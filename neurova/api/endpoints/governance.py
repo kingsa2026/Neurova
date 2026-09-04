@@ -12,7 +12,12 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from neurova.api.deps import require_admin
+
+# 模块级依赖实例：测试可用 dependency_overrides 覆盖
+_governance_admin_dep = require_admin()
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -270,3 +275,45 @@ async def reject_rsi_proposal(proposal_id: str, body: RsiRejectRequest):
         )
     logger.info("RSI 提案 %s 已拒绝", proposal_id)
     return {"code": 0, "data": {"rejected": True}}
+
+
+# ── 治理设置（治理遗留收口 2026-09-05） ────────────────────────
+# 独立于 /v1/settings 扁平 kv 的治理设置面：Step9.96 LLM 成本门控与
+# RSI 部署阶段的管理入口，require_admin + JSON 持久化。
+
+
+def _governance_settings_path():
+    from neurova.security.governance_settings import settings_path
+
+    return settings_path()
+
+
+@router.get("/settings")
+async def get_governance_settings(admin=Depends(_governance_admin_dep)):
+    """治理设置（仅管理员）"""
+    from neurova.security.governance_settings import load_governance_settings
+
+    return {"code": 0, "data": load_governance_settings()}
+
+
+class GovernanceSettingsUpdate(BaseModel):
+    """治理设置更新（rsi_phase: 0..4；conversation_rules_enabled: LLM 成本门控）"""
+
+    conversation_rules_enabled: Optional[bool] = None
+    rsi_phase: Optional[int] = Field(None, ge=0, le=4)
+
+
+@router.put("/settings")
+async def update_governance_settings(body: GovernanceSettingsUpdate, admin=Depends(_governance_admin_dep)):
+    """更新治理设置（仅管理员）"""
+    from neurova.security.governance_settings import (
+        load_governance_settings,
+        save_governance_settings,
+    )
+
+    payload = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not payload:
+        raise HTTPException(status_code=422, detail="无有效更新字段")
+    if not save_governance_settings(payload):
+        raise HTTPException(status_code=500, detail="治理设置保存失败")
+    return {"code": 0, "data": load_governance_settings()}

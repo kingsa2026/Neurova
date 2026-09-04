@@ -13,102 +13,203 @@
         :collapsed="appStore.sidebarCollapsed"
       />
 
-      <!-- Quick access -->
-      <GlassNavItem to="/agents" :label="t('nav.agents')" :collapsed="appStore.sidebarCollapsed" active-path="/agents">
-        <template #icon><RobotOutlined /></template>
-      </GlassNavItem>
-      <!-- 全局对话: 仅无 Agent 选中时显示 -->
-      <GlassNavItem v-if="!agentStore.currentAgent" to="/chat" :label="t('nav.chat')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><MessageOutlined /></template>
-      </GlassNavItem>
-      <!-- 渠道: 仅无 Agent 选中时显示全局版 -->
-      <GlassNavItem v-if="!agentStore.currentAgent" to="/channels" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed">
-        <template #icon><GlobalOutlined /></template>
-      </GlassNavItem>
+      <!-- ==================== 上半区: Agent 隔离功能 ==================== -->
+      <div v-if="!appStore.sidebarCollapsed" class="nr-nav-zone-title">{{ t('nav.agentZone') }}</div>
 
-      <!-- ==================== Agent-scoped (when agent selected) ==================== -->
       <template v-if="agentStore.currentAgent">
-        <!-- Agent: Core -->
-        <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.agentCore') }}</div>
-        <GlassNavItem to="/chat" :label="t('nav.chat')" :collapsed="appStore.sidebarCollapsed">
+        <!-- Agent: 高频平铺 -->
+        <GlassNavItem to="/chat" :label="t('nav.chat')" :collapsed="appStore.sidebarCollapsed" active-path="/chat">
           <template #icon><MessageOutlined /></template>
         </GlassNavItem>
         <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/memory`" :label="t('nav.memory')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><DatabaseOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem to="/memory/settings" :label="t('nav.memorySettings')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><ControlOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem to="/memory/search-settings" :label="t('nav.searchSettings')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><ExperimentOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/experience-knowledge`" :label="t('nav.experience')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><BulbOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/knowledge-graph`" :label="t('nav.knowledgeGraph')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><ShareAltOutlined /></template>
-        </GlassNavItem>
-
-        <!-- Agent: Cognition -->
-        <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.agentCognition') }}</div>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/metacognition`" :label="t('nav.metacognition')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><ExperimentOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/reflection`" :label="t('nav.reflection')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><BulbOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/growth`" :label="t('nav.growth')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><RiseOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/emotion`" :label="t('nav.emotion')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><HeartOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/personality`" :label="t('nav.personality')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><SmileOutlined /></template>
-        </GlassNavItem>
-
-        <!-- Agent: Capabilities -->
-        <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.agentCapabilities') }}</div>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/skills`" :label="t('nav.skills')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><ThunderboltOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/rules`" :label="t('nav.rules')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><SafetyOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/files`" :label="t('nav.files')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/files`" :label="t('nav.agentfiles')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><FileOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/media`" :label="t('nav.media')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><PlayCircleOutlined /></template>
-        </GlassNavItem>
 
-        <!-- Agent: Runtime -->
-        <div v-if="!appStore.sidebarCollapsed" class="nr-nav-section">{{ t('nav.agentRuntime') }}</div>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/scheduler`" :label="t('nav.scheduler')" :collapsed="appStore.sidebarCollapsed">
+        <!-- Agent: 知识与认知（低频折叠） -->
+        <GlassNavGroup
+          :label-key="'nav.knowledgeCognition'"
+          storage-key="agent-cognition"
+          :collapsed="appStore.sidebarCollapsed"
+          :first-item-to="`/agent/${agentStore.currentAgentId}/experience-knowledge`"
+          :count="7"
+        >
+          <template #icon><BulbOutlined /></template>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/experience-knowledge`" :label="t('nav.experience')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><BulbOutlined /></template>
+          </GlassNavItem>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/knowledge-graph`" :label="t('nav.knowledgeGraph')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><ShareAltOutlined /></template>
+          </GlassNavItem>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/metacognition`" :label="t('nav.metacognition')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><ExperimentOutlined /></template>
+          </GlassNavItem>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/reflection`" :label="t('nav.reflection')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><BulbOutlined /></template>
+          </GlassNavItem>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/growth`" :label="t('nav.growth')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><RiseOutlined /></template>
+          </GlassNavItem>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/emotion`" :label="t('nav.emotion')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><HeartOutlined /></template>
+          </GlassNavItem>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/personality`" :label="t('nav.personality')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><SmileOutlined /></template>
+          </GlassNavItem>
+        </GlassNavGroup>
+
+        <!-- Agent: 能力（低频折叠） -->
+        <GlassNavGroup
+          :label-key="'nav.agentCapabilities'"
+          storage-key="agent-capabilities"
+          :collapsed="appStore.sidebarCollapsed"
+          :first-item-to="`/agent/${agentStore.currentAgentId}/skills`"
+          :count="3"
+        >
+          <template #icon><ThunderboltOutlined /></template>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/skills`" :label="t('nav.skills')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><ThunderboltOutlined /></template>
+          </GlassNavItem>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/rules`" :label="t('nav.rules')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><SafetyOutlined /></template>
+          </GlassNavItem>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/media`" :label="t('nav.media')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><PlayCircleOutlined /></template>
+          </GlassNavItem>
+        </GlassNavGroup>
+
+        <!-- Agent: 运行（低频折叠） -->
+        <GlassNavGroup
+          :label-key="'nav.agentRuntime'"
+          storage-key="agent-runtime"
+          :collapsed="appStore.sidebarCollapsed"
+          :first-item-to="`/agent/${agentStore.currentAgentId}/scheduler`"
+          :count="5"
+        >
+          <template #icon><SettingOutlined /></template>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/scheduler`" :label="t('nav.scheduler')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><ClockCircleOutlined /></template>
+          </GlassNavItem>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/channel`" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><ApiOutlined /></template>
+          </GlassNavItem>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/sleep/status`" :label="t('nav.sleep')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><CoffeeOutlined /></template>
+          </GlassNavItem>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/computer`" :label="t('nav.computer')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><DesktopOutlined /></template>
+          </GlassNavItem>
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/trace`" :label="t('nav.debug')" :collapsed="appStore.sidebarCollapsed">
+            <template #icon><CodeOutlined /></template>
+          </GlassNavItem>
+        </GlassNavGroup>
+      </template>
+
+      <!-- Agent 空态引导卡: 未选择 Agent 时保持上半区形态稳定 -->
+      <div v-else-if="!appStore.sidebarCollapsed" class="nr-agent-empty">
+        <p class="nr-agent-empty-title">{{ t('nav.agentEmptyTitle') }}</p>
+        <p class="nr-agent-empty-desc">{{ t('nav.agentEmptyDesc') }}</p>
+        <div class="nr-agent-empty-actions">
+          <GlassButton variant="secondary" size="sm" @click="router.push('/agents')">
+            {{ t('nav.agentEmptySelect') }}
+          </GlassButton>
+          <GlassButton variant="ghost" size="sm" @click="router.push('/agents/create')">
+            {{ t('nav.agentEmptyCreate') }}
+          </GlassButton>
+        </div>
+      </div>
+
+      <!-- 分区线: Agent 区 / 用户区 -->
+      <div class="nr-nav-divider" :class="{ collapsed: appStore.sidebarCollapsed }" />
+
+      <!-- ==================== 下半区: 用户隔离功能 ==================== -->
+      <div v-if="!appStore.sidebarCollapsed" class="nr-nav-zone-title">{{ t('nav.userZone') }}</div>
+      <GlassNavItem to="/dashboard" :label="t('nav.dashboard')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><DashboardOutlined /></template>
+      </GlassNavItem>
+      <GlassNavItem to="/agents" :label="t('nav.agents')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><RobotOutlined /></template>
+      </GlassNavItem>
+      <GlassNavItem to="/knowledge" :label="t('nav.knowledge')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><BookOutlined /></template>
+      </GlassNavItem>
+      <GlassNavItem to="/skill-pool" :label="t('nav.skillPool')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><AppstoreOutlined /></template>
+      </GlassNavItem>
+      <GlassNavItem to="/marketplace/skills" :label="t('nav.skillMarket')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><ShopOutlined /></template>
+      </GlassNavItem>
+      <GlassNavItem to="/aigc" :label="t('nav.aigc')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><RocketOutlined /></template>
+      </GlassNavItem>
+      <GlassNavItem to="/files" :label="t('nav.files')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><FileOutlined /></template>
+      </GlassNavItem>
+      <GlassNavItem to="/neuron" :label="t('nav.neuron')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><NodeIndexOutlined /></template>
+      </GlassNavItem>
+
+      <!-- 用户: 协作（低频折叠，含全局渠道接入） -->
+      <GlassNavGroup
+        :label-key="'nav.collaboration'"
+        storage-key="user-collaboration"
+        :collapsed="appStore.sidebarCollapsed"
+        first-item-to="/collaboration/hub"
+        :count="12"
+      >
+        <template #icon><TeamOutlined /></template>
+        <GlassNavItem to="/collaboration/hub" :label="t('nav.collabHub')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><DashboardOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/sessions" :label="t('nav.collabSessions')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><TeamOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/workflows" :label="t('nav.workflows')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><RocketOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/canvas" :label="t('nav.collabCanvas')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><BgColorsOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/templates" :label="t('nav.collaborationtemplates')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><NodeIndexOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/history" :label="t('nav.collaborationhistory')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><HistoryOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/projects" :label="t('nav.projects')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><ProjectOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/teams" :label="t('nav.teams')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><TeamOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/tasks" :label="t('nav.tasks')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><ClockCircleOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/channel`" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed">
+        <GlassNavItem to="/collaboration/webhooks" :label="t('nav.webhooks')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><BranchesOutlined /></template>
+        </GlassNavItem>
+        <GlassNavItem to="/collaboration/session-sync" :label="t('nav.sessionsync')" :collapsed="appStore.sidebarCollapsed">
           <template #icon><ApiOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/channel-sharing`" :label="t('nav.channelSharing')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><LinkOutlined /></template>
+        <GlassNavItem to="/channels" :label="t('nav.channels')" :collapsed="appStore.sidebarCollapsed">
+          <template #icon><GlobalOutlined /></template>
         </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/sleep/status`" :label="t('nav.sleep')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><CoffeeOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/sleep/settings`" :label="t('nav.sleepsettings')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><CoffeeOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/computer`" :label="t('nav.computer')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><DesktopOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/trace`" :label="t('nav.trace')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><CodeOutlined /></template>
-        </GlassNavItem>
-        <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/trajectory`" :label="t('nav.trajectory')" :collapsed="appStore.sidebarCollapsed">
-          <template #icon><FileTextOutlined /></template>
-        </GlassNavItem>
-      </template>
+      </GlassNavGroup>
+
+      <GlassNavItem to="/notifications" :label="t('nav.notifications')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><BellOutlined /></template>
+      </GlassNavItem>
+      <GlassNavItem to="/usage-stats" :label="t('nav.usageStats')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><LineChartOutlined /></template>
+      </GlassNavItem>
+      <GlassNavItem to="/analytics" :label="t('nav.analytics')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><BarChartOutlined /></template>
+      </GlassNavItem>
+      <GlassNavItem to="/memory/search-settings" :label="t('nav.searchSettings')" :collapsed="appStore.sidebarCollapsed">
+        <template #icon><ControlOutlined /></template>
+      </GlassNavItem>
 
       <!-- Footer -->
       <template #footer>
@@ -212,6 +313,7 @@ import { supportedLocales } from '@/i18n'
 import StarBackground from '@/components/StarBackground.vue'
 import GlassNav from '@/components/GlassNav.vue'
 import GlassNavItem from '@/components/GlassNavItem.vue'
+import GlassNavGroup from '@/components/GlassNavGroup.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import AgentSwitcher from '@/components/AgentSwitcher.vue'
 import TopNavMenu from '@/components/TopNavMenu.vue'
@@ -230,11 +332,13 @@ import {
   ShareAltOutlined, ExperimentOutlined, BulbOutlined, RiseOutlined,
   HeartOutlined, ThunderboltOutlined, FileOutlined, ApiOutlined,
   ClockCircleOutlined, SafetyOutlined, CodeOutlined,
-  DesktopOutlined, PlusOutlined, ControlOutlined, LinkOutlined,
+  DesktopOutlined, ControlOutlined,
   SettingOutlined, BellOutlined, GlobalOutlined,
   LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined,
-  CoffeeOutlined, FileTextOutlined, HistoryOutlined,
+  CoffeeOutlined, HistoryOutlined, LineChartOutlined, BarChartOutlined,
   UserOutlined, PlayCircleOutlined, SmileOutlined, IdcardOutlined,
+  BookOutlined, AppstoreOutlined, RocketOutlined, NodeIndexOutlined,
+  TeamOutlined, ProjectOutlined, BranchesOutlined, BgColorsOutlined,
 } from '@ant-design/icons-vue'
 
 const router = useRouter()
@@ -376,11 +480,38 @@ const breadcrumbs = computed(() => {
 :deep(.nr-breadcrumb a) { color: var(--nr-text-tertiary); transition: color 0.2s; }
 :deep(.nr-breadcrumb a:hover) { color: var(--nr-text-primary); }
 
-/* Nav section label */
-.nr-nav-section {
+/* 分区标题（Agent 空间 / 个人空间） */
+.nr-nav-zone-title {
   font-size: 10px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.08em; color: var(--nr-text-muted);
   padding: 12px 12px 4px; margin-top: 4px;
+}
+
+/* Agent 区 / 用户区 分隔线 */
+.nr-nav-divider {
+  height: 1px; margin: 10px 8px;
+  background: var(--nr-glass-border);
+}
+.nr-nav-divider.collapsed { margin: 10px 6px; }
+
+/* Agent 空态引导卡 */
+.nr-agent-empty {
+  margin: 8px 4px; padding: 14px 12px;
+  border: 1px dashed var(--nr-glass-border);
+  border-radius: 12px;
+  background: var(--nr-glass-bg);
+  text-align: center;
+}
+.nr-agent-empty-title {
+  font-size: 13px; font-weight: 600; color: var(--nr-text-primary);
+  margin-bottom: 6px;
+}
+.nr-agent-empty-desc {
+  font-size: 11px; color: var(--nr-text-muted); line-height: 1.5;
+  margin-bottom: 10px;
+}
+.nr-agent-empty-actions {
+  display: flex; gap: 8px; justify-content: center;
 }
 
 /* User section */

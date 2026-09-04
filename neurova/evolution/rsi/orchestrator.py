@@ -13,7 +13,12 @@ from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
 from .convergence_analyzer import create_convergence_analyzer
-from .deployment_controller import create_deployment_controller
+from datetime import datetime
+
+from .deployment_controller import (
+    create_deployment_controller,
+    create_deployment_controller_with_settings,
+)
 from .integration_manager import create_rsi_integration_manager
 from .metrics import create_rsi_metrics
 from .recursive_ratchet_pruner import RecursiveRatchetPruner, Candidate
@@ -64,8 +69,19 @@ class RSIOrchestrator:
         # 创建回滚管理器
         self.rollback_manager = create_rollback_manager()
 
-        # 创建部署控制器
-        self.deployment_controller = create_deployment_controller()
+        # 创建部署控制器（治理遗留收口：rsi_phase 来自治理设置，默认 0 观察期）
+        try:
+            from neurova.security.governance_settings import load_governance_settings
+
+            self.deployment_controller = create_deployment_controller_with_settings(
+                load_governance_settings()
+            )
+        except Exception as e:  # noqa: BLE001 - 设置不可用时维持默认观察期
+            logger.warning("部署控制器按治理设置初始化失败，回退默认: %s", e)
+            self.deployment_controller = create_deployment_controller()
+
+        # RSI 启动时间（无回滚记录时 days_without_rollback 的起算点）
+        self._started_at = datetime.now()
 
         # 创建递归棘轮剪枝器（P0-A1 修复：接入核心算法）
         # 用于在多个候选优化方案中通过"粗筛→中筛→细筛"选出最优
@@ -119,6 +135,23 @@ class RSIOrchestrator:
             self.integration_manager.apply_optimization(
                 f"{info['system']}.{param_path}", info["value"]
             )
+
+    def _compute_days_without_rollback(self) -> float:
+        """计算无回滚天数（治理遗留 A：phase 评估的真实数据来源）。
+
+        最近一次回滚距今的天数；无回滚记录时返回 0（保守缺省——phase 1→2
+        需要 7 天无回滚，缺数据时不得虚假推进）。
+        """
+        try:
+            history = self.rollback_manager.get_rollback_history()
+            if history:
+                last_ts = history[-1].get("timestamp")
+                if last_ts:
+                    last = datetime.fromisoformat(str(last_ts))
+                    return max(0.0, (datetime.now() - last).total_seconds() / 86400.0)
+        except Exception as e:  # noqa: BLE001 - 统计失败不影响迭代
+            logger.debug("回滚天数计算失败: %s", e)
+        return 0.0
 
     def run_iteration(self) -> Dict[str, Any]:
         """
@@ -192,9 +225,9 @@ class RSIOrchestrator:
                 "roi": float((convergence.get("metrics") or {}).get("roi", 0.0) or 0.0)
                 if isinstance(convergence.get("metrics"), dict)
                 else 0.0,
-                "days_without_rollback": float(
-                    self.metrics.get_metric("days_without_rollback") or 0
-                ),
+                # 真实回滚天数（治理遗留 A）：来自 rollback_manager 历史，
+                # 不再读永远无人写入的 metrics 键
+                "days_without_rollback": self._compute_days_without_rollback(),
             }
             if self.deployment_controller.evaluate_phase_transition(phase_metrics):
                 new_phase = self.deployment_controller.advance_phase()

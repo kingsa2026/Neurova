@@ -63,6 +63,7 @@ import logging
 import os
 import random
 import re
+import shutil
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -384,6 +385,27 @@ class LLMProviderManager(Module):
             # 存量配置补内置定义(仅缺失 id;覆盖在用户保存时持久化)
             self._merge_builtin_providers_if_missing()
         except Exception as e:
+            # 配置文件损坏(半截 JSON/格式漂移)时,先转存原始字节再重建。
+            # 绝不允许无备份覆盖:2026-09-05 事故中此处曾用内置种子直接
+            # 覆盖真实配置,用户全部服务商配置不可逆丢失。
+            corrupt_backup = Path(
+                str(self._config_path)
+                + f".corrupt-{datetime.now().strftime('%Y%m%d_%H%M%S')}.bak"
+            )
+            try:
+                shutil.copy2(self._config_path, corrupt_backup)
+                logger.error(
+                    "Config file corrupted (%s); original preserved at %s",
+                    e,
+                    corrupt_backup,
+                )
+            except Exception as backup_err:
+                logger.error(
+                    "Config file corrupted (%s) AND backup failed: %s — refusing to overwrite",
+                    e,
+                    backup_err,
+                )
+                raise
             logger.error("Failed to load config: %s", e)
             self._load_builtin_providers()
             self._save_config()
@@ -401,7 +423,7 @@ class LLMProviderManager(Module):
             logger.error("Failed to create backup: %s", e)
 
     def _save_config(self) -> None:
-        """保存配置"""
+        """保存配置(原子写:临时文件 + os.replace,杜绝并发读读到半截 JSON)"""
         with self._config_lock:
             data = {
                 "providers": [p.to_dict(encrypt=True) for p in self._providers.values()],
@@ -410,8 +432,20 @@ class LLMProviderManager(Module):
             }
 
             os.makedirs(self._config_path.parent, exist_ok=True)
-            with open(self._config_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
+            tmp_path = self._config_path.with_suffix(
+                f".{datetime.now().strftime('%Y%m%d_%H%M%S%f')}.tmp"
+            )
+            try:
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+                os.replace(tmp_path, self._config_path)
+            except BaseException:
+                # 写失败/中断时清掉半截临时文件;原配置文件未被触碰
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
 
             logger.info("Saved config to %s", self._config_path)
 

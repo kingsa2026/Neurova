@@ -112,11 +112,12 @@ const messages = {
 }
 
 const stubs = {
-  // GlassCard 刻意不 stub：其真实模板（GlassCard.vue → GlassPanel）是毛玻璃背板的载体；
-  // 曾发生过 <script setup> 漏 import GlassCard，模板退化为未知元素 <glasscard>
-  // （标题只留 attribute、卡片无背板无标题），stub 会掩盖该回归。
+  // GlassCard / GlassButton 均刻意不 stub：其真实模板（GlassCard.vue → GlassPanel 的
+  // 毛玻璃背板、GlassButton.vue 的 nr-glass-btn 外壳）是页面视觉结构的载体；
+  // 曾发生过 <script setup> 漏 import GlassCard（2026-09-02）、漏 import GlassButton
+  // （2026-09-05），模板退化为未知元素 <glasscard>/<glassbutton>（标题/按钮只留
+  // attribute、样式壳整体缺失），stub 会掩盖该类回归。
   GlassPanel: { props: ['variant', 'padding', 'radius', 'blur'], template: '<div class="glass-panel"><div class="glass-backdrop"/><slot/></div>' },
-  GlassButton: { props: ['variant', 'size', 'loading'], emits: ['click'], template: '<button class="glass-btn" @click="$emit(\'click\')"><slot/></button>' },
   VChart: { props: ['option'], template: '<div class="vchart-stub" :data-has-option="option ? 1 : 0" />' },
   'a-spin': { props: ['spinning'], template: '<div><slot/></div>' },
   'a-badge': { props: ['status', 'text'], template: '<span class="a-badge" :data-status="status"><slot/>{{ text }}</span>' },
@@ -206,10 +207,30 @@ describe('DashboardPage', () => {
     expect(wrapper.find('.nr-dashboard-error').exists()).toBe(true)
     expect(wrapper.text()).toContain('仪表盘数据加载失败')
 
-    await wrapper.find('.glass-btn').trigger('click')
+    // 重试按钮是真实的 GlassButton（漏 import 回归时不 stub 的用例会在此暴露）
+    await wrapper.find('.nr-dashboard-error .nr-glass-btn').trigger('click')
     await flushPromises()
     // 重试触发重新拉取
     expect(getHomeData).toHaveBeenCalledTimes(2)
+  })
+
+  it('renders refresh buttons through the real GlassButton shell (missing import regression)', async () => {
+    // 回归背景（2026-09-05）：<script setup> 曾漏 import GlassButton，模板把
+    // <GlassButton> 渲染为未知元素 <glassbutton>（console "Failed to resolve
+    // component: GlassButton"，按钮退化为无玻璃壳/无 hover 态的裸 button）。
+    // 本用例不 stub GlassButton，断言页头的刷新与错误条的重试均由真实模板输出。
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const buttons = wrapper.findAll('button.nr-glass-btn')
+    // 正常路径仅头部刷新一个（错误条重试在失败用例中经 .nr-dashboard-error
+    // .nr-glass-btn 命中真实模板；若漏 import，二者都会退化为 <glassbutton> 元素）
+    expect(buttons.length).toBe(1)
+    for (const btn of buttons) {
+      // 真实 GlassButton 的内部结构：背景层 + 内容层（stub 无此结构）
+      expect(btn.find('.nr-glass-btn-bg').exists()).toBe(true)
+      expect(btn.find('.nr-glass-btn-label').exists()).toBe(true)
+    }
   })
 
   it('keeps feedback card empty state via i18n key', async () => {

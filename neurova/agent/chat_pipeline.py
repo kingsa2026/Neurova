@@ -644,15 +644,15 @@ class ChatPipeline:
                 )
             ctx.metadata = dict(ctx.metadata or {})
             ctx.metadata["command_dispatched"] = True
-            self._command_dispatch_replied = True
         except Exception as e:
             logger.warning("命令分发失败（回落 LLM 流程）: %s", e)
 
     async def _check_tool_memory(self, ctx: ChatContext):
         """ToolMemory 条件反射式工具记忆检查"""
         # B4 闭环审计修复：命令分发已直达执行同一输入 → 跳过肌肉记忆匹配，
-        # 防止同一输入触发第二次自动执行（双执行）
-        if getattr(self, "_command_dispatch_replied", False):
+        # 防止同一输入触发第二次自动执行（双执行）。读 ctx 轮次态（实例标志
+        # 会在分发后/LLM 前异常时滞留，导致后续轮次肌肉记忆被永久跳过）
+        if isinstance(ctx.metadata, dict) and ctx.metadata.get("command_dispatched"):
             return
         if not self.tool_memory:
             return
@@ -1519,9 +1519,9 @@ class ChatPipeline:
 
     async def _step_llm_call(self, ctx: ChatContext):
         """Agent Loop 调用 + 自动续写"""
-        # B4：命令分发已产出回复 → 跳过 LLM（低延迟确定性路径）
-        if getattr(self, "_command_dispatch_replied", False):
-            self._command_dispatch_replied = False
+        # B4：命令分发已产出回复 → 跳过 LLM（低延迟确定性路径）；
+        # 读 ctx 轮次态，杜绝实例标志跨轮滞留
+        if isinstance(ctx.metadata, dict) and ctx.metadata.get("command_dispatched"):
             logger.info("B4 命令分发已应答，跳过 LLM 调用")
             return
         self._apply_thinking_effort(ctx)
@@ -1688,7 +1688,13 @@ class ChatPipeline:
                     and ctx.metadata.get("emit_tool_events")
                 ):
                     try:
-                        emitter(etype, event.get("data"))
+                        _e2_data = event.get("data")
+                        if etype == "tool_result" and isinstance(_e2_data, dict):
+                            # E2：流式工具结果出口同样过隐私门控（与 AGENT_TOOL_RESULT 同源）
+                            from neurova.security.privacy_gate import redact_tool_messages_for_channel
+
+                            _e2_data = redact_tool_messages_for_channel([_e2_data])[0]
+                        emitter(etype, _e2_data)
                     except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
                         logger.debug("event_emitter 转发 %s 失败: %s", etype, e)
             # reasoning 等其他元数据事件不入回复

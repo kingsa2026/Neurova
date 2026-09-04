@@ -1,5 +1,6 @@
 <template>
   <div class="metacognition-page">
+    <AgentPageTabs :tabs="metacogTabs" />
     <div class="page-header">
       <div>
         <h2 class="page-title">{{ t('nav.metacognition') }}</h2>
@@ -280,6 +281,7 @@ import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useMutation } from '@/composables/useAPI'
 import * as metacognitionApi from '@/api/modules/metacognition'
@@ -298,6 +300,12 @@ const { agentId, currentAgent } = useAgentPage({
     refreshAll()
   },
 })
+
+// 三区导航：元认知 ↔ 反思日志 成对页签（agent 级同族）
+const metacogTabs = computed(() => [
+  { labelKey: 'nav.metacognition', to: `/agent/${agentId.value}/metacognition` },
+  { labelKey: 'nav.agentreflection', to: `/agent/${agentId.value}/reflection` },
+])
 
 // --- Stats / entries / load state / lessons / history ---
 const stats = ref<MetacognitionStats | null>(null)

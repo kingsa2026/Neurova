@@ -646,10 +646,12 @@ class UnifiedContextInjector(BaseModule):
             return ""
 
         try:
-            from neurova.skills.experience_knowledge_base import ExperienceKnowledgeBase
+            from neurova.skills.experience_knowledge_base import (
+                get_experience_knowledge_base,
+            )
 
-            # 创建经验知识库实例
-            ekb = ExperienceKnowledgeBase()
+            # 单例复用（复审残余点 B）：每次构建新建连接是连接 churn
+            ekb = get_experience_knowledge_base()
 
             # 查找相似经验（2.0 契约：skill_name=None 跨技能，context 为 dict）
             similar = ekb.find_similar_experiences(

@@ -137,7 +137,8 @@ class TestB4CommandDispatch(unittest.TestCase):
         args = p.tool_executor.execute.call_args
         self.assertEqual(args[0][0], "computer_shell")
         self.assertEqual(args[0][1].get("input"), "prod")
-        self.assertTrue(getattr(p, "_command_dispatch_replied", False))
+        # 第二遍审计：标志改为 ctx 轮次态（实例标志会在异常路径跨轮滞留）
+        self.assertTrue(ctx.metadata.get("command_dispatched"))
         self.assertIn("命令分发", ctx.reply)
 
     def test_skill_without_dispatch_falls_through(self):
@@ -313,7 +314,7 @@ class TestClosureAudit(unittest.TestCase):
         )
         with patch.dict(os.environ, {"NEUROVA_SKILL_COMMAND_DISPATCH": "1"}):
             asyncio.run(p._check_command_dispatch(ctx))
-            self.assertTrue(getattr(p, "_command_dispatch_replied", False))
+            self.assertTrue(ctx.metadata.get("command_dispatched"))
             asyncio.run(p._check_tool_memory(ctx))
         # 肌肉记忆检查被跳过（不会二次执行）
         p.tool_memory.check_tool_memory.assert_not_called()

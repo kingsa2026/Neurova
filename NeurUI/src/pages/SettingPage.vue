@@ -127,11 +127,6 @@
           </template>
         </GlassCard>
       </a-tab-pane>
-
-      <!-- Negative Screen -->
-      <a-tab-pane key="negative-screen" :tab="t('settings.negativeScreen')">
-        <NegativeScreenSettings />
-      </a-tab-pane>
     </a-tabs>
     </template>
   </div>
@@ -146,7 +141,6 @@ import { useAuthStore } from '@/stores/auth'
 import { supportedLocales } from '@/i18n'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
-import NegativeScreenSettings from '@/components/NegativeScreenSettings.vue'
 import { message } from 'ant-design-vue'
 
 const { t, locale } = useI18n()

@@ -1,5 +1,6 @@
 <template>
   <div class="reflection-page">
+    <AgentPageTabs :tabs="reflectionTabs" />
     <div class="page-header">
       <div>
         <h2 class="page-title">{{ t('growth.reflection') }}</h2>
@@ -191,6 +192,7 @@ import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import * as growthApi from '@/api/modules/growth'
 import type { GrowthReflection } from '@/api/modules/growth'
@@ -201,6 +203,12 @@ const { agentId, currentAgent } = useAgentPage({
     fetchReflections()
   },
 })
+
+// 三区导航：反思日志 ↔ 元认知 成对页签（agent 级同族）
+const reflectionTabs = [
+  { labelKey: 'nav.metacognition', to: `/agent/${agentId.value}/metacognition` },
+  { labelKey: 'nav.agentreflection', to: `/agent/${agentId.value}/reflection` },
+]
 
 const loading = ref(false)
 const creating = ref(false)
