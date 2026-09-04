@@ -114,7 +114,7 @@ def _serialize_event_safe(event: "SessionEvent") -> Optional[str]:
     OpenClaw 启发 P0-7 铁律 (b)：序列化失败的事件不得盖章进历史。毒帧
     一旦带 seq 落入历史，所有客户端的 gap 探测器会同时触发（重连风暴），
     且每次重连重放都会在同一帧卡壳。add_event 盖章前调用本函数把关；
-    预检产物即出站帧本体，发送侧直接复用，不重复序列化。
+    返回值仅作判定（出站帧由发送侧 send_callback 内自行序列化）。
     """
     try:
         return event.to_json()

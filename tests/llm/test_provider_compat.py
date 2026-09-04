@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from neurova.llm.provider_compat import ProviderCompat, resolve_compat
 
@@ -142,7 +142,7 @@ class TestModelClientCreationWiring(unittest.TestCase):
                 captured_cfg["compat"] = config.compat
                 super().__init__(config, preset)
 
-        with unittest.mock.patch.object(mmc, "LLMClient", SpyClient):
+        with patch.object(mmc, "LLMClient", SpyClient):
             mc = mgr._create_model_client(provider, "sensechat-5")
 
         self.assertIsNotNone(mc)
