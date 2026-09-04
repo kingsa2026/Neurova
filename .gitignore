@@ -359,3 +359,6 @@ NeurUI/src-tauri/resources/_python-*
 
 # 本地模型权重（运行时下载/生成，不入 git）
 models/**/*.data
+
+# 测试隔离会话/轨迹运行时产物（防再生）
+/sessions-test-quarantine/
