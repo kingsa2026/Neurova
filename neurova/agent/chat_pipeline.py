@@ -89,6 +89,30 @@ def _parse_sub_queries(text: str) -> List[str]:
     return [str(item).strip() for item in data if str(item).strip()][:5]
 
 
+def _active_memory_enabled() -> bool:
+    """D3 门控：NEUROVA_ACTIVE_MEMORY=1（默认关——阻塞式深检索改变延迟行为）。"""
+    import os as _os
+
+    return _os.environ.get("NEUROVA_ACTIVE_MEMORY") == "1"
+
+
+_PAST_SEEKING_PATTERN = None
+
+
+def _is_past_seeking(text: str) -> bool:
+    """确定性回溯型提问判据（无 LLM 成本）：时间回溯词 + 疑问/回忆意图。"""
+    import re as _re
+
+    global _PAST_SEEKING_PATTERN
+    if _PAST_SEEKING_PATTERN is None:
+        _PAST_SEEKING_PATTERN = _re.compile(
+            "昨天|上次|之前|以前|上周|上个月|去年|历史|记得|聊过|说过|提到|"
+            + "last time|previously|remember|yesterday|earlier|past",
+            _re.IGNORECASE,
+        )
+    return bool(_PAST_SEEKING_PATTERN.search(text or ""))
+
+
 @dataclass
 class ChatContext:
     """对话上下文，贯穿整个管线"""
@@ -491,21 +515,6 @@ class ChatPipeline:
             and isinstance(ctx.metadata, dict)
             and "history" in ctx.metadata
         )
-        # P1-10 写入围栏: turn 开始即接管会话写入权（writer=run:<trace>），
-        # 恢复/写入均在本 run 的权属下进行；并行旧 run 的落盘会被围栏拒绝
-        if ctx.session_id:
-            try:
-                from neurova.agent.history_fence import get_history_write_fence
-
-                ctx.writer_claim = get_history_write_fence().claim(
-                    self.config.agent_id,
-                    ctx.session_id,
-                    f"run:{ctx.trace_id or uuid.uuid4().hex[:12]}",
-                )
-            except Exception as e:  # noqa: BLE001 - 围栏故障退回无围栏路径
-                logger.debug("写入围栏 claim 跳过: %s", e)
-        if ctx.session_id and not caller_provided_history:
-            await self._restore_session_history(ctx)
 
         # 轨迹记录启动
         if self._trajectory_recorder:
@@ -520,6 +529,23 @@ class ChatPipeline:
                 event_type="user_input",
                 data={"user_input": ctx.user_input[:500]},
             )
+
+        # P1-10 写入围栏: trace 启动后接管会话写入权（writer=run:<trace_id>），
+        # 恢复/写入均在本 run 的权属下进行；并行旧 run 的落盘会被围栏拒绝。
+        # 时序（复审修正）：必须在 trace_id 生成之后 claim，writer_id 才能关联轨迹
+        if ctx.session_id:
+            try:
+                from neurova.agent.history_fence import get_history_write_fence
+
+                ctx.writer_claim = get_history_write_fence().claim(
+                    self.config.agent_id,
+                    ctx.session_id,
+                    f"run:{ctx.trace_id or uuid.uuid4().hex[:12]}",
+                )
+            except Exception as e:  # noqa: BLE001 - 围栏故障退回无围栏路径
+                logger.debug("写入围栏 claim 跳过: %s", e)
+        if ctx.session_id and not caller_provided_history:
+            await self._restore_session_history(ctx)
 
         # 记录活动，重置空闲计时
         if self.idle_tracker:
@@ -551,13 +577,83 @@ class ChatPipeline:
     # ══════════════════════════════════════════════════════════════
 
     async def _step_pre_llm_checks(self, ctx: ChatContext):
-        """ToolMemory 检查、技能获取、NL 合成"""
+        """命令分发（B4）、ToolMemory 检查、技能获取、NL 合成"""
+        await self._check_command_dispatch(ctx)
         await self._check_tool_memory(ctx)
         await self._check_skill_acquisition(ctx)
         await self._check_nl_synthesis(ctx)
 
+    async def _check_command_dispatch(self, ctx: ChatContext):
+        """B4（P2）command-dispatch：技能声明直达工具时的低延迟高确定性路径。
+
+        /<技能名> <原始参数> → 直接执行映射工具（走 tool_executor 正常管道，
+        治理预检/审批全链路生效）→ 结果直接作为回复，跳过 LLM 决策。
+        生态条件：env NEUROVA_SKILL_COMMAND_DISPATCH=1（默认关——新增交互面）；
+        技能 config.command_dispatch = {"tool": "工具名", "params": {静态参数}}。
+        """
+        import os as _os
+
+        if _os.environ.get("NEUROVA_SKILL_COMMAND_DISPATCH") != "1":
+            return
+        text = (ctx.user_input or "").strip()
+        if not text.startswith("/"):
+            return
+        try:
+            parts = text[1:].split(None, 1)
+            if not parts:
+                return
+            skill_name, raw_args = parts[0], (parts[1] if len(parts) > 1 else "")
+            registry = getattr(self._agent, "_skill_registry", None)
+            if registry is None or not getattr(registry, "has_skill", lambda _n: False)(skill_name):
+                return
+            raw = registry.skills.get(skill_name)
+            if raw is None:
+                return
+            from neurova.skill_system.compat import unpack_skill
+
+            skill = unpack_skill(raw)
+            if isinstance(skill, tuple):
+                skill = skill[0]
+            dispatch = (getattr(skill, "config", {}) or {}).get("command_dispatch") or {}
+            tool_name = dispatch.get("tool")
+            if not tool_name:
+                return  # 未声明直达映射的技能照常走 LLM
+
+            tool_params = dict(dispatch.get("params") or {})
+            if raw_args:
+                tool_params.setdefault("input", raw_args)
+            logger.info("B4 命令分发: /%s → 直达工具 %s", skill_name, tool_name)
+
+            result = await self.tool_executor.execute(tool_name, tool_params)
+            summary = result.get("result") if isinstance(result, dict) else None
+            if summary is None:
+                summary = result.get("content") if isinstance(result, dict) else None
+            if summary is None:
+                summary = result
+            _nl = chr(10)
+            if isinstance(summary, str):
+                ctx.reply = "⚡ 命令分发 /" + skill_name + " → " + tool_name + _nl + str(summary)[:2000]
+            else:
+                import json as _json
+
+                ctx.reply = (
+                    "⚡ 命令分发 /" + skill_name + " → " + tool_name + _nl
+                    + "```json" + _nl
+                    + _json.dumps(summary, ensure_ascii=False, default=str)[:2000]
+                    + _nl + "```"
+                )
+            ctx.metadata = dict(ctx.metadata or {})
+            ctx.metadata["command_dispatched"] = True
+            self._command_dispatch_replied = True
+        except Exception as e:
+            logger.warning("命令分发失败（回落 LLM 流程）: %s", e)
+
     async def _check_tool_memory(self, ctx: ChatContext):
         """ToolMemory 条件反射式工具记忆检查"""
+        # B4 闭环审计修复：命令分发已直达执行同一输入 → 跳过肌肉记忆匹配，
+        # 防止同一输入触发第二次自动执行（双执行）
+        if getattr(self, "_command_dispatch_replied", False):
+            return
         if not self.tool_memory:
             return
 
@@ -1011,6 +1107,11 @@ class ChatPipeline:
         # 结晶经验检索
         await self._retrieve_crystallized_patterns(ctx)
 
+        # EKB 经验检索（修复⑤：EKB 每轮写入却无人读——ctx.experience_items
+        # 无生产方恒空，orchestrator 的 [经验] 注入位与归档永远吃不到它。
+        # 此处填充死字段，归档/注入/统计三处消费方随之激活）
+        self._retrieve_ekb_experience(ctx)
+
         # 上下文构建（委托给 ContextOrchestrator）
         # 从 metadata 中提取语音上下文和调用方对话历史
         voice_context = None
@@ -1073,6 +1174,11 @@ class ChatPipeline:
         if _adaptive_retrieval_enabled(self._agent, ctx):
             result = await self._adaptive_second_retrieval(ctx, result, user_id)
 
+        # D3（P2）Active Memory 升级车道：确定性判据（回溯型提问 + 首查无强命中）
+        # 才花一次阻塞深检索——普通回复保持快路径。env 门控默认关。
+        if _active_memory_enabled():
+            result = await self._active_memory_escalation(ctx, result, user_id)
+
         # 提取记忆内容
         ctx.relevant_memories = result.memories
 
@@ -1089,6 +1195,65 @@ class ChatPipeline:
                 ctx.user_input,
                 f"找到 {len(ctx.relevant_memories)} 条记忆 (质量: {result.quality_level.value})",
             )
+
+    async def _active_memory_escalation(self, ctx: ChatContext, first_result, user_id: str):
+        """D3 升级车道：回溯型提问 + 确定性检索无强命中 → 一次阻塞深检索。
+
+        深检索 = 放宽质量门槛（min_quality=0.0）+ 大 limit 的全链重跑，
+        结果与首查合并去重。任何异常保留首查结果，绝不阻塞回复路径。
+        """
+        from dataclasses import replace as _dc_replace
+
+        from neurova.agent.memory_retrieval_chain import should_need_more_context
+
+        try:
+            if not should_need_more_context(first_result, min_quality=0.35):
+                return first_result
+            if not _is_past_seeking(ctx.user_input or ""):
+                return first_result
+
+            deep = await self.memory_retrieval_chain.retrieve(
+                RetrievalContext(
+                    query=ctx.user_input,
+                    limit=15,
+                    user_id=user_id,
+                    session_id=ctx.session_id,
+                    strategy=RetrievalStrategy.CHAIN,
+                    min_quality=0.0,
+                    metadata={
+                        "session_id": ctx.session_id,
+                        "trace_id": ctx.trace_id,
+                        "active_memory_escalation": True,
+                    },
+                )
+            )
+            merged = list(first_result.memories)
+            seen = {self._memory_key(m) for m in merged}
+            added = 0
+            for m in deep.memories:
+                key = self._memory_key(m)
+                if key in seen:
+                    continue
+                seen.add(key)
+                merged.append(m)
+                added += 1
+            if not added:
+                return first_result
+            first_q = float(first_result.quality or 0.0)
+            deep_q = float(deep.quality or 0.0)
+            best_quality = max(first_q, deep_q)
+            best_level = (
+                first_result.quality_level if first_q >= deep_q else deep.quality_level
+            )
+            logger.info(
+                "[ActiveMemory 升级] 深检索补充 %s 条记忆 (quality=%.2f)", added, best_quality
+            )
+            return _dc_replace(
+                first_result, memories=merged, quality=best_quality, quality_level=best_level
+            )
+        except Exception as e:
+            logger.debug("Active Memory 升级跳过: %s", e)
+            return first_result
 
     async def _adaptive_second_retrieval(self, ctx: ChatContext, first_result, user_id: str):
         """Adaptive Retrieval 二次检索（批次 4 + 遗留修复 ③ Query Planning）。
@@ -1240,6 +1405,60 @@ class ChatPipeline:
                 f"检索到 {len(ctx.crystallized_patterns)} 条结晶经验 (状态: {result.status.value})",
             )
 
+    def _retrieve_ekb_experience(self, ctx: ChatContext):
+        """EKB 相似经验检索（同步、有界、失败静默）。
+
+        查 data/experience_knowledge.db 中与当前输入相似的历史经验（≤3 条），
+        填充 ctx.experience_items——orchestrator 池路径据此归档 + 以
+        `[经验]` 注入。查询失败不阻断主流程。
+        """
+        if ctx.experience_items or not ctx.user_input:
+            return
+        try:
+            from neurova.skills.experience_knowledge_base import (
+                get_experience_knowledge_base,
+            )
+
+            hits = get_experience_knowledge_base().find_similar_experiences(
+                skill_name=None,
+                context={"user_input": ctx.user_input},
+                limit=3,
+            )
+            items = []
+            for hit in hits or []:
+                if not isinstance(hit, dict):
+                    continue
+                hit_ctx = hit.get("context") or {}
+                user_side = (
+                    str(hit_ctx.get("user_input", ""))
+                    if isinstance(hit_ctx, dict)
+                    else str(hit_ctx)
+                )
+                hit_result = hit.get("result")
+                if isinstance(hit_result, dict):
+                    reply_side = str(
+                        hit_result.get("reply_excerpt")
+                        or hit_result.get("output")
+                        or ""
+                    )
+                elif hit_result:
+                    reply_side = str(hit_result)
+                else:
+                    reply_side = ""
+                mark = "✓" if hit.get("success") else "✗"
+                items.append(
+                    {
+                        "content": f"{mark} {user_side[:80]} → {reply_side[:80]}",
+                        "source": "ekb",
+                        "success": bool(hit.get("success")),
+                    }
+                )
+            if items:
+                ctx.experience_items = items
+                logger.debug("EKB 经验检索命中 %s 条", len(items))
+        except Exception as e:  # noqa: BLE001 - 经验检索失败不阻断主流程
+            logger.debug("EKB 经验检索跳过: %s", e)
+
     # ══════════════════════════════════════════════════════════════
     # Step 2: Evocate 注入
     # ══════════════════════════════════════════════════════════════
@@ -1300,6 +1519,11 @@ class ChatPipeline:
 
     async def _step_llm_call(self, ctx: ChatContext):
         """Agent Loop 调用 + 自动续写"""
+        # B4：命令分发已产出回复 → 跳过 LLM（低延迟确定性路径）
+        if getattr(self, "_command_dispatch_replied", False):
+            self._command_dispatch_replied = False
+            logger.info("B4 命令分发已应答，跳过 LLM 调用")
+            return
         self._apply_thinking_effort(ctx)
         tools_for_llm = await self.context_orchestrator.build_tools_for_llm()
 
@@ -1361,11 +1585,14 @@ class ChatPipeline:
             try:
                 from neurova.sync.session_sync_manager import EventType
 
+                # E2 隐私门控：出口脱敏（敏感键脱敏 / private 事件丢 params）
+                from neurova.security.privacy_gate import redact_tool_messages_for_channel
+
                 await self._sync_event(
                     ctx,
                     EventType.AGENT_TOOL_RESULT,
                     {
-                        "tool_messages": tool_messages,
+                        "tool_messages": redact_tool_messages_for_channel(tool_messages),
                     },
                 )
             except ImportError:
@@ -1771,14 +1998,10 @@ class ChatPipeline:
             except Exception as e:
                 logger.warning("推理链记录失败: %s", e)
 
-        # 结晶器观察
-        if self.crystallizer:
-            last_tool = getattr(self._agent, "_last_tool_used", None)
-            if last_tool:
-                try:
-                    self.crystallizer.observe(tool_name=last_tool, context=ctx.user_input, success=True)
-                except Exception as e:
-                    logger.warning("结晶器观察失败: %s", e)
+        # 结晶器观察：由 post_chat Step9 → on_experience_recorded 统一驱动
+        # （真实成败信号、agent 级隔离、纯对话轮也观察）。此处原有一个依赖
+        # agent._last_tool_used 的直挂分支——该属性全仓只读不写（生产永不
+        # 触发的死代码），且硬编码 success=True 会污染结晶缓冲，故删除。
 
         # PostChatPipeline - 优先使用 PipelineExecutor
         # Bug #5+11: 提取 _run_post_chat_pipeline 辅助方法，消除 fallback 代码重复
