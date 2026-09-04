@@ -11,6 +11,15 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
 
+# 声明式 provider 兼容开关（P0-2）：懒加载防循环导入（provider_compat 只依赖
+# 标准库，但 llm/ 包 __init__ 有重初始化链，保守走函数内导入）
+
+
+def _default_compat():
+    from neurova.llm.provider_compat import ProviderCompat
+
+    return ProviderCompat()
+
 # OpenAI 库导入（可选）
 try:
     import openai
@@ -99,6 +108,10 @@ class LLMConfig:
     preset_name: str = ""
     # 输入 token 预算闸门（None = 不限制）；请求前按消息+工具定义计数检查
     max_input_tokens: Optional[int] = None
+    # 声明式 provider 兼容开关（OpenClaw 启发 P0-2，provider_compat.ProviderCompat）。
+    # 请求构造按开关表消费（如 include_stream_usage 决定是否携带 stream_options），
+    # 不再按 provider 写 if 分支。
+    compat: "ProviderCompat" = field(default_factory=lambda: _default_compat())
 
 
 class LLMClient:
@@ -143,6 +156,13 @@ class LLMClient:
         for key, value in preset.items():
             if hasattr(self.config, key):
                 setattr(self.config, key, value)
+
+    def _compat_include_stream_usage(self) -> bool:
+        """P0-2 compat 开关消费：是否随流式请求携带 stream_options.include_usage。"""
+        compat = getattr(self.config, "compat", None)
+        if compat is None:
+            return True  # 无声明 → OpenAI 协议默认行为（存量等价）
+        return bool(getattr(compat, "include_stream_usage", True))
 
     def _init_client(self):
         """初始化 OpenAI 客户端"""
@@ -316,7 +336,9 @@ class LLMClient:
             # 根因修复 (2026-09-02): OpenAI 协议流式默认不回传 usage，
             # 必须显式请求 include_usage——否则 chunk.usage 恒 None，
             # 上层 token 记账/成本统计永远 0（dashboard Token/调用为 0 的根因）。
-            params["stream_options"] = {"include_usage": True}
+            # P0-2 compat 开关：声明不支持的网关（sensetime 实测恒空）跳过。
+            if self._compat_include_stream_usage():
+                params["stream_options"] = {"include_usage": True}
 
             # 调用流式 API
             stream = self.client.chat.completions.create(**params)
@@ -429,7 +451,9 @@ class LLMClient:
                 params["tools"] = kwargs["tools"]
 
             # 根因修复 (2026-09-02): 流式 usage 回传必须显式请求（见同步流式处注释）。
-            params["stream_options"] = {"include_usage": True}
+            # P0-2 compat 开关：声明不支持的网关跳过（与同步流式同表消费）。
+            if self._compat_include_stream_usage():
+                params["stream_options"] = {"include_usage": True}
 
             # 调用流式 API
             # P1 修复: 原实现误用同步 self.client，返回的同步 Stream 无法 `async for`，

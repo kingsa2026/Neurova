@@ -218,6 +218,11 @@ class ApprovalManager:
         self._storage_path = self._workspace_path / ".approval" / "requests.json"
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # P1-11: 审批持久化状态机（SQLite）。JSON 快照保留为审计可读副本；
+        # SQLite 是裁决状态的真实来源（重启恢复 + terminal 记录保留）。
+        self._db_path = self._workspace_path / ".approval" / "approvals.db"
+        self._init_sqlite_store()
+
         # 加载历史请求
         self._load_requests()
 
@@ -226,6 +231,119 @@ class ApprovalManager:
     def register_notification_callback(self, callback: Callable):
         """注册通知回调"""
         self._notification_callbacks.append(callback)
+
+    # ── P1-11: 审批持久化状态机（SQLite） ──
+
+    def _init_sqlite_store(self):
+        """初始化审批 SQLite 库（幂等）。失败降级为纯 JSON 路径，不阻断初始化。"""
+        try:
+            import sqlite3
+
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(str(self._db_path))
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS approval_requests (
+                    request_id TEXT PRIMARY KEY,
+                    agent_id TEXT DEFAULT '',
+                    user_id TEXT DEFAULT '',
+                    command TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    danger_reason TEXT DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    expires_at TEXT,
+                    approved_by TEXT,
+                    approval_note TEXT,
+                    metadata TEXT DEFAULT '{}'
+                )
+            """)
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_apr_status ON approval_requests(status)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_apr_agent ON approval_requests(agent_id)"
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.warning("审批 SQLite 初始化失败, 降级纯 JSON 存储: %s", e)
+            self._db_path = None
+
+    def _upsert_request_sqlite(self, request: ApprovalRequest) -> None:
+        """单条 upsert 到 SQLite（每写一 commit，量级低无需批量）。"""
+        if not getattr(self, "_db_path", None):
+            return
+        try:
+            import sqlite3
+
+            conn = sqlite3.connect(str(self._db_path))
+            conn.execute(
+                """INSERT OR REPLACE INTO approval_requests
+                   (request_id, agent_id, user_id, command, description, danger_reason,
+                    status, created_at, updated_at, expires_at, approved_by, approval_note, metadata)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    request.request_id,
+                    request.agent_id,
+                    request.user_id,
+                    request.command,
+                    request.description,
+                    request.danger_reason,
+                    request.status.value,
+                    request.created_at.isoformat(),
+                    request.updated_at.isoformat(),
+                    request.expires_at.isoformat() if request.expires_at else None,
+                    request.approved_by,
+                    request.approval_note,
+                    json.dumps(request.metadata, ensure_ascii=False),
+                ),
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            logger.debug("审批 SQLite upsert 失败（JSON 快照仍可用）: %s", e)
+
+    def _load_requests_sqlite(self) -> None:
+        """启动时从 SQLite 恢复审批记录（terminal + PENDING 都保留）。"""
+        if not getattr(self, "_db_path", None):
+            return
+        try:
+            import sqlite3
+
+            conn = sqlite3.connect(str(self._db_path))
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM approval_requests").fetchall()
+            conn.close()
+            loaded = 0
+            for row in rows:
+                try:
+                    request = ApprovalRequest(
+                        request_id=row["request_id"],
+                        agent_id=row["agent_id"] or "",
+                        user_id=row["user_id"] or "",
+                        command=row["command"] or "",
+                        description=row["description"] or "",
+                        danger_reason=row["danger_reason"] or "",
+                        status=ApprovalStatus(row["status"]),
+                        created_at=datetime.datetime.fromisoformat(row["created_at"]),
+                        updated_at=datetime.datetime.fromisoformat(row["updated_at"]),
+                        expires_at=(
+                            datetime.datetime.fromisoformat(row["expires_at"])
+                            if row["expires_at"] else None
+                        ),
+                        approved_by=row["approved_by"],
+                        approval_note=row["approval_note"],
+                        metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+                    )
+                    self._requests[request.request_id] = request
+                    loaded += 1
+                except Exception as row_err:
+                    logger.debug("跳过损坏审批行 %s: %s", row["request_id"], row_err)
+            if loaded:
+                logger.info("从 SQLite 恢复 %s 条审批记录", loaded)
+        except Exception as e:
+            logger.warning("审批 SQLite 恢复失败: %s", e)
 
     def check_command(self, command: str, agent_id: str = "", user_id: str = "") -> Dict[str, Any]:
         """
@@ -316,6 +434,7 @@ class ApprovalManager:
             )
 
             self._requests[request.request_id] = request
+            self._upsert_request_sqlite(request)
             self._save_requests()
 
             # 发送通知
@@ -367,6 +486,7 @@ class ApprovalManager:
             # P1-c：审批记忆沉淀
             self._remember_approval(request.command, approved_by, remember)
 
+            self._upsert_request_sqlite(request)
             self._save_requests()
 
             # 发送结果通知
@@ -399,6 +519,7 @@ class ApprovalManager:
             request.approval_note = note
             request.updated_at = datetime.datetime.now(datetime.timezone.utc)
 
+            self._upsert_request_sqlite(request)
             self._save_requests()
 
             # 发送结果通知
@@ -565,6 +686,12 @@ class ApprovalManager:
                 callback("approval_request", request.to_dict())
             except Exception as e:
                 logger.error("发送审批通知失败: %s", e)
+        # P1-11 渠道镜像路由: 站内通知中心镜像审批卡（调用点解析模块全局,
+        # 测试可 patch；镜像故障绝不阻断审批主流程）
+        try:
+            _mirror_approval_notification("approval_request", request.to_dict())
+        except Exception as e:
+            logger.debug("审批请求站内通知镜像失败: %s", e)
 
     def _send_approval_result(self, request: ApprovalRequest):
         """发送审批结果通知"""
@@ -573,6 +700,10 @@ class ApprovalManager:
                 callback("approval_result", request.to_dict())
             except Exception as e:
                 logger.error("发送审批结果通知失败: %s", e)
+        try:
+            _mirror_approval_notification("approval_result", request.to_dict())
+        except Exception as e:
+            logger.debug("审批结果站内通知镜像失败: %s", e)
 
     def _cleanup_expired_requests(self):
         """清理过期请求"""
@@ -582,6 +713,7 @@ class ApprovalManager:
         for request_id, request in self._requests.items():
             if request.status == ApprovalStatus.PENDING and request.expires_at and now > request.expires_at:
                 request.status = ApprovalStatus.EXPIRED
+                self._upsert_request_sqlite(request)
                 expired_ids.append(request_id)
 
         if expired_ids:
@@ -589,14 +721,21 @@ class ApprovalManager:
             logger.info("清理了 %s 个过期审批请求", len(expired_ids))
 
     def _load_requests(self):
-        """加载审批请求"""
+        """加载审批请求
+
+        P1-11: SQLite 优先（裁决状态真实来源）；JSON 兜底导入历史遗留
+        （仅补缺，不让陈旧 JSON 覆盖 SQLite 中的新状态）。
+        """
+        self._load_requests_sqlite()
         try:
             if self._storage_path.exists():
                 with open(self._storage_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     for request_data in data.get("requests", []):
                         request = ApprovalRequest.from_dict(request_data)
-                        self._requests[request.request_id] = request
+                        # SQLite 已有的行不覆盖（SQLite 为权威来源）
+                        if request.request_id not in self._requests:
+                            self._requests[request.request_id] = request
 
                     # 加载白名单
                     self._whitelist = set(data.get("whitelist", []))
@@ -635,6 +774,38 @@ class ApprovalManager:
 
 _approval_manager: Optional[ApprovalManager] = None
 _am_lock = threading.Lock()
+
+
+def _mirror_approval_notification(kind: str, payload: Dict[str, Any]) -> None:
+    """P1-11: 室内通知中心镜像审批卡（铃铛/通知页可见）。
+
+    kind: "approval_request" | "approval_result"。失败由调用方兜底，不阻断。
+    """
+    from neurova.notifications.manager import get_notification_manager
+
+    nm = get_notification_manager()
+    request_id = payload.get("request_id", "")
+    command = (payload.get("command") or "")[:80]
+    status = payload.get("status", "")
+    agent_id = payload.get("agent_id", "")
+
+    if kind == "approval_request":
+        nm.add_notification(
+            user_id=payload.get("user_id") or "admin",
+            title="审批请求待处理",
+            message=f"Agent {agent_id or 'default'} 请求执行: {command}",
+            notification_type="approval_request",
+            data=payload,
+        )
+    else:
+        result_label = {"approved": "已批准", "rejected": "已拒绝"}.get(status, status)
+        nm.add_notification(
+            user_id=payload.get("user_id") or "admin",
+            title="审批已完成",
+            message=f"审批 {request_id[:8]} {result_label}: {command}",
+            notification_type="approval_result",
+            data=payload,
+        )
 
 
 def get_approval_manager(

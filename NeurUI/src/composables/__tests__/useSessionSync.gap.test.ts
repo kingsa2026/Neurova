@@ -225,4 +225,64 @@ describe('useSessionSync gap 检测', () => {
     ws.emit(evt(9)) // gap 但无回调
     expect(FakeWebSocket.instances).toHaveLength(1)
   })
+
+  it('gap 自愈（OpenClaw P0-7）：检测缺口立即重连，缺口起点整段重放回填', () => {
+    vi.useFakeTimers()
+    try {
+      const seen: number[] = []
+      const onGap = vi.fn()
+      const sid = ref('s1')
+      useSessionSync(() => sid.value, e => seen.push(e.seq as number), { onGap })
+      const first = lastWs()
+      first.open()
+      first.emit(evt(1))
+      first.emit(evt(2))
+      first.emit(evt(5)) // 慢消费者丢帧 3、4
+      expect(seen).toEqual([1, 2, 5])
+      expect(onGap).toHaveBeenCalledWith(2, 2)
+
+      // gap 触发立即重连（retry 重置，退避后重连）
+      vi.advanceTimersByTime(10_000)
+      const second = lastWs()
+      expect(second).not.toBe(first)
+      // resume 游标 = 最早缺口前一序号 2（非当前游标 5）
+      second.open()
+      expect(second.sent.map(s => JSON.parse(s))).toEqual([{ type: 'sync_resume', last_seq: 2 }])
+
+      // 服务端从 2 之后重放：3、4 回填，2/5 已见去重，6 新帧正常投递
+      second.emit(evt(2))
+      second.emit(evt(3))
+      second.emit(evt(4))
+      second.emit(evt(5))
+      second.emit(evt(6))
+      expect(seen).toEqual([1, 2, 5, 3, 4, 6])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('gap 自愈后区间耗尽，后续旧帧恢复去重', () => {
+    vi.useFakeTimers()
+    try {
+      const seen: number[] = []
+      const sid = ref('s1')
+      useSessionSync(() => sid.value, e => seen.push(e.seq as number), { onGap: () => {} })
+      const first = lastWs()
+      first.open()
+      first.emit(evt(1))
+      first.emit(evt(4)) // 缺口 [2,3]
+
+      vi.advanceTimersByTime(10_000)
+      const second = lastWs()
+      second.open()
+      second.emit(evt(4)) // 已见（游标 4）但落在缺口区间 → 回填语义不适用，去重
+      // 注：4 > lastSeq(4) 为假 → 走 consumeGap，区间 [2,3] 不含 4 → 去重
+      second.emit(evt(2)) // 回填
+      second.emit(evt(3)) // 回填，区间耗尽
+      second.emit(evt(2)) // 区间已空 → 去重
+      expect(seen).toEqual([1, 4, 2, 3])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

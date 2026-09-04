@@ -13,6 +13,8 @@ export interface MemoryEntry {
   category?: string
   importance: number
   temperature?: number
+  /** P1-9 来源信任级（owner/agent/untrusted/system），缺失视为 agent */
+  origin?: 'owner' | 'agent' | 'untrusted' | 'system'
   is_important?: boolean
   is_crystallized?: boolean
   emotion_score?: number

@@ -55,6 +55,10 @@ class MarketplaceSkill(BaseModel):
     download_url: str = ""
     updated_at: Optional[Any] = None
     source: str = "local"  # 条目来源: local(管理员上架) / aliyun / xfyun(远端同步)
+    # P0-4/P2-15 声明面透传（前端徽标数据源）：条目带声明元数据时回传，
+    # 无声明（远端源目录条目常态）为 None，前端不显示徽标
+    permissions: Optional[Dict[str, Any]] = None
+    sandbox_required: Optional[bool] = None
 
 
 class SkillInstallRequest(BaseModel):
@@ -162,6 +166,8 @@ def _convert_market_skill_to_api(skill: MarketSkill, installed: bool = False) ->
         download_url=skill.download_url,
         updated_at=skill.updated_at,
         source=getattr(skill, "source", "local") or "local",
+        permissions=getattr(skill, "permissions", None),
+        sandbox_required=getattr(skill, "sandbox_required", None),
     )
 
 

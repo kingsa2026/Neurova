@@ -114,6 +114,23 @@ def _save_configs(configs: Dict[str, Dict[str, Any]]):
 # ============================================================
 
 
+@router.get("/ingress/stats", summary="入站持久化队列状态（P0-5）")
+async def ingress_stats():
+    """渠道入站持久化队列统计（pending/processing/dead_letter/processed）。
+
+    供渠道管理页展示"重启不丢消息"的队列健康面。队列不可用时返回
+    enabled=False（fail-open 直发模式）。
+    """
+    manager = get_channel_manager()
+    queue = getattr(manager, "ingress_queue", None)
+    if queue is None:
+        return {"enabled": False}
+    try:
+        return {"enabled": True, **queue.stats()}
+    except Exception as e:  # noqa: BLE001 - 状态查询失败不炸端点
+        return {"enabled": False, "error": str(e)}
+
+
 @router.get("", summary="列出所有渠道配置")
 async def list_configs():
     """列出所有已配置的渠道"""

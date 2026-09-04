@@ -22,6 +22,7 @@ class PipelineRequest:
     save_memory: bool = True
     enable_tts: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
+    writer_claim: Optional[Any] = None  # P1-10 写入围栏凭证（可选）
 
 
 @dataclass
@@ -73,6 +74,7 @@ class PipelineExecutor:
                 save_memory=request.save_memory,
                 enable_tts=request.enable_tts,
                 metadata=request.metadata,
+                writer_claim=request.writer_claim,
             )
 
             # 构建响应

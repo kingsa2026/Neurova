@@ -679,6 +679,17 @@
           <span class="approval-label">{{ t('ui.content') }}</span>
           <pre class="approval-command">{{ approvalModal.command }}</pre>
         </div>
+        <!-- P0-6 分段审批：链式命令逐段确认，注入段无法借白名单段搭便车 -->
+        <div v-if="approvalModal.segments.length > 1" class="approval-field">
+          <span class="approval-label">{{ t('ui.approvalSegments') }}</span>
+          <ul class="approval-segments">
+            <li v-for="(seg, idx) in approvalModal.segments" :key="idx" class="approval-segment">
+              <a-tag v-if="seg.connector" color="default" class="approval-segment-connector">{{ seg.connector }}</a-tag>
+              <code class="approval-segment-text">{{ seg.text }}</code>
+              <a-tag v-if="seg.quoted" color="purple">{{ t('ui.approvalSegmentInline') }}</a-tag>
+            </li>
+          </ul>
+        </div>
         <div v-if="approvalModal.reason" class="approval-field">
           <span class="approval-label">{{ t('ui.reason') }}</span>
           <span class="approval-reason">{{ approvalModal.reason }}</span>
@@ -919,6 +930,8 @@ const approvalModal = reactive({
   toolName: '',
   command: '',
   reason: '',
+  // P0-6 分段审批：多段命令的候选段（后端 governance.segments）
+  segments: [] as Array<{ text: string; head: string; connector: string; quoted: boolean }>,
 })
 const approvalAddWhitelist = ref(false)
 /** 审批记忆档位：'' = 仅本次 / exact / similar（补课 3.2，后端 approval_manager 记忆规则） */
@@ -1735,6 +1748,16 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       approvalModal.command =
         params !== '{}' ? params : (event.command || '')
       approvalModal.reason = event.reason || ''
+      // P0-6 分段审批：链式命令逐段展示，审批人可见每一段
+      const govSegments = event.governance?.segments
+      approvalModal.segments = Array.isArray(govSegments)
+        ? govSegments.map((s: any) => ({
+            text: String(s?.text ?? ''),
+            head: String(s?.head ?? ''),
+            connector: String(s?.connector ?? ''),
+            quoted: Boolean(s?.quoted),
+          }))
+        : []
       approvalAddWhitelist.value = false
       approvalModal.open = true
       break
@@ -3087,6 +3110,33 @@ onBeforeUnmount(() => {
   word-break: break-all;
   max-height: 140px;
   flex: 1;
+}
+
+/* P0-6 分段审批：链式命令逐段展示 */
+.approval-segments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.approval-segment {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.approval-segment-text {
+  font-size: 12px;
+  color: var(--nr-text-primary, inherit);
+  background: var(--nr-bg-inset);
+  border-radius: 4px;
+  padding: 2px 8px;
+  word-break: break-all;
 }
 
 .approval-reason {

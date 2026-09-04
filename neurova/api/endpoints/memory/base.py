@@ -117,6 +117,8 @@ def memory_to_dict(memory) -> dict:
                 "category": str(memory.get("category", "")),
                 "temperature": float(memory.get("temperature", 100.0) or 0.0),
                 "lifecycle_stage": str(memory.get("lifecycle_stage", "")),
+                # P1-9 来源信任级透传（缺失回退 agent，等价旧行为）
+                "origin": str(memory.get("origin", "agent") or "agent"),
                 "is_important": bool(memory.get("is_important", metadata.get("is_important", importance >= 80.0))),
                 "is_crystallized": bool(
                     memory.get("is_crystallized", memory.get("lifecycle_stage") == "crystallized")
@@ -135,6 +137,7 @@ def memory_to_dict(memory) -> dict:
             "category": str(getattr(memory, "category", "")),
             "temperature": float(getattr(memory, "temperature", 100.0)),
             "lifecycle_stage": str(getattr(memory, "lifecycle_stage", "")),
+            "origin": str(getattr(memory, "origin", "agent") or "agent"),
             "is_important": bool(getattr(memory, "is_important", False)),
             "is_crystallized": bool(getattr(memory, "is_crystallized", False)),
             "emotion_score": float(getattr(memory, "emotion_score", 0.5)),

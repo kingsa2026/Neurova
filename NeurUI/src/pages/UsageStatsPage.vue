@@ -45,6 +45,33 @@
           <a-empty v-else :description="t('common.noData')" />
         </div>
       </GlassCard>
+
+      <!-- P1-13 provider 真账单（默认关，无快照恒隐藏） -->
+      <GlassCard v-if="providerSnapshots.length" :title="t('usageStats.providerBilling')" variant="default" :radius="20">
+        <div class="nr-provider-grid">
+          <div v-for="snap in providerSnapshots" :key="snap.provider_id" class="nr-provider-card">
+            <div class="nr-provider-name">{{ snap.provider_id }}</div>
+            <div class="nr-provider-balance">
+              <template v-if="snap.balance != null">
+                {{ snap.currency || '' }} {{ Number(snap.balance).toFixed(2) }}
+              </template>
+              <template v-else-if="snap.quota_remaining != null">
+                {{ Number(snap.quota_remaining).toLocaleString() }}
+              </template>
+              <template v-else>{{ t('common.noData') }}</template>
+            </div>
+            <div class="nr-provider-meta">
+              <span v-if="snap.plan">{{ snap.plan }}</span>
+              <span>{{ snap.ts }}</span>
+            </div>
+          </div>
+        </div>
+        <div v-if="providerErrors.length" class="nr-provider-errors">
+          <a-tag v-for="err in providerErrors" :key="err.provider_id" color="orange">
+            {{ err.provider_id }}: {{ err.error }}
+          </a-tag>
+        </div>
+      </GlassCard>
     </a-spin>
   </div>
 </template>
@@ -58,8 +85,11 @@ import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import {
   getUsageOverview,
+  getProviderUsage,
   type UsageOverview,
   type UsageOverviewHeatmapDay,
+  type ProviderUsageSnapshot,
+  type ProviderUsageResponse,
 } from '@/api/modules/stats'
 
 const { t } = useI18n()
@@ -90,6 +120,10 @@ const summary = computed(() => overview.value.summary)
 const scopeLabel = computed(() =>
   overview.value.scope === 'user' ? t('usageStats.myUsage') : t('usageStats.allUsers'),
 )
+
+/** P1-13 provider 账单快照（采集器未装配/无启用 provider 时恒空 → 卡片隐藏） */
+const providerSnapshots = ref<ProviderUsageSnapshot[]>([])
+const providerErrors = ref<ProviderUsageResponse['errors']>([])
 
 /** 每日 token 序列（KPI spark 用） */
 const heatDays = computed<UsageOverviewHeatmapDay[]>(() => overview.value.heatmap ?? [])
@@ -219,6 +253,16 @@ async function fetchData() {
   } finally {
     loading.value = false
   }
+  // P1-13: provider 账单副路径（失败静默，不影响主看板）
+  try {
+    const pu: any = await getProviderUsage()
+    const payload: ProviderUsageResponse = pu?.data ?? pu ?? { snapshots: [], errors: [] }
+    providerSnapshots.value = payload.snapshots ?? []
+    providerErrors.value = payload.errors ?? []
+  } catch {
+    providerSnapshots.value = []
+    providerErrors.value = []
+  }
 }
 
 /** 时间范围切换：显式驱动（antd radio 选中态与 v-model 同步，点击即改即拉取） */
@@ -289,5 +333,46 @@ onMounted(fetchData)
 
 .nr-usage-trend {
   height: 320px;
+}
+
+.nr-provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.nr-provider-card {
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nr-provider-name {
+  font-weight: 600;
+  color: var(--nr-text-primary);
+  font-size: 14px;
+}
+
+.nr-provider-balance {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--nr-text-primary);
+}
+
+.nr-provider-meta {
+  display: flex;
+  justify-content: space-between;
+  color: var(--nr-text-tertiary, #94a3b8);
+  font-size: 12px;
+}
+
+.nr-provider-errors {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 </style>

@@ -124,4 +124,28 @@ async def shutdown_agent(agent) -> None:
         except Exception as e:
             logger.warning("对话历史缓冲刷新失败: %s", e)
 
+    # 关闭认知存储引擎/附件管理器/情感模块的 SQLite 连接——不关则
+    # Windows 上工作区/数据目录删除因句柄占用留残（delete_agent 与包
+    # 导入回滚同根因；FakeAgent 测试掩盖了真连接的泄漏）。
+    # EmotionModule（memory_manager 私有）是 memory.db 的第三持有人，
+    # 自带 shutdown() 但此前无人调用。
+    for _holder, _attr in (
+        (agent, "cognitive_engine"),
+        (agent, "attachment_manager"),
+        (getattr(agent, "memory_manager", None), "_emotion_module"),
+    ):
+        if _holder is None:
+            continue
+        _component = getattr(_holder, _attr, None)
+        if _component is None:
+            continue
+        _closer = getattr(_component, "shutdown", None) or getattr(_component, "close", None)
+        if _closer is None:
+            continue
+        try:
+            _closer()
+            logger.debug("Agent %s: %s 已关闭", agent.config.name, _attr)
+        except Exception as e:
+            logger.warning("Agent %s: 关闭 %s 失败: %s", agent.config.name, _attr, e)
+
     logger.info("Agent %s 已关闭", agent.config.name)

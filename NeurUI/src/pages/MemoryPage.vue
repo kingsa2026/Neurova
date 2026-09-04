@@ -205,6 +205,13 @@
           <template v-else-if="column.key === 'type'">
             <a-tag :color="typeColor(record.type)">{{ record.type }}</a-tag>
           </template>
+          <template v-else-if="column.key === 'origin'">
+            <a-tooltip :title="record.origin === 'untrusted' ? t('memory.originUntrustedTip') : ''">
+              <a-tag :color="originColorMap[record.origin || 'agent'] || 'blue'">
+                {{ originLabel(record.origin) }}
+              </a-tag>
+            </a-tooltip>
+          </template>
           <template v-else-if="column.key === 'importance'">
             <a-progress
               :percent="Math.round((record.importance || 0) * 100)"
@@ -553,10 +560,29 @@ const statsCards = computed(() => [
 const tableColumns = computed(() => [
   { title: t('common.description'), key: 'content', dataIndex: 'content', ellipsis: true },
   { title: t('common.type'), key: 'type', width: 120 },
+  { title: t('memory.origin'), key: 'origin', width: 110 },
   { title: t('memory.importance'), key: 'importance', width: 120 },
   { title: t('common.createdAt'), dataIndex: 'created_at', width: 180 },
   { title: t('common.actions'), key: 'actions', width: 240 },
 ])
+
+// P1-9 来源信任级徽标：untrusted（外部网络抓取）橙色警示，owner 绿色
+const originColorMap: Record<string, string> = {
+  owner: 'green',
+  agent: 'blue',
+  untrusted: 'orange',
+  system: 'purple',
+}
+const originLabel = (origin?: string) => {
+  const key = origin || 'agent'
+  const i18nMap: Record<string, string> = {
+    owner: 'memory.originOwner',
+    agent: 'memory.originAgent',
+    untrusted: 'memory.originUntrusted',
+    system: 'memory.originSystem',
+  }
+  return t(i18nMap[key] || 'memory.originAgent')
+}
 
 const truncate = (text: string, len: number) =>
   text && text.length > len ? text.slice(0, len) + '...' : text || ''

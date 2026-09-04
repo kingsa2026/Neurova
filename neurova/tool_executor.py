@@ -300,18 +300,172 @@ class ToolExecutor:
             return self._messages_list
         return messages
 
+    # ── tool-call-repair（OpenClaw 启发 P0-3）─────────────────────────────
+
+    # 三种纯文本工具调用文法（OC packages/tool-call-repair/grammar.ts）：
+    #   XML-ish: <function name="ns.tool">{...}</function>（名称容忍命名空间标点）
+    #   Harmony: <|channel|>…<|message|>{"name":…,"arguments":…}<|call|>（gpt-oss 系）
+    #   尾标:    {"name":…,"arguments":…}[END_TOOL_REQUEST]
+    _REPAIR_MAX_PAYLOAD_BYTES = 256_000  # OC 默认上限，防恶意/失控输出
+
+    _XMLISH_RE = re.compile(r'<function\s+name="([A-Za-z0-9_.:-]+)"\s*>(\{.*?\})\s*</function>', re.DOTALL)
+    _HARMONY_RE = re.compile(
+        r"<\|channel\|>[a-z]+<\|message\|>\s*(\{.*?\})\s*<\|call\|>", re.DOTALL
+    )
+    # 尾标格式：JSON 对象右边界锚定用反向括号配平扫描（_balanced_json_before），
+    # 避免正则贪婪/非贪婪在嵌套与多尾标场景下的跨对象吞并
+    _TRAILER_MARKER_RE = re.compile(r"\[END_TOOL_REQUEST\]")
+    _CODE_FENCE_RE = re.compile(r"```|~~~")
+
+    def _protected_ranges(self, text: str):
+        """code fence 围栏区（成对 ``` / ~~~ 之间）——保护用户示例原文。"""
+        ranges = []
+        start = None
+        for m in self._CODE_FENCE_RE.finditer(text):
+            if start is None:
+                start = m.start()
+            else:
+                ranges.append((start, m.end()))
+                start = None
+        return ranges
+
+    @classmethod
+    def _in_protected(cls, pos: int, ranges) -> bool:
+        return any(lo <= pos < hi for lo, hi in ranges)
+
+    @classmethod
+    def _parse_call_json(cls, raw: str):
+        """候选 JSON → dict；失败返回 None（宁漏勿错，不猜语义）。"""
+        if len(raw.encode("utf-8", errors="replace")) > cls._REPAIR_MAX_PAYLOAD_BYTES:
+            return None
+        try:
+            obj = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return None
+        return obj if isinstance(obj, dict) else None
+
+    @staticmethod
+    def _balanced_json_start(text: str, close_pos: int) -> int:
+        """从 close_pos（应为 '}'）反向找字符串感知配平的 '{'，失败返回 -1。"""
+        depth = 0
+        in_str = False
+        esc = False
+        i = close_pos
+        while i >= 0:
+            ch = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch == "}":
+                depth += 1
+            elif ch == "{":
+                depth -= 1
+                if depth == 0:
+                    return i
+            i -= 1
+        return -1
+
+    def _extract_repaired_tool_calls(self, reply: str) -> list:
+        """从模型纯文本输出中提取"漏出"的工具调用（tool-call-repair）。
+
+        本地小模型（Ollama/vLLM 类）不走 provider 结构化 tool_calls 通道，
+        工具调用以三种文本形态漏出。此处流内扫描提升为结构化调用：
+        [{"name", "arguments"(dict), "raw"}]。code fence 内不扫描；
+        JSON 解析失败的候选跳过（不猜语义）。
+        """
+        if not reply or ("function" not in reply and "<|" not in reply and "[END_TOOL_REQUEST]" not in reply):
+            return []
+
+        protected = self._protected_ranges(reply)
+        calls = []
+
+        for m in self._XMLISH_RE.finditer(reply):
+            if self._in_protected(m.start(), protected):
+                continue
+            args = self._parse_call_json(m.group(2))
+            if args is None:
+                continue
+            calls.append({"name": m.group(1), "arguments": args, "raw": m.group(0)})
+
+        for m in self._HARMONY_RE.finditer(reply):
+            if self._in_protected(m.start(), protected):
+                continue
+            obj = self._parse_call_json(m.group(1))
+            if obj is None:
+                continue
+            name = obj.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            calls.append({"name": name, "arguments": obj.get("arguments") or {}, "raw": m.group(0)})
+
+        for m in self._TRAILER_MARKER_RE.finditer(reply):
+            if self._in_protected(m.start(), protected):
+                continue
+            # 尾标前必须是 JSON 对象闭括号（反向配平取完整对象）
+            j = m.start() - 1
+            while j >= 0 and reply[j] in " \t\r\n":
+                j -= 1
+            if j < 0 or reply[j] != "}":
+                continue
+            start = self._balanced_json_start(reply, j)
+            if start < 0 or self._in_protected(start, protected):
+                continue
+            obj = self._parse_call_json(reply[start : j + 1])
+            if obj is None:
+                continue
+            name = obj.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            calls.append({"name": name, "arguments": obj.get("arguments") or {}, "raw": reply[start : m.end()]})
+
+        return calls
+
     async def _execute_from_text(self, reply: str, user_input: str):
         """从文本回复中解析并执行工具调用"""
         import re
+
+        # tool-call-repair（P0-3）：三形态文本工具调用提升执行
+        repaired = self._extract_repaired_tool_calls(reply)
 
         # 简单的文本工具调用解析
         pattern = r'\[TOOL_CALL:(\w+)\((.*?)\)\]'
         matches = re.findall(pattern, reply, re.DOTALL)
 
-        if not matches:
+        if not matches and not repaired:
             return reply
 
         results = []
+        # 修复调用与原生标记调用共用执行链；结果同样入 _tool_messages_list
+        for idx, call in enumerate(repaired):
+            tool_name, arguments = call["name"], call["arguments"]
+            try:
+                result = await self._execute_single_tool(tool_name, arguments)
+                results.append(f"\n\n**{tool_name} 结果**: {json.dumps(result, ensure_ascii=False)[:2000]}")
+                if not hasattr(self._agent, "_tool_messages_list"):
+                    self._agent._tool_messages_list = []
+                self._agent._tool_messages_list.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": f"repaired_{tool_name}_{idx}",
+                        "name": tool_name,
+                        "tool_name": tool_name,
+                        "content": json.dumps(result, ensure_ascii=False),
+                        "type": "tool_result",
+                        "result": result,
+                        "success": self._result_is_success(result),
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
+            except Exception as e:
+                logger.error("Repaired tool execution failed: %s", e)
+                results.append(f"\n\n**{tool_name} 错误**: {str(e)}")
+
         for idx, (tool_name, args_str) in enumerate(matches):
             try:
                 # 尝试解析 JSON 参数

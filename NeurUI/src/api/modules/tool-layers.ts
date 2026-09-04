@@ -21,6 +21,8 @@ export interface Tool {
   type: string
   enabled?: boolean
   public?: boolean
+  /** P2-15 声明位：true=工具声明必须在沙箱下执行（后端 builtin_tools schema） */
+  sandbox_required?: boolean | null
 }
 
 // ---------------------------------------------------------------------------
