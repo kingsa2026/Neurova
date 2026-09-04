@@ -45,6 +45,30 @@ class LifecycleStage(Enum):
     CRYSTALLIZED = "crystallized"  # 已结晶（永久）
 
 
+class MemoryOrigin(Enum):
+    """记忆来源信任级（OpenClaw P1-9：写入时结构化定级，非内容级扫描）
+
+    闭集四值，落 SQLite 列；检索侧按此加权——untrusted（外部网络抓取）
+    降权，防止外部内容经记忆链路毒化上下文。模型无法用文字改写：
+    remember() 咽喉只认显式 origin 形参，metadata["origin"] 无效。
+    """
+
+    OWNER = "owner"  # 用户本人输入（最高信任）
+    AGENT = "agent"  # Agent 自身产出/推断
+    UNTRUSTED = "untrusted"  # 外部网络内容（web_reach/browser_read 等）
+    SYSTEM = "system"  # 系统内置/种子数据
+
+    @classmethod
+    def weights(cls) -> Dict["MemoryOrigin", float]:
+        """检索加权系数：untrusted 显式降权，其余不衰减"""
+        return {
+            cls.OWNER: 1.0,
+            cls.AGENT: 1.0,
+            cls.UNTRUSTED: 0.6,
+            cls.SYSTEM: 1.0,
+        }
+
+
 class MemoryPerspective(Enum):
     """记忆视角"""
 
@@ -256,6 +280,7 @@ class Memory:
     category: MemoryCategory = MemoryCategory.GENERAL
     lifecycle_stage: LifecycleStage = LifecycleStage.ACTIVE
     perspective: MemoryPerspective = MemoryPerspective.FIRST_PERSON
+    origin: MemoryOrigin = MemoryOrigin.AGENT
     emotion: EmotionType = EmotionType.NEUTRAL
     temperature: float = 100.0
     importance: float = 50.0
@@ -371,6 +396,7 @@ class Memory:
             "category": self.category.value,
             "lifecycle_stage": self.lifecycle_stage.value,
             "perspective": self.perspective.value,
+            "origin": self.origin.value,
             "emotion": self.emotion.value,
             "temperature": self.temperature,
             "importance": self.importance,
@@ -429,6 +455,7 @@ class Memory:
             category=_parse_enum(MemoryCategory, data.get("category"), MemoryCategory.GENERAL),
             lifecycle_stage=_parse_enum(LifecycleStage, data.get("lifecycle_stage"), LifecycleStage.ACTIVE),
             perspective=_parse_enum(MemoryPerspective, data.get("perspective"), MemoryPerspective.FIRST_PERSON),
+            origin=_parse_enum(MemoryOrigin, data.get("origin"), MemoryOrigin.AGENT),
             emotion=_parse_enum(EmotionType, data.get("emotion"), EmotionType.NEUTRAL),
             temperature=data.get("temperature", 100.0),
             importance=data.get("importance", 50.0),

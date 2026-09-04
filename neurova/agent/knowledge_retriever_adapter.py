@@ -85,20 +85,7 @@ class KnowledgeRetrieverAdapter:
                 )
 
             # 归一化为 memories 载荷（与记忆条目字段一致：content/title 等）
-            memories = [
-                {
-                    "memory_id": item.get("knowledge_id"),
-                    "content": item.get("content") or item.get("title") or "",
-                    "title": item.get("title", ""),
-                    "category": item.get("category", "knowledge"),
-                    "tags": item.get("tags", []),
-                    "source": item.get("source", "knowledge"),
-                    "confidence": item.get("confidence", 0.5),
-                    "visibility": item.get("visibility", "private"),
-                    "knowledge_id": item.get("knowledge_id"),
-                }
-                for item in knowledge_items
-            ]
+            memories = [self._normalize_item(item) for item in knowledge_items]
 
             quality = self.get_quality_score(knowledge_items, context.query)
             quality_level = self._quality_from_score(quality)
@@ -154,3 +141,34 @@ class KnowledgeRetrieverAdapter:
         if score > 0.0:
             return RetrievalQuality.POOR
         return RetrievalQuality.FAILED
+
+    # P1-9 来源信任分级: 知识条目 source → origin 闭集映射。
+    # fail-safe：未知来源一律 untrusted（外部可写面，绝不静默升权）。
+    # kb_builder 是 web_reach 抓取入口 → untrusted；agent 自产/结晶 → agent。
+    _ORIGIN_SOURCES_OWNER = {"user_upload", "manual", "local_import"}
+    _ORIGIN_SOURCES_AGENT = {"agent_generated", "crystallized"}
+
+    @classmethod
+    def _map_origin(cls, source: str) -> str:
+        s = (source or "").strip().lower()
+        if s in cls._ORIGIN_SOURCES_OWNER:
+            return "owner"
+        if s in cls._ORIGIN_SOURCES_AGENT:
+            return "agent"
+        return "untrusted"
+
+    @classmethod
+    def _normalize_item(cls, item: Dict[str, Any]) -> Dict[str, Any]:
+        """单条知识条目 → 检索链 memories 载荷（含 origin 信任级）"""
+        return {
+            "memory_id": item.get("knowledge_id"),
+            "content": item.get("content") or item.get("title") or "",
+            "title": item.get("title", ""),
+            "category": item.get("category", "knowledge"),
+            "tags": item.get("tags", []),
+            "source": item.get("source", "knowledge"),
+            "confidence": item.get("confidence", 0.5),
+            "visibility": item.get("visibility", "private"),
+            "knowledge_id": item.get("knowledge_id"),
+            "origin": cls._map_origin(item.get("source", "")),
+        }

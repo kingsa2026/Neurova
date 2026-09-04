@@ -44,6 +44,7 @@ def init_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:
                 emotion_tags TEXT DEFAULT '[]',
                 perspective TEXT DEFAULT 'ai_inference',
                 perspective_confidence REAL DEFAULT 1.0,
+                origin TEXT NOT NULL DEFAULT 'agent',
                 source TEXT,
                 access_count INTEGER DEFAULT 0,
                 last_accessed_at TEXT,
@@ -248,6 +249,13 @@ def migrate_schema(conn: sqlite3.Connection, lock: threading.Lock) -> None:
             try:
                 conn.execute("ALTER TABLE memories ADD COLUMN importance REAL DEFAULT 0.5")
                 logger.info("Migrated memories table: added importance column")
+            except sqlite3.OperationalError:
+                pass
+
+            # memories 表：添加 origin（P1-9 来源信任分级，闭集 owner/agent/untrusted/system）
+            try:
+                conn.execute("ALTER TABLE memories ADD COLUMN origin TEXT NOT NULL DEFAULT 'agent'")
+                logger.info("Migrated memories table: added origin column")
             except sqlite3.OperationalError:
                 pass
 

@@ -8,7 +8,7 @@ TTS Manager - TTS 引擎管理器
 """
 
 from neurova.core.logger import get_logger
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel
 
@@ -28,7 +28,7 @@ except ImportError:
 
 logger = get_logger(__name__)
 
-# Fallback 引擎优先级
+# Fallback 引擎优先级（默认链；可用 TTSConfig.fallback_chain 覆盖，P1-12）
 FALLBACK_CHAIN = ["moss-nano", "edge-tts", "sapi5", "mock"]
 
 
@@ -43,6 +43,10 @@ class TTSConfig(BaseModel):
     tokenizer_path: Optional[str] = None
     auto_download: bool = True
     fallback_enabled: bool = True
+    # P1-12 有序 fallback 表（OpenClaw autoSelectOrder 启发）：显式指定
+    # 引擎优先级顺序；None=用默认 FALLBACK_CHAIN。非法引擎名被过滤，
+    # 全非法回退默认链。默认行为与历史完全一致。
+    fallback_chain: Optional[List[str]] = None
 
 
 class TTSManager:
@@ -61,6 +65,24 @@ class TTSManager:
         self._fallback_index = 0
         self._available_engines: Dict[str, bool] = {}
         self._engines: Dict[str, TTSBase] = {}  # 实例缓存：重试不重复加载模型
+
+    @property
+    def fallback_chain(self) -> List[str]:
+        """生效的有序 fallback 链（P1-12）。
+
+        配置链过滤未知引擎名（注册表闭集）+ 去重保序；全非法或未配置
+        回退默认 FALLBACK_CHAIN（fail-safe，不禁用 TTS）。
+        """
+        known = {"moss-nano", "edge-tts", "sapi5", "mock"}
+        cfg_chain = self._config.fallback_chain
+        if cfg_chain:
+            seen: List[str] = []
+            for name in cfg_chain:
+                if name in known and name not in seen:
+                    seen.append(name)
+            if seen:
+                return seen
+        return list(FALLBACK_CHAIN)
 
     @property
     def is_initialized(self) -> bool:
@@ -105,11 +127,11 @@ class TTSManager:
 
     async def _initialize_with_fallback(self) -> bool:
         """按 fallback 链初始化"""
-        for engine_name in FALLBACK_CHAIN:
+        for engine_name in self.fallback_chain:
             logger.info("尝试初始化 TTS 引擎: %s", engine_name)
             success = await self._initialize_engine(engine_name)
             if success:
-                self._fallback_index = FALLBACK_CHAIN.index(engine_name)
+                self._fallback_index = self.fallback_chain.index(engine_name)
                 return True
             self._available_engines[engine_name] = False
 
@@ -193,7 +215,7 @@ class TTSManager:
 
         # mock（最后兜底/哔声）作为当前引擎时等同"本引擎本轮不可用"——
         # 直接走 fallback 从链顶再竞争，否则它会"成功"产出哔声挡住回卷。
-        is_last_resort = bool(FALLBACK_CHAIN) and self._engine_name == FALLBACK_CHAIN[-1]
+        is_last_resort = self._engine_name == self.fallback_chain[-1]
         result = b""
         if not is_last_resort:
             try:
@@ -211,13 +233,13 @@ class TTSManager:
 
     async def _fallback_synthesize(self, text: str, **kwargs) -> bytes:
         """fallback 合成"""
-        current_index = FALLBACK_CHAIN.index(self._engine_name) if self._engine_name in FALLBACK_CHAIN else -1
+        current_index = self.fallback_chain.index(self._engine_name) if self._engine_name in self.fallback_chain else -1
         # mock（最后兜底）不长期霸占：上轮它是兜底幸存者时，本轮从链顶
         # 重新竞争（实例有缓存，重试不重复加载模型）。
-        if current_index == len(FALLBACK_CHAIN) - 1:
+        if current_index == len(self.fallback_chain) - 1:
             current_index = -1
 
-        for engine_name in FALLBACK_CHAIN[current_index + 1 :]:
+        for engine_name in self.fallback_chain[current_index + 1:]:
             logger.info("Fallback 到: %s", engine_name)
             success = await self._initialize_engine(engine_name)
             if success:
@@ -241,13 +263,13 @@ class TTSManager:
             logger.error("TTSManager 未初始化")
             return
 
-        current_index = FALLBACK_CHAIN.index(self._engine_name) if self._engine_name in FALLBACK_CHAIN else -1
+        current_index = self.fallback_chain.index(self._engine_name) if self._engine_name in self.fallback_chain else -1
         # mock（最后兜底）不长期霸占：上轮它是兜底幸存者时，本轮候选从
         # 链顶重新竞争（实例有缓存，重试不重复加载模型）。
-        if current_index == len(FALLBACK_CHAIN) - 1:
-            candidates = list(FALLBACK_CHAIN)
+        if current_index == len(self.fallback_chain) - 1:
+            candidates = list(self.fallback_chain)
         else:
-            candidates = [self._engine_name] + FALLBACK_CHAIN[current_index + 1 :] if current_index >= 0 else list(FALLBACK_CHAIN)
+            candidates = [self._engine_name] + self.fallback_chain[current_index + 1:] if current_index >= 0 else list(self.fallback_chain)
 
         for engine_name in candidates:
             if engine_name != self._engine_name:

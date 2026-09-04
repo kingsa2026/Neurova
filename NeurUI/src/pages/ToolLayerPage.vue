@@ -58,7 +58,13 @@
         <a-spin :spinning="loadingTools">
           <a-table :columns="toolColumns" :data-source="tools" row-key="id" :pagination="{ pageSize: 15 }" size="small">
             <template #bodyCell="{ column, record }">
-              <template v-if="column.key === 'status'">
+              <template v-if="column.key === 'name'">
+                <span>{{ record.name }}</span>
+                <a-tag v-if="record.sandbox_required" color="orange" style="margin-left: 6px">
+                  {{ t('tool.sandboxRequired') }}
+                </a-tag>
+              </template>
+              <template v-else-if="column.key === 'status'">
                 <a-badge :status="record.enabled ? 'success' : 'default'" :text="record.enabled ? t('common.active') : t('common.inactive')" />
               </template>
               <template v-if="column.key === 'actions'">

@@ -34,12 +34,22 @@ class TestWhitelistMatching(unittest.TestCase):
         )
 
     def test_prefix_match_bypasses_inspection(self):
-        """命中前缀 → 直接 ALLOW，即使内容含可疑模式。"""
+        """命中前缀的单段命令 → 直接 ALLOW，即使内容含可疑模式。
+
+        2026-09-04 P0-6 分段审批语义修订（OpenClaw 启发，根因=链式注入
+        搭便车）：原断言允许 ``git status && echo $(whoami)`` 整串放行，
+        白名单段携带注入段搭便车。新语义：多段命令须全部段命中才放行，
+        本例第二段 ``echo $(whoami)``（含 inline 子命令）未在白名单 →
+        不再免检。单段前缀放行语义不变。
+        """
         policy = self._policy()
-        # $() 命令替换本应触发 HIGH，但 git status 在白名单内
-        result = policy.evaluate("git status && echo $(whoami)")
+        # 单段命令：白名单前缀放行语义保持
+        result = policy.evaluate("git status --short")
         self.assertEqual(result.decision, GovernanceDecision.ALLOW)
         self.assertTrue(any("白名单" in r for r in result.reasons))
+        # 多段命令：未全命中不再放行（详见 test_command_segment_approval.py）
+        chained = policy.evaluate("git status && echo $(whoami)")
+        self.assertNotEqual(chained.decision, GovernanceDecision.ALLOW)
 
     def test_non_matching_command_still_inspected(self):
         policy = self._policy()
@@ -65,17 +75,22 @@ class TestWhitelistMatching(unittest.TestCase):
                          GovernanceDecision.ALLOW)
 
     def test_tool_scoped_entry_only_matches_that_tool(self):
+        """工具作用域语义（P0-6 修订：链式载体改单段，链式放行语义已废）。
+
+        原 ``deploy.sh && echo $(date)`` 整串放行断言依赖链式搭便车语义
+        （P0-6 已堵）；本条保留"条目只对声明工具生效"的本意。
+        """
         policy = GovernancePolicy(
             whitelist_entries=[
                 {"pattern": "deploy.sh", "match_type": "prefix", "tool": "computer_shell"}
             ]
         )
-        ok = policy.evaluate("deploy.sh && echo $(date)", tool_name="computer_shell")
+        ok = policy.evaluate("deploy.sh --env prod", tool_name="computer_shell")
         self.assertEqual(ok.decision, GovernanceDecision.ALLOW)
         # 其他工具不享受该条目：同样的命令仍触发检测（$() → HIGH）
         # P1-7：SANDBOX 分支以"平台有真隔离后端"为前提，patch 掉平台差异
         with _with_enforced_platform():
-            other = policy.evaluate("deploy.sh && echo $(date)", tool_name="run_code")
+            other = policy.evaluate("deploy.sh; echo $(date)", tool_name="run_code")
         self.assertEqual(other.decision, GovernanceDecision.SANDBOX)
 
     def test_invalid_regex_ignored_safely(self):
@@ -117,15 +132,21 @@ class TestWhitelistPersistence(unittest.TestCase):
         self.assertEqual(policy.evaluate("echo").decision, GovernanceDecision.ALLOW)
 
     def test_remove_entry(self):
+        """移除条目后恢复检测（P0-6 修订：整串放行载体改写）。
+
+        原断言 ``dangerous-but-approved && echo x | sh`` 整串前缀放行
+        依赖链式搭便车语义（P0-6 已堵：多段须全命中）。白名单内放行
+        用单段验证；移除后恢复检测用原链式命令（echo x | sh → 高风险）。
+        """
         policy = GovernancePolicy(whitelist_path=self.path)
-        cmd = "dangerous-but-approved && echo x | sh"
+        cmd = "dangerous-but-approved --run"
         entry = policy.add_whitelist_entry(pattern="dangerous-but-approved")
         self.assertEqual(policy.evaluate(cmd).decision,
                          GovernanceDecision.ALLOW)
         self.assertTrue(policy.remove_whitelist_entry(entry["id"]))
         # 移除后同样的命令恢复检测（管道到 sh → SANDBOX；patch 平台有隔离）
         with _with_enforced_platform():
-            result = policy.evaluate(cmd)
+            result = policy.evaluate("dangerous-but-approved && echo x | sh")
         self.assertEqual(result.decision,
                          GovernanceDecision.SANDBOX)
         self.assertFalse(policy.remove_whitelist_entry("nonexistent"))

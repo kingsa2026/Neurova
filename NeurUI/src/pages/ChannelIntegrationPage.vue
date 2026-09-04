@@ -30,6 +30,23 @@
       </div>
     </div>
 
+    <!-- P0-5 入站持久化队列状态条 -->
+    <div v-if="ingressStats?.enabled" class="nr-ci-ingress">
+      <span class="nr-ci-ingress-title">{{ t('channel.ingressQueue') }}</span>
+      <span class="nr-ci-ingress-item">
+        {{ t('channel.ingressPending') }}: <b>{{ ingressStats.pending ?? 0 }}</b>
+      </span>
+      <span class="nr-ci-ingress-item">
+        {{ t('channel.ingressProcessing') }}: <b>{{ ingressStats.processing ?? 0 }}</b>
+      </span>
+      <span class="nr-ci-ingress-item" :class="{ warn: (ingressStats.dead_letter ?? 0) > 0 }">
+        {{ t('channel.ingressDead') }}: <b>{{ ingressStats.dead_letter ?? 0 }}</b>
+      </span>
+      <span class="nr-ci-ingress-item">
+        {{ t('channel.ingressProcessed') }}: <b>{{ ingressStats.processed_total ?? 0 }}</b>
+      </span>
+    </div>
+
     <!-- Channel Grid -->
     <a-spin :spinning="loadingConfigs">
     <div v-if="filteredChannels.length > 0" class="nr-ci-grid">
@@ -199,7 +216,7 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { listChannelConfigs, createChannelConfig, testChannelConfig } from '@/api/modules/channel-configs'
+import { listChannelConfigs, createChannelConfig, testChannelConfig, getIngressStats, type ChannelIngressStats } from '@/api/modules/channel-configs'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
@@ -438,7 +455,16 @@ async function loadConfigs() {
   } finally {
     loadingConfigs.value = false
   }
+  // P0-5：入站持久化队列状态（失败静默——面板隐藏即可）
+  try {
+    ingressStats.value = (await getIngressStats()) as ChannelIngressStats
+  } catch {
+    ingressStats.value = null
+  }
 }
+
+// P0-5 入站持久化队列状态
+const ingressStats = ref<ChannelIngressStats | null>(null)
 
 async function saveConfig() {
   if (!currentChannel.value) return
@@ -574,6 +600,29 @@ onMounted(() => { search.value = ''; loadConfigs() })
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
+}
+
+/* P0-5 入站持久化队列状态条 */
+.nr-ci-ingress {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 13px;
+  color: var(--nr-text-secondary, inherit);
+}
+
+.nr-ci-ingress-title {
+  font-weight: 600;
+  color: var(--nr-text-primary, inherit);
+}
+
+.nr-ci-ingress-item.warn {
+  color: var(--nr-warning, #faad14);
 }
 
 .nr-ci-tabs {

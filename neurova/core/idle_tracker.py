@@ -232,6 +232,18 @@ class IdleTimeTracker(BaseModule):
             self.log_warning("Cannot trigger consolidation: missing consolidation or memory manager")
             return
 
+        # P0-4 记忆晋升（OpenClaw Dreaming 启发）：巩固前置确定性晋升门——
+        # 召回/温度达标的 episodic 记忆晋升为重要记忆。晋升是本地确定性
+        # 扫描（无 LLM、有界、节流），挂在空闲整理线程，永不阻塞回复路径。
+        try:
+            promoted = self._memory_manager.run_promotion_cycle(
+                max_memories=500, min_interval_seconds=1800.0
+            )
+            if promoted:
+                self.log_info(f"Promotion cycle: {promoted} memories promoted")
+        except Exception as e:  # noqa: BLE001 - 晋升失败不影响巩固主流程
+            self.log_debug(f"Promotion cycle skipped: {e}")
+
         # 设置通路修复: memory_consolidation_enabled 此前仅在手动 start_sleep
         # 生效, 睡眠阶段触发的巩固从不检查。phase 非空 = 睡眠阶段触发;
         # phase=None = 手动/过载触发, 不受此开关限制。

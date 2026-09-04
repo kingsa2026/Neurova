@@ -14,6 +14,10 @@ import { onBeforeUnmount, watch } from 'vue'
  *   单调 seq；本组合式函数维护游标 lastSeq，检测跳号触发 onGap 并请求
  *   定向补发（sync_resume），旧帧去重，服务端纪元更迭（后端重启）自动
  *   重置游标避免误吞新帧
+ * - gap 自愈（OpenClaw 启发 P0-7 慢消费者配套）：检测到缺口立即重连，
+ *   服务端把丢帧留在历史中（丢帧也推进 seq），重连时以最早缺口的前一
+ *   序号作为 sync_resume 游标整段重放；缺口区间内的重放帧回填投递，
+ *   区间外已见帧去重——幂等投影合并，中间丢帧不再永久缺失
  */
 export interface SessionSyncEvent {
   event_id: string
@@ -50,6 +54,10 @@ export function useSessionSync(
   // seq 游标（本会话已见最大序号）。重连保留（供 sync_resume 定向补发与
   // 旧帧去重）；会话切换清零；sync_hello 纪元更迭时清零
   let lastSeq: number | null = null
+  // 本连接内未回填的缺口区间 [low, high]（升序发现）。重连时以最早缺口
+  // 的前一序号作为 resume 游标；区间内的重放帧回填，区间外去重
+  let gapRanges: Array<[number, number]> = []
+  let resyncing = false
 
   function buildUrl(sessionId: string): string {
     const base = import.meta.env.VITE_API_BASE_URL || '/api/v1'
@@ -62,15 +70,40 @@ export function useSessionSync(
     if (typeof seq !== 'number') return true
     if (lastSeq !== null && seq > lastSeq + 1) {
       // 缺口：丢帧数 = seq - lastSeq - 1。事件仍投递（有总比没有强），
-      // 补发请求交给重连 sync_resume 通道
+      // 并记录缺口区间触发重连自愈（服务端丢帧留在历史，重连整段重放）
       options.onGap?.(seq - lastSeq - 1, lastSeq)
+      gapRanges.push([lastSeq + 1, seq - 1])
+      triggerResync()
     }
     if (lastSeq !== null && seq <= lastSeq) {
-      // 本连接内重复/重放旧帧：去重跳过
-      return false
+      // 本连接内重复/重放旧帧：缺口区间内的回填投递，区间外去重跳过
+      return consumeGap(seq)
     }
     lastSeq = seq
     return true
+  }
+
+  /** 旧帧是否落在缺口区间内（回填投递并收缩区间）；区间外去重返回 false */
+  function consumeGap(seq: number): boolean {
+    for (let i = 0; i < gapRanges.length; i++) {
+      const [low, high] = gapRanges[i]
+      if (seq < low || seq > high) continue
+      if (seq === low) {
+        // 重放按序到达：从左端收缩，空区间移除
+        if (low === high) gapRanges.splice(i, 1)
+        else gapRanges[i] = [low + 1, high]
+      }
+      return true
+    }
+    return false
+  }
+
+  /** gap 自愈：立即重连走 onopen 的 sync_resume 整段重放（最快退避） */
+  function triggerResync() {
+    if (resyncing || closed || !ws) return
+    resyncing = true
+    retry = 0
+    ws.close() // onclose → scheduleReconnect
   }
 
   function connect(sessionId: string) {
@@ -83,10 +116,15 @@ export function useSessionSync(
     }
 
     ws.onopen = () => {
+      resyncing = false
       // 重连时携带游标请求定向补发（首次连接游标为空，服务端自动重放
-      // 最近历史作为基线）
-      if (lastSeq !== null && ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'sync_resume', last_seq: lastSeq }))
+      // 最近历史作为基线）。有未回填缺口时从缺口起点整段重放：已见帧
+      // 被去重/区间回填，幂等无副作用
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const resumeFrom = gapRanges.length ? gapRanges[0][0] - 1 : lastSeq
+        if (resumeFrom !== null) {
+          ws.send(JSON.stringify({ type: 'sync_resume', last_seq: resumeFrom }))
+        }
       }
     }
 
@@ -99,7 +137,10 @@ export function useSessionSync(
         // 纪元探测帧：服务端当前发号器落后于本地游标 → 后端已重启（seq
         // 归零），重置游标，否则新帧会被当作旧帧全部误吞
         if (event.type === 'sync_hello' && typeof event.next_seq === 'number') {
-          if (lastSeq !== null && event.next_seq <= lastSeq) lastSeq = null
+          if (lastSeq !== null && event.next_seq <= lastSeq) {
+            lastSeq = null
+            gapRanges = []
+          }
           return
         }
         if (event.type === 'sync_resume_done') return
@@ -147,6 +188,7 @@ export function useSessionSync(
       retry = 0
       currentSession = sid
       lastSeq = null // 会话切换：新事件流，游标清零
+      gapRanges = []
       if (sid) connect(sid)
     },
     { immediate: true },

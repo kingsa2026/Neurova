@@ -976,12 +976,14 @@ class MemCore:
                     memory_type="episodic",
                     category="conversation",
                     metadata={**base_meta, "sender_type": "user"},
+                    origin="owner",
                 )
                 self.memory_manager.remember(
                     content=f"助手: {agent_response}",
                     memory_type="episodic",
                     category="conversation",
                     metadata={**base_meta, "sender_type": "agent"},
+                    origin="agent",
                 )
 
             # 2. 写入对话缓冲区（快速上下文检索）
@@ -1145,12 +1147,15 @@ class MemCore:
     # 对话历史更新
     # ══════════════════════════════════════════════════════════════
 
-    def update_history(self, user_input: str, agent_response: str):
+    def update_history(self, user_input: str, agent_response: str, writer_claim=None, session_id: Optional[str] = None):
         """更新对话历史
 
         Args:
             user_input: 用户输入
             agent_response: Agent 回复
+            writer_claim: P1-10 写入围栏凭证（可选）。显式参与——失效时跳过
+                本次追加（被夺权的 run 不写陈旧历史）；None 时行为不变。
+            session_id: 围栏作用域键（与 claim 时的会话键一致）。
 
         Notes:
             S5 修复 (Critical #6): 整体方法体由 _history_lock 保护,
@@ -1159,6 +1164,23 @@ class MemCore:
             agent._conversation_context 是必填的 (由 Agent.init_conversation 初始化).
             未初始化时显式抛 RuntimeError,杜绝 split-brain 风险.
         """
+        # P1-10 写入围栏: 参与 claim 已失效 → 拒绝追加
+        if writer_claim is not None:
+            try:
+                from neurova.agent.history_fence import get_history_write_fence
+
+                _fence = get_history_write_fence()
+                if not _fence.check(
+                    getattr(self.config, "agent_id", "unknown") if self.config else "unknown",
+                    session_id or "default",
+                    writer_claim,
+                ):
+                    _fence.record_fenced_write()
+                    logger.info("对话历史更新被围栏拒绝（陈旧 writer）")
+                    return
+            except Exception as fence_err:  # noqa: BLE001 - 围栏故障绝不阻断主流程
+                logger.debug("围栏检查异常,降级放行: %s", fence_err)
+
         # S5: 整个 read-modify-write 在 _history_lock 内,保证原子性
         with self._history_lock:
             ctx = getattr(self._agent, "_conversation_context", None)
@@ -1198,6 +1220,7 @@ class MemCore:
         session_id: Optional[str] = None,
         metadata: Optional[Dict] = None,
         assistant_metadata: Optional[Dict] = None,
+        writer_claim=None,
     ) -> str:
         """保存对话到 session 文件，委托给 SessionManager.add_message()。
 
@@ -1236,6 +1259,7 @@ class MemCore:
             assistant_content=reply,
             metadata=metadata,
             assistant_metadata=assistant_metadata,
+            writer_claim=writer_claim,
         )
 
     # ══════════════════════════════════════════════════════════════

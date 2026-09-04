@@ -259,11 +259,19 @@ class MultiModelLLMClient:
 
             from neurova.llm.model_limits import get_model_max_tokens
 
+            # P0-2 声明式 compat：按 provider 解析开关注入 LLMConfig
+            from neurova.llm.provider_compat import resolve_compat
+
             config = LLMConfig(
                 api_key=provider.api_key,
                 base_url=provider.base_url,
                 model=model,
                 max_tokens=get_model_max_tokens(model),
+                compat=resolve_compat(
+                    provider_id=provider.id,
+                    base_url=provider.base_url,
+                    compat_dict=getattr(provider, "compat_dict", None),
+                ),
             )
             client = LLMClient(config)
             model_client = ModelClient(client=client, provider=provider, model=model)
@@ -739,7 +747,7 @@ class MultiModelLLMClient:
         client = self._get_client_for_request(model, provider_id)
         if not client:
             logger.warning("No client available for stream chat")
-            yield {"error": "No client available"}
+            yield _instream_error_dict(RuntimeError("No client available"))
             return
 
         try:
@@ -829,7 +837,17 @@ class MultiModelLLMClient:
                 )
             except Exception:
                 pass
-            yield {"error": str(e)}
+            # OpenClaw 启发 P0-1 流内错误编码铁律：provider 调用一旦开始，
+            # 一切失败编码为流内错误消息而非异常（llm-core types.ts L202）。
+            # error_type 用五类标准错误（error_mapping 单一事实源），消费方
+            # （openai_loop._raise_for_error_dict / chat_pipeline）据此分类，
+            # 不再靠 HTTP 语义字符串二次猜测。
+            yield _instream_error_dict(e)
+
+    @staticmethod
+    def _instream_error_dict_payload(error: Exception) -> Dict[str, Any]:
+        """公开给测试/调用方的错误 dict 形态（与 _instream_error_dict 同源）。"""
+        return _instream_error_dict(error)
 
     def _resolve_available_fallback(
         self,
@@ -993,6 +1011,25 @@ _multi_model_client: Optional[MultiModelLLMClient] = None
 # NEUROVA_LLM_MOCK=1 时 chat/chat_stream 在 provider 解析之前返回 canned
 # 响应（无 Key/无网络可跑通全链路：e2e/CI/本地演示）。信封与真实路径同形。
 MOCK_ENV_FLAG = "NEUROVA_LLM_MOCK"
+
+
+def _instream_error_dict(error: Exception) -> Dict[str, Any]:
+    """流内错误编码（OpenClaw 启发 P0-1 铁律）。
+
+    provider 调用一旦开始，一切失败编码为流内错误消息而非异常。dict
+    固定三键：error（脱敏原文）/ error_type（五类标准错误，error_mapping
+    单一事实源）/ retryable（消费方可重试判断）。消费方：
+    openai_loop._raise_for_error_dict（error_type 优先）与 chat_pipeline
+    _raise_for_llm_error_dict（消息兜底）。
+    """
+    from neurova.llm.providers.error_mapping import normalize_provider_error
+
+    pe = normalize_provider_error(error)
+    return {
+        "error": pe.message,
+        "error_type": pe.category.value,
+        "retryable": pe.category.retryable,
+    }
 
 
 def _mock_enabled() -> bool:

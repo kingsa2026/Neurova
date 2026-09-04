@@ -19,6 +19,7 @@ ChatPipeline — 对话流程管线
 from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
+import uuid
 
 from neurova.agent.crystallized_experience_manager import CrystallizedExperienceManager
 from neurova.agent.memory_retrieval_chain import MemoryRetrievalChain, RetrievalContext, RetrievalStrategy
@@ -115,6 +116,9 @@ class ChatContext:
     trace_id: Optional[str] = None
     reply: Optional[str] = None
     caller_provided_history: bool = False
+    # P1-10 写入围栏: turn 开始时 claim 的写入权属凭证（FenceClaim），
+    # 沉淀到 update_history/save_to_session 的写前断言；None = 未参与围栏
+    writer_claim: Optional[Any] = None
 
     # 结果
     result: Optional[Dict] = None
@@ -487,6 +491,19 @@ class ChatPipeline:
             and isinstance(ctx.metadata, dict)
             and "history" in ctx.metadata
         )
+        # P1-10 写入围栏: turn 开始即接管会话写入权（writer=run:<trace>），
+        # 恢复/写入均在本 run 的权属下进行；并行旧 run 的落盘会被围栏拒绝
+        if ctx.session_id:
+            try:
+                from neurova.agent.history_fence import get_history_write_fence
+
+                ctx.writer_claim = get_history_write_fence().claim(
+                    self.config.agent_id,
+                    ctx.session_id,
+                    f"run:{ctx.trace_id or uuid.uuid4().hex[:12]}",
+                )
+            except Exception as e:  # noqa: BLE001 - 围栏故障退回无围栏路径
+                logger.debug("写入围栏 claim 跳过: %s", e)
         if ctx.session_id and not caller_provided_history:
             await self._restore_session_history(ctx)
 
@@ -1629,17 +1646,33 @@ class ChatPipeline:
 
     @staticmethod
     def _raise_for_llm_error_dict(chunk: Dict) -> Exception:
-        """错误 dict → 分类异常（供应商错误守卫据此不再 fallback 重撞坏模型）。"""
+        """错误 dict → 分类异常（供应商错误守卫据此不再 fallback 重撞坏模型）。
+
+        OpenClaw 启发 P0-1：error_type 五类标准键（multi_model_client 流内
+        编码生产端）优先；消息兜底兼容无类型历史 dict。
+        """
         from neurova.llm_client import (
             LLMAuthError,
             LLMBadRequestError,
             LLMConnectionError,
             LLMError,
             LLMRateLimitError,
+            LLMServiceUnavailableError,
         )
 
         raw = str(chunk.get("error") or "")
         message = f"LLM 流式调用失败: {chunk.get('error')}"
+        error_type = str(chunk.get("error_type") or "")
+        typed = {
+            "rate_limited": LLMRateLimitError,
+            "service_unavailable": LLMServiceUnavailableError,
+            "connection_failed": LLMConnectionError,
+            "auth_failed": LLMAuthError,
+            "bad_request": LLMBadRequestError,
+        }
+        cls = typed.get(error_type)
+        if cls is not None:
+            return cls(message)
         low = raw.lower()
         if "404" in low or "not found" in low or "not_found" in low:
             return LLMBadRequestError(message)
@@ -1699,7 +1732,10 @@ class ChatPipeline:
     async def _step_post_processing(self, ctx: ChatContext):
         """对话历史更新、轨迹记录、PostChatPipeline"""
         if not ctx.caller_provided_history:
-            self.memory_agent.update_history(ctx.user_input, ctx.reply)
+            # P1-10: 围栏凭证随行——claim 已被夺权时此处写入会被拒绝
+            self.memory_agent.update_history(
+                ctx.user_input, ctx.reply, writer_claim=ctx.writer_claim, session_id=ctx.session_id
+            )
 
         # P1-5：会话自动快照（检查点子系统，防抖内建；异常吞掉不阻断主流程）
         await self._auto_checkpoint(ctx)
@@ -1792,6 +1828,7 @@ class ChatPipeline:
                     save_memory=ctx.save_memory,
                     enable_tts=ctx.enable_tts,
                     metadata=ctx.metadata or {},
+                    writer_claim=ctx.writer_claim,
                 )
                 response = await pipeline_executor.execute(request)
                 # 转换为旧格式以保持兼容性
@@ -1819,6 +1856,7 @@ class ChatPipeline:
             save_memory=ctx.save_memory,
             enable_tts=ctx.enable_tts,
             metadata=ctx.metadata,
+            writer_claim=ctx.writer_claim,
         )
 
     def _collect_tool_messages(self) -> List[Dict]:

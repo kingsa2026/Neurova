@@ -62,6 +62,18 @@ def _platform_has_enforced_sandbox() -> bool:
     return False
 
 
+def _tool_sandbox_enforce_enabled() -> bool:
+    """P2-15 声明面强制路由开关（默认关）。
+
+    NEUROVA_TOOL_SANDBOX_ENFORCE 精确等于 "1" 才开启——避免 "false"/"0"
+    之外任意真值字符串意外开启的经典坑。开启后，builtin_tools 声明了
+    sandbox_required 的工具，其调用被强制路由进沙箱裁决链。
+    """
+    import os
+
+    return os.environ.get("NEUROVA_TOOL_SANDBOX_ENFORCE") == "1"
+
+
 def check_outbound_url(url: str, *, allow_private: bool = False) -> bool:
     """全局出网校验层（P1-7：url_guard P0-1 产物统一暴露）。
 
@@ -90,14 +102,20 @@ class GovernanceResult:
     reasons: List[str] = field(default_factory=list)
     severity: SandboxSeverity = SandboxSeverity.NONE
     findings: List[Any] = field(default_factory=list)
+    # P0-6 分段审批：多段命令的候选段列表（CommandSegment.to_dict）。
+    # 单段命令恒 None（等价旧行为）；审批卡据此逐段展示。
+    segments: Optional[List[Dict[str, Any]]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "decision": self.decision.value,
             "reasons": list(self.reasons),
             "severity": self.severity.value,
             "finding_count": len(self.findings),
         }
+        if self.segments:
+            d["segments"] = list(self.segments)
+        return d
 
 
 # 参数提取的约定键名（非 scan_all 模式保持既有语义）
@@ -201,8 +219,28 @@ class GovernancePolicy:
                 reasons=[f"工具 '{tool_name}' 命中策略覆盖: {override.value}"],
             )
 
-        # 白名单免检放行
-        hit = self.match_whitelist(command, tool_name)
+        # P0-6 分段审批（OpenClaw 启发）：多段命令全部段命中白名单才放行；
+        # 任一段未命中 → 不再享受白名单免检，整条命令回落内容检测。
+        # 内容检测（critical/high DENY/SANDBOX）恒先于分段 ASK——内容级
+        # 危险信号不得被"白名单未命中→ASK"弱化；分段 ASK 只在内容检测
+        # 无发现时兜底（防"白名单段+无害注入段"借 default_action 放行）。
+        # 单段命令走 match_whitelist 原语义（字节等价旧行为）。
+        from neurova.security.command_segments import parse_command_segments
+
+        segs = parse_command_segments(command) if command else []
+        is_multi_seg = len(segs) > 1
+        if is_multi_seg:
+            seg_hits = [self.match_whitelist(s.text, tool_name) for s in segs]
+            if all(h is not None for h in seg_hits):
+                return GovernanceResult(
+                    decision=GovernanceDecision.ALLOW,
+                    reasons=[f"分段审批: 全部 {len(segs)} 段命中白名单"],
+                    segments=[s.to_dict() for s in segs],
+                )
+            hit = None
+        else:
+            hit = self.match_whitelist(command, tool_name)
+
         if hit is not None:
             return GovernanceResult(
                 decision=GovernanceDecision.ALLOW,
@@ -212,6 +250,9 @@ class GovernancePolicy:
         tool_params: Dict[str, Any] = {"command": command}
         if file_paths is not None:
             tool_params["path"] = file_paths
+
+        # P0-6：多段命令的分段信息透传到裁决结果（审批卡逐段展示）
+        _seg_dicts_if_multi = [s.to_dict() for s in segs] if len(segs) > 1 else None
 
         guard_result = self.engine.guard(tool_name, tool_params)
         findings = list(getattr(guard_result, "findings", []) or [])
@@ -228,6 +269,7 @@ class GovernancePolicy:
                 decision=GovernanceDecision.DENY,
                 reasons=reasons or ["命中阻断级规则"],
                 findings=findings,
+                segments=_seg_dicts_if_multi,
             )
 
         if high:
@@ -236,6 +278,7 @@ class GovernancePolicy:
                     decision=GovernanceDecision.ASK,
                     reasons=[f"需确认: {getattr(f, 'message', str(f))}" for f in high],
                     findings=findings,
+                    segments=_seg_dicts_if_multi,
                 )
             # P1-7 诚实化：平台上无真隔离后端时，SANDBOX 判定是谎言（实际裸跑），
             # 升级为 DENY——拒绝优于静默放行
@@ -246,12 +289,14 @@ class GovernancePolicy:
                              + "; ".join(getattr(f, "message", str(f)) for f in high)],
                     severity=SandboxSeverity.NONE,
                     findings=findings,
+                    segments=_seg_dicts_if_multi,
                 )
             return GovernanceResult(
                 decision=GovernanceDecision.SANDBOX,
                 reasons=[f"高风险,启用沙箱: {getattr(f, 'message', str(f))}" for f in high],
                 severity=self.sandbox_severity,
                 findings=findings,
+                segments=_seg_dicts_if_multi,
             )
 
         if medium and self.ask_on_high:
@@ -259,9 +304,26 @@ class GovernancePolicy:
                 decision=GovernanceDecision.ASK,
                 reasons=[f"中风险,建议确认: {getattr(f, 'message', str(f))}" for f in medium],
                 findings=findings,
+                segments=_seg_dicts_if_multi,
             )
 
-        return GovernanceResult(decision=self.default_action, reasons=[], findings=findings)
+        # P0-6 分段 ASK 兜底（顺序在内容检测之后）：多段命令有段未命中
+        # 白名单且内容检测无发现 → 逐段确认而非 default_action 放行。
+        # 注入段借白名单段搭便车的最后一道闸。
+        if is_multi_seg and any(h is None for h in seg_hits):
+            offender = next(s for s, h in zip(segs, seg_hits) if h is None)
+            return GovernanceResult(
+                decision=GovernanceDecision.ASK,
+                reasons=[
+                    f"分段审批: 段 '{offender.text[:80]}' 未命中白名单，链式命令需逐段确认"
+                ],
+                findings=findings,
+                segments=_seg_dicts_if_multi,
+            )
+
+        return GovernanceResult(
+            decision=self.default_action, reasons=[], findings=findings, segments=_seg_dicts_if_multi
+        )
 
     def evaluate_tool_call(
         self,
@@ -294,11 +356,60 @@ class GovernancePolicy:
                 findings=[guard_outcome.to_dict()],
             )
 
+        # P2-15 声明面强制路由（默认关）：声明 sandbox_required 的工具
+        # 在开关开启时无条件进入沙箱/Deny 语义，先于白名单与内容检测
+        # ——声明是开发者对工具安全底线的结构化承诺，不因运行时白名单
+        # 或"参数恰好无害"而失效。开关关闭时此层恒 None（逐字节等价旧路径）。
+        declaration_verdict = self._sandbox_declaration_verdict(tool_name)
+        if declaration_verdict is not None:
+            return declaration_verdict
+
         command, file_paths = extract_adjudicable_params(params, scan_all=scan_all)
         if not command and file_paths is None:
             return None
         return self.evaluate(
             command=command, tool_name=tool_name, user_id=user_id, file_paths=file_paths
+        )
+
+    def _sandbox_declaration_verdict(self, tool_name: str) -> Optional["GovernanceResult"]:
+        """P2-15：builtin 工具 sandboxRequired 声明位的强制裁决。
+
+        - 开关关闭（默认）→ None，调用方行为与接入前完全一致
+        - mcp.* 声明工具：无命令行沙箱语义（与 _governance_precheck 的
+          MCP-SANDBOX 阻断同口径）→ 直接 DENY
+        - 非 MCP 声明工具：有真隔离后端 → SANDBOX（复用既有沙箱执行链）；
+          无后端 → DENY（P1-7 诚实化：拒绝优于裸跑）
+        """
+        if not _tool_sandbox_enforce_enabled():
+            return None
+        try:
+            from neurova.builtin_tools import get_builtin_tool_sandbox_declaration
+
+            if get_builtin_tool_sandbox_declaration(tool_name) is not True:
+                return None
+        except Exception:  # noqa: BLE001 - 声明表不可达时不改变裁决路径
+            return None
+
+        if tool_name.startswith("mcp."):
+            return GovernanceResult(
+                decision=GovernanceDecision.DENY,
+                reasons=[
+                    f"工具 '{tool_name}' 声明 sandboxRequired，MCP 调用无命令行沙箱语义，已阻止"
+                ],
+                severity=SandboxSeverity.NONE,
+            )
+        if _platform_has_enforced_sandbox():
+            return GovernanceResult(
+                decision=GovernanceDecision.SANDBOX,
+                reasons=[f"工具 '{tool_name}' 声明 sandboxRequired，强制沙箱执行"],
+                severity=self.sandbox_severity,
+            )
+        return GovernanceResult(
+            decision=GovernanceDecision.DENY,
+            reasons=[
+                f"工具 '{tool_name}' 声明 sandboxRequired，但当前平台无强制沙箱后端，拒绝执行"
+            ],
+            severity=SandboxSeverity.NONE,
         )
 
     def execute_if_allowed(

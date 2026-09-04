@@ -328,6 +328,7 @@ class SessionManager(SessionRepository):
         metadata: Dict[str, Any] = None,
         assistant_metadata: Dict[str, Any] = None,
         date: str = None,
+        writer_claim=None,
     ) -> str:
         """添加一条对话（user + assistant 两条消息）到session
 
@@ -339,9 +340,29 @@ class SessionManager(SessionRepository):
         reasoning_content、工具调用 tool_calls）。此前 reasoning 经 post_chat
         管线一路传递到 mem_core.save_to_session 后被静默丢弃，切换页面重开
         会话后思考过程不显示。不传时保持旧行为：metadata 仍写入双方消息。
+
+        P1-10 写入围栏: writer_claim=(FenceClaim) 显式参与——check 失效时
+        跳过写盘返回 ""（被夺权的 run 永远写不进陈旧数据），不抛异常；
+        不传时行为与历史完全一致（等价性）。
         """
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
+
+        # P1-10 写入围栏: 参与 claim 已失效 → 拒绝写入（跳过,不抛异常）
+        if writer_claim is not None:
+            try:
+                from neurova.agent.history_fence import get_history_write_fence
+
+                _fence = get_history_write_fence()
+                if not _fence.check(agent_id, session_id, writer_claim):
+                    _fence.record_fenced_write()
+                    logger.info(
+                        "会话写入被围栏拒绝（陈旧 writer）: agent=%s, session=%s, writer=%s",
+                        agent_id, session_id, getattr(writer_claim, "writer_id", "?"),
+                    )
+                    return ""
+            except Exception as fence_err:  # noqa: BLE001 - 围栏故障绝不阻断正常写入
+                logger.debug("围栏检查异常,降级放行: %s", fence_err)
 
         file_path = self._get_session_file(agent_id, session_id, date)
         file_lock = self._get_file_lock(file_path)

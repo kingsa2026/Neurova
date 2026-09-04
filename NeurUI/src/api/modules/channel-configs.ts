@@ -24,6 +24,16 @@ export interface ChannelConfigTestResult {
   message?: string
 }
 
+/** P0-5 入站持久化队列统计（重启不丢消息的健康面）。 */
+export interface ChannelIngressStats {
+  enabled: boolean
+  pending?: number
+  processing?: number
+  dead_letter?: number
+  processed_total?: number
+  error?: string
+}
+
 // ---------------------------------------------------------------------------
 // API
 // ---------------------------------------------------------------------------
@@ -43,4 +53,9 @@ export function createChannelConfig(data: ChannelConfig) {
 /** Test a channel configuration. */
 export function testChannelConfig(type: string, data: ChannelConfig) {
   return api.post<ApiResponse<ChannelConfigTestResult>>(`${BASE}/${type}/test`, data)
+}
+
+/** P0-5：入站持久化队列状态（裸对象，无信封）。 */
+export function getIngressStats() {
+  return api.get<ChannelIngressStats>(`${BASE}/ingress/stats`)
 }

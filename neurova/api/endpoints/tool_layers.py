@@ -77,6 +77,9 @@ class ToolInfo(BaseModel):
     source: str = "builtin"
     parameters: Dict[str, Any] = {}
     server_id: Optional[str] = None
+    # P2-15 声明位：True=工具声明必须沙箱执行（前端徽标数据源）；
+    # None=未声明（存量行为，前端不显示徽标）
+    sandbox_required: Optional[bool] = None
 
 
 class ToolExecuteRequest(BaseModel):
@@ -333,6 +336,7 @@ async def list_all_tools(source: Optional[str] = Query(default=None)):
                             source="builtin",
                             parameters=builtin_tool.parameters,
                             server_id=None,
+                            sandbox_required=getattr(builtin_tool, "sandbox_required", None),
                         )
                     )
     except Exception as e:

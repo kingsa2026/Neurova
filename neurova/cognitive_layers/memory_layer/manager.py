@@ -54,11 +54,25 @@ from neurova.cognitive_layers.memory_layer.models import (
     LifecycleStage,
     Memory,
     MemoryCategory,
+    MemoryOrigin,
     MemoryPerspective,
     MemoryType,
 )
 
 logger = get_logger(__name__)
+
+
+def _row_origin(row) -> "MemoryOrigin":
+    """从 SQLite 行安全读取 origin（P1-9）：列缺失（未迁移旧库快照）→ AGENT，
+    值非法 → UNTRUSTED（fail-safe，绝不升权）。"""
+    try:
+        val = row["origin"]
+    except (IndexError, KeyError):
+        return MemoryOrigin.AGENT
+    try:
+        return MemoryOrigin(val)
+    except (ValueError, KeyError):
+        return MemoryOrigin.UNTRUSTED
 
 # 审计修复 (three-tier-isolation-audit.md P0-1): 请求级隔离作用域。
 # 原方案由 API 层直接给共享单例的 neuser_id/user_id 只读 property 赋值:
@@ -273,6 +287,7 @@ class MemoryManager:
                     category TEXT NOT NULL DEFAULT 'general',
                     lifecycle_stage TEXT NOT NULL DEFAULT 'active',
                     perspective TEXT NOT NULL DEFAULT 'first_person',
+                    origin TEXT NOT NULL DEFAULT 'agent',
                     emotion TEXT NOT NULL DEFAULT 'neutral',
                     temperature REAL NOT NULL DEFAULT 100.0,
                     importance REAL NOT NULL DEFAULT 50.0,
@@ -288,6 +303,11 @@ class MemoryManager:
                 )
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_mem_agent ON memories(agent_id)")
+            # P1-9 旧库迁移: origin 列幂等补齐（新库由上方 DDL 自带）
+            try:
+                conn.execute("ALTER TABLE memories ADD COLUMN origin TEXT NOT NULL DEFAULT 'agent'")
+            except sqlite3.OperationalError:
+                pass
             conn.execute("CREATE INDEX IF NOT EXISTS idx_mem_category ON memories(category)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_mem_type ON memories(memory_type)")
             # 审计修复 (P2-11): 三层复合索引, 隔离查询不再全表扫
@@ -343,6 +363,8 @@ class MemoryManager:
                         neuser_id=row["neuser_id"],
                         user_id=row["user_id"],
                         shared=bool(row["shared"]),
+                        # P1-9: origin 列旧库可能不存在（迁移前快照），按行键探测
+                        origin=_row_origin(row),
                         created_at=datetime.fromisoformat(row["created_at"]),
                         updated_at=datetime.fromisoformat(row["updated_at"]),
                         last_accessed_at=(
@@ -382,10 +404,10 @@ class MemoryManager:
             conn = sqlite3.connect(self._persist_db_path)
             conn.execute(
                 """INSERT OR REPLACE INTO memories
-                   (id, content, memory_type, category, lifecycle_stage, perspective, emotion,
+                   (id, content, memory_type, category, lifecycle_stage, perspective, origin, emotion,
                     temperature, importance, access_count, metadata, agent_id, neuser_id, user_id,
                     shared, created_at, updated_at, last_accessed_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     mem.id,
                     mem.content,
@@ -393,6 +415,7 @@ class MemoryManager:
                     mem.category.value,
                     mem.lifecycle_stage.value,
                     mem.perspective.value,
+                    mem.origin.value,
                     mem.emotion.value,
                     mem.temperature,
                     mem.importance,
@@ -522,6 +545,8 @@ class MemoryManager:
         is_crystallized: Optional[bool] = None,
         emotion_score: Optional[float] = None,
         perspective: Optional[str] = None,
+        # P1-9 来源信任分级: 闭集 owner/agent/untrusted/system, 写入时定级
+        origin: Optional[str] = None,
         # 控制参数(留 kwargs): auto_analyze_emotion / auto_classify / classification_context
         **kwargs,
     ) -> str:
@@ -593,6 +618,20 @@ class MemoryManager:
             if isinstance(category, str) and parsed_category == MemoryCategory.GENERAL and category != "general":
                 final_metadata["_original_category"] = category
 
+            # P1-9 来源信任分级: 只认显式 origin 形参, metadata 不可改写（结构门控）。
+            # 非法值 fail-safe 降级为 untrusted（绝不静默升权）。
+            final_metadata.pop("origin", None)
+            parsed_origin = MemoryOrigin.AGENT
+            if origin is not None:
+                if isinstance(origin, MemoryOrigin):
+                    parsed_origin = origin
+                elif isinstance(origin, str):
+                    try:
+                        parsed_origin = MemoryOrigin(origin)
+                    except (ValueError, KeyError):
+                        logger.warning("Invalid origin '%s', falling back to UNTRUSTED", origin)
+                        parsed_origin = MemoryOrigin.UNTRUSTED
+
             # M-7 修复: perspective 字符串转 MemoryPerspective 枚举, 写入 Memory.perspective
             parsed_perspective = MemoryPerspective.FIRST_PERSON
             if perspective is not None:
@@ -617,6 +656,7 @@ class MemoryManager:
                 emotion=emotion_val,
                 metadata=final_metadata,
                 perspective=parsed_perspective,
+                origin=parsed_origin,
                 agent_id=self._agent_id,
                 neuser_id=self._eff_neuser_id(),
                 user_id=self._eff_user_id(),
@@ -845,11 +885,18 @@ class MemoryManager:
             ]
 
         # 3) RRF 融合（向量 0.7 / 关键词 0.3）
+        # P1-9: 融合分乘 origin 信任权重——untrusted（外部网络抓取）降权，
+        # 其余来源不衰减；读取在锁外已完成的 id_to_memory 映射。
+        origin_weights = MemoryOrigin.weights()
         fused: Dict[str, float] = {}
         for rank, mid in vector_hits:
             fused[mid] = fused.get(mid, 0.0) + 0.7 / (60 + rank + 1)
         for rank, mid in keyword_hits:
             fused[mid] = fused.get(mid, 0.0) + 0.3 / (60 + rank + 1)
+        for mid in fused:
+            mem_obj = id_to_memory.get(mid)
+            if mem_obj is not None:
+                fused[mid] *= origin_weights.get(mem_obj.origin, 1.0)
 
         ordered_ids = [mid for mid, _ in sorted(fused.items(), key=lambda kv: -kv[1])]
         return [id_to_memory[mid] for mid in ordered_ids if mid in id_to_memory][:limit]
@@ -1411,6 +1458,98 @@ class MemoryManager:
         self._last_decay_at = time.monotonic()
 
         return count
+
+    def run_promotion_cycle(
+        self,
+        max_memories: Optional[int] = 500,
+        min_interval_seconds: float = 0.0,
+    ) -> int:
+        """运行记忆晋升周期 — 离线批量把达标记忆晋升为重要记忆
+
+        OpenClaw 启发 P0-4（Dreaming 晋升门）：整理离线做，回复路径永不
+        因记忆阻塞。确定性门控复用 TemperatureEngine.should_upgrade_to_
+        important（温度>=80 / 召回>=10 / 情感>=0.7 / 关联>=5 任一硬信号）；
+        唯一查询数从 metadata.unique_queries 读取（缺省退化 access_count）。
+
+        晋升动作（幂等）：metadata.is_important=True + 温度强化至晋升底座
+        （防晋升后立即被贝叶斯衰减降级）+ lifecycle 提升至 CONSOLIDATED
+        （仅当当前为 ACTIVE）+ 持久化。
+
+        与 run_decay_cycle 同纪律：RLock 保护、轮询游标有界处理、节流窗口。
+
+        Returns:
+            本次晋升的记忆数量
+        """
+        # 节流检查（同 run_decay_cycle 语义）
+        if min_interval_seconds > 0 and getattr(self, "_last_promotion_at", None) is not None:
+            elapsed = time.monotonic() - self._last_promotion_at
+            if elapsed < min_interval_seconds:
+                logger.debug(
+                    "run_promotion_cycle 节流跳过: 距上次 %.1fs < %.1fs",
+                    elapsed,
+                    min_interval_seconds,
+                )
+                return 0
+
+        from datetime import datetime, timezone
+
+        from neurova.cognitive_layers.memory_layer.models import LifecycleStage
+        from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
+
+        now = datetime.now(timezone.utc)
+        promoted = 0
+
+        with self._lock:
+            all_items = list(self._memories.values())
+
+            # 有界处理：轮询游标（与 decay 游标独立，互不挤占覆盖面）
+            if max_memories is not None and max_memories > 0 and len(all_items) > max_memories:
+                n = len(all_items)
+                start = getattr(self, "_promotion_cursor", 0) % n
+                items = [all_items[(start + i) % n] for i in range(max_memories)]
+                self._promotion_cursor = (start + max_memories) % n
+            else:
+                items = all_items
+
+            for mem in items:
+                # 已晋升/已结晶/已遗忘记忆跳过（幂等）
+                if (mem.metadata or {}).get("is_important", False):
+                    continue
+                if mem.lifecycle_stage in (LifecycleStage.CRYSTALLIZED, LifecycleStage.FORGOTTEN):
+                    continue
+
+                # 确定性门控（should_upgrade_to_important 硬信号）
+                unique_queries = (mem.metadata or {}).get("unique_queries")
+                recall_signal = (
+                    int(unique_queries) if isinstance(unique_queries, (int, float)) else mem.access_count
+                )
+                emotion_score = 0.0 if mem.emotion == EmotionType.NEUTRAL else 0.5
+                hits = TemperatureEngine.should_upgrade_to_important(
+                    temperature=mem.temperature,
+                    access_count=recall_signal,
+                    emotion_score=emotion_score,
+                    relation_count=0,
+                )
+                if not hits:
+                    continue
+
+                # 晋升动作
+                mem.metadata = dict(mem.metadata or {})
+                mem.metadata["is_important"] = True
+                mem.metadata["promoted_at"] = now.isoformat(timespec="seconds")
+                # 温度强化至晋升底座（>=80 门上不回落）
+                if mem.temperature < 80.0:
+                    mem.temperature = 80.0
+                if mem.lifecycle_stage == LifecycleStage.ACTIVE:
+                    mem.lifecycle_stage = LifecycleStage.CONSOLIDATED
+                mem.updated_at = now
+                self._persist_memory(mem)
+                promoted += 1
+
+        self._last_promotion_at = time.monotonic()
+        if promoted:
+            logger.info("记忆晋升完成: %s 条达标记忆已晋升", promoted)
+        return promoted
 
     def get_crystallized(self, limit: int = 10, agent_wide: bool = False) -> List[Dict[str, Any]]:
         """获取固化记忆

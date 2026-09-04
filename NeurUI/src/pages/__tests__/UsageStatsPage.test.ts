@@ -17,7 +17,10 @@ import { createI18n } from 'vue-i18n'
 
 vi.mock('@/api/modules/stats', () => ({
   getUsageOverview: vi.fn(),
+  getProviderUsage: vi.fn(),
 }))
+
+import { getProviderUsage } from '@/api/modules/stats'
 
 import UsageStatsPage from '@/pages/UsageStatsPage.vue'
 import { getUsageOverview } from '@/api/modules/stats'
@@ -38,6 +41,7 @@ const messages = {
     longestStreak: '最长连续天数',
     tokenActivity: 'Token 活动',
     dailyTokenTrend: '每日 Token 趋势',
+    providerBilling: 'Provider 余额',
     last7Days: '近 7 日',
     last30Days: '近 30 日',
     daily: '每日',
@@ -114,6 +118,7 @@ describe('UsageStatsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(getUsageOverview).mockResolvedValue(mockOverview() as never)
+    vi.mocked(getProviderUsage).mockResolvedValue({ data: { snapshots: [], errors: [] } } as never)
   })
 
   it('renders five KPI cards with formatted values', async () => {
@@ -180,5 +185,52 @@ describe('UsageStatsPage', () => {
     const text = wrapper.text()
     expect(text).toContain('全部用户') // scope=global
     expect(wrapper.find('.a-empty').exists()).toBe(true)
+  })
+})
+
+describe('UsageStatsPage provider 账单卡（P1-13）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(getUsageOverview).mockResolvedValue(mockOverview() as never)
+  })
+
+  it('hides provider card when no snapshots (default off)', async () => {
+    vi.mocked(getProviderUsage).mockResolvedValue({ data: { snapshots: [], errors: [] } } as never)
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Provider 余额')
+  })
+
+  it('renders provider balance snapshots', async () => {
+    vi.mocked(getProviderUsage).mockResolvedValue({
+      data: {
+        snapshots: [
+          { provider_id: 'deepseek', ts: '2026-09-04 12:00:00', plan: 'pay_as_you_go', balance: 88.5, currency: 'CNY' },
+          { provider_id: 'siliconflow', ts: '2026-09-04 12:00:00', quota_remaining: 12345 },
+        ],
+        errors: [],
+      },
+    } as never)
+    const wrapper = mountPage()
+    await flushPromises()
+    const text = wrapper.text()
+    expect(text).toContain('Provider 余额')
+    expect(text).toContain('deepseek')
+    expect(text).toContain('CNY 88.50')
+    expect(text).toContain('12,345')
+  })
+
+  it('renders provider fetch errors as warning tags', async () => {
+    vi.mocked(getProviderUsage).mockResolvedValue({
+      data: {
+        snapshots: [{ provider_id: 'deepseek', ts: '2026-09-04 12:00:00', balance: 1 }],
+        errors: [{ provider_id: 'weird', error: 'host 无内置适配', ts: '2026-09-04' }],
+      },
+    } as never)
+    const wrapper = mountPage()
+    await flushPromises()
+    const text = wrapper.text()
+    expect(text).toContain('weird')
+    expect(text).toContain('host 无内置适配')
   })
 })
