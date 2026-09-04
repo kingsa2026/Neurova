@@ -26,53 +26,94 @@ from neurova.tts.download_source import (
 
 
 class TestRegistryHasModelScope:
-    def test_all_models_have_ms_repo(self):
-        for name, entry in md.MODEL_REGISTRY.items():
-            assert entry.get("ms_repo_id"), f"{name} 缺 ModelScope 镜像 repo_id"
+    def test_bge_has_ms_mirror(self):
+        # bge 在 ModelScope 有镜像（AI-ModelScope），国内硬可靠
+        assert md.MODEL_REGISTRY["bge-small-zh-v1.5"].get("ms_repo_id")
+
+    def test_moss_onnx_no_mirror_marked_none(self):
+        # MOSS ONNX 仓在 ModelScope 只有 PyTorch 训练仓（文件格式不同），
+        # 显式标 None 防"拿错仓库"——国内源落 hf-mirror（尽力而为）
+        for name in ("moss-tts-nano", "moss-audio-tokenizer"):
+            assert md.MODEL_REGISTRY[name].get("ms_repo_id") is None, name
 
 
-class TestEnsureModelSource:
-    def _downloader(self, tmp_path):
-        return md.ModelDownloader(base_dir=str(tmp_path))
-
-    def test_default_source_is_auto_ms_first(self, tmp_path, monkeypatch):
-        """auto 策略 = ModelScope 优先（国内网络实测可靠），失败落 HF。"""
+class TestSourceResolution:
+    def test_auto_bge_ms_first(self, tmp_path, monkeypatch):
+        """bge 有 MS 镜像：auto = modelscope → hf-mirror → hf 直连。"""
         calls = []
         monkeypatch.setattr(md, "_download_via_modelscope",
-                            lambda entry, model_dir, cb: calls.append("ms") or None)
+                            lambda e, d, cb: calls.append("ms"))
+        monkeypatch.setattr(md, "_download_via_hf_mirror",
+                            lambda e, d, cb: calls.append("mirror"))
         monkeypatch.setattr(md, "_download_via_huggingface",
-                            lambda entry, model_dir, cb: calls.append("hf") or None)
-        dl = self._downloader(tmp_path)
-        dl.ensure_model("bge-small-zh-v1.5", source="auto")
+                            lambda e, d, cb: calls.append("hf"))
+        md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
+            "bge-small-zh-v1.5", source="auto")
         assert calls == ["ms"]
 
-    def test_ms_failure_falls_back_to_hf(self, tmp_path, monkeypatch):
+    def test_auto_moss_mirror_first_no_ms(self, tmp_path, monkeypatch):
+        """MOSS 无 MS 镜像：auto = hf-mirror → hf 直连（跳过 modelscope）。"""
         calls = []
-        def ms_fail(entry, model_dir, cb):
+        monkeypatch.setattr(md, "_download_via_modelscope",
+                            lambda e, d, cb: calls.append("ms"))
+        monkeypatch.setattr(md, "_download_via_hf_mirror",
+                            lambda e, d, cb: calls.append("mirror"))
+        monkeypatch.setattr(md, "_download_via_huggingface",
+                            lambda e, d, cb: calls.append("hf"))
+        md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
+            "moss-tts-nano", source="auto")
+        assert calls == ["mirror"]
+
+    def test_auto_ms_fail_falls_to_mirror_then_hf(self, tmp_path, monkeypatch):
+        calls = []
+        def ms_fail(e, d, cb):
             calls.append("ms-fail")
             raise RuntimeError("modelscope down")
+        def mirror_fail(e, d, cb):
+            calls.append("mirror-fail")
+            raise RuntimeError("mirror down")
         monkeypatch.setattr(md, "_download_via_modelscope", ms_fail)
+        monkeypatch.setattr(md, "_download_via_hf_mirror", mirror_fail)
         monkeypatch.setattr(md, "_download_via_huggingface",
-                            lambda entry, model_dir, cb: calls.append("hf") or None)
-        dl = self._downloader(tmp_path)
-        dl.ensure_model("bge-small-zh-v1.5", source="auto")
-        assert calls == ["ms-fail", "hf"]
+                            lambda e, d, cb: calls.append("hf"))
+        md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
+            "bge-small-zh-v1.5", source="auto")
+        assert calls == ["ms-fail", "mirror-fail", "hf"]
 
-    def test_explicit_modelscope_no_hf_fallback(self, tmp_path, monkeypatch):
+    def test_explicit_modelscope_no_fallback(self, tmp_path, monkeypatch):
         calls = []
         monkeypatch.setattr(md, "_download_via_modelscope", mock.Mock(
             side_effect=RuntimeError("modelscope down")))
+        monkeypatch.setattr(md, "_download_via_hf_mirror",
+                            lambda e, d, cb: calls.append("mirror"))
         monkeypatch.setattr(md, "_download_via_huggingface",
-                            lambda entry, model_dir, cb: calls.append("hf") or None)
-        dl = self._downloader(tmp_path)
+                            lambda e, d, cb: calls.append("hf"))
+        dl = md.ModelDownloader(base_dir=str(tmp_path))
         with pytest.raises(RuntimeError):
             dl.ensure_model("bge-small-zh-v1.5", source="modelscope")
         assert calls == []  # 显式指定源：失败不换源
 
-    def test_progress_callback_wired_to_both_sources(self, tmp_path, monkeypatch):
-        """进度回调在两个源都要接上（前端进度条的数据源）。"""
+    def test_explicit_huggingface_direct_only(self, tmp_path, monkeypatch):
+        calls = []
+        monkeypatch.setattr(md, "_download_via_modelscope",
+                            lambda e, d, cb: calls.append("ms"))
+        monkeypatch.setattr(md, "_download_via_hf_mirror",
+                            lambda e, d, cb: calls.append("mirror"))
+        monkeypatch.setattr(md, "_download_via_huggingface",
+                            lambda e, d, cb: calls.append("hf"))
+        md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
+            "bge-small-zh-v1.5", source="huggingface")
+        assert calls == ["hf"]
+
+    def test_invalid_source_rejected(self, tmp_path):
+        with pytest.raises(ValueError):
+            md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
+                "bge-small-zh-v1.5", source="ftp")
+
+    def test_progress_callback_wired_to_all_sources(self, tmp_path, monkeypatch):
+        """进度回调在三个源都要接上（前端进度条的数据源）。"""
         seen = []
-        dl = self._downloader(tmp_path)
+        dl = md.ModelDownloader(base_dir=str(tmp_path))
         dl.set_progress_callback(lambda p: seen.append(p))
         monkeypatch.setattr(md, "_download_via_modelscope",
                             mock.Mock(side_effect=lambda entry, d, cb: cb(50, 100)))
