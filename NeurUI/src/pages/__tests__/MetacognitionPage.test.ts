@@ -17,6 +17,10 @@ vi.mock('@/api/modules/metacognition', () => apiMocks)
 vi.mock('@/composables/useAgentPage', () => ({
   useAgentPage: () => ({ agentId: { value: 'a1' }, currentAgent: { value: { name: 'Test' } } }),
 }))
+// AgentPageTabs 内部用 useRoute（router-link 渲染需要）；stub 掉组件本体
+vi.mock('@/components/AgentPageTabs', () => ({
+  default: { template: '<div class="nr-page-tabs-stub"/>' },
+}))
 vi.mock('ant-design-vue', () => ({
   message: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))

@@ -142,27 +142,30 @@ class TestC9CrystallizerPersistence(unittest.TestCase):
 class TestC10SkillReviewGate(unittest.TestCase):
     def test_packer_registration_requires_approval(self):
         """AutoSkillBuilder.register_to_skill_registry 在 pending 模式下不注册，
-        approve_template 后可注册。默认 pending（评审闸开）。"""
+        approve_template 后可注册。评审闸默认关（增量教义），env 显式开启。"""
+        import os
+
         from neurova.evolution.skill_encapsulation import AutoSkillBuilder
 
-        builder = AutoSkillBuilder(min_pattern_occurrences=1, min_success_rate=0.1)
         seq = ["click", "type"]
-        for _ in range(3):
-            builder.observe(tool_sequence=seq, context="测试", success=True)
+        with patch.dict(os.environ, {"NEUROVA_SKILL_REVIEW_GATE": "1"}):
+            builder2 = AutoSkillBuilder(min_pattern_occurrences=1, min_success_rate=0.1)
+            for _ in range(3):
+                builder2.observe(tool_sequence=seq, context="测试", success=True)
 
-        # 产物进入待审集合
-        pending = builder.list_pending_templates()
+            # 产物进入待审集合
+            pending = builder2.list_pending_templates()
         self.assertTrue(pending, "评审闸开启时新产物应先入 pending")
 
         registry = MagicMock()
         registry.has_skill.return_value = False
         registry.register_skill.return_value = True
-        registered = builder.register_to_skill_registry(registry)
+        registered = builder2.register_to_skill_registry(registry)
         self.assertEqual(registered, 0, "未批准不得注册")
 
         template_id = pending[0]["template_id"] if isinstance(pending[0], dict) else pending[0]
-        self.assertTrue(builder.approve_template(template_id))
-        registered = builder.register_to_skill_registry(registry)
+        self.assertTrue(builder2.approve_template(template_id))
+        registered = builder2.register_to_skill_registry(registry)
         self.assertEqual(registered, 1)
 
 

@@ -1146,7 +1146,13 @@ class PostChatPipeline:
                     )
 
                     skill_tag = ",".join(tools_used[:3]) if tools_used else "chat"
-                    ekb = ExperienceKnowledgeBase()
+                    # 单例复用（复审残余点 B）：每轮 new 连接不 close 是连接 churn，
+                    # 模块单例长期存在零成本
+                    from neurova.skills.experience_knowledge_base import (
+                        get_experience_knowledge_base,
+                    )
+
+                    ekb = get_experience_knowledge_base()
                     ekb.add_experience_record(
                         skill_name=skill_tag,
                         exp=ExperienceRecord(
@@ -1914,10 +1920,22 @@ class PostChatPipeline:
             proposals = improver.propose_pending_improvements()
             growth_log_manager = self._get_dependency("growth_log_manager")
             skill_registry = getattr(self._agt, "_skill_registry", None)
+            # 改进落盘最后一米（复审残余点 C）：SkillService 传给 apply_improvement，
+            # 应用后 config+version 同步磁盘 manifest——否则改进重启即失
+            skill_service = None
+            try:
+                from neurova.skills.skill_service import SkillService
+
+                agent_id = getattr(self._agt.config, "agent_id", "default")
+                skill_service = SkillService(agent_id=agent_id)
+            except Exception as svc_err:
+                logger.debug("创建 SkillService 失败, 改进仅内存态: %s", svc_err)
             for proposal in proposals[:3]:
                 applied = False
                 if skill_registry is not None:
-                    applied = improver.apply_improvement(proposal, skill_registry)
+                    applied = improver.apply_improvement(
+                        proposal, skill_registry, skill_service=skill_service
+                    )
                 if applied:
                     logger.info(
                         "🔧 技能改进已应用: %s (%s)", proposal.skill_id, proposal.description or ""
@@ -2223,18 +2241,32 @@ class PostChatPipeline:
         step_name = "extract_conversation_rules"
         start_time = time.time()
 
-        # LLM 成本门控（遗留事项 ②）：本步骤每轮消耗一次 LLM 调用，默认关
-        # （NEUROVA_CONVERSATION_RULES=1 显式开启）。装配修复后依赖可达，
-        # 若无门控每轮对话都产生 LLM 成本——与 incremental-only 约束一致，
-        # 新链路默认关、显式开启。
+        # LLM 成本门控（治理遗留收口 2026-09-05）：本步骤每轮消耗一次 LLM 调用。
+        # 管理面：治理设置 conversation_rules_enabled（设置页高级选项卡），
+        # 优先级：env 显式设 0 强制关 > 治理设置值 > 默认关。
         import os as _os
 
-        if _os.environ.get("NEUROVA_CONVERSATION_RULES", "0") != "1":
+        if _os.environ.get("NEUROVA_CONVERSATION_RULES") == "0":
+            rules_enabled = False
+        else:
+            try:
+                from neurova.security.governance_settings import (
+                    load_governance_settings,
+                )
+
+                rules_enabled = bool(
+                    load_governance_settings().get("conversation_rules_enabled")
+                )
+            except Exception as e:  # noqa: BLE001 - 设置不可用维持默认关
+                logger.debug("治理设置读取失败，规则提取维持默认关: %s", e)
+                rules_enabled = False
+
+        if not rules_enabled:
             self._step_results.append(
                 StepResult(
                     step_name=step_name,
                     status=StepStatus.SKIPPED,
-                    message="NEUROVA_CONVERSATION_RULES != 1 (LLM cost gate, default off)",
+                    message="conversation rules disabled (LLM cost gate, default off)",
                     duration_ms=(time.time() - start_time) * 1000,
                 )
             )

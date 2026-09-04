@@ -254,6 +254,56 @@ async def unpush_skill_from_agent(skill_id: str, agent_id: str = Query(default="
 
 
 @router.get("/agent/{agent_id}/skills", response_model=List[SkillInfo])
+@router.get("/agent/{agent_id}/pending-skills")
+async def list_pending_skills(agent_id: str):
+    """C10 审批面：列出待审自动技能（评审闸开启时的配套生态）。
+
+    pending 数据在 Agent 的 skill_packer（AutoSkillBuilder）实例上；
+    Agent 未就绪返回空列表（闸关时恒空）。
+    """
+    try:
+        from neurova.api.endpoints.governance import _get_agent
+
+        agent = _get_agent()
+        packer = getattr(agent, "skill_packer", None) if agent is not None else None
+        if packer is None or not hasattr(packer, "list_pending_templates"):
+            return []
+        return packer.list_pending_templates()
+    except Exception as e:
+        logger.exception("list_pending_skills failed for agent_id=%s: %s", agent_id, e)
+        return []
+
+
+@router.post("/agent/{agent_id}/pending-skills/{template_id}/approve")
+async def approve_pending_skill(agent_id: str, template_id: str):
+    """C10 审批面：批准待审模板（激活后下轮 pattern_mining 注册进 Registry）。"""
+    from neurova.api.endpoints.governance import _get_agent
+
+    agent = _get_agent()
+    packer = getattr(agent, "skill_packer", None) if agent is not None else None
+    if packer is None or not hasattr(packer, "approve_template"):
+        raise HTTPException(status_code=503, detail="Agent 未就绪或评审闸未开启")
+    ok = packer.approve_template(template_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"待审模板不存在: {template_id}")
+    return {"code": 0, "data": {"approved": True, "template_id": template_id}}
+
+
+@router.post("/agent/{agent_id}/pending-skills/{template_id}/reject")
+async def reject_pending_skill(agent_id: str, template_id: str):
+    """C10 审批面：拒绝并删除待审模板。"""
+    from neurova.api.endpoints.governance import _get_agent
+
+    agent = _get_agent()
+    packer = getattr(agent, "skill_packer", None) if agent is not None else None
+    if packer is None or not hasattr(packer, "reject_template"):
+        raise HTTPException(status_code=503, detail="Agent 未就绪或评审闸未开启")
+    ok = packer.reject_template(template_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"待审模板不存在: {template_id}")
+    return {"code": 0, "data": {"rejected": True, "template_id": template_id}}
+
+
 async def get_agent_skills(agent_id: str):
     """获取 Agent 的所有技能
 
