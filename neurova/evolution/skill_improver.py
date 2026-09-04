@@ -148,6 +148,10 @@ class AutoSkillImprover:
         # 变体追踪
         self._variants: Dict[str, List[SkillVariant]] = {}  # skill_id -> variants
 
+        # 已应用改进的签名（skill_id + type + changes），防止同型提案反复应用
+        # 导致 config.improvements 膨胀 / 版本号每轮递增（断点 #3 防漂移）
+        self._applied_signatures: set = set()
+
         logger.info("AutoSkillImprover initialized")
 
     def record_usage(
@@ -426,6 +430,171 @@ class AutoSkillImprover:
                 "variants": len(variants),
                 "variant_details": variant_stats,
             }
+
+    def apply_improvement(self, improvement: SkillImprovement, registry, skill_service=None) -> bool:
+        """把改进提案应用到 skill 本体（断点 #3 修复：提案不再只进反思日志）。
+
+        应用语义（保守、可审计）：
+        - 改进记录追加进 skill.config["improvements"]（type/changes/applied_at），
+          不改写技能的工具序列——结构性变更（extend/reorder）必须走人工评审，
+          与 RSI propose_skill_manifest 的分层一致；
+        - 版本号 patch 位递增（1.0.0 → 1.0.1），可观测"该技能已被改进过"；
+        - applied 标记 + applied_at 落在提案对象上，pending 消费即消失；
+        - 同签名（skill_id+type+changes）提案只应用一次，防止每轮扫描反复应用
+          导致版本号膨胀。
+
+        持久化（改进落盘 2026-09-05）：提供 skill_service 时，应用成功后把
+        config+version 同步到磁盘 manifest（update_auto_skill）——否则改进
+        只存在于 registry 内存对象，重启即回 1.0.0（生效一次性）。
+
+        Args:
+            improvement: 待应用的改进提案
+            registry: SkillRegistry 实例（get_skill 定位技能本体）
+
+        Returns:
+            bool: 是否成功应用（技能不存在/已应用过同签名 → False）
+        """
+        skill_id = getattr(improvement, "skill_id", "") or ""
+        if not skill_id or registry is None:
+            return False
+
+        with self._lock:
+            if improvement.applied:
+                return False
+
+            try:
+                skill = registry.get_skill(skill_id)
+            except Exception as e:
+                logger.debug("获取技能 %s 失败: %s", skill_id, e)
+                skill = None
+            if skill is None:
+                return False
+
+            signature = (
+                skill_id,
+                getattr(improvement.improvement_type, "value", str(improvement.improvement_type)),
+                repr(improvement.changes),
+            )
+            if signature in self._applied_signatures:
+                improvement.applied = True
+                improvement.applied_at = datetime.datetime.now(datetime.timezone.utc)
+                logger.debug("改进提案 %s 同签名已应用过，跳过", improvement.improvement_id)
+                return False
+
+            config = getattr(skill, "config", None)
+            if not isinstance(config, dict):
+                config = {}
+                skill.config = config
+
+            # C13 修订快照：改动前的 config 深拷贝 + hash 落入 revisions
+            # （有界 5 条），revert_last_improvement 可回滚最近一次改进
+            import copy as _copy
+            import hashlib as _hashlib
+            import json as _json
+
+            version_before = str(skill.version or "1.0.0")
+            config_before = _copy.deepcopy(config)
+            revision_hash_before = _hashlib.sha256(
+                _json.dumps(config_before, sort_keys=True, default=str).encode("utf-8")
+            ).hexdigest()[:16]
+
+            improvements = config.setdefault("improvements", [])
+            improvements.append(
+                {
+                    "improvement_id": improvement.improvement_id,
+                    "type": getattr(improvement.improvement_type, "value", str(improvement.improvement_type)),
+                    "changes": dict(improvement.changes or {}),
+                    "reason": improvement.reason,
+                    "expected_impact": improvement.expected_impact,
+                    "applied_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "revision_hash_before": revision_hash_before,
+                }
+            )
+            revisions = config.setdefault("revisions", [])
+            revisions.append(
+                {
+                    "improvement_id": improvement.improvement_id,
+                    "version_before": version_before,
+                    "config_before": config_before,
+                    "revision_hash_before": revision_hash_before,
+                }
+            )
+            del revisions[:-5]  # 有界：只留最近 5 条
+
+            # patch 位递增（1.0.x）
+            try:
+                parts = str(skill.version or "1.0.0").split(".")
+                while len(parts) < 3:
+                    parts.append("0")
+                parts[2] = str(int(parts[2]) + 1)
+                skill.version = ".".join(parts)
+            except (ValueError, IndexError):
+                skill.version = "1.0.1"
+            if revisions:
+                revisions[-1]["version_after"] = skill.version
+
+            improvement.applied = True
+            improvement.applied_at = datetime.datetime.now(datetime.timezone.utc)
+            self._applied_signatures.add(signature)
+
+            # 改进落盘：config+version 同步到磁盘 manifest（失败不回滚内存态，
+            # 只记警告——内存态仍是本轮的最新正确状态）
+            if skill_service is not None:
+                try:
+                    skill_service.update_auto_skill(
+                        skill_id=skill_id, version=skill.version, config=skill.config
+                    )
+                except Exception as svc_err:
+                    logger.warning("改进落盘失败 %s: %s", skill_id, svc_err)
+
+            logger.info(
+                "技能改进已应用: %s (%s) → v%s",
+                skill_id,
+                improvement.improvement_type.value,
+                skill.version,
+            )
+            return True
+
+    def revert_last_improvement(self, skill_id: str, registry, skill_service=None) -> bool:
+        """回滚技能最近一次已应用的改进（C13：恢复 config 快照与版本号）。
+
+        回滚条目从 revisions 弹出并删除对应的 improvements 记录，
+        恢复 revision_hash_before 校验（防快照漂移）。
+        """
+        with self._lock:
+            try:
+                skill = registry.get_skill(skill_id)
+            except Exception as e:
+                logger.debug("获取技能 %s 失败: %s", skill_id, e)
+                skill = None
+            if skill is None:
+                return False
+            config = getattr(skill, "config", None)
+            if not isinstance(config, dict) or not config.get("revisions"):
+                return False
+            import copy as _copy
+
+            rev = config["revisions"].pop()
+            expected = rev.get("revision_hash_before")
+            if expected and skill.version != rev.get("version_after"):
+                # 版本号对不上最近一次应用 → 校验失败拒绝回滚（防错序回滚）
+                logger.warning("技能 %s 回滚校验失败：版本错序", skill_id)
+                config["revisions"].append(rev)
+                return False
+            skill.config = rev.get("config_before") or {}
+            skill.version = rev.get("version_before") or "1.0.0"
+
+            # 回滚落盘：磁盘 manifest 与内存态同步（否则重启后回到未回滚状态）
+            if skill_service is not None:
+                try:
+                    skill_service.update_auto_skill(
+                        skill_id=skill_id, version=skill.version, config=skill.config
+                    )
+                except Exception as svc_err:
+                    logger.warning("回滚落盘失败 %s: %s", skill_id, svc_err)
+
+            logger.info("技能 %s 已回滚改进至 v%s", skill_id, skill.version)
+            return True
 
     def get_variant_comparison(self, skill_id: str) -> Dict[str, Any]:
         """

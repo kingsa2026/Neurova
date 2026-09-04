@@ -269,6 +269,52 @@ class ToolExecutor:
         """获取配置"""
         return getattr(self._agent, "config", None)
 
+    def _metacog_gate_check(self, tool_name: str) -> Optional[Dict[str, Any]]:
+        """V3 调控门：查询该工具是否命中活跃 avoid_tool 教训。
+
+        env NEUROVA_METACOG_GATE=="1" 才启用（新扩展点默认关）；返回教训
+        metadata（含 text/recommendation/evidence），无教训或门关时返回 None。
+        故障一律放行（fail-open）——调控建议不得阻断主链路。
+        """
+        import os as _os
+
+        if _os.environ.get("NEUROVA_METACOG_GATE") != "1":
+            return None
+        try:
+            from neurova.cognitive_layers.meta_cognition_layer.self_model import get_self_model_engine
+
+            _user_id, _agent_id = self._agent_identity()
+            advisory = get_self_model_engine(str(_agent_id or "default")).check_tool_advisory(tool_name)
+            if advisory:
+                logger.info("🚦 元认知调控门命中: %s → %s", tool_name, advisory.get("finding", ""))
+            return advisory
+        except Exception:
+            logger.debug("调控门查询失败，放行", exc_info=True)
+            return None
+
+    def _metacog_gate_check(self, tool_name: str) -> Optional[Dict[str, Any]]:
+        """V3 调控门：查询该工具是否命中活跃 avoid_tool 教训。
+
+        env NEUROVA_METACOG_GATE=="1" 才启用（新扩展点默认关）；返回教训
+        metadata（含 text/recommendation/evidence），无教训或门关时返回 None。
+        故障一律放行（fail-open）——调控建议不得阻断主链路。
+        """
+        import os as _os
+
+        if _os.environ.get("NEUROVA_METACOG_GATE") != "1":
+            return None
+        try:
+            from neurova.cognitive_layers.meta_cognition_layer.self_model import get_self_model_engine
+
+            _user_id, _agent_id = self._agent_identity()
+            advisory = get_self_model_engine(str(_agent_id or "default")).check_tool_advisory(tool_name)
+            if advisory:
+                logger.info("🚦 元认知调控门命中: %s → %s", tool_name, advisory.get("finding", ""))
+            return advisory
+        except Exception:
+            logger.debug("调控门查询失败，放行", exc_info=True)
+            return None
+
     def _agent_identity(self) -> tuple:
         """解析执行身份 (user_id, agent_id)
 
@@ -702,6 +748,28 @@ class ToolExecutor:
             if not skill:
                 return {"error": f"Skill {skill_name} 不存在"}
 
+            # B3（工具面审计）：依赖前置声明（config.requires.bins）——声明的外部
+            # 可执行文件缺失时快速失败并提示安装，而非运行时以晦涩的
+            # FileNotFoundError/命令不存在失败。缺失不阻断执行（声明缺失≠
+            # 环境必缺），只在结果中附依赖警告供模型/用户决策。
+            _deps_warning = ""
+            try:
+                import shutil as _shutil
+
+                _requires = (getattr(skill, "config", {}) or {}).get("requires") or {}
+                _missing = [
+                    b for b in (_requires.get("bins") or [])
+                    if isinstance(b, str) and not _shutil.which(b)
+                ]
+                if _missing:
+                    _deps_warning = (
+                        f"⚠️ 技能依赖的外部命令缺失: {', '.join(_missing)}——"
+                        "请先安装，否则本技能步骤可能失败"
+                    )
+                    logger.warning("技能 %s 缺依赖: %s", skill_name, _missing)
+            except Exception as _dep_err:
+                logger.debug("技能依赖检查跳过: %s", _dep_err)
+
             # P0-4：技能执行期间挂载声明式权限作用域——治理预检
             # （_governance_precheck）对 skill 内的工具调用按声明仲裁
             from neurova.skills.permissions import parse_permissions, skill_permission_scope
@@ -710,6 +778,8 @@ class ToolExecutor:
             with skill_permission_scope(_perm):
                 # 执行 Skill
                 result = await skill.execute(params, context)
+            if _deps_warning and isinstance(result, dict):
+                result.setdefault("deps_warning", _deps_warning)
             return result
 
         except Exception as e:
@@ -776,6 +846,25 @@ class ToolExecutor:
         Returns:
             执行结果 dict（成功含 success/result 字段，失败含 error 字段）
         """
+        # A6 Tool Search（P2）：控制工具拦截。tool_call 解包后走完整
+        # _execute_single_tool 管道（治理预检/审批/肌肉记忆全链路生效）；
+        # tool_search/tool_describe 读进程内活动目录（build_tools_for_llm 构建时刷新）。
+        if tool_name in ("tool_search", "tool_describe", "tool_call"):
+            from neurova.context import tool_search as _ts
+
+            if tool_name == "tool_call":
+                real_name = str((params or {}).get("name", ""))
+                arguments = (params or {}).get("arguments") or {}
+                if not real_name:
+                    return {"error": "tool_call 缺少 name 参数"}
+                if real_name in _ts.CONTROL_TOOL_NAMES:
+                    return {"error": "tool_call 不能调用控制工具自身"}
+                catalog_names = {e["name"] for e in _ts.get_active_catalog()}
+                if real_name not in catalog_names:
+                    return {"error": f"工具 {real_name} 不在隐藏目录中（可能为直连工具，直接调用即可）"}
+                return await self._execute_single_tool(real_name, arguments)
+            return _ts.handle_control_tool(tool_name, params)
+
         return await self._execute_single_tool(tool_name, params)
 
     @staticmethod
@@ -833,11 +922,34 @@ class ToolExecutor:
 
             # 方案 P0-1.5: 统一治理预检 —— DENY 拦截、SANDBOX 隔离执行、
             # ASK 待确认；ALLOW / 无裁决内容返回 None 放行。
+            # E3（P2）：MCP 工具持久授权命中 → 免审批直达（等价审批重放的
+            # skip_governance 语义；授权由审批流 remember 批准时铸造）。
+            if not skip_governance:
+                try:
+                    from neurova.security.mcp_grants import get_tool_grant_store, parse_mcp_tool_name
+
+                    mcp_parts = parse_mcp_tool_name(tool_name)
+                    if mcp_parts and get_tool_grant_store().has_grant(*mcp_parts):
+                        skip_governance = True
+                        logger.debug("MCP 工具 %s 命中持久授权，跳过治理预检", tool_name)
+                except Exception as _grant_err:
+                    logger.debug("授权检查跳过: %s", _grant_err)
+
             precheck = (None if skip_governance
                         else await self._governance_precheck(tool_name, params))
             if precheck is not None:
                 result = precheck
                 return result
+
+            # V3 调控门（治理预检后、执行前）：env NEUROVA_METACOG_GATE=="1" 时，
+            # 命中活跃 avoid_tool 教训的工具返回结构化拦截建议（fail-open，默认关）。
+            advisory = self._metacog_gate_check(tool_name)
+            if advisory is not None:
+                return {
+                    "success": False,
+                    "error": f"工具 {tool_name} 被元认知调控门拦截: {advisory.get('finding', '')}",
+                    "metacog_advisory": advisory,
+                }
 
             # P1-2：per-tool 超时 + 超时转后台（单一咽喉点覆盖全部执行路径——
             # loop 原生/文本兜底/肌肉记忆自动执行最终都汇到这里）
@@ -3150,6 +3262,27 @@ class ToolExecutor:
                     weights.update_weight(tool_name, success, float(execution_time or 0.0))
             except Exception:
                 logger.debug("tool weight 反馈跳过", exc_info=True)
+
+        # V3 自模型：工具事件写统一台账（洞察编译器数据源；与权重活表同咽喉同口径）。
+        # 策略拒绝不记（决策≠故障），台账故障不阻断钩子主流程。
+        if not policy_denial:
+            try:
+                from neurova.cognitive_layers.meta_cognition_layer.self_model import get_self_model_engine
+
+                _user_id, _agent_id = self._agent_identity()
+                engine = get_self_model_engine(str(_agent_id or "default"))
+                engine.record_tool_event(
+                    tool_name=tool_name,
+                    success=bool(success),
+                    duration_ms=float(execution_time or 0.0) * 1000.0,
+                    source=tool_source or "",
+                    context={
+                        "has_code_block": "```" in (user_input or ""),
+                        "has_url": "http://" in (user_input or "") or "https://" in (user_input or ""),
+                    },
+                )
+            except Exception:
+                logger.debug("工具事件落台账跳过", exc_info=True)
 
         # P2-4：Prometheus 仪表（失败不影响钩子主流程）
         if not policy_denial:

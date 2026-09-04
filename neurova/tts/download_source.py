@@ -50,14 +50,14 @@ def get(model: str, path: Path | None = None) -> str:
         return choice if choice in VALID_CHOICES else "auto"
 
 
-def set(model: str, choice: str, path: Path | None = None) -> None:
+def set(choice: DownloadSourceChoice, path: Path | None = None) -> None:
     """写某模型的下载源选择（choice/model 双白名单校验）。"""
-    _validate_choice(choice)
+    _validate_choice(choice.choice)
     # model 必须在注册表里（防垃圾键无限增长）
     from neurova.tts.model_downloader import MODEL_REGISTRY
 
-    if model not in MODEL_REGISTRY:
-        raise ValueError(f"未知模型: {model!r}")
+    if choice.model not in MODEL_REGISTRY:
+        raise ValueError(f"未知模型: {choice.model!r}")
     p = path or DEFAULT_PATH
     with _lock:
         try:
@@ -66,12 +66,12 @@ def set(model: str, choice: str, path: Path | None = None) -> None:
                 data = {}
         except (OSError, json.JSONDecodeError):
             data = {}
-        data[model] = choice
+        data[choice.model] = choice.choice
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(p.suffix + ".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(p)  # 原子写（Windows 无 flock 交叉截断教训）
-    logger.debug("模型下载源选择已保存: %s -> %s", model, choice)
+    logger.debug("模型下载源选择已保存: %s -> %s", choice.model, choice.choice)
 
 
 # 面向测试的命名空间聚合（保持 import 处用法简洁）

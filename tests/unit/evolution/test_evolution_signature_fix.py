@@ -57,6 +57,7 @@ class TestEvolutionSignature:
                 task="test task",
                 tools=["tool_a"],
                 success=True,
+                crystallizer=None,
             )
 
     def test_post_chat_pipeline_correct_signature(self):

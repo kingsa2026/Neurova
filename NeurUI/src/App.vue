@@ -3,12 +3,13 @@
     <div :data-theme="appStore.theme" class="nr-app">
       <div class="star-bg" v-if="appStore.isDark" />
       <router-view />
+      <ModelDownloadDialog ref="modelDownloadDialog" />
     </div>
   </a-config-provider>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { theme as antdThemeAlgo, type ConfigProviderProps } from 'ant-design-vue'
 import localeZhCN from 'ant-design-vue/locale/zh_CN'
 import localeEnUS from 'ant-design-vue/locale/en_US'
@@ -26,6 +27,8 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useAgentStore } from '@/stores/agents'
 import { initErrorReporter, setErrorReporterInstance } from '@/utils/errorReporter'
+import ModelDownloadDialog from '@/components/ModelDownloadDialog.vue'
+import { listPendingDownloads } from '@/api/modules/models'
 
 const appStore = useAppStore()
 const authStore = useAuthStore()
@@ -95,6 +98,24 @@ onMounted(() => {
     }),
   )
 })
+
+// 模型下载提示框：登录态下查一次待下载清单，有缺失才弹（尽力而为，静默失败）
+const modelDownloadDialog = ref<InstanceType<typeof ModelDownloadDialog> | null>(null)
+watch(
+  () => authStore.isAuthenticated,
+  (authed) => {
+    if (authed) {
+      listPendingDownloads()
+        .then((items) => {
+          if (Array.isArray(items) && items.some((i) => i && !i.available)) {
+            modelDownloadDialog.value?.open()
+          }
+        })
+        .catch(() => {})
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <style>

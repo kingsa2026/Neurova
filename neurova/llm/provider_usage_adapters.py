@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import threading
+import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
@@ -103,16 +105,26 @@ def _fetch_for_provider(pc) -> Callable[[], Dict[str, Any]]:
     return lambda: factory(pc)
 
 
-def sync_provider_usage(providers: List[Any]) -> Dict[str, Any]:
+# 同步节流窗口（秒）：provider 后台账单变化慢，5 分钟内重复读端点不重拉
+USAGE_SYNC_TTL_SECONDS = 300.0
+_sync_lock = threading.Lock()
+_last_sync_at: Optional[float] = 0.0
+
+
+def sync_provider_usage(providers: List[Any], force: bool = False) -> Dict[str, Any]:
     """同步一轮 provider 账单快照（显式开启的才采）。
 
     Args:
         providers: ProviderConfig 列表（调用方决定 scope）
+        force: True 绕过 TTL 节流立即重拉（后台任务/手动刷新用）；
+            False 时 TTL 窗口内只读既有快照（节流，防高频端点打爆后台）。
 
     Returns:
-        {"snapshots": [...], "errors": [...]} —— 与采集器实例解耦，
-        快照已落 SQLite，errors 含 provider_id/error/ts。
+        {"snapshots": [...], "errors": [...]} —— 快照已落 SQLite，
+        errors 含 provider_id/error/ts。
     """
+    global _last_sync_at
+
     from neurova.core.provider_usage import (
         ProviderUsageCollector,
         install_provider_usage_collector,
@@ -120,23 +132,52 @@ def sync_provider_usage(providers: List[Any]) -> Dict[str, Any]:
 
     collector = ProviderUsageCollector.get_installed() or install_provider_usage_collector()
 
-    snapshots: List[Dict[str, Any]] = []
-    errors: List[Dict[str, Any]] = []
-    for pc in providers or []:
-        # 默认关语义: 显式开启 + 有凭证才采集
-        if not getattr(pc, "usage_collection", False):
-            continue
-        if not getattr(pc, "api_key", None):
-            continue
-        try:
-            fetch = _fetch_for_provider(pc)
-            collector.register_provider(pc.id, fetch)
-        except LookupError as e:
-            errors.append(
-                {"provider_id": pc.id, "error": str(e), "ts": datetime.now().isoformat(timespec="seconds")}
-            )
-            continue
+    with _sync_lock:
+        now = time.time()
+        should_sync = force or (now - _last_sync_at) >= USAGE_SYNC_TTL_SECONDS
+        if should_sync:
+            errors: List[Dict[str, Any]] = []
+            for pc in providers or []:
+                # 默认关语义: 显式开启 + 有凭证才采集
+                if not getattr(pc, "usage_collection", False):
+                    continue
+                if not getattr(pc, "api_key", None):
+                    continue
+                try:
+                    fetch = _fetch_for_provider(pc)
+                    collector.register_provider(pc.id, fetch)
+                except LookupError as e:
+                    errors.append(
+                        {"provider_id": pc.id, "error": str(e),
+                         "ts": datetime.now().isoformat(timespec="seconds")}
+                    )
+                    continue
 
-    collector.collect_all()
+            if any(getattr(pc, "usage_collection", False) and getattr(pc, "api_key", None)
+                   for pc in providers or []):
+                collector.collect_all()
+                _last_sync_at = now
+        else:
+            errors = []
+
     snapshots = collector.get_collected_usage()
     return {"snapshots": snapshots, "errors": errors + collector.get_errors()}
+
+
+def sync_provider_usage_for_user(current_user: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """按请求用户 scope 采集账单（端点入口，复审断链修复①）。
+
+    admin → 全局 admin scope；普通用户 → 自己的 user scope。
+    采集器是进程级单例（快照落共享 SQLite），scope 决定"看谁的 provider
+    配置"而非快照隔离；采集失败/无开启 provider 均静默返回空。
+    """
+    try:
+        from neurova.llm.provider_manager import get_provider_manager_for_user
+
+        manager = get_provider_manager_for_user(current_user or {})
+        if manager is None:
+            return {"snapshots": [], "errors": []}
+        return sync_provider_usage(manager.list_providers(enabled_only=True))
+    except Exception as e:  # noqa: BLE001 - 采集是统计副路径，绝不阻断读端点
+        logger.debug("provider 账单同步失败: %s", e)
+        return {"snapshots": [], "errors": []}

@@ -5,6 +5,8 @@
       <GlassButton variant="primary" size="sm" @click="openCreate">{{ t('channel.create') }}</GlassButton>
     </div>
 
+    <AgentPageTabs :tabs="channelTabs" />
+
     <!-- Channel list -->
     <a-spin :spinning="loading">
       <a-empty v-if="!loading && channels.length === 0" :description="t('common.noData')" />
@@ -72,16 +74,25 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import {
   listChannels, createChannel, updateChannel, deleteChannel, testChannel, toggleChannel,
   type Channel,
 } from '@/api/modules/channels'
 
 const { t } = useI18n()
+const route = useRoute()
+const agentId = route.params.agentId as string
+
+const channelTabs = [
+  { labelKey: 'nav.agentchannel', to: `/agent/${agentId}/channel` },
+  { labelKey: 'nav.agentchannelsharing', to: `/agent/${agentId}/channel-sharing` },
+]
 
 const channels = ref<Channel[]>([])
 const loading = ref(false)

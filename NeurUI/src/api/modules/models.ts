@@ -52,3 +52,43 @@ export function detectCapabilities(data: { provider_id?: string; model_id?: stri
 export function listModelsByCapability(capability: string) {
   return api.get<ModelItem[]>(`${BASE}/by-capability`, { params: { cap: capability } })
 }
+
+// ==================== 模型下载（双源选择 + 后台触发 + 进度轮询） ====================
+
+export type DownloadChoice = 'auto' | 'always_modelscope' | 'always_huggingface' | 'skip'
+
+export interface PendingDownloadItem {
+  model: string
+  description: string
+  size_hint: string
+  available: boolean
+  has_ms_mirror: boolean
+  choice: DownloadChoice
+}
+
+export interface DownloadState {
+  model: string
+  status: 'pending' | 'downloading' | 'done' | 'failed' | 'skipped'
+  error: string
+  percentage: number
+}
+
+export function listPendingDownloads() {
+  return api.get<PendingDownloadItem[]>(`${BASE}/pending-downloads`)
+}
+
+export function getDownloadSource() {
+  return api.get<Record<string, DownloadChoice>>(`${BASE}/download-source`)
+}
+
+export function setDownloadSource(data: { model: string; choice: DownloadChoice }) {
+  return api.post<{ ok: boolean }>(`${BASE}/download-source`, data)
+}
+
+export function triggerDownload(data: { model: string; source?: string }) {
+  return api.post<DownloadState>(`${BASE}/download`, data)
+}
+
+export function getDownloadProgress() {
+  return api.get<DownloadState[]>(`${BASE}/download-progress`)
+}

@@ -108,6 +108,10 @@ class TestRegisterToSkillRegistryPersistsToSkillService:
             )
         assert len(builder._templates) > 0, "前置: 应有封装的模板"
 
+        # C10 评审闸：先批准全部待审模板再触发注册
+        for _t in builder.list_pending_templates():
+            assert builder.approve_template(_t["template_id"])
+
         registry = SkillRegistry()
         registry._skills = {}
         service = SkillService(agent_id="test", skills_dir=str(tmp_path))

@@ -68,6 +68,20 @@ class MemoryOrigin(Enum):
             cls.SYSTEM: 1.0,
         }
 
+    @classmethod
+    def weight_of(cls, value: Any) -> float:
+        """按字符串/枚举取权重（检索 dict 通道用）。非法值 fail-safe 按
+        untrusted 降权——绝不静默升权；None/缺失返回 1.0（等价旧行为）。"""
+        if value is None:
+            return 1.0
+        weights = cls.weights()
+        if isinstance(value, cls):
+            return weights.get(value, 1.0)
+        try:
+            return weights[cls(str(value))]
+        except (ValueError, KeyError):
+            return weights[cls.UNTRUSTED]
+
 
 class MemoryPerspective(Enum):
     """记忆视角"""

@@ -1784,10 +1784,22 @@ class PostChatPipeline:
             for mem in related_memories:
                 memory_id = mem.get("id", "") if isinstance(mem, dict) else getattr(mem, "id", "")
                 if memory_id:
+                    # 签名对齐（遗留事项 ②）：create_snapshot 真实签名是
+                    # (memory_id, content, metadata, author, description)——
+                    # 原调用传不存在的 source/triggered_by，依赖一旦注入必
+                    # TypeError（依赖注入后的潜伏雷）
+                    mem_content = (
+                        mem.get("content", "") if isinstance(mem, dict) else str(getattr(mem, "content", ""))
+                    )
                     version_control.create_snapshot(
                         memory_id=memory_id,
-                        source="pre_conversation_backup",
-                        triggered_by="post_chat_pipeline",
+                        content=mem_content,
+                        metadata={
+                            "source": "pre_conversation_backup",
+                            "triggered_by": "post_chat_pipeline",
+                        },
+                        author="post_chat_pipeline",
+                        description="会话前版本快照（可回滚保障）",
                     )
                     snapshot_count += 1
 
@@ -2210,6 +2222,23 @@ class PostChatPipeline:
         """
         step_name = "extract_conversation_rules"
         start_time = time.time()
+
+        # LLM 成本门控（遗留事项 ②）：本步骤每轮消耗一次 LLM 调用，默认关
+        # （NEUROVA_CONVERSATION_RULES=1 显式开启）。装配修复后依赖可达，
+        # 若无门控每轮对话都产生 LLM 成本——与 incremental-only 约束一致，
+        # 新链路默认关、显式开启。
+        import os as _os
+
+        if _os.environ.get("NEUROVA_CONVERSATION_RULES", "0") != "1":
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="NEUROVA_CONVERSATION_RULES != 1 (LLM cost gate, default off)",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
+            return
 
         try:
             # 获取依赖组件

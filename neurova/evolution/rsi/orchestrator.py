@@ -182,6 +182,27 @@ class RSIOrchestrator:
         # 8. 更新迭代计数
         self._iteration_count += 1
 
+        # 9. 阶段自动评估（遗留事项 ① 接线）：evaluate_phase_transition 此前零
+        # 调用方——phase 永远停在观察期，can_auto_execute("low") 恒 False。
+        # 判据通过后由 advance_phase 真正推进（判据与推进分离是 controller 原设计）。
+        phase_advanced = False
+        try:
+            phase_metrics = {
+                "convergence_status": convergence.get("status", ""),
+                "roi": float((convergence.get("metrics") or {}).get("roi", 0.0) or 0.0)
+                if isinstance(convergence.get("metrics"), dict)
+                else 0.0,
+                "days_without_rollback": float(
+                    self.metrics.get_metric("days_without_rollback") or 0
+                ),
+            }
+            if self.deployment_controller.evaluate_phase_transition(phase_metrics):
+                new_phase = self.deployment_controller.advance_phase()
+                phase_advanced = True
+                logger.info("RSI 部署阶段推进至 %s", new_phase)
+        except Exception as e:  # noqa: BLE001 - 阶段评估故障不影响迭代主流程
+            logger.debug("阶段推进评估跳过: %s", e)
+
         return {
             "feedback_signals": feedback_signals,
             "convergence": convergence,
@@ -190,6 +211,7 @@ class RSIOrchestrator:
             "applied_count": applied_count,
             "gain": gain,
             "escalation_proposals": escalation_proposals,
+            "phase_advanced": phase_advanced,
             "metrics": self.metrics.get_dashboard_data(),
         }
 

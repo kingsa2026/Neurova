@@ -333,6 +333,56 @@ class _NullSystem:
         return {"status": "null_fallback", "active": False}
 
 
+def wire_memory_guards(agent) -> None:
+    """装配记忆护栏组件（Step9.9/9.95/9.96 的依赖，幂等）。
+
+    此前三个组件全仓无生产实例化点——post_chat 的冲突检测/版本快照/规则
+    提取三步骤恒 SKIPPED（mem_core.py:376 的契约注释形同虚设）。
+
+    - conflict_detector: LegacyConflictDetector 规则模式（use_semantic=False，
+      零模型依赖、确定性输出；语义模式的首载成本与不确定性不适合每轮路径）
+    - version_control: get_version_control()（内存态快照，会话内可回滚；
+      跨进程持久化待 storage 接口统一后另接）
+    - dependency_graph: get_dependency_graph() 模块单例
+    - experience_fusion: ExperienceMemoryFusion(dependency_graph)
+    """
+    try:
+        from neurova.cognitive_layers.memory_layer.conflict import LegacyConflictDetector
+
+        if getattr(agent, "conflict_detector", None) is None:
+            agent.conflict_detector = LegacyConflictDetector(use_semantic=False)
+    except Exception as e:  # noqa: BLE001 - 装配失败退回 None（步骤 SKIPPED 不炸）
+        logger.warning("conflict_detector 装配失败: %s", e)
+
+    try:
+        from neurova.cognitive_layers.memory_layer.version_control import get_version_control
+
+        if getattr(agent, "version_control", None) is None:
+            agent.version_control = get_version_control()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("version_control 装配失败: %s", e)
+
+    try:
+        from neurova.cognitive_layers.memory_layer.dependency_graph import get_dependency_graph
+
+        if getattr(agent, "dependency_graph", None) is None:
+            agent.dependency_graph = get_dependency_graph()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("dependency_graph 装配失败: %s", e)
+
+    try:
+        from neurova.cognitive_layers.memory_layer.experience_memory_fusion import (
+            ExperienceMemoryFusion,
+        )
+
+        if getattr(agent, "experience_fusion", None) is None:
+            agent.experience_fusion = ExperienceMemoryFusion(
+                getattr(agent, "dependency_graph", None)
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("experience_fusion 装配失败: %s", e)
+
+
 class SubSystemContainer:
     """Agent 子系统容器 — 分组管理初始化逻辑
 
@@ -445,6 +495,12 @@ class SubSystemContainer:
         a.unified_retriever = None
         a.crystallizer = None
         a.trace_manager = None
+        # 记忆护栏组件（Step9.9/9.95/9.96 依赖）：默认 None，init_cognition 时
+        # 由 wire_memory_guards 装配真实单例（post_chat 契约注释宣称拥有它们）
+        a.conflict_detector = None
+        a.version_control = None
+        a.dependency_graph = None
+        a.experience_fusion = None
 
         if c.enable_memory:
             a._init_memory_modules()
@@ -609,6 +665,9 @@ class SubSystemContainer:
         a = self.agent
         c = self.config
 
+        # 记忆护栏装配（幂等）：激活 post_chat Step9.9/9.95/9.96
+        wire_memory_guards(a)
+
         a.growth_analyzer = None
         if c.enable_cognitive_capabilities and a.memory_manager:
             try:
@@ -662,11 +721,21 @@ class SubSystemContainer:
             a.pattern_miner = a.evolution.pattern_miner
             a.genetic_engine = a.evolution.genetic_engine
 
+        # C3 断链修复（工具侧审计）：不再新建独立实例——此前 tool_executor 触的是
+        # 本实例，而 on_before_tool_selection 过滤用 orchestrator 内部实例，主链
+        # 活跃度数据永远进不了过滤器（ARCHIVED/DEGRADED 判定失真，过滤形同虚设）。
+        # 统一指向 orchestrator.tool_lifecycle 后，主链/后处理链/肌肉记忆降级检查/
+        # 过滤器消费同一份活跃度数据。evolution 不可用时回退自建（零 evolution 场景
+        # 生命周期仍可用）。注意：主链不得改调 on_after_tool_execution——那条路经
+        # ExperienceFeedback 会二次 update_weight（权重双计）。
         a.tool_lifecycle = None
-        try:
-            a.tool_lifecycle = ToolLifecycleManager()
-        except Exception as e:
-            logger.warning("ToolLifecycleManager 初始化失败: %s", e)
+        if a.evolution and getattr(a.evolution, "tool_lifecycle", None) is not None:
+            a.tool_lifecycle = a.evolution.tool_lifecycle
+        else:
+            try:
+                a.tool_lifecycle = ToolLifecycleManager()
+            except Exception as e:
+                logger.warning("ToolLifecycleManager 初始化失败: %s", e)
 
         if a.tool_memory and a.evolution:
             a.tool_memory.tool_weights = a.evolution.tool_weights
@@ -1232,6 +1301,7 @@ class Agent:
         self.crystallizer = PatternCrystallizer(
             engine=self.cognitive_engine,
             evolution_orchestrator=evolution,
+            state_path=str(c.workspace_path / "data" / "crystallizer_state.json"),
         )
         logger.info("PatternCrystallizer 初始化完成")
 
@@ -1369,7 +1439,31 @@ class Agent:
         except Exception as e:
             logger.debug("技能使用记录失败: %s", e)
 
-        if not self.tool_memory or not result or not result.success:
+        # 断点 #1 修复（Skill 递归进化审计）：genetic_engine.record_reuse 零调用方，
+        # 进化技能被复用时 reuse_count 恒 0、fitness 的复用项恒 0——"越用越强"的
+        # 正反馈不存在。此处把 genetic 产物的工具序列喂回种群。
+        # 断点⑥修复（闭环审计 2026-09-04）：reuse 反馈移到 success 判定之后——
+        # 失败执行累加 reuse_count 会把 fitness 正反馈推向错误方向（信号污染）。
+        if result is None or not result.success:
+            return
+
+        try:
+            tool_sequence = (getattr(skill, "config", None) or {}).get("tool_sequence")
+            if isinstance(tool_sequence, list) and tool_sequence:
+                evolution = getattr(self, "evolution", None)
+                genetic_engine = getattr(evolution, "genetic_engine", None)
+                if genetic_engine is None:
+                    from neurova.evolution.closed_loop import get_evolution_orchestrator
+
+                    genetic_engine = getattr(
+                        get_evolution_orchestrator(), "genetic_engine", None
+                    )
+                if genetic_engine is not None:
+                    genetic_engine.record_reuse([str(t) for t in tool_sequence])
+        except Exception as e:
+            logger.debug("遗传复用记录失败: %s", e)
+
+        if not self.tool_memory:
             return
 
         try:

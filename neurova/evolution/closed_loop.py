@@ -13,13 +13,15 @@
 
 from neurova.core.logger import get_logger
 import json
+import math
 import os
 import threading
 import time
-from dataclasses import dataclass
-from datetime import UTC, datetime
+from collections import deque
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 # H7 修复: 删除本地 Version A ToolLifecycleManager（touch 仅 1 参、get_state 返回字符串），
 # 统一 re-export tool_lifecycle.py 的 Version B（touch 接受 success、get_state 返回枚举、有锁）。
@@ -41,14 +43,40 @@ class ToolWeight:
     last_used: Optional[datetime] = None
     adaptive_multiplier: float = 1.0
     lifecycle_state: str = "active"  # active, degraded, archived, frozen
+    # 融合 A 版思想①②：滑动窗口（近期表现）与惰性衰减由 weights 管理器消费；
+    # 默认无 maxlen，由管理器按 window_size 显式修剪
+    window: Deque[Tuple[float, bool]] = field(default_factory=deque)
 
 
 class AdaptiveToolWeights:
-    """自适应权重管理器 — 根据工具表现调整权重"""
+    """自适应权重管理器 — 根据工具表现调整权重
 
-    def __init__(self):
+    融合说明（A/B 版裁决，docs/Neurova_OpenClaw工具技能专项对比 §7）：
+    B 版骨架（接线/持久化/夹紧/动态阈值齿轮）为正身，吸收 A 版三个思想：
+    - 滑动窗口成功率：get_effective_weight 取 window 内近期表现，不用终身计数
+    - 惰性时间衰减：读取时按 exp(-decay_rate*hours) 衰减 multiplier（处理非平稳）
+    - 参数化：success_bonus/failure_penalty/decay_rate/window_size 为真实消费属性
+      （RSI OPTIMIZABLE_PARAMETERS 同名参数从死表变活表）
+    """
+
+    def __init__(
+        self,
+        success_bonus: float = 0.1,
+        failure_penalty: float = 0.05,
+        decay_rate: float = 0.01,
+        window_size: int = 100,
+        min_multiplier: float = 0.3,
+        max_multiplier: float = 1.5,
+    ):
         self._weights: Dict[str, ToolWeight] = {}
         self._lock = threading.RLock()  # CL-1: RLock 支持读路径间的可重入调用
+        # RSI 可优化参数（真实消费：见 update_weight/_apply_lazy_decay/get_effective_weight）
+        self.success_bonus: float = success_bonus
+        self.failure_penalty: float = failure_penalty
+        self.decay_rate: float = decay_rate
+        self.window_size: int = max(1, int(window_size))
+        self.min_multiplier: float = min_multiplier
+        self.max_multiplier: float = max_multiplier
         # 断点 A 收尾：持久化挂载（None=纯内存/测试语义，行为零变化）
         self._persist_path: Optional[Path] = None
         self._save_interval: float = 10.0
@@ -70,7 +98,7 @@ class AdaptiveToolWeights:
             return False
         with self._lock:
             payload = {
-                "version": 1,
+                "version": 2,
                 "weights": {
                     name: {
                         "success_count": w.success_count,
@@ -79,6 +107,9 @@ class AdaptiveToolWeights:
                         "adaptive_multiplier": w.adaptive_multiplier,
                         "last_used": w.last_used.isoformat() if w.last_used else None,
                         "lifecycle_state": w.lifecycle_state,
+                        "window": [
+                            [ts, 1 if ok else 0] for ts, ok in list(w.window)[-self.window_size:]
+                        ],
                     }
                     for name, w in self._weights.items()
                 },
@@ -114,6 +145,11 @@ class AdaptiveToolWeights:
                             entry.last_used = datetime.fromisoformat(last_used)
                         except ValueError:
                             entry.last_used = None
+                    # v2：滑动窗口；旧 JSON 无 window 字段 → 安全默认空窗（未观测=权重 1.0 语义）
+                    entry.window = deque(
+                        ((float(ts), bool(ok)) for ts, ok in payload.get("window", [])),
+                        maxlen=self.window_size,
+                    )
                     self._weights[name] = entry
             logger.info("权重持久化恢复: %s 个工具", len(data))
             return True
@@ -144,23 +180,41 @@ class AdaptiveToolWeights:
             return self._weights.get(tool_name)
 
     def update_weight(self, tool_name: str, success: bool, latency: float = 0.0) -> None:
-        """更新工具权重"""
+        """更新工具权重
+
+        multiplier：成功走加法递减收益（A 版思想：bonus/(1+0.1*success_count)），
+        失败走乘法惩罚；两者共用 [min_multiplier, max_multiplier] 夹紧。
+        同时维护滑动窗口（A 版思想①），供 get_effective_weight 的近期成功率消费。
+        """
         with self._lock:
             if tool_name not in self._weights:
                 self._weights[tool_name] = ToolWeight(tool_name=tool_name)
 
             weight = self._weights[tool_name]
+            now_ts = time.time()
             if success:
                 weight.success_count += 1
-                # 成功时增加自适应乘数（最多增加50%）
-                weight.adaptive_multiplier = min(1.5, weight.adaptive_multiplier * 1.05)
+                # 成功时增加自适应乘数：递减收益（A 版思想，分母取窗口内成功数——
+                # 修复 A 版用终身计数导致老工具激励永久冻结的缺陷）
+                k = sum(1 for _, ok in weight.window if ok)
+                bonus = self.success_bonus / (1 + k * 0.1)
+                weight.adaptive_multiplier = min(
+                    self.max_multiplier,
+                    weight.adaptive_multiplier + bonus,
+                )
             else:
                 weight.failure_count += 1
-                # 失败时降低自适应乘数（最少降到30%）
-                weight.adaptive_multiplier = max(0.3, weight.adaptive_multiplier * 0.95)
+                # 失败时按比例降低自适应乘数（夹紧下限）
+                weight.adaptive_multiplier = max(
+                    self.min_multiplier,
+                    weight.adaptive_multiplier * (1 - self.failure_penalty),
+                )
 
             weight.total_latency += latency
             weight.last_used = datetime.now(UTC)
+            weight.window.append((now_ts, bool(success)))
+            while len(weight.window) > self.window_size:
+                weight.window.popleft()
             # 断点 A 收尾：节流落盘（挂载了持久化且达到间隔 → 保存；IO 在锁内
             # 快照、锁外写，见 save()）
             self._maybe_persist()
@@ -168,20 +222,79 @@ class AdaptiveToolWeights:
                 f"Weight updated for {tool_name}: success={success}, multiplier={weight.adaptive_multiplier:.3f}"
             )
 
+    def _apply_lazy_decay(self, weight: ToolWeight) -> None:
+        """惰性时间衰减（A 版思想②）：读取时按距上次使用的时长衰减 multiplier。
+
+        只在超过 6 分钟未使用时生效；下限 min_multiplier 与更新路径共用。
+        """
+        if weight.last_used is None:
+            return
+        hours = (datetime.now(UTC) - weight.last_used).total_seconds() / 3600.0
+        if hours <= 0.1 or self.decay_rate <= 0:
+            return
+        decayed = weight.adaptive_multiplier * math.exp(-self.decay_rate * hours)
+        weight.adaptive_multiplier = max(self.min_multiplier, decayed)
+        # 衰减即"被读取"，刷新时间戳防止同一次闲置被重复指数放大
+        weight.last_used = datetime.now(UTC)
+
+    def _windowed_success_rate(self, weight: ToolWeight) -> float:
+        """滑动窗口内成功率（A 版思想①）。
+
+        回退序：窗口空但有终身观测 → 终身成功率（旧 B 版语义，legacy 数据零跳变）；
+        完全未观测 → 1.0（不受罚）。
+        """
+        if not weight.window:
+            total = weight.success_count + weight.failure_count
+            if total == 0:
+                return 1.0
+            return weight.success_count / total
+        wins = sum(1 for _, ok in weight.window if ok)
+        return wins / len(weight.window)
+
+    def get_effective_multiplier(self, tool_name: str) -> float:
+        """乘数读数（含惰性衰减）——供动态阈值齿轮消费工具陈旧性。"""
+        weight = self.get_weight(tool_name)
+        if not weight:
+            return 1.0
+        with self._lock:
+            self._apply_lazy_decay(weight)
+        return weight.adaptive_multiplier
+
+    def configure(
+        self,
+        success_bonus: Optional[float] = None,
+        failure_penalty: Optional[float] = None,
+        decay_rate: Optional[float] = None,
+        window_size: Optional[int] = None,
+    ) -> None:
+        """运行时调参（RSI 活表入口；None=不修改）。
+
+        由 ToolMemoryIntegration 的同名参数属性转发调用——
+        RSI apply_optimization setattr 到 integration 后经此落到权重本体。
+        """
+        with self._lock:
+            if success_bonus is not None:
+                self.success_bonus = float(success_bonus)
+            if failure_penalty is not None:
+                self.failure_penalty = float(failure_penalty)
+            if decay_rate is not None:
+                self.decay_rate = float(decay_rate)
+            if window_size is not None:
+                self.window_size = max(1, int(window_size))
+                for w in self._weights.values():
+                    while len(w.window) > self.window_size:
+                        w.window.popleft()
+
     def get_effective_weight(self, tool_name: str) -> float:
-        """获取工具的有效权重（考虑自适应乘数）"""
+        """获取工具的有效权重 = 窗口成功率 × 自适应乘数（含惰性衰减）"""
         weight = self.get_weight(tool_name)
         if not weight:
             return 1.0
 
-        # 基础权重基于成功率
-        total = weight.success_count + weight.failure_count
-        if total == 0:
-            base_weight = 1.0
-        else:
-            base_weight = weight.success_count / total
+        with self._lock:
+            self._apply_lazy_decay(weight)
+            base_weight = self._windowed_success_rate(weight)
 
-        # 应用自适应乘数
         return base_weight * weight.adaptive_multiplier
 
     def get_ranked_tools(self, tool_names: List[str]) -> List[str]:
@@ -349,7 +462,14 @@ class EvolutionOrchestrator:
 
         logger.debug("Tool execution recorded: %s, success=%s", tool_name, success)
 
-    def on_experience_recorded(self, text: str, task: str, tools: List[str], success: bool) -> Dict[str, Any]:
+    def on_experience_recorded(
+        self,
+        text: str,
+        task: str,
+        tools: List[str],
+        success: bool,
+        crystallizer: Optional[Any] = None,
+    ) -> Dict[str, Any]:
         """
         经验记录后钩子 — 使用 ExperienceFeedback 提取洞察并更新权重
 
@@ -358,6 +478,9 @@ class EvolutionOrchestrator:
             task: 任务描述
             tools: 使用的工具列表
             success: 是否成功
+            crystallizer: 调用方（agent）自己的结晶器。单例的 self.crystallizer
+                会被每个 agent 初始化 last-writer-wins 覆盖（多 agent 串写），
+                因此调用方必须显式传入；未传时回退单例构造参数（向后兼容）。
 
         Returns:
             包含洞察信息的字典
@@ -379,10 +502,14 @@ class EvolutionOrchestrator:
             self.pattern_miner.add_sequence(tools, context=task)
 
         # 触发经验结晶
-        if self.crystallizer and tools:
-            for tool in tools:
+        # 入口放宽：纯对话轮（无工具）以 "chat" 伪工具名观察，与 EKB 的
+        # skill_name="chat" 约定一致——否则无工具轮永不进入结晶缓冲
+        cryst = crystallizer or self.crystallizer
+        if cryst:
+            observe_targets = tools if tools else ["chat"]
+            for tool in observe_targets:
                 try:
-                    self.crystallizer.observe(
+                    cryst.observe(
                         tool_name=tool,
                         context=task,
                         success=success,
@@ -547,6 +674,45 @@ def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
     if restored:
         logger.info("进化权重已从 %s 恢复", persist_path)
     return restored
+
+
+def bootstrap_evolution_protections() -> Dict[str, bool]:
+    """按 env 门控装配工具层防护（C5 断链修复；幂等；默认全关）。
+
+    - NEUROVA_TOOL_CIRCUIT_BREAKER=1 → install_tool_circuit_breaker()
+      （连续失败达阈值打开熔断，半开探测恢复；策略拒绝不计失败）
+    - NEUROVA_TOOL_PARAM_GUARD=1 → install_tool_param_guard()
+      （参数别名归一/截断 JSON 修复）
+
+    防护件此前生产零装配（防波堤造好没接水）；按项目教义防护类扩展点
+    显式 install 默认关，由 start_server 在 bootstrap_evolution_persistence
+    之后调用。返回各防护是否装配成功。
+    """
+    import os
+
+    result = {"circuit_breaker": False, "param_guard": False}
+
+    if os.environ.get("NEUROVA_TOOL_CIRCUIT_BREAKER") == "1":
+        try:
+            from neurova.security.tool_circuit_breaker import install_tool_circuit_breaker
+
+            install_tool_circuit_breaker()
+            result["circuit_breaker"] = True
+            logger.info("工具熔断器已装配（NEUROVA_TOOL_CIRCUIT_BREAKER=1）")
+        except Exception as e:
+            logger.warning("工具熔断器装配失败: %s", e)
+
+    if os.environ.get("NEUROVA_TOOL_PARAM_GUARD") == "1":
+        try:
+            from neurova.security.tool_param_guard import install_tool_param_guard
+
+            install_tool_param_guard()
+            result["param_guard"] = True
+            logger.info("工具参数守卫已装配（NEUROVA_TOOL_PARAM_GUARD=1）")
+        except Exception as e:
+            logger.warning("工具参数守卫装配失败: %s", e)
+
+    return result
 
 
 def reset_evolution_orchestrator() -> None:

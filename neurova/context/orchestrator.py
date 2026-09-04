@@ -455,28 +455,10 @@ class ContextOrchestrator:
                     content = str(memory)
                 self.context_pool.add_context(ContextInput(source=ContextSource.MEMORY, content=content, priority=70))
 
-            # 归档经验
-            for experience in experience_items or []:
-                if isinstance(experience, dict):
-                    content = experience.get("content", str(experience))
-                else:
-                    content = str(experience)
+            # 归档经验（D1 收敛：与结晶产物按内容键去重，结晶优先）
+            for tag, content, prio in dedupe_experience_sources(experience_items, crystallized_patterns):
                 self.context_pool.add_context(
-                    ContextInput(source=ContextSource.EXPERIENCE, content=content, priority=70)
-                )
-
-            # 归档结晶经验（认知图谱 PatternCrystallizer 产物）
-            for pattern in crystallized_patterns or []:
-                if isinstance(pattern, dict):
-                    content = pattern.get("content", str(pattern))
-                else:
-                    content = str(pattern)
-                self.context_pool.add_context(
-                    ContextInput(
-                        source=ContextSource.EXPERIENCE,
-                        content=f"[结晶经验] {content}",
-                        priority=80,  # 结晶经验优先级高于普通经验
-                    )
+                    ContextInput(source=ContextSource.EXPERIENCE, content=f"{tag}{content}", priority=prio)
                 )
 
             # 归档反思日志（持久教训，可被语义召回）
@@ -654,26 +636,10 @@ class ContextOrchestrator:
                 ContextInput(source=ContextSource.MEMORY, content=content, priority=70, metadata=metadata)
             )
 
-        # 添加经验
-        for experience in experience_items or []:
-            if isinstance(experience, dict):
-                content = experience.get("content", str(experience))
-            else:
-                content = str(experience)
-            candidate_pool.append(ContextInput(source=ContextSource.EXPERIENCE, content=content, priority=70))
-
-        # 添加结晶经验（认知图谱 PatternCrystallizer 产物）
-        for pattern in crystallized_patterns or []:
-            if isinstance(pattern, dict):
-                content = pattern.get("content", str(pattern))
-            else:
-                content = str(pattern)
+        # 添加经验（D1 收敛：与结晶产物按内容键去重，结晶优先）
+        for tag, content, prio in dedupe_experience_sources(experience_items, crystallized_patterns):
             candidate_pool.append(
-                ContextInput(
-                    source=ContextSource.EXPERIENCE,
-                    content=f"[结晶经验] {content}",
-                    priority=80,  # 结晶经验优先级高于普通经验
-                )
+                ContextInput(source=ContextSource.EXPERIENCE, content=f"{tag}{content}", priority=prio)
             )
 
         # 添加情感状态
@@ -951,6 +917,10 @@ class ContextOrchestrator:
     async def get_tools_description(self) -> str:
         """获取工具描述文本，注入 system prompt。
 
+        A1 单源化（工具面审计）：渲染消费 build_tools_for_llm 的同一份已筛选
+        清单（生命周期过滤+可见性门控后的结果），条目数与 tools 参数严格一致。
+        A4 预算：清单渲染走 render_tools_description（18000 字符预算降级）。
+
         注意：这里只列工具清单与使用策略，**不教任何调用语法**——
         原生 function calling 由 tools 参数承载；文本格式教学收敛在
         get_tool_call_format_hint()，仅供 provider 不支持原生 FC 的降级路径。
@@ -961,38 +931,154 @@ class ContextOrchestrator:
             tools = await self.build_tools_for_llm()
             if not tools:
                 return ""
-            lines = [
-                "\n\n## 可用工具\n",
-                "⚠️ **工具使用策略**：\n"
-                "- 你具备真实工具能力。需要实时信息、文件读写、屏幕/浏览器操作等能力时，"
-                "必须主动调用对应工具完成，不要回复\"我做不到/无法获取\"\n"
-                "- 调用前确认参数完整；调用失败时阅读错误信息，修正参数重试或改用其他工具\n"
-                "- 简单闲聊无需调用工具\n"
-                "- `memory_search` 和 `voice_memory_search` 仅检索本 Agent 自身的历史记忆，"
-                "不能搜互联网；实时信息请用 `weather` / `web_search`\n"
-                "- `computer_shell` 可执行本地命令，注意安全性和权限\n",
-            ]
-            for t in tools:
-                fn = t["function"]
-                params_desc = ""
-                params = fn.get("parameters", {}).get("properties", {})
-                required = fn.get("parameters", {}).get("required", [])
-                if params:
-                    param_list = [f"{k}{'(必填)' if k in required else ''}" for k in params]
-                    params_desc = f" — 参数: {', '.join(param_list)}"
-                lines.append(f"- **{fn['name']}**: {fn['description']}{params_desc}")
-            return "\n".join(lines)
+            return render_tools_description(tools)
         except Exception as e:
             logger.warning("构建工具描述失败: %s", e)
             return ""
+
+    async def _apply_visibility_gate(self, tools: Optional[List[Dict]]) -> Optional[List[Dict]]:
+        """A2 可见性门控（env 门控，默认关）：DEGRADED 工具从 LLM 工具面隐藏。
+
+        与 _apply_tool_lifecycle（排序+archived/frozen 过滤）串联：
+        build_tools_for_llm → _apply_tool_lifecycle → _apply_visibility_gate。
+        默认零行为变化；NEUROVA_HIDE_DEGRADED_TOOLS=1 时隐藏（不删除——
+        生命周期状态可恢复，恢复后自动重新可见）。
+        """
+        import os
+
+        if not tools or os.environ.get("NEUROVA_HIDE_DEGRADED_TOOLS") != "1":
+            return tools
+        try:
+            evolution = getattr(self._agent, "evolution", None)
+            lifecycle = getattr(evolution, "tool_lifecycle", None)
+            get_state = getattr(lifecycle, "get_state", None)
+            if not callable(get_state):
+                return tools
+            kept = []
+            for t in tools:
+                name = t.get("function", {}).get("name", "")
+                try:
+                    state = get_state(name)
+                    state_value = getattr(state, "value", None) or str(state or "")
+                except Exception:
+                    state_value = "active"
+                if state_value == "degraded":
+                    continue
+                kept.append(t)
+            if len(kept) != len(tools):
+                logger.info("可见性门控: 隐藏 %s 个 DEGRADED 工具", len(tools) - len(kept))
+            return kept if kept else tools
+        except Exception as e:
+            logger.debug("可见性门控跳过: %s", e)
+            return tools
 
     async def build_tools_for_llm(self) -> Optional[List[Dict]]:
         """聚合所有工具为 OpenAI function call schema（内置 + Skill + MCP + 插件）。
 
         实例方法：委托给底层 `_build_tools_for_llm` 实现，保持 `self` 注入，
         使 agent_core / chat_pipeline / context_facade 等调用方通过实例正常访问。
+        管道顺序：聚合 → 生命周期过滤/排序 → 可见性门控（A2）→ Tool Search 压缩（A6）。
         """
-        return self._apply_tool_lifecycle(await _build_tools_for_llm(self))
+        tools = self._apply_tool_lifecycle(await _build_tools_for_llm(self))
+        tools = await self._apply_visibility_gate(tools)
+        return self._apply_tool_search_compaction(tools)
+
+    def _apply_tool_search_compaction(self, tools):
+        """A6 Tool Search（P2）：env 门控 + 规模阈值触发目录压缩。
+
+        NEUROVA_TOOL_SEARCH=1 且（隐藏候选数 >= NEUROVA_TOOL_SEARCH_MIN_CATALOG，
+        默认 40）时激活：直连工具（NEUROVA_TOOL_SEARCH_DIRECT 逗号清单，含默认
+        核心集）+ 三个控制工具保持模型可见，其余参数 schema 移出 prompt；能力
+        目录（name+description，18000 字符预算）注入清单尾部供 tool_search 检索。
+        """
+        import os as _os
+
+        if not tools or _os.environ.get("NEUROVA_TOOL_SEARCH") != "1":
+            return tools
+        try:
+            from neurova.context.tool_search import (
+                apply_tool_search_compaction as _compact,
+                render_directory,
+            )
+
+            direct = [
+                n.strip()
+                for n in _os.environ.get(
+                    "NEUROVA_TOOL_SEARCH_DIRECT",
+                    "memory_search,voice_memory_search,web_search,file_read,file_write,"
+                    "file_edit,computer_shell,run_code,spawn_subagent,planning",
+                ).split(",")
+                if n.strip()
+            ]
+            try:
+                min_catalog = int(_os.environ.get("NEUROVA_TOOL_SEARCH_MIN_CATALOG", "40"))
+            except ValueError:
+                min_catalog = 40
+
+            hidden_candidates = [
+                t["function"]["name"]
+                for t in tools
+                if t.get("function", {}).get("name") not in set(direct)
+                and t.get("function", {}).get("name") not in ("tool_search", "tool_describe", "tool_call")
+            ]
+            compacted = _compact(tools, direct, min_catalog=min_catalog)
+            if compacted is None:
+                return tools
+
+            from neurova.context.tool_search import build_catalog, get_active_catalog
+
+            catalog_entries = [e for e in get_active_catalog()]
+            directory = render_directory(catalog_entries, max_chars=18000)
+            _nl = chr(10)
+            directory_block = (
+                _nl + _nl + "## 隐藏工具目录（schema 未加载）" + _nl
+                + "以下工具可用 tool_search 检索、tool_describe 取参数 schema、tool_call 调用："
+                + _nl + directory + _nl
+            )
+            # 目录以一个伪 schema 条目挂进 tools 参数（description 承载目录文本，
+            # 不产生可执行入口——真调用走 tool_call）
+            compacted.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "tool_search_directory",
+                        "description": f"Hidden tool catalog. {directory_block}",
+                        "parameters": {"type": "object", "properties": {}, "required": []},
+                    },
+                }
+            )
+            return compacted
+        except Exception as e:
+            logger.warning("Tool Search 压缩跳过: %s", e)
+            return tools
+
+
+def dedupe_experience_sources(experiences, crystallized_patterns):
+    """D1 经验注入收敛：普通经验与结晶产物按内容键去重（结晶优先保留）。
+
+    此前两条注入管线（EKB 经验 / PatternCrystallizer 产物）互不感知，
+    同一条经验会以 70/80 两个优先级重复进池。key = 内容去空白前 100 字符。
+    Returns: List[(tag, content, priority)]
+    """
+    import re as _re
+
+    def _key(c: str) -> str:
+        return _re.sub(r"[\s]+", "", str(c))[:100]
+
+    seen = set()
+    out = []
+    # 结晶产物先入（同内容时按优先级保留结晶副本）
+    pairs = [(("[结晶经验] ", p, 80)) for p in (crystallized_patterns or [])] + [
+        (("", e, 70)) for e in (experiences or [])
+    ]
+    for tag, item, prio in pairs:
+        content = item.get("content", str(item)) if isinstance(item, dict) else str(item)
+        k = _key(content)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append((tag, content, prio))
+    return out
 
 
 def get_tool_call_format_hint() -> str:
@@ -1007,6 +1093,80 @@ def get_tool_call_format_hint() -> str:
         "`[TOOL_CALL:工具名(参数=值, ...)]`\n"
         "示例：`[TOOL_CALL:web_search(query=\"今日新闻\")]`\n"
     )
+
+
+def render_tools_description(tools: List[Dict], max_chars: Optional[int] = None) -> str:
+    """渲染工具清单 markdown（A4 预算降级，模块级纯函数便于测试）。
+
+    预算默认 18000 字符（env NEUROVA_TOOL_PROMPT_BUDGET_CHARS 可覆盖），
+    对齐 OC directory 模式量级。超预算降级序：
+    1. 丢参数段（保留 name+完整 description）
+    2. 截断 description（400→160→80 字符）
+    3. 极限预算仍保留全部工具名条目（不删条目，防工具"消失"）
+    """
+    import os as _os
+
+    if max_chars is None:
+        try:
+            max_chars = int(_os.environ.get("NEUROVA_TOOL_PROMPT_BUDGET_CHARS", "18000"))
+        except ValueError:
+            max_chars = 18000
+
+    header = (
+        "\n\n## 可用工具\n"
+        "⚠️ **工具使用策略**：\n"
+        "- 你具备真实工具能力。需要实时信息、文件读写、屏幕/浏览器操作等能力时，"
+        "必须主动调用对应工具完成，不要回复\"我做不到/无法获取\"\n"
+        "- 调用前确认参数完整；调用失败时阅读错误信息，修正参数重试或改用其他工具\n"
+        "- 简单闲聊无需调用工具\n"
+        "- `memory_search` 和 `voice_memory_search` 仅检索本 Agent 自身的历史记忆，"
+        "不能搜互联网；实时信息请用 `weather` / `web_search`\n"
+        "- `computer_shell` 可执行本地命令，注意安全性和权限\n"
+    )
+
+    def _line(t, with_params=True, desc_limit=None):
+        fn = t["function"]
+        desc = fn.get("description", "") or ""
+        if desc_limit is not None and len(desc) > desc_limit:
+            desc = desc[:desc_limit] + "…"
+        params_desc = ""
+        if with_params:
+            params = fn.get("parameters", {}).get("properties", {})
+            required = fn.get("parameters", {}).get("required", [])
+            if params:
+                param_list = [f"{k}{'(必填)' if k in required else ''}" for k in params]
+                params_desc = f" — 参数: {', '.join(param_list)}"
+        return f"- **{fn['name']}**: {desc}{params_desc}"
+
+    def _join(lines):
+        return "\n".join([header] + lines)
+
+    # A6 闭环审计修复：目录伪条目只在 tools 参数承载（description 即目录文本），
+    # markdown 渲染跳过——否则目录双份注入，且预算截断会毁掉目录显示
+    budget_tools = [t for t in tools if t.get("function", {}).get("name") != "tool_search_directory"]
+    if not budget_tools:
+        budget_tools = tools
+
+    lines = [_line(t) for t in budget_tools]
+    if len(_join(lines)) <= max_chars:
+        return _join(lines)
+
+    # 降级 1：丢参数段
+    lines = [_line(t, with_params=False) for t in budget_tools]
+    if len(_join(lines)) <= max_chars:
+        return _join(lines)
+
+    # 降级 2：截断 description
+    for limit in (400, 160, 80, 40):
+        lines = [_line(t, with_params=False, desc_limit=limit) for t in budget_tools]
+        if len(_join(lines)) <= max_chars:
+            return _join(lines)
+
+    # 极限：硬截断整体，保证所有工具名可见（附截断说明）
+    text = _join(lines)
+    if len(text) > max_chars:
+        text = text[:max_chars] + f"\n\n⚠️ 工具清单过长已截断（{len(tools)} 个工具，预算 {max_chars} 字符）"
+    return text
 
 
 async def _build_tools_for_llm(self) -> Optional[List[Dict]]:
@@ -1069,6 +1229,10 @@ async def _build_tools_for_llm(self) -> Optional[List[Dict]]:
 
             for skill_name, raw_skill in self.skill_registry.skills.items():
                 skill = unpack_skill(raw_skill)  # H2 fix: 类 B 返回 (Skill, Path) 元组，需解包
+                # B2（工具面审计）：config.model_invocable=False 的技能不进模型工具面
+                # （人肉/API 仍可调用——SkillRegistry 与执行路径不受影响）
+                if isinstance(getattr(skill, "config", None), dict) and skill.config.get("model_invocable") is False:
+                    continue
                 # 尝试用 OpenAI Schema Adapter 生成带参数的 schema
                 try:
                     from neurova.skill_system.compat import OpenAISchemaAdapter

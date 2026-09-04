@@ -70,5 +70,125 @@
     "agent_id": "a1",
     "session_id": "s2",
     "created_at": "2026-09-04T02:48:06.766999+00:00"
+  },
+  {
+    "trace_id": "ead26e63-1946-4709-aad0-f7f0ed8e6f50",
+    "file_path": "trajectories\\u\\a\\s\\ead26e63-1946-4709-aad0-f7f0ed8e6f50.json",
+    "user_id": "u",
+    "agent_id": "a",
+    "session_id": "s",
+    "created_at": "2026-09-04T09:47:59.250666+00:00"
+  },
+  {
+    "trace_id": "919aab60-be12-40cb-b920-20b8498e1bb2",
+    "file_path": "trajectories\\u1\\a1\\s1\\919aab60-be12-40cb-b920-20b8498e1bb2.json",
+    "user_id": "u1",
+    "agent_id": "a1",
+    "session_id": "s1",
+    "created_at": "2026-09-04T09:48:05.347875+00:00"
+  },
+  {
+    "trace_id": "0597ea7b-16d8-4c79-8911-8865a7b7e9ee",
+    "file_path": "trajectories\\u1\\a1\\s1\\0597ea7b-16d8-4c79-8911-8865a7b7e9ee.json",
+    "user_id": "u1",
+    "agent_id": "a1",
+    "session_id": "s1",
+    "created_at": "2026-09-04T09:48:05.360812+00:00"
+  },
+  {
+    "trace_id": "65c22531-a586-41e7-9e86-298388d0e502",
+    "file_path": "trajectories\\u1\\a1\\s3\\65c22531-a586-41e7-9e86-298388d0e502.json",
+    "user_id": "u1",
+    "agent_id": "a1",
+    "session_id": "s3",
+    "created_at": "2026-09-04T09:48:05.369764+00:00"
+  },
+  {
+    "trace_id": "17d09e96-cef4-44f4-af9b-133094b05350",
+    "file_path": "trajectories\\u1\\a1\\s2\\17d09e96-cef4-44f4-af9b-133094b05350.json",
+    "user_id": "u1",
+    "agent_id": "a1",
+    "session_id": "s2",
+    "created_at": "2026-09-04T09:48:05.369764+00:00"
+  },
+  {
+    "trace_id": "d23203e3-04e7-4681-a5a7-6c666eec4104",
+    "file_path": "trajectories\\u\\a\\s\\d23203e3-04e7-4681-a5a7-6c666eec4104.json",
+    "user_id": "u",
+    "agent_id": "a",
+    "session_id": "s",
+    "created_at": "2026-09-04T09:50:43.883879+00:00"
+  },
+  {
+    "trace_id": "14903b84-da0f-44cc-bc4a-fb1eefae6ab2",
+    "file_path": "trajectories\\u1\\a1\\s1\\14903b84-da0f-44cc-bc4a-fb1eefae6ab2.json",
+    "user_id": "u1",
+    "agent_id": "a1",
+    "session_id": "s1",
+    "created_at": "2026-09-04T09:50:47.970848+00:00"
+  },
+  {
+    "trace_id": "f4a70116-ad49-4ecf-9947-b548c97466e0",
+    "file_path": "trajectories\\u1\\a1\\s1\\f4a70116-ad49-4ecf-9947-b548c97466e0.json",
+    "user_id": "u1",
+    "agent_id": "a1",
+    "session_id": "s1",
+    "created_at": "2026-09-04T09:50:47.980839+00:00"
+  },
+  {
+    "trace_id": "d51d1a2f-c0c4-4f72-885c-95f2d0ccaadd",
+    "file_path": "trajectories\\u1\\a1\\s3\\d51d1a2f-c0c4-4f72-885c-95f2d0ccaadd.json",
+    "user_id": "u1",
+    "agent_id": "a1",
+    "session_id": "s3",
+    "created_at": "2026-09-04T09:50:47.988895+00:00"
+  },
+  {
+    "trace_id": "506d09e9-c1ab-4af9-a9d8-dc09405f7cdf",
+    "file_path": "trajectories\\u1\\a1\\s2\\506d09e9-c1ab-4af9-a9d8-dc09405f7cdf.json",
+    "user_id": "u1",
+    "agent_id": "a1",
+    "session_id": "s2",
+    "created_at": "2026-09-04T09:50:47.987888+00:00"
+  },
+  {
+    "trace_id": "76b5d934-4d36-4083-9374-357354aab647",
+    "file_path": "trajectories\\u\\a\\s\\76b5d934-4d36-4083-9374-357354aab647.json",
+    "user_id": "u",
+    "agent_id": "a",
+    "session_id": "s",
+    "created_at": "2026-09-04T10:16:06.829955+00:00"
+  },
+  {
+    "trace_id": "1957b6fc-a548-4f97-92c8-586d30e60406",
+    "file_path": "trajectories\\u1\\a1\\s1\\1957b6fc-a548-4f97-92c8-586d30e60406.json",
+    "user_id": "u1",
+    "agent_id": "a1",
+    "session_id": "s1",
+    "created_at": "2026-09-04T10:16:10.707729+00:00"
+  },
+  {
+    "trace_id": "0b5a0e7f-e6cf-42ed-93db-78d266c66f23",
+    "file_path": "trajectories\\u1\\a1\\s1\\0b5a0e7f-e6cf-42ed-93db-78d266c66f23.json",
+    "user_id": "u1",
+    "agent_id": "a1",
+    "session_id": "s1",
+    "created_at": "2026-09-04T10:16:10.716890+00:00"
+  },
+  {
+    "trace_id": "861a5280-0900-4242-8a8a-8a686edeced3",
+    "file_path": "trajectories\\u1\\a1\\s3\\861a5280-0900-4242-8a8a-8a686edeced3.json",
+    "user_id": "u1",
+    "agent_id": "a1",
+    "session_id": "s3",
+    "created_at": "2026-09-04T10:16:10.725780+00:00"
+  },
+  {
+    "trace_id": "c8668eb0-9aed-47fa-9c63-7d72e0764493",
+    "file_path": "trajectories\\u1\\a1\\s2\\c8668eb0-9aed-47fa-9c63-7d72e0764493.json",
+    "user_id": "u1",
+    "agent_id": "a1",
+    "session_id": "s2",
+    "created_at": "2026-09-04T10:16:10.724701+00:00"
   }
 ]

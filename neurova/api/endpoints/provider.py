@@ -62,6 +62,9 @@ class UpdateProviderRequest(BaseModel):
     base_url: Optional[str] = Field(default=None, description="API 基础 URL")
     api_key: Optional[str] = Field(default=None, description="API Key")
     config: Dict[str, Any] = Field(default_factory=dict, description="额外配置")
+    # P1-13 断链修复: 真账单采集开关（None=不改动；true=开启该 provider 的
+    # 后台账单拉取，/stats/provider-usage 才会采集它）
+    usage_collection: Optional[bool] = Field(default=None, description="真账单采集开关")
 
 
 class ActivateModelRequest(BaseModel):

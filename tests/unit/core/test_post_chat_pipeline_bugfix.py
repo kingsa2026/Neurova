@@ -598,10 +598,13 @@ class TestBug9NoPrivateAttributeAccess:
         await pipeline._step_lifecycle_evaluate()
 
         # 应调用公开的 tool_weights 方法，不应访问私有 _tool_weights
-        # 验证 record_failure 被调用（而非直接修改 _tool_weights）
-        assert tool_weights.record_failure.called, (
-            "应通过 tool_weights.record_failure() 公开方法操作，而非直接访问 _tool_weights"
+        # 契约更新（A/B 融合 2026-09-04）：record_failure 已随 A 版删除，
+        # 衰减信号改经 update_weight(tool, success=False) 表达
+        assert tool_weights.update_weight.called, (
+            "应通过 tool_weights.update_weight() 公开方法操作，而非直接访问 _tool_weights"
         )
+        tool_weights.update_weight.assert_any_call("tool_a", False)
+        tool_weights.update_weight.assert_any_call("tool_b", False)
 
     @pytest.mark.asyncio
     async def test_genetic_evolution_uses_public_api(self, pipeline):

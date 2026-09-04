@@ -141,6 +141,13 @@ class AutoSkillBuilder:
         self._min_success_rate = min_success_rate
         self._max_patterns = max_patterns
         self._similarity_threshold = similarity_threshold
+        # C10 技能评审闸：默认开（产物 is_active=False 进 pending，需 approve_template
+        # 才会被 register_to_skill_registry 注册）；NEUROVA_SKILL_REVIEW_GATE=0 恢复
+        # 旧直通行为。自动产物未经人审即成模型可见工具面，是 OC Workshop 对照
+        # 报告指出的治理缺口。
+        import os as _os
+
+        self._review_gate = _os.environ.get("NEUROVA_SKILL_REVIEW_GATE", "1") != "0"
         self._lock = threading.RLock()
 
         # 模式库
@@ -328,6 +335,7 @@ class AutoSkillBuilder:
             tool_sequence=pattern.tool_sequence,
             context_template=" ".join(pattern.context_keywords[:5]),
             success_rate=pattern.success_rate,
+            is_active=not self._review_gate,  # C10: 评审闸开启时产物先进 pending
         )
 
         self._templates[template_id] = template
@@ -437,6 +445,39 @@ class AutoSkillBuilder:
     def get_all_templates(self) -> List[SkillTemplate]:
         """获取所有技能模板"""
         return list(self._templates.values())
+
+    def list_pending_templates(self) -> List[Dict[str, Any]]:
+        """列出待审模板（C10 评审闸：is_active=False 的产物）。"""
+        with self._lock:
+            return [
+                {
+                    "template_id": t.template_id,
+                    "name": t.name,
+                    "description": t.description,
+                    "tool_sequence": list(t.tool_sequence),
+                    "success_rate": t.success_rate,
+                }
+                for t in self._templates.values()
+                if not t.is_active
+            ]
+
+    def approve_template(self, template_id: str) -> bool:
+        """批准待审模板（激活后可被 register_to_skill_registry 注册）。"""
+        with self._lock:
+            t = self._templates.get(template_id)
+            if t is None:
+                return False
+            t.is_active = True
+            logger.info("技能模板 %s 已批准", template_id)
+            return True
+
+    def reject_template(self, template_id: str) -> bool:
+        """拒绝待审模板（删除）。"""
+        with self._lock:
+            if self._templates.pop(template_id, None) is None:
+                return False
+            logger.info("技能模板 %s 已拒绝", template_id)
+            return True
 
     def register_to_skill_registry(self, registry, skill_service=None) -> int:
         """将封装的技能模板注册到 SkillRegistry (并可选持久化到 SkillService)

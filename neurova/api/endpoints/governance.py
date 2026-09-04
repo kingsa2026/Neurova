@@ -173,6 +173,20 @@ async def approve_and_execute(request: Request, request_id: str,
     executor = ToolExecutor(agent)
     result = await executor._execute_single_tool(tool_name, params, skip_governance=True)
     logger.info("审批 %s 已批准并重放执行: %s", request_id, tool_name)
+
+    # E3（P2）：MCP 工具 + remember 批准 → 铸造 (server, tool) 粒度持久授权，
+    # 后续同名调用免审批直达（命令级 remember 由 ApprovalManager 负责，二者互补）
+    if getattr(body, "remember", None) and str(tool_name).startswith("mcp."):
+        try:
+            from neurova.security.mcp_grants import get_tool_grant_store, parse_mcp_tool_name
+
+            mcp_parts = parse_mcp_tool_name(tool_name)
+            if mcp_parts:
+                get_tool_grant_store().mint_grant(*mcp_parts, approved_by=str(body.approved_by or ""))
+                logger.info("已铸造 MCP 工具持久授权: %s", tool_name)
+        except Exception as _mint_err:
+            logger.warning("MCP 工具授权铸造失败: %s", _mint_err)
+
     return {"code": 0, "data": {"approved": True, "executed": True, "result": result}}
 
 
@@ -188,3 +202,71 @@ async def reject_approval(request: Request, request_id: str,
         raise HTTPException(status_code=500, detail="拒绝操作失败")
     logger.info("审批 %s 已拒绝", request_id)
     return {"code": 0, "data": {"approved": False}}
+
+
+# ── RSI 升级提案审批出口（遗留事项 ①） ─────────────────────────
+# SelfImprovementProposer 的 escalation 提案保持 PENDING 等待人工评审，
+# 但此前无任何 API 消费 approve_and_apply/reject_proposal——发散升级提案
+# 永远滞留。此处委托 RSI 单例（agent_core 注入 evolution 单例）暴露审批面。
+
+
+def _get_rsi_orchestrator():
+    from neurova.evolution.closed_loop import get_evolution_orchestrator
+
+    return getattr(get_evolution_orchestrator(), "rsi_orchestrator", None)
+
+
+class RsiApproveRequest(BaseModel):
+    """RSI 提案批准"""
+
+    approved_by: str = Field(..., min_length=1, description="批准者（人类评审 gate）")
+
+
+class RsiRejectRequest(BaseModel):
+    """RSI 提案拒绝"""
+
+    reason: str = ""
+
+
+@router.get("/rsi/proposals/pending")
+async def list_pending_rsi_proposals():
+    """列出 RSI 升级提案（PENDING 状态）"""
+    rsi = _get_rsi_orchestrator()
+    if rsi is None:
+        return {"code": 0, "data": {"proposals": [], "available": False}}
+    proposer = rsi.self_improvement_proposer
+    proposals = [p.to_dict() for p in proposer.list_pending_proposals()]
+    return {"code": 0, "data": {"proposals": proposals, "available": True}}
+
+
+@router.post("/rsi/proposals/{proposal_id}/approve")
+async def approve_rsi_proposal(proposal_id: str, body: RsiApproveRequest):
+    """人工批准并应用 RSI 升级提案（状态机守卫：仅 PENDING）"""
+    rsi = _get_rsi_orchestrator()
+    if rsi is None:
+        raise HTTPException(status_code=503, detail="RSI 编排器未初始化")
+    result = rsi.self_improvement_proposer.approve_and_apply(
+        proposal_id, approver=body.approved_by
+    )
+    if result is None or not getattr(result, "success", False):
+        error = getattr(result, "error", "") or "批准失败"
+        if "not found" in error:
+            raise HTTPException(status_code=404, detail=error)
+        raise HTTPException(status_code=409, detail=error)
+    logger.info("RSI 提案 %s 已批准并应用（by %s）", proposal_id, body.approved_by)
+    return {"code": 0, "data": {"applied": True, "result": getattr(result, "to_dict", lambda: {})()}}
+
+
+@router.post("/rsi/proposals/{proposal_id}/reject")
+async def reject_rsi_proposal(proposal_id: str, body: RsiRejectRequest):
+    """拒绝 RSI 升级提案（状态机守卫：仅 PENDING）"""
+    rsi = _get_rsi_orchestrator()
+    if rsi is None:
+        raise HTTPException(status_code=503, detail="RSI 编排器未初始化")
+    if not rsi.self_improvement_proposer.reject_proposal(proposal_id, reason=body.reason):
+        raise HTTPException(
+            status_code=404,
+            detail=f"提案不存在或非 PENDING 状态: {proposal_id}",
+        )
+    logger.info("RSI 提案 %s 已拒绝", proposal_id)
+    return {"code": 0, "data": {"rejected": True}}

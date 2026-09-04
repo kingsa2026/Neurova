@@ -189,33 +189,37 @@ class EvolutionFacade:
     # ============ 经验处理 ============
     
     def record_experience(
-        self, 
-        text: str, 
-        task: str, 
-        tools: List[str], 
+        self,
+        text: str,
+        task: str,
+        tools: List[str],
         success: bool,
+        crystallizer=None,
     ) -> Dict[str, Any]:
         """
         记录经验
-        
+
         Args:
             text: 经验文本
             task: 任务描述
             tools: 使用的工具列表
             success: 是否成功
-            
+            crystallizer: agent 自己的结晶器（agent 级隔离——单例上的
+                crystallizer 会被多 agent last-writer-wins 覆盖）
+
         Returns:
             Dict: 经验记录结果
         """
         if not self._orchestrator:
             return {"success": False, "error": "Orchestrator not available"}
-        
+
         try:
             result = self._orchestrator.on_experience_recorded(
                 text=text,
                 task=task,
                 tools=tools,
                 success=success,
+                crystallizer=crystallizer,
             )
             return result
         except Exception as e:
@@ -247,19 +251,32 @@ class EvolutionFacade:
     def get_frequent_patterns(self, top_n: int = 10) -> List[Dict[str, Any]]:
         """
         获取频繁模式
-        
+
+        C4 断链修复（工具侧审计）：此前调用不存在的
+        pattern_miner.get_frequent_patterns（实际方法名 get_top_patterns），
+        异常被吞静默返回 []。现透传并映射为 dict 契约
+        （{"tools", "support", "context"}），与 to_skill_template_list 对齐。
+
         Args:
             top_n: 返回前N个模式
-            
+
         Returns:
             List[Dict]: 频繁模式列表
         """
         if not self._orchestrator or not hasattr(self._orchestrator, 'pattern_miner'):
             return []
-        
+
         try:
-            patterns = self._orchestrator.pattern_miner.get_frequent_patterns(top_n)
-            return patterns if isinstance(patterns, list) else []
+            patterns = self._orchestrator.pattern_miner.get_top_patterns(k=top_n)
+            return [
+                {
+                    "tools": list(p.tools),
+                    "support": int(p.support),
+                    "context": p.context or "",
+                }
+                for p in patterns
+                if p is not None
+            ]
         except Exception as e:
             logger.warning("获取频繁模式失败: %s", e)
             return []

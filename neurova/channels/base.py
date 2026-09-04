@@ -237,8 +237,13 @@ class ChannelAdapter(ABC):
         chat_type: str = "p2p",
         message_type: str = "text",
         raw_event: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> ChannelMessage:
-        """构造统一消息对象"""
+        """构造统一消息对象
+
+        P1-12 断点③: 补 metadata 透传——feishu 语音下载的字节经
+        metadata.audio_bytes 送达 voice_precheck；不传时行为不变。
+        """
         return ChannelMessage(
             channel_type=self.channel_type,
             message_id=message_id,
@@ -249,4 +254,5 @@ class ChannelAdapter(ABC):
             chat_id=chat_id,
             chat_type=chat_type,
             raw_event=raw_event or {},
+            metadata=metadata or {},
         )

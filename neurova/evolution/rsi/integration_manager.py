@@ -187,8 +187,11 @@ class RSIIntegrationManager:
             # 应用优化
             system = self._systems[system_name]
             if hasattr(system, param_name):
+                old_value = getattr(system, param_name)
                 setattr(system, param_name, new_value)
                 logger.info("Applied optimization: %s = %s", parameter_path, new_value)
+                # C12 回执（工具面审计）：优化前后快照落 JSONL，可审计可回溯
+                self._write_optimization_receipt(parameter_path, old_value, new_value)
                 return True
             else:
                 logger.warning("System %s does not have parameter %s", system_name, param_name)
@@ -197,6 +200,32 @@ class RSIIntegrationManager:
         except Exception as e:
             logger.error("Failed to apply optimization: %s", e)
             return False
+
+    def _write_optimization_receipt(self, parameter_path: str, old_value: Any, new_value: Any) -> None:
+        """C12：优化回执落盘（JSONL 追加；env NEUROVA_RSI_RECEIPTS 覆盖路径，
+        默认 data/evolution/rsi_receipts.jsonl）。写失败仅告警不影响主流程。"""
+        import json as _json
+        import os as _os
+        import time as _time
+        from pathlib import Path as _Path
+
+        try:
+            env_path = _os.environ.get("NEUROVA_RSI_RECEIPTS")
+            if not env_path:
+                # 单例零 IO 教义：未显式配置路径（生产由 start_server 注入）不落盘
+                return
+            path = _Path(env_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            receipt = {
+                "ts": _time.time(),
+                "parameter_path": parameter_path,
+                "old_value": old_value,
+                "new_value": new_value,
+            }
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(_json.dumps(receipt, ensure_ascii=False) + chr(10))
+        except Exception as e:
+            self._logger.warning("优化回执写入失败: %s", e)
 
     def get_system_status(self) -> Dict[str, Any]:
         """
