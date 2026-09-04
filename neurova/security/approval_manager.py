@@ -470,6 +470,10 @@ class ApprovalManager:
             # 检查是否过期
             if request.expires_at and datetime.datetime.now(datetime.timezone.utc) > request.expires_at:
                 request.status = ApprovalStatus.EXPIRED
+                request.updated_at = datetime.datetime.now(datetime.timezone.utc)
+                # 复审修复: 过期状态同样落 SQLite（否则 JSON=EXPIRED 而库=PENDING，
+                # 重启后 SQLite 权威加载会让过期请求复活成可裁决态）
+                self._upsert_request_sqlite(request)
                 self._save_requests()
                 logger.warning("审批请求已过期: %s", request_id)
                 return False
