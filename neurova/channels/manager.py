@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from neurova.core.logger import get_logger
+from pathlib import Path
 from typing import Any, Callable, Coroutine, Dict, List, Optional
 
 from neurova.channels.base import (
@@ -240,41 +241,97 @@ class ChannelManager:
         await self._sync_to_session_sync(event_type, message)
 
         if event_type == ChannelEventType.MESSAGE_RECEIVED:
-            # 优先使用多处理器链
-            if hasattr(self, "_message_handlers") and self._message_handlers:
-                for priority, handler_id, handler in self._message_handlers:
+            # P1-12 语音预检: 语音消息先转写再进 handler 链（@提及/关键词
+            # 判定拿真实文本；失败降级占位，绝不阻断）
+            try:
+                from neurova.channels.voice_precheck import transcribe_voice_message
+
+                message = await transcribe_voice_message(message)
+            except Exception as e:  # noqa: BLE001 - 预检故障不影响消息分发
+                logger.debug("语音预检跳过: %s", e)
+
+            # P0-5 入站持久化队列（OpenClaw 启发）：先持久化再分发，重启不
+            # 丢消息。enqueue 成功 → 立即同步排水该消息（await，时序与旧
+            # 直发路径一致，分发结果经 ack/nack 落账）；队列不可用（DB 故障）
+            # → fail-open 旧直发路径。重启遗留消息由 start_drain 后台兜底。
+            queue = self._get_ingress_queue()
+            if queue is not None and queue.enqueue(message):
+                ev = queue.claim(worker="inline")
+                if ev is not None:
                     try:
-                        reply = await handler(message)
-                        if reply:
-                            await self.send_message(
-                                message.channel_type,
-                                message.chat_id,
-                                reply,
-                            )
-                            break  # 第一个返回回复的处理器获胜
-                    except Exception as e:
-                        logger.exception("Message handler %s error: %s", handler_id, e)
-            # 回退到单处理器模式
-            elif self._message_handler:
+                        await self._dispatch_message(ev.message)
+                    except Exception as e:  # noqa: BLE001 - 分发失败 nack 重试
+                        queue.nack(ev.event_id, str(e))
+                    else:
+                        queue.ack(ev.event_id)
+                return
+
+            await self._dispatch_message(message)
+
+    def _get_ingress_queue(self):
+        """惰性创建入站持久化队列（DB 打开失败返回 None，fail-open 直发）。
+
+        测试可通过 manager.ingress_queue = ChannelIngressQueue(tmp) 注入，
+        或置 False 强制直发路径。
+        """
+        injected = getattr(self, "ingress_queue", None)
+        if injected is False:
+            return None
+        if injected is not None:
+            return injected
+        if getattr(self, "_ingress_queue_failed", False):
+            return None
+        try:
+            from neurova.channels.channel_ingress_queue import ChannelIngressQueue
+
+            import os
+
+            db_path = os.environ.get("NEUROVA_CHANNEL_INGRESS_DB") or Path("data/channel_ingress.db")
+            queue = ChannelIngressQueue(db_path=db_path)
+            self.ingress_queue = queue
+            return queue
+        except Exception as e:
+            logger.warning("Ingress queue unavailable, fail-open to direct dispatch: %s", e)
+            self._ingress_queue_failed = True
+            return None
+
+    async def _dispatch_message(self, message: ChannelMessage):
+        """把一条渠道消息送进处理器链（原 _on_channel_event 分发体）。"""
+        # 优先使用多处理器链
+        if hasattr(self, "_message_handlers") and self._message_handlers:
+            for priority, handler_id, handler in self._message_handlers:
                 try:
-                    reply = await self._message_handler(message)
+                    reply = await handler(message)
                     if reply:
                         await self.send_message(
                             message.channel_type,
                             message.chat_id,
                             reply,
                         )
+                        break  # 第一个返回回复的处理器获胜
                 except Exception as e:
-                    logger.exception("Message handler error: %s", e)
-                    # 尝试发送错误提示
-                    try:
-                        await self.send_message(
-                            message.channel_type,
-                            message.chat_id,
-                            "抱歉，处理消息时出现错误，请稍后重试。",
-                        )
-                    except Exception:
-                        pass
+                    logger.exception("Message handler %s error: %s", handler_id, e)
+        # 回退到单处理器模式
+        elif self._message_handler:
+            try:
+                reply = await self._message_handler(message)
+                if reply:
+                    await self.send_message(
+                        message.channel_type,
+                        message.chat_id,
+                        reply,
+                    )
+            except Exception as e:
+                logger.exception("Message handler error: %s", e)
+                # 尝试发送错误提示
+                try:
+                    await self.send_message(
+                        message.channel_type,
+                        message.chat_id,
+                        "抱歉，处理消息时出现错误，请稍后重试。",
+                    )
+                except Exception:
+                    pass
 
     async def _sync_to_session_sync(self, event_type: ChannelEventType, message: ChannelMessage):
         """同步事件到 SessionSyncManager"""
@@ -339,6 +396,12 @@ class ChannelManager:
             return
 
         self._running = True
+        # P0-5：启动入站持久化队列排水（含重启恢复：遗留 pending/processing
+        # 重新入列消费）。handler 为既有分发链；队列不可用时 start_drain 为空操作。
+        queue = self._get_ingress_queue()
+        if queue is not None:
+            queue.start_drain(self._dispatch_message, poll_interval=0.5)
+
         tasks = []
         for channel_type, adapter in self._adapters.items():
             if adapter.config.enabled:
@@ -355,6 +418,13 @@ class ChannelManager:
     async def stop(self):
         """停止所有适配器"""
         self._running = False
+        # P0-5：先停排水循环再断适配器（在途消息 nack 回列，重启续投）
+        queue = getattr(self, "_ingress_queue", None)
+        if queue is not None:
+            try:
+                await queue.stop_drain()
+            except Exception as e:  # noqa: BLE001 - 停机不因队列失败中断
+                logger.debug("Ingress drain stop skipped: %s", e)
         tasks = []
         for adapter in self._adapters.values():
             tasks.append(adapter.disconnect())

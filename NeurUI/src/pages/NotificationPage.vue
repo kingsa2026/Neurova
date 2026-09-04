@@ -129,6 +129,9 @@ const typeColor = (type: string) => {
     skill_review: 'purple',
     skill_review_result: 'geekblue',
     market_update: 'cyan',
+    // P1-11 审批状态机镜像（approval_manager 通知路由）
+    approval_request: 'orange',
+    approval_result: 'geekblue',
   }
   return map[type] || 'default'
 }

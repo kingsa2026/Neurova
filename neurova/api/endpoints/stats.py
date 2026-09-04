@@ -393,6 +393,38 @@ async def get_usage_overview(
         return _empty_usage_overview(days, scope)
 
 
+@router.get("/provider-usage")
+async def get_provider_usage(
+    request: Request,
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+):
+    """provider 真账单快照（P1-13，OpenClaw provider-usage 启发）。
+
+    数据源: neurova.core.provider_usage 采集器（默认关，provider
+    usage_collection=True 才拉后台账单）。返回裸对象 {snapshots, errors}
+    （对齐 stats 域契约），未装配采集器时为空数组（诚实零态）。
+    """
+    _get_request_id(request)
+
+    from neurova.core.provider_usage import ProviderUsageCollector
+
+    collector = ProviderUsageCollector.get_installed()
+    if collector is None:
+        return {"snapshots": [], "errors": []}
+
+    # scope 隔离: 登录用户只看自己 scope 的 provider 账单快照按 provider_id
+    # 去重（采集器是全局副路径，快照不携带用户身份——provider 配置本身
+    # 按 scope 隔离，这里以最新快照为准）
+    snapshots = collector.get_collected_usage()
+    seen = set()
+    deduped = []
+    for snap in snapshots:
+        if snap["provider_id"] not in seen:
+            seen.add(snap["provider_id"])
+            deduped.append(snap)
+    return {"snapshots": deduped, "errors": collector.get_errors()}
+
+
 @router.get("/export")
 async def export_stats(request: Request):
     """导出统计汇总（JSON blob，供前端导出按钮下载）"""

@@ -237,6 +237,9 @@ class ProviderConfig:
     # models 保持字符串列表契约以兼容存量消费者;元数据仅承载增强信息。
     model_metadata: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     enabled: bool = True
+    # P1-13 真账单采集开关（OpenClaw provider-usage 启发，默认关）：
+    # 显式置 true 后 /stats/provider-usage 才会拉取该 provider 后台账单
+    usage_collection: bool = False
     priority: int = 0
     is_builtin: bool = False
     icon: Optional[str] = None

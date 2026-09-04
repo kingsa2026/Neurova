@@ -95,6 +95,12 @@
                   <span class="rating">⭐ {{ skill.rating?.toFixed(1) ?? '—' }}</span>
                   <span class="installs">📥 {{ skill.install_count ?? 0 }}</span>
                   <a-tag v-if="skill.category" color="blue">{{ skill.category }}</a-tag>
+                  <a-tag v-if="hasPermissionDeclaration(skill)" color="purple">
+                    {{ t('market.permissionDeclared') }}
+                  </a-tag>
+                  <a-tag v-if="sandboxDeclared(skill)" color="orange">
+                    {{ t('market.sandboxRequired') }}
+                  </a-tag>
                 </div>
                 <GlassButton
                   :variant="skill.installed ? 'danger' : 'primary'"
@@ -222,6 +228,10 @@ interface MarketSkill {
   featured?: boolean
   installed?: boolean
   _installing?: boolean
+  /** P0-4 声明式权限：null=未声明；dict=声明生效（运行时 fail-closed） */
+  permissions?: Record<string, unknown> | null
+  /** P2-15 沙箱声明位 */
+  sandbox_required?: boolean | null
 }
 
 interface Category {
@@ -240,6 +250,11 @@ const searchQuery = ref('')
 const activeCategory = ref<string>('')
 
 const featuredSkills = computed(() => skills.value.filter((s) => s.featured))
+
+// P0-4/P2-15 声明徽标：有 permissions 声明或 sandbox_required 时展示
+const hasPermissionDeclaration = (skill: MarketSkill) =>
+  skill.permissions != null && typeof skill.permissions === 'object'
+const sandboxDeclared = (skill: MarketSkill) => skill.sandbox_required === true
 const displaySkills = computed(() => {
   let list = skills.value
   if (activeCategory.value) {

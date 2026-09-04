@@ -5,10 +5,23 @@
         <h2 class="page-title">{{ t('agent.title') }}</h2>
         <p class="page-subtitle">{{ t('agent.description') }}</p>
       </div>
-      <GlassButton variant="primary" @click="$router.push('/agents/create')">
-        {{ t('agent.create') }}
-      </GlassButton>
+      <div class="header-actions">
+        <GlassButton variant="ghost" @click="triggerPackageImport">
+          {{ t('agent.packageImport') }}
+        </GlassButton>
+        <GlassButton variant="primary" @click="$router.push('/agents/create')">
+          {{ t('agent.create') }}
+        </GlassButton>
+      </div>
     </div>
+
+    <input
+      ref="packageFileInput"
+      type="file"
+      accept=".json"
+      style="display: none"
+      @change="handlePackageFileChange"
+    />
 
     <GlassCard>
       <div class="toolbar">
@@ -61,6 +74,9 @@
               <GlassButton size="sm" variant="ghost" @click="$router.push(`/agents/${agent.id}`)">
                 {{ t('common.edit') }}
               </GlassButton>
+              <GlassButton size="sm" variant="ghost" @click="handleExport(agent.id)">
+                {{ t('agent.packageExport') }}
+              </GlassButton>
               <GlassButton size="sm" variant="secondary" @click="$router.push(`/agent/${agent.id}/chat`)">
                 {{ t('nav.chat') }}
               </GlassButton>
@@ -102,6 +118,9 @@
                 <GlassButton size="sm" variant="ghost" @click="$router.push(`/agents/${record.id}`)">
                   {{ t('common.edit') }}
                 </GlassButton>
+                <GlassButton size="sm" variant="ghost" @click="handleExport(record.id)">
+                  {{ t('agent.packageExport') }}
+                </GlassButton>
                 <GlassButton size="sm" variant="secondary" @click="$router.push(`/agent/${record.id}/chat`)">
                   {{ t('nav.chat') }}
                 </GlassButton>
@@ -132,6 +151,12 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import { useAgentStore } from '@/stores/agents'
+import {
+  exportAgentPackage,
+  importAgentPackage,
+  downloadManifest,
+  type AgentPackageManifest,
+} from '@/api/modules/agent-package'
 
 const { t } = useI18n()
 const agentStore = useAgentStore()
@@ -140,6 +165,78 @@ const searchQuery = ref('')
 const viewMode = ref<'card' | 'table'>('card')
 const currentPage = ref(1)
 const pageSize = ref(12)
+
+// ── Agent 应用包导出/导入（P2-16） ──
+const packageFileInput = ref<HTMLInputElement | null>(null)
+const packageImporting = ref(false)
+
+const triggerPackageImport = () => {
+  packageFileInput.value?.click()
+}
+
+const handleExport = async (agentId: string) => {
+  try {
+    const res: any = await exportAgentPackage(agentId)
+    const manifest = (res?.data ?? res) as AgentPackageManifest
+    if (!manifest || manifest.kind !== 'neurova.agent-package') {
+      message.error(t('agent.packageExportFailed'))
+      return
+    }
+    downloadManifest(manifest, agentId)
+    message.success(t('agent.packageExportOk'))
+  } catch (err: any) {
+    console.error('[AgentListPage] export failed:', err)
+    message.error(err?.response?.data?.detail || t('agent.packageExportFailed'))
+  }
+}
+
+const handlePackageFileChange = async (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  let manifest: AgentPackageManifest
+  try {
+    manifest = JSON.parse(await file.text()) as AgentPackageManifest
+  } catch {
+    message.error(t('agent.packageInvalidFile'))
+    return
+  }
+  if (manifest?.kind !== 'neurova.agent-package' || manifest?.manifest_version !== 1) {
+    message.error(t('agent.packageInvalidFile'))
+    return
+  }
+
+  // 目标 agent_id：默认用 provenance 里的原 id
+  const targetId = manifest.provenance?.agent_id || 'imported-agent'
+  packageImporting.value = true
+  try {
+    const res: any = await importAgentPackage({
+      manifest,
+      agent_id: targetId,
+      import_skills: true,
+      import_cron: true,
+      import_mcp: false,
+    })
+    const data = res?.data ?? res
+    if (data?.success) {
+      message.success(t('agent.packageImportOk', { id: data.agent_id }))
+      await agentStore.loadAgents()
+    } else {
+      message.error(t('agent.packageImportFailed'))
+    }
+  } catch (err: any) {
+    console.error('[AgentListPage] import failed:', err)
+    const detail = err?.response?.data?.detail
+    if (typeof detail === 'string' && detail.includes('already exists')) {
+      message.error(t('agent.packageConflict', { id: targetId }))
+    } else {
+      message.error(detail || t('agent.packageImportFailed'))
+    }
+  } finally {
+    packageImporting.value = false
+  }
+}
 
 const viewOptions = computed(() => [
   { label: t('common.viewCard'), value: 'card' },
@@ -204,6 +301,13 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+}
+
+.header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .page-title {

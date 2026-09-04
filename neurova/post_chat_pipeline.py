@@ -320,6 +320,7 @@ class PostChatPipeline:
         save_memory: bool,
         enable_tts: bool,
         metadata: Dict[str, Any],
+        writer_claim=None,
     ) -> Dict[str, Any]:
         """
         执行对话后所有处理步骤，返回:
@@ -340,10 +341,10 @@ class PostChatPipeline:
         # P-1: 每个步骤用 _safe_step 包裹,异常只记录不传播
         # 步骤 6: 保存到 session 文件
         # Bug #4 fix: save_session 失败时回退到原始 session_id（而非 session_id or ""）
-        # 避免 None 被转为空字符串，导致记忆存到 "default" session
+        # 避免 None 袝转为空字符串，导致记忆存到 "default" session
         actual_session_id = await self._safe_step(
             "save_session",
-            self._step_save_session(user_input, reply, session_id, save_memory, metadata),
+            self._step_save_session(user_input, reply, session_id, save_memory, metadata, writer_claim),
             default=session_id,
         )
 
@@ -478,8 +479,12 @@ class PostChatPipeline:
         session_id: str,
         save_memory: bool,
         metadata: Dict[str, Any],
+        writer_claim=None,
     ) -> str:
-        """保存到 session 文件（备份机制）"""
+        """保存到 session 文件（备份机制）
+
+        P1-10: writer_claim 随行透传给 _save_to_session，围栏失效时跳过落盘。
+        """
         step_name = "save_session"
         start_time = time.time()
         # Bug #4 fix: 保留原始 session_id（包括 None），不通过 or "" 转为空字符串
@@ -511,6 +516,7 @@ class PostChatPipeline:
                 session_id,
                 metadata,
                 assistant_meta if assistant_meta else None,
+                writer_claim=writer_claim,
             )
             self._step_results.append(
                 StepResult(
@@ -600,12 +606,14 @@ class PostChatPipeline:
                     content=f"用户: {user_input}",
                     memory_type="episodic",
                     metadata={"sender_type": "user", "session_id": session_id or "default"},
+                    origin="owner",
                 )
                 # 保存助手回复记忆
                 agent_memory_id = memory_manager.remember(
                     content=f"助手: {reply}",
                     memory_type="episodic",
                     metadata={"sender_type": "agent", "session_id": session_id or "default"},
+                    origin="agent",
                 )
                 logger.debug("对话已直接写入记忆数据库")
 

@@ -1565,9 +1565,12 @@ class Agent:
         session_id: str = None,
         metadata: Optional[Dict[str, Any]] = None,
         assistant_metadata: Optional[Dict[str, Any]] = None,
+        writer_claim=None,
     ) -> str:
-        """保存对话到session文件（委托给 MemCore）"""
-        return self.memory_agent.save_to_session(user_input, reply, session_id, metadata, assistant_metadata)
+        """保存对话到session文件（委托给 MemCore；writer_claim 为 P1-10 围栏凭证）"""
+        return self.memory_agent.save_to_session(
+            user_input, reply, session_id, metadata, assistant_metadata, writer_claim=writer_claim
+        )
 
     def _update_memory_temperature(self):
         """更新记忆温度（批量衰减）"""

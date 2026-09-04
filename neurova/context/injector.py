@@ -701,15 +701,47 @@ class UnifiedContextInjector(BaseModule):
         return " | ".join(emotions) if emotions else "😐 neutral"
 
     def _trim_history(self, history: List[Dict]) -> List[Dict]:
-        """在 Token 预算内裁剪历史"""
+        """在 Token 预算内裁剪历史
+
+        OpenClaw 启发 P0-8：分割点不得切进工具块。assistant(tool_calls) 与
+        其紧随的 tool 结果段视为一个配对单元——预算装不下整个单元时整体
+        舍弃（分割点移动到块边界之前继续装填），绝不产出孤儿 tool 结果/
+        悬空调用。普通消息维持旧语义：装不下即终止（首条兜底保留）。
+        """
         if not history:
             return []
 
-        trimmed = []
+        from neurova.context.recovery import _is_tool_result, _opens_tool_block
+
+        trimmed: List[Dict] = []
         total_tokens = 0
         budget = self._token_budget.conversation_history
 
-        for msg in reversed(history):
+        i = len(history) - 1
+        while i >= 0:
+            msg = history[i]
+
+            # 工具块单元：连续 tool 结果段 + 其 assistant(tool_calls) 块头
+            if _is_tool_result(msg):
+                j = i
+                while j >= 0 and _is_tool_result(history[j]):
+                    j -= 1
+                has_header = j >= 0 and _opens_tool_block(history[j])
+                unit = [history[k] for k in range(i, j, -1)]
+                unit_tokens = sum(self._count_tokens(m.get("content", "")) for m in unit)
+                if has_header:
+                    unit.insert(0, history[j])
+                    unit_tokens += self._count_tokens(history[j].get("content", ""))
+                if total_tokens + unit_tokens <= budget:
+                    trimmed[0:0] = unit  # 整块按序插入，保持 块头→结果 顺序
+                    total_tokens += unit_tokens
+                    i = (j - 1) if has_header else j
+                    continue
+                # 装不下整块 → 整块舍弃，分割点移到块之前继续（不终止）
+                i = (j - 1) if has_header else (i - 1)
+                continue
+
+            # 普通消息：旧语义（装不下则首条兜底并终止）
             msg_tokens = self._count_tokens(msg.get("content", ""))
             if total_tokens + msg_tokens <= budget:
                 trimmed.insert(0, msg)
@@ -718,6 +750,7 @@ class UnifiedContextInjector(BaseModule):
                 if not trimmed:
                     trimmed.insert(0, msg)
                 break
+            i -= 1
 
         return trimmed
 

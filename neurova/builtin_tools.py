@@ -140,7 +140,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_shell": {
-        "description": "执行 shell 命令",
+        "description": "在用户计算机上执行 shell 命令",
+        "sandbox_required": True,
         "parameters": {
             "type": "object",
             "properties": {
@@ -538,6 +539,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     },
     "run_code": {
         "description": "【代码执行】运行一段 Python 或 shell 代码，返回 stdout/stderr/退出码。用于数据处理、批量文件操作、验证代码逻辑等。代码在本地运行时执行，受治理策略约束。",
+        "sandbox_required": True,
         "parameters": {
             "type": "object",
             "properties": {
@@ -719,6 +721,41 @@ def get_builtin_tool_params(tool_name: str) -> Optional[Dict]:
     return _BUILTIN_SCHEMAS.get(tool_name)
 
 
+# ═══════════════════════════════════════════════════════════════
+# 工具声明位（P2-15，OpenClaw 对比 #15）
+#
+# schema 可携带与 description/parameters 平级的 sandbox_required 布尔键，
+# 语义 = "该工具必须在沙箱隔离下执行"（OpenClaw exec 审批的声明面）。
+# 声明位不进入 to_openai_format()（模型可见面零变化），仅供治理与
+# 展示面消费；NEUROVA_TOOL_SANDBOX_ENFORCE=1 时治理层强制路由。
+# ═══════════════════════════════════════════════════════════════
+
+_SANDBOX_REQUIRED_KEY = "sandbox_required"
+
+
+def get_builtin_tool_sandbox_declaration(tool_name: str) -> Optional[bool]:
+    """读取工具的 sandbox_required 声明。
+
+    Returns:
+        True: 工具声明必须在沙箱下执行
+        None: 未声明或声明值非法（缺省=旧行为，调用方不得据此裁决）
+    """
+    schema = _BUILTIN_SCHEMAS.get(tool_name)
+    if not isinstance(schema, dict):
+        return None
+    value = schema.get(_SANDBOX_REQUIRED_KEY)
+    return True if value is True else None
+
+
+def list_sandbox_required_tools() -> List[str]:
+    """枚举声明了 sandbox_required 的内置工具名（治理/展示批量消费）。"""
+    return [
+        name
+        for name, schema in _BUILTIN_SCHEMAS.items()
+        if isinstance(schema, dict) and schema.get(_SANDBOX_REQUIRED_KEY) is True
+    ]
+
+
 def register_builtin_exec(tool_name: str, exec_func: Callable):
     """
     注册内置工具的执行函数
@@ -738,6 +775,9 @@ class BuiltinTool:
     description: str
     parameters: Dict[str, Any]
     required: List[str] = field(default_factory=list)
+    # P2-15 声明位：True=声明必须在沙箱下执行；None=未声明。
+    # 不进入 to_openai_format()，模型可见面零变化。
+    sandbox_required: Optional[bool] = None
 
     def to_openai_format(self) -> Dict[str, Any]:
         """转换为 OpenAI function calling 格式"""
@@ -766,6 +806,7 @@ class BuiltinToolRegistry:
                 description=schema["description"],
                 parameters=schema["parameters"],
                 required=schema["parameters"].get("required", []),
+                sandbox_required=get_builtin_tool_sandbox_declaration(tool_name),
             )
             self._tools[tool_name] = tool
 

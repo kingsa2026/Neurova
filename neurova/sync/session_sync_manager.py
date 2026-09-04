@@ -108,6 +108,26 @@ def _json_safe(value: Any) -> Any:
         return str(value)
 
 
+def _serialize_event_safe(event: "SessionEvent") -> Optional[str]:
+    """事件序列化预检：成功返回 JSON 字符串，失败返回 None（不抛）。
+
+    OpenClaw 启发 P0-7 铁律 (b)：序列化失败的事件不得盖章进历史。毒帧
+    一旦带 seq 落入历史，所有客户端的 gap 探测器会同时触发（重连风暴），
+    且每次重连重放都会在同一帧卡壳。add_event 盖章前调用本函数把关；
+    预检产物即出站帧本体，发送侧直接复用，不重复序列化。
+    """
+    try:
+        return event.to_json()
+    except Exception as e:  # 预检无副作用，序列化的任何失败都按"毒帧"处理
+        logger.error(
+            "SessionEvent serialization failed (event_id=%s type=%s): %s",
+            event.event_id,
+            event.event_type,
+            e,
+        )
+        return None
+
+
 @dataclass
 class SessionEvent:
     """会话事件"""
@@ -290,6 +310,11 @@ class SessionSyncManager:
         self._max_sessions = self._config.get("max_sessions", 1000)
         self._session_timeout = self._config.get("session_timeout", 3600)  # 1小时
         self._max_history_size = self._config.get("max_history_size", 1000)
+
+        # OpenClaw 启发 P0-7 铁律 (a)：慢消费者单帧发送超时（秒）。超时丢帧
+        # 但 seq 已盖章推进，客户端 gap 探测器看见丢失后可重连补发。0/None
+        # 关闭超时（等价旧行为）。
+        self._slow_consumer_send_timeout = self._config.get("slow_consumer_send_timeout", 5.0)
 
         # 异步事件循环引用
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -699,6 +724,11 @@ class SessionSyncManager:
             # 设置事件属性
             event.session_id = session_id
 
+            # OpenClaw 启发 P0-7 铁律 (b)：序列化失败不推进 seq——盖章/进历史
+            # 前序列化预检，毒帧被拒绝（不盖章、不入历史、不发送）。
+            if _serialize_event_safe(event) is None:
+                return 0
+
             # 保存到历史
             session.add_event(event)
 
@@ -724,15 +754,33 @@ class SessionSyncManager:
         return sent_count
 
     async def _send_to_channel(self, conn: ChannelConnection, event: SessionEvent) -> bool:
-        """发送事件到单个渠道"""
+        """发送事件到单个渠道
+
+        OpenClaw 启发 P0-7 铁律 (a)：慢消费者丢帧也推进 seq。单帧发送超过
+        slow_consumer_send_timeout 即放弃（seq 已在 add_event 盖章，客户端
+        gap 探测器看见丢失，重连后 sync_resume 从历史补发）。绝不因单个
+        慢渠道阻塞整场广播。
+        """
         try:
             import inspect
 
             if inspect.iscoroutinefunction(conn.send_callback):
-                await conn.send_callback(event)
+                timeout = self._slow_consumer_send_timeout
+                if timeout and timeout > 0:
+                    await asyncio.wait_for(conn.send_callback(event), timeout=timeout)
+                else:
+                    await conn.send_callback(event)
             else:
                 conn.send_callback(event)
             return True
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Slow consumer detected on channel %s (>%ss): frame dropped, seq %s remains in history for resume",
+                conn.channel_type,
+                self._slow_consumer_send_timeout,
+                event.seq,
+            )
+            return False
         except Exception as e:
             logger.error("Failed to send to channel %s: %s", conn.channel_type, e)
             return False
@@ -755,6 +803,11 @@ class SessionSyncManager:
                 return 0
 
             event.session_id = session_id
+
+            # OpenClaw 启发 P0-7 铁律 (b)：同步广播同咽喉预检，毒帧不盖章。
+            if _serialize_event_safe(event) is None:
+                return 0
+
             session.add_event(event)
             # 锁内复制 channels 到局部变量,后续迭代在锁外
             channels_snapshot = list(session.active_channels.items())

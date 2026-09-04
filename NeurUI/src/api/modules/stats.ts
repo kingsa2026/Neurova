@@ -135,3 +135,25 @@ export function getTokenUsage() {
 export function getUsageOverview(params: { days?: number; trend_days?: number } = {}) {
   return api.get<UsageOverview>(`${BASE}/usage-overview`, { params })
 }
+
+/** P1-13 provider 真账单快照（默认关；usage_collection=true 的 provider 才有）。 */
+export interface ProviderUsageSnapshot {
+  provider_id: string
+  ts: string
+  plan?: string | null
+  quota_remaining?: number | null
+  currency?: string | null
+  balance?: number | null
+  window_days?: number | null
+  raw?: Record<string, unknown>
+}
+
+export interface ProviderUsageResponse {
+  snapshots: ProviderUsageSnapshot[]
+  errors: { provider_id: string; error: string; ts: string }[]
+}
+
+/** Get provider billing snapshots (empty arrays when collector not installed). */
+export function getProviderUsage() {
+  return api.get<ProviderUsageResponse>(`${BASE}/provider-usage`)
+}

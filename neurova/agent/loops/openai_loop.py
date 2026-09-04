@@ -521,17 +521,25 @@ class OpenAILoop(BaseAgentLoop):
             LLMAuthError,
             LLMBadRequestError,
             LLMRateLimitError,
+            LLMServiceUnavailableError,
             TokenLimitExceeded,
         )
 
         raw = str(chunk.get("error") or "")
         message = f"LLM 流式调用失败: {chunk.get('error')}"
         error_type = str(chunk.get("error_type") or "")
+        # 键为五类标准错误（error_mapping ErrorCategory.value，multi_model_client
+        # 流内错误编码铁律 P0-1 的生产端）；旧四键保留兼容历史 dict。
         mapping = {
+            "rate_limited": LLMRateLimitError,
             "rate_limit": LLMRateLimitError,
-            "token_limit": TokenLimitExceeded,
-            "auth": LLMAuthError,
+            "service_unavailable": LLMServiceUnavailableError,
+            "connection_failed": LLMConnectionError,
             "connection": LLMConnectionError,
+            "auth_failed": LLMAuthError,
+            "auth": LLMAuthError,
+            "bad_request": LLMBadRequestError,
+            "token_limit": TokenLimitExceeded,
         }
         cls = mapping.get(error_type)
         if cls is None:
