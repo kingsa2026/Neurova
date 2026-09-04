@@ -518,6 +518,22 @@ class PostChatPipeline:
                 assistant_meta if assistant_meta else None,
                 writer_claim=writer_claim,
             )
+            if not result_session_id:
+                # P1-10 复审修正: 围栏拒绝（陈旧 writer）返回 ""——不能把 "" 当
+                # actual_session_id 下传（Bug#4 修复会把它当回退值写脏记忆归属），
+                # 回退原始 session_id 并把该步标 SKIPPED 以示未落盘
+                logger.info("session 落盘被写入围栏拒绝（陈旧 writer），回退原 session_id")
+                result_session_id = session_id
+                self._step_results.append(
+                    StepResult(
+                        step_name=step_name,
+                        status=StepStatus.SKIPPED,
+                        message="session save fenced out (stale writer claim)",
+                        duration_ms=(time.time() - start_time) * 1000,
+                        data={"session_id": result_session_id},
+                    )
+                )
+                return result_session_id
             self._step_results.append(
                 StepResult(
                     step_name=step_name,
@@ -1108,11 +1124,15 @@ class PostChatPipeline:
                 facade = EvolutionFacade(evolution)
                 # P-5: success 基于工具实际成败,而非"是否调用了工具"
                 tool_success = any(tm.get("success", True) for tm in tool_messages) if tool_messages else True
+                # agent 级隔离: 显式传本 agent 的结晶器。单例上的
+                # evolution.crystallizer 会被多 agent 初始化 last-writer-wins
+                # 覆盖,不传会把 A agent 的经验结晶进 B agent 的库
                 facade.record_experience(
                     text=f"用户: {user_input}\n助手: {reply}",
                     task=user_input,
                     tools=tools_used,
                     success=tool_success,
+                    crystallizer=getattr(self._agent, "crystallizer", None),
                 )
                 logger.info("📚 对话经验已记录 (工具: %s)", tools_used)
 
@@ -1284,18 +1304,18 @@ class PostChatPipeline:
             # Bug #9 fix: 使用公开的 tool_weights API，而非直接访问 _tool_weights 私有属性
             # 原代码: if evolution and hasattr(evolution, "_tool_weights"):
             #         evolution._tool_weights[tool_name].adaptive_multiplier *= factor
-            # 修复后: 通过 tool_weights.record_failure() 公开方法操作
+            # 修复后: 通过公开 API 操作
+            # 融合修复（闭环审计 2026-09-04）：A/B 融合删除 tool_weights.py 后
+            # get_tool_entry/record_failure 不存在，两处 hasattr 恒 False 静默
+            # no-op；改用融合版公开 API get_weight + update_weight(False)
             tool_weights = getattr(evolution, "tool_weights", None) if evolution else None
             if tool_weights:
                 decay = lifecycle_report.get("decay", {})
                 if decay:
                     for tool_name, factor in decay.items():
-                        # 通过公开 API 检查工具是否存在
-                        entry = tool_weights.get_tool_entry(tool_name) if hasattr(tool_weights, "get_tool_entry") else None
-                        if entry:
-                            # 降级/归档工具视为失败信号，通过公开方法记录
-                            if hasattr(tool_weights, "record_failure"):
-                                tool_weights.record_failure(tool_name)
+                        # 降级/归档工具视为失败信号，记录真实失败
+                        if tool_weights.get_weight(tool_name) is not None:
+                            tool_weights.update_weight(tool_name, False)
                     logger.debug("📉 工具权重衰减: %s 个工具", len(decay))
 
             self._step_results.append(
@@ -1377,11 +1397,13 @@ class PostChatPipeline:
                     )
 
                 # 修复 P0-1：将封装的技能注册到 SkillRegistry
-                # 原代码只存 AutoSkillBuilder 内存 dict，永远进不了 Registry
+                # 死实例修复（闭环审计 2026-09-04）：原代码 `SkillRegistry()` 新建
+                # 一次性对象注册即丢弃，运行时 LLM 永远看不到 pattern 封装技能；
+                # 必须注册进 agent 的真实 registry（与 genetic 路径对齐）。
+                # registry 不可用时传 None：packer 内部 register 失败会跳过，
+                # SkillService 持久化副作用保留（冷启动经 restore 恢复）。
                 try:
-                    from neurova.skills.registry import SkillRegistry
-
-                    registry = SkillRegistry()
+                    skill_registry = getattr(self._agt, "_skill_registry", None)
                     if hasattr(skill_packer, "register_to_skill_registry"):
                         # s3 P0 #2: 同时持久化到 SkillService, 使前端 GET /private 可见
                         skill_service = None
@@ -1394,7 +1416,7 @@ class PostChatPipeline:
                             logger.warning("创建 SkillService 失败, 自动技能仅写 registry: %s", svc_err)
 
                         registered = skill_packer.register_to_skill_registry(
-                            registry, skill_service=skill_service
+                            skill_registry, skill_service=skill_service
                         )
                         if registered > 0:
                             logger.info("📋 自动注册 %s 个技能到 SkillRegistry (并持久化到 SkillService)", registered)
@@ -1489,18 +1511,16 @@ class PostChatPipeline:
             logger.info("🧬 ToolGeneticEngine 进化完成: 种群=%s, 新个体=%s", len(genetic_engine.population), len(new_gen))
 
             # 将进化结果反馈到工具权重
-            # Bug #9 fix: 使用公开的 tool_weights API 检查工具是否存在，而非 _registered_tools 私有属性
-            # 原代码: if tool_name in evolution._registered_tools:
-            # 修复后: 通过 tool_weights.get_tool_entry(tool_name) 公开方法检查
+            # 融合修复（闭环审计 2026-09-04）：get_tool_entry 在融合版
+            # AdaptiveToolWeights 上不存在，hasattr 恒 False 使遗传高适应度
+            # 反哺静默失效；改用公开 API get_weight/update_weight
             tool_weights = getattr(evolution, "tool_weights", None)
             for genotype in new_gen:
                 for tool_name in genotype.tools:
-                    if tool_weights and hasattr(tool_weights, "get_tool_entry"):
-                        entry = tool_weights.get_tool_entry(tool_name)
-                        if entry:
-                            # 高适应度个体的工具应获得权重提升
-                            if genotype.fitness > 0.5:
-                                tool_weights.update_weight(tool_name, True)
+                    if tool_weights and tool_weights.get_weight(tool_name) is not None:
+                        # 高适应度个体的工具应获得权重提升
+                        if genotype.fitness > 0.5:
+                            tool_weights.update_weight(tool_name, True)
 
             # Bug A-6 修复: 将高适应度进化工具注册到 SkillRegistry
             # 之前进化成果只停留在 genetic_engine 内部种群，下次对话时
@@ -1509,7 +1529,20 @@ class PostChatPipeline:
             skill_registry = getattr(self._agt, "_skill_registry", None)
             if skill_registry is not None and hasattr(genetic_engine, "register_to_skill_registry"):
                 try:
-                    registered_to_registry = genetic_engine.register_to_skill_registry(skill_registry)
+                    # 断点 #2 修复：与 _step_pattern_mining 的 skill_packer 路径对齐，
+                    # 进化技能同步持久化 SkillService（SkillRegistry 纯内存，重启即丢）
+                    skill_service = None
+                    try:
+                        from neurova.skills.skill_service import SkillService
+
+                        agent_id = getattr(self._agt.config, "agent_id", "default")
+                        skill_service = SkillService(agent_id=agent_id)
+                    except Exception as svc_err:
+                        logger.warning("创建 SkillService 失败, 进化技能仅写 registry: %s", svc_err)
+
+                    registered_to_registry = genetic_engine.register_to_skill_registry(
+                        skill_registry, skill_service=skill_service
+                    )
                     if registered_to_registry > 0:
                         logger.info(
                             "🧬 已注册 %s 个进化工具到 SkillRegistry（避免下次对话重复合成）",
@@ -1855,16 +1888,29 @@ class PostChatPipeline:
         start_time = time.time()
 
         # 根因修复: AutoSkillImprover 此前零调用——每轮批量扫描技能使用数据，
-        # 对失败率超阈值的技能提出改进提案，并沉淀为反思日志回流上下文
+        # 对失败率超阈值的技能提出改进提案，并沉淀为反思日志回流上下文。
+        # 断点 #3 修复：提案先尝试 apply_improvement 回写技能本体（保守语义：
+        # 仅追加 config.improvements 记录+版本递增，不改工具序列），已应用的
+        # 提案不再重复刷反思日志；未应用的（registry 不可用等）保持原提案日志。
         try:
             from neurova.evolution.skill_improver import get_skill_improver
             from neurova.cognitive_layers.meta_cognition_layer.growth_log import (
                 ReflectionType as _RealReflectionType,
             )
 
-            proposals = get_skill_improver().propose_pending_improvements()
+            improver = get_skill_improver()
+            proposals = improver.propose_pending_improvements()
             growth_log_manager = self._get_dependency("growth_log_manager")
+            skill_registry = getattr(self._agt, "_skill_registry", None)
             for proposal in proposals[:3]:
+                applied = False
+                if skill_registry is not None:
+                    applied = improver.apply_improvement(proposal, skill_registry)
+                if applied:
+                    logger.info(
+                        "🔧 技能改进已应用: %s (%s)", proposal.skill_id, proposal.description or ""
+                    )
+                    continue
                 logger.info("🔧 技能改进提案: %s - %s", proposal.skill_id, (proposal.description or "")[:50])
                 if growth_log_manager:
                     try:
@@ -1920,6 +1966,44 @@ class PostChatPipeline:
                         "🧠 低负荷窗口触发记忆巩固: %s",
                         "完成" if consolidation_result else "依赖缺失",
                     )
+
+            # V3 自模型：反思门控触发（洞察编译器，全确定性零 LLM；教训落台账）
+            if turn_count > 0 and turn_count % 10 == 0:
+                try:
+                    from neurova.cognitive_layers.meta_cognition_layer.self_model import (
+                        get_self_model_engine,
+                    )
+
+                    engine = get_self_model_engine(agent_id)
+                    if engine.should_reflect():
+                        report = engine.reflect(trigger="periodic_turn")
+                        if report.get("lessons"):
+                            logger.info(
+                                "🪞 自模型反思产出 %d 条洞察: %s",
+                                len(report["lessons"]),
+                                report.get("summary", "")[:80],
+                            )
+                except Exception as re_err:
+                    logger.debug("自模型反思触发跳过: %s", re_err)
+
+            # V3 自模型：反思门控触发（洞察编译器，全确定性零 LLM；教训落台账）
+            if turn_count > 0 and turn_count % 10 == 0:
+                try:
+                    from neurova.cognitive_layers.meta_cognition_layer.self_model import (
+                        get_self_model_engine,
+                    )
+
+                    engine = get_self_model_engine(agent_id)
+                    if engine.should_reflect():
+                        report = engine.reflect(trigger="periodic_turn")
+                        if report.get("lessons"):
+                            logger.info(
+                                "🪞 自模型反思产出 %d 条洞察: %s",
+                                len(report["lessons"]),
+                                report.get("summary", "")[:80],
+                            )
+                except Exception as re_err:
+                    logger.debug("自模型反思触发跳过: %s", re_err)
         except Exception as e:
             logger.debug("认知负荷监控跳过: %s", e)
 
