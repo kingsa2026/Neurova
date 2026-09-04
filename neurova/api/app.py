@@ -223,6 +223,13 @@ def _load_saved_agents(app_state: AppState, default_workspace: str) -> None:
     import json as _json
 
     workspaces_dir = os.path.dirname(default_workspace)  # agent_workspaces/
+    # 全新安装（打包版）该数据目录天然不存在；加载路径不得因缺目录崩溃，
+    # 补建空目录以对齐"安装即有默认工作区"的不变量（bundle 同步预创建）。
+    try:
+        os.makedirs(workspaces_dir, exist_ok=True)
+    except OSError as e:
+        logger.warning("agent_workspaces 目录不可创建，跳过已持久化 agent 加载: %s", e)
+        return
     loaded = 0
     for agent_id in os.listdir(workspaces_dir):
         if agent_id in ("default", "test") or not os.path.isdir(os.path.join(workspaces_dir, agent_id)):
@@ -921,7 +928,18 @@ def create_app(
         # 注册启动/关闭事件
         @app.on_event("startup")
         async def startup_event():
-            await _on_startup(_app_state)
+            try:
+                await _on_startup(_app_state)
+            except Exception as e:
+                # lifespan 内的启动崩溃 uvicorn 会静默退出，start_server 的
+                # except 捕不到——必须在故障点上报远程错误日志（尽力而为）。
+                try:
+                    from neurova.core.crash_report import report_startup_failure
+
+                    report_startup_failure(e, stage="lifespan-startup")
+                except Exception:
+                    pass
+                raise
             # 将 LLM Provider 同步到全局 LLMRouter，使多模态路由可用（P0-#4）
             try:
                 from neurova.llm.llm_router import sync_llm_router

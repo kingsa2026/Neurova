@@ -1,5 +1,14 @@
 """
-工作流引擎
+工作流引擎（已冻结 — P1-7 双轨收敛）
+
+.. deprecated:: P1-7 (2026-09-04)
+   此模块为 CogArch 1.0 任务型线性链引擎（逐节点 next_nodes 线性推进），
+   与唯一引擎 neurova/collaboration/neurflow/（真 DAG：拓扑分层 + 层内
+   并发 + condition/loop + 断点/检查点/版本回滚）双轨并存属架构债。
+   收敛契约：新代码一律走 neurflow（shared_core.ExecutionEngine.
+   execute_workflow 已改为 neurflow 优先、本引擎仅兼容期回退）；本模块
+   API **冻结不再扩展**——仅存量模板（agent/templates）与既有测试引用，
+   不修复新 bug（安全问题除外），迁移完成后整体删除。
 
 Neurova CogArch 1.0.0 的执行组件之一
 负责：工作流定义、流程调度、状态管理

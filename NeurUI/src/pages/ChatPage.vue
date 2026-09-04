@@ -475,6 +475,14 @@
         <button class="nr-rate-limit-dismiss" @click="rateLimitBanner = null">✕</button>
       </div>
 
+      <!-- 实时事件丢失提示（seq gap 检测，OpenOcta 启发 P0-1）：仅提示，不可恢复 -->
+      <div v-if="eventsLostBanner" class="nr-rate-limit-banner">
+        <span class="nr-rate-limit-text">
+          ⚠ {{ t('chat.eventsLost', { n: eventsLostBanner }) }}
+        </span>
+        <button class="nr-rate-limit-dismiss" @click="eventsLostBanner = null">✕</button>
+      </div>
+
       <!-- 消息队列提示（补课 P3-b）：流式中的排队发送 -->
       <div v-if="messageQueue.items.length > 0" class="nr-msg-queue">
         <span class="nr-msg-queue-count">
@@ -846,6 +854,14 @@ function closeSubAgentWindow(subagentId: string) {
   delete subAgentWindows.value[subagentId]
 }
 
+// 实时事件丢失提示（seq gap 检测，OpenOcta 启发 P0-1）：WS 帧跳号说明
+// 服务端到本标签页之间丢了事件（子 Agent 进度/电脑面板流），仅提示不
+// 自动恢复——丢失的是实时进度流，刷新页面重建游标即可
+const eventsLostBanner = ref<number | null>(null)
+function onSyncGap(missed: number) {
+  eventsLostBanner.value = (eventsLostBanner.value ?? 0) + missed
+}
+
 // ---------------------------------------------------------------------------
 // 电脑操作分屏：Agent 调用 computer_*/browser_* 工具时自动展开，
 // 实时显示操作截图与动作日志（WS computer_action 事件驱动）
@@ -865,7 +881,7 @@ function closeComputerPanel() {
   computerPanel.close()
 }
 
-useSessionSync(() => currentSessionId.value, onSessionSyncEvent)
+useSessionSync(() => currentSessionId.value, onSessionSyncEvent, { onGap: onSyncGap })
 
 // Drag & Drop
 const isDragOver = ref(false)

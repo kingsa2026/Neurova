@@ -190,9 +190,11 @@ class ExecutionEngine:
                 tool_name=node.get("tool_name", ""), parameters=node.get("parameters", {}), timeout=node.get("timeout")
             )
         elif node_type == "workflow":
-            return await self.execute_workflow(
+            # P1-7：execute_workflow 返回 (result, meta) 二元组，节点结果取 result
+            wf_result, _wf_meta = await self.execute_workflow(
                 workflow_id=node.get("workflow_id", ""), parameters=node.get("parameters", {})
             )
+            return wf_result
         elif node_type == "condition":
             # 条件节点
             condition = node.get("condition", {})
@@ -283,10 +285,59 @@ class ExecutionEngine:
         logger.warning("_call_llm 方法未实现")
         return "LLM 调用未实现"
 
-    async def execute_workflow(self, workflow_id: str, parameters: typing.Dict[str, typing.Any] = None) -> typing.Any:
-        """执行工作流"""
+    async def execute_workflow(
+        self,
+        workflow_id: str,
+        parameters: typing.Dict[str, typing.Any] = None,
+        storage: typing.Any = None,
+    ) -> typing.Tuple[typing.Any, typing.Dict[str, typing.Any]]:
+        """执行工作流（P1-7 单轨收敛：neurflow 优先，旧引擎兼容期回退）。
+
+        转发语义：
+        1. 先查 neurflow（唯一引擎）：storage 未传时按环境缺省打开；
+           工作流存在 → neurflow DAG 引擎执行，meta.source="neurflow"
+        2. neurflow 无此工作流 → 回退旧 CogArch 引擎（兼容期，注册侧
+           仅存量模板/测试），meta.source="legacy"
+        3. 两边都没有 → ValueError（不再静默空转）
+
+        Returns:
+            (result, meta) 二元组：meta = {"source": "neurflow"|"legacy",
+            "status": 终态字符串, "execution_id": str}
+        """
+        # 1) neurflow 优先
+        try:
+            wf, nf_storage = await _load_neurflow_workflow(workflow_id, storage)
+        except Exception as e:  # noqa: BLE001 — storage 故障降级旧轨
+            logger.warning("neurflow 加载失败（回退旧引擎）: %s", e)
+            wf, nf_storage = None, None
+
+        if wf is not None:
+            from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
+
+            execution_id = str(uuid.uuid4())
+            result_row = ExecutionResult(
+                execution_id=execution_id, status=ExecutionStatus.RUNNING, start_time=datetime.datetime.now()
+            )
+            with self._lock:
+                self._executions[execution_id] = result_row
+            try:
+                instance = await get_workflow_executor().execute(wf, dict(parameters or {}))
+                ok = getattr(getattr(instance, "status", None), "value", "") == "completed"
+                result_row.status = ExecutionStatus.COMPLETED if ok else ExecutionStatus.FAILED
+                result_row.result = getattr(instance, "outputs", None)
+                result_row.end_time = datetime.datetime.now()
+                result_row.duration = (result_row.end_time - result_row.start_time).total_seconds()
+                outputs = getattr(instance, "outputs", None)
+                status = getattr(getattr(instance, "status", None), "value", "unknown")
+                return (outputs, {"source": "neurflow", "status": status, "execution_id": execution_id})
+            except Exception:
+                result_row.status = ExecutionStatus.FAILED
+                result_row.end_time = datetime.datetime.now()
+                raise
+
+        # 2) 旧引擎兼容回退
         if not self._workflow_engine:
-            raise RuntimeError("WorkflowEngine 未初始化")
+            raise ValueError(f"工作流未注册: {workflow_id}（neurflow 与旧引擎均无此工作流）")
 
         execution_id = str(uuid.uuid4())
         result = ExecutionResult(
@@ -306,7 +357,7 @@ class ExecutionEngine:
             result.duration = (result.end_time - result.start_time).total_seconds()
 
             logger.info("工作流执行完成: %s, 执行ID: %s", workflow_id, execution_id)
-            return workflow_result
+            return (workflow_result, {"source": "legacy", "status": "completed", "execution_id": execution_id})
 
         except Exception as e:
             result.status = ExecutionStatus.FAILED
@@ -367,6 +418,19 @@ class ExecutionEngine:
     def get_execution_monitor(self) -> typing.Optional["ExecutionMonitor"]:
         """获取执行监控器（可能为 None: 组件导入失败时的占位）"""
         return self._execution_monitor
+
+
+async def _load_neurflow_workflow(workflow_id: str, storage: typing.Any = None) -> typing.Tuple[typing.Any, typing.Any]:
+    """从 neurflow storage 加载工作流（P1-7 转发查询；测试可注入 storage）。
+
+    Returns:
+        (WorkflowDefinition, storage)；工作流不存在返回 (None, storage)
+    """
+    if storage is None:
+        from neurova.collaboration.neurflow.storage import NeurflowStorage
+
+        storage = NeurflowStorage()
+    return storage.get_workflow(workflow_id), storage
 
 
 # 工厂函数

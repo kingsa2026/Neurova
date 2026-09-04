@@ -38,6 +38,9 @@
           <GlassButton variant="ghost" size="sm" @click="configVisible = true; fetchKbConfigs()">
             {{ t('knowledge.remoteConfig') }}
           </GlassButton>
+          <GlassButton variant="secondary" size="sm" @click="annotationOpen = true">
+            {{ t('annotation.entry') }}
+          </GlassButton>
           <GlassButton variant="primary" size="sm" @click="openCreateModal">
             {{ t('knowledge.create') }}
           </GlassButton>
@@ -348,6 +351,9 @@
         </template>
       </a-table>
     </a-modal>
+
+    <!-- P2 标注闭环：精准回复命中表管理 -->
+    <AnnotationDrawer v-model:open="annotationOpen" />
   </div>
 </template>
 
@@ -378,6 +384,7 @@ import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope } from '@/ap
 import { request } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
+import AnnotationDrawer from '@/modules/collaboration/AnnotationDrawer.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 
@@ -417,6 +424,9 @@ const activeCategory = ref<string | undefined>(undefined)
 const totalItems = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
+
+// P2 标注闭环：精准回复命中表抽屉
+const annotationOpen = ref(false)
 
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.user?.role === 'admin')

@@ -48,6 +48,10 @@ class Skill:
     config: Dict[str, Any] = field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
+    # P0-4 声明式权限：None=未声明（存量语义，治理预检兜底）；
+    # dict/SkillPermissions=声明生效（运行时 fail-closed 裁决）。
+    # 载体与 config.permissions 等价，register_skill 会归一并入 config。
+    permissions: Optional[Dict[str, Any]] = None
 
 
 @dataclass
