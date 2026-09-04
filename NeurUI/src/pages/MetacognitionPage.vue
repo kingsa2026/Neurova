@@ -6,6 +6,9 @@
         <p class="page-subtitle">{{ currentAgent?.name || '' }}</p>
       </div>
       <div class="header-actions">
+        <GlassButton variant="secondary" size="sm" :loading="reflecting" @click="handleReflect">
+          {{ t('metacognition.triggerReflect') }}
+        </GlassButton>
         <GlassButton variant="secondary" size="sm" :loading="entriesLoading" @click="refreshAll">
           {{ t('common.refresh') }}
         </GlassButton>
@@ -63,7 +66,7 @@
     </GlassCard>
 
     <a-spin :spinning="loading">
-      <!-- Current state metrics -->
+      <!-- Cognitive load metrics (real state from chat pipeline write-through) -->
       <div class="metrics-grid" style="margin-top: 20px">
         <GlassCard v-for="metric in metrics" :key="metric.label" variant="subtle">
           <div class="metric-card">
@@ -82,37 +85,37 @@
         </GlassCard>
       </div>
 
-      <!-- Detailed state -->
-      <GlassCard :title="t('memory.overview')" style="margin-top: 20px">
-        <div v-if="metaState" class="state-details">
+      <!-- Current load state details -->
+      <GlassCard :title="t('metacognition.loadState')" style="margin-top: 20px">
+        <div v-if="loadState" class="state-details">
             <a-descriptions :column="2" bordered size="small">
-            <a-descriptions-item :label="t('common.status')">
-              <a-badge :status="stateBadge" :text="metaState.state || 'unknown'" />
+            <a-descriptions-item :label="t('metacognition.loadLevel')">
+              <a-badge :status="loadBadge" :text="loadState.load_level || 'unknown'" />
             </a-descriptions-item>
-            <a-descriptions-item :label="t('metacognition.confidence')">
-              {{ formatPercent(metaState.confidence) }}
+            <a-descriptions-item :label="t('metacognition.loadScore')">
+              {{ formatPercent(loadState.load_score) }}
             </a-descriptions-item>
-            <a-descriptions-item :label="t('metacognition.uncertainty')">
-              {{ formatPercent(metaState.uncertainty) }}
+            <a-descriptions-item :label="t('metacognition.activeTasks')">
+              {{ loadState.active_tasks }}
             </a-descriptions-item>
-            <a-descriptions-item :label="t('metacognition.awareness')">
-              {{ formatPercent(metaState.awareness) }}
+            <a-descriptions-item :label="t('metacognition.errorRate')">
+              {{ formatPercent(loadState.error_rate) }}
             </a-descriptions-item>
-            <a-descriptions-item :label="t('metacognition.selfMonitoring')">
-              {{ formatPercent(metaState.self_monitoring) }}
+            <a-descriptions-item :label="t('metacognition.responseTime')">
+              {{ Math.round(loadState.response_time_ms || 0) }} ms
             </a-descriptions-item>
-            <a-descriptions-item :label="t('metacognition.adaptationRate')">
-              {{ formatPercent(metaState.adaptation_rate) }}
+            <a-descriptions-item :label="t('metacognition.updatedAt')">
+              {{ formatTime(loadState.created_at) || '-' }}
             </a-descriptions-item>
           </a-descriptions>
         </div>
         <a-empty v-else :description="t('common.noData')" />
       </GlassCard>
 
-      <!-- Cognitive dimensions -->
-      <GlassCard :title="t('growth.traits')" style="margin-top: 20px">
-        <div v-if="dimensions.length > 0" class="dimensions-list">
-          <div v-for="dim in dimensions" :key="dim.name" class="dimension-row">
+      <!-- Load factor composition -->
+      <GlassCard :title="t('metacognition.loadFactors')" style="margin-top: 20px">
+        <div v-if="factors.length > 0" class="dimensions-list">
+          <div v-for="dim in factors" :key="dim.name" class="dimension-row">
             <div class="dim-info">
               <span class="dim-name">{{ dim.name }}</span>
               <span class="dim-value">{{ formatPercent(dim.value) }}</span>
@@ -185,14 +188,36 @@
         </div>
       </GlassCard>
 
-      <!-- History log -->
-      <GlassCard :title="t('memory.timeline')" style="margin-top: 20px">
+      <!-- Structured lessons (insight compiler output) -->
+      <GlassCard :title="t('metacognition.insights')" style="margin-top: 20px">
+        <template #extra>
+          <a-tag v-if="lessons.length" color="arcoblue">{{ t('metacognition.templateSource') }}</a-tag>
+        </template>
+        <a-spin :spinning="lessonsLoading">
+          <div v-if="lessons.length > 0" class="entries-list">
+            <div v-for="(lesson, idx) in lessons" :key="idx" class="entry-card">
+              <div class="entry-header">
+                <a-tag :color="operatorColor(lesson.operator)">{{ lesson.operator }}</a-tag>
+                <a-tag :color="lesson.recommendation === 'avoid_tool' ? 'red' : 'blue'">
+                  {{ lesson.recommendation }}
+                </a-tag>
+                <span class="entry-date">{{ lesson.subject }}</span>
+              </div>
+              <p class="entry-content">{{ lesson.text }}</p>
+            </div>
+          </div>
+          <a-empty v-else :description="t('common.noData')" />
+        </a-spin>
+      </GlassCard>
+
+      <!-- Reflection history -->
+      <GlassCard :title="t('metacognition.reflectionHistory')" style="margin-top: 20px">
         <a-table
           v-if="history.length > 0"
           :columns="historyColumns"
           :data-source="history"
           :pagination="{ pageSize: 10 }"
-          row-key="id"
+          row-key="created_at"
           size="small"
         >
           <template #bodyCell="{ column, record }">
@@ -221,7 +246,7 @@
       @ok="handleCreate"
       @cancel="resetForm"
     >
-      <a-form layout="vertical" :model="createForm">
+      <a-form layout="vertical">
         <a-form-item :label="t('metacognition.type')" required>
           <a-select v-model:value="createForm.type" :placeholder="t('metacognition.selectType')">
             <a-select-option value="self_assessment">{{ t('metacognition.selfAssessment') }}</a-select-option>
@@ -256,9 +281,16 @@ import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
-import { useAPI, useMutation } from '@/composables/useAPI'
+import { useMutation } from '@/composables/useAPI'
 import * as metacognitionApi from '@/api/modules/metacognition'
-import type { MetacognitionEntry, MetacognitionStats, MetacognitionCreatePayload } from '@/api/modules/metacognition'
+import type {
+  MetacognitionEntry,
+  MetacognitionStats,
+  MetacognitionCreatePayload,
+  CognitiveLoadState,
+  ReflectionHistoryItem,
+  StructuredLesson,
+} from '@/api/modules/metacognition'
 
 const { t } = useI18n()
 const { agentId, currentAgent } = useAgentPage({
@@ -267,16 +299,15 @@ const { agentId, currentAgent } = useAgentPage({
   },
 })
 
-// --- Legacy state (kept for backward compatibility with existing metrics/dimensions/history) ---
-const loading = ref(false)
-const metaState = ref<any>(null)
-const history = ref<any[]>([])
-
-// --- Stats ---
+// --- Stats / entries / load state / lessons / history ---
 const stats = ref<MetacognitionStats | null>(null)
-const statsLoading = ref(false)
+const loadState = ref<CognitiveLoadState | null>(null)
+const history = ref<ReflectionHistoryItem[]>([])
+const lessons = ref<StructuredLesson[]>([])
+const lessonsLoading = ref(false)
+const reflecting = ref(false)
+const loading = ref(false)
 
-// --- Entries (paginated) ---
 const entryItems = ref<MetacognitionEntry[]>([])
 const entryTotal = ref(0)
 const entryPage = ref(1)
@@ -284,7 +315,6 @@ const entrySize = ref(10)
 const entriesLoading = ref(false)
 const typeFilter = ref<string | undefined>(undefined)
 
-// --- Create modal ---
 const showCreateModal = ref(false)
 const createForm = reactive<{
   type: string
@@ -298,12 +328,10 @@ const createForm = reactive<{
   confidence: 0.5,
 })
 
-// --- Mutation for create ---
 const createMutation = useMutation<MetacognitionCreatePayload, MetacognitionEntry>(
-  (data) => metacognitionApi.createMetacognition(data),
+  (data) => metacognitionApi.createMetacognition(agentId.value, data),
 )
 
-// --- Type color map ---
 const typeColorMap: Record<string, string> = {
   self_assessment: 'blue',
   strategy: 'purple',
@@ -311,7 +339,16 @@ const typeColorMap: Record<string, string> = {
   planning: 'orange',
 }
 
-const formatPercent = (val: number | undefined) =>
+const operatorColor = (op: string) =>
+  ({
+    drift: 'red',
+    contrast: 'orange',
+    sequence: 'volcano',
+    calibration: 'purple',
+    budget: 'gold',
+  })[op] || 'default'
+
+const formatPercent = (val: number | undefined | null) =>
   val !== undefined && val !== null ? `${Math.round(val * 100)}%` : '-'
 
 const formatType = (type: string) => {
@@ -324,7 +361,7 @@ const formatType = (type: string) => {
   return map[type] || type
 }
 
-const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
+const formatTime = (ts: string | null) => (ts ? new Date(ts).toLocaleString() : '')
 const formatDate = (d: string) => {
   if (!d) return ''
   const date = new Date(d)
@@ -337,52 +374,60 @@ const trendBarHeight = (count: number) => {
   return Math.max(4, (count / max) * 80)
 }
 
+// --- Cognitive load metrics (real state) ---
 const metrics = computed(() => {
-  if (!metaState.value) return []
+  if (!loadState.value) return []
+  const s = loadState.value
   return [
     {
-      label: t('metacognition.confidence'),
-      displayValue: formatPercent(metaState.value.confidence),
-      percent: Math.round((metaState.value.confidence || 0) * 100),
-      color: '#10b981',
-      status: (metaState.value.confidence || 0) >= 0.7 ? t('metacognition.high') : t('metacognition.low'),
-    },
-    {
-      label: t('metacognition.uncertainty'),
-      displayValue: formatPercent(metaState.value.uncertainty),
-      percent: Math.round((metaState.value.uncertainty || 0) * 100),
-      color: '#f59e0b',
-      status: (metaState.value.uncertainty || 0) <= 0.3 ? t('metacognition.low') : t('metacognition.high'),
-    },
-    {
-      label: t('metacognition.awareness'),
-      displayValue: formatPercent(metaState.value.awareness),
-      percent: Math.round((metaState.value.awareness || 0) * 100),
+      label: t('metacognition.loadScore'),
+      displayValue: formatPercent(s.load_score),
+      percent: Math.round((s.load_score || 0) * 100),
       color: '#6366f1',
-      status: (metaState.value.awareness || 0) >= 0.7 ? t('metacognition.high') : t('metacognition.low'),
+      status: (s.load_score || 0) >= 0.7 ? t('metacognition.high') : t('metacognition.low'),
     },
     {
-      label: t('metacognition.selfMonitoring'),
-      displayValue: formatPercent(metaState.value.self_monitoring),
-      percent: Math.round((metaState.value.self_monitoring || 0) * 100),
+      label: t('metacognition.errorRate'),
+      displayValue: formatPercent(s.error_rate),
+      percent: Math.round((s.error_rate || 0) * 100),
+      color: '#f59e0b',
+      status: (s.error_rate || 0) <= 0.3 ? t('metacognition.low') : t('metacognition.high'),
+    },
+    {
+      label: t('metacognition.activeTasks'),
+      displayValue: String(s.active_tasks ?? 0),
+      percent: Math.min(100, Math.round(((s.active_tasks || 0) / 10) * 100)),
       color: '#8b5cf6',
-      status: (metaState.value.self_monitoring || 0) >= 0.5 ? t('metacognition.active') : t('metacognition.passive'),
+      status: (s.active_tasks || 0) > 0 ? t('metacognition.active') : t('metacognition.idle'),
+    },
+    {
+      label: t('metacognition.responseTime'),
+      displayValue: `${Math.round(s.response_time_ms || 0)} ms`,
+      percent: Math.min(100, Math.round(((s.response_time_ms || 0) / 5000) * 100)),
+      color: '#10b981',
+      status: (s.response_time_ms || 0) < 5000 ? t('metacognition.normal') : t('metacognition.slow'),
     },
   ]
 })
 
-const dimensions = computed(() => {
-  if (!metaState.value?.dimensions) return []
-  return Object.entries(metaState.value.dimensions).map(([name, value]) => ({
-    name,
-    value: value as number,
-  }))
+// --- Load factor composition (B 公式四因子) ---
+const factors = computed(() => {
+  const f = loadState.value?.factors
+  if (!f) return []
+  const labelMap: Record<string, string> = {
+    tasks: t('metacognition.factorTasks'),
+    memory: t('metacognition.factorMemory'),
+    response: t('metacognition.factorResponse'),
+    error: t('metacognition.factorError'),
+  }
+  return Object.entries(f).map(([name, value]) => ({ name: labelMap[name] || name, value: value as number }))
 })
 
-const stateBadge = computed(() => {
-  const s = metaState.value?.state
-  if (s === 'active' || s === 'healthy') return 'success'
-  if (s === 'degraded') return 'warning'
+const loadBadge = computed(() => {
+  const level = loadState.value?.load_level
+  if (level === 'low' || level === 'moderate') return 'success'
+  if (level === 'high') return 'warning'
+  if (level === 'overload') return 'error'
   return 'default'
 })
 
@@ -394,38 +439,21 @@ const historyColumns = computed(() => [
 ])
 
 // --- Fetchers ---
-const fetchMetacognition = async () => {
-  loading.value = true
+const fetchState = async () => {
   try {
-    const res: any = await metacognitionApi.getMetacognitionEntries(agentId.value, { page: 1, size: 1 })
-    const data = res?.data ?? res
-    metaState.value = data?.state ?? data?.current ?? data
-    history.value = data?.history ?? data?.logs ?? []
-  } catch (e: any) {
-    // Fallback: try legacy endpoint pattern
-    try {
-      const { request } = await import('@/api')
-      const legacyRes: any = await request.get(`/metacognition/${agentId.value}/metacognition`)
-      const legacyData = legacyRes?.data ?? legacyRes
-      metaState.value = legacyData?.state ?? legacyData?.current ?? legacyData
-      history.value = legacyData?.history ?? legacyData?.logs ?? []
-    } catch {
-      message.error(e?.message || t('common.error'))
-    }
-  } finally {
-    loading.value = false
+    const res = await metacognitionApi.getCognitiveState(agentId.value)
+    loadState.value = res?.data ?? null
+  } catch {
+    loadState.value = null
   }
 }
 
 const fetchStats = async () => {
-  statsLoading.value = true
   try {
     const res = await metacognitionApi.getMetacognitionStats(agentId.value)
     stats.value = res?.data ?? null
   } catch {
-    // Stats may not be available; silently ignore
-  } finally {
-    statsLoading.value = false
+    stats.value = null
   }
 }
 
@@ -454,6 +482,27 @@ const fetchEntries = async () => {
   }
 }
 
+const fetchLessons = async () => {
+  lessonsLoading.value = true
+  try {
+    const res = await metacognitionApi.getLessons(agentId.value)
+    lessons.value = res?.data?.items ?? []
+  } catch {
+    lessons.value = []
+  } finally {
+    lessonsLoading.value = false
+  }
+}
+
+const fetchHistory = async () => {
+  try {
+    const res = await metacognitionApi.getReflectionHistory(agentId.value)
+    history.value = res?.data?.items ?? []
+  } catch {
+    history.value = []
+  }
+}
+
 const onTypeFilterChange = () => {
   entryPage.value = 1
   fetchEntries()
@@ -470,7 +519,6 @@ const handleCreate = async () => {
     return
   }
   const payload: MetacognitionCreatePayload = {
-    agent_id: agentId.value,
     type: createForm.type,
     content: createForm.content,
     context: createForm.context || undefined,
@@ -481,10 +529,27 @@ const handleCreate = async () => {
     message.success(t('common.success'))
     showCreateModal.value = false
     resetForm()
-    // Refresh entries and stats
     await Promise.all([fetchEntries(), fetchStats()])
   } else if (createMutation.error.value) {
     message.error(createMutation.error.value)
+  }
+}
+
+const handleReflect = async () => {
+  reflecting.value = true
+  try {
+    const res = await metacognitionApi.triggerReflection(agentId.value)
+    const report = res?.data
+    if (report?.lessons?.length) {
+      message.success(t('metacognition.reflectDoneWith', { n: report.lessons.length }))
+    } else {
+      message.info(t('metacognition.reflectDoneClean'))
+    }
+    await Promise.all([fetchLessons(), fetchHistory()])
+  } catch (e: any) {
+    message.error(e?.message || t('common.error'))
+  } finally {
+    reflecting.value = false
   }
 }
 
@@ -496,7 +561,12 @@ const resetForm = () => {
 }
 
 const refreshAll = () => {
-  Promise.all([fetchMetacognition(), fetchStats(), fetchEntries()])
+  loading.value = true
+  Promise.all([fetchState(), fetchStats(), fetchEntries(), fetchLessons(), fetchHistory()]).finally(
+    () => {
+      loading.value = false
+    },
+  )
 }
 
 onMounted(() => {
@@ -693,6 +763,7 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
 }
 
 .entry-date {

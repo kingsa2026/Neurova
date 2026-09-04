@@ -83,6 +83,7 @@ class PatternCrystallizer:
         self,
         engine: CognitiveStorageEngine,
         evolution_orchestrator=None,
+        state_path: Optional[str] = None,
     ):
         """
         初始化经验结晶器
@@ -90,12 +91,69 @@ class PatternCrystallizer:
         Args:
             engine: CognitiveStorageEngine 实例
             evolution_orchestrator: EvolutionOrchestrator 实例（可选）
+            state_path: 观察缓冲持久化文件（可选；C9 断链修复——
+                此前 _buffer 纯内存，重启丢计数，低频场景"≥3 次结晶"
+                永远凑不齐。提供时按模式键持久化聚合计数，重启恢复）
         """
         self.engine = engine
         self.evolution = evolution_orchestrator
+        self._state_path = state_path
         self._buffer: Dict[str, List[Dict[str, Any]]] = {}
+        self._load_buffer_state()
 
         logger.info("PatternCrystallizer 初始化完成")
+
+    def _load_buffer_state(self) -> None:
+        """从 state 文件恢复观察聚合计数（C9；缺文件/损坏静默跳过）。"""
+        if not self._state_path:
+            return
+        try:
+            from pathlib import Path as _Path
+            import json as _json
+
+            p = _Path(self._state_path)
+            if not p.exists():
+                return
+            data = _json.loads(p.read_text(encoding="utf-8"))
+            # state 存聚合形态 {key: {"observations": n, "successes": n,
+            # "last_context": str}}；恢复为等价缓冲条目（合成条目不含原文，
+            # 只保计数语义）
+            for key, agg in data.items():
+                n = int(agg.get("observations", 0))
+                succ = int(agg.get("successes", 0))
+                if n <= 0 or n >= 3:
+                    continue  # 满 3 的缓冲即时结晶后已清空，不恢复
+                ctx = str(agg.get("last_context", ""))[:200]
+                self._buffer[key] = [
+                    {"tool": agg.get("tool", key), "success": i < succ, "context": ctx}
+                    for i in range(n)
+                ]
+        except Exception as e:
+            logger.debug("结晶缓冲状态恢复跳过: %s", e)
+
+    def _save_buffer_state(self) -> None:
+        """把缓冲聚合计数落盘（C9；写失败不影响主流程）。"""
+        if not self._state_path:
+            return
+        try:
+            from pathlib import Path as _Path
+            import json as _json
+
+            data = {}
+            for key, entries in self._buffer.items():
+                if not entries:
+                    continue
+                data[key] = {
+                    "observations": len(entries),
+                    "successes": sum(1 for e in entries if e.get("success")),
+                    "tool": entries[0].get("tool", ""),
+                    "last_context": entries[-1].get("context", ""),
+                }
+            p = _Path(self._state_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(_json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        except Exception as e:
+            logger.debug("结晶缓冲状态落盘失败: %s", e)
 
     def observe(
         self,
@@ -128,10 +186,12 @@ class PatternCrystallizer:
         )
 
         logger.debug("观察到工具使用: %s, 模式键: %s", tool_name, key)
+        self._save_buffer_state()
 
         # 当同一模式观察3次时尝试结晶
         if len(self._buffer[key]) >= 3:
             self._try_crystallize(key)
+            self._save_buffer_state()
 
     def _try_crystallize(self, key: str) -> None:
         """

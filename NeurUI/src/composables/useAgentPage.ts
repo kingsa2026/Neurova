@@ -67,7 +67,7 @@ export function useAgentPage(options?: { onAgentChange?: (newAgentId: string) =>
   watch(
     () => route.query.agentId,
     (newId) => {
-      if (route.params.agentId) return // params 优先, query 不覆盖
+      if (route.params?.agentId) return // params 优先, query 不覆盖
       const next = resolveAgentId(undefined, { agentId: newId }, agentId.value)
       if (next && next !== agentId.value) {
         agentId.value = next
@@ -77,7 +77,7 @@ export function useAgentPage(options?: { onAgentChange?: (newAgentId: string) =>
   )
 
   watch(
-    () => route.params.agentId,
+    () => route.params?.agentId,
     (newId) => {
       if (newId && typeof newId === 'string') {
         agentId.value = newId

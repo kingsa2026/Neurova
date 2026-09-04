@@ -38,15 +38,33 @@ class TestRegistryHasModelScope:
 
 
 class TestSourceResolution:
+    @staticmethod
+    def _ok_engine(tag, calls):
+        """stub 引擎：记录调用并落盘 required_files（模拟下载成功）。"""
+
+        def engine(registry, model_dir, cb=None):
+            calls.append(tag)
+            for f in registry["required_files"]:
+                p = model_dir / f
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_bytes(b"x")
+
+        return engine
+
+    @staticmethod
+    def _fail_engine(tag, calls):
+        def engine(registry, model_dir, cb=None):
+            calls.append(tag)
+            raise RuntimeError(f"{tag} down")
+
+        return engine
+
     def test_auto_bge_ms_first(self, tmp_path, monkeypatch):
         """bge 有 MS 镜像：auto = modelscope → hf-mirror → hf 直连。"""
         calls = []
-        monkeypatch.setattr(md, "_download_via_modelscope",
-                            lambda e, d, cb: calls.append("ms"))
-        monkeypatch.setattr(md, "_download_via_hf_mirror",
-                            lambda e, d, cb: calls.append("mirror"))
-        monkeypatch.setattr(md, "_download_via_huggingface",
-                            lambda e, d, cb: calls.append("hf"))
+        monkeypatch.setattr(md, "_download_via_modelscope", self._ok_engine("ms", calls))
+        monkeypatch.setattr(md, "_download_via_hf_mirror", self._fail_engine("mirror", calls))
+        monkeypatch.setattr(md, "_download_via_huggingface", self._fail_engine("hf", calls))
         md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
             "bge-small-zh-v1.5", source="auto")
         assert calls == ["ms"]
@@ -54,53 +72,37 @@ class TestSourceResolution:
     def test_auto_moss_mirror_first_no_ms(self, tmp_path, monkeypatch):
         """MOSS 无 MS 镜像：auto = hf-mirror → hf 直连（跳过 modelscope）。"""
         calls = []
-        monkeypatch.setattr(md, "_download_via_modelscope",
-                            lambda e, d, cb: calls.append("ms"))
-        monkeypatch.setattr(md, "_download_via_hf_mirror",
-                            lambda e, d, cb: calls.append("mirror"))
-        monkeypatch.setattr(md, "_download_via_huggingface",
-                            lambda e, d, cb: calls.append("hf"))
+        monkeypatch.setattr(md, "_download_via_modelscope", self._fail_engine("ms", calls))
+        monkeypatch.setattr(md, "_download_via_hf_mirror", self._ok_engine("mirror", calls))
+        monkeypatch.setattr(md, "_download_via_huggingface", self._fail_engine("hf", calls))
         md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
             "moss-tts-nano", source="auto")
         assert calls == ["mirror"]
 
     def test_auto_ms_fail_falls_to_mirror_then_hf(self, tmp_path, monkeypatch):
         calls = []
-        def ms_fail(e, d, cb):
-            calls.append("ms-fail")
-            raise RuntimeError("modelscope down")
-        def mirror_fail(e, d, cb):
-            calls.append("mirror-fail")
-            raise RuntimeError("mirror down")
-        monkeypatch.setattr(md, "_download_via_modelscope", ms_fail)
-        monkeypatch.setattr(md, "_download_via_hf_mirror", mirror_fail)
-        monkeypatch.setattr(md, "_download_via_huggingface",
-                            lambda e, d, cb: calls.append("hf"))
+        monkeypatch.setattr(md, "_download_via_modelscope", self._fail_engine("ms", calls))
+        monkeypatch.setattr(md, "_download_via_hf_mirror", self._fail_engine("mirror", calls))
+        monkeypatch.setattr(md, "_download_via_huggingface", self._ok_engine("hf", calls))
         md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
             "bge-small-zh-v1.5", source="auto")
-        assert calls == ["ms-fail", "mirror-fail", "hf"]
+        assert calls == ["ms", "mirror", "hf"]
 
     def test_explicit_modelscope_no_fallback(self, tmp_path, monkeypatch):
         calls = []
-        monkeypatch.setattr(md, "_download_via_modelscope", mock.Mock(
-            side_effect=RuntimeError("modelscope down")))
-        monkeypatch.setattr(md, "_download_via_hf_mirror",
-                            lambda e, d, cb: calls.append("mirror"))
-        monkeypatch.setattr(md, "_download_via_huggingface",
-                            lambda e, d, cb: calls.append("hf"))
+        monkeypatch.setattr(md, "_download_via_modelscope", self._fail_engine("ms", calls))
+        monkeypatch.setattr(md, "_download_via_hf_mirror", self._ok_engine("mirror", calls))
+        monkeypatch.setattr(md, "_download_via_huggingface", self._ok_engine("hf", calls))
         dl = md.ModelDownloader(base_dir=str(tmp_path))
         with pytest.raises(RuntimeError):
             dl.ensure_model("bge-small-zh-v1.5", source="modelscope")
-        assert calls == []  # 显式指定源：失败不换源
+        assert calls == ["ms"]  # 显式指定源：失败不换源
 
     def test_explicit_huggingface_direct_only(self, tmp_path, monkeypatch):
         calls = []
-        monkeypatch.setattr(md, "_download_via_modelscope",
-                            lambda e, d, cb: calls.append("ms"))
-        monkeypatch.setattr(md, "_download_via_hf_mirror",
-                            lambda e, d, cb: calls.append("mirror"))
-        monkeypatch.setattr(md, "_download_via_huggingface",
-                            lambda e, d, cb: calls.append("hf"))
+        monkeypatch.setattr(md, "_download_via_modelscope", self._ok_engine("ms", calls))
+        monkeypatch.setattr(md, "_download_via_hf_mirror", self._ok_engine("mirror", calls))
+        monkeypatch.setattr(md, "_download_via_huggingface", self._ok_engine("hf", calls))
         md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
             "bge-small-zh-v1.5", source="huggingface")
         assert calls == ["hf"]
@@ -115,8 +117,16 @@ class TestSourceResolution:
         seen = []
         dl = md.ModelDownloader(base_dir=str(tmp_path))
         dl.set_progress_callback(lambda p: seen.append(p))
-        monkeypatch.setattr(md, "_download_via_modelscope",
-                            mock.Mock(side_effect=lambda entry, d, cb: cb(50, 100)))
+
+        def engine(registry, model_dir, cb=None):
+            assert cb is not None, "引擎必须收到进度回调"
+            cb(50, 100)
+            for f in registry["required_files"]:
+                p = model_dir / f
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_bytes(b"x")
+
+        monkeypatch.setattr(md, "_download_via_modelscope", engine)
         dl.ensure_model("bge-small-zh-v1.5", source="modelscope")
         assert len(seen) == 1
         assert seen[0].percentage == 50.0
@@ -159,14 +169,14 @@ class TestSourceStore:
 
 
 class TestPendingDownloads:
-    def test_pending_lists_missing_models(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(md.MODEL_REGISTRY["moss-tts-nano"], "local_dir",
-                            "models/tts/moss-nano", raising=False)
+    def test_pending_lists_missing_models(self, tmp_path):
         dl = md.ModelDownloader(base_dir=str(tmp_path))
         pending = dl.pending_downloads()
         assert isinstance(pending, list)
+        assert pending, "干净目录下三个模型全缺失"
         for item in pending:
             assert {"model", "available", "size_hint"} <= set(item.keys())
+            assert item["available"] is False
 
     def test_pending_empty_when_all_present(self, tmp_path, monkeypatch):
         dl = md.ModelDownloader(base_dir=str(tmp_path))

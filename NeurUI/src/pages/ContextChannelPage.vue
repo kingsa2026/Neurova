@@ -5,6 +5,8 @@
       <GlassButton variant="ghost" size="sm" @click="$router.back()">{{ t('common.back') }}</GlassButton>
     </div>
 
+    <AgentPageTabs :tabs="channelTabs" />
+
     <GlassPanel variant="subtle" padding="16px 20px">
       <p class="section-desc">{{ t('channel.sharing') }} - {{ t('channel.config') }}</p>
     </GlassPanel>
@@ -44,8 +46,16 @@ import { request } from '@/api'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import AgentPageTabs from '@/components/AgentPageTabs.vue'
+import { useAgentPage } from '@/composables/useAgentPage'
 
 const { t } = useI18n()
+const { agentId } = useAgentPage()
+
+const channelTabs = [
+  { labelKey: 'nav.agentchannel', to: `/agent/${agentId.value}/channel` },
+  { labelKey: 'nav.agentchannelsharing', to: `/agent/${agentId.value}/channel-sharing` },
+]
 
 interface ChannelSharing {
   channelId: string

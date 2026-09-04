@@ -63,6 +63,25 @@ def main():
         except Exception as _persist_err:  # noqa: BLE001 - 权重恢复失败不阻断启动
             print(f"Warning: 进化权重恢复失败（忽略）: {_persist_err}")
 
+        # C12：RSI 优化回执路径（显式注入，保单例零 IO 默认）
+        try:
+            import os as _os
+
+            _os.environ.setdefault("NEUROVA_RSI_RECEIPTS", "data/evolution/rsi_receipts.jsonl")
+        except Exception as _receipt_err:  # noqa: BLE001
+            print(f"Warning: 回执路径注入失败（忽略）: {_receipt_err}")
+
+        # 工具层防护装配（C5：env 门控，默认关——NEUROVA_TOOL_CIRCUIT_BREAKER /
+        # NEUROVA_TOOL_PARAM_GUARD 置 1 开启）
+        try:
+            from neurova.evolution.closed_loop import bootstrap_evolution_protections
+
+            _protections = bootstrap_evolution_protections()
+            if any(_protections.values()):
+                print(f"工具层防护已装配: {_protections}")
+        except Exception as _protect_err:  # noqa: BLE001 - 防护装配失败不阻断启动
+            print(f"Warning: 工具层防护装配失败（忽略）: {_protect_err}")
+
         # 创建应用
         app = create_app()
 

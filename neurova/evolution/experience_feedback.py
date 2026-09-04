@@ -337,8 +337,22 @@ class ExperienceFeedback:
 
         success_rate = total_success / total_count if total_count > 0 else 0.0
 
+        # 任务-工具模式激活（遗留事项 ③）：_associations 每轮写入但
+        # get_task_tool_patterns 零消费方——模式沉淀了永不用于决策。此处把
+        # 高置信模式（观察≥2）按成功率排序进入反馈信号，随 RSI 的
+        # system_performance 估算参与决策。有界 5 条防反馈膨胀。
+        top_patterns = []
+        for task_assocs in self._associations.values():
+            for assoc in task_assocs.values():
+                if assoc.total_count < 2:
+                    continue
+                top_patterns.append(assoc.to_dict())
+        top_patterns.sort(key=lambda x: x["success_rate"], reverse=True)
+        top_patterns = top_patterns[:5]
+
         return {
             "crystallized_patterns": crystallized,
             "success_rate": success_rate,
             "total_experiences": len(self._insights),
+            "top_task_tool_patterns": top_patterns,
         }

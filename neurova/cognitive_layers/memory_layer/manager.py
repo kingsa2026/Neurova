@@ -35,6 +35,7 @@ Stub 方法 (返回空值, 未实现):
 """
 
 import json
+import datetime
 from neurova.core.logger import get_logger
 import os
 from pathlib import Path
@@ -1646,12 +1647,22 @@ class MemoryManager:
                 MetaCognitionModule,
             )
 
-            self._meta_cognition_module = MetaCognitionModule(max_history=1000)
+            self._meta_cognition_module = MetaCognitionModule(
+                max_history=1000, agent_id=self._resolve_meta_agent_id()
+            )
             self._meta_cognition_module.init()
             # 保存 CognitiveProcess 枚举供后续方法使用
             self._meta_cognition_process_cls = CognitiveProcess
             logger.info("MetaCognitionModule lazily initialized")
         return self._meta_cognition_module
+
+    def _resolve_meta_agent_id(self) -> str:
+        """解析本 manager 归属的 agent_id（台账归属用；取不到回退 default）。"""
+        for attr in ("_agent_id", "agent_id"):
+            value = getattr(self, attr, None)
+            if value:
+                return str(value)
+        return "default"
 
     def meta_monitor(self) -> Dict[str, Any]:
         """元认知监控（委托到 MetaCognitionModule.record_event + get_stats）"""
@@ -1661,12 +1672,27 @@ class MemoryManager:
         return module.get_stats()
 
     def meta_reflect(self, **kwargs) -> Dict[str, Any]:
-        """元认知反思（委托到 MetaCognitionModule.record_event）"""
+        """元认知反思（V3：保留模块事件委托 + 追加真分析）
+
+        原"假反思"根因：只记录一条名为 meta_reflect 的事件，不做任何分析。
+        现追加 SelfModelEngine（洞察编译器）真反思，教训与反思报告落台账。
+        模块委托保留（委托契约测试锁定）；引擎故障降级为原事件返回。
+        """
         module = self._ensure_meta_cognition_module()
         Process = self._meta_cognition_process_cls
         description = kwargs.get("description", "meta_reflect")
         event = module.record_event(Process.REASONING, description, duration_ms=0.0, success=True)
-        return event.to_dict()
+        result = event.to_dict()
+        try:
+            from neurova.cognitive_layers.meta_cognition_layer.self_model import get_self_model_engine
+
+            report = get_self_model_engine(self._resolve_meta_agent_id()).reflect(
+                trigger=description
+            )
+            result["reflection"] = report
+        except Exception as e:
+            logger.debug("真反思引擎调用跳过: %s", e)
+        return result
 
     def meta_optimize(self) -> Dict[str, Any]:
         """元认知优化（委托到 MetaCognitionModule.record_event + get_stats）"""
@@ -1683,15 +1709,33 @@ class MemoryManager:
         return module.get_stats()
 
     def meta_get_health_report(self) -> Dict[str, Any]:
-        """获取健康报告（委托到 MetaCognitionModule.get_stats）"""
+        """获取健康报告（V3：模块统计 + 台账真数据合并）"""
         module = self._ensure_meta_cognition_module()
-        return module.get_stats()
+        report = module.get_stats()
+        try:
+            from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
+
+            agent_id = self._resolve_meta_agent_id()
+            ledger = get_meta_ledger(agent_id)
+            report["load_state"] = ledger.latest_state(agent_id)
+            report["record_stats"] = ledger.record_stats(agent_id)
+        except Exception as e:
+            logger.debug("健康报告台账合并跳过: %s", e)
+        return report
 
     def meta_get_reflection_report(self) -> List[Dict[str, Any]]:
-        """获取反思报告（委托到 MetaCognitionModule.get_recent_events）"""
-        module = self._ensure_meta_cognition_module()
-        events = module.get_recent_events(count=10)
-        return [e.to_dict() for e in events]
+        """获取反思报告（V3：台账反思时间线——真报告，非事件回声）"""
+        try:
+            from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
+
+            return get_meta_ledger(self._resolve_meta_agent_id()).reflection_history(
+                self._resolve_meta_agent_id(), limit=10
+            )
+        except Exception as e:
+            logger.debug("反思报告读台账跳过: %s", e)
+            module = self._ensure_meta_cognition_module()
+            events = module.get_recent_events(count=10)
+            return [e.to_dict() for e in events]
 
     def meta_get_skill_stats(self) -> Dict[str, Any]:
         """获取技能统计（委托到 MetaCognitionModule.get_process_stats）"""
@@ -1712,14 +1756,32 @@ class MemoryManager:
         return [e.to_dict() for e in events if query.lower() in e.description.lower()]
 
     def meta_should_monitor(self) -> bool:
-        """是否应该监控（委托到 MetaCognitionModule，默认返回 True）"""
-        self._ensure_meta_cognition_module()
-        return True
+        """是否应该监控（V3：台账门控——距上次负荷快照超 5 分钟才需要）"""
+        try:
+            from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
+
+            agent_id = self._resolve_meta_agent_id()
+            state = get_meta_ledger(agent_id).latest_state(agent_id)
+            if state and state.get("created_at"):
+                from neurova.cognitive_layers.meta_cognition_layer.ledger import _now_iso
+
+                elapsed = (
+                    datetime.datetime.now(datetime.timezone.utc)
+                    - datetime.datetime.fromisoformat(state["created_at"])
+                ).total_seconds()
+                return elapsed >= 300
+            return True
+        except Exception:
+            return True
 
     def meta_should_reflect(self) -> bool:
-        """是否应该反思（委托到 MetaCognitionModule，默认返回 True）"""
-        self._ensure_meta_cognition_module()
-        return True
+        """是否应该反思（V3：洞察编译器间隔门控）"""
+        try:
+            from neurova.cognitive_layers.meta_cognition_layer.self_model import get_self_model_engine
+
+            return get_self_model_engine(self._resolve_meta_agent_id()).should_reflect()
+        except Exception:
+            return True
 
     def meta_should_optimize(self) -> bool:
         """是否应该优化（委托到 MetaCognitionModule，默认返回 True）"""

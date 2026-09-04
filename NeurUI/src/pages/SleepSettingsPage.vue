@@ -7,6 +7,8 @@
       </div>
     </div>
 
+    <AgentPageTabs :tabs="sleepTabs" />
+
     <a-spin :spinning="loading">
       <!-- Core settings（与后端 SleepSettings 键位严格对齐） -->
       <GlassCard :title="t('sleep.settings')" style="margin-top: 8px">
@@ -275,11 +277,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useMutation } from '@/composables/useAPI'
 import * as sleepApi from '@/api/modules/sleep'
@@ -287,6 +290,11 @@ import type { SleepSettings, MergeConflict } from '@/api/modules/sleep'
 
 const { t } = useI18n()
 const { agentId } = useAgentPage()
+
+const sleepTabs = computed(() => [
+  { labelKey: 'nav.sleepstatus', to: `/agent/${agentId.value}/sleep/status` },
+  { labelKey: 'nav.sleepsettings', to: `/agent/${agentId.value}/sleep/settings` },
+])
 
 // --- State ---
 const loading = ref(false)

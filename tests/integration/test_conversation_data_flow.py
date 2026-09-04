@@ -204,8 +204,13 @@ class TestChatPipelineDataFlow:
         agent.trace_manager.finish_trace.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_step4_crystallizer_observe(self):
-        """Step 4: 结晶器观察通路"""
+    async def test_step4_no_direct_crystallizer_observe(self):
+        """Step 4 不再直挂结晶观察（闭环审计 2026-09-04 修复）。
+
+        原分支依赖 agent._last_tool_used——该属性生产代码从不写入（死信号），
+        且硬编码 success=True 会污染结晶缓冲；与 Step9 → on_experience_recorded
+        的真实成败观察双计。观察职责已收敛到 post_chat Step9 单点。
+        """
         agent = MockAgent()
         agent._last_tool_used = "web_search"
         pipeline = ChatPipeline(agent)
@@ -213,8 +218,8 @@ class TestChatPipelineDataFlow:
         ctx = ChatContext(user_input="Hello")
         await pipeline.execute(ctx)
 
-        # crystallizer.observe 应被调用
-        agent.crystallizer.observe.assert_called_once()
+        # 直挂观察必须不存在（防止双计回归）；真实观察走 Step9→facade
+        agent.crystallizer.observe.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_result_assembly(self):

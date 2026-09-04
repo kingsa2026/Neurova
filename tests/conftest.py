@@ -277,3 +277,39 @@ def _isolate_usage_history(tmp_path, monkeypatch):
     except Exception:  # pragma: no cover - 模块未就绪时跳过
         return
     reset_usage_history()
+
+
+# ---------------------------------------------------------------------------
+# 元认知台账防污染隔离
+# ---------------------------------------------------------------------------
+# MetaLedger（neurova/cognitive_layers/meta_cognition_layer/ledger.py）默认落
+# data/metacognition.db；B/C 写穿透与 API 测试都会写它，测试期直接落盘会污染
+# 仓库 data/。统一指向每测试临时目录（含单例重建），与 _isolate_usage_history 同模式。
+
+@pytest.fixture(autouse=True)
+def _isolate_meta_ledger(tmp_path, monkeypatch):
+    """所有测试的元认知台账落盘指向临时目录。"""
+    monkeypatch.setenv("NEUROVA_META_LEDGER_DB", str(tmp_path / "metacognition.db"))
+    try:
+        from neurova.cognitive_layers.meta_cognition_layer.ledger import reset_meta_ledger
+    except Exception:  # pragma: no cover - 模块未就绪时跳过
+        return
+    reset_meta_ledger()
+
+
+# ---------------------------------------------------------------------------
+# 元认知台账防污染隔离
+# ---------------------------------------------------------------------------
+# MetaLedger（neurova/cognitive_layers/meta_cognition_layer/ledger.py）默认落
+# data/metacognition.db；B/C 写穿透与 API 测试都会写它，测试期直接落盘会污染
+# 仓库 data/。统一指向每测试临时目录（含单例重建），与 _isolate_usage_history 同模式。
+
+@pytest.fixture(autouse=True)
+def _isolate_meta_ledger(tmp_path, monkeypatch):
+    """所有测试的元认知台账落盘指向临时目录。"""
+    monkeypatch.setenv("NEUROVA_META_LEDGER_DB", str(tmp_path / "metacognition.db"))
+    try:
+        from neurova.cognitive_layers.meta_cognition_layer.ledger import reset_meta_ledger
+    except Exception:  # pragma: no cover - 模块未就绪时跳过
+        return
+    reset_meta_ledger()

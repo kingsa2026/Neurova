@@ -8,6 +8,7 @@ from fastapi import Depends, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_default
+from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
 from neurova.interfaces.api_standard import (
     APIError,
     APIResponse,
@@ -437,43 +438,40 @@ async def get_agent_metacognition(
     offset: int = 0,
     req: Request = None,
 ):
-    """获取 Agent 的元认知记录（前端 MetacognitionPage.vue 调用）"""
+    """获取 Agent 的元认知记录（前端 MetacognitionPage.vue 调用）
+
+    V3 收口：原实现读 agent.metacog_manager（全仓无此属性，恒返回空），
+    现与 /v1/metacognition 端点同源——统一台账 MetaLedger。
+    """
     try:
-        from neurova.agent_registry import AgentRegistry
-
-        registry = AgentRegistry()
-        agent = registry.get_agent(agent_id)
-        if not agent:
-            return success_response(
-                data={"items": [], "total": 0, "stats": {"total": 0, "evaluations": 0, "suggestions": 0}},
-                request_id=_get_request_id(req),
-            )
-
-        manager = getattr(agent, "metacog_manager", None)
-        records = getattr(manager, "records", []) if manager else []
-        total = len(records)
-        items = records[offset : offset + limit]
-
-        evals = len([r for r in records if getattr(r, "thought_type", "") == "evaluation"])
-        opts = len([r for r in records if getattr(r, "thought_type", "") == "optimization"])
-
+        ledger = get_meta_ledger(agent_id)
+        page = offset // limit + 1 if limit else 1
+        result = ledger.list_records(agent_id=agent_id, page=page, size=limit)
+        items = [
+            {
+                "id": it["id"],
+                "type": it["type"],
+                "content": it["content"],
+                "context": it["context"],
+                "confidence": it["confidence"],
+                "created_at": it["created_at"],
+            }
+            for it in result["items"]
+        ]
+        stats = ledger.record_stats(agent_id)
         return success_response(
             data={
                 "agent_id": agent_id,
-                "total": total,
-                "items": [
-                    {
-                        "id": getattr(r, "id", str(i)),
-                        "title": getattr(r, "content", "")[:50],
-                        "type": getattr(r, "thought_type", ""),
-                        "time": getattr(r, "created_at", ""),
-                    }
-                    for i, r in enumerate(items)
-                ],
+                "total": result["total"],
+                "items": items,
                 "stats": {
-                    "total": total,
-                    "evaluations": evals,
-                    "suggestions": opts,
+                    "total": stats["total_entries"],
+                    "evaluations": sum(
+                        t["count"] for t in stats["by_type"] if t["type"] == "self_assessment"
+                    ),
+                    "suggestions": sum(
+                        t["count"] for t in stats["by_type"] if t["type"] == "strategy"
+                    ),
                 },
             },
             message="获取成功",
@@ -492,34 +490,16 @@ async def get_agent_metacognition_stats(
     agent_id: str,
     req: Request = None,
 ):
-    """获取 Agent 元认知统计（前端 MetacognitionPage.vue 调用）"""
+    """获取 Agent 元认知统计（V3 收口：同源台账）"""
     try:
-        from neurova.agent_registry import AgentRegistry
-
-        registry = AgentRegistry()
-        agent = registry.get_agent(agent_id)
-        if not agent:
-            return success_response(
-                data={"agent_id": agent_id, "total": 0, "by_type": {}},
-                request_id=_get_request_id(req),
-            )
-
-        manager = getattr(agent, "metacog_manager", None)
-        records = getattr(manager, "records", []) if manager else []
-        by_type = {}
-        for r in records:
-            tt = getattr(r, "thought_type", "")
-            by_type[tt] = by_type.get(tt, 0) + 1
-
-        evals = by_type.get("evaluation", 0)
-        opts = by_type.get("optimization", 0)
-
+        stats = get_meta_ledger(agent_id).record_stats(agent_id)
+        by_type = {t["type"]: t["count"] for t in stats["by_type"]}
         return success_response(
             data={
                 "agent_id": agent_id,
-                "total": len(records),
-                "evaluations": evals,
-                "suggestions": opts,
+                "total": stats["total_entries"],
+                "evaluations": by_type.get("self_assessment", 0),
+                "suggestions": by_type.get("strategy", 0),
                 "by_type": by_type,
             },
             message="获取成功",

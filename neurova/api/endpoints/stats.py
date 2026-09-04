@@ -409,6 +409,12 @@ async def get_provider_usage(
     """
     _get_request_id(request)
 
+    from neurova.llm.provider_usage_adapters import sync_provider_usage_for_user
+
+    # 三轮断链修复①: 读端点顺带按当前用户 scope 触发同步采集
+    # （TTL 节流 5 分钟；usage_collection 开启才拉后台，无开启静默）
+    sync_provider_usage_for_user(current_user)
+
     from neurova.core.provider_usage import ProviderUsageCollector
 
     collector = ProviderUsageCollector.get_installed()

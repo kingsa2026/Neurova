@@ -242,11 +242,15 @@ def link_market_skill_to_agent(
 def restore_market_skills_from_service(service: Any, registry: Any, market_skills_dir: Any = None) -> int:
     """Agent 初始化时从 SkillService manifest 恢复持久化技能（重启后仍可感知）。
 
-    覆盖三类来源（manifest.source 区分）：
+    覆盖四类来源（manifest.source 区分）：
     - marketplace: 市场安装，经 MarketImporter/联邦注册；安装目录含 SKILL.md
       时恢复为 SkillDocSkill 指令型可执行；
     - synthesized: agent 自主分装（NL 合成/create_skill），config.tool_sequence
       恢复为可执行 ToolSequenceSkill——注册表须先 set_tool_router 注入路由器。
+    - agent / auto: agent 显式保存 / pattern 封装与 genetic 进化产物
+      （register_auto_skill 写入的 source），同样按 tool_sequence 恢复——
+      白名单漏 auto 曾导致重启后自动技能"前端可见、registry 不可见"，
+      且 has_skill 落空使下一代遗传重复合成。
     """
     restored = 0
     try:
@@ -256,7 +260,7 @@ def restore_market_skills_from_service(service: Any, registry: Any, market_skill
                 continue
             info = service.get_skill_info(skill_id) or {}
             source = (info.get("manifest") or {}).get("source") or info.get("source")
-            if source not in ("marketplace", "synthesized", "agent"):
+            if source not in ("marketplace", "synthesized", "agent", "auto"):
                 continue
             manifest = info.get("manifest") or {}
             tool_sequence = (manifest.get("config") or {}).get("tool_sequence")

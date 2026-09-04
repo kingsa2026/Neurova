@@ -5,6 +5,8 @@
       <GlassButton variant="ghost" size="sm" :loading="loading" @click="fetchTraces">{{ t('common.refresh') }}</GlassButton>
     </div>
 
+    <AgentPageTabs :tabs="debugTabs" />
+
     <!-- Performance metrics -->
     <GlassCard :title="t('trace.performanceMetrics')">
       <div class="metrics-grid">
@@ -102,11 +104,17 @@ import { listTraces, getTraceStats, getTraceDetail } from '@/api/modules/trace'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import { message } from 'ant-design-vue'
 
 const { t } = useI18n()
 const route = useRoute()
 const agentId = route.params.agentId as string
+
+const debugTabs = [
+  { labelKey: 'nav.trace', to: `/agent/${agentId}/trace` },
+  { labelKey: 'nav.trajectory', to: `/agent/${agentId}/trajectory` },
+]
 
 const loading = ref(false)
 const traces = ref<any[]>([])
