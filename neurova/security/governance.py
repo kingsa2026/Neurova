@@ -41,7 +41,14 @@ def is_policy_denial(result: Any) -> bool:
         return False
     # param_guard 键：工具参数守卫的拒绝（截断 JSON 无法配平等）同样是
     # "决策"——OpenOcta 启发 P1-5，与治理 DENY 同源口径，不计工具故障。
-    return bool(result.get("governance") or result.get("pending_approval") or result.get("param_guard"))
+    # swarm_rejection 键：蜂群 spawn 数据层结构化拒绝（OpenOcta 启发 P2-10
+    # 三明治，硬限阀门）同为"决策"非"后端故障"。
+    return bool(
+        result.get("governance")
+        or result.get("pending_approval")
+        or result.get("param_guard")
+        or result.get("swarm_rejection")
+    )
 
 
 def _platform_has_enforced_sandbox() -> bool:

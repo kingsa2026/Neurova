@@ -22,9 +22,11 @@ from neurova.skills.executor import BaseSkillExecutor, SkillResult
 class MemorySkillExecutor(BaseSkillExecutor):
     """记忆管理执行器：search / store"""
 
-    def __init__(self, memory_manager: Any = None) -> None:
+    def __init__(self, memory_manager: Any = None, pending_store: Any = None) -> None:
         super().__init__(skill_id="memory", skill_name="记忆管理技能")
         self.memory_manager = memory_manager
+        # P1-2 待确认队列（opt-in 挂载；None = 待确认通道不可用，store 全直写）
+        self.pending_store = pending_store
 
     def execute(self, params: Dict[str, Any]) -> SkillResult:
         start_time = time.time()
@@ -93,6 +95,48 @@ class MemorySkillExecutor(BaseSkillExecutor):
                     "execution_time": time.time() - start_time,
                 },
             )
+
+        # P1-2 待确认中间态：挂载了 pending_store 的实例，交互式单条写入
+        # 默认进待审队列（Utopia 0018：人就在对话里，确认成本最低）；
+        # confirm=True 按次强制直写；未挂载实例保持原直写语义（opt-in 在
+        # 构造处，不挂载 = 行为完全不变）。
+        if self.pending_store is not None and params.get("confirm") is not True:
+            try:
+                rec = self.pending_store.propose(
+                    content=content,
+                    category=params.get("category", "general"),
+                    memory_type=params.get("memory_type", "semantic"),
+                    source_sentence=params.get("source_sentence", ""),
+                    proposed_by=params.get("proposed_by", ""),
+                )
+                if rec.get("rejected"):
+                    return SkillResult(
+                        success=True,
+                        output={"pending": True, "rejected": True, "reason": rec.get("reason", "")},
+                        metadata={
+                            "action": "store",
+                            "execution_time": time.time() - start_time,
+                        },
+                    )
+                return SkillResult(
+                    success=True,
+                    output={"pending": True, "review_id": rec["id"]},
+                    metadata={
+                        "action": "store",
+                        "category": params.get("category", "general"),
+                        "memory_type": params.get("memory_type", "semantic"),
+                        "execution_time": time.time() - start_time,
+                    },
+                )
+            except Exception as exc:
+                return SkillResult(
+                    success=False,
+                    error=f"记忆待确认队列写入失败: {exc}",
+                    metadata={
+                        "action": "store",
+                        "execution_time": time.time() - start_time,
+                    },
+                )
 
         if self.memory_manager is None:
             # 无记忆管理器：降级返回成功标记（语义与 MemorySkill 一致）

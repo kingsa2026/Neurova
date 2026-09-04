@@ -245,3 +245,100 @@ export function deleteAnnotation(id: string) {
 export function exportAnnotationTrainingSet() {
   return api.get<ApiResponse<{ jsonl: string; count: number }>>(`${BASE}/annotations/export`)
 }
+
+// ---------------------------------------------------------------------------
+// P0-2 revision 账本 / tombstone + P0-3 同值冲突（Utopia 对标落地）
+// ---------------------------------------------------------------------------
+
+/** 知识条目 revision（update 前的旧值快照）。 */
+export interface KnowledgeRevision {
+  old: Record<string, unknown>
+  changed_fields: string[]
+  updated_at: string
+}
+
+/** 知识条目 revision 账本（最新在前）。 */
+export function listKnowledgeRevisions(id: string) {
+  return api.get<KnowledgeRevision[]>(`${BASE}/${id}/revisions`)
+}
+
+/** 墓碑记录（软删条目审计视图）。 */
+export interface DeletedKnowledge {
+  knowledge_id: string
+  title: string
+  owner_user_id: string
+  deleted_at: number
+  deleted_by: string
+  superseded_by: string | null
+}
+
+/** Admin: 墓碑清单。 */
+export function listDeletedKnowledge() {
+  return api.get<DeletedKnowledge[]>(`${BASE}/deleted`)
+}
+
+/** 属主/管理员：从墓碑复活条目。 */
+export function restoreKnowledgeNode(id: string) {
+  return api.post<{ code: number; message: string }>(`${BASE}/${id}/restore`)
+}
+
+/** 同值冲突记录（新条目疑似"同一事实的新说法"）。 */
+export interface KnowledgeConflict {
+  conflict_id: string
+  old_id: string
+  new_id: string
+  title: string
+  similarity: number
+  reason: string
+  detected_at: number
+  status: string
+}
+
+/** Admin: 同值冲突清单（pending 待审 / resolved 历史）。 */
+export function listKnowledgeConflicts(status: 'pending' | 'resolved' = 'pending') {
+  return api.get<KnowledgeConflict[]>(`${BASE}/conflicts`, { params: { status } })
+}
+
+/** Admin: 裁决冲突。keep_both=保留双条目；supersede_old=新说法接管（旧条目入墓碑）。 */
+export function resolveKnowledgeConflict(conflictId: string, resolution: 'keep_both' | 'supersede_old') {
+  return api.post<{ code: number; message: string }>(`${BASE}/conflicts/${conflictId}/resolve`, { resolution })
+}
+
+// ---------------------------------------------------------------------------
+// P1-1 图谱实体消解（灰区对人工队列 + 攒批裁决）
+// ---------------------------------------------------------------------------
+
+/** 图谱消解灰区对（转人工的低置信对）。 */
+export interface GraphResolutionReview {
+  review_id: string
+  left_id: string
+  right_id: string
+  left_label: string
+  right_label: string
+  similarity: number
+  status: string
+  created_at: number
+}
+
+/** Admin: 实体消解人工队列。 */
+export function listResolutionReviews(agentId: string, status: 'pending' | 'resolved' = 'pending') {
+  return api.get<ApiResponse<{ reviews: GraphResolutionReview[] }>>(
+    `/knowledge-graph/${agentId}/knowledge-graph/resolution/reviews`,
+    { params: { status } },
+  )
+}
+
+/** Admin: 人工裁决灰区对。merged=执行合并（可回滚）；kept=不同实体。 */
+export function resolveResolutionReview(agentId: string, reviewId: string, decision: 'merged' | 'kept') {
+  return api.post<{ code: number; message: string }>(
+    `/knowledge-graph/${agentId}/knowledge-graph/resolution/reviews/${reviewId}/resolve`,
+    { decision },
+  )
+}
+
+/** Admin: 跑一轮消解（灰区召回 + LLM 攒批裁决；未配 LLM 全部转人工）。 */
+export function runEntityResolution(agentId: string) {
+  return api.post<ApiResponse<{ result: { merged: number; kept: number; escalated: number }; human_reviews: number }>>(
+    `/knowledge-graph/${agentId}/knowledge-graph/resolution/run`,
+  )
+}

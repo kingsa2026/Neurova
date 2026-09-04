@@ -14,6 +14,7 @@ RetrievalMethod 四态（参照 Dify api/core/rag/retrieval_methods.py）：
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from enum import Enum
@@ -65,17 +66,53 @@ class RetrievalMethod(str, Enum):
         return _normalize_backend(backend) in _FULLTEXT_BACKENDS
 
 
-def tokenize(text: str) -> List[str]:
-    """中英文分词（与 semantic_search_api._tokenize 同规则，保持通道可比）：
-
-    英文按空格切分；中文提取 2-4 字连续片段。
-    """
+def _ngram_tokenize(text: str) -> List[str]:
+    """回退分词（jieba 不可用时）：英文按空格切分；中文提取 2-4 字连续片段。"""
     if not text:
         return []
     cleaned = re.sub(r"[^\w\u4e00-\u9fa5\s]", " ", text.lower())
     tokens = cleaned.split()
     tokens.extend(re.findall(r"[\u4e00-\u9fa5]{2,4}", text))
     return [t for t in tokens if len(t) >= 2]
+
+
+def _get_jieba() -> Any:
+    """进程级惰性加载 jieba；不可用返回 None（调用方回退 n-gram）。"""
+    global _jieba
+    if _jieba is not None:
+        return _jieba if _jieba is not False else None
+    try:
+        import jieba as _j
+
+        _j.setLogLevel(logging.WARNING)
+        _jieba = _j
+    except Exception:  # noqa: BLE001 — 可选依赖，缺席走回退
+        _jieba = False
+    return None if _jieba is False else _jieba
+
+
+_jieba: Any = None
+
+
+def tokenize(text: str) -> List[str]:
+    """中英文分词（jieba 真分词优先，缺席回退 n-gram）：
+
+    jieba 路径：中文按词级切分（"量子计算"→["量子","计算"]），英文按词；
+    产出 <2 字符的 token 丢弃（单字噪声不进 IDF 统计）。
+    """
+    if not text:
+        return []
+    jieba = _get_jieba()
+    if jieba is not None:
+        cleaned = re.sub(r"[^\w\u4e00-\u9fa5\s]", " ", text.lower())
+        tokens = []
+        for seg in jieba.cut(cleaned):
+            seg = seg.strip()
+            # <2 字符的 token 丢弃（单字噪声不进 IDF 统计）
+            if len(seg) >= 2:
+                tokens.append(seg)
+        return tokens
+    return _ngram_tokenize(text)
 
 
 def full_text_search(
