@@ -143,6 +143,8 @@ class TestStep996Gate:
         monkeypatch.setenv("NEUROVA_CONVERSATION_RULES", "1")
         agent = MagicMock()
         agent._collect_tool_messages.return_value = []
+        agent.rule_extractor = None  # 强制走懒创建分支（MagicMock 自动属性会遮蔽）
+        agent.experience_fusion = None
 
         pipeline = PostChatPipeline(agent)
         graph = MagicMock()
@@ -154,7 +156,6 @@ class TestStep996Gate:
         rule = MagicMock()
         rule.source_entity = "A"
         rule.target_entity = "B"
-        extractor.extract = pytest.importorskip("asyncio").run  # placeholder replaced below
 
         async def _extract(u, r, s):
             return [rule]
