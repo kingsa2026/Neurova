@@ -185,6 +185,32 @@ const security = ref({ jwt_secret: '', jwt_expiry_hours: 24, min_password_length
 const storage = ref({ media_path: '/data/media', max_upload_mb: 50, cache_ttl_minutes: 60 })
 const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false })
 
+// 进化治理设置（独立于扁平 settings 的治理面）
+const governance = ref({ conversation_rules_enabled: false, rsi_phase: 0 })
+const savingGovernance = ref(false)
+
+const fetchGovernance = async () => {
+  try {
+    const res = await getGovernanceSettings()
+    const data = (res as any)?.data?.data ?? (res as any)?.data
+    if (data) governance.value = { ...governance.value, ...data }
+  } catch {
+    // 治理设置读取失败不阻断设置页（默认关）
+  }
+}
+
+const saveGovernance = async () => {
+  savingGovernance.value = true
+  try {
+    await updateGovernanceSettings({ ...governance.value })
+    message.success(t('common.success'))
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    savingGovernance.value = false
+  }
+}
+
 const onThemeToggle = () => {
   appStore.toggleTheme()
   isDark.value = appStore.isDark
@@ -236,7 +262,10 @@ const clearCache = async () => {
   }
 }
 
-onMounted(fetchSettings)
+onMounted(() => {
+  fetchSettings()
+  fetchGovernance()
+})
 </script>
 
 <style scoped>
@@ -264,4 +293,6 @@ onMounted(fetchSettings)
 :deep(.settings-tabs .ant-tabs-tab) { padding: 10px 16px !important; color: var(--nr-text-secondary) !important; }
 :deep(.settings-tabs .ant-tabs-tab-active .ant-tabs-tab-btn) { color: var(--nr-text-primary) !important; }
 .storage-actions { display: flex; gap: 8px; }
+.advanced-stack { display: flex; flex-direction: column; gap: 16px; }
+.governance-hint { font-size: 12px; color: var(--nr-text-secondary, #8a8a92); margin: 0 0 12px; }
 </style>
