@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -88,7 +89,6 @@ def _fetch_openrouter(pc) -> Dict[str, Any]:
     return {
         "plan": "credits",
         "quota_remaining": data.get("limit_remaining"),
-        "balance": data.get("usage") if False else None,
         "currency": "USD",
         "window_days": 30,
     }
@@ -133,7 +133,7 @@ def sync_provider_usage(providers: List[Any]) -> Dict[str, Any]:
             collector.register_provider(pc.id, fetch)
         except LookupError as e:
             errors.append(
-                {"provider_id": pc.id, "error": str(e), "ts": __import__("datetime").datetime.now().isoformat(timespec="seconds")}
+                {"provider_id": pc.id, "error": str(e), "ts": datetime.now().isoformat(timespec="seconds")}
             )
             continue
 

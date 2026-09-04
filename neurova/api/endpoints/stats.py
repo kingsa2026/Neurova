@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from neurova.api.deps import get_optional_user
+from neurova.api.deps import get_current_user, get_optional_user
 from neurova.api.endpoints import get_app_state
 from neurova.core.logger import get_logger
 
@@ -396,13 +396,16 @@ async def get_usage_overview(
 @router.get("/provider-usage")
 async def get_provider_usage(
     request: Request,
-    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """provider 真账单快照（P1-13，OpenClaw provider-usage 启发）。
 
     数据源: neurova.core.provider_usage 采集器（默认关，provider
     usage_collection=True 才拉后台账单）。返回裸对象 {snapshots, errors}
     （对齐 stats 域契约），未装配采集器时为空数组（诚实零态）。
+
+    复审修复: get_optional_user → get_current_user。账单快照含余额/配额
+    等敏感商业数据，匿名可读等于泄露，对齐 provider 管理端点要求登录态。
     """
     _get_request_id(request)
 
