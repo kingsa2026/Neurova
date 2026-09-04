@@ -16,7 +16,7 @@ from __future__ import annotations
 from neurova.core.logger import get_logger
 import uuid
 import time
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -105,6 +105,8 @@ class UserInfo(BaseModel):
     username: str
     email: str = ""
     role: str = "user"
+    # 用户组功能模块白名单（所属组并集）。空列表 = 不限制（不在任何组/组未配置）。
+    allowed_modules: List[str] = []
     created_at: Optional[str] = None
 
     def model_post_init(self, __context) -> None:
@@ -358,6 +360,20 @@ async def refresh_token(request: Request, body: RefreshRequest):
         raise HTTPException(status_code=500, detail=f"Refresh failed: {str(e)}")
 
 
+def _get_user_allowed_modules(username: str) -> list:
+    """计算用户可用功能模块（所属用户组并集）。
+
+    fail-open：用户组服务异常时返回空列表（不限制），不影响登录本身。
+    """
+    try:
+        from neurova.auth.user_group_model import get_user_group_manager
+
+        return get_user_group_manager().get_allowed_modules_for_user(username)
+    except Exception as e:
+        logger.warning("Failed to compute allowed_modules for %s: %s", username, e)
+        return []
+
+
 @router.get("/me", response_model=UserInfo)
 async def get_current_user(request: Request):
     """获取当前用户信息"""
@@ -392,12 +408,17 @@ async def get_current_user(request: Request):
             raise HTTPException(status_code=401, detail="Not authenticated")
 
         user_id = user.get("user_id", "unknown")
+        username = user.get("username", "unknown")
+        role = user.get("role", "user")
+        # admin 恒全模块可见；普通用户取所属组并集
+        allowed_modules = [] if role == "admin" else _get_user_allowed_modules(username)
         return UserInfo(
             id=user_id,
             user_id=user_id,
-            username=user.get("username", "unknown"),
+            username=username,
             email=user.get("email", ""),
-            role=user.get("role", "user"),
+            role=role,
+            allowed_modules=allowed_modules,
         )
 
     except HTTPException:

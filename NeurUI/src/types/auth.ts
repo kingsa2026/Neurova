@@ -4,6 +4,8 @@ export interface User {
   email: string
   role: 'admin' | 'user' | 'viewer'
   status: 'active' | 'inactive' | 'banned'
+  /** 用户组功能模块白名单（后端 /auth/me 返回；空数组/缺省 = 不限制） */
+  allowed_modules?: string[]
   avatar?: string
   createdAt?: string
 }

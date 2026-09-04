@@ -20,14 +20,14 @@
         <GlassCard v-for="suite in suites" :key="suite.id" variant="default">
           <template #header>
             <div class="suite-header">
-              <span class="suite-name">{{ suite.name }}</span>
+              <span class="suite-name">{{ suiteLabel(suite) }}</span>
               <a-tag :color="suite.status === 'completed' ? 'green' : suite.status === 'running' ? 'blue' : 'default'">
                 {{ suite.status || t('benchmark.idle') }}
               </a-tag>
             </div>
           </template>
           <div class="suite-body">
-            <p class="suite-desc">{{ suite.description || '-' }}</p>
+            <p class="suite-desc">{{ suiteDesc(suite) }}</p>
             <div class="suite-meta">
               <span>{{ suite.tests_count || 0 }} {{ t('benchmark.tests') }}</span>
               <span v-if="suite.last_run">{{ t('benchmark.lastRun') }}{{ formatTime(suite.last_run) }}</span>
@@ -57,6 +57,9 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'agent'">
             <span class="agent-name">{{ record.agent_name || agentName(record.agent_id) }}</span>
+          </template>
+          <template v-if="column.key === 'suite_name'">
+            <span>{{ suiteLabel(record) }}</span>
           </template>
           <template v-if="column.key === 'score'">
             <a-progress :percent="record.score ?? 0" :stroke-color="record.score >= 80 ? '#10b981' : record.score >= 50 ? '#f59e0b' : '#ef4444'" size="small" />
@@ -90,8 +93,20 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const agentStore = useAgentStore()
+
+// 套件名/描述多语言:后端 _SUITES 是语言中立的英文数据,展示层按 suite_id
+// 映射 i18n(11 语言);未登记的 id 回落后端原值。
+const suiteLabel = (suite: any) => {
+  const id = suite?.id ?? suite?.suite_id ?? ''
+  const key = `benchmark.suites.${id}.name`
+  return te(key) ? t(key) : (suite?.name ?? id)
+}
+const suiteDesc = (suite: any) => {
+  const key = `benchmark.suites.${suite?.id}.description`
+  return te(key) ? t(key) : (suite?.description || '-')
+}
 
 const loading = ref(false)
 const loadingResults = ref(false)

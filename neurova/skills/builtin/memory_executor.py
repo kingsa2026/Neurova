@@ -84,6 +84,18 @@ class MemorySkillExecutor(BaseSkillExecutor):
                 },
             )
 
+    def _resolve_proposed_by(self, params: Dict[str, Any]) -> str:
+        """提议人归属：记忆隔离作用域（服务端可信）优先，参数自报兜底。"""
+        mm = self.memory_manager
+        try:
+            if mm is not None and hasattr(mm, "effective_user_id"):
+                uid = str(mm.effective_user_id() or "")
+                if uid and uid != "default":
+                    return uid
+        except Exception:  # noqa: BLE001 — 身份解析失败回退参数
+            pass
+        return str(params.get("proposed_by", "") or "")
+
     def _store(self, params: Dict[str, Any], start_time: float) -> SkillResult:
         content = params.get("content", "")
         if not content:
@@ -107,7 +119,10 @@ class MemorySkillExecutor(BaseSkillExecutor):
                     category=params.get("category", "general"),
                     memory_type=params.get("memory_type", "semantic"),
                     source_sentence=params.get("source_sentence", ""),
-                    proposed_by=params.get("proposed_by", ""),
+                    # P1-2 修 F：归属以服务端隔离作用域身份优先（防调用方
+                    # 伪造 proposed_by 把内容栽进他人待审队列）；无作用域
+                    # 环境（CLI 等）才回退参数自报
+                    proposed_by=self._resolve_proposed_by(params),
                 )
                 if rec.get("rejected"):
                     return SkillResult(

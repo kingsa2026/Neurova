@@ -453,7 +453,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
 import type { UploadFile } from 'ant-design-vue'
@@ -1193,6 +1193,12 @@ onMounted(() => {
   fetchSubmissions()
   fetchConflicts()
   fetchTombstones()
+  fetchResolutionReviews()
+})
+
+// 闭环审查：消解队列按 agent 分库，切换 agent 后 admin 面板数据会陈旧
+watch(agentId, () => {
+  if (!isAdmin.value) return
   fetchResolutionReviews()
 })
 </script>

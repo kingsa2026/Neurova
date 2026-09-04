@@ -159,11 +159,16 @@ class TestDeleteModel:
 
     def _make_manager_with_models(self):
         """Create a manager with sensetime provider having 3 models."""
+        import tempfile
+        from pathlib import Path
+
         mgr = LLMProviderManager.__new__(LLMProviderManager)
         mgr._providers = {}
         mgr._default_provider_id = None
         mgr._config_lock = __import__('threading').RLock()
-        mgr._config_path = MagicMock(exists=lambda: False, parent=MagicMock(mkdir=MagicMock()))
+        # 真实临时路径(原子写需要 with_suffix/os.replace 等真 Path 语义)
+        tmpdir = tempfile.mkdtemp(prefix="neurova-pm-test-")
+        mgr._config_path = Path(tmpdir) / "providers.json"
         _add_provider(mgr, "sensetime", "商汤科技", [
             "sensechat-5", "deepseek-v4-flash", "sensenova-6.7-flash-lite"
         ])

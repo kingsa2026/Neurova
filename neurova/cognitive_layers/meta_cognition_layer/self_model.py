@@ -118,11 +118,15 @@ class SelfModelEngine:
 
     @property
     def ledger(self):
-        if self._ledger is None:
-            from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
+        """台账访问——恒走单例注册表，不缓存实例。
 
-            self._ledger = get_meta_ledger(self._agent_id)
-        return self._ledger
+        缓存会在 reset_meta_ledger()（测试隔离/后端重启语义）后持有已关闭的
+        旧连接（sqlite3.ProgrammingError: closed database），形成闭环断点。"""
+        if self._ledger is not None:
+            return self._ledger
+        from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
+
+        return get_meta_ledger(self._agent_id)
 
     # ────── 工具事件写入（tool_executor 挂点调用） ──────
 

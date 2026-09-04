@@ -263,7 +263,13 @@ class UnifiedVectorStore:
         return result
 
     def _tokenize(self, text: str) -> List[str]:
-        """简单分词"""
+        """简单分词（单字粒度，tfidf centroid 通道专用）。
+
+        与 neurova.knowledge.search.tokenize（jieba 词级）**故意不同**：
+        本通道向量维度按单字展开，存量质心/记忆向量都基于该维度，
+        重写会使全部现存向量失效（P0-1 闭环审查结论：历史债登记，
+        待统一切换时全量重嵌后再收敛到 jieba）。
+        """
         import re
 
         # 英文单词

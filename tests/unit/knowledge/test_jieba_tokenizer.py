@@ -77,3 +77,43 @@ class TestFullTextSearchJieba:
 
     def test_no_hit_returns_empty(self):
         assert full_text_search("不存在的词组", self._corpus(), top_k=10) == []
+
+
+class TestJiebaAbsentFallback:
+    """P0-1 闭环审查：B 修复——缺席路径必须走 n-gram 且打 WARN。
+
+    旧实现 search.py:79-91 静默 except 把 _jieba 置 False，CI 没装 jieba
+    时所有用例全红；本次补 monkeypatch 强制缺席 + 验证回退行为。
+    """
+
+    def test_absent_jieba_falls_back_to_ngram(self, monkeypatch):
+        import neurova.knowledge.search as search_mod
+
+        monkeypatch.setattr(search_mod, "_jieba", False)
+        tokens = search_mod.tokenize("量子计算")
+        # n-gram 产 2-4 字片段（含跨词粘连）；明确"量子计算"必在
+        assert "量子计算" in tokens
+        # 且一定不会 jieba 词级切出"量子"+"计算"两个独立项
+        assert not ({"量子", "计算"}.issubset(set(tokens)))
+
+    def test_absent_jieba_logs_warning(self, monkeypatch, caplog):
+        import logging
+
+        import neurova.knowledge.search as search_mod
+
+        monkeypatch.setattr(search_mod, "_jieba", False)
+        # 强制 _get_jieba 重走 except 路径
+        monkeypatch.setattr(search_mod, "_jieba", None)
+        import builtins
+
+        real_import = builtins.__import__
+
+        def deny_jieba(name, *args, **kwargs):
+            if name == "jieba" or name.startswith("jieba."):
+                raise ImportError("simulated: jieba 缺席")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", deny_jieba)
+        with caplog.at_level(logging.WARNING, logger="neurova.knowledge.search"):
+            assert search_mod.tokenize("测试") == search_mod._ngram_tokenize("测试")
+        assert any("jieba 不可用" in r.message for r in caplog.records)

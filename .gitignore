@@ -22,6 +22,8 @@ develop-eggs/
 htmlcov/
 
 # 调试和临时文件
+# 注意：勿用 *_check*.py 这类通配——会吞掉合法测试文件（如 test_health_checks_contract.py，
+# 2026-09-05 踩坑：/tests/ 整目录 ignore 已于 09-04 移除，这里不能 reintroduce 变体）
 _debug*.py
 _diag*.py
 _check*.py
@@ -29,7 +31,6 @@ _verify*.py
 _patch*.py
 *_debug*.py
 *_diag*.py
-*_check*.py
 *_verify*.py
 *_patch*.py
 debug*.py

@@ -150,3 +150,30 @@ class TestConflictResolution:
         repo.create_knowledge("default", title="三连冲突", content="b")
         repo.create_knowledge("default", title="三连冲突", content="c")
         assert len(repo.list_conflicts()) == 2
+
+
+class TestBulkImportNoConflict:
+    """P0-3 闭环审查修 D：批量导入必须跳过同值冲突检测。
+
+    同名文件批量导入（课件/周报）会瞬间产生 N-1 条 pending 刷屏，
+    冲突检测的价值在交互式单条创建，不在批量导入。
+    """
+
+    def test_import_path_detect_conflict_false_no_conflicts(self, repo):
+        repo.create_knowledge(
+            "default", title="每周周报", content="第一批内容",
+            source="import:weekly.docx", detect_conflict=False,
+        )
+        repo.create_knowledge(
+            "default", title="每周周报", content="第二批内容",
+            source="import:weekly.docx", detect_conflict=False,
+        )
+        assert repo.list_conflicts() == []
+        # 两条都完整入库（可见性不受影响）
+        assert len(repo.list_knowledge("default")) == 2
+
+    def test_interactive_create_still_detects(self, repo):
+        """对照：交互式创建仍触发检测（修 D 不能误伤主路径）。"""
+        repo.create_knowledge("default", title="交互条目", content="a")
+        repo.create_knowledge("default", title="交互条目", content="b")
+        assert len(repo.list_conflicts()) == 1
