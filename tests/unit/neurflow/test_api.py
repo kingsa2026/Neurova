@@ -39,6 +39,23 @@ def _make_workflow(id="wf_001", name="测试工作流", template=False, status=W
     )
 
 
+def _build_app():
+    """P0-1：统一建 app 并注入认证身份（工作流面挂严格鉴权后 fixture 同步，
+    只改 fixture 不放宽断言；属主语义由 test_workflow_ownership.py 锁定）。"""
+    from neurova.api.auth import get_current_user, get_current_user_or_default
+    from neurova.api.endpoints.neurflow_api import router
+
+    def _fake_admin():
+        return {"user_id": "test_user", "username": "test_user",
+                "role": "admin", "neuser_id": "test_user"}
+
+    app = FastAPI()
+    app.include_router(router, prefix="/api/v1/neurflow")
+    app.dependency_overrides[get_current_user] = _fake_admin
+    app.dependency_overrides[get_current_user_or_default] = _fake_admin
+    return app
+
+
 # ==================== 节点 API ====================
 
 class TestNodesAPI:
@@ -46,9 +63,7 @@ class TestNodesAPI:
 
     @pytest.fixture
     def client(self):
-        from neurova.api.endpoints.neurflow_api import router
-        app = FastAPI()
-        app.include_router(router, prefix="/api/v1/neurflow")
+        app = _build_app()
         return TestClient(app)
 
     @pytest.fixture
@@ -196,9 +211,7 @@ class TestWorkflowsCRUDAPI:
 
     @pytest.fixture
     def client(self):
-        from neurova.api.endpoints.neurflow_api import router
-        app = FastAPI()
-        app.include_router(router, prefix="/api/v1/neurflow")
+        app = _build_app()
         return TestClient(app)
 
     @pytest.fixture
@@ -261,7 +274,9 @@ class TestWorkflowsCRUDAPI:
     def test_delete_workflow_success(self, client, mock_storage):
         response = client.delete("/api/v1/neurflow/workflows/wf_001")
         assert response.status_code == 200
-        mock_storage.delete_workflow.assert_called_once_with("wf_001")
+        mock_storage.delete_workflow.assert_called_once_with(
+            "wf_001", requester_id="test_user", is_admin=True
+        )
 
     def test_delete_workflow_not_found(self, client, mock_storage):
         mock_storage.delete_workflow.return_value = False
@@ -281,9 +296,7 @@ class TestWorkflowDefinitionAPI:
 
     @pytest.fixture
     def client(self):
-        from neurova.api.endpoints.neurflow_api import router
-        app = FastAPI()
-        app.include_router(router, prefix="/api/v1/neurflow")
+        app = _build_app()
         return TestClient(app)
 
     @pytest.fixture
@@ -409,9 +422,7 @@ class TestAgentsAPI:
 
     @pytest.fixture
     def client(self):
-        from neurova.api.endpoints.neurflow_api import router
-        app = FastAPI()
-        app.include_router(router, prefix="/api/v1/neurflow")
+        app = _build_app()
         return TestClient(app)
 
     @pytest.fixture
@@ -471,9 +482,7 @@ class TestTemplatesAPI:
 
     @pytest.fixture
     def client(self):
-        from neurova.api.endpoints.neurflow_api import router
-        app = FastAPI()
-        app.include_router(router, prefix="/api/v1/neurflow")
+        app = _build_app()
         return TestClient(app)
 
     @pytest.fixture
@@ -522,9 +531,7 @@ class TestAPIValidation:
 
     @pytest.fixture
     def client(self):
-        from neurova.api.endpoints.neurflow_api import router
-        app = FastAPI()
-        app.include_router(router, prefix="/api/v1/neurflow")
+        app = _build_app()
         return TestClient(app)
 
     def test_nonexistent_workflow(self, client):
@@ -574,6 +581,7 @@ class TestAPILifecycle:
 
     def test_publish_workflow_success(self, client, mock_storage):
         test_workflow = _make_workflow()
+        test_workflow.user_id = "test_user"  # P0-1：属主匹配才可发布
         mock_storage.get_workflow.return_value = test_workflow
 
         with patch('neurova.api.endpoints.neurflow_api.get_dag_validator') as mock_dag:
