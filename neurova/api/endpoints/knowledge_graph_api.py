@@ -25,15 +25,19 @@ def _get_request_id(request) -> str:
 
 
 def _get_kg_manager(agent_id: str = "default"):
-    """解析 Agent 对应的真实知识图谱管理器。
+    """解析 Agent 对应的专属知识图谱管理器（per-agent 隔离）。
 
-    优先取运行时 Agent 挂载的实例，否则用全局单例。
+    优先取运行时 Agent 挂载的实例，否则用 per-agent 注册表
+    （agent_workspaces/{agent_id}/knowledge_graph）。
+    （2026-09-05 隔离修复：此前 fallback 是全局单例——跨 agent 泄漏；
+    更早曾从不存在的 neurova.api.app_state 导入 get_app_state，
+    ImportError 被吞 → agent 级 manager 恒解析不到。）
     """
     try:
-        from neurova.api.app_state import get_app_state
+        from neurova.api.endpoints import get_app_state
 
-        state = get_app_state()
-        agent = (state or {}).get("agents", {}).get(agent_id)
+        state = get_app_state() or {}
+        agent = (state.get("agents") or {}).get(agent_id)
         manager = getattr(agent, "knowledge_graph_manager", None)
         if manager is not None:
             return manager
@@ -41,10 +45,13 @@ def _get_kg_manager(agent_id: str = "default"):
         pass
 
     from neurova.cognitive_layers.knowledge_graph.manager import (
-        get_knowledge_graph_manager,
+        get_agent_knowledge_graph_manager,
     )
 
-    return get_knowledge_graph_manager()
+    try:
+        return get_agent_knowledge_graph_manager(agent_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 def _node_to_dict(node) -> dict:
@@ -235,7 +242,7 @@ async def run_resolution(
     try:
         from neurova.api.endpoints.knowledge import _default_llm_call
 
-        llm_call = _default_llm_call(request)
+        llm_call = _default_llm_call(request, prefer_agent_id=agent_id)
     except Exception as e:  # noqa: BLE001
         logger.info("实体消解：LLM 调用器不可用，灰区对转人工: %s", e)
 
@@ -244,4 +251,67 @@ async def run_resolution(
     return {
         "code": 0,
         "data": {"result": result, "pending_grey": len(grey), "human_reviews": len(resolver.list_human_reviews())},
+    }
+
+
+@router.post("/{agent_id}/knowledge-graph/backfill")
+async def backfill_graph_from_knowledge(
+    agent_id: str,
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+    limit: int = Query(200, ge=1, le=2000),
+):
+    """存量知识条目补跑「条目→图谱节点」抽取（graph_node_ids 为空的条目）。
+
+    抽取只挂在导入时刻，且曾因 LLM 解析断链恒被跳过（见 knowledge.
+    _default_llm_call 根因修复）——存量条目需要一次性补建入口。
+    """
+    from neurova.api.endpoints.knowledge import _default_llm_call
+    from neurova.knowledge.graph_bridge import extract_knowledge_to_graph
+    from neurova.knowledge.repository import get_knowledge_repository
+
+    llm_call = _default_llm_call(request, prefer_agent_id=agent_id)
+    if llm_call is None:
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {
+                "entries": 0,
+                "extracted_nodes": 0,
+                "failed": 0,
+                "reason": "未解析到可用 LLM，无法抽取；请先配置 LLM 服务商",
+            },
+        }
+
+    repo = get_knowledge_repository()
+    graph = _get_kg_manager(agent_id)
+    pending = [
+        it
+        for it in repo.list_knowledge(agent_id, limit=limit)
+        if not (it.get("graph_node_ids") or [])
+    ]
+
+    extracted_nodes = 0
+    failed = 0
+    for entry in pending:
+        try:
+            ids = extract_knowledge_to_graph(
+                entry, repo=repo, llm_call=llm_call, graph_manager=graph
+            )
+            if ids:
+                extracted_nodes += len(ids)
+            else:
+                failed += 1
+        except Exception as e:  # noqa: BLE001 - 逐条吞掉，不阻断补建
+            logger.warning("[图谱补建] 抽取失败（已跳过）: %s", e)
+            failed += 1
+
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "entries": len(pending),
+            "extracted_nodes": extracted_nodes,
+            "failed": failed,
+        },
     }
