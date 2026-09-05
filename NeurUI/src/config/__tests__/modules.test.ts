@@ -65,4 +65,12 @@ describe('功能模块目录', () => {
       }
     }
   })
+
+  it('分组勾选页专用键在 11 个语言包存在（nav.topNav / system.allowedModules×2）', () => {
+    for (const [locale, msgs] of Object.entries(ALL_LOCALES)) {
+      expect(msgs?.nav?.topNav, `${locale}.nav.topNav 缺失`).toBeTruthy()
+      expect(msgs?.system?.allowedModules, `${locale}.system.allowedModules 缺失`).toBeTruthy()
+      expect(msgs?.system?.allowedModulesHint, `${locale}.system.allowedModulesHint 缺失`).toBeTruthy()
+    }
+  })
 })

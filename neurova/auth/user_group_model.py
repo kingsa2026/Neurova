@@ -161,8 +161,10 @@ class UserGroup:
         """从字典创建"""
         data = data.copy()
         data["group_type"] = UserGroupType(data["group_type"])
-        data["permissions"] = [Permission(p) for p in data["permissions"]]
-        data["resource_quota"] = ResourceQuota.from_dict(data["resource_quota"])
+        data["permissions"] = [Permission(p) for p in data.get("permissions") or []]
+        data.setdefault("description", "")
+        quota = data.get("resource_quota")
+        data["resource_quota"] = ResourceQuota.from_dict(quota) if isinstance(quota, dict) else ResourceQuota()
         # 旧 JSON 无新字段 → 归一为空列表
         data["allowed_modules"] = list(data.get("allowed_modules") or [])
         data["members"] = list(data.get("members") or [])
@@ -421,8 +423,18 @@ class UserGroupManager:
                 with open(self.groups_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
 
+                # 历史格式兼容：2026-06 前的文件是顶层 list（quota/细粒度 permissions schema），
+                # 当前模型无法消费。转存备份后再保存时不会无声覆盖（参考 providers.json 转存先例）。
+                if isinstance(data, list) or not isinstance(data, dict) or "groups" not in data:
+                    self._backup_legacy_groups_file()
+                    return
+
                 for group_data in data.get("groups", []):
-                    group = UserGroup.from_dict(group_data)
+                    try:
+                        group = UserGroup.from_dict(group_data)
+                    except Exception as e:
+                        logger.warning("Skip invalid user group entry: %s", e)
+                        continue
                     if not group.is_system:  # 系统组不从文件加载
                         self.groups[group.group_id] = group
 
@@ -430,6 +442,15 @@ class UserGroupManager:
 
         except Exception as e:
             logger.error("Failed to load user groups: %s", e)
+
+    def _backup_legacy_groups_file(self):
+        """旧格式/损坏文件转存备份，避免首次保存时无声覆盖历史数据"""
+        try:
+            backup = self.data_dir / f"user_groups.json.legacy-{int(time.time())}.bak"
+            backup.write_bytes(self.groups_file.read_bytes())
+            logger.warning("Legacy user_groups.json backed up to %s", backup)
+        except Exception as e:
+            logger.error("Failed to back up legacy user_groups.json: %s", e)
 
     def _save_groups(self):
         """保存用户组到文件"""
@@ -541,6 +562,11 @@ class UserGroupManager:
             创建的用户组
         """
         try:
+            # 调用方可能传字符串（如 groups_api 传 "custom"）：coerce 为枚举，
+            # 否则 to_dict 的 group_type.value 在保存时 AttributeError → 持久化静默失败
+            if isinstance(group_type, str):
+                group_type = UserGroupType(group_type)
+
             # 生成用户组ID
             group_id = f"group_{secrets.token_hex(8)}"
 
