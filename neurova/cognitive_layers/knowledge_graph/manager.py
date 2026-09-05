@@ -7,6 +7,7 @@
 
 import json
 from neurova.core.logger import get_logger
+import re
 import threading
 import time
 import uuid
@@ -1111,3 +1112,78 @@ def reset_knowledge_graph_manager():
     global _global_manager
     with _manager_lock:
         _global_manager = None
+
+
+# ============================================================
+# per-agent 图谱隔离（2026-09-05：图谱此前为全局单例，跨 agent 泄漏）
+# ============================================================
+
+_AGENT_MANAGERS: Dict[str, "KnowledgeGraphManager"] = {}
+_agent_manager_lock = threading.Lock()
+_AGENT_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
+_LEGACY_LAYOUT_FILES = ("nodes.json", "edges.json", "merges.json")
+
+
+def _agent_graph_root() -> str:
+    """per-agent 图谱根目录（agent_workspaces，与 memory.db 同基座）。"""
+    return str(Path(__file__).resolve().parents[3] / "agent_workspaces")
+
+
+def _migrate_legacy_graph_layout(legacy_dir: str, target_dir: Path) -> bool:
+    """把旧全局布局 data/knowledge_graph/*.json 移入 default agent 目录。
+
+    历史数据全部产自 default agent 的知识导入链（graph_bridge 唯一调用方），
+    归属 default 语义正确；用移动防重复迁移。
+    """
+    moved = False
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for name in _LEGACY_LAYOUT_FILES:
+        src = Path(legacy_dir) / name
+        dst = target_dir / name
+        if src.exists() and not dst.exists():
+            src.replace(dst)
+            moved = True
+    return moved
+
+
+def get_agent_knowledge_graph_manager(
+    agent_id: str,
+    legacy_dir: Optional[str] = None,
+) -> KnowledgeGraphManager:
+    """获取 agent 专属知识图谱管理器（per-agent 单例，目录隔离）。
+
+    Args:
+        agent_id: agent 标识（作为目录名，须通过路径安全校验）
+        legacy_dir: 旧全局布局位置（测试注入用；生产默认
+            <项目根>/data/knowledge_graph）
+
+    Returns:
+        该 agent 专属的 KnowledgeGraphManager
+    """
+    if not agent_id or not _AGENT_ID_RE.fullmatch(agent_id):
+        raise ValueError(f"illegal agent_id for knowledge graph: {agent_id!r}")
+
+    with _agent_manager_lock:
+        manager = _AGENT_MANAGERS.get(agent_id)
+        if manager is not None:
+            return manager
+
+        storage_dir = Path(_agent_graph_root()) / agent_id / "knowledge_graph"
+
+        # 旧全局布局只有 default 的历史数据，一次性认领迁移
+        if agent_id == "default":
+            legacy = legacy_dir or str(
+                Path(__file__).resolve().parents[3] / "data" / "knowledge_graph"
+            )
+            if (Path(legacy) / "nodes.json").exists():
+                _migrate_legacy_graph_layout(legacy, storage_dir)
+
+        manager = KnowledgeGraphManager(storage_dir=str(storage_dir))
+        _AGENT_MANAGERS[agent_id] = manager
+        return manager
+
+
+def reset_agent_knowledge_graph_managers():
+    """清空 per-agent 注册表（用于测试）"""
+    with _agent_manager_lock:
+        _AGENT_MANAGERS.clear()

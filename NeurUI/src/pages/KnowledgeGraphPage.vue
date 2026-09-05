@@ -105,11 +105,21 @@ import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
+import { useAppStore } from '@/stores/app'
 import { request } from '@/api'
 import VChart from 'vue-echarts'
+import {
+  buildTooltipOption,
+  buildTooltipFormatter,
+  buildNodeLabelOption,
+  buildEdgeLabelOption,
+  categoryColor,
+  tooltipTextClass,
+} from '@/pages/knowledge-graph/chartOptions'
 
 const { t } = useI18n()
 const { agentId, currentAgent } = useAgentPage()
+const appStore = useAppStore()
 
 const loading = ref(false)
 const searchQuery = ref('')
@@ -157,22 +167,15 @@ const nodeEdges = computed(() => {
   )
 })
 
-const categoryColorMap: Record<string, string> = {
-  default: '#6366f1',
-  concept: '#8b5cf6',
-  entity: '#06b6d4',
-  memory: '#22c55e',
-  knowledge: '#f59e0b',
-}
-
 const chartOption = computed(() => {
+  const theme = { isDark: appStore.isDark }
   const nodes = filteredNodes.value.map((n: any) => ({
     id: n.id,
     name: n.label || n.name,
     category: n.category,
     value: n.weight ?? 1,
     description: n.description,
-    itemStyle: { color: categoryColorMap[n.category] ?? categoryColorMap.default },
+    itemStyle: { color: categoryColor(n.category) },
     symbolSize: 18 + Math.min(30, (n.connections ?? 0) * 3 + (n.weight ?? 0) * 6),
   }))
   const ids = new Set(nodes.map((n: any) => n.id))
@@ -186,10 +189,9 @@ const chartOption = computed(() => {
     }))
   return {
     tooltip: {
-      formatter: (p: any) =>
-        p.dataType === 'node'
-          ? `<b>${p.name}</b><br/>${p.data.category ?? ''}${p.data.description ? '<br/>' + p.data.description : ''}`
-          : `${p.data.source} → ${p.data.target}${p.data.relation ? ' (' + p.data.relation + ')' : ''}`,
+      ...buildTooltipOption(),
+      className: `${buildTooltipOption().className} ${tooltipTextClass(theme)}`,
+      formatter: buildTooltipFormatter(),
     },
     series: [
       {
@@ -200,8 +202,10 @@ const chartOption = computed(() => {
         data: nodes,
         links,
         force: { repulsion: 160, edgeLength: [60, 140], gravity: 0.08 },
-        label: { show: true, fontSize: 11, color: 'inherit' },
+        label: buildNodeLabelOption(theme),
+        labelLayout: { hideOverlap: true },
         emphasis: { focus: 'adjacency', lineStyle: { width: 4 } },
+        edgeLabel: buildEdgeLabelOption(theme),
         lineStyle: { color: 'source', curveness: 0.15, opacity: 0.7 },
       },
     ],
@@ -383,5 +387,22 @@ pre.detail-value {
   padding: 8px 12px;
   border-radius: 6px;
   margin: 0;
+}
+</style>
+
+<style>
+/* ECharts tooltip 挂在图表容器内（appendToBody:false），非 scoped 可达 */
+.kg-graph-tooltip.kg-tooltip--dark {
+  background: rgba(15, 23, 42, 0.96);
+  color: #e2e8f0;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.kg-graph-tooltip.kg-tooltip--light {
+  background: rgba(255, 255, 255, 0.98);
+  color: #1e293b;
+  border: 1px solid rgba(100, 116, 139, 0.3);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
 }
 </style>
