@@ -33,8 +33,8 @@ _CATEGORY_TOOLS: Dict[str, Set[str]] = {
         "web_search", "web_fetch", "weather", "rss_read", "youtube_transcript",
         "bilibili_search", "social_search", "browser_read",
         "browser_navigate", "browser_click", "browser_type", "browser_screenshot",
-        "browser_extract_text", "browser_dom_snapshot", "browser_click_role",
-        "browser_fill_role",
+        "browser_extract_text", "browser_dom_snapshot", "browser_dom_read",
+        "browser_click_role", "browser_fill_role",
     },
     "file": {
         "file_read", "file_write", "file_create", "file_delete",

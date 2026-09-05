@@ -867,6 +867,106 @@ class BrowserManager:
         b = await self._get_backend(backend)
         return await b.dom_snapshot(generation)
 
+    # 快照正文分片上限：与 tool_executor 的 LLM 面截断（8000）同口径——
+    # 首片即既有契约量，尾部由续读游标接管而非丢弃
+    _DOM_READ_CHUNK = 8_000
+
+    async def dom_read(
+        self,
+        session_id: Optional[str] = None,
+        offset: Optional[int] = None,
+        chunk_size: Optional[int] = None,
+        backend: Optional[str] = None,
+    ) -> BrowserResult:
+        """快照正文分片读取（续读游标，一代页面一份游标）。
+
+        - 首读：走既有 dom_snapshot 观察链（playwright/camofox 通用），超 chunk
+          时全文入 ReadSessionStore 并返回游标字段；未超则与现状一致不建会话
+        - 续读：传 session_id 纯缓存切片，零观察开销；会话绑定 (target_id,
+          generation)，活动 tab 导航/交互后 generation 递增 → stale 拒绝，
+          引导重新 dom_read
+        """
+        from neurova.core.read_sessions import get_read_session_store
+
+        store = get_read_session_store()
+        chunk = int(chunk_size) if chunk_size else self._DOM_READ_CHUNK
+
+        # ── 续读路径：缓存切片 + (tab, generation) 新鲜度守卫 ──
+        if session_id:
+            session = store.get(session_id)
+            if session is None or session.domain != "dom_read":
+                return BrowserResult(
+                    success=False,
+                    error="读取会话不存在或已过期——页面可能已导航，请重新 dom_read",
+                    data={"stale": True},
+                )
+            # fail-closed：取不到当前 (tab, generation) 就不能放行旧游标
+            try:
+                b = await self._get_backend(backend)
+                current_target = getattr(b, "_active_target_id", None)
+                current_gen = b._active_generation() if callable(getattr(b, "_active_generation", None)) else None
+            except Exception as e:  # noqa: BLE001 - 后端不可用时同样 fail-closed
+                return BrowserResult(
+                    success=False,
+                    error=f"浏览器后端不可用，读取会话失效：{e}",
+                    data={"stale": True},
+                )
+            if session.target_id != current_target or session.generation != current_gen:
+                return BrowserResult(
+                    success=False,
+                    error=(
+                        "页面已变化（tab 或 generation 与读取会话不一致）——"
+                        "快照事实失效，请重新 dom_read"
+                    ),
+                    data={"stale": True, "current_generation": current_gen},
+                )
+            piece = store.read(session_id, offset=offset)
+            if piece is None:
+                return BrowserResult(
+                    success=False,
+                    error="读取会话不存在或已过期——请重新 dom_read",
+                    data={"stale": True},
+                )
+            return BrowserResult(success=True, data=piece, generation=current_gen)
+
+        # ── 首读路径：走既有观察链 ──
+        b = await self._get_backend(backend)
+        snap = await b.dom_snapshot()
+        if not snap.success:
+            return snap
+        tree = snap.data if isinstance(snap.data, str) else str(snap.data or "")
+        truncated = len(tree) > chunk
+        data = {
+            "text": tree[:chunk],
+            "offset": 0,
+            "next_offset": chunk if truncated else None,
+            "can_continue": truncated,
+            "total_length": len(tree),
+            "session_id": None,
+        }
+        if truncated:
+            session = store.create(
+                domain="dom_read",
+                url=snap.url or "",
+                title=snap.title or "",
+                text=tree,
+                chunk_size=chunk,
+                # 绑定信息必须取自本次观察所用的同一 backend 实例，
+                # 不能取 self._active_backend（仅 _get_backend 的副作用）
+                target_id=getattr(b, "_active_target_id", None),
+                generation=snap.generation,
+                served=chunk,
+            )
+            data["session_id"] = session.session_id
+        return BrowserResult(
+            success=True,
+            data=data,
+            url=snap.url,
+            title=snap.title,
+            duration_ms=snap.duration_ms,
+            generation=snap.generation,
+        )
+
     async def click_role(
         self, role: str, name: Optional[str] = None, backend: Optional[str] = None, generation: Optional[int] = None
     ) -> BrowserResult:
