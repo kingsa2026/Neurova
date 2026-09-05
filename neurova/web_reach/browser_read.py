@@ -7,6 +7,12 @@ browser_read 通过 Playwright 驱动真实浏览器，处理 SPA / 客户端渲
 安全边界（与 reach.py 一致）：
 - 仅 http/https；请求前经 url_guard 阻断私网/环回/链路本地/保留段/元数据 IP
 - 浏览器无状态：每次调用独立 headless 实例，关闭即释放
+- 续读零网络：传 session_id 时从内存缓存切片，不开浏览器、不做 URL 校验
+
+续读游标（对标 Dokobot canContinue/sessionId）：
+- 首读超过 chunk（默认 _MAX_TEXT=60k，与既有契约一致）→ 建 ReadSession，
+  返回首片 + session_id + can_continue + next_offset，全文缓存在会话里
+- 续读：browser_read(session_id=..., offset=?) → 纯内存切片，可循环读完全文
 
 依赖：playwright（已在 requirements.txt，浏览器二进制需 `playwright install
 chromium` 一次；未安装时返回明确引导错误，不影响其他 web_reach 工具）。
@@ -20,6 +26,7 @@ from typing import Any, Dict
 from playwright.async_api import async_playwright
 
 from neurova.core.logger import get_logger
+from neurova.core.read_sessions import get_read_session_store
 from neurova.web_reach.reach import _assert_public_host, _error, _ok
 
 logger = get_logger(__name__)
@@ -117,14 +124,37 @@ async def _browser_read_async(url: str, timeout: float) -> Dict[str, Any]:
     return result if isinstance(result, dict) else {"title": "", "text": ""}
 
 
-def browser_read(url: str, timeout: float = 30.0) -> Dict[str, Any]:
+def browser_read(
+    url: str = "",
+    timeout: float = 30.0,
+    session_id: str = None,
+    offset: int = None,
+    chunk_size: int = None,
+) -> Dict[str, Any]:
     """读取 JS 渲染页面为 Markdown 风格文本（同步入口，供工具线程调用）。
+
+    首读传 url；长文自动建读取会话并返回游标字段。续读只传 session_id
+    （可选 offset 显式回看），零浏览器开销。
 
     Returns:
         与 web_reach 契约一致的 _ok/_error 字典（success/data/source 或 error）。
     """
+    # ── 续读路径：纯内存切片，不开浏览器、不做 URL 校验（零网络）──
+    if session_id:
+        store = get_read_session_store()
+        chunk = store.read(session_id, offset=offset)
+        if chunk is None:
+            return _error(
+                "读取会话不存在或已过期——请用 url 重新首读",
+                source="browser_read",
+            )
+        if url and url != chunk["url"]:
+            logger.debug("续读忽略传入 url %s（会话归属 %s）", url, chunk["url"])
+        return _ok(chunk, source="browser_read")
+
+    # ── 首读路径 ──
     if not url or not str(url).strip():
-        return _error("缺少 url 参数", source="browser_read")
+        return _error("缺少 url 参数（或传 session_id 续读）", source="browser_read")
     try:
         _assert_public_host(url)
     except ValueError as e:
@@ -151,13 +181,30 @@ def browser_read(url: str, timeout: float = 30.0) -> Dict[str, Any]:
             "页面未提取到文本内容（可能为空页、登录墙或 JS 未渲染完成）",
             source="browser_read",
         )
-    truncated = len(text) > _MAX_TEXT
+
+    # 首片分片 + 全文入会话缓存（尾部不再丢弃）；短文（未超 chunk）不建会话，
+    # 行为与既有契约完全一致
+    effective_chunk = int(chunk_size) if chunk_size else _MAX_TEXT
+    truncated = len(text) > effective_chunk
     data = {
         "title": (result or {}).get("title", ""),
-        "text": text[:_MAX_TEXT] if truncated else text,
+        "text": text[:effective_chunk],
         "url": url,
         "text_length": len(text),
         "truncated": truncated,
+        "can_continue": truncated,
+        "next_offset": effective_chunk if truncated else None,
+        "session_id": None,
+        "total_length": len(text),
         "source": "browser_read",
     }
+    if truncated:
+        store = get_read_session_store()
+        session = store.create(
+            domain="browser_read", url=url,
+            title=(result or {}).get("title", "") or "",
+            text=text, chunk_size=effective_chunk,
+            served=effective_chunk,  # 首片已直接返回，游标跳过它
+        )
+        data["session_id"] = session.session_id
     return _ok(data, source="browser_read")

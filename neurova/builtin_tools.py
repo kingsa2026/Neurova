@@ -250,14 +250,29 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "browser_read": {
-        "description": "【浏览器读取】通过 Playwright 驱动真实浏览器，渲染 JavaScript 密集型网页（SPA / 客户端渲染 / 反爬轻量页面）并提取为干净 Markdown 文本。与 web_read（Jina Reader）互补：web_read 适合静态页，browser_read 处理 JS 渲染页。注意：首次使用需安装浏览器（playwright install chromium）。返回文本上限 60,000 字符。",
+        "description": "【浏览器读取】通过 Playwright 驱动真实浏览器，渲染 JavaScript 密集型网页（SPA / 客户端渲染 / 反爬轻量页面）并提取为干净 Markdown 文本。与 web_read（Jina Reader）互补：web_read 适合静态页，browser_read 处理 JS 渲染页。注意：首次使用需安装浏览器（playwright install chromium）。长文自动分片：首读返回前 60,000 字符 + session_id/can_continue/next_offset；正文未读完时必须带 session_id 续读直到 can_continue=false，不要凭首片下结论。",
         "parameters": {
             "type": "object",
             "properties": {
-                "url": {"type": "string", "description": "要读取的网页 URL（http/https）"},
+                "url": {"type": "string", "description": "要读取的网页 URL（http/https）；续读时可省略"},
                 "timeout": {"type": "number", "description": "超时秒数（默认 30，单次读取建议 ≤60）"},
+                "session_id": {"type": "string", "description": "可选。续读会话 ID（首读返回的 session_id）；传入后从缓存切片，不再访问网络"},
+                "offset": {"type": "integer", "description": "可选。续读起始偏移（默认按上次位置顺序续读）；传 0 可回看首片"},
+                "chunk_size": {"type": "integer", "description": "可选。单次返回的文本长度上限（默认 60000）"},
             },
-            "required": ["url"],
+            "required": [],
+        },
+    },
+    "browser_dom_read": {
+        "description": "【页面快照分片读取】获取当前页面的 aria 可访问性树正文，长快照自动分片：首读返回前 8,000 字符 + session_id/can_continue/next_offset。需要继续读取时带 session_id 续读直到 can_continue=false。与 browser_dom_snapshot 的区别：dom_snapshot 面向交互定位（拿 role+name），本工具面向完整阅读（分片拿全文）。页面导航/交互后旧 session 失效，需重新调用。仅在快照被截断、需要完整内容时使用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string", "description": "可选。续读会话 ID（首读返回的 session_id）"},
+                "offset": {"type": "integer", "description": "可选。续读起始偏移（默认按上次位置顺序续读）"},
+                "chunk_size": {"type": "integer", "description": "可选。单次返回的快照正文长度上限（默认 8000）"},
+            },
+            "required": [],
         },
     },
     "bilibili_search": {

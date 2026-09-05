@@ -51,6 +51,7 @@ COMPUTER_USE_TOOLS = frozenset(
         "browser_screenshot",
         "browser_extract_text",
         "browser_dom_snapshot",
+        "browser_dom_read",
         "browser_click_role",
         "browser_fill_role",
     }
@@ -85,6 +86,8 @@ def describe_computer_action(tool_name: str, params: Dict) -> str:
         return "提取页面文本"
     if tool_name == "browser_dom_snapshot":
         return "获取页面可访问性快照"
+    if tool_name == "browser_dom_read":
+        return "分片读取页面快照正文"
     if tool_name == "browser_click_role":
         return f"点击 {params.get('role', '?')}「{params.get('name', '')}」"
     if tool_name == "browser_fill_role":
@@ -156,6 +159,7 @@ class ToolExecutor:
         "browser_screenshot": "_execute_browser_screenshot",
         "browser_extract_text": "_execute_browser_extract_text",
         "browser_dom_snapshot": "_execute_browser_dom_snapshot",
+        "browser_dom_read": "_execute_browser_dom_read",
         "browser_click_role": "_execute_browser_click_role",
         "browser_fill_role": "_execute_browser_fill_role",
         "planning": "_execute_planning",
@@ -2732,6 +2736,29 @@ class ToolExecutor:
             logger.error("页面快照失败: %s", e)
             return {"error": f"页面快照失败: {str(e)}"}
 
+    async def _execute_browser_dom_read(self, params: Dict) -> Dict:
+        """快照正文分片读取（browser_dom_read）：一次观察、按 chunk 续读，
+        取代对超长 aria 树的硬截断（尾部不再丢失）。"""
+        try:
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            session_id = params.get("session_id")
+            offset = params.get("offset")
+            chunk_size = params.get("chunk_size")
+            result = self._normalize_browser_result(
+                await manager.browser_dom_read(
+                    session_id=str(session_id) if session_id else None,
+                    offset=int(offset) if offset is not None else None,
+                    chunk_size=int(chunk_size) if chunk_size else None,
+                )
+            )
+            await self._emit_computer_event("browser_dom_read", params, result)
+            return result
+        except Exception as e:
+            logger.error("快照分片读取失败: %s", e)
+            return {"error": f"快照分片读取失败: {str(e)}"}
+
     async def _execute_browser_click_role(self, params: Dict) -> Dict:
         """按 ARIA role + accessible name 定位点击（从 dom_snapshot 的快照事实取参）"""
         role = str(params.get("role") or "").strip()
@@ -2834,11 +2861,23 @@ class ToolExecutor:
                     return {"error": "缺少 url 参数"}
                 return await _asyncio.to_thread(youtube_transcript, url)
             if tool_name == "browser_read":
+                session_id = params.get("session_id")
+                if session_id:
+                    # 续读：纯内存切片，url 可省略、零网络
+                    return await _asyncio.to_thread(
+                        browser_read,
+                        session_id=str(session_id),
+                        offset=params.get("offset"),
+                    )
                 url = str(params.get("url") or "").strip()
                 if not url:
-                    return {"error": "缺少 url 参数"}
+                    return {"error": "缺少 url 参数（或传 session_id 续读）"}
                 timeout = float(params.get("timeout", 30))
-                return await _asyncio.to_thread(browser_read, url, timeout)
+                chunk_size = params.get("chunk_size")
+                return await _asyncio.to_thread(
+                    browser_read, url, timeout,
+                    chunk_size=int(chunk_size) if chunk_size else None,
+                )
             if tool_name == "bilibili_search":
                 query = str(params.get("query") or "").strip()
                 if not query:
