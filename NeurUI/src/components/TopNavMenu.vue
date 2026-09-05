@@ -108,10 +108,10 @@ function isCategoryActive(cat: FilteredCategory): boolean {
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  border-radius: 10px;
+  border-radius: 12px;
   color: var(--nr-text-secondary);
   font-size: 13px;
-  font-weight: 450;
+  font-weight: 500;
   text-decoration: none;
   transition: all 0.2s ease;
   white-space: nowrap;
@@ -123,7 +123,7 @@ function isCategoryActive(cat: FilteredCategory): boolean {
 .nr-topnav-quick.is-active {
   color: var(--nr-primary-light);
   background: var(--nr-primary-soft);
-  font-weight: 550;
+  font-weight: 600;
 }
 .nr-topnav-quick-label {
   display: inline;
@@ -135,10 +135,10 @@ function isCategoryActive(cat: FilteredCategory): boolean {
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
-  border-radius: 10px;
+  border-radius: 12px;
   color: var(--nr-text-secondary);
   font-size: 13px;
-  font-weight: 450;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
   white-space: nowrap;

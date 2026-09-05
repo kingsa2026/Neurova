@@ -14,6 +14,8 @@ html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  /* iOS 大标题感: 正文默认 15px、收紧字距贴近 SF Pro 排版 */
+  font-feature-settings: 'ss01' on, 'cv01' on;
 }
 
 body {
@@ -23,6 +25,7 @@ body {
   line-height: 1.6;
   min-height: 100vh;
   overflow: hidden;
+  transition: background-color 0.35s ease, color 0.35s ease;
 }
 
 #app {
@@ -31,7 +34,17 @@ body {
   overflow: hidden;
 }
 
-/* ─── Scrollbar ─── */
+/* ─── 选中态（iOS Accent 蓝） ─── */
+::selection {
+  background: rgba(10, 132, 255, 0.32);
+  color: inherit;
+}
+[data-theme='light'] ::selection {
+  background: rgba(0, 122, 255, 0.24);
+  color: inherit;
+}
+
+/* ─── Scrollbar（iOS 细窄半透明滚轮） ─── */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -46,54 +59,60 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--nr-glass-border-hover);
 }
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
 
-/* ─── Star Background ─── */
+/* ─── Ambient 背景（iOS 动态壁纸级柔和光晕，深浅两套主题共用） ─── */
 .star-bg {
   position: fixed;
   inset: 0;
   z-index: 0;
-  background: radial-gradient(ellipse at 20% 50%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 20%, rgba(34, 211, 238, 0.06) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 80%, rgba(167, 139, 250, 0.05) 0%, transparent 50%),
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 55% 42% at 18% 12%, rgba(10, 132, 255, 0.1) 0%, transparent 62%),
+    radial-gradient(ellipse 46% 38% at 82% 20%, rgba(100, 210, 255, 0.06) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 48% at 62% 88%, rgba(191, 90, 242, 0.05) 0%, transparent 62%),
     var(--nr-bg-deep);
 }
 .star-bg::before,
 .star-bg::after {
   content: '';
   position: absolute;
-  inset: 0;
-  background-image: radial-gradient(1px 1px at 20px 30px, rgba(255, 255, 255, 0.3), transparent),
-    radial-gradient(1px 1px at 40px 70px, rgba(255, 255, 255, 0.2), transparent),
-    radial-gradient(1px 1px at 50px 160px, rgba(255, 255, 255, 0.15), transparent),
-    radial-gradient(1px 1px at 90px 40px, rgba(255, 255, 255, 0.25), transparent),
-    radial-gradient(1px 1px at 130px 80px, rgba(255, 255, 255, 0.2), transparent),
-    radial-gradient(1.5px 1.5px at 160px 120px, rgba(255, 255, 255, 0.35), transparent);
-  background-size: 200px 200px;
-  animation: starDrift 120s linear infinite;
+  inset: -60% -30%;
+  background:
+    radial-gradient(ellipse 42% 50% at 35% 40%, rgba(100, 210, 255, 0.07) 0%, transparent 65%),
+    radial-gradient(ellipse 50% 55% at 70% 60%, rgba(191, 90, 242, 0.05) 0%, transparent 68%);
+  filter: blur(50px);
+  animation: auroraDrift 60s ease-in-out infinite alternate;
 }
 .star-bg::after {
-  background-size: 300px 300px;
-  opacity: 0.6;
-  animation-duration: 200s;
-  animation-direction: reverse;
+  inset: -40% -20%;
+  background:
+    radial-gradient(ellipse 36% 44% at 60% 30%, rgba(10, 132, 255, 0.08) 0%, transparent 62%),
+    radial-gradient(ellipse 40% 48% at 30% 72%, rgba(64, 156, 255, 0.05) 0%, transparent 62%);
+  animation-duration: 82s;
+  animation-direction: alternate-reverse;
 }
-@keyframes starDrift {
-  from { transform: translateY(0); }
-  to { transform: translateY(-200px); }
+@keyframes auroraDrift {
+  from { transform: translate3d(-4%, -2%, 0) rotate(0deg); }
+  to { transform: translate3d(4%, 3%, 0) rotate(6deg); }
 }
 
-/* ─── Glass Card ─── */
+/* ─── Glass Card（iOS 液态玻璃卡片） ─── */
 .glass-card {
   background: var(--nr-glass-bg);
-  backdrop-filter: blur(var(--nr-glass-blur));
-  -webkit-backdrop-filter: blur(var(--nr-glass-blur));
+  backdrop-filter: blur(var(--nr-glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--nr-glass-blur)) saturate(180%);
   border: 1px solid var(--nr-glass-border);
   border-radius: var(--nr-radius-lg);
+  box-shadow: inset 0 0.5px 0 rgba(var(--nr-glass-rgb), 0.12), var(--nr-shadow-sm);
   transition: all var(--nr-transition);
 }
 .glass-card:hover {
   background: var(--nr-glass-bg-hover);
   border-color: var(--nr-glass-border-hover);
+  box-shadow: inset 0 0.5px 0 rgba(var(--nr-glass-rgb), 0.18), var(--nr-shadow-md);
 }
 
 /* ─── Gradient Text ─── */
@@ -111,11 +130,11 @@ body {
 }
 .fade-slide-enter-from {
   opacity: 0;
-  transform: translateY(12px);
+  transform: translateY(10px) scale(0.995);
 }
 .fade-slide-leave-to {
   opacity: 0;
-  transform: translateY(-12px);
+  transform: translateY(-8px) scale(0.995);
 }
 
 .fade-enter-active,
@@ -137,15 +156,184 @@ body {
   transform: scale(0.95);
 }
 
-/* ─── Ant Design Vue Dark Overrides ─── */
+/* ═══════════════════════════════════════════════════════════════
+   Ant Design Vue — iOS Liquid Glass 覆盖
+   （输入为主的自适应容器 / 分组列表 / 圆角弹层 / 系统色状态）
+   ═══════════════════════════════════════════════════════════════ */
+
 .ant-layout {
   background: transparent !important;
 }
 
-/* Tabs */
+/* ─── 弹层材质：SystemGray 表面 + 玻璃模糊 ─── */
+.ant-modal {
+  backdrop-filter: blur(8px);
+}
+.ant-modal-content,
+.ant-drawer-content {
+  background: var(--nr-bg-surface) !important;
+  border: 1px solid var(--nr-glass-border) !important;
+  border-radius: 20px !important;
+  box-shadow: inset 0 0.5px 0 rgba(var(--nr-glass-rgb), 0.12), var(--nr-shadow-lg) !important;
+}
+.ant-modal-header,
+.ant-drawer-header {
+  background: transparent !important;
+  border-bottom: 1px solid var(--nr-glass-border) !important;
+}
+.ant-modal-title,
+.ant-drawer-title {
+  color: var(--nr-text-primary) !important;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.ant-modal-close {
+  color: var(--nr-text-secondary) !important;
+}
+.ant-modal-close:hover {
+  color: var(--nr-text-primary) !important;
+  background: var(--nr-glass-bg) !important;
+  border-radius: 50%;
+}
+
+/* ─── Dropdown / Popover / Tooltip / Select 弹层 ─── */
+.ant-dropdown-menu,
+.ant-select-dropdown,
+.ant-popover-inner,
+.ant-tooltip-inner {
+  background: var(--nr-bg-elevated) !important;
+  border: 1px solid var(--nr-glass-border) !important;
+  border-radius: 14px !important;
+  box-shadow: inset 0 0.5px 0 rgba(var(--nr-glass-rgb), 0.1), var(--nr-shadow-lg) !important;
+}
+.ant-popover-arrow::before {
+  background: var(--nr-bg-elevated) !important;
+}
+.ant-tooltip-inner {
+  color: var(--nr-text-primary) !important;
+}
+.ant-dropdown-menu-item,
+.ant-select-item {
+  color: var(--nr-text-secondary) !important;
+  border-radius: 10px;
+}
+.ant-dropdown-menu-item:hover,
+.ant-select-item-option-active {
+  color: var(--nr-text-primary) !important;
+  background: var(--nr-glass-bg-hover) !important;
+}
+.ant-select-item-option-selected {
+  color: var(--nr-primary-light) !important;
+  background: var(--nr-primary-soft) !important;
+}
+
+/* ─── 表单控件：iOS 自适应填充（smart inset） ─── */
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-select-selector,
+.ant-input-number,
+.ant-picker,
+.ant-input-search .ant-input,
+textarea,
+input[type="text"],
+input[type="number"],
+input[type="password"],
+input[type="email"],
+input[type="search"] {
+  background: var(--nr-glass-bg) !important;
+  border-color: var(--nr-glass-border) !important;
+  color: var(--nr-text-primary) !important;
+  border-radius: 12px !important;
+  transition: border-color var(--nr-transition-fast), box-shadow var(--nr-transition-fast), background var(--nr-transition-fast) !important;
+}
+.ant-input::placeholder,
+.ant-input-affix-wrapper input::placeholder,
+textarea::placeholder,
+input::placeholder,
+.ant-select-selection-placeholder {
+  color: var(--nr-text-tertiary) !important;
+}
+.ant-input:hover,
+.ant-select-selector:hover,
+.ant-picker:hover {
+  border-color: var(--nr-glass-border-hover) !important;
+}
+.ant-input:focus,
+.ant-input-focused,
+.ant-select-focused .ant-select-selector,
+.ant-select-selector:focus,
+.ant-picker-focused,
+.ant-picker:focus,
+.ant-input-number-focused {
+  border-color: var(--nr-primary) !important;
+  box-shadow: 0 0 0 3px var(--nr-primary-ring) !important;
+}
+.ant-select-selection-item,
+.ant-select-selection-search-input {
+  color: var(--nr-text-primary) !important;
+}
+.ant-picker-input > input {
+  color: var(--nr-text-primary) !important;
+}
+.ant-input-number-input {
+  color: var(--nr-text-primary) !important;
+}
+.ant-input-number-handler-wrap,
+.ant-input-number-handler {
+  background: var(--nr-glass-bg) !important;
+  border-color: var(--nr-glass-border) !important;
+}
+.ant-input-number-handler-up,
+.ant-input-number-handler-down {
+  color: var(--nr-text-secondary) !important;
+}
+.ant-input-number-handler-up:hover,
+.ant-input-number-handler-down:hover {
+  color: var(--nr-primary-light) !important;
+}
+
+/* ─── 按钮：iOS 系统按钮体系 ─── */
+.ant-btn {
+  border-radius: 12px !important;
+  font-weight: 500;
+}
+.ant-btn-primary {
+  background: var(--nr-gradient-primary) !important;
+  border: none !important;
+  color: #fff !important;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.18) inset, 0 2px 10px rgba(10, 132, 255, 0.3) !important;
+}
+.ant-btn-primary:hover {
+  background: linear-gradient(180deg, #4aa8ff 0%, #1f8fff 100%) !important;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.22) inset, 0 4px 16px rgba(10, 132, 255, 0.4) !important;
+}
+.ant-btn:not(.ant-btn-primary):not(.ant-btn-dangerous) {
+  background: var(--nr-glass-bg) !important;
+  border: 1px solid var(--nr-glass-border) !important;
+  color: var(--nr-primary-light) !important;
+}
+.ant-btn:not(.ant-btn-primary):not(.ant-btn-dangerous):hover {
+  background: var(--nr-glass-bg-hover) !important;
+  border-color: var(--nr-glass-border-hover) !important;
+  color: var(--nr-primary-light) !important;
+}
+.ant-btn-dangerous {
+  background: var(--nr-error) !important;
+  border: none !important;
+  color: #fff !important;
+}
+.ant-btn[disabled] {
+  color: var(--nr-text-muted) !important;
+  background: var(--nr-glass-bg) !important;
+  border-color: var(--nr-glass-border) !important;
+}
+
+/* ─── Tabs：iOS 蓝标签 —── */
 .ant-tabs-tab {
   color: var(--nr-text-secondary) !important;
   font-weight: 500;
+  border-radius: 10px !important;
+  transition: color var(--nr-transition-fast), background var(--nr-transition-fast);
 }
 .ant-tabs-tab:hover {
   color: var(--nr-text-primary) !important;
@@ -156,65 +344,112 @@ body {
 }
 .ant-tabs-ink-bar {
   background: var(--nr-primary) !important;
+  border-radius: 2px;
 }
 .ant-tabs-nav::before {
   border-color: var(--nr-glass-border) !important;
 }
 
-/* Tags */
-.ant-tag {
-  border-color: var(--nr-glass-border) !important;
-  color: var(--nr-text-secondary) !important;
-  background: var(--nr-glass-bg) !important;
+/* ─── Switch：iOS 系统开关（选中绿） ─── */
+.ant-switch {
+  background: var(--nr-glass-border-hover) !important;
+}
+.ant-switch-checked {
+  background: var(--nr-success) !important;
+}
+.ant-switch.ant-switch-checked:hover:not(.ant-switch-disabled) {
+  background: var(--nr-success) !important;
 }
 
-/* Table */
+/* ─── 表格：iOS 分组列表化 ─── */
 .ant-table {
   color: var(--nr-text-primary) !important;
+  background: transparent !important;
 }
 .ant-table-thead > tr > th {
   color: var(--nr-text-secondary) !important;
-  background: transparent !important;
-  border-color: var(--nr-glass-border) !important;
+  background: var(--nr-glass-bg) !important;
+  border-bottom: 1px solid var(--nr-glass-border) !important;
   font-weight: 600;
 }
 .ant-table-tbody > tr > td {
   color: var(--nr-text-primary) !important;
-  border-color: var(--nr-glass-border) !important;
+  border-bottom: 1px solid var(--nr-border-light) !important;
 }
 .ant-table-tbody > tr:hover > td {
   background: var(--nr-glass-bg-hover) !important;
 }
 
-/* Modal */
-.ant-modal-content {
-  background: var(--nr-bg-surface) !important;
-  color: var(--nr-text-primary) !important;
-}
-.ant-modal-header {
-  background: transparent !important;
-  border-color: var(--nr-glass-border) !important;
-}
-.ant-modal-title {
-  color: var(--nr-text-primary) !important;
-}
-.ant-modal-close {
+/* ─── 分组容器：Row/Statistic/Descriptions/List/Tag/Alert ─── */
+.ant-descriptions-item-label {
   color: var(--nr-text-secondary) !important;
 }
-
-/* Drawer */
-.ant-drawer-content {
-  background: var(--nr-bg-surface) !important;
-}
-.ant-drawer-header {
-  background: transparent !important;
-  border-color: var(--nr-glass-border) !important;
-}
-.ant-drawer-title {
+.ant-descriptions-item-content {
   color: var(--nr-text-primary) !important;
 }
+.ant-list-item {
+  color: var(--nr-text-primary) !important;
+  border-color: var(--nr-border-light) !important;
+}
+.ant-list-item-meta-title {
+  color: var(--nr-text-primary) !important;
+}
+.ant-list-item-meta-description {
+  color: var(--nr-text-secondary) !important;
+}
+.ant-tag {
+  border-color: var(--nr-glass-border) !important;
+  color: var(--nr-text-secondary) !important;
+  background: var(--nr-glass-bg) !important;
+  border-radius: 8px;
+}
+.ant-alert {
+  background: var(--nr-glass-bg) !important;
+  border: 1px solid var(--nr-glass-border) !important;
+  border-radius: 14px !important;
+}
 
-/* Steps */
+/* ─── 状态标签：浅色/深色都可读 ─── */
+.ant-badge-status-text {
+  color: var(--nr-text-secondary) !important;
+}
+.ant-badge-status-dot {
+  border: 2px solid var(--nr-bg-surface);
+}
+
+/* ─── 单选/复选文字 ─── */
+.ant-checkbox-wrapper,
+.ant-radio-wrapper {
+  color: var(--nr-text-secondary) !important;
+}
+.ant-checkbox-wrapper:hover,
+.ant-radio-wrapper:hover {
+  color: var(--nr-text-primary) !important;
+}
+.ant-checkbox-checked .ant-checkbox-inner,
+.ant-radio-checked .ant-radio-inner {
+  border-color: var(--nr-primary) !important;
+  background-color: var(--nr-primary) !important;
+}
+
+/* ─── 分页：圆润胶囊 ─── */
+.ant-pagination .ant-pagination-item {
+  background: var(--nr-glass-bg) !important;
+  border-color: var(--nr-glass-border) !important;
+  border-radius: 10px !important;
+}
+.ant-pagination .ant-pagination-item a {
+  color: var(--nr-text-secondary) !important;
+}
+.ant-pagination .ant-pagination-item-active {
+  border-color: var(--nr-primary) !important;
+  background: var(--nr-primary-soft) !important;
+}
+.ant-pagination .ant-pagination-item-active a {
+  color: var(--nr-primary-light) !important;
+}
+
+/* ─── Steps ─── */
 .ant-steps-item-title {
   color: var(--nr-text-secondary) !important;
 }
@@ -225,241 +460,42 @@ body {
   color: var(--nr-primary-light) !important;
   font-weight: 600;
 }
-
-/* Dropdown */
-.ant-dropdown-menu {
-  background: var(--nr-bg-surface) !important;
-  border: 1px solid var(--nr-glass-border) !important;
-  border-radius: 12px !important;
-}
-.ant-dropdown-menu-item {
-  color: var(--nr-text-secondary) !important;
-}
-.ant-dropdown-menu-item:hover {
-  color: var(--nr-text-primary) !important;
-  background: var(--nr-glass-bg-hover) !important;
-}
-
-/* Badge */
-.ant-badge-status-text {
-  color: var(--nr-text-secondary) !important;
-}
-
-/* Form */
-.ant-form-item-label > label {
-  color: var(--nr-text-secondary) !important;
-}
-.ant-select-dropdown {
-  background: var(--nr-bg-surface) !important;
-  border: 1px solid var(--nr-glass-border) !important;
-}
-.ant-select-item {
-  color: var(--nr-text-secondary) !important;
-}
-.ant-select-item-option-active {
-  background: var(--nr-glass-bg-hover) !important;
-}
-.ant-select-item-option-selected {
-  color: var(--nr-primary-light) !important;
-  background: var(--nr-primary-soft) !important;
-}
-
-/* Popover / Tooltip */
-.ant-popover-inner {
-  background: var(--nr-bg-surface) !important;
-}
-.ant-popover-arrow::before {
-  background: var(--nr-bg-surface) !important;
-}
-.ant-tooltip-inner {
-  background: var(--nr-bg-surface) !important;
-  color: var(--nr-text-primary) !important;
-}
-
-/* Radio */
-.ant-radio-wrapper {
-  color: var(--nr-text-secondary) !important;
-}
-.ant-radio-wrapper:hover {
-  color: var(--nr-text-primary) !important;
-}
-.ant-radio-button-wrapper {
-  background: var(--nr-glass-bg) !important;
-  border-color: var(--nr-glass-border) !important;
-  color: var(--nr-text-secondary) !important;
-}
-.ant-radio-button-wrapper-checked {
-  background: var(--nr-primary-soft) !important;
+.ant-steps-item-icon {
   border-color: var(--nr-primary) !important;
   color: var(--nr-primary-light) !important;
 }
 
-/* Switch */
-.ant-switch {
-  background: var(--nr-glass-border) !important;
-}
-.ant-switch-checked {
-  background: var(--nr-primary) !important;
-}
-
-/* List */
-.ant-list-item {
-  border-color: var(--nr-glass-border) !important;
-}
-.ant-list-item-meta-title {
-  color: var(--nr-text-primary) !important;
-}
-.ant-list-item-meta-description {
-  color: var(--nr-text-secondary) !important;
-}
-.ant-btn-primary {
-  background: var(--nr-gradient-primary) !important;
-  border: none !important;
-  box-shadow: var(--nr-shadow-glow) !important;
-}
-/* Input / Select / Picker / Textarea */
-.ant-input,
-.ant-select-selector,
-.ant-input-number,
-.ant-picker,
-textarea,
-input[type="text"],
-input[type="number"],
-input[type="password"],
-input[type="email"],
-input[type="search"] {
-  background: var(--nr-glass-bg) !important;
-  border-color: var(--nr-glass-border) !important;
-  color: var(--nr-text-primary) !important;
-}
-.ant-input::placeholder,
-textarea::placeholder,
-input::placeholder {
-  color: var(--nr-text-tertiary) !important;
-}
-.ant-input:focus,
-.ant-select-focused .ant-picker,
-.ant-select-focused .ant-select-selector {
-  border-color: var(--nr-primary) !important;
-  box-shadow: 0 0 0 2px var(--nr-primary-ring) !important;
-}
-.ant-select-selection-item,
-.ant-select-selection-search-input,
-.ant-select-selection-placeholder {
-  color: var(--nr-text-primary) !important;
-}
-.ant-picker-input > input {
-  color: var(--nr-text-primary) !important;
-}
-.ant-input-number-input {
-  color: var(--nr-text-primary) !important;
-}
-.ant-input-number-handler-wrap {
-  background: var(--nr-glass-bg) !important;
-  border-color: var(--nr-glass-border) !important;
-}
-.ant-input-number-handler-up,
-.ant-input-number-handler-down {
-  color: var(--nr-text-secondary) !important;
-}
-.ant-input-number-handler-up:hover,
-.ant-input-number-handler-down:hover {
-  color: var(--nr-text-primary) !important;
-}
-.ant-table {
-  background: transparent !important;
-}
-.ant-table-tbody > tr > td {
-  border-bottom: 1px solid var(--nr-border-light) !important;
-  color: var(--nr-text-primary) !important;
-}
-.ant-table-tbody > tr:hover > td {
-  background: var(--nr-glass-bg-hover) !important;
-}
-.ant-table-thead > tr > th {
-  background: var(--nr-glass-bg) !important;
-  border-bottom: 1px solid var(--nr-glass-border) !important;
-  color: var(--nr-text-primary) !important;
-  font-weight: 600 !important;
-}
-.ant-descriptions-item-label {
-  color: var(--nr-text-secondary) !important;
-}
-.ant-descriptions-item-content {
-  color: var(--nr-text-primary) !important;
-}
-.ant-list-item {
-  color: var(--nr-text-primary) !important;
-}
-.ant-card {
-  color: var(--nr-text-primary) !important;
-}
-.ant-modal-content,
-.ant-drawer-content {
-  background: var(--nr-bg-surface) !important;
-  border: 1px solid var(--nr-glass-border) !important;
-}
-.ant-modal-header,
-.ant-drawer-header {
-  background: transparent !important;
-  border-bottom: 1px solid var(--nr-glass-border) !important;
-}
-.ant-tabs-nav::before {
-  border-bottom: 1px solid var(--nr-glass-border) !important;
-}
-.ant-dropdown-menu {
-  background: var(--nr-bg-elevated) !important;
-  border: 1px solid var(--nr-glass-border) !important;
-}
-.ant-dropdown-menu-item {
-  color: var(--nr-text-secondary) !important;
-}
-.ant-dropdown-menu-item:hover {
-  background: var(--nr-glass-bg-hover) !important;
-  color: var(--nr-text-primary) !important;
-}
-.ant-tag {
-  border-color: var(--nr-glass-border) !important;
-  background: var(--nr-glass-bg) !important;
-}
-.ant-switch-checked {
-  background: var(--nr-primary) !important;
-}
-.ant-pagination .ant-pagination-item {
-  background: var(--nr-glass-bg) !important;
-  border-color: var(--nr-glass-border) !important;
-}
-.ant-pagination .ant-pagination-item-active {
-  border-color: var(--nr-primary) !important;
-}
-.ant-pagination .ant-pagination-item a {
-  color: var(--nr-text-secondary) !important;
-}
-.ant-pagination .ant-pagination-item-active a {
-  color: var(--nr-primary-light) !important;
-}
-.ant-tooltip-inner {
-  background: var(--nr-bg-elevated) !important;
-  border: 1px solid var(--nr-glass-border) !important;
-}
-.ant-badge-status-dot {
-  border: 2px solid var(--nr-bg-surface);
-}
-.ant-alert {
-  background: var(--nr-glass-bg) !important;
-  border: 1px solid var(--nr-glass-border) !important;
-}
-.ant-checkbox-wrapper {
-  color: var(--nr-text-secondary) !important;
-}
-.ant-radio-wrapper {
-  color: var(--nr-text-secondary) !important;
-}
-.ant-form-item-label > label {
-  color: var(--nr-text-secondary) !important;
-}
+/* ─── Empty ─── */
 .ant-empty-description {
   color: var(--nr-text-tertiary) !important;
+}
+
+/* ─── Message / Notification ─── */
+.ant-message-notice-content,
+.ant-notification-notice {
+  background: var(--nr-bg-elevated) !important;
+  color: var(--nr-text-primary) !important;
+  border: 1px solid var(--nr-glass-border) !important;
+  border-radius: 14px !important;
+  box-shadow: inset 0 0.5px 0 rgba(var(--nr-glass-rgb), 0.1), var(--nr-shadow-lg) !important;
+}
+
+/* ─── Menu（右侧栏等） ─── */
+.ant-menu {
+  background: transparent !important;
+  border-inline-end: none !important;
+}
+.ant-menu-item {
+  border-radius: 12px !important;
+  color: var(--nr-text-secondary) !important;
+}
+.ant-menu-item:hover {
+  color: var(--nr-text-primary) !important;
+  background: var(--nr-glass-bg) !important;
+}
+.ant-menu-item-selected {
+  color: var(--nr-primary-light) !important;
+  background: var(--nr-primary-soft) !important;
 }
 
 /* ─── Utility ─── */
@@ -470,3 +506,14 @@ input::placeholder {
 .flex-between { display: flex; align-items: center; justify-content: space-between; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 [dir="rtl"] .rtl-flip { transform: scaleX(-1); }
+
+/* ─── 减弱动效：系统偏好优先（iOS 尊重 Reduce Motion） ─── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

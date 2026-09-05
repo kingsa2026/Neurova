@@ -4,6 +4,8 @@
  * 从 variables.css 提取的设计令牌，供 JS/TS 代码使用。
  * 注意: 这些值必须与 variables.css 中的 CSS 变量保持同步。
  *
+ * 2026-09-05 起主题为 Apple iOS Liquid Glass 风格（深色/浅色两套）。
+ *
  * 同步映射:
  *   colors.primary      ↔ --nr-primary
  *   colors.accent       ↔ --nr-accent
@@ -29,23 +31,23 @@
  */
 export const tokens = {
   colors: {
-    primary: '#6366f1',
-    accent: '#22d3ee',
-    bgDeep: '#06080f',
-    bgBase: '#0a0e1a',
-    bgSurface: '#111827',
-    bgElevated: '#1a2236',
-    bgOverlay: 'rgba(10, 14, 26, 0.85)',
-    glassBg: 'rgba(255, 255, 255, 0.035)',
-    glassBorder: 'rgba(255, 255, 255, 0.08)',
-    textPrimary: 'rgba(255, 255, 255, 0.95)',
-    textSecondary: 'rgba(255, 255, 255, 0.7)',
-    textTertiary: 'rgba(255, 255, 255, 0.45)',
-    textMuted: 'rgba(255, 255, 255, 0.25)',
-    success: '#10b981',
-    warning: '#f59e0b',
-    error: '#ef4444',
-    info: '#3b82f6',
+    primary: '#0a84ff',
+    accent: '#64d2ff',
+    bgDeep: '#000000',
+    bgBase: '#000000',
+    bgSurface: '#1c1c1e',
+    bgElevated: '#2c2c2e',
+    bgOverlay: 'rgba(0, 0, 0, 0.72)',
+    glassBg: 'rgba(255, 255, 255, 0.07)',
+    glassBorder: 'rgba(255, 255, 255, 0.12)',
+    textPrimary: 'rgba(255, 255, 255, 0.96)',
+    textSecondary: 'rgba(255, 255, 255, 0.64)',
+    textTertiary: 'rgba(255, 255, 255, 0.44)',
+    textMuted: 'rgba(255, 255, 255, 0.3)',
+    success: '#30d158',
+    warning: '#ff9f0a',
+    error: '#ff453a',
+    info: '#0a84ff',
   },
   spacing: {
     xs: '4px',
@@ -56,21 +58,21 @@ export const tokens = {
     xxl: '48px',
   },
   radius: {
-    sm: '6px',
-    md: '10px',
-    lg: '16px',
-    xl: '24px',
+    sm: '10px',
+    md: '14px',
+    lg: '18px',
+    xl: '28px',
     full: '9999px',
   },
   transitions: {
-    fast: '0.15s cubic-bezier(0.4, 0, 0.2, 1)',
-    normal: '0.25s cubic-bezier(0.4, 0, 0.2, 1)',
-    slow: '0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+    fast: '0.2s cubic-bezier(0.32, 0.72, 0, 1)',
+    normal: '0.35s cubic-bezier(0.32, 0.72, 0, 1)',
+    slow: '0.55s cubic-bezier(0.32, 0.72, 0, 1)',
   },
   shadows: {
-    sm: '0 2px 8px rgba(0, 0, 0, 0.3)',
-    md: '0 4px 16px rgba(0, 0, 0, 0.4)',
-    lg: '0 8px 32px rgba(0, 0, 0, 0.5)',
+    sm: '0 1px 2px rgba(0, 0, 0, 0.3)',
+    md: '0 2px 12px rgba(0, 0, 0, 0.35)',
+    lg: '0 12px 32px rgba(0, 0, 0, 0.55)',
   },
 } as const
 

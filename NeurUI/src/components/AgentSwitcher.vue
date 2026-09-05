@@ -111,7 +111,7 @@ const currentAgentInitial = computed(() =>
   (agentStore.currentAgent?.name || 'A').charAt(0).toUpperCase(),
 )
 const currentAgentColor = computed(() =>
-  agentStore.currentAgent ? getAgentColor(agentStore.currentAgent) : '#8B5CF6',
+  agentStore.currentAgent ? getAgentColor(agentStore.currentAgent) : '#0A84FF',
 )
 
 const filteredAgents = computed(() => {
@@ -134,9 +134,10 @@ onMounted(async () => {
 })
 
 // --- Methods ---
+// iOS 系统色板（Accent 蓝 / 绿 / 橙 / 红 / Cyan / 紫 / 粉 / 靛 / 黄 / Teal）
 const colors = [
-  '#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#3B82F6',
-  '#EF4444', '#6366F1', '#14B8A6', '#F97316', '#06B6D4',
+  '#0A84FF', '#30D158', '#FF9F0A', '#FF453A', '#64D2FF',
+  '#BF5AF2', '#FF375F', '#5E5CE6', '#FFD60A', '#32ADE6',
 ]
 
 function getAgentColor(agent: Agent): string {
@@ -424,6 +425,7 @@ watch(panelOpen, (val) => {
   font-weight: 700;
   font-size: 15px;
   flex-shrink: 0;
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.25);
 }
 
 .nr-as-item-info {

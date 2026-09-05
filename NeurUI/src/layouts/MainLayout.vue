@@ -1,6 +1,6 @@
 <template>
   <div class="nr-layout" :class="{ 'sidebar-collapsed': appStore.sidebarCollapsed }">
-    <StarBackground v-if="appStore.isDark" />
+    <!-- iOS 氛围壁纸统一由 App.vue 的 .star-bg 提供（深/浅两套主题共用） -->
 
     <!-- Sidebar -->
     <GlassNav :collapsed="appStore.sidebarCollapsed" @brand-click="router.push('/dashboard')">
@@ -314,7 +314,6 @@ import { useAgentStore } from '@/stores/agents'
 import { useNotificationStore } from '@/stores/notifications'
 import { subscribeUnreadStream } from '@/api/modules/notifications'
 import { supportedLocales } from '@/i18n'
-import StarBackground from '@/components/StarBackground.vue'
 import GlassNav from '@/components/GlassNav.vue'
 import GlassNavItem from '@/components/GlassNavItem.vue'
 import GlassNavGroup from '@/components/GlassNavGroup.vue'
@@ -460,10 +459,11 @@ const canAgent = (name: string) =>
 
 .nr-header {
   height: var(--nr-header-h); display: flex; align-items: center;
-  justify-content: space-between; padding: 0 24px;
+  justify-content: space-between; padding: 0 20px;
   background: var(--nr-header-bg);
   backdrop-filter: blur(30px) saturate(180%);
-  border-bottom: 1px solid var(--nr-glass-border);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border-bottom: 0.5px solid var(--nr-glass-border);
   flex-shrink: 0; z-index: 5;
 }
 

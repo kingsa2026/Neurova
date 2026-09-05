@@ -77,19 +77,20 @@ const anyChildActive = computed(() => isActiveRoute(props.firstItemTo))
 </script>
 
 <style scoped>
+/* iOS 分组头：玻璃胶囊 + 展开箭头 */
 .nr-nav-group-head {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: 8px;
   width: 100%; border: 1px solid var(--nr-glass-border);
   background: var(--nr-glass-bg);
   -webkit-backdrop-filter: blur(var(--nr-glass-blur)) saturate(160%);
   backdrop-filter: blur(var(--nr-glass-blur)) saturate(160%);
-  padding: 7px 10px; margin: 10px 0 4px; cursor: pointer;
-  border-radius: 10px;
+  padding: 8px 12px; margin: 10px 0 4px; cursor: pointer;
+  border-radius: 12px;
   transition: background 0.2s, border-color 0.2s, box-shadow 0.2s;
-  font-size: 11px; font-weight: 600;
+  font-size: 12px; font-weight: 600;
   letter-spacing: 0.02em; color: var(--nr-text-secondary);
   font-family: inherit;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  box-shadow: inset 0 0.5px 0 rgba(var(--nr-glass-rgb), 0.08);
 }
 .nr-nav-group-head:hover {
   background: var(--nr-glass-bg-hover);
