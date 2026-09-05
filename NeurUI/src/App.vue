@@ -1,7 +1,8 @@
 <template>
   <a-config-provider :get-popup-container="getPopupContainer" :theme="antdTheme" :locale="antdLocale">
     <div :data-theme="appStore.theme" class="nr-app">
-      <div class="star-bg" v-if="appStore.isDark" />
+      <!-- iOS 氛围壁纸（深/浅两套主题统一使用，登录页与受保护页面共用） -->
+      <div class="star-bg" />
       <router-view />
       <ModelDownloadDialog ref="modelDownloadDialog" />
     </div>
@@ -58,27 +59,46 @@ const antdLocale = computed<ConfigProviderProps['locale']>(() => {
 const getPopupContainer = (triggerNode?: HTMLElement) =>
   (triggerNode?.parentNode || document.body) as HTMLElement
 
-/** Ant Design 主题跟随应用主题：深色用 darkAlgorithm，浅色用 defaultAlgorithm。 */
+/** Ant Design 主题跟随应用主题：Liquid Glass 深浅两套，iOS Accent 蓝。 */
+const iOS_FONT =
+  "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', 'Segoe UI Variable', 'Segoe UI', 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei', sans-serif"
+
 const antdTheme = computed(() =>
   appStore.isDark
     ? {
         algorithm: antdThemeAlgo.darkAlgorithm,
         token: {
-          colorPrimary: '#6366f1',
-          colorInfo: '#6366f1',
-          colorBgBase: '#0a0e1a',
+          colorPrimary: '#0a84ff',
+          colorInfo: '#0a84ff',
+          colorLink: '#409cff',
+          colorLinkHover: '#64d2ff',
+          colorBgBase: '#000000',
           colorTextBase: '#ffffff',
-          borderRadius: 10,
+          colorBgSpotlight: '#2c2c2e',
+          colorSuccess: '#30d158',
+          colorWarning: '#ff9f0a',
+          colorError: '#ff453a',
+          borderRadius: 14,
+          fontFamily: iOS_FONT,
+          fontSize: 14,
         },
       }
     : {
         algorithm: antdThemeAlgo.defaultAlgorithm,
         token: {
-          colorPrimary: '#4d6bfe',
-          colorInfo: '#4d6bfe',
+          colorPrimary: '#007aff',
+          colorInfo: '#007aff',
+          colorLink: '#007aff',
+          colorLinkHover: '#3395ff',
           colorBgBase: '#ffffff',
-          colorTextBase: '#1f2329',
-          borderRadius: 10,
+          colorTextBase: '#000000',
+          colorBgSpotlight: '#ffffff',
+          colorSuccess: '#34c759',
+          colorWarning: '#ff9500',
+          colorError: '#ff3b30',
+          borderRadius: 14,
+          fontFamily: iOS_FONT,
+          fontSize: 14,
         },
       },
 )

@@ -1,6 +1,6 @@
 <template>
   <div class="nr-chat-layout" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
-    <StarBackground v-if="appStore.isDark" />
+    <!-- iOS 氛围壁纸统一由 App.vue 的 .star-bg 提供（深/浅两套主题共用） -->
 
     <!-- Chat Sidebar -->
     <GlassNav :collapsed="sidebarCollapsed" @brand-click="router.push('/dashboard')">
@@ -103,7 +103,6 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useAgentStore } from '@/stores/agents'
-import StarBackground from '@/components/StarBackground.vue'
 import GlassNav from '@/components/GlassNav.vue'
 import GlassNavItem from '@/components/GlassNavItem.vue'
 import AgentSwitcher from '@/components/AgentSwitcher.vue'
@@ -232,7 +231,7 @@ function onAgentSelect(_agent: Agent) {
 .nr-logo {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -242,6 +241,7 @@ function onAgentSelect(_agent: Agent) {
   font-family: var(--nr-font-display);
   font-weight: 800;
   font-size: 16px;
+  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.25), 0 2px 8px rgba(10, 132, 255, 0.3);
 }
 .nr-brand-text {
   font-family: var(--nr-font-display);

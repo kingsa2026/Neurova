@@ -1,9 +1,10 @@
 /**
  * 主题系统契约测试
  *
- * 两套主题:
- *  1. Cosmic（深色）— 现有 UI 风格，定义在 :root，必须原样保留
- *  2. Light（浅色）— 参照 DeepSeek 风格的简洁浅色主题，定义在 [data-theme='light']
+ * 两套主题（2026-09-05 起切换为 Apple iOS Liquid Glass 风格）:
+ *  1. iOS 深色 — 定义在 :root（纯黑背景、iOS SystemGray 表面、Accent 蓝 #0a84ff）
+ *  2. iOS 浅色 — 定义在 [data-theme='light']（systemGroupedBackground #f2f2f7、
+ *     白色表面、Accent 蓝 #007aff）
  *
  * 所有颜色类令牌必须在浅色主题中提供覆盖，保证全站无硬编码色值穿透。
  */
@@ -91,28 +92,35 @@ const COLOR_TOKENS = [
   '--nr-panel-shadow',
 ]
 
-describe('Cosmic 深色主题（:root，现有风格必须保留）', () => {
+describe('iOS 深色主题（:root）', () => {
   it(':root 块存在', () => {
     expect(rootBlock).not.toBe('')
   })
 
-  it('保留宇宙深空背景色', () => {
-    expect(valueOf(rootBlock, '--nr-bg-deep')).toBe('#06080f')
-    expect(valueOf(rootBlock, '--nr-bg-base')).toBe('#0a0e1a')
-    expect(valueOf(rootBlock, '--nr-bg-surface')).toBe('#111827')
-    expect(valueOf(rootBlock, '--nr-bg-elevated')).toBe('#1a2236')
+  it('使用 iOS 纯黑系统背景', () => {
+    expect(valueOf(rootBlock, '--nr-bg-deep')).toBe('#000000')
+    expect(valueOf(rootBlock, '--nr-bg-base')).toBe('#000000')
+    expect(valueOf(rootBlock, '--nr-bg-surface')).toBe('#1c1c1e')
+    expect(valueOf(rootBlock, '--nr-bg-elevated')).toBe('#2c2c2e')
   })
 
-  it('保留品牌主色与强调色', () => {
-    expect(valueOf(rootBlock, '--nr-primary')).toBe('#6366f1')
-    expect(valueOf(rootBlock, '--nr-primary-light')).toBe('#818cf8')
-    expect(valueOf(rootBlock, '--nr-accent')).toBe('#22d3ee')
+  it('使用 iOS Accent 蓝（深色 #0a84ff）与 Cyan 强调色', () => {
+    expect(valueOf(rootBlock, '--nr-primary')).toBe('#0a84ff')
+    expect(valueOf(rootBlock, '--nr-primary-light')).toBe('#409cff')
+    expect(valueOf(rootBlock, '--nr-accent')).toBe('#64d2ff')
   })
 
-  it('保留白色玻璃拟态令牌', () => {
+  it('保留白色玻璃拟态令牌（Liquid Glass 材质）', () => {
     expect(valueOf(rootBlock, '--nr-glass-rgb')).toMatch(/^255,\s*255,\s*255$/)
     expect(valueOf(rootBlock, '--nr-glass-bg')).toMatch(/rgba\(255,\s*255,\s*255/)
     expect(valueOf(rootBlock, '--nr-glass-border')).toMatch(/rgba\(255,\s*255,\s*255/)
+  })
+
+  it('状态色使用 iOS 系统色（深色模式）,文本使用白色标签分层', () => {
+    expect(valueOf(rootBlock, '--nr-success')).toBe('#30d158')
+    expect(valueOf(rootBlock, '--nr-warning')).toBe('#ff9f0a')
+    expect(valueOf(rootBlock, '--nr-error')).toBe('#ff453a')
+    expect(valueOf(rootBlock, '--nr-text-primary')).toMatch(/rgba\(255,\s*255,\s*255/)
   })
 
   it('新增兼容令牌在深色主题中有定义', () => {
@@ -133,33 +141,33 @@ describe('Cosmic 深色主题（:root，现有风格必须保留）', () => {
   })
 })
 
-describe('Light 浅色主题（DeepSeek 风格）', () => {
+describe('iOS 浅色主题（Liquid Glass light）', () => {
   it("[data-theme='light'] 块存在", () => {
     expect(lightBlock).not.toBe('')
   })
 
-  it('使用 DeepSeek 蓝作为主色', () => {
-    expect(valueOf(lightBlock, '--nr-primary')).toBe('#4d6bfe')
+  it('使用 iOS Accent 蓝作为主色', () => {
+    expect(valueOf(lightBlock, '--nr-primary')).toBe('#007aff')
   })
 
-  it('使用浅灰白背景（简洁大方）', () => {
-    expect(valueOf(lightBlock, '--nr-bg-deep')).toBe('#f5f6f7')
+  it('使用 systemGroupedBackground 浅灰白背景', () => {
+    expect(valueOf(lightBlock, '--nr-bg-deep')).toBe('#f2f2f7')
     expect(valueOf(lightBlock, '--nr-bg-surface')).toBe('#ffffff')
   })
 
-  it('正文使用深色墨迹文字，保证对比度', () => {
-    expect(valueOf(lightBlock, '--nr-text-primary')).toMatch(/rgba\(31,\s*35,\s*41/)
-    expect(valueOf(lightBlock, '--nr-text-secondary')).toMatch(/rgba\(31,\s*35,\s*41/)
+  it('正文使用纯黑标签文字，保证对比度', () => {
+    expect(valueOf(lightBlock, '--nr-text-primary')).toMatch(/rgba\(0,\s*0,\s*0/)
+    expect(valueOf(lightBlock, '--nr-text-secondary')).toMatch(/rgba\(0,\s*0,\s*0/)
   })
 
-  it('玻璃令牌使用深色半透明叠加（白底可见）', () => {
-    expect(valueOf(lightBlock, '--nr-glass-rgb')).toMatch(/^31,\s*35,\s*41$/)
-    expect(valueOf(lightBlock, '--nr-glass-bg')).toMatch(/rgba\(31,\s*35,\s*41/)
-    expect(valueOf(lightBlock, '--nr-glass-border')).toMatch(/rgba\(31,\s*35,\s*41/)
+  it('玻璃令牌使用 iOS SystemGray（120,120,128）半透明叠加', () => {
+    expect(valueOf(lightBlock, '--nr-glass-rgb')).toMatch(/^120,\s*120,\s*128$/)
+    expect(valueOf(lightBlock, '--nr-glass-bg')).toMatch(/rgba\(120,\s*120,\s*128/)
+    expect(valueOf(lightBlock, '--nr-glass-border')).toMatch(/rgba\(60,\s*60,\s*67/)
   })
 
-  it('阴影为轻柔的浅色系阴影', () => {
-    expect(valueOf(lightBlock, '--nr-shadow-lg')).toMatch(/rgba\(31,\s*35,\s*41/)
+  it('阴影为轻柔的黑色系阴影（白色玻璃投影）', () => {
+    expect(valueOf(lightBlock, '--nr-shadow-lg')).toMatch(/rgba\(0,\s*0,\s*0/)
   })
 
   it('所有颜色令牌在浅色主题中均有覆盖', () => {
