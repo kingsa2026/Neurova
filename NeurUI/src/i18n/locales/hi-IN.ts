@@ -1408,6 +1408,9 @@ export default {
     light: 'लाइट मोड',
     language: 'भाषा',
     appearance: 'रूप',
+    skinLabel: 'थीम',
+    skinCosmic: 'मूल',
+    skinIos: 'iOS ग्लास',
   },
   aigc: {
     title: 'AIGC जनरेशन',

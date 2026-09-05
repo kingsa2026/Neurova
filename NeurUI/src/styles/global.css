@@ -99,20 +99,42 @@ body {
   to { transform: translate3d(4%, 3%, 0) rotate(6deg); }
 }
 
+/* ─── iOS 皮肤：玻璃背后的彩色壁纸透射 ───
+   Liquid Glass 材质的颜色来自背后壁纸折射，深色皮肤需更浓的光晕才"看得见玻璃" */
+[data-skin='ios'] .star-bg {
+  background:
+    radial-gradient(ellipse 62% 46% at 16% 8%, rgba(10, 132, 255, 0.24) 0%, transparent 64%),
+    radial-gradient(ellipse 52% 42% at 84% 22%, rgba(100, 210, 255, 0.16) 0%, transparent 60%),
+    radial-gradient(ellipse 64% 50% at 64% 88%, rgba(191, 90, 242, 0.14) 0%, transparent 64%),
+    radial-gradient(ellipse 46% 38% at 38% 46%, rgba(48, 209, 88, 0.07) 0%, transparent 62%),
+    var(--nr-bg-deep);
+}
+[data-skin='ios'][data-theme='light'] .star-bg {
+  background:
+    radial-gradient(ellipse 62% 46% at 16% 8%, rgba(0, 122, 255, 0.18) 0%, transparent 64%),
+    radial-gradient(ellipse 52% 42% at 84% 22%, rgba(90, 200, 250, 0.13) 0%, transparent 60%),
+    radial-gradient(ellipse 64% 50% at 64% 88%, rgba(175, 82, 222, 0.12) 0%, transparent 64%),
+    var(--nr-bg-deep);
+}
+
 /* ─── Glass Card（iOS 液态玻璃卡片） ─── */
 .glass-card {
-  background: var(--nr-glass-bg);
+  background:
+    radial-gradient(ellipse 70% 42% at 24% 6%, var(--nr-glass-highlight) 0%, transparent 60%),
+    var(--nr-glass-bg);
   backdrop-filter: blur(var(--nr-glass-blur)) saturate(180%);
   -webkit-backdrop-filter: blur(var(--nr-glass-blur)) saturate(180%);
   border: 1px solid var(--nr-glass-border);
   border-radius: var(--nr-radius-lg);
-  box-shadow: inset 0 0.5px 0 rgba(var(--nr-glass-rgb), 0.12), var(--nr-shadow-sm);
+  box-shadow: inset 0 1.5px 0 var(--nr-glass-specular-top), var(--nr-shadow-sm);
   transition: all var(--nr-transition);
 }
 .glass-card:hover {
-  background: var(--nr-glass-bg-hover);
+  background:
+    radial-gradient(ellipse 70% 42% at 24% 6%, var(--nr-glass-highlight) 0%, transparent 60%),
+    var(--nr-glass-bg-hover);
   border-color: var(--nr-glass-border-hover);
-  box-shadow: inset 0 0.5px 0 rgba(var(--nr-glass-rgb), 0.18), var(--nr-shadow-md);
+  box-shadow: inset 0 1.5px 0 var(--nr-glass-specular-top), var(--nr-shadow-md);
 }
 
 /* ─── Gradient Text ─── */

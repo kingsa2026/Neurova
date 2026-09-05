@@ -1411,6 +1411,9 @@ export default {
     light: 'Light Mode',
     language: 'Language',
     appearance: 'Appearance',
+    skinLabel: 'Skin',
+    skinCosmic: 'Original',
+    skinIos: 'iOS Glass',
   },
   aigc: {
     title: 'AIGC Generation',

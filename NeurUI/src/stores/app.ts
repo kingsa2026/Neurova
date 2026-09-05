@@ -3,11 +3,14 @@ import { ref, computed } from 'vue'
 import { secureStorage } from '@/utils/security'
 
 const THEME_KEY = 'app_theme'
+const SKIN_KEY = 'app_skin'
 const LOCALE_KEY = 'locale'
 const SIDEBAR_KEY = 'sidebar_collapsed'
 
 /** RTL locale codes that require document.dir = 'rtl'. */
 const RTL_LOCALES = ['ar-SA', 'he-IL', 'fa-IR', 'ur-PK']
+
+export type AppSkin = 'cosmic' | 'ios'
 
 export const useAppStore = defineStore('app', () => {
   // ---------------------------------------------------------------------------
@@ -16,6 +19,7 @@ export const useAppStore = defineStore('app', () => {
   const theme = ref<'light' | 'dark'>(
     (secureStorage.get(THEME_KEY) as 'light' | 'dark') || 'dark',
   )
+  const skin = ref<AppSkin>((secureStorage.get(SKIN_KEY) as AppSkin) || 'cosmic')
   const locale = ref<string>(secureStorage.get(LOCALE_KEY) || 'zh-CN')
   const sidebarCollapsed = ref<boolean>(secureStorage.getObject<boolean>(SIDEBAR_KEY, false))
   const currentAgentId = ref<string | null>(null)
@@ -42,6 +46,13 @@ export const useAppStore = defineStore('app', () => {
   }
 
   /**
+   * Apply the current skin to the document root.
+   */
+  function applySkin(): void {
+    document.documentElement.setAttribute('data-skin', skin.value)
+  }
+
+  /**
    * Apply the current locale direction (LTR/RTL) to the document.
    */
   function applyDirection(): void {
@@ -62,6 +73,22 @@ export const useAppStore = defineStore('app', () => {
    */
   function toggleTheme(): void {
     setTheme(theme.value === 'dark' ? 'light' : 'dark')
+  }
+
+  /**
+   * Set skin explicitly and persist.
+   */
+  function setSkin(newSkin: AppSkin): void {
+    skin.value = newSkin
+    secureStorage.set(SKIN_KEY, newSkin)
+    applySkin()
+  }
+
+  /**
+   * Toggle between the two skins (cosmic 原版 ⇄ ios Liquid Glass).
+   */
+  function toggleSkin(): void {
+    setSkin(skin.value === 'cosmic' ? 'ios' : 'cosmic')
   }
 
   /**
@@ -103,12 +130,14 @@ export const useAppStore = defineStore('app', () => {
    */
   function init(): void {
     applyTheme()
+    applySkin()
     applyDirection()
   }
 
   return {
     // state
     theme,
+    skin,
     locale,
     sidebarCollapsed,
     currentAgentId,
@@ -120,6 +149,8 @@ export const useAppStore = defineStore('app', () => {
     // actions
     setTheme,
     toggleTheme,
+    setSkin,
+    toggleSkin,
     setLocale,
     toggleSidebar,
     setCurrentAgentId,

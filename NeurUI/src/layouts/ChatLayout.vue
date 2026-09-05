@@ -84,8 +84,11 @@
 
     <!-- Main Content -->
     <div class="nr-chat-main">
-      <!-- 悬浮主题切换（右上角） -->
-      <ThemeToggle class="nr-chat-theme-toggle" />
+      <!-- 悬浮皮肤/主题切换（右上角） -->
+      <div class="nr-chat-theme-tools">
+        <SkinSwitcher />
+        <ThemeToggle class="nr-chat-theme-toggle" />
+      </div>
       <main class="nr-chat-content">
         <router-view v-slot="{ Component, route }">
           <transition name="fade-slide" mode="out-in">
@@ -107,6 +110,7 @@ import GlassNav from '@/components/GlassNav.vue'
 import GlassNavItem from '@/components/GlassNavItem.vue'
 import AgentSwitcher from '@/components/AgentSwitcher.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
+import SkinSwitcher from '@/components/SkinSwitcher.vue'
 import type { Agent } from '@/types/agent'
 import {
   MessageOutlined, BellOutlined, GlobalOutlined, ClockCircleOutlined,
@@ -209,12 +213,18 @@ function onAgentSelect(_agent: Agent) {
   background: var(--nr-glass-bg);
 }
 
-/* 悬浮主题切换按钮 */
-.nr-chat-theme-toggle {
+/* 悬浮皮肤/主题切换工具组 */
+.nr-chat-theme-tools {
   position: absolute;
   top: 14px;
   right: 20px;
   z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nr-chat-theme-toggle {
+  position: static;
 }
 
 /* Nav section label */
