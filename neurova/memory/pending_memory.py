@@ -128,7 +128,7 @@ class PendingMemoryStore:
                     "SELECT id, content, category, memory_type, source_sentence, status,"
                     " memory_id, proposed_by, created_at, decided_by, decided_at, note"
                     " FROM pending_memories WHERE status = 'pending' AND proposed_by = ?"
-                    " ORDER BY created_at DESC",
+                    " ORDER BY created_at DESC, rowid DESC",
                     (str(proposed_by),),
                 ).fetchall()
             else:
@@ -136,7 +136,7 @@ class PendingMemoryStore:
                     "SELECT id, content, category, memory_type, source_sentence, status,"
                     " memory_id, proposed_by, created_at, decided_by, decided_at, note"
                     " FROM pending_memories WHERE status = 'pending'"
-                    " ORDER BY created_at DESC"
+                    " ORDER BY created_at DESC, rowid DESC"
                 ).fetchall()
         return [self._to_dict(r) for r in rows]
 
@@ -148,7 +148,7 @@ class PendingMemoryStore:
             rows = self._conn.execute(
                 "SELECT id, content, category, memory_type, source_sentence, status,"
                 " memory_id, proposed_by, created_at, decided_by, decided_at, note"
-                " FROM pending_memories WHERE status = ? ORDER BY decided_at DESC",
+                " FROM pending_memories WHERE status = ? ORDER BY decided_at DESC, rowid DESC",
                 (status,),
             ).fetchall()
         return [self._to_dict(r) for r in rows]

@@ -211,7 +211,7 @@ class PatternCrystallizer:
         # 成功率低于60%不结晶
         if rate < 0.6:
             logger.debug("模式 '%s' 成功率 %.0f%% < 60%%，不结晶", key, rate * 100)
-            del self._buffer[key]
+            self._buffer.pop(key, None)
             return
 
         # 找出最常用的工具
@@ -241,6 +241,11 @@ class PatternCrystallizer:
             },
         )
 
+        # 先清缓冲再存储/通知（闭环审查修 E2）：自喂 observe 在通知链内
+        # 重新观察同一 key，缓冲不清空会触发递归重结晶与二删 KeyError；
+        # 清空后自喂观察从干净周期起步（1 条 < 3 阈值，无递归）
+        self._buffer.pop(key, None)
+
         # 存储
         self.engine.store(node)
         logger.info("结晶成功: '%s' → %s (成功率 %.0f%%)", key, primary_tool, rate * 100)
@@ -260,8 +265,6 @@ class PatternCrystallizer:
             except Exception as e:
                 logger.warning("通知 EvolutionOrchestrator 失败: %s", e)
 
-        # 清空缓冲区
-        del self._buffer[key]
 
     def retrieve(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
