@@ -188,17 +188,17 @@
   --nr-bg-inset: rgba(255, 255, 255, 0.06);
   --nr-bg-inset-deep: rgba(0, 0, 0, 0.3);
 
-  /* Liquid Glass 材质 */
+  /* Liquid Glass 材质：较高透明度让背后壁纸彩色透出 */
   --nr-glass-rgb: 255, 255, 255;
-  --nr-glass-bg: rgba(255, 255, 255, 0.07);
-  --nr-glass-bg-hover: rgba(255, 255, 255, 0.12);
-  --nr-glass-bg-active: rgba(255, 255, 255, 0.16);
-  --nr-glass-border: rgba(255, 255, 255, 0.12);
-  --nr-glass-border-hover: rgba(255, 255, 255, 0.24);
-  --nr-glass-blur: 24px;
+  --nr-glass-bg: rgba(255, 255, 255, 0.11);
+  --nr-glass-bg-hover: rgba(255, 255, 255, 0.16);
+  --nr-glass-bg-active: rgba(255, 255, 255, 0.2);
+  --nr-glass-border: rgba(255, 255, 255, 0.16);
+  --nr-glass-border-hover: rgba(255, 255, 255, 0.3);
+  --nr-glass-blur: 28px;
   /* Liquid Glass 高光：顶部 1px 白色边缘高光（specular rim）+ 内部折射光斑 */
   --nr-glass-specular-top: rgba(255, 255, 255, 0.92);
-  --nr-glass-highlight: rgba(255, 255, 255, 0.09);
+  --nr-glass-highlight: rgba(255, 255, 255, 0.14);
 
   /* Brand（iOS Accent 蓝） */
   --nr-primary: #0a84ff;
@@ -275,16 +275,16 @@
   --nr-bg-inset: rgba(120, 120, 128, 0.08);
   --nr-bg-inset-deep: rgba(120, 120, 128, 0.14);
 
-  /* Glass（iOS SystemGray 叠加） */
+  /* Glass（iOS SystemGray 叠加，较透以显示背后光晕） */
   --nr-glass-rgb: 120, 120, 128;
-  --nr-glass-bg: rgba(120, 120, 128, 0.1);
-  --nr-glass-bg-hover: rgba(120, 120, 128, 0.16);
-  --nr-glass-bg-active: rgba(120, 120, 128, 0.22);
+  --nr-glass-bg: rgba(120, 120, 128, 0.14);
+  --nr-glass-bg-hover: rgba(120, 120, 128, 0.2);
+  --nr-glass-bg-active: rgba(120, 120, 128, 0.26);
   --nr-glass-border: rgba(60, 60, 67, 0.16);
   --nr-glass-border-hover: rgba(60, 60, 67, 0.28);
   /* Liquid Glass 高光（浅色：亮白描边 + 更明显的折射光斑） */
   --nr-glass-specular-top: rgba(255, 255, 255, 0.9);
-  --nr-glass-highlight: rgba(255, 255, 255, 0.5);
+  --nr-glass-highlight: rgba(255, 255, 255, 0.55);
 
   /* Brand（iOS Accent 蓝 · 浅色 #007aff） */
   --nr-primary: #007aff;

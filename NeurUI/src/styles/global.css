@@ -103,17 +103,19 @@ body {
    Liquid Glass 材质的颜色来自背后壁纸折射，深色皮肤需更浓的光晕才"看得见玻璃" */
 [data-skin='ios'] .star-bg {
   background:
-    radial-gradient(ellipse 62% 46% at 16% 8%, rgba(10, 132, 255, 0.24) 0%, transparent 64%),
-    radial-gradient(ellipse 52% 42% at 84% 22%, rgba(100, 210, 255, 0.16) 0%, transparent 60%),
-    radial-gradient(ellipse 64% 50% at 64% 88%, rgba(191, 90, 242, 0.14) 0%, transparent 64%),
-    radial-gradient(ellipse 46% 38% at 38% 46%, rgba(48, 209, 88, 0.07) 0%, transparent 62%),
+    radial-gradient(ellipse 62% 46% at 16% 8%, rgba(10, 132, 255, 0.45) 0%, transparent 66%),
+    radial-gradient(ellipse 52% 42% at 84% 22%, rgba(100, 210, 255, 0.3) 0%, transparent 62%),
+    radial-gradient(ellipse 64% 50% at 64% 88%, rgba(191, 90, 242, 0.28) 0%, transparent 66%),
+    radial-gradient(ellipse 68% 46% at 45% 40%, rgba(64, 156, 255, 0.18) 0%, transparent 64%),
+    radial-gradient(ellipse 46% 38% at 38% 46%, rgba(48, 209, 88, 0.1) 0%, transparent 62%),
     var(--nr-bg-deep);
 }
 [data-skin='ios'][data-theme='light'] .star-bg {
   background:
-    radial-gradient(ellipse 62% 46% at 16% 8%, rgba(0, 122, 255, 0.18) 0%, transparent 64%),
-    radial-gradient(ellipse 52% 42% at 84% 22%, rgba(90, 200, 250, 0.13) 0%, transparent 60%),
-    radial-gradient(ellipse 64% 50% at 64% 88%, rgba(175, 82, 222, 0.12) 0%, transparent 64%),
+    radial-gradient(ellipse 62% 46% at 16% 8%, rgba(0, 122, 255, 0.3) 0%, transparent 66%),
+    radial-gradient(ellipse 52% 42% at 84% 22%, rgba(90, 200, 250, 0.22) 0%, transparent 62%),
+    radial-gradient(ellipse 64% 50% at 64% 88%, rgba(175, 82, 222, 0.18) 0%, transparent 66%),
+    radial-gradient(ellipse 46% 38% at 38% 46%, rgba(0, 122, 255, 0.12) 0%, transparent 62%),
     var(--nr-bg-deep);
 }
 

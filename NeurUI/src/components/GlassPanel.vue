@@ -135,7 +135,7 @@ const borderStyle = computed<CSSProperties>(() => ({
   padding: v-bind('props.padding');
   color: var(--nr-text-primary);
 }
-/* Liquid Glass 顶部高光描边：1.5px 高、中间亮两侧渐隐，
+/* Liquid Glass 顶部高光描边：2.5px 高、中间亮两侧渐隐，
    贴合圆角（border-radius: inherit），cosmic 皮肤自然退化为弱光泽 */
 .nr-glass-specular {
   position: absolute;
@@ -143,13 +143,13 @@ const borderStyle = computed<CSSProperties>(() => ({
   z-index: 3;
   pointer-events: none;
   border-radius: inherit;
-  -webkit-mask: linear-gradient(to bottom, #000 0, #000 1.5px, transparent 1.5px);
-  mask: linear-gradient(to bottom, #000 0, #000 1.5px, transparent 1.5px);
+  -webkit-mask: linear-gradient(to bottom, #000 0, #000 2.5px, transparent 2.5px);
+  mask: linear-gradient(to bottom, #000 0, #000 2.5px, transparent 2.5px);
   background: linear-gradient(90deg,
-    transparent 0%,
-    var(--nr-glass-specular-top) 12%,
-    var(--nr-glass-specular-top) 88%,
-    transparent 100%);
+    transparent 4%,
+    var(--nr-glass-specular-top) 15%,
+    var(--nr-glass-specular-top) 85%,
+    transparent 96%);
   opacity: 0.9;
 }
 </style>

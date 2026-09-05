@@ -4,7 +4,7 @@
     <div class="nr-legal-container">
       <GlassPanel variant="elevated" :radius="24" padding="36px 40px">
         <div class="nr-auth-header">
-          <img :src="appStore.isDark ? '/img/NEUROVA-LOGO350white.png' : '/img/NEUROVA-LOGO350black.png'" alt="Neurova Logo" class="nr-auth-logo-img" />
+          <BrandLogo size="lg" />
           <h2 class="nr-auth-title">{{ title }}</h2>
           <p class="nr-auth-subtitle">{{ updated }}</p>
         </div>
@@ -31,6 +31,7 @@ import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import StarBackground from '@/components/StarBackground.vue'
+import BrandLogo from '@/components/BrandLogo.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 
 const props = defineProps<{ type: 'terms' | 'privacy' }>()
@@ -110,13 +111,6 @@ onMounted(() => {
 .nr-auth-header {
   text-align: center;
   margin-bottom: 24px;
-}
-
-.nr-auth-logo-img {
-  max-width: 280px;
-  height: auto;
-  margin: 0 auto 24px;
-  display: block;
 }
 
 .nr-auth-title {

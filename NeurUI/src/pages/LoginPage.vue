@@ -4,7 +4,7 @@
     <div class="nr-auth-container">
       <GlassPanel variant="elevated" :radius="24" padding="40px 36px">
         <div class="nr-auth-header">
-          <img :src="appStore.isDark ? '/img/NEUROVA-LOGO350white.png' : '/img/NEUROVA-LOGO350black.png'" alt="Neurova Logo" class="nr-auth-logo-img" />
+          <BrandLogo size="lg" />
         </div>
 
         <!-- 首启向导：系统中无任何用户时（桌面版首次安装） -->
@@ -162,6 +162,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { authAPI } from '@/api/auth'
 import StarBackground from '@/components/StarBackground.vue'
+import BrandLogo from '@/components/BrandLogo.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
@@ -339,13 +340,6 @@ async function handleLogin() {
 .nr-auth-header {
   text-align: center;
   margin-bottom: 32px;
-}
-
-.nr-auth-logo-img {
-  max-width: 280px;
-  height: auto;
-  margin: 0 auto 24px;
-  display: block;
 }
 
 .nr-setup-intro {
