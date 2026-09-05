@@ -446,6 +446,18 @@ class SleepConsolidation:
             merge_result = self.merge_cluster(cluster)
             merge_results.append(merge_result)
 
+            # 单例簇（未发生真实合并）：原样保留原记录，只走后续温度衰减。
+            # 禁止伪造 merged_from=[自身id] —— 下游写回以 merged_from 非空判定
+            # "合并产物"，伪造会把未合并记忆当新记忆重新插入 → 每轮巩固全库翻倍。
+            if len(cluster) == 1:
+                mem = cluster[0]
+                if isolation_context is not None:
+                    mem.agent_id = isolation_context.agent_id
+                    mem.neuser_id = isolation_context.neuser_id
+                    mem.user_id = isolation_context.user_id
+                merged_memories.append(mem)
+                continue
+
             # 创建合并后的记忆记录
             merged_memory = MemoryRecord(
                 id=merge_result.merged_id,

@@ -48,7 +48,11 @@ def write_back_consolidation_result(memory_manager, result: Dict[str, Any]) -> D
 
     for memory in merged_memories:
         try:
-            if getattr(memory, "merged_from", None):
+            # 新增门禁与删除侧 source_ids >= 2 契约对称：只有 ≥2 来源才是真实
+            # 合并产物，才允许 remember() 新增。单例（merged_from 为空或仅含
+            # 自身）落归档/温度更新分支 —— 否则每轮巩固把整库重新插入一遍
+            # （2026-09-05 事故：persist 库 5040→10080→20160 指数翻倍）。
+            if len(getattr(memory, "merged_from", None) or []) >= 2:
                 categories = getattr(memory, "categories", None) or ["general"]
                 category = categories[0] if isinstance(categories, list) else str(categories)
                 try:
