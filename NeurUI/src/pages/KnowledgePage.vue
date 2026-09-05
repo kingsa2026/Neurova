@@ -299,8 +299,9 @@
       <a-upload-dragger
         :file-list="importFiles"
         :before-upload="beforeImportUpload"
-        :multiple="false"
-        accept=".json,.csv,.txt,.md,.html,.htm,.docx,.xlsx,.pptx,.pdf"
+        :multiple="true"
+        directory
+        accept=".json,.jsonl,.csv,.txt,.md,.rst,.html,.htm,.xml,.yaml,.yml,.toml,.log,.rtf,.odt,.ods,.odp,.docx,.xlsx,.pptx,.pdf"
       >
         <p class="ant-upload-text">{{ t('knowledge.dragOrClick') }}</p>
         <p class="ant-upload-hint">{{ t('knowledge.importFormats') }}</p>
@@ -586,6 +587,15 @@ const form = ref({ title: '', category: '', content: '', tags: [] as string[] })
 const importVisible = ref(false)
 const importing = ref(false)
 const importFiles = ref<UploadFile[]>([])
+// 批量导入：支持多选 + 整文件夹（directory）；不支持扩展名入队时过滤并计数
+const KB_IMPORT_EXTS = [
+  'json', 'jsonl', 'csv', 'txt', 'md', 'rst', 'html', 'htm', 'xml',
+  'yaml', 'yml', 'toml', 'log', 'rtf', 'odt', 'ods', 'odp', 'docx', 'xlsx', 'pptx', 'pdf',
+]
+const MAX_IMPORT_BATCH = 50
+const importSkipped = ref(0)
+const importTooMany = ref(0)
+let importQueueSeq = 0
 const importUrlValue = ref('')
 const importingUrl = ref(false)
 
@@ -1035,30 +1045,69 @@ function exportKnowledge() {
 }
 
 function beforeImportUpload(file: File) {
-  importFiles.value = [{ uid: '-1', name: file.name, status: 'done', originFileObj: file } as any]
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? ''
+  if (!KB_IMPORT_EXTS.includes(ext)) {
+    importSkipped.value++
+    return false
+  }
+  if (importFiles.value.length >= MAX_IMPORT_BATCH) {
+    importTooMany.value++
+    return false
+  }
+  importFiles.value = [
+    ...importFiles.value,
+    { uid: `kbq-${++importQueueSeq}`, name: file.name, status: 'done', originFileObj: file } as any,
+  ]
   return false
 }
 
+/** 批量导入：逐个文件上传，聚合成功/失败结果（支持多选与整文件夹队列） */
 async function handleImport() {
   if (!importFiles.value.length) return
   importing.value = true
+  const failures: string[] = []
+  let success = 0
   try {
-    const file = (importFiles.value[0] as any).originFileObj as File
-    const formData = new FormData()
-    formData.append('file', file)
-    await request.post('/knowledge/import', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      params: { agent_id: agentId.value },
-    })
-    message.success(t('knowledge.importSuccess'))
+    for (const entry of importFiles.value) {
+      const file = (entry as any).originFileObj as File
+      const formData = new FormData()
+      formData.append('file', file)
+      try {
+        // 后端对抽取失败（旧版 .ppt/纯图片页等）返回 code=1 + status，
+        // 不再以成功语义静默返回空列表——按文件聚合失败原因
+        const res: any = await request.post('/knowledge/import', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          params: { agent_id: agentId.value },
+        })
+        const status: string = res?.data?.status || ''
+        if (res?.code !== 0 || !res?.data?.items?.length) {
+          failures.push(`${file.name}（${importFailText(status)}）`)
+          continue
+        }
+        success++
+      } catch {
+        failures.push(`${file.name}（${t('knowledge.importError')}）`)
+      }
+    }
     importVisible.value = false
     importFiles.value = []
-    fetchKnowledge()
-  } catch {
-    message.error(t('knowledge.importError'))
+    if (importSkipped.value > 0) message.info(t('knowledge.importSkippedUnsupported', { n: importSkipped.value }))
+    if (success > 0 && failures.length === 0) {
+      message.success(t('knowledge.importBatchSuccess', { n: success }))
+    } else if (success > 0) {
+      message.warning(t('knowledge.importBatchPartial', { success, fail: failures.length }))
+    } else {
+      message.error(failures.join('；') || t('knowledge.importError'))
+    }
+    if (success > 0) fetchKnowledge()
   } finally {
     importing.value = false
   }
+}
+
+function importFailText(status: string): string {
+  if (status === 'unsupported_format') return t('knowledge.importUnsupported')
+  return t('knowledge.importParseFailed')
 }
 
 async function handleImportUrl() {

@@ -76,3 +76,14 @@ describe('GlassButton 浅色主题规则编译完整性', () => {
     )
   })
 })
+
+describe('GlassButton 本体 UA 背景阻断（2026-09-05 元认知页白胶囊事故）', () => {
+  it('按钮本体必须显式声明透明背景（UA ButtonFace 是不透明的，Windows=浅灰 #f0f0f0）', () => {
+    // 背景 设计上全在子层 .nr-glass-btn-bg（secondary 是 3.5% 半透明玻璃），
+    // 本体不设 background 时 UA 的 ButtonFace 直接透出——白胶囊+白字就是这么来的。
+    // scoped 编译后选择器带 [data-v-*] 属性，正则须容忍
+    expect(compiledCss()).toMatch(
+      /\.nr-glass-btn(\[[^\]]*\])?\s*\{[^}]*background\s*:\s*transparent/,
+    )
+  })
+})
