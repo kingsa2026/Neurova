@@ -285,11 +285,15 @@ class TestExecMemoryNodes:
 
     @pytest.mark.asyncio
     async def test_memory_save_uses_ctx_first(self):
-        """memory_save 优先使用 ctx 中的 memory_manager"""
+        """memory_save 优先使用 ctx 中的 memory_manager
+
+        P1-2 待审记忆语义后，默认走 propose 待审队列；confirm=True 才直写。
+        本测原意是验证 ctx-first 管理器选择——走 confirm 直写路径断言。
+        """
         from neurova.collaboration.neurflow.builtin import exec_memory_save
         manager = _make_memory_manager()
         result = await exec_memory_save(
-            {"content": "新记忆", "importance": 0.9},
+            {"content": "新记忆", "importance": 0.9, "confirm": True},
             {"memory_manager": manager},
         )
 
