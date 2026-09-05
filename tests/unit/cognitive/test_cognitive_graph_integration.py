@@ -56,8 +56,9 @@ class TestCognitiveGraphFullStack:
         pattern_results = [r for r in results if r.get('source') == 'pattern']
         assert len(pattern_results) >= 1
 
-    def test_reasoning_trace_stored_and_retrievable(self, tmp_path):
-        """推理链存储后可检索"""
+    def test_reasoning_trace_stored_and_retrievable(self, tmp_path, monkeypatch):
+        """推理链存储后可检索（持久化需显式开启 NEUROVA_TRACE_PERSIST）"""
+        monkeypatch.setenv("NEUROVA_TRACE_PERSIST", "1")
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
         from neurova.cognitive_layers.memory_layer.reasoning_trace_manager import ReasoningTraceManager
         from neurova.cognitive_layers.memory_layer.unified_retriever import UnifiedRetriever
