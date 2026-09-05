@@ -771,6 +771,19 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("workflow triggers bootstrap skipped: %s", e)
 
+    # P0-5 OTel 桥（可选依赖 + env 门控默认关——增量约束）：
+    # NEUROVA_OTEL=1 时装配 TrajectoryRecorder/neurflow 事件 → OTel span 投影
+    import os as _os
+
+    if _os.environ.get("NEUROVA_OTEL") == "1":
+        try:
+            from neurova.core.otel_bridge import install_otel_bridge
+
+            _otel_status = install_otel_bridge()
+            logger.info("OTel bridge installed: %s", _otel_status)
+        except Exception as e:
+            logger.warning("OTel bridge install skipped: %s", e)
+
     # 启动管理器
     if app_state.startup_manager:
         result = app_state.startup_manager.start()

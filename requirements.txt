@@ -3,93 +3,46 @@
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 pydantic>=2.5.0
-jsonschema>=4.20.0
 
 # HTTP & WebSocket
 httpx>=0.25.0
 websockets>=12.0
 aiohttp>=3.9.0
 
-# CLI REPL 输出渲染（cli.py）
-rich>=15.0.0
-
 # Database
 aiosqlite>=0.19.0
 
 # Authentication
-PyJWT>=2.8.0
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 python-multipart>=0.0.6
-pycryptodome>=3.20.0  # AES-GCM for secret_store encryption
-
-# Web Reach（互联网平台直达，对标 Agent-Reach；可选增强，缺席时工具优雅降级）
-feedparser>=6.0
-yt-dlp>=2024.12.13
 
 # LLM Providers
 litellm>=1.10.0
 openai>=1.6.0
 anthropic>=0.8.0
-tiktoken>=0.5
-
-# 中文分词（知识库 FTS/BM25 通道真分词，缺席自动回退 n-gram）
-jieba>=0.42.1
 
 # Utilities
 python-dotenv>=1.0.0
 psutil>=5.9.0
 numpy>=1.24.0
 tiktoken>=0.5.0
-apscheduler>=3.10.0
 
-# MOSS TTS (local inference)
-onnxruntime>=1.29.0  # 2026-09-03 实测升级：1.26→1.29，MOSS-TTS 5 图全加载验证
+# MOSS TTS/Audio (local inference)
+onnxruntime>=1.16.0
 soundfile>=0.12.0
-huggingface_hub>=1.29.0  # 模型下载器实测版本（旧下限 0.20 与 1.x 差距过大）
+huggingface_hub>=0.20.0
 sentencepiece>=0.2.0
-
-# ASR (optional, auto-fallback)
-funasr>=1.4.13  # 2026-09-02 发布：修复 NumPy 2 ABI 不匹配（元数据强制 numpy<2，pip 自动降级）
-torchaudio  # FunASR fbank 特征提取依赖（实测缺失报"torchaudio is not installed"）
-openai-whisper>=20231117  # Whisper 语音识别引擎（补课 4.2 本地真模型；torch CPU 版约 200MB）
 
 # Edge TTS (online fallback)
 edge-tts>=6.1.0
-# Windows SAPI5 离线 TTS (comtypes 缺失会禁用 sapi5 fallback 链)
-comtypes; sys_platform == "win32"
 
 # Embedding (ONNX-based local inference)
-sentence-transformers>=6.0.1  # 2026-09-03 实测升级 5.5→6.0（major），bge 真实推理 512 维验证
+sentence-transformers>=2.2.0
 transformers>=4.20.0
 tokenizers>=0.13.0
-
-# Neural memory / NeRF (optional, auto-fallback)
-# neurova/cognitive_layers/memory_layer/memory_field.py 需要 torch + numpy；
-# 缺席时经 memory_layer/__init__.py 的 try/except 优雅降级，不影响主链路。
-# 注意：torch 体积大，且在 Python 3.15 alpha 上无可用 wheel，
-# 建议在稳定版 Python（3.11–3.13）上按需安装：
-# torch>=2.0.0
-
-# Computer Use（桌面控制 + 浏览器自动化）
-# 安装后需执行 `python scripts/setup_computer_use.py --install`
-# 下载 Playwright 的 Chromium 内核（脚本会自动处理）
-pillow>=10.0.0
-pyautogui>=0.9.54
-playwright>=1.40.0
-
-# MCP（Model Context Protocol）官方 SDK — MCPToolClient 的协议层（运行时可选，
-# 未安装时连接失败并给出安装提示，不影响其余功能）
-mcp>=1.2.0
-
-# QQ 机器人 Webhook 验签（官方 Ed25519 方案；neurova/channels/qq.py）
-ecdsa>=0.17
 
 # Testing (dev)
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
 pytest-cov>=4.1.0
-pytest-timeout>=2.3
-
-# P2-4 观测性：/metrics 指标（Counter/Histogram 埋点 + prometheus 格式输出）
-prometheus_client>=0.20

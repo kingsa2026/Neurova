@@ -1269,6 +1269,27 @@ async def _build_tools_for_llm(self) -> Optional[List[Dict]]:
         except Exception:
             logger.exception("从 SkillRegistry 获取工具失败")
 
+    # 3.5 workflow_as_tool（P1-3）：已发布工作流注册为 agent 工具
+    # （DAG start 节点 fields 天然自带输入校验；失败静默跳过——可选增强）
+    try:
+        from neurova.api.endpoints.neurflow_api import _get_storage
+        from neurova.collaboration.neurflow.workflow_as_tool import list_published_workflows_as_tools
+
+        wf_tools = list_published_workflows_as_tools(_get_storage())
+        existing_names = {t["function"]["name"] for t in tools}
+        for wt in wf_tools:
+            if wt["name"] not in existing_names:
+                tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": wt["name"],
+                        "description": wt["description"],
+                        "parameters": wt["parameters"],
+                    },
+                })
+    except Exception as e:
+        logger.debug("workflow_as_tool 工具注入失败（跳过）: %s", e)
+
     # 过滤掉格式不正确的工具（某些 provider 要求 tools 中每个元素都必须有 function 字段）
     valid_tools = []
     for t in tools:

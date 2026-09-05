@@ -1,0 +1,141 @@
+# ============================================
+# Neurova Project - Frontend Gitignore
+# ============================================
+
+# Dependencies
+# ============================================
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+# ============================================
+dist/
+dist-ssr/
+*.local
+out/
+
+# Test coverage
+# ============================================
+coverage/
+coverage-output/
+htmlcov/
+
+# Logs
+# ============================================
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment files (sensitive!)
+# ============================================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+!.env.example
+!.env.template
+
+# IDE
+# ============================================
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Build artifacts
+# ============================================
+*.tar.gz
+*.zip
+*.whl
+*.egg-info/
+
+# Temporary files
+# ============================================
+*.tmp
+*.bak
+*.backup
+*.backup-*
+*.sql
+*.bak-*
+*.old
+*.temp
+
+# API Test outputs
+# ============================================
+test_output.txt
+test-output.txt
+test-output*.txt
+test-results.txt
+test_result.txt
+test_result*.txt
+build_output*.txt
+build_output*.txt
+coverage*.txt
+coverage_output*.txt
+coverage-report*.txt
+coverage-report/
+eslint*.txt
+eslint_output*.txt
+eslint_result*.txt
+lint_output*.txt
+lint-output*.txt
+lint-result*.txt
+lint-result*.txt
+analyze*.txt
+analyze_result*.txt
+
+# Debug files
+# ============================================
+*.map
+*.log
+debug.log
+*.trace
+
+# Playwright
+# ============================================
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Vitest
+# ============================================
+vitest.workspace.ts
+
+# Storybook (if used)
+# ============================================
+storybook-static/
+
+# ============================================
+# Source-specific ignores
+# ============================================
+
+# Mock data (regenerate on demand)
+**/__mocks__/**/*.js
+**/mocks/**/*.js
+
+# Build caches
+.eslintcache
+.prettiercache
+.vite/
+
+# ============================================
+# API Backup files (auto-generated)
+# ============================================
+api-backup/
