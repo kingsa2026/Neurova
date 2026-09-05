@@ -146,6 +146,17 @@ class ReasoningTraceManager:
         for step in trace.steps:
             all_memory_ids.extend(step.memory_ids)
 
+        # 持久化门控（新扩展点默认关，与 NEUROVA_METACOG_GATE 同口径）：
+        # 原实现每轮对话无条件把整条推理链（含寒暄）存为记忆——零消费方
+        # （get_recent_traces 全仓无调用），且 unified_retriever 检索不带
+        # category 过滤，寒暄链会被当相关记忆捞回上下文形成回声污染。
+        # 2026-09-05 事故：与睡眠巩固翻倍叠加，4 万行库中绝大多数为此类行。
+        import os
+
+        if os.environ.get("NEUROVA_TRACE_PERSIST") != "1":
+            logger.debug("推理链 %s 未持久化（NEUROVA_TRACE_PERSIST 未开启）", trace_id)
+            return
+
         # 存储为记忆节点（可被检索）
         node = UnifiedMemoryNode(
             content=f"推理链: {trace.query} → {trace.final_answer}",
