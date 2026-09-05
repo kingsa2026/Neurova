@@ -143,6 +143,32 @@ class TestBuildContextConsumesSnapshot:
         assert soul == "原始灵魂"
 
 
+class TestCrossAgentIsolation:
+    """复审修复（09-05）：跨 agent 同名会话不得共享快照（身份泄漏）。
+
+    API 层不禁止跨 agent 复用 session_id——缓存键必须含 agent 身份。
+    此用例曾随并行覆盖丢失一次，锁死契约防再丢。
+    """
+
+    def test_same_session_id_different_agents_no_leak(self):
+        from neurova.agent.session_snapshot import SessionSnapshotCache
+        from unittest.mock import MagicMock
+
+        cache = SessionSnapshotCache(max_sessions=10)
+        a1 = MagicMock()
+        a1.config.agent_id = "agent-a"
+        a1.soul = "A 的灵魂"
+        a1.personality = ""
+        a2 = MagicMock()
+        a2.config.agent_id = "agent-b"
+        a2.soul = "B 的灵魂"
+        a2.personality = ""
+
+        cache.get(a1, session_id="shared-sess")
+        snap2 = cache.get(a2, session_id="shared-sess")
+        assert snap2["soul"] == "B 的灵魂", "同 session_id 跨 agent 必须各自冻结"
+
+
 class TestSessionSwitch:
     def test_same_cache_shared_across_instances(self, agent):
         """快照缓存挂在 agent 上（多 pipeline 实例共享同会话冻结值）。"""
