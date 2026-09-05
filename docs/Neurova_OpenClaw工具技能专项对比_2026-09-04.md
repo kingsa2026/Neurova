@@ -185,6 +185,18 @@ E1 熔断器装配 ✅（=C5）；E2 隐私门控 ✅（§8 + §10.5 流式路�
 
 **二遍审计后回归：923 passed / 10 failed（全部 feedparser 链预存）；今天全部契约 74 条绿。**
 
+### 10.6 第三遍审计——覆盖事故专项（用户指令"如有事故覆盖，修而不覆盖"）
+
+| # | 事故 | 处置 |
+|---|---|---|
+| Y1 | **C11 传动轴被覆盖断链**：并行会话重写 `_on_skill_post_execute` 时把 `record_skill_usage` 调用覆盖丢失（签名扫描 53 项当场抓出；并行的 record_reuse 改进被保留——成败语义移到 success 后） | 重接调用（"修而不覆盖"：只补丢失调用，不触碰并行改动）；补防覆盖契约 `TestC11WiringSurvival` |
+| Y2 | **A 版死代码复活**：`evolution/tool_weights.py` 因 stash 往返 + 并行落库回到跟踪态（零导入方取证在案） | `git rm` 重删；`test_dead_a_version_stays_deleted` 防复活 |
+| Y3 | **审计台账被并行清理删除**（从未提交，工作树丢失） | 依据上下文全量重建本文档（§7-§10 + C10 行同步二遍终态）；`test_audit_report_present` 防再丢 |
+
+**防覆盖机制固化**：`tests/unit/evolution/test_wiring_survival.py`——五批全部改动的 60+ 关键签名固化为参数化契约（21 条），未来任何并行覆盖/回滚在测试层当场变红，红字指引核对本文档后再决定恢复或更新契约。
+
+**三遍审计后回归：924 passed / 10 failed（全部 feedparser 链预存）；全部契约 74+22=96 条绿。闭环判定维持成立。**
+
 ---
 
 ## 10.A 闭环判定（最终）
