@@ -10,6 +10,7 @@
 4. /auth/me 返回 allowed_modules（所属组并集；不在任何组 → 空数组 = 不限制）。
 """
 
+import json
 import os
 
 import pytest
@@ -104,6 +105,61 @@ class TestUserGroupModel:
         g = UserGroup.from_dict(legacy)
         assert g.allowed_modules == []
         assert g.members == []
+
+    def test_api_created_group_modules_persist_across_reload(self, client, data_dir):
+        """闭环回归：API 创建的组（字符串 group_type）必须真正落盘。
+
+        历史缺陷：groups_api 传 group_type="custom" 字符串 → to_dict 调
+        group_type.value 抛 AttributeError → _save_groups 静默失败 →
+        allowed_modules/members 重启即丢。
+        """
+        r = client.post(
+            "/api/v1/groups",
+            json={"name": "持久组", "allowed_modules": ["/chat"], "members": ["alice"]},
+        )
+        assert r.status_code == 200, r.text
+
+        reloaded = UserGroupManager(data_dir=str(data_dir))
+        created = [g for g in reloaded.list_groups() if g.name == "持久组"]
+        assert created, "API 创建的组未持久化到磁盘"
+        assert created[0].allowed_modules == ["/chat"]
+        assert created[0].members == ["alice"]
+
+
+class TestLegacyGroupsFileMigration:
+    """旧格式 user_groups.json（2026-06 顶层 list + quota 字段）防覆盖。
+
+    契约：加载发现旧格式时转存 .legacy-*.bak 备份；后续保存写新 schema，
+    备份文件保留可查（参考 providers.json corrupt 转存先例）。
+    """
+
+    def test_legacy_list_format_backed_up_and_ignored(self, data_dir):
+        data_dir.mkdir(parents=True, exist_ok=True)
+        legacy = json.dumps(
+            [{"group_id": "group_super_admin", "name": "超级管理员", "quota": {}, "permissions": []}],
+            ensure_ascii=False,
+        )
+        (data_dir / "user_groups.json").write_text(legacy, encoding="utf-8")
+
+        manager = UserGroupManager(data_dir=str(data_dir))
+        # 旧格式不进内存（只有新系统组），且已备份
+        assert [g.group_id for g in manager.list_groups()] == [
+            "super_admin", "admin", "developer", "user", "guest",
+        ]
+        backups = list(data_dir.glob("user_groups.json.legacy-*.bak"))
+        assert len(backups) == 1, "旧格式文件未备份"
+        assert json.loads(backups[0].read_text(encoding="utf-8"))[0]["group_id"] == "group_super_admin"
+
+        # 触发一次保存：新 schema 落盘，备份不被清除
+        manager.set_allowed_modules("user", ["/chat"])
+        assert len(list(data_dir.glob("user_groups.json.legacy-*.bak"))) == 1
+        assert json.loads((data_dir / "user_groups.json").read_text(encoding="utf-8"))["groups"]
+
+    def test_from_dict_tolerates_missing_resource_quota(self):
+        g = UserGroup.from_dict(
+            {"group_id": "group_y", "name": "残缺组", "group_type": "custom", "permissions": []}
+        )
+        assert g.resource_quota is not None
 
 
 # ---------------------------------------------------------------------------
