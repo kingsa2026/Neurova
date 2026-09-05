@@ -202,20 +202,19 @@ def _agent_config_from_saved(cfg: dict, agent_id: str, workspace_path: str):
 
     归属持久化修复：owner_user_id 旧格式缺失 → None（保持历史行为，
     chat 的 _user_can_access_agent 将拒绝非 admin 访问，属主需重新保存）。
+    description 已字段化（AgentConfig 构造参数），走声明字段而非动态属性。
     """
     from neurova.agent_core import AgentConfig
 
-    agent_config = AgentConfig(
+    return AgentConfig(
         name=cfg.get("name", ""),
         agent_id=agent_id,
         workspace_path=workspace_path,
         llm_model=cfg.get("model", "gpt-4") or "gpt-4",
         llm_provider=cfg.get("provider", ""),
         owner_user_id=cfg.get("owner_user_id") or None,
+        description=cfg.get("description", "") or "",
     )
-    # description 不是 AgentConfig 构造参数，存到 config 属性中
-    agent_config.description = cfg.get("description", "")
-    return agent_config
 
 
 def _load_saved_agents(app_state: AppState, default_workspace: str) -> None:

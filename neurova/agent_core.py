@@ -203,6 +203,9 @@ class AgentConfig:
         # 个性和宪法配置
         personality: str = "",  # 个性设定
         constitution: str = "",  # 行为准则（宪法）
+        description: str = "",  # 描述（字段化：此前无声明字段导致
+        # create/update 的 description 从不落 workspace agent_config.json，
+        # 只活在中枢登记面——重启后经动态属性回填读到空串）
         behavior_rules: List[str] = None,  # 动态行为规则列表
         # TTS 配置
         enable_tts: bool = False,  # 是否启用 TTS
@@ -293,6 +296,7 @@ class AgentConfig:
         # 个性和宪法配置
         self.personality = personality
         self.constitution = constitution
+        self.description = description
 
         # 动态行为规则（Phase 6.5: 统一行为规则配置）
         self.behavior_rules = behavior_rules or [
