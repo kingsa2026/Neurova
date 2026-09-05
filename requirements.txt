@@ -22,6 +22,9 @@ litellm>=1.10.0
 openai>=1.6.0
 anthropic>=0.8.0
 
+# 中文分词（知识库 FTS/BM25 通道真分词，缺席自动回退 n-gram）
+jieba>=0.42.1
+
 # Utilities
 python-dotenv>=1.0.0
 psutil>=5.9.0
