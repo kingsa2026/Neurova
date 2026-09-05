@@ -41,10 +41,19 @@ def _get_runtime_memory_manager(request: Request):
     """解析运行时 Agent 的 MemoryManager（断点 S1 修复）。
 
     模块级单例与运行时 Agent 的 per-agent MemoryManager 内存隔离，
-    导致本 API 曾永远检索不到聊天记忆。现优先取 app.state.agents 中
+    导致本 API 曾永远检索不到聊天记忆。优先取运行时注册表中
     首个活跃 Agent 的 memory_manager，无活跃 Agent 时才降级单例。
+    （根因修复：request.app.state.agents 生产恒空——唯一事实源是
+    neurova.api.endpoints.set_app_state 注入的注册表。）
     """
-    agents = getattr(request.app.state, "agents", {}) or {}
+    try:
+        from neurova.api.endpoints import get_app_state
+
+        agents = (get_app_state() or {}).get("agents") or {}
+    except Exception:  # noqa: BLE001
+        agents = {}
+    if not agents:
+        agents = getattr(request.app.state, "agents", {}) or {}
     for agent in agents.values():
         manager = getattr(agent, "memory_manager", None) or getattr(
             getattr(agent, "memory_agent", None), "memory_manager", None

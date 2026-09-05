@@ -19,7 +19,7 @@ R-4 修复: CRUD 接入 KnowledgeRepository（JSON 持久化），删除 memory_
 from neurova.core.logger import get_logger
 import time
 import urllib.parse
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 
 from neurova.api.auth import get_current_user_or_service
 import uuid
@@ -747,39 +747,103 @@ def _build_item_dict(item: Dict[str, Any]) -> Dict[str, Any]:
     return item
 
 
-def _default_llm_call(request: Request):
-    """从运行时 Agent 解析 LLM 调用器（prompt→文本）；不可用返回 None（跳过抽取）。"""
+def _resolve_runtime_agents(request: Optional[Request]) -> Dict[str, Any]:
+    """运行时 Agent 注册表解析（生产唯一事实源 + 测试回退）。
+
+    生产链路：app.py 经 set_app_state 注入的 neurova.api.endpoints 模块级
+    注册表（home.py _get_app_state 注释已明示：request.app.state 是
+    Starlette State 对象，生产从不写入 agents）。回退读 request.app.state
+    仅兼容测试自建 app 直接挂载的写法。
+    """
     try:
-        agents = getattr(request.app.state, "agents", {}) or {}
-        for agent in agents.values():
-            client = getattr(agent, "llm_client", None)
-            if client is None:
+        from neurova.api.endpoints import get_app_state
+
+        agents = (get_app_state() or {}).get("agents")
+        if agents:
+            return agents
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        return getattr(getattr(getattr(request, "app", None), "state", None), "agents", {}) or {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _default_llm_call(request: Optional[Request], prefer_agent_id: Optional[str] = None):
+    """从运行时 Agent 解析 LLM 调用器（prompt→文本）；不可用返回 None（跳过抽取）。
+
+    根因修复（2026-09-05 知识图谱空图）：agent 从注册表解析（此前读
+    request.app.state.agents——生产恒空，抽取恒被跳过）；AgentLLMClient.chat
+    是 async，经 mem_core.run_async_safely 同步桥接（BE-CORE-001 同款，
+    此前同步调用拿到 coroutine 后 content 恒空）。
+
+    prefer_agent_id：优先用知识所属 Agent 的 llm_client（per-agent 模型配置）；
+    其模型不可用（AgentLLMClient 错误契约返回 "[LLM Error]" 文本或抛异常）时
+    逐个回退其他活跃 Agent——抽取是后台增强任务，不应因单个 Agent 配置坏而死亡。
+    """
+    try:
+        agents = _resolve_runtime_agents(request)
+        candidates: List[Any] = []
+        if prefer_agent_id and prefer_agent_id in agents:
+            candidates.append(agents[prefer_agent_id])
+        for aid, agent in agents.items():
+            if prefer_agent_id and aid == prefer_agent_id:
                 continue
+            candidates.append(agent)
+        clients = [c for c in (getattr(a, "llm_client", None) for a in candidates) if c is not None]
+        if not clients:
+            return None
 
-            def _call(prompt: str, _client=client):
-                resp = _client.chat([{"role": "user", "content": prompt}])
-                return getattr(resp, "content", "") or ""
+        def _call(prompt: str):
+            from neurova.mem_core import run_async_safely
 
-            return _call
+            last = ""
+            for client in clients:
+                try:
+                    resp = run_async_safely(
+                        client.chat([{"role": "user", "content": prompt}])
+                    )
+                except Exception as exc:  # noqa: BLE001 - 换下一个候选
+                    logger.warning("graph_bridge: LLM 调用异常，尝试下一个候选: %s", exc)
+                    continue
+                content = getattr(resp, "content", "") or ""
+                if content.startswith("[LLM Error]"):
+                    last = content
+                    logger.warning("graph_bridge: 候选 LLM 返回错误，尝试下一个: %s", content[:120])
+                    continue
+                return content
+            return last
+
+        return _call
     except Exception as e:  # noqa: BLE001
         logger.debug("graph_bridge LLM 解析失败: %s", e)
     return None
 
 
-def _try_extract_to_graph(items: List[Dict[str, Any]], request: Request) -> None:
+def _try_extract_to_graph(
+    items: List[Dict[str, Any]], request: Request, agent_id: Optional[str] = None
+) -> None:
     """导入后触发"知识条目→图谱节点"抽取（批次 3）。失败逐条吞掉，不阻断导入。"""
     from neurova.cognitive_layers.knowledge_graph.manager import (
+        get_agent_knowledge_graph_manager,
         get_knowledge_graph_manager,
     )
     from neurova.knowledge.graph_bridge import extract_knowledge_to_graph
     from neurova.knowledge.repository import get_knowledge_repository
 
-    llm_call = _default_llm_call(request)
+    llm_call = _default_llm_call(request, prefer_agent_id=agent_id)
     if llm_call is None:
         logger.info("[知识导入] 未解析到可用 LLM，跳过 %s 条的图谱抽取", len(items))
         return
     repo = get_knowledge_repository()
-    graph = get_knowledge_graph_manager()
+    # per-agent 隔离：写入所属 agent 的图谱（agent_id 缺失时退全局，仅测试路径）
+    if agent_id:
+        try:
+            graph = get_agent_knowledge_graph_manager(agent_id)
+        except ValueError:
+            graph = get_knowledge_graph_manager()
+    else:
+        graph = get_knowledge_graph_manager()
     for entry in items:
         try:
             extract_knowledge_to_graph(entry, repo=repo, llm_call=llm_call, graph_manager=graph)
@@ -801,14 +865,23 @@ async def import_knowledge_file(
     """
     filename = file.filename or "imported"
     data = await file.read()
-    items = _import_file_data(data, filename, agent_id, current_user)
-    _try_extract_to_graph(items, request)
+    items, extract_status = _import_file_data(data, filename, agent_id, current_user)
+    if not items:
+        # 2026-09-06 修复：抽取失败显式化——此前以成功语义静默返回空列表，
+        # 前端一律提示"导入成功"，用户无从知晓 .ppt 旧格式/超 2MB/纯图片页
+        # 实际未入库（"提示成功但列表没有"的根因）。
+        return {
+            "code": 1,
+            "message": f"extract_failed:{extract_status}",
+            "data": {"items": [], "status": extract_status},
+        }
+    _try_extract_to_graph(items, request, agent_id=agent_id)
     return {"code": 0, "message": "Import completed", "data": {"items": items}}
 
 
 def _import_file_data(
     data: bytes, filename: str, agent_id: str, user: Dict[str, Any]
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], str]:
     from neurova.attachment_parser import extract_attachment_text
     from neurova.knowledge.splitter import split_with_meta
 
@@ -817,7 +890,7 @@ def _import_file_data(
     text, status = extract_attachment_text(data, filename, file_type)
     if not text:
         logger.info("[知识导入] %s 未抽取文本 (%s)", filename, status)
-        return []
+        return [], status
 
     repo = _get_repository()
     title = _title_from_filename(filename)
@@ -838,13 +911,14 @@ def _import_file_data(
         # source 字段独立溯源，冲突检测留给交互式单条创建路径
         detect_conflict=False,
     )
-    return [_build_item_dict(item)]
+    return [_build_item_dict(item)], status
 
 
 def _guess_type(ext: str) -> str:
-    if ext in ("txt", "md", "rst"):
+    if ext in ("txt", "md", "rst", "json", "yaml", "yml", "toml", "log"):
         return "text"
-    if ext in ("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "html", "htm"):
+    if ext in ("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "html", "htm",
+               "rtf", "odt", "ods", "odp", "xml"):
         return "document"
     return "file"
 
@@ -931,7 +1005,7 @@ async def import_knowledge_url(
         raise HTTPException(status_code=502, detail="Fetch failed: %s" % e)
 
     items = _import_file_data(data, _title_from_url(url), agent_id, current_user)
-    _try_extract_to_graph(items, request)
+    _try_extract_to_graph(items, request, agent_id=agent_id)
     return {"code": 0, "message": "URL import completed", "data": {"items": items}}
 
 

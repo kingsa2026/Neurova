@@ -18,9 +18,22 @@ router = APIRouter()
 
 
 def _get_all_recall_engines(request: Request) -> typing.List:
-    """从所有活跃 Agent 中获取 NeurovaRecallEngine 实例"""
+    """从所有活跃 Agent 中获取 NeurovaRecallEngine 实例。
+
+    （根因修复：request.app.state.agents 生产恒空——唯一事实源是
+    neurova.api.endpoints.set_app_state 注入的注册表，旧路径仅作
+    测试回退保留。）
+    """
     engines = []
-    agents = getattr(request.app.state, "agents", {})
+    agents = {}
+    try:
+        from neurova.api.endpoints import get_app_state
+
+        agents = (get_app_state() or {}).get("agents") or {}
+    except Exception:  # noqa: BLE001
+        agents = {}
+    if not agents:
+        agents = getattr(request.app.state, "agents", {}) or {}
     for agent_id, agent in agents.items():
         memory_agent = getattr(agent, "memory_agent", None)
         if memory_agent:
