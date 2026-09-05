@@ -487,11 +487,17 @@ async def check_connection(
         connected = False
         message = ""
 
+        error_category = None
+        error_hint = ""
+
         if hasattr(provider_manager, "check_model_connection"):
             result = await provider_manager.check_model_connection(model_id)
             # manager 层返回 ConnectionResult(异步链路),兼容旧 dict 形状
             connected = getattr(result, "success", False)
             message = getattr(result, "error", "") or getattr(result, "message", "")
+            # P0 错误契约：五类归一分类与用户可行动提示透传给前端
+            error_category = getattr(result, "error_category", None)
+            error_hint = getattr(result, "error_hint", "") or ""
 
         return {
             "code": 0,
@@ -499,6 +505,8 @@ async def check_connection(
                 "model_id": model_id,
                 "connected": connected,
                 "message": message,
+                **({"error_category": error_category, "error_hint": error_hint}
+                   if error_category else {}),
             },
         }
     except Exception as e:

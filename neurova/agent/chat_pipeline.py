@@ -198,6 +198,15 @@ class ChatPipeline:
                 self._memory_retrieval_chain.add_retriever(adapter)
                 logger.debug("Added MoERetrieverAdapter to retrieval chain")
 
+        # 2.5 AnnotationRetriever（P2 标注闭环消费侧——人工修正的精准答案，
+        # priority 5 最高权威：先于 Unified/MoE/Knowledge 注入上下文）
+        try:
+            from neurova.agent.annotation_retriever import register_annotation_retriever
+
+            register_annotation_retriever(self._memory_retrieval_chain)
+        except Exception as e:
+            logger.warning("AnnotationRetrieverAdapter 接入失败（降级跳过）: %s", e)
+
         # 3. KnowledgeRetriever（知识库，中低优先级：记忆/MoE 之后、Cache 之前）
         try:
             from neurova.knowledge.repository import get_knowledge_repository

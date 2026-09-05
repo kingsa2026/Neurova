@@ -268,6 +268,7 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.memory_share_groups", "/v1", "Memory Share Groups API"),
         ("neurova.api.endpoints.session_sync", "/v1/sync", "Session Sync API"),
         ("neurova.api.endpoints.neurflow_api", "/v1/neurflow", "Neurflow Workflow API"),
+        ("neurova.api.endpoints.mcp_server_api", "/v1/mcp", "Neurova MCP Server Face"),
         ("neurova.api.endpoints.negative_screen_settings", "/v1/negative-screen", "Negative Screen Settings API"),
         ("neurova.api.endpoints.memory_settings_api", "/v1/memory-settings", "Memory Settings API"),
         ("neurova.api.endpoints.neuron", "", "NEURON System API"),

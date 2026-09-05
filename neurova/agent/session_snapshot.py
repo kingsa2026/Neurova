@@ -25,7 +25,11 @@ from typing import Any, Dict, Optional
 
 
 class SessionSnapshotCache:
-    """session_id → 身份快照的 LRU 缓存（线程安全）。"""
+    """(agent_id, session_id) → 身份快照的 LRU 缓存（线程安全）。
+
+    键含 agent_id：同一 session_id 被不同 agent 处理时（API 层不禁止
+    跨 agent 复用会话 id），快照绝不跨 agent 泄漏身份。
+    """
 
     def __init__(self, max_sessions: int = 64) -> None:
         self._max = max(1, int(max_sessions))
@@ -40,18 +44,26 @@ class SessionSnapshotCache:
         if not session_id:
             return self._read_live(agent)
 
+        key = self._key(agent, session_id)
         with self._lock:
-            cached = self._cache.get(session_id)
+            cached = self._cache.get(key)
             if cached is not None:
-                self._cache.move_to_end(session_id)
+                self._cache.move_to_end(key)
                 return cached
 
         snapshot = self._read_live(agent)
         with self._lock:
-            self._cache[session_id] = snapshot
+            self._cache[key] = snapshot
             while len(self._cache) > self._max:
                 self._cache.popitem(last=False)
         return snapshot
+
+    @staticmethod
+    def _key(agent: Any, session_id: str) -> str:
+        """缓存键：agent 身份 + 会话（跨 agent 隔离）。"""
+        config = getattr(agent, "config", None)
+        agent_id = str(getattr(config, "agent_id", None) or id(agent))
+        return f"{agent_id}::{session_id}"
 
     @staticmethod
     def _read_live(agent: Any) -> Dict[str, str]:
@@ -73,8 +85,8 @@ class SessionSnapshotCache:
             self._cache.clear()
 
 
-# 进程级共享缓存（多 pipeline 实例/多 agent 同会话语义一致；
-# 键含 session_id 本身，跨 agent 同名会话罕见且快照幂等，可接受）
+# 进程级共享缓存（多 pipeline 实例共享；键 = agent_id::session_id，
+# 跨 agent 天然隔离，同名会话不串身份）
 _shared_cache: Optional[SessionSnapshotCache] = None
 _cache_lock = threading.RLock()
 
