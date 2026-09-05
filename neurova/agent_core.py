@@ -1453,6 +1453,15 @@ class Agent:
                     error_message=str(getattr(result, "error", "") or ""),
                     metadata={"agent_id": self.config.agent_id},
                 )
+
+                # C11 使用计数（第三遍审计重接：并行重写本 handler 时此调用被
+                # 覆盖丢失——use_count/last_used_at_ms 是 collection-review 与
+                # 改进提案的消费面。成败都记，ledger 语义与上方 record_usage 一致）
+                from neurova.skills.skill_service import SkillService
+
+                SkillService(agent_id=self.config.agent_id).record_skill_usage(
+                    skill_id, success=bool(result and result.success)
+                )
         except Exception as e:
             logger.debug("技能使用记录失败: %s", e)
 
