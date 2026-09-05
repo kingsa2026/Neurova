@@ -231,3 +231,35 @@ class TestBreakpoint3ApplyImprovement(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestC11WiringSurvival(unittest.TestCase):
+    """第三遍审计（覆盖事故回归）：并行重写 _on_skill_post_execute 曾把
+    C11 record_skill_usage 调用覆盖丢失——本契约锁定该传动轴存活。"""
+
+    def test_post_execute_records_usage_to_skill_service(self):
+        import neurova.agent_core as ac
+
+        agent = object.__new__(ac.Agent)
+        agent.config = MagicMock()
+        agent.config.agent_id = "default"
+        agent.tool_memory = None
+        agent.tool_executor = MagicMock()
+        agent._current_user_input = "测试"
+        agent.evolution = None
+
+        skill = MagicMock()
+        skill.skill_id = "genetic_a_b"
+        skill.id = "genetic_a_b"
+        skill.name = "genetic_a_b"
+        skill.config = {"tool_sequence": ["a", "b"]}
+        result = MagicMock()
+        result.success = True
+        result.execution_time = 0.1
+        result.error = ""
+        result.metadata = {"skill_kwargs": {}}
+
+        with patch("neurova.skills.skill_service.SkillService") as svc_cls:
+            svc = svc_cls.return_value
+            with patch("neurova.evolution.closed_loop.get_evolution_orchestrator"):
+                agent._on_skill_post_execute(skill, result)
+            svc.record_skill_usage.assert_called_once_with("genetic_a_b", success=True)
