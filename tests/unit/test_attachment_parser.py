@@ -149,13 +149,17 @@ def test_empty_file():
     assert status == "empty_file"
 
 
-def test_too_large():
-    from neurova.attachment_parser import extract_attachment_text
+def test_large_file_accepted_and_truncated():
+    """2026-09-06 契约升级：移除 2MB 字节硬限制（用户要求）。
+    真正的上下文闸门是 MAX_EXTRACT_CHARS（20 万字符）——大文件接受，
+    超长文本截断。"""
+    from neurova.attachment_parser import extract_attachment_text, MAX_EXTRACT_CHARS
 
-    big = b"x" * (3 * 1024 * 1024)
+    big = ("中文行内容abc。" + chr(10)) * (300 * 1024)
+    big = big.encode("utf-8")  # >2MB
     text, status = extract_attachment_text(big, "big.txt", "text")
-    assert text is None
-    assert status == "too_large"
+    assert status == "decoded"
+    assert text is not None and len(text) <= MAX_EXTRACT_CHARS
 
 
 def test_invalid_docx_returns_none():
@@ -185,3 +189,76 @@ def test_excel_via_xlsx_extracts_text():
     text, status = extract_attachment_text(data, "表格.xlsx", "document")
     assert status == "xlsx"
     assert "姓名" in text and "张三" in text
+
+
+def test_json_decodes():
+    from neurova.attachment_parser import extract_attachment_text
+
+    data = '{"name": "知识导入", "items": [1, 2, 3]}'.encode("utf-8")
+    text, status = extract_attachment_text(data, "config.json", "text")
+    assert status == "decoded"
+    assert "知识导入" in text
+
+
+def test_xml_extracts_text():
+    from neurova.attachment_parser import extract_attachment_text
+
+    data = '<?xml version="1.0"?><root><title>XML 标题</title><body>Body text</body></root>'.encode('utf-8')
+    text, status = extract_attachment_text(data, "doc.xml", "document")
+    assert status == "html"
+    assert "Body text" in text
+
+
+def test_rtf_extracts_text():
+    from neurova.attachment_parser import extract_attachment_text
+
+    rtf = b"{\\rtf1\\ansi Hello RTF World.\\par Second line.}"
+    text, status = extract_attachment_text(rtf, "doc.rtf", "document")
+    assert status == "rtf"
+    assert "Hello RTF World." in text
+    assert "Second line." in text
+
+
+def _make_odt():
+    from odf.opendocument import OpenDocumentText
+    from odf.text import P
+
+    doc = OpenDocumentText()
+    doc.text.addElement(P(text="ODT 正文内容"))
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def _make_ods():
+    from odf.opendocument import OpenDocumentSpreadsheet
+    from odf.table import Table, TableRow, TableCell
+    from odf.text import P
+
+    doc = OpenDocumentSpreadsheet()
+    table = Table(name="Sheet1")
+    row = TableRow()
+    cell = TableCell(valuetype="string")
+    cell.addElement(P(text="单元格数据"))
+    row.addElement(cell)
+    table.addElement(row)
+    doc.spreadsheet.addElement(table)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+def test_odt_extracts_text():
+    from neurova.attachment_parser import extract_attachment_text
+
+    text, status = extract_attachment_text(_make_odt(), "doc.odt", "document")
+    assert status == "odt"
+    assert "ODT 正文内容" in text
+
+
+def test_ods_extracts_cells():
+    from neurova.attachment_parser import extract_attachment_text
+
+    text, status = extract_attachment_text(_make_ods(), "sheet.ods", "document")
+    assert status == "ods"
+    assert "单元格数据" in text
