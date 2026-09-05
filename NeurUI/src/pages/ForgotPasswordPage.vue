@@ -4,7 +4,7 @@
     <div class="nr-auth-container">
       <GlassPanel variant="elevated" :radius="24" padding="40px 36px">
         <div class="nr-auth-header">
-          <img :src="appStore.isDark ? '/img/NEUROVA-LOGO350white.png' : '/img/NEUROVA-LOGO350black.png'" alt="Neurova Logo" class="nr-auth-logo-img" />
+          <BrandLogo size="lg" />
           <h2 class="nr-auth-title">{{ t('auth.recoverTitle') }}</h2>
           <p class="nr-auth-subtitle">{{ t('auth.recoverSubtitle') }}</p>
         </div>
@@ -124,6 +124,7 @@ import { message } from 'ant-design-vue'
 import { authAPI } from '@/api/auth'
 import { useAppStore } from '@/stores/app'
 import StarBackground from '@/components/StarBackground.vue'
+import BrandLogo from '@/components/BrandLogo.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
@@ -229,13 +230,6 @@ onMounted(() => {
 .nr-auth-header {
   text-align: center;
   margin-bottom: 24px;
-}
-
-.nr-auth-logo-img {
-  max-width: 280px;
-  height: auto;
-  margin: 0 auto 24px;
-  display: block;
 }
 
 .nr-auth-title {

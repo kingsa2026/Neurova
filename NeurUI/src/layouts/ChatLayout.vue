@@ -5,8 +5,7 @@
     <!-- Chat Sidebar -->
     <GlassNav :collapsed="sidebarCollapsed" @brand-click="router.push('/dashboard')">
       <template #brand>
-        <span class="nr-logo">N</span>
-        <span v-if="!sidebarCollapsed" class="nr-brand-text">Neurova</span>
+        <BrandLogo :collapsed="sidebarCollapsed" />
       </template>
 
       <!-- Agent Switcher -->
@@ -111,6 +110,7 @@ import GlassNavItem from '@/components/GlassNavItem.vue'
 import AgentSwitcher from '@/components/AgentSwitcher.vue'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import SkinSwitcher from '@/components/SkinSwitcher.vue'
+import BrandLogo from '@/components/BrandLogo.vue'
 import type { Agent } from '@/types/agent'
 import {
   MessageOutlined, BellOutlined, GlobalOutlined, ClockCircleOutlined,
@@ -236,29 +236,5 @@ function onAgentSelect(_agent: Agent) {
   color: var(--nr-text-muted);
   padding: 12px 12px 4px;
   margin-top: 4px;
-}
-
-.nr-logo {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  background: var(--nr-gradient-primary);
-  color: white;
-  font-family: var(--nr-font-display);
-  font-weight: 800;
-  font-size: 16px;
-  box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.25), 0 2px 8px rgba(10, 132, 255, 0.3);
-}
-.nr-brand-text {
-  font-family: var(--nr-font-display);
-  font-weight: 700;
-  font-size: 17px;
-  color: var(--nr-text-primary);
-  letter-spacing: -0.02em;
-  white-space: nowrap;
 }
 </style>

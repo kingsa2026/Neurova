@@ -5,7 +5,7 @@
     <!-- Sidebar -->
     <GlassNav :collapsed="appStore.sidebarCollapsed" @brand-click="router.push('/dashboard')">
       <template #brand>
-        <img :src="appStore.isDark ? '/img/NEUROVA-LOGO350white.png' : '/img/NEUROVA-LOGO350black.png'" alt="Neurova" class="nr-logo-img" />
+        <BrandLogo :collapsed="appStore.sidebarCollapsed" />
       </template>
 
       <!-- Agent Switcher -->
@@ -334,6 +334,7 @@ import {
 } from '@/utils/errorReporter'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import SkinSwitcher from '@/components/SkinSwitcher.vue'
+import BrandLogo from '@/components/BrandLogo.vue'
 import { canAccessModule } from '@/utils/permissions'
 import {
   DashboardOutlined, RobotOutlined, MessageOutlined, DatabaseOutlined,
@@ -548,5 +549,4 @@ const canAgent = (name: string) =>
 .nr-nav-user-name { font-size: 13px; font-weight: 500; color: var(--nr-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nr-nav-user-role { font-size: 11px; color: var(--nr-text-muted); text-transform: capitalize; }
 
-.nr-logo-img { height: 32px; width: auto; max-width: 160px; object-fit: contain; }
 </style>

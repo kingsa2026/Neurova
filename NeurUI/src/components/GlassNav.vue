@@ -4,7 +4,8 @@
     <div class="nr-glass-nav-content">
       <div class="nr-glass-nav-brand" @click="$emit('brand-click')">
         <slot name="brand">
-          <img :src="logoSrc" alt="Neurova" class="nr-glass-nav-logo-img" :class="{ 'is-collapsed': collapsed }" />
+          <!-- 默认品牌区：皮肤感知的 BrandLogo（cosmic 图片 / ios 玻璃 N 字标） -->
+          <BrandLogo :collapsed="collapsed" />
         </slot>
       </div>
       <div class="nr-glass-nav-items">
@@ -18,20 +19,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useAppStore } from '@/stores/app'
+import BrandLogo from '@/components/BrandLogo.vue'
 
 withDefaults(defineProps<{
   collapsed?: boolean
 }>(), { collapsed: false })
 
 defineEmits<{ 'brand-click': [] }>()
-
-const appStore = useAppStore()
-// 浅色主题用黑色 logo，深色主题用白色 logo，保证两种主题下品牌可见
-const logoSrc = computed(() =>
-  appStore.isDark ? '/img/NEUROVA-LOGO350white.png' : '/img/NEUROVA-LOGO350black.png',
-)
 </script>
 
 <style scoped>
@@ -61,14 +55,6 @@ const logoSrc = computed(() =>
   transition: background 0.2s;
 }
 .nr-glass-nav-brand:hover { background: var(--nr-glass-bg); }
-.nr-glass-nav-logo-img {
-  height: 30px; width: auto; max-width: 140px;
-  object-fit: contain; flex-shrink: 0;
-  transition: all 0.3s ease;
-}
-.nr-glass-nav-logo-img.is-collapsed {
-  height: 26px; max-width: 26px; object-fit: contain;
-}
 .nr-glass-nav-items { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .nr-glass-nav-footer {
   margin-top: auto; padding-top: 12px;
