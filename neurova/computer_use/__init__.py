@@ -312,6 +312,20 @@ class ComputerUseManager:
             return await bm.dom_snapshot(generation=generation)
         return {"error": "浏览器管理器不可用"}
 
+    async def browser_dom_read(
+        self,
+        session_id: str = None,
+        offset: int = None,
+        chunk_size: int = None,
+    ) -> typing.Any:
+        """快照正文分片读取（续读游标）：一次观察按 chunk 喂给 LLM，尾部不丢"""
+        bm = self._get_browser_manager()
+        if bm:
+            return await bm.dom_read(
+                session_id=session_id, offset=offset, chunk_size=chunk_size
+            )
+        return {"error": "浏览器管理器不可用"}
+
     async def browser_click_role(self, role: str, name: str = None, generation: int = None) -> typing.Any:
         """按 ARIA role + accessible name 定位点击（快照事实驱动）"""
         bm = self._get_browser_manager()
