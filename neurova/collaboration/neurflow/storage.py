@@ -73,9 +73,20 @@ class NeurflowStorage:
                     status TEXT DEFAULT 'draft',
                     template INTEGER DEFAULT 0,
                     public INTEGER DEFAULT 0,
-                    metadata_json TEXT DEFAULT '{}'
+                    metadata_json TEXT DEFAULT '{}',
+                    user_id TEXT
                 )
             """)
+            # P0-1 属主隔离：旧库迁移补 user_id 列 + 存量回填（幂等）
+            wf_cols = {
+                r[1] for r in self._conn.execute("PRAGMA table_info(workflows)").fetchall()
+            }
+            if "user_id" not in wf_cols:
+                self._conn.execute("ALTER TABLE workflows ADD COLUMN user_id TEXT")
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workflows_user ON workflows(user_id)"
+            )
+            self._backfill_workflow_user_ids()
 
             # 节点定义表
             self._conn.execute("""
@@ -386,14 +397,26 @@ class NeurflowStorage:
             self._conn.close()
             self._conn = None
 
+    def _backfill_workflow_user_ids(self) -> None:
+        """P0-1：存量无主工作流回填 user_id='default'（幂等，每次启动执行）。
+
+        对齐知识库 scope 化先例：存量数据迁移到 default 私有，随后
+        按 HTTP 属主语义隔离；仅回填 NULL（显式 '' 视为历史 default 行）。
+        """
+        self._conn.execute(
+            "UPDATE workflows SET user_id='default' WHERE user_id IS NULL"
+        )
+
     # ==================== 工作流 CRUD ====================
 
-    def save_workflow(self, workflow: WorkflowDefinition) -> bool:
+    def save_workflow(self, workflow: WorkflowDefinition, user_id: Optional[str] = None) -> bool:
         """
         保存工作流定义
 
         Args:
             workflow: 工作流定义对象
+            user_id: 属主（P0-1）。None=保留既有行的属主（更新路径）；
+                新行无属主信息时归 'default'（与存量回填口径一致）
 
         Returns:
             bool: 保存是否成功
@@ -406,13 +429,18 @@ class NeurflowStorage:
 
         with self._lock:
             try:
+                if user_id is None:
+                    existing_owner = self._conn.execute(
+                        "SELECT user_id FROM workflows WHERE id = ?", (workflow.id,)
+                    ).fetchone()
+                    user_id = (existing_owner["user_id"] if existing_owner else None) or "default"
                 self._conn.execute(
                     """
-                    INSERT OR REPLACE INTO workflows 
-                    (id, name, description, version, nodes_json, edges_json, 
-                     variables_json, tags_json, category, author, created_at, 
-                     updated_at, status, template, public, metadata_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT OR REPLACE INTO workflows
+                    (id, name, description, version, nodes_json, edges_json,
+                     variables_json, tags_json, category, author, created_at,
+                     updated_at, status, template, public, metadata_json, user_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         workflow.id,
@@ -431,6 +459,7 @@ class NeurflowStorage:
                         1 if workflow.template else 0,
                         1 if workflow.public else 0,
                         json.dumps(workflow.metadata, ensure_ascii=False),
+                        user_id,
                     ),
                 )
                 # P2-4.4：内容变化才产生新版本（首次保存即 v1 基线，上限 20）
@@ -450,12 +479,18 @@ class NeurflowStorage:
                 self._conn.rollback()
                 raise e
 
-    def get_workflow(self, workflow_id: str) -> Optional[WorkflowDefinition]:
+    def get_workflow(self, workflow_id: str, requester_id: Optional[str] = None,
+                     is_admin: bool = False) -> Optional[WorkflowDefinition]:
         """
         获取工作流定义
 
         Args:
             workflow_id: 工作流 ID
+            requester_id: 请求者（P0-1 属主语义）。None=系统内部路径
+                （cron/webhook/workflow_agent 派发），不受属主限制；
+                传 ID 时 owner/admin 全通过，非 owner 仅 public=1 可读，
+                其余返回 None（与不存在同构，防 UUID 枚举）
+            is_admin: 请求者是否 admin（配合 requester_id 使用）
 
         Returns:
             WorkflowDefinition 或 None
@@ -465,6 +500,11 @@ class NeurflowStorage:
             row = cursor.fetchone()
             if not row:
                 return None
+
+            if requester_id is not None:
+                owner = row["user_id"] or "default"
+                if requester_id != owner and not is_admin and not row["public"]:
+                    return None
 
             return self._row_to_workflow(row)
 
@@ -581,17 +621,29 @@ class NeurflowStorage:
             self._conn.commit()
         return True
 
-    def delete_workflow(self, workflow_id: str) -> bool:
+    def delete_workflow(self, workflow_id: str, requester_id: Optional[str] = None,
+                        is_admin: bool = False) -> bool:
         """
         删除工作流定义
 
         Args:
             workflow_id: 工作流 ID
+            requester_id: 请求者（P0-1）。None=系统内部路径不受限；
+                非 owner 且非 admin → 不删并返回 False（调用方转 404）
 
         Returns:
             bool: 删除是否成功
         """
         with self._lock:
+            if requester_id is not None:
+                row = self._conn.execute(
+                    "SELECT user_id, public FROM workflows WHERE id = ?", (workflow_id,)
+                ).fetchone()
+                if not row:
+                    return False
+                owner = row["user_id"] or "default"
+                if requester_id != owner and not is_admin:
+                    return False
             cursor = self._conn.execute("DELETE FROM workflows WHERE id = ?", (workflow_id,))
             self._conn.commit()
             return cursor.rowcount > 0
@@ -603,6 +655,8 @@ class NeurflowStorage:
         author: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
+        requester_id: Optional[str] = None,
+        is_admin: bool = False,
     ) -> List[WorkflowDefinition]:
         """
         列出工作流定义
@@ -613,6 +667,8 @@ class NeurflowStorage:
             author: 按作者过滤
             limit: 返回数量限制
             offset: 偏移量
+            requester_id: 请求者（P0-1）。None=系统内部路径（返回全量）；
+                传 ID 时只见自己的 + public=1（admin 见全量）
 
         Returns:
             工作流定义列表
@@ -620,6 +676,10 @@ class NeurflowStorage:
         with self._lock:
             query = "SELECT * FROM workflows WHERE 1=1"
             params = []
+
+            if requester_id is not None and not is_admin:
+                query += " AND (user_id = ? OR public = 1)"
+                params.append(requester_id)
 
             if category:
                 query += " AND category = ?"
@@ -671,25 +731,32 @@ class NeurflowStorage:
 
             return [self._row_to_workflow(row) for row in rows]
 
-    def search_workflows(self, query: str) -> List[WorkflowDefinition]:
+    def search_workflows(self, query: str, requester_id: Optional[str] = None,
+                         is_admin: bool = False) -> List[WorkflowDefinition]:
         """
         搜索工作流定义
 
         Args:
             query: 搜索关键词
+            requester_id: 请求者（P0-1，语义同 list_workflows）
 
         Returns:
             匹配的工作流定义列表
         """
         with self._lock:
             search_pattern = f"%{query}%"
+            scope = ""
+            params: list = []
+            if requester_id is not None and not is_admin:
+                scope = " AND (user_id = ? OR public = 1)"
+                params.append(requester_id)
             cursor = self._conn.execute(
-                """
-                SELECT * FROM workflows 
-                WHERE name LIKE ? OR description LIKE ? OR tags_json LIKE ?
+                f"""
+                SELECT * FROM workflows
+                WHERE (name LIKE ? OR description LIKE ? OR tags_json LIKE ?){scope}
                 ORDER BY updated_at DESC
             """,
-                (search_pattern, search_pattern, search_pattern),
+                (search_pattern, search_pattern, search_pattern, *params),
             )
 
             rows = cursor.fetchall()
@@ -941,6 +1008,7 @@ class NeurflowStorage:
             template=bool(row["template"]),
             public=bool(row["public"]),
             metadata=json.loads(row["metadata_json"]) if row["metadata_json"] else {},
+            user_id=row["user_id"] if "user_id" in row.keys() else None,
         )
 
     # ==================== 节点定义 CRUD ====================

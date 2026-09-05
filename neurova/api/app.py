@@ -755,9 +755,18 @@ async def _on_startup(app_state: AppState) -> None:
             if wf is None or wf.status != WorkflowStatus.PUBLISHED:
                 return {"success": False, "error": "WORKFLOW_NOT_PUBLISHED"}
 
+            def _run_as_owner(workflow, run_inputs, user_id=None):
+                # P0-1：cron 属系统派发，以触发器属主（workflow.user_id）身份
+                # 执行/记账——不经 requester 过滤，直接反查模型自带属主
+                return get_workflow_executor().execute(
+                    workflow=workflow,
+                    inputs=run_inputs,
+                    user_id=user_id or getattr(workflow, "user_id", None) or None,
+                )
+
             executor = WorkflowTaskExecutor(
                 workflow_loader=lambda ref: wf if ref == workflow_id else None,
-                workflow_runner_callable=get_workflow_executor().execute,
+                workflow_runner_callable=_run_as_owner,
             )
             dispatch_run = executor.execute
             return dispatch_run(workflow_id, inputs)
