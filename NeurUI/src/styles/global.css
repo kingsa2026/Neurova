@@ -352,26 +352,45 @@ input::placeholder,
   border-color: var(--nr-glass-border) !important;
 }
 
-/* ─── Tabs：iOS 蓝标签 —── */
+/* ─── Tabs：玻璃胶囊页签（与 AgentPageTabs .nr-page-tab 同源统一） ───
+  页内切换（a-tabs）此前是 antd 默认下划线风，与页面级导航的胶囊风割裂；
+  2026-09-05 全站统一：隐藏 ink-bar、激活页签 primary-soft 胶囊、nav 玻璃底。
+  颜色全走 --nr-* 变量，深浅皮肤自动适配。 */
 .ant-tabs-tab {
   color: var(--nr-text-secondary) !important;
-  font-weight: 500;
-  border-radius: 10px !important;
+  font-weight: 450;
+  padding: 6px 16px !important;
+  border-radius: 9px !important;
   transition: color var(--nr-transition-fast), background var(--nr-transition-fast);
 }
 .ant-tabs-tab:hover {
   color: var(--nr-text-primary) !important;
+  background: var(--nr-glass-bg-hover) !important;
+}
+.ant-tabs-tab.ant-tabs-tab-active {
+  background: var(--nr-primary-soft) !important;
+  border: 1px solid var(--nr-primary-soft-border) !important;
 }
 .ant-tabs-tab-active .ant-tabs-tab-btn {
   color: var(--nr-primary-light) !important;
-  font-weight: 600;
+  font-weight: 550;
 }
 .ant-tabs-ink-bar {
-  background: var(--nr-primary) !important;
-  border-radius: 2px;
+  display: none !important;
+}
+.ant-tabs-nav {
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 12px;
+  padding: 3px;
+  margin-bottom: 16px !important;
 }
 .ant-tabs-nav::before {
-  border-color: var(--nr-glass-border) !important;
+  border-bottom: none !important;
+  border-inline-end: none !important;
+}
+.ant-tabs-nav-operations .ant-tabs-nav-more {
+  border-radius: 9px;
 }
 
 /* ─── Switch：iOS 系统开关（选中绿） ─── */

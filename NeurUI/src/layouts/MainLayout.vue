@@ -30,7 +30,7 @@
 
         <!-- Agent: 知识与认知（低频折叠） -->
         <GlassNavGroup
-          v-if="canAgent('experience-knowledge') || canAgent('knowledge-graph') || canAgent('metacognition') || canAgent('reflection') || canAgent('growth') || canAgent('emotion') || canAgent('personality')"
+          v-if="canAgent('experience-knowledge') || canAgent('knowledge-graph') || canAgent('metacognition') || canAgent('reflection') || canAgent('growth') || canAgent('personality')"
           :label-key="'nav.knowledgeCognition'"
           storage-key="agent-cognition"
           :collapsed="appStore.sidebarCollapsed"
@@ -53,10 +53,7 @@
           <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/growth`" :label="t('nav.growth')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('growth')">
             <template #icon><RiseOutlined /></template>
           </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/emotion`" :label="t('nav.emotion')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('emotion')">
-            <template #icon><HeartOutlined /></template>
-          </GlassNavItem>
-          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/personality`" :label="t('nav.personality')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('personality')">
+          <GlassNavItem :to="`/agent/${agentStore.currentAgentId}/personality`" :label="t('nav.persona')" :collapsed="appStore.sidebarCollapsed" v-if="canAgent('personality')">
             <template #icon><SmileOutlined /></template>
           </GlassNavItem>
         </GlassNavGroup>
@@ -339,7 +336,7 @@ import { canAccessModule } from '@/utils/permissions'
 import {
   DashboardOutlined, RobotOutlined, MessageOutlined, DatabaseOutlined,
   ShareAltOutlined, ExperimentOutlined, BulbOutlined, RiseOutlined,
-  HeartOutlined, ThunderboltOutlined, FileOutlined, ApiOutlined,
+  ThunderboltOutlined, FileOutlined, ApiOutlined,
   ClockCircleOutlined, SafetyOutlined, CodeOutlined,
   DesktopOutlined, ControlOutlined,
   SettingOutlined, BellOutlined, GlobalOutlined,

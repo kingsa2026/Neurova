@@ -43,6 +43,9 @@ const btnRef = ref<HTMLElement | null>(null)
 .nr-glass-btn {
   position: relative; display: inline-flex; align-items: center; justify-content: center;
   border: none; cursor: pointer; overflow: hidden;
+  /* 本体必须显式透明：UA 的 button 默认 ButtonFace 不透明（Windows 浅灰 #f0f0f0），
+     会透过 secondary 的 3.5% 玻璃层变白胶囊；背景一律由 .nr-glass-btn-bg 承担 */
+  background: transparent;
   border-radius: 12px; font-family: var(--nr-font-body);
   font-weight: 500; letter-spacing: -0.01em;
   transition: transform 0.15s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.25s, opacity 0.25s, background 0.25s;

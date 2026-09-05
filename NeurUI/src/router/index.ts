@@ -146,9 +146,7 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'agent/:agentId/emotion',
-        name: 'AgentEmotion',
-        component: () => import('@/pages/AgentEmotionPage.vue'),
-        props: true,
+        redirect: (to) => ({ path: to.path.replace(/\/emotion$/, '/personality'), query: to.query }),
       },
       {
         path: 'agent/:agentId/personality',

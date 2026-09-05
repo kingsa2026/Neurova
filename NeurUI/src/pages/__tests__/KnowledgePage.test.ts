@@ -21,6 +21,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import KnowledgePage from '@/pages/KnowledgePage.vue'
+import { message } from 'ant-design-vue'
 
 vi.mock('@/api/modules/knowledge', () => ({
   getKnowledgeNodes: vi.fn().mockResolvedValue({ data: { items: [], total: 0 } }),
@@ -54,7 +55,7 @@ vi.mock('@/composables/useAgentPage', () => ({
 }))
 
 vi.mock('ant-design-vue', () => ({
-  message: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+  message: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
   Modal: { confirm: vi.fn() },
 }))
 
@@ -127,6 +128,12 @@ const messages = {
     importTitle: '导入',
     importSuccess: '操作成功',
     importError: '操作失败',
+    importUnsupported: '暂不支持该格式（旧版 .ppt/.doc/.xls 请先转存为新格式）',
+    importParseFailed: '文件解析失败，未能抽取到文本',
+    importBatchSuccess: '成功导入 {n} 个文件',
+    importBatchPartial: '成功 {success} 个，失败 {fail} 个',
+    importSkippedUnsupported: '已忽略 {n} 个不支持的文件',
+    importTooManyFiles: '一次最多导入 {n} 个文件',
     dragOrClick: '拖拽',
     importFormats: '格式',
     importUrl: '导入网页',
@@ -410,6 +417,95 @@ describe('KnowledgePage P0-2 分块溯源展示', () => {
     const text = wrapper.find('.ant-table').text()
     expect(text).not.toContain('共 1 块')
     expect(text).not.toContain('命中片段')
+    wrapper.unmount()
+  })
+})
+
+describe('KnowledgePage 文件导入（批量契约）', () => {
+  function makeFile(name: string) {
+    return new File(['x'], name)
+  }
+
+  it('多选批量上传：2 个文件依次上传，全部成功弹批量成功提示并刷新', async () => {
+    vi.mocked(getKnowledgeNodes).mockResolvedValue({ data: { items: [], total: 0 } } as any)
+    const { request } = await import('@/api')
+    vi.mocked(request.post).mockResolvedValue({
+      code: 0, message: 'Import completed',
+      data: { items: [{ knowledge_id: 'k1', title: 't', content: 'x' }] },
+    } as any)
+
+    const wrapper = mountPage()
+    await flushPromises()
+    vi.mocked(getKnowledgeNodes).mockClear()
+    const vm = wrapper.vm as any
+    await vm.beforeImportUpload(makeFile('a.pptx'))
+    await vm.beforeImportUpload(makeFile('b.docx'))
+    expect(vm.importFiles).toHaveLength(2)
+    await vm.handleImport()
+    await flushPromises()
+
+    expect(request.post).toHaveBeenCalledTimes(2)
+    expect(message.success).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(message.success).mock.calls[0][0]).toContain('2 个')
+    expect(getKnowledgeNodes, '有成功须刷新列表').toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('文件夹上传：不支持的文件入队时被过滤并计数，不上传', async () => {
+    vi.mocked(getKnowledgeNodes).mockResolvedValue({ data: { items: [], total: 0 } } as any)
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    await vm.beforeImportUpload(makeFile('doc1.docx'))
+    await vm.beforeImportUpload(makeFile('photo.exe'))
+    await vm.beforeImportUpload(makeFile('doc2.pdf'))
+    expect(vm.importFiles, '不支持的扩展名不得入队').toHaveLength(2)
+    expect(vm.importSkipped).toBe(1)
+    wrapper.unmount()
+  })
+
+  it('部分失败：成功 1 失败 1 弹批量部分提示，仍刷新列表', async () => {
+    vi.mocked(getKnowledgeNodes).mockResolvedValue({ data: { items: [], total: 0 } } as any)
+    const { request } = await import('@/api')
+    vi.mocked(request.post)
+      .mockResolvedValueOnce({ code: 0, message: 'ok', data: { items: [{ knowledge_id: 'k1' }] } } as any)
+      .mockResolvedValueOnce({ code: 1, message: 'extract_failed:unsupported_format', data: { items: [], status: 'unsupported_format' } } as any)
+
+    const wrapper = mountPage()
+    await flushPromises()
+    vi.mocked(getKnowledgeNodes).mockClear()
+    const vm = wrapper.vm as any
+    await vm.beforeImportUpload(makeFile('ok.txt'))
+    await vm.beforeImportUpload(makeFile('scanned.pdf'))
+    await vm.handleImport()
+    await flushPromises()
+
+    expect(message.warning).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(message.warning).mock.calls[0][0]).toContain('成功 1 个')
+    expect(getKnowledgeNodes, '部分成功也要刷新').toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('全部失败：不弹成功、不刷新列表，错误信息含失败原因', async () => {
+    vi.mocked(getKnowledgeNodes).mockResolvedValue({ data: { items: [], total: 0 } } as any)
+    const { request } = await import('@/api')
+    vi.mocked(request.post).mockResolvedValue({
+      code: 1, message: 'extract_failed:unsupported_format',
+      data: { items: [], status: 'unsupported_format' },
+    } as any)
+
+    const wrapper = mountPage()
+    await flushPromises()
+    vi.mocked(getKnowledgeNodes).mockClear()
+    const vm = wrapper.vm as any
+    await vm.beforeImportUpload(makeFile('scanned.pdf'))
+    await vm.handleImport()
+    await flushPromises()
+
+    expect(message.success, '失败不得提示导入成功').not.toHaveBeenCalled()
+    expect(message.error).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(message.error).mock.calls[0][0]).toContain('不支持')
+    expect(getKnowledgeNodes, '无成功不得刷新列表').not.toHaveBeenCalled()
     wrapper.unmount()
   })
 })
