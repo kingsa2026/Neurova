@@ -2,22 +2,23 @@
 附件文本抽取器（R-3）
 
 把上传附件转换为可注入 LLM 上下文的文本：
-- text（txt/md/rst）/ code → 直接按 UTF-8 解码
-- document：docx（python-docx 段落）、xlsx（openpyxl 单元格）、ppt/pptx（python-pptx 文本）、
-  pdf（pypdf 页面文字）、csv → 表格文本化
+- text（txt/md/rst/json/yaml/toml/log 等文本族）/ code → 直接按 UTF-8/gb18030 解码
+- document：docx（python-docx 段落+表格）、xlsx（openpyxl 单元格）、pptx（python-pptx 文本+备注）、
+  pdf（pypdf 页面文字）、csv → 表格文本化、html/htm/xml → 剥标签、rtf（striprtf）、
+  odt/ods/odp（odfpy）
 - image / audio / video → 不抽取文本（由调用方走 vision/ASR/占位）
-- 其他 → 返回 None（调用方降级为元数据占位）
+- 其他（含 ppt/doc/xls 旧格式）→ 返回 None（调用方降级为元数据占位）
 
 所有解析失败都降级为 None（返回 (None, reason) 供日志排查），不抛异常——附件处理失败
-不拖垮整轮对话。
+不拖垮整轮对话。文件大小不设限；真正防超大文档拖垮上下文的闸门是
+MAX_EXTRACT_CHARS（抽取文本上限）。
 """
 
 import io
 import os
 from typing import Optional, Tuple
 
-MAX_EXTRACT_BYTES = 2 * 1024 * 1024  # 2MB，超限不抽取（防超大文档拖垮上下文）
-MAX_EXTRACT_CHARS = 200_000  # 20 万字符上限
+MAX_EXTRACT_CHARS = 200_000  # 20 万字符上限（真正的上下文闸门）
 
 
 def _decode_text(data: bytes, filename: str) -> Optional[str]:
@@ -107,8 +108,6 @@ def extract_attachment_text(data: bytes, filename: str, file_type: str) -> Tuple
     """
     if data is None or len(data) == 0:
         return None, "empty_file"
-    if len(data) > MAX_EXTRACT_BYTES:
-        return None, "too_large"
 
     ext = os.path.splitext(filename)[1].lower()
 
@@ -126,7 +125,7 @@ def extract_attachment_text(data: bytes, filename: str, file_type: str) -> Tuple
             return _extract_xlsx(data), "xlsx"
         except Exception as e:
             return None, f"xlsx_error:{type(e).__name__}"
-    if ext in (".pptx", ".ppt"):
+    if ext == ".pptx":
         try:
             return _extract_pptx(data), "pptx"
         except Exception as e:
@@ -139,14 +138,63 @@ def extract_attachment_text(data: bytes, filename: str, file_type: str) -> Tuple
     if ext == ".csv":
         text = _decode_text(data, filename)
         return (text, "csv") if text else (None, "csv_decode_failed")
-    if ext in (".html", ".htm"):
+    if ext in (".html", ".htm", ".xml"):
         try:
             return _extract_html(data), "html"
         except Exception as e:
             return None, f"html_error:{type(e).__name__}"
+    if ext == ".rtf":
+        try:
+            return _extract_rtf(data), "rtf"
+        except Exception as e:
+            return None, f"rtf_error:{type(e).__name__}"
+    if ext in (".odt", ".ods", ".odp"):
+        try:
+            return _extract_odf(data), ext.lstrip(".")
+        except Exception as e:
+            return None, f"odf_error:{type(e).__name__}"
 
-    # 未支持的文档/二进制（doc/xls/ppt 旧格式）不抽取文本
+    # 未支持的文档/二进制（ppt/doc/xls 旧格式）不抽取文本。
+    # 注意 .ppt（OLE2）此前被错误归入 pptx 分支，python-pptx 打不开只会抛
+    # pptx_error 静默失败；python-pptx 仅支持 OOXML（.pptx）。
     return None, "unsupported_format"
+
+
+def _extract_rtf(data: bytes) -> str:
+    """RTF → 纯文本（striprtf；依赖缺失回退 stdlib 正则剥控制字）。"""
+    try:
+        from striprtf.striprtf import rtf_to_text
+
+        return rtf_to_text(data.decode("ascii", errors="ignore"))[:MAX_EXTRACT_CHARS]
+    except ImportError:
+        import re
+
+        text = data.decode("ascii", errors="ignore")
+        text = re.sub(r"\\par[d]?\b", "\n", text)
+        text = re.sub(r"\{\\\*?[^{}]*\}", "", text)  # 剥 {\*\...} 目标组
+        text = re.sub(r"\\'[0-9a-fA-F]{2}", "", text)  # 十六进制转义剥除
+        text = re.sub(r"\\[a-zA-Z]+-?\d* ?", "", text)
+        return re.sub(r"[{}]", "", text)[:MAX_EXTRACT_CHARS]
+
+
+def _extract_odf(data: bytes) -> str:
+    """ODF 家族（odt 文本 / ods 表格 / odp 演示）→ 纯文本（odfpy）。"""
+    from odf.opendocument import load
+    from odf import text as odf_text, table as odf_table, teletype
+
+    doc = load(io.BytesIO(data))
+    parts = []
+    # 表格单元格优先（ods/odp 里也常有）
+    for cell in doc.getElementsByType(odf_table.TableCell):
+        cell_text = teletype.extractText(cell)
+        if cell_text.strip():
+            parts.append(cell_text)
+    # 段落与标题
+    for elem in doc.getElementsByType(odf_text.P) + doc.getElementsByType(odf_text.H):
+        para_text = teletype.extractText(elem)
+        if para_text.strip() and para_text not in parts:
+            parts.append(para_text)
+    return "\n".join(parts)[:MAX_EXTRACT_CHARS]
 
 
 def _extract_html(data: bytes) -> str:
