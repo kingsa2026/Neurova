@@ -1408,6 +1408,9 @@ export default {
     light: 'Modo claro',
     language: 'Idioma',
     appearance: 'Apariencia',
+    skinLabel: 'Diseño',
+    skinCosmic: 'Original',
+    skinIos: 'Vidrio iOS',
   },
   aigc: {
     title: 'Generación AIGC',

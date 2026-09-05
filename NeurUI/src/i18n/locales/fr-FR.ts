@@ -1408,6 +1408,9 @@ export default {
     light: 'Mode clair',
     language: 'Langue',
     appearance: 'Apparence',
+    skinLabel: 'Apparence',
+    skinCosmic: 'Original',
+    skinIos: 'Verre iOS',
   },
   aigc: {
     title: 'Génération AIGC',

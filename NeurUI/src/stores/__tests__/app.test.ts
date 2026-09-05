@@ -14,6 +14,29 @@ describe('useAppStore', () => {
     expect(store.isDark).toBe(true)
   })
 
+  it('defaults to cosmic skin (原版默认皮肤)', () => {
+    const store = useAppStore()
+    expect(store.skin).toBe('cosmic')
+  })
+
+  it('setSkin persists and applies data-skin to document root', () => {
+    const store = useAppStore()
+    store.setSkin('ios')
+    expect(store.skin).toBe('ios')
+    expect(document.documentElement.getAttribute('data-skin')).toBe('ios')
+    expect(localStorage.setItem).toHaveBeenCalled()
+  })
+
+  it('init applies persisted skin', () => {
+    const store = useAppStore()
+    store.setSkin('ios')
+    store.init()
+    expect(document.documentElement.getAttribute('data-skin')).toBe('ios')
+    // 持久化后新会话恢复 ios 皮肤
+    store.setSkin('cosmic')
+    expect(store.skin).toBe('cosmic')
+  })
+
   it('setTheme persists and updates', () => {
     const store = useAppStore()
     store.setTheme('light')

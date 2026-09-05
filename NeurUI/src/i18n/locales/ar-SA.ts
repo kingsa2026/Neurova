@@ -1408,6 +1408,9 @@ export default {
     light: 'الوضع الفاتح',
     language: 'اللغة',
     appearance: 'المظهر',
+    skinLabel: 'المظهر',
+    skinCosmic: 'الأصلي',
+    skinIos: 'iOS زجاجي',
   },
   aigc: {
     title: 'توليد AIGC',

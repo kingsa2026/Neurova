@@ -1,103 +1,66 @@
 /**
  * 验证设计令牌（JS 侧）—— 与 variables.css 中的 CSS 变量保持同步
  *
- * 2026-09-05 起主题切换为 Apple iOS Liquid Glass 风格，
- * 主色小幅量的 iOS 深色 Accent 蓝 #0a84ff、强调色 iOS Cyan #64d2ff。
+ * 结构（2026-09-05 双皮肤共存）:
+ *   skinTokens.cosmic.{dark,light} — 原版星空/DeepSeek 风格
+ *   skinTokens.ios.{dark,light}    — Apple iOS Liquid Glass 风格
  */
 import { describe, it, expect } from 'vitest'
-import { tokens } from '../tokens'
+import { skinTokens } from '../tokens'
 
 describe('Design Tokens (JS 侧设计令牌)', () => {
-  describe('colors', () => {
-    it('colors.primary 应等于 #0a84ff', () => {
-      expect(tokens.colors.primary).toBe('#0a84ff')
+  it('双皮肤 × 双明暗四套令牌齐全', () => {
+    for (const skin of ['cosmic', 'ios'] as const) {
+      for (const mode of ['dark', 'light'] as const) {
+        const t = skinTokens[skin][mode]
+        expect(t, `${skin}.${mode} 应有 colors`).toBeDefined()
+        expect(t.colors.primary).toBeDefined()
+        expect(t.radius.md).toBeDefined()
+        expect(t.shadows.md).toBeDefined()
+      }
+    }
+  })
+
+  describe('Cosmic（原版）', () => {
+    it('深色使用星云紫 #6366f1', () => {
+      expect(skinTokens.cosmic.dark.colors.primary).toBe('#6366f1')
+      expect(skinTokens.cosmic.dark.colors.bgDeep).toBe('#06080f')
     })
 
-    it('colors.accent 应等于 #64d2ff', () => {
-      expect(tokens.colors.accent).toBe('#64d2ff')
+    it('浅色使用 DeepSeek 蓝 #4d6bfe', () => {
+      expect(skinTokens.cosmic.light.colors.primary).toBe('#4d6bfe')
+      expect(skinTokens.cosmic.light.colors.bgDeep).toBe('#f5f6f7')
     })
 
-    it('colors.bgDeep 应存在且为字符串', () => {
-      expect(tokens.colors.bgDeep).toBeDefined()
-      expect(typeof tokens.colors.bgDeep).toBe('string')
+    it('结构令牌为小圆角 + DM Sans', () => {
+      expect(skinTokens.cosmic.dark.radius.md).toBe('10px')
+      expect(skinTokens.cosmic.dark.font.body).toContain('DM Sans')
     })
   })
 
-  describe('spacing', () => {
-    it('spacing.xs 应存在且为字符串', () => {
-      expect(tokens.spacing.xs).toBeDefined()
-      expect(typeof tokens.spacing.xs).toBe('string')
+  describe('iOS (Liquid Glass)', () => {
+    it('深色使用 iOS Accent 蓝 #0a84ff', () => {
+      expect(skinTokens.ios.dark.colors.primary).toBe('#0a84ff')
+      expect(skinTokens.ios.dark.colors.bgDeep).toBe('#000000')
     })
 
-    it('spacing.sm 应存在且为字符串', () => {
-      expect(tokens.spacing.sm).toBeDefined()
-      expect(typeof tokens.spacing.sm).toBe('string')
+    it('浅色使用 #007aff', () => {
+      expect(skinTokens.ios.light.colors.primary).toBe('#007aff')
+      expect(skinTokens.ios.light.colors.bgDeep).toBe('#f2f2f7')
     })
 
-    it('spacing.md 应存在且为字符串', () => {
-      expect(tokens.spacing.md).toBeDefined()
-      expect(typeof tokens.spacing.md).toBe('string')
-    })
-
-    it('spacing.lg 应存在且为字符串', () => {
-      expect(tokens.spacing.lg).toBeDefined()
-      expect(typeof tokens.spacing.lg).toBe('string')
-    })
-
-    it('spacing.xl 应存在且为字符串', () => {
-      expect(tokens.spacing.xl).toBeDefined()
-      expect(typeof tokens.spacing.xl).toBe('string')
+    it('结构令牌为大圆角 + SF Pro', () => {
+      expect(skinTokens.ios.dark.radius.md).toBe('14px')
+      expect(skinTokens.ios.dark.font.body).toContain('SF Pro')
     })
   })
 
-  describe('radius', () => {
-    it('radius.sm 应存在且为字符串', () => {
-      expect(tokens.radius.sm).toBeDefined()
-      expect(typeof tokens.radius.sm).toBe('string')
-    })
-
-    it('radius.md 应存在且为字符串', () => {
-      expect(tokens.radius.md).toBeDefined()
-      expect(typeof tokens.radius.md).toBe('string')
-    })
-
-    it('radius.lg 应存在且为字符串', () => {
-      expect(tokens.radius.lg).toBeDefined()
-      expect(typeof tokens.radius.lg).toBe('string')
-    })
-
-    it('radius.full 应存在且为字符串', () => {
-      expect(tokens.radius.full).toBeDefined()
-      expect(typeof tokens.radius.full).toBe('string')
-    })
-  })
-
-  describe('transitions', () => {
-    it('transitions.fast 应存在且为字符串', () => {
-      expect(tokens.transitions.fast).toBeDefined()
-      expect(typeof tokens.transitions.fast).toBe('string')
-    })
-
-    it('transitions.normal 应存在且为字符串', () => {
-      expect(tokens.transitions.normal).toBeDefined()
-      expect(typeof tokens.transitions.normal).toBe('string')
-    })
-
-    it('transitions.slow 应存在且为字符串', () => {
-      expect(tokens.transitions.slow).toBeDefined()
-      expect(typeof tokens.transitions.slow).toBe('string')
-    })
-  })
-
-  describe('只读对象 (as const)', () => {
-    it('tokens 应是 as const 对象（结构完整且各分组存在）', () => {
-      // as const 是编译时保证，运行时验证对象结构完整
+  describe('只读结构', () => {
+    it('在完整结构下提供默认导出（iOS 深色，兼容旧消费方）', async () => {
+      const { default: dft, tokens } = await import('../tokens')
+      expect(dft).toBeDefined()
       expect(tokens).toBeDefined()
-      expect(typeof tokens).toBe('object')
-      expect(tokens.colors).toBeDefined()
-      expect(tokens.spacing).toBeDefined()
-      expect(tokens.radius).toBeDefined()
-      expect(tokens.transitions).toBeDefined()
+      expect(tokens.colors.primary).toBeDefined()
     })
   })
 })
