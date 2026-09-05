@@ -1,15 +1,11 @@
 <template>
   <div class="metacognition-page">
-    <AgentPageTabs :tabs="metacogTabs" />
     <div class="page-header">
       <div>
         <h2 class="page-title">{{ t('nav.metacognition') }}</h2>
         <p class="page-subtitle">{{ currentAgent?.name || '' }}</p>
       </div>
       <div class="header-actions">
-        <GlassButton variant="secondary" size="sm" :loading="reflecting" @click="handleReflect">
-          {{ t('metacognition.triggerReflect') }}
-        </GlassButton>
         <GlassButton variant="secondary" size="sm" :loading="entriesLoading" @click="refreshAll">
           {{ t('common.refresh') }}
         </GlassButton>
@@ -188,55 +184,6 @@
           />
         </div>
       </GlassCard>
-
-      <!-- Structured lessons (insight compiler output) -->
-      <GlassCard :title="t('metacognition.insights')" style="margin-top: 20px">
-        <template #extra>
-          <a-tag v-if="lessons.length" color="arcoblue">{{ t('metacognition.templateSource') }}</a-tag>
-        </template>
-        <a-spin :spinning="lessonsLoading">
-          <div v-if="lessons.length > 0" class="entries-list">
-            <div v-for="(lesson, idx) in lessons" :key="idx" class="entry-card">
-              <div class="entry-header">
-                <a-tag :color="operatorColor(lesson.operator)">{{ lesson.operator }}</a-tag>
-                <a-tag :color="lesson.recommendation === 'avoid_tool' ? 'red' : 'blue'">
-                  {{ lesson.recommendation }}
-                </a-tag>
-                <span class="entry-date">{{ lesson.subject }}</span>
-              </div>
-              <p class="entry-content">{{ lesson.text }}</p>
-            </div>
-          </div>
-          <a-empty v-else :description="t('common.noData')" />
-        </a-spin>
-      </GlassCard>
-
-      <!-- Reflection history -->
-      <GlassCard :title="t('metacognition.reflectionHistory')" style="margin-top: 20px">
-        <a-table
-          v-if="history.length > 0"
-          :columns="historyColumns"
-          :data-source="history"
-          :pagination="{ pageSize: 10 }"
-          row-key="created_at"
-          size="small"
-        >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'confidence'">
-              <a-progress
-                :percent="Math.round((record.confidence || 0) * 100)"
-                size="small"
-                :show-info="false"
-                style="width: 80px"
-              />
-            </template>
-            <template v-else-if="column.key === 'trigger'">
-              <a-tag>{{ record.trigger || 'manual' }}</a-tag>
-            </template>
-          </template>
-        </a-table>
-        <a-empty v-else :description="t('common.noData')" />
-      </GlassCard>
     </a-spin>
 
     <!-- Create Entry Modal -->
@@ -281,7 +228,6 @@ import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
-import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useMutation } from '@/composables/useAPI'
 import * as metacognitionApi from '@/api/modules/metacognition'
@@ -290,8 +236,6 @@ import type {
   MetacognitionStats,
   MetacognitionCreatePayload,
   CognitiveLoadState,
-  ReflectionHistoryItem,
-  StructuredLesson,
 } from '@/api/modules/metacognition'
 
 const { t } = useI18n()
@@ -301,19 +245,9 @@ const { agentId, currentAgent } = useAgentPage({
   },
 })
 
-// 三区导航：元认知 ↔ 反思日志 成对页签（agent 级同族）
-const metacogTabs = computed(() => [
-  { labelKey: 'nav.metacognition', to: `/agent/${agentId.value}/metacognition` },
-  { labelKey: 'nav.agentreflection', to: `/agent/${agentId.value}/reflection` },
-])
-
-// --- Stats / entries / load state / lessons / history ---
+// --- Stats / entries / load state（反思行为=触发/洞察/时间线已迁往反思页） ---
 const stats = ref<MetacognitionStats | null>(null)
 const loadState = ref<CognitiveLoadState | null>(null)
-const history = ref<ReflectionHistoryItem[]>([])
-const lessons = ref<StructuredLesson[]>([])
-const lessonsLoading = ref(false)
-const reflecting = ref(false)
 const loading = ref(false)
 
 const entryItems = ref<MetacognitionEntry[]>([])
@@ -346,15 +280,6 @@ const typeColorMap: Record<string, string> = {
   monitoring: 'green',
   planning: 'orange',
 }
-
-const operatorColor = (op: string) =>
-  ({
-    drift: 'red',
-    contrast: 'orange',
-    sequence: 'volcano',
-    calibration: 'purple',
-    budget: 'gold',
-  })[op] || 'default'
 
 const formatPercent = (val: number | undefined | null) =>
   val !== undefined && val !== null ? `${Math.round(val * 100)}%` : '-'
@@ -439,13 +364,6 @@ const loadBadge = computed(() => {
   return 'default'
 })
 
-const historyColumns = computed(() => [
-  { title: t('common.createdAt'), dataIndex: 'created_at', key: 'created_at', width: 180 },
-  { title: t('metacognition.confidence'), key: 'confidence', width: 120 },
-  { title: t('metacognition.trigger'), key: 'trigger', width: 120 },
-  { title: t('common.description'), dataIndex: 'summary', key: 'summary', ellipsis: true },
-])
-
 // --- Fetchers ---
 const fetchState = async () => {
   try {
@@ -490,27 +408,6 @@ const fetchEntries = async () => {
   }
 }
 
-const fetchLessons = async () => {
-  lessonsLoading.value = true
-  try {
-    const res = await metacognitionApi.getLessons(agentId.value)
-    lessons.value = res?.data?.items ?? []
-  } catch {
-    lessons.value = []
-  } finally {
-    lessonsLoading.value = false
-  }
-}
-
-const fetchHistory = async () => {
-  try {
-    const res = await metacognitionApi.getReflectionHistory(agentId.value)
-    history.value = res?.data?.items ?? []
-  } catch {
-    history.value = []
-  }
-}
-
 const onTypeFilterChange = () => {
   entryPage.value = 1
   fetchEntries()
@@ -543,24 +440,6 @@ const handleCreate = async () => {
   }
 }
 
-const handleReflect = async () => {
-  reflecting.value = true
-  try {
-    const res = await metacognitionApi.triggerReflection(agentId.value)
-    const report = res?.data
-    if (report?.lessons?.length) {
-      message.success(t('metacognition.reflectDoneWith', { n: report.lessons.length }))
-    } else {
-      message.info(t('metacognition.reflectDoneClean'))
-    }
-    await Promise.all([fetchLessons(), fetchHistory()])
-  } catch (e: any) {
-    message.error(e?.message || t('common.error'))
-  } finally {
-    reflecting.value = false
-  }
-}
-
 const resetForm = () => {
   createForm.type = 'self_assessment'
   createForm.content = ''
@@ -570,11 +449,9 @@ const resetForm = () => {
 
 const refreshAll = () => {
   loading.value = true
-  Promise.all([fetchState(), fetchStats(), fetchEntries(), fetchLessons(), fetchHistory()]).finally(
-    () => {
-      loading.value = false
-    },
-  )
+  Promise.all([fetchState(), fetchStats(), fetchEntries()]).finally(() => {
+    loading.value = false
+  })
 }
 
 onMounted(() => {

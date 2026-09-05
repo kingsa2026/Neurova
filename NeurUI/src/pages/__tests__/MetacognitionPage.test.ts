@@ -138,31 +138,19 @@ describe('MetacognitionPage V3 真数据契约', () => {
     expect(wrapper.text()).toContain('自我评估')
   })
 
-  it('洞察卡渲染 lesson text 与 operator', async () => {
+  it('反思性内容已迁出：触发反思/结构化洞察/反思时间线不再出现（已迁往反思页）', async () => {
     const wrapper = await mountPage()
-    expect(wrapper.text()).toContain('工具 bad_tool 成功率崩塌')
-    expect(wrapper.text()).toContain('drift')
+    const text = wrapper.text()
+    expect(text).not.toContain('触发反思')
+    expect(text).not.toContain('结构化洞察')
+    expect(text).not.toContain('反思时间线')
+    expect(apiMocks.triggerReflection).not.toHaveBeenCalled()
+    expect(apiMocks.getLessons).not.toHaveBeenCalled()
+    expect(apiMocks.getReflectionHistory).not.toHaveBeenCalled()
   })
 
-  it('反思时间线数据被接收（a-table 渲染交给 antd）', async () => {
+  it('不再渲染成对页签（元认知单独为一个页面）', async () => {
     const wrapper = await mountPage()
-    const vm = wrapper.vm as any
-    expect(vm.history).toHaveLength(1)
-    expect(vm.history[0].trigger).toBe('manual')
-    expect(vm.history[0].summary).toBe('1 条洞察')
-  })
-
-  it('手动触发反思调用 triggerReflection 并刷新洞察/时间线', async () => {
-    apiMocks.triggerReflection.mockResolvedValue({ code: 0, data: { lessons: [], observations: [], confidence: 0.5, summary: '' } })
-    const wrapper = await mountPage()
-    apiMocks.getLessons.mockClear()
-    apiMocks.getReflectionHistory.mockClear()
-    const buttons = wrapper.findAll('button')
-    const reflectBtn = buttons.find((b) => b.text().includes('触发反思'))
-    await reflectBtn!.trigger('click')
-    await flushPromises()
-    expect(apiMocks.triggerReflection).toHaveBeenCalledWith('a1')
-    expect(apiMocks.getLessons).toHaveBeenCalled()
-    expect(apiMocks.getReflectionHistory).toHaveBeenCalled()
+    expect(wrapper.find('.nr-page-tabs').exists()).toBe(false)
   })
 })

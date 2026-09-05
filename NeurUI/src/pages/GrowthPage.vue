@@ -82,48 +82,6 @@
         </a-spin>
       </a-tab-pane>
 
-      <!-- Reflections Tab (NEW) -->
-      <a-tab-pane key="reflections" :tab="t('growth.reflection')">
-        <div class="tab-toolbar">
-          <GlassButton variant="primary" size="sm" @click="showReflectionModal = true">
-            {{ t('common.create') }}
-          </GlassButton>
-        </div>
-        <a-spin :spinning="loadingReflections">
-          <div v-if="reflections.length > 0" class="reflections-list">
-            <GlassCard v-for="r in reflections" :key="r.id" variant="subtle">
-              <div class="reflection-item">
-                <div class="reflection-header">
-                  <a-tag v-if="r.category" :color="categoryColor(r.category)">{{ r.category }}</a-tag>
-                  <span class="reflection-date">{{ formatTime(r.created_at) }}</span>
-                </div>
-                <div class="reflection-content">{{ r.content }}</div>
-                <div v-if="r.insights?.length" class="reflection-insights">
-                  <div class="insights-label">{{ t('growth.insights') }}</div>
-                  <ul>
-                    <li v-for="(insight, idx) in r.insights" :key="idx">{{ insight }}</li>
-                  </ul>
-                </div>
-                <div v-if="r.quality_score !== undefined" class="reflection-quality">
-                  <span class="quality-label">{{ t('growth.quality') }}:</span>
-                  <a-rate :value="r.quality_score" disabled :count="5" style="font-size: 12px" />
-                </div>
-              </div>
-            </GlassCard>
-          </div>
-          <a-empty v-else :description="t('common.noData')" />
-          <div v-if="reflectionsTotal > reflectionsPageSize" class="pagination-bar">
-            <a-pagination
-              v-model:current="reflectionsPage"
-              :total="reflectionsTotal"
-              :page-size="reflectionsPageSize"
-              @change="onReflectionsPageChange"
-              size="small"
-            />
-          </div>
-        </a-spin>
-      </a-tab-pane>
-
       <!-- Questions Tab -->
       <a-tab-pane key="questions" :tab="t('growth.questions')">
         <div class="tab-toolbar">
@@ -255,23 +213,6 @@
       </a-tab-pane>
     </a-tabs>
 
-    <!-- Create reflection modal (NEW) -->
-    <a-modal v-model:open="showReflectionModal" :title="t('growth.reflection')" @ok="submitReflection" :confirm-loading="creatingReflection" width="560px">
-      <a-form layout="vertical">
-        <a-form-item :label="t('common.description')" required>
-          <a-textarea v-model:value="newReflection.content" :rows="4" />
-        </a-form-item>
-        <a-form-item :label="t('common.type')">
-          <a-select v-model:value="newReflection.category" style="width: 100%">
-            <a-select-option value="general">{{ t('growth.general') }}</a-select-option>
-            <a-select-option value="insight">{{ t('growth.insight') }}</a-select-option>
-            <a-select-option value="lesson">{{ t('growth.lesson') }}</a-select-option>
-            <a-select-option value="mistake">{{ t('growth.mistake') }}</a-select-option>
-          </a-select>
-        </a-form-item>
-      </a-form>
-    </a-modal>
-
     <!-- Create question modal -->
     <a-modal v-model:open="showQuestionModal" :title="t('growth.questions')" @ok="createQuestion" :confirm-loading="creatingQuestion">
       <a-form layout="vertical">
@@ -313,13 +254,12 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import * as growthApi from '@/api/modules/growth'
-import type { MotivationState, PersonalityProfile, ConstitutionRule, GrowthReflection, GrowthQuestion, ProactiveAction } from '@/api/modules/growth'
+import type { MotivationState, PersonalityProfile, ConstitutionRule, GrowthQuestion, ProactiveAction } from '@/api/modules/growth'
 
 const { t } = useI18n()
 const { agentId, currentAgent } = useAgentPage({
   onAgentChange: () => {
     fetchOverview()
-    fetchReflections()
     fetchQuestions()
     fetchActions()
     fetchConstitution()
@@ -334,16 +274,6 @@ const motivationData = ref<MotivationState | null>(null)
 const personalityProfile = ref<PersonalityProfile | null>(null)
 const personalityTraits = ref<{ name: string; value: number }[]>([])
 const constitutionRules = ref<ConstitutionRule[]>([])
-
-// Reflections state (NEW)
-const loadingReflections = ref(false)
-const reflections = ref<GrowthReflection[]>([])
-const reflectionsPage = ref(1)
-const reflectionsPageSize = 10
-const reflectionsTotal = ref(0)
-const showReflectionModal = ref(false)
-const creatingReflection = ref(false)
-const newReflection = ref({ content: '', category: 'general' })
 
 // Questions state
 const loadingQuestions = ref(false)
@@ -381,13 +311,6 @@ const traitColor = (val: number) => {
   return '#f59e0b'
 }
 
-const categoryColor = (cat: string) => {
-  const map: Record<string, string> = {
-    general: 'blue', insight: 'purple', lesson: 'green', mistake: 'red',
-  }
-  return map[cat] || 'default'
-}
-
 const actionColumns = computed(() => [
   { title: t('common.description'), dataIndex: 'description', key: 'description', ellipsis: true },
   { title: t('common.type'), key: 'type', dataIndex: 'type', width: 120 },
@@ -422,52 +345,6 @@ const fetchOverview = async () => {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
     loadingOverview.value = false
-  }
-}
-
-const fetchReflections = async () => {
-  loadingReflections.value = true
-  try {
-    const res = await growthApi.getReflections(agentId.value, {
-      page: reflectionsPage.value,
-      size: reflectionsPageSize,
-    })
-    const data = res.data
-    if (data && typeof data === 'object' && 'items' in data) {
-      reflections.value = data.items ?? []
-      reflectionsTotal.value = data.total ?? 0
-    } else {
-      reflections.value = Array.isArray(data) ? data : []
-      reflectionsTotal.value = reflections.value.length
-    }
-  } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
-  } finally {
-    loadingReflections.value = false
-  }
-}
-
-const onReflectionsPageChange = (p: number) => {
-  reflectionsPage.value = p
-  fetchReflections()
-}
-
-const submitReflection = async () => {
-  if (!newReflection.value.content.trim()) {
-    message.warning(t('validation.required'))
-    return
-  }
-  creatingReflection.value = true
-  try {
-    await growthApi.createReflection(agentId.value, newReflection.value.content, newReflection.value.category)
-    message.success(t('common.success'))
-    showReflectionModal.value = false
-    newReflection.value = { content: '', category: 'general' }
-    await fetchReflections()
-  } catch (e: any) {
-    message.error(e?.response?.data?.message || e?.message || t('common.error'))
-  } finally {
-    creatingReflection.value = false
   }
 }
 
@@ -614,7 +491,6 @@ const removeRule = async (ruleId: string) => {
 
 onMounted(() => {
   fetchOverview()
-  fetchReflections()
   fetchQuestions()
   fetchActions()
   fetchConstitution()
@@ -773,79 +649,6 @@ onMounted(() => {
   justify-content: flex-end;
   align-items: center;
   margin-bottom: 16px;
-}
-
-/* Reflections */
-.reflections-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.reflection-item {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.reflection-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.reflection-date {
-  font-size: 11px;
-  color: var(--nr-text-muted);
-  font-family: var(--nr-font-mono);
-}
-
-.reflection-content {
-  font-size: 14px;
-  color: var(--nr-text-primary);
-  line-height: 1.6;
-}
-
-.reflection-insights {
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 8px;
-}
-
-.insights-label {
-  font-size: 11px;
-  color: var(--nr-text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin-bottom: 6px;
-}
-
-.reflection-insights ul {
-  margin: 0;
-  padding-left: 18px;
-}
-
-.reflection-insights li {
-  font-size: 13px;
-  color: var(--nr-text-secondary);
-  line-height: 1.5;
-}
-
-.reflection-quality {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.quality-label {
-  font-size: 12px;
-  color: var(--nr-text-tertiary);
-}
-
-.pagination-bar {
-  display: flex;
-  justify-content: center;
-  margin-top: 16px;
 }
 
 /* Questions */

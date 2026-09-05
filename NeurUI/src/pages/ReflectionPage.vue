@@ -1,114 +1,176 @@
 <template>
   <div class="reflection-page">
-    <AgentPageTabs :tabs="reflectionTabs" />
     <div class="page-header">
       <div>
-        <h2 class="page-title">{{ t('growth.reflection') }}</h2>
+        <h2 class="page-title">{{ t('nav.reflection') }}</h2>
         <p class="page-subtitle">{{ currentAgent?.name || '' }}</p>
       </div>
       <div class="header-actions">
-        <GlassButton variant="secondary" size="sm" :loading="loading" @click="fetchReflections">
+        <GlassButton variant="secondary" size="sm" :loading="refreshing" @click="refreshAll">
           {{ t('common.refresh') }}
         </GlassButton>
-        <GlassButton variant="primary" @click="showCreateModal = true">
-          {{ t('common.create') }}
-        </GlassButton>
       </div>
     </div>
 
-    <!-- Stats -->
-    <div class="stats-grid">
-      <GlassCard variant="subtle">
-        <div class="stat-item">
-          <div class="stat-value">{{ total }}</div>
-          <div class="stat-label">{{ t('common.total') }}</div>
+    <a-tabs v-model:activeKey="activeTab">
+      <!-- 反思 tab：反思行为（触发反思 + 结构化洞察 + 反思时间线） -->
+      <a-tab-pane key="reflect" :tab="t('nav.agentreflection')">
+        <div class="tab-toolbar">
+          <GlassButton variant="primary" size="sm" :loading="reflecting" @click="handleReflect">
+            {{ t('metacognition.triggerReflect') }}
+          </GlassButton>
         </div>
-      </GlassCard>
-      <GlassCard variant="subtle">
-        <div class="stat-item">
-          <div class="stat-value">{{ averageQuality }}</div>
-          <div class="stat-label">{{ t('growth.avgQuality') }}</div>
-        </div>
-      </GlassCard>
-      <GlassCard variant="subtle">
-        <div class="stat-item">
-          <div class="stat-value">{{ categoryBreakdown.length }}</div>
-          <div class="stat-label">{{ t('common.type') + 's' }}</div>
-        </div>
-      </GlassCard>
-    </div>
 
-    <!-- Reflections list -->
-    <GlassCard>
-      <div class="toolbar">
-        <a-input-search
-          v-model:value="searchQuery"
-          :placeholder="t('common.search')"
-          style="max-width: 320px"
-          allow-clear
-          @search="fetchReflections"
-        />
-        <a-select
-          v-model:value="categoryFilter"
-          :placeholder="t('common.type')"
-          allow-clear
-          style="min-width: 160px"
-          @change="fetchReflections"
-        >
-          <a-select-option value="general">{{ t('growth.general') }}</a-select-option>
-          <a-select-option value="insight">{{ t('growth.insight') }}</a-select-option>
-          <a-select-option value="lesson">{{ t('growth.lesson') }}</a-select-option>
-          <a-select-option value="mistake">{{ t('growth.mistake') }}</a-select-option>
-        </a-select>
-      </div>
-
-      <a-spin :spinning="loading">
-        <a-table
-          :columns="tableColumns"
-          :data-source="filteredReflections"
-          :pagination="{
-            current: page,
-            pageSize: size,
-            total: total,
-            showSizeChanger: true,
-            showTotal: (t: number) => `${t} items`,
-          }"
-          row-key="id"
-          size="middle"
-          @change="onTableChange"
-        >
-          <template #bodyCell="{ column, record }">
-            <template v-if="column.key === 'content'">
-              <div class="content-preview">{{ truncate(record.content, 100) }}</div>
-            </template>
-            <template v-else-if="column.key === 'quality'">
-              <div class="quality-cell">
-                <a-rate :value="record.quality_score || record.quality || 0" disabled :count="5" style="font-size: 14px" />
-                <span v-if="record.quality_score !== undefined" class="quality-score-text">
-                  {{ record.quality_score.toFixed(1) }}
-                </span>
-              </div>
-            </template>
-            <template v-else-if="column.key === 'type'">
-              <a-tag :color="categoryColor(record.category || record.type)">{{ record.category || record.type || 'general' }}</a-tag>
-            </template>
-            <template v-else-if="column.key === 'insights'">
-              <span v-if="record.insights?.length" class="insights-count">
-                {{ record.insights.length }}
-              </span>
-              <span v-else class="no-insights">-</span>
-            </template>
-            <template v-else-if="column.key === 'actions'">
-              <div class="row-actions">
-                <GlassButton size="sm" variant="ghost" @click="viewReflection(record)">
-                  {{ t('common.open') }}
-                </GlassButton>
-              </div>
-            </template>
+        <!-- Structured lessons (insight compiler output) -->
+        <GlassCard :title="t('metacognition.insights')">
+          <template #extra>
+            <a-tag v-if="lessons.length" color="arcoblue">{{ t('metacognition.templateSource') }}</a-tag>
           </template>
-        </a-table>
-      </a-spin>
-    </GlassCard>
+          <a-spin :spinning="lessonsLoading">
+            <div v-if="lessons.length > 0" class="entries-list">
+              <div v-for="(lesson, idx) in lessons" :key="idx" class="entry-card">
+                <div class="entry-header">
+                  <a-tag :color="operatorColor(lesson.operator)">{{ lesson.operator }}</a-tag>
+                  <a-tag :color="lesson.recommendation === 'avoid_tool' ? 'red' : 'blue'">
+                    {{ lesson.recommendation }}
+                  </a-tag>
+                  <span class="entry-date">{{ lesson.subject }}</span>
+                </div>
+                <p class="entry-content">{{ lesson.text }}</p>
+              </div>
+            </div>
+            <a-empty v-else :description="t('common.noData')" />
+          </a-spin>
+        </GlassCard>
+
+        <!-- Reflection history -->
+        <GlassCard :title="t('metacognition.reflectionHistory')" style="margin-top: 20px">
+          <a-table
+            v-if="history.length > 0"
+            :columns="historyColumns"
+            :data-source="history"
+            :pagination="{ pageSize: 10 }"
+            row-key="created_at"
+            size="small"
+          >
+            <template #bodyCell="{ column, record }">
+              <template v-if="column.key === 'confidence'">
+                <a-progress
+                  :percent="Math.round((record.confidence || 0) * 100)"
+                  size="small"
+                  :show-info="false"
+                  style="width: 80px"
+                />
+              </template>
+              <template v-else-if="column.key === 'trigger'">
+                <a-tag>{{ record.trigger || 'manual' }}</a-tag>
+              </template>
+            </template>
+          </a-table>
+          <a-empty v-else :description="t('common.noData')" />
+        </GlassCard>
+      </a-tab-pane>
+
+      <!-- 反思日志 tab：成长反思日志（/growth/reflection） -->
+      <a-tab-pane key="log" :tab="t('growth.reflection')">
+        <!-- Stats -->
+        <div class="stats-grid">
+          <GlassCard variant="subtle">
+            <div class="stat-item">
+              <div class="stat-value">{{ total }}</div>
+              <div class="stat-label">{{ t('common.total') }}</div>
+            </div>
+          </GlassCard>
+          <GlassCard variant="subtle">
+            <div class="stat-item">
+              <div class="stat-value">{{ averageQuality }}</div>
+              <div class="stat-label">{{ t('growth.avgQuality') }}</div>
+            </div>
+          </GlassCard>
+          <GlassCard variant="subtle">
+            <div class="stat-item">
+              <div class="stat-value">{{ categoryBreakdown.length }}</div>
+              <div class="stat-label">{{ t('common.type') + 's' }}</div>
+            </div>
+          </GlassCard>
+        </div>
+
+        <!-- Reflections list -->
+        <GlassCard style="margin-top: 20px">
+          <div class="toolbar">
+            <a-input-search
+              v-model:value="searchQuery"
+              :placeholder="t('common.search')"
+              style="max-width: 320px"
+              allow-clear
+              @search="fetchReflections"
+            />
+            <a-select
+              v-model:value="categoryFilter"
+              :placeholder="t('common.type')"
+              allow-clear
+              style="min-width: 160px"
+              @change="fetchReflections"
+            >
+              <a-select-option value="general">{{ t('growth.general') }}</a-select-option>
+              <a-select-option value="insight">{{ t('growth.insight') }}</a-select-option>
+              <a-select-option value="lesson">{{ t('growth.lesson') }}</a-select-option>
+              <a-select-option value="mistake">{{ t('growth.mistake') }}</a-select-option>
+            </a-select>
+            <GlassButton variant="primary" @click="showCreateModal = true">
+              {{ t('common.create') }}
+            </GlassButton>
+          </div>
+
+          <a-spin :spinning="loading">
+            <a-table
+              :columns="tableColumns"
+              :data-source="filteredReflections"
+              :pagination="{
+                current: page,
+                pageSize: size,
+                total: total,
+                showSizeChanger: true,
+                showTotal: (t: number) => `${t} items`,
+              }"
+              row-key="id"
+              size="middle"
+              @change="onTableChange"
+            >
+              <template #bodyCell="{ column, record }">
+                <template v-if="column.key === 'content'">
+                  <div class="content-preview">{{ truncate(record.content, 100) }}</div>
+                </template>
+                <template v-else-if="column.key === 'quality'">
+                  <div class="quality-cell">
+                    <a-rate :value="record.quality_score || record.quality || 0" disabled :count="5" style="font-size: 14px" />
+                    <span v-if="record.quality_score !== undefined" class="quality-score-text">
+                      {{ record.quality_score.toFixed(1) }}
+                    </span>
+                  </div>
+                </template>
+                <template v-else-if="column.key === 'type'">
+                  <a-tag :color="categoryColor(record.category || record.type)">{{ record.category || record.type || 'general' }}</a-tag>
+                </template>
+                <template v-else-if="column.key === 'insights'">
+                  <span v-if="record.insights?.length" class="insights-count">
+                    {{ record.insights.length }}
+                  </span>
+                  <span v-else class="no-insights">-</span>
+                </template>
+                <template v-else-if="column.key === 'actions'">
+                  <div class="row-actions">
+                    <GlassButton size="sm" variant="ghost" @click="viewReflection(record)">
+                      {{ t('common.open') }}
+                    </GlassButton>
+                  </div>
+                </template>
+              </template>
+            </a-table>
+          </a-spin>
+        </GlassCard>
+      </a-tab-pane>
+    </a-tabs>
 
     <!-- Create reflection modal -->
     <a-modal
@@ -192,24 +254,84 @@ import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
-import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import * as growthApi from '@/api/modules/growth'
+import * as metacognitionApi from '@/api/modules/metacognition'
 import type { GrowthReflection } from '@/api/modules/growth'
+import type { ReflectionHistoryItem, StructuredLesson } from '@/api/modules/metacognition'
 
 const { t } = useI18n()
 const { agentId, currentAgent } = useAgentPage({
   onAgentChange: () => {
-    fetchReflections()
+    refreshAll()
   },
 })
 
-// 三区导航：反思日志 ↔ 元认知 成对页签（agent 级同族）
-const reflectionTabs = [
-  { labelKey: 'nav.metacognition', to: `/agent/${agentId.value}/metacognition` },
-  { labelKey: 'nav.agentreflection', to: `/agent/${agentId.value}/reflection` },
-]
+const activeTab = ref('reflect')
+const refreshing = ref(false)
 
+// --- 反思行为：结构化洞察 + 反思时间线（洞察编译器产出，零 LLM） ---
+const lessons = ref<StructuredLesson[]>([])
+const lessonsLoading = ref(false)
+const history = ref<ReflectionHistoryItem[]>([])
+const reflecting = ref(false)
+
+const operatorColor = (op: string) =>
+  ({
+    drift: 'red',
+    contrast: 'orange',
+    sequence: 'volcano',
+    calibration: 'purple',
+    budget: 'gold',
+  })[op] || 'default'
+
+const historyColumns = computed(() => [
+  { title: t('common.createdAt'), dataIndex: 'created_at', key: 'created_at', width: 180 },
+  { title: t('metacognition.confidence'), key: 'confidence', width: 120 },
+  { title: t('metacognition.trigger'), key: 'trigger', width: 120 },
+  { title: t('common.description'), dataIndex: 'summary', key: 'summary', ellipsis: true },
+])
+
+const fetchLessons = async () => {
+  lessonsLoading.value = true
+  try {
+    const res = await metacognitionApi.getLessons(agentId.value)
+    lessons.value = res?.data?.items ?? []
+  } catch {
+    lessons.value = []
+  } finally {
+    lessonsLoading.value = false
+  }
+}
+
+const fetchHistory = async () => {
+  try {
+    const res = await metacognitionApi.getReflectionHistory(agentId.value)
+    history.value = res?.data?.items ?? []
+  } catch {
+    history.value = []
+  }
+}
+
+const handleReflect = async () => {
+  reflecting.value = true
+  try {
+    const res = await metacognitionApi.triggerReflection(agentId.value)
+    const report = res?.data
+    if (report?.lessons?.length) {
+      message.success(t('metacognition.reflectDoneWith', { n: report.lessons.length }))
+    } else {
+      message.info(t('metacognition.reflectDoneClean'))
+    }
+    await Promise.all([fetchLessons(), fetchHistory()])
+  } catch (e: any) {
+    message.error(e?.message || t('common.error'))
+  } finally {
+    reflecting.value = false
+  }
+}
+
+// --- 反思日志：成长反思日志（/growth/reflection） ---
 const loading = ref(false)
 const creating = ref(false)
 const reflections = ref<GrowthReflection[]>([])
@@ -326,8 +448,17 @@ const viewReflection = (record: any) => {
   showDetailModal.value = true
 }
 
+const refreshAll = async () => {
+  refreshing.value = true
+  try {
+    await Promise.all([fetchLessons(), fetchHistory(), fetchReflections()])
+  } finally {
+    refreshing.value = false
+  }
+}
+
 onMounted(() => {
-  fetchReflections()
+  refreshAll()
 })
 </script>
 
@@ -364,6 +495,56 @@ onMounted(() => {
   align-items: center;
 }
 
+.tab-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+/* 反思行为：洞察/时间线条目（与元认知页同源样式） */
+.entries-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.entry-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--nr-border-secondary, rgba(255, 255, 255, 0.06));
+  border-radius: 8px;
+  background: var(--nr-bg-elevated, rgba(255, 255, 255, 0.02));
+  transition: border-color 0.2s ease;
+}
+
+.entry-card:hover {
+  border-color: var(--nr-border-hover, rgba(99, 102, 241, 0.3));
+}
+
+.entry-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.entry-date {
+  font-size: 11px;
+  color: var(--nr-text-muted);
+  font-family: var(--nr-font-mono);
+}
+
+.entry-content {
+  font-size: 13px;
+  color: var(--nr-text-primary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* 反思日志：统计与列表 */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
