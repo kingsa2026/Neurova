@@ -34,29 +34,28 @@ const isActive = computed(() => {
 </script>
 
 <style scoped>
+/* iOS 导航项：胶囊选中态（Accent 蓝填充，无左侧指示条） */
 .nr-nav-item {
   display: flex; align-items: center; gap: 10px;
-  padding: 9px 12px; border-radius: 10px;
+  padding: 10px 12px; border-radius: 12px;
   color: var(--nr-text-secondary); text-decoration: none;
-  transition: all 0.2s ease; cursor: pointer; position: relative;
-  font-size: 13px; font-weight: 450;
+  transition: all 0.2s cubic-bezier(0.32, 0.72, 0, 1); cursor: pointer; position: relative;
+  font-size: 14px; font-weight: 450; letter-spacing: -0.01em;
 }
 .nr-nav-item:hover { color: var(--nr-text-primary); background: var(--nr-glass-bg); }
 .nr-nav-item.is-active {
   color: var(--nr-primary-light); background: var(--nr-primary-soft);
-  font-weight: 550;
+  font-weight: 600;
 }
-.nr-nav-item.is-active::before {
-  content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  width: 3px; height: 60%; border-radius: 0 2px 2px 0;
-  background: var(--nr-primary);
+.nr-nav-item.is-active:hover {
+  background: var(--nr-primary-soft);
 }
-.nr-nav-item.is-collapsed { justify-content: center; padding: 10px; }
-.nr-nav-item-icon { display: flex; align-items: center; font-size: 18px; flex-shrink: 0; width: 20px; justify-content: center; }
+.nr-nav-item.is-collapsed { justify-content: center; padding: 11px; }
+.nr-nav-item-icon { display: flex; align-items: center; font-size: 19px; flex-shrink: 0; width: 22px; justify-content: center; }
 .nr-nav-item-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nr-nav-item-badge {
   margin-left: auto; font-size: 10px; font-weight: 600;
-  background: var(--nr-primary); color: white; padding: 1px 6px;
+  background: var(--nr-primary); color: #fff; padding: 1px 6px;
   border-radius: 10px; min-width: 18px; text-align: center;
 }
 </style>

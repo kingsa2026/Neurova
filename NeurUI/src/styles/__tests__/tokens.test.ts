@@ -1,20 +1,20 @@
 /**
- * 阶段9 RED: 验证设计令牌（JS 侧）
+ * 验证设计令牌（JS 侧）—— 与 variables.css 中的 CSS 变量保持同步
  *
- * 测试从 variables.css 提取的设计令牌
- * 值必须与 variables.css 中的 CSS 变量保持同步
+ * 2026-09-05 起主题切换为 Apple iOS Liquid Glass 风格，
+ * 主色小幅量的 iOS 深色 Accent 蓝 #0a84ff、强调色 iOS Cyan #64d2ff。
  */
 import { describe, it, expect } from 'vitest'
 import { tokens } from '../tokens'
 
 describe('Design Tokens (JS 侧设计令牌)', () => {
   describe('colors', () => {
-    it('colors.primary 应等于 #6366f1', () => {
-      expect(tokens.colors.primary).toBe('#6366f1')
+    it('colors.primary 应等于 #0a84ff', () => {
+      expect(tokens.colors.primary).toBe('#0a84ff')
     })
 
-    it('colors.accent 应等于 #22d3ee', () => {
-      expect(tokens.colors.accent).toBe('#22d3ee')
+    it('colors.accent 应等于 #64d2ff', () => {
+      expect(tokens.colors.accent).toBe('#64d2ff')
     })
 
     it('colors.bgDeep 应存在且为字符串', () => {

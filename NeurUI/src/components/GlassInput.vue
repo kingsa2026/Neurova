@@ -52,17 +52,18 @@ defineExpose({ focus: () => inputRef.value?.focus() })
 <style scoped>
 .nr-glass-input { display: flex; flex-direction: column; gap: 6px; }
 .nr-glass-input-label {
-  font-size: 12px; font-weight: 500; color: var(--nr-text-secondary);
-  text-transform: uppercase; letter-spacing: 0.04em;
+  font-size: 13px; font-weight: 600; color: var(--nr-text-secondary);
+  letter-spacing: -0.01em;
 }
 .nr-glass-input-wrap {
   display: flex; align-items: center; gap: 8px;
   background: var(--nr-glass-bg); border: 1px solid var(--nr-glass-border);
-  border-radius: 10px; padding: 0 14px; height: 42px;
+  border-radius: 12px; padding: 0 14px; height: 42px;
   transition: all 0.25s ease;
   backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
-.nr-glass-input-wrap:hover { border-color: var(--nr-glass-border-hover); }
+.nr-glass-input-wrap:hover { border-color: var(--nr-glass-border-hover); background: var(--nr-glass-bg-hover); }
 .is-focused .nr-glass-input-wrap {
   border-color: var(--nr-primary); background: var(--nr-primary-soft);
   box-shadow: 0 0 0 3px var(--nr-primary-ring);

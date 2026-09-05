@@ -35,6 +35,7 @@ const logoSrc = computed(() =>
 </script>
 
 <style scoped>
+/* iOS 侧栏：Liquid Glass 材质 + 顶部高光 + Activity 分隔线 */
 .nr-glass-nav {
   position: relative; display: flex; flex-direction: column;
   width: var(--nr-sidebar-w); height: 100vh;
@@ -45,8 +46,10 @@ const logoSrc = computed(() =>
 .nr-glass-nav-backdrop {
   position: absolute; inset: 0; z-index: 0;
   background: var(--nr-sidebar-bg);
-  backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(var(--nr-glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--nr-glass-blur)) saturate(180%);
   border-right: 1px solid var(--nr-glass-border);
+  box-shadow: inset -1px 0 0 rgba(var(--nr-glass-rgb), 0.06);
 }
 .nr-glass-nav-content {
   position: relative; z-index: 1; display: flex; flex-direction: column;
@@ -54,18 +57,21 @@ const logoSrc = computed(() =>
 }
 .nr-glass-nav-brand {
   display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-  margin-bottom: 16px; cursor: pointer; border-radius: 10px;
+  margin-bottom: 16px; cursor: pointer; border-radius: var(--nr-radius-md);
   transition: background 0.2s;
 }
 .nr-glass-nav-brand:hover { background: var(--nr-glass-bg); }
 .nr-glass-nav-logo-img {
-  height: 32px; width: auto; max-width: 140px;
+  height: 30px; width: auto; max-width: 140px;
   object-fit: contain; flex-shrink: 0;
   transition: all 0.3s ease;
 }
 .nr-glass-nav-logo-img.is-collapsed {
-  height: 28px; max-width: 28px; object-fit: contain;
+  height: 26px; max-width: 26px; object-fit: contain;
 }
 .nr-glass-nav-items { flex: 1; display: flex; flex-direction: column; gap: 2px; }
-.nr-glass-nav-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--nr-glass-border); }
+.nr-glass-nav-footer {
+  margin-top: auto; padding-top: 12px;
+  border-top: 1px solid var(--nr-glass-border);
+}
 </style>

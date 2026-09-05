@@ -39,50 +39,67 @@ const btnRef = ref<HTMLElement | null>(null)
 </script>
 
 <style scoped>
+/* iOS 系统按钮：Accent 蓝主按钮 / SystemGray 次按钮 / 纯文本 Ghost / 红色危险 */
 .nr-glass-btn {
   position: relative; display: inline-flex; align-items: center; justify-content: center;
   border: none; cursor: pointer; overflow: hidden;
   border-radius: 12px; font-family: var(--nr-font-body);
   font-weight: 500; letter-spacing: -0.01em;
-  transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform 0.15s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.25s, opacity 0.25s, background 0.25s;
   outline: none;
+  -webkit-tap-highlight-color: transparent;
 }
-.nr-glass-btn--sm { height: 32px; padding: 0 14px; font-size: 12px; border-radius: 8px; gap: 6px; }
-.nr-glass-btn--md { height: 40px; padding: 0 20px; font-size: 13px; border-radius: 12px; gap: 8px; }
-.nr-glass-btn--lg { height: 48px; padding: 0 28px; font-size: 15px; border-radius: 14px; gap: 10px; }
+.nr-glass-btn:active { transform: scale(0.97); }
+.nr-glass-btn--sm { height: 30px; padding: 0 14px; font-size: 12px; border-radius: 9px; gap: 6px; }
+.nr-glass-btn--md { height: 38px; padding: 0 20px; font-size: 13px; border-radius: 12px; gap: 8px; }
+.nr-glass-btn--lg { height: 46px; padding: 0 28px; font-size: 15px; border-radius: 14px; gap: 10px; }
 
+/* Primary: iOS Accent 蓝（竖向微渐变还原系统按钮光泽） */
 .nr-glass-btn--primary .nr-glass-btn-bg {
   position: absolute; inset: 0;
   background: var(--nr-gradient-primary);
   transition: opacity 0.3s;
 }
-.nr-glass-btn--primary { color: white; box-shadow: 0 4px 20px color-mix(in srgb, var(--nr-primary) 30%, transparent), inset 0 1px 0 rgba(255,255,255,0.15); }
+.nr-glass-btn--primary {
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 2px 12px rgba(10, 132, 255, 0.32);
+}
+.nr-glass-btn--primary:hover .nr-glass-btn-bg { opacity: 0.92; }
 
+/* Secondary: iOS SystemFill 灰按钮 */
 .nr-glass-btn--secondary .nr-glass-btn-bg {
   position: absolute; inset: 0;
-  background: linear-gradient(135deg, #162d50 0%, #1e4976 50%, #1a3f66 100%);
-  border: 1px solid rgba(59, 130, 246, 0.25); border-radius: inherit;
+  background: var(--nr-glass-bg);
+  border: 1px solid var(--nr-glass-border); border-radius: inherit;
   transition: all 0.3s;
 }
-.nr-glass-btn--secondary { color: #e0eaff; box-shadow: 0 2px 12px rgba(30, 64, 120, 0.25), inset 0 1px 0 rgba(255,255,255,0.08); }
-.nr-glass-btn--secondary:hover .nr-glass-btn-bg { background: linear-gradient(135deg, #1e3d6b 0%, #2563a0 50%, #1f5080 100%); border-color: rgba(59, 130, 246, 0.4); }
-.nr-glass-btn--secondary:hover { color: #fff; }
+.nr-glass-btn--secondary {
+  color: var(--nr-text-primary);
+  box-shadow: inset 0 0.5px 0 rgba(var(--nr-glass-rgb), 0.1);
+}
+.nr-glass-btn--secondary:hover .nr-glass-btn-bg { background: var(--nr-glass-bg-hover); border-color: var(--nr-glass-border-hover); }
 
+/* Ghost: iOS 纯文本蓝按钮 */
 .nr-glass-btn--ghost .nr-glass-btn-bg {
   position: absolute; inset: 0;
-  background: linear-gradient(135deg, #0f2040 0%, #17335a 50%, #132a4a 100%);
-  border: 1px solid rgba(59, 130, 246, 0.18); border-radius: inherit; transition: all 0.3s;
+  background: transparent;
+  border: 1px solid transparent; border-radius: inherit; transition: all 0.3s;
 }
-.nr-glass-btn--ghost { color: #c8d8f0; }
-.nr-glass-btn--ghost:hover { color: #e0eaff; }
-.nr-glass-btn--ghost:hover .nr-glass-btn-bg { background: linear-gradient(135deg, #162d50 0%, #1e4976 50%, #1a3f66 100%); border-color: rgba(59, 130, 246, 0.3); }
+.nr-glass-btn--ghost { color: var(--nr-primary-light); }
+.nr-glass-btn--ghost:hover { color: var(--nr-primary-light); }
+.nr-glass-btn--ghost:hover .nr-glass-btn-bg { background: var(--nr-primary-soft); border-color: var(--nr-primary-soft-border); }
 
+/* Danger: iOS 红色 */
 .nr-glass-btn--danger .nr-glass-btn-bg {
   position: absolute; inset: 0;
-  background: linear-gradient(135deg, #ef4444, #dc2626);
+  background: linear-gradient(180deg, #ff5f52 0%, var(--nr-error) 60%, #e3372c 100%);
   border-radius: inherit; transition: opacity 0.3s;
 }
-.nr-glass-btn--danger { color: white; box-shadow: 0 4px 20px rgba(239,68,68,0.3); }
+.nr-glass-btn--danger {
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 2px 12px rgba(255, 69, 58, 0.3);
+}
+.nr-glass-btn--danger:hover .nr-glass-btn-bg { opacity: 0.92; }
 
 .nr-glass-btn-content { position: relative; z-index: 2; display: flex; align-items: center; gap: inherit; }
 .nr-glass-btn-spinner { display: flex; animation: spin 1s linear infinite; }
@@ -106,8 +123,8 @@ const btnRef = ref<HTMLElement | null>(null)
   border: 1px solid var(--nr-glass-border-hover);
 }
 [data-theme='light'] .nr-glass-btn--secondary {
-  color: var(--nr-text-secondary);
-  box-shadow: var(--nr-shadow-sm);
+  color: var(--nr-text-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 [data-theme='light'] .nr-glass-btn--secondary:hover .nr-glass-btn-bg {
   background: var(--nr-bg-elevated);
@@ -117,12 +134,12 @@ const btnRef = ref<HTMLElement | null>(null)
 
 [data-theme='light'] .nr-glass-btn--ghost .nr-glass-btn-bg {
   background: transparent;
-  border: 1px solid var(--nr-glass-border);
+  border: 1px solid transparent;
 }
-[data-theme='light'] .nr-glass-btn--ghost { color: var(--nr-text-secondary); box-shadow: none; }
+[data-theme='light'] .nr-glass-btn--ghost { color: var(--nr-primary); box-shadow: none; }
 [data-theme='light'] .nr-glass-btn--ghost:hover .nr-glass-btn-bg {
-  background: var(--nr-glass-bg);
-  border-color: var(--nr-glass-border-hover);
+  background: var(--nr-primary-soft);
+  border-color: var(--nr-primary-soft-border);
 }
-[data-theme='light'] .nr-glass-btn--ghost:hover { color: var(--nr-text-primary); }
+[data-theme='light'] .nr-glass-btn--ghost:hover { color: var(--nr-primary); }
 </style>
