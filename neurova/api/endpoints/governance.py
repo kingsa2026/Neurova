@@ -12,7 +12,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+import typing
 
 from neurova.api.deps import require_admin
 
@@ -118,11 +119,24 @@ async def delete_whitelist(request: Request, entry_id: str):
 
 
 @router.get("/approvals/pending")
-async def list_pending_approvals(request: Request):
-    """待审批列表"""
+async def list_pending_approvals(
+    request: Request,
+    surface: typing.Optional[str] = Query(default=None, description="按调用面过滤（P1-2 HITL surface）"),
+):
+    """待审批列表。
+
+    surface 参数（P1-2 HITL surface 安全模型）：传 service_api/openapi/console
+    时按接收方裁剪表过滤——API 面只见 web 表单来源，console 面只收
+    console/backstage；无 surface 声明的存量请求保守默认仅 console 可见。
+    缺省（不过滤）行为不变。
+    """
     am = _get_approvals()
-    pending = [r.to_dict() for r in am.get_pending_requests()]
-    return {"code": 0, "data": {"requests": pending}}
+    pending = am.get_pending_requests()
+    if surface:
+        from neurova.security.hitl_surface import filter_requests_for_surface
+
+        pending = filter_requests_for_surface(pending, surface)
+    return {"code": 0, "data": {"requests": [r.to_dict() for r in pending]}}
 
 
 @router.get("/approvals/{request_id}")

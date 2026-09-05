@@ -363,3 +363,13 @@ models/**/*.data
 
 # 测试隔离会话/轨迹运行时产物（防再生）
 /sessions-test-quarantine/
+
+# 根级 pyc 恢复/分析临时脚本与产物（防再生，2026-09-05）
+/analyze_*.py
+/batch_*.py
+/smart_restore.py
+/count_skeleton_files.py
+/*_analysis.txt
+/*_files.txt
+/batch_analysis.txt
+/tour-*.json

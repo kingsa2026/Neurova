@@ -285,4 +285,70 @@ describe('useSessionSync gap 检测', () => {
       vi.useRealTimers()
     }
   })
+
+  it('gap 自愈重连中纪元更迭：区间与游标一并清零（按新流重建）', () => {
+    vi.useFakeTimers()
+    try {
+      const seen: number[] = []
+      const sid = ref('s1')
+      useSessionSync(() => sid.value, e => seen.push(e.seq as number), { onGap: () => {} })
+      const first = lastWs()
+      first.open()
+      first.emit(evt(1))
+      first.emit(evt(2))
+      first.emit(evt(5)) // 缺口 [3,4]，进入自愈重连
+      vi.advanceTimersByTime(10_000)
+      const second = lastWs()
+      second.open()
+      // 后端已重启：hello next_seq=1 <= 游标 5 → 纪元重置
+      second.emit({ type: 'sync_hello', next_seq: 1 })
+      second.emit(evt(1))
+      second.emit(evt(2))
+      expect(seen).toEqual([1, 2, 5, 1, 2])
+
+      // 旧缺口 [3,4] 必须已作废：再断连重连时 resume = 新流 lastSeq=2
+      // （若区间未清，resume 会取 gap[0][0]-1=2 巧合相同——用 lastSeq 验证：
+      // 新流推进到 3 后断连，resume 应为 3 而非旧区间污染值）
+      second.emit(evt(3))
+      second.onclose?.()
+      vi.advanceTimersByTime(10_000)
+      const third = lastWs()
+      third.open()
+      const resume = third.sent.map(s => JSON.parse(s)).find(m => m.type === 'sync_resume')
+      expect(resume).toEqual({ type: 'sync_resume', last_seq: 3 })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('会话切换清空缺口区间（旧会话 gap 不污染新流 resume 游标）', async () => {
+    vi.useFakeTimers()
+    try {
+      const seen: number[] = []
+      const sid = ref('s1')
+      useSessionSync(() => sid.value, e => seen.push(e.seq as number), { onGap: () => {} })
+      const ws1 = lastWs()
+      ws1.open()
+      ws1.emit(evt(1))
+      ws1.emit(evt(2))
+      ws1.emit(evt(10)) // 旧会话缺口 [3,9]
+
+      sid.value = 's2'
+      await nextTick()
+      const ws2 = lastWs()
+      ws2.open()
+      ws2.emit(evt(1))
+      ws2.emit(evt(2))
+      ws2.emit(evt(3)) // 新流推进到 3
+      ws2.onclose?.()
+      vi.advanceTimersByTime(10_000)
+      const ws3 = lastWs()
+      ws3.open()
+      // 旧 gap 未清则 resume 取 gap[0][0]-1=2；正确语义 = 新流 lastSeq 3
+      const resume = ws3.sent.map(s => JSON.parse(s)).find(m => m.type === 'sync_resume')
+      expect(resume).toEqual({ type: 'sync_resume', last_seq: 3 })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
