@@ -185,6 +185,8 @@ class WorkflowDefinition:
     template: bool = False
     public: bool = False
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # P0-1 属主（运行时面）：storage 列为准，None=未定属主（默认 default）
+    user_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """序列化为字典"""

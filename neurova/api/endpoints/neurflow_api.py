@@ -388,17 +388,25 @@ async def list_workflows(
     status: Optional[str] = Query(None, description="按状态过滤"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """列出工作流"""
+    """列出工作流（P0-1 属主隔离：自己的 + public；admin 全量）"""
     storage = _get_storage()
     ws_status = WorkflowStatus(status) if status else None
-    workflows = storage.list_workflows(category=category, status=ws_status, limit=limit, offset=offset)
+    workflows = storage.list_workflows(
+        category=category, status=ws_status, limit=limit, offset=offset,
+        requester_id=str(current_user.get("user_id") or ""),
+        is_admin=current_user.get("role") == "admin",
+    )
     return {"workflows": [w.to_dict() for w in workflows], "total": len(workflows)}
 
 
 @router.post("/workflows")
-async def create_workflow(data: Dict[str, Any] = Body(...)):
-    """创建工作流"""
+async def create_workflow(
+    data: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """创建工作流（P0-1：属主=当前登录用户）"""
     storage = _get_storage()
     try:
         # 如果前端没有提供 id，则生成一个新的 UUID
@@ -410,29 +418,47 @@ async def create_workflow(data: Dict[str, Any] = Body(...)):
         workflow = WorkflowDefinition.from_dict(data)
         workflow.created_at = time.time()
         workflow.updated_at = time.time()
-        storage.save_workflow(workflow)
+        storage.save_workflow(workflow, user_id=str(current_user.get("user_id") or "") or None)
         return {"workflow": workflow.to_dict(), "message": "工作流创建成功"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"创建工作流失败: {str(e)}")
 
 
+def _owned_workflow_or_404(storage, workflow_id: str, current_user: Dict[str, Any],
+                           writable: bool = False):
+    """P0-1 属主判定单点：owner/admin 全通过；非 owner 仅 public 可读；
+    写操作（writable=True）要求 owner/admin。deny 与不存在同构 → 404。"""
+    requester_id = str(current_user.get("user_id") or "")
+    is_admin = current_user.get("role") == "admin"
+    workflow = storage.get_workflow(workflow_id, requester_id=requester_id, is_admin=is_admin)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="工作流不存在")
+    if writable:
+        if requester_id != (workflow.user_id or "default") and not is_admin:
+            raise HTTPException(status_code=404, detail="工作流不存在")
+    return workflow
+
+
 @router.get("/workflows/{workflow_id}")
-async def get_workflow(workflow_id: str):
+async def get_workflow(
+    workflow_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取工作流详情"""
     storage = _get_storage()
-    workflow = storage.get_workflow(workflow_id)
-    if not workflow:
-        raise HTTPException(status_code=404, detail="工作流不存在")
+    workflow = _owned_workflow_or_404(storage, workflow_id, current_user)
     return {"workflow": workflow.to_dict()}
 
 
 @router.put("/workflows/{workflow_id}")
-async def update_workflow(workflow_id: str, data: Dict[str, Any] = Body(...)):
+async def update_workflow(
+    workflow_id: str,
+    data: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """更新工作流"""
     storage = _get_storage()
-    existing = storage.get_workflow(workflow_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="工作流不存在")
+    existing = _owned_workflow_or_404(storage, workflow_id, current_user, writable=True)
     try:
         workflow = WorkflowDefinition.from_dict(data)
         workflow.id = workflow_id
@@ -444,20 +470,34 @@ async def update_workflow(workflow_id: str, data: Dict[str, Any] = Body(...)):
 
 
 @router.delete("/workflows/{workflow_id}")
-async def delete_workflow(workflow_id: str):
+async def delete_workflow(
+    workflow_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """删除工作流"""
     storage = _get_storage()
-    result = storage.delete_workflow(workflow_id)
+    result = storage.delete_workflow(
+        workflow_id,
+        requester_id=str(current_user.get("user_id") or ""),
+        is_admin=current_user.get("role") == "admin",
+    )
     if not result:
         raise HTTPException(status_code=404, detail="工作流不存在")
     return {"message": "工作流删除成功"}
 
 
 @router.get("/workflows/search/{query}")
-async def search_workflows(query: str):
-    """搜索工作流"""
+async def search_workflows(
+    query: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """搜索工作流（P0-1 属主过滤）"""
     storage = _get_storage()
-    workflows = storage.search_workflows(query)
+    workflows = storage.search_workflows(
+        query,
+        requester_id=str(current_user.get("user_id") or ""),
+        is_admin=current_user.get("role") == "admin",
+    )
     return {"workflows": [w.to_dict() for w in workflows], "total": len(workflows)}
 
 
@@ -465,12 +505,13 @@ async def search_workflows(query: str):
 
 
 @router.post("/workflows/{workflow_id}/validate")
-async def validate_workflow(workflow_id: str):
+async def validate_workflow(
+    workflow_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """验证工作流"""
     storage = _get_storage()
-    workflow = storage.get_workflow(workflow_id)
-    if not workflow:
-        raise HTTPException(status_code=404, detail="工作流不存在")
+    workflow = _owned_workflow_or_404(storage, workflow_id, current_user)
 
     validator = get_dag_validator()
     result = validator.validate(workflow.nodes, workflow.edges)
@@ -505,7 +546,7 @@ async def execute_workflow(
     后台执行并落库；默认 wait=true 同步返回终态实例（行为不变）。
     """
     storage = _get_storage()
-    workflow = storage.get_workflow(workflow_id)
+    workflow = _owned_workflow_or_404(storage, workflow_id, current_user)
     if not workflow:
         raise HTTPException(status_code=404, detail="工作流不存在")
 
@@ -895,12 +936,13 @@ async def get_node(node_type: str):
 
 
 @router.post("/workflows/{workflow_id}/duplicate")
-async def duplicate_workflow(workflow_id: str):
-    """复制工作流"""
+async def duplicate_workflow(
+    workflow_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """复制工作流（P0-1：源须可读；副本属主=当前用户）"""
     storage = _get_storage()
-    existing = storage.get_workflow(workflow_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="工作流不存在")
+    existing = _owned_workflow_or_404(storage, workflow_id, current_user)
 
     try:
         # 创建副本
@@ -922,17 +964,22 @@ async def duplicate_workflow(workflow_id: str):
             public=False,  # 副本默认不公开
             metadata=existing.metadata.copy(),
         )
-        storage.save_workflow(new_workflow)
+        storage.save_workflow(
+            new_workflow, user_id=str(current_user.get("user_id") or "") or None
+        )
         return {"workflow": new_workflow.to_dict(), "message": "工作流复制成功"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"复制工作流失败: {str(e)}")
 
 
 @router.get("/workflows/{workflow_id}/definition")
-async def get_workflow_definition(workflow_id: str):
+async def get_workflow_definition(
+    workflow_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取工作流定义"""
     storage = _get_storage()
-    workflow = storage.get_workflow(workflow_id)
+    workflow = _owned_workflow_or_404(storage, workflow_id, current_user)
     if not workflow:
         raise HTTPException(status_code=404, detail="工作流不存在")
 
@@ -944,12 +991,14 @@ async def get_workflow_definition(workflow_id: str):
 
 
 @router.put("/workflows/{workflow_id}/definition")
-async def update_workflow_definition(workflow_id: str, data: Dict[str, Any] = Body(...)):
+async def update_workflow_definition(
+    workflow_id: str,
+    data: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """更新工作流定义（节点/边/变量）"""
     storage = _get_storage()
-    existing = storage.get_workflow(workflow_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="工作流不存在")
+    existing = _owned_workflow_or_404(storage, workflow_id, current_user, writable=True)
 
     try:
         # 更新节点
@@ -972,12 +1021,14 @@ async def update_workflow_definition(workflow_id: str, data: Dict[str, Any] = Bo
 
 
 @router.put("/workflows/{workflow_id}/viewport")
-async def save_workflow_viewport(workflow_id: str, data: Dict[str, Any] = Body(...)):
+async def save_workflow_viewport(
+    workflow_id: str,
+    data: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """保存工作流视口状态"""
     storage = _get_storage()
-    existing = storage.get_workflow(workflow_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="工作流不存在")
+    existing = _owned_workflow_or_404(storage, workflow_id, current_user, writable=True)
 
     try:
         # 保存视口状态到 metadata
@@ -996,9 +1047,7 @@ async def publish_workflow(
 ):
     """发布工作流（P2：编译 AgentManifest 并落 agents 记录，chat 页可直接选用）"""
     storage = _get_storage()
-    existing = storage.get_workflow(workflow_id)
-    if not existing:
-        raise HTTPException(status_code=404, detail="工作流不存在")
+    existing = _owned_workflow_or_404(storage, workflow_id, current_user, writable=True)
 
     try:
         # 验证工作流
@@ -1199,8 +1248,9 @@ async def restore_agent(agent_id: str):
 @router.get("/templates")
 async def list_templates(
     category: Optional[str] = Query(None, description="按分类过滤"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """列出工作流模板"""
+    """列出工作流模板（P0-1：登录用户可读）"""
     storage = _get_storage()
     try:
         templates = storage.list_templates(category=category)
@@ -1210,8 +1260,11 @@ async def list_templates(
 
 
 @router.post("/templates")
-async def create_template(data: Dict[str, Any] = Body(...)):
-    """创建工作流模板"""
+async def create_template(
+    data: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """创建工作流模板（P0-1：源工作流须可写；模板属主=创建者）"""
     storage = _get_storage()
     try:
         # 基于现有工作流创建模板
@@ -1219,7 +1272,7 @@ async def create_template(data: Dict[str, Any] = Body(...)):
         if not workflow_id:
             raise HTTPException(status_code=400, detail="workflow_id 是必填字段")
 
-        existing = storage.get_workflow(workflow_id)
+        existing = _owned_workflow_or_404(storage, workflow_id, current_user, writable=True)
         if not existing:
             raise HTTPException(status_code=404, detail="工作流不存在")
 
@@ -1242,7 +1295,9 @@ async def create_template(data: Dict[str, Any] = Body(...)):
             public=data.get("public", False),
             metadata=existing.metadata.copy(),
         )
-        storage.save_workflow(template)
+        storage.save_workflow(
+            template, user_id=str(current_user.get("user_id") or "") or None
+        )
         from starlette.responses import JSONResponse
 
         return JSONResponse(content={"template": template.to_dict(), "message": "模板创建成功"}, status_code=201)
@@ -1253,11 +1308,15 @@ async def create_template(data: Dict[str, Any] = Body(...)):
 
 
 @router.post("/templates/{template_id}/instantiate")
-async def instantiate_template(template_id: str, data: Dict[str, Any] = Body(...)):
-    """从模板创建工作流"""
+async def instantiate_template(
+    template_id: str,
+    data: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """从模板创建工作流（P0-1：实例属主=实例化人）"""
     storage = _get_storage()
     try:
-        # 获取模板
+        # 获取模板（登录用户可读——模板对全员开放的计划语义 §1.3）
         template = storage.get_workflow(template_id)
         if not template or not template.template:
             raise HTTPException(status_code=404, detail="模板不存在")
@@ -1288,7 +1347,9 @@ async def instantiate_template(template_id: str, data: Dict[str, Any] = Body(...
                 if var.name in data["variables"]:
                     var.default_value = data["variables"][var.name]
 
-        storage.save_workflow(new_workflow)
+        storage.save_workflow(
+            new_workflow, user_id=str(current_user.get("user_id") or "") or None
+        )
         from starlette.responses import JSONResponse
 
         return JSONResponse(
@@ -1477,7 +1538,7 @@ async def step_run_node(
     """单节点试跑：只执行指定节点（mock 优先），上游输出经
     upstream_outputs 注入（画布右键面板/变量检查的数据源）。"""
     storage = _get_storage()
-    workflow = storage.get_workflow(workflow_id)
+    workflow = _owned_workflow_or_404(storage, workflow_id, current_user)
     if not workflow:
         raise HTTPException(status_code=404, detail="工作流不存在")
     if not any(n.id == body.node_id for n in workflow.nodes):
@@ -1528,8 +1589,10 @@ def _webhook_ingress_deps() -> Dict[str, Any]:
         return None
 
     async def run_workflow(workflow, inputs, user_id=None):
+        # P0-1：匿名 HMAC 入口按 workflow 属主执行/记账（trigger→workflow 反查）
+        effective = user_id or getattr(workflow, "user_id", None) or None
         return await get_workflow_executor().execute(
-            workflow=workflow, inputs=inputs, user_id=user_id
+            workflow=workflow, inputs=inputs, user_id=effective
         )
 
     def rate_limiter_for(trigger):
@@ -1573,8 +1636,11 @@ def get_workflow_agent_deps() -> Dict[str, Any]:
         return None
 
     async def run_workflow(workflow, inputs, user_id=None):
+        # P0-1：user_id 由 tool_executor 请求级透传；缺省（系统派发）回退
+        # workflow 属主，保证知识库节点等用户级凭据校验不落空
+        effective = user_id or getattr(workflow, "user_id", None) or None
         return await get_workflow_executor().execute(
-            workflow=workflow, inputs=inputs, user_id=user_id
+            workflow=workflow, inputs=inputs, user_id=effective
         )
 
     return {
@@ -1696,7 +1762,7 @@ async def create_workflow_trigger(
     from neurova.llm.providers.secret_store import encrypt_api_key
 
     storage = _get_storage()
-    if not storage.get_workflow(workflow_id):
+    if not _owned_workflow_or_404(storage, workflow_id, current_user):
         raise HTTPException(status_code=404, detail="工作流不存在")
 
     try:
@@ -1842,8 +1908,7 @@ async def list_workflow_versions_api(
 ):
     """工作流版本历史（倒序；内容指纹快照）。"""
     storage = _get_storage()
-    if not storage.get_workflow(workflow_id):
-        raise HTTPException(status_code=404, detail="工作流不存在")
+    _owned_workflow_or_404(storage, workflow_id, current_user)
     return {"code": 0, "data": storage.list_workflow_versions(workflow_id)}
 
 
@@ -1855,8 +1920,7 @@ async def rollback_workflow_api(
 ):
     """回滚到指定版本（状态保持当前值；回滚本身产生新版本）。"""
     storage = _get_storage()
-    if not storage.get_workflow(workflow_id):
-        raise HTTPException(status_code=404, detail="工作流不存在")
+    _owned_workflow_or_404(storage, workflow_id, current_user, writable=True)
     if not storage.rollback_workflow(workflow_id, version):
         raise HTTPException(status_code=404, detail="版本不存在")
     return {
