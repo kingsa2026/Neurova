@@ -92,13 +92,13 @@ class TestVisibilityView:
         item = _create(client, "alice-secret")
 
         holder["user"] = dict(BOB)
-        titles = [i["title"] for i in client.get(PREFIX).json()]
+        titles = [i["title"] for i in (client.get(PREFIX)).json()["data"]["items"]]
         assert "alice-secret" not in titles
         # 不可见条目 404，不泄露存在性
         assert client.get(PREFIX + "/" + item["knowledge_id"]).status_code == 404
 
         holder["user"] = dict(ADMIN)
-        titles = [i["title"] for i in client.get(PREFIX).json()]
+        titles = [i["title"] for i in (client.get(PREFIX)).json()["data"]["items"]]
         assert "alice-secret" in titles
 
     def test_create_public_requires_admin(self, api):
@@ -112,7 +112,7 @@ class TestVisibilityView:
         assert resp.json()["visibility"] == "public"
 
         holder["user"] = dict(BOB)
-        titles = [i["title"] for i in client.get(PREFIX).json()]
+        titles = [i["title"] for i in (client.get(PREFIX)).json()["data"]["items"]]
         assert "p" in titles
 
     def test_scope_param(self, api):
@@ -122,9 +122,9 @@ class TestVisibilityView:
         _create(client, "pub", visibility="public")
 
         holder["user"] = dict(BOB)
-        assert [i["title"] for i in client.get(PREFIX, params={"scope": "public"}).json()] == ["pub"]
-        assert client.get(PREFIX, params={"scope": "private"}).json() == []
-        assert client.get(PREFIX, params={"scope": "all"}).json() != []
+        assert [i["title"] for i in (client.get(PREFIX, params={"scope": "public"})).json()["data"]["items"]] == ["pub"]
+        assert client.get(PREFIX, params={"scope": "private"}).json()["data"]["items"] == []
+        assert client.get(PREFIX, params={"scope": "all"}).json()["data"]["items"] != []
 
     def test_search_within_visible_view(self, api):
         client, holder, _app = api
@@ -156,7 +156,7 @@ class TestModifyGuards:
 
         holder["user"] = dict(BOB)
         # 可见可查
-        titles = [i["title"] for i in client.get(PREFIX).json()]
+        titles = [i["title"] for i in (client.get(PREFIX)).json()["data"]["items"]]
         assert "shared-doc" in titles
         # 只读：改/删被拒
         resp = client.put(
@@ -213,7 +213,7 @@ class TestPublicSubmission:
         assert resp.json()["visibility"] == "public"
 
         holder["user"] = dict(BOB)
-        titles = [i["title"] for i in client.get(PREFIX).json()]
+        titles = [i["title"] for i in (client.get(PREFIX)).json()["data"]["items"]]
         assert "to-public" in titles
 
     def test_reject_keeps_private(self, api):
@@ -231,7 +231,7 @@ class TestPublicSubmission:
         assert resp.json()["submission"]["status"] == "rejected"
 
         holder["user"] = dict(BOB)
-        titles = [i["title"] for i in client.get(PREFIX).json()]
+        titles = [i["title"] for i in (client.get(PREFIX)).json()["data"]["items"]]
         assert "rejected-doc" not in titles
 
     def test_review_requires_admin(self, api):
@@ -271,5 +271,5 @@ class TestImportAttribution:
         assert items[0]["owner_user_id"] == "1"
 
         holder["user"] = dict(BOB)
-        titles = [i["title"] for i in client.get(PREFIX).json()]
+        titles = [i["title"] for i in (client.get(PREFIX)).json()["data"]["items"]]
         assert items[0]["title"] not in titles

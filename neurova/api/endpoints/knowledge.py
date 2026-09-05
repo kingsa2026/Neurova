@@ -189,20 +189,47 @@ def _guard(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=str(exc))
 
 
-@router.get("", response_model=List[KnowledgeItem])
+@router.get("")
 async def get_knowledge(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
     agent_id: Optional[str] = Query(default=None, description="来源 agent 过滤（不再构成安全边界）"),
     category: Optional[str] = Query(default=None, description="分类筛选"),
     scope: str = Query(default="all", description="范围：all/public/private/shared"),
-    limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
-    offset: int = Query(default=0, ge=0, description="偏移量"),
+    # 双兼容分页：page/page_size（前端知识库页）与 limit/offset（其余调用方）。
+    # 2026-09-06 修复：此前只认 limit/offset，page/page_size 被静默忽略 →
+    # 列表恒只有前 20 条，第 21 条起"导入成功但列表没有"。
+    page: Optional[int] = Query(default=None, ge=1, description="页码（与 page_size 搭配）"),
+    page_size: Optional[int] = Query(default=None, ge=1, le=100, description="每页数量"),
+    limit: int = Query(default=20, ge=1, le=100, description="数量限制（limit/offset 语义）"),
+    offset: int = Query(default=0, ge=0, description="偏移量（limit/offset 语义）"),
 ):
-    """获取当前用户可见的知识条目（public + 我的私有 + 共享给我；admin 全量）"""
+    """获取当前用户可见的知识条目（public + 我的私有 + 共享给我；admin 全量）。
+
+    page/page_size 优先；未传时回退 limit/offset。响应为
+    {items, total, page, page_size} 信封（total 供前端分页器）。
+    """
     repo = _get_repository()
     items = repo.visible_items(current_user, scope=scope, category=category, agent_id=agent_id)
-    return [_item_response(i) for i in items[offset : offset + limit]]
+    total = len(items)
+    if page is not None or page_size is not None:
+        size = page_size or limit
+        start = ((page or 1) - 1) * size
+    else:
+        size = limit
+        start = offset
+    page_out = (start // size + 1) if size else 1
+    window = items[start : start + size]
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {
+            "items": [_item_response(i) for i in window],
+            "total": total,
+            "page": page_out,
+            "page_size": size,
+        },
+    }
 
 
 @router.post("/search", response_model=List[KnowledgeItem])
