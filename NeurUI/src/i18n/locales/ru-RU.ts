@@ -1408,6 +1408,9 @@ export default {
     light: 'Светлая тема',
     language: 'Язык',
     appearance: 'Внешний вид',
+    skinLabel: 'Скин',
+    skinCosmic: 'Оригинал',
+    skinIos: 'iOS стекло',
   },
   aigc: {
     title: 'Генерация AIGC',

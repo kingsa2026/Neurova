@@ -1421,6 +1421,9 @@ export default {
     light: '浅色模式',
     language: '语言',
     appearance: '外观',
+    skinLabel: '皮肤',
+    skinCosmic: '原版',
+    skinIos: 'iOS 液态玻璃',
   },
   aigc: {
     title: 'AIGC 生成',

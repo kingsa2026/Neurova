@@ -1408,6 +1408,9 @@ export default {
     light: 'Hellmodus',
     language: 'Sprache',
     appearance: 'Erscheinungsbild',
+    skinLabel: 'Design',
+    skinCosmic: 'Original',
+    skinIos: 'iOS Glass',
   },
   aigc: {
     title: 'AIGC-Generierung',

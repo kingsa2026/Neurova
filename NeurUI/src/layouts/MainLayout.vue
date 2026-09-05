@@ -266,6 +266,9 @@
         <!-- Global navigation moved to top bar -->
         <TopNavMenu />
         <div class="nr-header-right">
+          <!-- Skin switcher (cosmic 原版 ⇄ iOS 液态玻璃) -->
+          <SkinSwitcher />
+
           <!-- Theme toggle -->
           <ThemeToggle />
 
@@ -330,6 +333,7 @@ import {
   reportManualFeedback,
 } from '@/utils/errorReporter'
 import ThemeToggle from '@/components/ThemeToggle.vue'
+import SkinSwitcher from '@/components/SkinSwitcher.vue'
 import { canAccessModule } from '@/utils/permissions'
 import {
   DashboardOutlined, RobotOutlined, MessageOutlined, DatabaseOutlined,

@@ -1,23 +1,185 @@
 /* ═══════════════════════════════════════════════════════════════
-   Neurova 主题令牌 — Apple iOS 20 "Liquid Glass" 设计语言
+   Neurova 主题令牌 — 双皮肤 × 双明暗
    ─────────────────────────────────────────────────────────────
-   · iOS 深色（默认）— 纯黑背景 + SystemGray 表面 + Accent 蓝，
-     定义在 :root
-   · iOS 浅色 — systemGroupedBackground #f2f2f7 + 白色玻璃，
-     定义在 [data-theme='light']，仅覆盖颜色类令牌；
-     间距/圆角/字体/布局/动效等结构令牌两套主题共享。
+   · 皮肤维度 data-skin：
+       cosmic — 原版「星空玻璃拟态 / DeepSeek 浅色」风格（默认皮肤）
+       ios    — Apple iOS 20 "Liquid Glass" 风格（可切换皮肤）
+   · 明暗维度 data-theme：
+       dark（默认，写在皮肤块内）/ light（[data-theme='light'] 覆盖）
+   · JS 侧渲染保证：根节点恒有 data-skin 属性
+     （index.html 静态默认 data-skin="cosmic"，store.init() 校正），
+     因此无需 :root 兜底块，四组令牌各自独立、组件零改动。
    ─────────────────────────────────────────────────────────────
    映射关系（与 JS 侧 tokens.ts 保持同步）:
-     --nr-*                ↔  tokens.colors.*
-   颜色参考（Apple Human Interface Guidelines）:
-     深色: Accent #0a84ff / Cyan #64d2ff / Green #30d158
-           Orange #ff9f0a / Red #ff453a / Gray 层级 #1c1c1e→#2c2c2e
-     浅色: Accent #007aff / Cyan #5ac8fa / Green #34c759
-           Orange #ff9500 / Red #ff3b30 / Gray 层级 #f2f2f7→#ffffff
+     --nr-*  ↔  skinTokens.<skin>.<mode>.colors.*
    ═══════════════════════════════════════════════════════════════ */
 
+/* ─── 双皮肤共享结构令牌 ─── */
 :root {
-  /* ─── iOS 深色调色板 ─── */
+  /* Spacing（双皮肤一致） */
+  --nr-space-xs: 4px;
+  --nr-space-sm: 8px;
+  --nr-space-md: 16px;
+  --nr-space-lg: 24px;
+  --nr-space-xl: 32px;
+  --nr-space-2xl: 48px;
+}
+
+/* ─── ═══ Cosmic 皮肤（原版默认） · 深色 ═══ ───
+   星空玻璃拟态：深黑紫背景、Indigo 紫渐变品牌、DM Sans 字体 */
+:root[data-skin='cosmic'] {
+  /* Cosmic Palette (Dark) */
+  --nr-bg-deep: #06080f;
+  --nr-bg-base: #0a0e1a;
+  --nr-bg-surface: #111827;
+  --nr-bg-elevated: #1a2236;
+  --nr-bg-overlay: rgba(10, 14, 26, 0.85);
+  --nr-bg-inset: rgba(0, 0, 0, 0.2);
+  --nr-bg-inset-deep: rgba(0, 0, 0, 0.35);
+
+  /* Glass */
+  --nr-glass-rgb: 255, 255, 255;
+  --nr-glass-bg: rgba(255, 255, 255, 0.035);
+  --nr-glass-bg-hover: rgba(255, 255, 255, 0.06);
+  --nr-glass-bg-active: rgba(255, 255, 255, 0.1);
+  --nr-glass-border: rgba(255, 255, 255, 0.08);
+  --nr-glass-border-hover: rgba(255, 255, 255, 0.14);
+  --nr-glass-blur: 20px;
+  /* 玻璃高光（cosmic 保持低调光泽，原版观感不受影响） */
+  --nr-glass-specular-top: rgba(255, 255, 255, 0.25);
+  --nr-glass-highlight: rgba(255, 255, 255, 0.05);
+
+  /* Brand */
+  --nr-primary: #6366f1;
+  --nr-primary-light: #818cf8;
+  --nr-primary-dark: #4f46e5;
+  --nr-primary-soft: rgba(99, 102, 241, 0.12);
+  --nr-primary-soft-border: rgba(99, 102, 241, 0.2);
+  --nr-primary-ring: rgba(99, 102, 241, 0.15);
+  --nr-accent: #22d3ee;
+  --nr-accent-secondary: #a78bfa;
+  --nr-gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
+  --nr-gradient-accent: linear-gradient(135deg, #22d3ee 0%, #6366f1 100%);
+  --nr-gradient-warm: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+
+  /* Text */
+  --nr-text-primary: rgba(255, 255, 255, 0.95);
+  --nr-text-secondary: rgba(255, 255, 255, 0.7);
+  --nr-text-tertiary: rgba(255, 255, 255, 0.45);
+  --nr-text-muted: rgba(255, 255, 255, 0.25);
+
+  /* Status */
+  --nr-success: #10b981;
+  --nr-warning: #f59e0b;
+  --nr-error: #ef4444;
+  --nr-info: #3b82f6;
+
+  /* Borders & Shadows */
+  --nr-border: rgba(255, 255, 255, 0.08);
+  --nr-border-light: rgba(255, 255, 255, 0.04);
+  --nr-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --nr-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --nr-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --nr-shadow-glow: 0 0 20px rgba(99, 102, 241, 0.15);
+  --nr-panel-shadow: rgba(0, 0, 0, 0.3);
+
+  /* Surfaces */
+  --nr-header-bg: rgba(10, 14, 26, 0.5);
+  --nr-sidebar-bg: rgba(10, 14, 26, 0.7);
+  --nr-bubble-user: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.2));
+  --nr-bubble-user-border: rgba(99, 102, 241, 0.2);
+
+  /* ─── 结构令牌（cosmic 作为默认皮肤的基础值；ios 覆盖差异项） ─── */
+
+  /* Radius */
+  --nr-radius-sm: 6px;
+  --nr-radius-md: 10px;
+  --nr-radius-lg: 16px;
+  --nr-radius-xl: 24px;
+
+  /* Typography */
+  --nr-font-display: 'DM Sans', 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans KR', 'Noto Sans Arabic', 'Noto Sans Devanagari', system-ui, sans-serif;
+  --nr-font-body: 'DM Sans', 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans KR', 'Noto Sans Arabic', 'Noto Sans Devanagari', system-ui, sans-serif;
+  --nr-font-mono: 'Space Mono', 'Fira Code', monospace;
+
+  /* Layout */
+  --nr-header-h: 56px;
+  --nr-sidebar-w: 240px;
+  --nr-sidebar-collapsed-w: 64px;
+
+  /* Transitions */
+  --nr-transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --nr-transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  --nr-transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ─── Cosmic 皮肤（原版） · 浅色（DeepSeek 风格：白底浅灰、蓝主色、柔和阴影） ─── */
+:root[data-skin='cosmic'][data-theme='light'] {
+  /* Backgrounds */
+  --nr-bg-deep: #f5f6f7;
+  --nr-bg-base: #fafbfc;
+  --nr-bg-surface: #ffffff;
+  --nr-bg-elevated: #f0f2f5;
+  --nr-bg-overlay: rgba(255, 255, 255, 0.9);
+  --nr-bg-inset: #edeff2;
+  --nr-bg-inset-deep: #e6e9ee;
+
+  /* Glass（白底上使用深色半透明叠加） */
+  --nr-glass-rgb: 31, 35, 41;
+  --nr-glass-bg: rgba(31, 35, 41, 0.035);
+  --nr-glass-bg-hover: rgba(31, 35, 41, 0.06);
+  --nr-glass-bg-active: rgba(31, 35, 41, 0.09);
+  --nr-glass-border: rgba(31, 35, 41, 0.1);
+  --nr-glass-border-hover: rgba(31, 35, 41, 0.18);
+  /* 玻璃高光（浅色底上保持近乎不可见的弱光泽） */
+  --nr-glass-specular-top: rgba(255, 255, 255, 0.4);
+  --nr-glass-highlight: rgba(255, 255, 255, 0.22);
+
+  /* Brand（DeepSeek 蓝） */
+  --nr-primary: #4d6bfe;
+  --nr-primary-light: #3d5ce0;
+  --nr-primary-dark: #3b57e8;
+  --nr-primary-soft: rgba(77, 107, 254, 0.08);
+  --nr-primary-soft-border: rgba(77, 107, 254, 0.22);
+  --nr-primary-ring: rgba(77, 107, 254, 0.12);
+  --nr-accent: #0891b2;
+  --nr-accent-secondary: #7c3aed;
+  --nr-gradient-primary: linear-gradient(135deg, #4d6bfe 0%, #6a86ff 50%, #8ba3ff 100%);
+  --nr-gradient-accent: linear-gradient(135deg, #0891b2 0%, #4d6bfe 100%);
+  --nr-gradient-warm: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+
+  /* Text（深色墨迹，保证白底对比度） */
+  --nr-text-primary: rgba(31, 35, 41, 0.95);
+  --nr-text-secondary: rgba(31, 35, 41, 0.65);
+  --nr-text-tertiary: rgba(31, 35, 41, 0.45);
+  --nr-text-muted: rgba(31, 35, 41, 0.28);
+
+  /* Status（加深以保证浅底对比度） */
+  --nr-success: #059669;
+  --nr-warning: #d97706;
+  --nr-error: #dc2626;
+  --nr-info: #2563eb;
+
+  /* Borders & Shadows（轻柔浅阴影） */
+  --nr-border: rgba(31, 35, 41, 0.1);
+  --nr-border-light: rgba(31, 35, 41, 0.05);
+  --nr-shadow-sm: 0 1px 3px rgba(31, 35, 41, 0.05), 0 2px 8px rgba(31, 35, 41, 0.05);
+  --nr-shadow-md: 0 4px 16px rgba(31, 35, 41, 0.08);
+  --nr-shadow-lg: 0 8px 32px rgba(31, 35, 41, 0.12);
+  --nr-shadow-glow: 0 0 20px rgba(77, 107, 254, 0.12);
+  --nr-panel-shadow: rgba(31, 35, 41, 0.1);
+
+  /* Surfaces */
+  --nr-header-bg: rgba(255, 255, 255, 0.75);
+  --nr-sidebar-bg: rgba(255, 255, 255, 0.85);
+  --nr-bubble-user: #e9edfd;
+  --nr-bubble-user-border: rgba(77, 107, 254, 0.18);
+}
+
+/* ═══ iOS 皮肤（Liquid Glass） · 深色 ═══
+   Apple HIG：纯黑背景 + SystemGray 表面 + Accent 蓝 #0a84ff */
+:root[data-skin='ios'] {
+  /* iOS 深色调色板 */
   --nr-bg-deep: #000000;
   --nr-bg-base: #000000;
   --nr-bg-surface: #1c1c1e;
@@ -26,7 +188,7 @@
   --nr-bg-inset: rgba(255, 255, 255, 0.06);
   --nr-bg-inset-deep: rgba(0, 0, 0, 0.3);
 
-  /* Liquid Glass 材质（白色叠加） */
+  /* Liquid Glass 材质 */
   --nr-glass-rgb: 255, 255, 255;
   --nr-glass-bg: rgba(255, 255, 255, 0.07);
   --nr-glass-bg-hover: rgba(255, 255, 255, 0.12);
@@ -34,6 +196,9 @@
   --nr-glass-border: rgba(255, 255, 255, 0.12);
   --nr-glass-border-hover: rgba(255, 255, 255, 0.24);
   --nr-glass-blur: 24px;
+  /* Liquid Glass 高光：顶部 1px 白色边缘高光（specular rim）+ 内部折射光斑 */
+  --nr-glass-specular-top: rgba(255, 255, 255, 0.92);
+  --nr-glass-highlight: rgba(255, 255, 255, 0.09);
 
   /* Brand（iOS Accent 蓝） */
   --nr-primary: #0a84ff;
@@ -48,7 +213,7 @@
   --nr-gradient-accent: linear-gradient(135deg, #64d2ff 0%, #0a84ff 100%);
   --nr-gradient-warm: linear-gradient(135deg, #ff9f0a 0%, #ff453a 100%);
 
-  /* Labels（iOS 白色标签分层） */
+  /* Labels */
   --nr-text-primary: rgba(255, 255, 255, 0.96);
   --nr-text-secondary: rgba(255, 255, 255, 0.64);
   --nr-text-tertiary: rgba(255, 255, 255, 0.44);
@@ -60,7 +225,7 @@
   --nr-error: #ff453a;
   --nr-info: #0a84ff;
 
-  /* Borders & Shadows（iOS 白色玻璃投影） */
+  /* Borders & Shadows */
   --nr-border: rgba(255, 255, 255, 0.12);
   --nr-border-light: rgba(255, 255, 255, 0.06);
   --nr-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
@@ -75,7 +240,7 @@
   --nr-bubble-user: rgba(10, 132, 255, 0.32);
   --nr-bubble-user-border: rgba(10, 132, 255, 0.45);
 
-  /* ─── 结构令牌（两套主题共享） ─── */
+  /* ─── 结构令牌（覆盖 cosmic 基础值） ─── */
 
   /* Radius（iOS 大圆角体系） */
   --nr-radius-sm: 10px;
@@ -83,15 +248,7 @@
   --nr-radius-lg: 18px;
   --nr-radius-xl: 28px;
 
-  /* Spacing */
-  --nr-space-xs: 4px;
-  --nr-space-sm: 8px;
-  --nr-space-md: 16px;
-  --nr-space-lg: 24px;
-  --nr-space-xl: 32px;
-  --nr-space-2xl: 48px;
-
-  /* Typography（SF Pro 系统字体栈，Apple 平台原生 SF，其余平台系统 UI） */
+  /* Typography（SF Pro 系统字体栈） */
   --nr-font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'SF Pro', 'Segoe UI Variable', 'Segoe UI', 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   --nr-font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', 'Segoe UI Variable', 'Segoe UI', 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   --nr-font-mono: 'SF Mono', ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
@@ -107,8 +264,8 @@
   --nr-transition-slow: 0.55s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-/* ─── iOS 浅色主题（Liquid Glass light） ─── */
-[data-theme='light'] {
+/* ─── iOS 皮肤 · 浅色（Liquid Glass light） ─── */
+:root[data-skin='ios'][data-theme='light'] {
   /* Backgrounds（iOS systemGroupedBackground） */
   --nr-bg-deep: #f2f2f7;
   --nr-bg-base: #f2f2f7;
@@ -118,13 +275,16 @@
   --nr-bg-inset: rgba(120, 120, 128, 0.08);
   --nr-bg-inset-deep: rgba(120, 120, 128, 0.14);
 
-  /* Glass（iOS SystemGray 叠加，白底上可见） */
+  /* Glass（iOS SystemGray 叠加） */
   --nr-glass-rgb: 120, 120, 128;
   --nr-glass-bg: rgba(120, 120, 128, 0.1);
   --nr-glass-bg-hover: rgba(120, 120, 128, 0.16);
   --nr-glass-bg-active: rgba(120, 120, 128, 0.22);
   --nr-glass-border: rgba(60, 60, 67, 0.16);
   --nr-glass-border-hover: rgba(60, 60, 67, 0.28);
+  /* Liquid Glass 高光（浅色：亮白描边 + 更明显的折射光斑） */
+  --nr-glass-specular-top: rgba(255, 255, 255, 0.9);
+  --nr-glass-highlight: rgba(255, 255, 255, 0.5);
 
   /* Brand（iOS Accent 蓝 · 浅色 #007aff） */
   --nr-primary: #007aff;
@@ -139,7 +299,7 @@
   --nr-gradient-accent: linear-gradient(135deg, #5ac8fa 0%, #007aff 100%);
   --nr-gradient-warm: linear-gradient(135deg, #ff9500 0%, #ff3b30 100%);
 
-  /* Labels（iOS 纯黑标签分层） */
+  /* Labels */
   --nr-text-primary: rgba(0, 0, 0, 0.94);
   --nr-text-secondary: rgba(0, 0, 0, 0.62);
   --nr-text-tertiary: rgba(0, 0, 0, 0.44);
@@ -151,7 +311,7 @@
   --nr-error: #ff3b30;
   --nr-info: #007aff;
 
-  /* Borders & Shadows（柔和黑阴影，白色玻璃投影） */
+  /* Borders & Shadows */
   --nr-border: rgba(60, 60, 67, 0.18);
   --nr-border-light: rgba(60, 60, 67, 0.08);
   --nr-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);

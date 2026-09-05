@@ -1408,6 +1408,9 @@ export default {
     light: 'ライトモード',
     language: '言語',
     appearance: '外観',
+    skinLabel: 'スキン',
+    skinCosmic: 'オリジナル',
+    skinIos: 'iOS ガラス',
   },
   aigc: {
     title: 'AIGC 生成',
