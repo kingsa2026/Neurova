@@ -45,6 +45,9 @@
     <!-- Animated border gradient -->
     <div class="nr-glass-border" :style="borderStyle" />
 
+    <!-- Liquid Glass 顶部高光描边（specular rim，仅顶部 1.5px 可见） -->
+    <div class="nr-glass-specular" />
+
     <!-- Content -->
     <div class="nr-glass-content">
       <slot />
@@ -106,6 +109,7 @@ const backdropStyle = computed<CSSProperties>(() => ({
   backdropFilter: `blur(${props.blur}px) saturate(${props.saturation}%)`,
   WebkitBackdropFilter: `blur(${props.blur}px) saturate(${props.saturation}%)`,
   background: `
+    radial-gradient(ellipse 70% 42% at 24% 6%, var(--nr-glass-highlight) 0%, transparent 60%),
     radial-gradient(ellipse 120% 80% at 30% 10%, color-mix(in srgb, var(--nr-primary) 6%, transparent) 0%, transparent 60%),
     radial-gradient(ellipse 80% 60% at 70% 30%, color-mix(in srgb, var(--nr-accent) 4%, transparent) 0%, transparent 50%),
     linear-gradient(145deg, rgba(var(--nr-glass-rgb),${variantConfig.value.bg}) 0%, rgba(var(--nr-glass-rgb),${variantConfig.value.bg * 0.4}) 50%, rgba(var(--nr-glass-rgb),${variantConfig.value.bg * 0.7}) 100%)
@@ -130,5 +134,22 @@ const borderStyle = computed<CSSProperties>(() => ({
   position: relative; z-index: 4;
   padding: v-bind('props.padding');
   color: var(--nr-text-primary);
+}
+/* Liquid Glass 顶部高光描边：1.5px 高、中间亮两侧渐隐，
+   贴合圆角（border-radius: inherit），cosmic 皮肤自然退化为弱光泽 */
+.nr-glass-specular {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: inherit;
+  -webkit-mask: linear-gradient(to bottom, #000 0, #000 1.5px, transparent 1.5px);
+  mask: linear-gradient(to bottom, #000 0, #000 1.5px, transparent 1.5px);
+  background: linear-gradient(90deg,
+    transparent 0%,
+    var(--nr-glass-specular-top) 12%,
+    var(--nr-glass-specular-top) 88%,
+    transparent 100%);
+  opacity: 0.9;
 }
 </style>
