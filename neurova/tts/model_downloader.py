@@ -35,9 +35,9 @@ MODEL_REGISTRY = {
             "tokenizer.model",
         ],
         "size_hint": "~200MB",
-        # ModelScope 无 ONNX 权重镜像（只有 PyTorch 训练仓，文件格式不同，
-        # 拿来即错）——显式 None，国内源走 hf-mirror（尽力而为）
-        "ms_repo_id": None,
+        # ModelScope 官方 ONNX 镜像（2026-09-06 实证 13 文件与 HF 对齐，
+        # required_files 全覆盖）——国内首选源
+        "ms_repo_id": "OpenMOSS/MOSS-TTS-Nano-100M-ONNX",
     },
     "moss-audio-tokenizer": {
         "repo_id": "OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX",
@@ -52,7 +52,8 @@ MODEL_REGISTRY = {
             "moss_audio_tokenizer_decode_shared.data",
         ],
         "size_hint": "~50MB",
-        "ms_repo_id": None,  # 同上：ModelScope 只有 PyTorch 训练仓
+        # ModelScope 官方 ONNX 镜像（9 文件，encode/decode 权重齐全）
+        "ms_repo_id": "OpenMOSS/MOSS-Audio-Tokenizer-Nano-ONNX",
     },
     "bge-small-zh-v1.5": {
         "repo_id": "BAAI/bge-small-zh-v1.5",

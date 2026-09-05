@@ -30,11 +30,14 @@ class TestRegistryHasModelScope:
         # bge 在 ModelScope 有镜像（AI-ModelScope），国内硬可靠
         assert md.MODEL_REGISTRY["bge-small-zh-v1.5"].get("ms_repo_id")
 
-    def test_moss_onnx_no_mirror_marked_none(self):
-        # MOSS ONNX 仓在 ModelScope 只有 PyTorch 训练仓（文件格式不同），
-        # 显式标 None 防"拿错仓库"——国内源落 hf-mirror（尽力而为）
-        for name in ("moss-tts-nano", "moss-audio-tokenizer"):
-            assert md.MODEL_REGISTRY[name].get("ms_repo_id") is None, name
+    def test_moss_onnx_has_ms_mirror(self):
+        # 2026-09-06 实证：ModelScope 已上架官方 ONNX 镜像
+        # （OpenMOSS/MOSS-TTS-Nano-100M-ONNX 13 文件 / Audio-Tokenizer 9 文件，
+        #  required_files 与 HF 仓完全对齐）
+        assert md.MODEL_REGISTRY["moss-tts-nano"].get("ms_repo_id") == \
+            "OpenMOSS/MOSS-TTS-Nano-100M-ONNX"
+        assert md.MODEL_REGISTRY["moss-audio-tokenizer"].get("ms_repo_id") == \
+            "OpenMOSS/MOSS-Audio-Tokenizer-Nano-ONNX"
 
 
 class TestSourceResolution:
@@ -69,15 +72,15 @@ class TestSourceResolution:
             "bge-small-zh-v1.5", source="auto")
         assert calls == ["ms"]
 
-    def test_auto_moss_mirror_first_no_ms(self, tmp_path, monkeypatch):
-        """MOSS 无 MS 镜像：auto = hf-mirror → hf 直连（跳过 modelscope）。"""
+    def test_auto_moss_full_chain(self, tmp_path, monkeypatch):
+        """moss 现有 MS 镜像：auto 全链 = ms → mirror → hf（三源依次降级）。"""
         calls = []
         monkeypatch.setattr(md, "_download_via_modelscope", self._fail_engine("ms", calls))
         monkeypatch.setattr(md, "_download_via_hf_mirror", self._ok_engine("mirror", calls))
         monkeypatch.setattr(md, "_download_via_huggingface", self._fail_engine("hf", calls))
         md.ModelDownloader(base_dir=str(tmp_path)).ensure_model(
             "moss-tts-nano", source="auto")
-        assert calls == ["mirror"]
+        assert calls == ["ms", "mirror"]   # mirror 成功即止，不再落 hf
 
     def test_auto_ms_fail_falls_to_mirror_then_hf(self, tmp_path, monkeypatch):
         calls = []
