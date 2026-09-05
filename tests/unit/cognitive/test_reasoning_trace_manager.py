@@ -132,8 +132,9 @@ class TestReasoningTraceManagerAddStep:
 class TestReasoningTraceManagerFinishTrace:
     """finish_trace() 完成推理链并存储为记忆"""
 
-    def test_finish_trace_stores_memory(self):
-        """finish_trace() 将推理链存储为记忆"""
+    def test_finish_trace_stores_memory(self, monkeypatch):
+        """finish_trace() 将推理链存储为记忆（需显式开启 NEUROVA_TRACE_PERSIST）"""
+        monkeypatch.setenv("NEUROVA_TRACE_PERSIST", "1")
         from neurova.cognitive_layers.memory_layer.reasoning_trace_manager import ReasoningTraceManager
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
             CognitiveStorageEngine, UnifiedMemoryNode, MemoryType,
@@ -191,8 +192,9 @@ class TestReasoningTraceManagerFinishTrace:
 class TestReasoningTraceManagerMetadata:
     """finish_trace() 正确设置元数据"""
 
-    def test_finish_trace_metadata(self):
-        """finish_trace() 设置正确的元数据"""
+    def test_finish_trace_metadata(self, monkeypatch):
+        """finish_trace() 设置正确的元数据（需显式开启 NEUROVA_TRACE_PERSIST）"""
+        monkeypatch.setenv("NEUROVA_TRACE_PERSIST", "1")
         from neurova.cognitive_layers.memory_layer.reasoning_trace_manager import ReasoningTraceManager
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import CognitiveStorageEngine
         
@@ -303,8 +305,9 @@ class TestReasoningStepDataclass:
 class TestReasoningTraceManagerFullFlow:
     """ReasoningTraceManager 完整流程测试"""
 
-    def test_full_trace_flow(self):
-        """完整的推理链流程：开始 → 添加步骤 → 完成 → 检索"""
+    def test_full_trace_flow(self, monkeypatch):
+        """完整的推理链流程：开始 → 添加步骤 → 完成 → 检索（需显式开启 NEUROVA_TRACE_PERSIST）"""
+        monkeypatch.setenv("NEUROVA_TRACE_PERSIST", "1")
         from neurova.cognitive_layers.memory_layer.reasoning_trace_manager import ReasoningTraceManager
         from neurova.cognitive_layers.memory_layer.cognitive_storage_engine import (
             CognitiveStorageEngine, UnifiedMemoryNode, MemoryType,
