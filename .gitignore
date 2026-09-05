@@ -373,3 +373,6 @@ models/**/*.data
 /*_files.txt
 /batch_analysis.txt
 /tour-*.json
+
+# 安装器 WPF 壳构建产物（体积 400MB+ 超 GitHub 100MB 限制，构建可再生）
+NeurUI/src-tauri/installer-wpf/bin/installer-shell.exe
