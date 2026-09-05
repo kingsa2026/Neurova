@@ -183,31 +183,26 @@ VIAddVersionKey "Comments" "${PRODUCTNAME} — ${TAGLINE}. Homepage: ${HOMEPAGE}
 ; 0x48211A，实际渲染成 RGB(72,33,26) 咖啡棕（用户截图证实）。
 !define MUI_BGCOLOR "1A2148"
 !define MUI_TEXTCOLOR "F2F5FF"
-LangString nsWelcomeTitle ${LANG_ENGLISH} "Welcome to Neurova"
-LangString nsWelcomeTitle ${LANG_SIMPCHINESE} "欢迎使用 Neurova 智星"
-LangString nsWelcomeText ${LANG_ENGLISH} "Neurova (智星) is a personal AI agent with memory, emotion and self-evolution — fully open source, runs locally with your own model providers.$\r$\n$\r$\nOpen Source:$\r$\n  GitHub:  github.com/kingsa2026/Neurova$\r$\n  CNB:     cnb.cool/kingsa2026/neurova$\r$\nWebsite:  www.neurova.top$\r$\n$\r$\nIt is recommended to close other applications before continuing."
-LangString nsWelcomeText ${LANG_SIMPCHINESE} "Neurova 智星 —— 具备记忆、情感与自我进化的个人 AI 智能体，全程开源，本地运行，可自由接入你自己的模型服务。$\r$\n$\r$\n开源地址：$\r$\n  GitHub：  github.com/kingsa2026/Neurova$\r$\n  CNB：     cnb.cool/kingsa2026/neurova$\r$\n官方网站： www.neurova.top$\r$\n$\r$\n建议关闭其他程序后继续。"
-LangString nsFinishTitle ${LANG_ENGLISH} "Neurova Installation Complete"
-LangString nsFinishTitle ${LANG_SIMPCHINESE} "Neurova 智星 安装完成"
-LangString nsFinishText ${LANG_ENGLISH} "Setup has finished installing Neurova on your computer.$\r$\n$\r$\nWebsite: www.neurova.top$\r$\nGitHub:  github.com/kingsa2026/Neurova$\r$\n$\r$\nClick Finish to close this wizard."
-LangString nsFinishText ${LANG_SIMPCHINESE} "Neurova 智星 已成功安装到您的电脑。$\r$\n$\r$\n官方网站： www.neurova.top$\r$\n开源地址： github.com/kingsa2026/Neurova$\r$\n$\r$\n点击“完成”关闭本向导。"
-!define MUI_WELCOMEPAGE_TITLE "$(nsWelcomeTitle)"
-!define MUI_WELCOMEPAGE_TEXT "$(nsWelcomeText)"
+; 安装进度页同色系：深靛蓝底 + 浅色日志文字（统一整体风格）
+!define MUI_INSTFILESPAGE_COLORS "F2F5FF 1A2148"
+; 注意：LangString 必须在 MUI_LANGUAGE 之后定义（LANG_* 常量届时才存在），
+; 全部自定义文案统一放下方「语言块之后」区域。
 !define MUI_FINISHPAGE_TITLE "$(nsFinishTitle)"
 !define MUI_FINISHPAGE_TEXT "$(nsFinishText)"
 
 ; Installer pages, must be ordered as they appear
-; 1. Welcome Page
-!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
-!insertmacro MUI_PAGE_WELCOME
+; 1. 单页自定义安装器（Hero 品牌图 + 协议勾选 + 安装位置 + 一键安装）
+;    替代 MUI 欢迎页/许可页/目录页三段式（Driver Booster 式单页交互）
+Var FastInstall        ; 1=一键安装（跳过目录页） 0=自定义安装（走目录页）
+Var hCustDlg           ; 自定义页对话框句柄
+Var hHeroBitmap
+Var hEulaCheck
+Var hEulaLink
+Var hPathText
+Var hBtnInstall
+Page custom PageWelcome PageLeaveWelcome
 
-; 2. License Page (if defined)
-!if "${LICENSE}" != ""
-  !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
-  !insertmacro MUI_PAGE_LICENSE "${LICENSE}"
-!endif
-
-; 3. Install mode (if it is set to `both`)
+; 2. Install mode (if it is set to `both`)
 !if "${INSTALLMODE}" == "both"
   !define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
   !insertmacro MULTIUSER_PAGE_INSTALLMODE
@@ -440,23 +435,32 @@ Function PageAdminAccount
   Pop $R4
   ${IfThen} $(^RTL) = 1 ${|} nsDialogs::SetRTL $(^RTL) ${|}
 
-  ${NSD_CreateLabel} 0 2u 100% 8u "$(adminUsernameLabel)"
+  ; 品牌强调条（主色 #4D6BFE 细线，与单页主界面统一）
+  ${NSD_CreateLabel} 0 0 100% 3u ""
   Pop $R0
-  ${NSD_CreateText} 0 12u 100% 12u ""
+  SetCtlColors $R0 "" 0x4D6BFE
+
+  ${NSD_CreateLabel} 0 14u 100% 8u "$(adminUsernameLabel)"
+  Pop $R0
+  SetCtlColors $R0 0x1A2148 transparent
+  ${NSD_CreateText} 0 24u 100% 12u ""
   Pop $AdminUsername
 
-  ${NSD_CreateLabel} 0 30u 100% 8u "$(adminPasswordLabel)"
+  ${NSD_CreateLabel} 0 42u 100% 8u "$(adminPasswordLabel)"
   Pop $R0
-  ${NSD_CreatePassword} 0 40u 100% 12u ""
+  SetCtlColors $R0 0x1A2148 transparent
+  ${NSD_CreatePassword} 0 52u 100% 12u ""
   Pop $AdminPassword
 
-  ${NSD_CreateLabel} 0 58u 100% 8u "$(adminPassword2Label)"
+  ${NSD_CreateLabel} 0 70u 100% 8u "$(adminPassword2Label)"
   Pop $R0
-  ${NSD_CreatePassword} 0 68u 100% 12u ""
+  SetCtlColors $R0 0x1A2148 transparent
+  ${NSD_CreatePassword} 0 80u 100% 12u ""
   Pop $AdminPassword2
 
-  ${NSD_CreateLabel} 0 86u 100% 16u "$(adminPageHint)"
+  ${NSD_CreateLabel} 0 98u 100% 16u "$(adminPageHint)"
   Pop $R0
+  SetCtlColors $R0 0x8A93A8 transparent
 
   ${NSD_SetFocus} $AdminUsername
   nsDialogs::Show
@@ -548,10 +552,9 @@ Function ValidateAdminUsername
   Exch $R9
 FunctionEnd
 
-; 6. Choose install directory page
-!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipIfPassive
+; 6. Choose install directory page（一键安装模式下跳过——主页面已显示目标位置）
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipDirIfFastOrPassive
 !insertmacro MUI_PAGE_DIRECTORY
-
 ; 6. Start menu shortcut page
 Var AppStartMenuFolder
 !if "${STARTMENUFOLDER}" != ""
@@ -645,6 +648,26 @@ FunctionEnd
   !include "{{this}}"
 {{/each}}
 
+; Neurova 自定义文案（放在 MUI_LANGUAGE 之后：LANG_* 常量届时才存在）
+LangString nsWelcomeTitle ${LANG_ENGLISH} "Welcome to Neurova"
+LangString nsWelcomeTitle ${LANG_SIMPCHINESE} "欢迎使用 Neurova 智星"
+; 单页安装器标签（Hero 图内已烙介绍与地址，无需 nsWelcomeText）
+LangString nsEulaPre ${LANG_ENGLISH} "I have read and agree to the"
+LangString nsEulaPre ${LANG_SIMPCHINESE} "我已阅读并同意"
+LangString nsEulaLink ${LANG_ENGLISH} "License Agreement"
+LangString nsEulaLink ${LANG_SIMPCHINESE} "《软件许可协议》"
+LangString nsEulaWarn ${LANG_ENGLISH} "Please read and accept the license agreement first."
+LangString nsEulaWarn ${LANG_SIMPCHINESE} "请先阅读并勾选同意《软件许可协议》。"
+LangString nsPathLabel ${LANG_ENGLISH} "Install to:"
+LangString nsPathLabel ${LANG_SIMPCHINESE} "安装位置："
+LangString nsCustomInstall ${LANG_ENGLISH} "Custom Install"
+LangString nsCustomInstall ${LANG_SIMPCHINESE} "自定义安装"
+LangString nsInstallBtn ${LANG_ENGLISH} "Install Now"
+LangString nsInstallBtn ${LANG_SIMPCHINESE} "一键安装"
+LangString nsFinishTitle ${LANG_ENGLISH} "Neurova Installation Complete"
+LangString nsFinishTitle ${LANG_SIMPCHINESE} "Neurova 智星 安装完成"
+LangString nsFinishText ${LANG_ENGLISH} "Setup has finished installing Neurova on your computer.$\r$\n$\r$\nWebsite: www.neurova.top$\r$\nGitHub:  github.com/kingsa2026/Neurova$\r$\n$\r$\nClick Finish to close this wizard."
+LangString nsFinishText ${LANG_SIMPCHINESE} "Neurova 智星 已成功安装到您的电脑。$\r$\n$\r$\n官方网站： www.neurova.top$\r$\n开源地址： github.com/kingsa2026/Neurova$\r$\n$\r$\n点击“完成”关闭本向导。"
 ; Neurova 首装管理员账号页文案（SimpChinese + English；其他语言回退 English）
 LangString adminPageTitle        ${LANG_ENGLISH} "Create Admin Account"
 LangString adminPageSubtitle     ${LANG_ENGLISH} "This is the first account and will have administrator privileges"
@@ -1149,6 +1172,161 @@ FunctionEnd
 
 Function SkipIfPassive
   ${IfThen} $PassiveMode = 1  ${|} Abort ${|}
+FunctionEnd
+
+; ==================== 单页自定义安装器 ====================
+; 参考现代单页安装器（Hero 品牌图 + 协议勾选 + 一键安装）。
+; 配色 = 应用品牌深靛蓝（#0A0E1F→#1A2148 渐变 + 主色 #4D6BFE 按钮位图）。
+; Hero 位图内烙品牌介绍与开源地址/官网（中英双图按安装器语言挑选）。
+; 彩色大按钮 = BS_BITMAP 原生位图按钮（无第三方插件）；点击即推进向导。
+
+Function SkipDirIfFastOrPassive
+  ${IfThen} $PassiveMode = 1 ${|} Abort ${|}
+  ${IfThen} $FastInstall = 1 ${|} Abort ${|}
+FunctionEnd
+
+Function OnEulaLinkClick
+  ; 协议链接 → 官网法律页（与前端 /terms 同源）
+  ExecShell "open" "https://www.neurova.top/terms"
+FunctionEnd
+
+Function OnCustomInstallClick
+  ; 自定义安装：走目录页（Driver Booster 式次级入口）
+  StrCpy $FastInstall 0
+  GetDlgItem $0 $HWNDPARENT 1
+  SendMessage $0 ${BM_CLICK} 0 0
+FunctionEnd
+
+Function OnInstallBtnClick
+  ; 一键安装：协议校验 → 推进（FastInstall=1 跳过目录页）
+  ${NSD_GetState} $hEulaCheck $0
+  ${If} $0 <> ${BST_CHECKED}
+    MessageBox MB_ICONEXCLAMATION "$(nsEulaWarn)"
+    Abort
+  ${EndIf}
+  GetDlgItem $0 $HWNDPARENT 1
+  SendMessage $0 ${BM_CLICK} 0 0
+FunctionEnd
+
+Function PageWelcome
+  StrCpy $FastInstall 1
+
+  ; 隐藏 MUI header（单页安装器整窗展示）。MUI2 header 控件 ID：
+  ; 1037=标题 1038=副标题 1039=位图 1256=branding（Interface.nsh 实证）
+  GetDlgItem $R0 $HWNDPARENT 1037
+  ShowWindow $R0 0
+  GetDlgItem $R0 $HWNDPARENT 1038
+  ShowWindow $R0 0
+  GetDlgItem $R0 $HWNDPARENT 1039
+  ShowWindow $R0 0
+  GetDlgItem $R0 $HWNDPARENT 1256
+  ShowWindow $R0 0
+
+  ; 页面 dialog 拉到父窗口 client 全区（含 header 腾出的空间）——
+  ; 否则顶部残留 header 高度的空白带
+  System::Alloc 16
+  Pop $R9
+  System::Call "user32::GetClientRect(p $HWNDPARENT, p $R9)"
+  System::Call "*$R9(i, i, i .R8, i .R7)"
+  System::Free $R9
+
+  nsDialogs::Create 1018
+  Pop $hCustDlg
+  SetCtlColors $hCustDlg "" 0xFFFFFF  ; 底部白条（Hero 覆盖上部）
+  System::Call "user32::SetWindowPos(p $hCustDlg, p 0, i 0, i 0, i $R8, i $R7, i 0x10)"
+
+  ; Hero 位图 1:1 贴（496x150，占页面上部；中英按安装器语言挑选）。
+  ; 编译期路径：bundler 的 makensis cwd = target/release/nsis/x64，
+  ; 相对上行四级即 src-tauri/nsis/assets；独立验证时 expand 脚本注入绝对路径。
+  File /oname=$PLUGINSDIR\hero.bmp "..\..\..\..\nsis\assets\hero_zh.bmp"
+  File /oname=$PLUGINSDIR\hero_en.bmp "..\..\..\..\nsis\assets\hero_en.bmp"
+  ${NSD_CreateBitmap} 0 0 1u 1u ""
+  Pop $hHeroBitmap
+  ${NSD_SetImage} $hHeroBitmap "$PLUGINSDIR\hero.bmp" "$PLUGINSDIR\hero.bmp"
+  ${If} $LANGUAGE <> ${LANG_SIMPCHINESE}
+    ${NSD_SetImage} $hHeroBitmap "$PLUGINSDIR\hero_en.bmp" "$PLUGINSDIR\hero_en.bmp"
+  ${EndIf}
+
+  ; 像素布局（页面 client 尺寸运行时获取，DPI 安全）
+  System::Alloc 16
+  Pop $R1
+  System::Call "user32::GetClientRect(p $hCustDlg, p $R1)"
+  System::Call "*$R1(i, i, i .R2, i .R3)"   ; R2=页宽 R3=页高
+  System::Free $R1
+  ; Hero 贴满页宽、按位图纵横比定高（496:150）
+  IntOp $R4 $R2 * 150
+  IntOp $R4 $R4 / 496
+  System::Call "user32::SetWindowPos(p $hHeroBitmap, p 0, i 0, i 0, i $R2, i $R4, i 0x10)"
+
+  ; 下部控件区基线 = Hero 底 + 10px
+  IntOp $R5 $R4 + 10
+
+  ${NSD_CreateCheckBox} 1u 1u 1u 1u "$(nsEulaPre)"
+  Pop $hEulaCheck
+  System::Call "user32::SetWindowPos(p $hEulaCheck, p 0, i 14, i $R5, i 250, i 22, i 0x10)"
+  ${NSD_CreateLink} 1u 1u 1u 1u "$(nsEulaLink)"
+  Pop $hEulaLink
+  ${NSD_OnClick} $hEulaLink OnEulaLinkClick
+  SetCtlColors $hEulaLink 0x4D6BFE transparent
+  IntOp $1 $R2 - 210
+  System::Call "user32::SetWindowPos(p $hEulaLink, p 0, i $1, i $R5, i 196, i 22, i 0x10)"
+
+  ; 安装位置行（只读展示；修改走「自定义安装」）
+  IntOp $R5 $R5 + 32
+  ${NSD_CreateLabel} 1u 1u 1u 1u "$(nsPathLabel)"
+  Pop $0
+  SetCtlColors $0 0x1A2148 transparent
+  System::Call "user32::SetWindowPos(p $0, p 0, i 14, i $R5, i 66, i 22, i 0x10)"
+  ${NSD_CreateText} 1u 1u 1u 1u "$INSTDIR"
+  Pop $hPathText
+  SendMessage $hPathText ${EM_SETREADONLY} 1 0
+  IntOp $1 $R2 - 24
+  IntOp $2 $R5 - 2
+  System::Call "user32::SetWindowPos(p $hPathText, p 0, i 84, i $2, i $1, i 24, i 0x10)"
+
+  ; 一键安装大按钮（原生位图按钮 240x58 品牌主色胶囊，1:1 不裁切；
+  ; 位图归控件所有，不 DeleteObject——删了即空白）
+  File /oname=$PLUGINSDIR\btn_install.bmp "..\..\..\..\nsis\assets\btn_install.bmp"
+  ${NSD_CreateButton} 1u 1u 1u 1u "$(nsInstallBtn)"
+  Pop $hBtnInstall
+  ${NSD_OnClick} $hBtnInstall OnInstallBtnClick
+  System::Call "user32::GetWindowLong(p $hBtnInstall, i -16) p .r0"
+  IntOp $0 $0 | 0x80            ; BS_BITMAP
+  System::Call "user32::SetWindowLong(p $hBtnInstall, i -16, p r0)"
+  System::Call 'user32::LoadImage(p 0, t "$PLUGINSDIR\btn_install.bmp", i 0, i 0, i 0, i 0x10) p .s' ; LR_LOADFROMFILE
+  Pop $1
+  SendMessage $hBtnInstall ${BM_SETIMAGE} ${IMAGE_BITMAP} $1
+  IntOp $R5 $R5 + 34
+  IntOp $0 $R2 - 200
+  IntOp $0 $0 / 2
+  System::Call "user32::SetWindowPos(p $hBtnInstall, p 0, i $0, i $R5, i 200, i 48, i 0x10)"
+
+  ; 自定义安装小链接（按钮正下方居中，Driver Booster 式次级入口）
+  ${NSD_CreateLink} 1u 1u 1u 1u "$(nsCustomInstall)"
+  Pop $0
+  ${NSD_OnClick} $0 OnCustomInstallClick
+  SetCtlColors $0 0x8A93A8 transparent
+  IntOp $R5 $R5 + 52
+  IntOp $2 $R2 - 160
+  IntOp $2 $2 / 2
+  System::Call "user32::SetWindowPos(p $0, p 0, i $2, i $R5, i 160, i 20, i 0x10)"
+
+  ${NSD_SetFocus} $hBtnInstall
+  nsDialogs::Show
+FunctionEnd
+
+Function PageLeaveWelcome
+  ${NSD_GetState} $hEulaCheck $0
+  ${If} $0 <> ${BST_CHECKED}
+    MessageBox MB_ICONEXCLAMATION "$(nsEulaWarn)"
+    Abort
+  ${EndIf}
+  ${NSD_GetText} $hPathText $0
+  ${If} $0 == ""
+    StrCpy $INSTDIR "$INSTDIR"
+  ${Else}
+    StrCpy $INSTDIR $0
+  ${EndIf}
 FunctionEnd
 Function un.SkipIfPassive
   ${IfThen} $PassiveMode = 1  ${|} Abort ${|}
