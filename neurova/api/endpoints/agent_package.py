@@ -403,13 +403,8 @@ async def import_agent_package(
             owner_user_id=current_user.get("user_id"),
             llm_model=str(agent_face.get("model") or "gpt-4"),
             llm_provider=str(agent_face.get("provider") or ""),
+            description=str(agent_face.get("description") or ""),
         )
-        # description 在 AgentConfig 上不是声明字段（workspace 文件此前
-        # 恒空串、update 端点的 hasattr 守卫也静默跳过）——但 AgentConfig
-        # 非 slots 类，动态属性可落：setattr 后 _save_agent_config 的
-        # getattr 能读到，agent_to_info 也能在列表接口回显。personality/
-        # constitution 是真字段，直接赋值。
-        config.description = str(agent_face.get("description") or "")
         if hasattr(config, "personality"):
             config.personality = str(agent_face.get("personality") or "")
         if hasattr(config, "constitution"):
