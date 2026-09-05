@@ -254,3 +254,62 @@ class TestImportUrl:
         assert status == "html"
         assert len(items) == 1
         assert "Remote body content" in items[0]["content"]
+
+
+class TestListPaginationContract:
+    """2026-09-06 分页契约修复：GET /knowledge 此前只认 limit/offset，
+    前端传的 page/page_size 被静默忽略 → 列表恒只有前 20 条（默认 limit），
+    第 21 条起「导入成功但列表没有」。现 page/page_size 与 limit/offset 双兼容，
+    并返回 {items,total,page,page_size} 信封。"""
+
+    @pytest.mark.asyncio
+    async def test_page_params_are_honored(self, monkeypatch, tmp_path):
+        from neurova.knowledge.repository import KnowledgeRepository
+
+        repo = KnowledgeRepository(str(tmp_path / "kb"))
+        repo._items.clear()
+        for i in range(25):
+            repo.create_knowledge(
+                agent_id="default", title=f"item-{i}", content="c",
+                owner_user_id="1", detect_conflict=False,
+            )
+        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+
+        class FakeRequest:
+            app = None
+
+        result = await kb.get_knowledge(
+            request=FakeRequest(), current_user={"user_id": "1", "role": "admin"},
+            agent_id="default", category=None, scope="all",
+            page=2, page_size=20, limit=20, offset=0,
+        )
+        # 信封契约
+        assert result["data"]["total"] == 25
+        assert result["data"]["page"] == 2
+        assert len(result["data"]["items"]) == 5
+        assert result["data"]["items"][0].title == "item-20"
+
+    @pytest.mark.asyncio
+    async def test_limit_offset_still_works(self, monkeypatch, tmp_path):
+        """旧调用方（limit/offset 裸数组语义）保持兼容。"""
+        from neurova.knowledge.repository import KnowledgeRepository
+
+        repo = KnowledgeRepository(str(tmp_path / "kb"))
+        repo._items.clear()
+        for i in range(5):
+            repo.create_knowledge(
+                agent_id="default", title=f"old-{i}", content="c",
+                owner_user_id="1", detect_conflict=False,
+            )
+        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+
+        class FakeRequest:
+            app = None
+
+        result = await kb.get_knowledge(
+            request=FakeRequest(), current_user={"user_id": "1", "role": "admin"},
+            agent_id="default", category=None, scope="all",
+            page=None, page_size=None, limit=2, offset=1,
+        )
+        assert len(result["data"]["items"]) == 2
+        assert result["data"]["items"][0].title == "old-1"

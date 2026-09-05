@@ -82,7 +82,7 @@ class TestAdminDeletePublicSubmission:
         # 公共库视角立即消失
         holder["user"] = dict(ADMIN)
         public_titles = [
-            i["title"] for i in client.get(PREFIX, params={"scope": "public"}).json()
+            i["title"] for i in client.get(PREFIX, params={"scope": "public"}).json()["data"]["items"]
         ]
         assert "公共文档" not in public_titles
 
