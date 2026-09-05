@@ -333,6 +333,7 @@ async def create_agent(
             owner_user_id=current_user.get("user_id"),
             llm_model=body.model or "gpt-4",
             llm_provider=body.provider or body.config.get("provider", "") if body.config else "",
+            description=body.description or "",
         )
 
         agent = Agent(config=config)
