@@ -55,7 +55,6 @@ models/*.onnx
 models/*.safetensors
 
 # 前端文件（生产模式下由后端服务静态文件）
-neuUI/
 NeurUI/
 node_modules/
 
