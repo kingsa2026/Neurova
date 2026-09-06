@@ -576,6 +576,27 @@ async def post_console_chat(
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
                 flush_events.append({"type": "done", "session_id": session_id})
+                # QwenPaw turn_usage 对齐:done 之前发一次真实 usage 事件
+                # (入账已在 MultiModelLLMClient 下沉,此处只读 last_call 不双计;
+                #  无记录时不发——不伪造数据)
+                try:
+                    from neurova.core.usage_accounting import get_usage_accounting
+
+                    last = get_usage_accounting().last_call()
+                    if last:
+                        usage_event = {
+                            "type": "usage",
+                            "model": last.get("model", ""),
+                            "provider": last.get("provider", ""),
+                            "prompt_tokens": int(last.get("prompt_tokens", 0)),
+                            "completion_tokens": int(last.get("completion_tokens", 0)),
+                            "total_tokens": int(last.get("total_tokens", 0)),
+                            "estimated": bool(last.get("estimated", False)),
+                        }
+                        flush_events.append(usage_event)
+                        yield f"data: {json.dumps(usage_event, ensure_ascii=False)}\n\n"
+                except Exception:  # noqa: BLE001 — usage 读取失败不影响 done
+                    pass
                 _buffer_replay_events(session_id, flush_events)
                 yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
                 buf = _replay_buffers.get(session_id)
@@ -643,10 +664,35 @@ async def get_chat_sessions(request: Request, agent_id: str = Query(default=""))
             "created_at": s.get("created_at", ""),
             "updated_at": s.get("updated_at", ""),
             "pinned": bool(s.get("pinned", False)),
+            "sort_order": int(s.get("sort_order", 0) or 0),
         }
         for s in sessions
     ]
     return {"code": 0, "message": "success", "data": {"sessions": summaries, "total": len(summaries)}}
+
+
+class ReorderSessionsRequest(BaseModel):
+    agent_id: str = ""
+    ordered_ids: typing.List[str]
+
+
+@router.post("/chat/sessions/reorder")
+async def reorder_chat_sessions(body: ReorderSessionsRequest, request: Request):
+    """按用户拖拽顺序持久化会话排序（QwenPaw /chats/groups/order 对齐）。"""
+    user_id = _get_user_id(request)
+    repo = get_session_repository()
+    ordered_ids = [sid for sid in (body.ordered_ids or []) if sid]
+    if not ordered_ids:
+        raise HTTPException(status_code=400, detail="ordered_ids is required")
+    # 越权防护:逐一校验会话归属(空 user_id 会话视为共享,与 delete 端点口径一致)
+    sessions = repo.list_sessions(agent_id=body.agent_id)
+    visible = {s.get("session_id") or s.get("id", "") for s in sessions}
+    unknown = [sid for sid in ordered_ids if sid not in visible]
+    if unknown:
+        raise HTTPException(status_code=404, detail=f"Sessions not found: {unknown[:5]}")
+    if not repo.set_sessions_sort_order(agent_id=body.agent_id, ordered_ids=ordered_ids):
+        raise HTTPException(status_code=500, detail="Failed to persist session order")
+    return {"code": 0, "message": "ok", "data": {"agent_id": body.agent_id, "ordered_ids": ordered_ids}}
 
 
 @router.delete("/chat/sessions/{session_id}")
@@ -1033,6 +1079,92 @@ async def post_chat_feedback(body: FeedbackRequest, request: Request):
                 logger.warning("标注闭环处理失败: %s", e)
 
     return {"code": 0, "message": "Feedback saved"}
+
+
+class ForkSessionRequest(BaseModel):
+    # 截取定位键：复制该时间戳（含）之前的全部历史到新会话；缺省=整个会话
+    until_timestamp: typing.Optional[str] = None
+    title: typing.Optional[str] = None
+
+
+@router.post("/chat/sessions/{session_id}/fork")
+async def fork_chat_session(session_id: str, body: ForkSessionRequest, request: Request):
+    """会话分叉（ZCode fork 对齐）：按 until_timestamp 截取历史复制为新会话。
+
+    双路定位（timestamp / metadata.client_timestamp）与删除轮次同一套规则；
+    分叉出的新会话独立演进，原会话不动。agent 内存历史不注入（由新会话
+    首轮对话按正常链路加载 session 历史）。
+    """
+    user_id = _get_user_id(request)
+    repo = get_session_repository()
+    target = _find_session_target(repo, session_id, user_id)
+    agent_id = target.get("agent_id", "")
+
+    history = repo.get_history(agent_id=agent_id, session_id=session_id)
+    if body.until_timestamp:
+        cut = None
+        for idx, msg in enumerate(history):
+            ts = msg.get("timestamp", "")
+            meta_ts = (msg.get("metadata") or {}).get("client_timestamp", "")
+            if ts == body.until_timestamp or (meta_ts and meta_ts == body.until_timestamp):
+                cut = idx + 1  # 含该条
+                break
+        if cut is None:
+            raise HTTPException(status_code=400, detail="until_timestamp not found in session history")
+        copied = history[:cut]
+    else:
+        copied = list(history)
+
+    fork_title = (body.title or "").strip() or f"{target.get('title', '新对话')} (分叉)"
+    new_session_id = repo.create_session(agent_id=agent_id, user_id=user_id, title=fork_title)
+    for msg in copied:
+        repo.save_message(
+            agent_id=agent_id,
+            session_id=new_session_id,
+            role=str(msg.get("role", "user")),
+            content=str(msg.get("content", "")),
+            metadata=(msg.get("metadata") or None) or None,
+        )
+
+    return {
+        "code": 0,
+        "message": "Session forked",
+        "data": {
+            "new_session_id": new_session_id,
+            "copied_messages": len(copied),
+            "title": fork_title,
+        },
+    }
+
+
+class CheckpointRequest(BaseModel):
+    session_id: str
+    timestamp: str
+    # True=设钩子；False=移除
+    active: bool
+
+
+@router.post("/chat/checkpoint")
+async def set_chat_checkpoint(body: CheckpointRequest, request: Request):
+    """消息钩子/检查点（ZCode checkpoint 对齐）：写消息 metadata.checkpoint。
+
+    前端在消息操作条设/撤钩子；加载历史时读取 metadata 渲染锚点标记。
+    复用 feedback 的双路定位契约。
+    """
+    user_id = _get_user_id(request)
+    repo = get_session_repository()
+    target = _find_session_target(repo, body.session_id, user_id)
+    agent_id = target.get("agent_id", "")
+
+    ok = repo.update_message_metadata(
+        agent_id=agent_id,
+        session_id=body.session_id,
+        timestamp=body.timestamp,
+        metadata_patch={"checkpoint": bool(body.active)},
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Message not found")
+    return {"code": 0, "message": "ok", "data": {"checkpoint": bool(body.active)}}
 
 
 @router.get("/chat/feedback/stats")
