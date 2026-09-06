@@ -43,6 +43,8 @@ class ProviderInfo(BaseModel):
     status: str = "unknown"
     models_count: int = 0
     health: str = "unknown"
+    # 聊天模型切换器过滤依据：未配置 key 的种子服务商模型不可联通
+    api_key_configured: bool = False
 
 
 class CreateProviderRequest(BaseModel):
@@ -191,6 +193,7 @@ async def list_providers(request: Request, current_user: Dict[str, Any] = Depend
                             is_active=getattr(provider, "enabled", False),
                             status=getattr(provider, "health_status", "unknown"),
                             models_count=len(getattr(provider, "models", [])),
+                            api_key_configured=bool(getattr(provider, "api_key", None)),
                         )
                     )
         except Exception as e:
@@ -275,6 +278,7 @@ async def get_provider(
                     is_active=getattr(provider, "enabled", False),
                     status=getattr(provider, "health_status", "unknown"),
                     models_count=len(getattr(provider, "models", [])),
+                    api_key_configured=bool(getattr(provider, "api_key", None)),
                 )
     except Exception as e:
         logger.warning("Get provider error: %s", e)
@@ -313,6 +317,7 @@ async def create_provider(
                 base_url=getattr(provider, "base_url", ""),
                 is_active=getattr(provider, "enabled", True),
                 status="created",
+                api_key_configured=bool(getattr(provider, "api_key", None)),
             )
         else:
             logger.error("Provider manager does not have add_provider method")
@@ -378,6 +383,7 @@ async def update_provider(
                         base_url=getattr(provider, "base_url", ""),
                         is_active=getattr(provider, "enabled", False),
                         status="updated",
+                        api_key_configured=bool(getattr(provider, "api_key", None)),
                     )
                 return ProviderInfo(
                     provider_id=provider_id,
