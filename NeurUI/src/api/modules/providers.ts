@@ -12,6 +12,9 @@ export interface Provider {
   api_key?: string
   api_key_configured?: boolean
   enabled?: boolean
+  /** GET /providers 真实字段：启用态与最近健康检查结果（healthy/unhealthy/unknown） */
+  is_active?: boolean
+  status?: string
   models?: string[]
   config?: Record<string, unknown>
 }

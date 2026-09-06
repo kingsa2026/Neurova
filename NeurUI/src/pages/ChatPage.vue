@@ -443,20 +443,18 @@
               style="display: none"
               @change="handleFileSelect"
             />
-            <button class="nr-composer-pill nr-composer-pill--icon" :title="t('chat.upload')" @click="fileInputRef?.click()">＋</button>
+            <button class="nr-composer-pill nr-composer-pill--icon" :title="t('chat.upload')" @click="fileInputRef?.click()"><svg class="nr-ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
             <button
               class="nr-composer-pill nr-composer-pill--icon"
               :class="{ 'is-active': computerPanelState.open }"
               :title="t('computerPanel.title')"
-              @click="toggleComputerPanel"
-            >🖥</button>
+              @click="toggleComputerPanel"><svg class="nr-ico" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></button>
             <button
               v-if="asrAvailable"
               class="nr-composer-pill nr-composer-pill--icon"
               :class="{ 'is-active': isRecording }"
               :title="t('chat.voice')"
-              @click="toggleRecording"
-            >{{ isRecording ? '🔴' : '🎙️' }}</button>
+              @click="toggleRecording"><svg v-if="isRecording" class="nr-ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="currentColor" stroke="none"/></svg><svg v-else class="nr-ico" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3"/></svg></button>
           </div>
           <div class="nr-composer-right">
             <ContextUsageIndicator
@@ -465,7 +463,7 @@
             />
             <a-dropdown :trigger="['click']" placement="topRight">
               <button class="nr-composer-pill" :title="t('chat.thinkingEffort')">
-                <span>🧠</span>
+                <svg class="nr-ico" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>
                 <span>{{ currentThinkingLabel }}</span>
                 <span class="nr-composer-pill-arrow">▾</span>
               </button>
@@ -488,38 +486,80 @@
               class="nr-composer-pill nr-composer-pill--icon"
               :class="{ 'is-active': autoVoice }"
               :title="t('chat.autoVoiceTitle')"
-              @click="toggleAutoVoice"
-            >
-              {{ autoVoice ? '🔊' : '🔇' }}
+              @click="toggleAutoVoice">
+              <svg v-if="autoVoice" class="nr-ico" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+              <svg v-else class="nr-ico" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4z"/><path d="M22 9l-6 6M16 9l6 6"/></svg>
             </button>
-            <a-dropdown :trigger="['click']" placement="topRight">
-              <button class="nr-composer-pill nr-composer-pill--model" :title="t('agent.model')">
+            <div class="nr-model-menu-wrap">
+              <button
+                class="nr-composer-pill nr-composer-pill--model"
+                :title="t('agent.model')"
+                @click="modelMenuOpen = !modelMenuOpen"
+              >
                 <span class="nr-composer-pill-label">{{ selectedModelLabel }}</span>
                 <span class="nr-composer-pill-arrow">▾</span>
               </button>
-              <template #overlay>
-                <div class="nr-glass-dropdown nr-composer-model-menu">
-                  <div
-                    v-for="opt in chatModelOptions"
-                    :key="opt.value || 'auto'"
-                    class="nr-glass-dropdown-item nr-composer-menu-item"
-                    :class="{ 'is-active': selectedModel === opt.value }"
-                    @click="selectedModel = opt.value"
-                  >
-                    <span class="nr-composer-pill-label">{{ opt.label }}</span>
-                    <span v-if="selectedModel === opt.value" class="nr-composer-check">✓</span>
+              <template v-if="modelMenuOpen">
+                <div class="nr-model-backdrop" @click="modelMenuOpen = false" />
+                <!-- 二级级联：左=服务商（含自动路由），右=该服务商可联通模型，底=管理模型 -->
+                <div class="nr-model-cascade">
+                  <div class="nr-model-cascade-left">
+                    <div
+                      class="nr-model-provider"
+                      :class="{ 'is-active': selectedModel === '' }"
+                      @click="pickModel('')"
+                    >
+                      <span class="nr-model-provider-name">{{ t('ui.autoRoute') }}</span>
+                      <span v-if="selectedModel === ''" class="nr-composer-check">✓</span>
+                    </div>
+                    <div class="nr-model-cascade-divider" />
+                    <div
+                      v-for="g in chatModelGroups"
+                      :key="g.provider_id"
+                      class="nr-model-provider"
+                      :class="{ 'is-active': activeProviderId === g.provider_id }"
+                      @mouseenter="activeProviderId = g.provider_id"
+                      @click="activeProviderId = g.provider_id"
+                    >
+                      <span class="nr-model-provider-name">{{ g.provider_name }}</span>
+                      <span class="nr-model-provider-count">{{ g.models.length }}</span>
+                      <span class="nr-model-provider-arrow">›</span>
+                    </div>
+                    <div v-if="chatModelGroups.length === 0" class="nr-model-empty">
+                      {{ t('chat.noConnectableModels') }}
+                    </div>
+                  </div>
+                  <div class="nr-model-cascade-footer" @click="gotoModelsManage">
+                    <svg class="nr-ico" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    <span>{{ t('chat.manageModels') }}</span>
+                  </div>
+                  <!-- 独立模型子菜单：固定高度+内部滚动，切换服务商不改变主菜单尺寸 -->
+                  <div v-if="activeGroupModels.length > 0" class="nr-model-flyout">
+                    <div class="nr-model-flyout-title">{{ activeProviderName }}</div>
+                    <div class="nr-model-flyout-list">
+                      <div
+                        v-for="m in activeGroupModels"
+                        :key="m.value"
+                        class="nr-glass-dropdown-item nr-composer-menu-item"
+                        :class="{ 'is-active': selectedModel === m.value }"
+                        @click="pickModel(m.value)"
+                      >
+                        <span class="nr-composer-pill-label">{{ m.label }}</span>
+                        <span v-if="selectedModel === m.value" class="nr-composer-check">✓</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </template>
-            </a-dropdown>
+            </div>
             <button
               class="nr-composer-send"
               :disabled="(!inputText.trim() && pendingFiles.length === 0 && !isStreaming) || !isSendLockOwner"
               :title="!isSendLockOwner ? t('chat.anotherTabSending') : (isStreaming ? t('chat.stop') : t('chat.send'))"
               @click="isStreaming ? stopStreaming() : sendMessage()"
             >
-              <span v-if="isStreaming">■</span>
-              <span v-else>↑</span>
+              <svg v-if="isStreaming" class="nr-ico nr-ico--send" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
+              <svg v-else class="nr-ico nr-ico--send" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
             </button>
           </div>
           </div>
@@ -818,6 +858,7 @@ import { findMessageMatches } from '@/utils/messageSearch'
 import type { ThinkingEffort } from '@/composables/useThinkingEffort'
 import { useSessionSync } from '@/composables/useSessionSync'
 import { listModels } from '@/api/modules/models'
+import { listProviders } from '@/api/modules/providers'
 import { normalizeModel } from '@/types/model'
 
 /** 聊天页可切换的模型选项（空串 = 自动路由） */
@@ -1004,6 +1045,16 @@ const approvalRemember = ref<'' | 'exact' | 'similar'>('')
 // 空串'' = 自动路由（默认，不影响富媒体→多模态 LLM 的自动路由）
 // 非空 = 手动指定模型，随消息 POST body 的 model 字段转发到后端热切换
 const chatModelOptions = ref<ChatModelOption[]>([])
+/** 按服务商分组的可联通模型（聊天模型切换器二级级联菜单数据源） */
+interface ChatModelGroup {
+  provider_id: string
+  provider_name: string
+  models: ChatModelOption[]
+}
+const chatModelGroups = ref<ChatModelGroup[]>([])
+// 本地/免 key 服务商类型：无需 api_key 即可联通（连上本地服务即可）
+const LOCAL_PROVIDER_TYPES = new Set(['ollama', 'lm_studio'])
+const KEYLESS_PROVIDER_IDS = new Set(['opencode', 'kilo-code'])
 // 补课 A1：429 限流横幅——当前轮被限流的模型 + 一键切换候选列表
 const rateLimitBanner = ref<{ model: string; alternatives: ChatModelOption[] } | null>(null)
 // 补课 A2：无已启用模型提示（自动路由将无人可派）——引导去模型管理页
@@ -1029,28 +1080,74 @@ const chatModelLoading = ref(false)
 async function loadChatModels() {
   chatModelLoading.value = true
   try {
-    const modelsRes = await listModels()
+    const [modelsRes, providersRes] = await Promise.all([
+      listModels(),
+      listProviders().catch(() => []),
+    ])
     const rawModels = Array.isArray(modelsRes) ? modelsRes : modelsRes?.models ?? []
     const normalized = rawModels.map((m) => normalizeModel(m))
-    // 只展示已启用（可用）的模型，避免用户选到不可用的模型
-    const enabled = normalized.filter((m) => m.enabled !== false)
+    const providers = Array.isArray(providersRes) ? providersRes : (providersRes as any)?.data ?? []
+
+    // 服务商元数据索引：id -> {name, is_active, api_key_configured, status, provider_type}
+    const providerMeta = new Map<string, any>()
+    for (const p of providers) {
+      if (p?.provider_id) providerMeta.set(p.provider_id, p)
+    }
+
+    // 可联通判定：服务商启用 + (已配置 API Key 或 本地/免 key 类型) + 健康检查未失败。
+    // 未配置的内置种子商（无 key）其模型必然 "No client available"，直接过滤掉。
+    function isConnectable(providerId: string): boolean {
+      const meta = providerMeta.get(providerId)
+      if (!meta) return false // 模型归属服务商不在列表 → 不可信，隐藏
+      if (!meta.is_active) return false
+      if (meta.status === 'unhealthy') return false
+      const configured =
+        meta.api_key_configured ||
+        LOCAL_PROVIDER_TYPES.has(meta.provider_type) ||
+        KEYLESS_PROVIDER_IDS.has(providerId)
+      return !!configured
+    }
+
+    const usable = normalized.filter(
+      (m) => m.enabled !== false && isConnectable(m.provider_id || ''),
+    )
+
+    // 按服务商分组（保持服务商在 /providers 的返回顺序，组内按模型名）
+    const groupMap = new Map<string, ChatModelGroup>()
+    for (const m of usable) {
+      const pid = m.provider_id || ''
+      if (!groupMap.has(pid)) {
+        groupMap.set(pid, {
+          provider_id: pid,
+          provider_name: providerMeta.get(pid)?.name || pid,
+          models: [],
+        })
+      }
+      groupMap.get(pid)!.models.push({
+        label: m.name || m.id,
+        value: m.id || m.name,
+        provider_id: pid,
+        context_window: m.context_window ?? null,
+      })
+    }
+    const groups = [...groupMap.values()]
+    for (const g of groups) g.models.sort((a, b) => a.label.localeCompare(b.label))
+    chatModelGroups.value = groups
+
+    // 扁平选项（429 候选 / 标签查找 / 上下文限额查询复用）
     const AUTO_ROUTE_LABEL = t('ui.autoRoute')
     const options: ChatModelOption[] = [
       { label: AUTO_ROUTE_LABEL, value: '', provider_id: '', context_window: null },
-      ...enabled.map((m) => ({
-        label: `${m.name || m.id}${m.is_active ? ' ●' : ''}`,
-        value: m.id || m.name,
-        provider_id: m.provider_id || '',
-        context_window: m.context_window ?? null,
-      })),
+      ...groups.flatMap((g) => g.models),
     ]
     chatModelOptions.value = options
-    // 补课 A2：列表拉取成功但零已启用模型 → 自动路由无候选可派，提示配置
-    noModelsHint.value = enabled.length === 0
+    // 补课 A2：零可联通模型 → 自动路由无候选可派，提示去模型管理页配置
+    noModelsHint.value = usable.length === 0
   } catch (e) {
     // 加载失败不阻塞聊天，保留"自动路由"选项即可
     console.warn('[ChatPage] failed to load model list:', e)
     chatModelOptions.value = []
+    chatModelGroups.value = []
   } finally {
     chatModelLoading.value = false
   }
@@ -1116,6 +1213,42 @@ const selectedModelLabel = computed<string>(() => {
   const opt = chatModelOptions.value.find((o) => o.value === selectedModel.value)
   return opt ? opt.label : t('ui.autoRoute')
 })
+
+// ── 模型切换器：二级级联菜单（左服务商 / 右模型 / 底管理模型）──
+const modelMenuOpen = ref(false)
+const activeProviderId = ref<string>('')
+/** 当前展开服务商的模型列表（activeProviderId 为空时回退首个服务商）。 */
+const activeGroupModels = computed<ChatModelOption[]>(() => {
+  const groups = chatModelGroups.value
+  if (groups.length === 0) return []
+  const g = groups.find((x) => x.provider_id === activeProviderId.value) ?? groups[0]
+  return g.models
+})
+
+/** 当前展开服务商名（子菜单标题）。 */
+const activeProviderName = computed<string>(() => {
+  const groups = chatModelGroups.value
+  const g = groups.find((x) => x.provider_id === activeProviderId.value) ?? groups[0]
+  return g ? g.provider_name : ''
+})
+/** 打开菜单时定位到当前选中模型所属服务商（自动路由则展开首个服务商）。 */
+watch(modelMenuOpen, (open) => {
+  if (!open) return
+  if (selectedModel.value) {
+    const opt = chatModelOptions.value.find((o) => o.value === selectedModel.value)
+    activeProviderId.value = opt?.provider_id || chatModelGroups.value[0]?.provider_id || ''
+  } else {
+    activeProviderId.value = chatModelGroups.value[0]?.provider_id || ''
+  }
+})
+function pickModel(value: string): void {
+  selectedModel.value = value
+  modelMenuOpen.value = false
+}
+function gotoModelsManage(): void {
+  modelMenuOpen.value = false
+  router.push('/models')
+}
 
 // ---------------------------------------------------------------------------
 // 斜杠命令面板（QwenPaw slash commands 对齐）
@@ -3818,7 +3951,6 @@ onBeforeUnmount(() => {
 .nr-chat-input-area {
   position: relative;
   padding: 12px 24px 20px;
-  border-top: 1px solid var(--nr-glass-border);
 }
 
 .nr-pending-files {
@@ -4653,9 +4785,6 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 8px;
   padding: 6px 0 0;
-  border-top: 1px solid var(--nr-glass-border);
-  margin-top: 2px;
-  padding-top: 8px;
 }
 
 .nr-composer-left,
@@ -4700,6 +4829,24 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 
+/* 工具条线性图标：currentColor 描边，左右风格统一（替代彩色 emoji） */
+.nr-ico {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.nr-ico--send {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2;
+}
+
 .nr-composer-pill--model {
   max-width: 240px;
 }
@@ -4733,21 +4880,138 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 
-.nr-composer-send {
-  flex: none;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  border: none;
-  cursor: pointer;
-  background: linear-gradient(135deg, var(--nr-primary, #4a9eff), #7c5cff);
-  color: #fff;
-  font-size: 15px;
-  line-height: 1;
-  display: inline-flex;
+/* ── 模型切换器二级级联菜单（参考图：左服务商 / 右模型 / 底管理模型）── */
+.nr-model-menu-wrap {
+  position: relative;
+}
+
+.nr-model-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+
+.nr-model-cascade {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  width: 184px;
+  border-radius: 12px;
+  border: 1px solid var(--nr-glass-border);
+  background: var(--nr-bg-secondary, rgba(30, 32, 40, 0.98));
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+  overflow: visible;
+}
+
+.nr-model-cascade-left {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.nr-model-provider {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  transition: transform 0.15s, filter 0.2s, opacity 0.2s;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--nr-text-secondary);
+}
+
+.nr-model-provider:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.nr-model-provider.is-active {
+  background: rgba(74, 158, 255, 0.14);
+  color: var(--nr-text-primary);
+}
+
+.nr-model-provider-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nr-model-provider-count {
+  font-size: 11px;
+  color: var(--nr-text-tertiary);
+}
+
+.nr-model-provider-arrow {
+  font-size: 12px;
+  opacity: 0.5;
+}
+
+.nr-model-cascade-divider {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--nr-glass-border);
+}
+
+.nr-model-empty {
+  padding: 10px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--nr-text-tertiary);
+}
+
+.nr-model-cascade-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border-top: 1px solid var(--nr-glass-border);
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  cursor: pointer;
+  border-radius: 0 0 12px 12px;
+}
+
+.nr-model-cascade-footer:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--nr-text-primary);
+}
+
+/* 独立模型子菜单：向左弹出，固定高度+内部滚动（切换服务商主菜单尺寸恒定） */
+.nr-model-flyout {
+  position: absolute;
+  right: calc(100% + 8px);
+  bottom: 0;
+  width: 248px;
+  height: 360px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  border: 1px solid var(--nr-glass-border);
+  background: var(--nr-bg-secondary, rgba(30, 32, 40, 0.98));
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.nr-model-flyout-title {
+  flex: none;
+  padding: 9px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--nr-text-tertiary);
+  border-bottom: 1px solid var(--nr-glass-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nr-model-flyout-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
 }
 
 .nr-composer-send:hover:not(:disabled) {

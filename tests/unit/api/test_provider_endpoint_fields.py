@@ -108,6 +108,12 @@ class TestListProvidersFieldMapping:
         data = response.json()
         assert data[0]["models_count"] == 2  # len(["gpt-4o", "gpt-3.5-turbo"])
 
+    def test_list_providers_maps_api_key_configured(self, app_client):
+        """api_key_configured 反映 ProviderConfig.api_key 是否已配置（聊天模型切换器过滤未配置种子商用）"""
+        response = app_client.get("/providers")
+        data = response.json()
+        assert data[0]["api_key_configured"] is True  # provider.api_key = "sk-test-key"
+
 
 class TestGetProviderFieldMapping:
     """测试 get_provider 端点的字段映射"""
