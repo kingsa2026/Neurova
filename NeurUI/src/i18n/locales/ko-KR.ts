@@ -513,6 +513,8 @@ export default {
     deleteRound: '이 라운드 삭제',
     forkFromHere: '이 메시지에서 분기',
     manageModels: '모델 관리',
+    modelSavedToAgent: '에이전트 기본 모델이 업데이트되었습니다',
+    modelSaveFailed: '기본 모델 저장 실패',
     noConnectableModels: '연결 가능한 모델이 없습니다',
     forkDone: '새 대화로 분기되었습니다',
     forkFailed: '분기 실패',

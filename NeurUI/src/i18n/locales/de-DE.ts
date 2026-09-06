@@ -513,6 +513,8 @@ export default {
     deleteRound: 'Runde löschen',
     forkFromHere: 'Ab dieser Nachricht aufteilen',
     manageModels: 'Modelle verwalten',
+    modelSavedToAgent: 'Standardmodell des Agenten gesetzt',
+    modelSaveFailed: 'Speichern des Standardmodells fehlgeschlagen',
     noConnectableModels: 'Keine erreichbaren Modelle',
     forkDone: 'In neue Unterhaltung aufgeteilt',
     forkFailed: 'Aufteilung fehlgeschlagen',

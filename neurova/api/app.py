@@ -363,16 +363,41 @@ def _initialize_components(app_state: AppState) -> None:
 
         os.makedirs(default_workspace, exist_ok=True)
 
-        # 从 provider_manager 获取默认 provider/model
-        _default_llm_provider, _default_llm_model = _get_default_llm()
+        # 优先读工作区已保存的 agent_config.json（含用户在聊天页切模型的结果
+        # —— 切模型=编辑 agent 默认模型，持久化于顶层 model/provider 键）。
+        # 根因修复 2026-09-07：此前每次启动都用 _get_default_llm()（全局默认
+        # 服务商的 default_model），用户保存的商汤模型被无视，重启后回落到
+        # modelscope 已下架的 Kimi-K2.6 → 对话 400 "has no provider supported"。
+        import json as _json
+
+        _saved_cfg_path = os.path.join(default_workspace, "agent_config.json")
+        _saved_cfg: dict = {}
+        if os.path.exists(_saved_cfg_path):
+            try:
+                with open(_saved_cfg_path, encoding="utf-8") as f:
+                    _saved_cfg = _json.load(f) or {}
+            except Exception as e:
+                logger.warning("读取 default agent 保存配置失败，回退全局默认: %s", e)
+
+        if _saved_cfg.get("model"):
+            _default_llm_provider = _saved_cfg.get("provider") or ""
+            _default_llm_model = _saved_cfg.get("model")
+            logger.info(
+                "Default Agent 使用已保存配置: provider=%s model=%s",
+                _default_llm_provider,
+                _default_llm_model,
+            )
+        else:
+            _default_llm_provider, _default_llm_model = _get_default_llm()
 
         config = AgentConfig(
-            name="Neurova",
+            name=_saved_cfg.get("name") or "Neurova",
             agent_id="default",
             enable_memory=True,
             workspace_path=default_workspace,
             llm_model=_default_llm_model,
             llm_provider=_default_llm_provider,
+            description=_saved_cfg.get("description") or "",
         )
         agent = Agent(config=config)
         app_state.add_agent("default", agent)

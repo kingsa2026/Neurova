@@ -513,6 +513,8 @@ export default {
     deleteRound: 'Удалить раунд',
     forkFromHere: 'Ветвление от этого сообщения',
     manageModels: 'Управление моделями',
+    modelSavedToAgent: 'Модель агента по умолчанию обновлена',
+    modelSaveFailed: 'Не удалось сохранить модель по умолчанию',
     noConnectableModels: 'Нет доступных моделей',
     forkDone: 'Создана ветка в новом диалоге',
     forkFailed: 'Не удалось выполнить ветвление',

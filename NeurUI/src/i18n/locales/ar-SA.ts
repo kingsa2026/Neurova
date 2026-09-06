@@ -513,6 +513,8 @@ export default {
     deleteRound: 'حذف هذه الجولة',
     forkFromHere: 'التفرع من هذه الرسالة',
     manageModels: 'إدارة النماذج',
+    modelSavedToAgent: 'تم تعيين النموذج الافتراضي لهذا الوكيل',
+    modelSaveFailed: 'فشل حفظ النموذج الافتراضي',
     noConnectableModels: 'لا توجد نماذج متصلة',
     forkDone: 'تم التفرع إلى محادثة جديدة',
     forkFailed: 'فشل التفرع',

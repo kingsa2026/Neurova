@@ -525,6 +525,8 @@ export default {
     deleteRound: '删除此轮',
     forkFromHere: '从此消息分叉新会话',
     manageModels: '管理模型',
+    modelSavedToAgent: '已更新该智能体的默认模型',
+    modelSaveFailed: '默认模型保存失败',
     noConnectableModels: '无可联通模型',
     forkDone: '已分叉到新会话',
     forkFailed: '分叉失败',

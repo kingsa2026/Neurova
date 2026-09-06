@@ -1075,8 +1075,8 @@ class LLMProviderManager(Module):
                 all_models.append(view)
         return all_models
 
-    @staticmethod
     def _build_model_view(
+        self,
         provider: ProviderConfig,
         model_id: str,
     ) -> PydanticModelInfo:
@@ -1096,10 +1096,29 @@ class LLMProviderManager(Module):
             max_tokens=int(meta.get("max_tokens", 4096) or 4096),
             context_window=int(meta.get("context_window", 4096) or 4096),
             pricing=dict(meta.get("pricing") or {}),
-            metadata=dict(meta.get("metadata") or {}),
+            # 连通判定随模型透出（聊天模型切换器绿/灰点数据源）：
+            # 服务商启用 + (已配置 key 或 本地/免 key 类型) + 健康检查未失败
+            metadata={
+                **dict(meta.get("metadata") or {}),
+                "connectable": self._is_provider_connectable(provider),
+            },
             owned_by=provider.id,
             is_free=bool(meta.get("is_free", False)),
         )
+
+    def _is_provider_connectable(self, provider: ProviderConfig) -> bool:
+        """服务商级可联通判定（与前端聊天切换器过滤口径一致，单一事实源）。"""
+        if not provider.enabled:
+            return False
+        if provider.health_status == "unhealthy":
+            return False
+        if provider.api_key:
+            return True
+        if provider.provider in ("ollama", "lm_studio"):
+            return True
+        if provider.id in KEYLESS_PROVIDER_IDS:
+            return True
+        return False
 
     def _resolve_provider(
         self,

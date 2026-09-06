@@ -515,6 +515,8 @@ export default {
     deleteRound: 'Delete turn',
     forkFromHere: 'Fork from this message',
     manageModels: 'Manage models',
+    modelSavedToAgent: 'Agent default model updated',
+    modelSaveFailed: 'Failed to save default model',
     noConnectableModels: 'No connectable models',
     forkDone: 'Forked into a new conversation',
     forkFailed: 'Fork failed',
