@@ -427,6 +427,11 @@ class EvolutionOrchestrator:
                 w *= 0.7
             weights[tool] = w
 
+        # P2-2：惩罚必须作用于排序——weights 字典的唯一生产消费方只读
+        # ranking 顺序，此前 ×0.7 只落在被丢弃的 dict 上。按带罚权重稳定
+        # 重排（保持 get_ranked_tools 的既有次序作并列决胜）。
+        ranked_tools = sorted(ranked_tools, key=lambda t: -weights[t])
+
         return {
             "ranking": ranked_tools,
             "weights": weights,

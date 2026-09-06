@@ -296,29 +296,6 @@ class ToolExecutor:
             logger.debug("调控门查询失败，放行", exc_info=True)
             return None
 
-    def _metacog_gate_check(self, tool_name: str) -> Optional[Dict[str, Any]]:
-        """V3 调控门：查询该工具是否命中活跃 avoid_tool 教训。
-
-        env NEUROVA_METACOG_GATE=="1" 才启用（新扩展点默认关）；返回教训
-        metadata（含 text/recommendation/evidence），无教训或门关时返回 None。
-        故障一律放行（fail-open）——调控建议不得阻断主链路。
-        """
-        import os as _os
-
-        if _os.environ.get("NEUROVA_METACOG_GATE") != "1":
-            return None
-        try:
-            from neurova.cognitive_layers.meta_cognition_layer.self_model import get_self_model_engine
-
-            _user_id, _agent_id = self._agent_identity()
-            advisory = get_self_model_engine(str(_agent_id or "default")).check_tool_advisory(tool_name)
-            if advisory:
-                logger.info("🚦 元认知调控门命中: %s → %s", tool_name, advisory.get("finding", ""))
-            return advisory
-        except Exception:
-            logger.debug("调控门查询失败，放行", exc_info=True)
-            return None
-
     def _agent_identity(self) -> tuple:
         """解析执行身份 (user_id, agent_id)
 
@@ -870,6 +847,15 @@ class ToolExecutor:
             return _ts.handle_control_tool(tool_name, params)
 
         return await self._execute_single_tool(tool_name, params)
+
+    async def execute_tool(self, tool_name: str, params: Dict, user_input: str = "") -> Dict:
+        """ToolExecutionManager 三条超时策略（strict/elastic/infinite）的执行契约名。
+
+        P0-1 修复：该名此前不存在，肌肉记忆命中→自动执行链每次 AttributeError
+        被 ToolExecutionManager 吞成 FAILED 并倒扣晋升计数。委托
+        _execute_single_tool 与 execute 同管道（治理/审批/肌肉记忆反馈全链生效）。
+        """
+        return await self.execute(tool_name, params)
 
     @staticmethod
     def _result_is_success(result: Any) -> bool:

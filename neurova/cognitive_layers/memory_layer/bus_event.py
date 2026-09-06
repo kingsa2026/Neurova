@@ -68,10 +68,8 @@ class MemoryEvent:
     BUFFER_FLUSHED = "buffer_flushed"
     SLEEP_STARTED = "sleep_started"
     SLEEP_COMPLETED = "sleep_completed"
-    CONTEXT_BUILT = "context_built"
-    TOOL_INVOKED = "tool_invoked"
-    EVOLUTION_TRIGGERED = "evolution_triggered"
-    METACOGNITION_EVALUATED = "metacognition_evaluated"
+    # P2-10：TOOL_INVOKED / METACOGNITION_EVALUATED 死常量已删除——V3 直写
+    # 穿透架构下全仓无 emitter 也无 subscriber，属"事件→账本"叙事的僵尸痕迹。
 
     def __init__(self, type: str, source: str, payload: Optional[Dict[str, Any]] = None):
         self.type = type

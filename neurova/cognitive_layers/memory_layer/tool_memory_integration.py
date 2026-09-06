@@ -9,6 +9,7 @@
 
 from neurova.core.logger import get_logger
 from dataclasses import dataclass, field
+from collections import deque
 from datetime import datetime, timezone
 import threading
 from typing import Any, Dict, List
@@ -60,7 +61,9 @@ class ToolMemoryIntegration:
         self.confidence_threshold = confidence_threshold
         self.temperature_threshold = temperature_threshold
         self.tool_lifecycle = tool_lifecycle
-        self.usage_history: List[ToolUsageRecord] = []
+        # 有界历史（P2-4）：usage_history 只服务 get_feedback 的近期窗口统计，
+        # 原无界 list 长期运行下线性增长。上限 2000 条（RSI 反馈取近期窗口）。
+        self.usage_history: deque = deque(maxlen=2000)
         self.tool_stats: Dict[str, Dict[str, Any]] = {}
         # 并发锁：保护 usage_history 和 tool_stats 的读写
         self._lock = threading.RLock()
@@ -269,8 +272,12 @@ class ToolMemoryIntegration:
         Returns:
             Dict[str, Any]: 包含 total_usages, success_rate, muscle_memory_hits
         """
-        total_usages = len(self.usage_history)
-        success_count = sum(1 for r in self.usage_history if r.success)
+        # P2-4：hit_only（肌肉记忆命中但未真实执行）不进 success_rate——
+        # 命中事件硬编码 success=True 会系统性推高反馈信号（回声室残留）；
+        # muscle_memory_hits 统计保持原口径不受影响。
+        real = [r for r in self.usage_history if not r.context.get("hit_only")]
+        total_usages = len(real)
+        success_count = sum(1 for r in real if r.success)
         success_rate = success_count / total_usages if total_usages > 0 else 0.0
 
         # 肌肉记忆命中数：从 usage_history 中统计有 muscle_memory 匹配的记录

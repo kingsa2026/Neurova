@@ -654,10 +654,13 @@ class UnifiedContextInjector(BaseModule):
             ekb = get_experience_knowledge_base()
 
             # 查找相似经验（2.0 契约：skill_name=None 跨技能，context 为 dict）
+            # P0-3：检索按 agent 隔离——身份与存储同源（memory_manager 归属 agent）
+            _mm_agent = str(getattr(self.memory_manager, "agent_id", "") or "") or None
             similar = ekb.find_similar_experiences(
                 skill_name=None,
                 context={"user_input": query},
                 limit=3,
+                agent_id=_mm_agent,
             )
 
             if not similar:

@@ -760,6 +760,11 @@ class SubSystemContainer:
         if a.evolution is not None:
             if a.crystallizer is not None:
                 a.evolution.crystallizer = a.crystallizer
+                # P1-3：反向引用同批回填—— crystallizer.evolution 缺失时
+                # 结晶成功→进化经验的回流分支（pattern_crystallizer.record）
+                # 恒 False，单向注入只修了箭头一边。
+                if getattr(a.crystallizer, "evolution", None) is None:
+                    a.crystallizer.evolution = a.evolution
             if getattr(a, "rsi_orchestrator", None) is not None:
                 a.evolution.rsi_orchestrator = a.rsi_orchestrator
 
@@ -1843,6 +1848,16 @@ class Agent:
         """轮次计数 +1，返回新值"""
         self._turn_count = getattr(self, "_turn_count", 0) + 1
         return self._turn_count
+
+    @property
+    def turn_count(self) -> int:
+        """当前轮次（读取方 getattr(agent,"turn_count") 的契约名；P0-2 失配修复）"""
+        return int(getattr(self, "_turn_count", 0) or 0)
+
+    @property
+    def session_id(self) -> str:
+        """当前会话 id（EKB 溯源等读取方契约名；实际存储在 _current_session_id）"""
+        return str(getattr(self, "_current_session_id", "") or "")
 
     async def record_tool_failure_lesson(
         self, tool_name: str, user_input: str, error_msg: str

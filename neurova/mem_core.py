@@ -617,21 +617,10 @@ class MemCore:
             )
             logger.info("Agent %s: BufferModule（缓冲模块）已启用", self.config.name)
 
-            # 初始化肌肉记忆
-            from neurova.cognitive_layers.memory_layer.muscle_memory import MuscleMemory
-
-            self._agent.muscle_memory = MuscleMemory(
-                agent_id=self.config.agent_id,
-            )
-            logger.info("Agent %s: MuscleMemory（肌肉记忆）已启用", self.config.name)
-
-            # 初始化工具记忆集成
-            from neurova.cognitive_layers.memory_layer.tool_memory_integration import ToolMemoryIntegration
-
-            self._agent.tool_memory = ToolMemoryIntegration(
-                memory_layer=self.memory_manager,
-            )
-            logger.info("Agent %s: ToolMemoryIntegration（工具记忆）已启用", self.config.name)
+            # 肌肉记忆/工具记忆不在 mem_core 初始化——agent_core.init_memory 的
+            # ToolMemory（正式实例，带 workspace 落盘目录 + 阈值单源）会覆盖
+            # agent.tool_memory；此处曾另建一套无 storage_dir 的 MuscleMemory +
+            # ToolMemoryIntegration，是永不落盘的内存孤儿（P2 清理删除）。
 
             logger.info(
                 f"记忆系统模块初始化成功: agent_id={self.config.agent_id}, neuser_id={neuser_id}, user_id={user_id}"

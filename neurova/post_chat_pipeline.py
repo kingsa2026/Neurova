@@ -1162,6 +1162,7 @@ class PostChatPipeline:
                             success=tool_success,
                             feedback=user_input[:100],
                         ),
+                        agent_id=str(getattr(self._agent, "agent_id", "") or "") or None,
                         session_id=str(getattr(self._agent, "session_id", "") or "") or None,
                     )
                 except Exception as ekb_error:  # noqa: BLE001 - 沉淀失败不阻断主流程
@@ -1996,25 +1997,6 @@ class PostChatPipeline:
                         "🧠 低负荷窗口触发记忆巩固: %s",
                         "完成" if consolidation_result else "依赖缺失",
                     )
-
-            # V3 自模型：反思门控触发（洞察编译器，全确定性零 LLM；教训落台账）
-            if turn_count > 0 and turn_count % 10 == 0:
-                try:
-                    from neurova.cognitive_layers.meta_cognition_layer.self_model import (
-                        get_self_model_engine,
-                    )
-
-                    engine = get_self_model_engine(agent_id)
-                    if engine.should_reflect():
-                        report = engine.reflect(trigger="periodic_turn")
-                        if report.get("lessons"):
-                            logger.info(
-                                "🪞 自模型反思产出 %d 条洞察: %s",
-                                len(report["lessons"]),
-                                report.get("summary", "")[:80],
-                            )
-                except Exception as re_err:
-                    logger.debug("自模型反思触发跳过: %s", re_err)
 
             # V3 自模型：反思门控触发（洞察编译器，全确定性零 LLM；教训落台账）
             if turn_count > 0 and turn_count % 10 == 0:

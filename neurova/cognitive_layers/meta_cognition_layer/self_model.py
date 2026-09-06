@@ -158,14 +158,20 @@ class SelfModelEngine:
             events = list(reversed(self.ledger.list_events(agent_id=self._agent_id, limit=2000)))
             lessons: List[Dict[str, Any]] = []
             observations: List[str] = []
-            try:
-                lessons.extend(self._op_drift(events, observations))
-                lessons.extend(self._op_contrast(events, observations))
-                lessons.extend(self._op_sequence(events, observations))
-                lessons.extend(self._op_calibration(lessons, events, observations))
-                lessons.extend(self._op_budget(events, observations))
-            except Exception as e:
-                logger.debug("洞察编译器算子异常: %s", e)
+
+            # P1-4：per-operator 隔离——原单 try 包五算子，_op_drift 一崩
+            # contrast/sequence/calibration/budget 整轮静默报废。
+            for op_name, op in (
+                ("drift", self._op_drift),
+                ("contrast", self._op_contrast),
+                ("sequence", self._op_sequence),
+                ("calibration", lambda ev, ob: self._op_calibration(lessons, ev, ob)),
+                ("budget", self._op_budget),
+            ):
+                try:
+                    lessons.extend(op(events, observations))
+                except Exception as e:
+                    logger.debug("洞察编译器算子 %s 异常: %s", op_name, e)
 
             for lesson in lessons:
                 lesson["source"] = "template"
@@ -205,7 +211,8 @@ class SelfModelEngine:
 
     def check_tool_advisory(self, tool_name: str) -> Optional[Dict[str, Any]]:
         """返回该工具当前活跃的 avoid_tool 教训；无则 None。"""
-        records = self.ledger.list_records(agent_id=self._agent_id, page=1, size=50)
+        # SQL 层 kind 过滤：thought 洪泛会把活跃教训挤出最新 50 条窗口
+        records = self.ledger.list_records(agent_id=self._agent_id, page=1, size=50, kind="lesson")
         now = datetime.datetime.now(datetime.timezone.utc)
         for it in records["items"]:
             if it["kind"] != "lesson":
@@ -411,6 +418,8 @@ class SelfModelEngine:
                 continue
             base = durations[: -_WINDOW]
             recent = durations[-_WINDOW:]
+            if not base or not recent:  # 恰等于 _WINDOW 时 base 为空，避免除零
+                continue
             base_avg = sum(base) / len(base)
             recent_avg = sum(recent) / len(recent)
             if base_avg > 0 and recent_avg > base_avg * _BUDGET_RATIO:
