@@ -280,21 +280,6 @@ class ExperienceFeedback:
         logger.debug("Processed experience: %s", result)
         return result
 
-    def _update_task_association(
-        self,
-        task_type: str,
-        tool_name: str,
-        outcome: str,
-        confidence: float,
-    ) -> None:
-        """更新任务-工具关联。"""
-        self.create_task_tool_association(
-            task_type=task_type,
-            tool_name=tool_name,
-            outcome=outcome,
-            confidence=confidence,
-        )
-
     def get_task_tool_patterns(self, task_type: str) -> List[Dict[str, Any]]:
         """获取任务-工具模式。
 

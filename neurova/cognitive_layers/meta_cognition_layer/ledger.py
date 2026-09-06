@@ -21,7 +21,10 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-_DEFAULT_DB = os.path.join("data", "metacognition.db")
+# __file__ 锚定项目根，杜绝 CWD 相对路径把测试写进生产库（2026-09-06 巡检：
+# data/metacognition.db 曾混入 482 行测试 agent 数据）。EKB 同款约定。
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+_DEFAULT_DB = os.path.join(_REPO_ROOT, "data", "metacognition.db")
 
 _DEFAULT_MAX_EVENTS = 2000
 _DEFAULT_MAX_RECORDS = 1000
@@ -274,8 +277,12 @@ class MetaLedger:
         ).isoformat()
 
     def reflection_history(self, agent_id: str, limit: int = 20) -> list:
-        """反思报告时间线（kind='reflection' 的记录，供前端历史表）。"""
-        result = self.list_records(agent_id=agent_id, page=1, size=limit)
+        """反思报告时间线（kind='reflection' 的记录，供前端历史表）。
+
+        P1-5：kind 过滤必须在 SQL 层——先取最新 limit 条再 Python 过滤时，
+        thought/lesson 洪泛会挤占窗口，更早的 reflection 永远翻不到。
+        """
+        result = self.list_records(agent_id=agent_id, page=1, size=limit, kind="reflection")
         return [
             {
                 "created_at": it["created_at"],

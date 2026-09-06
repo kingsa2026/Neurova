@@ -446,7 +446,9 @@ async def get_agent_metacognition(
     try:
         ledger = get_meta_ledger(agent_id)
         page = offset // limit + 1 if limit else 1
-        result = ledger.list_records(agent_id=agent_id, page=page, size=limit)
+        # 口径与 /v1/metacognition 主端点对齐（P2-11）：只返回 thought 条目，
+        # 否则 lesson/reflection 混入"元认知记录"列表而 stats 是 thought-only。
+        result = ledger.list_records(agent_id=agent_id, page=page, size=limit, kind="thought")
         items = [
             {
                 "id": it["id"],

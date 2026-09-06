@@ -698,7 +698,7 @@ class ChatPipeline:
             # 通过 ToolExecutionManager 执行工具
             execution_context = await self.tool_execution_manager.execute(
                 tool_name=tool_name,
-                params=ctx.tool_memory_result.get("params", {}),
+                params=ctx.tool_memory_result.get("tool_params", {}),
                 user_input=ctx.user_input,
                 executor=self.tool_executor,
                 timeout=5.0,  # 默认5秒超时
@@ -1432,6 +1432,7 @@ class ChatPipeline:
                 skill_name=None,
                 context={"user_input": ctx.user_input},
                 limit=3,
+                agent_id=str(getattr(self._agent, "agent_id", "") or "") or None,
             )
             items = []
             for hit in hits or []:
