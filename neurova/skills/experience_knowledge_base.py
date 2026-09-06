@@ -38,6 +38,37 @@ logger = get_logger(__name__)
 # 默认数据库路径（相对项目根目录的 data 目录）
 _DEFAULT_DB_PATH = str(Path(__file__).resolve().parent.parent.parent / "data" / "experience_knowledge.db")
 
+# CJK 2-gram 窗口内跳过的纯标点字符（避免跨标点生成噪声 gram）
+_PUNCT = set("，。！？、；：\"'()（）[]【】{}<>《》…—·,.!?;: \t\r\n")
+
+
+def _tokenize_for_match(text: str) -> List[str]:
+    """相似度匹配分词：拉丁词按空格/大小写归一；CJK 连续段切 2-gram。
+
+    P2-B4：原实现只 str.split()——中文整句成单 token，重叠判定几乎必失配。
+    2-gram 保序切分让"抓取网页"类实词片段可精确重叠，无需引入分词依赖。
+    """
+    text = (text or "").lower()
+    tokens: List[str] = []
+    buffer: List[str] = []
+    for ch in text:
+        if ch.isspace() or ch in _PUNCT:
+            if buffer:
+                tokens.append("".join(buffer))
+                buffer = []
+            continue
+        buffer.append(ch)
+    if buffer:
+        tokens.append("".join(buffer))
+
+    out: List[str] = []
+    for tok in tokens:
+        if any("\u4e00" <= c <= "\u9fff" for c in tok) and len(tok) > 1:
+            out.extend(tok[i : i + 2] for i in range(len(tok) - 1))
+        else:
+            out.append(tok)
+    return out
+
 
 class ExperienceKnowledgeBase:
     """经验知识库
@@ -278,7 +309,11 @@ class ExperienceKnowledgeBase:
         if isinstance(context, dict):
             query_topic = str(context.get("topic", ""))
 
-        query_words = [w for w in query_input.lower().split() if w]
+        # P2-B4：中文整句 str.split() 得单 token，子串匹配几乎必失配 →
+        # keyword/topic 恒 0，而成功记录保底 0.1 分恒过 threshold，任意查询
+        # 恒"命中"无关经验。CJK 文本改用 2-gram 切分（与 stored_input 同规则
+        # 比对子串），拉丁词保持按空格。
+        query_words = _tokenize_for_match(query_input)
 
         sql = "SELECT * FROM experience_records WHERE 1=1"
         params: List[Any] = []
@@ -303,10 +338,11 @@ class ExperienceKnowledgeBase:
             stored_input = str(stored_ctx.get("user_input", "")).lower()
             stored_topic = str(stored_ctx.get("topic", "")).lower()
 
-            # 关键词重叠 (60%)
-            if query_words:
-                overlap = sum(1 for w in query_words if w in stored_input)
-                keyword_score = overlap / len(query_words)
+            # 关键词重叠 (60%)——stored 侧用同一分词规则，token 集合精确匹配
+            stored_tokens = set(_tokenize_for_match(stored_input)) if stored_input else set()
+            if query_words and stored_tokens:
+                overlap = sum(1 for w in set(query_words) if w in stored_tokens)
+                keyword_score = overlap / len(set(query_words))
             else:
                 keyword_score = 0.0
 
@@ -318,8 +354,9 @@ class ExperienceKnowledgeBase:
 
             similarity = 0.6 * keyword_score + 0.3 * topic_score + 0.1 * success_score
 
-            # 至少要有一点相关性才返回（避免噪音）
-            if similarity > 0:
+            # 相关性门：必须有实词/话题重叠，success 保底分不得单独入选
+            #（P2-B4 根因——0.1*1=0.1>0 曾让任意查询恒命中 3 条无关经验）
+            if keyword_score > 0 or topic_score > 0:
                 d["similarity_score"] = round(similarity, 4)
                 scored.append((similarity, d))
 
