@@ -36,7 +36,9 @@ MANIFEST = STAGE / "MANIFEST.json"
 PYPSA_REPO = "astral-sh/python-build-standalone"
 PYPSA_VERSION_PREFIX = "cpython-3.12."
 
-EXCLUDE_DIR_NAMES = {"__pycache__", ".mimosa", ".pytest_cache"}
+# .cache = HuggingFace/modelscope 下载缓存（模型目录实测混入，用户点名排除）
+# .git = 任何被拷入的仓库元数据
+EXCLUDE_DIR_NAMES = {"__pycache__", ".mimosa", ".pytest_cache", ".cache", ".git", ".github"}
 
 
 def log(msg: str) -> None:
@@ -65,7 +67,8 @@ def robocopy(src: Path, dst: Path, extra: list[str] | None = None) -> int:
     """
     cmd = [
         "robocopy", str(src), str(dst), "/E", "/NFL", "/NDL", "/NJH", "/NJS", "/NP",
-        "/XD", "__pycache__", ".mimosa", ".pytest_cache",
+        "/XD", "__pycache__", ".mimosa", ".pytest_cache", ".cache", ".git",
+        "tests", "test",   # 第三方库自带测试目录（41 个 ~15MB，用户点名不打包）
         "/XF", "*.pyc", "*.pyo",
     ]
     if extra:
@@ -180,7 +183,9 @@ def ensure_runtime_dirs(stage: Path) -> None:
     log(f"运行时数据目录就绪: {workspaces}")
 
 
-EXCLUDE_DIR_NAMES = {"__pycache__", ".mimosa", ".pytest_cache"}
+# .cache = HuggingFace/modelscope 下载缓存（模型目录实测混入，用户点名排除）
+# .git = 任何被拷入的仓库元数据
+EXCLUDE_DIR_NAMES = {"__pycache__", ".mimosa", ".pytest_cache", ".cache", ".git", ".github"}
 
 # 打包体积红线：NSIS 对单文件 mmap 有 ~2GB 限制，安装包体积也应克制。
 # 排除原始权重 blob（.data，如 moss-nano TTS ~640MB）；bge embedding 是
@@ -264,6 +269,17 @@ def main() -> int:
     copy_tree_light(REPO / "config", STAGE / "config", manifest, "config")
     copy_tree_light(REPO / "start_server.py", STAGE / "start_server.py", manifest, "start_server")
     ensure_runtime_dirs(STAGE)
+
+    # 出厂清洁：剥离开发/测试期生成的运行时数据（.agents 补丁目录、
+    # .jwt_secret 开发密钥）——首次启动会自动重新生成
+    for stale in (STAGE / ".agents", STAGE / ".jwt_secret"):
+        if stale.exists():
+            import shutil as _sh
+            if stale.is_dir():
+                _sh.rmtree(stale, ignore_errors=True)
+            else:
+                stale.unlink(missing_ok=True)
+            log(f"出厂清洁：已移除 {stale.name}")
 
     manifest["built_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
     manifest["python"] = sys.version.split()[0]
