@@ -965,12 +965,18 @@ class Agent:
 
         logger.info("Agent %s 初始化完成", self.config.name)
 
-    def rebuild_loop(self, model_name: str) -> bool:
+    async def rebuild_loop(self, model_name: str) -> bool:
         """
         重建 Agent Loop（模型热切换时调用）
 
         当模型切换后，需要重新选择合适的 Loop 类型，
         因为不同模型可能需要不同的 Loop（如 OpenAI vs Anthropic）。
+
+        2026-09-07 根因修复：本方法原为同步 def，内部调用 async 的
+        loop_manager.rebuild() 却未 await —— 返回协程对象（truthy）谎报
+        成功，Loop 从未重建；旧 Loop 构造时缓存的 llm_client 仍指向旧
+        模型，导致切模型后对话仍用旧模型打新服务商（商汤网关 400
+        "Model id: moonshotai/Kimi-K2.6 has no provider supported" 实测）。
 
         参数:
             model_name: 新的模型名称
@@ -982,10 +988,14 @@ class Agent:
             logger.warning("Agent Loop 系统不可用，无法重建")
             return False
 
-        # 委托给 LoopManager
-        result = self.loop_manager.rebuild(model_name)
+        # 必须真正 await：旧实现未 await，热切换静默失效
+        result = await self.loop_manager.rebuild(model_name)
         # 同步 self.loop 引用
         self.loop = self.loop_manager.get_loop()
+        # Loop 构造时缓存 self.llm_client = agent.llm_client（loops/base.py）；
+        # 同模型短路或重建成功后都必须刷新为当前引用，防止旧 client 残留
+        if self.loop is not None and hasattr(self.loop, "llm_client"):
+            self.loop.llm_client = self.llm_client
         return result
 
     async def process_multimodal(
@@ -1039,7 +1049,7 @@ class Agent:
             # 如果指定了模型且与当前不同，热切换
             if model and model != getattr(self.config.llm_config, "model", None):
                 logger.info("多模态路由：热切换模型到 %s", model)
-                self.rebuild_loop(model)
+                await self.rebuild_loop(model)
 
         except Exception as e:
             logger.warning("多模态模型选择失败，使用当前模型: %s", e)
@@ -1615,7 +1625,7 @@ class Agent:
                     "聊天页手动切换模型: %s -> %s", current_model, model
                 )
                 try:
-                    self.rebuild_loop(model)
+                    await self.rebuild_loop(model)
                 except Exception as e:
                     logger.warning("聊天页模型热切换失败，使用当前模型: %s", e)
 

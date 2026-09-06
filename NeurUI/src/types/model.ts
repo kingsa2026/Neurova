@@ -11,6 +11,8 @@ export interface ModelItem {
   enabled: boolean
   capabilities: string[]  // 六类核心: text/reasoning/vision/video/image_generation/video_generation（另有 audio/tts/stt/tool_use）
   is_active: boolean
+  /** 服务商级连通判定（provider enabled+key配置/本地/keyless+非unhealthy），切换器绿/灰点 */
+  connectable?: boolean
   context_window?: number
   max_tokens?: number
   pricing?: { input: number; output: number }
@@ -61,6 +63,7 @@ export function normalizeModel(item: Record<string, any>): ModelItem {
     enabled: item.enabled ?? true,
     capabilities: Array.isArray(item.capabilities) ? item.capabilities : [],
     is_active: item.is_active ?? false,
+    connectable: item.connectable ?? false,
     context_window: item.context_window,
     max_tokens: item.max_tokens,
     pricing: item.pricing,

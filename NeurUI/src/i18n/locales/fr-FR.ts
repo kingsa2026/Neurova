@@ -513,6 +513,8 @@ export default {
     deleteRound: 'Supprimer le tour',
     forkFromHere: 'Bifurquer depuis ce message',
     manageModels: 'Gerer les modeles',
+    modelSavedToAgent: 'Modele par defaut de l agent mis a jour',
+    modelSaveFailed: 'Echec de la mise a jour du modele',
     noConnectableModels: 'Aucun modele connectable',
     forkDone: 'Bifurque vers une nouvelle conversation',
     forkFailed: 'Echec de la bifurcation',

@@ -541,9 +541,10 @@
                         v-for="m in activeGroupModels"
                         :key="m.value"
                         class="nr-glass-dropdown-item nr-composer-menu-item"
-                        :class="{ 'is-active': selectedModel === m.value }"
-                        @click="pickModel(m.value)"
+                        :class="{ 'is-active': selectedModel === m.value, 'is-unconnectable': !m.connectable }"
+                        @click="pickModel(m.value, m.provider_id)"
                       >
+                        <span class="nr-model-dot" :class="m.connectable ? 'is-ok' : 'is-off'" />
                         <span class="nr-composer-pill-label">{{ m.label }}</span>
                         <span v-if="selectedModel === m.value" class="nr-composer-check">✓</span>
                       </div>
@@ -820,6 +821,7 @@ import { storeToRefs } from 'pinia'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useASRRestartGuard } from '@/composables/useASRRestartGuard'
 import { useAppStore } from '@/stores/app'
+import { useAgentStore } from '@/stores/agents'
 import { useChatStore } from '@/stores/chat'
 import { useMessageQueueStore } from '@/stores/messageQueue'
 import { useSessionSendLock } from '@/composables/useSessionSendLock'
@@ -867,10 +869,13 @@ interface ChatModelOption {
   value: string
   provider_id: string
   context_window?: number | null
+  /** 服务商级连通判定：绿点=真实可用，灰点=不可联通 */
+  connectable?: boolean
 }
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const agentStore = useAgentStore()
 const { agentId, currentAgent } = useAgentPage()
 
 const props = defineProps<{
@@ -1094,27 +1099,12 @@ async function loadChatModels() {
       if (p?.provider_id) providerMeta.set(p.provider_id, p)
     }
 
-    // 可联通判定：服务商启用 + (已配置 API Key 或 本地/免 key 类型) + 健康检查未失败。
-    // 未配置的内置种子商（无 key）其模型必然 "No client available"，直接过滤掉。
-    function isConnectable(providerId: string): boolean {
-      const meta = providerMeta.get(providerId)
-      if (!meta) return false // 模型归属服务商不在列表 → 不可信，隐藏
-      if (!meta.is_active) return false
-      if (meta.status === 'unhealthy') return false
-      const configured =
-        meta.api_key_configured ||
-        LOCAL_PROVIDER_TYPES.has(meta.provider_type) ||
-        KEYLESS_PROVIDER_IDS.has(providerId)
-      return !!configured
-    }
-
-    const usable = normalized.filter(
-      (m) => m.enabled !== false && isConnectable(m.provider_id || ''),
-    )
-
+    // 全量展示（可联通=绿点 / 不可联通=灰点），不再硬过滤——
+    // 连通判定以后端 metadata.connectable 为单一事实源（服务商级）
     // 按服务商分组（保持服务商在 /providers 的返回顺序，组内按模型名）
     const groupMap = new Map<string, ChatModelGroup>()
-    for (const m of usable) {
+    for (const m of normalized) {
+      if (m.enabled === false) continue
       const pid = m.provider_id || ''
       if (!groupMap.has(pid)) {
         groupMap.set(pid, {
@@ -1128,10 +1118,13 @@ async function loadChatModels() {
         value: m.id || m.name,
         provider_id: pid,
         context_window: m.context_window ?? null,
+        connectable: m.connectable ?? false,
       })
     }
     const groups = [...groupMap.values()]
     for (const g of groups) g.models.sort((a, b) => a.label.localeCompare(b.label))
+    // 可联通的组在前，灰点组垫底
+    groups.sort((a, b) => Number(b.models.some((m) => m.connectable)) - Number(a.models.some((m) => m.connectable)))
     chatModelGroups.value = groups
 
     // 扁平选项（429 候选 / 标签查找 / 上下文限额查询复用）
@@ -1142,7 +1135,7 @@ async function loadChatModels() {
     ]
     chatModelOptions.value = options
     // 补课 A2：零可联通模型 → 自动路由无候选可派，提示去模型管理页配置
-    noModelsHint.value = usable.length === 0
+    noModelsHint.value = !groups.some((g) => g.models.some((m) => m.connectable))
   } catch (e) {
     // 加载失败不阻塞聊天，保留"自动路由"选项即可
     console.warn('[ChatPage] failed to load model list:', e)
@@ -1241,9 +1234,24 @@ watch(modelMenuOpen, (open) => {
     activeProviderId.value = chatModelGroups.value[0]?.provider_id || ''
   }
 })
-function pickModel(value: string): void {
+/**
+ * 切换模型 = 修改该 agent 的默认模型（按 agent 隔离，等同编辑 agent）：
+ * PUT /agents/{id} 持久化 model/provider 并重建运行时 llm_client。
+ * 自动路由 → model='auto' 且清空 provider；具名模型 → 同时钉住其服务商。
+ */
+async function pickModel(value: string, providerId?: string): Promise<void> {
   selectedModel.value = value
   modelMenuOpen.value = false
+  if (!agentId.value) return
+  const result = await agentStore.updateAgent(agentId.value, {
+    model: value || 'auto',
+    provider: providerId || '',
+  })
+  if (result) {
+    uiMessage.success(t('chat.modelSavedToAgent'))
+  } else {
+    uiMessage.error(t('chat.modelSaveFailed'))
+  }
 }
 function gotoModelsManage(): void {
   modelMenuOpen.value = false
@@ -3051,6 +3059,15 @@ watch(
 // Lifecycle
 // ---------------------------------------------------------------------------
 // 切换 agent 时重新加载 sessions
+// 当前 agent 默认模型 → 同步切换器 pill（agent 隔离：每个 agent 记忆自己的模型）
+watch(
+  () => currentAgent.value?.model,
+  (model) => {
+    selectedModel.value = model && model !== 'auto' ? model : ''
+  },
+  { immediate: true },
+)
+
 watch(agentId, (newId, oldId) => {
   if (newId && newId !== oldId) {
     chatStore.clearMessages()
@@ -4978,6 +4995,27 @@ onBeforeUnmount(() => {
 .nr-model-cascade-footer:hover {
   background: rgba(255, 255, 255, 0.05);
   color: var(--nr-text-primary);
+}
+
+/* 模型连通点：绿=真实可用，灰=不可联通 */
+.nr-model-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.nr-model-dot.is-ok {
+  background: #22c55e;
+  box-shadow: 0 0 4px rgba(34, 197, 94, 0.55);
+}
+
+.nr-model-dot.is-off {
+  background: rgba(128, 128, 128, 0.45);
+}
+
+.nr-composer-menu-item.is-unconnectable .nr-composer-pill-label {
+  color: var(--nr-text-tertiary);
 }
 
 /* 独立模型子菜单：向左弹出，固定高度+内部滚动（切换服务商主菜单尺寸恒定） */

@@ -513,6 +513,8 @@ export default {
     deleteRound: 'Elimina il turno',
     forkFromHere: 'Biforca da questo messaggio',
     manageModels: 'Gestisci modelli',
+    modelSavedToAgent: 'Modello predefinito dell agente aggiornato',
+    modelSaveFailed: 'Salvataggio del modello predefinito non riuscito',
     noConnectableModels: 'Nessun modello connettibile',
     forkDone: 'Biforcato in una nuova conversazione',
     forkFailed: 'Biforcazione non riuscita',

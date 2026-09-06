@@ -78,6 +78,9 @@ class ModelInfo(BaseModel):
     max_tokens: Optional[int] = None
     is_active: bool = False
     status: str = "unknown"
+    # 服务商级连通判定（provider enabled+key配置/本地/keyless+非unhealthy）：
+    # 聊天模型切换器绿/灰点数据源
+    connectable: bool = False
 
 
 class SwitchModelRequest(BaseModel):
@@ -170,6 +173,7 @@ async def list_models(
                             max_tokens=_clean_limit(getattr(model, "max_tokens", None)),
                             is_active=getattr(model, "is_active", False),
                             status=getattr(model, "status", "available"),
+                            connectable=bool((getattr(model, "metadata", None) or {}).get("connectable", False)),
                         )
                     )
         except Exception as e:
@@ -424,7 +428,7 @@ async def switch_model(request: Request, body: SwitchModelRequest):
     loop_rebuilt = False
     try:
         if hasattr(agent, "rebuild_loop"):
-            loop_rebuilt = agent.rebuild_loop(model_name=body.model_id)
+            loop_rebuilt = await agent.rebuild_loop(model_name=body.model_id)
     except Exception as e:
         logger.error(f"Switch model error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to switch model: {str(e)}")
