@@ -430,16 +430,18 @@ async def discover_models(
         raise HTTPException(status_code=503, detail="Provider manager not available")
 
     try:
-        if hasattr(provider_manager, "fetch_provider_models"):
+        if hasattr(provider_manager, "discover_provider_models"):
             provider = (
                 provider_manager.get_provider(provider_id)
                 if hasattr(provider_manager, "get_provider")
                 else None
             )
-            models = await provider_manager.fetch_provider_models(provider_id)
-            message = ""
+            # QwenPaw 对齐:结构化发现结果(元数据全量透传,失败不再静默空列表)
+            result = await provider_manager.discover_provider_models(provider_id)
+            message = result.get("message", "")
             if (
-                not models
+                not message
+                and not result.get("models")
                 and provider is not None
                 and not provider.api_key
                 and provider.id not in KEYLESS_PROVIDER_IDS
@@ -449,7 +451,12 @@ async def discover_models(
                 "code": 0,
                 "data": {
                     "provider_id": provider_id,
-                    "models": models,
+                    "models": result.get("models", []),
+                    "success": result.get("success", False),
+                    "discovered_count": result.get("discovered_count", 0),
+                    "last_synced_at": result.get("last_synced_at"),
+                    "used_static_fallback": result.get("used_static_fallback", False),
+                    "error_kind": result.get("error_kind"),
                     "message": message,
                 },
             }

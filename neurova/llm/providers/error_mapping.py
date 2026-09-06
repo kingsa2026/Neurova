@@ -218,3 +218,43 @@ def exception_classes_for(categories: typing.Iterable[ErrorCategory]) -> tuple:
             classes.append(cls)
     classes.append(ProviderError)
     return tuple(classes)
+
+
+# ── 模型可用性七态派生（对齐 QwenPaw provider_model_availability） ──
+
+_NOT_FOUND_PATTERN = re.compile(
+    r"(not.?found|does.?not.?exist|模型不存在|未找到该模型|无此模型|no such model)", re.I,
+)
+_INCOMPATIBLE_PATTERN = re.compile(
+    r"(does.?not.?support|不支持)(.{0,24}(chat|对话|completion|媒体|image|vision))?", re.I,
+)
+
+
+def availability_status_of(
+    success: bool,
+    error_category: typing.Optional[str] = None,
+    message: str = "",
+    http_status: typing.Optional[int] = None,
+) -> str:
+    """把连接检查结果派生为可用性七态（QwenPaw ModelAvailabilityStatus 对齐）。
+
+    available / permission_denied / model_not_found / incompatible_api /
+    rate_limited / transient_error / unverified。
+    五类 ErrorCategory 仍是错误分类的单一事实源，这里只做展示层派生。
+    """
+    if success:
+        return "available"
+    if error_category == "auth_failed":
+        return "permission_denied"
+    if error_category == "rate_limited":
+        return "rate_limited"
+    if error_category in ("connection_failed", "service_unavailable"):
+        return "transient_error"
+    if error_category == "bad_request" or http_status == 404:
+        text = message or ""
+        if _NOT_FOUND_PATTERN.search(text) or http_status == 404:
+            return "model_not_found"
+        if _INCOMPATIBLE_PATTERN.search(text):
+            return "incompatible_api"
+        return "model_not_found" if http_status == 404 else "transient_error"
+    return "unverified"

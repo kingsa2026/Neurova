@@ -234,6 +234,9 @@ class ProviderConfig:
     models: List[str] = field(default_factory=list)
     # 发现候选(与 models 分离):fetch 写入、merge 显式并入,持久化
     discovered_models: List[str] = field(default_factory=list)
+    # 模型发现同步元数据(QwenPaw 对齐):成功时间戳/最后一次失败原因,持久化
+    models_last_synced_at: Optional[str] = None
+    models_last_sync_error: Optional[str] = None
     # 模型元数据:model_id -> 模型档案(dict,含 capabilities/context_window/pricing 等)。
     # models 保持字符串列表契约以兼容存量消费者;元数据仅承载增强信息。
     model_metadata: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -916,6 +919,8 @@ class LLMProviderManager(Module):
             self._save_config()
 
         logger.info("Activated model %s in provider %s", model_id, provider.name)
+        # QwenPaw 对齐:激活后对未探测过的模型调度后台多模态探测
+        self.maybe_probe_multimodal(provider_id, model_id)
         return True
 
     def get_active_model(self) -> Optional[Dict[str, Any]]:
@@ -1117,78 +1122,158 @@ class LLMProviderManager(Module):
                 return provider
         return None
 
-    async def fetch_provider_models(
+    async def discover_provider_models(
         self,
         provider_id: str,
         merge: bool = True,
-    ) -> List[PydanticModelInfo]:
-        """真实现:调用 provider 实例的 fetch_models,并将元数据写回配置。
+    ) -> Dict[str, Any]:
+        """结构化模型发现（QwenPaw discover_provider_models 对齐）。
 
-        - ``merge=True``(默认):发现结果并入配置列表 —— 兼容前端
-          "发现模型即全部加入"的现有交互。
-        - ``merge=False``:发现结果只写入候选(discovered_models)并持久化,
-          由 :meth:`merge_discovered_models` 显式并入 —— 对齐 QwenPaw 的
-          discovered/configured 分离语义。
-
-        失败时保留已有配置(与 QwenPaw 语义一致:失败的刷新不破坏上次成功状态)。
+        Returns:
+            {"success", "models", "discovered_count", "last_synced_at",
+             "used_static_fallback", "error_kind", "message"}
+        - 失败不再静默空列表：error_kind 分类 + used_static_fallback
+          （回退配置存量视图）；错误分类单一事实源为 error_mapping 五类。
+        - 成功时 last_synced_at 持久化到 ProviderConfig.models_last_synced_at。
+        - discovered_count = 本次新进入配置/候选的模型数。
         """
         provider = self.get_provider(provider_id)
         if not provider:
-            logger.error("Provider %s not found", provider_id)
-            return []
+            return {
+                "success": False,
+                "models": [],
+                "discovered_count": 0,
+                "last_synced_at": None,
+                "used_static_fallback": False,
+                "error_kind": "provider_not_found",
+                "message": f"Provider {provider_id} not found",
+            }
 
-        instance = self._get_provider_instance(provider_id)
-        if instance is None:
+        def _static_view() -> List[PydanticModelInfo]:
             return [
                 self._build_model_view(provider, model_id)
                 for model_id in getattr(provider, "models", [])
             ]
 
+        instance = self._get_provider_instance(provider_id)
+        if instance is None:
+            return {
+                "success": False,
+                "models": _static_view(),
+                "discovered_count": 0,
+                "last_synced_at": provider.models_last_synced_at,
+                "used_static_fallback": True,
+                "error_kind": "configuration",
+                "message": "Provider instance unavailable, showing configured models",
+            }
+
         try:
             models = await instance.fetch_models()
         except Exception as e:
-            logger.error("Failed to fetch models from %s: %s", provider_id, e)
-            return []
+            from neurova.llm.providers.error_mapping import normalize_provider_error
 
-        if models:
-            from neurova.llm.capability_detector import (
-                apply_preset_defaults,
-                detect_model_capabilities,
-            )
-
+            normalized = normalize_provider_error(e)
+            kind_map = {
+                "auth_failed": "authentication",
+                "connection_failed": "network",
+                "service_unavailable": "provider_unavailable",
+                "rate_limited": "rate_limited",
+                "bad_request": "invalid_response",
+            }
+            error_kind = kind_map.get(normalized.category.value, "provider_unavailable")
             with self._config_lock:
-                metadata = dict(provider.model_metadata or {})
-                for model in models:
-                    entry = model.to_dict()
-                    entry["owned_by"] = provider_id
-                    # 自动检测能力标记:发现链路写入时缺 capabilities 则推断补齐并持久化
-                    if not (entry.get("capabilities") or []):
-                        old_entry = metadata.get(model.id, {}) or {}
-                        entry["capabilities"] = detect_model_capabilities(
-                            model.id,
-                            existing=old_entry.get("capabilities") or [],
-                            display_name=str(model.name or ""),
-                        )
-                    # 限额三元组兜底:服务商返回的真实值首选,缺省(或 4096 占位)才按预埋补
-                    entry = apply_preset_defaults(model.id, entry)
-                    metadata[model.id] = entry
-                current_ids = set(provider.models or [])
-                if merge:
-                    # 发现结果持久化:新模型追加进配置列表(前端"发现模型"刷新不丢失);
-                    # 已配置模型保持原有顺序,不重复追加。
-                    added_ids = [
-                        model.id for model in models if model.id not in current_ids
-                    ]
-                    if added_ids:
-                        provider.models = [*(provider.models or []), *added_ids]
-                    provider.discovered_models = []
-                else:
-                    provider.discovered_models = [
-                        model.id for model in models if model.id not in current_ids
-                    ]
-                provider.model_metadata = metadata
+                provider.models_last_sync_error = str(e)[:300]
                 self._save_config()
-        return list(models)
+            return {
+                "success": False,
+                "models": _static_view(),
+                "discovered_count": 0,
+                "last_synced_at": provider.models_last_synced_at,
+                "used_static_fallback": True,
+                "error_kind": error_kind,
+                "message": str(e),
+            }
+
+        if not models:
+            # 空结果消歧（QwenPaw _probe_discovery_failure_reason）：
+            # 可能是真没有模型，也可能是请求失败被底层吞掉 — 拉连通性区分
+            check = await self.check_provider_connection(provider_id)
+            if not check.success:
+                with self._config_lock:
+                    provider.models_last_sync_error = check.error or "provider unreachable"
+                    self._save_config()
+                return {
+                    "success": False,
+                    "models": _static_view(),
+                    "discovered_count": 0,
+                    "last_synced_at": provider.models_last_synced_at,
+                    "used_static_fallback": True,
+                    "error_kind": "provider_unavailable",
+                    "message": check.error or "Provider unreachable",
+                }
+
+        from neurova.llm.capability_detector import (
+            apply_preset_defaults,
+            detect_model_capabilities,
+        )
+
+        with self._config_lock:
+            metadata = dict(provider.model_metadata or {})
+            for model in models:
+                entry = model.to_dict()
+                entry["owned_by"] = provider_id
+                # 自动检测能力标记:发现链路写入时缺 capabilities 则推断补齐并持久化
+                if not (entry.get("capabilities") or []):
+                    old_entry = metadata.get(model.id, {}) or {}
+                    entry["capabilities"] = detect_model_capabilities(
+                        model.id,
+                        existing=old_entry.get("capabilities") or [],
+                        display_name=str(model.name or ""),
+                    )
+                # 限额三元组兜底:服务商返回的真实值首选,缺省(或 4096 占位)才按预埋补
+                entry = apply_preset_defaults(model.id, entry)
+                metadata[model.id] = entry
+            current_ids = set(provider.models or [])
+            if merge:
+                # 发现结果持久化:新模型追加进配置列表(前端"发现模型"刷新不丢失);
+                # 已配置模型保持原有顺序,不重复追加。
+                added_ids = [
+                    model.id for model in models if model.id not in current_ids
+                ]
+                if added_ids:
+                    provider.models = [*(provider.models or []), *added_ids]
+                provider.discovered_models = []
+                discovered_count = len(added_ids)
+            else:
+                provider.discovered_models = [
+                    model.id for model in models if model.id not in current_ids
+                ]
+                discovered_count = len(provider.discovered_models)
+            provider.model_metadata = metadata
+            synced_at = datetime.now().isoformat()
+            provider.models_last_synced_at = synced_at
+            provider.models_last_sync_error = None
+            self._save_config()
+
+        return {
+            "success": True,
+            "models": list(models),
+            "discovered_count": discovered_count,
+            "last_synced_at": synced_at,
+            "used_static_fallback": False,
+            "error_kind": None,
+            "message": "",
+        }
+
+    async def fetch_provider_models(
+        self,
+        provider_id: str,
+        merge: bool = True,
+    ) -> List[PydanticModelInfo]:
+        """发现服务商模型列表（薄壳：委托 discover_provider_models，
+        保持旧 List 契约供 multi_model_client 404 重连等消费方使用）。"""
+        result = await self.discover_provider_models(provider_id, merge=merge)
+        return result["models"]
 
     def merge_discovered_models(
         self,
@@ -1343,8 +1428,15 @@ class LLMProviderManager(Module):
         self,
         model_id: str,
         provider_id: Optional[str] = None,
+        force: bool = False,
     ) -> ProbeResult:
-        """探测模型多模态能力:元数据优先,其次 provider 实例,名称启发式兜底。"""
+        """探测模型多模态能力。
+
+        - ``force=False``(默认):元数据优先,其次 provider 实例,名称启发式兜底
+          (兼容既有消费方)。
+        - ``force=True``:跳过元数据直发真实探测(QwenPaw 语义),结果写回
+          model_metadata(capabilities 合并 vision + probe_source)。
+        """
         provider = self._resolve_provider(model_id, provider_id)
         if provider is None:
             return ProbeResult(
@@ -1356,7 +1448,7 @@ class LLMProviderManager(Module):
 
         meta = (provider.model_metadata or {}).get(model_id, {}) or {}
         metadata_caps = meta.get("capabilities") or []
-        if metadata_caps:
+        if metadata_caps and not force:
             return ProbeResult(
                 model_id=model_id,
                 supported=bool(metadata_caps),
@@ -1366,6 +1458,13 @@ class LLMProviderManager(Module):
                     "provider_id": provider.id,
                 },
             )
+
+        if force:
+            result = await self._probe_model_multimodal_real(provider.id, model_id)
+            probe_source = result.metadata.get("probe_source") if isinstance(result.metadata, dict) else None
+            if probe_source == "probed":
+                self._persist_probe_result(provider, model_id, result)
+            return result
 
         instance = self._get_provider_instance(provider.id)
         if instance is not None:
@@ -1385,12 +1484,104 @@ class LLMProviderManager(Module):
             },
         )
 
+    async def _probe_model_multimodal_real(
+        self, provider_id: str, model_id: str,
+    ) -> ProbeResult:
+        """真实多模态探测:委托 provider 实例(OpenAI 兼容路径发图像请求)。"""
+        instance = self._get_provider_instance(provider_id)
+        if instance is None:
+            return ProbeResult(
+                model_id=model_id,
+                supported=False,
+                capabilities=[],
+                metadata={"probe_source": "inconclusive"},
+            )
+        try:
+            return await instance.probe_model_multimodal(model_id)
+        except Exception as e:
+            logger.warning("Real probe failed for %s/%s: %s", provider_id, model_id, e)
+            return ProbeResult(
+                model_id=model_id,
+                supported=False,
+                capabilities=[],
+                metadata={"probe_source": "inconclusive", "probe_detail": str(e)[:300]},
+            )
+
+    def _persist_probe_result(
+        self,
+        provider: ProviderConfig,
+        model_id: str,
+        result: ProbeResult,
+    ) -> None:
+        """把真实探测结果写回 model_metadata(幂等,探测失败不覆盖既有标记)。"""
+        try:
+            from datetime import datetime as _dt
+
+            with self._config_lock:
+                metadata = dict(provider.model_metadata or {})
+                entry = dict(metadata.get(model_id, {}) or {})
+                caps = [str(c) for c in (entry.get("capabilities") or [])]
+                result_caps = [str(c) for c in (result.capabilities or [])]
+                vision = "vision" in result_caps
+                if vision and "vision" not in caps:
+                    caps = [*caps, "vision"]
+                elif not vision and "vision" in caps and result.metadata.get("probe_detail") == "media_rejected":
+                    caps = [c for c in caps if c != "vision"]
+                entry["capabilities"] = caps
+                entry["probe_source"] = "probed"
+                entry["probed_at"] = _dt.now().isoformat()
+                metadata[model_id] = entry
+                provider.model_metadata = metadata
+                self._save_config()
+        except Exception as e:  # noqa: BLE001 — 持久化失败不影响探测结果返回
+            logger.warning("Persist probe result failed for %s: %s", model_id, e)
+
+    def maybe_probe_multimodal(self, provider_id: str, model_id: str) -> None:
+        """激活模型时的自动后台探测(QwenPaw maybe_probe_multimodal 对齐)。
+
+        仅对该模型无任何能力标记时调度 fire-and-forget 线程,
+        不阻塞激活流程;探测结果经 _persist_probe_result 写回。
+        """
+        try:
+            provider = self.get_provider(provider_id)
+            if provider is None:
+                return
+            meta = (provider.model_metadata or {}).get(model_id, {}) or {}
+            if meta.get("capabilities"):
+                return  # 已有标记(含探针/文档来源),不重复探测
+            if meta.get("probe_source") == "probed":
+                return
+
+            def _run() -> None:
+                try:
+                    import asyncio as _asyncio
+
+                    result = _asyncio.run(
+                        self._probe_model_multimodal_real(provider_id, model_id),
+                    )
+                    if isinstance(result.metadata, dict) and result.metadata.get("probe_source") == "probed":
+                        self._persist_probe_result(provider, model_id, result)
+                except Exception as e:  # noqa: BLE001 — 后台任务失败仅记录
+                    logger.warning("Auto probe failed for %s/%s: %s", provider_id, model_id, e)
+
+            import threading
+
+            threading.Thread(target=_run, name=f"probe-{model_id}", daemon=True).start()
+        except Exception as e:  # noqa: BLE001 — 调度失败不影响激活
+            logger.warning("maybe_probe_multimodal failed: %s", e)
+
     async def check_model_connection(
         self,
         model_id: str,
         provider_id: Optional[str] = None,
     ) -> ConnectionResult:
-        """检查模型连接:按 model_id 定位服务商并调用实例检查。"""
+        """检查模型连接:按 model_id 定位服务商并调用实例检查。
+
+        QwenPaw 对齐:管理器层统一填 checked_at 并派生可用性七态,
+        检查结果持久化进 model_metadata[model_id]["availability"]。
+        """
+        from datetime import timezone
+
         provider = self._resolve_provider(model_id, provider_id)
         if provider is None:
             return ConnectionResult(success=False, error="Model not found")
@@ -1399,9 +1590,47 @@ class LLMProviderManager(Module):
         if instance is None:
             return ConnectionResult(success=False, error="Provider instance unavailable")
         try:
-            return await instance.check_model_connection(model_id)
+            result = await instance.check_model_connection(model_id)
         except Exception as e:
             return ConnectionResult(success=False, error=str(e))
+
+        result.checked_at = datetime.now(timezone.utc).isoformat()
+        if result.retryable is None:
+            category = result.error_category
+            result.retryable = (
+                False
+                if result.success
+                else category in ("connection_failed", "service_unavailable", "rate_limited")
+            )
+        if result.verification == "unverified" and result.success:
+            result.verification = "live"
+
+        try:
+            from neurova.llm.providers.error_mapping import availability_status_of
+
+            status = availability_status_of(
+                success=result.success,
+                error_category=result.error_category,
+                message=result.error,
+                http_status=result.http_status,
+            )
+            with self._config_lock:
+                metadata = dict(provider.model_metadata or {})
+                entry = dict(metadata.get(model_id, {}) or {})
+                entry["availability"] = {
+                    "status": status,
+                    "checked_at": result.checked_at,
+                    "http_status": result.http_status,
+                    "verification": result.verification,
+                    "message": (result.error or "")[:300],
+                }
+                metadata[model_id] = entry
+                provider.model_metadata = metadata
+                self._save_config()
+        except Exception as e:  # noqa: BLE001 — 持久化失败不影响检查结果返回
+            logger.warning("Persist model availability failed for %s: %s", model_id, e)
+
+        return result
 
     async def check_provider_connection(self, provider_id: str) -> ConnectionResult:
         """真实现:调用 provider 实例的 check_connection,并如实更新健康状态。"""

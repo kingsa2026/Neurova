@@ -367,6 +367,12 @@
                   <span v-if="m.tags.includes('built-in')" class="nr-mm-tag nr-mm-tag-builtin">{{ t('model.builtin') }}</span>
                 </div>
                 <div class="nr-mm-item-actions">
+                  <button class="nr-mm-icon-btn" :title="t('model.testConnectionTip')" :disabled="testingModelId === m.id" @click="testModelConnection(m)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                  </button>
+                  <button class="nr-mm-icon-btn" :title="t('model.probeMultimodalTip')" :disabled="probingModelId === m.id" @click="probeModel(m)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+                  </button>
                   <button class="nr-mm-icon-btn" :title="t('model.editModel')" @click="startEditModel(m)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                   </button>
@@ -443,9 +449,10 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api'
-import { listProviders, getActiveModel, activateModel as apiActivateModel, updateProvider, createProvider as apiCreateProvider, deleteProvider as apiDeleteProvider, discoverModels as apiDiscoverModels, filterProviderModels, getProviderSeries, testConnection } from '@/api/modules/providers'
+import { listProviders, getActiveModel, activateModel as apiActivateModel, updateProvider, createProvider as apiCreateProvider, deleteProvider as apiDeleteProvider, discoverModelsStructured, filterProviderModels, getProviderSeries, testConnection } from '@/api/modules/providers'
 import type { FilteredProviderModel } from '@/api/modules/providers'
-import { listModels, updateModel, deleteModel as apiDeleteModel, detectCapabilities as apiDetectCapabilities } from '@/api/modules/models'
+import { listModels, updateModel, deleteModel as apiDeleteModel, detectCapabilities as apiDetectCapabilities, checkModelConnection, probeModelMultimodal } from '@/api/modules/models'
+import type { ModelConnectionResult } from '@/api/modules/models'
 import { getSettings, updateSettings } from '@/api/modules/settings'
 import { useAuthStore } from '@/stores/auth'
 import GlassCard from '@/components/GlassCard.vue'
@@ -941,8 +948,23 @@ async function deleteProvider(p: Provider) {
 async function discoverModels(providerId: string) {
   discoveringId.value = providerId
   try {
-    const data: any = await apiDiscoverModels(providerId) as any
+    // QwenPaw 对齐:结构化结果(success/discovered_count/used_static_fallback/error_kind)
+    const res: any = await discoverModelsStructured(providerId) as any
+    const data = res?.data ?? res ?? {}
     const discovered: any[] = data.models ?? []
+    if (!data.success && data.used_static_fallback) {
+      // 发现失败:展示 error_kind 可行动提示,已回退展示配置存量
+      const kindHints: Record<string, string> = {
+        authentication: t('model.discoverAuthFailed'),
+        network: t('model.discoverNetworkFailed'),
+        provider_unavailable: t('model.discoverUnavailable'),
+        rate_limited: t('model.discoverRateLimited'),
+        invalid_response: t('model.discoverInvalidResponse'),
+        configuration: t('model.discoverNotConfigured'),
+      }
+      message.warning(kindHints[data.error_kind] || data.message || t('model.discoverFailed'))
+      return
+    }
     if (discovered.length === 0) {
       // 后端 message(如"请先配置 API Key")优先;无可行动脚本时回到通用文案
       message.info(data.message || t('model.noNewModels'))
@@ -960,7 +982,8 @@ async function discoverModels(providerId: string) {
       }
       provider.model_count = provider.models.length
     }
-    message.success(t('model.modelsDiscovered', { n: discovered.length }))
+    const newCount = typeof data.discovered_count === 'number' ? data.discovered_count : discovered.length
+    message.success(t('model.modelsDiscovered', { n: newCount }))
   } catch {
     message.error(t('model.discoverFailed'))
   } finally {
@@ -997,6 +1020,69 @@ function modelLimitLabel(m: { context_window?: number; max_tokens?: number }): s
 }
 
 const detectingCaps = ref(false)
+
+// ---------------------------------------------------------------------------
+// 模型级连接测试 + 多模态真实探测（QwenPaw 对齐）
+// ---------------------------------------------------------------------------
+const testingModelId = ref<string | null>(null)
+const probingModelId = ref<string | null>(null)
+
+/** 可用性七态 → 结果消息的语气与文案。 */
+function modelTestResultMessage(r: ModelConnectionResult): { type: 'success' | 'warning' | 'error'; text: string } {
+  if (r.connected) {
+    // provider_only=仅验证服务商连通（如非对话模型降级验证），提示用户非全量验证
+    const verificationHint = r.verification === 'provider_only' ? ` (${t('model.verifiedProviderOnly')})` : ''
+    return { type: 'success', text: t('model.connectionOk') + verificationHint }
+  }
+  const kindHints: Record<string, string> = {
+    permission_denied: t('model.testPermissionDenied'),
+    model_not_found: t('model.testModelNotFound'),
+    incompatible_api: t('model.testIncompatible'),
+    rate_limited: t('model.testRateLimited'),
+    transient_error: t('model.testTransient'),
+  }
+  // 后端 error_hint（脱敏可行动提示）优先
+  return { type: 'error', text: r.error_hint || kindHints[r.status || ''] || r.message || t('model.connectionFailed') }
+}
+
+/** 对单个模型发真实连接测试（chat ping），结果以消息展示。 */
+async function testModelConnection(m: ModelItem) {
+  testingModelId.value = m.id
+  try {
+    const res: any = await checkModelConnection(m.id) as any
+    const data: ModelConnectionResult = res?.data ?? res ?? {}
+    const result = modelTestResultMessage(data)
+    if (result.type === 'success') message.success(result.text)
+    else message.error(result.text)
+  } catch {
+    message.error(t('model.connectionFailed'))
+  } finally {
+    testingModelId.value = null
+  }
+}
+
+/** 对单个模型发真实多模态探测（图像问答），支持 vision 时补拉能力标记。 */
+async function probeModel(m: ModelItem) {
+  probingModelId.value = m.id
+  try {
+    const res: any = await probeModelMultimodal({ model_id: m.id, force: true }) as any
+    const result = res?.data?.result ?? res?.result ?? {}
+    const source = result?.probe_source ?? result?.metadata?.probe_source
+    const caps: string[] = result?.capabilities?.map((c: any) => (typeof c === 'string' ? c : c.value ?? String(c))) ?? []
+    if (source === 'probed' && caps.includes('vision')) {
+      message.success(t('model.probeVisionYes'))
+      await fetchModels()
+    } else if (source === 'probed') {
+      message.info(t('model.probeVisionNo'))
+    } else {
+      message.warning(t('model.probeInconclusive'))
+    }
+  } catch {
+    message.error(t('model.probeFailed'))
+  } finally {
+    probingModelId.value = null
+  }
+}
 
 async function detectCapabilities(providerId: string) {
   detectingCaps.value = true
@@ -1066,7 +1152,8 @@ async function testProviderConnection() {
     if (data.success || data.connected) {
       message.success(t('model.connectionOk', { ms: data.latency_ms || '' }))
     } else {
-      message.warning(data.error || data.message || t('model.connectionFailed'))
+      // error_hint（五类归一错误的可行动提示）优先，原始错误信息次之
+      message.warning(data.error_hint || data.error || data.message || t('model.connectionFailed'))
     }
   } catch {
     message.error(t('model.connectionFailed'))

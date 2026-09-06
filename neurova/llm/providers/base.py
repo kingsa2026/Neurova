@@ -135,24 +135,27 @@ class BaseProvider(ABC):
             return self._extra_models
 
     async def check_model_connection(self, model_id: str) -> ConnectionResult:
-        """检查特定模型的连接状态
+        """检查特定模型的连接状态（QwenPaw 对齐：真实网络验证）。
 
-        Args:
-            model_id: 模型ID
-
-        Returns:
-            连接测试结果（失败时附五类归一 error_category/error_hint）
+        默认实现拉取服务商模型列表验证连通性与模型存在性
+        （verification=provider_only）；OpenAI 兼容子类覆盖为对该模型
+        发真实 chat 请求（verification=live）。失败经 error_mapping
+        归一为五类标准错误。
         """
         from neurova.llm.providers.error_mapping import normalize_provider_error
 
         start_time = time.time()
         try:
-            await self.create_chat_model(model_id)
+            models = await self.get_available_models()
             latency = (time.time() - start_time) * 1000
+            found = any(m.id == model_id for m in models)
             return ConnectionResult(
-                success=True,
+                success=found,
                 latency_ms=latency,
-                metadata={"model_id": model_id},
+                error="" if found else f"Model '{model_id}' not found in provider's model list",
+                models_available=len(models),
+                verification="provider_only",
+                metadata={"model_id": model_id, "retryable": False},
             )
         except Exception as e:
             latency = (time.time() - start_time) * 1000
@@ -163,7 +166,9 @@ class BaseProvider(ABC):
                 error=str(e),
                 error_category=normalized.category.value,
                 error_hint=normalized.user_hint,
-                metadata={"model_id": model_id, "retryable": normalized.retryable},
+                verification="provider_only",
+                retryable=normalized.retryable,
+                metadata={"model_id": model_id},
             )
 
     async def probe_model_multimodal(self, model_id: str) -> ProbeResult:
