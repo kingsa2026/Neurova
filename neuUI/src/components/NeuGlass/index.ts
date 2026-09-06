@@ -1,6 +1,0 @@
-export { default as NeuGlass } from './LiquidGlass.vue'
-export { default as GlassContainer } from './GlassContainer.vue'
-export { default as GlassFilter } from './GlassFilter.vue'
-export * from './type'
-export * from './utils'
-export * from './shader-util'
