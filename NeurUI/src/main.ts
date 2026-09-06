@@ -17,6 +17,7 @@ import App from './App.vue'
 import { captureAppError } from '@/utils/errorReporter'
 import router from './router'
 import i18n from './i18n'
+import 'katex/dist/katex.min.css'
 import './styles/global.css'
 
 // echarts 按需注册（Dashboard 等页面的图表区使用；vendor-charts 已在 vite

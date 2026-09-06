@@ -39,6 +39,8 @@ export interface ChatMessage {
   ttsUrls?: string[]
   /** 回放当前句块下标 */
   ttsIdx?: number
+  /** 钩子/检查点（ZCode checkpoint 对齐）：持久化在消息 metadata.checkpoint */
+  checkpoint?: boolean
 }
 
 export interface Session {
