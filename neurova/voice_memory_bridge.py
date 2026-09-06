@@ -242,16 +242,9 @@ class VoiceMemoryBridge:
                 try:
                     self._evolution_orchestrator.on_after_tool_execution(
                         tool_name="asr_transcribe",
-                        params={
-                            "engine": record.engine,
-                            "language": record.language,
-                            "confidence": record.confidence,
-                            "duration_ms": record.duration_ms,
-                            "user_id": user_id,
-                            "agent_id": agent_id,
-                        },
                         success=True,
-                        execution_time=record.duration_ms / 1000.0,
+                        context=f"engine={record.engine}, lang={record.language}, conf={record.confidence:.2f}",
+                        latency=record.duration_ms / 1000.0,
                     )
                     logger.debug(f"ASR 结果已记录到进化系统")
                 except Exception as e:
@@ -331,19 +324,12 @@ class VoiceMemoryBridge:
             if self.config.enable_tts_stats and self._evolution_orchestrator:
                 try:
                     # 使用 EvolutionOrchestrator 的 on_after_tool_execution 方法
-                    # 模拟工具执行：TTS 作为一个工具被调用
-                    tool_params = {
-                        "text_length": stats.text_length,
-                        "engine": stats.engine,
-                        "voice": stats.voice,
-                        "user_id": user_id,
-                        "agent_id": agent_id,
-                    }
+                    # 模拟工具执行：TTS 作为一个工具被调用（签名与 closed_loop.py:436 对齐）
                     self._evolution_orchestrator.on_after_tool_execution(
                         tool_name="tts_synthesize",
-                        params=tool_params,
                         success=stats.success,
-                        execution_time=stats.duration_ms / 1000.0,  # 转换为秒
+                        context=f"engine={stats.engine}, voice={stats.voice}",
+                        latency=stats.duration_ms / 1000.0,  # 转换为秒
                     )
                     stats_recorded = True
                     logger.debug("TTS 使用统计已记录到进化系统: %s", stats.engine)

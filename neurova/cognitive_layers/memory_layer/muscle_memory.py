@@ -477,34 +477,6 @@ class MuscleMemory:
             self._l3[item.id] = item
             logger.debug("Demoted %s... L2 -> L3", item.id[:8])
 
-    def create_from_skill(
-        self,
-        skill_name: str,
-        tool_name: str,
-        description: str,
-        parameters: Dict[str, Any],
-    ) -> MuscleMemoryItem:
-        """从技能创建记忆条目"""
-        item_id = self._generate_item_id(tool_name, description)
-        fingerprint = self._extract_keywords(description)
-
-        item = MuscleMemoryItem(
-            id=item_id,
-            tool_name=tool_name,
-            query_fingerprint=fingerprint,
-            parameters=parameters,
-            result_summary=f"Skill: {skill_name}",
-            level=MemoryLevel.L2,
-            metadata={"source": "skill", "skill_name": skill_name},
-        )
-
-        with self._lock:
-            self._l2[item_id] = item
-            self._add_to_keyword_index(item)
-            self._add_to_tool_index(item)
-
-        return item
-
     def _extract_keywords(self, text: str) -> str:
         """提取关键词指纹"""
         # 移除标点和特殊字符，分词

@@ -633,6 +633,15 @@ async def _on_startup(app_state: AppState) -> None:
     # 初始化组件
     _initialize_components(app_state)
 
+    # 进化权重持久化装配（P2-6：此前仅 start_server.py 调用，uvicorn 直启
+    # get_app 的入口权重纯内存，重启即丢。幂等——已装配时 no-op）。
+    try:
+        from neurova.evolution.closed_loop import bootstrap_evolution_persistence
+
+        bootstrap_evolution_persistence()
+    except Exception as _persist_err:  # noqa: BLE001 - 权重恢复失败不阻断启动
+        logger.warning("进化权重恢复失败（忽略）: %s", _persist_err)
+
     # 初始化 TTS 引擎
     if hasattr(app_state, "tts_manager") and app_state.tts_manager:
         try:
