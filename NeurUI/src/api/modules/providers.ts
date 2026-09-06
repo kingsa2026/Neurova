@@ -29,6 +29,16 @@ export interface ConnectionTestResult {
   latency_ms?: number
   error?: string
   message?: string
+  /** QwenPaw 对齐:结构化检查元数据 */
+  status?: string
+  http_status?: number | null
+  retryable?: boolean | null
+  checked_at?: string | null
+  verification?: 'live' | 'provider_only' | 'catalog' | 'unverified' | null
+  /** 五类归一错误(error_mapping):auth_failed/rate_limited/connection_failed/service_unavailable/bad_request */
+  error_category?: string | null
+  /** 用户可行动提示(脱敏,可直接展示) */
+  error_hint?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +95,22 @@ export function testConnection(providerId: string) {
 /** Discover available models from a provider. */
 export function discoverModels(providerId: string) {
   return api.get<{ models: Record<string, unknown>[] }>(`${BASE}/${providerId}/models/discover`)
+}
+
+/** 结构化发现结果（QwenPaw 对齐）：元数据全量透传。 */
+export interface DiscoverResult {
+  provider_id: string
+  models: Record<string, unknown>[]
+  success: boolean
+  discovered_count: number
+  last_synced_at: string | null
+  used_static_fallback: boolean
+  error_kind: string | null
+  message: string
+}
+
+export function discoverModelsStructured(providerId: string) {
+  return api.get<{ code: number; data: DiscoverResult }>(`${BASE}/${providerId}/models/discover`)
 }
 
 // ---------------------------------------------------------------------------

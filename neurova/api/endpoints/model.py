@@ -92,6 +92,7 @@ class ProbeRequest(BaseModel):
 
     model_id: str = Field(..., description="模型 ID")
     probe_type: str = Field(default="multimodal", description="探测类型")
+    force: bool = Field(default=False, description="元数据已有标记时是否强制真实探测")
 
 
 def _get_request_id(request: Request) -> str:
@@ -455,7 +456,9 @@ async def probe_multimodal(
     try:
         result = {}
         if hasattr(provider_manager, "probe_model_multimodal"):
-            result = await provider_manager.probe_model_multimodal(body.model_id)
+            result = await provider_manager.probe_model_multimodal(
+                body.model_id, force=body.force,
+            )
 
         return {
             "code": 0,
