@@ -513,6 +513,8 @@ export default {
     deleteRound: 'राउंड हटाएँ',
     forkFromHere: 'इस संदेश से विभाजित करें',
     manageModels: 'मॉडल प्रबंधित करें',
+    modelSavedToAgent: 'एजेंट का डिफ़ॉल्ट मॉडल अपडेट किया गया',
+    modelSaveFailed: 'डिफ़ॉल्ट मॉडल सहेजने में विफल',
     noConnectableModels: 'कोई कनेक्ट करने योग्य मॉडल नहीं',
     forkDone: 'नई बातचीत में विभाजित हुआ',
     forkFailed: 'विभाजन विफल',

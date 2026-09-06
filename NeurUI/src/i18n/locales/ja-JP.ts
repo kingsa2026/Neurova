@@ -513,6 +513,8 @@ export default {
     deleteRound: 'このやり取りを削除',
     forkFromHere: 'このメッセージからフォーク',
     manageModels: 'モデルを管理',
+    modelSavedToAgent: 'エージェントのデフォルトモデルを更新しました',
+    modelSaveFailed: 'デフォルトモデルの保存に失敗しました',
     noConnectableModels: '接続可能なモデルがありません',
     forkDone: '新しい会話にフォークしました',
     forkFailed: 'フォークに失敗しました',

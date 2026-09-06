@@ -415,7 +415,7 @@ async def update_agent(
     # 触发 rebuild_loop 如果模型变更
     if body.model is not None and hasattr(agent, "rebuild_loop"):
         try:
-            agent.rebuild_loop(model_name=body.model)
+            await agent.rebuild_loop(model_name=body.model)
         except Exception as e:
             logger.warning(f"rebuild_loop failed after model update: {e}")
 
@@ -661,7 +661,7 @@ async def rebuild_loop(request: Request, agent_id: str = FastAPIPath(...), model
     loop_rebuilt = False
     try:
         if hasattr(agent, "rebuild_loop"):
-            loop_rebuilt = agent.rebuild_loop(model=model)
+            loop_rebuilt = await agent.rebuild_loop(model_name=model)
     except Exception as e:
         logger.error(f"Rebuild loop error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Rebuild loop failed: {str(e)}")

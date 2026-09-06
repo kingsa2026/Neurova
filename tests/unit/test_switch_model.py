@@ -18,13 +18,15 @@ from neurova.api.endpoints import model as model_module
 
 
 class FakeAgent:
-    """最小替身，暴露与 agent_core.Agent 一致的 rebuild_loop 签名。"""
+    """最小替身，暴露与 agent_core.Agent 一致的 rebuild_loop 签名。
+
+    2026-09-07 热切换根因修复后 rebuild_loop 为 async（端点已 await）。
+    """
 
     def __init__(self) -> None:
         self.rebuild_calls: list[str] = []
 
-    def rebuild_loop(self, model_name: str) -> bool:
-        # 与 neurova/agent_core.py: Agent.rebuild_loop(self, model_name) 一致
+    async def rebuild_loop(self, model_name: str) -> bool:
         self.rebuild_calls.append(model_name)
         return True
 
