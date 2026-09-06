@@ -24,6 +24,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import re
 import sqlite3
 import threading
 from pathlib import Path
@@ -37,6 +38,32 @@ logger = get_logger(__name__)
 
 # 默认数据库路径（相对项目根目录的 data 目录）
 _DEFAULT_DB_PATH = str(Path(__file__).resolve().parent.parent.parent / "data" / "experience_knowledge.db")
+
+
+def _resolve_default_db_path() -> str:
+    """解析默认落盘路径：NEUROVA_EKB_DB 环境变量优先（测试隔离挂点，
+    conftest autouse fixture 把所有测试的 EKB 指向临时目录），
+    未设置时回退项目 data/ 目录（向后兼容）。"""
+    env_path = os.environ.get("NEUROVA_EKB_DB", "")
+    return env_path or _DEFAULT_DB_PATH
+
+
+# agent_id 安全字符集：字母/数字/下划线/连字符，1-64 位。
+# MagicMock 泄漏（str(mock) = "<MagicMock name='...' id='...'>"）与其它
+# 非法值一律归一为 None，杜绝 Mock repr 垃圾值落库（3920 事故第三根因）。
+_AGENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _sanitize_agent_id(agent_id: Optional[str]) -> Optional[str]:
+    """归一化 agent_id：合法标识符原样返回，非法值（Mock repr/空串/超长）
+    归一为 None（NULL 语义 = 未归属）。"""
+    if agent_id is None:
+        return None
+    text = str(agent_id)
+    if _AGENT_ID_PATTERN.match(text):
+        return text
+    logger.warning("Invalid agent_id sanitized to None: %.80s", text)
+    return None
 
 # CJK 2-gram 窗口内跳过的纯标点字符（避免跨标点生成噪声 gram）
 _PUNCT = set("，。！？、；：\"'()（）[]【】{}<>《》…—·,.!?;: \t\r\n")
@@ -81,7 +108,7 @@ class ExperienceKnowledgeBase:
     """
 
     def __init__(self, db_path: Optional[str] = None) -> None:
-        self._db_path: str = db_path or _DEFAULT_DB_PATH
+        self._db_path: str = db_path or _resolve_default_db_path()
         self._lock = threading.RLock()
 
         # 确保目录存在
@@ -183,18 +210,35 @@ class ExperienceKnowledgeBase:
             tags: 标签列表
 
         Returns:
-            新记录的 id（int，> 0）
+            新记录的 id；命中去重门禁时返回既有记录 id
         """
         tags = tags or []
-        context_json = json.dumps(exp.context or {}, ensure_ascii=False)
+        agent_id = _sanitize_agent_id(agent_id)
+        context_json = json.dumps(exp.context or {}, ensure_ascii=False, sort_keys=True)
         result_json = (
-            json.dumps(exp.result, ensure_ascii=False) if exp.result is not None else None
+            json.dumps(exp.result, ensure_ascii=False, sort_keys=True) if exp.result is not None else None
         )
         tags_json = json.dumps(tags, ensure_ascii=False)
         created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         with self._lock:
             cur = self._conn.cursor()
+            # 去重门禁：完全相同的 (agent, skill, context, result, success) 只保留一行
+            # （3920 条垃圾经验事故：管线测试经单例打真库，"Hello" 重复 1223 次）。
+            # success 参与键：同问同答但一成一败是两条语义不同的经验，不合并。
+            cur.execute(
+                """
+                SELECT id FROM experience_records
+                WHERE agent_id IS ? AND skill_name = ? AND context = ? AND result IS ? AND success = ?
+                LIMIT 1
+                """,
+                (agent_id, skill_name, context_json, result_json, 1 if exp.success else 0),
+            )
+            existing = cur.fetchone()
+            if existing is not None:
+                logger.debug("Duplicate experience record skipped (existing id=%s)", existing["id"])
+                return int(existing["id"])
+
             cur.execute(
                 """
                 INSERT INTO experience_records

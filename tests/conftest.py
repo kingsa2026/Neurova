@@ -299,7 +299,13 @@ def _isolate_governance_settings(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolate_meta_ledger(tmp_path, monkeypatch):
-    """所有测试的元认知台账落盘指向临时目录。"""
+    """所有测试的元认知台账落盘指向临时目录。
+
+    （合并残留：本文件内曾定义两次，后者静默遮蔽前者——2026-09-06 收敛为一份。）
+    MetaLedger（neurova/cognitive_layers/meta_cognition_layer/ledger.py）默认落
+    data/metacognition.db；B/C 写穿透与 API 测试都会写它，测试期直接落盘会污染
+    仓库 data/。统一指向每测试临时目录（含单例重建），与 _isolate_usage_history 同模式。
+    """
     monkeypatch.setenv("NEUROVA_META_LEDGER_DB", str(tmp_path / "metacognition.db"))
     try:
         from neurova.cognitive_layers.meta_cognition_layer.ledger import reset_meta_ledger
@@ -307,20 +313,24 @@ def _isolate_meta_ledger(tmp_path, monkeypatch):
         return
     reset_meta_ledger()
 
-
-# ---------------------------------------------------------------------------
-# 元认知台账防污染隔离
-# ---------------------------------------------------------------------------
-# MetaLedger（neurova/cognitive_layers/meta_cognition_layer/ledger.py）默认落
-# data/metacognition.db；B/C 写穿透与 API 测试都会写它，测试期直接落盘会污染
-# 仓库 data/。统一指向每测试临时目录（含单例重建），与 _isolate_usage_history 同模式。
 
 @pytest.fixture(autouse=True)
-def _isolate_meta_ledger(tmp_path, monkeypatch):
-    """所有测试的元认知台账落盘指向临时目录。"""
-    monkeypatch.setenv("NEUROVA_META_LEDGER_DB", str(tmp_path / "metacognition.db"))
+def _isolate_ekb(tmp_path, monkeypatch):
+    """所有测试的经验知识库（EKB）落盘指向临时目录。
+
+    根因（3920 条垃圾经验事故 2026-09-06）：管线级测试用 MagicMock
+    evolution（hasattr 恒真）→ _step_record_experience 的 EKB 写入分支必执行，
+    模块单例默认打生产库 data/experience_knowledge.db，测试对话
+    （"Hello" ×1223 等）全部灌进真库。与 _isolate_meta_ledger 同模式：
+    环境变量指向 tmp_path + 单例重建。
+    """
+    monkeypatch.setenv("NEUROVA_EKB_DB", str(tmp_path / "experience_knowledge.db"))
     try:
-        from neurova.cognitive_layers.meta_cognition_layer.ledger import reset_meta_ledger
+        from neurova.skills.experience_knowledge_base import (
+            reset_experience_knowledge_base,
+        )
     except Exception:  # pragma: no cover - 模块未就绪时跳过
         return
-    reset_meta_ledger()
+    reset_experience_knowledge_base()
+    yield
+    reset_experience_knowledge_base()
