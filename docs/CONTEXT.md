@@ -123,7 +123,7 @@ Agent (1621 行, 37 方法)
 
 支持 14 种平台接入：飞书、钉钉、企业微信、微信、Telegram、Discord、QQ、MQTT、WebSocket、SIP、Webhook、移动设备（QR码配对）
 
-### 前端 (`neuUI/`)
+### 前端 (`NeurUI/`)
 
 Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue，82 个页面组件：
 
