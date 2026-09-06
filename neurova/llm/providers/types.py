@@ -110,3 +110,10 @@ class ConnectionResult(BaseModel):
     # 成功/未分类时为 None
     error_category: Optional[str] = None
     error_hint: str = ""
+    # QwenPaw 对齐：结构化检查元数据
+    # verification: live=真实请求验证 / provider_only=仅验证服务商连通 /
+    #               unverified=仅本地构造校验未发请求
+    verification: str = "unverified"
+    http_status: Optional[int] = None
+    retryable: Optional[bool] = None
+    checked_at: Optional[str] = None
