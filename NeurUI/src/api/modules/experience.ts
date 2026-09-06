@@ -68,11 +68,6 @@ export function searchSimilar(agentId: string, query: string, limit = 5) {
   return api.post<ApiResponse<ExperienceRecord[]>>(`${BASE}/similar`, { agent_id: agentId, query, limit })
 }
 
-/** Evaluate an experience (e.g. rate quality). */
-export function evaluateExperience(skillName: string, rating: number, feedback?: string) {
-  return api.get<ApiResponse<null>>(`${BASE}/evaluate/${skillName}`)
-}
-
 /** Get experience recommendations for a task (uses /ranking as fallback). */
 export function getRecommendations(agentId: string, taskType: string, limit = 5) {
   return api.get<ApiResponse<PaginatedData<ExperienceRecord>>>(`${BASE}/ranking`, { params: { agent_id: agentId, task_type: taskType, limit } })

@@ -456,7 +456,11 @@ const fetchRecommendations = async () => {
   try {
     const taskType = recommendationTaskType.value.trim() || 'general'
     const res = await experienceApi.getRecommendations(agentId.value, taskType, 10)
-    recommendations.value = Array.isArray(res.data) ? res.data : []
+    // axios 拦截器已解一层 response.data；res.data 是 {items,total,...} 分页信封
+    const envelope = res.data as any
+    recommendations.value = Array.isArray(envelope)
+      ? envelope
+      : envelope?.items ?? envelope?.results ?? []
   } catch (e: any) {
     console.error('Failed to fetch recommendations:', e?.response?.data?.message || e?.message)
   } finally {
@@ -470,7 +474,11 @@ const findSimilar = async (record: ExperienceRecord) => {
   try {
     const query = record.context || record.task_type || ''
     const res = await experienceApi.searchSimilar(agentId.value, query, 10)
-    similarExperiences.value = Array.isArray(res.data) ? res.data : []
+    // axios 拦截器已解一层；res.data 是 {results,total} 信封（后端 /similar 契约）
+    const envelope = res.data as any
+    similarExperiences.value = Array.isArray(envelope)
+      ? envelope
+      : envelope?.results ?? envelope?.items ?? []
   } catch (e: any) {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
