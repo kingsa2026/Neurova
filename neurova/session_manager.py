@@ -818,11 +818,19 @@ class SessionManager(SessionRepository):
                         "updated_at": session_data.get("updated_at", ""),
                         "total_messages": session_data.get("total_messages", 0),
                         "pinned": bool(session_data.get("pinned", False)),
+                        "sort_order": int(session_data.get("sort_order", 0) or 0),
                     }
                     seen_session_ids[sid] = summary
 
         summaries = list(seen_session_ids.values())
-        summaries.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        # 拖拽排序落库:sort_order>0 的会话按其升序在前,未排序(0)按 created_at 倒序垫底
+        summaries.sort(
+            key=lambda x: (
+                0 if x.get("sort_order", 0) else 1,
+                x.get("sort_order", 0) if x.get("sort_order", 0) else 0,
+                "" if x.get("sort_order", 0) else x.get("created_at", ""),
+            ),
+        )
         return summaries
 
     def set_session_pinned(self, agent_id: str, session_id: str, pinned: bool) -> bool:
@@ -840,6 +848,34 @@ class SessionManager(SessionRepository):
                 ok = False
                 continue
             session_data["pinned"] = bool(pinned)
+            if not self._write_session_file(file_path, session_data):
+                ok = False
+        return ok
+
+    def set_sessions_sort_order(self, agent_id: str, ordered_ids: List[str]) -> bool:
+        """按用户拖拽顺序持久化会话排序（写入所有日期文件的 sort_order 字段）。
+
+        ordered_ids 为完整有序 session_id 列表；未出现在列表中的会话保持
+        sort_order=0（视为未排序，按 created_at 倒序垫底）。
+        """
+        agent_dir = self._get_session_dir(agent_id)
+        if not agent_dir.is_dir():
+            logger.warning("set_sessions_sort_order: agent 目录不存在 %s", agent_id)
+            return False
+
+        order_map = {sid: idx + 1 for idx, sid in enumerate(ordered_ids)}
+        ok = True
+        for file_path in agent_dir.glob("session_*.json"):
+            session_data = self._read_session_file(file_path)
+            if not session_data:
+                continue
+            sid = session_data.get("session_id", "")
+            if sid not in order_map:
+                continue
+            new_order = order_map[sid]
+            if session_data.get("sort_order", 0) == new_order:
+                continue
+            session_data["sort_order"] = new_order
             if not self._write_session_file(file_path, session_data):
                 ok = False
         return ok

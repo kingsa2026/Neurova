@@ -119,6 +119,14 @@ class SessionRepository(ABC):
         """
         return False
 
+    def set_sessions_sort_order(self, agent_id: str, ordered_ids: List[str]) -> bool:
+        """按用户拖拽顺序持久化会话排序（非抽象默认实现：返回 False 表示不支持）。
+
+        ordered_ids 为完整有序 session_id 列表；实现方应把 sort_order 写入
+        会话文件，list_sessions 按 sort_order 升序稳定排序。
+        """
+        return False
+
 
 # ── 工厂函数（单例） ──────────────────────────────────────
 
