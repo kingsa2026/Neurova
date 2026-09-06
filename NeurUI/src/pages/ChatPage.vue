@@ -32,6 +32,7 @@
           @update:model-value="searchQuery = $event"
         />
         <button class="nr-msg-search-open" :title="t('chat.searchInSession')" @click="openMsgSearch">🔍</button>
+        <button class="nr-msg-search-open" :title="t('chat.crossSearchTitle')" @click="crossSearchOpen = true">🌐</button>
       </div>
 
       <div class="nr-session-list">
@@ -80,70 +81,16 @@
       <!-- Page Header (when inside MainLayout) -->
       <div v-if="isMainLayout" class="nr-chat-page-header">
         <div class="nr-chat-header-left">
-          <a-dropdown :trigger="['click']" placement="bottomLeft">
-            <button class="nr-chat-session-select">
-              <span class="nr-chat-session-select-icon">💬</span>
-              <span class="nr-chat-session-select-name">{{ currentSessionTitle || t('chat.noSessions') }}</span>
-              <span class="nr-chat-session-select-arrow">▾</span>
-            </button>
-            <template #overlay>
-              <div class="nr-glass-dropdown">
-                <div class="nr-glass-dropdown-item" style="font-weight:600; color: var(--nr-text-primary);" @click="createSession">
-                  + {{ t('chat.newChat') }}
-                </div>
-                <div class="nr-glass-dropdown-divider" />
-                <div
-                  v-for="s in filteredSessions"
-                  :key="s.id"
-                  class="nr-glass-dropdown-item"
-                  :class="{ 'is-active': s.id === currentSessionId }"
-                  @click="switchSession(s.id)"
-                >
-                  <span>{{ s.title }}</span>
-                </div>
-                <div v-if="filteredSessions.length === 0" class="nr-glass-dropdown-item" style="opacity:0.5">
-                  {{ t('common.noData') }}
-                </div>
-              </div>
-            </template>
-          </a-dropdown>
+          <!-- 静态会话标题：切换会话走右侧历史面板（下拉菜单已移除，功能重叠） -->
+          <span class="nr-chat-header-title">{{ currentSessionTitle || t('chat.noSessions') }}</span>
         </div>
         <div class="nr-chat-header-actions">
-          <!-- 思考程度：简单 / 标准 / 深度 -->
-          <div class="nr-thinking-seg" :title="t('chat.thinkingEffort')">
-            <button
-              v-for="opt in thinkingOptions"
-              :key="opt.value"
-              class="nr-thinking-opt"
-              :class="{ active: thinkingEffort === opt.value }"
-              @click="setThinkingEffort(opt.value)"
-            >
-              {{ t(opt.label) }}
-            </button>
-          </div>
-          <button
-            class="nr-auto-voice-btn"
-            :class="{ active: autoVoice }"
-            :title="t('chat.autoVoiceTitle')"
-            @click="toggleAutoVoice"
-          >
-            {{ autoVoice ? '🔊' : '🔇' }}
-          </button>
-          <a-select
-            v-model:value="selectedModel"
-            class="nr-chat-model-select"
-            :options="chatModelOptions"
-            :loading="chatModelLoading"
-            :title="t('agent.model')"
-            size="small"
-          />
           <button
             class="nr-chat-toggle-btn"
-            :class="{ 'cu-active': computerPanelState.open }"
-            :title="t('computerPanel.title')"
-            @click="toggleComputerPanel"
+            :title="t('chat.crossSearchTitle')"
+            @click="crossSearchOpen = true"
           >
-            🖥
+            🌐
           </button>
           <button class="nr-chat-toggle-btn" @click="historyPanelOpen = !historyPanelOpen" :title="t('chat.history')">
             {{ historyPanelOpen ? '›' : '‹' }}
@@ -186,10 +133,12 @@
           :id="`nr-msg-${idx}`"
           :key="idx"
           class="nr-msg"
-          :class="[`nr-msg--${msg.role}`, { 'nr-msg--hit': msgSearchHits.includes(idx) && idx === msgSearchCursor }]"
+          :class="[`nr-msg--${msg.role}`, { 'nr-msg--hit': msgSearchHits.includes(idx) && idx === msgSearchCursor, 'nr-msg--checkpoint': msg.checkpoint }]"
         >
           <div class="nr-msg-avatar">{{ msg.role === 'user' ? '👤' : '🤖' }}</div>
           <div class="nr-msg-body">
+            <!-- 钩子/检查点标记（ZCode checkpoint 对齐） -->
+            <div v-if="msg.checkpoint" class="nr-msg-checkpoint-badge" :title="t('chat.checkpointSet')">⚓ {{ t('chat.checkpoint') }}</div>
             <!-- Reasoning / Thinking Block -->
             <div v-if="msg.reasoning" class="nr-msg-reasoning">
               <div class="nr-reasoning-header" @click="msg.reasoningOpen = !msg.reasoningOpen">
@@ -351,6 +300,11 @@
               <template v-if="msg.role === 'assistant'">
                 <button
                   class="nr-msg-action"
+                  :title="t('chat.regenerate')"
+                  @click="regenerateLastRound"
+                >⟳</button>
+                <button
+                  class="nr-msg-action"
                   :class="{ 'nr-msg-action--active': msg.feedback === 'like' }"
                   :title="t('chat.like')"
                   @click="rateReply(msg, 'like')"
@@ -361,8 +315,30 @@
                   :title="t('chat.dislike')"
                   @click="rateReply(msg, 'dislike')"
                 >👎</button>
+                <button
+                  class="nr-msg-action"
+                  :title="t('chat.forkFromHere')"
+                  @click="forkFromMessage(msg)"
+                >⎇</button>
+                <button
+                  class="nr-msg-action"
+                  :class="{ 'nr-msg-action--active': msg.checkpoint }"
+                  :title="msg.checkpoint ? t('chat.checkpointRemove') : t('chat.checkpointSet')"
+                  @click="toggleCheckpoint(msg)"
+                >⚓</button>
               </template>
               <template v-else>
+                <button
+                  class="nr-msg-action"
+                  :title="t('chat.forkFromHere')"
+                  @click="forkFromMessage(msg)"
+                >⎇</button>
+                <button
+                  class="nr-msg-action"
+                  :class="{ 'nr-msg-action--active': msg.checkpoint }"
+                  :title="msg.checkpoint ? t('chat.checkpointRemove') : t('chat.checkpointSet')"
+                  @click="toggleCheckpoint(msg)"
+                >⚓</button>
                 <button
                   v-if="isLastUserMessage(idx)"
                   class="nr-msg-action"
@@ -422,29 +398,9 @@
           <span class="nr-retrieval-spinner">⟳</span>
           <span>{{ retrievalStatus }}</span>
         </div>
-        <div class="nr-input-row">
-          <input
-            ref="fileInputRef"
-            type="file"
-            multiple
-            accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.csv,.json,.py,.js,.ts,.vue,.html,.css,.md"
-            style="display: none"
-            @change="handleFileSelect"
-          />
-          <GlassButton variant="ghost" size="md" @click="fileInputRef?.click()" :title="t('chat.upload')">
-            📎
-          </GlassButton>
-          <!-- ASR Voice Button -->
-          <GlassButton
-            v-if="asrAvailable"
-            variant="ghost"
-            size="md"
-            :class="{ 'nr-voice-active': isRecording }"
-            @click="toggleRecording"
-            :title="t('chat.voice')"
-          >
-            {{ isRecording ? '🔴' : '🎙️' }}
-          </GlassButton>
+        <!-- Composer 一体化外壳（参考图：textarea + 工具条同框，玻璃容器承载边框） -->
+        <div class="nr-composer-shell" :class="{ 'is-focus': composerFocused }">
+          <div class="nr-input-row">
           <textarea
             ref="textareaRef"
             v-model="inputText"
@@ -454,9 +410,120 @@
             @compositionstart="onCompositionStart"
             @compositionend="onCompositionEnd"
             @keydown="handleKeydown"
-            @input="autoResize"
+            @input="onComposerInput"
             @paste="handlePaste"
+            @focus="composerFocused = true"
+            @blur="composerFocused = false"
           />
+          <!-- 斜杠命令面板（QwenPaw slash commands 对齐）：输入 / 开头时弹出 -->
+          <div v-if="slashOpen" class="nr-slash-panel">
+            <div
+              v-for="(cmd, i) in slashFiltered"
+              :key="cmd.name"
+              class="nr-slash-item"
+              :class="{ 'is-active': i === slashIndex }"
+              @mousedown.prevent="runSlashCommand(cmd)"
+              @mousemove="slashIndex = i"
+            >
+              <span class="nr-slash-name">{{ cmd.name }}</span>
+              <span class="nr-slash-desc">{{ t(cmd.descKey) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Composer 工具条（QwenPaw/ZCode composer 对齐）：
+             左 = +附件 / 电脑操作(图标) / 语音输入；右 = 用量环 + 思考程度 + 语音开关 + 模型 + 发送 -->
+        <div class="nr-composer-toolbar">
+          <div class="nr-composer-left">
+            <input
+              ref="fileInputRef"
+              type="file"
+              multiple
+              accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.csv,.json,.py,.js,.ts,.vue,.html,.css,.md"
+              style="display: none"
+              @change="handleFileSelect"
+            />
+            <button class="nr-composer-pill nr-composer-pill--icon" :title="t('chat.upload')" @click="fileInputRef?.click()">＋</button>
+            <button
+              class="nr-composer-pill nr-composer-pill--icon"
+              :class="{ 'is-active': computerPanelState.open }"
+              :title="t('computerPanel.title')"
+              @click="toggleComputerPanel"
+            >🖥</button>
+            <button
+              v-if="asrAvailable"
+              class="nr-composer-pill nr-composer-pill--icon"
+              :class="{ 'is-active': isRecording }"
+              :title="t('chat.voice')"
+              @click="toggleRecording"
+            >{{ isRecording ? '🔴' : '🎙️' }}</button>
+          </div>
+          <div class="nr-composer-right">
+            <ContextUsageIndicator
+              :usage="sessionUsage"
+              :context-window="currentModelContextWindow"
+            />
+            <a-dropdown :trigger="['click']" placement="topRight">
+              <button class="nr-composer-pill" :title="t('chat.thinkingEffort')">
+                <span>🧠</span>
+                <span>{{ currentThinkingLabel }}</span>
+                <span class="nr-composer-pill-arrow">▾</span>
+              </button>
+              <template #overlay>
+                <div class="nr-glass-dropdown">
+                  <div
+                    v-for="opt in thinkingOptions"
+                    :key="opt.value"
+                    class="nr-glass-dropdown-item nr-composer-menu-item"
+                    :class="{ 'is-active': thinkingEffort === opt.value }"
+                    @click="setThinkingEffort(opt.value)"
+                  >
+                    <span>{{ t(opt.label) }}</span>
+                    <span v-if="thinkingEffort === opt.value" class="nr-composer-check">✓</span>
+                  </div>
+                </div>
+              </template>
+            </a-dropdown>
+            <button
+              class="nr-composer-pill nr-composer-pill--icon"
+              :class="{ 'is-active': autoVoice }"
+              :title="t('chat.autoVoiceTitle')"
+              @click="toggleAutoVoice"
+            >
+              {{ autoVoice ? '🔊' : '🔇' }}
+            </button>
+            <a-dropdown :trigger="['click']" placement="topRight">
+              <button class="nr-composer-pill nr-composer-pill--model" :title="t('agent.model')">
+                <span class="nr-composer-pill-label">{{ selectedModelLabel }}</span>
+                <span class="nr-composer-pill-arrow">▾</span>
+              </button>
+              <template #overlay>
+                <div class="nr-glass-dropdown nr-composer-model-menu">
+                  <div
+                    v-for="opt in chatModelOptions"
+                    :key="opt.value || 'auto'"
+                    class="nr-glass-dropdown-item nr-composer-menu-item"
+                    :class="{ 'is-active': selectedModel === opt.value }"
+                    @click="selectedModel = opt.value"
+                  >
+                    <span class="nr-composer-pill-label">{{ opt.label }}</span>
+                    <span v-if="selectedModel === opt.value" class="nr-composer-check">✓</span>
+                  </div>
+                </div>
+              </template>
+            </a-dropdown>
+            <button
+              class="nr-composer-send"
+              :disabled="(!inputText.trim() && pendingFiles.length === 0 && !isStreaming) || !isSendLockOwner"
+              :title="!isSendLockOwner ? t('chat.anotherTabSending') : (isStreaming ? t('chat.stop') : t('chat.send'))"
+              @click="isStreaming ? stopStreaming() : sendMessage()"
+            >
+              <span v-if="isStreaming">■</span>
+              <span v-else>↑</span>
+            </button>
+          </div>
+          </div>
+        </div>
       <!-- 429 限流横幅（补课 A1）：一键切换备选模型 -->
       <div v-if="rateLimitBanner" class="nr-rate-limit-banner">
         <span class="nr-rate-limit-text">
@@ -525,26 +592,6 @@
           {{ t('common.clear') }}
         </button>
       </div>
-
-          <GlassButton
-            v-if="isStreaming"
-            variant="danger"
-            size="md"
-            @click="stopStreaming"
-          >
-            {{ t('chat.stop') }}
-          </GlassButton>
-          <GlassButton
-            v-else
-            variant="primary"
-            size="md"
-            :disabled="(!inputText.trim() && pendingFiles.length === 0) || !isSendLockOwner"
-            :title="!isSendLockOwner ? t('chat.anotherTabSending') : undefined"
-            @click="sendMessage"
-          >
-            {{ t('chat.send') }}
-          </GlassButton>
-        </div>
       </div>
 
       <!-- 蜂群子 Agent 对话小窗（右下角堆叠，可最小化） -->
@@ -566,6 +613,14 @@
       @close="closeComputerPanel"
     />
 
+    <!-- 跨会话全文搜索（QwenPaw ChatSearchPanel 对齐） -->
+    <CrossSessionSearch
+      :open="crossSearchOpen"
+      :sessions="sessions"
+      @close="crossSearchOpen = false"
+      @jump="onCrossSearchJump"
+    />
+
     <!-- Right Panel: Conversation History (main layout mode) -->
     <aside v-if="isMainLayout && agentId && historyPanelOpen" class="nr-chat-history-panel">
       <div class="nr-history-header">
@@ -585,6 +640,7 @@
           :placeholder="t('common.search')"
           @update:model-value="searchQuery = $event"
         />
+        <button class="nr-msg-search-open" :title="t('chat.crossSearchTitle')" @click="crossSearchOpen = true">🌐</button>
       </div>
       <div class="nr-session-list">
         <div
@@ -732,6 +788,7 @@ import { useTtsAudioGate } from '@/composables/useTtsAudioGate'
 import { isDefaultChatTitle } from '@/utils/sessionTitle'
 import { useRouter } from 'vue-router'
 import { useChat } from '@/composables/useChat'
+import { reorderConsoleSessions } from '@/api/modules/console'
 import type { ChatMessage, Session, PendingFile } from '@/types/chat'
 import { api } from '@/api'
 import {
@@ -747,6 +804,8 @@ import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
 import SubAgentPanel, { type SubAgentWindowState } from '@/components/chat/SubAgentPanel.vue'
 import ComputerUsePanel from '@/components/chat/ComputerUsePanel.vue'
+import ContextUsageIndicator from '@/components/chat/ContextUsageIndicator.vue'
+import CrossSessionSearch from '@/components/chat/CrossSessionSearch.vue'
 import { useComputerPanel, isComputerTool, } from '@/composables/useComputerPanel'
 import { toolCardVariant, variantIcon, variantColor } from '@/utils/toolCardVariant'
 import { useThinkingEffort } from '@/composables/useThinkingEffort'
@@ -766,6 +825,7 @@ interface ChatModelOption {
   label: string
   value: string
   provider_id: string
+  context_window?: number | null
 }
 
 const { t } = useI18n()
@@ -803,6 +863,8 @@ const {
 // Local UI state (UI concerns, not domain state)
 // ---------------------------------------------------------------------------
 const messagesRef = ref<HTMLElement | null>(null)
+/** Composer 外壳聚焦态（focus-within 由 CSS 处理不了 Vue 模板类的场景，focus/blur 维护） */
+const composerFocused = ref(false)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const fileInputRef = ref<HTMLInputElement | null>(null)
 
@@ -974,11 +1036,12 @@ async function loadChatModels() {
     const enabled = normalized.filter((m) => m.enabled !== false)
     const AUTO_ROUTE_LABEL = t('ui.autoRoute')
     const options: ChatModelOption[] = [
-      { label: AUTO_ROUTE_LABEL, value: '', provider_id: '' },
+      { label: AUTO_ROUTE_LABEL, value: '', provider_id: '', context_window: null },
       ...enabled.map((m) => ({
         label: `${m.name || m.id}${m.is_active ? ' ●' : ''}`,
         value: m.id || m.name,
         provider_id: m.provider_id || '',
+        context_window: m.context_window ?? null,
       })),
     ]
     chatModelOptions.value = options
@@ -994,6 +1057,150 @@ async function loadChatModels() {
 }
 
 let abortController: AbortController | null = null
+
+// ---------------------------------------------------------------------------
+// 跨会话全文搜索（QwenPaw ChatSearchPanel 对齐）
+// ---------------------------------------------------------------------------
+const crossSearchOpen = ref(false)
+
+/** 跳转命中：切会话 → 历史加载后按关键词滚动定位第一条命中消息。 */
+async function onCrossSearchJump(sessionId: string, keyword: string): Promise<void> {
+  crossSearchOpen.value = false
+  if (sessionId !== currentSessionId.value) {
+    await switchSession(sessionId)
+  }
+  void nextTick(() => {
+    void scrollToFirstHit(sessionId, keyword)
+  })
+}
+
+/** 在已加载历史里定位含关键词的消息并滚动（找不到则仅贴底）。 */
+async function scrollToFirstHit(sessionId: string, keyword: string): Promise<void> {
+  if (currentSessionId.value !== sessionId) return
+  // 历史加载是异步的，给一帧缓冲后尝试定位（最多重试 3 次）
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const idx = messages.value.findIndex((m) =>
+      String(m.content || '').toLowerCase().includes(keyword.toLowerCase()),
+    )
+    if (idx >= 0) {
+      const el = document.getElementById(`nr-msg-${idx}`)
+      if (el) {
+        el.scrollIntoView({ block: 'center' })
+        return
+      }
+    }
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  scrollToBottom()
+}
+
+// ---------------------------------------------------------------------------
+// Token/上下文用量（QwenPaw ContextUsageIndicator 对齐）
+// sessionUsage = 当前会话累计（store per-session），contextWindow = 当前选中
+// 模型的限额（自动路由时未知 → 指示器退化为产出密度环）。
+// ---------------------------------------------------------------------------
+const sessionUsage = computed(() => chatStore.getSessionTokenUsage(currentSessionId.value))
+const currentModelContextWindow = computed<number | null>(() => {
+  const opt = chatModelOptions.value.find((o) => o.value === selectedModel.value)
+  return opt?.context_window ?? null
+})
+
+/** Composer pill 当前思考程度标签（简单/标准/深度）。 */
+const currentThinkingLabel = computed<string>(() => {
+  const opt = thinkingOptions.find((o) => o.value === thinkingEffort.value)
+  return opt ? t(opt.label) : ''
+})
+
+/** Composer pill 当前模型标签（空 = 自动路由）。 */
+const selectedModelLabel = computed<string>(() => {
+  const opt = chatModelOptions.value.find((o) => o.value === selectedModel.value)
+  return opt ? opt.label : t('ui.autoRoute')
+})
+
+// ---------------------------------------------------------------------------
+// 斜杠命令面板（QwenPaw slash commands 对齐）
+// 输入框以 "/" 开头时弹出本地命令面板，Enter 执行 / Tab 补全 / ↑↓ 导航。
+// 纯前端交互：命令落地为既有函数（新会话/清屏/历史清空），不发后端。
+// ---------------------------------------------------------------------------
+interface SlashCommand {
+  name: string
+  descKey: string
+  run: () => void | Promise<void>
+}
+
+const slashCommands: SlashCommand[] = [
+  {
+    name: '/new',
+    descKey: 'chat.slashNew',
+    run: () => createSession(),
+  },
+  {
+    name: '/clear',
+    descKey: 'chat.slashClear',
+    run: () => {
+      chatStore.clearMessages()
+    },
+  },
+  {
+    name: '/archive',
+    descKey: 'chat.slashArchive',
+    run: async () => {
+      if (currentSessionId.value) {
+        await archiveSession(currentSessionId.value)
+      }
+    },
+  },
+]
+
+const slashOpen = ref(false)
+const slashIndex = ref(0)
+const slashFiltered = computed<SlashCommand[]>(() => {
+  const q = inputText.value.trim().toLowerCase()
+  if (!q.startsWith('/')) return []
+  return slashCommands.filter((c) => c.name.startsWith(q))
+})
+
+function onSlashInput(): void {
+  slashIndex.value = 0
+  slashOpen.value = slashFiltered.value.length > 0
+}
+
+function closeSlashPanel(): void {
+  slashOpen.value = false
+}
+
+async function runSlashCommand(cmd?: SlashCommand): Promise<void> {
+  const target = cmd ?? slashFiltered.value[slashIndex.value]
+  closeSlashPanel()
+  if (!target) return
+  chatStore.setInputText('')
+  await target.run()
+}
+
+function onSlashKeydown(e: KeyboardEvent): boolean {
+  if (!slashOpen.value) return false
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    slashIndex.value = (slashIndex.value + 1) % slashFiltered.value.length
+    return true
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    slashIndex.value = (slashIndex.value - 1 + slashFiltered.value.length) % slashFiltered.value.length
+    return true
+  }
+  if (e.key === 'Enter' || e.key === 'Tab') {
+    e.preventDefault()
+    void runSlashCommand()
+    return true
+  }
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    closeSlashPanel()
+    return true
+  }
+  return false
+}
 
 // ---------------------------------------------------------------------------
 // Session Management (delegated to useChat composable)
@@ -1015,6 +1222,9 @@ const {
   // 轮次操作：删除一轮（编辑覆写复用）/ 点赞点踩反馈
   deleteRound: _deleteRound,
   sendFeedback: _sendFeedback,
+  // 会话分叉 / 消息钩子（ZCode fork/checkpoint 对齐）
+  forkSession: _forkSession,
+  setCheckpoint: _setCheckpoint,
   // 用户主动调用 switchSession / deleteSession 失败时弹 toast 的错误策略 helper
   // (#2 / ADR 0008 函数调用库契约的一部分 — switchSession / deleteSession 本身
   //  不弹 toast, 调用方按需调 notifySwitchFailure / notifyDeleteFailure;
@@ -1122,6 +1332,23 @@ function onSessionDrop(targetId: string): void {
   dragOverSessionId.value = null
   if (!sourceId || sourceId === targetId) return
   chatStore.moveSessionAfter(sourceId, targetId)
+  // 拖拽排序落库（QwenPaw /chats/groups/order 对齐）：本地视觉排序立即生效，
+  // 同时异步持久化 sort_order（失败静默——本地排序仍可用，刷新后回退服务端顺序）。
+  void persistSessionOrder()
+}
+
+/** 把当前会话顺序（含置顶区顺序）整体落库。 */
+async function persistSessionOrder(): Promise<void> {
+  if (!agentId.value) return
+  // filteredSessions 已含置顶优先排序；置顶区在前一并落库，服务端 sort_order 保序
+  const orderedIds = filteredSessions.value.map((s) => s.id).filter(Boolean)
+  if (orderedIds.length === 0) return
+  try {
+    await reorderConsoleSessions(agentId.value, orderedIds)
+    chatStore.applySessionOrder(orderedIds)
+  } catch (e) {
+    console.warn('[ChatPage] persist session order failed:', e)
+  }
 }
 
 /** 加载当前 agent 的 session 列表(模板 onMounted / agentId watch 调用)。 */
@@ -1411,6 +1638,79 @@ async function deleteRoundAt(idx: number): Promise<void> {
   chatStore.removeRoundFrom(idx)
 }
 
+/**
+ * 重新生成（QwenPaw regenerate 对齐）：以最后一轮用户消息原文重发。
+ * 复用"删旧轮+重发"契约（与编辑重发同链路）：删除旧轮（后端清 session
+ * 记录+该轮记忆+agent 内存历史）→ 原文经 sendMessage 原链路重写新轮。
+ */
+async function regenerateLastRound(): Promise<void> {
+  if (isStreaming.value) return
+  // 从尾部找最后一条 user 消息
+  let userIdx = -1
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    if (messages.value[i].role === 'user') {
+      userIdx = i
+      break
+    }
+  }
+  if (userIdx < 0) return
+  const userMsg = messages.value[userIdx]
+  const text = (userMsg.content || '').trim()
+  if (!text || !agentId.value || !currentSessionId.value) return
+  if (!userMsg.timestamp) {
+    uiMessage.error(t('chat.deleteRoundFailed'))
+    return
+  }
+  if (!isSendLockOwner.value) {
+    uiMessage.warning(t('chat.anotherTabSending'))
+    return
+  }
+  const result = await _deleteRound(currentSessionId.value, userMsg.timestamp)
+  if (!result.ok) {
+    uiMessage.error(t('chat.deleteRoundFailed'))
+    return
+  }
+  chatStore.removeRoundFrom(userIdx)
+  chatStore.setInputText(text)
+  await sendMessage()
+}
+
+/**
+ * 会话分叉（ZCode fork 对齐）：从该消息处（含）截取历史复制为新会话并切换。
+ * 消息级操作：msg.timestamp 即截取定位键。
+ */
+let forkInFlight = false
+async function forkFromMessage(msg: ChatMessage): Promise<void> {
+  if (!currentSessionId.value || !msg.timestamp || isStreaming.value) return
+  if (forkInFlight) return // 防连点重复分叉
+  forkInFlight = true
+  try {
+    const result = await _forkSession(currentSessionId.value, msg.timestamp)
+    if (!result.ok) {
+      uiMessage.error(t('chat.forkFailed'))
+      return
+    }
+    // 刷新会话列表并切到分叉出的新会话（历史加载走 switchSession 既有链路）
+    await _loadSessions(agentId.value)
+    const switchResult = await _switchSession(result.newSessionId)
+    _notifySwitchFailure(switchResult)
+    chatStore.setInputText(chatDraft.restore(result.newSessionId))
+    scrollToBottomForHistory()
+    uiMessage.success(t('chat.forkDone'))
+  } finally {
+    forkInFlight = false
+  }
+}
+
+/** 设置/移除消息钩子（checkpoint）：乐观更新，失败回滚。 */
+async function toggleCheckpoint(msg: ChatMessage): Promise<void> {
+  if (!currentSessionId.value || !msg.timestamp) return
+  const next = !msg.checkpoint
+  msg.checkpoint = next
+  const ok = await _setCheckpoint(currentSessionId.value, msg.timestamp, next)
+  if (!ok) msg.checkpoint = !next
+}
+
 // ---------------------------------------------------------------------------
 // Message Sending with SSE Streaming
 // ---------------------------------------------------------------------------
@@ -1469,6 +1769,7 @@ async function drainMessageQueue(): Promise<void> {
 }
 
 async function sendMessage() {
+  closeSlashPanel()
   const text = inputText.value.trim()
   if (!text && pendingFiles.value.length === 0) return
   // 补课 P3-b：流式中再次发送 → 入队（纯文本轮；附件轮保持丢弃语义，
@@ -1792,6 +2093,18 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       // Inline image from backend (e.g., AIGC generated image)
       if (event.url) {
         msg.content += `\n![${event.alt || 'image'}](${event.url})\n`
+      }
+      break
+
+    case 'usage':
+      // QwenPaw turn_usage 对齐:真实 token 用量入 store（per-session 累计）
+      if (typeof event.total_tokens === 'number') {
+        chatStore.applyTurnUsage(currentSessionId.value, {
+          prompt: Number(event.prompt_tokens || 0),
+          completion: Number(event.completion_tokens || 0),
+          total: Number(event.total_tokens || 0),
+          estimated: Boolean(event.estimated),
+        })
       }
       break
 
@@ -2347,6 +2660,8 @@ const { record: recordInputHistory, up: historyUp, down: historyDown } = useInpu
 const { onCompositionStart, onCompositionEnd, shouldBlockSend } = useIMEComposition()
 
 function handleKeydown(e: KeyboardEvent) {
+  // 斜杠命令面板键盘导航（↑↓/Enter/Tab/Esc），打开时独占按键
+  if (onSlashKeydown(e)) return
   if (e.key === 'Enter' && !e.shiftKey) {
     // IME 合成防误发（补课 A）：输入法选词回车不发送
     if (shouldBlockSend(e)) return
@@ -2368,6 +2683,12 @@ function handleKeydown(e: KeyboardEvent) {
       chatStore.setInputText(next)
     }
   }
+}
+
+/** 输入框 @input 统一入口：保留 autoResize 高度自适应 + 斜杠面板开合判定。 */
+function onComposerInput(e: Event): void {
+  autoResize()
+  onSlashInput()
 }
 
 function autoResize() {
@@ -2717,6 +3038,14 @@ onBeforeUnmount(() => {
 
 .nr-sidebar-search {
   padding: 0 16px 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nr-sidebar-search :deep(.nr-input) {
+  flex: 1;
+  min-width: 0;
 }
 
 .nr-session-list {
@@ -3487,6 +3816,7 @@ onBeforeUnmount(() => {
 
 /* Input Area */
 .nr-chat-input-area {
+  position: relative;
   padding: 12px 24px 20px;
   border-top: 1px solid var(--nr-glass-border);
 }
@@ -3641,25 +3971,45 @@ onBeforeUnmount(() => {
   to { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
 }
 
+/* Composer 一体化外壳（参考图：textarea+工具条同框，边框聚焦态由外壳承载） */
+.nr-composer-shell {
+  position: relative;
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 16px;
+  background: var(--nr-glass-bg);
+  padding: 12px 14px 10px;
+  transition: border-color 0.25s, box-shadow 0.25s;
+}
+
+.nr-composer-shell.is-focus {
+  border-color: var(--nr-primary);
+  box-shadow: 0 0 0 3px var(--nr-primary-ring);
+}
+
+.nr-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
 .nr-chat-textarea {
   flex: 1;
   resize: none;
-  background: var(--nr-glass-bg);
-  border: 1px solid var(--nr-glass-border);
-  border-radius: 12px;
-  padding: 10px 14px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 4px 6px 10px;
+  min-height: 60px;
   color: var(--nr-text-primary);
   font-size: 14px;
   font-family: var(--nr-font-body);
-  line-height: 1.5;
+  line-height: 1.55;
   outline: none;
-  transition: border-color 0.25s;
-  max-height: 160px;
+  max-height: 200px;
 }
 
 .nr-chat-textarea:focus {
-  border-color: var(--nr-primary);
-  box-shadow: 0 0 0 3px var(--nr-primary-ring);
+  outline: none;
 }
 
 .nr-chat-textarea::placeholder {
@@ -4076,6 +4426,14 @@ onBeforeUnmount(() => {
 
 .nr-history-search {
   padding: 0 16px 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nr-history-search :deep(.nr-input) {
+  flex: 1;
+  min-width: 0;
 }
 
 /* 实时记忆检索进度条（临时态，不落历史） */
@@ -4236,6 +4594,194 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   border: 1px solid var(--nr-glass-border);
   background: rgba(255, 255, 255, 0.04);
+}
+
+/* ── 斜杠命令面板（QwenPaw slash commands 对齐） ── */
+.nr-slash-panel {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--nr-glass-border);
+  background: var(--nr-bg-secondary, rgba(30, 32, 40, 0.95));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  z-index: 30;
+}
+
+.nr-slash-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.nr-slash-item.is-active {
+  background: rgba(74, 158, 255, 0.15);
+}
+
+.nr-slash-name {
+  font-family: var(--nr-font-mono, monospace);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--nr-primary, #4a9eff);
+  min-width: 72px;
+}
+
+.nr-slash-desc {
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+}
+
+/* ── Composer 工具条：用量环 + 思考程度 + 语音 + 模型 + 圆形发送（QwenPaw/ZCode 输入条风格） ── */
+.nr-chat-header-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--nr-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 42vw;
+}
+
+.nr-composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0 0;
+  border-top: 1px solid var(--nr-glass-border);
+  margin-top: 2px;
+  padding-top: 8px;
+}
+
+.nr-composer-left,
+.nr-composer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nr-composer-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 13px;
+  border: 1px solid var(--nr-glass-border);
+  background: var(--nr-glass-bg);
+  color: var(--nr-text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.2s, border-color 0.2s, background 0.2s;
+}
+
+.nr-composer-pill:hover {
+  color: var(--nr-text-primary);
+  border-color: var(--nr-primary, #4a9eff);
+}
+
+.nr-composer-pill.is-active {
+  color: var(--nr-primary, #4a9eff);
+  border-color: var(--nr-primary, #4a9eff);
+}
+
+.nr-composer-pill--icon {
+  width: 26px;
+  padding: 0;
+  justify-content: center;
+  font-size: 13px;
+}
+
+.nr-composer-pill--model {
+  max-width: 240px;
+}
+
+.nr-composer-pill-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nr-composer-pill-arrow {
+  font-size: 9px;
+  opacity: 0.65;
+}
+
+.nr-composer-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 132px;
+}
+
+.nr-composer-check {
+  color: var(--nr-primary, #4a9eff);
+  font-size: 12px;
+}
+
+.nr-composer-model-menu {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.nr-composer-send {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--nr-primary, #4a9eff), #7c5cff);
+  color: #fff;
+  font-size: 15px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s, filter 0.2s, opacity 0.2s;
+}
+
+.nr-composer-send:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.12);
+}
+
+.nr-composer-send:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.nr-composer-send.is-stop {
+  background: var(--nr-danger, #f56c6c);
+}
+
+/* ── 消息钩子/检查点（ZCode checkpoint 对齐） ── */
+.nr-msg-checkpoint-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--nr-primary, #4a9eff);
+  background: rgba(74, 158, 255, 0.12);
+  border: 1px solid rgba(74, 158, 255, 0.35);
+  border-radius: 10px;
+  padding: 1px 8px;
+  margin-bottom: 4px;
+  width: fit-content;
+}
+
+.nr-msg--checkpoint .nr-msg-body {
+  border-left: 2px solid rgba(74, 158, 255, 0.45);
+  padding-left: 6px;
 }
 
 .nr-msg-search-input {

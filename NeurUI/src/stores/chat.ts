@@ -33,6 +33,13 @@ export const useChatStore = defineStore('chat', () => {
   const inputText = ref<string>('')
   const searchQuery = ref<string>('')
 
+  // ── Token 用量（QwenPaw turnUsageStore 对齐）──
+  // per-session 累计（内存态，会话切换不丢；刷新即清 — 与 QwenPaw 一致）。
+  // 结构：{ [sessionId]: { prompt, completion, total } }
+  const sessionTokenUsage = ref<Record<string, { prompt: number; completion: number; total: number }>>({})
+  /** 最近一轮的真实 usage（SSE usage 事件，消息级展示用）。 */
+  const lastTurnUsage = ref<{ prompt: number; completion: number; total: number; estimated: boolean } | null>(null)
+
   // ---------------------------------------------------------------------------
   // Computed
   // ---------------------------------------------------------------------------
@@ -173,6 +180,38 @@ export const useChatStore = defineStore('chat', () => {
     searchQuery.value = query
   }
 
+  // ── Token 用量 mutations（SSE usage 事件消费） ─────────────────────────
+
+  function applyTurnUsage(sessionId: string | null, usage: { prompt: number; completion: number; total: number; estimated: boolean }): void {
+    lastTurnUsage.value = {
+      prompt: usage.prompt,
+      completion: usage.completion,
+      total: usage.total,
+      estimated: usage.estimated,
+    }
+    if (!sessionId) return
+    const acc = sessionTokenUsage.value[sessionId] ?? { prompt: 0, completion: 0, total: 0 }
+    sessionTokenUsage.value[sessionId] = {
+      prompt: acc.prompt + usage.prompt,
+      completion: acc.completion + usage.completion,
+      total: acc.total + usage.total,
+    }
+  }
+
+  /** 会话累计用量读取（无记录返回 null）。 */
+  function getSessionTokenUsage(sessionId: string | null): { prompt: number; completion: number; total: number } | null {
+    if (!sessionId) return null
+    return sessionTokenUsage.value[sessionId] ?? null
+  }
+
+  // ── 会话排序（拖拽落库后的本地同步） ──────────────────────────────────
+
+  /** 按给定 id 顺序重排 sessions（reorder API 成功后本地同步，避免整表重拉）。 */
+  function applySessionOrder(orderedIds: string[]): void {
+    const rank = new Map(orderedIds.map((id, idx) => [id, idx]))
+    sessions.value.sort((a, b) => (rank.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.id) ?? Number.MAX_SAFE_INTEGER))
+  }
+
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
@@ -198,6 +237,8 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming,
     inputText,
     searchQuery,
+    sessionTokenUsage,
+    lastTurnUsage,
     // computed
     currentSession,
     filteredSessions,
@@ -221,6 +262,10 @@ export const useChatStore = defineStore('chat', () => {
     setStreaming,
     setInputText,
     setSearchQuery,
+    // usage
+    applyTurnUsage,
+    getSessionTokenUsage,
+    applySessionOrder,
     // lifecycle
     reset,
   }

@@ -217,6 +217,8 @@ export function useChat(options: UseChatOptions = {}) {
           // 旧记录缺 timestamp 时回退 metadata.client_timestamp（chat 请求携带）
           timestamp: m.timestamp || m.metadata?.client_timestamp || undefined,
           feedback: m.metadata?.feedback,
+          // 钩子/检查点（ZCode checkpoint 对齐）
+          checkpoint: Boolean(m.metadata?.checkpoint),
         }
       })
       store.setMessages(mapped)
@@ -494,6 +496,44 @@ export function useChat(options: UseChatOptions = {}) {
     }
   }
 
+  /**
+   * 会话分叉（ZCode fork 对齐）：复制 untilTimestamp（含）之前的全部历史
+   * 到新会话；untilTimestamp 缺省 = 整个会话。返回新会话 id。
+   */
+  async function forkSession(
+    sessionId: string,
+    untilTimestamp?: string,
+  ): Promise<{ ok: true; newSessionId: string } | { ok: false; error: unknown }> {
+    try {
+      const res: any = await api.post(`/console/chat/sessions/${sessionId}/fork`, {
+        until_timestamp: untilTimestamp || null,
+      })
+      const newSessionId: string = res?.data?.new_session_id ?? res?.new_session_id ?? ''
+      if (!newSessionId) return { ok: false, error: 'no new_session_id' }
+      return { ok: true, newSessionId }
+    } catch (err) {
+      console.error('[Chat] Fork session failed:', err)
+      return { ok: false, error: err }
+    }
+  }
+
+  /**
+   * 设置/移除消息钩子（checkpoint，持久化到消息 metadata）。
+   */
+  async function setCheckpoint(sessionId: string, timestamp: string, active: boolean): Promise<boolean> {
+    try {
+      await api.post('/console/chat/checkpoint', {
+        session_id: sessionId,
+        timestamp,
+        active,
+      })
+      return true
+    } catch (err) {
+      console.error('[Chat] Checkpoint failed:', err)
+      return false
+    }
+  }
+
   return {
     // store passthrough (reactive)
     store,
@@ -514,6 +554,8 @@ export function useChat(options: UseChatOptions = {}) {
     // round actions
     deleteRound,
     sendFeedback,
+    forkSession,
+    setCheckpoint,
     // error policy helpers — 仅用户主动调用方调用 (ChatPage wrappers)
     notifySwitchFailure,
     notifyDeleteFailure,

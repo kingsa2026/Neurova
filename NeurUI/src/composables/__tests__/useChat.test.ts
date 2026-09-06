@@ -287,6 +287,7 @@ describe('useChat', () => {
         reasoningOpen: false,
         toolCall: undefined,
         toolResult: undefined,
+        checkpoint: false,
       })
     })
 
