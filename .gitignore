@@ -376,3 +376,7 @@ models/**/*.data
 
 # 安装器 WPF 壳构建产物（体积 400MB+ 超 GitHub 100MB 限制，构建可再生）
 NeurUI/src-tauri/installer-wpf/bin/installer-shell.exe
+
+# 运行期生成的安全/补丁文件（开发机根目录，不应入库）
+.jwt_secret
+.agents/
