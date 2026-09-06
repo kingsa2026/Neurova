@@ -14,6 +14,7 @@
  *   - 输出最后过 sanitizeHtmlStrict (DOMPurify 白名单) 兜底
  */
 import { Marked, type Tokens } from 'marked'
+import katex from 'katex'
 import hljs from 'highlight.js/lib/core'
 import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
@@ -105,11 +106,20 @@ function createRenderer(copyLabel: string) {
 /**
  * 将 Markdown 文本渲染为安全的 HTML 字符串 (已过 DOMPurify 清洗)。
  *
+ * 数学公式（KaTeX，QwenPaw 对齐）：
+ *   1. 渲染前提取 $$...$$ / $...$ / \(..\) / \[..\] 为占位符（跳过代码段），
+ *      避免 marked 把数学语法当普通文本破坏；
+ *   2. marked + DOMPurify 正常渲染（占位符是纯文本，原样通过白名单）；
+ *   3. 渲染后把占位符替换为 katex.renderToString 输出（本地生成、可信，
+ *      不再过 sanitize——katex 输出的 MathML/svg 会被白名单剥离）。
+ *
  * @param text 用户消息内容 (可为流式累加的半截文本, 未闭合围栏不会抛错)
  * @param copyLabel 代码块复制按钮文案 (由调用方提供 i18n 文本)
  */
 export function renderMarkdown(text: string, copyLabel = '⧉'): string {
   if (!text || typeof text !== 'string') return ''
+
+  const { prepared, restore } = extractMath(text)
 
   const marked = new Marked({
     gfm: true,
@@ -119,12 +129,103 @@ export function renderMarkdown(text: string, copyLabel = '⧉'): string {
 
   let html: string
   try {
-    html = marked.parse(text, { async: false }) as string
+    html = marked.parse(prepared, { async: false }) as string
   } catch {
     // 极端 malformed 输入也不抛错: 退化为纯文本
     html = escapeHtml(text)
   }
 
   // P0-7 层 3: DOMPurify 白名单兜底 (del/hr 已显式加入)
-  return sanitizeHtmlStrict(html)
+  const safe = sanitizeHtmlStrict(html)
+  return restore(safe)
+}
+
+// ---------------------------------------------------------------------------
+// KaTeX 数学公式（QwenPaw KaTeX 对齐）
+// ---------------------------------------------------------------------------
+
+interface MathExtractResult {
+  /** 数学片段替换为占位符后的 markdown 源 */
+  prepared: string
+  /** 渲染+清洗后回填 katex HTML 的函数 */
+  restore: (html: string) => string
+}
+
+/** 按 markdown 代码段切分文本：fenced ```、tilde ~~~、inline ` 内不提取数学。 */
+function splitByCodeSegments(text: string): Array<{ isCode: boolean; content: string }> {
+  const segments: Array<{ isCode: boolean; content: string }> = []
+  const pattern = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]+`)/g
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = pattern.exec(text)) !== null) {
+    if (m.index > last) segments.push({ isCode: false, content: text.slice(last, m.index) })
+    segments.push({ isCode: true, content: m[0] })
+    last = m.index + m[0].length
+  }
+  if (last < text.length) segments.push({ isCode: false, content: text.slice(last) })
+  return segments
+}
+
+/**
+ * 提取数学片段为占位符。
+ * 支持：$$..$$（display）、$..$（inline）、\(..\)（inline）、\[..\]（display）。
+ * 未闭合的（流式半截）不提取，按普通文本渲染。
+ */
+function extractMath(text: string): MathExtractResult {
+  const stash: Array<{ display: boolean; latex: string }> = []
+  const mathPattern = /(\$\$[\s\S]+?\$\$)|(\$\$(?![\s\S]*?\$\$))|(\$[^$\n]+?\$)|\\\(([^)]+?)\\\)|\\\[([\s\S]+?)\\\]/g
+
+  const replaceInSegment = (segment: string): string =>
+    segment.replace(mathPattern, (match, ddBlock, ddOpen, inlineDollar, paren, bracket) => {
+      if (ddOpen) return match // 未闭合 $$（流式半截）保持原样
+      let display = false
+      let latex = ''
+      if (ddBlock) {
+        display = true
+        latex = ddBlock.slice(2, -2)
+      } else if (inlineDollar) {
+        latex = inlineDollar.slice(1, -1)
+      } else if (paren !== undefined) {
+        latex = paren
+      } else if (bracket !== undefined) {
+        display = true
+        latex = bracket
+      } else {
+        return match
+      }
+      if (!latex.trim()) return match
+      const idx = stash.length
+      stash.push({ display, latex })
+      return `⟦NR_MATH_${idx}⟧`
+    })
+
+  const segments = splitByCodeSegments(text)
+  const prepared = segments
+    .map((s) => (s.isCode ? s.content : replaceInSegment(s.content)))
+    .join('')
+
+  const restore = (html: string): string => {
+    if (stash.length === 0) return html
+    let out = html
+    for (let i = 0; i < stash.length; i++) {
+      const token = `⟦NR_MATH_${i}⟧`
+      if (!out.includes(token)) continue
+      const item = stash[i]
+      let katexHtml: string
+      try {
+        katexHtml = katex.renderToString(item.latex, {
+          displayMode: item.display,
+          throwOnError: false,
+          output: 'html',
+        })
+      } catch {
+        katexHtml = escapeHtml(`$${item.latex}$`)
+      }
+      // 占位符可能被 marked 包进 <p>/<strong> 等，直接全局替换文本
+      out = out.split(token).join(katexHtml)
+    }
+    return out
+  }
+
+  return { prepared, restore }
 }
