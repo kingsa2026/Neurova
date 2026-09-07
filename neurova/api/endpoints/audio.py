@@ -199,12 +199,16 @@ async def synthesize_speech(request: Request, body: SynthesizeRequest):
             except Exception:
                 raise HTTPException(status_code=400, detail="参考音频 base64 格式错误")
 
-        # 合成
+        # 合成；voice/speed 透传（与流式端点同链——编辑 Agent 换音色生效）
         kwargs = {}
         if ref_audio_bytes:
             kwargs["voice_ref_audio"] = ref_audio_bytes
         if body.voice_ref_text:
             kwargs["voice_ref_text"] = body.voice_ref_text
+        if body.voice:
+            kwargs["voice"] = body.voice
+        if body.speed and body.speed != 1.0:
+            kwargs["speed"] = body.speed
 
         audio_bytes = await tts.synthesize(body.text, **kwargs)
 
