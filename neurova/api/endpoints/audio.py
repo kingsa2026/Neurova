@@ -281,11 +281,23 @@ async def synthesize_speech_stream(request: Request, body: SynthesizeRequest):
     # 避免把包装对象当 TTSManager（AttributeError 曾直接 500）
     inner = getattr(tts, "_engine", None)
     if inner is not None and hasattr(tts, "is_available") and not hasattr(tts, "synthesize_stream"):
-        if not getattr(inner, "is_initialized", False):
-            raise HTTPException(status_code=503, detail="TTS 引擎未就绪")
         engine = inner
     else:
         engine = tts
+
+    # H2-C 按需咽喉（统一到最终 engine）：lazy_release 释放后（或冷启动）
+    # 未就绪时先按需初始化再继续——否则闲置 TTL 过后自动语音（前端
+    # useStreamTTS 走本端点）会静默哑掉。常驻模式下已就绪，幂等跳过。
+    if not getattr(engine, "is_initialized", False):
+        try:
+            initialize = getattr(engine, "initialize", None)
+            if initialize is None or not await initialize():
+                raise HTTPException(status_code=503, detail="TTS 引擎未就绪")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"TTS 按需初始化失败: {e}")
+            raise HTTPException(status_code=503, detail="TTS 引擎未就绪")
         if not getattr(engine, "is_initialized", False):
             raise HTTPException(status_code=503, detail="TTS 引擎未就绪")
 
