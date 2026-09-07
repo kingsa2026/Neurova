@@ -474,6 +474,16 @@ describe('useChat', () => {
       expect(onError).not.toHaveBeenCalled()
     })
 
+    it('does NOT call onError for ghost-404（预期自愈：会话已被归档/删除，非真错误）', () => {
+      const onError = vi.fn()
+      const errorMessage = vi.fn((k: string, f: string) => f)
+      const { notifySwitchFailure } = useChat({ onError, errorMessage })
+
+      notifySwitchFailure({ ok: false, error: new Error('history 404'), code: 'ghost-404' })
+
+      expect(onError).not.toHaveBeenCalled()
+    })
+
     it('falls back to hardcoded message when errorMessage option is absent', () => {
       const onError = vi.fn()
       const { notifySwitchFailure } = useChat({ onError })
