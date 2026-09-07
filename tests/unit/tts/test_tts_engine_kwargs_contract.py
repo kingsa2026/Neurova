@@ -165,10 +165,11 @@ def test_moss_build_request_rows_shape():
     assert rows[-1][0] == 6
 
 
+@pytest.mark.skipif(not _MOSS_MODEL_DIR.exists(), reason="本地 moss-nano 模型未下载")
 def test_moss_builtin_voice_prompt_codes_loaded():
-    """本地 manifest 内置音色前缀 codes 可加载（voice-clone 无参考音频也能跑）。"""
+    """本地 manifest 内置音色 codes 经 _resolve_prompt_codes 默认路径可加载。"""
     tts = MOSSNanTTS(model_dir=_MOSS_MODEL_DIR, tokenizer_dir=None, auto_download=False)
-    prompt_codes = tts._load_builtin_prompt_codes()
+    prompt_codes = tts._resolve_prompt_codes(None)
     assert prompt_codes, "manifest.builtin_voices[0].prompt_audio_codes 加载失败"
     assert len(prompt_codes) >= 10
     assert all(len(row) == 16 for row in prompt_codes)
@@ -356,3 +357,10 @@ def test_edge_request_params_maps_moss_voice_names():
     # 未知名回落实例默认（防 edge 服务拒绝未知 voice 导致合成失败）
     fallback = engine._request_params(voice="Gibberish")
     assert fallback["voice"] == "zh-CN-XiaoxiaoNeural"
+
+
+def test_synthesize_endpoint_passes_voice_speed():
+    """非流式端点同样透传 voice/speed（与流式同链，agent 换音色双路生效）。"""
+    src = open("neurova/api/endpoints/audio.py", encoding="utf-8").read()
+    assert 'kwargs["voice"] = body.voice' in src, "非流式端点必须透传 voice"
+    assert 'kwargs["speed"] = body.speed' in src, "非流式端点必须透传 speed"
