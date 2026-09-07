@@ -498,6 +498,7 @@ export default {
     stepDuration: '{n}s तक',
     ctxPanelTitle: 'संदर्भ क्षमता',
     ctxCacheHitRate: 'औसत कैश हिट दर',
+    ctxPanelNoData: 'कोई डेटा नहीं — संदेश भेजें',
     ctxSectionMessages: 'संदेश',
     ctxSectionSystemTools: 'सिस्टम टूल',
     ctxSectionMcpTools: 'MCP टूल',

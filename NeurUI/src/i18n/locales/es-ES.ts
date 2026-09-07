@@ -498,6 +498,7 @@ export default {
     stepDuration: 'duró {n}s',
     ctxPanelTitle: 'Capacidad de contexto',
     ctxCacheHitRate: 'Tasa media de caché',
+    ctxPanelNoData: 'Sin datos — envía un mensaje',
     ctxSectionMessages: 'Mensajes',
     ctxSectionSystemTools: 'Herramientas del sistema',
     ctxSectionMcpTools: 'Herramientas MCP',

@@ -498,6 +498,7 @@ export default {
     stepDuration: '{n}秒継続',
     ctxPanelTitle: 'コンテキスト容量',
     ctxCacheHitRate: '平均キャッシュ命中率',
+    ctxPanelNoData: 'データなし — メッセージ送信後に生成されます',
     ctxSectionMessages: 'メッセージ',
     ctxSectionSystemTools: 'システムツール',
     ctxSectionMcpTools: 'MCPツール',

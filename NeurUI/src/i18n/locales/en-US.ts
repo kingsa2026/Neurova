@@ -499,6 +499,7 @@ export default {
     stepDuration: 'lasted {n}s',
     ctxPanelTitle: 'Context usage',
     ctxCacheHitRate: 'Avg cache hit rate',
+    ctxPanelNoData: 'No data yet — send a message to generate',
     ctxSectionMessages: 'Messages',
     ctxSectionSystemTools: 'System tools',
     ctxSectionMcpTools: 'MCP tools',
