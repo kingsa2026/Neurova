@@ -223,9 +223,10 @@ class LoopManager:
         loop_class_name = None
 
         try:
-            # 更新配置中的模型名
-            self._agent.config.llm_config.model = model_name
-            self._last_model = model_name
+            # 先记住旧值，成功后才提交（2026-09-07 根因修复：原实现在失败路径
+            # 已污染 _last_model/config，导致重试同模型时 "Same model" 短路谎报成功）
+            _prev_model = self._agent.config.llm_config.model
+            _prev_last = self._last_model
 
             # 查找新模型对应的 Loop 类
             loop_class = find_agent_loop(model_name)
@@ -233,7 +234,7 @@ class LoopManager:
 
             if not loop_class:
                 logger.warning("No suitable Loop found for model: %s", model_name)
-                return False
+                return False  # _last_model/config 未被污染，可安全重试
 
             # 实例化新 Loop
             new_loop = loop_class(self._agent)
@@ -245,7 +246,9 @@ class LoopManager:
                 self._set_state(LoopState.DEGRADED, f"Rebuilt to {loop_class.__name__} with limited functionality")
                 return True
 
-            # 替换 Loop
+            # 替换 Loop（成功后才提交 model 状态）
+            self._agent.config.llm_config.model = model_name
+            self._last_model = model_name
             self._loop = new_loop
             self._set_state(LoopState.READY, f"Loop rebuilt: {old_loop_name} → {loop_class.__name__}")
 

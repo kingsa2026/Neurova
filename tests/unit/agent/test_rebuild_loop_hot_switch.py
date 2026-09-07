@@ -40,8 +40,8 @@ def _make_agent() -> types.SimpleNamespace:
     mgr = FakeLoopManager()
     agent = types.SimpleNamespace(
         loop_manager=mgr,
-        loop=types.SimpleNamespace(llm_client="OLD_CLIENT"),
-        llm_client="NEW_CLIENT",
+        loop=types.SimpleNamespace(llm_client=types.SimpleNamespace(model="old-model")),
+        llm_client=types.SimpleNamespace(model="old-model", config=types.SimpleNamespace(model="old-model")),
         config=types.SimpleNamespace(llm_config=types.SimpleNamespace(model="old-model")),
     )
     agent.rebuild_loop = Agent.rebuild_loop.__get__(agent)
@@ -70,4 +70,4 @@ def test_rebuild_loop_refreshes_cached_llm_client():
     """Loop 缓存的 llm_client 必须刷新为 agent.llm_client 当前引用。"""
     agent = _make_agent()
     asyncio.run(agent.rebuild_loop("new-model"))
-    assert agent.loop.llm_client == "NEW_CLIENT"
+    assert agent.loop.llm_client is agent.llm_client

@@ -335,8 +335,14 @@ class FallbackRetrieverAdapter:
         start_time = time.monotonic()
 
         try:
-            # 使用 MemoryAgent 的基础检索
-            memories = self._memory_agent.moe_retrieve(
+            # 2026-09-07 根因修复（audit SUB-P1-16）：moe_retrieve 是同步重 IO
+            # （嵌入+SQLite），直接在 async 上下文调用会阻塞事件循环秒级；
+            # to_thread 释放 loop。底层 run_async_safely 的 executor.result()
+            # 阻塞路径随之不再被 async 调用方触发。
+            import asyncio as _asyncio
+
+            memories = await _asyncio.to_thread(
+                self._memory_agent.moe_retrieve,
                 query=context.query,
                 limit=context.limit,
             )

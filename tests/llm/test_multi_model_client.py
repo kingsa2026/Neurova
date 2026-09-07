@@ -151,10 +151,12 @@ class TestMultiModelLLMClient(unittest.TestCase):
         """测试获取统计信息"""
         stats = self.manager.get_stats()
         
-        self.assertIn("total_models", stats)
+        # 实现口径（2026-09-07 对齐）：无 total_models/overall_success_rate 键，
+        # 模型列表在 "models" 键
+        self.assertIn("total_clients", stats)
         self.assertIn("total_requests", stats)
         self.assertIn("total_errors", stats)
-        self.assertIn("overall_success_rate", stats)
+        self.assertIn("models", stats)
 
 
 if __name__ == "__main__":

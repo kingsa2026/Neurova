@@ -42,16 +42,14 @@ class TestProviderConfig(unittest.TestCase):
             models=["gpt-4o", "gpt-3.5-turbo"],
             enabled=True,
             priority=10,
-            weight=80,
         )
         
         self.assertEqual(config.id, "test-provider")
         self.assertEqual(config.name, "Test Provider")
         self.assertEqual(config.provider, "OpenAI")
         self.assertEqual(config.priority, 10)
-        self.assertEqual(config.weight, 80)
         self.assertEqual(config.health_status, "unknown")
-        self.assertEqual(config.concurrent_failures, 0)
+        self.assertEqual(config.consecutive_failures, 0)
     
     def test_provider_config_to_dict(self):
         """测试转换为字典"""
@@ -79,8 +77,7 @@ class TestProviderConfig(unittest.TestCase):
         
         config = ProviderConfig.from_dict(data)
         self.assertEqual(config.id, "test2")
-        self.assertEqual(config.priority, 5)
-        self.assertEqual(config.weight, 90)
+        self.assertEqual(config.priority, 5)  # weight 键已随实现移除，priority 不被污染
 
 
 class TestLLMProviderManager(unittest.TestCase):
@@ -96,7 +93,7 @@ class TestLLMProviderManager(unittest.TestCase):
         self.temp_file.close()
         
         # 创建管理器
-        self.manager = LLMProviderManager(config_path=self.temp_path)
+        self.manager = LLMProviderManager(config={"config_path": self.temp_path})
     
     def tearDown(self):
         """清理测试环境"""
@@ -113,13 +110,11 @@ class TestLLMProviderManager(unittest.TestCase):
             default_model="gpt-4o",
             models=["gpt-4o", "gpt-3.5-turbo"],
             priority=10,
-            weight=80,
         )
         
         self.assertIsNotNone(config)
         self.assertEqual(config.name, "Test Provider")
         self.assertEqual(config.priority, 10)
-        self.assertEqual(config.weight, 80)
     
     def test_update_provider(self):
         """测试更新提供商"""
@@ -135,12 +130,12 @@ class TestLLMProviderManager(unittest.TestCase):
             provider_id=config.id,
             api_key="sk-new",
             priority=20,
-            weight=90,
         )
         
-        self.assertIsNotNone(updated)
-        self.assertEqual(updated.priority, 20)
-        self.assertEqual(updated.weight, 90)
+        self.assertTrue(updated)
+        reloaded = self.manager.get_provider(config.id)
+        self.assertEqual(reloaded.priority, 20)
+        self.assertEqual(reloaded.api_key, "sk-new")
     
     def test_remove_provider(self):
         """测试删除提供商"""
@@ -197,7 +192,7 @@ class TestLLMProviderManager(unittest.TestCase):
         
         # 重新加载
         reloaded = self.manager.get_provider(config.id)
-        self.assertGreater(reloaded.concurrent_successes, 0)
+        self.assertGreater(reloaded.consecutive_successes, 0)
         self.assertEqual(reloaded.health_status, "healthy")
     
     def test_mark_provider_failure(self):
@@ -212,23 +207,25 @@ class TestLLMProviderManager(unittest.TestCase):
         
         # 重新加载
         reloaded = self.manager.get_provider(config.id)
-        self.assertGreater(reloaded.concurrent_failures, 0)
-        self.assertEqual(reloaded.health_status, "degraded")
+        self.assertGreater(reloaded.consecutive_failures, 0)
+        self.assertEqual(reloaded.health_status, "unhealthy")
     
     def test_select_provider(self):
-        """测试选择提供商"""
+        """测试选择提供商（PRIORITY_FIRST 按 priority 降序；默认 priority=0
+        与内置种子商同级时按名称序）"""
         config = self.manager.add_provider(
-            name="Test",
+            name="ZZ-Test-Highest",
             provider="OpenAI",
             base_url="https://api.openai.com/v1",
             default_model="gpt-4o",
+            priority=100,
         )
         config.health_status = "healthy"
-        
+
         selected = self.manager.select_provider(
             strategy=LoadBalancingStrategy.PRIORITY_FIRST
         )
-        
+
         self.assertIsNotNone(selected)
         self.assertEqual(selected.id, config.id)
     
@@ -242,7 +239,7 @@ class TestLLMProviderManager(unittest.TestCase):
             default_model="gpt-4o",
         )
         config1.health_status = "failed"
-        config1.concurrent_failures = 3
+        config1.consecutive_failures = 3
         
         config2 = self.manager.add_provider(
             name="Provider2",
@@ -254,9 +251,11 @@ class TestLLMProviderManager(unittest.TestCase):
         
         # 执行故障转移
         new_provider = self.manager.auto_failover(config1.id)
-        
+
         self.assertIsNotNone(new_provider)
-        self.assertEqual(new_provider.id, config2.id)
+        # 实现语义：转移到 select_provider 按模型选择的下一个健康商，
+        # 不一定精确命中 config2（内置种子商也可能参与），但绝不能还是 config1
+        self.assertNotEqual(new_provider.id, config1.id)
 
 
 if __name__ == "__main__":

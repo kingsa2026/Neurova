@@ -114,6 +114,16 @@ class LLMConfig:
     compat: "ProviderCompat" = field(default_factory=lambda: _default_compat())
 
 
+def _pick_reasoning(obj, *attrs):
+    """多字段取思考内容：reasoning_content（OpenAI 兼容系）/
+    reasoning（商汤 sensenova 流式字段名）— 2026-09-07 修复思考过程不显示。"""
+    for a in attrs:
+        v = getattr(obj, a, None)
+        if v:
+            return v
+    return None
+
+
 class LLMClient:
     """LLM 客户端
 
@@ -277,7 +287,7 @@ class LLMClient:
                 content=content,
                 role="assistant",
                 model=response.model,
-                reasoning_content=getattr(choice.message, "reasoning_content", None),
+                reasoning_content=_pick_reasoning(choice.message, "reasoning_content", "reasoning"),
                 tool_calls=tool_calls,
                 usage=usage,
                 finish_reason=choice.finish_reason,
@@ -346,6 +356,11 @@ class LLMClient:
             # 处理流式响应
             for chunk in stream:
                 if not chunk.choices:
+                    # include_usage 的末 chunk choices 为空但携带 usage——
+                    # 原样 yield 给消费方（multi_model/openai_loop 按 chunk.usage 读取），
+                    # 再 continue（2026-09-07 根因修复：原实现直接丢弃）
+                    if getattr(chunk, "usage", None) is not None:
+                        yield chunk
                     continue
 
                 choice = chunk.choices[0]
@@ -387,7 +402,7 @@ class LLMClient:
                     content=content,
                     role="assistant",
                     model=chunk.model,
-                    reasoning_content=getattr(choice.delta, "reasoning_content", None),
+                    reasoning_content=_pick_reasoning(choice.delta, "reasoning_content", "reasoning"),
                     tool_calls=tool_calls,
                     usage=usage,
                     finish_reason=choice.finish_reason,
@@ -463,6 +478,9 @@ class LLMClient:
             # 处理流式响应
             async for chunk in stream:
                 if not chunk.choices:
+                    # async 版同因修复：yield usage chunk 给消费方
+                    if getattr(chunk, "usage", None) is not None:
+                        yield chunk
                     continue
 
                 choice = chunk.choices[0]
@@ -504,7 +522,7 @@ class LLMClient:
                     content=content,
                     role="assistant",
                     model=chunk.model,
-                    reasoning_content=getattr(choice.delta, "reasoning_content", None),
+                    reasoning_content=_pick_reasoning(choice.delta, "reasoning_content", "reasoning"),
                     tool_calls=tool_calls,
                     usage=usage,
                     finish_reason=choice.finish_reason,

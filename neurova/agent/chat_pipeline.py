@@ -1015,7 +1015,9 @@ class ChatPipeline:
         # 附件注入在 build_context 之前：文本已进入 user_input，构建上下文时
         # 会被送入 LLM；图像切片由 build_context 之后的 _apply_vision_attachments
         # 挂到 context 最后一条 user 消息（此处 ctx.context 尚未构建，推迟处理）。
-        self._pending_vision_parts = vision_parts
+        # 2026-09-07 根因修复：原挂共享管线实例（self._pending_vision_parts），
+        # 并发请求图片互串/异常残留泄漏到下个请求；改挂 ctx 随请求生命周期走
+        ctx._pending_vision_parts = vision_parts
 
         logger.info(
             "[附件注入] %d 个附件处理完成, vision_parts=%d",
@@ -1025,10 +1027,10 @@ class ChatPipeline:
 
     def _flush_vision_attachments(self, ctx: ChatContext):
         """build_context 之后调用：把保存的图像切片挂到 context 最后一条 user 消息。"""
-        vision_parts = getattr(self, "_pending_vision_parts", None)
+        vision_parts = getattr(ctx, "_pending_vision_parts", None)
         if vision_parts:
             self._apply_vision_attachments(ctx, vision_parts)
-            self._pending_vision_parts = None
+            ctx._pending_vision_parts = None
 
     def _read_attachment_bytes(self, file_id: str) -> Optional[bytes]:
         """按 file_id 读取附件字节（测试可 monkeypatch）"""
@@ -1352,7 +1354,7 @@ class ChatPipeline:
             "问题：" + query
         )
         try:
-            resp = llm.chat([{"role": "user", "content": prompt}])
+            resp = await llm.chat([{"role": "user", "content": prompt}])
             text = getattr(resp, "content", "") or ""
         except Exception as exc:  # noqa: BLE001
             logger.warning("[ADAPTIVE_RAG] 子问题拆解失败: %s", exc)
@@ -1368,7 +1370,7 @@ class ChatPipeline:
             "把下面的用户问题改写成一句适合向量/关键词检索的查询（只输出改写后的查询本身，"
             "不要解释、不要引号）。保留关键实体与时间限定。\n问题：" + query
         )
-        resp = llm.chat([{"role": "user", "content": prompt}])
+        resp = await llm.chat([{"role": "user", "content": prompt}])
         return (getattr(resp, "content", "") or "").strip().strip('"').strip("'")
 
     async def _retrieve_crystallized_patterns(self, ctx: ChatContext):
@@ -1432,7 +1434,7 @@ class ChatPipeline:
                 skill_name=None,
                 context={"user_input": ctx.user_input},
                 limit=3,
-                agent_id=str(getattr(self._agent, "agent_id", "") or "") or None,
+                agent_id=str(getattr(self.config, "agent_id", "") or "") or None,
             )
             items = []
             for hit in hits or []:
