@@ -173,20 +173,25 @@ class TestTorchImportsOk:
 
 class TestPreflightOrchestration:
     def test_healthy_noop(self, monkeypatch, caplog):
-        monkeypatch.setattr(env_check, "detect_torch_dll_problem", lambda: None)
+        # H1 新契约：子进程探测（torch_imports_ok）通过 → 主进程零 torch：
+        # 不做诊断、不自愈
+        monkeypatch.setattr(env_check, "torch_imports_ok", mock.Mock(return_value=True))
+        monkeypatch.setattr(env_check, "detect_torch_dll_problem", mock.Mock())
         monkeypatch.setattr(env_check, "ensure_vc_redist", mock.Mock())
         env_check.preflight_torch_runtime()
+        env_check.detect_torch_dll_problem.assert_not_called()
         env_check.ensure_vc_redist.assert_not_called()
 
     def test_dll_problem_and_missing_runtime_installs(self, monkeypatch):
         problem = env_check.TorchDllProblem(winerror=1114, dll="c10.dll")
+        # H1 编排：torch_imports_ok 首调=门（DLL 坏 → False），装完复验 → True
+        monkeypatch.setattr(env_check, "torch_imports_ok", mock.Mock(side_effect=[False, True]))
         monkeypatch.setattr(env_check, "detect_torch_dll_problem", lambda: problem)
         ensured = env_check.EnsureResult(installed=True, reason="ok")
         monkeypatch.setattr(env_check, "ensure_vc_redist", mock.Mock(return_value=ensured))
-        monkeypatch.setattr(env_check, "torch_imports_ok", mock.Mock(return_value=True))
         env_check.preflight_torch_runtime()
         env_check.ensure_vc_redist.assert_called_once()
-        env_check.torch_imports_ok.assert_called_once()
+        assert env_check.torch_imports_ok.call_count == 2
 
     def test_install_fail_does_not_raise(self, monkeypatch):
         problem = env_check.TorchDllProblem(winerror=1114, dll="c10.dll")

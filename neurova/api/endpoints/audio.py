@@ -91,11 +91,17 @@ def _engine_label(engine) -> str:
 
 
 def _get_tts_manager():
-    """获取 TTS Manager (向后兼容)"""
-    # 优先使用 VoiceEngine
+    """获取 TTS Manager (向后兼容)
+
+    返回 manager 契约对象（is_initialized/synthesize/…）。VoiceEngine
+    统一层只是包装（无这些属性，直接返回必然 AttributeError → 曾致
+    /synthesize-stream 500）——解包其 _engine 返回真实 TTSManager。
+    """
     voice_engine = _get_voice_engine("tts")
     if voice_engine:
-        return voice_engine
+        inner = getattr(voice_engine, "_engine", None)
+        if inner is not None:
+            return inner
 
     # 降级到旧的 TTSManager
     state = get_app_state()
@@ -187,7 +193,21 @@ async def synthesize_speech(request: Request, body: SynthesizeRequest):
 
     # 降级到旧的 TTSManager
     tts = _get_tts_manager()
-    if not tts or not tts.is_initialized:
+    if tts is None:
+        raise HTTPException(status_code=503, detail="TTS 引擎未就绪")
+    # H2-C 按需模式：未初始化时先尝试按需加载（lazy_release 下
+    # manager.initialize 会走 fallback 链；常驻模式下幂等 no-op）
+    if not getattr(tts, "is_initialized", False):
+        try:
+            initialize = getattr(tts, "initialize", None)
+            if initialize is not None and not await initialize():
+                raise HTTPException(status_code=503, detail="TTS 引擎未就绪")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"TTS 按需初始化失败: {e}")
+            raise HTTPException(status_code=503, detail="TTS 引擎未就绪")
+    if not getattr(tts, "is_initialized", False):
         raise HTTPException(status_code=503, detail="TTS 引擎未就绪")
 
     try:

@@ -117,16 +117,32 @@ try:
 except ImportError as _e:
     _mem_layer_logger.debug("positional_encoding 未可用: %s", _e)
 
-try:
-    from .memory_field import (
-        MemoryFieldConfig,
-        MemoryFieldNetwork,
-        MemoryFieldTrainer,
-        get_memory_field,
-        reset_memory_field,
-    )
-except ImportError as _e:
-    _mem_layer_logger.debug("memory_field 未可用 (需要 torch): %s", _e)
+# memory_field（NeRF 记忆场）惰性导出（PEP 562，内存优化 H1）：
+# 模块级 `import torch`（memory_field.py）导入即 +176MB，而 MemoryField
+# 运行时无消费方——包 __init__ 急切导入会让 memory_layer 任一子模块的
+# 导入（如 mem_core 拿 UnifiedVectorStore）都白拉 torch。改为按需加载，
+# API 兼容：属性访问/`from ... import` 触发时才真正导入。torch 缺失时
+# 保持历史 fail-soft 语义（AttributeError，与原 try/except 静默跳过一致）。
+_TORCH_LAZY_EXPORTS = {
+    "MemoryFieldConfig": ("memory_field", "MemoryFieldConfig"),
+    "MemoryFieldNetwork": ("memory_field", "MemoryFieldNetwork"),
+    "MemoryFieldTrainer": ("memory_field", "MemoryFieldTrainer"),
+    "get_memory_field": ("memory_field", "get_memory_field"),
+    "reset_memory_field": ("memory_field", "reset_memory_field"),
+}
+
+
+def __getattr__(name: str):
+    target = _TORCH_LAZY_EXPORTS.get(name)
+    if target is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+
+    try:
+        module = importlib.import_module(f".{target[0]}", __name__)
+    except ImportError as _e:
+        raise AttributeError(f"{name} 不可用（memory_field 导入失败: {_e}）") from _e
+    return getattr(module, target[1])
 
 try:
     from .volume_renderer import (
