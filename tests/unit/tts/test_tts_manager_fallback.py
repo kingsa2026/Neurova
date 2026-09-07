@@ -194,7 +194,7 @@ async def test_moss_stream_raises_on_inference_failure(monkeypatch):
 
     tts = MOSSNanTTS(model_dir=None, auto_download=False)
     tts._initialized = True
-    tts._tts_session = object()
+    tts._prefill_session = object()
     monkeypatch.setattr(
         tts,
         "_run_inference",

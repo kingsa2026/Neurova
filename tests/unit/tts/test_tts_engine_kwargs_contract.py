@@ -117,7 +117,7 @@ async def test_fallback_chain_skips_raising_engine(monkeypatch):
 def test_moss_probe_capability_false_when_inference_empty(monkeypatch):
     """能力自检：推理产出空音频 → False（不许谎报可用）。"""
     tts = MOSSNanTTS(model_dir=None, auto_download=False)
-    tts._tts_session = object()
+    tts._prefill_session = object()
     monkeypatch.setattr(tts, "_run_inference", lambda *a, **k: np.zeros(0, dtype=np.float32))
     assert tts._probe_inference_capability() is False
 
@@ -125,7 +125,7 @@ def test_moss_probe_capability_false_when_inference_empty(monkeypatch):
 def test_moss_probe_capability_false_when_inference_raises(monkeypatch):
     """能力自检：推理抛异常（如 KV-cache 输入缺失）→ False。"""
     tts = MOSSNanTTS(model_dir=None, auto_download=False)
-    tts._tts_session = object()
+    tts._prefill_session = object()
 
     def _boom(*a, **k):
         raise ValueError("Required inputs (['past_key_0']) are missing from input feed")
@@ -134,31 +134,116 @@ def test_moss_probe_capability_false_when_inference_raises(monkeypatch):
     assert tts._probe_inference_capability() is False
 
 
+@pytest.mark.skipif(not _MOSS_MODEL_DIR.exists(), reason="本地 moss-nano 模型未下载")
+def test_moss_build_request_rows_shape():
+    """请求行构造：row_width=17，slot 行/文本行填充 1024，通道 1..16 放 codes。
+
+    前缀/后缀模板 token 来自 manifest，故需指向真实模型目录。
+    """
+    tts = MOSSNanTTS(model_dir=_MOSS_MODEL_DIR, tokenizer_dir=None, auto_download=False)
+    text_ids = [100, 200]
+    prompt_codes = [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]]
+    rows = tts._build_request_rows(text_ids, prompt_codes)
+    pt = tts._prompt_templates()
+    n_prefix = len(pt["user_prompt_prefix_token_ids"]) + 1  # + audio_start
+    n_suffix_fixed = 1 + len(pt["user_prompt_after_reference_token_ids"])  # audio_end + 后缀
+    n_asst = len(pt["assistant_prompt_prefix_token_ids"]) + 1  # + audio_start
+    # 总行数 = 前缀 + code 行 + (固定后缀 + 2 文本) + 助手前缀
+    assert len(rows) == n_prefix + 1 + n_suffix_fixed + 2 + n_asst
+    for row in rows:
+        assert len(row) == 17
+    # 用户音频前缀行：slot=audio_user_slot_token_id(8)，code 进通道 1..16
+    user_row = rows[n_prefix]
+    assert user_row[0] == 8
+    assert list(user_row[1:]) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+    # 文本行：通道 0 = token，其余 = audio_pad(1024)
+    text_row = rows[n_prefix + 1 + n_suffix_fixed]
+    assert text_row[0] == 100
+    assert all(v == 1024 for v in text_row[1:])
+    # 首行 = 用户前缀首个模板 token（文本行）；末行 = 助手 audio_start(6)
+    assert rows[0][0] == pt["user_prompt_prefix_token_ids"][0]
+    assert rows[-1][0] == 6
+
+
+def test_moss_builtin_voice_prompt_codes_loaded():
+    """本地 manifest 内置音色前缀 codes 可加载（voice-clone 无参考音频也能跑）。"""
+    tts = MOSSNanTTS(model_dir=_MOSS_MODEL_DIR, tokenizer_dir=None, auto_download=False)
+    prompt_codes = tts._load_builtin_prompt_codes()
+    assert prompt_codes, "manifest.builtin_voices[0].prompt_audio_codes 加载失败"
+    assert len(prompt_codes) >= 10
+    assert all(len(row) == 16 for row in prompt_codes)
+
+
 def test_moss_probe_capability_true_when_inference_produces_audio(monkeypatch):
     """能力自检：推理真产出非空音频 → True（未来推理修好后自检放行）。"""
     tts = MOSSNanTTS(model_dir=None, auto_download=False)
-    tts._tts_session = object()
-    monkeypatch.setattr(tts, "_run_inference", lambda *a, **k: np.ones(4800, dtype=np.float32))
+    tts._prefill_session = object()
+    monkeypatch.setattr(tts, "_run_inference", lambda *a, **k: np.ones((4800, 2), dtype=np.float32))
     assert tts._probe_inference_capability() is True
+
+
+def test_create_wav_bytes_empty_array_returns_header():
+    """_create_wav_bytes 空数组必须返回 44 字节合法 WAV 头（不崩）。
+
+    事故：流式路径用 zeros(0) 造头，np.max 空归约崩（zero-size array
+    to reduction）——moss 流式打通后首帧必炸。
+    """
+    from neurova.tts.moss_nano import _create_wav_bytes
+
+    header = _create_wav_bytes(np.zeros(0, dtype=np.float32))
+    assert len(header) == 44
+    assert header[:4] == b"RIFF" and header[8:12] == b"WAVE"
+    # data chunk size = 0（小端 uint32，位于 40..44）
+    import struct
+
+    assert struct.unpack("<I", header[40:44])[0] == 0
+
+
+@pytest.mark.skipif(not _MOSS_MODEL_DIR.exists(), reason="本地 moss-nano 模型未下载")
+@pytest.mark.asyncio
+async def test_moss_stream_real_synthesis():
+    """moss 流式真合成：头部 + 数据块顺序产出，不能静默空/中途崩。"""
+    tts = MOSSNanTTS(model_dir=_MOSS_MODEL_DIR, tokenizer_dir=None, auto_download=False)
+    ok = await tts.initialize()
+    try:
+        assert ok, "模型齐全但 initialize() 失败"
+        chunks = []
+        async for c in tts.synthesize_stream("流式合成验证"):
+            chunks.append(c)
+        assert chunks, "流式零产出"
+        assert chunks[0][:4] == b"RIFF", "首块必须是 WAV 头"
+        body = b"".join(chunks[1:])
+        assert len(body) > 48000, f"音频数据过短: {len(body)} bytes"
+    finally:
+        await tts.shutdown()
 
 
 @pytest.mark.skipif(not _MOSS_MODEL_DIR.exists(), reason="本地 moss-nano 模型未下载")
 @pytest.mark.asyncio
 async def test_moss_initialized_implies_real_synthesis():
-    """诚实初始化不变量：initialize()=True 蕴含引擎真能合成出非空音频。
+    """诚实初始化不变量：模型齐全时 initialize() 必须成功，且真能合成非空语音。
 
-    当前推理实现无法驱动 KV-cache 自回归图 → initialize() 必须返回
-    False（而非谎报 True 让每次请求白走死引擎）。未来推理修好后此
-    不变量同样成立（True + 真合成）。
+    09-07 推理流水线重写后的收口测试：模型文件在而 initialize() 失败 =
+    推理链路未打通（此前 kv-cache 输入缺失，恒 0 字节）。
     """
+    import io as _io
+
+    import soundfile as sf
+
     tts = MOSSNanTTS(model_dir=_MOSS_MODEL_DIR, tokenizer_dir=None, auto_download=False)
     ok = await tts.initialize()
-    if ok:
-        try:
-            audio = await tts.synthesize("测试")
-            assert audio, "initialize()=True 但合成 0 字节：is_initialized 谎报能力"
-        finally:
-            await tts.shutdown()
-    else:
-        # 自检失败必须诚实：不许留在"已初始化"状态
-        assert tts.is_initialized is False
+    try:
+        assert ok, "模型齐全但 initialize() 失败：moss-nano 推理链路未打通"
+        assert tts.is_initialized is True
+        audio = await tts.synthesize("测试语音")
+        assert audio, "initialize()=True 但合成 0 字节"
+        assert audio[:4] == b"RIFF" and audio[8:12] == b"WAVE", "输出必须是合法 WAV"
+        data, sr = sf.read(_io.BytesIO(audio), dtype="float32")
+        assert sr == 48000, f"采样率应为 48000，实得 {sr}"
+        duration = len(data) / sr
+        assert duration >= 0.3, f"合成时长过短: {duration:.2f}s"
+        flat = data.reshape(-1) if data.ndim > 1 else data
+        rms = float((flat.astype("float64") ** 2).mean() ** 0.5)
+        assert rms > 0.005, f"合成音频疑似静音: rms={rms:.5f}"
+    finally:
+        await tts.shutdown()
