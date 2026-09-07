@@ -605,6 +605,7 @@ async def post_console_chat(
                     if last:
                         usage_event = {
                             "type": "usage",
+                            "session_id": session_id,
                             "model": last.get("model", ""),
                             "provider": last.get("provider", ""),
                             "prompt_tokens": int(last.get("prompt_tokens", 0)),
