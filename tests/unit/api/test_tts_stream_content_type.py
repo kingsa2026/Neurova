@@ -20,7 +20,7 @@ def _make_client(engine_media_type: str):
     # 补课 4.3 修复后：端点读引擎属性 audio_media_type（非方法）
     tts.audio_media_type = engine_media_type
 
-    async def fake_stream(text):
+    async def fake_stream(text, **kwargs):
         yield b"chunk1"
         yield b"chunk2"
 
@@ -70,7 +70,7 @@ def test_voice_engine_wrapper_does_not_500():
 
     inner = SimpleNamespace(is_initialized=True, audio_media_type="audio/mpeg")
 
-    async def fake_stream(text):
+    async def fake_stream(text, **kwargs):
         yield b"x"
 
     inner.synthesize_stream = fake_stream

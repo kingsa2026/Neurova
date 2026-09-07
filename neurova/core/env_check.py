@@ -221,10 +221,18 @@ def _cleanup(exe: Path) -> None:
 
 
 def preflight_torch_runtime(auto_install: bool = True) -> None:
-    """启动预检编排入口。永不抛异常——环境修复失败不阻断后端启动。"""
+    """启动预检编排入口。永不抛异常——环境修复失败不阻断后端启动。
+
+    内存优化 H1 补充（2026-09-08）：先走子进程探测（torch_imports_ok），
+    torch DLL 正常时主进程**不导入 torch**——H1 惰性化后运行时已无 torch
+    消费方，预检自身成了 torch（+176MB）进场的唯一原因。仅当子进程探测
+    判定 DLL 损坏时，才回主进程做精准诊断（winerror/dll 定位）+ 自动修复。
+    """
     try:
         if not _IS_WINDOWS:
             return
+        if torch_imports_ok():
+            return  # 子进程探测通过：DLL 无损，主进程保持零 torch
         problem = detect_torch_dll_problem()
         if problem is None:
             return
