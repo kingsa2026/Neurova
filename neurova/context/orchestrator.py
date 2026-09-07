@@ -307,6 +307,7 @@ class ContextOrchestrator:
                 token_budget=TokenBudget(max_total=16000),
                 enable_cache=True,
                 enable_compression=True,
+                show_empathy=getattr(self._agent.config, "show_empathy", True),
             )
             logger.info("Agent %s: UnifiedContextInjector 已启用 (16K tokens)", self.config.name)
 
@@ -377,6 +378,14 @@ class ContextOrchestrator:
         # build_context 是 chat_pipeline 实际调用的路径(build_system_prompt 只是工具方法,未被调用),
         # 所以必须在此处注入时间,否则 LLM 看不到真实当前时间。
         system_instructions.append(self._build_current_time_section())
+
+        # 批次 C：恒定规则段（工具使用方法论/环境块/记忆写入规则）——除日期
+        # 外全部恒定，system 会话内字节稳定；动态内容走 envelope（injector）
+        from neurova.context.rules_sections import build_all_sections
+
+        system_instructions.append(
+            build_all_sections(workspace_path=str(getattr(self.config, "workspace_path", "") or ""))
+        )
 
         # 使用配置的行为规则
         developer_instructions = list(self.config.behavior_rules)
@@ -709,7 +718,17 @@ class ContextOrchestrator:
                 content = getattr(item, "content", None)
                 if content:
                     fallback.append({"role": "user", "content": str(content)})
-            fallback.append({"role": "user", "content": user_input})
+            # 批次 A：降级路径与主路径同构——候选内容以瞬态信封挂末条 user
+            # 消息（免疫句/缓存语义一致），不再散落为多条裸 user 消息
+            from neurova.context.envelope import build_envelope as _build_envelope
+
+            _memory_lines = [
+                str(item.content)
+                for item in candidate_pool
+                if getattr(item, "content", None) and "MEMORY" in str(getattr(item, "source", ""))
+            ]
+            _env = _build_envelope({"memories": "\n".join(_memory_lines)} if _memory_lines else {})
+            fallback.append({"role": "user", "content": f"{_env}\n\n{user_input}" if _env else user_input})
             return fallback
 
         context = self.context_builder.build_from_pool(
@@ -792,6 +811,7 @@ class ContextOrchestrator:
         developer_instructions 保持一致。
 
         Bug T-1 修复:在 prompt 末尾注入当前时间上下文,避免 LLM 误用训练截止日期。
+        批次 C：与 build_context 主链同步追加恒定规则段（双路径一致）。
         """
         parts = [self.soul]
 
@@ -801,6 +821,13 @@ class ContextOrchestrator:
         # 添加宪法/行为准则
         if self.config.constitution:
             parts.append("\n\n## 行为准则（宪法）\n" + self.config.constitution)
+
+        from neurova.context.rules_sections import build_all_sections
+
+        parts.append(
+            "\n\n"
+            + build_all_sections(workspace_path=str(getattr(self.config, "workspace_path", "") or ""))
+        )
 
         # 使用配置的行为规则
         if self.config.behavior_rules:
@@ -1025,10 +1052,10 @@ class ContextOrchestrator:
             if compacted is None:
                 return tools
 
-            from neurova.context.tool_search import build_catalog, get_active_catalog
+            from neurova.context.tool_search import build_catalog, get_active_catalog, get_directory_budget
 
             catalog_entries = [e for e in get_active_catalog()]
-            directory = render_directory(catalog_entries, max_chars=18000)
+            directory = render_directory(catalog_entries, max_chars=get_directory_budget())
             _nl = chr(10)
             directory_block = (
                 _nl + _nl + "## 隐藏工具目录（schema 未加载）" + _nl

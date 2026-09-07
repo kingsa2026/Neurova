@@ -58,12 +58,13 @@ class TestEkbFallbackOnEmptyList:
         assert result.context
 
     def test_ekb_hits_injected_into_system_prompt(self):
+        """批次 A 后经验进末条 user 消息的 <experience> 信封块（不再拼 system）。"""
         injector = _make_injector()
         with patch(_FIND, return_value=[_EKB_RECORD]):
             result = _build(injector, [])
-        system = result.context[0]["content"]
-        assert "相关经验" in system
-        assert "北京今天晴" in system
+        user_content = result.context[-1]["content"]
+        assert "<experience>" in user_content
+        assert "北京今天晴" in user_content
 
     def test_pooled_hits_skip_second_query(self):
         """池预检索命中（非空列表）不触发二次查询"""
@@ -74,16 +75,16 @@ class TestEkbFallbackOnEmptyList:
                 [{"context": "池内经验", "result": "池内结果", "success": True}],
             )
             mock_find.assert_not_called()
-        system = result.context[0]["content"]
-        assert "池内经验" in system
+        user_content = result.context[-1]["content"]
+        assert "池内经验" in user_content
 
     def test_reply_excerpt_contract(self):
         """写读契约对齐：读端取 reply_excerpt（写端 post_chat 存的就是它）"""
         injector = _make_injector()
         with patch(_FIND, return_value=[_EKB_RECORD]):
             result = _build(injector, [])
-        system = result.context[0]["content"]
-        assert "北京今天晴" in system
+        user_content = result.context[-1]["content"]
+        assert "北京今天晴" in user_content
 
     def test_ekb_failure_degrades_to_empty(self):
         """EKB 查询失败不影响上下文构建"""

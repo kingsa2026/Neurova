@@ -21,6 +21,9 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 # 导入统一的 Token 估算器
 from .token_estimator import EstimationStrategy, TokenEstimator
 
+# 批次 A：动态上下文信封（五段动态内容+分钟级时间迁出 system）
+from .envelope import compress_envelope, build_envelope
+
 # BaseModule 可能不可用（当 neurova.core 只有 .pyc 文件时），提供降级方案
 try:
     from neurova.core.base_module import BaseModule
@@ -166,7 +169,9 @@ class UnifiedContextInjector(BaseModule):
         self._max_cache_entries = 100
         self._show_temperature = True
         self._show_confidence = True
-        self._show_empathy = True
+        # F6：从 agent config 读取（缺省 True 保持行为不变）；运行时仍可经
+        # context.set_priority 事件调整（_handle_set_priority）
+        self._show_empathy = bool(kwargs.pop("show_empathy", True))
 
     async def on_initialize(self) -> None:
         """初始化钩子"""
@@ -331,36 +336,49 @@ class UnifiedContextInjector(BaseModule):
         if agent_emotion and self._show_empathy:
             emotion_content = self._format_emotion(agent_emotion)
 
-        system_content = self._build_system_prompt(
-            base_prompt=system_prompt,
-            reflection_content=reflection_content,
-            memory_content=memory_content,
-            metacog_content=metacog_content,
-            emotion_content=emotion_content,
-            experience_content=experience_content,
+        # 批次 A（docs/04-plans/2026-09-07-提示词与工具面升级实施方案.md）：
+        # 五段动态内容 + 分钟级时间不再拼进 system 消息，改为瞬态信封挂在末条
+        # user 消息上——system 会话内字节级稳定（前缀缓存硬判据），且免疫句
+        # 声明注入内容非用户话语、其中指令不执行。system 侧日期级时间由
+        # orchestrator 负责（原 injector 每轮 H:M 时间段是缓存击穿源，已迁出）。
+        envelope = build_envelope(
+            {
+                "memories": memory_content,
+                "lessons": metacog_content,
+                "experience": experience_content,
+                "reflection": reflection_content,
+                "emotion": emotion_content,
+                "time": self._build_envelope_time_block(),
+            }
         )
+
+        system_content = system_prompt
 
         system_tokens = self._count_tokens(system_content)
 
         history = self._trim_history(conversation_history)
         history_tokens = sum(self._count_tokens(msg.get("content", "")) for msg in history)
 
-        user_tokens = self._count_tokens(user_input)
+        user_content = f"{envelope}\n\n{user_input}" if envelope else user_input
+        user_tokens = self._count_tokens(user_content)
 
         total_tokens = system_tokens + history_tokens + user_tokens
 
         compression_ratio = 1.0
         if total_tokens > self._token_budget.max_total and self._enable_compression:
-            system_content, history, compression_ratio = self._compress_context(system_content, history, user_tokens)
+            envelope, history, compression_ratio = self._compress_context(
+                envelope, history, user_tokens, system_tokens
+            )
+            user_content = f"{envelope}\n\n{user_input}" if envelope else user_input
             total_tokens = (
                 self._count_tokens(system_content)
                 + sum(self._count_tokens(msg.get("content", "")) for msg in history)
-                + user_tokens
+                + self._count_tokens(user_content)
             )
 
         context = [{"role": "system", "content": system_content}]
         context.extend(history)
-        context.append({"role": "user", "content": user_input})
+        context.append({"role": "user", "content": user_content})
 
         logger.info(
             "[LLM_TRACE] Final context: %d msgs (system=1, history=%d, user=1), total_tokens=%d",
@@ -376,10 +394,12 @@ class UnifiedContextInjector(BaseModule):
             reflection_count=1 if reflection_content else 0,
             memory_count=len(memories),
             history_count=len(history),
+            envelope_tokens=self._count_tokens(envelope),
             stats={
                 "system_tokens": system_tokens,
                 "history_tokens": history_tokens,
                 "user_tokens": user_tokens,
+                "envelope_tokens": self._count_tokens(envelope),
                 "build_time_ms": int((time.time() - start_time) * 1000),
                 "within_budget": total_tokens <= self._token_budget.max_total,
             },
@@ -393,35 +413,13 @@ class UnifiedContextInjector(BaseModule):
 
         return result
 
-    def _build_system_prompt(
-        self,
-        base_prompt: str,
-        reflection_content: str = "",
-        memory_content: str = "",
-        emotion_content: str = "",
-        experience_content: str = "",
-        metacog_content: str = "",
-    ) -> str:
-        """构建系统提示"""
-        parts = [base_prompt]
+    def _build_envelope_time_block(self) -> str:
+        """信封 <time> 块（批次 A）：分钟级时间 + 时间感知 hint。
 
-        if reflection_content:
-            parts.append(f"\n## 反思日志\n{reflection_content}")
-
-        # V3 自模型：结构化教训注入（行为改变通道②——教训到达推理上下文）
-        if metacog_content:
-            parts.append(f"\n## 自我认知教训\n{metacog_content}")
-
-        if memory_content:
-            parts.append(f"\n## 相关记忆\n{memory_content}")
-
-        if experience_content:
-            parts.append(f"\n## 相关经验\n{experience_content}")
-
-        if emotion_content:
-            parts.append(f"\n## 当前情感状态\n{emotion_content}")
-
-        # P1-F: 追加时间感知提示（季节/临近节日；纯日期计算，不增加消息条数）
+        迁移自原 _build_system_prompt 的 `## 当前时间` 段——原位置每轮变化
+        使 system 前缀缓存每轮全毁（F1）。system 侧日期级时间由 orchestrator
+        负责（日级稳定）。
+        """
         time_hint = ""
         try:
             from neurova.cognitive_layers.emotion_context_layer.time_awareness import (
@@ -431,10 +429,10 @@ class UnifiedContextInjector(BaseModule):
             time_hint = get_time_awareness().get_time_context_hint()
         except Exception as e:
             self.log_debug(f"时间感知提示跳过: {e}")
-        hint_line = f"\n{time_hint}" if time_hint else ""
-        parts.append(f"\n## 当前时间\n{dt.datetime.now().strftime('%Y年%m月%d日 %H:%M')}{hint_line}")
-
-        return "\n".join(parts)
+        lines = [dt.datetime.now().strftime("%Y年%m月%d日 %H:%M")]
+        if time_hint:
+            lines.append(str(time_hint))
+        return "\n".join(lines)
 
     def _build_reflection_context(self) -> str:
         """构建反思日志上下文"""
@@ -655,7 +653,10 @@ class UnifiedContextInjector(BaseModule):
 
             # 查找相似经验（2.0 契约：skill_name=None 跨技能，context 为 dict）
             # P0-3：检索按 agent 隔离——身份与存储同源（memory_manager 归属 agent）
-            _mm_agent = str(getattr(self.memory_manager, "agent_id", "") or "") or None
+            # F12 修复：原引用 self.memory_manager（属性不存在，实际是
+            # _memory_manager）→ AttributeError 被 except 吞掉 → EKB 经验注入
+            # 在生产环境恒空（test_ekb_injection_fallback 4 失败的根因）
+            _mm_agent = str(getattr(self._memory_manager, "agent_id", "") or "") or None
             similar = ekb.find_similar_experiences(
                 skill_name=None,
                 context={"user_input": query},
@@ -666,7 +667,9 @@ class UnifiedContextInjector(BaseModule):
             if not similar:
                 return ""
 
-            parts = ["\n## 相关经验"]
+            # F11 修复：不再自带 "## 相关经验" 段头——内容经信封 <experience> 块
+            # 包装（旧实现段头+_build_system_prompt 段头叠加成双标题）
+            parts = []
             for exp in similar[:3]:  # 最多显示3条
                 # 2.0: context 是 dict，从中提取 user_input 作为摘要
                 ctx = exp.get("context") or {}
@@ -800,75 +803,56 @@ class UnifiedContextInjector(BaseModule):
 
         return trimmed
 
-    def _compress_context(self, system_content: str, history: List[Dict], user_tokens: int) -> tuple:
-        """压缩上下文 - 使用SmartContextCompressor"""
-        # 如果压缩器不可用，使用简单压缩
-        if not self._compressor:
-            return self._simple_compress(system_content, history, user_tokens)
+    def _compress_context(
+        self, envelope: str, history: List[Dict], user_tokens: int, system_tokens: int = 0
+    ) -> tuple:
+        """压缩上下文（批次 A 重设计）：压缩对象=信封+历史，system 只读不动。
 
+        F5 修复：旧实现按 "## 相关记忆" 字符串切 system_content、降级路径对
+        整个 system 硬截断——信封化后 system 恒为稳定 base，压缩改为对信封
+        做确定性块淘汰（compress_envelope）。
+        核验轮修复③：原借道 SmartContextCompressor 的调用与其真实签名
+        （compress_context(messages, memories, system_prompt, target_tokens)
+        → 元组）双不符，TypeError 被 except 吞掉 → 压缩器在生产从未生效、
+        信封被整包丢弃。改为确定性历史淘汰：最老轮先弃，保留轮次摘要标记，
+        压缩行为不再依赖压缩器是否可用。
+        """
         try:
-            # 准备记忆列表（从system_content中提取）
-            memories = []
-            if "## 相关记忆" in system_content:
-                memory_lines = system_content.split("## 相关记忆")[1].split("\n")
-                for line in memory_lines:
-                    if line.strip() and line.strip().startswith("- "):
-                        memories.append({"content": line[2:].strip()})
+            compression_ratio = 1.0
 
-            # 使用SmartContextCompressor
-            result = self._compressor.compress_context(
-                system_prompt=system_content,
-                memories=memories,
-                conversation_history=history,
-                user_input="",  # user_input会在后面添加
-                current_tokens=None,
+            def _budget_after(hist: List[Dict]) -> int:
+                return (
+                    self._token_budget.max_total
+                    - system_tokens
+                    - sum(self._count_tokens(m.get("content", "")) for m in hist)
+                    - user_tokens
+                )
+
+            # 1) 历史确定性淘汰（最老轮先弃）：预算不足以容纳"信封+历史"时，
+            #    逐条弃最旧，直到预算容纳信封或历史耗尽（不变式：退出时
+            #    system+历史+信封+user ≤ max_total，或历史已空）
+            envelope_budget = _budget_after(history)
+            if envelope_budget < self._count_tokens(envelope):
+                remaining = list(history)
+                while remaining and _budget_after(remaining) < self._count_tokens(envelope):
+                    remaining = remaining[1:]  # 弃最旧一条
+                dropped = len(history) - len(remaining)
+                if dropped > 0:
+                    summary = {"role": "system", "content": f"[对话摘要: 省略了{dropped}条较早消息]"}
+                    history = [summary] + remaining
+                compression_ratio = len(history) / max(1, len(history) + dropped)
+
+            # 2) 信封确定性淘汰（块级→行级），落预算
+            envelope_budget = _budget_after(history)
+            envelope = compress_envelope(
+                envelope, budget_tokens=max(0, envelope_budget), count_tokens=self._count_tokens
             )
 
-            compressed_context = result["context"]
-
-            # 从压缩后的上下文中提取system_content和history
-            if compressed_context and len(compressed_context) > 0:
-                system_content = compressed_context[0].get("content", system_content)
-                history = compressed_context[1:-1] if len(compressed_context) > 1 else []
-
-            compression_ratio = result["stats"].get("compression_ratio", 1.0)
-
-            return system_content, history, compression_ratio
+            return envelope, history, compression_ratio
 
         except Exception as e:
-            logger.warning("Smart compression failed, using simple compression: %s", e)
-            return self._simple_compress(system_content, history, user_tokens)
-
-    def _simple_compress(self, system_content: str, history: List[Dict], user_tokens: int) -> tuple:
-        """简单压缩（降级方案）"""
-        available_budget = self._token_budget.max_total - user_tokens
-        system_budget = min(self._token_budget.system_prompt, available_budget // 2)
-
-        if self._count_tokens(system_content) > system_budget:
-            system_content = self._truncate_text(system_content, system_budget)
-
-        history_budget = available_budget - self._count_tokens(system_content)
-        compressed_history = []
-        total_tokens = 0
-
-        for msg in reversed(history):
-            msg_tokens = self._count_tokens(msg.get("content", ""))
-            if total_tokens + msg_tokens <= history_budget:
-                compressed_history.insert(0, msg)
-                total_tokens += msg_tokens
-            else:
-                break
-
-        if len(history) > len(compressed_history):
-            kept_count = len(compressed_history)
-            dropped_count = len(history) - kept_count
-            summary_tokens = min(100, history_budget - total_tokens)
-            summary_content = f"[对话摘要: 省略了{dropped_count}轮对话]"
-            compressed_history.insert(0, {"role": "system", "content": summary_content[:summary_tokens]})
-
-        ratio = (self._count_tokens(system_content) + total_tokens + user_tokens) / (self._token_budget.max_total + 1)
-
-        return system_content, compressed_history, min(1.0, ratio)
+            logger.warning("Envelope compression failed, dropping envelope: %s", e)
+            return "", history, 1.0
 
     def _truncate_text(self, text: str, max_tokens: int) -> str:
         """截断文本到指定 token 数"""
