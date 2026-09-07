@@ -104,6 +104,23 @@ async def confirm_pending_memory(
         if not _is_admin(user) and rec.get("proposed_by") != uid:
             raise APIError(ErrorCodes.PERMISSION_DENIED, "仅提议人或管理员可确认")
 
+        # 核验轮修复②：forget 提议按动作分流——确认=真删除目标记忆，
+        # 绝不把遗忘摘要当新记忆写入主库
+        if rec.get("proposed_action") == "forget":
+            target = str(rec.get("target_memory_id") or "")
+            if not target:
+                raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, "forget 提议缺少目标记忆 ID")
+            manager = get_memory_manager(agent_id, user)
+            deleted = manager.forget(target, soft=True)
+            if not deleted:
+                raise APIError(ErrorCodes.NOT_FOUND, "目标记忆不存在或已删除，请拒绝该提议")
+            out = store.confirm(pending_id, lambda c, cat, mt: target)
+            return success_response(
+                data={"memory_id": out.get("memory_id"), "pending_id": pending_id, "action": "forget"},
+                message="记忆已确认遗忘",
+                request_id=_get_request_id(None),
+            )
+
         manager = get_memory_manager(agent_id, user)
         memory_id = manager.remember(
             content=rec["content"],
