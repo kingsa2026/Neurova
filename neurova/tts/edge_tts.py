@@ -65,7 +65,7 @@ class EdgeTTS(TTSBase):
     使用 edge-tts 库，免费且中文效果好。
     """
 
-    def __init__(self, voice: str = "zh-CN-XiaoxiaoNeural", rate: str = "+0%", volume: str = "+0%"):
+    def __init__(self, voice: str = "zh-CN-XiaoxiaoNeural", rate: str = "+0%", volume: str = "+0%", pitch: str = "+0Hz"):
         """
         初始化 EdgeTTS
 
@@ -73,11 +73,13 @@ class EdgeTTS(TTSBase):
             voice: 音色名称
             rate: 语速调整
             volume: 音量调整
+            pitch: 音调调整（edge-tts Communicate 原生参数，如 "+50Hz"）
         """
         super().__init__()
         self.voice = voice
         self.rate = rate
         self.volume = volume
+        self.pitch = pitch
         self._communicate = None
 
     async def initialize(self) -> bool:
@@ -106,6 +108,7 @@ class EdgeTTS(TTSBase):
             voice=self.voice,
             rate=self.rate,
             volume=self.volume,
+            pitch=self.pitch,
         )
         audio_data = b""
         async for chunk in communicate.stream():
@@ -174,6 +177,7 @@ class EdgeTTS(TTSBase):
                     voice=self.voice,
                     rate=self.rate,
                     volume=self.volume,
+                    pitch=self.pitch,
                 )
 
                 # 流式合成音频
