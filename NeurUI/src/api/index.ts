@@ -6,6 +6,13 @@ import config from '@/config'
 
 const TOKEN_KEY = 'auth_token'
 
+/** 调用方可声明的"预期失败状态码"：拦截器降级为 debug，不当 error 刷控制台 */
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    __expectedStatus?: number | number[]
+  }
+}
+
 /**
  * Generate a UUID v4 string for request tracing (X-Request-ID).
  * Uses crypto.randomUUID when available, otherwise falls back to a
@@ -106,9 +113,19 @@ request.interceptors.response.use(
       bus.emit('api:rate-limited', { requestId, retryAfter, message: msg })
     }
 
+    // Caller-declared expected failures (e.g. "404 = no snapshot yet") log at
+    // debug instead of error so polling/first-load probes don't paint the console red.
+    const expectedStatus = (error.config as any)?.__expectedStatus
+    const isExpected =
+      Array.isArray(expectedStatus) ? expectedStatus.includes(status) : expectedStatus === status
+
     // Only log non-auth errors (auth errors are handled above)
     if (status !== 401) {
-      logger.error(`[API] !! ${error.config?.method?.toUpperCase()} ${error.config?.url}  ${status || 'network'}  [${requestId}]`)
+      if (isExpected) {
+        logger.debug(`[API] .. ${error.config?.method?.toUpperCase()} ${error.config?.url}  ${status} (expected)  [${requestId}]`)
+      } else {
+        logger.error(`[API] !! ${error.config?.method?.toUpperCase()} ${error.config?.url}  ${status || 'network'}  [${requestId}]`)
+      }
     }
     return Promise.reject(error)
   },
