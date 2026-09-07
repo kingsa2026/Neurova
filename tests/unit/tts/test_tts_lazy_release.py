@@ -305,3 +305,39 @@ async def test_shutdown_cancels_background_tasks(heavy_manager):
     with contextlib.suppress(asyncio.CancelledError):
         await ttl_task
     assert ttl_task.cancelled()
+
+
+def test_stream_endpoint_lazy_ready_after_release(heavy_manager):
+    """流式端点按需咽喉：TTL 释放后 /synthesize-stream 触发按需初始化，
+    不再 503（否则闲置后前端自动语音整段哑掉）。"""
+    from unittest.mock import patch
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from neurova.api.endpoints import audio as audio_mod
+
+    mgr, heavy, light = heavy_manager
+    # 模拟 TTL 释放后的状态：已换班 edge 且 edge 就绪
+    mgr._engine = light
+    mgr._engine_name = "edge-tts"
+    mgr._initialized = True
+    light._initialized = True
+    light.synthesize_stream = _fake_light_stream
+
+    calls = {"n": 0}
+
+    def fake_get_tts_manager():
+        return mgr
+
+    with patch.object(audio_mod, "_get_tts_manager", fake_get_tts_manager):
+        app = FastAPI()
+        app.include_router(audio_mod.router, prefix="/audio")
+        client = TestClient(app)
+        resp = client.post("/audio/synthesize-stream", json={"text": "释放后流式"})
+    assert resp.status_code == 200, resp.text
+    assert calls["n"] == 0  # 顶班引擎就绪：未触发 initialize
+
+
+async def _fake_light_stream(text, **kwargs):
+    yield b"mp3-chunk"
