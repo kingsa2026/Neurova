@@ -39,7 +39,9 @@ def require_admin_dep():
 class SynthesizeRequest(BaseModel):
     """TTS 合成请求"""
 
-    text: str = Field(..., description="要合成的文本", max_length=5000)
+    # 字数上限已取消（2026-09-07）：引擎内部分句切块合成，长度只受
+    # 合成耗时自然约束
+    text: str = Field(..., description="要合成的文本")
     voice: Optional[str] = Field(default=None, description="音色名称")
     speed: float = Field(default=1.0, ge=0.5, le=2.0, description="语速")
     format: str = Field(default="wav", description="音频格式 (wav/mp3)")
