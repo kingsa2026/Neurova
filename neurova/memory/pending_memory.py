@@ -45,8 +45,38 @@ CREATE TABLE IF NOT EXISTS pending_memories (
 );
 CREATE INDEX IF NOT EXISTS pending_memories_status_idx
     ON pending_memories (status, created_at DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS pending_memories_rejected_fp_idx
-    ON pending_memories (fingerprint) WHERE status = 'rejected';
+"""
+
+# 2026-09-07 事故修复（/agent/default/memory 拒绝入库报
+# UNIQUE constraint failed: pending_memories.fingerprint）：
+# 旧索引只约束 rejected 单墓碑，propose 却允许同指纹 pending 无限堆积——
+# 堆积后第二次拒绝必然撞索引。不变量收紧为"每指纹至多一条未决行"：
+# propose 对未决指纹幂等回指、reject 单向改判，索引冲突从状态机上不可达。
+_MIGRATION_DROP_OLD = "DROP INDEX IF EXISTS pending_memories_rejected_fp_idx;"
+
+# 存量堆积收敛（幂等）：有墓碑的指纹下残留 pending 由墓碑代表裁决，直接清除；
+# 无墓碑的同指纹 pending 堆积保留最新一条（内容归一化相同，无信息损失）。
+_LEGACY_CLEANUP = """
+DELETE FROM pending_memories
+ WHERE status = 'pending'
+   AND fingerprint IN (SELECT fingerprint FROM pending_memories WHERE status = 'rejected');
+DELETE FROM pending_memories
+ WHERE status = 'pending'
+   AND id NOT IN (
+       SELECT id FROM (
+           SELECT id, ROW_NUMBER() OVER (
+               PARTITION BY fingerprint ORDER BY created_at DESC, rowid DESC
+           ) AS rn
+             FROM pending_memories
+            WHERE status = 'pending'
+       )
+       WHERE rn = 1
+   );
+"""
+
+_LIVE_FP_INDEX = """
+CREATE UNIQUE INDEX IF NOT EXISTS pending_memories_live_fp_idx
+    ON pending_memories (fingerprint) WHERE status IN ('pending', 'rejected');
 """
 
 
@@ -63,6 +93,9 @@ class PendingMemoryStore:
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.executescript(_SCHEMA)
+        self._conn.executescript(_MIGRATION_DROP_OLD)
+        self._conn.executescript(_LEGACY_CLEANUP)
+        self._conn.executescript(_LIVE_FP_INDEX)
         self._conn.commit()
 
     # ── 提议 ──────────────────────────────────────────────────
@@ -75,18 +108,24 @@ class PendingMemoryStore:
         source_sentence: str = "",
         proposed_by: str = "",
     ) -> Dict[str, Any]:
-        """写入待审记录。命中已拒绝指纹 → 返回 rejected 标记（不新建）。"""
+        """写入待审记录。命中未决指纹幂等回指（rejected 墓碑 → 拒绝标记，
+        pending → 回指既有记录），不新建。"""
         content = (content or "").strip()
         if not content:
             raise ValueError("待确认记忆内容不能为空")
         fp = _fingerprint(content)
         with self._lock:
             row = self._conn.execute(
-                "SELECT id FROM pending_memories WHERE fingerprint = ? AND status = 'rejected'",
+                "SELECT id, status FROM pending_memories"
+                " WHERE fingerprint = ? AND status IN ('pending', 'rejected')",
                 (fp,),
             ).fetchone()
             if row is not None:
-                return {"rejected": True, "reason": "rejected_before", "id": row[0]}
+                if row[1] == "rejected":
+                    return {"rejected": True, "reason": "rejected_before", "id": row[0]}
+                rec = self.get(row[0])
+                assert rec is not None  # 同事务刚查出，库内自洽
+                return rec
             rec_id = str(uuid.uuid4())
             self._conn.execute(
                 "INSERT INTO pending_memories"
