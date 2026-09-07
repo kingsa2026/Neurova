@@ -80,12 +80,30 @@ class OpenAILoop(BaseAgentLoop):
             TokenBudgetGate,
         )
 
+        limits = self._load_agent_limits()
         self._gate_runner = GateRunner([
             DoomLoopGate(),
-            IterationGate(max_rounds=20),
-            TokenBudgetGate(max_tokens=100000),
+            IterationGate(max_rounds=limits["max_loop_rounds"]),
+            TokenBudgetGate(max_tokens=limits["token_budget"]),
         ])
-        logger.info("OpenAILoop initialized for agent: %s", agent.config.name)
+        logger.info(
+            "OpenAILoop initialized for agent: %s (max_rounds=%s, token_budget=%s)",
+            agent.config.name, limits["max_loop_rounds"], limits["token_budget"],
+        )
+
+    @staticmethod
+    def _load_agent_limits() -> dict:
+        """读取 Agent 运行限制设置（token_budget/max_loop_rounds）。
+
+        失败时回退内置默认（100000/20），不阻断 Loop 构造。
+        """
+        try:
+            from neurova.security.agent_limits_settings import get_effective_limits
+
+            return get_effective_limits()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("读取 agent limits 失败，使用默认: %s", e)
+            return {"token_budget": 100000, "max_loop_rounds": 20}
 
     def _ensure_gate_runner(self) -> None:
         """懒初始化门控执行器（__new__ 绕过 __init__ 的测试构造兼容）。"""
@@ -97,10 +115,11 @@ class OpenAILoop(BaseAgentLoop):
                 TokenBudgetGate,
             )
 
+            limits = self._load_agent_limits()
             self._gate_runner = GateRunner([
                 DoomLoopGate(),
-                IterationGate(max_rounds=20),
-                TokenBudgetGate(max_tokens=100000),
+                IterationGate(max_rounds=limits["max_loop_rounds"]),
+                TokenBudgetGate(max_tokens=limits["token_budget"]),
             ])
 
     def set_goal_gate(self, goal: Dict[str, Any], completion_check=None, max_rounds: int = 15) -> None:
@@ -128,7 +147,9 @@ class OpenAILoop(BaseAgentLoop):
         except ImportError:  # pragma: no cover - 模块缺失时退化为仅签名判定
             calculate_similarity = None
 
-        previous_replies = [r for r in self._round_replies[:-1] if r]
+        # 2026-09-07 根因修复（audit P2-10）：原 [:-1] 把紧邻上一轮切掉，
+        # 逐轮重复检测永远失效；append 在本方法调用之后执行，无需再切
+        previous_replies = [r for r in self._round_replies if r]
         if round_reply and previous_replies:
             if calculate_similarity is not None:
                 for prev in previous_replies[-2:]:
@@ -199,6 +220,38 @@ class OpenAILoop(BaseAgentLoop):
         # 现改为 per-request 禁用:本次请求 400 后本次不传 tools,
         # 但不污染下一次 chat 请求(可能是不同模型/不同 schema)。
         self._tools_supported = True
+        # 2026-09-07 根因修复（audit P1-5 实锤场景）：DoomLoopGate 滑动窗口
+        # 挂在 agent 级单例 Loop 上，跨请求残留——上一轮的 weather 签名留在
+        # 窗口里，用户再问天气时第 1 次工具调用即被误判"死循环"直接终止，
+        # 回复恒空白。predict_step 顶层调用必须重置门控会话状态。
+        if getattr(self, "_gate_runner", None) is not None:
+            self._gate_runner.reset_session()
+        # 2026-09-07 回归修复：_round_usage 是"本轮 token 预算"语义，必须
+        # 每次用户请求重置——原修复只加了写入方，忘了重置，跨请求无限累计
+        # 导致第二轮 LLM 调用被 TokenBudgetGate 掐死（回复空白回归）
+        self.agent._round_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        }
+        # 非流式路径的工具轮次上限读取设置（与 IterationGate 同源）
+        try:
+            from neurova.security.agent_limits_settings import get_effective_limits
+
+            self._max_tool_rounds = get_effective_limits()["max_loop_rounds"] // 2
+        except Exception:  # noqa: BLE001
+            self._max_tool_rounds = 10
+        # 用户消息指纹（用户建议采纳）：死循环签名绑定本轮真实用户请求——
+        # 新的用户消息 → 新指纹 → 跨轮的同名工具调用永不误判死循环；
+        # 同一轮内重复相同调用（真死循环）仍然触发
+        import hashlib as _hashlib
+
+        _last_user = next(
+            (m for m in reversed(messages) if m.get("role") == "user"), {}
+        )
+        self._round_user_key = _hashlib.md5(
+            str(_last_user.get("content") or "").encode("utf-8")
+        ).hexdigest()[:12]
         request_params = {
             "messages": messages,
             "stream": stream,
@@ -295,13 +348,24 @@ class OpenAILoop(BaseAgentLoop):
         tool_calls = getattr(response, "tool_calls", None)
         if tool_calls:
             self._tool_rounds += 1
-            if self._tool_rounds > 10:
-                logger.warning("工具调用轮次超过上限 (%s)，停止递归", self._tool_rounds)
+            _max_rounds = getattr(self, "_max_tool_rounds", None) or 10
+            if self._tool_rounds > _max_rounds:
+                # 2026-09-07 根因修复（audit P2-8）：原实现只打日志继续递归，
+                # 实际上限是 IterationGate 的 20；现在 >10 真正终止
+                logger.warning("工具调用轮次超过上限 (%s)，终止递归", self._tool_rounds)
+                return response
             # P2-5：非流式路径同样过门控（TERMINATE 即终止递归）
             from neurova.agent.gates import StopAction as _SA
 
             self._ensure_gate_runner()
-            _gd = self._gate_runner.on_round_end({"tool_rounds": self._tool_rounds})
+            _tool_sigs = "|".join(
+                f"{tc.name}:{str(tc.arguments)[:64]}"
+                for tc in (getattr(response, "tool_calls", None) or [])
+            )
+            _gd = self._gate_runner.on_round_end({
+                "tool_rounds": self._tool_rounds,
+                "round_signature": f"{self._round_user_key}:{_tool_sigs}",
+            })
             if _gd is not None and _gd.action == _SA.TERMINATE:
                 logger.warning("门控 %s 终止非流式循环: %s", _gd.gate_name, _gd.reason)
                 return response
@@ -407,6 +471,14 @@ class OpenAILoop(BaseAgentLoop):
                     "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
                     "total_tokens": getattr(u, "total_tokens", 0) or 0,
                 }
+                # 2026-09-07 根因修复（audit P2-8）：agent._round_usage 全仓无
+                # 写入方 → TokenBudgetGate 恒死门；从流式 usage 聚合写入
+                prev = getattr(self.agent, "_round_usage", None) or {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+                self.agent._round_usage = {
+                    "prompt_tokens": prev.get("prompt_tokens", 0) + round_usage["prompt_tokens"],
+                    "completion_tokens": prev.get("completion_tokens", 0) + round_usage["completion_tokens"],
+                    "total_tokens": prev.get("total_tokens", 0) + round_usage["total_tokens"],
+                }
             rtext = getattr(chunk, "reasoning_content", None)
             if rtext:
                 reasoning_parts.append(rtext)
@@ -449,7 +521,11 @@ class OpenAILoop(BaseAgentLoop):
             # INTERRUPT → 注入提示后继续）。_gate_runner 懒初始化——兼容
             # 测试里 __new__ 绕过 __init__ 的构造方式
             self._ensure_gate_runner()
-            round_signature = "|".join(f"{n}:{a[:64]}" for n, a in current_calls) or round_reply[:128]
+            round_signature = (
+                f"{self._round_user_key}:"
+                + "|".join(f"{n}:{a[:64]}" for n, a in current_calls)
+                or round_reply[:128]
+            )
             gate_decision = self._gate_runner.on_round_end({
                 "tool_rounds": self._tool_rounds,
                 "round_reply": round_reply,

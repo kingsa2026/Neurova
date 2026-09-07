@@ -82,3 +82,20 @@ export function getGovernanceSettings() {
 export function updateGovernanceSettings(data: Partial<GovernanceSettings>) {
   return api.put<ApiResponse<GovernanceSettings>>('/governance/settings', data)
 }
+
+// ---------------------------------------------------------------------------
+// Agent 运行限制（Token 预算上限 / 单次会话最大 Loop 轮次）
+// ---------------------------------------------------------------------------
+
+export interface AgentLimits {
+  token_budget: number
+  max_loop_rounds: number
+}
+
+export function getAgentLimits() {
+  return api.get<ApiResponse<AgentLimits>>('/governance/agent-limits')
+}
+
+export function updateAgentLimits(data: Partial<AgentLimits>) {
+  return api.put<ApiResponse<AgentLimits>>('/governance/agent-limits', data)
+}

@@ -46,6 +46,10 @@ class AnthropicLoop(BaseAgentLoop):
         返回:
             LLMResponse 对象
         """
+
+        # 每次外部调用重置轮次计数（递归内部经 _top_level=False 不清零）
+        if kwargs.get('_top_level', True):
+            self._tool_rounds = 0
         # 转换 messages 格式 (OpenAI → Anthropic)
         anthropic_messages = self._convert_messages_to_anthropic(messages)
 
@@ -71,7 +75,13 @@ class AnthropicLoop(BaseAgentLoop):
 
         # 处理 tool_calls (包括 computer 工具)
         if response.tool_calls:
-            logger.info("LLM returned %s tool calls", len(response.tool_calls))
+            # 2026-09-07 根因修复（audit P2-11）：原实现递归无轮次上限——
+            # claude-* 模型工具循环可无限烧 token；对齐 OpenAILoop 的 10 轮上限
+            self._tool_rounds = getattr(self, "_tool_rounds", 0) + 1
+            if self._tool_rounds > 10:
+                logger.warning("Anthropic 工具调用轮次超过上限 (%s)，终止递归", self._tool_rounds)
+                return response
+            logger.info("LLM returned %s tool calls (round %s)", len(response.tool_calls), self._tool_rounds)
 
             # 执行工具
             tool_messages = await self.handle_tool_calls(response.tool_calls, messages)
@@ -80,7 +90,7 @@ class AnthropicLoop(BaseAgentLoop):
             messages.extend(tool_messages)
 
             # 递归调用，直到没有 tool_calls
-            return await self.predict_step(messages, tools, computer_handler, **kwargs)
+            return await self.predict_step(messages, tools, computer_handler, _top_level=False, **kwargs)
 
         return response
 

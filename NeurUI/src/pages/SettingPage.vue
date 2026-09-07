@@ -128,6 +128,36 @@
           </template>
         </GlassCard>
 
+        <!-- Agent 运行限制（Token 预算上限 + 单次会话最大 Loop 轮次） -->
+        <GlassCard :title="t('settings.agentLimitsTitle')">
+          <p class="governance-hint">{{ t('settings.agentLimitsHint') }}</p>
+          <a-form layout="vertical">
+            <a-form-item :label="t('settings.agentTokenBudget')">
+              <a-input-number
+                v-model:value="agentLimits.token_budget"
+                :min="1000"
+                :max="10000000"
+                :step="10000"
+                style="width: 100%"
+              />
+              <p class="governance-hint">{{ t('settings.agentTokenBudgetHint') }}</p>
+            </a-form-item>
+            <a-form-item :label="t('settings.agentMaxRounds')">
+              <a-input-number
+                v-model:value="agentLimits.max_loop_rounds"
+                :min="2"
+                :max="200"
+                :step="1"
+                style="width: 100%"
+              />
+              <p class="governance-hint">{{ t('settings.agentMaxRoundsHint') }}</p>
+            </a-form-item>
+          </a-form>
+          <template #footer>
+            <GlassButton variant="primary" size="sm" :loading="savingAgentLimits" @click="saveAgentLimits">{{ t('common.save') }}</GlassButton>
+          </template>
+        </GlassCard>
+
         <!-- 进化治理（RSI 部署阶段 + 对话规则提取 LLM 成本门控） -->
         <GlassCard :title="t('settings.governanceTitle')">
           <p class="governance-hint">{{ t('settings.governanceHint') }}</p>
@@ -159,7 +189,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings } from '@/api/modules/settings'
+import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits } from '@/api/modules/settings'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { supportedLocales } from '@/i18n'
@@ -188,6 +218,32 @@ const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false })
 // 进化治理设置（独立于扁平 settings 的治理面）
 const governance = ref({ conversation_rules_enabled: false, rsi_phase: 0 })
 const savingGovernance = ref(false)
+
+/** Agent 运行限制（Token 预算上限 / 单次会话最大 Loop 轮次） */
+const agentLimits = ref({ token_budget: 100000, max_loop_rounds: 20 })
+const savingAgentLimits = ref(false)
+
+const fetchAgentLimits = async () => {
+  try {
+    const res = await getAgentLimits()
+    const data = (res as any)?.data?.data ?? (res as any)?.data
+    if (data) agentLimits.value = { ...agentLimits.value, ...data }
+  } catch {
+    // 读取失败不阻断设置页（保留默认值）
+  }
+}
+
+const saveAgentLimits = async () => {
+  savingAgentLimits.value = true
+  try {
+    await updateAgentLimits({ ...agentLimits.value })
+    message.success(t('common.success'))
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    savingAgentLimits.value = false
+  }
+}
 
 const fetchGovernance = async () => {
   try {
@@ -265,6 +321,7 @@ const clearCache = async () => {
 onMounted(() => {
   fetchSettings()
   fetchGovernance()
+  fetchAgentLimits()
 })
 </script>
 
