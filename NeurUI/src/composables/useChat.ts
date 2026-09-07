@@ -270,6 +270,9 @@ export function useChat(options: UseChatOptions = {}) {
    */
   function notifySwitchFailure(result: SwitchResult): void {
     if (!result.ok) {
+      // ghost-404 是 switchSession 内部的"预期自愈"（会话已被删除/归档，
+      // store 已同步移除该条目），不是用户需要感知的错误 — 静默。
+      if (result.code === 'ghost-404') return
       const msg = options.errorMessage?.('chat.loadHistoryFailed', i18n.global.t('chat.loadHistoryFailed')) ?? i18n.global.t('chat.loadHistoryFailed')
       options.onError?.(msg)
     }

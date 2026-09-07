@@ -20,12 +20,42 @@ const URL_RE = /https?:\/\/\S+|www\.\S+/gi
 const FENCED_CODE_RE = /```[\s\S]*?```/g
 /** 行内代码 */
 const INLINE_CODE_RE = /`[^`\n]*`/g
+/** markdown 图片 ![alt](url)（先于链接处理） */
+const MD_IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)[^)]*\)/g
+/** markdown 视频常见外链（.mp4/.webm/.mov 结尾的链接） */
+const VIDEO_URL_RE = /https?:\/\/\S+\.(?:mp4|webm|mov)(?:\?\S*)?/gi
 /** markdown 链接 [text](url) → text */
 const MD_LINK_RE = /\[([^\]]*)\]\(([^)]*)\)/g
 /** markdown 残留符号 */
 const MD_RESIDUE_RE = /[*`#>]+/g
 
-/** 语音清洗：网址/代码/表情/markdown 残留全部剔除，收敛空白。 */
+/**
+ * 语音预处理（用户要求）：代码/网址/图片/视频不读原文，改为播报提示。
+ * - 围栏/行内代码 → "以下是代码"
+ * - 网址 → "以下是网址"
+ * - 图片 → "以下是图片"（有 alt 描述则附带）
+ * - 视频外链 → "以下是视频"
+ * 纯表情/markdown 残留仍清洗，不播报。返回空串表示无可读内容。
+ */
+export function prepareSpeechText(text: string): string {
+  if (!text) return ''
+  return text
+    .replace(FENCED_CODE_RE, ' 以下是代码。 ')
+    .replace(INLINE_CODE_RE, ' 以下是代码。 ')
+    .replace(MD_IMAGE_RE, (_m, alt: string) => (alt ? ` 以下是图片：${alt}。 ` : ' 以下是图片。 '))
+    .replace(VIDEO_URL_RE, ' 以下是视频。 ')
+    .replace(MD_LINK_RE, '$1')
+    .replace(URL_RE, ' 以下是网址。 ')
+    .replace(EMOJI_RE, '')
+    .replace(MD_RESIDUE_RE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * 语音清洗（旧契约，仍导出兼容既有测试/调用方）：全部剔除不播报。
+ * 新代码请用 prepareSpeechText（内容改播报提示）。
+ */
 export function sanitizeForSpeech(text: string): string {
   if (!text) return ''
   return text
@@ -64,6 +94,68 @@ export function audioSourceFor(msg: {
     return msg.ttsUrls[msg.ttsIdx ?? 0] ?? msg.ttsUrls[0]
   }
   return msg.audioUrl ?? ''
+}
+
+/** ── 工具调用语音提示 ────────────────────────────────────── */
+
+/** 工具名 → 播报语（命令/终端类工具说"执行命令"，其余说"使用工具"） */
+const COMMAND_TOOL_RE = /shell|terminal|command|exec|cmd|python|run_code|bash/i
+
+export function toolAnnouncementText(toolName: string): string {
+  return COMMAND_TOOL_RE.test(toolName) ? '正在执行命令，请稍等' : '正在使用工具，请稍等'
+}
+
+/** 单句提示音量级（防同轮多工具提示刷屏：同句 8s 内不重播） */
+const ANNOUNCE_COOLDOWN_MS = 8000
+
+export interface SpeechAnnouncer {
+  announce: (text: string) => void
+  dispose: () => void
+}
+
+/**
+ * 独立语音提示合声器：与正文 TTS 分轨（不走 live 播放器队列），
+ * 用一次性 synthesize-stream 请求 + 独立 Audio 播报。
+ * 自动语音开启时由宿主创建；仅网络引擎可用（fetch 失败静默跳过）。
+ */
+export function createSpeechAnnouncer(
+  synthesize: (text: string) => Promise<Blob>,
+  opts: { enabled: () => boolean } = { enabled: () => true },
+): SpeechAnnouncer {
+  let lastAt = 0
+  let lastText = ''
+  let current: HTMLAudioElement | null = null
+
+  return {
+    announce(text: string): void {
+      if (!opts.enabled() || !text) return
+      const now = Date.now()
+      // 同文本冷却（连续多个工具调用不逐个重播提示）
+      if (text === lastText && now - lastAt < ANNOUNCE_COOLDOWN_MS) return
+      lastAt = now
+      lastText = text
+      void (async () => {
+        try {
+          const blob = await synthesize(text)
+          if (!blob || blob.size === 0) return
+          const audio = new Audio(URL.createObjectURL(blob))
+          current?.pause()
+          current = audio
+          audio.onended = () => {
+            URL.revokeObjectURL(audio.src)
+            if (current === audio) current = null
+          }
+          audio.play().catch(() => {})
+        } catch {
+          // 提示播报失败静默跳过（不干扰正文）
+        }
+      })()
+    },
+    dispose(): void {
+      current?.pause()
+      current = null
+    },
+  }
 }
 
 /** ── 纯函数：流式句子切分 ────────────────────────────────── */
@@ -153,8 +245,8 @@ export class StreamTTSRunner {
     const idx = this.buffer.indexOf(consumed)
     this.buffer = idx >= 0 ? this.buffer.slice(idx + consumed.length) : ''
     for (const sentence of complete) {
-      const text = sanitizeForSpeech(sentence)
-      if (!text) continue // 纯网址/代码/表情 → 不读
+      const text = prepareSpeechText(sentence)
+      if (!text) continue // 纯表情/markdown 残留 → 不读
       this.enqueue(text)
     }
   }
@@ -165,7 +257,7 @@ export class StreamTTSRunner {
     const { complete } = extractSentences(this.buffer, true)
     this.buffer = ''
     for (const sentence of complete) {
-      const text = sanitizeForSpeech(sentence)
+      const text = prepareSpeechText(sentence)
       if (!text) continue
       this.enqueue(text)
     }
