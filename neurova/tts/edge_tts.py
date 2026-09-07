@@ -101,14 +101,14 @@ class EdgeTTS(TTSBase):
             self._logger.error("EdgeTTS 初始化失败: %s", e)
             return False
 
-    async def _communicate_audio(self, text: str) -> bytes:
-        """单段文本合成（Communicate.stream audio chunk 拼接）。"""
+    async def _communicate_audio(self, text: str, voice: str = None, rate: str = None, volume: str = None, pitch: str = None) -> bytes:
+        """单段文本合成（Communicate.stream audio chunk 拼接；参数缺省回落实例配置）。"""
         communicate = self._edge_tts.Communicate(
             text=text,
-            voice=self.voice,
-            rate=self.rate,
-            volume=self.volume,
-            pitch=self.pitch,
+            voice=voice or self.voice,
+            rate=rate or self.rate,
+            volume=volume or self.volume,
+            pitch=pitch or self.pitch,
         )
         audio_data = b""
         async for chunk in communicate.stream():
@@ -116,12 +116,28 @@ class EdgeTTS(TTSBase):
                 audio_data += chunk["data"]
         return audio_data
 
+    def _request_params(self, **kwargs) -> dict:
+        """请求级参数覆盖：voice/rate/pitch/volume/speed 可由调用方按请求
+        传入（编辑 Agent 换音色的生效链），缺省回落实例配置。"""
+        speed = kwargs.get("speed")
+        rate = kwargs.get("rate")
+        if rate is None and speed:
+            # 语速倍率 → edge 调整串（1.0 → +0%，0.5-2.0）
+            rate = f"{round((float(speed) - 1.0) * 100):+d}%"
+        return {
+            "voice": kwargs.get("voice") or self.voice,
+            "rate": rate or self.rate,
+            "volume": kwargs.get("volume") or self.volume,
+            "pitch": kwargs.get("pitch") or self.pitch,
+        }
+
     async def synthesize(self, text: str, **kwargs) -> bytes:
         """
         合成语音（长文本按句切块逐段合成、MP3 字节按序拼接）
 
         Args:
             text: 要合成的文本
+            **kwargs: voice/rate/pitch/volume/speed 请求级覆盖
 
         Returns:
             bytes: MP3 格式的音频数据
@@ -133,13 +149,14 @@ class EdgeTTS(TTSBase):
         if not self.validate_text(text):
             return b""
         text = self.sanitize_text(text)
+        params = self._request_params(**kwargs)
 
         try:
             chunks = split_text_for_tts(text)
             audio_data = b""
             for i, chunk in enumerate(chunks):
                 try:
-                    audio_data += await self._communicate_audio(chunk)
+                    audio_data += await self._communicate_audio(chunk, **params)
                 except Exception as e:
                     # 单段失败跳过，不拖垮整篇（长文切换比整体失败好）
                     self._logger.warning("EdgeTTS 第 %d/%d 段合成失败: %s", i + 1, len(chunks), e)
@@ -151,12 +168,13 @@ class EdgeTTS(TTSBase):
             self._logger.error("EdgeTTS 合成失败: %s", e)
             return b""
 
-    async def synthesize_stream(self, text: str) -> typing.AsyncGenerator[bytes, None]:
+    async def synthesize_stream(self, text: str, **kwargs) -> typing.AsyncGenerator[bytes, None]:
         """
         流式合成语音（长文本按句切块，逐段流式下发）
 
         Args:
             text: 要合成的文本
+            **kwargs: voice/rate/pitch/volume/speed 请求级覆盖
 
         Yields:
             bytes: 音频数据块
@@ -168,16 +186,17 @@ class EdgeTTS(TTSBase):
         if not self.validate_text(text):
             return
         text = self.sanitize_text(text)
+        params = self._request_params(**kwargs)
 
         try:
             for chunk_text in split_text_for_tts(text):
                 # 创建 Communicate 对象
                 communicate = self._edge_tts.Communicate(
                     text=chunk_text,
-                    voice=self.voice,
-                    rate=self.rate,
-                    volume=self.volume,
-                    pitch=self.pitch,
+                    voice=params["voice"],
+                    rate=params["rate"],
+                    volume=params["volume"],
+                    pitch=params["pitch"],
                 )
 
                 # 流式合成音频

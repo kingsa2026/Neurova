@@ -424,13 +424,19 @@
           <span>{{ retrievalStatus }}</span>
         </div>
         <!-- Composer 一体化外壳（参考图：textarea + 工具条同框，玻璃容器承载边框） -->
-        <div class="nr-composer-shell" :class="{ 'is-focus': composerFocused }">
+        <div class="nr-composer-shell" :class="{ 'is-focus': composerFocused, 'has-queue-cards': messageQueue.items.length > 0, 'is-editing-queued': !!editingQueuedId }">
+          <!-- 顶入卡片（DeepSeek 截图对齐）：composer 内嵌消息队列 -->
+          <QueuedMessageCards
+            :editing-queued-id="editingQueuedId"
+            @send-now="sendQueuedNow"
+            @edit="startQueuedEdit"
+          />
           <div class="nr-input-row">
           <textarea
             ref="textareaRef"
             v-model="inputText"
             class="nr-chat-textarea"
-            :placeholder="isRecording ? t('chat.recording') : t('chat.placeholder')"
+            :placeholder="queuedPlaceholder"
             rows="1"
             @compositionstart="onCompositionStart"
             @compositionend="onCompositionEnd"
@@ -582,11 +588,13 @@
             </div>
             <button
               class="nr-composer-send"
+              :class="{ 'is-confirm': !!editingQueuedId }"
               :disabled="(!inputText.trim() && pendingFiles.length === 0 && !isStreaming) || !isSendLockOwner"
-              :title="!isSendLockOwner ? t('chat.anotherTabSending') : (isStreaming ? t('chat.stop') : t('chat.send'))"
-              @click="isStreaming ? stopStreaming() : sendMessage()"
+              :title="editingQueuedId ? t('common.confirm') : (!isSendLockOwner ? t('chat.anotherTabSending') : (isStreaming ? t('chat.stop') : t('chat.send')))"
+              @click="editingQueuedId ? commitQueuedEdit() : (isStreaming ? stopStreaming() : sendMessage())"
             >
-              <svg v-if="isStreaming" class="nr-ico nr-ico--send" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
+              <svg v-if="isStreaming && !editingQueuedId" class="nr-ico nr-ico--send" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
+              <svg v-else-if="editingQueuedId" class="nr-ico nr-ico--send" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
               <svg v-else class="nr-ico nr-ico--send" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
             </button>
           </div>
@@ -616,49 +624,6 @@
           ⚠ {{ t('chat.eventsLost', { n: eventsLostBanner }) }}
         </span>
         <button class="nr-rate-limit-dismiss" @click="eventsLostBanner = null">✕</button>
-      </div>
-
-      <!-- 消息队列提示（补课 P3-b）：流式中的排队发送 -->
-      <div v-if="messageQueue.items.length > 0" class="nr-msg-queue">
-        <span class="nr-msg-queue-count">
-          {{ t('chat.queued', { n: messageQueue.pendingCount }) }}
-        </span>
-        <span
-          v-for="qi in messageQueue.items"
-          :key="qi.id"
-          class="nr-msg-queue-item"
-          :title="qi.status === 'failed' ? qi.error : qi.text"
-        >
-          <span class="nr-msg-queue-text">{{ qi.text.slice(0, 40) }}</span>
-          <span class="nr-msg-queue-status" :class="qi.status">{{ qi.status }}</span>
-          <button
-            v-if="qi.status === 'pending' && messageQueue.items[0]?.id !== qi.id"
-            class="nr-msg-queue-act"
-            :title="t('chat.queueTop')"
-            @click="messageQueue.moveToTop(qi.id)"
-          >↑</button>
-          <button
-            v-if="qi.status === 'pending'"
-            class="nr-msg-queue-act"
-            :title="t('common.edit')"
-            @click="editQueuedItem(qi)"
-          >✎</button>
-          <button
-            v-if="qi.status === 'failed'"
-            class="nr-msg-queue-act"
-            :title="t('chat.retry')"
-            @click="messageQueue.retry(qi.id); drainMessageQueue()"
-          >↻</button>
-          <button
-            v-if="qi.status !== 'sending'"
-            class="nr-msg-queue-act"
-            :title="t('common.delete')"
-            @click="messageQueue.remove(qi.id)"
-          >✕</button>
-        </span>
-        <button class="nr-msg-queue-clear" @click="messageQueue.clear()">
-          {{ t('common.clear') }}
-        </button>
       </div>
       </div>
 
@@ -874,6 +839,7 @@ import GlassInput from '@/components/GlassInput.vue'
 import SubAgentPanel, { type SubAgentWindowState } from '@/components/chat/SubAgentPanel.vue'
 import ComputerUsePanel from '@/components/chat/ComputerUsePanel.vue'
 import ContextUsageIndicator from '@/components/chat/ContextUsageIndicator.vue'
+import QueuedMessageCards from '@/components/chat/QueuedMessageCards.vue'
 import CrossSessionSearch from '@/components/chat/CrossSessionSearch.vue'
 import { useComputerPanel, isComputerTool, } from '@/composables/useComputerPanel'
 import { toolCardVariant, variantIcon, variantColor } from '@/utils/toolCardVariant'
@@ -1949,11 +1915,67 @@ async function toggleCheckpoint(msg: ChatMessage): Promise<void> {
 // ---------------------------------------------------------------------------
 // Message Sending with SSE Streaming
 // ---------------------------------------------------------------------------
-/** 队列项就地编辑（补课 A3；prompt 简化——QP 用内联输入，语义一致）。 */
-function editQueuedItem(qi: { id: string; text: string }): void {
-  const next = window.prompt(t('chat.queueEdit'), qi.text)
-  if (next !== null && next.trim()) messageQueue.updateText(qi.id, next)
+/**
+ * 顶入编辑态（DeepSeek 截图对齐）：✎ 把排队文案回填 composer 就地改，
+ * 完成前该卡片高亮、placeholder 提示"修改后回车顶入"；Esc/删除卡片即取消。
+ */
+const editingQueuedId = ref<string | null>(null)
+
+const queuedPlaceholder = computed(() => {
+  if (isRecording.value) return t('chat.recording')
+  if (editingQueuedId.value) return t('chat.queueEditInline')
+  return t('chat.placeholder')
+})
+
+/** ✎ 重新编辑顶入内容：文案回填输入框（进入编辑态，卡片高亮）。 */
+function startQueuedEdit(item: { id: string; text: string }): void {
+  editingQueuedId.value = item.id
+  chatStore.setInputText(item.text)
+  nextTick(() => {
+    textareaRef.value?.focus()
+    autoResize()
+  })
 }
+
+/** 编辑态下提交：改写队列文案并退出编辑态（不改排队位次）。 */
+function commitQueuedEdit(): boolean {
+  const id = editingQueuedId.value
+  if (!id) return false
+  const text = inputText.value.trim()
+  if (text) messageQueue.updateText(id, text)
+  editingQueuedId.value = null
+  chatStore.setInputText('')
+  return true
+}
+
+/** 取消顶入编辑：还原原文案回卡片，清空输入框退出编辑态。 */
+function cancelQueuedEdit(): void {
+  editingQueuedId.value = null
+  chatStore.setInputText('')
+  nextTick(() => textareaRef.value?.focus())
+}
+
+/** 「↑ 立即」：指定排队项插到队首。空闲则立即续发；流式中只置顶
+ * （drain 会被 sendMessage 的流式入队分支吃掉，必须等当前轮 done 续发）。 */
+function sendQueuedNow(id: string): void {
+  messageQueue.moveToTop(id)
+  if (isStreaming.value || _draining.value) {
+    uiMessage.info(t('chat.queueTopAuto'))
+    return
+  }
+  void drainMessageQueue()
+}
+
+// 编辑目标被删除/出队 → 自动退出编辑态（防悬挂高亮与错误 placeholder）
+watch(
+  () => editingQueuedId.value && messageQueue.items.some((i) => i.id === editingQueuedId.value),
+  (exists) => {
+    if (editingQueuedId.value && !exists) {
+      editingQueuedId.value = null
+      chatStore.setInputText('')
+    }
+  },
+)
 
 /**
  * 429 限流识别与横幅（补课 A1）：错误文本含 429/rate limit 措辞时，
@@ -1991,6 +2013,8 @@ async function drainMessageQueue(): Promise<void> {
   _draining.value = true
   try {
     if (!messageQueue.markSending(item.id)) return
+    // drain 要占用输入框通道传文案，编辑中的草稿先退出（防覆盖/误提交）
+    if (editingQueuedId.value) cancelQueuedEdit()
     chatStore.setInputText(item.text)
     try {
       // BUG-21 修复：sendMessage 原先吞掉一切错误恒不抛——catch 死代码，
@@ -2619,7 +2643,9 @@ async function synthesizeTTS(msg: ChatMessage) {
         // 语音预处理：代码/网址/图片/视频改为"以下是…"播报提示；
         // 字数上限已取消（后端引擎分句切块合成）
         text: prepareSpeechText(msg.content),
-        speed: 1.0,
+        // 编辑 Agent 换音色的生效链：当前 Agent 配置的音色/语速随请求透传
+        voice: currentAgent?.value?.config?.ttsVoice || undefined,
+        speed: currentAgent?.value?.config?.ttsSpeed || 1.0,
         format: 'wav',
       }),
     })
@@ -2949,6 +2975,20 @@ const { onCompositionStart, onCompositionEnd, shouldBlockSend } = useIMEComposit
 function handleKeydown(e: KeyboardEvent) {
   // 斜杠命令面板键盘导航（↑↓/Enter/Tab/Esc），打开时独占按键
   if (onSlashKeydown(e)) return
+  // 顶入编辑态（DeepSeek 截图对齐）：Enter=提交改写，Esc=取消还原
+  if (editingQueuedId.value) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      if (shouldBlockSend(e)) return
+      e.preventDefault()
+      commitQueuedEdit()
+      return
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      cancelQueuedEdit()
+      return
+    }
+  }
   if (e.key === 'Enter' && !e.shiftKey) {
     // IME 合成防误发（补课 A）：输入法选词回车不发送
     if (shouldBlockSend(e)) return
@@ -3069,7 +3109,12 @@ function startStreamTTS(): void {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ text, speed: 1.0 }),
+        body: JSON.stringify({
+          text,
+          // 当前 Agent 音色/语速（换音色生效链）
+          voice: currentAgent?.value?.config?.ttsVoice || undefined,
+          speed: currentAgent?.value?.config?.ttsSpeed || 1.0,
+        }),
         signal,
       })
       if (!resp.ok) throw new Error(`TTS ${resp.status}`)
@@ -3116,7 +3161,12 @@ function getToolAnnouncer(): SpeechAnnouncer | null {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ text, speed: 1.0 }),
+        body: JSON.stringify({
+          text,
+          // 当前 Agent 音色/语速（换音色生效链）
+          voice: currentAgent?.value?.config?.ttsVoice || undefined,
+          speed: currentAgent?.value?.config?.ttsSpeed || 1.0,
+        }),
       })
       if (!resp.ok) throw new Error(`TTS ${resp.status}`)
       return resp.blob()
@@ -5020,54 +5070,16 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.nr-msg-queue {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 8px;
-  font-size: 12px;
-}
-
-.nr-msg-queue-count {
-  color: var(--nr-text-secondary);
-}
-
-.nr-msg-queue-act {
-  border: none;
-  background: none;
-  color: var(--nr-text-tertiary);
-  cursor: pointer;
-  padding: 0 2px;
-  font-size: 11px;
-}
-
-.nr-msg-queue-act:hover {
-  color: var(--nr-text-primary);
-}
-
-.nr-msg-queue-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
-  border-radius: 8px;
+/* 顶入卡片态：composer 内嵌队列时 textarea 区域收进内框（对齐截图） */
+.nr-composer-shell.has-queue-cards .nr-input-row {
   border: 1px solid var(--nr-glass-border);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--nr-text-primary);
-  cursor: pointer;
+  border-radius: 12px;
+  padding: 0 6px;
+  transition: border-color 0.25s;
 }
 
-.nr-msg-queue-item .nr-msg-queue-status.pending { color: var(--nr-text-tertiary); }
-.nr-msg-queue-item .nr-msg-queue-status.sending { color: #6366f1; }
-.nr-msg-queue-item .nr-msg-queue-status.failed { color: #ef4444; }
-
-.nr-msg-queue-clear {
-  border: none;
-  background: none;
-  color: var(--nr-text-tertiary);
-  cursor: pointer;
-  font-size: 12px;
+.nr-composer-shell.has-queue-cards.is-editing-queued .nr-input-row {
+  border-color: var(--nr-primary);
 }
 
 .nr-msg-search {
