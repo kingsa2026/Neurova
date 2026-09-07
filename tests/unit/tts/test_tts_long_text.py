@@ -1,18 +1,17 @@
 """
-TTS 长文本根因测试（2026-09-01）
+TTS 长文本契约测试（2026-09-07 更新：**取消字数上限**）
 
-根因: user 1727 字回复 TTS 500。
-链: TTSBase.validate_text 对 >1000 字符**整体拒绝**(日志"将被截断"是假截断,
- 实际直接 return False) → EdgeTTS 返回 b"" → manager fallback:
- sapi5(缺 comtypes) → mock(同样拒收) → 所有 fallback 引擎合成失败 → 500。
+历史: 09-01 user 1727 字回复 TTS 500（>1000 整体拒绝）→ 改真截断 2000。
+2026-09-07 用户要求 TTS **不限字数**（流式/非流式都不要限制）：
+- sanitize_text 只清洗不截断（长文本由引擎内部按句切块合成）;
+- EdgeTTS 对超长文本按句切块逐段合成、MP3 字节拼接;
+- moss-nano 内部已有 75 token/块流水线切块, 天然支持任意长度。
 
 契约:
-1. sanitize_text: 超限文本**真正截断**后可通过(不再整体拒绝);
-   max_text_length 属性可配置(默认 2000, 覆盖 edge-tts 长文能力);
-2. validate_text 仅校验非空(长度处理前置于 sanitize);
-3. 引擎级: MockTTS 对 1727 字文本 synthesize 返回非空 WAV(b'RIFF' 头);
-4. EdgeTTS 属于网络引擎(不在此单测访问网络), 但其入库文本经 sanitize 后
-   不受 1000 上限拒绝。
+1. sanitize_text: 只剥控制字符, 不截断（3000/10000 字原样保留）;
+2. validate_text 仅校验非空;
+3. 引擎级: MockTTS 长文本 synthesize 返回非空 WAV;
+4. EdgeTTS 长文本: 分句切块逐段合成后拼接（离线单测, fake 通信对象）。
 """
 
 import pytest
@@ -36,19 +35,26 @@ class _ProbeTTS(TTSBase):
         self._initialized = False
 
 
-def test_sanitize_truncates_instead_of_rejecting():
+def test_sanitize_never_truncates():
+    """sanitize_text 只清洗不截断：任意长度原样保留（字数上限取消）。"""
     tts = _ProbeTTS()
-    # 1727 字在上限(2000)内: 不再被整体拒绝, 原样返回
-    long_text = "x" * 1727
+    long_text = "长" * 3000
     sanitized = tts.sanitize_text(long_text)
-    assert sanitized == long_text
+    assert sanitized == long_text, "3000 字不得被截断"
+
+    huge_text = "字" * 10000
+    assert tts.sanitize_text(huge_text) == huge_text, "10000 字不得被截断"
     assert tts.validate_text(sanitized) is True
 
-    # 真正超限: 截断到上限
-    huge_text = "y" * 3000
-    cut = tts.sanitize_text(huge_text)
-    assert len(cut) == tts.max_text_length
-    assert cut == huge_text[: tts.max_text_length]
+
+def test_sanitize_strips_control_chars():
+    """控制字符仍剥离（\\r 归一为 \\n），换行/制表保留。"""
+    tts = _ProbeTTS()
+    text = "你好\x00\x01世界\r\n第二行\t制表"
+    sanitized = tts.sanitize_text(text)
+    assert "\x00" not in sanitized and "\x01" not in sanitized
+    assert "\r" not in sanitized
+    assert "\n" in sanitized and "\t" in sanitized
 
 
 def test_validate_only_checks_nonempty():
@@ -63,4 +69,73 @@ async def test_mock_tts_synthesizes_long_text():
     engine = MockTTSSimple()
     assert await engine.initialize()
     audio = await engine.synthesize("长" * 1727)
-    assert audio[:4] == b"RIFF", "mock 引擎对长文本应返回 WAV(截断后合成), 而非空字节"
+    assert audio[:4] == b"RIFF", "mock 引擎对长文本应返回 WAV, 而非空字节"
+
+
+# ---- EdgeTTS 长文本分句拼接（离线 fake，不打网络） ----
+
+
+def _split_sentences_for_tts(text: str, max_len: int):
+    """被测函数：从 edge_tts 导入（新契约）。
+
+    这里间接引用——实现落在 neurova.tts.edge_tts 模块级，
+    便于不启动 onnxruntime 的纯单测。
+    """
+    from neurova.tts.edge_tts import split_text_for_tts
+
+    return split_text_for_tts(text, max_len)
+
+
+def test_edge_split_text_by_sentence():
+    """长文本按句边界切块：块不超 max_len，不把句子拦腰截断。"""
+    text = "这是第一句话。这是第二句话！这是第三句话？" + "填充内容，" * 200
+    chunks = _split_sentences_for_tts(text, 200)
+    assert len(chunks) > 1
+    assert all(len(c) <= 400 for c in chunks), "块内允许略超（单句超长时保句完整），但不得失控"
+    joined = "".join(chunks)
+    # 拼接还原（允许清洗差异）：所有句子边界标点必须保留
+    for marker in ("这是第一句话。", "这是第二句话！", "这是第三句话？"):
+        assert marker in joined
+
+
+def test_edge_split_short_text_single_chunk():
+    """短文本单块原样返回。"""
+    chunks = _split_sentences_for_tts("你好世界。", 200)
+    assert chunks == ["你好世界。"]
+
+
+@pytest.mark.asyncio
+async def test_edge_tts_long_text_concat(monkeypatch):
+    """EdgeTTS 对超长文本分句逐段合成后拼接；单段失败跳过不拖垮整体。"""
+    from neurova.tts.edge_tts import EdgeTTS
+
+    engine = EdgeTTS()
+    engine._initialized = True
+    engine._edge_tts = object()  # 不走真 Communicate
+
+    calls: list[str] = []
+
+    class _FakeStream:
+        def __init__(self, tag):
+            self._tag = tag
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if not getattr(self, "_sent", False):
+                self._sent = True
+                return {"type": "audio", "data": self._tag.encode()}
+            raise StopAsyncIteration
+
+    class _FakeCommunicate:
+        def __init__(self, text, voice=None, rate=None, volume=None):
+            calls.append(text)
+            self.stream = lambda: _FakeStream(f"[{len(calls)}]")
+
+    monkeypatch.setattr(engine, "_edge_tts", type("M", (), {"Communicate": _FakeCommunicate}))
+
+    long_text = "这是第一句话。这是第二句话！" + "继续填充的内容，用来撑长文本。" * 200
+    audio = await engine.synthesize(long_text)
+    assert len(calls) > 1, "长文本必须分句多次合成"
+    assert audio == b"".join(f"[{i}]".encode() for i in range(1, len(calls) + 1)), "按序拼接各段 MP3"

@@ -23,9 +23,9 @@ class TTSBase(ABC):
         """初始化 TTS 引擎"""
         self._initialized = False
         self._logger = logging.getLogger(self.__class__.__name__)
-        # 单次合成文本上限(edge-tts 可处理 ~3000 字; 原 1000 过保守,
-        # 且超限会被 validate_text 整体拒绝而非截断 → 长回复 TTS 500 根因)
-        self.max_text_length = 2000
+        # 字数上限已取消（2026-09-07）：长文本由引擎内部分句切块合成。
+        # 保留属性供引擎自行声明内部块大小（如 moss 的 token 预算）。
+        self.max_text_length: int | None = None
 
     @property
     def is_initialized(self) -> bool:
@@ -76,16 +76,14 @@ class TTSBase(ABC):
         ...
 
     def sanitize_text(self, text: str) -> str:
-        """清洗/截断文本: 超限**真正截断**(整体拒绝曾导致长回复 TTS 500),
-        并剥离控制字符(换行保留)。"""
+        """清洗文本：剥离控制字符（\r 归一 \n），**不截断**。
+
+        字数上限已取消（2026-09-07 用户要求不限字数）：长文本由引擎
+        内部按句切块合成——moss-nano 75 token/块流水线、edge-tts 分句
+        拼接。此前的截断/整体拒绝都曾把长回复变成静默丢字。
+        """
         text = (text or "").replace("\r", "\n")
-        text = "".join(ch for ch in text if ch == "\n" or ch == "\t" or not (ord(ch) < 32 or ord(ch) == 127))
-        if len(text) > self.max_text_length:
-            self._logger.warning(
-                "文本过长: %s 字符，截断到 %s", len(text), self.max_text_length
-            )
-            return text[: self.max_text_length]
-        return text
+        return "".join(ch for ch in text if ch == "\n" or ch == "\t" or not (ord(ch) < 32 or ord(ch) == 127))
 
     def validate_text(self, text: str) -> bool:
         """
