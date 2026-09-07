@@ -825,7 +825,7 @@ import { useAgentStore } from '@/stores/agents'
 import { useChatStore } from '@/stores/chat'
 import { useMessageQueueStore } from '@/stores/messageQueue'
 import { useSessionSendLock } from '@/composables/useSessionSendLock'
-import { StreamTTSRunner, audioSourceFor, requireNonEmptyAudioBlob } from '@/composables/useStreamTTS'
+import { StreamTTSRunner, audioSourceFor, requireNonEmptyAudioBlob, prepareSpeechText, createSpeechAnnouncer, toolAnnouncementText, type SpeechAnnouncer } from '@/composables/useStreamTTS'
 import { useTtsAudioGate } from '@/composables/useTtsAudioGate'
 import { isDefaultChatTitle } from '@/utils/sessionTitle'
 import { useRouter } from 'vue-router'
@@ -2205,6 +2205,8 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       })
       // legacy compat
       msg.toolCall = msg.toolCalls[msg.toolCalls.length - 1]
+      // 自动语音：工具/命令执行播报提示（独立分轨，不打断正文）
+      toolAnnouncer?.announce(toolAnnouncementText(String(event.name || event.tool_name || '')))
       // SSE 兜底：电脑/浏览器工具调用即开分屏（主通道为 WS computer_action）
       if (isComputerTool(event.name || event.tool_name || '')) {
         computerPanel.handleToolCall(String(event.name || event.tool_name))
@@ -2520,7 +2522,9 @@ async function synthesizeTTS(msg: ChatMessage) {
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        text: msg.content.replace(/[*`#\[\]()]/g, '').slice(0, 5000),
+        // 语音预处理：代码/网址/图片/视频改为"以下是…"播报提示；
+        // 字数上限已取消（后端引擎分句切块合成）
+        text: prepareSpeechText(msg.content),
         speed: 1.0,
         format: 'wav',
       }),
@@ -3002,6 +3006,30 @@ function startStreamTTS(): void {
 }
 
 let streamingTtsMsg: ChatMessage | null = null
+
+// 工具调用语音提示（独立分轨，不进正文流式队列）
+let toolAnnouncer: SpeechAnnouncer | null = null
+
+function getToolAnnouncer(): SpeechAnnouncer | null {
+  if (!ttsAvailable.value) return null
+  if (!toolAnnouncer) {
+    toolAnnouncer = createSpeechAnnouncer(async (text) => {
+      const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
+      const token = secureStorage.get('auth_token')
+      const resp = await fetch(`${baseUrl}/audio/synthesize-stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ text, speed: 1.0 }),
+      })
+      if (!resp.ok) throw new Error(`TTS ${resp.status}`)
+      return resp.blob()
+    }, { enabled: () => autoVoice.value && ttsAvailable.value })
+  }
+  return toolAnnouncer
+}
 
 /** 开启一轮流式语音（autoVoice 开启时在发起对话时调用）。 */
 function beginStreamTTS(msg: ChatMessage): void {
