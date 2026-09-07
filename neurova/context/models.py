@@ -83,3 +83,5 @@ class ContextBuildResult:
     memory_count: int
     history_count: int
     stats: Dict[str, Any]
+    # 批次 A：末条 user 消息中瞬态信封的 token 数（system 侧恒定不含信封）
+    envelope_tokens: int = 0
