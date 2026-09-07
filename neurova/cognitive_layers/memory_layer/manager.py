@@ -434,7 +434,45 @@ class MemoryManager:
             conn.commit()
             conn.close()
         except Exception as e:
-            logger.debug("Persist memory failed: %s", e)
+            # 2026-09-07 修复（audit SUB-P2-18）：原 DEBUG 级吞掉 = 重启静默
+            # 丢记忆且无从排查；升级 WARNING 并重试一次（写竞争场景）
+            logger.warning("Persist memory failed (id=%s): %s", mem.id, e)
+            try:
+                conn = sqlite3.connect(self._persist_db_path, timeout=5.0)
+                conn.execute("PRAGMA busy_timeout=4000")
+                conn.execute(
+                    """INSERT OR REPLACE INTO memories
+                       (id, content, memory_type, category, lifecycle_stage, perspective, origin, emotion,
+                        temperature, importance, access_count, metadata, agent_id, neuser_id, user_id,
+                        shared, created_at, updated_at, last_accessed_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        mem.id,
+                        mem.content,
+                        mem.memory_type.value,
+                        mem.category.value,
+                        mem.lifecycle_stage.value,
+                        mem.perspective.value,
+                        mem.origin.value,
+                        mem.emotion.value,
+                        mem.temperature,
+                        mem.importance,
+                        mem.access_count,
+                        json.dumps(mem.metadata, ensure_ascii=False),
+                        mem.agent_id,
+                        mem.neuser_id,
+                        mem.user_id,
+                        int(mem.shared),
+                        mem.created_at.isoformat(),
+                        mem.updated_at.isoformat(),
+                        mem.last_accessed_at.isoformat() if mem.last_accessed_at else None,
+                    ),
+                )
+                conn.commit()
+                conn.close()
+                logger.warning("Persist memory retry succeeded (id=%s)", mem.id)
+            except Exception as e2:
+                logger.error("Persist memory retry failed (id=%s): %s", mem.id, e2)
 
     def _delete_persisted_memory(self, memory_id: str):
         """从 SQLite 删除持久化记忆
@@ -952,6 +990,12 @@ class MemoryManager:
                 mem.category = (
                     MemoryCategory(kwargs["category"]) if isinstance(kwargs["category"], str) else kwargs["category"]
                 )
+            if "metadata" in kwargs and isinstance(kwargs["metadata"], dict):
+                # 2026-09-07 修复（audit SUB-P1-15）：状态流转（如反思日志
+                # applied/validated）需要更新 metadata，否则重启后回退旧状态
+                merged = dict(mem.metadata or {})
+                merged.update(kwargs["metadata"])
+                mem.metadata = merged
             if "lifecycle_stage" in kwargs:
                 stage_val = kwargs["lifecycle_stage"]
                 if isinstance(stage_val, str):

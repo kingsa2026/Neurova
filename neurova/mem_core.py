@@ -649,7 +649,17 @@ class MemCore:
                     name="embedding-engine-warmup",
                 )
                 asyncio_thread.start()
-                asyncio_thread.join(timeout=90)
+                # 2026-09-07 根因修复（audit SUB-P2-20）：原 join(timeout=90)
+                # 在 uvicorn 事件循环线程上最长冻结 90 秒（模型加载慢时全部
+                # 请求无响应）。改为短轮询就绪标志：warmup 在后台跑，本线程
+                # 最多等 5 秒，超时后由懒加载兜底（encode 内部自初始化）。
+                deadline = __import__("time").monotonic() + 5.0
+                while (
+                    not getattr(encoder_engine, "is_initialized", False)
+                    and asyncio_thread.is_alive()
+                    and __import__("time").monotonic() < deadline
+                ):
+                    asyncio_thread.join(timeout=0.2)
 
             # 专家定义对齐 memories 表真实 schema（此前 is_crystallized 列不存在，
             # L0 SQL 必然异常返回空）。category 取值来自 MemoryCategory 枚举。

@@ -681,17 +681,18 @@ class SessionSyncManager:
             return False
 
     def update_heartbeat(self, session_id: str, channel_type: str) -> bool:
-        """更新渠道心跳"""
-        session = self._sessions.get(session_id)
-        if not session:
+        """更新渠道心跳（补锁：_sessions 与清理线程并发）"""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return False
+
+            conn = session.active_channels.get(channel_type)
+            if conn:
+                conn.update_heartbeat()
+                return True
+
             return False
-
-        conn = session.active_channels.get(channel_type)
-        if conn:
-            conn.update_heartbeat()
-            return True
-
-        return False
 
     # -----------------------------------------------------------------------
     # 事件广播
@@ -856,12 +857,19 @@ class SessionSyncManager:
     # -----------------------------------------------------------------------
 
     def map_external_id(self, external_id: str, session_id: str):
-        """映射外部 ID 到会话 ID"""
-        self._external_mapping[external_id] = session_id
+        """映射外部 ID 到会话 ID
+
+        2026-09-07 修复（audit SUB-P2-16）：补锁——cleanup_expired_sessions
+        持锁迭代 _external_mapping.items() 时并发写入会 RuntimeError
+        "dictionary changed size during iteration" → create_session 500。
+        """
+        with self._lock:
+            self._external_mapping[external_id] = session_id
 
     def resolve_external_id(self, external_id: str) -> Optional[str]:
-        """解析外部 ID 到会话 ID"""
-        return self._external_mapping.get(external_id)
+        """解析外部 ID 到会话 ID（同上补锁，读时避开清理方的迭代窗口）"""
+        with self._lock:
+            return self._external_mapping.get(external_id)
 
     # -----------------------------------------------------------------------
     # 清理和维护
