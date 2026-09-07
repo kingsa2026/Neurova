@@ -554,6 +554,11 @@ class MOSSNanTTS(TTSBase):
         ref = self._load_audio_from_bytes(audio_bytes)
         if ref is None or len(ref) == 0:
             return None
+        # 静音守卫：_load_audio_from_bytes 失败时回 1 秒全零（len>0 会
+        # 漏过上面的判空）——静音编出的"音色"无意义，回退内置音色
+        if float(np.abs(ref).max()) < 1e-4:
+            logger.warning("参考音频为静音（加载失败或无声源），声音克隆降级为内置音色")
+            return None
         # 上限 ~8s（参考实现按句级 3~10s 参考）
         max_samples = 8 * self._sample_rate
         if len(ref) > max_samples:
@@ -742,6 +747,8 @@ class MOSSNanTTS(TTSBase):
         if not self.validate_text(text):
             return
 
+        # 与 synthesize 同清洗契约：控制字符剥离后再进分词器/切块
+        text = self.sanitize_text(text)
         text = self._normalize_text(text)
         if not text:
             return
