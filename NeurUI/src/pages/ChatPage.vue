@@ -139,8 +139,51 @@
           <div class="nr-msg-body">
             <!-- 钩子/检查点标记（ZCode checkpoint 对齐） -->
             <div v-if="msg.checkpoint" class="nr-msg-checkpoint-badge" :title="t('chat.checkpointSet')">⚓ {{ t('chat.checkpoint') }}</div>
-            <!-- Reasoning / Thinking Block -->
-            <div v-if="msg.reasoning" class="nr-msg-reasoning">
+            <!-- 流式状态条（三需求①）：理解→思考→工具→输出，进行中扫光 -->
+            <div v-if="msg.streaming" class="nr-stream-status" :data-phase="deriveStreamPhase(msg)">
+              <span class="nr-stream-status-icon">{{ streamPhaseMeta(deriveStreamPhase(msg)).icon }}</span>
+              <span class="nr-stream-status-label">{{ streamPhaseMeta(deriveStreamPhase(msg)).label }}</span>
+              <span class="nr-stream-status-shimmer" />
+            </div>
+
+            <!-- 步骤化时间轴（三需求②）：推理/工具按到达顺序成段，独立折叠 -->
+            <div v-if="msg.steps && msg.steps.length > 0" class="nr-steps-timeline">
+              <div
+                v-for="step in msg.steps"
+                :key="step.id"
+                class="nr-step-item"
+                :class="[`nr-step--${step.kind}`, { 'is-active': step.active, 'is-open': step.open }]"
+              >
+                <div class="nr-step-header" @click="toggleStep(msg.steps!, step.id)">
+                  <span class="nr-step-icon">{{ step.kind === 'reasoning' ? '🧠' : variantIcon(toolCardVariant(step.name)) }}</span>
+                  <span class="nr-step-title">{{ step.kind === 'reasoning' ? t('chat.stepThinking') : step.name }}</span>
+                  <span v-if="step.active" class="nr-step-badge is-running">{{ t('chat.stepRunning') }}</span>
+                  <span v-else-if="step.kind === 'tool'" class="nr-step-badge" :class="step.result ? 'is-done' : 'is-error'">
+                    {{ step.result ? t('chat.toolDone') : t('chat.stepNoResult') }}
+                  </span>
+                  <span v-if="stepDurationText(step)" class="nr-step-duration">{{ stepDurationText(step) }}</span>
+                  <span class="nr-step-toggle">{{ step.open ? '▾' : '▸' }}</span>
+                </div>
+                <div v-show="step.open" class="nr-step-body">
+                  <template v-if="step.kind === 'reasoning'">
+                    <div class="nr-step-reasoning">{{ step.text }}</div>
+                  </template>
+                  <template v-else>
+                    <pre class="nr-tool-args">{{ formatJSON(step.arguments) }}</pre>
+                    <div v-if="isBackgroundResult(step.result)" class="nr-tool-background">
+                      {{ t('chat.toolBackgroundHint') }}
+                    </div>
+                    <div v-if="step.result" class="nr-tool-result">
+                      <div class="nr-tool-result-header">{{ t('chat.toolResult') }}</div>
+                      <pre class="nr-tool-result-content">{{ step.result }}</pre>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+
+            <!-- Legacy reasoning block（旧消息无 steps 时兜底） -->
+            <div v-if="!msg.steps?.length && msg.reasoning" class="nr-msg-reasoning">
               <div class="nr-reasoning-header" @click="msg.reasoningOpen = !msg.reasoningOpen">
                 <span>💭 {{ t('chat.reasoning') }}</span>
                 <span class="nr-reasoning-toggle">{{ msg.reasoningOpen ? '▾' : '▸' }}</span>
@@ -150,9 +193,9 @@
               </div>
             </div>
 
-            <!-- Tool Call Block (collapsible, supports multi-round) -->
-            <template v-if="msg.toolCalls && msg.toolCalls.length > 0">
-              <div v-for="(tc, tcIdx) in msg.toolCalls" :key="tcIdx" class="nr-msg-tool-call">
+            <!-- Legacy tool call blocks（旧消息无 steps 时兜底，含历史兼容单工具） -->
+            <template v-if="!msg.steps?.length && legacyToolList(msg).length > 0">
+              <div v-for="(tc, tcIdx) in legacyToolList(msg)" :key="tcIdx" class="nr-msg-tool-call">
                 <div class="nr-tool-header" @click="msg.toolOpen = !msg.toolOpen">
                   <span class="nr-tool-icon">{{ variantIcon(toolCardVariant(tc.name)) }}</span>
                   <span class="nr-tool-name">{{ tc.name }}</span>
@@ -173,24 +216,6 @@
                 </div>
               </div>
             </template>
-            <!-- Legacy single tool call (backward compat) -->
-            <div v-else-if="msg.toolCall" class="nr-msg-tool-call">
-              <div class="nr-tool-header" @click="msg.toolOpen = !msg.toolOpen">
-                <span class="nr-tool-icon">{{ variantIcon(toolCardVariant(msg.toolCall.name)) }}</span>
-                <span class="nr-tool-name">{{ msg.toolCall.name }}</span>
-                <a-tag :color="msg.toolResult ? 'success' : variantColor(toolCardVariant(msg.toolCall.name))">
-                  {{ msg.toolResult ? t('chat.toolDone') : t('chat.toolCalling') }}
-                </a-tag>
-                <span class="nr-tool-toggle">{{ msg.toolOpen ? '▾' : '▸' }}</span>
-              </div>
-              <div v-show="msg.toolOpen">
-                <pre class="nr-tool-args">{{ formatJSON(msg.toolCall.arguments) }}</pre>
-                <div v-if="msg.toolResult" class="nr-tool-result">
-                  <div class="nr-tool-result-header">{{ t('chat.toolResult') }}</div>
-                  <pre class="nr-tool-result-content">{{ msg.toolResult }}</pre>
-                </div>
-              </div>
-            </div>
 
             <!-- Edit mode（编辑最后一条用户消息）：内联编辑框替换消息内容 -->
             <div v-if="isEditingMessage(absIdx(idx))" class="nr-msg-edit">
@@ -358,7 +383,7 @@
             </div>
 
             <!-- Streaming indicator -->
-            <div v-if="msg.streaming" class="nr-msg-streaming">
+            <div v-if="msg.streaming && !msg.content && !(msg.steps?.length)" class="nr-msg-streaming">
               <span class="nr-typing-dot" /><span class="nr-typing-dot" /><span class="nr-typing-dot" />
             </div>
           </div>
@@ -460,6 +485,8 @@
             <ContextUsageIndicator
               :usage="sessionUsage"
               :context-window="currentModelContextWindow"
+              :agent-id="agentId"
+              :session-id="currentSessionId"
             />
             <a-dropdown :trigger="['click']" placement="topRight">
               <button class="nr-composer-pill" :title="t('chat.thinkingEffort')">
@@ -857,6 +884,16 @@ import { useInputHistory } from '@/composables/useInputHistory'
 import { useIMEComposition } from '@/composables/useIMEComposition'
 import { isBackgroundResult } from '@/utils/toolCallStatus'
 import { findMessageMatches } from '@/utils/messageSearch'
+import {
+  appendReasoningStep,
+  appendToolStep,
+  attachToolResult,
+  finishAllSteps,
+  buildStepsFromHistory,
+  toggleStep,
+  deriveStreamPhase,
+  type ChatStep,
+} from '@/utils/chatSteps'
 import type { ThinkingEffort } from '@/composables/useThinkingEffort'
 import { useSessionSync } from '@/composables/useSessionSync'
 import { listModels } from '@/api/modules/models'
@@ -1409,6 +1446,39 @@ const renderedMessages = computed(() => {
  *  renderedMessages 是 slice 切片，deleteRoundAt 等用绝对下标索引）。 */
 function absIdx(windowIdx: number): number {
   return renderStart.value + windowIdx
+}
+
+// ── 流式状态条 + 步骤时间轴 helpers（2026-09-07 三需求①②） ─────────────
+
+/** 流式阶段 → 图标 + i18n 标签。 */
+function streamPhaseMeta(phase: ReturnType<typeof deriveStreamPhase>): { icon: string; label: string } {
+  switch (phase) {
+    case 'understanding':
+      return { icon: '📥', label: t('chat.phaseUnderstanding') }
+    case 'thinking':
+      return { icon: '🧠', label: t('chat.phaseThinking') }
+    case 'tool':
+      return { icon: '⚙️', label: t('chat.phaseTool') }
+    case 'output':
+      return { icon: '✍️', label: t('chat.phaseOutput') }
+  }
+}
+
+/** 段落耗时文案（"持续 N 秒"；未封口的活跃段按当前时刻计）。 */
+function stepDurationText(step: ChatStep): string {
+  if (!step.startedAt) return ''
+  const end = step.endedAt ?? Date.now()
+  const secs = Math.max(1, Math.round((end - step.startedAt) / 1000))
+  return t('chat.stepDuration', { n: secs })
+}
+
+/** 旧消息（无 steps）的兜底工具列表：toolCalls 优先，legacy 单工具次之。 */
+function legacyToolList(
+  msg: ChatMessage,
+): Array<{ name: string; arguments: string; result?: string }> {
+  if (msg.toolCalls && msg.toolCalls.length > 0) return msg.toolCalls
+  if (msg.toolCall) return [{ ...msg.toolCall, result: msg.toolResult }]
+  return []
 }
 
 watch(
@@ -2004,6 +2074,7 @@ async function sendMessage() {
     content: '',
     reasoning: '',
     reasoningOpen: false,
+    steps: [],
     toolCalls: [],
     toolOpen: false,
     streaming: true,
@@ -2188,14 +2259,16 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     }
 
     case 'reasoning':
-    case 'thinking':
-      msg.reasoning = (msg.reasoning || '') + (event.content || event.text || '')
-      // 首次收到思考内容时自动展开（用户手动折叠后不再打扰）
-      if (msg.reasoning && !msg.reasoningOpen && !msg.reasoningAutoOpened) {
-        msg.reasoningOpen = true
-        msg.reasoningAutoOpened = true
+    case 'thinking': {
+      const rText = event.content || event.text || ''
+      // 步骤化时间轴：推理按到达顺序成段（工具打断即封口，再次思考开新段）
+      if (rText) {
+        if (!msg.steps) msg.steps = []
+        appendReasoningStep(msg.steps, rText)
+        msg.reasoning = (msg.reasoning || '') + rText
       }
       break
+    }
 
     case 'tool_call':
       if (!msg.toolCalls) msg.toolCalls = []
@@ -2203,6 +2276,13 @@ function processSSEEvent(event: any, msg: ChatMessage) {
         name: event.name || event.tool_name || 'unknown',
         arguments: event.arguments || event.input || '',
       })
+      // 步骤化时间轴：工具段（尾部活跃推理段自动封口收起）
+      if (!msg.steps) msg.steps = []
+      appendToolStep(
+        msg.steps,
+        String(event.name || event.tool_name || 'unknown'),
+        String(event.arguments || event.input || ''),
+      )
       // legacy compat
       msg.toolCall = msg.toolCalls[msg.toolCalls.length - 1]
       // 自动语音：工具/命令执行播报提示（独立分轨，不打断正文）。
@@ -2215,17 +2295,21 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       }
       break
 
-    case 'tool_result':
+    case 'tool_result': {
+      const resultText = typeof event.result === 'string' ? event.result : JSON.stringify(event.result, null, 2)
       if (msg.toolCalls && msg.toolCalls.length > 0) {
         const last = msg.toolCalls[msg.toolCalls.length - 1]
-        last.result = typeof event.result === 'string' ? event.result : JSON.stringify(event.result, null, 2)
+        last.result = resultText
       }
+      // 步骤化时间轴：结果落到最近活跃工具段并封口
+      if (msg.steps) attachToolResult(msg.steps, resultText)
       // legacy compat
-      msg.toolResult = typeof event.result === 'string' ? event.result : JSON.stringify(event.result, null, 2)
+      msg.toolResult = resultText
       if (isComputerTool(event.name || '')) {
         computerPanel.markIdle()
       }
       break
+    }
 
     case 'approval_required': {
       // 治理 ASK: 弹出人工确认框（P0）
@@ -2256,6 +2340,8 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'chunk':
       // 回复内容开始 → 检索已结束，清空临时进度显示
       if (retrievalStatus.value) retrievalStatus.value = ''
+      // 步骤化时间轴：正文开始输出，封口一切仍活跃的推理/工具段
+      if (msg.steps?.some((s) => s.active)) finishAllSteps(msg.steps)
       msg.content += event.content || event.text || event.delta || ''
       // 补课：自动语音 → 流式文本增量喂入句子流水线
       if (autoVoice.value && streamTTSRunner && !streamTTSRunner.isFinished) {
@@ -2285,7 +2371,11 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'usage':
       // QwenPaw turn_usage 对齐:真实 token 用量入 store（per-session 累计）
       if (typeof event.total_tokens === 'number') {
-        chatStore.applyTurnUsage(activeStreamSessionId, {
+        // 2026-09-07 根因修复：新会话首轮流式时 activeStreamSessionId 为
+        // null（session_id 由后端 done 才回传），原实现把 usage 记到 null
+        // 键被 store 丢弃 → 环形用量图永不显示。usage 事件现已携带
+        // session_id（后端同批补上），优先采信。
+        chatStore.applyTurnUsage((event.session_id as string) || activeStreamSessionId, {
           prompt: Number(event.prompt_tokens || 0),
           completion: Number(event.completion_tokens || 0),
           total: Number(event.total_tokens || 0),
@@ -2297,6 +2387,8 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'done':
     case 'complete':
       msg.streaming = false
+      // 步骤化时间轴：整轮流收尾（活跃段全部封口收起）
+      if (msg.steps?.some((s) => s.active)) finishAllSteps(msg.steps)
       // 补课：流式语音会话收尾（滞留句 flush；回放列表定稿）
       if (autoVoice.value && streamTTSRunner) streamTTSRunner.end()
       // 补课 4.4 兜底：后端把 audio_url 附在 done 事件上（而非独立 audio 帧）
@@ -3113,7 +3205,8 @@ watch(
 )
 onMounted(() => void nextTick().then(() => renderMermaid(messagesRef.value)))
 
-function formatJSON(str: string): string {
+function formatJSON(str?: string): string {
+  if (!str) return ''
   try {
     return JSON.stringify(JSON.parse(str), null, 2)
   } catch {
@@ -4041,6 +4134,166 @@ onBeforeUnmount(() => {
 
 .nr-typing-dot:nth-child(2) { animation-delay: 0.2s; }
 .nr-typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* ── 流式状态条（三需求①）：阶段图标 + 文案 + 扫光，结束随 streaming 消失 ── */
+.nr-stream-status {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px 6px 10px;
+  margin: 4px 0 8px;
+  border-radius: 999px;
+  border: 1px solid var(--nr-border, rgba(128, 128, 128, 0.25));
+  background: var(--nr-bg-tertiary, rgba(120, 120, 140, 0.08));
+  overflow: hidden;
+  max-width: 100%;
+}
+
+.nr-stream-status-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+.nr-stream-status-label {
+  font-size: 12px;
+  color: var(--nr-text-secondary, #9aa0ac);
+  white-space: nowrap;
+}
+
+/* 扫光：一条高光从左到右掠过状态条；仅流式期间存在（v-if 随 streaming 消失） */
+.nr-stream-status-shimmer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(120, 170, 255, 0.18) 45%,
+    rgba(255, 255, 255, 0.22) 50%,
+    rgba(120, 170, 255, 0.18) 55%,
+    transparent 80%
+  );
+  background-size: 220% 100%;
+  animation: nr-shimmer 1.8s linear infinite;
+}
+
+@keyframes nr-shimmer {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
+}
+
+/* ── 步骤化时间轴（三需求②）：推理/工具按到达顺序，独立折叠 ─────────── */
+.nr-steps-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 8px;
+  position: relative;
+}
+
+.nr-step-item {
+  border: 1px solid var(--nr-border, rgba(128, 128, 128, 0.2));
+  border-radius: 10px;
+  background: var(--nr-bg-tertiary, rgba(120, 120, 140, 0.06));
+  overflow: hidden;
+}
+
+.nr-step-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  min-width: 0;
+}
+
+.nr-step-header:hover {
+  background: rgba(120, 170, 255, 0.07);
+}
+
+.nr-step-icon {
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.nr-step-title {
+  font-size: 12px;
+  color: var(--nr-text-secondary, #9aa0ac);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 活跃段标题扫光：文字渐变高光横扫（进行中语义，结束即灭） */
+.nr-step-item.is-active .nr-step-title {
+  background: linear-gradient(90deg, var(--nr-text-secondary, #9aa0ac) 35%, #cfe1ff 50%, var(--nr-text-secondary, #9aa0ac) 65%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: nr-step-shimmer 1.6s linear infinite;
+}
+
+@keyframes nr-step-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+.nr-step-badge {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  color: var(--nr-text-tertiary, #8a8f99);
+  background: rgba(128, 128, 140, 0.14);
+}
+
+.nr-step-badge.is-running {
+  color: #6aa5ff;
+  background: rgba(106, 165, 255, 0.14);
+}
+
+.nr-step-badge.is-done {
+  color: #67c23a;
+  background: rgba(103, 194, 58, 0.13);
+}
+
+.nr-step-badge.is-error {
+  color: #e6a23c;
+  background: rgba(230, 162, 60, 0.13);
+}
+
+.nr-step-duration {
+  font-size: 10px;
+  color: var(--nr-text-tertiary, #7a7f8a);
+  flex-shrink: 0;
+}
+
+.nr-step-toggle {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--nr-text-tertiary, #7a7f8a);
+  flex-shrink: 0;
+}
+
+.nr-step-body {
+  padding: 4px 10px 8px;
+  border-top: 1px dashed var(--nr-border, rgba(128, 128, 128, 0.15));
+}
+
+.nr-step-reasoning {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--nr-text-secondary, #9aa0ac);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow-y: auto;
+}
 
 @keyframes typing {
   0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
