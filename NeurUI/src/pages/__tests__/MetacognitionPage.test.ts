@@ -126,6 +126,42 @@ describe('MetacognitionPage V3 真数据契约', () => {
     expect(apiMocks.getCognitiveState).toHaveBeenCalledWith('a1')
   })
 
+  it('六卡统一三列网格：统计卡与负荷指标卡并入同一容器', async () => {
+    const wrapper = await mountPage()
+    const grid = wrapper.find('.stats-dashboard')
+    expect(grid.exists()).toBe(true)
+    expect(grid.text()).toContain('总条目数')
+    expect(grid.text()).toContain('负荷分数')
+    expect(grid.text()).toContain('响应耗时')
+    // 旧的四列 metrics-grid 独立容器不再存在
+    expect(wrapper.find('.metrics-grid').exists()).toBe(false)
+  })
+
+  it('by_type 为空时统一网格恰好六卡（两行 × 三列）', async () => {
+    apiMocks.getMetacognitionStats.mockResolvedValue({
+      code: 0,
+      data: { total_entries: 0, by_type: [], avg_confidence: 0, recent_trend: [] },
+    })
+    const wrapper = await mountPage()
+    const grid = wrapper.find('.stats-dashboard')
+    expect(grid.element.children.length).toBe(6)
+  })
+
+  it('百分比进度条改环形：环形示意 + 环心数值文字独立渲染', async () => {
+    const wrapper = await mountPage()
+    const grid = wrapper.find('.stats-dashboard')
+    const bars = grid.findAll('a-progress')
+    // 平均置信度 + 四张负荷指标卡，共 5 个环形
+    expect(bars.length).toBe(5)
+    bars.forEach((bar) => expect(bar.attributes('type')).toBe('circle'))
+    // 数值文字不依赖 antd 内部文本渲染，独立覆盖在环心
+    const ringValues = wrapper.findAll('.metric-ring-value')
+    expect(ringValues.length).toBe(4)
+    expect(wrapper.find('.stat-ring-value').text()).toBe('80%')
+    expect(grid.text()).toContain('50%')
+    expect(grid.text()).toContain('2500 ms')
+  })
+
   it('负荷四因子构成卡渲染 factors', async () => {
     const wrapper = await mountPage()
     expect(wrapper.text()).toContain('任务密度')
