@@ -19,10 +19,12 @@ MemorySkillExecutor 挂钩（交互式单条写入口）：
 """
 
 import sqlite3
+import time
+import uuid
 
 import pytest
 
-from neurova.memory.pending_memory import PendingMemoryStore
+from neurova.memory.pending_memory import PendingMemoryStore, _fingerprint
 from neurova.skills.builtin.memory_executor import MemorySkillExecutor
 from neurova.skills.executor import SkillResult
 
@@ -105,6 +107,133 @@ class TestPendingStore:
         assert len(done) == 1
         assert done[0]["status"] == "rejected"
         assert done[0]["decided_by"] == "admin1"
+
+    # ── 指纹状态机自洽（09-07 UNIQUE constraint 事故防回归）──────────
+
+    def test_propose_idempotent_and_tombstone_lifecycle(self, store):
+        """事故根因：propose 允许同指纹 pending 堆积，reject 盲改状态撞
+        单墓碑唯一索引（UNIQUE constraint failed: pending_memories.fingerprint）。
+
+        新状态机：同指纹未决行幂等回指（堆积不可达）→ 单条拒绝封存指纹
+        → 同内容再提议命中墓碑 rejected_before。"""
+        r1 = store.propose(content="同内容 A")
+        r2 = store.propose(content="同内容 A")
+        assert r1["id"] == r2["id"]  # 幂等回指，不再堆积
+        out = store.reject(r1["id"], rejected_by="admin")
+        assert out["status"] == "rejected"
+        with pytest.raises(ValueError):  # 已裁决行不可重复拒绝
+            store.reject(r1["id"], rejected_by="admin")
+        assert store.propose(content="同内容 A").get("rejected") is True
+        assert len(store.list_decisions(status="rejected")) == 1
+
+    def test_propose_returns_existing_pending_for_same_fingerprint(self, store):
+        """propose 命中已有未决指纹时回指既有记录，不无限堆积待审行。"""
+        first = store.propose(content="重复提议")
+        second = store.propose(content="重复提议")
+        assert second["id"] == first["id"]
+        assert len(store.list_pending()) == 1
+
+    def test_propose_normalized_fingerprint_dedup(self, store):
+        """归一化指纹（大小写/首尾空白）在未决态同样判重。"""
+        store.propose(content="大小写测试")
+        again = store.propose(content="  大小写测试  ")
+        assert len(store.list_pending()) == 1
+        assert again["content"] == "大小写测试"
+
+    def test_propose_after_confirm_allows_reproposal(self, store):
+        """confirmed 不是拒绝墓碑：同内容确认入库后允许再次提议。"""
+        r1 = store.propose(content="确认后再提")
+        store.confirm(r1["id"], lambda c, cat, mt: "mem_x")
+        r2 = store.propose(content="确认后再提")
+        assert r2.get("rejected") is not True
+        assert r2["status"] == "pending"
+
+    def test_migrate_legacy_pending_duplicates(self, tmp_path):
+        """存量库堆积的多条同指纹 pending（现场实况：8 pending + 1 墓碑）：
+        重开连接时自动收敛——墓碑指纹下残留 pending 删除，无墓碑堆积留最新
+        一条，此后 reject 不再撞唯一索引。"""
+        db = str(tmp_path / "legacy.db")
+        conn = sqlite3.connect(db)
+        conn.executescript(
+            """
+            CREATE TABLE pending_memories (
+                id TEXT PRIMARY KEY, content TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'general',
+                memory_type TEXT NOT NULL DEFAULT 'semantic',
+                source_sentence TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','confirmed','rejected')),
+                fingerprint TEXT NOT NULL, memory_id TEXT,
+                proposed_by TEXT NOT NULL DEFAULT '',
+                created_at REAL NOT NULL, decided_by TEXT, decided_at REAL, note TEXT
+            );
+            CREATE UNIQUE INDEX pending_memories_rejected_fp_idx
+                ON pending_memories (fingerprint) WHERE status = 'rejected';
+            """
+        )
+        fp = _fingerprint("堆积的历史提议")
+        ids = [str(uuid.uuid4()) for _ in range(3)]
+        for i, rid in enumerate(ids):
+            conn.execute(
+                "INSERT INTO pending_memories (id, content, status, fingerprint,"
+                " proposed_by, created_at) VALUES (?, '堆积的历史提议', 'pending', ?, 'u1', ?)",
+                (rid, fp, time.time() + i),
+            )
+        conn.commit()
+        conn.close()
+
+        s2 = PendingMemoryStore(db_path=db)  # 重开连接触发存量清洗
+        items = s2.list_pending()
+        assert len(items) == 1
+        assert items[0]["id"] == ids[-1]  # 保留最新一条
+        for rid in ids[:-1]:
+            assert s2.get(rid) is None  # 堆积行已收敛（内容由保留行代表）
+        s2.reject(ids[-1], rejected_by="admin")  # 不再撞索引
+        assert s2.get(ids[-1])["status"] == "rejected"
+
+    def test_migrate_pending_under_rejected_fingerprint_removed(self, tmp_path):
+        """现场形态：墓碑已存在，同指纹 pending 残留（旧行为下 reject 必炸）。
+        迁移后残留清除，墓碑保留，同内容再提议仍被封存。"""
+        db = str(tmp_path / "tombstone_legacy.db")
+        tomb_id = str(uuid.uuid4())
+        conn = sqlite3.connect(db)  # 用旧 schema 裸建库模拟存量现场
+        conn.executescript(
+            """
+            CREATE TABLE pending_memories (
+                id TEXT PRIMARY KEY, content TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'general',
+                memory_type TEXT NOT NULL DEFAULT 'semantic',
+                source_sentence TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending','confirmed','rejected')),
+                fingerprint TEXT NOT NULL, memory_id TEXT,
+                proposed_by TEXT NOT NULL DEFAULT '',
+                created_at REAL NOT NULL, decided_by TEXT, decided_at REAL, note TEXT
+            );
+            CREATE UNIQUE INDEX pending_memories_rejected_fp_idx
+                ON pending_memories (fingerprint) WHERE status = 'rejected';
+            """
+        )
+        conn.execute(
+            "INSERT INTO pending_memories (id, content, status, fingerprint,"
+            " proposed_by, created_at, decided_by, decided_at)"
+            " VALUES (?, '先拒后堆', 'rejected', ?, 'u1', ?, 'admin', ?)",
+            (tomb_id, _fingerprint("先拒后堆"), time.time(), time.time()),
+        )
+        conn.execute(
+            "INSERT INTO pending_memories (id, content, status, fingerprint,"
+            " proposed_by, created_at) VALUES ('stale-1', '先拒后堆', 'pending', ?, 'u1', ?)",
+            (_fingerprint("先拒后堆"), time.time()),
+        )
+        conn.commit()
+        conn.close()
+
+        s2 = PendingMemoryStore(db_path=db)
+        assert s2.list_pending() == []  # 墓碑指纹下残留清除
+        assert s2.get("stale-1") is None
+        tomb = s2.list_decisions(status="rejected")
+        assert len(tomb) == 1 and tomb[0]["id"] == tomb_id
+        assert s2.propose(content="先拒后堆").get("rejected") is True
 
 
 class TestExecutorHook:
