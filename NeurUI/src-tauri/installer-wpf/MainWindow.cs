@@ -294,13 +294,15 @@ namespace Neurova.Installer
                 Margin = new Thickness(0, 0, 0, 24),   // 视觉重心略上提
             };
 
-            // 品牌 Logo：原始尺寸 350x90 原样居中（不缩放）
+            // 品牌 Logo：等比缩放适配 350x90 设计位（Stretch.Uniform 不受源
+            // PNG DPI 元数据影响——Stretch.None 会按物理 DPI 放大导致右侧裁切）
             var logo = new Image
             {
-                Width = 350,
-                Height = 90,
-                Stretch = Stretch.None,
+                MaxWidth = 350,
+                MaxHeight = 90,
+                Stretch = Stretch.Uniform,
                 HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
             };
             try
             {
