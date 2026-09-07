@@ -243,7 +243,14 @@ class TTSManager:
             logger.info("Fallback 到: %s", engine_name)
             success = await self._initialize_engine(engine_name)
             if success:
-                result = await self._engine.synthesize(text, **kwargs)
+                # 异常=该引擎本轮失败，跳过继续链（与主路径 try/except 同契约）：
+                # 此前裸调，链中任一引擎抛错（如 kwarg 契约 TypeError）会中断
+                # 整条 fallback 链直接冒泡 500。
+                try:
+                    result = await self._engine.synthesize(text, **kwargs)
+                except Exception as e:
+                    logger.warning("Fallback 引擎 %s 合成失败: %s", engine_name, e)
+                    continue
                 if result:
                     return result
 
