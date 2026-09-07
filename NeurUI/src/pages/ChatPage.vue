@@ -2205,8 +2205,10 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       })
       // legacy compat
       msg.toolCall = msg.toolCalls[msg.toolCalls.length - 1]
-      // 自动语音：工具/命令执行播报提示（独立分轨，不打断正文）
-      toolAnnouncer?.announce(toolAnnouncementText(String(event.name || event.tool_name || '')))
+      // 自动语音：工具/命令执行播报提示（独立分轨，不打断正文）。
+      // 必须经 getToolAnnouncer() 惰性创建——直接判 toolAnnouncer 恒 null
+      // 是死接线（核验 2026-09-07 修复）。
+      getToolAnnouncer()?.announce(toolAnnouncementText(String(event.name || event.tool_name || '')))
       // SSE 兜底：电脑/浏览器工具调用即开分屏（主通道为 WS computer_action）
       if (isComputerTool(event.name || event.tool_name || '')) {
         computerPanel.handleToolCall(String(event.name || event.tool_name))
