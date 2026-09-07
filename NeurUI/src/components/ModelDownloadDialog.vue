@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch , onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import {
@@ -124,6 +124,7 @@ function stopPolling() {
     clearInterval(pollTimer)
     pollTimer = null
   }
+  onUnmounted(() => stopPolling())
 }
 
 async function start(item: PendingDownloadItem) {

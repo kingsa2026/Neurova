@@ -130,10 +130,10 @@
 
         <div
           v-for="(msg, idx) in renderedMessages"
-          :id="`nr-msg-${idx}`"
-          :key="idx"
+          :id="`nr-msg-${absIdx(idx)}`"
+          :key="absIdx(idx)"
           class="nr-msg"
-          :class="[`nr-msg--${msg.role}`, { 'nr-msg--hit': msgSearchHits.includes(idx) && idx === msgSearchCursor, 'nr-msg--checkpoint': msg.checkpoint }]"
+          :class="[`nr-msg--${msg.role}`, { 'nr-msg--hit': msgSearchHits.includes(absIdx(idx)) && absIdx(idx) === msgSearchCursor, 'nr-msg--checkpoint': msg.checkpoint }]"
         >
           <div class="nr-msg-avatar">{{ msg.role === 'user' ? '👤' : '🤖' }}</div>
           <div class="nr-msg-body">
@@ -193,7 +193,7 @@
             </div>
 
             <!-- Edit mode（编辑最后一条用户消息）：内联编辑框替换消息内容 -->
-            <div v-if="isEditingMessage(idx)" class="nr-msg-edit">
+            <div v-if="isEditingMessage(absIdx(idx))" class="nr-msg-edit">
               <textarea
                 v-model="editDraft"
                 class="nr-msg-edit-textarea"
@@ -293,7 +293,7 @@
             </div>
 
             <!-- Message footer: 时间 + 操作条（复制 / 点赞点踩 / 编辑 / 删除轮次） -->
-            <div v-if="!msg.streaming && !isEditingMessage(idx)" class="nr-msg-footer">
+            <div v-if="!msg.streaming && !isEditingMessage(absIdx(idx))" class="nr-msg-footer">
               <span v-if="displayTime(msg)" class="nr-msg-time">{{ displayTime(msg) }}</span>
               <span class="nr-msg-footer-spacer" />
               <button class="nr-msg-action" :title="t('chat.copy')" @click="copyMessage(msg)">⧉</button>
@@ -340,10 +340,10 @@
                   @click="toggleCheckpoint(msg)"
                 >⚓</button>
                 <button
-                  v-if="isLastUserMessage(idx)"
+                  v-if="isLastUserMessage(absIdx(idx))"
                   class="nr-msg-action"
                   :title="t('chat.editMessage')"
-                  @click="startEditMessage(idx)"
+                  @click="startEditMessage(absIdx(idx))"
                 >✎</button>
               </template>
               <a-popconfirm
@@ -351,7 +351,7 @@
                 :title="t('chat.deleteRoundConfirm')"
                 :ok-text="t('common.confirm')"
                 :cancel-text="t('common.cancel')"
-                @confirm="deleteRoundAt(idx)"
+                @confirm="deleteRoundAt(absIdx(idx))"
               >
                 <button class="nr-msg-action nr-msg-action--danger" :title="t('chat.deleteRound')">🗑</button>
               </a-popconfirm>
@@ -620,7 +620,7 @@
             v-if="qi.status === 'failed'"
             class="nr-msg-queue-act"
             :title="t('chat.retry')"
-            @click="messageQueue.retry(qi.id) && drainMessageQueue()"
+            @click="messageQueue.retry(qi.id); drainMessageQueue()"
           >↻</button>
           <button
             v-if="qi.status !== 'sending'"
@@ -1405,6 +1405,12 @@ const renderedMessages = computed(() => {
   return all.slice(start, start + RENDER_WINDOW)
 })
 
+/** 窗口相对下标 → messages 绝对下标（DATA-P0-5 根因修复：
+ *  renderedMessages 是 slice 切片，deleteRoundAt 等用绝对下标索引）。 */
+function absIdx(windowIdx: number): number {
+  return renderStart.value + windowIdx
+}
+
 watch(
   () => messages.value.length,
   (len, prev) => {
@@ -1492,9 +1498,13 @@ async function persistSessionOrder(): Promise<void> {
   }
 }
 
-/** 加载当前 agent 的 session 列表(模板 onMounted / agentId watch 调用)。 */
+/** 加载当前 agent 的 session 列表(模板 onMounted / agentId watch 调用)。
+ *  BUG-11 修复：发起时记录 agentId，写 store 前校验归属——
+ *  快速切 agent 时旧响应后到会覆盖新 agent 的会话列表。 */
 async function loadSessions(): Promise<void> {
-  await _loadSessions(agentId.value)
+  const requestedAgent = agentId.value
+  await _loadSessions(requestedAgent)
+  if (agentId.value !== requestedAgent) return
 }
 
 /** 创建新会话(模板按钮无参调用),委托给 useChat.createSession。 */
@@ -1512,6 +1522,20 @@ async function createSession(): Promise<void> {
  * (副作用场景), 不调 notifySwitchFailure — 详见 useChat.ts 的 silent 契约.
  */
 async function switchSession(sessionId: string): Promise<void> {
+  // BUG-2 修复：流式中切走先 abort 旧流并复位 streaming 态，
+  // 否则 usage 记账/队列 drain 会污染刚打开的新会话
+  if (isStreaming.value) {
+    abortController?.abort()
+    abortController = null
+    chatStore.setStreaming(false)
+    stopStreamTTS()
+  }
+  // BUG-4 修复：restore 前先保存旧会话草稿（原实现只在组件卸载时保存，
+  // 切会话即丢）
+  const prevSid = currentSessionId.value
+  if (prevSid && prevSid !== sessionId) {
+    chatDraft.save(prevSid, inputText.value)
+  }
   const result = await _switchSession(sessionId)
   _notifySwitchFailure(result)
   // 补课 D：恢复新会话草稿；补课 A6+F：历史会话打开定位到最新记录
@@ -1899,8 +1923,11 @@ async function drainMessageQueue(): Promise<void> {
     if (!messageQueue.markSending(item.id)) return
     chatStore.setInputText(item.text)
     try {
-      await sendMessage()
-      messageQueue.markSent(item.id)
+      // BUG-21 修复：sendMessage 原先吞掉一切错误恒不抛——catch 死代码，
+      // 失败消息被 markSent。现按返回值区分成功/失败。
+      const ok = await sendMessage()
+      if (ok) messageQueue.markSent(item.id)
+      else messageQueue.markFailed(item.id, 'send failed')
     } catch (err: any) {
       messageQueue.markFailed(item.id, err?.message || 'send failed')
     }
@@ -1908,6 +1935,11 @@ async function drainMessageQueue(): Promise<void> {
     _draining.value = false
   }
 }
+
+/** 当前流所属会话快照（BUG-2 修复：usage/drain 用发起时的 session_id，
+ *  流式中切会话不再把旧轮的用量/队列消息记到新会话头上）。 */
+let activeStreamSessionId: string | null = null
+let lastSentMessageText = ''
 
 async function sendMessage() {
   closeSlashPanel()
@@ -1959,6 +1991,10 @@ async function sendMessage() {
       size: f.file.size,
     })),
   }
+  // 捕获流所属会话（流式中用户切走时，usage/drain 仍归属发起会话）
+  activeStreamSessionId = currentSessionId.value
+  lastSentMessageText = text
+
   chatStore.addMessage(userMsg)
 
   // Prepare assistant placeholder
@@ -2108,8 +2144,13 @@ async function sendMessage() {
     abortController = null
     scrollToBottom()
     // 补课 P3-b：当前轮结束 → 自动续发下一条排队消息（暂停时不续发）
-    await drainMessageQueue()
+    // BUG-2 修复：仅当用户仍停留在发起会话时才 drain，
+    // 否则排队消息会被发进刚切到的新会话
+    if (currentSessionId.value === activeStreamSessionId) {
+      await drainMessageQueue()
+    }
   }
+  return true
 }
 
 /** Process a single SSE event and update the assistant message. */
@@ -2240,7 +2281,7 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'usage':
       // QwenPaw turn_usage 对齐:真实 token 用量入 store（per-session 累计）
       if (typeof event.total_tokens === 'number') {
-        chatStore.applyTurnUsage(currentSessionId.value, {
+        chatStore.applyTurnUsage(activeStreamSessionId, {
           prompt: Number(event.prompt_tokens || 0),
           completion: Number(event.completion_tokens || 0),
           total: Number(event.total_tokens || 0),
@@ -2264,18 +2305,25 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       // Auto-create session if this is the first exchange
       if (!currentSessionId.value && event.session_id) {
         chatStore.setCurrentSession(event.session_id)
+        // BUG-6 修复：标题取发送时文本（inputText 此时已被清空，
+        // 流式中又输入的草稿会污染标题）
         chatStore.addSession({
           id: event.session_id,
-          title: inputText.value.slice(0, 50) || t('chat.newChat'),
+          title: lastSentMessageText.slice(0, 50) || t('chat.newChat'),
         })
       }
       // 补课 6：默认标题（新对话/新建对话）→ 语义概括自动填充，不再停留默认名
       void maybeAutoTitle()
       break
 
-    case 'error':
-      msg.content += `\n\n**Error:** ${event.message || event.error || 'Unknown error'}`
+    case 'error': {
+      // 2026-09-07 修复：429 限流错误 → 触发限流横幅（一键换模型），
+      // 不把原始 429 JSON 拼进气泡；其余错误仍追加错误文本
+      const errMsg = String(event.message || event.error || 'Unknown error')
+      if (handleRateLimit({ message: errMsg })) break
+      msg.content += `\n\n**Error:** ${errMsg}`
       break
+    }
   }
 }
 
@@ -3102,11 +3150,16 @@ onBeforeUnmount(() => {
     if (pf.preview) URL.revokeObjectURL(pf.preview)
   }
   // Revoke TTS blob URLs
+  // BUG-23 修复：补 revoke 每条消息的 ttsUrls 数组（流式语音一轮可产生
+  // 几十个 blob URL，原实现只清 audioUrl）
+  const revokeUrls: string[] = []
   for (const msg of messages.value) {
-    if (msg.audioUrl?.startsWith('blob:')) {
-      URL.revokeObjectURL(msg.audioUrl)
+    if (msg.audioUrl?.startsWith('blob:')) revokeUrls.push(msg.audioUrl)
+    for (const u of msg.ttsUrls || []) {
+      if (u?.startsWith('blob:')) revokeUrls.push(u)
     }
   }
+  for (const u of revokeUrls) URL.revokeObjectURL(u)
 })
 </script>
 
