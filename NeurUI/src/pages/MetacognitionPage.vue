@@ -15,31 +15,54 @@
       </div>
     </div>
 
-    <!-- Stats Dashboard -->
-    <div class="stats-dashboard" v-if="stats">
-      <GlassCard variant="subtle">
-        <div class="stat-card">
-          <span class="stat-label">{{ t('metacognition.totalEntries') }}</span>
-          <span class="stat-value">{{ stats.total_entries }}</span>
-        </div>
-      </GlassCard>
-      <GlassCard variant="subtle">
-        <div class="stat-card">
-          <span class="stat-label">{{ t('metacognition.avgConfidence') }}</span>
-          <span class="stat-value">{{ formatPercent(stats.avg_confidence) }}</span>
-          <a-progress
-            :percent="Math.round((stats.avg_confidence || 0) * 100)"
-            :stroke-color="stats.avg_confidence >= 0.7 ? '#10b981' : '#f59e0b'"
-            :show-info="false"
-            size="small"
-          />
-        </div>
-      </GlassCard>
-      <GlassCard v-for="typeItem in stats.by_type" :key="typeItem.type" variant="subtle">
-        <div class="stat-card">
-          <span class="stat-label">{{ formatType(typeItem.type) }}</span>
-          <span class="stat-value">{{ typeItem.count }}</span>
-          <a-tag :color="typeColorMap[typeItem.type] || 'default'" size="small">{{ typeItem.type }}</a-tag>
+    <!-- Stats + cognitive load metrics（统一三列网格：两行 × 三列） -->
+    <div class="stats-dashboard" v-if="stats || loadState">
+      <template v-if="stats">
+        <GlassCard variant="subtle">
+          <div class="stat-card">
+            <span class="stat-label">{{ t('metacognition.totalEntries') }}</span>
+            <span class="stat-value">{{ stats.total_entries }}</span>
+          </div>
+        </GlassCard>
+        <GlassCard variant="subtle">
+          <div class="stat-card">
+            <span class="stat-label">{{ t('metacognition.avgConfidence') }}</span>
+            <div class="stat-ring">
+              <a-progress
+                type="circle"
+                :percent="Math.round((stats.avg_confidence || 0) * 100)"
+                :size="84"
+                :stroke-color="stats.avg_confidence >= 0.7 ? '#10b981' : '#f59e0b'"
+                :show-info="false"
+              />
+              <span class="stat-ring-value">{{ formatPercent(stats.avg_confidence) }}</span>
+            </div>
+          </div>
+        </GlassCard>
+        <GlassCard v-for="typeItem in stats.by_type" :key="typeItem.type" variant="subtle">
+          <div class="stat-card">
+            <span class="stat-label">{{ formatType(typeItem.type) }}</span>
+            <span class="stat-value">{{ typeItem.count }}</span>
+            <a-tag :color="typeColorMap[typeItem.type] || 'default'" size="small">{{ typeItem.type }}</a-tag>
+          </div>
+        </GlassCard>
+      </template>
+      <GlassCard v-for="metric in metrics" :key="metric.label" variant="subtle">
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-label">{{ metric.label }}</span>
+            <a-tag :color="metric.color">{{ metric.status }}</a-tag>
+          </div>
+          <div class="metric-ring">
+            <a-progress
+              type="circle"
+              :percent="metric.percent"
+              :size="84"
+              :stroke-color="metric.color"
+              :show-info="false"
+            />
+            <span class="metric-ring-value">{{ metric.displayValue }}</span>
+          </div>
         </div>
       </GlassCard>
     </div>
@@ -63,25 +86,6 @@
     </GlassCard>
 
     <a-spin :spinning="loading">
-      <!-- Cognitive load metrics (real state from chat pipeline write-through) -->
-      <div class="metrics-grid" style="margin-top: 20px">
-        <GlassCard v-for="metric in metrics" :key="metric.label" variant="subtle">
-          <div class="metric-card">
-            <div class="metric-header">
-              <span class="metric-label">{{ metric.label }}</span>
-              <a-tag :color="metric.color">{{ metric.status }}</a-tag>
-            </div>
-            <div class="metric-value">{{ metric.displayValue }}</div>
-            <a-progress
-              :percent="metric.percent"
-              :stroke-color="metric.color"
-              :show-info="false"
-              size="small"
-            />
-          </div>
-        </GlassCard>
-      </div>
-
       <!-- Current load state details -->
       <GlassCard :title="t('metacognition.loadState')" style="margin-top: 20px">
         <div v-if="loadState" class="state-details">
@@ -492,11 +496,35 @@ onMounted(() => {
   align-items: center;
 }
 
-/* Stats dashboard */
+/* Stats dashboard：统一三列网格（统计卡 + 负荷指标卡，两行 × 三列） */
 .stats-dashboard {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+/* 环形示意：进度环居中，数值文字独立覆盖在环心，互不干扰 */
+.stat-ring,
+.metric-ring {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 0;
+}
+
+.stat-ring-value,
+.metric-ring-value {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--nr-font-display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--nr-text-primary);
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .stat-card {
@@ -553,13 +581,6 @@ onMounted(() => {
   font-family: var(--nr-font-mono);
 }
 
-/* Metrics grid */
-.metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-}
-
 .metric-card {
   display: flex;
   flex-direction: column;
@@ -578,13 +599,6 @@ onMounted(() => {
   color: var(--nr-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-
-.metric-value {
-  font-family: var(--nr-font-display);
-  font-size: 24px;
-  font-weight: 700;
-  color: var(--nr-text-primary);
 }
 
 .state-details {
