@@ -23,6 +23,8 @@ def app():
 
 @pytest.fixture
 def client(app):
+    from neurova.api.deps import get_current_user
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": "u1", "role": "admin"}
     return TestClient(app)
 
 
@@ -124,4 +126,4 @@ class TestArchivedListEndpoint:
 
     def test_list_archived_passes_agent_filter(self, client, mock_repo):
         client.get("/api/v1/console/chat/sessions/archived", params={"agent_id": "kai"})
-        mock_repo.list_archived_sessions.assert_called_once_with(agent_id="kai", user_id="anonymous")
+        mock_repo.list_archived_sessions.assert_called_once_with(agent_id="kai", user_id="u1")

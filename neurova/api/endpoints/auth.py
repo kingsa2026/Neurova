@@ -14,6 +14,7 @@ from __future__ import annotations
 """
 
 from neurova.core.logger import get_logger
+import os
 import uuid
 import time
 from typing import Dict, List, Optional
@@ -44,7 +45,9 @@ _token_blacklist: set = set()
 # 忘记密码/取回密码：最高权重恢复密码（写死常量）。
 # 校验只允许发生在服务端（前端仅做 UX 即时校验）；双条件缺一不可：
 # 1) username 是系统内角色为 admin 的管理员账号；2) master_password == 此常量。
-MASTER_RECOVERY_PASSWORD = "nerovamakehappy"
+# 根因修复 2026-09-07：硬编码恢复密码随源码/打包分发=后门；改为环境变量，
+# 未配置则恢复功能整体禁用（403）。
+MASTER_RECOVERY_PASSWORD = os.environ.get("NEUROVA_MASTER_RECOVERY_PASSWORD", "")
 
 # recover-password 简易限流：key=(username|ip) -> 尝试时间戳列表
 _recover_attempts: Dict[str, list] = {}
@@ -262,6 +265,8 @@ async def recover_password(request: Request, body: RecoverPasswordRequest):
         user_model = _get_user_model()
         user = user_model.get_user_by_username(body.username)
 
+        if not MASTER_RECOVERY_PASSWORD:
+            raise HTTPException(status_code=403, detail="密码恢复功能未配置（NEUROVA_MASTER_RECOVERY_PASSWORD），已禁用")
         master_ok = body.master_password == MASTER_RECOVERY_PASSWORD
         user_ok = bool(user) and user.role == "admin"
         if not (user_ok and master_ok):
@@ -301,8 +306,10 @@ async def recover_password(request: Request, body: RecoverPasswordRequest):
 
 
 def is_token_blacklisted(token: str) -> bool:
-    """检查token是否在黑名单中"""
-    return token in _token_blacklist
+    """检查token是否在黑名单中（含全局单源黑名单）。"""
+    from neurova.api.auth import is_token_blacklisted_global
+
+    return token in _token_blacklist or is_token_blacklisted_global(token)
 
 
 @router.post("/refresh", response_model=TokenResponse)
@@ -609,9 +616,16 @@ async def logout(request: Request):
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
 
-            # 将 token 加入黑名单
+            # 将 token 加入黑名单（双源：本模块 set + api/auth 全局单源，
+            # verify_access_token 只查后者——否则登出对受保护端点无效）
             if token:
                 _token_blacklist.add(token)
+                try:
+                    from neurova.api.auth import blacklist_token
+
+                    blacklist_token(token)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("全局黑名单注册失败: %s", e)
                 logger.info("Token added to blacklist")
 
         return {

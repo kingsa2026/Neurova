@@ -62,7 +62,7 @@ class RecordingAgent:
 
 
 def _patch(monkeypatch, agent) -> None:
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda request, current_user=None: "u1")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: FakeRepo())
     monkeypatch.setattr(console_module, "get_agent_instance", lambda agent_id: agent)
 

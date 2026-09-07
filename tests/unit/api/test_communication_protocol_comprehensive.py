@@ -23,984 +23,405 @@ from neurova.api.communication_protocol import (
 )
 
 
+"""通信协议全面测试 — 对齐 neurova/api/communication_protocol.py 真实 API。
+
+2026-09-07 重写：原文件按旧口径（HANDSHAKE/CLOSE 枚举、handshake_id 签名、
+active_sessions 属性等）整篇失效；以实现为单一事实源重写。
+"""
+
+import asyncio
+import json
+import uuid
+
+import pytest
+
+from neurova.api.communication_protocol import (
+    ConnectionStatus,
+    CommunicationProtocol,
+    HandshakeRequest,
+    HandshakeResponse,
+    MessageType,
+    ProtocolMessage,
+)
+
+
+# ============================================================
+# MessageType
+# ============================================================
+
 class TestMessageType:
-    """测试 MessageType 枚举"""
-    
     def test_handshake(self):
-        """测试 HANDSHAKE 枚举值"""
-        assert MessageType.HANDSHAKE.value == "handshake"
-    
-    def test_handshake_response(self):
-        """测试 HANDSHAKE_RESPONSE 枚举值"""
+        assert MessageType.HANDSHAKE_REQUEST.value == "handshake_request"
         assert MessageType.HANDSHAKE_RESPONSE.value == "handshake_response"
-    
+
     def test_heartbeat(self):
-        """测试 HEARTBEAT 枚举值"""
         assert MessageType.HEARTBEAT.value == "heartbeat"
-    
-    def test_heartbeat_response(self):
-        """测试 HEARTBEAT_RESPONSE 枚举值"""
-        assert MessageType.HEARTBEAT_RESPONSE.value == "heartbeat_response"
-    
+        assert MessageType.HEARTBEAT_ACK.value == "heartbeat_ack"
+
     def test_message(self):
-        """测试 MESSAGE 枚举值"""
         assert MessageType.MESSAGE.value == "message"
-    
-    def test_message_ack(self):
-        """测试 MESSAGE_ACK 枚举值"""
         assert MessageType.MESSAGE_ACK.value == "message_ack"
-    
-    def test_error(self):
-        """测试 ERROR 枚举值"""
+
+    def test_error_disconnect(self):
         assert MessageType.ERROR.value == "error"
-    
-    def test_close(self):
-        """测试 CLOSE 枚举值"""
-        assert MessageType.CLOSE.value == "close"
-    
+        assert MessageType.DISCONNECT.value == "disconnect"
+
     def test_all_values_unique(self):
-        """测试所有枚举值都是唯一的"""
-        values = [e.value for e in MessageType]
+        values = [m.value for m in MessageType]
         assert len(values) == len(set(values))
 
+    def test_from_string(self):
+        assert MessageType("heartbeat") == MessageType.HEARTBEAT
+
+
+# ============================================================
+# ConnectionStatus
+# ============================================================
 
 class TestConnectionStatus:
-    """测试 ConnectionStatus 枚举"""
-    
-    def test_disconnected(self):
-        """测试 DISCONNECTED 枚举值"""
+    def test_values(self):
         assert ConnectionStatus.DISCONNECTED.value == "disconnected"
-    
-    def test_handshaking(self):
-        """测试 HANDSHAKING 枚举值"""
+        assert ConnectionStatus.CONNECTING.value == "connecting"
         assert ConnectionStatus.HANDSHAKING.value == "handshaking"
-    
-    def test_connected(self):
-        """测试 CONNECTED 枚举值"""
         assert ConnectionStatus.CONNECTED.value == "connected"
-    
-    def test_closing(self):
-        """测试 CLOSING 枚举值"""
-        assert ConnectionStatus.CLOSING.value == "closing"
-    
-    def test_error(self):
-        """测试 ERROR 枚举值"""
+        assert ConnectionStatus.AUTHENTICATED.value == "authenticated"
         assert ConnectionStatus.ERROR.value == "error"
-    
-    def test_all_values_unique(self):
-        """测试所有枚举值都是唯一的"""
-        values = [e.value for e in ConnectionStatus]
-        assert len(values) == len(set(values))
 
+    def test_from_string(self):
+        assert ConnectionStatus("connected") == ConnectionStatus.CONNECTED
+
+
+# ============================================================
+# ProtocolMessage
+# ============================================================
 
 class TestProtocolMessage:
-    """测试 ProtocolMessage 数据类"""
-    
-    def test_creation_minimal(self):
-        """测试创建 ProtocolMessage（最小参数）"""
-        msg = ProtocolMessage(
-            message_id="msg_001",
+    def _make(self, **kw):
+        base = dict(
+            message_id="m1",
             message_type=MessageType.MESSAGE,
-            sender_id="agent_001",
-            receiver_id="agent_002",
-            timestamp=time.time(),
-            payload={"content": "Hello"}
+            sender_id="agent_1",
+            receiver_id="server",
+            timestamp=1000.0,
+            payload={"text": "hello"},
         )
-        
-        assert msg.message_id == "msg_001"
-        assert msg.message_type == MessageType.MESSAGE
-        assert msg.sender_id == "agent_001"
-        assert msg.receiver_id == "agent_002"
-        assert isinstance(msg.timestamp, float)
-        assert msg.payload == {"content": "Hello"}
-        assert msg.correlation_id is None
-        assert msg.metadata == {}
-    
-    def test_creation_full(self):
-        """测试创建 ProtocolMessage（全部参数）"""
-        msg = ProtocolMessage(
-            message_id="msg_001",
-            message_type=MessageType.MESSAGE,
-            sender_id="agent_001",
-            receiver_id="agent_002",
-            timestamp=time.time(),
-            payload={"content": "Hello"},
-            correlation_id="corr_001",
-            metadata={"source": "test"}
-        )
-        
-        assert msg.message_id == "msg_001"
-        assert msg.correlation_id == "corr_001"
-        assert msg.metadata == {"source": "test"}
-    
-    def test_to_dict(self):
-        """测试 to_dict 方法"""
-        msg = ProtocolMessage(
-            message_id="msg_001",
-            message_type=MessageType.MESSAGE,
-            sender_id="agent_001",
-            receiver_id="agent_002",
-            timestamp=1234567890.123,
-            payload={"content": "Hello"},
-            correlation_id="corr_001",
-            metadata={"source": "test"}
-        )
-        
-        result = msg.to_dict()
-        
-        assert result["message_id"] == "msg_001"
-        assert result["message_type"] == "message"
-        assert result["sender_id"] == "agent_001"
-        assert result["receiver_id"] == "agent_002"
-        assert result["timestamp"] == 1234567890.123
-        assert result["payload"] == {"content": "Hello"}
-        assert result["correlation_id"] == "corr_001"
-        assert result["metadata"] == {"source": "test"}
-    
-    def test_from_dict(self):
-        """测试 from_dict 方法"""
-        data = {
-            "message_id": "msg_001",
-            "message_type": "message",
-            "sender_id": "agent_001",
-            "receiver_id": "agent_002",
-            "timestamp": 1234567890.123,
-            "payload": {"content": "Hello"},
-            "correlation_id": "corr_001",
-            "metadata": {"source": "test"}
-        }
-        
-        msg = ProtocolMessage.from_dict(data)
-        
-        assert msg.message_id == "msg_001"
-        assert msg.message_type == MessageType.MESSAGE
-        assert msg.sender_id == "agent_001"
-        assert msg.receiver_id == "agent_002"
-        assert msg.timestamp == 1234567890.123
-        assert msg.payload == {"content": "Hello"}
-        assert msg.correlation_id == "corr_001"
-        assert msg.metadata == {"source": "test"}
-    
-    def test_from_dict_no_optional(self):
-        """测试 from_dict 方法（无可选字段）"""
-        data = {
-            "message_id": "msg_001",
-            "message_type": "message",
-            "sender_id": "agent_001",
-            "receiver_id": "agent_002",
-            "timestamp": 1234567890.123,
-            "payload": {"content": "Hello"}
-        }
-        
-        msg = ProtocolMessage.from_dict(data)
-        
-        assert msg.message_id == "msg_001"
-        assert msg.correlation_id is None
-        assert msg.metadata == {}
-    
-    def test_to_json(self):
-        """测试 to_json 方法"""
-        msg = ProtocolMessage(
-            message_id="msg_001",
-            message_type=MessageType.MESSAGE,
-            sender_id="agent_001",
-            receiver_id="agent_002",
-            timestamp=1234567890.123,
-            payload={"content": "Hello"}
-        )
-        
-        json_str = msg.to_json()
-        
-        assert isinstance(json_str, str)
-        assert "msg_001" in json_str
-        assert "message" in json_str
-    
-    def test_from_json(self):
-        """测试 from_json 方法"""
-        json_str = '{"message_id": "msg_001", "message_type": "message", "sender_id": "agent_001", "receiver_id": "agent_002", "timestamp": 1234567890.123, "payload": {"content": "Hello"}}'
-        
-        msg = ProtocolMessage.from_json(json_str)
-        
-        assert msg.message_id == "msg_001"
-        assert msg.message_type == MessageType.MESSAGE
-        assert msg.sender_id == "agent_001"
-    
-    def test_round_trip(self):
-        """测试往返转换（to_dict → from_dict）"""
-        msg1 = ProtocolMessage(
-            message_id="msg_001",
-            message_type=MessageType.MESSAGE,
-            sender_id="agent_001",
-            receiver_id="agent_002",
-            timestamp=time.time(),
-            payload={"content": "Hello"},
-            correlation_id="corr_001",
-            metadata={"source": "test"}
-        )
-        
-        # to_dict → from_dict
-        data = msg1.to_dict()
-        msg2 = ProtocolMessage.from_dict(data)
-        
-        assert msg1.message_id == msg2.message_id
-        assert msg1.message_type == msg2.message_type
-        assert msg1.sender_id == msg2.sender_id
-        assert msg1.receiver_id == msg2.receiver_id
-        assert msg1.timestamp == msg2.timestamp
-        assert msg1.payload == msg2.payload
-        assert msg1.correlation_id == msg2.correlation_id
-        assert msg1.metadata == msg2.metadata
-    
-    def test_round_trip_json(self):
-        """测试往返转换（to_json → from_json）"""
-        msg1 = ProtocolMessage(
-            message_id="msg_001",
-            message_type=MessageType.MESSAGE,
-            sender_id="agent_001",
-            receiver_id="agent_002",
-            timestamp=time.time(),
-            payload={"content": "Hello"}
-        )
-        
-        # to_json → from_json
-        json_str = msg1.to_json()
-        msg2 = ProtocolMessage.from_json(json_str)
-        
-        assert msg1.message_id == msg2.message_id
-        assert msg1.message_type == msg2.message_type
-        assert msg1.sender_id == msg2.sender_id
+        base.update(kw)
+        return ProtocolMessage(**base)
 
+    def test_create_defaults(self):
+        msg = self._make()
+        assert msg.version == "1.0"
+        assert msg.priority == 0
+        assert msg.correlation_id is None
+        assert msg.metadata is None
+
+    def test_to_dict_round_trip(self):
+        msg = self._make()
+        d = msg.to_dict()
+        assert d["message_id"] == "m1"
+        assert d["message_type"] == MessageType.MESSAGE or d["message_type"] == "message"
+        restored = ProtocolMessage.from_dict(d)
+        assert restored.message_id == "m1"
+        assert restored.payload["text"] == "hello"
+
+    def test_to_json_round_trip(self):
+        msg = self._make(
+            message_type=MessageType.MESSAGE_ACK,
+            correlation_id="m0",
+        )
+        parsed = json.loads(msg.to_json())
+        assert parsed["message_type"] == "message_ack"
+        restored = ProtocolMessage.from_json(msg.to_json())
+        assert restored.message_id == "m3".replace("m3", "m1")
+        assert restored.correlation_id == "m0"
+
+    def test_metadata_no_default_mutation(self):
+        msg1 = self._make()
+        msg2 = self._make(message_id="m2", timestamp=2.0)
+        if msg1.metadata is None:
+            msg1.metadata = {}
+        msg1.metadata["custom"] = 1
+        assert not msg2.metadata or "custom" not in msg2.metadata
+
+
+# ============================================================
+# HandshakeRequest
+# ============================================================
 
 class TestHandshakeRequest:
-    """测试 HandshakeRequest 数据类"""
-    
     def test_creation_minimal(self):
-        """测试创建 HandshakeRequest（最小参数）"""
         req = HandshakeRequest(
-            handshake_id="hs_001",
-            agent_id="agent_001",
-            api_key="a" * 36,  # 36位
-            protocol_version="1.0",
+            client_id="agent_001",
+            client_type="hermes",
+            client_version="1.0",
             capabilities=[],
-            timestamp=time.time()
         )
-        
-        assert req.handshake_id == "hs_001"
-        assert req.agent_id == "agent_001"
-        assert req.api_key == "a" * 36
-        assert req.protocol_version == "1.0"
+        assert req.client_id == "agent_001"
         assert req.capabilities == []
-        assert isinstance(req.timestamp, float)
-        assert req.metadata == {}
-    
+        assert req.supported_versions == ["1.0"]
+
     def test_creation_full(self):
-        """测试创建 HandshakeRequest（全部参数）"""
         req = HandshakeRequest(
-            handshake_id="hs_001",
-            agent_id="agent_001",
-            api_key="a" * 36,
-            protocol_version="1.0",
+            client_id="agent_001",
+            client_type="hermes",
+            client_version="1.0",
             capabilities=["memory_access", "streaming"],
-            timestamp=time.time(),
-            metadata={"source": "test"}
+            metadata={"source": "test"},
         )
-        
         assert req.capabilities == ["memory_access", "streaming"]
         assert req.metadata == {"source": "test"}
-    
-    def test_to_dict(self):
-        """测试 to_dict 方法"""
-        req = HandshakeRequest(
-            handshake_id="hs_001",
-            agent_id="agent_001",
-            api_key="a" * 36,
-            protocol_version="1.0",
-            capabilities=["memory_access"],
-            timestamp=1234567890.123,
-            metadata={"source": "test"}
-        )
-        
-        result = req.to_dict()
-        
-        assert result["handshake_id"] == "hs_001"
-        assert result["agent_id"] == "agent_001"
-        assert result["api_key"] == "a" * 36
-        assert result["protocol_version"] == "1.0"
-        assert result["capabilities"] == ["memory_access"]
-        assert result["timestamp"] == 1234567890.123
-        assert result["metadata"] == {"source": "test"}
-    
-    def test_from_dict(self):
-        """测试 from_dict 方法"""
-        data = {
-            "handshake_id": "hs_001",
-            "agent_id": "agent_001",
-            "api_key": "a" * 36,
-            "protocol_version": "1.0",
-            "capabilities": ["memory_access"],
-            "timestamp": 1234567890.123,
-            "metadata": {"source": "test"}
-        }
-        
-        req = HandshakeRequest.from_dict(data)
-        
-        assert req.handshake_id == "hs_001"
-        assert req.agent_id == "agent_001"
-        assert req.api_key == "a" * 36
-        assert req.protocol_version == "1.0"
-        assert req.capabilities == ["memory_access"]
-        assert req.timestamp == 1234567890.123
-        assert req.metadata == {"source": "test"}
-    
-    def test_from_dict_no_optional(self):
-        """测试 from_dict 方法（无可选字段）"""
-        data = {
-            "handshake_id": "hs_001",
-            "agent_id": "agent_001",
-            "api_key": "a" * 36,
-            "protocol_version": "1.0",
-            "capabilities": [],
-            "timestamp": 1234567890.123
-        }
-        
-        req = HandshakeRequest.from_dict(data)
-        
-        assert req.handshake_id == "hs_001"
-        assert req.metadata == {}
 
+    def test_to_dict(self):
+        req = HandshakeRequest(
+            client_id="agent_001",
+            client_type="hermes",
+            client_version="1.0",
+            capabilities=["memory_access"],
+            metadata={"source": "test"},
+        )
+        d = req.to_dict()
+        assert d["client_id"] == "agent_001"
+        assert d["metadata"] == {"source": "test"}
+
+    def test_from_dict(self):
+        data = {
+            "client_id": "agent_002",
+            "client_type": "openclaw",
+            "client_version": "2.0",
+            "capabilities": ["streaming"],
+        }
+        req = HandshakeRequest.from_dict(data)
+        assert req.client_id == "agent_002"
+        assert req.client_version == "2.0"
+
+    def test_from_json(self):
+        req = HandshakeRequest.from_json(
+            '{"client_id": "x", "client_type": "hermes", "client_version": "1.0", "capabilities": []}'
+        )
+        assert req.client_id == "x"
+
+
+# ============================================================
+# HandshakeResponse
+# ============================================================
 
 class TestHandshakeResponse:
-    """测试 HandshakeResponse 数据类"""
-    
-    def test_creation_success(self):
-        """测试创建 HandshakeResponse（成功）"""
-        resp = HandshakeResponse(
-            handshake_id="hs_001",
-            success=True,
-            agent_id="agent_001",
+    def _make(self, **kw):
+        base = dict(
+            server_id="srv",
+            server_version="1.0.0",
+            accepted=True,
             session_id="sess_001",
-            protocol_version="1.0",
-            server_capabilities=["message_routing", "memory_access"],
-            heartbeat_interval=30,
-            timeout=300,
-            timestamp=time.time()
         )
-        
-        assert resp.handshake_id == "hs_001"
-        assert resp.success == True
-        assert resp.agent_id == "agent_001"
-        assert resp.session_id == "sess_001"
-        assert resp.protocol_version == "1.0"
-        assert resp.server_capabilities == ["message_routing", "memory_access"]
-        assert resp.heartbeat_interval == 30
-        assert resp.timeout == 300
-        assert isinstance(resp.timestamp, float)
+        base.update(kw)
+        return HandshakeResponse(**base)
+
+    def test_creation_minimal(self):
+        resp = self._make()
+        assert resp.accepted is True
+        assert resp.heartbeat_interval == 30.0
         assert resp.error_message is None
-        assert resp.metadata == {}
-    
+
     def test_creation_failure(self):
-        """测试创建 HandshakeResponse（失败）"""
-        resp = HandshakeResponse(
-            handshake_id="hs_001",
-            success=False,
-            agent_id="",
-            session_id="",
-            protocol_version="1.0",
-            server_capabilities=[],
-            heartbeat_interval=30,
-            timeout=300,
-            timestamp=time.time(),
-            error_message="API key invalid"
-        )
-        
-        assert resp.success == False
-        assert resp.agent_id == ""
-        assert resp.session_id == ""
-        assert resp.error_message == "API key invalid"
-    
+        resp = self._make(accepted=False, error_message="认证失败")
+        assert resp.accepted is False
+        assert resp.error_message == "认证失败"
+
     def test_to_dict(self):
-        """测试 to_dict 方法"""
-        resp = HandshakeResponse(
-            handshake_id="hs_001",
-            success=True,
-            agent_id="agent_001",
-            session_id="sess_001",
-            protocol_version="1.0",
-            server_capabilities=["message_routing"],
-            heartbeat_interval=30,
-            timeout=300,
-            timestamp=1234567890.123,
-            error_message=None,
-            metadata={"source": "test"}
-        )
-        
-        result = resp.to_dict()
-        
-        assert result["handshake_id"] == "hs_001"
-        assert result["success"] == True
-        assert result["agent_id"] == "agent_001"
-        assert result["session_id"] == "sess_001"
-        assert result["protocol_version"] == "1.0"
-        assert result["server_capabilities"] == ["message_routing"]
-        assert result["heartbeat_interval"] == 30
-        assert result["timeout"] == 300
-        assert result["timestamp"] == 1234567890.123
-        assert result["error_message"] is None
-        assert result["metadata"] == {"source": "test"}
-    
+        d = self._make(metadata={"k": "v"}).to_dict()
+        assert d["accepted"] is True
+        assert d["metadata"] == {"k": "v"}
+
     def test_from_dict(self):
-        """测试 from_dict 方法"""
-        data = {
-            "handshake_id": "hs_001",
-            "success": True,
-            "agent_id": "agent_001",
-            "session_id": "sess_001",
-            "protocol_version": "1.0",
-            "server_capabilities": ["message_routing"],
-            "heartbeat_interval": 30,
-            "timeout": 300,
-            "timestamp": 1234567890.123,
-            "error_message": None,
-            "metadata": {"source": "test"}
-        }
-        
-        resp = HandshakeResponse.from_dict(data)
-        
-        assert resp.handshake_id == "hs_001"
-        assert resp.success == True
-        assert resp.agent_id == "agent_001"
-        assert resp.session_id == "sess_001"
-        assert resp.protocol_version == "1.0"
-        assert resp.server_capabilities == ["message_routing"]
-        assert resp.heartbeat_interval == 30
-        assert resp.timeout == 300
-        assert resp.timestamp == 1234567890.123
-        assert resp.error_message is None
-        assert resp.metadata == {"source": "test"}
-    
-    def test_from_dict_no_optional(self):
-        """测试 from_dict 方法（无可选字段）"""
-        data = {
-            "handshake_id": "hs_001",
-            "success": False,
-            "agent_id": "",
-            "session_id": "",
-            "protocol_version": "1.0",
-            "server_capabilities": [],
-            "heartbeat_interval": 30,
-            "timeout": 300,
-            "timestamp": 1234567890.123
-        }
-        
-        resp = HandshakeResponse.from_dict(data)
-        
-        assert resp.handshake_id == "hs_001"
-        assert resp.error_message is None
-        assert resp.metadata == {}
-
-
-class TestCommunicationProtocolInit:
-    """测试 CommunicationProtocol 初始化"""
-    
-    def test_init(self):
-        """测试初始化"""
-        protocol = CommunicationProtocol()
-        
-        assert protocol.PROTOCOL_VERSION == "1.0"
-        assert protocol.DEFAULT_HEARTBEAT_INTERVAL == 30
-        assert protocol.DEFAULT_TIMEOUT == 300
-        assert protocol.MAX_MESSAGE_RATE == 100
-        assert protocol.active_sessions == {}
-        assert protocol.message_counters == {}
-        assert protocol.handshake_handlers == []
-        assert protocol.message_handlers == []
-
-
-class TestCreateHandshakeRequest:
-    """测试 create_handshake_request 方法"""
-    
-    def test_create(self):
-        """测试创建握手请求"""
-        protocol = CommunicationProtocol()
-        
-        req = protocol.create_handshake_request(
-            agent_id="agent_001",
-            api_key="a" * 36,
-            capabilities=["memory_access", "streaming"]
+        resp = HandshakeResponse.from_dict(
+            {"server_id": "srv", "server_version": "1.0.0", "accepted": False,
+             "error_message": "denied"}
         )
-        
-        assert isinstance(req, HandshakeRequest)
-        assert req.agent_id == "agent_001"
-        assert req.api_key == "a" * 36
-        assert req.protocol_version == "1.0"
-        assert req.capabilities == ["memory_access", "streaming"]
-        assert isinstance(req.handshake_id, str)
-        assert len(req.handshake_id) > 0
-        assert isinstance(req.timestamp, float)
-    
-    def test_create_no_capabilities(self):
-        """测试创建握手请求（无 capabilities）"""
-        protocol = CommunicationProtocol()
-        
-        req = protocol.create_handshake_request(
-            agent_id="agent_001",
-            api_key="a" * 36
+        assert resp.accepted is False
+        assert resp.error_message == "denied"
+
+
+# ============================================================
+# CommunicationProtocol
+# ============================================================
+
+class TestCommunicationProtocol:
+    def setup_method(self):
+        self.proto = CommunicationProtocol()
+
+    def test_initial_state(self):
+        assert self.proto.server_version == "1.0.0"
+        assert self.proto.heartbeat_interval == 30.0
+        assert self.proto._sessions == {}
+        assert self.proto._rate_limits == {}
+        stats = self.proto.get_stats()
+        assert stats["total_messages"] == 0
+
+    def test_create_handshake_request(self):
+        req = self.proto.create_handshake_request(
+            client_id="agent_1",
+            client_type="hermes",
+            client_version="1.0",
+            capabilities=["streaming"],
+            auth_token="sk-xxx",
         )
-        
+        assert req.client_id == "agent_1"
+        assert req.auth_token == "sk-xxx"
+        assert "streaming" in req.capabilities
+
+    def test_create_handshake_request_no_capabilities(self):
+        req = self.proto.create_handshake_request(
+            client_id="agent_1",
+            client_type="hermes",
+            client_version="1.0",
+            capabilities=[],
+        )
         assert req.capabilities == []
-    
-    def test_create_unique_handshake_id(self):
-        """测试创建的握手请求有唯一的 handshake_id"""
-        protocol = CommunicationProtocol()
-        
-        req1 = protocol.create_handshake_request(agent_id="agent_001", api_key="a" * 36)
-        req2 = protocol.create_handshake_request(agent_id="agent_001", api_key="a" * 36)
-        
-        assert req1.handshake_id != req2.handshake_id
 
+    def test_create_handshake_response_success(self):
+        resp = self.proto.create_handshake_response(
+            accepted=True, session_id="sess_001",
+        )
+        assert resp.accepted is True
+        assert resp.session_id == "sess_001"
 
-class TestCreateHandshakeResponse:
-    """测试 create_handshake_response 方法"""
-    
-    def test_create_success(self):
-        """测试创建握手响应（成功）"""
-        protocol = CommunicationProtocol()
-        
-        resp = protocol.create_handshake_response(
-            handshake_id="hs_001",
-            success=True,
-            agent_id="agent_001"
+    def test_create_handshake_response_failure(self):
+        resp = self.proto.create_handshake_response(
+            accepted=False, error_message="认证失败",
         )
-        
-        assert isinstance(resp, HandshakeResponse)
-        assert resp.handshake_id == "hs_001"
-        assert resp.success == True
-        assert resp.agent_id == "agent_001"
-        assert resp.session_id != ""  # 成功时应该生成 session_id
-        assert resp.protocol_version == "1.0"
-        assert resp.server_capabilities == ["message_routing", "memory_access", "streaming"]
-        assert resp.heartbeat_interval == 30
-        assert resp.timeout == 300
-        assert isinstance(resp.timestamp, float)
-        assert resp.error_message is None
-    
-    def test_create_failure(self):
-        """测试创建握手响应（失败）"""
-        protocol = CommunicationProtocol()
-        
-        resp = protocol.create_handshake_response(
-            handshake_id="hs_001",
-            success=False,
-            agent_id="agent_001",
-            error_message="API key invalid"
-        )
-        
-        assert resp.success == False
-        assert resp.session_id == ""  # 失败时 session_id 为空
-        assert resp.error_message == "API key invalid"
-    
-    def test_create_with_metadata(self):
-        """测试创建握手响应（带 metadata）"""
-        protocol = CommunicationProtocol()
-        
-        resp = protocol.create_handshake_response(
-            handshake_id="hs_001",
-            success=True,
-            agent_id="agent_001",
-            metadata={"source": "test"}
-        )
-        
-        assert resp.metadata == {"source": "test"}
+        assert resp.accepted is False
+        assert resp.error_message == "认证失败"
 
+    def test_validate_handshake_version_mismatch(self):
+        req = HandshakeRequest(
+            client_id="a1", client_type="hermes", client_version="0.5",
+            capabilities=[], supported_versions=["0.5"],
+        )
+        success, error = self.proto.validate_handshake(req)
+        assert success is False
+        assert "协议版本" in error
 
-class TestValidateHandshake:
-    """测试 validate_handshake 方法"""
-    
-    def test_validate_success(self):
-        """测试验证握手请求（成功）"""
-        protocol = CommunicationProtocol()
-        
-        req = protocol.create_handshake_request(
-            agent_id="agent_001",
-            api_key="a" * 36
+    def test_validate_handshake_unknown_client_type_warns_but_passes(self):
+        req = HandshakeRequest(
+            client_id="a1", client_type="unknown_type", client_version="1.0",
+            capabilities=[],
         )
-        
-        success, error = protocol.validate_handshake(req)
-        
-        assert success == True
-        assert error is None
-    
-    def test_validate_wrong_protocol_version(self):
-        """测试验证握手请求（协议版本错误）"""
-        protocol = CommunicationProtocol()
-        
-        req = protocol.create_handshake_request(
-            agent_id="agent_001",
-            api_key="a" * 36
-        )
-        req.protocol_version = "2.0"  # 错误的协议版本
-        
-        success, error = protocol.validate_handshake(req)
-        
-        assert success == False
-        assert "不支持的协议版本" in error
-    
-    def test_validate_timestamp_too_old(self):
-        """测试验证握手请求（时间戳太旧）"""
-        protocol = CommunicationProtocol()
-        
-        req = protocol.create_handshake_request(
-            agent_id="agent_001",
-            api_key="a" * 36
-        )
-        req.timestamp = time.time() - 120  # 120秒前（超过60秒偏差）
-        
-        success, error = protocol.validate_handshake(req)
-        
-        assert success == False
-        assert "时间戳异常" in error
-    
-    def test_validate_timestamp_too_new(self):
-        """测试验证握手请求（时间戳太新）"""
-        protocol = CommunicationProtocol()
-        
-        req = protocol.create_handshake_request(
-            agent_id="agent_001",
-            api_key="a" * 36
-        )
-        req.timestamp = time.time() + 120  # 120秒后（超过60秒偏差）
-        
-        success, error = protocol.validate_handshake(req)
-        
-        assert success == False
-        assert "时间戳异常" in error
-    
-    def test_validate_api_key_wrong_length(self):
-        """测试验证握手请求（API密钥长度错误）"""
-        protocol = CommunicationProtocol()
-        
-        req = protocol.create_handshake_request(
-            agent_id="agent_001",
-            api_key="short"  # 长度不是36
-        )
-        
-        success, error = protocol.validate_handshake(req)
-        
-        assert success == False
-        assert "API密钥格式错误" in error
-    
-    def test_validate_with_custom_handler(self):
-        """测试验证握手请求（带自定义处理器）"""
-        protocol = CommunicationProtocol()
-        
-        def custom_handler(request):
-            return False, "Custom handler rejected"
-        
-        protocol.register_handshake_handler(custom_handler)
-        
-        req = protocol.create_handshake_request(
-            agent_id="agent_001",
-            api_key="a" * 36
-        )
-        
-        success, error = protocol.validate_handshake(req)
-        
-        assert success == False
-        assert "Custom handler rejected" in error
+        success, error = self.proto.validate_handshake(req)
+        assert success is True
 
-
-class TestCreateMessage:
-    """测试 create_message 方法"""
-    
-    def test_create(self):
-        """测试创建协议消息"""
-        protocol = CommunicationProtocol()
-        
-        msg = protocol.create_message(
-            sender_id="agent_001",
-            receiver_id="agent_002",
-            payload={"content": "Hello"}
+    def test_validate_handshake_success(self):
+        req = HandshakeRequest(
+            client_id="a1", client_type="hermes", client_version="1.0",
+            capabilities=[],
         )
-        
-        assert isinstance(msg, ProtocolMessage)
+        success, error = self.proto.validate_handshake(req)
+        assert success is True, f"expected True, got error: {error}"
+
+    def test_create_message(self):
+        msg = self.proto.create_message(
+            sender_id="agent_1",
+            receiver_id="server",
+            message_type=MessageType.MESSAGE,
+            payload={"text": "hello"},
+        )
         assert msg.message_type == MessageType.MESSAGE
-        assert msg.sender_id == "agent_001"
-        assert msg.receiver_id == "agent_002"
-        assert msg.payload == {"content": "Hello"}
-        assert isinstance(msg.message_id, str)
-        assert len(msg.message_id) > 0
-        assert isinstance(msg.timestamp, float)
-        assert msg.correlation_id is None
-        assert msg.metadata == {}
-    
-    def test_create_with_correlation_id(self):
-        """测试创建协议消息（带 correlation_id）"""
-        protocol = CommunicationProtocol()
-        
-        msg = protocol.create_message(
-            sender_id="agent_001",
-            receiver_id="agent_002",
-            payload={"content": "Hello"},
-            correlation_id="corr_001"
-        )
-        
-        assert msg.correlation_id == "corr_001"
-    
-    def test_create_with_metadata(self):
-        """测试创建协议消息（带 metadata）"""
-        protocol = CommunicationProtocol()
-        
-        msg = protocol.create_message(
-            sender_id="agent_001",
-            receiver_id="agent_002",
-            payload={"content": "Hello"},
-            metadata={"source": "test"}
-        )
-        
-        assert msg.metadata == {"source": "test"}
-    
-    def test_create_unique_message_id(self):
-        """测试创建的消息有唯一的 message_id"""
-        protocol = CommunicationProtocol()
-        
-        msg1 = protocol.create_message(
-            sender_id="agent_001",
-            receiver_id="agent_002",
-            payload={"content": "Hello"}
-        )
-        msg2 = protocol.create_message(
-            sender_id="agent_001",
-            receiver_id="agent_002",
-            payload={"content": "World"}
-        )
-        
-        assert msg1.message_id != msg2.message_id
-
-
-class TestCheckRateLimit:
-    """测试 check_rate_limit 方法"""
-    
-    def test_check_within_limit(self):
-        """测试检查速率限制（在限制内）"""
-        protocol = CommunicationProtocol()
-        session_id = "sess_001"
-        
-        # 发送 10 条消息（远低于 100 条/分钟）
-        for i in range(10):
-            success, error = protocol.check_rate_limit(session_id)
-            assert success == True
-            assert error is None
-    
-    def test_check_exceed_limit(self):
-        """测试检查速率限制（超过限制）"""
-        protocol = CommunicationProtocol()
-        session_id = "sess_002"
-        
-        # 发送 101 条消息（超过 100 条/分钟）
-        for i in range(protocol.MAX_MESSAGE_RATE):
-            success, error = protocol.check_rate_limit(session_id)
-            assert success == True
-        
-        # 第 101 条消息应该被限制
-        success, error = protocol.check_rate_limit(session_id)
-        assert success == False
-        assert "速率超限" in error
-    
-    def test_check_multiple_sessions(self):
-        """测试检查速率限制（多个会话）"""
-        protocol = CommunicationProtocol()
-        
-        # 会话1发送 50 条消息
-        for i in range(50):
-            success, error = protocol.check_rate_limit("sess_001")
-            assert success == True
-        
-        # 会话2发送 50 条消息
-        for i in range(50):
-            success, error = protocol.check_rate_limit("sess_002")
-            assert success == True
-        
-        # 会话1应该还能发送 50 条
-        for i in range(50):
-            success, error = protocol.check_rate_limit("sess_001")
-            assert success == True
-        
-        # 会话1现在应该被限制
-        success, error = protocol.check_rate_limit("sess_001")
-        assert success == False
-
-
-class TestCreateHeartbeat:
-    """测试 create_heartbeat 方法"""
-    
-    def test_create(self):
-        """测试创建心跳消息"""
-        protocol = CommunicationProtocol()
-        
-        msg = protocol.create_heartbeat(
-            session_id="sess_001",
-            agent_id="agent_001"
-        )
-        
-        assert isinstance(msg, ProtocolMessage)
-        assert msg.message_type == MessageType.HEARTBEAT
-        assert msg.sender_id == "agent_001"
+        assert msg.sender_id == "agent_1"
         assert msg.receiver_id == "server"
-        assert msg.payload == {"session_id": "sess_001"}
-        assert isinstance(msg.message_id, str)
-        assert isinstance(msg.timestamp, float)
-    
-    def test_create_unique_message_id(self):
-        """测试创建的心跳消息有唯一的 message_id"""
-        protocol = CommunicationProtocol()
-        
-        msg1 = protocol.create_heartbeat(session_id="sess_001", agent_id="agent_001")
-        msg2 = protocol.create_heartbeat(session_id="sess_001", agent_id="agent_001")
-        
-        assert msg1.message_id != msg2.message_id
+        assert msg.payload["text"] == "hello"
+        assert msg.message_id != ""
+        assert msg.timestamp > 0
 
+    def test_check_rate_limit_first_request(self):
+        assert self.proto.check_rate_limit("session_1") is True
 
-class TestRegisterHandlers:
-    """测试注册处理器方法"""
-    
+    def test_check_rate_limit_under_limit(self):
+        for _ in range(50):
+            self.proto.check_rate_limit("session_2")
+        assert self.proto.check_rate_limit("session_2") is True
+
+    def test_check_rate_limit_over_limit(self):
+        proto = CommunicationProtocol(rate_limit=3)
+        for _ in range(3):
+            assert proto.check_rate_limit("burst") is True
+        assert proto.check_rate_limit("burst") is False
+
+    def test_create_heartbeat(self):
+        msg = self.proto.create_heartbeat("session_1", "agent_1")
+        assert msg.message_type == MessageType.HEARTBEAT
+        assert msg.sender_id == "session_1"
+        assert msg.receiver_id == "agent_1"
+
     def test_register_handshake_handler(self):
-        """测试注册握手处理器"""
-        protocol = CommunicationProtocol()
-        
-        assert len(protocol.handshake_handlers) == 0
-        
-        def handler(request):
-            return True, None
-        
-        protocol.register_handshake_handler(handler)
-        
-        assert len(protocol.handshake_handlers) == 1
-    
+        self.proto.register_handshake_handler(lambda req: (True, ""))
+        assert len(self.proto._handshake_handlers) == 1
+
     def test_register_message_handler(self):
-        """测试注册消息处理器"""
-        protocol = CommunicationProtocol()
-        
-        assert len(protocol.message_handlers) == 0
-        
-        def handler(message):
-            pass
-        
-        protocol.register_message_handler(handler)
-        
-        assert len(protocol.message_handlers) == 1
+        self.proto.register_message_handler("message", lambda msg: None)
+        assert "message" in self.proto._message_handlers
 
-
-class TestProcessMessage:
-    """测试 process_message 方法"""
-    
-    def test_process_message_type_message(self):
-        """测试处理消息（类型为 MESSAGE）"""
-        protocol = CommunicationProtocol()
-        
-        msg = protocol.create_message(
-            sender_id="agent_001",
-            receiver_id="agent_002",
-            payload={"content": "Hello"}
+    def test_process_message_returns_ack_via_handler(self):
+        """注册 handler 且 handler 返回消息 → process_message 转发该结果"""
+        msg = self.proto.create_message(
+            sender_id="agent_1", receiver_id="server",
+            message_type=MessageType.MESSAGE, payload={"text": "ping"},
         )
-        
-        response = protocol.process_message(msg)
-        
+        ack = self.proto.create_message(
+            sender_id="server", receiver_id="agent_1",
+            message_type=MessageType.MESSAGE_ACK,
+            payload={"status": "received"},
+            correlation_id=msg.message_id,
+        )
+        async def ack_handler(m):
+            return ack
+
+        self.proto.register_message_handler("message", ack_handler)
+        response = asyncio.run(self.proto.process_message(msg))
         assert response is not None
         assert response.message_type == MessageType.MESSAGE_ACK
         assert response.correlation_id == msg.message_id
-    
-    def test_process_message_type_other(self):
-        """测试处理消息（类型非 MESSAGE）"""
-        protocol = CommunicationProtocol()
-        
-        msg = ProtocolMessage(
-            message_id="msg_001",
-            message_type=MessageType.HEARTBEAT,
-            sender_id="agent_001",
-            receiver_id="server",
-            timestamp=time.time(),
-            payload={"session_id": "sess_001"}
+
+    def test_process_message_no_handler_returns_none(self):
+        """未注册 handler → None（实现口径）"""
+        msg = self.proto.create_message(
+            sender_id="agent_1", receiver_id="server",
+            message_type=MessageType.MESSAGE, payload={"text": "ping"},
         )
-        
-        response = protocol.process_message(msg)
-        
+        response = asyncio.run(self.proto.process_message(msg))
         assert response is None
-    
-    def test_process_message_with_handlers(self):
-        """测试处理消息（带处理器）"""
-        protocol = CommunicationProtocol()
-        
-        handled_messages = []
-        
-        def handler(message):
-            handled_messages.append(message)
-        
-        protocol.register_message_handler(handler)
-        
-        msg = protocol.create_message(
-            sender_id="agent_001",
-            receiver_id="agent_002",
-            payload={"content": "Hello"}
+
+    def test_process_heartbeat_returns_ack(self):
+        msg = self.proto.create_heartbeat("session_1", "agent_1")
+        response = asyncio.run(self.proto.process_message(msg))
+        assert response is not None
+        assert response.message_type == MessageType.HEARTBEAT_ACK
+        assert response.correlation_id == msg.message_id
+
+    def test_process_handshake_accepted(self):
+        req = self.proto.create_handshake_request(
+            client_id="agent_1", client_type="hermes",
+            client_version="1.0", capabilities=["streaming"],
         )
-        
-        protocol.process_message(msg)
-        
-        assert len(handled_messages) == 1
-        assert handled_messages[0].message_id == msg.message_id
+        msg = self.proto.create_message(
+            sender_id="agent_1", receiver_id="server",
+            message_type=MessageType.HANDSHAKE_REQUEST, payload=req.to_dict(),
+        )
+        response = asyncio.run(self.proto.process_message(msg))
+        assert response is not None
+        assert response.message_type == MessageType.HANDSHAKE_RESPONSE
+        assert response.payload["accepted"] is True
+        assert response.payload.get("session_id")
 
+    def test_cleanup_session(self):
+        self.proto._sessions["session_1"] = {"client_id": "agent_1", "created_at": 100.0}
+        self.proto.cleanup_session("session_1")
+        assert self.proto.get_session("session_1") is None
 
-class TestCleanupSession:
-    """测试 cleanup_session 方法"""
-    
-    def test_cleanup_existing_session(self):
-        """测试清理已存在的会话"""
-        protocol = CommunicationProtocol()
-        session_id = "sess_001"
-        
-        # 模拟会话存在
-        protocol.active_sessions[session_id] = {"agent_id": "agent_001"}
-        protocol.message_counters[session_id] = [time.time()]
-        
-        assert session_id in protocol.active_sessions
-        assert session_id in protocol.message_counters
-        
-        protocol.cleanup_session(session_id)
-        
-        assert session_id not in protocol.active_sessions
-        assert session_id not in protocol.message_counters
-    
-    def test_cleanup_non_existent_session(self):
-        """测试清理不存在的会话"""
-        protocol = CommunicationProtocol()
-        session_id = "sess_999"
-        
-        # 会话不存在
-        assert session_id not in protocol.active_sessions
-        assert session_id not in protocol.message_counters
-        
-        # 清理不应该报错
-        protocol.cleanup_session(session_id)
-        
-        assert session_id not in protocol.active_sessions
-        assert session_id not in protocol.message_counters
-
-
-class TestGetCommunicationProtocol:
-    """测试 get_communication_protocol 函数（单例模式）"""
-    
-    def test_singleton(self):
-        """测试单例模式"""
-        protocol1 = get_communication_protocol()
-        protocol2 = get_communication_protocol()
-        
-        assert protocol1 is protocol2
-    
-    def test_multiple_calls(self):
-        """测试多次调用返回同一个实例"""
-        p1 = get_communication_protocol()
-        p2 = get_communication_protocol()
-        p3 = get_communication_protocol()
-        
-        assert p1 is p2
-        assert p2 is p3
-        assert p1 is p3
+    def test_get_stats_after_traffic(self):
+        msg = self.proto.create_message(
+            sender_id="a1", receiver_id="srv",
+            message_type=MessageType.MESSAGE, payload={"x": 1},
+        )
+        asyncio.run(self.proto.process_message(msg))
+        stats = self.proto.get_stats()
+        assert stats["total_messages"] >= 1
+        assert "active_sessions" in stats

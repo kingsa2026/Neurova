@@ -417,7 +417,7 @@ async def get_active_model(request: Request, agent_id: str = Query(default="defa
 
 
 @router.post("/switch")
-async def switch_model(request: Request, body: SwitchModelRequest):
+async def switch_model(request: Request, body: SwitchModelRequest, current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),):
     """切换模型"""
     _get_request_id(request)
 
@@ -568,7 +568,7 @@ async def get_download_source(current_user: Optional[Dict[str, Any]] = Depends(g
 @router.post("/download-source")
 async def set_download_source(
     body: DownloadSourceRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
 ):
     """写某模型的下载源选择（非法值/未知模型 400）。"""
     from neurova.tts.download_source import DownloadSourceChoice, set as set_choice
@@ -586,7 +586,7 @@ async def set_download_source(
 @router.post("/download")
 async def trigger_download(
     body: DownloadTriggerRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
 ):
     """触发模型下载（幂等；重复触发返回同一状态）。"""
     try:
