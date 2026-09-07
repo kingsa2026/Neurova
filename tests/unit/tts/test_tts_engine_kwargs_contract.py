@@ -239,7 +239,7 @@ async def test_moss_initialized_implies_real_synthesis():
         assert audio, "initialize()=True 但合成 0 字节"
         assert audio[:4] == b"RIFF" and audio[8:12] == b"WAVE", "输出必须是合法 WAV"
         data, sr = sf.read(_io.BytesIO(audio), dtype="float32")
-        assert sr == 48000, f"采样率应为 48000，实得 {sr}"
+        assert sr == 16000, f"采样率应为 16000（16k 降载契约），实得 {sr}"
         duration = len(data) / sr
         assert duration >= 0.3, f"合成时长过短: {duration:.2f}s"
         flat = data.reshape(-1) if data.ndim > 1 else data
@@ -247,3 +247,71 @@ async def test_moss_initialized_implies_real_synthesis():
         assert rms > 0.005, f"合成音频疑似静音: rms={rms:.5f}"
     finally:
         await tts.shutdown()
+
+
+# ---- 2026-09-08 三修：16k 降采样 / 掐停顿 / 音色透传 ----
+
+
+@pytest.mark.skipif(not _MOSS_MODEL_DIR.exists(), reason="本地 moss-nano 模型未下载")
+@pytest.mark.asyncio
+async def test_moss_output_16k_mono():
+    """moss 输出契约：16kHz 单声道（降压力：48k 双声道→16k 单声道，体积/内存 -6x）。"""
+    tts = MOSSNanTTS(model_dir=_MOSS_MODEL_DIR, tokenizer_dir=None, auto_download=False)
+    ok = await tts.initialize()
+    try:
+        assert ok
+        assert tts.sample_rate == 16000, f"输出采样率应 16000，实得 {tts.sample_rate}"
+        assert tts.channels == 1, f"输出声道应 1，实得 {tts.channels}"
+        audio = await tts.synthesize("采样率验证")
+        assert audio[:4] == b"RIFF"
+        import io as _io
+        import struct
+        data = audio
+        # WAV fmt 块: sample_rate @ 24..28, channels @ 22..24
+        sr = struct.unpack("<I", data[24:28])[0]
+        ch = struct.unpack("<H", data[22:24])[0]
+        assert sr == 16000 and ch == 1, f"WAV 头 sr={sr} ch={ch}"
+    finally:
+        await tts.shutdown()
+
+
+def test_moss_silence_gap_capped():
+    """块间停顿上限 0.12s（原 0.24s 且逗号自身停顿 0.4-0.6s 叠加致断续）。"""
+    import numpy as np
+
+    from neurova.tts import moss_nano as mm
+
+    pause = mm._inter_chunk_pause(16000, 1)
+    expect = int(0.12 * 16000)
+    assert pause.shape[0] == expect, f"停顿应 {expect} 样本，实得 {pause.shape[0]}"
+
+
+def test_synthesize_request_voice_speed_reach_stream():
+    """流式端点必须透传 voice/speed（agent 音色生效链）。"""
+    src = open("neurova/api/endpoints/audio.py", encoding="utf-8").read()
+    assert "synthesize_stream(" in src and "voice=body.voice" in src and "speed=body.speed" in src, \
+        "synthesize-stream 端点必须把 voice/speed 传给引擎链"
+
+
+def test_compress_silence_caps_gap():
+    """输出端静音压缩：>0.35s 的连续停顿裁到 0.3s（治逗号长停顿听感）。"""
+    sr = 16000
+    tone = (np.sin(np.linspace(0, 100, sr)) * 0.5).astype(np.float32)
+    gap = np.zeros(int(0.6 * sr), dtype=np.float32)
+    wave = np.concatenate([tone, gap, tone])
+    from neurova.tts import moss_nano as mm
+
+    out = mm._compress_silence(wave, sr)
+    win = int(0.05 * sr)
+    nf = len(out) // win
+    en = [float(np.sqrt((out[i * win:(i + 1) * win].astype("float64") ** 2).mean())) for i in range(nf)]
+    zero_run = mx = 0
+    for x in en:
+        if x < 0.005:
+            zero_run += 1
+            mx = max(mx, zero_run)
+        else:
+            zero_run = 0
+    assert mx * 0.05 <= 0.35, f"压缩后最长停顿应 ≤0.35s，实得 {mx * 0.05:.2f}s"
+    # 有声内容不丢
+    assert len(out) > 2 * sr, "有声段不得被裁"

@@ -30,6 +30,69 @@ from neurova.tts.model_downloader import ModelDownloader, get_model_downloader
 logger = get_logger(__name__)
 
 
+def _resample_linear(data: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
+    """线性插值重采样（一维波形；块级调用，无外部依赖）。"""
+    if src_rate == dst_rate or len(data) == 0:
+        return data
+    duration = len(data) / src_rate
+    target_len = max(1, int(duration * dst_rate))
+    indices = np.linspace(0, len(data) - 1, target_len)
+    return np.interp(indices, np.arange(len(data)), data).astype(np.float32)
+
+
+def _inter_chunk_pause(sample_rate: int, channels: int) -> np.ndarray:
+    """块间停顿：0.12s（原 0.24s 与模型句尾自然衰减叠加 → 听感断续）。
+
+    返回 1-D 单声道（内部波形域统一单声道）。
+    """
+    return np.zeros(int(0.12 * sample_rate), dtype=np.float32)
+
+
+# 模型自生成停顿的压缩上限（实测逗号处自生成 0.4-0.6s 静音 → 听感断续）
+_SILENCE_GAP_CAP_SEC = 0.30
+_SILENCE_RMS_THRESHOLD = 0.005
+
+
+def _compress_silence(wave: np.ndarray, sample_rate: int) -> np.ndarray:
+    """压缩超长静音：连续静音段（50ms 窗 RMS < 阈值）超上限时裁至上限。
+
+    模型在逗号/句间自生成的 0.4-0.6s 停顿是"断断续续"听感的主因；
+    保留 ≤0.3s 的自然停顿，只裁超长段。有声内容不动。
+    """
+    if len(wave) == 0:
+        return wave
+    win = max(1, int(0.05 * sample_rate))
+    n_frames = len(wave) // win
+    if n_frames == 0:
+        return wave
+    cap_frames = max(1, int(_SILENCE_GAP_CAP_SEC / 0.05))
+
+    quiet = np.zeros(n_frames, dtype=bool)
+    for i in range(n_frames):
+        seg = wave[i * win : (i + 1) * win].astype(np.float64)
+        if float(np.sqrt((seg**2).mean())) < _SILENCE_RMS_THRESHOLD:
+            quiet[i] = True
+
+    # 标记需裁掉的帧（连续静音中超出 cap 的尾部）
+    drop = np.zeros(n_frames, dtype=bool)
+    run_start = None
+    for i in range(n_frames + 1):
+        q = quiet[i] if i < n_frames else False
+        if q and run_start is None:
+            run_start = i
+        elif not q and run_start is not None:
+            if i - run_start > cap_frames:
+                drop[run_start + cap_frames : i] = True
+            run_start = None
+
+    if not drop.any():
+        return wave
+    keep = np.ones(n_frames, dtype=bool)
+    keep[drop] = False
+    out = wave[: n_frames * win].reshape(n_frames, win)[keep].reshape(-1)
+    return np.concatenate([out, wave[n_frames * win :]])
+
+
 def _create_wav_bytes(
     audio_data: np.ndarray,
     sample_rate: int = 48000,
@@ -101,12 +164,15 @@ class MOSSNanTTS(TTSBase):
     首次使用自动从 HuggingFace 下载模型（~200MB）。
     """
 
+    # codec 图原生输出采样率（下混/重采样的源基准）
+    _CODEC_SAMPLE_RATE = 48000
+
     def __init__(
         self,
         model_dir: str = None,
         tokenizer_dir: str = None,
-        sample_rate: int = 48000,
-        channels: int = 2,
+        sample_rate: int = 16000,
+        channels: int = 1,
         auto_download: bool = True,
     ):
         """
@@ -115,8 +181,9 @@ class MOSSNanTTS(TTSBase):
         Args:
             model_dir: TTS 模型目录
             tokenizer_dir: Tokenizer 模型目录（声音克隆需要）
-            sample_rate: 输出采样率
-            channels: 输出声道数
+            sample_rate: 输出采样率（默认 16000；codec 原生 48k 会重采样，
+                降低传输体积/前端内存/播放压力——用户拍板降载）
+            channels: 输出声道数（默认 1 单声道；codec 双声道下混）
             auto_download: 是否自动下载模型
         """
         super().__init__()
@@ -145,6 +212,16 @@ class MOSSNanTTS(TTSBase):
         self._total_syntheses = 0
         self._total_duration_sec = 0.0
         self._total_inference_ms = 0.0
+
+    @property
+    def sample_rate(self) -> int:
+        """输出采样率（端点/前端元数据用；codec 原生 48k 重采样后目标值）"""
+        return self._sample_rate
+
+    @property
+    def channels(self) -> int:
+        """输出声道数"""
+        return self._channels
 
     @property
     def stats(self) -> dict:
@@ -533,7 +610,7 @@ class MOSSNanTTS(TTSBase):
 
         if not frames:
             logger.warning("MOSSNanTTS 未生成任何音频帧: %s", text[:20])
-            return np.zeros((0, self._channels), dtype=np.float32)
+            return np.zeros(0, dtype=np.float32)
 
         # codec 解码：codes (1, T, 16) → 波形 (1, 2, N) 通道主序
         codes = np.array([frames], dtype=np.int32)
@@ -544,7 +621,22 @@ class MOSSNanTTS(TTSBase):
         codec_names = {o.name: codec_out[i] for i, o in enumerate(self._codec_decode_session.get_outputs())}
         audio = codec_names["audio"]
         n_samples = int(codec_names["audio_lengths"].reshape(-1)[0])
-        return audio[0, :, :n_samples].T.astype(np.float32)  # (N, 2) 交错就绪
+        wave_48k = audio[0, :, :n_samples].astype(np.float32)  # (2, N) 通道主序
+
+        # 输出降载：48kHz 双声道 → 目标采样率单声道（默认 16k，体积/内存 -6x）
+        # codec 原生输出对单声道下混无损信息（两通道本就高度相关）
+        if self._channels == 1:
+            mono = wave_48k.mean(axis=0)
+            if self._sample_rate != self._CODEC_SAMPLE_RATE:
+                mono = _resample_linear(mono, self._CODEC_SAMPLE_RATE, self._sample_rate)
+            return mono.astype(np.float32)
+        stereo = wave_48k.T  # (N, 2) 显式要求双声道时保留
+        if self._sample_rate != self._CODEC_SAMPLE_RATE:
+            stereo = np.stack(
+                [_resample_linear(stereo[:, c], self._CODEC_SAMPLE_RATE, self._sample_rate) for c in range(stereo.shape[1])],
+                axis=1,
+            )
+        return stereo.astype(np.float32)
 
     def _encode_reference_audio(self, audio_bytes: bytes) -> Optional[List[List[int]]]:
         """参考音频（可解码音频格式）→ codec codes，供声音克隆前缀行。"""
@@ -559,8 +651,9 @@ class MOSSNanTTS(TTSBase):
         if float(np.abs(ref).max()) < 1e-4:
             logger.warning("参考音频为静音（加载失败或无声源），声音克隆降级为内置音色")
             return None
-        # 上限 ~8s（参考实现按句级 3~10s 参考）
-        max_samples = 8 * self._sample_rate
+        # 上限 ~8s（参考实现按句级 3~10s 参考）；参考音频须在 codec
+        # 原生采样率域（48k），重采样由 _load_audio_from_bytes 负责
+        max_samples = 8 * self._CODEC_SAMPLE_RATE
         if len(ref) > max_samples:
             ref = ref[:max_samples]
         wave = np.stack([ref, ref], axis=0).astype(np.float32)  # (2, N) 单声道复制
@@ -610,7 +703,7 @@ class MOSSNanTTS(TTSBase):
         prompt_codes = self._resolve_prompt_codes(voice_ref_audio)
         chunks = self._split_text_chunks(text)
         if not chunks:
-            return np.zeros((0, self._channels), dtype=np.float32)
+            return np.zeros(0, dtype=np.float32)
 
         start_time = time.time()
         pieces: List[np.ndarray] = []
@@ -620,13 +713,17 @@ class MOSSNanTTS(TTSBase):
                 pieces.append(piece)
 
         if not pieces:
-            return np.zeros((0, self._channels), dtype=np.float32)
+            return np.zeros(0, dtype=np.float32)
 
-        # 块间插静音（参考实现长停顿 0.24s）
-        pause = np.zeros((int(0.24 * self._sample_rate), self._channels), dtype=np.float32)
+        # 块间插停顿（0.12s 上限：模型句尾自然衰减 + 逗号停顿已够，叠加致断续）
+        pause = _inter_chunk_pause(self._sample_rate, self._channels)
         audio = pieces[0]
         for piece in pieces[1:]:
             audio = np.concatenate([audio, pause, piece], axis=0)
+
+        # 静音压缩：模型逗号/句间自生成的 0.4-0.6s 停顿裁到 ≤0.3s
+        # （"断断续续"听感主因；块间 0.24s 停顿是次因，已降 0.12s）
+        audio = _compress_silence(audio, self._sample_rate)
 
         inference_ms = (time.time() - start_time) * 1000
         logger.info(
@@ -775,13 +872,14 @@ class MOSSNanTTS(TTSBase):
                 channels=self._channels,
             )
 
-            # 分块发送（首块含 WAV 头）
+            # 分块发送（首块含 WAV 头）。无人工 sleep：本引擎是全量合成后
+            # 伪流式，sleep(0.01)/块 曾把 816s 音频的传输拖长 163s 纯等待
+            # （手动 TTS"一直转圈"的放大器）；chunked 传输本身有背压。
             step = chunk_size * 2 * self._channels
             for i in range(0, len(wav_bytes), step):
                 chunk = wav_bytes[i : i + step]
                 if chunk:
                     yield chunk
-                await asyncio.sleep(0.01)  # 让出事件循环
 
             # 更新统计
             duration_sec = len(audio_data) / self._sample_rate
@@ -798,30 +896,28 @@ class MOSSNanTTS(TTSBase):
             raise RuntimeError(f"MOSSNanTTS 流式合成失败: {e}") from e
 
     def _load_audio_from_bytes(self, audio_bytes: bytes) -> np.ndarray:
-        """从字节数据加载音频为 numpy 数组"""
+        """从字节数据加载音频为 numpy 单声道 @ codec 原生采样率（克隆输入域）。"""
         try:
             import soundfile as sf
 
             with io.BytesIO(audio_bytes) as buf:
                 audio, sr = sf.read(buf, dtype="float32")
 
-            # 重采样到目标采样率（如果需要）
-            if sr != self._sample_rate:
-                # 简单线性插值重采样
-                duration = len(audio) / sr
-                target_len = int(duration * self._sample_rate)
-                indices = np.linspace(0, len(audio) - 1, target_len)
-                audio = np.interp(indices, np.arange(len(audio)), audio).astype(np.float32)
-
             # 转为单声道（如果是立体声）
             if audio.ndim == 2:
                 audio = audio.mean(axis=1)
+
+            # 重采样到 codec 原生采样率（encode 图输入域 48k；不是输出 16k）
+            if sr != self._CODEC_SAMPLE_RATE:
+                audio = _resample_linear(
+                    audio.astype(np.float32), sr, self._CODEC_SAMPLE_RATE
+                )
 
             return audio
 
         except Exception as e:
             logger.warning("音频加载失败: %s，返回静音", e)
-            return np.zeros(self._sample_rate, dtype=np.float32)  # 1秒静音
+            return np.zeros(self._CODEC_SAMPLE_RATE, dtype=np.float32)  # 1秒静音
 
     async def shutdown(self) -> None:
         """关闭引擎，释放资源"""
