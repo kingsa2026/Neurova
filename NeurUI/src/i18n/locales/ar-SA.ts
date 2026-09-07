@@ -498,6 +498,7 @@ export default {
     stepDuration: 'استمر {n} ث',
     ctxPanelTitle: 'سعة السياق',
     ctxCacheHitRate: 'متوسط معدل إصابة ذاكرة التخزين المؤقت',
+    ctxPanelNoData: 'لا توجد بيانات — أرسل رسالة',
     ctxSectionMessages: 'الرسائل',
     ctxSectionSystemTools: 'أدوات النظام',
     ctxSectionMcpTools: 'أدوات MCP',

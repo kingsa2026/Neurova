@@ -1,6 +1,5 @@
 <template>
   <div
-    v-if="visible"
     class="nr-ctx-usage"
     :class="{ 'nr-ctx-usage--warn': level === 'warn', 'nr-ctx-usage--danger': level === 'danger' }"
     @mouseenter="openPanel"
@@ -21,32 +20,35 @@
 
     <!-- 悬停明细面板（三需求③）：上下文容量 + 分类占比 + 命中率 -->
     <transition name="nr-ctx-pop">
-      <div v-if="panelOpen && composition" class="nr-ctx-panel" @mouseenter="cancelClose" @mouseleave="scheduleClose">
+      <div v-if="panelOpen" class="nr-ctx-panel" @mouseenter="cancelClose" @mouseleave="scheduleClose">
         <div class="nr-ctx-panel-title">{{ t('chat.ctxPanelTitle') }}</div>
-        <div class="nr-ctx-panel-headline">
-          <span class="nr-ctx-panel-big">{{ fmtCompact(usedTokens) }}</span>
-          <span class="nr-ctx-panel-sep">/</span>
-          <span class="nr-ctx-panel-total">{{ fmtCompact(contextWindow) }}</span>
-          <span class="nr-ctx-panel-pct">({{ usedPct }}%)</span>
-        </div>
-        <div class="nr-ctx-panel-bar">
-          <span
-            v-for="seg in barSegments"
-            :key="seg.key"
-            class="nr-ctx-panel-bar-seg"
-            :style="{ width: seg.pct + '%', background: seg.color }"
-          />
-        </div>
-        <div class="nr-ctx-panel-rows">
-          <div v-for="row in panelRows" :key="row.key" class="nr-ctx-panel-row">
-            <span class="nr-ctx-panel-dot" :style="{ background: row.color }" />
-            <span class="nr-ctx-panel-label">{{ row.label }}</span>
-            <span class="nr-ctx-panel-value">{{ row.pct }}%</span>
+        <template v-if="composition">
+          <div class="nr-ctx-panel-headline">
+            <span class="nr-ctx-panel-big">{{ fmtCompact(usedTokens) }}</span>
+            <span class="nr-ctx-panel-sep">/</span>
+            <span class="nr-ctx-panel-total">{{ fmtCompact(contextWindow) }}</span>
+            <span class="nr-ctx-panel-pct">({{ usedPct }}%)</span>
           </div>
-        </div>
-        <div v-if="cacheHitRate !== null" class="nr-ctx-panel-footer">
-          {{ t('chat.ctxCacheHitRate') }} <b>{{ (cacheHitRate * 100).toFixed(1) }}%</b>
-        </div>
+          <div class="nr-ctx-panel-bar">
+            <span
+              v-for="seg in barSegments"
+              :key="seg.key"
+              class="nr-ctx-panel-bar-seg"
+              :style="{ width: seg.pct + '%', background: seg.color }"
+            />
+          </div>
+          <div class="nr-ctx-panel-rows">
+            <div v-for="row in panelRows" :key="row.key" class="nr-ctx-panel-row">
+              <span class="nr-ctx-panel-dot" :style="{ background: row.color }" />
+              <span class="nr-ctx-panel-label">{{ row.label }}</span>
+              <span class="nr-ctx-panel-value">{{ row.pct }}%</span>
+            </div>
+          </div>
+          <div v-if="cacheHitRate !== null" class="nr-ctx-panel-footer">
+            {{ t('chat.ctxCacheHitRate') }} <b>{{ (cacheHitRate * 100).toFixed(1) }}%</b>
+          </div>
+        </template>
+        <div v-else class="nr-ctx-panel-empty">{{ t('chat.ctxPanelNoData') }}</div>
       </div>
     </transition>
   </div>
@@ -104,7 +106,9 @@ const compositionFetched = ref(false)
 const panelOpen = ref(false)
 let closeTimer: ReturnType<typeof setTimeout> | null = null
 
-const visible = computed(() => Boolean(props.usage || composition.value))
+/** 环图常驻（2026-09-07 二次修复）：图二交互里环是 composer 常驻元素；
+ *  零数据（新会话+后端无快照）显示 0，悬停给"暂无数据"提示而非整个消失。 */
+const visible = computed(() => true)
 
 /** 环图分母优先级：模型窗口 > composition 实测窗口 > completion/prompt 密度。 */
 const effectiveWindow = computed<number | null>(() => props.contextWindow || composition.value?.context_window || null)
@@ -370,6 +374,13 @@ watch(
 .nr-ctx-panel-footer b {
   color: #67c23a;
   font-weight: 600;
+}
+
+.nr-ctx-panel-empty {
+  padding: 14px 0 8px;
+  font-size: 12px;
+  color: var(--nr-text-tertiary, #7a7f8a);
+  text-align: center;
 }
 
 /* 弹出过渡 */

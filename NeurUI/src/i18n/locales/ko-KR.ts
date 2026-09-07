@@ -498,6 +498,7 @@ export default {
     stepDuration: '{n}초 지속',
     ctxPanelTitle: '컨텍스트 용량',
     ctxCacheHitRate: '평균 캐시 적중률',
+    ctxPanelNoData: '데이터 없음 — 메시지 전송 후 생성됩니다',
     ctxSectionMessages: '메시지',
     ctxSectionSystemTools: '시스템 도구',
     ctxSectionMcpTools: 'MCP 도구',
