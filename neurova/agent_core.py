@@ -209,9 +209,11 @@ class AgentConfig:
         behavior_rules: List[str] = None,  # 动态行为规则列表
         # TTS 配置
         enable_tts: bool = False,  # 是否启用 TTS
-        tts_engine: str = "mock",  # TTS 引擎类型 (edge/moss_nano/mock)
-        tts_voice: str = "mock",  # 音色名称
+        tts_engine: str = "auto",  # TTS 引擎类型 (edge-tts/moss-nano/sapi5/mock/auto)
+        tts_voice: str = "zh-CN-XiaoxiaoNeural",  # 音色名称
         tts_auto_download: bool = True,  # 是否自动下载模型
+        tts_speed: float = 1.0,  # 语速倍率（0.5-2.0，构造 TTSConfig 时映射为 "+X%"）
+        tts_pitch: float = 1.0,  # 音调倍率（0.5-2.0，仅 edge-tts 支持，映射为 "+XHz"）
         # ASR 配置
         enable_asr: bool = False,  # 是否启用 ASR
         asr_engine: str = "mock",  # ASR 引擎类型 (funasr/whisper/mock)
@@ -282,6 +284,8 @@ class AgentConfig:
         self.tts_engine = tts_engine
         self.tts_voice = tts_voice
         self.tts_auto_download = tts_auto_download
+        self.tts_speed = tts_speed
+        self.tts_pitch = tts_pitch
 
         # ASR 配置
         self.enable_asr = enable_asr
@@ -595,9 +599,17 @@ class SubSystemContainer:
             try:
                 from neurova.tts.manager import TTSConfig, TTSManager
 
+                # 倍率 → edge-tts 调整串：语速 +X%（50%-200%），音调 +XHz
+                #（每 0.1 倍率 ≈ 20Hz，1.0 → +0Hz）。sapi5/moss 忽略 pitch。
+                speed = max(0.5, min(2.0, float(getattr(c, "tts_speed", 1.0) or 1.0)))
+                pitch = max(0.5, min(2.0, float(getattr(c, "tts_pitch", 1.0) or 1.0)))
+                rate_str = f"{round((speed - 1.0) * 100):+d}%"
+                pitch_str = f"{round((pitch - 1.0) * 200):+d}Hz"
                 tts_config = TTSConfig(
                     engine=c.tts_engine,
                     voice=c.tts_voice,
+                    rate=rate_str,
+                    pitch=pitch_str,
                     auto_download=c.tts_auto_download,
                     model_path=str(c.workspace_path / "models" / "tts" / "moss-nano"),
                     tokenizer_path=str(c.workspace_path / "models" / "tts" / "moss-tokenizer"),

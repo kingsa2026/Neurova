@@ -89,12 +89,44 @@ def _save_agent_config(agent) -> None:
         "constitution": getattr(cfg, "constitution", ""),
         # 归属持久化：重启后 _user_can_access_agent 依赖此字段判定属主
         "owner_user_id": str(getattr(cfg, "owner_user_id", "") or ""),
+        # TTS 配置持久化：否则前端表单"改了→保存→重开全回默认"
+        "enable_tts": bool(getattr(cfg, "enable_tts", False)),
+        "tts_engine": getattr(cfg, "tts_engine", "auto"),
+        "tts_voice": getattr(cfg, "tts_voice", ""),
+        "tts_speed": float(getattr(cfg, "tts_speed", 1.0) or 1.0),
+        "tts_pitch": float(getattr(cfg, "tts_pitch", 1.0) or 1.0),
     }
     config_path = os.path.join(workspace, "agent_config.json")
     os.makedirs(workspace, exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
         _json.dump(config_data, f, ensure_ascii=False, indent=2)
     logger.debug("Saved agent config to %s", config_path)
+
+
+def _tts_fields_from_body_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """从请求体 config 字典提取 TTS 字段（CreateAgentRequest/UpdateAgentRequest
+    声明了 config 但端点此前整个不消费——表单 TTS 配置被静默丢弃的根因）。
+
+    仅返回请求中实际出现的键（update 路径做局部更新不覆盖未提及字段）。
+    """
+    if not config:
+        return {}
+    out: Dict[str, Any] = {}
+    if "tts_enabled" in config:
+        out["enable_tts"] = bool(config["tts_enabled"])
+    if "tts_voice" in config and str(config["tts_voice"] or "").strip():
+        out["tts_voice"] = str(config["tts_voice"]).strip()
+    if "tts_speed" in config:
+        try:
+            out["tts_speed"] = max(0.5, min(2.0, float(config["tts_speed"])))
+        except (TypeError, ValueError):
+            pass
+    if "tts_pitch" in config:
+        try:
+            out["tts_pitch"] = max(0.5, min(2.0, float(config["tts_pitch"])))
+        except (TypeError, ValueError):
+            pass
+    return out
 
 
 class AgentInfo(BaseModel):
@@ -110,6 +142,8 @@ class AgentInfo(BaseModel):
     last_active: Optional[str] = None
     memory_enabled: bool = False
     tools_count: int = 0
+    # 回显 config（TTS 等）：编辑表单重开后从响应恢复已保存参数
+    config: Dict[str, Any] = Field(default_factory=dict)
 
 
 class CreateAgentRequest(BaseModel):
@@ -220,6 +254,14 @@ def agent_to_info(agent) -> Dict[str, Any]:
         if hasattr(config, "llm_config"):
             info["model"] = getattr(config.llm_config, "model", "")
         info["provider"] = getattr(config, "llm_provider", "") or ""
+        # TTS 配置回显（与 _save_agent_config 落盘键一致，snake_case）
+        info["config"] = {
+            "enable_tts": bool(getattr(config, "enable_tts", False)),
+            "tts_engine": getattr(config, "tts_engine", "auto"),
+            "tts_voice": getattr(config, "tts_voice", ""),
+            "tts_speed": float(getattr(config, "tts_speed", 1.0) or 1.0),
+            "tts_pitch": float(getattr(config, "tts_pitch", 1.0) or 1.0),
+        }
 
     # 获取工具数量
     if hasattr(agent, "tool_executor"):
@@ -325,6 +367,7 @@ async def create_agent(
             os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "agent_workspaces", agent_id
         )
         os.makedirs(workspace_path, exist_ok=True)
+        tts_fields = _tts_fields_from_body_config(body.config)
         config = AgentConfig(
             name=body.name,
             agent_id=agent_id,
@@ -334,6 +377,10 @@ async def create_agent(
             llm_model=body.model or "gpt-4",
             llm_provider=body.provider or body.config.get("provider", "") if body.config else "",
             description=body.description or "",
+            enable_tts=tts_fields.get("enable_tts", False),
+            tts_voice=tts_fields.get("tts_voice", "zh-CN-XiaoxiaoNeural"),
+            tts_speed=tts_fields.get("tts_speed", 1.0),
+            tts_pitch=tts_fields.get("tts_pitch", 1.0),
         )
 
         agent = Agent(config=config)
@@ -393,6 +440,21 @@ async def update_agent(
         agent.config.llm_config.model = body.model
     if body.provider is not None and hasattr(agent, "config"):
         agent.config.llm_provider = body.provider
+
+    # TTS 配置更新（局部：仅覆盖请求中出现的键）
+    tts_fields = _tts_fields_from_body_config(body.config)
+    if tts_fields:
+        for key, value in tts_fields.items():
+            setattr(agent.config, key, value)
+        # 运行时 tts_manager 重建：enable_tts/voice/speed/pitch 变更需重开引擎
+        try:
+            from neurova.agent_core import SubSystemContainer
+
+            if getattr(agent, "tts_manager", None) is not None or tts_fields.get("enable_tts"):
+                SubSystemContainer(agent).init_voice()
+                logger.info("Rebuilt tts_manager after TTS config update: %s", tts_fields)
+        except Exception as e:
+            logger.warning("Failed to rebuild tts_manager: %s", e)
 
     # 更新运行时的 AgentLLMClient（provider/model 变更后必须重建）
     if (body.model is not None or body.provider is not None) and hasattr(agent, "llm_client"):

@@ -129,7 +129,7 @@ async def test_edge_tts_long_text_concat(monkeypatch):
             raise StopAsyncIteration
 
     class _FakeCommunicate:
-        def __init__(self, text, voice=None, rate=None, volume=None):
+        def __init__(self, text, voice=None, rate=None, volume=None, pitch=None):
             calls.append(text)
             self.stream = lambda: _FakeStream(f"[{len(calls)}]")
 

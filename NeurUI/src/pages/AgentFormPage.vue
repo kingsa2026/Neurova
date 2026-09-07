@@ -108,13 +108,12 @@
 
           <template v-if="formState.ttsEnabled">
             <a-form-item :label="t('agent.ttsVoice')">
-              <a-select v-model:value="formState.ttsVoice" :placeholder="t('agent.ttsVoice')" style="width: 100%">
-                <a-select-option value="alloy">{{ t('aigc.voiceAlloy') }}</a-select-option>
-                <a-select-option value="echo">{{ t('aigc.voiceEcho') }}</a-select-option>
-                <a-select-option value="fable">{{ t('aigc.voiceFable') }}</a-select-option>
-                <a-select-option value="onyx">{{ t('aigc.voiceOnyx') }}</a-select-option>
-                <a-select-option value="nova">{{ t('aigc.voiceNova') }}</a-select-option>
-                <a-select-option value="shimmer">{{ t('aigc.voiceShimmer') }}</a-select-option>
+              <!-- edge-tts 中文音色（后端 EdgeTTS/TTSManager 真实消费的 voice 值） -->
+              <a-select v-model:value="formState.ttsVoice" :placeholder="t('agent.ttsVoice')" style="width: 100%" allow-clear>
+                <a-select-option value="zh-CN-XiaoxiaoNeural">{{ t('agent.voiceXiaoxiao') }}</a-select-option>
+                <a-select-option value="zh-CN-XiaoyiNeural">{{ t('agent.voiceXiaoyi') }}</a-select-option>
+                <a-select-option value="zh-CN-YunxiNeural">{{ t('agent.voiceYunxi') }}</a-select-option>
+                <a-select-option value="zh-CN-YunyangNeural">{{ t('agent.voiceYunyang') }}</a-select-option>
               </a-select>
             </a-form-item>
 
