@@ -271,7 +271,11 @@ async def synthesize_speech_stream(request: Request, body: SynthesizeRequest):
     # 先取首个 chunk 再声明响应头：流式 fallback 在首个 chunk 产生前切换引擎
     # （实测 moss 失败 → edge，字节是 MP3 而旧实现头部恒标 moss/audio/wav），
     # 取首块后引擎身份才定局，头部才能说真话；后续块照常流式下发。
-    gen = engine.synthesize_stream(body.text)
+    # voice/speed 透传：编辑 Agent 换音色的生效链（前端 currentAgent.config
+    # 带参；moss 忽略语义参数，edge-tts 请求级覆盖音色/语速）。
+    gen = engine.synthesize_stream(
+        body.text, voice=body.voice, speed=body.speed
+    )
     try:
         first_chunk = await gen.__anext__()
     except StopAsyncIteration:
