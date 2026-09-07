@@ -16,6 +16,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+os.environ.setdefault("NEUROVA_MASTER_RECOVERY_PASSWORD", "test_master_recovery")
 os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_p0_fixes_0123456789")
 
 from neurova.api.endpoints import auth

@@ -87,7 +87,14 @@ def _tail_text_file(path: str, lines: int = 100) -> str:
         return f"Error reading file: {e}"
 
 
-def _get_user_id(request) -> str:
+def _get_user_id(request, current_user: Optional[Dict[str, Any]] = None) -> str:
+    """用户身份解析：JWT current_user 优先，request.state 兜底。
+
+    根因修复 2026-09-07：无中间件注入 request.state.user_id 时旧实现恒返回
+    "anonymous"，导致会话端点越权校验形同虚设（anonymous==anonymous 恒过）。
+    """
+    if isinstance(current_user, dict) and current_user.get("user_id"):
+        return str(current_user["user_id"])
     return getattr(request.state, "user_id", "anonymous")
 
 
@@ -387,9 +394,9 @@ async def post_console_chat(
 ):
     """流式聊天接口（SSE）"""
     # R-3: 附件归属用 JWT 用户身份（与 /files/upload 一致）。
-    # _get_user_id(request) 读 request.state.user_id——中间件从未注入，
+    # _get_user_id(request, current_user) 读 request.state.user_id——中间件从未注入，
     # 恒为 "anonymous"，导致 attach_files 找不到属主文件。
-    user_id = str(current_user.get("user_id", "")) if isinstance(current_user, dict) else _get_user_id(request)
+    user_id = str(current_user.get("user_id", "")) if isinstance(current_user, dict) else _get_user_id(request, current_user)
     repo = get_session_repository()
     agent_id = getattr(body, "agent_id", "") or ""
 
@@ -522,7 +529,10 @@ async def post_console_chat(
                     return {"text": str(response), "reasoning": None, "tool_messages": []}
                 except Exception as e:
                     logger.warning("Console chat error: %s", e, exc_info=True)
-                    return {"text": f"Error: {str(e)}", "reasoning": None, "tool_messages": []}
+                    # 2026-09-07 修复：携带 error 标志，flush 阶段以 error 事件
+                    # 发给前端（此前该文本从不入 SSE → 前端气泡空白无提示）
+                    return {"text": f"Error: {str(e)}", "reasoning": None,
+                            "tool_messages": [], "error": str(e)}
                 finally:
                     # 通知消费循环：本轮事件已全部产生
                     queue.put_nowait(_EMIT_DONE)
@@ -575,6 +585,15 @@ async def post_console_chat(
                         flush_events.append(event)
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
+                # 2026-09-07 修复：LLM 调用失败时把错误作为 error 事件发给
+                # 前端（前端 processSSEEvent 已有 error 分支追加 **Error:**，
+                # 429 文本可触发限流横幅一键换模型）——原实现错误文本只写日志，
+                # 用户看到空白气泡
+                if result.get("error"):
+                    err_event = {"type": "error", "message": result["error"]}
+                    flush_events.append(err_event)
+                    yield f"data: {json.dumps(err_event, ensure_ascii=False)}\n\n"
+
                 flush_events.append({"type": "done", "session_id": session_id})
                 # QwenPaw turn_usage 对齐:done 之前发一次真实 usage 事件
                 # (入账已在 MultiModelLLMClient 下沉,此处只读 last_call 不双计;
@@ -615,9 +634,15 @@ async def post_console_chat_stop(session_id: str):
 
 
 @router.get("/chat/history")
-async def get_chat_history(session_id: str, request: Request):
+async def get_chat_history(
+    session_id: str,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取聊天历史"""
     repo = get_session_repository()
+    # 归属校验（根因修复 2026-09-07：原实现无鉴权可读任意会话）
+    _find_session_target(repo, session_id, _get_user_id(request, current_user))
     # history 端点没有 agent_id 参数，用空字符串查询（SessionManager 支持）
     messages = repo.get_history(agent_id="", session_id=session_id)
     if not messages:
@@ -632,9 +657,11 @@ async def get_chat_history(session_id: str, request: Request):
 
 
 @router.post("/chat/new")
-async def post_console_chat_new(request: Request):
+async def post_console_chat_new(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),):
     """创建新会话"""
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     agent_id = ""
     title = "新对话"
@@ -650,9 +677,13 @@ async def post_console_chat_new(request: Request):
 
 
 @router.get("/chat/sessions")
-async def get_chat_sessions(request: Request, agent_id: str = Query(default="")):
+async def get_chat_sessions(
+    request: Request,
+    agent_id: str = Query(default=""),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """列出所有会话（按 agent_id 过滤）"""
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     sessions = repo.list_sessions(agent_id=agent_id, user_id=user_id)
     # 只返回摘要信息，不返回完整消息列表
@@ -677,9 +708,13 @@ class ReorderSessionsRequest(BaseModel):
 
 
 @router.post("/chat/sessions/reorder")
-async def reorder_chat_sessions(body: ReorderSessionsRequest, request: Request):
+async def reorder_chat_sessions(
+    body: ReorderSessionsRequest,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """按用户拖拽顺序持久化会话排序（QwenPaw /chats/groups/order 对齐）。"""
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     ordered_ids = [sid for sid in (body.ordered_ids or []) if sid]
     if not ordered_ids:
@@ -696,9 +731,10 @@ async def reorder_chat_sessions(body: ReorderSessionsRequest, request: Request):
 
 
 @router.delete("/chat/sessions/{session_id}")
-async def delete_chat_session(session_id: str, request: Request):
+async def delete_chat_session(session_id: str, request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),):
     """删除指定会话"""
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     # 查找 session 验证 user_id（SessionRepository 不接受 user_id 参数）
     sessions = repo.list_sessions()
@@ -719,14 +755,15 @@ async def delete_chat_session(session_id: str, request: Request):
 
 
 @router.post("/chat/sessions/{session_id}/auto-title")
-async def auto_title_chat_session(session_id: str, request: Request):
+async def auto_title_chat_session(session_id: str, request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),):
     """
     会话语义标题自动填充：LLM 概括首轮对话，失败回退首条用户消息截断。
 
     仅当会话仍为默认标题（新对话/新建对话）时应被调用（前端判定）；
     端点为幂等重命名，失败不返回 500（标题生成内部已兜底）。
     """
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     sessions = repo.list_sessions()
     target = [s for s in sessions if s.get("session_id") == session_id or s.get("id") == session_id]
@@ -786,9 +823,13 @@ def _session_summary(s: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @router.get("/chat/sessions/archived")
-async def get_archived_chat_sessions(request: Request, agent_id: str = Query(default="")):
+async def get_archived_chat_sessions(
+    request: Request,
+    agent_id: str = Query(default=""),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """列出存档会话"""
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     sessions = repo.list_archived_sessions(agent_id=agent_id, user_id=user_id)
     summaries = [_session_summary(s) for s in sessions]
@@ -800,9 +841,14 @@ class PinSessionRequest(BaseModel):
 
 
 @router.post("/chat/sessions/{session_id}/pin")
-async def pin_chat_session(session_id: str, body: PinSessionRequest, request: Request):
+async def pin_chat_session(
+    session_id: str,
+    body: PinSessionRequest,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """置顶/取消置顶会话（补课 2.3）"""
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     target = _find_session_target(repo, session_id, user_id)
     agent_id = target.get("agent_id", "")
@@ -812,9 +858,10 @@ async def pin_chat_session(session_id: str, body: PinSessionRequest, request: Re
 
 
 @router.post("/chat/sessions/{session_id}/archive")
-async def archive_chat_session(session_id: str, request: Request):
+async def archive_chat_session(session_id: str, request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),):
     """存档会话（历史列表隐藏，数据保留，可恢复）"""
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     target = _find_session_target(repo, session_id, user_id)
     agent_id = target.get("agent_id", "")
@@ -824,9 +871,10 @@ async def archive_chat_session(session_id: str, request: Request):
 
 
 @router.post("/chat/sessions/{session_id}/unarchive")
-async def unarchive_chat_session(session_id: str, request: Request):
+async def unarchive_chat_session(session_id: str, request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),):
     """恢复存档会话为正常会话"""
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     archived = repo.list_archived_sessions()
     target = next(
@@ -847,9 +895,10 @@ class RenameSessionRequest(BaseModel):
 
 
 @router.put("/chat/sessions/{session_id}")
-async def rename_chat_session(session_id: str, body: RenameSessionRequest, request: Request):
+async def rename_chat_session(session_id: str, body: RenameSessionRequest, request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),):
     """重命名指定会话"""
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     # 查找 session 验证 user_id（与 delete_chat_session 保持一致：空 user_id 视为共享，
     # 允许任何已认证用户重命名，避免"看得到改不了"的死锁，P2-#20）。
@@ -912,14 +961,15 @@ def _sync_agent_history_from_session(agent, agent_id: str, session_id: str, repo
 
 
 @router.delete("/chat/rounds")
-async def delete_chat_round(session_id: str, timestamp: str, request: Request):
+async def delete_chat_round(session_id: str, timestamp: str, request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),):
     """删除一轮对话（user 消息 + 相邻 assistant 回复）。
 
     同时清除该轮对应的记忆并同步存活 agent 的内存会话历史，
     否则 agent 仍会"记得"已删除的轮次。前端"编辑最后一条用户消息"
     也复用本端点（删旧轮 → 走原发送链路重发 → 管线写入新轮记录与记忆）。
     """
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     target = _find_session_target(repo, session_id, user_id)
     agent_id = target.get("agent_id", "")
@@ -1036,7 +1086,11 @@ def _maybe_crystallize_annotation(
 
 
 @router.post("/chat/feedback")
-async def post_chat_feedback(body: FeedbackRequest, request: Request):
+async def post_chat_feedback(
+    body: FeedbackRequest,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """点赞/点踩 agent 回复。
 
     持久化到该轮 assistant 消息 metadata（随 session 留存，供质量分析），
@@ -1044,7 +1098,7 @@ async def post_chat_feedback(body: FeedbackRequest, request: Request):
     dislike 抑制（-15，加速遗忘）。feedback=None 表示取消已有反馈。
     timestamp 为所在轮次的定位键（与删除轮次同一套双路定位规则）。
     """
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     target = _find_session_target(repo, body.session_id, user_id)
     agent_id = target.get("agent_id", "")
@@ -1088,14 +1142,19 @@ class ForkSessionRequest(BaseModel):
 
 
 @router.post("/chat/sessions/{session_id}/fork")
-async def fork_chat_session(session_id: str, body: ForkSessionRequest, request: Request):
+async def fork_chat_session(
+    session_id: str,
+    body: ForkSessionRequest,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """会话分叉（ZCode fork 对齐）：按 until_timestamp 截取历史复制为新会话。
 
     双路定位（timestamp / metadata.client_timestamp）与删除轮次同一套规则；
     分叉出的新会话独立演进，原会话不动。agent 内存历史不注入（由新会话
     首轮对话按正常链路加载 session 历史）。
     """
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     target = _find_session_target(repo, session_id, user_id)
     agent_id = target.get("agent_id", "")
@@ -1145,13 +1204,17 @@ class CheckpointRequest(BaseModel):
 
 
 @router.post("/chat/checkpoint")
-async def set_chat_checkpoint(body: CheckpointRequest, request: Request):
+async def set_chat_checkpoint(
+    body: CheckpointRequest,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """消息钩子/检查点（ZCode checkpoint 对齐）：写消息 metadata.checkpoint。
 
     前端在消息操作条设/撤钩子；加载历史时读取 metadata 渲染锚点标记。
     复用 feedback 的双路定位契约。
     """
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     target = _find_session_target(repo, body.session_id, user_id)
     agent_id = target.get("agent_id", "")
@@ -1170,6 +1233,7 @@ async def set_chat_checkpoint(body: CheckpointRequest, request: Request):
 @router.get("/chat/feedback/stats")
 async def get_feedback_stats(
     request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
     agent_id: str = Query(default=""),
     limit: int = Query(default=50, ge=1, le=200),
 ):
@@ -1178,7 +1242,7 @@ async def get_feedback_stats(
     扫描最近 limit 个会话的 assistant 消息 metadata.feedback 聚合计数，
     并返回最近 20 条反馈明细（按时间倒序）。
     """
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     sessions = repo.list_sessions(agent_id=agent_id, user_id=user_id)[:limit]
 
@@ -1253,7 +1317,10 @@ async def post_console_upload(request: Request, file: UploadFile = File(...)):
 
 
 @router.get("/uploads")
-async def list_console_uploads(request: Request):
+async def list_console_uploads(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """列出已上传文件"""
     files = []
     for f in sorted(_CONSOLE_UPLOAD_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
@@ -1269,7 +1336,10 @@ async def list_console_uploads(request: Request):
 
 
 @router.get("/uploads/{filename}")
-async def get_console_upload(filename: str):
+async def get_console_upload(
+    filename: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """下载文件"""
     safe = _safe_filename(filename)
     path = _CONSOLE_UPLOAD_DIR / safe
@@ -1279,7 +1349,10 @@ async def get_console_upload(filename: str):
 
 
 @router.delete("/uploads/{filename}")
-async def delete_console_upload(filename: str):
+async def delete_console_upload(
+    filename: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """删除文件"""
     safe = _safe_filename(filename)
     path = _CONSOLE_UPLOAD_DIR / safe
@@ -1293,7 +1366,10 @@ async def delete_console_upload(filename: str):
 
 
 @router.get("/debug/logs")
-async def get_backend_debug_logs(lines: int = 100):
+async def get_backend_debug_logs(
+    lines: int = 100,
+    _admin: Dict[str, Any] = Depends(require_admin()),
+):
     """查看后端日志"""
     log_path = config.get("NEUROVA_LOG_FILE", "logs/neurova.log")
     if os.path.exists(log_path):
@@ -1304,7 +1380,9 @@ async def get_backend_debug_logs(lines: int = 100):
 
 
 @router.get("/debug/status")
-async def get_system_status():
+async def get_system_status(
+    _admin: Dict[str, Any] = Depends(require_admin()),
+):
     """系统状态"""
     import psutil
 
@@ -1331,18 +1409,22 @@ async def get_system_status():
 @router.post("/debug/command")
 async def post_debug_run_command(
     body: CommandRequest, current_user: Dict[str, Any] = Depends(require_admin())
-):
+,):
     """运行调试命令（仅限管理员，避免任意命令执行 / 密钥泄露）"""
     # 注意： deliberately 排除 `env` —— 它会泄露全部环境变量（含密钥/令牌），
     # 属安全敏感命令，绝不允许通过 HTTP 调试接口执行（P1-#7）。
-    allowed = {"ls", "pwd", "echo", "whoami", "date", "python --version", "node --version"}
+    allowed = {"ls", "pwd", "whoami", "date", "python --version", "node --version"}
     cmd = body.command.strip()
-    if cmd not in allowed and not any(cmd.startswith(a) for a in ["echo "]):
+    # 白名单精确匹配 + exec 数组执行（根因修复 2026-09-07：原 echo 前缀分支
+    # 配 shell=True 可被 `echo hi; <任意命令>` 绕过，白名单形同虚设）
+    if cmd not in allowed:
         raise HTTPException(status_code=403, detail=f"Command '{cmd}' not allowed. Allowed: {sorted(allowed)}")
 
     try:
-        proc = await asyncio.create_subprocess_shell(
-            cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        import shlex as _shlex
+
+        proc = await asyncio.create_subprocess_exec(
+            *_shlex.split(cmd), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
         return {
@@ -1364,8 +1446,18 @@ async def post_debug_run_command(
 
 
 @router.websocket("/ws/{client_id}")
-async def websocket_console(websocket: WebSocket, client_id: str):
-    """WebSocket 连接，支持推送消息和双向通信。"""
+async def websocket_console(websocket: WebSocket, client_id: str, token: str = Query(default="")):
+    """WebSocket 连接，支持推送消息和双向通信。
+
+    根因修复 2026-09-07：原实现直接 accept 无鉴权，未认证者可驱动 agent.chat。
+    现要求 query ?token=<JWT>（或 Authorization: Bearer 头），校验失败关闭 4401。
+    """
+    from neurova.api.auth import verify_access_token
+
+    payload = verify_access_token(token) if token else None
+    if not payload:
+        await websocket.close(code=4401)
+        return
     await _manager.connect(websocket, client_id)
     try:
         while True:
@@ -1399,24 +1491,29 @@ async def websocket_console(websocket: WebSocket, client_id: str):
 
 
 @router.get("/push/messages")
-async def get_push_messages(request: Request, since: float = 0):
+async def get_push_messages(
+    request: Request,
+    since: float = 0,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """获取推送消息（轮询方式）"""
-    user_id = _get_user_id(request)
+    user_id = _get_user_id(request, current_user)
     messages = _manager.get_messages(user_id, since)
     return {"code": 0, "message": "success", "data": {"messages": messages, "total": len(messages)}}
 
 
 @router.post("/push/message")
-async def post_push_message(body: dict, request: Request):
+async def post_push_message(body: dict, request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),):
     """发送推送消息（广播给所有WebSocket连接）"""
     message = {
         "type": "push",
         "content": body.get("content", ""),
-        "sender": _get_user_id(request),
+        "sender": _get_user_id(request, current_user),
         "timestamp": time.time(),
     }
     await _manager.broadcast(message)
-    _manager.store_message(_get_user_id(request), message)
+    _manager.store_message(_get_user_id(request, current_user), message)
     return {"code": 0, "message": "Push sent"}
 
 

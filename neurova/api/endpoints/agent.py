@@ -441,7 +441,7 @@ async def update_agent(
 
 
 @router.delete("/{agent_id}")
-async def delete_agent(request: Request, agent_id: str = FastAPIPath(...)):
+async def delete_agent(request: Request, agent_id: str = FastAPIPath(...), current_user: Dict[str, Any] = Depends(get_current_user),):
     """删除 Agent"""
     _get_request_id(request)
 
@@ -555,7 +555,7 @@ async def get_agent_stats(request: Request, agent_id: str = FastAPIPath(...)):
 
 
 @router.post("/{agent_id}/switch")
-async def switch_agent(request: Request, agent_id: str = FastAPIPath(...)):
+async def switch_agent(request: Request, agent_id: str = FastAPIPath(...), current_user: Dict[str, Any] = Depends(get_current_user)):
     """切换默认 Agent"""
     _get_request_id(request)
 
@@ -595,8 +595,7 @@ async def get_constitution(request: Request, agent_id: str = FastAPIPath(...)):
 async def update_constitution(
     request: Request,
     agent_id: str = FastAPIPath(...),
-    body: UpdateConstitutionRequest = Body(...),
-):
+    body: UpdateConstitutionRequest = Body(...), current_user: Dict[str, Any] = Depends(get_current_user),):
     """更新 Agent 宪法"""
     _get_request_id(request)
 
@@ -650,7 +649,7 @@ async def make_decision(
 
 
 @router.post("/{agent_id}/rebuild-loop")
-async def rebuild_loop(request: Request, agent_id: str = FastAPIPath(...), model: str = Query(default=None)):
+async def rebuild_loop(request: Request, agent_id: str = FastAPIPath(...), model: str = Query(default=None), current_user: Dict[str, Any] = Depends(get_current_user),):
     """重建 Agent Loop（热切换模型）"""
     _get_request_id(request)
 

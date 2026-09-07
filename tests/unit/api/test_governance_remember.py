@@ -46,6 +46,8 @@ def client(monkeypatch):
 
     app = FastAPI()
     app.include_router(gov_mod.router, prefix="/v1/governance")
+    from neurova.api.deps import get_current_user
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": "admin1", "role": "admin"}
     return TestClient(app), captured
 
 
