@@ -129,7 +129,19 @@ class ModelDownloader:
         except (KeyError, ValueError):
             return False
 
+
+    _ensure_locks: dict = {}
+    _ensure_locks_guard = __import__("threading").Lock()
+
     def ensure_model(self, model_name: str, force: bool = False, source: str = "auto") -> Path:
+        """ensure_model 并发外壳（audit SUB-P2-17）：同一模型的下载服务线程与
+        MOSS 引擎自动下载并发时会交叉写同一目录产生损坏文件；按 model 串行化。"""
+        with self._ensure_locks_guard:
+            lock = self._ensure_locks.setdefault(model_name, __import__("threading").Lock())
+        with lock:
+            return self._ensure_model_impl(model_name, force=force, source=source)
+
+    def _ensure_model_impl(self, model_name: str, force: bool = False, source: str = "auto") -> Path:
         """
         确保模型已下载，没有则自动下载
 
@@ -374,15 +386,26 @@ def _download_via_hf_mirror(registry: dict, model_dir: Path, progress_cb=None) -
         dest = model_dir / fname
         if dest.exists() and dest.stat().st_size > 0:
             continue  # 断点续传粒度：文件级
+        # 2026-09-07 根因修复（audit SUB-P1-8）：下载到 .part 临时文件，
+        # 成功后 os.replace 原子提交——原实现中断留下截断文件会被
+        # "exists 且 >0 字节" 误判为已完成，模型永久损坏
         req = urllib.request.Request(
             base + fname, headers={"User-Agent": "Neurova/1.0"}
         )
-        with urllib.request.urlopen(req, timeout=300) as resp, open(dest, "wb") as f:
-            while True:
-                chunk = resp.read(1024 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
+        part = dest.with_suffix(dest.suffix + ".part")
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp, open(part, "wb") as f:
+                while True:
+                    chunk = resp.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+            import os as _os
+
+            _os.replace(part, dest)
+        except Exception:
+            part.unlink(missing_ok=True)
+            raise
 
 
 def _download_via_huggingface(registry: dict, model_dir: Path, progress_cb=None) -> None:

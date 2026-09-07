@@ -123,12 +123,15 @@ class SessionManager(SessionRepository):
                 sessions_dir or os.environ.get("NEUROVA_SESSIONS_DIR") or "sessions"
             )
             self._sessions_dir.mkdir(parents=True, exist_ok=True)
-            self._file_locks: Dict[str, Lock] = {}
+            # 2026-09-07 根因修复（audit SUB-P0-6）：文件锁改 RLock——
+            # _quarantine_broken_file 在 add_message 等持锁路径内被调用且
+            # 自行再次取锁，非重入 Lock 会同线程永久死锁
+            self._file_locks: Dict[str, RLock] = {}
             # S3 修复 (Critical #4 TOCTOU): 保护 _file_locks dict 的独立 RLock.
             # RLock 允许 _get_file_lock 在持锁时被同线程重入调用 (如 __init__ 内部).
             self._file_locks_lock = RLock()
 
-    def _get_file_lock(self, file_path) -> Lock:
+    def _get_file_lock(self, file_path) -> RLock:
         """获取文件的线程锁 (S3 修复 TOCTOU: DCL 双重检查锁定).
 
         Bug (Critical #4): 原 `if key not in dict: dict[key] = Lock()` 是
@@ -701,38 +704,42 @@ class SessionManager(SessionRepository):
         """
         date = datetime.now().strftime("%Y-%m-%d")
         file_path = self._get_session_file(agent_id, session_id, date)
-        session_data = self._read_session_file(file_path)
+        # 2026-09-07 根因修复（audit SUB-P1-7）：read-modify-write 全程持
+        # file_lock——原锁外读陈旧快照写回，并发 add_message 会静默回滚最后一轮
+        file_lock = self._get_file_lock(file_path)
+        with file_lock:
+            session_data = self._read_session_file(file_path)
 
-        now = datetime.now().isoformat()
-        msg: Dict[str, Any] = {
-            "role": role,
-            "content": content,
-            "timestamp": now,
-        }
-        if metadata:
-            msg["metadata"] = metadata
-
-        if session_data is None:
-            # 文件不存在（可能跨日），创建新记录
-            session_data = {
-                "agent_id": agent_id,
-                "session_id": session_id,
-                "session_date": date,
-                "messages": [msg],
-                "created_at": now,
-                "updated_at": now,
-                "total_messages": 1,
-                "title": "新对话",
-                "user_id": "",
+            now = datetime.now().isoformat()
+            msg: Dict[str, Any] = {
+                "role": role,
+                "content": content,
+                "timestamp": now,
             }
-        else:
-            if "messages" not in session_data:
-                session_data["messages"] = []
-            session_data["messages"].append(msg)
-            session_data["updated_at"] = now
-            session_data["total_messages"] = len(session_data["messages"])
+            if metadata:
+                msg["metadata"] = metadata
 
-        return self._write_session_file(file_path, session_data)
+            if session_data is None:
+                # 文件不存在（可能跨日），创建新记录
+                session_data = {
+                    "agent_id": agent_id,
+                    "session_id": session_id,
+                    "session_date": date,
+                    "messages": [msg],
+                    "created_at": now,
+                    "updated_at": now,
+                    "total_messages": 1,
+                    "title": "新对话",
+                    "user_id": "",
+                }
+            else:
+                if "messages" not in session_data:
+                    session_data["messages"] = []
+                session_data["messages"].append(msg)
+                session_data["updated_at"] = now
+                session_data["total_messages"] = len(session_data["messages"])
+
+            return self._write_session_file_unlocked(file_path, session_data)
 
     def get_history(self, agent_id: str, session_id: str, max_messages: int = 0) -> List[Dict[str, Any]]:
         """获取 session 所有日期的所有消息（聚合）。
@@ -843,13 +850,15 @@ class SessionManager(SessionRepository):
 
         ok = True
         for file_path in file_paths:
-            session_data = self._read_session_file(file_path)
-            if not session_data:
-                ok = False
-                continue
-            session_data["pinned"] = bool(pinned)
-            if not self._write_session_file(file_path, session_data):
-                ok = False
+            file_lock = self._get_file_lock(file_path)
+            with file_lock:
+                session_data = self._read_session_file(file_path)
+                if not session_data:
+                    ok = False
+                    continue
+                session_data["pinned"] = bool(pinned)
+                if not self._write_session_file_unlocked(file_path, session_data):
+                    ok = False
         return ok
 
     def set_sessions_sort_order(self, agent_id: str, ordered_ids: List[str]) -> bool:
@@ -866,18 +875,20 @@ class SessionManager(SessionRepository):
         order_map = {sid: idx + 1 for idx, sid in enumerate(ordered_ids)}
         ok = True
         for file_path in agent_dir.glob("session_*.json"):
-            session_data = self._read_session_file(file_path)
-            if not session_data:
-                continue
-            sid = session_data.get("session_id", "")
-            if sid not in order_map:
-                continue
-            new_order = order_map[sid]
-            if session_data.get("sort_order", 0) == new_order:
-                continue
-            session_data["sort_order"] = new_order
-            if not self._write_session_file(file_path, session_data):
-                ok = False
+            file_lock = self._get_file_lock(file_path)
+            with file_lock:
+                session_data = self._read_session_file(file_path)
+                if not session_data:
+                    continue
+                sid = session_data.get("session_id", "")
+                if sid not in order_map:
+                    continue
+                new_order = order_map[sid]
+                if session_data.get("sort_order", 0) == new_order:
+                    continue
+                session_data["sort_order"] = new_order
+                if not self._write_session_file_unlocked(file_path, session_data):
+                    ok = False
         return ok
 
     def rename_session(self, agent_id: str, session_id: str, title: str) -> bool:
@@ -890,13 +901,15 @@ class SessionManager(SessionRepository):
 
         ok = True
         for file_path in file_paths:
-            session_data = self._read_session_file(file_path)
-            if not session_data:
-                ok = False
-                continue
-            session_data["title"] = title
-            if not self._write_session_file(file_path, session_data):
-                ok = False
+            file_lock = self._get_file_lock(file_path)
+            with file_lock:
+                session_data = self._read_session_file(file_path)
+                if not session_data:
+                    ok = False
+                    continue
+                session_data["title"] = title
+                if not self._write_session_file_unlocked(file_path, session_data):
+                    ok = False
         return ok
 
 

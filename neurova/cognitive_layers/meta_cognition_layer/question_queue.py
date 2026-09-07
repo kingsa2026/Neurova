@@ -130,6 +130,11 @@ class QuestionQueueManager:
         # 状态索引
         self._status_index: Dict[QuestionStatus, List[str]] = {status: [] for status in QuestionStatus}
 
+        # 2026-09-07 根因修复（audit SUB-P2-15）：on_initialize 全仓无人调用，
+        # 持久化问题跨重启静默丢失且 _memory_ids 为空导致每次状态流转复制新记忆；
+        # 构造时直接加载（对齐 GrowthLogManager 的根因修复）
+        self.on_initialize()
+
     def on_initialize(self) -> None:
         """初始化回调：从记忆系统加载问题"""
         self._load_questions_from_memory()

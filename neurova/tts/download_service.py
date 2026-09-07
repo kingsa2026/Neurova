@@ -59,17 +59,24 @@ class ModelDownloadService:
             raise ValueError(f"未知模型: {model!r}")
 
         with self._lock:
-            if model in self._states:
-                return self._states[model]  # 幂等：已在跑/已完成不重跑
+            state = self._states.get(model)
+        if state is not None:
+            # 2026-09-07 根因修复（audit SUB-P1-9）：failed/skipped 为可重试
+            # 终态，重新 start 起新下载；仅 pending/downloading 幂等短路
+            if state.get("status") in ("pending", "downloading"):
+                return state
+            if state.get("status") not in ("failed", "skipped"):
+                return state
+            self._states.pop(model, None)
 
-            choice = source or get_choice(model, path=_choice_path())
-            state = {
-                "model": model,
-                "status": "pending",
-                "error": "",
-                "percentage": 0.0,
-            }
-            self._states[model] = state
+        choice = source or get_choice(model, path=_choice_path())
+        state = {
+            "model": model,
+            "status": "pending",
+            "error": "",
+            "percentage": 0.0,
+        }
+        self._states[model] = state
 
         if choice == "skip":
             state["status"] = "skipped"

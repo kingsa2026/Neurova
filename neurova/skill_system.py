@@ -550,6 +550,20 @@ class SkillRegistry:
         except Exception:
             return False
 
+    def set_skill_enabled(self, skill_name: str, enabled: bool) -> bool:
+        """启用/禁用技能（2026-09-07 C1 闭环：skill 端点 enable/disable 的真实实现）。
+
+        Returns:
+            True 表示状态已变更；技能不存在返回 False。
+        """
+        skill = self.skills.get(skill_name)
+        if skill is None:
+            return False
+        from neurova.skill_system_module_standalone import SkillStatus
+
+        skill.status = SkillStatus.ACTIVE if enabled else SkillStatus.INACTIVE
+        return True
+
     def unregister(self, skill_name: str):
         """注销 Skill"""
         if skill_name in self._skills:

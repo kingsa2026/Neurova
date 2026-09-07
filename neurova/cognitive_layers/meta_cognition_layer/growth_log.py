@@ -246,9 +246,14 @@ class GrowthLogManager:
 
         try:
             if entry.memory_id:
-                # 更新现有记忆（update_memory 仅支持 content 等字段；metadata 变更
-                # 属于状态流转，当前无生产调用方，暂不落库）
-                self.memory_manager.update_memory(entry.memory_id, content=entry.content)
+                # 更新现有记忆（content + metadata 状态流转全量落库；
+                # 2026-09-07 修复：原实现 metadata 从不重写，重启后
+                # applied/validated 回退 pending，反思注入断裂）
+                self.memory_manager.update_memory(
+                    entry.memory_id,
+                    content=entry.content,
+                    metadata={"reflection_log": entry.to_dict()},
+                )
             else:
                 # 创建新记忆（remember 为同步方法，返回 memory_id）。
                 # "reflection" 是 MemoryCategory 的合法值，走分类维度而非 memory_type。

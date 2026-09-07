@@ -554,8 +554,14 @@ class MuscleMemory:
             path = Path(self._storage_path) / f"muscle_{level_name}.json"
             path.parent.mkdir(parents=True, exist_ok=True)
             data = [item.to_dict() for item in store.values()]
-            with open(path, "w", encoding="utf-8") as f:
+            # 2026-09-07 修复（audit SUB-P2-19）：tmp+os.replace 原子写——
+            # 高频保存窗口内崩溃会留下截断 JSON，load 失败即全量清零
+            import os as _os
+
+            tmp = path.with_suffix(".json.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False)
+            _os.replace(tmp, path)
         except Exception as e:
             logger.warning("Failed to save %s: %s", level_name, e)
 
