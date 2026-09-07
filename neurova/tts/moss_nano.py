@@ -204,7 +204,6 @@ class MOSSNanTTS(TTSBase):
         self._codec_encode_session = None  # 声音克隆用（参考音频 → codes）
         self._manifest: Optional[dict] = None
         self._sp = None
-        self._builtin_prompt_codes: Optional[List[List[int]]] = None
         self._downloader: Optional[ModelDownloader] = None
         self._lock = threading.Lock()
 
@@ -338,7 +337,7 @@ class MOSSNanTTS(TTSBase):
                 f"MOSSNanTTS 初始化完成 | "
                 f"采样率={self._sample_rate} | "
                 f"声道={self._channels} | "
-                f"内置音色={'OK' if self._builtin_prompt_codes else 'N/A'}"
+                f"内置音色={'OK' if (self._manifest.get('builtin_voices') if self._manifest else None) else 'N/A'}"
             )
             return True
 
@@ -365,23 +364,6 @@ class MOSSNanTTS(TTSBase):
         if self._manifest is None and self._model_dir is not None:
             self._load_manifest()
         return self._manifest is not None
-
-    def _load_builtin_prompt_codes(self) -> Optional[List[List[int]]]:
-        """加载内置音色的预计算参考音频 codes（manifest.builtin_voices[0]）。"""
-        if self._builtin_prompt_codes is not None:
-            return self._builtin_prompt_codes
-        if not self._ensure_manifest():
-            return None
-        try:
-            voices = self._manifest.get("builtin_voices") or []
-            for voice in voices:
-                codes = voice.get("prompt_audio_codes")
-                if codes:
-                    self._builtin_prompt_codes = [[int(v) for v in row] for row in codes]
-                    return self._builtin_prompt_codes
-        except Exception as e:
-            logger.warning("内置音色 codes 加载失败: %s", e)
-        return None
 
     def _load_sentencepiece(self) -> None:
         """加载 sentencepiece 文本分词器；失败降级字符映射（_text_to_tokens 兜底）。"""
