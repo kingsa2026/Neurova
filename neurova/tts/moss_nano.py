@@ -939,5 +939,9 @@ class MOSSNanTTS(TTSBase):
         self._local_frame_session = None
         self._codec_decode_session = None
         self._codec_encode_session = None
+        # 按需释放语义（H2-C）：tokenizer/manifest 一并置空，
+        # initialize()/懒加载路径会重建（内存优化报告 2026-09-08 §二-3）
+        self._sp = None
+        self._manifest = None
         self._initialized = False
         logger.info("MOSSNanTTS 已关闭 | 统计: %s", self.stats)
