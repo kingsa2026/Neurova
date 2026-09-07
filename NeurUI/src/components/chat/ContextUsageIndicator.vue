@@ -198,7 +198,7 @@ async function fetchComposition(): Promise<void> {
   if (!props.agentId || compositionFetched.value) return
   compositionFetched.value = true
   try {
-    const res: any = await api.get('/context/composition', { params: { agent_id: props.agentId } })
+    const res: any = await api.get('/context/composition', { params: { agent_id: props.agentId }, __expectedStatus: 404 })
     const data = res?.data ?? res
     if (data && data.total_tokens !== undefined) composition.value = data
   } catch {

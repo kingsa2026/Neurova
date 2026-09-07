@@ -180,11 +180,12 @@ export function useChat(options: UseChatOptions = {}) {
       const history = Array.isArray(data) ? data : data?.messages ?? data?.items ?? []
       const mapped: ChatMessage[] = history.map((m: any) => {
         // Build toolCalls array from tool_messages
-        const toolCalls: Array<{ name: string; arguments: string; result?: string }> = []
+        const toolCalls: Array<{ name: string; arguments: string; result?: string; taskName?: string }> = []
         const toolMessages = m.tool_messages || []
         for (const tm of toolMessages) {
           if (tm.type === 'tool_call') {
             toolCalls.push({
+              taskName: tm.task_name ? String(tm.task_name) : undefined,
               name: tm.tool_name || tm.name || '',
               arguments:
                 typeof tm.params === 'string'
