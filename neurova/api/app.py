@@ -414,14 +414,24 @@ def _initialize_components(app_state: AppState) -> None:
 
     # 初始化 TTS Manager
     try:
+        import os as _os
+
         from neurova.tts.manager import TTSConfig, TTSManager
 
+        # H2-C：env 优先（部署级开关），config 键其次，默认关（行为不变）
+        lazy_release = (
+            _os.environ.get("NEUROVA_TTS_LAZY_RELEASE", "").strip() == "1"
+            or bool(app_state.config.get("tts_lazy_release", False))
+        )
+        _ttl_env = _os.environ.get("NEUROVA_TTS_RELEASE_TTL", "").strip()
         tts_config = TTSConfig(
             engine=app_state.config.get("tts_engine", "auto"),
             model_path=app_state.config.get("tts_model_path"),  # None = 自动检测
             tokenizer_path=app_state.config.get("tts_tokenizer_path"),  # None = 自动检测
             auto_download=app_state.config.get("tts_auto_download", False),
             voice=app_state.config.get("tts_voice", "zh-CN-XiaoxiaoNeural"),
+            lazy_release=lazy_release,
+            release_ttl_sec=int(_ttl_env or app_state.config.get("tts_release_ttl_sec", 600)),
         )
         app_state.tts_manager = TTSManager(config=tts_config)
     except Exception as e:
@@ -674,11 +684,18 @@ async def _on_startup(app_state: AppState) -> None:
     # 初始化 TTS 引擎
     if hasattr(app_state, "tts_manager") and app_state.tts_manager:
         try:
-            success = await app_state.tts_manager.initialize()
-            if success:
-                logger.info("TTS engine ready: %s", app_state.tts_manager.get_engine_name())
+            if getattr(app_state.tts_manager, "_config", None) is not None and getattr(
+                app_state.tts_manager._config, "lazy_release", False
+            ):
+                # H2-C 按需模式：跳过启动加载（moss 首载实测 +3.4GB RSS），
+                # 首次合成时 _ensure_ready 按需初始化
+                logger.info("TTS lazy_release=on：启动跳过引擎加载，首次合成时按需初始化")
             else:
-                logger.warning("TTS engine initialization failed, fallback will be used")
+                success = await app_state.tts_manager.initialize()
+                if success:
+                    logger.info("TTS engine ready: %s", app_state.tts_manager.get_engine_name())
+                else:
+                    logger.warning("TTS engine initialization failed, fallback will be used")
         except Exception as e:
             logger.warning("TTS engine init error: %s", e)
 
@@ -700,7 +717,10 @@ async def _on_startup(app_state: AppState) -> None:
     try:
         from neurova.voice_engine import VoiceEngine, VoiceEngineType
 
-        if app_state.tts_manager and getattr(app_state.tts_manager, "is_initialized", False):
+        # H2-C：去掉 is_initialized 门控——lazy_release 模式下 manager 构造即
+        # 应建统一层（is_available 是动态属性，端点侧本就按可用性降级）；
+        # 常驻模式下 manager 启动即初始化，行为不变。
+        if app_state.tts_manager:
             app_state.voice_engines["tts"] = VoiceEngine(
                 engine_type=VoiceEngineType.TTS,
                 engine=app_state.tts_manager,
