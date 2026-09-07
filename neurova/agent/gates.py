@@ -221,3 +221,10 @@ class GateRunner:
             if decision.action == StopAction.INTERRUPT_AND_CONTINUE:
                 final = decision
         return final
+
+    def reset_session(self) -> None:
+        """重置所有门控的会话级状态（2026-09-07：轮次状态必须 per-request，
+        跨请求残留会让 DoomLoopGate 把新一轮的正常调用误判为死循环）。"""
+        for gate in self._gates:
+            if hasattr(gate, "reset_session"):
+                gate.reset_session()

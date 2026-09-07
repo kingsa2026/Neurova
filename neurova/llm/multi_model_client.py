@@ -132,6 +132,8 @@ class MultiModelLLMClient:
             self._clients: Dict[str, ModelClient] = {}  # key: provider_id/model
             self._current_provider_id: Optional[str] = None
             self._current_model: Optional[str] = None
+            self._retry_guards_inst: Dict[str, Any] = {}
+            self._pending_tasks: set = set()
             self._round_robin_index = 0
             # 404 重连防抖：model -> 上次重连时刻（monotonic）。合理间隔内不重复
             # 触发 provider 重发现，防止模型已下线时形成请求风暴。
@@ -406,7 +408,9 @@ class MultiModelLLMClient:
 
     # P2-2：retry/熔断装配（评测指出 rate_limiter.py 构件齐备但零装配）
     # per-provider 熔断器缓存：{provider_id: CircuitBreaker}
-    _retry_guards: Dict[str, Any] = {}
+    # 2026-09-07 根因修复（audit P2-12B）：改实例级——类级 dict 跨 scope 共享，
+    # 某用户对某 provider 连续失败会把所有用户的请求一起熔断 30s。
+    _retry_guards: Dict[str, Any] = {}  # 仅作旧引用兜底；实际读写走实例属性
 
     # 404 重连防抖间隔（秒）：同一模型两次重发现之间的最小间隔
     _RECONNECT_DEBOUNCE_SECONDS = 300.0
@@ -465,7 +469,9 @@ class MultiModelLLMClient:
         if provider_id:
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self._rediscover_provider_models(provider_id))
+                task = loop.create_task(self._rediscover_provider_models(provider_id))
+                self._pending_tasks.add(task)
+                task.add_done_callback(self._pending_tasks.discard)
             except RuntimeError:
                 logger.debug("404 重连：无运行事件循环，跳过上游模型重发现")
 
@@ -486,11 +492,13 @@ class MultiModelLLMClient:
     # 可重试集合：限流/连接/超时/服务不可用；认证错误不重试（换 key 才有意义）
     _RETRYABLE = (LLMRateLimitError, LLMConnectionError, LLMServiceUnavailableError, ConnectionError, TimeoutError)
 
-    @staticmethod
-    def _get_retry_guard(client) -> tuple:
-        """按 provider 取 (RetryConfig, CircuitBreaker)——跨调用共享熔断状态。"""
+    def _get_retry_guard(self, client) -> tuple:
+        """按 provider 取 (RetryConfig, CircuitBreaker)——实例级熔断（scope 隔离，
+        2026-09-07 根因修复：类级共享使某用户失败熔断全部用户的请求）。"""
         pid = getattr(getattr(client, "provider", None), "id", None) or id(client)
-        guard = MultiModelLLMClient._retry_guards.get(pid)
+        if not hasattr(self, "_retry_guards_inst"):
+            self._retry_guards_inst = {}
+        guard = self._retry_guards_inst.get(pid)
         if guard is None:
             guard = (
                 __import__("neurova.llm.providers.rate_limiter", fromlist=["RetryConfig"]).RetryConfig(
@@ -499,11 +507,10 @@ class MultiModelLLMClient:
                 ),
                 CircuitBreaker(failure_threshold=5, recovery_timeout=30.0, name=f"llm:{pid}"),
             )
-            MultiModelLLMClient._retry_guards[pid] = guard
+            self._retry_guards_inst[pid] = guard
         return guard
 
-    @staticmethod
-    async def _chat_with_retry(client, messages: List[Dict[str, str]], **kwargs) -> Any:
+    async def _chat_with_retry(self, client, messages: List[Dict[str, str]], **kwargs) -> Any:
         """per-provider retry/circuit 装配的单次底层调用。
 
         重试集合内的异常（限流/连接/超时）指数退避重试；认证错误与其余异常
@@ -512,7 +519,7 @@ class MultiModelLLMClient:
         """
         from neurova.llm.providers.rate_limiter import RetryConfig
 
-        rc, cb = MultiModelLLMClient._get_retry_guard(client)
+        rc, cb = self._get_retry_guard(client)
 
         async def _attempt():
             return await asyncio.to_thread(client.client.chat, messages, **kwargs)
@@ -547,9 +554,11 @@ class MultiModelLLMClient:
             }
 
         # auto failover：仅未显式指定 provider 时启用（显式指定尊重用户选择，不静默切换）
+        # 2026-09-07 根因修复（audit P2-12A）：排除集原挂全局单例，并发请求互踩
+        # （A 已失败模型被 B 重试/B 继承 A 排除集提前无候选）；改请求局部变量
+        failover_excluded: set = set()
+        # auto failover：仅未显式指定 provider 时启用（显式指定尊重用户选择，不静默切换）
         auto_failover = not provider_id
-        if auto_failover:
-            self._failover_excluded = set()
         # __new__ 最小注入的测试实例可能不带 _clients，防御性读取
         max_attempts = max(1, len(getattr(self, "_clients", {}) or {})) if auto_failover else 1
 
@@ -570,7 +579,8 @@ class MultiModelLLMClient:
                 "auto 切换：%s/%s 失败（%s），尝试下一可用候选",
                 client.provider.id, client.model, error_kind,
             )
-            client = self._next_failover_client(client.model)
+            failover_excluded.add(client.model)
+            client = self._next_failover_client(client.model, failover_excluded)
         return last_result
 
     async def _chat_single_attempt(
@@ -730,18 +740,24 @@ class MultiModelLLMClient:
             resp = _build_mock_response(messages)
             text = resp.content
             step = max(1, len(text) // 4)
+            # 2026-09-07 根因修复（audit P2-13）：原 yield dict 与真实
+            # LLMResponse 契约错位，openai_loop 消费方对非 error dict 一律
+            # continue → mock 流式回复恒空。改为产 LLMResponse 形状对象。
+            from types import SimpleNamespace as _NS
+
             for i in range(0, len(text), step):
-                yield {"type": "content", "content": text[i : i + step]}
-            yield {
-                "type": "done",
-                "content": "",
-                "usage": {
-                    "prompt_tokens": resp.usage.get("prompt_tokens", 0),
-                    "completion_tokens": resp.usage.get("completion_tokens", 0),
-                    "total_tokens": resp.usage.get("total_tokens", 0),
-                    "duration": _time.time() - _t0,
-                },
-            }
+                yield _NS(content=text[i : i + step], reasoning_content=None,
+                          usage=None, tool_calls=None, finish_reason=None)
+            u = resp.usage
+            yield _NS(
+                content="", reasoning_content=None,
+                usage=_NS(
+                    prompt_tokens=u.get("prompt_tokens", 0),
+                    completion_tokens=u.get("completion_tokens", 0),
+                    total_tokens=u.get("total_tokens", 0),
+                ),
+                tool_calls=None, finish_reason="stop",
+            )
             return
 
         client = self._get_client_for_request(model, provider_id)
@@ -877,13 +893,14 @@ class MultiModelLLMClient:
             logger.warning("Auto-refresh failed: %s", e, exc_info=True)
         return self.get_current_client()
 
-    def _next_failover_client(self, failed_model: Optional[str]) -> Optional[ModelClient]:
-        """auto 失败切换：返回排除已失败模型后的下一候选（None=无候选）。"""
-        exclude = getattr(self, "_failover_excluded", None) or set()
+    def _next_failover_client(self, failed_model: Optional[str], excluded: Optional[set] = None) -> Optional[ModelClient]:
+        """auto 失败切换：返回排除已失败模型后的下一候选（None=无候选）。
+
+        2026-09-07：排除集改请求局部（调用方持有并累积），不再挂全局单例。
+        """
+        exclude = set(excluded or set())
         if failed_model:
-            exclude = set(exclude)
             exclude.add(failed_model)
-        self._failover_excluded = exclude
         return self._resolve_available_fallback(exclude_models=exclude)
 
     def _resolve_available_fallback(
