@@ -39,6 +39,7 @@ class TTSConfig(BaseModel):
     voice: str = "zh-CN-XiaoxiaoNeural"
     rate: str = "+0%"
     volume: str = "+0%"
+    pitch: str = "+0Hz"  # 音调调整（仅 edge-tts 消费；sapi5/moss 忽略）
     model_path: Optional[str] = None
     tokenizer_path: Optional[str] = None
     auto_download: bool = True
@@ -162,6 +163,7 @@ class TTSManager:
                         voice=self._config.voice,
                         rate=self._config.rate,
                         volume=self._config.volume,
+                        pitch=self._config.pitch,
                     )
                 elif engine_name == "sapi5":
                     if SAPI5TTS is None:

@@ -214,6 +214,10 @@ def _agent_config_from_saved(cfg: dict, agent_id: str, workspace_path: str):
         llm_provider=cfg.get("provider", ""),
         owner_user_id=cfg.get("owner_user_id") or None,
         description=cfg.get("description", "") or "",
+        enable_tts=bool(cfg.get("enable_tts", False)),
+        tts_voice=cfg.get("tts_voice", "zh-CN-XiaoxiaoNeural"),
+        tts_speed=float(cfg.get("tts_speed", 1.0) or 1.0),
+        tts_pitch=float(cfg.get("tts_pitch", 1.0) or 1.0),
     )
 
 
