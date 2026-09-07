@@ -36,12 +36,84 @@ class MemorySkillExecutor(BaseSkillExecutor):
             return self._search(params, start_time)
         if action == "store":
             return self._store(params, start_time)
+        if action == "forget":
+            return self._forget(params, start_time)
 
         return SkillResult(
             success=False,
             error=f"未知操作: {action}",
             metadata={"action": action, "execution_time": time.time() - start_time},
         )
+
+    def _forget(self, params: Dict[str, Any], start_time: float) -> SkillResult:
+        """B2（F7）：遗忘指定记忆（反驳→更新/删除，不新增矛盾记忆）。
+
+        与 store 同对待审门：挂载 pending_store 时删除提议先进待审
+        （proposed_action="forget"），confirm=True 才直删——删除是不可逆
+        写操作，不允许模型静默绕过用户。"""
+        memory_id = str(params.get("memory_id", "") or "").strip()
+        if not memory_id:
+            return SkillResult(
+                success=False,
+                error="forget 操作缺少 memory_id 参数（可先用 search 定位目标记忆）",
+                metadata={"action": "forget", "execution_time": time.time() - start_time},
+            )
+
+        if self.pending_store is not None and params.get("confirm") is not True:
+            try:
+                rec = self.pending_store.propose(
+                    content=str(params.get("content", "") or f"[遗忘记忆 {memory_id}]"),
+                    category="forget",
+                    memory_type="semantic",
+                    source_sentence="",
+                    proposed_action="forget",
+                    target_memory_id=memory_id,
+                    proposed_by=self._resolve_proposed_by(params),
+                )
+                if rec.get("rejected"):
+                    return SkillResult(
+                        success=True,
+                        output={"pending": True, "rejected": True, "reason": rec.get("reason", "")},
+                        metadata={"action": "forget", "execution_time": time.time() - start_time},
+                    )
+                return SkillResult(
+                    success=True,
+                    output={"pending": True, "review_id": rec["id"]},
+                    metadata={"action": "forget", "memory_id": memory_id, "execution_time": time.time() - start_time},
+                )
+            except Exception as exc:  # noqa: BLE001
+                # 核验轮修复②：待审通道失败即整体失败上报——不再回退直删
+                # （删除是写操作，绕过审批直删与待审设计冲突；回退建普通
+                # 待审记忆更是会让确认端把遗忘摘要当新增写入主库）
+                return SkillResult(
+                    success=False,
+                    error=f"遗忘提议写入待审队列失败: {exc}",
+                    metadata={"action": "forget", "memory_id": memory_id, "execution_time": time.time() - start_time},
+                )
+
+        return self._forget_direct(memory_id, params, start_time)
+
+    def _forget_direct(self, memory_id: str, params: Dict[str, Any], start_time: float) -> SkillResult:
+        """confirm=True 或未挂载待审队列时的直删通道（与 store 直写语义对齐）。"""
+        if self.memory_manager is None:
+            return SkillResult(
+                success=True,
+                output={"forgotten": False, "reason": "no_memory_manager"},
+                metadata={"action": "forget", "memory_id": memory_id, "execution_time": time.time() - start_time},
+            )
+        try:
+            forgotten = bool(self.memory_manager.forget(memory_id, soft=True))
+            return SkillResult(
+                success=True,
+                output={"forgotten": forgotten, "memory_id": memory_id},
+                metadata={"action": "forget", "memory_id": memory_id, "execution_time": time.time() - start_time},
+            )
+        except Exception as exc:  # noqa: BLE001
+            return SkillResult(
+                success=False,
+                error=f"遗忘失败: {exc}",
+                metadata={"action": "forget", "memory_id": memory_id, "execution_time": time.time() - start_time},
+            )
 
     def _search(self, params: Dict[str, Any], start_time: float) -> SkillResult:
         query = params.get("query", "")

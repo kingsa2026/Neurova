@@ -103,6 +103,12 @@ class OpenAISchemaAdapter:
                 "type": pinfo.get("type", "string"),
                 "description": pinfo.get("description", pname),
             }
+            # B2：enum/default 必须透传到模型可见面（此前被丢弃——memory action
+            # 的 search/store/forget 枚举只存在于参数表，schema 里消失）
+            if pinfo.get("enum"):
+                props[pname]["enum"] = list(pinfo["enum"])
+            if pinfo.get("default") is not None:
+                props[pname]["default"] = pinfo["default"]
             if pinfo.get("required"):
                 required.append(pname)
 

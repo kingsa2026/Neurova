@@ -15,11 +15,13 @@ import typing
 # skill_id -> 字段四元组列表
 _BUILTIN_SKILL_FIELDS: typing.Dict[str, typing.List[typing.Tuple[str, str, bool, str]]] = {
     "memory": [
-        ("action", "string", True, "操作类型：search 检索 / store 存储"),
+        ("action", "string", True, "操作类型：search 检索 / store 存储（默认进待审队列，用户确认后落库，这是设计行为，不要重复提交或擅自 confirm）/ forget 遗忘指定记忆（同样默认进待审）"),
         ("query", "string", False, "检索词或待存储的内容主题"),
         ("limit", "integer", False, "返回条数上限"),
-        ("content", "string", False, "action=store 时要存储的完整内容"),
+        ("content", "string", False, "action=store 时要存储的完整内容；action=forget 时为待遗忘记忆的内容摘要"),
         ("category", "string", False, "记忆分类（可选）"),
+        ("memory_id", "string", False, "action=forget 时目标记忆的 ID（可先 search 获取）"),
+        ("confirm", "boolean", False, "仅当用户在对话中明确同意该具体写入/删除时才可传 true"),
     ],
     "web_search": [
         ("query", "string", True, "检索词"),
@@ -63,6 +65,7 @@ def get_builtin_skill_parameters(skill_id: str) -> typing.Dict[str, typing.Dict[
             if skill_id == "kb_builder":
                 entry["enum"] = ["build", "record_summary"]
             else:
-                entry["enum"] = ["search", "store"]
+                # B2（F7）：补 forget——反驳记忆时更新/删除而非并行新增矛盾记忆
+                entry["enum"] = ["search", "store", "forget"]
         result[name] = entry
     return result

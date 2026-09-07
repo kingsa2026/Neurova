@@ -41,7 +41,9 @@ CREATE TABLE IF NOT EXISTS pending_memories (
     created_at   REAL NOT NULL,
     decided_by   TEXT,
     decided_at   REAL,
-    note         TEXT
+    note         TEXT,
+    proposed_action TEXT NOT NULL DEFAULT 'store',
+    target_memory_id TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS pending_memories_status_idx
     ON pending_memories (status, created_at DESC);
@@ -93,6 +95,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS pending_memories_live_fp_idx
     WHERE status IN ('pending', 'rejected');
 """
 
+# 核验轮修复②：存量库幂等列迁移（CREATE TABLE 只覆盖新建库）。旧库缺
+# proposed_action/target_memory_id 两列时补齐，默认值保持旧行为语义
+# （store、无目标）。
+def _migrate_action_columns(conn: "sqlite3.Connection") -> None:
+    existing = {
+        row[1] for row in conn.execute("PRAGMA table_info(pending_memories)").fetchall()
+    }
+    if "proposed_action" not in existing:
+        conn.execute(
+            "ALTER TABLE pending_memories ADD COLUMN proposed_action TEXT NOT NULL DEFAULT 'store'"
+        )
+    if "target_memory_id" not in existing:
+        conn.execute(
+            "ALTER TABLE pending_memories ADD COLUMN target_memory_id TEXT NOT NULL DEFAULT ''"
+        )
+
 
 def _fingerprint(content: str) -> str:
     """内容指纹：去首尾空白 + 小写归一后哈希（拒绝名单判重用）。"""
@@ -108,9 +126,17 @@ class PendingMemoryStore:
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.executescript(_SCHEMA)
         self._conn.executescript(_MIGRATION_DROP_OLD)
+        self._migrate_columns()
         self._conn.executescript(_LEGACY_CLEANUP)
         self._conn.executescript(_LIVE_FP_INDEX)
         self._conn.commit()
+
+    def _migrate_columns(self) -> None:
+        try:
+            _migrate_action_columns(self._conn)
+            self._conn.commit()
+        except Exception:  # noqa: BLE001 - 迁移失败不阻断建库，待下次启动重试
+            self._conn.rollback()
 
     # ── 提议 ──────────────────────────────────────────────────
 
@@ -121,13 +147,25 @@ class PendingMemoryStore:
         memory_type: str = "semantic",
         source_sentence: str = "",
         proposed_by: str = "",
+        proposed_action: str = "store",
+        target_memory_id: str = "",
     ) -> Dict[str, Any]:
         """写入待审记录。命中未决指纹幂等回指（rejected 墓碑 → 拒绝标记，
         pending → 回指既有记录），不新建。判重按提议人隔离：
-        (指纹, proposed_by) 分区内至多一条未决行，跨用户互不封存。"""
+        (指纹, proposed_by) 分区内至多一条未决行，跨用户互不封存。
+
+        核验轮修复②（forget 审批闭环）：proposed_action 标记动作类型
+        （store 新增 / forget 遗忘），confirm 端点据此分流执行——此前
+        forget 提议与普通新增无差别，确认会把遗忘摘要当新记忆入主库。"""
         content = (content or "").strip()
         if not content:
             raise ValueError("待确认记忆内容不能为空")
+        action = str(proposed_action or "store").strip().lower()
+        if action not in ("store", "forget"):
+            raise ValueError(f"未知 proposed_action: {action}")
+        target = str(target_memory_id or "").strip()
+        if action == "forget" and not target:
+            raise ValueError("forget 提议缺少 target_memory_id")
         fp = _fingerprint(content)
         owner = str(proposed_by or "")
         with self._lock:
@@ -147,8 +185,8 @@ class PendingMemoryStore:
             self._conn.execute(
                 "INSERT INTO pending_memories"
                 " (id, content, category, memory_type, source_sentence, status,"
-                "  fingerprint, proposed_by, created_at)"
-                " VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
+                "  fingerprint, proposed_by, created_at, proposed_action, target_memory_id)"
+                " VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
                 (
                     rec_id,
                     content,
@@ -158,6 +196,8 @@ class PendingMemoryStore:
                     fp,
                     str(proposed_by or ""),
                     time.time(),
+                    action,
+                    target,
                 ),
             )
             self._conn.commit()
@@ -170,7 +210,7 @@ class PendingMemoryStore:
         with self._lock:
             row = self._conn.execute(
                 "SELECT id, content, category, memory_type, source_sentence, status,"
-                " memory_id, proposed_by, created_at, decided_by, decided_at, note"
+                " memory_id, proposed_by, created_at, decided_by, decided_at, note, proposed_action, target_memory_id"
                 " FROM pending_memories WHERE id = ?",
                 (pending_id,),
             ).fetchone()
@@ -182,7 +222,7 @@ class PendingMemoryStore:
             if proposed_by:
                 rows = self._conn.execute(
                     "SELECT id, content, category, memory_type, source_sentence, status,"
-                    " memory_id, proposed_by, created_at, decided_by, decided_at, note"
+                    " memory_id, proposed_by, created_at, decided_by, decided_at, note, proposed_action, target_memory_id"
                     " FROM pending_memories WHERE status = 'pending' AND proposed_by = ?"
                     " ORDER BY created_at DESC, rowid DESC",
                     (str(proposed_by),),
@@ -190,7 +230,7 @@ class PendingMemoryStore:
             else:
                 rows = self._conn.execute(
                     "SELECT id, content, category, memory_type, source_sentence, status,"
-                    " memory_id, proposed_by, created_at, decided_by, decided_at, note"
+                    " memory_id, proposed_by, created_at, decided_by, decided_at, note, proposed_action, target_memory_id"
                     " FROM pending_memories WHERE status = 'pending'"
                     " ORDER BY created_at DESC, rowid DESC"
                 ).fetchall()
@@ -203,7 +243,7 @@ class PendingMemoryStore:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, content, category, memory_type, source_sentence, status,"
-                " memory_id, proposed_by, created_at, decided_by, decided_at, note"
+                " memory_id, proposed_by, created_at, decided_by, decided_at, note, proposed_action, target_memory_id"
                 " FROM pending_memories WHERE status = ? ORDER BY decided_at DESC, rowid DESC",
                 (status,),
             ).fetchall()
@@ -224,6 +264,8 @@ class PendingMemoryStore:
             "decided_by": row[9],
             "decided_at": row[10],
             "note": row[11],
+            "proposed_action": row[12],
+            "target_memory_id": row[13],
         }
 
     # ── 裁决 ──────────────────────────────────────────────────
