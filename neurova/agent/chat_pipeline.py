@@ -1584,6 +1584,27 @@ class ChatPipeline:
             logger.debug("后台工具提示注入跳过", exc_info=True)
 
         if self.loop:
+            # 上下文组成实测（聊天页"上下文容量"面板数据源）：
+            # 此刻 ctx.context（含 system 注入）与 tools_for_llm 均已定型、
+            # 紧邻真实 LLM 请求——实测口径与发送内容一致。失败静默不影响回复。
+            try:
+                from neurova.context.composition import measure_composition
+
+                _ctx_window = None
+                try:
+                    from neurova.llm.model_limits import get_model_context_window
+
+                    _ctx_window = get_model_context_window(self.config.llm_config.model or "")
+                except Exception:
+                    pass
+                measure_composition(
+                    agent_id=getattr(self.config, "agent_id", "default") or "default",
+                    messages=ctx.context,
+                    tools=tools_for_llm,
+                    context_window=_ctx_window,
+                )
+            except Exception:
+                logger.debug("上下文组成实测跳过", exc_info=True)
             ctx.reply = await self._call_agent_loop(ctx, tools_for_llm)
         else:
             ctx.reply = await self._call_legacy(ctx)

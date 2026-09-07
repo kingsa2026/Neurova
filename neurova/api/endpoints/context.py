@@ -61,6 +61,20 @@ class ContextStats(BaseModel):
     compression_rate: float = 0
 
 
+class ContextCompositionResponse(BaseModel):
+    """上下文组成实测（聊天页悬停面板数据源）"""
+
+    agent_id: str
+    measured_at: float
+    elapsed_ms: float
+    context_window: Optional[int] = None
+    total_tokens: int = 0
+    messages: Dict[str, Any] = Field(default_factory=dict)
+    tools: Dict[str, Any] = Field(default_factory=dict)
+    cache_hit_rate: Optional[float] = None
+    cache_source: str = "none"
+
+
 class ContextPreview(BaseModel):
     """上下文预览"""
 
@@ -292,6 +306,25 @@ async def get_context_stats(request: Request):
         cache_hit_rate=0,
         compression_rate=0,
     )
+
+
+@router.get("/composition", response_model=ContextCompositionResponse)
+async def get_context_composition(
+    request: Request,
+    agent_id: str = Query(default="default", description="Agent ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """获取最近一轮 LLM 请求的上下文组成实测（消息分桶 + 工具分类 + 命中率）。
+
+    数据来自 ChatPipeline._step_llm_call 挂点的真实测算（非估算 stub）；
+    该 agent 尚未跑过任何一轮时返回 404——前端按"暂无数据"处理，不伪造。
+    """
+    from neurova.context.composition import get_last_composition
+
+    comp = get_last_composition(agent_id or "default")
+    if comp is None:
+        raise HTTPException(status_code=404, detail="No composition measured for this agent yet")
+    return ContextCompositionResponse(**comp)
 
 
 @router.get("/{context_id}/preview", response_model=ContextPreview)
