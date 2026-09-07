@@ -12,6 +12,12 @@ export interface ChatMessage {
   reasoningOpen?: boolean
   /** 流式期间是否已自动展开过思考区（用户手动折叠后不再自动打开） */
   reasoningAutoOpened?: boolean
+  /**
+   * 步骤化时间轴（2026-09-07）：推理/工具按 SSE 到达顺序成段，
+   * 每段独立折叠。实时流式由 processSSEEvent 增量构建；
+   * 历史消息由 useChat buildStepsFromHistory 合成。
+   */
+  steps?: import('@/utils/chatSteps').ChatStep[]
   toolCalls?: Array<{ name: string; arguments: string; result?: string }>
   toolOpen?: boolean
   /** legacy single tool call, kept for backward compatibility */

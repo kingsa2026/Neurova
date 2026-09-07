@@ -3,6 +3,7 @@ import api from '@/api'
 import { archiveConsoleSession, deleteConsoleSession, unarchiveConsoleSession } from '@/api/modules/console'
 import { useChatStore } from '@/stores/chat'
 import type { ChatMessage, Session } from '@/types/chat'
+import { buildStepsFromHistory } from '@/utils/chatSteps'
 import bus from '@/bus'
 import i18n from '@/i18n'
 
@@ -213,12 +214,16 @@ export function useChat(options: UseChatOptions = {}) {
         //（post_chat 管线 assistant_metadata 传递），历史回放需读取该字段；
         // 顶层 m.reasoning_content / m.reasoning 兼容旧数据与其他通道。
         const reasoning = m.reasoning || m.reasoning_content || m.metadata?.reasoning_content
+        // 步骤化时间轴（2026-09-07）：历史消息合成 steps（reasoning 段 + 工具段，
+        // 全部收起，点开可看）；与新消息的 steps 契约一致
+        const steps = buildStepsFromHistory(reasoning, toolCalls.length > 0 ? toolCalls : undefined)
         return {
           role: m.role === 'user' ? 'user' : 'assistant',
           content: m.content || '',
           reasoning,
           // 带思考过程的历史消息默认展开（与实时流式首片自动展开一致）
           reasoningOpen: !!reasoning,
+          steps: steps.length > 0 ? steps : undefined,
           toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
           toolCall,
           toolResult,
