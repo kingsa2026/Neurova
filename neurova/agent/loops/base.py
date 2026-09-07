@@ -152,15 +152,27 @@ class BaseAgentLoop(ABC):
             )
             return parse_msg, records
 
+        # B3：剥离执行摘要参数——taskName* 是给时间轴 UI 的展示元数据，
+        # 不属于工具真实参数；先提取再从 _tc_arguments 移除，SkillRegistry/
+        # ToolRouter 两条执行通道都收不到
+        _task_name_active = ""
+        _task_name_complete = ""
+        try:
+            _task_name_active = str(_tc_arguments.pop("taskNameActive", "") or "")
+            _task_name_complete = str(_tc_arguments.pop("taskNameComplete", "") or "")
+        except AttributeError:
+            pass
+
         # 记录工具调用消息（用于前端展示）
-        records.append(
-            {
-                "type": "tool_call",
-                "tool_name": _tc_function_name,
-                "params": _tc_arguments,
-                "timestamp": datetime.now().isoformat(),
-            }
-        )
+        _call_record = {
+            "type": "tool_call",
+            "tool_name": _tc_function_name,
+            "params": _tc_arguments,
+            "timestamp": datetime.now().isoformat(),
+        }
+        if _task_name_active:
+            _call_record["task_name"] = _task_name_active
+        records.append(_call_record)
 
         try:
             # [TOOLBUG] 诊断日志：检查 SkillRegistry 和 ToolRouter 的初始化状态
@@ -251,15 +263,16 @@ class BaseAgentLoop(ABC):
                 # 完整保留 content（不预截断）：SSE 去重 key 基于完整内容 hash，
                 # 截断会让"前缀相同正文不同"的结果（如同计划 create/mark_step）
                 # 被误判为重复；展示层截断由 console._build_tool_events 的 [:500] 处理
-                records.append(
-                    {
-                        "type": "tool_result",
-                        "tool_name": _tc_function_name,
-                        "result": content if content else "执行完成",
-                        "success": exec_result.success,
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
+                _result_record = {
+                    "type": "tool_result",
+                    "tool_name": _tc_function_name,
+                    "result": content if content else "执行完成",
+                    "success": exec_result.success,
+                    "timestamp": datetime.now().isoformat(),
+                }
+                if _task_name_complete:
+                    _result_record["task_name"] = _task_name_complete
+                records.append(_result_record)
 
                 logger.info("Tool executed: %s, success=%s", _tc_function_name, exec_result.success)
                 return tool_msg, records

@@ -205,6 +205,24 @@ async def _gc_replay_buffers() -> None:
             _replay_buffers.pop(sid, None)
 
 
+def _call_key(name: str, arguments: str) -> str:
+    """tool_call 去重键规范化（核验轮修复①）。
+
+    流式键源于 LLM 原始 arguments 串，收尾键源于剥离 taskName* 后的 params
+    再序列化——两者空格/键序/taskName 有无都会造成假性不同 → flush 重复推送
+    同一调用。统一解析后剔除 taskName* 并按 sorted-key 紧凑序列化；解析失败
+    回退原串。
+    """
+    try:
+        obj = json.loads(arguments) if isinstance(arguments, str) else (arguments or {})
+        if isinstance(obj, dict):
+            obj = {k: v for k, v in obj.items() if k not in ("taskNameActive", "taskNameComplete")}
+            return f"{name}:" + json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except Exception:  # noqa: BLE001 - 非法 JSON 退回原串
+        pass
+    return f"{name}:{arguments}"
+
+
 def _sse_events_from_emitter_item(
     item: Any,
     seen_calls: set,
@@ -235,11 +253,29 @@ def _sse_events_from_emitter_item(
             arguments = fn.get("arguments", "{}")
             if not isinstance(arguments, str):
                 arguments = json.dumps(arguments, ensure_ascii=False)
-            key = f"{name}:{arguments}"
+            # B3：从 arguments JSON 提取执行摘要（taskNameActive）——前端两条
+            # 路径统一读 event.task_name；事件 arguments 同步剔除 taskName*
+            # （展示无噪声，且与收尾 flush 事件一致）
+            task_name = ""
+            clean_args = arguments
+            try:
+                _args_obj = json.loads(arguments) if isinstance(arguments, str) else (arguments or {})
+                if isinstance(_args_obj, dict):
+                    task_name = str(_args_obj.get("taskNameActive", "") or "")
+                    clean_args = json.dumps(
+                        {k: v for k, v in _args_obj.items() if k not in ("taskNameActive", "taskNameComplete")},
+                        ensure_ascii=False,
+                    )
+            except Exception:  # noqa: BLE001 - 提取失败不影响事件本身
+                task_name = ""
+            key = _call_key(name, arguments)
             if not name or key in seen_calls:
                 return []
             seen_calls.add(key)
-            return [{"type": "tool_call", "name": name, "arguments": arguments}]
+            event = {"type": "tool_call", "name": name, "arguments": clean_args}
+            if task_name:
+                event["task_name"] = task_name
+            return [event]
         if kind == "tool_result":
             tm = data or {}
             name = str(tm.get("name") or tm.get("tool_name") or "")
@@ -364,19 +400,23 @@ def _build_tool_events(tm: dict) -> typing.List[dict]:
     if not tm.get("tool_name"):
         return events
     if tm_type == "tool_call":
-        events.append(
-            {
-                "type": "tool_call",
-                "name": tm.get("tool_name", ""),
-                "arguments": json.dumps(tm.get("params", {}), ensure_ascii=False),
-            }
-        )
+        _call_event = {
+            "type": "tool_call",
+            "name": tm.get("tool_name", ""),
+            "arguments": json.dumps(tm.get("params", {}), ensure_ascii=False),
+        }
+        if tm.get("task_name"):
+            _call_event["task_name"] = str(tm["task_name"])
+        events.append(_call_event)
     elif tm_type == "tool_result":
         result_text = tm.get("result", "")
         if isinstance(result_text, dict):
             result_text = json.dumps(result_text, ensure_ascii=False)
         result_text = _strip_heavy_payload(str(result_text))
-        events.append({"type": "tool_result", "name": tm.get("tool_name", ""), "result": result_text[:500]})
+        _result_event = {"type": "tool_result", "name": tm.get("tool_name", ""), "result": result_text[:500]}
+        if tm.get("task_name"):
+            _result_event["task_name"] = str(tm["task_name"])
+        events.append(_result_event)
 
         # P0 人工确认弹窗: 检测治理 ASK 结果，推送结构化审批事件。
         # 必须在脱敏/截断前的完整文本上解析。
@@ -571,7 +611,13 @@ async def post_console_chat(
                     for event in _build_tool_events(tm):
                         etype = event.get("type")
                         if etype == "tool_call":
-                            key = f"{event.get('name', '')}:{event.get('arguments', '')}"
+                            # 核验轮修复①：键与流式侧共用 _call_key 规范化
+                            #（剔 taskName* + 紧凑序列化），否则 taskName 一出现
+                            # 必然两键不同 → 同一调用被重复推送
+                            key = _call_key(
+                                str(event.get("name", "")),
+                                json.dumps(tm.get("params", {}), ensure_ascii=False),
+                            )
                             if key in seen_calls:
                                 continue
                             seen_calls.add(key)
