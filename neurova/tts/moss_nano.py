@@ -211,6 +211,21 @@ class MOSSNanTTS(TTSBase):
                     logger.warning("Tokenizer 加载失败（声音克隆不可用）: %s", e)
 
             self._initialized = True
+
+            # 预热 + 能力自检（initialize 文档承诺的第 3 步真实现）：
+            # 模型文件/Session 加载成功 ≠ 推理可驱动。实测 moss_tts_decode_step
+            # 是带 KV-cache 的自回归图，喂不进输入时推理必崩 → 此前 is_initialized
+            # 谎报 True，每次请求都白走死引擎再 fallback。自检失败 = 诚实上报
+            # 初始化失败，交由 manager fallback 链选下一个引擎。
+            if not self._probe_inference_capability():
+                logger.error(
+                    "MOSSNanTTS 能力自检失败：推理无法产出音频，引擎标记为不可用"
+                )
+                self._initialized = False
+                # 释放已加载的 Session（~640MB），不占内存等一个永远不会被用的引擎
+                await self.shutdown()
+                return False
+
             logger.info(
                 f"MOSSNanTTS 初始化完成 | "
                 f"采样率={self._sample_rate} | "
@@ -221,6 +236,22 @@ class MOSSNanTTS(TTSBase):
 
         except Exception as e:
             logger.error(f"MOSSNanTTS 初始化失败: {e}", exc_info=True)
+            return False
+
+    def _probe_inference_capability(self) -> bool:
+        """
+        能力自检：跑一次最小真实推理，验证引擎真能产出非空音频。
+
+        Returns:
+            True=推理链路可用；False=推理崩/产出空（模型与实现契约错位）
+        """
+        if not self._tts_session:
+            return False
+        try:
+            audio = self._run_inference("测试")
+            return audio is not None and audio.size > 0
+        except Exception as e:
+            logger.warning("能力自检推理失败: %s", e)
             return False
 
     def _normalize_text(self, text: str) -> str:
@@ -349,6 +380,7 @@ class MOSSNanTTS(TTSBase):
         text: str,
         voice_ref_audio: Optional[bytes] = None,
         voice_ref_text: Optional[str] = None,
+        **kwargs,
     ) -> bytes:
         """
         合成语音
@@ -357,6 +389,9 @@ class MOSSNanTTS(TTSBase):
             text: 要合成的文本
             voice_ref_audio: 参考音频 WAV 字节（声音克隆用，~3秒）
             voice_ref_text: 参考文本（声音克隆用）
+            **kwargs: 上游语义参数（voice/speed 等）。本引擎无音色/语速
+                概念，忽略——签名收紧会在参数绑定阶段 TypeError，炸穿
+                manager fallback 链（manager 按 TTSBase 宽契约透传 kwarg）。
 
         Returns:
             WAV 格式的音频字节数据
@@ -419,6 +454,7 @@ class MOSSNanTTS(TTSBase):
         voice_ref_audio: Optional[bytes] = None,
         voice_ref_text: Optional[str] = None,
         chunk_size: int = 4800,
+        **kwargs,
     ) -> AsyncGenerator[bytes, None]:
         """
         流式合成语音
@@ -430,6 +466,7 @@ class MOSSNanTTS(TTSBase):
             voice_ref_audio: 参考音频（声音克隆用）
             voice_ref_text: 参考文本（声音克隆用）
             chunk_size: 每个 chunk 的采样点数
+            **kwargs: 上游语义参数（voice/speed 等），同 synthesize 忽略
 
         Yields:
             WAV 格式的音频数据块
