@@ -48,6 +48,7 @@ const i18n = createI18n({
         ctxSectionOther: '其他',
         ctxSectionSkills: '技能',
         ctxSectionSystemPrompt: '系统提示词',
+        ctxPanelNoData: '暂无数据，发送一条消息后生成',
         usagePrompt: '输入 {n}',
         usageCompletion: '输出 {n}',
         usageContextPct: '上下文 {pct}%',
@@ -95,9 +96,11 @@ describe('ContextUsageIndicator 可见性（2026-09-07 环图消失根因修复�
     expect(wrapper.find('.nr-ctx-usage-text').text()).toBe('12.4万')
   })
 
-  it('usage 与 composition 都为空且无 agent → 不渲染', async () => {
+  it('usage 与 composition 都为空仍常驻渲染 0（环图常驻语义）', async () => {
     const wrapper = await mountIndicator({ usage: null })
-    expect(wrapper.find('.nr-ctx-usage').exists()).toBe(false)
+    expect(wrapper.find('.nr-ctx-usage').exists()).toBe(true)
+    expect(wrapper.find('.nr-ctx-ring').exists()).toBe(true)
+    expect(wrapper.find('.nr-ctx-usage-text').text()).toBe('0')
   })
 
   it('悬停展开明细面板：分段行 + 命中率', async () => {
@@ -111,5 +114,13 @@ describe('ContextUsageIndicator 可见性（2026-09-07 环图消失根因修复�
     const footer = wrapper.find('.nr-ctx-panel-footer')
     expect(footer.exists()).toBe(true)
     expect(footer.text()).toContain('87.7')
+  })
+
+  it('悬停无数据时面板显示空态提示', async () => {
+    const wrapper = await mountIndicator({ usage: null })
+    await wrapper.find('.nr-ctx-usage').trigger('mouseenter')
+    await flushPromises()
+    expect(wrapper.find('.nr-ctx-panel-empty').exists()).toBe(true)
+    expect(wrapper.find('.nr-ctx-panel-empty').text()).toContain('暂无数据')
   })
 })

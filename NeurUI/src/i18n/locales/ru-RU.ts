@@ -498,6 +498,7 @@ export default {
     stepDuration: 'длилось {n} с',
     ctxPanelTitle: 'Ёмкость контекста',
     ctxCacheHitRate: 'Средний процент попаданий кэша',
+    ctxPanelNoData: 'Нет данных — отправьте сообщение',
     ctxSectionMessages: 'Сообщения',
     ctxSectionSystemTools: 'Системные инструменты',
     ctxSectionMcpTools: 'Инструменты MCP',

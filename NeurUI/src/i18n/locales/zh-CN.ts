@@ -504,6 +504,7 @@ export default {
     stepDuration: '持续 {n} 秒',
     ctxPanelTitle: '上下文容量',
     ctxCacheHitRate: '平均缓存命中率',
+    ctxPanelNoData: '暂无数据，发送一条消息后生成',
     ctxSectionMessages: '消息',
     ctxSectionSystemTools: '系统工具',
     ctxSectionMcpTools: 'MCP 工具',
