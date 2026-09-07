@@ -243,7 +243,7 @@ namespace Neurova.Installer
                 VerticalAlignment = VerticalAlignment.Center,
             };
             tb.MouseLeftButtonUp += onClick;
-            tb.MouseEnter += delegate { tb.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1FFFFFF")); };
+            tb.MouseEnter += delegate { tb.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#1FFFFFFF")); };
             tb.MouseLeave += delegate { tb.Background = Brushes.Transparent; };
             return tb;
         }
