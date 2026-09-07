@@ -29,6 +29,21 @@ from neurova.skills.builtin.memory_executor import MemorySkillExecutor
 from neurova.skills.executor import SkillResult
 
 
+_LEGACY_SCHEMA = """
+CREATE TABLE pending_memories (
+    id TEXT PRIMARY KEY, content TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'general',
+    memory_type TEXT NOT NULL DEFAULT 'semantic',
+    source_sentence TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending','confirmed','rejected')),
+    fingerprint TEXT NOT NULL, memory_id TEXT,
+    proposed_by TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL, decided_by TEXT, decided_at REAL, note TEXT
+);
+"""
+
+
 @pytest.fixture
 def store(tmp_path):
     return PendingMemoryStore(db_path=str(tmp_path / "pending_mem.db"))
@@ -148,6 +163,71 @@ class TestPendingStore:
         assert r2.get("rejected") is not True
         assert r2["status"] == "pending"
 
+    def test_propose_per_user_isolation(self, store):
+        """判重按提议人隔离（09-07 用户拍板）：甲的未决/墓碑不影响乙。"""
+        a = store.propose(content="共享内容", proposed_by="alice")
+        b = store.propose(content="共享内容", proposed_by="bob")
+        assert a["id"] != b["id"]
+        assert b["status"] == "pending"
+        assert [i["id"] for i in store.list_pending(proposed_by="alice")] == [a["id"]]
+        assert [i["id"] for i in store.list_pending(proposed_by="bob")] == [b["id"]]
+        # 同用户仍幂等回指
+        a2 = store.propose(content="共享内容", proposed_by="alice")
+        assert a2["id"] == a["id"]
+
+    def test_reject_tombstone_scoped_to_proposer(self, store):
+        """拒绝墓碑只封存提议人自己：甲拒后甲再提 rejected_before，乙可提。"""
+        a = store.propose(content="被拒内容", proposed_by="alice")
+        store.reject(a["id"], rejected_by="admin")
+        assert store.propose(content="被拒内容", proposed_by="alice").get("rejected") is True
+        b = store.propose(content="被拒内容", proposed_by="bob")
+        assert b.get("rejected") is not True
+        assert b["status"] == "pending"
+        # 匿名桶（proposed_by=''）自成一域，不受 alice 墓碑影响
+        anon = store.propose(content="被拒内容")
+        assert anon.get("rejected") is not True
+
+    def test_migrate_tombstone_scoped_to_user(self, tmp_path):
+        """存量迁移按 (指纹, 提议人) 收敛：u1 墓碑清掉 u1 残留 pending，
+        u2 同内容 pending 保留（全局判重时代会被误删）。"""
+        db = str(tmp_path / "scoped_legacy.db")
+        conn = sqlite3.connect(db)
+        conn.executescript(
+            _LEGACY_SCHEMA
+            + """
+            CREATE UNIQUE INDEX pending_memories_rejected_fp_idx
+                ON pending_memories (fingerprint) WHERE status = 'rejected';
+            """
+        )
+        fp = _fingerprint("跨用户内容")
+        now = time.time()
+        conn.execute(
+            "INSERT INTO pending_memories (id, content, status, fingerprint,"
+            " proposed_by, created_at, decided_by, decided_at)"
+            " VALUES ('tomb-u1', '跨用户内容', 'rejected', ?, 'u1', ?, 'admin', ?)",
+            (fp, now, now),
+        )
+        conn.execute(
+            "INSERT INTO pending_memories (id, content, status, fingerprint,"
+            " proposed_by, created_at) VALUES ('stale-u1', '跨用户内容', 'pending', ?, 'u1', ?)",
+            (fp, now + 1),
+        )
+        conn.execute(
+            "INSERT INTO pending_memories (id, content, status, fingerprint,"
+            " proposed_by, created_at) VALUES ('keep-u2', '跨用户内容', 'pending', ?, 'u2', ?)",
+            (fp, now + 2),
+        )
+        conn.commit()
+        conn.close()
+
+        s2 = PendingMemoryStore(db_path=db)
+        assert s2.get("stale-u1") is None  # u1 墓碑指纹下残留清除
+        kept = s2.get("keep-u2")
+        assert kept is not None and kept["status"] == "pending"  # u2 不受 u1 墓碑影响
+        assert [i["id"] for i in s2.list_pending(proposed_by="u2")] == ["keep-u2"]
+        assert s2.propose("跨用户内容", proposed_by="u1").get("rejected") is True
+        assert s2.propose("跨用户内容", proposed_by="u2")["id"] == "keep-u2"
+
     def test_migrate_legacy_pending_duplicates(self, tmp_path):
         """存量库堆积的多条同指纹 pending（现场实况：8 pending + 1 墓碑）：
         重开连接时自动收敛——墓碑指纹下残留 pending 删除，无墓碑堆积留最新
@@ -229,11 +309,11 @@ class TestPendingStore:
         conn.close()
 
         s2 = PendingMemoryStore(db_path=db)
-        assert s2.list_pending() == []  # 墓碑指纹下残留清除
+        assert s2.list_pending() == []  # 墓碑指纹下同提议人残留清除
         assert s2.get("stale-1") is None
         tomb = s2.list_decisions(status="rejected")
         assert len(tomb) == 1 and tomb[0]["id"] == tomb_id
-        assert s2.propose(content="先拒后堆").get("rejected") is True
+        assert s2.propose(content="先拒后堆", proposed_by="u1").get("rejected") is True
 
 
 class TestExecutorHook:
