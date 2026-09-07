@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "recall_history": {
-        "description": "【历史召回】召回本会话被折叠/驱逐出当前上下文窗口的早期对话内容（P1-1③）。当用户提到“之前讨论过”“刚才说的”而当前上下文里找不到时，用本工具按关键词召回被压缩归档的历史轮次。与 memory_search 的区别：memory_search 查长期记忆库（跨会话持久），本工具查当前会话的上下文台账（本会话内被折叠的内容）。",
+        "description": "【历史召回】召回本会话被折叠/驱逐出当前上下文窗口的早期对话内容（P1-1③）。当用户提到“之前讨论过”“刚才说的”而当前上下文里找不到时，用本工具按关键词召回被压缩归档的历史轮次。与 memory_search 的区别：memory_search 查长期记忆库（跨会话持久），本工具查当前会话的上下文台账（本会话内被折叠的内容）。【何时不用】查跨会话长期记忆改用 memory_search；查用户语音说过的话用 voice_memory_search；当前上下文里还找得到的内容不要召回。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -30,7 +30,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "memory_search": {
-        "description": "【内部记忆检索】仅搜索本Agent自身存储的历史对话和记忆条目。不能搜索互联网、不能查天气、不能查新闻、不能获取任何外部实时信息。仅用于回忆用户之前说过的话或Agent之前记录的内容。",
+        "description": "【内部记忆检索】仅搜索本Agent自身存储的历史对话和记忆条目。不能搜索互联网、不能查天气、不能查新闻、不能获取任何外部实时信息。仅用于回忆用户之前说过的话或Agent之前记录的内容。【何时不用】实时/外部信息改用 web_search；查本会话内被折叠的对话用 recall_history；查用户语音说过的话用 voice_memory_search。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -42,7 +42,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "file_read": {
-        "description": "读取文件内容",
+        "description": "【文件读取】读取指定路径文件的内容。已知确切路径时用本工具；还不知道路径先用 file_list 枚举、按内容找用 file_search。【何时不用】大文件建议带 offset 分段读；网页内容不要用本工具（用 web_fetch）。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -54,7 +54,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "file_write": {
-        "description": "写入文件内容",
+        "description": "【文件写入】写入（整体覆盖）指定路径文件的内容。【何时不用】对已有文件做局部修改改用 file_edit（查找替换，避免整文件重写）；创建全新文件用 file_create。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -87,12 +87,12 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "file_edit": {
-        "description": "编辑文件（查找替换）",
+        "description": "【文件编辑】查找替换方式修改已有文件：old_str 必须与文件内容逐字符一致且在文件中唯一（含足够上下文行），不唯一则不执行替换。对已有文件的局部修改一律用本工具。【何时不用】整体重写文件用 file_write；新建文件用 file_create。",
         "parameters": {
             "type": "object",
             "properties": {
                 "file_path": {"type": "string", "description": "文件路径"},
-                "old_str": {"type": "string", "description": "待替换文本"},
+                "old_str": {"type": "string", "description": "待替换文本（须逐字符一致且唯一，建议带前后各几行上下文）"},
                 "new_str": {"type": "string", "description": "替换后文本"},
             },
             "required": ["file_path", "old_str", "new_str"],
@@ -140,7 +140,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_shell": {
-        "description": "在用户计算机上执行 shell 命令",
+        "description": "【Shell 命令】在用户计算机上执行 shell 命令（Windows 下经 cmd.exe /c）。适合系统操作：进程/服务管理、环境变量、批量文件整理、安装依赖。【何时不用】数据处理/算法计算/文本批量处理改用 run_code；纯数值计算禁止在本工具里心算或在 shell 里拼算式，用 run_code 跑 Python；抓取网页不要用 curl（用 web_fetch）。",
         "sandbox_required": True,
         "parameters": {
             "type": "object",
@@ -153,7 +153,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     # ── 浏览器操作工具（BrowserManager 多后端：Playwright/Scrapling）──
     # 执行过程的页面截图会实时推送到聊天页的电脑操作分屏面板
     "browser_navigate": {
-        "description": "【浏览器导航】在内置自动化浏览器中打开指定 URL。这是工具阶梯中最重的一档：仅当 web_search/web_fetch 无法完成任务（需要页面交互、登录或 JS 动态渲染）时才使用；纯读取内容一律先用 web_search 搜索、web_fetch 抓取。打开后可用 browser_extract_text 提取正文、browser_click/browser_type 交互、browser_screenshot 截图。",
+        "description": "【浏览器导航】在内置自动化浏览器中打开指定 URL。这是工具阶梯中最重的一档：仅当 web_search/web_fetch 无法完成任务（需要页面交互、登录或 JS 动态渲染）时才使用；纯读取内容一律先用 web_search 搜索、web_fetch 抓取。打开后可用 browser_extract_text 提取正文、browser_click/browser_type 交互、browser_screenshot 截图。【何时不用】已知 URL 的静态页读取不要导航（直接 web_fetch）；站点内搜索不要用导航拼 URL（用 web_search 或 bilibili_search 等垂直工具）。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -193,7 +193,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "browser_extract_text": {
-        "description": "【浏览器提取文本】提取当前浏览器页面的正文文字内容，用于阅读网页、总结文章、获取搜索结果等。建议先用 browser_navigate 打开页面。",
+        "description": "【浏览器提取文本】提取当前浏览器页面的正文文字内容，用于阅读网页、总结文章、获取搜索结果等。建议先用 browser_navigate 打开页面。【何时不用】还没打开页面时先 browser_navigate；需要完整长文分片阅读改用 browser_dom_read；未驱动浏览器前抓静态页直接 web_fetch，不要为本工具单独开浏览器。",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -250,7 +250,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "browser_read": {
-        "description": "【浏览器读取】通过 Playwright 驱动真实浏览器，渲染 JavaScript 密集型网页（SPA / 客户端渲染 / 反爬轻量页面）并提取为干净 Markdown 文本。与 web_read（Jina Reader）互补：web_read 适合静态页，browser_read 处理 JS 渲染页。注意：首次使用需安装浏览器（playwright install chromium）。长文自动分片：首读返回前 60,000 字符 + session_id/can_continue/next_offset；正文未读完时必须带 session_id 续读直到 can_continue=false，不要凭首片下结论。",
+        "description": "【浏览器读取】通过 Playwright 驱动真实浏览器，渲染 JavaScript 密集型网页（SPA / 客户端渲染 / 反爬轻量页面）并提取为干净 Markdown 文本。与 web_fetch 互补：web_fetch 适合静态页，browser_read 处理 JS 渲染页。注意：首次使用需安装浏览器（playwright install chromium）。长文自动分片：首读返回前 60,000 字符 + session_id/can_continue/next_offset；正文未读完时必须带 session_id 续读直到 can_continue=false，不要凭首片下结论。【何时不用】静态页直接 web_fetch（更轻更快）；搜索发现 URL 先 web_search；已打开页面内的正文提取用 browser_extract_text。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -264,7 +264,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "browser_dom_read": {
-        "description": "【页面快照分片读取】获取当前页面的 aria 可访问性树正文，长快照自动分片：首读返回前 8,000 字符 + session_id/can_continue/next_offset。需要继续读取时带 session_id 续读直到 can_continue=false。与 browser_dom_snapshot 的区别：dom_snapshot 面向交互定位（拿 role+name），本工具面向完整阅读（分片拿全文）。页面导航/交互后旧 session 失效，需重新调用。仅在快照被截断、需要完整内容时使用。",
+        "description": "【页面快照分片读取】获取当前页面的 aria 可访问性树正文，长快照自动分片：首读返回前 8,000 字符 + session_id/can_continue/next_offset。需要继续读取时带 session_id 续读直到 can_continue=false。与 browser_dom_snapshot 的区别：dom_snapshot 面向交互定位（拿 role+name），本工具面向完整阅读（分片拿全文）。页面导航/交互后旧 session 失效，需重新调用。【何时不用】快照未截断时不要调用（直接消费 browser_dom_snapshot 结果）；未打开页面前不要调用（先 browser_navigate）。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -276,7 +276,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "bilibili_search": {
-        "description": "【B站搜索】搜索 B 站视频，返回标题与链接。用于查找中文视频教程、评测、讲解等内容。",
+        "description": "【B站搜索】搜索 B 站视频，返回标题与链接。用于查找中文视频教程、评测、讲解等内容。【何时不用】仅限 B 站内容；通用搜索/其他平台改用 web_search，拿到视频链接后要字幕内容用 youtube_transcript（仅限 YouTube）。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -287,7 +287,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "rss_read": {
-        "description": "【RSS 阅读】读取 RSS/Atom 订阅源的最新条目（标题/链接/摘要）。用于追踪博客、播客、新闻源更新。",
+        "description": "【RSS 阅读】读取 RSS/Atom 订阅源的最新条目（标题/链接/摘要）。用于追踪博客、播客、新闻源更新。【何时不用】需要条目全文时拿链接用 web_fetch 续读；源已失效或非 RSS 地址改用 web_search / web_fetch；搜索未知站点不要用本工具。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -298,7 +298,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "v2ex_hot": {
-        "description": "【V2EX 热门】获取 V2EX 社区当前热门帖子（标题/链接/回复数/作者）。用于了解开发者社区热议话题。",
+        "description": "【V2EX 热门】获取 V2EX 社区当前热门帖子（标题/链接/回复数/作者）。用于了解开发者社区热议话题。【何时不用】仅限 V2EX 站点；查帖子全文拿链接用 web_fetch；通用技术搜索改用 web_search。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -308,7 +308,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "social_search": {
-        "description": "【社交平台搜索】查询社交平台（twitter/reddit/xiaohongshu/facebook/instagram/linkedin）的搜索接入状态。已配置登录态后端时返回后端与命令信息；未配置时返回配置引导。不自动登录。",
+        "description": "【社交平台搜索】查询社交平台（twitter/reddit/xiaohongshu/facebook/instagram/linkedin）的搜索接入状态。已配置登录态后端时返回后端与命令信息；未配置时返回配置引导。不自动登录。【何时不用】仅限上述社交平台；通用搜索改用 web_search；本工具未配置接入时不要反复重试，按返回的配置引导提示用户。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -319,7 +319,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "planning": {
-        "description": "【任务计划】创建和管理结构化任务计划，适合多步骤长任务：先 create 建立步骤清单，执行过程中用 mark_step 标记各步状态（completed/in_progress/blocked），让用户和后续轮次都能看到全局进度。计划持久化存储，重启后仍可 get 查询继续推进。对于需要多轮才能完成的任务，开工前先建计划。",
+        "description": "【任务计划】创建和管理结构化任务计划，适合多步骤长任务：先 create 建立步骤清单，执行过程中用 mark_step 标记各步状态（completed/in_progress/blocked），让用户和后续轮次都能看到全局进度。计划持久化存储，重启后仍可 get 查询继续推进。对于需要多轮才能完成的任务，开工前先建计划。状态机纪律：同一时刻至多一个 in_progress 步骤；步骤完成立即标记，不要攒到最后批量勾选；探索/搜索/阅读类动作不要登记为步骤；计划需要大改时先说明理由再 update。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -385,7 +385,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "voice_memory_search": {
-        "description": "【内部语音记忆检索】仅搜索用户之前通过语音说过的内容（语音转写后的记录）。不能搜索互联网、不能查天气、不能获取外部信息。仅用于回忆用户语音对话历史。",
+        "description": "【内部语音记忆检索】仅搜索用户之前通过语音说过的内容（语音转写后的记录）。不能搜索互联网、不能查天气、不能获取外部信息。仅用于回忆用户语音对话历史。【何时不用】查打字/文字对话记忆改用 memory_search；查本会话被折叠内容用 recall_history；两者结果都不足时再回退本工具，不要每次都查三路。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -422,7 +422,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "web_search": {
-        "description": "【实时网络搜索】通过搜索引擎查询互联网上的实时信息（新闻、股价、百科、技术文档等）。当用户需要 memory_search 无法提供的实时或外部信息时调用此工具。返回搜索结果摘要文本。工具选择阶梯（最轻优先）：不知道网址先用本工具搜索 → 拿到具体网址后用 web_fetch 读取 → 仅当页面需要交互/登录/动态渲染才升级 browser_* 工具，不要直接开浏览器做纯检索。",
+        "description": "【实时网络搜索】通过搜索引擎查询互联网上的实时信息（新闻、股价、百科、技术文档等）。当用户需要 memory_search 无法提供的实时或外部信息时调用此工具。返回搜索结果摘要文本。工具选择阶梯（最轻优先）：不知道网址先用本工具搜索 → 拿到具体网址后用 web_fetch 读取 → 仅当页面需要交互/登录/动态渲染才升级 browser_* 工具，不要直接开浏览器做纯检索。【何时不用】已知确切 URL 直接 web_fetch；站点限定内容（B站/V2EX/RSS）用对应垂直工具；内部记忆问题用 memory_search。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -443,7 +443,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "spawn_subagent": {
-        "description": "【蜂群派生子Agent】将一个子任务派交给另一个 Agent 执行（蜂群编排）。当任务可分解为多个相对独立的子任务（如：多主题调研、多文件分析、多视角评审）时，对每个子任务各调用一次本工具即可并行蜂群执行。每个子 Agent 拥有独立的人设/记忆/模型配置。前台模式等待完成并返回最终报告；background=true 立即返回 subagent_id（用 subagent_status 查询结果）。子 Agent 的执行过程会实时显示在聊天界面的子 Agent 小窗中。可先用 list_agents 查看可用的子 Agent。配额纪律（系统强制，超限派生会被数据层直接拒绝）：任务要求 N 个子任务就只调 N 次；用户未指定数量时每层 1-3 个；禁止为同一子任务重复派生；禁止派生与当前任务无关的子 Agent；并发上限 5，超限先 subagent_status 等待回收再派生。",
+        "description": "【蜂群派生子Agent】将一个子任务派交给另一个 Agent 执行（蜂群编排）。当任务可分解为多个相对独立的子任务（如：多主题调研、多文件分析、多视角评审）时，对每个子任务各调用一次本工具即可并行蜂群执行。每个子 Agent 拥有独立的人设/记忆/模型配置。前台模式等待完成并返回最终报告；background=true 立即返回 subagent_id（用 subagent_status 查询结果）。子 Agent 的执行过程会实时显示在聊天界面的子 Agent 小窗中。可先用 list_agents 查看可用的子 Agent。配额纪律（系统强制，超限派生会被数据层直接拒绝）：任务要求 N 个子任务就只调 N 次；用户未指定数量时每层 1-3 个；禁止为同一子任务重复派生；禁止派生与当前任务无关的子 Agent；并发上限 5，超限先 subagent_status 等待回收再派生。【何时不用】固定步骤序列的自动化改用工作流/画布（canvas_run）；单步工具能完成的不要派生子 Agent。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -542,7 +542,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "web_fetch": {
-        "description": "【网页抓取】抓取指定 URL 的内容并转为纯文本（阅读文章、文档、API 响应等）。已知网址要读取其内容时用此工具；不知道网址先用 web_search 搜索。仅支持 http/https 协议。若本工具返回空或内容不完整（JS 动态页），再升级 browser_* 工具处理，不要跳过本工具直接用浏览器。",
+        "description": "【网页抓取】抓取指定 URL 的内容并转为纯文本（阅读文章、文档、API 响应等）。已知网址要读取其内容时用此工具；不知道网址先用 web_search 搜索。仅支持 http/https 协议。若本工具返回空或内容不完整（JS 动态页），再升级 browser_* 工具处理，不要跳过本工具直接用浏览器。【何时不用】未拿到具体 URL 时先用 web_search；JS 渲染/需登录页改用 browser_read；本地文件用 file_read。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -553,7 +553,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "run_code": {
-        "description": "【代码执行】运行一段 Python 或 shell 代码，返回 stdout/stderr/退出码。用于数据处理、批量文件操作、验证代码逻辑等。代码在本地运行时执行，受治理策略约束。",
+        "description": "【代码执行】运行一段 Python 或 shell 代码，返回 stdout/stderr/退出码。用于数据处理、算法计算、文本批量处理、验证代码逻辑等。代码在本地运行时执行，受治理策略约束。【何时不用】系统操作类命令（进程/服务/环境变量）改用 computer_shell；纯数值计算禁止心算，一律用本工具跑 Python。",
         "sandbox_required": True,
         "parameters": {
             "type": "object",
@@ -692,7 +692,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "canvas_run": {
-        "description": "【运行画布】把画布编译为工作流并同步执行，返回整体状态与每个节点的执行结果（状态/输出/错误/耗时）。搭完工作流后用它验证流程是否跑通。",
+        "description": "【运行画布】把画布编译为工作流并同步执行，返回整体状态与每个节点的执行结果（状态/输出/错误/耗时）。搭完工作流后用它验证流程是否跑通。【何时不用】把已保存的工作流交给子 Agent 长期执行改用 spawn_subagent；一次性简单任务不要包装成画布，直接用对应工具。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -747,6 +747,25 @@ def get_builtin_tool_params(tool_name: str) -> Optional[Dict]:
 
 _SANDBOX_REQUIRED_KEY = "sandbox_required"
 
+# B3（v0 启发）：执行摘要参数——模型自述"进行中/完成态"的 2-6 字动作短语，
+# 经 SSE 透传给步骤化时间轴作段标题。单一注入点（to_openai_format），54 个
+# 内置工具自动获得；执行层在分发前剥离（不污染真实参数）。
+_TASK_NAME_PARAM_DEFS: Dict[str, Any] = {
+    "taskNameActive": {
+        "type": "string",
+        "description": "可选。当前操作的 2-6 字动词短语（如\"读取配置文件\"），用于界面时间轴显示。",
+    },
+    "taskNameComplete": {
+        "type": "string",
+        "description": "可选。完成态的 2-6 字短语（如\"已读取配置\"），不带成败语义（成败由结果呈现）。",
+    },
+}
+
+
+def get_task_name_param_defs() -> Dict[str, Any]:
+    """taskName* 参数定义（单一事实源；BuiltinTool.to_openai_format 注入）。"""
+    return _TASK_NAME_PARAM_DEFS
+
 
 def get_builtin_tool_sandbox_declaration(tool_name: str) -> Optional[bool]:
     """读取工具的 sandbox_required 声明。
@@ -795,13 +814,25 @@ class BuiltinTool:
     sandbox_required: Optional[bool] = None
 
     def to_openai_format(self) -> Dict[str, Any]:
-        """转换为 OpenAI function calling 格式"""
+        """转换为 OpenAI function calling 格式。
+
+        B3：统一注入 taskNameActive/taskNameComplete 可选参数（执行摘要，
+        直连时间轴 UI）；MCP/Skill 外来 schema 不经此处，自然不受影响。
+        """
+        params = self.parameters
+        try:
+            if isinstance(params, dict) and params.get("type") == "object":
+                props = params.setdefault("properties", {})
+                for _pn, _pdef in _TASK_NAME_PARAM_DEFS.items():
+                    props.setdefault(_pn, dict(_pdef))
+        except Exception:  # noqa: BLE001 - 注入失败不阻断工具暴露
+            pass
         return {
             "type": "function",
             "function": {
                 "name": self.name,
                 "description": self.description,
-                "parameters": self.parameters,
+                "parameters": params,
             },
         }
 

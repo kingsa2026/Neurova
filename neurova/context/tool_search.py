@@ -12,6 +12,7 @@
 """
 
 import math
+import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -25,6 +26,38 @@ _BM25_K1 = 1.2
 _BM25_B = 0.75
 
 _TOKEN_SPLIT = re.compile(r"[^a-z0-9\u4e00-\u9fff]+")
+
+# B0 预算治理（docs/04-plans/2026-09-07-提示词与工具面升级实施方案.md）：
+# 目录单条 description 截断上限——超预算时旧行为是整行丢工具（工具对模型
+# 消失），新行为先截断再装填，同预算容纳全部工具。
+_DIR_DESC_MAX_DEFAULT = 120
+_DIR_BUDGET_DEFAULT = 20000
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def get_directory_budget() -> int:
+    """目录字符预算（env NEUROVA_TOOL_SEARCH_BUDGET 可覆写，默认 20000）。
+
+    orchestrator 的目录渲染与本模块共用此单源，避免两处硬编码漂移。
+    """
+    return _env_int("NEUROVA_TOOL_SEARCH_BUDGET", _DIR_BUDGET_DEFAULT)
+
+
+def _clip_desc(desc: str, limit: int = _DIR_DESC_MAX_DEFAULT) -> str:
+    """目录单行内的 description 截断：塌缩空白 + 超限截断加省略号。"""
+    collapsed = " ".join(str(desc or "").split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[:limit].rstrip() + "…"
 
 # 每次构建目录时刷新（进程级最后目录——Executor 的 tool_search/tool_describe 读它；
 # 单网关进程语义下与 OC 的 per-session catalog 等价收敛）
@@ -85,9 +118,16 @@ def search_catalog(query: str, entries: List[Dict[str, Any]], limit: int = 8) ->
     return [entries[idx] for _, idx in scored[: max(1, limit)]]
 
 
-def render_directory(entries: List[Dict[str, Any]], max_chars: int = 18000) -> str:
-    """有界能力目录（只有 name+description，schema 永不进 prompt）。"""
-    lines = [f"- {e['name']}: {e['description']}" for e in entries]
+def render_directory(entries: List[Dict[str, Any]], max_chars: Optional[int] = None) -> str:
+    """有界能力目录（只有 name+description，schema 永不进 prompt）。
+
+    B0：max_chars 缺省读共享预算（get_directory_budget）；每条 description
+    先截断到 _DIR_DESC_MAX_DEFAULT 再装填——预算装不下时旧行为整行丢工具，
+    新行为因截断而尽量零丢弃，仅在预算极小时才丢行并保留尾注。
+    """
+    if max_chars is None:
+        max_chars = get_directory_budget()
+    lines = [f"- {e['name']}: {_clip_desc(e.get('description', ''))}" for e in entries]
     body = "\n".join(lines)
     if len(body) <= max_chars:
         return body
@@ -103,22 +143,25 @@ def render_directory(entries: List[Dict[str, Any]], max_chars: int = 18000) -> s
 
 
 def control_tool_schemas() -> List[Dict[str, Any]]:
-    """三个控制工具的 OpenAI schema（直连工具面，永不进隐藏目录）。"""
+    """三个控制工具的 OpenAI schema（直连工具面，永不进隐藏目录）。
+
+    批次 B1：description 中文化（系统提示全中文语境，避免双语混排）。
+    """
     return [
         {
             "type": "function",
             "function": {
                 "name": "tool_search",
                 "description": (
-                    "Search the hidden tool catalog by intent. Returns matching tool "
-                    "names and descriptions (no schemas). Use tool_describe to load a "
-                    "full schema before tool_call."
+                    "【工具检索】按意图在隐藏工具目录中检索，返回匹配的工具名与描述"
+                    "（不含参数 schema）。先用本工具找到目标工具，再用 tool_describe "
+                    "加载其完整参数定义，最后用 tool_call 调用。"
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "query": {"type": "string", "description": "What you want to do"},
-                        "limit": {"type": "integer", "description": "Max results (default 8)"},
+                        "query": {"type": "string", "description": "想完成的任务（自然语言）"},
+                        "limit": {"type": "integer", "description": "返回条数上限（默认 8）"},
                     },
                     "required": ["query"],
                 },
@@ -128,10 +171,10 @@ def control_tool_schemas() -> List[Dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "tool_describe",
-                "description": "Load the full parameter schema of one hidden tool by exact name.",
+                "description": "【工具详情】按精确名称加载一个隐藏工具的完整参数 schema。调用前必须先用本工具了解参数定义。",
                 "parameters": {
                     "type": "object",
-                    "properties": {"name": {"type": "string", "description": "Exact tool name"}},
+                    "properties": {"name": {"type": "string", "description": "工具的精确名称"}},
                     "required": ["name"],
                 },
             },
@@ -141,15 +184,15 @@ def control_tool_schemas() -> List[Dict[str, Any]]:
             "function": {
                 "name": "tool_call",
                 "description": (
-                    "Call a hidden tool by exact name with its full argument object. "
-                    "Describe the tool first to learn the schema. Execution goes through "
-                    "the normal policy/approval pipeline."
+                    "【调用隐藏工具】按精确名称调用隐藏目录中的工具，附完整参数对象。"
+                    "调用前先用 tool_describe 了解 schema；执行走正常策略/审批管线，"
+                    "与直连工具同权限同治理。"
                 ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "name": {"type": "string", "description": "Exact tool name"},
-                        "arguments": {"type": "object", "description": "Tool arguments"},
+                        "name": {"type": "string", "description": "工具的精确名称"},
+                        "arguments": {"type": "object", "description": "工具参数对象"},
                     },
                     "required": ["name"],
                 },
