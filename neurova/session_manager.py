@@ -830,14 +830,16 @@ class SessionManager(SessionRepository):
                     seen_session_ids[sid] = summary
 
         summaries = list(seen_session_ids.values())
-        # 拖拽排序落库:sort_order>0 的会话按其升序在前,未排序(0)按 created_at 倒序垫底
-        summaries.sort(
-            key=lambda x: (
-                0 if x.get("sort_order", 0) else 1,
-                x.get("sort_order", 0) if x.get("sort_order", 0) else 0,
-                "" if x.get("sort_order", 0) else x.get("created_at", ""),
-            ),
-        )
+        # 拖拽排序落库:sort_order>0 的会话按其升序在前,未排序(0)按 created_at
+        # 倒序垫底(新→旧)。951d8c0b 曾把此排序写成三键升序元组——未排序区
+        # created_at 变升序(最老在前),最新会话全部沉底,前端 loadSessions
+        # auto-select 列表第一项打开的是老空会话,用户感知"重启后会话全丢"。
+        # ISO 时间串无法取负,单一 sort 表达不出 ASC/DESC 混排,分区排序实现。
+        ordered = [x for x in summaries if int(x.get("sort_order", 0) or 0)]
+        unsorted_ = [x for x in summaries if not int(x.get("sort_order", 0) or 0)]
+        ordered.sort(key=lambda x: int(x.get("sort_order", 0) or 0))
+        unsorted_.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        summaries = ordered + unsorted_
         return summaries
 
     def set_session_pinned(self, agent_id: str, session_id: str, pinned: bool) -> bool:
