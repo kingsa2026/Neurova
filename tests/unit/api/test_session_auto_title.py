@@ -172,6 +172,8 @@ def client(repo, monkeypatch):
     monkeypatch.setattr(console_api, "get_session_repository", lambda: repo)
     app = FastAPI()
     app.include_router(console_api.router, prefix="/api/v1/console")
+    from neurova.api.deps import get_current_user
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": "u1", "role": "admin"}
     return TestClient(app)
 
 
@@ -191,6 +193,11 @@ def test_auto_title_403_for_foreign_user(monkeypatch):
         return await call_next(request)
 
     app.include_router(console_api.router, prefix="/api/v1/console")
+
+    from neurova.api.deps import get_current_user
+
+    # 身份 override：override 返回的用户与会话属主不同 → 403
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": "someone-else", "role": "user"}
     client = TestClient(app)
     resp = client.post("/api/v1/console/chat/sessions/s1/auto-title")
     assert resp.status_code == 403

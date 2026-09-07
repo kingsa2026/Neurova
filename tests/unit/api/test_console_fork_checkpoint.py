@@ -61,10 +61,15 @@ def _messages():
 
 
 def _client(monkeypatch, repo):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from neurova.api.deps import get_current_user
+
     monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda request, current_user=None: "u1")
     app = FastAPI()
     app.include_router(console_module.router, prefix="/api/v1/console")
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": "u1", "role": "admin"}
     return TestClient(app)
 
 

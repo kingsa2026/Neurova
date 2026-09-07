@@ -16,6 +16,9 @@ from neurova.security.approval_manager import ApprovalManager
 def _make_client(tmpdir: str) -> TestClient:
     app = FastAPI()
     app.include_router(router, prefix="/api/v1/governance")
+    # 2026-09-07 安全修复：governance 端点要求 admin；测试注入 admin 身份
+    from neurova.api.deps import get_current_user
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": "admin1", "role": "admin"}
     return TestClient(app)
 
 

@@ -84,14 +84,14 @@ class ApprovalActionRequest(BaseModel):
 
 
 @router.get("/whitelist")
-async def list_whitelist(request: Request):
+async def list_whitelist(request: Request, _admin: Any = Depends(_governance_admin_dep)):
     """列出白名单条目"""
     gov = _get_governance()
     return {"code": 0, "data": {"entries": gov.list_whitelist_entries()}}
 
 
 @router.post("/whitelist")
-async def add_whitelist(request: Request, body: WhitelistEntryRequest):
+async def add_whitelist(request: Request, body: WhitelistEntryRequest, _admin: Any = Depends(_governance_admin_dep)):
     """新增白名单条目"""
     if body.match_type not in ("prefix", "exact", "regex"):
         raise HTTPException(status_code=422, detail="match_type 必须是 prefix/exact/regex")
@@ -107,7 +107,7 @@ async def add_whitelist(request: Request, body: WhitelistEntryRequest):
 
 
 @router.delete("/whitelist/{entry_id}")
-async def delete_whitelist(request: Request, entry_id: str):
+async def delete_whitelist(request: Request, entry_id: str, _admin: Any = Depends(_governance_admin_dep)):
     """删除白名单条目"""
     gov = _get_governance()
     if not gov.remove_whitelist_entry(entry_id):
@@ -121,8 +121,7 @@ async def delete_whitelist(request: Request, entry_id: str):
 @router.get("/approvals/pending")
 async def list_pending_approvals(
     request: Request,
-    surface: typing.Optional[str] = Query(default=None, description="按调用面过滤（P1-2 HITL surface）"),
-):
+    surface: typing.Optional[str] = Query(default=None, description="按调用面过滤（P1-2 HITL surface）"), _admin: Any = Depends(_governance_admin_dep),):
     """待审批列表。
 
     surface 参数（P1-2 HITL surface 安全模型）：传 service_api/openapi/console
@@ -140,7 +139,7 @@ async def list_pending_approvals(
 
 
 @router.get("/approvals/{request_id}")
-async def get_approval_detail(request: Request, request_id: str):
+async def get_approval_detail(request: Request, request_id: str, _admin: Any = Depends(_governance_admin_dep)):
     """审批请求详情"""
     am = _get_approvals()
     req = am.get_request(request_id)
@@ -151,7 +150,7 @@ async def get_approval_detail(request: Request, request_id: str):
 
 @router.post("/approvals/{request_id}/approve")
 async def approve_and_execute(request: Request, request_id: str,
-                              body: ApprovalActionRequest):
+                              body: ApprovalActionRequest, _admin: Any = Depends(_governance_admin_dep)):
     """
     批准并重放执行。
 
@@ -211,7 +210,7 @@ async def approve_and_execute(request: Request, request_id: str,
 
 @router.post("/approvals/{request_id}/reject")
 async def reject_approval(request: Request, request_id: str,
-                          body: ApprovalActionRequest):
+                          body: ApprovalActionRequest, _admin: Any = Depends(_governance_admin_dep)):
     """拒绝审批请求"""
     am = _get_approvals()
     req = am.get_request(request_id)
@@ -248,7 +247,7 @@ class RsiRejectRequest(BaseModel):
 
 
 @router.get("/rsi/proposals/pending")
-async def list_pending_rsi_proposals():
+async def list_pending_rsi_proposals(_admin: Any = Depends(_governance_admin_dep)):
     """列出 RSI 升级提案（PENDING 状态）"""
     rsi = _get_rsi_orchestrator()
     if rsi is None:
@@ -259,7 +258,7 @@ async def list_pending_rsi_proposals():
 
 
 @router.post("/rsi/proposals/{proposal_id}/approve")
-async def approve_rsi_proposal(proposal_id: str, body: RsiApproveRequest):
+async def approve_rsi_proposal(proposal_id: str, body: RsiApproveRequest, _admin: Any = Depends(_governance_admin_dep)):
     """人工批准并应用 RSI 升级提案（状态机守卫：仅 PENDING）"""
     rsi = _get_rsi_orchestrator()
     if rsi is None:
@@ -277,7 +276,7 @@ async def approve_rsi_proposal(proposal_id: str, body: RsiApproveRequest):
 
 
 @router.post("/rsi/proposals/{proposal_id}/reject")
-async def reject_rsi_proposal(proposal_id: str, body: RsiRejectRequest):
+async def reject_rsi_proposal(proposal_id: str, body: RsiRejectRequest, _admin: Any = Depends(_governance_admin_dep)):
     """拒绝 RSI 升级提案（状态机守卫：仅 PENDING）"""
     rsi = _get_rsi_orchestrator()
     if rsi is None:
@@ -300,6 +299,40 @@ def _governance_settings_path():
     from neurova.security.governance_settings import settings_path
 
     return settings_path()
+
+
+# ── Agent 运行限制设置（Token 预算 / Loop 轮次，2026-09-07）──
+
+
+@router.get("/agent-limits")
+async def get_agent_limits(admin=Depends(_governance_admin_dep)):
+    """Agent 运行限制（仅管理员）：token_budget / max_loop_rounds"""
+    from neurova.security.agent_limits_settings import get_effective_limits
+
+    return {"code": 0, "data": get_effective_limits()}
+
+
+class AgentLimitsUpdate(BaseModel):
+    """Agent 运行限制更新"""
+
+    token_budget: Optional[int] = Field(None, ge=1000, le=10_000_000)
+    max_loop_rounds: Optional[int] = Field(None, ge=2, le=200)
+
+
+@router.put("/agent-limits")
+async def update_agent_limits(body: AgentLimitsUpdate, admin=Depends(_governance_admin_dep)):
+    """更新 Agent 运行限制（仅管理员）"""
+    from neurova.security.agent_limits_settings import (
+        get_effective_limits,
+        save_agent_limits,
+    )
+
+    payload = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not payload:
+        raise HTTPException(status_code=422, detail="无有效更新字段")
+    if not save_agent_limits(payload):
+        raise HTTPException(status_code=500, detail="Agent 运行限制保存失败")
+    return {"code": 0, "data": get_effective_limits()}
 
 
 @router.get("/settings")

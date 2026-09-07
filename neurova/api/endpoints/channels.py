@@ -18,7 +18,8 @@ from __future__ import annotations
 from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from neurova.api.deps import get_current_user
+from fastapi import Depends, APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from neurova.channels.manager import get_channel_manager
@@ -88,7 +89,7 @@ class WebhookConfigRequest(BaseModel):
 
 
 @router.get("", summary="列出所有渠道状态")
-async def list_channels():
+async def list_channels(current_user: Any = Depends(get_current_user),):
     """列出所有已注册的渠道适配器状态"""
     manager = get_channel_manager()
     health = await manager.health_check()
@@ -96,7 +97,7 @@ async def list_channels():
 
 
 @router.get("/{channel_type}", summary="获取指定渠道状态")
-async def get_channel_status(channel_type: str):
+async def get_channel_status(channel_type: str, current_user: Any = Depends(get_current_user),):
     """获取指定渠道的连接状态"""
     manager = get_channel_manager()
     adapter = manager.get_adapter(channel_type)
@@ -106,7 +107,7 @@ async def get_channel_status(channel_type: str):
 
 
 @router.post("/{channel_type}/connect", summary="连接指定渠道")
-async def connect_channel(channel_type: str, request: ConnectRequest):
+async def connect_channel(channel_type: str, request: ConnectRequest, current_user: Any = Depends(get_current_user),):
     """连接指定渠道适配器"""
     manager = get_channel_manager()
     adapter = manager.get_adapter(channel_type)
@@ -126,7 +127,7 @@ async def connect_channel(channel_type: str, request: ConnectRequest):
 
 
 @router.post("/{channel_type}/disconnect", summary="断开指定渠道")
-async def disconnect_channel(channel_type: str):
+async def disconnect_channel(channel_type: str, current_user: Any = Depends(get_current_user),):
     """断开指定渠道适配器"""
     manager = get_channel_manager()
     adapter = manager.get_adapter(channel_type)
@@ -137,7 +138,7 @@ async def disconnect_channel(channel_type: str):
 
 
 @router.post("/{channel_type}/send", summary="发送消息")
-async def send_message(channel_type: str, request: SendMessageRequest):
+async def send_message(channel_type: str, request: SendMessageRequest, current_user: Any = Depends(get_current_user),):
     """通过指定渠道发送消息"""
     manager = get_channel_manager()
     msg_id = await manager.send_message(

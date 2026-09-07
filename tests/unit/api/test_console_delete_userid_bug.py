@@ -44,7 +44,9 @@ def app():
 
 @pytest.fixture
 def client(app):
-    """创建 TestClient."""
+    """创建 TestClient（console 端点鉴权收紧后注入测试身份）。"""
+    from neurova.api.deps import get_current_user
+    app.dependency_overrides[get_current_user] = lambda: {"user_id": "u1", "role": "admin"}
     return TestClient(app)
 
 

@@ -19,6 +19,7 @@ import pytest
 from starlette.requests import Request
 
 from neurova.api.endpoints import console as console_module
+from neurova.api.deps import get_current_user
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +58,7 @@ class RecordingAgent:
 
 
 def _patch(monkeypatch, agent) -> None:
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda request, current_user=None: "u1")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: FakeRepo())
     monkeypatch.setattr(console_module, "get_agent_instance", lambda agent_id: agent)
 
@@ -153,10 +154,11 @@ class TestSessionReorderEndpoint:
 
         repo = FakeRepoWithSort()
         monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
-        monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+        monkeypatch.setattr(console_module, "_get_user_id", lambda request, current_user=None: "u1")
 
         app = FastAPI()
         app.include_router(console_module.router, prefix="/api/v1/console")
+        app.dependency_overrides[get_current_user] = lambda: {"user_id": "u1", "role": "admin"}
         with TestClient(app) as client:
             resp = client.post(
                 "/api/v1/console/chat/sessions/reorder",
@@ -173,10 +175,11 @@ class TestSessionReorderEndpoint:
 
         repo = FakeRepoWithSort()
         monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
-        monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+        monkeypatch.setattr(console_module, "_get_user_id", lambda request, current_user=None: "u1")
 
         app = FastAPI()
         app.include_router(console_module.router, prefix="/api/v1/console")
+        app.dependency_overrides[get_current_user] = lambda: {"user_id": "u1", "role": "admin"}
         with TestClient(app) as client:
             resp = client.post(
                 "/api/v1/console/chat/sessions/reorder",
@@ -190,10 +193,11 @@ class TestSessionReorderEndpoint:
 
         repo = FakeRepoWithSort()
         monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
-        monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+        monkeypatch.setattr(console_module, "_get_user_id", lambda request, current_user=None: "u1")
 
         app = FastAPI()
         app.include_router(console_module.router, prefix="/api/v1/console")
+        app.dependency_overrides[get_current_user] = lambda: {"user_id": "u1", "role": "admin"}
         with TestClient(app) as client:
             resp = client.get("/api/v1/console/chat/sessions", params={"agent_id": "default"})
         assert resp.status_code == 200

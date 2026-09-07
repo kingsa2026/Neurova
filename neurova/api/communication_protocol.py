@@ -458,7 +458,7 @@ class CommunicationProtocol:
             return await self._process_handshake(message)
 
         # 处理心跳
-        if message.message_type == MessageType.HEHeartbeat:
+        if message.message_type == MessageType.HEARTBEAT:
             return self.create_message(
                 sender_id=self.server_id,
                 receiver_id=message.sender_id,

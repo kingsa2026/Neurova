@@ -212,7 +212,31 @@ def verify_token(token: str, token_type: str = "access") -> Optional[Dict[str, A
     return payload
 
 
+# ── 登出黑名单（全局单源；endpoints/auth.py logout 注册，verify 统一校验）──
+_token_blacklist: Dict[str, float] = {}  # token -> 过期时间戳（用于清理）
+_BLACKLIST_MAX = 20000
+
+
+def blacklist_token(token: str, exp: float = 0.0) -> None:
+    """登出时注册 token；超过容量上限时清理已过期条目防泄漏。"""
+    import time as _time
+
+    if len(_token_blacklist) >= _BLACKLIST_MAX:
+        now = _time.time()
+        for k in [k for k, v in _token_blacklist.items() if v and v <= now]:
+            _token_blacklist.pop(k, None)
+        if len(_token_blacklist) >= _BLACKLIST_MAX:
+            _token_blacklist.clear()
+    _token_blacklist[token] = exp
+
+
+def is_token_blacklisted_global(token: str) -> bool:
+    return token in _token_blacklist
+
+
 def verify_access_token(token: str) -> Optional[Dict[str, Any]]:
+    if is_token_blacklisted_global(token):
+        return None  # 已登出的 token 视为无效
     """验证 Access Token"""
     return verify_token(token, "access")
 
