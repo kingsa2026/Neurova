@@ -126,7 +126,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { request } from '@/api'
@@ -185,6 +185,14 @@ function capOptions(cap: string) {
 const textModelOptions = computed(() => capOptions('text'))
 const imageModelOptions = computed(() => capOptions('image_generation'))
 const videoModelOptions = computed(() => capOptions('video_generation'))
+
+onUnmounted(() => {
+  // BUG-24 修复：卸载时清理视频轮询定时器（原实现泄漏直到任务终态）
+  if (videoPollTimer) {
+    clearInterval(videoPollTimer)
+    videoPollTimer = null
+  }
+})
 
 onMounted(async () => {
   try {
@@ -339,6 +347,11 @@ async function generateVideo() {
 }
 
 function pollVideoStatus(taskId: string) {
+  // BUG-24 修复：先清旧 timer，防止双 interval 只有最后一个能被清除
+  if (videoPollTimer) {
+    clearInterval(videoPollTimer)
+    videoPollTimer = null
+  }
   videoPollTimer = setInterval(async () => {
     try {
       const res: any = await request.get(`/generation/video/${taskId}`)

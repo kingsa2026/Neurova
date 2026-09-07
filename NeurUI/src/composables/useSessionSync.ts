@@ -150,12 +150,16 @@ export function useSessionSync(
       }
     }
 
-    ws.onclose = () => {
+    // BUG-26 修复：捕获各自的 socket 实例——旧连接的 error/close 事件
+    // 在重连创建新 ws 之后异步到达时，原闭包读共享变量会误杀新连接
+    const sock = ws
+    sock.onclose = () => {
+      if (ws !== sock) return // 已被新连接取代，忽略旧事件
       if (!closed && currentSession === sessionId) scheduleReconnect(sessionId)
     }
 
-    ws.onerror = () => {
-      ws?.close()
+    sock.onerror = () => {
+      if (ws === sock) sock.close()
     }
   }
 

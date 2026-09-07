@@ -62,6 +62,9 @@ export interface UseChatOptions {
   onError?: (message: string) => void
 }
 
+/** 会话切换请求序号（BUG-3 守卫） */
+let switchSessionSeq = 0
+
 export function useChat(options: UseChatOptions = {}) {
   const store = useChatStore()
 
@@ -164,8 +167,14 @@ export function useChat(options: UseChatOptions = {}) {
     store.setCurrentSession(sessionId)
     store.clearMessages()
     switchingSession.value = true
+    // 2026-09-07 修复（audit BUG-3）：请求序号守卫——快速连续切换时
+    // 旧 history 响应后到会覆盖新会话的消息列表，写入前校验归属
+    const reqSeq = ++switchSessionSeq
     try {
       const res: any = await api.get(`/console/chat/history?session_id=${sessionId}`)
+      if (reqSeq !== switchSessionSeq || store.currentSessionId !== sessionId) {
+        return { ok: true } // 已被更新的切换取代，丢弃过期响应
+      }
       const data = res?.data ?? res
       const history = Array.isArray(data) ? data : data?.messages ?? data?.items ?? []
       const mapped: ChatMessage[] = history.map((m: any) => {
