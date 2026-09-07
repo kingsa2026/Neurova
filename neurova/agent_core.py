@@ -996,6 +996,12 @@ class Agent:
         # 同模型短路或重建成功后都必须刷新为当前引用，防止旧 client 残留
         if self.loop is not None and hasattr(self.loop, "llm_client"):
             self.loop.llm_client = self.llm_client
+        # 2026-09-07 补刀（audit P1-1）：AgentLLMClient.model 在构造时冻结，
+        # chat() 用 self.model 路由——不同步则请求仍打旧模型，且 config 已指向
+        # 新模型导致 `model != current_model` 判断失效，永远卡死。
+        if result and self.llm_client is not None:
+            self.llm_client.model = model_name
+            self.llm_client.config.model = model_name
         return result
 
     async def process_multimodal(
