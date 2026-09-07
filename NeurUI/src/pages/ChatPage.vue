@@ -156,7 +156,7 @@
               >
                 <div class="nr-step-header" @click="toggleStep(msg.steps!, step.id)">
                   <span class="nr-step-icon">{{ step.kind === 'reasoning' ? '🧠' : variantIcon(toolCardVariant(step.name)) }}</span>
-                  <span class="nr-step-title">{{ step.kind === 'reasoning' ? t('chat.stepThinking') : step.name }}</span>
+                  <span class="nr-step-title">{{ step.kind === 'reasoning' ? t('chat.stepThinking') : (step.taskName || step.name) }}</span>
                   <span v-if="step.active" class="nr-step-badge is-running">{{ t('chat.stepRunning') }}</span>
                   <span v-else-if="step.kind === 'tool'" class="nr-step-badge" :class="step.result ? 'is-done' : 'is-error'">
                     {{ step.result ? t('chat.toolDone') : t('chat.stepNoResult') }}
@@ -1566,6 +1566,11 @@ async function switchSession(sessionId: string): Promise<void> {
     chatStore.setStreaming(false)
     stopStreamTTS()
   }
+  // 顶入编辑态跨会话失效：队列是全局的，但编辑草稿属于原会话输入框，
+  // 不退出会把切会话后的草稿误提交到旧队列项（悬挂高亮）
+  if (editingQueuedId.value) {
+    editingQueuedId.value = null
+  }
   // BUG-4 修复：restore 前先保存旧会话草稿（原实现只在组件卸载时保存，
   // 切会话即丢）
   const prevSid = currentSessionId.value
@@ -1977,6 +1982,12 @@ watch(
   },
 )
 
+// 会话/agent 切换 → 编辑态作废（编辑草稿属于原会话输入框，只清态不动
+// 输入框——新会话草稿恢复晚于此回调，清输入会误删草稿）
+watch(currentSessionId, () => {
+  if (editingQueuedId.value) editingQueuedId.value = null
+})
+
 /**
  * 429 限流识别与横幅（补课 A1）：错误文本含 429/rate limit 措辞时，
  * 从已启用模型列表（排除当前选中）生成备选候选，弹出横幅一键切换。
@@ -2306,6 +2317,7 @@ function processSSEEvent(event: any, msg: ChatMessage) {
         msg.steps,
         String(event.name || event.tool_name || 'unknown'),
         String(event.arguments || event.input || ''),
+        event.task_name ? String(event.task_name) : undefined,
       )
       // legacy compat
       msg.toolCall = msg.toolCalls[msg.toolCalls.length - 1]
@@ -2326,7 +2338,7 @@ function processSSEEvent(event: any, msg: ChatMessage) {
         last.result = resultText
       }
       // 步骤化时间轴：结果落到最近活跃工具段并封口
-      if (msg.steps) attachToolResult(msg.steps, resultText)
+      if (msg.steps) attachToolResult(msg.steps, resultText, event.task_name ? String(event.task_name) : undefined)
       // legacy compat
       msg.toolResult = resultText
       if (isComputerTool(event.name || '')) {
@@ -5412,6 +5424,11 @@ onBeforeUnmount(() => {
 
 .nr-composer-send.is-stop {
   background: var(--nr-danger, #f56c6c);
+}
+
+/* 顶入编辑确认态：✓ 图标时着色提示"回车/点击=保存改写" */
+.nr-composer-send.is-confirm {
+  color: var(--nr-primary);
 }
 
 /* ── 消息钩子/检查点（ZCode checkpoint 对齐） ── */

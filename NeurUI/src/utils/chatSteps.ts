@@ -24,6 +24,8 @@ export interface ChatStep {
   name?: string
   arguments?: string
   result?: string
+  /** B3：模型自述的执行摘要（active 起、complete 收），时间轴标题优先用它 */
+  taskName?: string
   /** 独立折叠态：流式中活动段为 true，封口时翻 false（用户手动展开后不再自动收） */
   open: boolean
   /** 流式中该段仍在增长（扫光/进行中标记） */
@@ -61,8 +63,9 @@ export function appendReasoningStep(steps: ChatStep[], text: string): ChatStep[]
 /**
  * 追加一个工具调用段。
  * 任何未封口的尾段（推理段）先封口；工具段保持活跃至 tool_result 到达。
+ * taskName：模型自述的进行中短语（B3，可选）——时间轴标题优先显示。
  */
-export function appendToolStep(steps: ChatStep[], name: string, args: string): ChatStep[] {
+export function appendToolStep(steps: ChatStep[], name: string, args: string, taskName?: string): ChatStep[] {
   const last = steps[steps.length - 1]
   if (last) finishStep(last)
   steps.push({
@@ -70,6 +73,7 @@ export function appendToolStep(steps: ChatStep[], name: string, args: string): C
     kind: 'tool',
     name,
     arguments: args,
+    taskName: taskName || undefined,
     open: true,
     active: true,
     startedAt: Date.now(),
@@ -78,17 +82,21 @@ export function appendToolStep(steps: ChatStep[], name: string, args: string): C
 }
 
 /** 给尾部的活跃工具段落结果（tool_result 语义：只落在最近一个活跃工具段）。 */
-export function attachToolResult(steps: ChatStep[], result: string): ChatStep[] {
+export function attachToolResult(steps: ChatStep[], result: string, taskName?: string): ChatStep[] {
   for (let i = steps.length - 1; i >= 0; i--) {
     const s = steps[i]
     if (s.kind === 'tool' && s.active) {
       s.result = result
+      // v0 语义：完成态短语替换进行中短语（标题随生命周期迁移到 complete 态）；
+      // active 文案仅作 complete 缺失时的兜底
+      if (taskName) s.taskName = taskName
       finishStep(s)
       return steps
     }
     // 越过已封口段继续向前找（tool_result 可能迟到）
     if (s.kind === 'tool' && !s.result) {
       s.result = result
+      if (taskName) s.taskName = taskName
       return steps
     }
   }
@@ -124,7 +132,7 @@ export function toggleStep(steps: ChatStep[], stepId: string): void {
  */
 export function buildStepsFromHistory(
   reasoning: string | undefined,
-  toolCalls: Array<{ name: string; arguments: string; result?: string }> | undefined,
+  toolCalls: Array<{ name: string; arguments: string; result?: string; taskName?: string }> | undefined,
 ): ChatStep[] {
   const steps: ChatStep[] = []
   if (reasoning) {
@@ -143,6 +151,7 @@ export function buildStepsFromHistory(
       name: tc.name,
       arguments: tc.arguments,
       result: tc.result,
+      taskName: tc.taskName,
       open: false,
       active: false,
     })
