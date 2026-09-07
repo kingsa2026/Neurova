@@ -669,22 +669,46 @@ class MOSSNanTTS(TTSBase):
         code_len = int(names["audio_code_lengths"].reshape(-1)[0])
         return codes_t[0, :code_len, :].tolist()
 
-    def _resolve_prompt_codes(self, voice_ref_audio: Optional[bytes]) -> List[List[int]]:
-        """声音克隆优先；无参考音频用内置音色。"""
+    # edge-tts 音色名 → moss 内置音色近似映射（性别/语言对齐）：
+    # 网页表单选 edge 名、agent 引擎为 moss 时仍能切到对应听感音色
+    _EDGE_VOICE_ALIASES = {
+        "zh-CN-XiaoxiaoNeural": "Xiaoyu",   # 女声
+        "zh-CN-XiaoyiNeural": "Yuewen",     # 女声
+        "zh-CN-YunxiNeural": "Junhao",      # 男声
+        "zh-CN-YunyangNeural": "Zhiming",   # 男声
+    }
+
+    def _resolve_prompt_codes(
+        self, voice_ref_audio: Optional[bytes], voice: Optional[str] = None
+    ) -> List[List[int]]:
+        """声音克隆优先；无参考音频按 voice 名选内置音色（未知名回退首个）。"""
         if voice_ref_audio is not None:
             codes = self._encode_reference_audio(voice_ref_audio)
             if codes:
                 return codes
-        builtin = self._load_builtin_prompt_codes()
-        if not builtin:
+        if not self._ensure_manifest():
             raise RuntimeError("无内置音色 codes 且声音克隆不可用，无法构造音频前缀")
-        return builtin
+        voices = self._manifest.get("builtin_voices") or []
+        if not voices:
+            raise RuntimeError("manifest 无内置音色，无法构造音频前缀")
+        # voice 名解析：直接名 / edge 别名；未知名回退首个
+        wanted = self._EDGE_VOICE_ALIASES.get(voice or "", voice)
+        for v in voices:
+            if wanted and v.get("voice") == wanted:
+                codes = v.get("prompt_audio_codes")
+                if codes:
+                    return [[int(x) for x in row] for row in codes]
+        default = voices[0].get("prompt_audio_codes")
+        if not default:
+            raise RuntimeError("首个内置音色无 prompt_audio_codes")
+        return [[int(x) for x in row] for row in default]
 
     def _run_inference(
         self,
         text: str,
         voice_ref_audio: Optional[np.ndarray] = None,
         voice_ref_text: Optional[str] = None,
+        voice: Optional[str] = None,
     ) -> np.ndarray:
         """
         运行 TTS 推理（多图流水线；长文本按句切块后拼 Pause 静音）
@@ -693,14 +717,15 @@ class MOSSNanTTS(TTSBase):
             text: 要合成的文本
             voice_ref_audio: 参考音频（声音克隆用；None=内置音色）
             voice_ref_text: 参考文本（兼容保留，本流水线未使用）
+            voice: 内置音色名（Junhao/Xiaoyu...；edge 名经别名映射；未知名回退默认）
 
         Returns:
-            float32 (N, channels) 波形（声道交错就绪）
+            float32 (N,) 单声道波形
         """
         if not self._prefill_session or not self._decode_session or not self._local_frame_session:
             raise RuntimeError("TTS 模型未加载")
 
-        prompt_codes = self._resolve_prompt_codes(voice_ref_audio)
+        prompt_codes = self._resolve_prompt_codes(voice_ref_audio, voice=voice)
         chunks = self._split_text_chunks(text)
         if not chunks:
             return np.zeros(0, dtype=np.float32)
@@ -782,9 +807,12 @@ class MOSSNanTTS(TTSBase):
             if voice_ref_audio is not None:
                 ref_audio_np = self._load_audio_from_bytes(voice_ref_audio)
 
-            # 在线程池中运行推理（避免阻塞事件循环）
+            # 在线程池中运行推理（避免阻塞事件循环）；voice 语义参数路由到内置音色选择
+            voice_name = kwargs.pop("voice", None)
             loop = asyncio.get_event_loop()
-            audio_data = await loop.run_in_executor(None, self._run_inference, text, ref_audio_np, voice_ref_text)
+            audio_data = await loop.run_in_executor(
+                None, self._run_inference, text, ref_audio_np, voice_ref_text, voice_name
+            )
 
             # 转换为 WAV 字节
             wav_bytes = _create_wav_bytes(
@@ -856,9 +884,12 @@ class MOSSNanTTS(TTSBase):
             if voice_ref_audio is not None:
                 ref_audio_np = self._load_audio_from_bytes(voice_ref_audio)
 
-            # 运行推理
+            # 运行推理；voice 语义参数路由到内置音色选择
+            voice_name = kwargs.pop("voice", None)
             loop = asyncio.get_event_loop()
-            audio_data = await loop.run_in_executor(None, self._run_inference, text, ref_audio_np, voice_ref_text)
+            audio_data = await loop.run_in_executor(
+                None, self._run_inference, text, ref_audio_np, voice_ref_text, voice_name
+            )
             if len(audio_data) == 0:
                 # 空产出按失败处理：让管理器流式 fallback 接管
                 raise RuntimeError("推理未产出音频帧")

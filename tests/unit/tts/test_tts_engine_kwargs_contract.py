@@ -315,3 +315,44 @@ def test_compress_silence_caps_gap():
     assert mx * 0.05 <= 0.35, f"压缩后最长停顿应 ≤0.35s，实得 {mx * 0.05:.2f}s"
     # 有声内容不丢
     assert len(out) > 2 * sr, "有声段不得被裁"
+
+
+# ---- 2026-09-08 音色映射：moss 内置音色按名切换 + edge↔moss 双向近似 ----
+
+
+@pytest.mark.skipif(not _MOSS_MODEL_DIR.exists(), reason="本地 moss-nano 模型未下载")
+def test_moss_resolve_prompt_codes_by_voice_name():
+    """voice 名匹配内置音色 → 对应 prompt codes；未知名 → 默认首个。"""
+    tts = MOSSNanTTS(model_dir=_MOSS_MODEL_DIR, tokenizer_dir=None, auto_download=False)
+    junhao = tts._resolve_prompt_codes(None, voice="Junhao")
+    xiaoyu = tts._resolve_prompt_codes(None, voice="Xiaoyu")
+    assert junhao and xiaoyu, "两个内置音色 codes 都应可解析"
+    assert junhao != xiaoyu, "不同音色的参考 codes 必须不同（否则音色切换无效）"
+    # 未知名回退默认（首个内置音色）
+    unknown = tts._resolve_prompt_codes(None, voice="NotExists")
+    assert unknown == tts._resolve_prompt_codes(None, voice=None)
+
+
+@pytest.mark.skipif(not _MOSS_MODEL_DIR.exists(), reason="本地 moss-nano 模型未下载")
+def test_moss_edge_voice_alias_maps_to_builtin():
+    """edge 音色名（zh-CN-XiaoxiaoNeural）经别名表映射到 moss 近似内置音色。"""
+    tts = MOSSNanTTS(model_dir=_MOSS_MODEL_DIR, tokenizer_dir=None, auto_download=False)
+    aliased = tts._resolve_prompt_codes(None, voice="zh-CN-XiaoxiaoNeural")
+    assert aliased, "edge 别名应映射到内置音色"
+    default = tts._resolve_prompt_codes(None, voice=None)
+    assert aliased != default, "XiaoxiaoNeural 应映射到 Xiaoyu 而非默认 Junhao"
+
+
+def test_edge_request_params_maps_moss_voice_names():
+    """edge 引擎收到 moss 音色名（Junhao）→ 反向映射到近似 edge 音色，不炸服务。"""
+    from neurova.tts.edge_tts import EdgeTTS
+
+    engine = EdgeTTS(voice="zh-CN-XiaoxiaoNeural")
+    mapped = engine._request_params(voice="Junhao")
+    assert mapped["voice"].startswith("zh-CN-"), f"moss 名应映射为 edge 音色，实得 {mapped['voice']}"
+    # edge 名原样通过
+    same = engine._request_params(voice="zh-CN-YunxiNeural")
+    assert same["voice"] == "zh-CN-YunxiNeural"
+    # 未知名回落实例默认（防 edge 服务拒绝未知 voice 导致合成失败）
+    fallback = engine._request_params(voice="Gibberish")
+    assert fallback["voice"] == "zh-CN-XiaoxiaoNeural"

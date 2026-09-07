@@ -108,13 +108,30 @@
 
           <template v-if="formState.ttsEnabled">
             <a-form-item :label="t('agent.ttsVoice')">
-              <!-- edge-tts 中文音色（后端 EdgeTTS/TTSManager 真实消费的 voice 值） -->
-              <a-select v-model:value="formState.ttsVoice" :placeholder="t('agent.ttsVoice')" style="width: 100%" allow-clear>
-                <a-select-option value="zh-CN-XiaoxiaoNeural">{{ t('agent.voiceXiaoxiao') }}</a-select-option>
-                <a-select-option value="zh-CN-XiaoyiNeural">{{ t('agent.voiceXiaoyi') }}</a-select-option>
-                <a-select-option value="zh-CN-YunxiNeural">{{ t('agent.voiceYunxi') }}</a-select-option>
-                <a-select-option value="zh-CN-YunyangNeural">{{ t('agent.voiceYunyang') }}</a-select-option>
-              </a-select>
+              <!-- 音色分组：本地 moss 内置音色（16k 试听即真实输出听感）+ 在线 edge-tts；
+                   播放按钮试听当前选中音色（预制静态文件 /tts-preview/，脚本 scripts/generate_tts_previews.py） -->
+              <div class="voice-row">
+                <a-select v-model:value="formState.ttsVoice" :placeholder="t('agent.ttsVoice')" style="flex: 1" allow-clear>
+                  <a-select-opt-group :label="t('agent.voiceGroupLocal')">
+                    <a-select-option v-for="v in mossVoiceOptions" :key="v.value" :value="v.value">
+                      {{ v.label }}
+                    </a-select-option>
+                  </a-select-opt-group>
+                  <a-select-opt-group :label="t('agent.voiceGroupOnline')">
+                    <a-select-option v-for="v in edgeVoiceOptions" :key="v.value" :value="v.value">
+                      {{ v.label }}
+                    </a-select-option>
+                  </a-select-opt-group>
+                </a-select>
+                <GlassButton
+                  variant="ghost"
+                  class="voice-preview-btn"
+                  :disabled="!formState.ttsVoice || previewLoading"
+                  @click="previewVoice"
+                >
+                  {{ previewLoading ? t('agent.voicePreviewLoading') : t('agent.voicePreview') }}
+                </GlassButton>
+              </div>
             </a-form-item>
 
             <a-row :gutter="16">
@@ -246,6 +263,52 @@ const formState = ref({
   ttsPitch: 1.0,
 })
 
+// ── 音色选项与试听（预制静态文件 /tts-preview/，scripts/generate_tts_previews.py 生成）──
+interface VoiceOption {
+  value: string
+  label: string
+}
+
+// moss 内置音色（本地引擎，跨引擎自动近似回落 edge；value=moss 内置名，后端 _EDGE_VOICE_ALIASES 反查）
+const mossVoiceOptions: VoiceOption[] = [
+  { value: 'Junhao', label: 'Junhao · 浩（中文男声）' },
+  { value: 'Zhiming', label: 'Zhiming · 志明（中文男声·胡同）' },
+  { value: 'Weiguo', label: 'Weiguo · 卫国（中文男声·说书）' },
+  { value: 'Xiaoyu', label: 'Xiaoyu · 羽（中文女声·明星）' },
+  { value: 'Yuewen', label: 'Yuewen · 悦文（中文女声·机车）' },
+  { value: 'Lingyu', label: 'Lingyu · 灵雨（中文女声·深夜电台）' },
+  { value: 'Trump', label: 'Trump（英文男声）' },
+  { value: 'Adam', label: 'Adam（英文男声·新闻）' },
+  { value: 'Ava', label: 'Ava（英文女声）' },
+  { value: 'Bella', label: 'Bella（英文女声）' },
+]
+// edge-tts 在线音色（原四音色保留）
+const edgeVoiceOptions: VoiceOption[] = [
+  { value: 'zh-CN-XiaoxiaoNeural', label: `${t('agent.voiceXiaoxiao')} · 在线` },
+  { value: 'zh-CN-XiaoyiNeural', label: `${t('agent.voiceXiaoyi')} · 在线` },
+  { value: 'zh-CN-YunxiNeural', label: `${t('agent.voiceYunxi')} · 在线` },
+  { value: 'zh-CN-YunyangNeural', label: `${t('agent.voiceYunyang')} · 在线` },
+]
+
+const previewLoading = ref(false)
+let previewAudio: HTMLAudioElement | null = null
+
+/** 试听当前选中音色：预制文件按 voice 名直接命中（moss.wav / edge.mp3）。 */
+function previewVoice(): void {
+  const voice = formState.value.ttsVoice
+  if (!voice) return
+  previewAudio?.pause()
+  const file = voice.endsWith('Neural') ? `${voice}.mp3` : `${voice}.wav`
+  previewAudio = new Audio(`/tts-preview/${encodeURIComponent(file)}`)
+  previewLoading.value = true
+  previewAudio.onended = () => (previewLoading.value = false)
+  previewAudio.onerror = () => {
+    previewLoading.value = false
+    message.warning(t('agent.voicePreviewMissing'))
+  }
+  previewAudio.play().catch(() => (previewLoading.value = false))
+}
+
 const loadAgent = async () => {
   if (!agentId.value) return
   pageLoading.value = true
@@ -352,6 +415,16 @@ onMounted(async () => {
   font-weight: 700;
   color: var(--nr-text-primary);
   margin: 0;
+}
+
+.voice-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.voice-preview-btn {
+  white-space: nowrap;
 }
 
 .page-subtitle {
