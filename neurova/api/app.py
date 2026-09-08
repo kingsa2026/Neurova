@@ -535,6 +535,23 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
     # 注册所有端点路由
     register_endpoint_routers(app)
 
+    # 工具大输出 OutputRef 落盘引用（产物预览计划 W1-4，2026-09-08）：
+    # 默认开启；env NEUROVA_TOOL_OUTPUT_REF=0 逃生。fail-open 不阻断启动。
+    try:
+        from neurova.agent.tool_output_ref import ensure_output_ref_installed_from_env
+
+        ensure_output_ref_installed_from_env()
+    except Exception as _oref_err:  # noqa: BLE001
+        logger.warning("OutputRef 装配异常（忽略）: %s", _oref_err)
+
+    # files 元数据 SQLite 水合（产物预览计划 W1-4）：重启后上传件预览不再 404
+    try:
+        from neurova.api.endpoints.files_api import hydrate_files_store
+
+        hydrate_files_store()
+    except Exception as _hyd_err:  # noqa: BLE001
+        logger.warning("files 元数据水合异常（忽略）: %s", _hyd_err)
+
     # 遗留①：bootstrap 用户引导（NEUROVA_BOOTSTRAP_USER 配置时；fail-open）
     try:
         from neurova.api.bootstrap_user import ensure_bootstrap_user
