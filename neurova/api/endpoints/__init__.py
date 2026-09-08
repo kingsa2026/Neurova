@@ -190,6 +190,7 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.health", "/v1/health", "Health API"),
         ("neurova.api.endpoints.home", "/v1", "Home API"),
         ("neurova.api.endpoints.chat", "/v1/chat", "Chat API"),
+        ("neurova.api.endpoints.plans", "/v1/plans", "Plans API"),
         ("neurova.api.endpoints.agent", "/v1/agents", "Agent API"),
         ("neurova.api.endpoints.agent_package", "/v1/agents", "Agent Package API"),
         ("neurova.api.endpoints.auth", "/v1/auth", "Auth API"),
