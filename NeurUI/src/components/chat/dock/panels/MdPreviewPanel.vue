@@ -64,11 +64,18 @@ function onBodyClick(e: MouseEvent): void {
 
 watch(() => [props.tab.id, props.tab.data.artifactId, props.tab.data.content], () => {
   if (!props.tab.data.content && props.tab.data.artifactId) void loadRemote()
+  else if (!props.tab.data.content && !props.tab.data.artifactId) {
+    // 仅 path 的 tab（历史会话/后端重启后）：明示不可用而非空白
+    error.value = t('chat.artifactUnavailable')
+  }
   void renderMermaid()
 })
 
 onMounted(async () => {
   if (!props.tab.data.content && props.tab.data.artifactId) await loadRemote()
+  else if (!props.tab.data.content && !props.tab.data.artifactId) {
+    error.value = t('chat.artifactUnavailable')
+  }
   await renderMermaid()
 })
 </script>

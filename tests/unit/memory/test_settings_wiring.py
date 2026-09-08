@@ -65,11 +65,12 @@ class TestRememberUsesSettings:
         assert mem.importance == 1.0
 
     def test_default_config_keeps_legacy_behavior(self, settings):
-        """未修改配置时保持历史硬编码行为（100/50），保证零默认回归"""
+        """未修改配置时保持 schema 默认行为：温度 65（2026-09-08 温度死锁修复，
+        原 100 ≥ 高温不衰减阈值 80 使新记忆永不衰减）、重要性 50"""
         mgr = _make_manager()
         mid = mgr.remember("默认行为不变")
         mem = mgr._memories[mid]
-        assert mem.temperature == 100.0
+        assert mem.temperature == 65.0
         assert mem.importance == 50.0
 
 
