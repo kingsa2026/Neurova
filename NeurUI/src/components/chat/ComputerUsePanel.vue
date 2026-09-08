@@ -8,6 +8,7 @@
  * 复用"电脑操控"页同款 REST 接口。
  */
 import { ref, computed } from 'vue'
+import UiIcon from '@/components/UiIcon.vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import type { ComputerPanelState } from '@/composables/useComputerPanel'
@@ -117,12 +118,12 @@ async function doRunCommand() {
   <aside class="cu-panel" :class="{ minimized: state.minimized }">
     <!-- Header -->
     <div class="cu-header">
-      <span class="cu-icon">🖥️</span>
+      <span class="cu-icon"><UiIcon name="monitor" :size="15" /></span>
       <span class="cu-title">{{ t('computerPanel.title') }}</span>
       <span class="cu-status" :class="{ busy: state.busy }">
         <span class="cu-status-dot" />{{ statusText }}
       </span>
-      <button class="cu-btn" :title="t('computerPanel.refreshShot')" @click.stop="refreshScreenshot">⟳</button>
+      <button class="cu-btn" :title="t('computerPanel.refreshShot')" @click.stop="refreshScreenshot"><UiIcon name="reload" :size="13" /></button>
       <button class="cu-btn" :title="state.minimized ? t('ui.expand') : t('ui.minimize')" @click.stop="state.minimized = !state.minimized">
         {{ state.minimized ? '▢' : '—' }}
       </button>
@@ -141,7 +142,7 @@ async function doRunCommand() {
           @click="onScreenshotClick"
         />
         <div v-else class="cu-shot-empty">
-          <span>🖥️</span>
+          <span><UiIcon name="monitor" :size="13" /></span>
           <p>{{ t('computerPanel.empty') }}</p>
         </div>
         <div v-if="lastClickCoords" class="cu-coords">
@@ -151,7 +152,7 @@ async function doRunCommand() {
 
       <!-- Browser URL bar -->
       <div v-if="state.browserUrl" class="cu-urlbar">
-        <span class="cu-url-icon">🌐</span>
+        <span class="cu-url-icon"><UiIcon name="globe" :size="12" /></span>
         <span class="cu-url" :title="state.browserUrl">{{ state.browserUrl }}</span>
       </div>
 
@@ -164,7 +165,7 @@ async function doRunCommand() {
         <div class="cu-log-list">
           <div v-for="entry in [...state.actions].reverse()" :key="entry.id" class="cu-log-item" :class="{ failed: !entry.success }">
             <span class="cu-log-time">{{ formatTime(entry.timestamp) }}</span>
-            <span class="cu-log-kind">{{ entry.kind === 'browser' ? '🌐' : '🖥️' }}</span>
+            <span class="cu-log-kind"><UiIcon :name="entry.kind === 'browser' ? 'globe' : 'monitor'" :size="12" /></span>
             <span class="cu-log-summary" :title="entry.error || entry.summary">
               {{ entry.summary }}
               <template v-if="entry.error"> · {{ entry.error }}</template>

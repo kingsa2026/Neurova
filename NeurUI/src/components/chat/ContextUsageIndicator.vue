@@ -200,7 +200,10 @@ async function fetchComposition(): Promise<void> {
   compositionFetched.value = true
   const reqAgentId = props.agentId
   try {
-    const res: any = await api.get('/context/composition', { params: { agent_id: reqAgentId }, __expectedStatus: 404 })
+    const res: any = await api.get('/context/composition', {
+      params: { agent_id: reqAgentId, session_id: props.sessionId || '' },
+      __expectedStatus: 404,
+    })
     if (reqAgentId !== props.agentId) return // 已切走：丢弃过期响应
     const data = res?.data ?? res
     if (data && data.total_tokens !== undefined) composition.value = data
