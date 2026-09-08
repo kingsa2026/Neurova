@@ -12,68 +12,76 @@
  */
 import { onUnmounted, ref, watch, type Ref } from 'vue'
 
+// ---------------------------------------------------------------------------
+// 2026-09-08 dock 收编 / composer 拆分产物：共享单例。
+// ChatPage（sendMessage 守卫）与 ChatComposerArea（发送按钮 disabled）各自
+// 实例化时会对同一把 Web Lock 互相竞争——本标签页内部两个实例都调 acquire，
+// 第二个实例 ifAvailable 竞争失败把 isOwner 置 false → 发送按钮恒禁用。
+// 修复：模块级共享同一实例（同 useComputerPanel 模式）。
+// ---------------------------------------------------------------------------
+const sharedIsOwner = ref(true)
+let sharedReleaseLock: (() => void) | null = null
+let sharedCurrentKey: string | null = null
+
+function sharedRelease(): void {
+  if (sharedReleaseLock) {
+    sharedReleaseLock()
+    sharedReleaseLock = null
+  }
+  sharedCurrentKey = null
+}
+
+async function sharedAcquire(key: string): Promise<void> {
+  sharedRelease()
+  if (typeof navigator === 'undefined' || !navigator.locks) {
+    sharedIsOwner.value = true // 能力降级：无锁 API 不阻塞
+    return
+  }
+  sharedCurrentKey = key
+  try {
+    const handle = await navigator.locks.request(
+      `neurova-chat-send:${key}`,
+      { ifAvailable: true },
+      (lock) => {
+        if (lock) {
+          sharedIsOwner.value = true
+          return new Promise<void>((resolve) => {
+            sharedReleaseLock = () => resolve()
+          })
+        }
+        sharedIsOwner.value = false
+        sharedReleaseLock = null
+        return undefined
+      },
+    )
+    if (handle === undefined) sharedIsOwner.value = false
+  } catch {
+    sharedIsOwner.value = true
+  }
+}
+
 export function useSessionSendLock(sessionId: Ref<string | null | undefined>) {
-  const isOwner = ref(true)
-  let releaseLock: (() => void) | null = null
-  let currentKey: string | null = null
-
-  async function acquire(key: string): Promise<void> {
-    // 先释放上一个 session 的锁
-    release()
-    if (typeof navigator === 'undefined' || !navigator.locks) {
-      isOwner.value = true // 能力降级：无锁 API 不阻塞
-      return
-    }
-    currentKey = key
-    try {
-      const handle = await navigator.locks.request(
-        `neurova-chat-send:${key}`,
-        { ifAvailable: true },
-        (lock) => {
-          if (lock) {
-            isOwner.value = true
-            // 持锁直到显式释放：返回一个永不 resolve 的 Promise 的
-            // 替代方案是让回调立即返回并配合 ifAvailable 重新竞争——
-            // 这里用"持有期由 release() 控制"的托管模式：
-            return new Promise<void>((resolve) => {
-              releaseLock = () => resolve()
-            })
-          }
-          isOwner.value = false
-          releaseLock = null
-          return undefined
-        },
-      )
-      // handle 为 undefined 表示未获得锁
-      if (handle === undefined) isOwner.value = false
-    } catch {
-      // 锁机制异常不阻塞聊天（与能力降级同策略）
-      isOwner.value = true
-    }
-  }
-
-  function release(): void {
-    if (releaseLock) {
-      releaseLock()
-      releaseLock = null
-    }
-    currentKey = null
-  }
-
+  // 每个调用方各自 watch 同一 store ref（回调都写共享状态，天然去重：
+  // sharedAcquire 内部先 sharedRelease 旧 key，key 未变时跳过重复竞争——
+  // 防 Web Locks 同标签自锁：ifAvailable 下自己持有的锁自己再请求会失败）。
   watch(
     sessionId,
     (sid) => {
-      if (sid) {
-        void acquire(sid)
-      } else {
-        isOwner.value = true
-        release()
+      if (sid && sid !== sharedCurrentKey) {
+        void sharedAcquire(sid)
+      } else if (!sid) {
+        sharedIsOwner.value = true
+        sharedRelease()
       }
+      // sid === sharedCurrentKey：同 key 重复触发（多实例同步）跳过
     },
     { immediate: true },
   )
 
-  onUnmounted(release)
+  return { isOwner: sharedIsOwner, release: sharedRelease }
+}
 
-  return { isOwner, release }
+/** 测试隔离出口：清空单例 watch 安装标记（锁本体由浏览器端释放） */
+export function resetSessionSendLockForTest(): void {
+  sharedCurrentKey = null
 }

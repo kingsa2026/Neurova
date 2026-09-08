@@ -17,64 +17,13 @@
       </div>
     </transition>
 
-    <!-- Left Sidebar: Sessions -->
-    <aside v-if="!isMainLayout" class="nr-chat-sidebar" :class="{ collapsed: sidebarCollapsed }">
-      <div class="nr-sidebar-header">
-        <GlassButton variant="primary" size="md" style="flex: 1" @click="createSession">
-          + {{ t('chat.newChat') }}
-        </GlassButton>
-      </div>
-
-      <div class="nr-sidebar-search">
-        <GlassInput
-          v-model:model-value="searchQuery"
-          :placeholder="t('common.search')"
-          @update:model-value="searchQuery = $event"
-        />
-        <button class="nr-msg-search-open" :title="t('chat.searchInSession')" @click="openMsgSearch">🔍</button>
-        <button class="nr-msg-search-open" :title="t('chat.crossSearchTitle')" @click="crossSearchOpen = true">🌐</button>
-      </div>
-
-      <div class="nr-session-list">
-        <template v-for="group in groupedSessions" :key="group.key">
-          <div v-if="group.label" class="nr-session-group-label">{{ group.label }}</div>
-          <div
-            v-for="session in group.sessions"
-            :key="session.id"
-            class="nr-session-item"
-            :class="{ active: session.id === currentSessionId, 'drop-target': dragOverSessionId === session.id }"
-            draggable="true"
-            @click="switchSession(session.id)"
-            @dragstart="onSessionDragStart(session.id, $event)"
-            @dragover.prevent="dragOverSessionId = session.id"
-            @dragleave="dragOverSessionId = null"
-            @drop.prevent="onSessionDrop(session.id)"
-          >
-          <span class="nr-session-icon">💬</span>
-          <span class="nr-session-name">{{ session.pinned ? '📌 ' : '' }}{{ session.title }}</span>
-          <a-dropdown :trigger="['click']" @click.stop>
-            <span class="nr-session-menu-btn" @click.stop>⋯</span>
-            <template #overlay>
-              <a-menu>
-                <a-menu-item @click="renameSession(session.id)">
-                  {{ t('chat.rename') }}
-                </a-menu-item>
-                <a-menu-item @click="togglePin(session)">
-                  {{ session.pinned ? t('chat.unpin') : t('chat.pin') }}
-                </a-menu-item>
-                <a-menu-item @click="archiveSession(session.id)">
-                  {{ t('chat.archive') }}
-                </a-menu-item>
-              </a-menu>
-            </template>
-          </a-dropdown>
-          </div>
-        </template>
-        <div v-if="filteredSessions.length === 0" class="nr-session-empty">
-          {{ t('chat.noSessions') }}
-        </div>
-      </div>
-    </aside>
+    <!-- Left Sidebar: Sessions（拆分组件，2026-09-08） -->
+    <ChatSessionSidebar
+      v-if="!isMainLayout"
+      @switch="switchSession"
+      @open-msg-search="openMsgSearch"
+      @cross-search="crossSearchOpen = true"
+    />
 
     <!-- Main Chat Area -->
     <main class="nr-chat-main">
@@ -90,10 +39,10 @@
             :title="t('chat.crossSearchTitle')"
             @click="crossSearchOpen = true"
           >
-            🌐
+            <UiIcon name="globe" :size="15" />
           </button>
-          <button class="nr-chat-toggle-btn" @click="historyPanelOpen = !historyPanelOpen" :title="t('chat.history')">
-            {{ historyPanelOpen ? '›' : '‹' }}
+          <button class="nr-chat-toggle-btn" @click="toggleHistoryPanel" :title="t('chat.history')">
+            {{ isHistoryTabActive ? '›' : '‹' }}
           </button>
         </div>
       </div>
@@ -117,12 +66,12 @@
       <div class="nr-chat-messages" ref="messagesRef" @scroll="onMessagesScroll">
         <div v-if="messages.length === 0" class="nr-chat-empty">
           <div v-if="isMainLayout && !agentId" class="nr-chat-empty">
-            <div class="nr-chat-empty-icon">💬</div>
+            <div class="nr-chat-empty-icon"><UiIcon name="chat" :size="44" /></div>
             <h3>{{ t('nav.chat') }}</h3>
             <p>{{ t('chat.selectAgentFirst') }}</p>
           </div>
           <div v-else class="nr-chat-empty">
-            <div class="nr-chat-empty-icon">🤖</div>
+            <div class="nr-chat-empty-icon"><UiIcon name="monitor" :size="44" /></div>
             <h3>{{ currentAgent?.name || t('agent.title') }}</h3>
             <p>{{ t('chat.placeholder') }}</p>
           </div>
@@ -135,13 +84,13 @@
           class="nr-msg"
           :class="[`nr-msg--${msg.role}`, { 'nr-msg--hit': msgSearchHits.includes(absIdx(idx)) && absIdx(idx) === msgSearchCursor, 'nr-msg--checkpoint': msg.checkpoint }]"
         >
-          <div class="nr-msg-avatar">{{ msg.role === 'user' ? '👤' : '🤖' }}</div>
+          <div class="nr-msg-avatar"><UiIcon :name="msg.role === 'user' ? 'chat' : 'monitor'" :size="16" /></div>
           <div class="nr-msg-body">
             <!-- 钩子/检查点标记（ZCode checkpoint 对齐） -->
-            <div v-if="msg.checkpoint" class="nr-msg-checkpoint-badge" :title="t('chat.checkpointSet')">⚓ {{ t('chat.checkpoint') }}</div>
+            <div v-if="msg.checkpoint" class="nr-msg-checkpoint-badge" :title="t('chat.checkpointSet')"><UiIcon name="anchor" :size="12" /> {{ t('chat.checkpoint') }}</div>
             <!-- 流式状态条（三需求①）：理解→思考→工具→输出，进行中扫光 -->
             <div v-if="msg.streaming" class="nr-stream-status" :data-phase="deriveStreamPhase(msg)">
-              <span class="nr-stream-status-icon">{{ streamPhaseMeta(deriveStreamPhase(msg)).icon }}</span>
+              <span class="nr-stream-status-icon"><UiIcon :name="streamPhaseMeta(deriveStreamPhase(msg)).icon" :size="13" /></span>
               <span class="nr-stream-status-label">{{ streamPhaseMeta(deriveStreamPhase(msg)).label }}</span>
               <span class="nr-stream-status-shimmer" />
             </div>
@@ -155,7 +104,7 @@
                 :class="[`nr-step--${step.kind}`, { 'is-active': step.active, 'is-open': step.open }]"
               >
                 <div class="nr-step-header" @click="toggleStep(msg.steps!, step.id)">
-                  <span class="nr-step-icon">{{ step.kind === 'reasoning' ? '🧠' : variantIcon(toolCardVariant(step.name)) }}</span>
+                  <span class="nr-step-icon"><UiIcon :name="step.kind === 'reasoning' ? 'brain' : variantIcon(toolCardVariant(step.name))" :size="14" /></span>
                   <span class="nr-step-title">{{ step.kind === 'reasoning' ? t('chat.stepThinking') : (step.taskName || step.name) }}</span>
                   <span v-if="step.active" class="nr-step-badge is-running">{{ t('chat.stepRunning') }}</span>
                   <span v-else-if="step.kind === 'tool'" class="nr-step-badge" :class="step.result ? 'is-done' : 'is-error'">
@@ -174,7 +123,14 @@
                       {{ t('chat.toolBackgroundHint') }}
                     </div>
                     <div v-if="step.result" class="nr-tool-result">
-                      <div class="nr-tool-result-header">{{ t('chat.toolResult') }}</div>
+                      <div class="nr-tool-result-header">
+                        {{ t('chat.toolResult') }}
+                        <button
+                          class="nr-tool-result-preview-btn"
+                          :title="t('chat.openInPreview')"
+                          @click.stop="openToolResultArtifacts(step.result)"
+                        ><UiIcon name="eye" :size="12" /></button>
+                      </div>
                       <pre class="nr-tool-result-content">{{ step.result }}</pre>
                     </div>
                   </template>
@@ -197,7 +153,7 @@
             <template v-if="!msg.steps?.length && legacyToolList(msg).length > 0">
               <div v-for="(tc, tcIdx) in legacyToolList(msg)" :key="tcIdx" class="nr-msg-tool-call">
                 <div class="nr-tool-header" @click="msg.toolOpen = !msg.toolOpen">
-                  <span class="nr-tool-icon">{{ variantIcon(toolCardVariant(tc.name)) }}</span>
+                  <span class="nr-tool-icon"><UiIcon :name="variantIcon(toolCardVariant(tc.name))" :size="14" /></span>
                   <span class="nr-tool-name">{{ tc.name }}</span>
                   <a-tag :color="isBackgroundResult(tc.result) ? 'warning' : tc.result ? 'success' : 'processing'">
                     {{ isBackgroundResult(tc.result) ? t('chat.toolBackground') : tc.result ? t('chat.toolDone') : t('chat.toolCalling') }}
@@ -210,7 +166,14 @@
                     {{ t('chat.toolBackgroundHint') }}
                   </div>
                   <div v-if="tc.result" class="nr-tool-result">
-                    <div class="nr-tool-result-header">{{ t('chat.toolResult') }}</div>
+                    <div class="nr-tool-result-header">
+                      {{ t('chat.toolResult') }}
+                      <button
+                        class="nr-tool-result-preview-btn"
+                        :title="t('chat.openInPreview')"
+                        @click.stop="openToolResultArtifacts(tc.result)"
+                      ><UiIcon name="eye" :size="12" /></button>
+                    </div>
                     <pre class="nr-tool-result-content">{{ tc.result }}</pre>
                   </div>
                 </div>
@@ -255,7 +218,7 @@
                 :key="fi"
                 class="nr-attachment-thumb"
                 :class="`nr-attachment--${getFileCategory(file.type)}`"
-                @click="file.type?.startsWith('image/') && openLightbox(file.preview!, file.name)"
+                @click="onAttachmentClick(file)"
               >
                 <img
                   v-if="file.type?.startsWith('image/')"
@@ -263,7 +226,7 @@
                   :alt="file.name"
                   class="nr-attachment-img"
                 />
-                <span v-else class="nr-attachment-file-icon">{{ getFileIcon(file.type) }}</span>
+                <span v-else class="nr-attachment-file-icon"><UiIcon :name="getFileIcon(file.type)" :size="16" /></span>
                 <div class="nr-attachment-info">
                   <span class="nr-attachment-name">{{ file.name }}</span>
                   <span v-if="file.size" class="nr-attachment-size">{{ formatFileSize(file.size) }}</span>
@@ -312,7 +275,7 @@
               class="nr-msg-tts-action"
             >
               <button v-if="!msg.ttsUrls" class="nr-tts-btn" @click="synthesizeTTS(msg)" :disabled="msg.ttsLoading">
-                {{ msg.ttsLoading ? '⏳' : '🔊' }}
+                <UiIcon v-if="msg.ttsLoading" name="clock" :size="14" /><UiIcon v-else name="audio" :size="14" />
                 <span>{{ msg.ttsLoading ? t('chat.ttsLoading') : t('chat.playTTS') }}</span>
               </button>
             </div>
@@ -321,55 +284,55 @@
             <div v-if="!msg.streaming && !isEditingMessage(absIdx(idx))" class="nr-msg-footer">
               <span v-if="displayTime(msg)" class="nr-msg-time">{{ displayTime(msg) }}</span>
               <span class="nr-msg-footer-spacer" />
-              <button class="nr-msg-action" :title="t('chat.copy')" @click="copyMessage(msg)">⧉</button>
+              <button class="nr-msg-action" :title="t('chat.copy')" @click="copyMessage(msg)"><UiIcon name="copy" :size="14" /></button>
               <template v-if="msg.role === 'assistant'">
                 <button
                   class="nr-msg-action"
                   :title="t('chat.regenerate')"
                   @click="regenerateLastRound"
-                >⟳</button>
+                ><UiIcon name="refresh" :size="14" /></button>
                 <button
                   class="nr-msg-action"
                   :class="{ 'nr-msg-action--active': msg.feedback === 'like' }"
                   :title="t('chat.like')"
                   @click="rateReply(msg, 'like')"
-                >👍</button>
+                ><UiIcon name="like" :size="14" /></button>
                 <button
                   class="nr-msg-action"
                   :class="{ 'nr-msg-action--active-negative': msg.feedback === 'dislike' }"
                   :title="t('chat.dislike')"
                   @click="rateReply(msg, 'dislike')"
-                >👎</button>
+                ><UiIcon name="dislike" :size="14" /></button>
                 <button
                   class="nr-msg-action"
                   :title="t('chat.forkFromHere')"
                   @click="forkFromMessage(msg)"
-                >⎇</button>
+                ><UiIcon name="fork" :size="14" /></button>
                 <button
                   class="nr-msg-action"
                   :class="{ 'nr-msg-action--active': msg.checkpoint }"
                   :title="msg.checkpoint ? t('chat.checkpointRemove') : t('chat.checkpointSet')"
                   @click="toggleCheckpoint(msg)"
-                >⚓</button>
+                ><UiIcon name="anchor" :size="14" /></button>
               </template>
               <template v-else>
                 <button
                   class="nr-msg-action"
                   :title="t('chat.forkFromHere')"
                   @click="forkFromMessage(msg)"
-                >⎇</button>
+                ><UiIcon name="fork" :size="14" /></button>
                 <button
                   class="nr-msg-action"
                   :class="{ 'nr-msg-action--active': msg.checkpoint }"
                   :title="msg.checkpoint ? t('chat.checkpointRemove') : t('chat.checkpointSet')"
                   @click="toggleCheckpoint(msg)"
-                >⚓</button>
+                ><UiIcon name="anchor" :size="14" /></button>
                 <button
                   v-if="isLastUserMessage(absIdx(idx))"
                   class="nr-msg-action"
                   :title="t('chat.editMessage')"
                   @click="startEditMessage(absIdx(idx))"
-                >✎</button>
+                ><UiIcon name="edit" :size="14" /></button>
               </template>
               <a-popconfirm
                 v-if="msg.role === 'user'"
@@ -378,7 +341,7 @@
                 :cancel-text="t('common.cancel')"
                 @confirm="deleteRoundAt(absIdx(idx))"
               >
-                <button class="nr-msg-action nr-msg-action--danger" :title="t('chat.deleteRound')">🗑</button>
+                <button class="nr-msg-action nr-msg-action--danger" :title="t('chat.deleteRound')"><UiIcon name="trash" :size="14" /></button>
               </a-popconfirm>
             </div>
 
@@ -390,263 +353,22 @@
         </div>
       </div>
 
-      <!-- Input Area -->
-      <div class="nr-chat-input-area">
-        <!-- Attachment previews -->
-        <div v-if="pendingFiles.length > 0" class="nr-pending-files">
-          <div v-for="(file, i) in pendingFiles" :key="i" class="nr-pending-file">
-            <img v-if="file.preview" :src="file.preview" :alt="file.name" />
-            <span v-else class="nr-pending-file-icon">{{ getFileIcon(file.type) }}</span>
-            <div class="nr-pending-file-info">
-              <span class="nr-pending-file-name">{{ file.name }}</span>
-              <span class="nr-pending-file-size">{{ formatFileSize(file.file.size) }}</span>
-            </div>
-            <button class="nr-pending-file-remove" @click="removePendingFile(i)">×</button>
-          </div>
-        </div>
+      <!-- 输入区（Composer + 工具条 + 429/事件丢失横幅，2026-09-08 拆分） -->
+      <ChatComposerArea
+        @send="sendMessage()"
+        @stop="stopStreaming()"
+        @send-queued-now="onSendQueuedNow"
+        @slash-plan="onSlashPlan"
+      />
 
-        <!-- ASR Recording Indicator -->
-        <transition name="fade-slide">
-          <div v-if="isRecording" class="nr-recording-bar">
-            <div class="nr-recording-dot" />
-            <span class="nr-recording-label">{{ t('chat.recording') }}</span>
-            <div class="nr-recording-wave">
-              <span v-for="n in 12" :key="n" class="nr-wave-bar" :style="{ animationDelay: `${n * 0.08}s` }" />
-            </div>
-            <span class="nr-recording-time">{{ recordingTimeStr }}</span>
-            <button class="nr-recording-cancel" @click="cancelRecording">{{ t('common.cancel') }}</button>
-          </div>
-        </transition>
-
-        <!-- 实时记忆检索进度（临时态：回复开始即消失，不落消息历史） -->
-        <div v-if="retrievalStatus" class="nr-retrieval-status">
-          <span class="nr-retrieval-spinner">⟳</span>
-          <span>{{ retrievalStatus }}</span>
-        </div>
-        <!-- Composer 一体化外壳（参考图：textarea + 工具条同框，玻璃容器承载边框） -->
-        <div class="nr-composer-shell" :class="{ 'is-focus': composerFocused, 'has-queue-cards': currentSessionQueued.length > 0, 'is-editing-queued': !!editingQueuedId }">
-          <!-- 顶入卡片（DeepSeek 截图对齐）：composer 内嵌消息队列。
-               审计③：只展示当前会话的排队项（全局 store 按会话过滤） -->
-          <QueuedMessageCards
-            :editing-queued-id="editingQueuedId"
-            :items="currentSessionQueued"
-            @send-now="sendQueuedNow"
-            @edit="startQueuedEdit"
-          />
-          <div class="nr-input-row">
-          <textarea
-            ref="textareaRef"
-            v-model="inputText"
-            class="nr-chat-textarea"
-            :placeholder="queuedPlaceholder"
-            rows="1"
-            @compositionstart="onCompositionStart"
-            @compositionend="onCompositionEnd"
-            @keydown="handleKeydown"
-            @input="onComposerInput"
-            @paste="handlePaste"
-            @focus="composerFocused = true"
-            @blur="composerFocused = false"
-          />
-          <!-- 斜杠命令面板（QwenPaw slash commands 对齐）：输入 / 开头时弹出 -->
-          <div v-if="slashOpen" class="nr-slash-panel">
-            <div
-              v-for="(cmd, i) in slashFiltered"
-              :key="cmd.name"
-              class="nr-slash-item"
-              :class="{ 'is-active': i === slashIndex }"
-              @mousedown.prevent="runSlashCommand(cmd)"
-              @mousemove="slashIndex = i"
-            >
-              <span class="nr-slash-name">{{ cmd.name }}</span>
-              <span class="nr-slash-desc">{{ t(cmd.descKey) }}</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Composer 工具条（QwenPaw/ZCode composer 对齐）：
-             左 = +附件 / 电脑操作(图标) / 语音输入；右 = 用量环 + 思考程度 + 语音开关 + 模型 + 发送 -->
-        <div class="nr-composer-toolbar">
-          <div class="nr-composer-left">
-            <input
-              ref="fileInputRef"
-              type="file"
-              multiple
-              accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.csv,.json,.py,.js,.ts,.vue,.html,.css,.md"
-              style="display: none"
-              @change="handleFileSelect"
-            />
-            <button class="nr-composer-pill nr-composer-pill--icon" :title="t('chat.upload')" @click="fileInputRef?.click()"><svg class="nr-ico" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
-            <button
-              class="nr-composer-pill nr-composer-pill--icon"
-              :class="{ 'is-active': computerPanelState.open }"
-              :title="t('computerPanel.title')"
-              @click="toggleComputerPanel"><svg class="nr-ico" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></button>
-            <button
-              v-if="asrAvailable"
-              class="nr-composer-pill nr-composer-pill--icon"
-              :class="{ 'is-active': isRecording }"
-              :title="t('chat.voice')"
-              @click="toggleRecording"><svg v-if="isRecording" class="nr-ico" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="currentColor" stroke="none"/></svg><svg v-else class="nr-ico" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3"/></svg></button>
-          </div>
-          <div class="nr-composer-right">
-            <ContextUsageIndicator
-              :usage="sessionUsage"
-              :context-window="currentModelContextWindow"
-              :agent-id="agentId"
-              :session-id="currentSessionId"
-            />
-            <a-dropdown :trigger="['click']" placement="topRight">
-              <button class="nr-composer-pill" :title="t('chat.thinkingEffort')">
-                <svg class="nr-ico" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>
-                <span>{{ currentThinkingLabel }}</span>
-                <span class="nr-composer-pill-arrow">▾</span>
-              </button>
-              <template #overlay>
-                <div class="nr-glass-dropdown">
-                  <div
-                    v-for="opt in thinkingOptions"
-                    :key="opt.value"
-                    class="nr-glass-dropdown-item nr-composer-menu-item"
-                    :class="{ 'is-active': thinkingEffort === opt.value }"
-                    @click="setThinkingEffort(opt.value)"
-                  >
-                    <span>{{ t(opt.label) }}</span>
-                    <span v-if="thinkingEffort === opt.value" class="nr-composer-check">✓</span>
-                  </div>
-                </div>
-              </template>
-            </a-dropdown>
-            <button
-              class="nr-composer-pill nr-composer-pill--icon"
-              :class="{ 'is-active': autoVoice }"
-              :title="t('chat.autoVoiceTitle')"
-              @click="toggleAutoVoice">
-              <svg v-if="autoVoice" class="nr-ico" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
-              <svg v-else class="nr-ico" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4z"/><path d="M22 9l-6 6M16 9l6 6"/></svg>
-            </button>
-            <div class="nr-model-menu-wrap">
-              <button
-                class="nr-composer-pill nr-composer-pill--model"
-                :title="t('agent.model')"
-                @click="modelMenuOpen = !modelMenuOpen"
-              >
-                <span class="nr-composer-pill-label">{{ selectedModelLabel }}</span>
-                <span class="nr-composer-pill-arrow">▾</span>
-              </button>
-              <template v-if="modelMenuOpen">
-                <div class="nr-model-backdrop" @click="modelMenuOpen = false" />
-                <!-- 二级级联：左=服务商（含自动路由），右=该服务商可联通模型，底=管理模型 -->
-                <div class="nr-model-cascade">
-                  <div class="nr-model-cascade-left">
-                    <div
-                      class="nr-model-provider"
-                      :class="{ 'is-active': selectedModel === '' }"
-                      @click="pickModel('')"
-                    >
-                      <span class="nr-model-provider-name">{{ t('ui.autoRoute') }}</span>
-                      <span v-if="selectedModel === ''" class="nr-composer-check">✓</span>
-                    </div>
-                    <div class="nr-model-cascade-divider" />
-                    <div
-                      v-for="g in chatModelGroups"
-                      :key="g.provider_id"
-                      class="nr-model-provider"
-                      :class="{ 'is-active': activeProviderId === g.provider_id }"
-                      @mouseenter="activeProviderId = g.provider_id"
-                      @click="activeProviderId = g.provider_id"
-                    >
-                      <span class="nr-model-provider-name">{{ g.provider_name }}</span>
-                      <span class="nr-model-provider-count">{{ g.models.length }}</span>
-                      <span class="nr-model-provider-arrow">›</span>
-                    </div>
-                    <div v-if="chatModelGroups.length === 0" class="nr-model-empty">
-                      {{ t('chat.noConnectableModels') }}
-                    </div>
-                  </div>
-                  <div class="nr-model-cascade-footer" @click="gotoModelsManage">
-                    <svg class="nr-ico" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-                    <span>{{ t('chat.manageModels') }}</span>
-                  </div>
-                  <!-- 独立模型子菜单：固定高度+内部滚动，切换服务商不改变主菜单尺寸 -->
-                  <div v-if="activeGroupModels.length > 0" class="nr-model-flyout">
-                    <div class="nr-model-flyout-title">{{ activeProviderName }}</div>
-                    <div class="nr-model-flyout-list">
-                      <div
-                        v-for="m in activeGroupModels"
-                        :key="m.value"
-                        class="nr-glass-dropdown-item nr-composer-menu-item"
-                        :class="{ 'is-active': selectedModel === m.value, 'is-unconnectable': !m.connectable }"
-                        @click="pickModel(m.value, m.provider_id)"
-                      >
-                        <span class="nr-model-dot" :class="m.connectable ? 'is-ok' : 'is-off'" />
-                        <span class="nr-composer-pill-label">{{ m.label }}</span>
-                        <span v-if="selectedModel === m.value" class="nr-composer-check">✓</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </template>
-            </div>
-            <button
-              class="nr-composer-send"
-              :class="{ 'is-confirm': !!editingQueuedId }"
-              :disabled="(!inputText.trim() && pendingFiles.length === 0 && !isStreaming) || !isSendLockOwner"
-              :title="editingQueuedId ? t('common.confirm') : (!isSendLockOwner ? t('chat.anotherTabSending') : (isStreaming ? t('chat.stop') : t('chat.send')))"
-              @click="editingQueuedId ? commitQueuedEdit() : (isStreaming ? stopStreaming() : sendMessage())"
-            >
-              <svg v-if="isStreaming && !editingQueuedId" class="nr-ico nr-ico--send" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none"/></svg>
-              <svg v-else-if="editingQueuedId" class="nr-ico nr-ico--send" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
-              <svg v-else class="nr-ico nr-ico--send" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
-            </button>
-          </div>
-          </div>
-        </div>
-      <!-- 429 限流横幅（补课 A1）：一键切换备选模型 -->
-      <div v-if="rateLimitBanner" class="nr-rate-limit-banner">
-        <span class="nr-rate-limit-text">
-          ⚠ {{ t('chat.rateLimited', { model: rateLimitBanner.model || t('ui.autoRoute') }) }}
-        </span>
-        <div class="nr-rate-limit-alts">
-          <button
-            v-for="alt in rateLimitBanner.alternatives.slice(0, 3)"
-            :key="alt.value"
-            class="nr-rate-limit-alt"
-            @click="switchAfterRateLimit(alt.value)"
-          >
-            {{ alt.label }}
-          </button>
-        </div>
-        <button class="nr-rate-limit-dismiss" @click="rateLimitBanner = null">✕</button>
-      </div>
-
-      <!-- 实时事件丢失提示（seq gap 检测，OpenOcta 启发 P0-1）：仅提示，不可恢复 -->
-      <div v-if="eventsLostBanner" class="nr-rate-limit-banner">
-        <span class="nr-rate-limit-text">
-          ⚠ {{ t('chat.eventsLost', { n: eventsLostBanner }) }}
-        </span>
-        <button class="nr-rate-limit-dismiss" @click="eventsLostBanner = null">✕</button>
-      </div>
-      </div>
 
       <!-- 蜂群子 Agent 对话小窗（右下角堆叠，可最小化） -->
-      <div class="subagent-window-stack">
-        <SubAgentPanel
-          v-for="win in subAgentWindows"
-          :key="win.subagentId"
-          :state="win"
-          @close="closeSubAgentWindow"
-        />
-      </div>
+      <SubAgentWindowStack />
     </main>
 
-    <!-- 电脑操作分屏（Agent 使用电脑/浏览器工具时自动展开，ZCode 式跟随） -->
-    <ComputerUsePanel
-      v-if="computerPanelState.open"
-      :state="computerPanelState"
-      :agent-id="agentId"
-      @close="closeComputerPanel"
-    />
+    <!-- 右侧多标签 dock（2026-09-08）：产物文档/历史会话/存档/电脑分屏统一容器，
+         左缘可拖拽调宽；tabs 全空时整体不渲染 -->
+    <RightDock :agent-id="agentId" @switch="switchSession" @cross-search="crossSearchOpen = true" />
 
     <!-- 跨会话全文搜索（QwenPaw ChatSearchPanel 对齐） -->
     <CrossSessionSearch
@@ -656,146 +378,11 @@
       @jump="onCrossSearchJump"
     />
 
-    <!-- Right Panel: Conversation History (main layout mode) -->
-    <aside v-if="isMainLayout && agentId && historyPanelOpen" class="nr-chat-history-panel">
-      <div class="nr-history-header">
-        <GlassButton variant="primary" size="sm" @click="createSession">+ {{ t('chat.newChat') }}</GlassButton>
-        <GlassButton
-          variant="ghost"
-          size="sm"
-          :class="{ 'is-active': archivedPanelOpen }"
-          @click="toggleArchivedPanel"
-        >
-          🗂 {{ t('chat.archivedSessions') }}
-        </GlassButton>
-      </div>
-      <div class="nr-history-search">
-        <GlassInput
-          v-model:model-value="searchQuery"
-          :placeholder="t('common.search')"
-          @update:model-value="searchQuery = $event"
-        />
-        <button class="nr-msg-search-open" :title="t('chat.crossSearchTitle')" @click="crossSearchOpen = true">🌐</button>
-      </div>
-      <div class="nr-session-list">
-        <div
-          v-for="session in filteredSessions"
-          :key="session.id"
-          class="nr-session-item"
-          :class="{ active: session.id === currentSessionId }"
-          @click="switchSession(session.id)"
-        >
-          <span class="nr-session-icon">💬</span>
-          <span class="nr-session-name">{{ session.title }}</span>
-          <a-dropdown :trigger="['click']" @click.stop>
-            <span class="nr-session-menu-btn" @click.stop>⋯</span>
-            <template #overlay>
-              <a-menu>
-                <a-menu-item @click="renameSession(session.id)">
-                  {{ t('chat.rename') }}
-                </a-menu-item>
-                <a-menu-item @click="archiveSession(session.id)">
-                  {{ t('chat.archive') }}
-                </a-menu-item>
-              </a-menu>
-            </template>
-          </a-dropdown>
-        </div>
-        <div v-if="filteredSessions.length === 0" class="nr-session-empty">
-          {{ t('chat.noSessions') }}
-        </div>
-      </div>
-    </aside>
+    <!-- 会话重命名弹窗（侧栏与 dock 历史 tab 共用，状态在 useSessionOps） -->
+    <SessionRenameModal />
 
-    <!-- Right Panel: Archived Sessions (存档会话卡片页，位于历史会话右侧) -->
-    <aside v-if="isMainLayout && agentId && archivedPanelOpen" class="nr-chat-archived-panel">
-      <div class="nr-history-header">
-        <span class="nr-history-title">{{ t('chat.archivedSessions') }}</span>
-        <button class="nr-archived-close" @click="archivedPanelOpen = false">✕</button>
-      </div>
-      <div class="nr-session-list">
-        <div v-for="session in archivedSessions" :key="session.id" class="nr-session-item archived">
-          <span class="nr-session-icon">🗄</span>
-          <span class="nr-session-name">{{ session.title }}</span>
-          <button class="nr-archived-restore-btn" @click="restoreArchivedSession(session.id)">
-            {{ t('chat.restore') }}
-          </button>
-        </div>
-        <div v-if="archivedSessions.length === 0" class="nr-session-empty">
-          {{ t('chat.noArchivedSessions') }}
-        </div>
-      </div>
-    </aside>
-
-    <!-- Image Lightbox -->
-    <transition name="fade-scale">
-      <div v-if="lightbox.open" class="nr-lightbox" @click="lightbox.open = false">
-        <div class="nr-lightbox-content" @click.stop>
-          <img :src="lightbox.src" :alt="lightbox.alt" />
-          <div class="nr-lightbox-caption">{{ lightbox.alt }}</div>
-        </div>
-        <button class="nr-lightbox-close" @click="lightbox.open = false">✕</button>
-      </div>
-    </transition>
-
-    <!-- Rename Modal -->
-    <a-modal
-      v-model:open="renameModal.open"
-      :title="t('chat.rename')"
-      @ok="confirmRename"
-    >
-      <GlassInput
-        v-model:model-value="renameModal.title"
-        :placeholder="t('chat.rename')"
-        @update:model-value="renameModal.title = $event"
-      />
-    </a-modal>
-
-    <!-- Governance Approval Modal (P0: ASK 人工确认) -->
-    <a-modal
-      v-model:open="approvalModal.open"
-      :title="t('ui.confirmNeeded')"
-      :confirm-loading="approvalModal.loading"
-      :ok-text="t('ui.approveExecute')"
-      :cancel-text="t('ui.reject')"
-      @ok="confirmApproval"
-      @cancel="rejectApproval"
-    >
-      <div class="approval-body">
-        <div class="approval-field">
-          <span class="approval-label">{{ t('ui.tool') }}</span>
-          <a-tag color="orange">{{ approvalModal.toolName || t('ui.unknown') }}</a-tag>
-        </div>
-        <div v-if="approvalModal.command" class="approval-field">
-          <span class="approval-label">{{ t('ui.content') }}</span>
-          <pre class="approval-command">{{ approvalModal.command }}</pre>
-        </div>
-        <!-- P0-6 分段审批：链式命令逐段确认，注入段无法借白名单段搭便车 -->
-        <div v-if="approvalModal.segments.length > 1" class="approval-field">
-          <span class="approval-label">{{ t('ui.approvalSegments') }}</span>
-          <ul class="approval-segments">
-            <li v-for="(seg, idx) in approvalModal.segments" :key="idx" class="approval-segment">
-              <a-tag v-if="seg.connector" color="default" class="approval-segment-connector">{{ seg.connector }}</a-tag>
-              <code class="approval-segment-text">{{ seg.text }}</code>
-              <a-tag v-if="seg.quoted" color="purple">{{ t('ui.approvalSegmentInline') }}</a-tag>
-            </li>
-          </ul>
-        </div>
-        <div v-if="approvalModal.reason" class="approval-field">
-          <span class="approval-label">{{ t('ui.reason') }}</span>
-          <span class="approval-reason">{{ approvalModal.reason }}</span>
-        </div>
-        <a-checkbox v-model:checked="approvalAddWhitelist">
-          {{ t('ui.addToWhitelistAndApprove') }}
-        </a-checkbox>
-        <a-radio-group v-model:value="approvalRemember" class="approval-remember" size="small">
-          <a-radio value="">{{ t('ui.rememberNone') }}</a-radio>
-          <a-radio value="exact">{{ t('ui.rememberExact') }}</a-radio>
-          <a-radio value="similar">{{ t('ui.rememberSimilar') }}</a-radio>
-        </a-radio-group>
-        <p class="approval-hint">{{ t('ui.approvalHint') }}</p>
-      </div>
-    </a-modal>
+    <!-- Governance Approval Modal (P0: ASK 人工确认，状态在 useGovernanceApproval) -->
+    <GovernanceApprovalModal />
 
     <!-- 计划模式面板（/plan）：澄清问答 → MD 计划预览 → 审批执行 -->
     <PlanPanel
@@ -836,24 +423,35 @@ import { useChat } from '@/composables/useChat'
 import { reorderConsoleSessions } from '@/api/modules/console'
 import type { ChatMessage, Session, PendingFile } from '@/types/chat'
 import { api } from '@/api'
-import {
-  approveRequest as apiApproveRequest,
-  rejectRequest as apiRejectRequest,
-  addWhitelistEntry,
-} from '@/api/modules/governance'
+import { useGovernanceApproval } from '@/composables/useGovernanceApproval'
 import { secureStorage } from '@/utils/security'
 import { renderMarkdown } from '@/utils/markdown'
+import { openArtifactTab, openCodeBlockTab, openFileTab, openImageTab, openToolResultArtifacts, type ArtifactEventPayload } from '@/utils/artifacts'
 import { uiMessage } from '@/utils/message'
 import { resolveI18nMessage } from '@/utils/i18n'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
-import SubAgentPanel, { type SubAgentWindowState } from '@/components/chat/SubAgentPanel.vue'
-import ComputerUsePanel from '@/components/chat/ComputerUsePanel.vue'
+import UiIcon from '@/components/UiIcon.vue'
+
+import SubAgentWindowStack from '@/components/chat/SubAgentWindowStack.vue'
+import SessionRenameModal from '@/components/chat/SessionRenameModal.vue'
+import ChatSessionSidebar from '@/components/chat/ChatSessionSidebar.vue'
+import ChatComposerArea from '@/components/chat/ChatComposerArea.vue'
+import GovernanceApprovalModal from '@/components/chat/GovernanceApprovalModal.vue'
+import RightDock from '@/components/chat/dock/RightDock.vue'
 import ContextUsageIndicator from '@/components/chat/ContextUsageIndicator.vue'
 import QueuedMessageCards from '@/components/chat/QueuedMessageCards.vue'
 import PlanPanel from '@/components/chat/PlanPanel.vue'
 import CrossSessionSearch from '@/components/chat/CrossSessionSearch.vue'
 import { useComputerPanel, isComputerTool, } from '@/composables/useComputerPanel'
+import { useRightDockStore } from '@/stores/rightDock'
+import { useSessionOps } from '@/composables/useSessionOps'
+import { useChatModels } from '@/composables/useChatModels'
+import { usePendingFiles } from '@/composables/usePendingFiles'
+import { useASRRecording } from '@/composables/useASRRecording'
+import { useAutoVoice } from '@/composables/useAutoVoice'
+import { useSlashCommands, setupSlashCommands } from '@/composables/useSlashCommands'
+import { useSubAgentWindows } from '@/composables/useSubAgentWindows'
 import { toolCardVariant, variantIcon, variantColor } from '@/utils/toolCardVariant'
 import { useThinkingEffort } from '@/composables/useThinkingEffort'
 import { useMermaidRenderer } from '@/composables/useMermaidRenderer'
@@ -879,16 +477,11 @@ import { listModels } from '@/api/modules/models'
 import { listProviders } from '@/api/modules/providers'
 import { normalizeModel } from '@/types/model'
 
-/** 聊天页可切换的模型选项（空串 = 自动路由） */
-interface ChatModelOption {
-  label: string
-  value: string
-  provider_id: string
-  context_window?: number | null
-  /** 服务商级连通判定：绿点=真实可用，灰点=不可联通 */
-  connectable?: boolean
-}
+// 顶入卡片编辑态（queued edit）→ 已收敛进 ChatComposerArea（2026-09-08）
 
+// ---------------------------------------------------------------------------
+// Store-backed domain state（ADR 0008）+ 页面编排状态（2026-09-08 重建段）
+// ---------------------------------------------------------------------------
 const { t } = useI18n()
 const appStore = useAppStore()
 const agentStore = useAgentStore()
@@ -900,12 +493,6 @@ const props = defineProps<{
 
 const isMainLayout = computed(() => props.layoutMode === 'main')
 
-// ---------------------------------------------------------------------------
-// Store-backed domain state (single source of truth via Pinia)
-// #2 / ADR 0008: ChatPage 不再持有领域状态,统一由 useChatStore 管理。
-// sessions/currentSessionId/messages/isStreaming/inputText/searchQuery 通过
-// storeToRefs 解构为本地 ref(保持响应性 + 模板兼容),所有 mutation 走 store actions。
-// ---------------------------------------------------------------------------
 const chatStore = useChatStore()
 const messageQueue = useMessageQueueStore()
 const router = useRouter()
@@ -921,36 +508,25 @@ const {
   filteredSessions,
 } = storeToRefs(chatStore)
 
-// ---------------------------------------------------------------------------
-// Local UI state (UI concerns, not domain state)
-// ---------------------------------------------------------------------------
 const messagesRef = ref<HTMLElement | null>(null)
-/** Composer 外壳聚焦态（focus-within 由 CSS 处理不了 Vue 模板类的场景，focus/blur 维护） */
-const composerFocused = ref(false)
-const textareaRef = ref<HTMLTextAreaElement | null>(null)
-const fileInputRef = ref<HTMLInputElement | null>(null)
-
-const pendingFiles = ref<PendingFile[]>([])
-// 实时记忆检索进度（SSE memory_progress；临时态：不落消息历史，回复开始即清空）
-const retrievalStatus = ref('')
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
-const historyPanelOpen = ref(true)
 
-// ---------------------------------------------------------------------------
-// 思考程度（简单/标准/深度）：持久化于 localStorage，随消息发给后端
-// ---------------------------------------------------------------------------
+// ── 右侧多标签 dock（收编历史/存档/电脑分屏 + 产物预览）─────────
+const rightDock = useRightDockStore()
+const isHistoryTabActive = computed(() => rightDock.activeTabId === 'history')
+function toggleHistoryPanel(): void {
+  if (rightDock.activeTabId === 'history') {
+    rightDock.closeTab('history')
+  } else {
+    rightDock.openHistory()
+  }
+}
+
+// ── 思考程度（持久化 localStorage，随消息发给后端）──────────────
 const { effort: thinkingEffort, setEffort: setThinkingEffort } = useThinkingEffort()
-const thinkingOptions: Array<{ value: ThinkingEffort; label: string }> = [
-  { value: 'light', label: 'chat.thinkingLight' },
-  { value: 'standard', label: 'chat.thinkingStandard' },
-  { value: 'deep', label: 'chat.thinkingDeep' },
-]
 
-// ---------------------------------------------------------------------------
-// 蜂群子 Agent 小窗：订阅会话 WS 事件（subagent_started/chunk/completed），
-// 每个子 Agent 一个可最小化的浮动小窗
-// ---------------------------------------------------------------------------
-const subAgentWindows = ref<Record<string, SubAgentWindowState>>({})
+// ── 蜂群子 Agent 浮窗（WS subagent_* 事件 → useSubAgentWindows）──
+const { handleSubAgentSyncEvent } = useSubAgentWindows()
 
 function onSessionSyncEvent(event: { event_type: string; payload: Record<string, unknown> }) {
   // 电脑操作实时事件 → 分屏面板（不携带 subagent_id，先于子 Agent 分支处理）
@@ -958,93 +534,25 @@ function onSessionSyncEvent(event: { event_type: string; payload: Record<string,
     computerPanel.handleComputerAction(event.payload)
     return
   }
-  const p = event.payload as Record<string, string>
-  const sid = p?.subagent_id
-  if (!sid) return
-  if (event.event_type === 'subagent_started') {
-    subAgentWindows.value[sid] = {
-      subagentId: sid,
-      agentName: p.agent_name || sid,
-      task: p.task || '',
-      chunks: [],
-      status: 'running',
-      report: '',
-    }
-  } else if (event.event_type === 'subagent_chunk') {
-    const win = subAgentWindows.value[sid]
-    if (win && p.data !== undefined) {
-      win.chunks.push({ type: String(p.chunk_type || 'content'), data: String(p.data) })
-    }
-  } else if (event.event_type === 'subagent_completed') {
-    const win = subAgentWindows.value[sid]
-    if (win) {
-      win.status = (p.status as SubAgentWindowState['status']) || 'completed'
-      win.report = String(p.report || '')
-      win.error = p.error || null
-    }
-  }
+  handleSubAgentSyncEvent(event)
 }
 
-function closeSubAgentWindow(subagentId: string) {
-  delete subAgentWindows.value[subagentId]
-}
-
-// 实时事件丢失提示（seq gap 检测，OpenOcta 启发 P0-1）：WS 帧跳号说明
-// 服务端到本标签页之间丢了事件（子 Agent 进度/电脑面板流），仅提示不
-// 自动恢复——丢失的是实时进度流，刷新页面重建游标即可
-const eventsLostBanner = ref<number | null>(null)
+// 实时事件丢失提示（seq gap 检测，OpenOcta P0-1）：计数入 chatStore（composer 读）
 function onSyncGap(missed: number) {
-  eventsLostBanner.value = (eventsLostBanner.value ?? 0) + missed
+  chatStore.bumpEventsLost(missed)
 }
 
-// ---------------------------------------------------------------------------
-// 电脑操作分屏：Agent 调用 computer_*/browser_* 工具时自动展开，
-// 实时显示操作截图与动作日志（WS computer_action 事件驱动）
-// ---------------------------------------------------------------------------
+// ── 电脑操作分屏（useComputerPanel 共享单例，自动开屏走 rightDock）──
 const computerPanel = useComputerPanel()
 const computerPanelState = computerPanel.state
 
-function toggleComputerPanel() {
-  if (computerPanelState.open) {
-    computerPanel.close()
-  } else {
-    computerPanel.open()
-  }
-}
-
-function closeComputerPanel() {
-  computerPanel.close()
-}
-
 useSessionSync(() => currentSessionId.value, onSessionSyncEvent, { onGap: onSyncGap })
 
-// Drag & Drop
+// ── 页面级 UI 临时态 ──────────────────────────────────────
 const isDragOver = ref(false)
 let dragCounter = 0
 
-// ASR
-const asrAvailable = ref(false)
-const isRecording = ref(false)
-const recordingTimeStr = ref('0:00')
-let recognition: any = null
-// Guard against infinite ASR auto-restart when the recognizer keeps dying.
-const asrRestartGuard = useASRRestartGuard(3)
-let recordingTimer: ReturnType<typeof setInterval> | null = null
-let recordingSeconds = 0
-// Timer for the delayed ASR restart (breaks tight onend→start loops)
-let asrRestartTimer: ReturnType<typeof setTimeout> | null = null
-
-// MediaRecorder for backend ASR fallback
-let mediaRecorder: MediaRecorder | null = null
-let recordedChunks: Blob[] = []
-
-// TTS
 const ttsAvailable = ref(true) // assume available, verify on mount
-
-// Lightbox
-const lightbox = reactive({ open: false, src: '', alt: '' })
-
-const renameModal = reactive({ open: false, sessionId: '', title: '' })
 
 // 计划模式（/plan）：面板开关 + 初始需求种子；会话态收敛在 PlanPanel 内部
 const planPanelOpen = ref(false)
@@ -1058,48 +566,60 @@ function onPlanApproved(executePrompt: string): void {
   void sendMessage()
 }
 
-// 治理审批弹窗（P0: ASK 人工确认）
-const approvalModal = reactive({
-  open: false,
-  loading: false,
-  approvalId: '',
-  toolName: '',
-  command: '',
-  reason: '',
-  // P0-6 分段审批：多段命令的候选段（后端 governance.segments）
-  segments: [] as Array<{ text: string; head: string; connector: string; quoted: boolean }>,
-})
-const approvalAddWhitelist = ref(false)
-/** 审批记忆档位：'' = 仅本次 / exact / similar（补课 3.2，后端 approval_manager 记忆规则） */
-const approvalRemember = ref<'' | 'exact' | 'similar'>('')
-
-// ---------------------------------------------------------------------------
-// 手动模型切换（聊天页右上角）
-// 空串'' = 自动路由（默认，不影响富媒体→多模态 LLM 的自动路由）
-// 非空 = 手动指定模型，随消息 POST body 的 model 字段转发到后端热切换
-const chatModelOptions = ref<ChatModelOption[]>([])
-/** 按服务商分组的可联通模型（聊天模型切换器二级级联菜单数据源） */
-interface ChatModelGroup {
-  provider_id: string
-  provider_name: string
-  models: ChatModelOption[]
+/** /plan 斜杠命令（ChatComposerArea emit 上抛）：打开计划面板并注入需求种子 */
+function onSlashPlan(seed: string): void {
+  planRequestSeed.value = seed
+  planPanelOpen.value = true
 }
-const chatModelGroups = ref<ChatModelGroup[]>([])
-// 本地/免 key 服务商类型：无需 api_key 即可联通（连上本地服务即可）
-const LOCAL_PROVIDER_TYPES = new Set(['ollama', 'lm_studio'])
-const KEYLESS_PROVIDER_IDS = new Set(['opencode', 'kilo-code'])
-// 补课 A1：429 限流横幅——当前轮被限流的模型 + 一键切换候选列表
-const rateLimitBanner = ref<{ model: string; alternatives: ChatModelOption[] } | null>(null)
-// 补课 A2：无已启用模型提示（自动路由将无人可派）——引导去模型管理页
-const noModelsHint = ref(false)
 
-// ── 流式实时 TTS（自动语音开关，补课）──────────────────────
-const AUTO_VOICE_KEY = 'neurova_auto_voice'
-const autoVoice = ref(localStorage.getItem(AUTO_VOICE_KEY) === '1')
+/** 「↑ 立即」排队项（ChatComposerArea emit 上抛）：走 drain force 入口 */
+function onSendQueuedNow(id: string): void {
+  messageQueue.moveToTop(id)
+  if (isStreaming.value || _queueDrainer.isDraining()) {
+    uiMessage.info(t('chat.queueTopAuto'))
+    return
+  }
+  void drainMessageQueue(true, currentSessionId.value)
+}
+
+// 治理审批弹窗（P0: ASK 人工确认）→ 状态机收敛在 useGovernanceApproval
+const { approvalModal, openApprovalModal, confirmApproval, rejectApproval } = useGovernanceApproval()
+
+// 斜杠命令面板（共享单例；命令注册表在 ChatComposerArea 组装）
+const { closeSlashPanel } = useSlashCommands()
+
+// ── 模型切换器 / 429 横幅 / 待传附件（共享单例 composables）──────
+const {
+  chatModelOptions,
+  selectedModel,
+  rateLimitBanner,
+  handleRateLimit,
+  loadChatModels,
+  noModelsHint,
+} = useChatModels()
+const { pendingFiles } = usePendingFiles()
+
+// ── 会话操作共享层（侧栏与 dock 历史/存档 tab 共用）─────────────
+const {
+  renameModal,
+  groupedSessions,
+  onSessionDragStart,
+  onSessionDrop,
+  dragOver,
+  togglePin,
+  archiveSession,
+  createSession,
+  renameSession,
+} = useSessionOps()
+const dragOverSessionId = dragOver
+
+// ── ASR（共享单例：composer 录音 UI 与本页 sendMessage 共享）──────
+const { asrAvailable, isRecording, initASR, stopRecording, syncLocale } = useASRRecording()
+
+// ── 流式实时 TTS（live 播放器接线；autoVoice 开关为共享单例）──────
+const { autoVoice, toggleAutoVoice: _toggleAutoVoice } = useAutoVoice()
 function toggleAutoVoice(): void {
-  autoVoice.value = !autoVoice.value
-  localStorage.setItem(AUTO_VOICE_KEY, autoVoice.value ? '1' : '0')
-  if (!autoVoice.value) streamTTSRunner?.abort()
+  _toggleAutoVoice(() => streamTTSRunner?.abort())
 }
 let streamTTSRunner: StreamTTSRunner | null = null
 // live 播放：专用 audio 元素顺序播句子块；结束后由模板 onended 推进
@@ -1107,287 +627,8 @@ const liveTtsUrl = ref('')
 const liveTtsQueue = ref<string[]>([])
 const liveTtsIdx = ref(0)
 const liveTtsAudio = ref<HTMLAudioElement | null>(null)
-const selectedModel = ref<string>('')
-const chatModelLoading = ref(false)
 
-async function loadChatModels() {
-  chatModelLoading.value = true
-  try {
-    const [modelsRes, providersRes] = await Promise.all([
-      listModels(),
-      listProviders().catch(() => []),
-    ])
-    const rawModels = Array.isArray(modelsRes) ? modelsRes : modelsRes?.models ?? []
-    const normalized = rawModels.map((m) => normalizeModel(m))
-    const providers = Array.isArray(providersRes) ? providersRes : (providersRes as any)?.data ?? []
 
-    // 服务商元数据索引：id -> {name, is_active, api_key_configured, status, provider_type}
-    const providerMeta = new Map<string, any>()
-    for (const p of providers) {
-      if (p?.provider_id) providerMeta.set(p.provider_id, p)
-    }
-
-    // 全量展示（可联通=绿点 / 不可联通=灰点），不再硬过滤——
-    // 连通判定以后端 metadata.connectable 为单一事实源（服务商级）
-    // 按服务商分组（保持服务商在 /providers 的返回顺序，组内按模型名）
-    const groupMap = new Map<string, ChatModelGroup>()
-    for (const m of normalized) {
-      if (m.enabled === false) continue
-      const pid = m.provider_id || ''
-      if (!groupMap.has(pid)) {
-        groupMap.set(pid, {
-          provider_id: pid,
-          provider_name: providerMeta.get(pid)?.name || pid,
-          models: [],
-        })
-      }
-      groupMap.get(pid)!.models.push({
-        label: m.name || m.id,
-        value: m.id || m.name,
-        provider_id: pid,
-        context_window: m.context_window ?? null,
-        connectable: m.connectable ?? false,
-      })
-    }
-    const groups = [...groupMap.values()]
-    for (const g of groups) g.models.sort((a, b) => a.label.localeCompare(b.label))
-    // 可联通的组在前，灰点组垫底
-    groups.sort((a, b) => Number(b.models.some((m) => m.connectable)) - Number(a.models.some((m) => m.connectable)))
-    chatModelGroups.value = groups
-
-    // 扁平选项（429 候选 / 标签查找 / 上下文限额查询复用）
-    const AUTO_ROUTE_LABEL = t('ui.autoRoute')
-    const options: ChatModelOption[] = [
-      { label: AUTO_ROUTE_LABEL, value: '', provider_id: '', context_window: null },
-      ...groups.flatMap((g) => g.models),
-    ]
-    chatModelOptions.value = options
-    // 补课 A2：零可联通模型 → 自动路由无候选可派，提示去模型管理页配置
-    noModelsHint.value = !groups.some((g) => g.models.some((m) => m.connectable))
-  } catch (e) {
-    // 加载失败不阻塞聊天，保留"自动路由"选项即可
-    console.warn('[ChatPage] failed to load model list:', e)
-    chatModelOptions.value = []
-    chatModelGroups.value = []
-  } finally {
-    chatModelLoading.value = false
-  }
-}
-
-let abortController: AbortController | null = null
-
-// ---------------------------------------------------------------------------
-// 跨会话全文搜索（QwenPaw ChatSearchPanel 对齐）
-// ---------------------------------------------------------------------------
-const crossSearchOpen = ref(false)
-
-/** 跳转命中：切会话 → 历史加载后按关键词滚动定位第一条命中消息。 */
-async function onCrossSearchJump(sessionId: string, keyword: string): Promise<void> {
-  crossSearchOpen.value = false
-  if (sessionId !== currentSessionId.value) {
-    await switchSession(sessionId)
-  }
-  void nextTick(() => {
-    void scrollToFirstHit(sessionId, keyword)
-  })
-}
-
-/** 在已加载历史里定位含关键词的消息并滚动（找不到则仅贴底）。 */
-async function scrollToFirstHit(sessionId: string, keyword: string): Promise<void> {
-  if (currentSessionId.value !== sessionId) return
-  // 历史加载是异步的，给一帧缓冲后尝试定位（最多重试 3 次）
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const idx = messages.value.findIndex((m) =>
-      String(m.content || '').toLowerCase().includes(keyword.toLowerCase()),
-    )
-    if (idx >= 0) {
-      const el = document.getElementById(`nr-msg-${idx}`)
-      if (el) {
-        el.scrollIntoView({ block: 'center' })
-        return
-      }
-    }
-    await new Promise((r) => setTimeout(r, 250))
-  }
-  scrollToBottom()
-}
-
-// ---------------------------------------------------------------------------
-// Token/上下文用量（QwenPaw ContextUsageIndicator 对齐）
-// sessionUsage = 当前会话累计（store per-session），contextWindow = 当前选中
-// 模型的限额（自动路由时未知 → 指示器退化为产出密度环）。
-// ---------------------------------------------------------------------------
-const sessionUsage = computed(() => chatStore.getSessionTokenUsage(currentSessionId.value))
-const currentModelContextWindow = computed<number | null>(() => {
-  const opt = chatModelOptions.value.find((o) => o.value === selectedModel.value)
-  return opt?.context_window ?? null
-})
-
-/** Composer pill 当前思考程度标签（简单/标准/深度）。 */
-const currentThinkingLabel = computed<string>(() => {
-  const opt = thinkingOptions.find((o) => o.value === thinkingEffort.value)
-  return opt ? t(opt.label) : ''
-})
-
-/** Composer pill 当前模型标签（空 = 自动路由）。 */
-const selectedModelLabel = computed<string>(() => {
-  const opt = chatModelOptions.value.find((o) => o.value === selectedModel.value)
-  return opt ? opt.label : t('ui.autoRoute')
-})
-
-// ── 模型切换器：二级级联菜单（左服务商 / 右模型 / 底管理模型）──
-const modelMenuOpen = ref(false)
-const activeProviderId = ref<string>('')
-/** 当前展开服务商的模型列表（activeProviderId 为空时回退首个服务商）。 */
-const activeGroupModels = computed<ChatModelOption[]>(() => {
-  const groups = chatModelGroups.value
-  if (groups.length === 0) return []
-  const g = groups.find((x) => x.provider_id === activeProviderId.value) ?? groups[0]
-  return g.models
-})
-
-/** 当前展开服务商名（子菜单标题）。 */
-const activeProviderName = computed<string>(() => {
-  const groups = chatModelGroups.value
-  const g = groups.find((x) => x.provider_id === activeProviderId.value) ?? groups[0]
-  return g ? g.provider_name : ''
-})
-/** 打开菜单时定位到当前选中模型所属服务商（自动路由则展开首个服务商）。 */
-watch(modelMenuOpen, (open) => {
-  if (!open) return
-  if (selectedModel.value) {
-    const opt = chatModelOptions.value.find((o) => o.value === selectedModel.value)
-    activeProviderId.value = opt?.provider_id || chatModelGroups.value[0]?.provider_id || ''
-  } else {
-    activeProviderId.value = chatModelGroups.value[0]?.provider_id || ''
-  }
-})
-/**
- * 切换模型 = 修改该 agent 的默认模型（按 agent 隔离，等同编辑 agent）：
- * PUT /agents/{id} 持久化 model/provider 并重建运行时 llm_client。
- * 自动路由 → model='auto' 且清空 provider；具名模型 → 同时钉住其服务商。
- */
-async function pickModel(value: string, providerId?: string): Promise<void> {
-  selectedModel.value = value
-  modelMenuOpen.value = false
-  if (!agentId.value) return
-  const result = await agentStore.updateAgent(agentId.value, {
-    model: value || 'auto',
-    provider: providerId || '',
-  })
-  if (result) {
-    uiMessage.success(t('chat.modelSavedToAgent'))
-  } else {
-    uiMessage.error(t('chat.modelSaveFailed'))
-  }
-}
-function gotoModelsManage(): void {
-  modelMenuOpen.value = false
-  router.push('/models')
-}
-
-// ---------------------------------------------------------------------------
-// 斜杠命令面板（QwenPaw slash commands 对齐）
-// 输入框以 "/" 开头时弹出本地命令面板，Enter 执行 / Tab 补全 / ↑↓ 导航。
-// 纯前端交互：命令落地为既有函数（新会话/清屏/历史清空），不发后端。
-// /plan 例外：打开计划模式交互面板（后端 LLM 澄清问答 → MD 计划 → 审批）。
-// ---------------------------------------------------------------------------
-interface SlashCommand {
-  name: string
-  descKey: string
-  /** rawInput = 清输入框前的完整原文（带参命令 /plan xxx 自取参数） */
-  run: (rawInput: string) => void | Promise<void>
-}
-
-const slashCommands: SlashCommand[] = [
-  {
-    name: '/plan',
-    descKey: 'chat.slashPlan',
-    run: (rawInput: string) => {
-      // /plan 后的剩余文本作为初始需求（可空，面板内可再补）
-      const seed = rawInput.replace(/^\/plan\b\s*/i, '').trim()
-      planRequestSeed.value = seed
-      planPanelOpen.value = true
-    },
-  },
-  {
-    name: '/new',
-    descKey: 'chat.slashNew',
-    run: () => createSession(),
-  },
-  {
-    name: '/clear',
-    descKey: 'chat.slashClear',
-    run: () => {
-      chatStore.clearMessages()
-    },
-  },
-  {
-    name: '/archive',
-    descKey: 'chat.slashArchive',
-    run: async () => {
-      if (currentSessionId.value) {
-        await archiveSession(currentSessionId.value)
-      }
-    },
-  },
-]
-
-const slashOpen = ref(false)
-const slashIndex = ref(0)
-const slashFiltered = computed<SlashCommand[]>(() => {
-  const q = inputText.value.trim().toLowerCase()
-  if (!q.startsWith('/')) return []
-  // /plan 等带参命令：首词命中即弹面板（参数部分不算入前缀匹配）
-  const firstWord = q.split(/\s+/)[0]
-  return slashCommands.filter((c) => c.name.startsWith(firstWord))
-})
-
-function onSlashInput(): void {
-  slashIndex.value = 0
-  slashOpen.value = slashFiltered.value.length > 0
-}
-
-function closeSlashPanel(): void {
-  slashOpen.value = false
-}
-
-async function runSlashCommand(cmd?: SlashCommand): Promise<void> {
-  const target = cmd ?? slashFiltered.value[slashIndex.value]
-  closeSlashPanel()
-  if (!target) return
-  // /plan 带参命令：先快照原文（含参数）再清输入框，run() 内自取种子
-  const rawInput = inputText.value
-  chatStore.setInputText('')
-  await target.run(rawInput)
-}
-
-function onSlashKeydown(e: KeyboardEvent): boolean {
-  if (!slashOpen.value) return false
-  if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    slashIndex.value = (slashIndex.value + 1) % slashFiltered.value.length
-    return true
-  }
-  if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    slashIndex.value = (slashIndex.value - 1 + slashFiltered.value.length) % slashFiltered.value.length
-    return true
-  }
-  if (e.key === 'Enter' || e.key === 'Tab') {
-    e.preventDefault()
-    void runSlashCommand()
-    return true
-  }
-  if (e.key === 'Escape') {
-    e.preventDefault()
-    closeSlashPanel()
-    return true
-  }
-  return false
-}
-
-// ---------------------------------------------------------------------------
 // Session Management (delegated to useChat composable)
 // #2 / ADR 0008: 所有 session CRUD 通过 useChat 统一函数调用库,禁止直接调后端 API。
 // 5 个 session 函数(load/create/switch/delete/rename)委托给 useChat,
@@ -1461,13 +702,13 @@ function absIdx(windowIdx: number): number {
 function streamPhaseMeta(phase: ReturnType<typeof deriveStreamPhase>): { icon: string; label: string } {
   switch (phase) {
     case 'understanding':
-      return { icon: '📥', label: t('chat.phaseUnderstanding') }
+      return { icon: 'radar', label: t('chat.phaseUnderstanding') }
     case 'thinking':
-      return { icon: '🧠', label: t('chat.phaseThinking') }
+      return { icon: 'brain', label: t('chat.phaseThinking') }
     case 'tool':
-      return { icon: '⚙️', label: t('chat.phaseTool') }
+      return { icon: 'wrench', label: t('chat.phaseTool') }
     case 'output':
-      return { icon: '✍️', label: t('chat.phaseOutput') }
+      return { icon: 'edit', label: t('chat.phaseOutput') }
   }
 }
 
@@ -1514,241 +755,13 @@ function onMessagesScroll(): void {
   }
 }
 
-// 补课 A5：会话日期分组（置顶/今天/7 天内/更早）+ 拖拽移动
-interface SessionGroup {
-  key: string
-  label: string
-  sessions: Session[]
-}
-const dragOverSessionId = ref<string | null>(null)
-const draggingSessionId = ref<string | null>(null)
+// 补课 A4：跨标签单发送者锁（同 session 多标签只有一个能发）
 
-const groupedSessions = computed<SessionGroup[]>(() => {
-  const pinned = filteredSessions.value.filter((s) => s.pinned)
-  const rest = filteredSessions.value.filter((s) => !s.pinned)
-  const now = Date.now()
-  const DAY = 86_400_000
-  const buckets: Record<string, Session[]> = { today: [], week: [], earlier: [] }
-  for (const s of rest) {
-    const ts = s.updatedAt ? Date.parse(s.updatedAt) : NaN
-    if (Number.isNaN(ts)) buckets.today.push(s)
-    else if (now - ts < DAY) buckets.today.push(s)
-    else if (now - ts < 7 * DAY) buckets.week.push(s)
-    else buckets.earlier.push(s)
-  }
-  const groups: SessionGroup[] = []
-  if (pinned.length) groups.push({ key: 'pinned', label: t('chat.groupPinned'), sessions: pinned })
-  if (buckets.today.length) groups.push({ key: 'today', label: t('chat.groupToday'), sessions: buckets.today })
-  if (buckets.week.length) groups.push({ key: 'week', label: t('chat.groupWeek'), sessions: buckets.week })
-  if (buckets.earlier.length) groups.push({ key: 'earlier', label: t('chat.groupEarlier'), sessions: buckets.earlier })
-  return groups
-})
+/** 窗口相对下标 → messages 绝对下标（DATA-P0-5 根因修复：
+ *  renderedMessages 是 slice 切片，deleteRoundAt 等用绝对下标索引）。 */
 
-function onSessionDragStart(sessionId: string, e: DragEvent): void {
-  draggingSessionId.value = sessionId
-  e.dataTransfer?.setData('text/plain', sessionId)
-}
 
-/** 拖拽放下 = 把拖拽会话的 updatedAt 移到目标之后（重排=本地排序，QP 同款语义）。 */
-function onSessionDrop(targetId: string): void {
-  const sourceId = draggingSessionId.value
-  draggingSessionId.value = null
-  dragOverSessionId.value = null
-  if (!sourceId || sourceId === targetId) return
-  chatStore.moveSessionAfter(sourceId, targetId)
-  // 拖拽排序落库（QwenPaw /chats/groups/order 对齐）：本地视觉排序立即生效，
-  // 同时异步持久化 sort_order（失败静默——本地排序仍可用，刷新后回退服务端顺序）。
-  void persistSessionOrder()
-}
-
-/** 把当前会话顺序（含置顶区顺序）整体落库。 */
-async function persistSessionOrder(): Promise<void> {
-  if (!agentId.value) return
-  // filteredSessions 已含置顶优先排序；置顶区在前一并落库，服务端 sort_order 保序
-  const orderedIds = filteredSessions.value.map((s) => s.id).filter(Boolean)
-  if (orderedIds.length === 0) return
-  try {
-    await reorderConsoleSessions(agentId.value, orderedIds)
-    chatStore.applySessionOrder(orderedIds)
-  } catch (e) {
-    console.warn('[ChatPage] persist session order failed:', e)
-  }
-}
-
-/** 加载当前 agent 的 session 列表(模板 onMounted / agentId watch 调用)。
- *  BUG-11 修复：发起时记录 agentId，写 store 前校验归属——
- *  快速切 agent 时旧响应后到会覆盖新 agent 的会话列表。 */
-async function loadSessions(): Promise<void> {
-  const requestedAgent = agentId.value
-  await _loadSessions(requestedAgent)
-  if (agentId.value !== requestedAgent) return
-}
-
-/** 创建新会话(模板按钮无参调用),委托给 useChat.createSession。 */
-async function createSession(): Promise<void> {
-  await _createSession(agentId.value, t('chat.newChat'))
-}
-
-/**
- * 切换会话 (用户主动点击侧栏 session 项):
- *   1. 调 useChat.switchSession — 返回 SwitchResult (不弹 toast)
- *   2. 用户主动场景 → 调 notifySwitchFailure,历史加载失败时弹 toast
- *   3. 补充 scrollToBottom UI 副作用 (历史加载后滚到底部)
- *
- * 注: loadSessions/createSession/deleteSession 内部自动切换不弹 toast
- * (副作用场景), 不调 notifySwitchFailure — 详见 useChat.ts 的 silent 契约.
- */
-async function switchSession(sessionId: string): Promise<void> {
-  // BUG-2 修复：流式中切走先 abort 旧流并复位 streaming 态，
-  // 否则 usage 记账/队列 drain 会污染刚打开的新会话
-  if (isStreaming.value) {
-    abortController?.abort()
-    abortController = null
-    chatStore.setStreaming(false)
-    stopStreamTTS()
-  }
-  // 顶入编辑态跨会话失效：队列是全局的，但编辑草稿属于原会话输入框，
-  // 不退出会把切会话后的草稿误提交到旧队列项（悬挂高亮）
-  if (editingQueuedId.value) {
-    editingQueuedId.value = null
-  }
-  // BUG-4 修复：restore 前先保存旧会话草稿（原实现只在组件卸载时保存，
-  // 切会话即丢）
-  const prevSid = currentSessionId.value
-  if (prevSid && prevSid !== sessionId) {
-    chatDraft.save(prevSid, inputText.value)
-  }
-  const result = await _switchSession(sessionId)
-  _notifySwitchFailure(result)
-  // 补课 D：恢复新会话草稿；补课 A6+F：历史会话打开定位到最新记录
-  chatStore.setInputText(chatDraft.restore(sessionId))
-  scrollToBottomForHistory()
-}
-
-/** 打开重命名 modal(只读取 sessions,不调 API)。 */
-function renameSession(sessionId: string): void {
-  const session = sessions.value.find((s) => s.id === sessionId)
-  if (!session) return
-  renameModal.sessionId = sessionId
-  renameModal.title = session.title
-  renameModal.open = true
-}
-
-/** 确认重命名(modal @ok),委托给 useChat.renameSession。 */
-async function confirmRename(): Promise<void> {
-  if (!renameModal.title.trim()) return
-  const ok = await _renameSession(renameModal.sessionId, renameModal.title.trim())
-  if (ok) renameModal.open = false
-}
-
-// ---------------------------------------------------------------------------
-// Governance Approval (P0: ASK 人工确认)
-// ---------------------------------------------------------------------------
-
-/** 批准执行；勾选白名单时先加入免检列表再批准 */
-async function confirmApproval(): Promise<void> {
-  if (!approvalModal.approvalId || approvalModal.loading) return
-  approvalModal.loading = true
-  try {
-    if (approvalAddWhitelist.value) {
-      const pattern = extractWhitelistPattern(approvalModal.command)
-      if (pattern) {
-        await addWhitelistEntry({
-          pattern,
-          match_type: 'prefix',
-          note: t('ui.approvalNote', { id: approvalModal.approvalId }),
-        })
-      }
-    }
-    const resp = await apiApproveRequest(
-      approvalModal.approvalId,
-      t('ui.userConfirmed'),
-      approvalRemember.value || undefined,
-    )
-    approvalModal.open = false
-    approvalRemember.value = ''
-    const data = (resp as any)?.data?.data ?? (resp as any)?.data
-    if (data?.executed && data?.result) {
-      uiMessage.success(t('ui.approvedExecuted'))
-    } else {
-      uiMessage.success(t('ui.approved'))
-    }
-  } catch (e) {
-    console.error('[Approval] approve failed:', e)
-    uiMessage.error(t('ui.approveFailed'))
-  } finally {
-    approvalModal.loading = false
-  }
-}
-
-/** 拒绝执行 */
-async function rejectApproval(): Promise<void> {
-  if (!approvalModal.approvalId || approvalModal.loading) return
-  approvalModal.loading = true
-  try {
-    await apiRejectRequest(approvalModal.approvalId, t('ui.userRejected'))
-    approvalModal.open = false
-    approvalRemember.value = ''
-    uiMessage.info(t('ui.rejectedOperation'))
-  } catch (e) {
-    console.error('[Approval] reject failed:', e)
-    uiMessage.error(t('ui.operationFailed'))
-  } finally {
-    approvalModal.loading = false
-  }
-}
-
-/** 从命令中提取适合加入白名单的前缀（首个词或可执行文件名） */
-function extractWhitelistPattern(command: string): string {
-  const trimmed = (command || '').trim()
-  if (!trimmed) return ''
-  // 取第一段管道/分号之前的内容的首个 token 作为前缀
-  const head = trimmed.split(/[|;&]/)[0].trim()
-  return head.split(/\s+/)[0] || head
-}
-
-/** 删除会话,委托给 useChat.deleteSession; 失败时弹 toast 让用户感知. */
-async function deleteSession(sessionId: string): Promise<void> {
-  const result = await _deleteSession(sessionId)
-  _notifyDeleteFailure(result)
-}
-
-// ---------------------------------------------------------------------------
-// 会话存档（删除 → 存档：历史列表隐藏，存档卡片页可随时恢复）
-// ---------------------------------------------------------------------------
-const archivedPanelOpen = ref(false)
-
-/** 置顶/取消置顶（模板菜单无参调用；静默失败不打断列表交互）。 */
-async function togglePin(session: Session): Promise<void> {
-  const ok = await _pinSession(session.id, !session.pinned)
-  if (!ok) {
-    uiMessage.error(resolveI18nMessage(t, 'chat.pinFailed', t('chat.pinFailed')))
-  }
-}
-
-/** 存档会话（模板菜单无参调用），失败弹 toast（错误策略与 deleteSession wrapper 一致）。 */
-async function archiveSession(sessionId: string): Promise<void> {
-  const result = await _archiveSession(sessionId)
-  if (!result.ok) {
-    uiMessage.error(resolveI18nMessage(t, 'chat.archiveFailed', t('chat.archiveFailed')))
-  }
-}
-
-/** 打开/关闭存档卡片页，打开时加载当前 agent 的存档会话列表。 */
-async function toggleArchivedPanel(): Promise<void> {
-  archivedPanelOpen.value = !archivedPanelOpen.value
-  if (archivedPanelOpen.value) {
-    await _loadArchivedSessions(agentId.value)
-  }
-}
-
-/** 恢复存档会话为正常会话。 */
-async function restoreArchivedSession(sessionId: string): Promise<void> {
-  const result = await _restoreSession(sessionId)
-  if (!result.ok) {
-    uiMessage.error(resolveI18nMessage(t, 'chat.restoreFailed', t('chat.restoreFailed')))
-  }
-}
+let abortController: AbortController | null = null
 
 // ---------------------------------------------------------------------------
 // 轮次操作：时间显示 / 复制 / 点赞点踩 / 编辑最后一条用户消息 / 删除一轮
@@ -1959,105 +972,73 @@ async function toggleCheckpoint(msg: ChatMessage): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Message Sending with SSE Streaming
+/** 加载当前 agent 的 session 列表(模板 onMounted / agentId watch 调用)。
+ *  BUG-11 修复：发起时记录 agentId，写 store 前校验归属——
+ *  快速切 agent 时旧响应后到会覆盖新 agent 的会话列表。 */
+async function loadSessions(): Promise<void> {
+  const requestedAgent = agentId.value
+  await _loadSessions(requestedAgent)
+  if (agentId.value !== requestedAgent) return
+}
+
+async function switchSession(sessionId: string): Promise<void> {
+  // BUG-2 修复：流式中切走先 abort 旧流并复位 streaming 态，
+  // 否则 usage 记账/队列 drain 会污染刚打开的新会话
+  if (isStreaming.value) {
+    abortController?.abort()
+    abortController = null
+    chatStore.setStreaming(false)
+    stopStreamTTS()
+  }
+  // 顶入编辑态跨会话失效 → ChatComposerArea 内 watch(currentSessionId) 统一处理
+  // BUG-4 修复：restore 前先保存旧会话草稿（原实现只在组件卸载时保存，
+  // 切会话即丢）
+  const prevSid = currentSessionId.value
+  if (prevSid && prevSid !== sessionId) {
+    chatDraft.save(prevSid, inputText.value)
+  }
+  const result = await _switchSession(sessionId)
+  _notifySwitchFailure(result)
+  // 补课 D：恢复新会话草稿；补课 A6+F：历史会话打开定位到最新记录
+  chatStore.setInputText(chatDraft.restore(sessionId))
+  scrollToBottomForHistory()
+}
+
+// 跨会话全文搜索（QwenPaw ChatSearchPanel 对齐）
 // ---------------------------------------------------------------------------
-/**
- * 顶入编辑态（DeepSeek 截图对齐）：✎ 把排队文案回填 composer 就地改，
- * 完成前该卡片高亮、placeholder 提示"修改后回车顶入"；Esc/删除卡片即取消。
- */
-const editingQueuedId = ref<string | null>(null)
+const crossSearchOpen = ref(false)
 
-const queuedPlaceholder = computed(() => {
-  if (isRecording.value) return t('chat.recording')
-  if (editingQueuedId.value) return t('chat.queueEditInline')
-  return t('chat.placeholder')
-})
-
-/** ✎ 重新编辑顶入内容：文案回填输入框（进入编辑态，卡片高亮）。 */
-function startQueuedEdit(item: { id: string; text: string }): void {
-  editingQueuedId.value = item.id
-  chatStore.setInputText(item.text)
-  nextTick(() => {
-    textareaRef.value?.focus()
-    autoResize()
+/** 跳转命中：切会话 → 历史加载后按关键词滚动定位第一条命中消息。 */
+async function onCrossSearchJump(sessionId: string, keyword: string): Promise<void> {
+  crossSearchOpen.value = false
+  if (sessionId !== currentSessionId.value) {
+    await switchSession(sessionId)
+  }
+  void nextTick(() => {
+    void scrollToFirstHit(sessionId, keyword)
   })
 }
 
-/** 编辑态下提交：改写队列文案并退出编辑态（不改排队位次）。 */
-function commitQueuedEdit(): boolean {
-  const id = editingQueuedId.value
-  if (!id) return false
-  const text = inputText.value.trim()
-  if (text) messageQueue.updateText(id, text)
-  editingQueuedId.value = null
-  chatStore.setInputText('')
-  return true
-}
-
-/** 取消顶入编辑：还原原文案回卡片，清空输入框退出编辑态。 */
-function cancelQueuedEdit(): void {
-  editingQueuedId.value = null
-  chatStore.setInputText('')
-  nextTick(() => textareaRef.value?.focus())
-}
-
-/** 「↑ 立即」：指定排队项插到队首。空闲则立即续发（force 入口，审计⑯：
- * paused 也放行首条并给出反馈）；流式中只置顶（等当前轮 done 续发）。 */
-function sendQueuedNow(id: string): void {
-  messageQueue.moveToTop(id)
-  if (isStreaming.value || _queueDrainer.isDraining()) {
-    uiMessage.info(t('chat.queueTopAuto'))
-    return
-  }
-  void drainMessageQueue(true, currentSessionId.value)
-}
-
-/** 当前会话的排队卡片（审计③：全局 store 按会话过滤，跨会话项不混入）。 */
-const currentSessionQueued = computed(() =>
-  messageQueue.items.filter(
-    (i) => !currentSessionId.value || i.sessionId === currentSessionId.value,
-  ),
-)
-
-// 编辑目标被删除/出队 → 自动退出编辑态（防悬挂高亮与错误 placeholder）
-watch(
-  () => editingQueuedId.value && messageQueue.items.some((i) => i.id === editingQueuedId.value),
-  (exists) => {
-    if (editingQueuedId.value && !exists) {
-      editingQueuedId.value = null
-      chatStore.setInputText('')
+/** 在已加载历史里定位含关键词的消息并滚动（找不到则仅贴底）。 */
+async function scrollToFirstHit(sessionId: string, keyword: string): Promise<void> {
+  if (currentSessionId.value !== sessionId) return
+  // 历史加载是异步的，给一帧缓冲后尝试定位（最多重试 3 次）
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const idx = messages.value.findIndex((m) =>
+      String(m.content || '').toLowerCase().includes(keyword.toLowerCase()),
+    )
+    if (idx >= 0) {
+      const el = document.getElementById(`nr-msg-${idx}`)
+      if (el) {
+        el.scrollIntoView({ block: 'center' })
+        return
+      }
     }
-  },
-)
-
-// 会话/agent 切换 → 编辑态作废（编辑草稿属于原会话输入框，只清态不动
-// 输入框——新会话草稿恢复晚于此回调，清输入会误删草稿）
-watch(currentSessionId, () => {
-  if (editingQueuedId.value) editingQueuedId.value = null
-})
-
-/**
- * 429 限流识别与横幅（补课 A1）：错误文本含 429/rate limit 措辞时，
- * 从已启用模型列表（排除当前选中）生成备选候选，弹出横幅一键切换。
- * 非限流错误返回 false 走原有错误路径。
- */
-function handleRateLimit(err: any): boolean {
-  const msg = String(err?.message || '')
-  if (!/429|rate.?limit|too many requests|限流|请求过于频繁/i.test(msg)) return false
-  const current = selectedModel.value || ''
-  const alternatives = chatModelOptions.value.filter(
-    (o) => o.value && o.value !== current,
-  )
-  rateLimitBanner.value = { model: current, alternatives }
-  return true
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  scrollToBottom()
 }
-
-/** 横幅一键切换：选定备选模型后关闭横幅（用户重发即走新模型）。 */
-function switchAfterRateLimit(modelValue: string): void {
-  selectedModel.value = modelValue
-  rateLimitBanner.value = null
-  uiMessage.success(t('chat.rateLimitSwitched'))
-}
+// 429 限流识别/横幅切换 → 已收敛进 useChatModels（handleRateLimit/switchAfterRateLimit）
 
 /**
  * 队列续发（审计①③⑯ 修复，2026-09-08）：queueDrain runner 驱动。
@@ -2080,7 +1061,7 @@ const _queueDrainer = createQueueDrainer({
   markFailed: (id, error) => messageQueue.markFailed(id, error),
   send: async (text) => {
     // drain 要占用输入框通道传文案，编辑中的草稿先退出（防覆盖/误提交）
-    if (editingQueuedId.value) cancelQueuedEdit()
+    // 顶入编辑态取消 → ChatComposerArea 内部（drain 复用输入框通道前由 store 清空）
     chatStore.setInputText(text)
     // 审计⑪：sendMessage 的空输入/无 agent 等早退分支返回 undefined，
     // 一律按失败处理（不出队）
@@ -2337,17 +1318,17 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       }
       const rName = names[retriever] || retriever
       if (stage === 'retriever_start') {
-        retrievalStatus.value = t('chat.retrievalStatus', { name: rName })
+        chatStore.retrievalStatus = t('chat.retrievalStatus', { name: rName })
       } else if (stage === 'retriever_done') {
-        retrievalStatus.value = t('chat.retrievalDone', { name: rName, count: event.count ?? 0, ms: event.ms ?? 0 })
+        chatStore.retrievalStatus = t('chat.retrievalDone', { name: rName, count: event.count ?? 0, ms: event.ms ?? 0 })
       } else if (stage === 'retriever_error' || stage === 'retriever_timeout') {
-        retrievalStatus.value = t('chat.retrievalError', { name: rName })
+        chatStore.retrievalStatus = t('chat.retrievalError', { name: rName })
       } else if (stage === 'moe_gate') {
-        retrievalStatus.value = t('chat.retrievalExpert', { n: (event.experts || []).length })
+        chatStore.retrievalStatus = t('chat.retrievalExpert', { n: (event.experts || []).length })
       } else if (stage === 'moe_expert') {
-        retrievalStatus.value = `${event.expert || ''}：${event.count ?? 0}`
+        chatStore.retrievalStatus = `${event.expert || ''}：${event.count ?? 0}`
       } else if (stage === 'moe_done') {
-        retrievalStatus.value = event.fallback
+        chatStore.retrievalStatus = event.fallback
           ? t('chat.retrievalSemanticFallback', { count: event.count ?? 0 })
           : t('chat.retrievalExpertDone', { count: event.count ?? 0 })
       }
@@ -2409,32 +1390,24 @@ function processSSEEvent(event: any, msg: ChatMessage) {
         )
       // legacy compat
       msg.toolResult = resultText
+      // 产物预览钩子（2026-09-08）：tool_result 文本含 file_path 等路径引用时
+      // 开 dock 预览 tab（后端 artifact 事件为主通道，此处为兜底/历史兼容）
+      openToolResultArtifacts(resultText)
       if (isComputerTool(event.name || '')) {
         computerPanel.markIdle()
       }
       break
     }
 
+    case 'artifact': {
+      // 后端 artifact 事件（产物预览主通道）：注册完成的产物文件 → dock tab
+      openArtifactTab(event as unknown as ArtifactEventPayload)
+      break
+    }
+
     case 'approval_required': {
-      // 治理 ASK: 弹出人工确认框（P0）
-      approvalModal.approvalId = event.approval_id || ''
-      approvalModal.toolName = event.tool_name || ''
-      const params = typeof event.params === 'string' ? event.params : JSON.stringify(event.params ?? {}, null, 2)
-      approvalModal.command =
-        params !== '{}' ? params : (event.command || '')
-      approvalModal.reason = event.reason || ''
-      // P0-6 分段审批：链式命令逐段展示，审批人可见每一段
-      const govSegments = event.governance?.segments
-      approvalModal.segments = Array.isArray(govSegments)
-        ? govSegments.map((s: any) => ({
-            text: String(s?.text ?? ''),
-            head: String(s?.head ?? ''),
-            connector: String(s?.connector ?? ''),
-            quoted: Boolean(s?.quoted),
-          }))
-        : []
-      approvalAddWhitelist.value = false
-      approvalModal.open = true
+      // 治理 ASK: 弹出人工确认框（P0）→ useGovernanceApproval 状态机
+      openApprovalModal(event)
       break
     }
 
@@ -2443,7 +1416,7 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'delta':
     case 'chunk':
       // 回复内容开始 → 检索已结束，清空临时进度显示
-      if (retrievalStatus.value) retrievalStatus.value = ''
+      if (chatStore.retrievalStatus) chatStore.retrievalStatus = ''
       // 步骤化时间轴：正文开始输出，封口一切仍活跃的推理/工具段
       if (msg.steps?.some((s) => s.active)) finishAllSteps(msg.steps)
       msg.content += event.content || event.text || event.delta || ''
@@ -2556,141 +1529,6 @@ async function maybeAutoTitle(): Promise<void> {
 // ---------------------------------------------------------------------------
 // ASR - Voice Input (Web Speech API + Backend Fallback)
 // ---------------------------------------------------------------------------
-function initASR() {
-  const SpeechRecognition =
-    (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-  if (!SpeechRecognition) {
-    asrAvailable.value = false
-    console.warn('[ASR] Web Speech API not available')
-    return
-  }
-
-  asrAvailable.value = true
-  recognition = new SpeechRecognition()
-  recognition.continuous = true
-  recognition.interimResults = true
-  recognition.lang = appStore.locale === 'zh-CN' ? 'zh-CN' : 'en-US'
-
-  recognition.onresult = (event: any) => {
-    let finalTranscript = ''
-    let interimTranscript = ''
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const transcript = event.results[i][0].transcript
-      if (event.results[i].isFinal) {
-        finalTranscript += transcript
-      } else {
-        interimTranscript += transcript
-      }
-    }
-    if (finalTranscript) {
-      chatStore.setInputText(inputText.value + (inputText.value ? ' ' : '') + finalTranscript)
-      nextTick(() => autoResize())
-    }
-  }
-
-  recognition.onerror = (event: any) => {
-    console.error('[ASR] Error:', event.error)
-    if (event.error !== 'aborted') {
-      stopRecording()
-    }
-  }
-
-  recognition.onend = () => {
-    // Auto-restart if still in recording mode, but cap consecutive restarts
-    // to avoid an infinite loop when isRecording is stuck true or the
-    // recognizer keeps dying. After the cap, stop and tell the user.
-    if (isRecording.value && asrRestartGuard.canRestart()) {
-      asrRestartGuard.recordRestart()
-      // Delay restart by 1s to break tight onend→start loops and give the
-      // recognizer time to fully reset before we start() it again.
-      asrRestartTimer = setTimeout(() => {
-        asrRestartTimer = null
-        if (!isRecording.value) return
-        try {
-          recognition.start()
-        } catch {
-          // Already started
-        }
-      }, 1000)
-    } else if (isRecording.value && asrRestartGuard.limitReached.value) {
-      console.warn('[ASR] Restart limit reached, stopping auto-restart')
-      isRecording.value = false
-      if (recordingTimer) {
-        clearInterval(recordingTimer)
-        recordingTimer = null
-      }
-      uiMessage.warning(t('chat.asrRestartLimit') || 'Speech recognition stopped after multiple retries. Please try again.')
-    }
-  }
-}
-
-function toggleRecording() {
-  if (isRecording.value) {
-    stopRecording()
-  } else {
-    startRecording()
-  }
-}
-
-function startRecording() {
-  if (!recognition) return
-  isRecording.value = true
-  recordingSeconds = 0
-  recordingTimeStr.value = '0:00'
-  // Fresh user-initiated start → reset the restart counter
-  asrRestartGuard.reset()
-
-  try {
-    recognition.start()
-  } catch {
-    // Already started
-  }
-
-  recordingTimer = setInterval(() => {
-    recordingSeconds++
-    const mins = Math.floor(recordingSeconds / 60)
-    const secs = recordingSeconds % 60
-    recordingTimeStr.value = `${mins}:${secs.toString().padStart(2, '0')}`
-  }, 1000)
-}
-
-function stopRecording() {
-  isRecording.value = false
-  if (recordingTimer) {
-    clearInterval(recordingTimer)
-    recordingTimer = null
-  }
-  if (asrRestartTimer) {
-    clearTimeout(asrRestartTimer)
-    asrRestartTimer = null
-  }
-  try {
-    recognition?.stop()
-  } catch {
-    // Ignore
-  }
-}
-
-function cancelRecording() {
-  stopRecording()
-}
-
-// Backend ASR fallback for uploaded audio files
-async function transcribeAudioFile(file: File): Promise<string | null> {
-  try {
-    const formData = new FormData()
-    formData.append('audio_file', file)
-    formData.append('language', appStore.locale === 'zh-CN' ? 'zh' : 'en')
-    const res: any = await api.post('/audio/transcribe', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
-    const data = res?.data ?? res
-    return data?.data?.text || data?.text || null
-  } catch (err) {
-    console.error('[ASR] Backend transcription failed:', err)
-    return null
-  }
-}
 
 // ---------------------------------------------------------------------------
 // TTS - Voice Output
@@ -2932,18 +1770,18 @@ function getFileCategory(type?: string): string {
 function getFileIcon(type?: string): string {
   const cat = getFileCategory(type)
   const icons: Record<string, string> = {
-    image: '🖼️',
-    audio: '🎵',
-    video: '🎬',
-    pdf: '📕',
-    spreadsheet: '📊',
-    presentation: '📑',
-    document: '📄',
-    text: '📝',
-    file: '📎',
-    unknown: '📎',
+    image: 'image',
+    audio: 'audio',
+    video: 'image',
+    pdf: 'fileText',
+    spreadsheet: 'fileText',
+    presentation: 'fileText',
+    document: 'fileText',
+    text: 'fileText',
+    file: 'file',
+    unknown: 'file',
   }
-  return icons[cat] || '📎'
+  return icons[cat] || 'file'
 }
 
 function formatFileSize(bytes: number): string {
@@ -2967,7 +1805,7 @@ function renderRichContent(text: string): string {
   return renderMarkdown(text, t('common.copy'))
 }
 
-/** Handle clicks within rendered content (image lightbox + code copy). */
+/** Handle clicks within rendered content (code copy/preview + image → dock). */
 function handleContentClick(e: MouseEvent) {
   const target = e.target as HTMLElement
 
@@ -2991,18 +1829,31 @@ function handleContentClick(e: MouseEvent) {
     return
   }
 
-  // 图片 lightbox
+  // 代码块预览按钮（产物预览 2026-09-08）：md/html/svg 分派到对应 dock 面板
+  const previewBtn = target.closest('.nr-code-preview-btn') as HTMLElement | null
+  if (previewBtn) {
+    const wrap = previewBtn.closest('.nr-code-wrap')
+    const codeEl = wrap?.querySelector('code')
+    const langEl = wrap?.querySelector('.nr-code-lang')
+    const lang = (langEl?.textContent || '').trim().toLowerCase()
+    if (codeEl) openCodeBlockTab(codeEl.textContent || '', lang === 'code' ? '' : lang)
+    return
+  }
+
+  // 消息内联图片 → dock 图片预览（lightbox 模态已收编入 dock）
   if (target.tagName === 'IMG' && target.closest('.nr-inline-image')) {
     const img = target as HTMLImageElement
-    openLightbox(img.src, img.alt)
+    openImageTab(img.src, img.alt || 'image')
   }
 }
 
-// Lightbox
-function openLightbox(src: string, alt: string) {
-  lightbox.src = src
-  lightbox.alt = alt
-  lightbox.open = true
+/** 消息附件缩略图点击：图片 → dock 图片预览；其余类型带 fileId → 文档预览 */
+function onAttachmentClick(file: { name?: string; type?: string; preview?: string; fileId?: string }): void {
+  if (file.type?.startsWith('image/') && file.preview) {
+    openImageTab(file.preview, file.name || 'image')
+  } else if (file.fileId) {
+    openFileTab(file.fileId, file.name || 'file', file.type)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3052,58 +1903,7 @@ const { record: recordInputHistory, up: historyUp, down: historyDown } = useInpu
 
 const { onCompositionStart, onCompositionEnd, shouldBlockSend } = useIMEComposition()
 
-function handleKeydown(e: KeyboardEvent) {
-  // 斜杠命令面板键盘导航（↑↓/Enter/Tab/Esc），打开时独占按键
-  if (onSlashKeydown(e)) return
-  // 顶入编辑态（DeepSeek 截图对齐）：Enter=提交改写，Esc=取消还原
-  if (editingQueuedId.value) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      if (shouldBlockSend(e)) return
-      e.preventDefault()
-      commitQueuedEdit()
-      return
-    }
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      cancelQueuedEdit()
-      return
-    }
-  }
-  if (e.key === 'Enter' && !e.shiftKey) {
-    // IME 合成防误发（补课 A）：输入法选词回车不发送
-    if (shouldBlockSend(e)) return
-    e.preventDefault()
-    sendMessage()
-    return
-  }
-  // ↑↓ 历史回溯（补课 C）：仅无修饰键时生效
-  if (e.key === 'ArrowUp' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-    const next = historyUp(inputText.value)
-    if (next !== null) {
-      e.preventDefault()
-      chatStore.setInputText(next)
-    }
-  } else if (e.key === 'ArrowDown' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-    const next = historyDown(inputText.value)
-    if (next !== null) {
-      e.preventDefault()
-      chatStore.setInputText(next)
-    }
-  }
-}
-
-/** 输入框 @input 统一入口：保留 autoResize 高度自适应 + 斜杠面板开合判定。 */
-function onComposerInput(e: Event): void {
-  autoResize()
-  onSlashInput()
-}
-
-function autoResize() {
-  const el = textareaRef.value
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 160) + 'px'
-}
+// handleKeydown/onComposerInput/autoResize → 已迁 ChatComposerArea（2026-09-08）
 
 function scrollToBottom() {
   nextTick(() => {
@@ -3350,9 +2150,7 @@ function formatJSON(str?: string): string {
 watch(
   () => appStore.locale,
   (newLocale) => {
-    if (recognition) {
-      recognition.lang = newLocale === 'zh-CN' ? 'zh-CN' : 'en-US'
-    }
+    syncLocale(newLocale)
   },
 )
 
@@ -3374,8 +2172,8 @@ watch(agentId, (newId, oldId) => {
     chatStore.clearMessages()
     chatStore.setCurrentSession(null)
     loadSessions()
-    // 存档卡片页开着时随 agent 切换刷新列表
-    if (archivedPanelOpen.value) {
+    // 存档 tab 开着时随 agent 切换刷新列表（dock ArchiveTab 自身挂载时也会加载）
+    if (rightDock.tabs.some((tab) => tab.kind === 'archive')) {
       _loadArchivedSessions(newId)
     }
   }
@@ -3469,95 +2267,6 @@ onBeforeUnmount(() => {
 }
 
 /* Sidebar */
-.nr-chat-sidebar {
-  width: 280px;
-  min-width: 280px;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--nr-glass-border);
-  background: var(--nr-bg-inset);
-  transition: width 0.3s ease, min-width 0.3s ease;
-}
-
-.nr-chat-sidebar.collapsed {
-  width: 0;
-  min-width: 0;
-  overflow: hidden;
-  border-right: none;
-}
-
-.nr-sidebar-header {
-  display: flex;
-  gap: 8px;
-  padding: 16px;
-}
-
-.nr-sidebar-search {
-  padding: 0 16px 12px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.nr-sidebar-search :deep(.nr-input) {
-  flex: 1;
-  min-width: 0;
-}
-
-.nr-session-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 8px;
-}
-
-.nr-session-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: background 0.2s;
-  margin-bottom: 2px;
-}
-
-.nr-session-item:hover {
-  background: var(--nr-glass-bg-hover);
-}
-
-.nr-session-item.active {
-  background: var(--nr-primary-soft);
-  border: 1px solid var(--nr-primary-soft-border);
-}
-
-.nr-session-icon {
-  font-size: 16px;
-  flex-shrink: 0;
-}
-
-.nr-session-name {
-  flex: 1;
-  font-size: 13px;
-  color: var(--nr-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.nr-session-menu-btn {
-  color: var(--nr-text-muted);
-  font-size: 16px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.nr-session-item:hover .nr-session-menu-btn {
-  opacity: 1;
-}
-
 .nr-chat-page-header {
   display: flex; justify-content: space-between; align-items: center;
   padding: 16px 24px; border-bottom: 1px solid var(--nr-glass-border);
@@ -3566,16 +2275,6 @@ onBeforeUnmount(() => {
 .nr-chat-header-left { display: flex; align-items: center; gap: 12px; }
 .nr-chat-header-left .page-title { margin: 0; font-family: var(--nr-font-display); font-size: 20px; font-weight: 700; color: var(--nr-text-primary); }
 .nr-chat-header-actions { display: flex; gap: 8px; align-items: center; }
-.nr-chat-model-select {
-  min-width: 190px;
-  background: var(--nr-glass-bg);
-  border-radius: 8px;
-}
-.nr-chat-model-select:hover { border-color: var(--nr-glass-border-hover); }
-.nr-chat-model-select .ant-select-selection-item,
-.nr-chat-model-select .ant-select-selection-placeholder {
-  font-size: 13px;
-}
 .nr-chat-toggle-btn {
   width: 32px; height: 32px; border: 1px solid var(--nr-glass-border); border-radius: 8px;
   background: var(--nr-glass-bg); color: var(--nr-text-secondary); font-size: 18px;
@@ -3586,68 +2285,9 @@ onBeforeUnmount(() => {
 .nr-chat-toggle-btn.cu-active { border-color: color-mix(in srgb, var(--nr-primary-light) 70%, transparent); color: var(--nr-primary-light, #818cf8); background: var(--nr-primary-soft); }
 
 /* 思考程度三档选择器（简单/标准/深度） */
-.nr-thinking-seg {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--nr-glass-border);
-  border-radius: 8px;
-  background: var(--nr-glass-bg);
-}
-.nr-thinking-opt {
-  border: none;
-  background: transparent;
-  color: var(--nr-text-tertiary);
-  font-size: 12px;
-  line-height: 1;
-  padding: 6px 9px;
-  border-radius: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.15s ease;
-}
-.nr-thinking-opt:hover { color: var(--nr-text-primary); }
-.nr-thinking-opt.active {
-  color: #fff;
-  background: var(--nr-primary);
-}
 @media (max-width: 720px) {
   .nr-thinking-seg { display: none; }
 }
-.nr-chat-session-select {
-  display: flex; align-items: center; gap: 8px; padding: 6px 14px;
-  border-radius: 10px; border: 1px solid var(--nr-glass-border);
-  background: var(--nr-glass-bg); color: var(--nr-text-primary);
-  font-size: 14px; font-weight: 500; cursor: pointer;
-  transition: all 0.2s ease;
-}
-.nr-chat-session-select:hover { border-color: var(--nr-glass-border-hover); background: var(--nr-glass-bg-hover); }
-.nr-chat-session-select-icon { font-size: 16px; }
-.nr-chat-session-select-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nr-chat-session-select-arrow { font-size: 10px; opacity: 0.5; }
-.nr-glass-dropdown {
-  background: var(--nr-bg-surface); backdrop-filter: blur(40px) saturate(180%);
-  border: 1px solid var(--nr-glass-border); border-radius: 14px;
-  padding: 6px; min-width: 220px; box-shadow: var(--nr-shadow-lg);
-  display: flex; flex-direction: column; gap: 2px;
-}
-.nr-glass-dropdown-item {
-  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
-  border-radius: 10px; color: var(--nr-text-secondary);
-  font-size: 13px; cursor: pointer; transition: all 0.18s ease; white-space: nowrap;
-}
-.nr-glass-dropdown-item:hover { color: var(--nr-text-primary); background: var(--nr-glass-bg-hover); }
-.nr-glass-dropdown-item.is-active { color: var(--nr-primary-light); background: var(--nr-primary-soft); font-weight: 550; }
-.nr-glass-dropdown-divider { height: 1px; background: var(--nr-glass-border); margin: 4px 8px; }
-
-.nr-session-empty {
-  text-align: center;
-  color: var(--nr-text-muted);
-  padding: 32px 16px;
-  font-size: 13px;
-}
-
 /* Main Chat Area */
 .nr-chat-main {
   flex: 1;
@@ -3862,79 +2502,7 @@ onBeforeUnmount(() => {
   max-height: 120px;
 }
 
-/* Governance approval modal (P0) */
-.approval-body {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.approval-field {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
-
-.approval-label {
-  min-width: 42px;
-  font-size: 13px;
-  color: var(--nr-text-secondary);
-  line-height: 22px;
-  flex-shrink: 0;
-}
-
-.approval-command {
-  font-size: 12px;
-  color: var(--nr-text-primary, inherit);
-  background: var(--nr-bg-inset);
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin: 0;
-  overflow-x: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 140px;
-  flex: 1;
-}
-
-/* P0-6 分段审批：链式命令逐段展示 */
-.approval-segments {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-}
-
-.approval-segment {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.approval-segment-text {
-  font-size: 12px;
-  color: var(--nr-text-primary, inherit);
-  background: var(--nr-bg-inset);
-  border-radius: 4px;
-  padding: 2px 8px;
-  word-break: break-all;
-}
-
-.approval-reason {
-  font-size: 13px;
-  color: var(--nr-warning);
-  line-height: 1.5;
-}
-
-.approval-hint {
-  font-size: 12px;
-  color: var(--nr-text-secondary);
-  margin: 4px 0 0;
-}
+/* Governance approval modal 样式已随组件迁移（GovernanceApprovalModal.vue） */
 
 .nr-tool-result {
   margin-top: 8px;
@@ -3948,6 +2516,25 @@ onBeforeUnmount(() => {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nr-tool-result-preview-btn {
+  border: none;
+  background: transparent;
+  color: var(--nr-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.nr-tool-result-preview-btn:hover {
+  color: var(--nr-text-primary);
+  background: var(--nr-bg-secondary);
 }
 
 .nr-tool-result-content {
@@ -4431,206 +3018,8 @@ onBeforeUnmount(() => {
 }
 
 /* Input Area */
-.nr-chat-input-area {
-  position: relative;
-  padding: 12px 24px 20px;
-}
-
-.nr-pending-files {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 10px;
-}
-
-.nr-pending-file {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 10px;
-  background: var(--nr-glass-bg);
-  border: 1px solid var(--nr-glass-border);
-  font-size: 12px;
-  color: var(--nr-text-secondary);
-}
-
-.nr-pending-file img {
-  width: 32px;
-  height: 32px;
-  object-fit: cover;
-  border-radius: 6px;
-}
-
-.nr-pending-file-icon {
-  font-size: 20px;
-}
-
-.nr-pending-file-info {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.nr-pending-file-name {
-  max-width: 100px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nr-pending-file-size {
-  font-size: 10px;
-  color: var(--nr-text-muted);
-}
-
-.nr-pending-file-remove {
-  background: none;
-  border: none;
-  color: var(--nr-text-muted);
-  cursor: pointer;
-  font-size: 16px;
-  padding: 0 2px;
-  line-height: 1;
-}
-
-.nr-pending-file-remove:hover {
-  color: var(--nr-error);
-}
-
 /* ASR Recording Bar */
-.nr-recording-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  margin-bottom: 8px;
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  border-radius: 10px;
-}
-
-.nr-recording-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #ef4444;
-  animation: rec-pulse 1s ease infinite;
-}
-
-@keyframes rec-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(0.8); }
-}
-
-.nr-recording-label {
-  font-size: 13px;
-  color: var(--nr-error);
-  font-weight: 500;
-}
-
-.nr-recording-wave {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  height: 20px;
-  flex: 1;
-}
-
-.nr-wave-bar {
-  width: 3px;
-  height: 100%;
-  background: rgba(239, 68, 68, 0.5);
-  border-radius: 2px;
-  animation: wave-anim 0.8s ease-in-out infinite alternate;
-}
-
-@keyframes wave-anim {
-  0% { height: 20%; }
-  100% { height: 90%; }
-}
-
-.nr-recording-time {
-  font-size: 13px;
-  font-family: var(--nr-font-mono);
-  color: var(--nr-text-secondary);
-}
-
-.nr-recording-cancel {
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-  border-radius: 6px;
-  padding: 2px 10px;
-  font-size: 12px;
-  color: var(--nr-error);
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.nr-recording-cancel:hover {
-  background: rgba(239, 68, 68, 0.25);
-}
-
-.nr-input-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-}
-
-.nr-voice-active {
-  animation: voice-glow 1s ease infinite alternate;
-}
-
-@keyframes voice-glow {
-  from { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.2); }
-  to { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
-}
-
 /* Composer 一体化外壳（参考图：textarea+工具条同框，边框聚焦态由外壳承载） */
-.nr-composer-shell {
-  position: relative;
-  border: 1px solid var(--nr-glass-border);
-  border-radius: 16px;
-  background: var(--nr-glass-bg);
-  padding: 12px 14px 10px;
-  transition: border-color 0.25s, box-shadow 0.25s;
-}
-
-.nr-composer-shell.is-focus {
-  border-color: var(--nr-primary);
-  box-shadow: 0 0 0 3px var(--nr-primary-ring);
-}
-
-.nr-input-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 10px;
-}
-
-.nr-chat-textarea {
-  flex: 1;
-  resize: none;
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  padding: 4px 6px 10px;
-  min-height: 60px;
-  color: var(--nr-text-primary);
-  font-size: 14px;
-  font-family: var(--nr-font-body);
-  line-height: 1.55;
-  outline: none;
-  max-height: 200px;
-}
-
-.nr-chat-textarea:focus {
-  outline: none;
-}
-
-.nr-chat-textarea::placeholder {
-  color: var(--nr-text-muted);
-}
-
 /* Rich Content: Code Blocks */
 :deep(.nr-code-wrap) {
   margin: 10px 0;
@@ -4900,61 +3289,6 @@ onBeforeUnmount(() => {
 }
 
 /* Lightbox */
-.nr-lightbox {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(8px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.nr-lightbox-content {
-  max-width: 90vw;
-  max-height: 85vh;
-  cursor: default;
-}
-
-.nr-lightbox-content img {
-  max-width: 90vw;
-  max-height: 80vh;
-  object-fit: contain;
-  border-radius: 12px;
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
-}
-
-.nr-lightbox-caption {
-  text-align: center;
-  padding: 12px;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 13px;
-}
-
-.nr-lightbox-close {
-  position: absolute;
-  top: 20px;
-  right: 24px;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  border: 1px solid var(--nr-glass-border);
-  background: var(--nr-bg-overlay);
-  color: var(--nr-text-primary);
-  font-size: 18px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.2s;
-}
-
-.nr-lightbox-close:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
 /* Transitions */
 .fade-scale-enter-active,
 .fade-scale-leave-active {
@@ -4966,16 +3300,6 @@ onBeforeUnmount(() => {
   transform: scale(0.95);
 }
 
-.fade-slide-enter-active,
-.fade-slide-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-.fade-slide-enter-from,
-.fade-slide-leave-to {
-  opacity: 0;
-  transform: translateY(6px);
-}
-
 /* Main layout mode: fill parent container instead of viewport */
 .nr-chat-page--main {
   height: calc(100vh - var(--nr-header-h) - 48px);
@@ -4983,185 +3307,8 @@ onBeforeUnmount(() => {
 }
 
 /* Right-side conversation history panel (main layout mode) */
-.nr-chat-history-panel {
-  width: 280px;
-  min-width: 280px;
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid var(--nr-glass-border);
-  background: var(--nr-bg-inset);
-}
-
-.nr-chat-archived-panel {
-  width: 280px;
-  min-width: 280px;
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid var(--nr-glass-border);
-  background: var(--nr-bg-inset);
-}
-
-.nr-archived-close {
-  background: none;
-  border: none;
-  color: var(--nr-text-secondary);
-  cursor: pointer;
-  font-size: 14px;
-  padding: 4px 8px;
-}
-
-.nr-archived-restore-btn {
-  background: var(--nr-bg-elevated, rgba(255, 255, 255, 0.08));
-  border: 1px solid var(--nr-border-light);
-  border-radius: 8px;
-  color: var(--nr-text-primary);
-  cursor: pointer;
-  font-size: 12px;
-  padding: 4px 10px;
-  white-space: nowrap;
-}
-
-.nr-archived-restore-btn:hover {
-  border-color: var(--nr-primary, var(--nr-border-light));
-}
-
-.nr-history-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px;
-  border-bottom: 1px solid var(--nr-border-light);
-}
-
-.nr-history-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--nr-text-primary);
-}
-
-.nr-history-search {
-  padding: 0 16px 12px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.nr-history-search :deep(.nr-input) {
-  flex: 1;
-  min-width: 0;
-}
-
 /* 实时记忆检索进度条（临时态，不落历史） */
-.nr-retrieval-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 14px;
-  margin: 0 16px 6px;
-  font-size: 12px;
-  color: var(--nr-text-secondary);
-  background: var(--nr-bg-secondary);
-  border: 1px solid var(--nr-border);
-  border-radius: 10px;
-}
-
-.nr-retrieval-spinner {
-  display: inline-block;
-  animation: nr-retrieval-spin 1.2s linear infinite;
-  color: var(--nr-accent);
-}
-
-@keyframes nr-retrieval-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.nr-session-group-label {
-  font-size: 11px;
-  color: var(--nr-text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 8px 6px 2px;
-  user-select: none;
-}
-
-.nr-session-item.drop-target {
-  border-top: 2px solid #6366f1;
-}
-
-.nr-auto-voice-btn {
-  border: 1px solid var(--nr-glass-border);
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 8px;
-  padding: 2px 8px;
-  cursor: pointer;
-  font-size: 14px;
-  opacity: 0.6;
-}
-
-.nr-auto-voice-btn.active {
-  opacity: 1;
-  border-color: rgba(34, 197, 94, 0.5);
-  background: rgba(34, 197, 94, 0.1);
-}
-
-.nr-rate-limit-banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin: 0 0 8px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  background: rgba(245, 158, 11, 0.08);
-  font-size: 12px;
-}
-
-.nr-rate-limit-text {
-  color: var(--nr-text-primary);
-}
-
-.nr-rate-limit-alts {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.nr-rate-limit-alt {
-  padding: 3px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(99, 102, 241, 0.5);
-  background: rgba(99, 102, 241, 0.1);
-  color: var(--nr-text-primary);
-  cursor: pointer;
-  font-size: 12px;
-}
-
-.nr-rate-limit-alt:hover {
-  background: rgba(99, 102, 241, 0.2);
-}
-
-.nr-rate-limit-dismiss {
-  margin-left: auto;
-  border: none;
-  background: none;
-  color: var(--nr-text-tertiary);
-  cursor: pointer;
-}
-
 /* 顶入卡片态：composer 内嵌队列时 textarea 区域收进内框（对齐截图） */
-.nr-composer-shell.has-queue-cards .nr-input-row {
-  border: 1px solid var(--nr-glass-border);
-  border-radius: 12px;
-  padding: 0 6px;
-  transition: border-color 0.25s;
-}
-
-.nr-composer-shell.has-queue-cards.is-editing-queued .nr-input-row {
-  border-color: var(--nr-primary);
-}
-
 .nr-msg-search {
   display: flex;
   align-items: center;
@@ -5174,45 +3321,6 @@ onBeforeUnmount(() => {
 }
 
 /* ── 斜杠命令面板（QwenPaw slash commands 对齐） ── */
-.nr-slash-panel {
-  position: absolute;
-  bottom: 100%;
-  left: 0;
-  right: 0;
-  margin-bottom: 6px;
-  border-radius: 10px;
-  border: 1px solid var(--nr-glass-border);
-  background: var(--nr-bg-secondary, rgba(30, 32, 40, 0.95));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
-  overflow: hidden;
-  z-index: 30;
-}
-
-.nr-slash-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  cursor: pointer;
-}
-
-.nr-slash-item.is-active {
-  background: rgba(74, 158, 255, 0.15);
-}
-
-.nr-slash-name {
-  font-family: var(--nr-font-mono, monospace);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--nr-primary, #4a9eff);
-  min-width: 72px;
-}
-
-.nr-slash-desc {
-  font-size: 12px;
-  color: var(--nr-text-secondary);
-}
-
 /* ── Composer 工具条：用量环 + 思考程度 + 语音 + 模型 + 圆形发送（QwenPaw/ZCode 输入条风格） ── */
 .nr-chat-header-title {
   font-size: 14px;
@@ -5224,281 +3332,11 @@ onBeforeUnmount(() => {
   max-width: 42vw;
 }
 
-.nr-composer-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 0 0;
-}
-
-.nr-composer-left,
-.nr-composer-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.nr-composer-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 10px;
-  border-radius: 13px;
-  border: 1px solid var(--nr-glass-border);
-  background: var(--nr-glass-bg);
-  color: var(--nr-text-secondary);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: color 0.2s, border-color 0.2s, background 0.2s;
-}
-
-.nr-composer-pill:hover {
-  color: var(--nr-text-primary);
-  border-color: var(--nr-primary, #4a9eff);
-}
-
-.nr-composer-pill.is-active {
-  color: var(--nr-primary, #4a9eff);
-  border-color: var(--nr-primary, #4a9eff);
-}
-
-.nr-composer-pill--icon {
-  width: 26px;
-  padding: 0;
-  justify-content: center;
-  font-size: 13px;
-}
-
 /* 工具条线性图标：currentColor 描边，左右风格统一（替代彩色 emoji） */
-.nr-ico {
-  width: 15px;
-  height: 15px;
-  flex: none;
-  stroke: currentColor;
-  fill: none;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.nr-ico--send {
-  width: 16px;
-  height: 16px;
-  stroke-width: 2;
-}
-
-.nr-composer-pill--model {
-  max-width: 240px;
-}
-
-.nr-composer-pill-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nr-composer-pill-arrow {
-  font-size: 9px;
-  opacity: 0.65;
-}
-
-.nr-composer-menu-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  min-width: 132px;
-}
-
-.nr-composer-check {
-  color: var(--nr-primary, #4a9eff);
-  font-size: 12px;
-}
-
-.nr-composer-model-menu {
-  max-height: 320px;
-  overflow-y: auto;
-}
-
 /* ── 模型切换器二级级联菜单（参考图：左服务商 / 右模型 / 底管理模型）── */
-.nr-model-menu-wrap {
-  position: relative;
-}
-
-.nr-model-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-}
-
-.nr-model-cascade {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  right: 0;
-  z-index: 60;
-  display: flex;
-  flex-direction: column;
-  width: 184px;
-  border-radius: 12px;
-  border: 1px solid var(--nr-glass-border);
-  background: var(--nr-bg-secondary, rgba(30, 32, 40, 0.98));
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
-  overflow: visible;
-}
-
-.nr-model-cascade-left {
-  max-height: 320px;
-  overflow-y: auto;
-  padding: 6px;
-}
-
-.nr-model-provider {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--nr-text-secondary);
-}
-
-.nr-model-provider:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.nr-model-provider.is-active {
-  background: rgba(74, 158, 255, 0.14);
-  color: var(--nr-text-primary);
-}
-
-.nr-model-provider-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.nr-model-provider-count {
-  font-size: 11px;
-  color: var(--nr-text-tertiary);
-}
-
-.nr-model-provider-arrow {
-  font-size: 12px;
-  opacity: 0.5;
-}
-
-.nr-model-cascade-divider {
-  height: 1px;
-  margin: 4px 8px;
-  background: var(--nr-glass-border);
-}
-
-.nr-model-empty {
-  padding: 10px;
-  text-align: center;
-  font-size: 12px;
-  color: var(--nr-text-tertiary);
-}
-
-.nr-model-cascade-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 14px;
-  border-top: 1px solid var(--nr-glass-border);
-  font-size: 12px;
-  color: var(--nr-text-secondary);
-  cursor: pointer;
-  border-radius: 0 0 12px 12px;
-}
-
-.nr-model-cascade-footer:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--nr-text-primary);
-}
-
 /* 模型连通点：绿=真实可用，灰=不可联通 */
-.nr-model-dot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-}
-
-.nr-model-dot.is-ok {
-  background: #22c55e;
-  box-shadow: 0 0 4px rgba(34, 197, 94, 0.55);
-}
-
-.nr-model-dot.is-off {
-  background: rgba(128, 128, 128, 0.45);
-}
-
-.nr-composer-menu-item.is-unconnectable .nr-composer-pill-label {
-  color: var(--nr-text-tertiary);
-}
-
 /* 独立模型子菜单：向左弹出，固定高度+内部滚动（切换服务商主菜单尺寸恒定） */
-.nr-model-flyout {
-  position: absolute;
-  right: calc(100% + 8px);
-  bottom: 0;
-  width: 248px;
-  height: 360px;
-  display: flex;
-  flex-direction: column;
-  border-radius: 12px;
-  border: 1px solid var(--nr-glass-border);
-  background: var(--nr-bg-secondary, rgba(30, 32, 40, 0.98));
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
-  overflow: hidden;
-}
-
-.nr-model-flyout-title {
-  flex: none;
-  padding: 9px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--nr-text-tertiary);
-  border-bottom: 1px solid var(--nr-glass-border);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.nr-model-flyout-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 6px;
-}
-
-.nr-composer-send:hover:not(:disabled) {
-  transform: translateY(-1px);
-  filter: brightness(1.12);
-}
-
-.nr-composer-send:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.nr-composer-send.is-stop {
-  background: var(--nr-danger, #f56c6c);
-}
-
 /* 顶入编辑确认态：✓ 图标时着色提示"回车/点击=保存改写" */
-.nr-composer-send.is-confirm {
-  color: var(--nr-primary);
-}
-
 /* ── 消息钩子/检查点（ZCode checkpoint 对齐） ── */
 .nr-msg-checkpoint-badge {
   display: inline-flex;
@@ -5553,13 +3391,6 @@ onBeforeUnmount(() => {
   border-radius: 10px;
 }
 
-.nr-msg-search-open {
-  border: none;
-  background: none;
-  cursor: pointer;
-  font-size: 14px;
-}
-
 .nr-tool-background {
   margin: 8px 0;
   padding: 8px 12px;
@@ -5569,4 +3400,5 @@ onBeforeUnmount(() => {
   color: #b45309;
   font-size: 12px;
 }
+
 </style>
