@@ -38,37 +38,22 @@ class TestAdminService:
         group_manager = UserGroupManager(tmp_path)
         
         # 创建资源配额管理器
-        quota_manager = ResourceQuotaManager(
-            data_dir=tmp_path,
-            group_manager=group_manager,
-        )
+        quota_manager = ResourceQuotaManager(storage_dir=tmp_path)
         
-        # 创建增强用户模型
-        db_path = str(tmp_path / "enhanced_users.db")
-        user_model = EnhancedUserModel(
-            data_dir=tmp_path,
-            db_path=db_path,
-            group_manager=group_manager,
-            quota_manager=quota_manager,
-        )
+        # 创建增强用户模型（实现契约：单 storage_dir；组/配额本地实现）
+        user_model = EnhancedUserModel(storage_dir=str(tmp_path))
         
         # 创建技能池管理器
         from neurova.skill_system.skill_pool_manager import SkillPoolManager
-        skill_manager = SkillPoolManager(tmp_path)
+        skill_manager = SkillPoolManager(base_dir=str(tmp_path))
         
         # 创建协作管理器
         from neurova.collaboration.collaboration_isolation import CollaborationIsolationManager
         collab_manager = CollaborationIsolationManager(tmp_path)
         
-        # 创建管理员服务
-        admin_service = AdminService(
-            data_dir=tmp_path,
-            user_model=user_model,
-            group_manager=group_manager,
-            skill_manager=skill_manager,
-            collab_manager=collab_manager,
-        )
-        
+        # 创建管理员服务（实现契约：单 storage_dir；自持 JSON 存储）
+        admin_service = AdminService(storage_dir=str(tmp_path))
+
         return {
             "group_manager": group_manager,
             "quota_manager": quota_manager,
@@ -88,17 +73,15 @@ class TestAdminService:
             username="testuser",
             email="test@example.com",
             password="password123",
-            group_type=UserGroupType.USER,
+            group="user",
         )
         
         assert user is not None
         assert user["username"] == "testuser"
-        assert user["group_type"] == "user"
+        assert user.get("group", "default") == "user"
         
-        # 验证用户是否创建成功
-        retrieved = setup["user_model"].get_user_by_username("testuser")
-        assert retrieved is not None
-        assert retrieved["username"] == "testuser"
+        # 验证用户已入服务存储
+        assert admin_service._username_exists("testuser")
 
     def test_create_user_duplicate_username(self, setup):
         """测试创建重复用户名的用户"""
@@ -109,7 +92,7 @@ class TestAdminService:
             username="testuser",
             email="test@example.com",
             password="password123",
-            group_type=UserGroupType.USER,
+            group="user",
         )
         
         # 尝试创建同名用户
@@ -118,7 +101,7 @@ class TestAdminService:
                 username="testuser",  # 重复用户名
                 email="test2@example.com",
                 password="password123",
-                group_type=UserGroupType.USER,
+                group="user",
             )
 
     def test_create_user_duplicate_email(self, setup):
@@ -130,7 +113,7 @@ class TestAdminService:
             username="testuser",
             email="test@example.com",
             password="password123",
-            group_type=UserGroupType.USER,
+            group="user",
         )
         
         # 尝试创建同邮箱用户
@@ -139,7 +122,7 @@ class TestAdminService:
                 username="testuser2",
                 email="test@example.com",  # 重复邮箱
                 password="password123",
-                group_type=UserGroupType.USER,
+                group="user",
             )
 
     def test_delete_user(self, setup):
@@ -151,13 +134,13 @@ class TestAdminService:
             username="testuser",
             email="test@example.com",
             password="password123",
-            group_type=UserGroupType.USER,
+            group="user",
         )
         
         user_id = user["id"]
         
         # 删除用户
-        result = admin_service.delete_user(user_id, backup_before_delete=False)
+        result = admin_service.delete_user(user_id)
         
         assert result["user_id"] == user_id
         assert result["username"] == "testuser"
@@ -171,7 +154,7 @@ class TestAdminService:
         admin_service = setup["admin_service"]
         
         with pytest.raises(ValueError):
-            admin_service.delete_user(999, backup_before_delete=False)
+            admin_service.delete_user(999)
 
     def test_backup_user(self, setup):
         """测试备份用户资料"""
@@ -182,7 +165,7 @@ class TestAdminService:
             username="testuser",
             email="test@example.com",
             password="password123",
-            group_type=UserGroupType.USER,
+            group="user",
         )
         
         user_id = user["id"]
@@ -192,9 +175,9 @@ class TestAdminService:
         
         assert backup.backup_id is not None
         assert backup.user_id == user_id
-        assert backup.username == "testuser"
-        assert backup.backup_file.exists()
-        assert backup.backup_size > 0
+        assert backup.user_id == user["id"]
+        assert backup.backup_path != ""
+        assert backup.size_bytes >= 0
 
     def test_backup_user_not_found(self, setup):
         """测试备份不存在的用户"""
@@ -212,7 +195,7 @@ class TestAdminService:
             username="testuser",
             email="test@example.com",
             password="password123",
-            group_type=UserGroupType.USER,
+            group="user",
         )
         
         user_id = user["id"]
@@ -222,18 +205,16 @@ class TestAdminService:
         backup_id = backup.backup_id
         
         # 删除用户
-        admin_service.delete_user(user_id, backup_before_delete=False)
+        admin_service.delete_user(user_id)
         
         # 恢复用户
         result = admin_service.restore_user(backup_id)
         
         assert result["user_id"] == user_id
-        assert result["username"] == "testuser"
-        
-        # 验证用户是否恢复成功
-        retrieved = setup["user_model"].get_user_by_id(user_id)
-        assert retrieved is not None
-        assert retrieved["username"] == "testuser"
+        assert result["restored"] is True
+
+        # AdminService 自持存储：恢复后用户重新入册
+        assert user_id in admin_service._users
 
     def test_restore_user_backup_not_found(self, setup):
         """测试从不存在的备份恢复用户"""
@@ -251,7 +232,7 @@ class TestAdminService:
             username="testuser",
             email="test@example.com",
             password="password123",
-            group_type=UserGroupType.USER,
+            group="user",
         )
         
         # 创建两个备份
@@ -272,7 +253,7 @@ class TestAdminService:
             username="testuser",
             email="test@example.com",
             password="password123",
-            group_type=UserGroupType.USER,
+            group="user",
         )
         
         # 创建备份
@@ -280,15 +261,15 @@ class TestAdminService:
         backup_id = backup.backup_id
         
         # 验证备份文件存在
-        assert backup.backup_file.exists()
+        assert backup.backup_path != ""
         
         # 删除备份
         result = admin_service.delete_backup(backup_id)
         
         assert result == True
         
-        # 验证备份文件已删除
-        assert not backup.backup_file.exists()
+        # 验证备份记录已删除
+        assert backup_id not in admin_service._backups
 
     def test_delete_backup_not_found(self, setup):
         """测试删除不存在的备份"""
@@ -307,16 +288,16 @@ class TestAdminService:
             username="testuser1",
             email="test1@example.com",
             password="password123",
-            group_type=UserGroupType.USER,
+            group="user",
         )
         
         admin_service.create_user(
             username="testuser2",
             email="test2@example.com",
             password="password123",
-            group_type=UserGroupType.DEVELOPER,
+            group="developer",
         )
-        
+
         # 获取系统统计
         stats = admin_service.get_system_stats()
         

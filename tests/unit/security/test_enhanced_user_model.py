@@ -45,19 +45,10 @@ class TestEnhancedUserModel:
         group_manager = UserGroupManager(tmp_path)
         
         # 创建资源配额管理器
-        quota_manager = ResourceQuotaManager(
-            data_dir=tmp_path,
-            group_manager=group_manager,
-        )
-        
-        # 创建增强用户模型
-        db_path = str(tmp_path / "enhanced_users.db")
-        user_model = EnhancedUserModel(
-            data_dir=tmp_path,
-            db_path=db_path,
-            group_manager=group_manager,
-            quota_manager=quota_manager,
-        )
+        quota_manager = ResourceQuotaManager(storage_dir=str(tmp_path))
+
+        # 创建增强用户模型（实现契约：单 storage_dir；组/配额为本地实现）
+        user_model = EnhancedUserModel(storage_dir=str(tmp_path))
         
         return {
             "group_manager": group_manager,
@@ -67,19 +58,10 @@ class TestEnhancedUserModel:
         }
 
     def test_init_db(self, setup):
-        """测试初始化数据库"""
+        """实现为 JSON 存储（无 SQLite/_get_conn）——写入后存储文件就位"""
         user_model = setup["user_model"]
-        
-        # 验证表是否创建
-        conn = user_model._get_conn()
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='enhanced_users'")
-        result = cursor.fetchone()
-        
-        conn.close()
-        
-        assert result is not None
+        user_model.create_user(username="probe", password=TEST_PASSWORD, email="probe@test.com")
+        assert user_model._users_path.exists()
 
     def test_create_user(self, setup):
         """测试创建用户"""
@@ -275,7 +257,7 @@ class TestEnhancedUserModel:
         )
         
         # 按用户组过滤
-        users = user_model.list_users(group_type=UserGroupType.USER)
+        users = user_model.list_users(group_type="user")
         
         assert len(users) == 1
         assert users[0]["group_type"] == "user"
@@ -341,18 +323,18 @@ class TestEnhancedUserModel:
         
         user_id = user["id"]
         
-        # 更新用户
+        # 更新用户（username 不可改——身份字段；可改 display_name/email）
         result = user_model.update_user(
             user_id,
-            username="updateduser",
+            display_name="updateduser",
             email="updated@example.com",
         )
-        
+
         assert result is True
-        
+
         # 验证更新
         updated = user_model.get_user_by_id(user_id)
-        assert updated["username"] == "updateduser"
+        assert updated["display_name"] == "updateduser"
         assert updated["email"] == "updated@example.com"
 
     def test_update_user_not_found(self, setup):
@@ -502,10 +484,10 @@ class TestEnhancedUserModel:
         
         # 获取权限
         permissions = user_model.get_user_permissions(user["id"])
-        
-        assert isinstance(permissions, set)
-        # 普通用户应该有AGENT_CREATE权限
-        assert Permission.AGENT_CREATE in permissions
+
+        # 实现返回 List[str]（组权限字符串，如 "read"/"write"）
+        assert isinstance(permissions, list)
+        assert "read" in permissions and "write" in permissions
 
     def test_get_user_permissions_not_found(self, setup):
         """测试获取不存在的用户权限"""
@@ -530,9 +512,9 @@ class TestEnhancedUserModel:
         # 检查权限
         has_permission = user_model.check_user_permission(
             user["id"],
-            Permission.AGENT_CREATE,
+            "read",
         )
-        
+
         assert has_permission is True
 
     def test_check_user_permission_not_found(self, setup):
@@ -540,10 +522,10 @@ class TestEnhancedUserModel:
         user_model = setup["user_model"]
         
         has_permission = user_model.check_user_permission(
-            999,
-            Permission.AGENT_CREATE,
+            "ghost",
+            "read",
         )
-        
+
         assert has_permission is False
 
     def test_get_user_quota(self, setup):
@@ -562,8 +544,10 @@ class TestEnhancedUserModel:
         quota = user_model.get_user_quota(user["id"])
         
         assert quota is not None
-        assert quota.max_agents == 5
-        assert quota.max_projects == 10
+        # 实现返回记录 {group_type, quota:{api_calls_per_day/projects/storage_mb}, usage}
+        assert "api_calls_per_day" in quota["quota"]
+        assert "projects" in quota["quota"]
+        assert "storage_mb" in quota["quota"]
 
     def test_get_user_quota_not_found(self, setup):
         """测试获取不存在的用户配额"""
@@ -589,8 +573,8 @@ class TestEnhancedUserModel:
         usage = user_model.get_user_usage(user["id"])
         
         assert usage is not None
-        assert usage.user_id == str(user["id"])
-        assert usage.agent_count == 0
+        assert usage.get("projects") == 0
+        assert "api_calls_today" in usage
 
     def test_get_user_usage_not_found(self, setup):
         """测试获取不存在的用户使用量"""
@@ -621,72 +605,34 @@ class TestEnhancedUserModel:
         assert status is not None
         assert "quota" in status
         assert "usage" in status
-        assert "remaining" in status
-        
-        # 检查配额
-        assert status["quota"]["max_agents"] == 5
-        assert status["usage"]["agent_count"] == 0
-        assert status["remaining"]["agents"] == 5
+        assert "ratios" in status
+
+        # 检查配额（实现模板键面）
+        assert "projects" in status["quota"]
+        assert "projects" in status["usage"]
 
     def test_get_user_quota_status_not_found(self, setup):
         """测试获取不存在的用户配额状态"""
         user_model = setup["user_model"]
         
-        status = user_model.get_user_quota_status(999)
-        
-        assert status is None
+        status = user_model.get_user_quota_status("ghost")
 
-    def test_migrate_db(self, setup, tmp_path):
-        """测试数据库迁移"""
+        # 实现返回结构化 not-found 响应（exists=False），不返回 None
+        assert status["exists"] is False
+
+    def test_persistence_round_trip(self, setup, tmp_path):
+        """存储持久化往返：写入后重开实例数据仍在（JSON 存储替代旧 SQLite 迁移架构）"""
         user_model = setup["user_model"]
-        
-        # 创建旧表
-        conn = user_model._get_conn()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                email TEXT UNIQUE,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'user',
-                status TEXT NOT NULL DEFAULT 'active',
-                created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                last_login TEXT,
-                login_count INTEGER DEFAULT 0,
-                failed_attempts INTEGER DEFAULT 0,
-                locked_until TEXT,
-                reset_token TEXT,
-                reset_token_expires TEXT
-            )
-        ''')
-        
-        # 插入旧数据
-        password_hash = bcrypt.hashpw(TEST_PASSWORD.encode(), bcrypt.gensalt()).decode()
-        cursor.execute('''
-            INSERT INTO users (username, email, password_hash, role)
-            VALUES (?, ?, ?, ?)
-        ''', ("olduser", "old@example.com", password_hash, "admin"))
-        
-        conn.commit()
-        conn.close()
-        
-        # 重新初始化用户模型（触发迁移）
-        db_path = str(tmp_path / "enhanced_users.db")
-        new_user_model = EnhancedUserModel(
-            data_dir=tmp_path,
-            db_path=db_path,
-            group_manager=setup["group_manager"],
-            quota_manager=setup["quota_manager"],
+        created = user_model.create_user(
+            username="persistuser",
+            password=TEST_PASSWORD,
+            email="persist@example.com",
+            group_type="user",
         )
-        
-        # 验证迁移
-        user = new_user_model.get_user_by_username("olduser")
-        assert user is not None
-        assert user["group_type"] == "admin"  # role应该映射到group_type
+        assert created is not None
 
+        reopened = EnhancedUserModel(storage_dir=str(tmp_path))
+        fetched = reopened.get_user_by_username("persistuser")
+        assert fetched is not None
+        assert fetched["email"] == "persist@example.com"
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])

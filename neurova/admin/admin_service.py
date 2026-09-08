@@ -131,6 +131,17 @@ class AdminService:
             encoding="utf-8",
         )
 
+    def _email_exists(self, email: str, exclude_id: Optional[str] = None) -> bool:
+        if not email:
+            return False
+        el = email.lower()
+        for uid, u in self._users.items():
+            if uid == exclude_id:
+                continue
+            if str(u.get("email", "")).lower() == el:
+                return True
+        return False
+
     def _username_exists(self, username: str, exclude_id: Optional[str] = None) -> bool:
         for uid, u in self._users.items():
             if uid == exclude_id:
@@ -151,6 +162,8 @@ class AdminService:
         with self._lock:
             if self._username_exists(username):
                 raise ValueError(f"Username already exists: {username}")
+            if email and self._email_exists(email):
+                raise ValueError(f"Email already exists: {email}")
             uid = _new_id("usr_")
             user: Dict[str, Any] = {
                 "id": uid,
