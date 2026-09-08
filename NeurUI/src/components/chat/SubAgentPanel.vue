@@ -7,6 +7,7 @@
  */
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import UiIcon from '@/components/UiIcon.vue'
 
 export interface SubAgentWindowState {
   subagentId: string
@@ -32,9 +33,9 @@ const bodyText = computed(() => {
 })
 
 const statusIcon = computed(() => {
-  if (props.state.status === 'running') return '⏳'
-  if (props.state.status === 'failed') return '❌'
-  return '✅'
+  if (props.state.status === 'running') return 'clock'
+  if (props.state.status === 'failed') return 'x'
+  return 'check'
 })
 
 function toggleMinimize() {
@@ -45,7 +46,7 @@ function toggleMinimize() {
 <template>
   <div class="subagent-panel" :class="[`status-${state.status}`, { minimized }]">
     <div class="panel-header" @click="toggleMinimize">
-      <span class="panel-icon">{{ statusIcon }}</span>
+      <span class="panel-icon"><UiIcon :name="statusIcon" :size="14" /></span>
       <span class="panel-title" :title="state.task">{{ title }}</span>
       <button class="panel-btn" :title="minimized ? t('ui.expand') : t('ui.minimize')" @click.stop="toggleMinimize">
         {{ minimized ? '▢' : '—' }}

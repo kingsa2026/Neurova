@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  useComputerPanel,
+  createComputerPanel,
   describeComputerAction,
   isComputerTool,
 } from '@/composables/useComputerPanel'
@@ -43,9 +43,9 @@ describe('describeComputerAction', () => {
   })
 })
 
-describe('useComputerPanel', () => {
+describe('createComputerPanel', () => {
   it('handleComputerAction 记录动作并自动打开分屏', () => {
-    const panel = useComputerPanel()
+    const panel = createComputerPanel()
     expect(panel.state.open).toBe(false)
 
     panel.handleComputerAction({
@@ -65,21 +65,21 @@ describe('useComputerPanel', () => {
   })
 
   it('截图动作生成 data URL 并更新最新截图', () => {
-    const panel = useComputerPanel()
+    const panel = createComputerPanel()
     panel.handleComputerAction({ tool: 'computer_screenshot', params: {}, success: true, screenshot: 'QUJD' })
     expect(panel.state.latestScreenshot).toBe('data:image/png;base64,QUJD')
     expect(panel.state.actions[0].screenshot).toBe('data:image/png;base64,QUJD')
   })
 
   it('失败动作保留错误信息', () => {
-    const panel = useComputerPanel()
+    const panel = createComputerPanel()
     panel.handleComputerAction({ tool: 'computer_click', params: {}, success: false, error: '需要 pyautogui' })
     expect(panel.state.actions[0].success).toBe(false)
     expect(panel.state.actions[0].error).toBe('需要 pyautogui')
   })
 
   it('动作日志超过上限时丢弃最旧的', () => {
-    const panel = useComputerPanel(3)
+    const panel = createComputerPanel(3)
     for (let i = 0; i < 5; i++) {
       panel.handleComputerAction({ tool: 'computer_scroll', params: {}, success: true })
     }
@@ -89,7 +89,7 @@ describe('useComputerPanel', () => {
   })
 
   it('handleToolCall 仅对电脑类工具打开分屏并置忙碌', () => {
-    const panel = useComputerPanel()
+    const panel = createComputerPanel()
     panel.handleToolCall('web_search')
     expect(panel.state.open).toBe(false)
 
@@ -99,7 +99,7 @@ describe('useComputerPanel', () => {
   })
 
   it('close/clear/toggleMinimized 状态切换', () => {
-    const panel = useComputerPanel()
+    const panel = createComputerPanel()
     panel.handleComputerAction({ tool: 'computer_scroll', params: {}, success: true })
     panel.toggleMinimized()
     expect(panel.state.minimized).toBe(true)
@@ -113,7 +113,7 @@ describe('useComputerPanel', () => {
   })
 
   it('无效 payload 安全忽略', () => {
-    const panel = useComputerPanel()
+    const panel = createComputerPanel()
     expect(() => panel.handleComputerAction(undefined as never)).not.toThrow()
     expect(() => panel.handleComputerAction({})).not.toThrow()
     expect(panel.state.actions).toHaveLength(0)

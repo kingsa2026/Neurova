@@ -70,6 +70,23 @@ def get_installed_output_ref() -> Optional[OutputRefHandle]:
         return _global_handle
 
 
+def ensure_output_ref_installed_from_env() -> None:
+    """按环境变量装配/卸载（产物预览计划 W1-4，2026-09-08）。
+
+    默认开启（>8KiB 工具输出落盘 tool_outputs/，上下文只留引用+预览，
+    防 token 膨胀）；env NEUROVA_TOOL_OUTPUT_REF=0 显式关闭（逃生开关，
+    恢复旧的透传行为）。应用启动时（app.py lifespan）调用。
+    """
+    import os
+
+    if os.environ.get("NEUROVA_TOOL_OUTPUT_REF", "") == "0":
+        if get_installed_output_ref() is not None:
+            uninstall_tool_output_ref(force=True)
+            logger.info("工具大输出引用已按 env 关闭（NEUROVA_TOOL_OUTPUT_REF=0）")
+        return
+    install_tool_output_ref()
+
+
 def maybe_output_ref(tool_name: str, result: Any, workspace_dir: Any) -> Any:
     """结果出流咽喉点调用：大输出落盘为引用。
 
