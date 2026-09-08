@@ -196,6 +196,11 @@ class BaseAgentLoop(ABC):
                     _caller_id = str(getattr(self.agent, "_current_user_id", None) or "")
                     _caller_ctx = {"user_id": _caller_id}
                     _caller_args = {**(_tc_arguments or {}), "_caller_user_id": _caller_id}
+                    # 沙箱根注入（2026-09-08 相对路径乱放根因修复）：file_operation
+                    # 的相对路径锚定 agent 工作区；服务端赋值覆盖 LLM 伪造同名参数
+                    if _tc_function_name == "file_operation":
+                        _ws = getattr(self.agent, "workspace_path", "")
+                        _caller_args["_base_dir"] = str(_ws) if _ws else "."
                     skill_result = await self.agent.skill_registry.execute_skill(_tc_function_name, _caller_args, _caller_ctx)
                     # SkillRegistry 找不到该 skill 时返回 None；找到但执行失败返回 success=False
                     if skill_result is not None and getattr(skill_result, "success", False):

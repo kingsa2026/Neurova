@@ -345,6 +345,171 @@ class TestBuiltinToolExecutor:
         assert test_file.exists()
         assert test_file.read_text(encoding="utf-8") == "New content"
 
+    # ═══════════════════════════════════════════════════════════════
+    # 相对路径沙箱（2026-09-08 根因修复）：agent 用相对路径调 file_*
+    # 时，落盘位置曾取决于进程 CWD（写到项目根而非 agent 工作区），
+    # 与 SSE artifact 注册的解析不一致 → 产物注册失败/文件乱放。
+    # 修复面①：内置 file_* 工具相对路径统一锚定 agent.workspace_path。
+    # ═══════════════════════════════════════════════════════════════
+
+    def _create_tool_executor_in_workspace(self, tmp_path):
+        executor = self._create_tool_executor()
+        executor._agent.workspace_path = tmp_path
+        return executor
+
+    @pytest.mark.asyncio
+    async def test_file_write_relative_path_lands_in_workspace(self, tmp_path):
+        """file_write 相对路径必须落在 agent.workspace_path 内"""
+        executor = self._create_tool_executor_in_workspace(tmp_path)
+
+        result = await executor._execute_file_write({
+            "file_path": "notes/out.md",
+            "content": "hello",
+        })
+
+        assert result.get("success") is True
+        # 落盘在工作区，而非进程 CWD
+        assert (tmp_path / "notes" / "out.md").read_text(encoding="utf-8") == "hello"
+        # 返回解析后的绝对路径，供 SSE artifact 注册方解析到真实文件
+        assert result["file_path"] == str((tmp_path / "notes" / "out.md").resolve())
+
+    @pytest.mark.asyncio
+    async def test_file_write_relative_path_rejects_escape(self, tmp_path):
+        """file_write 相对路径 ../ 越界必须拒绝且不落盘"""
+        executor = self._create_tool_executor_in_workspace(tmp_path)
+
+        result = await executor._execute_file_write({
+            "file_path": "../escape.md",
+            "content": "nope",
+        })
+
+        assert result.get("success") is not True
+        assert "error" in result
+        assert not (tmp_path.parent / "escape.md").exists()
+
+    @pytest.mark.asyncio
+    async def test_file_read_relative_path_resolves_in_workspace(self, tmp_path):
+        """file_read 相对路径在工作区内解析"""
+        executor = self._create_tool_executor_in_workspace(tmp_path)
+        (tmp_path / "doc.txt").write_text("workspace content", encoding="utf-8")
+
+        result = await executor._execute_file_read({"file_path": "doc.txt"})
+
+        assert result.get("content") == "workspace content"
+
+    @pytest.mark.asyncio
+    async def test_file_create_and_edit_relative_path(self, tmp_path):
+        """file_create/file_edit 相对路径在工作区内解析"""
+        executor = self._create_tool_executor_in_workspace(tmp_path)
+
+        result = await executor._execute_file_create({
+            "file_path": "sub/new.txt", "content": "v1",
+        })
+        assert result.get("success") is True
+        assert (tmp_path / "sub" / "new.txt").read_text(encoding="utf-8") == "v1"
+        assert result["file_path"] == str((tmp_path / "sub" / "new.txt").resolve())
+
+        result = await executor._execute_file_edit({
+            "file_path": "sub/new.txt", "old_str": "v1", "new_str": "v2",
+        })
+        assert result.get("success") is True
+        assert (tmp_path / "sub" / "new.txt").read_text(encoding="utf-8") == "v2"
+
+    @pytest.mark.asyncio
+    async def test_file_delete_relative_path(self, tmp_path):
+        """file_delete 相对路径在工作区内解析"""
+        executor = self._create_tool_executor_in_workspace(tmp_path)
+        (tmp_path / "gone.txt").write_text("bye", encoding="utf-8")
+
+        result = await executor._execute_file_delete({"file_path": "gone.txt"})
+
+        assert result.get("success") is True
+        assert not (tmp_path / "gone.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_absolute_path_behavior_unchanged(self, tmp_path):
+        """绝对路径行为不变（现有调用方契约保持）"""
+        executor = self._create_tool_executor_in_workspace(tmp_path)
+        test_file = tmp_path / "abs.txt"
+
+        result = await executor._execute_file_write({
+            "file_path": str(test_file), "content": "abs",
+        })
+
+        assert result.get("success") is True
+        assert test_file.read_text(encoding="utf-8") == "abs"
+
+    @pytest.mark.asyncio
+    async def test_file_list_default_base_is_workspace(self, tmp_path):
+        """file_list 缺省 path 时以 agent.workspace_path 为基准目录"""
+        executor = self._create_tool_executor_in_workspace(tmp_path)
+        (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+
+        result = await executor._execute_file_list({"pattern": "a.txt"})
+
+        assert result.get("count") == 1
+        assert result["files"] == [str(tmp_path / "a.txt")]
+
+    @pytest.mark.asyncio
+    async def test_skill_call_site_injects_workspace_base_dir(self, tmp_path):
+        """skill 链路咽喉注入 _base_dir：LLM 伪造的同名参数被服务端覆盖"""
+        executor = self._create_tool_executor_in_workspace(tmp_path)
+        # 跳过 ToolEngine 路径（False 使 tool_engine property 短路）
+        executor._tool_engine = False
+
+        captured = {}
+
+        class _CaptureSkill:
+            name = "file_operation"
+            config = {}
+
+            async def execute(self, params, context=None):
+                captured["params"] = dict(params)
+                return {"success": True}
+
+        registry = Mock()
+        registry.has_skill.return_value = True
+        registry.get_skill.return_value = _CaptureSkill()
+        executor._agent._skill_registry = registry
+
+        # builtin 注册表查不到该名（file_operation 是技能面工具）
+        with patch("neurova.tool_executor.get_builtin_tool_params", return_value=None):
+            await executor._execute_tool_core("file_operation", {
+                "operation": "write", "file_path": "x.md", "content": "hi",
+                "_base_dir": "/llm/forged/path",
+            })
+
+        injected = captured["params"]
+        # 服务端赋值（agent 工作区）覆盖 LLM 伪造值
+        assert injected["_base_dir"] == str(tmp_path)
+        assert injected["_caller_user_id"]
+
+    @pytest.mark.asyncio
+    async def test_non_file_skills_do_not_receive_base_dir(self, tmp_path):
+        """_base_dir 注入仅限 file_operation，其他技能参数面不受污染"""
+        executor = self._create_tool_executor_in_workspace(tmp_path)
+        executor._tool_engine = False
+
+        captured = {}
+
+        class _CaptureSkill:
+            name = "memory"
+            config = {}
+
+            async def execute(self, params, context=None):
+                captured["params"] = dict(params)
+                return {"success": True}
+
+        registry = Mock()
+        registry.has_skill.return_value = True
+        registry.get_skill.return_value = _CaptureSkill()
+        executor._agent._skill_registry = registry
+
+        with patch("neurova.tool_executor.get_builtin_tool_params", return_value=None):
+            await executor._execute_tool_core("memory", {"query": "q"})
+
+        assert "_base_dir" not in captured["params"]
+
 
 class TestBuiltinToolIntegration:
     """测试内置工具集成"""

@@ -757,6 +757,12 @@ class ToolExecutor:
 
             _perm = parse_permissions(getattr(skill, "config", {}).get("permissions"))
             with skill_permission_scope(_perm):
+                # 沙箱根注入（2026-09-08 相对路径乱放根因修复）：file_operation
+                # 的相对路径必须落在 agent 工作区。在 execute_skill_tool 咽喉处
+                # 注入（服务端赋值覆盖 LLM 伪造的同名参数，同 _caller_user_id
+                # 防线），覆盖 chat 主链与审批重放等全部 skill 执行路径。
+                if skill_name == "file_operation":
+                    params = {**(params or {}), "_base_dir": self._workspace_base()}
                 # 执行 Skill
                 result = await skill.execute(params, context)
             if _deps_warning and isinstance(result, dict):
@@ -2183,9 +2189,12 @@ class ToolExecutor:
 
     async def _execute_file_read(self, params: Dict) -> Dict:
         """执行文件读取"""
-        file_path = params.get("file_path", "")
         offset = params.get("offset", 0)
         encoding = params.get("encoding", "utf-8")
+
+        file_path, err = self._resolve_agent_path(params.get("file_path", ""))
+        if err:
+            return {"error": err}
 
         try:
             with open(file_path, "r", encoding=encoding) as f:
@@ -2199,11 +2208,17 @@ class ToolExecutor:
 
     async def _execute_file_write(self, params: Dict) -> Dict:
         """执行文件写入"""
-        file_path = params.get("file_path", "")
         content = params.get("content", "")
         encoding = params.get("encoding", "utf-8")
 
+        file_path, err = self._resolve_agent_path(params.get("file_path", ""))
+        if err:
+            return {"error": err}
+
         try:
+            from pathlib import Path
+
+            Path(file_path).parent.mkdir(parents=True, exist_ok=True)
             with open(file_path, "w", encoding=encoding) as f:
                 f.write(content)
                 return {"success": True, "file_path": file_path}
@@ -2212,10 +2227,16 @@ class ToolExecutor:
 
     async def _execute_file_create(self, params: Dict) -> Dict:
         """执行文件创建"""
-        file_path = params.get("file_path", "")
         content = params.get("content", "")
 
+        file_path, err = self._resolve_agent_path(params.get("file_path", ""))
+        if err:
+            return {"error": err}
+
         try:
+            from pathlib import Path
+
+            Path(file_path).parent.mkdir(parents=True, exist_ok=True)
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(content)
                 return {"success": True, "file_path": file_path}
@@ -2226,7 +2247,9 @@ class ToolExecutor:
         """执行文件删除"""
         import os
 
-        file_path = params.get("file_path", "")
+        file_path, err = self._resolve_agent_path(params.get("file_path", ""))
+        if err:
+            return {"error": err}
 
         try:
             if os.path.exists(file_path):
@@ -2239,9 +2262,12 @@ class ToolExecutor:
 
     async def _execute_file_edit(self, params: Dict) -> Dict:
         """执行文件编辑"""
-        file_path = params.get("file_path", "")
         old_str = params.get("old_str", "")
         new_str = params.get("new_str", "")
+
+        file_path, err = self._resolve_agent_path(params.get("file_path", ""))
+        if err:
+            return {"error": err}
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:
@@ -2261,6 +2287,52 @@ class ToolExecutor:
     # 安全设计：path 参数会进入治理预检（_governance_precheck 扫描 path），
     # 但 pattern 不会；因此此处额外做路径规范化 + 拒绝 .. 段 + 结果约束在
     # 基准目录内，防止 glob/walk 经 ../ 或符号链接逃逸出预期目录。
+
+    def _workspace_base(self) -> str:
+        """agent 工作区根（相对路径的锚定基准）。
+
+        根因修复（2026-09-08 事故）：内置文件工具与 file_operation 技能的
+        相对路径解析各随其便（进程 CWD），写盘散落项目根且与 SSE artifact
+        注册不一致。统一锚定 agent.workspace_path；拿不到有效工作区时
+        回退 "."（保持无 agent 上下文构造的旧语义）。
+        """
+        ws = getattr(self._agent, "workspace_path", None)
+        if not ws:
+            return "."
+        try:
+            from pathlib import Path
+
+            p = Path(str(ws))
+            # 非真实目录（含 Mock 泄漏）视为缺失，宁可回退也不拿伪根
+            return str(p) if p.is_dir() else "."
+        except Exception:  # noqa: BLE001
+            return "."
+
+    def _resolve_agent_path(self, file_path: str) -> tuple:
+        """内置文件读写类工具的路径解析咽喉。
+
+        - 相对路径：锚定 agent 工作区（_workspace_base），并拒绝 .. 逃逸
+          （与 file_operation 技能面 _resolve 同语义）；
+        - 绝对路径：保持原显式语义（现有调用方契约）。
+
+        Returns:
+            (路径字符串, None) 或 ("", 错误信息)
+        """
+        from pathlib import Path
+
+        if not file_path:
+            return "", "缺少 file_path 参数"
+        p = Path(file_path)
+        if p.is_absolute():
+            return str(p), None
+        base = Path(self._workspace_base()).resolve()
+        resolved = (base / p).resolve()
+        if resolved != base and base not in resolved.parents:
+            return "", (
+                f"路径越界: '{file_path}' 不在 agent 工作区 {base} 内"
+                "（相对路径锚定 agent 工作区，禁止 .. 逃逸）"
+            )
+        return str(resolved), None
 
     @staticmethod
     def _safe_search_base(path: str) -> tuple:
@@ -2295,7 +2367,8 @@ class ToolExecutor:
             return {"error": "缺少 pattern 参数"}
         if ".." in pattern.replace("\\", "/").split("/"):
             return {"error": "pattern 包含 ..，已禁止（防路径穿越）"}
-        base = params.get("path") or "."
+        # 基准目录缺省锚定 agent 工作区（原 "." 按进程 CWD 解析，同事故面）
+        base = params.get("path") or self._workspace_base()
         recursive = bool(params.get("recursive", True))
 
         try:
@@ -2353,6 +2426,10 @@ class ToolExecutor:
             max_results = int(params.get("max_results", 50))
         except (TypeError, ValueError):
             max_results = 50
+
+        # 相对基准目录同样锚定 agent 工作区（与文件读写同一解析口径）
+        if not os.path.isabs(path):
+            path = os.path.join(self._workspace_base(), path)
 
         target, err = self._safe_search_base(path)
         if err:
