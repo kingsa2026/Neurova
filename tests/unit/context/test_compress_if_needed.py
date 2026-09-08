@@ -93,8 +93,10 @@ class TestCompressIfNeeded:
         """有 UnifiedContextInjector 时委托给 injector"""
         mock_injector = MagicMock()
         mock_injector._count_tokens = MagicMock(return_value=100)
+        # 批次 A 新契约：_compress_context(envelope, history, user_tokens, system_tokens)
+        # → (envelope_out, compressed_history, ratio)；system 只读不动
         mock_injector._compress_context = MagicMock(return_value=(
-            "压缩后的系统消息",
+            "",
             [{"role": "assistant", "content": "压缩后的历史"}],
             0.5,
         ))
@@ -115,7 +117,8 @@ class TestCompressIfNeeded:
         mock_injector._compress_context.assert_called_once()
         # 结果应该有 system + 历史 + user
         assert len(result) >= 2
-        assert result[0]["content"] == "压缩后的系统消息"
+        # 新契约：system 消息只读（不再被压缩器输出替换）
+        assert result[0]["content"] == "系统消息0"
 
     def test_with_unified_injector_fallback_on_error(self):
         """injector 压缩失败时降级到 fallback"""

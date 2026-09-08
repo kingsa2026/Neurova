@@ -564,7 +564,9 @@ class TimeAwareness:
             # 使用缓存的周期性事件
             periodic_events = self._pattern_cache.get("periodic_events", [])
 
-            current_time = datetime.datetime.now(datetime.timezone.utc)
+            # 同域 naive local：pattern cache 的 last_occurrence 是 naive ISO，
+            # aware UTC 相减即抛 TypeError（本文件预测分支共性根因）
+            current_time = datetime.datetime.now()
             end_time = current_time + datetime.timedelta(days=prediction_days)
 
             for event in periodic_events:
@@ -616,7 +618,8 @@ class TimeAwareness:
         try:
             predictions = []
 
-            current_time = datetime.datetime.now(datetime.timezone.utc)
+            # 同域 naive local：seasonal_events 的 event_date 是 naive datetime
+            current_time = datetime.datetime.now()
             end_time = current_time + datetime.timedelta(days=prediction_days)
 
             # 季节性事件示例
@@ -668,7 +671,8 @@ class TimeAwareness:
         try:
             predictions = []
 
-            current_time = datetime.datetime.now(datetime.timezone.utc)
+            # 同域 naive local：_CHINESE_HOLIDAYS 的 holiday_date 是 naive datetime
+            current_time = datetime.datetime.now()
             end_time = current_time + datetime.timedelta(days=prediction_days)
 
             for (month, day), name in self._CHINESE_HOLIDAYS.items():
@@ -721,7 +725,9 @@ class TimeAwareness:
             if not peak_hours or not peak_weekdays:
                 return predictions
 
-            current_time = datetime.datetime.now(datetime.timezone.utc)
+            # 同域 naive local：predicted_time 与 _calculate_date_confidence 的
+            # now 基准统一（aware/naive 混比即崩）
+            current_time = datetime.datetime.now()
             end_time = current_time + datetime.timedelta(days=prediction_days)
 
             # 预测高峰时段活动
@@ -772,7 +778,8 @@ class TimeAwareness:
             # 使用缓存的周期性事件
             periodic_events = self._pattern_cache.get("periodic_events", [])
 
-            current_time = datetime.datetime.now(datetime.timezone.utc)
+            # 同域 naive local：last_occurrence 是 naive ISO（与 :567 同根因）
+            current_time = datetime.datetime.now()
             end_time = current_time + datetime.timedelta(days=prediction_days)
 
             for event in periodic_events:
@@ -827,7 +834,9 @@ class TimeAwareness:
             置信度 (0-1)
         """
         try:
-            current_time = datetime.datetime.now(datetime.timezone.utc)
+            # 同域 naive local：三个调用方传入的 next_occurrence/predicted_time
+            # 均为 naive（本文件预测分支统一 naive local 基准）
+            current_time = datetime.datetime.now()
             days_until = (target_date - current_time).total_seconds() / 86400
 
             # 距离越远，置信度越低

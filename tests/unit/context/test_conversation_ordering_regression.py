@@ -56,8 +56,9 @@ class TestConversationOrdering:
         ctx = asyncio.run(
             orch.build_context(user_input="Q1", relevant_memories=[])
         )
-        assert conv_messages(ctx) == [{"role": "user", "content": "Q1"}]
-        assert ctx[-1] == {"role": "user", "content": "Q1"}
+        # 审计②：末条 user 消息携带瞬态信封（<system-reminder>...原文）
+        assert conv_messages(ctx)[-1]["content"].endswith("Q1")
+        assert ctx[-1]["content"].endswith("Q1")
 
     def test_second_round_no_duplication_and_order_preserved(self):
         """第二轮：历史问答按原顺序出现一次，当前输入在末尾"""
@@ -75,8 +76,8 @@ class TestConversationOrdering:
             )
         )
 
-        # 当前输入必须是最后一条消息
-        assert ctx[-1] == {"role": "user", "content": "请告诉我你使用的模型名称"}
+        # 当前输入必须是最后一条消息（审计②：末条携带瞬态信封）
+        assert ctx[-1]["content"].endswith("请告诉我你使用的模型名称")
 
         conv = conv_messages(ctx[:-1])
         # 历史 user 消息只出现一次（不因 USER_INPUT/CONVERSATION 双份而重复）
@@ -99,9 +100,11 @@ class TestConversationOrdering:
                     session_context=history or None,
                 )
             )
-            # 当前输入是最后一条，且全上下文仅出现一次
-            assert ctx[-1] == {"role": "user", "content": q}, f"round {i+1}: 当前输入不在末尾"
-            assert sum(1 for m in ctx if m.get("content") == q) == 1, f"round {i+1}: 当前输入重复"
+            # 当前输入是最后一条，且全上下文仅出现一次（审计②：末条为信封+原文）
+            assert ctx[-1]["content"].endswith(q), f"round {i+1}: 当前输入不在末尾"
+            assert sum(1 for m in ctx if q in str(m.get("content", ""))) == 1, (
+                f"round {i+1}: 当前输入重复"
+            )
 
             # 历史部分与真实历史完全一致（顺序 + 无重复 + 交替）
             conv = conv_messages(ctx[:-1])

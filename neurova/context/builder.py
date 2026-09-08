@@ -277,16 +277,25 @@ class ContextBuilder:
                 user_msg = context[-1] if len(context) > 1 else {"role": "user", "content": ""}
                 history = context[1:-1] if len(context) > 2 else []
 
-                # 使用 injector 的压缩方法
-                system_content, compressed_history, _ = self._unified_injector._compress_context(
-                    system_content=system_msg.get("content", ""),
-                    history=history,
-                    user_tokens=self._unified_injector._count_tokens(user_msg.get("content", "")),
+                # 使用 injector 的压缩方法（批次 A 新签名：压缩对象=信封+历史，
+                # system 只读——传 system_tokens 而非 system_content）
+                user_bare = user_msg.get("content", "")
+                # user 消息可能已带信封（injector 产物），裸输入口径剥离后再计
+                try:
+                    from .envelope import strip_envelope
+
+                    user_bare = strip_envelope(user_bare)
+                except Exception:
+                    pass
+                _, compressed_history, _ = self._unified_injector._compress_context(
+                    "",  # 信封已挂在末条 user 上；此路径的压缩对象只有历史
+                    history,
+                    self._unified_injector._count_tokens(user_bare),
+                    self._unified_injector._count_tokens(system_msg.get("content", "")),
                 )
 
-                # 重建上下文
-                compressed_system_msg = {"role": "system", "content": system_content}
-                return [compressed_system_msg] + compressed_history + [user_msg]
+                # 重建上下文（system 只读不动）
+                return [system_msg] + compressed_history + [user_msg]
             except Exception as e:
                 logger.warning("UnifiedContextInjector 压缩失败，使用降级模式: %s", e)
                 return self._fallback_compress(context)
