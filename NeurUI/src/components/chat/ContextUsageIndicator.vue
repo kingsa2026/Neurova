@@ -193,12 +193,15 @@ function fmtCompact(n: number | null | undefined): string {
   return String(n)
 }
 
-/** 拉 composition 快照（usage 空时环图兜底 + 面板数据源）。404=尚无实测。 */
+/** 拉 composition 快照（usage 空时环图兜底 + 面板数据源）。404=尚无实测。
+ *  审计⑰：请求发起时快照 agentId，响应回来时已切走则丢弃（防旧响应覆盖）。 */
 async function fetchComposition(): Promise<void> {
   if (!props.agentId || compositionFetched.value) return
   compositionFetched.value = true
+  const reqAgentId = props.agentId
   try {
-    const res: any = await api.get('/context/composition', { params: { agent_id: props.agentId }, __expectedStatus: 404 })
+    const res: any = await api.get('/context/composition', { params: { agent_id: reqAgentId }, __expectedStatus: 404 })
+    if (reqAgentId !== props.agentId) return // 已切走：丢弃过期响应
     const data = res?.data ?? res
     if (data && data.total_tokens !== undefined) composition.value = data
   } catch {
