@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from .token_estimator import EstimationStrategy, TokenEstimator
 
 # 批次 A：动态上下文信封（五段动态内容+分钟级时间迁出 system）
-from .envelope import compress_envelope, build_envelope
+from .envelope import compress_envelope, build_envelope, build_time_block
 
 # BaseModule 可能不可用（当 neurova.core 只有 .pyc 文件时），提供降级方案
 try:
@@ -281,8 +281,16 @@ class UnifiedContextInjector(BaseModule):
         # 1. 系统提示：不能压缩太多
         system_budget = max(int(self._token_budget.system_prompt * 0.8), 600)
 
-        # 2. 记忆：中等压缩
-        memory_budget = int(memory_estimate * compression_ratio) if memory_estimate > 0 else self._token_budget.memories
+        # 2. 记忆：按比例缩放，但设下限——
+        #    遗留①：小占比记忆（如 9 tokens vs 48000 历史）被比例缩水到
+        #    自身 token 以下，_build_memory_context 把记忆截成碎屑，截出
+        #    的量被历史预算吞掉（纯损毁零收益）。下限 = max(自身估算,
+        #    max_tokens/10)：小记忆保自身，大记忆保 10% 窗口。
+        memory_own_estimate = memory_estimate if memory_estimate > 0 else self._token_budget.memories
+        memory_budget = max(
+            int(memory_own_estimate * compression_ratio),
+            min(memory_own_estimate, max_tokens // 10),
+        )
 
         # 3. 历史：主要压缩对象
         history_budget = max_tokens - system_budget - memory_budget - 500
@@ -360,6 +368,9 @@ class UnifiedContextInjector(BaseModule):
         history_tokens = sum(self._count_tokens(msg.get("content", "")) for msg in history)
 
         user_content = f"{envelope}\n\n{user_input}" if envelope else user_input
+        # 审计④：压缩预算按"裸 user 输入"计算——user_tokens 若含旧信封，
+        # _compress_context 的 _budget_after 再扣一次信封 → 双计导致过度压缩
+        user_bare_tokens = self._count_tokens(user_input)
         user_tokens = self._count_tokens(user_content)
 
         total_tokens = system_tokens + history_tokens + user_tokens
@@ -367,7 +378,7 @@ class UnifiedContextInjector(BaseModule):
         compression_ratio = 1.0
         if total_tokens > self._token_budget.max_total and self._enable_compression:
             envelope, history, compression_ratio = self._compress_context(
-                envelope, history, user_tokens, system_tokens
+                envelope, history, user_bare_tokens, system_tokens
             )
             user_content = f"{envelope}\n\n{user_input}" if envelope else user_input
             total_tokens = (
@@ -414,25 +425,9 @@ class UnifiedContextInjector(BaseModule):
         return result
 
     def _build_envelope_time_block(self) -> str:
-        """信封 <time> 块（批次 A）：分钟级时间 + 时间感知 hint。
-
-        迁移自原 _build_system_prompt 的 `## 当前时间` 段——原位置每轮变化
-        使 system 前缀缓存每轮全毁（F1）。system 侧日期级时间由 orchestrator
-        负责（日级稳定）。
-        """
-        time_hint = ""
-        try:
-            from neurova.cognitive_layers.emotion_context_layer.time_awareness import (
-                get_time_awareness,
-            )
-
-            time_hint = get_time_awareness().get_time_context_hint()
-        except Exception as e:
-            self.log_debug(f"时间感知提示跳过: {e}")
-        lines = [dt.datetime.now().strftime("%Y年%m月%d日 %H:%M")]
-        if time_hint:
-            lines.append(str(time_hint))
-        return "\n".join(lines)
+        """信封 <time> 块（批次 A）：委托模块级 build_time_block（单源，
+        orchestrator pool 主链共用）。"""
+        return build_time_block()
 
     def _build_reflection_context(self) -> str:
         """构建反思日志上下文"""

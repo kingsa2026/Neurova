@@ -172,15 +172,16 @@ async def build_context(
             sources = []
 
             if hasattr(agent, "build_context"):
-                result = await agent.build_context(
-                    user_input=body.user_input,
-                    session_id=session_id,
-                    max_tokens=body.max_tokens,
-                    include_reflection=body.include_reflection,
-                    include_memories=body.include_memories,
-                    include_constitution=body.include_constitution,
-                )
-                if isinstance(result, dict):
+                # 审计⑮：按 ContextOrchestrator.build_context 真实签名调用——
+                # 旧代码传 session_id/include_memories 等不存在的 kwargs →
+                # TypeError 500
+                result = await agent.build_context(user_input=body.user_input)
+                if isinstance(result, list):
+                    context_content = "\n".join(
+                        f"{m.get('role', 'unknown')}: {m.get('content', '')}" for m in result
+                    )
+                    sources = ["agent_build_context"]
+                elif isinstance(result, dict):
                     context_content = result.get("content", "")
                     sources = result.get("sources", [])
                 else:
@@ -260,21 +261,34 @@ async def build_context_v2(
             sources = []
 
             if hasattr(agent, "unified_injector") and agent.unified_injector:
-                result = await agent.unified_injector.build_context(
+                # 审计⑮：按 UnifiedContextInjector.build_context 真实签名调用
+                result = agent.unified_injector.build_context(
+                    system_prompt=getattr(agent, "soul", "") or "",
+                    memories=[],
+                    conversation_history=[],
                     user_input=body.user_input,
                     max_tokens=body.max_tokens,
-                    include_reflection=body.include_reflection,
-                    include_memories=body.include_memories,
+                    include_reflection_log=body.include_reflection,
                 )
-                context_content = result.get("content", "")
-                sources = result.get("sources", [])
+                if isinstance(result, list):
+                    context_content = "\n".join(
+                        f"{m.get('role', 'unknown')}: {m.get('content', '')}" for m in result
+                    )
+                    sources = ["unified_injector"]
+                else:
+                    context = getattr(result, "context", None) or result.get("context", [])
+                    context_content = "\n".join(
+                        f"{m.get('role', 'unknown')}: {m.get('content', '')}" for m in context
+                    )
+                    sources = ["unified_injector"]
             elif hasattr(agent, "build_context"):
-                result = await agent.build_context(
-                    user_input=body.user_input,
-                    session_id=session_id,
-                    max_tokens=body.max_tokens,
-                )
-                if isinstance(result, dict):
+                result = await agent.build_context(user_input=body.user_input)
+                if isinstance(result, list):
+                    context_content = "\n".join(
+                        f"{m.get('role', 'unknown')}: {m.get('content', '')}" for m in result
+                    )
+                    sources = ["agent_build_context"]
+                elif isinstance(result, dict):
                     context_content = result.get("content", "")
                     sources = result.get("sources", [])
                 else:

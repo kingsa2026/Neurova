@@ -152,12 +152,22 @@ def repair_tool_turns(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 j += 1
             missing = [cid for cid in expected_ids if cid not in seen_ids]
             if missing:
-                repaired.append({
-                    "role": "tool",
-                    "tool_call_id": missing[0] if len(missing) == 1 else ",".join(map(str, missing)),
-                    "name": calls[0].get("function", {}).get("name", "tool") if calls else "tool",
-                    "content": _synth_tool_result([str(c) for c in missing]),
-                })
+                # 审计⑭：逐 call 补独立合成结果——此前只补一条
+                # tool_call_id="id1,id2" 的拼接消息，与任何单个调用都不匹配
+                #（OpenAI 要求 tool 消息与 assistant.tool_calls 的 id 一一对应）
+                calls_by_id = {c.get("id"): c for c in calls if c.get("id")}
+                for cid in missing:
+                    name = (
+                        (calls_by_id.get(cid) or {}).get("function", {}).get("name", "tool")
+                        if calls_by_id
+                        else "tool"
+                    )
+                    repaired.append({
+                        "role": "tool",
+                        "tool_call_id": cid,
+                        "name": name,
+                        "content": _synth_tool_result([str(cid)]),
+                    })
             i = j
             continue
         i += 1
