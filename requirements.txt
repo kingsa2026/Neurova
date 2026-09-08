@@ -18,8 +18,7 @@ passlib[bcrypt]>=1.7.4
 python-multipart>=0.0.6
 
 # LLM Providers
-litellm>=1.10.0
-openai>=1.6.0
+openai>=3.9.0
 anthropic>=0.8.0
 
 # 中文分词（知识库 FTS/BM25 通道真分词，缺席自动回退 n-gram）

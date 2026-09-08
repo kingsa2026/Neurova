@@ -32,8 +32,7 @@ python-multipart>=0.0.6
 pycryptodome>=3.20.0  # AES-GCM for secret_store encryption
 
 # LLM Providers
-litellm>=1.10.0
-openai>=1.6.0
+openai>=3.9.0
 anthropic>=0.8.0
 
 # Utilities
