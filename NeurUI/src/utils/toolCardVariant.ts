@@ -35,17 +35,17 @@ export function toolCardVariant(name: string | undefined | null): ToolCardVarian
 export function variantIcon(variant: ToolCardVariant): string {
   switch (variant) {
     case 'computer':
-      return '🖥️'
+      return 'monitor'
     case 'file':
-      return '📁'
+      return 'folder'
     case 'search':
-      return '🔍'
+      return 'search'
     case 'shell':
-      return '⌨️'
+      return 'keyboard'
     case 'code':
-      return '🧬'
+      return 'code'
     default:
-      return '🔧'
+      return 'wrench'
   }
 }
 

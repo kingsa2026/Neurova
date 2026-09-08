@@ -40,6 +40,12 @@ export const useChatStore = defineStore('chat', () => {
   /** 最近一轮的真实 usage（SSE usage 事件，消息级展示用）。 */
   const lastTurnUsage = ref<{ prompt: number; completion: number; total: number; estimated: boolean } | null>(null)
 
+  // ── 页面级临时态（2026-09-08 composer 拆分：SSE 编排层写入、composer 读）──
+  /** 实时记忆检索进度（SSE memory_progress；回复开始即清空，不落消息历史） */
+  const retrievalStatus = ref('')
+  /** 实时事件丢失计数（WS seq gap 检测，OpenOcta P0-1；仅提示不可恢复） */
+  const eventsLostBanner = ref<number | null>(null)
+
   // ---------------------------------------------------------------------------
   // Computed
   // ---------------------------------------------------------------------------
@@ -226,6 +232,18 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = []
     isStreaming.value = false
     inputText.value = ''
+    retrievalStatus.value = ''
+    eventsLostBanner.value = null
+  }
+
+  function setRetrievalStatus(status: string): void {
+    retrievalStatus.value = status
+  }
+  function bumpEventsLost(count: number): void {
+    eventsLostBanner.value = (eventsLostBanner.value ?? 0) + count
+  }
+  function clearEventsLost(): void {
+    eventsLostBanner.value = null
   }
 
   return {
@@ -239,6 +257,8 @@ export const useChatStore = defineStore('chat', () => {
     searchQuery,
     sessionTokenUsage,
     lastTurnUsage,
+    retrievalStatus,
+    eventsLostBanner,
     // computed
     currentSession,
     filteredSessions,
@@ -262,6 +282,9 @@ export const useChatStore = defineStore('chat', () => {
     setStreaming,
     setInputText,
     setSearchQuery,
+    setRetrievalStatus,
+    bumpEventsLost,
+    clearEventsLost,
     // usage
     applyTurnUsage,
     getSessionTokenUsage,

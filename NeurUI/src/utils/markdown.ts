@@ -55,9 +55,9 @@ for (const [name, language] of HLJS_LANGUAGES) {
   hljs.registerLanguage(name, language)
 }
 
-function createRenderer(copyLabel: string) {
+function createRenderer(copyLabel: string, previewLabel = '◫') {
   return {
-    /** 围栏代码块: 语法高亮 + 语言标签 + 复制按钮 (升级后的代码块卡片) */
+    /** 围栏代码块: 语法高亮 + 语言标签 + 复制/预览按钮 (升级后的代码块卡片) */
     code(token: Tokens.Code): string {
       const rawLang = (token.lang || '').trim().toLowerCase()
       const lang = rawLang.split(/\s+/)[0]
@@ -72,11 +72,18 @@ function createRenderer(copyLabel: string) {
         lang && hljs.getLanguage(lang) ? hljs.highlight(token.text, { language: lang }).value : escapeHtml(token.text)
       const langLabel = lang ? escapeHtml(lang) : 'code'
       const codeClass = `language-${escapeHtml(lang || 'code')}`
+      // 预览按钮：md/html/svg 等可在右侧 dock 预览的语言才显示
+      // （data-preview-lang 供事件委托读取，DOMPurify 默认放行 data-*）
+      const previewable = ['markdown', 'md', 'html', 'htm', 'xhtml', 'svg'].includes(lang)
+      const previewBtn = previewable
+        ? `<button class="nr-code-preview-btn" data-preview-lang="${escapeHtml(lang)}" aria-label="preview">${escapeHtml(previewLabel)}</button>`
+        : ''
       return (
         `<div class="nr-code-wrap">` +
         `<div class="nr-code-header">` +
         `<span class="nr-code-lang">${langLabel}</span>` +
         `<button class="nr-code-copy-btn" aria-label="copy">${escapeHtml(copyLabel)}</button>` +
+        previewBtn +
         `</div>` +
         `<pre class="nr-code-block"><code class="${codeClass}">${highlighted}</code></pre>` +
         `</div>`
