@@ -39,6 +39,29 @@ export interface ComputerPanelState {
 
 const COMPUTER_TOOL_PREFIXES = ['computer_', 'browser_']
 
+/**
+ * 模块级共享单例（2026-09-08 dock 收编）：ChatPage 的 WS/SSE 处理器与
+ * dock 的 ComputerTab 必须共享同一 state；useComputerPanel() 每次调用
+ * 返回同一实例（工厂签名保留兼容既有调用方）。
+ */
+export interface ComputerPanelApi {
+  state: ComputerPanelState
+  handleComputerAction: (payload: Record<string, any> | undefined | null) => void
+  handleToolCall: (toolName: string) => void
+  markIdle: () => void
+  open: () => void
+  close: () => void
+  toggleMinimized: () => void
+  clear: () => void
+}
+
+let _sharedPanel: ComputerPanelApi | null = null
+
+// 测试环境清理钩子（可选注入；生产无感知）
+export function resetComputerPanelForTest(): void {
+  _sharedPanel = null
+}
+
 export function isComputerTool(name: string): boolean {
   if (!name) return false
   return COMPUTER_TOOL_PREFIXES.some((p) => name.startsWith(p))
@@ -75,14 +98,13 @@ export function describeComputerAction(tool: string, params: Record<string, unkn
 
 let entrySeq = 0
 
-export function useComputerPanel(maxActions = 50) {
+export function createComputerPanel(maxActions = 50): ComputerPanelApi {
   const state = reactive<ComputerPanelState>({
     open: false,
     minimized: false,
     busy: false,
     actions: [],
   })
-
   /** 处理 WS computer_action 事件 payload */
   function handleComputerAction(payload: Record<string, any> | undefined | null): void {
     if (!payload || typeof payload !== 'object') return
@@ -114,8 +136,18 @@ export function useComputerPanel(maxActions = 50) {
     if (entry.screenshot) state.latestScreenshot = entry.screenshot
     if (entry.url) state.browserUrl = entry.url
     state.busy = false
-    // 自动分屏：Agent 操作电脑时自动展开面板（ZCode 式跟随）
+    // 自动分屏：Agent 操作电脑时自动展开（ZCode 式跟随）。
+    // 2026-09-08 dock 收编：开屏统一走 rightDock（computer tab），state.open
+    // 保留为兼容位（组件挂载已迁入 dock，不再由它驱动 v-if）。
     state.open = true
+    openComputerDockTab()
+  }
+
+  /** 打开 dock 的 computer tab（延迟导入防循环依赖：rightDock 不依赖本模块） */
+  function openComputerDockTab(): void {
+    void import('@/stores/rightDock').then(({ useRightDockStore }) => {
+      useRightDockStore().openComputer()
+    })
   }
 
   /** SSE 兜底：看到电脑类工具调用即开屏并置忙碌 */
@@ -123,6 +155,7 @@ export function useComputerPanel(maxActions = 50) {
     if (!isComputerTool(toolName)) return
     state.open = true
     state.busy = true
+    openComputerDockTab()
   }
 
   function markIdle(): void {
@@ -147,5 +180,14 @@ export function useComputerPanel(maxActions = 50) {
     state.browserUrl = undefined
   }
 
-  return { state, handleComputerAction, handleToolCall, markIdle, open, close, toggleMinimized, clear }
+  return (_sharedPanel = { state, handleComputerAction, handleToolCall, markIdle, open, close, toggleMinimized, clear })
+}
+
+/**
+ * 共享实例入口：ChatPage 与 dock ComputerTab 调用同一单例
+ * （WS/SSE 处理器写入的状态必须与 dock 面板读到的状态一致）。
+ */
+export function useComputerPanel(): ComputerPanelApi {
+  if (!_sharedPanel) createComputerPanel()
+  return _sharedPanel!
 }

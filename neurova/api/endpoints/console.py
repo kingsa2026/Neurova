@@ -21,6 +21,7 @@ from typing import Any, Dict, Optional
 
 from neurova.api.deps import get_current_user, require_admin
 from neurova.api.endpoints import get_agent_instance
+from neurova.api.endpoints.artifacts_api import extract_tool_artifacts
 from neurova.session_repository import get_session_repository
 
 logger = get_logger(__name__)
@@ -227,6 +228,8 @@ def _sse_events_from_emitter_item(
     item: Any,
     seen_calls: set,
     seen_results: set,
+    agent_id: str = "",
+    user_id: str = "",
 ) -> typing.List[dict]:
     """把管线的 (kind, data) 发射器事件转成 0~N 个 SSE 事件 dict。
 
@@ -302,6 +305,13 @@ def _sse_events_from_emitter_item(
             approval_payload = _extract_approval_payload(content, {"tool_name": name})
             if approval_payload:
                 events.append({"type": "approval_required", **approval_payload})
+            # 产物事件（dock 预览）：在截断前的完整文本上提取 file_path/
+            # audio_path/output_ref.path，注册 artifact 并追加结构化事件。
+            # 失败只丢增强能力，不影响 tool_result 本体。
+            try:
+                events.extend(extract_tool_artifacts(name, content, agent_id=agent_id, user_id=user_id))
+            except Exception:  # noqa: BLE001
+                pass
             return events
     except Exception:  # noqa: BLE001 - 映射失败丢弃该事件，不中断流
         return []
@@ -381,12 +391,15 @@ def _strip_heavy_payload(result_text: str, max_value_len: int = 1000) -> str:
     return result_text
 
 
-def _build_tool_events(tm: dict) -> typing.List[dict]:
+def _build_tool_events(
+    tm: dict, agent_id: str = "", user_id: str = ""
+) -> typing.List[dict]:
     """把单条 tool_message 转成 0~2 个 SSE 事件 dict。
 
     - tool_call → {"type": "tool_call", name, arguments}
     - tool_result → {"type": "tool_result", name, result}（超长字段已脱敏）
       命中治理 ASK 待审批时追加 {"type": "approval_required", ...}
+      完整文本含产物路径时追加 {"type": "artifact", ...}
     """
     events: typing.List[dict] = []
     if not isinstance(tm, dict):
@@ -423,6 +436,12 @@ def _build_tool_events(tm: dict) -> typing.List[dict]:
         approval_payload = _extract_approval_payload(result_text, tm)
         if approval_payload:
             events.append({"type": "approval_required", **approval_payload})
+        # 产物事件：同上，完整文本上提取（脱敏会剥掉 base64 值但保留路径字段；
+        # 正则兜底覆盖 [:500] 截断的半截 JSON）
+        try:
+            events.extend(extract_tool_artifacts(str(tm.get("tool_name", "")), result_text, agent_id=agent_id, user_id=user_id))
+        except Exception:  # noqa: BLE001
+            pass
     return events
 
 
@@ -595,7 +614,7 @@ async def post_console_chat(
                         continue
                     if item is _EMIT_DONE:
                         break
-                    for event in _sse_events_from_emitter_item(item, seen_calls, seen_results):
+                    for event in _sse_events_from_emitter_item(item, seen_calls, seen_results, agent_id=agent_id, user_id=user_id):
                         live_events.append(event)  # 补课 8：断线重连缓冲
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             finally:
@@ -608,7 +627,7 @@ async def post_console_chat(
                 flush_events: typing.List[Dict[str, Any]] = []
                 # 收尾 flush：文本模式等未经发射器的工具消息（去重后）
                 for tm in tool_messages:
-                    for event in _build_tool_events(tm):
+                    for event in _build_tool_events(tm, agent_id=agent_id, user_id=user_id):
                         etype = event.get("type")
                         if etype == "tool_call":
                             # 核验轮修复①：键与流式侧共用 _call_key 规范化
