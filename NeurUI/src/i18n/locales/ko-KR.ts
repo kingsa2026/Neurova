@@ -484,6 +484,8 @@ export default {
   },
 
   chat: {
+    artifactUnavailable: '산출물 내용을 사용할 수 없습니다(이동 또는 삭제되었을 수 있습니다)',
+    openInPreview: '미리보기에서 열기',
     retrievalUnified: '统一检索',
     retrievalMoE: 'MoE 专家路由',
     retrievalCache: '缓存检索',
@@ -2977,11 +2979,20 @@ export default {
     manualPlaceholder: '描述遇到的问题，或粘贴错误信息（用于主动反馈）',
     manualSent: '反馈已提交，感谢！',
   },
+
+  dock: {
+    closeTab: '탭 닫기',
+    closeAll: '모두 닫기',
+    resizeHint: '드래그하여 너비 조정, 두 번 클릭하여 재설정',
+    empty: '열린 미리보기 없음',
+    download: '다운로드',
+    refresh: '새로 고침',
+    htmlSandboxHint: '샌드박스 미리보기: 스크립트 활성화, 동일 출처 권한 없음',
+    kindMarkdown: 'Markdown',
+    kindHtml: 'HTML',
+    kindImage: '이미지',
+    kindAudio: '오디오',
+    kindText: '텍스트',
+  },
+
 }
-
-
-
-
-
-
-

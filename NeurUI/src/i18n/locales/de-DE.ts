@@ -484,6 +484,8 @@ export default {
   },
 
   chat: {
+    artifactUnavailable: 'Artefaktinhalt nicht verfügbar (möglicherweise verschoben oder gelöscht)',
+    openInPreview: 'In der Vorschau öffnen',
     retrievalUnified: '统一检索',
     retrievalMoE: 'MoE 专家路由',
     retrievalCache: '缓存检索',
@@ -2977,11 +2979,20 @@ export default {
     manualPlaceholder: '描述遇到的问题，或粘贴错误信息（用于主动反馈）',
     manualSent: '反馈已提交，感谢！',
   },
+
+  dock: {
+    closeTab: 'Tab schließen',
+    closeAll: 'Alle schließen',
+    resizeHint: 'Ziehen zum Anpassen, Doppelklick zum Zurücksetzen',
+    empty: 'Keine Vorschau geöffnet',
+    download: 'Herunterladen',
+    refresh: 'Neu laden',
+    htmlSandboxHint: 'Sandbox-Vorschau: Skripte aktiv, kein Same-Origin-Zugriff',
+    kindMarkdown: 'Markdown',
+    kindHtml: 'HTML',
+    kindImage: 'Bild',
+    kindAudio: 'Audio',
+    kindText: 'Text',
+  },
+
 }
-
-
-
-
-
-
-

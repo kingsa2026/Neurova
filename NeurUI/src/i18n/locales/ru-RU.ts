@@ -484,6 +484,8 @@ export default {
   },
 
   chat: {
+    artifactUnavailable: 'Содержимое артефакта недоступно (возможно, перемещено или удалено)',
+    openInPreview: 'Открыть в предпросмотре',
     retrievalUnified: '统一检索',
     retrievalMoE: 'MoE 专家路由',
     retrievalCache: '缓存检索',
@@ -2977,11 +2979,20 @@ export default {
     manualPlaceholder: '描述遇到的问题，或粘贴错误信息（用于主动反馈）',
     manualSent: '反馈已提交，感谢！',
   },
+
+  dock: {
+    closeTab: 'Закрыть вкладку',
+    closeAll: 'Закрыть все',
+    resizeHint: 'Перетащите для изменения ширины, двойной клик — сброс',
+    empty: 'Нет открытых предпросмотров',
+    download: 'Скачать',
+    refresh: 'Обновить',
+    htmlSandboxHint: 'Изолированный просмотр: скрипты включены, без доступа к источнику',
+    kindMarkdown: 'Markdown',
+    kindHtml: 'HTML',
+    kindImage: 'Изображение',
+    kindAudio: 'Аудио',
+    kindText: 'Текст',
+  },
+
 }
-
-
-
-
-
-
-

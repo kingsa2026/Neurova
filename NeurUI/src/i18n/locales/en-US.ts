@@ -485,6 +485,8 @@ export default {
   },
 
   chat: {
+    artifactUnavailable: 'Artifact content unavailable (it may have been moved or deleted)',
+    openInPreview: 'Open in preview',
     retrievalUnified: 'Unified Retrieval',
     retrievalMoE: 'MoE Router',
     retrievalCache: 'Cache Retrieval',
@@ -2981,12 +2983,20 @@ export default {
     manualPlaceholder: 'Describe the issue, or paste error details (active feedback)',
     manualSent: 'Feedback submitted. Thank you!',
   },
+
+  dock: {
+    closeTab: 'Close tab',
+    closeAll: 'Close all',
+    resizeHint: 'Drag to resize, double-click to reset',
+    empty: 'No preview open',
+    download: 'Download',
+    refresh: 'Refresh',
+    htmlSandboxHint: 'Sandboxed preview: scripts enabled, no same-origin access',
+    kindMarkdown: 'Markdown',
+    kindHtml: 'HTML',
+    kindImage: 'Image',
+    kindAudio: 'Audio',
+    kindText: 'Text',
+  },
+
 }
-
-
-
-
-
-
-
-

@@ -488,6 +488,8 @@ export default {
   },
 
   chat: {
+    artifactUnavailable: '产物内容不可用（可能已被移动或删除）',
+    openInPreview: '在预览中打开',
     retrievalUnified: '统一检索',
     retrievalMoE: 'MoE 专家路由',
     retrievalCache: '缓存检索',
@@ -2902,11 +2904,20 @@ export default {
     manualPlaceholder: '描述遇到的问题，或粘贴错误信息（用于主动反馈）',
     manualSent: '反馈已提交，感谢！',
   },
+
+  dock: {
+    closeTab: '关闭标签页',
+    closeAll: '全部关闭',
+    resizeHint: '拖拽调整宽度，双击重置',
+    empty: '暂无打开的预览',
+    download: '下载',
+    refresh: '刷新',
+    htmlSandboxHint: '沙箱预览：脚本已启用，无同源权限',
+    kindMarkdown: 'Markdown',
+    kindHtml: 'HTML',
+    kindImage: '图片',
+    kindAudio: '音频',
+    kindText: '文本',
+  },
+
 }
-
-
-
-
-
-
-
