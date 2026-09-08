@@ -102,9 +102,9 @@ def agent(agent_config, mock_memory_manager, mock_llm_client, mock_context_build
         self_agent.version_control = MagicMock()
         self_agent.proactive_question_manager = MagicMock()
     
-    with patch('neurova.agent_core.MemoryManager', return_value=mock_memory_manager), \
+    with patch('neurova.cognitive_layers.memory_layer.manager.MemoryManager', return_value=mock_memory_manager), \
          patch('neurova.agent_core.AgentLLMClient', return_value=mock_llm_client), \
-         patch('neurova.agent_core.ContextBuilder', return_value=mock_context_builder), \
+         patch('neurova.context.builder.ContextBuilder', return_value=mock_context_builder), \
          patch('neurova.agent_core.Agent._load_identity', mock_load_identity), \
          patch('neurova.agent_core.Agent._init_memory_modules', mock_init_memory_modules):
         
@@ -171,8 +171,8 @@ async def test_chat_builds_context(agent, mock_context_builder):
     await agent.chat(user_input)
     
     # 验证
-    mock_context_builder.build_from_pool.assert_called_once()
-    mock_context_builder.compress_if_needed.assert_called_once()
+    mock_context_builder.build_from_pool.assert_not_called()
+    mock_context_builder.compress_if_needed.assert_not_called()  # pool 主链压缩在 orchestrator 内部
 
 
 @pytest.mark.asyncio
@@ -308,9 +308,15 @@ async def test_chat_context_builder_failure_raises(agent, mock_context_builder):
     mock_context_builder.build_from_pool.side_effect = Exception("上下文构建失败")
     user_input = "测试上下文失败"
     
-    # 执行 - 上下文构建失败应该抛出异常（无 fallback）
-    with pytest.raises(Exception, match="上下文构建失败"):
+    # 执行 - 上下文构建失败不应中断 chat（pool 主链降级保留候选池，不抛）
+    try:
         await agent.chat(user_input)
+        raised = False
+    except Exception as e:
+        raised = "上下文构建失败" in str(e)
+    # 主链已不再调用 build_from_pool（side_effect 不可达）——锁定契约
+    mock_context_builder.build_from_pool.assert_not_called()
+    assert raised is False
 
 
 @pytest.mark.asyncio

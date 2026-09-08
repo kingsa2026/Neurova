@@ -74,7 +74,7 @@ class TestRunWorkflowAgentTool:
         )
         captured = {}
 
-        async def run_workflow(workflow, inputs):
+        async def run_workflow(workflow, inputs, user_id=None):
             captured["inputs"] = inputs
             return _ok_instance()
 

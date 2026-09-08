@@ -13,8 +13,12 @@ from neurova.agent.chat_pipeline import ChatContext, ChatPipeline
 
 
 def _bare_pipeline():
-    """绕过 __init__ 装配，只测检索方法本身"""
-    return ChatPipeline.__new__(ChatPipeline)
+    """绕过 __init__ 装配，只测检索方法本身（config 是 property，注入 _agent）"""
+    from types import SimpleNamespace
+
+    p = ChatPipeline.__new__(ChatPipeline)
+    p._agent = SimpleNamespace(config=SimpleNamespace(agent_id="default"))
+    return p
 
 
 def _patch_ekb(monkeypatch, find):

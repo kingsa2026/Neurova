@@ -42,6 +42,22 @@ class ProviderCompat:
     # 及绝大多数兼容网关支持；实测不支持的网关在此声明 False。
     include_stream_usage: bool = True
 
+    # 是否支持 reasoning_effort 请求参数（OpenAI o 系扩展，AMD RADEON 网关
+    # 2026-09-08 实测三模型均支持；未声明的网关不注入，防低容忍网关 400）。
+    # 开启后 chat/chat_stream 请求按 thinking_effort 映射注入
+    # （light→不传 / standard→medium / deep→high）。
+    supports_reasoning_effort: bool = False
+
+    # thinking_effort（前端深度选择器）→ reasoning_effort（API 参数）映射。
+    # 仅 supports_reasoning_effort=True 的 provider 消费。
+    _REASONING_EFFORT_MAP = {"light": None, "standard": "medium", "deep": "high"}
+
+    def map_reasoning_effort(self, thinking_effort: Optional[str]) -> Optional[str]:
+        """前端深度档位 → API reasoning_effort 值；light/未知/空 → None（不注入）。"""
+        if not self.supports_reasoning_effort:
+            return None
+        return self._REASONING_EFFORT_MAP.get((thinking_effort or "").strip().lower())
+
     def merged(self, overrides: Optional[dict]) -> "ProviderCompat":
         """显式声明覆盖静态表（字段级合并）。"""
         if not overrides:
@@ -59,6 +75,13 @@ PROVIDER_COMPAT: dict = {
     # 且对未知请求参数容忍度低——关闭 include_usage 请求体。
     "sensetime": ProviderCompat(include_stream_usage=False),
     "token.sensenova.cn": ProviderCompat(include_stream_usage=False),
+    # AMD RADEON 网关（developer.amd.com.cn/radeon，2026-09-08 实测）：
+    # DeepSeek-V4-Flash / DeepSeek-V4-Flash-Vision-Exp 默认不吐思考内容，
+    # 须显式带 reasoning_effort（high→522/213 字符实测）；Qwen3.8-Flash-Next
+    # 默认吐 delta.reasoning（LLMClient._pick_reasoning 已兼容字段名）。
+    # 思考档位：xhigh(默认)/high/medium…，reasoning.max_tokens 不支持。
+    "amd": ProviderCompat(include_stream_usage=True, supports_reasoning_effort=True),
+    "developer.amd.com.cn": ProviderCompat(include_stream_usage=True, supports_reasoning_effort=True),
 }
 
 

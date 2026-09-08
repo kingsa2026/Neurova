@@ -148,10 +148,12 @@ class MoERetrieverAdapter:
         try:
             # 调用 MoEMemoryRouter
             # BUG#1: MoEMemoryRouter.retrieve 是 async,必须 await(否则返回 coroutine,len() 抛 TypeError)
+            _cb = getattr(context, "progress_callback", None)
+            _kwargs = {"progress_cb": _cb} if _cb is not None else {}
             memories = await self._router.retrieve(
                 query=context.query,
                 limit=context.limit,
-                progress_cb=getattr(context, "progress_callback", None),
+                **_kwargs,
             )
 
             elapsed = time.monotonic() - start_time
