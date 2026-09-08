@@ -26,12 +26,14 @@ def _clear_registry():
 # ================================================================
 
 class TestCreateDefaultSkills:
-    def test_returns_registry_with_4_skills(self):
+    def test_returns_registry_with_5_skills(self):
+        """工厂产出 5 技能（4 executor 桥接 + github_push 注册断链修复后接入）"""
         from neurova.skills import create_default_skills
 
         registry = create_default_skills()
         assert isinstance(registry, SkillRegistry)
-        assert len(registry.get_skill_names()) == 4
+        assert len(registry.get_skill_names()) == 5
+        assert "github_push" in registry.get_skill_names()
 
     def test_contains_memory_skill(self):
         from neurova.skills import create_default_skills

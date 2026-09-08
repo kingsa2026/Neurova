@@ -11,17 +11,19 @@ TDD vertical slices:
 from pathlib import Path
 
 
-def test_skill_system_py_file_removed():
-    """A9.1: neurova/skill_system.py 僵尸文件应被删除
-
-    根因：neurova/skill_system.py（文件）与 neurova/skill_system/（目录包）共存，
-    Python 包目录优先于模块文件，导致 skill_system.py 完全不可达（僵尸文件）。
-    删除该文件消除维护陷阱。
-    """
+def test_skill_system_py_standalone_loadable():
+    """A9.1（2026-09-08 架构甄别后改写）：skill_system.py 是 ADR 0011 的
+    规范实现载体（SkillRegistry/get_skill_registry/create_default_skills），
+    由 skill_system/__init__ 经 spec_from_file_location 有意加载为
+    neurova.skill_system_module_standalone——不再是"僵尸"，而是生产依赖
+    （mcp_server_api/marketplace/skill/neurflow 四端点取 get_skill_registry）。
+    守卫锁定：文件必须存在且经 standalone 缓存键可加载。"""
     skill_system_py = Path(__file__).parent.parent.parent.parent / "neurova" / "skill_system.py"
-    assert not skill_system_py.exists(), (
-        f"僵尸文件 {skill_system_py} 仍存在，应删除以消除包遮蔽陷阱"
+    assert skill_system_py.exists(), (
+        f"standalone 载体 {skill_system_py} 不存在——get_skill_registry 加载链断裂"
     )
+    from neurova.skill_system import get_skill_registry
+    assert callable(get_skill_registry)
 
 
 def test_skill_result_exported_from_skill_system():

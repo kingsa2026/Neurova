@@ -22,7 +22,7 @@ from neurova.skill_system import Skill, SkillEvent, SkillRegistry, SkillResult
 
 class _EchoSkill(Skill):
     async def execute(self, params, context=None):
-        return SkillResult(success=True, data={"echo": params})
+        return SkillResult(success=True, output={"echo": params})
 
 
 class _BoomSkill(Skill):
@@ -115,7 +115,7 @@ class TestExecuteSkill:
         registry.register(_EchoSkill("demo"))
         result = await registry.execute_skill("demo", {"x": 1})
         assert result.success is True
-        assert result.data == {"echo": {"x": 1}}
+        assert result.output == {"echo": {"x": 1}}
 
     @pytest.mark.asyncio
     async def test_execute_missing_skill_fails(self, registry):

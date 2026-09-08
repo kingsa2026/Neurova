@@ -130,9 +130,9 @@ class TestLogFile:
         """测试 LOG_FILE 是 Path 对象"""
         assert isinstance(LOG_FILE, Path)
     
-    def test_log_file_parent_is_root(self):
-        """测试日志文件父目录是根目录"""
-        assert LOG_FILE.parent == ROOT_DIR
+    def test_log_file_parent_is_logs_dir(self):
+        """日志文件父目录是 logs/ 子目录（与 start.py:111 落点一致）"""
+        assert LOG_FILE.parent == ROOT_DIR / "logs"
 
 
 class TestHelperFunctions:
