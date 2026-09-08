@@ -136,7 +136,10 @@ PARAM_SCHEMAS: List[ParamSchema] = [
                 desc_key="memorySettings.paramvectorSearchMaxDf"),
 
     # ---- manager: 记忆管理器默认值 ----
-    ParamSchema("manager.new_memory_temperature", 100.0, "float", 0.0, 1000.0,
+    # 默认 65（2026-09-08 温度死锁修复）：原默认 100 ≥ 高温不衰减阈值 80，
+    # 新记忆从未进入衰减曲线工作区（真库实测 182/183 恒温 100.0），
+    # 热点页签=全量页签。65 落在衰减工作区（40~80），留存靠访问回升。
+    ParamSchema("manager.new_memory_temperature", 65.0, "float", 0.0, 1000.0,
                 "新记忆初始温度",
                 desc_key="memorySettings.parammanagerNewMemoryTemperature"),
     ParamSchema("manager.new_memory_importance", 50.0, "float", 0.0, 1000.0,
@@ -145,6 +148,9 @@ PARAM_SCHEMAS: List[ParamSchema] = [
     ParamSchema("manager.hot_memories_threshold", 80.0, "float", 0.0, 1000.0,
                 "高温记忆过滤阈值",
                 desc_key="memorySettings.parammanagerHotMemoriesThreshold"),
+    ParamSchema("manager.crystallize_cycles", 3, "int", 1, 100,
+                "记忆结晶所需晋升周期数（硬信号持续命中 N 轮后固化为结晶记忆）",
+                desc_key="memorySettings.parammanagerCrystallizeCycles"),
     ParamSchema("manager.decay_hours", 1.0, "float", 0.1, 24.0,
                 "衰减周期（小时）（保留参数：当前贝叶斯曲线按天 idle 计算，不直接消费）",
                 desc_key="memorySettings.parammanagerDecayHours"),

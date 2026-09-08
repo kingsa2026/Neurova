@@ -70,6 +70,7 @@ class AddMemoryRequest(BaseModel):
     """添加记忆请求"""
 
     content: str = Field(..., min_length=1, max_length=50000, description="记忆内容")
+    memory_type: Optional[str] = Field(default=None, description="记忆类型 (semantic/episodic/procedural/pattern/emotional/working，为空则默认 semantic)")
     category: Optional[str] = Field(default=None, description="记忆分类 (为空则自动推断)")
     is_important: Optional[bool] = Field(default=None, description="是否重要 (为空则自动判断)")
     is_crystallized: Optional[bool] = Field(default=None, description="是否固化 (为空则自动判断)")
@@ -126,6 +127,8 @@ def memory_to_dict(memory) -> dict:
                 "agent_id": str(memory.get("agent_id", "")),
                 "content": str(memory.get("content", "")),
                 "category": str(memory.get("category", "")),
+                # type: memory_type 的契约别名（前端类型列/页签过滤键）
+                "type": str(memory.get("memory_type", memory.get("type", "")) or ""),
                 "temperature": float(memory.get("temperature", 100.0) or 0.0),
                 "lifecycle_stage": str(memory.get("lifecycle_stage", "")),
                 # P1-9 来源信任级透传（缺失回退 agent，等价旧行为）
@@ -146,6 +149,8 @@ def memory_to_dict(memory) -> dict:
             "agent_id": getattr(memory, "agent_id", ""),
             "content": str(getattr(memory, "content", "")),
             "category": str(getattr(memory, "category", "")),
+            # type: memory_type 的契约别名（前端类型列/页签过滤键）
+            "type": str(getattr(memory, "memory_type", "") and getattr(memory, "memory_type").value),
             "temperature": float(getattr(memory, "temperature", 100.0)),
             "lifecycle_stage": str(getattr(memory, "lifecycle_stage", "")),
             "origin": _origin_to_str(getattr(memory, "origin", None)),

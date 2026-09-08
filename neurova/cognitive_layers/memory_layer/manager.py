@@ -373,6 +373,15 @@ class MemoryManager:
                         ),
                     )
                     self._memories[mem.id] = mem
+                    # 存量迁移（2026-09-08 结晶闭环）：历史实现把 is_crystallized
+                    # 只落 metadata、stage 停在 active，读取端永远查不到。
+                    # 装载时按 metadata 标记收敛 stage 并回写。
+                    if (
+                        mem.lifecycle_stage == LifecycleStage.ACTIVE
+                        and (mem.metadata or {}).get("is_crystallized") is True
+                    ):
+                        mem.lifecycle_stage = LifecycleStage.CRYSTALLIZED
+                        self._persist_memory(mem)
                     self._counter = max(
                         self._counter, int(mem.id.replace("mem_", "")) if mem.id.startswith("mem_") else 0
                     )
@@ -596,7 +605,8 @@ class MemoryManager:
     ) -> str:
         """存储一条记忆"""
         # 配置化默认值（memory-settings 配置页）: manager.new_memory_temperature /
-        # new_memory_importance。settings 默认 100/50 与历史硬编码一致；
+        # new_memory_importance。默认 65（温度死锁修复：原 100 ≥ 高温不衰减
+        # 阈值 80，新记忆从未真正参与衰减）；
         # 调用方显式传参时优先于配置。
         if temperature is None or importance is None:
             from neurova.cognitive_layers.memory_layer.settings_config import (
@@ -605,7 +615,7 @@ class MemoryManager:
 
             _cfg = get_memory_settings()
             if temperature is None:
-                temperature = float(_cfg.get("manager.new_memory_temperature", 100.0))
+                temperature = float(_cfg.get("manager.new_memory_temperature", 65.0))
             if importance is None:
                 importance = float(_cfg.get("manager.new_memory_importance", 50.0))
 
@@ -690,6 +700,15 @@ class MemoryManager:
                             perspective,
                         )
 
+            # 结晶写入侧闭环（2026-09-08 页签契约修复）：历史实现只写
+            # metadata["is_crystallized"]，而读取端（get_crystallized/to_dict）
+            # 只认 lifecycle_stage == CRYSTALLIZED，导致 API 声明的固化
+            # 永远不出现在结晶列表。写入时同步定 stage，两侧同源。
+            if final_metadata.get("is_crystallized") is True:
+                final_lifecycle_stage = LifecycleStage.CRYSTALLIZED
+            else:
+                final_lifecycle_stage = LifecycleStage.ACTIVE
+
             mem = Memory(
                 id=mem_id,
                 content=content,
@@ -701,6 +720,7 @@ class MemoryManager:
                 metadata=final_metadata,
                 perspective=parsed_perspective,
                 origin=parsed_origin,
+                lifecycle_stage=final_lifecycle_stage,
                 agent_id=self._agent_id,
                 neuser_id=self._eff_neuser_id(),
                 user_id=self._eff_user_id(),
@@ -781,6 +801,7 @@ class MemoryManager:
         limit: int = 10,
         min_temperature: float = 0.0,
         agent_wide: bool = False,
+        memory_type: Optional[str] = None,
         **kwargs,
     ) -> List[Dict[str, Any]]:
         """检索记忆
@@ -795,6 +816,9 @@ class MemoryManager:
 
         agent_wide=True: 管理/浏览口径, 基集改为 agent 全量(仅 agent_id 过滤);
         默认 False: 聊天检索, 保持生效三元组(`_scoped_memories`)三层隔离。
+
+        memory_type: 按记忆类型过滤（semantic/episodic/procedural/pattern/
+        emotional/working，管理页类型页签契约，2026-09-08）；非法值静默不匹配。
         """
         base = self._agent_memories() if agent_wide else self._scoped_memories()
         with self._lock:
@@ -805,6 +829,18 @@ class MemoryManager:
 
             # P-3 修复: 排除已遗忘记忆（forget soft-delete 后不应被 recall 返回）
             results = [m for m in results if m.lifecycle_stage != LifecycleStage.FORGOTTEN]
+
+            # 按类型过滤（页签契约：episodic/semantic/... → MemoryType 枚举）
+            if memory_type:
+                try:
+                    wanted_type = MemoryType(memory_type)
+                except (ValueError, KeyError):
+                    logger.warning("recall 收到非法 memory_type '%s'，按无匹配处理", memory_type)
+                    wanted_type = None
+                if wanted_type is not None:
+                    results = [m for m in results if m.memory_type == wanted_type]
+                else:
+                    results = []
 
             # 按分类过滤（支持合法枚举值 + 任意字符串标签）
             if category:
@@ -1562,9 +1598,7 @@ class MemoryManager:
                 items = all_items
 
             for mem in items:
-                # 已晋升/已结晶/已遗忘记忆跳过（幂等）
-                if (mem.metadata or {}).get("is_important", False):
-                    continue
+                # 已结晶/已遗忘记忆跳过（结晶终态，幂等）
                 if mem.lifecycle_stage in (LifecycleStage.CRYSTALLIZED, LifecycleStage.FORGOTTEN):
                     continue
 
@@ -1583,15 +1617,40 @@ class MemoryManager:
                 if not hits:
                     continue
 
-                # 晋升动作
                 mem.metadata = dict(mem.metadata or {})
-                mem.metadata["is_important"] = True
-                mem.metadata["promoted_at"] = now.isoformat(timespec="seconds")
-                # 温度强化至晋升底座（>=80 门上不回落）
-                if mem.temperature < 80.0:
-                    mem.temperature = 80.0
-                if mem.lifecycle_stage == LifecycleStage.ACTIVE:
-                    mem.lifecycle_stage = LifecycleStage.CONSOLIDATED
+                already_important = bool(mem.metadata.get("is_important", False))
+
+                # 结晶阈值 N（manager.crystallize_cycles，默认 3）：晋升本身
+                # 计硬信号第 1 次命中，此后每轮命中 +1，累计 N 次固化。
+                try:
+                    from neurova.cognitive_layers.memory_layer.settings_config import (
+                        get_memory_settings,
+                    )
+
+                    threshold = max(1, int(get_memory_settings().get("manager.crystallize_cycles", 3)))
+                except Exception:
+                    threshold = 3
+
+                if not already_important:
+                    # 晋升动作（硬信号第 1 次命中）
+                    mem.metadata["is_important"] = True
+                    mem.metadata["promoted_at"] = now.isoformat(timespec="seconds")
+                    hit_count = 1
+                    # 温度强化至晋升底座（>=80 门上不回落）
+                    if mem.temperature < 80.0:
+                        mem.temperature = 80.0
+                    if mem.lifecycle_stage == LifecycleStage.ACTIVE:
+                        mem.lifecycle_stage = LifecycleStage.CONSOLIDATED
+                else:
+                    # 结晶闭环（2026-09-08）：已晋升记忆继续满足硬信号 →
+                    # 累计命中 N 次后走完 CONSOLIDATED→CRYSTALLIZED 最后一步。
+                    hit_count = int(mem.metadata.get("upgrade_hits", 1)) + 1
+
+                mem.metadata["upgrade_hits"] = hit_count
+                if hit_count >= threshold:
+                    mem.lifecycle_stage = LifecycleStage.CRYSTALLIZED
+                    mem.metadata["crystallized_at"] = now.isoformat(timespec="seconds")
+                    logger.info("记忆结晶: %s（硬信号命中 %d 次）", mem.id, hit_count)
                 mem.updated_at = now
                 self._persist_memory(mem)
                 promoted += 1
