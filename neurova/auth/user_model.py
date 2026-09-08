@@ -33,6 +33,12 @@ class User:
         role: str = "user",
         status: str = "active",
         created_at: str = "",
+        login_count: int = 0,
+        failed_attempts: int = 0,
+        last_login: str = "",
+        locked_until: str = "",
+        updated_at: str = "",
+        reset_token: str = "",
     ):
         self.id = id
         self.username = username
@@ -41,6 +47,13 @@ class User:
         self.role = role
         self.status = status
         self.created_at = created_at
+        self.login_count = login_count
+        self.failed_attempts = failed_attempts
+        # 空串归一 None（NULL=未发生，时间戳语义才成立）
+        self.last_login = last_login or None
+        self.locked_until = locked_until or None
+        self.updated_at = updated_at
+        self.reset_token = reset_token or None
 
 
 class UserModel:
@@ -93,7 +106,8 @@ class UserModel:
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     login_count INTEGER DEFAULT 0,
                     failed_attempts INTEGER DEFAULT 0,
-                    last_login TEXT
+                    last_login TEXT,
+                    locked_until TEXT
                 )
             """)
 
@@ -102,13 +116,27 @@ class UserModel:
                 CREATE TABLE IF NOT EXISTS login_logs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
+                    username TEXT,
                     login_time TEXT DEFAULT CURRENT_TIMESTAMP,
                     ip_address TEXT,
                     user_agent TEXT,
                     success INTEGER DEFAULT 1,
+                    message TEXT,
                     FOREIGN KEY (user_id) REFERENCES users (id)
                 )
             """)
+
+            # 存量库幂等列迁移（新建表已含列，旧库补齐）
+            existing = {r[1] for r in cursor.execute("PRAGMA table_info(users)").fetchall()}
+            if "locked_until" not in existing:
+                cursor.execute("ALTER TABLE users ADD COLUMN locked_until TEXT")
+            existing_logs = {r[1] for r in cursor.execute("PRAGMA table_info(login_logs)").fetchall()}
+            if "message" not in existing_logs:
+                cursor.execute("ALTER TABLE login_logs ADD COLUMN message TEXT")
+            if "username" not in existing_logs:
+                cursor.execute("ALTER TABLE login_logs ADD COLUMN username TEXT")
+            if "reset_token" not in existing:
+                cursor.execute("ALTER TABLE users ADD COLUMN reset_token TEXT")
 
             conn.commit()
             conn.close()
@@ -146,6 +174,13 @@ class UserModel:
             if cursor.fetchone():
                 conn.close()
                 raise ValueError(f"Username '{username}' already exists")
+
+            # 检查邮箱是否已存在（同 fail-fast 契约）
+            if email:
+                cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
+                if cursor.fetchone():
+                    conn.close()
+                    raise ValueError(f"Email '{email}' already exists")
 
             # 插入新用户
             cursor.execute(
@@ -204,6 +239,12 @@ class UserModel:
                     role=row["role"],
                     status=row["status"],
                     created_at=row["created_at"],
+                    login_count=row["login_count"] if "login_count" in row.keys() else 0,
+                    failed_attempts=row["failed_attempts"] if "failed_attempts" in row.keys() else 0,
+                    last_login=row["last_login"] if "last_login" in row.keys() else "",
+                    locked_until=row["locked_until"] if "locked_until" in row.keys() else "",
+                    updated_at=row["updated_at"] if "updated_at" in row.keys() else "",
+                    reset_token=row["reset_token"] if "reset_token" in row.keys() else "",
                 )
             return None
 
@@ -238,6 +279,12 @@ class UserModel:
                     role=row["role"],
                     status=row["status"],
                     created_at=row["created_at"],
+                    login_count=row["login_count"] if "login_count" in row.keys() else 0,
+                    failed_attempts=row["failed_attempts"] if "failed_attempts" in row.keys() else 0,
+                    last_login=row["last_login"] if "last_login" in row.keys() else "",
+                    locked_until=row["locked_until"] if "locked_until" in row.keys() else "",
+                    updated_at=row["updated_at"] if "updated_at" in row.keys() else "",
+                    reset_token=row["reset_token"] if "reset_token" in row.keys() else "",
                 )
             return None
 
@@ -272,6 +319,12 @@ class UserModel:
                     role=row["role"],
                     status=row["status"],
                     created_at=row["created_at"],
+                    login_count=row["login_count"] if "login_count" in row.keys() else 0,
+                    failed_attempts=row["failed_attempts"] if "failed_attempts" in row.keys() else 0,
+                    last_login=row["last_login"] if "last_login" in row.keys() else "",
+                    locked_until=row["locked_until"] if "locked_until" in row.keys() else "",
+                    updated_at=row["updated_at"] if "updated_at" in row.keys() else "",
+                    reset_token=row["reset_token"] if "reset_token" in row.keys() else "",
                 )
             return None
 
@@ -328,6 +381,12 @@ class UserModel:
                         role=row["role"],
                         status=row["status"],
                         created_at=row["created_at"],
+                        login_count=row["login_count"] if "login_count" in row.keys() else 0,
+                        failed_attempts=row["failed_attempts"] if "failed_attempts" in row.keys() else 0,
+                        last_login=row["last_login"] if "last_login" in row.keys() else "",
+                        locked_until=row["locked_until"] if "locked_until" in row.keys() else "",
+                        updated_at=row["updated_at"] if "updated_at" in row.keys() else "",
+                        reset_token=row["reset_token"] if "reset_token" in row.keys() else "",
                     )
                 )
 
@@ -500,12 +559,19 @@ class UserModel:
             logger.error("Failed to increment login count: %s", e)
             return False
 
-    def increment_failed_attempts(self, user_id: int) -> bool:
+    def increment_failed_attempts(
+        self, user_id: int, max_attempts: int = 5, lock_duration_minutes: int = 15
+    ) -> bool:
         """
-        增加用户失败尝试次数
+        增加用户失败尝试次数；达到 max_attempts 后锁定账户。
+
+        暴力破解防护：此前实现只累加计数、无锁定分支（测试描述的安全
+        设计从未落地），失败次数无限累积却永不停机。
 
         Args:
             user_id: 用户ID
+            max_attempts: 允许的最大连续失败次数（达到即锁定）
+            lock_duration_minutes: 锁定时长（分钟）
 
         Returns:
             操作是否成功
@@ -516,12 +582,26 @@ class UserModel:
 
             cursor.execute(
                 """
-                UPDATE users 
+                UPDATE users
                 SET failed_attempts = failed_attempts + 1
                 WHERE id = ?
             """,
                 (user_id,),
             )
+
+            failed = cursor.execute(
+                "SELECT failed_attempts FROM users WHERE id = ?", (user_id,)
+            ).fetchone()[0]
+
+            if failed >= max_attempts:
+                locked_until = (
+                    datetime.datetime.now()
+                    + datetime.timedelta(minutes=lock_duration_minutes)
+                ).isoformat()
+                cursor.execute(
+                    "UPDATE users SET locked_until = ? WHERE id = ?",
+                    (locked_until, user_id),
+                )
 
             conn.commit()
             conn.close()
@@ -532,7 +612,15 @@ class UserModel:
             logger.error("Failed to increment failed attempts: %s", e)
             return False
 
-    def log_login(self, user_id: int, ip_address: str = None, user_agent: str = None, success: bool = True) -> bool:
+    def log_login(
+        self,
+        user_id: int,
+        username: str = None,
+        ip_address: str = None,
+        success: bool = True,
+        message: str = None,
+        user_agent: str = None,
+    ) -> bool:
         """
         记录用户登录日志
 
@@ -551,10 +639,17 @@ class UserModel:
 
             cursor.execute(
                 """
-                INSERT INTO login_logs (user_id, ip_address, user_agent, success)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO login_logs (user_id, username, ip_address, user_agent, success, message)
+                VALUES (?, ?, ?, ?, ?, ?)
             """,
-                (user_id, ip_address, user_agent, 1 if success else 0),
+                (
+                    user_id,
+                    username,
+                    ip_address,
+                    user_agent,
+                    1 if success else 0,
+                    message,
+                ),
             )
 
             conn.commit()
@@ -566,7 +661,7 @@ class UserModel:
             logger.error("Failed to log login: %s", e)
             return False
 
-    def get_login_logs(self, user_id: int, limit: int = 50) -> list:
+    def get_login_logs(self, user_id: Optional[int] = None, limit: int = 50) -> list:
         """
         获取用户登录日志
 
@@ -581,15 +676,26 @@ class UserModel:
             conn = self._get_conn()
             cursor = conn.cursor()
 
-            cursor.execute(
-                """
-                SELECT * FROM login_logs 
-                WHERE user_id = ? 
-                ORDER BY login_time DESC 
-                LIMIT ?
-            """,
-                (user_id, limit),
-            )
+            # user_id=None → 全量日志（审计查询语义）
+            if user_id is None:
+                cursor.execute(
+                    """
+                    SELECT * FROM login_logs
+                    ORDER BY login_time DESC
+                    LIMIT ?
+                """,
+                    (limit,),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT * FROM login_logs
+                    WHERE user_id = ?
+                    ORDER BY login_time DESC
+                    LIMIT ?
+                """,
+                    (user_id, limit),
+                )
 
             rows = cursor.fetchall()
             conn.close()
@@ -600,10 +706,12 @@ class UserModel:
                     {
                         "id": row["id"],
                         "user_id": row["user_id"],
+                        "username": row["username"] if "username" in row.keys() else "",
                         "login_time": row["login_time"],
                         "ip_address": row["ip_address"],
                         "user_agent": row["user_agent"],
                         "success": bool(row["success"]),
+                        "message": row["message"] if "message" in row.keys() else "",
                     }
                 )
 
@@ -633,11 +741,27 @@ class UserModel:
             if user.status != "active":
                 return None
 
+            # 暴力破解防护：锁定期内拒绝认证（locked_until 未过）
+            if user.locked_until:
+                try:
+                    if datetime.datetime.fromisoformat(user.locked_until) > datetime.datetime.now():
+                        logger.warning("用户 %s 处于锁定期（至 %s），拒绝认证", username, user.locked_until)
+                        return None
+                except ValueError:
+                    logger.warning("locked_until 格式非法，忽略锁定检查: %s", user.locked_until)
+
             # 验证密码
             from neurova.api.auth import verify_password
 
             if not verify_password(password, user.password_hash):
                 return None
+
+            # 认证成功：清零失败计数并清锁定（防锁定到期后首次成功仍残留计数）
+            if user.failed_attempts or user.locked_until:
+                try:
+                    self._clear_lock_state(user.id)
+                except Exception as e:
+                    logger.warning("清除锁定状态失败: %s", e)
 
             # 返回用户信息字典
             return {
@@ -653,3 +777,15 @@ class UserModel:
         except Exception as e:
             logger.error("Failed to authenticate user: %s", e)
             return None
+
+    def _clear_lock_state(self, user_id: int) -> None:
+        """认证成功后清零失败计数与锁定时间戳。"""
+        conn = self._get_conn()
+        try:
+            conn.execute(
+                "UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?",
+                (user_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
