@@ -103,6 +103,7 @@ class ModuleLib:
         # 模块存储
         self._modules: typing.Dict[str, Module] = {}
         self._descriptors: typing.Dict[str, ModuleDescriptor] = {}
+        self._module_classes: typing.Dict[str, Type[Module]] = {}
 
         # 加载路径
         self._load_paths: typing.List[Path] = []
@@ -179,12 +180,30 @@ class ModuleLib:
                 return False
 
             self._descriptors[module_id] = descriptor
+            if module_class is not None:
+                self._module_classes[module_id] = module_class
 
             # 更新依赖图
             self._dependency_graph[module_id] = descriptor.dependencies.copy()
 
             logger.info("Registered module: %s", module_id)
             return True
+
+    def _get_dependents(self, module_id: str) -> typing.List[str]:
+        """
+        查询依赖指定模块的其他模块
+
+        参数:
+            module_id: 模块 ID
+
+        返回:
+            List[str]: 依赖该模块的模块 ID 列表
+        """
+        return [
+            mid
+            for mid, deps in self._dependency_graph.items()
+            if mid != module_id and module_id in deps
+        ]
 
     def unregister_async(self, module_id: str) -> typing.Coroutine:
         """
@@ -229,6 +248,7 @@ class ModuleLib:
                 del self._modules[module_id]
 
             del self._descriptors[module_id]
+            self._module_classes.pop(module_id, None)
             if module_id in self._dependency_graph:
                 del self._dependency_graph[module_id]
 
@@ -297,6 +317,11 @@ class ModuleLib:
         返回:
             Optional[Type[Module]]: 模块类
         """
+        # 优先返回注册时显式登记的模块类
+        registered = self._module_classes.get(descriptor.module_id)
+        if registered is not None:
+            return registered
+
         # 尝试从入口点加载
         if descriptor.entry_point:
             try:

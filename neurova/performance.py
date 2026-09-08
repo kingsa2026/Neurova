@@ -16,6 +16,12 @@ from neurova.core.cache import MemoryCache
 logger = get_logger(__name__)
 
 
+def _default_cache_key(args: Tuple, kwargs: Dict) -> str:
+    """默认缓存键：对参数元组做稳定序列化后摘要"""
+    key_repr = repr((args, sorted(kwargs.items())))
+    return hashlib.md5(key_repr.encode("utf-8")).hexdigest()
+
+
 def cached(ttl: float = 300.0, max_size: int = 1000, key_func: Callable = None):
     """
     缓存装饰器
@@ -30,7 +36,7 @@ def cached(ttl: float = 300.0, max_size: int = 1000, key_func: Callable = None):
     """
 
     def decorator(func: Callable) -> Callable:
-        cache = MemoryCache(max_size=max_size, default_ttl=ttl)
+        cache = MemoryCache(capacity=max_size, default_ttl=ttl)
 
         @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -38,7 +44,7 @@ def cached(ttl: float = 300.0, max_size: int = 1000, key_func: Callable = None):
             if key_func:
                 cache_key = key_func(*args, **kwargs)
             else:
-                cache_key = cache._generate_key(*args, **kwargs)
+                cache_key = _default_cache_key(args, kwargs)
 
             # 尝试从缓存获取
             cached_value = cache.get(cache_key)
@@ -59,7 +65,7 @@ def cached(ttl: float = 300.0, max_size: int = 1000, key_func: Callable = None):
             if key_func:
                 cache_key = key_func(*args, **kwargs)
             else:
-                cache_key = cache._generate_key(*args, **kwargs)
+                cache_key = _default_cache_key(args, kwargs)
 
             # 尝试从缓存获取
             cached_value = cache.get(cache_key)
@@ -83,7 +89,7 @@ def cached(ttl: float = 300.0, max_size: int = 1000, key_func: Callable = None):
         # 添加缓存管理方法
         wrapper.cache = cache
         wrapper.cache_clear = cache.clear
-        wrapper.cache_stats = cache.stats
+        wrapper.cache_stats = cache.get_stats
 
         return wrapper
 

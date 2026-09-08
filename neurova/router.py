@@ -232,6 +232,12 @@ class MessageRouter:
             params = {"raw": params_str}
 
         # 执行 Skill
+        # 沙箱根注入（2026-09-08 相对路径乱放根因修复）：file_operation
+        # 相对路径锚定 agent 工作区（router 持有 agent 引用；无 agent 时
+        # 回落 "."，技能面按 CWD 解析保持旧语义）
+        if skill_name == "file_operation":
+            _ws = getattr(self._agent, "workspace_path", "")
+            params = {**(params or {}), "_base_dir": str(_ws) if _ws else "."}
         result = await self._skill_registry.execute_skill(skill_name, params, message.metadata)
 
         return RouteResult(
