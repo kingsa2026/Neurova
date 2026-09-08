@@ -424,10 +424,12 @@
           <span>{{ retrievalStatus }}</span>
         </div>
         <!-- Composer 一体化外壳（参考图：textarea + 工具条同框，玻璃容器承载边框） -->
-        <div class="nr-composer-shell" :class="{ 'is-focus': composerFocused, 'has-queue-cards': messageQueue.items.length > 0, 'is-editing-queued': !!editingQueuedId }">
-          <!-- 顶入卡片（DeepSeek 截图对齐）：composer 内嵌消息队列 -->
+        <div class="nr-composer-shell" :class="{ 'is-focus': composerFocused, 'has-queue-cards': currentSessionQueued.length > 0, 'is-editing-queued': !!editingQueuedId }">
+          <!-- 顶入卡片（DeepSeek 截图对齐）：composer 内嵌消息队列。
+               审计③：只展示当前会话的排队项（全局 store 按会话过滤） -->
           <QueuedMessageCards
             :editing-queued-id="editingQueuedId"
+            :items="currentSessionQueued"
             @send-now="sendQueuedNow"
             @edit="startQueuedEdit"
           />
@@ -795,6 +797,15 @@
       </div>
     </a-modal>
 
+    <!-- 计划模式面板（/plan）：澄清问答 → MD 计划预览 → 审批执行 -->
+    <PlanPanel
+      :open="planPanelOpen"
+      :agent-id="agentId || 'default'"
+      :initial-request="planRequestSeed"
+      @close="planPanelOpen = false"
+      @approved="onPlanApproved"
+    />
+
     <!-- 流式实时语音：常驻隐藏 live 播放器。src 逐句切换，播完自动推进下一句 -->
     <audio
       class="nr-live-tts-audio"
@@ -840,6 +851,7 @@ import SubAgentPanel, { type SubAgentWindowState } from '@/components/chat/SubAg
 import ComputerUsePanel from '@/components/chat/ComputerUsePanel.vue'
 import ContextUsageIndicator from '@/components/chat/ContextUsageIndicator.vue'
 import QueuedMessageCards from '@/components/chat/QueuedMessageCards.vue'
+import PlanPanel from '@/components/chat/PlanPanel.vue'
 import CrossSessionSearch from '@/components/chat/CrossSessionSearch.vue'
 import { useComputerPanel, isComputerTool, } from '@/composables/useComputerPanel'
 import { toolCardVariant, variantIcon, variantColor } from '@/utils/toolCardVariant'
@@ -860,6 +872,7 @@ import {
   deriveStreamPhase,
   type ChatStep,
 } from '@/utils/chatSteps'
+import { createQueueDrainer } from '@/utils/queueDrain'
 import type { ThinkingEffort } from '@/composables/useThinkingEffort'
 import { useSessionSync } from '@/composables/useSessionSync'
 import { listModels } from '@/api/modules/models'
@@ -1032,6 +1045,18 @@ const ttsAvailable = ref(true) // assume available, verify on mount
 const lightbox = reactive({ open: false, src: '', alt: '' })
 
 const renameModal = reactive({ open: false, sessionId: '', title: '' })
+
+// 计划模式（/plan）：面板开关 + 初始需求种子；会话态收敛在 PlanPanel 内部
+const planPanelOpen = ref(false)
+const planRequestSeed = ref('')
+
+function onPlanApproved(executePrompt: string): void {
+  planPanelOpen.value = false
+  // 审批通过 → 计划全文（execute_prompt）走 sendMessage 原链路执行
+  // （含流式/排队/锁互斥全部既有语义，零管线改动）
+  chatStore.setInputText(executePrompt)
+  void sendMessage()
+}
 
 // 治理审批弹窗（P0: ASK 人工确认）
 const approvalModal = reactive({
@@ -1265,14 +1290,26 @@ function gotoModelsManage(): void {
 // 斜杠命令面板（QwenPaw slash commands 对齐）
 // 输入框以 "/" 开头时弹出本地命令面板，Enter 执行 / Tab 补全 / ↑↓ 导航。
 // 纯前端交互：命令落地为既有函数（新会话/清屏/历史清空），不发后端。
+// /plan 例外：打开计划模式交互面板（后端 LLM 澄清问答 → MD 计划 → 审批）。
 // ---------------------------------------------------------------------------
 interface SlashCommand {
   name: string
   descKey: string
-  run: () => void | Promise<void>
+  /** rawInput = 清输入框前的完整原文（带参命令 /plan xxx 自取参数） */
+  run: (rawInput: string) => void | Promise<void>
 }
 
 const slashCommands: SlashCommand[] = [
+  {
+    name: '/plan',
+    descKey: 'chat.slashPlan',
+    run: (rawInput: string) => {
+      // /plan 后的剩余文本作为初始需求（可空，面板内可再补）
+      const seed = rawInput.replace(/^\/plan\b\s*/i, '').trim()
+      planRequestSeed.value = seed
+      planPanelOpen.value = true
+    },
+  },
   {
     name: '/new',
     descKey: 'chat.slashNew',
@@ -1301,7 +1338,9 @@ const slashIndex = ref(0)
 const slashFiltered = computed<SlashCommand[]>(() => {
   const q = inputText.value.trim().toLowerCase()
   if (!q.startsWith('/')) return []
-  return slashCommands.filter((c) => c.name.startsWith(q))
+  // /plan 等带参命令：首词命中即弹面板（参数部分不算入前缀匹配）
+  const firstWord = q.split(/\s+/)[0]
+  return slashCommands.filter((c) => c.name.startsWith(firstWord))
 })
 
 function onSlashInput(): void {
@@ -1317,8 +1356,10 @@ async function runSlashCommand(cmd?: SlashCommand): Promise<void> {
   const target = cmd ?? slashFiltered.value[slashIndex.value]
   closeSlashPanel()
   if (!target) return
+  // /plan 带参命令：先快照原文（含参数）再清输入框，run() 内自取种子
+  const rawInput = inputText.value
   chatStore.setInputText('')
-  await target.run()
+  await target.run(rawInput)
 }
 
 function onSlashKeydown(e: KeyboardEvent): boolean {
@@ -1960,16 +2001,23 @@ function cancelQueuedEdit(): void {
   nextTick(() => textareaRef.value?.focus())
 }
 
-/** 「↑ 立即」：指定排队项插到队首。空闲则立即续发；流式中只置顶
- * （drain 会被 sendMessage 的流式入队分支吃掉，必须等当前轮 done 续发）。 */
+/** 「↑ 立即」：指定排队项插到队首。空闲则立即续发（force 入口，审计⑯：
+ * paused 也放行首条并给出反馈）；流式中只置顶（等当前轮 done 续发）。 */
 function sendQueuedNow(id: string): void {
   messageQueue.moveToTop(id)
-  if (isStreaming.value || _draining.value) {
+  if (isStreaming.value || _queueDrainer.isDraining()) {
     uiMessage.info(t('chat.queueTopAuto'))
     return
   }
-  void drainMessageQueue()
+  void drainMessageQueue(true, currentSessionId.value)
 }
+
+/** 当前会话的排队卡片（审计③：全局 store 按会话过滤，跨会话项不混入）。 */
+const currentSessionQueued = computed(() =>
+  messageQueue.items.filter(
+    (i) => !currentSessionId.value || i.sessionId === currentSessionId.value,
+  ),
+)
 
 // 编辑目标被删除/出队 → 自动退出编辑态（防悬挂高亮与错误 placeholder）
 watch(
@@ -2012,33 +2060,37 @@ function switchAfterRateLimit(modelValue: string): void {
 }
 
 /**
- * 队列续发（补课 P3-b）：当前轮 done 后取下一条 pending 发送。
- * 递归经由 sendMessage → 流式 finally → drainMessageQueue 链自然排空。
- * markSending/markSent 失败说明状态竞争（如用户手动移除）——静默跳过。
+ * 队列续发（审计①③⑯ 修复，2026-09-08）：queueDrain runner 驱动。
+ * - ① P0 续发死锁：旧实现外层 drain 持 _draining 守卫 await sendMessage，
+ *   sendMessage finally 的递归 drain 被守卫吞掉 → 排队 ≥2 条只发 1 条。
+ *   runner 内单层 while 循环排空，递归调用降级 no-op。
+ * - ③ 会话隔离：drain 启动时快照发起会话，takeNext 只取该会话排队项——
+ *   流中切会话后不泄漏到新会话；会话无排队项自然空转。
+ * - ⑯ paused 语义：自动续发尊重暂停；用户点「立即」走 force 入口。
  */
-const _draining = ref(false)
-async function drainMessageQueue(): Promise<void> {
-  if (_draining.value || messageQueue.paused) return
-  const item = messageQueue.next()
-  if (!item) return
-  _draining.value = true
-  try {
-    if (!messageQueue.markSending(item.id)) return
+let _drainSessionId: string | null = null
+const _queueDrainer = createQueueDrainer({
+  isPaused: () => messageQueue.paused,
+  takeNext: () => {
+    const item = messageQueue.next(_drainSessionId || undefined)
+    return item ? { id: item.id, text: item.text } : undefined
+  },
+  markSending: (id) => messageQueue.markSending(id),
+  markSent: (id) => messageQueue.markSent(id),
+  markFailed: (id, error) => messageQueue.markFailed(id, error),
+  send: async (text) => {
     // drain 要占用输入框通道传文案，编辑中的草稿先退出（防覆盖/误提交）
     if (editingQueuedId.value) cancelQueuedEdit()
-    chatStore.setInputText(item.text)
-    try {
-      // BUG-21 修复：sendMessage 原先吞掉一切错误恒不抛——catch 死代码，
-      // 失败消息被 markSent。现按返回值区分成功/失败。
-      const ok = await sendMessage()
-      if (ok) messageQueue.markSent(item.id)
-      else messageQueue.markFailed(item.id, 'send failed')
-    } catch (err: any) {
-      messageQueue.markFailed(item.id, err?.message || 'send failed')
-    }
-  } finally {
-    _draining.value = false
-  }
+    chatStore.setInputText(text)
+    // 审计⑪：sendMessage 的空输入/无 agent 等早退分支返回 undefined，
+    // 一律按失败处理（不出队）
+    return (await sendMessage()) === true
+  },
+})
+
+async function drainMessageQueue(force = false, sessionId?: string | null): Promise<void> {
+  _drainSessionId = sessionId ?? activeStreamSessionId ?? currentSessionId.value
+  await _queueDrainer.drain(force)
 }
 
 /** 当前流所属会话快照（BUG-2 修复：usage/drain 用发起时的 session_id，
@@ -2054,9 +2106,10 @@ async function sendMessage() {
   // 避免队列项携带上传会话）。done 后 drainMessageQueue 自动续发。
   if (isStreaming.value) {
     if (text && pendingFiles.value.length === 0 && agentId.value) {
-      messageQueue.enqueue(text)
+      // 审计③：排队项绑定入队时会话——续发只进原会话，不跨会话泄漏
+      messageQueue.enqueue(text, currentSessionId.value || undefined)
       chatStore.setInputText('')
-      uiMessage.info(t('chat.queued', { n: messageQueue.pendingCount }))
+      uiMessage.info(t('chat.queued', { n: messageQueue.countPending(currentSessionId.value || undefined) }))
     }
     return
   }
@@ -2219,13 +2272,18 @@ async function sendMessage() {
     }
   }
 
+  // 审计⑪：失败路径必须返回 false——旧实现 catch 后落入恒 return true，
+  // drain 把排队项 markSent 出队（BUG-21 修复只覆盖了早期 return 路径）
+  let _sendOk = true
   try {
     await readStream()
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      // 用户主动停止
+      // 用户主动停止：本轮已终止，视为失败（不算成功出队排队项）
+      _sendOk = false
     } else if (handleRateLimit(err)) {
       // 补课 A1：429 → 横幅一键切模型（不计入消息正文错误）
+      _sendOk = false
     } else {
       // 网络层中断且已收到至少一个事件 → 重连快进一次（HTTP 错误/中止不重连）
       const networkDrop =
@@ -2236,10 +2294,12 @@ async function sendMessage() {
         } catch (retryErr: any) {
           if (retryErr.name !== 'AbortError') {
             streamingMsg.content += `\n\n**Error:** ${retryErr.message || 'Stream failed.'}`
+            _sendOk = false
           }
         }
       } else {
         streamingMsg.content += `\n\n**Error:** ${err.message || 'Stream failed.'}`
+        _sendOk = false
       }
     }
   } finally {
@@ -2252,11 +2312,12 @@ async function sendMessage() {
     // 补课 P3-b：当前轮结束 → 自动续发下一条排队消息（暂停时不续发）
     // BUG-2 修复：仅当用户仍停留在发起会话时才 drain，
     // 否则排队消息会被发进刚切到的新会话
+    // （审计③：runner 的 takeNext 按发起会话快照过滤，双保险）
     if (currentSessionId.value === activeStreamSessionId) {
-      await drainMessageQueue()
+      await drainMessageQueue(false, activeStreamSessionId)
     }
   }
-  return true
+  return _sendOk
 }
 
 /** Process a single SSE event and update the assistant message. */
@@ -2337,8 +2398,15 @@ function processSSEEvent(event: any, msg: ChatMessage) {
         const last = msg.toolCalls[msg.toolCalls.length - 1]
         last.result = resultText
       }
-      // 步骤化时间轴：结果落到最近活跃工具段并封口
-      if (msg.steps) attachToolResult(msg.steps, resultText, event.task_name ? String(event.task_name) : undefined)
+      // 步骤化时间轴：结果按工具名归属匹配段并封口（审计⑫：并行工具时
+      // "最近活跃段"会把 A 的结果挂到 B——携带工具名供按名匹配）
+      if (msg.steps)
+        attachToolResult(
+          msg.steps,
+          resultText,
+          event.task_name ? String(event.task_name) : undefined,
+          event.name || event.tool_name ? String(event.name || event.tool_name) : undefined,
+        )
       // legacy compat
       msg.toolResult = resultText
       if (isComputerTool(event.name || '')) {

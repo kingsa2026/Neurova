@@ -81,8 +81,37 @@ export function appendToolStep(steps: ChatStep[], name: string, args: string, ta
   return steps
 }
 
-/** 给尾部的活跃工具段落结果（tool_result 语义：只落在最近一个活跃工具段）。 */
-export function attachToolResult(steps: ChatStep[], result: string, taskName?: string): ChatStep[] {
+/**
+ * 给工具段落结果（tool_result 语义）。
+ * 审计⑫：并行工具调用 call A → call B → result A → result B 时，旧实现
+ * "最近活跃段"会把 A 的结果挂到 B、B 的经 !s.result 回填 A——交叉错挂。
+ * 传入 toolName 时优先按名匹配未封口段（同段名匹配最早未消费段）；
+ * 无 toolName 或无命中时回退旧语义。
+ */
+export function attachToolResult(
+  steps: ChatStep[],
+  result: string,
+  taskName?: string,
+  toolName?: string,
+): ChatStep[] {
+  if (toolName) {
+    // 按名匹配：未封口优先（活跃段），其次最早未消费段
+    for (const s of steps) {
+      if (s.kind === 'tool' && s.name === toolName && s.active) {
+        s.result = result
+        if (taskName) s.taskName = taskName
+        finishStep(s)
+        return steps
+      }
+    }
+    for (const s of steps) {
+      if (s.kind === 'tool' && s.name === toolName && !s.result) {
+        s.result = result
+        if (taskName) s.taskName = taskName
+        return steps
+      }
+    }
+  }
   for (let i = steps.length - 1; i >= 0; i--) {
     const s = steps[i]
     if (s.kind === 'tool' && s.active) {
