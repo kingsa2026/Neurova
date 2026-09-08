@@ -7,12 +7,18 @@
  * textarea）/ 🗑（取消顶入）；failed 附 ↻ 重试，sending 锁定无动作。
  * remove/retry/reorder 直接走 store；send-now（需父级 drain 续发）与
  * edit（需父级把文本回填 composer）emit 给父级。
+ * 审计③：渲染列表由父级按当前会话过滤后传入（items prop）——全局 store
+ * 中的跨会话排队项不得混入本会话 composer。
  */
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueue'
 
-const props = defineProps<{ editingQueuedId: string | null }>()
+const props = defineProps<{
+  editingQueuedId: string | null
+  /** 当前会话的排队项（父级过滤后传入） */
+  items: QueuedMessage[]
+}>()
 
 const emit = defineEmits<{
   (e: 'send-now', id: string): void
@@ -33,7 +39,7 @@ function onDrop(targetId: string): void {
   dragId.value = null
   if (!from || from === targetId) return
   // reorder 只吃 pending 全序：把拖动项插到目标项当前位
-  const pendingIds = queue.items.filter((i) => i.status === 'pending').map((i) => i.id)
+  const pendingIds = props.items.filter((i) => i.status === 'pending').map((i) => i.id)
   const fromIdx = pendingIds.indexOf(from)
   const toIdx = pendingIds.indexOf(targetId)
   if (fromIdx < 0 || toIdx < 0) return
@@ -43,9 +49,9 @@ function onDrop(targetId: string): void {
 </script>
 
 <template>
-  <div v-if="queue.items.length > 0" class="nr-queue-cards" role="list">
+  <div v-if="props.items.length > 0" class="nr-queue-cards" role="list">
     <div
-      v-for="qi in queue.items"
+      v-for="qi in props.items"
       :key="qi.id"
       class="nr-queue-card"
       :class="{
