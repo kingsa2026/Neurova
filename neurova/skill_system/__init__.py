@@ -57,7 +57,18 @@ def __getattr__(name: str) -> Any:
         AttributeError: 属性不存在
     """
     # 导入核心类
-    if name == "SkillPoolManager":
+    if name == "SkillResult":
+        # 2026-09-08 断链修复：github_push/skill.py 等调用方经
+        # `from neurova.skill_system import SkillResult` 取类，旧路径落到
+        # 遮蔽文件里的独立定义（≠ skills.executor 规范类）→ 双类 split-brain。
+        # 统一代理到规范 SkillResult。
+        from neurova.skills.executor import SkillResult
+
+        return SkillResult
+    # SkillEvent 不在此代理：skills.events 门面反向 from neurova.skill_system
+    # import SkillEvent——在此引 events 会循环导入（partially initialized）。
+    # SkillEvent 走下方 standalone 加载分支，与 events 门面同源同对象。
+    elif name == "SkillPoolManager":
         from neurova.skill_system.skill_pool_manager import SkillPoolManager
 
         return SkillPoolManager
@@ -265,6 +276,14 @@ class SkillResult:
         self.data = data
         self.error = error
         self.execution_time = execution_time
+
+
+# 2026-09-08 断链修复：模块顶层直连定义的 SkillResult 与 __getattr__ 代理分支
+# 并存时，顶层定义优先于延迟加载——调用方拿到的是本地类而非
+# neurova.skills.executor 规范类（双类 split-brain，守卫测试实测不同一）。
+# 删除顶层定义、顶层直接 re-export 规范类，保证两条路径同源。
+from neurova.skills.executor import SkillResult as SkillResult  # noqa: E402,F811
+from neurova.skill_system_module_standalone import Skill as Skill  # noqa: E402,F811
 
 
 class SkillInfo:

@@ -64,14 +64,20 @@ class TestSkillServiceActivated:
     """验证 SkillNeedAnalyzer 持有 SkillService，_install_skill 委托真实安装。"""
 
     def test_skill_need_analyzer_has_skill_service(self):
-        """SkillNeedAnalyzer 应持有 SkillService 实例。"""
+        """SkillNeedAnalyzer 应能产出 SkillService 实例。
+
+        ADR 0012：skill_service 为惰性构建（避免无参构造碰磁盘），
+        构造后为 None；守卫锁定 _get_skill_service() 可产出真实实例。
+        """
         from neurova.skills.skill_need_analyzer import SkillNeedAnalyzer
         from neurova.skills.skill_service import SkillService
 
         analyzer = SkillNeedAnalyzer()
         assert hasattr(analyzer, "skill_service"), "SkillNeedAnalyzer 应有 skill_service 属性"
-        assert isinstance(getattr(analyzer, "skill_service"), SkillService), (
-            f"期望 SkillService 实例，实际 {type(getattr(analyzer, 'skill_service', None)).__name__}"
+        assert analyzer.skill_service is None, "ADR 0012 惰性契约：构造后应为 None"
+        service = analyzer._get_skill_service()
+        assert isinstance(service, SkillService), (
+            f"期望 SkillService 实例，实际 {type(service).__name__}"
         )
 
     def test_install_skill_not_stub(self):

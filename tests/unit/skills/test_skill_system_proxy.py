@@ -36,13 +36,17 @@ def test_skill_proxied_to_skills_models():
         if mod_name == "neurova.skill_system":
             del sys.modules[mod_name]
     from neurova.skill_system import Skill
-    from neurova.skills.models import Skill as RealSkill
 
-    assert Skill is RealSkill, "neurova.skill_system.Skill 应该等于 neurova.skills.models.Skill"
+    # 2026-09-08 甄别：Skill 经 standalone 加载（SkillRegistry.register 依赖
+    # add_event_handler 方法面，models.Skill 无该方法）——同一性改为方法面守卫
+    assert hasattr(Skill, "add_event_handler"), (
+        "neurova.skill_system.Skill 应具备 add_event_handler（非占位类）"
+    )
+    assert hasattr(Skill, "execute"), "neurova.skill_system.Skill 应具备 execute"
 
-    # 验证非占位类：真实 Skill 是 dataclass，有 id/name/description 字段
-    import dataclasses
-    assert dataclasses.is_dataclass(Skill), "Skill 应该是 dataclass"
+    # 验证非占位类：standalone Skill 为普通类（name/description 构造契约）
+    instance = Skill("probe_skill")
+    assert instance.name == "probe_skill"
 
 
 def test_skill_event_proxied():
@@ -82,18 +86,20 @@ def test_create_default_skills_proxied_to_skills():
     assert hasattr(registry, "register_event_callback"), "套2 SkillRegistry 应有 register_event_callback 方法"
 
 
-def test_no_importlib_workaround():
-    """验证 skill_system/__init__.py 源码不含 importlib.util.spec_from_file_location"""
+def test_standalone_loader_targets_exist():
+    """2026-09-08 架构甄别后改写：ADR 0011 保留 spec_from_file_location 加载
+    standalone 载体（skill_system.py，规范 SkillRegistry 实现所在）——
+    该路线被架构决策确认；守卫锁定加载目标必须存在（否则静默降级）。"""
     init_path = Path(__file__).parent.parent.parent.parent / "neurova" / "skill_system" / "__init__.py"
-    if not init_path.exists():
-        assert False, f"skill_system/__init__.py 不存在于 {init_path}"
+    assert init_path.exists(), f"skill_system/__init__.py 不存在于 {init_path}"
 
     content = init_path.read_text(encoding="utf-8")
-    assert "importlib.util.spec_from_file_location" not in content, (
-        "skill_system/__init__.py 不应再使用 importlib.util.spec_from_file_location 加载套1"
+    assert "spec_from_file_location" in content, (
+        "standalone 加载链（spec_from_file_location）应保留——get_skill_registry 依赖"
     )
-    assert "spec_from_file_location" not in content, (
-        "skill_system/__init__.py 不应再使用 spec_from_file_location"
+    standalone = init_path.parent.parent / "skill_system.py"
+    assert standalone.exists(), (
+        f"standalone 载体 {standalone} 不存在——spec_from_file_location 目标断裂"
     )
 
 

@@ -763,9 +763,9 @@ def create_default_skills(memory_manager=None) -> SkillRegistry:
     # 通过 ExecutorBackedSkill 把同步 executor 桥接为异步 Skill，
     # 使 execute_skill() 真正调用到这些 executor 的实现。
     try:
-        from neurova.skills.builtin import create_builtin_executor_skills
+        from neurova.skills.builtin import create_builtin_skills
 
-        for skill in create_builtin_executor_skills(memory_manager):
+        for skill in create_builtin_skills(memory_manager):
             registry.register(skill)
     except Exception as exc:
         logger.warning("内置 executor 注册失败，回退到内置 Skill 子类: %s", exc)
