@@ -1,14 +1,14 @@
 {
   "name": "Neurova",
   "description": "",
-  "model": "sensenova-6.8-flash-lite",
-  "provider": "sensetime",
+  "model": "DeepSeek-V4-Flash-Vision-Exp",
+  "provider": "amd",
   "personality": "",
   "constitution": "",
   "owner_user_id": "",
-  "enable_tts": true,
+  "enable_tts": false,
   "tts_engine": "auto",
-  "tts_voice": "zh-CN-XiaoyiNeural",
+  "tts_voice": "zh-CN-XiaoxiaoNeural",
   "tts_speed": 1.0,
   "tts_pitch": 1.0
 }

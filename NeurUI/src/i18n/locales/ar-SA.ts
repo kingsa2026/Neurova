@@ -484,6 +484,8 @@ export default {
   },
 
   chat: {
+    artifactUnavailable: 'محتوى المنتج غير متاح (ربما تم نقله أو حذفه)',
+    openInPreview: 'فتح في المعاينة',
     retrievalUnified: '统一检索',
     retrievalMoE: 'MoE 专家路由',
     retrievalCache: '缓存检索',
@@ -2977,11 +2979,20 @@ export default {
     manualPlaceholder: '描述遇到的问题，或粘贴错误信息（用于主动反馈）',
     manualSent: '反馈已提交，感谢！',
   },
+
+  dock: {
+    closeTab: 'إغلاق علامة التبويب',
+    closeAll: 'إغلاق الكل',
+    resizeHint: 'اسحب لتغيير العرض، وانقر نقرا مزدوجا لإعادة التعيين',
+    empty: 'لا توجد معاينات مفتوحة',
+    download: 'تنزيل',
+    refresh: 'تحديث',
+    htmlSandboxHint: 'معاينة معزولة: البرمجيات النصية مفعلة، بدون وصول لنفس المصدر',
+    kindMarkdown: 'Markdown',
+    kindHtml: 'HTML',
+    kindImage: 'صورة',
+    kindAudio: 'صوت',
+    kindText: 'نص',
+  },
+
 }
-
-
-
-
-
-
-

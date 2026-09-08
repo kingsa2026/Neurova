@@ -484,6 +484,8 @@ export default {
   },
 
   chat: {
+    artifactUnavailable: '成果物の内容を利用できません（移動または削除された可能性があります）',
+    openInPreview: 'プレビューで開く',
     retrievalUnified: '统一检索',
     retrievalMoE: 'MoE 专家路由',
     retrievalCache: '缓存检索',
@@ -2977,11 +2979,20 @@ export default {
     manualPlaceholder: '描述遇到的问题，或粘贴错误信息（用于主动反馈）',
     manualSent: '反馈已提交，感谢！',
   },
+
+  dock: {
+    closeTab: 'タブを閉じる',
+    closeAll: 'すべて閉じる',
+    resizeHint: 'ドラッグで幅を調整、ダブルクリックでリセット',
+    empty: '開いているプレビューなし',
+    download: 'ダウンロード',
+    refresh: '再読み込み',
+    htmlSandboxHint: 'サンドボックスプレビュー: スクリプト有効、同一オリジン権限なし',
+    kindMarkdown: 'Markdown',
+    kindHtml: 'HTML',
+    kindImage: '画像',
+    kindAudio: '音声',
+    kindText: 'テキスト',
+  },
+
 }
-
-
-
-
-
-
-
