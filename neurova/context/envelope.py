@@ -13,6 +13,8 @@
 
 from typing import Callable, Dict, List, Optional
 
+import datetime as dt
+
 ENVELOPE_OPEN = "<system-reminder>"
 ENVELOPE_CLOSE = "</system-reminder>"
 
@@ -37,6 +39,28 @@ _COMPRESS_DROP_ORDER = ("emotion", "reflection", "experience", "lessons", "time"
 def _count_default(text: str) -> int:
     """无估算器时的粗略 token 计数（与 injector._truncate_text 同 1.5 比率）。"""
     return int(len(text or "") / 1.5) + 1
+
+
+def build_time_block() -> str:
+    """信封 <time> 块内容：分钟级时间 + 时间感知 hint。
+
+    审计②（批次 A 接入 pool 主链）：此前该逻辑私有于 UnifiedContextInjector，
+    enable_context_pool=True 的主链末条 user 消息从未携带分钟级时间。
+    提取为模块函数供 injector 与 orchestrator pool 分支共用（单源）。
+    """
+    time_hint = ""
+    try:
+        from neurova.cognitive_layers.emotion_context_layer.time_awareness import (
+            get_time_awareness,
+        )
+
+        time_hint = get_time_awareness().get_time_context_hint()
+    except Exception:
+        time_hint = ""
+    lines = [dt.datetime.now().strftime("%Y年%m月%d日 %H:%M")]
+    if time_hint:
+        lines.append(str(time_hint))
+    return "\n".join(lines)
 
 
 def build_envelope(blocks: Dict[str, Optional[str]]) -> str:

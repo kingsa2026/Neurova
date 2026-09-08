@@ -417,21 +417,17 @@ class ContextOrchestrator:
         # Phase 3: 构建 ContextInput → ContextCollector → 候选池
         # session_context 包含完整的 user+assistant 历史（优先使用）
         # conversation_history 只有 user 消息且不更新（仅作 fallback）
-        # P1-7（OpenOcta 启发 toolTurnRepair）：repair 配对完整性——孤儿
-        # tool 结果转注记、悬空 tool_calls 补合成结果（纯函数，well-formed
-        # 输入逐条等价通过，今日 user/assistant 会话历史零行为变化）
+        # P1-7（OpenOcta 启发 toolTurnRepair）：repair 配对完整性
+        # 审计⑦：repair 必须在视图重建（剥 tool_calls）之后——先 repair 会在
+        # tool_calls 在场时判"配对完整"保留 role:"tool"，随后重建剥掉
+        # tool_calls → 孤儿 tool 消息直发 LLM（provider 400）。
+        # 顺序：先重建 → repair 兜剥字段的残留 → 发模型。
         if session_context is not None:
             conversation_context = list(session_context)
         else:
             conversation_context = list(
                 {"role": m["role"], "content": m["content"]} for m in (self.conversation_history or [])
             )
-        try:
-            from neurova.context.recovery import repair_tool_turns
-
-            conversation_context = repair_tool_turns(conversation_context)
-        except Exception as e:  # noqa: BLE001 - 修复故障不阻断上下文构建
-            logger.debug("tool-turn 修复跳过: %s", e)
 
         logger.info(
             "[CTX_TRACE] conversation_context=%d msgs, session_context_provided=%s",
@@ -492,7 +488,19 @@ class ContextOrchestrator:
                 context.append({"role": "system", "content": instruction})
 
             # 2. 对话窗口（原始时序，append-only）
-            for msg in conversation_context:
+            # 审计⑦：视图重建剥 tool_calls/tool_call_id（只保留 role+content），
+            # 先重建后 repair——残留 role:"tool" 此处转 user 注记，协议合法
+            window_msgs = [
+                {"role": msg.get("role", "user"), "content": msg["content"]}
+                for msg in conversation_context
+            ]
+            try:
+                from neurova.context.recovery import repair_tool_turns
+
+                window_msgs = repair_tool_turns(window_msgs)
+            except Exception as e:  # noqa: BLE001 - 修复故障不阻断上下文构建
+                logger.debug("tool-turn 修复跳过: %s", e)
+            for msg in window_msgs:
                 context.append({"role": msg.get("role", "user"), "content": msg["content"]})
 
             # 3. 本轮检索产物直接注入（不经抽屉门槛——它们由上游检索链按当前
@@ -599,7 +607,16 @@ class ContextOrchestrator:
                     logger.debug("语音上下文注入跳过: %s", e)
 
             # 5. 当前用户输入最后追加，确保是 LLM 看到的最后一条 user 消息
-            context.append({"role": "user", "content": user_input})
+            # 审计②（批次 A 接入主链）：动态注入内容（记忆/经验/反思/情感已由
+            # 上方 system 注入位承载）+ 分钟级时间以瞬态信封挂末条 user 消息——
+            # 此前 pool 分支完全绕过 UnifiedContextInjector，信封化（F1 前缀
+            # 缓存/免疫句）在默认配置下从未生效
+            from neurova.context.envelope import build_envelope, build_time_block
+
+            _env = build_envelope({"time": build_time_block()})
+            context.append(
+                {"role": "user", "content": f"{_env}\n\n{user_input}" if _env else user_input}
+            )
 
             return context
 
@@ -714,20 +731,34 @@ class ContextOrchestrator:
             # 根因修复（P2-#16）: 降级路径原先直接丢弃已构建的 candidate_pool，
             # 导致记忆/对话上下文全部丢失。此处保留候选上下文，仅丢失优先级压缩。
             fallback = [{"role": "system", "content": "\n\n".join(system_instructions)}]
+            # 审计⑬：SYSTEM_INSTRUCTION 已并入上面的 system 消息、USER_INPUT
+            # 由末条信封消息承载——候选池里这两类原样重发会造成双份
             for item in candidate_pool:
+                if getattr(item, "source", None) in (
+                    ContextSource.SYSTEM_INSTRUCTION,
+                    ContextSource.USER_INPUT,
+                ):
+                    continue
                 content = getattr(item, "content", None)
                 if content:
                     fallback.append({"role": "user", "content": str(content)})
             # 批次 A：降级路径与主路径同构——候选内容以瞬态信封挂末条 user
             # 消息（免疫句/缓存语义一致），不再散落为多条裸 user 消息
-            from neurova.context.envelope import build_envelope as _build_envelope
+            from neurova.context.envelope import (
+                build_envelope as _build_envelope,
+                build_time_block as _build_time_block,
+            )
 
             _memory_lines = [
                 str(item.content)
                 for item in candidate_pool
                 if getattr(item, "content", None) and "MEMORY" in str(getattr(item, "source", ""))
             ]
-            _env = _build_envelope({"memories": "\n".join(_memory_lines)} if _memory_lines else {})
+            _env = _build_envelope(
+                {"memories": "\n".join(_memory_lines), "time": _build_time_block()}
+                if _memory_lines
+                else {"time": _build_time_block()}
+            )
             fallback.append({"role": "user", "content": f"{_env}\n\n{user_input}" if _env else user_input})
             return fallback
 
@@ -740,6 +771,15 @@ class ContextOrchestrator:
 
         # Phase 4: 压缩上下文（如果需要）
         context = self.context_builder.compress_if_needed(context)
+
+        # 审计⑦：发模型前最后一刻修复 tool 配对（injector 路径同样可能
+        # 收到被剥离 tool_calls 的会话历史）
+        try:
+            from neurova.context.recovery import repair_tool_turns
+
+            context = repair_tool_turns(context)
+        except Exception as e:  # noqa: BLE001 - 修复故障不阻断上下文构建
+            logger.debug("tool-turn 修复跳过: %s", e)
 
         return context
 

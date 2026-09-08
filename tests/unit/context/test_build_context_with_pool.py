@@ -68,7 +68,7 @@ class TestBuildContextWithPool:
             # 保证当前输入是 LLM 看到的最后一条 user 消息
             assert len(result) == 7
             assert result[0]["role"] == "system"  # 系统指令
-            assert result[-1] == {"role": "user", "content": "帮我写一个Python函数"}
+            assert result[-1]["content"].endswith("帮我写一个Python函数")
             # 中间为 system 富化内容（个性、规则、工具描述等）
             assert all(m["role"] == "system" for m in result[:-1])
 
@@ -201,7 +201,7 @@ class TestBuildContextWithPool:
             memory_found = any(pre_memory in ctx.get("content", "") for ctx in result)
             assert memory_found, "记忆上下文应该被包含在结果中"
             # 用户输入仍在末尾
-            assert result[-1] == {"role": "user", "content": "帮我写一个Python函数"}
+            assert result[-1]["content"].endswith("帮我写一个Python函数")
 
             # 验证 ContextPool.draw() 被调用
             assert orchestrator.context_pool is not None
@@ -260,7 +260,7 @@ class TestBuildContextBackwardCompatibility:
             assert isinstance(result, list)
             # [FIX] 默认启用 ContextPool；用户输入拼接在末尾（时序修复）
             assert len(result) == 7
-            assert result[-1] == {"role": "user", "content": "帮我写一个Python函数"}
+            assert result[-1]["content"].endswith("帮我写一个Python函数")
 
             # 验证向后兼容性
             assert orchestrator.use_pool is True  # 默认启用
