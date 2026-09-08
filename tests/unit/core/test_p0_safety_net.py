@@ -54,7 +54,7 @@ class TestP0SafetyNet:
         
         # 验证核心方法存在
         assert hasattr(executor, "execute_text_tool_calls")
-        assert hasattr(executor, "execute_from_memory")
+        # 同步版 execute_from_memory 已移除，只保留 async 版
         assert hasattr(executor, "execute_from_memory_async")
         assert hasattr(executor, "execute_skill_tool")
         assert hasattr(executor, "execute_cli_tool")

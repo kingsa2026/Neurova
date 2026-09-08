@@ -516,6 +516,10 @@ class CognitionOrchestrator:
             result.error = str(e)
             result.duration_ms = (time.time() - start_time) * 1000
 
+        # 上报元认知监控（成功/失败都记录；monitoring 关闭时 record_cycle 内部自守卫）
+        if self._metacognition_monitor:
+            self._metacognition_monitor.record_cycle(result)
+
         return result
 
     async def _observe(

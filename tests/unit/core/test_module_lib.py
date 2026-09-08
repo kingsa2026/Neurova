@@ -57,15 +57,15 @@ class TestModuleLib:
     """测试ModuleLib类"""
     
     class MockModule(BaseModule):
-        """模拟模块"""
-        
-        async def on_initialize(self):
+        """模拟模块（BaseModule 钩子为同步抽象方法）"""
+
+        def on_initialize(self):
             pass
-        
-        async def on_start(self):
+
+        def on_start(self):
             pass
-        
-        async def on_stop(self):
+
+        def on_stop(self):
             pass
     
     def test_init(self):
@@ -163,24 +163,20 @@ class TestModuleLib:
         assert success is False
     
     def test_get_module(self):
-        """测试获取模块"""
+        """测试获取模块（get_module 返回已加载实例）"""
         lib = ModuleLib()
-        
+
         descriptor = ModuleDescriptor(
-
-        
             module_id="test_module",
-
-        
             name="Test Module",
-
-        
         )
-        
+
         lib.register(descriptor, self.MockModule)
+        loaded = lib.load_module("test_module")
         retrieved = lib.get_module("test_module")
-        
-        assert retrieved is module
+
+        assert loaded is not None
+        assert retrieved is loaded
     
     def test_get_nonexistent_module(self):
         """测试获取不存在的模块"""
@@ -278,19 +274,10 @@ class TestModuleLib:
     def test_module_count(self):
         """测试模块计数"""
         lib = ModuleLib()
-        
-        module1 = self.MockModule(
-            module_id="module1",
-            name="Module 1",
-        )
-        module2 = self.MockModule(
-            module_id="module2",
-            name="Module 2",
-        )
-        
-        lib.register(module1)
-        lib.register(module2)
-        
+
+        lib.register(ModuleDescriptor(module_id="module1", name="Module 1"), self.MockModule)
+        lib.register(ModuleDescriptor(module_id="module2", name="Module 2"), self.MockModule)
+
         assert lib.module_count == 2
     
     def test_running_count(self):
@@ -331,150 +318,125 @@ class TestModuleLib:
         lib.register(descriptor, self.MockModule)
         
         status = lib.get_status()
-        
+
+        # 实现键面：total_modules / running_modules / load_paths / modules
         assert "total_modules" in status
         assert "running_modules" in status
         assert "modules" in status
-        assert "circular_dependencies" in status
+        assert "load_paths" in status
     
     @pytest.mark.asyncio
     async def test_lifecycle_operations(self):
-        """测试生命周期操作"""
+        """测试生命周期操作（initialize/start/stop 为同步方法）"""
         lib = ModuleLib()
-        
+
         descriptor = ModuleDescriptor(
-
-        
             module_id="test_module",
-
-        
             name="Test Module",
-
-        
         )
-        
+
         lib.register(descriptor, self.MockModule)
-        
+
         # 初始化
-        success = await lib.initialize_module("test_module")
+        success = lib.initialize_module("test_module")
         assert success is True
-        
+
         # 启动
-        success = await lib.start_module("test_module")
+        success = lib.start_module("test_module")
         assert success is True
-        
+
         # 停止
-        success = await lib.stop_module("test_module")
+        success = lib.stop_module("test_module")
         assert success is True
-    
+
     @pytest.mark.asyncio
     async def test_lifecycle_all(self):
-        """测试所有模块的生命周期操作"""
+        """测试所有模块的生命周期操作（*_all 为同步方法）"""
         lib = ModuleLib()
-        
-        module1 = self.MockModule(
-            module_id="module1",
-            name="Module 1",
-        )
-        module2 = self.MockModule(
-            module_id="module2",
-            name="Module 2",
-        )
-        
-        lib.register(module1)
-        lib.register(module2)
-        
+
+        lib.register(ModuleDescriptor(module_id="module1", name="Module 1"), self.MockModule)
+        lib.register(ModuleDescriptor(module_id="module2", name="Module 2"), self.MockModule)
+
         # 初始化所有
-        results = await lib.initialize_all()
+        results = lib.initialize_all()
         assert len(results) == 2
-        
+
         # 启动所有
-        results = await lib.start_all()
+        results = lib.start_all()
         assert len(results) == 2
-        
+
         # 停止所有
-        results = await lib.stop_all()
+        results = lib.stop_all()
         assert len(results) == 2
-    
+
     def test_resolve_dependencies(self):
         """测试依赖解析"""
         lib = ModuleLib()
-        
+
         # 模块2依赖模块1
-        module1 = self.MockModule(
-            module_id="module1",
-            name="Module 1",
+        lib.register(ModuleDescriptor(module_id="module1", name="Module 1"), self.MockModule)
+        lib.register(
+            ModuleDescriptor(module_id="module2", name="Module 2", dependencies=["module1"]),
+            self.MockModule,
         )
-        module2 = self.MockModule(
-            module_id="module2",
-            name="Module 2",
-            dependencies=["module1"],
-        )
-        
-        lib.register(module1)
-        lib.register(module2)
-        
+
         order = lib.resolve_dependencies()
-        
+
         # module1应该先于module2加载
         assert "module1" in order
         assert "module2" in order
         assert order.index("module1") < order.index("module2")
-    
+
     def test_check_circular_dependencies(self):
         """测试循环依赖检测"""
         lib = ModuleLib()
-        
+
         # 创建循环依赖
-        module1 = self.MockModule(
-            module_id="module1",
-            name="Module 1",
-            dependencies=["module2"],
+        lib.register(
+            ModuleDescriptor(module_id="module1", name="Module 1", dependencies=["module2"]),
+            self.MockModule,
         )
-        module2 = self.MockModule(
-            module_id="module2",
-            name="Module 2",
-            dependencies=["module1"],
+        lib.register(
+            ModuleDescriptor(module_id="module2", name="Module 2", dependencies=["module1"]),
+            self.MockModule,
         )
-        
-        lib.register(module1)
-        lib.register(module2)
-        
+
         cycles = lib.check_circular_dependencies()
-        
+
         # 应该检测到循环依赖
         assert len(cycles) >= 1
-    
+
     def test_check_dependencies(self):
-        """测试依赖检查"""
+        """测试依赖检查（契约：_check_dependencies(module_id) -> bool，按已加载实例判定）"""
         lib = ModuleLib()
-        
-        descriptor = ModuleDescriptor(
 
-        
-            module_id="module1",
-
-        
-            name="Module 1",
-
-        
+        lib.register(ModuleDescriptor(module_id="module1", name="Module 1"), self.MockModule)
+        lib.register(
+            ModuleDescriptor(module_id="module2", name="Module 2", dependencies=["module1"]),
+            self.MockModule,
         )
-        
-        lib.register(descriptor, self.MockModule)
-        
-        missing = lib._check_dependencies(["module1", "module2"])
-        
-        assert "module2" in missing
-    
+
+        # module1 未加载 → module2 依赖不满足
+        assert lib._check_dependencies("module2") is False
+
+        # module1 加载后依赖满足
+        assert lib.load_module("module1") is not None
+        assert lib._check_dependencies("module2") is True
+
     def test_load_module_nonexistent_file(self):
-        """测试加载不存在的文件"""
+        """测试加载入口点指向不存在文件的模块"""
         lib = ModuleLib()
-        
-        module = lib.load_module(
-            module_id="test_module",
-            file_path="/nonexistent/path/module.py",
+
+        lib.register(
+            ModuleDescriptor(
+                module_id="test_module",
+                name="test_module",
+                entry_point="/nonexistent/path/module.py",
+            )
         )
-        
+
+        module = lib.load_module("test_module")
+
         assert module is None
 
 

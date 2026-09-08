@@ -57,9 +57,10 @@ class TestLogLevel:
         assert LogLevel.CRITICAL in levels
     
     def test_log_level_str_representation(self):
-        """测试日志级别的字符串表示"""
-        assert str(LogLevel.DEBUG) == "LogLevel.DEBUG"
-        assert str(LogLevel.INFO) == "LogLevel.INFO"
+        """测试日志级别的字符串表示（Py3.12 IntEnum str() 返回数值字符串）"""
+        assert str(LogLevel.DEBUG) == "10"
+        assert str(LogLevel.INFO) == "20"
+        assert LogLevel.DEBUG.name == "DEBUG"
     
     def test_log_level_int_operations(self):
         """测试作为IntEnum的数值操作"""

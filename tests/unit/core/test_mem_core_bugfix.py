@@ -336,13 +336,13 @@ class TestBug7RunAsyncSafelyCoroLeak:
         coro = sample_coro()
 
         async def runner():
-            # 在事件循环内调用, 进入 run_coroutine_threadsafe 调度路径。
-            # 放大视角: 真实实现通过 asyncio.run_coroutine_threadsafe 提交协程,
-            # 而非直接使用 ThreadPoolExecutor.submit, 故应 mock 该提交边界。
-            # mock 调度本身抛异常, 模拟"提交失败"——此时协程尚未被事件循环接管, 必须关闭。
+            # 真实实现走 ThreadPoolExecutor.submit(_run_in_new_loop)（P2-#17 专用循环）。
+            # mock 提交边界本身抛异常, 模拟"提交失败"——此时协程尚未被消费, 必须关闭。
+            mock_executor = MagicMock()
+            mock_executor.submit.side_effect = RuntimeError("BrokenExecutor")
             with patch(
-                "neurova.mem_core.asyncio.run_coroutine_threadsafe",
-                side_effect=RuntimeError("BrokenExecutor"),
+                "neurova.mem_core.concurrent.futures.ThreadPoolExecutor",
+                return_value=mock_executor,
             ):
                 with pytest.raises(RuntimeError):
                     run_async_safely(coro)
@@ -362,13 +362,14 @@ class TestBug7RunAsyncSafelyCoroLeak:
         coro = sample_coro()
 
         async def runner():
-            # mock run_coroutine_threadsafe 返回一个 result() 会抛异常的 future,
-            # 模拟"协程执行/结果异常"路径。
+            # mock submit 返回 result() 会抛异常的 future, 模拟"协程执行/结果异常"路径。
+            mock_executor = MagicMock()
             mock_future = MagicMock()
             mock_future.result.side_effect = RuntimeError("result failed")
+            mock_executor.submit.return_value = mock_future
             with patch(
-                "neurova.mem_core.asyncio.run_coroutine_threadsafe",
-                return_value=mock_future,
+                "neurova.mem_core.concurrent.futures.ThreadPoolExecutor",
+                return_value=mock_executor,
             ):
                 with pytest.raises(RuntimeError):
                     run_async_safely(coro)

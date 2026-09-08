@@ -189,6 +189,38 @@ class TestMessageRouting:
         skill_registry.execute_skill.assert_awaited_once()
 
     @pytest.mark.asyncio
+    async def test_route_file_operation_injects_workspace_base_dir(self, tmp_path):
+        """file_operation 技能路由：服务端注入 _base_dir 且覆盖伪造值（相对路径乱放根因修复）"""
+        skill_registry = MagicMock()
+        skill_registry.execute_skill = AsyncMock(
+            return_value=MagicMock(success=True, data="ok", error=None, execution_time=0.1)
+        )
+        agent = MagicMock()
+        agent.workspace_path = tmp_path
+        router = MessageRouter(agent=agent, skill_registry=skill_registry)
+        msg = Message('file_operation {"operation": "write", "file_path": "x.md", "_base_dir": "/llm/forged"}')
+        msg.message_type = MessageType.SKILL_REQUEST
+        await router.route(msg)
+
+        sent_name, sent_params = skill_registry.execute_skill.await_args.args[0], skill_registry.execute_skill.await_args.args[1]
+        assert sent_name == "file_operation"
+        # 服务端赋值（agent 工作区）覆盖伪造值
+        assert sent_params["_base_dir"] == str(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_route_other_skills_no_base_dir(self):
+        """非 file_operation 技能不注入 _base_dir"""
+        skill_registry = MagicMock()
+        skill_registry.execute_skill = AsyncMock(
+            return_value=MagicMock(success=True, data="ok", error=None, execution_time=0.1)
+        )
+        router = MessageRouter(skill_registry=skill_registry)
+        msg = Message('使用skill开发一个插件 {"x": 1}')
+        await router.route(msg)
+        sent_params = skill_registry.execute_skill.await_args.args[1]
+        assert "_base_dir" not in sent_params
+
+    @pytest.mark.asyncio
     async def test_route_memory_request_without_manager(self):
         """无记忆系统时应返回失败"""
         router = MessageRouter()

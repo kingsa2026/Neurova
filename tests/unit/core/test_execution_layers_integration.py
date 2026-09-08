@@ -13,6 +13,8 @@ import time
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from typing import Dict, Any
 
+from neurova.skills.executor import SkillResult
+
 
 # ═══════════════════════════════════════════════════════════════
 # 1. LocalExecutor 核心功能
@@ -355,22 +357,20 @@ class TestExecuteSkillIsolated:
     def _create_registry_with_skill(self):
         """创建带有一个已注册技能的 SkillRegistry 实例"""
         from neurova.skills.registry import SkillRegistry
-        from neurova.skills.models import Skill, SkillSource
+        from neurova.skills.executor import SkillResult
+        from neurova.skill_system import Skill as SystemSkill
 
-        # 重置单例以确保干净状态
+        # 重置单例以确保干净状态；注入 mock runtime_manager 使隔离执行走 Factory 路径
         SkillRegistry._instance = None
-        registry = SkillRegistry()
+        registry = SkillRegistry(runtime_manager=Mock())
 
-        # 注册一个虚拟技能
-        skill = Skill(
-            id="test_dummy_skill",
-            name="Test Dummy Skill",
-            version="1.0.0",
-            description="A dummy skill for testing",
-            source=SkillSource.AGENT_PRIVATE,
-        )
-        from pathlib import Path
-        registry.register_skill(skill, Path("/tmp/test_skill"))
+        # 规范 Skill 子类（含 execute），降级执行时可成功完成
+        class DummySkill(SystemSkill):
+            async def execute(self, params=None, context=None):
+                return SkillResult(success=True, output={"ok": True})
+
+        skill = DummySkill(name="test_dummy_skill", description="A dummy skill for testing")
+        registry.register_skill(skill)
         return registry
 
     @pytest.mark.asyncio
@@ -393,8 +393,8 @@ class TestExecuteSkillIsolated:
                 "test_dummy_skill", {"a": 1}
             )
 
-        # 降级为普通 execute_skill
-        assert result["success"] is True
+        # 降级为普通 execute_skill（返回 SkillResult 对象）
+        assert result.success is True
 
     @pytest.mark.asyncio
     async def test_execute_skill_isolated_nonexistent_skill(self):
@@ -402,8 +402,8 @@ class TestExecuteSkillIsolated:
         registry = self._create_registry_with_skill()
 
         result = await registry.execute_skill_isolated("nonexistent_skill", {})
-        assert result["success"] is False
-        assert "未注册" in result["error"]
+        assert result.success is False
+        assert "不存在" in result.error
 
     @pytest.mark.asyncio
     async def test_execute_skill_isolated_creates_runtime(self):
@@ -451,8 +451,8 @@ class TestExecuteSkillIsolated:
             result = await registry.execute_skill_isolated("test_dummy_skill", {})
 
             assert mock_runtime.stop.called
-            # 异常被外层 try/except 捕获，降级为普通执行
-            assert result["success"] is True
+            # 异常被外层 try/except 捕获，降级为普通执行（返回 SkillResult）
+            assert isinstance(result, SkillResult)
 
 
 # ═══════════════════════════════════════════════════════════════
