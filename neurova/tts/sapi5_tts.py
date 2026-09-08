@@ -104,7 +104,9 @@ class SAPI5TTS(TTSBase):
             except OSError:
                 pass
 
-    async def synthesize_stream(self, text: str) -> typing.AsyncGenerator[bytes, None]:
+    async def synthesize_stream(self, text: str, **kwargs) -> typing.AsyncGenerator[bytes, None]:
+        # **kwargs 宽契约（审计⑧）：端点恒传 voice/speed 等语义参数，
+        # 本引擎无请求级概念，忽略（与 moss 同构）
         wav_data = await self.synthesize(text)
         if wav_data:
             yield wav_data
