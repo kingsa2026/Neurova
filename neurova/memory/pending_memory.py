@@ -167,6 +167,12 @@ class PendingMemoryStore:
         if action == "forget" and not target:
             raise ValueError("forget 提议缺少 target_memory_id")
         fp = _fingerprint(content)
+        # 审计⑤：forget 提议的判重指纹只绑定目标记忆——content 是模型自填
+        # 摘要（展示用），旧口径哈希 content 导致：不同 target 的同摘要提议
+        # 撞车（confirm 删错记忆）、同 target 换摘要绕过拒绝墓碑、与同内容
+        # store 提议互相顶替（确认语义反转：删变存）。
+        if action == "forget":
+            fp = _fingerprint(f"forget\x00{target}")
         owner = str(proposed_by or "")
         with self._lock:
             row = self._conn.execute(
