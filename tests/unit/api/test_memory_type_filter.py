@@ -58,8 +58,20 @@ class TestMemoryTypeFilter:
         assert mock_manager.recall.call_args.kwargs.get("memory_type") in (None, "")
 
     def test_invalid_memory_type_rejected(self, app_client):
-        """非法枚举值 400（fail-fast，不静默吞成全量）。"""
+        """非法枚举值 422（fail-fast，不静默吞成全量）。"""
         resp = app_client.get(f"{BASE}", params={"agent_id": "default", "memory_type": "not_a_type"})
+        assert resp.status_code == 422
+
+    def test_multi_value_accepted(self, app_client, mock_manager):
+        """逗号多值（长期记忆页签 = 排除 working 的五类）原样透传 recall。"""
+        mt = "semantic,episodic,procedural,pattern,emotional"
+        resp = app_client.get(f"{BASE}", params={"agent_id": "default", "memory_type": mt})
+        assert resp.status_code == 200
+        assert mock_manager.recall.call_args.kwargs.get("memory_type") == mt
+
+    def test_multi_value_with_invalid_token_rejected(self, app_client):
+        """多值中混入非法 token → 整体 422（fail-fast）。"""
+        resp = app_client.get(f"{BASE}", params={"agent_id": "default", "memory_type": "semantic,bogus"})
         assert resp.status_code == 422
 
     def test_create_accepts_memory_type(self, app_client, mock_manager):

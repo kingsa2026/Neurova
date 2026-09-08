@@ -270,10 +270,12 @@
           <a-col :span="12">
             <a-form-item :label="t('common.type')">
               <a-select v-model:value="createForm.type" style="width: 100%">
-                <a-select-option value="short_term">{{ t('memory.shortTerm') }}</a-select-option>
-                <a-select-option value="long_term">{{ t('memory.longTerm') }}</a-select-option>
-                <a-select-option value="episodic">{{ t('memory.categoryEpisodic') }}</a-select-option>
                 <a-select-option value="semantic">{{ t('memory.categorySemantic') }}</a-select-option>
+                <a-select-option value="episodic">{{ t('memory.categoryEpisodic') }}</a-select-option>
+                <a-select-option value="working">{{ t('memory.typeWorking') }}</a-select-option>
+                <a-select-option value="procedural">{{ t('memory.typeProcedural') }}</a-select-option>
+                <a-select-option value="pattern">{{ t('memory.typePattern') }}</a-select-option>
+                <a-select-option value="emotional">{{ t('memory.typeEmotional') }}</a-select-option>
               </a-select>
             </a-form-item>
           </a-col>
@@ -514,15 +516,17 @@ const categories = ['general', 'conversation', 'fact', 'preference', 'skill', 'e
 
 const createForm = ref({
   content: '',
-  type: 'short_term',
+  type: 'semantic',
   category: 'general',
   importance: 0.5,
   tags: [] as string[],
 })
 
 const typeColor = (type: string) => {
+  // key = 后端 MemoryType 枚举值（页签契约对齐 2026-09-08）
   const map: Record<string, string> = {
-    short_term: '#6366f1', long_term: '#10b981', episodic: '#f59e0b', semantic: '#8b5cf6',
+    working: '#6366f1', episodic: '#f59e0b', semantic: '#8b5cf6',
+    procedural: '#10b981', pattern: '#0ea5e9', emotional: '#f43f5e',
   }
   return map[type] || '#6366f1'
 }
@@ -632,10 +636,13 @@ const performSemanticSearch = async () => {
     // data.results 元素形如 {memory_id|id, content, score, channel, metadata, created_at}
     const res = await memoryApi.enhancedSearch(searchQuery.value, { top_k: 20 })
     const raw: any[] = Array.isArray(res.data) ? (res.data as any) : ((res.data as any)?.results ?? [])
-    // 后端无 type 参数，type 过滤在前端做
-    const wanted = activeTab.value !== 'all' ? activeTab.value : undefined
+    // 后端无 type 参数，type 过滤在前端做（页签 key → memory_type 映射）
+    const wanted = memoryApi.MEMORY_TYPE_BY_TAB[activeTab.value]?.split(',')
     searchResults.value = raw
-      .filter((r: any) => !wanted || (r.type ?? r.channel ?? 'general') === wanted)
+      .filter((r: any) => {
+        if (!wanted || wanted.length === 0) return true
+        return wanted.includes(String(r.type ?? r.channel ?? 'general'))
+      })
       .map((r: any) => ({
         id: r.id ?? r.memory_id ?? '',
         content: r.content ?? '',
@@ -665,10 +672,15 @@ const fetchStats = async () => {
 const fetchMemories = async () => {
   loading.value = true
   try {
-    // 后端 GET /memory 实参: query/category/limit（暂无 offset 分页）
+    // 后端 GET /memory 实参: query/category/memory_type/limit（暂无 offset 分页）
+    // 页签契约（2026-09-08）：类型页签 key 经 MEMORY_TYPE_BY_TAB 映射为
+    // memory_type 参数（long_term = 排除 working 的五类逗号多值）；
+    // hot/crystallized 走各自专用端点，不经此处。
     const params: Record<string, any> = {
       limit: size.value,
     }
+    const tabType = memoryApi.MEMORY_TYPE_BY_TAB[activeTab.value]
+    if (tabType) params.memory_type = tabType
     if (categoryFilter.value) params.category = categoryFilter.value
     if (searchQuery.value && !semanticSearch.value) params.query = searchQuery.value
 
@@ -689,7 +701,7 @@ const createMemory = async () => {
     await memoryApi.createMemory(
       {
         content: createForm.value.content,
-        type: createForm.value.type,
+        memory_type: createForm.value.type,
         importance: createForm.value.importance,
         tags: createForm.value.tags.length > 0 ? createForm.value.tags : undefined,
       },
@@ -697,7 +709,7 @@ const createMemory = async () => {
     )
     message.success(t('common.success'))
     showCreateModal.value = false
-    createForm.value = { content: '', type: 'short_term', category: 'general', importance: 0.5, tags: [] }
+    createForm.value = { content: '', type: 'semantic', category: 'general', importance: 0.5, tags: [] }
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
