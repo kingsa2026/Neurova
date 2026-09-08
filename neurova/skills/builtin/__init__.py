@@ -59,3 +59,23 @@ def create_builtin_executor_skills(memory_manager=None) -> list:
         ExecutorBackedSkill(FileOperationSkillExecutor()),
         ExecutorBackedSkill(KbBuilderSkillExecutor()),
     ]
+
+
+def create_builtin_skills(memory_manager=None) -> list:
+    """构造完整内置技能列表（executor 桥接 + 独立 Skill 子类）。
+
+    2026-09-08 注册断链修复：github_push 技能类存在
+    （skills/builtin/github_push/skill.py，自带 async execute）但从未接入
+    注册工厂——create_default_skills 的产物里永远没有它，
+    守卫测试实测 has_skill("github_push") 为 False。
+    """
+    skills = create_builtin_executor_skills(memory_manager)
+    try:
+        from neurova.skills.builtin.github_push.skill import create_github_push_skill
+
+        skills.append(create_github_push_skill())
+    except Exception as exc:  # noqa: BLE001
+        import logging
+
+        logging.getLogger(__name__).warning("github_push 技能注册失败，跳过: %s", exc)
+    return skills
