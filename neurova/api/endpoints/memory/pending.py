@@ -104,31 +104,40 @@ async def confirm_pending_memory(
         if not _is_admin(user) and rec.get("proposed_by") != uid:
             raise APIError(ErrorCodes.PERMISSION_DENIED, "仅提议人或管理员可确认")
 
+        # 审计⑩：动作必须经 remember_fn 在 store.confirm 锁内执行——
+        # 端点先执行后标记的旧顺序在"动作成功、标记失败"的窗口留下
+        # 状态机缺口（store 重复确认 → 重复写库/要求拒绝已执行的提议）
+        manager = get_memory_manager(agent_id, user)
+
         # 核验轮修复②：forget 提议按动作分流——确认=真删除目标记忆，
         # 绝不把遗忘摘要当新记忆写入主库
         if rec.get("proposed_action") == "forget":
             target = str(rec.get("target_memory_id") or "")
             if not target:
                 raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, "forget 提议缺少目标记忆 ID")
-            manager = get_memory_manager(agent_id, user)
-            deleted = manager.forget(target, soft=True)
-            if not deleted:
-                raise APIError(ErrorCodes.NOT_FOUND, "目标记忆不存在或已删除，请拒绝该提议")
-            out = store.confirm(pending_id, lambda c, cat, mt: target)
+
+            def _do_forget(_content: str, _category: str, _memory_type: str) -> str:
+                deleted = manager.forget(target, soft=True)
+                if not deleted:
+                    raise APIError(ErrorCodes.NOT_FOUND, "目标记忆不存在或已删除，请拒绝该提议")
+                return target
+
+            out = store.confirm(pending_id, _do_forget)
             return success_response(
                 data={"memory_id": out.get("memory_id"), "pending_id": pending_id, "action": "forget"},
                 message="记忆已确认遗忘",
                 request_id=_get_request_id(None),
             )
 
-        manager = get_memory_manager(agent_id, user)
-        memory_id = manager.remember(
-            content=rec["content"],
-            category=rec["category"],
-            memory_type=rec["memory_type"],
-            metadata={"from_pending": True, "pending_id": pending_id},
-        )
-        out = store.confirm(pending_id, lambda c, cat, mt: memory_id)
+        def _do_remember(content: str, category: str, memory_type: str) -> str:
+            return manager.remember(
+                content=content,
+                category=category,
+                memory_type=memory_type,
+                metadata={"from_pending": True, "pending_id": pending_id},
+            )
+
+        out = store.confirm(pending_id, _do_remember)
         return success_response(
             data={"memory_id": out.get("memory_id"), "pending_id": pending_id},
             message="记忆已确认入库",
