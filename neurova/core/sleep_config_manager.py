@@ -227,9 +227,9 @@ class SleepConfigManager(BaseModule):
             return False
 
     def get_config(self) -> SleepConfigData:
-        """获取配置"""
+        """获取配置（惰性装载：未加载时读盘/回退默认并缓存）"""
         if self._config is None:
-            return SleepConfigData.from_dict(self.DEFAULT_CONFIG)
+            self.load_config()
         return self._config
 
     def get_config_dict(self) -> Dict[str, Any]:

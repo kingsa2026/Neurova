@@ -135,6 +135,23 @@ class TestWarn3ConsoleChatMetadata:
 
         source = _get_method_source(console.post_console_chat)
         tree = ast.parse(source)
+
+        # 收集"赋值为含 user_id 键的 Dict 字面量"的变量名
+        # （实现把 metadata 字面量提取为变量，调用点传变量名）
+        user_id_dict_vars = set()
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Assign)
+                and isinstance(node.value, ast.Dict)
+                and any(
+                    isinstance(k, ast.Constant) and k.value == "user_id"
+                    for k in node.value.keys
+                )
+            ):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        user_id_dict_vars.add(target.id)
+
         matched_calls = []
         for node in ast.walk(tree):
             # await agent.chat(...) 或 agent.chat(...) 均匹配
@@ -143,9 +160,12 @@ class TestWarn3ConsoleChatMetadata:
                 continue
             for kw in call.keywords:
                 if kw.arg == "metadata" and isinstance(kw.value, ast.Dict):
-                    for key in kw.value.keys:
-                        if isinstance(key, ast.Constant) and key.value == "user_id":
-                            matched_calls.append(call)
+                    if any(isinstance(k, ast.Constant) and k.value == "user_id" for k in kw.value.keys):
+                        matched_calls.append(call)
+                # 变量形态: metadata=metadata，且该变量被赋值为含 user_id 的 Dict
+                elif kw.arg == "metadata" and isinstance(kw.value, ast.Name):
+                    if kw.value.id in user_id_dict_vars:
+                        matched_calls.append(call)
         assert matched_calls, (
             "WARN #3: post_console_chat 调 agent.chat 时未传 metadata={'user_id': ...}. "
             "导致 ChatPipeline 用 'anonymous' 兜底,记忆保存/事件广播拿不到真实 user_id. "

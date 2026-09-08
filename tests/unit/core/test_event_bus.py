@@ -40,10 +40,11 @@ class TestEventBus(unittest.TestCase):
         self.assertEqual(event.source, "test_module")
         self.assertIsNotNone(event.timestamp)
 
-    def test_event_default_metadata(self) -> None:
-        """测试事件默认元数据"""
+    def test_event_default_priority(self) -> None:
+        """测试事件默认优先级（Event 无 metadata 字段，默认 NORMAL）"""
         event = Event(name="test.event")
-        self.assertEqual(event.metadata["priority"], EventPriority.NORMAL)
+        self.assertEqual(event.priority, EventPriority.NORMAL)
+        self.assertIsNotNone(event.timestamp)
 
     def test_subscribe_and_publish(self) -> None:
         """测试订阅和发布"""
@@ -55,7 +56,7 @@ class TestEventBus(unittest.TestCase):
         callback.assert_called_once()
         args = callback.call_args[0]
         self.assertEqual(args[0].name, "test.event")
-        self.assertEqual(args[0].data, {"data": "test_data"})
+        self.assertEqual(args[0].data, "test_data")
 
     def test_unsubscribe(self) -> None:
         """测试取消订阅"""
@@ -75,9 +76,9 @@ class TestEventBus(unittest.TestCase):
         callback1 = MagicMock()
         callback2 = MagicMock()
 
-        self.event_bus.subscribe("event1", callback1, module_id="module1")
-        self.event_bus.subscribe("event2", callback2, module_id="module1")
-        self.event_bus.subscribe("event1", MagicMock(), module_id="module2")
+        self.event_bus.subscribe("event1", callback1, module_name="module1")
+        self.event_bus.subscribe("event2", callback2, module_name="module1")
+        self.event_bus.subscribe("event1", MagicMock(), module_name="module2")
 
         removed = self.event_bus.unsubscribe_module("module1")
         self.assertEqual(removed, 2)
@@ -122,8 +123,8 @@ class TestEventBus(unittest.TestCase):
         log = self.event_bus.get_event_log()
         self.assertEqual(len(log), 3)
 
-        # 按事件名称过滤
-        event1_log = self.event_bus.get_event_log(event_name="event1")
+        # 按事件名称过滤（实现无 event_name 参数，用 comprehension）
+        event1_log = [e for e in self.event_bus.get_event_log(limit=100) if e["event"] == "event1"]
         self.assertEqual(len(event1_log), 2)
 
     def test_clear_event_log(self) -> None:
@@ -159,7 +160,7 @@ class TestEventBus(unittest.TestCase):
         self.event_bus.subscribe("event1", MagicMock())
         self.event_bus.subscribe("event2", MagicMock())
 
-        self.assertEqual(self.event_bus.subscription_count, 3)
+        self.assertEqual(self.event_bus.subscription_count(), 3)
 
     def test_global_event_bus(self) -> None:
         """测试全局事件总线"""
@@ -167,13 +168,12 @@ class TestEventBus(unittest.TestCase):
         bus2 = get_event_bus()
         self.assertIs(bus1, bus2)
 
-    def test_publish_event_object(self) -> None:
-        """测试发布事件对象"""
+    def test_publish_with_custom_data(self) -> None:
+        """测试发布携带自定义数据的事件"""
         callback = MagicMock()
-        event = Event(name="test.event", data={"custom": "data"})
 
         self.event_bus.subscribe("test.event", callback)
-        self.event_bus.publish(event)
+        self.event_bus.publish("test.event", data={"custom": "data"})
 
         callback.assert_called_once()
         self.assertEqual(callback.call_args[0][0].data, {"custom": "data"})
@@ -209,16 +209,14 @@ class TestEventBusAsync(unittest.TestCase):
         self.assertEqual(result, ["sync"])
 
     def test_start_stop(self) -> None:
-        """测试启动和停止"""
-        self.assertFalse(self.event_bus.is_running)
+        """测试启动和停止（同步方法 + is_running() 方法调用）"""
+        self.assertFalse(self.event_bus.is_running())
 
-        async def test():
-            await self.event_bus.start()
-            self.assertTrue(self.event_bus.is_running)
-            await self.event_bus.stop()
-            self.assertFalse(self.event_bus.is_running)
+        self.event_bus.start()
+        self.assertTrue(self.event_bus.is_running())
 
-        asyncio.run(test())
+        self.event_bus.stop()
+        self.assertFalse(self.event_bus.is_running())
 
 
 if __name__ == "__main__":

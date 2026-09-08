@@ -9,11 +9,11 @@ from unittest.mock import patch, MagicMock
 from neurova.core.logger import (
     LogManager,
     LogEntry,
+    LogLevel,
     get_log_manager,
     reset_log_manager,
     _sanitize_context,
 )
-from neurova.core.log_level import LogLevel
 
 
 class TestLogManager(unittest.TestCase):
@@ -29,20 +29,23 @@ class TestLogManager(unittest.TestCase):
         reset_log_manager()
 
     def test_log_creation(self) -> None:
-        """测试日志创建"""
-        entry = self.log_manager.info(
+        """测试日志记录（契约：log 方法返回 None，条目经 get_entries 取回）"""
+        result = self.log_manager.info(
             module="test_module",
             message="Test message",
             context={"key": "value"}
         )
 
-        self.assertIsNotNone(entry)
-        self.assertEqual(entry.module, "test_module")
-        self.assertEqual(entry.message, "Test message")
-        self.assertEqual(entry.context, {"key": "value"})
+        self.assertIsNone(result)
+
+        entries = self.log_manager.get_entries(module="test_module")
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].module, "test_module")
+        self.assertEqual(entries[0].message, "Test message")
+        self.assertEqual(entries[0].context, {"key": "value"})
 
     def test_log_levels(self) -> None:
-        """测试不同日志级别"""
+        """测试不同日志级别（各级别方法落盘后级别正确）"""
         self.log_manager.set_default_level(LogLevel.DEBUG)
         levels = [
             (LogLevel.DEBUG, self.log_manager.debug),
@@ -53,33 +56,36 @@ class TestLogManager(unittest.TestCase):
         ]
 
         for level, method in levels:
-            entry = method("test_module", f"Test {level.name}")
-            self.assertEqual(entry.level, level)
+            method("test_module", f"Test {level.name}")
+            entries = self.log_manager.get_entries(limit=1)
+            self.assertEqual(entries[-1].level, level)
 
     def test_log_filtering(self) -> None:
-        """测试日志过滤"""
+        """测试日志过滤（低于默认级别的日志被丢弃）"""
         self.log_manager.set_default_level(LogLevel.WARNING)
 
-        # DEBUG 日志应该被过滤
-        debug_entry = self.log_manager.debug("test_module", "Debug message")
-        self.assertIsNone(debug_entry)
+        # DEBUG 日志应该被过滤（不入条目表）
+        self.log_manager.debug("test_module", "Debug message")
+        self.assertEqual(self.log_manager.entry_count(), 0)
 
         # WARNING 日志应该被记录
-        warning_entry = self.log_manager.warning("test_module", "Warning message")
-        self.assertIsNotNone(warning_entry)
+        self.log_manager.warning("test_module", "Warning message")
+        self.assertEqual(self.log_manager.entry_count(), 1)
 
     def test_module_level_filtering(self) -> None:
-        """测试模块级别过滤"""
+        """测试模块级别过滤（per-module 覆盖默认级别）"""
         self.log_manager.set_default_level(LogLevel.INFO)
         self.log_manager.set_level("special_module", LogLevel.DEBUG)
 
-        # 默认模块应该受默认级别限制
-        entry = self.log_manager.debug("normal_module", "Debug message")
-        self.assertIsNone(entry)
+        # 默认模块受默认级别限制（DEBUG 被丢弃）
+        self.log_manager.debug("normal_module", "Debug message")
+        entries = self.log_manager.get_entries(module="normal_module")
+        self.assertEqual(len(entries), 0)
 
-        # special_module 应该能记录 DEBUG 日志
-        entry = self.log_manager.debug("special_module", "Debug message")
-        self.assertIsNotNone(entry)
+        # special_module 放行 DEBUG
+        self.log_manager.debug("special_module", "Debug message")
+        entries = self.log_manager.get_entries(module="special_module")
+        self.assertEqual(len(entries), 1)
 
     def test_get_entries(self) -> None:
         """测试获取日志条目"""
@@ -106,17 +112,17 @@ class TestLogManager(unittest.TestCase):
         self.log_manager.error("module2", "Message 3")
 
         stats = self.log_manager.get_stats()
-        self.assertEqual(stats["total"], 3)
-        self.assertEqual(stats["by_level"][LogLevel.INFO], 2)
-        self.assertEqual(stats["by_level"][LogLevel.ERROR], 1)
+        self.assertEqual(stats["total_logs"], 3)
+        self.assertEqual(stats["by_level"][LogLevel.INFO.value], 2)
+        self.assertEqual(stats["by_level"][LogLevel.ERROR.value], 1)
 
     def test_clear_logs(self) -> None:
         """测试清空日志"""
         self.log_manager.info("test_module", "Test message")
-        self.assertEqual(self.log_manager.entry_count, 1)
+        self.assertEqual(self.log_manager.entry_count(), 1)
 
         self.log_manager.clear()
-        self.assertEqual(self.log_manager.entry_count, 0)
+        self.assertEqual(self.log_manager.entry_count(), 0)
 
     def test_rotate_logs(self) -> None:
         """测试日志轮转"""
@@ -127,11 +133,11 @@ class TestLogManager(unittest.TestCase):
             mock_time.return_value = 200.0
             self.log_manager.info("test_module", "New message")
 
-            # 轮转掉100秒前的日志
+            # 轮转掉50秒前的日志（max_age_hours 单位是小时）
             mock_time.return_value = 200.0
-            removed = self.log_manager.rotate(max_age=50.0)
+            removed = self.log_manager.rotate(max_age_hours=50.0 / 3600.0)
             self.assertEqual(removed, 1)
-            self.assertEqual(self.log_manager.entry_count, 1)
+            self.assertEqual(self.log_manager.entry_count(), 1)
 
     def test_sensitive_data_sanitization(self) -> None:
         """测试敏感数据脱敏"""
@@ -143,10 +149,10 @@ class TestLogManager(unittest.TestCase):
         }
 
         sanitized = _sanitize_context(context)
-        self.assertEqual(sanitized["password"], "***REDACTED***")
-        self.assertEqual(sanitized["token"], "***REDACTED***")
+        self.assertEqual(sanitized["password"], "***")
+        self.assertEqual(sanitized["token"], "***")
         self.assertEqual(sanitized["normal_key"], "normal_value")
-        self.assertEqual(sanitized["nested"]["api_key"], "***REDACTED***")
+        self.assertEqual(sanitized["nested"]["api_key"], "***")
 
     def test_global_log_manager(self) -> None:
         """测试全局日志管理器"""
@@ -169,8 +175,10 @@ class TestLogManager(unittest.TestCase):
         self.assertEqual(entry_dict["level"], "INFO")
         self.assertEqual(entry_dict["module"], "test_module")
 
-    def test_log_entry_to_json(self) -> None:
-        """测试日志条目转JSON"""
+    def test_log_entry_json_roundtrip(self) -> None:
+        """测试日志条目 JSON 序列化（契约：to_dict + json.dumps）"""
+        import json as jsonlib
+
         entry = LogEntry(
             timestamp=123.456,
             level=LogLevel.INFO,
@@ -178,9 +186,9 @@ class TestLogManager(unittest.TestCase):
             message="Test message"
         )
 
-        json_str = entry.to_json()
-        self.assertIn("\"level\": \"INFO\"", json_str)
-        self.assertIn("\"message\": \"Test message\"", json_str)
+        json_str = jsonlib.dumps(entry.to_dict(), ensure_ascii=False)
+        self.assertIn('"level": "INFO"', json_str)
+        self.assertIn('"message": "Test message"', json_str)
 
 
 if __name__ == "__main__":

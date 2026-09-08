@@ -215,7 +215,7 @@ class TaskTracker:
 
             self._notify_subscribers("progress_update", task)
 
-            logger.debug("Task %.1f progress: %s%", task_id, progress)
+            logger.debug("Task %s progress: %.1f%%", task_id, progress)
             return True
 
     def complete_task(self, task_id: str, result: typing.Optional[typing.Dict[str, typing.Any]] = None) -> bool:

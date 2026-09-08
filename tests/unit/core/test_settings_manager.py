@@ -1,23 +1,23 @@
 """
-设置管理器测试
-测试 SettingsManager 的各种功能，包括语言设置、时区设置、用户设置管理等。
+设置管理器测试（对齐 neurova/core/settings_manager.py 真实契约）
+测试 SettingsManager 的语言/时区/工作空间设置、持久化与生命周期回调。
 """
 
 import pytest
-import sys
-import os
 import json
-import asyncio
 from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
 
 from neurova.core.settings_manager import (
     SettingsManager,
     get_settings_manager,
-    reset_settings_manager
+    reset_settings_manager,
 )
+
+
+def _make_manager(tmp_path, **extra):
+    config = {"data_dir": str(tmp_path / "settings")}
+    config.update(extra)
+    return SettingsManager(config)
 
 
 class TestSettingsManager:
@@ -27,40 +27,28 @@ class TestSettingsManager:
     def settings_manager(self, tmp_path):
         """创建设置管理器实例"""
         reset_settings_manager()
-        config = {
-            "data_path": str(tmp_path / "settings"),
-            "languages_enabled": True,
-            "timezone_enabled": True
-        }
-        return SettingsManager(config)
+        return _make_manager(tmp_path)
 
-    def test_init(self, settings_manager):
-        """测试初始化"""
-        assert settings_manager is not None
-        assert settings_manager.languages_enabled is True
-        assert settings_manager.timezone_enabled is True
-        assert settings_manager.data_path.exists()
+    def test_init(self, tmp_path):
+        """测试初始化（data_dir 目录自动创建，默认语言 zh-CN）"""
+        manager = _make_manager(tmp_path)
+
+        assert manager is not None
+        assert (tmp_path / "settings").exists()
+        assert manager.get_setting("language") == "zh-CN"
+        assert manager.get_setting("timezone") == "Asia/Shanghai"
 
     def test_get_user_language_default(self, settings_manager):
-        """测试获取用户默认语言"""
+        """测试获取用户默认语言（契约：返回语言代码字符串）"""
         language = settings_manager.get_user_language("user1")
-        assert language["language"] == "zh_CN"
-        assert language["fallback_language"] == "en_US"
-        assert language["auto_detect"] is False
+        assert language == "zh-CN"
 
     def test_set_user_language(self, settings_manager):
-        """测试设置用户语言"""
-        settings_manager.set_user_language(
-            user_id="user1",
-            language="en_US",
-            fallback_language="zh_CN",
-            auto_detect=True
-        )
-        
-        language = settings_manager.get_user_language("user1")
-        assert language["language"] == "en_US"
-        assert language["fallback_language"] == "zh_CN"
-        assert language["auto_detect"] is True
+        """测试设置用户语言（契约：set_user_language(language, user_id)）"""
+        success = settings_manager.set_user_language("en-US", "user1")
+
+        assert success is True
+        assert settings_manager.get_user_language("user1") == "en-US"
 
     def test_get_user_timezone_default(self, settings_manager):
         """测试获取用户默认时区"""
@@ -69,147 +57,141 @@ class TestSettingsManager:
 
     def test_set_user_timezone(self, settings_manager):
         """测试设置用户时区"""
-        settings_manager.set_user_timezone("user1", "America/New_York")
-        timezone = settings_manager.get_user_timezone("user1")
-        assert timezone == "America/New_York"
+        settings_manager.set_user_timezone("America/New_York", "user1")
+        assert settings_manager.get_user_timezone("user1") == "America/New_York"
+
+    def test_get_user_workspace(self, settings_manager):
+        """测试用户工作空间设置"""
+        assert settings_manager.get_user_workspace("user1") is None
+
+        settings_manager.set_user_workspace("/tmp/ws", "user1")
+        assert settings_manager.get_user_workspace("user1") == "/tmp/ws"
 
     def test_get_all_settings(self, settings_manager):
-        """测试获取用户所有设置"""
-        settings_manager.set_user_language("user1", "en_US")
-        settings_manager.set_user_timezone("user1", "America/New_York")
-        
+        """测试获取用户所有设置（8 个标准键，用户覆盖优先）"""
+        settings_manager.set_user_language("en-US", "user1")
+        settings_manager.set_user_timezone("America/New_York", "user1")
+
         all_settings = settings_manager.get_all_settings("user1")
-        assert "language" in all_settings
-        assert "timezone" in all_settings
-        assert all_settings["language"]["language"] == "en_US"
+        assert all_settings["language"] == "en-US"
         assert all_settings["timezone"] == "America/New_York"
+        # 未覆盖的键回落全局默认
+        assert all_settings["theme"] == "light"
+        assert all_settings["font_size"] == 14
 
     def test_update_settings(self, settings_manager):
-        """测试批量更新用户设置"""
-        settings_manager.update_settings("user1", {
-            "custom_key": "custom_value",
-            "another_key": 123
-        })
-        
+        """测试批量更新用户设置（契约：update_settings(settings, user_id)，白名单键生效）"""
+        success = settings_manager.update_settings(
+            {"theme": "dark", "font_size": 16, "custom_key": "ignored"},
+            "user1",
+        )
+
+        assert success is True
         all_settings = settings_manager.get_all_settings("user1")
-        assert all_settings["custom_key"] == "custom_value"
-        assert all_settings["another_key"] == 123
+        assert all_settings["theme"] == "dark"
+        assert all_settings["font_size"] == 16
+        # 非白名单键不进入标准视图
+        assert "custom_key" not in all_settings
 
     def test_multiple_users(self, settings_manager):
-        """测试多用户设置"""
-        settings_manager.set_user_language("user1", "en_US")
-        settings_manager.set_user_language("user2", "zh_CN")
-        settings_manager.set_user_timezone("user1", "America/New_York")
-        settings_manager.set_user_timezone("user2", "Asia/Tokyo")
-        
-        lang1 = settings_manager.get_user_language("user1")
-        lang2 = settings_manager.get_user_language("user2")
-        tz1 = settings_manager.get_user_timezone("user1")
-        tz2 = settings_manager.get_user_timezone("user2")
-        
-        assert lang1["language"] == "en_US"
-        assert lang2["language"] == "zh_CN"
-        assert tz1 == "America/New_York"
-        assert tz2 == "Asia/Tokyo"
+        """测试多用户设置隔离"""
+        settings_manager.set_user_language("en-US", "user1")
+        settings_manager.set_user_language("zh-CN", "user2")
+        settings_manager.set_user_timezone("America/New_York", "user1")
+        settings_manager.set_user_timezone("Asia/Tokyo", "user2")
+
+        assert settings_manager.get_user_language("user1") == "en-US"
+        assert settings_manager.get_user_language("user2") == "zh-CN"
+        assert settings_manager.get_user_timezone("user1") == "America/New_York"
+        assert settings_manager.get_user_timezone("user2") == "Asia/Tokyo"
+
+    def test_set_setting_get_setting(self, settings_manager):
+        """测试通用单键设置"""
+        assert settings_manager.set_setting("custom_key", {"a": 1}) is True
+        assert settings_manager.get_setting("custom_key") == {"a": 1}
+        assert settings_manager.get_setting("missing", "fallback") == "fallback"
+
+    def test_reset_settings(self, settings_manager):
+        """测试重置用户设置为默认值"""
+        settings_manager.set_user_language("en-US", "user1")
+        settings_manager.set_user_timezone("Asia/Tokyo", "user1")
+
+        assert settings_manager.reset_settings("user1") is True
+        assert settings_manager.get_user_language("user1") == "zh-CN"
+        assert settings_manager.get_user_timezone("user1") == "Asia/Shanghai"
 
 
 class TestSettingsPersistence:
     """测试设置持久化"""
 
-    @pytest.fixture
-    def settings_manager_with_data(self, tmp_path):
-        """创建带数据的设置管理器"""
-        config = {"data_path": str(tmp_path / "settings")}
-        manager = SettingsManager(config)
-        
-        manager.set_user_language("user1", "en_US")
-        manager.set_user_timezone("user1", "America/New_York")
-        manager.update_settings("user1", {"custom": "value"})
-        
-        return manager
+    def test_save_and_reload(self, tmp_path):
+        """测试设置落盘并在新实例中恢复（扁平 user_{uid}_* 键）"""
+        manager = _make_manager(tmp_path)
+        manager.set_user_language("en-US", "user1")
+        manager.set_user_timezone("America/New_York", "user1")
 
-    def test_save_settings_sync(self, settings_manager_with_data):
-        """测试同步保存设置"""
-        settings_manager_with_data._save_settings_sync()
-        
-        settings_file = settings_manager_with_data._user_settings_path
+        settings_file = manager._settings_file
         assert settings_file.exists()
-        
-        with open(settings_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        assert "user1" in data
-        assert data["user1"]["language"]["language"] == "en_US"
+
+        data = json.loads(settings_file.read_text(encoding="utf-8"))
+        assert data["user_user1_language"] == "en-US"
+
+        # 新实例从同一文件恢复
+        manager2 = _make_manager(tmp_path)
+        assert manager2.get_user_language("user1") == "en-US"
+        assert manager2.get_user_timezone("user1") == "America/New_York"
 
     def test_load_settings_on_init(self, tmp_path):
-        """测试初始化时加载设置"""
-        data_path = tmp_path / "settings"
-        data_path.mkdir(parents=True)
-        
-        settings_file = data_path / "user_settings.json"
-        initial_data = {
-            "user1": {
-                "language": {
-                    "language": "ja_JP",
-                    "fallback_language": "en_US",
-                    "auto_detect": False
-                },
-                "timezone": "Asia/Tokyo"
-            }
-        }
-        
-        with open(settings_file, 'w', encoding='utf-8') as f:
-            json.dump(initial_data, f)
-        
-        config = {"data_path": str(data_path)}
-        manager = SettingsManager(config)
-        
-        language = manager.get_user_language("user1")
-        timezone = manager.get_user_timezone("user1")
-        
-        assert language["language"] == "ja_JP"
-        assert timezone == "Asia/Tokyo"
+        """测试初始化时加载已有设置文件"""
+        data_dir = tmp_path / "settings"
+        data_dir.mkdir(parents=True)
+
+        settings_file = data_dir / "settings.json"
+        settings_file.write_text(
+            json.dumps({"user_user1_language": "ja-JP", "user_user1_timezone": "Asia/Tokyo"}),
+            encoding="utf-8",
+        )
+
+        manager = _make_manager(tmp_path)
+
+        assert manager.get_user_language("user1") == "ja-JP"
+        assert manager.get_user_timezone("user1") == "Asia/Tokyo"
+
+    def test_corrupt_settings_file_falls_back(self, tmp_path):
+        """设置文件损坏时回落默认值不崩"""
+        data_dir = tmp_path / "settings"
+        data_dir.mkdir(parents=True)
+        (data_dir / "settings.json").write_text("{broken json", encoding="utf-8")
+
+        manager = _make_manager(tmp_path)
+
+        assert manager.get_setting("language") == "zh-CN"
 
 
 class TestSettingsManagerLifecycle:
-    """测试设置管理器生命周期"""
+    """测试设置管理器生命周期（契约：_on_init/_on_start/_on_stop 同步回调）"""
 
-    @pytest.fixture
-    def settings_manager(self, tmp_path):
-        """创建设置管理器实例"""
-        config = {"data_path": str(tmp_path / "settings")}
-        return SettingsManager(config)
+    def test_on_init(self, tmp_path):
+        """测试初始化阶段回调"""
+        manager = _make_manager(tmp_path)
+        manager._on_init()
+        assert (tmp_path / "settings").exists()
 
-    def test_on_init(self, settings_manager):
-        """测试初始化阶段"""
-        settings_manager._on_init()
-        assert settings_manager.data_path.exists()
+    def test_on_start(self, tmp_path):
+        """测试启动阶段回调"""
+        manager = _make_manager(tmp_path)
+        manager._on_start()
 
-    def test_on_start(self, settings_manager):
-        """测试启动阶段"""
-        settings_manager._on_start()
+    def test_on_stop_saves(self, tmp_path):
+        """测试停止阶段回调触发落盘"""
+        manager = _make_manager(tmp_path)
+        manager.set_user_language("en-US", "user1")
 
-    def test_on_stop(self, settings_manager):
-        """测试停止阶段"""
-        settings_manager.set_user_language("user1", "en_US")
-        settings_manager._on_stop()
+        # 手动清掉文件模拟未保存状态，_on_stop 应重新落盘
+        manager._settings_file.unlink()
+        manager._on_stop()
 
-    @pytest.mark.asyncio
-    async def test_initialize(self, settings_manager):
-        """测试异步初始化"""
-        await settings_manager.initialize()
-        assert settings_manager.data_path.exists()
-
-    @pytest.mark.asyncio
-    async def test_start(self, settings_manager):
-        """测试异步启动"""
-        await settings_manager.start()
-
-    @pytest.mark.asyncio
-    async def test_stop(self, settings_manager):
-        """测试异步停止"""
-        settings_manager.set_user_language("user1", "en_US")
-        await settings_manager.stop()
+        assert manager._settings_file.exists()
 
 
 class TestGetSettingsManager:
@@ -235,66 +217,47 @@ class TestEdgeCases:
     """测试边界情况"""
 
     def test_nonexistent_user(self, tmp_path):
-        """测试不存在的用户"""
-        config = {"data_path": str(tmp_path / "settings")}
-        manager = SettingsManager(config)
-        
+        """测试不存在的用户回落全局默认"""
+        manager = _make_manager(tmp_path)
+
         language = manager.get_user_language("nonexistent")
         timezone = manager.get_user_timezone("nonexistent")
         all_settings = manager.get_all_settings("nonexistent")
-        
-        assert language["language"] == "zh_CN"
+
+        assert language == "zh-CN"
         assert timezone == "Asia/Shanghai"
-        assert all_settings == {}
+        assert set(all_settings.keys()) == {
+            "language", "timezone", "workspace", "theme",
+            "font_size", "auto_save", "notifications", "debug_mode",
+        }
 
     def test_empty_user_id(self, tmp_path):
         """测试空用户ID"""
-        config = {"data_path": str(tmp_path / "settings")}
-        manager = SettingsManager(config)
-        
-        manager.set_user_language("", "en_US")
-        language = manager.get_user_language("")
-        
-        assert language["language"] == "en_US"
+        manager = _make_manager(tmp_path)
+
+        manager.set_user_language("en-US", "")
+        assert manager.get_user_language("") == "en-US"
 
     def test_special_characters_in_user_id(self, tmp_path):
         """测试用户ID包含特殊字符"""
-        config = {"data_path": str(tmp_path / "settings")}
-        manager = SettingsManager(config)
-        
+        manager = _make_manager(tmp_path)
+
         user_id = "user@example.com"
-        manager.set_user_language(user_id, "en_US")
-        language = manager.get_user_language(user_id)
-        
-        assert language["language"] == "en_US"
+        manager.set_user_language("en-US", user_id)
+        assert manager.get_user_language(user_id) == "en-US"
 
-    def test_invalid_timezone(self, tmp_path):
-        """测试无效时区"""
-        config = {"data_path": str(tmp_path / "settings")}
-        manager = SettingsManager(config)
-        
-        manager.set_user_timezone("user1", "Invalid/Timezone")
-        timezone = manager.get_user_timezone("user1")
-        
-        assert timezone == "Invalid/Timezone"
+    def test_invalid_timezone_stored_as_is(self, tmp_path):
+        """测试无效时区原样存储（不做校验）"""
+        manager = _make_manager(tmp_path)
 
-    def test_update_empty_settings(self, tmp_path):
-        """测试更新空设置"""
-        config = {"data_path": str(tmp_path / "settings")}
-        manager = SettingsManager(config)
-        
-        manager.update_settings("user1", {})
-        all_settings = manager.get_all_settings("user1")
-        
-        assert all_settings == {}
+        manager.set_user_timezone("Invalid/Timezone", "user1")
+        assert manager.get_user_timezone("user1") == "Invalid/Timezone"
 
     def test_overwrite_existing_settings(self, tmp_path):
         """测试覆盖现有设置"""
-        config = {"data_path": str(tmp_path / "settings")}
-        manager = SettingsManager(config)
-        
-        manager.set_user_language("user1", "en_US")
-        manager.set_user_language("user1", "zh_CN")
-        
-        language = manager.get_user_language("user1")
-        assert language["language"] == "zh_CN"
+        manager = _make_manager(tmp_path)
+
+        manager.set_user_language("en-US", "user1")
+        manager.set_user_language("zh-CN", "user1")
+
+        assert manager.get_user_language("user1") == "zh-CN"

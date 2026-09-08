@@ -1,5 +1,5 @@
 """
-测试计划编排器
+测试计划编排器（对齐 neurova/core/plan_orchestrator.py 真实契约）
 """
 import pytest
 from datetime import datetime
@@ -17,356 +17,375 @@ from neurova.core.plan_orchestrator import (
 
 class TestTaskComplexity:
     """测试TaskComplexity枚举"""
-    
+
     def test_task_complexity_members(self):
         """测试复杂度枚举成员"""
         assert TaskComplexity.SIMPLE.value == "simple"
         assert TaskComplexity.COMPOUND.value == "compound"
         assert TaskComplexity.PARALLEL.value == "parallel"
         assert TaskComplexity.DAG.value == "dag"
-        assert TaskComplexity.ITERATIVE.value == "iterative"
 
 
 class TestRetryPolicy:
-    """测试RetryPolicy数据类"""
-    
-    def test_create_retry_policy(self):
-        """测试创建重试策略"""
-        policy = RetryPolicy()
-        
-        assert policy.max_retries == 3
-        assert policy.retry_delay == 1.0
-        assert policy.exponential_backoff is True
-    
-    def test_create_custom_retry_policy(self):
-        """测试创建自定义重试策略"""
-        policy = RetryPolicy(
-            max_retries=5,
-            retry_delay=2.0,
-            exponential_backoff=False,
-        )
-        
-        assert policy.max_retries == 5
-        assert policy.retry_delay == 2.0
-        assert policy.exponential_backoff is False
+    """测试RetryPolicy枚举"""
+
+    def test_retry_policy_members(self):
+        """测试重试策略枚举成员"""
+        assert RetryPolicy.NONE.value == "none"
+        assert RetryPolicy.LINEAR.value == "linear"
+        assert RetryPolicy.EXPONENTIAL.value == "exponential"
+        assert RetryPolicy.FIXED.value == "fixed"
 
 
 class TestTaskNode:
     """测试TaskNode数据类"""
-    
+
     def test_create_task_node(self):
         """测试创建任务节点"""
         node = TaskNode(
-            id="task_1",
+            task_id="task_1",
             description="测试任务",
-            tool="test_tool",
-            agent="test_agent",
+            tool_name="test_tool",
         )
-        
-        assert node.id == "task_1"
+
+        assert node.task_id == "task_1"
         assert node.description == "测试任务"
-        assert node.tool == "test_tool"
-        assert node.agent == "test_agent"
-        assert node.depends_on == []
-        assert node.status == "pending"
-        assert node.result is None
-        assert node.error is None
-    
+        assert node.tool_name == "test_tool"
+        assert node.dependencies == []
+        assert node.retry_policy == RetryPolicy.NONE
+        assert node.metadata == {}
+
+    def test_task_node_auto_id(self):
+        """未指定 task_id 时自动生成"""
+        node = TaskNode(description="自动ID任务")
+
+        assert node.task_id != ""
+
     def test_task_node_with_dependencies(self):
         """测试带依赖的任务节点"""
         node = TaskNode(
-            id="task_2",
+            task_id="task_2",
             description="依赖任务",
-            depends_on=["task_1"],
+            dependencies=["task_1"],
         )
-        
-        assert node.depends_on == ["task_1"]
-    
+
+        assert node.dependencies == ["task_1"]
+
     def test_task_node_with_retry_policy(self):
         """测试带重试策略的任务节点"""
-        policy = RetryPolicy(max_retries=5)
         node = TaskNode(
-            id="task_1",
+            task_id="task_1",
             description="测试任务",
-            retry_policy=policy,
+            retry_policy=RetryPolicy.LINEAR,
+            max_retries=5,
         )
-        
-        assert node.retry_policy.max_retries == 5
+
+        assert node.retry_policy == RetryPolicy.LINEAR
+        assert node.max_retries == 5
+
+    def test_task_node_to_dict(self):
+        """测试任务节点字典化"""
+        node = TaskNode(task_id="task_1", description="任务", tool_name="tool")
+        data = node.to_dict()
+
+        assert data["task_id"] == "task_1"
+        assert data["tool_name"] == "tool"
+        assert data["retry_policy"] == "none"
 
 
 class TestPlan:
     """测试Plan数据类"""
-    
+
     def test_create_plan(self):
         """测试创建计划"""
         tasks = [
-            TaskNode(id="task_1", description="任务1"),
-            TaskNode(id="task_2", description="任务2"),
+            TaskNode(task_id="task_1", description="任务1"),
+            TaskNode(task_id="task_2", description="任务2"),
         ]
-        
+
         plan = Plan(
             plan_id="plan_1",
             description="测试计划",
             complexity=TaskComplexity.SIMPLE,
             tasks=tasks,
         )
-        
+
         assert plan.plan_id == "plan_1"
         assert plan.description == "测试计划"
         assert plan.complexity == TaskComplexity.SIMPLE
         assert len(plan.tasks) == 2
 
+    def test_plan_to_dict(self):
+        """测试计划字典化"""
+        plan = Plan(plan_id="plan_1", name="计划", complexity=TaskComplexity.DAG)
+        data = plan.to_dict()
+
+        assert data["plan_id"] == "plan_1"
+        assert data["complexity"] == "dag"
+
 
 class TestPlanResult:
     """测试PlanResult数据类"""
-    
+
     def test_create_plan_result(self):
         """测试创建计划结果"""
-        now = datetime.now()
-        
         result = PlanResult(
             plan_id="plan_1",
             success=True,
             task_results={"task_1": "result1"},
-            errors=[],
-            started_at=now,
-            completed_at=now,
-            duration_seconds=1.5,
+            total_duration_ms=1500.0,
         )
-        
+
         assert result.plan_id == "plan_1"
         assert result.success is True
-        assert result.duration_seconds == 1.5
+        assert result.total_duration_ms == 1500.0
+        assert result.error is None
+
+    def test_plan_result_to_dict(self):
+        """测试计划结果字典化"""
+        result = PlanResult(plan_id="plan_1", success=False, error="boom")
+        data = result.to_dict()
+
+        assert data["success"] is False
+        assert data["error"] == "boom"
 
 
 class TestExecutionFeedback:
     """测试ExecutionFeedback数据类"""
-    
+
     def test_create_execution_feedback(self):
         """测试创建执行反馈"""
         feedback = ExecutionFeedback(
             task_id="task_1",
             success=True,
-            result="result",
+            output={"result": "result"},
             error=None,
-            execution_time=1.0,
+            duration_ms=1.0,
         )
-        
+
         assert feedback.task_id == "task_1"
         assert feedback.success is True
-        assert feedback.result == "result"
+        assert feedback.output == {"result": "result"}
         assert feedback.error is None
-        assert feedback.execution_time == 1.0
+        assert feedback.duration_ms == 1.0
 
 
 class TestPlanOrchestrator:
     """测试PlanOrchestrator类"""
-    
+
     def test_init(self):
         """测试初始化"""
         orchestrator = PlanOrchestrator()
-        
-        assert orchestrator.event_bus is None
-        assert orchestrator.service_manager is None
-        assert orchestrator.active_plans == {}
-        assert orchestrator.task_results == {}
-    
-    @pytest.mark.asyncio
-    async def test_decompose_intent_simple(self):
-        """测试分解简单意图"""
+
+        assert orchestrator._plans == {}
+        assert orchestrator._executor is None
+
+    def test_decompose_intent_simple(self):
+        """测试分解简单意图（同步方法）"""
         orchestrator = PlanOrchestrator()
-        
-        plan = await orchestrator.decompose_intent(
+
+        plan = orchestrator.decompose_intent(
             intent="执行简单任务",
             context={},
         )
-        
+
         assert plan is not None
         assert plan.complexity == TaskComplexity.SIMPLE
         assert len(plan.tasks) >= 1
-    
-    @pytest.mark.asyncio
-    async def test_decompose_intent_compound(self):
+
+    def test_decompose_intent_compound(self):
         """测试分解复合意图"""
         orchestrator = PlanOrchestrator()
-        
-        plan = await orchestrator.decompose_intent(
-            intent="执行任务A和任务B",
+
+        plan = orchestrator.decompose_intent(
+            intent="执行任务A然后执行任务B",
             context={},
         )
-        
+
         assert plan.complexity == TaskComplexity.COMPOUND
-    
-    @pytest.mark.asyncio
-    async def test_decompose_intent_parallel(self):
+
+    def test_decompose_intent_parallel(self):
         """测试分解并行意图"""
         orchestrator = PlanOrchestrator()
-        
-        plan = await orchestrator.decompose_intent(
+
+        plan = orchestrator.decompose_intent(
             intent="同时执行多个任务",
             context={},
         )
-        
+
         assert plan.complexity == TaskComplexity.PARALLEL
-    
-    @pytest.mark.asyncio
-    async def test_decompose_intent_iterative(self):
-        """测试分解迭代意图"""
+
+    def test_decompose_intent_dag(self):
+        """测试分解 DAG 意图"""
         orchestrator = PlanOrchestrator()
-        
-        plan = await orchestrator.decompose_intent(
-            intent="重复执行任务",
+
+        plan = orchestrator.decompose_intent(
+            intent="执行依赖任务",
             context={},
         )
-        
-        assert plan.complexity == TaskComplexity.ITERATIVE
-    
+
+        assert plan.complexity == TaskComplexity.DAG
+
+    def test_decompose_intent_stores_plan(self):
+        """分解后的计划被登记，可通过 get_plan/list_plans 取回"""
+        orchestrator = PlanOrchestrator()
+
+        plan = orchestrator.decompose_intent("执行任务")
+
+        assert orchestrator.get_plan(plan.plan_id) is plan
+        assert plan in orchestrator.list_plans()
+
     @pytest.mark.asyncio
     async def test_execute_plan(self):
-        """测试执行计划"""
+        """测试执行计划（契约：execute_plan(plan_id)）"""
         orchestrator = PlanOrchestrator()
-        
-        plan = await orchestrator.decompose_intent(
+
+        plan = orchestrator.decompose_intent(
             intent="执行任务",
             context={},
         )
-        
-        result = await orchestrator.execute_plan(plan)
-        
+
+        result = await orchestrator.execute_plan(plan.plan_id)
+
         assert result is not None
         assert result.plan_id == plan.plan_id
-        assert "completed" in [t.status for t in plan.tasks]
-    
+        assert result.success is True
+        assert set(result.task_results.keys()) == {t.task_id for t in plan.tasks}
+
     @pytest.mark.asyncio
-    async def test_execute_plan_with_event_bus(self):
-        """测试带事件总线的计划执行"""
-        mock_event_bus = MagicMock()
-        orchestrator = PlanOrchestrator(event_bus=mock_event_bus)
-        
-        plan = await orchestrator.decompose_intent(
-            intent="执行任务",
-            context={},
-        )
-        
-        result = await orchestrator.execute_plan(plan)
-        
-        assert mock_event_bus.emit.called
-    
-    @pytest.mark.asyncio
-    async def test_adjust_plan(self):
-        """测试调整计划"""
+    async def test_execute_plan_not_found(self):
+        """执行不存在的计划返回失败结果"""
         orchestrator = PlanOrchestrator()
-        
-        plan = await orchestrator.decompose_intent(
+
+        result = await orchestrator.execute_plan("nonexistent")
+
+        assert result.success is False
+        assert "not found" in (result.error or "")
+
+    def test_adjust_plan(self):
+        """测试调整计划（契约：adjust_plan(plan_id, feedback)，失败反馈就地升级重试策略）"""
+        orchestrator = PlanOrchestrator()
+
+        plan = orchestrator.decompose_intent(
             intent="执行任务",
             context={},
         )
-        
-        feedback = [
-            ExecutionFeedback(
-                task_id="task_1",
-                success=False,
-                result=None,
-                error="执行失败",
-                execution_time=1.0,
-                suggestions=["重试建议"],
-            )
-        ]
-        
-        adjusted_plan = await orchestrator.adjust_plan(plan, feedback)
-        
-        assert adjusted_plan is not None
-        assert adjusted_plan.plan_id != plan.plan_id
-        assert len(adjusted_plan.tasks) == len(plan.tasks)
-    
+        task = plan.tasks[0]
+
+        feedback = ExecutionFeedback(
+            task_id=task.task_id,
+            success=False,
+            error="执行失败",
+            duration_ms=1.0,
+        )
+
+        adjusted_plan = orchestrator.adjust_plan(plan.plan_id, feedback)
+
+        assert adjusted_plan is plan
+        assert task.retry_policy == RetryPolicy.LINEAR
+        assert task.max_retries == 3
+
+    def test_adjust_plan_not_found(self):
+        """调整不存在的计划返回 None"""
+        orchestrator = PlanOrchestrator()
+
+        feedback = ExecutionFeedback(task_id="task_1", success=False)
+        assert orchestrator.adjust_plan("nonexistent", feedback) is None
+
     def test_get_plan(self):
         """测试获取计划"""
         orchestrator = PlanOrchestrator()
-        
+
         plan = orchestrator.get_plan("nonexistent")
-        
+
         assert plan is None
-    
+
     def test_list_plans(self):
         """测试列出计划"""
         orchestrator = PlanOrchestrator()
-        
+
         plans = orchestrator.list_plans()
-        
+
         assert plans == []
 
 
 class TestTopologicalSort:
     """测试拓扑排序"""
-    
-    @pytest.mark.asyncio
-    async def test_topological_sort_simple(self):
+
+    def test_topological_sort_simple(self):
         """测试简单拓扑排序"""
         orchestrator = PlanOrchestrator()
-        
+
         tasks = [
-            TaskNode(id="task_1", description="任务1"),
-            TaskNode(id="task_2", description="任务2", depends_on=["task_1"]),
+            TaskNode(task_id="task_1", description="任务1"),
+            TaskNode(task_id="task_2", description="任务2", dependencies=["task_1"]),
         ]
-        
+
         sorted_tasks = orchestrator._topological_sort(tasks)
-        
-        assert sorted_tasks[0].id == "task_1"
-        assert sorted_tasks[1].id == "task_2"
-    
-    @pytest.mark.asyncio
-    async def test_topological_sort_complex(self):
+
+        assert sorted_tasks[0].task_id == "task_1"
+        assert sorted_tasks[1].task_id == "task_2"
+
+    def test_topological_sort_complex(self):
         """测试复杂拓扑排序"""
         orchestrator = PlanOrchestrator()
-        
+
         tasks = [
-            TaskNode(id="task_1", description="任务1"),
-            TaskNode(id="task_2", description="任务2", depends_on=["task_1"]),
-            TaskNode(id="task_3", description="任务3", depends_on=["task_1"]),
-            TaskNode(id="task_4", description="任务4", depends_on=["task_2", "task_3"]),
+            TaskNode(task_id="task_1", description="任务1"),
+            TaskNode(task_id="task_2", description="任务2", dependencies=["task_1"]),
+            TaskNode(task_id="task_3", description="任务3", dependencies=["task_1"]),
+            TaskNode(task_id="task_4", description="任务4", dependencies=["task_2", "task_3"]),
         ]
-        
+
         sorted_tasks = orchestrator._topological_sort(tasks)
-        
-        assert sorted_tasks[0].id == "task_1"
-        assert sorted_tasks[3].id == "task_4"
+
+        assert sorted_tasks[0].task_id == "task_1"
+        assert sorted_tasks[3].task_id == "task_4"
+
+    def test_topological_sort_missing_dependency(self):
+        """依赖缺失的任务仍出现在结果中（不崩）"""
+        orchestrator = PlanOrchestrator()
+
+        tasks = [
+            TaskNode(task_id="task_1", description="任务1", dependencies=["ghost"]),
+        ]
+
+        sorted_tasks = orchestrator._topological_sort(tasks)
+
+        assert [t.task_id for t in sorted_tasks] == ["task_1"]
 
 
 class TestComplexityAnalysis:
     """测试复杂度分析"""
-    
-    @pytest.mark.asyncio
-    async def test_analyze_simple_intent(self):
+
+    def test_analyze_simple_intent(self):
         """测试简单意图分析"""
         orchestrator = PlanOrchestrator()
-        
-        complexity = await orchestrator._analyze_complexity("简单任务", {})
-        
+
+        complexity = orchestrator._analyze_complexity("简单任务", {})
+
         assert complexity == TaskComplexity.SIMPLE
-    
-    @pytest.mark.asyncio
-    async def test_analyze_compound_intent(self):
+
+    def test_analyze_compound_intent(self):
         """测试复合意图分析"""
         orchestrator = PlanOrchestrator()
-        
-        complexity = await orchestrator._analyze_complexity("执行A和B", {})
-        
+
+        complexity = orchestrator._analyze_complexity("先执行A然后执行B", {})
+
         assert complexity == TaskComplexity.COMPOUND
-    
-    @pytest.mark.asyncio
-    async def test_analyze_parallel_intent(self):
+
+    def test_analyze_parallel_intent(self):
         """测试并行意图分析"""
         orchestrator = PlanOrchestrator()
-        
-        complexity = await orchestrator._analyze_complexity("同时执行", {})
-        
+
+        complexity = orchestrator._analyze_complexity("同时执行", {})
+
         assert complexity == TaskComplexity.PARALLEL
-    
-    @pytest.mark.asyncio
-    async def test_analyze_iterative_intent(self):
-        """测试迭代意图分析"""
+
+    def test_analyze_dag_intent(self):
+        """测试 DAG 意图分析"""
         orchestrator = PlanOrchestrator()
-        
-        complexity = await orchestrator._analyze_complexity("重复执行", {})
-        
-        assert complexity == TaskComplexity.ITERATIVE
+
+        complexity = orchestrator._analyze_complexity("依赖模块A", {})
+
+        assert complexity == TaskComplexity.DAG

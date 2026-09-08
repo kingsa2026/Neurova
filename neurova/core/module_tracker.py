@@ -160,6 +160,7 @@ class ModuleEffectivenessTracker:
 
         # 定时检查线程
         self._running = True
+        self._stop_event = threading.Event()
         self._check_thread: typing.Optional[threading.Thread] = None
 
         self._start_periodic_check()
@@ -170,9 +171,11 @@ class ModuleEffectivenessTracker:
         """启动定时检查"""
 
         def check_loop():
+            # Event.wait 可被 shutdown 打断，避免 sleep(check_interval) 内无法退出
             while self._running:
+                if self._stop_event.wait(self._check_interval):
+                    break
                 try:
-                    time.sleep(self._check_interval)
                     if self._running:
                         self._periodic_check()
                 except Exception as e:
@@ -519,6 +522,7 @@ class ModuleEffectivenessTracker:
     def shutdown(self) -> None:
         """关闭追踪器"""
         self._running = False
+        self._stop_event.set()
         if self._check_thread and self._check_thread.is_alive():
             self._check_thread.join(timeout=5)
 

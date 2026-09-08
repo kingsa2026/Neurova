@@ -141,14 +141,14 @@ class TestTrajectorySpan:
         )
         
         event = TrajectoryEvent(
-            event_type=TrajectoryEventType.LLM_CALL_STREAM_CHUNK,
+            event_type=TrajectoryEventType.LLM_CALL_START,
             data={"chunk": "Hello"},
         )
-        
+
         span.add_event(event)
-        
+
         assert len(span.events) == 1
-        assert span.events[0].event_type == TrajectoryEventType.LLM_CALL_STREAM_CHUNK
+        assert span.events[0].event_type == TrajectoryEventType.LLM_CALL_START
         assert span.events[0].span_id == span.span_id
     
     def test_span_to_dict(self):
@@ -157,14 +157,12 @@ class TestTrajectorySpan:
             span_id="test-span-123",
             trace_id="test-trace-456",
             operation_name="test_operation",
-            tags={"tag1": "value1"},
         )
-        
+
         span_dict = span.to_dict()
-        
+
         assert span_dict["span_id"] == "test-span-123"
         assert span_dict["trace_id"] == "test-trace-456"
-        assert span_dict["tags"] == {"tag1": "value1"}
     
     def test_span_from_dict(self):
         """测试从字典创建span"""
@@ -219,7 +217,8 @@ class TestTrajectory:
         assert len(trajectory.spans) == 2
         assert "span1" in trajectory.spans
         assert "span2" in trajectory.spans
-        assert "span2" in trajectory.spans["span1"].child_spans
+                # child_spans 存 TrajectorySpan 对象
+        assert any(s.span_id == "span2" for s in trajectory.spans["span1"].child_spans)
     
     def test_get_span(self):
         """测试获取span"""

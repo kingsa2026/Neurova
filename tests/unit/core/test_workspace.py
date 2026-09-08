@@ -1,211 +1,234 @@
 """
-工作空间测试
-测试 Workspace 的各种功能，包括初始化、服务管理、生命周期等。
+工作空间测试（对齐 neurova/core/workspace.py 真实契约）
+测试 Workspace 的初始化、管理器装配、生命周期、可复用服务等。
 """
 
 import pytest
-import sys
-import os
-import asyncio
 from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
+from neurova.core.workspace import (
+    Workspace,
+    create_workspace,
+    get_workspace,
+    list_workspaces,
+    remove_workspace,
+    reset_workspaces,
+)
 
-from neurova.core.workspace import Workspace
+
+@pytest.fixture(autouse=True)
+def _isolated_global_workspaces():
+    """隔离模块级全局工作空间注册表"""
+    reset_workspaces()
+    yield
+    reset_workspaces()
+
+
+def _make_workspace(tmp_path, workspace_id="test-agent", **kwargs):
+    return Workspace(workspace_id, tmp_path / "workspace", **kwargs)
 
 
 class TestWorkspace:
     """测试工作空间"""
 
-    @pytest.fixture
-    def workspace(self, tmp_path):
-        """创建工作空间实例"""
-        agent_id = "test-agent"
-        workspace_dir = str(tmp_path / "workspace")
-        return Workspace(agent_id, workspace_dir)
+    def test_init(self, tmp_path):
+        """测试初始化（契约：Workspace(workspace_id, data_dir, config)）"""
+        ws = _make_workspace(tmp_path, workspace_id="test-agent")
 
-    def test_init(self, workspace):
-        """测试初始化"""
-        assert workspace is not None
-        assert workspace.agent_id == "test-agent"
-        assert workspace.workspace_dir.exists()
-        assert workspace._started is False
+        assert ws is not None
+        assert ws.workspace_id == "test-agent"
+        assert ws.data_dir.exists()
+        assert ws.started is False
 
     def test_workspace_dir_creation(self, tmp_path):
-        """测试工作空间目录创建"""
-        agent_id = "new-agent"
-        workspace_dir = str(tmp_path / "new_workspace")
-        
-        workspace = Workspace(agent_id, workspace_dir)
-        
-        assert workspace.workspace_dir.exists()
-        assert workspace.workspace_dir.is_dir()
+        """测试工作空间目录自动创建"""
+        ws = Workspace("new-agent", tmp_path / "new_workspace")
 
-    def test_agent_id(self, workspace):
-        """测试代理ID"""
-        assert workspace.agent_id == "test-agent"
+        assert ws.data_dir.exists()
+        assert ws.data_dir.is_dir()
 
-    def test_started_property(self, workspace):
+    def test_workspace_id(self, tmp_path):
+        """测试工作空间ID"""
+        ws = _make_workspace(tmp_path, workspace_id="test-agent")
+
+        assert ws.workspace_id == "test-agent"
+
+    def test_config_property(self, tmp_path):
+        """测试配置属性"""
+        config = {"key": "value"}
+        ws = Workspace("test-agent", tmp_path / "workspace", config=config)
+
+        assert ws.config == config
+
+    def test_started_property(self, tmp_path):
         """测试启动状态属性"""
-        assert workspace.started is False
-        workspace._started = True
-        assert workspace.started is True
+        ws = _make_workspace(tmp_path)
 
-    def test_set_manager(self, workspace):
-        """测试设置管理器"""
+        assert ws.started is False
+
+    def test_set_manager_known_name(self, tmp_path):
+        """测试按名称设置已知管理器"""
+        ws = _make_workspace(tmp_path)
         mock_manager = MagicMock()
-        workspace.set_manager(mock_manager)
-        assert workspace._manager == mock_manager
 
-    @pytest.mark.asyncio
-    async def test_start(self, workspace):
-        """测试启动工作空间"""
-        with patch.object(workspace._service_manager, 'start_all', new_callable=AsyncMock) as mock_start:
-            await workspace.start()
-            mock_start.assert_called_once()
-            assert workspace._started is True
+        ws.set_manager("memory", mock_manager)
 
-    @pytest.mark.asyncio
-    async def test_stop(self, workspace):
-        """测试停止工作空间"""
-        workspace._started = True
-        
-        with patch.object(workspace._service_manager, 'stop_all', new_callable=AsyncMock) as mock_stop:
-            await workspace.stop()
-            mock_stop.assert_called_once()
-            assert workspace._started is False
+        assert ws.memory_manager is mock_manager
 
-    @pytest.mark.asyncio
-    async def test_stop_final(self, workspace):
-        """测试最终停止工作空间"""
-        workspace._started = True
-        
-        with patch.object(workspace._service_manager, 'stop_all', new_callable=AsyncMock) as mock_stop:
-            await workspace.stop(final=True)
-            mock_stop.assert_called_once_with(final=True)
-            assert workspace._started is False
+    def test_set_manager_custom_name(self, tmp_path):
+        """未知管理器名称落入可复用服务"""
+        ws = _make_workspace(tmp_path)
+        mock_manager = MagicMock()
 
-    def test_get_reusable_services(self, workspace):
-        """测试获取可复用服务"""
-        with patch.object(workspace._service_manager, 'get_reusable_services', return_value={}) as mock_get:
-            services = workspace.get_reusable_services()
-            mock_get.assert_called_once()
-            assert services == {}
+        ws.set_manager("custom_thing", mock_manager)
 
-    @pytest.mark.asyncio
-    async def test_set_reusable_services(self, workspace):
-        """测试设置可复用服务"""
+        assert ws.get_reusable_services() == {"custom_thing": mock_manager}
+
+    def test_start(self, tmp_path):
+        """测试启动工作空间（同步方法，启动已装配的管理器）"""
+        ws = _make_workspace(tmp_path)
+        memory = MagicMock()
+        channel = MagicMock()
+        ws.set_manager("memory", memory)
+        ws.set_manager("channel", channel)
+
+        success = ws.start()
+
+        assert success is True
+        assert ws.started is True
+        memory.start.assert_called_once()
+        channel.start.assert_called_once()
+
+    def test_stop(self, tmp_path):
+        """测试停止工作空间（同步方法，反序停止）"""
+        ws = _make_workspace(tmp_path)
+        memory = MagicMock()
+        ws.set_manager("memory", memory)
+        ws.start()
+
+        success = ws.stop()
+
+        assert success is True
+        assert ws.started is False
+        memory.stop.assert_called_once()
+
+    def test_start_idempotent(self, tmp_path):
+        """测试已启动时再次启动不重复触发管理器"""
+        ws = _make_workspace(tmp_path)
+        memory = MagicMock()
+        ws.set_manager("memory", memory)
+
+        assert ws.start() is True
+        assert ws.start() is True
+        memory.start.assert_called_once()
+
+    def test_stop_when_not_started(self, tmp_path):
+        """测试未启动时停止是安全的 no-op"""
+        ws = _make_workspace(tmp_path)
+        memory = MagicMock()
+        ws.set_manager("memory", memory)
+
+        assert ws.stop() is True
+        memory.stop.assert_not_called()
+
+    def test_reusable_services_roundtrip(self, tmp_path):
+        """测试可复用服务存取"""
+        ws = _make_workspace(tmp_path)
         services = {"service1": MagicMock(), "service2": MagicMock()}
-        
-        with patch.object(workspace._service_manager, 'set_reusable', new_callable=AsyncMock) as mock_set:
-            await workspace.set_reusable_services(services)
-            assert mock_set.call_count == 2
 
-    def test_memory_manager_property(self, workspace):
-        """测试记忆管理器属性"""
-        with patch.object(workspace._service_manager, 'services', {'memory_manager': MagicMock()}):
-            manager = workspace.memory_manager
-            assert manager is not None
+        ws.set_reusable_services(services)
 
-    def test_channel_manager_property(self, workspace):
-        """测试通道管理器属性"""
-        with patch.object(workspace._service_manager, 'services', {'channel_manager': MagicMock()}):
-            manager = workspace.channel_manager
-            assert manager is not None
+        assert ws.get_reusable_services() == services
 
-    def test_skill_manager_property(self, workspace):
-        """测试技能管理器属性"""
-        with patch.object(workspace._service_manager, 'services', {'skill_manager': MagicMock()}):
-            manager = workspace.skill_manager
-            assert manager is not None
+    def test_manager_properties_default_none(self, tmp_path):
+        """测试服务属性默认返回 None"""
+        ws = _make_workspace(tmp_path)
 
-    def test_project_manager_property(self, workspace):
-        """测试项目管理器属性"""
-        with patch.object(workspace._service_manager, 'services', {'project_manager': MagicMock()}):
-            manager = workspace.project_manager
-            assert manager is not None
+        assert ws.memory_manager is None
+        assert ws.channel_manager is None
+        assert ws.skill_manager is None
+        assert ws.project_manager is None
+        assert ws.cron_manager is None
 
-    def test_cron_manager_property(self, workspace):
-        """测试定时任务管理器属性"""
-        with patch.object(workspace._service_manager, 'services', {'cron_manager': MagicMock()}):
-            manager = workspace.cron_manager
-            assert manager is not None
+    def test_get_status(self, tmp_path):
+        """测试状态字典键面"""
+        ws = _make_workspace(tmp_path, workspace_id="status-agent")
+        ws.set_manager("memory", MagicMock())
+        ws.start()
 
-    def test_none_service_properties(self, workspace):
-        """测试服务属性返回None"""
-        with patch.object(workspace._service_manager, 'services', {}):
-            assert workspace.memory_manager is None
-            assert workspace.channel_manager is None
-            assert workspace.skill_manager is None
-            assert workspace.project_manager is None
-            assert workspace.cron_manager is None
+        status = ws.get_status()
 
-
-class TestWorkspaceServices:
-    """测试工作空间服务管理"""
-
-    @pytest.fixture
-    def workspace_with_services(self, tmp_path):
-        """创建带服务的工作空间"""
-        agent_id = "service-agent"
-        workspace_dir = str(tmp_path / "service_workspace")
-        workspace = Workspace(agent_id, workspace_dir)
-        
-        mock_services = {
-            "memory_manager": MagicMock(),
-            "channel_manager": MagicMock(),
-            "skill_manager": MagicMock(),
-            "project_manager": MagicMock(),
-            "cron_manager": MagicMock(),
-        }
-        
-        workspace._service_manager._services = mock_services
-        return workspace
-
-    def test_access_all_services(self, workspace_with_services):
-        """测试访问所有服务"""
-        ws = workspace_with_services
-        
-        assert ws.memory_manager is not None
-        assert ws.channel_manager is not None
-        assert ws.skill_manager is not None
-        assert ws.project_manager is not None
-        assert ws.cron_manager is not None
+        assert status["workspace_id"] == "status-agent"
+        assert status["started"] is True
+        assert status["managers"]["memory"] is True
+        assert status["managers"]["skill"] is False
 
 
 class TestWorkspaceLifecycle:
     """测试工作空间生命周期"""
 
-    @pytest.fixture
-    def workspace(self, tmp_path):
-        """创建工作空间实例"""
-        agent_id = "lifecycle-agent"
-        workspace_dir = str(tmp_path / "lifecycle_workspace")
-        return Workspace(agent_id, workspace_dir)
-
-    @pytest.mark.asyncio
-    async def test_start_stop_cycle(self, workspace):
+    def test_start_stop_cycle(self, tmp_path):
         """测试启动-停止循环"""
-        with patch.object(workspace._service_manager, 'start_all', new_callable=AsyncMock):
-            with patch.object(workspace._service_manager, 'stop_all', new_callable=AsyncMock):
-                await workspace.start()
-                assert workspace.started is True
-                
-                await workspace.stop()
-                assert workspace.started is False
+        ws = _make_workspace(tmp_path, workspace_id="lifecycle-agent")
 
-    @pytest.mark.asyncio
-    async def test_multiple_start_stop(self, workspace):
+        assert ws.start() is True
+        assert ws.started is True
+
+        assert ws.stop() is True
+        assert ws.started is False
+
+    def test_multiple_start_stop(self, tmp_path):
         """测试多次启动-停止"""
-        with patch.object(workspace._service_manager, 'start_all', new_callable=AsyncMock):
-            with patch.object(workspace._service_manager, 'stop_all', new_callable=AsyncMock):
-                for i in range(3):
-                    await workspace.start()
-                    assert workspace.started is True
-                    
-                    await workspace.stop()
-                    assert workspace.started is False
+        ws = _make_workspace(tmp_path, workspace_id="lifecycle-agent")
+        memory = MagicMock()
+        ws.set_manager("memory", memory)
+
+        for _ in range(3):
+            assert ws.start() is True
+            assert ws.started is True
+
+            assert ws.stop() is True
+            assert ws.started is False
+
+        # 每轮 start 都重新拉起管理器
+        assert memory.start.call_count == 3
+        assert memory.stop.call_count == 3
+
+
+class TestGlobalRegistry:
+    """测试全局工作空间注册函数族"""
+
+    def test_create_and_get(self, tmp_path):
+        """创建后可按 ID 取回"""
+        ws = create_workspace("ws-1", tmp_path / "ws1")
+
+        assert get_workspace("ws-1") is ws
+        assert list_workspaces() == ["ws-1"]
+
+    def test_create_duplicate_raises(self, tmp_path):
+        """重复创建同 ID 抛 ValueError"""
+        create_workspace("ws-1", tmp_path / "ws1")
+
+        with pytest.raises(ValueError):
+            create_workspace("ws-1", tmp_path / "ws1b")
+
+    def test_remove_workspace(self, tmp_path):
+        """移除工作空间并停止它"""
+        ws = create_workspace("ws-1", tmp_path / "ws1")
+        ws.start()
+
+        assert remove_workspace("ws-1") is True
+        assert get_workspace("ws-1") is None
+        assert ws.started is False
+        assert remove_workspace("ws-1") is False
+
+    def test_list_workspaces(self, tmp_path):
+        """列出所有工作空间"""
+        create_workspace("ws-a", tmp_path / "wsa")
+        create_workspace("ws-b", tmp_path / "wsb")
+
+        assert sorted(list_workspaces()) == ["ws-a", "ws-b"]
 
 
 class TestEdgeCases:
@@ -213,60 +236,31 @@ class TestEdgeCases:
 
     def test_workspace_with_existing_dir(self, tmp_path):
         """测试已存在目录的工作空间"""
-        agent_id = "existing-agent"
-        workspace_dir = str(tmp_path / "existing_workspace")
-        
-        Path(workspace_dir).mkdir(parents=True, exist_ok=True)
-        (Path(workspace_dir) / "test.txt").write_text("test")
-        
-        workspace = Workspace(agent_id, workspace_dir)
-        
-        assert workspace.workspace_dir.exists()
-        assert (Path(workspace_dir) / "test.txt").exists()
+        workspace_dir = tmp_path / "existing_workspace"
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+        (workspace_dir / "test.txt").write_text("test")
+
+        ws = Workspace("existing-agent", workspace_dir)
+
+        assert ws.data_dir.exists()
+        assert (workspace_dir / "test.txt").exists()
 
     def test_workspace_with_special_chars_in_id(self, tmp_path):
         """测试ID包含特殊字符的工作空间"""
-        agent_id = "agent-with_special.chars"
-        workspace_dir = str(tmp_path / "special_workspace")
-        
-        workspace = Workspace(agent_id, workspace_dir)
-        
-        assert workspace.agent_id == agent_id
-        assert workspace.workspace_dir.exists()
+        ws = Workspace("agent-with_special.chars", tmp_path / "special_workspace")
+
+        assert ws.workspace_id == "agent-with_special.chars"
+        assert ws.data_dir.exists()
 
     def test_workspace_with_long_id(self, tmp_path):
         """测试长ID的工作空间"""
-        agent_id = "a" * 100
-        workspace_dir = str(tmp_path / "long_workspace")
-        
-        workspace = Workspace(agent_id, workspace_dir)
-        
-        assert workspace.agent_id == agent_id
+        long_id = "a" * 100
+        ws = Workspace(long_id, tmp_path / "long_workspace")
+
+        assert ws.workspace_id == long_id
 
     def test_workspace_with_empty_id(self, tmp_path):
         """测试空ID的工作空间"""
-        agent_id = ""
-        workspace_dir = str(tmp_path / "empty_workspace")
-        
-        workspace = Workspace(agent_id, workspace_dir)
-        
-        assert workspace.agent_id == ""
+        ws = Workspace("", tmp_path / "empty_workspace")
 
-    @pytest.mark.asyncio
-    async def test_start_when_already_started(self, workspace):
-        """测试已启动时再次启动"""
-        workspace._started = True
-        
-        with patch.object(workspace._service_manager, 'start_all', new_callable=AsyncMock) as mock_start:
-            await workspace.start()
-            mock_start.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_stop_when_not_started(self, workspace):
-        """测试未启动时停止"""
-        assert workspace._started is False
-        
-        with patch.object(workspace._service_manager, 'stop_all', new_callable=AsyncMock) as mock_stop:
-            await workspace.stop()
-            mock_stop.assert_called_once()
-            assert workspace._started is False
+        assert ws.workspace_id == ""

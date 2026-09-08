@@ -22,6 +22,9 @@ class TestJsonLogFormatter:
 
         # 清单例缓存走真实构造路径（formatter 选择逻辑被真实执行）
         monkeypatch.delitem(_logger_cache, "p2-json-probe", raising=False)
+        # pytest 自带 root handler 会触发"依赖传播"分支跳过自有 handler 挂载，
+        # mock 掉 root.handlers 使构造路径真实执行
+        monkeypatch.setattr(logging.root, "handlers", [])
         logger = get_logger("p2-json-probe", level=logging.INFO)
         stream = _io.StringIO()
         logger.handlers[0].stream = stream
