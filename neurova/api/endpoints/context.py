@@ -326,18 +326,24 @@ async def get_context_stats(request: Request):
 async def get_context_composition(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
+    session_id: str = Query(default="", description="Session ID（提供时按会话隔离快照）"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取最近一轮 LLM 请求的上下文组成实测（消息分桶 + 工具分类 + 命中率）。
 
     数据来自 ChatPipeline._step_llm_call 挂点的真实测算（非估算 stub）；
     该 agent 尚未跑过任何一轮时返回 404——前端按"暂无数据"处理，不伪造。
+    session_id 提供时优先读该会话自己的快照（聊天页环图按会话隔离，2026-09-08 bug2）。
     """
-    from neurova.context.composition import get_last_composition
+    from neurova.context.composition import estimate_composition_from_history, get_last_composition
 
-    comp = get_last_composition(agent_id or "default")
+    comp = get_last_composition(agent_id or "default", session_id or None)
+    if comp is None and session_id:
+        # 该会话尚无实测快照（修复前创建的老会话）→ 用会话历史估算兜底。
+        # 不回落 agent 级快照：那是别的会话的上下文，会造成"环图数据相同"。
+        comp = estimate_composition_from_history(agent_id or "default", session_id)
     if comp is None:
-        raise HTTPException(status_code=404, detail="No composition measured for this agent yet")
+        raise HTTPException(status_code=404, detail="No composition measured for this session yet")
     return ContextCompositionResponse(**comp)
 
 

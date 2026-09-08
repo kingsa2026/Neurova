@@ -35,6 +35,9 @@ _estimator = get_token_estimator(EstimationStrategy.EXACT)
 _last_composition: Dict[str, Dict[str, Any]] = {}
 # 最近一轮的消息列表（命中率重复前缀估算用）：{agent_id: messages}
 _last_messages: Dict[str, Optional[List[Dict]]] = {}
+# session 维度快照（聊天页环图按会话隔离，2026-09-08 bug2 修复）：
+# {agent_id: {session_id: composition}}；agent 级 _last_composition 保留作兼容兜底
+_last_session_composition: Dict[str, Dict[str, Dict[str, Any]]] = {}
 _lock = threading.RLock()
 
 # 重复前缀估算最多比对的字符量（前缀重复是大头，够用且防超长会话 O(n²)）
@@ -205,6 +208,7 @@ def measure_composition(
     tools: Optional[List[Dict]],
     provider_usage: Optional[Dict[str, Any]] = None,
     context_window: Optional[int] = None,
+    session_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """实测一次 prompt 组成并更新该 agent 的最近快照。
 
@@ -214,6 +218,7 @@ def measure_composition(
         tools: OpenAI function schema 工具列表
         provider_usage: 本轮供应商 usage（含 prompt_tokens_details.cached_tokens 时优先采信）
         context_window: 当前模型上下文窗口（token 上限）
+        session_id: 会话标识（提供时额外写入 session 维度快照，供环图按会话隔离）
 
     Returns:
         composition dict（同时更新快照，供 GET /v1/context/composition 读取）
@@ -263,13 +268,61 @@ def measure_composition(
     with _lock:
         _last_composition[agent_id] = composition
         _last_messages[agent_id] = messages
+        if session_id:
+            _last_session_composition.setdefault(agent_id, {})[session_id] = composition
     return composition
 
 
-def get_last_composition(agent_id: str) -> Optional[Dict[str, Any]]:
-    """读取 agent 最近一次实测快照（无记录返回 None）。"""
+def get_last_composition(agent_id: str, session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """读取最近一次实测快照（无记录返回 None）。
+
+    session_id 提供时优先读 session 维度快照（该会话自己的最近一轮）。
+    注意：不再回落 agent 级——那是别的会话的上下文，返回它会造成
+    "所有会话环图数据相同"（2026-09-08 bug2 二次修复）。调用方对 None
+    自行兜底（估算历史 / 404）。
+    """
     with _lock:
+        if session_id:
+            return _last_session_composition.get(agent_id, {}).get(session_id)
         return _last_composition.get(agent_id)
+
+
+def estimate_composition_from_history(agent_id: str, session_id: str) -> Optional[Dict[str, Any]]:
+    """从会话历史消息估算上下文组成（老会话无实测快照时的兜底）。
+
+    复用 _measure_messages 同一分桶口径，诚实标注 cache_source=
+    "history_estimate"（区别于实测 "provider_usage"/"prefix_estimate"）；
+    会话无历史返回 None（前端按"暂无数据"处理）。
+    """
+    if not session_id:
+        return None
+    try:
+        from neurova.session_repository import get_session_repository
+
+        repo = get_session_repository()
+        history = repo.get_history(agent_id, session_id)
+    except Exception:  # noqa: BLE001 - 估算失败不影响聊天
+        return None
+    if not history:
+        return None
+
+    msg_stats = _measure_messages(history)
+    comp = {
+        "agent_id": agent_id,
+        "measured_at": time.time(),
+        "elapsed_ms": 0.0,
+        "context_window": None,
+        "total_tokens": msg_stats.get("total_tokens", 0),
+        "messages": msg_stats,
+        "tools": {},
+        "cache_hit_rate": None,
+        # 诚实标记：这是基于该会话历史的估算，不是最近一轮实测
+        "cache_source": "history_estimate",
+    }
+    with _lock:
+        # 写入 session 维度缓存（同会话重复悬停不重复估算）
+        _last_session_composition.setdefault(agent_id, {})[session_id] = comp
+    return comp
 
 
 def reset_composition() -> None:
@@ -277,3 +330,4 @@ def reset_composition() -> None:
     with _lock:
         _last_composition.clear()
         _last_messages.clear()
+        _last_session_composition.clear()

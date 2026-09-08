@@ -57,9 +57,13 @@ def get_process_by_port(port: int) -> Optional[int]:
             stdout = result.stdout.decode('gbk', errors='replace') if isinstance(result.stdout, bytes) else result.stdout
             if result.returncode == 0:
                 for line in stdout.split('\n'):
-                    if f':{port}' in line and 'LISTENING' in line:
-                        parts = line.split()
-                        if parts and parts[-1].isdigit():
+                    if 'LISTENING' not in line:
+                        continue
+                    parts = line.split()
+                    # 本地地址列（第2列）形如 0.0.0.0:8080——尾部 ':port' 精确匹配，
+                    # 避免子串误匹配（port=0 时 ':0' 命中 ':5000' 等行 → 假阳性 PID）
+                    if len(parts) >= 2 and parts[1].rsplit(':', 1)[-1] == str(port):
+                        if parts[-1].isdigit():
                             return int(parts[-1])
         else:
             # Unix/Linux/Mac: 使用 lsof

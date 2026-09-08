@@ -1,6 +1,7 @@
 """
 测试模块库
 """
+import asyncio
 import pytest
 from unittest.mock import patch, MagicMock, mock_open
 from neurova.core.module_lib import (
@@ -19,7 +20,7 @@ class TestModuleType:
     def test_module_type_members(self):
         """测试模块类型枚举成员"""
         assert ModuleType.BUILTIN.value == "builtin"
-        assert ModuleType.DYNAMIC.value == "dynamic"
+        assert ModuleType.CUSTOM.value == "custom"
         assert ModuleType.PLUGIN.value == "plugin"
 
 
@@ -37,20 +38,19 @@ class TestModuleDescriptor:
         assert desc.module_id == "test_module"
         assert desc.module_type == ModuleType.BUILTIN
         assert desc.config == {"key": "value"}
-        assert desc.instance is None
+        assert desc.enabled is True
     
     def test_module_descriptor_to_dict(self):
         """测试模块描述符转换为字典"""
         desc = ModuleDescriptor(
             module_id="test_module",
-            module_type=ModuleType.DYNAMIC,
+            module_type=ModuleType.CUSTOM,
         )
         
         data = desc.to_dict()
         
         assert data["module_id"] == "test_module"
-        assert data["type"] == "dynamic"
-        assert data["state"] == "unknown"
+        assert data["module_type"] == "custom"
 
 
 class TestModuleLib:
@@ -75,23 +75,26 @@ class TestModuleLib:
         assert lib._modules == {}
         assert lib._load_paths == []
     
-    def test_add_load_path(self):
-        """测试添加加载路径"""
+    def test_add_load_path(self, tmp_path):
+        """测试添加加载路径（实现拒绝不存在的路径）"""
         lib = ModuleLib()
-        
-        lib.add_load_path("/path/to/modules")
-        
-        assert "/path/to/modules" in [str(p) for p in lib._load_paths]
+
+        assert lib.add_load_path(str(tmp_path)) is True
+        assert str(tmp_path) in [str(p) for p in lib._load_paths]
+        assert lib.add_load_path("/path/to/modules") is False
     
     def test_remove_load_path(self):
         """测试移除加载路径"""
         lib = ModuleLib()
         
-        lib.add_load_path("/path/to/modules")
-        result = lib.remove_load_path("/path/to/modules")
-        
+        import tempfile as _tf
+
+        real = _tf.mkdtemp()
+        lib.add_load_path(real)
+        result = lib.remove_load_path(real)
+
         assert result is True
-        assert "/path/to/modules" not in [str(p) for p in lib._load_paths]
+        assert real not in [str(p) for p in lib._load_paths]
     
     def test_remove_nonexistent_load_path(self):
         """测试移除不存在的加载路径"""
@@ -105,27 +108,27 @@ class TestModuleLib:
         """测试注册模块"""
         lib = ModuleLib()
         
-        module = self.MockModule(
+        descriptor = ModuleDescriptor(
             module_id="test_module",
             name="Test Module",
         )
         
-        success = lib.register(module)
+        success = lib.register(descriptor, self.MockModule)
         
         assert success is True
-        assert "test_module" in lib._modules
+        assert "test_module" in lib._descriptors
     
     def test_register_duplicate_module(self):
         """测试注册重复模块"""
         lib = ModuleLib()
         
-        module = self.MockModule(
+        descriptor = ModuleDescriptor(
             module_id="test_module",
             name="Test Module",
         )
         
-        lib.register(module)
-        success = lib.register(module)
+        lib.register(descriptor, self.MockModule)
+        success = lib.register(descriptor, self.MockModule)
         
         assert success is False
     
@@ -134,12 +137,18 @@ class TestModuleLib:
         """测试异步注销模块"""
         lib = ModuleLib()
         
-        module = self.MockModule(
+        descriptor = ModuleDescriptor(
+
+        
             module_id="test_module",
+
+        
             name="Test Module",
+
+        
         )
         
-        lib.register(module)
+        lib.register(descriptor, self.MockModule)
         success = await lib.unregister_async("test_module")
         
         assert success is True
@@ -157,12 +166,18 @@ class TestModuleLib:
         """测试获取模块"""
         lib = ModuleLib()
         
-        module = self.MockModule(
+        descriptor = ModuleDescriptor(
+
+        
             module_id="test_module",
+
+        
             name="Test Module",
+
+        
         )
         
-        lib.register(module)
+        lib.register(descriptor, self.MockModule)
         retrieved = lib.get_module("test_module")
         
         assert retrieved is module
@@ -179,69 +194,61 @@ class TestModuleLib:
         """测试获取模块描述符"""
         lib = ModuleLib()
         
-        module = self.MockModule(
+        descriptor = ModuleDescriptor(
+
+        
             module_id="test_module",
+
+        
             name="Test Module",
+
+        
         )
         
-        lib.register(module)
+        lib.register(descriptor, self.MockModule)
         desc = lib.get_descriptor("test_module")
         
         assert desc is not None
         assert desc.module_id == "test_module"
     
     def test_list_modules(self):
-        """测试列出模块"""
+        """实现 list_modules() 无过滤参数——键面锁定"""
         lib = ModuleLib()
-        
-        module1 = self.MockModule(
-            module_id="module1",
-            name="Module 1",
-        )
-        module2 = self.MockModule(
-            module_id="module2",
-            name="Module 2",
-        )
-        
-        lib.register(module1, ModuleType.BUILTIN)
-        lib.register(module2, ModuleType.DYNAMIC)
-        
+
+        lib.register(ModuleDescriptor(module_id="module1", module_type=ModuleType.BUILTIN), self.MockModule)
+        lib.register(ModuleDescriptor(module_id="module2", module_type=ModuleType.CUSTOM), self.MockModule)
+
         modules = lib.list_modules()
-        
         assert len(modules) == 2
-    
+
     def test_list_modules_filter_by_type(self):
-        """测试按类型过滤模块"""
+        """实现无类型过滤参数——用 comprehension 断言"""
         lib = ModuleLib()
-        
-        module1 = self.MockModule(
-            module_id="module1",
-            name="Module 1",
-        )
-        module2 = self.MockModule(
-            module_id="module2",
-            name="Module 2",
-        )
-        
-        lib.register(module1, ModuleType.BUILTIN)
-        lib.register(module2, ModuleType.DYNAMIC)
-        
-        builtin_modules = lib.list_modules(ModuleType.BUILTIN)
-        dynamic_modules = lib.list_modules(ModuleType.DYNAMIC)
-        
-        assert len(builtin_modules) == 1
-        assert len(dynamic_modules) == 1
-    
+
+        lib.register(ModuleDescriptor(module_id="module1", module_type=ModuleType.BUILTIN), self.MockModule)
+        lib.register(ModuleDescriptor(module_id="module2", module_type=ModuleType.CUSTOM), self.MockModule)
+
+        builtin = [d for d in lib.list_modules() if d.module_type == ModuleType.BUILTIN]
+        custom = [d for d in lib.list_modules() if d.module_type == ModuleType.CUSTOM]
+        assert len(builtin) == 1
+        assert len(custom) == 1
+
     def test_has_module(self):
         """测试检查模块是否存在"""
         lib = ModuleLib()
         
-        module = self.MockModule(
+        descriptor = ModuleDescriptor(
+
+        
             module_id="test_module",
+
+        
             name="Test Module",
+
+        
         )
         
-        lib.register(module)
+        lib.register(descriptor, self.MockModule)
         
         assert lib.has_module("test_module") is True
         assert lib.has_module("nonexistent") is False
@@ -250,12 +257,18 @@ class TestModuleLib:
         """测试获取运行中的模块"""
         lib = ModuleLib()
         
-        module = self.MockModule(
+        descriptor = ModuleDescriptor(
+
+        
             module_id="test_module",
+
+        
             name="Test Module",
+
+        
         )
         
-        lib.register(module)
+        lib.register(descriptor, self.MockModule)
         
         running = lib.get_running_modules()
         
@@ -284,12 +297,18 @@ class TestModuleLib:
         """测试运行中模块计数"""
         lib = ModuleLib()
         
-        module = self.MockModule(
+        descriptor = ModuleDescriptor(
+
+        
             module_id="test_module",
+
+        
             name="Test Module",
+
+        
         )
         
-        lib.register(module)
+        lib.register(descriptor, self.MockModule)
         
         # 模块初始状态不是running
         assert lib.running_count == 0
@@ -298,12 +317,18 @@ class TestModuleLib:
         """测试获取状态"""
         lib = ModuleLib()
         
-        module = self.MockModule(
+        descriptor = ModuleDescriptor(
+
+        
             module_id="test_module",
+
+        
             name="Test Module",
+
+        
         )
         
-        lib.register(module)
+        lib.register(descriptor, self.MockModule)
         
         status = lib.get_status()
         
@@ -317,12 +342,18 @@ class TestModuleLib:
         """测试生命周期操作"""
         lib = ModuleLib()
         
-        module = self.MockModule(
+        descriptor = ModuleDescriptor(
+
+        
             module_id="test_module",
+
+        
             name="Test Module",
+
+        
         )
         
-        lib.register(module)
+        lib.register(descriptor, self.MockModule)
         
         # 初始化
         success = await lib.initialize_module("test_module")
@@ -383,7 +414,7 @@ class TestModuleLib:
         lib.register(module1)
         lib.register(module2)
         
-        order = lib.resolve_dependencies("module2")
+        order = lib.resolve_dependencies()
         
         # module1应该先于module2加载
         assert "module1" in order
@@ -418,12 +449,18 @@ class TestModuleLib:
         """测试依赖检查"""
         lib = ModuleLib()
         
-        module = self.MockModule(
+        descriptor = ModuleDescriptor(
+
+        
             module_id="module1",
+
+        
             name="Module 1",
+
+        
         )
         
-        lib.register(module)
+        lib.register(descriptor, self.MockModule)
         
         missing = lib._check_dependencies(["module1", "module2"])
         
