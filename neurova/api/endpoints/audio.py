@@ -111,10 +111,16 @@ def _get_tts_manager():
 
 
 def _get_asr_manager():
-    """获取 ASR Manager (向后兼容)"""
-    # 优先使用 VoiceEngine
+    """获取 ASR Manager (向后兼容)
+
+    审计⑨：VoiceEngine 统一层无 is_initialized/transcribe 接口（与 TTS
+    侧同根因）——鸭子解包其 _engine 返回真实 ASR 引擎，避免降级分支
+    AttributeError 500。"""
     voice_engine = _get_voice_engine("asr")
     if voice_engine:
+        inner = getattr(voice_engine, "_engine", None)
+        if inner is not None:
+            return inner
         return voice_engine
 
     # 降级到旧的 ASRManager
@@ -390,7 +396,23 @@ async def transcribe_audio(
 
     # 降级到旧的 ASRManager
     asr_manager = _get_asr_manager()
-    if not asr_manager or not asr_manager.is_initialized:
+
+    def _asr_ready(mgr) -> bool:
+        """就绪判定鸭子化（审计⑨）：真实 manager 有 is_initialized；
+        VoiceEngine 统一层只有 is_available()。两者皆无=未就绪。"""
+        if mgr is None:
+            return False
+        initialized = getattr(mgr, "is_initialized", None)
+        if isinstance(initialized, bool):
+            return initialized
+        if hasattr(mgr, "is_available"):
+            try:
+                return bool(mgr.is_available())
+            except Exception:
+                return False
+        return False
+
+    if not _asr_ready(asr_manager):
         raise HTTPException(status_code=503, detail="ASR 引擎未就绪")
 
     try:

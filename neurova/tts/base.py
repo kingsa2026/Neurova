@@ -56,12 +56,16 @@ class TTSBase(ABC):
         ...
 
     @abstractmethod
-    async def synthesize_stream(self, text: str) -> typing.AsyncGenerator[bytes, None]:
+    async def synthesize_stream(self, text: str, **kwargs) -> typing.AsyncGenerator[bytes, None]:
         """
         流式合成语音
 
         Args:
             text: 要合成的文本
+            **kwargs: 上游语义参数（voice/speed 等）。不消费这些参数的
+                引擎也必须以 **kwargs 收编——manager/端点按 TTSBase 宽契约
+                透传请求级参数（审计⑧：签名收紧会在调用点 TypeError，
+                炸穿 fallback 链返回 500）
 
         Yields:
             bytes: 音频数据块

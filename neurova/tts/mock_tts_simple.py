@@ -83,12 +83,14 @@ class MockTTSSimple(TTSBase):
         self._logger.info("MockTTS 合成完成: %.1f 字符, %s 秒", len(text), duration)
         return wav_data
 
-    async def synthesize_stream(self, text: str) -> typing.AsyncGenerator[bytes, None]:
+    async def synthesize_stream(self, text: str, **kwargs) -> typing.AsyncGenerator[bytes, None]:
         """
         流式合成语音
 
         Args:
             text: 要合成的文本
+            **kwargs: 上游语义参数（voice/speed 等），本引擎忽略
+               （宽契约，审计⑧）
 
         Yields:
             bytes: 音频数据块
