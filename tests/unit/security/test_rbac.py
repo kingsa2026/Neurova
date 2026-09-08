@@ -134,6 +134,7 @@ class TestRBACManager(unittest.TestCase):
         self.assertFalse(result)
 
     def test_revoke_role(self) -> None:
+        self._assign_role_in_cache("user123", "editor")
         self.mock_cursor.rowcount = 1
         result = self.rbac.revoke_role("user123", "editor")
         self.assertTrue(result)
