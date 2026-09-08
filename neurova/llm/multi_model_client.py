@@ -275,7 +275,24 @@ class MultiModelLLMClient:
                     compat_dict=getattr(provider, "compat_dict", None),
                 ),
             )
-            client = LLMClient(config)
+            # 协议分派（2026-09-09 原生通道接入）：
+            # - anthropic 类型 → AnthropicNativeClient（/v1/messages 原生协议，
+            #   thinking blocks 归一为 LLMResponse.reasoning_content）
+            # - google/gemini 类型 → GeminiNativeClient（generateContent 原生协议，
+            #   thought parts 归一为 reasoning_content）
+            # - 其余 → LLMClient（OpenAI 兼容协议）
+            # 三者鸭子接口对齐（chat/chat_stream/chat_stream_async），上层零改动
+            provider_kind = str(provider.provider).lower()
+            if provider_kind == "anthropic":
+                from neurova.llm.providers.anthropic_client import AnthropicNativeClient
+
+                client = AnthropicNativeClient(config, provider_id=provider.id)
+            elif provider_kind in ("google", "gemini", "google-vertex", "google-cn"):
+                from neurova.llm.providers.gemini_client import GeminiNativeClient
+
+                client = GeminiNativeClient(config, provider_id=provider.id)
+            else:
+                client = LLMClient(config)
             model_client = ModelClient(client=client, provider=provider, model=model)
             self._clients[client_key] = model_client
             return model_client
