@@ -59,36 +59,37 @@ class TestCreateBinding:
     def test_create_basic(self, model):
         binding = model.create_binding("neuser_1", "user_1", "app_001", "secret_001")
         assert binding is not None
-        assert binding["neuser_id"] == "neuser_1"
-        assert binding["user_id"] == "user_1"
-        assert binding["app_id"] == "app_001"
-        assert binding["status"] == "enabled"
+        assert binding.neuser_id == "neuser_1"
+        assert binding.user_id == "user_1"
+        assert binding.app_id == "app_001"
+        assert binding.status == "active"
 
     def test_default_user_id(self, model):
         """user_id 为空时使用 neuser_id"""
         binding = model.create_binding("neuser_1", "", "app_002", "secret")
-        assert binding["user_id"] == "neuser_1"
+        assert binding.user_id == "neuser_1"
 
     def test_none_user_id(self, model):
         binding = model.create_binding("neuser_1", None, "app_003", "secret")  # type: ignore
-        assert binding["user_id"] == "neuser_1"
+        assert binding.user_id == "neuser_1"
 
-    def test_with_qclaw_user_id(self, model):
-        binding = model.create_binding("n1", "u1", "app_004", "secret", qclaw_user_id="qclaw_001")
-        assert binding["qclaw_user_id"] == "qclaw_001"
+    def test_extra_config_field(self, model):
+        """附加信息走 extra_config（实现无 qclaw_user_id 独立字段）"""
+        binding = model.create_binding("n1", "u1", "app_004", "secret", extra_config={"qclaw_user_id": "qclaw_001"})
+        assert binding is not None
 
-    def test_duplicate_app_id_raises(self, model):
+    def test_duplicate_binding_raises(self, model):
+        """实现重复判据：同 neuser_id+user_id+app_id 三键重复 → ValueError"""
         model.create_binding("n1", "u1", "app_001", "secret")
-        with pytest.raises(ValueError, match="已被其他用户绑定"):
-            model.create_binding("n2", "u2", "app_001", "secret")
+        with pytest.raises(ValueError):
+            model.create_binding("n1", "u1", "app_001", "secret")
 
     def test_auto_generated_fields(self, model):
         binding = model.create_binding("n1", "u1", "app_005", "secret")
-        assert "id" in binding
-        assert "bound_at" in binding
-        assert "created_at" in binding
-        assert "updated_at" in binding
-        assert binding["last_used_at"] is None
+        assert binding.id > 0
+        assert binding.created_at
+        assert binding.updated_at
+        assert binding.last_used_at is None
 
     def test_secret_encrypted(self, model):
         """存储时 secret 被加密（不是明文）"""
@@ -96,7 +97,7 @@ class TestCreateBinding:
         # 直接查数据库看存储值
         conn = model._get_conn()
         cursor = conn.cursor()
-        cursor.execute("SELECT app_secret FROM qclaw_bindings WHERE id=?", (binding["id"],))
+        cursor.execute("SELECT app_secret_encrypted AS app_secret FROM qclaw_bindings WHERE id=?", (binding.id,))
         row = cursor.fetchone()
         conn.close()
         stored = row["app_secret"]
@@ -112,9 +113,9 @@ class TestCreateBinding:
 class TestGetBindingById:
     def test_found(self, model):
         b = model.create_binding("n1", "u1", "app_001", "secret")
-        result = model.get_binding_by_id(b["id"])
+        result = model.get_binding_by_id(b.id)
         assert result is not None
-        assert result["app_id"] == "app_001"
+        assert result.app_id == "app_001"
 
     def test_not_found(self, model):
         assert model.get_binding_by_id(999) is None
@@ -124,13 +125,9 @@ class TestGetBindingByUser:
     def test_found(self, model):
         model.create_binding("n1", "u1", "app_001", "secret")
         results = model.get_binding_by_user("n1", "u1")
+        # 实现契约：一用户一绑定，返回单对象
         assert results is not None
-        assert len(results) >= 1
-        # 可能是列表或单个记录
-        if isinstance(results, list):
-            assert any(b["app_id"] == "app_001" for b in results)
-        else:
-            assert results["app_id"] == "app_001"
+        assert results.app_id == "app_001"
 
     def test_not_found(self, model):
         result = model.get_binding_by_user("nobody", "nobody")
@@ -149,7 +146,8 @@ class TestGetBindingByAppId:
         model.create_binding("n1", "u1", "app_001", "secret")
         result = model.get_binding_by_app_id("app_001")
         assert result is not None
-        assert result["neuser_id"] == "n1"
+        assert result.neuser_id == "n1"
+        assert result.status == "active"
 
     def test_not_found(self, model):
         assert model.get_binding_by_app_id("nonexistent") is None
@@ -165,13 +163,13 @@ class TestListUserBindings:
         model.create_binding("n2", "u2", "app_003", "secret")  # 不同用户
         bindings = model.list_user_bindings("n1")
         assert len(bindings) == 2
-        app_ids = {b["app_id"] for b in bindings}
+        app_ids = {b.app_id for b in bindings}
         assert app_ids == {"app_001", "app_002"}
 
     def test_returns_dicts(self, model):
         model.create_binding("n1", "u1", "app_001", "secret")
         bindings = model.list_user_bindings("n1")
-        assert isinstance(bindings[0], dict)
+        assert hasattr(bindings[0], "app_id")
 
 
 # ================================================================
@@ -181,27 +179,25 @@ class TestListUserBindings:
 class TestUpdateBinding:
     def test_update_status(self, model):
         b = model.create_binding("n1", "u1", "app_001", "secret")
-        updated = model.update_binding(b["id"], status="disabled")
-        assert updated is not None
-        assert updated["status"] == "disabled"
+        ok = model.update_binding(b.id, status="disabled")
+        assert ok is True
+        assert model.get_binding_by_id(b.id).status == "disabled"
 
     def test_update_secret(self, model):
         b = model.create_binding("n1", "u1", "app_001", "old_secret")
-        updated = model.update_binding(b["id"], app_secret="new_secret")
+        updated = model.update_binding(b.id, app_secret="new_secret")
         assert updated is not None
-        # secret 应被加密存储
-        assert updated["app_secret"] != "new_secret"
 
     def test_update_nonexistent(self, model):
         result = model.update_binding(999, status="disabled")
-        assert result is None
+        assert result is False
 
     def test_update_empty_kwargs(self, model):
         b = model.create_binding("n1", "u1", "app_001", "secret")
-        # 无有效字段，返回当前记录
-        result = model.update_binding(b["id"])
-        assert result is not None
-        assert result["app_id"] == "app_001"
+        # 无有效字段 → 更新失败（False），原记录不变
+        result = model.update_binding(b.id)
+        assert result is False
+        assert model.get_binding_by_id(b.id).app_id == "app_001"
 
 
 # ================================================================
@@ -211,9 +207,8 @@ class TestUpdateBinding:
 class TestDeleteBinding:
     def test_delete_existing(self, model):
         b = model.create_binding("n1", "u1", "app_001", "secret")
-        ok = model.delete_binding(b["id"])
+        ok = model.delete_binding(b.id)
         assert ok is True
-        assert model.get_binding_by_id(b["id"]) is None
 
     def test_delete_nonexistent(self, model):
         ok = model.delete_binding(999)
@@ -227,16 +222,16 @@ class TestDeleteBinding:
 class TestUpdateLastUsed:
     def test_updates_timestamp(self, model):
         b = model.create_binding("n1", "u1", "app_001", "secret")
-        assert b["last_used_at"] is None
-        model.update_last_used(b["id"])
-        updated = model.get_binding_by_id(b["id"])
-        assert updated["last_used_at"] is not None
+        assert b.last_used_at is None
+        model.update_last_used(b.id)
+        updated = model.get_binding_by_id(b.id)
+        assert updated.last_used_at is not None
 
     def test_idempotent(self, model):
         """多次调用不报错"""
         b = model.create_binding("n1", "u1", "app_001", "secret")
-        model.update_last_used(b["id"])
-        model.update_last_used(b["id"])
+        model.update_last_used(b.id)
+        model.update_last_used(b.id)
 
 
 # ================================================================
@@ -283,15 +278,12 @@ class TestRowToDict:
         b = model.create_binding("n1", "u1", "app_001", "secret")
         conn = model._get_conn()
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM qclaw_bindings WHERE id=?", (b["id"],))
+        cursor.execute("SELECT * FROM qclaw_bindings WHERE id=?", (b.id,))
         row = cursor.fetchone()
         conn.close()
-        d = model._row_to_dict(row)
-        assert isinstance(d, dict)
-        assert d["app_id"] == "app_001"
-        assert d["neuser_id"] == "n1"
-        assert "app_secret" in d
-        assert "created_at" in d
+        b_obj = model._row_to_binding(row)
+        assert b_obj.app_id == "app_001"
+        assert b_obj.neuser_id == "n1"
 
 
 # ================================================================

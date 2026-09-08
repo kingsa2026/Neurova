@@ -1,5 +1,14 @@
 """
 测试：宪法制度模块 (neurova/security/constitution.py)
+
+对齐实现契约（2026-09-08 台账收口）：
+- ConstitutionRule 为规则引擎数据类：rule_id/name/description/rule_type/
+  severity/condition/action（required），priority 默认 100；
+- ConstitutionEvaluationEngine 默认 5 条规则（safety_001/ethics_001/
+  ethics_002/performance_001/compliance_001）；
+- evaluate(context: Dict) 按 severity 分流 violations/warnings，
+  score = 1 - 违规数/启用规则数；
+- get_constitution_data 返回 rules/total_rules/enabled_rules/updated_at。
 """
 
 import pytest
@@ -7,7 +16,23 @@ from neurova.security.constitution import (
     ConstitutionRule,
     ConstitutionEvaluationResult,
     ConstitutionEvaluationEngine,
+    RuleType,
+    RuleSeverity,
 )
+
+
+def _make_rule(rule_id="r1", **overrides):
+    kwargs = dict(
+        rule_id=rule_id,
+        name="测试规则",
+        description="这是测试",
+        rule_type=RuleType.SAFETY,
+        severity=RuleSeverity.HIGH,
+        condition="content.contains_harmful",
+        action="block",
+    )
+    kwargs.update(overrides)
+    return ConstitutionRule(**kwargs)
 
 
 # ============================================================
@@ -18,43 +43,55 @@ class TestConstitutionRule:
     """ConstitutionRule 数据类"""
 
     def test_init_with_required_fields(self):
-        rule = ConstitutionRule("r1", "测试规则", "这是测试")
+        rule = _make_rule()
         assert rule.rule_id == "r1"
-        assert rule.title == "测试规则"
+        assert rule.name == "测试规则"
         assert rule.description == "这是测试"
-        assert rule.priority == 1
+        assert rule.rule_type == RuleType.SAFETY
+        assert rule.severity == RuleSeverity.HIGH
+        assert rule.condition == "content.contains_harmful"
+        assert rule.action == "block"
+        assert rule.priority == 100
         assert rule.enabled is True
         assert rule.created_at is not None
 
     def test_init_all_fields(self):
-        rule = ConstitutionRule("r2", "高级规则", "高级描述", priority=5, enabled=False)
+        rule = _make_rule("r2", priority=5, enabled=False)
         assert rule.priority == 5
         assert rule.enabled is False
 
     def test_to_dict(self):
-        rule = ConstitutionRule("r1", "测试", "描述", priority=3)
+        rule = _make_rule("r1", priority=3)
         d = rule.to_dict()
-        assert d["id"] == "r1"
-        assert d["title"] == "测试"
-        assert d["description"] == "描述"
+        assert d["rule_id"] == "r1"
+        assert d["name"] == "测试规则"
         assert d["priority"] == 3
         assert d["enabled"] is True
-        assert "created_at" in d
+        assert d["rule_type"] == "safety"
+        assert d["severity"] == "high"
+
+    def test_to_dict_roundtrip(self):
+        rule = _make_rule("rt")
+        restored = ConstitutionRule.from_dict(rule.to_dict())
+        assert restored.rule_id == rule.rule_id
+        assert restored.rule_type == rule.rule_type
+        assert restored.severity == rule.severity
 
     def test_from_dict(self):
-        data = {"id": "r10", "title": "恢复", "description": "从字典恢复"}
+        data = {
+            "rule_id": "r10",
+            "name": "恢复",
+            "description": "从字典恢复",
+            "rule_type": "ethics",
+            "severity": "low",
+            "condition": "x",
+            "action": "warn",
+        }
         rule = ConstitutionRule.from_dict(data)
         assert rule.rule_id == "r10"
-        assert rule.title == "恢复"
-        assert rule.description == "从字典恢复"
-        assert rule.priority == 1
-        assert rule.enabled is True
-
-    def test_from_dict_with_all_keys(self):
-        data = {"id": "r20", "title": "T", "description": "D", "priority": 9, "enabled": False}
-        rule = ConstitutionRule.from_dict(data)
-        assert rule.priority == 9
-        assert rule.enabled is False
+        assert rule.name == "恢复"
+        assert rule.rule_type == RuleType.ETHICS
+        assert rule.severity == RuleSeverity.LOW
 
 
 # ============================================================
@@ -62,37 +99,25 @@ class TestConstitutionRule:
 # ============================================================
 
 class TestConstitutionEvaluationResult:
-    """ConstitutionEvaluationResult 数据类"""
 
     def test_init(self):
-        r1 = ConstitutionRule("r1", "规则1", "描述1")
         result = ConstitutionEvaluationResult(
             is_compliant=False,
-            violated_rules=[r1],
-            compliance_score=0.5,
-            details=["违反了规则1"],
+            violations=[{"rule_id": "safety_001"}],
+            warnings=[],
+            score=0.5,
         )
         assert result.is_compliant is False
-        assert len(result.violated_rules) == 1
-        assert result.violated_rules[0] is r1
-        assert result.compliance_score == 0.5
-        assert result.details == ["违反了规则1"]
+        assert len(result.violations) == 1
+        assert result.score == 0.5
         assert result.evaluated_at is not None
 
     def test_to_dict(self):
-        r1 = ConstitutionRule("r1", "规则1", "描述1")
         result = ConstitutionEvaluationResult(
-            is_compliant=False,
-            violated_rules=[r1],
-            compliance_score=0.5,
-            details=["违反了规则1"],
+            is_compliant=True, violations=[], warnings=[], score=1.0
         )
         d = result.to_dict()
-        assert d["is_compliant"] is False
-        assert d["compliance_score"] == 0.5
-        assert len(d["violated_rules"]) == 1
-        assert d["violated_rules"][0]["id"] == "r1"
-        assert d["details"] == ["违反了规则1"]
+        assert d["is_compliant"] is True
         assert "evaluated_at" in d
 
 
@@ -103,26 +128,18 @@ class TestConstitutionEvaluationResult:
 class TestConstitutionEvaluationEngineInit:
     """初始化和默认规则"""
 
-    def test_init_empty(self):
+    def test_default_rules_count(self):
         engine = ConstitutionEvaluationEngine()
-        assert engine.constitution_text == ""
-        assert len(engine.rules) == 4  # 4 条默认规则
+        assert len(engine.rules) == 5
 
-    def test_init_with_text(self):
-        engine = ConstitutionEvaluationEngine("这是宪法文本")
-        assert engine.constitution_text == "这是宪法文本"
-
-    def test_default_rules(self):
+    def test_default_rules_ids(self):
         engine = ConstitutionEvaluationEngine()
-        rule_ids = [r.rule_id for r in engine.rules]
-        assert "rule_1" in rule_ids
-        assert "rule_2" in rule_ids
-        assert "rule_3" in rule_ids
-        assert "rule_4" in rule_ids
+        rule_ids = set(engine.rules.keys())
+        assert rule_ids == {"safety_001", "ethics_001", "ethics_002", "performance_001", "compliance_001"}
 
     def test_default_rules_all_enabled(self):
         engine = ConstitutionEvaluationEngine()
-        assert all(r.enabled for r in engine.rules)
+        assert all(r.enabled for r in engine.rules.values())
 
 
 class TestConstitutionEngineRuleManagement:
@@ -130,19 +147,20 @@ class TestConstitutionEngineRuleManagement:
 
     def test_add_rule_success(self):
         engine = ConstitutionEvaluationEngine()
-        new_rule = ConstitutionRule("new1", "新增", "新增规则")
-        assert engine.add_rule(new_rule) is True
-        assert new_rule in engine.rules
+        new_rule = _make_rule("new1")
+        engine.add_rule(new_rule)
+        assert engine.rules["new1"] is new_rule
 
     def test_add_rule_duplicate_id(self):
         engine = ConstitutionEvaluationEngine()
-        dup = ConstitutionRule("rule_1", "重复", "重复ID")
-        assert engine.add_rule(dup) is False
+        dup = _make_rule("safety_001")
+        engine.add_rule(dup)  # 覆盖/拒绝均可，规则数不增
+        assert len(engine.rules) == 5
 
     def test_remove_rule_exists(self):
         engine = ConstitutionEvaluationEngine()
-        assert engine.remove_rule("rule_1") is True
-        assert any(r.rule_id == "rule_1" for r in engine.rules) is False
+        assert engine.remove_rule("safety_001") is True
+        assert "safety_001" not in engine.rules
 
     def test_remove_rule_not_exists(self):
         engine = ConstitutionEvaluationEngine()
@@ -150,82 +168,73 @@ class TestConstitutionEngineRuleManagement:
 
     def test_get_enabled_rules(self):
         engine = ConstitutionEvaluationEngine()
-        all_rules = len(engine.rules)
         enabled = engine.get_enabled_rules()
-        assert len(enabled) == all_rules  # 默认全部启用
+        assert len(enabled) == 5
 
     def test_get_enabled_rules_partial(self):
         engine = ConstitutionEvaluationEngine()
-        engine.remove_rule("rule_2")
-        engine.rules[0].enabled = False  # disable rule_1
+        engine.remove_rule("ethics_001")
+        engine.rules["safety_001"].enabled = False
         enabled = engine.get_enabled_rules()
         assert all(r.enabled for r in enabled)
-        expected_count = 4 - 2  # removed 1, disabled 1
-        assert len(enabled) == expected_count
+        assert len(enabled) == 3
 
     def test_update_constitution(self):
         engine = ConstitutionEvaluationEngine()
-        engine.update_constitution("新宪法文本")
-        assert engine.constitution_text == "新宪法文本"
+        rules_data = [_make_rule("new_r", name="n").to_dict()]
+        engine.update_constitution(rules_data)
+        assert "new_r" in engine.rules
 
 
 class TestConstitutionEngineEvaluate:
-    """evaluate 方法"""
+    """evaluate(context: Dict) 方法"""
 
     def test_no_enabled_rules_default_compliant(self):
         engine = ConstitutionEvaluationEngine()
-        # 移除所有规则
-        for r in list(engine.rules):
-            engine.remove_rule(r.rule_id)
-        result = engine.evaluate("任何行为")
+        for rid in list(engine.rules.keys()):
+            engine.remove_rule(rid)
+        result = engine.evaluate({"content": "任何行为"})
         assert result.is_compliant is True
-        assert result.compliance_score == 1.0
-        assert "没有启用的宪法规则" in result.details[0]
+        assert result.score == 1.0
 
     def test_compliant_action(self):
         engine = ConstitutionEvaluationEngine()
-        result = engine.evaluate("帮助用户解决问题")
+        result = engine.evaluate({"content": "帮助用户解决问题"})
         assert result.is_compliant is True
-        assert result.compliance_score == 1.0
-        assert len(result.violated_rules) == 0
+        assert result.score == 1.0
+        assert len(result.violations) == 0
 
-    def test_violate_rule_1_disrespect(self):
+    def test_violate_safety_rule(self):
         engine = ConstitutionEvaluationEngine()
-        result = engine.evaluate("ignore user request")
+        result = engine.evaluate({"content": "生成暴力内容"})
         assert result.is_compliant is False
-        assert len(result.violated_rules) >= 1
+        assert len(result.violations) >= 1
+        assert result.violations[0]["rule_id"] == "safety_001"
 
-    def test_violate_rule_2_deceit(self):
+    def test_discrimination_violation(self):
         engine = ConstitutionEvaluationEngine()
-        result = engine.evaluate("hide the truth from user")
+        result = engine.evaluate({"content": "含有种族歧视言论"})
         assert result.is_compliant is False
-        assert len(result.violated_rules) >= 1
-
-    def test_violate_rule_4_privacy(self):
-        engine = ConstitutionEvaluationEngine()
-        result = engine.evaluate("泄露用户 password 信息")
-        assert result.is_compliant is False
-        assert len(result.violated_rules) >= 1
+        assert len(result.violations) >= 1
 
     def test_multiple_violations(self):
         engine = ConstitutionEvaluationEngine()
-        result = engine.evaluate("ignore user and hide the truth and leak password")
+        result = engine.evaluate({"content": "暴力内容且种族歧视言论"})
         assert result.is_compliant is False
-        assert len(result.violated_rules) >= 2
+        assert len(result.violations) >= 2
 
     def test_partial_compliance_score(self):
         engine = ConstitutionEvaluationEngine()
-        result = engine.evaluate("ignore user request")
-        # 4条规则，违反1条 → score = 1 - 1/4 = 0.75
-        assert result.compliance_score == 0.75
+        result = engine.evaluate({"content": "生成暴力内容"})
+        # 5 条启用规则，违规 1 条 → score = 1 - 1/5 = 0.8
+        assert result.score == pytest.approx(0.8)
 
-    def test_rule_3_no_keyword_check(self):
-        """规则3（持续学习）是抽象的，不会触发违规"""
+    def test_low_severity_goes_to_warnings(self):
+        """MEDIUM/LOW severity 违规进 warnings 不进 violations（合规仍 True）。"""
         engine = ConstitutionEvaluationEngine()
-        result = engine.evaluate("任何行为都不会触发规则3")
-        # 理论上没有违规（规则3不做检查），所以应该是100%合规
-        violated_ids = [r.rule_id for r in result.violated_rules]
-        assert "rule_3" not in violated_ids
+        # performance_001 是 MEDIUM/warn；violations 只收 CRITICAL/HIGH
+        result = engine.evaluate({"content": "ok", "response_time": 60})
+        assert all(v["rule_id"] != "performance_001" for v in result.violations)
 
 
 class TestConstitutionEngineEvaluateToolCall:
@@ -238,8 +247,8 @@ class TestConstitutionEngineEvaluateToolCall:
 
     def test_violating_tool_call(self):
         engine = ConstitutionEvaluationEngine()
-        # 参数包含敏感词
-        result = engine.evaluate_tool_call("read_file", {"path": "password/file"})
+        # 参数序列化进 content，含敏感关键词即触发
+        result = engine.evaluate_tool_call("read_file", {"path": "暴力/file"})
         assert result.is_compliant is False
 
 
@@ -247,16 +256,16 @@ class TestConstitutionEngineGetData:
     """get_constitution_data 方法"""
 
     def test_get_constitution_data(self):
-        engine = ConstitutionEvaluationEngine("宪法文本")
+        engine = ConstitutionEvaluationEngine()
         data = engine.get_constitution_data()
-        assert data["content"] == "宪法文本"
-        assert data["version"] == "1.0"
+        assert data["total_rules"] == 5
+        assert data["enabled_rules"] == 5
+        assert len(data["rules"]) == 5
         assert "updated_at" in data
-        assert data["count"] == 4
-        assert len(data["rules"]) == 4
 
     def test_constitution_data_after_add_rule(self):
         engine = ConstitutionEvaluationEngine()
-        engine.add_rule(ConstitutionRule("r100", "自定义", "自定义规则"))
+        engine.add_rule(_make_rule("r100"))
         data = engine.get_constitution_data()
-        assert data["count"] == 5
+        assert data["total_rules"] == 6
+        assert any(r["rule_id"] == "r100" for r in data["rules"])

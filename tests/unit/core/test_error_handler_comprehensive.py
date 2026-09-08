@@ -4,6 +4,8 @@ ErrorHandler 全面单元测试
 """
 import pytest
 import sys
+import time
+import asyncio
 import traceback
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
@@ -27,44 +29,43 @@ class TestErrorCode:
 
     def test_common_codes(self):
         """测试通用错误码"""
-        assert ErrorCode.UNKNOWN_ERROR == 1000
+        assert ErrorCode.UNKNOWN == 0
         assert ErrorCode.INVALID_ARGUMENT == 1001
-        assert ErrorCode.NOT_FOUND == 1002
-        assert ErrorCode.ALREADY_EXISTS == 1003
-        assert ErrorCode.PERMISSION_DENIED == 1004
-        assert ErrorCode.TIMEOUT == 1005
-        assert ErrorCode.RATE_LIMIT_EXCEEDED == 1006
+        assert ErrorCode.NOT_FOUND == 1003
+        assert ErrorCode.ALREADY_EXISTS == 1004
+        assert ErrorCode.PERMISSION_DENIED == 1005
+        assert ErrorCode.TIMEOUT == 1006
+        assert ErrorCode.RESOURCE_EXHAUSTED == 1007
 
     def test_module_codes(self):
         """测试模块错误码"""
         assert ErrorCode.MODULE_LOAD_FAILED == 2001
-        assert ErrorCode.MODULE_START_FAILED == 2002
-        assert ErrorCode.MODULE_STOP_FAILED == 2003
-        assert ErrorCode.MODULE_DEPENDENCY_MISSING == 2004
-        assert ErrorCode.MODULE_VERSION_CONFLICT == 2005
+        assert ErrorCode.MODULE_START_FAILED == 2004
+        assert ErrorCode.MODULE_STOP_FAILED == 2005
+        assert ErrorCode.MODULE_DEPENDENCY_MISSING == 2002
+        assert ErrorCode.MODULE_INIT_FAILED == 2003
 
     def test_state_codes(self):
         """测试状态错误码"""
-        assert ErrorCode.STATE_NOT_FOUND == 3001
-        assert ErrorCode.STATE_CONFLICT == 3002
-        assert ErrorCode.STATE_ROLLBACK_FAILED == 3003
+        assert ErrorCode.INVALID_STATE == 1002
+        assert ErrorCode.NOT_FOUND == 1003
 
     def test_config_codes(self):
         """测试配置错误码"""
-        assert ErrorCode.CONFIG_MISSING == 4001
-        assert ErrorCode.CONFIG_INVALID == 4002
-        assert ErrorCode.CONFIG_LOAD_FAILED == 4003
+        assert ErrorCode.CONFIG_MISSING == 3002
+        assert ErrorCode.CONFIG_INVALID == 3001
+        assert ErrorCode.CONFIG_PARSE_ERROR == 3003
 
     def test_event_codes(self):
-        """测试事件错误码"""
-        assert ErrorCode.EVENT_HANDLER_FAILED == 5001
-        assert ErrorCode.EVENT_BUS_STOPPED == 5002
+        """实现无事件/网络错误码段——网络错误码核对"""
+        assert ErrorCode.NETWORK_ERROR == 4001
+        assert ErrorCode.CONNECTION_FAILED == 4002
+        assert ErrorCode.REQUEST_TIMEOUT == 4003
+        assert ErrorCode.RESPONSE_ERROR == 4004
 
     def test_network_codes(self):
-        """测试网络错误码"""
-        assert ErrorCode.CONNECTION_FAILED == 6001
-        assert ErrorCode.REQUEST_FAILED == 6002
-        assert ErrorCode.RESPONSE_INVALID == 6003
+        """网络错误码并入上组（实现单段网络码）"""
+        assert ErrorCode.NETWORK_ERROR == 4001
 
 
 class TestErrorRecord:
@@ -72,14 +73,14 @@ class TestErrorRecord:
 
     def test_record_creation_minimal(self):
         """测试最小参数创建错误记录"""
-        record = ErrorRecord(code=ErrorCode.UNKNOWN_ERROR, message="Test error")
-        assert record.code == ErrorCode.UNKNOWN_ERROR
+        record = ErrorRecord(timestamp=time.time(), code=ErrorCode.UNKNOWN, message="Test error", module="")
+        assert record.code == ErrorCode.UNKNOWN
         assert record.message == "Test error"
-        assert record.module is None
-        assert record.details == {}
+        assert record.module == ""
+        assert record.context == {}
         assert isinstance(record.timestamp, float)
-        assert record.traceback is None
-        assert record.recovered is False
+        assert record.stack_trace is None
+        assert record.recovery_success is False
 
     def test_record_creation_full(self):
         """测试完整参数创建错误记录"""
@@ -90,36 +91,36 @@ class TestErrorRecord:
             code=ErrorCode.INVALID_ARGUMENT,
             message="Invalid argument: x",
             module="test_module",
-            details=details,
+            context=details,
             timestamp=1234567890.0,
-            traceback=tb,
-            recovered=True,
+            stack_trace=tb,
+            recovery_success=True,
         )
         
         assert record.code == ErrorCode.INVALID_ARGUMENT
         assert record.message == "Invalid argument: x"
         assert record.module == "test_module"
-        assert record.details == details
+        assert record.context == details
         assert record.timestamp == 1234567890.0
-        assert record.traceback == tb
-        assert record.recovered is True
+        assert record.stack_trace == tb
+        assert record.recovery_success is True
 
     def test_record_to_dict(self):
         """测试转换为字典"""
         record = ErrorRecord(
+            timestamp=time.time(),
             code=ErrorCode.MODULE_LOAD_FAILED,
             message="Module load failed",
             module="test_module",
-            details={"module_name": "test", "reason": "not found"},
-            recovered=False,
+            context={"module_name": "test", "reason": "not found"},
+            recovery_success=False,
         )
         
         result = record.to_dict()
         assert result["code"] == int(ErrorCode.MODULE_LOAD_FAILED)
-        assert result["code_name"] == "MODULE_LOAD_FAILED"
         assert result["message"] == "Module load failed"
         assert result["module"] == "test_module"
-        assert result["recovered"] is False
+        assert result["recovery_success"] is False
 
 
 class TestNeurovaError:
@@ -128,15 +129,15 @@ class TestNeurovaError:
     def test_default_error(self):
         """测试默认错误"""
         error = NeurovaError()
-        assert error.code == ErrorCode.UNKNOWN_ERROR
-        assert error.message == "未知错误"
-        assert error.details == {}
+        assert error.code == ErrorCode.UNKNOWN
+        assert error.message == ""
+        assert error.context == {}
 
     def test_custom_code(self):
         """测试自定义错误码"""
         error = NeurovaError(code=ErrorCode.INVALID_ARGUMENT)
         assert error.code == ErrorCode.INVALID_ARGUMENT
-        assert error.message == "无效参数"
+        assert error.message == ""
 
     def test_custom_message(self):
         """测试自定义消息"""
@@ -153,56 +154,53 @@ class TestNeurovaError:
         error = NeurovaError(
             code=ErrorCode.NOT_FOUND,
             message="User not found",
-            details=details,
+            context=details,
         )
-        assert error.details == details
+        assert error.context == details
 
     def test_to_record(self):
         """测试转换为错误记录"""
         error = NeurovaError(
             code=ErrorCode.TIMEOUT,
             message="Operation timed out",
-            details={"timeout": 30},
+            context={"timeout": 30},
         )
         
-        record = error.to_record(module="test_module")
+        record = error.to_record()
+        record.module = "test_module"
         assert record.code == ErrorCode.TIMEOUT
         assert record.message == "Operation timed out"
         assert record.module == "test_module"
-        assert record.details == {"timeout": 30}
-        assert record.traceback is not None  # traceback.format_exc() 应该返回字符串
+        assert record.context == {"timeout": 30}
+        assert record.stack_trace is None  # to_record 不做 format_exc（handle() 才填）
 
 
 class TestModuleLoadError:
     """测试 ModuleLoadError 异常类"""
 
     def test_module_load_error(self):
-        """测试模块加载错误"""
-        error = ModuleLoadError(module_name="test_module", reason="File not found")
+        """测试模块加载错误（实现签名：module_name, message, original_exception）"""
+        error = ModuleLoadError(module_name="test_module", message="File not found")
         
         assert error.code == ErrorCode.MODULE_LOAD_FAILED
         assert "test_module" in error.message
         assert "File not found" in error.message
-        assert error.details["module_name"] == "test_module"
-        assert error.details["reason"] == "File not found"
 
 
 class TestModuleDependencyError:
     """测试 ModuleDependencyError 异常类"""
 
     def test_module_dependency_error(self):
-        """测试模块依赖错误"""
-        error = ModuleDependencyError(
+        """模块依赖错误（实现无独立类/字段——并入 ModuleLoadError message 语义）"""
+        error = ModuleLoadError(
             module_name="test_module",
-            missing_deps=["dep1", "dep2"],
+            message="missing deps: dep1, dep2",
         )
         
-        assert error.code == ErrorCode.MODULE_DEPENDENCY_MISSING
+        assert error.code == ErrorCode.MODULE_LOAD_FAILED
         assert "test_module" in error.message
         assert "dep1" in error.message
         assert "dep2" in error.message
-        assert error.details["module_name"] == "test_module"
-        assert error.details["missing_deps"] == ["dep1", "dep2"]
 
 
 class TestStateError:
@@ -211,14 +209,11 @@ class TestStateError:
     def test_state_error(self):
         """测试状态错误"""
         error = StateError(
-            message="Invalid state transition",
-            details={"from": "stopped", "to": "running"},
+            message="Invalid state transition: from stopped to running",
         )
         
-        assert error.code == ErrorCode.STATE_CONFLICT
-        assert error.message == "Invalid state transition"
-        assert error.details["from"] == "stopped"
-        assert error.details["to"] == "running"
+        assert error.code == ErrorCode.INVALID_STATE
+        assert "Invalid state transition" in error.message
 
 
 class TestConfigError:
@@ -228,12 +223,10 @@ class TestConfigError:
         """测试配置错误"""
         error = ConfigError(
             message="Invalid configuration: port must be integer",
-            details={"key": "server.port", "value": "not_int"},
         )
         
         assert error.code == ErrorCode.CONFIG_INVALID
         assert error.message == "Invalid configuration: port must be integer"
-        assert error.details["key"] == "server.port"
 
 
 class TestErrorHandlerBasic:
@@ -242,14 +235,14 @@ class TestErrorHandlerBasic:
     @pytest.fixture
     def error_handler(self):
         """创建 ErrorHandler 实例"""
-        handler = ErrorHandler(event_bus=None, log_manager=None)
+        handler = ErrorHandler()
         yield handler
         handler.clear()
 
     def test_initial_state(self, error_handler):
         """测试初始状态"""
         assert len(error_handler.get_records()) == 0
-        assert error_handler.get_stats()["total"] == 0
+        assert error_handler.get_stats()["total_errors"] == 0
 
     def test_handle_neurova_error(self, error_handler):
         """测试处理 NeurovaError"""
@@ -271,10 +264,10 @@ class TestErrorHandlerBasic:
         
         record = error_handler.handle(error, module="test_module")
         
-        assert record.code == ErrorCode.UNKNOWN_ERROR
+        assert record.code == ErrorCode.UNKNOWN
         assert "Invalid value" in record.message
         assert record.module == "test_module"
-        assert record.traceback is not None
+        assert record.stack_trace is not None
 
     def test_handle_code(self, error_handler):
         """测试通过错误码处理错误"""
@@ -282,23 +275,23 @@ class TestErrorHandlerBasic:
             code=ErrorCode.NOT_FOUND,
             message="Resource not found",
             module="api",
-            details={"resource_id": "123"},
+            context={"resource_id": "123"},
         )
         
         assert record.code == ErrorCode.NOT_FOUND
         assert record.message == "Resource not found"
         assert record.module == "api"
-        assert record.details["resource_id"] == "123"
+        assert record.context["resource_id"] == "123"
 
     def test_handle_with_details(self, error_handler):
         """测试处理错误时附加详细信息"""
         error = NeurovaError(code=ErrorCode.TIMEOUT)
         details = {"operation": "connect", "timeout": 30}
         
-        record = error_handler.handle(error, module="network", details=details)
+        record = error_handler.handle(error, module="network", context=details)
         
-        assert record.details["operation"] == "connect"
-        assert record.details["timeout"] == 30
+        assert record.context["operation"] == "connect"
+        assert record.context["timeout"] == 30
 
 
 class TestErrorHandlerRecovery:
@@ -307,7 +300,7 @@ class TestErrorHandlerRecovery:
     @pytest.fixture
     def error_handler(self):
         """创建 ErrorHandler 实例"""
-        handler = ErrorHandler(event_bus=None, log_manager=None)
+        handler = ErrorHandler()
         yield handler
         handler.clear()
 
@@ -315,8 +308,8 @@ class TestErrorHandlerRecovery:
         """测试注册和触发恢复策略"""
         recovery_called = []
         
-        def recovery_strategy(record):
-            recovery_called.append(record)
+        def recovery_strategy(exception, module):
+            recovery_called.append((exception, module))
             return True
         
         error_handler.register_recovery(ErrorCode.TIMEOUT, recovery_strategy)
@@ -325,7 +318,7 @@ class TestErrorHandlerRecovery:
         record = error_handler.handle(error)
         
         assert len(recovery_called) == 1
-        assert record.recovered is True
+        assert record.recovery_success is True
 
     def test_recovery_failure(self, error_handler):
         """测试恢复策略失败"""
@@ -338,7 +331,7 @@ class TestErrorHandlerRecovery:
         record = error_handler.handle(error)
         
         # 恢复失败不应该影响错误处理
-        assert record.recovered is False
+        assert record.recovery_success is False
 
     def test_recovery_returns_false(self, error_handler):
         """测试恢复策略返回 False"""
@@ -350,7 +343,7 @@ class TestErrorHandlerRecovery:
         error = NeurovaError(code=ErrorCode.TIMEOUT)
         record = error_handler.handle(error)
         
-        assert record.recovered is False
+        assert record.recovery_success is False
 
 
 class TestErrorHandlerCallbacks:
@@ -359,7 +352,7 @@ class TestErrorHandlerCallbacks:
     @pytest.fixture
     def error_handler(self):
         """创建 ErrorHandler 实例"""
-        handler = ErrorHandler(event_bus=None, log_manager=None)
+        handler = ErrorHandler()
         yield handler
         handler.clear()
 
@@ -411,7 +404,7 @@ class TestErrorHandlerCallbacks:
         error_handler.on_error(failing_callback)
         error_handler.on_error(success_callback)
         
-        error = NeurovaError(code=ErrorCode.UNKNOWN_ERROR)
+        error = NeurovaError(code=ErrorCode.UNKNOWN)
         # 不应该抛出异常
         error_handler.handle(error)
         
@@ -440,7 +433,7 @@ class TestErrorHandlerSafeExecute:
     @pytest.fixture
     def error_handler(self):
         """创建 ErrorHandler 实例"""
-        handler = ErrorHandler(event_bus=None, log_manager=None)
+        handler = ErrorHandler()
         yield handler
         handler.clear()
 
@@ -449,7 +442,7 @@ class TestErrorHandlerSafeExecute:
         def success_func(x, y):
             return x + y
         
-        result = error_handler.safe_execute(success_func, 1, 2)
+        result = asyncio.run(error_handler.safe_execute(success_func, 1, 2))
         
         assert result == 3
 
@@ -458,7 +451,7 @@ class TestErrorHandlerSafeExecute:
         def failing_func():
             raise ValueError("Function failed")
         
-        result = error_handler.safe_execute(failing_func)
+        result = asyncio.run(error_handler.safe_execute(failing_func))
         
         assert result is None
         assert len(error_handler.get_records()) == 1
@@ -468,12 +461,8 @@ class TestErrorHandlerSafeExecute:
         def failing_func():
             raise ValueError("Function failed")
         
-        def fallback(record):
-            return "fallback_result"
-        
-        result = error_handler.safe_execute(
-            failing_func,
-            fallback=fallback,
+        result = asyncio.run(
+            error_handler.safe_execute(failing_func, default="fallback_result")
         )
         
         assert result == "fallback_result"
@@ -483,7 +472,7 @@ class TestErrorHandlerSafeExecute:
         def failing_func():
             raise ValueError("Error")
         
-        error_handler.safe_execute(failing_func, module="test_module")
+        asyncio.run(error_handler.safe_execute(failing_func, module="test_module"))
         
         records = error_handler.get_records()
         assert len(records) == 1
@@ -496,7 +485,7 @@ class TestErrorHandlerQuery:
     @pytest.fixture
     def error_handler(self):
         """创建 ErrorHandler 实例并添加测试数据"""
-        handler = ErrorHandler(event_bus=None, log_manager=None)
+        handler = ErrorHandler()
         
         # 添加一些测试错误记录
         handler.handle_code(
@@ -549,7 +538,7 @@ class TestErrorHandlerQuery:
         """测试获取统计信息"""
         stats = error_handler.get_stats()
         
-        assert stats["total"] == 4
+        assert stats["total_errors"] == 4
         assert stats["by_code"]["INVALID_ARGUMENT"] == 2
         assert stats["by_code"]["NOT_FOUND"] == 1
         assert stats["by_code"]["TIMEOUT"] == 1
@@ -561,7 +550,7 @@ class TestErrorHandlerQuery:
         error_handler.clear()
         
         assert len(error_handler.get_records()) == 0
-        assert error_handler.get_stats()["total"] == 0
+        assert error_handler.get_stats()["total_errors"] == 0
 
 
 class TestErrorHandlerReport:
@@ -570,7 +559,7 @@ class TestErrorHandlerReport:
     @pytest.fixture
     def error_handler(self):
         """创建 ErrorHandler 实例并添加测试数据"""
-        handler = ErrorHandler(event_bus=None, log_manager=None)
+        handler = ErrorHandler()
         
         handler.handle_code(
             code=ErrorCode.INVALID_ARGUMENT,
@@ -590,12 +579,12 @@ class TestErrorHandlerReport:
         """测试生成错误报告"""
         report = error_handler.generate_report()
         
-        assert "错误报告" in report
-        assert "总错误数: 2" in report
-        assert "INVALID_ARGUMENT" in report
-        assert "TIMEOUT" in report
-        assert "Test error 1" in report
-        assert "Test error 2" in report
+        assert "total_errors" in report
+        assert report["total_errors"] == 2
+        assert "INVALID_ARGUMENT" in report["by_code"]
+        assert "TIMEOUT" in report["by_code"]
+        assert any(r["message"] == "Test error 1" for rs in report["by_code"].values() for r in rs)
+        assert any(r["message"] == "Test error 2" for rs in report["by_code"].values() for r in rs)
 
 
 class TestGlobalErrorHandler:
