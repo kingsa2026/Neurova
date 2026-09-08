@@ -830,15 +830,22 @@ class MemoryManager:
             # P-3 修复: 排除已遗忘记忆（forget soft-delete 后不应被 recall 返回）
             results = [m for m in results if m.lifecycle_stage != LifecycleStage.FORGOTTEN]
 
-            # 按类型过滤（页签契约：episodic/semantic/... → MemoryType 枚举）
+            # 按类型过滤（页签契约，2026-09-08）：逗号分隔多值——长期记忆页签
+            # 传 "semantic,episodic,procedural,pattern,emotional"（排除 working）。
+            # 合法值并入过滤集；非法值忽略并告警；全部非法 → 确定性空结果
+            # （显式过滤不静默回退全量）。
             if memory_type:
-                try:
-                    wanted_type = MemoryType(memory_type)
-                except (ValueError, KeyError):
-                    logger.warning("recall 收到非法 memory_type '%s'，按无匹配处理", memory_type)
-                    wanted_type = None
-                if wanted_type is not None:
-                    results = [m for m in results if m.memory_type == wanted_type]
+                wanted_types = set()
+                for _token in str(memory_type).split(","):
+                    _token = _token.strip()
+                    if not _token:
+                        continue
+                    try:
+                        wanted_types.add(MemoryType(_token))
+                    except (ValueError, KeyError):
+                        logger.warning("recall 收到非法 memory_type '%s'，忽略该值", _token)
+                if wanted_types:
+                    results = [m for m in results if m.memory_type in wanted_types]
                 else:
                     results = []
 

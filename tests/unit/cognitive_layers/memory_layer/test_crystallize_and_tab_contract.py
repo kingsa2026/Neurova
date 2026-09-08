@@ -222,5 +222,52 @@ class TestExplicitOverrideStillWorks(TestTabContractFixBase):
         self.assertEqual(self.mgr._memories[mid].temperature, 99.0)
 
 
+class TestRecallMemoryTypeMultiValue(TestTabContractFixBase):
+    """recall memory_type 逗号多值过滤（长期记忆页签 = 排除 working 的五类）。"""
+
+    def _seed(self):
+        self.mgr.remember("语义A", memory_type="semantic")
+        self.mgr.remember("情景B", memory_type="episodic")
+        self.mgr.remember("工作C", memory_type="working")
+
+    def test_single_value(self):
+        self._seed()
+        res = self.mgr.recall(memory_type="episodic", agent_wide=True, limit=10)
+        self.assertEqual([r["memory_type"] for r in res], ["episodic"])
+
+    def test_multi_value(self):
+        self._seed()
+        res = self.mgr.recall(memory_type="semantic,episodic", agent_wide=True, limit=10)
+        self.assertEqual(sorted(r["memory_type"] for r in res), ["episodic", "semantic"])
+
+    def test_long_term_excludes_working(self):
+        """长期记忆页签契约：五类显式列表不含 working。"""
+        self._seed()
+        res = self.mgr.recall(
+            memory_type="semantic,episodic,procedural,pattern,emotional",
+            agent_wide=True, limit=10,
+        )
+        self.assertNotIn("working", [r["memory_type"] for r in res])
+        self.assertEqual(len(res), 2)
+
+    def test_all_invalid_tokens_fail_closed(self):
+        """显式过滤但全部非法 → 确定性空结果（不静默回退全量）。"""
+        self._seed()
+        res = self.mgr.recall(memory_type="bogus1,bogus2", agent_wide=True, limit=10)
+        self.assertEqual(res, [])
+
+    def test_mixed_valid_invalid_keeps_valid(self):
+        """合法与非法混排 → 保留合法值过滤。"""
+        self._seed()
+        res = self.mgr.recall(memory_type="semantic,bogus", agent_wide=True, limit=10)
+        self.assertEqual([r["memory_type"] for r in res], ["semantic"])
+
+    def test_none_keeps_all(self):
+        """不传 memory_type → 行为与旧契约一致（全量）。"""
+        self._seed()
+        res = self.mgr.recall(agent_wide=True, limit=10)
+        self.assertEqual(len(res), 3)
+
+
 if __name__ == "__main__":
     unittest.main()

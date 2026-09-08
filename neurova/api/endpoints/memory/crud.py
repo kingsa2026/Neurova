@@ -5,7 +5,7 @@
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from fastapi import Depends, Query, Request
+from fastapi import Depends, HTTPException, Query, Request
 
 from neurova.api.auth import get_current_user_or_default
 from neurova.cognitive_layers.memory_layer.models import MemoryType
@@ -31,17 +31,26 @@ from .base import (
 async def search_memories(
     query: str = Query(default="", min_length=0, description="搜索关键词"),
     category: Optional[str] = Query(default=None, description="按分类过滤"),
-    memory_type: Optional[MemoryType] = Query(default=None, description="按记忆类型过滤 (semantic/episodic/procedural/pattern/emotional/working)"),
+    memory_type: Optional[str] = Query(default=None, description="按记忆类型过滤，逗号分隔多值 (semantic/episodic/procedural/pattern/emotional/working)"),
     limit: int = Query(default=10, ge=1, le=100, description="返回条数"),
     agent_id: Optional[str] = Query(default=None, description="Agent ID"),
     user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """搜索记忆 - query 为空时返回全部"""
+    # memory_type 逐段校验（逗号多值）：任一非法整体 422（fail-fast），
+    # 合法多值原样透传 recall（长期记忆页签 = 排除 working 的五类）。
+    # 校验在 try 之前：HTTPException 不能被下方 except Exception 收编成 APIError。
+    if memory_type:
+        _valid_types = {t.value for t in MemoryType}
+        for _token in memory_type.split(","):
+            _token = _token.strip()
+            if _token and _token not in _valid_types:
+                raise HTTPException(status_code=422, detail=f"非法 memory_type: {_token}")
     try:
         manager = get_memory_manager(agent_id, user)
         memories = manager.recall(
             query=query, category=category, limit=limit, agent_wide=True,
-            memory_type=memory_type.value if memory_type else None,
+            memory_type=memory_type or None,
         )
 
         return success_response(

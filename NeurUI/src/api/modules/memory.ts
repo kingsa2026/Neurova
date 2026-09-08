@@ -5,11 +5,14 @@ import type { ApiResponse, PaginatedData } from '@/types/response'
 // Core Types
 // ---------------------------------------------------------------------------
 
+/** 记忆类型 = 后端 MemoryType 枚举值（页签过滤键 / 列表 type 列数据源） */
+export type MemoryTypeValue = 'semantic' | 'episodic' | 'procedural' | 'pattern' | 'emotional' | 'working'
+
 export interface MemoryEntry {
   id: string
   agent_id: string
   content: string
-  type: 'short_term' | 'long_term' | 'episodic' | 'semantic'
+  type: MemoryTypeValue
   category?: string
   importance: number
   temperature?: number
@@ -26,10 +29,27 @@ export interface MemoryEntry {
   expires_at?: string
 }
 
+/**
+ * 页签 key → memory_type 查询值映射（2026-09-08 页签契约对齐）。
+ * - all → 不传（全量）
+ * - hot / crystallized → 走各自专用端点，不走此映射
+ * - working → 工作记忆页签
+ * - long_term → 排除 working 的五类显式列表（后端逗号多值）
+ * - episodic / semantic → 同名类型
+ */
+export const MEMORY_TYPE_BY_TAB: Record<string, string | undefined> = {
+  all: undefined,
+  short_term: 'working',
+  long_term: 'semantic,episodic,procedural,pattern,emotional',
+  episodic: 'episodic',
+  semantic: 'semantic',
+}
+
 export interface MemoryCreatePayload {
   content: string
   category?: string
-  type?: string
+  /** 后端 MemoryType 枚举值（AddMemoryRequest.memory_type，空则默认 semantic） */
+  memory_type?: string
   importance?: number
   is_important?: boolean
   is_crystallized?: boolean
