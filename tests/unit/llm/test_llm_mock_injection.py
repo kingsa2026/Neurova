@@ -52,10 +52,12 @@ class TestMockInjectionPoint:
         chunks = [c async for c in mmc.chat_stream([{"role": "user", "content": "hi"}])]
 
         assert chunks, "流式 mock 必须产出 chunk"
-        assert any(c.get("type") == "content" for c in chunks)
+        # 2026-09-07 audit P2-13 修复后 mock 流产出 LLMResponse 形状对象
+        # （与真实 chunk 契约同形），不再有 {"type": ...} 包装 dict
+        assert any(getattr(c, "content", "") for c in chunks)
         done = chunks[-1]
-        assert done.get("type") == "done"
-        assert isinstance(done.get("usage"), dict)
+        assert getattr(done, "finish_reason", None) == "stop"
+        assert getattr(done, "usage", None) is not None
 
     @pytest.mark.asyncio
     async def test_mock_canned_content_echoes_user(self, monkeypatch):

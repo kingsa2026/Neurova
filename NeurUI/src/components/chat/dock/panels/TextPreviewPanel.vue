@@ -70,6 +70,11 @@ watch(
   () => [props.tab.id, props.tab.data.artifactId, props.tab.data.content],
   () => {
     if (!props.tab.data.content && props.tab.data.artifactId) void loadRemote()
+    else if (!props.tab.data.content && !props.tab.data.artifactId) {
+      // 仅 path 的 tab（历史会话/后端重启后）：无注册 id 拉不到内容，
+      // 空白体是误导——明示不可用原因
+      error.value = t('chat.artifactUnavailable')
+    }
   },
   { immediate: true },
 )
