@@ -17,6 +17,19 @@ from typing import Any, Dict, List, Optional
 
 logger = get_logger(__name__)
 
+# 内置技能包资产目录（随包分发的离线技能 zip）
+BUILTIN_BUNDLE_DIR = Path(__file__).resolve().parent / "market_bundles"
+
+
+def read_builtin_bundle(name: str) -> Optional[bytes]:
+    """读取随包内置技能 zip; 只接受裸文件名（防路径逃逸）, 缺失返回 None"""
+    if not name or Path(name).name != name:
+        return None
+    try:
+        return (BUILTIN_BUNDLE_DIR / name).read_bytes()
+    except OSError:
+        return None
+
 
 class ImportStatus(str, Enum):
     """导入状态"""
@@ -226,11 +239,35 @@ class MarketImporter:
                         )
                         return task
 
-                # 远端市场源条目: 真实下载 zip 并安全解压到 skills_dir/{skill_id}
-                # （SKILL.md 格式技能包；本地种子条目仍走原模拟链路）
+                # 内置技能包条目: 从包内 market_bundles 资产离线解压（零网络）,
+                # 资产缺失 FAIL 不静默模拟; 远端市场源条目: 真实下载 zip 并
+                # 安全解压到 skills_dir/{skill_id}（SKILL.md 格式技能包;
+                # 本地种子条目仍走原模拟链路）
+                bundle_name = (entry or {}).get("bundle_zip")
                 downloaded = False
                 download_url = (entry or {}).get("download_url") or ""
-                if download_url:
+                if bundle_name:
+                    task.status = ImportStatus.INSTALLING
+                    task.progress = 0.7
+                    payload = read_builtin_bundle(str(bundle_name))
+                    if payload is None:
+                        task.status = ImportStatus.FAILED
+                        task.error_message = f"builtin bundle missing: {bundle_name}"
+                        logger.error("Failed to import skill '%s': %s", skill_id, task.error_message)
+                        return task
+                    dest = self._skills_dir / skill_id
+                    if dest.exists():
+                        import shutil
+
+                        shutil.rmtree(dest, ignore_errors=True)
+                    from neurova.skills import market_sources
+
+                    if not market_sources.extract_remote_skill_zip(skill_id, payload, dest):
+                        task.status = ImportStatus.FAILED
+                        task.error_message = f"extract builtin bundle {bundle_name} failed"
+                        logger.error("Failed to import skill '%s': %s", skill_id, task.error_message)
+                        return task
+                elif download_url:
                     from neurova.skills import market_sources
 
                     if market_sources.is_remote_market_url(download_url):

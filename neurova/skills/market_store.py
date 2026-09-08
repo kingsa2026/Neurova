@@ -50,6 +50,51 @@ _DEFAULT_CATALOG: List[Dict[str, Any]] = [
     },
 ]
 
+# 内置技能包（随包分发, 离线可装）: zip 资产在 neurova/skills/market_bundles/
+# 下, 条目以 bundle_zip 指向文件名; 安装走本地解压（market_importer）。
+# skillhub.cn multi-search-engine v2.1.5（腾讯 keen/sanbu 双扫描 benign）
+_BUILTIN_CATALOG: List[Dict[str, Any]] = [
+    {
+        "skill_id": "builtin--multi-search-engine",
+        "name": "搜索引擎",
+        "version": "2.1.5",
+        "description": "多搜索引擎集成, 16 引擎(7 国内+9 全球)聚合搜索。Multi search engine integration with 16 engines (7 CN + 9 Global)。",
+        "author": "智创未来 (skillhub.cn)",
+        "download_url": "https://api.skillhub.cn/api/v1/download?slug=multi-search-engine",
+        "category": "utility",
+        "tags": ["search", "搜索", "检索", "工具", "web_fetch"],
+        "rating": 0.0,
+        "downloads": 390049,
+        "updated_at": 0,
+        "source": "builtin",
+        "bundle_zip": "multi-search-engine.zip",
+    },
+    {
+        "skill_id": "builtin--adaptive-presentation-studio",
+        "name": "智能演示文稿生成器",
+        "version": "1.0.24",
+        "description": "上传 Word/Excel/CSV/PDF/PPT/Markdown/图片等办公资料，理解受众与目的，动态规划叙事、版式、配色与图表，输出可编辑 16:9 PowerPoint。含本地渲染脚本与断点续跑。",
+        "author": "WorkBuddy 实名权利人 (skillhub.cn)",
+        "download_url": "https://api.skillhub.cn/api/v1/download?slug=adaptive-presentation-studio",
+        "category": "productivity",
+        "tags": ["PPT", "演示文稿", "办公", "文档转换", "office"],
+        "rating": 0.0,
+        "downloads": 22825,
+        "updated_at": 0,
+        "source": "builtin",
+        "bundle_zip": "adaptive-presentation-studio.zip",
+    },
+]
+
+
+def _ensure_builtin_entries(items: List[Dict[str, Any]]) -> bool:
+    """向 items 原地补缺内置条目: 只补 catalog 中缺失的 skill_id,
+    不覆盖既有条目（admin 对已上架条目的改动保留）。返回是否有补入。"""
+    known = {i.get("skill_id") for i in items}
+    added = [dict(e) for e in _BUILTIN_CATALOG if e["skill_id"] not in known]
+    items.extend(added)
+    return bool(added)
+
 
 class MarketStore:
     """市场清单存储: JSON 持久化 + RLock 并发保护"""
@@ -67,11 +112,15 @@ class MarketStore:
                     with open(self.catalog_path, "r", encoding="utf-8") as f:
                         raw = json.load(f)
                     self._items = raw if isinstance(raw, list) else []
+                    # 内置技能包补缺（只补缺不覆盖既有/admin 改动）
+                    if _ensure_builtin_entries(self._items):
+                        self._save()
                 except Exception as e:  # noqa: BLE001 — 损坏文件回退种子
                     logger.error("load market catalog failed: %s", e)
                     self._items = []
             else:
                 self._items = [dict(item) for item in _DEFAULT_CATALOG]
+                _ensure_builtin_entries(self._items)
                 self._save()
                 logger.info("seeded market catalog at %s", self.catalog_path)
 
