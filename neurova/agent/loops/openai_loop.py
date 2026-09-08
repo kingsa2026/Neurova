@@ -71,6 +71,7 @@ class OpenAILoop(BaseAgentLoop):
         self._round_replies: List[str] = []
         self._last_round_calls: List[tuple] = []
         self._stagnation_count = 0
+        self._round_user_key: Optional[str] = None  # 首轮 predict_step 时计算
         # P2-5：循环门控（对标 QP loop/gates）——DoomLoop/Iteration/TokenBudget 默认装配，
         # goal 模式由调用方经 set_goal_gate 注入 GoalGate
         from neurova.agent.gates import (
@@ -275,6 +276,14 @@ class OpenAILoop(BaseAgentLoop):
                 value = getattr(self.agent.llm_client.config, key)
                 if value is not None:
                     request_params[key] = value
+
+        # 思考档位透传（2026-09-08 AMD 推理透传）：前端深度选择器
+        # thinking_effort（light/standard/deep）经管线 metadata → 此处
+        # request_params → LLMClient._build_request_params 按 provider
+        # compat 声明映射为 reasoning_effort（未声明网关不注入，防 400）。
+        for key in ["thinking_effort", "reasoning_effort"]:
+            if key in kwargs and kwargs[key] is not None:
+                request_params[key] = kwargs[key]
 
         # 执行预测（如果 tools 导致 API 400，回退到无 tools 模式）
         try:

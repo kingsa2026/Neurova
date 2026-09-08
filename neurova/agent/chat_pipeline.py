@@ -1602,6 +1602,7 @@ class ChatPipeline:
                     messages=ctx.context,
                     tools=tools_for_llm,
                     context_window=_ctx_window,
+                    session_id=ctx.session_id,
                 )
             except Exception:
                 logger.debug("上下文组成实测跳过", exc_info=True)
@@ -1682,7 +1683,10 @@ class ChatPipeline:
         # Bug V2-6 修复:predict_step 是 async def,返回 coroutine。
         # 原代码 `gen = self.loop.predict_step(...)` 缺 await,对 coroutine
         # 迭代会抛 TypeError: 'coroutine' object is not async iterable。
-        gen = await self.loop.predict_step(messages=ctx.context, tools=tools_for_llm, stream=True)
+        gen = await self.loop.predict_step(
+            messages=ctx.context, tools=tools_for_llm, stream=True,
+            thinking_effort=self._effort_of(ctx),
+        )
         emitter = ctx.event_emitter
         async for event in gen:
             if not isinstance(event, dict):
@@ -1739,7 +1743,10 @@ class ChatPipeline:
 
     async def _call_loop_normal(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:
         """非流式调用 Agent Loop（含自动续写）"""
-        response = await self.loop.predict_step(messages=ctx.context, tools=tools_for_llm, stream=False)
+        response = await self.loop.predict_step(
+            messages=ctx.context, tools=tools_for_llm, stream=False,
+            thinking_effort=self._effort_of(ctx),
+        )
         reply = response.content if response else ""
 
         # 捕获思考过程
@@ -1750,6 +1757,12 @@ class ChatPipeline:
         reply = await self._auto_continue(ctx, response, reply, tools_for_llm)
 
         return reply
+
+    def _effort_of(self, ctx: "ChatContext") -> str:
+        """取本轮思考档位（light/standard/deep），无 metadata 或未设置时空串。"""
+        if isinstance(ctx.metadata, dict):
+            return str(ctx.metadata.get("thinking_effort") or "").strip().lower()
+        return ""
 
     async def _auto_continue(self, ctx: ChatContext, response, reply: str, tools_for_llm: Optional[List]) -> str:
         """截断自动续写逻辑"""
@@ -1798,7 +1811,10 @@ class ChatPipeline:
 
             logger.info("截断续写第 %s 轮 (tools=%s, 已输出 %s 字符)", continue_round, 'on' if _tools else 'off', len(reply))
 
-            response = await self.loop.predict_step(messages=ctx_snapshot, tools=_tools, stream=False)
+            response = await self.loop.predict_step(
+                messages=ctx_snapshot, tools=_tools, stream=False,
+                thinking_effort=self._effort_of(ctx),
+            )
             new_content = getattr(response, "content", "") if response else ""
 
             # 护栏 A: 续写过短
@@ -2022,17 +2038,16 @@ class ChatPipeline:
             try:
                 # P2 剩余清单：优先真实 usage（usage_accounting.last_call，multi_model_client
                 # 已入账）；无真实值时回退字符长度估算（向后兼容）
-                total_tokens = None
+                # 回退估算（优先真实 usage——下方若取到入账则覆盖此值）
+                total_tokens = len(ctx.user_input) + len(ctx.reply) if ctx.reply else len(ctx.user_input)
                 try:
                     from neurova.core.usage_accounting import get_usage_accounting
 
                     last = get_usage_accounting().last_call()
-                    if last:
+                    if last and last.get("total_tokens"):
                         total_tokens = last["total_tokens"]
                 except Exception:
                     pass
-                if total_tokens is None:
-                    total_tokens = len(ctx.user_input) + len(ctx.reply) if ctx.reply else len(ctx.user_input)
                 self.trace_manager.finish_trace(ctx.trace_id, ctx.reply or "", total_tokens=total_tokens)
             except Exception as e:
                 logger.warning("推理链记录失败: %s", e)

@@ -5,6 +5,7 @@ ChatPipeline 集成测试 - PipelineExecutor 集成
 """
 
 import pytest
+from types import SimpleNamespace
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
@@ -79,9 +80,14 @@ def mock_agent():
     agent.idle_tracker = MagicMock()
     agent.session_manager = MagicMock()
     agent.loop = None
+    from unittest.mock import AsyncMock as _AM
+
     agent.llm_client = MagicMock()
     agent.llm_client.config = MagicMock()
     agent.llm_client.config.max_tokens = 8192
+    # 实现契约：_call_legacy/_call_stream 均 await llm_client.chat/chat_stream
+    agent.llm_client.chat = _AM(return_value=SimpleNamespace(content="Hello from legacy!"))
+    agent.llm_client.chat_stream = _AM(return_value=iter([SimpleNamespace(content="chunk")]))
 
     # Agent Loop
     agent._chat_normal = AsyncMock(return_value="Hello from legacy!")

@@ -83,7 +83,7 @@ class FakeLLM:
         self._reply = reply
         self.prompts = []
 
-    def chat(self, messages, **kwargs):
+    async def chat(self, messages, **kwargs):
         self.prompts.append(messages[-1]["content"])
         return SimpleNamespace(content=self._reply)
 
