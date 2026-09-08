@@ -27,7 +27,7 @@ class TestUnifiedToolRegistryInit(unittest.TestCase):
     
     def test_init_default(self):
         registry = UnifiedToolRegistry()
-        self.assertIsNone(registry.tool_router)
+        self.assertIsNone(registry._execution_engine)
         self.assertIsNone(registry.tool_engine)
         self.assertIsNone(registry._capability_graph)
         self.assertIsNone(registry._cli_executor)
@@ -38,11 +38,9 @@ class TestUnifiedToolRegistryInit(unittest.TestCase):
         mock_engine = Mock()
         
         registry = UnifiedToolRegistry(
-            tool_router=mock_router,
-            tool_engine=mock_engine
-        )
+)
         
-        self.assertEqual(registry.tool_router, mock_router)
+        self.assertEqual(registry._execution_engine, mock_router)
         self.assertEqual(registry.tool_engine, mock_engine)
         mock_router.set_execution_engine.assert_called_once_with(mock_engine)
 
@@ -54,9 +52,7 @@ class TestBuiltinToolRegistration(unittest.TestCase):
         self.mock_router = Mock()
         self.mock_engine = Mock()
         self.registry = UnifiedToolRegistry(
-            tool_router=self.mock_router,
-            tool_engine=self.mock_engine
-        )
+)
     
     def test_register_builtin_to_both(self):
         def test_func(x):
@@ -85,7 +81,7 @@ class TestBuiltinToolRegistration(unittest.TestCase):
         self.assertEqual(handler, test_func)
     
     def test_register_builtin_without_engine(self):
-        registry = UnifiedToolRegistry(tool_router=self.mock_router)
+        registry = UnifiedToolRegistry()
         
         def test_func():
             return "result"
@@ -96,7 +92,7 @@ class TestBuiltinToolRegistration(unittest.TestCase):
         self.mock_router.register_builtin.assert_called_once_with("test", test_func)
     
     def test_register_builtin_without_router(self):
-        registry = UnifiedToolRegistry(tool_engine=self.mock_engine)
+        registry = UnifiedToolRegistry()
         
         def test_func():
             return "result"
@@ -128,9 +124,7 @@ class TestRegisterToEngine(unittest.TestCase):
         self.mock_router = Mock()
         self.mock_engine = Mock()
         self.registry = UnifiedToolRegistry(
-            tool_router=self.mock_router,
-            tool_engine=self.mock_engine
-        )
+)
     
     def test_register_to_engine(self):
         definition = ToolDefinition(
@@ -205,7 +199,7 @@ class TestExecuteAndLog(unittest.TestCase):
     
     def setUp(self):
         self.mock_router = Mock()
-        self.registry = UnifiedToolRegistry(tool_router=self.mock_router)
+        self.registry = UnifiedToolRegistry()
     
     def test_execute_and_log_success(self):
         mock_result = Mock()
@@ -309,7 +303,7 @@ class TestUnifiedToolRegistryExtended(unittest.TestCase):
     def test_register_builtin_parameters_conversion(self):
         """测试参数定义转换"""
         mock_engine = Mock()
-        registry = UnifiedToolRegistry(tool_engine=mock_engine)
+        registry = UnifiedToolRegistry()
         
         def test_func(a, b):
             return a + b
@@ -336,7 +330,7 @@ class TestUnifiedToolRegistryExtended(unittest.TestCase):
     def test_register_builtin_batch_to_engine(self):
         """测试批量注册到 Engine"""
         mock_engine = Mock()
-        registry = UnifiedToolRegistry(tool_engine=mock_engine)
+        registry = UnifiedToolRegistry()
         
         tools = {
             "tool1": lambda: "result1",

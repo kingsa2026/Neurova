@@ -15,8 +15,24 @@ import sys
 import time
 
 # 模拟依赖模块
+import pytest as _pytest
+
+
 mock_capability_graph = MagicMock()
-sys.modules['neurova.tool_layers.capability_graph'] = mock_capability_graph
+
+
+@_pytest.fixture(scope="module", autouse=True)
+def _isolate_mock_capability_graph():
+    """进程内注入被 mock 的依赖模块，模块结束后恢复——模块级 sys.modules
+    写入会永久毒化同一 pytest 进程内后续测试文件（tools 套互相污染根因）。"""
+    import sys
+    saved = sys.modules.get("neurova.tool_layers.capability_graph")
+    sys.modules["neurova.tool_layers.capability_graph"] = mock_capability_graph
+    yield
+    if saved is None:
+        sys.modules.pop("neurova.tool_layers.capability_graph", None)
+    else:
+        sys.modules["neurova.tool_layers.capability_graph"] = saved
 
 # 导入被测模块
 from neurova.tool_layers.tool_cache import CacheEntry, ToolCache
