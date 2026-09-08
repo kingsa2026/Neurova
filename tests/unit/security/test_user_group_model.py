@@ -31,22 +31,21 @@ class TestResourceQuota:
         """测试默认配额"""
         quota = ResourceQuota()
         
-        assert quota.max_agents == 5
-        assert quota.max_projects == 10
-        assert quota.max_llm_calls_per_day == 1000
-        assert quota.max_storage_mb == 1024
+        assert quota.max_agents == 10
+        assert quota.max_tokens_per_day == 100000
+        assert quota.max_storage_mb == 10240
 
     def test_custom_quota(self):
         """测试自定义配额"""
         quota = ResourceQuota(
             max_agents=20,
-            max_projects=50,
-            max_llm_calls_per_day=5000,
+            max_memory_mb=50,
+            max_tokens_per_day=5000,
         )
-        
+
         assert quota.max_agents == 20
-        assert quota.max_projects == 50
-        assert quota.max_llm_calls_per_day == 5000
+        assert quota.max_memory_mb == 50
+        assert quota.max_tokens_per_day == 5000
 
 
 class TestUserGroup:
@@ -55,38 +54,38 @@ class TestUserGroup:
     def test_create_user_group(self):
         """测试创建用户组"""
         quota = ResourceQuota(max_agents=10)
-        permissions = {Permission.AGENT_CREATE, Permission.PROJECT_CREATE}
+        permissions = {Permission.AGENT_CREATE, Permission.TOOL_CREATE}
         
         group = UserGroup(
             group_id="test_group",
             name="测试用户组",
             description="测试描述",
             group_type=UserGroupType.CUSTOM,
-            quota=quota,
+            resource_quota=quota,
             permissions=permissions,
         )
         
         assert group.group_id == "test_group"
         assert group.name == "测试用户组"
         assert group.group_type == UserGroupType.CUSTOM
-        assert group.quota.max_agents == 10
+        assert group.resource_quota.max_agents == 10
         assert Permission.AGENT_CREATE in group.permissions
         assert group.is_system == False
 
     def test_has_permission(self):
         """测试权限检查"""
-        permissions = {Permission.AGENT_CREATE, Permission.PROJECT_CREATE}
+        permissions = {Permission.AGENT_CREATE, Permission.TOOL_CREATE}
         group = UserGroup(
             group_id="test_group",
             name="测试用户组",
             description="测试描述",
             group_type=UserGroupType.CUSTOM,
-            quota=ResourceQuota(),
+            resource_quota=ResourceQuota(),
             permissions=permissions,
         )
         
         assert group.has_permission(Permission.AGENT_CREATE) == True
-        assert group.has_permission(Permission.USER_CREATE) == False
+        assert group.has_permission(Permission.USER_WRITE) == False
 
     def test_add_permission(self):
         """测试添加权限"""
@@ -95,8 +94,8 @@ class TestUserGroup:
             name="测试用户组",
             description="测试描述",
             group_type=UserGroupType.CUSTOM,
-            quota=ResourceQuota(),
-            permissions=set(),
+            resource_quota=ResourceQuota(),
+            permissions=[],
         )
         
         assert group.has_permission(Permission.AGENT_CREATE) == False
@@ -106,13 +105,13 @@ class TestUserGroup:
 
     def test_remove_permission(self):
         """测试移除权限"""
-        permissions = {Permission.AGENT_CREATE, Permission.PROJECT_CREATE}
+        permissions = {Permission.AGENT_CREATE, Permission.TOOL_CREATE}
         group = UserGroup(
             group_id="test_group",
             name="测试用户组",
             description="测试描述",
             group_type=UserGroupType.CUSTOM,
-            quota=ResourceQuota(),
+            resource_quota=ResourceQuota(),
             permissions=permissions,
         )
         
@@ -130,7 +129,7 @@ class TestUserGroup:
             name="测试用户组",
             description="测试描述",
             group_type=UserGroupType.CUSTOM,
-            quota=quota,
+            resource_quota=quota,
             permissions=permissions,
         )
         
@@ -138,7 +137,7 @@ class TestUserGroup:
         
         assert data["group_id"] == "test_group"
         assert data["name"] == "测试用户组"
-        assert data["quota"]["max_agents"] == 10
+        assert data["resource_quota"]["max_agents"] == 10
         assert Permission.AGENT_CREATE.value in data["permissions"]
 
     def test_from_dict(self):
@@ -148,9 +147,9 @@ class TestUserGroup:
             "name": "测试用户组",
             "description": "测试描述",
             "group_type": "custom",
-            "quota": {
+            "resource_quota": {
                 "max_agents": 10,
-                "max_projects": 20,
+                "max_memory_mb": 20,
             },
             "permissions": [Permission.AGENT_CREATE.value],
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -164,7 +163,7 @@ class TestUserGroup:
         assert group.group_id == "test_group"
         assert group.name == "测试用户组"
         assert group.group_type == UserGroupType.CUSTOM
-        assert group.quota.max_agents == 10
+        assert group.resource_quota.max_agents == 10
         assert Permission.AGENT_CREATE in group.permissions
 
 
@@ -174,7 +173,7 @@ class TestUserGroupManager:
     @pytest.fixture
     def manager(self, tmp_path):
         """创建测试用的用户组管理器"""
-        mgr = UserGroupManager({"data_dir": str(tmp_path)})
+        mgr = UserGroupManager(data_dir=str(tmp_path))
         mgr._on_init()
         return mgr
 
@@ -199,7 +198,7 @@ class TestUserGroupManager:
         group = manager.create_group(
             name="自定义用户组",
             description="测试自定义用户组",
-            quota=quota,
+            resource_quota=quota,
             permissions=permissions,
         )
         
@@ -207,7 +206,7 @@ class TestUserGroupManager:
         assert group.name == "自定义用户组"
         assert group.group_type == UserGroupType.CUSTOM
         assert group.is_system == False
-        assert group.quota.max_agents == 15
+        assert group.resource_quota.max_agents == 15
         
         # 验证是否保存成功
         loaded_group = manager.get_group(group.group_id)
@@ -223,28 +222,29 @@ class TestUserGroupManager:
         group = manager.create_group(
             name="自定义用户组",
             description="测试",
-            quota=quota,
+            resource_quota=quota,
             permissions=permissions,
         )
         
         # 更新用户组
         new_quota = ResourceQuota(max_agents=20)
-        new_permissions = {Permission.AGENT_CREATE, Permission.PROJECT_CREATE}
+        new_permissions = {Permission.AGENT_CREATE, Permission.TOOL_CREATE}
         
         result = manager.update_group(
             group.group_id,
             name="更新后的用户组",
-            quota=new_quota,
+            resource_quota=new_quota,
             permissions=new_permissions,
         )
-        
-        assert result == True
+
+        # 实现：返回更新后的 UserGroup 对象（非 bool）
+        assert result is not None and result.name == "更新后的用户组"
         
         # 验证更新
         updated_group = manager.get_group(group.group_id)
         assert updated_group.name == "更新后的用户组"
-        assert updated_group.quota.max_agents == 20
-        assert Permission.PROJECT_CREATE in updated_group.permissions
+        assert updated_group.resource_quota.max_agents == 20
+        assert Permission.TOOL_CREATE in updated_group.permissions
 
     def test_delete_group(self, manager):
         """测试删除用户组"""
@@ -252,8 +252,8 @@ class TestUserGroupManager:
         group = manager.create_group(
             name="要删除的用户组",
             description="测试",
-            quota=ResourceQuota(),
-            permissions=set(),
+            resource_quota=ResourceQuota(),
+            permissions=[],
         )
         
         group_id = group.group_id
@@ -270,37 +270,36 @@ class TestUserGroupManager:
     def test_cannot_delete_system_group(self, manager):
         """测试不能删除系统内置用户组"""
         # 尝试删除超级管理员用户组
-        result = manager.delete_group("group_super_admin")
+        result = manager.delete_group("super_admin")
         
         assert result == False
         
         # 验证仍然存在
-        group = manager.get_group("group_super_admin")
+        group = manager.get_group("super_admin")
         assert group is not None
 
     def test_check_permission(self, manager):
         """测试检查权限"""
         # 检查超级管理员权限
         result = manager.check_permission(
-            "group_super_admin",
-            Permission.USER_CREATE,
+            "super_admin",
+            Permission.USER_WRITE,
         )
         assert result == True
         
         # 检查普通用户权限
         result = manager.check_permission(
-            "group_user",
-            Permission.USER_CREATE,
+            "user",
+            Permission.USER_WRITE,
         )
         assert result == False
 
     def test_get_user_quota(self, manager):
         """测试获取用户配额"""
-        quota = manager.get_user_quota("group_user")
-        
+        quota = manager.get_user_quota("user")
+
         assert quota is not None
         assert quota.max_agents == 5
-        assert quota.max_projects == 10
 
 
 if __name__ == "__main__":

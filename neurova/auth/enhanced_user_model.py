@@ -182,7 +182,10 @@ def _default_quota(group_type: str) -> Dict[str, int]:
 def _coerce_group_type(value: Optional[str]) -> str:
     if not value:
         return DEFAULT_GROUP_TYPE
-    val = str(value)
+    # 2026-09-08 真 bug 修复：枚举入参（如 UserGroupType.DEVELOPER）此前被
+    # str() 成 "UserGroupType.DEVELOPER"，不匹配任何组 → 静默回落 default，
+    # DEVELOPER 用户被降为 USER 组（权限面错配）。先取枚举 .value。
+    val = str(getattr(value, "value", value))
     if val in GROUP_PERMISSIONS:
         return val
     try:
