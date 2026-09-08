@@ -64,6 +64,110 @@ class StorageInfo(BaseModel):
 
 _files_store: Dict[str, Dict[str, Any]] = {}
 
+# ---------------------------------------------------------------------------
+# SQLite 持久化（2026-09-08 产物预览计划 W1-4）：_files_store 原为纯内存，
+# 重启即失 → 预览/附件 404。写穿 + 启动水合；坏库/磁盘丢文件静默降级
+# （不阻塞启动，元数据丢失可接受——上传件本体在 storage/ 仍有目录可扫）。
+# ---------------------------------------------------------------------------
+
+_FILES_DB_PATH = "data/users.db"
+
+_FILES_DDL = """
+CREATE TABLE IF NOT EXISTS files (
+    file_id TEXT PRIMARY KEY,
+    filename TEXT, file_type TEXT, mime_type TEXT,
+    size INTEGER, version TEXT, status TEXT,
+    user_id TEXT, agent_id TEXT, path TEXT,
+    created_at REAL, updated_at REAL
+)
+"""
+
+
+def _files_db_path(db_path: Optional[str] = None) -> str:
+    return db_path or _FILES_DB_PATH
+
+
+def persist_file(file_id: str, info: Dict[str, Any], db_path: Optional[str] = None) -> None:
+    """写穿单条文件元数据到 files 表（失败仅告警，不影响主流程）。"""
+    try:
+        Path(_files_db_path(db_path)).parent.mkdir(parents=True, exist_ok=True)
+        import sqlite3
+
+        conn = sqlite3.connect(_files_db_path(db_path))
+        try:
+            conn.execute(_FILES_DDL)
+            conn.execute(
+                "INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    info.get("file_id", file_id),
+                    info.get("filename", ""),
+                    info.get("file_type", "file"),
+                    info.get("mime_type", ""),
+                    info.get("size", 0),
+                    info.get("version", "1.0.0"),
+                    info.get("status", "active"),
+                    info.get("user_id", ""),
+                    info.get("agent_id", ""),
+                    info.get("path", ""),
+                    info.get("created_at", 0),
+                    info.get("updated_at", 0),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001 - 持久化失败降级为内存态
+        logger.warning("files 元数据写穿失败（降级内存态）: %s", e)
+
+
+def delete_file_record(file_id: str, db_path: Optional[str] = None) -> None:
+    """从 files 表删除单条元数据（失败仅告警）。"""
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(_files_db_path(db_path))
+        try:
+            conn.execute("DELETE FROM files WHERE file_id = ?", (file_id,))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("files 元数据删除失败: %s", e)
+
+
+def hydrate_files_store(db_path: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+    """启动水合：磁盘文件仍在的行恢复进 _files_store，丢盘行自动清理。
+
+    返回本次水合加载的记录（测试断言用）；坏库静默返回空（不阻塞启动）。
+    """
+    loaded: Dict[str, Dict[str, Any]] = {}
+    db = _files_db_path(db_path)
+    if not Path(db).exists():
+        return loaded
+    try:
+        import sqlite3
+
+        conn = sqlite3.connect(db)
+        try:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute("SELECT * FROM files").fetchall()
+            for row in rows:
+                rec = dict(row)
+                # 磁盘文件已丢的行：清理元数据（防 404 僵尸）
+                if rec.get("path") and not Path(rec["path"]).exists():
+                    conn.execute("DELETE FROM files WHERE file_id = ?", (rec.get("file_id"),))
+                    continue
+                loaded[rec["file_id"]] = rec
+                _files_store[rec["file_id"]] = rec
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001 - 坏库不阻塞启动
+        logger.warning("files 元数据水合失败（空库降级）: %s", e)
+        return {}
+    logger.info("files 元数据水合完成: %d 条", len(loaded))
+    return loaded
+
 # P0 安全修复: 路径段只允许字母数字与 . _ -，禁止 .. / \ 等穿越字符
 _PATH_SEGMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
@@ -215,6 +319,7 @@ async def upload_file(
         "updated_at": now,
     }
     _files_store[file_id] = info
+    persist_file(file_id, info)
     return FileInfo(**info)
 
 
@@ -301,6 +406,7 @@ async def update_file(
     if body.status is not None:
         info["status"] = body.status
     info["updated_at"] = time.time()
+    persist_file(file_id, info)
     return FileInfo(**info)
 
 
@@ -312,6 +418,7 @@ async def delete_file(
     """删除文件"""
     info = _get_owned_file(file_id, current_user)
     del _files_store[file_id]
+    delete_file_record(file_id)
     try:
         Path(info["path"]).unlink(missing_ok=True)
     except Exception:
