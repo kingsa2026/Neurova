@@ -856,6 +856,12 @@ class SubSystemContainer:
                 if a._skill_registry:
                     skill = a._skill_registry.get_skill(tool_name)
                     if skill:
+                        # 沙箱根注入（2026-09-08 相对路径乱放根因修复）：
+                        # file_operation 相对路径锚定本 agent 工作区，服务端
+                        # 赋值覆盖调用方伪造的同名参数
+                        if tool_name == "file_operation":
+                            params = {**(params or {}),
+                                      "_base_dir": str(getattr(a, "workspace_path", "") or ".")}
                         result = await a._skill_registry.execute_skill(tool_name, params)
                         if result.success:
                             return {"success": True, "data": result.data}
@@ -976,6 +982,19 @@ class Agent:
         self._subsystems.init_all()
 
         logger.info("Agent %s 初始化完成", self.config.name)
+
+    @property
+    def workspace_path(self) -> Path:
+        """Agent 工作区根（代理 config.workspace_path）。
+
+        2026-09-08 根因修复：workspace_path 此前只在 AgentConfig 上，
+        Agent 实例无此属性 —— loops/base 与 tool_executor 的
+        getattr(agent, 'workspace_path') 恒空，file_operation 相对路径
+        沙箱注入落空回落 CWD，落盘散落项目根；maybe_output_ref 的
+        工作区引用面同样恒 None。统一在 Agent 上暴露，读取方不再需要
+        各自双读 config。
+        """
+        return self.config.workspace_path
 
     async def rebuild_loop(self, model_name: str) -> bool:
         """
@@ -1656,6 +1675,49 @@ class Agent:
             enable_tts=enable_tts,
         )
         return await self.chat_pipeline.execute(ctx)
+
+    async def chat_stream(
+        self,
+        user_input: str,
+        session_id: str = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        **kwargs,
+    ):
+        """流式对话：逐 chunk yield 字符串
+
+        mobile_pairing._handle_chat_send 与 chat.py SSE 端点按
+        user_input=/session_id=/metadata= 消费本方法（hasattr 分支）。
+        当前委托 self.chat() 走完整管线（记忆/上下文/后处理不缺失），
+        拿到完整回复后按句切块 yield；chat() 异常透传不吞。
+        """
+        response = await self.chat(
+            user_input=user_input,
+            session_id=session_id,
+            metadata=metadata,
+            **kwargs,
+        )
+
+        if isinstance(response, dict):
+            text = response.get("text") or ""
+        else:
+            text = str(response or "")
+
+        if not text:
+            yield ""
+            return
+
+        import re as _re
+
+        # 按句子边界切块（保留标点），无标点长文按 120 字符硬切
+        parts = _re.split(r"(?<=[。！？!?\n])", text)
+        buf = ""
+        for part in parts:
+            buf += part
+            if len(buf) >= 120:
+                yield buf
+                buf = ""
+        if buf:
+            yield buf
 
     async def _record_tool_failure_lesson(
         self,

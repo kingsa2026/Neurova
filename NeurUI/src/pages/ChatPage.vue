@@ -280,6 +280,14 @@
               </button>
             </div>
 
+            <!-- 产出物卡片（回答结尾）：本轮真实产出，可收纳展开 + 审验/预览 -->
+            <ArtifactCard
+              v-if="msg.role === 'assistant' && msg.artifacts && msg.artifacts.length > 0"
+              :artifacts="msg.artifacts"
+              @review="reviewArtifact"
+              @open="openMessageArtifact"
+            />
+
             <!-- Message footer: 时间 + 操作条（复制 / 点赞点踩 / 编辑 / 删除轮次） -->
             <div v-if="!msg.streaming && !isEditingMessage(absIdx(idx))" class="nr-msg-footer">
               <span v-if="displayTime(msg)" class="nr-msg-time">{{ displayTime(msg) }}</span>
@@ -426,7 +434,8 @@ import { api } from '@/api'
 import { useGovernanceApproval } from '@/composables/useGovernanceApproval'
 import { secureStorage } from '@/utils/security'
 import { renderMarkdown } from '@/utils/markdown'
-import { openArtifactTab, openCodeBlockTab, openFileTab, openImageTab, openToolResultArtifacts, type ArtifactEventPayload } from '@/utils/artifacts'
+import { openArtifactTab, openCodeBlockTab, openFileTab, openImageTab, openToolResultArtifacts, artifactFromEvent, artifactsFromToolResult, mergeMessageArtifacts, openMessageArtifact, type ArtifactEventPayload, type MessageArtifact } from '@/utils/artifacts'
+import ArtifactCard from '@/components/chat/ArtifactCard.vue'
 import { uiMessage } from '@/utils/message'
 import { resolveI18nMessage } from '@/utils/i18n'
 import GlassButton from '@/components/GlassButton.vue'
@@ -801,6 +810,24 @@ function formatMsgTime(ts?: string): string {
 /** 展示时间：用户 = 发送时刻；assistant = 回复完成时刻（回退轮次时间） */
 function displayTime(msg: ChatMessage): string {
   return formatMsgTime(msg.role === 'assistant' ? msg.repliedAt || msg.timestamp : msg.timestamp)
+}
+
+/**
+ * 审验产出物：强制源码形态开 dock tab（text kind 走 TextPanel 源码审读），
+ * 与「打开」的渲染预览区分——审验看源，打开看效果。
+ */
+function reviewArtifact(artifact: MessageArtifact): void {
+  const dock = useRightDockStore()
+  dock.openTab({
+    id: `review:${artifact.name || artifact.path || artifact.artifactId || ''}`,
+    kind: 'text',
+    title: artifact.name || artifact.path || '',
+    icon: 'fileText',
+    data: {
+      artifactId: artifact.artifactId,
+      path: artifact.path,
+    },
+  })
 }
 
 async function copyMessage(msg: ChatMessage): Promise<void> {
@@ -1390,6 +1417,9 @@ function processSSEEvent(event: any, msg: ChatMessage) {
         )
       // legacy compat
       msg.toolResult = resultText
+      // 产出物收集（兜底通道）：后端 artifact 事件缺位/历史回放时，
+      // 从 tool_result 文本提取路径引用（读形态过滤与后端同契约）
+      msg.artifacts = mergeMessageArtifacts(msg.artifacts, artifactsFromToolResult(resultText))
       // 产物预览钩子（2026-09-08）：tool_result 文本含 file_path 等路径引用时
       // 开 dock 预览 tab（后端 artifact 事件为主通道，此处为兜底/历史兼容）
       openToolResultArtifacts(resultText)
@@ -1402,6 +1432,13 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'artifact': {
       // 后端 artifact 事件（产物预览主通道）：注册完成的产物文件 → dock tab
       openArtifactTab(event as unknown as ArtifactEventPayload)
+      // 产出物收集（主通道）：同时挂到本轮消息，回答结尾产出物卡片渲染
+      msg.artifacts = mergeMessageArtifacts(
+        msg.artifacts,
+        [artifactFromEvent(event as unknown as ArtifactEventPayload)].filter(
+          (a): a is MessageArtifact => a !== null,
+        ),
+      )
       break
     }
 

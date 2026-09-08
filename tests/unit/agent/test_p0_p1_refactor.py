@@ -182,10 +182,10 @@ class TestPostChatPipeline:
     def test_step_save_session_when_save_memory_false(self):
         """save_memory=False 时跳过 Session 保存"""
         from neurova.post_chat_pipeline import PostChatPipeline
-        
+
         mock_agent = Mock()
         pipeline = PostChatPipeline(mock_agent)
-        
+
         result = asyncio.run(
             pipeline._step_save_session(
                 user_input="hello",
@@ -196,6 +196,86 @@ class TestPostChatPipeline:
             )
         )
         assert result == "s1"  # 返回原始 session_id
+
+    def test_step_save_session_persists_artifacts(self, tmp_path, monkeypatch):
+        """产物卡片持久化（2026-09-08）：本轮 tool_result 提取的产物随
+        assistant_metadata.artifacts 落盘，历史回放可恢复产出物卡片。
+
+        根因背景：SSE artifact 事件只活在实时流，刷新/重开会话后卡片消失。
+        """
+        from neurova.api.endpoints import artifacts_api
+        from neurova.post_chat_pipeline import PostChatPipeline
+
+        out = tmp_path / "artifact_live_verify.md"
+        out.write_text("live-verify 产出物卡片", encoding="utf-8")
+        monkeypatch.setattr(artifacts_api, "_WORKSPACE_ROOT", tmp_path)
+        monkeypatch.setattr(artifacts_api, "_artifacts_store", {})
+
+        mock_agent = Mock()
+        mock_agent.current_reasoning = None
+        mock_agent.current_user_id = "1"
+        mock_agent._collect_tool_messages = Mock(
+            return_value=[
+                {
+                    "type": "tool_result",
+                    "tool_name": "file_operation",
+                    "result": '{"success": true, "file_path": "%s", "bytes": 20}' % str(out).replace("\\", "\\\\"),
+                    "success": True,
+                }
+            ]
+        )
+        mock_agent._save_to_session = Mock(return_value="s1")
+
+        pipeline = PostChatPipeline(mock_agent)
+        asyncio.run(
+            pipeline._step_save_session(
+                user_input="hi",
+                reply="done",
+                session_id="s1",
+                save_memory=True,
+                metadata=None,
+            )
+        )
+
+        assistant_meta = mock_agent._save_to_session.call_args[0][4]
+        assert "artifacts" in assistant_meta, f"artifacts 未落盘: {sorted(assistant_meta)}"
+        arts = assistant_meta["artifacts"]
+        assert len(arts) == 1
+        assert arts[0]["name"] == "artifact_live_verify.md"
+        assert arts[0]["kind"] == "markdown"
+        assert arts[0]["artifact_id"]
+
+    def test_step_save_session_artifacts_read_shape_filtered(self):
+        """读形态（file_operation read 返回 {content, file_path}）不算产出，
+        不写入 artifacts——与 SSE 出口 extract_tool_artifacts 同契约。"""
+        from neurova.post_chat_pipeline import PostChatPipeline
+
+        mock_agent = Mock()
+        mock_agent._collect_tool_messages = Mock(
+            return_value=[
+                {
+                    "type": "tool_result",
+                    "tool_name": "file_operation",
+                    "result": '{"content": "file body...", "file_path": "notes.md"}',
+                    "success": True,
+                }
+            ]
+        )
+        mock_agent._save_to_session = Mock(return_value="s1")
+
+        pipeline = PostChatPipeline(mock_agent)
+        asyncio.run(
+            pipeline._step_save_session(
+                user_input="hi",
+                reply="done",
+                session_id="s1",
+                save_memory=True,
+                metadata=None,
+            )
+        )
+
+        assistant_meta = mock_agent._save_to_session.call_args[0][4]
+        assert "artifacts" not in assistant_meta, f"读形态被误记为产出: {assistant_meta.get('artifacts')}"
 
     def test_step_save_memory_with_buffer(self):
         """使用缓冲区模式保存记忆"""
