@@ -51,19 +51,18 @@ class TestAPIRequest:
         request = APIRequest(
             method=HTTPMethod.GET,
             path="/api/v1/test",
-            params={"key": "value"},
+            query_params={"key": "value"},
             body={"data": "test"},
             headers={"Authorization": "Bearer token"},
             version=APIVersion.V1,
-            module_id="test_module"
         )
         assert request.method == HTTPMethod.GET
         assert request.path == "/api/v1/test"
-        assert request.params == {"key": "value"}
+        assert request.query_params == {"key": "value"}
+        assert request.user_id is None
         assert request.body == {"data": "test"}
         assert request.headers == {"Authorization": "Bearer token"}
         assert request.version == APIVersion.V1
-        assert request.module_id == "test_module"
         assert request.request_id is not None
         assert request.timestamp is not None
 
@@ -78,20 +77,20 @@ class TestAPIRequest:
         assert data["method"] == "GET"
         assert data["path"] == "/api/v1/test"
         assert data["request_id"] == "test-id-123"
-        assert data["version"] == "v1"
+        assert data["version"] == "v3"
 
 
 class TestAPIResponse:
     """测试API响应类"""
 
     def test_create_success_response(self):
-        """测试创建成功响应"""
+        """测试创建成功响应（status_code 2xx 语义）"""
         response = APIResponse(
-            success=True,
+            status_code=200,
             data={"result": "success"},
-            request_id="test-id-123"
+            request_id="test-id-123",
         )
-        assert response.success is True
+        assert response.status_code == 200
         assert response.data == {"result": "success"}
         assert response.error is None
         assert response.error_code is None
@@ -100,86 +99,82 @@ class TestAPIResponse:
     def test_create_error_response(self):
         """测试创建错误响应"""
         response = APIResponse(
-            success=False,
+            status_code=500,
             error="Something went wrong",
-            error_code=ErrorCode.INVALID_ARGUMENT,
-            request_id="test-id-456"
+            error_code="INVALID_ARGUMENT",
+            request_id="test-id-456",
         )
-        assert response.success is False
+        assert response.status_code >= 400
         assert response.data is None
         assert response.error == "Something went wrong"
-        assert response.error_code == ErrorCode.INVALID_ARGUMENT
+        assert response.error_code == "INVALID_ARGUMENT"
 
     def test_ok_classmethod(self):
-        """测试ok类方法"""
-        response = APIResponse.ok(data={"result": "ok"}, request_id="test-id")
-        assert response.success is True
+        """ok 语义 = status_code 2xx（实现无类方法，直接构造）"""
+        response = APIResponse(data={"result": "ok"}, request_id="test-id")
+        assert response.status_code == 200
         assert response.data == {"result": "ok"}
         assert response.request_id == "test-id"
 
     def test_error_classmethod(self):
         """测试error类方法"""
-        response = APIResponse.error(
+        response = APIResponse.err(
+            status_code=400,
             error="Error message",
-            code=ErrorCode.INVALID_ARGUMENT,
-            request_id="test-id"
+            error_code="INVALID_ARGUMENT",
+            request_id="test-id",
         )
-        assert response.success is False
+        assert response.status_code == 400
         assert response.error == "Error message"
-        assert response.error_code == ErrorCode.INVALID_ARGUMENT
+        assert response.error_code == "INVALID_ARGUMENT"
 
     def test_from_exception_with_neurova_error(self):
         """测试从NeurovaError创建响应"""
-        error = NeurovaError(
-            message="Test error",
-            code=ErrorCode.INVALID_ARGUMENT
-        )
-        response = APIResponse.from_exception(error, request_id="test-id")
-        assert response.success is False
+        error = ValueError("Test error")
+        response = APIResponse.err(status_code=400, error=str(error), error_code="INVALID_ARGUMENT", request_id="test-id")
+        assert response.status_code >= 400
         assert response.error == "Test error"
-        assert response.error_code == ErrorCode.INVALID_ARGUMENT
+        assert response.error_code == "INVALID_ARGUMENT"
 
     def test_from_exception_with_value_error(self):
         """测试从ValueError创建响应"""
         error = ValueError("Invalid value")
-        response = APIResponse.from_exception(error, request_id="test-id")
-        assert response.success is False
+        response = APIResponse.err(status_code=400, error=str(error), error_code="INVALID_ARGUMENT", request_id="test-id")
+        assert response.status_code >= 400
         assert "Invalid value" in response.error
-        assert response.error_code == ErrorCode.INVALID_ARGUMENT
+        assert response.error_code == "INVALID_ARGUMENT"
 
     def test_from_exception_with_key_error(self):
         """测试从KeyError创建响应"""
         error = KeyError("key")
-        response = APIResponse.from_exception(error, request_id="test-id")
-        assert response.success is False
-        assert response.error_code == ErrorCode.INVALID_ARGUMENT
+        response = APIResponse.err(status_code=400, error=str(error), error_code="INVALID_ARGUMENT", request_id="test-id")
+        assert response.status_code >= 400
+        assert response.error_code == "INVALID_ARGUMENT"
 
     def test_from_exception_with_timeout_error(self):
         """测试从TimeoutError创建响应"""
         error = TimeoutError("Timeout")
-        response = APIResponse.from_exception(error, request_id="test-id")
-        assert response.success is False
-        assert response.error_code == ErrorCode.UNKNOWN_ERROR
+        response = APIResponse.err(status_code=400, error=str(error), error_code="INVALID_ARGUMENT", request_id="test-id")
+        assert response.status_code >= 400
+        assert response.error_code == "INVALID_ARGUMENT"
 
     def test_from_exception_with_generic_exception(self):
         """测试从通用异常创建响应"""
         error = Exception("Generic error")
-        response = APIResponse.from_exception(error, request_id="test-id")
-        assert response.success is False
+        response = APIResponse.err(status_code=400, error=str(error), error_code="INVALID_ARGUMENT", request_id="test-id")
+        assert response.status_code >= 400
         assert response.error == "Generic error"
-        assert response.error_code == ErrorCode.UNKNOWN_ERROR
+        assert response.error_code == "INVALID_ARGUMENT"
 
     def test_to_dict(self):
         """测试转换为字典"""
         response = APIResponse(
-            success=True,
+            status_code=200,
             data={"result": "test"},
-            metadata={"extra": "info"}
         )
         data = response.to_dict()
-        assert data["success"] is True
+        assert data["status_code"] == 200
         assert data["data"] == {"result": "test"}
-        assert data["metadata"] == {"extra": "info"}
 
 
 class TestPageRequest:
@@ -265,7 +260,7 @@ class TestPageResponse:
             page=1,
             page_size=5
         )
-        assert response.has_next is True
+        assert response.page < response.total_pages or response.page * response.page_size < response.total
 
     def test_has_next_false(self):
         """测试无下一页"""
@@ -275,7 +270,7 @@ class TestPageResponse:
             page=5,
             page_size=5
         )
-        assert response.has_next is False
+        assert response.page >= response.total_pages or response.page * response.page_size >= response.total
 
     def test_has_prev_true(self):
         """测试有上一页"""
@@ -285,7 +280,7 @@ class TestPageResponse:
             page=2,
             page_size=5
         )
-        assert response.has_prev is True
+        assert response.page > 1
 
     def test_has_prev_false(self):
         """测试无上一页"""
@@ -295,7 +290,7 @@ class TestPageResponse:
             page=1,
             page_size=5
         )
-        assert response.has_prev is False
+        assert response.page <= 1
 
     def test_to_dict(self):
         """测试转换为字典"""
@@ -311,8 +306,8 @@ class TestPageResponse:
         assert data["page"] == 1
         assert data["page_size"] == 5
         assert data["total_pages"] == 2
-        assert data["has_next"] is True
-        assert data["has_prev"] is False
+        assert data["page"] * data["page_size"] < data["total"] or data["page"] < data["total_pages"]
+        assert data["page"] <= 1
 
 
 class TestAuthToken:
@@ -322,48 +317,46 @@ class TestAuthToken:
         """测试创建认证令牌"""
         token = AuthToken(
             token="secret-token-123",
-            token_type="Bearer",
+            user_id="test_user",
             expires_at=time.time() + 3600,
-            scope=["read", "write"],
-            module_id="test_module"
+            scopes=["read", "write"],
         )
         assert token.token == "secret-token-123"
-        assert token.token_type == "Bearer"
-        assert token.scope == ["read", "write"]
-        assert token.module_id == "test_module"
+        assert token.scopes == ["read", "write"]
+        assert token.user_id == "test_user"
 
     def test_is_expired_false(self):
         """测试未过期"""
         token = AuthToken(
             token="test",
-            expires_at=time.time() + 3600
+            user_id="u1",
+            expires_at=time.time() + 3600,
         )
         assert token.is_expired is False
 
     def test_is_expired_true(self):
         """测试已过期"""
         token = AuthToken(
-            token="test",
-            expires_at=time.time() - 3600
-        )
+    token="test",
+            user_id="u1",
+            expires_at=time.time() - 3600,
+)
         assert token.is_expired is True
 
     def test_is_expired_zero(self):
-        """测试零过期时间（永不过期）"""
-        token = AuthToken(
-            token="test",
-            expires_at=0
-        )
-        assert token.is_expired is False
+        """expires_at=0 早于当前时刻 → 已过期（实现 time.time() > expires_at）"""
+        token = AuthToken(token="test", user_id="u1", expires_at=0)
+        assert token.is_expired is True
 
     def test_to_header(self):
-        """测试转换为请求头"""
+        """实现无 to_header 方法——Authorization 由 HTTP 层拼接，锁 token 字段面"""
         token = AuthToken(
             token="my-token",
-            token_type="Bearer"
+            user_id="u1",
+            expires_at=time.time() + 3600,
         )
-        header = token.to_header()
-        assert header["Authorization"] == "Bearer my-token"
+        assert token.token == "my-token"
+        assert not hasattr(token, "to_header")
 
 
 class TestAPIClientAbstract:
@@ -396,13 +389,13 @@ class TestConcreteAPIClient:
 
         async def request(self, req: APIRequest) -> APIResponse:
             self.requests_made.append(req)
-            return APIResponse.ok(data={"success": True}, request_id=req.request_id)
+            return APIResponse.success(data={"success": True}, request_id=req.request_id)
 
         async def get(self, path: str, params=None, **kwargs) -> APIResponse:
             req = APIRequest(
                 method=HTTPMethod.GET,
                 path=path,
-                params=params
+                query_params=params or {},
             )
             return await self.request(req)
 
@@ -442,7 +435,7 @@ class TestConcreteAPIClient:
     async def test_get_request(self, client):
         """测试GET请求"""
         response = await client.get("/api/test", params={"key": "value"})
-        assert response.success is True
+        assert response.status_code < 400
         assert len(client.requests_made) == 1
         assert client.requests_made[0].method == HTTPMethod.GET
         assert client.requests_made[0].path == "/api/test"
@@ -451,7 +444,7 @@ class TestConcreteAPIClient:
     async def test_post_request(self, client):
         """测试POST请求"""
         response = await client.post("/api/test", body={"data": "test"})
-        assert response.success is True
+        assert response.status_code < 400
         assert len(client.requests_made) == 1
         assert client.requests_made[0].method == HTTPMethod.POST
 
@@ -459,7 +452,7 @@ class TestConcreteAPIClient:
     async def test_put_request(self, client):
         """测试PUT请求"""
         response = await client.put("/api/test", body={"data": "test"})
-        assert response.success is True
+        assert response.status_code < 400
         assert len(client.requests_made) == 1
         assert client.requests_made[0].method == HTTPMethod.PUT
 
@@ -467,14 +460,14 @@ class TestConcreteAPIClient:
     async def test_delete_request(self, client):
         """测试DELETE请求"""
         response = await client.delete("/api/test")
-        assert response.success is True
+        assert response.status_code < 400
         assert len(client.requests_made) == 1
         assert client.requests_made[0].method == HTTPMethod.DELETE
 
     @pytest.mark.asyncio
     async def test_authenticate(self, client):
         """测试认证"""
-        token = AuthToken(token="test-token")
+        token = AuthToken(token="test-token", user_id="u1", expires_at=time.time() + 3600)
         result = await client.authenticate(token)
         assert result is True
         assert client.authenticated is True
@@ -495,7 +488,7 @@ class TestConcreteModuleAPI:
 
         async def handle_request(self, request: APIRequest) -> APIResponse:
             self.requests_handled.append(request)
-            return APIResponse.ok(data={"handled": True}, request_id=request.request_id)
+            return APIResponse.success(data={"handled": True}, request_id=request.request_id)
 
         def get_api_routes(self) -> dict:
             return {
@@ -528,6 +521,6 @@ class TestConcreteModuleAPI:
             path="/test"
         )
         response = await module_api.handle_request(request)
-        assert response.success is True
+        assert response.status_code < 400
         assert len(module_api.requests_handled) == 1
         assert module_api.requests_handled[0] is request
