@@ -63,6 +63,23 @@ class TestPureSections:
         assert a == b
         assert a.index("## 工具使用规则") < a.index("## 环境") < a.index("## 记忆写入规则")
 
+    def test_deliverable_reporting_clause(self):
+        """产出物报告条款（2026-09-08）：回答结尾把本轮真实产出展示成清单。
+
+        对齐图2 形态——每轮回答末尾要有「产出物」区块（文件名 + 简述），
+        前端据 LLM 列表 + artifact 事件双通道渲染产出物卡片。
+        """
+        text = build_tool_rules_section()
+        assert "产出物" in text
+        assert "结尾" in text or "回答末尾" in text
+        assert "文件名" in text  # 明确清单要素
+        # 诚实边界：读过/检查过的文件不算产出
+        assert "读过" in text or "读取" in text or "查看" in text
+
+    def test_deliverable_clause_in_all_sections(self):
+        text = build_all_sections(workspace_path="/w", platform_name="Windows")
+        assert "产出物" in text
+
 
 class TestDualPathIntegration:
     """双路径接入：build_context（生产主链）与 build_system_prompt（工具方法）。"""
