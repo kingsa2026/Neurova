@@ -484,6 +484,8 @@ export default {
   },
 
   chat: {
+    artifactUnavailable: 'आर्टिफैक्ट सामग्री अनुपलब्ध (संभवतः स्थानांतरित या हटाई गई)',
+    openInPreview: 'पूर्वावलोकन में खोलें',
     retrievalUnified: '统一检索',
     retrievalMoE: 'MoE 专家路由',
     retrievalCache: '缓存检索',
@@ -2977,11 +2979,20 @@ export default {
     manualPlaceholder: '描述遇到的问题，或粘贴错误信息（用于主动反馈）',
     manualSent: '反馈已提交，感谢！',
   },
+
+  dock: {
+    closeTab: 'टैब बंद करें',
+    closeAll: 'सभी बंद करें',
+    resizeHint: 'चौड़ाई बदलने के लिए खींचें, रीसेट के लिए डबल-क्लिक करें',
+    empty: 'कोई पूर्वावलोकन खुला नहीं',
+    download: 'डाउनलोड',
+    refresh: 'रीफ़्रेश',
+    htmlSandboxHint: 'सैंडबॉक्स पूर्वावलोकन: स्क्रिप्ट सक्रिय, समान-मूल पहुंच नहीं',
+    kindMarkdown: 'Markdown',
+    kindHtml: 'HTML',
+    kindImage: 'छवि',
+    kindAudio: 'ऑडियो',
+    kindText: 'टेक्स्ट',
+  },
+
 }
-
-
-
-
-
-
-
