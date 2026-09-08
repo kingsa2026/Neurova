@@ -91,7 +91,7 @@ class TestSourceFilter:
         a, c = app
         _auth(c)
         skills = c.get("/api/v1/marketplace/skills").json()
-        assert len(skills) == 7  # 2 种子 + 5 远端
+        assert len(skills) == 9  # 2 种子 + 5 远端 + 2 内置(market_bundles 补缺)
 
 
 class TestPaginationEnvelope:

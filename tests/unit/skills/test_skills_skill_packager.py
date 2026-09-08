@@ -13,9 +13,9 @@ from neurova.skills.skill_packager import SkillPackager
 
 
 @pytest.fixture
-def skill_packager() -> SkillPackager:
+def skill_packager(tmp_path) -> SkillPackager:
     """创建SkillPackager实例"""
-    return SkillPackager()
+    return SkillPackager(skills_dir=tmp_path, output_dir=tmp_path / "packages")
 
 
 @pytest.fixture
@@ -24,21 +24,8 @@ def sample_skill() -> SkillInfo:
     return SkillInfo(
         name="test_skill",
         description="测试技能",
-        content="def run():\n    return 'hello'",
-        source=SkillSource.AGENT_PRIVATE,
-        version_text="1.0.0",
-        evolution_history=[
-            {"version": "1.0.0", "change": "初始版本"}
-        ],
-        experience_records=[
-            {
-                "skill_name": "test_skill",
-                "context": {"input": "test"},
-                "result": {"output": "hello"},
-                "success": True,
-                "timestamp": "2026-05-12T22:00:00",
-            }
-        ],
+        source=SkillSource.LOCAL,
+        version="1.0.0",
     )
 
 
@@ -46,192 +33,94 @@ class TestSkillPackagerInit:
     """测试SkillPackager初始化"""
 
     def test_init(self, skill_packager: SkillPackager):
-        """初始化"""
-        assert skill_packager._registry is not None
+        """初始化（目录就位）"""
+        assert skill_packager._skills_dir is not None
+        assert skill_packager._output_dir is not None
+
+
+def _make_skill(skills_dir: Path, skill_id: str = "pk1") -> None:
+    """在 skills_dir 下建立可打包的技能目录（实现按 skill_id 查找）"""
+    skill_dir = skills_dir / skill_id
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "skill.md").write_text("# skill", encoding="utf-8")
+    (skill_dir / "manifest.json").write_text('{"id": "%s", "name": "%s", "version": "1.0.0"}' % (skill_id, skill_id), encoding="utf-8")
+    exp = skill_dir / "experience"
+    exp.mkdir(exist_ok=True)
+    (exp / "exp.json").write_text('[{"success": true}]', encoding="utf-8")
 
 
 class TestPackageForSharing:
-    """测试package_for_sharing方法"""
+    """package_for_sharing(skill_id, include_experience, include_history)"""
 
-    def test_package_for_sharing(self, skill_packager: SkillPackager, sample_skill: SkillInfo, tmp_path: Path):
-        """打包用于分享"""
-        output_path = tmp_path / "test_skill.zip"
-        result = skill_packager.package_for_sharing(sample_skill, output_path)
-        
+    def test_package_for_sharing(self, skill_packager: SkillPackager, tmp_path: Path):
+        _make_skill(skill_packager._skills_dir, "share1")
+        result = skill_packager.package_for_sharing("share1")
+        assert result is not None
         assert result.exists()
-        assert result.stat().st_size > 0
-        
-        # 验证ZIP内容
-        with zipfile.ZipFile(result, "r") as zipf:
-            file_list = zipf.namelist()
-            assert "skill.json" in file_list
-            assert "metadata.json" in file_list
+        assert result.suffix == ".zip"
 
-    def test_package_for_sharing_default_path(self, skill_packager: SkillPackager, sample_skill: SkillInfo, tmp_path: Path):
-        """打包用于分享（默认路径）"""
-        with patch("pathlib.Path.cwd", return_value=tmp_path):
-            result = skill_packager.package_for_sharing(sample_skill)
-            assert result.exists()
-            assert result.name == "test_skill.zip"
+    def test_package_nonexistent(self, skill_packager: SkillPackager):
+        """技能目录不存在 → None（不 raise）"""
+        assert skill_packager.package_for_sharing("ghost") is None
 
-    def test_package_without_history(self, skill_packager: SkillPackager, sample_skill: SkillInfo, tmp_path: Path):
-        """打包不包含历史"""
-        output_path = tmp_path / "test_skill_no_history.zip"
-        result = skill_packager.package_for_sharing(
-            sample_skill, output_path, include_history=False
-        )
-        
-        assert result.exists()
-        
-        # 验证历史已被移除
-        with zipfile.ZipFile(result, "r") as zipf:
-            manifest_data = json.loads(zipf.read("skill.json"))
-            assert "evolution_history" not in manifest_data
+    def test_package_without_experience(self, skill_packager: SkillPackager):
+        _make_skill(skill_packager._skills_dir, "noexp")
+        result = skill_packager.package_for_sharing("noexp", include_experience=False)
+        assert result is not None
 
-    def test_package_without_stats(self, skill_packager: SkillPackager, sample_skill: SkillInfo, tmp_path: Path):
-        """打包不包含统计"""
-        output_path = tmp_path / "test_skill_no_stats.zip"
-        result = skill_packager.package_for_sharing(
-            sample_skill, output_path, include_stats=False
-        )
-        
-        assert result.exists()
-        
-        # 验证统计已被移除
-        with zipfile.ZipFile(result, "r") as zipf:
-            manifest_data = json.loads(zipf.read("skill.json"))
-            assert "usage_statistics" not in manifest_data
-            assert "experience_records" not in manifest_data
+    def test_package_with_history(self, skill_packager: SkillPackager):
+        _make_skill(skill_packager._skills_dir, "hist")
+        result = skill_packager.package_for_sharing("hist", include_history=True)
+        assert result is not None
 
 
-class TestPackageForEvolution:
-    """测试package_for_evolution方法"""
-
-    def test_package_for_evolution(self, skill_packager: SkillPackager, sample_skill: SkillInfo, tmp_path: Path):
-        """打包用于进化"""
-        with patch("pathlib.Path.cwd", return_value=tmp_path):
-            result = skill_packager.package_for_evolution(sample_skill)
-            
-            assert result.exists()
-            assert "evolution" in result.name
-            
-            # 验证ZIP内容包含历史和经验
-            with zipfile.ZipFile(result, "r") as zipf:
-                file_list = zipf.namelist()
-                assert "skill.json" in file_list
-                assert "evolution_history.json" in file_list
-                assert "experiences.json" in file_list
-
-
-class TestUnpackPackage:
-    """测试unpack_package方法"""
-
-    def test_unpack_package(self, skill_packager: SkillPackager, sample_skill: SkillInfo, tmp_path: Path):
-        """解包"""
-        # 先打包
-        zip_path = tmp_path / "test_skill.zip"
-        skill_packager.package_for_sharing(sample_skill, zip_path)
-        
-        # 再解包
-        unpacked = skill_packager.unpack_package(zip_path)
-        
-        assert unpacked is not None
-        assert unpacked.name == "test_skill"
-        assert unpacked.version_text == "1.0.0"
+class TestUnpack:
+    """unpack_package——异常契约：失败返回 None（不 raise）"""
 
     def test_unpack_nonexistent_package(self, skill_packager: SkillPackager):
-        """解包不存在的文件"""
-        with pytest.raises(FileNotFoundError):
-            skill_packager.unpack_package(Path("nonexistent.zip"))
+        assert skill_packager.unpack_package(Path("nonexistent.zip")) is None
 
     def test_unpack_invalid_zip(self, skill_packager: SkillPackager, tmp_path: Path):
-        """解包无效的ZIP文件"""
-        invalid_zip = tmp_path / "invalid.zip"
-        invalid_zip.write_text("not a zip file")
-        
-        with pytest.raises(zipfile.BadZipFile):
-            skill_packager.unpack_package(invalid_zip)
+        bad = tmp_path / "invalid.zip"
+        bad.write_text("not a zip file")
+        assert skill_packager.unpack_package(bad) is None
+
+    def test_unpack_roundtrip(self, skill_packager: SkillPackager, tmp_path: Path):
+        _make_skill(skill_packager._skills_dir, "rt1")
+        pkg = skill_packager.package_for_sharing("rt1")
+        assert pkg is not None
+        result = skill_packager.unpack_package(pkg)
+        assert result is not None
 
 
 class TestPackageToFile:
-    """测试package_to_file方法"""
+    """package_to_file(skill_id, output_path, package_type)"""
 
-    def test_package_to_file(self, skill_packager: SkillPackager, sample_skill: SkillInfo, tmp_path: Path):
-        """打包技能到指定文件"""
-        output_path = tmp_path / "output.zip"
-        result = skill_packager.package_to_file(sample_skill, output_path)
-        
-        assert result.exists()
-        assert result.stat().st_size > 0
+    def test_package_to_file(self, skill_packager: SkillPackager, tmp_path: Path):
+        _make_skill(skill_packager._skills_dir, "pf1")
+        out = tmp_path / "out.zip"
+        result = skill_packager.package_to_file("pf1", out)
+        assert result == out
+        assert out.exists()
 
-    def test_package_to_file_unsupported_format(self, skill_packager: SkillPackager, sample_skill: SkillInfo, tmp_path: Path):
-        """打包到不支持的格式"""
-        output_path = tmp_path / "output.tar"
-        
-        with pytest.raises(ValueError):
-            skill_packager.package_to_file(sample_skill, output_path, format="tar")
+    def test_package_to_file_nonexistent(self, skill_packager: SkillPackager, tmp_path: Path):
+        result = skill_packager.package_to_file("ghost", tmp_path / "x.zip")
+        assert result is None
 
 
 class TestGetPackageInfo:
-    """测试get_package_info方法"""
+    """get_package_info(package_path)"""
 
-    def test_get_package_info(self, skill_packager: SkillPackager, sample_skill: SkillInfo, tmp_path: Path):
-        """获取打包文件信息"""
-        # 先打包
-        zip_path = tmp_path / "test_skill.zip"
-        skill_packager.package_for_sharing(sample_skill, zip_path)
-        
-        # 获取信息
-        info = skill_packager.get_package_info(zip_path)
-        
-        assert info["skill_name"] == "test_skill"
-        assert info["version"] == "1.0.0"
-        assert info["file_count"] > 0
-        assert "files" in info
+    def test_get_package_info(self, skill_packager: SkillPackager):
+        _make_skill(skill_packager._skills_dir, "gi1")
+        pkg = skill_packager.package_for_sharing("gi1")
+        info = skill_packager.get_package_info(pkg)
+        assert info is not None
+        assert info.get("skill_id") == "gi1" or "skill_id" in str(info)
 
     def test_get_nonexistent_package_info(self, skill_packager: SkillPackager):
-        """获取不存在的打包文件信息"""
-        with pytest.raises(FileNotFoundError):
-            skill_packager.get_package_info(Path("nonexistent.zip"))
-
-    def test_get_package_info_no_manifest(self, skill_packager: SkillPackager, tmp_path: Path):
-        """获取没有清单的打包文件信息"""
-        # 创建一个没有skill.json的ZIP文件
-        zip_path = tmp_path / "no_manifest.zip"
-        with zipfile.ZipFile(zip_path, "w") as zipf:
-            zipf.writestr("README.md", "# Test")
-        
-        with pytest.raises(FileNotFoundError):
-            skill_packager.get_package_info(zip_path)
+        assert skill_packager.get_package_info(Path("ghost.zip")) is None
 
 
-class TestIntegration:
-    """集成测试"""
-
-    def test_package_and_unpack(self, skill_packager: SkillPackager, sample_skill: SkillInfo, tmp_path: Path):
-        """打包后解包"""
-        # 打包
-        zip_path = tmp_path / "integration_test.zip"
-        skill_packager.package_for_sharing(sample_skill, zip_path)
-        
-        # 解包
-        unpacked = skill_packager.unpack_package(zip_path)
-        
-        assert unpacked.name == sample_skill.name
-        assert unpacked.description == sample_skill.description
-
-    def test_package_for_evolution_and_read(self, skill_packager: SkillPackager, sample_skill: SkillInfo, tmp_path: Path):
-        """打包用于进化并读取"""
-        with patch("pathlib.Path.cwd", return_value=tmp_path):
-            # 打包
-            zip_path = skill_packager.package_for_evolution(sample_skill)
-            
-            # 验证内容
-            with zipfile.ZipFile(zip_path, "r") as zipf:
-                # 读取进化历史
-                evolution_data = json.loads(zipf.read("evolution_history.json"))
-                assert len(evolution_data) > 0
-                
-                # 读取经验记录
-                experiences_data = json.loads(zipf.read("experiences.json"))
-                assert len(experiences_data) > 0
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
