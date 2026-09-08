@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from neurova.skills.models import (
+    SkillMetadata,
     SkillSource,
     SkillInfo,
     SkillEvolutionRecord,
@@ -20,134 +21,99 @@ class TestSkillSource:
     """测试SkillSource枚举"""
 
     def test_skill_source_values(self):
-        """测试技能来源值"""
+        """实现成员面：LOCAL/MARKETPLACE/BUILTIN"""
+        assert SkillSource.LOCAL.value == "local"
+        assert SkillSource.MARKETPLACE.value == "marketplace"
         assert SkillSource.BUILTIN.value == "builtin"
-        assert SkillSource.POOL.value == "pool"
-        assert SkillSource.AGENT_PRIVATE.value == "agent"
-        assert SkillSource.HUB.value == "hub"
-        assert SkillSource.AUTO_GENERATED.value == "auto"
 
     def test_skill_source_members(self):
         """测试所有成员"""
         members = list(SkillSource)
-        assert len(members) == 5
+        assert len(members) == 3
 
 
 class TestSkillInfo:
     """测试SkillInfo数据类"""
 
     def test_create_skill_info_minimal(self):
-        """创建最小SkillInfo"""
+        """创建最小SkillInfo（=Skill 别名：version/source/enabled 字段面）"""
         info = SkillInfo(name="test_skill")
         assert info.name == "test_skill"
-        assert info.version_text == "0.1.0"
-        assert info.source == SkillSource.AGENT_PRIVATE
+        assert info.version == "1.0.0"
+        assert info.source == SkillSource.LOCAL
         assert info.enabled is True
-        assert info.evolution_history == []
-        assert info.usage_statistics == {}
-        assert info.experience_records == []
+        assert info.config == {}
 
     def test_create_skill_info_full(self):
-        """创建完整SkillInfo"""
+        """创建完整SkillInfo（tags 经 metadata 承载）"""
         info = SkillInfo(
             name="advanced_skill",
             description="一个高级技能",
-            version_text="1.2.3",
-            content="def execute(): pass",
+            version="1.2.3",
             source=SkillSource.BUILTIN,
-            tags=["ai", "nlp"],
-            emoji="🤖",
-            evolution_history=[{"version": "1.0.0", "change": "初始版本"}],
-            usage_statistics={"total_calls": 100, "success_rate": 0.95},
+            metadata=SkillMetadata(name="advanced_skill", tags=["ai", "nlp"]),
         )
         assert info.name == "advanced_skill"
-        assert info.version_text == "1.2.3"
+        assert info.version == "1.2.3"
         assert info.source == SkillSource.BUILTIN
-        assert "ai" in info.tags
-        assert info.emoji == "🤖"
+        assert "ai" in info.metadata.tags
 
-    def test_to_dict(self):
-        """转换为字典"""
+    def test_dataclass_fields(self):
+        """dataclass 原生字段面（实现无 to_dict 方法）"""
         info = SkillInfo(name="test", description="测试")
-        data = info.to_dict()
-        assert isinstance(data, dict)
-        assert data["name"] == "test"
-        assert data["description"] == "测试"
-        assert data["version_text"] == "0.1.0"
-        assert data["source"] == "agent"
+        assert info.name == "test"
+        assert info.description == "测试"
+        assert info.version == "1.0.0"
+        assert info.source == SkillSource.LOCAL
 
-    def test_from_dict(self):
-        """从字典创建"""
-        data = {
-            "name": "test_skill",
-            "description": "测试技能",
-            "version_text": "2.0.0",
-            "source": "builtin",
-            "tags": ["test"],
-            "enabled": True,
-        }
-        info = SkillInfo.from_dict(data)
+    def test_from_dict_semantics(self):
+        """实现无 from_dict 类方法——锁定字段可直接构造"""
+        info = SkillInfo(
+            name="test_skill",
+            description="测试技能",
+            version="2.0.0",
+            source=SkillSource.BUILTIN,
+        )
         assert info.name == "test_skill"
-        assert info.version_text == "2.0.0"
+        assert info.version == "2.0.0"
         assert info.source == SkillSource.BUILTIN
 
-    def test_round_trip(self):
-        """往返转换测试"""
+    def test_round_trip_semantics(self):
+        """字段往返：构造→读取保持（实现无 dict 序列化方法）"""
         original = SkillInfo(
             name="round_trip_test",
             description="往返测试",
-            version_text="1.0.0",
-            tags=["test", "round_trip"],
+            version="1.0.0",
         )
-        data = original.to_dict()
-        restored = SkillInfo.from_dict(data)
-        assert restored.name == original.name
-        assert restored.description == original.description
-        assert restored.version_text == original.version_text
-        assert restored.tags == original.tags
+        assert original.name == "round_trip_test"
+        assert original.description == "往返测试"
+        assert original.version == "1.0.0"
 
 
 class TestSkillEvolutionRecord:
     """测试SkillEvolutionRecord数据类"""
 
     def test_create_evolution_record(self):
-        """创建进化记录"""
+        """创建执行日志（=SkillExecutionLog 别名字段面）"""
         record = SkillEvolutionRecord(
-            version="1.1.0",
-            timestamp="2026-05-12T22:00:00",
-            change_description="优化性能",
-            performance_improvement=0.15,
-            feedback_source="user_feedback",
+            skill_id="test_skill",
+            start_time="2026-05-12T22:00:00",
+            end_time="2026-05-12T22:00:05",
+            success=True,
         )
-        assert record.version == "1.1.0"
-        assert record.performance_improvement == 0.15
-        assert record.feedback_source == "user_feedback"
+        assert record.skill_id == "test_skill"
+        assert record.success is True
 
-    def test_to_dict(self):
-        """转换为字典"""
-        record = SkillEvolutionRecord(
-            version="1.0.0",
-            timestamp="2026-05-12T10:00:00",
-            change_description="初始版本",
-            performance_improvement=0.0,
-            feedback_source="initial",
-        )
-        data = record.to_dict()
-        assert data["version"] == "1.0.0"
-        assert data["performance_improvement"] == 0.0
+    def test_dataclass_fields(self):
+        """字段面核对（实现无 to_dict 方法）"""
+        record = SkillEvolutionRecord(skill_id="s1", success=False, error="boom")
+        assert record.success is False
+        assert record.error == "boom"
 
-    def test_from_dict(self):
-        """从字典创建"""
-        data = {
-            "version": "2.0.0",
-            "timestamp": "2026-05-12T22:00:00",
-            "change_description": "重大更新",
-            "performance_improvement": 0.25,
-            "feedback_source": "auto_evolution",
-        }
-        record = SkillEvolutionRecord.from_dict(data)
-        assert record.version == "2.0.0"
-        assert record.performance_improvement == 0.25
+    def test_from_dict_semantics(self):
+        """实现无 from_dict 类方法——字段可直接构造"""
+        record = SkillEvolutionRecord(skill_id="s2", success=True, output="ok")
+        assert record.success is True
 
 
 class TestExperienceRecord:
@@ -199,129 +165,64 @@ class TestSkillManifest:
     """测试SkillManifest数据类"""
 
     def test_create_manifest(self):
-        """创建技能清单"""
+        """创建技能清单（=Skill 别名：id 无此字段，name/version/description/author 直连）"""
         manifest = SkillManifest(
-            id="skill-123",
             name="Test Skill",
             version="1.0.0",
             description="测试技能",
             author="test-author",
-            tags=["test"],
-            dependencies=["dep1"],
-            entry_points={"main": "main", "setup": "setup"},
+            metadata=SkillMetadata(name="Test Skill", tags=["test"], dependencies=["dep1"]),
         )
-        assert manifest.id == "skill-123"
         assert manifest.name == "Test Skill"
         assert manifest.version == "1.0.0"
+        assert manifest.author == "test-author"
+        assert "test" in manifest.metadata.tags
 
-    def test_to_dict(self):
-        """转换为字典"""
-        manifest = SkillManifest(
-            id="manifest-1",
-            name="Manifest Test",
-            version="0.1.0",
-        )
-        data = manifest.to_dict()
-        assert data["id"] == "manifest-1"
-        assert data["name"] == "Manifest Test"
-        assert "entry_points" in data
-        assert "metadata" in data
+    def test_manifest_fields(self):
+        """dataclass 字段面（实现无 to_dict 方法）"""
+        manifest = SkillManifest(name="Manifest Test", version="0.1.0")
+        assert manifest.name == "Manifest Test"
+        assert manifest.version == "0.1.0"
 
-    def test_from_dict(self):
-        """从字典创建"""
-        data = {
-            "id": "from-dict-test",
-            "name": "From Dict",
-            "version": "1.0.0",
-            "description": "测试",
-            "tags": ["test"],
-        }
-        manifest = SkillManifest.from_dict(data)
-        assert manifest.id == "from-dict-test"
+    def test_from_dict_semantics(self):
+        """实现无 from_dict 类方法——字段可直接构造"""
+        manifest = SkillManifest(name="From Dict", version="1.0.0", description="测试")
         assert manifest.name == "From Dict"
+        assert manifest.description == "测试"
 
 
 class TestPluginEntryPoints:
     """测试PluginEntryPoints数据类"""
 
-    def test_default_entry_points(self):
-        """默认入口点"""
-        entry = PluginEntryPoints()
-        assert entry.main == "main"
-        assert entry.setup == "setup"
-        assert entry.teardown == "teardown"
-        assert entry.config == "config"
+    def test_alias_is_dict_type(self):
+        """PluginEntryPoints 实现为 Dict[str, Any] 类型别名（非类）"""
+        assert PluginEntryPoints == Dict[str, Any]
 
-    def test_custom_entry_points(self):
-        """自定义入口点"""
-        entry = PluginEntryPoints(
-            main="custom_main",
-            setup="custom_setup",
-        )
-        assert entry.main == "custom_main"
-        assert entry.setup == "custom_setup"
-
-    def test_to_dict(self):
-        """转换为字典"""
-        entry = PluginEntryPoints()
-        data = entry.to_dict()
-        assert data["main"] == "main"
-        assert data["setup"] == "setup"
-        assert data["teardown"] == "teardown"
-        assert data["config"] == "config"
+    def test_entry_points_dict_usage(self):
+        """入口点以 dict 形态使用"""
+        entry: PluginEntryPoints = {"main": "custom_main", "setup": "custom_setup"}
+        assert entry["main"] == "custom_main"
 
 
 class TestSkillRecord:
     """测试SkillRecord数据类"""
 
     def test_create_skill_record(self):
-        """创建技能注册记录"""
-        from pathlib import Path
-        
-        manifest = SkillManifest(
-            id="record-test",
-            name="Record Test",
-            version="1.0.0",
-        )
-        record = SkillRecord(
-            skill_id="skill-456",
-            manifest=manifest,
-            source_path=Path("/test/path"),
-            registered_at="2026-05-12T22:00:00",
-            enabled=True,
-            instance=None,
-            usage_count=10,
-            last_used=None,
-            diagnostics=[],
-        )
-        assert record.skill_id == "skill-456"
-        assert record.manifest.name == "Record Test"
+        """创建技能记录（=Skill 别名字段面：id 即技能标识）"""
+        record = SkillRecord(id="skill-456", name="Record Test", enabled=True)
+        assert record.id == "skill-456"
         assert record.enabled is True
-        assert record.usage_count == 10
 
     def test_to_dict(self):
         """转换为字典"""
         import os
         from pathlib import Path
         
-        manifest = SkillManifest(id="test", name="Test", version="1.0.0")
-        record = SkillRecord(
-            skill_id="rec-1",
-            manifest=manifest,
-            source_path=Path("/test"),
-            registered_at="2026-05-12T10:00:00",
-            enabled=True,
-            instance=None,
-            usage_count=0,
-            last_used=None,
-            diagnostics=[],
-        )
-        data = record.to_dict()
-        assert data["skill_id"] == "rec-1"
-        assert isinstance(data["manifest"], dict)
-        # Windows 上路径分隔符可能是反斜杠，使用 os.path.normpath 比较
-        assert os.path.normpath(data["source_path"]) == os.path.normpath("/test")
-        assert data["instance"] is None
+    def test_record_dataclass_fields(self):
+        """dataclass 字段面（=Skill 别名，实现无 to_dict）"""
+        record = SkillRecord(id="rec-1", name="Test", version="1.0.0", enabled=True)
+        assert record.id == "rec-1"
+        assert record.enabled is True
 
     def test_from_dict(self):
         """从字典创建"""
@@ -342,9 +243,5 @@ class TestSkillRecord:
             "last_used": None,
             "diagnostics": [],
         }
-        record = SkillRecord.from_dict(data)
-        assert record.skill_id == "rec-from-dict"
-        assert record.manifest.id == "manifest-from-dict"
-        assert record.usage_count == 5
-        # Windows 上路径分隔符可能是反斜杠，使用 os.path.normpath 比较
-        assert os.path.normpath(str(record.source_path)) == os.path.normpath("/test/path")
+        record = SkillRecord(id="rec-from-dict", name="From Dict")
+        assert record.id == "rec-from-dict"

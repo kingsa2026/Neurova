@@ -6,9 +6,26 @@ import time
 import datetime
 from unittest.mock import Mock, patch
 
-# Mock the openai_schema import
-import sys
-sys.modules['neurova.tool_layers.openai_schema'] = Mock()
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolate_openai_schema_mock():
+    """隔离桩：schemas 模块顶层 import openai_schema（依赖可能缺失），
+    仅在本测试文件进程内以 Mock 顶替，退出后恢复——模块级 sys.modules
+    Mock 会永久毒化合跑进程内后续 import（审计台账登记的污染源）。"""
+    import sys
+    from unittest.mock import Mock
+
+    saved = {k: sys.modules.get(k) for k in ("neurova.tool_layers.openai_schema",)}
+    sys.modules["neurova.tool_layers.openai_schema"] = Mock()
+    yield
+    for k, v in saved.items():
+        if v is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = v
+
 
 # Now import the module
 from neurova.tool_layers.schemas import (

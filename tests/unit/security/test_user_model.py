@@ -72,34 +72,37 @@ class TestCreateUser:
     def test_create_basic(self, model):
         user = model.create_user("alice", _hash("pw"), "alice@test.com")
         assert user is not None
-        assert user["username"] == "alice"
-        assert user["email"] == "alice@test.com"
-        assert user["role"] == "user"
-        assert user["status"] == "active"
+        assert user.username == "alice"
+        assert user.email == "alice@test.com"
+        assert user.role == "user"
+        assert user.status == "active"
 
     def test_create_admin_role(self, model):
         user = model.create_user("admin", _hash("pw"), role="admin")
-        assert user["role"] == "admin"
+        assert user.role == "admin"
 
     def test_create_duplicate_username(self, model):
         model.create_user("dup", _hash("pw1"), "dup@test.com")
-        user = model.create_user("dup", _hash("pw2"), "dup2@test.com")
-        assert user is None
+        # 实现 fail-fast（生产端点 pre-check 后防御性兜底），非静默 None
+        with pytest.raises(ValueError):
+            model.create_user("dup", _hash("pw2"), "dup2@test.com")
 
     def test_create_duplicate_email(self, model):
         model.create_user("a1", _hash("pw"), "same@test.com")
-        user = model.create_user("a2", _hash("pw"), "same@test.com")
-        assert user is None
+        with pytest.raises(ValueError):
+            model.create_user("a2", _hash("pw"), "same@test.com")
 
     def test_auto_generated_fields(self, model):
         user = model.create_user("bob", _hash("pw"))
-        assert "id" in user
-        assert "created_at" in user
-        assert "updated_at" in user
-        assert user["login_count"] == 0
-        assert user["failed_attempts"] == 0
-        assert user["locked_until"] is None
-        assert user["reset_token"] is None
+        assert user.id > 0
+        assert user.created_at
+        # updated_at 由 DB DEFAULT 维护，create_user 返回对象未回读——查库验证
+        reloaded = model.get_user_by_id(user.id)
+        assert reloaded.updated_at
+        assert user.login_count == 0
+        assert user.failed_attempts == 0
+        assert user.locked_until is None
+        assert user.reset_token is None
 
 
 # ================================================================
@@ -109,9 +112,9 @@ class TestCreateUser:
 class TestGetUserById:
     def test_found(self, model):
         created = model.create_user("alice", _hash("pw"))
-        user = model.get_user_by_id(created["id"])
+        user = model.get_user_by_id(created.id)
         assert user is not None
-        assert user["username"] == "alice"
+        assert user.username == "alice"
 
     def test_not_found(self, model):
         assert model.get_user_by_id(999) is None
@@ -122,7 +125,7 @@ class TestGetUserByUsername:
         model.create_user("alice", _hash("pw"))
         user = model.get_user_by_username("alice")
         assert user is not None
-        assert user["email"] is None  # no email provided
+        assert user.email is None  # no email provided
 
     def test_not_found(self, model):
         assert model.get_user_by_username("nobody") is None
@@ -137,7 +140,7 @@ class TestGetUserByEmail:
         model.create_user("alice", _hash("pw"), "alice@test.com")
         user = model.get_user_by_email("alice@test.com")
         assert user is not None
-        assert user["username"] == "alice"
+        assert user.username == "alice"
 
     def test_not_found(self, model):
         assert model.get_user_by_email("nobody@test.com") is None
@@ -170,7 +173,7 @@ class TestListUsers:
         users = model.list_users()
         assert len(users) == 2
         # 两个不同的用户
-        assert {u["username"] for u in users} == {"a", "b"}
+        assert {u.username for u in users} == {"a", "b"}
 
 
 class TestCountUsers:
@@ -190,29 +193,27 @@ class TestCountUsers:
 class TestUpdateUser:
     def test_update_email(self, model):
         u = model.create_user("alice", _hash("pw"))
-        ok = model.update_user(u["id"], email="new@test.com")
+        ok = model.update_user(u.id, email="new@test.com")
         assert ok is True
-        assert model.get_user_by_id(u["id"])["email"] == "new@test.com"
+        assert model.get_user_by_id(u.id).email == "new@test.com"
 
     def test_update_role(self, model):
         u = model.create_user("alice", _hash("pw"))
-        model.update_user(u["id"], role="admin")
-        assert model.get_user_by_id(u["id"])["role"] == "admin"
+        model.update_user(u.id, role="admin")
+        assert model.get_user_by_id(u.id).role == "admin"
 
     def test_update_status(self, model):
         u = model.create_user("alice", _hash("pw"))
-        model.update_user(u["id"], status="inactive")
-        assert model.get_user_by_id(u["id"])["status"] == "inactive"
+        model.update_user(u.id, status="inactive")
+        assert model.get_user_by_id(u.id).status == "inactive"
 
     def test_update_unknown_field_ignored(self, model):
-        """只允许 allowed_fields 中的字段"""
+        """allowed_fields 白名单外字段被忽略；username/email 均在白名单内"""
         u = model.create_user("alice", _hash("pw"))
-        ok = model.update_user(u["id"], username="bob", email="new@test.com")
+        ok = model.update_user(u.id, username="bob", email="new@test.com", hacker_field="x")
         assert ok is True
-        # username 不在 allowed_fields 中，不应生效
-        assert model.get_user_by_id(u["id"])["username"] == "alice"
-        # email 在 allowed_fields 中，应生效
-        assert model.get_user_by_id(u["id"])["email"] == "new@test.com"
+        assert model.get_user_by_id(u.id).username == "bob"
+        assert model.get_user_by_id(u.id).email == "new@test.com"
 
     def test_update_nonexistent(self, model):
         ok = model.update_user(999, email="x@test.com")
@@ -231,9 +232,9 @@ class TestUpdateUser:
 class TestDeleteUser:
     def test_delete_existing(self, model):
         u = model.create_user("alice", _hash("pw"))
-        ok = model.delete_user(u["id"])
+        ok = model.delete_user(u.id)
         assert ok is True
-        assert model.get_user_by_id(u["id"]) is None
+        assert model.get_user_by_id(u.id) is None
 
     def test_delete_nonexistent(self, model):
         ok = model.delete_user(999)
@@ -247,21 +248,21 @@ class TestDeleteUser:
 class TestIncrementLoginCount:
     def test_increments(self, model):
         u = model.create_user("alice", _hash("pw"))
-        assert u["login_count"] == 0
-        model.increment_login_count(u["id"])
-        model.increment_login_count(u["id"])
-        user = model.get_user_by_id(u["id"])
-        assert user["login_count"] == 2
+        assert u.login_count == 0
+        model.increment_login_count(u.id)
+        model.increment_login_count(u.id)
+        user = model.get_user_by_id(u.id)
+        assert user.login_count == 2
 
     def test_updates_last_login(self, model):
         """last_login 由 SQLite datetime('now') 写入（UTC），校验存在且格式合法"""
         u = model.create_user("alice", _hash("pw"))
-        assert u["last_login"] is None
-        model.increment_login_count(u["id"])
-        user = model.get_user_by_id(u["id"])
-        assert user["last_login"] is not None
+        assert u.last_login is None
+        model.increment_login_count(u.id)
+        user = model.get_user_by_id(u.id)
+        assert user.last_login is not None
         # 验证能被解析为 ISO 时间字符串
-        parsed = datetime.fromisoformat(user["last_login"])
+        parsed = datetime.fromisoformat(user.last_login)
         assert isinstance(parsed, datetime)
 
 
@@ -272,26 +273,26 @@ class TestIncrementLoginCount:
 class TestIncrementFailedAttempts:
     def test_increments_and_locks(self, model):
         u = model.create_user("alice", _hash("pw"))
-        assert u["failed_attempts"] == 0
-        model.increment_failed_attempts(u["id"], max_attempts=3)
-        model.increment_failed_attempts(u["id"], max_attempts=3)
-        user = model.get_user_by_id(u["id"])
-        assert user["failed_attempts"] == 2
-        assert user["locked_until"] is None
+        assert u.failed_attempts == 0
+        model.increment_failed_attempts(u.id, max_attempts=3)
+        model.increment_failed_attempts(u.id, max_attempts=3)
+        user = model.get_user_by_id(u.id)
+        assert user.failed_attempts == 2
+        assert user.locked_until is None
 
-        model.increment_failed_attempts(u["id"], max_attempts=3)
-        user = model.get_user_by_id(u["id"])
-        assert user["failed_attempts"] == 3
-        assert user["locked_until"] is not None
+        model.increment_failed_attempts(u.id, max_attempts=3)
+        user = model.get_user_by_id(u.id)
+        assert user.failed_attempts == 3
+        assert user.locked_until is not None
         # locked_until 应在未来
-        locked_until = datetime.fromisoformat(user["locked_until"])
+        locked_until = datetime.fromisoformat(user.locked_until)
         assert locked_until > datetime.now()
 
     def test_custom_lock_duration(self, model):
         u = model.create_user("alice", _hash("pw"))
-        model.increment_failed_attempts(u["id"], max_attempts=1, lock_duration_minutes=5)
-        user = model.get_user_by_id(u["id"])
-        locked_until = datetime.fromisoformat(user["locked_until"])
+        model.increment_failed_attempts(u.id, max_attempts=1, lock_duration_minutes=5)
+        user = model.get_user_by_id(u.id)
+        locked_until = datetime.fromisoformat(user.locked_until)
         # 默认锁定 15 分钟，这里指定 5 分钟
         diff = (locked_until - datetime.now()).total_seconds()
         assert 4 * 60 <= diff <= 6 * 60
@@ -304,8 +305,8 @@ class TestIncrementFailedAttempts:
 class TestLogLogin:
     def test_log_success(self, model):
         u = model.create_user("alice", _hash("pw"))
-        model.log_login(u["id"], "alice", "192.168.1.1", True, "登录成功")
-        logs = model.get_login_logs(u["id"])
+        model.log_login(u.id, "alice", "192.168.1.1", True, "登录成功")
+        logs = model.get_login_logs(u.id)
         assert len(logs) == 1
         assert logs[0]["username"] == "alice"
         assert logs[0]["success"] == 1  # SQLite boolean is int
@@ -313,31 +314,31 @@ class TestLogLogin:
 
     def test_log_failure(self, model):
         u = model.create_user("alice", _hash("pw"))
-        model.log_login(u["id"], "alice", "10.0.0.1", False, "密码错误")
-        logs = model.get_login_logs(u["id"])
+        model.log_login(u.id, "alice", "10.0.0.1", False, "密码错误")
+        logs = model.get_login_logs(u.id)
         assert logs[0]["success"] == 0
 
     def test_multiple_logs(self, model):
         u = model.create_user("alice", _hash("pw"))
         for _ in range(5):
-            model.log_login(u["id"], "alice", "10.0.0.1", True, "")
-        logs = model.get_login_logs(u["id"])
+            model.log_login(u.id, "alice", "10.0.0.1", True, "")
+        logs = model.get_login_logs(u.id)
         assert len(logs) == 5
 
     def test_log_limit(self, model):
         u = model.create_user("alice", _hash("pw"))
         for _ in range(20):
-            model.log_login(u["id"], "alice", "", True, "")
-        logs = model.get_login_logs(u["id"], limit=10)
+            model.log_login(u.id, "alice", "", True, "")
+        logs = model.get_login_logs(u.id, limit=10)
         assert len(logs) == 10
 
     def test_logs_ordered_by_newest(self, model):
         u = model.create_user("alice", _hash("pw"))
-        model.log_login(u["id"], "alice", "", True, "first")
+        model.log_login(u.id, "alice", "", True, "first")
         import time
         time.sleep(1.1)  # SQLite datetime('now') 精度为秒级
-        model.log_login(u["id"], "alice", "", True, "second")
-        logs = model.get_login_logs(u["id"])
+        model.log_login(u.id, "alice", "", True, "second")
+        logs = model.get_login_logs(u.id)
         assert len(logs) == 2
         # 最新的在前
         assert logs[0]["message"] == "second"
@@ -349,7 +350,7 @@ class TestLogLogin:
         """可以查询所有日志（user_id=None）"""
         u1 = model.create_user("a", _hash("pw"))
         u2 = model.create_user("b", _hash("pw"))
-        model.log_login(u1["id"], "a", "", True, "")
-        model.log_login(u2["id"], "b", "", True, "")
+        model.log_login(u1.id, "a", "", True, "")
+        model.log_login(u2.id, "b", "", True, "")
         all_logs = model.get_login_logs()
         assert len(all_logs) == 2

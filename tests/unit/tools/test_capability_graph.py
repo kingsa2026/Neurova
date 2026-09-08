@@ -60,7 +60,7 @@ class TestToolCapabilityGraph:
 
     def setup_method(self):
         """每个测试前重置图（空图，不加载默认工具）"""
-        self.graph = ToolCapabilityGraph(load_defaults=False)
+        self.graph = ToolCapabilityGraph()
 
     def test_add_node(self):
         """测试添加节点"""
