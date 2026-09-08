@@ -10,7 +10,7 @@ vi.mock('@/api', () => ({
   },
 }))
 
-import { extractMemoryList } from '@/api/modules/memory'
+import { extractMemoryList, MEMORY_TYPE_BY_TAB } from '@/api/modules/memory'
 
 const m = { id: 'm1', content: 'hi' }
 
@@ -36,5 +36,31 @@ describe('extractMemoryList', () => {
     expect(extractMemoryList(null)).toEqual({ items: [], total: 0 })
     expect(extractMemoryList({})).toEqual({ items: [], total: 0 })
     expect(extractMemoryList('bad')).toEqual({ items: [], total: 0 })
+  })
+})
+
+describe('MEMORY_TYPE_BY_TAB（页签 → memory_type 契约）', () => {
+  it('工作记忆页签（short_term）→ working', () => {
+    expect(MEMORY_TYPE_BY_TAB.short_term).toBe('working')
+  })
+
+  it('长期记忆页签（long_term）→ 排除 working 的五类逗号多值', () => {
+    const mt = MEMORY_TYPE_BY_TAB.long_term
+    expect(mt).toBeTruthy()
+    const parts = String(mt).split(',')
+    expect(parts).toContain('semantic')
+    expect(parts).toContain('episodic')
+    expect(parts).not.toContain('working')
+  })
+
+  it('情景/语义页签 → 同名 memory_type', () => {
+    expect(MEMORY_TYPE_BY_TAB.episodic).toBe('episodic')
+    expect(MEMORY_TYPE_BY_TAB.semantic).toBe('semantic')
+  })
+
+  it('全部/热点/结晶页签不映射（全量或专用端点）', () => {
+    expect(MEMORY_TYPE_BY_TAB.all).toBeUndefined()
+    expect(MEMORY_TYPE_BY_TAB.hot).toBeUndefined()
+    expect(MEMORY_TYPE_BY_TAB.crystallized).toBeUndefined()
   })
 })
