@@ -114,7 +114,8 @@ describe('MemoryPage performSemanticSearch（断链修复）', () => {
       data: {
         results: [
           { memory_id: 'a', content: 'x', score: 0.8, channel: 'general' },
-          { memory_id: 'b', content: 'y', score: 0.7, channel: 'fact' },
+          { memory_id: 'b', content: 'y', score: 0.7, channel: 'episodic' },
+          { memory_id: 'c', content: 'z', score: 0.6, channel: 'working' },
         ],
       },
     })
@@ -122,12 +123,37 @@ describe('MemoryPage performSemanticSearch（断链修复）', () => {
     await flushPromises()
     ;(wrapper.vm as any).searchQuery = 'q'
     ;(wrapper.vm as any).semanticSearch = true
-    ;(wrapper.vm as any).activeTab = 'fact'
+    // 页签契约（2026-09-08）：页签 key 经 MEMORY_TYPE_BY_TAB 映射；
+    // episodic 页签 → 仅 episodic 类型（working 命中 short_term 页签，不应混入）
+    ;(wrapper.vm as any).activeTab = 'episodic'
     await (wrapper.vm as any).performSemanticSearch()
     await flushPromises()
 
     const results = (wrapper.vm as any).searchResults
     expect(results).toHaveLength(1)
     expect(results[0].id).toBe('b')
+  })
+
+  it('long_term tab filters locally by five-type allowlist (no working)', async () => {
+    enhancedSearchMock.mockResolvedValue({
+      code: 0,
+      data: {
+        results: [
+          { memory_id: 'a', content: 'x', score: 0.8, channel: 'semantic' },
+          { memory_id: 'b', content: 'y', score: 0.7, channel: 'working' },
+        ],
+      },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    ;(wrapper.vm as any).searchQuery = 'q'
+    ;(wrapper.vm as any).semanticSearch = true
+    ;(wrapper.vm as any).activeTab = 'long_term'
+    await (wrapper.vm as any).performSemanticSearch()
+    await flushPromises()
+
+    const results = (wrapper.vm as any).searchResults
+    expect(results).toHaveLength(1)
+    expect(results[0].id).toBe('a')
   })
 })
