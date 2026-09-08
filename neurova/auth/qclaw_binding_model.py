@@ -165,6 +165,10 @@ class QClawBindingModel:
             ValueError: 如果绑定已存在
         """
         try:
+            # user_id 为空/None 时回填 neuser_id（表 NOT NULL 约束 + 平台用户缺省语义）
+            if not user_id:
+                user_id = neuser_id
+
             # 加密app_secret
             encrypted_secret = self._encrypt_secret(app_secret)
 
@@ -186,7 +190,7 @@ class QClawBindingModel:
             if cursor.fetchone():
                 conn.close()
                 raise ValueError(
-                    f"Binding already exists for neuser_id={neuser_id}, user_id={user_id}, app_id={app_id}"
+                    f"App {app_id} 已被其他用户绑定 (neuser_id={neuser_id})"
                 )
 
             # 插入新绑定

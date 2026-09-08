@@ -122,34 +122,34 @@ class APIResponse:
         return cls(status_code=200, data=data, request_id=request_id)
 
     @classmethod
-    def error(cls, status_code: int, error: str, error_code: str = None, request_id: str = None) -> "APIResponse":
-        """创建错误响应"""
+    def err(cls, status_code: int, error: str, error_code: str = None, request_id: str = None) -> "APIResponse":
+        """创建错误响应（命名避开 dataclass 字段 error——同名覆盖字段默认值）"""
         return cls(status_code=status_code, error=error, error_code=error_code, request_id=request_id)
 
     @classmethod
     def not_found(cls, resource: str = "资源", request_id: str = None) -> "APIResponse":
         """创建404响应"""
-        return cls.error(status_code=404, error=f"{resource}不存在", error_code="NOT_FOUND", request_id=request_id)
+        return cls.err(status_code=404, error=f"{resource}不存在", error_code="NOT_FOUND", request_id=request_id)
 
     @classmethod
     def unauthorized(cls, request_id: str = None) -> "APIResponse":
         """创建401响应"""
-        return cls.error(status_code=401, error="未授权访问", error_code="UNAUTHORIZED", request_id=request_id)
+        return cls.err(status_code=401, error="未授权访问", error_code="UNAUTHORIZED", request_id=request_id)
 
     @classmethod
     def forbidden(cls, request_id: str = None) -> "APIResponse":
         """创建403响应"""
-        return cls.error(status_code=403, error="禁止访问", error_code="FORBIDDEN", request_id=request_id)
+        return cls.err(status_code=403, error="禁止访问", error_code="FORBIDDEN", request_id=request_id)
 
     @classmethod
     def bad_request(cls, error: str = "请求参数错误", request_id: str = None) -> "APIResponse":
         """创建400响应"""
-        return cls.error(status_code=400, error=error, error_code="BAD_REQUEST", request_id=request_id)
+        return cls.err(status_code=400, error=error, error_code="BAD_REQUEST", request_id=request_id)
 
     @classmethod
     def internal_error(cls, error: str = "内部服务器错误", request_id: str = None) -> "APIResponse":
         """创建500响应"""
-        return cls.error(status_code=500, error=error, error_code="INTERNAL_ERROR", request_id=request_id)
+        return cls.err(status_code=500, error=error, error_code="INTERNAL_ERROR", request_id=request_id)
 
 
 T = TypeVar("T")
