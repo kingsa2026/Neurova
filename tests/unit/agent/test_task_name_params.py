@@ -247,3 +247,59 @@ class TestStreamFlushDedup:
             set(), set(),
         )
         assert events[0]["type"] == "tool_call"
+
+
+class TestWorkspaceBaseDirInjection:
+    """file_operation 相对路径沙箱（2026-09-08 根因修复·第三暴露面）。
+
+    loops/base.py 是 skill 链路的第三条执行通道（除 tool_executor 的
+    builtin/skill 分派外）。file_operation 的相对路径必须锚定
+    agent.workspace_path；服务端注入覆盖 LLM 伪造的同名参数（同
+    _caller_user_id 防线）。
+    """
+
+    def _make_loop_with_workspace(self, tmp_path):
+        loop = _make_loop()
+        loop.agent.workspace_path = tmp_path
+        return loop
+
+    @pytest.mark.asyncio
+    async def test_file_operation_skill_gets_workspace_base_dir(self, tmp_path):
+        loop = self._make_loop_with_workspace(tmp_path)
+        registry = MagicMock()
+        skill_result = SimpleNamespace(success=True, data={"done": True}, error=None, metadata={})
+        registry.execute_skill = AsyncMock(return_value=skill_result)
+        loop.agent.skill_registry = registry
+
+        tool_call = {
+            "id": "call_w1",
+            "function": {
+                "name": "file_operation",
+                "arguments": json.dumps({
+                    "operation": "write", "file_path": "x.md", "content": "hi",
+                    "_base_dir": "/llm/forged/path",
+                }),
+            },
+        }
+        await loop._execute_tool_call_worker(tool_call)
+
+        sent_args = registry.execute_skill.await_args.args[1]
+        # 服务端赋值（agent 工作区）覆盖 LLM 伪造值
+        assert sent_args["_base_dir"] == str(tmp_path)
+
+    @pytest.mark.asyncio
+    async def test_non_file_skills_do_not_receive_base_dir(self, tmp_path):
+        loop = self._make_loop_with_workspace(tmp_path)
+        registry = MagicMock()
+        skill_result = SimpleNamespace(success=True, data={"done": True}, error=None, metadata={})
+        registry.execute_skill = AsyncMock(return_value=skill_result)
+        loop.agent.skill_registry = registry
+
+        tool_call = {
+            "id": "call_w2",
+            "function": {"name": "memory", "arguments": json.dumps({"action": "search"})},
+        }
+        await loop._execute_tool_call_worker(tool_call)
+
+        sent_args = registry.execute_skill.await_args.args[1]
+        assert "_base_dir" not in sent_args

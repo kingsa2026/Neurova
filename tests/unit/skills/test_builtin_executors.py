@@ -97,6 +97,48 @@ class TestFileOperationSkillExecutor:
         exe = FileOperationSkillExecutor()
         assert exe.skill_id == "file_operation"
 
+    def test_per_request_base_dir_resolves_relative_paths(self, tmp_path):
+        """根因修复（2026-09-09）：per-call _base_dir 覆盖时，相对路径
+        解析到该 base_dir 而非进程 CWD——agent 产出文件必须落在自己
+        工作区内，不得散落后端启动目录。"""
+        exe = FileOperationSkillExecutor()
+        result = exe.execute(
+            params={
+                "operation": "write",
+                "file_path": "notes/out.md",
+                "content": "hello",
+                "_base_dir": str(tmp_path),
+            }
+        )
+        assert result.success is True
+        # 文件落在注入的工作区内
+        assert (tmp_path / "notes" / "out.md").read_text() == "hello"
+        # 回显绝对路径：下游 artifact 注册（file_path → 白名单校验）
+        # 与实际落盘位置一致，不再依赖 CWD 解析
+        assert result.output["file_path"] == str((tmp_path / "notes" / "out.md").resolve())
+
+    def test_per_request_base_dir_blocks_escape(self, tmp_path):
+        """注入 _base_dir 后，相对路径 .. 越界仍被沙箱拦截"""
+        exe = FileOperationSkillExecutor()
+        result = exe.execute(
+            params={
+                "operation": "write",
+                "file_path": "../escape.md",
+                "content": "x",
+                "_base_dir": str(tmp_path),
+            }
+        )
+        assert result.success is False
+        assert not (tmp_path.parent / "escape.md").exists()
+
+    def test_no_base_dir_keeps_cwd_default(self, tmp_path, monkeypatch):
+        """不注入 _base_dir 时保持旧行为（进程 CWD 兜底）——向后兼容"""
+        monkeypatch.chdir(tmp_path)
+        exe = FileOperationSkillExecutor()
+        result = exe.execute(params={"operation": "write", "file_path": "legacy.md", "content": "x"})
+        assert result.success is True
+        assert (tmp_path / "legacy.md").read_text() == "x"
+
 
 # ================================================================
 # P1-2 工厂挂载待确认队列（用户 2026-09-04 决策启用）

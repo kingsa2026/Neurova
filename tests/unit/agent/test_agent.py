@@ -77,6 +77,26 @@ class TestAgentInit:
         assert agent.config.name == "TestAgent"
         assert agent.memory_manager is None
 
+    def test_agent_workspace_path_property(self, tmp_path):
+        """Agent 暴露 workspace_path property（相对路径沙箱锚定面）。
+
+        2026-09-08 根因：workspace_path 只在 AgentConfig 上，Agent 实例
+        无此属性，loops/base 与 tool_executor 的 getattr(agent,
+        'workspace_path') 恒空 → file_operation 相对路径回落 CWD，
+        落盘散落项目根。修复后必须等于 config.workspace_path。
+        """
+        agent = Agent(
+            name="TestAgent", workspace_path=str(tmp_path), enable_memory=False
+        )
+        assert agent.workspace_path == tmp_path
+
+    def test_agent_workspace_path_is_absolute(self, tmp_path):
+        """workspace_path 返回绝对路径（tool_executor 沙箱前缀校验依赖）"""
+        agent = Agent(
+            name="TestAgent", workspace_path=str(tmp_path), enable_memory=False
+        )
+        assert Path(agent.workspace_path).is_absolute()
+
     def test_init_with_kwargs(self, tmp_path):
         """使用kwargs初始化"""
         agent = Agent(name="TestAgent", workspace_path=str(tmp_path), enable_memory=False)
