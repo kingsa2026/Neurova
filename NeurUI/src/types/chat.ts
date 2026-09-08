@@ -47,6 +47,12 @@ export interface ChatMessage {
   ttsIdx?: number
   /** 钩子/检查点（ZCode checkpoint 对齐）：持久化在消息 metadata.checkpoint */
   checkpoint?: boolean
+  /**
+   * 本轮产出物（2026-09-08 回答结尾产出物卡片）：SSE artifact 事件主通道 +
+   * tool_result 文本兜底双通道收集，按 name 去重。仅实时轮次收集；
+   * 历史回放无此数据（后端 artifact 注册表会话级，不落盘）。
+   */
+  artifacts?: import('@/utils/artifacts').MessageArtifact[]
 }
 
 export interface Session {

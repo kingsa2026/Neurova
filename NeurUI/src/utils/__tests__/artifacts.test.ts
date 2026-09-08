@@ -5,10 +5,22 @@
  * - parseToolResultArtifacts：JSON dict 精确解析 + 截断 JSON 正则兜底 +
  *   output_ref 嵌套 + 去重；
  * - kindForFilename 扩展名映射（与后端 _artifact_kind 对齐）；
- * - shortHash 稳定性。
+ * - shortHash 稳定性；
+ * - 消息级产出物收集（2026-09-08 产出物卡片）：读形态过滤（与后端
+ *   extract_tool_artifacts 同契约）/ artifactFromEvent / mergeMessageArtifacts 去重。
  */
 import { describe, expect, it } from 'vitest'
-import { kindForFilename, parseToolResultArtifacts, shortHash } from '../artifacts'
+import {
+  kindForFilename,
+  parseToolResultArtifacts,
+  shortHash,
+  isReadBackReference,
+  artifactFromEvent,
+  artifactsFromToolResult,
+  mergeMessageArtifacts,
+  artifactUiIcon,
+  type MessageArtifact,
+} from '../artifacts'
 
 describe('parseToolResultArtifacts', () => {
   it('完整 JSON dict 提取 file_path', () => {
@@ -64,5 +76,51 @@ describe('shortHash', () => {
   it('稳定且冲突可辨', () => {
     expect(shortHash('abc')).toBe(shortHash('abc'))
     expect(shortHash('abc')).not.toBe(shortHash('abd'))
+  })
+})
+
+describe('消息级产出物收集（产出物卡片契约）', () => {
+  it('isReadBackReference：读形态 {content, file_path} 判真，写形态判假', () => {
+    expect(isReadBackReference(JSON.stringify({ content: '# md', file_path: 'a.md' }))).toBe(true)
+    expect(isReadBackReference(JSON.stringify({ success: true, file_path: 'a.md' }))).toBe(false)
+    expect(isReadBackReference('just text')).toBe(false)
+    expect(isReadBackReference('')).toBe(false)
+  })
+
+  it('artifactsFromToolResult：写形态提取产出，读形态返回空', () => {
+    const write = artifactsFromToolResult(JSON.stringify({ success: true, file_path: 'E:\\ws\\calc.html' }))
+    expect(write).toHaveLength(1)
+    expect(write[0]).toMatchObject({ name: 'calc.html', kind: 'html', path: 'E:\\ws\\calc.html' })
+
+    const read = artifactsFromToolResult(JSON.stringify({ content: '...', file_path: 'E:\\ws\\calc.html' }))
+    expect(read).toEqual([])
+  })
+
+  it('artifactFromEvent：SSE 事件转产出物项；name 缺省从 path 取 basename', () => {
+    const a = artifactFromEvent({ artifact_id: 'ar1', kind: 'markdown', name: 'report.md', size: 120 })
+    expect(a).toMatchObject({ artifactId: 'ar1', name: 'report.md', kind: 'markdown', size: 120 })
+    const b = artifactFromEvent({ artifact_id: 'ar2', kind: 'text', name: '', path: 'E:\\ws\\x.json' })
+    expect(b?.name).toBe('x.json')
+    expect(artifactFromEvent({ artifact_id: '', kind: '', name: '' })).toBeNull()
+  })
+
+  it('mergeMessageArtifacts：按 name 去重，先到先得保住富信息（artifactId/size）', () => {
+    const existing: MessageArtifact[] = [
+      { artifactId: 'ar1', name: 'calc.html', kind: 'html', size: 2048 },
+    ]
+    const merged = mergeMessageArtifacts(existing, [
+      { name: 'calc.html', kind: 'html' }, // 兜底通道重复——丢弃保住 artifactId
+      { name: 'note.md', kind: 'markdown' },
+    ])
+    expect(merged).toHaveLength(2)
+    expect(merged[0].artifactId).toBe('ar1')
+    expect(merged[1].name).toBe('note.md')
+    expect(mergeMessageArtifacts(undefined, [])).toEqual([])
+  })
+
+  it('artifactUiIcon：kind → UiIcon 图标名，未知 kind 落 file', () => {
+    expect(artifactUiIcon('markdown')).toBe('fileText')
+    expect(artifactUiIcon('html')).toBe('browser')
+    expect(artifactUiIcon('mystery')).toBe('file')
   })
 })

@@ -123,6 +123,73 @@ export interface ArtifactEventPayload {
   path?: string
 }
 
+/** 消息级产出物（回答结尾产出物卡片的数据项，2026-09-08） */
+export interface MessageArtifact {
+  artifactId?: string
+  path?: string
+  name: string
+  kind: DockTabKind | string
+  size?: number
+}
+
+/**
+ * file_operation 读形态判别（与后端 extract_tool_artifacts 同契约）：
+ * 读取返回 {content, file_path}——file_path 是被读文件的回指而非本轮产出；
+ * 写入返回 {success, file_path} 才算产出。非 JSON 不判读（保守提取）。
+ */
+export function isReadBackReference(resultText: string): boolean {
+  if (!resultText) return false
+  try {
+    const parsed = JSON.parse(resultText)
+    return !!(parsed && typeof parsed === 'object' && 'file_path' in parsed && 'content' in parsed)
+  } catch {
+    return false
+  }
+}
+
+/** SSE artifact 事件 → 消息产出物项（name 缺省时从 path 取 basename） */
+export function artifactFromEvent(payload: ArtifactEventPayload): MessageArtifact | null {
+  const name = payload.name || (payload.path ? basename(payload.path) : '')
+  if (!name && !payload.path) return null
+  return {
+    artifactId: payload.artifact_id,
+    path: payload.path,
+    name: name || payload.artifact_id,
+    kind: payload.kind || 'text',
+    size: payload.size,
+  }
+}
+
+/** tool_result 文本 → 消息产出物项（读形态过滤；后端事件缺位时的兜底通道） */
+export function artifactsFromToolResult(resultText: string): MessageArtifact[] {
+  if (isReadBackReference(resultText)) return []
+  return parseToolResultArtifacts(resultText).map((ref) => ({
+    path: ref.path,
+    name: basename(ref.path),
+    kind: kindForFilename(basename(ref.path)),
+  }))
+}
+
+/** 产出物去重键：name 优先（两通道归一同键），path basename 兜底 */
+function artifactKey(a: MessageArtifact): string {
+  return a.name || (a.path ? basename(a.path) : '')
+}
+
+/** 合并消息产出物（按 key 去重，先到先得保住 artifactId/size 富信息） */
+export function mergeMessageArtifacts(
+  existing: MessageArtifact[] | undefined,
+  incoming: MessageArtifact[],
+): MessageArtifact[] {
+  const merged = [...(existing ?? [])]
+  for (const item of incoming) {
+    const key = artifactKey(item)
+    if (!key) continue
+    if (merged.some((m) => artifactKey(m) === key)) continue
+    merged.push(item)
+  }
+  return merged
+}
+
 /** dock tab 图标 → UiIcon 线描图标名（统一图标风格，2026-09-08） */
 const DOCK_ICONS: Record<DockTabKind, string> = {
   markdown: 'fileText',
@@ -133,6 +200,31 @@ const DOCK_ICONS: Record<DockTabKind, string> = {
   history: 'clock',
   archive: 'archive',
   computer: 'monitor',
+}
+
+/** 产出物 kind → UiIcon 图标名（产出物卡片行图标用） */
+export function artifactUiIcon(kind: DockTabKind | string): string {
+  return DOCK_ICONS[(kind as DockTabKind) in DOCK_ICONS ? (kind as DockTabKind) : 'text'] ?? 'file'
+}
+
+/**
+ * 打开产出物预览 tab（产出物卡片「预览/打开」按钮）。
+ * 与 openArtifactTab 同 id 归一：name hash 主键，path basename 兜底。
+ */
+export function openMessageArtifact(artifact: MessageArtifact): void {
+  const dock = useRightDockStore()
+  const kind = (KIND_BY_EXT[bucketOf(artifact.name)] ?? (artifact.kind as DockTabKind)) || 'text'
+  const id = `doc:p${shortHash(artifact.name || artifact.path || artifact.artifactId || '')}`
+  dock.openTab({
+    id,
+    kind,
+    title: artifact.name || artifact.path || '',
+    icon: DOCK_ICONS[kind] ?? 'file',
+    data: {
+      artifactId: artifact.artifactId,
+      path: artifact.path,
+    },
+  })
 }
 
 /**

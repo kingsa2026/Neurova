@@ -314,6 +314,102 @@ describe('useChat', () => {
       expect(store.messages[0].toolCalls![0].result).toContain('25')
     })
 
+    it('reads tool_calls from metadata.tool_calls (backend persisted contract)', async () => {
+      // 契约错位修复（2026-09-08）：后端 post_chat_pipeline 落盘的是
+      // metadata.tool_calls（顶层 tool_messages 从未写入），历史回放刷新后
+      // 工具卡片/步骤时间轴全消失。顶层 tool_messages 兼容保留。
+      vi.mocked(api.get).mockResolvedValueOnce({
+        data: [
+          {
+            role: 'assistant',
+            content: 'created',
+            metadata: {
+              tool_calls: [
+                {
+                  type: 'tool_call',
+                  tool_name: 'file_operation',
+                  params: { operation: 'write', file_path: 'a.md' },
+                },
+                {
+                  type: 'tool_result',
+                  tool_name: 'file_operation',
+                  result: '{"success": true, "file_path": "a.md"}',
+                  success: true,
+                },
+              ],
+            },
+          },
+        ],
+      } as any)
+
+      const { switchSession, store } = useChat()
+      await switchSession('s1')
+
+      expect(store.messages[0].toolCalls).toHaveLength(1)
+      expect(store.messages[0].toolCalls![0].name).toBe('file_operation')
+      expect(store.messages[0].toolCalls![0].result).toContain('a.md')
+    })
+
+    it('restores artifacts from metadata.artifacts (artifact card replay)', async () => {
+      // 产物卡片持久化回放（2026-09-08）：SSE artifact 事件只活在实时流，
+      // 刷新后卡片消失。后端 _step_save_session 落盘 metadata.artifacts
+      // （与 SSE artifact 事件同形态），历史回放据此恢复卡片。
+      vi.mocked(api.get).mockResolvedValueOnce({
+        data: [
+          {
+            role: 'assistant',
+            content: 'created',
+            metadata: {
+              artifacts: [
+                { artifact_id: 'ar1', kind: 'markdown', name: 'a.md', size: 34, path: 'E:/ws/a.md' },
+              ],
+            },
+          },
+        ],
+      } as any)
+
+      const { switchSession, store } = useChat()
+      await switchSession('s1')
+
+      expect(store.messages[0].artifacts).toHaveLength(1)
+      expect(store.messages[0].artifacts![0]).toMatchObject({
+        artifactId: 'ar1',
+        kind: 'markdown',
+        name: 'a.md',
+        size: 34,
+        path: 'E:/ws/a.md',
+      })
+    })
+
+    it('derives artifacts from tool_result text for legacy sessions', async () => {
+      // 旧会话兜底（2026-09-08）：修复前落盘的会话无 metadata.artifacts，
+      // 但 tool_result 文本已持久化——从文本派生产出物卡片（path-only，
+      // 无 artifactId 时预览面板明示不可用）。读形态（content+file_path）过滤。
+      vi.mocked(api.get).mockResolvedValueOnce({
+        data: [
+          {
+            role: 'assistant',
+            content: 'created',
+            metadata: {
+              tool_calls: [
+                { type: 'tool_call', tool_name: 'file_operation', params: { operation: 'write', file_path: 'a.md' } },
+                { type: 'tool_result', tool_name: 'file_operation', result: '{"success": true, "file_path": "notes/a.md", "bytes": 3}', success: true },
+                { type: 'tool_call', tool_name: 'file_operation', params: { operation: 'read', file_path: 'b.md' } },
+                { type: 'tool_result', tool_name: 'file_operation', result: '{"content": "body", "file_path": "b.md"}', success: true },
+              ],
+            },
+          },
+        ],
+      } as any)
+
+      const { switchSession, store } = useChat()
+      await switchSession('s1')
+
+      const arts = store.messages[0].artifacts
+      expect(arts).toHaveLength(1) // 读形态 b.md 被过滤
+      expect(arts![0]).toMatchObject({ name: 'a.md', kind: 'markdown', path: 'notes/a.md' })
+    })
+
     it('emits chat:session-switched event', async () => {
       vi.mocked(api.get).mockResolvedValueOnce({ data: [] } as any)
 
