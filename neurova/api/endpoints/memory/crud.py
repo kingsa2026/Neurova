@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 from fastapi import Depends, Query, Request
 
 from neurova.api.auth import get_current_user_or_default
+from neurova.cognitive_layers.memory_layer.models import MemoryType
 from neurova.interfaces.api_standard import (
     APIError,
     APIResponse,
@@ -30,6 +31,7 @@ from .base import (
 async def search_memories(
     query: str = Query(default="", min_length=0, description="搜索关键词"),
     category: Optional[str] = Query(default=None, description="按分类过滤"),
+    memory_type: Optional[MemoryType] = Query(default=None, description="按记忆类型过滤 (semantic/episodic/procedural/pattern/emotional/working)"),
     limit: int = Query(default=10, ge=1, le=100, description="返回条数"),
     agent_id: Optional[str] = Query(default=None, description="Agent ID"),
     user: Dict[str, Any] = Depends(get_current_user_or_default),
@@ -37,7 +39,10 @@ async def search_memories(
     """搜索记忆 - query 为空时返回全部"""
     try:
         manager = get_memory_manager(agent_id, user)
-        memories = manager.recall(query=query, category=category, limit=limit, agent_wide=True)
+        memories = manager.recall(
+            query=query, category=category, limit=limit, agent_wide=True,
+            memory_type=memory_type.value if memory_type else None,
+        )
 
         return success_response(
             data={
@@ -75,6 +80,7 @@ async def add_memory(
 
         memory_id = manager.remember(
             content=request.content,
+            memory_type=request.memory_type,
             category=request.category,
             is_important=request.is_important,
             is_crystallized=request.is_crystallized,
