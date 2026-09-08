@@ -4,6 +4,7 @@ import { archiveConsoleSession, deleteConsoleSession, unarchiveConsoleSession } 
 import { useChatStore } from '@/stores/chat'
 import type { ChatMessage, Session } from '@/types/chat'
 import { buildStepsFromHistory } from '@/utils/chatSteps'
+import { artifactFromEvent, artifactsFromToolResult, mergeMessageArtifacts, type ArtifactEventPayload } from '@/utils/artifacts'
 import bus from '@/bus'
 import i18n from '@/i18n'
 
@@ -180,8 +181,18 @@ export function useChat(options: UseChatOptions = {}) {
       const history = Array.isArray(data) ? data : data?.messages ?? data?.items ?? []
       const mapped: ChatMessage[] = history.map((m: any) => {
         // Build toolCalls array from tool_messages
+        // 契约错位修复（2026-09-08）：后端 post_chat_pipeline 落盘在
+        // metadata.tool_calls（顶层 tool_messages 从未写入——此前历史回放
+        // 工具卡片/步骤时间轴恒空）。顶层 tool_messages 兼容保留。
+        const rawToolMessages: any[] = m.tool_messages ?? m.metadata?.tool_calls ?? []
+        // 同一轮两种形态并存：内部形态（tool_name/params/result）与原生
+        // OpenAI 形态（data.function.name/data.content）。内部形态优先，
+        // 有内部形态时剔除 data 形态（同一调用去重，避免双卡）。
+        const hasInternalForm = rawToolMessages.some((tm) => tm?.type && tm.tool_name !== undefined)
+        const toolMessages = hasInternalForm
+          ? rawToolMessages.filter((tm) => !tm?.data)
+          : rawToolMessages
         const toolCalls: Array<{ name: string; arguments: string; result?: string; taskName?: string }> = []
-        const toolMessages = m.tool_messages || []
         for (const tm of toolMessages) {
           if (tm.type === 'tool_call') {
             toolCalls.push({
@@ -218,6 +229,23 @@ export function useChat(options: UseChatOptions = {}) {
         // 步骤化时间轴（2026-09-07）：历史消息合成 steps（reasoning 段 + 工具段，
         // 全部收起，点开可看）；与新消息的 steps 契约一致
         const steps = buildStepsFromHistory(reasoning, toolCalls.length > 0 ? toolCalls : undefined)
+        // 产物卡片回放（2026-09-08）：metadata.artifacts 与 SSE artifact
+        // 事件同形态（snake_case），经 artifactFromEvent 同构恢复。
+        // 旧会话（修复前落盘）无此字段时从 tool_result 文本派生（path-only，
+        // 读形态过滤，与实时兜底通道同契约）。
+        let artifacts = Array.isArray(m.metadata?.artifacts)
+          ? (m.metadata.artifacts as ArtifactEventPayload[])
+              .map((payload) => artifactFromEvent(payload))
+              .filter((a): a is NonNullable<typeof a> => a !== null)
+          : []
+        if (artifacts.length === 0 && toolMessages.length > 0) {
+          for (const tm of toolMessages) {
+            if (tm.type !== 'tool_result') continue
+            const resultText =
+              typeof tm.result === 'string' ? tm.result : JSON.stringify(tm.result ?? tm.data?.content ?? '')
+            artifacts = mergeMessageArtifacts(artifacts, artifactsFromToolResult(resultText))
+          }
+        }
         return {
           role: m.role === 'user' ? 'user' : 'assistant',
           content: m.content || '',
@@ -225,6 +253,7 @@ export function useChat(options: UseChatOptions = {}) {
           // 带思考过程的历史消息默认展开（与实时流式首片自动展开一致）
           reasoningOpen: !!reasoning,
           steps: steps.length > 0 ? steps : undefined,
+          artifacts: artifacts.length > 0 ? artifacts : undefined,
           toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
           toolCall,
           toolResult,
