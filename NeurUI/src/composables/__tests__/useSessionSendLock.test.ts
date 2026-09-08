@@ -6,11 +6,12 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
-import { useSessionSendLock } from '@/composables/useSessionSendLock'
+import { useSessionSendLock, resetSessionSendLockForTest } from '@/composables/useSessionSendLock'
 
 describe('useSessionSendLock', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    resetSessionSendLockForTest()
     // @ts-expect-error 测试环境注入
     delete navigator.locks
   })
