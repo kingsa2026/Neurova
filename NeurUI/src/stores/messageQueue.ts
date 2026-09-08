@@ -17,6 +17,8 @@ export interface QueuedMessage {
   status: 'pending' | 'sending' | 'failed'
   /** failed 时的错误摘要（retry 后清除） */
   error?: string
+  /** 入队时所属会话（审计③）：drain/展示按会话过滤，杜绝跨会话泄漏 */
+  sessionId?: string
 }
 
 let seq = 0
@@ -29,22 +31,33 @@ export const useMessageQueueStore = defineStore('messageQueue', () => {
   const pendingCount = computed(() => items.value.filter((i) => i.status === 'pending').length)
   const hasPending = computed(() => pendingCount.value > 0)
 
-  /** 入队（流式中再次发送）。 */
-  function enqueue(text: string): QueuedMessage {
+  /** 入队（流式中再次发送）。sessionId=入队时所属会话。 */
+  function enqueue(text: string, sessionId?: string): QueuedMessage {
     seq += 1
     const item: QueuedMessage = {
       id: `q${Date.now()}-${seq}`,
       text: text.trim(),
       enqueuedAt: new Date().toISOString(),
       status: 'pending',
+      sessionId,
     }
     items.value.push(item)
     return item
   }
 
-  /** 取下一条待发（不出队——发送成功才移除，失败转 failed）。 */
-  function next(): QueuedMessage | undefined {
-    return items.value.find((i) => i.status === 'pending')
+  /** 取下一条待发（不出队——发送成功才移除，失败转 failed）。
+   * 审计③：传 sessionId 时只取该会话的排队项。 */
+  function next(sessionId?: string): QueuedMessage | undefined {
+    return items.value.find(
+      (i) => i.status === 'pending' && (!sessionId || i.sessionId === sessionId),
+    )
+  }
+
+  /** pending 计数（审计③：可按会话过滤）。 */
+  function countPending(sessionId?: string): number {
+    return items.value.filter(
+      (i) => i.status === 'pending' && (!sessionId || i.sessionId === sessionId),
+    ).length
   }
 
   /** 标记发送中（防重入）。 */
@@ -134,6 +147,7 @@ export const useMessageQueueStore = defineStore('messageQueue', () => {
     paused,
     pendingCount,
     hasPending,
+    countPending,
     enqueue,
     next,
     markSending,

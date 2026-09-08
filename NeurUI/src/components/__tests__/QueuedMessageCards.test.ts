@@ -36,9 +36,11 @@ const i18n = createI18n({
   },
 })
 
-function mountCards(editingQueuedId: string | null = null) {
+function mountCards(editingQueuedId: string | null = null, items?: ReturnType<typeof useMessageQueueStore>['items']) {
+  const q = useMessageQueueStore()
   return mount(QueuedMessageCards, {
-    props: { editingQueuedId },
+    // 审计③：渲染列表由父级按当前会话过滤后传入；缺省=全量（测试便捷）
+    props: { editingQueuedId, items: items ?? q.items },
     global: { plugins: [i18n] },
   })
 }
