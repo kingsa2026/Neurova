@@ -407,6 +407,8 @@ class Memory:
             "id": self.id,
             "content": self.content,
             "memory_type": self.memory_type.value,
+            # type: memory_type 的契约别名（API/前端消费，页签过滤键）
+            "type": self.memory_type.value,
             "category": self.category.value,
             "lifecycle_stage": self.lifecycle_stage.value,
             "perspective": self.perspective.value,
@@ -415,6 +417,9 @@ class Memory:
             "temperature": self.temperature,
             "importance": self.importance,
             "access_count": self.access_count,
+            # is_crystallized 单一真源 = lifecycle_stage（2026-09-08 结晶闭环）
+            "is_crystallized": self.lifecycle_stage == LifecycleStage.CRYSTALLIZED,
+            "is_important": bool((self.metadata or {}).get("is_important", False)),
             "metadata": self.metadata,
             "agent_id": self.agent_id,
             "neuser_id": self.neuser_id,
