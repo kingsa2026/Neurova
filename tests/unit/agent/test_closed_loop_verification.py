@@ -184,7 +184,7 @@ class TestClosedLoopVerification:
             assert tool_name in orchestrator.tool_weights._weights, "工具权重未更新"
             
             # 5. 验证生命周期更新
-            assert tool_name in orchestrator.tool_lifecycle._usage_counts, "工具生命周期未更新"
+            assert orchestrator.tool_lifecycle.get_usage_count(tool_name) >= 1, "工具生命周期未更新"
             
             assert True, "端到端数据流验证成功"
         except Exception as e:

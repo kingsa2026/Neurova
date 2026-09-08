@@ -17,7 +17,7 @@ class TestAgentConfig:
     def test_default_config(self, tmp_path):
         """默认配置"""
         config = AgentConfig(workspace_path=str(tmp_path))
-        assert config.name == "忆灵"
+        assert config.name == "智星"
         assert config.agent_id == "yi_ling"
         assert config.enable_memory is True
 
@@ -86,7 +86,7 @@ class TestAgentInit:
         """应该加载身份文件"""
         agent = Agent(workspace_path=str(tmp_path), enable_memory=False)
         assert agent.soul != ""
-        assert "忆灵" in agent.soul
+        assert "智星" in agent.soul
 
     def test_load_identity_missing_files(self, tmp_path):
         """缺少身份文件应使用默认值"""

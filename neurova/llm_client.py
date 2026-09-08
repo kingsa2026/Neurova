@@ -174,6 +174,47 @@ class LLMClient:
             return True  # 无声明 → OpenAI 协议默认行为（存量等价）
         return bool(getattr(compat, "include_stream_usage", True))
 
+    def _build_request_params(
+        self, messages: List[Dict[str, str]], stream: bool = False, **kwargs
+    ) -> Dict[str, Any]:
+        """组装 chat/completions 请求参数（chat/chat_stream/chat_stream_async 共用）。
+
+        reasoning_effort 注入（2026-09-08 AMD 推理透传）：仅当 provider compat
+        声明 supports_reasoning_effort=True 时，按 thinking_effort 映射注入
+        （light→不传 / standard→medium / deep→high）；未声明网关绝不注入，
+        防低容忍网关 400（与 include_stream_usage 同一声明式纪律）。
+        """
+        from neurova.llm.model_limits import clamp_max_tokens
+
+        params: Dict[str, Any] = {
+            "model": self.config.model,
+            "messages": messages,
+            "temperature": kwargs.get("temperature", self.config.temperature),
+            "max_tokens": clamp_max_tokens(
+                kwargs.get("max_tokens", self.config.max_tokens),
+                self.config.model,
+            ),
+            "top_p": kwargs.get("top_p", self.config.top_p),
+            "frequency_penalty": kwargs.get("frequency_penalty", self.config.frequency_penalty),
+            "presence_penalty": kwargs.get("presence_penalty", self.config.presence_penalty),
+        }
+        if stream:
+            params["stream"] = True
+
+        if "tools" in kwargs:
+            params["tools"] = kwargs["tools"]
+
+        # 显式透传的 reasoning_effort 优先；否则按 thinking_effort 档位映射
+        reasoning_effort = kwargs.get("reasoning_effort")
+        if reasoning_effort is None:
+            compat = getattr(self.config, "compat", None)
+            if compat is not None:
+                reasoning_effort = compat.map_reasoning_effort(kwargs.get("thinking_effort"))
+        if reasoning_effort:
+            params["reasoning_effort"] = reasoning_effort
+
+        return params
+
     def _init_client(self):
         """初始化 OpenAI 客户端"""
         if not OPENAI_AVAILABLE:
@@ -226,24 +267,8 @@ class LLMClient:
         start_time = time.time()
 
         try:
-            # 构建请求参数
-            from neurova.llm.model_limits import clamp_max_tokens
-            params = {
-                "model": self.config.model,
-                "messages": messages,
-                "temperature": kwargs.get("temperature", self.config.temperature),
-                "max_tokens": clamp_max_tokens(
-                    kwargs.get("max_tokens", self.config.max_tokens),
-                    self.config.model,
-                ),
-                "top_p": kwargs.get("top_p", self.config.top_p),
-                "frequency_penalty": kwargs.get("frequency_penalty", self.config.frequency_penalty),
-                "presence_penalty": kwargs.get("presence_penalty", self.config.presence_penalty),
-            }
-
-            # 如果有 tools 参数
-            if "tools" in kwargs:
-                params["tools"] = kwargs["tools"]
+            # 构建请求参数（公共组装：tools/reasoning_effort 等）
+            params = self._build_request_params(messages, stream=False, **kwargs)
 
             # 调用 API
             response = self.client.chat.completions.create(**params)
@@ -323,25 +348,8 @@ class LLMClient:
         start_time = time.time()
 
         try:
-            # 构建请求参数
-            from neurova.llm.model_limits import clamp_max_tokens
-            params = {
-                "model": self.config.model,
-                "messages": messages,
-                "temperature": kwargs.get("temperature", self.config.temperature),
-                "max_tokens": clamp_max_tokens(
-                    kwargs.get("max_tokens", self.config.max_tokens),
-                    self.config.model,
-                ),
-                "top_p": kwargs.get("top_p", self.config.top_p),
-                "frequency_penalty": kwargs.get("frequency_penalty", self.config.frequency_penalty),
-                "presence_penalty": kwargs.get("presence_penalty", self.config.presence_penalty),
-                "stream": True,
-            }
-
-            # 如果有 tools 参数
-            if "tools" in kwargs:
-                params["tools"] = kwargs["tools"]
+            # 构建请求参数（公共组装：stream/tools/reasoning_effort 等）
+            params = self._build_request_params(messages, stream=True, **kwargs)
 
             # 根因修复 (2026-09-02): OpenAI 协议流式默认不回传 usage，
             # 必须显式请求 include_usage——否则 chunk.usage 恒 None，
@@ -445,25 +453,8 @@ class LLMClient:
         start_time = time.time()
 
         try:
-            # 构建请求参数
-            from neurova.llm.model_limits import clamp_max_tokens
-            params = {
-                "model": self.config.model,
-                "messages": messages,
-                "temperature": kwargs.get("temperature", self.config.temperature),
-                "max_tokens": clamp_max_tokens(
-                    kwargs.get("max_tokens", self.config.max_tokens),
-                    self.config.model,
-                ),
-                "top_p": kwargs.get("top_p", self.config.top_p),
-                "frequency_penalty": kwargs.get("frequency_penalty", self.config.frequency_penalty),
-                "presence_penalty": kwargs.get("presence_penalty", self.config.presence_penalty),
-                "stream": True,
-            }
-
-            # 如果有 tools 参数
-            if "tools" in kwargs:
-                params["tools"] = kwargs["tools"]
+            # 构建请求参数（公共组装：stream/tools/reasoning_effort 等）
+            params = self._build_request_params(messages, stream=True, **kwargs)
 
             # 根因修复 (2026-09-02): 流式 usage 回传必须显式请求（见同步流式处注释）。
             # P0-2 compat 开关：声明不支持的网关跳过（与同步流式同表消费）。

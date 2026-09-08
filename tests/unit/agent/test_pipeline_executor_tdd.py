@@ -5,6 +5,7 @@ PipelineExecutor TDD 测试 - 简化接口的行为测试
 """
 
 import pytest
+from types import SimpleNamespace
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from pathlib import Path
@@ -17,6 +18,12 @@ def mock_agent():
     """创建模拟的 Agent 实例"""
     agent = MagicMock()
     agent.config = MagicMock()
+    import tempfile as _tempfile
+
+    agent.config.attachment_dir = _tempfile.mkdtemp()
+    agent.config.tts_engine = "edge-tts"  # P2-5 字段面：上传/注册步骤读取
+    agent.config.user_id = "test-user"
+    agent.config.agent_id = "test-agent"
     agent.config.agent_id = "test-agent"
     agent.config.name = "TestAgent"
     agent.config.tts_enabled = True
@@ -29,9 +36,15 @@ def mock_agent():
     agent.memory_agent = MagicMock()
     agent.memory_agent.add_conversation = AsyncMock()
     
-    agent.tts_manager = MagicMock()
-    agent.tts_manager.synthesize = AsyncMock(return_value=b"audio bytes")
-    agent.tts_manager.is_initialized = True
+    # P2-5 契约：TTS 经统一语音管线 voice_pipeline.process_tts
+    agent.voice_pipeline = MagicMock()
+    agent.voice_pipeline.process_tts = AsyncMock(
+        return_value=SimpleNamespace(
+            error=None, audio_path="/audio/test.wav", audio_data=b"bytes",
+            tts_engine="edge-tts", tts_voice="zh-CN-XiaoxiaoNeural",
+            tts_duration_ms=123.0, context_injected=False, memory_recorded=False,
+        )
+    )
     
     agent.cognitive_engine = MagicMock()
     agent.cognitive_engine.analyze_conversation = AsyncMock(return_value=0.8)
@@ -90,7 +103,7 @@ class TestPipelineExecutorBehavior:
         response = await executor.execute(request)
         
         assert response.audio_url is not None
-        mock_agent.tts_manager.synthesize.assert_called_once()
+        mock_agent.voice_pipeline.process_tts.assert_called_once()
     
     @pytest.mark.asyncio
     async def test_execute_with_tts_disabled(self, executor, mock_agent):
@@ -139,8 +152,10 @@ class TestPipelineExecutorBehavior:
     
     @pytest.mark.asyncio
     async def test_execute_handles_error_gracefully(self, executor, mock_agent):
-        """处理错误时应优雅降级"""
-        mock_agent.tts_manager.synthesize.side_effect = Exception("TTS failed")
+        """处理错误时应优雅降级（P2-5 契约：TTS 经 voice_pipeline，其 error 字段触发降级）"""
+        mock_agent.voice_pipeline.process_tts = AsyncMock(
+            return_value=SimpleNamespace(error="TTS failed")
+        )
         
         request = PipelineRequest(
             user_input="Hello",
