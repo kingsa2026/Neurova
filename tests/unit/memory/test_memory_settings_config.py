@@ -58,7 +58,8 @@ class TestMemorySettingsConfig:
         assert cfg.get("threshold.default") == 0.3
         assert cfg.get("graph.beam_width") == 3
         assert cfg.get("vector_search.max_features") == 10000
-        assert cfg.get("manager.new_memory_temperature") == 100.0
+        # 2026-09-08 温度死锁修复：默认 65 落入衰减曲线工作区（原 100 ≥ 高温不衰减阈值 80）
+        assert cfg.get("manager.new_memory_temperature") == 65.0
         assert cfg.get("auto_context.update_interval") == 3600
 
     def test_unknown_key_returns_default(self):

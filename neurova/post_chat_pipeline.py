@@ -507,6 +507,14 @@ class PostChatPipeline:
                 "reasoning_content": getattr(self._agt, "current_reasoning", None),
                 "tool_calls": _tool_msgs or None,
             }
+            # 产物卡片持久化（2026-09-08）：SSE artifact 事件只活在实时流，
+            # 刷新/重开会话后卡片消失。此处把本轮 tool_result 提取的产物
+            # 随 assistant_metadata.artifacts 落盘（注册幂等，与 SSE 出口
+            # extract_tool_artifacts 同一判读：读形态不算产出）。注册失败
+            # （路径越界/文件缺失）仅跳过该产物，不阻断会话保存。
+            _artifacts = self._collect_round_artifacts(_tool_msgs)
+            if _artifacts:
+                assistant_meta["artifacts"] = _artifacts
             # 过滤 None 值
             assistant_meta = {k: v for k, v in assistant_meta.items() if v is not None}
 
@@ -559,6 +567,41 @@ class PostChatPipeline:
             )
 
         return result_session_id
+
+    def _collect_round_artifacts(self, tool_msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """从本轮 tool_result 列表提取产物（落盘到 assistant_metadata.artifacts）。
+
+        与 SSE 出口共用 extract_tool_artifacts（读形态判读+注册+事件形态），
+        输出即 artifact SSE 事件形态（artifact_id/kind/name/size/path），
+        前端历史回放按 artifactFromEvent 同构恢复。失败逐项跳过（artifact
+        是增强能力，不阻断会话保存）。
+        """
+        events: List[Dict[str, Any]] = []
+        try:
+            from neurova.api.endpoints.artifacts_api import extract_tool_artifacts
+
+            agent_id = str(getattr(self._agt, "agent_id", "") or "")
+            user_id = str(getattr(self._agt, "current_user_id", "") or "")
+            for tm in tool_msgs or []:
+                if not isinstance(tm, dict) or tm.get("type") != "tool_result":
+                    continue
+                result_text = tm.get("result")
+                if not isinstance(result_text, str) or not result_text:
+                    continue
+                try:
+                    events.extend(
+                        extract_tool_artifacts(
+                            str(tm.get("tool_name", "")),
+                            result_text,
+                            agent_id=agent_id,
+                            user_id=user_id,
+                        )
+                    )
+                except Exception as e:  # noqa: BLE001 - 单条产物失败不影响其余
+                    logger.debug("产物提取跳过: %s", e)
+        except Exception as e:  # noqa: BLE001 - 整体降级：产物缺失不影响会话
+            logger.debug("产物收集降级: %s", e)
+        return events
 
     async def _step_save_memory(
         self,

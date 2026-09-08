@@ -98,13 +98,18 @@ class TestPromotionCycle(unittest.TestCase):
         self.assertEqual(promoted, 0)
         self.assertFalse(self.mgr._memories["p3"].metadata.get("is_important", False))
 
-    def test_already_important_not_repromoted(self):
-        """已晋升记忆幂等跳过（重复运行不重复计账）。"""
+    def test_already_important_counts_toward_crystallize(self):
+        """已晋升记忆重复命中硬信号：不再重复晋升（is_important 幂等），
+        但按结晶闭环语义累计 upgrade_hits（默认阈值 3，单轮不结晶）。"""
         mem = _mem("p4", access_count=10)
         mem.metadata["is_important"] = True
+        mem.metadata["upgrade_hits"] = 1
         self.mgr._memories[mem.id] = mem
         promoted = self.mgr.run_promotion_cycle(max_memories=100)
-        self.assertEqual(promoted, 0)
+        # 结晶闭环（2026-09-08）：命中计入 crystallize 周期，但不重复晋升
+        self.assertEqual(promoted, 1)
+        self.assertEqual(self.mgr._memories["p4"].metadata.get("upgrade_hits"), 2)
+        self.assertNotEqual(self.mgr._memories["p4"].lifecycle_stage.value, "crystallized")
 
     def test_promotion_boosts_temperature(self):
         """晋升动作含温度强化（防止晋升后立即被衰减降级）。"""
