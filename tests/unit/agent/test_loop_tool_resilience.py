@@ -52,6 +52,39 @@ class TestBadArgumentsTolerance:
         assert any(m.get("role") == "tool" and "ok" in m["content"] for m in result)
 
 
+class TestToolRouterFailureErrorPropagation:
+    """ToolRouter 失败路径必须回传真实错误（2026-09-09 串台事故）
+
+    根因：`from types import SimpleNamespace` 写在 success 分支内，Python 将其
+    编译为函数级局部名；ToolRouter 返回失败时走 else 分支引用未绑定名 →
+    UnboundLocalError 被上层 except 吞掉 → 真实工具错误被顶掉为
+    "SkillRegistry 和 ToolRouter 均未找到该工具"，LLM 收到错误诊断信息
+    （生产实锤：mcp.filesystem.list_allowed_directories 失败被污染）。
+
+    契约：success=False 时 tool 消息 content 必须携带 ToolRouter 的真实 error。
+    """
+
+    def test_router_failure_returns_real_error(self):
+        loop = make_loop()
+        loop.agent.tool_router = SimpleNamespace(
+            execute=lambda **kw: SimpleNamespace(success=False, result=None, error="REAL_ERROR_TARGET_DIR_MISSING")
+        )
+        result = asyncio.run(loop.handle_tool_calls([tool_call("c1", "{}")], []))
+        contents = [m["content"] for m in result if m["role"] == "tool"]
+        assert contents, "失败也必须产出 tool 消息回给 LLM"
+        assert "REAL_ERROR_TARGET_DIR_MISSING" in contents[0]
+        assert "均未找到该工具" not in contents[0]
+
+    def test_router_none_result_returns_fallback_error(self):
+        """router 返回空（非 SimpleNamespace）时也不得炸 UnboundLocalError"""
+        loop = make_loop()
+        loop.agent.tool_router = SimpleNamespace(execute=lambda **kw: None)
+        result = asyncio.run(loop.handle_tool_calls([tool_call("c1", "{}")], []))
+        contents = [m["content"] for m in result if m["role"] == "tool"]
+        assert contents
+        assert "SimpleNamespace" not in contents[0]
+
+
 class TestDegradeDetection:
     def test_true_positives(self):
         assert _looks_like_unsupported_tools_error("Error code: 400 - Invalid tools schema")
