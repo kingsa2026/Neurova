@@ -450,6 +450,20 @@ class MultiModelLLMClient:
             return "not_found"
         return "unknown"
 
+    @staticmethod
+    def _mark_provider_health(provider_id: str, success: bool, response_time: float) -> None:
+        """provider 健康度上报桥（审计 P1-F1）：真实请求成败 → LLMProviderManager
+        的 health_status/current_requests 统计，使 get_healthy_providers/
+        加权选择基于真实数据而非首次快照。"""
+        try:
+            from neurova.llm.provider_manager import get_provider_manager
+
+            get_provider_manager().mark_provider_success(provider_id, response_time) if (
+                success
+            ) else get_provider_manager().mark_provider_failure(provider_id)
+        except Exception:  # noqa: BLE001 - 上报失败静默（审计日志已留痕）
+            pass
+
     def _note_404_reconnect(self, provider_id: Optional[str], model: Optional[str]) -> bool:
         """模型 404（下线/改名）→ 触发 provider 重发现，300s 防抖。
 
@@ -629,6 +643,12 @@ class MultiModelLLMClient:
 
             client.increment_request(success=True)
             limiter.report_success(model_key)
+            # 审计 P1-F1：provider 健康度接线（原 mark_provider_success 零
+            # 调用方，负载均衡基于永不更新的陈旧数据）
+            try:
+                self._mark_provider_health(client.provider.id, True, duration)
+            except Exception:  # noqa: BLE001 - 健康度更新失败不影响主流程
+                pass
             try:
                 # P2-4 补刀：llm prometheus 埋点（此前 record_llm_call 零调用点）
                 from neurova.core.metrics import get_metrics
@@ -716,6 +736,11 @@ class MultiModelLLMClient:
             }
         except Exception as e:
             client.increment_request(success=False)
+            # 审计 P1-F1：provider 健康度接线——失败上报
+            try:
+                self._mark_provider_health(client.provider.id, False, 0.0)
+            except Exception:  # noqa: BLE001
+                pass
             # P2-a：429 类错误反馈成该模型全局暂停（防继续撞限流）
             # 2026-09-03：错误分类驱动——429 → 指数退避暂停；404（模型下线/改名）
             # → 300s 防抖的 provider 重发现+重连；其余错误仅记录。
@@ -908,39 +933,6 @@ class MultiModelLLMClient:
         else:
             _stream_ok = True
 
-    def _resolve_available_fallback(
-        self,
-        exclude_models: Optional[set] = None,
-    ) -> Optional[ModelClient]:
-        """请求的 provider/model 不可用时的兜底客户端。
-
-        目标：只要系统里存在任一个 enabled 且有 api_key 的服务商，就不允许
-        返回 "No client available"。分两步：
-        1. 已有可用客户端 → 直接返回当前/首个客户端；
-        2. _clients 为空（冷启动或初始化失败）→ 触发 refresh_all_providers() 自愈，
-           重建所有 enabled + 有 key 的服务商客户端后再取。
-
-        ``exclude_models``：auto 失败切换时排除已失败模型（同能力下一候选）。
-
-        根因背景：默认服务商（如 sensetime，优先级最高）可能没有 api_key，
-        而其他有效服务商（如 b.ai）反而有 key；若严格按请求的 provider/model
-        查找将永远拿不到客户端，导致 "[LLM Error] No client available"。
-        """
-        current = self.get_current_client()
-        if current and (not exclude_models or current.model not in exclude_models):
-            return current
-        if exclude_models:
-            # 失败切换：从全部客户端中选第一个不在排除集的（保持注册序）
-            for client in self._clients.values():
-                if client.model not in exclude_models:
-                    return client
-        logger.info("Auto-refreshing providers due to empty _clients")
-        try:
-            self.refresh_all_providers()
-        except Exception as e:
-            logger.warning("Auto-refresh failed: %s", e, exc_info=True)
-        return self.get_current_client()
-
     def _next_failover_client(self, failed_model: Optional[str], excluded: Optional[set] = None) -> Optional[ModelClient]:
         """auto 失败切换：返回排除已失败模型后的下一候选（None=无候选）。
 
@@ -979,7 +971,9 @@ class MultiModelLLMClient:
             for client in clients.values():
                 if client.model not in exclude_models:
                     return client
-            return None  # 排除后无候选 → 终止 failover（有界）
+            # 审计 F3：排除后无候选 → 终止 failover（有界，不做 refresh 自愈
+            # ——与第一版死代码的语义差异点，维护时勿改回）
+            return None
 
         current = None
         if current_provider_id and current_model:

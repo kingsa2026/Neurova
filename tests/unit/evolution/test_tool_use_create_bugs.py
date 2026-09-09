@@ -176,9 +176,15 @@ class TestT4ExecuteFromTextMissingMessages:
         reply_with_tool_call = '[TOOL_CALL:test_tool({"query": "hello"})]'
         await executor._execute_from_text(reply_with_tool_call, "hello")
 
-        # 工具执行后，_tool_messages_list 应有记录（当前为空 → RED）
-        assert len(mock_agent._tool_messages_list) > 0, (
-            "_execute_from_text 应将工具结果写入 _tool_messages_list，"
+        # 工具执行后，工具消息应有记录（P0-B1 契约同步：存储迁 ContextVar，
+        # 写入经 Agent.append_tool_messages 公有 API——MagicMock 已捕获调用）
+        written = [
+            c for c in mock_agent.append_tool_messages.call_args_list if c.args
+        ]
+        assert any(
+            any(m.get("tool_name") == "test_tool" for m in c.args[0]) for c in written
+        ), (
+            "_execute_from_text 应经公有 API 写入工具消息（P0-B1 迁 ContextVar），"
             "否则前端 AGENT_TOOL_RESULT 事件收不到工具结果"
         )
 
