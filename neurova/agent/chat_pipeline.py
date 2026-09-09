@@ -2254,4 +2254,4 @@ class ChatPipeline:
 
     def _collect_tool_messages(self) -> List[Dict]:
         """收集工具调用消息"""
-        return getattr(self._agent, "_tool_messages_list", []) or []
+        return self._agent.get_tool_messages_snapshot()

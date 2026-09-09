@@ -26,6 +26,7 @@ from neurova.collaboration.neurflow.execution_engine import get_workflow_executo
 from neurova.core.logger import get_logger
 import re
 import shlex
+import threading
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -211,6 +212,8 @@ class ToolExecutor:
         self._agent = agent_ref
         self._messages_list: List[Dict] = []
         self._tool_engine = None  # ToolEngine 实例（延迟初始化）
+        # P0-B6：惰性创建互斥锁（并发首访防双实例）
+        self._tool_engine_lock = threading.Lock()
         # P1-2：工具执行协调器（per-tool 超时 + 超时转后台 + pending hints）
         # 懒加载（AGENTS.md 纪律）：neurova.agent 包 __init__ 链回本模块，模块级导入会循环
         from neurova.agent.tool_coordinator import ToolCoordinator
@@ -219,28 +222,36 @@ class ToolExecutor:
 
     @property
     def tool_engine(self):
-        """获取 ToolEngine 实例（延迟初始化）"""
+        """获取 ToolEngine 实例（延迟初始化；P0-B6 加锁防并发双实例）"""
         if self._tool_engine is None:
-            # 首先尝试从 ExecutionEngine 获取
+            with self._tool_engine_lock:
+                if self._tool_engine is None:
+                    self._tool_engine = self._create_tool_engine()
+            return self._tool_engine
+        return self._tool_engine
+
+    def _create_tool_engine(self):
+        """实际创建 ToolEngine（须持 _tool_engine_lock 调用）"""
+        # 首先尝试从 ExecutionEngine 获取
+        try:
+            from neurova.shared_core.execution_engine import ExecutionEngine
+
+            engine = ExecutionEngine()
+            if hasattr(engine, "_tool_engine") and engine._tool_engine is not None:
+                self._tool_engine = engine._tool_engine
+                logger.debug("从 ExecutionEngine 获取 ToolEngine")
+                return self._tool_engine
+        except Exception as e:
+            logger.debug("从 ExecutionEngine 获取 ToolEngine 失败: %s", e)
+
+        # 如果 ExecutionEngine 不可用，创建新的 ToolEngine
+        ToolEngineClass = _get_tool_engine_class()
+        if ToolEngineClass:
             try:
-                from neurova.shared_core.execution_engine import ExecutionEngine
-
-                engine = ExecutionEngine()
-                if hasattr(engine, "_tool_engine") and engine._tool_engine is not None:
-                    self._tool_engine = engine._tool_engine
-                    logger.debug("从 ExecutionEngine 获取 ToolEngine")
-                    return self._tool_engine
+                self._tool_engine = ToolEngineClass()
+                logger.debug("创建新的 ToolEngine 实例")
             except Exception as e:
-                logger.debug("从 ExecutionEngine 获取 ToolEngine 失败: %s", e)
-
-            # 如果 ExecutionEngine 不可用，创建新的 ToolEngine
-            ToolEngineClass = _get_tool_engine_class()
-            if ToolEngineClass:
-                try:
-                    self._tool_engine = ToolEngineClass()
-                    logger.debug("创建新的 ToolEngine 实例")
-                except Exception as e:
-                    logger.warning("创建 ToolEngine 失败: %s", e)
+                logger.warning("创建 ToolEngine 失败: %s", e)
         return self._tool_engine
 
     @property
@@ -474,9 +485,8 @@ class ToolExecutor:
             try:
                 result = await self._execute_single_tool(tool_name, arguments)
                 results.append(f"\n\n**{tool_name} 结果**: {json.dumps(result, ensure_ascii=False)[:2000]}")
-                if not hasattr(self._agent, "_tool_messages_list"):
-                    self._agent._tool_messages_list = []
-                self._agent._tool_messages_list.append(
+                # P0-B1：轮次级工具展示消息经公有 API 写 ContextVar（原直写单例属性并发互踩）
+                self._agent.append_tool_messages([
                     {
                         "role": "tool",
                         "tool_call_id": f"repaired_{tool_name}_{idx}",
@@ -488,7 +498,7 @@ class ToolExecutor:
                         "success": self._result_is_success(result),
                         "timestamp": datetime.now().isoformat(),
                     }
-                )
+                ])
             except Exception as e:
                 logger.error("Repaired tool execution failed: %s", e)
                 results.append(f"\n\n**{tool_name} 错误**: {str(e)}")
@@ -517,9 +527,8 @@ class ToolExecutor:
                 # 前端 AGENT_TOOL_RESULT 事件的 tool_messages 永远为空
                 # Bug A-2 修复: 添加 tool_name 字段，与 base.py 格式一致，
                 # 使 post_chat_pipeline 的 tm.get("tool_name") 可正常工作
-                if not hasattr(self._agent, "_tool_messages_list"):
-                    self._agent._tool_messages_list = []
-                self._agent._tool_messages_list.append(
+                # P0-B1：轮次级工具展示消息经公有 API 写 ContextVar（原直写单例属性并发互踩）
+                self._agent.append_tool_messages([
                     {
                         "role": "tool",
                         "tool_call_id": f"text_{tool_name}_{idx}",
@@ -533,7 +542,7 @@ class ToolExecutor:
                         "success": self._result_is_success(result),
                         "timestamp": datetime.now().isoformat(),
                     }
-                )
+                ])
             except Exception as e:
                 logger.error("Text tool execution failed: %s", e)
                 results.append(f"\n\n**{tool_name} 错误**: {str(e)}")
@@ -607,9 +616,8 @@ class ToolExecutor:
                 # 而非 self._messages_list（ToolExecutor 本地列表，消费者不可见）
                 # Bug A-2 修复: 添加 tool_name 字段，与 base.py 格式一致，
                 # 使 post_chat_pipeline 的 tm.get("tool_name") 可正常工作
-                if not hasattr(self._agent, "_tool_messages_list"):
-                    self._agent._tool_messages_list = []
-                self._agent._tool_messages_list.append(
+                # P0-B1：轮次级工具展示消息经公有 API 写 ContextVar（原直写单例属性并发互踩）
+                self._agent.append_tool_messages([
                     {
                         "role": "tool",
                         "tool_call_id": tool_call.get("id", ""),
@@ -624,7 +632,7 @@ class ToolExecutor:
                         "success": self._result_is_success(result),
                         "timestamp": datetime.now().isoformat(),
                     }
-                )
+                ])
 
             except Exception as e:
                 logger.error("工具执行失败: %s", e)
@@ -1265,6 +1273,22 @@ class ToolExecutor:
         "file_list", "file_search", "file_read", "list_agents",
         "calculator", "emotion_analyze", "planning",
     })
+
+    # P0-B2：recall 循环防护按会话分桶（避免并发会话共用一个 guard 互踩）
+    _recall_guards: Dict[str, Any] = {}
+    _recall_guards_lock = threading.Lock()
+
+    @classmethod
+    def _get_recall_guard(cls, session_id: str):
+        """取（或惰性建）会话专属的召回循环防护器。"""
+        with cls._recall_guards_lock:
+            guard = cls._recall_guards.get(session_id)
+            if guard is None:
+                from neurova.agent.recall_loop_guard import RecallLoopGuard
+
+                guard = RecallLoopGuard()
+                cls._recall_guards[session_id] = guard
+            return guard
 
     def _governance_fail_closed(
         self, tool_name: str, is_mcp: bool, is_builtin: bool, reason: str
@@ -2127,12 +2151,12 @@ class ToolExecutor:
             recalled = pool.recall_evicted(query=query, limit=limit)
 
             # P1-a：召回循环防护——同轮同查询同结果拒绝（防模型死循环重试）
+            # P0-B2：guard 按 session_id 分桶（原挂在单例 Agent 实例上，并发
+            # 会话的 turn 判断与指纹重置互相覆盖）
             from neurova.agent.recall_loop_guard import RecallLoopGuard, compute_digest
 
-            guard = getattr(self._agent, "_recall_loop_guard", None)
-            if guard is None:
-                guard = RecallLoopGuard()
-                self._agent._recall_loop_guard = guard
+            _session_id = getattr(self._agent, "current_session_id", None) or "default"
+            guard = self._get_recall_guard(_session_id)
             # 轮次感知：turn_count 变化 = 新对话轮 → 重置指纹（自包含，不依赖管线显式调用）
             current_turn = getattr(self._agent, "turn_count", 0) or 0
             if getattr(guard, "_last_turn", None) not in (None, current_turn):
@@ -3572,10 +3596,8 @@ class ToolExecutor:
         self._messages_list（ToolExecutor 本地列表），属性名不匹配导致工具消息丢失。
         改为读 agent._tool_messages_list，与写入端（line 155, 217）一致。
         """
-        agent_list = getattr(self._agent, "_tool_messages_list", None)
-        if agent_list is None:
-            return []
-        return list(agent_list)
+        # P0-B1：轮次级状态已迁 ContextVar，经 Agent 公有快照 API 读取
+        return self._agent.get_tool_messages_snapshot()
 
     def clear_tool_messages(self):
         """清空工具消息列表。
@@ -3583,6 +3605,5 @@ class ToolExecutor:
         Bug N-4 修复: 清空 agent._tool_messages_list（消费者读取的列表），
         而非 self._messages_list（本地列表，清空不影响消费者，导致跨轮次累积）。
         """
-        agent_list = getattr(self._agent, "_tool_messages_list", None)
-        if agent_list is not None:
-            agent_list.clear()
+        # P0-B1：经 Agent 公有 API 清空（ContextVar 存储）
+        self._agent.reset_tool_messages()
