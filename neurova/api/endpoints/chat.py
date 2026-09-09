@@ -420,8 +420,12 @@ async def clear_chat_history(
 
 
 @router.post("/attachment")
-async def add_attachment(request: Request, body: AttachmentRequest):
-    """添加附件到对话"""
+async def add_attachment(
+    request: Request,
+    body: AttachmentRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """添加附件到对话（审计 A8：补齐鉴权——stub 期与兄弟端点同源）"""
     request_id = _get_request_id(request)
 
     try:
