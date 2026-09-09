@@ -18,19 +18,27 @@ from unittest.mock import patch
 
 import pytest
 
+from neurova.sandbox.appcontainer import AppContainerSandbox
 from neurova.sandbox.exec_sandbox import (
-    AppContainerSandbox,
     SandboxSeverity,
     execute_in_sandbox,
 )
 
 
 class TestAppContainerHonesty:
-    def test_windows_available_is_false_until_real_impl(self):
-        """真实现落地前必须诚实返回 False（占位谎言是安全漏洞）"""
+    def test_appcontainer_uses_real_impl(self):
+        """P1-7 遗留③后：真实现（appcontainer.py）落地，exec_sandbox 的
+        同名谎言占位已删除；available() 现为 API 绑定探测"""
+        from neurova.sandbox import exec_sandbox as es
+
+        assert not hasattr(es, "AppContainerSandbox"), (
+            "exec_sandbox 内的谎言占位 AppContainerSandbox 应保持删除"
+        )
         if sys.platform != "win32":
             pytest.skip("仅 Windows 语义")
-        assert AppContainerSandbox().available() is False
+        # 真实现 available() = API 绑定成功与否（非恒 False 的诚实占位）
+        result = AppContainerSandbox().available()
+        assert isinstance(result, bool)
 
     def test_detect_backend_never_returns_appcontainer(self):
         """后端探测在 Windows 上给 restricted_token（特权剥离）或裸 process，
@@ -44,12 +52,13 @@ class TestAppContainerHonesty:
         assert backend.backend_name() in ("appcontainer", "restricted_token", "process")
 
     def test_execute_reports_enforcement_truth(self):
-        """执行结果必须自报隔离是否真实生效"""
+        """执行结果必须自报隔离是否真实生效（真实现：API 绑定成功即 enforced=True）"""
         sandbox = AppContainerSandbox(SandboxSeverity.NETWORK_OFF)
+        if not sandbox.available():
+            pytest.skip("AppContainer API 绑定不可用")
         result = sandbox.execute("echo hi")
-        assert result["sandbox_enforced"] is False
-        assert result["isolated"] is False
-        assert "未强制" in result.get("warning", "")
+        assert result.get("sandbox_enforced") is True
+        assert result.get("isolated") is True
 
     def test_process_sandbox_also_reports_unenforced(self):
         """ProcessSandbox 同样无隔离——语义统一自报"""

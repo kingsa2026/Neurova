@@ -180,21 +180,6 @@ class SeatbeltSandbox(ExecSandbox):
         return ["sandbox-exec", "-p", profile, "sh", "-c", command]
 
 
-class AppContainerSandbox(ExecSandbox):
-    """Windows: AppContainer 受限执行。
-
-    P1-7 诚实化：真实现（COM 派生受限 token / packaged app 语义）尚未落地，
-    available() 必须返回 False——原占位在 win32 返回 True 但执行走普通 shell，
-    让治理层误以为隔离生效（安全谎言）。真实现推后。
-    """
-
-    def available(self) -> bool:
-        return False
-
-    def backend_name(self) -> str:
-        return "appcontainer"
-
-
 def _detect_backend(severity: SandboxSeverity) -> ExecSandbox:
     """按平台与可用工具选择最佳隔离后端；始终能降级到 ProcessSandbox。"""
     if severity == SandboxSeverity.NONE:
@@ -323,7 +308,6 @@ __all__ = [
     "ProcessSandbox",
     "BubblewrapSandbox",
     "SeatbeltSandbox",
-    "AppContainerSandbox",
     "get_exec_sandbox",
     "reset_exec_sandbox",
     "execute_in_sandbox",

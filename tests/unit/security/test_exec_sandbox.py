@@ -8,8 +8,8 @@ import sys
 import unittest
 from unittest.mock import patch
 
+from neurova.sandbox.appcontainer import AppContainerSandbox
 from neurova.sandbox.exec_sandbox import (
-    AppContainerSandbox,
     BubblewrapSandbox,
     ExecSandbox,
     ProcessSandbox,
@@ -49,9 +49,7 @@ class TestBackendDetection(unittest.TestCase):
         """P1-7+P2：AppContainer 未实现；Windows 给 SAFER 受限令牌（特权剥离）
         或裸 ProcessSandbox（SAFER 不可达兜底），绝不返回说谎的 AppContainer"""
         sandbox = get_exec_sandbox(SandboxSeverity.READ_ONLY)
-        from neurova.sandbox.exec_sandbox import AppContainerSandbox
-
-        # 遗留③ 后：AppContainer 是真实现（不再是说谎占位），Windows 三级优先
+        # 遗留③ 后：AppContainer 是真实现（exec_sandbox 谎言占位已删除），三级优先
         self.assertIn(sandbox.backend_name(), ("appcontainer", "restricted_token", "process"))
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux 专属")
