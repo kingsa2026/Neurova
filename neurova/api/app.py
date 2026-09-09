@@ -290,6 +290,20 @@ def _load_saved_agents(app_state: AppState, default_workspace: str) -> None:
         logger.info("Loaded %d saved agents from workspaces", loaded)
 
 
+def _resolve_tts_lazy_release(env_value: str, config_value) -> bool:
+    """TTS 按需加载默认值解析（纯函数，供测试）。
+
+    启动性能（2026-09-09）：moss-nano 启动同步加载 + 预热推理实测 17.5s，
+    为启动期最大单项。默认翻转为 lazy_release=on（启动跳过引擎加载，首次
+    合成时 _ensure_ready 按需初始化）；env NEUROVA_TTS_LAZY_RELEASE 保持
+    部署级显式开关优先（"1" 开 / "0" 关），config 键其次。
+    """
+    v = (env_value or "").strip()
+    if v:
+        return v == "1"
+    return bool(config_value) if config_value is not None else True
+
+
 def _initialize_components(app_state: AppState) -> None:
     """
     初始化核心组件
@@ -418,10 +432,11 @@ def _initialize_components(app_state: AppState) -> None:
 
         from neurova.tts.manager import TTSConfig, TTSManager
 
-        # H2-C：env 优先（部署级开关），config 键其次，默认关（行为不变）
-        lazy_release = (
-            _os.environ.get("NEUROVA_TTS_LAZY_RELEASE", "").strip() == "1"
-            or bool(app_state.config.get("tts_lazy_release", False))
+        # 启动性能（2026-09-09）：默认 lazy_release=on（启动跳过引擎加载，
+        # 首次合成按需初始化）；env 部署级开关优先，config 键其次。
+        lazy_release = _resolve_tts_lazy_release(
+            _os.environ.get("NEUROVA_TTS_LAZY_RELEASE", ""),
+            app_state.config.get("tts_lazy_release"),
         )
         _ttl_env = _os.environ.get("NEUROVA_TTS_RELEASE_TTL", "").strip()
         tts_config = TTSConfig(
@@ -678,6 +693,40 @@ def _add_health_routes(app: FastAPI, app_state: AppState) -> None:
         }
 
 
+def _schedule_mcp_bootstrap(app_state: AppState):
+    """MCP bootstrap 后台化（启动性能 2026-09-09）。
+
+    npx 拉起 filesystem server 实测 13.6s，原同步 await 把 /health 就绪时间
+    整体拖后。改为 create_task 后台连接，不阻塞 startup 事件；完成后把已连
+    接客户端补挂到启动期已存在 agent 的 ToolRouter——否则后台化后默认 agent
+    永远拿不到 MCP 工具（原同步路径同样存在此断链：agent init_tools 先于
+    bootstrap 完成，attach 时 _clients 还是空的）。失败仅告警，不阻断启动。
+    """
+
+    async def _run():
+        try:
+            from neurova.tool_layers.mcp_bootstrap import (
+                attach_bootstrapped_clients,
+                bootstrap_mcp,
+            )
+
+            results = await bootstrap_mcp()
+            logger.info("MCP bootstrap: %s", results)
+
+            for agent_id, agent in list(app_state.agents.items()):
+                router = getattr(agent, "tool_router", None)
+                if router is None:
+                    continue
+                try:
+                    attach_bootstrapped_clients(router)
+                except Exception as e:  # noqa: BLE001 - 单个 agent 挂载失败不拖垮整体
+                    logger.debug("MCP attach to agent '%s' skipped: %s", agent_id, e)
+        except Exception as e:  # noqa: BLE001 - bootstrap 失败不阻断启动
+            logger.warning("MCP bootstrap skipped: %s", e)
+
+    return asyncio.create_task(_run(), name="mcp-bootstrap")
+
+
 async def _on_startup(app_state: AppState) -> None:
     """
     应用启动事件
@@ -774,14 +823,9 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as e:
         logger.debug("VoiceAdapter registration skipped: %s", e)
 
-    # MCP bootstrap：按共享配置连接 enabled 的 MCP 服务器（失败仅告警，不阻断启动）
-    try:
-        from neurova.tool_layers.mcp_bootstrap import bootstrap_mcp
-
-        mcp_results = await bootstrap_mcp()
-        logger.info("MCP bootstrap: %s", mcp_results)
-    except Exception as e:
-        logger.warning("MCP bootstrap skipped: %s", e)
+    # MCP bootstrap：按共享配置连接 enabled 的 MCP 服务器（后台任务，不阻塞
+    # 就绪；完成后补挂到已存在 agent 的 ToolRouter）
+    _schedule_mcp_bootstrap(app_state)
 
     # 更新全局应用状态（TTS/Audio/VoiceEngine 已初始化）
     from neurova.api.endpoints import set_app_state as _update_app_state
