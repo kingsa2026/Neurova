@@ -141,3 +141,48 @@ P0-A 安全 → P0-B 并发 → P0-C 流式 → P1-D 记忆 → P1-E 扫荡 → 
 | P1-F | ~1.5 天 | 中 |
 | P1-G | ~1.5 天 | 中（G1 流式缓冲牵动渲染层） |
 | P2-H | 多轮 | 低（均为独立清理） |
+
+
+---
+
+## 执行状态（2026-09-10 夜间自动执行收口，晨间快照）
+
+### 已完成并提交（8 个提交，每批独立可回溯）
+
+| 批次 | 提交 | 内容 |
+|------|------|------|
+| P0-A 安全收口 | c326bc8b + 7487a18e | A1-A8 全部：沙箱探测表填充（兼容类/实例）、docker 假分支显式拒绝、fail-open 收窄只读白名单、白名单 fullmatch、单调守卫恒开、审批单例、休眠审批 API 删除、/attachment 鉴权 |
+| P0-B 并发正确性 | a0500416 | B1-B6 全部：轮次态迁 ContextVar（新模块 core/turn_context.py）、recall guard 按 session 分桶、provider 读锁、ECB 锁、热切换串行锁、tool_engine 双检锁 |
+| P0-C 真流式 | d48a5c51 | C1-C5 全部：/chat/stream 真流式接线（emitter→队列模式）、SSE 心跳、chat_stream 限流熔断同源、SDK 重试禁用（3→0）、条件缓冲 |
+| P1-D 记忆层 | 3820cdd9 | D1/D2/D6/D7/D8/D9：persist.db WAL+常驻连接、touch 批量、关键词索引增量 upsert/remove、温度通道 SQL Top-N、_PersistDbStore 常驻、MoE 增量刷新 |
+| P1-E 扫荡 | da1dba2a | E1/E5/E6/E7：memory+file 五工具 to_thread、降级 MemoryManager 缓存单例、usage 记账常驻 WAL、肌肉落盘下沉、updater 去重+删死方法 |
+| P1-F 假接线 | 04f8f186 | F1/F3/F4/F7：provider 健康链接线、fallback 双定义删除、find_session 索引式定位（4 消费点）、RSI 参数 clamp |
+| P1-G 前端 | 27bd4f95 | G3/G5：Canvas 轮询卸载守卫、AgentStore TTL 缓存+in-flight 去重 |
+| P2-H 清理 | 141ed493 | H4/H5/H6/H7：/test debug 门控+单例锁、死 stub 删除、AGENTS 勘误（本地，文件被 gitignore）、三处 except-pass 可观测化 |
+
+### 后置台账（未在本轮执行，原因与建议）
+
+| 项 | 原因 | 建议 |
+|----|------|------|
+| F6 历史恢复截断 | context/orchestrator.py 为并行会话活跃工作区 | 白班在其提交后处理 |
+| F2 LLMRouter TTL 刷新 | llm_router.py 同上 | 同上 |
+| F5 PostChat 分流 | 主响应路径重构，需与 F6 统一设计 | 白班 |
+| E2 session fsync 下沉 | chat_pipeline 主热路径重叠 | 白班 |
+| E3 neurflow 下沉 / E4 渠道连接池化 | 大面机械改造，需独立回归窗口 | 独立批次 |
+| D3 依赖图合批 / D4 WriteQueue 批量语义 | remember 副作用语义需设计 | 独立批次 |
+| D5 全表驻留分区缓存 | 架构级改动 | 先出设计稿 |
+| G1 流式渲染缓冲 / G2 i18n 动态 / G4 computed / G6 SSE 401 / G9 滚动 | ChatPage.vue/i18n 并行会话重叠 | 白班 |
+| H1 memory_layer 拆分 / H2 情感收敛 / H3 e2e 补齐 | 大工程/多轮 | 按原计划分轮 |
+
+### 预存问题登记（非本轮引入，全部经 HEAD worktree 基线比对确认）
+
+1. **Pillow DLL 损坏**：`module PIL._imaging uses unknown slot ID 85` —— computer_shell 全链不可用；需用户侧 `pip install -U --force-reinstall pillow`
+2. **pydantic v1 环境**：缺 TypeAdapter/model_dump —— gate_catalog/knowledge_config 部分测试失败
+3. **缺 prometheus_client / openai / aiohttp / numpy** —— metrics、taxonomy、native client、np_matrix 相关测试失败
+4. **data/evolution/rsi_receipts.jsonl 工作区残留**（09-08 RSI 运行产物）—— tool_weights 零副作用测试失败
+5. **test_moe_router_reads_persist_db_not_json_store 套件顺序污染**（HEAD 基线同样失败，单跑通过）
+6. **canvas-edges 悬浮层断言**（CRLF/注释匹配问题，HEAD 基线同样失败）
+
+### 事故登记
+
+- 02:02 发生 stash 误弹事故：`git stash push <path>` 因文件仅暂存态未保存（"No local changes to save"），后续 `git stash pop` 弹出了预存的旧快照 stash（filter-branch: rewrite 时代），冲掉部分 P0-A 编辑并带入 361 个旧文件。处置：编辑全部重放、security/__init__.py 还原 HEAD、361 个文件按 mtime（02:02:55 同秒创建）精确判定后删除；被弹出的 stash 可经 reflog（e1c28825）恢复。**教训：共享工作区禁用 stash，改用 worktree 比对基线。**
