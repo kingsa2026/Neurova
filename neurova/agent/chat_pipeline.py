@@ -1030,7 +1030,53 @@ class ChatPipeline:
         vision_parts = getattr(ctx, "_pending_vision_parts", None)
         if vision_parts:
             self._apply_vision_attachments(ctx, vision_parts)
+            # 先激活图像轮路由再清切片（激活守卫读 _pending_vision_parts 判定图像轮）
+            self._maybe_activate_vision_routing(ctx)
             ctx._pending_vision_parts = None
+
+    def _current_model_name(self) -> str:
+        """当前 agent 配置的模型名（测试/异常安全）。"""
+        try:
+            return str(getattr(self.config.llm_config, "model", "") or "")
+        except Exception:
+            return ""
+
+    def _maybe_activate_vision_routing(self, ctx: ChatContext):
+        """图像轮自动路由：当前模型缺 vision 时，本轮覆盖到有 vision 的模型。
+
+        覆盖是请求级 ContextVar（见 llm_routing_overlay）：不 rebuild_loop、
+        不改 config、不落盘——用户手动选的模型在无图轮原样生效。
+        解析不到候选（全库无 vision 模型）时保持现状，不凭空造能力。
+        """
+        if not getattr(ctx, "_pending_vision_parts", None):
+            return None
+        from neurova.llm import llm_routing_overlay as _overlay
+
+        current = self._current_model_name()
+        resolved = _overlay.resolve_vision_capable_model(current)
+        if not resolved:
+            logger.info("[视觉路由] 当前模型 %s 无 vision 或无可用候选，本轮保持现状", current or "(auto)")
+            return None
+        provider_id, model_id = resolved
+        token = _overlay.activate_vision_override(provider_id, model_id)
+        ctx._vision_override_token = token
+        logger.info(
+            "[视觉路由] 图像轮模型覆盖：%s -> %s/%s（请求级，轮次结束自动恢复）",
+            current or "(auto)", provider_id, model_id,
+        )
+        return token
+
+    def _clear_vision_routing(self, ctx: ChatContext):
+        """轮次 LLM 调用结束（含工具续调）后恢复覆盖，防同任务后续调用串模型。"""
+        token = getattr(ctx, "_vision_override_token", None)
+        if token is not None:
+            try:
+                from neurova.llm.llm_routing_overlay import clear_vision_override
+
+                clear_vision_override(token)
+            except Exception:
+                logger.debug("视觉路由覆盖恢复失败（随请求任务消亡，无跨轮影响）", exc_info=True)
+            ctx._vision_override_token = None
 
     def _read_attachment_bytes(self, file_id: str) -> Optional[bytes]:
         """按 file_id 读取附件字节（测试可 monkeypatch）"""
@@ -1066,6 +1112,10 @@ class ChatPipeline:
             if file_type == "image" and data:
                 import base64
 
+                from neurova.attachment_parser import normalize_image_for_llm
+
+                # 大图归一化：超闸门图片降采样重编码，防 413 request_too_large
+                data, mime = normalize_image_for_llm(data, mime)
                 b64 = base64.b64encode(data).decode("ascii")
                 vision_parts.append(
                     {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
@@ -1638,6 +1688,10 @@ class ChatPipeline:
             self.context_orchestrator.mark_last_view_seen()
         except Exception:
             logger.debug("视图已读确认跳过", exc_info=True)
+
+        # 视觉路由覆盖恢复：LLM 主调用与工具续调均已完成，覆盖使命结束
+        #（异常路径不经过此处——ContextVar 随请求任务消亡，无跨轮残留）
+        self._clear_vision_routing(ctx)
 
     async def _call_agent_loop(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:
         """通过 Agent Loop 调用 LLM"""
