@@ -1,0 +1,1482 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Neurova 全系统架构",
+    "locale": "zh-CN",
+    "quality_profile": "standard",
+    "views": [
+      {
+        "id": "main-path",
+        "label": "主对话链路",
+        "focus": [
+          "users",
+          "ui",
+          "api",
+          "agent",
+          "pipeline",
+          "llm",
+          "providers"
+        ],
+        "note": "从一次聊天请求到多模型推理的主干。"
+      },
+      {
+        "id": "memory-loop",
+        "label": "记忆闭环",
+        "focus": [
+          "pipeline",
+          "mem_core",
+          "mlayer",
+          "retriever",
+          "vecstore",
+          "crystal",
+          "sleepm"
+        ],
+        "note": "检索、分类、结晶与睡眠巩固写回。"
+      },
+      {
+        "id": "tools-security",
+        "label": "工具与安全",
+        "focus": [
+          "pipeline",
+          "toolexec",
+          "builtin",
+          "tlayers",
+          "mcp",
+          "sandbox",
+          "approval"
+        ],
+        "note": "工具解析执行、注册表、MCP 与沙箱审批。"
+      },
+      {
+        "id": "cog-evolution",
+        "label": "认知与进化",
+        "focus": [
+          "emotion",
+          "corch",
+          "module",
+          "pminer",
+          "gene",
+          "rsi"
+        ],
+        "note": "认知编排与自改进进化引擎。"
+      },
+      {
+        "id": "ingress-storage",
+        "label": "接入与持久化",
+        "focus": [
+          "ui",
+          "channels",
+          "api",
+          "nflow",
+          "voice",
+          "maindb",
+          "memdb"
+        ],
+        "note": "多端接入、工作流语音与 17 库存储。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "users",
+      "type": "external",
+      "label": "用户",
+      "sublabel": "浏览器 / 桌面",
+      "pos": [
+        40,
+        576
+      ],
+      "size": [
+        96,
+        56
+      ]
+    },
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "NeurUI",
+      "sublabel": "Vue 3 · Pinia · 9 stores",
+      "tag": "65 页面",
+      "pos": [
+        190,
+        560
+      ],
+      "size": [
+        130,
+        80
+      ]
+    },
+    {
+      "id": "channels",
+      "type": "external",
+      "label": "渠道适配器",
+      "sublabel": "飞书·钉钉·TG·微信 ×14",
+      "pos": [
+        190,
+        710
+      ],
+      "size": [
+        160,
+        64
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "API 网关",
+      "sublabel": "FastAPI :9527 · JWT · CORS",
+      "tag": "85 端点组",
+      "pos": [
+        365,
+        560
+      ],
+      "size": [
+        170,
+        80
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "Agent Core",
+      "sublabel": "agent_core.py · 37 方法",
+      "pos": [
+        580,
+        560
+      ],
+      "size": [
+        160,
+        80
+      ]
+    },
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "ChatPipeline",
+      "sublabel": "6 步对话管线",
+      "tag": "核心",
+      "pos": [
+        770,
+        552
+      ],
+      "size": [
+        180,
+        84
+      ]
+    },
+    {
+      "id": "post",
+      "type": "backend",
+      "label": "PostChatPipeline",
+      "sublabel": "14 步后处理管线",
+      "pos": [
+        770,
+        712
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "cloud",
+      "label": "LLM 栈",
+      "sublabel": "多模型客户端 · ProviderManager",
+      "tag": "10 类路由",
+      "pos": [
+        1010,
+        560
+      ],
+      "size": [
+        160,
+        80
+      ]
+    },
+    {
+      "id": "providers",
+      "type": "external",
+      "label": "模型服务商",
+      "sublabel": "OpenAI·Anthropic·Gemini·Ollama 等",
+      "pos": [
+        1230,
+        560
+      ],
+      "size": [
+        200,
+        80
+      ]
+    },
+    {
+      "id": "provconf",
+      "type": "database",
+      "label": "providers.json",
+      "sublabel": "AES-256-GCM 密文",
+      "pos": [
+        1230,
+        712
+      ],
+      "size": [
+        200,
+        60
+      ]
+    },
+    {
+      "id": "mem_core",
+      "type": "backend",
+      "label": "MemCore",
+      "sublabel": "记忆检索 / 保存 / 温度",
+      "pos": [
+        470,
+        100
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "mlayer",
+      "type": "backend",
+      "label": "memory_layer",
+      "sublabel": "17 维自动分类 · schema",
+      "pos": [
+        650,
+        100
+      ],
+      "size": [
+        170,
+        60
+      ]
+    },
+    {
+      "id": "retriever",
+      "type": "backend",
+      "label": "UnifiedRetriever",
+      "sublabel": "BM25 + RRF 三路融合",
+      "pos": [
+        870,
+        100
+      ],
+      "size": [
+        170,
+        60
+      ]
+    },
+    {
+      "id": "vecstore",
+      "type": "database",
+      "label": "UnifiedVectorStore",
+      "sublabel": "TF-IDF · FAISS · Chroma",
+      "pos": [
+        1090,
+        100
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "l1m",
+      "type": "database",
+      "label": "L1 肌肉记忆",
+      "sublabel": "工具模式自动执行",
+      "pos": [
+        470,
+        230
+      ],
+      "size": [
+        120,
+        56
+      ]
+    },
+    {
+      "id": "l2m",
+      "type": "database",
+      "label": "L2 热缓存",
+      "sublabel": "高频快取",
+      "pos": [
+        650,
+        230
+      ],
+      "size": [
+        100,
+        56
+      ]
+    },
+    {
+      "id": "l3m",
+      "type": "database",
+      "label": "L3 工具记忆",
+      "sublabel": "经验闭环学习",
+      "pos": [
+        870,
+        230
+      ],
+      "size": [
+        110,
+        56
+      ]
+    },
+    {
+      "id": "workmem",
+      "type": "database",
+      "label": "工作记忆",
+      "sublabel": "会话级缓存",
+      "pos": [
+        1090,
+        230
+      ],
+      "size": [
+        140,
+        56
+      ]
+    },
+    {
+      "id": "hebb",
+      "type": "backend",
+      "label": "NeuHebb",
+      "sublabel": "Evocate 结构化推理",
+      "pos": [
+        1270,
+        230
+      ],
+      "size": [
+        160,
+        56
+      ]
+    },
+    {
+      "id": "crystal",
+      "type": "backend",
+      "label": "PatternCrystallizer",
+      "sublabel": "经验模式结晶",
+      "pos": [
+        480,
+        360
+      ],
+      "size": [
+        120,
+        56
+      ]
+    },
+    {
+      "id": "tkg",
+      "type": "database",
+      "label": "时序知识图谱",
+      "sublabel": "TKG · 时序事实",
+      "pos": [
+        650,
+        360
+      ],
+      "size": [
+        150,
+        56
+      ]
+    },
+    {
+      "id": "confl",
+      "type": "backend",
+      "label": "冲突 · 遗忘",
+      "sublabel": "检测 / 恢复",
+      "pos": [
+        870,
+        360
+      ],
+      "size": [
+        110,
+        56
+      ]
+    },
+    {
+      "id": "ekb",
+      "type": "database",
+      "label": "EKB 经验库",
+      "sublabel": "贝叶斯 · 推理链",
+      "pos": [
+        1090,
+        360
+      ],
+      "size": [
+        140,
+        56
+      ]
+    },
+    {
+      "id": "sleepm",
+      "type": "backend",
+      "label": "睡眠巩固",
+      "sublabel": "空闲整合 · 写回",
+      "pos": [
+        1270,
+        360
+      ],
+      "size": [
+        140,
+        56
+      ]
+    },
+    {
+      "id": "voice",
+      "type": "backend",
+      "label": "语音统一层",
+      "sublabel": "voice_engine · pipeline",
+      "pos": [
+        40,
+        880
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "tts",
+      "type": "backend",
+      "label": "TTS",
+      "sublabel": "MOSS · Edge · SAPI5",
+      "pos": [
+        210,
+        880
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "asr",
+      "type": "backend",
+      "label": "ASR",
+      "sublabel": "Whisper · FunASR",
+      "pos": [
+        370,
+        880
+      ],
+      "size": [
+        110,
+        60
+      ]
+    },
+    {
+      "id": "nflow",
+      "type": "backend",
+      "label": "NeurFlow",
+      "sublabel": "DAG 引擎 · 子流 · NL 设计",
+      "pos": [
+        40,
+        1000
+      ],
+      "size": [
+        130,
+        68
+      ]
+    },
+    {
+      "id": "sched",
+      "type": "backend",
+      "label": "调度器",
+      "sublabel": "APScheduler",
+      "pos": [
+        210,
+        1000
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "collab",
+      "type": "backend",
+      "label": "多 Agent 协作",
+      "sublabel": "swarm · team",
+      "pos": [
+        370,
+        1000
+      ],
+      "size": [
+        100,
+        60
+      ]
+    },
+    {
+      "id": "ntrig",
+      "type": "backend",
+      "label": "触发器",
+      "sublabel": "cron · webhook · 重试",
+      "pos": [
+        40,
+        1120
+      ],
+      "size": [
+        140,
+        60
+      ]
+    },
+    {
+      "id": "wfat",
+      "type": "backend",
+      "label": "工作流即工具",
+      "sublabel": "workflow_as_tool",
+      "pos": [
+        210,
+        1120
+      ],
+      "size": [
+        140,
+        60
+      ]
+    },
+    {
+      "id": "emotion",
+      "type": "backend",
+      "label": "情感层",
+      "sublabel": "17 种情感 · 上下文注入",
+      "pos": [
+        530,
+        880
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "growth",
+      "type": "backend",
+      "label": "成长层",
+      "sublabel": "成长分析",
+      "pos": [
+        700,
+        880
+      ],
+      "size": [
+        110,
+        60
+      ]
+    },
+    {
+      "id": "meta",
+      "type": "backend",
+      "label": "元认知",
+      "sublabel": "self_model · ledger",
+      "pos": [
+        830,
+        880
+      ],
+      "size": [
+        120,
+        60
+      ]
+    },
+    {
+      "id": "madapter",
+      "type": "backend",
+      "label": "模型适配",
+      "sublabel": "适配注册表",
+      "pos": [
+        990,
+        880
+      ],
+      "size": [
+        110,
+        60
+      ]
+    },
+    {
+      "id": "corch",
+      "type": "backend",
+      "label": "认知编排器",
+      "sublabel": "cognition_orchestrator",
+      "pos": [
+        530,
+        1000
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "module",
+      "type": "backend",
+      "label": "认知模块库",
+      "sublabel": "module_lib · 任务/空闲追踪",
+      "pos": [
+        710,
+        1000
+      ],
+      "size": [
+        180,
+        60
+      ]
+    },
+    {
+      "id": "toolexec",
+      "type": "backend",
+      "label": "工具执行器",
+      "sublabel": "tool_executor",
+      "pos": [
+        1160,
+        880
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "builtin",
+      "type": "backend",
+      "label": "内置工具",
+      "sublabel": "builtin_tools 单一事实源",
+      "tag": "40+",
+      "pos": [
+        1345,
+        880
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "tlayers",
+      "type": "backend",
+      "label": "tool_layers",
+      "sublabel": "统一注册表 · 编排",
+      "pos": [
+        1535,
+        880
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "mcp",
+      "type": "backend",
+      "label": "MCP",
+      "sublabel": "client · server · oauth",
+      "pos": [
+        1715,
+        880
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "skills",
+      "type": "backend",
+      "label": "技能市场",
+      "sublabel": "市场 · 安装门 · 扫描",
+      "pos": [
+        1160,
+        1000
+      ],
+      "size": [
+        120,
+        60
+      ]
+    },
+    {
+      "id": "sandbox",
+      "type": "security",
+      "label": "沙箱",
+      "sublabel": "exec_sandbox · 受限令牌",
+      "pos": [
+        1345,
+        1000
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "approval",
+      "type": "security",
+      "label": "审批",
+      "sublabel": "分段审批 · HITL",
+      "pos": [
+        1515,
+        1000
+      ],
+      "size": [
+        160,
+        60
+      ]
+    },
+    {
+      "id": "secops",
+      "type": "security",
+      "label": "安全域",
+      "sublabel": "RBAC · 审计 · 熔断 · 隐私",
+      "pos": [
+        1715,
+        1000
+      ],
+      "size": [
+        140,
+        60
+      ]
+    },
+    {
+      "id": "pminer",
+      "type": "backend",
+      "label": "模式挖掘",
+      "sublabel": "PatternMiner",
+      "pos": [
+        1850,
+        1100
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "gene",
+      "type": "backend",
+      "label": "遗传引擎",
+      "sublabel": "ToolGeneticEngine",
+      "pos": [
+        2010,
+        1100
+      ],
+      "size": [
+        140,
+        60
+      ]
+    },
+    {
+      "id": "synth",
+      "type": "backend",
+      "label": "NL 工具合成",
+      "sublabel": "nl_synthesizer",
+      "pos": [
+        2170,
+        1100
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "rsi",
+      "type": "backend",
+      "label": "RSI 自改进",
+      "sublabel": "提案 · 收敛 · 回滚",
+      "pos": [
+        1850,
+        1220
+      ],
+      "size": [
+        150,
+        68
+      ]
+    },
+    {
+      "id": "toolife",
+      "type": "backend",
+      "label": "工具生命周期",
+      "sublabel": "lifecycle 管理",
+      "pos": [
+        2020,
+        1220
+      ],
+      "size": [
+        140,
+        60
+      ]
+    },
+    {
+      "id": "feedback",
+      "type": "backend",
+      "label": "经验反馈",
+      "sublabel": "closed_loop",
+      "pos": [
+        2180,
+        1220
+      ],
+      "size": [
+        120,
+        60
+      ]
+    },
+    {
+      "id": "memdb",
+      "type": "database",
+      "label": "记忆库 ×4",
+      "sublabel": "persist · links · metacognition",
+      "pos": [
+        40,
+        1240
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "maindb",
+      "type": "database",
+      "label": "主库",
+      "sublabel": "neurova · users · rbac",
+      "pos": [
+        270,
+        1240
+      ],
+      "size": [
+        190,
+        64
+      ]
+    },
+    {
+      "id": "knowdb",
+      "type": "database",
+      "label": "知识库 ×2",
+      "sublabel": "knowledge · experience",
+      "pos": [
+        490,
+        1240
+      ],
+      "size": [
+        180,
+        64
+      ]
+    },
+    {
+      "id": "appdb",
+      "type": "database",
+      "label": "应用库 ×9",
+      "sublabel": "ingress · collab · usage",
+      "pos": [
+        700,
+        1240
+      ],
+      "size": [
+        200,
+        64
+      ]
+    },
+    {
+      "id": "flowdb",
+      "type": "database",
+      "label": "neurflow.db",
+      "sublabel": "工作流持久化",
+      "pos": [
+        930,
+        1240
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "ws",
+      "type": "database",
+      "label": "agent_workspaces",
+      "sublabel": "每 Agent 隔离工作区",
+      "pos": [
+        1110,
+        1240
+      ],
+      "size": [
+        190,
+        64
+      ]
+    },
+    {
+      "id": "models",
+      "type": "database",
+      "label": "本地模型",
+      "sublabel": "TTS · ONNX 嵌入",
+      "pos": [
+        1330,
+        1240
+      ],
+      "size": [
+        170,
+        64
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "记忆子系统 · memory_layer（~90 文件）",
+      "wraps": [
+        "mem_core",
+        "mlayer",
+        "retriever",
+        "vecstore",
+        "l1m",
+        "l2m",
+        "l3m",
+        "workmem",
+        "hebb",
+        "crystal",
+        "tkg",
+        "confl",
+        "ekb",
+        "sleepm"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "工作流 · 调度 · 语音",
+      "wraps": [
+        "voice",
+        "tts",
+        "asr",
+        "nflow",
+        "sched",
+        "collab",
+        "ntrig",
+        "wfat"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "认知编排层",
+      "wraps": [
+        "emotion",
+        "growth",
+        "meta",
+        "madapter",
+        "corch",
+        "module"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "工具 · 技能 · 安全域",
+      "wraps": [
+        "toolexec",
+        "builtin",
+        "tlayers",
+        "mcp",
+        "skills",
+        "sandbox",
+        "approval",
+        "secops"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "进化系统 · evolution",
+      "wraps": [
+        "pminer",
+        "gene",
+        "synth",
+        "rsi",
+        "toolife",
+        "feedback"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "持久化层 · 17 个 SQLite 库",
+      "wraps": [
+        "memdb",
+        "maindb",
+        "knowdb",
+        "appdb",
+        "flowdb",
+        "ws",
+        "models"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "users-to-ui",
+      "from": "users",
+      "to": "ui",
+      "label": "HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ui-to-api",
+      "from": "ui",
+      "to": "api",
+      "label": "REST · WS",
+      "labelDy": -20,
+      "labelAt": [
+        352,
+        655
+      ]
+    },
+    {
+      "id": "channels-to-api",
+      "from": "channels",
+      "to": "api",
+      "label": "Webhook"
+    },
+    {
+      "id": "api-to-agent",
+      "from": "api",
+      "to": "agent",
+      "label": "agent_ref",
+      "labelAt": [
+        557,
+        655
+      ]
+    },
+    {
+      "id": "agent-to-pipeline",
+      "from": "agent",
+      "to": "pipeline",
+      "label": "chat()",
+      "labelDy": -27,
+      "labelAt": [
+        755,
+        650
+      ]
+    },
+    {
+      "id": "pipeline-to-post",
+      "from": "pipeline",
+      "to": "post",
+      "label": "后处理",
+      "labelDy": 24
+    },
+    {
+      "id": "pipeline-to-llm",
+      "from": "pipeline",
+      "to": "llm",
+      "label": "推理"
+    },
+    {
+      "id": "llm-to-providers",
+      "from": "llm",
+      "to": "providers",
+      "label": "自适应路由"
+    },
+    {
+      "id": "llm-to-provconf",
+      "from": "llm",
+      "to": "provconf",
+      "label": "AES 密文",
+      "variant": "dashed"
+    },
+    {
+      "id": "pipeline-to-memcore",
+      "from": "pipeline",
+      "to": "mem_core",
+      "label": "检索 · 写回",
+      "fromSide": "top",
+      "toSide": "right",
+      "via": [
+        [
+          860,
+          500
+        ],
+        [
+          625,
+          500
+        ],
+        [
+          625,
+          130
+        ]
+      ]
+    },
+    {
+      "id": "memcore-to-mlayer",
+      "from": "mem_core",
+      "to": "mlayer"
+    },
+    {
+      "id": "mlayer-to-retriever",
+      "from": "mlayer",
+      "to": "retriever"
+    },
+    {
+      "id": "retriever-to-vecstore",
+      "from": "retriever",
+      "to": "vecstore"
+    },
+    {
+      "id": "mlayer-to-l1",
+      "from": "mlayer",
+      "to": "l1m",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "mlayer-to-l2",
+      "from": "mlayer",
+      "to": "l2m",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "mlayer-to-l3",
+      "from": "mlayer",
+      "to": "l3m",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "hebb-to-pipeline",
+      "from": "hebb",
+      "to": "pipeline",
+      "label": "Evocate 注入",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "top",
+      "via": [
+        [
+          1250,
+          258
+        ],
+        [
+          1250,
+          510
+        ],
+        [
+          860,
+          510
+        ]
+      ],
+      "labelAt": [
+        1250,
+        520
+      ]
+    },
+    {
+      "id": "post-to-crystal",
+      "from": "post",
+      "to": "crystal",
+      "label": "经验结晶",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          860,
+          810
+        ],
+        [
+          540,
+          810
+        ],
+        [
+          540,
+          440
+        ]
+      ]
+    },
+    {
+      "id": "post-to-ekb",
+      "from": "post",
+      "to": "ekb",
+      "label": "经验记录",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [
+        [
+          990,
+          744
+        ],
+        [
+          990,
+          470
+        ],
+        [
+          1160,
+          470
+        ]
+      ],
+      "labelAt": [
+        990,
+        470
+      ]
+    },
+    {
+      "id": "post-to-tkg",
+      "from": "post",
+      "to": "tkg",
+      "label": "事实写入",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [
+        [
+          975,
+          744
+        ],
+        [
+          975,
+          440
+        ],
+        [
+          725,
+          440
+        ]
+      ]
+    },
+    {
+      "id": "sleep-to-mlayer",
+      "from": "sleepm",
+      "to": "mlayer",
+      "label": "巩固写回",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "bottom",
+      "via": [
+        [
+          1250,
+          388
+        ],
+        [
+          1250,
+          185
+        ],
+        [
+          735,
+          185
+        ]
+      ],
+      "labelAt": [
+        1000,
+        185
+      ]
+    },
+    {
+      "id": "emotion-to-pipeline",
+      "from": "emotion",
+      "to": "pipeline",
+      "label": "情感上下文",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "via": [
+        [
+          605,
+          690
+        ],
+        [
+          860,
+          690
+        ]
+      ]
+    },
+    {
+      "id": "corch-to-module",
+      "from": "corch",
+      "to": "module"
+    },
+    {
+      "id": "pipeline-to-toolexec",
+      "from": "pipeline",
+      "to": "toolexec",
+      "label": "工具调用",
+      "fromSide": "right",
+      "toSide": "top",
+      "via": [
+        [
+          970,
+          594
+        ],
+        [
+          970,
+          798
+        ],
+        [
+          1235,
+          798
+        ]
+      ]
+    },
+    {
+      "id": "toolexec-to-builtin",
+      "from": "toolexec",
+      "to": "builtin"
+    },
+    {
+      "id": "builtin-to-tlayers",
+      "from": "builtin",
+      "to": "tlayers"
+    },
+    {
+      "id": "tlayers-to-mcp",
+      "from": "tlayers",
+      "to": "mcp"
+    },
+    {
+      "id": "toolexec-to-skills",
+      "from": "toolexec",
+      "to": "skills",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "toolexec-to-sandbox",
+      "from": "toolexec",
+      "to": "sandbox",
+      "label": "沙箱强制",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          1235,
+          975
+        ],
+        [
+          1305,
+          975
+        ],
+        [
+          1305,
+          1030
+        ]
+      ],
+      "labelAt": [
+        1305,
+        990
+      ]
+    },
+    {
+      "id": "toolexec-to-approval",
+      "from": "toolexec",
+      "to": "approval",
+      "label": "分段审批",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          1235,
+          960
+        ],
+        [
+          1595,
+          960
+        ]
+      ],
+      "labelDy": 14,
+      "labelAt": [
+        1400,
+        960
+      ]
+    },
+    {
+      "id": "post-to-pminer",
+      "from": "post",
+      "to": "pminer",
+      "label": "模式挖掘",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          860,
+          812
+        ],
+        [
+          1915,
+          812
+        ],
+        [
+          1915,
+          1076
+        ]
+      ],
+      "labelAt": [
+        1400,
+        812
+      ]
+    },
+    {
+      "id": "api-to-nflow",
+      "from": "api",
+      "to": "nflow",
+      "label": "工作流 API",
+      "fromSide": "bottom",
+      "toSide": "right",
+      "via": [
+        [
+          450,
+          800
+        ],
+        [
+          190,
+          800
+        ],
+        [
+          190,
+          1034
+        ]
+      ]
+    },
+    {
+      "id": "post-to-voice",
+      "from": "post",
+      "to": "voice",
+      "label": "TTS 合成",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "via": [
+        [
+          860,
+          830
+        ],
+        [
+          105,
+          830
+        ]
+      ]
+    },
+    {
+      "id": "voice-to-tts",
+      "from": "voice",
+      "to": "tts"
+    },
+    {
+      "id": "ntrig-to-nflow",
+      "from": "ntrig",
+      "to": "nflow",
+      "label": "触发",
+      "fromSide": "top",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "架构纪律",
+      "items": [
+        "深度模块 · agent_ref 依赖注入 · 零反向导入",
+        "SQLite 全库 threading.RLock · 懒加载破循环"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "记忆闭环",
+      "items": [
+        "17 维分类 · L1 肌肉记忆 / L2 热缓存 / L3 工具记忆",
+        "结晶 + EKB + TKG + 睡眠巩固写回"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "系统规模",
+      "items": [
+        "后端 550+ 文件 · 85 端点组 · 14 渠道 · 前端 65 页面",
+        "本地语音 MOSS TTS · Whisper / FunASR"
+      ]
+    }
+  ]
+}
