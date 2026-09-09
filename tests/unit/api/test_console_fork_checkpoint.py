@@ -35,6 +35,13 @@ class FakeRepo:
             return []
         return [s]
 
+    def find_session(self, session_id):
+        # P1-F4：端点走索引式定位，测试桩同步契约
+        s = self._session()
+        if session_id == s["session_id"]:
+            return s
+        return None
+
     def get_history(self, agent_id="", session_id="", max_messages=0):
         return list(self.messages)
 
@@ -99,8 +106,8 @@ class TestForkEndpoint:
         assert resp.status_code == 400
 
     def test_fork_missing_session_is_404(self, monkeypatch):
-        repo = FakeRepo()  # list_sessions 返回空 → s1 不存在
-        monkeypatch.setattr(repo, "list_sessions", lambda agent_id="", user_id="": [])
+        repo = FakeRepo()  # find_session 返回 None → s1 不存在（P1-F4 契约）
+        monkeypatch.setattr(repo, "find_session", lambda session_id: None)
         client = _client(monkeypatch, repo)
         resp = client.post(
             "/api/v1/console/chat/sessions/s1/fork",
