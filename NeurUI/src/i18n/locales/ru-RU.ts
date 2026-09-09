@@ -592,6 +592,7 @@ export default {
     slashNew: 'Начать новый диалог',
     slashClear: 'Очистить текущий экран',
     slashArchive: 'Архивировать текущий диалог',
+    slashCompact: 'Сжать контекст текущего диалога',
     slashPlan: 'Создать план выполнения',
     crossSearchTitle: 'Поиск по всем диалогам',
     crossSearchPlaceholder: 'Поиск по всем диалогам…',

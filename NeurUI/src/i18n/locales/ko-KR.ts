@@ -592,6 +592,7 @@ export default {
     slashNew: '새 대화 시작',
     slashClear: '현재 화면 지우기',
     slashArchive: '현재 대화 보관',
+    slashCompact: '현재 대화 컨텍스트 압축',
     slashPlan: '실행 계획 만들기',
     crossSearchTitle: '모든 대화 검색',
     crossSearchPlaceholder: '모든 대화에서 검색…',

@@ -592,6 +592,7 @@ export default {
     slashNew: 'Démarrer une nouvelle conversation',
     slashClear: 'Effacer la vue actuelle',
     slashArchive: 'Archiver la conversation actuelle',
+    slashCompact: 'Compacter le contexte de la conversation',
     slashPlan: 'Créer un plan dexécution',
     crossSearchTitle: 'Rechercher dans toutes les conversations',
     crossSearchPlaceholder: 'Rechercher dans toutes les conversations…',

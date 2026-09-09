@@ -594,6 +594,7 @@ export default {
     slashNew: 'Start a new conversation',
     slashClear: 'Clear current conversation view',
     slashArchive: 'Archive current conversation',
+    slashCompact: 'Compact current conversation context',
     slashPlan: 'Create an execution plan',
     crossSearchTitle: 'Search across conversations',
     crossSearchPlaceholder: 'Search across conversations…',

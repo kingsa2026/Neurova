@@ -592,6 +592,7 @@ export default {
     slashNew: 'Neue Unterhaltung starten',
     slashClear: 'Aktuelle Ansicht leeren',
     slashArchive: 'Aktuelle Unterhaltung archivieren',
+    slashCompact: 'Aktuellen Konversationskontext komprimieren',
     slashPlan: 'Ausführungsplan erstellen',
     crossSearchTitle: 'Alle Unterhaltungen durchsuchen',
     crossSearchPlaceholder: 'Alle Unterhaltungen durchsuchen…',

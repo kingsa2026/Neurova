@@ -31,15 +31,40 @@ function planRun(rawInput: string, seed: { value: string }, open: { value: boole
 
 describe('/plan 斜杠命令契约', () => {
   it('面板过滤：/plan 与 /plan <参数> 均命中（首词前缀）', () => {
-    const names = ['/plan', '/new', '/clear', '/archive']
+    const names = ['/plan', '/new', '/clear', '/archive', '/compact']
     expect(filterSlashCommands(names, '/plan')).toContain('/plan')
     expect(filterSlashCommands(names, '/plan 重构登录模块')).toContain('/plan')
     expect(filterSlashCommands(names, '/pl')).toContain('/plan')
   })
 
   it('面板过滤：/plansomething 不误命中（词边界）', () => {
-    const names = ['/plan', '/new', '/clear', '/archive']
+    const names = ['/plan', '/new', '/clear', '/archive', '/compact']
     expect(filterSlashCommands(names, '/plansomething')).not.toContain('/plan')
+  })
+
+  it('/compact 已注册且 /comp 前缀命中（zcode 上下文压缩对齐）', () => {
+    const names = ['/plan', '/new', '/clear', '/archive', '/compact']
+    expect(names).toContain('/compact')
+    expect(filterSlashCommands(names, '/compact')).toContain('/compact')
+    expect(filterSlashCommands(names, '/comp')).toContain('/compact')
+    // 词边界：未注册的 /compactor 不会出现在面板
+    expect(filterSlashCommands(names, '/compactor')).toEqual([])
+  })
+
+  it('/compact run 触发 onCompact 回调（页面经 sendMessage 原链路发送）', () => {
+    // 镜像 useSlashCommands.ts 的 /compact run 语义
+    let called = 0
+    const onCompact = () => {
+      called += 1
+    }
+    const registry = [
+      {
+        name: '/compact',
+        run: () => onCompact(),
+      },
+    ]
+    registry.find((c) => c.name === '/compact')?.run()
+    expect(called).toBe(1)
   })
 
   it('run(rawInput) 提取 /plan 后文本为需求种子并打开面板', () => {

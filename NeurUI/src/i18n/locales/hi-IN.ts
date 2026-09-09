@@ -592,6 +592,7 @@ export default {
     slashNew: 'नई बातचीत शुरू करें',
     slashClear: 'वर्तमान दृश्य साफ़ करें',
     slashArchive: 'वर्तमान बातचीत संग्रहित करें',
+    slashCompact: 'वर्तमान बातचीत संदर्भ संकुचित करें',
     slashPlan: 'निष्पादन योजना बनाएं',
     crossSearchTitle: 'सभी बातचीत में खोजें',
     crossSearchPlaceholder: 'सभी बातचीत में खोजें…',

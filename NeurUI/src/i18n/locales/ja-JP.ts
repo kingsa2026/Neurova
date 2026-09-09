@@ -592,6 +592,7 @@ export default {
     slashNew: '新しい会話を開始',
     slashClear: '現在の画面をクリア',
     slashArchive: '現在の会話をアーカイブ',
+    slashCompact: '現在の会話コンテキストを圧縮',
     slashPlan: '実行計画を作成',
     crossSearchTitle: '全会話を検索',
     crossSearchPlaceholder: '全会話を検索…',

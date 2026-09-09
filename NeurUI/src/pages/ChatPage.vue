@@ -367,6 +367,7 @@
         @stop="stopStreaming()"
         @send-queued-now="onSendQueuedNow"
         @slash-plan="onSlashPlan"
+        @slash-compact="onSlashCompact"
       />
 
 
@@ -580,6 +581,13 @@ function onPlanApproved(executePrompt: string): void {
 function onSlashPlan(seed: string): void {
   planRequestSeed.value = seed
   planPanelOpen.value = true
+}
+
+/** /compact 斜杠命令（ChatComposerArea emit 上抛）：经 sendMessage 原链路
+ *  发往后端命令分发（报告为该轮回复；流式/排队/锁互斥全复用） */
+function onSlashCompact(): void {
+  chatStore.setInputText('/compact')
+  void sendMessage()
 }
 
 /** 「↑ 立即」排队项（ChatComposerArea emit 上抛）：走 drain force 入口 */

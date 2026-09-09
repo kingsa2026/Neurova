@@ -592,6 +592,7 @@ export default {
     slashNew: 'بدء محادثة جديدة',
     slashClear: 'مسح شاشة المحادثة الحالية',
     slashArchive: 'أرشفة المحادثة الحالية',
+    slashCompact: 'ضغط سياق المحادثة الحالية',
     slashPlan: 'إنشاء خطة تنفيذ',
     crossSearchTitle: 'بحث في جميع المحادثات',
     crossSearchPlaceholder: 'ابحث في جميع المحادثات…',

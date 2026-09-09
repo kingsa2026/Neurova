@@ -604,6 +604,7 @@ export default {
     slashNew: '开始新会话',
     slashClear: '清空当前会话屏幕',
     slashArchive: '存档当前会话',
+    slashCompact: '压缩当前会话上下文',
     slashPlan: '制定执行计划',
     crossSearchTitle: '搜索所有会话',
     crossSearchPlaceholder: '搜索所有会话…',
