@@ -646,14 +646,14 @@ class SessionManager(SessionRepository):
             "dates": sorted(dates),
         }
 
-    def get_recent_context(self, agent_id: str, session_id: str, max_messages: int = 20) -> List[Dict[str, str]]:
+    def get_recent_context(self, agent_id: str, session_id: str, max_messages: Optional[int] = 20) -> List[Dict[str, str]]:
         """
         获取最近的对话上下文
 
         Args:
             agent_id: Agent ID
             session_id: 会话 ID
-            max_messages: 最大消息数
+            max_messages: 最大消息数（None=不截断，返回全会话消息；/compact 命令用）
 
         Returns:
             消息列表，格式为 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
@@ -683,7 +683,9 @@ class SessionManager(SessionRepository):
                             }
                         )
 
-        # 返回最近的 max_messages 条消息
+        # 返回最近的 max_messages 条消息（None=不截断）
+        if max_messages is None:
+            return all_messages
         return all_messages[-max_messages:] if len(all_messages) > max_messages else all_messages
 
     # ══════════════════════════════════════════════════════════════

@@ -107,6 +107,59 @@ def test_inject_attachments_none_keeps_input(monkeypatch):
     assert vision_parts == []
 
 
+class TestImagePlaceholderNeutrality:
+    """图片占位文本必须中性化（2026-09-09 串台事故）
+
+    根因：`请结合图片回答` 指令跟随 ctx.user_input 持久化进会话历史，
+    后续纯文本轮的模型看到一条"请结合图片回答"的指令但手里没有图
+    （图片 base64 只挂当轮请求），被带偏去 file_list/mcp 翻找图片文件，
+    并在回复中穿插对上一轮图片的道歉（串台表象）。
+
+    契约：
+    1. 持久化通道（user_input）只携带中性标记（文件名 + 已附图说明），
+       不携带任何要求模型执行的动作指令；
+    2. "请结合图片回答" 指令改由 _apply_vision_attachments 挂到当轮请求
+       的 text part（不落盘，随请求生命周期消亡）。
+    """
+
+    PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+
+    def test_persisted_input_has_no_imperative(self, monkeypatch):
+        import base64
+
+        p = make_pipeline()
+        monkeypatch.setattr(p, "_read_attachment_bytes", lambda fid: base64.b64decode(self.PNG_B64))
+
+        attachments = [
+            {"file_id": "fimg", "filename": "IMG_7734.png", "file_type": "image",
+             "mime_type": "image/png", "size": 100, "path": "/tmp/pic.png"}
+        ]
+        user_input, vision_parts = p._inject_attachments_into_input("这是什么", attachments)
+
+        assert len(vision_parts) == 1
+        assert "IMG_7734.png" in user_input
+        # 指令不得进入持久化通道
+        assert "请结合图片回答" not in user_input
+        assert "请结合" not in user_input
+
+    def test_request_level_text_part_carries_imperative(self):
+        from types import SimpleNamespace
+
+        p = make_pipeline()
+        ctx = SimpleNamespace(context=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "这是什么"},
+        ])
+        vision = [{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}]
+        p._apply_vision_attachments(ctx, vision)
+
+        text_part = ctx.context[-1]["content"][0]
+        assert text_part["type"] == "text"
+        # 原文保留 + 当轮指令在场（指令措辞与 _apply_vision_attachments 对齐）
+        assert "这是什么" in text_part["text"]
+        assert "请结合本轮附上的图片回答" in text_part["text"]
+
+
 class TestVisionMount:
     """图像切片必须挂到 context 最后一条 user 消息（R-3）"""
 
@@ -123,9 +176,10 @@ class TestVisionMount:
         vision = [{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}]
         p._apply_vision_attachments(ctx, vision)
 
-        # 最后一条 user 消息（index 3）变为 content list
+        # 最后一条 user 消息（index 3）变为 content list；text part 保留原文
+        # 并携带当轮指令（不落盘，随请求消亡）
         assert ctx.context[3]["content"] == [
-            {"type": "text", "text": "看图"},
+            {"type": "text", "text": "看图\n[请结合本轮附上的图片回答]"},
             {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}},
         ]
         # 之前的 user 消息（index 1）保持不变
