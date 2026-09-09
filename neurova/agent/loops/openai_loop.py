@@ -409,8 +409,60 @@ class OpenAILoop(BaseAgentLoop):
         got_content = False
         try:
             async for event in self._predict_stream_once(request_params):
-                if isinstance(event, dict) and event.get("type") == "content":
+                if isinstance(event, dict) and event.get("type") == "content" and event.get("data"):
                     got_content = True
+                # 修3（2026-09-09）：输出预算耗尽防线——finish_reason=length
+                # 且正文为空（思考模型把 max_tokens 吃满，HTTP 200 无异常，
+                # TokenLimitExceeded 溢出恢复永远不触发）。压缩消息后单次
+                # 重试；重试仍空则原样转发该 done（不二次重试，防循环）。
+                if (
+                    isinstance(event, dict)
+                    and event.get("type") == "done"
+                    and not got_content
+                    and not request_params.get("_length_empty_retried")
+                    and not (event.get("reply") or "").strip()
+                    and str(event.get("finish_reason") or "").lower() in ("length", "max_tokens")
+                ):
+                    compact, info = compact_messages_for_overflow(request_params.get("messages") or [])
+                    if info.get("folded_count", 0) > 0:
+                        logger.warning(
+                            "[CTX_RECOVERY] 输出预算耗尽(length)且正文为空，折叠 %d 条消息后单次重试",
+                            info["folded_count"],
+                        )
+                        yield {"type": "reasoning", "data": "检测到回复为空（输出预算被思考过程耗尽），正在压缩上下文后重试…"}
+                        # 被折叠消息摘要回写池（fire-and-forget，与溢出恢复同构）
+                        try:
+                            pool = getattr(
+                                getattr(self.agent, "context_orchestrator", None), "context_pool", None
+                            )
+                            if pool is not None:
+                                asyncio.ensure_future(
+                                    pool.rollup_overflow_digest(info.get("folded_messages") or [])
+                                )
+                        except Exception:
+                            logger.debug("length 恢复摘要回写跳过", exc_info=True)
+                        retry_params = {
+                            **request_params,
+                            "messages": compact,
+                            "_length_empty_retried": True,
+                        }
+                        async for ev in self._predict_stream(retry_params):
+                            # 重试仍空 → 补可见提示（杜绝空气泡），done.reply 同步改写
+                            # 使 ctx.reply 非空、落盘与前端气泡均有内容（闭环）
+                            if (
+                                isinstance(ev, dict)
+                                and ev.get("type") == "done"
+                                and not (ev.get("reply") or "").strip()
+                            ):
+                                notice = (
+                                    "⚠️ 未能生成回复：输出预算被思考过程占满（finish_reason=length），"
+                                    "压缩上下文重试后仍未产出正文。建议切换非思考模型，"
+                                    "或在模型设置中调大最大输出 token。"
+                                )
+                                yield {"type": "content", "data": notice}
+                                ev = {**ev, "reply": notice}
+                            yield ev
+                        return
                 yield event
             return
         except BaseException as e:  # noqa: BLE001 - 统一捕获后按类型分流

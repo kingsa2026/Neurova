@@ -55,6 +55,16 @@ class ContextOrchestrator:
         # P1-1④ ack 集：最近一次 build_context 视图内的池 chunk hash
         self._last_view_hashes: set = set()
 
+        # 修2（2026-09-09）：对话窗口 token 预算压缩（zcode 式）
+        # _window_summarizer: async (dropped_msgs, previous_summary) -> Optional[str]
+        # _window_compaction_cache: session_id -> {"summary", "covered_hashes"}
+        #   （已摘要覆盖的消息 hash，跨轮增量摘要不重复调 LLM）
+        self._window_summarizer = None
+        self._window_compaction_cache: dict = {}
+        # 增量防抖阈值（类级常量语义）：距上次摘要新追加消息数 ≤ 此值时复用缓存摘要
+        self._DELTA_RESUMMARY_MSGS = 4
+        self._last_archived_window_hashes: set = set()
+
         # 初始化 ContextPool（如果启用）
         if use_pool:
             from neurova.context_pool import ContextPool
@@ -488,12 +498,14 @@ class ContextOrchestrator:
                 context.append({"role": "system", "content": instruction})
 
             # 2. 对话窗口（原始时序，append-only）
+            # 修2（2026-09-09）：token 预算压缩——折叠发生在归档之后，
+            # 被折叠消息原文已入池、可经 [历史回忆] 语义召回（零丢失）。
             # 审计⑦：视图重建剥 tool_calls/tool_call_id（只保留 role+content），
             # 先重建后 repair——残留 role:"tool" 此处转 user 注记，协议合法
-            window_msgs = [
-                {"role": msg.get("role", "user"), "content": msg["content"]}
-                for msg in conversation_context
-            ]
+            window_budget = self._compute_window_budget(
+                system_instructions, developer_instructions, tools_desc
+            )
+            window_msgs = await self._apply_window_budget(conversation_context, window_budget)
             try:
                 from neurova.context.recovery import repair_tool_turns
 
@@ -507,7 +519,7 @@ class ContextOrchestrator:
             #    查询专门检索，是"本轮相关"的定义本身；同时已归档供未来召回）
             window_hashes = {
                 ContextInput.compute_hash(ContextSource.CONVERSATION, msg["content"])
-                for msg in conversation_context
+                for msg in window_msgs
             }
             injected_hashes = set(window_hashes)
             for memory in relevant_memories or []:
@@ -794,13 +806,16 @@ class ContextOrchestrator:
         # 局部导入（与 build_context 同模式，避免模块级循环依赖）
         from neurova.context_pool import ContextInput, ContextSource
 
+        archived_hashes: set = set()
         for msg, turn_id in assign_turn_ids(conversation_context):
             role = (msg or {}).get("role", "user")
             if role == "tool":
+                content = msg.get("content", "")
+                archived_hashes.add(ContextInput.compute_hash(ContextSource.TOOL_CALL, content))
                 self.context_pool.add_context(
                     ContextInput(
                         source=ContextSource.TOOL_CALL,
-                        content=msg.get("content", ""),
+                        content=content,
                         priority=60,
                         metadata={
                             "role": "tool",
@@ -811,14 +826,238 @@ class ContextOrchestrator:
                     )
                 )
             else:
+                content = msg.get("content", "")
+                archived_hashes.add(ContextInput.compute_hash(ContextSource.CONVERSATION, content))
                 self.context_pool.add_context(
                     ContextInput(
                         source=ContextSource.CONVERSATION,
-                        content=msg.get("content", ""),
+                        content=content,
                         priority=60,
                         metadata={"role": role, "turn_id": turn_id},
                     )
                 )
+        # 修2：暴露本轮归档的窗口 hash 集（窗口折叠发生在归档之后——零丢失判据）
+        self._last_archived_window_hashes = archived_hashes
+
+    # ══════════════════════════════════════════════════════════════
+    # 修2（2026-09-09）：对话窗口 token 预算 + 自动压缩（zcode 式）
+    # ══════════════════════════════════════════════════════════════
+
+    def _resolve_window_token_budget(self) -> int:
+        """窗口 token 预算：模型元数据预算（get_token_budget_for_model）为上限。
+
+        窗口只是 prompt 的一部分（system 前缀/工具 schema/记忆注入共享），
+        取池预算的 60% 作为窗口份额，钳位 [3000, 100000]。
+        """
+        try:
+            from neurova.context_pool import ContextPool
+
+            model_name = str(getattr(self.config, "llm_model", "") or "gpt-4")
+            pool_budget = ContextPool.get_token_budget_for_model(model_name)
+        except Exception:  # noqa: BLE001 - 预算查询失败不阻断
+            pool_budget = 16000
+        return max(3000, min(int(pool_budget * 0.6), 100000))
+
+    def _compute_window_budget(
+        self,
+        system_instructions: list,
+        developer_instructions: list,
+        tools_desc: str,
+    ) -> int:
+        """预算再扣减：本轮固开头部（system 前缀/工具描述/记忆注入位）占多少，
+        窗口份额同步收窄，防止「窗口按满额预算装配后总 prompt 仍超」。
+        """
+        from neurova.context.token_estimator import estimate_tokens
+
+        try:
+            # tools_desc 已含于 developer_instructions（build_context 装配处
+            # append），不重复加算——双计会把窗口预算压得过小
+            overhead = 0
+            for instruction in list(system_instructions or []) + list(developer_instructions or []):
+                overhead += estimate_tokens(str(instruction))
+            return max(1000, self._resolve_window_token_budget() - overhead)
+        except Exception:  # noqa: BLE001
+            return self._resolve_window_token_budget()
+
+    def _build_window_summarizer(self):
+        """摘要桥（懒构建）：池已有 summarizer 时复用其 LLM 通道。"""
+        if self._window_summarizer is not None:
+            return self._window_summarizer
+
+        async def _summarize(dropped_msgs, previous_summary=""):
+            pool = self.context_pool
+            summarizer = getattr(pool, "_summarizer", None) if pool else None
+            if summarizer is None:
+                return None
+            from neurova.context_pool import ContextInput, ContextSource
+
+            chunks = [
+                ContextInput(
+                    source=ContextSource.CONVERSATION,
+                    content=(m or {}).get("content", ""),
+                    priority=60,
+                    metadata={"role": (m or {}).get("role", "user")},
+                )
+                for m in dropped_msgs or []
+            ]
+            return await summarizer.summarize(chunks, previous_summary=previous_summary)
+
+        self._window_summarizer = _summarize
+        return self._window_summarizer
+
+    async def _apply_window_budget(
+        self,
+        conversation_context: list,
+        budget_tokens: int,
+    ) -> list:
+        """窗口预算裁剪：未超预算原样返回；超预算折叠老消息为摘要行 + 尾部窗口。
+
+        - 跨轮增量：已摘要覆盖的消息 hash 记入 _window_compaction_cache，
+          后续折叠只对新落入折叠区的消息做增量摘要（previous_summary 传递）。
+        - 归档先行：本方法在 _archive_conversation_to_pool 之后调用，
+          折叠只影响视图，原文零丢失。
+        """
+        from neurova.context.window_compactor import compact_window, estimate_window_tokens
+
+        msgs = [
+            {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
+            for m in (conversation_context or [])
+            if isinstance(m, dict) and (m or {}).get("content")
+        ]
+        if not msgs or estimate_window_tokens(msgs) <= budget_tokens:
+            return [
+                {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
+                for m in (conversation_context or [])
+                if isinstance(m, dict) and (m or {}).get("content")
+            ]
+
+        cache = self._window_compaction_cache.setdefault(
+            self.session_id or "_", {"summary": "", "covered": set()}
+        )
+        # 增量防抖：距上次成功摘要新追加的消息数 ≤ 阈值时复用缓存摘要
+        # （省一轮摘要 LLM——实测摘要链路 30s+，每轮重调不可接受）。
+        # 未覆盖的消息仍归档在池中，零丢失。
+        last_count = cache.get("last_count", 0)
+        delta_msgs = (len(msgs) - last_count) if last_count else len(msgs)
+        reuse_summary = bool(cache.get("summary")) and delta_msgs <= self._DELTA_RESUMMARY_MSGS
+        summarize = None if reuse_summary else self._build_window_summarizer()
+
+        compaction = await compact_window(
+            msgs,
+            budget_tokens,
+            summarize=summarize,
+            previous_summary=cache.get("summary", ""),
+        )
+        if compaction is None:
+            return msgs
+
+        # 更新跨轮缓存（摘要失败时保留旧摘要，下次重试增量）
+        if compaction.summary:
+            cache["summary"] = compaction.summary
+            cache["last_count"] = len(msgs)
+            from neurova.context_pool import ContextInput, ContextSource
+
+            # 标记本轮仍被折叠的消息为已覆盖（凡未出现在新窗口的）
+            kept_set = {m["content"] for m in compaction.window}
+            for m in msgs:
+                if m["content"] not in kept_set:
+                    cache["covered"].add(
+                        ContextInput.compute_hash(ContextSource.CONVERSATION, m["content"])
+                    )
+
+        window = compaction.window
+        if compaction.compacted_count > 0 and not compaction.summary:
+            # 摘要器缺失/失败：注入静态折叠桩（或沿用既有摘要），不静默丢上下文
+            existing = cache.get("summary", "")
+            stub = (
+                f"[早期对话摘要] {existing}"
+                if existing
+                else (
+                    f"[早期对话摘要] （早期 {compaction.compacted_count} 条消息已折叠以控制上下文预算；"
+                    "如需细节请让我检索历史记忆。）"
+                )
+            )
+            window = [{"role": "system", "content": stub}] + window
+
+        logger.info(
+            "[WINDOW_COMPACT] 窗口超预算折叠: %d msgs → %d（折叠 %d 条, token %d → %d, LLM摘要=%s）",
+            len(msgs),
+            len(window),
+            compaction.compacted_count,
+            compaction.tokens_before,
+            compaction.tokens_after,
+            bool(compaction.summary),
+        )
+        return window
+
+    async def manual_compact(self, conversation_history: list) -> dict:
+        """/compact 手动压缩：无视预算水位强制折叠当前会话窗口。
+
+        与 _apply_window_budget 共用折叠/摘要桥和跨轮缓存——手动压缩
+        生成的摘要直接进 _window_compaction_cache，后续轮次超预算折叠
+        时携带同一摘要（zcode 语义：压缩后窗口立即变小且不重复摘要）。
+
+        Returns:
+            {compacted, folded, kept, tokens_before, tokens_after,
+             summary_generated, reason?}
+        """
+        from neurova.context.window_compactor import compact_window, estimate_window_tokens
+
+        msgs = [
+            {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
+            for m in (conversation_history or [])
+            if isinstance(m, dict) and (m or {}).get("content")
+        ]
+        if not msgs:
+            return {"compacted": False, "reason": "empty_history", "folded": 0, "kept": 0,
+                    "tokens_before": 0, "tokens_after": 0, "summary_generated": False}
+
+        tokens_before = estimate_window_tokens(msgs)
+        # 强制折叠：预算取窗口默认份额的一半（手动压缩意图明确=尽快瘦身）
+        budget = max(1500, self._resolve_window_token_budget() // 2)
+        cache = self._window_compaction_cache.setdefault(
+            self.session_id or "_", {"summary": "", "covered": set()}
+        )
+
+        compaction = await compact_window(
+            msgs,
+            budget,
+            summarize=self._build_window_summarizer(),
+            previous_summary=cache.get("summary", ""),
+        )
+        if compaction is None:
+            return {"compacted": False, "reason": "under_budget", "folded": 0, "kept": len(msgs),
+                    "tokens_before": tokens_before, "tokens_after": tokens_before,
+                    "summary_generated": False}
+
+        if compaction.summary:
+            cache["summary"] = compaction.summary
+            cache["last_count"] = len(msgs)
+            from neurova.context_pool import ContextInput, ContextSource
+
+            kept_set = {m["content"] for m in compaction.window}
+            for m in msgs:
+                if m["content"] not in kept_set:
+                    cache["covered"].add(
+                        ContextInput.compute_hash(ContextSource.CONVERSATION, m["content"])
+                    )
+        elif cache.get("summary"):
+            # 无新摘要但旧摘要存在：保留（后续轮次仍携带）
+            pass
+
+        logger.info(
+            "[WINDOW_COMPACT] /compact 手动压缩: 折叠 %d 条, token %d → %d, LLM摘要=%s",
+            compaction.compacted_count, compaction.tokens_before,
+            compaction.tokens_after, bool(compaction.summary),
+        )
+        return {
+            "compacted": True,
+            "folded": compaction.compacted_count,
+            "kept": len(compaction.window),
+            "tokens_before": compaction.tokens_before,
+            "tokens_after": compaction.tokens_after,
+            "summary_generated": bool(compaction.summary),
+        }
 
     # ══════════════════════════════════════════════════════════════
     # 系统提示构建

@@ -9,6 +9,7 @@ import json
 from neurova.core.logger import get_logger
 from abc import ABC, abstractmethod
 from datetime import datetime
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 # Agent 仅用于类型注解；运行时导入会与 agent_core 形成循环依赖
@@ -204,8 +205,6 @@ class BaseAgentLoop(ABC):
                     skill_result = await self.agent.skill_registry.execute_skill(_tc_function_name, _caller_args, _caller_ctx)
                     # SkillRegistry 找不到该 skill 时返回 None；找到但执行失败返回 success=False
                     if skill_result is not None and getattr(skill_result, "success", False):
-                        from types import SimpleNamespace
-
                         exec_result = SimpleNamespace(
                             success=True,
                             data=getattr(skill_result, "data", None),
@@ -235,8 +234,6 @@ class BaseAgentLoop(ABC):
                     )
                     router_result = await _router_rv if asyncio.iscoroutine(_router_rv) else _router_rv
                     if router_result and router_result.success:
-                        from types import SimpleNamespace
-
                         exec_result = SimpleNamespace(
                             success=True,
                             data=router_result.result,

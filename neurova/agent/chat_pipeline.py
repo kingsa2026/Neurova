@@ -586,11 +586,61 @@ class ChatPipeline:
     # ══════════════════════════════════════════════════════════════
 
     async def _step_pre_llm_checks(self, ctx: ChatContext):
-        """命令分发（B4）、ToolMemory 检查、技能获取、NL 合成"""
+        """命令分发（B4）、/compact 压缩命令、ToolMemory 检查、技能获取、NL 合成"""
+        await self._check_compact_command(ctx)
         await self._check_command_dispatch(ctx)
         await self._check_tool_memory(ctx)
         await self._check_skill_acquisition(ctx)
         await self._check_nl_synthesis(ctx)
+
+    async def _check_compact_command(self, ctx: ChatContext):
+        """/compact 手动压缩命令（对齐 zcode）：不调 LLM 正文轮，直接折叠
+        会话窗口老消息为摘要（经 ContextOrchestrator 的预算切分+摘要桥），
+        报告折叠统计后经 B4 同款 command_dispatched 短路 LLM。
+        异常不崩轮——回落正常 LLM 流程。
+        """
+        text = (ctx.user_input or "").strip().lower()
+        if text.split(None, 1)[0] not in ("/compact", "/压缩") if text else True:
+            return
+        # event_emitter 提前提取：命令回复不经 LLM，无 content 事件——
+        # SSE 客户端靠 emitter 的 chunk 事件看到回复（AGENT_REPLY 只广播 WS）
+        if ctx.event_emitter is None and isinstance(ctx.metadata, dict):
+            candidate = ctx.metadata.get("event_emitter")
+            if callable(candidate):
+                ctx.event_emitter = candidate
+        try:
+            session_id = ctx.session_id or "default"
+            full_history = self.session_manager.get_recent_context(
+                agent_id=self.config.agent_id,
+                session_id=session_id,
+                max_messages=None,
+            )
+            stats = await self.context_orchestrator.manual_compact(full_history or [])
+            if stats.get("compacted"):
+                ctx.reply = (
+                    f"📦 上下文已压缩：折叠 {stats.get('folded', 0)} 条早期消息"
+                    f"（估算 {stats.get('tokens_before', 0)} → {stats.get('tokens_after', 0)} tokens）。"
+                    "摘要将在后续每轮注入视图；原始对话已完整归档，可随时检索回忆（零丢失）。"
+                )
+            else:
+                reason = stats.get("reason")
+                ctx.reply = (
+                    "📦 上下文无需压缩：会话历史为空。"
+                    if reason == "empty_history"
+                    else "📦 上下文无需压缩：当前会话窗口在预算内，未做折叠。"
+                )
+            ctx.metadata = dict(ctx.metadata or {})
+            ctx.metadata["command_dispatched"] = True
+            # 命令回复直达 SSE 客户端（无 LLM content 事件可转发）；
+            # emitter 契约 = _emit(kind, data) 双参（console 端点定义）
+            if callable(getattr(ctx, "event_emitter", None)):
+                try:
+                    ctx.event_emitter("content", ctx.reply)
+                except Exception:  # noqa: BLE001 - 发射失败不影响回复落盘
+                    logger.debug("/compact 回复发射失败", exc_info=True)
+            logger.info("/compact 命令完成: session=%s stats=%s", session_id, stats)
+        except Exception as e:  # noqa: BLE001 - 命令失败回落 LLM 流程
+            logger.warning("/compact 命令失败（回落 LLM 流程）: %s", e)
 
     async def _check_command_dispatch(self, ctx: ChatContext):
         """B4（P2）command-dispatch：技能声明直达工具时的低延迟高确定性路径。
@@ -1120,7 +1170,11 @@ class ChatPipeline:
                 vision_parts.append(
                     {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
                 )
-                parts.append(f"[用户上传了图片: {filename}, 请结合图片回答]")
+                # 持久化通道只留中性标记：指令不能进历史（2026-09-09 串台事故——
+                # 图片 base64 只挂当轮请求，历史里的"请结合图片回答"对后续文本轮
+                # 是一条无图可依、无法履行的指令，弱模型被带偏去文件系统找图）；
+                # 当轮指令由 _apply_vision_attachments 挂到请求级 text part。
+                parts.append(f"[用户上传了图片: {filename}（图片已随本轮请求附上）]")
                 continue
 
             text, status = extract_attachment_text(data, filename, file_type)
@@ -1140,6 +1194,8 @@ class ChatPipeline:
 
         R-3 修复: 全量扫描找最后一条 user 消息（context 末尾可能是 system/记忆
         等非 user 角色，仅查 [-1] 会漏挂，导致模型收不到图像）。
+        当轮指令挂这里（请求级）：图像 base64 与"请结合图片回答"指令同生命周期，
+        随请求消亡；持久化历史只留中性标记（见 _inject_attachments_into_input）。
         """
         if not ctx.context:
             return
@@ -1150,7 +1206,13 @@ class ChatPipeline:
                 break
         if target is None:
             return
-        target["content"] = [{"type": "text", "text": target.get("content", "") or ""}, *vision_parts]
+        text_with_instruction = (
+            (target.get("content", "") or "") + "\n[请结合本轮附上的图片回答]"
+        ).strip()
+        target["content"] = [
+            {"type": "text", "text": text_with_instruction},
+            *vision_parts,
+        ]
 
     # ══════════════════════════════════════════════════════════════
     # Step 1: 检索与上下文构建

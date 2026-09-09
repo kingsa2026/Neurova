@@ -269,9 +269,19 @@ class ToolRouter:
                     mcp_tools = list_tools_fn()
                     if isinstance(mcp_tools, list):
                         for t in mcp_tools:
-                            tool_name = getattr(t, "name", None) or str(t)
-                            desc = getattr(t, "description", "") or ""
-                            params = getattr(t, "parameters", {}) or {}
+                            # MCPToolClient.list_tools() 返回 List[dict]：dict 无
+                            # .name 属性，getattr 恒 None 会把整个 dict repr 当
+                            # 工具名（万字符 blob，且超 OpenAI 64 字符上限不可调用）。
+                            if isinstance(t, dict):
+                                tool_name = t.get("name") or ""
+                                desc = t.get("description", "") or ""
+                                params = t.get("parameters", {}) or {}
+                            else:
+                                tool_name = getattr(t, "name", None) or ""
+                                desc = getattr(t, "description", "") or ""
+                                params = getattr(t, "parameters", {}) or {}
+                            if not tool_name:
+                                continue
                             namespace_name = f"mcp.{server_id}.{tool_name}"
                             tools[namespace_name] = _MCPToolProxy(
                                 name=namespace_name,

@@ -145,7 +145,12 @@ class TestResultAssembly:
 
     @pytest.mark.asyncio
     async def test_unknown_tool_error_preserved(self):
-        """未知工具：router 显式上报失败时走未知工具分支"""
+        """未知工具：router 显式上报失败时必须回传真实错误。
+
+        2026-09-09 修复前该路径因 SimpleNamespace UnboundLocalError 被 except
+        吞掉，真实 error 被顶掉为"均未找到该工具"兜底消息（本测试旧断言把
+        污染行为固化了）；修复后 router 的真实 error 原样回给 LLM。
+        """
         router = _make_router()
         # 覆盖默认返回：该工具显式失败（模拟 router 找不到工具）
         async def _fail(tool_name, params=None, agent_id=None, user_id=None):
@@ -155,7 +160,7 @@ class TestResultAssembly:
         loop = _make_loop(router)
         msgs = await loop.handle_tool_calls([_call("c1", "no_such_tool_anywhere")], [])
         payload = json.loads(msgs[0]["content"])
-        assert "SkillRegistry 和 ToolRouter 均未找到" in payload["error"]
+        assert payload["error"] == "tool not found"
 
     @pytest.mark.asyncio
     async def test_user_id_threading_preserved(self):
