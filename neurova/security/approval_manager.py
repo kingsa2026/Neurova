@@ -664,9 +664,14 @@ class ApprovalManager:
             return True
 
         # 检查自定义白名单
+        # 审计 A4：re.match 无 $ 锚定——条目 "ls" 会前缀放行 "ls && rm -rf /"。
+        # fullmatch 全串匹配：链式/拼接命令不再借前缀搭车。
         for pattern in self._whitelist:
-            if re.match(pattern, command, re.IGNORECASE):
-                return True
+            try:
+                if re.fullmatch(pattern, command, re.IGNORECASE):
+                    return True
+            except re.error:
+                continue
 
         return False
 
@@ -1039,80 +1044,7 @@ def generate_approval_html(request_data: Dict[str, Any]) -> str:
 """
     return html
 
-
-def create_approval_api_endpoints(app, approval_manager: ApprovalManager):
-    """
-    创建审批 API 端点（用于控制台跨会话审批）
-
-    参数:
-        app: FastAPI 应用实例
-        approval_manager: 审批管理器实例
-    """
-    from fastapi import HTTPException
-    from pydantic import BaseModel
-
-    class ApprovalAction(BaseModel):
-        note: str = ""
-
-    @app.get("/api/v1/approval/pending")
-    async def get_pending_approvals():
-        """获取待处理审批"""
-        requests = approval_manager.get_pending_requests()
-        return {
-            "success": True,
-            "data": [r.to_dict() for r in requests],
-        }
-
-    @app.get("/api/v1/approval/{request_id}")
-    async def get_approval_detail(request_id: str):
-        """获取审批详情"""
-        request = approval_manager._requests.get(request_id)
-        if not request:
-            raise HTTPException(status_code=404, detail="审批请求不存在")
-
-        return {
-            "success": True,
-            "data": request.to_dict(),
-        }
-
-    @app.get("/api/v1/approval/{request_id}/html")
-    async def get_approval_html(request_id: str):
-        """获取审批 HTML 页面"""
-        request = approval_manager._requests.get(request_id)
-        if not request:
-            raise HTTPException(status_code=404, detail="审批请求不存在")
-
-        from fastapi.responses import HTMLResponse
-
-        html = generate_approval_html(request.to_dict())
-        return HTMLResponse(content=html)
-
-    @app.post("/api/v1/approval/{request_id}/approve")
-    async def approve_request(request_id: str, action: ApprovalAction):
-        """批准审批"""
-        success = approval_manager.approve_request(
-            request_id=request_id,
-            approved_by="console_user",
-            note=action.note,
-        )
-
-        if not success:
-            raise HTTPException(status_code=400, detail="批准失败")
-
-        return {"success": True, "message": "已批准"}
-
-    @app.post("/api/v1/approval/{request_id}/reject")
-    async def reject_request(request_id: str, action: ApprovalAction):
-        """拒绝审批"""
-        success = approval_manager.reject_request(
-            request_id=request_id,
-            rejected_by="console_user",
-            note=action.note,
-        )
-
-        if not success:
-            raise HTTPException(status_code=400, detail="拒绝失败")
-
-        return {"success": True, "message": "已拒绝"}
-
-    logger.info("审批 API 端点已创建")
+# 审计 A7：create_approval_api_endpoints 已删除——该函数注册的
+# /api/v1/approval/* 端点硬编码 approved_by="console_user" 且无鉴权依赖，
+# 全库无调用方。休眠的未鉴权审批通道一旦被接线即成绕过治理的执行面；
+# 审批出口统一走 api/endpoints/governance.py（require_admin 保护）。

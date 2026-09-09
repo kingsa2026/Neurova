@@ -931,6 +931,29 @@ class ToolExecutor:
                 except Exception as _grant_err:
                     logger.debug("授权检查跳过: %s", _grant_err)
 
+            # 审计 A5：单调守卫恒开——skip_governance（审批重放/持久授权）
+            # 只豁免内容裁决链，不得连守卫一起跳过。重放时 metadata 里的
+            # params 可被同机写权限篡改，守卫是借人工批准执行任意参数的
+            # 最后一道闸。（正常路径 evaluate_tool_call 内亦会跑守卫，
+            # 谓词语义幂等，双跑无害。）
+            from neurova.security.monotonic_guard import get_monotonic_guards
+
+            _guard_outcome = get_monotonic_guards().check_all(
+                tool_name, params, self._agent_identity()[0]
+            )
+            if _guard_outcome is not None:
+                return {
+                    "success": False,
+                    "error": f"单调守卫拦截: {_guard_outcome.message}",
+                    "governance": {
+                        "decision": "deny",
+                        "reasons": [_guard_outcome.message],
+                        "source": "monotonic_guard",
+                        "severity": "none",
+                        "finding_count": 1,
+                    },
+                }
+
             precheck = (None if skip_governance
                         else await self._governance_precheck(tool_name, params))
             if precheck is not None:
@@ -1233,18 +1256,30 @@ class ToolExecutor:
 
         return None  # ALLOW 放行
 
+    # 审计 A3：治理故障时允许放行的内置只读工具白名单——这些工具无
+    # command/code 执行语义，故障放行的最坏后果是查询失败；shell/run_code/
+    # 文件写等不在列，一律 fail-closed（未知代码面无治理审查放行 = 裸奔）。
+    _GOVERNANCE_FAILOPEN_READONLY_TOOLS = frozenset({
+        "memory_search", "recall_history", "voice_memory_search",
+        "computer_screenshot", "get_datetime", "weather", "web_search",
+        "file_list", "file_search", "file_read", "list_agents",
+        "calculator", "emotion_analyze", "planning",
+    })
+
     def _governance_fail_closed(
         self, tool_name: str, is_mcp: bool, is_builtin: bool, reason: str
     ) -> Optional[Dict]:
         """治理不可用时的分级处置（P0-2 fail-open → 分级 fail-closed）。
 
-        - 内置白名单工具：放行（治理是可选增强，基础能力不因治理故障瘫痪）
-        - MCP / 未知来源（动态注册、来源不明）：deny 并留痕——未知代码面
-          在无治理审查时放行等于裸奔
+        - 内置只读工具（_GOVERNANCE_FAILOPEN_READONLY_TOOLS）：放行
+          （治理是可选增强，查询类基础能力不因治理故障瘫痪）
+        - 内置危险工具（shell/run_code/file_write 等）与 MCP / 未知来源
+          （动态注册、来源不明）：deny 并留痕——未知代码面在无治理审查时
+          放行等于裸奔
         """
-        if is_builtin and not is_mcp:
+        if is_builtin and not is_mcp and tool_name in self._GOVERNANCE_FAILOPEN_READONLY_TOOLS:
             return None
-        logger.warning("治理不可用，拒绝非内置工具 %s: %s", tool_name, reason)
+        logger.warning("治理不可用，拒绝非只读工具 %s: %s", tool_name, reason)
         return {
             "success": False,
             "error": f"治理服务不可用，已拒绝执行（fail-closed）: {reason}",
@@ -3238,7 +3273,7 @@ class ToolExecutor:
             # 延迟导入避免循环依赖
             from neurova.execution_layers import (
                 LocalExecutor,
-                RuntimeManager,
+                RuntimeFactory,
                 RuntimeType,
                 get_runtime_manager,
             )
@@ -3257,19 +3292,32 @@ class ToolExecutor:
                     runtime = runtime_manager.get_runtime(info_dict["runtime_id"])
                     break
 
-            # 没有可用运行时，创建临时 LocalExecutor
+            # 没有可用运行时，创建临时的
             owns_runtime = False
             if runtime is None:
                 if runtime_type == RuntimeType.DOCKER:
-                    runtime = (
-                        RuntimeManager.create_runtime_class(RuntimeType.DOCKER)
-                        if hasattr(RuntimeManager, "create_runtime_class")
-                        else None
-                    )
-                if runtime is None:
+                    # 审计 A2：Docker 不可用必须显式失败——原 hasattr 守卫恒
+                    # None 后静默回退 LocalExecutor 裸跑并谎报 runtime_type
+                    from neurova.sandbox.exec_sandbox import docker_available
+
+                    if not docker_available():
+                        return {
+                            "success": False,
+                            "error": "Docker 运行时不可用（docker info 探测失败），"
+                                     "已拒绝本地裸跑。请启动 Docker 或改用 runtime_type=local。",
+                            "runtime_type": "docker",
+                        }
+                    runtime = RuntimeFactory.create(RuntimeType.DOCKER)
+                else:
                     runtime = LocalExecutor(runtime_id=f"run_code_{int(time.time())}")
                 owns_runtime = True
-                await runtime.start()
+                started = await runtime.start()
+                if not started:
+                    return {
+                        "success": False,
+                        "error": f"{runtime_type.value} 运行时启动失败",
+                        "runtime_type": runtime_type.value,
+                    }
 
             try:
                 # 构建执行命令

@@ -25,8 +25,23 @@ from neurova.core.logger import get_logger
 from neurova.sandbox.exec_sandbox import SandboxSeverity, execute_in_sandbox
 from neurova.security.tool_guard import ApprovalMode, GuardSeverity, ToolGuardEngine
 
-# P1-7：平台真隔离后端探测表（bwrap/seatbelt/docker；Windows AppContainer 未实现不入列）
-_ENFORCED_SANDBOX_BACKENDS = {}
+# P1-7：平台真隔离后端探测表（bwrap/seatbelt/docker；Windows 走
+# AppContainer 真实现 + SAFER 受限令牌兜底）。探测结果驱动
+# _platform_has_enforced_sandbox()：有真隔离 → HIGH/声明面裁决 SANDBOX；
+# 无真隔离 → 升级 DENY（拒绝优于静默放行）。
+from neurova.sandbox.exec_sandbox import (
+    BubblewrapSandbox,
+    SeatbeltSandbox,
+)
+from neurova.sandbox.appcontainer import AppContainerSandbox
+from neurova.sandbox.restricted_token import RestrictedTokenSandbox
+
+_ENFORCED_SANDBOX_BACKENDS = {
+    "bubblewrap": BubblewrapSandbox,
+    "seatbelt": SeatbeltSandbox,
+    "appcontainer": AppContainerSandbox,
+    "restricted_token": RestrictedTokenSandbox,
+}
 
 
 def is_policy_denial(result: Any) -> bool:
@@ -53,11 +68,11 @@ def is_policy_denial(result: Any) -> bool:
 
 def _platform_has_enforced_sandbox() -> bool:
     """当前平台是否存在任一可用真隔离后端（诚实化：占位后端不算数）。"""
-    for name, backend in _ENFORCED_SANDBOX_BACKENDS.items():
+    for name, backend_cls in _ENFORCED_SANDBOX_BACKENDS.items():
         try:
-            if backend.available():
+            if backend_cls().available():
                 return True
-        except Exception:
+        except Exception:  # noqa: BLE001 - 探测失败按后端不可用处理
             continue
     return False
 
