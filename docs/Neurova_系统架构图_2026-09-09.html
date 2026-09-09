@@ -5130,7 +5130,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     <!-- Main Diagram -->
     <div class="diagram-container" data-detail-level="read"
          data-preset-badge-editorial-plate="ARCHIFY / 图版 04">
-      <svg viewBox="0 0 930 624" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase">
+      <svg viewBox="0 0 930 572" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase">
         <title id="archify-diagram-title">Neurova 系统架构</title>
         <desc id="archify-diagram-description">由 Archify 生成的架构图。</desc>
         <!-- Definitions -->
@@ -5156,237 +5156,237 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <rect width="100%" height="100%" fill="url(#grid)" />
 
         <!-- Boundaries (behind everything) -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="Neurova 后端进程 (Python · FastAPI)" x="258" y="74" width="632" height="482" rx="12" class="c-region" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="region" data-composition-frame-id="0" data-composition-frame-label="Neurova 后端进程 (Python · FastAPI)" x="258" y="66" width="632" height="438" rx="12" class="c-region" stroke-width="1"/>
 
         <!-- Connection paths (before components for correct z-order) -->
-        <path data-edge-from="users" data-edge-to="ui" data-edge-label="HTTPS" data-edge-key="0" data-edge-id="users-to-ui" data-composition-points="96,327;136,327" d="M 96 327 L 136 327" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="ui" data-edge-to="api" data-edge-label="REST + WS" data-edge-key="1" data-edge-id="ui-to-api" data-composition-points="248,323;288,323" d="M 248 323 L 288 323" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="channels" data-edge-to="api" data-edge-label="Webhook" data-edge-key="2" data-edge-id="channels-to-api" data-composition-points="248,506;268,506;268,337;288,337" d="M 248 506 L 260 506 Q 268 506 268 498 L 268 345 Q 268 337 276 337 L 288 337" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="api" data-edge-to="agent" data-edge-label="agent_ref 注入" data-edge-key="3" data-edge-id="api-to-agent" data-composition-points="400,330;440,330" d="M 400 330 L 440 330" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="agent" data-edge-to="pipeline" data-edge-label="chat() 编排" data-edge-key="4" data-edge-id="agent-to-pipeline" data-composition-points="556,327;596,327" d="M 556 327 L 596 327" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="pipeline" data-edge-to="memory" data-edge-label="检索 / 写回" data-edge-key="5" data-edge-id="pipeline-to-memory" data-composition-points="658,300;658,232;635,232;635,164" d="M 658 300 L 658 240 Q 658 232 650 232 L 643 232 Q 635 232 635 224 L 635 164" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="pipeline" data-edge-to="tools" data-edge-label="工具调用" data-edge-key="6" data-edge-id="pipeline-to-tools" data-composition-points="658,368;658,476" d="M 658 368 L 658 476" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="cog" data-edge-to="pipeline" data-edge-label="Evocate 注入" data-edge-key="7" data-edge-id="cog-to-pipeline" data-composition-points="400,506;572,506;572,341;596,341" d="M 400 506 L 564 506 Q 572 506 572 498 L 572 349 Q 572 341 580 341 L 596 341" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="pipeline" data-edge-to="llm" data-edge-label="推理" data-edge-key="8" data-edge-id="pipeline-to-llm" data-composition-points="720,334;756,334" d="M 720 334 L 756 334" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="llm" data-edge-to="providers" data-edge-label="自适应路由" data-edge-key="9" data-edge-id="llm-to-providers" data-composition-points="808,360;808,384;828,384;828,452;812,452;812,476" d="M 808 360 L 808 376 Q 808 384 816 384 L 820 384 Q 828 384 828 392 L 828 444 Q 828 452 820 452 L 820 452 Q 812 452 812 460 L 812 476" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="memory" data-edge-to="db" data-edge-label="读写" data-edge-key="10" data-edge-id="memory-to-db" data-composition-points="710,134;756,134" d="M 710 134 L 756 134" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="users" data-edge-to="ui" data-edge-label="HTTPS" data-edge-key="0" data-edge-id="users-to-ui" data-composition-points="96,299;136,299" d="M 96 299 L 136 299" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="ui" data-edge-to="api" data-edge-label="REST + WS" data-edge-key="1" data-edge-id="ui-to-api" data-composition-points="248,295;288,295" d="M 248 295 L 288 295" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="channels" data-edge-to="api" data-edge-label="Webhook" data-edge-key="2" data-edge-id="channels-to-api" data-composition-points="248,454;268,454;268,309;288,309" d="M 248 454 L 260 454 Q 268 454 268 446 L 268 317 Q 268 309 276 309 L 288 309" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="api" data-edge-to="agent" data-edge-label="agent_ref 注入" data-edge-key="3" data-edge-id="api-to-agent" data-composition-points="400,302;440,302" d="M 400 302 L 440 302" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="agent" data-edge-to="pipeline" data-edge-label="chat() 编排" data-edge-key="4" data-edge-id="agent-to-pipeline" data-composition-points="556,299;596,299" d="M 556 299 L 596 299" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="pipeline" data-edge-to="memory" data-edge-label="检索 / 写回" data-edge-key="5" data-edge-id="pipeline-to-memory" data-composition-points="658,272;658,214;635,214;635,156" d="M 658 272 L 658 222 Q 658 214 650 214 L 643 214 Q 635 214 635 206 L 635 156" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="pipeline" data-edge-to="tools" data-edge-label="工具调用" data-edge-key="6" data-edge-id="pipeline-to-tools" data-composition-points="658,340;658,424" d="M 658 340 L 658 424" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="cog" data-edge-to="pipeline" data-edge-label="Evocate 注入" data-edge-key="7" data-edge-id="cog-to-pipeline" data-composition-points="400,454;572,454;572,313;596,313" d="M 400 454 L 564 454 Q 572 454 572 446 L 572 321 Q 572 313 580 313 L 596 313" class="a-dashed" stroke-width="1.5" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="pipeline" data-edge-to="llm" data-edge-label="推理" data-edge-key="8" data-edge-id="pipeline-to-llm" data-composition-points="720,306;756,306" d="M 720 306 L 756 306" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="llm" data-edge-to="providers" data-edge-label="自适应路由" data-edge-key="9" data-edge-id="llm-to-providers" data-composition-points="808,332;808,356;828,356;828,400;812,400;812,424" d="M 808 332 L 808 348 Q 808 356 816 356 L 820 356 Q 828 356 828 364 L 828 392 Q 828 400 820 400 L 820 400 Q 812 400 812 408 L 812 424" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="memory" data-edge-to="db" data-edge-label="读写" data-edge-key="10" data-edge-id="memory-to-db" data-composition-points="710,126;756,126" d="M 710 126 L 756 126" class="a-default" stroke-width="1.5" marker-end="url(#arrowhead)"/>
 
         <!-- Components -->
         <g id="node-users" data-node-id="users" data-node-label="用户" tabindex="0" role="button" aria-label="聚焦用户，浏览器 / 桌面, 架构组件" aria-pressed="false" data-node-kind="external" data-node-sublabel="浏览器 / 桌面" data-node-context="架构组件">
           <title>用户 · 浏览器 / 桌面 · 架构组件</title>
-          <rect x="0" y="300" width="96" height="54" rx="6" class="c-mask"/>
-          <rect x="0" y="300" width="96" height="54" rx="6" class="c-external" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(6 306) scale(0.6875)">
+          <rect x="0" y="272" width="96" height="54" rx="6" class="c-mask"/>
+          <rect x="0" y="272" width="96" height="54" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(6 278) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="48" y="325" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">用户</text>
-        <text data-detail="context" x="48" y="341" class="t-muted" font-size="9" text-anchor="middle">浏览器 / 桌面</text>
+          <text data-node-label="" data-detail-anchor="" x="48" y="297" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">用户</text>
+        <text data-detail="context" x="48" y="313" class="t-muted" font-size="9" text-anchor="middle">浏览器 / 桌面</text>
         </g>
 
         <g id="node-ui" data-node-id="ui" data-node-label="NeurUI" tabindex="0" role="button" aria-label="聚焦NeurUI，Vue 3 :8100, 架构组件" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="Vue 3 :8100" data-node-context="架构组件">
           <title>NeurUI · Vue 3 :8100 · 架构组件</title>
-          <rect x="136" y="300" width="112" height="60" rx="6" class="c-mask"/>
-          <rect x="136" y="300" width="112" height="60" rx="6" class="c-frontend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(142 306) scale(0.6875)">
+          <rect x="136" y="272" width="112" height="60" rx="6" class="c-mask"/>
+          <rect x="136" y="272" width="112" height="60" rx="6" class="c-frontend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(142 278) scale(0.6875)">
             <rect x="2" y="3" width="12" height="10" rx="2"/>
             <path d="M2 6.5h12"/>
             <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
             <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="192" y="328" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">NeurUI</text>
-        <text data-detail="context" x="192" y="344" class="t-muted" font-size="9" text-anchor="middle">Vue 3 :8100</text>
+          <text data-node-label="" data-detail-anchor="" x="192" y="300" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">NeurUI</text>
+        <text data-detail="context" x="192" y="316" class="t-muted" font-size="9" text-anchor="middle">Vue 3 :8100</text>
         </g>
 
         <g id="node-api" data-node-id="api" data-node-label="API 网关" tabindex="0" role="button" aria-label="聚焦API 网关，FastAPI :9527, Neurova 后端进程 (Python · FastAPI)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="FastAPI :9527" data-node-context="Neurova 后端进程 (Python · FastAPI)">
           <title>API 网关 · FastAPI :9527 · Neurova 后端进程 (Python · FastAPI)</title>
-          <rect x="288" y="300" width="112" height="60" rx="6" class="c-mask"/>
-          <rect x="288" y="300" width="112" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(294 306) scale(0.6875)">
+          <rect x="288" y="272" width="112" height="60" rx="6" class="c-mask"/>
+          <rect x="288" y="272" width="112" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(294 278) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="344" y="328" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">API 网关</text>
-        <text data-detail="context" x="344" y="344" class="t-muted" font-size="9" text-anchor="middle">FastAPI :9527</text>
+          <text data-node-label="" data-detail-anchor="" x="344" y="300" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">API 网关</text>
+        <text data-detail="context" x="344" y="316" class="t-muted" font-size="9" text-anchor="middle">FastAPI :9527</text>
         </g>
 
         <g id="node-agent" data-node-id="agent" data-node-label="Agent Core" tabindex="0" role="button" aria-label="聚焦Agent Core，agent_core.py, Neurova 后端进程 (Python · FastAPI)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="agent_core.py" data-node-context="Neurova 后端进程 (Python · FastAPI)">
           <title>Agent Core · agent_core.py · Neurova 后端进程 (Python · FastAPI)</title>
-          <rect x="440" y="300" width="116" height="60" rx="6" class="c-mask"/>
-          <rect x="440" y="300" width="116" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(446 306) scale(0.6875)">
+          <rect x="440" y="272" width="116" height="60" rx="6" class="c-mask"/>
+          <rect x="440" y="272" width="116" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(446 278) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="498" y="328" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Agent Core</text>
-        <text data-detail="context" x="498" y="344" class="t-muted" font-size="9" text-anchor="middle">agent_core.py</text>
+          <text data-node-label="" data-detail-anchor="" x="498" y="300" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Agent Core</text>
+        <text data-detail="context" x="498" y="316" class="t-muted" font-size="9" text-anchor="middle">agent_core.py</text>
         </g>
 
         <g id="node-pipeline" data-node-id="pipeline" data-node-label="ChatPipeline" tabindex="0" role="button" aria-label="聚焦ChatPipeline，6 步对话管线, Neurova 后端进程 (Python · FastAPI)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="6 步对话管线" data-node-tag="核心" data-node-context="Neurova 后端进程 (Python · FastAPI)">
           <title>ChatPipeline · 6 步对话管线 · Neurova 后端进程 (Python · FastAPI) · 核心</title>
-          <rect x="596" y="300" width="124" height="68" rx="6" class="c-mask"/>
-          <rect x="596" y="300" width="124" height="68" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(602 306) scale(0.6875)">
+          <rect x="596" y="272" width="124" height="68" rx="6" class="c-mask"/>
+          <rect x="596" y="272" width="124" height="68" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(602 278) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="658" y="332" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">ChatPipeline</text>
-        <text data-detail="context" x="658" y="348" class="t-muted" font-size="9" text-anchor="middle">6 步对话管线</text>
-        <text data-detail="fine" x="658" y="360" class="t-backend" font-size="7" text-anchor="middle">核心</text>
+          <text data-node-label="" data-detail-anchor="" x="658" y="304" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">ChatPipeline</text>
+        <text data-detail="context" x="658" y="320" class="t-muted" font-size="9" text-anchor="middle">6 步对话管线</text>
+        <text data-detail="fine" x="658" y="332" class="t-backend" font-size="7" text-anchor="middle">核心</text>
         </g>
 
         <g id="node-llm" data-node-id="llm" data-node-label="LLM 路由" tabindex="0" role="button" aria-label="聚焦LLM 路由，多模型客户端, Neurova 后端进程 (Python · FastAPI)" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="多模型客户端" data-node-context="Neurova 后端进程 (Python · FastAPI)">
           <title>LLM 路由 · 多模型客户端 · Neurova 后端进程 (Python · FastAPI)</title>
-          <rect x="756" y="300" width="104" height="60" rx="6" class="c-mask"/>
-          <rect x="756" y="300" width="104" height="60" rx="6" class="c-cloud" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(762 306) scale(0.6875)">
+          <rect x="756" y="272" width="104" height="60" rx="6" class="c-mask"/>
+          <rect x="756" y="272" width="104" height="60" rx="6" class="c-cloud" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(762 278) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="808" y="328" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">LLM 路由</text>
-        <text data-detail="context" x="808" y="344" class="t-muted" font-size="9" text-anchor="middle">多模型客户端</text>
+          <text data-node-label="" data-detail-anchor="" x="808" y="300" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">LLM 路由</text>
+        <text data-detail="context" x="808" y="316" class="t-muted" font-size="9" text-anchor="middle">多模型客户端</text>
         </g>
 
         <g id="node-memory" data-node-id="memory" data-node-label="记忆系统" tabindex="0" role="button" aria-label="聚焦记忆系统，mem_core · 17 维, Neurova 后端进程 (Python · FastAPI)" aria-pressed="false" data-node-kind="database" data-node-sublabel="mem_core · 17 维" data-node-context="Neurova 后端进程 (Python · FastAPI)">
           <title>记忆系统 · mem_core · 17 维 · Neurova 后端进程 (Python · FastAPI)</title>
-          <rect x="560" y="104" width="150" height="60" rx="6" class="c-mask"/>
-          <rect x="560" y="104" width="150" height="60" rx="6" class="c-database" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(566 110) scale(0.6875)">
+          <rect x="560" y="96" width="150" height="60" rx="6" class="c-mask"/>
+          <rect x="560" y="96" width="150" height="60" rx="6" class="c-database" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(566 102) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="635" y="132" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">记忆系统</text>
-        <text data-detail="context" x="635" y="148" class="t-muted" font-size="9" text-anchor="middle">mem_core · 17 维</text>
+          <text data-node-label="" data-detail-anchor="" x="635" y="124" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">记忆系统</text>
+        <text data-detail="context" x="635" y="140" class="t-muted" font-size="9" text-anchor="middle">mem_core · 17 维</text>
         </g>
 
         <g id="node-db" data-node-id="db" data-node-label="SQLite" tabindex="0" role="button" aria-label="聚焦SQLite，RLock 保护, Neurova 后端进程 (Python · FastAPI)" aria-pressed="false" data-node-kind="database" data-node-sublabel="RLock 保护" data-node-context="Neurova 后端进程 (Python · FastAPI)">
           <title>SQLite · RLock 保护 · Neurova 后端进程 (Python · FastAPI)</title>
-          <rect x="756" y="104" width="104" height="60" rx="6" class="c-mask"/>
-          <rect x="756" y="104" width="104" height="60" rx="6" class="c-database" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(762 110) scale(0.6875)">
+          <rect x="756" y="96" width="104" height="60" rx="6" class="c-mask"/>
+          <rect x="756" y="96" width="104" height="60" rx="6" class="c-database" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(762 102) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="808" y="132" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">SQLite</text>
-        <text data-detail="context" x="808" y="148" class="t-muted" font-size="9" text-anchor="middle">RLock 保护</text>
+          <text data-node-label="" data-detail-anchor="" x="808" y="124" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">SQLite</text>
+        <text data-detail="context" x="808" y="140" class="t-muted" font-size="9" text-anchor="middle">RLock 保护</text>
         </g>
 
         <g id="node-channels" data-node-id="channels" data-node-label="渠道适配器" tabindex="0" role="button" aria-label="聚焦渠道适配器，飞书 · 钉钉 · TG ×14, 架构组件" aria-pressed="false" data-node-kind="external" data-node-sublabel="飞书 · 钉钉 · TG ×14" data-node-context="架构组件">
           <title>渠道适配器 · 飞书 · 钉钉 · TG ×14 · 架构组件</title>
-          <rect x="136" y="476" width="112" height="60" rx="6" class="c-mask"/>
-          <rect x="136" y="476" width="112" height="60" rx="6" class="c-external" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(142 482) scale(0.6875)">
+          <rect x="136" y="424" width="112" height="60" rx="6" class="c-mask"/>
+          <rect x="136" y="424" width="112" height="60" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(142 430) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="192" y="504" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">渠道适配器</text>
-        <text data-detail="context" x="192" y="520" class="t-muted" font-size="8.6" text-anchor="middle">飞书 · 钉钉 · TG ×14</text>
+          <text data-node-label="" data-detail-anchor="" x="192" y="452" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">渠道适配器</text>
+        <text data-detail="context" x="192" y="468" class="t-muted" font-size="8.6" text-anchor="middle">飞书 · 钉钉 · TG ×14</text>
         </g>
 
         <g id="node-cog" data-node-id="cog" data-node-label="认知层" tabindex="0" role="button" aria-label="聚焦认知层，情感 / 元认知, Neurova 后端进程 (Python · FastAPI)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="情感 / 元认知" data-node-context="Neurova 后端进程 (Python · FastAPI)">
           <title>认知层 · 情感 / 元认知 · Neurova 后端进程 (Python · FastAPI)</title>
-          <rect x="288" y="476" width="112" height="60" rx="6" class="c-mask"/>
-          <rect x="288" y="476" width="112" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(294 482) scale(0.6875)">
+          <rect x="288" y="424" width="112" height="60" rx="6" class="c-mask"/>
+          <rect x="288" y="424" width="112" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(294 430) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="344" y="504" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">认知层</text>
-        <text data-detail="context" x="344" y="520" class="t-muted" font-size="9" text-anchor="middle">情感 / 元认知</text>
+          <text data-node-label="" data-detail-anchor="" x="344" y="452" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">认知层</text>
+        <text data-detail="context" x="344" y="468" class="t-muted" font-size="9" text-anchor="middle">情感 / 元认知</text>
         </g>
 
         <g id="node-tools" data-node-id="tools" data-node-label="工具执行器" tabindex="0" role="button" aria-label="聚焦工具执行器，tool_executor, Neurova 后端进程 (Python · FastAPI)" aria-pressed="false" data-node-kind="backend" data-node-sublabel="tool_executor" data-node-context="Neurova 后端进程 (Python · FastAPI)">
           <title>工具执行器 · tool_executor · Neurova 后端进程 (Python · FastAPI)</title>
-          <rect x="596" y="476" width="124" height="60" rx="6" class="c-mask"/>
-          <rect x="596" y="476" width="124" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(602 482) scale(0.6875)">
+          <rect x="596" y="424" width="124" height="60" rx="6" class="c-mask"/>
+          <rect x="596" y="424" width="124" height="60" rx="6" class="c-backend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(602 430) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="658" y="504" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">工具执行器</text>
-        <text data-detail="context" x="658" y="520" class="t-muted" font-size="9" text-anchor="middle">tool_executor</text>
+          <text data-node-label="" data-detail-anchor="" x="658" y="452" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">工具执行器</text>
+        <text data-detail="context" x="658" y="468" class="t-muted" font-size="9" text-anchor="middle">tool_executor</text>
         </g>
 
         <g id="node-providers" data-node-id="providers" data-node-label="模型服务商" tabindex="0" role="button" aria-label="聚焦模型服务商，OpenAI · Anthropic · Gemini, 架构组件" aria-pressed="false" data-node-kind="external" data-node-sublabel="OpenAI · Anthropic · Gemini" data-node-context="架构组件">
           <title>模型服务商 · OpenAI · Anthropic · Gemini · 架构组件</title>
-          <rect x="756" y="476" width="112" height="60" rx="6" class="c-mask"/>
-          <rect x="756" y="476" width="112" height="60" rx="6" class="c-external" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(762 482) scale(0.6875)">
+          <rect x="756" y="424" width="112" height="60" rx="6" class="c-mask"/>
+          <rect x="756" y="424" width="112" height="60" rx="6" class="c-external" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(762 430) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
           </g>
-          <text data-node-label="" data-detail-anchor="" x="812" y="504" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">模型服务商</text>
-        <text data-detail="context" x="812" y="520" class="t-muted" font-size="6.4" text-anchor="middle">OpenAI · Anthropic · Gemini</text>
+          <text data-node-label="" data-detail-anchor="" x="812" y="452" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">模型服务商</text>
+        <text data-detail="context" x="812" y="468" class="t-muted" font-size="6.4" text-anchor="middle">OpenAI · Anthropic · Gemini</text>
         </g>
 
         <!-- Connection labels -->
         <g data-detail="context" data-edge-from="users" data-edge-to="ui" data-edge-label="HTTPS" data-edge-key="0" data-edge-id="users-to-ui">
-          <rect x="99" y="307" width="34" height="14" rx="3" class="c-mask"/>
-          <text x="116" y="317" class="t-backend" font-size="8" text-anchor="middle">HTTPS</text>
+          <rect x="99" y="279" width="34" height="14" rx="3" class="c-mask"/>
+          <text x="116" y="289" class="t-backend" font-size="8" text-anchor="middle">HTTPS</text>
         </g>
         <g data-detail="context" data-edge-from="ui" data-edge-to="api" data-edge-label="REST + WS" data-edge-key="1" data-edge-id="ui-to-api">
-          <rect x="241.4" y="284" width="53.199999999999996" height="14" rx="3" class="c-mask"/>
-          <text x="268" y="294" class="t-muted" font-size="8" text-anchor="middle">REST + WS</text>
+          <rect x="241.4" y="256" width="53.199999999999996" height="14" rx="3" class="c-mask"/>
+          <text x="268" y="266" class="t-muted" font-size="8" text-anchor="middle">REST + WS</text>
         </g>
         <g data-detail="context" data-edge-from="channels" data-edge-to="api" data-edge-label="Webhook" data-edge-key="2" data-edge-id="channels-to-api">
-          <rect x="246.2" y="401.5" width="43.6" height="14" rx="3" class="c-mask"/>
-          <text x="268" y="411.5" class="t-muted" font-size="8" text-anchor="middle">Webhook</text>
+          <rect x="246.2" y="361.5" width="43.6" height="14" rx="3" class="c-mask"/>
+          <text x="268" y="371.5" class="t-muted" font-size="8" text-anchor="middle">Webhook</text>
         </g>
         <g data-detail="context" data-edge-from="api" data-edge-to="agent" data-edge-label="agent_ref 注入" data-edge-key="3" data-edge-id="api-to-agent">
-          <rect x="381.4" y="284" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="420" y="294" class="t-muted" font-size="8" text-anchor="middle">agent_ref 注入</text>
+          <rect x="381.4" y="256" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="420" y="266" class="t-muted" font-size="8" text-anchor="middle">agent_ref 注入</text>
         </g>
         <g data-detail="context" data-edge-from="agent" data-edge-to="pipeline" data-edge-label="chat() 编排" data-edge-key="4" data-edge-id="agent-to-pipeline">
-          <rect x="544.6" y="281" width="62.8" height="14" rx="3" class="c-mask"/>
-          <text x="576" y="291" class="t-muted" font-size="8" text-anchor="middle">chat() 编排</text>
+          <rect x="544.6" y="253" width="62.8" height="14" rx="3" class="c-mask"/>
+          <text x="576" y="263" class="t-muted" font-size="8" text-anchor="middle">chat() 编排</text>
         </g>
         <g data-detail="context" data-edge-from="pipeline" data-edge-to="memory" data-edge-label="检索 / 写回" data-edge-key="5" data-edge-id="pipeline-to-memory">
-          <rect x="615.1" y="212" width="62.8" height="14" rx="3" class="c-mask"/>
-          <text x="646.5" y="222" class="t-muted" font-size="8" text-anchor="middle">检索 / 写回</text>
+          <rect x="615.1" y="194" width="62.8" height="14" rx="3" class="c-mask"/>
+          <text x="646.5" y="204" class="t-muted" font-size="8" text-anchor="middle">检索 / 写回</text>
         </g>
         <g data-detail="context" data-edge-from="pipeline" data-edge-to="tools" data-edge-label="工具调用" data-edge-key="6" data-edge-id="pipeline-to-tools">
-          <rect x="633.8" y="372" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="658" y="382" class="t-muted" font-size="8" text-anchor="middle">工具调用</text>
+          <rect x="633.8" y="344" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="658" y="354" class="t-muted" font-size="8" text-anchor="middle">工具调用</text>
         </g>
         <g data-detail="context" data-edge-from="cog" data-edge-to="pipeline" data-edge-label="Evocate 注入" data-edge-key="7" data-edge-id="cog-to-pipeline">
-          <rect x="538.2" y="403.5" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="572" y="413.5" class="t-messagebus" font-size="8" text-anchor="middle">Evocate 注入</text>
+          <rect x="538.2" y="363.5" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="572" y="373.5" class="t-messagebus" font-size="8" text-anchor="middle">Evocate 注入</text>
         </g>
         <g data-detail="context" data-edge-from="pipeline" data-edge-to="llm" data-edge-label="推理" data-edge-key="8" data-edge-id="pipeline-to-llm">
-          <rect x="723" y="314" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="738" y="324" class="t-muted" font-size="8" text-anchor="middle">推理</text>
+          <rect x="723" y="286" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="738" y="296" class="t-muted" font-size="8" text-anchor="middle">推理</text>
         </g>
         <g data-detail="context" data-edge-from="llm" data-edge-to="providers" data-edge-label="自适应路由" data-edge-key="9" data-edge-id="llm-to-providers">
-          <rect x="789" y="388" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="818" y="398" class="t-muted" font-size="8" text-anchor="middle">自适应路由</text>
+          <rect x="789" y="360" width="58" height="14" rx="3" class="c-mask"/>
+          <text x="818" y="370" class="t-muted" font-size="8" text-anchor="middle">自适应路由</text>
         </g>
         <g data-detail="context" data-edge-from="memory" data-edge-to="db" data-edge-label="读写" data-edge-key="10" data-edge-id="memory-to-db">
-          <rect x="718" y="114" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="733" y="124" class="t-muted" font-size="8" text-anchor="middle">读写</text>
+          <rect x="718" y="106" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="733" y="116" class="t-muted" font-size="8" text-anchor="middle">读写</text>
         </g>
 
         <!-- Boundary labels (foreground masks keep routes out of titles) -->
         <g data-graph-role="structural-frame-label" data-composition-frame-id="0" data-composition-frame-kind="region" data-composition-frame-label="Neurova 后端进程 (Python · FastAPI)">
-          <rect data-graph-role="structural-frame-label-mask" x="262" y="84" width="199" height="16" rx="3" class="c-mask"/>
-          <text data-boundary-label="" x="266" y="97" class="t-cloud" font-size="9" font-weight="600">Neurova 后端进程 (Python · FastAPI)</text>
+          <rect data-graph-role="structural-frame-label-mask" x="262" y="76" width="199" height="16" rx="3" class="c-mask"/>
+          <text data-boundary-label="" x="266" y="89" class="t-cloud" font-size="9" font-weight="600">Neurova 后端进程 (Python · FastAPI)</text>
         </g>
 
         <!-- Legend -->
         <g data-legend="" data-legend-bridge="">
-          <text x="40" y="588" class="t-primary" font-size="12" font-weight="650">图例</text>
-          <g data-legend-semantic-kind="frontend" data-legend-kind="frontend" data-legend-label="前端" data-legend-x="40" data-legend-baseline="608" data-legend-width="63">
-            <rect x="40" y="599" width="16" height="10" rx="2.5" class="c-frontend" stroke-width="1"/>
-            <text x="62" y="608" class="t-muted" font-size="10" font-weight="500">前端</text>
+          <text x="40" y="536" class="t-primary" font-size="12" font-weight="650">图例</text>
+          <g data-legend-semantic-kind="frontend" data-legend-kind="frontend" data-legend-label="前端" data-legend-x="40" data-legend-baseline="556" data-legend-width="63">
+            <rect x="40" y="547" width="16" height="10" rx="2.5" class="c-frontend" stroke-width="1"/>
+            <text x="62" y="556" class="t-muted" font-size="10" font-weight="500">前端</text>
           </g>
-          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="后端" data-legend-x="125" data-legend-baseline="608" data-legend-width="63">
-            <rect x="125" y="599" width="16" height="10" rx="2.5" class="c-backend" stroke-width="1"/>
-            <text x="147" y="608" class="t-muted" font-size="10" font-weight="500">后端</text>
+          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="后端" data-legend-x="125" data-legend-baseline="556" data-legend-width="63">
+            <rect x="125" y="547" width="16" height="10" rx="2.5" class="c-backend" stroke-width="1"/>
+            <text x="147" y="556" class="t-muted" font-size="10" font-weight="500">后端</text>
           </g>
-          <g data-legend-semantic-kind="database" data-legend-kind="database" data-legend-label="数据库" data-legend-x="210" data-legend-baseline="608" data-legend-width="73">
-            <rect x="210" y="599" width="16" height="10" rx="2.5" class="c-database" stroke-width="1"/>
-            <text x="232" y="608" class="t-muted" font-size="10" font-weight="500">数据库</text>
+          <g data-legend-semantic-kind="database" data-legend-kind="database" data-legend-label="数据库" data-legend-x="210" data-legend-baseline="556" data-legend-width="73">
+            <rect x="210" y="547" width="16" height="10" rx="2.5" class="c-database" stroke-width="1"/>
+            <text x="232" y="556" class="t-muted" font-size="10" font-weight="500">数据库</text>
           </g>
-          <g data-legend-semantic-kind="cloud" data-legend-kind="cloud" data-legend-label="云服务" data-legend-x="305" data-legend-baseline="608" data-legend-width="73">
-            <rect x="305" y="599" width="16" height="10" rx="2.5" class="c-cloud" stroke-width="1"/>
-            <text x="327" y="608" class="t-muted" font-size="10" font-weight="500">云服务</text>
+          <g data-legend-semantic-kind="cloud" data-legend-kind="cloud" data-legend-label="云服务" data-legend-x="305" data-legend-baseline="556" data-legend-width="73">
+            <rect x="305" y="547" width="16" height="10" rx="2.5" class="c-cloud" stroke-width="1"/>
+            <text x="327" y="556" class="t-muted" font-size="10" font-weight="500">云服务</text>
           </g>
-          <g data-legend-semantic-kind="external" data-legend-kind="external" data-legend-label="外部系统" data-legend-x="400" data-legend-baseline="608" data-legend-width="83">
-            <rect x="400" y="599" width="16" height="10" rx="2.5" class="c-external" stroke-width="1"/>
-            <text x="422" y="608" class="t-muted" font-size="10" font-weight="500">外部系统</text>
+          <g data-legend-semantic-kind="external" data-legend-kind="external" data-legend-label="外部系统" data-legend-x="400" data-legend-baseline="556" data-legend-width="83">
+            <rect x="400" y="547" width="16" height="10" rx="2.5" class="c-external" stroke-width="1"/>
+            <text x="422" y="556" class="t-muted" font-size="10" font-weight="500">外部系统</text>
           </g>
         </g>
       </svg>
@@ -5581,8 +5581,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>核心链路</h3>
         </div>
         <ul>
-          <li>&bull; 6 步 ChatPipeline：空闲追踪 → 前置检查 → 记忆检索 → Evocate 注入 → LLM 调用 → 后处理</li>
-          <li>&bull; 深度模块经 agent_ref 依赖注入，反向零导入</li>
+          <li>&bull; 6 步 ChatPipeline 对话管线</li>
+          <li>&bull; agent_ref 依赖注入 · 零反向导入</li>
         </ul>
       </div>
 
@@ -5592,8 +5592,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>记忆与认知</h3>
         </div>
         <ul>
-          <li>&bull; 17 维记忆分类 · L1 肌肉记忆 / L2 热缓存 / L3 工具记忆</li>
-          <li>&bull; 情感 · 成长 · 元认知认知层，Evocate 结构化推理注入</li>
+          <li>&bull; 17 维记忆 + L1/L2/L3 分层</li>
+          <li>&bull; 认知层注入结构化推理</li>
           <li>&bull; 经验结晶 + 时序知识图谱</li>
         </ul>
       </div>
@@ -5604,9 +5604,9 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>接入与存储</h3>
         </div>
         <ul>
-          <li>&bull; Vue 3 Web UI + 14 渠道适配器汇入同一网关</li>
-          <li>&bull; 多服务商模型：OpenAI / Anthropic / Gemini / Ollama / OpenRouter</li>
-          <li>&bull; 向量检索 TF-IDF / FAISS / ChromaDB，本地 TTS / ONNX 嵌入</li>
+          <li>&bull; Web UI + 14 渠道适配器</li>
+          <li>&bull; 多服务商 LLM 自适应路由</li>
+          <li>&bull; SQLite RLock + 向量检索</li>
         </ul>
       </div>
     </div>
