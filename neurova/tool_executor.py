@@ -2194,8 +2194,26 @@ class ToolExecutor:
             logger.warning("recall_history 执行失败: %s", e)
             return {"error": f"召回失败: {e}"}
 
+    # 审计 P1-E1：降级 MemoryManager 模块级缓存（原每次失败新建重对象，
+    # 全表加载+建索引代价在每次工具调用重复支付）
+    _fallback_memory_manager = None
+    _fallback_memory_manager_lock = threading.Lock()
+
+    @classmethod
+    def _get_fallback_memory_manager(cls):
+        if cls._fallback_memory_manager is None:
+            with cls._fallback_memory_manager_lock:
+                if cls._fallback_memory_manager is None:
+                    from neurova.cognitive_layers.memory_layer.manager import (
+                        MemoryManager,
+                    )
+
+                    cls._fallback_memory_manager = MemoryManager()
+        return cls._fallback_memory_manager
+
     async def _execute_memory_search(self, params: Dict) -> Dict:
-        """执行记忆搜索"""
+        """执行记忆搜索（审计 P1-E1：同步 SQLite 检索经 to_thread 下沉线程池，
+        不阻塞事件循环）"""
         try:
             query = params.get("query", "")
             category = params.get("category")
@@ -2205,17 +2223,14 @@ class ToolExecutor:
                 return {"error": "缺少搜索查询"}
 
             # 获取 MemoryManager
-            memory_manager = None
             if hasattr(self._agent, "memory_manager") and self._agent.memory_manager:
                 memory_manager = self._agent.memory_manager
             else:
-                # 创建临时 MemoryManager（降级模式）
-                from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+                memory_manager = self._get_fallback_memory_manager()
 
-                memory_manager = MemoryManager()
-
-            # 执行搜索
-            memories = memory_manager.recall(
+            # 执行搜索（同步 DB I/O 下线程池）
+            memories = await asyncio.to_thread(
+                memory_manager.recall,
                 query=query,
                 category=category,
                 limit=limit,
@@ -2256,12 +2271,16 @@ class ToolExecutor:
             return {"error": err}
 
         try:
-            with open(file_path, "r", encoding=encoding) as f:
-                lines = f.readlines()
-                if offset > 0:
-                    lines = lines[offset - 1 :]  # offset 从 1 开始
-                content = "".join(lines)
-                return {"content": content, "lines": len(lines)}
+            # 审计 P1-E1：同步文件 I/O 经 to_thread 下沉（同 web_search 模式）
+            def _read() -> Dict:
+                with open(file_path, "r", encoding=encoding) as f:
+                    lines = f.readlines()
+                    if offset > 0:
+                        lines = lines[offset - 1 :]  # offset 从 1 开始
+                    content = "".join(lines)
+                    return {"content": content, "lines": len(lines)}
+
+            return await asyncio.to_thread(_read)
         except Exception as e:
             return {"error": str(e)}
 
@@ -2277,10 +2296,13 @@ class ToolExecutor:
         try:
             from pathlib import Path
 
-            Path(file_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(file_path, "w", encoding=encoding) as f:
-                f.write(content)
+            def _write() -> Dict:
+                Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+                with open(file_path, "w", encoding=encoding) as f:
+                    f.write(content)
                 return {"success": True, "file_path": file_path}
+
+            return await asyncio.to_thread(_write)
         except Exception as e:
             return {"error": str(e)}
 
@@ -2295,10 +2317,13 @@ class ToolExecutor:
         try:
             from pathlib import Path
 
-            Path(file_path).parent.mkdir(parents=True, exist_ok=True)
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(content)
+            def _create() -> Dict:
+                Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(content)
                 return {"success": True, "file_path": file_path}
+
+            return await asyncio.to_thread(_create)
         except Exception as e:
             return {"error": str(e)}
 
@@ -2311,11 +2336,14 @@ class ToolExecutor:
             return {"error": err}
 
         try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                return {"success": True, "file_path": file_path}
-            else:
-                return {"error": f"文件不存在: {file_path}"}
+            def _delete() -> Dict:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    return {"success": True, "file_path": file_path}
+                else:
+                    return {"error": f"文件不存在: {file_path}"}
+
+            return await asyncio.to_thread(_delete)
         except Exception as e:
             return {"error": str(e)}
 
@@ -2329,16 +2357,19 @@ class ToolExecutor:
             return {"error": err}
 
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
-                content = f.read()
+            def _edit() -> Dict:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
 
-            if old_str in content:
-                new_content = content.replace(old_str, new_str, 1)
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(new_content)
-                return {"success": True, "file_path": file_path}
-            else:
-                return {"error": "未找到目标文本"}
+                if old_str in content:
+                    new_content = content.replace(old_str, new_str, 1)
+                    with open(file_path, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+                    return {"success": True, "file_path": file_path}
+                else:
+                    return {"error": "未找到目标文本"}
+
+            return await asyncio.to_thread(_edit)
         except Exception as e:
             return {"error": str(e)}
 

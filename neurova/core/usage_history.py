@@ -59,12 +59,22 @@ class UsageHistoryStore:
             or str(DEFAULT_DB_PATH)
         )
         self._lock = threading.RLock()
+        # 审计 P1-E5：常驻连接（原每次 record 新建 sqlite3 连接；
+        # WAL 下写入与查询互不阻塞，省去每次连接建立开销）
+        self._conn: Optional[sqlite3.Connection] = None
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
+        conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _ensure_conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            self._conn = self._connect()
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=4000")
+        return self._conn
 
     def _init_db(self) -> None:
         try:
@@ -116,7 +126,8 @@ class UsageHistoryStore:
             usage_date = date.today().isoformat()
         try:
             with self._lock:
-                with self._connect() as conn:
+                conn = self._ensure_conn()
+                if conn is not None:
                     conn.execute(
                         """
                         INSERT INTO llm_usage (

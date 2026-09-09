@@ -52,6 +52,8 @@ class AutoContextUpdater:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
+        # 审计 P1-E7：更新执行标志（trigger_update 与事件循环线程去重）
+        self._update_in_progress_flag = threading.Lock()
         self._stats = {
             "total_updates": 0,
             "last_update": None,
@@ -96,16 +98,6 @@ class AutoContextUpdater:
             except Exception as e:
                 logger.error("AutoContextUpdater 更新失败: %s", e)
                 time.sleep(60)  # 出错后等待1分钟
-
-    def _update_loop(self) -> None:
-        """更新循环（异步版本）"""
-        while self._running:
-            try:
-                # 这里可以添加异步更新逻辑
-                time.sleep(self.update_interval)
-            except Exception as e:
-                logger.error("AutoContextUpdater 更新循环失败: %s", e)
-                time.sleep(60)
 
     def _perform_update(self) -> None:
         """执行更新"""
@@ -210,9 +202,20 @@ class AutoContextUpdater:
             logger.warning("AutoContextUpdater 未运行，无法触发更新")
             return
 
-        # 在新线程中执行更新
-        threading.Thread(target=self._perform_update, daemon=True).start()
+        # 审计 P1-E7：执行标志去重——事件循环线程可能正在 _perform_update，
+        # 无条件开新线程会导致重叠并发更新（无互斥）
+        if not self._update_in_progress_flag.acquire(blocking=False):
+            logger.debug("手动触发更新跳过（已有更新在执行）")
+            return
+        threading.Thread(target=self._perform_update_with_flag, daemon=True).start()
         logger.info("手动触发更新")
+
+    def _perform_update_with_flag(self) -> None:
+        """持执行标志运行更新（配合 trigger_update 去重）"""
+        try:
+            self._perform_update()
+        finally:
+            self._update_in_progress_flag.release()
 
 
 class ContextAutoUpdater:
