@@ -294,6 +294,80 @@ def _infer_capabilities(model_name: str) -> List[ModelCapability]:
     ]
 
 
+# 上下文窗口查询的保守默认（完全未知模型：宁可早压缩不可撑爆 prompt）
+_UNKNOWN_MODEL_WINDOW = 16_000
+# provider 元数据的占位哨兵（ModelInfo 默认值，视为"未知"）
+_PLACEHOLDER_WINDOW = 4096
+
+
+def resolve_model_context_window(model_name: str) -> int:
+    """模型上下文窗口统一查询（llmrouter 层单一来源，2026-09-10）。
+
+    优先级：
+    1. provider.model_metadata（服务商发现/文档维护的真实值；4096 占位视为未知）
+    2. capability_detector.MODEL_PRESETS（族级预埋档案）
+    3. model_limits.MODEL_CONTEXT_WINDOWS（服务商文档精确表）
+    4. 保守默认 16000
+
+    此前 ContextPool 自带的元数据查询只遍历 models/discovered_models 字符串
+    列表（无 window 字段，恒 0 跳过）——真实窗口值在 model_metadata dict 里
+    从未被查询，实际恒走过时静态表。本入口修复断链并收敛全部窗口知识源。
+    全程异常保护：任何源失败静默落到下一优先级。
+    """
+    needle = (model_name or "").strip().lower()
+    if not needle:
+        return _UNKNOWN_MODEL_WINDOW
+
+    # 1) provider.model_metadata（子串命中——路由变体名如 DeepSeek-V4-Flash）；
+    #    兼容对象形态条目（discovered_models/models 列表混存的带 window 对象）
+    try:
+        from neurova.llm.provider_manager import get_provider_manager
+
+        pm = get_provider_manager()
+        for cfg in (getattr(pm, "providers", None) or {}).values():
+            metadata = getattr(cfg, "model_metadata", None) or {}
+            for mid, meta in metadata.items():
+                if not isinstance(meta, dict):
+                    continue
+                if needle and needle in str(mid).lower():
+                    window = int(meta.get("context_window", 0) or 0)
+                    if window > 0 and window != _PLACEHOLDER_WINDOW:
+                        return window
+            for entry in list(getattr(cfg, "discovered_models", None) or []) + list(
+                getattr(cfg, "models", None) or []
+            ):
+                if isinstance(entry, str):
+                    continue
+                mid = str(getattr(entry, "id", "") or "")
+                window = int(getattr(entry, "context_window", 0) or 0)
+                if mid and needle and needle in mid.lower() and window > 0 and window != _PLACEHOLDER_WINDOW:
+                    return window
+    except Exception:
+        pass  # 元数据不可用 → 下一优先级
+
+    # 2) 族级预埋档案（capability_detector）
+    try:
+        from neurova.llm.capability_detector import lookup_model_preset
+
+        preset = lookup_model_preset(needle)
+        if preset is not None and getattr(preset, "context_window", None):
+            return int(preset.context_window)
+    except Exception:
+        pass
+
+    # 3) model_limits 精确表（含前缀回退逻辑，直接复用其查询函数）
+    try:
+        from neurova.llm.model_limits import get_model_context_window
+
+        window = get_model_context_window(needle)
+        if window:
+            return int(window)
+    except Exception:
+        pass
+
+    return _UNKNOWN_MODEL_WINDOW
+
+
 def register_provider_from_config(
     provider_id: str,
     provider_name: str,

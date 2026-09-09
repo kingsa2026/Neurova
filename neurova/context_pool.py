@@ -503,41 +503,26 @@ class ContextPool:
 
     @staticmethod
     def get_token_budget_for_model(model_name: str, default_budget: int = 16000) -> int:
-        """动态 Token 预算（P1-1②）：provider_manager 模型元数据优先。
+        """动态 Token 预算（P1-1②，2026-09-10 收敛 llmrouter 统一入口）。
 
-        优先级：模型 context_window（×0.6 视图安全系数，钳位 [4000, 400000]）
-        → 静态已知型号表（provider 元数据不可用时）→ default_budget。
-        只读接入 provider_manager（懒加载 + 全程异常保护，不因预算查询崩溃）。
+        窗口查询委托 llm_router.resolve_model_context_window（provider 真实
+        元数据 → 族级预埋 → model_limits 精确表 → 保守默认），本函数只做
+        ×0.6 视图安全系数与钳位。llm_router 不可用时回退自有静态表。
         """
         needle = (model_name or "").strip().lower()
 
-        # 1) provider 元数据（只读接入，不修改其文件）
+        # 1) llmrouter 统一入口（真实元数据优先）
         try:
-            from neurova.llm.provider_manager import get_provider_manager
+            from neurova.llm.llm_router import resolve_model_context_window
 
-            pm = get_provider_manager()
-            providers = getattr(pm, "providers", None) or {}
-            for cfg in providers.values():
-                entries = (getattr(cfg, "discovered_models", None) or []) + (
-                    getattr(cfg, "models", None) or []
-                )
-                for model in entries:
-                    if isinstance(model, str):
-                        mid, mname, window = model, model, 0
-                    else:
-                        mid = str(getattr(model, "id", "") or "")
-                        mname = str(getattr(model, "name", "") or "")
-                        window = int(getattr(model, "context_window", 0) or 0)
-                    hit = needle and needle in (mid.lower(), mname.lower())
-                    if not hit:
-                        continue
-                    if window > 0:
-                        budget = int(window * ContextPool._BUDGET_WINDOW_FACTOR)
-                        return max(ContextPool._BUDGET_MIN, min(ContextPool._BUDGET_MAX, budget))
+            window = resolve_model_context_window(model_name)
+            if window > 0:
+                budget = int(window * ContextPool._BUDGET_WINDOW_FACTOR)
+                return max(ContextPool._BUDGET_MIN, min(ContextPool._BUDGET_MAX, budget))
         except Exception:
-            pass  # 元数据不可用 → 静态表回退
+            pass  # llm_router 不可用 → 静态表回退
 
-        # 2) 静态已知型号表
+        # 2) 静态已知型号表（llm_router 导入失败时的兜底）
         for model_pattern, budget in ContextPool._STATIC_MODEL_BUDGETS.items():
             if model_pattern in needle:
                 return budget

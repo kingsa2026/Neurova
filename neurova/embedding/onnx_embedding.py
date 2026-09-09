@@ -111,68 +111,69 @@ class ONNXEmbeddingEngine:
             }
 
     async def initialize(self) -> bool:
+        """异步初始化（契约保持：内部全为同步 I/O，直接走同步路径）"""
+        return self.initialize_sync()
+
+    def initialize_sync(self) -> bool:
         """
-        初始化嵌入引擎
+        同步初始化嵌入引擎
 
         流程：
         1. 自动下载模型（如果不存在）
         2. 加载 Tokenizer
         3. 加载推理引擎（ONNX 或 sentence-transformers）
         4. 推断向量维度
+
+        事故约束（2026-09-10 CPU 打满）：初始化必须是可在事件循环内直接
+        调用的同步方法——此前的"假异步"导致懒初始化在请求路径上永远无法
+        完成，编码器整体降级 TF-IDF 全量重算。
         """
-        try:
-            from neurova.tts.model_downloader import get_model_downloader
+        with self._lock:
+            if self._initialized:
+                return True
+            try:
+                from neurova.tts.model_downloader import get_model_downloader
 
-            downloader = get_model_downloader()
+                downloader = get_model_downloader()
 
-            # 自动下载模型
-            if self._auto_download:
-                self._model_dir = downloader.ensure_model("bge-small-zh-v1.5")
-            else:
-                if not downloader.is_model_available("bge-small-zh-v1.5"):
-                    logger.error("嵌入模型不存在: %s", self._model_dir)
+                # 自动下载模型
+                if self._auto_download:
+                    self._model_dir = downloader.ensure_model("bge-small-zh-v1.5")
+                else:
+                    if not downloader.is_model_available("bge-small-zh-v1.5"):
+                        logger.error("嵌入模型不存在: %s", self._model_dir)
+                        return False
+
+                # 加载 Tokenizer
+                try:
+                    from sentencepiece import SentencePieceProcessor
+
+                    tokenizer_path = self._model_dir / "tokenizer.model"
+                    if tokenizer_path.exists():
+                        self._tokenizer = SentencePieceProcessor()
+                        self._tokenizer.Load(str(tokenizer_path))
+                        logger.info("Tokenizer 加载完成: %s", tokenizer_path)
+                    else:
+                        # 回退到 HuggingFace tokenizer
+                        self._tokenizer = self._load_hf_tokenizer()
+                except ImportError:
+                    logger.warning("sentencepiece 未安装，尝试 HuggingFace tokenizer")
+                    self._tokenizer = self._load_hf_tokenizer()
+
+                if self._tokenizer is None:
+                    logger.error("Tokenizer 加载失败")
                     return False
 
-            # 加载 Tokenizer
-            try:
-                from sentencepiece import SentencePieceProcessor
-
-                tokenizer_path = self._model_dir / "tokenizer.model"
-                if tokenizer_path.exists():
-                    self._tokenizer = SentencePieceProcessor()
-                    self._tokenizer.Load(str(tokenizer_path))
-                    logger.info("Tokenizer 加载完成: %s", tokenizer_path)
-                else:
-                    # 回退到 HuggingFace tokenizer
-                    self._tokenizer = self._load_hf_tokenizer()
-            except ImportError:
-                logger.warning("sentencepiece 未安装，尝试 HuggingFace tokenizer")
-                self._tokenizer = self._load_hf_tokenizer()
-
-            if self._tokenizer is None:
-                logger.error("Tokenizer 加载失败")
-                return False
-
-            # 优先尝试 ONNX Runtime
-            onnx_loaded = await self._try_load_onnx()
-
-            # 如果 ONNX 失败，尝试 sentence-transformers
-            if not onnx_loaded:
-                st_loaded = await self._try_load_sentence_transformers()
-                if st_loaded:
+                # 优先尝试 ONNX Runtime；失败再尝试 sentence-transformers
+                if self._try_load_onnx():
                     return True
+                return self._try_load_sentence_transformers()
 
-            if not onnx_loaded:
-                logger.error("所有嵌入后端加载失败")
+            except Exception as e:
+                logger.error(f"ONNXEmbeddingEngine 初始化失败: {e}", exc_info=True)
                 return False
 
-            return True
-
-        except Exception as e:
-            logger.error(f"ONNXEmbeddingEngine 初始化失败: {e}", exc_info=True)
-            return False
-
-    async def _try_load_onnx(self) -> bool:
+    def _try_load_onnx(self) -> bool:
         """尝试加载 ONNX Runtime 后端"""
         try:
             import onnxruntime as ort
@@ -216,7 +217,7 @@ class ONNXEmbeddingEngine:
             logger.warning("ONNX Runtime 加载失败: %s", e)
             return False
 
-    async def _try_load_sentence_transformers(self) -> bool:
+    def _try_load_sentence_transformers(self) -> bool:
         """尝试加载 sentence-transformers 后端"""
         try:
             from sentence_transformers import SentenceTransformer
@@ -302,13 +303,16 @@ class ONNXEmbeddingEngine:
             EmbeddingResult
         """
         if not self._initialized:
-            logger.error("ONNXEmbeddingEngine 未初始化")
-            return EmbeddingResult(
-                vectors=[[0.0] * 512] * len(texts),
-                model_name=self._model_name,
-                dimension=512,
-                inference_ms=0,
-            )
+            # 懒初始化自救：get_embedding_engine()/UnifiedVectorStore 拿到的
+            # 都是未加载模型的裸实例，此处不初始化则所有消费方拿到静默零向量
+            if not self.initialize_sync():
+                logger.error("ONNXEmbeddingEngine 初始化失败，返回零向量兜底")
+                return EmbeddingResult(
+                    vectors=[[0.0] * 512] * len(texts),
+                    model_name=self._model_name,
+                    dimension=512,
+                    inference_ms=0,
+                )
 
         start_time = time.time()
 
