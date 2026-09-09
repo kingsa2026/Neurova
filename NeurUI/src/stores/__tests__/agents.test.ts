@@ -49,9 +49,19 @@ describe('useAgentStore — agentOptions（画布 Agent 下拉数据源）', () 
     await store.loadAgents()
     expect(store.agentOptions).toEqual([{ label: 'A', value: 'a', isWorkflow: false }])
 
+    // P1-G5：loadAgents 带 TTL 缓存，重取需 force（锁定缓存契约）
     mockedGet.mockResolvedValueOnce([{ id: 'b', name: 'B' }])
-    await store.loadAgents()
+    await store.loadAgents(true)
     expect(store.agentOptions).toEqual([{ label: 'B', value: 'b', isWorkflow: false }])
+  })
+
+  it('P1-G5：TTL 内重复 loadAgents 不重复请求（in-flight/TTL 去重）', async () => {
+    mockedGet.mockResolvedValueOnce({ items: [{ id: 'a', name: 'A' }] })
+    const store = useAgentStore()
+    await store.loadAgents()
+    await store.loadAgents()
+    await store.loadAgents()
+    expect(mockedGet).toHaveBeenCalledTimes(1)
   })
 
   it('加载失败时 agentOptions 为空数组且不抛异常', async () => {
