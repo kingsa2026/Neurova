@@ -180,3 +180,21 @@ class TestWindowTokenBudget:
         assert calls["n"] == 2, "累计增量超阈值应重新摘要"
         joined3 = "".join(m["content"] for m in r3)
         assert "摘要v2" in joined3
+
+    @pytest.mark.asyncio
+    async def test_draw_budget_linked_to_window_remaining(self):
+        """审验闭环：draw 侧预算 = 窗口预算 − 窗口实占（防止召回加倍吃回）。"""
+        orch = self._mk_orchestrator(budget=8000)
+        ctx = [_long_msg(i) for i in range(30)]
+        result = await self._build(orch, ctx)
+
+        drawer = orch.context_pool._drawer
+        from neurova.context.window_compactor import estimate_window_tokens
+
+        window_msgs = [m for m in result if m["role"] in ("user", "assistant", "system")
+                       and not m["content"].startswith("[记忆]") and not m["content"].startswith("[经验]")
+                       and not m["content"].startswith("[历史回忆]")]
+        window_tokens = estimate_window_tokens(window_msgs)
+        assert drawer.max_tokens <= max(1000, 8000 - window_tokens), (
+            f"draw 预算 {drawer.max_tokens} 应 ≤ 窗口剩余 {8000 - window_tokens}"
+        )

@@ -81,6 +81,11 @@ async def compact_window(
 ) -> typing.Optional[WindowCompaction]:
     """超预算时折叠窗口老消息；未超预算返回 None（零行为变化）。
 
+    递进折叠（Letta compaction 对齐，2026-09-10）：折叠目标从
+    target_ratio 起步，若折叠后窗口仍超预算则按 0.1 步进扩大折叠
+    比例重试，直至放下或已折叠到 keep_min_messages 下限——避免
+    一次激进摘要丢信息（最小摘要原则）。
+
     summarize: async (dropped_msgs, previous_summary) -> Optional[str]
     """
     msgs = [
@@ -91,28 +96,55 @@ async def compact_window(
     if not msgs:
         return None
 
-    dropped, kept = split_window_by_budget(msgs, budget_tokens, keep_min_messages, target_ratio)
-    if not dropped:
-        return None
-
     summary = None
-    if summarize is not None:
-        try:
-            summary = await summarize(dropped, previous_summary)
-        except Exception:  # noqa: BLE001 - 摘要失败不阻断上下文构建
-            summary = None
-        if isinstance(summary, str) and not summary.strip():
-            summary = None
+    ratio = target_ratio
+    best: typing.Optional[WindowCompaction] = None
 
-    window: typing.List[dict] = []
-    if summary:
-        window.append({"role": "system", "content": f"{summary_prefix}{summary}"})
-    window.extend(kept)
+    while True:
+        dropped, kept = split_window_by_budget(
+            msgs, budget_tokens, keep_min_messages, target_ratio=ratio
+        )
+        if not dropped:
+            # 无可折叠（keep_min 下限本身超预算等物理无解）：返回保留态的
+            # 尽力结果（零折叠、带说明性摘要行），不静默丢弃折叠机会
+            if best is None and estimate_window_tokens(msgs) > budget_tokens:
+                best = WindowCompaction(
+                    window=list(msgs),
+                    summary=None,
+                    compacted_count=0,
+                    tokens_before=estimate_window_tokens(msgs),
+                    tokens_after=estimate_window_tokens(msgs),
+                )
+            break
 
-    return WindowCompaction(
-        window=window,
-        summary=summary,
-        compacted_count=len(dropped),
-        tokens_before=estimate_window_tokens(msgs),
-        tokens_after=estimate_window_tokens(window),
-    )
+        round_summary = None
+        if summarize is not None:
+            try:
+                round_summary = await summarize(dropped, previous_summary)
+            except Exception:  # noqa: BLE001 - 摘要失败不阻断上下文构建
+                round_summary = None
+            if isinstance(round_summary, str) and not round_summary.strip():
+                round_summary = None
+
+        window: typing.List[dict] = []
+        if round_summary:
+            window.append({"role": "system", "content": f"{summary_prefix}{round_summary}"})
+        window.extend(kept)
+
+        best = WindowCompaction(
+            window=window,
+            summary=round_summary,
+            compacted_count=len(dropped),
+            tokens_before=estimate_window_tokens(msgs),
+            tokens_after=estimate_window_tokens(window),
+        )
+        summary = round_summary or summary
+
+        # 递进：折叠后仍超预算且还有可折叠空间 → 扩大折叠比例重试
+        if best.tokens_after <= budget_tokens or len(dropped) >= len(msgs) - keep_min_messages:
+            break
+        ratio = round(ratio + 0.1, 2)
+        if ratio >= 1.0:
+            break
+
+    return best

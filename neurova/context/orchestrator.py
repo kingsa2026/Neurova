@@ -63,6 +63,8 @@ class ContextOrchestrator:
         self._window_compaction_cache: dict = {}
         # 增量防抖阈值（类级常量语义）：距上次摘要新追加消息数 ≤ 此值时复用缓存摘要
         self._DELTA_RESUMMARY_MSGS = 4
+        # 本轮刚折叠消息的 hash 集（当轮 draw 防召回；下轮起正常参与语义召回）
+        self._last_folded_hashes: set = set()
         self._last_archived_window_hashes: set = set()
 
         # 初始化 ContextPool（如果启用）
@@ -506,6 +508,14 @@ class ContextOrchestrator:
                 system_instructions, developer_instructions, tools_desc
             )
             window_msgs = await self._apply_window_budget(conversation_context, window_budget)
+            # microcompact（Anthropic context editing 对齐，2026-09-10）：
+            # 保留最近 3 个工具结果原文，更早的替换为占位指针（池归档无损、
+            # 可凭 [历史回忆] 召回）。工具输出通常占窗口大头，先清它比折叠
+            # 对话文本收益最大且不破坏轮次结构。
+            try:
+                window_msgs = self._clear_old_tool_results(window_msgs)
+            except Exception as e:  # noqa: BLE001 - 清除失败不阻断
+                logger.debug("工具结果占位清除跳过: %s", e)
             try:
                 from neurova.context.recovery import repair_tool_turns
 
@@ -522,6 +532,9 @@ class ContextOrchestrator:
                 for msg in window_msgs
             }
             injected_hashes = set(window_hashes)
+            # 本轮刚折叠的消息当轮不召回（freshness 高分会立即命中，折叠白做）；
+            # 下轮起窗口已滑走，恢复正常语义召回（连续性闭环）
+            injected_hashes |= getattr(self, "_last_folded_hashes", set()) or set()
             for memory in relevant_memories or []:
                 content = memory.get("content", str(memory)) if isinstance(memory, dict) else str(memory)
                 injected_hashes.add(ContextInput.compute_hash(ContextSource.MEMORY, content))
@@ -544,6 +557,19 @@ class ContextOrchestrator:
 
             # 4. 跨轮语义调取块：从归档池按当前输入召回**历史**相关内容
             #    排除已注入条目（窗口 + 本轮产物），只召回往轮归档
+            # 审验闭环（2026-09-10）：draw 侧预算与窗口剩余空间联动——
+            # 否则窗口折叠省下的 token 会被 draw 召回加倍吃回（实测
+            # prompt 65920：draw 29 条归档撑爆）。固定前缀不占 draw 预算
+            # （drawer 是池归档的独立额度）。
+            try:
+                from neurova.context.window_compactor import estimate_window_tokens
+
+                remaining = max(1000, window_budget - estimate_window_tokens(window_msgs))
+                drawer = getattr(self.context_pool, "_drawer", None)
+                if drawer is not None:
+                    drawer.max_tokens = remaining
+            except Exception as e:  # noqa: BLE001 - 预算联动失败不阻断召回
+                logger.debug("draw 预算联动跳过: %s", e)
             drawn_contexts = self.context_pool.draw(need=user_input)
             logger.debug("ContextPool.draw() 调取 %s 条归档", len(drawn_contexts))
             for ctx in drawn_contexts:
@@ -839,6 +865,37 @@ class ContextOrchestrator:
         # 修2：暴露本轮归档的窗口 hash 集（窗口折叠发生在归档之后——零丢失判据）
         self._last_archived_window_hashes = archived_hashes
 
+    # microcompact 保留窗口：最近 N 个工具结果保留原文，更早的占位替换
+    _TOOL_RESULT_KEEP_RECENT = 3
+    _TOOL_RESULT_PLACEHOLDER = "[工具输出已清除（原文已归档，可检索回忆）]"
+
+    def _clear_old_tool_results(self, window_msgs: list) -> list:
+        """microcompact（Anthropic context editing 对齐）：老工具结果占位清除。
+
+        只在窗口 token 超过 8k 时启用（短对话不做无谓替换）；保留最近
+        _TOOL_RESULT_KEEP_RECENT 个工具结果原文，更早的替换为占位指针。
+        原文已由 _archive_conversation_to_pool 无损归档，召回不受影响。
+        """
+        from neurova.context.window_compactor import estimate_window_tokens
+
+        if estimate_window_tokens(window_msgs) <= 8000:
+            return window_msgs
+
+        tool_positions = [
+            i for i, m in enumerate(window_msgs) if (m or {}).get("role") == "tool"
+        ]
+        if len(tool_positions) <= self._TOOL_RESULT_KEEP_RECENT:
+            return window_msgs
+
+        cutoff = tool_positions[-self._TOOL_RESULT_KEEP_RECENT]
+        cleared = list(window_msgs)
+        for i in tool_positions:
+            if i < cutoff:
+                content = str(cleared[i].get("content", "") or "")
+                if len(content) >= 80:  # 极短结果（如状态码）保留原文
+                    cleared[i] = {**cleared[i], "content": self._TOOL_RESULT_PLACEHOLDER}
+        return cleared
+
     # ══════════════════════════════════════════════════════════════
     # 修2（2026-09-09）：对话窗口 token 预算 + 自动压缩（zcode 式）
     # ══════════════════════════════════════════════════════════════
@@ -953,7 +1010,19 @@ class ContextOrchestrator:
             previous_summary=cache.get("summary", ""),
         )
         if compaction is None:
+            self._last_folded_hashes = set()
             return msgs
+
+        # 本轮被折叠消息 hash 集（build_context 据此当轮防召回——刚折叠即召回
+        # 会让折叠白做；下轮起窗口滑走、恢复正常语义召回）
+        kept_contents = {m.get("content", "") for m in compaction.window}
+        from neurova.context_pool import ContextInput as _CI, ContextSource as _CS
+
+        self._last_folded_hashes = {
+            _CI.compute_hash(_CS.CONVERSATION, m.get("content", ""))
+            for m in msgs
+            if m.get("content", "") not in kept_contents
+        }
 
         # 更新跨轮缓存（摘要失败时保留旧摘要，下次重试增量）
         if compaction.summary:

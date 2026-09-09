@@ -204,16 +204,16 @@ class UnifiedVectorStore:
 
     async def initialize_encoder(self) -> bool:
         """
-        异步初始化编码器（用于 ONNX 后端的懒加载）
+        初始化编码器（用于 ONNX 后端的懒加载；契约保持异步，事件循环内外均可调）
 
         Returns:
             初始化是否成功
         """
         if self.backend == "onnx" and self._encoder and not self._encoder.is_initialized:
             try:
-                return await self._encoder.initialize()
+                return self._encoder.initialize_sync()
             except Exception as e:
-                logger.warning("ONNX 编码器异步初始化失败: %s", e)
+                logger.warning("ONNX 编码器初始化失败: %s", e)
                 return False
         return True
 
@@ -337,24 +337,14 @@ class UnifiedVectorStore:
             if self.backend == "faiss":
                 vec = self._encoder.encode(text, normalize_embeddings=True)
             elif self.backend == "onnx":
-                # 懒初始化 ONNX 引擎
+                # 同步懒初始化：initialize_sync 可在事件循环内直接调用
+                # （2026-09-10 CPU 事故修复——原"检测到运行中事件循环即放弃
+                # 初始化降级 TF-IDF"分支导致编码器永远无法就绪，请求路径
+                # 每轮全量 TF-IDF 重算打满 CPU）
                 if not self._encoder.is_initialized:
-                    import asyncio
-
-                    try:
-                        loop = asyncio.get_running_loop()
-                    except RuntimeError:
-                        loop = None
-
-                    if loop and loop.is_running():
-                        # 已有运行的事件循环，无法同步初始化
-                        logger.warning("ONNX 编码器未初始化，降级到 TF-IDF")
+                    if not self._encoder.initialize_sync():
+                        logger.warning("ONNX 编码器初始化失败，降级到 TF-IDF")
                         return self._tfidf_encode(text)
-                    else:
-                        asyncio.run(self._encoder.initialize())
-                        if not self._encoder.is_initialized:
-                            logger.warning("ONNX 编码器初始化失败，降级到 TF-IDF")
-                            return self._tfidf_encode(text)
 
                 return self._encoder.encode(text)
             else:

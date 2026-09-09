@@ -139,7 +139,20 @@ class SemanticMatchDrawer:
             if total_tokens + drop_tokens <= self.max_tokens:
                 selected.append(drop)
                 total_tokens += drop_tokens
-            # 超预算：整条跳过并继续尝试更小的条目（不截断内容、不中断选取）
+            elif drop_tokens > self.max_tokens and self.max_tokens > 200:
+                # 审验闭环（2026-09-10）：单条超预算的大归档截断召回（尾部省略注记），
+                # 不再整条跳过——否则长消息被窗口折叠后永远无法召回（对话连续性断裂）。
+                # 截断只影响本次视图，池内原文仍无损。
+                from neurova.context.token_estimator import estimate_tokens as _est
+
+                content = str(drop.content or "")
+                keep_chars = max(200, self.max_tokens * 2)  # 保守 2 char/token 逆推
+                truncated = content[:keep_chars] + "…[召回截断，全文见会话记录]"
+                drop.content = truncated
+                drop.tokens = _est(truncated)
+                selected.append(drop)
+                total_tokens += drop.tokens
+            # 其余超预算：整条跳过并继续尝试更小的条目（不截断内容、不中断选取）
 
         # [缓存稳定] 最终顺序按 created_at 稳定排序：
         # 同一批被调取的条目在不同请求中保持相同相对位置，保住 LLM 前缀缓存

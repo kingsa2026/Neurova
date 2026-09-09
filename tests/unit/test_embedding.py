@@ -27,14 +27,21 @@ class TestONNXEmbeddingEngine:
         assert isinstance(ok, bool)
 
     @pytest.mark.asyncio
-    async def test_encode_before_init(self):
-        """未初始化时 encode 应返回零向量"""
+    async def test_encode_lazy_initializes(self):
+        """encode 遇未初始化应懒初始化并返回真实向量
+
+        2026-09-10 CPU 事故契约变更：旧断言"未初始化时 encode 返回零向量"
+        固化的正是事故中的静默质量腐坏（semantic_search/vector_index 拿到
+        全零向量）。新契约：encode 自救懒初始化，失败才回零向量兜底。
+        """
         from neurova.embedding import ONNXEmbeddingEngine
+
         engine = ONNXEmbeddingEngine(auto_download=False)
         result = engine.encode("hello")
+        assert engine.is_initialized
         assert isinstance(result, list)
-        assert len(result) > 0
-        assert all(v == 0.0 for v in result)
+        assert len(result) == engine.dimension
+        assert any(v != 0.0 for v in result)
 
     @pytest.mark.asyncio
     async def test_shutdown(self):
