@@ -1790,7 +1790,8 @@ class Agent:
                             item.consecutive_successes = 0
                             reset_any = True
                 if reset_any:
-                    muscle._save_all()
+                    # 审计 P1-E6：同步落盘下沉线程池（不阻塞事件循环）
+                    await asyncio.to_thread(muscle._save_all)
                     logger.info("📉 肌肉记忆降级: %s consecutive_successes 重置为 0", tool_name)
         except Exception as e:
             logger.debug("肌肉记忆降级记录跳过: %s", e)
