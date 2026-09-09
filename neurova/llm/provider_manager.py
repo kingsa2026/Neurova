@@ -542,43 +542,43 @@ class LLMProviderManager(Module):
         usage_collection: Optional[bool] = None,
     ) -> bool:
         """更新服务商配置"""
-        if provider_id not in self._providers:
-            logger.warning("Provider %s not found", provider_id)
-            return False
-
-        provider = self._providers[provider_id]
-
-        if api_key is not None:
-            provider.api_key = api_key
-        if default_model is not None:
-            provider.default_model = default_model
-        if models is not None:
-            provider.models = models
-            # 同步清理已删除模型的元数据残留(defensive)
-            metadata = dict(provider.model_metadata or {})
-            remaining = set(models)
-            pruned = {
-                model_id: meta
-                for model_id, meta in metadata.items()
-                if model_id in remaining
-            }
-            if pruned != metadata:
-                provider.model_metadata = pruned
-        if enabled is not None:
-            provider.enabled = enabled
-        if priority is not None:
-            provider.priority = priority
-        if base_url is not None:
-            provider.base_url = base_url
-        if description is not None:
-            provider.description = description
-        # P1-13 断链修复: 真账单采集开关经 API 可达（复审断点②）
-        if usage_collection is not None:
-            provider.usage_collection = usage_collection
-
-        provider.updated_at = datetime.now().isoformat()
-
         with self._config_lock:
+            if provider_id not in self._providers:
+                logger.warning("Provider %s not found", provider_id)
+                return False
+
+            provider = self._providers[provider_id]
+
+            if api_key is not None:
+                provider.api_key = api_key
+            if default_model is not None:
+                provider.default_model = default_model
+            if models is not None:
+                provider.models = models
+                # 同步清理已删除模型的元数据残留(defensive)
+                metadata = dict(provider.model_metadata or {})
+                remaining = set(models)
+                pruned = {
+                    model_id: meta
+                    for model_id, meta in metadata.items()
+                    if model_id in remaining
+                }
+                if pruned != metadata:
+                    provider.model_metadata = pruned
+            if enabled is not None:
+                provider.enabled = enabled
+            if priority is not None:
+                provider.priority = priority
+            if base_url is not None:
+                provider.base_url = base_url
+            if description is not None:
+                provider.description = description
+            # P1-13 断链修复: 真账单采集开关经 API 可达（复审断点②）
+            if usage_collection is not None:
+                provider.usage_collection = usage_collection
+
+            provider.updated_at = datetime.now().isoformat()
+
             self._save_config()
 
         logger.info("Updated provider: %s", provider.name)
@@ -633,11 +633,12 @@ class LLMProviderManager(Module):
 
     def update_provider_metadata(self, provider_id: str, metadata: Dict[str, Any]) -> bool:
         """更新服务商元数据"""
-        if provider_id not in self._providers:
-            logger.warning("Provider %s not found", provider_id)
-            return False
+        with self._config_lock:
+            if provider_id not in self._providers:
+                logger.warning("Provider %s not found", provider_id)
+                return False
 
-        provider = self._providers[provider_id]
+            provider = self._providers[provider_id]
         if not isinstance(metadata, dict):
             return False
 
@@ -650,11 +651,12 @@ class LLMProviderManager(Module):
 
     def remove_provider(self, provider_id: str) -> bool:
         """移除服务商"""
-        if provider_id not in self._providers:
-            logger.warning("Provider %s not found", provider_id)
-            return False
+        with self._config_lock:
+            if provider_id not in self._providers:
+                logger.warning("Provider %s not found", provider_id)
+                return False
 
-        provider = self._providers[provider_id]
+            provider = self._providers[provider_id]
         if provider.is_builtin:
             logger.warning("Cannot remove built-in provider: %s", provider.name)
             return False
@@ -669,8 +671,9 @@ class LLMProviderManager(Module):
         return True
 
     def get_provider(self, provider_id: str) -> Optional[ProviderConfig]:
-        """获取服务商配置"""
-        return self._providers.get(provider_id)
+        """获取服务商配置（P0-B3：锁内读取，防并发增删时 dict 尺寸变更）"""
+        with self._config_lock:
+            return self._providers.get(provider_id)
 
     def list_providers(
         self,
@@ -678,8 +681,9 @@ class LLMProviderManager(Module):
         builtin_only: bool = False,
         custom_only: bool = False,
     ) -> List[ProviderConfig]:
-        """列出服务商"""
-        providers = list(self._providers.values())
+        """列出服务商（P0-B3：锁内快照，防并发增删时迭代异常）"""
+        with self._config_lock:
+            providers = list(self._providers.values())
 
         if enabled_only:
             providers = [p for p in providers if p.enabled]
@@ -732,7 +736,10 @@ class LLMProviderManager(Module):
         """搜索服务商"""
         query_lower = query.lower()
         results = []
-        for provider in self._providers.values():
+        # P0-B3：锁内快照再遍历
+        with self._config_lock:
+            snapshot = list(self._providers.values())
+        for provider in snapshot:
             if (
                 query_lower in provider.name.lower()
                 or query_lower in provider.provider.lower()

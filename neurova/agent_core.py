@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 # BE-CORE-003 修复: 下方 except 分支使用 logging.warning()，需导入 logging
+import asyncio
 import logging
 
 # SkillManifestProvider 仅在 property 的字符串注解中引用（运行时按需导入）
@@ -998,6 +999,9 @@ class Agent:
     - 普通对话才由 Agent 的 chat 方法处理
     """
 
+    # P0-B5：模型热切换串行锁（asyncio.Lock 非 fork 安全，按进程实例化）
+    _model_switch_lock_slot: asyncio.Lock = asyncio.Lock()
+
     def __init__(self, config: Optional[AgentConfig] = None, **kwargs):
 
         self.config = config or AgentConfig(**kwargs)
@@ -1049,6 +1053,18 @@ class Agent:
             logger.warning("Agent Loop 系统不可用，无法重建")
             return False
 
+        # 审计 P0-B5：per-agent 串行锁——重建期间并发请求可能读到半旧半新的
+        # loop/llm_client 组合（Loop 构造冻结 client 引用，此处补丁式回填）
+        async with self._get_model_switch_lock():
+            return await self._rebuild_loop_locked(model_name)
+
+    @classmethod
+    def _get_model_switch_lock(cls) -> asyncio.Lock:
+        """per-Agent 实例的模型热切换锁（每次调用返回当前实例锁）。"""
+        return cls._model_switch_lock_slot
+
+    async def _rebuild_loop_locked(self, model_name: str) -> bool:
+        """rebuild_loop 主体（须持 _model_switch_lock 调用）。"""
         # 必须真正 await：旧实现未 await，热切换静默失效
         result = await self.loop_manager.rebuild(model_name)
         # 同步 self.loop 引用
@@ -1915,69 +1931,94 @@ class Agent:
     ) -> None:
         """记录本轮请求级身份（工具层三层隔离/蜂群事件广播依赖）。
 
-        user_id 缺省落 "default"（与原 chat_pipeline 写入语义一致：
-        metadata 未携带 JWT user_id 时工具层凭据分桶主体仍可用）。
+        审计 P0-B1：轮次级状态迁 ContextVar——Agent 是单例，实例属性存储
+        在并发请求下互踩（请求 B 覆盖请求 A 的身份/工具消息）。
+        user_id 缺省落 "default"（与原 chat_pipeline 写入语义一致）。
         """
-        self._current_user_input = user_input
-        self._current_session_id = session_id
-        self._current_user_id = user_id or "default"
+        from neurova.core.turn_context import set_turn_identity
+
+        set_turn_identity(user_input, session_id, user_id)
 
     @property
     def current_user_input(self) -> Optional[str]:
-        return getattr(self, "_current_user_input", None)
+        from neurova.core.turn_context import get_turn_user_input
+
+        return get_turn_user_input()
 
     @property
     def current_session_id(self) -> Optional[str]:
-        return getattr(self, "_current_session_id", None)
+        from neurova.core.turn_context import get_turn_session_id
+
+        return get_turn_session_id()
 
     @property
     def current_user_id(self) -> Optional[str]:
-        return getattr(self, "_current_user_id", None)
+        from neurova.core.turn_context import get_turn_user_id
+
+        return get_turn_user_id()
 
     @property
     def current_reasoning(self) -> Optional[str]:
-        return getattr(self, "_current_reasoning", None)
+        from neurova.core.turn_context import get_turn_reasoning
+
+        return get_turn_reasoning()
 
     def set_current_reasoning(self, reasoning: Optional[str]) -> None:
-        """记录本轮思考过程（流式聚合 / 非流式单值共用）"""
-        self._current_reasoning = reasoning
+        """记录本轮思考过程（流式聚合 / 非流式单值共用；P0-B1 迁 ContextVar）"""
+        from neurova.core.turn_context import set_turn_reasoning
+
+        set_turn_reasoning(reasoning)
 
     def reset_tool_messages(self) -> None:
-        """清空本轮工具展示记录（轮次开始时调用）"""
-        self._tool_messages_list = []
+        """清空本轮工具展示记录（轮次开始时调用；P0-B1 迁 ContextVar）"""
+        from neurova.core.turn_context import reset_turn_tool_messages
+
+        reset_turn_tool_messages()
 
     def append_tool_messages(self, records: List[Dict[str, Any]]) -> None:
-        """追加工具调用/结果展示记录（原生事件合并 + 并行回装共用入口）"""
-        if getattr(self, "_tool_messages_list", None) is None:
-            self._tool_messages_list = []
-        self._tool_messages_list.extend(records or [])
+        """追加工具调用/结果展示记录（原生事件合并 + 并行回装共用入口；P0-B1 迁 ContextVar）"""
+        from neurova.core.turn_context import append_turn_tool_messages
+
+        append_turn_tool_messages(records)
 
     def get_tool_messages_snapshot(self) -> List[Dict[str, Any]]:
         """工具展示记录快照（副本，外部改动不回写）——公有形态"""
-        return self._collect_tool_messages()
+        from neurova.core.turn_context import get_turn_tool_messages_snapshot
+
+        return get_turn_tool_messages_snapshot()
 
     def append_tool_event(self, event: Dict[str, Any]) -> None:
-        """追加工具降级/异常事件（openai_loop 降级路径）；损坏态自愈为列表"""
-        events = getattr(self, "_tool_events", None)
-        if not isinstance(events, list):
-            events = []
-            self._tool_events = events
-        events.append(event)
+        """追加工具降级/异常事件（openai_loop 降级路径）；损坏态自愈为列表（P0-B1 迁 ContextVar）"""
+        from neurova.core.turn_context import append_turn_tool_event
+
+        append_turn_tool_event(event)
+
+    @property
+    def tool_events(self) -> List[Dict[str, Any]]:
+        """工具降级/异常事件只读视图（P0-B1 迁 ContextVar 后的对偶读 API）"""
+        from neurova.core.turn_context import get_turn_tool_events
+
+        return get_turn_tool_events()
 
     def increment_turn_count(self) -> int:
-        """轮次计数 +1，返回新值"""
-        self._turn_count = getattr(self, "_turn_count", 0) + 1
-        return self._turn_count
+        """轮次计数 +1，返回新值（P0-B1 迁 ContextVar）"""
+        from neurova.core.turn_context import increment_turn_count
+
+        return increment_turn_count()
 
     @property
     def turn_count(self) -> int:
         """当前轮次（读取方 getattr(agent,"turn_count") 的契约名；P0-2 失配修复）"""
-        return int(getattr(self, "_turn_count", 0) or 0)
+        from neurova.core.turn_context import get_turn_count
+
+        return get_turn_count()
 
     @property
     def session_id(self) -> str:
-        """当前会话 id（EKB 溯源等读取方契约名；实际存储在 _current_session_id）"""
-        return str(getattr(self, "_current_session_id", "") or "")
+        """当前会话 id（EKB 溯源等读取方契约名；P0-B1 迁 ContextVar）"""
+        from neurova.core.turn_context import get_turn_session_id
+
+        return str(get_turn_session_id() or "")
 
     async def record_tool_failure_lesson(
         self, tool_name: str, user_input: str, error_msg: str

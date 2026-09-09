@@ -194,7 +194,7 @@ class BaseAgentLoop(ABC):
                 try:
                     # 隔离注入：身份并入 params（kb_builder 等据此归属知识条目），
                     # 同时以 context 透传；服务端赋值优先，防 LLM 参数伪造
-                    _caller_id = str(getattr(self.agent, "_current_user_id", None) or "")
+                    _caller_id = str(getattr(self.agent, "current_user_id", None) or "")
                     _caller_ctx = {"user_id": _caller_id}
                     _caller_args = {**(_tc_arguments or {}), "_caller_user_id": _caller_id}
                     # 沙箱根注入（2026-09-08 相对路径乱放根因修复）：file_operation

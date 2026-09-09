@@ -45,6 +45,10 @@ def _make_agent() -> types.SimpleNamespace:
         config=types.SimpleNamespace(llm_config=types.SimpleNamespace(model="old-model")),
     )
     agent.rebuild_loop = Agent.rebuild_loop.__get__(agent)
+    # P0-B5：rebuild_loop 现自持 per-agent 锁；桩提供与 Agent 相同语义的
+    # 锁方法与锁内主体方法绑定
+    agent._get_model_switch_lock = Agent._get_model_switch_lock.__get__(agent)
+    agent._rebuild_loop_locked = Agent._rebuild_loop_locked.__get__(agent)
     return agent
 
 
