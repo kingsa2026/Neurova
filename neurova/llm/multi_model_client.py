@@ -987,7 +987,10 @@ class MultiModelLLMClient:
             return self._resolve_available_fallback()
         elif model:
             client = self.get_client(model=model)
-            if client:
+            # 请求按模型名解析时必须命中同名客户端：get_client 找不到目标模型
+            # 会静默回落 current/default 客户端（2026-09-09 视觉轮实测：覆盖
+            # 模型名被丢弃、请求仍打默认 Kimi 400）。不匹配 → 继续走懒加载。
+            if client and (client.model == model or client.model.endswith(model)):
                 return client
             # 按模型名查找所有服务商
             for provider in self._provider_manager.list_providers():
