@@ -79,4 +79,43 @@ describe('useSessionSendLock', () => {
     await new Promise((r) => setTimeout(r, 0))
     expect(isOwner.value).toBe(false)
   })
+
+  // ── 防回归（2026-09-09 新建会话发送按钮禁用根因）──────────────────
+  // Web Locks 规范：navigator.locks.request() 返回 Promise<void>，resolve 值恒为
+  // undefined（没有 handle）；抢锁失败的唯一信号是回调收到 lock === null。
+  // 若把 resolve undefined 误判为"抢锁失败"，锁释放时 stale await 会把
+  // isOwner 打成 false——新建会话（sid→null，只释放不再抢）后发送按钮恒禁用。
+
+  /** 规范忠实 mock：request 恒 resolve undefined，且仅在回调返回的持锁 promise settle 后 resolve。 */
+  function specFaithfulRequest() {
+    return vi.fn(async (_n: string, _o: any, cb: any) => {
+      await cb({ name: _n })
+      return undefined
+    })
+  }
+
+  it('keeps ownership after release (new-chat path, sid→null)', async () => {
+    // @ts-expect-error 注入 mock
+    navigator.locks = { request: specFaithfulRequest() }
+    const sid = ref<string | null>('s1')
+    const { isOwner } = useSessionSendLock(sid)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(isOwner.value).toBe(true)
+    sid.value = null // 新对话：useSessionOps.createSession() → setCurrentSession(null)
+    await nextTick()
+    await new Promise((r) => setTimeout(r, 0))
+    expect(isOwner.value).toBe(true)
+  })
+
+  it('keeps ownership after switching sessions (stale await must not clobber)', async () => {
+    // @ts-expect-error 注入 mock
+    navigator.locks = { request: specFaithfulRequest() }
+    const sid = ref<string | null>('s1')
+    const { isOwner } = useSessionSendLock(sid)
+    await new Promise((r) => setTimeout(r, 0))
+    expect(isOwner.value).toBe(true)
+    sid.value = 's2'
+    await new Promise((r) => setTimeout(r, 0))
+    expect(isOwner.value).toBe(true)
+  })
 })
