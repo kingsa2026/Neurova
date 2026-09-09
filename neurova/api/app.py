@@ -1014,10 +1014,8 @@ def create_app(
     """
     global _app_state, _app_instance
 
-    # 单例模式
-    if _app_instance is not None:
-        return _app_instance
-
+    # 单例模式（审计 P2-H6：检查在锁内完成——原锁外 check-then-act 模式
+    # 脆弱；CPython 下良性但不应依赖实现细节）
     with _state_lock:
         if _app_instance is not None:
             return _app_instance
@@ -1054,16 +1052,19 @@ def create_app(
         # 注册指标端点
         _register_metrics_endpoint(app)
 
-        # 测试端点
-        @app.get("/test")
-        async def test_simple_endpoint():
-            """最简单的测试端点"""
-            return {"status": "ok", "message": "Neurova API is running"}
+        # 测试端点（审计 P2-H6：仅 debug 模式注册——诊断端点无鉴权，
+        # 生产 app 不应暴露）
+        if debug:
 
-        @app.post("/test")
-        async def test_post_direct():
-            """直接在 app 上注册的 POST 端点（用于诊断）"""
-            return {"status": "ok", "method": "POST"}
+            @app.get("/test")
+            async def test_simple_endpoint():
+                """最简单的测试端点"""
+                return {"status": "ok", "message": "Neurova API is running"}
+
+            @app.post("/test")
+            async def test_post_direct():
+                """直接在 app 上注册的 POST 端点（用于诊断）"""
+                return {"status": "ok", "method": "POST"}
 
         # 注册启动/关闭事件
         @app.on_event("startup")
