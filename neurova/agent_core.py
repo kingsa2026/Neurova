@@ -694,9 +694,12 @@ class SubSystemContainer:
         a = self.agent
         a.approval_manager = None
         try:
-            from neurova.security.approval_manager import ApprovalLevel, ApprovalManager
+            from neurova.security.approval_manager import ApprovalLevel, get_approval_manager
 
-            a.approval_manager = ApprovalManager(
+            # 审计 A6：必须走 get_approval_manager 单例工厂——原代码直接 new
+            # 出第二个实例，与 tool_executor/API 消费的全局单例形成 split-brain
+            # （两套 .approval 存储，审批状态互不可见）。
+            a.approval_manager = get_approval_manager(
                 workspace_path=str(a.config.workspace_path),
                 approval_level=ApprovalLevel.SMART,
             )
