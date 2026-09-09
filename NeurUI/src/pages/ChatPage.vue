@@ -431,6 +431,7 @@ import { useChat } from '@/composables/useChat'
 import { reorderConsoleSessions } from '@/api/modules/console'
 import type { ChatMessage, Session, PendingFile } from '@/types/chat'
 import { api } from '@/api'
+import { extractUploadedFileId } from '@/api/modules/files'
 import { useGovernanceApproval } from '@/composables/useGovernanceApproval'
 import { secureStorage } from '@/utils/security'
 import { renderMarkdown } from '@/utils/markdown'
@@ -1196,8 +1197,11 @@ async function sendMessage() {
       const uploadRes: any = await api.upload('/files/upload', pf.file, 'file', {
         agent_id: agentId.value,
       })
-      const uploadData = uploadRes?.data ?? uploadRes
-      if (uploadData?.id) fileIds.push(uploadData.id)
+      // 后端 FileInfo 契约字段是 file_id（无 id、无信封）；提取失败不得静默——
+      // 缺 file_ids 会导致该轮附件整轮丢失（agent 收不到图片）
+      const fid = extractUploadedFileId(uploadRes)
+      if (fid) fileIds.push(fid)
+      else console.error('[Chat] File upload response missing file_id:', uploadRes)
     } catch (err) {
       console.error('[Chat] File upload failed:', err)
     }
