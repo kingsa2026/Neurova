@@ -28,6 +28,9 @@
 /* ─── ═══ Cosmic 皮肤（原版默认） · 深色 ═══ ───
    星空玻璃拟态：深黑紫背景、Indigo 紫渐变品牌、DM Sans 字体 */
 :root[data-skin='cosmic'] {
+  /* 原生控件弹层（select 下拉/日期/自动填充）跟随主题明暗，防白底白字 */
+  color-scheme: dark;
+
   /* Cosmic Palette (Dark) */
   --nr-bg-deep: #06080f;
   --nr-bg-base: #0a0e1a;
@@ -115,6 +118,8 @@
 
 /* ─── Cosmic 皮肤（原版） · 浅色（DeepSeek 风格：白底浅灰、蓝主色、柔和阴影） ─── */
 :root[data-skin='cosmic'][data-theme='light'] {
+  color-scheme: light;
+
   /* Backgrounds */
   --nr-bg-deep: #f5f6f7;
   --nr-bg-base: #fafbfc;
@@ -179,6 +184,8 @@
 /* ═══ iOS 皮肤（Liquid Glass） · 深色 ═══
    Apple HIG：纯黑背景 + SystemGray 表面 + Accent 蓝 #0a84ff */
 :root[data-skin='ios'] {
+  color-scheme: dark;
+
   /* iOS 深色调色板 */
   --nr-bg-deep: #000000;
   --nr-bg-base: #000000;
@@ -266,6 +273,8 @@
 
 /* ─── iOS 皮肤 · 浅色（Liquid Glass light） ─── */
 :root[data-skin='ios'][data-theme='light'] {
+  color-scheme: light;
+
   /* Backgrounds（iOS systemGroupedBackground） */
   --nr-bg-deep: #f2f2f7;
   --nr-bg-base: #f2f2f7;

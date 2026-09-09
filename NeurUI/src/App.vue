@@ -56,8 +56,10 @@ const antdLocale = computed<ConfigProviderProps['locale']>(() => {
   return map[locale.value] ?? localeEnUS
 })
 
-const getPopupContainer = (triggerNode?: HTMLElement) =>
-  (triggerNode?.parentNode || document.body) as HTMLElement
+// 弹层必须挂 body：玻璃容器（GlassPanel 等）overflow:hidden 会截断挂在
+// triggerNode.parentNode 里的弹层（默认 LLM 下拉被裁剪事故 2026-09-09）。
+// 需要弹层跟随滚动容器的个别组件已显式传自己的 get-popup-container（组件级优先）。
+const getPopupContainer = () => document.body
 
 /** Ant Design 主题联动：双皮肤（cosmic 原版 / ios Liquid Glass）× 深浅色。
  *  与 variables.css 四组令牌 + tokens.ts 保持一致。 */
