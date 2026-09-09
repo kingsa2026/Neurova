@@ -14,13 +14,138 @@ UnifiedVectorStore — 三合一向量索引
 """
 
 from neurova.core.logger import get_logger
+import base64
 import hashlib
+import json
 import math
+import os
+import threading
+from array import array
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = get_logger(__name__)
+
+# ═══════════════════════════════════════════════════════════════
+# 进程级嵌入缓存（启动性能 2026-09-09）
+#
+# init_moe_router 初始索引每次启动对全量记忆逐条 encode（199 条实测 10.7s），
+# 且嵌入结果从不落盘 → 每次启动全量重算，成本随记忆量线性恶化。
+# 修复：内容寻址（sha256(文本)）缓存，落盘持久化，重启后同文本同模型直接命中。
+#
+# 纪律：
+# - 仅真实模型后端且 encoder 已初始化的向量可入缓存。tfidf 词汇表漂移、
+#   onnx 懒加载失败降级 tfidf 的路径一律绕过缓存，防止维度漂移向量毒化。
+# - 指纹 backend:model_name 不匹配 → 整体失效。
+# - 内存态存 base64(float32)（20000×512 维按 float 列表存约 250MB，b64 约 56MB）；
+#   命中时解码（微秒级），落盘/内存同形。
+# - 环境变量 NEUROVA_EMBEDDING_CACHE 可覆盖落盘路径（测试隔离）。
+# ═══════════════════════════════════════════════════════════════
+
+_EMBEDDING_CACHE_MAX_ENTRIES = 20000
+# 类型: sha256(文本) → base64(float32 向量字节)
+_embedding_cache: Optional[Dict[str, str]] = None
+_embedding_cache_fingerprint: str = ""
+_embedding_cache_path: Optional[Path] = None
+_embedding_cache_lock = threading.RLock()
+
+
+def _embedding_fingerprint(backend: str, encoder: Any) -> str:
+    """模型指纹：同文本不同模型/维度的向量不可互用"""
+    model_name = getattr(encoder, "model_name", "") or getattr(encoder, "_model_name", "")
+    return f"{backend}:{model_name}"
+
+
+def _embedding_cache_file() -> Path:
+    env = os.environ.get("NEUROVA_EMBEDDING_CACHE", "").strip()
+    if env:
+        return Path(env)
+    return Path(__file__).resolve().parents[3] / "data" / "embedding_cache.json"
+
+
+def _vec_to_b64(vec: List[float]) -> Optional[str]:
+    try:
+        return base64.b64encode(array("f", vec).tobytes()).decode("ascii")
+    except Exception:
+        return None
+
+
+def _b64_to_vec(b64: str) -> Optional[List[float]]:
+    try:
+        buf = array("f")
+        buf.frombytes(base64.b64decode(b64))
+        return list(buf)
+    except Exception:
+        return None
+
+
+def _load_embedding_cache(fingerprint: str) -> Dict[str, str]:
+    """加载落盘缓存；指纹不匹配或文件损坏时整体失效（返回空表）"""
+    global _embedding_cache, _embedding_cache_fingerprint, _embedding_cache_path
+    with _embedding_cache_lock:
+        if _embedding_cache is not None and _embedding_cache_fingerprint == fingerprint:
+            return _embedding_cache
+        path = _embedding_cache_file()
+        _embedding_cache_path = path
+        entries: Dict[str, str] = {}
+        if path.exists():
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if raw.get("fingerprint") == fingerprint:
+                    entries = raw.get("entries", {})
+                    logger.info("嵌入缓存已加载: %d 条 (fingerprint=%s)", len(entries), fingerprint)
+                else:
+                    logger.info("嵌入缓存指纹不匹配（模型变更），整体失效重建")
+            except Exception as e:
+                logger.warning("嵌入缓存文件损坏，重建: %s", e)
+        _embedding_cache = entries
+        _embedding_cache_fingerprint = fingerprint
+        return entries
+
+
+def _persist_embedding_cache(fingerprint: str, entries: Dict[str, str]) -> None:
+    """批处理边界统一写穿（原子替换，防半截 JSON）；超上限时按插入序截断"""
+    global _embedding_cache_path
+    with _embedding_cache_lock:
+        if _embedding_cache_path is None:
+            _embedding_cache_path = _embedding_cache_file()
+        path = _embedding_cache_path
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            trimmed = dict(list(entries.items())[-_EMBEDDING_CACHE_MAX_ENTRIES:])
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(
+                json.dumps({"fingerprint": fingerprint, "entries": trimmed}),
+                encoding="utf-8",
+            )
+            os.replace(tmp, path)
+        except Exception as e:
+            logger.warning("嵌入缓存落盘失败（不影响索引）: %s", e)
+
+
+def flush_embedding_cache() -> None:
+    """把进程内新增嵌入写穿落盘（index_memories/initialize_centroids 批结束调用）"""
+    with _embedding_cache_lock:
+        if _embedding_cache is None:
+            return
+        _persist_embedding_cache(_embedding_cache_fingerprint, _embedding_cache)
+
+
+def reset_embedding_cache() -> None:
+    """清空进程内缓存状态（测试用；不删落盘文件）"""
+    global _embedding_cache, _embedding_cache_fingerprint, _embedding_cache_path
+    with _embedding_cache_lock:
+        _embedding_cache = None
+        _embedding_cache_fingerprint = ""
+        _embedding_cache_path = None
+
+
+def _cacheable_vector(backend: str, encoder: Any) -> bool:
+    """该后端+encoder 的向量是否可入缓存：仅真实模型后端且 encoder 已就绪"""
+    if backend not in ("faiss", "fastembed", "onnx"):
+        return False
+    return bool(getattr(encoder, "is_initialized", False))
 
 
 def vector_norm(a: List[float]) -> float:
@@ -172,7 +297,7 @@ class UnifiedVectorStore:
 
     def encode(self, text: str) -> List[float]:
         """
-        将文本编码为向量
+        将文本编码为向量（带进程级内容寻址缓存）
 
         Args:
             text: 输入文本
@@ -180,6 +305,33 @@ class UnifiedVectorStore:
         Returns:
             归一化向量
         """
+        backend = self.backend
+        encoder = self._encoder
+        cacheable = _cacheable_vector(backend, encoder)
+        fingerprint = _embedding_fingerprint(backend, encoder) if cacheable else ""
+        cache_key = ""
+        if cacheable:
+            cache_key = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            entries = _load_embedding_cache(fingerprint)
+            with _embedding_cache_lock:
+                cached_b64 = entries.get(cache_key)
+            if cached_b64 is not None:
+                cached = _b64_to_vec(cached_b64)
+                if cached is not None:
+                    return cached
+
+        vec = self._encode_uncached(text)
+
+        if cacheable and cache_key:
+            b64 = _vec_to_b64(vec)
+            if b64 is not None:
+                entries = _load_embedding_cache(fingerprint)
+                with _embedding_cache_lock:
+                    entries[cache_key] = b64
+        return vec
+
+    def _encode_uncached(self, text: str) -> List[float]:
+        """真实编码路径（原 encode 主体，无缓存逻辑）"""
         if self.backend in ("faiss", "fastembed", "onnx") and self._encoder:
             # 使用预训练模型
             if self.backend == "faiss":
@@ -330,6 +482,7 @@ class UnifiedVectorStore:
             self.centroids[expert_id] = centroid
             self._centroid_last_access[expert_id] = datetime.now().timestamp()
 
+        flush_embedding_cache()
         logger.info("初始化 %s 个质心", len(experts))
 
     def _expert_to_text(self, expert_def: Dict[str, Any]) -> str:
@@ -395,6 +548,9 @@ class UnifiedVectorStore:
         # 无所加时跳过整矩阵重建(20k 条向量 copy 无谓开销)
         if added > 0 or self._np_matrix is None:
             self._refresh_numpy_matrix()
+
+        # 批结束写穿嵌入缓存（重启后同文本直接命中，免全量重编码）
+        flush_embedding_cache()
 
         logger.info("索引 %s 条记忆（新增 %s，总索引 %s）", len(memories), added, len(self.memory_ids))
 

@@ -141,9 +141,31 @@ class AgentLLMClient:
 
         return get_multi_model_client(self._scope)
 
+    def _resolve_call_model(self, kwargs: dict) -> tuple:
+        """解析本次调用的 (model, provider_id)。
+
+        优先级：调用方显式 kwargs["model"] > 视觉轮请求级覆盖
+        （ContextVar，随请求自动失效）> 实例冻结模型。
+        覆盖时不携带实例 provider_id：钉死提供方会禁用 auto-failover，
+        候选服务商 key 失效时整轮 401 硬失败（2026-09-09 live 实测）；
+        只传模型名让 MultiModelLLMClient 跨服务商解析并保留切换链。
+        """
+        explicit = kwargs.pop("model", None)
+        if explicit:
+            return explicit, self.provider_id or None
+
+        from neurova.llm.llm_routing_overlay import get_vision_model_override
+
+        override = get_vision_model_override()
+        if override:
+            return override[1], None
+
+        return (self.model if self.model != "auto" else None), self.provider_id or None
+
     async def chat(self, messages, **kwargs):
+        call_model, call_provider = self._resolve_call_model(kwargs)
         result = await self._get_client().chat(
-            messages, model=self.model if self.model != "auto" else None, provider_id=self.provider_id or None, **kwargs
+            messages, model=call_model, provider_id=call_provider, **kwargs
         )
         # MultiModelLLMClient.chat() 返回 dict {"success": bool, "response": LLMResponse, ...}
         # OpenAILoop 等调用方期望直接得到 LLMResponse 对象，需要解包
@@ -168,8 +190,9 @@ class AgentLLMClient:
         return result
 
     async def chat_stream(self, messages, **kwargs):
+        call_model, call_provider = self._resolve_call_model(kwargs)
         async for chunk in self._get_client().chat_stream(
-            messages, model=self.model if self.model != "auto" else None, provider_id=self.provider_id or None, **kwargs
+            messages, model=call_model, provider_id=call_provider, **kwargs
         ):
             yield chunk
 
@@ -237,7 +260,11 @@ class AgentConfig:
                 f"Example: AgentConfig(name='{name}', agent_id='{agent_id}', workspace_path='/path/to/agent/workspace')"
             )
 
-        self.workspace_path = Path(workspace_path)
+        # realpath 归一化（2026-09-09）：调用方常以字面 .. 段拼工作区
+        # （app.py 默认 agent = neurova/api/../../agent_workspaces/default），
+        # 原样持有会让 growth 校验器按 parts 误判穿越 → "认知能力初始化失败"。
+        # 构造时消解 .. 语义；真实越界仍由各消费方校验器拒绝。
+        self.workspace_path = Path(workspace_path).resolve()
 
         # 数据库路径配置 - 优先使用Agent工作目录下的memory文件夹
         if db_path:
