@@ -1,6 +1,5 @@
 import { reactive, ref } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { api } from '@/api'
+import i18n from '@/i18n'
 import {
   approveRequest as apiApproveRequest,
   rejectRequest as apiRejectRequest,
@@ -14,6 +13,10 @@ import { uiMessage } from '@/utils/message'
  * 模块级共享 reactive：SSE 处理器（页面编排层 openApprovalModal）与
  * GovernanceApprovalModal 组件零 props 连线。
  * confirm/reject 的 API 逻辑原样迁自 ChatPage（不改写）。
+ *
+ * 契约（2026-09-09）：confirm/reject 挂在弹窗 @ok/@cancel 事件处理器上，
+ * 组件上下文之外调用，文案一律取 i18n.global.t——禁止 useI18n()（拆分前
+ * 闭包捕获 setup 的 t，拆分迁入函数体后变成事件路径必然抛错）。
  */
 
 export interface ApprovalSegment {
@@ -67,7 +70,7 @@ function extractWhitelistPattern(command: string): string {
 
 /** 批准执行；勾选白名单时先加入免检列表再批准 */
 async function confirmApproval(): Promise<void> {
-  const { t } = useI18n()
+  const t = i18n.global.t
   if (!approvalModal.approvalId || approvalModal.loading) return
   approvalModal.loading = true
   try {
@@ -104,7 +107,7 @@ async function confirmApproval(): Promise<void> {
 
 /** 拒绝执行 */
 async function rejectApproval(): Promise<void> {
-  const { t } = useI18n()
+  const t = i18n.global.t
   if (!approvalModal.approvalId || approvalModal.loading) return
   approvalModal.loading = true
   try {
@@ -130,6 +133,3 @@ export function useGovernanceApproval() {
     rejectApproval,
   }
 }
-
-// api 导入保留给后续扩展（当前审批 API 均经 governance 模块）
-void api

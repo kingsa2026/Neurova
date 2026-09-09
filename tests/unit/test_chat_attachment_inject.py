@@ -139,3 +139,85 @@ class TestVisionMount:
         vision = [{"type": "image_url", "image_url": {"url": "data:image/png;base64,AAA"}}]
         p._apply_vision_attachments(ctx, vision)  # 不抛异常
         assert ctx.context[0]["content"] == "sys"
+
+
+class TestImageNormalization:
+    """大图注入前必须归一化（2026-09-09 413 事故）
+
+    服务商请求体普遍 5MB 上限：4.4MB 照片 base64 膨胀 4/3 ≈ 5.9MB，
+    整体请求 6.38MB 被 413 request_too_large 拒绝。契约：
+    1. 超阈值图片 → 降采样重编码，payload 显著变小、长边 ≤ 2048；
+    2. 小图原样透传（字节不变，零质量损失零 CPU 开销）；
+    3. 解码失败（坏图）→ 原样返回不抛异常。
+    """
+
+    def _big_jpeg(self):
+        import os
+        from PIL import Image
+
+        img = Image.frombytes("RGB", (4000, 3000), os.urandom(4000 * 3000 * 3))
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=95)
+        data = buf.getvalue()
+        assert len(data) > 2 * 1024 * 1024  # 前置：构造物必须超阈值
+        return data
+
+    def test_large_image_normalized_under_payload_limit(self, monkeypatch):
+        from neurova.attachment_parser import LLM_IMAGE_MAX_DIMENSION
+
+        p = make_pipeline()
+        big = self._big_jpeg()
+        monkeypatch.setattr(p, "_read_attachment_bytes", lambda fid: big)
+
+        attachments = [
+            {"file_id": "fbig", "filename": "photo.jpg", "file_type": "image",
+             "mime_type": "image/jpeg", "size": len(big), "path": "/tmp/photo.jpg"}
+        ]
+        user_input, vision_parts = p._inject_attachments_into_input("分析", attachments)
+
+        assert len(vision_parts) == 1
+        url = vision_parts[0]["image_url"]["url"]
+        # base64 载荷 < 3MB：叠加上下文后整体请求远离服务商 5MB 上限
+        b64_payload = url.split(",", 1)[1]
+        assert len(b64_payload) < 3 * 1024 * 1024
+        # 无 alpha → 重编码为 JPEG
+        assert url.startswith("data:image/jpeg;base64,")
+        # 长边降采样到上限内
+        import base64 as b64mod
+        from PIL import Image
+
+        out = Image.open(io.BytesIO(b64mod.b64decode(b64_payload)))
+        assert max(out.size) <= LLM_IMAGE_MAX_DIMENSION
+
+    def test_small_image_passthrough_unchanged(self, monkeypatch):
+        import base64 as b64mod
+
+        p = make_pipeline()
+        png = b64mod.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        )
+        monkeypatch.setattr(p, "_read_attachment_bytes", lambda fid: png)
+
+        attachments = [
+            {"file_id": "fsmall", "filename": "pic.png", "file_type": "image",
+             "mime_type": "image/png", "size": len(png), "path": "/tmp/pic.png"}
+        ]
+        _, vision_parts = p._inject_attachments_into_input("看", attachments)
+
+        assert vision_parts[0]["image_url"]["url"] == f"data:image/png;base64,{b64mod.b64encode(png).decode()}"
+
+    def test_corrupt_large_image_falls_back_to_raw(self, monkeypatch):
+        import os
+
+        p = make_pipeline()
+        junk = b"\x89PNG\r\n\x1a\n" + os.urandom(3 * 1024 * 1024)
+        monkeypatch.setattr(p, "_read_attachment_bytes", lambda fid: junk)
+
+        attachments = [
+            {"file_id": "fbad", "filename": "broken.png", "file_type": "image",
+             "mime_type": "image/png", "size": len(junk), "path": "/tmp/broken.png"}
+        ]
+        _, vision_parts = p._inject_attachments_into_input("看", attachments)
+
+        # 解码失败不抛异常，原样透传（当前行为兜底）
+        assert vision_parts[0]["image_url"]["url"].startswith("data:image/png;base64,")

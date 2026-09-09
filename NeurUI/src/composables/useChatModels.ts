@@ -1,9 +1,7 @@
 import { computed, ref, watch } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import i18n from '@/i18n'
+import router from '@/router'
 import { useAgentStore } from '@/stores/agents'
-import { useAgentPage } from '@/composables/useAgentPage'
 import { listModels } from '@/api/modules/models'
 import { listProviders } from '@/api/modules/providers'
 import { normalizeModel } from '@/types/model'
@@ -14,8 +12,13 @@ import { uiMessage } from '@/utils/message'
  *
  * 模块级单例：页面编排层（sendMessage body 携带 selectedModel、SSE
  * handleRateLimit）与 ChatComposerArea 工具条（级联菜单 UI）共享同一状态。
- * 所有逻辑原样迁自 ChatPage（不改写），首次调用须在组件 setup 内
- * （useI18n/useRouter 依赖注入上下文）。
+ * 所有逻辑原样迁自 ChatPage（不改写）。
+ *
+ * 契约（2026-09-09 点击模型无反应修复）：全部动作函数（loadChatModels/
+ * pickModel/gotoModelsManage/switchAfterRateLimit）会在 @click、SSE 回调等
+ * 组件上下文之外被调用，禁止在其函数体内使用 useI18n()/useRouter()/
+ * useAgentPage() 这类仅限 setup 期的注入 API——改用 i18n.global、router
+ * 单例与 agentStore.currentAgentId（useAgentPage 挂载时已双向同步）。
  */
 
 /** 聊天页可切换的模型选项（空串 = 自动路由） */
@@ -71,15 +74,6 @@ const activeProviderName = computed<string>(() => {
   return g ? g.provider_name : ''
 })
 
-function useI18nSafe() {
-  try {
-    return useI18n()
-  } catch {
-    return null
-  }
-}
-void useI18nSafe
-
 // 打开菜单时定位到当前选中模型所属服务商（自动路由则展开首个服务商）
 let _menuWatchInstalled = false
 function installMenuWatch() {
@@ -97,7 +91,7 @@ function installMenuWatch() {
 }
 
 async function loadChatModels() {
-  const { t } = useI18n()
+  const t = i18n.global.t
   chatModelLoading.value = true
   try {
     const [modelsRes, providersRes] = await Promise.all([listModels(), listProviders().catch(() => [])])
@@ -164,13 +158,13 @@ async function loadChatModels() {
  * 自动路由 → model='auto' 且清空 provider；具名模型 → 同时钉住其服务商。
  */
 async function pickModel(value: string, providerId?: string): Promise<void> {
-  const { t } = useI18n()
-  const { agentId } = useAgentPage()
-  const agentStore = useAgentStore()
+  const t = i18n.global.t
+  // 事件处理器上下文无组件实例：agentId 取 store（useAgentPage 挂载时已同步）
+  const agentId = useAgentStore().currentAgentId || ''
   selectedModel.value = value
   modelMenuOpen.value = false
-  if (!agentId.value) return
-  const result = await agentStore.updateAgent(agentId.value, {
+  if (!agentId) return
+  const result = await useAgentStore().updateAgent(agentId, {
     model: value || 'auto',
     provider: providerId || '',
   })
@@ -182,7 +176,6 @@ async function pickModel(value: string, providerId?: string): Promise<void> {
 }
 
 function gotoModelsManage(): void {
-  const router = useRouter()
   modelMenuOpen.value = false
   router.push('/models')
 }
@@ -203,10 +196,9 @@ function handleRateLimit(err: any): boolean {
 
 /** 横幅一键切换：选定备选模型后关闭横幅（用户重发即走新模型）。 */
 function switchAfterRateLimit(modelValue: string): void {
-  const { t } = useI18n()
   selectedModel.value = modelValue
   rateLimitBanner.value = null
-  uiMessage.success(t('chat.rateLimitSwitched'))
+  uiMessage.success(i18n.global.t('chat.rateLimitSwitched'))
 }
 
 export function useChatModels() {

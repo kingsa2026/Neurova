@@ -72,3 +72,20 @@ export function deleteFile(id: string) {
 export function downloadFile(id: string) {
   return request.get(`${BASE}/${id}/download`, { responseType: 'blob' }) as unknown as Promise<Blob>
 }
+
+/**
+ * Extract file_id from a POST /files/upload response.
+ *
+ * Backend contract: FileInfo serializes the key as `file_id` (no `id` field,
+ * no envelope). Accepts an envelope-wrapped shape (.data) and an `id` alias;
+ * returns null when the response carries neither.
+ */
+export function extractUploadedFileId(res: unknown): string | null {
+  const body =
+    res && typeof res === 'object' && 'data' in res
+      ? (res as { data?: unknown }).data ?? res
+      : res
+  if (!body || typeof body !== 'object') return null
+  const fid = (body as Record<string, unknown>).file_id ?? (body as Record<string, unknown>).id
+  return typeof fid === 'string' && fid ? fid : null
+}
