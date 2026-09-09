@@ -44,22 +44,23 @@ class TestA1EnforcedSandboxBackends:
             assert hasattr(backend, "available"), f"后端 {name} 缺 available() 探测"
 
     def test_platform_has_enforced_sandbox_reflects_table(self):
-        """探测函数按表实例化 available()——全不可用为 False，任一可用为 True。"""
+        """探测函数按表条目调 available()（实例形态——P1-7 存量契约）：
+        全不可用为 False，任一可用为 True。"""
         from neurova.security.governance import _platform_has_enforced_sandbox
 
-        unavailable_cls = MagicMock()
-        unavailable_cls.return_value.available.return_value = False
+        unavailable = MagicMock()
+        unavailable.available.return_value = False
         with patch(
             "neurova.security.governance._ENFORCED_SANDBOX_BACKENDS",
-            {"fake": unavailable_cls},
+            {"fake": unavailable},
         ):
             assert _platform_has_enforced_sandbox() is False
 
-        available_cls = MagicMock()
-        available_cls.return_value.available.return_value = True
+        available = MagicMock()
+        available.available.return_value = True
         with patch(
             "neurova.security.governance._ENFORCED_SANDBOX_BACKENDS",
-            {"fake": available_cls},
+            {"fake": available},
         ):
             assert _platform_has_enforced_sandbox() is True
 
