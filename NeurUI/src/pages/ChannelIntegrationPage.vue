@@ -140,11 +140,11 @@
                     </button>
                   </template>
                   <template v-else-if="field.type === 'select'">
-                    <select v-model="configForm[field.key]" class="nr-ci-select">
-                      <option v-for="opt in field.options" :key="opt.value" :value="opt.value">
+                    <a-select v-model:value="configForm[field.key]" style="width: 100%">
+                      <a-select-option v-for="opt in field.options" :key="opt.value" :value="opt.value">
                         {{ opt.label }}
-                      </option>
-                    </select>
+                      </a-select-option>
+                    </a-select>
                   </template>
                   <template v-else>
                     <input
@@ -177,11 +177,11 @@
                     </button>
                   </template>
                   <template v-else-if="field.type === 'select'">
-                    <select v-model="configForm[field.key]" class="nr-ci-select">
-                      <option v-for="opt in field.options" :key="opt.value" :value="opt.value">
+                    <a-select v-model:value="configForm[field.key]" style="width: 100%">
+                      <a-select-option v-for="opt in field.options" :key="opt.value" :value="opt.value">
                         {{ opt.label }}
-                      </option>
-                    </select>
+                      </a-select-option>
+                    </a-select>
                   </template>
                   <template v-else-if="field.type === 'number'">
                     <input
@@ -1032,28 +1032,6 @@ onMounted(() => { search.value = ''; loadConfigs() })
 
 .nr-ci-input::placeholder {
   color: var(--nr-text-muted, rgba(255, 255, 255, 0.25));
-}
-
-.nr-ci-select {
-  width: 100%;
-  height: 36px;
-  padding: 0 10px;
-  border: 1px solid var(--nr-glass-border, rgba(255, 255, 255, 0.08));
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--nr-text-primary);
-  font-size: 13px;
-  outline: none;
-  cursor: pointer;
-}
-
-.nr-ci-select:focus {
-  border-color: var(--nr-primary);
-}
-
-.nr-ci-select option {
-  background: var(--nr-bg-surface);
-  color: var(--nr-text-primary);
 }
 
 .nr-ci-toggle {
