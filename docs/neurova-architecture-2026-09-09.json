@@ -1,0 +1,343 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Neurova 系统架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "main-path",
+        "label": "主对话链路",
+        "focus": [
+          "users",
+          "ui",
+          "api",
+          "agent",
+          "pipeline",
+          "llm",
+          "providers"
+        ],
+        "note": "从一次聊天请求到多模型推理的完整主干。"
+      },
+      {
+        "id": "memory-loop",
+        "label": "记忆回路",
+        "focus": [
+          "pipeline",
+          "memory",
+          "db",
+          "cog"
+        ],
+        "note": "检索、Evocate 注入与后处理写回构成记忆闭环。"
+      },
+      {
+        "id": "ingress",
+        "label": "多端接入",
+        "focus": [
+          "users",
+          "ui",
+          "channels",
+          "api"
+        ],
+        "note": "Web UI 与 14 个渠道适配器汇入同一 FastAPI 网关。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "users",
+      "type": "external",
+      "label": "用户",
+      "sublabel": "浏览器 / 桌面",
+      "pos": [
+        0,
+        272
+      ],
+      "size": [
+        96,
+        54
+      ]
+    },
+    {
+      "id": "ui",
+      "type": "frontend",
+      "label": "NeurUI",
+      "sublabel": "Vue 3 :8100",
+      "pos": [
+        136,
+        272
+      ],
+      "size": [
+        112,
+        60
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "API 网关",
+      "sublabel": "FastAPI :9527",
+      "pos": [
+        288,
+        272
+      ],
+      "size": [
+        112,
+        60
+      ]
+    },
+    {
+      "id": "agent",
+      "type": "backend",
+      "label": "Agent Core",
+      "sublabel": "agent_core.py",
+      "pos": [
+        440,
+        272
+      ],
+      "size": [
+        116,
+        60
+      ]
+    },
+    {
+      "id": "pipeline",
+      "type": "backend",
+      "label": "ChatPipeline",
+      "sublabel": "6 步对话管线",
+      "tag": "核心",
+      "pos": [
+        596,
+        272
+      ],
+      "size": [
+        124,
+        68
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "cloud",
+      "label": "LLM 路由",
+      "sublabel": "多模型客户端",
+      "pos": [
+        756,
+        272
+      ],
+      "size": [
+        104,
+        60
+      ]
+    },
+    {
+      "id": "memory",
+      "type": "database",
+      "label": "记忆系统",
+      "sublabel": "mem_core · 17 维",
+      "pos": [
+        560,
+        96
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "SQLite",
+      "sublabel": "RLock 保护",
+      "pos": [
+        756,
+        96
+      ],
+      "size": [
+        104,
+        60
+      ]
+    },
+    {
+      "id": "channels",
+      "type": "external",
+      "label": "渠道适配器",
+      "sublabel": "飞书 · 钉钉 · TG ×14",
+      "pos": [
+        136,
+        424
+      ],
+      "size": [
+        112,
+        60
+      ]
+    },
+    {
+      "id": "cog",
+      "type": "backend",
+      "label": "认知层",
+      "sublabel": "情感 / 元认知",
+      "pos": [
+        288,
+        424
+      ],
+      "size": [
+        112,
+        60
+      ]
+    },
+    {
+      "id": "tools",
+      "type": "backend",
+      "label": "工具执行器",
+      "sublabel": "tool_executor",
+      "pos": [
+        596,
+        424
+      ],
+      "size": [
+        124,
+        60
+      ]
+    },
+    {
+      "id": "providers",
+      "type": "external",
+      "label": "模型服务商",
+      "sublabel": "OpenAI · Anthropic · Gemini",
+      "pos": [
+        756,
+        424
+      ],
+      "size": [
+        112,
+        60
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Neurova 后端进程 (Python · FastAPI)",
+      "wraps": [
+        "api",
+        "agent",
+        "pipeline",
+        "memory",
+        "tools",
+        "cog",
+        "llm",
+        "db"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "users-to-ui",
+      "from": "users",
+      "to": "ui",
+      "label": "HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ui-to-api",
+      "from": "ui",
+      "to": "api",
+      "label": "REST + WS",
+      "labelDy": -19
+    },
+    {
+      "id": "channels-to-api",
+      "from": "channels",
+      "to": "api",
+      "label": "Webhook"
+    },
+    {
+      "id": "api-to-agent",
+      "from": "api",
+      "to": "agent",
+      "label": "agent_ref 注入",
+      "labelDy": -26
+    },
+    {
+      "id": "agent-to-pipeline",
+      "from": "agent",
+      "to": "pipeline",
+      "label": "chat() 编排",
+      "labelDy": -26
+    },
+    {
+      "id": "pipeline-to-memory",
+      "from": "pipeline",
+      "to": "memory",
+      "label": "检索 / 写回",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "pipeline-to-tools",
+      "from": "pipeline",
+      "to": "tools",
+      "label": "工具调用",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "cog-to-pipeline",
+      "from": "cog",
+      "to": "pipeline",
+      "label": "Evocate 注入",
+      "variant": "dashed"
+    },
+    {
+      "id": "pipeline-to-llm",
+      "from": "pipeline",
+      "to": "llm",
+      "label": "推理"
+    },
+    {
+      "id": "llm-to-providers",
+      "from": "llm",
+      "to": "providers",
+      "label": "自适应路由",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 24
+    },
+    {
+      "id": "memory-to-db",
+      "from": "memory",
+      "to": "db",
+      "label": "读写"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "核心链路",
+      "items": [
+        "6 步 ChatPipeline 对话管线",
+        "agent_ref 依赖注入 · 零反向导入"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "记忆与认知",
+      "items": [
+        "17 维记忆 + L1/L2/L3 分层",
+        "认知层注入结构化推理",
+        "经验结晶 + 时序知识图谱"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "接入与存储",
+      "items": [
+        "Web UI + 14 渠道适配器",
+        "多服务商 LLM 自适应路由",
+        "SQLite RLock + 向量检索"
+      ]
+    }
+  ]
+}
