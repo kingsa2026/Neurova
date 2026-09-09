@@ -97,7 +97,7 @@
       "type": "frontend",
       "label": "NeurUI",
       "sublabel": "Vue 3 · Pinia · 9 stores",
-      "tag": "65 页面",
+      "tag": "69 页面",
       "pos": [
         190,
         560
@@ -126,7 +126,7 @@
       "type": "backend",
       "label": "API 网关",
       "sublabel": "FastAPI :9527 · JWT · CORS",
-      "tag": "85 端点组",
+      "tag": "88 端点组",
       "pos": [
         365,
         560
@@ -140,7 +140,7 @@
       "id": "agent",
       "type": "backend",
       "label": "Agent Core",
-      "sublabel": "agent_core.py · 37 方法",
+      "sublabel": "agent_core.py · 32 公开方法",
       "pos": [
         580,
         560
@@ -169,7 +169,7 @@
       "id": "post",
       "type": "backend",
       "label": "PostChatPipeline",
-      "sublabel": "14 步后处理管线",
+      "sublabel": "15 步后处理管线",
       "pos": [
         770,
         712
@@ -604,7 +604,7 @@
       "id": "module",
       "type": "backend",
       "label": "认知模块库",
-      "sublabel": "module_lib · 任务/空闲追踪",
+      "sublabel": "module_tracker · task_tracker",
       "pos": [
         710,
         1000
@@ -633,7 +633,7 @@
       "type": "backend",
       "label": "内置工具",
       "sublabel": "builtin_tools 单一事实源",
-      "tag": "40+",
+      "tag": "54",
       "pos": [
         1345,
         880
@@ -815,7 +815,7 @@
       "id": "memdb",
       "type": "database",
       "label": "记忆库 ×4",
-      "sublabel": "persist · links · metacognition",
+      "sublabel": "persist · links · metacog · pending",
       "pos": [
         40,
         1240
@@ -829,7 +829,7 @@
       "id": "maindb",
       "type": "database",
       "label": "主库",
-      "sublabel": "neurova · users · rbac",
+      "sublabel": "users · rbac（neurova.db 空壳）",
       "pos": [
         270,
         1240
@@ -843,7 +843,7 @@
       "id": "knowdb",
       "type": "database",
       "label": "知识库 ×2",
-      "sublabel": "knowledge · experience",
+      "sublabel": "knowledge · experience_knowledge",
       "pos": [
         490,
         1240
@@ -985,7 +985,7 @@
     },
     {
       "kind": "region",
-      "label": "持久化层 · 17 个 SQLite 库",
+      "label": "持久化层 · SQLite 库群",
       "wraps": [
         "memdb",
         "maindb",
@@ -1205,29 +1205,6 @@
       ]
     },
     {
-      "id": "post-to-tkg",
-      "from": "post",
-      "to": "tkg",
-      "label": "事实写入",
-      "variant": "dashed",
-      "fromSide": "right",
-      "toSide": "bottom",
-      "via": [
-        [
-          975,
-          744
-        ],
-        [
-          975,
-          440
-        ],
-        [
-          725,
-          440
-        ]
-      ]
-    },
-    {
       "id": "sleep-to-mlayer",
       "from": "sleepm",
       "to": "mlayer",
@@ -1272,11 +1249,6 @@
           690
         ]
       ]
-    },
-    {
-      "id": "corch-to-module",
-      "from": "corch",
-      "to": "module"
     },
     {
       "id": "pipeline-to-toolexec",
@@ -1451,6 +1423,47 @@
       "label": "触发",
       "fromSide": "top",
       "toSide": "bottom"
+    },
+    {
+      "id": "pipeline-to-tkg",
+      "from": "pipeline",
+      "to": "tkg",
+      "label": "时序检索",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "top",
+      "via": [
+        [
+          860,
+          300
+        ],
+        [
+          725,
+          300
+        ]
+      ],
+      "labelAt": [
+        792,
+        300
+      ]
+    },
+    {
+      "id": "voice-to-asr",
+      "from": "voice",
+      "to": "asr",
+      "label": "语音识别",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          105,
+          975
+        ],
+        [
+          425,
+          975
+        ]
+      ]
     }
   ],
   "cards": [
@@ -1474,7 +1487,7 @@
       "dot": "amber",
       "title": "系统规模",
       "items": [
-        "后端 550+ 文件 · 85 端点组 · 14 渠道 · 前端 65 页面",
+        "后端 550+ 文件 · 88 端点组 · 14 渠道 · 前端 69 页面",
         "本地语音 MOSS TTS · Whisper / FunASR"
       ]
     }

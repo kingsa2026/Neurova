@@ -796,6 +796,9 @@ namespace Neurova.Installer
 
         private void StartInstall(string targetDir, string adminUser, string adminPass)
         {
+            // 升级路径从欢迎页直达此处（跳过管理员页）——欢迎页必须在此收口隐藏，
+            // 否则与进度/完成页叠加错位（2026-09-09 升级安装事故）
+            _pageWelcome.Visibility = Visibility.Collapsed;
             _pageAdmin.Visibility = Visibility.Collapsed;
             _pageProgress.Visibility = Visibility.Visible;
             _customPanel.Visibility = Visibility.Collapsed;
