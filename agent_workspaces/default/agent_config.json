@@ -1,8 +1,8 @@
 {
   "name": "Neurova",
   "description": "",
-  "model": "DeepSeek-V4-Flash-Vision-Exp",
-  "provider": "amd",
+  "model": "agnes-3.0-flash",
+  "provider": "agnes",
   "personality": "",
   "constitution": "",
   "owner_user_id": "",
