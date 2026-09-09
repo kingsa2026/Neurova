@@ -944,17 +944,15 @@ class NeurovaRecallEngine:
             return results
         
         try:
-            all_memories = self.memory_manager.get_all_memories()
-            
-            # 按温度排序（高温优先）
-            sorted_memories = sorted(
-                all_memories,
-                key=lambda m: m.get("temperature", 50),
-                reverse=True
+            # 审计 P1-D7：SQL ORDER BY temperature DESC LIMIT n（索引直取），
+            # 替代全量 get_all_memories 深拷贝 + O(N log N) 排序。直调管理器
+            # 公有 API——缺方法属编程错误，交由 BUG-7 re-raise 契约上抛
+            top_memories = (
+                self.memory_manager.get_top_memories_by_temperature(limit) or []
             )
-            
+
             # 转换为RecalledMemory
-            for mem in sorted_memories[:limit]:
+            for mem in top_memories:
                 results.append(RecalledMemory(
                     memory_id=mem.get("id", ""),
                     content=mem.get("content", ""),

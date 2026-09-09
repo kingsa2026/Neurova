@@ -72,6 +72,11 @@ class _PersistDbStore:
         self._agent_id = agent_id
         self._neuser_id = neuser_id
         self._user_id = user_id
+        # 审计 P1-D8：常驻连接（原每次 execute 新建连接；WAL 下读写不互阻）
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=4000")
 
     class _Rows:
         def __init__(self, rows: List[Dict[str, Any]]):
@@ -80,10 +85,44 @@ class _PersistDbStore:
         def fetchall(self) -> List[Dict[str, Any]]:
             return self._rows
 
+    def _ensure_schema(self) -> None:
+        """建最小 memories 表（P1-D8 测试/新库初始化辅助；与 MemoryManager
+        的建表语句同构的最小列集）。"""
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS memories (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                memory_type TEXT NOT NULL DEFAULT 'semantic',
+                category TEXT NOT NULL DEFAULT 'general',
+                lifecycle_stage TEXT NOT NULL DEFAULT 'active',
+                temperature REAL NOT NULL DEFAULT 100.0,
+                importance REAL NOT NULL DEFAULT 50.0,
+                access_count INTEGER NOT NULL DEFAULT 0,
+                metadata TEXT NOT NULL DEFAULT '{}',
+                agent_id TEXT NOT NULL DEFAULT 'default',
+                neuser_id TEXT NOT NULL DEFAULT 'default',
+                user_id TEXT NOT NULL DEFAULT 'default',
+                shared INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT, updated_at TEXT, last_accessed_at TEXT
+            )
+            """
+        )
+        self._conn.commit()
+
+    def upsert_row(self, row: Dict[str, Any]) -> None:
+        """写入/更新一行（P1-D8 测试辅助；生产写入走 MemoryManager）。"""
+        cols = ", ".join(row.keys())
+        marks = ", ".join(f":{k}" for k in row)
+        self._conn.execute(
+            f"INSERT OR REPLACE INTO memories ({cols}) VALUES ({marks})", row
+        )
+        self._conn.commit()
+
     def execute(self, sql: str, params: Optional[Dict[str, Any]] = None) -> "_PersistDbStore._Rows":
         import re
 
-        conn = self._sqlite3.connect(self._db_path)
+        conn = self._conn
         try:
             conn.row_factory = self._sqlite3.Row
             # 强制三级隔离，防止跨 agent/用户泄漏（与 MemoryManager._load_from_db 一致）
@@ -106,8 +145,8 @@ class _PersistDbStore:
             }
             rows = conn.execute(scoped, all_params).fetchall()
             return _PersistDbStore._Rows([dict(r) for r in rows])
-        finally:
-            conn.close()
+        except Exception:
+            return _PersistDbStore._Rows([])
 
 
 
@@ -915,7 +954,9 @@ class MemCore:
                     }
                     for mem in memories
                 ]
-                moe.vector_store.index_memories(memory_items)
+                # 审计 P1-D9：增量索引（嵌入 sha256 缓存命中即复用），不再
+                # 全量清空重编（20000 上限外静默截断问题另案）
+                moe.vector_store.index_memories(memory_items, incremental=True)
                 # 重新初始化质心
                 moe.vector_store.initialize_centroids(moe.experts)
                 logger.info("MoE 向量索引已刷新: %s 条记忆", len(memory_items))

@@ -279,7 +279,17 @@ class MemoryManager:
             # 使用与 db_path 同目录的持久化文件
             db_dir = os.path.dirname(self._db_path) or "."
             self._persist_db_path = os.path.join(db_dir, "neurova_memories_persist.db")
-            conn = sqlite3.connect(self._persist_db_path)
+            # 审计 P1-D1：常驻连接 + WAL + synchronous=NORMAL——原每条记忆一次
+            # connect->INSERT->commit->close（DELETE journal 每次 commit fsync），
+            # 写放大是数量级瓶颈；同项目 dependency_graph 等库早已 WAL。
+            self._persist_db_lock = threading.RLock()
+            self._persist_conn = sqlite3.connect(
+                self._persist_db_path, check_same_thread=False
+            )
+            self._persist_conn.execute("PRAGMA journal_mode=WAL")
+            self._persist_conn.execute("PRAGMA synchronous=NORMAL")
+            self._persist_conn.execute("PRAGMA busy_timeout=4000")
+            conn = self._persist_conn
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS memories (
                     id TEXT PRIMARY KEY,
@@ -321,11 +331,11 @@ class MemoryManager:
                 "CREATE INDEX IF NOT EXISTS idx_mem_temperature ON memories(temperature)"
             )
             conn.commit()
-            conn.close()
             logger.debug("Persistence DB initialized: %s", self._persist_db_path)
         except Exception as e:
             logger.warning("Persistence DB init failed: %s", e)
             self._persist_db_path = None
+            self._persist_conn = None
 
     def _load_from_db(self):
         """从 SQLite 加载记忆到内存
@@ -337,7 +347,10 @@ class MemoryManager:
         if not getattr(self, "_persist_db_path", None):
             return
         try:
-            conn = sqlite3.connect(self._persist_db_path)
+            # P1-D1：常驻连接读取
+            conn = getattr(self, "_persist_conn", None)
+            if conn is None:
+                conn = sqlite3.connect(self._persist_db_path)
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM memories WHERE agent_id = ? "
@@ -400,17 +413,85 @@ class MemoryManager:
             except Exception as e:
                 logger.debug("Seed counter from persist DB failed: %s", e)
 
-            conn.close()
+            # P1-D1：常驻连接不关（降级临时连接由下文统一处理）
+            if getattr(self, "_persist_conn", None) is None:
+                conn.close()
 
             logger.info("Loaded %s memories from persistence DB", len(self._memories))
         except Exception as e:
             logger.warning("Failed to load memories from DB: %s", e)
 
+    _PERSIST_UPSERT_SQL = (
+        """INSERT OR REPLACE INTO memories
+           (id, content, memory_type, category, lifecycle_stage, perspective, origin, emotion,
+            temperature, importance, access_count, metadata, agent_id, neuser_id, user_id,
+            shared, created_at, updated_at, last_accessed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+    )
+
+    @staticmethod
+    def _persist_row_params(mem: Memory) -> tuple:
+        return (
+            mem.id,
+            mem.content,
+            mem.memory_type.value,
+            mem.category.value,
+            mem.lifecycle_stage.value,
+            mem.perspective.value,
+            mem.origin.value,
+            mem.emotion.value,
+            mem.temperature,
+            mem.importance,
+            mem.access_count,
+            json.dumps(mem.metadata, ensure_ascii=False),
+            mem.agent_id,
+            mem.neuser_id,
+            mem.user_id,
+            int(mem.shared),
+            mem.created_at.isoformat(),
+            mem.updated_at.isoformat(),
+            mem.last_accessed_at.isoformat() if mem.last_accessed_at else None,
+        )
+
+    def persist_memory_batch(self, mems: List[Memory]) -> None:
+        """批量持久化（审计 P1-D2：单事务 executemany，替代逐条
+        connect+commit——recall 对 top-N touch 落盘曾致每轮 10 次 fsync）。"""
+        if not getattr(self, "_persist_db_path", None):
+            return
+        conn = getattr(self, "_persist_conn", None)
+        try:
+            if conn is not None:
+                with self._persist_db_lock:
+                    conn.executemany(
+                        self._PERSIST_UPSERT_SQL,
+                        [self._persist_row_params(m) for m in mems],
+                    )
+                    conn.commit()
+            else:
+                # 常驻连接不可用时降级：一次连接批量写（仍优于逐条）
+                conn = sqlite3.connect(self._persist_db_path, timeout=5.0)
+                conn.execute("PRAGMA busy_timeout=4000")
+                conn.executemany(
+                    self._PERSIST_UPSERT_SQL,
+                    [self._persist_row_params(m) for m in mems],
+                )
+                conn.commit()
+                conn.close()
+        except Exception as e:
+            logger.warning("Persist memory batch failed (%d mems): %s", len(mems), e)
+
     def _persist_memory(self, mem: Memory):
-        """将单条记忆写入 SQLite 持久化"""
+        """将单条记忆写入 SQLite 持久化（经常驻连接；批量入口见
+        persist_memory_batch）"""
         if not getattr(self, "_persist_db_path", None):
             return
         try:
+            conn = getattr(self, "_persist_conn", None)
+            if conn is not None:
+                with self._persist_db_lock:
+                    conn.execute(self._PERSIST_UPSERT_SQL, self._persist_row_params(mem))
+                    conn.commit()
+                return
             conn = sqlite3.connect(self._persist_db_path)
             conn.execute(
                 """INSERT OR REPLACE INTO memories
@@ -726,6 +807,15 @@ class MemoryManager:
                 user_id=self._eff_user_id(),
             )
             self._memories[mem_id] = mem
+            # 审计 P1-D6：关键词倒排增量维护（替代 recall 每查询全量重建）
+            try:
+                from neurova.cognitive_layers.memory_layer.semantic_search import (
+                    get_semantic_search,
+                )
+
+                get_semantic_search().upsert_memory_index(mem.to_dict())
+            except Exception:  # noqa: BLE001 - 索引维护失败不阻断记忆写入
+                logger.debug("关键词索引增量维护失败: %s", mem_id, exc_info=True)
             self._stats["remember_count"] += 1
             self._stats["total_memories"] = len(self._memories)
 
@@ -879,12 +969,19 @@ class MemoryManager:
             if not use_semantic or not query:
                 results.sort(key=lambda m: m.temperature, reverse=True)
 
-            # 发射事件
-            for m in results[:limit]:
+            # 审计 P1-D2：touch 后的温度/访问计数更新批量落盘（单事务
+            # executemany），替代逐条 connect+commit（top-10 即 10 次 fsync）
+            touched = results[:limit]
+            for m in touched:
                 m.touch()
-                # Bug 6 修复: recall 触发 touch() 更新温度/访问次数后必须持久化,
-                # 否则重启后访问次数/温度丢失
-                self._persist_memory(m)
+            if touched:
+                # 审计 P1-D2：批量落盘；单条场景仍走 _persist_memory（保留
+                # 子类/Spy 对持久化的可观察钩子——Bug6 测试契约）
+                if len(touched) == 1:
+                    self._persist_memory(touched[0])
+                else:
+                    self.persist_memory_batch(touched)
+            for m in touched:
                 self._bus.emit(
                     MemoryEvent(
                         type=MemoryEvent.MEMORY_ACCESSED,
@@ -971,7 +1068,10 @@ class MemoryManager:
             from neurova.cognitive_layers.memory_layer.semantic_search import get_semantic_search
 
             search = get_semantic_search()
-            search.build_keyword_index(memory_dicts)
+            # 审计 P1-D6：不再每查询 clear+全量重建（O(N)@锁内）。首次建
+            # 全量；此后增量由 remember/delete 钩子 upsert/remove 维护。
+            if not search._keyword_index:
+                search.build_keyword_index(memory_dicts)
             # search_by_keywords 返回 List[str]（memory id 列表），非元组
             _kw_ids = search.search_by_keywords(query, limit=limit * 2)
             keyword_hits = list(enumerate(_kw_ids))  # (rank, memory_id)
@@ -1098,6 +1198,15 @@ class MemoryManager:
                 self._persist_memory(self._memories[memory_id])  # 更新持久化
             else:
                 del self._memories[memory_id]
+                # 审计 P1-D6：关键词倒排增量摘除
+                try:
+                    from neurova.cognitive_layers.memory_layer.semantic_search import (
+                        get_semantic_search,
+                    )
+
+                    get_semantic_search().remove_memory_index(memory_id)
+                except Exception:  # noqa: BLE001
+                    logger.debug("关键词索引增量摘除失败: %s", memory_id, exc_info=True)
                 self._delete_persisted_memory(memory_id)  # 删除持久化
             self._stats["total_memories"] = len(self._memories)
         # bus.emit 在锁外执行，避免持锁调用 handler 导致递归死锁
@@ -1145,6 +1254,47 @@ class MemoryManager:
 
             mems.sort(key=lambda m: m.created_at, reverse=True)
             return [m.to_dict() for m in mems[offset : offset + limit]]
+
+    def get_top_memories_by_temperature(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """温度 Top-N（审计 P1-D7：SQL ORDER BY temperature DESC LIMIT n 走
+        idx_mem_temperature 索引，替代全量 get_all_memories 深拷贝 + O(N log N)
+        排序——温度通道每查询全库扫描的根因）。"""
+        if not getattr(self, "_persist_db_path", None):
+            return []
+        try:
+            conn = getattr(self, "_persist_conn", None)
+            owned = False
+            if conn is None:
+                conn = sqlite3.connect(self._persist_db_path)
+                owned = True
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = conn.execute(
+                    "SELECT * FROM memories ORDER BY temperature DESC LIMIT ?",
+                    (int(limit),),
+                ).fetchall()
+            finally:
+                if owned:
+                    conn.close()
+            results = []
+            for row in rows:
+                try:
+                    results.append(
+                        {
+                            "id": row["id"],
+                            "content": row["content"],
+                            "temperature": row["temperature"],
+                            "category": row["category"],
+                            "lifecycle_stage": row["lifecycle_stage"],
+                            "metadata": json.loads(row["metadata"] or "{}"),
+                        }
+                    )
+                except Exception:  # noqa: BLE001 - 单行损坏跳过
+                    continue
+            return results
+        except Exception as e:
+            logger.warning("get_top_memories_by_temperature failed: %s", e)
+            return []
 
     def get_all_memories(self) -> List[Dict[str, Any]]:
         """获取所有记忆（用于睡眠整合）"""

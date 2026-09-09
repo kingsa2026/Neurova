@@ -413,8 +413,10 @@ class TestBug7ExceptionSwallowing:
         """_channel_temperature 中 memory_manager.get_all_memories 抛 TypeError 时,
         异常应被 re-raise 而非吞掉返回空列表"""
         # 构造一个会抛 TypeError 的 memory_manager (模拟编程错误)
+        # P1-D7：温度通道主路径改为 get_top_memories_by_temperature（SQL Top-N），
+        # 异常注入随 API 同步
         memory_manager = MagicMock()
-        memory_manager.get_all_memories.side_effect = TypeError(
+        memory_manager.get_top_memories_by_temperature.side_effect = TypeError(
             "simulated programming error: 'NoneType' object is not iterable"
         )
 
@@ -428,8 +430,10 @@ class TestBug7ExceptionSwallowing:
     def test_channel_text_reraises_attribute_error(self):
         """_channel_text 中抛 AttributeError (编程错误) 时应被 re-raise"""
         memory_manager = MagicMock()
-        # get_all_memories 返回非可迭代对象触发 AttributeError
-        memory_manager.get_all_memories.return_value = None  # None 不可迭代
+        # _channel_text 走 get_all_memories 全量语义搜索路径（D7 只改温度通道）
+        memory_manager.get_all_memories.side_effect = AttributeError(
+            "'NoneType' object is not iterable"
+        )
 
         engine = NeurovaRecallEngine(use_plugins=False, memory_manager=memory_manager)
 
@@ -441,8 +445,9 @@ class TestBug7ExceptionSwallowing:
     def test_channel_temperature_reraises_attribute_error(self):
         """_channel_temperature 中抛 AttributeError 时应被 re-raise 而非吞掉"""
         memory_manager = MagicMock()
-        # 模拟 memory_manager 缺失 get_all_memories 方法 (编程错误)
-        del memory_manager.get_all_memories  # 删除 mock 方法, 访问时抛 AttributeError
+        # 模拟 memory_manager 缺失温度通道主 API（编程错误，P1-D7 契约同步：
+        # 通道主路径已从 get_all_memories 换成 get_top_memories_by_temperature）
+        del memory_manager.get_top_memories_by_temperature
 
         engine = NeurovaRecallEngine(use_plugins=False, memory_manager=memory_manager)
 

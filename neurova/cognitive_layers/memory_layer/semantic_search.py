@@ -215,6 +215,38 @@ class SemanticSearch:
         
         logger.info("构建关键词索引: %d 个关键词", len(self._keyword_index))
     
+    def upsert_memory_index(self, mem: Dict[str, Any]) -> None:
+        """增量维护单条记忆的关键词倒排（审计 P1-D6）。
+
+        原契约只有 build_keyword_index（clear+全量重建）——manager 每次
+        recall 全量重建（O(N)@锁内），neurova_recall 又"只建一次永不更新"，
+        两者共享单例互相踩踏：要么索引陈旧要么每查询重建。现提供增量入口，
+        记忆增删时逐条 upsert/remove，检索路径零重建。
+        """
+        memory_id = mem.get("id", "")
+        if not memory_id:
+            return
+        # 幂等：先摘除旧词条再插新（content 变更场景）
+        self.remove_memory_index(memory_id)
+        keywords = self._extract_keywords(mem.get("content", ""))
+        for kw in keywords:
+            bucket = self._keyword_index.setdefault(kw, [])
+            if memory_id not in bucket:
+                bucket.append(memory_id)
+
+    def remove_memory_index(self, memory_id: str) -> None:
+        """从倒排索引摘除一条记忆（增量删除）。"""
+        if not memory_id:
+            return
+        empty_keys = []
+        for kw, ids in self._keyword_index.items():
+            if memory_id in ids:
+                ids.remove(memory_id)
+                if not ids:
+                    empty_keys.append(kw)
+        for kw in empty_keys:
+            del self._keyword_index[kw]
+
     def search_by_keywords(self, query: str, limit: int = 10) -> List[str]:
         """基于关键词索引搜索"""
         keywords = self._extract_keywords(query)
