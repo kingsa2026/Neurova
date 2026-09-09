@@ -92,6 +92,9 @@ class TestMultiModelChatStream:
 
         model_client = MagicMock(spec=ModelClient)
         model_client.client = inner
+        # P0-C2：流式路径同源限流后需 model key 与 provider id
+        model_client.model = "m"
+        model_client.provider = MagicMock(id="p")
 
         mm._get_client_for_request = MagicMock(return_value=model_client)
 
