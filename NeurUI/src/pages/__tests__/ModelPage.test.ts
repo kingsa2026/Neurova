@@ -61,7 +61,24 @@ const globalStubs = {
   GlassCard: { props: ['title'], template: '<div><slot name="header"/><slot/></div>' },
   GlassButton: { props: ['variant', 'size', 'loading', 'title'], emits: ['click'], template: '<button :title="title" @click="$emit(\'click\')"><slot/></button>' },
   'a-input': { props: ['value', 'placeholder'], emits: ['update:value'], template: '<input :value="value" @input="$emit(\'update:value\', $event.target.value)" />' },
-  'a-select': { props: ['value'], template: '<select><slot/></select>' },
+  // 捕获 get-popup-container prop（kebab-case 属性 → camelCase prop）并调用一次，
+  // 把返回容器记到 data-popup，供弹层挂载契约断言（判断 body 的逻辑在测试内做）
+  'a-select': {
+    props: ['value', 'getPopupContainer'],
+    template: '<select :data-popup="popupName"><slot/></select>',
+    computed: {
+      popupName(this: { getPopupContainer?: (n?: HTMLElement) => unknown }): string {
+        try {
+          const r = this.getPopupContainer?.({ parentNode: null } as unknown as HTMLElement)
+          if (r === document.body) return 'body'
+          if (r && (r as { nodeName?: string }).nodeName) return String((r as { nodeName: string }).nodeName)
+          return 'none'
+        } catch {
+          return 'error'
+        }
+      },
+    },
+  },
   'a-select-option': { template: '<option><slot/></option>' },
   'a-switch': { props: ['checked'], template: '<button class="ant-switch" />' },
   'a-slider': { template: '<input type="range" />' },
@@ -156,5 +173,29 @@ describe('ModelPage — 测试连接信封解包（回归 2026-09-05）', () => 
 
     expect(message.warning).toHaveBeenCalled()
     expect(message.success).not.toHaveBeenCalled()
+  })
+})
+
+describe('ModelPage — 默认 LLM 下拉弹层挂载契约（回归 2026-09-09）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('头部卡片内的 select 弹层必须挂 body（默认 parentNode 会被 GlassPanel overflow:hidden 裁剪）', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const headerSelects = wrapper.findAll('.nr-header-row select[data-popup]')
+    expect(headerSelects.length, '默认 LLM 头部应有 2 个 select（提供商+模型）').toBe(2)
+    for (const sel of headerSelects) {
+      expect(
+        (sel.element as HTMLElement).dataset.popup,
+        '弹层容器必须脱离玻璃卡片（挂 body），否则被 overflow:hidden 截断',
+      ).toBe('body')
+    }
   })
 })

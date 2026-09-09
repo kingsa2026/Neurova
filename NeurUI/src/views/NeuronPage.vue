@@ -91,10 +91,10 @@
         </div>
         <div class="form-group">
           <label>{{ t('neuron.direction') }}</label>
-          <select v-model="cascadeForm.direction">
-            <option value="forward">{{ t('neuron.forward') }}</option>
-            <option value="backward">{{ t('neuron.backward') }}</option>
-          </select>
+          <a-select v-model:value="cascadeForm.direction">
+            <a-select-option value="forward">{{ t('neuron.forward') }}</a-select-option>
+            <a-select-option value="backward">{{ t('neuron.backward') }}</a-select-option>
+          </a-select>
         </div>
         <div class="form-group">
           <label>{{ t('neuron.maxDepth') }}</label>
@@ -135,14 +135,14 @@
         </div>
         <div class="form-group">
           <label>{{ t('neuron.expectedRelation') }}</label>
-          <select v-model="absenceForm.expectedRelation">
-            <option value="causal">{{ t('neuron.relCausal') }}</option>
-            <option value="temporal">{{ t('neuron.relTemporal') }}</option>
-            <option value="conditional">{{ t('neuron.relConditional') }}</option>
-            <option value="prerequisite">{{ t('neuron.relPrerequisite') }}</option>
-            <option value="support">{{ t('neuron.relSupport') }}</option>
-            <option value="hierarchical">{{ t('neuron.relHierarchical') }}</option>
-          </select>
+          <a-select v-model:value="absenceForm.expectedRelation">
+            <a-select-option value="causal">{{ t('neuron.relCausal') }}</a-select-option>
+            <a-select-option value="temporal">{{ t('neuron.relTemporal') }}</a-select-option>
+            <a-select-option value="conditional">{{ t('neuron.relConditional') }}</a-select-option>
+            <a-select-option value="prerequisite">{{ t('neuron.relPrerequisite') }}</a-select-option>
+            <a-select-option value="support">{{ t('neuron.relSupport') }}</a-select-option>
+            <a-select-option value="hierarchical">{{ t('neuron.relHierarchical') }}</a-select-option>
+          </a-select>
         </div>
         <div class="form-group">
           <label>{{ t('neuron.contextEntities') }}</label>
@@ -519,7 +519,7 @@ async function runAbsenceCheck() {
 }
 
 .form-group input,
-.form-group select {
+.form-group .ant-select {
   width: 100%;
   padding: 10px 12px;
   background: var(--nr-bg-inset);
@@ -531,15 +531,10 @@ async function runAbsenceCheck() {
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
-.form-group select option {
-  background: var(--nr-bg-elevated, #1a2236);
-  color: var(--nr-text-primary);
-}
-
 .form-group input::placeholder { color: var(--nr-text-muted); }
 
 .form-group input:focus,
-.form-group select:focus {
+.form-group .ant-select .ant-select-selector:focus {
   border-color: var(--nr-primary);
   outline: none;
   box-shadow: 0 0 0 2px var(--nr-primary-ring);

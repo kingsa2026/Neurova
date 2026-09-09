@@ -14,6 +14,7 @@
             v-model:value="defaultConfig.provider_id"
             :placeholder="t('model.defaultProvider')"
             style="width: 200px"
+            :get-popup-container="popupToBody"
             @change="onDefaultProviderChange"
           >
             <a-select-option v-for="p in providersWithModels" :key="p.id" :value="p.id">
@@ -24,6 +25,7 @@
             v-model:value="defaultConfig.model_id"
             :placeholder="t('model.defaultModel')"
             style="width: 260px"
+            :get-popup-container="popupToBody"
           >
             <a-select-option v-for="m in defaultModelOptions" :key="m.id" :value="m.id">
               <div class="nr-model-option">
@@ -162,13 +164,13 @@
             </div>
             <div class="nr-field">
               <label>{{ t('model.providerType') }} <span class="req">*</span></label>
-              <select v-model="addForm.provider_type" class="nr-select">
-                <option value="openai">{{ t('model.typeOpenAI') }}</option>
-                <option value="anthropic">{{ t('model.typeAnthropic') }}</option>
-                <option value="gemini">{{ t('model.typeGemini') }}</option>
-                <option value="ollama">{{ t('model.typeOllama') }}</option>
-                <option value="openrouter">{{ t('model.typeOpenRouter') }}</option>
-              </select>
+              <a-select v-model:value="addForm.provider_type" style="width: 100%" :popup-match-select-width="false">
+                <a-select-option value="openai">{{ t('model.typeOpenAI') }}</a-select-option>
+                <a-select-option value="anthropic">{{ t('model.typeAnthropic') }}</a-select-option>
+                <a-select-option value="gemini">{{ t('model.typeGemini') }}</a-select-option>
+                <a-select-option value="ollama">{{ t('model.typeOllama') }}</a-select-option>
+                <a-select-option value="openrouter">{{ t('model.typeOpenRouter') }}</a-select-option>
+              </a-select>
             </div>
             <div class="nr-field">
               <label>{{ t('model.defaultBaseUrl') }}</label>
@@ -546,6 +548,9 @@ const BUILTIN_PROVIDERS: SeedProvider[] = [
 // ---------------------------------------------------------------------------
 const loading = ref(true)
 const loadingModels = ref(false)
+// 全局 getPopupContainer 把弹层挂在触发节点父容器里，玻璃卡片 overflow:hidden 会截断
+// （默认 LLM 下拉被裁剪事故）；弹层统一挂 body 逃出裁剪。
+const popupToBody = () => document.body
 const savingDefault = ref(false)
 const savingProvider = ref(false)
 const savingConfig = ref(false)
@@ -1875,18 +1880,6 @@ watch(() => defaultConfig.provider_id, () => {
   border-color: var(--nr-primary);
   background: rgba(99, 102, 241, 0.06);
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
-}
-
-.nr-select {
-  width: 100%;
-  height: 36px;
-  padding: 0 12px;
-  border: 1px solid var(--nr-glass-border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--nr-text-primary);
-  font-size: 13px;
-  outline: none;
 }
 
 /* Radio group */

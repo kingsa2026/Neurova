@@ -200,6 +200,17 @@ describe('iOS 皮肤（Liquid Glass）· 浅色', () => {
   })
 })
 
+describe('原生控件 color-scheme 契约', () => {
+  // 原生 <select> 下拉弹层 / 日期选择器 / 自动填充等浏览器原生 UI 不吃 CSS 变量，
+  // 只认 color-scheme。漏声明会导致暗色主题下弹层白底白字（如服务商类型下拉）。
+  it('每个主题块都必须声明 color-scheme 且与明暗一致', () => {
+    expect(valueOf(cosmicDark, 'color-scheme')).toBe('dark')
+    expect(valueOf(cosmicLight, 'color-scheme')).toBe('light')
+    expect(valueOf(iosDark, 'color-scheme')).toBe('dark')
+    expect(valueOf(iosLight, 'color-scheme')).toBe('light')
+  })
+})
+
 describe('Liquid Glass 高光还原契约（iOS 26 玻璃材质标志性特征）', () => {
   /** 提取 rgba 的 alpha 数值。 */
   const alpha = (color: string): number =>
