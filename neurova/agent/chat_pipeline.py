@@ -236,7 +236,7 @@ class ChatPipeline:
                 try:
                     self._agent._tkg_instance = tkg
                 except Exception:
-                    pass
+                    logger.debug("set_request_user_id 注入失败（身份归属可能退化为 default）", exc_info=True)
             if tkg is not None:
                 tkg_adapter = TKGRetrieverAdapter(tkg)
                 self._memory_retrieval_chain.add_retriever(tkg_adapter)
@@ -367,7 +367,7 @@ class ChatPipeline:
 
             set_request_user_id((ctx.metadata or {}).get("user_id") or None)
         except Exception:
-            pass
+            logger.debug("get_model_context_window 失败（上下文窗口预算按缺省值）", exc_info=True)
 
         self._init_agent_state(ctx)
 
@@ -1708,7 +1708,7 @@ class ChatPipeline:
 
                     _ctx_window = get_model_context_window(self.config.llm_config.model or "")
                 except Exception:
-                    pass
+                    logger.debug("usage 回退读取失败", exc_info=True)
                 measure_composition(
                     agent_id=getattr(self.config, "agent_id", "default") or "default",
                     messages=ctx.context,
