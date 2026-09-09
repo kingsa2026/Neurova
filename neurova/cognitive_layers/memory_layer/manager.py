@@ -863,7 +863,13 @@ class MemoryManager:
             if query:
                 if use_semantic:
                     # 语义搜索模式
-                    results = self._semantic_recall(query, results, limit)
+                    # agent_wide 透传（防回归 2026-09-09）：管理口径检索基集是
+                    # agent 全量，_semantic_recall 内不得再按请求作用域三元组
+                    # 收窄，否则登录用户（'1','1'）搜不到 default 三元组存量
+                    # 记忆（列表可见、搜索不可见的割裂根因）。
+                    results = self._semantic_recall(
+                        query, results, limit, agent_wide=agent_wide
+                    )
                 else:
                     # 兼容旧版：简单关键词匹配
                     query_lower = query.lower()
@@ -910,7 +916,9 @@ class MemoryManager:
                 self._vector_stores.pop(next(iter(self._vector_stores)), None)
         return store
 
-    def _semantic_recall(self, query: str, memories: list, limit: int) -> list:
+    def _semantic_recall(
+        self, query: str, memories: list, limit: int, agent_wide: bool = False
+    ) -> list:
         """语义搜索检索（P2-1 真向量混合召回）。
 
         历史：
@@ -925,14 +933,19 @@ class MemoryManager:
         4. 向量库不可用 → 整体降级关键词路径（行为与历史一致）
 
         隔离：每隔离三元组独立分库 + 入口三元组过滤双保险。
+        agent_wide=True（管理页/记忆 API 浏览口径）时跳过三元组收窄，
+        与 get_memory(agent_wide=True) 的既有先例同规则——只校验 agent 归属。
         """
-        # 隔离过滤（保留：双保险的第 2 层）
-        memories = [
-            m for m in memories
-            if m.agent_id == self._agent_id
-            and m.neuser_id == self._eff_neuser_id()
-            and m.user_id == self._eff_user_id()
-        ]
+        # 隔离过滤（保留：双保险的第 2 层；agent_wide 管理口径豁免）
+        if not agent_wide:
+            memories = [
+                m for m in memories
+                if m.agent_id == self._agent_id
+                and m.neuser_id == self._eff_neuser_id()
+                and m.user_id == self._eff_user_id()
+            ]
+        else:
+            memories = [m for m in memories if m.agent_id == self._agent_id]
         if not memories:
             return []
 
