@@ -23,7 +23,7 @@ beforeEach(() => {
 })
 
 // ===========================================================================
-// 既有函数 — 验证 URL 对齐 ADR 0013 canonical 端点 (/skill-pool/*)
+// 既有函数 — 验证 URL 对齐 ADR 0013 canonical 端点 (/skill-pool/* 与 /marketplace/*)
 // ===========================================================================
 describe('skill-pool API — 既有函数 URL 对齐', () => {
   it('getPublicSkills calls GET /marketplace/skills (catalog 同源; 功能页原走 /skill-pool/public 僵尸空字典)', async () => {
@@ -38,9 +38,12 @@ describe('skill-pool API — 既有函数 URL 对齐', () => {
     expect(mockGet).toHaveBeenCalledWith('/skill-pool/private', { params: { agent_id: 'agent-1' } })
   })
 
-  it('installSkill calls POST /skill-pool/{skillId}/install', async () => {
+  it('installSkill calls POST /marketplace/skills/{skillId}/install (canonical; 2026-09-09 修复: 原 /skill-pool/{id}/install 路由不存在恒 404)', async () => {
     await skillPool.installSkill('skill-1', 'agent-1')
-    expect(mockPost).toHaveBeenCalledWith('/skill-pool/skill-1/install', { agent_id: 'agent-1' })
+    expect(mockPost).toHaveBeenCalledTimes(1)
+    const [url, body] = mockPost.mock.calls[0]
+    expect(String(url)).toBe('/marketplace/skills/skill-1/install')
+    expect(body).toMatchObject({ agent_id: 'agent-1' })
   })
 
   it('installSkillFromUrl calls POST /skill-pool/install-from-url', async () => {
@@ -96,11 +99,12 @@ describe('skill-pool API — 既有函数 URL 对齐', () => {
 // ===========================================================================
 describe('skill-pool API — 新增函数', () => {
   // --- uninstallSkill ---
-  it('uninstallSkill calls DELETE /skill-pool/private/{skillId}/push with agent_id', async () => {
+  it('uninstallSkill calls DELETE /marketplace/skills/{skillId}/install with agent_id (canonical; 原走 private/push 取消推送语义假成功不落盘)', async () => {
     await skillPool.uninstallSkill('skill-1', 'agent-1')
-    expect(mockDelete).toHaveBeenCalledWith('/skill-pool/private/skill-1/push', {
-      params: { agent_id: 'agent-1' },
-    })
+    expect(mockDelete).toHaveBeenCalledTimes(1)
+    const [url, config] = mockDelete.mock.calls[0]
+    expect(String(url)).toBe('/marketplace/skills/skill-1/install')
+    expect(config).toMatchObject({ params: { agent_id: 'agent-1' } })
   })
 
   // --- getAgentSkills ---
@@ -135,7 +139,6 @@ describe('skill-pool API — 废弃端点守护', () => {
     const source = await import('@/api/modules/skill-pool?raw').catch(() => null)
     if (source) {
       expect(source.default).not.toContain('/skills-market/')
-      expect(source.default).not.toContain('/marketplace/skills/')
     }
     // 即使无法 ?raw import，也验证函数调用不触发废弃端点
     await skillPool.getPublicSkills().catch(() => {})
@@ -143,7 +146,14 @@ describe('skill-pool API — 废弃端点守护', () => {
     const calls = [...mockGet.mock.calls, ...mockPost.mock.calls]
     calls.forEach(([url]) => {
       expect(String(url)).not.toMatch(/\/skills-market\//)
-      expect(String(url)).not.toMatch(/\/marketplace\/skills\//)
+    })
+  })
+
+  it('不应调用僵尸路由 POST /skill-pool/{id}/install（路由不存在恒 404；安装唯一正道是 /marketplace/skills/{id}/install）', async () => {
+    await skillPool.installSkill('s1', 'a1').catch(() => {})
+    const calls = [...mockGet.mock.calls, ...mockPost.mock.calls, ...mockDelete.mock.calls]
+    calls.forEach(([url]) => {
+      expect(String(url)).not.toMatch(/\/skill-pool\/[^/]+\/install$/)
     })
   })
 })

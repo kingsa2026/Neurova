@@ -106,13 +106,23 @@ async def get_public_skill(skill_id: str):
 
 
 @router.post("/public/{skill_id}/install")
-async def install_public_skill(skill_id: str, agent_id: str = Query(default="default")):
-    """安装公共技能到 Agent"""
-    with _lock:
-        skill = _public_skills.get(skill_id)
-        if not skill:
-            raise HTTPException(status_code=404, detail="Skill not found")
-        return {"code": 0, "message": f"Skill '{skill_id}' installed to agent '{agent_id}'"}
+@router.post("/{skill_id}/install")
+async def install_public_skill(
+    request: Request,
+    skill_id: str,
+    agent_id: str = Query(default="default"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """安装公共技能 — ADR 0013: 委托 marketplace canonical 安装链。
+
+    修复 (2026-09-09): 原实现查无人填充的内存 dict _public_skills（僵尸），
+    前端 SkillMarketPage/AgentSkillPage/SkillPoolPage 安装恒 404（调用的
+    /{skill_id}/install 路由此前根本不存在）。现统一走 catalog → 下载导入
+    → 联邦注册（技能页 manifest + 工具注册表）真实链路，agent_id 透传。
+    """
+    from neurova.api.endpoints.marketplace import SkillInstallRequest, install_skill
+
+    return await install_skill(request, skill_id, SkillInstallRequest(agent_id=agent_id), current_user)
 
 
 @router.get("/private", response_model=List[SkillInfo])

@@ -67,6 +67,8 @@ class SkillInstallRequest(BaseModel):
     version: Optional[str] = None
     config: Dict[str, Any] = {}
     force: Optional[bool] = None
+    # 目标 Agent（联邦注册落盘目标；缺省 default，兼容旧 /skill-pool 请求体）
+    agent_id: Optional[str] = None
 
 
 class MarketplaceSkillCreate(BaseModel):
@@ -382,7 +384,7 @@ async def install_skill(
                     name=target_skill.name,
                     description=target_skill.description,
                     version=target_skill.version,
-                    service=SkillService(agent_id="default"),
+                    service=SkillService(agent_id=body.agent_id or "default"),
                     registry=_default_skill_registry(),
                     extra_registries=_running_agent_registries(),
                     market_skills_dir=importer._skills_dir,
@@ -431,7 +433,7 @@ async def install_skill(
             name=target_skill.name,
             description=target_skill.description,
             version=target_skill.version,
-            service=SkillService(agent_id="default"),
+            service=SkillService(agent_id=body.agent_id or "default"),
             registry=_default_skill_registry(),
             extra_registries=_running_agent_registries(),
             market_skills_dir=importer._skills_dir,
@@ -460,6 +462,7 @@ async def install_skill(
 async def uninstall_skill(
     request: Request,
     skill_id: str = Path(..., description="技能ID"),
+    agent_id: str = Query(default="default", description="目标 Agent ID（联邦注销落盘目标）"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """卸载技能 — 登录用户可操作"""
@@ -495,7 +498,7 @@ async def uninstall_skill(
 
         unlink_market_skill_from_agent(
             skill_id,
-            service=SkillService(agent_id="default"),
+            service=SkillService(agent_id=agent_id),
             registry=_default_skill_registry(),
         )
         for reg in _running_agent_registries():
