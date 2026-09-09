@@ -233,3 +233,48 @@ def _extract_html(data: bytes) -> str:
         pass
     text = parser.get_text()
     return text[:MAX_EXTRACT_CHARS] if text else raw[:MAX_EXTRACT_CHARS]
+
+
+# ---------------------------------------------------------------------------
+# 图像 LLM 载荷归一化（2026-09-09 413 事故）
+#
+# 主流服务商请求体上限 5MB（OpenAI 兼容系 5242880 bytes）：手机照片 4-8MB
+# base64 膨胀 4/3 后整体请求必然超限 → 413 request_too_large，整轮对话失败。
+# 闸门：原始字节超 PAYLOAD 限 → 降采样（长边 ≤ DIMENSION）+ JPEG 重编码，
+# 直到 base64 载荷进限；解码失败原样返回（与模块整体降级语义一致）。
+# ---------------------------------------------------------------------------
+
+LLM_IMAGE_MAX_PAYLOAD_BYTES = 3 * 1024 * 1024   # base64 前的原始字节闸门（3MB）
+LLM_IMAGE_MAX_DIMENSION = 2048                  # 降采样长边上限
+
+
+def normalize_image_for_llm(data: bytes, mime_type: str = "image/png") -> Tuple[bytes, str]:
+    """把图像归一化到 LLM 可接受的载荷尺寸。
+
+    返回 (bytes, mime)：原始字节已超阈值时降采样重编码（无 alpha 通道 → JPEG，
+    有 alpha → PNG 保透明）；未超限或解码失败时原样返回。
+    """
+    if len(data) <= LLM_IMAGE_MAX_PAYLOAD_BYTES:
+        return data, mime_type
+    try:
+        from PIL import Image
+
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        # 长边超限才缩放；等比缩到上限内
+        scale = LLM_IMAGE_MAX_DIMENSION / max(img.size)
+        if scale < 1:
+            img = img.resize(
+                (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
+            )
+        has_alpha = img.mode in ("RGBA", "LA", "PA") or (
+            img.mode == "P" and "transparency" in img.info
+        )
+        out = io.BytesIO()
+        if has_alpha:
+            img.save(out, "PNG", optimize=True)
+            return out.getvalue(), "image/png"
+        img.convert("RGB").save(out, "JPEG", quality=85)
+        return out.getvalue(), "image/jpeg"
+    except Exception:
+        return data, mime_type
