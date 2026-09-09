@@ -609,6 +609,8 @@ const agentStore = useAgentStore()
 const agentOptions = computed(() => agentStore.agentOptions)
 /** 节点执行状态（nodeId → 状态+输出），来自画布运行轮询 */
 const runStatus = ref<Record<string, { status: string; output?: unknown; error?: string | null }>>({})
+// 审计 P1-G3：组件卸载标志（降级轮询循环退出依据）
+const isDisposed = ref(false)
 const runState = ref<'idle' | 'running' | 'completed' | 'failed'>('idle')
 /** 最近一次画布运行的 runId（调试 resume 用） */
 const lastRunId = ref<string | null>(null)
@@ -2103,9 +2105,11 @@ async function waitForRunCompletion(canvasId: string, runId: string) {
 
   if (sawTerminal) return
 
-  // 降级：轮询执行状态（1s 间隔，终态停止）
+  // 降级：轮询执行状态（1s 间隔，终态停止；组件卸载即退出——
+  // 审计 P1-G3：原无卸载守卫，切走画布后 for(;;) 持续请求并写已卸载组件 ref）
   for (;;) {
     await new Promise(r => setTimeout(r, 1000))
+    if (isDisposed) return
     try {
       const statusRes = await getCanvasRun(canvasId, runId)
       const data = statusRes as unknown as CanvasRunStatus
@@ -2460,6 +2464,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  isDisposed.value = true
   document.removeEventListener('keydown', onKeyDown)
   document.removeEventListener('keyup', onKeyUp)
   document.removeEventListener('mousedown', onSpacePanCapture, true)

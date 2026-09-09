@@ -141,7 +141,28 @@ export const useAgentStore = defineStore('agents', () => {
   /**
    * Load the full agent list from the API.
    */
-  async function loadAgents(): Promise<void> {
+  // 审计 P1-G5：TTL 缓存 + in-flight 复用（Chat↔Canvas↔Agent 页切换
+  // 不再重复拉取；refreshAgents 强制刷新时绕过）
+  let _agentsCacheTs = 0
+  let _agentsInFlight: Promise<void> | null = null
+  const _AGENTS_TTL_MS = 30_000
+
+  async function loadAgents(force = false): Promise<void> {
+    if (!force && Date.now() - _agentsCacheTs < _AGENTS_TTL_MS && agents.value.length > 0) return
+    if (!force && _agentsInFlight) return _agentsInFlight
+    const job = (async () => {
+      await _loadAgentsInner()
+      _agentsCacheTs = Date.now()
+    })()
+    _agentsInFlight = job
+    try {
+      await job
+    } finally {
+      _agentsInFlight = null
+    }
+  }
+
+  async function _loadAgentsInner(): Promise<void> {
     loading.value = true
     error.value = null
     try {
