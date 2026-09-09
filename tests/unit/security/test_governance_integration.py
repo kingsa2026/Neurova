@@ -111,8 +111,12 @@ class TestGovernanceIntegration(unittest.TestCase):
                 )
             )
 
-        # 公共不变量：不出现常规执行输出
-        self.assertNotIn("returncode", result)
+        # 公共不变量：不出现常规执行输出。
+        # 审计 A1 后沙箱后端（AppContainer 等）结果自身携带 returncode（沙箱
+        # 内进程退出码，如 'sh' 不存在返回 255）——这不再是"常规执行"的证据；
+        # 常规执行的证据是结果缺少 sandbox/isolated 标记。
+        if not result.get("sandbox"):
+            self.assertNotIn("returncode", result)
         # 分支判定：有沙箱后端 → sandbox 标记；无后端 → fail-closed 拒绝
         from neurova.sandbox.exec_sandbox import execute_in_sandbox_async  # 可用性探针
         if result.get("sandbox"):

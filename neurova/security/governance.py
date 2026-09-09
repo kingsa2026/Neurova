@@ -67,10 +67,15 @@ def is_policy_denial(result: Any) -> bool:
 
 
 def _platform_has_enforced_sandbox() -> bool:
-    """当前平台是否存在任一可用真隔离后端（诚实化：占位后端不算数）。"""
-    for name, backend_cls in _ENFORCED_SANDBOX_BACKENDS.items():
+    """当前平台是否存在任一可用真隔离后端（诚实化：占位后端不算数）。
+
+    表内条目兼容类与实例两种形态（类则实例化探测；实例直接调
+    available()）——P1-7 存量测试以实例注入契约。
+    """
+    for name, backend in _ENFORCED_SANDBOX_BACKENDS.items():
         try:
-            if backend_cls().available():
+            probe = backend() if isinstance(backend, type) else backend
+            if probe.available():
                 return True
         except Exception:  # noqa: BLE001 - 探测失败按后端不可用处理
             continue
