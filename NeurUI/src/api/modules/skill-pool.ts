@@ -87,9 +87,10 @@ export function deleteSkill(skillId: string) {
   return api.delete<ApiResponse<null>>(`${BASE}/${skillId}`)
 }
 
-/** Install a public skill into an agent's private pool. */
+/** Install a marketplace skill (canonical /marketplace/skills/{id}/install；
+ *  原 /skill-pool/{id}/install 路由不存在恒 404，ADR 0013 写侧迁移漏项）。 */
 export function installSkill(skillId: string, agentId: string) {
-  return api.post<ApiResponse<Skill>>(`${BASE}/${skillId}/install`, { agent_id: agentId })
+  return api.post<ApiResponse<Skill>>(`/marketplace/skills/${skillId}/install`, { agent_id: agentId })
 }
 
 /** Share a private skill to the public pool. */
@@ -178,9 +179,11 @@ export function installSkillFromZip(file: File) {
 // Agent Skill Management (uninstall / list / toggle / execute)
 // ---------------------------------------------------------------------------
 
-/** Uninstall a skill from an agent (cancel push). */
+/** Uninstall a marketplace skill (canonical DELETE /marketplace/skills/{id}/install；
+ *  原走 /skill-pool/private/{id}/push 是"取消推送"语义——对市场技能假成功不落盘，
+ *  刷新后 installed 又回 true。ADR 0013 写侧迁移漏项之二。） */
 export function uninstallSkill(skillId: string, agentId: string) {
-  return api.delete<ApiResponse<null>>(`${BASE}/private/${skillId}/push`, {
+  return api.delete<ApiResponse<null>>(`/marketplace/skills/${skillId}/install`, {
     params: { agent_id: agentId },
   })
 }
