@@ -102,7 +102,10 @@ class LLMConfig:
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
     timeout: int = 120
-    max_retries: int = 3
+    # 审计 P0-C3：SDK 层重试禁用（默认 0）——外层 RetryConfig(max_attempts=3)
+    # 单层负责重试；SDK 内层再叠 3 次曾致单次逻辑调用最多 9 次真实请求
+    # （429 场景重复计费）。显式传 max_retries>0 的存量配置不受影响。
+    max_retries: int = 0
     retry_delay: float = 1.0
     stream: bool = False
     preset_name: str = ""

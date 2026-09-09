@@ -11,6 +11,7 @@ from __future__ import annotations
 """
 
 import datetime
+import asyncio
 import json
 from neurova.core.logger import get_logger
 import uuid
@@ -223,44 +224,79 @@ async def chat_stream(
             },
         )
 
+    # 审计 P0-C1/C4：真流式改造——原实现恒走"agent.chat() 全量返回再吐一块"
+    # 的假流式（首字节延迟=全响应时长，且无心跳易被网关掐断）。现对齐
+    # console.py /chat 的 emitter→队列模式：agent.chat(stream=True) 后台执行，
+    # 管线 _call_loop_stream 产生的 content/reasoning 事件经 event_emitter →
+    # 队列 → SSE 即时推送；空闲 15s 发 ": ping" 注释心跳保活。
+    _EMIT_DONE = object()
+
     async def event_generator():
-        """SSE 事件生成器"""
+        """SSE 事件生成器（真流式）"""
         audio_url = None
+        queue: asyncio.Queue = asyncio.Queue()
+
+        def _emit(kind, data):
+            # 管线在事件循环线程内同步回调；put_nowait 不阻塞主流程
+            try:
+                queue.put_nowait((kind, data))
+            except Exception:  # noqa: BLE001 - 队列异常不拖垮聊天
+                pass
+
+        call_metadata = dict(body.metadata or {})
+        call_metadata["event_emitter"] = _emit
+
+        async def run_chat():
+            try:
+                return await agent.chat(
+                    user_input=body.message,
+                    stream=True,
+                    session_id=body.session_id,
+                    metadata=call_metadata,
+                )
+            finally:
+                # 通知消费循环：本轮事件已全部产生
+                queue.put_nowait(_EMIT_DONE)
+
         try:
             # 发送开始事件
             yield f"event: start\ndata: {json.dumps({'request_id': request_id})}\n\n"
 
-            # Bug V2-3 修复:不强制传 {"history": []}(同 POST /api/v1/chat 修复)
-            call_metadata = body.metadata or {}
+            task = asyncio.create_task(run_chat())
+            seen_content = False
+            while True:
+                try:
+                    item = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    # 审计 P0-C4：空闲心跳（SSE 注释，前端解析器天然忽略）
+                    yield ": ping\n\n"
+                    continue
+                if item is _EMIT_DONE:
+                    break
+                kind, data = item
+                if kind == "content":
+                    seen_content = True
+                    yield f"event: message\ndata: {json.dumps({'content': str(data or '')})}\n\n"
+                elif kind == "reasoning":
+                    yield f"event: reasoning\ndata: {json.dumps({'content': str(data or '')})}\n\n"
 
-            # 调用 Agent 的流式 chat 方法
-            if hasattr(agent, "chat_stream"):
-                async for chunk in agent.chat_stream(
-                    user_input=body.message,
-                    session_id=body.session_id,
-                    metadata=call_metadata,
-                ):
-                    yield f"event: message\ndata: {json.dumps({'content': chunk})}\n\n"
+            # 整轮结束后取 chat() 返回值：TTS audio 产物 + 兜底文本
+            response = await task
+            reply_text = ""
+            if isinstance(response, dict):
+                reply_text = response.get("text", "")
+                audio_url = response.get("audio_path")
+                if audio_url:
+                    yield (
+                        "event: audio\n"
+                        f"data: {json.dumps({'type': 'audio', 'url': audio_url})}\n\n"
+                    )
             else:
-                # 降级到非流式（Agent 类现无 chat_stream 方法——恒走此分支）
-                response = await agent.chat(
-                    user_input=body.message,
-                    session_id=body.session_id,
-                    metadata=call_metadata,
-                )
-                reply_text = ""
-                if isinstance(response, dict):
-                    reply_text = response.get("text", "")
-                    # 补课 4.4：post_chat TTS 产物透出为 audio 事件——
-                    # 前端 case 'audio' 此前是死代码（流式路径从不发该事件）
-                    audio_url = response.get("audio_path")
-                    if audio_url:
-                        yield (
-                            "event: audio\n"
-                            f"data: {json.dumps({'type': 'audio', 'url': audio_url})}\n\n"
-                        )
-                else:
-                    reply_text = str(response)
+                reply_text = str(response)
+
+            # 兜底：管线未产生任何 content 事件（命令回复/纯文本降级）时，
+            # 用最终回复补发一条 message 事件，避免前端空白
+            if not seen_content and reply_text:
                 yield f"event: message\ndata: {json.dumps({'content': reply_text})}\n\n"
 
             # 发送完成事件（含 audio_url 兜底——前端 done case 消费）

@@ -783,6 +783,20 @@ class MultiModelLLMClient:
             yield _instream_error_dict(RuntimeError("No client available"))
             return
 
+        # 审计 P0-C2：流式路径与 chat() 同源限流——原实现无 acquire/release/
+        # 429 上报，per-model QPM/并发上限/暂停在主流量（前端全走流式）上是空的
+        from neurova.llm.model_rate_limiter import RateLimitExceeded, get_shared_limiter
+
+        limiter = get_shared_limiter()
+        model_key = client.model or "unknown"
+        try:
+            limiter.acquire(model_key, blocking=False)
+        except RateLimitExceeded as e:
+            client.increment_request(success=False)
+            yield _instream_error_dict(RuntimeError(f"模型限流: {e}"))
+            return
+
+        _stream_ok = False
         try:
             start_time = time.time()
             # P1 修复: chat_stream 是同步生成器，无法 `async for`（TypeError）。
@@ -790,6 +804,8 @@ class MultiModelLLMClient:
             stream_usage: Dict[str, int] = {}
             reply_text = ""
             first_token_ms = 0  # P1-8（OpenOcta 启发）：首块耗时入账
+            # 审计 P0-C5：上游声明回传 usage（OpenAI 标准行为）→ 无需整段缓冲
+            _needs_reply_text = not getattr(client.client, "_compat_include_stream_usage", lambda: True)()
             async for chunk in client.client.chat_stream_async(messages, **kwargs):
                 if first_token_ms == 0:
                     # 首个有效 chunk（含 reasoning/content/usage 任一载荷）
@@ -804,11 +820,16 @@ class MultiModelLLMClient:
                         "completion_tokens": getattr(_u, "completion_tokens", None) if not isinstance(_u, dict) else _u.get("completion_tokens"),
                     }
                     stream_usage = {k: int(v or 0) for k, v in stream_usage.items()}
-                reply_text += getattr(chunk, "content", "") or ""
-                reply_text += getattr(chunk, "reasoning_content", "") or ""
+                # 审计 P0-C5：条件缓冲——仅当上游网关声明不回传 usage（估算
+                # token 必须整段重放）时才累积；正常路径长响应内存不再翻倍
+                if _needs_reply_text:
+                    reply_text += getattr(chunk, "content", "") or ""
+                    reply_text += getattr(chunk, "reasoning_content", "") or ""
                 yield chunk
             duration = time.time() - start_time  # P2-4 补刀：原为丢弃结果的死语句
             client.increment_request(success=True)
+            limiter.report_success(model_key)
+            limiter.release(model_key)
             try:
                 from neurova.core.metrics import get_metrics
 
@@ -862,6 +883,12 @@ class MultiModelLLMClient:
                 logger.debug("流式 usage 入账跳过", exc_info=True)
         except Exception as e:
             client.increment_request(success=False)
+            # 审计 P0-C2：流内 429 与 chat() 同源——分类后 report_429 暂停该模型
+            error_kind = self._classify_error(e)
+            if error_kind == "rate_limit":
+                limiter.report_429(model_key, pause_seconds=30.0)
+            elif error_kind == "not_found":
+                self._note_404_reconnect(client.provider.id, client.model)
             try:
                 from neurova.core.metrics import get_metrics
 
@@ -870,12 +897,16 @@ class MultiModelLLMClient:
                 )
             except Exception:
                 pass
+            finally:
+                limiter.release(model_key)
             # OpenClaw 启发 P0-1 流内错误编码铁律：provider 调用一旦开始，
             # 一切失败编码为流内错误消息而非异常（llm-core types.ts L202）。
             # error_type 用五类标准错误（error_mapping 单一事实源），消费方
             # （openai_loop._raise_for_error_dict / chat_pipeline）据此分类，
             # 不再靠 HTTP 语义字符串二次猜测。
             yield _instream_error_dict(e)
+        else:
+            _stream_ok = True
 
     def _resolve_available_fallback(
         self,
