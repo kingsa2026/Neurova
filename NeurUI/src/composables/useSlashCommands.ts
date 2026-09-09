@@ -86,8 +86,12 @@ function onSlashKeydown(e: KeyboardEvent): boolean {
 /**
  * 组装命令注册表（模块级共享：ChatPage 与 ChatComposerArea 共用同一面板态）。
  * openPlanPanel：/plan 触发时回调（页面持有 planPanelOpen/planRequestSeed）。
+ * onCompact：/compact 触发时回调（页面经 sendMessage 原链路发往后端命令分发）。
  */
-export function setupSlashCommands(openPlanPanel: (seed: string) => void): void {
+export function setupSlashCommands(
+  openPlanPanel: (seed: string) => void,
+  onCompact?: () => void,
+): void {
   const { t } = useI18n()
   const chatStore = useChatStore()
   const { createSession, archiveSession } = useSessionOps()
@@ -124,6 +128,17 @@ export function setupSlashCommands(openPlanPanel: (seed: string) => void): void 
       run: async () => {
         if (currentSessionId.value) {
           await archiveSession(currentSessionId.value)
+        }
+      },
+    },
+    {
+      // /compact 手动压缩上下文（zcode 对齐）：不走前端本地处理，
+      // 经 sendMessage 原链路发往后端命令分发（报告为该轮回复）
+      name: '/compact',
+      descKey: 'chat.slashCompact',
+      run: () => {
+        if (onCompact) {
+          onCompact()
         }
       },
     },
