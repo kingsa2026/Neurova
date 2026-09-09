@@ -150,8 +150,9 @@ class TestManualCompact:
         agent.llm_client = MagicMock()
         agent.llm_client.chat = AsyncMock(return_value={"content": "测试摘要：会话讨论了30条长消息。"})
         orch = ContextOrchestrator(agent, use_pool=True, auto_tag=False)
-        # 强制小预算，保证历史必然超限
-        orch._force_window_budget = 4000
+        # 显式覆盖窗口预算（_resolve_window_token_budget 读取）——保证 61 条
+        # 历史必然超限；此前 _force_window_budget 是死属性（从未被读取）
+        orch._window_token_budget = 4000
         return orch
 
     @pytest.mark.asyncio

@@ -515,7 +515,12 @@ class OpenAILoop(BaseAgentLoop):
         # P2-4d：流式 usage 聚合（OpenAI 流式 usage 在最后一 chunk 携带全量）
         round_usage = None
 
-        stream_kwargs = {k: v for k, v in request_params.items() if k not in ("messages", "stream")}
+        # 内部控制标志不透传 LLM 链路（_build_request_params 虽忽略未知键，
+        # 但泄漏进 provider 兼容层属于未定义行为）
+        stream_kwargs = {
+            k: v for k, v in request_params.items()
+            if k not in ("messages", "stream", "_length_empty_retried")
+        }
         async for chunk in self.llm_client.chat_stream(request_params["messages"], **stream_kwargs):
             if isinstance(chunk, dict):
                 if chunk.get("error"):

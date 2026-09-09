@@ -844,11 +844,15 @@ class ContextOrchestrator:
     # ══════════════════════════════════════════════════════════════
 
     def _resolve_window_token_budget(self) -> int:
-        """窗口 token 预算：模型元数据预算（get_token_budget_for_model）为上限。
+        """窗口 token 预算：显式覆盖（_window_token_budget，测试/运维用）优先，
+        否则模型元数据预算（get_token_budget_for_model）。
 
         窗口只是 prompt 的一部分（system 前缀/工具 schema/记忆注入共享），
         取池预算的 60% 作为窗口份额，钳位 [3000, 100000]。
         """
+        override = getattr(self, "_window_token_budget", None)
+        if override:
+            return max(1000, int(override))
         try:
             from neurova.context_pool import ContextPool
 
@@ -1013,7 +1017,9 @@ class ContextOrchestrator:
                     "tokens_before": 0, "tokens_after": 0, "summary_generated": False}
 
         tokens_before = estimate_window_tokens(msgs)
-        # 强制折叠：预算取窗口默认份额的一半（手动压缩意图明确=尽快瘦身）
+        # 强制折叠：预算取窗口默认份额的一半（手动压缩意图明确=尽快瘦身）。
+        # 与 auto 路径同源（_resolve_window_token_budget → _window_token_budget
+        # 覆盖生效），保证测试/运维显式预算下两路结论一致
         budget = max(1500, self._resolve_window_token_budget() // 2)
         cache = self._window_compaction_cache.setdefault(
             self.session_id or "_", {"summary": "", "covered": set()}
@@ -1024,6 +1030,11 @@ class ContextOrchestrator:
             budget,
             summarize=self._build_window_summarizer(),
             previous_summary=cache.get("summary", ""),
+        )
+        logger.info(
+            "[WINDOW_COMPACT] /compact 决策: msgs=%d estimate=%d budget=%d resolved=%d -> compacted=%s",
+            len(msgs), tokens_before, budget, self._resolve_window_token_budget(),
+            bool(compaction),
         )
         if compaction is None:
             return {"compacted": False, "reason": "under_budget", "folded": 0, "kept": len(msgs),
