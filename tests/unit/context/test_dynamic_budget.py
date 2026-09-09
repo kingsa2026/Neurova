@@ -43,7 +43,7 @@ class TestDynamicBudget:
             pm_module, "get_provider_manager",
             lambda: _fake_manager({"p1": ["gpt-str"]}),
         )
-        assert ContextPool.get_token_budget_for_model("gpt-str") == 16000  # 回落默认
+        assert ContextPool.get_token_budget_for_model("gpt-str") == int(16000 * 0.6)  # 未知模型：保守窗口 16000 × 视图系数（统一过系数语义）
 
     def test_fallback_to_known_table(self, monkeypatch):
         import neurova.llm.provider_manager as pm_module
@@ -52,7 +52,7 @@ class TestDynamicBudget:
             pm_module, "get_provider_manager",
             lambda: _fake_manager({}),  # 无元数据
         )
-        assert ContextPool.get_token_budget_for_model("gpt-4") == 32000  # 静态表
+        assert ContextPool.get_token_budget_for_model("gpt-4") == int(8192 * 0.6)  # model_limits 精确表（8192，比旧静态表准）
 
     def test_fallback_to_default_when_unknown_everywhere(self, monkeypatch):
         import neurova.llm.provider_manager as pm_module
@@ -61,7 +61,7 @@ class TestDynamicBudget:
             pm_module, "get_provider_manager",
             lambda: _fake_manager({}),
         )
-        assert ContextPool.get_token_budget_for_model("never-heard-of") == 16000
+        assert ContextPool.get_token_budget_for_model("never-heard-of") == int(16000 * 0.6)  # 同上
 
     def test_broken_manager_never_raises(self, monkeypatch):
         import neurova.llm.provider_manager as pm_module
@@ -70,7 +70,7 @@ class TestDynamicBudget:
             raise RuntimeError("pm down")
 
         monkeypatch.setattr(pm_module, "get_provider_manager", _boom)
-        assert ContextPool.get_token_budget_for_model("gpt-4") == 32000
+        assert ContextPool.get_token_budget_for_model("gpt-4") == int(8192 * 0.6)  # model_limits 精确表（pm 故障不阻断该源）
 
     def test_window_clamped_to_reasonable_range(self, monkeypatch):
         import neurova.llm.provider_manager as pm_module

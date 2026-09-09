@@ -38,6 +38,10 @@ class FakeEncoder:
         return [base[i % self._dim] + len(text) * 0.01 * (i + 1) for i in range(self._dim)]
 
     async def initialize(self):
+        """异步契约保持（引擎兼容旧调用方）"""
+        return self.initialize_sync()
+
+    def initialize_sync(self):
         """模拟初始化失败（不置 is_initialized）→ _encode_uncached 走 tfidf 降级"""
         return False
 
