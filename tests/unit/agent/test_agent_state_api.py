@@ -62,11 +62,14 @@ class TestTurnLevelStateAPI:
 
         agent = Agent.__new__(Agent)
         agent.append_tool_event({"type": "tools_degraded", "reason": "r"})
-        assert agent._tool_events == [{"type": "tools_degraded", "reason": "r"}]
+        # P0-B1：轮次级状态迁 ContextVar，经公有只读属性读
+        assert agent.tool_events == [{"type": "tools_degraded", "reason": "r"}]
         # 损坏态（非列表）自愈为全新列表，不崩不串
-        agent._tool_events = "corrupt"
+        from neurova.core import turn_context
+
+        turn_context._tool_events_var.set("corrupt")
         agent.append_tool_event({"type": "x"})
-        assert agent._tool_events == [{"type": "x"}]
+        assert agent.tool_events == [{"type": "x"}]
 
     def test_request_identity_roundtrip(self):
         from neurova.agent_core import Agent

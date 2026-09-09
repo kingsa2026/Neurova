@@ -14,12 +14,17 @@ from neurova.agent_core import Agent, AgentConfig
 
 @pytest.fixture
 def agent(tmp_path):
+    # P0-B1：轮次态迁 ContextVar——同线程测试间需清态防泄漏
+    from neurova.core.turn_context import clear_turn_state
+
+    clear_turn_state()
     cfg = AgentConfig(
         name="audit-agent",
         agent_id="audit-turn-count",
         workspace_path=str(tmp_path / "ws"),
     )
-    return Agent(cfg)
+    yield Agent(cfg)
+    clear_turn_state()
 
 
 def test_turn_count_property_reflects_increment(agent):
@@ -35,5 +40,6 @@ def test_turn_count_property_reflects_increment(agent):
 def test_session_id_property_readable(agent):
     """session_id 可读（默认空串），_current_session_id 赋值后属性跟随。"""
     assert getattr(agent, "session_id", None) is not None
-    agent._current_session_id = "sess-abc"
+    # P0-B1：写入走公有 API（实例属性直写不再是存储位）
+    agent.set_request_identity(user_input="q", session_id="sess-abc", user_id="u")
     assert agent.session_id == "sess-abc"
