@@ -39,7 +39,11 @@ async function sharedAcquire(key: string): Promise<void> {
   }
   sharedCurrentKey = key
   try {
-    const handle = await navigator.locks.request(
+    // Web Locks 规范：request() 返回 Promise<void>，resolve 值恒为 undefined（无 handle）。
+    // 抢锁失败的唯一信号是回调收到 lock === null（下方 else 分支已置 isOwner=false）。
+    // 禁止用 resolve 值判"抢锁失败"——那会在锁释放时把 isOwner 误打回 false
+    // （新建会话 sid→null 只释放不再抢，发送按钮将恒禁用）。
+    await navigator.locks.request(
       `neurova-chat-send:${key}`,
       { ifAvailable: true },
       (lock) => {
@@ -54,7 +58,6 @@ async function sharedAcquire(key: string): Promise<void> {
         return undefined
       },
     )
-    if (handle === undefined) sharedIsOwner.value = false
   } catch {
     sharedIsOwner.value = true
   }
