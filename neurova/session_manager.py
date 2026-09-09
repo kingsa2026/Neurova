@@ -765,6 +765,42 @@ class SessionManager(SessionRepository):
             return all_messages[-max_messages:]
         return all_messages
 
+    def find_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """按 session_id 定位会话摘要（审计 P1-F4 索引式查找）。
+
+        原 delete/rename/auto-title/round-ops 每请求 repo.list_sessions()
+        全库扫描——glob 所有 agent 目录的全部 session_*.json 并完整读入
+        （含全部消息正文），只为定位一个会话。现按文件名 glob 直配
+        （session_{id}_*.json 命中前零内容读取），命中仅读单个文件。
+        """
+        if not session_id:
+            return None
+        try:
+            for agent_dir in self._sessions_dir.iterdir():
+                if not agent_dir.is_dir():
+                    continue
+                matches = sorted(agent_dir.glob(f"session_{session_id}_*.json"))
+                if not matches:
+                    continue
+                # 最新日期文件为代表（与 _collect_summaries 口径一致）
+                data = self._read_session_file(matches[-1])
+                if not data:
+                    continue
+                sid = data.get("session_id", "")
+                return {
+                    "session_id": sid or session_id,
+                    "id": sid or session_id,
+                    "agent_id": data.get("agent_id", "") or agent_dir.name,
+                    "title": data.get("title", "新对话"),
+                    "user_id": data.get("user_id", ""),
+                    "created_at": data.get("created_at", ""),
+                    "updated_at": data.get("updated_at", ""),
+                    "total_messages": data.get("total_messages", 0),
+                }
+        except Exception as e:
+            logger.warning("find_session(%s) failed: %s", session_id, e)
+        return None
+
     def list_sessions(self, agent_id: str = "", user_id: str = "") -> List[Dict[str, Any]]:
         """列出所有会话摘要（按 agent_id/user_id 过滤）。
 

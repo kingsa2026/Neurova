@@ -802,20 +802,16 @@ async def delete_chat_session(session_id: str, request: Request,
     """删除指定会话"""
     user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
-    # 查找 session 验证 user_id（SessionRepository 不接受 user_id 参数）
-    sessions = repo.list_sessions()
-    target = [s for s in sessions if s.get("session_id") == session_id or s.get("id") == session_id]
+    # 查找 session 验证 user_id（P1-F4：索引式定位替代全库扫描）
+    target = repo.find_session(session_id)
     if not target:
         raise HTTPException(status_code=404, detail="Session not found")
-    # user_id 校验与 SessionManager.list_sessions (session_manager.py:598) 过滤逻辑一致:
-    # 空 user_id (None 或 "") 视为"共享", 允许任何已认证用户删除.
-    # 修复 "看得到删不掉" 死锁 — list 端点宽松过滤让空 user_id 的 session 对所有用户可见,
-    # delete 端点必须一致地允许删除, 否则用户能在列表看到却无法删除.
-    # 详见 docs/bugfix-delete-session-userid-mismatch.md
-    target_user_id = target[0].get("user_id") or ""
+    # user_id 校验口径不变: 空 user_id (None 或 "") 视为"共享"，允许任何已认证用户删除
+    # （修复 "看得到删不掉" 死锁，docs/bugfix-delete-session-userid-mismatch.md）
+    target_user_id = target.get("user_id") or ""
     if target_user_id and user_id and target_user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
-    agent_id = target[0].get("agent_id", "")
+    agent_id = target.get("agent_id", "")
     repo.delete_session(agent_id=agent_id, session_id=session_id)
     return {"code": 0, "message": "Session deleted"}
 
@@ -831,14 +827,14 @@ async def auto_title_chat_session(session_id: str, request: Request,
     """
     user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
-    sessions = repo.list_sessions()
-    target = [s for s in sessions if s.get("session_id") == session_id or s.get("id") == session_id]
+    # 审计 P1-F4：索引式定位
+    target = repo.find_session(session_id)
     if not target:
         raise HTTPException(status_code=404, detail="Session not found")
-    target_user_id = target[0].get("user_id") or ""
+    target_user_id = target.get("user_id") or ""
     if target_user_id and user_id and target_user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
-    agent_id = target[0].get("agent_id", "")
+    agent_id = target.get("agent_id", "")
 
     messages = repo.get_history(agent_id=agent_id, session_id=session_id)
     first_user = next((m for m in messages if m.get("role") == "user"), None)
@@ -968,15 +964,15 @@ async def rename_chat_session(session_id: str, body: RenameSessionRequest, reque
     repo = get_session_repository()
     # 查找 session 验证 user_id（与 delete_chat_session 保持一致：空 user_id 视为共享，
     # 允许任何已认证用户重命名，避免"看得到改不了"的死锁，P2-#20）。
-    sessions = repo.list_sessions()
-    target = [s for s in sessions if s.get("session_id") == session_id or s.get("id") == session_id]
+    # 审计 P1-F4：索引式定位
+    target = repo.find_session(session_id)
     if not target:
         raise HTTPException(status_code=404, detail="Session not found")
-    target_user_id = target[0].get("user_id") or ""
+    target_user_id = target.get("user_id") or ""
     if target_user_id and user_id and target_user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
-    agent_id = target[0].get("agent_id", "")
-    new_title = body.title.strip() or target[0].get("title", "新对话")
+    agent_id = target.get("agent_id", "")
+    new_title = body.title.strip() or target.get("title", "新对话")
     repo.rename_session(agent_id=agent_id, session_id=session_id, title=new_title)
     return {"code": 0, "message": "Session renamed", "data": {"id": session_id, "title": new_title}}
 
@@ -990,14 +986,14 @@ def _find_session_target(repo, session_id: str, user_id: str) -> Dict[str, Any]:
     与既有 delete/rename 端点的过滤逻辑一致：空 user_id 视为"共享"，
     允许任何已认证用户操作（避免"看得到删不掉"死锁，P2-#20）。
     """
-    sessions = repo.list_sessions()
-    target = [s for s in sessions if s.get("session_id") == session_id or s.get("id") == session_id]
+    # 审计 P1-F4：索引式定位（原 list_sessions 全库扫描）
+    target = repo.find_session(session_id)
     if not target:
         raise HTTPException(status_code=404, detail="Session not found")
-    target_user_id = target[0].get("user_id") or ""
+    target_user_id = target.get("user_id") or ""
     if target_user_id and user_id and target_user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
-    return target[0]
+    return target
 
 
 def _sync_agent_history_from_session(agent, agent_id: str, session_id: str, repo) -> None:

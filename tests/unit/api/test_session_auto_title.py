@@ -33,6 +33,13 @@ class _FakeRepo(SessionRepository):
     def list_sessions(self, agent_id="", user_id=""):
         return self._sessions
 
+    def find_session(self, session_id):
+        # P1-F4：端点改走索引式定位，测试桩同步契约
+        for s in self._sessions:
+            if s.get("session_id") == session_id or s.get("id") == session_id:
+                return s
+        return None
+
     def get_history(self, agent_id, session_id, max_messages=0):
         return self._messages
 

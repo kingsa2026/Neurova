@@ -151,6 +151,23 @@ class RSIIntegrationManager:
 
         return signals
 
+    # 审计 P1-F7：数值参数硬边界（缺省 [0, 10] 兜底；负界用 -inf 语义时
+    # 显式列出）。新增可优化参数须同步登记边界，否则兜底夹紧。
+    PARAMETER_BOUNDS = {
+        ("sleep", "base_decay_rate"): (0.0, 1.0),
+        ("sleep", "similarity_threshold"): (0.0, 1.0),
+        ("sleep", "merge_threshold"): (0.0, 1.0),
+        ("emotion", "emotional_protection_threshold"): (0.0, 100.0),
+        ("emotion", "emotional_protection_factor"): (0.0, 10.0),
+        ("experience", "crystallize_min_observations"): (1.0, 1000.0),
+        ("experience", "crystallize_min_success_rate"): (0.0, 1.0),
+    }
+    _PARAM_BOUND_DEFAULT = (0.0, 100.0)
+
+    @classmethod
+    def _parameter_bounds(cls, system_name: str, param_name: str) -> tuple:
+        return cls.PARAMETER_BOUNDS.get((system_name, param_name), cls._PARAM_BOUND_DEFAULT)
+
     def apply_optimization(self, parameter_path: str, new_value: Any) -> bool:
         """
         应用优化到指定参数
@@ -188,6 +205,11 @@ class RSIIntegrationManager:
             system = self._systems[system_name]
             if hasattr(system, param_name):
                 old_value = getattr(system, param_name)
+                # 审计 P1-F7：数值参数夹紧——RSI 棘轮调整（10%/次）若无界可
+                # 跨迭代复利漂移（如衰减率 >1 或负阈值）
+                if isinstance(new_value, (int, float)) and not isinstance(new_value, bool):
+                    lo, hi = self._parameter_bounds(system_name, param_name)
+                    new_value = max(lo, min(hi, float(new_value)))
                 setattr(system, param_name, new_value)
                 logger.info("Applied optimization: %s = %s", parameter_path, new_value)
                 # C12 回执（工具面审计）：优化前后快照落 JSONL，可审计可回溯
