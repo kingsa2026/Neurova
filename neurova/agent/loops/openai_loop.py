@@ -281,7 +281,9 @@ class OpenAILoop(BaseAgentLoop):
         # thinking_effort（light/standard/deep）经管线 metadata → 此处
         # request_params → LLMClient._build_request_params 按 provider
         # compat 声明映射为 reasoning_effort（未声明网关不注入，防 400）。
-        for key in ["thinking_effort", "reasoning_effort"]:
+        # B1-3：思考开关两级旋钮同通道透传（enable_thinking/thinking_budget
+        # 经 compat.supports_thinking_toggle 门控注入）。
+        for key in ["thinking_effort", "reasoning_effort", "thinking_enabled", "thinking_budget"]:
             if key in kwargs and kwargs[key] is not None:
                 request_params[key] = kwargs[key]
 

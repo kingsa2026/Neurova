@@ -65,7 +65,7 @@ class _ContinuationLoop:
     def __init__(self):
         self.calls = 0
 
-    async def predict_step(self, messages=None, tools=None, stream=False, thinking_effort=""):
+    async def predict_step(self, messages=None, tools=None, stream=False, thinking_effort="", **kwargs):
         self.calls += 1
         return SimpleNamespace(
             content="这是自动续写的内容，长度足够通过最短护栏检查。",
