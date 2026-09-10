@@ -280,16 +280,20 @@ def sync_skills(registry) -> int:
     if skill_registry is None:
         return 0
 
-    try:
-        count = 0
-        for skill in skill_registry.list_skills():
+    count = 0
+    for skill in skill_registry.list_skills():
+        # 单条技能转换/注册失败不归零整个同步（一条畸形 schema 曾让
+        # 全部技能节点消失）；跳过坏条目并留痕
+        try:
             node_def = skill_to_node(skill)
             registry.register(node_def)
             count += 1
-        return count
-    except Exception as e:
-        logger.warning("同步技能失败: %s", e)
-        return 0
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "技能节点同步跳过 %s: %s",
+                getattr(skill, "name", skill if isinstance(skill, str) else "?"), e,
+            )
+    return count
 
 
 def sync_mcp(registry) -> int:
