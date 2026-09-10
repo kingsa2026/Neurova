@@ -79,13 +79,22 @@ class TestFirstUserAdmin:
         assert user_model.created_kwargs[0]["role"] == "admin"
 
     def test_second_registered_user_is_normal_user(self, client, fake_models):
-        """已有用户时注册 → role=user（仅首个管理员）"""
+        """已有用户时注册 → role=user（仅首个管理员）
+
+        2026-09-10 更新: 适配既有 S-04 契约（非首启注册必须携带邮箱验证码,
+        见 HEAD 中 register 端点）。原用例未带邮箱 → 400, 为预存失败。
+        """
         user_model, _ = fake_models
         user_model.count_users.return_value = 1
 
         resp = client.post(
             "/v1/auth/register",
-            json={"username": "follower", "password": "Passw0rd!123"},
+            json={
+                "username": "follower",
+                "password": "Passw0rd!123",
+                "email": "follower@example.com",
+                "verification_code": "123456",
+            },
         )
         assert resp.status_code == 200, resp.text
         assert user_model.created_kwargs[0]["role"] == "user"

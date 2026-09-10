@@ -13,8 +13,10 @@ from neurova.core.logger import get_logger
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
+
+from neurova.api.deps import require_admin
 
 logger = get_logger(__name__)
 
@@ -102,8 +104,10 @@ async def get_audit_logs(
     resource_type: Optional[str] = Query(default=None, description="资源类型筛选"),
     limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
     offset: int = Query(default=0, ge=0, description="偏移量"),
+    _admin: Dict[str, Any] = Depends(require_admin()),
 ):
-    """获取审计日志"""
+    """获取审计日志（BUG AUDIT S-08: 原零鉴权; 审计数据仅管理员, 前端
+    AuditPage 挂在 platformAdmin 导航分组）"""
     try:
         if get_audit_logger is None:
             logger.warning("Audit logger service not available")
@@ -134,6 +138,7 @@ async def get_audit_logs(
 async def search_audit_logs(
     request: Request,
     body: AuditSearchRequest,
+    _admin: Dict[str, Any] = Depends(require_admin()),
 ):
     """搜索审计日志"""
     try:
@@ -166,6 +171,7 @@ async def get_audit_stats(
     request: Request,
     start_time: Optional[float] = Query(default=None, description="开始时间"),
     end_time: Optional[float] = Query(default=None, description="结束时间"),
+    _admin: Dict[str, Any] = Depends(require_admin()),
 ):
     """获取审计统计"""
     try:

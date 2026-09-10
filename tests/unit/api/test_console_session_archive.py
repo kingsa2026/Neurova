@@ -36,6 +36,17 @@ def mock_repo():
     mock.list_archived_sessions.return_value = []
     mock.archive_session.return_value = True
     mock.unarchive_session.return_value = True
+
+    # 2026-09-10: 适配既有 P1-F4 契约（archive 端点经 find_session 索引式定位,
+    # 见 HEAD console.py）。原桩仅播种 list_sessions → find_session 落到
+    # MagicMock, user_id 比对失真 → 预存 403 假失败。
+    def _find_session(session_id):
+        for s in mock.list_sessions.return_value:
+            if (s.get("session_id") or s.get("id")) == session_id:
+                return s
+        return None
+
+    mock.find_session.side_effect = _find_session
     with patch("neurova.api.endpoints.console.get_session_repository", return_value=mock):
         yield mock
 
