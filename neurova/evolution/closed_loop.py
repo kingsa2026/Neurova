@@ -215,12 +215,13 @@ class AdaptiveToolWeights:
             weight.window.append((now_ts, bool(success)))
             while len(weight.window) > self.window_size:
                 weight.window.popleft()
-            # 断点 A 收尾：节流落盘（挂载了持久化且达到间隔 → 保存；IO 在锁内
-            # 快照、锁外写，见 save()）
-            self._maybe_persist()
             logger.debug(
                 f"Weight updated for {tool_name}: success={success}, multiplier={weight.adaptive_multiplier:.3f}"
             )
+        # C-15: 落盘在锁外执行。原实现把 _maybe_persist 嵌在外层 RLock 内，
+        # save() 的 write_text 磁盘 IO 会串行阻塞所有权重读路径——save() 自身
+        # "锁内快照、锁外写"的注释只对直接调用 save() 的路径成立。
+        self._maybe_persist()
 
     def _apply_lazy_decay(self, weight: ToolWeight) -> None:
         """惰性时间衰减（A 版思想②）：读取时按距上次使用的时长衰减 multiplier。

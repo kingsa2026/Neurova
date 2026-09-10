@@ -71,3 +71,19 @@ class TelegramAPIMixin:
         except Exception as e:
             logger.error("保存临时文件失败: %s", e)
             return None
+
+    def _cleanup_temp_file(self: Any, temp_path: str | None) -> None:
+        """C-18: 统一清理 _save_temp_file 产出的临时文件（消费侧 finally 调用）。
+
+        delete=False 的 NamedTemporaryFile 无人清理会无限堆积在磁盘；
+        清理失败仅告警（临时文件残留不应掩盖发送结果/二次抛错）。
+        """
+        if not temp_path:
+            return
+        import os
+        try:
+            os.unlink(temp_path)
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            logger.warning("临时文件清理失败: %s (%s)", temp_path, e)

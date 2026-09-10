@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from neurova.core.logger import get_logger
-import os
 import re
 from typing import Any, Optional
 
@@ -235,10 +234,11 @@ class TelegramAIGenerationMixin:
                     if gen_image_data:
                         temp_path = await self._save_temp_file(gen_image_data, "png")
                         if temp_path:
-                            if self._send_photo(message.chat_id, temp_path):
-                                os.unlink(temp_path)
-                                return True
-                            os.unlink(temp_path)
+                            try:
+                                if self._send_photo(message.chat_id, temp_path):
+                                    return True
+                            finally:
+                                self._cleanup_temp_file(temp_path)
                     self._send_text_message(message.chat_id, "图片生成失败")
                     return False
             else:
@@ -249,10 +249,11 @@ class TelegramAIGenerationMixin:
                     if image_data:
                         temp_path = await self._save_temp_file(image_data, "png")
                         if temp_path:
-                            if self._send_photo(message.chat_id, temp_path):
-                                os.unlink(temp_path)
-                                return True
-                            os.unlink(temp_path)
+                            try:
+                                if self._send_photo(message.chat_id, temp_path):
+                                    return True
+                            finally:
+                                self._cleanup_temp_file(temp_path)
                     self._send_text_message(message.chat_id, "图片生成失败")
                     return False
 
@@ -266,10 +267,11 @@ class TelegramAIGenerationMixin:
                 if image_data:
                     temp_path = await self._save_temp_file(image_data, "png")
                     if temp_path:
-                        if self._send_photo(message.chat_id, temp_path):
-                            os.unlink(temp_path)
-                            return True
-                        os.unlink(temp_path)
+                        try:
+                            if self._send_photo(message.chat_id, temp_path):
+                                return True
+                        finally:
+                            self._cleanup_temp_file(temp_path)
                 self._send_text_message(message.chat_id, "图片生成失败")
                 return False
 
@@ -283,10 +285,11 @@ class TelegramAIGenerationMixin:
                 if video_data:
                     temp_path = await self._save_temp_file(video_data, "mp4")
                     if temp_path:
-                        if self._send_video(message.chat_id, temp_path):
-                            os.unlink(temp_path)
-                            return True
-                        os.unlink(temp_path)
+                        try:
+                            if self._send_video(message.chat_id, temp_path):
+                                return True
+                        finally:
+                            self._cleanup_temp_file(temp_path)
                 self._send_text_message(message.chat_id, "视频生成失败")
                 return False
 
@@ -301,10 +304,11 @@ class TelegramAIGenerationMixin:
                 if video_data:
                     temp_path = await self._save_temp_file(video_data, "mp4")
                     if temp_path:
-                        if self._send_video(message.chat_id, temp_path):
-                            os.unlink(temp_path)
-                            return True
-                        os.unlink(temp_path)
+                        try:
+                            if self._send_video(message.chat_id, temp_path):
+                                return True
+                        finally:
+                            self._cleanup_temp_file(temp_path)
                 self._send_text_message(message.chat_id, "视频生成失败")
                 return False
 
@@ -318,10 +322,11 @@ class TelegramAIGenerationMixin:
                 if video_data:
                     temp_path = await self._save_temp_file(video_data, "mp4")
                     if temp_path:
-                        if self._send_video(message.chat_id, temp_path):
-                            os.unlink(temp_path)
-                            return True
-                        os.unlink(temp_path)
+                        try:
+                            if self._send_video(message.chat_id, temp_path):
+                                return True
+                        finally:
+                            self._cleanup_temp_file(temp_path)
                 self._send_text_message(message.chat_id, "视频生成失败")
                 return False
 
@@ -333,10 +338,11 @@ class TelegramAIGenerationMixin:
                 if video_data:
                     temp_path = await self._save_temp_file(video_data, "mp4")
                     if temp_path:
-                        if self._send_video(message.chat_id, temp_path):
-                            os.unlink(temp_path)
-                            return True
-                        os.unlink(temp_path)
+                        try:
+                            if self._send_video(message.chat_id, temp_path):
+                                return True
+                        finally:
+                            self._cleanup_temp_file(temp_path)
                 self._send_text_message(message.chat_id, "视频生成失败")
                 return False
 

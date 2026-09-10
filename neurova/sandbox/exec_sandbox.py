@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 import platform
 import shutil
 import subprocess
@@ -95,30 +96,16 @@ class ExecSandbox:
         argv = self.wrap_argv(command)
         base = self._base_result()
         try:
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 argv,
                 shell=False,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout,
                 cwd=cwd,
                 env=env,
+                **self._spawn_kwargs(),
             )
-            return {
-                **base,
-                "success": result.returncode == 0,
-                "output": result.stdout or "",
-                "error": result.stderr or "",
-                "return_code": result.returncode,
-            }
-        except subprocess.TimeoutExpired:
-            return {
-                **base,
-                "success": False,
-                "output": "",
-                "error": f"Command timed out after {timeout} seconds",
-                "return_code": -1,
-            }
         except Exception as e:  # noqa: BLE001 - 沙箱执行需捕获一切异常以保证可用
             return {
                 **base,
@@ -127,6 +114,74 @@ class ExecSandbox:
                 "error": str(e),
                 "return_code": -1,
             }
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+            return {
+                **base,
+                "success": proc.returncode == 0,
+                "output": stdout or "",
+                "error": stderr or "",
+                "return_code": proc.returncode,
+            }
+        except subprocess.TimeoutExpired:
+            # C-22: 超时后必须杀整棵进程树（原 subprocess.run 只杀直接子进程，
+            # sh/cmd 的孙进程残留继续占资源）
+            self._kill_process_tree(proc)
+            try:
+                stdout, stderr = proc.communicate(timeout=5)
+            except Exception:  # noqa: BLE001 - 收尸失败不改变超时结果契约
+                stdout, stderr = "", ""
+            return {
+                **base,
+                "success": False,
+                "output": stdout or "",
+                "error": f"Command timed out after {timeout} seconds",
+                "return_code": -1,
+            }
+        except Exception as e:  # noqa: BLE001 - 沙箱执行需捕获一切异常以保证可用
+            self._kill_process_tree(proc)
+            return {
+                **base,
+                "success": False,
+                "output": "",
+                "error": str(e),
+                "return_code": -1,
+            }
+
+    def _spawn_kwargs(self) -> Dict[str, Any]:
+        """C-22: POSIX 下让子进程成为新进程组首进程，供超时后整组杀灭。"""
+        if sys.platform == "win32":
+            return {}
+        return {"start_new_session": True}
+
+    def _kill_process_tree(self, proc: subprocess.Popen) -> None:
+        """C-22: 按平台杀灭整棵进程树。
+
+        - POSIX: 进程组 SIGKILL（execute 经 start_new_session 建组）；
+          进程已退出时 getpgid 抛 ProcessLookupError，退回直接 kill。
+        - Windows: taskkill /T /F（TerminateProcess 只杀单个进程，
+          taskkill /T 遍历子树）；taskkill 缺失/失败时退回 proc.kill()。
+        """
+        if sys.platform == "win32":
+            taskkill = shutil.which("taskkill")
+            if taskkill is not None:
+                try:
+                    subprocess.run(
+                        [taskkill, "/T", "/F", "/PID", str(proc.pid)],
+                        capture_output=True,
+                        timeout=10,
+                    )
+                    return
+                except Exception:  # noqa: BLE001 - taskkill 失败退回单杀
+                    pass
+            proc.kill()
+        else:
+            import signal
+
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                proc.kill()
 
 
 class ProcessSandbox(ExecSandbox):
