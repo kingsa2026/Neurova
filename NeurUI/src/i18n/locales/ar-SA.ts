@@ -1763,6 +1763,7 @@ export default {
     governancePhase3: '3 — آلي مشروط (متوسط المخاطر تلقائياً)',
     governancePhase4: '4 — آلي بالكامل (يُطبق كل شيء)',
     governanceConversationRules: 'استخراج قواعد المحادثة (استدعاء LLM واحد لكل دورة)',
+    notLoadedSaveBlocked: 'لم يتم تحميل الإعدادات بعد؛ تم منع الحفظ لمنع استبدال تكوين الخادم بالقيم الافتراضية',
     debugMode: 'وضع التصحيح',
     logLevel: 'مستوى السجل',
     debug: 'تصحيح',

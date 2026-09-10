@@ -700,8 +700,9 @@ const renderStart = ref(0)
 
 const renderedMessages = computed(() => {
   const all = messages.value
+  // F-07：getter 内禁止写 renderStart（写后又读同一 ref → computed 自依赖，
+  // 可能递归更新）。短列表归零由下方 messages.length watch 负责。
   if (all.length <= RENDER_WINDOW + RENDER_BUFFER) {
-    renderStart.value = 0
     return all
   }
   const start = Math.max(0, Math.min(renderStart.value, all.length - RENDER_WINDOW))
@@ -1216,7 +1217,8 @@ async function sendMessage() {
   }
 
   // Initiate SSE streaming request
-  abortController = new AbortController()
+  // F-10：控制器由 readStream 独自创建/持有（重连重试会再建新控制器），
+  // 此处不得预建——预建的控制器会被 readStream 内的创建覆盖成孤儿。
   const token = secureStorage.get('auth_token')
 
   // 补课 8（断线重连+replay 快进）：读流网络中断（非用户中止/非 HTTP 错）
@@ -1312,10 +1314,12 @@ async function sendMessage() {
         try {
           await readStream(receivedSeq[0])
         } catch (retryErr: any) {
+          // F-08：中止（含重试被中止）一律视为失败——否则 drain 把排队项
+          // markSent 出队，内容只播一半却标记已发送（与主中止路径口径一致）
           if (retryErr.name !== 'AbortError') {
             streamingMsg.content += `\n\n**Error:** ${retryErr.message || 'Stream failed.'}`
-            _sendOk = false
           }
+          _sendOk = false
         }
       } else {
         streamingMsg.content += `\n\n**Error:** ${err.message || 'Stream failed.'}`

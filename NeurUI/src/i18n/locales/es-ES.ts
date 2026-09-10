@@ -1763,6 +1763,7 @@ export default {
     governancePhase3: '3 — Automático condicional (riesgo medio)',
     governancePhase4: '4 — Totalmente automático (todo se aplica)',
     governanceConversationRules: 'Extracción de reglas de conversación (1 llamada LLM por turno)',
+    notLoadedSaveBlocked: 'Ajustes aún no cargados: guardado bloqueado para evitar sobrescribir la configuración del servidor con valores predeterminados',
     debugMode: 'Modo de depuración',
     logLevel: 'Nivel de registro',
     debug: 'Depuración',

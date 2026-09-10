@@ -199,18 +199,31 @@ const savingGovernance = ref(false)
 /** Agent 运行限制（Token 预算上限 / 单次会话最大 Loop 轮次） */
 const agentLimits = ref({ token_budget: 100000, max_loop_rounds: 20 })
 const savingAgentLimits = ref(false)
+// F-12：加载成功标志——未成功加载就保存会把默认值回写覆盖线上配置
+const agentLimitsLoaded = ref(false)
+const governanceLoaded = ref(false)
 
 const fetchAgentLimits = async () => {
   try {
     const res = await getAgentLimits()
     const data = (res as any)?.data?.data ?? (res as any)?.data
-    if (data) agentLimits.value = { ...agentLimits.value, ...data }
-  } catch {
+    if (data) {
+      agentLimits.value = { ...agentLimits.value, ...data }
+      agentLimitsLoaded.value = true
+    }
+  } catch (err) {
+    console.error('[Settings] fetchAgentLimits failed:', err)
+    agentLimitsLoaded.value = false
     // 读取失败不阻断设置页（保留默认值）
   }
 }
 
 const saveAgentLimits = async () => {
+  if (!agentLimitsLoaded.value) {
+    // F-12：未成功加载 → 表单里是前端默认值，提交会覆盖线上配置
+    message.warning(t('settings.notLoadedSaveBlocked'))
+    return
+  }
   savingAgentLimits.value = true
   try {
     await updateAgentLimits({ ...agentLimits.value })
@@ -226,13 +239,23 @@ const fetchGovernance = async () => {
   try {
     const res = await getGovernanceSettings()
     const data = (res as any)?.data?.data ?? (res as any)?.data
-    if (data) governance.value = { ...governance.value, ...data }
-  } catch {
+    if (data) {
+      governance.value = { ...governance.value, ...data }
+      governanceLoaded.value = true
+    }
+  } catch (err) {
+    console.error('[Settings] fetchGovernance failed:', err)
+    governanceLoaded.value = false
     // 治理设置读取失败不阻断设置页（默认关）
   }
 }
 
 const saveGovernance = async () => {
+  if (!governanceLoaded.value) {
+    // F-12：未成功加载 → 表单里是前端默认值，提交会覆盖线上配置
+    message.warning(t('settings.notLoadedSaveBlocked'))
+    return
+  }
   savingGovernance.value = true
   try {
     await updateGovernanceSettings({ ...governance.value })

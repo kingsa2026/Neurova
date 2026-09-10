@@ -1776,6 +1776,7 @@ export default {
     governancePhase3: '3 — 条件自动（中风险自动执行）',
     governancePhase4: '4 — 完全自动（所有优化自动执行）',
     governanceConversationRules: '对话规则提取（每轮一次 LLM 调用）',
+    notLoadedSaveBlocked: '设置尚未加载成功，已阻止保存（避免默认值覆盖线上配置）',
     debugMode: '调试模式',
     logLevel: '日志级别',
     debug: '调试',
