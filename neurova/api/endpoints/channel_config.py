@@ -153,6 +153,22 @@ async def list_configs():
     return result
 
 
+@router.get("/schemas", summary="插件渠道动态表单 schema（B4-d）")
+async def list_plugin_channel_schemas():
+    """已注册插件渠道的 config_fields 动态表单 schema（前端渲染用）。
+
+    必须注册在 /{channel_type} 参数路由之前（字面量优先），
+    否则 schemas 会被当作 channel_type 404。
+    """
+    from neurova.channels.plugin_channels import get_plugin_channel_registry
+
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"schemas": get_plugin_channel_registry().schemas()},
+    }
+
+
 @router.get("/{channel_type}", summary="获取指定渠道配置")
 async def get_config(channel_type: str):
     """获取指定渠道的配置"""
@@ -407,6 +423,15 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
             raise HTTPException(status_code=400, detail=str(e))
 
     else:
+        # B4-d：插件化自定义渠道注册表优先于"仅存配置"兜底
+        try:
+            from neurova.channels.plugin_channels import get_plugin_channel_registry
+
+            plugin_adapter = get_plugin_channel_registry().create_adapter(channel_type, config)
+            if plugin_adapter is not None:
+                return plugin_adapter
+        except Exception as e:  # noqa: BLE001 — 插件工厂异常不阻断内置链路
+            logger.warning("Plugin channel factory failed for '%s': %s", channel_type, e)
         # For channel types without a dedicated factory (yuanbao, matrix, mattermost, etc.),
         # persist the config but skip adapter creation — the adapter can be registered
         # manually or via a future factory implementation.

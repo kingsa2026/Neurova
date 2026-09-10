@@ -363,8 +363,10 @@ class ChannelManager:
             if not mapped_type:
                 return
 
-            # 获取或创建会话
-            session = sync_manager.get_session_by_external_id(message.chat_id)
+            # 获取或创建会话（B4-b：群聊隔离键——share_session_in_group=False
+            # 时按 sender 隔离，否则群共享）
+            scope_id = self.resolve_session_scope_id(message)
+            session = sync_manager.get_session_by_external_id(scope_id)
             if not session:
                 # 尝试从元数据获取 user_id
                 user_id = getattr(message, "sender_id", None) or "anonymous"
@@ -372,7 +374,7 @@ class ChannelManager:
                 session = sync_manager.create_session(
                     user_id=user_id,
                     agent_id=agent_id,
-                    external_id=message.chat_id,
+                    external_id=scope_id,
                     metadata={"channel_type": message.channel_type},
                 )
 
@@ -454,6 +456,97 @@ class ChannelManager:
                 logger.warning("Adapter %s failed to connect", adapter.channel_type)
         except Exception as e:
             logger.exception("Adapter %s connect error: %s", adapter.channel_type, e)
+
+    # ============================================================
+    # B4-a 渠道管理能力面（QP config.py/manager.py 对齐）
+    # ============================================================
+
+    async def restart_channel(self, channel_type: str) -> Dict[str, Any]:
+        """渠道重启：disconnect → connect（配置变更生效/断线重连语义）。"""
+        adapter = self.get_adapter(channel_type)
+        if adapter is None:
+            return {"success": False, "channel_type": channel_type, "error": "渠道未注册"}
+        try:
+            await adapter.disconnect()
+        except Exception as e:  # noqa: BLE001 — 断开失败继续尝试重连
+            logger.warning("restart %s disconnect 异常（继续重连）: %s", channel_type, e)
+        try:
+            ok = await adapter.connect()
+            return {"success": bool(ok), "channel_type": channel_type}
+        except Exception as e:  # noqa: BLE001
+            return {"success": False, "channel_type": channel_type, "error": str(e)}
+
+    async def replace_channel(
+        self, channel_type: str, adapter_factory: "Callable[[], ChannelAdapter]",
+    ) -> Dict[str, Any]:
+        """替换渠道适配器实例（配置热更新：旧实例断开注销，新实例注册并连接）。"""
+        old = self.get_adapter(channel_type)
+        if old is not None:
+            try:
+                await old.disconnect()
+            except Exception:  # noqa: BLE001
+                pass
+            self.unregister_adapter(channel_type)
+        adapter = adapter_factory()
+        self.register_adapter(adapter)
+        try:
+            ok = await adapter.connect()
+            return {"success": bool(ok), "channel_type": channel_type}
+        except Exception as e:  # noqa: BLE001
+            return {"success": False, "channel_type": channel_type, "error": str(e)}
+
+    def clear_channel_queue(self, channel_type: str) -> int:
+        """清空渠道待处理入站队列，返回清除条数（队列不可用抛 IngressQueueUnavailable）。"""
+        queue = self._get_ingress_queue()
+        return queue.clear(channel_type)
+
+    def conflict_check(self) -> Dict[str, Any]:
+        """机器人身份冲突检测（QP config.py:379 对齐）。
+
+        两个渠道复用同一身份凭据（app_id/api_key 相同）时，平台的回调/事件
+        会串渠道。按身份指纹分组，返回出现 ≥2 次的冲突项。
+        """
+        groups: Dict[str, List[str]] = {}
+        for channel_type, adapter in self._adapters.items():
+            cfg = getattr(adapter, "config", None)
+            app_id = str(getattr(cfg, "app_id", "") or "")
+            api_key = str(getattr(cfg, "api_key", "") or "")
+            identity = app_id or api_key
+            if not identity:
+                continue
+            groups.setdefault(identity, []).append(channel_type)
+        conflicts = [
+            {"identity": identity, "channels": chans}
+            for identity, chans in groups.items()
+            if len(chans) >= 2
+        ]
+        return {"conflicts": conflicts, "checked": len(groups)}
+
+    # ============================================================
+    # B4-b 群聊会话隔离（#7208/#7001 对齐）
+    # ============================================================
+
+    @staticmethod
+    def _coerce_share_flag(value: Any) -> bool:
+        if isinstance(value, str):
+            return value.strip().lower() not in ("false", "0", "no", "off")
+        return bool(value)
+
+    def resolve_session_scope_id(self, message: ChannelMessage) -> str:
+        """群聊会话隔离键（单点裁决，供会话同步/处理器共用）。
+
+        share_session_in_group=True（默认）→ chat_id（群内共享一个会话）；
+        False → ``chat_id:sender_id``（按发送者隔离，QwenPaw 隔离模式语义）。
+        配置取适配器的 share_session_in_group 属性（bool/"true"/"false"），
+        未声明的适配器默认共享——与既有行为等价，只提升不下降。
+        """
+        scope = message.chat_id
+        adapter = self.get_adapter(message.channel_type)
+        if adapter is not None:
+            share = getattr(adapter, "share_session_in_group", True)
+            if not self._coerce_share_flag(share) and message.sender_id:
+                scope = f"{message.chat_id}:{message.sender_id}"
+        return scope
 
     # ============================================================
     # 健康检查
