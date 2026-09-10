@@ -349,3 +349,18 @@ export function artifactContentUrl(artifactId: string): string {
 export function filePreviewUrl(fileId: string): string {
   return `/api/v1/files/${fileId}/preview`
 }
+
+/** B3-3（#7161 对齐）：产物直接下载（blob 触发浏览器保存；带 artifactId 的产物可用）。 */
+export async function downloadArtifact(artifactId: string, fileName?: string): Promise<void> {
+  const blob = (await api.get(`/artifacts/${artifactId}/content`, {
+    responseType: 'blob',
+  })) as unknown as Blob
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName || artifactId
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
