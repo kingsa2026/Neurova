@@ -374,6 +374,20 @@ async def get_current_user(
 _SERVICE_TOKEN_HEADER = "X-Service-Token"
 
 
+def service_token_matches(provided: str) -> bool:
+    """X-Service-Token 与 NEUROVA_SERVICE_TOKEN 常量时间比较。
+
+    单一事实源：get_current_user_or_service 与 global_auth.GlobalAuthMiddleware
+    共用本判定（未配置 env = 功能关闭，恒 False，无后门）。
+    """
+    import hmac as _hmac
+    import os as _os
+
+    expected = (_os.environ.get("NEUROVA_SERVICE_TOKEN") or "").strip()
+    provided = str(provided or "").strip()
+    return bool(expected and provided and _hmac.compare_digest(provided, expected))
+
+
 async def get_current_user_or_service(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
@@ -382,16 +396,11 @@ async def get_current_user_or_service(
 
     面向无 JWT 的机器调用方（渠道后端、n8n、运维脚本等）访问知识条目 API：
     - 仅当环境变量 NEUROVA_SERVICE_TOKEN 已配置时启用（未配置=功能关闭，无后门）
-    - 头 X-Service-Token 与配置值做常量时间比较（hmac.compare_digest）
+    - 头 X-Service-Token 与配置值做常量时间比较（service_token_matches）
     - 匹配 → role="admin" 的受信机器身份（user_id="system"）
     - 服务令牌不匹配时回落 JWT 校验，两者都失败 → 401
     """
-    import hmac as _hmac
-    import os as _os
-
-    expected = (_os.environ.get("NEUROVA_SERVICE_TOKEN") or "").strip()
-    provided = str(getattr(request, "headers", {}).get(_SERVICE_TOKEN_HEADER, "") or "").strip()
-    if expected and provided and _hmac.compare_digest(provided, expected):
+    if service_token_matches(request.headers.get(_SERVICE_TOKEN_HEADER, "")):
         return {
             "user_id": "system",
             "username": "service",

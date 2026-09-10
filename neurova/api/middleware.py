@@ -225,4 +225,11 @@ def setup_middleware(app: FastAPI) -> None:
     # 速率限制
     app.add_middleware(RateLimitMiddleware, requests_per_minute=120)
 
+    # 全局鉴权白名单 (BUG AUDIT S-08 收口)：默认 off 完全惰性；
+    # NEUROVA_GLOBAL_AUTH=shadow 记录匿名访问取证 / enforce 白名单外强制凭证。
+    # 最后注册 = 最外层，先于限流/日志拒绝未认证请求。
+    from neurova.api.global_auth import GlobalAuthMiddleware
+
+    app.add_middleware(GlobalAuthMiddleware)
+
     logger.info("Middleware setup complete")
