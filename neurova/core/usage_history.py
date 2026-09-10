@@ -38,7 +38,10 @@ CREATE TABLE IF NOT EXISTS llm_usage (
     total_tokens INTEGER NOT NULL DEFAULT 0,
     estimated INTEGER NOT NULL DEFAULT 0,
     first_token_ms INTEGER NOT NULL DEFAULT 0,
-    duration_ms INTEGER NOT NULL DEFAULT 0
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    agent_id TEXT NOT NULL DEFAULT ''
 )
 """
 
@@ -91,10 +94,17 @@ class UsageHistoryStore:
                     # 存量库幂等迁移（OpenOcta 启发 P1-8 延迟维度）：
                     # 旧库无 first_token_ms/duration_ms 列时补列，旧数据默认 0
                     existing = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage)")}
-                    for column in ("first_token_ms", "duration_ms"):
+                    for column, ddl in (
+                        ("first_token_ms", "INTEGER NOT NULL DEFAULT 0"),
+                        ("duration_ms", "INTEGER NOT NULL DEFAULT 0"),
+                        # B1-5/B3-2：Prompt Cache 命中/写入 + 按 agent 记账
+                        ("cache_read_tokens", "INTEGER NOT NULL DEFAULT 0"),
+                        ("cache_write_tokens", "INTEGER NOT NULL DEFAULT 0"),
+                        ("agent_id", "TEXT NOT NULL DEFAULT ''"),
+                    ):
                         if column not in existing:
                             conn.execute(
-                                f"ALTER TABLE llm_usage ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0"
+                                f"ALTER TABLE llm_usage ADD COLUMN {column} {ddl}"
                             )
         except Exception:
             pass  # 落盘不可用 → 内存记账主流程不受影响
@@ -114,6 +124,9 @@ class UsageHistoryStore:
         estimated: bool = False,
         first_token_ms: int = 0,
         duration_ms: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        agent_id: str = "",
     ) -> None:
         """记一次 LLM 调用（一行）。任何失败都静默——仅为附加统计。
 
@@ -137,8 +150,9 @@ class UsageHistoryStore:
                         INSERT INTO llm_usage (
                             ts, usage_date, user_id, model, provider,
                             prompt_tokens, completion_tokens, total_tokens, estimated,
-                            first_token_ms, duration_ms
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            first_token_ms, duration_ms,
+                            cache_read_tokens, cache_write_tokens, agent_id
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             ts,
@@ -152,6 +166,9 @@ class UsageHistoryStore:
                             1 if estimated else 0,
                             max(0, int(first_token_ms or 0)),
                             max(0, int(duration_ms or 0)),
+                            max(0, int(cache_read_tokens or 0)),
+                            max(0, int(cache_write_tokens or 0)),
+                            str(agent_id or ""),
                         ),
                     )
         except Exception:
@@ -185,6 +202,57 @@ class UsageHistoryStore:
             return [dict(r) for r in rows]
         except Exception:
             return []
+
+    def agent_token_totals(self, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """B3-2：按 agent 聚合 token 用量 [{agent_id, tokens, calls}]，调用量降序。"""
+        try:
+            where, params = self._where(user_id)
+            with self._lock:
+                with self._connect() as conn:
+                    rows = conn.execute(
+                        f"""
+                        SELECT agent_id,
+                               SUM(total_tokens) AS tokens,
+                               COUNT(*) AS calls
+                        FROM llm_usage
+                        {where}
+                        GROUP BY agent_id
+                        ORDER BY calls DESC
+                        """,
+                        params,
+                    ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
+
+    def cache_totals(self, user_id: Optional[str] = None) -> Dict[str, Any]:
+        """B1-5（#7342）：Prompt Cache 命中/写入累计与命中率。
+
+        cache_hit_rate = cache_read / prompt_tokens（诚实口径：读不到
+        cache 明细的网关行自然为 0，不伪造）。
+        """
+        try:
+            where, params = self._where(user_id)
+            with self._lock:
+                with self._connect() as conn:
+                    row = conn.execute(
+                        f"""
+                        SELECT COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+                               COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
+                               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens
+                        FROM llm_usage
+                        {where}
+                        """,
+                        params,
+                    ).fetchone()
+            result = dict(row) if row else {}
+            prompt = int(result.get("prompt_tokens") or 0)
+            read = int(result.get("cache_read_tokens") or 0)
+            result["cache_hit_rate"] = round(read / prompt, 4) if prompt > 0 else 0.0
+            return result
+        except Exception:
+            return {"cache_read_tokens": 0, "cache_write_tokens": 0,
+                    "prompt_tokens": 0, "cache_hit_rate": 0.0}
 
     def daily_by_model(self, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """按天×模型聚合 [{usage_date, model, tokens}]，按日-模型升序。"""

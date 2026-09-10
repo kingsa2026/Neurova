@@ -252,6 +252,25 @@ async def get_usage_stats(
             aid = str(s.get("agent_id") or "default")
             by_agent_counter[aid] = by_agent_counter.get(aid, 0) + 1
 
+        # B3-2：按 agent token 记账（usage_history agent_id 列，真值聚合）
+        agent_token_totals: Dict[str, Dict[str, Any]] = {}
+        try:
+            from neurova.core.usage_history import get_usage_history
+
+            for r in get_usage_history().agent_token_totals():
+                agent_token_totals[str(r.get("agent_id") or "default")] = r
+        except Exception:
+            agent_token_totals = {}
+
+        # B1-5：Prompt Cache 命中/写入累计与命中率（真值，读不到明细为 0）
+        cache_summary: Dict[str, Any] = {}
+        try:
+            from neurova.core.usage_history import get_usage_history
+
+            cache_summary = get_usage_history().cache_totals()
+        except Exception:
+            cache_summary = {}
+
         by_model = [
             {"model": name, "requests": int(e.get("calls", 0)), "tokens": int(e.get("total_tokens", 0))}
             for name, e in token["by_model"].items()
@@ -262,8 +281,17 @@ async def get_usage_stats(
             "total_requests": token["calls"],
             "total_tokens": token["tokens"],
             "avg_latency_ms": 0.0,  # 无请求级延迟持久源，诚实 0（性能维度见 /performance）
+            "cache_read_tokens": int(cache_summary.get("cache_read_tokens", 0)),
+            "cache_write_tokens": int(cache_summary.get("cache_write_tokens", 0)),
+            "cache_hit_rate": float(cache_summary.get("cache_hit_rate", 0.0)),
             "by_agent": [
-                {"agent_id": aid, "name": aid, "requests": n}
+                {
+                    "agent_id": aid,
+                    "name": aid,
+                    "requests": n,
+                    "tokens": int(agent_token_totals.get(aid, {}).get("tokens", 0)),
+                    "calls": int(agent_token_totals.get(aid, {}).get("calls", 0)),
+                }
                 for aid, n in sorted(by_agent_counter.items(), key=lambda kv: kv[1], reverse=True)
             ],
             "by_model": by_model,
@@ -276,6 +304,9 @@ async def get_usage_stats(
             "total_requests": 0,
             "total_tokens": 0,
             "avg_latency_ms": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cache_hit_rate": 0.0,
             "by_agent": [],
             "by_model": [],
             "daily_trend": [],

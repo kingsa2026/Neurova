@@ -91,6 +91,10 @@ export interface UsageOverview {
     peak_daily_tokens: number
     peak_daily_date: string | null
     longest_session_seconds: number
+    /** B1-5: Prompt Cache 命中/写入 */
+    cache_read_tokens: number
+    cache_write_tokens: number
+    cache_hit_rate: number
     current_streak_days: number
     longest_streak_days: number
     active_days: number
