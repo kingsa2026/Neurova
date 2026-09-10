@@ -54,6 +54,26 @@ from neurova.llm.providers.rate_limiter import (
 
 logger = get_logger(__name__)
 
+# 已知模型版本后缀（L-20）：匹配请求模型时剥掉任一方的这类后缀再比较，
+# 使 "qwen-plus" 能命中客户端名 "qwen-plus-latest"，反之亦然。
+_KNOWN_MODEL_VERSION_SUFFIXES = ("-latest", "-preview")
+
+
+def _strip_model_version_suffix(model: str) -> str:
+    for suffix in _KNOWN_MODEL_VERSION_SUFFIXES:
+        if model.endswith(suffix):
+            return model[: -len(suffix)]
+    return model
+
+
+def _model_matches(client_model: str, requested: str) -> bool:
+    """单源模型匹配（L-20）：相等，或任一方剥掉已知版本后缀后相等。"""
+    if not client_model or not requested:
+        return False
+    if client_model == requested:
+        return True
+    return _strip_model_version_suffix(client_model) == _strip_model_version_suffix(requested)
+
 
 class ModelClient:
     """单个模型的客户端封装"""
@@ -323,7 +343,7 @@ class MultiModelLLMClient:
         # 按模型名称查找
         if model:
             for client in list(self._clients.values()):
-                if client.model == model or client.model.endswith(model):
+                if _model_matches(client.model, model):
                     return client
 
         # 返回当前客户端
@@ -1064,7 +1084,7 @@ class MultiModelLLMClient:
             # 请求按模型名解析时必须命中同名客户端：get_client 找不到目标模型
             # 会静默回落 current/default 客户端（2026-09-09 视觉轮实测：覆盖
             # 模型名被丢弃、请求仍打默认 Kimi 400）。不匹配 → 继续走懒加载。
-            if client and (client.model == model or client.model.endswith(model)):
+            if client and _model_matches(client.model, model):
                 return client
             # 按模型名查找所有服务商
             for provider in self._provider_manager.list_providers():

@@ -1901,7 +1901,10 @@ def get_provider_manager(config_path: Optional[str] = None, scope: Optional[str]
                     )
         return _provider_manager
 
-    key = f"scope:{scope}"
+    # L-19：键纳入 config_path——scope=None 且显式传 config_path 时，旧键固定
+    # "scope:None" 会让不同配置路径错误共享同一实例；scope 相同且未显式传
+    # config_path 时路径由 _config_path_for_scope 确定性派生，既有命中行为不变。
+    key = f"scope:{scope}:{config_path}"
     cached = _provider_managers.get(key)
     if cached is None:
         with _provider_manager_lock:

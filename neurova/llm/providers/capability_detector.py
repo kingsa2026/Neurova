@@ -112,6 +112,7 @@ class CapabilityDetector:
             capabilities_to_probe = list(ModelCapability)
 
         capabilities = {}
+        errors: List[str] = []
 
         for cap in capabilities_to_probe:
             try:
@@ -140,6 +141,7 @@ class CapabilityDetector:
             except Exception as e:
                 logger.warning("Failed to probe %s for %s: %s", cap.value, model_name, str(e))
                 capabilities[cap] = False
+                errors.append(f"{cap.value}: {e}")
 
         elapsed_ms = (time.time() - start_time) * 1000
 
@@ -148,6 +150,7 @@ class CapabilityDetector:
             provider=provider,
             capabilities=capabilities,
             response_time_ms=elapsed_ms,
+            error="; ".join(errors) if errors else None,
         )
 
         logger.info(
@@ -170,14 +173,20 @@ class CapabilityDetector:
                 max_tokens=10,
                 stream=True,
             )
-            # 尝试读取第一个 chunk
-            async for chunk in response:
-                if chunk.choices and chunk.choices[0].delta:
-                    return True
-            return False
+            try:
+                # 尝试读取第一个 chunk
+                async for chunk in response:
+                    if chunk.choices and chunk.choices[0].delta:
+                        return True
+                return False
+            finally:
+                # L-16：读到首个 delta 提前返回时也必须收口 HTTP 流
+                aclose = getattr(response, "aclose", None)
+                if aclose is not None:
+                    await aclose()
         except Exception as e:
             logger.debug("Streaming probe failed: %s", str(e))
-            return False
+            raise
 
     async def _probe_function_calling(self, llm_client: Any, model_name: str) -> bool:
         """探测函数调用能力"""
@@ -213,7 +222,7 @@ class CapabilityDetector:
             return False
         except Exception as e:
             logger.debug("Function calling probe failed: %s", str(e))
-            return False
+            raise
 
     async def _probe_vision(self, llm_client: Any, model_name: str) -> bool:
         """探测视觉能力"""
@@ -238,7 +247,7 @@ class CapabilityDetector:
             return response.choices and response.choices[0].message and response.choices[0].message.content
         except Exception as e:
             logger.debug("Vision probe failed: %s", str(e))
-            return False
+            raise
 
     async def _probe_json_mode(self, llm_client: Any, model_name: str) -> bool:
         """探测 JSON 模式能力"""
@@ -263,7 +272,7 @@ class CapabilityDetector:
             return False
         except Exception as e:
             logger.debug("JSON mode probe failed: %s", str(e))
-            return False
+            raise
 
     async def _probe_code_interpreter(self, llm_client: Any, model_name: str) -> bool:
         """探测代码解释器能力"""
@@ -296,7 +305,7 @@ class CapabilityDetector:
             return False
         except Exception as e:
             logger.debug("Code interpreter probe failed: %s", str(e))
-            return False
+            raise
 
     async def _probe_parallel_function_calling(self, llm_client: Any, model_name: str) -> bool:
         """探测并行函数调用能力"""
@@ -333,7 +342,7 @@ class CapabilityDetector:
             return False
         except Exception as e:
             logger.debug("Parallel function calling probe failed: %s", str(e))
-            return False
+            raise
 
     async def _probe_system_message(self, llm_client: Any, model_name: str) -> bool:
         """探测系统消息能力"""
@@ -353,7 +362,7 @@ class CapabilityDetector:
             return False
         except Exception as e:
             logger.debug("System message probe failed: %s", str(e))
-            return False
+            raise
 
     async def _probe_multi_turn(self, llm_client: Any, model_name: str) -> bool:
         """探测多轮对话能力"""
@@ -376,7 +385,7 @@ class CapabilityDetector:
             return False
         except Exception as e:
             logger.debug("Multi-turn probe failed: %s", str(e))
-            return False
+            raise
 
     def _get_model_info(self, model_name: str) -> Dict[str, Any]:
         """获取模型信息（从模型名推断）"""
@@ -574,8 +583,8 @@ async def detect_capabilities(
     detector = get_capability_detector(timeout=timeout)
     result = await detector.probe(model_name, provider, llm_client)
 
-    # 缓存结果
-    if cache:
+    # 缓存结果（L-15：含探测错误的结果不进长缓存——网络抖动不应被固化为"零能力"）
+    if cache and result.error is None:
         cache.set(result)
 
     return result
