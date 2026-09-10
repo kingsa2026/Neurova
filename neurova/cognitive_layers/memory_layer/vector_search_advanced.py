@@ -29,7 +29,7 @@ except ImportError:
     HAS_FAISS = False
 
 try:
-    pass
+    import numpy as np
 
     HAS_NUMPY = True
 except ImportError:
@@ -381,13 +381,60 @@ class FaissBackend(VectorSearchBackend):
         if HAS_SENTENCE_TRANSFORMERS:
             try:
                 self._model = SentenceTransformer("all-MiniLM-L6-v2")
+                return
             except Exception as e:
-                logger.warning("Failed to load sentence transformer: %s", e)
+                logger.warning("SentenceTransformer 加载失败，降级到 TF-IDF 定长向量: %s", e)
+        # M-08: 模型不可用时不抛出，保持 _model=None，交由 _get_embeddings 降级，
+        # 保证 FaissBackend 始终可用（不再 RuntimeError 使整个后端崩溃）
+        self._model = None
+
+    def _fallback_tokenize(self, text: str) -> List[str]:
+        """M-08 降级嵌入用的轻量分词：英文/数字按词，中文按单字。"""
+        text = text.lower()
+        tokens: List[str] = []
+        buf: List[str] = []
+        for ch in text:
+            if ch.isalnum():
+                buf.append(ch)
+            else:
+                if buf:
+                    tokens.append("".join(buf))
+                    buf = []
+                if "一" <= ch <= "鿿":
+                    tokens.append(ch)
+        if buf:
+            tokens.append("".join(buf))
+        return [t for t in tokens if t]
+
+    def _fallback_embeddings(self, texts: List[str]) -> Any:
+        """M-08 降级：SentenceTransformer 不可用时的 TF-IDF 风格定长稠密向量。
+
+        通过特征哈希将词频投影到固定维度并 L2 归一化，FAISS IndexFlatIP
+        （内积）即近似 cosine 相似度。保证后端始终可用，不再 RuntimeError。
+        """
+        dim = self._dimension
+        result: List[List[float]] = []
+        for text in texts:
+            vec = [0.0] * dim
+            counts = Counter(self._fallback_tokenize(text))
+            if not counts:
+                result.append(vec)
+                continue
+            l1 = float(sum(counts.values())) or 1.0
+            for tok, c in counts.items():
+                h = (hash(tok) & 0x7FFFFFFF) % dim
+                vec[h] += c / l1
+            norm = math.sqrt(sum(v * v for v in vec)) or 1.0
+            result.append([v / norm for v in vec])
+        return np.array(result, dtype="float32")
 
     def _get_embeddings(self, texts: List[str]) -> Any:
-        if self._model and HAS_NUMPY:
+        if self._model is not None and HAS_NUMPY:
             return self._model.encode(texts, normalize_embeddings=True)
-        raise RuntimeError("No embedding model available")
+        if HAS_NUMPY:
+            # M-08: 嵌入模型不可用时降级到 TF-IDF 风格定长向量
+            return self._fallback_embeddings(texts)
+        raise RuntimeError("No embedding backend available (numpy required)")
 
     def add_texts(self, texts: List[str], ids: List[str], metadatas: Optional[List[Dict[str, Any]]] = None) -> int:
         with self._lock:
