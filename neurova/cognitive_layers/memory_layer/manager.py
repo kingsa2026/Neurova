@@ -910,8 +910,11 @@ class MemoryManager:
         memory_type: 按记忆类型过滤（semantic/episodic/procedural/pattern/
         emotional/working，管理页类型页签契约，2026-09-08）；非法值静默不匹配。
         """
-        base = self._agent_memories() if agent_wide else self._scoped_memories()
         with self._lock:
+            # M-06: 基集构造必须在锁内完成——_scoped_memories/_agent_memories 迭代
+            # self._memories.values()，锁外调用会与 remember/forget 的字典增删竞态，
+            # 触发 RuntimeError: dictionary changed size during iteration
+            base = self._agent_memories() if agent_wide else self._scoped_memories()
             self._stats["recall_count"] += 1
             # 审计修复: 检索路径统一按生效三元组过滤 (agent_wide 时基集已
             # 按 agent 口径扩权, 此处不再重复收窄)
@@ -1078,8 +1081,11 @@ class MemoryManager:
         except Exception as e:
             logger.debug("关键词搜索模块不可用，退化为子串匹配: %s", e)
             query_lower = query.lower()
+            # 必须与主路径的 (rank, id) 顺序保持一致，否则下游
+            # `for rank, mid in keyword_hits` 解包后 mid 变成 int，
+            # id_to_memory[mid] 全部 miss，降级路径恒定返回空结果。
             keyword_hits = [
-                (m.id, rank)
+                (rank, m.id)
                 for rank, m in enumerate(memories)
                 if query_lower in m.content.lower()
             ]
@@ -1240,8 +1246,9 @@ class MemoryManager:
             offset: 偏移量
             agent_wide: True=agent 级浏览口径(管理页), False=生效三元组(默认)
         """
-        base = self._agent_memories() if agent_wide else self._scoped_memories()
         with self._lock:
+            # M-06: 基集构造移入锁内（同 recall 修复）
+            base = self._agent_memories() if agent_wide else self._scoped_memories()
             # 审计修复: 读路径默认按生效三元组过滤; agent_wide 基集已按 agent 口径扩权
             mems = base
 
@@ -1368,8 +1375,9 @@ class MemoryManager:
 
     def get_stats(self, agent_wide: bool = False) -> Dict[str, Any]:
         """获取统计信息"""
-        base = self._agent_memories() if agent_wide else self._scoped_memories()
         with self._lock:
+            # M-06: 基集构造移入锁内（同 recall/get_memories 修复）
+            base = self._agent_memories() if agent_wide else self._scoped_memories()
             return {
                 # 审计修复: 统计按生效作用域计数, 不泄漏其他用户的数据量;
                 # agent_wide=True(管理页)按 agent 全量口径计数。

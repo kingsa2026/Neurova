@@ -157,6 +157,11 @@ PARAM_SCHEMAS: List[ParamSchema] = [
     ParamSchema("manager.decay_rate", 1.0, "float", 0.0, 10.0,
                 "衰减速率（保留参数：当前贝叶斯曲线通过曲线因子计算，不直接消费）",
                 desc_key="memorySettings.parammanagerDecayRate"),
+
+    # ---- llm: 生成参数（2026-09-10 自系统设置大模型 tab 迁入；全局默认语义）----
+    ParamSchema("llm.temperature", 0.7, "float", 0.0, 2.0,
+                "全局默认生成温度——Agent 未显式配置温度时使用（agent 表单显式值优先）",
+                desc_key="memorySettings.paramllmTemperature"),
 ]
 
 

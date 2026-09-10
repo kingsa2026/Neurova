@@ -258,13 +258,24 @@ class TemperatureEngine:
         # 计算空闲天数
         if last_accessed:
             try:
-                from datetime import datetime as _dt
+                from datetime import datetime as _dt, timezone as _tz
                 if isinstance(last_accessed, str):
                     last_dt = _dt.fromisoformat(last_accessed)
                 else:
                     last_dt = last_accessed
-                days_idle = max(0.0, (_dt.now() - last_dt).total_seconds() / 86400.0)
-            except (ValueError, TypeError):
+                # M-03 根因修复：last_accessed 来自 Memory.to_dict()，是带
+                # +00:00 的 aware UTC 串；而 _dt.now() 返回 naive 本地时间。
+                # 二者相减抛 TypeError，此前被静默吞掉 → days_idle 回退 0.0 →
+                # 命中下方 `days_idle < 1.0 直接返回`，导致衰减永久失效。
+                # 统一到 aware UTC 后再相减。
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=_tz.utc)
+                days_idle = max(0.0, (_dt.now(_tz.utc) - last_dt).total_seconds() / 86400.0)
+            except (ValueError, TypeError) as e:
+                # 不得静默回退：否则衰减失效完全不可观测。
+                logger.warning(
+                    "last_accessed 解析失败(%s)，回退到传入的 days_idle=%s", e, days_idle
+                )
                 days_idle = max(0.0, days_idle)
         else:
             days_idle = max(0.0, _validate_temp(days_idle, "days_idle"))

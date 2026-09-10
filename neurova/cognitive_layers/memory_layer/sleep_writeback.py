@@ -77,13 +77,39 @@ def write_back_consolidation_result(memory_manager, result: Dict[str, Any]) -> D
                     logger.debug("归档更新失败 (%s): %s", memory.id, e)
             else:
                 try:
-                    memory_manager.update_memory_temperature(
+                    # M-10 根因修复：睡眠写回本应"衰减"温度，原实现却调用
+                    # update_memory_temperature（内部 touch → 升温），与"睡眠衰减"
+                    # 语义相反，叠加 M-03 的衰减失效等于记忆只升不降。改为按 idle
+                    # 时长对当前温度做线性衰减（每闲置 1 天约降 2 度，下限 0）。
+                    import time as _time  # noqa: F401
+
+                    from datetime import datetime as _dt, timezone as _tz
+
+                    cur_temp = float(getattr(memory, "temperature", 50.0) or 50.0)
+                    last_accessed = getattr(memory, "last_accessed_at", None) or getattr(
+                        memory, "last_accessed", None
+                    )
+                    days_idle = 0.0
+                    if last_accessed:
+                        try:
+                            ld = (
+                                _dt.fromisoformat(last_accessed)
+                                if isinstance(last_accessed, str)
+                                else last_accessed
+                            )
+                            if getattr(ld, "tzinfo", None) is None:
+                                ld = ld.replace(tzinfo=_tz.utc)
+                            days_idle = max(0.0, (_dt.now(_tz.utc) - ld).total_seconds() / 86400.0)
+                        except Exception:
+                            days_idle = 0.0
+                    decayed = max(0.0, cur_temp - days_idle * 2.0)
+                    memory_manager.update_memory(
                         memory_id=memory.id,
-                        interaction_type="consolidation",
+                        temperature=decayed,
                     )
                     stats["updated"] += 1
                 except Exception as e:  # noqa: BLE001
-                    logger.debug("温度更新失败 (%s): %s", memory.id, e)
+                    logger.debug("温度衰减更新失败 (%s): %s", memory.id, e)
         except Exception as e:  # noqa: BLE001
             logger.warning("写回单条记忆异常: %s", e)
 

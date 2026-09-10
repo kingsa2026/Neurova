@@ -144,7 +144,10 @@ class PatternMiner:
         logger.info("PatternMiner reset")
 
     def to_skill_template_list(
-        self, min_support: Optional[int] = None, min_success_rate: float = 0.0
+        self,
+        min_support: Optional[int] = None,
+        min_success_rate: float = 0.0,
+        top_n: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         """
         将挖掘出的高频模式导出为 AutoSkillBuilder 可用的格式
@@ -172,6 +175,8 @@ class PatternMiner:
                 }
                 templates.append(template)
 
+        if top_n is not None:
+            templates = templates[:top_n]
         logger.info("Exported %s skill templates", len(templates))
         return templates
 
