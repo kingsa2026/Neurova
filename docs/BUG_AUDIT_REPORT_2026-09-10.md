@@ -605,3 +605,44 @@ const started: PlanSession = res.data.data.session   // res.data={session} → r
 **台账（预存/不修，均有 HEAD 或隔离复现证据）**：`tests/unit/execution/test_tool_engine.py`×7（幽灵 API harness）、`tests/unit/llm`×9（provider 契约错位，根因 `provider.py:446` 收 MagicMock）、`tests/unit/api`×4（agent_package×2/execution_events/mobile_pairing）、`test_auth_system`×1（黑名单结构不匹配）、agent+tools 目录其余 58 failed+14 errors（HEAD 同样失败，含 capability_graph_phase3×21/unified_tool_registry×14 等陈旧 harness）、`test_files_api_security_p0.py` 隔离运行挂起（files_api 域）、`test_memory_source_unification::test_moe_router_reads_persist_db` 偶发顺序 flaky（多轮定向复现未果，疑 MoE 后台索引线程竞态）、console.py:1518 docstring 失实（称支持 Bearer 头实仅 query token）。
 
 **最终回归状态**：agent+tools 当前失败集为 HEAD 基线真子集（零新增，另修复 13 项预存）；cognitive_layers+memory+core 确定性失败清零；llm+api+security 仅剩台账预存 14 项；channels+evolution+sandbox+execution 仅剩台账预存 7 项；前端 vitest 1260/1260 绿 + vue-tsc 零错误。新增回归测试 39 文件（约 150+ 用例）均先红后绿实证。
+
+## 9.7 遗留项处理（第三轮，2026-09-11）
+
+对 9.6 末登记的三条遗留项（S-08 全局白名单 / M-14 其余三项 / S-07 死代码）逐一收口：
+
+### 9.7.1 S-07 死代码删除（用户点名）
+
+- **删除 `neurova/security/auth_system.py` 全文件**（SHA256 单轮 PasswordHasher + 自带 sqlite 的 AuthSystem）：全库 grep 证实零生产引用，仅 `security/__init__.py` 自引用；生产登录走 `neurova/auth/password_hasher.py`（bcrypt 12 轮）。
+- **`security/__init__.py` 导出修正**：删除指向死代码的 `ApprovalMode` 再导出（其与 `tool_guard.py` 的同名枚举值集不同，属遮蔽陷阱）；同时清除指向**不存在模块** `security/api_keys.py` 的 `APIKey` 幽灵导入。
+- **引用面同步清理**：`tests/unit/security/test_security_modules.py` 删除针对死代码的 4 个测试类（UserRole/UserStatus/ApprovalMode/PasswordHasher）；`tests/run_complete_tests.py` 删除 `security.auth_system` 与幽灵 `security.api_keys` 两条注册及方法体；`tests/auth/test_security_integration.py` 移除对从未存在的 `tests/test_security_auth_system.py` 的文件存在断言。
+- **验证**：`neurova.security` 可导入且 `auth_system` ModuleNotFoundError；`tests/unit/security/` 895 passed；`tests/auth/test_security_integration.py` 的 6 失败经 HEAD worktree 比对为预存（Windows tempfile FileExistsError + 空想文件清单），与本次零关联。
+
+### 9.7.2 M-14 其余三项定性收口
+
+调查结论（含放大视角新发现）：
+
+- **`AutoContextUpdater` 本身是孤儿模块**：neurova/ 生产代码零实例化（temperature 衰减虽已真实实现，模块不接线则不运行；生产温度维护实际走 TemperatureEngine.on_access + 睡眠巩固链路）。`auto_context.*` 设置键有 schema/API 但无消费方（暴露未消费，登记为产品决策项）。
+- **`VectorIndexManager` 同为孤儿**：生产零实例化，`MemoryManager` 亦未持有索引管理器属性——`_rebuild_vector_index` 无活后端可接，死接死属假进度。
+- **`cache.py` 已废弃**（shim 到 neurova.core.cache），MemoryManager 无带 TTL 的可清缓存实例——`_cleanup_cache` 无真实清理目标。
+- **`compress_low_value_memories` 语义不同轴**：按低重要性候选 + LLM 语义合并（破坏性），与">N 天旧记忆"不同，且不可由小时级后台循环静默触发。
+
+落地：三个方法保持透明 no-op（计数如实为 0），docstring 写入上述根因定性防止未来重报；`tests/unit/test_auto_context_updater_m14.py` 3 绿。完整激活需产品决策（接线 + 按龄压缩 API + 显式开关）。
+
+### 9.7.3 S-08 全局鉴权白名单机制落地（默认零行为变化）
+
+- **路由鉴权全量清点基线**：静态导入 82 个 endpoint 模块，遍历 `route.dependencies` + `route.dependant.dependencies`：**OPEN(未挂鉴权依赖)=478 / lock=355**，遍布 ~70 模块——证实"是否鉴权靠手写"是系统性问题，一次性 default-deny 会破坏桌面首启/渠道集成/非 axios 消费方。证据入库 `docs/s08_route_auth_baseline_2026-09-11.txt`（生成法见文件头注释，可随时重生成）。
+- **新模块 `neurova/api/global_auth.py`**：纯 ASGI `GlobalAuthMiddleware`（不走 BaseHTTPMiddleware，SSE/流式安全）+ `PUBLIC_EXACT_PATHS` 精确白名单（健康/指标/状态/文档/登录注册验证码/setup-status/找回密码/前端错误上报；**不做前缀扩散**防 `/auth/login-evil` 绕过）+ 三态开关 `NEUROVA_GLOBAL_AUTH`：
+  - `off`（默认，未设置）：完全惰性，零行为变化（只提升不下降）；
+  - `shadow`：非白名单路径匿名访问按路径去重记 INFO（调用面审计取证，enforce 迁移的数据基础）；
+  - `enforce`：白名单外必须持有效 Bearer JWT 或 X-Service-Token，否则 401（信封与 APIError 处理器同形）。
+- **单一事实源**：JWT 校验复用 `auth.verify_access_token`；服务令牌判定从 `get_current_user_or_service` 抽出为 `auth.service_token_matches()` 两方共用（常量时间比较语义不变）。WS scope 直接透传（WS 鉴权由端点自管）；OPTIONS 先于鉴权放行（CORS 预检不受影响）。
+- **接线**：`setup_middleware` 最外层注册（先于限流/日志拒绝未认证请求）。前端 axios 全局带 Bearer + 401 刷新重试，SPA 侧 enforce 就绪。
+- **TDD**：`tests/unit/api/test_global_auth_middleware.py` 17 用例先红后绿（白名单注册表/精确匹配负例/三态行为/有效凭证/服务令牌同契约/WS 透传/OPTIONS）。
+- **live-verify（真实后端两次启动）**：enforce 模式——`/health`、`/api/v1/status`、`/api/v1/auth/setup-status` 公开 200；`/api/v1/agents`、`/api/v1/memory/stats` 无凭证 401（信封正确）；有效 JWT 200；`/api/v1/auth/login` 缺体 422 证到达端点（带体 401 为端点自身的凭证错误响应）；OPTIONS 405（透传到路由，非 401）。off 模式——`/api/v1/agents` 无凭证 200，零行为变化。
+- **enforce 迁移路径**（运维决策，不在本次默认开启）：跑 shadow 收集匿名消费路径 → 补白名单/前端补凭证 → 置 `NEUROVA_GLOBAL_AUTH=enforce`。478 OPEN 的按域收口以基线文件为准分批进行。
+
+### 9.7.4 顺带修复的台账预存项（只提升）
+
+1. **`test_auth_system::TestTokenBlacklist`（台账项）**：101cfb4e 将黑名单改 token→exp Dict（S-21）后遗留测试仍按 set 契约写（`.add/.discard`）→ 按新契约重写（登记/命中/过期惰性清理/移除），绿。
+2. **`test_files_api_security_p0` 隔离挂起（台账项）**：根因 = `_make_upload_file` 的 `AsyncMock(return_value=content)` 永不返回 EOF，`upload_file` 分块循环死循环——mock 不忠实，非端点缺陷；改 `side_effect=[content, b""]` 忠实模拟一次内容 + EOF，挂起消除，5 绿。
+3. 修复后 `tests/unit/api/` 全目录 **4 failed / 1213 passed**，4 失败恰为台账预存集（agent_package×2 / execution_events / mobile_pairing），较此前净减 2 项台账。

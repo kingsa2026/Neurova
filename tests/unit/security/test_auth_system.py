@@ -350,22 +350,36 @@ class TestInvitationCode(unittest.TestCase):
 
 
 class TestTokenBlacklist(unittest.TestCase):
-    """Token 黑名单测试"""
-    
+    """Token 黑名单测试
+
+    契约更新（BUG AUDIT S-21，101cfb4e）：黑名单由无界 set 改为
+    token -> 过期时间戳 dict（惰性清理过期项），本测试同步对齐。
+    """
+
     def test_token_blacklist(self):
-        """测试 Token 黑名单"""
-        from neurova.api.endpoints.auth import _token_blacklist, is_token_blacklisted
-        
+        """测试 Token 黑名单（登记/命中/过期清理/移除）"""
+        import time
+        from neurova.api.endpoints.auth import (
+            _blacklist_token_local,
+            _token_blacklist,
+            is_token_blacklisted,
+        )
+
         # 初始状态
         assert "test_token" not in _token_blacklist
         assert is_token_blacklisted("test_token") is False
-        
-        # 添加到黑名单
-        _token_blacklist.add("test_token")
+
+        # 登记黑名单（无 exp token 走兜底 TTL）
+        _blacklist_token_local("test_token")
         assert is_token_blacklisted("test_token") is True
-        
+
+        # 过期项被惰性清理（S-21 语义）
+        _token_blacklist["expired_token"] = time.time() - 1
+        assert is_token_blacklisted("expired_token") is False
+        assert "expired_token" not in _token_blacklist
+
         # 从黑名单中移除
-        _token_blacklist.discard("test_token")
+        _token_blacklist.pop("test_token", None)
         assert is_token_blacklisted("test_token") is False
 
 
