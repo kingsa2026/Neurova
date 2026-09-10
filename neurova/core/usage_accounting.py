@@ -46,14 +46,21 @@ class TokenUsageAccounting:
         prompt_tokens: int,
         completion_tokens: int,
         estimated: bool = False,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
     ) -> None:
         """记一次 LLM 调用的真实 token 用量。
 
         estimated=True：provider 网关不回传 usage（实测 sensetime 流式恒空）
         时由 tiktoken 估值入账，供对账区分真值/估计值。
+        B1-5（#7342）：cache_read/write_tokens 记 Prompt Cache 命中与写入
+        （OpenAI prompt_tokens_details.cached_tokens / Anthropic
+        cache_creation_input_tokens——由 multi_model_client 提取透传）。
         """
         prompt_tokens = int(prompt_tokens or 0)
         completion_tokens = int(completion_tokens or 0)
+        cache_read_tokens = int(cache_read_tokens or 0)
+        cache_write_tokens = int(cache_write_tokens or 0)
         total = prompt_tokens + completion_tokens
 
         with self._lock:
@@ -65,6 +72,8 @@ class TokenUsageAccounting:
                     "completion_tokens": 0,
                     "total_tokens": 0,
                     "estimated_calls": 0,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
                     "by_provider": {},
                 },
             )
@@ -72,17 +81,22 @@ class TokenUsageAccounting:
             entry["prompt_tokens"] += prompt_tokens
             entry["completion_tokens"] += completion_tokens
             entry["total_tokens"] += total
+            entry["cache_read_tokens"] = entry.get("cache_read_tokens", 0) + cache_read_tokens
+            entry["cache_write_tokens"] = entry.get("cache_write_tokens", 0) + cache_write_tokens
             if estimated:
                 entry["estimated_calls"] = entry.get("estimated_calls", 0) + 1
 
             p_entry = entry["by_provider"].setdefault(
                 provider,
-                {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                 "cache_read_tokens": 0, "cache_write_tokens": 0},
             )
             p_entry["calls"] += 1
             p_entry["prompt_tokens"] += prompt_tokens
             p_entry["completion_tokens"] += completion_tokens
             p_entry["total_tokens"] += total
+            p_entry["cache_read_tokens"] = p_entry.get("cache_read_tokens", 0) + cache_read_tokens
+            p_entry["cache_write_tokens"] = p_entry.get("cache_write_tokens", 0) + cache_write_tokens
 
             self._last_call = {
                 "model": model,
@@ -91,6 +105,8 @@ class TokenUsageAccounting:
                 "completion_tokens": completion_tokens,
                 "total_tokens": total,
                 "estimated": estimated,
+                "cache_read_tokens": cache_read_tokens,
+                "cache_write_tokens": cache_write_tokens,
             }
 
     def last_call(self) -> Optional[Dict[str, Any]]:
@@ -112,6 +128,8 @@ class TokenUsageAccounting:
             "completion_tokens": sum(e["completion_tokens"] for e in by_model.values()),
             "total_tokens": sum(e["total_tokens"] for e in by_model.values()),
             "estimated_calls": sum(e.get("estimated_calls", 0) for e in by_model.values()),
+            "cache_read_tokens": sum(e.get("cache_read_tokens", 0) for e in by_model.values()),
+            "cache_write_tokens": sum(e.get("cache_write_tokens", 0) for e in by_model.values()),
         }
         return {
             "by_model": by_model,

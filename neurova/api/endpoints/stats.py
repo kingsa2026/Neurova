@@ -271,6 +271,10 @@ def _empty_usage_overview(days: int, scope: str) -> Dict[str, Any]:
             "current_streak_days": 0,
             "longest_streak_days": 0,
             "active_days": 0,
+            # B1-5（#7342）：Prompt Cache 命中/写入与命中率
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "cache_hit_rate": 0.0,
         },
         "heatmap": [
             {"date": (start + timedelta(days=i)).isoformat(), "tokens": 0, "calls": 0}
@@ -357,6 +361,12 @@ async def get_usage_overview(
                 active_dates.add(created)
         current_streak, longest_streak = compute_streaks(active_dates, today)
 
+        cache_summary: Dict[str, Any] = {}
+        try:
+            cache_summary = history.cache_totals(user_id=user_id)
+        except Exception:  # noqa: BLE001 — cache 汇总失败不影响主看板
+            cache_summary = {}
+
         longest_session_seconds = 0
         for s in sessions:
             try:
@@ -380,6 +390,14 @@ async def get_usage_overview(
                 "current_streak_days": current_streak,
                 "longest_streak_days": longest_streak,
                 "active_days": len(active_dates),
+                # B1-5（#7342）：Prompt Cache 命中/写入与命中率
+                **(
+                    {
+                        "cache_read_tokens": int(cache_summary.get("cache_read_tokens", 0)),
+                        "cache_write_tokens": int(cache_summary.get("cache_write_tokens", 0)),
+                        "cache_hit_rate": float(cache_summary.get("cache_hit_rate", 0.0)),
+                    }
+                ),
             },
             "heatmap": heatmap,
             "trends": trends,
