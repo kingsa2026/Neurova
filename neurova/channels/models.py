@@ -72,6 +72,11 @@ class UnifiedMessage:
     raw_message: Optional[Any] = None
     attachments: Optional[List[Dict[str, Any]]] = None
     metadata: Optional[Dict[str, Any]] = None
+    # 全局用户标识（跨渠道唯一，约定格式 "渠道:原始用户ID"）。
+    # BUG AUDIT C-01: 该字段此前缺失，而 discord/websocket/sip/qq/qqbot/mqtt
+    # 7 个适配器构造 UnifiedMessage 时都传 global_user_id=...，
+    # 导致消息解析 100% 抛 TypeError。
+    global_user_id: Optional[str] = None
 
     def __post_init__(self):
         if self.timestamp is None:

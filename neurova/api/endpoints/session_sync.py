@@ -21,9 +21,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
+from neurova.api.auth import verify_access_token
+from neurova.api.deps import get_current_user
 from neurova.sync.session_sync_manager import (
     EventType,
     SessionEvent,
@@ -110,7 +112,12 @@ _ws_connections: Dict[str, List[WebSocketConnection]] = {}
 
 
 @router.websocket("/ws/{session_id}")
-async def websocket_sync(websocket: WebSocket, session_id: str, channel_type: str = "web", user_id: str = "anonymous"):
+async def websocket_sync(
+    websocket: WebSocket,
+    session_id: str,
+    channel_type: str = "web",
+    token: str = Query(default=""),
+):
     """
     WebSocket 实时同步连接
 
@@ -121,9 +128,16 @@ async def websocket_sync(websocket: WebSocket, session_id: str, channel_type: st
     - 发送：{"type": "user_message", "content": "..."}
     - 接收：SessionEvent JSON
 
-    session_id 不存在时自动注册（upsert 语义），与 chat_pipeline 的
-    register_or_create_session 设计一致。user_id 用于隔离，默认 "anonymous"。
+    BUG AUDIT S-03: 此前无任何鉴权即 accept，任意访客可订阅/读取/注入
+    任意 session_id 的全部对话事件。现要求 ?token=<JWT>，校验失败关闭 4401；
+    user_id 从 token 主体派生（不再由客户端随意指定，杜绝 IDOR）。
     """
+    payload = verify_access_token(token) if token else None
+    if not payload:
+        await websocket.close(code=4401)
+        return
+    user_id = payload.get("neuser_id") or payload.get("user_id") or payload.get("sub") or "anonymous"
+
     await websocket.accept()
 
     manager = get_session_sync_manager()
@@ -259,19 +273,25 @@ async def websocket_sync(websocket: WebSocket, session_id: str, channel_type: st
 
 
 @router.post("/sessions", response_model=SessionResponse)
-async def create_session(body: CreateSessionRequest):
+async def create_session(
+    body: CreateSessionRequest, current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """创建同步会话"""
     manager = get_session_sync_manager()
 
+    # BUG AUDIT S-03: 会话归属以 token 身份为准，避免客户端伪造 user_id 越权
+    owner_id = current_user.get("user_id") or body.user_id
     session = manager.create_session(
-        user_id=body.user_id, agent_id=body.agent_id, external_id=body.external_id, metadata=body.metadata
+        user_id=owner_id, agent_id=body.agent_id, external_id=body.external_id, metadata=body.metadata
     )
 
     return SessionResponse(**session.to_dict())
 
 
 @router.get("/sessions/{session_id}", response_model=SessionResponse)
-async def get_session(session_id: str):
+async def get_session(
+    session_id: str, current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """获取会话信息"""
     manager = get_session_sync_manager()
     session = manager.get_session(session_id)
@@ -283,7 +303,9 @@ async def get_session(session_id: str):
 
 
 @router.get("/sessions/{session_id}/history")
-async def get_session_history(session_id: str, limit: int = 100):
+async def get_session_history(
+    session_id: str, limit: int = 100, current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """获取会话历史"""
     manager = get_session_sync_manager()
     session = manager.get_session(session_id)
@@ -297,7 +319,9 @@ async def get_session_history(session_id: str, limit: int = 100):
 
 
 @router.post("/sessions/{session_id}/messages")
-async def send_message(session_id: str, body: SendMessageRequest):
+async def send_message(
+    session_id: str, body: SendMessageRequest, current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """
     发送消息（REST 降级方案）
 

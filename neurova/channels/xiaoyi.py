@@ -36,8 +36,9 @@ class XiaoYiAdapter(ChannelAdapter):
     channel = "xiaoyi"
 
     def __init__(self):
-        super().__init__()
-        self.config: Optional[ChannelConfig] = None
+        # BUG AUDIT C-02: 此前 super().__init__() 不传 config，基类要求
+        # ChannelConfig 必填 → 实例化即 TypeError；且 self.config 被置 None。
+        super().__init__(ChannelConfig(channel_type="xiaoyi"))
         self.authenticated = False
         self.ws = None
         self.bot_prefix = "@bot"
@@ -63,8 +64,8 @@ class XiaoYiAdapter(ChannelAdapter):
         """
         try:
             self.config = ChannelConfig(
-                channel="xiaoyi",
-                config={
+                channel_type="xiaoyi",
+                extra={
                     "access_key": config.get("access_key"),
                     "secret_key": config.get("secret_key"),
                     "agent_id": config.get("agent_id"),
@@ -78,9 +79,9 @@ class XiaoYiAdapter(ChannelAdapter):
             # 验证必需参数
             if not all(
                 [
-                    self.config.config.get("access_key"),
-                    self.config.config.get("secret_key"),
-                    self.config.config.get("agent_id"),
+                    self.config.extra.get("access_key"),
+                    self.config.extra.get("secret_key"),
+                    self.config.extra.get("agent_id"),
                 ]
             ):
                 logger.error("小艺认证失败: AK, SK, Agent ID 不能为空")

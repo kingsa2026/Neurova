@@ -254,17 +254,29 @@ class ChannelManager:
             # 丢消息。enqueue 成功 → 立即同步排水该消息（await，时序与旧
             # 直发路径一致，分发结果经 ack/nack 落账）；队列不可用（DB 故障）
             # → fail-open 旧直发路径。重启遗留消息由 start_drain 后台兜底。
+            # C-07: enqueue 返回 False 仅表示"重复消息去重"，直接丢弃；
+            # DB 故障抛 IngressQueueUnavailable 才 fail-open 直发——
+            # 否则平台重发的消息会被去重后再次直发（双投递）。
             queue = self._get_ingress_queue()
-            if queue is not None and queue.enqueue(message):
-                ev = queue.claim(worker="inline")
-                if ev is not None:
-                    try:
-                        await self._dispatch_message(ev.message)
-                    except Exception as e:  # noqa: BLE001 - 分发失败 nack 重试
-                        queue.nack(ev.event_id, str(e))
-                    else:
-                        queue.ack(ev.event_id)
-                return
+            if queue is not None:
+                from neurova.channels.channel_ingress_queue import IngressQueueUnavailable
+
+                try:
+                    enqueued = queue.enqueue(message)
+                except IngressQueueUnavailable as e:
+                    logger.warning("Ingress queue unavailable, fail-open to direct dispatch: %s", e)
+                else:
+                    if not enqueued:
+                        return  # 重复消息（tombstone 去重），不再直发
+                    ev = queue.claim(worker="inline")
+                    if ev is not None:
+                        try:
+                            await self._dispatch_message(ev.message)
+                        except Exception as e:  # noqa: BLE001 - 分发失败 nack 重试
+                            queue.nack(ev.event_id, str(e))
+                        else:
+                            queue.ack(ev.event_id)
+                    return
 
             await self._dispatch_message(message)
 
@@ -419,7 +431,9 @@ class ChannelManager:
         """停止所有适配器"""
         self._running = False
         # P0-5：先停排水循环再断适配器（在途消息 nack 回列，重启续投）
-        queue = getattr(self, "_ingress_queue", None)
+        # C-06: _get_ingress_queue() 把实例存到 self.ingress_queue（无下划线），
+        # 此处此前读 _ingress_queue 恒 None → 排水任务永不停止、持续持有 DB 连接
+        queue = getattr(self, "ingress_queue", None)
         if queue is not None:
             try:
                 await queue.stop_drain()

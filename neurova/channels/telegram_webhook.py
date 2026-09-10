@@ -44,6 +44,15 @@ class TelegramWebhookMixin:
         return None
 
     def verify_webhook_signature(self: Any, headers: Dict) -> bool:
+        # BUG AUDIT C-10: 此前 _webhook_secret 为空时直接 return True → 任何人
+        # 可伪造 Webhook 推送。改为 fail-closed：无密钥时拒绝（返回 False）。
         if not self._webhook_secret:
-            return True
-        return headers.get("X-Telegram-Bot-Api-Secret-Token", "") == self._webhook_secret
+            logger.warning("Telegram Webhook 未配置 _webhook_secret，拒绝未校验的推送")
+            return False
+        # 恒定时间比较，防时序攻击探测 secret（同 S-20）
+        import hmac
+
+        return hmac.compare_digest(
+            str(headers.get("X-Telegram-Bot-Api-Secret-Token", "")).encode("utf-8", "ignore"),
+            str(self._webhook_secret).encode("utf-8"),
+        )

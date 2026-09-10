@@ -3,7 +3,7 @@ from __future__ import annotations
 from neurova.core.logger import get_logger
 from typing import Any, Dict
 
-from neurova.channels import ChannelAdapter, MessageChannel
+from neurova.channels import ChannelAdapter, ChannelConfig, MessageChannel
 
 from neurova.channels.telegram_api_client import TelegramAPIMixin
 from neurova.channels.telegram_sender import TelegramSenderMixin
@@ -43,6 +43,10 @@ class TelegramAdapter(
         return MessageChannel.TELEGRAM
 
     def __init__(self):
+        # BUG AUDIT C-03: 此前未调用 super().__init__(config)，导致
+        # register_adapter() 读取 adapter.channel_type / adapter.config 时
+        # AttributeError: 'TelegramAdapter' object has no attribute 'config'。
+        super().__init__(ChannelConfig(channel_type="telegram"))
         self.bot_token = ""
         self._initialized = False
 

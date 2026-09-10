@@ -164,11 +164,15 @@ class WeComAdapter(ChannelAdapter):
             encrypt = root.findtext("Encrypt", "") or ""
 
             # 验证签名: msg_signature = SHA1(sort(token, timestamp, nonce, encrypt))
-            if self._callback_token:
-                signature = _wecom_callback_signature(self._callback_token, timestamp, nonce, encrypt)
-                if signature != msg_signature:
-                    logger.warning("WeCom callback signature verification failed")
-                    return None
+            # BUG AUDIT C-09: 此前当 _callback_token 为空时跳过验签 → 任何人可伪造回调。
+            # 改为 fail-closed：无回调密钥时一律拒绝，避免未授权回调被处理。
+            if not self._callback_token:
+                logger.warning("WeCom 回调未配置 _callback_token，拒绝处理回调（fail-closed）")
+                return None
+            signature = _wecom_callback_signature(self._callback_token, timestamp, nonce, encrypt)
+            if signature != msg_signature:
+                logger.warning("WeCom callback signature verification failed")
+                return None
 
             to_user_name = root.findtext("ToUserName", "")
             from_user = root.findtext("FromUserName", "")

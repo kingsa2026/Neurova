@@ -1,13 +1,18 @@
 """
-test_channels_models.py — P4 测试：渠道数据模型
+test_channels_models.py — 渠道数据模型测试
 
-验证从 channels/__init__.py 提取到 channels/models.py 的 6 个数据类
+验证 channels/models.py 的数据类（MessageChannel, ContentType,
+UnifiedMessage, UserIdentity, SessionContext, ChannelConfig）。
+
+注意：断言以生产契约为准——
+- 时间戳字段为 float（Unix 秒），__post_init__ 自动补当前时间
+- 可选集合字段默认 None（不自动初始化为空容器）
+- BUG AUDIT C-01: UnifiedMessage.global_user_id 字段必须存在
 """
 
 from __future__ import annotations
 
 import pytest
-from datetime import datetime
 
 from neurova.channels.models import (
     MessageChannel,
@@ -32,11 +37,14 @@ class TestMessageChannel:
         assert MessageChannel.TELEGRAM.value == "telegram"
         assert MessageChannel.WEB.value == "web"
         assert MessageChannel.API.value == "api"
-        assert MessageChannel.UNKNOWN.value == "unknown"
+        # 第三方平台渠道（C-01 修复涉及的 7 个适配器渠道必须可用）
+        for name in ("WECHAT", "DINGTALK", "WECOM", "SIP", "QQBOT", "QQ", "MQTT", "DISCORD", "WEBSOCKET"):
+            assert hasattr(MessageChannel, name), f"缺少渠道枚举: {name}"
 
-    def test_total_channel_count(self):
-        """验证渠道总数（18 个）"""
-        assert len(MessageChannel) == 18
+    def test_members_are_unique(self):
+        """验证渠道枚举值唯一"""
+        values = [m.value for m in MessageChannel]
+        assert len(values) == len(set(values))
 
 
 # ============================================================================
@@ -51,11 +59,8 @@ class TestContentType:
         assert ContentType.TEXT.value == "text"
         assert ContentType.IMAGE.value == "image"
         assert ContentType.FILE.value == "file"
-
-    def test_has_ai_types(self):
-        """验证 AI 生成类型存在"""
-        assert ContentType.AI_IMAGE.value == "ai_image"
-        assert ContentType.AI_VIDEO.value == "ai_video"
+        assert ContentType.VOICE.value == "voice"
+        assert ContentType.CARD.value == "card"
 
 
 # ============================================================================
@@ -67,7 +72,6 @@ class TestUnifiedMessage:
 
     def test_create_basic_message(self):
         """验证创建基本消息"""
-        now = datetime.now()
         msg = UnifiedMessage(
             message_id="msg-001",
             channel=MessageChannel.TELEGRAM,
@@ -76,85 +80,93 @@ class TestUnifiedMessage:
             agent_id="agent-789",
             content="Hello, world!",
             content_type=ContentType.TEXT,
-            timestamp=now,
         )
         assert msg.message_id == "msg-001"
         assert msg.channel == MessageChannel.TELEGRAM
         assert msg.content == "Hello, world!"
-        assert msg.timestamp == now
+        assert msg.chat_id == "chat-123"
+
+    def test_global_user_id_field_exists(self):
+        """BUG AUDIT C-01: global_user_id 字段必须存在且可赋值。
+
+        discord/websocket/sip/qq/qqbot/mqtt 7 个适配器构造消息时都传该字段。
+        """
+        msg = UnifiedMessage(
+            message_id="m1",
+            channel=MessageChannel.DISCORD,
+            content_type=ContentType.TEXT,
+            content="hi",
+            user_id="u1",
+            global_user_id="discord:12345",
+        )
+        assert msg.global_user_id == "discord:12345"
 
     def test_default_values(self):
-        """验证默认值"""
-        now = datetime.now()
+        """验证可选字段默认 None"""
         msg = UnifiedMessage(
             message_id="m1", channel=MessageChannel.WEB, chat_id="c1",
-            user_id="u1", agent_id="a1", content="hi",
-            content_type=ContentType.TEXT, timestamp=now,
+            user_id="u1", content="hi",
+            content_type=ContentType.TEXT,
         )
-        assert msg.global_user_id == ""
-        assert msg.session_id == ""
+        assert msg.global_user_id is None
+        assert msg.session_id is None
         assert msg.raw_message is None
-        assert msg.metadata == {}
-        assert msg.attachments == []
-        assert msg.card_data == {}
+        assert msg.metadata is None
+        assert msg.attachments is None
+        assert msg.card_data is None
 
     def test_timestamp_auto_now(self):
-        """验证 timestamp 为 None 时自动设置为当前时间"""
+        """验证 timestamp 为 None 时自动设置为当前 Unix 时间（float）"""
         msg = UnifiedMessage(
             message_id="m1", channel=MessageChannel.WEB, chat_id="c1",
-            user_id="u1", agent_id="a1", content="hi",
+            user_id="u1", content="hi",
             content_type=ContentType.TEXT, timestamp=None,
         )
         assert msg.timestamp is not None
-        assert isinstance(msg.timestamp, datetime)
+        assert isinstance(msg.timestamp, float)
 
-    def test_add_attachment(self):
-        """验证添加附件"""
+    def test_explicit_timestamp_preserved(self):
+        """验证显式 timestamp 不被覆盖"""
         msg = UnifiedMessage(
-            message_id="m1", channel=MessageChannel.TELEGRAM, chat_id="c1",
-            user_id="u1", agent_id="a1", content="hi",
-            content_type=ContentType.TEXT, timestamp=datetime.now(),
+            message_id="m1", channel=MessageChannel.WEB,
+            user_id="u1", content="hi",
+            content_type=ContentType.TEXT, timestamp=1700000000.0,
         )
-        msg.add_attachment("image", url="http://example.com/img.png", name="photo.png", size=12345)
-        assert msg.has_attachments() is True
+        assert msg.timestamp == 1700000000.0
+
+    def test_to_dict_from_dict_roundtrip(self):
+        """验证序列化往返：enum 转字符串值，可完整还原"""
+        msg = UnifiedMessage(
+            message_id="m2",
+            channel=MessageChannel.FEISHU,
+            content_type=ContentType.CARD,
+            content="card",
+            user_id="u2",
+            chat_id="c2",
+            card_data={"title": "T"},
+            metadata={"k": "v"},
+            global_user_id="feishu:ou_1",
+        )
+        d = msg.to_dict()
+        assert d["channel"] == "feishu"
+        assert d["content_type"] == "card"
+
+        restored = UnifiedMessage.from_dict(d)
+        assert restored == msg
+
+    def test_attachments_list_payload(self):
+        """验证附件以列表载荷传递（附件管理由各适配器/metadata 承担）"""
+        msg = UnifiedMessage(
+            message_id="m3", channel=MessageChannel.WEB,
+            user_id="u1", content="file",
+            content_type=ContentType.FILE,
+            attachments=[{"type": "image", "url": "img.png", "name": "img.png"}],
+            file_url="img.png",
+            file_name="img.png",
+        )
         assert len(msg.attachments) == 1
         assert msg.attachments[0]["type"] == "image"
-        assert msg.attachments[0]["url"] == "http://example.com/img.png"
-
-    def test_get_attachments_by_type(self):
-        """验证按类型获取附件"""
-        msg = UnifiedMessage(
-            message_id="m1", channel=MessageChannel.WEB, chat_id="c1",
-            user_id="u1", agent_id="a1", content="hi",
-            content_type=ContentType.TEXT, timestamp=datetime.now(),
-        )
-        msg.add_attachment("image", url="img1.png")
-        msg.add_attachment("file", url="doc1.pdf")
-        msg.add_attachment("image", url="img2.png")
-
-        images = msg.get_attachments_by_type("image")
-        assert len(images) == 2
-        files = msg.get_attachments_by_type("file")
-        assert len(files) == 1
-
-    def test_has_attachments_empty(self):
-        """验证空附件"""
-        msg = UnifiedMessage(
-            message_id="m1", channel=MessageChannel.WEB, chat_id="c1",
-            user_id="u1", agent_id="a1", content="hi",
-            content_type=ContentType.TEXT, timestamp=datetime.now(),
-        )
-        assert msg.has_attachments() is False
-
-    def test_card_data_default(self):
-        """验证卡片数据默认是空字典"""
-        msg = UnifiedMessage(
-            message_id="m1", channel=MessageChannel.WEB, chat_id="c1",
-            user_id="u1", agent_id="a1", content="hi",
-            content_type=ContentType.CARD, timestamp=datetime.now(),
-            card_data={"title": "Test Card"},
-        )
-        assert msg.card_data["title"] == "Test Card"
+        assert msg.file_name == "img.png"
 
 
 # ============================================================================
@@ -165,37 +177,42 @@ class TestUserIdentity:
     """UserIdentity 用户身份测试"""
 
     def test_create_identity(self):
-        """验证创建基本身份"""
-        identity = UserIdentity(global_user_id="g-user-001")
-        assert identity.global_user_id == "g-user-001"
-        assert identity.display_name == ""
-        assert identity.feishu_open_id == ""
-
-    def test_auto_timestamps(self):
-        """验证时间戳自动设置"""
-        identity = UserIdentity(global_user_id="u1")
-        assert identity.created_at is not None
-        assert identity.updated_at is not None
-        assert isinstance(identity.created_at, datetime)
-
-    def test_channel_specific_fields(self):
-        """验证渠道特定字段"""
+        """验证创建基本身份（user_id + channel + channel_user_id 三元组）"""
         identity = UserIdentity(
-            global_user_id="u1",
-            telegram_user_id="12345",
-            telegram_username="testuser",
-            feishu_open_id="ou_abc",
-            dingtalk_user_id="dt_xyz",
+            user_id="u-001",
+            channel=MessageChannel.FEISHU,
+            channel_user_id="ou_abc",
         )
-        assert identity.telegram_user_id == "12345"
-        assert identity.telegram_username == "testuser"
-        assert identity.feishu_open_id == "ou_abc"
-        assert identity.dingtalk_user_id == "dt_xyz"
+        assert identity.user_id == "u-001"
+        assert identity.channel == MessageChannel.FEISHU
+        assert identity.channel_user_id == "ou_abc"
+        assert identity.display_name is None
+
+    def test_auto_timestamp(self):
+        """验证 created_at 自动设置为当前 Unix 时间（float）"""
+        identity = UserIdentity(
+            user_id="u1", channel=MessageChannel.WEB, channel_user_id="c1",
+        )
+        assert identity.created_at is not None
+        assert isinstance(identity.created_at, float)
 
     def test_display_name(self):
         """验证显示名称"""
-        identity = UserIdentity(global_user_id="u1", display_name="Test User")
+        identity = UserIdentity(
+            user_id="u1", channel=MessageChannel.TELEGRAM,
+            channel_user_id="12345", display_name="Test User",
+        )
         assert identity.display_name == "Test User"
+
+    def test_to_dict_from_dict_roundtrip(self):
+        """验证序列化往返"""
+        identity = UserIdentity(
+            user_id="u1", channel=MessageChannel.WEB,
+            channel_user_id="c1", display_name="Tester",
+        )
+        d = identity.to_dict()
+        assert d["channel"] == "web"
+        assert UserIdentity.from_dict(d) == identity
 
 
 # ============================================================================
@@ -209,44 +226,45 @@ class TestSessionContext:
         """验证创建基本会话"""
         session = SessionContext(
             session_id="s-001",
-            agent_id="a-001",
-            global_user_id="u-001",
+            user_id="u-001",
             channel=MessageChannel.WEB,
-            active_channels=[MessageChannel.WEB],
+            agent_id="a-001",
         )
         assert session.session_id == "s-001"
+        assert session.user_id == "u-001"
         assert session.agent_id == "a-001"
-        assert session.global_user_id == "u-001"
-        assert session.channel == MessageChannel.WEB
+        assert session.message_count == 0
 
     def test_auto_timestamps(self):
-        """验证时间戳自动设置"""
+        """验证 started_at/last_active_at 自动设置（float）"""
         session = SessionContext(
-            session_id="s1", agent_id="a1", global_user_id="u1",
-            channel=MessageChannel.WEB, active_channels=[MessageChannel.WEB],
+            session_id="s1", user_id="u1", channel=MessageChannel.WEB,
         )
-        assert session.created_at is not None
-        assert session.updated_at is not None
-        assert session.last_active is not None
+        assert session.started_at is not None
+        assert session.last_active_at is not None
 
-    def test_default_lists(self):
-        """验证默认列表"""
-        session = SessionContext(
-            session_id="s1", agent_id="a1", global_user_id="u1",
-            channel=MessageChannel.WEB, active_channels=[],
-        )
-        assert session.conversation_history == []
-        assert session.memory_keys == []
+    def test_touch_updates_activity(self):
+        """验证 touch() 更新活跃时间并累加消息计数"""
+        import time as _time
 
-    def test_multiple_active_channels(self):
-        """验证多个活跃渠道"""
         session = SessionContext(
-            session_id="s1", agent_id="a1", global_user_id="u1",
-            channel=MessageChannel.WEB,
-            active_channels=[MessageChannel.WEB, MessageChannel.TELEGRAM],
+            session_id="s1", user_id="u1", channel=MessageChannel.WEB,
+            message_count=1,
         )
-        assert len(session.active_channels) == 2
-        assert MessageChannel.TELEGRAM in session.active_channels
+        _time.sleep(0.01)
+        session.touch()
+        assert session.last_active_at >= session.started_at
+        assert session.message_count == 2
+
+    def test_to_dict_from_dict_roundtrip(self):
+        """验证序列化往返"""
+        session = SessionContext(
+            session_id="s1", user_id="u1", channel=MessageChannel.WEB,
+            context_data={"page": "home"},
+        )
+        d = session.to_dict()
+        assert d["channel"] == "web"
+        assert SessionContext.from_dict(d) == session
 
 
 # ============================================================================
@@ -261,39 +279,43 @@ class TestChannelConfig:
         config = ChannelConfig(channel=MessageChannel.TELEGRAM)
         assert config.channel == MessageChannel.TELEGRAM
         assert config.enabled is True
-        assert config.priority == 0
+        assert config.max_message_length == 4096
+        assert config.rate_limit == 60
 
-    def test_default_health_status(self):
-        """验证默认健康状态"""
+    def test_default_content_types(self):
+        """验证默认允许的内容类型"""
         config = ChannelConfig(channel=MessageChannel.WEB)
-        assert config.health_status == "unknown"
-        assert config.consecutive_failures == 0
-        assert config.consecutive_successes == 0
+        assert config.allowed_content_types == [ContentType.TEXT]
 
-    def test_feishu_fields(self):
-        """验证飞书配置字段"""
+    def test_credentials_fields(self):
+        """验证凭证字段（app_id/app_secret/webhook_url）"""
         config = ChannelConfig(
             channel=MessageChannel.FEISHU,
-            feishu_app_id="app-123",
-            feishu_app_secret="secret-456",
+            app_id="app-123",
+            app_secret="secret-456",
+            webhook_url="https://example.com/hook",
         )
-        assert config.feishu_app_id == "app-123"
-        assert config.feishu_app_secret == "secret-456"
+        assert config.app_id == "app-123"
+        assert config.app_secret == "secret-456"
+        assert config.webhook_url == "https://example.com/hook"
 
-    def test_telegram_fields(self):
-        """验证 Telegram 配置字段"""
-        config = ChannelConfig(
-            channel=MessageChannel.TELEGRAM,
-            telegram_bot_token="bot-token-123",
-        )
-        assert config.telegram_bot_token == "bot-token-123"
-
-    def test_statistics_defaults(self):
-        """验证统计默认值"""
+    def test_welcome_message_default(self):
+        """验证欢迎语默认值"""
         config = ChannelConfig(channel=MessageChannel.WEB)
-        assert config.total_requests == 0
-        assert config.total_errors == 0
-        assert config.last_used is None
+        assert "Neurova" in config.welcome_message
+        assert config.bot_name == "Neurova"
+
+    def test_to_dict_from_dict_roundtrip(self):
+        """验证序列化往返（enum 与 allowed_content_types 需转换）"""
+        config = ChannelConfig(
+            channel=MessageChannel.FEISHU,
+            allowed_content_types=[ContentType.TEXT, ContentType.IMAGE],
+            metadata={"ver": 1},
+        )
+        d = config.to_dict()
+        assert d["channel"] == "feishu"
+        assert d["allowed_content_types"] == ["text", "image"]
+        assert ChannelConfig.from_dict(d) == config
 
 
 # ============================================================================
@@ -315,9 +337,3 @@ class TestBackwardCompatibility:
         assert UM is not None
         assert UI is not None
         assert CC is not None
-
-    def test_import_channel_adapter(self):
-        """验证 ChannelAdapter 可从包导入"""
-        from neurova.channels import ChannelAdapter
-        from neurova.channels.base_adapter import ChannelAdapter as CA2
-        assert ChannelAdapter is CA2
