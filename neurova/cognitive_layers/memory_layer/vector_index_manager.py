@@ -122,6 +122,9 @@ class VectorIndexManager:
         # 操作队列
         self._queue: List[IndexOperation] = []
         self._queue_event = threading.Event()
+        # M-24: 已被 worker 取出、处理中的操作数（批次弹出时 +1, 处理完 -1）——
+        # wait_for_completion 只看队列会漏掉 in-flight 批次而过早返回 True
+        self._in_flight = 0
 
         # 状态
         self._state = self._load_state()
@@ -191,7 +194,12 @@ class VectorIndexManager:
             try:
                 # 等待新操作或超时
                 self._queue_event.wait(timeout=1.0)
-                self._queue_event.clear()
+                # M-24 修复: 仅在锁内确认队列为空时才 clear —— 多 worker 下
+                # 先到者无条件 clear 会丢掉其他 worker 尚未消费的唤醒。
+                # 1s 轮询保留作最终兜底。
+                with self._lock:
+                    if not self._queue:
+                        self._queue_event.clear()
 
                 if not self._running:
                     break
@@ -203,6 +211,8 @@ class VectorIndexManager:
                     self._queue.sort(key=lambda op: -op.priority)
                     batch = self._queue[: self._batch_size]
                     self._queue = self._queue[self._batch_size :]
+                    # M-24: 取批即计入 in-flight, 使 wait_for_completion 可感知处理中批次
+                    self._in_flight += len(batch)
 
                 for op in batch:
                     if not self._running:
@@ -234,6 +244,8 @@ class VectorIndexManager:
                 else:
                     self._state.failed_count += 1
                 self._state.pending_count = max(0, self._state.pending_count - 1)
+                # M-24: 操作处理完成, in-flight 递减
+                self._in_flight = max(0, self._in_flight - 1)
 
             return success
 
@@ -242,6 +254,7 @@ class VectorIndexManager:
             with self._lock:
                 self._state.failed_count += 1
                 self._state.pending_count = max(0, self._state.pending_count - 1)
+                self._in_flight = max(0, self._in_flight - 1)
             return False
 
     # ── 公共接口 ──
@@ -385,11 +398,15 @@ class VectorIndexManager:
             return len(self._queue)
 
     def wait_for_completion(self, timeout: float = 30.0) -> bool:
-        """等待所有操作完成"""
+        """等待所有操作完成
+
+        M-24 修复: 原实现只查 `not self._queue`, 而 worker 取批时已把批次弹出
+        （in-flight 不可见）→ 处理中即过早返回 True。现同时要求 in-flight 归零。
+        """
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             with self._lock:
-                if not self._queue:
+                if not self._queue and self._in_flight <= 0:
                     return True
             time.sleep(0.1)
         return False

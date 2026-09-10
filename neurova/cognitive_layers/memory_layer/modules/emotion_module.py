@@ -192,6 +192,8 @@ class EmotionModule:
             memory_id: 记忆ID
             emotion: 情感状态
         """
+        # M-23 修复: 锁内只更新内存态 —— 原 `_save_to_db`（sqlite 写 IO）在
+        # `with self._lock:` 内调用, 持锁做 DB IO 会阻塞 get_emotion 等并发读。
         with self._lock:
             # 检查是否触发情感保护（高强度负面情感）
             # Bug 14 修复: 使用公开属性 emotional_protection_threshold(可被 RSI 调整),
@@ -200,7 +202,8 @@ class EmotionModule:
                 self._protection_triggered += 1
 
             self._memory_emotions[memory_id] = emotion
-            self._save_to_db(memory_id, emotion)
+        # 落盘在锁外执行（内存态为权威读取源, 持久化为镜像）
+        self._save_to_db(memory_id, emotion)
 
     def get_emotion(self, memory_id: str) -> Optional[EmotionState]:
         """获取记忆的情感状态"""

@@ -23,6 +23,12 @@ from typing import Any, Dict, List, Optional
 
 logger = get_logger(__name__)
 
+# M-13: 插件通道挂起曾永久阻塞召回 —— 协程线程 join 与 gather 均无超时。
+# gather 层统一走 recall 链路 self.timeout_seconds（与 _phase1_multichannel_recall
+# 的 as_completed(timeout=) 先例同口径）；此处为线程 join 的模块级兜底值。
+_COROUTINE_JOIN_TIMEOUT_SECONDS = 12.0
+_PLUGIN_RECALL_JOIN_GRACE_SECONDS = 5.0
+
 
 # ────── Enums ──────
 
@@ -767,15 +773,20 @@ class NeurovaRecallEngine:
             return []
 
     @staticmethod
-    def _run_coroutine_in_thread(coro) -> Any:
+    def _run_coroutine_in_thread(coro, join_timeout: Optional[float] = None) -> Any:
         """在独立线程中运行协程, 用 asyncio.run() 创建并关闭独立 event loop。
 
         BUG-5 修复: 替代废弃的 asyncio.get_event_loop() + loop.run_until_complete()。
         - 避开 "This event loop is already running" RuntimeError (在已有运行 loop 时)
         - 确保每次创建的 loop 都被 close, 无资源泄漏
+        M-13 修复: thread.join(timeout=None) 永久等待 → 默认模块级兜底超时,
+        超时记 warning 并放弃等待（协程结果丢失时调用方以部分结果/空结果继续）。
         """
         import concurrent.futures
 
+        effective_timeout = (
+            join_timeout if join_timeout is not None else _COROUTINE_JOIN_TIMEOUT_SECONDS
+        )
         result_box: Dict[str, Any] = {}
 
         def _worker():
@@ -786,7 +797,12 @@ class NeurovaRecallEngine:
 
         thread = threading.Thread(target=_worker, daemon=True)
         thread.start()
-        thread.join(timeout=None)
+        thread.join(timeout=effective_timeout)
+        if thread.is_alive():
+            logger.warning(
+                "协程线程 %ss 未完成, 放弃等待（daemon 线程随进程退出）",
+                effective_timeout,
+            )
         if "error" in result_box:
             raise result_box["error"]
         return result_box.get("value")
@@ -905,9 +921,31 @@ class NeurovaRecallEngine:
                         memory_manager=self.memory_manager,
                     )
                 )
-            return await asyncio.gather(*tasks, return_exceptions=True)
+            # M-13 修复: gather 无超时 — 单个插件通道挂起即永久阻塞召回。
+            # asyncio.wait 超时后保留已完成通道的部分结果, 挂起通道取消后放弃；
+            # 异常任务以异常对象为占位（下游 isinstance(Exception) 跳过逻辑不变）。
+            futures = [asyncio.ensure_future(t) for t in tasks]
+            done, pending = await asyncio.wait(futures, timeout=self.timeout_seconds)
+            for f in pending:
+                f.cancel()
+            if pending:
+                logger.warning(
+                    "插件通道召回超时 (timeout=%ss), %d/%d 通道未完成, 以部分结果继续",
+                    self.timeout_seconds, len(pending), len(futures),
+                )
+            results = []
+            for f in done:
+                if f.cancelled():
+                    continue
+                exc = f.exception()
+                results.append(exc if exc is not None else f.result())
+            return results
 
-        results_list = self._run_coroutine_in_thread(_run_all())
+        join_timeout = self.timeout_seconds + _PLUGIN_RECALL_JOIN_GRACE_SECONDS
+        results_list = self._run_coroutine_in_thread(_run_all(), join_timeout=join_timeout)
+        if results_list is None:
+            # M-13: join 超时（通道抗取消导致 loop 未退出）—— 空结果继续而非崩溃
+            results_list = []
 
         for channel_results in results_list:
             if isinstance(channel_results, Exception):
