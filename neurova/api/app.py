@@ -740,8 +740,9 @@ async def _on_startup(app_state: AppState) -> None:
     logger.info("Neurova API Server starting...")
     logger.info("=" * 60)
 
-    # 初始化组件
-    _initialize_components(app_state)
+    # 初始化组件（BUG AUDIT S-13: 原同步直调, Agent/TTS/ASR 等秒级重初始化
+    # 阻塞事件循环 → 移入工作线程执行）
+    await asyncio.to_thread(_initialize_components, app_state)
 
     # 进化权重持久化装配（P2-6：此前仅 start_server.py 调用，uvicorn 直启
     # get_app 的入口权重纯内存，重启即丢。幂等——已装配时 no-op）。

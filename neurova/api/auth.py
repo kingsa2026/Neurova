@@ -449,9 +449,14 @@ async def get_current_user_or_default(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> Dict[str, Any]:
     """
-    FastAPI 依赖：获取认证用户，未认证时返回默认用户
+    FastAPI 依赖：获取认证用户，无凭证时返回默认用户
 
     用于不需要严格认证但仍然想识别已登录用户的端点。
+
+    BUG AUDIT S-10: 原实现对"凭证无效"也静默回落 default 身份——token
+    过期/伪造/黑名单者变成共享 default 用户串改数据。现区分两种情况:
+    - 完全无凭证 → 保留 _DEFAULT_USER 回落（桌面首启/登录前流程依赖）;
+    - 有凭证但无效 → 401（与 get_current_user 同契约）。
     """
     if not credentials:
         return _DEFAULT_USER.copy()
@@ -460,6 +465,10 @@ async def get_current_user_or_default(
     payload = verify_access_token(token)
 
     if not payload:
-        return _DEFAULT_USER.copy()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     return _user_identity(payload)

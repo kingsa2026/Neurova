@@ -1358,8 +1358,12 @@ async def get_feedback_stats(
 
 
 @router.post("/upload")
-async def post_console_upload(request: Request, file: UploadFile = File(...)):
-    """上传文件"""
+async def post_console_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """上传文件（BUG AUDIT S-08: 原零鉴权, 匿名可投递任意文件）"""
     safe_name = _safe_filename(file.filename or "unnamed")
     file_id = str(uuid.uuid4())[:8]
     dest = _CONSOLE_UPLOAD_DIR / f"{file_id}_{safe_name}"
@@ -1513,6 +1517,12 @@ async def websocket_console(websocket: WebSocket, client_id: str, token: str = Q
 
     根因修复 2026-09-07：原实现直接 accept 无鉴权，未认证者可驱动 agent.chat。
     现要求 query ?token=<JWT>（或 Authorization: Bearer 头），校验失败关闭 4401。
+
+    BUG AUDIT S-17 残余:
+    - 连接键由服务端派生 f"{user}:{uuid4().hex[:8]}" —— 路径参数仅保留路由
+      形状（前端兼容），不作为身份；否则客户端可指定他人 client_id 冒用条目。
+    - try/finally 收口清理 —— 原仅 except WebSocketDisconnect，其他异常
+      （如 receive_json 解析失败）时条目永久滞留 _manager。
     """
     from neurova.api.auth import verify_access_token
 
@@ -1520,7 +1530,8 @@ async def websocket_console(websocket: WebSocket, client_id: str, token: str = Q
     if not payload:
         await websocket.close(code=4401)
         return
-    await _manager.connect(websocket, client_id)
+    conn_id = f"{payload.get('sub', 'unknown')}:{uuid.uuid4().hex[:8]}"
+    await _manager.connect(websocket, conn_id)
     try:
         while True:
             data = await websocket.receive_json()
@@ -1546,7 +1557,9 @@ async def websocket_console(websocket: WebSocket, client_id: str, token: str = Q
             else:
                 await websocket.send_json({"type": "ack", "data": data})
     except WebSocketDisconnect:
-        _manager.disconnect(client_id)
+        pass
+    finally:
+        _manager.disconnect(conn_id)
 
 
 # ── Push message endpoints ─────────────────────────────
@@ -1565,9 +1578,16 @@ async def get_push_messages(
 
 
 @router.post("/push/message")
-async def post_push_message(body: dict, request: Request,
-    current_user: Dict[str, Any] = Depends(get_current_user),):
-    """发送推送消息（广播给所有WebSocket连接）"""
+async def post_push_message(
+    body: dict,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(require_admin()),
+):
+    """发送推送消息（广播给所有WebSocket连接）。
+
+    BUG AUDIT S-18: 原仅要求登录, 任意用户可向全体连接广播（消息注入）;
+    参照本文件 /debug/* 端点收口为仅管理员。
+    """
     message = {
         "type": "push",
         "content": body.get("content", ""),
@@ -1599,6 +1619,7 @@ async def list_annotations(
     request: Request,
     q: str = Query(default="", description="按问题/答案子串过滤"),
     limit: int = Query(default=100, ge=1, le=500),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """精准回复命中表清单（管理页：按命中次数排序）。"""
     from neurova.core.annotation_store import get_annotation_store
@@ -1612,7 +1633,11 @@ async def list_annotations(
 
 
 @router.post("/annotations")
-async def create_annotation(body: AnnotationCreateRequest, request: Request):
+async def create_annotation(
+    body: AnnotationCreateRequest,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """手工新增精准回复（不限于反馈链路沉淀）。"""
     if not body.question.strip() or not body.answer.strip():
         raise HTTPException(status_code=400, detail="question/answer 不能为空")
@@ -1623,7 +1648,12 @@ async def create_annotation(body: AnnotationCreateRequest, request: Request):
 
 
 @router.put("/annotations/{annotation_id}")
-async def update_annotation(annotation_id: str, body: AnnotationUpdateRequest, request: Request):
+async def update_annotation(
+    annotation_id: str,
+    body: AnnotationUpdateRequest,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """更新答案 / 启停用（停用即下线该精准回复）。"""
     from neurova.core.annotation_store import get_annotation_store
 
@@ -1638,7 +1668,11 @@ async def update_annotation(annotation_id: str, body: AnnotationUpdateRequest, r
 
 
 @router.delete("/annotations/{annotation_id}")
-async def delete_annotation(annotation_id: str, request: Request):
+async def delete_annotation(
+    annotation_id: str,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     from neurova.core.annotation_store import get_annotation_store
 
     if not get_annotation_store().delete(annotation_id):
@@ -1647,7 +1681,7 @@ async def delete_annotation(annotation_id: str, request: Request):
 
 
 @router.get("/annotations/export")
-async def export_training_set(request: Request):
+async def export_training_set(request: Request, current_user: Dict[str, Any] = Depends(get_current_user)):
     """重训练化集导出：JSONL（input/output 对）——供后续 SFT 微调集。"""
     from neurova.core.annotation_store import get_annotation_store
 

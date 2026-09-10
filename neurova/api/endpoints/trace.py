@@ -17,8 +17,10 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from pydantic import BaseModel
+
+from neurova.api.deps import get_current_user
 
 logger = get_logger(__name__)
 
@@ -333,8 +335,10 @@ async def get_traces(
     status: Optional[str] = Query(default=None, description="状态筛选"),
     limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
     offset: int = Query(default=0, ge=0, description="偏移量"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """获取轨迹列表"""
+    """获取轨迹列表（BUG AUDIT S-08: 原零鉴权; 前端 AgentTrajectory/AgentTrace
+    为非 admin 页面调用 → 收口为登录即可）"""
     try:
         # 获取轨迹管理器
         manager = get_trace_manager()
@@ -359,6 +363,7 @@ async def get_traces(
 async def get_trace_stats(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取轨迹统计"""
     try:
@@ -387,6 +392,7 @@ async def get_trace_stats(
 async def get_trace(
     request: Request,
     trace_id: str = Path(..., description="轨迹ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取单个轨迹详情"""
     try:
@@ -414,6 +420,7 @@ async def get_trace_events(
     trace_id: str = Path(..., description="轨迹ID"),
     event_type: Optional[str] = Query(default=None, description="事件类型筛选"),
     limit: int = Query(default=50, ge=1, le=500, description="数量限制"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取轨迹事件"""
     try:

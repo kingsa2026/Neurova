@@ -149,6 +149,8 @@ class RegisterRequest(BaseModel):
     invite_code: Optional[str] = Field(default=None, description="邀请码")
     # BUG AUDIT S-04: 非首启注册必须携带邮箱验证码，否则任意访客可无验证注册
     verification_code: Optional[str] = Field(default=None, description="邮箱验证码（非首启注册必填）")
+    # BUG AUDIT S-04 残余: 服务端部署首账号抢注防护——配置了引导令牌时必填
+    bootstrap_token: Optional[str] = Field(default=None, description="首账号引导令牌（部署加固）")
 
 
 class RecoverPasswordRequest(BaseModel):
@@ -174,6 +176,36 @@ class RefreshRequest(BaseModel):
 def _get_request_id(request: Request) -> str:
     """安全获取 request_id"""
     return getattr(request.state, "request_id", str(uuid.uuid4()))
+
+
+# BUG AUDIT S-04 残余: 首账号注册引导令牌（部署加固; 环境门控, 未配置=行为不变）
+_BOOTSTRAP_ADMIN_TOKEN_ENV = "NEUROVA_BOOTSTRAP_ADMIN_TOKEN"
+
+
+def _resolve_bootstrap_admin_token() -> str:
+    """解析首账号注册引导令牌（仅 count_users()==0 时消费）。
+
+    优先级:
+    1. 环境变量 NEUROVA_BOOTSTRAP_ADMIN_TOKEN
+    2. data/bootstrap_admin.ini 的 [bootstrap] token 键（安装包向导约定文件的
+       扩展; 旧格式仅 username/password 无 token 键 → 视为未配置, 保持兼容）
+    两者均未配置 → 返回空串（桌面首启默认行为: 首账号即管理员, 不要求令牌）。
+    """
+    token = (os.environ.get(_BOOTSTRAP_ADMIN_TOKEN_ENV) or "").strip()
+    if token:
+        return token
+
+    import neurova.api.bootstrap_user as _bootstrap_user
+
+    ini_path = _bootstrap_user.BOOTSTRAP_ADMIN_FILE
+    if os.path.exists(ini_path):
+        try:
+            parser = _bootstrap_user._read_ini_text(ini_path)
+            if parser is not None and parser.has_section("bootstrap"):
+                return (parser.get("bootstrap", "token", fallback="") or "").strip()
+        except Exception as e:
+            logger.warning("bootstrap_admin.ini 令牌读取失败: %s", e)
+    return ""
 
 
 def _get_token_manager():
@@ -513,6 +545,23 @@ async def register(request: Request, body: RegisterRequest):
                 logger.warning("邮箱验证码校验失败: %s", body.email)
                 verification_model.record_register_attempt(ip_address, success=False)
                 raise HTTPException(status_code=400, detail="邮箱验证码无效或已过期")
+        else:
+            # BUG AUDIT S-04 残余: 服务端部署场景下首账号即管理员, 可被任意访客
+            # 抢注。部署方配置引导令牌（NEUROVA_BOOTSTRAP_ADMIN_TOKEN 或
+            # data/bootstrap_admin.ini [bootstrap] token）后, 首账号注册必须
+            # 出示匹配令牌; 两处均未配置 → 保持桌面默认行为（注册即管理员）。
+            expected_token = _resolve_bootstrap_admin_token()
+            if expected_token:
+                provided_token = (body.bootstrap_token or "").encode("utf-8")
+                if not hmac.compare_digest(provided_token, expected_token.encode("utf-8")):
+                    logger.warning("首账号注册引导令牌校验失败: %s", body.username)
+                    verification_model.record_register_attempt(ip_address, success=False)
+                    raise HTTPException(status_code=403, detail="Invalid bootstrap token")
+            else:
+                logger.warning(
+                    "首账号注册未配置引导令牌（NEUROVA_BOOTSTRAP_ADMIN_TOKEN / "
+                    "bootstrap_admin.ini）: 服务端部署存在管理员抢注风险"
+                )
 
         # 1. 检查用户名是否已存在
         existing_user = user_model.get_user_by_username(body.username)
