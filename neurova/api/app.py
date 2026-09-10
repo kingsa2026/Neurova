@@ -1102,6 +1102,22 @@ def create_app(
         _app_instance = app
         logger.info("FastAPI application created")
 
+        # B2-c：生成产物静态目录（data/generations → /api/v1/generation/files/*）
+        try:
+            from pathlib import Path as _GenPath
+
+            from starlette.staticfiles import StaticFiles as _StaticFiles
+
+            _gen_dir = _GenPath("data/generations")
+            _gen_dir.mkdir(parents=True, exist_ok=True)
+            app.mount(
+                "/api/v1/generation/files",
+                _StaticFiles(directory=str(_gen_dir)),
+                name="generation_files",
+            )
+        except Exception as _e:  # noqa: BLE001 — 静态挂载失败不影响主服务
+            logger.warning("generation files 挂载失败: %s", _e)
+
         return app
 
 
@@ -1194,3 +1210,4 @@ if __name__ == "__main__":
         debug=args.debug,
         reload=args.reload,
     )
+
