@@ -72,6 +72,8 @@ class _PersistDbStore:
         self._agent_id = agent_id
         self._neuser_id = neuser_id
         self._user_id = user_id
+        # A-05: close()/execute() 并发互斥（MoE 后台索引线程经 execute 用连接）
+        self._close_lock = threading.Lock()
         # 审计 P1-D8：常驻连接（原每次 execute 新建连接；WAL 下读写不互阻）
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
@@ -147,6 +149,21 @@ class _PersistDbStore:
             return _PersistDbStore._Rows([dict(r) for r in rows])
         except Exception:
             return _PersistDbStore._Rows([])
+
+    def close(self) -> None:
+        """关闭常驻 SQLite 连接（A-05：幂等、锁安全）。
+
+        此前无释放路径——Agent.shutdown() 后连接句柄残留，Windows 上
+        工作区/数据目录删除因句柄占用留残。关闭后 execute() 走既有
+        except 分支返回空行集（ MoE 后台索引线程不受致命影响）。
+        """
+        with self._close_lock:
+            if self._conn is None:
+                return
+            try:
+                self._conn.close()
+            finally:
+                self._conn = None
 
 
 
@@ -423,6 +440,9 @@ class MemCore:
         # S5 修复 (Critical #6): 保护 update_history 的 read-modify-write.
         # conversation_history 是裸 list,无锁并发修改会 lost update.
         self._history_lock = RLock()
+        # A-05: MoE L0 下钻的 persist.db 常驻连接适配器（init_moe_router 赋值，
+        # Agent 关闭链路经此释放；未初始化时为 None）
+        self._persist_db_store = None
 
     # ---- 属性代理（方便内部访问） ----
     @property
@@ -728,6 +748,8 @@ class MemCore:
 
             # L0 下钻与初始索引统一指向 persist.db（recall 主数据源）
             store = self._build_moe_store()
+            # A-05: 持引用供 Agent 关闭链路释放常驻连接（否则句柄残留）
+            self._persist_db_store = store
             if store:
                 try:
                     rows = store.execute(
@@ -977,14 +999,21 @@ class MemCore:
                 items = self.conversation_buffer.flush()
                 if items and hasattr(self, 'memory_manager'):
                     queue = getattr(self.memory_manager, '_write_queue', None)
-                    if queue:
+                    # A-06: 必须用 `is not None`——MemoryWriteQueue.__bool__ 按队列
+                    # 非空取值，空队列恒 falsy 会导致首轮入队被整体跳过
+                    if queue is not None:
                         queue.enqueue_batch(items)
                 logger.debug("对话缓冲区已 flush")
 
-            # 刷新写入队列
-            if self.buffer_module and hasattr(self.buffer_module, "_write_queue"):
-                queue = self.buffer_module._write_queue
-                if queue and hasattr(queue, "flush_to_storage"):
+            # A-06 split-brain 修复: 入队（上方）与 flush 必须走同一条能真正
+            # 持久化的队列。原实现入队 memory_manager._write_queue（其
+            # flush_to_storage 走 memory_manager.remember → persist.db，且
+            # agent_shutdown 关闭时 flush 的也是它），flush 却打
+            # buffer_module._write_queue（另一条队列）——该批记忆在本路径
+            # 永不落盘。现统一 flush memory_manager._write_queue。
+            if self.memory_manager is not None:
+                queue = getattr(self.memory_manager, '_write_queue', None)
+                if queue is not None and hasattr(queue, "flush_to_storage"):
                     # BUG 3 修复: flush_to_storage() 返回 int(written 计数),
                     # 不是 dict, 不能用 result.get("written", 0)
                     written = queue.flush_to_storage()
@@ -1037,7 +1066,10 @@ class MemCore:
                     items = self.conversation_buffer.flush()
                     if items and hasattr(self, 'memory_manager'):
                         queue = getattr(self.memory_manager, '_write_queue', None)
-                        if queue:
+                        # A-06: `is not None` 判空（__bool__ 按队列非空取值，
+                        # 空队列 falsy 会跳过入队）；与 flush_before_retrieve
+                        # 的 flush 同队列，agent_shutdown 关闭时 flush 的也是它
+                        if queue is not None:
                             queue.enqueue_batch(items)
 
             logger.debug("对话记忆已保存: user_input=%s...", user_input[:50])

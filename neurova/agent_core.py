@@ -506,7 +506,12 @@ class SubSystemContainer:
             "voice": ["memory", "evolution"],
             "security": [],
             "cognition": ["memory"],
-            "evolution": ["memory", "management"],
+            # A-08: evolution 依赖 tools——init_evolution 的
+            # evolution.register_tools(a._skill_registry.list_skills()) 要求
+            # _skill_registry 已就绪，而它由 init_tools 创建（init_management
+            # 先置 None）。缺此依赖时拓扑序 evolution 先于 tools，
+            # register_tools 永不执行。
+            "evolution": ["memory", "management", "tools"],
             "tools": ["memory", "management"],
             "pipeline": ["memory", "context", "tools"],
             "loop": ["pipeline"],
@@ -615,6 +620,7 @@ class SubSystemContainer:
         # 提供 invariant：role 校验 + 自动 trim + 线程安全
         # conversation_history（list）保持兼容，两者通过 MemCore.update_history 同步
         a._conversation_context = ConversationContext(max_messages=100)
+        # A-04: 经 property setter 重置轮次 ContextVar（不再是死状态的实例属性）
         a._current_user_input = None
         a._current_trace_id = ""
         a._trajectory_recorder = get_trajectory_recorder()
@@ -1013,11 +1019,16 @@ class Agent:
     """
 
     # P0-B5：模型热切换串行锁（asyncio.Lock 非 fork 安全，按进程实例化）
-    _model_switch_lock_slot: asyncio.Lock = asyncio.Lock()
+    # A-07 修复：锁改为实例级——原类属性让全部 Agent 实例共用一把锁，
+    # 一个 agent 热切换会互卡其他 agent 的 rebuild_loop。锁在 __init__ 创建，
+    # 经 _get_model_switch_lock() 获取（对 __new__ 直构的测试路径懒建兜底）。
 
     def __init__(self, config: Optional[AgentConfig] = None, **kwargs):
 
         self.config = config or AgentConfig(**kwargs)
+
+        # A-07: per-agent 实例级模型热切换锁（原类属性全实例共用一把锁）
+        self._model_switch_lock: asyncio.Lock = asyncio.Lock()
 
         logger.debug("Agent.__init__() 开始: %s (ID: %s)", self.config.name, self.config.agent_id)
 
@@ -1071,10 +1082,17 @@ class Agent:
         async with self._get_model_switch_lock():
             return await self._rebuild_loop_locked(model_name)
 
-    @classmethod
-    def _get_model_switch_lock(cls) -> asyncio.Lock:
-        """per-Agent 实例的模型热切换锁（每次调用返回当前实例锁）。"""
-        return cls._model_switch_lock_slot
+    def _get_model_switch_lock(self) -> asyncio.Lock:
+        """per-Agent 实例的模型热切换锁（A-07：实例级，每次调用返回本实例锁）。
+
+        懒建兜底仅服务于 Agent.__new__ 直构（跳过 __init__）的测试路径；
+        正常构造在 __init__ 创建。
+        """
+        lock = getattr(self, "_model_switch_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._model_switch_lock = lock
+        return lock
 
     async def _rebuild_loop_locked(self, model_name: str) -> bool:
         """rebuild_loop 主体（须持 _model_switch_lock 调用）。"""
@@ -1608,8 +1626,9 @@ class Agent:
             return
 
         try:
-            # 从 result.metadata 获取原始 skill 参数
-            tool_params = result.metadata.get("skill_kwargs", {})
+            # A-16: result 可能是 SkillExecutionResult（skills/models.py，无
+            # metadata 字段）——直接 .get 会 AttributeError 炸掉整段记录
+            tool_params = (getattr(result, "metadata", None) or {}).get("skill_kwargs", {})
             problem_text = self._current_user_input or f"执行 {skill.name}"
 
             self.tool_executor.on_tool_executed(
@@ -1799,18 +1818,13 @@ class Agent:
             # muscle.items（属性不存在，恒被 hasattr 跳过）且字段名拼错为
             # consecutive_success（实际是 consecutive_successes），失败降级静默失效
             if muscle is not None:
-                reset_any = False
-                for layer in (muscle._l1, muscle._l2, muscle._l3):
-                    for item in layer.values():
-                        if getattr(item, "tool_name", None) == tool_name:
-                            item.consecutive_successes = 0
-                            reset_any = True
-                if reset_any:
-                    # 审计 P1-E6：同步落盘下沉线程池（不阻塞事件循环）
-                    await asyncio.to_thread(muscle._save_all)
+                # A-15 收口：降级走公开 API degrade_tool（锁内重置、锁外落盘），
+                # 不再遍历私有 _l1/_l2/_l3；to_thread 保持落盘不阻塞事件循环（P1-E6）
+                if await asyncio.to_thread(muscle.degrade_tool, tool_name):
                     logger.info("📉 肌肉记忆降级: %s consecutive_successes 重置为 0", tool_name)
         except Exception as e:
-            logger.debug("肌肉记忆降级记录跳过: %s", e)
+            # A-15: 降级路径失败此前 debug 吞错——肌肉记忆降级静默失效无从排查
+            logger.warning("肌肉记忆降级记录失败: %s", e, exc_info=True)
 
         # 2. 写入反思日志
         try:
@@ -1955,6 +1969,26 @@ class Agent:
         from neurova.core.turn_context import set_turn_identity
 
         set_turn_identity(user_input, session_id, user_id)
+
+    @property
+    def _current_user_input(self) -> Optional[str]:
+        """轮次级用户输入（A-04 根因修复）。
+
+        轮次状态迁 ContextVar（P0-B1）后原实例属性成死状态：init_conversation
+        的置 None 写不进 ContextVar，_on_skill_post_execute 等读取方恒拿
+        None/占位串。现做成 property 与 current_user_input 绑定同一
+        ContextVar——getter 读，setter 写（含置 None 重置语义），
+        tool_executor 等经 getattr 读取的旧消费方无需改动即恢复。
+        """
+        from neurova.core.turn_context import get_turn_user_input
+
+        return get_turn_user_input()
+
+    @_current_user_input.setter
+    def _current_user_input(self, value: Optional[str]) -> None:
+        from neurova.core.turn_context import set_turn_user_input
+
+        set_turn_user_input(value)
 
     @property
     def current_user_input(self) -> Optional[str]:

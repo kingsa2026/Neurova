@@ -158,7 +158,12 @@ class TestBug3FlushToStorageIntHandling:
         bm = BufferModule()
         bm._write_queue = mock_queue
 
-        mc = make_memcore(buffer=cb, buffer_module=bm)
+        # A-06 适配: flush 与入队统一走 memory_manager._write_queue
+        # （原 split-brain 接线 flush buffer_module._write_queue 已修复）
+        mm = MagicMock()
+        mm._write_queue = mock_queue
+
+        mc = make_memcore(buffer=cb, buffer_module=bm, memory_manager=mm)
 
         with patch("neurova.mem_core.logger") as mock_logger:
             mc.flush_before_retrieve()

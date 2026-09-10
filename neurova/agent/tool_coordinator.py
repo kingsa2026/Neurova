@@ -120,7 +120,12 @@ class ToolCoordinator:
             "error": None,
             "success": None,
         }
-        asyncio.ensure_future(self._observe_background(tool_name, task_id, task))
+        # A-20：观察者任务挂强引用——事件循环对 Task 只持弱引用，裸
+        # ensure_future 的观察者可能被 GC 静默吞掉（pending hints 永不投递）。
+        # 引用挂在 entry 上，观察者 finally 自行置 None 断开引用环。
+        self._background[task_id]["observer"] = asyncio.ensure_future(
+            self._observe_background(tool_name, task_id, task)
+        )
         message = (
             f"工具 {tool_name} 执行超时，已转入后台继续运行；"
             f"完成后结果将注入后续上下文（task_id={task_id}）"
@@ -166,6 +171,8 @@ class ToolCoordinator:
             logger.warning("后台工具 %s (%s) 失败: %s", tool_name, task_id, e)
         finally:
             entry["task"] = None
+            # A-20：断开对观察者自身的强引用（entry 随后移入 _completed 留存）
+            entry["observer"] = None
             # 资源修复: 移入有界留存(供 get_background_status 查询近 200 条终态)
             self._background.pop(task_id, None)
             self._completed[task_id] = entry

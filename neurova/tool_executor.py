@@ -211,9 +211,11 @@ class ToolExecutor:
         """
         self._agent = agent_ref
         self._messages_list: List[Dict] = []
-        self._tool_engine = None  # ToolEngine 实例（延迟初始化）
-        # P0-B6：惰性创建互斥锁（并发首访防双实例）
-        self._tool_engine_lock = threading.Lock()
+        # A-18：ToolEngine 构造为纯内存对象图（dict/RLock/deque + 默认守卫，
+        # 无 IO/线程/网络），懒初始化无收益且有并发缺陷——改为 __init__ 急切
+        # 构建，property 退化为纯读（消除 async 路径持同步锁 + 锁外首读无保护）。
+        # 循环依赖规避靠 _create_tool_engine 内函数级 import（构建期≠导入期）。
+        self._tool_engine = self._create_tool_engine()
         # P1-2：工具执行协调器（per-tool 超时 + 超时转后台 + pending hints）
         # 懒加载（AGENTS.md 纪律）：neurova.agent 包 __init__ 链回本模块，模块级导入会循环
         from neurova.agent.tool_coordinator import ToolCoordinator
@@ -222,16 +224,15 @@ class ToolExecutor:
 
     @property
     def tool_engine(self):
-        """获取 ToolEngine 实例（延迟初始化；P0-B6 加锁防并发双实例）"""
-        if self._tool_engine is None:
-            with self._tool_engine_lock:
-                if self._tool_engine is None:
-                    self._tool_engine = self._create_tool_engine()
-            return self._tool_engine
+        """ToolEngine 实例（A-18：__init__ 急切构建，此处纯读零副作用）"""
         return self._tool_engine
 
     def _create_tool_engine(self):
-        """实际创建 ToolEngine（须持 _tool_engine_lock 调用）"""
+        """实际创建 ToolEngine（__init__ 急切构建期调用；函数级 import 规避循环依赖）"""
+        # A-18：急切构建发生在 __init__（实例上尚无 _tool_engine 属性），
+        # 先置 None 兜住"两级来源均不可用"的失败路径（与原懒加载失败语义一致：
+        # 静默降级 None，执行链回退 builtin/skill/router）
+        self._tool_engine = None
         # 首先尝试从 ExecutionEngine 获取
         try:
             from neurova.shared_core.execution_engine import ExecutionEngine

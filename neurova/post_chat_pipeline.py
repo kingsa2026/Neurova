@@ -256,11 +256,14 @@ class PostChatPipeline:
     # pipeline 继续运行，bug 永不暴露。违反 bug-hunt 规则 #3 "Never bypass"。
     # 现将这些"编程错误"类型显式 re-raise，让调用方看到真实 bug；运营错误
     # （OSError/ValueError/RuntimeError/ConnectionError/TimeoutError 等）维持降级。
+    # A-14 修复：ImportError 移出本集合——可选依赖缺失（ModuleNotFoundError ⊂
+    # ImportError）会炸穿整轮 chat()，而导入错误极少是可恢复的编程错误信号，
+    # 且这些步骤本就要求失败不影响整轮。ImportError 走专用分支：warning +
+    # 步骤失败 + 跳过（见 _safe_step/_safe_step_sync）。
     _PROGRAMMING_ERRORS = (
         TypeError,
         AttributeError,
         NameError,
-        ImportError,
         SyntaxError,
         IndentationError,
     )
@@ -268,12 +271,26 @@ class PostChatPipeline:
     async def _safe_step(self, step_name: str, coro, default=None):
         """P-1: 安全执行单个步骤,异常只记录不传播
 
-        P0-C2 修复：编程错误（TypeError/AttributeError/NameError/ImportError/SyntaxError）
-        会 re-raise，让真实 bug 暴露给调用方；运营错误（OSError/ValueError/
+        P0-C2 修复：编程错误（TypeError/AttributeError/NameError/SyntaxError）
+        会 re-raise，让真实 bug 暴露给调用方；ImportError 按 A-14 降级为
+        步骤失败+warning；运营错误（OSError/ValueError/
         RuntimeError 等）仍按原逻辑降级为 default 值。
         """
         try:
             return await coro
+        except ImportError as e:
+            # A-14: 导入错误（含可选依赖缺失 ModuleNotFoundError）按步骤失败
+            # 降级跳过，不 re-raise——炸穿整轮 chat() 的代价比漏一步高
+            logger.warning(
+                "Step '%s' failed with ImportError (skipping step): %s",
+                step_name,
+                e,
+                exc_info=True,
+            )
+            self._step_results.append(
+                StepResult(step_name=step_name, status=StepStatus.FAILED, message=str(e))
+            )
+            return default
         except self._PROGRAMMING_ERRORS:
             # P0-C2: 编程错误必须 re-raise，不能被吞没
             logger.error(
@@ -292,11 +309,24 @@ class PostChatPipeline:
     def _safe_step_sync(self, step_name: str, func, default=None):
         """P-1: 安全执行同步步骤,异常只记录不传播
 
-        P0-C2 修复：编程错误（TypeError/AttributeError/NameError/ImportError/SyntaxError）
-        会 re-raise，让真实 bug 暴露给调用方；运营错误仍按原逻辑降级为 default 值。
+        P0-C2 修复：编程错误（TypeError/AttributeError/NameError/SyntaxError）
+        会 re-raise，让真实 bug 暴露给调用方；ImportError 按 A-14 降级为
+        步骤失败+warning；运营错误仍按原逻辑降级为 default 值。
         """
         try:
             return func()
+        except ImportError as e:
+            # A-14: 同 _safe_step——导入错误降级为步骤失败，不 re-raise
+            logger.warning(
+                "Step '%s' failed with ImportError (skipping step): %s",
+                step_name,
+                e,
+                exc_info=True,
+            )
+            self._step_results.append(
+                StepResult(step_name=step_name, status=StepStatus.FAILED, message=str(e))
+            )
+            return default
         except self._PROGRAMMING_ERRORS:
             # P0-C2: 编程错误必须 re-raise，不能被吞没
             logger.error(
@@ -580,7 +610,9 @@ class PostChatPipeline:
         try:
             from neurova.api.endpoints.artifacts_api import extract_tool_artifacts
 
-            agent_id = str(getattr(self._agt, "agent_id", "") or "")
+            # A-03: Agent 无 agent_id 实例属性（在 config.agent_id，与
+            # :1463/:1588/:1973 兄弟调用点一致）——原写法恒为空串
+            agent_id = str(getattr(self._agt.config, "agent_id", "") or "")
             user_id = str(getattr(self._agt, "current_user_id", "") or "")
             for tm in tool_msgs or []:
                 if not isinstance(tm, dict) or tm.get("type") != "tool_result":
@@ -1205,7 +1237,9 @@ class PostChatPipeline:
                             success=tool_success,
                             feedback=user_input[:100],
                         ),
-                        agent_id=str(getattr(self._agent, "agent_id", "") or "") or None,
+                        # A-03 同根因命中点：Agent.agent_id 不存在（在 config 上），
+                        # 原写法恒 None，EKB 沉淀记录永远归属不了 agent
+                        agent_id=str(getattr(self._agent.config, "agent_id", "") or "") or None,
                         session_id=str(getattr(self._agent, "session_id", "") or "") or None,
                     )
                 except Exception as ekb_error:  # noqa: BLE001 - 沉淀失败不阻断主流程
@@ -2076,7 +2110,10 @@ class PostChatPipeline:
 
         try:
             if rsi.should_continue():
-                result = rsi.run_iteration()
+                # A-13: run_iteration 含 SQLite 读写/参数寻优（同步重活），
+                # 直接在事件循环内调用会卡死所有并发请求——移到工作线程。
+                # to_thread 原样透传返回值与异常，外层 try/except 语义不变。
+                result = await asyncio.to_thread(rsi.run_iteration)
                 logger.info("RSI 迭代完成: %s", result.get('convergence', {}).get('status', 'unknown'))
                 self._step_results.append(
                     StepResult(

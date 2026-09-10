@@ -208,8 +208,14 @@ class TestB5HotSwitchAtomicity:
         """rebuild_loop 持有 per-agent asyncio.Lock：并发切换串行执行。"""
         from neurova.agent_core import Agent
 
-        assert hasattr(Agent, "_model_switch_lock_slot"), (
-            "Agent 缺少模型切换锁槽位（类级声明）"
+        # A-07 适配：锁为实例级（原类属性 _model_switch_lock_slot 已废除——
+        # 全 Agent 实例共用一把锁会让跨实例热切换互卡）
+        assert not hasattr(Agent, "_model_switch_lock_slot"), (
+            "模型切换锁不得回退为类属性（全实例共用一把锁）"
+        )
+        agent_a, agent_b = Agent.__new__(Agent), Agent.__new__(Agent)
+        assert agent_a._get_model_switch_lock() is not agent_b._get_model_switch_lock(), (
+            "不同 Agent 实例必须持有各自的模型切换锁"
         )
 
         # 语义验证：两协程并发调 rebuild_loop，rebuild 体内不交错
