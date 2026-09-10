@@ -205,3 +205,29 @@ class TestSessionReorderEndpoint:
         assert sessions, "应有会话列表"
         for s in sessions:
             assert "sort_order" in s, "会话摘要应携带 sort_order 字段"
+
+
+# ---------------------------------------------------------------------------
+# 3. P0-2：/chat/stop 真取消
+# ---------------------------------------------------------------------------
+
+def test_stop_endpoint_cancels_registered_chat_task():
+    """stop 端点必须取消 per-session 注册的 asyncio task（旧空壳只回 success）。"""
+    from neurova.core.task_tracker import get_task_tracker, reset_task_tracker
+
+    async def scenario():
+        async def work():
+            await asyncio.sleep(30)
+
+        task = asyncio.create_task(work())
+        get_task_tracker().register_async_task("sess-stop-test", task, kind="chat")
+        resp = await console_module.post_console_chat_stop(session_id="sess-stop-test")
+        assert resp["data"]["stopped"] is True
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        # 未知会话返回 stopped=False 而非报错
+        resp2 = await console_module.post_console_chat_stop(session_id="sess-stop-test")
+        assert resp2["data"]["stopped"] is False
+
+    asyncio.run(scenario())
+    reset_task_tracker()

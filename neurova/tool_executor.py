@@ -3048,7 +3048,13 @@ class ToolExecutor:
                 if not platform or not query:
                     return {"error": "缺少 platform 或 query 参数"}
                 # 三层隔离：请求级登录用户（_current_user_id）作为凭据分桶主体
-                user_id = getattr(self._agent, "current_user_id", None) or "default"
+                # （与 :323 同契约——必须带 _current_user_id 回退，否则
+                # 无 public 别名的 Agent 凭据桶恒落 default 串桶）
+                user_id = (
+                    getattr(self._agent, "_current_user_id", None)
+                    or getattr(self._agent, "current_user_id", None)
+                    or "default"
+                )
                 return await _asyncio.to_thread(
                     social_search, platform, query, user_id=user_id
                 )

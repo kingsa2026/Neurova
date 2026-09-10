@@ -1514,6 +1514,13 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       }
       break
 
+    case 'stopped':
+      // P0-2：用户主动停止（后端真取消任务后发的显式事件）——气泡收口并标记
+      msg.streaming = false
+      if (msg.steps?.some((s) => s.active)) finishAllSteps(msg.steps)
+      msg.content += `\n\n_(${t('chat.stoppedByUser')})_`
+      break
+
     case 'done':
     case 'complete':
       msg.streaming = false
@@ -1554,6 +1561,14 @@ function processSSEEvent(event: any, msg: ChatMessage) {
 }
 
 function stopStreaming() {
+  // P0-2：真停止——除 abort SSE 外，请求后端取消该会话运行中的任务
+  //（旧实现仅断流，后端照常跑完整轮并消耗 token）
+  const sid = activeStreamSessionId || currentSessionId.value
+  if (sid) {
+    void api
+      .post(`/console/chat/stop?session_id=${encodeURIComponent(sid)}`)
+      .catch(() => {})
+  }
   abortController?.abort()
   stopStreamTTS()
   chatStore.setStreaming(false)

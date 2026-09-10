@@ -110,6 +110,10 @@ class ChatRequest(BaseModel):
     model: typing.Optional[str] = None
     # 思考程度：light(简单) / standard(标准) / deep(深度)；空串=默认
     thinking_effort: typing.Optional[str] = ""
+    # B1-3 思考控制两级旋钮（QwenPaw #6302）：开关 + token 预算，
+    # 经 metadata → 管线 → LLMClient 按 compat 门控注入请求体
+    thinking_enabled: typing.Optional[bool] = None
+    thinking_budget: typing.Optional[int] = None
     # R-3 修复: 附件文件 ID 列表（前端 /files/upload 后携带）。此前 Pydantic
     # 静默丢弃该字段，模型完全感知不到上传文件。
     file_ids: typing.Optional[typing.List[str]] = None
@@ -555,6 +559,8 @@ async def post_console_chat(
             metadata = {
                 "user_id": user_id,
                 "thinking_effort": (body.thinking_effort or "").lower(),
+                "thinking_enabled": getattr(body, "thinking_enabled", None),
+                "thinking_budget": getattr(body, "thinking_budget", None),
                 "event_emitter": _emit,
                 # 开启工具事件实时转发（默认关闭以保持蜂群子 Agent 纯文本流契约）
                 "emit_tool_events": True,
@@ -597,11 +603,36 @@ async def post_console_chat(
                     queue.put_nowait(_EMIT_DONE)
 
             task = asyncio.create_task(run_chat())
+            # P0-2：注册到 per-session asyncio 任务表，/chat/stop 据此真取消
+            #（旧 stop 端点空壳假停止——只回 success，后端照常跑完整轮耗 token）
+            from neurova.core.task_tracker import get_task_tracker
+
+            get_task_tracker().register_async_task(session_id, task, kind="chat")
             seen_calls: set = set()
             seen_results: set = set()
 
             try:
                 live_events: typing.List[Dict[str, Any]] = []
+                # B3-1（#7244 对齐）：chunk/reasoning delta 合并节流——
+                # 逐 delta yield 造成每字符一次 json.dumps+SSE 帧（长回复
+                # 开销放大）。攒 buffer，FLUSH_INTERVAL 到期或非 delta 事件
+                # 才合并刷出；done 前 finally 兜底刷尾。
+                _FLUSH_INTERVAL = 0.06  # 60ms 最小合并间隔（肉眼无感，帧数降 ~10x）
+                delta_buffer: Dict[str, Dict[str, typing.Any]] = {}
+                last_flush_at = time.monotonic()
+
+                def _delta_flush_events() -> typing.List[Dict[str, Any]]:
+                    merged: typing.List[Dict[str, Any]] = []
+                    for etype, buf in delta_buffer.items():
+                        if buf.get("content"):
+                            merged.append({"type": etype, "content": buf["content"]})
+                    delta_buffer.clear()
+                    return merged
+
+                def _buffer_delta(etype: str, text: str) -> None:
+                    buf = delta_buffer.setdefault(etype, {"type": etype, "content": ""})
+                    buf["content"] += text
+
                 while True:
                     # 15s 无事件发 SSE 注释心跳（": ping"）：agent 工具执行/LLM
                     # 慢响应期间流可能长时间无数据，代理/杀软/网络栈会掐空闲
@@ -614,12 +645,42 @@ async def post_console_chat(
                         continue
                     if item is _EMIT_DONE:
                         break
+                    is_delta = item[0] in ("content", "reasoning") if isinstance(item, tuple) else False
+                    if is_delta:
+                        # 攒 delta（content→chunk / reasoning→reasoning）
+                        _buffer_delta("chunk" if item[0] == "content" else "reasoning",
+                                      str(item[1] or ""))
+                        if time.monotonic() - last_flush_at >= _FLUSH_INTERVAL:
+                            for event in _delta_flush_events():
+                                live_events.append(event)
+                                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                            last_flush_at = time.monotonic()
+                        continue
+                    # 非 delta 事件：先刷掉积压 delta 再原样发（顺序保持）
+                    for event in _delta_flush_events():
+                        live_events.append(event)
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    last_flush_at = time.monotonic()
                     for event in _sse_events_from_emitter_item(item, seen_calls, seen_results, agent_id=agent_id, user_id=user_id):
                         live_events.append(event)  # 补课 8：断线重连缓冲
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                # 收尾：刷出残余 delta
+                for event in _delta_flush_events():
+                    live_events.append(event)
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             finally:
                 _buffer_replay_events(session_id, live_events)
-                result = await task
+                try:
+                    result = await task
+                except asyncio.CancelledError:
+                    if task.cancelled():
+                        # P0-2：stop 端点取消——SSE 以 stopped 事件收尾
+                        #（done 恒发，前端状态机正常收口）
+                        result = {"text": "", "reasoning": None,
+                                  "tool_messages": [], "stopped": True}
+                    else:
+                        # 生成器自身被取消（客户端断连）而非任务取消——保持原语义
+                        raise
                 reply = result["text"]
                 reasoning = result["reasoning"]
                 tool_messages = result["tool_messages"]
@@ -659,6 +720,12 @@ async def post_console_chat(
                     flush_events.append(err_event)
                     yield f"data: {json.dumps(err_event, ensure_ascii=False)}\n\n"
 
+                # P0-2：用户主动停止的显式事件（前端据此标记"已手动停止"）
+                if result.get("stopped"):
+                    stopped_event = {"type": "stopped", "session_id": session_id}
+                    flush_events.append(stopped_event)
+                    yield f"data: {json.dumps(stopped_event, ensure_ascii=False)}\n\n"
+
                 flush_events.append({"type": "done", "session_id": session_id})
                 # QwenPaw turn_usage 对齐:done 之前发一次真实 usage 事件
                 # (入账已在 MultiModelLLMClient 下沉,此处只读 last_call 不双计;
@@ -695,8 +762,19 @@ async def post_console_chat(
 
 @router.post("/chat/stop")
 async def post_console_chat_stop(session_id: str):
-    """停止运行中的对话"""
-    return {"code": 0, "message": "Chat stopped", "data": {"session_id": session_id}}
+    """停止运行中的对话
+
+    P0-2 真取消：cancel per-session 注册的 chat asyncio task，取消沿
+    await 点传播中断 LLM/工具执行；SSE 流以 stopped+done 收尾。
+    """
+    from neurova.core.task_tracker import get_task_tracker
+
+    stopped = get_task_tracker().request_session_stop(session_id)
+    return {
+        "code": 0,
+        "message": "Chat stopped" if stopped else "No running task",
+        "data": {"session_id": session_id, "stopped": stopped > 0},
+    }
 
 
 @router.get("/chat/history")
@@ -1687,3 +1765,24 @@ async def export_training_set(request: Request, current_user: Dict[str, Any] = D
 
     lines = get_annotation_store().export_training_set()
     return {"code": 0, "message": "ok", "data": {"jsonl": "\n".join(lines), "count": len(lines)}}
+
+
+@router.get("/tasks")
+async def list_console_running_tasks(request: Request):
+    """运行中任务快照（B3-3 后台任务面板数据源；P0-2 任务跟踪器）。
+
+    返回 per-session 注册的 asyncio 任务（kind/started_at/duration），
+    供前端后台任务面板分组展示与取消操作联动 POST /console/chat/stop。
+    """
+    _ = request
+    from neurova.core.task_tracker import get_task_tracker
+
+    tasks = get_task_tracker().snapshot_async_tasks()
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "tasks": tasks,
+            "total": len(tasks),
+        },
+    }
