@@ -26,6 +26,7 @@ from neurova.tool_executor import ToolExecutor
 
 
 def _make_executor(monkeypatch, config_user_id="u1", config_agent_id="a1"):
+    tool_messages: list = []
     agent = SimpleNamespace(
         config=SimpleNamespace(user_id=config_user_id, agent_id=config_agent_id),
         tool_memory=MagicMock(),
@@ -33,6 +34,10 @@ def _make_executor(monkeypatch, config_user_id="u1", config_agent_id="a1"):
         _skill_registry=None,
         tool_router=None,
         _current_user_input="do the thing",
+        # P0-B1 契约：executor 经公有 API append_tool_messages 写入（Agent 实现
+        # 落轮次上下文）。mock 忠实模拟：records 落到消费者可见列表。
+        _tool_messages_list=tool_messages,
+        append_tool_messages=lambda records: tool_messages.extend(records),
     )
     executor = ToolExecutor(agent)
     monkeypatch.setattr(ToolExecutor, "tool_engine", property(lambda self: None))

@@ -22,8 +22,11 @@ from neurova.tool_executor import ToolExecutor
 def _make_executor_with_mock_agent():
     """构造一个 ToolExecutor，其 _execute_single_tool 被 mock 为返回固定结果。"""
     mock_agent = MagicMock()
-    # 消费者在 chat_pipeline._init_agent_state 中会初始化 _tool_messages_list = []
-    mock_agent._tool_messages_list = []
+    # P0-B1 契约：executor 经公有 API append_tool_messages 写入（Agent 实现落
+    # 轮次上下文）。mock 忠实模拟 Agent 行为：records 落到消费者可见列表。
+    store: list = []
+    mock_agent._tool_messages_list = store
+    mock_agent.append_tool_messages.side_effect = lambda records: store.extend(records)
     executor = ToolExecutor(mock_agent)
     # mock _execute_single_tool 避免真实工具执行
     executor._execute_single_tool = AsyncMock(return_value={"status": "ok"})
@@ -109,10 +112,16 @@ def test_multiple_tool_calls_all_recorded_in_agent_list():
 
 
 def test_agent_tool_messages_list_lazy_initialized():
-    """若 agent 未预初始化 _tool_messages_list，应懒初始化而非崩溃。"""
+    """agent 未预置存储时不得崩溃，消息经公有 API 有归属（P0-B1 契约）。
+
+    原断言（hasattr → _tool_messages_list 懒初始化）针对直写属性旧契约；
+    P0-B1 后 executor 只调 append_tool_messages，存储归 Agent 侧管理。
+    意图保持：不崩溃 + 消息有归属。
+    """
     mock_agent = MagicMock()
-    # 不预初始化 _tool_messages_list，模拟 loops/base.py 的懒初始化场景
-    del mock_agent._tool_messages_list
+    store: list = []
+    mock_agent.append_tool_messages.side_effect = lambda records: store.extend(records)
+    del mock_agent._tool_messages_list  # 模拟未预初始化场景
     executor = ToolExecutor(mock_agent)
     executor._execute_single_tool = AsyncMock(return_value={"status": "ok"})
 
@@ -125,6 +134,6 @@ def test_agent_tool_messages_list_lazy_initialized():
 
     asyncio.run(executor.execute_text_tool_calls(tool_calls))
 
-    # 修复应懒初始化并写入消息
-    assert hasattr(mock_agent, "_tool_messages_list")
-    assert len(mock_agent._tool_messages_list) == 1
+    assert mock_agent.append_tool_messages.call_count == 1
+    assert len(store) == 1
+    assert store[0]["tool_call_id"] == "call_lazy"

@@ -2,7 +2,7 @@
 温度引擎测试 - TemperatureEngine 完整测试覆盖
 """
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from neurova.memory import TemperatureEngine
 
 
@@ -113,7 +113,7 @@ class TestTemperatureOnDecay:
 
     def test_recent_access_no_decay(self):
         """今天访问过的记忆不应衰减"""
-        now = datetime.now().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         result = TemperatureEngine.on_decay(
             current_temp=50.0, last_accessed=now
         )
@@ -121,7 +121,7 @@ class TestTemperatureOnDecay:
 
     def test_basic_decay(self):
         """几天后应该有衰减"""
-        three_days_ago = (datetime.now() - timedelta(days=3)).isoformat()
+        three_days_ago = (datetime.now(timezone.utc) - timedelta(days=3)).isoformat()
         result = TemperatureEngine.on_decay(
             current_temp=50.0, last_accessed=three_days_ago
         )
@@ -132,13 +132,13 @@ class TestTemperatureOnDecay:
         """固化记忆不应衰减"""
         result = TemperatureEngine.on_decay(
             current_temp=100.0,
-            last_accessed=(datetime.now() - timedelta(days=30)).isoformat()
+            last_accessed=(datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         )
         assert result['new_temp'] == 100.0
 
     def test_emotion_protection(self):
         """高情感分数应该减缓衰减"""
-        days_ago = (datetime.now() - timedelta(days=7)).isoformat()
+        days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
         no_emotion = TemperatureEngine.on_decay(
             current_temp=50.0, last_accessed=days_ago, emotion_score=0.0
         )
@@ -149,7 +149,7 @@ class TestTemperatureOnDecay:
 
     def test_important_protection(self):
         """重要记忆应该减缓衰减"""
-        days_ago = (datetime.now() - timedelta(days=7)).isoformat()
+        days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
         normal = TemperatureEngine.on_decay(
             current_temp=50.0, last_accessed=days_ago, is_important=False
         )
@@ -160,7 +160,7 @@ class TestTemperatureOnDecay:
 
     def test_relation_protection(self):
         """多关联记忆应该减缓衰减"""
-        days_ago = (datetime.now() - timedelta(days=7)).isoformat()
+        days_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
         few_relations = TemperatureEngine.on_decay(
             current_temp=50.0, last_accessed=days_ago, relation_count=1
         )
@@ -171,8 +171,8 @@ class TestTemperatureOnDecay:
 
     def test_ebbinghaus_curve(self):
         """遗忘曲线应该影响衰减率"""
-        days_ago_1 = (datetime.now() - timedelta(days=1)).isoformat()
-        days_ago_7 = (datetime.now() - timedelta(days=7)).isoformat()
+        days_ago_1 = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        days_ago_7 = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
 
         result_1 = TemperatureEngine.on_decay(
             current_temp=50.0, last_accessed=days_ago_1
@@ -186,7 +186,7 @@ class TestTemperatureOnDecay:
 
     def test_return_dict_structure(self):
         """返回字典应包含必要字段"""
-        days_ago = (datetime.now() - timedelta(days=5)).isoformat()
+        days_ago = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
         result = TemperatureEngine.on_decay(
             current_temp=50.0, last_accessed=days_ago
         )
@@ -197,7 +197,7 @@ class TestTemperatureOnDecay:
 
     def test_temperature_never_negative(self):
         """温度不应为负"""
-        long_ago = (datetime.now() - timedelta(days=100)).isoformat()
+        long_ago = (datetime.now(timezone.utc) - timedelta(days=100)).isoformat()
         result = TemperatureEngine.on_decay(
             current_temp=10.0, last_accessed=long_ago
         )
@@ -205,7 +205,7 @@ class TestTemperatureOnDecay:
 
     def test_lifecycle_stage_active(self):
         """高温且近期访问应为active阶段"""
-        yesterday = (datetime.now() - timedelta(days=1)).isoformat()
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
         result = TemperatureEngine.on_decay(
             current_temp=60.0, last_accessed=yesterday
         )

@@ -7,10 +7,12 @@ P0-C2 修复：_safe_step 异常吞没测试
     这导致真实 bug（如 None.attr、错函数签名、错 import）被默默吞掉，
     步骤降级为 default 值，pipeline 继续运行，bug 永不暴露。
 
-修复策略（bug-hunt Phase 4 surgical fix）：
+修复策略（bug-hunt Phase 4 surgical fix + A-14 修订）：
     区分编程错误与运营错误：
-    - 编程错误（TypeError/AttributeError/NameError/ImportError/SyntaxError）→ re-raise
+    - 编程错误（TypeError/AttributeError/NameError/SyntaxError）→ re-raise
       让调用方看到真实 bug
+    - ImportError/ModuleNotFoundError → A-14：可选依赖缺失按步骤失败降级
+      （warning + FAILED + default），不炸穿整轮 chat()，但绝不静默吞掉
     - 运营错误（OSError/ConnectionError/TimeoutError/FileNotFoundError/ValueError/
       RuntimeError）→ 维持降级策略（log + default），保持管线韧性
     - KeyError 默认视为运营错误（dict 缺键在配置场景常见）
@@ -62,13 +64,21 @@ class TestSafeStepProgrammingErrors:
 
     @pytest.mark.asyncio
     async def test_import_error_not_swallowed(self, pipeline):
-        """ImportError（导入失败）应 re-raise"""
+        """A-14 契约：ImportError 降级为步骤失败 + warning，不再炸穿整轮。
+
+        原契约 re-raise；A-14 根因修复后 ModuleNotFoundError（可选依赖缺失）
+        不再 re-raise——但错误不被吞：记 StepStatus.FAILED 并返回 default。
+        """
+        result = None
 
         async def bad_step():
             import nonexistent_module_xyz  # noqa: F401
 
-        with pytest.raises(ImportError):
-            await pipeline._safe_step("bad_step", bad_step(), default="fallback")
+        result = await pipeline._safe_step("bad_step", bad_step(), default="fallback")
+        assert result == "fallback"
+        failed = [r for r in pipeline._step_results if r.step_name == "bad_step"]
+        assert failed, "ImportError 必须记入步骤结果（不许静默吞掉）"
+        assert failed[-1].status == StepStatus.FAILED
 
     @pytest.mark.asyncio
     async def test_syntax_error_not_swallowed(self, pipeline):

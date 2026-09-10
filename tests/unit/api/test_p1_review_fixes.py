@@ -21,6 +21,20 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")))
 
 
+@pytest.fixture(autouse=True)
+def _isolated_step_results_ctx():
+    """每个用例独立 _step_results 上下文，测试结束复位 ContextVar token。
+
+    用例内 `pipe._step_results = []`（property setter）会把 ContextVar 落在
+    线程基础上下文且不复位，泄漏给同 worker 后续测试——set/reset 必须成对。
+    """
+    from neurova.post_chat_pipeline import PostChatPipeline
+
+    token = PostChatPipeline._step_results_ctx.set([])
+    yield
+    PostChatPipeline._step_results_ctx.reset(token)
+
+
 class TestMemoryToDictOrigin:
     """修③: origin 枚举序列化"""
 

@@ -72,6 +72,10 @@ class UsageHistoryStore:
     def _ensure_conn(self) -> sqlite3.Connection:
         if self._conn is None:
             self._conn = self._connect()
+            # 常驻连接必须 autocommit（isolation_level=None）：否则 INSERT 的
+            # 隐式事务永不提交，WAL 下其他读连接永久看不到已记数据（统计恒 0），
+            # 且进程退出未提交数据全丢。原每次新建连接时由 `with conn:` 隐式提交。
+            self._conn.isolation_level = None
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA busy_timeout=4000")
         return self._conn

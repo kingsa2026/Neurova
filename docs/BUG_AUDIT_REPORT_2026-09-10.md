@@ -559,3 +559,49 @@ const started: PlanSession = res.data.data.session   // res.data={session} → r
 - **前端**：F-02~F-12（未读数轮询恒假、竞态守卫、SSE 缓冲偏移、401 退避等）
 
 > 说明：9.1 覆盖全部 **16 条 P0** 与多数高影响 **P1**。因并行修复 agent 在当前环境不可用（模型调度失败），剩余项由主 agent 按根因原则逐步修复；建议后续用集成测试（跨模块契约）守护，防止同类契约错位复发。
+
+---
+
+## 9.6 第二轮全量核实与收口（2026-09-10/11）
+
+> 方式：4 路只读核查（Agent 核心/记忆层/LLM+API 安全/通道+前端）逐条核实 9.3 "尚未修复"清单的真实状态 → 7 组并行修复（文件归属零交集）→ 主会话合并回归甄别。
+
+### 9.6.1 进度核实修正（文档滞后于代码，实际已修）
+
+- **A-12**（trace_id 双写串台）：已拆分 `reasoning_trace_id`，代码与注释齐全。
+- **S-15**（上传无限制/无锁）：分块读取+100MB 上限+危险扩展名黑名单+`_files_store_lock` 已落地。
+- **S-21**（token 黑名单只增不减）：已改有界 dict + TTL 语义（`_BLACKLIST_MAX=20000`）。
+- **C-11**（Docker 沙箱未隔离）：`--network=none --read-only --memory=512m --pids-limit=128` 已加。
+- **C-12**（同步工具裸调阻塞循环）：已 `to_thread + wait_for` 强制超时。
+- **C-14**（WS 重连属性名错位/无退避）：已统一 `_reconnect_attempts` + 指数退避封顶 300s + 任务强引用。
+- **F-02 / F-03 / F-09**（未读轮询恒假/会话竞态守卫/定时器泄漏）：均已修。
+- **S-04 前半**（注册验证码）：`VerificationCodeModel` + 限流已接入（首账号门控见 9.6.2）。
+
+### 9.6.2 本轮修复（46 项缺陷 + 1 项非缺陷澄清）
+
+**Agent 核心（A 组+B 组，14 项）**：A-03（agent_id 改读 `config.agent_id`，放大视角同修 EKB 写入点）、A-04（`_current_user_input` 改 ContextVar 绑定 property，三处消费方自动恢复）、A-05（`_PersistDbStore.close()` + 关闭链路接入）、A-06（双队列 split-brain 收敛到 `memory_manager._write_queue` 单队列；顺带修 `if queue:` 被 `__bool__` 陷阱吞掉 `enqueue_batch` 的同根因命中点）、A-07（模型切换锁改实例级）、A-08（拓扑序补 `evolution→tools` 依赖，`register_tools` 恢复执行）、A-11（`predict_step` 补 `NotImplementedError`）、A-13（RSI 迭代 `to_thread`）、A-14（ImportError 移出编程错误集，可选依赖缺失降级为步骤失败+warning 不炸穿整轮）、A-15（失败分支 debug→warning+exc_info；收口见下）、A-16（metadata 判空经 `getattr`）、A-17（max_tokens None 守卫）、A-18（ToolEngine 急切构建，锁整个删除）、A-19（流式轮次上限与非流式同源 `_max_tool_rounds`）、A-20（观察者协程强引用）、A-21（命令轮提前 return 路由过 `_clear_vision_routing`）。
+**A-15 终态收口**：MuscleMemory 新增公开 `degrade_tool(tool_name)`（锁内重置、锁外落盘），agent_core 降级路径不再触私有 `_l1/_l2/_l3`。
+
+**记忆认知层（12 项）**：M-13（插件通道 join/gather 加 12s 超时，部分结果继续）、M-15（DELETE 连接 busy_timeout+finally）、M-16（from_dict 补 embedding/last_accessed_at/三模型时间字段回填）、M-17（update_memory 枚举兜底）、M-18（avg_temperature 分母改记忆条数）、M-19（`_save_all` 统一锁外落盘+公开 `save_all()`）、M-20（`_load_level` 逐条容错，坏条目不再清零整层）、M-21（TKG 逐行枚举容错+`FACTS_LOAD_LIMIT=200000` 可配置）、M-22（`get_recent_memories` 对齐 fromisoformat+锁内过滤）、M-23（set_emotion 落盘移出锁）、M-24（in-flight 计数修复 `wait_for_completion` 过早返回+Event 丢唤醒）、M-25（自定义 id 跨作用域互踩：upsert 改作用域三元组 WHERE 收敛，冲突落 `\x1f` 前缀行，旧库免迁移兼容）。
+
+**LLM 层+API key（7 项）**：L-15（探测 error 字段落值+错误结果不进 3600s 缓存；内层 `except: return False` 全部改 raise 透传——这是 error 从不赋值的真正根因）、L-16（流式探测 `aclose` 收口）、L-17（completed+video_url 改真实下载返回字节，不再空轮询 300s 假超时）、L-18（`clamp_max_tokens` 容忍 None+截断一次性 warning）、L-19（provider 单例键纳入 config_path）、L-20（`_model_matches` 单源匹配剥 `-latest/-preview`，qwen-plus↔qwen-plus-latest 互通）、S-19（validate_key 落盘 30s 防抖+关键变更立即落+atexit flush）。
+
+**API/安全（6 项）**：S-08 定点收口（trace×4+audit×3 `require_admin`（audit 前端挂在 platformAdmin；trace 按 agent 页面降级 `get_current_user`）、console upload/annotations 登录门槛；全局白名单机制留待前端全量调用审计后实施）、S-10（有凭证但无效→401，不再静默变 default 身份；完全无凭证回落保留保桌面首启）、S-13（`_initialize_components` 改 `to_thread`，审计确认无线程不安全 asyncio 原语）、S-17 残余（WS finally 收口+client_id 服务端派生，前端零依赖确认）、S-18（/push/message 改 `require_admin`）、S-04 残余（`NEUROVA_BOOTSTRAP_ADMIN_TOKEN` env 或 `data/bootstrap_admin.ini` 配置时首账号注册强制 hmac.compare_digest 校验，未配置保持桌面"注册即管理员"默认+warning；/setup-status 保留，抢注风险已被门控覆盖）。
+
+**通道/进化/沙箱（11 项+1 澄清）**：C-13（disconnect 探测 SDK stop/close+join(5s) 幂等）、C-15（`_maybe_persist` 移出外层 RLock，修正误导注释）、C-16（window_size 校验回落+空历史安全值）、C-17（`random.Random(seed)` 实例化可注入）、C-18（telegram 临时文件 7 处消费点 try/finally 清理——真实缺陷是异常路径泄漏）、C-19（`cached` 装饰器全库零使用点→删除 -76 行）、C-20（`_validate_parameters` 接线会误判 LLM 参数类型→删除死代码）、C-21（mobile_pairing 加 RLock+`_revoked_tokens` 改有界 dict+配对码改 `secrets.choice`）、C-22（沙箱超时 POSIX killpg/Windows taskkill /T /F 杀进程树，Windows 实测杀灭 ping 孙进程）、C-23（feishu URL 挑战 fail-closed 比对 verification_token）、C-24（`_message_handlers` __init__ 直建+快照遍历）、**C-25 澄清非缺陷**（lark-oapi 固定间隔+jitter 无限重连、dingtalk-stream 指数退避封顶 60s，重连由 SDK 管理）。
+
+**前端（8 项）**：F-04（TTS 缓冲边界改用切分函数返回的滞留段精确对齐，indexOf 反推删除）、F-05（401 单飞刷新：共享 Promise+重放一次+失败清凭证跳登录，refresh_token 首次接入）、F-06（画布 interval isDisposed 守卫+兜底定时器句柄收口+onBeforeUnmount unsubscribe）、F-07（computed 内自写 ref 移除，getter 纯函数化）、F-08（重试被中止不再 markSent 出队）、F-10（孤儿 AbortController 删除）、F-11（ModelPage 卸载守卫）、F-12（SettingPage 未加载禁保存+11 语言 i18n）。
+
+### 9.6.3 合并回归甄别与回归修复（主会话）
+
+合并回归采用 HEAD worktree 对照法（注意：HEAD 在 `tests/unit/memory/test_pending_memory.py` 存在收集期错误会中断全量收集，跨目录 HEAD 基线须按目录分别采集）。发现并根修 5 处回归/缺陷：
+
+1. **usage_history 常驻连接丢 commit（生产级，P1-E5 优化引入）**：record() 改常驻连接后丢失 `with conn:` 的隐式提交，INSERT 滞留未提交事务，WAL 下所有读连接永久不可见 → token 统计静默归零。根修：常驻连接 `isolation_level=None`（autocommit）。顺带修好 usage_overview 3 项预存失败。
+2. **A-14 契约适配**：`test_post_chat_pipeline_safe_step` 仍按旧契约断言 ImportError re-raise → 按新契约改写（FAILED 记录+default，不炸穿）。
+3. **P0-B1 契约 harness 滞后 ×2**：`test_tool_executor_messages_fix`（4）与 `test_p2_tool_executor_fixes`（3）仍断言直写 `_tool_messages_list` → mock 忠实模拟 `append_tool_messages` 公有 API（records 落消费者可见列表），12 用例转绿。
+4. **ContextVar 测试污染 ×3**：`pipe._step_results = []`（property setter）落线程基础上下文且不复位，泄漏同 worker 全部后续测试（neurflow 集成 6 项假红）。修复 test_a03 文件（autouse fixture set/reset 成对）+ 扫荡修复预存泄漏点 test_ekb_agent_isolation、test_p1_review_fixes。
+5. **测试脚本缺陷 ×2**：TOCTOU 源码断言 `lock_line_idx` 缺 `is None` 守卫（被 M-11 第二个锁块覆盖成假红）；温度测试喂 naive 本地时间与 naive→UTC 生产契约错位（UTC+8 下 1 天算成 16h 命中不衰减早退）——统一 aware UTC；moe 时序测试 `0.0<0.0`（100 次空转低于计时器分辨率）→ perf_counter+20000 次迭代确定性化。
+
+**台账（预存/不修，均有 HEAD 或隔离复现证据）**：`tests/unit/execution/test_tool_engine.py`×7（幽灵 API harness）、`tests/unit/llm`×9（provider 契约错位，根因 `provider.py:446` 收 MagicMock）、`tests/unit/api`×4（agent_package×2/execution_events/mobile_pairing）、`test_auth_system`×1（黑名单结构不匹配）、agent+tools 目录其余 58 failed+14 errors（HEAD 同样失败，含 capability_graph_phase3×21/unified_tool_registry×14 等陈旧 harness）、`test_files_api_security_p0.py` 隔离运行挂起（files_api 域）、`test_memory_source_unification::test_moe_router_reads_persist_db` 偶发顺序 flaky（多轮定向复现未果，疑 MoE 后台索引线程竞态）、console.py:1518 docstring 失实（称支持 Bearer 头实仅 query token）。
+
+**最终回归状态**：agent+tools 当前失败集为 HEAD 基线真子集（零新增，另修复 13 项预存）；cognitive_layers+memory+core 确定性失败清零；llm+api+security 仅剩台账预存 14 项；channels+evolution+sandbox+execution 仅剩台账预存 7 项；前端 vitest 1260/1260 绿 + vue-tsc 零错误。新增回归测试 39 文件（约 150+ 用例）均先红后绿实证。
