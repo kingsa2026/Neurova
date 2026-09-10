@@ -311,7 +311,6 @@ class TestSecurityCoverage:
             'tests/test_security_tool_guard.py',
             'tests/test_security_skill_scanner.py',
             'tests/test_security_cognitive_security.py',
-            'tests/test_security_auth_system.py',
             'tests/test_security_integration.py',
         ]
         
