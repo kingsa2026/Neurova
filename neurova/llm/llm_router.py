@@ -329,7 +329,7 @@ def resolve_model_context_window(model_name: str) -> int:
             for mid, meta in metadata.items():
                 if not isinstance(meta, dict):
                     continue
-                if needle and needle in str(mid).lower():
+                if needle and str(mid).lower() in needle:
                     window = int(meta.get("context_window", 0) or 0)
                     if window > 0 and window != _PLACEHOLDER_WINDOW:
                         return window
@@ -340,7 +340,7 @@ def resolve_model_context_window(model_name: str) -> int:
                     continue
                 mid = str(getattr(entry, "id", "") or "")
                 window = int(getattr(entry, "context_window", 0) or 0)
-                if mid and needle and needle in mid.lower() and window > 0 and window != _PLACEHOLDER_WINDOW:
+                if mid and needle and mid.lower() in needle and window > 0 and window != _PLACEHOLDER_WINDOW:
                     return window
     except Exception:
         pass  # 元数据不可用 → 下一优先级

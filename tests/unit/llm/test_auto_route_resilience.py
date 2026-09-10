@@ -9,6 +9,11 @@ Auto 路由故障韧性测试（2026-09-03 第三轮）
    合理间隔防抖（默认 300s 内不重复刷新）。
 """
 import time
+
+import pytest
+
+# L-11 修复后 client=None 不再伪造成功；本文件验证真实客户端路由，缺 openai 库时跳过
+pytest.importorskip("openai")
 import unittest
 from typing import List
 from unittest.mock import MagicMock, patch
