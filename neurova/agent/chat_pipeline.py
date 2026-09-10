@@ -138,6 +138,10 @@ class ChatContext:
     crystallized_patterns: List = field(default_factory=list)
     context: List[Dict] = field(default_factory=list)
     trace_id: Optional[str] = None
+    # BUG AUDIT A-12: 推理链追踪（ReasoningTraceManager）曾直接覆写 ctx.trace_id，
+    # 与轨迹记录器（TrajectoryRecorder）共用同一字段 → 轨迹事件归因到错误的 trace、
+    # 原轨迹无法正常结束。拆分为独立字段。
+    reasoning_trace_id: Optional[str] = None
     reply: Optional[str] = None
     caller_provided_history: bool = False
     # P1-10 写入围栏: turn 开始时 claim 的写入权属凭证（FenceClaim），
@@ -1220,9 +1224,9 @@ class ChatPipeline:
 
     async def _step_retrieve_and_build_context(self, ctx: ChatContext):
         """统一检索 + 结晶经验 + 上下文构建"""
-        # 启动推理链
+        # 启动推理链（使用独立字段，避免覆盖轨迹 trace_id —— A-12）
         if self.trace_manager:
-            ctx.trace_id = self.trace_manager.start_trace(ctx.user_input)
+            ctx.reasoning_trace_id = self.trace_manager.start_trace(ctx.user_input)
 
         # 统一检索
         await self._retrieve_memories(ctx)
@@ -1311,9 +1315,9 @@ class ChatPipeline:
         )
 
         # 记录到追踪系统
-        if ctx.trace_id and self.trace_manager:
+        if ctx.reasoning_trace_id and self.trace_manager:
             self.trace_manager.add_step(
-                ctx.trace_id,
+                ctx.reasoning_trace_id,
                 "retrieve",
                 ctx.user_input,
                 f"找到 {len(ctx.relevant_memories)} 条记忆 (质量: {result.quality_level.value})",
@@ -1520,9 +1524,9 @@ class ChatPipeline:
         )
 
         # 记录到追踪系统
-        if ctx.trace_id and self.trace_manager:
+        if ctx.reasoning_trace_id and self.trace_manager:
             self.trace_manager.add_step(
-                ctx.trace_id,
+                ctx.reasoning_trace_id,
                 "crystallize",
                 ctx.user_input,
                 f"检索到 {len(ctx.crystallized_patterns)} 条结晶经验 (状态: {result.status.value})",
@@ -2150,7 +2154,7 @@ class ChatPipeline:
             )
 
         # 推理链记录
-        if ctx.trace_id and self.trace_manager:
+        if ctx.reasoning_trace_id and self.trace_manager:
             try:
                 # P2 剩余清单：优先真实 usage（usage_accounting.last_call，multi_model_client
                 # 已入账）；无真实值时回退字符长度估算（向后兼容）
@@ -2164,7 +2168,7 @@ class ChatPipeline:
                         total_tokens = last["total_tokens"]
                 except Exception:
                     pass
-                self.trace_manager.finish_trace(ctx.trace_id, ctx.reply or "", total_tokens=total_tokens)
+                self.trace_manager.finish_trace(ctx.reasoning_trace_id, ctx.reply or "", total_tokens=total_tokens)
             except Exception as e:
                 logger.warning("推理链记录失败: %s", e)
 

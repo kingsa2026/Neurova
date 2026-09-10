@@ -120,6 +120,10 @@ class TestErrorTaxonomy:
 
         generic = LLMClient._wrap_llm_error(_generic_api_error())
         assert isinstance(generic, LLMServiceUnavailableError) and "error-500" in str(generic)
+        # 2026-09-10 事故回归：httpx 流中读超时（空消息）包装为连接错误
+        # （曾漏分类原样透传 raw httpx 异常 → 流内兜底 bad_request）
+        httpx_timeout = LLMClient._wrap_llm_error(httpx.ReadTimeout(""))
+        assert isinstance(httpx_timeout, LLMConnectionError) and "ReadTimeout" in str(httpx_timeout)
         # 未知异常（无类型/状态码/关键词命中）原样透传，不篡改类型
         weird = ValueError("totally unknown")
         assert LLMClient._wrap_llm_error(weird) is weird

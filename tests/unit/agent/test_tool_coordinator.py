@@ -77,6 +77,27 @@ class TestCoordinatorOffload:
         await asyncio.wait_for(finished.wait(), timeout=2.0)
 
     @pytest.mark.asyncio
+    async def test_spawn_offload_envelope_carries_poll_hint(self):
+        """P1（2026-09-10 蜂群排查）：spawn_subagent 转后台信封必须携带
+        subagent_status 轮询提示——信封的 task_id（bg_xxx）查不了 swarm
+        记录，主 agent 需要知道可主动轮询而不是傻等 hints 注入。"""
+        coordinator = ToolCoordinator()
+
+        async def slow():
+            await asyncio.sleep(0.3)
+            return {"report": "子任务报告"}
+
+        envelope = await coordinator.run_with_timeout("spawn_subagent", slow, timeout=0.02)
+        assert envelope["status"] == "background"
+        assert "subagent_status" in envelope["message"], (
+            f"spawn 转后台信封必须提示 subagent_status 轮询，got {envelope['message']!r}"
+        )
+
+    def test_spawn_subagent_has_registered_timeout(self):
+        """P2：spawn_subagent 落表 600s——60s 默认对蜂群子任务是必然转后台"""
+        assert get_tool_timeout("spawn_subagent") == 600
+
+    @pytest.mark.asyncio
     async def test_background_result_lands_in_pending_hints(self):
         coordinator = ToolCoordinator()
 

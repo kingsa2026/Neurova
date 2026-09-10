@@ -92,6 +92,32 @@ class TestSpawnForeground:
         assert result["status"] == "failed"
         assert "LLM 超时" in result["error"]
 
+    @pytest.mark.asyncio
+    async def test_spawn_streams_subagent_llm(self, swarm):
+        """P0（2026-09-10 蜂群超时排查）：子 agent LLM 必须流式。
+
+        非流式的读超时是"整段生成总窗口"（服务器算完才回），思考型子 agent
+        生成整份报告超过窗口即 ReadTimeout；流式按字节间隙计，长任务免疫。
+        小窗实时显示（SUBAGENT_CHUNK）也依赖流式透传。
+        """
+        agent = make_mock_agent()
+        with patch("neurova.api.endpoints.get_agent_instance", return_value=agent):
+            await swarm.spawn(task="调研某主题", agent_id="researcher")
+
+        _, kwargs = agent.chat.call_args
+        assert kwargs.get("stream") is True, "swarm._execute 必须显式传 stream=True"
+
+    @pytest.mark.asyncio
+    async def test_llm_error_report_marks_failed(self, swarm):
+        """P3（2026-09-10）：非流式路径 LLM 失败不抛异常，返回
+        "[LLM Error] ..." 文本——不得当正常报告标 completed。"""
+        agent = make_mock_agent(reply="[LLM Error] LLM 调用失败: 连接失败: ReadTimeout")
+        with patch("neurova.api.endpoints.get_agent_instance", return_value=agent):
+            result = await swarm.spawn(task="任务")
+
+        assert result["status"] == "failed"
+        assert "ReadTimeout" in (result.get("error") or "")
+
 
 class TestBackgroundSpawn:
     """后台派生"""
@@ -120,6 +146,26 @@ class TestBackgroundSpawn:
     @pytest.mark.asyncio
     async def test_status_unknown_id(self, swarm):
         assert "error" in swarm.status("swarm_nonexistent")
+
+    @pytest.mark.asyncio
+    async def test_status_without_id_lists_recent_runs(self, swarm):
+        """P1（2026-09-10）：subagent_id 可省略——转后台信封里的 task_id
+        （bg_xxx）查不了 swarm 记录，主 agent 需要按列表主动轮询。"""
+        agent = make_mock_agent()
+
+        async def slow_chat(*args, **kwargs):
+            await asyncio.sleep(0.05)
+            return {"text": "后台完成"}
+
+        agent.chat = AsyncMock(side_effect=slow_chat)
+        with patch("neurova.api.endpoints.get_agent_instance", return_value=agent):
+            spawned = await swarm.spawn(task="长任务", background=True)
+
+        listing = swarm.status("")
+        assert listing["status"] == "list"
+        assert any(
+            r["subagent_id"] == spawned["subagent_id"] for r in listing["runs"]
+        ), "省略 id 时必须返回最近派生列表（含刚派生的）"
 
 
 class TestEventBroadcast:

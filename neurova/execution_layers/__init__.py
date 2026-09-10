@@ -326,6 +326,24 @@ class DockerExecutor(ExecutionRuntime):
         try:
             cmd = ["docker", "run", "--rm"]
 
+            # BUG AUDIT C-11: 原先裸 `docker run --rm` 无任何隔离，却被
+            # exec_sandbox 当"真隔离"后端使用。补齐最小安全隔离集：
+            # 断网 + 只读根 fs + 资源上限 + 非特权用户 + 禁提权。
+            cmd.extend(
+                [
+                    "--network=none",
+                    "--read-only",
+                    "--memory=512m",
+                    "--pids-limit=128",
+                    "--user",
+                    "nobody",
+                    "--security-opt=no-new-privileges",
+                    "--cap-drop=ALL",
+                    "--tmpfs",
+                    "/tmp:rw,noexec,nosuid,size=64m",
+                ]
+            )
+
             # 添加环境变量
             if env:
                 for key, value in env.items():
