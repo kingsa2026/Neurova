@@ -13,6 +13,20 @@ from neurova.skills.experience_knowledge_base import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolated_step_results_ctx():
+    """每个用例独立 _step_results 上下文，测试结束复位 ContextVar token。
+
+    用例内 `pipe._step_results = []`（property setter）会把 ContextVar 落在
+    线程基础上下文且不复位，泄漏给同 worker 后续测试——set/reset 必须成对。
+    """
+    from neurova.post_chat_pipeline import PostChatPipeline
+
+    token = PostChatPipeline._step_results_ctx.set([])
+    yield
+    PostChatPipeline._step_results_ctx.reset(token)
+
+
 @pytest.fixture
 def ekb(tmp_path):
     return ExperienceKnowledgeBase(db_path=str(tmp_path / "ekb.db"))
@@ -69,7 +83,8 @@ def test_pipeline_writers_pass_agent_identity(tmp_path, monkeypatch):
     pipe._step_results = []
     pipe._agent = SimpleNamespace(
         _collect_tool_messages=lambda: [],
-        agent_id="audit-agent",
+        # A-03 适配：真 Agent 的 agent_id 在 config.agent_id（无顶层属性）
+        config=SimpleNamespace(agent_id="audit-agent"),
         session_id="sess-1",  # 真 Agent 上是 property（见 test_agent_turn_session_contract）
         _current_session_id="sess-1",
     )

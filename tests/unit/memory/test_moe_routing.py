@@ -257,21 +257,23 @@ class TestMoEPerformance:
             channels[f"ch_{i}"] = ch
 
         # 模拟 MoE 模式：只执行 2 个通道
-        start = time.time()
+        # 确定性化：100 次空转低于 perf_counter 分辨率（双方恒 0.0 → 0.0<0.0 假红），
+        # 提高工作量使两段计时均可测，比值关系（2/6）才稳定成立。
+        start = time.perf_counter()
         for name in ["ch_0", "ch_1"]:
             ch = channels[name]
             # 模拟检索延迟
-            for _ in range(100):
+            for _ in range(20000):
                 pass
-        moe_time = time.time() - start
+        moe_time = time.perf_counter() - start
 
         # 模拟全通道模式：执行 6 个通道
-        start = time.time()
+        start = time.perf_counter()
         for name in channels:
             ch = channels[name]
-            for _ in range(100):
+            for _ in range(20000):
                 pass
-        all_time = time.time() - start
+        all_time = time.perf_counter() - start
 
         # MoE 应该更快
         assert moe_time < all_time
