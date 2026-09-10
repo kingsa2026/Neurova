@@ -377,15 +377,34 @@ function submitManualFeedback(text: string) {
 // 铃铛未读数：SSE 流优先（补课 2.2），断流降级 60s 轮询
 const unreadCount = computed(() => notifStore.unreadTotal)
 let unreadTimer: ReturnType<typeof setInterval> | null = null
+let unreadGraceTimer: ReturnType<typeof setTimeout> | null = null
 let closeUnreadStream: (() => void) | null = null
+// BUG AUDIT F-02: 原判据 `!closeUnreadStream` 恒假（上一行已赋值为关闭函数）
+// → SSE 失败降级轮询永不触发、未读数恒 0。改为跟踪 SSE 真实连接状态。
+let unreadSseHealthy = false
 
 const startUnreadStream = () => {
-  closeUnreadStream = subscribeUnreadStream((count) => {
-    notifStore.setUnreadTotal(count)
-  })
-  // 3s 宽限：若 SSE 首帧/连接未建立（404/断网），降级轮询
-  setTimeout(() => {
-    if (notifStore.unreadTotal === 0 && !closeUnreadStream) startPolling()
+  closeUnreadStream = subscribeUnreadStream(
+    (count) => {
+      unreadSseHealthy = true
+      notifStore.setUnreadTotal(count)
+    },
+    (status) => {
+      if (status === 'error') {
+        // SSE 建立失败（404/断网/网关错误）→ 立即降级轮询
+        unreadSseHealthy = false
+        startPolling()
+      } else if (status === 'closed') {
+        // 服务端结束流 → 轮询兜底
+        startPolling()
+      }
+      // connected：等待首帧即置 healthy（onUnread 回调里也会置）
+    },
+  )
+  // 3s 宽限：既未收到首帧也未报错（如网关挂起不响应）→ 降级轮询。
+  // F-09: 句柄保存，onUnmounted 一并清理（原句柄丢失，卸载后残留触发）。
+  unreadGraceTimer = setTimeout(() => {
+    if (!unreadSseHealthy) startPolling()
   }, 3000)
 }
 
@@ -406,6 +425,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (unreadTimer) clearInterval(unreadTimer)
+  if (unreadGraceTimer) clearTimeout(unreadGraceTimer)
   if (closeUnreadStream) closeUnreadStream()
 })
 

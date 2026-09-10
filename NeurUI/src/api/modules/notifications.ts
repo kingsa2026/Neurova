@@ -82,12 +82,20 @@ export function getPushStats() {
 /** 铃铛未读数流回调类型 */
 export type UnreadStreamCallback = (count: number) => void
 
+/** SSE 流状态通知（BUG AUDIT F-02：调用方降级轮询需要真实连接状态，
+ * 此前返回的关闭函数恒为真值，"未建立连接"判断恒假 → 降级永不触发） */
+export type UnreadStreamStatus = 'connected' | 'error' | 'closed'
+
 /**
  * 订阅未读数 SSE 流（fetch+ReadableStream——EventSource 无法带 Bearer 头）。
  *
- * 返回关闭函数；断流后由调用方决定降级（MainLayout 会回退 60s 轮询）。
+ * 返回关闭函数；onStatus（可选）在连接建立/失败/结束时回调，
+ * 断流后由调用方决定降级（MainLayout 会回退 60s 轮询）。
  */
-export function subscribeUnreadStream(onUnread: UnreadStreamCallback): () => void {
+export function subscribeUnreadStream(
+  onUnread: UnreadStreamCallback,
+  onStatus?: (status: UnreadStreamStatus) => void,
+): () => void {
   const controller = new AbortController()
   const token = secureStorage.get(TOKEN_KEY)
   const base = config.apiBaseUrl
@@ -99,7 +107,11 @@ export function subscribeUnreadStream(onUnread: UnreadStreamCallback): () => voi
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         signal: controller.signal,
       })
-      if (!resp.ok || !resp.body) return
+      if (!resp.ok || !resp.body) {
+        onStatus?.('error')
+        return
+      }
+      onStatus?.('connected')
       const reader = resp.body.getReader()
       const decoder = new TextDecoder()
       let buf = ''
@@ -121,9 +133,11 @@ export function subscribeUnreadStream(onUnread: UnreadStreamCallback): () => voi
           }
         }
       }
+      // 服务端正常结束流 → 通知调用方降级兜底
+      onStatus?.('closed')
     } catch (e) {
       if ((e as Error).name !== 'AbortError') {
-        // 断流静默——调用方降级轮询
+        onStatus?.('error')
       }
     }
   })()

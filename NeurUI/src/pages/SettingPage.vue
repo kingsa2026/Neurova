@@ -32,32 +32,11 @@
         </GlassCard>
       </a-tab-pane>
 
-      <!-- LLM -->
-      <a-tab-pane key="llm" :tab="t('settings.llm')">
-        <GlassCard :title="t('settings.llmSettings')">
-          <a-form layout="vertical" :model="llm" :rules="{ default_provider: [{ required: true, message: t('common.required') }], default_model: [{ required: true, message: t('common.required') }] }">
-            <a-form-item :label="t('model.providers')">
-              <a-select v-model:value="llm.default_provider" style="width: 100%">
-                <a-select-option v-for="p in providerOptions" :key="p" :value="p">{{ p }}</a-select-option>
-              </a-select>
-            </a-form-item>
-            <a-form-item :label="t('model.active')">
-              <a-input v-model:value="llm.default_model" />
-            </a-form-item>
-            <a-form-item :label="t('agent.temperature')">
-              <a-slider v-model:value="llm.temperature" :min="0" :max="2" :step="0.1" />
-            </a-form-item>
-            <a-form-item :label="t('agent.maxTokens')">
-              <a-input-number v-model:value="llm.max_tokens" :min="1" :max="128000" style="width: 100%" />
-            </a-form-item>
-          </a-form>
-          <template #footer>
-            <GlassButton variant="primary" size="sm" :loading="saving" @click="saveSection('llm')">{{ t('common.save') }}</GlassButton>
-          </template>
-        </GlassCard>
-      </a-tab-pane>
-
       <!-- Security -->
+      <!-- LLM 默认模型设置在 LLM 服务商管理页（ModelPage 表头，真实链路=apiActivateModel
+           + getActiveModel 回读）；此前系统设置里的 default_provider/default_model 是
+           /v1/settings 假存（进程内 dict 重启即丢）上的第三入口，且 prefill 会用假数据
+           覆盖真实 active 状态，已随温度迁出一起删除 -->
       <a-tab-pane key="security" :tab="t('settings.security')">
         <GlassCard :title="t('settings.securitySettings')">
           <a-form layout="vertical" :model="security" :rules="{ jwt_secret: [{ required: true, message: t('common.required') }] }">
@@ -207,10 +186,8 @@ const activeTab = ref('general')
 const saving = ref(false)
 const clearingCache = ref(false)
 const isDark = ref(appStore.isDark)
-const providerOptions = ref<string[]>([])
 
 const general = ref({ app_name: 'Neurova', language: locale.value })
-const llm = ref({ default_provider: '', default_model: '', temperature: 0.7, max_tokens: 4096 })
 const security = ref({ jwt_secret: '', jwt_expiry_hours: 24, min_password_length: 8, require_special: true })
 const storage = ref({ media_path: '/data/media', max_upload_mb: 50, cache_ttl_minutes: 60 })
 const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false })
@@ -277,11 +254,9 @@ const fetchSettings = async () => {
     const res = await getSettings()
     const data = res?.data
     if (data?.general) general.value = { ...general.value, ...data.general }
-    if (data?.llm) llm.value = { ...llm.value, ...data.llm }
     if (data?.security) security.value = { ...security.value, ...data.security }
     if (data?.storage) storage.value = { ...storage.value, ...data.storage }
     if (data?.advanced) advanced.value = { ...advanced.value, ...data.advanced }
-    if (data?.providers) providerOptions.value = data.providers
   } catch {
     message.error(t('common.error'))
   }
@@ -290,7 +265,7 @@ const fetchSettings = async () => {
 const saveSection = async (section: string) => {
   saving.value = true
   try {
-    const sectionMap: Record<string, any> = { general: general.value, llm: llm.value, security: security.value, storage: storage.value, advanced: advanced.value }
+    const sectionMap: Record<string, any> = { general: general.value, security: security.value, storage: storage.value, advanced: advanced.value }
     await updateSettings(section, sectionMap[section])
 
     if (section === 'general' && general.value.language !== locale.value) {
