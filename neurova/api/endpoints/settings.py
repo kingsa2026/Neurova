@@ -37,9 +37,9 @@ _default_settings = {
     "language": "zh-CN",
     "auto_save": True,
     "notifications": True,
-    "max_tokens": 4096,
-    "temperature": 0.7,
     "stream_mode": True,
+    # 2026-09-10：max_tokens/temperature 两键移除——全链零消费的死参数；
+    # 温度已迁记忆设置 llm.temperature（全局默认生成温度，agent 显式值优先）
 }
 
 # CORS 配置文件路径

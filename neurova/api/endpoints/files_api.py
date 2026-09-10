@@ -17,7 +17,9 @@
 
 from neurova.core.logger import get_logger
 import mimetypes
+import os
 import re
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -33,6 +35,15 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 STORAGE_ROOT = Path("storage/users")
+
+# BUG AUDIT S-15: 上传原先 await file.read() 全量读内存且无大小/类型限制，
+# 恶意/超大上传可打满内存与磁盘。改为分块流式落盘 + 大小上限 + 危险扩展名黑名单。
+_MAX_UPLOAD_BYTES = int(os.environ.get("NEUROVA_MAX_UPLOAD_MB", "100")) * 1024 * 1024
+_UPLOAD_CHUNK = 1024 * 1024  # 1 MiB
+_DANGEROUS_EXTENSIONS = {
+    ".exe", ".bat", ".cmd", ".com", ".scr", ".msi", ".ps1", ".vbs", ".vbe",
+    ".dll", ".so", ".dylib", ".jar",
+}
 
 
 class FileInfo(BaseModel):
@@ -63,6 +74,8 @@ class StorageInfo(BaseModel):
 
 
 _files_store: Dict[str, Dict[str, Any]] = {}
+# BUG AUDIT S-15: 全局 dict 的写入点（上传/删除）加锁，防并发写竞争
+_files_store_lock = threading.Lock()
 
 # ---------------------------------------------------------------------------
 # SQLite 持久化（2026-09-08 产物预览计划 W1-4）：_files_store 原为纯内存，
@@ -283,6 +296,10 @@ async def upload_file(
     if not safe_filename or safe_filename in (".", ".."):
         safe_filename = "unknown"
 
+    # BUG AUDIT S-15: 危险可执行扩展名拒绝上传（防落地即被 Shell 工具执行）
+    if Path(safe_filename).suffix.lower() in _DANGEROUS_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="File type not allowed")
+
     # 确定存储路径
     file_type = _determine_file_type(safe_filename)
     storage_dir = STORAGE_ROOT / user_id / "agents" / agent_id / "sessions" / session_id / file_type
@@ -300,8 +317,27 @@ async def upload_file(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    content = await file.read()
-    file_path.write_bytes(content)
+    # BUG AUDIT S-15: 分块流式落盘 + 大小上限（原 await file.read() 全量读内存，
+    # 一次 2GB 上传即可打满进程内存）
+    total_size = 0
+    try:
+        with open(file_path, "wb") as out:
+            while True:
+                chunk = await file.read(_UPLOAD_CHUNK)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > _MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large (max {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
+                    )
+                out.write(chunk)
+    except HTTPException:
+        file_path.unlink(missing_ok=True)  # 超限即清残留，不留半截文件
+        raise
+    finally:
+        await file.close()
 
     mime, _ = mimetypes.guess_type(safe_filename)
     info = {
@@ -309,7 +345,7 @@ async def upload_file(
         "filename": safe_filename,
         "file_type": file_type,
         "mime_type": mime or "application/octet-stream",
-        "size": len(content),
+        "size": total_size,
         "version": "1.0.0",
         "status": "active",
         "user_id": user_id,
@@ -318,7 +354,8 @@ async def upload_file(
         "created_at": now,
         "updated_at": now,
     }
-    _files_store[file_id] = info
+    with _files_store_lock:
+        _files_store[file_id] = info
     persist_file(file_id, info)
     return FileInfo(**info)
 
@@ -417,7 +454,8 @@ async def delete_file(
 ):
     """删除文件"""
     info = _get_owned_file(file_id, current_user)
-    del _files_store[file_id]
+    with _files_store_lock:
+        _files_store.pop(file_id, None)
     delete_file_record(file_id)
     try:
         Path(info["path"]).unlink(missing_ok=True)

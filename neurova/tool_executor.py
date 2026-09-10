@@ -1460,12 +1460,10 @@ class ToolExecutor:
         )
 
     async def _execute_subagent_status(self, params: Dict) -> Dict:
-        """查询后台子 Agent 状态/结果"""
+        """查询后台子 Agent 状态/结果（subagent_id 可省略→最近派生列表）"""
         from neurova.agent.swarm import get_swarm_manager
 
-        subagent_id = params.get("subagent_id", "")
-        if not subagent_id:
-            return {"error": "缺少 subagent_id 参数"}
+        subagent_id = str(params.get("subagent_id") or "").strip()
         return get_swarm_manager().status(subagent_id)
 
     async def _execute_list_agents(self, params: Dict) -> Dict:

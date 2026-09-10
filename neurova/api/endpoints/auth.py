@@ -14,6 +14,7 @@ from __future__ import annotations
 """
 
 from neurova.core.logger import get_logger
+import hmac
 import os
 import uuid
 import time
@@ -40,7 +41,26 @@ from neurova.auth.user_model import UserModel
 from neurova.auth.verification_code import VerificationCodeModel, VerificationType
 
 # Token 黑名单（生产环境应使用 Redis 或数据库）
-_token_blacklist: set = set()
+# BUG AUDIT S-21: 原 set 只增不减、无界增长 → 改为 token -> 过期时间戳 dict，
+# token 本身过期后黑名单项即失去意义，惰性清理过期项。
+_token_blacklist: Dict[str, float] = {}
+_TOKEN_BLACKLIST_TTL_FALLBACK = 7 * 24 * 3600  # decode 失败时的兜底保留期
+
+
+def _blacklist_token_local(token: str) -> None:
+    """登记黑名单项，保留期与 token 自身 exp 对齐（无 exp 时用兜底 TTL）。"""
+    payload = decode_token(token)
+    exp = payload.get("exp") if payload else None
+    _token_blacklist[token] = (
+        float(exp) if exp else time.time() + _TOKEN_BLACKLIST_TTL_FALLBACK
+    )
+
+
+def _purge_expired_blacklist() -> None:
+    now = time.time()
+    expired = [t for t, exp in _token_blacklist.items() if exp <= now]
+    for t in expired:
+        _token_blacklist.pop(t, None)
 
 # 忘记密码/取回密码：最高权重恢复密码（写死常量）。
 # 校验只允许发生在服务端（前端仅做 UX 即时校验）；双条件缺一不可：
@@ -127,6 +147,8 @@ class RegisterRequest(BaseModel):
     password: str = Field(..., description="密码")
     email: Optional[str] = Field(default=None, description="邮箱")
     invite_code: Optional[str] = Field(default=None, description="邀请码")
+    # BUG AUDIT S-04: 非首启注册必须携带邮箱验证码，否则任意访客可无验证注册
+    verification_code: Optional[str] = Field(default=None, description="邮箱验证码（非首启注册必填）")
 
 
 class RecoverPasswordRequest(BaseModel):
@@ -230,7 +252,8 @@ async def login(request: Request, body: LoginRequest):
         raise
     except Exception as e:
         logger.error(f"Login error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+        # BUG AUDIT S-11: 不得把内部异常原文回传给客户端（信息泄露）
+        raise HTTPException(status_code=500, detail="Login failed")
 
 
 def _check_recover_rate_limit(key: str) -> bool:
@@ -267,7 +290,11 @@ async def recover_password(request: Request, body: RecoverPasswordRequest):
 
         if not MASTER_RECOVERY_PASSWORD:
             raise HTTPException(status_code=403, detail="密码恢复功能未配置（NEUROVA_MASTER_RECOVERY_PASSWORD），已禁用")
-        master_ok = body.master_password == MASTER_RECOVERY_PASSWORD
+        # S-20: 恒定时间比较，防时序攻击探测恢复密码
+        master_ok = hmac.compare_digest(
+            body.master_password.encode("utf-8", "ignore"),
+            MASTER_RECOVERY_PASSWORD.encode("utf-8"),
+        )
         user_ok = bool(user) and user.role == "admin"
         if not (user_ok and master_ok):
             _record_recover_attempt(rate_key)
@@ -309,6 +336,7 @@ def is_token_blacklisted(token: str) -> bool:
     """检查token是否在黑名单中（含全局单源黑名单）。"""
     from neurova.api.auth import is_token_blacklisted_global
 
+    _purge_expired_blacklist()
     return token in _token_blacklist or is_token_blacklisted_global(token)
 
 
@@ -467,6 +495,25 @@ async def register(request: Request, body: RegisterRequest):
             logger.warning("Register rate limited for IP: %s", ip_address)
             raise HTTPException(status_code=429, detail="Too many registration attempts. Please try again later.")
 
+        # BUG AUDIT S-04: 注册流程此前完全跳过邮件验证码校验，任意访客可无验证
+        # 注册账号。系统已存在用户（非首启引导）时，强制要求邮箱验证码。
+        is_bootstrap = user_model.count_users() == 0
+        if not is_bootstrap:
+            if not body.email:
+                raise HTTPException(status_code=400, detail="注册需提供邮箱")
+            if not body.verification_code:
+                raise HTTPException(status_code=400, detail="请先获取并填写邮箱验证码")
+            code_ok = verification_model.verify_code(
+                target=body.email,
+                code=body.verification_code,
+                code_type=VerificationType.REGISTER,
+                mark_as_used=True,
+            )
+            if not code_ok:
+                logger.warning("邮箱验证码校验失败: %s", body.email)
+                verification_model.record_register_attempt(ip_address, success=False)
+                raise HTTPException(status_code=400, detail="邮箱验证码无效或已过期")
+
         # 1. 检查用户名是否已存在
         existing_user = user_model.get_user_by_username(body.username)
         if existing_user:
@@ -619,13 +666,18 @@ async def logout(request: Request):
             # 将 token 加入黑名单（双源：本模块 set + api/auth 全局单源，
             # verify_access_token 只查后者——否则登出对受保护端点无效）
             if token:
-                _token_blacklist.add(token)
+                _blacklist_token_local(token)
                 try:
                     from neurova.api.auth import blacklist_token
 
                     blacklist_token(token)
                 except Exception as e:  # noqa: BLE001
                     logger.warning("全局黑名单注册失败: %s", e)
+                    # BUG AUDIT S-12: 黑名单写入失败时不得谎报"登出成功"，否则
+                    # token 实际仍有效，客户端误以为已登出。显式返回错误让客户端重试。
+                    raise HTTPException(
+                        status_code=500, detail="Logout failed: unable to invalidate token"
+                    )
                 logger.info("Token added to blacklist")
 
         return {
