@@ -1651,6 +1651,10 @@ class ChatPipeline:
         # 读 ctx 轮次态，杜绝实例标志跨轮滞留
         if isinstance(ctx.metadata, dict) and ctx.metadata.get("command_dispatched"):
             logger.info("B4 命令分发已应答，跳过 LLM 调用")
+            # A-21：命令轮提前返回也必须清理视觉路由覆盖——_flush_vision_attachments
+            # 可能在本轮已激活请求级 override（ContextVar 随请求任务存活，不会
+            # 因提前返回消亡），漏清会让同任务后续 LLM 调用串到视觉模型。
+            self._clear_vision_routing(ctx)
             return
         self._apply_thinking_effort(ctx)
         tools_for_llm = await self.context_orchestrator.build_tools_for_llm()
@@ -1887,7 +1891,9 @@ class ChatPipeline:
     async def _auto_continue(self, ctx: ChatContext, response, reply: str, tools_for_llm: Optional[List]) -> str:
         """截断自动续写逻辑"""
         MAX_CONTINUE_ROUNDS = 100
-        MAX_TOTAL_CHARS = getattr(self.llm_client.config, "max_tokens", 8192) * 10
+        # A-17：getattr 默认值只兜属性缺失不兜属性值为 None——max_tokens=None
+        # 时 None*10 直接 TypeError 炸穿续写段。对 None 值同样回落 8192。
+        MAX_TOTAL_CHARS = (getattr(self.llm_client.config, "max_tokens", None) or 8192) * 10
         OVERLAP_CHECK_LEN = 200
         OVERLAP_THRESHOLD = 0.6
         MIN_CONTINUE_LEN = 10

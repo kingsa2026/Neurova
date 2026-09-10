@@ -630,7 +630,9 @@ class OpenAILoop(BaseAgentLoop):
             else:
                 self._stagnation_count = 0
 
-            if self._tool_rounds <= 10:
+            # A-19：与非流式 _predict_normal 同一可配置来源（_max_tool_rounds，
+            # predict_step 顶层从 get_effective_limits() 读取）——消除硬编码 10 漂移
+            if self._tool_rounds <= (getattr(self, "_max_tool_rounds", None) or 10):
                 # 工具结果入历史后流式续写（递归），保持后续轮次同样逐 token 转发
                 request_params["messages"].extend(tool_messages)
                 if stagnant:

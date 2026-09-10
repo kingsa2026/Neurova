@@ -66,6 +66,9 @@ class BaseAgentLoop(ABC):
         返回:
             LLMResponse 对象或原始响应
         """
+        # A-11：abstractmethod 只在实例化时拦截；动态构造/热加载等绕过 ABC
+        # 检查的路径会落到这里——必须显式抛错，不得静默返回 None（空回复）
+        raise NotImplementedError("子类必须实现 predict_step()")
 
     async def handle_tool_calls(self, tool_calls: List, messages: List[Dict]) -> List[Dict]:
         """
