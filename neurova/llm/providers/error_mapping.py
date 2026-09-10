@@ -19,6 +19,7 @@ auth/bad_request 不可重试——单一事实源，避免双处维护漂移。
 
 from __future__ import annotations
 
+import asyncio
 import enum
 import re
 import typing
@@ -36,11 +37,14 @@ class ErrorCategory(enum.Enum):
     RATE_LIMIT = "rate_limited"
     AUTH = "auth_failed"
     BAD_REQUEST = "bad_request"
+    # B1-6（#7268/#7308）：超时独立类别——前端可显示"模型超时"，
+    # 退避/重试语义与连接错误一致（retryable=True）
+    TIMEOUT = "timeout"
 
     @property
     def retryable(self) -> bool:
         """连接/不可用/限频可重试；鉴权/坏请求不可重试（换 key / 改参数才有意义）"""
-        return self in (ErrorCategory.CONNECTION, ErrorCategory.UNAVAILABLE, ErrorCategory.RATE_LIMIT)
+        return self in (ErrorCategory.CONNECTION, ErrorCategory.UNAVAILABLE, ErrorCategory.RATE_LIMIT, ErrorCategory.TIMEOUT)
 
     @property
     def user_hint(self) -> str:
@@ -51,6 +55,7 @@ class ErrorCategory(enum.Enum):
             ErrorCategory.RATE_LIMIT: "请求频率过高或配额用尽，请稍后重试或检查套餐配额",
             ErrorCategory.AUTH: "认证失败，请检查 API Key 是否正确或有对应模型权限",
             ErrorCategory.BAD_REQUEST: "请求被拒绝，请检查模型名称与参数是否有效",
+            ErrorCategory.TIMEOUT: "模型响应超时，请稍后重试或更换模型",
         }[self]
 
 
@@ -192,6 +197,11 @@ def normalize_provider_error(exc: BaseException) -> ProviderError:
 
     message = str(exc) or exc.__class__.__name__
 
+    # 0. 超时家族最优先（openai.APITimeoutError 也继承自内建 TimeoutError 族时
+    #    不被前面的 SDK 分类抢走——B1-6 #7268）
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        return ProviderError(ErrorCategory.TIMEOUT, _mask_secrets(message), cause=exc)
+
     # 1. 类型映射（含 neurova LLM 异常族与 openai SDK 族）
     for cls, cat in _EXCEPTION_MAP:
         if isinstance(exc, cls):
@@ -207,6 +217,11 @@ def normalize_provider_error(exc: BaseException) -> ProviderError:
     cat = _classify_by_status(status if isinstance(status, int) else None)
     if cat is not None:
         return ProviderError(cat, _mask_secrets(message), cause=exc)
+
+    # 2.5 超时关键词（在通用兜底前）
+    low = message.lower()
+    if "timed out" in low or "timeout" in low:
+        return ProviderError(ErrorCategory.TIMEOUT, _mask_secrets(message), cause=exc)
 
     # 3. 消息关键词兜底
     cat = _classify_by_message(message)

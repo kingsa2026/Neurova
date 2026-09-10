@@ -15,6 +15,7 @@ import random
 import threading
 import time
 from collections import deque
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from neurova.core.logger import get_logger
@@ -167,3 +168,30 @@ def reset_shared_limiter() -> None:
     global _shared_limiter
     with _shared_lock:
         _shared_limiter = None
+
+
+def parse_retry_after(value):
+    """B1-6（#6617）：解析服务端 Retry-After 头。
+
+    支持整秒/小数秒与 HTTP-date 形态；非法/缺失返回 None（调用方
+    回落默认退避）。
+    """
+    from email.utils import parsedate_to_datetime
+
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        seconds = float(text)
+        return seconds if seconds >= 0 else None
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(text)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+    except Exception:
+        return None
