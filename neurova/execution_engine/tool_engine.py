@@ -520,7 +520,16 @@ class ToolEngine:
                 else:
                     result = await func(**prepared)
             else:
-                result = func(**prepared)
+                # BUG AUDIT C-12: 同步分支此前裸调，卡死的工具会永久阻塞事件
+                # 循环，timeout 参数对其完全不生效。同步函数无法被协作取消，
+                # 丢入线程池执行并用 wait_for 强制超时（超时后线程为 daemon
+                # 泄漏，但事件循环得以解脱——与卡死整个服务相比是正确取舍）。
+                if timeout:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(func, **prepared), timeout=timeout
+                    )
+                else:
+                    result = await asyncio.to_thread(func, **prepared)
 
             invocation.result = result
             invocation.success = True

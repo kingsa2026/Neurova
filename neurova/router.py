@@ -9,6 +9,7 @@ D1 任务重构版本：
 - 集成 LLMRouter 实现智能模型选择
 """
 
+import inspect
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -98,6 +99,9 @@ class RouteResult:
     handler: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     execution_time: float = 0.0
+    # BUG AUDIT A-01: 此前缺少该字段，而 agent_core.process_message() 读取
+    # result.message_type.value → 每次路由成功后必抛 AttributeError。
+    message_type: Optional[MessageType] = None
 
 
 class MessageRouter:
@@ -162,7 +166,13 @@ class MessageRouter:
             msg_type = message.message_type.value
             self._stats["by_type"][msg_type] = self._stats["by_type"].get(msg_type, 0) + 1
 
-            # 根据消息类型路由
+            # BUG AUDIT A-09：_handlers 此前从未被读取（死代码，注册的协程
+            # 从未被 await）。派发契约修正（回归修复 2026-09-10）：内置路由
+            # （command/skill/memory/chat）优先——init_router 会用标记性
+            # lambda 注册同类型 handler（见 router.py init_router"已内置处理"
+            # 注释），若注册 handler 反抢优先级，CHAT 将绕过 _route_chat 的
+            # 语音处理/元数据透传/A-10 文本提取完整管线。注册 handler 仅
+            # 作为无内置路由类型的回退，此时协程会被正确 await。
             if message.message_type == MessageType.COMMAND:
                 result = await self._route_command(message)
             elif message.message_type == MessageType.SKILL_REQUEST:
@@ -172,15 +182,31 @@ class MessageRouter:
             elif message.message_type == MessageType.CHAT:
                 result = await self._route_chat(message)
             else:
-                result = RouteResult(
-                    success=False,
-                    response="未知消息类型",
-                    handler="unknown",
-                )
+                explicit_handler = self._handlers.get(message.message_type)
+                if explicit_handler is not None:
+                    outcome = explicit_handler(message)
+                    if inspect.isawaitable(outcome):
+                        outcome = await outcome
+                    result = (
+                        outcome
+                        if isinstance(outcome, RouteResult)
+                        else RouteResult(
+                            success=True,
+                            response="" if outcome is None else str(outcome),
+                            handler="custom",
+                        )
+                    )
+                else:
+                    result = RouteResult(
+                        success=False,
+                        response="未知消息类型",
+                        handler="unknown",
+                    )
 
             # 更新统计
             self._stats["processed_messages"] += 1
             result.execution_time = (datetime.now() - start_time).total_seconds()
+            result.message_type = message.message_type
 
             return result
 
@@ -189,6 +215,7 @@ class MessageRouter:
             return RouteResult(
                 success=False,
                 response=f"路由失败: {e}",
+                message_type=message.message_type,
                 execution_time=(datetime.now() - start_time).total_seconds(),
             )
 
@@ -311,10 +338,20 @@ class MessageRouter:
                 # 让 agent.chat() 自行从 session 恢复历史.
                 response = await self._agent.chat(message.content, metadata=message.metadata or {})
 
+            # BUG AUDIT A-10: agent.chat()/process_multimodal() 返回 Dict，
+            # 而 response 声明为 str，直接塞入会让调用方拿到
+            # "{'text': ...}" 之类的字符串。统一提取文本，原始结构放 metadata。
+            if isinstance(response, dict):
+                reply_text = response.get("text") or response.get("content") or ""
+                extra_meta = dict(response)
+            else:
+                reply_text = "" if response is None else str(response)
+                extra_meta = {}
             return RouteResult(
                 success=True,
-                response=response,
+                response=reply_text,
                 handler="chat",
+                metadata=extra_meta,
             )
         except Exception as e:
             return RouteResult(

@@ -83,9 +83,17 @@ class TestSubagentStatusTool:
         fake_swarm.status.assert_called_once_with("swarm_x")
 
     @pytest.mark.asyncio
-    async def test_status_requires_id(self, executor):
+    async def test_status_without_id_lists_recent(self, executor):
+        """P1（2026-09-10）：subagent_id 省略 → 透传空值给 swarm.status 查最近列表"""
         exe, _ = executor
-        assert "error" in await exe._execute_subagent_status({})
+        fake_swarm = MagicMock()
+        fake_swarm.status = MagicMock(
+            return_value={"status": "list", "runs": [], "hint": "最近派生"}
+        )
+        with patch("neurova.agent.swarm.get_swarm_manager", return_value=fake_swarm):
+            result = await exe._execute_subagent_status({})
+        assert result["status"] == "list"
+        fake_swarm.status.assert_called_once_with("")
 
 
 class TestListAgentsTool:

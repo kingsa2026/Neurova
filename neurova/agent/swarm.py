@@ -213,7 +213,22 @@ class SwarmManager:
         return {**run.to_dict(), **self._quota_snapshot()}
 
     def status(self, subagent_id: str) -> Dict[str, Any]:
-        """查询子 Agent 运行状态"""
+        """查询子 Agent 运行状态
+
+        P1（2026-09-10）：subagent_id 可省略——前台 spawn 被工具层转后台时，
+        信封里的 task_id（bg_xxx）查不了 swarm 记录，主 agent 需按最近列表
+        主动轮询。列表模式截断 report 省 token，精确查询传 id。
+        """
+        if not (subagent_id or "").strip():
+            runs = self.list_all(limit=10)
+            for r in runs:
+                if r.get("report"):
+                    r["report"] = r["report"][:300]
+            return {
+                "status": "list",
+                "runs": runs,
+                "hint": "最近派生的子 Agent（新→旧）；精确查询请传 subagent_id",
+            }
         with self._lock:
             run = self._runs.get(subagent_id)
         if run is None:
@@ -364,12 +379,20 @@ class SwarmManager:
             }
             if emitter is not None:
                 spawn_metadata["event_emitter"] = emitter
+            # stream=True（2026-09-10 蜂群超时排查）：非流式的读超时是"整段
+            # 生成总窗口"，思考型子 agent 生成整份报告超窗即 ReadTimeout；
+            # 流式按字节间隙计且静默看门狗/小窗实时流（SUBAGENT_CHUNK）全部依赖它
             response = await agent.chat(
                 run.task,
+                stream=True,
                 session_id=run.member_session_id,
                 metadata=spawn_metadata,
             )
             report = self._extract_text(response)
+            # P3：非流式遗留路径 LLM 失败不抛异常而是返回 "[LLM Error] ..." 文本
+            # ——不得当正常报告标 completed（流式路径失败走异常分支天然 failed）
+            if report.startswith("[LLM Error]"):
+                raise RuntimeError(report)
             run.report = report
             run.status = "completed"
             run.finished_at = time.time()
