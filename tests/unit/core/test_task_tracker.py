@@ -341,3 +341,95 @@ class TestGlobalTaskTracker:
         tracker = get_task_tracker()
         assert isinstance(tracker, TaskTracker)
         reset_task_tracker()
+
+
+class TestAsyncTaskRegistry:
+    """P0-2：asyncio 任务注册表（/console/chat/stop 真取消的根基）。
+
+    旧 stop_task 只翻状态不取消任何 asyncio Task——空壳假停止。
+    register_async_task / request_session_stop 提供真取消能力。
+    """
+
+    def test_register_and_lookup(self):
+        tracker = TaskTracker()
+
+        async def scenario():
+            async def work():
+                await asyncio.sleep(10)
+
+            task = asyncio.create_task(work())
+            entry = tracker.register_async_task("s1", task, kind="chat")
+            assert entry["session_id"] == "s1"
+            assert entry["kind"] == "chat"
+            assert len(tracker.lookup_async_tasks("s1")) == 1
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        asyncio.run(scenario())
+
+    def test_request_session_stop_cancels_running_task(self):
+        tracker = TaskTracker()
+
+        async def scenario():
+            hit = {"cancelled": False}
+
+            async def work():
+                try:
+                    await asyncio.sleep(30)
+                except asyncio.CancelledError:
+                    hit["cancelled"] = True
+                    raise
+
+            task = asyncio.create_task(work())
+            tracker.register_async_task("s1", task, kind="chat")
+            await asyncio.sleep(0)  # 让 task 先启动进入 await 点（首步前取消不进协程体）
+            n = tracker.request_session_stop("s1")
+            assert n == 1
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert hit["cancelled"] is True
+
+        asyncio.run(scenario())
+
+    def test_request_session_stop_unknown_returns_zero(self):
+        assert TaskTracker().request_session_stop("nope") == 0
+
+    def test_done_callback_auto_removes(self):
+        tracker = TaskTracker()
+
+        async def scenario():
+            async def quick():
+                return 1
+
+            task = asyncio.create_task(quick())
+            tracker.register_async_task("s1", task)
+            await task
+            await asyncio.sleep(0)
+            assert tracker.lookup_async_tasks("s1") == []
+
+        asyncio.run(scenario())
+
+    def test_snapshot_reports_running_tasks(self):
+        tracker = TaskTracker()
+
+        async def scenario():
+            async def work():
+                await asyncio.sleep(10)
+
+            task = asyncio.create_task(work())
+            tracker.register_async_task("s1", task, kind="chat")
+            snap = tracker.snapshot_async_tasks()
+            assert len(snap) == 1
+            assert snap[0]["session_id"] == "s1"
+            assert snap[0]["kind"] == "chat"
+            assert snap[0]["duration"] >= 0
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+        asyncio.run(scenario())

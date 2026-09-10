@@ -1810,6 +1810,8 @@ class ChatPipeline:
         gen = await self.loop.predict_step(
             messages=ctx.context, tools=tools_for_llm, stream=True,
             thinking_effort=self._effort_of(ctx),
+            thinking_enabled=self._thinking_flag_of(ctx),
+            thinking_budget=self._thinking_budget_of(ctx),
         )
         emitter = ctx.event_emitter
         async for event in gen:
@@ -1870,6 +1872,8 @@ class ChatPipeline:
         response = await self.loop.predict_step(
             messages=ctx.context, tools=tools_for_llm, stream=False,
             thinking_effort=self._effort_of(ctx),
+            thinking_enabled=self._thinking_flag_of(ctx),
+            thinking_budget=self._thinking_budget_of(ctx),
         )
         reply = response.content if response else ""
 
@@ -1887,6 +1891,24 @@ class ChatPipeline:
         if isinstance(ctx.metadata, dict):
             return str(ctx.metadata.get("thinking_effort") or "").strip().lower()
         return ""
+
+    def _thinking_flag_of(self, ctx: "ChatContext"):
+        """B1-3：本轮思考开关（None=未设置，True/False=显式开关）。"""
+        if isinstance(ctx.metadata, dict) and "thinking_enabled" in ctx.metadata:
+            value = ctx.metadata.get("thinking_enabled")
+            return None if value is None else bool(value)
+        return None
+
+    def _thinking_budget_of(self, ctx: "ChatContext"):
+        """B1-3：本轮思考 token 预算（None=未设置）。"""
+        if isinstance(ctx.metadata, dict):
+            value = ctx.metadata.get("thinking_budget")
+            if value:
+                try:
+                    return int(value)
+                except (TypeError, ValueError):
+                    return None
+        return None
 
     async def _auto_continue(self, ctx: ChatContext, response, reply: str, tools_for_llm: Optional[List]) -> str:
         """截断自动续写逻辑"""
@@ -1940,6 +1962,8 @@ class ChatPipeline:
             response = await self.loop.predict_step(
                 messages=ctx_snapshot, tools=_tools, stream=False,
                 thinking_effort=self._effort_of(ctx),
+                thinking_enabled=self._thinking_flag_of(ctx),
+                thinking_budget=self._thinking_budget_of(ctx),
             )
             new_content = getattr(response, "content", "") if response else ""
 
