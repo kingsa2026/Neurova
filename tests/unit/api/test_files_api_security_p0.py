@@ -36,10 +36,15 @@ def isolated_storage(tmp_path, monkeypatch):
 
 
 def _make_upload_file(filename: str, content: bytes = b"test content") -> UploadFile:
-    """构造 UploadFile mock"""
+    """构造 UploadFile mock
+
+    mock 必须忠实模拟 EOF：upload_file 以 ``if not chunk: break`` 收尾，
+    ``return_value=content`` 永不返回 b'' → 分块循环死循环挂起（预存台账项，
+    2026-09-11 根修：一次内容后返回 EOF）。
+    """
     uf = MagicMock(spec=UploadFile)
     uf.filename = filename
-    uf.read = AsyncMock(return_value=content)
+    uf.read = AsyncMock(side_effect=[content, b""])
     return uf
 
 
