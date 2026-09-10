@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime
 import os
 from neurova.core.logger import get_logger
+from neurova.security.shell_normalization import normalize_posix_line_continuations
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -442,6 +443,31 @@ class FilePathGuardian(BaseGuardian):
                 return f"敏感凭据文件 {stem}"
         return None
 
+    def _scan_protected_paths_in_text(self, text: str) -> List["GuardFinding"]:
+        """在命令文本中扫描受保护路径（路径段边界匹配，防 /usr/root 类误报）。"""
+        findings: List[GuardFinding] = []
+        candidates = list(self._protected_paths)
+        for prefix in self._windows_protected_prefixes:
+            candidates.append(prefix)
+        seen = set()
+        for protected in candidates:
+            pattern = (
+                r"(?<![\w./\\-])" + re.escape(protected) + r"(?![\w.\-])"
+            )
+            if re.search(pattern, text, re.IGNORECASE) and protected not in seen:
+                seen.add(protected)
+                findings.append(
+                    GuardFinding(
+                        rule_id="protected_path_in_command",
+                        severity=GuardSeverity.HIGH,
+                        category=GuardThreatCategory.PATH_TRAVERSAL,
+                        message=f"命令访问受保护路径: {protected}",
+                        evidence=protected,
+                        suggestion=f"路径 {protected} 受系统保护，命令方式访问同样受限",
+                    )
+                )
+        return findings
+
     def guard(self, tool_input: str, context: Dict[str, Any]) -> List[GuardFinding]:
         """检查文件路径安全性"""
         findings: List[GuardFinding] = []
@@ -455,6 +481,11 @@ class FilePathGuardian(BaseGuardian):
                 path = path_match.group(1)
 
         if not path:
+            # P0-1 同根因族补口：受保护路径出现在命令文本内（如 `cat /etc/passwd`）
+            # 也须覆盖——文件工具拦截了 path 参数，shell 读同一文件不该漏网。
+            command_text = context.get("command")
+            if isinstance(command_text, str) and command_text:
+                findings.extend(self._scan_protected_paths_in_text(command_text))
             return findings
 
         # 检查路径遍历
@@ -599,6 +630,18 @@ class ToolGuardEngine:
                 metadata={"skipped": True, "reason": "engine_disabled"},
             )
 
+        # P0-1（QwenPaw #7472 同款漏洞）：POSIX shell 分词前移除 \+换行续行，
+        # 守卫必须看归一化后的命令形态，否则敏感路径/逃逸特征被物理换行
+        # 拆开即可绕过。result.metadata 保留原文供日志审计。
+        guard_params = tool_params
+        if isinstance(tool_params, dict):
+            command_value = tool_params.get("command")
+            if isinstance(command_value, str):
+                normalized = normalize_posix_line_continuations(command_value)
+                if normalized != command_value:
+                    guard_params = dict(tool_params)
+                    guard_params["command"] = normalized
+
         all_findings: List[GuardFinding] = []
 
         # 检查拒绝列表
@@ -614,12 +657,12 @@ class ToolGuardEngine:
             )
 
         # 构建工具输入文本
-        tool_input = self._build_tool_input(tool_name, tool_params)
+        tool_input = self._build_tool_input(tool_name, guard_params)
 
         # 运行所有守护者
         for guardian in self.guardians:
             try:
-                findings = guardian.guard(tool_input, tool_params)
+                findings = guardian.guard(tool_input, guard_params)
                 all_findings.extend(findings)
             except Exception as e:
                 logger.warning("守护者 %s 异常: %s", guardian.name, e)
@@ -632,6 +675,9 @@ class ToolGuardEngine:
             safe=safe,
             findings=all_findings,
         )
+        if guard_params is not tool_params:
+            result.metadata["normalized_command"] = True
+            result.metadata["original_command"] = tool_params.get("command")
 
         if not safe:
             logger.warning("工具守卫阻止: %s, " f"发现 %s 个问题", tool_name, len(all_findings))

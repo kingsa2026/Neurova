@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.sandbox.exec_sandbox import SandboxSeverity, execute_in_sandbox
+from neurova.security.shell_normalization import normalize_posix_line_continuations
 from neurova.security.tool_guard import ApprovalMode, GuardSeverity, ToolGuardEngine
 
 # P1-7：平台真隔离后端探测表（bwrap/seatbelt/docker；Windows 走
@@ -244,6 +245,10 @@ class GovernancePolicy:
 
         优先级: tool_overrides > 白名单 > 内容检测。
         """
+        # P0-1（QwenPaw #7472 同款）：分段/白名单/内容检测统一看 shell
+        # 实际执行的形态（续行已移除），防止换行拆分绕过。
+        command = normalize_posix_line_continuations(command)
+
         # 工具级覆盖优先于内容检测结果（显式配置 > 自动推断）
         if tool_name in self.tool_overrides:
             override = self.tool_overrides[tool_name]
