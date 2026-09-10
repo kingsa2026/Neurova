@@ -133,8 +133,9 @@ const SESSION_AWAITING: PlanSession = {
 const PLAN_MD = '# 计划：重构登录模块\n\n1. 梳理现状'
 
 function resp<T>(data: T) {
-  // ApiResponse 信封（code/message/data）——data 由调用方按端点契约给定
-  return { data: { code: 0, message: 'success', data } } as any
+  // axios 拦截器已解一层 response.data，组件拿到 {code,message,data} 后
+  // 按单层 res.data.xxx 读（2026-09-10 组件解包口径修正的配套 mock 更新）
+  return { data } as any
 }
 
 function mountPanel(initialRequest = ''): VueWrapper<any> {

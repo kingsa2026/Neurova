@@ -455,7 +455,6 @@ import { listProviders, getActiveModel, activateModel as apiActivateModel, updat
 import type { FilteredProviderModel } from '@/api/modules/providers'
 import { listModels, updateModel, deleteModel as apiDeleteModel, detectCapabilities as apiDetectCapabilities, checkModelConnection, probeModelMultimodal } from '@/api/modules/models'
 import type { ModelConnectionResult } from '@/api/modules/models'
-import { getSettings, updateSettings } from '@/api/modules/settings'
 import { useAuthStore } from '@/stores/auth'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -725,17 +724,6 @@ async function fetchActiveModel() {
   }
 }
 
-async function fetchDefaultConfig() {
-  try {
-    const res = await getSettings()
-    const settings = res?.data
-    if (settings?.llm?.default_provider) defaultConfig.provider_id = settings.llm.default_provider
-    if (settings?.llm?.default_model) defaultConfig.model_id = settings.llm.default_model
-  } catch {
-    message.error(t('common.error'))
-  }
-}
-
 /** Merge API-returned providers with built-in seeds. */
 function mergeProviders(apiList: any[]): Provider[] {
   const map = new Map<string, any>()
@@ -840,7 +828,6 @@ async function saveDefaultLLM() {
       provider_id: defaultConfig.provider_id,
       model_id: defaultConfig.model_id,
     })
-    await updateSettings('llm', { default_provider: defaultConfig.provider_id, default_model: defaultConfig.model_id })
     activeModelInfo.model_id = defaultConfig.model_id
     activeModelInfo.provider = defaultConfig.provider_id
     const p = providers.value.find((pr) => pr.id === defaultConfig.provider_id)
@@ -1439,8 +1426,6 @@ onMounted(async () => {
   console.log('[ModelPage] after fetchModels:', providers.value.length, 'providers,', allModels.value.length, 'models')
   await fetchActiveModel()
   console.log('[ModelPage] after fetchActiveModel:', providers.value.length, 'providers')
-  await fetchDefaultConfig()
-  console.log('[ModelPage] after fetchDefaultConfig:', providers.value.length, 'providers, done')
 })
 
 watch(() => defaultConfig.provider_id, () => {
