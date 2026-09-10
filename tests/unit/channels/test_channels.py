@@ -403,8 +403,20 @@ class TestFeishuAdapter:
         assert "cli_test" in health["app_id"]
 
     def test_verify_url_challenge(self):
-        result = FeishuAdapter.verify_url_challenge("test_challenge", "token")
-        assert result == {"challenge": "test_challenge"}
+        # C-23: token 必须与配置比对，未配置/不匹配 fail-closed
+        adapter = create_feishu_adapter(
+            app_id="cli_test123",
+            app_secret="secret123",
+            verification_token="token123",
+        )
+        assert adapter.verify_url_challenge("test_challenge", "token123") == {
+            "challenge": "test_challenge"
+        }
+        with pytest.raises(ValueError):
+            adapter.verify_url_challenge("test_challenge", "wrong_token")
+        unconfigured = create_feishu_adapter(app_id="cli_test123", app_secret="secret123")
+        with pytest.raises(ValueError):
+            unconfigured.verify_url_challenge("test_challenge", "token123")
 
     @pytest.mark.asyncio
     async def test_disconnect(self):

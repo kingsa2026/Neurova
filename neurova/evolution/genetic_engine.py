@@ -90,6 +90,7 @@ class ToolGeneticEngine:
         mutation_rate: float = 0.3,
         crossover_rate: float = 0.7,
         elite_ratio: float = 0.2,
+        seed: Optional[int] = None,
     ):
         """初始化遗传引擎。
 
@@ -99,12 +100,16 @@ class ToolGeneticEngine:
             mutation_rate: 变异率
             crossover_rate: 交叉率
             elite_ratio: 精英比例
+            seed: 随机种子（None=系统熵；注入固定值可复现进化过程）
         """
         self._population_size = population_size
         self._validation_threshold = validation_threshold
         self._mutation_rate = mutation_rate
         self._crossover_rate = crossover_rate
         self._elite_ratio = elite_ratio
+
+        # C-17: 实例级 RNG（原先用全局 random 模块，无 seed 不可复现）
+        self._rng = random.Random(seed)
 
         # 种群存储
         self._population: List[ToolGenotype] = []
@@ -222,24 +227,24 @@ class ToolGeneticEngine:
 
             # 生成新个体
             while len(new_population) < self._population_size:
-                if random.random() < self._crossover_rate and len(self._population) >= 2:
+                if self._rng.random() < self._crossover_rate and len(self._population) >= 2:
                     # 交叉
-                    parent_a, parent_b = random.sample(self._population, 2)
+                    parent_a, parent_b = self._rng.sample(self._population, 2)
                     child = self.crossover(parent_a, parent_b)
                     if child:
                         new_population.append(child)
 
-                elif random.random() < self._mutation_rate:
+                elif self._rng.random() < self._mutation_rate:
                     # 变异
-                    parent = random.choice(self._population)
-                    mutation_type = random.choice(["extend", "substitute", "reorder"])
+                    parent = self._rng.choice(self._population)
+                    mutation_type = self._rng.choice(["extend", "substitute", "reorder"])
                     child = self.mutate(parent, mutation_type)
                     if child:
                         new_population.append(child)
 
                 else:
                     # 复制
-                    parent = random.choice(self._population)
+                    parent = self._rng.choice(self._population)
                     new_population.append(
                         ToolGenotype(
                             tool_sequence=parent.tool_sequence.copy(),
@@ -283,8 +288,8 @@ class ToolGeneticEngine:
         # 随机选择交叉点
         if remaining_a and remaining_b:
             # 选择父代 A 的前半部分和父代 B 的后半部分
-            crossover_point_a = random.randint(0, len(remaining_a))
-            crossover_point_b = random.randint(0, len(remaining_b))
+            crossover_point_a = self._rng.randint(0, len(remaining_a))
+            crossover_point_b = self._rng.randint(0, len(remaining_b))
 
             child_sequence = common_prefix + remaining_a[:crossover_point_a] + remaining_b[crossover_point_b:]
         elif remaining_a:
@@ -352,10 +357,10 @@ class ToolGeneticEngine:
         if not available:
             return None
 
-        new_tool = random.choice(available)
+        new_tool = self._rng.choice(available)
 
         # 随机插入位置
-        insert_pos = random.randint(0, len(parent.tools))
+        insert_pos = self._rng.randint(0, len(parent.tools))
         new_sequence = parent.tools[:insert_pos] + [new_tool] + parent.tools[insert_pos:]
 
         return ToolGenotype(
@@ -372,14 +377,14 @@ class ToolGeneticEngine:
             return None
 
         # 选择要替换的工具（优先替换成功率低的）
-        replace_idx = random.randint(0, len(parent.tools) - 1)
+        replace_idx = self._rng.randint(0, len(parent.tools) - 1)
 
         # 选择新工具
         available = [t for t in self._available_tools if t not in parent.tools]
         if not available:
             return None
 
-        new_tool = random.choice(available)
+        new_tool = self._rng.choice(available)
         new_sequence = parent.tools.copy()
         new_sequence[replace_idx] = new_tool
 
@@ -399,7 +404,7 @@ class ToolGeneticEngine:
         new_sequence = parent.tools.copy()
 
         # 随机选择两个位置交换
-        i, j = random.sample(range(len(new_sequence)), 2)
+        i, j = self._rng.sample(range(len(new_sequence)), 2)
         new_sequence[i], new_sequence[j] = new_sequence[j], new_sequence[i]
 
         return ToolGenotype(
@@ -416,7 +421,7 @@ class ToolGeneticEngine:
             return None
 
         # 随机选择变异方式
-        if random.random() < 0.5:
+        if self._rng.random() < 0.5:
             # 先扩展再替换
             extended = self._mutate_extend(parent)
             if extended:

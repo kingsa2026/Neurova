@@ -32,6 +32,13 @@ class ConvergenceAnalyzer:
             convergence_threshold: 收敛阈值（增益小于此值认为收敛）
             divergence_threshold: 发散阈值（增益小于此值认为发散）
         """
+        # C-16: window_size<=0 会使 len(gain_history) < window_size 恒假，
+        # 收敛计算退化为空切片求均值（ZeroDivisionError）——非法值回落默认窗口
+        if not isinstance(window_size, int) or window_size <= 0:
+            logger.warning(
+                "ConvergenceAnalyzer 收到非法 window_size=%r，回落默认值 20", window_size
+            )
+            window_size = 20
         self.window_size = window_size
         self.convergence_threshold = convergence_threshold
         self.divergence_threshold = divergence_threshold
