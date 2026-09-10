@@ -238,12 +238,13 @@ export class StreamTTSRunner {
   feed(delta: string): void {
     if (this.finished || !delta) return
     this.buffer += delta
-    const { complete } = extractSentences(this.buffer)
+    const { complete, rest } = extractSentences(this.buffer)
     if (complete.length === 0) return
-    // 消费掉完整句（保留滞留段）
-    const consumed = complete.join('')
-    const idx = this.buffer.indexOf(consumed)
-    this.buffer = idx >= 0 ? this.buffer.slice(idx + consumed.length) : ''
+    // 消费边界直接用切分函数返回的滞留段 rest（相对原 buffer 精确对齐）。
+    // 不得用 trim 后的 complete 拼接反查 indexOf：句间换行等空白会让
+    // 拼接串与原 buffer 失配（indexOf=-1），旧实现此时整段清空 buffer，
+    // 未分句的尾部文本被静默丢弃。
+    this.buffer = rest
     for (const sentence of complete) {
       const text = prepareSpeechText(sentence)
       if (!text) continue // 纯表情/markdown 残留 → 不读

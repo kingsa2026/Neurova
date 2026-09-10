@@ -1763,6 +1763,7 @@ export default {
     governancePhase3: '3 — Auto conditionnel (risque moyen auto)',
     governancePhase4: '4 — Auto complet (tout est appliqué)',
     governanceConversationRules: 'Extraction de règles de conversation (1 appel LLM par tour)',
+    notLoadedSaveBlocked: 'Paramètres non chargés : enregistrement bloqué pour éviter d\'écraser la configuration du serveur avec les valeurs par défaut',
     debugMode: 'Mode débogage',
     logLevel: 'Niveau de journalisation',
     debug: 'Débogage',

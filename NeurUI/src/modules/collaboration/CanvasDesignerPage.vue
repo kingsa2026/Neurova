@@ -611,6 +611,10 @@ const agentOptions = computed(() => agentStore.agentOptions)
 const runStatus = ref<Record<string, { status: string; output?: unknown; error?: string | null }>>({})
 // 审计 P1-G3：组件卸载标志（降级轮询循环退出依据）
 const isDisposed = ref(false)
+// F-06：执行事件流订阅句柄与兜底 timeout 句柄提升到组件作用域，
+// onBeforeUnmount 才能取消订阅/清除定时器（原实现均为 waitForRunCompletion 局部常量）
+let activeExecutionUnsubscribe: (() => void) | null = null
+let runFallbackTimer: ReturnType<typeof setTimeout> | null = null
 const runState = ref<'idle' | 'running' | 'completed' | 'failed'>('idle')
 /** 最近一次画布运行的 runId（调试 resume 用） */
 const lastRunId = ref<string | null>(null)
@@ -2087,18 +2091,29 @@ async function waitForRunCompletion(canvasId: string, runId: string) {
     }
     if (sawTerminal) streamEnded = true
   })
+  // F-06：句柄提升到组件作用域，卸载时可兜底取消订阅
+  activeExecutionUnsubscribe = unsubscribe
 
-  // 事件流结束后（终态收尾或断流）决定是否需要轮询兜底
+  // 事件流结束后（终态收束或断流）决定是否需要轮询兜底。
+  // F-06：interval 回调必须判 isDisposed（卸载后立即收束，不再空转）；
+  // 兜底 timeout 句柄保存，收束/卸载时清除。
   await new Promise<void>(resolve => {
-    const timer = setInterval(() => {
-      if (streamEnded) {
-        clearInterval(timer)
-        unsubscribe()
-        resolve()
+    let timer: ReturnType<typeof setInterval> | undefined
+    const settle = () => {
+      if (timer) clearInterval(timer)
+      if (runFallbackTimer) {
+        clearTimeout(runFallbackTimer)
+        runFallbackTimer = null
       }
+      unsubscribe()
+      activeExecutionUnsubscribe = null
+      resolve()
+    }
+    timer = setInterval(() => {
+      if (isDisposed.value || streamEnded) settle()
     }, 100)
     // 安全上限：10 分钟强制收束
-    setTimeout(() => {
+    runFallbackTimer = setTimeout(() => {
       streamEnded = true
     }, 600_000)
   })
@@ -2465,6 +2480,13 @@ watch(
 
 onBeforeUnmount(() => {
   isDisposed.value = true
+  // F-06：收束执行事件流订阅与兜底定时器（原实现句柄为函数局部常量不可达）
+  if (runFallbackTimer) {
+    clearTimeout(runFallbackTimer)
+    runFallbackTimer = null
+  }
+  activeExecutionUnsubscribe?.()
+  activeExecutionUnsubscribe = null
   document.removeEventListener('keydown', onKeyDown)
   document.removeEventListener('keyup', onKeyUp)
   document.removeEventListener('mousedown', onSpacePanCapture, true)

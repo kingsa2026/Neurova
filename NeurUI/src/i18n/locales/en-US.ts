@@ -1766,6 +1766,7 @@ export default {
     governancePhase3: '3 — Conditional auto (medium-risk auto-applied)',
     governancePhase4: '4 — Full auto (all optimizations auto-applied)',
     governanceConversationRules: 'Conversation rule extraction (one LLM call per turn)',
+    notLoadedSaveBlocked: 'Settings not loaded yet; save blocked to prevent overwriting server config with defaults',
     debugMode: 'Debug Mode',
     logLevel: 'Log Level',
     debug: 'Debug',

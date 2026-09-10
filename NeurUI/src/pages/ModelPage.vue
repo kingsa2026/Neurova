@@ -448,7 +448,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api'
 import { listProviders, getActiveModel, activateModel as apiActivateModel, updateProvider, createProvider as apiCreateProvider, deleteProvider as apiDeleteProvider, discoverModelsStructured, filterProviderModels, getProviderSeries, testConnection } from '@/api/modules/providers'
@@ -657,6 +657,9 @@ function clearModelSearch() {
 // ---------------------------------------------------------------------------
 // Data fetching
 // ---------------------------------------------------------------------------
+// F-11：onMounted 串行加载的卸载守卫——快速切页后不再写已卸载组件状态、不弹 toast
+let isDisposed = false
+
 async function fetchProviders() {
   loading.value = true
   try {
@@ -696,7 +699,8 @@ async function fetchModels() {
       return { ...p, models, model_count: models.length }
     })
   } catch {
-    message.error(t('common.error'))
+    // F-11：卸载后不再弹 toast（错误会出现在别的页面）
+    if (!isDisposed) message.error(t('common.error'))
     allModels.value = []
   } finally {
     loadingModels.value = false
@@ -720,7 +724,8 @@ async function fetchActiveModel() {
       }
     }
   } catch {
-    message.error(t('common.error'))
+    // F-11：卸载后不再弹 toast（错误会出现在别的页面）
+    if (!isDisposed) message.error(t('common.error'))
   }
 }
 
@@ -1421,11 +1426,19 @@ onMounted(async () => {
   providerSearch.value = ''
   console.log('[ModelPage] onMounted start')
   await fetchProviders()
+  // F-11：每段 await 之间检查卸载标志，即刻返回（不发起后续请求）
+  if (isDisposed) return
   console.log('[ModelPage] after fetchProviders:', providers.value.length, 'providers')
   await fetchModels()
+  if (isDisposed) return
   console.log('[ModelPage] after fetchModels:', providers.value.length, 'providers,', allModels.value.length, 'models')
   await fetchActiveModel()
+  if (isDisposed) return
   console.log('[ModelPage] after fetchActiveModel:', providers.value.length, 'providers')
+})
+
+onBeforeUnmount(() => {
+  isDisposed = true
 })
 
 watch(() => defaultConfig.provider_id, () => {
