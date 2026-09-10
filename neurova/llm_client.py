@@ -221,6 +221,18 @@ class LLMClient:
         if reasoning_effort:
             params["reasoning_effort"] = reasoning_effort
 
+        # B1-3 思考控制两级旋钮（QwenPaw #6302 对齐）：enable_thinking /
+        # thinking_budget 仅在 compat.supports_thinking_toggle 声明的网关注入；
+        # budget 只在开关为真时随发（关思考带预算是矛盾请求）。
+        thinking_enabled = kwargs.get("thinking_enabled")
+        if thinking_enabled is not None:
+            compat = getattr(self.config, "compat", None)
+            if compat is not None and getattr(compat, "supports_thinking_toggle", False):
+                params["enable_thinking"] = bool(thinking_enabled)
+                thinking_budget = kwargs.get("thinking_budget")
+                if thinking_enabled and thinking_budget:
+                    params["thinking_budget"] = int(thinking_budget)
+
         return params
 
     def _httpx_timeout(self):

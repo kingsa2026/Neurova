@@ -195,3 +195,40 @@ def clamp_max_tokens(max_tokens: "int | None", model_id: str = "") -> int:
         )
         _clamp_warned_models.add(model_id)
     return clamped
+
+# ── B1-6（#7337）：模型输出能力上限（catalog 口径） vs 单次请求限制 ──────────
+# get_model_output_capability / resolve_max_output_length 是"模型最多能输出
+# 多少"的口径；clamp_max_tokens 是"本次请求允许带多少"的口径。用户显式
+# 配置的输出上限（user_override）永远优先，发现/目录值不得覆盖用户配置。
+
+
+def get_model_output_capability(model_id: str) -> "int | None":
+    """模型输出能力上限（token）；目录未收录返回 None（诚实未知，不编造）。"""
+    if not model_id:
+        return None
+    if model_id in MODEL_MAX_TOKENS:
+        return MODEL_MAX_TOKENS[model_id]
+    parts = model_id.rsplit("-", 1)
+    while len(parts) > 1:
+        candidate = parts[0]
+        if candidate in MODEL_MAX_TOKENS:
+            return MODEL_MAX_TOKENS[candidate]
+        parts = candidate.rsplit("-", 1)
+    return None
+
+
+def resolve_max_output_length(
+    model_id: str, user_override: "int | None" = None
+) -> "tuple[int | None, str]":
+    """解析生效的输出上限与来源。
+
+    Returns:
+        (value, source)：source ∈ user_override / catalog / unknown。
+        用户覆盖优先——发现流程写回 metadata 时必须保留用户显式值。
+    """
+    if user_override is not None and int(user_override) > 0:
+        return int(user_override), "user_override"
+    cap = get_model_output_capability(model_id)
+    if cap is not None:
+        return cap, "catalog"
+    return None, "unknown"

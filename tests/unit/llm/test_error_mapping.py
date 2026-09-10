@@ -43,9 +43,13 @@ class TestFiveCategories:
 
 class TestNormalizeByExceptionType:
     def test_connection_errors(self):
-        for exc in (ConnectionError(), TimeoutError(), OSError("network down")):
+        # B1-6（#7268）：超时独立 TIMEOUT 类别（不再混入 CONNECTION）；
+        # 连接错误仍归 CONNECTION
+        for exc in (ConnectionError(), OSError("network down")):
             err = normalize_provider_error(exc)
             assert err.category is ErrorCategory.CONNECTION, (type(exc), err.category)
+        err = normalize_provider_error(TimeoutError())
+        assert err.category is ErrorCategory.TIMEOUT, (TimeoutError, err.category)
 
     def test_httpx_transport_errors(self):
         """httpx/httpcore 传输族归一为 CONNECTION（2026-09-10 流中断事故回归）。
@@ -165,8 +169,10 @@ class TestStringFallback:
         class Stranger(Exception):
             pass
 
+        # B1-6（#7268）：超时类驼峰名归 TIMEOUT；其余连接类驼峰名仍归 CONNECTION
         for msg in ("ReadTimeout", "ConnectTimeout", "APITimeoutError", "timed out"):
-            assert normalize_provider_error(Stranger(msg)).category is ErrorCategory.CONNECTION, msg
+            assert normalize_provider_error(Stranger(msg)).category is ErrorCategory.TIMEOUT, msg
+        assert normalize_provider_error(Stranger("ConnectionRefused")).category is ErrorCategory.CONNECTION
 
     def test_sensitive_material_masked(self):
         """鉴权错误不得在 user_hint 里回显 key 片段"""
