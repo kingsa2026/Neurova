@@ -464,21 +464,44 @@ class MultiModelLLMClient:
 
     @staticmethod
     def _classify_error(error: Exception) -> str:
-        """按异常文本分类可路由的故障类型（429 限流 / 404 模型失效）。"""
-        text = str(error or "")
-        lowered = text.lower()
-        if "429" in text or "rate limit" in lowered or "too many requests" in lowered:
-            return "rate_limit"
-        if (
-            "404" in text
-            or "not found" in lowered
-            or "does not exist" in lowered
-            or "not exist" in lowered
-            or "decommissioned" in lowered
-            or "model_not_found" in lowered
-        ):
-            return "not_found"
-        return "unknown"
+        """B1-2 错误分类单源委托（neurova.llm.model_error_policy）。
+
+        返回八类：authentication/bad_request/context_overflow/content_safety/
+        model_not_found/rate_limited/transient/unknown。
+        """
+        from neurova.llm.model_error_policy import classify_model_error
+
+        return classify_model_error(error).kind
+
+    @staticmethod
+    def _extract_cache_tokens(usage) -> tuple:
+        """B1-5（#7342）：从 usage 提取 Prompt Cache 命中/写入 token。
+
+        兼容两种形态：
+        - OpenAI：prompt_tokens_details.cached_tokens → read
+        - Anthropic 风格：cache_read_input_tokens → read，
+          cache_creation_input_tokens → write
+        无字段返回 (0, 0)（诚实口径，不伪造）。
+        """
+        if usage is None:
+            return 0, 0
+
+        def _get(obj, key):
+            if isinstance(obj, dict):
+                return obj.get(key)
+            return getattr(obj, key, None)
+
+        read = _get(usage, "cache_read_input_tokens")
+        write = _get(usage, "cache_creation_input_tokens")
+        details = _get(usage, "prompt_tokens_details")
+        if details is not None:
+            cached = _get(details, "cached_tokens")
+            if cached is not None and read is None:
+                read = cached
+        try:
+            return int(read or 0), int(write or 0)
+        except (TypeError, ValueError):
+            return 0, 0
 
     @staticmethod
     def _mark_provider_health(provider_id: str, success: bool, response_time: float) -> None:
@@ -639,9 +662,13 @@ class MultiModelLLMClient:
             if result.get("success"):
                 return result
             last_result = result
-            # 仅 429 退避 / 404 模型失效触发切换；认证/参数错误换模型无意义
+            # B1-2 回退资格单源：仅 rate_limited/transient/model_not_found 触发
+            # 跨模型切换（transient 旧版缺失——网络抖动/超时/5xx 整轮失败）；
+            # 认证/参数/上下文溢出/内容安全换模型无意义，不切换
             error_kind = self._classify_error(result.get("error") or "")
-            if not auto_failover or error_kind not in ("rate_limit", "not_found"):
+            from neurova.llm.model_error_policy import is_fallback_eligible
+
+            if not auto_failover or not is_fallback_eligible(result.get("error") or ""):
                 return result
             logger.warning(
                 "auto 切换：%s/%s 失败（%s），尝试下一可用候选",
@@ -701,6 +728,7 @@ class MultiModelLLMClient:
                 # 用 tiktoken 估值并标记 estimated，绝不做字符长度裸白造假。
                 _usage = getattr(result, "usage", None)
                 _prompt, _completion, _estimated = None, None, False
+                _cache_read, _cache_write = 0, 0
                 if _usage:
                     def _uval(key):
                         v = getattr(_usage, key, None)
@@ -709,6 +737,8 @@ class MultiModelLLMClient:
                         return int(v or 0)
 
                     _prompt, _completion = _uval("prompt_tokens"), _uval("completion_tokens")
+                    # B1-5：Prompt Cache 命中/写入提取
+                    _cache_read, _cache_write = self._extract_cache_tokens(_usage)
                 else:
                     _est_client = getattr(client.client, "count_tokens", None)
                     if _est_client:
@@ -725,6 +755,8 @@ class MultiModelLLMClient:
                     prompt_tokens=_prompt or 0,
                     completion_tokens=_completion or 0,
                     estimated=_estimated,
+                    cache_read_tokens=_cache_read,
+                    cache_write_tokens=_cache_write,
                 )
                 # 持久化历史：同一回 true usage 同时落 SQLite（重启不归零）。
                 # user_id 取请求级 ContextVar（chat_pipeline.execute 注入），
@@ -740,6 +772,8 @@ class MultiModelLLMClient:
                     estimated=_estimated,
                     user_id=get_request_user_id() or "anonymous",
                     duration_ms=int(duration * 1000),
+                    cache_read_tokens=_cache_read,
+                    cache_write_tokens=_cache_write,
                 )
             except Exception:
                 pass
@@ -781,10 +815,16 @@ class MultiModelLLMClient:
             # P2-a：429 类错误反馈成该模型全局暂停（防继续撞限流）
             # 2026-09-03：错误分类驱动——429 → 指数退避暂停；404（模型下线/改名）
             # → 300s 防抖的 provider 重发现+重连；其余错误仅记录。
+            # B1-2：分类名对齐 model_error_policy（rate_limited/model_not_found）
             error_kind = self._classify_error(e)
-            if error_kind == "rate_limit":
-                limiter.report_429(model_key, pause_seconds=30.0)
-            elif error_kind == "not_found":
+            if error_kind == "rate_limited":
+                # B1-6（#6617）：服务端 Retry-After 头优先（缺失回落 30s 默认退避）
+                from neurova.llm.model_rate_limiter import parse_retry_after
+
+                _headers = getattr(getattr(e, "response", None), "headers", None)
+                pause = parse_retry_after(_headers.get("retry-after") if _headers else None) or 30.0
+                limiter.report_429(model_key, pause_seconds=pause)
+            elif error_kind == "model_not_found":
                 self._note_404_reconnect(client.provider.id, client.model)
             try:
                 from neurova.core.metrics import get_metrics
@@ -866,6 +906,7 @@ class MultiModelLLMClient:
             # P1 修复: chat_stream 是同步生成器，无法 `async for`（TypeError）。
             # 必须调用异步版本 chat_stream_async。
             stream_usage: Dict[str, int] = {}
+            _cache_read, _cache_write = 0, 0
             reply_text = ""
             first_token_ms = 0  # P1-8（OpenOcta 启发）：首块耗时入账
             # 审计 P0-C5：上游声明回传 usage（OpenAI 标准行为）→ 无需整段缓冲
@@ -899,6 +940,8 @@ class MultiModelLLMClient:
                             "completion_tokens": getattr(_u, "completion_tokens", None) if not isinstance(_u, dict) else _u.get("completion_tokens"),
                         }
                         stream_usage = {k: int(v or 0) for k, v in stream_usage.items()}
+                        # B1-5：流式路径同样提取 cache 命中/写入
+                        _cache_read, _cache_write = self._extract_cache_tokens(_u)
                     # 审计 P0-C5：条件缓冲——仅当上游网关声明不回传 usage（估算
                     # token 必须整段重放）时才累积；正常路径长响应内存不再翻倍
                     if _needs_reply_text:
@@ -955,6 +998,8 @@ class MultiModelLLMClient:
                     prompt_tokens=_prompt or 0,
                     completion_tokens=_completion or 0,
                     estimated=_estimated,
+                    cache_read_tokens=_cache_read,
+                    cache_write_tokens=_cache_write,
                 )
                 # 持久化历史（同 chat 路径）：user_id 取请求级 ContextVar，缺失记 anonymous
                 from neurova.core.identity_context import get_request_user_id
@@ -969,16 +1014,24 @@ class MultiModelLLMClient:
                     user_id=get_request_user_id() or "anonymous",
                     first_token_ms=first_token_ms,
                     duration_ms=int(duration * 1000),
+                    cache_read_tokens=_cache_read,
+                    cache_write_tokens=_cache_write,
                 )
             except Exception:
                 logger.debug("流式 usage 入账跳过", exc_info=True)
         except Exception as e:
             client.increment_request(success=False)
             # 审计 P0-C2：流内 429 与 chat() 同源——分类后 report_429 暂停该模型
+            # B1-2：分类名对齐 model_error_policy（rate_limited/model_not_found）
             error_kind = self._classify_error(e)
-            if error_kind == "rate_limit":
-                limiter.report_429(model_key, pause_seconds=30.0)
-            elif error_kind == "not_found":
+            if error_kind == "rate_limited":
+                # B1-6（#6617）：服务端 Retry-After 头优先（缺失回落 30s 默认退避）
+                from neurova.llm.model_rate_limiter import parse_retry_after
+
+                _headers = getattr(getattr(e, "response", None), "headers", None)
+                pause = parse_retry_after(_headers.get("retry-after") if _headers else None) or 30.0
+                limiter.report_429(model_key, pause_seconds=pause)
+            elif error_kind == "model_not_found":
                 self._note_404_reconnect(client.provider.id, client.model)
             try:
                 from neurova.core.metrics import get_metrics

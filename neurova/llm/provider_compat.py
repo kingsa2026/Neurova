@@ -52,6 +52,11 @@ class ProviderCompat:
     # 仅 supports_reasoning_effort=True 的 provider 消费。
     _REASONING_EFFORT_MAP = {"light": None, "standard": "medium", "deep": "high"}
 
+    # B1-3（QwenPaw #6302 对齐）：是否支持思考开关两级参数
+    # enable_thinking(bool) / thinking_budget(int)（Qwen3/DashScope 风格）。
+    # 仅声明 True 的网关注入；thinking_budget 只在 thinking_enabled=True 时随发。
+    supports_thinking_toggle: bool = False
+
     def map_reasoning_effort(self, thinking_effort: Optional[str]) -> Optional[str]:
         """前端深度档位 → API reasoning_effort 值；light/未知/空 → None（不注入）。"""
         if not self.supports_reasoning_effort:

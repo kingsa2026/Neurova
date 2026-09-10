@@ -129,3 +129,43 @@ class TestSensetimeBuiltin:
         assert kept.base_url == "https://token.sensenova.cn/v1"
         assert kept.api_key == _CRED
         assert kept.models == ["sensenova-6.7-flash-lite"]
+
+
+class TestVolcengineAgentPlanMimoSeeds:
+    """B1-4（#6515）：火山引擎 Agent Plan / 小米 MiMo V2.5 提供商 + Ark 目录。"""
+
+    def test_agentplan_seed_present(self, manager):
+        manager._load_builtin_providers()
+        by_id = {p.id: p for p in manager.list_providers()}
+        ap = by_id["volcengine-agentplan"]
+        assert ap.base_url == "https://ark.cn-beijing.volces.com/api/plan/v3"
+        assert ap.is_builtin is True
+        assert "doubao-seed-2.0-lite" in ap.models
+        assert "deepseek-v4-pro" in ap.models
+        assert "kimi-k3" in ap.models
+        assert len(ap.models) >= 11
+
+    def test_volcengine_ark_seed_with_catalog(self, manager):
+        manager._load_builtin_providers()
+        by_id = {p.id: p for p in manager.list_providers()}
+        ark = by_id["volcengine"]
+        assert ark.base_url == "https://ark.cn-beijing.volces.com/api/v3"
+        assert "doubao-seed-evolving" in ark.models
+        assert "glm-5-2-260617" in ark.models
+
+    def test_mimo_seeds_present(self, manager):
+        manager._load_builtin_providers()
+        by_id = {p.id: p for p in manager.list_providers()}
+        mimo = by_id["mimo"]
+        assert mimo.base_url == "https://api.xiaomimimo.com/v1"
+        assert "mimo-v2.5" in mimo.models
+        assert "mimo-v2.5-pro" in mimo.models
+        token = by_id["mimo-tokenplan"]
+        assert token.base_url == "https://token-plan-cn.xiaomimimo.com/v1"
+        assert "mimo-v2.5" in token.models
+
+    def test_seeds_without_catalog_stay_empty(self, manager):
+        """无目录声明的种子（openrouter）仍为空清单——发现/筛选填充真实数据。"""
+        manager._load_builtin_providers()
+        by_id = {p.id: p for p in manager.list_providers()}
+        assert by_id["openrouter"].models == []

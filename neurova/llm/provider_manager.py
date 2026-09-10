@@ -58,6 +58,7 @@ reset 链路(与 MultiModelLLMClient 协同)
 """
 
 import inspect
+import asyncio
 import json
 import logging
 import os
@@ -206,7 +207,103 @@ _BUILTIN_PROVIDER_DEFS: tuple[dict, ...] = (
         "base_url": "https://token.sensenova.cn/v1",
         "api_key_prefix": "",
     },
+    # ── B1-4（QwenPaw #6515 对齐）：火山引擎（Ark）/ Agent Plan / 小米 MiMo ──
+    # 模型目录搬运自 QwenPaw model_catalog.json（ctx/输出窗口见各模型文档），
+    # 作为静态回退清单：用户填 key 后发现失败时仍有可用模型列表。
+    {
+        "id": "volcengine",
+        "name": "火山引擎（Ark）",
+        "provider": "openai",
+        "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+        "api_key_prefix": "",
+        "models": [
+            "doubao-seed-evolving",
+            "doubao-seed-2-1-pro-260628",
+            "doubao-seed-2-1-turbo-260628",
+            "doubao-seed-2-0-pro-260215",
+            "doubao-seed-2-0-lite-260628",
+            "doubao-seed-2-0-lite-260428",
+            "doubao-seed-2-0-lite-260215",
+            "doubao-seed-2-0-mini-260628",
+            "doubao-seed-2-0-mini-260428",
+            "doubao-seed-2-0-mini-260215",
+            "doubao-seed-2-0-code-preview-260215",
+            "doubao-seed-character-260628",
+            "doubao-seed-character-251128",
+            "glm-5-2-260617",
+            "kimi-k2-250905",
+            "deepseek-v3-2-251201",
+        ],
+    },
+    {
+        "id": "volcengine-agentplan",
+        "name": "火山引擎 Agent Plan",
+        "provider": "openai",
+        "base_url": "https://ark.cn-beijing.volces.com/api/plan/v3",
+        "api_key_prefix": "",
+        "models": [
+            "doubao-seed-2.0-lite",
+            "doubao-seed-2.0-mini",
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            "minimax-m3",
+            "glm-5.3",
+            "doubao-seed-2.1-turbo",
+            "doubao-seed-evolving",
+            "kimi-k3",
+            "kimi-k2.7-code",
+            "ark-code-latest",
+        ],
+    },
+    {
+        "id": "mimo",
+        "name": "小米 MiMo",
+        "provider": "openai",
+        "base_url": "https://api.xiaomimimo.com/v1",
+        "api_key_prefix": "sk-",
+        "models": ["mimo-v2.5", "mimo-v2.5-pro"],
+    },
+    {
+        "id": "mimo-tokenplan",
+        "name": "小米 MiMo Token Plan",
+        "provider": "openai",
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "api_key_prefix": "",
+        "models": ["mimo-v2.5", "mimo-v2.5-pro"],
+    },
 )
+
+
+def _classify_discovery_error_kind(exc: BaseException) -> str:
+    """B1-1：发现失败 error_kind 细分（对齐 QwenPaw DiscoveryErrorKind）。
+
+    在 normalize_provider_error 五类之上细分：超时独立于网络（timeout）、
+    403 独立于 401（authorization）。返回值 ∈ authentication / authorization /
+    timeout / network / invalid_response / unsupported / provider_unavailable /
+    configuration / rate_limited / provider_not_found。
+    """
+    from neurova.llm.providers.error_mapping import normalize_provider_error
+
+    normalized = normalize_provider_error(exc)
+    kind_map = {
+        "auth_failed": "authentication",
+        "connection_failed": "network",
+        "service_unavailable": "provider_unavailable",
+        "rate_limited": "rate_limited",
+        "bad_request": "invalid_response",
+        "timeout": "timeout",
+    }
+    kind = kind_map.get(normalized.category.value, "provider_unavailable")
+    text = str(exc).lower()
+    if kind == "authentication" and ("403" in text or "forbidden" in text):
+        return "authorization"
+    if kind == "network" and (
+        "timeout" in text
+        or "timed out" in text
+        or isinstance(exc, (TimeoutError, asyncio.TimeoutError))
+    ):
+        return "timeout"
+    return kind
 
 
 class LoadBalancingStrategy(Enum):
@@ -491,7 +588,7 @@ class LLMProviderManager(Module):
                 provider=definition["provider"],
                 base_url=definition["base_url"],
                 api_key_prefix=definition.get("api_key_prefix", ""),
-                models=[],
+                models=list(definition.get("models", [])),
                 is_builtin=True,
             )
         logger.info(
@@ -1212,17 +1309,8 @@ class LLMProviderManager(Module):
         try:
             models = await instance.fetch_models()
         except Exception as e:
-            from neurova.llm.providers.error_mapping import normalize_provider_error
-
-            normalized = normalize_provider_error(e)
-            kind_map = {
-                "auth_failed": "authentication",
-                "connection_failed": "network",
-                "service_unavailable": "provider_unavailable",
-                "rate_limited": "rate_limited",
-                "bad_request": "invalid_response",
-            }
-            error_kind = kind_map.get(normalized.category.value, "provider_unavailable")
+            # B1-1：细分 error_kind（timeout/authorization 独立），单源委托
+            error_kind = _classify_discovery_error_kind(e)
             with self._config_lock:
                 provider.models_last_sync_error = str(e)[:300]
                 self._save_config()
@@ -1575,6 +1663,15 @@ class LLMProviderManager(Module):
                 metadata[model_id] = entry
                 provider.model_metadata = metadata
                 self._save_config()
+                # B1-1：同步进进程级能力缓存（跨模型切换免重复首探）
+                from neurova.llm.model_capability_cache import (
+                    CAP_SUPPORTS_MULTIMODAL,
+                    get_capability_cache,
+                )
+
+                get_capability_cache().learn(
+                    f"{provider.id}:{model_id}", CAP_SUPPORTS_MULTIMODAL, vision,
+                )
         except Exception as e:  # noqa: BLE001 — 持久化失败不影响探测结果返回
             logger.warning("Persist probe result failed for %s: %s", model_id, e)
 
@@ -1592,6 +1689,28 @@ class LLMProviderManager(Module):
             if meta.get("capabilities"):
                 return  # 已有标记(含探针/文档来源),不重复探测
             if meta.get("probe_source") == "probed":
+                return
+
+            # B1-1：进程级能力缓存命中 → 直接回写标记，免重复网络探测
+            from neurova.llm.model_capability_cache import (
+                CAP_SUPPORTS_MULTIMODAL,
+                get_capability_cache,
+            )
+
+            cached = get_capability_cache().get(
+                f"{provider_id}:{model_id}", CAP_SUPPORTS_MULTIMODAL,
+            )
+            if cached is not None:
+                self._persist_probe_result(
+                    provider,
+                    model_id,
+                    ProbeResult(
+                        model_id=model_id,
+                        supported=bool(cached),
+                        capabilities=["vision"] if cached else [],
+                        metadata={"probe_source": "probed", "probe_detail": "capability_cache"},
+                    ),
+                )
                 return
 
             def _run() -> None:

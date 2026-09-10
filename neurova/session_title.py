@@ -31,6 +31,11 @@ _FENCE_RE = re.compile(r"```[\s\S]*?```")
 _INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 _MARKDOWN_RE = re.compile(r"[*_#>|\[\]()]+")
 _WHITESPACE_RE = re.compile(r"\s+")
+# B1-6（#7187）：推理模型的思考块不进标题（未闭合块到串尾一并剥除）
+_THINK_BLOCK_RE = re.compile(
+    r"<(think|thinking|analysis|reasoning)>.*?(?:</\1>|$)",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def is_default_title(title: Optional[str]) -> bool:
@@ -41,7 +46,7 @@ def is_default_title(title: Optional[str]) -> bool:
 
 
 def _clean_title(text: str) -> str:
-    t = (text or "")
+    t = _THINK_BLOCK_RE.sub("", (text or ""))
     for ch in ('"', "'", "”", "“", "\n", "\r", "。", "！", "！"):
         t = t.replace(ch, " ")
     t = _WHITESPACE_RE.sub(" ", t).strip()
@@ -51,8 +56,9 @@ def _clean_title(text: str) -> str:
 
 
 def fallback_title(content: str) -> str:
-    """首条用户消息 → 干净截断（去 markdown/网址/代码/多余空白）。"""
+    """首条用户消息 → 干净截断（去思考块/markdown/网址/代码/多余空白）。"""
     t = (content or "")
+    t = _THINK_BLOCK_RE.sub(" ", t)
     t = _URL_RE.sub(" ", t)
     t = _FENCE_RE.sub(" ", t)
     t = _INLINE_CODE_RE.sub(" ", t)
