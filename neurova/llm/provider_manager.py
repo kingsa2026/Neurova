@@ -244,6 +244,9 @@ class ProviderConfig:
     # P1-13 真账单采集开关（OpenClaw provider-usage 启发，默认关）：
     # 显式置 true 后 /stats/provider-usage 才会拉取该 provider 后台账单
     usage_collection: bool = False
+    # 服务商级读超时覆盖（秒）：思考模型经缓冲型网关的流内静默可达数分钟，
+    # 个别服务商需单独放宽/收紧；None=走 LLMConfig 默认（读 300s/建连 15s）
+    timeout: Optional[int] = None
     priority: int = 0
     is_builtin: bool = False
     icon: Optional[str] = None
@@ -350,6 +353,11 @@ class LLMProviderManager(Module):
     MODULE_NAME = "LLM Provider Manager"
     MODULE_VERSION = "1.0.0"
 
+    # L-05: 保护 _provider_instances 缓存的读写（与 update_provider 失效逻辑
+    # 同一把锁）。类级锁——合法构造契约含 `__new__` 绕过 __init__（如
+    # test_provider_manager.TestDeleteModel），实例属性会在该路径下缺失。
+    _PROVIDER_INSTANCES_LOCK = threading.RLock()
+
     def __init__(self, config=None, event_bus=None):
         super().__init__(config=config, event_bus=event_bus)
         self._preset_registry = get_preset_registry()
@@ -363,6 +371,7 @@ class LLMProviderManager(Module):
         self._providers: Dict[str, ProviderConfig] = {}
         self._default_provider_id: Optional[str] = None
         self._config_lock = threading.RLock()
+        self._provider_instances: Dict[str, Any] = {}
 
         # 加载配置
         self._load_config()
@@ -580,6 +589,13 @@ class LLMProviderManager(Module):
             provider.updated_at = datetime.now().isoformat()
 
             self._save_config()
+
+        # L-05: 失效该 provider 的实例缓存，否则改了 api_key/base_url 仍用旧实例(401)
+        # 惰性访问：__new__ 绕过 __init__ 的构造路径（测试/序列化重建）无该字典
+        with LLMProviderManager._PROVIDER_INSTANCES_LOCK:
+            instances = getattr(self, "_provider_instances", None)
+            if instances is not None:
+                instances.pop(provider_id, None)
 
         logger.info("Updated provider: %s", provider.name)
         return True
@@ -1724,11 +1740,12 @@ class LLMProviderManager(Module):
         if not provider:
             return None
 
-        cache = getattr(self, "_provider_instances", None)
-        if cache is None:
-            cache = self._provider_instances = {}
-        if provider_id in cache:
-            return cache[provider_id]
+        with LLMProviderManager._PROVIDER_INSTANCES_LOCK:
+            instances = getattr(self, "_provider_instances", None)
+            if instances is None:
+                instances = self._provider_instances = {}
+            if provider_id in instances:
+                return instances[provider_id]
 
         def _build(cls):
             try:
@@ -1776,7 +1793,11 @@ class LLMProviderManager(Module):
             logger.warning("Could not import provider %s: %s", provider.provider, e)
             return None
 
-        cache[provider_id] = instance
+        with LLMProviderManager._PROVIDER_INSTANCES_LOCK:
+            instances = getattr(self, "_provider_instances", None)
+            if instances is None:
+                instances = self._provider_instances = {}
+            instances[provider_id] = instance
         return instance
 
 

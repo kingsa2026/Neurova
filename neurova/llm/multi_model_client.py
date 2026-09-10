@@ -26,6 +26,7 @@
 
 import asyncio
 from neurova.core.logger import get_logger
+import inspect
 import threading
 import time
 from typing import Any, Dict, List, Optional
@@ -179,10 +180,13 @@ class MultiModelLLMClient:
                 instance._initialized = False
             # 清除类级单例
             cls._instance = None
-        # 清除模块级单例（在锁外，因为 get_multi_model_client 自己会加锁）
+        # 清除模块级单例：必须复用 get_multi_model_client 所用的同一把锁
+        # _multi_model_clients_lock，否则 reset() 与并发 get_multi_model_client
+        # 对 _multi_model_clients 字典形成双锁竞态（L-14 根因）。
         global _multi_model_client, _multi_model_clients
-        _multi_model_client = None
-        _multi_model_clients.clear()
+        with _multi_model_clients_lock:
+            _multi_model_client = None
+            _multi_model_clients.clear()
 
         # 清除 provider_manager 单例，确保 reset 链路穿透到 provider_manager 层
         # 延迟导入避免循环依赖（multi_model_client 顶部已 import provider_manager，
@@ -264,6 +268,11 @@ class MultiModelLLMClient:
             # P0-2 声明式 compat：按 provider 解析开关注入 LLMConfig
             from neurova.llm.provider_compat import resolve_compat
 
+            # 服务商级读超时覆盖（providers.json "timeout" 字段，秒）；未配置
+            # 走 LLMConfig 默认（读 300s / 建连 15s 分离）
+            _timeout_kwargs: Dict[str, Any] = {}
+            if provider.timeout:
+                _timeout_kwargs["timeout"] = int(provider.timeout)
             config = LLMConfig(
                 api_key=provider.api_key,
                 base_url=provider.base_url,
@@ -274,6 +283,7 @@ class MultiModelLLMClient:
                     base_url=provider.base_url,
                     compat_dict=getattr(provider, "compat_dict", None),
                 ),
+                **_timeout_kwargs,
             )
             # 协议分派（2026-09-09 原生通道接入）：
             # - anthropic 类型 → AnthropicNativeClient（/v1/messages 原生协议，
@@ -312,7 +322,7 @@ class MultiModelLLMClient:
 
         # 按模型名称查找
         if model:
-            for client in self._clients.values():
+            for client in list(self._clients.values()):
                 if client.model == model or client.model.endswith(model):
                     return client
 
@@ -381,7 +391,7 @@ class MultiModelLLMClient:
     def list_available_models(self) -> List[Dict[str, Any]]:
         """列出所有可用模型"""
         models = []
-        for client in self._clients.values():
+        for client in list(self._clients.values()):
             models.append(
                 {
                     "provider_id": client.provider.id,
@@ -553,7 +563,14 @@ class MultiModelLLMClient:
         rc, cb = self._get_retry_guard(client)
 
         async def _attempt():
-            return await asyncio.to_thread(client.client.chat, messages, **kwargs)
+            # BUG AUDIT L-01: AnthropicNativeClient.chat / GeminiNativeClient.chat
+            # 是 async 方法。asyncio.to_thread 只会"创建"协程并立刻返回它，
+            # 从不执行、从不 await → 调用方拿到 coroutine 对象（空回复 + 
+            # "coroutine was never awaited" 告警），token 按 0 记账。
+            chat_fn = client.client.chat
+            if inspect.isawaitable(chat_fn) or inspect.iscoroutinefunction(chat_fn):
+                return await chat_fn(messages, **kwargs)
+            return await asyncio.to_thread(chat_fn, messages, **kwargs)
 
         wrapped = with_retry_and_circuit_breaker(retry_config=rc, circuit_breaker=cb)(_attempt)
         return await wrapped()
@@ -814,8 +831,10 @@ class MultiModelLLMClient:
 
         limiter = get_shared_limiter()
         model_key = client.model or "unknown"
+        acquired = False
         try:
             limiter.acquire(model_key, blocking=False)
+            acquired = True
         except RateLimitExceeded as e:
             client.increment_request(success=False)
             yield _instream_error_dict(RuntimeError(f"模型限流: {e}"))
@@ -831,30 +850,57 @@ class MultiModelLLMClient:
             first_token_ms = 0  # P1-8（OpenOcta 启发）：首块耗时入账
             # 审计 P0-C5：上游声明回传 usage（OpenAI 标准行为）→ 无需整段缓冲
             _needs_reply_text = not getattr(client.client, "_compat_include_stream_usage", lambda: True)()
-            async for chunk in client.client.chat_stream_async(messages, **kwargs):
-                if first_token_ms == 0:
-                    # 首个有效 chunk（含 reasoning/content/usage 任一载荷）
-                    first_token_ms = int((time.time() - start_time) * 1000)
-                # 根因修复 (2026-09-02): 流式 usage 在最后一个 chunk 携带全量
-                # （LLMClient 已请求 stream_options.include_usage）——
-                # 取最后一次非空值，逐 chunk 累加会把 token 双计。
-                _u = getattr(chunk, "usage", None)
-                if _u:
-                    stream_usage = {
-                        "prompt_tokens": getattr(_u, "prompt_tokens", None) if not isinstance(_u, dict) else _u.get("prompt_tokens"),
-                        "completion_tokens": getattr(_u, "completion_tokens", None) if not isinstance(_u, dict) else _u.get("completion_tokens"),
-                    }
-                    stream_usage = {k: int(v or 0) for k, v in stream_usage.items()}
-                # 审计 P0-C5：条件缓冲——仅当上游网关声明不回传 usage（估算
-                # token 必须整段重放）时才累积；正常路径长响应内存不再翻倍
-                if _needs_reply_text:
-                    reply_text += getattr(chunk, "content", "") or ""
-                    reply_text += getattr(chunk, "reasoning_content", "") or ""
-                yield chunk
+            # 流内静默看门狗（2026-09-10 流中断事故遥测）：任何退出路径都必须
+            # 取消（try/finally 包住整个异步迭代，含消费方中途放弃的 aclose）
+            _stream_state = {
+                "last_chunk_at": time.time(),
+                "warned_at": 0.0,
+                "reasoning_chars": 0,
+                "content_chars": 0,
+                "read_timeout": getattr(getattr(client.client, "config", None), "timeout", "?"),
+            }
+            _silence_task = asyncio.create_task(
+                _warn_stream_silence(client.provider.id, client.model, _stream_state)
+            )
+            try:
+                async for chunk in client.client.chat_stream_async(messages, **kwargs):
+                    _stream_state["last_chunk_at"] = time.time()
+                    _stream_state["warned_at"] = 0.0
+                    if first_token_ms == 0:
+                        # 首个有效 chunk（含 reasoning/content/usage 任一载荷）
+                        first_token_ms = int((time.time() - start_time) * 1000)
+                    # 根因修复 (2026-09-02): 流式 usage 在最后一个 chunk 携带全量
+                    # （LLMClient 已请求 stream_options.include_usage）——
+                    # 取最后一次非空值，逐 chunk 累加会把 token 双计。
+                    _u = getattr(chunk, "usage", None)
+                    if _u:
+                        stream_usage = {
+                            "prompt_tokens": getattr(_u, "prompt_tokens", None) if not isinstance(_u, dict) else _u.get("prompt_tokens"),
+                            "completion_tokens": getattr(_u, "completion_tokens", None) if not isinstance(_u, dict) else _u.get("completion_tokens"),
+                        }
+                        stream_usage = {k: int(v or 0) for k, v in stream_usage.items()}
+                    # 审计 P0-C5：条件缓冲——仅当上游网关声明不回传 usage（估算
+                    # token 必须整段重放）时才累积；正常路径长响应内存不再翻倍
+                    if _needs_reply_text:
+                        reply_text += getattr(chunk, "content", "") or ""
+                        reply_text += getattr(chunk, "reasoning_content", "") or ""
+                    # 静默遥测计数：判读"思考/正文各吐了多少"的证据
+                    _rc = getattr(chunk, "reasoning_content", None)
+                    if _rc:
+                        _stream_state["reasoning_chars"] += len(_rc)
+                    _cc = getattr(chunk, "content", None)
+                    if _cc:
+                        _stream_state["content_chars"] += len(_cc)
+                    yield chunk
+            finally:
+                _silence_task.cancel()
+                try:
+                    await _silence_task
+                except BaseException:  # noqa: BLE001 — 取消收尾，遥测异常不外泄
+                    pass
             duration = time.time() - start_time  # P2-4 补刀：原为丢弃结果的死语句
             client.increment_request(success=True)
             limiter.report_success(model_key)
-            limiter.release(model_key)
             try:
                 from neurova.core.metrics import get_metrics
 
@@ -923,7 +969,10 @@ class MultiModelLLMClient:
             except Exception:
                 pass
             finally:
-                limiter.release(model_key)
+                # BUG AUDIT L-03: 统一收敛到此处单次释放（成功路径的重复 release 已移除）；
+                # acquired 守卫避免限流提前 return 路径误释放未持有的槽位。
+                if acquired:
+                    limiter.release(model_key)
             # OpenClaw 启发 P0-1 流内错误编码铁律：provider 调用一旦开始，
             # 一切失败编码为流内错误消息而非异常（llm-core types.ts L202）。
             # error_type 用五类标准错误（error_mapping 单一事实源），消费方
@@ -1049,8 +1098,8 @@ class MultiModelLLMClient:
 
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
-        total_requests = sum(c.request_count for c in self._clients.values())
-        total_errors = sum(c.error_count for c in self._clients.values())
+        total_requests = sum(c.request_count for c in list(self._clients.values()))
+        total_errors = sum(c.error_count for c in list(self._clients.values()))
 
         return {
             "total_clients": len(self._clients),
@@ -1087,6 +1136,44 @@ def _instream_error_dict(error: Exception) -> Dict[str, Any]:
         "error_type": pe.category.value,
         "retryable": pe.category.retryable,
     }
+
+
+# 流内静默看门狗阈值（秒）：静默跨过阈值即留 WARNING，此后每再静默一个阈值再报
+_STREAM_SILENCE_WARN_SECONDS = 60
+_STREAM_SILENCE_POLL_SECONDS = 10
+
+
+async def _warn_stream_silence(provider_id: str, model: str, state: Dict[str, Any]) -> None:
+    """流内静默看门狗（2026-09-10 流中断事故遥测）。
+
+    ReadTimeout 只知"窗口内零字节"，无法区分"思考模型经缓冲型网关的健康
+    长静默"与"上游停滞死流"——看门狗按阈值为周期留痕（provider/模型/
+    静默时长/已收 reasoning 与 content 字数/读超时窗口），事故判读与
+    读超时调参都有据可依。遥测职责，绝不抛异常干扰主流程。
+    """
+    try:
+        while True:
+            await asyncio.sleep(_STREAM_SILENCE_POLL_SECONDS)
+            silent = time.time() - state["last_chunk_at"]
+            if silent < _STREAM_SILENCE_WARN_SECONDS:
+                continue
+            if silent - state.get("warned_at", 0.0) < _STREAM_SILENCE_WARN_SECONDS:
+                continue
+            state["warned_at"] = silent
+            logger.warning(
+                "[STREAM_SILENCE] %s/%s 流内已静默 %.0fs（已收 reasoning %s 字 / content %s 字，读超时 %ss）"
+                "——思考模型长静默或上游停滞",
+                provider_id,
+                model,
+                silent,
+                state["reasoning_chars"],
+                state["content_chars"],
+                state["read_timeout"],
+            )
+    except asyncio.CancelledError:
+        return
+    except Exception:  # noqa: BLE001 — 遥测绝不干扰主流程
+        logger.debug("流内静默看门狗退出", exc_info=True)
 
 
 def _mock_enabled() -> bool:

@@ -12,6 +12,9 @@ P2-2 LLM 层 — chat 请求路径 retry/circuit-breaker 装配测试
 import asyncio
 
 import pytest
+
+# L-11 修复后 client=None 不再伪造成功；本文件验证真实客户端装配，缺 openai 库时跳过
+pytest.importorskip("openai")
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 

@@ -33,6 +33,12 @@ class TestInStreamErrorEncoding(unittest.TestCase):
     """铁律：chat_stream 的一切失败都编码为流内错误 dict，不抛异常。"""
 
     def setUp(self):
+        # 共享限流器跨测试污染隔离：前面的测试抛 429 类异常会触发
+        # report_429(30s 暂停)，后续测试在 acquire 阶段就被限流 dict 顶掉
+        # （曾致 read_timeout 回归测试拿到 rate_limited 假结果）
+        from neurova.llm.model_rate_limiter import reset_shared_limiter
+
+        reset_shared_limiter()
         self.manager = MultiModelLLMClient(strategy=None).__class__(
             # 占位防误用：实际用 _make_manager 构造
         ) if False else None
@@ -85,6 +91,22 @@ class TestInStreamErrorEncoding(unittest.TestCase):
         chunks = self._stream_one(manager, [], exc=RuntimeError("boom midstream"))
         err = [c for c in chunks if isinstance(c, dict) and c.get("error")]
         self.assertEqual(len(err), 1)
+
+    def test_midstream_read_timeout_is_connection_retryable(self):
+        """2026-09-10 事故回归：流中断 ReadTimeout 必须编码为可重试连接错误。
+
+        api.b.ai 流式断流案：httpx.ReadTimeout（str 空、httpx 族不在类型表）
+        曾被兜底成 error_type=bad_request / retryable=False → 供应商错误守卫
+        直接上抛，用户看到裸报错。
+        """
+        import httpx
+
+        manager = self._make_manager()
+        chunks = self._stream_one(manager, [{"delta": "thinking"}], exc=httpx.ReadTimeout(""))
+        err = [c for c in chunks if isinstance(c, dict) and c.get("error")]
+        self.assertEqual(len(err), 1)
+        self.assertEqual(err[0]["error_type"], "connection_failed")
+        self.assertTrue(err[0]["retryable"], "连接类超时可重试")
 
     def test_no_client_yields_typed_error(self):
         """无可用客户端也走归一化（带 error_type），不再是无类型裸字符串。"""

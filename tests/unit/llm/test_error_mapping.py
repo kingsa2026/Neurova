@@ -47,6 +47,24 @@ class TestNormalizeByExceptionType:
             err = normalize_provider_error(exc)
             assert err.category is ErrorCategory.CONNECTION, (type(exc), err.category)
 
+    def test_httpx_transport_errors(self):
+        """httpx/httpcore 传输族归一为 CONNECTION（2026-09-10 流中断事故回归）。
+
+        openai SDK 流式迭代中读超时裸抛 httpx.ReadTimeout：str 为空、
+        不继承内置 TimeoutError —— 曾漏分类被兜底成不可重试的 bad_request。
+        """
+        import httpx
+
+        for exc in (
+            httpx.ReadTimeout(""),  # 事故原样：空消息（str() == ""）
+            httpx.ConnectTimeout("connect timeout"),
+            httpx.ConnectError("connection refused"),
+            httpx.RemoteProtocolError("server disconnected without sending a response"),
+        ):
+            err = normalize_provider_error(exc)
+            assert err.category is ErrorCategory.CONNECTION, (type(exc), err.category)
+            assert err.retryable, type(exc)
+
     def test_llm_error_subclasses_preserved(self):
         from neurova.llm_client import (
             LLMAuthError,
@@ -137,6 +155,18 @@ class TestStringFallback:
         assert normalize_provider_error(RuntimeError("rate limit exceeded")).category is ErrorCategory.RATE_LIMIT
         assert normalize_provider_error(RuntimeError("connection refused")).category is ErrorCategory.CONNECTION
         assert normalize_provider_error(RuntimeError("service unavailable")).category is ErrorCategory.UNAVAILABLE
+
+    def test_camelcase_class_name_messages(self):
+        """异常 str 为空、归一器取类名兜底时，驼峰拼接名也必须命中连接类。
+
+        归一器 message = str(exc) or 类名；"ReadTimeout" 连写无词边界，
+        曾因 \\b 前缀匹配失败掉进 bad_request 兜底。
+        """
+        class Stranger(Exception):
+            pass
+
+        for msg in ("ReadTimeout", "ConnectTimeout", "APITimeoutError", "timed out"):
+            assert normalize_provider_error(Stranger(msg)).category is ErrorCategory.CONNECTION, msg
 
     def test_sensitive_material_masked(self):
         """鉴权错误不得在 user_hint 里回显 key 片段"""
