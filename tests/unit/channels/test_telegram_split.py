@@ -129,12 +129,13 @@ class TestTelegramAdapterSplit:
     def test_verify_webhook_signature(self):
         from neurova.channels.telegram_adapter import TelegramAdapter
         adapter = TelegramAdapter()
-        # No secret set → always passes
-        assert adapter.verify_webhook_signature({}) is True
+        # BUG AUDIT C-10: 无密钥 → fail-closed 拒绝（此前 fail-open 恒放行）
+        assert adapter.verify_webhook_signature({}) is False
         # Secret set → must match
         adapter._webhook_secret = "abc123"
         assert adapter.verify_webhook_signature({"X-Telegram-Bot-Api-Secret-Token": "abc123"}) is True
         assert adapter.verify_webhook_signature({"X-Telegram-Bot-Api-Secret-Token": "wrong"}) is False
+        assert adapter.verify_webhook_signature({}) is False
 
     def test_update_config(self):
         from neurova.channels.telegram_adapter import TelegramAdapter

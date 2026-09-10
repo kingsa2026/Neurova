@@ -18,7 +18,7 @@ try:
 except ImportError:
     REQUESTS_AVAILABLE = False
 
-from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+from neurova.channels import ChannelAdapter, ChannelConfig, ContentType, MessageChannel, UnifiedMessage
 
 
 class DiscordAdapter(ChannelAdapter):
@@ -39,6 +39,10 @@ class DiscordAdapter(ChannelAdapter):
         return MessageChannel.DISCORD
 
     def __init__(self):
+        # BUG AUDIT C-04: 此前未调用 super().__init__(config)，导致 self.config
+        # 不存在，访问 adapter.channel_type / adapter.config.enabled 时
+        # AttributeError。基类 ChannelAdapter.__init__ 接收 ChannelConfig。
+        super().__init__(ChannelConfig(channel_type="discord"))
         # 基础认证信息
         self.bot_token = ""
 

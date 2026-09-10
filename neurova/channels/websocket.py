@@ -28,7 +28,7 @@ try:
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
 
-from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+from neurova.channels import ChannelAdapter, ChannelConfig, ContentType, MessageChannel, UnifiedMessage
 
 
 class WebSocketAdapter(ChannelAdapter):
@@ -49,6 +49,9 @@ class WebSocketAdapter(ChannelAdapter):
         return MessageChannel.WEBSOCKET
 
     def __init__(self):
+        # BUG AUDIT C-04: 同 discord 适配器，未初始化 self.config 导致
+        # channel_type / config.enabled 访问崩溃。基类统一接收 ChannelConfig。
+        super().__init__(ChannelConfig(channel_type="websocket"))
         # 基础配置
         self.bot_prefix = "@bot"
         self.show_tool_messages = True
@@ -64,9 +67,14 @@ class WebSocketAdapter(ChannelAdapter):
 
         # 重连配置
         self.reconnect_enabled = True
-        self.reconnect_interval = 5  # 重连间隔 (秒)
+        self.reconnect_interval = 5  # 基础重连间隔 (秒)
         self.reconnect_max_attempts = 0  # 最大重连次数 (0=无限)
-        self.reconnect_attempts = 0
+        # BUG AUDIT C-14: 原 __init__ 定义 reconnect_attempts，而重连逻辑读写
+        # _reconnect_attempts（连接成功前不存在）→ 首次重连即 AttributeError。
+        # 统一为 _reconnect_attempts，并加指数退避上限。
+        self._reconnect_attempts = 0
+        self.reconnect_max_interval = 300  # 退避上限 (秒)
+        self._reconnect_task: Optional[asyncio.Task] = None
 
         # 认证配置
         self.auth_type = "none"  # none / bearer / basic / api_key
@@ -268,24 +276,34 @@ class WebSocketAdapter(ChannelAdapter):
             self._connected = False
 
     async def _reconnect(self):
-        """自动重连"""
+        """自动重连（指数退避：interval * 2^(attempt-1)，上限 reconnect_max_interval）"""
         if self.reconnect_max_attempts > 0 and self._reconnect_attempts >= self.reconnect_max_attempts:
             logging.error("WebSocket 达到最大重连次数 (%s)，停止重连", self.reconnect_max_attempts)
             return
 
         self._reconnect_attempts += 1
-        logging.info("WebSocket 尝试重连 (%s/%s)...", self._reconnect_attempts, self.reconnect_max_attempts or '∞')
+        # BUG AUDIT C-14: 固定 5s 无限重连改为指数退避（防对故障服务端形成重连风暴）
+        backoff = min(
+            self.reconnect_interval * (2 ** (self._reconnect_attempts - 1)),
+            self.reconnect_max_interval,
+        )
+        logging.info(
+            "WebSocket 尝试重连 (%s/%s, 退避 %.1fs)...",
+            self._reconnect_attempts,
+            self.reconnect_max_attempts or '∞',
+            backoff,
+        )
 
-        await asyncio.sleep(self.reconnect_interval)
+        await asyncio.sleep(backoff)
 
         try:
             await self._async_init_connection()
             logging.info("WebSocket 重连成功")
         except Exception as e:
             logging.error("WebSocket 重连失败: %s", e)
-            # 继续尝试重连
+            # 继续尝试重连（C-14: create_task 结果保强引用，防任务被 GC 静默丢弃）
             if self.reconnect_enabled:
-                asyncio.create_task(self._reconnect())
+                self._reconnect_task = asyncio.create_task(self._reconnect())
 
     def _parse_websocket_message(self, raw_message: str) -> Optional[UnifiedMessage]:
         """解析 WebSocket 消息"""
