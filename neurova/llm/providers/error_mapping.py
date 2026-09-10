@@ -122,6 +122,15 @@ def _build_exception_map() -> list:
     for cls, cat in sdk:
         if cls is not None:
             pairs.append((cls, cat))
+    # httpx/httpcore 传输族（2026-09-10 流中断事故回归）：openai SDK 流式
+    # 迭代中读超时裸抛 httpx.ReadTimeout——str 为空、不继承内置 TimeoutError，
+    # 漏分类致流中断被兜底成不可重试的 bad_request。openai 依赖 httpx，正常必装。
+    try:  # noqa: SIM105 — 映射表需要真实类对象，try/except 是唯一形态
+        import httpx as _httpx
+
+        pairs.append((_httpx.TransportError, ErrorCategory.CONNECTION))
+    except ImportError:
+        pass
     pairs.extend([
         (ConnectionError, ErrorCategory.CONNECTION),
         (TimeoutError, ErrorCategory.CONNECTION),
@@ -137,7 +146,9 @@ _MESSAGE_PATTERNS: list = [
     (re.compile(r"\b(40[13]\b|unauthorized|forbidden|invalid.{0,12}api.?key|authentication)", re.I), ErrorCategory.AUTH),
     (re.compile(r"\b(429\b|rate.?limit|too many requests|quota)", re.I), ErrorCategory.RATE_LIMIT),
     (re.compile(r"\b(5\d\d\b|service.?unavailable|bad.?gateway|gateway.?timeout|overloaded|internal server)", re.I), ErrorCategory.UNAVAILABLE),
-    (re.compile(r"\b(connection|timeout|timed?.?out|network|unreachable|refused|reset)", re.I), ErrorCategory.CONNECTION),
+    # \w*timeout：异常 str 为空时归一器以类名兜底（ReadTimeout 等驼峰拼接名
+    # 连写无词边界，裸 \btimeout 匹配不到——2026-09-10 流中断事故回归）
+    (re.compile(r"\b(connection|\w*timeout|timed?.?out|network|unreachable|refused|reset)", re.I), ErrorCategory.CONNECTION),
     (re.compile(r"\b(40[024]\b|bad.?request|not.?found|invalid.?model|invalid.?request|unsupported)", re.I), ErrorCategory.BAD_REQUEST),
 ]
 
@@ -203,7 +214,7 @@ def normalize_provider_error(exc: BaseException) -> ProviderError:
         return ProviderError(cat, _mask_secrets(message), cause=exc)
 
     # 4. 兜底：坏请求（不丢原信息）
-    return ProviderError(ErrorCategory.BAD_REQUEST, message, cause=exc)
+    return ProviderError(ErrorCategory.BAD_REQUEST, _mask_secrets(message), cause=exc)
 
 
 def exception_classes_for(categories: typing.Iterable[ErrorCategory]) -> tuple:

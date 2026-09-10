@@ -101,7 +101,12 @@ class LLMConfig:
     top_p: float = 1.0
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
-    timeout: int = 120
+    # 读/写等待（流式=字节间隙上限）：300s 适配思考模型经缓冲型网关的长静默
+    # （reasoning 停发、工具调用参数缓冲）——2026-09-10 api.b.ai 流中断事故，
+    # 原 120s 把健康的思考静默误杀为 ReadTimeout
+    timeout: int = 300
+    # 建连/取池单独收紧：死端点快速失败，不随读窗口放宽
+    connect_timeout: int = 15
     # 审计 P0-C3：SDK 层重试禁用（默认 0）——外层 RetryConfig(max_attempts=3)
     # 单层负责重试；SDK 内层再叠 3 次曾致单次逻辑调用最多 9 次真实请求
     # （429 场景重复计费）。显式传 max_retries>0 的存量配置不受影响。
@@ -218,17 +223,38 @@ class LLMClient:
 
         return params
 
+    def _httpx_timeout(self):
+        """读/写等待与建连分离（openai SDK 接受 httpx.Timeout 实例）：
+        timeout 管读间隙/写等待，connect_timeout 管建连与取池。"""
+        import httpx
+
+        return httpx.Timeout(self.config.timeout, connect=self.config.connect_timeout)
+
     def _init_client(self):
         """初始化 OpenAI 客户端"""
         if not OPENAI_AVAILABLE:
             self.logger.info("使用模拟模式（openai 库不可用）")
             return
 
+        # L-13: 重建客户端前先关闭旧连接，避免连接池/TLS 会话泄漏
+        old_client = self.client
+        if old_client is not None:
+            try:
+                old_client.close()
+            except Exception:
+                pass
+        old_async = self.async_client
+        if old_async is not None:
+            try:
+                old_async.close()
+            except Exception:
+                pass
+
         try:
             self.client = OpenAI(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url,
-                timeout=self.config.timeout,
+                timeout=self._httpx_timeout(),
                 max_retries=self.config.max_retries,
             )
 
@@ -236,7 +262,7 @@ class LLMClient:
                 self.async_client = AsyncOpenAI(
                     api_key=self.config.api_key,
                     base_url=self.config.base_url,
-                    timeout=self.config.timeout,
+                    timeout=self._httpx_timeout(),
                     max_retries=self.config.max_retries,
                 )
 
@@ -265,7 +291,10 @@ class LLMClient:
                 getattr(self.config, "base_url", "?"),
                 getattr(self.config, "model", "?"),
             )
-            return self._mock_response(messages)
+            raise LLMConnectionError(
+                f"LLMClient 未初始化(缺 key/配置失败),无法生成回复: "
+                f"base_url={getattr(self.config, 'base_url', '?')} model={getattr(self.config, 'model', '?')}"
+            )
 
         start_time = time.time()
 
@@ -345,8 +374,11 @@ class LLMClient:
         """
         self._check_input_budget(messages, tools=kwargs.get("tools"))
         if not self.client:
-            yield from self._mock_stream_response(messages)
-            return
+            # BUG AUDIT L-11: 流式路径同样禁止冒充成功响应。
+            raise LLMConnectionError(
+                f"LLMClient 未初始化(缺 key/配置失败),无法流式生成回复: "
+                f"base_url={getattr(self.config, 'base_url', '?')} model={getattr(self.config, 'model', '?')}"
+            )
 
         start_time = time.time()
 
@@ -448,10 +480,11 @@ class LLMClient:
         """
         self._check_input_budget(messages, tools=kwargs.get("tools"))
         if not self.async_client:
-            # 回退到同步流式
-            for response in self._mock_stream_response(messages):
-                yield response
-            return
+            # BUG AUDIT L-11: 异步流式路径同样禁止冒充成功响应。
+            raise LLMConnectionError(
+                f"LLMClient 异步客户端未初始化(缺 key/配置失败),无法流式生成回复: "
+                f"base_url={getattr(self.config, 'base_url', '?')} model={getattr(self.config, 'model', '?')}"
+            )
 
         start_time = time.time()
 
@@ -686,7 +719,9 @@ class LLMClient:
             return e
 
         normalized = normalize_provider_error(e)
-        msg = str(e)
+        # 用归一器的 message（str 为空时回退类名，且已脱敏）——raw str 空
+        # 异常（如流中 httpx.ReadTimeout）包装后不再是"连接失败: "空白尾
+        msg = normalized.message
         cat = normalized.category
 
         if cat is ErrorCategory.CONNECTION:

@@ -8,6 +8,9 @@ P2-a 每模型限流器防回归网（对标 QP beta.5 LLM 限流语义）
 import time
 
 import pytest
+
+# L-11 修复后 client=None 不再伪造成功；chat 装配用例需真实 openai 客户端
+pytest.importorskip("openai")
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 

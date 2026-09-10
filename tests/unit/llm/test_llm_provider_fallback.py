@@ -35,6 +35,11 @@ import unittest
 from typing import List
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+# L-11 修复后 client=None 不再伪造成功；本文件验证真实客户端兜底，缺 openai 库时跳过
+pytest.importorskip("openai")
+
 from neurova.llm.multi_model_client import MultiModelLLMClient, ModelClient
 
 

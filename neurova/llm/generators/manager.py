@@ -13,6 +13,16 @@ from typing import Any, Dict, List, Optional
 
 logger = get_logger(__name__)
 
+# BUG AUDIT L-02: 生成器类型 → (模块后缀, 类名) 映射，用于按类型注册真实实例
+_GENERATOR_REGISTRY: Dict[str, tuple] = {
+    "text_to_image": ("text_to_image", "TextToImageGenerator"),
+    "image_to_image": ("image_to_image", "ImageToImageGenerator"),
+    "text_to_video": ("text_to_video", "TextToVideoGenerator"),
+    "image_to_video": ("image_to_video", "ImageToVideoGenerator"),
+    "keyframe_to_video": ("keyframe_to_video", "KeyframeToVideoGenerator"),
+    "video_to_video": ("video_to_video", "VideoToVideoGenerator"),
+}
+
 
 @dataclass
 class GeneratorResult:
@@ -79,6 +89,37 @@ class GeneratorManager:
         except ImportError:
             logger.warning("ProviderManager not available")
 
+        # BUG AUDIT L-02: 此前 self._generators 全局唯一赋值处只有 `{}`，
+        # 从不写入，导致所有 AIGC 调用返回 "not available"。在此注册真实实例。
+        self._register_default_generators()
+
+    def _register_default_generators(self) -> None:
+        """按 _GENERATOR_REGISTRY 注册真实生成器实例（BUG AUDIT L-02 根因修复）。
+
+        旧实现中 self._generators 从不写入，get_generator 恒返回 None，
+        所有文生图/图生图/文生视频/图生视频均报 "not available"。
+        """
+        api_key = ""
+        base_url = ""
+        if self._provider_manager is not None:
+            try:
+                api_key = getattr(self._provider_manager, "default_api_key", "") or ""
+                base_url = getattr(self._provider_manager, "default_base_url", "") or ""
+            except Exception as e:
+                logger.warning("读取 provider 凭据失败: %s", e)
+
+        for gen_type, (module_suffix, cls_name) in _GENERATOR_REGISTRY.items():
+            try:
+                import importlib
+
+                mod = importlib.import_module(f"neurova.llm.generators.{module_suffix}")
+                cls = getattr(mod, cls_name)
+                self._generators[gen_type] = cls(
+                    generator_id=gen_type, api_key=api_key, base_url=base_url
+                )
+            except Exception as e:
+                logger.error("注册生成器 %s(%s) 失败: %s", gen_type, cls_name, e)
+
     def _load_providers(self) -> None:
         """加载可用的提供者"""
         if self._provider_manager:
@@ -125,16 +166,35 @@ class GeneratorManager:
                 return self._create_error_result(f"Generator type '{generator_type}' not available")
 
             # 如果未指定模型，使用 LLMRouter 选择
+            # BUG AUDIT L-02: 旧代码调用不存在的 get_best_model()，且返回值为
+            # ModelSelectionResult（含 .model / .provider_id 属性而非 dict）。
             if model is None and self._llm_router:
                 request_type = self._map_to_llm_request_type(generator_type)
                 if request_type:
-                    model_info = self._llm_router.get_best_model(request_type)
-                    if model_info:
-                        model = model_info.get("model")
-                        provider = model_info.get("provider")
+                    try:
+                        from neurova.llm.llm_router import RequestType as _RT
 
-            # 执行生成
-            result = await generator.generate(prompt=prompt, model=model, provider=provider, **kwargs)
+                        model_info = self._llm_router.select_model(_RT(request_type))
+                        if model_info:
+                            model = getattr(model_info, "model", None)
+                            provider = getattr(model_info, "provider_id", provider)
+                    except Exception as e:
+                        logger.warning("模型自动选择失败，使用默认模型: %s", e)
+
+            # 构造 GenerationConfig 并调用生成器
+            # BUG AUDIT L-02: BaseGenerator.generate 接收 config: GenerationConfig，
+            # 旧代码用 generate(prompt=..., model=...) 会 TypeError。
+            try:
+                gtype = GenType(generator_type)
+            except ValueError:
+                gtype = GenType.TEXT_GENERATION
+            config = GenerationConfig(
+                type=gtype,
+                prompt=prompt,
+                model_id=model or "",
+                extra_params=kwargs,
+            )
+            result = await generator.generate(config)
 
             duration_ms = (time.time() - start_time) * 1000
 
