@@ -612,21 +612,30 @@ class MemoryStorage:
             cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
             cutoff_iso = cutoff.isoformat()
 
+        # M-22 修复: 过滤移入锁内并对齐 query()（Bug 19）的 fromisoformat 口径 ——
+        # 原实现 a) 裸 ISO 字符串比较时间, 不同时区表示的相同时刻字符串序 != 时间序;
+        # b) 锁外读共享可变 MemoryRecord 的属性（锁内只做快照）。
         with self._lock:
-            records = list(self._records.values())
+            filtered = []
+            for r in self._records.values():
+                if cutoff_iso is not None:
+                    try:
+                        rec_dt = datetime.datetime.fromisoformat(r.created_at)
+                        cutoff_dt = datetime.datetime.fromisoformat(cutoff_iso)
+                        if rec_dt < cutoff_dt:
+                            continue
+                    except (ValueError, TypeError):
+                        # 解析失败回退到字符串比较 (与 query() 行为兼容)
+                        if r.created_at < cutoff_iso:
+                            continue
+                if agent_id is not None and r.agent_id != agent_id:
+                    continue
+                if user_id is not None and r.user_id != user_id:
+                    continue
+                filtered.append(r)
 
-        filtered = []
-        for r in records:
-            if cutoff_iso and r.created_at < cutoff_iso:
-                continue
-            if agent_id is not None and r.agent_id != agent_id:
-                continue
-            if user_id is not None and r.user_id != user_id:
-                continue
-            filtered.append(r)
-
-        filtered.sort(key=lambda r: r.created_at, reverse=True)
-        return [r.to_dict() for r in filtered[:limit]]
+            filtered.sort(key=lambda r: r.created_at, reverse=True)
+            return [r.to_dict() for r in filtered[:limit]]
 
     def delete_memory(self, memory_id: str) -> bool:
         """删除单条记忆

@@ -109,6 +109,22 @@ class EmotionType(Enum):
 # ────── Data Models ──────
 
 
+def _parse_dt_field(val: Any, default: datetime) -> datetime:
+    """from_dict 时间字段回填（M-16）：有值才解析覆盖，缺省/非法走 default。
+
+    供 UserProfile/Skill/SelfModel/Memory 的 from_dict 复用 —— 此前四者
+    均不回填日期字段，每次加载被重置为 now。
+    """
+    if isinstance(val, datetime):
+        return val
+    if isinstance(val, str):
+        try:
+            return datetime.fromisoformat(val)
+        except ValueError:
+            pass
+    return default
+
+
 @dataclass
 class UserProfile:
     """用户档案"""
@@ -137,6 +153,8 @@ class UserProfile:
             name=data.get("name", ""),
             preferences=data.get("preferences", {}),
             traits=data.get("traits", []),
+            created_at=_parse_dt_field(data.get("created_at"), datetime.now(timezone.utc)),
+            updated_at=_parse_dt_field(data.get("updated_at"), datetime.now(timezone.utc)),
         )
 
 
@@ -175,6 +193,7 @@ class Skill:
             parameters=data.get("parameters", {}),
             usage_count=data.get("usage_count", 0),
             success_rate=data.get("success_rate", 0.0),
+            created_at=_parse_dt_field(data.get("created_at"), datetime.now(timezone.utc)),
         )
 
 
@@ -213,6 +232,7 @@ class SelfModel:
             beliefs=data.get("beliefs", {}),
             goals=data.get("goals", []),
             version=data.get("version", 1),
+            updated_at=_parse_dt_field(data.get("updated_at"), datetime.now(timezone.utc)),
         )
 
 
@@ -441,15 +461,7 @@ class Memory:
             except (ValueError, KeyError):
                 return default
 
-        def _parse_dt(val):
-            if isinstance(val, datetime):
-                return val
-            if isinstance(val, str):
-                try:
-                    return datetime.fromisoformat(val)
-                except ValueError:
-                    return datetime.now(timezone.utc)
-            return datetime.now(timezone.utc)
+        _now = datetime.now(timezone.utc)
 
         # Bug 2 修复: 若未传 isolation_context, 则从 agent_id/neuser_id/user_id 字段重建
         if isolation_context is None:
@@ -479,13 +491,16 @@ class Memory:
             temperature=data.get("temperature", 100.0),
             importance=data.get("importance", 50.0),
             access_count=data.get("access_count", 0),
+            # M-16: embedding 与 last_accessed_at 原先不回填, round-trip 即丢
+            embedding=data.get("embedding"),
             metadata=data.get("metadata", {}),
             agent_id=data.get("agent_id", ""),
             neuser_id=data.get("neuser_id", ""),
             user_id=data.get("user_id", ""),
             shared=data.get("shared", False),
             share_group_ids=data.get("share_group_ids", []),
-            created_at=_parse_dt(data.get("created_at")),
-            updated_at=_parse_dt(data.get("updated_at")),
+            created_at=_parse_dt_field(data.get("created_at"), _now),
+            updated_at=_parse_dt_field(data.get("updated_at"), _now),
+            last_accessed_at=_parse_dt_field(data.get("last_accessed_at"), None),
             isolation_context=isolation_context,
         )

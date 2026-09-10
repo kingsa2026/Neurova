@@ -34,10 +34,12 @@ def scoped_manager(tmp_path):
         category="experience",
         importance=50.0,
     )
-    # admin 作用域注入（与 memory/base.py get_memory_manager 同路径）
-    mm.set_request_scope(neuser_id="1", user_id="1")
-    yield mm
-    mm.set_request_scope(neuser_id=None, user_id=None)
+    # admin 作用域注入（与 memory/base.py get_memory_manager 同路径）。
+    # 必须用 token 型 request_scope 包装 yield：set_request_scope(None, None)
+    # 只会重设为实例默认值（None or self._user_id），ContextVar 仍非空，
+    # 会泄漏到同线程后续测试（M-25 跨作用域用例因此被污染失效）。
+    with mm.request_scope(neuser_id="1", user_id="1"):
+        yield mm
 
 
 class TestAgentWideSemanticRecall:

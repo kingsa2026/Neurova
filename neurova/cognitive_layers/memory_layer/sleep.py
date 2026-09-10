@@ -174,6 +174,9 @@ class SleepConsolidation:
         self._total_memories_processed: int = 0
         self._total_merged: int = 0
         self._temperature_sum: float = 0.0
+        # M-18: 与 _temperature_sum 同口径的记忆条数（分母）——
+        # 原实现用整合轮数当分母, 均值严重偏大
+        self._temperature_count: int = 0
 
         # API 能力状态（此前 /api/v1/sleep 端点因缺少这些能力而全部降级为 mock）
         self._is_sleeping: bool = False
@@ -497,6 +500,8 @@ class SleepConsolidation:
         self._total_memories_processed += len(memories)
         self._total_merged += len(merge_results)
         self._temperature_sum += sum(m.temperature for m in merged_memories)
+        # M-18: 分母与分子同口径 —— 按参与求和的记忆条数累计
+        self._temperature_count += len(merged_memories)
 
         return merged_memories, merge_results
 
@@ -509,8 +514,9 @@ class SleepConsolidation:
         """
         total_memories = self._total_memories_processed
         merge_rate = self._total_merged / total_memories if total_memories > 0 else 0.0
-        total_merged_memories = self._consolidation_count  # 每次整合产出的记忆数
-        avg_temperature = self._temperature_sum / total_merged_memories if total_merged_memories > 0 else 50.0
+        # M-18 修复: 分母原为 _consolidation_count（整合轮数）, 与分子的按条累加
+        # 不同口径, 均值严重偏大。改用按条累计的 _temperature_count。
+        avg_temperature = self._temperature_sum / self._temperature_count if self._temperature_count > 0 else 50.0
 
         return {
             "consolidation_count": self._consolidation_count,
