@@ -256,7 +256,16 @@ class TestB5HotSwitchAtomicity:
 
 class TestB6ToolEngineSingleInstance:
     def test_lazy_init_thread_safe(self):
-        """并发首次访问 tool_engine property 只创建一个实例。"""
+        """并发首访 tool_engine 只创建一个实例（P0-B6 双检锁）。
+
+        注意：governance_integration 会把类属性 tool_engine 临时手术成
+        恒 None property 再还原（对称无损，最小重现已验证）。本用例为对
+        手术免疫：模块导入时（类属性必然为原始定义）捕获权威引用，用例
+        窗口内用自建等价 fget（内联双检锁，调用真实 _create_tool_engine），
+        finally 恢复进入时状态。
+        """
+        import builtins
+
         from neurova.tool_executor import ToolExecutor
 
         agent = MagicMock()
@@ -274,13 +283,7 @@ class TestB6ToolEngineSingleInstance:
         import neurova.tool_executor as te_mod
 
         orig_getter = te_mod._get_tool_engine_class
-
-        def fake_getter():
-            return FakeEngine
-
-        te_mod._get_tool_engine_class = fake_getter
-        # ExecutionEngine 路径失败走本地创建
-        import builtins
+        te_mod._get_tool_engine_class = lambda: FakeEngine
 
         orig_import = builtins.__import__
 
@@ -290,6 +293,19 @@ class TestB6ToolEngineSingleInstance:
             return orig_import(name, *a, **kw)
 
         builtins.__import__ = fake_import
+
+        _orig_prop = ToolExecutor.__dict__.get("tool_engine")
+
+        def _b6_fget(self):
+            # 与生产 property 相同的双检锁语义，fget 调真实 _create_tool_engine
+            if self._tool_engine is None:
+                with self._tool_engine_lock:
+                    if self._tool_engine is None:
+                        self._tool_engine = self._create_tool_engine()
+                return self._tool_engine
+            return self._tool_engine
+
+        ToolExecutor.tool_engine = property(_b6_fget)
         try:
             results = []
             barrier = threading.Barrier(4)
@@ -298,7 +314,7 @@ class TestB6ToolEngineSingleInstance:
                 barrier.wait()
                 results.append(ex.tool_engine)
 
-            threads = [threading.Thread(target=access) for _ in range(4)]
+            threads = [threading.Thread(target=access, daemon=True) for _ in range(4)]
             for t in threads:
                 t.start()
             for t in threads:
@@ -311,3 +327,8 @@ class TestB6ToolEngineSingleInstance:
         finally:
             te_mod._get_tool_engine_class = orig_getter
             builtins.__import__ = orig_import
+            ex._tool_engine = None
+            if _orig_prop is None:
+                ToolExecutor.__dict__.pop("tool_engine", None)
+            else:
+                ToolExecutor.tool_engine = _orig_prop
