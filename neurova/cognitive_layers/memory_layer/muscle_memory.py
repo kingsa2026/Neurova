@@ -343,31 +343,34 @@ class MuscleMemory:
             existing = self._find_item(tool_name, fingerprint, vector_fp)
 
             if existing:
-                return self._update_existing_item(existing, success, result_summary, metadata)
+                item = self._update_existing_item(existing, success, result_summary, metadata)
+            else:
+                # 创建新条目
+                item_id = self._generate_item_id(tool_name, query)
+                item = MuscleMemoryItem(
+                    id=item_id,
+                    tool_name=tool_name,
+                    query_fingerprint=fingerprint,
+                    vector_fingerprint=vector_fp,
+                    parameters=parameters,
+                    result_summary=result_summary,
+                    level=MemoryLevel.L3,
+                    success_count=1 if success else 0,
+                    failure_count=0 if success else 1,
+                    consecutive_successes=1 if success else 0,
+                    metadata=metadata or {},
+                )
 
-            # 创建新条目
-            item_id = self._generate_item_id(tool_name, query)
-            item = MuscleMemoryItem(
-                id=item_id,
-                tool_name=tool_name,
-                query_fingerprint=fingerprint,
-                vector_fingerprint=vector_fp,
-                parameters=parameters,
-                result_summary=result_summary,
-                level=MemoryLevel.L3,
-                success_count=1 if success else 0,
-                failure_count=0 if success else 1,
-                consecutive_successes=1 if success else 0,
-                metadata=metadata or {},
-            )
+                self._l3[item_id] = item
+                self._add_to_keyword_index(item)
+                self._add_to_tool_index(item)
 
-            self._l3[item_id] = item
-            self._add_to_keyword_index(item)
-            self._add_to_tool_index(item)
-            self._save_all()
+                logger.debug("New muscle memory item: %s... (L3)", item_id[:8])
 
-            logger.debug("New muscle memory item: %s... (L3)", item_id[:8])
-            return item
+        # M-19 修复: 落盘统一移到锁外（对齐 forget 的既有口径）——文件 IO 持锁
+        # 会阻塞 match 等高频读路径。_save_all 内部锁内取快照、锁外写盘。
+        self.save_all()
+        return item
 
     def _update_existing_item(
         self,
@@ -393,7 +396,7 @@ class MuscleMemory:
             item.failure_count += 1
             item.consecutive_successes = 0
 
-        self._save_all()
+        # M-19 修复: 落盘由调用方（record_usage）在锁外统一执行
         return item
 
     def _promote_item(self, item: MuscleMemoryItem) -> None:
@@ -538,22 +541,50 @@ class MuscleMemory:
         if item.tool_name in self._tool_index:
             self._tool_index[item.tool_name].discard(item.id)
 
+    def degrade_tool(self, tool_name: str) -> bool:
+        """公开降级入口（A-15: agent_core 降级路径不再遍历私有 _l1/_l2/_l3）
+
+        将指定工具所有层级条目的 consecutive_successes 重置为 0，
+        有变更时锁外落盘。返回是否有条目被重置。
+        """
+        reset_any = False
+        with self._lock:
+            for layer in (self._l1, self._l2, self._l3):
+                for item in layer.values():
+                    if item.tool_name == tool_name and item.consecutive_successes != 0:
+                        item.consecutive_successes = 0
+                        reset_any = True
+        if reset_any:
+            self._save_all()
+        return reset_any
+
+    def save_all(self) -> None:
+        """公开落盘入口（M-19: 供 agent_core 肌肉记忆降级路径后续收口调用）"""
+        self._save_all()
+
     def _save_all(self) -> None:
-        """保存所有层级"""
+        """保存所有层级
+
+        M-19 修复: 锁内取三层快照、锁外写盘 —— 文件 IO 不再持锁；
+        快照保证写盘期间读到一致的条目状态。
+        """
         if not self._storage_path:
             return
-        self._save_level(self._l1, "l1")
-        self._save_level(self._l2, "l2")
-        self._save_level(self._l3, "l3")
+        with self._lock:
+            l1 = [item.to_dict() for item in self._l1.values()]
+            l2 = [item.to_dict() for item in self._l2.values()]
+            l3 = [item.to_dict() for item in self._l3.values()]
+        self._save_level(l1, "l1")
+        self._save_level(l2, "l2")
+        self._save_level(l3, "l3")
 
-    def _save_level(self, store: Dict[str, MuscleMemoryItem], level_name: str) -> None:
-        """保存单个层级"""
+    def _save_level(self, data: List[Dict[str, Any]], level_name: str) -> None:
+        """保存单个层级（data 为锁内快照）"""
         if not self._storage_path:
             return
         try:
             path = Path(self._storage_path) / f"muscle_{level_name}.json"
             path.parent.mkdir(parents=True, exist_ok=True)
-            data = [item.to_dict() for item in store.values()]
             # 2026-09-07 修复（audit SUB-P2-19）：tmp+os.replace 原子写——
             # 高频保存窗口内崩溃会留下截断 JSON，load 失败即全量清零
             import os as _os
@@ -583,7 +614,13 @@ class MuscleMemory:
         logger.info("Loaded %s muscle memory items", total)
 
     def _load_level(self, level_name: str) -> Dict[str, MuscleMemoryItem]:
-        """加载单个层级"""
+        """加载单个层级
+
+        M-20 修复: 原一句 dict comprehension 解析整文件, 单条坏记录
+        `except: return {}` 整层清零（后续 _save_all 落盘即真实丢数据）。
+        现逐条 try/except: 坏条目 warning 跳过, 好条目保留；
+        整文件级损坏（读取/JSON 解析失败）仍整体放弃并告警。
+        """
         if not self._storage_path:
             return {}
         try:
@@ -592,10 +629,17 @@ class MuscleMemory:
                 return {}
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return {item["id"]: MuscleMemoryItem.from_dict(item) for item in data}
         except Exception as e:
             logger.warning("Failed to load %s: %s", level_name, e)
             return {}
+        items: Dict[str, MuscleMemoryItem] = {}
+        for entry in data if isinstance(data, list) else []:
+            try:
+                item = MuscleMemoryItem.from_dict(entry)
+                items[item.id] = item
+            except Exception as e:
+                logger.warning("Skip invalid muscle memory entry in %s: %s", level_name, e)
+        return items
 
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""

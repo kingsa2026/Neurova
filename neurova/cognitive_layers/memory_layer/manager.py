@@ -363,7 +363,8 @@ class MemoryManager:
             for row in rows:
                 try:
                     mem = Memory(
-                        id=row["id"],
+                        # M-25: 作用域限定行 id 剥前缀还原业务 id（旧行无前缀原样）
+                        id=self._plain_memory_id(row["id"]),
                         content=row["content"],
                         memory_type=MemoryType(row["memory_type"]),
                         category=MemoryCategory(row["category"]),
@@ -385,7 +386,23 @@ class MemoryManager:
                             datetime.fromisoformat(row["last_accessed_at"]) if row["last_accessed_at"] else None
                         ),
                     )
-                    self._memories[mem.id] = mem
+                    # M-25: 作用域限定行剥前缀后可能与普通行同 id（跨作用域
+                    # 自定义 id）。内存 dict 每 id 只能留一份 —— 当前生效作用域
+                    # 匹配的行优先, 持久层两行均保留（重启不丢）。
+                    existing = self._memories.get(mem.id)
+                    if existing is not None:
+                        new_match = (
+                            mem.neuser_id == self._eff_neuser_id()
+                            and mem.user_id == self._eff_user_id()
+                        )
+                        old_match = (
+                            existing.neuser_id == self._eff_neuser_id()
+                            and existing.user_id == self._eff_user_id()
+                        )
+                        if new_match or not old_match:
+                            self._memories[mem.id] = mem
+                    else:
+                        self._memories[mem.id] = mem
                     # 存量迁移（2026-09-08 结晶闭环）：历史实现把 is_crystallized
                     # 只落 metadata、stage 停在 active，读取端永远查不到。
                     # 装载时按 metadata 标记收敛 stage 并回写。
@@ -421,13 +438,55 @@ class MemoryManager:
         except Exception as e:
             logger.warning("Failed to load memories from DB: %s", e)
 
+    # M-25: id 为全表主键, 原 INSERT OR REPLACE 按 id 覆盖 —— A 作用域自定义 id
+    # 会被 B 作用域同 id 的写入直接覆盖（重启丢数据）。改为作用域三元组匹配的
+    # UPSERT: 跨作用域冲突不落写（rowcount=0），由 _persist_upsert 落到带作用域
+    # 前缀（\x1f 分隔）的行 id 重写；读路径剥前缀还原，无前缀旧行照读。
     _PERSIST_UPSERT_SQL = (
-        """INSERT OR REPLACE INTO memories
+        """INSERT INTO memories
            (id, content, memory_type, category, lifecycle_stage, perspective, origin, emotion,
             temperature, importance, access_count, metadata, agent_id, neuser_id, user_id,
             shared, created_at, updated_at, last_accessed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"""
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             content=excluded.content, memory_type=excluded.memory_type,
+             category=excluded.category, lifecycle_stage=excluded.lifecycle_stage,
+             perspective=excluded.perspective, origin=excluded.origin, emotion=excluded.emotion,
+             temperature=excluded.temperature, importance=excluded.importance,
+             access_count=excluded.access_count, metadata=excluded.metadata,
+             agent_id=excluded.agent_id, neuser_id=excluded.neuser_id, user_id=excluded.user_id,
+             shared=excluded.shared, created_at=excluded.created_at,
+             updated_at=excluded.updated_at, last_accessed_at=excluded.last_accessed_at
+           WHERE memories.agent_id=excluded.agent_id
+             AND memories.neuser_id=excluded.neuser_id
+             AND memories.user_id=excluded.user_id"""
     )
+
+    @staticmethod
+    def _plain_memory_id(row_id: str) -> str:
+        """M-25: 作用域限定行 id 还原业务 id；无 \\x1f 前缀的旧行原样返回"""
+        return row_id.rsplit("\x1f", 1)[-1] if "\x1f" in row_id else row_id
+
+    def _persist_upsert(self, conn, mem: Memory) -> None:
+        """执行作用域感知的持久化 upsert（M-25）
+
+        正常路径: 插入 / 同作用域原位更新（rowcount=1）。
+        跨作用域 id 冲突: rowcount=0 → 落为作用域限定行 id 重写（同前缀行
+        幂等收敛），绝不覆盖他人作用域的行。
+        """
+        cur = conn.execute(self._PERSIST_UPSERT_SQL, self._persist_row_params(mem))
+        if cur.rowcount == 0:
+            logger.warning(
+                "持久化 id 跨作用域冲突 (id=%s, scope=%s,%s,%s), 落为作用域限定行",
+                mem.id, mem.agent_id, mem.neuser_id, mem.user_id,
+            )
+            scoped_id = "\x1f".join(
+                (mem.agent_id, mem.neuser_id, mem.user_id, mem.id)
+            )
+            conn.execute(
+                self._PERSIST_UPSERT_SQL,
+                (scoped_id,) + self._persist_row_params(mem)[1:],
+            )
 
     @staticmethod
     def _persist_row_params(mem: Memory) -> tuple:
@@ -462,19 +521,16 @@ class MemoryManager:
         try:
             if conn is not None:
                 with self._persist_db_lock:
-                    conn.executemany(
-                        self._PERSIST_UPSERT_SQL,
-                        [self._persist_row_params(m) for m in mems],
-                    )
+                    for m in mems:
+                        # M-25: 逐行走作用域感知 upsert（单事务内, 提交次数不变）
+                        self._persist_upsert(conn, m)
                     conn.commit()
             else:
                 # 常驻连接不可用时降级：一次连接批量写（仍优于逐条）
                 conn = sqlite3.connect(self._persist_db_path, timeout=5.0)
                 conn.execute("PRAGMA busy_timeout=4000")
-                conn.executemany(
-                    self._PERSIST_UPSERT_SQL,
-                    [self._persist_row_params(m) for m in mems],
-                )
+                for m in mems:
+                    self._persist_upsert(conn, m)
                 conn.commit()
                 conn.close()
         except Exception as e:
@@ -489,38 +545,11 @@ class MemoryManager:
             conn = getattr(self, "_persist_conn", None)
             if conn is not None:
                 with self._persist_db_lock:
-                    conn.execute(self._PERSIST_UPSERT_SQL, self._persist_row_params(mem))
+                    self._persist_upsert(conn, mem)
                     conn.commit()
                 return
             conn = sqlite3.connect(self._persist_db_path)
-            conn.execute(
-                """INSERT OR REPLACE INTO memories
-                   (id, content, memory_type, category, lifecycle_stage, perspective, origin, emotion,
-                    temperature, importance, access_count, metadata, agent_id, neuser_id, user_id,
-                    shared, created_at, updated_at, last_accessed_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    mem.id,
-                    mem.content,
-                    mem.memory_type.value,
-                    mem.category.value,
-                    mem.lifecycle_stage.value,
-                    mem.perspective.value,
-                    mem.origin.value,
-                    mem.emotion.value,
-                    mem.temperature,
-                    mem.importance,
-                    mem.access_count,
-                    json.dumps(mem.metadata, ensure_ascii=False),
-                    mem.agent_id,
-                    mem.neuser_id,
-                    mem.user_id,
-                    int(mem.shared),
-                    mem.created_at.isoformat(),
-                    mem.updated_at.isoformat(),
-                    mem.last_accessed_at.isoformat() if mem.last_accessed_at else None,
-                ),
-            )
+            self._persist_upsert(conn, mem)
             conn.commit()
             conn.close()
         except Exception as e:
@@ -530,34 +559,7 @@ class MemoryManager:
             try:
                 conn = sqlite3.connect(self._persist_db_path, timeout=5.0)
                 conn.execute("PRAGMA busy_timeout=4000")
-                conn.execute(
-                    """INSERT OR REPLACE INTO memories
-                       (id, content, memory_type, category, lifecycle_stage, perspective, origin, emotion,
-                        temperature, importance, access_count, metadata, agent_id, neuser_id, user_id,
-                        shared, created_at, updated_at, last_accessed_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        mem.id,
-                        mem.content,
-                        mem.memory_type.value,
-                        mem.category.value,
-                        mem.lifecycle_stage.value,
-                        mem.perspective.value,
-                        mem.origin.value,
-                        mem.emotion.value,
-                        mem.temperature,
-                        mem.importance,
-                        mem.access_count,
-                        json.dumps(mem.metadata, ensure_ascii=False),
-                        mem.agent_id,
-                        mem.neuser_id,
-                        mem.user_id,
-                        int(mem.shared),
-                        mem.created_at.isoformat(),
-                        mem.updated_at.isoformat(),
-                        mem.last_accessed_at.isoformat() if mem.last_accessed_at else None,
-                    ),
-                )
+                self._persist_upsert(conn, mem)
                 conn.commit()
                 conn.close()
                 logger.warning("Persist memory retry succeeded (id=%s)", mem.id)
@@ -569,19 +571,30 @@ class MemoryManager:
 
         审计修复 (P1-6): 原 DELETE 仅按 id, 知道对方 memory_id 即可越权删除
         任何作用域的持久化行。现强制附带生效三元组, 跨作用域删不掉。
+        M-15: 连接补 busy_timeout（对齐同文件先例）, close() 收口到 finally
+        （原 execute 抛错即泄漏连接）。
+        M-25: 自定义 id 跨作用域冲突时持久化为作用域限定行, 删除需同时命中。
         """
         if not getattr(self, "_persist_db_path", None):
             return
+        conn = None
         try:
-            conn = sqlite3.connect(self._persist_db_path)
+            conn = sqlite3.connect(self._persist_db_path, timeout=5.0)
+            conn.execute("PRAGMA busy_timeout=4000")
+            scoped_id = "\x1f".join(
+                (self._agent_id, self._eff_neuser_id(), self._eff_user_id(), memory_id)
+            )
             conn.execute(
-                "DELETE FROM memories WHERE id = ? AND agent_id = ? AND neuser_id = ? AND user_id = ?",
-                (memory_id, self._agent_id, self._eff_neuser_id(), self._eff_user_id()),
+                "DELETE FROM memories WHERE id IN (?, ?) "
+                "AND agent_id = ? AND neuser_id = ? AND user_id = ?",
+                (memory_id, scoped_id, self._agent_id, self._eff_neuser_id(), self._eff_user_id()),
             )
             conn.commit()
-            conn.close()
         except Exception as e:
             logger.debug("Delete persisted memory failed: %s", e)
+        finally:
+            if conn is not None:
+                conn.close()
 
     # ────── Properties ──────
 
@@ -1149,9 +1162,19 @@ class MemoryManager:
             if "importance" in kwargs:
                 mem.importance = kwargs["importance"]
             if "category" in kwargs:
-                mem.category = (
-                    MemoryCategory(kwargs["category"]) if isinstance(kwargs["category"], str) else kwargs["category"]
-                )
+                # M-17 修复: 枚举解析无兜底 → 非法值 API 500。
+                # 对齐 remember (:731-741) 的既有兜底模式: warning + 回落默认。
+                cat_val = kwargs["category"]
+                if isinstance(cat_val, str):
+                    try:
+                        mem.category = MemoryCategory(cat_val)
+                    except (ValueError, KeyError):
+                        logger.warning(
+                            "Invalid category '%s' on update, falling back to GENERAL", cat_val
+                        )
+                        mem.category = MemoryCategory.GENERAL
+                elif isinstance(cat_val, MemoryCategory):
+                    mem.category = cat_val
             if "metadata" in kwargs and isinstance(kwargs["metadata"], dict):
                 # 2026-09-07 修复（audit SUB-P1-15）：状态流转（如反思日志
                 # applied/validated）需要更新 metadata，否则重启后回退旧状态
@@ -1161,7 +1184,15 @@ class MemoryManager:
             if "lifecycle_stage" in kwargs:
                 stage_val = kwargs["lifecycle_stage"]
                 if isinstance(stage_val, str):
-                    mem.lifecycle_stage = LifecycleStage(stage_val)
+                    # M-17 修复: 非法字符串 warning + 回落 ACTIVE（原直接抛 ValueError）
+                    try:
+                        mem.lifecycle_stage = LifecycleStage(stage_val)
+                    except (ValueError, KeyError):
+                        logger.warning(
+                            "Invalid lifecycle_stage '%s' on update, falling back to ACTIVE",
+                            stage_val,
+                        )
+                        mem.lifecycle_stage = LifecycleStage.ACTIVE
                 elif isinstance(stage_val, LifecycleStage):
                     mem.lifecycle_stage = stage_val
             mem.updated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
@@ -1288,7 +1319,8 @@ class MemoryManager:
                 try:
                     results.append(
                         {
-                            "id": row["id"],
+                            # M-25: 作用域限定行 id 剥前缀, 不向消费方泄漏
+                            "id": self._plain_memory_id(row["id"]),
                             "content": row["content"],
                             "temperature": row["temperature"],
                             "category": row["category"],

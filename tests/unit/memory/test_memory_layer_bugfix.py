@@ -505,13 +505,16 @@ class TestBug10FlushToStorageTOCTOU:
         """flush_to_storage 的空检查应在锁内"""
         source = inspect.getsource(MemoryWriteQueue.flush_to_storage)
         lines = source.split("\n")
-        # 找到 `if not self._queue:` 的行号
+        # 找到 `if not self._queue:` 与首个 `with self._lock:` 的行号。
+        # 两者都取首个：TOCTOU 契约针对"空检查相对首次获锁"的位置；
+        # M-11 修复在写循环后新增了第二个锁块（失败项重入队），
+        # 若取末个锁块会误判（check 24 > last lock 103 的假红）。
         check_line_idx = None
         lock_line_idx = None
         for i, line in enumerate(lines):
             if "if not self._queue:" in line and check_line_idx is None:
                 check_line_idx = i
-            if "with self._lock:" in line:
+            if "with self._lock:" in line and lock_line_idx is None:
                 lock_line_idx = i
         assert check_line_idx is not None, "flush_to_storage 应有 _queue 空检查"
         assert lock_line_idx is not None, "flush_to_storage 应有 with self._lock"

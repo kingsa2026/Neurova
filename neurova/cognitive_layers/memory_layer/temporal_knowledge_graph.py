@@ -172,6 +172,11 @@ class FactConflict:
 class TemporalKnowledgeGraph:
     """时序知识图谱引擎，管理带时间窗口的事实"""
 
+    # M-21: 全量物化曾无上限 → OOM/CPU 尖峰风险, 故保留截断加载并放大默认上限
+    # （原 50000 截断后第 5 万条外的事实永远读不到, query_current 只遍历
+    # _facts_cache）。可按部署规模覆写本类属性调整。
+    FACTS_LOAD_LIMIT = 200000
+
     _CREATE_SQL = """
         CREATE TABLE IF NOT EXISTS temporal_facts (
             id TEXT PRIMARY KEY,
@@ -246,18 +251,31 @@ class TemporalKnowledgeGraph:
             self._time_index.clear()
             conn = self._get_connection()
             # 资源修复: 全表无上限 → 整库物化 + 逐行重建索引;
-            # 截断加载, 超限告警(影响聚类/推断质量但避免 OOM/CPU 尖峰)
-            facts = conn.execute("SELECT * FROM temporal_facts LIMIT 50000").fetchall()
+            # 截断加载, 超限告警(影响聚类/推断质量但避免 OOM/CPU 尖峰)。
+            # M-21: LIMIT 提为可配置常量并放大默认值（原 50000 静默丢事实）。
+            facts = conn.execute(
+                "SELECT * FROM temporal_facts LIMIT ?", (self.FACTS_LOAD_LIMIT,)
+            ).fetchall()
             total = conn.execute("SELECT COUNT(*) FROM temporal_facts").fetchone()[0]
             if total > len(facts):
                 logger.warning("时序知识图加载截断: %s/%s", len(facts), total)
+            # M-21: 枚举/解析坏行逐行 try/except —— 原单条坏行
+            # （RelationType/FactStatus/json 解析失败）令 __init__ 直接崩。
+            skipped = 0
             for row in facts:
-                fact = self._row_to_fact(row)
+                try:
+                    fact = self._row_to_fact(row)
+                except Exception as e:
+                    skipped += 1
+                    logger.warning("跳过损坏的事实行 id=%s: %s", row["id"], e)
+                    continue
                 self._facts_cache[fact.id] = fact
                 self._subject_index.setdefault(fact.subject, []).append(fact.id)
                 self._predicate_index.setdefault(fact.predicate, []).append(fact.id)
                 self._time_index.append((fact.valid_from, fact.id))
             self._time_index.sort(key=lambda x: x[0])
+            if skipped:
+                logger.warning("时序知识图加载跳过 %s 条损坏行", skipped)
 
     def _row_to_fact(self, row: sqlite3.Row) -> TemporalFact:
         def _parse_dt(val):
