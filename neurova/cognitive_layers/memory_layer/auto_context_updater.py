@@ -135,7 +135,14 @@ class AutoContextUpdater:
                 logger.error("AutoContextUpdater 更新失败: %s", e)
 
     def _compress_old_memories(self) -> int:
-        """压缩旧记忆"""
+        """压缩旧记忆。
+
+        M-14 遗留定性（2026-09-11）：现无"按年龄压缩"的真实后端。
+        ``MemoryManager.compress_low_value_memories`` 是按低重要性候选+LLM 语义
+        合并的破坏性操作，与本方法的">N 天"语义不同轴，且不允许由小时级后台
+        循环静默触发；接入需产品决策（专用按龄压缩 API + 显式开关）。
+        在此之前保持透明 no-op（计数如实为 0，不谎报成功）。
+        """
         if not self.memory_manager:
             return 0
 
@@ -216,7 +223,13 @@ class AutoContextUpdater:
             return 0
 
     def _rebuild_vector_index(self) -> int:
-        """重建向量索引"""
+        """重建向量索引。
+
+        M-14 遗留定性（2026-09-11）：``VectorIndexManager.sync_full`` 虽存在，
+        但 VectorIndexManager 本身在 neurova/ 生产代码中从未被实例化（孤儿模块），
+        MemoryManager 亦未持有索引管理器属性——无活后端可接，死接死属假进度。
+        待记忆检索链路接入统一索引管理后再行对接；保持透明 no-op。
+        """
         if not self.memory_manager:
             return 0
 
@@ -230,7 +243,12 @@ class AutoContextUpdater:
             return 0
 
     def _cleanup_cache(self) -> int:
-        """清理过期缓存"""
+        """清理过期缓存。
+
+        M-14 遗留定性（2026-09-11）：memory_layer/cache.py 已废弃（shim 到
+        neurova.core.cache），MemoryManager 未持有带 TTL 的可清缓存实例；
+        现有缓存随请求生命周期存续，无跨周期积压。无真实清理目标，保持透明 no-op。
+        """
         try:
             # 清理过期缓存
             logger.debug("清理过期缓存")
