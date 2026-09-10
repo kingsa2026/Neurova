@@ -71,6 +71,17 @@ def mock_repo():
     mock.delete_session.return_value = True
     mock.rename_session.return_value = True
     mock.get_session.return_value = None
+
+    # 2026-09-10: 适配既有 P1-F4 契约（delete/auto-title/archive 端点已改用
+    # find_session 索引式定位, 见 HEAD console.py）。原桩仅播种 list_sessions,
+    # find_session 落到 MagicMock → 恒非空且 user_id 比对失真 → 预存 403/404 假失败。
+    def _find_session(session_id):
+        for s in mock.list_sessions.return_value:
+            if (s.get("session_id") or s.get("id")) == session_id:
+                return s
+        return None
+
+    mock.find_session.side_effect = _find_session
     with patch("neurova.api.endpoints.console.get_session_repository", return_value=mock):
         yield mock
 
