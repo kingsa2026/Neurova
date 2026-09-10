@@ -216,6 +216,7 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.channel_config", "/v1", "Channel Config API"),
         ("neurova.api.endpoints.notifications", "/v1/notifications", "Notifications API"),
         ("neurova.api.endpoints.audit", "/v1/audit", "Audit API"),
+        ("neurova.api.endpoints.workspace_files", "/v1/workspace", "Workspace Files API"),
         ("neurova.api.endpoints.firewall", "/v1/firewall", "Firewall API"),
         ("neurova.api.endpoints.governance", "/v1/governance", "Governance API"),
         ("neurova.api.endpoints.analytics", "/v1/analytics", "Analytics API"),
