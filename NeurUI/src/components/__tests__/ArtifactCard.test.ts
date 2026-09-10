@@ -70,10 +70,11 @@ describe('ArtifactCard', () => {
   })
 
   it('点审验 emit review(item)；点打开 emit open(item)——携带完整数据项', async () => {
+    // B3-3 后带 artifactId 的产物在审验前多一个「下载」按钮（idx: 0下载 1审验 2打开）
     const w = mountCard()
     const rows = w.findAll('.nr-artifact-row')
-    await rows[0].findAll('button')[0].trigger('click')
     await rows[0].findAll('button')[1].trigger('click')
+    await rows[0].findAll('button')[2].trigger('click')
     expect(w.emitted('review')?.[0]?.[0]).toMatchObject({ name: 'calculator.html', artifactId: 'ar1' })
     expect(w.emitted('open')?.[0]?.[0]).toMatchObject({ name: 'calculator.html' })
   })

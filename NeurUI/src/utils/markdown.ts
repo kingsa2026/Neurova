@@ -123,8 +123,33 @@ function createRenderer(copyLabel: string, previewLabel = '◫') {
  * @param text 用户消息内容 (可为流式累加的半截文本, 未闭合围栏不会抛错)
  * @param copyLabel 代码块复制按钮文案 (由调用方提供 i18n 文本)
  */
+/**
+ * B3-1（#7176 对齐）：渲染结果 LRU 缓存。
+ * 密集历史重渲（打开旧会话/滚动）相同 (text, copyLabel) 直接命中缓存，
+ * 不再每次 new Marked + hljs 高亮 + DOMPurify 全量解析。
+ */
+const RENDER_CACHE_MAX = 200
+const renderCache = new Map<string, string>()
+
+function cacheKey(text: string, copyLabel: string): string {
+  return `${copyLabel}::${text.length}::${text}`
+}
+
+export function clearMarkdownRenderCache(): void {
+  renderCache.clear()
+}
+
 export function renderMarkdown(text: string, copyLabel = '⧉'): string {
   if (!text || typeof text !== 'string') return ''
+
+  const key = cacheKey(text, copyLabel)
+  const cached = renderCache.get(key)
+  if (cached !== undefined) {
+    // LRU 触达刷新
+    renderCache.delete(key)
+    renderCache.set(key, cached)
+    return cached
+  }
 
   const { prepared, restore } = extractMath(text)
 
@@ -144,7 +169,15 @@ export function renderMarkdown(text: string, copyLabel = '⧉'): string {
 
   // P0-7 层 3: DOMPurify 白名单兜底 (del/hr 已显式加入)
   const safe = sanitizeHtmlStrict(html)
-  return restore(safe)
+  const result = restore(safe)
+
+  if (renderCache.size >= RENDER_CACHE_MAX) {
+    // Map 迭代序 = 插入序，删最老条目
+    const oldest = renderCache.keys().next().value
+    if (oldest !== undefined) renderCache.delete(oldest)
+  }
+  renderCache.set(key, result)
+  return result
 }
 
 // ---------------------------------------------------------------------------

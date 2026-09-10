@@ -15,6 +15,14 @@
         </div>
         <span class="nr-artifact-row-size">{{ sizeText(item) }}</span>
         <div class="nr-artifact-row-actions">
+          <button
+            v-if="item.artifactId"
+            class="nr-artifact-btn"
+            :title="t('chat.artifactDownloadTip')"
+            @click="download(item)"
+          >
+            {{ t('chat.artifactDownload') }}
+          </button>
           <button class="nr-artifact-btn" :title="t('chat.artifactReviewTip')" @click="$emit('review', item)">
             {{ t('chat.artifactReview') }}
           </button>
@@ -39,7 +47,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import UiIcon from '@/components/UiIcon.vue'
-import { artifactUiIcon, type MessageArtifact } from '@/utils/artifacts'
+import { artifactUiIcon, downloadArtifact, type MessageArtifact } from '@/utils/artifacts'
 
 // 注意：Boolean 类型 prop 若无默认值，缺省时会被 Vue 运行时 cast 成 false
 // （而非 undefined），`props.defaultOpen ?? true` 会恒得 false —— 必须用
@@ -60,6 +68,16 @@ defineEmits<{
 
 const { t } = useI18n()
 const open = ref(props.defaultOpen ?? true)
+
+/** B3-3（#7161）：媒体/文本产物直接下载（仅带 artifactId 的产物可下载）。 */
+async function download(item: MessageArtifact): Promise<void> {
+  if (!item.artifactId) return
+  try {
+    await downloadArtifact(item.artifactId, item.name)
+  } catch {
+    // 下载失败静默（按钮是增强，预览/审读路径不受影响）
+  }
+}
 
 function artifactKey(item: MessageArtifact): string {
   return item.name || item.path || item.artifactId || ''
