@@ -65,6 +65,11 @@ class IngressEvent:
     attempt: int
 
 
+class IngressQueueUnavailable(RuntimeError):
+    """DB 故障导致队列不可用（C-07: 与"重复消息去重返回 False"必须可区分，
+    否则调用方把去重当 fail-open 再直发一次 = 平台重发时消息被投递两次）。"""
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -108,6 +113,8 @@ class ChannelIngressQueue:
 
         Returns:
             True=新入队/重开；False=重复消息（去重忽略）
+        Raises:
+            IngressQueueUnavailable: DB 故障（调用方 fail-open 直发，勿与去重混淆）
         """
         from dataclasses import asdict
 
@@ -147,8 +154,8 @@ class ChannelIngressQueue:
                         )
                         return True
             except sqlite3.Error as e:
-                logger.error("Ingress enqueue failed (fail-open to direct dispatch): %s", e)
-                return False
+                logger.error("Ingress enqueue failed (queue unavailable): %s", e)
+                raise IngressQueueUnavailable(str(e)) from e
             return False
 
     # ------------------------------------------------------------------

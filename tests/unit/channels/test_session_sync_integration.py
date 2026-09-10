@@ -275,7 +275,10 @@ class TestChatPipelineSync:
         mock_agent.config.agent_id = "test_agent"
         mock_agent.config.llm_config = MagicMock()
         mock_agent.config.llm_config.model = "test-model"
-        mock_agent._current_reasoning = "Test reasoning"
+        # 生产代码读 current_reasoning 属性（chat_pipeline._sync_final_reply）；
+        # 此前误设 _current_reasoning → MagicMock 属性为可调用对象，被
+        # _sync_event 的"剥离 callable"逻辑过滤，payload 缺 reasoning 键
+        mock_agent.current_reasoning = "Test reasoning"
         mock_agent._tool_messages_list = []
         mock_agent._turn_count = 0
         

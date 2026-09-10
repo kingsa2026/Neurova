@@ -192,9 +192,13 @@ class TestWeComEventLoopSafety:
 
     def test_callback_schedules_to_main_loop(self):
         """RED: wecom 同步回调应将事件调度到主 loop"""
-        # 不设置 callback_token，跳过签名验证
+        # BUG AUDIT C-09: 验签已改 fail-closed，无 token 一律拒绝。
+        # 测试须配置 token 并附合法签名（明文模式无 Encrypt 字段，第 4 元为空串）。
+        from neurova.channels.wecom import _wecom_callback_signature
+
+        callback_token = "test_callback_token"
         adapter = WeComAdapter(
-            ChannelConfig(channel_type="wecom", webhook_token="")
+            ChannelConfig(channel_type="wecom", webhook_token=callback_token)
         )
         called = threading.Event()
         loops: List[asyncio.AbstractEventLoop] = []
@@ -217,12 +221,14 @@ class TestWeComEventLoopSafety:
                 "<MsgId>msg_123</MsgId>"
                 "</xml>"
             )
+            timestamp, nonce = "1234567890", "nonce"
+            signature = _wecom_callback_signature(callback_token, timestamp, nonce, "")
 
             errors: List[Exception] = []
 
             def trigger():
                 try:
-                    adapter.handle_callback("", "1234567890", "nonce", xml_data)
+                    adapter.handle_callback(signature, timestamp, nonce, xml_data)
                 except Exception as e:
                     errors.append(e)
 
