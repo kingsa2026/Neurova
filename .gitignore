@@ -386,3 +386,7 @@ NeurUI/src-tauri/installer-wpf/bin/installer-shell.exe
 /docs/05-reports/Kai*迁移报告*.md
 /docs/05-reports/kai-import-render-verify-*.png
 agent_workspaces/kai/
+
+# 审计事故 2026-09-10：stash 误弹恢复暂存区（含 6 月旧 WIP 快照副本 361 文件，
+# 审计后删除；不入库、不进工作区）
+.stash-recovery-20260910/
