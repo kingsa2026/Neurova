@@ -135,16 +135,26 @@ class TestSingletonRestore(unittest.TestCase):
                     reset_evolution_orchestrator()
 
     def test_get_singleton_is_zero_side_effect(self):
-        """未 bootstrap 时单例不产生任何持久化 IO（测试环境零污染）。"""
+        """未 bootstrap 时单例不产生任何持久化 IO（测试环境零污染）。
+
+        断言基于相对路径 data/evolution，故 chdir 到临时目录，与仓库共享
+        data/ 目录中其他进程的运行时产物隔离（否则误报"产生持久化"）。
+        """
         from neurova.evolution.closed_loop import reset_evolution_orchestrator
 
-        reset_evolution_orchestrator()
-        try:
-            orchestrator = get_evolution_orchestrator()
-            self.assertIsNone(orchestrator.tool_weights._persist_path)
-            self.assertFalse((Path("data") / "evolution").exists())
-        finally:
-            reset_evolution_orchestrator()
+        with tempfile.TemporaryDirectory() as hermetic:
+            prev_cwd = os.getcwd()
+            os.chdir(hermetic)
+            try:
+                reset_evolution_orchestrator()
+                try:
+                    orchestrator = get_evolution_orchestrator()
+                    self.assertIsNone(orchestrator.tool_weights._persist_path)
+                    self.assertFalse((Path("data") / "evolution").exists())
+                finally:
+                    reset_evolution_orchestrator()
+            finally:
+                os.chdir(prev_cwd)
 
 
 if __name__ == "__main__":

@@ -29,48 +29,78 @@ class TestChannelManagerMessageHandler:
         assert manager._message_handler == mock_handler
     
     @pytest.mark.asyncio
-    async def test_message_handler_called_on_event(self):
+    async def test_message_handler_called_on_event(self, tmp_path):
         """测试收到消息时正确调用处理器"""
         manager = ChannelManager()
         mock_handler = AsyncMock(return_value="回复内容")
         manager.set_message_handler(mock_handler)
-        
-        # 模拟渠道消息
-        mock_message = MagicMock()
-        mock_message.channel_type = "feishu"
-        mock_message.chat_id = "test_chat"
-        mock_message.sender_name = "test_user"
-        
-        # 模拟发送消息
-        with patch.object(manager, 'send_message', new_callable=AsyncMock) as mock_send:
-            mock_send.return_value = "msg_id"
-            
-            # 触发消息事件
-            from neurova.channels.base import ChannelEventType
-            await manager._on_channel_event(ChannelEventType.MESSAGE_RECEIVED, mock_message)
-            
-            # 验证处理器被调用
-            mock_handler.assert_called_once_with(mock_message)
-            
-            # 验证回复被发送
-            mock_send.assert_called_once_with(
-                "feishu",
-                "test_chat",
-                "回复内容"
-            )
-    
-    def test_message_handler_not_called_when_none(self):
+
+        # P0-5 入站持久化队列要求真实 ChannelMessage（enqueue 走 asdict 序列化）
+        from neurova.channels.base import ChannelEventType, ChannelMessage
+        from neurova.channels.channel_ingress_queue import ChannelIngressQueue
+
+        queue = ChannelIngressQueue(tmp_path / "ingress.db")
+        manager.ingress_queue = queue
+
+        message = ChannelMessage(
+            channel_type="feishu",
+            message_id="msg_001",
+            sender_id="user_001",
+            sender_name="test_user",
+            content="你好",
+            chat_id="test_chat",
+        )
+
+        try:
+            # 模拟发送消息
+            with patch.object(manager, 'send_message', new_callable=AsyncMock) as mock_send:
+                mock_send.return_value = "msg_id"
+
+                # 触发消息事件（消息经持久化队列 claim 后分发）
+                await manager._on_channel_event(ChannelEventType.MESSAGE_RECEIVED, message)
+
+                # 验证处理器被调用（收到的为队列往返重建的消息）
+                mock_handler.assert_called_once()
+                dispatched = mock_handler.call_args[0][0]
+                assert dispatched.channel_type == "feishu"
+                assert dispatched.chat_id == "test_chat"
+                assert dispatched.content == "你好"
+
+                # 验证回复被发送
+                mock_send.assert_called_once_with(
+                    "feishu",
+                    "test_chat",
+                    "回复内容"
+                )
+        finally:
+            queue.close()
+
+    @pytest.mark.asyncio
+    async def test_message_handler_not_called_when_none(self, tmp_path):
         """测试处理器为 None 时不调用"""
         manager = ChannelManager()
         manager._message_handler = None
-        
-        # 模拟渠道消息
-        mock_message = MagicMock()
-        
-        # 不应抛出异常
-        from neurova.channels.base import ChannelEventType
-        import asyncio
-        asyncio.run(manager._on_channel_event(ChannelEventType.MESSAGE_RECEIVED, mock_message))
+
+        from neurova.channels.base import ChannelEventType, ChannelMessage
+        from neurova.channels.channel_ingress_queue import ChannelIngressQueue
+
+        queue = ChannelIngressQueue(tmp_path / "ingress.db")
+        manager.ingress_queue = queue
+
+        message = ChannelMessage(
+            channel_type="feishu",
+            message_id="msg_002",
+            sender_id="user_001",
+            sender_name="test_user",
+            content="你好",
+            chat_id="test_chat",
+        )
+
+        try:
+            # 不应抛出异常
+            await manager._on_channel_event(ChannelEventType.MESSAGE_RECEIVED, message)
+        finally:
+            queue.close()
 
 
 class TestContextPoolLifecycle:
@@ -168,14 +198,17 @@ class TestDynamicTokenBudget:
             agent_id="test_agent"
         )
         
-        # 测试不同模型的 Token 预算
+        # 测试不同模型的 Token 预算（统一入口：真实窗口注册表 ×0.6）
         budget_gpt4 = pool.get_token_budget_for_model("gpt-4")
         budget_gpt35 = pool.get_token_budget_for_model("gpt-3.5-turbo")
         budget_claude = pool.get_token_budget_for_model("claude-3-opus")
-        
-        # GPT-4 应该有更大的预算
-        assert budget_gpt4 > budget_gpt35
+
+        # 按模型真实窗口区分：gpt-4 真实窗口 8192 反而小于 gpt-3.5-turbo 16385
+        # （旧静态表 32000/16000 的“gpt-4 更大”是错误猜测），长窗 claude-3-opus 最大
+        assert budget_gpt4 == 4915
+        assert budget_gpt35 == 9831
         assert budget_claude > budget_gpt35
+        assert budget_claude > budget_gpt4
     
     def test_dynamic_budget_based_on_capabilities(self):
         """测试根据模型能力动态调整预算"""
