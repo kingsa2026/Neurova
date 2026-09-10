@@ -16,6 +16,8 @@ API 参考:
 """
 
 import asyncio
+import hmac
+import inspect
 import json
 from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
@@ -275,15 +277,28 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
             return None
 
     async def disconnect(self):
-        """断开飞书连接"""
-        if self._ws_client:
-            try:
-                # lark-oapi ws client 没有显式 stop 方法
-                # 线程是 daemon 的，主线程退出时自动终止
-                pass
-            except Exception as e:
-                logger.warning("Feishu disconnect warning: %s", e)
+        """断开飞书连接（幂等）"""
+        # C-13: 真正关闭长连接——SDK 版本差异安全探测 stop/close
+        # （当前 lark-oapi ws Client 无公开 stop API，探测到即调用，
+        # awaitable 结果在主 loop 上等待）
+        client = self._ws_client
+        if client is not None:
+            stopper = getattr(client, "stop", None) or getattr(client, "close", None)
+            if callable(stopper):
+                try:
+                    result = stopper()
+                    if inspect.isawaitable(result):
+                        await result
+                except Exception as e:
+                    logger.warning("Feishu disconnect stop warning: %s", e)
 
+        # C-13: join 长连接线程（daemon 线程，超时不强杀）
+        thread = getattr(self, "_ws_thread", None)
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5)
+            if thread.is_alive():
+                logger.warning("Feishu ws thread alive after 5s (daemon, not force-killed)")
+        self._ws_thread = None
         self._connected = False
         self._ws_client = None
         self._client = None
@@ -304,13 +319,20 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
     # 验证辅助
     # ============================================================
 
-    @staticmethod
-    def verify_url_challenge(challenge: str, token: str) -> Dict[str, str]:
+    def verify_url_challenge(self, challenge: str, token: str) -> Dict[str, str]:
         """
         Webhook URL 验证
 
         飞书在配置 Webhook 时会发送 challenge 请求进行验证。
+
+        C-23: 必须与配置的 verification_token 比对（恒定时间比较）；
+        未配置 token 时 fail-closed（拒绝挑战，与 wecom/telegram 口径一致）。
         """
+        expected = self.config.verification_token or ""
+        if not expected or not token or not hmac.compare_digest(token, expected):
+            raise ValueError(
+                "Feishu URL verification rejected: token missing or mismatched (fail-closed)"
+            )
         return {"challenge": challenge}
 
 

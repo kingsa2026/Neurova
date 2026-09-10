@@ -17,6 +17,7 @@ API 参考:
 
 import asyncio
 import hmac
+import inspect
 import json
 from neurova.core.logger import get_logger
 import time
@@ -358,13 +359,28 @@ class DingTalkAdapter(ChannelAdapter):
                     logger.error("DingTalk token refresh failed: %s", result)
 
     async def disconnect(self):
-        """断开钉钉连接"""
-        if self._stream_client:
-            try:
-                pass  # daemon 线程自动退出
-            except Exception as e:
-                logger.warning("DingTalk disconnect warning: %s", e)
+        """断开钉钉连接（幂等）"""
+        # C-13: 真正关闭长连接——dingtalk_stream.DingtalkStreamClient 提供
+        # async stop()（设置 stop_event 并关闭 websocket）；SDK 版本差异安全
+        # 探测 stop/close，awaitable 结果在主 loop 上等待
+        client = self._stream_client
+        if client is not None:
+            stopper = getattr(client, "stop", None) or getattr(client, "close", None)
+            if callable(stopper):
+                try:
+                    result = stopper()
+                    if inspect.isawaitable(result):
+                        await result
+                except Exception as e:
+                    logger.warning("DingTalk disconnect stop warning: %s", e)
 
+        # C-13: join 长连接线程（daemon 线程，超时不强杀）
+        thread = getattr(self, "_ws_thread", None)
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5)
+            if thread.is_alive():
+                logger.warning("DingTalk ws thread alive after 5s (daemon, not force-killed)")
+        self._ws_thread = None
         self._connected = False
         self._stream_client = None
         self._access_token = None

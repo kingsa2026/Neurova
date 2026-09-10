@@ -71,6 +71,9 @@ class ChannelManager:
             raise RuntimeError("Use get_channel_manager() instead of direct construction")
         self._adapters: Dict[str, ChannelAdapter] = {}
         self._message_handler: Optional[MessageHandler] = None
+        # C-24: 构造期直接建表——原惰性 hasattr 建表存在竞态（并发 add 时
+        # 两个线程都可能通过 hasattr 检查并各自重建列表）
+        self._message_handlers: List[tuple] = []
         self._running = False
 
     @classmethod
@@ -136,9 +139,6 @@ class ChannelManager:
         Returns:
             处理器ID（用于后续移除）
         """
-        if not hasattr(self, "_message_handlers"):
-            self._message_handlers: List[tuple] = []
-
         handler_id = len(self._message_handlers)
         self._message_handlers.append((priority, handler_id, handler))
         # 按优先级排序
@@ -148,9 +148,6 @@ class ChannelManager:
 
     def remove_message_handler(self, handler_id: int) -> bool:
         """移除消息处理函数"""
-        if not hasattr(self, "_message_handlers"):
-            return False
-
         for i, (priority, hid, handler) in enumerate(self._message_handlers):
             if hid == handler_id:
                 del self._message_handlers[i]
@@ -310,8 +307,9 @@ class ChannelManager:
     async def _dispatch_message(self, message: ChannelMessage):
         """把一条渠道消息送进处理器链（原 _on_channel_event 分发体）。"""
         # 优先使用多处理器链
-        if hasattr(self, "_message_handlers") and self._message_handlers:
-            for priority, handler_id, handler in self._message_handlers:
+        # C-24: 快照遍历——处理器在回调中增删列表时不再被并发修改影响
+        if self._message_handlers:
+            for priority, handler_id, handler in list(self._message_handlers):
                 try:
                     reply = await handler(message)
                     if reply:

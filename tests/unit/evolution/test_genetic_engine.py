@@ -9,6 +9,7 @@ Phase 2 P2-4: ToolGeneticEngine 基因编程测试
 - 适应度函数计算
 """
 import pytest
+from types import SimpleNamespace
 from typing import List
 
 
@@ -92,9 +93,15 @@ class TestCrossover:
 
     def test_crossover_two_sequences(self):
         """交叉两个工具序列"""
+        from types import SimpleNamespace
+
         from neurova.evolution.genetic_engine import ToolGenotype, ToolGeneticEngine
 
         engine = ToolGeneticEngine()
+        # 交叉点 randint 存在 ~1/9 概率产出 <2 唯一工具的子代（预存 flake，
+        # Monte-Carlo 实测 10.9%）。固定 RNG 使本契约测试确定性：
+        # crossover_point 取 0 → 子代 = 公共前缀 + 父B 全部剩余部分
+        engine._rng = SimpleNamespace(randint=lambda low, high: low)
 
         parent_a = ToolGenotype(
             tool_sequence=["browser_navigate", "browser_screenshot", "browser_click"],
@@ -121,6 +128,8 @@ class TestCrossover:
         from neurova.evolution.genetic_engine import ToolGenotype, ToolGeneticEngine
 
         engine = ToolGeneticEngine()
+        # 同 test_crossover_two_sequences：固定交叉点，消除 ~1/9 预存 flake
+        engine._rng = SimpleNamespace(randint=lambda low, high: low)
 
         parent_a = ToolGenotype(
             tool_sequence=["setup", "action_a", "verify"],
@@ -225,7 +234,23 @@ class TestGeneticEngine:
         """种群进化"""
         from neurova.evolution.genetic_engine import ToolGenotype, ToolGeneticEngine
 
+        class _CrossoverAlwaysRng:
+            """确定性 RNG：恒走交叉分支，交叉点取下界，消除预存随机 flake。"""
+
+            def random(self):
+                return 0.5  # < crossover_rate=0.7 → 恒走交叉分支
+
+            def sample(self, seq, n):
+                return list(seq[:n])
+
+            def choice(self, seq):
+                return seq[0]
+
+            def randint(self, low, high):
+                return low
+
         engine = ToolGeneticEngine(population_size=5)
+        engine._rng = _CrossoverAlwaysRng()
 
         # 初始种群
         engine.add_to_population(ToolGenotype(
