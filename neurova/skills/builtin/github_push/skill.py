@@ -410,41 +410,49 @@ class GitHubPushSkill(Skill):
         info = super().get_info()
         info.description = "GitHub 推送技能 - 封装完整的 Git 操作流程，支持状态检查、文件添加、提交和推送"
         info.tags = ["git", "github", "push", "version-control"]
-        info.parameters = {
-            "action": {
+        # 参数契约：list-of-dicts（param_to_sub_block/skill_to_node 消费形态；
+        # 旧 dict-of-dicts 迭代出字符串键 → 'str' object has no attribute get）
+        info.parameters = [
+            {
+                "name": "action",
                 "type": "string",
                 "description": "操作类型：status, add, commit, push, full_push",
                 "required": False,
                 "default": "full_push",
             },
-            "message": {
+            {
+                "name": "message",
                 "type": "string",
                 "description": "提交信息（commit 操作需要）",
                 "required": False,
                 "default": "Update from Neurova GitHub Push Skill",
             },
-            "files": {
+            {
+                "name": "files",
                 "type": "array",
                 "description": "要添加的文件列表（add 操作需要，默认为所有文件）",
                 "required": False,
             },
-            "push_to_main": {
+            {
+                "name": "push_to_main",
                 "type": "boolean",
                 "description": "是否直接推送到 main 分支",
                 "required": False,
                 "default": True,
             },
-            "branch": {
+            {
+                "name": "branch",
                 "type": "string",
                 "description": "指定分支（可选）",
                 "required": False,
             },
-            "repo_path": {
+            {
+                "name": "repo_path",
                 "type": "string",
                 "description": "仓库路径（默认为当前目录）",
                 "required": False,
             },
-        }
+        ]
         info.required_params = []
         return info
 
@@ -490,7 +498,7 @@ if __name__ == "__main__":
         # 显示技能信息
         info = skill.get_info()
         print(f"技能标签: {info.tags}")
-        print(f"参数列表: {list(info.parameters.keys())}")
+        print(f"参数列表: {[p.get('name') if isinstance(p, dict) else p for p in info.parameters]}")
 
         # 示例：获取状态
         print("\n--- 获取 Git 状态 ---")
