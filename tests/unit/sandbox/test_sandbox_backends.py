@@ -19,27 +19,25 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from neurova.sandbox import exec_sandbox as exec_sandbox_module
+from neurova.sandbox.appcontainer import AppContainerSandbox
 from neurova.sandbox.exec_sandbox import (
     SandboxSeverity,
-    AppContainerSandbox,
     execute_in_sandbox,
 )
 
 
 class TestCurrentStateDocumentation:
-    def test_appcontainer_is_placeholder_on_windows(self):
-        """记录现状：Windows 后端为占位——argv 化后仍无隔离前缀（等同 shell 语义）。
-
-        这是 P6 修正实施的动机：Windows 上治理 SANDBOX 判定此前实际裸跑，
-        现已由 execute_in_sandbox_async 的 auto 模式用 Docker 后端补位
-        （跨平台真隔离）。
-        """
+    def test_appcontainer_is_real_impl_on_windows(self):
+        """记录现状（P2-H4 更新）：exec_sandbox 谎言占位已删除，AppContainer
+        为 sandbox/appcontainer.py 真实现（Low integrity + 默认断网），
+        available() = API 绑定探测结果（win32 通常 True）。"""
         if platform.system() != "Windows":
             pytest.skip("仅 Windows 环境")
+        from neurova.sandbox import exec_sandbox as es
+
+        assert not hasattr(es, "AppContainerSandbox"), "谎言占位应保持删除"
         backend = AppContainerSandbox(SandboxSeverity.NETWORK_OFF)
-        # P1-7+P2：占位谎言已清——available 诚实 False；Windows 平台
-        # 隔离由 restricted_token（SAFER 特权剥离）承接
-        assert backend.available() is False
+        assert isinstance(backend.available(), bool)
 
 
 def _mock_docker_executor(exit_code=0, stdout="ok", stderr=""):

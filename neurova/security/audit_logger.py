@@ -464,29 +464,34 @@ class AuditLogger:
             total = cursor.fetchone()["total"]
 
             # 按事件类型统计
+            # BUG AUDIT S-09: 此前三查询复用同一个 params 列表，start/end_time
+            # 被重复 append，第 2/3 条 SQL 绑定数不匹配 → ProgrammingError 被吞 →
+            # 传时间范围时审计统计恒为空。每条查询使用独立 params。
             query = "SELECT event_type, COUNT(*) as count FROM audit_logs WHERE 1=1"
+            params2 = []
             if start_time:
                 query += " AND timestamp >= ?"
-                params.append(start_time)
+                params2.append(start_time)
             if end_time:
                 query += " AND timestamp <= ?"
-                params.append(end_time)
+                params2.append(end_time)
             query += " GROUP BY event_type"
 
-            cursor.execute(query, params)
+            cursor.execute(query, params2)
             by_event_type = {row["event_type"]: row["count"] for row in cursor.fetchall()}
 
             # 按严重级别统计
             query = "SELECT severity, COUNT(*) as count FROM audit_logs WHERE 1=1"
+            params3 = []
             if start_time:
                 query += " AND timestamp >= ?"
-                params.append(start_time)
+                params3.append(start_time)
             if end_time:
                 query += " AND timestamp <= ?"
-                params.append(end_time)
+                params3.append(end_time)
             query += " GROUP BY severity"
 
-            cursor.execute(query, params)
+            cursor.execute(query, params3)
             by_severity = {row["severity"]: row["count"] for row in cursor.fetchall()}
 
             conn.close()

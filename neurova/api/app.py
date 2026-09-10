@@ -212,6 +212,11 @@ def _agent_config_from_saved(cfg: dict, agent_id: str, workspace_path: str):
         workspace_path=workspace_path,
         llm_model=cfg.get("model", "gpt-4") or "gpt-4",
         llm_provider=cfg.get("provider", ""),
+        # 温度回读（2026-09-10 断链修复）：落盘值显式覆盖；未落盘（None）走
+        # 记忆设置全局默认 llm.temperature
+        llm_temperature=(
+            float(cfg["temperature"]) if cfg.get("temperature") is not None else None
+        ),
         owner_user_id=cfg.get("owner_user_id") or None,
         description=cfg.get("description", "") or "",
         enable_tts=bool(cfg.get("enable_tts", False)),

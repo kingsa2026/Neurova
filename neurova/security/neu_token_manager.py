@@ -21,6 +21,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 from neurova.core import config
 from neurova.core.logger import get_logger
 import secrets
@@ -31,6 +32,36 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = get_logger(__name__)
+
+_TOKEN_SECRET_FILENAME = ".neurova_token_secret"
+
+
+def _load_or_create_token_secret() -> str:
+    """读取或创建持久化签名密钥，保证重启 / 多 worker 之间密钥一致（BUG AUDIT S-06）。
+
+    旧实现每次实例化都生成新随机密钥 → 重启后旧 token 无法验签、多 worker 各持
+    不同密钥 → 间歇性 401。现改为从持久化文件读取（不存在则生成并 0600 保存）。
+    """
+    try:
+        data_dir = getattr(config, "DATA_DIR", None) or os.environ.get("NEUROVA_DATA_DIR") or "data"
+        os.makedirs(data_dir, exist_ok=True)
+        secret_path = os.path.join(data_dir, _TOKEN_SECRET_FILENAME)
+        if os.path.exists(secret_path):
+            with open(secret_path, "r", encoding="utf-8") as _f:
+                existing = _f.read().strip()
+            if existing:
+                return existing
+        new_secret = secrets.token_hex(32)
+        with open(secret_path, "w", encoding="utf-8") as _f:
+            _f.write(new_secret)
+        try:
+            os.chmod(secret_path, 0o600)
+        except OSError:
+            pass
+        return new_secret
+    except Exception as e:
+        logger.warning("持久化签名密钥失败，回退到内存随机密钥（重启将失效）: %s", e)
+        return secrets.token_hex(32)
 
 
 class NEUTokenManager:
@@ -60,9 +91,15 @@ class NEUTokenManager:
             refresh_token_ttl: JWT刷新令牌TTL (秒)
             issuer: 令牌签发者
         """
-        self.secret_key = secret_key or config.get(
-            "NEU_TOKEN_SECRET", secrets.token_hex(32)
-        )
+        # BUG AUDIT S-06: 旧实现 secret_key 缺失时每次实例化都生成新随机密钥，
+        # 导致重启后旧 token 无法验签、多 worker 各持不同密钥 → 间歇性 401。
+        # 优先级：显式传入 > 环境变量/配置 > 持久化文件（稳定）。
+        resolved_secret = secret_key
+        if not resolved_secret and config is not None:
+            resolved_secret = config.get("NEU_TOKEN_SECRET")
+        if not resolved_secret:
+            resolved_secret = os.environ.get("NEU_TOKEN_SECRET")
+        self.secret_key = resolved_secret or _load_or_create_token_secret()
         self.token_expiry_hours = token_expiry_hours
         self._access_token_ttl = access_token_ttl
         self._refresh_token_ttl = refresh_token_ttl
@@ -378,10 +415,26 @@ class NEUTokenManager:
         try:
             payload_bytes = self._base64url_decode(payload_b64)
             payload = json.loads(payload_bytes)
-            return payload
         except (json.JSONDecodeError, Exception) as e:
             logger.warning("Failed to decode token payload: %s", e)
             return None
+
+        # BUG AUDIT S-05: 此前完全不校验 exp —— refresh_tokens() 只查签名/
+        # type/jti/黑名单，导致只要 refresh token 仍在内存中就能无限续期。
+        # 这里统一在解码层拦截过期令牌（含无 exp 声明的令牌）。
+        exp = payload.get("exp")
+        if exp is None:
+            logger.warning("Token rejected: missing exp claim")
+            return None
+        try:
+            if time.time() > float(exp):
+                logger.info("Token rejected: expired")
+                return None
+        except (TypeError, ValueError):
+            logger.warning("Token rejected: invalid exp claim")
+            return None
+
+        return payload
 
     @staticmethod
     def _base64url_encode(data: bytes) -> str:

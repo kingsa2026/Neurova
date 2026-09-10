@@ -464,16 +464,16 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "subagent_status": {
-        "description": "【查询子Agent状态】查询蜂群派生的后台子 Agent 的执行状态与最终报告。配合 spawn_subagent(background=true) 使用。",
+        "description": "【查询子Agent状态】查询蜂群派生的子 Agent 的执行状态与最终报告。配合 spawn_subagent(background=true) 或前台 spawn 转后台后的主动轮询使用。subagent_id 省略时返回最近派生的子 Agent 列表（新→旧，report 截断）。",
         "parameters": {
             "type": "object",
             "properties": {
                 "subagent_id": {
                     "type": "string",
-                    "description": "spawn_subagent 返回的 subagent_id",
+                    "description": "spawn_subagent 返回的 subagent_id；省略时返回最近派生列表",
                 },
             },
-            "required": ["subagent_id"],
+            "required": [],
         },
     },
     "list_agents": {
