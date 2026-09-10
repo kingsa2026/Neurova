@@ -183,6 +183,8 @@ P0-A 安全 → P0-B 并发 → P0-C 流式 → P1-D 记忆 → P1-E 扫荡 → 
 5. **test_moe_router_reads_persist_db_not_json_store 套件顺序污染**（HEAD 基线同样失败，单跑通过）
 6. **canvas-edges 悬浮层断言**（CRLF/注释匹配问题，HEAD 基线同样失败）
 
+> **⚠️ 2026-09-10 上午更正**：以上 6 条均因夜间误用系统 python 3.15.0a7 alpha 所致——项目实际解释器 `.venv`（3.12.10）下 PIL/pydantic/prometheus/openai/aiohttp/numpy 全部健康，这些失败在 venv 下不存在。真实残留仅 2 条且已处理：rsi_receipts.jsonl 归档至 logs/rsi-archive-20260910/；B6 与 governance_integration 的 property 手术交叉污染已修（9de3a6f3）；附带修复 sandbox_backends 测试的占位 import 漏网。跑测试一律用 `.venv/Scripts/python.exe`。
+
 ### 事故登记
 
 - 02:02 发生 stash 误弹事故：`git stash push <path>` 因文件仅暂存态未保存（"No local changes to save"），后续 `git stash pop` 弹出了预存的旧快照 stash（filter-branch: rewrite 时代），冲掉部分 P0-A 编辑并带入 361 个旧文件。处置：编辑全部重放、security/__init__.py 还原 HEAD、361 个文件按 mtime（02:02:55 同秒创建）精确判定后删除；被弹出的 stash 可经 reflog（e1c28825）恢复。**教训：共享工作区禁用 stash，改用 worktree 比对基线。**
