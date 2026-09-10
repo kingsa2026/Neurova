@@ -52,6 +52,7 @@ class TelegramAdapter(
 
         self.bot_prefix = "kingsa"
         self.show_tool_messages = True
+        self.share_session_in_group = True
         self.show_thinking = True
         self.http_proxy = ""
         self.http_proxy_auth = ""
@@ -86,6 +87,8 @@ class TelegramAdapter(
             return False
 
         self.bot_prefix = config.get("bot_prefix", "kingsa")
+        # B4-b（#7208/#7001 对齐）：群聊会话共享开关（manager 消费）
+        self.share_session_in_group = config.get("share_session_in_group", "true").lower() == "true"
         self.show_tool_messages = config.get("show_tool_messages", "true").lower() == "true"
         self.show_thinking = config.get("show_thinking", "true").lower() == "true"
         self.http_proxy = config.get("http_proxy", "")

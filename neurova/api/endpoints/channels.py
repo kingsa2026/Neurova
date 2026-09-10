@@ -306,3 +306,43 @@ async def health_check_all():
     """检查所有渠道的健康状态"""
     manager = get_channel_manager()
     return await manager.health_check()
+
+
+# ============================================================
+# B4-a 渠道管理能力面（QP config.py/manager.py:689/:713 对齐）
+# ============================================================
+
+
+@router.post("/{channel_type}/restart", summary="重启指定渠道")
+async def restart_channel(
+    channel_type: str,
+    current_user: Any = Depends(get_current_user),
+):
+    """渠道重启（disconnect → connect，配置变更生效/断线重连）。"""
+    manager = get_channel_manager()
+    result = await manager.restart_channel(channel_type)
+    if not result.get("success") and "error" in result:
+        return {"code": 1, "message": result["error"], "data": result}
+    return {"code": 0, "message": "Channel restarted", "data": result}
+
+
+@router.post("/{channel_type}/clear-queue", summary="清空渠道待处理队列")
+async def clear_channel_queue(
+    channel_type: str,
+    current_user: Any = Depends(get_current_user),
+):
+    """清空渠道入站持久化队列中的待处理事件（积压清理）。"""
+    manager = get_channel_manager()
+    try:
+        cleared = manager.clear_channel_queue(channel_type)
+    except Exception as e:  # noqa: BLE001 — 队列不可用诚实报错
+        raise HTTPException(status_code=503, detail=f"入站队列不可用: {e}")
+    return {"code": 0, "message": "Queue cleared", "data": {"channel_type": channel_type, "cleared": cleared}}
+
+
+@router.get("/conflicts/check", summary="机器人身份冲突检测")
+async def channel_conflict_check(current_user: Any = Depends(get_current_user)):
+    """扫描已注册渠道，检测复用同一身份凭据（app_id/api_key）的冲突。"""
+    manager = get_channel_manager()
+    result = manager.conflict_check()
+    return {"code": 0, "message": "success", "data": result}
