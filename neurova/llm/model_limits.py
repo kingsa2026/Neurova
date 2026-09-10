@@ -7,6 +7,8 @@
 来源: 各服务商官方文档 (2025 Q2)
 """
 
+from neurova.core.logger import get_logger
+
 # 模型 ID → max_tokens (输出 token 上限)
 MODEL_MAX_TOKENS: dict[str, int] = {
     # ── 商汤科技 (SenseTime) ──
@@ -61,6 +63,11 @@ MIN_MAX_TOKENS = 256
 
 # 全局最大值保护（任何模型不高于此值）
 MAX_MAX_TOKENS = 200000
+
+logger = get_logger(__name__)
+
+# 已告警过 clamp 的模型（按模型去重，避免每次请求刷 warning，L-18）
+_clamp_warned_models: set[str] = set()
 
 
 # 模型 ID → 上下文窗口（输入+输出总 token 容量）
@@ -159,16 +166,32 @@ def get_model_max_tokens(model_id: str) -> int:
     return DEFAULT_MAX_TOKENS
 
 
-def clamp_max_tokens(max_tokens: int, model_id: str = "") -> int:
+def clamp_max_tokens(max_tokens: "int | None", model_id: str = "") -> int:
     """
     将 max_tokens 限制在合理范围内。
 
+    max_tokens 为 None（未配置）时回落 DEFAULT_MAX_TOKENS，不再抛
+    TypeError（L-18：调用方 llm_client 直接透传 config.max_tokens）。
+
     Args:
-        max_tokens: 请求的 max_tokens
+        max_tokens: 请求的 max_tokens（None 表示未配置）
         model_id: 模型 ID (用于获取上限)
 
     Returns:
         夹紧后的 max_tokens
     """
+    if max_tokens is None:
+        max_tokens = DEFAULT_MAX_TOKENS
     model_limit = get_model_max_tokens(model_id)
-    return max(MIN_MAX_TOKENS, min(max_tokens, model_limit, MAX_MAX_TOKENS))
+    clamped = max(MIN_MAX_TOKENS, min(max_tokens, model_limit, MAX_MAX_TOKENS))
+    if clamped != max_tokens and model_id not in _clamp_warned_models:
+        # 截断发生时告警（按模型去重，不刷屏）：静默 4096 上限会让长输出配置悄悄失效
+        logger.warning(
+            "max_tokens %s clamped to %s for model %r (limit %s)",
+            max_tokens,
+            clamped,
+            model_id,
+            model_limit,
+        )
+        _clamp_warned_models.add(model_id)
+    return clamped

@@ -418,7 +418,7 @@ class TextToVideoGenerator(BaseGenerator):
 
                     if not task_id:
                         # 尝试直接获取视频数据
-                        video_data = self._extract_video_data(data)
+                        video_data = await self._extract_video_data(session, data)
                         if video_data:
                             return self._create_success_result(
                                 output_data=video_data,
@@ -502,9 +502,12 @@ class TextToVideoGenerator(BaseGenerator):
 
                         if status == "completed" or status == "success":
                             # 获取视频数据
-                            video_data = self._extract_video_data(data)
+                            video_data = await self._extract_video_data(session, data)
                             if video_data:
                                 return video_data
+                            # 任务已完成但无视频数据：继续轮询只会假性超时（L-17）
+                            self.logger.error("任务已完成但未提取到视频数据: %s", task_id)
+                            return None
                         elif status == "failed" or status == "error":
                             self.logger.error("任务失败: %s", data)
                             return None
@@ -543,10 +546,11 @@ class TextToVideoGenerator(BaseGenerator):
             # 通用格式
             return data.get("status") or data.get("task_status") or "unknown"
 
-    def _extract_video_data(self, data: Dict[str, Any]) -> Optional[bytes]:
+    async def _extract_video_data(self, session: "aiohttp.ClientSession", data: Dict[str, Any]) -> Optional[bytes]:
         """提取视频数据
 
         Args:
+            session: HTTP 会话（用于下载 video_url）
             data: 响应数据
 
         Returns:
@@ -580,13 +584,17 @@ class TextToVideoGenerator(BaseGenerator):
                 except Exception:
                     pass
 
-        # 如果有 URL，下载视频
+        # 如果有 URL，用 session 下载视频字节流（L-17：调用方消费 output_data: bytes，
+        # 只返回 None 会让 completed 任务被当作无数据一直轮询到假性超时）
         if video_url:
-            # 注意：这里需要同步下载，因为是在异步函数中
-            # 实际实现中可能需要使用 aiohttp 下载
             self.logger.info("获取到视频 URL: %s", video_url)
-            # 返回 URL 作为元数据，实际下载由调用者处理
-            return None
+            try:
+                async with session.get(video_url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+                    self.logger.warning("下载视频失败: HTTP %s", resp.status)
+            except Exception as e:
+                self.logger.warning("下载视频异常: %s", e)
 
         return None
 
