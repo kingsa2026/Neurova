@@ -13,71 +13,9 @@ from typing import Dict, Any, List, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 
-class TestUserRole:
-    """测试 UserRole 枚举"""
-    
-    def test_user_roles(self):
-        """测试用户角色枚举"""
-        from neurova.security.auth_system import UserRole
-        
-        assert UserRole.ADMIN.value == "admin"
-        assert UserRole.USER.value == "user"
-        assert UserRole.GUEST.value == "guest"
-        assert UserRole.MODERATOR.value == "moderator"
-
-
-class TestUserStatus:
-    """测试 UserStatus 枚举"""
-    
-    def test_user_statuses(self):
-        """测试用户状态枚举"""
-        from neurova.security.auth_system import UserStatus
-        
-        assert UserStatus.ACTIVE.value == "active"
-        assert UserStatus.INACTIVE.value == "inactive"
-        assert UserStatus.SUSPENDED.value == "suspended"
-        assert UserStatus.PENDING.value == "pending"
-
-
-class TestApprovalMode:
-    """测试 ApprovalMode 枚举"""
-    
-    def test_approval_modes(self):
-        """测试审批模式枚举"""
-        from neurova.security.auth_system import ApprovalMode
-        
-        assert ApprovalMode.AUTO.value == "auto"
-        assert ApprovalMode.MANUAL.value == "manual"
-        assert ApprovalMode.SEMI_AUTO.value == "semi_auto"
-
-
-class TestPasswordHasher:
-    """测试 PasswordHasher 类"""
-    
-    def test_hash_password(self):
-        """测试密码哈希"""
-        from neurova.security.auth_system import PasswordHasher
-        
-        hasher = PasswordHasher()
-        password = "test_password"
-        
-        hashed = hasher.hash(password)
-        
-        assert isinstance(hashed, str)
-        assert len(hashed) > 0
-        assert hashed != password
-    
-    def test_verify_password(self):
-        """测试密码验证"""
-        from neurova.security.auth_system import PasswordHasher
-        
-        hasher = PasswordHasher()
-        password = "test_password"
-        
-        hashed = hasher.hash(password)
-        
-        assert hasher.verify(password, hashed) is True
-        assert hasher.verify("wrong_password", hashed) is False
+# 注：原 TestUserRole/TestUserStatus/TestApprovalMode/TestPasswordHasher 四类
+# 针对 security/auth_system.py（S-07 死代码，2026-09-11 删除）；
+# 认证归 neurova.auth.password_hasher（tests/unit/auth/ 覆盖）。
 
 
 class TestAuditEventType:

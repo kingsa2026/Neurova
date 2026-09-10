@@ -4,46 +4,26 @@ Neurova 安全体系 2.0
 提供完整的安全防护：
 - 工具守卫 (Tool Guard)
 - 技能扫描器 (Skill Scanner)
-- 认证系统 (Auth System)
 - 认知安全 (Cognitive Security)
 
 与 Neurova 的认知增强特性深度集成。
+
+注：用户认证走 neurova.api.auth 与 neurova.auth.password_hasher（bcrypt），
+本包不再提供认证组件（S-07 死代码 security/auth_system.py 已删除）。
 """
 
-import logging
-
 from neurova.core.logger import get_logger
-from typing import TYPE_CHECKING
-
-_logger = get_logger(__name__)
-
-try:
-    from neurova.security.api_keys import APIKey
-except ImportError as _e:
-    _logger.debug("APIKey 未可用: %s", _e)
-    APIKey = None
-
-try:
-    from neurova.security.auth_system import ApprovalMode
-except ImportError as _e:
-    _logger.debug("ApprovalMode 未可用: %s", _e)
-    ApprovalMode = None
 
 try:
     from neurova.security.audit_logger import AuditLog
 except ImportError as _e:
-    _logger.debug("AuditLog 未可用: %s", _e)
     AuditLog = None
 
 try:
     from neurova.security.rbac import Permission, Role
 except ImportError as _e:
-    _logger.debug("Permission/Role 未可用: %s", _e)
     Permission = None
     Role = None
-
-if TYPE_CHECKING:
-    pass
 
 
 def get_logger(name: str = "security"):
@@ -54,8 +34,6 @@ def get_logger(name: str = "security"):
 
 
 __all__ = [
-    "APIKey",
-    "ApprovalMode",
     "AuditLog",
     "Permission",
     "Role",
