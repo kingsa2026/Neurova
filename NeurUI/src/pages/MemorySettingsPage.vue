@@ -251,6 +251,7 @@ const sectionLabelMap: Record<string, string> = {
   graph: 'memorySettings.sectionGraph',
   vector_search: 'memorySettings.sectionVectorSearch',
   manager: 'memorySettings.sectionManager',
+  llm: 'memorySettings.sectionLlm',
 }
 
 const sectionDescMap: Record<string, string> = {
@@ -262,6 +263,7 @@ const sectionDescMap: Record<string, string> = {
   graph: 'memorySettings.sectionGraphDesc',
   vector_search: 'memorySettings.sectionVectorSearchDesc',
   manager: 'memorySettings.sectionManagerDesc',
+  llm: 'memorySettings.sectionLlmDesc',
 }
 
 const sectionLabel = (sec: string) => {

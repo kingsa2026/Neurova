@@ -185,7 +185,7 @@ async function startSession(): Promise<void> {
   error.value = ''
   try {
     const res: any = await startPlanSessionApi(props.agentId, request)
-    const started: PlanSession = res.data.data.session
+    const started: PlanSession = res?.data?.session
     session.value = started
     resetRoundState(started.rounds[started.rounds.length - 1])
   } catch (e: any) {
@@ -282,7 +282,7 @@ async function submitRound(): Promise<void> {
       (a) => (a.selected && a.selected.length > 0) || (a.custom && a.custom.trim())
     )
     const res: any = await submitPlanAnswers(session.value.session_id, payload, supplement.value)
-    const advanced: PlanSession = res.data.data.session
+    const advanced: PlanSession = res?.data?.session
     session.value = advanced
     if (advanced.status === 'awaiting_approval') {
       await loadPlanContent(advanced)
@@ -304,7 +304,7 @@ async function backToQuestions(): Promise<void> {
   error.value = ''
   try {
     const res: any = await submitPlanAnswers(session.value.session_id, [], supplement.value)
-    const supplemented: PlanSession = res.data.data.session
+    const supplemented: PlanSession = res?.data?.session
     session.value = supplemented
     planContent.value = null
     resetRoundState(supplemented.rounds[supplemented.rounds.length - 1])
@@ -321,10 +321,10 @@ async function decide(action: 'approve' | 'reject'): Promise<void> {
   error.value = ''
   try {
     const res: any = await decidePlan(session.value.session_id, action)
-    session.value = res.data.data.session
-    if (action === 'approve' && res.data.data.execute_prompt) {
+    session.value = res?.data?.session
+    if (action === 'approve' && res?.data?.execute_prompt) {
       uiMessage.success(t('plan.approved'))
-      emit('approved', res.data.data.execute_prompt)
+      emit('approved', res?.data?.execute_prompt)
     } else {
       uiMessage.info(t('plan.rejected'))
     }
@@ -339,7 +339,7 @@ async function loadPlanContent(s: PlanSession): Promise<void> {
   if (!s.document) return
   try {
     const res: any = await readPlanDocumentApi(s.agent_id, s.document.name)
-    planContent.value = res.data.data.content
+    planContent.value = res?.data?.content
   } catch (e: any) {
     planContent.value = null
     error.value = e?.response?.data?.message || t('plan.previewFailed')

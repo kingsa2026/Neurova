@@ -1747,8 +1747,6 @@ export default {
     general: '通用',
     generalSettings: '通用设置',
     appName: '应用名称',
-    llm: '大模型',
-    llmSettings: '大模型设置',
     security: '安全',
     securitySettings: '安全设置',
     jwtSecret: 'JWT 密钥',
@@ -1972,7 +1970,9 @@ export default {
     sectionVectorSearch: '向量检索',
     sectionVectorSearchDesc: 'BM25/向量搜索引擎的缓存和特征参数',
     sectionManager: '记忆管理器',
+    sectionLlm: '生成参数 (LLM)',
     sectionManagerDesc: '新记忆初始温度/重要性、热门记忆阈值、衰减周期',
+    sectionLlmDesc: '全局默认生成温度：Agent 未在表单中显式配置时使用',
     // Parameter descriptions（与后端 PARAM_SCHEMAS.description 同源）
     paramNameTemperatureDecayRate: "温度衰减速率",
     paramNameTemperatureAccessBoost: "检索提升量",
@@ -2040,6 +2040,7 @@ export default {
     parammanagerHotMemoriesThreshold: '高温记忆过滤阈值',
     parammanagerDecayHours: '衰减周期（小时）（保留参数：当前贝叶斯曲线按天 idle 计算，不直接消费）',
     parammanagerDecayRate: '衰减速率（保留参数：当前贝叶斯曲线通过曲线因子计算，不直接消费）',
+    paramllmTemperature: '生成温度 (temperature)',
   },
   trajectory: {
     title: '智能体轨迹',

@@ -10,13 +10,6 @@ export interface GeneralSettings {
   language: string
 }
 
-export interface LLMSettings {
-  default_provider: string
-  default_model: string
-  temperature: number
-  max_tokens: number
-}
-
 export interface SecuritySettings {
   jwt_secret: string
   jwt_expiry_hours: number
@@ -38,7 +31,6 @@ export interface AdvancedSettings {
 
 export interface AppSettings {
   general: GeneralSettings
-  llm: LLMSettings
   security: SecuritySettings
   storage: StorageSettings
   advanced: AdvancedSettings
