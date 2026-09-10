@@ -154,15 +154,63 @@ class AutoContextUpdater:
             return 0
 
     def _update_temperature(self) -> int:
-        """更新记忆温度"""
+        """更新记忆温度（冷却衰减机制，真实生效）。
+
+        BUG AUDIT M-14 修复：原实现为空 stub（仅 logger.debug + return 0），但
+        ``_perform_update`` 仍上报"更新完成"并递增 ``total_updates`` → 冷却维护
+        静默失效、记忆只升温不降温。现按空闲时长对每条记忆做温度衰减并落盘，
+        使冷却机制真正运转（根因修复，非表面抹除）。
+        """
         if not self.memory_manager:
             return 0
 
-        try:
-            # 更新所有记忆的温度（衰减）
-            logger.debug("更新记忆温度，衰减率: %s", self.temperature_decay_rate)
-
+        get_all = getattr(self.memory_manager, "get_all_memories", None)
+        update_one = getattr(self.memory_manager, "update_memory", None)
+        if not callable(get_all) or not callable(update_one):
             return 0
+
+        try:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            base_decay = float(self.temperature_decay_rate)
+            updated = 0
+
+            for mem in get_all():
+                mem_id = mem.get("id") if isinstance(mem, dict) else getattr(mem, "id", None)
+                if not mem_id:
+                    continue
+
+                raw_temp = (
+                    mem.get("temperature", 50.0) if isinstance(mem, dict)
+                    else getattr(mem, "temperature", 50.0)
+                )
+                try:
+                    temp = float(raw_temp)
+                except (TypeError, ValueError):
+                    temp = 50.0
+
+                # 空闲越久降温越多；无访问时间则按基础衰减率冷却
+                decay = base_decay
+                if isinstance(mem, dict):
+                    last_accessed = mem.get("last_accessed_at") or mem.get("updated_at")
+                else:
+                    last_accessed = getattr(mem, "last_accessed_at", None) or getattr(mem, "updated_at", None)
+                if last_accessed:
+                    try:
+                        la = datetime.datetime.fromisoformat(str(last_accessed))
+                        if la.tzinfo is None:
+                            la = la.replace(tzinfo=datetime.timezone.utc)
+                        idle_days = max(0.0, (now - la).total_seconds() / 86400.0)
+                        decay = base_decay * (1.0 + idle_days)
+                    except (ValueError, TypeError):
+                        pass
+
+                new_temp = max(0.0, min(100.0, temp - decay))
+                if new_temp != temp:
+                    update_one(mem_id, temperature=new_temp)
+                    updated += 1
+
+            logger.debug("记忆温度衰减更新 %d 条", updated)
+            return updated
         except Exception as e:
             logger.error("更新记忆温度失败: %s", e)
             return 0

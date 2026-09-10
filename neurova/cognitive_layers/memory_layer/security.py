@@ -8,6 +8,7 @@ import hashlib
 from neurova.core.logger import get_logger
 import os
 import re
+import secrets
 import threading
 from dataclasses import dataclass, field
 from enum import Enum
@@ -24,6 +25,43 @@ except ImportError:
     HAS_CRYPTOGRAPHY = False
 
 logger = get_logger(__name__)
+
+_ENCRYPTION_KEY_FILENAME = ".neurova_memory_encryption_key"
+
+
+def _load_or_create_encryption_key() -> str:
+    """读取或创建持久化记忆加密密钥，保证重启 / 多 worker 之间密钥一致（BUG AUDIT M-12）。
+
+    旧实现当 encryption_key 未配置时每次进程生成新随机密钥 → 重启后已加密记忆
+    无法解密（解密静默返回空串，记忆"消失"）。现改为从持久化文件读取（不存在则
+    生成符合 Fernet 规范的密钥并 0600 保存），两类加密器均可复用。
+    """
+    try:
+        try:
+            from neurova.core import config as _cfg
+
+            data_dir = getattr(_cfg, "DATA_DIR", None) or os.environ.get("NEUROVA_DATA_DIR") or "data"
+        except Exception:
+            data_dir = os.environ.get("NEUROVA_DATA_DIR") or "data"
+        os.makedirs(data_dir, exist_ok=True)
+        key_path = os.path.join(data_dir, _ENCRYPTION_KEY_FILENAME)
+        if os.path.exists(key_path):
+            with open(key_path, "r", encoding="utf-8") as _f:
+                existing = _f.read().strip()
+            if existing:
+                return existing
+        # 生成符合 Fernet 规范的密钥（32 url-safe base64 字节），Fernet 与回退 XOR 均可使用
+        new_key = Fernet.generate_key().decode() if HAS_CRYPTOGRAPHY else secrets.token_hex(32)
+        with open(key_path, "w", encoding="utf-8") as _f:
+            _f.write(new_key)
+        try:
+            os.chmod(key_path, 0o600)
+        except OSError:
+            pass
+        return new_key
+    except Exception as e:
+        logger.warning("持久化记忆加密密钥失败，回退到内存随机密钥（重启将失效）: %s", e)
+        return secrets.token_hex(32)
 
 
 # ────── Enums ──────
@@ -288,14 +326,26 @@ class MemorySecurity:
     5. 访问日志审计
     """
 
-    def __init__(self, config: Optional[SecurityConfig] = None):
+    def __init__(
+        self,
+        config: Optional[SecurityConfig] = None,
+        memory_manager: Optional[Any] = None,
+    ):
         self._config = config or SecurityConfig()
         self._patterns: List[SensitivePattern] = list(_BUILTIN_PATTERNS)
         self._access_logs: List[AccessLog] = []
         self._lock = threading.RLock()
+        # BUG AUDIT M-02: 被遗忘权需要真实的删除后端。此前 forget_memory()
+        # 是空实现却返回 success=True，合规删除流程被静默欺骗。
+        self._memory_manager = memory_manager
 
         # 初始化加密器
         self._cipher = self._init_cipher()
+
+    def set_memory_manager(self, memory_manager: Any) -> None:
+        """延迟注入记忆管理器（被遗忘权的真实删除后端）"""
+        with self._lock:
+            self._memory_manager = memory_manager
 
         # 编译模式缓存
         self._compiled_patterns: Dict[str, Pattern] = {}
@@ -308,10 +358,14 @@ class MemorySecurity:
 
         if method == EncryptionMethod.FERNET:
             try:
-                return _FernetCipher(self._config.encryption_key)
+                # BUG AUDIT M-12: 未配置密钥时不再每次随机生成（重启后旧密文无法
+                # 解密 → 记忆"消失"），改从持久化文件读取稳定密钥。
+                key = self._config.encryption_key or _load_or_create_encryption_key()
+                return _FernetCipher(key)
             except ImportError:
                 logger.warning("cryptography 库未安装，使用回退加密器")
-                return _FallbackCipher(self._config.encryption_key)
+                fb_key = self._config.encryption_key or _load_or_create_encryption_key()
+                return _FallbackCipher(fb_key)
         elif method == EncryptionMethod.HASH:
             # 哈希不需要加密器
             return None
@@ -550,16 +604,35 @@ class MemorySecurity:
             "success": False,
         }
 
+        manager = self._memory_manager
+        if manager is None or not hasattr(manager, "forget"):
+            # 没有删除后端时必须显式失败。禁止像此前那样"一行没删却返回
+            # success=True"——那会让合规/删除流程静默误判成功。
+            result["error"] = (
+                "未注入可用的 memory_manager（需提供 forget(memory_id, soft) 接口），"
+                "无法执行被遗忘权删除"
+            )
+            logger.error("被遗忘权执行失败: %s", result["error"])
+            self._log_access(
+                memory_id=memory_id,
+                action=AuditAction.FORGET,
+                details=f"失败：未注入 memory_manager（永久删除: {permanent}）",
+            )
+            return result
+
         try:
-            # 这里应该调用实际的记忆删除逻辑
-            # 由于我们只有 Memory 模型，这里只是模拟
+            # soft=True 为软删除（保留审计痕迹），permanent=True 走物理删除
+            deleted = manager.forget(memory_id, soft=not permanent)
 
-            # 记录访问日志
-            self._log_access(memory_id=memory_id, action=AuditAction.FORGET, details=f"永久删除: {permanent}")
+            result["success"] = bool(deleted)
+            result["deleted"] = bool(deleted)
+            result["message"] = "记忆已删除" if deleted else "记忆不存在或删除失败"
 
-            result["success"] = True
-            result["message"] = "记忆已标记为遗忘"
-
+            self._log_access(
+                memory_id=memory_id,
+                action=AuditAction.FORGET,
+                details=f"{'永久' if permanent else '软'}删除: {permanent}｜结果: {deleted}",
+            )
         except Exception as e:
             result["error"] = str(e)
             logger.error("遗忘记忆失败: %s", e)

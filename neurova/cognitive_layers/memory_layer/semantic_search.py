@@ -38,6 +38,11 @@ class SemanticSearch:
         self._use_embedding = use_embedding and embedding_model is not None
         self._cache: Dict[str, List[float]] = {}
         self._keyword_index: Dict[str, List[str]] = {}
+        # M-07: 保护 _keyword_index 的并发读写。原 build/upsert/remove/search 全方法
+        # 无锁；remove_memory_index 边迭代边 del，并发 upsert/remove/search 时会触发
+        # RuntimeError: dictionary changed size during iteration。RLock 可重入，
+        # upsert 内调用 remove 不会自死锁。
+        self._index_lock = threading.RLock()
         
         logger.info("SemanticSearch 初始化: embedding=%s", self._use_embedding)
     
@@ -201,19 +206,20 @@ class SemanticSearch:
     
     def build_keyword_index(self, memories: List[Dict[str, Any]]):
         """构建关键词索引"""
-        self._keyword_index.clear()
-        
-        for mem in memories:
-            content = mem.get("content", "")
-            memory_id = mem.get("id", "")
+        with self._index_lock:
+            self._keyword_index.clear()
             
-            keywords = self._extract_keywords(content)
-            for kw in keywords:
-                if kw not in self._keyword_index:
-                    self._keyword_index[kw] = []
-                self._keyword_index[kw].append(memory_id)
-        
-        logger.info("构建关键词索引: %d 个关键词", len(self._keyword_index))
+            for mem in memories:
+                content = mem.get("content", "")
+                memory_id = mem.get("id", "")
+                
+                keywords = self._extract_keywords(content)
+                for kw in keywords:
+                    if kw not in self._keyword_index:
+                        self._keyword_index[kw] = []
+                    self._keyword_index[kw].append(memory_id)
+            
+            logger.info("构建关键词索引: %d 个关键词", len(self._keyword_index))
     
     def upsert_memory_index(self, mem: Dict[str, Any]) -> None:
         """增量维护单条记忆的关键词倒排（审计 P1-D6）。
@@ -226,26 +232,29 @@ class SemanticSearch:
         memory_id = mem.get("id", "")
         if not memory_id:
             return
-        # 幂等：先摘除旧词条再插新（content 变更场景）
-        self.remove_memory_index(memory_id)
-        keywords = self._extract_keywords(mem.get("content", ""))
-        for kw in keywords:
-            bucket = self._keyword_index.setdefault(kw, [])
-            if memory_id not in bucket:
-                bucket.append(memory_id)
+        # 幂等：先摘除旧词条再插新（content 变更场景）；整段持锁，
+        # remove_memory_index 内部同样取 RLock（可重入）不会自死锁
+        with self._index_lock:
+            self.remove_memory_index(memory_id)
+            keywords = self._extract_keywords(mem.get("content", ""))
+            for kw in keywords:
+                bucket = self._keyword_index.setdefault(kw, [])
+                if memory_id not in bucket:
+                    bucket.append(memory_id)
 
     def remove_memory_index(self, memory_id: str) -> None:
         """从倒排索引摘除一条记忆（增量删除）。"""
         if not memory_id:
             return
-        empty_keys = []
-        for kw, ids in self._keyword_index.items():
-            if memory_id in ids:
-                ids.remove(memory_id)
-                if not ids:
-                    empty_keys.append(kw)
-        for kw in empty_keys:
-            del self._keyword_index[kw]
+        with self._index_lock:
+            empty_keys = []
+            for kw, ids in self._keyword_index.items():
+                if memory_id in ids:
+                    ids.remove(memory_id)
+                    if not ids:
+                        empty_keys.append(kw)
+            for kw in empty_keys:
+                del self._keyword_index[kw]
 
     def search_by_keywords(self, query: str, limit: int = 10) -> List[str]:
         """基于关键词索引搜索"""
@@ -254,10 +263,11 @@ class SemanticSearch:
         # 统计每个记忆的匹配关键词数
         memory_scores: Dict[str, int] = {}
         
-        for kw in keywords:
-            if kw in self._keyword_index:
-                for memory_id in self._keyword_index[kw]:
-                    memory_scores[memory_id] = memory_scores.get(memory_id, 0) + 1
+        with self._index_lock:
+            for kw in keywords:
+                if kw in self._keyword_index:
+                    for memory_id in self._keyword_index[kw]:
+                        memory_scores[memory_id] = memory_scores.get(memory_id, 0) + 1
         
         # 按匹配数排序
         sorted_memories = sorted(memory_scores.items(), key=lambda x: x[1], reverse=True)

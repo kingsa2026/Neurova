@@ -227,7 +227,9 @@ class CognitiveStorageEngine:
         # L0: WAL 缓冲区（内存 + 文件）
         self._l0_buffer: List[UnifiedMemoryNode] = []
         self._wal_path = self.data_dir / "wal.jsonl"
-        self._wal_lock = threading.Lock()
+        # 必须用 RLock：_wal_append 在持有 _wal_lock 的情况下会调用
+        # _flush_l0_to_l1()，后者需要再次获取同一把锁（普通 Lock 会自死锁）。
+        self._wal_lock = threading.RLock()
 
         # L1: SQLite 热存储
         self._db_path = self.data_dir / "memory.db"
@@ -236,6 +238,10 @@ class CognitiveStorageEngine:
 
         # 内存向量索引（简单实现，后续可换 FAISS）
         self._vector_index: Dict[str, List[float]] = {}
+        # M-09: 专用锁保护内存态 _l0_buffer / _vector_index。
+        # _db_lock 只保护 SQLite 连接，内存结构与 DB 是不同资源，必须分开加锁；
+        # 统一取锁顺序为 buffer_lock -> db_lock（两锁均 RLock，避免死锁且可重入）。
+        self._buffer_lock = threading.RLock()
         self._embed_fn = None  # 延迟初始化
 
         # 恢复 WAL 中未 flush 的数据
@@ -332,34 +338,52 @@ class CognitiveStorageEngine:
                 logger.warning("WAL size check failed: %s", e)
 
     def _flush_l0_to_l1(self):
-        """将 L0 缓冲区 flush 到 L1 SQLite"""
-        if not self._l0_buffer:
-            return
-        nodes = self._l0_buffer[:]
-        self._l0_buffer.clear()
+        """将 L0 缓冲区 flush 到 L1 SQLite。
+
+        M-11 修复（根因：flush 先清后写丢数据）：原实现 `nodes = self._l0_buffer[:]`
+        后立刻 `self._l0_buffer.clear()`，再在锁内写入——若写入中途抛异常
+        （磁盘满 / 约束冲突 / 连接中断），缓冲已被清空、节点永久丢失，且内存态与
+        WAL 不一致。修复：在锁内快照并写入，commit 成功后才按 id 剔除已写入节点；
+        写入失败则**保留缓冲不清除**（异常上抛由调用方日志兜底），等待重试 + WAL
+        崩溃恢复兜底，杜绝数据静默丢失。
+        """
+        with self._buffer_lock:
+            if not self._l0_buffer:
+                return
+            # M-09：持 buffer 锁快照，避免与并发 store/retrieve 竞态读到半截状态
+            nodes = list(self._l0_buffer)
         with self._db_lock:
-            for node in nodes:
-                self._db.execute(
-                    """INSERT OR REPLACE INTO memories
-                       (id, content, memory_type, category, temperature, layer,
-                        metadata, embedding, created_at, updated_at, access_count, trace_id)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        node.id,
-                        node.content,
-                        node.memory_type.value,
-                        node.category,
-                        node.temperature,
-                        node.layer.value,
-                        json.dumps(node.metadata, ensure_ascii=False),
-                        json.dumps(node.embedding) if node.embedding else None,
-                        node.created_at.isoformat(),
-                        node.updated_at.isoformat(),
-                        node.access_count,
-                        node.trace_id,
-                    ),
-                )
-            self._db.commit()
+            try:
+                for node in nodes:
+                    self._db.execute(
+                        """INSERT OR REPLACE INTO memories
+                           (id, content, memory_type, category, temperature, layer,
+                            metadata, embedding, created_at, updated_at, access_count, trace_id)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            node.id,
+                            node.content,
+                            node.memory_type.value,
+                            node.category,
+                            node.temperature,
+                            node.layer.value,
+                            json.dumps(node.metadata, ensure_ascii=False),
+                            json.dumps(node.embedding) if node.embedding else None,
+                            node.created_at.isoformat(),
+                            node.updated_at.isoformat(),
+                            node.access_count,
+                            node.trace_id,
+                        ),
+                    )
+                self._db.commit()
+            except Exception:
+                # 写入失败：保留缓冲，不清除，便于重试；异常上抛由调用方日志兜底
+                raise
+        # 仅移除已成功写入的节点（按 id），避免误删并发追加的新节点
+        # M-09：持 buffer 锁做列表替换，与 store 的 append 互斥
+        with self._buffer_lock:
+            written_ids = {n.id for n in nodes}
+            self._l0_buffer = [n for n in self._l0_buffer if n.id not in written_ids]
         # Clear WAL after successful flush
         with self._wal_lock:
             try:
@@ -373,13 +397,15 @@ class CognitiveStorageEngine:
         """写入记忆节点"""
         # 1. 写 WAL（崩溃恢复）
         self._wal_append(node)
-        # 2. 写 L0 缓冲
-        self._l0_buffer.append(node)
-        # 3. 更新向量索引
-        if node.embedding:
-            self._vector_index[node.id] = node.embedding
-        # 4. L0 满了就 flush 到 L1
-        if len(self._l0_buffer) >= _FLUSH_THRESHOLD:
+        # 2. 写 L0 缓冲 + 向量索引（M-09：持 _buffer_lock，避免与 retrieve/
+        #    update_temperature/get_statistics/flush 并发读或 flush 替换列表竞态）
+        with self._buffer_lock:
+            self._l0_buffer.append(node)
+            if node.embedding:
+                self._vector_index[node.id] = node.embedding
+            need_flush = len(self._l0_buffer) >= _FLUSH_THRESHOLD
+        # 3. L0 满了就 flush 到 L1（锁已释放，flush 内部自取锁，避免持锁跨调用）
+        if need_flush:
             self._flush_l0_to_l1()
         return node.id
 
@@ -399,8 +425,13 @@ class CognitiveStorageEngine:
         """跨层检索"""
         results: List[UnifiedMemoryNode] = []
 
+        # M-09：先持 buffer 锁快照 L0，避免与 store/flush 并发替换列表竞态
+        # （迭代进行中列表被替换会抛 RuntimeError: list changed size during iteration）
+        with self._buffer_lock:
+            l0_snapshot = list(self._l0_buffer)
+
         # 1. L0 缓冲搜索（文本匹配 + 过滤）
-        for node in self._l0_buffer:
+        for node in l0_snapshot:
             if self._apply_filters(node, filters):
                 continue
             if query.lower() in node.content.lower():
@@ -442,7 +473,8 @@ class CognitiveStorageEngine:
 
         # L0 缓冲扫描（预存失败修复 2026-09-02）：flush 阈值(100)前的节点
         # 只在 _l0_buffer，此前 retrieve 不扫描 L0 → store 后立查拿不到结果
-        for node in self._l0_buffer:
+        # 使用上面已快照的 l0_snapshot，避免重复持锁
+        for node in l0_snapshot:
             if self._apply_filters(node, filters):
                 continue
             if query.lower() in node.content.lower():
@@ -478,18 +510,20 @@ class CognitiveStorageEngine:
 
     def update_temperature(self, node_id: str, delta: float) -> None:
         """更新温度"""
-        # 先查 L0
-        for node in self._l0_buffer:
-            if node.id == node_id:
-                node.temperature = max(0.0, min(100.0, node.temperature + delta))
-                # S-4: L0 命中时也同步更新 L1,避免 flush 前 retrieve 拿到旧值
-                with self._db_lock:
-                    self._db.execute(
-                        "UPDATE memories SET temperature = MAX(0, MIN(100, temperature + ?)) WHERE id = ?",
-                        (delta, node_id),
-                    )
-                    self._db.commit()
-                return
+        # 先查 L0（M-09：持 buffer 锁扫描 + 取节点引用，避免与 store/flush 并发替换列表竞态）
+        with self._buffer_lock:
+            l0_hit = next((n for n in self._l0_buffer if n.id == node_id), None)
+        if l0_hit is not None:
+            # 节点对象引用稳定，脱离锁后修改安全；并发 flush 移除的是列表项而非对象
+            l0_hit.temperature = max(0.0, min(100.0, l0_hit.temperature + delta))
+            # S-4: L0 命中时也同步更新 L1,避免 flush 前 retrieve 拿到旧值
+            with self._db_lock:
+                self._db.execute(
+                    "UPDATE memories SET temperature = MAX(0, MIN(100, temperature + ?)) WHERE id = ?",
+                    (delta, node_id),
+                )
+                self._db.commit()
+            return
         # 再查 L1
         with self._db_lock:
             self._db.execute(
@@ -500,12 +534,16 @@ class CognitiveStorageEngine:
 
     def get_statistics(self) -> Dict[str, Any]:
         """各层统计"""
+        # M-09：内存态统计持 buffer 锁读取，避免与 store/flush 并发替换列表竞态
+        with self._buffer_lock:
+            l0 = len(self._l0_buffer)
+            vi = len(self._vector_index)
         with self._db_lock:
             l1_count = self._db.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
         return {
-            "l0_buffer": len(self._l0_buffer),
+            "l0_buffer": l0,
             "l1_hot": l1_count,
-            "vector_index_size": len(self._vector_index),
+            "vector_index_size": vi,
         }
 
     def close(self):

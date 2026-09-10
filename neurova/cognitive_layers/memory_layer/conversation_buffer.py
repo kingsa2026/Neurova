@@ -385,7 +385,15 @@ class MemoryWriteQueue:
 
             except Exception as e:
                 errors += 1
-                logger.warning("写入单条记忆失败: %s", e)
+                # BUG AUDIT M-11: 此前队列在写入前已整体清空（line 317），且单条失败仅
+                # 计数丢弃 → 写入异常（DB 抖动/约束冲突）的记忆永久丢失。改为失败项
+                # 重新入队，下次 flush 重试，杜绝"先清后写"的数据丢失。
+                logger.warning("写入单条记忆失败，重新入队待重试: %s", e)
+                try:
+                    with self._lock:
+                        self._queue.append(item)
+                except Exception as re_e:
+                    logger.error("失败记忆重新入队也失败，数据可能丢失: %s", re_e)
 
         if written > 0:
             # Bug C-1 修复：原代码括号位置错误导致 str + tuple → TypeError
