@@ -289,8 +289,13 @@ class CLIToolExecutor:
 
         # 替换命令模板中的参数
         command = tool["command"]
+        import shlex  # 延迟导入，避免顶层依赖
+
         for param_name, param_value in params.items():
-            command = command.replace(f"{{{param_name}}}", str(param_value))
+            # BUG AUDIT C-08: 直接将参数值 str 拼入命令串、再以 shell=True 执行
+            # → 参数注入（如 param 含 "; rm -rf /" 即被当作第二条命令执行）。
+            # 对每个参数值做 shell 转义，中和注入语义。
+            command = command.replace(f"{{{param_name}}}", shlex.quote(str(param_value)))
 
         # 执行命令
         return self.execute_sync(command, timeout=timeout or tool.get("timeout", 30.0))

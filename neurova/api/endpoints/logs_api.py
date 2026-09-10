@@ -104,9 +104,12 @@ def _get_wls():
         return None
 
 
-def _get_user_from_auth(auth_header: Optional[str] = None) -> Dict[str, str]:
-    """从认证头获取用户信息"""
-    return {"user_id": "default", "agent_id": "default"}
+def _scoped_logs(user: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """S-16: 工作日志按属主过滤，防止登录用户互看彼此日志；admin 可见全部。"""
+    if user.get("role") == "admin":
+        return list(_logs_store.values())
+    uid = str(user.get("user_id", "default"))
+    return [l for l in _logs_store.values() if l.get("user_id") == uid]
 
 
 # ---------------------------------------------------------------------------
@@ -115,10 +118,11 @@ def _get_user_from_auth(auth_header: Optional[str] = None) -> Dict[str, str]:
 
 
 @router.post("", response_model=LogEntry)
-async def create_log(body: LogCreate):
+async def create_log(body: LogCreate, current_user: Dict[str, Any] = Depends(get_current_user)):
     """记录日志"""
     log_id = str(uuid.uuid4())
     now = time.time()
+    owner_id = str(current_user.get("user_id", "default"))
 
     # 尝试使用后端系统
     wls = _get_wls()
@@ -138,8 +142,8 @@ async def create_log(body: LogCreate):
     # 使用内存存储
     entry = {
         "log_id": log_id,
-        "user_id": "default",
-        "agent_id": "default",
+        "user_id": owner_id,
+        "agent_id": str(current_user.get("agent_id") or "default"),
         "title": body.title,
         "content": body.content,
         "category": body.category,
@@ -158,6 +162,7 @@ async def list_logs(
     start_date: Optional[str] = Query(default=None),
     end_date: Optional[str] = Query(default=None),
     limit: int = Query(default=50, le=200),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取日志列表"""
     # 尝试使用后端系统
@@ -176,7 +181,7 @@ async def list_logs(
             logger.warning("WorkLogSystem.list_logs failed: %s", e)
 
     # 使用内存存储
-    logs = list(_logs_store.values())
+    logs = _scoped_logs(current_user)
 
     if category:
         logs = [l for l in logs if l.get("category") == category]
@@ -190,14 +195,15 @@ async def list_logs(
 @router.get("/daily-summary", response_model=DailySummary)
 async def get_daily_summary(
     date: Optional[str] = Query(default=None, description="日期 YYYY-MM-DD"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取日总结"""
     if not date:
         date = datetime.date.today().isoformat()
 
-    # 筛选当天的日志
+    # 筛选当天的日志（S-16: 按属主过滤）
     day_logs = []
-    for log in _logs_store.values():
+    for log in _scoped_logs(current_user):
         log_date = datetime.datetime.fromtimestamp(log.get("created_at", 0)).date().isoformat()
         if log_date == date:
             day_logs.append(log)
@@ -224,6 +230,7 @@ async def get_daily_summary(
 @router.get("/weekly-report", response_model=WeeklyReport)
 async def get_weekly_report(
     week_offset: int = Query(default=0, description="周偏移量 (0=本周)"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取周报"""
     today = datetime.date.today()
@@ -241,7 +248,7 @@ async def get_weekly_report(
         day_str = day.isoformat()
 
         day_logs = []
-        for log in _logs_store.values():
+        for log in _scoped_logs(current_user):
             log_date = datetime.datetime.fromtimestamp(log.get("created_at", 0)).date().isoformat()
             if log_date == day_str:
                 day_logs.append(log)
@@ -283,9 +290,9 @@ async def get_weekly_report(
 
 
 @router.get("/stats", response_model=LogStats)
-async def get_stats():
+async def get_stats(current_user: Dict[str, Any] = Depends(get_current_user)):
     """获取项目统计"""
-    logs = list(_logs_store.values())
+    logs = _scoped_logs(current_user)
 
     total_duration = sum(l.get("duration_minutes", 0) or 0 for l in logs)
 
@@ -317,9 +324,10 @@ async def export_logs(
     format: str = Query(default="json", description="导出格式: json/csv"),
     start_date: Optional[str] = Query(default=None),
     end_date: Optional[str] = Query(default=None),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """导出日志"""
-    logs = list(_logs_store.values())
+    logs = _scoped_logs(current_user)
 
     if start_date:
         logs = [

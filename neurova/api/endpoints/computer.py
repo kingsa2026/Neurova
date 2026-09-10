@@ -5,18 +5,46 @@ Computer Use API 端点 v1.0.0-beta1 - 浏览器自动化增强版
 """
 
 import asyncio
+import os
 from neurova.core.logger import get_logger
+from pathlib import Path
 import typing
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, TypeAdapter
+from pydantic import BaseModel
 
 from neurova.api.auth import get_current_user
 
 logger = get_logger(__name__)
+
+
+def _require_admin_dep():
+    """路由内延迟获取 require_admin（模块导入顺序安全，参考 audio.py 做法）"""
+    from neurova.api.deps import require_admin
+
+    return require_admin()
+
+
+def _resolve_safe_path(raw: str) -> Path:
+    """把用户提供的路径限制在工作区根目录内，阻断路径穿越（BUG AUDIT S-02）。
+
+    默认根目录为当前工作目录，可用环境变量 NEUROVA_COMPUTER_ROOT 覆盖。
+    未加约束前 /file/read 可读 /etc/passwd、.env、data/users.db，
+    /file/write 可覆盖任意代码与配置文件。
+    """
+    root = Path(os.environ.get("NEUROVA_COMPUTER_ROOT") or Path.cwd()).resolve()
+    candidate = Path(raw)
+    target = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
+    if target != root and root not in target.parents:
+        raise HTTPException(status_code=403, detail=f"路径越界，拒绝访问: {raw}")
+    return target
+
+
 # P0 安全修复: /shell、/file/read、/file/write 等端点可执行任意命令/读写任意文件，
 # 必须要求认证（此前完全无鉴权，任何能访问端口的人均可 RCE）。
+# BUG AUDIT S-01: 仅"已登录"仍不够——注册端点开放，攻击者可自注册后
+# 直接拿到 shell。命令执行/文件读写进一步收敛到 admin。
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
@@ -116,14 +144,16 @@ class BrowserSnapshotRequest(BaseModel):
 
 class BrowserClickRoleRequest(BaseModel):
     # 严格 schema（对标 ZCode 命令模式）：未知字段直接拒绝，防幻觉参数
-    model_config = ConfigDict(extra="forbid")
+    class Config:
+        extra = "forbid"
 
     role: str
     name: typing.Optional[str] = None
 
 
 class BrowserFillRoleRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    class Config:
+        extra = "forbid"
 
     role: str
     name: typing.Optional[str] = None
@@ -138,7 +168,8 @@ class BrowserScrapeRequest(BaseModel):
 # ── 浏览器命令总线（对标 ZCode 单入口 + 严格 schema 模式）──
 # 判别联合：command Literal 字段区分命令；extra="forbid" 逐命令拒绝幻觉参数
 class NavigateCmd(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    class Config:
+        extra = "forbid"
 
     command: typing.Literal["navigate"] = "navigate"
     url: str
@@ -146,14 +177,16 @@ class NavigateCmd(BaseModel):
 
 
 class DomSnapshotCmd(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    class Config:
+        extra = "forbid"
 
     command: typing.Literal["dom_snapshot"] = "dom_snapshot"
     generation: typing.Optional[int] = None
 
 
 class ClickRoleCmd(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    class Config:
+        extra = "forbid"
 
     command: typing.Literal["click_role"] = "click_role"
     role: str
@@ -162,7 +195,8 @@ class ClickRoleCmd(BaseModel):
 
 
 class FillRoleCmd(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    class Config:
+        extra = "forbid"
 
     command: typing.Literal["fill_role"] = "fill_role"
     role: str
@@ -172,32 +206,37 @@ class FillRoleCmd(BaseModel):
 
 
 class ScreenshotCmd(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    class Config:
+        extra = "forbid"
 
     command: typing.Literal["screenshot"] = "screenshot"
 
 
 class ExtractTextCmd(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    class Config:
+        extra = "forbid"
 
     command: typing.Literal["extract_text"] = "extract_text"
 
 
 class ListTargetsCmd(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    class Config:
+        extra = "forbid"
 
     command: typing.Literal["list_targets"] = "list_targets"
 
 
 class OpenTargetCmd(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    class Config:
+        extra = "forbid"
 
     command: typing.Literal["open_target"] = "open_target"
     url: typing.Optional[str] = None
 
 
 class SwitchTargetCmd(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    class Config:
+        extra = "forbid"
 
     command: typing.Literal["switch_target"] = "switch_target"
     target_id: str
@@ -205,7 +244,8 @@ class SwitchTargetCmd(BaseModel):
 
 
 class CloseTargetCmd(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    class Config:
+        extra = "forbid"
 
     command: typing.Literal["close_target"] = "close_target"
     target_id: str
@@ -226,7 +266,9 @@ BrowserCommand = typing.Union[
 ]
 
 # 程序化校验入口（FastAPI 请求体校验与本适配器共享同一份 schema）
-BrowserCommandAdapter: TypeAdapter = TypeAdapter(BrowserCommand)
+# 注：原代码使用 pydantic v2 的 TypeAdapter，当前运行环境为 pydantic v1，
+# 该适配器未被任何代码引用（死代码），移除以避免导入失败。
+
 
 
 # ── In-memory state ────────────────────────────────────
@@ -318,7 +360,7 @@ async def scroll(body: ScrollRequest):
     return {"code": 0, "message": "Scrolled", "data": {"success": True, "dx": body.dx, "dy": body.dy}}
 
 
-@router.post("/shell")
+@router.post("/shell", dependencies=[Depends(_require_admin_dep())])
 async def shell(body: ShellRequest):
     """执行 Shell 命令"""
     try:
@@ -342,13 +384,11 @@ async def shell(body: ShellRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/file/read")
+@router.post("/file/read", dependencies=[Depends(_require_admin_dep())])
 async def file_read(body: FileReadRequest):
     """读取文件"""
     try:
-        from pathlib import Path
-
-        p = Path(body.path)
+        p = _resolve_safe_path(body.path)
         if not p.exists():
             raise HTTPException(status_code=404, detail=f"File not found: {body.path}")
         content = p.read_text(encoding=body.encoding)
@@ -360,13 +400,11 @@ async def file_read(body: FileReadRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/file/write")
+@router.post("/file/write", dependencies=[Depends(_require_admin_dep())])
 async def file_write(body: FileWriteRequest):
     """写入文件"""
     try:
-        from pathlib import Path
-
-        p = Path(body.path)
+        p = _resolve_safe_path(body.path)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(body.content, encoding=body.encoding)
         _log_action("file_write", {"path": body.path, "size": len(body.content)})

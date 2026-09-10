@@ -85,6 +85,12 @@ def _save_agent_config(agent) -> None:
         "description": getattr(cfg, "description", "") or "",
         "model": getattr(cfg.llm_config, "model", "") if hasattr(cfg, "llm_config") else "",
         "provider": getattr(cfg, "llm_provider", ""),
+        # 温度落盘：agent 表单改温度后重启不丢（None 时不写键 → 重建走全局默认）
+        **(
+            {"temperature": float(cfg.llm_config.temperature)}
+            if hasattr(cfg, "llm_config") and getattr(cfg.llm_config, "temperature", None) is not None
+            else {}
+        ),
         "personality": getattr(cfg, "personality", ""),
         "constitution": getattr(cfg, "constitution", ""),
         # 归属持久化：重启后 _user_can_access_agent 依赖此字段判定属主
@@ -127,6 +133,22 @@ def _tts_fields_from_body_config(config: Dict[str, Any]) -> Dict[str, Any]:
         except (TypeError, ValueError):
             pass
     return out
+
+
+def _temperature_from_body_config(config: Dict[str, Any]) -> Optional[float]:
+    """从请求体 config 提取生成温度（2026-09-10 断链修复：Agent 表单温度
+    此前被静默丢弃，AgentConfig.llm_temperature 恒默认 0.7）。
+
+    仅在键实际出现时返回（update 路径局部更新不覆盖未提及字段）；
+    0~2 钳位，非法值忽略（回落全局默认语义）。
+    """
+    if not config or "temperature" not in config:
+        return None
+    try:
+        value = float(config["temperature"])
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, min(2.0, value))
 
 
 class AgentInfo(BaseModel):
@@ -368,9 +390,11 @@ async def create_agent(
         )
         os.makedirs(workspace_path, exist_ok=True)
         tts_fields = _tts_fields_from_body_config(body.config)
+        temperature = _temperature_from_body_config(body.config)
         config = AgentConfig(
             name=body.name,
             agent_id=agent_id,
+            llm_temperature=temperature,
             enable_memory=body.enable_memory,
             workspace_path=workspace_path,
             owner_user_id=current_user.get("user_id"),
@@ -455,6 +479,12 @@ async def update_agent(
                 logger.info("Rebuilt tts_manager after TTS config update: %s", tts_fields)
         except Exception as e:
             logger.warning("Failed to rebuild tts_manager: %s", e)
+
+    # 温度更新（2026-09-10 断链修复：局部覆盖请求中出现的键；None=未提及）
+    temperature = _temperature_from_body_config(body.config)
+    if temperature is not None and hasattr(agent.config, "llm_config"):
+        agent.config.llm_config.temperature = temperature
+        logger.info("Updated agent temperature: %s -> %s", agent_id, temperature)
 
     # 更新运行时的 AgentLLMClient（provider/model 变更后必须重建）
     if (body.model is not None or body.provider is not None) and hasattr(agent, "llm_client"):

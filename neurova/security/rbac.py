@@ -553,7 +553,15 @@ class RBACManager:
         return [{"id": p.value, "name": p.name, "description": descriptions.get(p.value, p.value)} for p in Permission]
 
     def _get_permission_description(self, permission: str) -> str:
-        return self.get_all_permissions().get(permission, permission)
+        # BUG AUDIT S-14: get_all_permissions() 返回 List[dict]，此前对其调用
+        # .get() 必抛 AttributeError。改为兼容 list / dict 两种形态。
+        perms = self.get_all_permissions()
+        if isinstance(perms, dict):
+            return perms.get(permission, permission)
+        for p in perms or []:
+            if isinstance(p, dict) and p.get("id") == permission:
+                return p.get("name") or p.get("description") or permission
+        return permission
 
 
 _rbac_manager: Optional[RBACManager] = None
