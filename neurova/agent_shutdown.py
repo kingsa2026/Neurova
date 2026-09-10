@@ -129,10 +129,13 @@ async def shutdown_agent(agent) -> None:
     # 导入回滚同根因；FakeAgent 测试掩盖了真连接的泄漏）。
     # EmotionModule（memory_manager 私有）是 memory.db 的第三持有人，
     # 自带 shutdown() 但此前无人调用。
+    # A-05: memory_agent._persist_db_store（MoE L0 下钻的 persist.db
+    # 常驻只读连接）同批纳入——close() 幂等，无此属性时静默跳过。
     for _holder, _attr in (
         (agent, "cognitive_engine"),
         (agent, "attachment_manager"),
         (getattr(agent, "memory_manager", None), "_emotion_module"),
+        (getattr(agent, "memory_agent", None), "_persist_db_store"),
     ):
         if _holder is None:
             continue

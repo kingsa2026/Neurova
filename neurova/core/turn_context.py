@@ -41,6 +41,12 @@ def set_turn_identity(
     _user_id_var.set(user_id or "default")
 
 
+def set_turn_user_input(value: Optional[str]) -> None:
+    """单写轮次用户输入（A-04：Agent._current_user_input property 的
+    setter 后端；传 None 即重置，兼容 init_conversation 的置空语义）。"""
+    _user_input_var.set(value)
+
+
 def get_turn_user_input() -> Optional[str]:
     return _user_input_var.get()
 
@@ -123,6 +129,7 @@ def clear_turn_state() -> None:
 
 __all__ = [
     "set_turn_identity",
+    "set_turn_user_input",
     "get_turn_user_input",
     "get_turn_session_id",
     "get_turn_user_id",

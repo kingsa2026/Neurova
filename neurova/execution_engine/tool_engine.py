@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import collections
 import datetime
-import functools
 import inspect
 from neurova.core.logger import get_logger
 import typing
@@ -19,40 +18,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 logger = get_logger(__name__)
-
-
-def cache_token(func_name: str, args: tuple, kwargs: dict) -> str:
-    """生成缓存键"""
-    import hashlib
-
-    key = f"{func_name}:{args}:{sorted(kwargs.items())}"
-    return hashlib.md5(key.encode()).hexdigest()
-
-
-def cached(ttl: float = 300):
-    """缓存装饰器（简化版）"""
-
-    def decorator(func):
-        _cache: typing.Dict[str, typing.Tuple[float, typing.Any]] = {}
-
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            key = cache_token(func.__name__, args, kwargs)
-            now = datetime.datetime.now().timestamp()
-
-            if key in _cache:
-                ts, val = _cache[key]
-                if now - ts < ttl:
-                    return val
-
-            result = await func(*args, **kwargs)
-            _cache[key] = (now, result)
-            return result
-
-        wrapper._cache = _cache
-        return wrapper
-
-    return decorator
 
 
 class ToolStatus(Enum):
@@ -438,47 +403,6 @@ class ToolEngine:
             raise ValueError(f"缺少必需参数: {', '.join(missing_required)}")
 
         return prepared
-
-    async def _validate_parameters(
-        self, tool_def: typing.Union[str, ToolDefinition], parameters: typing.Dict[str, typing.Any]
-    ) -> None:
-        """验证参数类型和约束"""
-        if isinstance(tool_def, str):
-            defn = self._tools.get(tool_def)
-        else:
-            defn = tool_def
-
-        if not defn:
-            return
-
-        for param in defn.parameters:
-            if param.name not in parameters:
-                if param.required:
-                    raise ValueError(f"缺少必需参数: {param.name}")
-                continue
-
-            value = parameters[param.name]
-
-            # 类型验证
-            type_checks = {
-                "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
-                "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
-                "string": lambda v: isinstance(v, str),
-                "boolean": lambda v: isinstance(v, bool),
-                "array": lambda v: isinstance(v, list),
-                "object": lambda v: isinstance(v, dict),
-            }
-
-            if param.type in type_checks and not type_checks[param.type](value):
-                raise ValueError(f"参数 {param.name} 类型错误: 期望 {param.type}, 实际 {type(value).__name__}")
-
-            # 约束验证
-            if param.constraints:
-                if param.type in ("integer", "number"):
-                    if "min" in param.constraints and value < param.constraints["min"]:
-                        raise ValueError(f"参数 {param.name} 小于最小值 {param.constraints['min']}")
-                    if "max" in param.constraints and value > param.constraints["max"]:
-                        raise ValueError(f"参数 {param.name} 大于最大值 {param.constraints['max']}")
 
     async def execute(
         self,
