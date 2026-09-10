@@ -10,6 +10,7 @@ Agent API密钥管理模块
 集成现有认证系统（neurova/api/auth.py）
 """
 
+import atexit
 import hashlib
 import json
 import secrets
@@ -124,6 +125,10 @@ class APIKeyManager:
     管理Agent的API密钥，支持生成、验证、撤销等功能。
     """
 
+    # touch 类轻量变更（validate_key 更新 last_used_at）的落盘防抖间隔（秒）。
+    # S-19：validate_key 高频命中时每次全量 JSON 重写会放大 IO，改为脏标记 + 防抖。
+    SAVE_DEBOUNCE_SECONDS = 30.0
+
     def __init__(self, storage_path: Optional[Path] = None, key_length: int = 36, default_expiry_days: int = 365):
         """
         初始化API密钥管理器
@@ -144,8 +149,16 @@ class APIKeyManager:
         # 线程安全
         self._lock = threading.RLock()
 
+        # S-19：touch 类变更的脏标记 + 防抖落盘状态
+        self._dirty = False
+        self._last_save_ts = 0.0
+        self._save_timer: Optional[threading.Timer] = None
+
         # 加载密钥
         self._load_keys()
+
+        # S-19：进程退出时把未落盘的内存态（last_used_at 等）flush 到存储
+        atexit.register(self._flush_on_exit)
 
         logger.info("APIKeyManager 初始化，存储路径: %s", self.storage_path)
 
@@ -178,9 +191,50 @@ class APIKeyManager:
             with open(self.storage_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
+            # 全量落盘完成，脏状态复位（S-19）
+            self._dirty = False
+            self._last_save_ts = time.time()
+
             logger.debug("保存了 %s 个API密钥", len(self._keys))
         except Exception as e:
             logger.error("保存API密钥失败: %s", e)
+
+    def _schedule_save(self):
+        """S-19：touch 类轻量变更的防抖落盘——SAVE_DEBOUNCE_SECONDS 内至多写一次盘"""
+        self._dirty = True
+        elapsed = time.time() - self._last_save_ts
+        if elapsed >= self.SAVE_DEBOUNCE_SECONDS:
+            self._save_keys()
+            return
+        if self._save_timer is None:
+            timer = threading.Timer(self.SAVE_DEBOUNCE_SECONDS - elapsed, self._flush_dirty)
+            timer.daemon = True
+            self._save_timer = timer
+            timer.start()
+
+    def _flush_dirty(self):
+        """防抖定时器回调：仍有脏数据时落盘一次"""
+        with self._lock:
+            self._save_timer = None
+            if not self._dirty:
+                return
+            self._save_keys()
+
+    def flush(self):
+        """立即落盘未持久化的脏状态（S-19：供进程退出/关键节点调用）"""
+        with self._lock:
+            if self._save_timer is not None:
+                self._save_timer.cancel()
+                self._save_timer = None
+            if self._dirty:
+                self._save_keys()
+
+    def _flush_on_exit(self):
+        """进程退出钩子：把内存态 last_used_at flush 到存储"""
+        try:
+            self.flush()
+        except Exception as e:
+            logger.warning("进程退出时落盘API密钥失败: %s", e)
 
     def generate_key(
         self,
@@ -279,9 +333,9 @@ class APIKeyManager:
             if api_key.is_expired():
                 return None
 
-            # 更新使用时间
+            # 更新使用时间（S-19：仅内存态 + 脏标记，防抖落盘，不再每次全量重写 JSON）
             api_key.touch()
-            self._save_keys()
+            self._schedule_save()
 
             return api_key
 
