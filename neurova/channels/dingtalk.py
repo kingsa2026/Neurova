@@ -72,6 +72,15 @@ class DingTalkAdapter(ChannelAdapter):
         # 修复 P0-5 (C4): 捕获主事件循环引用，供同步回调线程安全调度
         self._main_loop: Optional[asyncio.AbstractEventLoop] = None
 
+        # B4-b（#7208/#7001 对齐）：群聊会话共享开关（manager.resolve_session_scope_id
+        # 消费）；False=群内按发送者隔离会话。bool 或 "true"/"false" 字符串。
+        _cfg_meta = getattr(config, "metadata", None) or getattr(config, "extra", {}) or {}
+        _share = _cfg_meta.get("share_session_in_group", True)
+        self.share_session_in_group = (
+            _share.strip().lower() not in ("false", "0", "no", "off")
+            if isinstance(_share, str) else bool(_share)
+        )
+
     async def connect(self) -> bool:
         """建立钉钉连接"""
         # 修复 P0-5 (C4): 捕获主 loop 引用，供 _handle_bot_message 跨线程调度

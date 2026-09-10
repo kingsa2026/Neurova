@@ -98,6 +98,24 @@ class ChannelIngressQueue:
         self._stopping = False
         self._processed_total = 0
 
+    def clear(self, channel_type: str) -> int:
+        """B4-a（QP manager.py:689 对齐）：清空指定渠道的待处理事件。
+
+        仅删除 pending（未消费）事件；processing/done/dead 等终态或租赁中
+        的行不动（防并发消费竞争）。返回清除条数；DB 故障抛 IngressQueueUnavailable。
+        """
+        try:
+            with self._lock:
+                with self._conn:
+                    cur = self._conn.execute(
+                        "DELETE FROM channel_ingress_events WHERE channel_type=? AND status='pending'",
+                        (channel_type,),
+                    )
+                    return cur.rowcount or 0
+        except sqlite3.Error as e:
+            logger.error("Ingress clear failed (queue unavailable): %s", e)
+            raise IngressQueueUnavailable(str(e)) from e
+
     def close(self):
         with self._lock:
             self._conn.close()
