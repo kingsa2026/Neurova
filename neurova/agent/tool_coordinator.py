@@ -36,6 +36,17 @@ TOOL_TIMEOUTS_S: Dict[str, float] = {
 
 TOOL_DEFAULT_TIMEOUT_S = 60.0
 
+# P2（2026-09-10 蜂群排查）：前台 spawn 子任务动辄数分钟，60s 默认=必然转后台，
+# 全部依赖 hints 注入的滞后语义——落表 600s 让多数子任务在窗口内直接返回报告
+TOOL_TIMEOUTS_S["spawn_subagent"] = 600.0
+
+# P1（2026-09-10）：转后台信封的 task_id 是 coordinator 通用键，特定工具的
+# 自有查询凭据（如 spawn 的 subagent_id）不在信封里——per-tool 轮询提示
+# 让主 agent 知道该用什么工具主动查询，而不是傻等 pending hints 注入
+_OFFLOAD_HINTS: Dict[str, str] = {
+    "spawn_subagent": "可用 subagent_status 查询子 Agent 状态与报告（subagent_id 可省略，省略时返回最近派生列表）",
+}
+
 # 并行安全声明清单：只读/无共享可变状态的工具（P1-2 并行 gather 白名单）
 _CONCURRENCY_SAFE_TOOLS = {
     "calculator",
@@ -110,6 +121,13 @@ class ToolCoordinator:
             "success": None,
         }
         asyncio.ensure_future(self._observe_background(tool_name, task_id, task))
+        message = (
+            f"工具 {tool_name} 执行超时，已转入后台继续运行；"
+            f"完成后结果将注入后续上下文（task_id={task_id}）"
+        )
+        hint = _OFFLOAD_HINTS.get((tool_name or "").strip().lower())
+        if hint:
+            message += f"。{hint}"
         logger.info(
             "工具 %s 超时（%.0fs），转后台继续（task_id=%s）", tool_name, effective, task_id
         )
@@ -117,10 +135,7 @@ class ToolCoordinator:
             "status": "background",
             "task_id": task_id,
             "tool_name": tool_name,
-            "message": (
-                f"工具 {tool_name} 执行超时，已转入后台继续运行；"
-                f"完成后结果将注入后续上下文（task_id={task_id}）"
-            ),
+            "message": message,
         }
 
     async def _observe_background(self, tool_name: str, task_id: str, task: asyncio.Future) -> None:

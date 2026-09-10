@@ -213,7 +213,7 @@ class AgentConfig:
         llm_api_key: str = "",
         llm_base_url: str = "https://api.openai.com/v1",
         llm_model: str = "gpt-4",
-        llm_temperature: float = 0.7,
+        llm_temperature: Optional[float] = None,  # None=取记忆设置全局默认（llm.temperature）；显式值=agent 级覆盖
         max_tokens: int = 0,  # 0 = 自动适配（查 model_limits 注册表）
         enable_memory: bool = True,
         enable_streaming: bool = False,
@@ -281,6 +281,19 @@ class AgentConfig:
 
         # LLM 服务商 ID（用于路由到指定服务商）
         self.llm_provider = llm_provider
+
+        # 温度两层语义（2026-09-10）：None → 记忆设置全局默认（llm.temperature，
+        # data/memory_settings.json 持久化）；显式值 → agent 级覆盖。读取失败
+        # 回落 0.7，不阻断构造。
+        if llm_temperature is None:
+            try:
+                from neurova.cognitive_layers.memory_layer.settings_config import (
+                    get_memory_settings,
+                )
+
+                llm_temperature = float(get_memory_settings().get("llm.temperature", 0.7))
+            except Exception:
+                llm_temperature = 0.7
 
         # max_tokens=0 表示自动适配
         if not max_tokens:
@@ -1719,6 +1732,9 @@ class Agent:
             session_id=session_id,
             metadata=metadata,
             enable_tts=enable_tts,
+            # BUG AUDIT A-02: event_emitter 此前未透传，导致调用方传入的
+            # 流式/推理事件回调恒为 None，SSE 客户端收不到 content 事件。
+            event_emitter=event_emitter,
         )
         return await self.chat_pipeline.execute(ctx)
 
