@@ -115,7 +115,9 @@ class TestContextPoolSettingsAPI:
         assert "token_budget" in budget_info
 
         assert budget_info["model_name"] == "gpt-4"
-        assert budget_info["token_budget"] == 32000
+        # 2026-09-10 统一入口：llm_router.resolve_model_context_window(gpt-4)
+        # = model_limits 8192 → ×0.6 视图安全系数 = 4915（旧静态表 32000 弃用）
+        assert budget_info["token_budget"] == 4915
 
     def test_test_budget_calculation(self, client):
         """测试Token预算计算测试端点"""
@@ -138,7 +140,8 @@ class TestContextPoolSettingsAPI:
         assert "explanation" in budget_result
 
         assert budget_result["model_name"] == "gpt-4"
-        assert budget_result["calculated_budget"] == 32000
+        # 同上：统一入口 model_limits 8192 × 0.6 = 4915
+        assert budget_result["calculated_budget"] == 4915
 
     def test_get_pool_settings_unauthorized(self):
         """测试未认证访问返回 401（端点自带 Depends(get_current_user)）"""
@@ -170,7 +173,8 @@ class TestContextPoolSettingsAPI:
 
         budget_info = data["data"]
         assert budget_info["model_name"] == "unknown-model"
-        assert budget_info["token_budget"] == 16000
+        # 2026-09-10 统一入口：未知模型保守窗 16000 × 0.6 = 9600（裸 16000 弃用）
+        assert budget_info["token_budget"] == 9600
 
 
 class TestContextPoolSettingsIntegration:
