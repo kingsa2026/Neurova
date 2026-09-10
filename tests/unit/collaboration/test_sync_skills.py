@@ -20,8 +20,12 @@ def test_sync_skills_returns_count():
     registry = get_skill_registry()
     nr = NodeRegistry()
     count = sync_skills(nr)
-    # 默认注册了 3 个 skill：memory, web_search, file_operation
-    assert count == 3, f"sync_skills 应返回 3，实际返回 {count}"
+    # 真实契约：全部技能节点同步成功（数量 = 注册表技能数；内置技能
+    # 随版本增长，旧断言硬编码 3 是被 sync 中途崩溃掩盖的假契约）
+    assert count >= 3, f"sync_skills 至少应同步 3 个技能，实际 {count}"
+    assert count == len(registry.list_skills()), (
+        f"sync 应全量转换（一条畸形 schema 不得使同步归零），{count} vs {len(registry.list_skills())}"
+    )
 
 
 def test_sync_skills_idempotent():
