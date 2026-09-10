@@ -96,6 +96,36 @@
               <a-form-item :label="t('aigc.model')">
                 <a-select v-model:value="videoModel" class="model-select-video" :options="videoModelOptions" :placeholder="t('aigc.selectModel')" show-search />
               </a-form-item>
+              <!-- B2-c 参数面：协议/服务商凭据/时长/分辨率/参考图/音频 -->
+              <a-form-item :label="t('aigc.protocol')">
+                <a-select v-model:value="videoProtocol" allow-clear :placeholder="t('aigc.protocolAuto')">
+                  <a-select-option value="wan">wan（百炼 Wan）</a-select-option>
+                  <a-select-option value="seedance2">seedance2（火山 Ark）</a-select-option>
+                  <a-select-option value="veo">veo（Gemini）</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item :label="t('aigc.providerId')">
+                <a-input v-model:value="videoProviderId" allow-clear :placeholder="t('aigc.providerIdHint')" />
+              </a-form-item>
+              <a-form-item :label="t('aigc.duration')">
+                <a-input-number v-model:value="videoDuration" :min="1" :max="60" style="width: 100%" />
+              </a-form-item>
+              <a-form-item :label="t('aigc.resolution')">
+                <a-select v-model:value="videoResolution">
+                  <a-select-option value="480p">480p</a-select-option>
+                  <a-select-option value="720p">720p</a-select-option>
+                  <a-select-option value="1080p">1080p</a-select-option>
+                </a-select>
+              </a-form-item>
+              <a-form-item :label="t('aigc.refImage')">
+                <a-input v-model:value="videoRefImage" allow-clear :placeholder="t('aigc.refImageHint')" />
+              </a-form-item>
+              <a-form-item :label="t('aigc.audio')">
+                <a-select v-model:value="videoAudio" allow-clear :placeholder="t('aigc.protocolAuto')">
+                  <a-select-option :value="true">{{ t('common.yes') }}</a-select-option>
+                  <a-select-option :value="false">{{ t('common.no') }}</a-select-option>
+                </a-select>
+              </a-form-item>
               <GlassButton variant="primary" :loading="videoGenerating" @click="generateVideo">
                 {{ t('aigc.generate') }}
               </GlassButton>
@@ -324,6 +354,13 @@ async function generateAudio() {
 // --- Video ---
 const videoPrompt = ref('')
 const videoModel = ref('auto')
+// B2-c：参数面（协议/服务商/时长/分辨率/参考图/音频开关）
+const videoProtocol = ref('')
+const videoProviderId = ref('')
+const videoDuration = ref(5)
+const videoResolution = ref('1080p')
+const videoRefImage = ref('')
+const videoAudio = ref<boolean | null>(null)
 const videoGenerating = ref(false)
 const videoStatus = ref<{ status: string; progress: number; url?: string } | null>(null)
 let videoPollTimer: ReturnType<typeof setInterval> | null = null
@@ -333,7 +370,17 @@ async function generateVideo() {
   videoGenerating.value = true
   videoStatus.value = { status: 'pending', progress: 0 }
   try {
-    const res: any = await request.post('/generation/video', { prompt: videoPrompt.value, model: videoModel.value })
+    const payload: Record<string, unknown> = {
+      prompt: videoPrompt.value,
+      model: videoModel.value === 'auto' ? undefined : videoModel.value,
+      duration: videoDuration.value,
+      resolution: videoResolution.value,
+    }
+    if (videoProtocol.value) payload.protocol = videoProtocol.value
+    if (videoProviderId.value) payload.provider_id = videoProviderId.value
+    if (videoRefImage.value.trim()) payload.ref_images = [videoRefImage.value.trim()]
+    if (videoAudio.value !== null) payload.audio = videoAudio.value
+    const res: any = await request.post('/generation/video', payload)
     const data = res?.data ?? res
     const taskId = data?.task_id ?? data?.id
     videoStatus.value = { status: data?.status ?? 'processing', progress: data?.progress ?? 0 }
@@ -354,18 +401,19 @@ function pollVideoStatus(taskId: string) {
   }
   videoPollTimer = setInterval(async () => {
     try {
-      const res: any = await request.get(`/generation/video/${taskId}`)
+      // B2-c：后端真实轮询端点（账本+协议轮询），succeeded=完成
+      const res: any = await request.get(`/generation/video/status/${taskId}`)
       const data = res?.data ?? res
       videoStatus.value = {
         status: data?.status ?? 'processing',
-        progress: data?.progress ?? 0,
+        progress: data?.status === 'succeeded' ? 100 : videoStatus.value?.progress ?? 0,
         url: data?.url,
       }
-      if (data?.status === 'completed' || data?.status === 'failed') {
+      if (data?.status === 'succeeded' || data?.status === 'failed') {
         clearInterval(videoPollTimer!)
         videoPollTimer = null
         videoGenerating.value = false
-        if (data.status === 'completed') message.success(t('aigc.videoSuccess'))
+        if (data.status === 'succeeded') message.success(t('aigc.videoSuccess'))
         else message.error(t('aigc.videoFailed'))
       }
     } catch {
