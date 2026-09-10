@@ -1763,6 +1763,7 @@ export default {
     governancePhase3: '3 — 조건부 자동(중위험 자동 적용)',
     governancePhase4: '4 — 완전 자동(모두 자동 적용)',
     governanceConversationRules: '대화 규칙 추출(턴당 LLM 호출 1회)',
+    notLoadedSaveBlocked: '설정이 아직 로드되지 않아 저장이 차단되었습니다(기본값이 서버 설정을 덮어쓰지 않도록 방지)',
     debugMode: '디버그 모드',
     logLevel: '로그 레벨',
     debug: '디버그',

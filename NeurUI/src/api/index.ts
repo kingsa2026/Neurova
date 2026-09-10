@@ -5,12 +5,44 @@ import logger from '@/utils/logger'
 import config from '@/config'
 
 const TOKEN_KEY = 'auth_token'
+const REFRESH_TOKEN_KEY = 'refresh_token'
 
 /** 调用方可声明的"预期失败状态码"：拦截器降级为 debug，不当 error 刷控制台 */
 declare module 'axios' {
   export interface AxiosRequestConfig {
     __expectedStatus?: number | number[]
   }
+}
+
+/**
+ * 401 单飞刷新（F-05）：access token 过期时用 refresh_token 换新，
+ * 并发 401 共享同一个刷新 Promise（只发一次刷新请求），
+ * 成功后由各调用方重放各自的原请求（一次），失败才清凭证跳登录。
+ */
+let refreshInFlight: Promise<string> | null = null
+
+/** 刷新 access token 并持久化（后端轮换 refresh_token，一并落盘）；返回新 access token。 */
+function refreshAccessToken(refreshToken: string): Promise<string> {
+  refreshInFlight ??= (async () => {
+    // 直接走底层 request（响应拦截器统一解包 data）；/auth/refresh 自身的
+    // 401 会被拦截器排除在刷新之外，不会递归。
+    const res: any = await request.post('/auth/refresh', { refresh_token: refreshToken })
+    const data = res?.data ?? res
+    const accessToken = data?.access_token
+    if (!accessToken) throw new Error('Refresh response missing access_token')
+    secureStorage.set(TOKEN_KEY, accessToken)
+    if (data.refresh_token) secureStorage.set(REFRESH_TOKEN_KEY, data.refresh_token)
+    return accessToken as string
+  })().finally(() => {
+    refreshInFlight = null
+  })
+  return refreshInFlight
+}
+
+/** 登录/注册/刷新接口自身的 401 不触发刷新（避免循环）。 */
+function isAuthEndpoint(url: unknown): boolean {
+  const u = String(url || '')
+  return ['/auth/login', '/auth/register', '/auth/refresh'].some((p) => u.includes(p))
 }
 
 /**
@@ -79,7 +111,9 @@ request.interceptors.request.use(
 /**
  * Response interceptor:
  * - Log responses with their request ID
- * - Handle 401 by clearing auth state and redirecting
+ * - Handle 401 with single-flight token refresh + one-shot request replay;
+ *   fall back to clearing auth state and redirecting when refresh is
+ *   impossible/failed (also for auth endpoints themselves)
  * - Handle 429 (rate limiting) with a user-visible warning
  */
 request.interceptors.response.use(
@@ -90,12 +124,29 @@ request.interceptors.response.use(
     logger.info(`[API] <- ${method} ${url}  ${response.status}  [${requestId}]`)
     return response.data
   },
-  (error) => {
+  async (error) => {
     const requestId = (error.config as any)?.__requestId || 'unknown'
     const status = error.response?.status
 
     if (status === 401) {
+      const cfg = error.config ?? {}
+      const alreadyReplayed = (cfg as any).__replayedAfterRefresh === true
+      const refreshTokenValue = secureStorage.get(REFRESH_TOKEN_KEY)
+      if (!isAuthEndpoint(cfg.url) && !alreadyReplayed && refreshTokenValue) {
+        try {
+          const newToken = await refreshAccessToken(refreshTokenValue)
+          // 重放原请求一次：请求拦截器会重新生成 Request-ID 并附着新 token
+          logger.info(`[API] 401 → token refreshed, replaying ${String(cfg.method || 'get').toUpperCase()} ${cfg.url}  [${requestId}]`)
+          ;(cfg as any).__replayedAfterRefresh = true
+          cfg.headers = cfg.headers ?? {}
+          ;(cfg.headers as Record<string, unknown>).Authorization = `Bearer ${newToken}`
+          return request.request(cfg)
+        } catch (refreshErr) {
+          logger.warn(`[API] 401 token refresh failed [${requestId}]: ${refreshErr instanceof Error ? refreshErr.message : String(refreshErr)}`)
+        }
+      }
       secureStorage.remove(TOKEN_KEY)
+      secureStorage.remove(REFRESH_TOKEN_KEY)
       secureStorage.remove('user')
       // Redirect to login if not already there
       if (window.location.pathname !== '/login') {

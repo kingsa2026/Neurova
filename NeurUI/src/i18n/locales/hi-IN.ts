@@ -1763,6 +1763,7 @@ export default {
     governancePhase3: '3 — शर्तित स्वचालित (मध्यम जोखिम स्वतः)',
     governancePhase4: '4 — पूर्ण स्वचालित (सब स्वतः लागू)',
     governanceConversationRules: 'बातचीत नियम निष्कर्षण (प्रति चरण 1 LLM कॉल)',
+    notLoadedSaveBlocked: 'सेटिंग्स अभी लोड नहीं हुई हैं; सर्वर कॉन्फ़िगरेशन को डिफ़ॉल्ट मानों से अधिलेखित होने से बचाने के लिए सहेजना अवरुद्ध किया गया है',
     debugMode: 'डीबग मोड',
     logLevel: 'लॉग स्तर',
     debug: 'डीबग',

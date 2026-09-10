@@ -1763,6 +1763,7 @@ export default {
     governancePhase3: '3 — 条件付き自動（中リスクを自動適用）',
     governancePhase4: '4 — 完全自動（すべて自動適用）',
     governanceConversationRules: '会話ルール抽出（ターンごとに LLM 呼び出し 1 回）',
+    notLoadedSaveBlocked: '設定がまだ読み込まれていないため、保存をブロックしました（既定値によるサーバー設定の上書きを防止）',
     debugMode: 'デバッグモード',
     logLevel: 'ログレベル',
     debug: 'デバッグ',

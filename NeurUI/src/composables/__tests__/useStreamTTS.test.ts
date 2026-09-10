@@ -146,6 +146,20 @@ describe('StreamTTSRunner', () => {
     }
   })
 
+  it('keeps unconsumed tail when sentences are newline-separated (F-04 回归)', async () => {
+    // 修复前：trim 后的句子拼接与原 buffer 失配（句间 \n\n），indexOf=-1 →
+    // 整个 buffer（含未分句的尾巴）被清空 → 尾部文本静默丢弃。
+    const runner = new StreamTTSRunner(hooks)
+    runner.begin()
+    runner.feed('第一句话足够长可以送去合成了。\n\n第二句话足够长也可以送去合成了。\n\n这是没有句号的尾巴文本')
+    runner.end()
+    await vi.waitFor(() => expect(hooks.onDone).toHaveBeenCalled())
+    const calls = hooks.synthesize.mock.calls.map((c) => c[0])
+    expect(calls.some((txt) => txt.includes('第一句'))).toBe(true)
+    // 尾巴必须被 force 出句送合成（修复前被误清空丢失）
+    expect(calls.some((txt) => txt.includes('尾巴文本'))).toBe(true)
+  })
+
   it('abort keeps already-synthesized urls and stops new synthesis', async () => {
     let releaseFirst: (() => void) | null = null
     hooks.synthesize.mockImplementationOnce(
