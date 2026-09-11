@@ -32,7 +32,7 @@ try:
 except ImportError:
     REQUESTS_AVAILABLE = False
 
-from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+from neurova.channels import ChannelAdapter, ChannelConfig, ContentType, MessageChannel, UnifiedMessage
 
 
 class SIPAdapter(ChannelAdapter):
@@ -53,6 +53,9 @@ class SIPAdapter(ChannelAdapter):
         return MessageChannel.SIP
 
     def __init__(self):
+        # Gen2 契约：走基类构造获得 config/_connected/_event_callback。
+        # 此前未调 super().__init__，channel_type/health_check/_emit_event 恒 AttributeError
+        super().__init__(ChannelConfig(channel_type="sip", enabled=False))
         # 基础配置
         self.bot_prefix = "@bot"
         self.show_tool_messages = True
@@ -186,6 +189,25 @@ class SIPAdapter(ChannelAdapter):
         self._initialized = True
         return True
 
+    async def connect(self) -> bool:
+        """Gen2 契约：SIP 协议栈未实现——配置校验后诚实失败（禁假成功）。
+
+        此前缺 connect 实现，抽象类无法实例化；这里只做真实可行的配置校验，
+        绝不虚构 SIP 能力：启用/测试 sip 渠道如实返回不可用。
+        """
+        if not self.sip_username or not self.sip_password:
+            logging.error("SIP connect 失败: 用户名和密码未配置")
+            return False
+        logging.warning("SIP 通道未实现")
+        return False
+
+    async def disconnect(self):
+        """Gen2 契约：清理通话会话与客户端引用"""
+        self._call_session = None
+        self._voip_client = None
+        self._connected = False
+        logging.info("SIP adapter disconnected")
+
     def text_to_speech(self, text: str) -> Optional[bytes]:
         """
         文本转语音 (TTS)
@@ -291,26 +313,20 @@ class SIPAdapter(ChannelAdapter):
             logging.error("STT 转换异常: %s", e)
             return None
 
-    def send_message(self, message: UnifiedMessage) -> bool:
+    async def send_message(
+        self,
+        chat_id: str,
+        content: str,
+        message_type: str = "text",
+        **kwargs,
+    ) -> Optional[str]:
+        """Gen2 契约：SIP 消息发送未实现，诚实返回 None（禁假成功）。
+
+        原同步实现依赖活跃通话会话（dev 路径永不可达）或无条件 return True 的
+        _send_production_audio（假成功）——两者均无真实通路，如实报未实现。
         """
-        发送 SIP 语音消息
-
-        将文本转换为语音并发送
-        """
-        if not self._initialized:
-            logging.error("SIP 未初始化")
-            return False
-
-        # 先将文本转换为语音
-        audio_data = self.text_to_speech(message.content)
-        if not audio_data:
-            logging.error("TTS 转换失败")
-            return False
-
-        if self.sip_mode == "dev" and self._voip_client:
-            return self._send_dev_audio(audio_data, message.chat_id)
-        else:
-            return self._send_production_audio(audio_data, message.chat_id)
+        logging.warning("SIP 通道未实现")
+        return None
 
     def _send_dev_audio(self, audio_data: bytes, chat_id: str) -> bool:
         """Dev 模式发送音频"""
@@ -335,62 +351,6 @@ class SIPAdapter(ChannelAdapter):
         # Production 模式下，音频通过 SIP 服务器转发
         logging.info("[SIP Production] 发送音频到 %s", chat_id)
         return True
-
-    def receive_message(self) -> Optional[UnifiedMessage]:
-        """接收 SIP 语音消息"""
-        if self.sip_mode == "dev" and self._voip_client:
-            return self._receive_dev_message()
-        else:
-            return self._receive_production_message()
-
-    def _receive_dev_message(self) -> Optional[UnifiedMessage]:
-        """Dev 模式接收消息"""
-        if not PYVOIP_AVAILABLE:
-            return None
-
-        try:
-            # 等待来电
-            call = self._voip_client.wait_for_call(timeout=1)
-            if call:
-                # 接受通话
-                call.answer()
-                self._call_session = call
-
-                # 接收 RTP 音频数据
-                audio_data = call.receive_rtp_audio()
-                if audio_data:
-                    # 将音频转换为文本
-                    text = self.speech_to_text(audio_data)
-                    if text:
-                        return UnifiedMessage(
-                            message_id=str(int(time.time())),
-                            channel=MessageChannel.SIP,
-                            chat_id=call.caller_id,
-                            user_id=call.caller_id,
-                            agent_id="",
-                            content=text,
-                            content_type=ContentType.TEXT,
-                            timestamp=datetime.now(),
-                            global_user_id=f"sip:{call.caller_id}",
-                            session_id=f"sip:{call.call_id}",
-                            raw_message={"caller_id": call.caller_id, "call_id": call.call_id},
-                            metadata={
-                                "caller_id": call.caller_id,
-                                "call_id": call.call_id,
-                                "sip_mode": "dev",
-                            },
-                        )
-        except pyvoip.NoCallError:
-            logging.debug("没有当前来电")
-        except Exception as e:
-            logging.error("接收 SIP 消息异常: %s", e)
-
-        return None
-
-    def _receive_production_message(self) -> Optional[UnifiedMessage]:
-        """Production 模式接收消息 (通过 Webhook)"""
-        logging.warning("SIP Production 模式请使用 Webhook 接收消息")
-        return None
 
     def parse_raw_message(self, raw_data: Any) -> UnifiedMessage:
         """
