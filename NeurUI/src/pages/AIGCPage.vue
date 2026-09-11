@@ -300,7 +300,12 @@ async function generateImage() {
       model: imageModel.value,
     })
     const data = res?.data ?? res
-    const urls: string[] = data?.urls ?? data?.images ?? (data?.url ? [data.url] : [])
+    // B2-c 契约：/generation/image 返回 images:[{url, path}]（本地化产物），
+    // 兼容旧字符串数组形态
+    const rawImages: any[] = data?.images ?? data?.urls ?? (data?.url ? [data.url] : [])
+    const urls: string[] = rawImages
+      .map((i: any) => (typeof i === 'string' ? i : i?.url))
+      .filter(Boolean)
     for (const url of urls) {
       imageResults.value.unshift({ url, prompt: imagePrompt.value })
     }
