@@ -175,7 +175,13 @@ class KnowledgeVectorIndex:
                     texts.append((title + "\n" + content) if title else content)
                 try:
                     if hasattr(engine, "encode_batch"):
-                        vectors = engine.encode_batch(texts)
+                        batch = engine.encode_batch(texts)
+                        # 真引擎（ONNXEmbeddingEngine）契约：encode_batch →
+                        # EmbeddingResult（.vectors 才是向量列表）；注入引擎
+                        # 可直接返回 list。两者之外退回逐条 encode。
+                        vectors = getattr(batch, "vectors", batch)
+                        if not isinstance(vectors, list):
+                            vectors = [engine.encode(t) for t in texts]
                     else:
                         vectors = [engine.encode(t) for t in texts]
                 except Exception as e:  # noqa: BLE001
