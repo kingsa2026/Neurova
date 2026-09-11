@@ -70,6 +70,7 @@
   let stageIdx = -1
   let done = false
   let failCount = 0
+  let logOffset = 0  // P2-17：消费返回的 p.offset 增量拉取，不再每轮从 0 全量重读
 
   const STAGES = [
     [20, '正在初始化数据库',    /Database tables initialized|sqlite|SQLite/i],
@@ -118,7 +119,8 @@
       return
     }
     try {
-      const p = await t('boot_tail', { logOffset: 0 })
+      const p = await t('boot_tail', { logOffset })
+      logOffset = (typeof p.offset === 'number') ? p.offset : logOffset  // P2-17
       failCount = 0
       for (const line of p.lines || []) {
         appendLog(line)
