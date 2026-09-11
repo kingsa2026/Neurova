@@ -91,7 +91,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listFiles, uploadFile, getFileContent, getFileVersions, deleteFile as deleteFileApi } from '@/api/modules/files'
+import { listFiles, uploadFile, getFileContent, getFileVersions, deleteFile as deleteFileApi, downloadFile as downloadFileBlob } from '@/api/modules/files'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
@@ -186,11 +186,27 @@ const previewFileFn = async (record: any) => {
   showPreview.value = true
 }
 
-const downloadFile = (record: any) => {
-  const a = document.createElement('a')
-  a.href = record.url || `/api/v1/files/${record.id}/download`
-  a.download = record.name
-  a.click()
+const downloadFile = async (record: any) => {
+  try {
+    if (record.url) {
+      // 外部/既有 URL（后端 FileInfo 无 url 字段，此分支为兼容保留）
+      const a = document.createElement('a')
+      a.href = record.url
+      a.download = record.name
+      a.click()
+      return
+    }
+    // download 端点有 JWT 鉴权，直链必 401 → Bearer 取 blob 触发保存
+    const blob = (await downloadFileBlob(record.id)) as unknown as Blob
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = record.name
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    message.error(t('common.error'))
+  }
 }
 
 const showHistory = async (record: any) => {

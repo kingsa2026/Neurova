@@ -646,3 +646,30 @@ const started: PlanSession = res.data.data.session   // res.data={session} → r
 1. **`test_auth_system::TestTokenBlacklist`（台账项）**：101cfb4e 将黑名单改 token→exp Dict（S-21）后遗留测试仍按 set 契约写（`.add/.discard`）→ 按新契约重写（登记/命中/过期惰性清理/移除），绿。
 2. **`test_files_api_security_p0` 隔离挂起（台账项）**：根因 = `_make_upload_file` 的 `AsyncMock(return_value=content)` 永不返回 EOF，`upload_file` 分块循环死循环——mock 不忠实，非端点缺陷；改 `side_effect=[content, b""]` 忠实模拟一次内容 + EOF，挂起消除，5 绿。
 3. 修复后 `tests/unit/api/` 全目录 **4 failed / 1213 passed**，4 失败恰为台账预存集（agent_package×2 / execution_events / mobile_pairing），较此前净减 2 项台账。
+
+### 9.7.5 第三轮复核与前端匹配检查（同日收口）
+
+**后端复核结论（四提交 9e6d292b/3ce8a30f/d04e8aa0/0eede9d8）**：
+
+- 提交均在史且关键文件未被并行会话再改动；global_auth 边界自检通过：OPTIONS 先于鉴权放行、WS scope 透传、查询串不参与路径匹配、服务令牌空值短路、shadow 取证按路径去重有界、纯 ASGI 实现对 SSE/流式安全（不经 BaseHTTPMiddleware）。
+- 已知边界（记录不修）：白名单精确匹配不含尾斜杠变体（`/api/v1/auth/login/` 在 enforce 下 401 而非 307 重定向——前端无尾斜杠调用，enforce 迁移时留意）；根路径 `/` 非白名单（无业务路由）。
+- S-07 残留扫描：pyproject / scripts / config / 安装器打包面零残留。
+- 后端快速套件 81 绿（middleware 17 + files_api_security_p0 5 + auth_system 24 + m14 3 + auth 目录 32）。
+
+**前端匹配检查：发现并修复 5 处现存 UI 断点**（与 enforce 无关，当日即坏）：
+
+- 根因：内容端点 `/files/{id}/download`、`/files/{id}/preview`、`/artifacts/{id}/content` 均有 JWT+属主鉴权（dd5b00be 起），而 `<img>/<audio>/<iframe>/<a download>` 无法携带 Authorization 头，前端直链消费必 401——预览空白/下载得到 401 JSON：
+  1. `AgentFilePage.vue` 图片/PDF 预览（previewUrl 直链）；
+  2. `AgentFilePage.vue` 下载（a.href 直链）；
+  3. `FilePage.vue` 下载（a.href 直链）；
+  4. dock `ImagePreviewPanel.vue`（img src 直链 + fetch 下载）；
+  5. dock `AudioPreviewPanel.vue`（audio src 直链）。
+- 修复：`utils/artifacts.ts` 新增统一助手 `fetchContentObjectUrl` / `artifactContentObjectUrl` / `fileContentObjectUrl`（axios Bearer → blob → object URL，调用方负责 revoke，对齐 useStreamTTS/downloadArtifact 既有正确范式）；删除死直链助手 `artifactContentUrl` / `filePreviewUrl`；5 处消费方全部迁移并补 object URL 生命周期回收；新增 3 防回归测试。
+- 前端 auth 链路与 S-08 白名单一一对应：login/register×3/refresh/setup-status/recover 全公开 ✓，me/logout 带鉴权符合设计 ✓，axios 全局 Bearer + 401 单飞刷新（F-05）✓。
+- SSE 无 EventSource 裸用（notifications/collaboration 均 fetch+ReadableStream 带 Bearer；console 的 getConsoleChatSSEUrl 无消费方）。
+- 回归：vue-tsc 零错误 + vitest 1263/1263 绿。
+
+**enforce 就绪度缺口清点（迁移前处理；默认 off 不受影响）**：
+
+- `/api/v1/generation/files` StaticFiles 挂载（B2-c）无端点鉴权——当前态任何知道文件名者可匿名读生成产物；enforce 下中间件会拦截，且前端零消费方（产物下载走 axios blob 的 downloadArtifact），迁移不产生 UI 断链；建议 enforce 前评估属主校验或签名 URL。
+- 文件/产物直链消费已在本轮全部清零（上述 5 处迁移完成）。
