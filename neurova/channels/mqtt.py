@@ -12,6 +12,7 @@ MQTT 消息渠道适配器
 pip install paho-mqtt
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -25,7 +26,14 @@ try:
 except ImportError:
     MQTT_AVAILABLE = False
 
-from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+from neurova.channels import (
+    ChannelAdapter,
+    ChannelConfig,
+    ChannelEventType,
+    ContentType,
+    MessageChannel,
+    UnifiedMessage,
+)
 
 
 class MQTTAdapter(ChannelAdapter):
@@ -45,6 +53,9 @@ class MQTTAdapter(ChannelAdapter):
         return MessageChannel.MQTT
 
     def __init__(self):
+        # Gen2 契约：走基类构造获得 config/_connected/_event_callback。
+        # 此前未调 super().__init__，channel_type/health_check/_emit_event 恒 AttributeError
+        super().__init__(ChannelConfig(channel_type="mqtt"))
         # 基础配置
         self.bot_prefix = "@bot"
         self.show_tool_messages = True
@@ -72,9 +83,10 @@ class MQTTAdapter(ChannelAdapter):
         # 内部状态
         self._initialized = False
         self._client = None
-        self._connected = False
         self._client_id = f"neurova_{int(time.time())}"
-        self._message_queue = []
+        # P1-7: paho 网络线程回调分发所需的主循环引用（feishu P0-4 同型），
+        # 在运行中事件循环的上下文里初始化连接时捕获
+        self._main_loop = None
 
     def authenticate(self, config: Dict[str, str]) -> bool:
         """
@@ -125,6 +137,22 @@ class MQTTAdapter(ChannelAdapter):
         self.tls_keyfile = config.get("tls_keyfile", "")
 
         return self._init_connection()
+
+    async def connect(self) -> bool:
+        """Gen2 契约：建立连接——走真实 paho 初始化路径（_init_connection）。
+
+        同步网络调用经 to_thread 下沉工作线程；paho-mqtt 未安装时诚实失败
+        （不复刻 authenticate 路径的"模拟初始化"假成功）。P1-7：_init_connection
+        在工作线程上无法捕获运行中事件循环，成功后在此补捕获，保证 paho
+        网络线程回调能 run_coroutine_threadsafe 调度回主 loop。
+        """
+        if not MQTT_AVAILABLE:
+            logging.error("MQTT connect 失败: paho-mqtt 未安装（安装命令: pip install paho-mqtt）")
+            return False
+        ok = await asyncio.to_thread(self._init_connection)
+        if ok:
+            self._main_loop = asyncio.get_running_loop()
+        return ok
 
     def _init_connection(self) -> bool:
         """初始化 MQTT 连接"""
@@ -187,7 +215,7 @@ class MQTTAdapter(ChannelAdapter):
             # BUG-18: 连接失败清理 + 订阅重试
             if not self._client.is_connected():
                 logging.warning(f"MQTT 连接超时，清理资源并准备重试")
-                self.disconnect()
+                self._close_client()
                 return False
 
             logging.info("MQTT 连接初始化成功 - 服务器: %s:%s", self.host, self.port)
@@ -228,9 +256,24 @@ class MQTTAdapter(ChannelAdapter):
             # 解析消息
             unified_msg = self._parse_mqtt_message(msg, payload)
             if unified_msg:
-                self._message_queue.append(unified_msg)
+                # P1-7: 经统一事件分发（对照 feishu/dingtalk 模式）。
+                # 原 _message_queue 无界堆积且 receive_message 全仓零调用
+                self._schedule_emit(unified_msg)
         except Exception as e:
             logging.error("MQTT 消息处理异常: %s", e)
+
+    def _schedule_emit(self, message: UnifiedMessage) -> None:
+        """P1-7: paho 网络线程回调 → 主事件循环统一分发（feishu P0-4 同型）。
+
+        无可用运行中循环时丢弃并告警——死队列删除后不允许退回无界堆积。
+        """
+        if self._main_loop is None or not self._main_loop.is_running():
+            logging.warning("MQTT 无可用事件循环，丢弃入站消息（P1-7）")
+            return
+        asyncio.run_coroutine_threadsafe(
+            self._emit_event(ChannelEventType.MESSAGE_RECEIVED, message),
+            self._main_loop,
+        )
 
     def _on_subscribe(self, client, userdata, mid, granted_qos):
         """订阅成功回调"""
@@ -337,12 +380,6 @@ class MQTTAdapter(ChannelAdapter):
             logging.error("MQTT 消息发送异常: %s", e)
             return False
 
-    def receive_message(self) -> Optional[UnifiedMessage]:
-        """接收 MQTT 消息"""
-        if self._message_queue:
-            return self._message_queue.pop(0)
-        return None
-
     def parse_raw_message(self, raw_data: Any) -> UnifiedMessage:
         """
         解析 MQTT 原始消息
@@ -413,12 +450,22 @@ class MQTTAdapter(ChannelAdapter):
         if "tls_keyfile" in config_updates:
             self.tls_keyfile = config_updates["tls_keyfile"]
 
-    def disconnect(self):
-        """断开 MQTT 连接"""
+    def _close_client(self):
+        """释放 paho 客户端（同步清理路径，供 _init_connection 失败分支复用）"""
         if self._client:
             self._client.loop_stop()
             self._client.disconnect()
+            self._client = None
+            self._connected = False
             logging.info("MQTT 连接已断开")
+
+    async def disconnect(self):
+        """断开 MQTT 连接
+
+        P1-8: 原同步 def 覆写基类 async 抽象（base.py:161），
+        manager.stop/restart 的 gather 对其 await 必然异常——改 async 对齐契约。
+        """
+        self._close_client()
 
 
 def create_mqtt_adapter(

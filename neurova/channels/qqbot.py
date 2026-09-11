@@ -13,6 +13,7 @@ API 文档: https://12.onebot.dev/
 5. 白名单和提及控制
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -39,6 +40,7 @@ except ImportError:
     logging.warning("httpx 库未安装，部分AI生成功能可能不可用")
 
 from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+from neurova.channels.base import ChannelConfig
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,10 @@ class QQBotAdapter(ChannelAdapter):
         return MessageChannel.QQBOT
 
     def __init__(self):
+        # Gen2 契约：走基类构造获得 config/_connected/_event_callback。
+        # 此前未调 super().__init__，channel_type/health_check/is_connected/_emit_event
+        # 恒 AttributeError（渠道 test_connection 的 health_check 必炸）
+        super().__init__(ChannelConfig(channel_type="qqbot", enabled=False))
         # 基础认证信息
         self.access_token = ""
 
@@ -174,6 +180,26 @@ class QQBotAdapter(ChannelAdapter):
         if not self._initialized:
             return self._verify_connection()
         return True
+
+    async def connect(self) -> bool:
+        """Gen2 契约：建立连接——走真实 _verify_connection（OneBot HTTP API）校验路径。
+
+        access_token 未配置（authenticate 未通过）时诚实失败；HTTP 往返经
+        to_thread 下沉工作线程，不阻塞事件循环。
+        """
+        if not self.access_token:
+            logging.error("QQ Bot connect 失败: access_token 未配置（先 authenticate）")
+            return False
+        ok = await asyncio.to_thread(self._verify_connection)
+        self._connected = ok
+        return ok
+
+    async def disconnect(self):
+        """Gen2 契约：断开连接并清理状态"""
+        self._connected = False
+        self._initialized = False
+        self._ws_connection = None
+        logging.info("QQ Bot adapter disconnected")
 
     def _api_request(self, method: str, endpoint: str, **kwargs) -> Dict[str, Any]:
         """
@@ -297,11 +323,6 @@ class QQBotAdapter(ChannelAdapter):
             return content
 
         return content
-
-    def receive_message(self) -> Optional[UnifiedMessage]:
-        """接收消息 (通过WebSocket事件)"""
-        logging.warning("QQ Bot消息接收请使用 WebSocket 事件模式")
-        return None
 
     def parse_raw_message(self, raw_data: Any) -> UnifiedMessage:
         """
@@ -1132,7 +1153,8 @@ async def _download_url(self, url: str, timeout: int = 60) -> Optional[bytes]:
             return None
     elif REQUESTS_AVAILABLE:
         try:
-            response = requests.get(url, timeout=timeout)
+            # P2-12: 回退分支为同步 requests，直调阻塞事件循环至 60s
+            response = await asyncio.to_thread(requests.get, url, timeout=timeout)
             if response.status_code == 200:
                 return response.content
             else:
