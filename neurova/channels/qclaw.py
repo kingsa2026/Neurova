@@ -222,18 +222,6 @@ class QClawAdapter(ChannelAdapter):
             logger.error("消息发送失败: %s", result.get('error'))
             return False
 
-    def receive_message(self) -> Optional[UnifiedMessage]:
-        """
-        接收消息（Webhook 或轮询）
-
-        返回:
-            统一消息对象，无消息返回 None
-        """
-        # QClaw 使用 Webhook 推送消息，所以这里不需要主动轮询
-        # 消息通过 /api/v1/qclaw/message/callback 接口接收
-        logger.debug("QClaw 使用 Webhook 接收消息，无需轮询")
-        return None
-
     def parse_raw_message(self, raw_data: Any) -> UnifiedMessage:
         """
         解析原始消息为统一消息

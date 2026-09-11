@@ -4,12 +4,13 @@ Discord 消息渠道适配器
 API 文档: https://discord.com/developers/docs/intro
 """
 
+import asyncio
 import json
 import logging
 import threading
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 try:
     import requests
@@ -183,6 +184,28 @@ class DiscordAdapter(ChannelAdapter):
                     return self._verify_token()
         return True
 
+    async def connect(self) -> bool:
+        """Gen2 契约：建立连接——走真实 _verify_token 网关校验路径。
+
+        bot_token 未配置（authenticate 未通过）时诚实失败；HTTP 往返经
+        to_thread 下沉工作线程，不阻塞事件循环。
+        """
+        if not self.bot_token:
+            logging.error("Discord connect 失败: bot_token 未配置（先 authenticate）")
+            return False
+        ok = await asyncio.to_thread(self._verify_token)
+        self._connected = ok
+        return ok
+
+    async def disconnect(self):
+        """Gen2 契约：断开连接并清理会话资源"""
+        self._connected = False
+        self._initialized = False
+        if self.session is not None:
+            self.session.close()
+            self.session = None
+        logging.info("Discord adapter disconnected")
+
     def send_message(self, message: UnifiedMessage) -> bool:
         """发送Discord消息"""
         if not self._ensure_authenticated():
@@ -228,11 +251,6 @@ class DiscordAdapter(ChannelAdapter):
         except Exception as e:
             logging.error("Discord消息发送异常: %s", e)
             return False
-
-    def receive_message(self) -> Optional[UnifiedMessage]:
-        """接收消息 (需通过 Webhook 回调)"""
-        logging.warning("Discord消息接收请使用 Webhook 模式")
-        return None
 
     def parse_raw_message(self, raw_data: Any) -> UnifiedMessage:
         """
