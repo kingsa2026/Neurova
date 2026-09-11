@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from .token_estimator import EstimationStrategy, TokenEstimator
 
 # 批次 A：动态上下文信封（五段动态内容+分钟级时间迁出 system）
-from .envelope import compress_envelope, build_envelope, build_time_block
+from .envelope import compress_envelope, build_envelope, build_time_block, build_system_time_hint
 
 # BaseModule 可能不可用（当 neurova.core 只有 .pyc 文件时），提供降级方案
 try:
@@ -360,6 +360,9 @@ class UnifiedContextInjector(BaseModule):
             }
         )
 
+        # 批次 A 契约：system 消息字节级透传（动态内容一律走信封）。
+        # 时间感知的系统侧注入由 orchestrator 时间段（含日级 hint）负责；
+        # 注入器级能力保留在 _build_system_prompt（直连构建方使用，带去重守卫）。
         system_content = system_prompt
 
         system_tokens = self._count_tokens(system_content)
@@ -428,6 +431,29 @@ class UnifiedContextInjector(BaseModule):
         """信封 <time> 块（批次 A）：委托模块级 build_time_block（单源，
         orchestrator pool 主链共用）。"""
         return build_time_block()
+
+    def _build_system_prompt(self, base_prompt: str = "") -> str:
+        """组装 system 提示：基础提示 + 日级稳定时间感知块（缺失时补齐）。
+
+        时间块契约（延续 F1/T-1 既有约束）：
+        - 只含日期精度（无 时:分）——本段位于 system 固定前缀，分钟级
+          时刻会使前缀缓存命中率归零；分钟级时间由信封 <time> 块挂在
+          末条 user 消息（build_time_block）。
+        - hint（季节/临近节日）为日级粒度，随日期稳定，经
+          envelope.build_system_time_hint 单源取用。
+        - base 已含 `## 当前时间` 段（主链由 orchestrator
+          _build_current_time_section 注入）时原样返回，避免双段。
+        """
+        base = str(base_prompt or "")
+        if "## 当前时间" in base:
+            return base
+        hint = build_system_time_hint()
+        weekdays_zh = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
+        now = dt.datetime.now()
+        lines = [f"当前日期:{now.year}年{now.month}月{now.day}日 {weekdays_zh[now.weekday()]}"]
+        if hint:
+            lines.append(str(hint))
+        return base + "\n\n## 当前时间\n" + "\n".join(lines)
 
     def _build_reflection_context(self) -> str:
         """构建反思日志上下文"""
