@@ -44,6 +44,7 @@ except ImportError:
     ED25519_AVAILABLE = False
 
 from neurova.channels import ChannelAdapter, ContentType, MessageChannel, UnifiedMessage
+from neurova.channels.base import ChannelConfig
 
 # access_token 换取接口（官方规范，Bot {appid}.{token} 头已废弃）
 AUTH_TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken"
@@ -72,6 +73,10 @@ class QQAdapter(ChannelAdapter):
         return MessageChannel.QQ
 
     def __init__(self):
+        # Gen2 契约：走基类构造获得 config/_connected/_event_callback。
+        # 此前未调 super().__init__，channel_type/health_check/is_connected/_emit_event
+        # 恒 AttributeError（渠道 test_connection 的 health_check 必炸）
+        super().__init__(ChannelConfig(channel_type="qq", enabled=False))
         # 基础认证信息
         self.app_id = ""
         self.token = ""
@@ -330,11 +335,6 @@ class QQAdapter(ChannelAdapter):
             payload["msg_id"] = message.message_id  # 被动回复标记（群 5 分钟/C2C 60 分钟有效）
             payload["msg_seq"] = int(metadata.get("msg_seq", 1))  # 同 msg_id 去重序号
         return payload
-
-    def receive_message(self) -> Optional[UnifiedMessage]:
-        """接收消息 (需通过 Webhook 回调)"""
-        logging.warning("QQ频道消息接收请使用 Webhook 模式")
-        return None
 
     def parse_raw_message(self, raw_data: Any) -> UnifiedMessage:
         """

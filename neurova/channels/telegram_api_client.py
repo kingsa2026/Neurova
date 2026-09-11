@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from neurova.core.logger import get_logger
 from typing import Any, Dict
 
@@ -51,7 +53,8 @@ class TelegramAPIMixin:
             pass
 
         try:
-            response = requests.get(url, timeout=timeout)
+            # P2-12: 回退分支为同步 requests，直调阻塞事件循环至 60s
+            response = await asyncio.to_thread(requests.get, url, timeout=timeout)
             if response.status_code == 200:
                 return response.content
             logger.error("下载失败 HTTP %s: %s", response.status_code, url)

@@ -21,7 +21,7 @@ from __future__ import annotations
 from neurova.core.logger import get_logger
 from typing import Any, Dict, List, Optional
 
-from neurova.channels.base import ChannelAdapter, MessageChannel
+from neurova.channels.base import ChannelAdapter, ChannelConfig, MessageChannel
 from neurova.channels.models import ContentType, UnifiedMessage
 
 from neurova.channels.wechat_auth import WeChatAuthMixin
@@ -95,6 +95,14 @@ class WeChatAdapter(
         return ""
 
     def __init__(self):
+        # RES-P0-2 顺带根修：本类未走基类 __init__，缺基类契约三件
+        # （config/_connected/_event_callback），channel_type 属性、
+        # health_check、is_connected、_emit_event 一律 AttributeError，
+        # 渠道测试连接对 wechat 恒失败。
+        self.config = ChannelConfig(channel_type="wechat", enabled=False)
+        self._connected = False
+        self._event_callback = None
+
         # 模式选择: wecom / ilink / official
         self.mode = "wecom"
 

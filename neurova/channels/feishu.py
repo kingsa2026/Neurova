@@ -272,7 +272,9 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
 
             request = CreateMessageRequest.builder().receive_id_type(receive_id_type).request_body(body).build()
 
-            response = self._client.im.v1.message.create(request)
+            # P1-6: lark 默认同步 Client（requests 实现），直调会阻塞事件循环
+            # 一次 HTTPS 往返——下沉到工作线程执行
+            response = await asyncio.to_thread(self._client.im.v1.message.create, request)
 
             if response.success():
                 msg_id = response.data.message_id if response.data else None

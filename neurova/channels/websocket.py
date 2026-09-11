@@ -28,7 +28,14 @@ try:
 except ImportError:
     WEBSOCKETS_AVAILABLE = False
 
-from neurova.channels import ChannelAdapter, ChannelConfig, ContentType, MessageChannel, UnifiedMessage
+from neurova.channels import (
+    ChannelAdapter,
+    ChannelConfig,
+    ChannelEventType,
+    ContentType,
+    MessageChannel,
+    UnifiedMessage,
+)
 
 
 class WebSocketAdapter(ChannelAdapter):
@@ -94,9 +101,7 @@ class WebSocketAdapter(ChannelAdapter):
         self._ws_connection = None
         self._connected = False
         self._receive_task = None
-        self._message_queue: List[UnifiedMessage] = []
         self._client_id = f"ws_{int(time.time())}"
-        self._event_loop = None
 
     def authenticate(self, config: Dict[str, str]) -> bool:
         """
@@ -174,7 +179,9 @@ class WebSocketAdapter(ChannelAdapter):
             logging.error("WebSocket 认证失败: ws_url 不能为空")
             return False
 
-        return self._init_connection()
+        # P1-8 同族（Gen1 sync 残留清理）：authenticate 不再建连，连接职责移交 async connect
+        self._initialized = True
+        return True
 
     def _get_auth_headers(self) -> Dict[str, str]:
         """获取认证 Headers"""
@@ -192,29 +199,25 @@ class WebSocketAdapter(ChannelAdapter):
 
         return headers
 
-    def _init_connection(self) -> bool:
-        """初始化 WebSocket 连接"""
+    async def connect(self) -> bool:
+        """Gen2 契约：建立连接——复用真实 websockets 连接路径（_async_init_connection）。
+
+        ws_url 未配置或 websockets 未安装时诚实失败；连接异常如实返回 False
+        （原 Gen1 sync _init_connection 的"模拟初始化/失败仍 return True"假成功一并消灭）。
+        """
+        if not self.ws_url:
+            logging.error("WebSocket connect 失败: ws_url 未配置（先 authenticate 配置）")
+            return False
         if not WEBSOCKETS_AVAILABLE:
-            logging.warning("websockets 未安装，WebSocket 模式不可用")
-            logging.info("安装命令: pip install websockets")
-            self._initialized = True  # 模拟初始化
-            return True
-
-        # 获取事件循环
+            logging.warning("websockets 未安装，WebSocket 模式不可用（安装命令: pip install websockets）")
+            return False
         try:
-            self._event_loop = asyncio.get_event_loop()
-        except RuntimeError:
-            self._event_loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self._event_loop)
-
-        # 异步初始化连接
-        try:
-            self._event_loop.run_until_complete(self._async_init_connection())
-            return True
+            await self._async_init_connection()
+            return self._connected
         except Exception as e:
             logging.error("WebSocket 连接初始化失败: %s", e)
-            self._initialized = True  # 允许继续，连接可以后续重试
-            return True
+            self._connected = False
+            return False
 
     async def _async_init_connection(self):
         """异步初始化 WebSocket 连接"""
@@ -260,7 +263,9 @@ class WebSocketAdapter(ChannelAdapter):
                 try:
                     unified_msg = self._parse_websocket_message(message)
                     if unified_msg:
-                        self._message_queue.append(unified_msg)
+                        # P1-7: 直接走统一事件分发（对照 feishu/dingtalk 模式）。
+                        # 原 _message_queue 无界堆积且 receive_message 全仓零调用
+                        await self._emit_event(ChannelEventType.MESSAGE_RECEIVED, unified_msg)
                 except Exception as e:
                     logging.error("WebSocket 消息解析异常: %s", e)
         except websockets.exceptions.ConnectionClosed as e:
@@ -370,8 +375,13 @@ class WebSocketAdapter(ChannelAdapter):
                 },
             )
 
-    def send_message(self, message: UnifiedMessage) -> bool:
-        """发送 WebSocket 消息"""
+    async def send_message(self, message: UnifiedMessage) -> bool:
+        """发送 WebSocket 消息
+
+        P1-8 同族：原 sync 实现在捕获 loop 上 run_until_complete（运行中循环上
+        必抛 RuntimeError）——基类 send_message 契约为 async（base.py:166），改 async
+        直接 await 连接发送。
+        """
         if not self._initialized or not self._connected:
             logging.error("WebSocket 未连接")
             return False
@@ -399,17 +409,11 @@ class WebSocketAdapter(ChannelAdapter):
                 payload = message.content
 
             # 异步发送消息
-            self._event_loop.run_until_complete(self._ws_connection.send(payload))
+            await self._ws_connection.send(payload)
             return True
         except Exception as e:
             logging.error("WebSocket 消息发送异常: %s", e)
             return False
-
-    def receive_message(self) -> Optional[UnifiedMessage]:
-        """接收 WebSocket 消息"""
-        if self._message_queue:
-            return self._message_queue.pop(0)
-        return None
 
     def parse_raw_message(self, raw_data: Any) -> UnifiedMessage:
         """解析 WebSocket 原始消息"""
@@ -469,12 +473,26 @@ class WebSocketAdapter(ChannelAdapter):
         if "user_id_field" in config_updates:
             self.user_id_field = config_updates["user_id_field"]
 
-    def disconnect(self):
-        """断开 WebSocket 连接"""
+    async def disconnect(self):
+        """断开 WebSocket 连接
+
+        P1-8: 原同步 def 覆写基类 async 抽象（base.py:161），内部
+        run_until_complete 在运行中事件循环上必抛 RuntimeError，
+        manager.stop/restart 中断且 _receive_task/_reconnect_task 永不取消。
+        现改为 await 关闭连接并 cancel 两个后台任务（含收尸）。
+        """
+        tasks = [t for t in (self._receive_task, self._reconnect_task) if t is not None]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._receive_task = None
+        self._reconnect_task = None
         if self._ws_connection:
-            self._event_loop.run_until_complete(self._ws_connection.close())
-            self._connected = False
-            logging.info("WebSocket 连接已断开")
+            await self._ws_connection.close()
+            self._ws_connection = None
+        self._connected = False
+        logging.info("WebSocket 连接已断开")
 
 
 def create_websocket_adapter(ws_url: str = "", auth_type: str = "none", auth_token: str = "") -> WebSocketAdapter:
