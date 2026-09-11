@@ -42,6 +42,10 @@ class FakeSessionRepo:
             return [s for s in self._sessions if s.get("agent_id") == agent_id]
         return self._sessions
 
+    def count_sessions(self, agent_id: str = "", user_id: str = "") -> int:
+        # 接口扩展同步：SessionRepository 新增 count_sessions 后桩须忠实实现
+        return len(self.list_sessions(agent_id=agent_id, user_id=user_id))
+
 
 class FakeAgent:
     def __init__(self, name="Nova", status="active"):
