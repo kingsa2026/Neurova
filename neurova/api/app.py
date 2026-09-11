@@ -1104,11 +1104,12 @@ def create_app(
 
         # B2-c：生成产物静态目录（data/generations → /api/v1/generation/files/*）
         try:
-            from pathlib import Path as _GenPath
-
             from starlette.staticfiles import StaticFiles as _StaticFiles
 
-            _gen_dir = _GenPath("data/generations")
+            # P1-8：目录基准与 generation 端点同源（仓库根绝对路径），
+            # 防 CWD 漂移导致挂载点与落盘目录分裂
+            from neurova.api.endpoints.generation import GENERATION_OUTPUT_DIR as _gen_dir
+
             _gen_dir.mkdir(parents=True, exist_ok=True)
             app.mount(
                 "/api/v1/generation/files",
