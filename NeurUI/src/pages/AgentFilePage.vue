@@ -121,7 +121,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
-import { listFiles, uploadFile as uploadFileApi, getFileContent, updateFile, deleteFile } from '@/api/modules/files'
+import { listFiles, uploadFile as uploadFileApi, getFileContent, updateFile, deleteFile, downloadFile as downloadFileBlob } from '@/api/modules/files'
+import { fileContentObjectUrl } from '@/utils/artifacts'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassStatCard from '@/components/GlassStatCard.vue'
@@ -246,11 +247,17 @@ async function uploadFile(file: File) {
 
 async function previewFile(file: FileItem) {
   previewFileItem.value = file
+  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
   previewUrl.value = ''
   previewContent.value = ''
 
   if (isImage(file) || isPdf(file)) {
-    previewUrl.value = `/api/v1/files/${file.id}/download`
+    // download 端点有 JWT 鉴权，<img>/<iframe> 直链必 401 → Bearer 取 blob 转 object URL
+    try {
+      previewUrl.value = await fileContentObjectUrl(file.id)
+    } catch {
+      message.error(t('file.previewError'))
+    }
   } else if (isText(file)) {
     try {
       const res = await getFileContent(file.id)
@@ -264,10 +271,13 @@ async function previewFile(file: FileItem) {
 
 async function downloadFile(file: FileItem) {
   try {
+    const blob = (await downloadFileBlob(file.id)) as unknown as Blob
+    const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = `/api/v1/files/${file.id}/download`
+    a.href = url
     a.download = file.name
     a.click()
+    URL.revokeObjectURL(url)
   } catch {
     message.error(t('file.downloadError'))
   }
@@ -330,6 +340,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('dragover', onDragOver)
   document.removeEventListener('drop', onDrop)
+  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
 })
 </script>
 

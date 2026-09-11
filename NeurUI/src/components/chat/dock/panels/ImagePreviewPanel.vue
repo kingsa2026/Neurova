@@ -24,9 +24,9 @@
  * dock 图片预览：滚轮缩放 + 双击复位 + 下载。吸收原消息 Lightbox 职责
  * （lightbox 模态删除，统一入 dock）。
  */
-import { computed, ref, watch } from 'vue'
+import { ref, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { artifactContentUrl, filePreviewUrl } from '@/utils/artifacts'
+import { artifactContentObjectUrl, fileContentObjectUrl } from '@/utils/artifacts'
 import UiIcon from '@/components/UiIcon.vue'
 import type { DockTab } from '@/stores/rightDock'
 
@@ -35,12 +35,36 @@ const { t } = useI18n()
 
 const scale = ref(1)
 const error = ref('')
+const src = ref('')
 
-const src = computed(() => {
-  if (props.tab.data.url) return props.tab.data.url
-  if (props.tab.data.artifactId) return artifactContentUrl(props.tab.data.artifactId)
-  if (props.tab.data.fileId) return filePreviewUrl(props.tab.data.fileId)
-  return ''
+/** 内容端点有 JWT 鉴权，<img> 直链必 401 → 经 Bearer 取 blob 转 object URL */
+async function loadSrc(): Promise<void> {
+  if (src.value) {
+    URL.revokeObjectURL(src.value)
+    src.value = ''
+  }
+  error.value = ''
+  try {
+    if (props.tab.data.url) {
+      src.value = props.tab.data.url
+    } else if (props.tab.data.artifactId) {
+      src.value = await artifactContentObjectUrl(props.tab.data.artifactId)
+    } else if (props.tab.data.fileId) {
+      src.value = await fileContentObjectUrl(props.tab.data.fileId)
+    }
+  } catch {
+    error.value = 'load'
+  }
+}
+
+watch(
+  () => [props.tab.data.url, props.tab.data.artifactId, props.tab.data.fileId],
+  loadSrc,
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  if (src.value) URL.revokeObjectURL(src.value)
 })
 
 function onWheel(e: WheelEvent): void {

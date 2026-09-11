@@ -9,8 +9,11 @@
  * - 消息级产出物收集（2026-09-08 产出物卡片）：读形态过滤（与后端
  *   extract_tool_artifacts 同契约）/ artifactFromEvent / mergeMessageArtifacts 去重。
  */
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  fetchContentObjectUrl,
+  artifactContentObjectUrl,
+  fileContentObjectUrl,
   kindForFilename,
   parseToolResultArtifacts,
   shortHash,
@@ -122,5 +125,48 @@ describe('消息级产出物收集（产出物卡片契约）', () => {
     expect(artifactUiIcon('markdown')).toBe('fileText')
     expect(artifactUiIcon('html')).toBe('browser')
     expect(artifactUiIcon('mystery')).toBe('file')
+  })
+})
+
+// ─────── fetchContentObjectUrl（2026-09-11 直链 401 根治） ───────
+// 内容端点（/artifacts/{id}/content、/files/{id}/download）有 JWT+属主鉴权，
+// img/audio/iframe 直链必 401；助手必须经 axios(Bearer) 取 blob 转 object URL。
+import { api } from '@/api'
+
+vi.mock('@/api', () => ({
+  api: { get: vi.fn() },
+}))
+
+describe('fetchContentObjectUrl（Bearer-blob 助手）', () => {
+  beforeEach(() => {
+    vi.mocked(api.get).mockReset()
+    Object.defineProperty(URL, 'createObjectURL', {
+      value: vi.fn(() => 'blob:mock-1'),
+      writable: true,
+      configurable: true,
+    })
+  })
+
+  it('请求带 responseType blob 且透传端点路径，返回 object URL', async () => {
+    vi.mocked(api.get).mockResolvedValue(new Blob(['x']))
+    const url = await fetchContentObjectUrl('/files/f1/download')
+    expect(api.get).toHaveBeenCalledWith('/files/f1/download', { responseType: 'blob' })
+    expect(url).toBe('blob:mock-1')
+  })
+
+  it('artifactContentObjectUrl / fileContentObjectUrl 走各自鉴权端点（同源相对路径）', async () => {
+    vi.mocked(api.get).mockResolvedValue(new Blob(['x']))
+    await artifactContentObjectUrl('a1')
+    await fileContentObjectUrl('f2')
+    const paths = vi.mocked(api.get).mock.calls.map((c) => c[0])
+    expect(paths).toEqual(['/artifacts/a1/content', '/files/f2/download'])
+    for (const p of paths) {
+      expect(String(p).startsWith('/api/')).toBe(false) // axios 实例已带 /api/v1 baseURL，避免双前缀
+    }
+  })
+
+  it('端点失败时异常上抛（调用方进入错误态，不落地假 URL）', async () => {
+    vi.mocked(api.get).mockRejectedValue(new Error('401'))
+    await expect(fileContentObjectUrl('f3')).rejects.toThrow('401')
   })
 })

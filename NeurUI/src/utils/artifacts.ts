@@ -340,14 +340,25 @@ export async function fetchArtifactText(artifactId: string): Promise<string> {
   return typeof wrapped?.data === 'string' ? wrapped.data : String(data ?? '')
 }
 
-/** artifact 内容 URL（img/audio/iframe src 用） */
-export function artifactContentUrl(artifactId: string): string {
-  return `/api/v1/artifacts/${artifactId}/content`
+/**
+ * 经 axios(Bearer) 取内容转 object URL —— img/audio/iframe 无凭证直链的统一替代。
+ * 内容端点（/artifacts/{id}/content、/files/{id}/download）均有 JWT+属主鉴权，
+ * <img>/<audio>/<iframe>/<a download> 无法携带 Authorization 头，直链必 401；
+ * 必须经本助手转 blob object URL。调用方负责 URL.revokeObjectURL 释放。
+ */
+export async function fetchContentObjectUrl(apiPath: string): Promise<string> {
+  const blob = (await api.get(apiPath, { responseType: 'blob' })) as unknown as Blob
+  return URL.createObjectURL(blob)
 }
 
-/** 上传件内容 URL */
-export function filePreviewUrl(fileId: string): string {
-  return `/api/v1/files/${fileId}/preview`
+/** artifact 内容 object URL（img/audio/iframe src 用） */
+export async function artifactContentObjectUrl(artifactId: string): Promise<string> {
+  return fetchContentObjectUrl(`/artifacts/${artifactId}/content`)
+}
+
+/** 上传件内容 object URL（预览/下载共用 download 端点） */
+export async function fileContentObjectUrl(fileId: string): Promise<string> {
+  return fetchContentObjectUrl(`/files/${fileId}/download`)
 }
 
 /** B3-3（#7161 对齐）：产物直接下载（blob 触发浏览器保存；带 artifactId 的产物可用）。 */
