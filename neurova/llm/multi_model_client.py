@@ -904,7 +904,6 @@ class MultiModelLLMClient:
             yield _instream_error_dict(RuntimeError(f"模型限流: {e}"))
             return
 
-        _stream_ok = False
         try:
             start_time = time.time()
             # P1 修复: chat_stream 是同步生成器，无法 `async for`（TypeError）。
@@ -965,6 +964,12 @@ class MultiModelLLMClient:
                     await _silence_task
                 except BaseException:  # noqa: BLE001 — 取消收尾，遥测异常不外泄
                     pass
+                # RES-P0-1 根修：并发槽位随流式段收尾归一释放。本 finally 覆盖
+                # 成功/异常/消费方中断（GeneratorExit）/取消全部退出路径；
+                # except 分支的兜底 release 由 acquired 守卫防双释放。
+                if acquired:
+                    limiter.release(model_key)
+                    acquired = False
             duration = time.time() - start_time  # P2-4 补刀：原为丢弃结果的死语句
             client.increment_request(success=True)
             limiter.report_success(model_key)
@@ -1049,8 +1054,8 @@ class MultiModelLLMClient:
             except Exception:
                 pass
             finally:
-                # BUG AUDIT L-03: 统一收敛到此处单次释放（成功路径的重复 release 已移除）；
-                # acquired 守卫避免限流提前 return 路径误释放未持有的槽位。
+                # RES-P0-1：兜底释放，仅覆盖流式段开始前的异常；正常路径已在
+                # 流式段 finally 释放（acquired 已置 False，此处为 no-op）。
                 if acquired:
                     limiter.release(model_key)
             # OpenClaw 启发 P0-1 流内错误编码铁律：provider 调用一旦开始，
@@ -1059,8 +1064,6 @@ class MultiModelLLMClient:
             # （openai_loop._raise_for_error_dict / chat_pipeline）据此分类，
             # 不再靠 HTTP 语义字符串二次猜测。
             yield _instream_error_dict(e)
-        else:
-            _stream_ok = True
 
     def _next_failover_client(self, failed_model: Optional[str], excluded: Optional[set] = None) -> Optional[ModelClient]:
         """auto 失败切换：返回排除已失败模型后的下一候选（None=无候选）。
