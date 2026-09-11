@@ -749,7 +749,11 @@ class MultiModelLLMClient:
                         _completion = _est_client(getattr(result, "content", "") or "")
                         _estimated = True
 
-                get_usage_accounting().record(
+                # P2-6：任务级回填（record 返回本次 payload）——并发会话下
+                # last_call() 在请求任务内读到本调用而非其它请求的覆写值
+                from neurova.core.usage_accounting import set_task_last_call
+
+                set_task_last_call(get_usage_accounting().record(
                     model=client.model,
                     provider=client.provider.id,
                     prompt_tokens=_prompt or 0,
@@ -757,7 +761,7 @@ class MultiModelLLMClient:
                     estimated=_estimated,
                     cache_read_tokens=_cache_read,
                     cache_write_tokens=_cache_write,
-                )
+                ))
                 # 持久化历史：同一回 true usage 同时落 SQLite（重启不归零）。
                 # user_id 取请求级 ContextVar（chat_pipeline.execute 注入），
                 # 缺失记 anonymous —— 与内存记账同源不同命，失败静默。
@@ -992,7 +996,10 @@ class MultiModelLLMClient:
                     else:
                         _prompt = _prompt or 0
                         _completion = _completion or 0
-                get_usage_accounting().record(
+                # P2-6：任务级回填（同 chat 路径）
+                from neurova.core.usage_accounting import set_task_last_call
+
+                set_task_last_call(get_usage_accounting().record(
                     model=client.model or "unknown",
                     provider=client.provider.id,
                     prompt_tokens=_prompt or 0,
@@ -1000,7 +1007,7 @@ class MultiModelLLMClient:
                     estimated=_estimated,
                     cache_read_tokens=_cache_read,
                     cache_write_tokens=_cache_write,
-                )
+                ))
                 # 持久化历史（同 chat 路径）：user_id 取请求级 ContextVar，缺失记 anonymous
                 from neurova.core.identity_context import get_request_user_id
                 from neurova.core.usage_history import get_usage_history
