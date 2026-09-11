@@ -19,11 +19,15 @@ from __future__ import annotations
 
 from neurova.core.logger import get_logger
 import os
+import re
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 
@@ -103,10 +107,6 @@ _media_config: Dict[str, Any] = {
     "updated_at": time.time(),
 }
 
-# 模拟文件内容存储
-_file_contents: Dict[str, bytes] = {}
-
-
 # ---------------------------------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------------------------------
@@ -115,6 +115,17 @@ _file_contents: Dict[str, bytes] = {}
 def _generate_media_id() -> str:
     """生成媒体 ID"""
     return f"media-{uuid.uuid4().hex[:12]}"
+
+
+def _storage_root() -> Path:
+    """媒体存储根目录（磁盘内容源的基准路径，相对路径按 CWD 解析）。"""
+    return Path(os.path.abspath(_media_config.get("storage_path", "media_storage")))
+
+
+def _media_disk_path(media: Dict[str, Any]) -> Path:
+    """把元数据里的 storage_path 解析为磁盘绝对路径。"""
+    path = Path(media.get("storage_path") or "")
+    return path if path.is_absolute() else Path(os.path.abspath(path))
 
 
 def _get_mime_type(media_type: str, filename: str) -> str:
@@ -139,14 +150,18 @@ def _get_mime_type(media_type: str, filename: str) -> str:
     return mime_map.get(ext, f"{media_type}/octet-stream")
 
 
-def _get_media_manager():
-    """获取或创建 MediaManager 实例"""
-    try:
-        from neurova.media import MediaManager
+def _content_disposition(filename: Optional[str]) -> str:
+    """RFC 6266/5987 Content-Disposition（资源修复 #6, 台账 2026-09-11）：
 
-        return MediaManager.get_instance()
-    except Exception:
-        return None
+    filename= 用 ASCII 安全名（含引号/换行的名字一并回退，防响应头注入）；
+    非 ASCII 原始名经 filename*=UTF-8''<percent-encoded> 传递——旧实现把
+    原始名直写响应头，中文文件名下载头异常。
+    """
+    name = filename or "file"
+    if name.isascii() and not re.search(r'["\\\r\n]', name):
+        return f'attachment; filename="{name}"'
+    fallback = re.sub(r"[^A-Za-z0-9._-]", "_", name)[:80] or "download"
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(name, safe='')}"
 
 
 # ---------------------------------------------------------------------------
@@ -171,20 +186,23 @@ async def save_media(
             detail=f"不支持的媒体类型: {media_type}。允许的类型: {_media_config.get('allowed_types', [])}",
         )
 
-    # 检查文件大小
-    content = await file.read()
+    # 检查文件大小：分块读累计校验，超限立即 413 并停止读取。
+    # P1-2: 原实现 await file.read() 先全量读入内存再校验，单请求可打进任意大内存。
     max_size = _media_config.get("max_file_size", 50 * 1024 * 1024)
-    if len(content) > max_size:
-        raise HTTPException(status_code=413, detail=f"文件大小超过限制 ({len(content)} > {max_size} bytes)")
 
     media_id = _generate_media_id()
     filename = file.filename or f"unnamed_{media_id}"
     mime_type = _get_mime_type(media_type, filename)
 
-    # 模拟存储路径
+    # 存储路径（P1-2: 内容真实落盘，路径必须防逃逸——agent_id/文件名可能携带路径片段）
     storage_path = os.path.join(
         _media_config.get("storage_path", "media_storage"), agent_id, media_type, f"{media_id}_{filename}"
     )
+    disk_path = Path(os.path.abspath(storage_path))
+    if not disk_path.is_relative_to(_storage_root()):
+        raise HTTPException(status_code=400, detail="非法的存储路径（agent_id 或文件名包含路径片段）")
+
+    disk_path.parent.mkdir(parents=True, exist_ok=True)
 
     # 解析元数据
     meta = {}
@@ -196,13 +214,40 @@ async def save_media(
         except Exception:
             meta = {"raw_metadata": metadata}
 
+    size = 0
+    try:
+        with disk_path.open("wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > max_size:
+                    raise HTTPException(
+                        status_code=413, detail=f"文件大小超过限制 ({size} > {max_size} bytes)"
+                    )
+                out.write(chunk)
+    except HTTPException:
+        # 超限中断：清掉半写文件后原样抛出
+        try:
+            disk_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    except OSError as e:
+        try:
+            disk_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise HTTPException(status_code=400, detail=f"媒体文件写入失败: {e}")
+
     now = time.time()
     media_info = {
         "media_id": media_id,
         "filename": filename,
         "media_type": media_type,
         "mime_type": mime_type,
-        "size": len(content),
+        "size": size,
         "agent_id": agent_id,
         "user_id": user_id,
         "memory_id": memory_id,
@@ -212,7 +257,6 @@ async def save_media(
     }
 
     _media_store[media_id] = media_info
-    _file_contents[media_id] = content
 
     return {
         "code": 0,
@@ -253,22 +297,20 @@ async def list_media(
 
 @router.get("/{media_id}")
 async def get_media(media_id: str):
-    """获取媒体文件内容"""
+    """获取媒体文件内容（P1-2: 从磁盘 FileResponse 流式读取，不再驻留内存）"""
     media = _media_store.get(media_id)
     if not media:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
 
-    content = _file_contents.get(media_id)
-    if not content:
+    disk_path = _media_disk_path(media)
+    if not disk_path.is_file():
         raise HTTPException(status_code=404, detail=f"Media content not found")
 
-    from fastapi.responses import Response
-
-    return Response(
-        content=content,
+    return FileResponse(
+        path=disk_path,
         media_type=media.get("mime_type", "application/octet-stream"),
         headers={
-            "Content-Disposition": f"attachment; filename=\"{media.get('filename', 'file')}\"",
+            "Content-Disposition": _content_disposition(media.get("filename")),
             "X-Media-ID": media_id,
         },
     )
@@ -297,22 +339,20 @@ async def get_media_metadata(media_id: str):
 
 @router.get("/download/{media_id}")
 async def download_attachment(media_id: str):
-    """直接从附件目录下载文件（用于TTS音频等）"""
+    """直接从附件目录下载文件（用于TTS音频等；P1-2: 磁盘流式读取）"""
     media = _media_store.get(media_id)
     if not media:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
 
-    content = _file_contents.get(media_id)
-    if not content:
+    disk_path = _media_disk_path(media)
+    if not disk_path.is_file():
         raise HTTPException(status_code=404, detail=f"Media content not found")
 
-    from fastapi.responses import Response
-
-    return Response(
-        content=content,
+    return FileResponse(
+        path=disk_path,
         media_type=media.get("mime_type", "application/octet-stream"),
         headers={
-            "Content-Disposition": f"attachment; filename=\"{media.get('filename', 'file')}\"",
+            "Content-Disposition": _content_disposition(media.get("filename")),
         },
     )
 
@@ -324,8 +364,13 @@ async def delete_media(media_id: str):
     if not media:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
 
-    # 删除文件内容
-    _file_contents.pop(media_id, None)
+    # P1-2: 内容已落盘，删元数据须同步删磁盘文件
+    disk_path = _media_disk_path(media)
+    try:
+        if disk_path.is_file():
+            disk_path.unlink()
+    except OSError as e:
+        logger.warning("删除媒体磁盘文件失败 %s: %s", disk_path, e)
 
     # 删除元数据
     del _media_store[media_id]
@@ -415,14 +460,19 @@ async def update_config(body: UpdateConfigRequest):
 
 @router.post("/cache/clear")
 async def clear_cache():
-    """清除媒体存储缓存"""
-    # 这里只是模拟清除缓存
+    """清除媒体存储缓存（P1-2 实做：清空内存媒体索引）。
+
+    磁盘文件是持久化内容源，不随缓存清除删除（逐条删除走 DELETE /{media_id}）。
+    """
+    cleared_items = len(_media_store)
+    freed_space = sum(m.get("size", 0) for m in _media_store.values())
+    _media_store.clear()
     return {
         "code": 0,
         "message": "媒体存储缓存已清除",
         "data": {
-            "cleared_items": 0,
-            "freed_space": 0,
+            "cleared_items": cleared_items,
+            "freed_space": freed_space,
         },
     }
 
