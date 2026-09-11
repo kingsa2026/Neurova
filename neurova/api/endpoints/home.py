@@ -46,7 +46,9 @@ def _real_conversation_count() -> int:
     try:
         from neurova.session_repository import get_session_repository
 
-        return len(get_session_repository().list_sessions())
+        # RES-P1-4：count_sessions 走文件名去重零解析快路径——
+        # 旧 len(list_sessions()) 为取个数而加载全部历史消息
+        return int(get_session_repository().count_sessions())
     except Exception:
         return 0
 

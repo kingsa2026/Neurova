@@ -58,6 +58,10 @@ class SessionRepository(ABC):
     def list_sessions(self, agent_id: str = "", user_id: str = "") -> List[Dict]:
         """列出会话（按 agent_id/user_id 过滤），返回摘要列表。"""
 
+    def count_sessions(self, agent_id: str = "", user_id: str = "") -> int:
+        """会话总数。默认退回 list_sessions 计数；实现方可提供零解析快路径。"""
+        return len(self.list_sessions(agent_id=agent_id, user_id=user_id))
+
     @abstractmethod
     def delete_session(self, agent_id: str, session_id: str) -> bool:
         """删除会话（所有日期文件）。"""
