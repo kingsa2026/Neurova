@@ -18,6 +18,8 @@
             <GlassStatCard :label="t('dashboard.totalTokens')" :value="usageData.tokens ?? 0" emoji="🔤" :trend="usageData.tokens_trend" />
             <GlassStatCard :label="t('dashboard.totalCalls')" :value="usageData.api_calls ?? 0" emoji="📡" :trend="usageData.api_calls_trend" />
             <GlassStatCard :label="t('dashboard.totalAgents')" :value="usageData.agents ?? 0" emoji="🤖" :trend="usageData.agents_trend" />
+            <!-- B1-5：Prompt Cache 命中率（真实口径，无 cache 明细为 0） -->
+            <GlassStatCard :label="t('analytics.cacheHitRate')" :value="`${((usageData.cache_hit_rate ?? 0) * 100).toFixed(1)}%`" emoji="🎯" />
           </div>
           <GlassCard :title="t('analytics.usageOverTime')" style="margin-top: 20px">
             <div class="chart-placeholder">
@@ -27,6 +29,16 @@
               </div>
               <a-empty v-if="!(usageData.timeline?.length)" :description="t('common.noData')" />
             </div>
+          </GlassCard>
+          <!-- B3-2：按 agent token 用量（usage_history agent_id 真值聚合） -->
+          <GlassCard :title="t('analytics.byAgent')" style="margin-top: 20px">
+            <a-table
+              :columns="agentUsageColumns"
+              :data-source="agentUsage"
+              row-key="agent_id"
+              :pagination="false"
+              size="small"
+            />
           </GlassCard>
         </a-spin>
       </a-tab-pane>
@@ -108,6 +120,14 @@ const timeRange = ref('week')
 const loading = ref(false)
 
 const usageData = ref<Record<string, any>>({})
+// B3-2：按 agent 用量（/analytics/usage by_agent 携带 tokens/calls）
+const agentUsage = ref<{ agent_id: string; name?: string; requests: number; tokens?: number; calls?: number }[]>([])
+const agentUsageColumns = computed(() => [
+  { title: 'Agent', dataIndex: 'agent_id', key: 'agent_id' },
+  { title: t('analytics.sessions'), dataIndex: 'requests', key: 'requests' },
+  { title: t('analytics.tokensCol'), dataIndex: 'tokens', key: 'tokens' },
+  { title: t('analytics.llmCalls'), dataIndex: 'calls', key: 'calls' },
+])
 const perfData = ref<Record<string, any>>({})
 const behaviorData = ref<Record<string, any>>({})
 const errorData = ref<Record<string, any>>({})
@@ -133,7 +153,10 @@ const fetchAll = async () => {
       const res = await analyticsApi.getUsageAnalytics(params)
       const d = res?.data ?? res ?? {} as any
       const byAgents = d.by_agent ?? []
+      agentUsage.value = byAgents
       usageData.value = {
+        cache_hit_rate: d.cache_hit_rate ?? 0,
+        cache_read_tokens: d.cache_read_tokens ?? 0,
         conversations: byAgents.reduce((sum: number, a: any) => sum + (a.requests ?? 0), 0),
         tokens: d.total_tokens ?? 0,
         api_calls: d.total_requests ?? 0,
