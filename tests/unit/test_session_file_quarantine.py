@@ -20,8 +20,10 @@ from datetime import datetime
 
 import pytest
 
-os.environ["NEUROVA_SESSIONS_DIR"] = "sessions-test-quarantine"
-
+# P2（审计 2026-09-11 收尾顺手修）：env 必须在 fixture 内设置——原模块级
+# 设置在 pytest 收集期执行，先于全部测试运行，把 SessionManager 单例的
+# 隔离通道绑到 CWD 相对目录，污染同轮次内其它 session 相关测试
+# （console 双写/session_list_order 大组合必现失败、单跑必绿）。
 from neurova.sync.session_sync_manager import SessionEvent, EventType, _json_safe
 from neurova.session_manager import SessionManager
 
@@ -35,6 +37,8 @@ def sm(tmp_path):
     inst = object.__new__(SessionManager)
     inst.__init__()
     yield inst
+    SessionManager._instances = {} if hasattr(SessionManager, "_instances") else None
+    os.environ.pop("NEUROVA_SESSIONS_DIR", None)
 
 
 class TestSessionEventJsonSafe:
