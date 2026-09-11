@@ -1170,7 +1170,6 @@ class LLMProviderManager(Module):
             apply_preset_defaults,
             detect_model_capabilities,
         )
-
         all_models: List[PydanticModelInfo] = []
         for provider in self.list_providers():
             model_ids = list(getattr(provider, "models", None) or [])
@@ -1346,6 +1345,7 @@ class LLMProviderManager(Module):
             apply_preset_defaults,
             detect_model_capabilities,
         )
+        from neurova.llm.model_limits import resolve_max_output_length
 
         with self._config_lock:
             metadata = dict(provider.model_metadata or {})
@@ -1362,6 +1362,15 @@ class LLMProviderManager(Module):
                     )
                 # 限额三元组兜底:服务商返回的真实值首选,缺省(或 4096 占位)才按预埋补
                 entry = apply_preset_defaults(model.id, entry)
+                # B1-6（#7337）：输出能力上限与来源落元数据——用户显式覆盖
+                # (source=user_override) 不被发现值覆盖；未知模型诚实不写
+                if not entry.get("max_output_length_source"):
+                    out_cap, out_source = resolve_max_output_length(
+                        model.id, entry.get("max_output_length"),
+                    )
+                    if out_cap is not None:
+                        entry["max_output_length"] = out_cap
+                        entry["max_output_length_source"] = out_source
                 metadata[model.id] = entry
             current_ids = set(provider.models or [])
             if merge:
