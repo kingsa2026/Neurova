@@ -12,6 +12,7 @@
 from neurova.core.logger import get_logger
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from neurova.cognitive_layers.memory_layer.models import Memory
@@ -103,8 +104,10 @@ class MemoryReadWriteManager:
         self._cache_misses += 1
 
         # 从底层管理器检索
+        # P2-2（审计 2026-09-11）：MemoryManager 真实 API 是 recall（原 search
+        # 不存在 → 任何调用 AttributeError，适配层整体不可用）
         if self._memory_manager:
-            results = self._memory_manager.search(query, limit=limit)
+            results = self._memory_manager.recall(query, limit=limit)
         else:
             # 模拟实现
             results = []
@@ -133,9 +136,9 @@ class MemoryReadWriteManager:
 
         self._cache_misses += 1
 
-        # 从底层管理器获取
+        # 从底层管理器获取（P2-2：get_all_memories 无分页参数，本地切片）
         if self._memory_manager:
-            results = self._memory_manager.get_all(limit=limit, offset=offset)
+            results = self._memory_manager.get_all_memories()[offset : offset + limit]
         else:
             # 模拟实现
             results = []
@@ -165,7 +168,8 @@ class MemoryReadWriteManager:
             记忆 ID
         """
         if self._memory_manager:
-            memory_id = self._memory_manager.create(
+            # P2-2：真实 API 是 remember
+            memory_id = self._memory_manager.remember(
                 content=content,
                 importance=importance,
                 metadata=metadata or {},
@@ -215,13 +219,19 @@ class MemoryReadWriteManager:
             是否更新成功
         """
         if self._memory_manager:
-            success = self._memory_manager.update(
-                memory_id=memory_id,
-                content=content,
-                importance=importance,
-                metadata=metadata,
-                temperature=temperature,
-            )
+            # P2-2：真实 API 是 update_memory(memory_id, **kwargs)；None 值
+            # 不透传，避免把未指定字段覆写为 None
+            fields = {
+                k: v
+                for k, v in {
+                    "content": content,
+                    "importance": importance,
+                    "metadata": metadata,
+                    "temperature": temperature,
+                }.items()
+                if v is not None
+            }
+            success = self._memory_manager.update_memory(memory_id, **fields)
         else:
             # 模拟实现
             success = True
@@ -257,7 +267,8 @@ class MemoryReadWriteManager:
             是否删除成功
         """
         if self._memory_manager:
-            success = self._memory_manager.delete(memory_id)
+            # P2-2：真实 API 是 forget
+            success = self._memory_manager.forget(memory_id)
         else:
             # 模拟实现
             success = True
@@ -302,17 +313,17 @@ class MemoryReadWriteManager:
             elif op.operation_type == "delete":
                 deletes.append(op)
 
-        # 执行批量操作
+        # 执行批量操作（P2-2：真实 API remember/update_memory/forget，无 batch_create）
         if self._memory_manager:
-            if creates:
-                memories = [op.data for op in creates]
-                self._memory_manager.batch_create(memories)
+            for op in creates:
+                self._memory_manager.remember(**op.data)
 
             for op in updates:
-                self._memory_manager.update(op.memory_id, **op.data)
+                fields = {k: v for k, v in op.data.items() if v is not None}
+                self._memory_manager.update_memory(op.memory_id, **fields)
 
             for op in deletes:
-                self._memory_manager.delete(op.memory_id)
+                self._memory_manager.forget(op.memory_id)
 
         # 清空队列
         self._write_queue.clear()
@@ -337,25 +348,42 @@ class MemoryReadWriteManager:
         if not self._memory_manager:
             return
 
-        # 获取所有记忆
-        memories = self._memory_manager.get_all()
+        # P2-2：真实 API get_all_memories 返回 List[Dict]（to_dict 字段：
+        # id/temperature/last_accessed_at）
+        memories = self._memory_manager.get_all_memories()
 
         current_time = time.time()
         decay_factor = 0.95  # 每小时衰减 5%
 
         for memory in memories:
+            mid = memory.get("id")
+            if not mid:
+                continue
+            last_raw = memory.get("last_accessed_at") or memory.get("created_at")
+            if isinstance(last_raw, str):
+                try:
+                    last_dt = datetime.fromisoformat(last_raw)
+                except ValueError:
+                    continue
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+            elif isinstance(last_raw, datetime):
+                last_dt = last_raw if last_raw.tzinfo else last_raw.replace(tzinfo=timezone.utc)
+            else:
+                continue
+
             # 计算时间差（小时）
-            time_diff_hours = (current_time - memory.last_accessed) / 3600.0
+            time_diff_hours = max(
+                0.0, (datetime.now(timezone.utc) - last_dt).total_seconds() / 3600.0
+            )
+            old_temperature = float(memory.get("temperature", 1.0) or 1.0)
 
             # 应用衰减
-            new_temperature = memory.temperature * (decay_factor**time_diff_hours)
+            new_temperature = old_temperature * (decay_factor**time_diff_hours)
 
             # 更新温度
-            if new_temperature != memory.temperature:
-                self._memory_manager.update(
-                    memory_id=memory.id,
-                    temperature=new_temperature,
-                )
+            if new_temperature != old_temperature:
+                self._memory_manager.update_memory(mid, temperature=new_temperature)
 
         logger.debug("Decay cycle completed for %s memories", len(memories))
 

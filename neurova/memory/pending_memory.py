@@ -87,6 +87,21 @@ DELETE FROM pending_memories
        )
        WHERE rn = 1
    );
+-- P2-5（审计 2026-09-11）：唯一索引谓词含 rejected，存量同分区多条
+-- rejected 会让 CREATE UNIQUE INDEX 抛错 → 建库失败每次启动复现。
+-- 建索引前对 rejected 同分区去重（保留最新 decided_at）。
+DELETE FROM pending_memories
+ WHERE status = 'rejected'
+   AND id NOT IN (
+       SELECT id FROM (
+           SELECT id, ROW_NUMBER() OVER (
+               PARTITION BY fingerprint, proposed_by ORDER BY decided_at DESC, rowid DESC
+           ) AS rn
+             FROM pending_memories
+            WHERE status = 'rejected'
+       )
+       WHERE rn = 1
+   );
 """
 
 _LIVE_FP_INDEX = """

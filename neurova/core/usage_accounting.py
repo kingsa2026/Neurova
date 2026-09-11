@@ -13,7 +13,23 @@ Per-turn Token 对账 + 成本核算（P2-4）
 from __future__ import annotations
 
 import threading
+from contextvars import ContextVar
 from typing import Any, Dict, Optional
+
+# P2-6（审计 2026-09-11）：任务级"最近一次调用"——并发会话下全局单槽
+# _last_call会被其它请求覆写（A 的 usage 事件读到 B 的 model/token 串号）。
+# record() 与消费方（chat_pipeline trace / console run_chat）同任务执行，
+# ContextVar 天然按请求隔离；无任务上下文的调用方回退全局槽。
+_last_call_var: ContextVar = ContextVar("neurova_last_llm_call", default=None)
+
+
+def set_task_last_call(payload: Optional[Dict[str, Any]]) -> None:
+    """在当前请求任务内回填任务级最近调用（P2-6，供 to_thread 调用方使用）。"""
+    if payload:
+        try:
+            _last_call_var.set(payload)
+        except Exception:  # noqa: BLE001
+            pass
 
 # 定价目录（$/token；首批准 OpenAI 公开价，待接 provider 元数据扩展）
 _PRICING_DEFAULT: Dict[str, Dict[str, float]] = {
@@ -98,7 +114,7 @@ class TokenUsageAccounting:
             p_entry["cache_read_tokens"] = p_entry.get("cache_read_tokens", 0) + cache_read_tokens
             p_entry["cache_write_tokens"] = p_entry.get("cache_write_tokens", 0) + cache_write_tokens
 
-            self._last_call = {
+            payload = {
                 "model": model,
                 "provider": provider,
                 "prompt_tokens": prompt_tokens,
@@ -108,9 +124,26 @@ class TokenUsageAccounting:
                 "cache_read_tokens": cache_read_tokens,
                 "cache_write_tokens": cache_write_tokens,
             }
+            with self._lock:
+                self._last_call = payload
+            # P2-6：任务级快照——同任务内的 last_call() 读到的必是本次调用。
+            # 注意 to_thread 工作线程内的 set 不回传调用任务，调用方须以
+            # set_task_last_call() 在事件循环任务内显式回填。
+            try:
+                _last_call_var.set(payload)
+            except Exception:  # noqa: BLE001 — 无任务上下文时跳过
+                pass
+            return payload
 
     def last_call(self) -> Optional[Dict[str, Any]]:
-        """最近一次调用的真实 usage（trace 对账用）；无记录返回 None。"""
+        """最近一次调用的真实 usage（trace 对账用）；无记录返回 None。
+
+        P2-6：请求任务上下文内优先返回任务级快照（并发隔离），
+        否则回退进程级最近一次（后台脚本等无请求语义的调用方）。
+        """
+        task_local = _last_call_var.get()
+        if task_local:
+            return dict(task_local)
         with self._lock:
             last = getattr(self, "_last_call", None)
         return dict(last) if last else None
@@ -180,7 +213,18 @@ def get_usage_accounting() -> TokenUsageAccounting:
 
 
 def reset_usage_accounting() -> None:
-    """重置单例（测试用）。"""
+    """重置单例（测试用）。
+
+    P2-6 配套：必须同时清任务级 ContextVar——record() 在测试主上下文
+    set 的任务级快照会跨测试泄漏（同线程 context 复用），仅置空单例
+    时 last_call() 仍读到旧值（test_no_usage_event_without_record 假红根因）。
+    """
     global _usage_accounting
     with _usage_lock:
         _usage_accounting = None
+    # 直接 set None 清任务级快照（set_task_last_call 的 if payload 守卫
+    # 使传 None 成为空操作，清不掉跨测试泄漏的 ContextVar）
+    try:
+        _last_call_var.set(None)
+    except Exception:  # noqa: BLE001
+        pass
