@@ -4,6 +4,10 @@
     <div class="nr-ci-header">
       <div class="nr-ci-title-row">
         <h2>{{ t('channel.integration') }}</h2>
+        <!-- B4-a：机器人身份冲突检测（多渠道复用同一凭据会串回调） -->
+        <GlassButton variant="ghost" size="sm" @click="runConflictCheck">
+          {{ t('channel.conflictCheck') }}
+        </GlassButton>
       </div>
       <p class="nr-ci-desc">{{ t('channel.integrationDesc') }}</p>
     </div>
@@ -88,6 +92,16 @@
             <GlassButton variant="secondary" size="sm" @click="testChannel(ch)">
               {{ t('channel.test') }}
             </GlassButton>
+            <!-- B4-a：渠道重启（disconnect→connect，配置变更生效）；
+                 负一屏走独立 API 且无适配器类型，不渲染 -->
+            <GlassButton
+              v-if="ch.backendType"
+              variant="ghost"
+              size="sm"
+              @click="restartAdapter(ch)"
+            >
+              {{ t('channel.restart') }}
+            </GlassButton>
           </div>
         </div>
       </GlassCard>
@@ -149,7 +163,7 @@
                   <template v-else>
                     <input
                       v-model="configForm[field.key]"
-                      :type="field.inputType || 'text'"
+                      :type="field.type === 'password' ? 'password' : (field.inputType || 'text')"
                       :placeholder="field.placeholder"
                       class="nr-ci-input"
                     />
@@ -194,7 +208,7 @@
                   <template v-else>
                     <input
                       v-model="configForm[field.key]"
-                      :type="field.inputType || 'text'"
+                      :type="field.type === 'password' ? 'password' : (field.inputType || 'text')"
                       :placeholder="field.placeholder"
                       class="nr-ci-input"
                     />
@@ -207,6 +221,7 @@
 
           <!-- Modal Footer（负一屏自带保存/删除，隐藏通用 footer） -->
           <div v-if="currentChannel?.channelKey !== 'negative-screen'" class="nr-ci-modal-footer">
+            <GlassButton variant="ghost" @click="clearQueue(currentChannel!)">{{ t('channel.clearQueue') }}</GlassButton>
             <GlassButton variant="ghost" @click="closeConfigModal">{{ t('common.cancel') }}</GlassButton>
             <GlassButton variant="primary" :loading="saving" @click="saveConfig">{{ t('common.save') }}</GlassButton>
           </div>
@@ -220,7 +235,7 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { listChannelConfigs, createChannelConfig, testChannelConfig, getIngressStats, type ChannelIngressStats } from '@/api/modules/channel-configs'
+import { listChannelConfigs, createChannelConfig, testChannelConfig, getIngressStats, restartChannelAdapter, clearChannelQueue, checkChannelConflicts, listPluginChannelSchemas, type ChannelIngressStats } from '@/api/modules/channel-configs'
 import { getNegativeScreenConfig, updateNegativeScreenConfig, testNegativeScreenPush } from '@/api/modules/negative-screen'
 import NegativeScreenSettings from '@/components/NegativeScreenSettings.vue'
 import GlassCard from '@/components/GlassCard.vue'
@@ -281,6 +296,7 @@ const channelFieldsMap = computed<Record<string, FieldSchema[]>>(() => ({
     { key: 'app_secret', label: 'Client Secret', type: 'password', required: true, placeholder: t('nav.dingtalkAppSecret') },
     { key: 'use_stream', label: t('nav.streamMode'), type: 'toggle', defaultValue: true },
     { key: 'reply_at_sender', label: t('nav.replyAtSender'), type: 'toggle', defaultValue: false },
+    { key: 'share_session_in_group', label: t('nav.groupShareSession'), type: 'toggle', defaultValue: true },
   ],
   feishu: [
     { key: 'app_id', label: 'App ID', type: 'text', required: true },
@@ -291,7 +307,7 @@ const channelFieldsMap = computed<Record<string, FieldSchema[]>>(() => ({
       { value: 'feishu', label: t('nav.feishuChina') }, { value: 'lark', label: t('nav.larkInternational') },
     ]},
     { key: 'media_directory', label: t('nav.mediaDirectory'), type: 'text', placeholder: './media' },
-    { key: 'group_share_session', label: t('nav.groupShareSession'), type: 'toggle', defaultValue: false },
+    { key: 'share_session_in_group', label: t('nav.groupShareSession'), type: 'toggle', defaultValue: true },
   ],
   discord: [
     { key: 'bot_token', label: 'Bot Token', type: 'password', required: true },
@@ -304,6 +320,7 @@ const channelFieldsMap = computed<Record<string, FieldSchema[]>>(() => ({
     { key: 'http_proxy', label: 'HTTP Proxy', type: 'text', placeholder: 'http://127.0.0.1:7890' },
     { key: 'http_proxy_auth', label: 'HTTP Proxy Auth', type: 'text' },
     { key: 'show_typing', label: 'Show Typing', type: 'toggle', defaultValue: true },
+    { key: 'share_session_in_group', label: t('nav.groupShareSession'), type: 'toggle', defaultValue: true },
   ],
   qq: [
     { key: 'app_id', label: 'App ID', type: 'text', required: true },
@@ -321,7 +338,7 @@ const channelFieldsMap = computed<Record<string, FieldSchema[]>>(() => ({
     { key: 'app_secret', label: 'Secret', type: 'password', required: true },
     { key: 'media_directory', label: t('nav.mediaDirectory'), type: 'text', placeholder: './media' },
     { key: 'welcome_message', label: t('nav.welcomeMessage'), type: 'text', placeholder: 'Hello! I am Neurova' },
-    { key: 'group_share_session', label: t('nav.groupShareSession'), type: 'toggle', defaultValue: false },
+    { key: 'share_session_in_group', label: t('nav.groupShareSession'), type: 'toggle', defaultValue: true },
   ],
   yuanbao: [
     { key: 'app_id', label: 'App ID', type: 'text', required: true },
@@ -468,6 +485,30 @@ async function toggleNegativeScreen(ch: ChannelItem) {
 async function loadConfigs() {
   loadingConfigs.value = true
   try {
+    // B4-d：插件渠道动态接入——先追加卡片（在已存配置合并前，否则状态回填错过新卡片）
+    try {
+      const schemaRes: any = await listPluginChannelSchemas()
+      const schemas = schemaRes?.data?.schemas ?? schemaRes?.schemas ?? []
+      schemas.forEach((s: any) => {
+        pluginFields.value[s.channel_type] = pluginSchemaToFields(s.config_fields ?? [])
+        const existing = channels.value.find((c) => c.backendType === s.channel_type)
+        if (!existing) {
+          channels.value.push({
+            name: s.name || s.channel_type,
+            icon: '🔌',
+            type: 'custom',
+            enabled: false,
+            color: '#8b5cf6',
+            channelKey: s.channel_type,
+            backendType: s.channel_type,
+            connected: false,
+          })
+        }
+      })
+    } catch {
+      /* schema 拉取失败不阻塞页面（无插件渠道时恒空） */
+    }
+
     const data: any = await listChannelConfigs()
     if (Array.isArray(data)) {
       data.forEach((cfg: any) => {
@@ -581,16 +622,88 @@ async function testChannel(ch: ChannelItem) {
   }
 }
 
+// ── B4-a：运行管理（重启 / 清空队列 / 身份冲突检测） ──────────────────────
+async function restartAdapter(ch: ChannelItem) {
+  try {
+    const res: any = await restartChannelAdapter(ch.backendType)
+    const data = res?.data ?? res
+    if (data?.success) {
+      showToast(t('channel.restartOk'))
+    } else {
+      showToast(`${t('channel.restartFail')}: ${data?.error ?? ''}`)
+    }
+  } catch (e: any) {
+    showToast(e?.message || t('channel.restartFail'))
+  }
+}
+
+async function clearQueue(ch: ChannelItem) {
+  try {
+    const res: any = await clearChannelQueue(ch.backendType)
+    const data = res?.data ?? res
+    showToast(`${t('channel.queueCleared')}: ${data?.cleared ?? 0}`)
+  } catch (e: any) {
+    showToast(e?.message || t('channel.restartFail'))
+  }
+}
+
+async function runConflictCheck() {
+  try {
+    const res: any = await checkChannelConflicts()
+    const data = res?.data ?? res
+    const conflicts = data?.conflicts ?? []
+    if (!conflicts.length) {
+      showToast(t('channel.noConflicts'))
+      return
+    }
+    const lines = conflicts
+      .map((c: any) => `${c.identity}: ${(c.channels ?? []).join(', ')}`)
+      .join('；')
+    message.warning(`${t('channel.conflictFound')} ${lines}`)
+  } catch (e: any) {
+    showToast(e?.message || t('channel.restartFail'))
+  }
+}
+
+
 function showToast(msg: string) {
   toastMessage.value = msg
   setTimeout(() => { toastMessage.value = '' }, 3000)
 }
 
 // ─── Computed ───
+// B4-d：插件渠道动态表单字段（schema 端点下发，key=channel_type）
+const pluginFields = ref<Record<string, { key: string; label: string; type: string; required?: boolean; defaultValue?: unknown; placeholder?: string }[]>>({})
+
 const currentChannelFields = computed(() => {
   if (!currentChannel.value) return []
-  return channelFieldsMap.value[currentChannel.value.channelKey] || []
+  return (
+    channelFieldsMap.value[currentChannel.value.channelKey] ||
+    pluginFields.value[currentChannel.value.channelKey] ||
+    []
+  )
 })
+
+/** 插件渠道 schema → 页面字段 schema 形态（secret→password、bool→toggle、int→number） */
+function pluginSchemaToFields(
+  fields: { key: string; label?: string; type: string; required?: boolean; default?: unknown; placeholder?: string }[],
+) {
+  return fields.map((f) => ({
+    key: f.key,
+    label: f.label || f.key,
+    type:
+      f.type === 'secret'
+        ? 'password'
+        : f.type === 'bool'
+          ? 'toggle'
+          : f.type === 'int'
+            ? 'number'
+            : 'text',
+    required: !!f.required,
+    defaultValue: f.default,
+    placeholder: f.placeholder || '',
+  }))
+}
 
 const filteredChannels = computed(() => {
   let list = channels.value
