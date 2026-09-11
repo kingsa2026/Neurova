@@ -30,6 +30,25 @@ class StubEngine:
         return [self.encode(t) for t in texts]
 
 
+class RealContractEngine(StubEngine):
+    """忠实复刻 ONNXEmbeddingEngine 契约：encode_batch 返回 EmbeddingResult 而非 list。
+
+    历史事故：StubEngine.encode_batch 返回 list 与真实引擎契约不符（mock 不忠实），
+    ensure_indexed 对 EmbeddingResult 做 zip 迭代 TypeError 被吞掉，
+    生产环境知识向量索引恒为空（computed=0）而单测全绿。
+    """
+
+    def encode_batch(self, texts):
+        from neurova.embedding.onnx_embedding import EmbeddingResult
+
+        return EmbeddingResult(
+            vectors=[self.encode(t) for t in texts],
+            model_name="stub-bge",
+            dimension=len(self.VOCAB),
+            inference_ms=0.0,
+        )
+
+
 @pytest.fixture()
 def repo(tmp_path):
     r = KnowledgeRepository(str(tmp_path / "kb"))
@@ -93,6 +112,15 @@ class TestSearch:
         idx = KnowledgeVectorIndex(str(tmp_path / "vec"), engine=None)
         idx.ensure_indexed(repo, ALICE)  # 不抛出
         assert idx.search("quantum", ALICE, top_k=3) == []
+
+    def test_real_engine_embeddingresult_contract(self, repo, tmp_path):
+        """回归：真引擎 encode_batch 返回 EmbeddingResult 时索引必须成功构建。"""
+        idx = KnowledgeVectorIndex(str(tmp_path / "vec"), engine=RealContractEngine())
+        stats = idx.ensure_indexed(repo, ALICE)
+        assert stats["computed"] == 2, "EmbeddingResult 契约下向量必须真实入索引"
+        assert stats["entry_count"] == 2
+        hits = idx.search("quantum computing basics", ALICE, top_k=3)
+        assert hits and hits[0]["title"] == "Quantum Guide"
 
 
 class TestHybridIntegration:
