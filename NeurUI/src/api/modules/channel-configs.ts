@@ -59,3 +59,35 @@ export function testChannelConfig(type: string, data: ChannelConfig) {
 export function getIngressStats() {
   return api.get<ChannelIngressStats>(`${BASE}/ingress/stats`)
 }
+
+// ---------------------------------------------------------------------------
+// B4-a 渠道管理能力面（restart / clear-queue / conflict-check）
+// ---------------------------------------------------------------------------
+
+/** 重启渠道适配器（disconnect → connect，配置变更生效/断线重连）。 */
+export function restartChannelAdapter(type: string) {
+  return api.post<{ code: number; message: string; data: { success: boolean; error?: string } }>(
+    `/channel-adapters/${type}/restart`,
+  )
+}
+
+/** 清空渠道待处理入站队列（积压清理）。 */
+export function clearChannelQueue(type: string) {
+  return api.post<{ code: number; message: string; data: { cleared: number } }>(
+    `/channel-adapters/${type}/clear-queue`,
+  )
+}
+
+/** 机器人身份冲突检测（多渠道复用同一凭据）。 */
+export function checkChannelConflicts() {
+  return api.get<{ code: number; message: string; data: { conflicts: { identity: string; channels: string[] }[]; checked: number } }>(
+    `/channel-adapters/conflicts/check`,
+  )
+}
+
+/** 插件渠道动态表单 schema（B4-d；未注册插件时为空数组）。 */
+export function listPluginChannelSchemas() {
+  return api.get<{ code: number; message: string; data: { schemas: { channel_type: string; name: string; config_fields: { key: string; label?: string; type: string; required?: boolean; default?: unknown; placeholder?: string }[] }[] } }>(
+    `/channel-configs/schemas`,
+  )
+}
