@@ -115,6 +115,11 @@ class ContextPool:
         # 遵循 AGENTS.md "Thread safety: use threading.RLock for shared state"
         self._lock = threading.RLock()
 
+        # RES-P2-1：hash→条目索引——add 去重与 ack 标记此前是全池 O(n) 线性扫
+        # （每条消息追加/每轮 ack 都扫一遍，池为永久归档只增不减，随历史线性劣化）。
+        # 列表被整体重排（TTL/compress/dedup/clear）时须调用 _rebuild_hash_index 同步。
+        self._by_hash: Dict[str, Any] = {}
+
         # P1-1③：驱逐台账持久层 + 摘要压缩器（可选注入；None=保持内存行为）
         self._ledger_db = ledger_db
         self._summarizer = summarizer
@@ -136,14 +141,15 @@ class ContextPool:
                 context = self._auto_tagger.auto_tag(context)
 
             # [FIX] 添加时去重：已存在相同 hash 的条目则跳过
+            # （RES-P2-1：经 _by_hash 索引 O(1) 查找，旧实现全池线性扫）
             if context.hash:
-                existing = [c for c in self._collector._contexts if c.hash == context.hash]
-                if existing:
+                existing_entry = self._by_hash.get(context.hash)
+                if existing_entry is not None:
                     # 若新条目优先级更高则替换，否则跳过
-                    existing_entry = existing[0]
                     if context.priority > existing_entry.priority:
                         idx = self._collector._contexts.index(existing_entry)
                         self._collector._contexts[idx] = context
+                        self._by_hash[context.hash] = context
                         self._cache_version += 1
                         logger.debug("ContextPool 替换条目: hash=%s, priority=%s→%s",
                                      context.hash[:8], existing_entry.priority, context.priority)
@@ -156,7 +162,13 @@ class ContextPool:
             # "永不丢失上下文"是硬约束；容量控制只发生在视图层（Drawer 按预算
             # 整条选取）。驱逐台账（_archive_evicted）保留兼容，主流程不再触发。
             self._collector.add_context(context)
+            if context.hash:
+                self._by_hash[context.hash] = context
             self._cache_version += 1
+
+    def _rebuild_hash_index(self) -> None:
+        """整体重排 _contexts 后重建 hash→条目索引（调用方须持 _lock）。"""
+        self._by_hash = {c.hash: c for c in self._collector._contexts if c.hash}
 
     def _inject_isolation_tags(self, context) -> None:
         """根因 A 修复: 把 session_id/agent_id/user_id 注入到 chunk.metadata
@@ -402,14 +414,18 @@ class ContextPool:
             return count
 
     def mark_hashes_seen(self, hashes) -> int:
-        """ack 集：按内容 hash 标记已读（视图捕获路径）。"""
+        """ack 集：按内容 hash 标记已读（视图捕获路径）。
+
+        RES-P2-1：经 _by_hash 索引 O(k) 直取，旧实现全池 O(n) 线性扫。
+        """
         wanted = {h for h in (hashes or []) if h}
         if not wanted:
             return 0
         with self._lock:
             count = 0
-            for chunk in self._collector._contexts:
-                if chunk.hash in wanted and not chunk.seen_confirmed:
+            for h in wanted:
+                chunk = self._by_hash.get(h)
+                if chunk is not None and not chunk.seen_confirmed:
                     chunk.seen_confirmed = True
                     count += 1
             return count
@@ -471,6 +487,7 @@ class ContextPool:
             removed_items = [c for c in self._collector._contexts if c not in valid]
             original_count = len(self._collector._contexts)
             self._collector._contexts = valid
+            self._rebuild_hash_index()
 
             removed_count = original_count - len(valid)
             for item in removed_items:
@@ -575,6 +592,7 @@ class ContextPool:
             contexts = self.get_contexts()
             compressed = self._compressor.compress(contexts)
             self._collector._contexts = compressed
+            self._rebuild_hash_index()
 
     def merge_with(self, other_pool: "ContextPool"):
         with self._lock:
@@ -586,6 +604,7 @@ class ContextPool:
     def clear(self):
         with self._lock:
             self._collector._contexts.clear()
+            self._by_hash.clear()
             self._cache.clear()
             self._cache_version += 1
 
@@ -612,6 +631,7 @@ class ContextPool:
             all_drops = self._collector.collect()
             deduped = self._deduplicator.dedup(all_drops, stage=stage)
             self._collector._contexts = deduped
+            self._rebuild_hash_index()
             return len(deduped)
 
 

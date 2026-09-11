@@ -258,11 +258,18 @@ async def chat_stream(
                 # 通知消费循环：本轮事件已全部产生
                 queue.put_nowait(_EMIT_DONE)
 
+        task = None
         try:
             # 发送开始事件
             yield f"event: start\ndata: {json.dumps({'request_id': request_id})}\n\n"
 
             task = asyncio.create_task(run_chat())
+            # RES-P2-2：注册任务表（对齐 console.py）——带 session_id 的轮次
+            # 可被 /console/chat/stop 真取消；完成后由 tracker 自动摘除
+            if body.session_id:
+                from neurova.core.task_tracker import get_task_tracker
+
+                get_task_tracker().register_async_task(body.session_id, task, kind="chat")
             seen_content = False
             while True:
                 try:
@@ -308,6 +315,16 @@ async def chat_stream(
         except Exception as e:
             logger.error(f"Stream error: {e}", exc_info=True)
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            # RES-P2-2：断连（GeneratorExit）/异常退出时取消孤儿生成任务——
+            # 旧实现任由 run_chat 跑完全程（token 白烧、停止端点无效）。
+            # 正常路径 task 已被 await 完成，此处为 no-op。
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except BaseException:  # noqa: BLE001 — 收尸不外泄（含 CancelledError）
+                    pass
 
     return StreamingResponse(
         event_generator(),

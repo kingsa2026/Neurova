@@ -109,6 +109,10 @@ _CONFIRM_RATE_LIMIT = 5
 _CONFIRM_RATE_WINDOW_SECONDS = 300
 _confirm_attempts: Dict[str, List[float]] = {}  # ip -> [timestamp, ...]
 
+# P2-8: WS Token 有效期（对齐 _verify_ws_token 的 24h 签名时效）。
+# 离线且超过该期限的设备已无法凭旧 token 再连（须重新配对），可安全回收。
+_WS_TOKEN_TTL_SECONDS = 86400
+
 # 审计修复 (P2-12): 单用户 WS 连接上限, 防止单用户/单客户端耗尽连接资源
 MAX_CONNECTIONS_PER_USER = 5
 
@@ -138,6 +142,10 @@ def _get_ws_secret() -> str:
     return secret
 
 
+# 取消标记（资源修复 #3, 台账 2026-09-11）：仅在对应 chat:send 流式执行生命周期内
+# 有效——_handle_chat_send 开始时消费残留标记（孤儿取消不误杀下一次发送）、
+# 流终态弹出；无在流会话消费的孤儿标记按 _CANCELLED_SESSIONS_MAX 封顶逐出最旧。
+_CANCELLED_SESSIONS_MAX = 512
 _cancelled_sessions: Dict[str, bool] = {}
 
 
@@ -169,9 +177,29 @@ def _generate_pairing_code() -> str:
     return "".join(str(secrets.randbelow(10)) for _ in range(6))
 
 
+def _prune_expired_pairing_codes() -> None:
+    """P2-8: 清除已过期的配对码（原实现过期只改 status 从不 pop，dict 只增不清）。
+
+    expires_at 已过的条目无论 pending/confirmed/expired 均回收：
+    - pending 过期 → 早已不可确认；
+    - confirmed 过期 → 设备信息已在 _paired_devices，码条目本身冗余。
+    """
+    now = time.time()
+    expired = [code for code, p in _pairing_codes.items() if now > p.get("expires_at", 0)]
+    for code in expired:
+        del _pairing_codes[code]
+
+
 def _check_confirm_rate_limit(ip: str) -> None:
     """confirm_pairing 每 IP 滑动窗口限流, 超限抛 429"""
     now = time.time()
+    # P2-8: 时间线整条滑出窗口的 IP 连键删除, 防 _confirm_attempts 只增不清
+    stale_ips = [
+        k for k, ts in _confirm_attempts.items()
+        if not ts or now - max(ts) >= _CONFIRM_RATE_WINDOW_SECONDS
+    ]
+    for k in stale_ips:
+        del _confirm_attempts[k]
     attempts = _confirm_attempts.setdefault(ip, [])
     # 剔除窗口外记录
     attempts[:] = [t for t in attempts if now - t < _CONFIRM_RATE_WINDOW_SECONDS]
@@ -337,6 +365,9 @@ async def _handle_chat_send(ws, data: dict, user_id: str):
     agent_id = data.get("agent_id", "default")
     session_id = data.get("session_id", f"mobile-{uuid.uuid4().hex[:8]}")
 
+    # 孤儿取消标记只对在流会话生效：新流开始即消费残留标记
+    _cancelled_sessions.pop(session_id, None)
+
     try:
         from neurova.api.endpoints import get_agent_instance
 
@@ -366,6 +397,9 @@ async def _handle_chat_send(ws, data: dict, user_id: str):
         await ws.send_json({"type": "chat:done", "session_id": session_id, "message_id": f"msg-{uuid.uuid4().hex[:8]}"})
     except Exception as e:
         await ws.send_json({"type": "error", "code": "chat_failed", "message": str(e)})
+    finally:
+        # 资源修复 #3: 取消标记随流终态（done/cancelled/error）回收
+        _cancelled_sessions.pop(session_id, None)
 
 
 async def _handle_chat_cancel(ws, data: dict):
@@ -373,6 +407,9 @@ async def _handle_chat_cancel(ws, data: dict):
     session_id = data.get("session_id", "")
     if session_id:
         _cancelled_sessions[session_id] = True
+        # 资源修复 #3: 封顶兜底——孤儿标记（无在流会话弹出）超限逐出最旧
+        while len(_cancelled_sessions) > _CANCELLED_SESSIONS_MAX:
+            _cancelled_sessions.pop(next(iter(_cancelled_sessions)))
 
 
 async def _handle_agent_switch(ws, data: dict):
@@ -468,6 +505,9 @@ async def generate_pairing(
     code = _generate_pairing_code()
     pairing_id = f"pair-{uuid.uuid4().hex[:12]}"
     expires_in = 300  # 5 分钟
+
+    # P2-8: 创建新码时顺带回收已过期码，防 _pairing_codes 只增不清
+    _prune_expired_pairing_codes()
 
     _pairing_codes[code] = {
         "code": code,
@@ -626,6 +666,23 @@ async def list_paired_devices(
     user_id: str = Depends(_get_current_user_id),
 ):
     """列出已配对设备（需 JWT 认证）"""
+    now = time.time()
+    # P2-8: 检查过期时顺带回收失效设备——离线且超过 WS Token 有效期的设备
+    # 已无法再连（须重新配对才产生新条目），防 _paired_devices/_user_devices 只增不清
+    stale_ids = [
+        pid
+        for pid, d in _paired_devices.items()
+        if not d.get("is_online") and now - d.get("paired_at", 0) > _WS_TOKEN_TTL_SECONDS
+    ]
+    for pid in stale_ids:
+        device = _paired_devices.pop(pid, None)
+        owner = (device or {}).get("user_id")
+        ids = _user_devices.get(owner)
+        if ids is not None:
+            ids.discard(pid)
+            if not ids:
+                _user_devices.pop(owner, None)
+
     device_ids = _user_devices.get(user_id, set())
     devices = []
 
@@ -661,7 +718,10 @@ async def revoke_pairing(
     # 移除设备
     del _paired_devices[pairing_id]
     if user_id in _user_devices:
+        # P2-8: 空设备列表连键一起删，防 _user_devices 空集键残留
         _user_devices[user_id].discard(pairing_id)
+        if not _user_devices[user_id]:
+            _user_devices.pop(user_id, None)
 
     # 关闭 WebSocket 连接
     if pairing_id in _ws_connections:
