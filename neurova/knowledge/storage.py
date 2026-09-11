@@ -84,21 +84,27 @@ class KnowledgeStorage:
                     logger.warning("Failed to load %s: %s", path, exc)
 
     def _save_configs(self) -> None:
-        self._configs_path.write_text(
+        from neurova.core.atomic_io import atomic_write_text
+
+        atomic_write_text(
+            self._configs_path,
             json.dumps(self._configs, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
 
     def _save_collections(self) -> None:
-        self._collections_path.write_text(
+        from neurova.core.atomic_io import atomic_write_text
+
+        atomic_write_text(
+            self._collections_path,
             json.dumps(self._collections, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
 
     def _save_memory_links(self) -> None:
-        self._memory_links_path.write_text(
+        from neurova.core.atomic_io import atomic_write_text
+
+        atomic_write_text(
+            self._memory_links_path,
             json.dumps(self._memory_links, ensure_ascii=False, indent=2),
-            encoding="utf-8",
         )
 
     def _hash_api_key(self, key: str) -> str:
