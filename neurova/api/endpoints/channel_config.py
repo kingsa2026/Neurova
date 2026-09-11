@@ -14,6 +14,7 @@ from __future__ import annotations
 - POST   /api/channel-configs/{channel_type}/test - 测试连接
 """
 
+import asyncio
 import json
 from neurova.core.logger import get_logger
 from pathlib import Path
@@ -217,7 +218,9 @@ async def create_or_update_config(request: ChannelConfigRequest):
         extra=request.extra,
     )
 
-    adapter = _create_adapter(request.channel_type, channel_config)
+    # RES-P0-2：工厂内含同步网络工作（如 iLink 认证最长 300s 轮询），
+    # 必须下沉线程池，否则一次保存即冻结整个事件循环
+    adapter = await asyncio.to_thread(_create_adapter, request.channel_type, channel_config)
     manager = get_channel_manager()
     if adapter is not None:
         manager.register_adapter(adapter)
@@ -265,7 +268,8 @@ async def test_connection(channel_type: str, request: ChannelConfigRequest):
         extra=request.extra,
     )
 
-    adapter = _create_adapter(channel_type, channel_config)
+    # RES-P0-2：同 create_or_update_config——同步工厂下沉线程池
+    adapter = await asyncio.to_thread(_create_adapter, channel_type, channel_config)
 
     if adapter is None:
         return ChannelTestResult(
@@ -379,12 +383,16 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
 
     elif channel_type == "wechat":
         try:
+            # RES-P0-2 根修：mode/agentid 此前与 **extra 重复传参——extra 携带
+            # mode（前端必带）时必然 TypeError→400，保存/测试从未真正可达。
+            wechat_kwargs = dict(extra)
+            wechat_kwargs.setdefault("mode", "ilink")
+            wechat_kwargs.pop("agentid", None)
             return create_wechat_adapter(
                 corpid=config.app_id,
                 corpsecret=config.app_secret,
                 agentid=extra.get("agentid", ""),
-                mode=extra.get("mode", "ilink"),
-                **extra,
+                **wechat_kwargs,
             )
         except Exception as e:
             logger.warning("Failed to create wechat adapter: %s", e)
