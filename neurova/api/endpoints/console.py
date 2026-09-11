@@ -254,6 +254,10 @@ def _sse_events_from_emitter_item(
         if kind == "reasoning":
             text = str(data or "")
             return [{"type": "reasoning", "content": text}] if text else []
+        if kind == "usage":
+            # P2-6：run_chat 同任务内读取的本调用真实 usage，直接透传
+            payload = data if isinstance(data, dict) else {}
+            return [{"type": "usage", **payload}] if payload else []
         if kind == "tool_call":
             fn = (data or {}).get("function") or {}
             name = str(fn.get("name") or "")
@@ -585,6 +589,26 @@ async def post_console_chat(
                         metadata=metadata,
                         model=getattr(body, "model", None) or None,
                     )
+                    # P2-6（审计 2026-09-11）：usage 事件在 record() 同任务
+                    # 上下文内发射——任务级 ContextVar 必命中本次调用；原在
+                    # 生成器 finally 读全局 last_call，并发会话下会被其它
+                    # 请求的调用覆写（用量串号）。
+                    try:
+                        from neurova.core.usage_accounting import get_usage_accounting
+
+                        _last = get_usage_accounting().last_call()
+                        if _last:
+                            _emit("usage", {
+                                "session_id": session_id,
+                                "model": str(_last.get("model", "")),
+                                "provider": str(_last.get("provider", "")),
+                                "prompt_tokens": int(_last.get("prompt_tokens", 0)),
+                                "completion_tokens": int(_last.get("completion_tokens", 0)),
+                                "total_tokens": int(_last.get("total_tokens", 0)),
+                                "estimated": bool(_last.get("estimated", False)),
+                            })
+                    except Exception:  # noqa: BLE001 — usage 事件失败不影响本轮
+                        pass
                     if isinstance(response, dict):
                         return {
                             "text": response.get("text", str(response)),
@@ -662,6 +686,11 @@ async def post_console_chat(
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                     last_flush_at = time.monotonic()
                     for event in _sse_events_from_emitter_item(item, seen_calls, seen_results, agent_id=agent_id, user_id=user_id):
+                        # 复核修正（P2-6 闭环）：usage 是累加语义记账事件，
+                        # 不进断线重连缓冲——重放会把它再消费一遍（用量双计）
+                        if event.get("type") == "usage":
+                            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                            continue
                         live_events.append(event)  # 补课 8：断线重连缓冲
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                 # 收尾：刷出残余 delta
@@ -727,28 +756,8 @@ async def post_console_chat(
                     yield f"data: {json.dumps(stopped_event, ensure_ascii=False)}\n\n"
 
                 flush_events.append({"type": "done", "session_id": session_id})
-                # QwenPaw turn_usage 对齐:done 之前发一次真实 usage 事件
-                # (入账已在 MultiModelLLMClient 下沉,此处只读 last_call 不双计;
-                #  无记录时不发——不伪造数据)
-                try:
-                    from neurova.core.usage_accounting import get_usage_accounting
-
-                    last = get_usage_accounting().last_call()
-                    if last:
-                        usage_event = {
-                            "type": "usage",
-                            "session_id": session_id,
-                            "model": last.get("model", ""),
-                            "provider": last.get("provider", ""),
-                            "prompt_tokens": int(last.get("prompt_tokens", 0)),
-                            "completion_tokens": int(last.get("completion_tokens", 0)),
-                            "total_tokens": int(last.get("total_tokens", 0)),
-                            "estimated": bool(last.get("estimated", False)),
-                        }
-                        flush_events.append(usage_event)
-                        yield f"data: {json.dumps(usage_event, ensure_ascii=False)}\n\n"
-                except Exception:  # noqa: BLE001 — usage 读取失败不影响 done
-                    pass
+                # P2-6：usage 事件已改由 run_chat 任务内发射（并发串号根修），
+                # 此处不再读全局 last_call 补发
                 _buffer_replay_events(session_id, flush_events)
                 yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
                 buf = _replay_buffers.get(session_id)
@@ -761,12 +770,27 @@ async def post_console_chat(
 
 
 @router.post("/chat/stop")
-async def post_console_chat_stop(session_id: str):
+async def post_console_chat_stop(
+    session_id: str,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """停止运行中的对话
 
     P0-2 真取消：cancel per-session 注册的 chat asyncio task，取消沿
     await 点传播中断 LLM/工具执行；SSE 流以 stopped+done 收尾。
+    审计 2026-09-11 P0-3：补鉴权 + 会话归属校验（原实现匿名可停任意会话）。
+    复核修正：归属校验只拒绝"已落盘且属他人"的会话（403）——新会话
+    首轮流式期间 session 文件尚未落盘（add_message 轮末才写），此时
+    find_session 返回 None，若照搬 history 的 404 语义会把停止按钮
+    打断在最需要取消的场景上；会话不存在时放行旧语义（取消按 session_id
+    匹配运行任务，无可取消则 stopped=False）。
     """
+    repo = get_session_repository()
+    target = repo.find_session(session_id)
+    if target is not None:
+        # 与 history/delete 端点同规（空 user_id 视为共享会话放行）
+        _check_session_ownership(target, _get_user_id(request, current_user))
     from neurova.core.task_tracker import get_task_tracker
 
     stopped = get_task_tracker().request_session_stop(session_id)
@@ -1768,11 +1792,15 @@ async def export_training_set(request: Request, current_user: Dict[str, Any] = D
 
 
 @router.get("/tasks")
-async def list_console_running_tasks(request: Request):
+async def list_console_running_tasks(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """运行中任务快照（B3-3 后台任务面板数据源；P0-2 任务跟踪器）。
 
     返回 per-session 注册的 asyncio 任务（kind/started_at/duration），
     供前端后台任务面板分组展示与取消操作联动 POST /console/chat/stop。
+    审计 2026-09-11 P0-3：补鉴权（原实现匿名泄露全部会话任务面）。
     """
     _ = request
     from neurova.core.task_tracker import get_task_tracker
