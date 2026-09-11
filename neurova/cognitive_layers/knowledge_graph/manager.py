@@ -297,19 +297,21 @@ class KnowledgeGraphManager:
             return
 
         try:
+            from neurova.core.atomic_io import atomic_write_text
+
             nodes_file = self._storage_dir / "nodes.json"
             edges_file = self._storage_dir / "edges.json"
 
             nodes_data = [node.to_dict() for node in self._nodes.values()]
             edges_data = [edge.to_dict() for edge in self._edges.values()]
 
-            nodes_file.write_text(
+            atomic_write_text(
+                nodes_file,
                 json.dumps(nodes_data, ensure_ascii=False, indent=2),
-                encoding="utf-8",
             )
-            edges_file.write_text(
+            atomic_write_text(
+                edges_file,
                 json.dumps(edges_data, ensure_ascii=False, indent=2),
-                encoding="utf-8",
             )
         except Exception as e:
             logger.error("Failed to save knowledge graph: %s", e)
@@ -319,10 +321,12 @@ class KnowledgeGraphManager:
         if not self._storage_dir or not self._auto_save:
             return
         try:
+            from neurova.core.atomic_io import atomic_write_text
+
             merges_file = self._storage_dir / "merges.json"
-            merges_file.write_text(
+            atomic_write_text(
+                merges_file,
                 json.dumps(self._merge_log, ensure_ascii=False, indent=2),
-                encoding="utf-8",
             )
         except Exception as e:
             logger.error("Failed to save merge log: %s", e)
