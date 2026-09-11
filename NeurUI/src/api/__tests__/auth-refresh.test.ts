@@ -21,7 +21,7 @@ vi.mock('@/utils/security', () => ({
 }))
 
 import { secureStorage } from '@/utils/security'
-import { request } from '../index'
+import { request, resetAuthRedirectForTest } from '../index'
 
 const secureGet = vi.mocked(secureStorage.get)
 const secureSet = vi.mocked(secureStorage.set)
@@ -82,6 +82,8 @@ beforeEach(() => {
   dataCalls = 0
   dataAlwaysFail = false
   dataAuthHeaders.length = 0
+  // P2-7：jsdom 无真实导航，401 跳转单飞标志需逐用例复位
+  resetAuthRedirectForTest()
   secureGet.mockImplementation((k: string) => (k === 'refresh_token' ? 'rt-old' : null))
   installAdapter()
 })

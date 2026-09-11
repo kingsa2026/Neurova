@@ -20,6 +20,13 @@ declare module 'axios' {
  * 成功后由各调用方重放各自的原请求（一次），失败才清凭证跳登录。
  */
 let refreshInFlight: Promise<string> | null = null
+// P2-7（审计 2026-09-11）：401 清库+跳转单飞——并发多请求的刷新都失败时，
+// 各自执行一次 remove+硬跳转；标志只在整页跳走前存活，属预期语义
+let authRedirectInFlight = false
+/** 测试隔离出口：jsdom 不发生真实导航，标志不会随页面卸载复位 */
+export function resetAuthRedirectForTest(): void {
+  authRedirectInFlight = false
+}
 
 /** 刷新 access token 并持久化（后端轮换 refresh_token，一并落盘）；返回新 access token。 */
 function refreshAccessToken(refreshToken: string): Promise<string> {
@@ -145,15 +152,20 @@ request.interceptors.response.use(
           logger.warn(`[API] 401 token refresh failed [${requestId}]: ${refreshErr instanceof Error ? refreshErr.message : String(refreshErr)}`)
         }
       }
-      secureStorage.remove(TOKEN_KEY)
-      secureStorage.remove(REFRESH_TOKEN_KEY)
-      secureStorage.remove('user')
-      // Redirect to login if not already there
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login'
+      // P2-7：清库+跳转单飞——硬刷新会丢 SPA 状态，路由守卫支持
+      // query.redirect 深链，多次整页跳转只会放大状态丢失
+      if (!authRedirectInFlight) {
+        authRedirectInFlight = true
+        secureStorage.remove(TOKEN_KEY)
+        secureStorage.remove(REFRESH_TOKEN_KEY)
+        secureStorage.remove('user')
+        // Redirect to login if not already there
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login'
+        }
+        // Don't treat expired/missing token as a real error — it's expected on page load
+        logger.warn(`[API] 401 Auth required [${requestId}] → redirecting to login`)
       }
-      // Don't treat expired/missing token as a real error — it's expected on page load
-      logger.warn(`[API] 401 Auth required [${requestId}] → redirecting to login`)
     } else if (status === 429) {
       const retryAfter = error.response?.headers?.['retry-after']
       const msg = retryAfter
