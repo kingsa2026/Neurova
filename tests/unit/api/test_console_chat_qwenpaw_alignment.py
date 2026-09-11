@@ -211,9 +211,22 @@ class TestSessionReorderEndpoint:
 # 3. P0-2：/chat/stop 真取消
 # ---------------------------------------------------------------------------
 
-def test_stop_endpoint_cancels_registered_chat_task():
-    """stop 端点必须取消 per-session 注册的 asyncio task（旧空壳只回 success）。"""
+def test_stop_endpoint_cancels_registered_chat_task(monkeypatch):
+    """stop 端点必须取消 per-session 注册的 asyncio task（旧空壳只回 success）。
+
+    P0-3（审计 2026-09-11）后端点签名含 request/current_user 且做会话归属
+    校验；本测试聚焦取消语义，桩掉会话定位（_find_session_target）。
+    """
     from neurova.core.task_tracker import get_task_tracker, reset_task_tracker
+
+    monkeypatch.setattr(
+        console_module, "_find_session_target",
+        lambda repo, sid, uid: {"session_id": sid},
+    )
+    import types as _types
+
+    _req = _types.SimpleNamespace()
+    _me = {"user_id": "u1", "username": "u1", "role": "user", "neuser_id": "u1"}
 
     async def scenario():
         async def work():
@@ -221,12 +234,14 @@ def test_stop_endpoint_cancels_registered_chat_task():
 
         task = asyncio.create_task(work())
         get_task_tracker().register_async_task("sess-stop-test", task, kind="chat")
-        resp = await console_module.post_console_chat_stop(session_id="sess-stop-test")
+        resp = await console_module.post_console_chat_stop(
+            session_id="sess-stop-test", request=_req, current_user=_me)
         assert resp["data"]["stopped"] is True
         with pytest.raises(asyncio.CancelledError):
             await task
         # 未知会话返回 stopped=False 而非报错
-        resp2 = await console_module.post_console_chat_stop(session_id="sess-stop-test")
+        resp2 = await console_module.post_console_chat_stop(
+            session_id="sess-stop-test", request=_req, current_user=_me)
         assert resp2["data"]["stopped"] is False
 
     asyncio.run(scenario())
