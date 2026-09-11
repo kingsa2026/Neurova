@@ -305,15 +305,32 @@ export function openCodeBlockTab(code: string, language: string): void {
   })
 }
 
+/** openImageTab 可选项（台账 #18/#11，2026-09-11） */
+export interface OpenImageTabOptions {
+  /**
+   * 稳定去重标识（附件 fileId / 消息 preview 等原始标识）。附件预览每次
+   * 点击 fetch 自建新 blob URL，按 url 去重会让同附件重复点击生成新 tab；
+   * 传 dedupeKey 后同附件回焦既有 tab。缺省按 url 去重（内联图服务端
+   * URL 本身稳定）。
+   */
+  dedupeKey?: string
+  /**
+   * url 为调用方为本面板专属创建（如附件预览 fetch 自建 blob），所有权
+   * 随 tab 转移、预览面板换源/卸载时 revoke；缺省 = 外来 URL，面板不
+   * revoke（消息 blob 由 store.revokeMessageBlobUrls 统一释放，台账 #11）。
+   */
+  createdBy?: 'panel'
+}
+
 /** 打开图片直链预览（消息内联图/附件缩略图/截图） */
-export function openImageTab(url: string, title: string): void {
+export function openImageTab(url: string, title: string, opts?: OpenImageTabOptions): void {
   const dock = useRightDockStore()
   dock.openTab({
-    id: `img:${shortHash(url)}`,
+    id: `img:${shortHash(opts?.dedupeKey || url)}`,
     kind: 'image',
     title: title || 'image',
     icon: 'image',
-    data: { url },
+    data: { url, createdBy: opts?.createdBy },
   })
 }
 
