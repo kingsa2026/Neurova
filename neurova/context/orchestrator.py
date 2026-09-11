@@ -1209,6 +1209,7 @@ class ContextOrchestrator:
             ## 当前时间
             当前日期:2026年6月28日 星期日
             时区:Asia/Shanghai (UTC+08:00)
+            季节:秋;临近节日:国庆节(20天内)   ← 时间感知 hint，可缺省
 
         说明:
         - 日期用中文格式(YYYY年MM月DD日)+ 星期,便于 LLM 回答"今天星期几"。
@@ -1242,10 +1243,21 @@ class ContextOrchestrator:
 
         date_str = f"{today.year}年{today.month}月{today.day}日"
 
+        # 时间感知 hint（季节/临近节日）：日级粒度，随日期字节稳定，可安全
+        # 进入 system 固定前缀；经 envelope 单源取用，异常/为空不渲染该行。
+        try:
+            from neurova.context.envelope import build_system_time_hint
+
+            time_hint = str(build_system_time_hint() or "")
+        except Exception:  # noqa: BLE001 - hint 缺失不阻断时间段
+            time_hint = ""
+        hint_line = f"{time_hint}\n" if time_hint else ""
+
         return (
             f"\n\n## 当前时间\n"
             f"当前日期:{date_str} {weekday_zh}\n"
             f"时区:{tz_name} (UTC{tz_offset_str})\n"
+            f"{hint_line}"
             f"提示:以上是系统注入的真实当前时间,请基于此时间回答用户的时间相关问题,"
             f"不要使用训练数据中的截止日期。"
         )

@@ -63,6 +63,23 @@ def build_time_block() -> str:
     return "\n".join(lines)
 
 
+def build_system_time_hint() -> str:
+    """system 侧日级稳定时间感知 hint（季节/临近节日）；不可用返回 ""。
+
+    与 build_time_block 的分工：hint 是日级粒度（跨轮字节稳定），可安全
+    进入 system 前缀；分钟级时刻只能走末条 user 信封 <time> 块（F1：
+    system 侧每轮变化会使前缀缓存命中率归零）。
+    """
+    try:
+        from neurova.cognitive_layers.emotion_context_layer.time_awareness import (
+            get_time_awareness,
+        )
+
+        return str(get_time_awareness().get_time_context_hint() or "")
+    except Exception:
+        return ""
+
+
 def build_envelope(blocks: Dict[str, Optional[str]]) -> str:
     """blocks → <system-reminder> 信封文本；空块不渲染；全空返回空串。"""
     sections: List[str] = [ENVELOPE_OPEN, ENVELOPE_IMMUNE]
