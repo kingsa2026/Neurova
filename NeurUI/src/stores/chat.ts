@@ -234,6 +234,10 @@ export const useChatStore = defineStore('chat', () => {
     inputText.value = ''
     retrievalStatus.value = ''
     eventsLostBanner.value = null
+    // P2-8（审计 2026-09-11）：per-session 用量累计一并清空——切 Agent 后
+    // 旧 Agent 的用量残留会让环形用量图带出上一 Agent 数据，且 Record 只增不减
+    sessionTokenUsage.value = {}
+    lastTurnUsage.value = null
   }
 
   function setRetrievalStatus(status: string): void {
