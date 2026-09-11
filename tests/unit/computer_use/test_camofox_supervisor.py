@@ -269,17 +269,18 @@ class TestRecordActivity:
 
 
 class TestIdleCheck:
-    """_check_idle:超时则请求停止"""
+    """_check_idle:超时则触发真实停机(RES-P1-3:原实现只 set 无人消费的 _stop_requested)"""
 
-    def test_idle_check_triggers_stop_event(self):
+    def test_idle_check_triggers_stop(self):
         from neurova.computer_use.camofox_supervisor import CamofoxSupervisor
 
         s = CamofoxSupervisor({"idle_timeout": 1})
         s._process = _make_process_mock()
         s._last_activity = time.time() - 100  # 100 秒前
 
-        s._check_idle()
-        assert s._stop_requested.is_set()
+        with patch.object(s, "_stop_from_monitor") as mock_stop:
+            s._check_idle()
+            mock_stop.assert_called_once()
 
     def test_idle_check_noop_when_fresh(self):
         from neurova.computer_use.camofox_supervisor import CamofoxSupervisor
@@ -288,16 +289,19 @@ class TestIdleCheck:
         s._process = _make_process_mock()
         s._last_activity = time.time()  # 刚刚活跃
 
-        s._check_idle()
-        assert not s._stop_requested.is_set()
+        with patch.object(s, "_stop_from_monitor") as mock_stop:
+            s._check_idle()
+            mock_stop.assert_not_called()
 
     def test_idle_check_noop_when_not_running(self):
         from neurova.computer_use.camofox_supervisor import CamofoxSupervisor
 
         s = CamofoxSupervisor({"idle_timeout": 1})
         s._process = None  # 没跑
-        s._check_idle()
-        assert not s._stop_requested.is_set()
+
+        with patch.object(s, "_stop_from_monitor") as mock_stop:
+            s._check_idle()
+            mock_stop.assert_not_called()
 
 
 class TestCleanupTempTraces:
