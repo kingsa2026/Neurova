@@ -36,6 +36,11 @@ class FakeSessionRepo:
     def list_sessions(self, agent_id: str = "", user_id: str = ""):
         return self._sessions
 
+    def count_sessions(self, agent_id: str = "", user_id: str = "") -> int:
+        # 接口扩展同步：SessionRepository 新增 count_sessions 后桩须忠实实现
+        # （mock 不忠实 → int(Mock) 抛错 → home 回退 0，假绿）
+        return len(self._sessions)
+
 
 class FakeMemoryManager:
     def __init__(self, count: int):
