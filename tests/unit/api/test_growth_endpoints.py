@@ -53,6 +53,12 @@ class GrowthReflectionEndpointsTest(unittest.TestCase):
 
         app = FastAPI()
         app.include_router(growth_api.router, prefix="/api/v1/growth")
+        # P0-5（审计 2026-09-11）：router 级鉴权后的测试身份注入
+        from neurova.api.auth import get_current_user as _gcu
+
+        app.dependency_overrides[_gcu] = lambda: {
+            "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+        }
         self.client = TestClient(app)
         self._patcher = patch.object(growth_api, "_get_agent", return_value=agent)
         self._patcher.start()
@@ -141,6 +147,12 @@ class GrowthQuestionEndpointsTest(unittest.TestCase):
 
         app = FastAPI()
         app.include_router(growth_api.router, prefix="/api/v1/growth")
+        # P0-5（审计 2026-09-11）：router 级鉴权后的测试身份注入
+        from neurova.api.auth import get_current_user as _gcu2
+
+        app.dependency_overrides[_gcu2] = lambda: {
+            "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+        }
         self.client = TestClient(app)
         self._patcher = patch.object(growth_api, "_get_agent", return_value=agent)
         self._patcher.start()

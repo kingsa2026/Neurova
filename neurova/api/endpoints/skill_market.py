@@ -17,10 +17,11 @@ import zipfile
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, File, UploadFile
+from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)],)
 
 _DEPRECATED = True
 """已废弃 — ADR 0013: 统一到 skill_pool_api.py。此端点为 stub 实现（内存 list + 硬编码数据）。"""

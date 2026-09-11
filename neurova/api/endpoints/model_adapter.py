@@ -4,8 +4,9 @@ Model Adapter API 端点 v1.0.0
 
 
 from fastapi import APIRouter, HTTPException
+from neurova.api.auth import get_current_user, Depends
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)],)
 
 
 # ── In-memory store ────────────────────────────────────

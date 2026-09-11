@@ -14,13 +14,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
+from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel
 
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)],)
 
 
 class ACPRegisterRequest(BaseModel):
