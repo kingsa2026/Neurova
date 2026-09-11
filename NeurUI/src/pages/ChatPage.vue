@@ -436,6 +436,7 @@ import { extractUploadedFileId } from '@/api/modules/files'
 import { useGovernanceApproval } from '@/composables/useGovernanceApproval'
 import { secureStorage } from '@/utils/security'
 import { renderMarkdown } from '@/utils/markdown'
+import { revokeMessageBlobUrls } from '@/utils/blobUrls'
 import { openArtifactTab, openCodeBlockTab, openFileTab, openImageTab, openToolResultArtifacts, artifactFromEvent, artifactsFromToolResult, mergeMessageArtifacts, openMessageArtifact, type ArtifactEventPayload, type MessageArtifact } from '@/utils/artifacts'
 import ArtifactCard from '@/components/chat/ArtifactCard.vue'
 import { uiMessage } from '@/utils/message'
@@ -537,7 +538,7 @@ function toggleHistoryPanel(): void {
 const { effort: thinkingEffort, setEffort: setThinkingEffort } = useThinkingEffort()
 
 // ── 蜂群子 Agent 浮窗（WS subagent_* 事件 → useSubAgentWindows）──
-const { handleSubAgentSyncEvent } = useSubAgentWindows()
+const { handleSubAgentSyncEvent, clearSubAgentWindows } = useSubAgentWindows()
 
 function onSessionSyncEvent(event: { event_type: string; payload: Record<string, unknown> }) {
   // 电脑操作实时事件 → 分屏面板（不携带 subagent_id，先于子 Agent 分支处理）
@@ -1936,9 +1937,29 @@ function handleContentClick(e: MouseEvent) {
 }
 
 /** 消息附件缩略图点击：图片 → dock 图片预览；其余类型带 fileId → 文档预览 */
-function onAttachmentClick(file: { name?: string; type?: string; preview?: string; fileId?: string }): void {
+async function onAttachmentClick(file: { name?: string; type?: string; preview?: string; fileId?: string }): Promise<void> {
   if (file.type?.startsWith('image/') && file.preview) {
-    openImageTab(file.preview, file.name || 'image')
+    // P1-10（审计 2026-09-11）：dock 面板卸载时会 revoke 持有的 src，不得把
+    // 消息自身的 blob URL 交给它（面板一关消息缩略图的 URL 即失效）——
+    // 经 fetch 自建一份交给 dock，随面板生命周期配对释放。
+    // #11/#18（2026-09-11）：自建 URL 标记 createdBy:'panel'（所有权随面板
+    // 释放；自建失败回退的消息 blob 不标记，由 store.revokeMessageBlobUrls
+    // 统一释放）；去重键用稳定标识（fileId 优先，回退消息 preview），重复
+    // 点击回焦既有 tab 而非每次自建新 blob 生成新 tab。
+    let url = file.preview
+    let createdByPanel = false
+    if (url.startsWith('blob:')) {
+      try {
+        url = URL.createObjectURL(await (await fetch(file.preview)).blob())
+        createdByPanel = true
+      } catch {
+        /* 自建失败回退原 URL（外来 URL 契约：面板不 revoke，无连带撤消） */
+      }
+    }
+    openImageTab(url, file.name || 'image', {
+      dedupeKey: file.fileId || file.preview,
+      createdBy: createdByPanel ? 'panel' : undefined,
+    })
   } else if (file.fileId) {
     openFileTab(file.fileId, file.name || 'file', file.type)
   }
@@ -2222,8 +2243,15 @@ function scrollToMessage(idx: number): void {
 }
 
 // 补课 E：消息内容变更 → 防抖渲染 mermaid 占位
+// P2-16（审计 2026-09-11）：源改为增量信号（消息条数 + 末条 content 长度）。
+// 原 map+reduce 对全部历史消息求长度和，流式每 chunk 全量重算；流式只追加
+// 末条消息，条数或末条长度变化即覆盖了需要触发渲染的全部场景。
 watch(
-  () => messages.value.map((m) => m.content.length).reduce((a, b) => a + b, 0),
+  () => {
+    const msgs = messages.value
+    const last = msgs[msgs.length - 1]
+    return `${msgs.length}:${last ? last.content.length : 0}`
+  },
   () => scheduleMermaidRender(messagesRef.value),
 )
 onMounted(() => void nextTick().then(() => renderMermaid(messagesRef.value)))
@@ -2276,6 +2304,9 @@ watch(agentId, (newId, oldId) => {
     if (prevSession) chatDraft.save(prevSession, inputText.value)
     chatStore.clearMessages()
     chatStore.setCurrentSession(null)
+    // P2-15（审计 2026-09-11）：切 Agent 整栈回收子 Agent 浮窗
+    // （旧 Agent 流已在上面的 abort 分支中止，运行窗也不会再有事件）
+    clearSubAgentWindows()
     loadSessions()
     // 存档 tab 开着时随 agent 切换刷新列表（dock ArchiveTab 自身挂载时也会加载）
     if (rightDock.tabs.some((tab) => tab.kind === 'archive')) {
@@ -2283,6 +2314,10 @@ watch(agentId, (newId, oldId) => {
     }
   }
 })
+
+// P2-15（审计 2026-09-11）：会话切换回收子 Agent 浮窗（模块级单例跨会话残留）。
+// 浮窗状态不随会话持久化，切换后旧窗不再有事件流入，一律整栈回收。
+watch(currentSessionId, () => clearSubAgentWindows())
 
 onMounted(() => {
   loadSessions()
@@ -2308,17 +2343,9 @@ onBeforeUnmount(() => {
   for (const pf of pendingFiles.value) {
     if (pf.preview) URL.revokeObjectURL(pf.preview)
   }
-  // Revoke TTS blob URLs
-  // BUG-23 修复：补 revoke 每条消息的 ttsUrls 数组（流式语音一轮可产生
-  // 几十个 blob URL，原实现只清 audioUrl）
-  const revokeUrls: string[] = []
-  for (const msg of messages.value) {
-    if (msg.audioUrl?.startsWith('blob:')) revokeUrls.push(msg.audioUrl)
-    for (const u of msg.ttsUrls || []) {
-      if (u?.startsWith('blob:')) revokeUrls.push(u)
-    }
-  }
-  for (const u of revokeUrls) URL.revokeObjectURL(u)
+  // P1-10（审计 2026-09-11）：统一经 revokeMessageBlobUrls 回收消息 blob URL。
+  // 覆盖 audioUrl/ttsUrls（原 BUG-23 补课逻辑）+ attachments[].preview（原实现漏撤）。
+  for (const msg of messages.value) revokeMessageBlobUrls(msg)
 })
 </script>
 
