@@ -594,7 +594,9 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...), curre
         for workspace in workspace_candidates:
             if not workspace.is_dir():
                 continue
-            if _remove_tree_with_retry(workspace):
+            # P2-7: rmtree + time.sleep 重试删大工作区可达秒级~十秒级，
+            # 必须丢线程池执行，不得阻塞事件循环
+            if await asyncio.to_thread(_remove_tree_with_retry, workspace):
                 logger.info("Removed workspace for %s: %s", agent_id, workspace)
             else:
                 cleanup_report["workspace_removed"] = False
@@ -602,7 +604,9 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...), curre
         # 2) 认知图谱数据目录 data/{agent_id}（agent_core._init_cognitive_graph 创建，CWD 相对）
         if agent_id not in _RESERVED_DATA_DIR_NAMES:
             agent_data_dir = Path("data") / agent_id
-            if agent_data_dir.is_dir() and not _remove_tree_with_retry(agent_data_dir):
+            if agent_data_dir.is_dir() and not await asyncio.to_thread(
+                _remove_tree_with_retry, agent_data_dir
+            ):
                 cleanup_report["agent_data_removed"] = False
     else:
         logger.warning("Agent id '%s' 含不安全字符，跳过文件系统清理", agent_id)

@@ -24,6 +24,10 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
+# P2-6: fire-and-forget 后台任务持强引用集合——防任务被 GC 中途回收、
+# 异常无人收割（对照 multi_model_client._pending_tasks 姿势）
+_background_tasks: set = set()
+
 # 导入协作服务
 try:
     from neurova.collaboration.collaboration_isolation import CollaborationIsolationManager, get_collaboration_manager
@@ -795,7 +799,7 @@ async def run_canvas_workflow(
     # 后台执行（立即返回 execution_id 供前端轮询；session_id 透传给蜂群事件）
     import asyncio
 
-    asyncio.create_task(
+    task = asyncio.create_task(
         executor.execute(
             workflow,
             inputs={},
@@ -806,6 +810,8 @@ async def run_canvas_workflow(
             debug_session=debug_session,
         )
     )
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return {
         "code": 0,
