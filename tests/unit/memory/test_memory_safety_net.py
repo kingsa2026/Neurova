@@ -74,15 +74,6 @@ class TestMemorySystemSafetyNet:
         from neurova.cognitive_layers.memory_layer.vector_search import VectorSearch
         assert VectorSearch is not None
 
-    def test_vector_search_advanced_importable(self):
-        """测试 vector_search_advanced 可导入（多后端支持）"""
-        from neurova.cognitive_layers.memory_layer.vector_search_advanced import (
-            AdvancedVectorSearch,
-            create_vector_search,
-        )
-        assert AdvancedVectorSearch is not None
-        assert callable(create_vector_search)
-
     # ═══ 兼容层导出 ═══
 
     def test_memory_compat_layer_exports(self):

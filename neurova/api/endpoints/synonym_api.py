@@ -73,16 +73,6 @@ _config: Dict[str, Any] = {
 }
 
 
-def _get_vsa():
-    """获取向量搜索高级模块"""
-    try:
-        from neurova.cognitive_layers.memory_layer.vector_search_advanced import VectorSearchAdvanced
-
-        return VectorSearchAdvanced()
-    except Exception:
-        return None
-
-
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
