@@ -12,7 +12,8 @@ import i18n from '@/i18n'
  * id 约定（去重键）：
  * - singleton kind：history / archive / computer 以 kind 为 id；
  * - 文档产物：`doc:{artifactId|pathHash}`；代码块：`code:{hash}`；
- *   图片：`img:{url}`；上传件：`file:{fileId}`（调用方构造，见 utils/artifacts.ts）。
+ *   图片：`img:{dedupeKey|url}`（dedupeKey = 附件等稳定标识，台账 #18，
+ *   见 utils/artifacts.ts openImageTab）；上传件：`file:{fileId}`（调用方构造）。
  */
 
 export type DockTabKind =
@@ -36,6 +37,14 @@ export interface DockTabData {
   fileId?: string
   /** 图片直链 / data URL / blob URL */
   url?: string
+  /**
+   * url 所有权标记（台账 #11 根修，2026-09-11）：'panel' = 该 url 由调用方
+   * 为本面板专属创建（如附件预览 fetch 自建 blob），所有权随 tab 转移，
+   * 预览面板换源/卸载时负责 revoke；未标记 = 外来 URL（服务端直链 / 消息
+   * 自有 blob / data URL），面板一律不 revoke——消息 blob 由
+   * store.revokeMessageBlobUrls 统一释放。
+   */
+  createdBy?: 'panel'
   /** 源文件路径（标题与展示用） */
   path?: string
 }

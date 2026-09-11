@@ -124,8 +124,10 @@ function stopPolling() {
     clearInterval(pollTimer)
     pollTimer = null
   }
-  onUnmounted(() => stopPolling())
 }
+
+// P2-14：卸载清理必须在 setup 顶层注册（误植进 stopPolling() 体内永不注册）
+onUnmounted(() => stopPolling())
 
 async function start(item: PendingDownloadItem) {
   started[item.model] = true

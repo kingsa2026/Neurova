@@ -37,20 +37,35 @@ const scale = ref(1)
 const error = ref('')
 const src = ref('')
 
+/**
+ * 面板负责释放的 object URL（台账 #11 根修，2026-09-11）：
+ * - 自建（artifactId/fileId 经 fetch 转 object URL）；
+ * - data.url 且 data.createdBy === 'panel'（调用方为面板专属创建）。
+ * 外来 URL（服务端直链/消息自有 blob）一律不 revoke——消息 blob 由
+ * store.revokeMessageBlobUrls 统一释放，面板误撤会使消息缩略图失效。
+ */
+let ownedUrl = ''
+
+function releaseSrc(): void {
+  if (ownedUrl) {
+    URL.revokeObjectURL(ownedUrl)
+    ownedUrl = ''
+  }
+  src.value = ''
+}
+
 /** 内容端点有 JWT 鉴权，<img> 直链必 401 → 经 Bearer 取 blob 转 object URL */
 async function loadSrc(): Promise<void> {
-  if (src.value) {
-    URL.revokeObjectURL(src.value)
-    src.value = ''
-  }
+  releaseSrc()
   error.value = ''
   try {
     if (props.tab.data.url) {
       src.value = props.tab.data.url
+      if (props.tab.data.createdBy === 'panel') ownedUrl = src.value
     } else if (props.tab.data.artifactId) {
-      src.value = await artifactContentObjectUrl(props.tab.data.artifactId)
+      src.value = ownedUrl = await artifactContentObjectUrl(props.tab.data.artifactId)
     } else if (props.tab.data.fileId) {
-      src.value = await fileContentObjectUrl(props.tab.data.fileId)
+      src.value = ownedUrl = await fileContentObjectUrl(props.tab.data.fileId)
     }
   } catch {
     error.value = 'load'
@@ -63,9 +78,7 @@ watch(
   { immediate: true },
 )
 
-onBeforeUnmount(() => {
-  if (src.value) URL.revokeObjectURL(src.value)
-})
+onBeforeUnmount(releaseSrc)
 
 function onWheel(e: WheelEvent): void {
   const delta = e.deltaY > 0 ? -0.1 : 0.1
