@@ -184,31 +184,20 @@ class TestDuplicateImplementation:
     """BUG: channels/mobile_pairing.py 与 api/endpoints/mobile_pairing.py 双实现"""
 
     def test_channels_mobile_pairing_should_be_removed_or_unified(self):
-        """RED: channels/mobile_pairing.py 应被删除（死代码）或与 api/endpoints 合并
+        """GREEN（台账 #4 已修）: channels/mobile_pairing.py 必须已删除（防复活断言）
 
-        验证: channels/mobile_pairing.py 不应作为独立实现存在
-        - 如果存在，它应该只是 api/endpoints/mobile_pairing.py 的 re-export
-        - 或者完全删除
+        原双实现（channels 版零运行时消费方）已于 2026-09-11 删除；
+        本测试从"存在则校验是否 re-export"转为正向断言文件不存在。
         """
-        # 检查 channels/mobile_pairing.py 是否还存在独立的 MobilePairingManager 类
-        try:
-            from neurova.channels.mobile_pairing import MobilePairingManager as ChannelsManager
-            from neurova.api.endpoints.mobile_pairing import _pairing_codes
+        from pathlib import Path
 
-            # 如果 channels 版本还存在独立的 Manager 类，说明双实现未合并
-            # 修复后: channels 版本应要么删除，要么只是 re-export
-            # 这里我们验证: channels 版本不应有独立的业务逻辑
-            import inspect
-            src = inspect.getsource(ChannelsManager)
-            # 如果源码中包含 _sessions 字典（独立存储），说明是独立实现
-            if "_sessions" in src and "_issue_ws_token" in src:
-                pytest.fail(
-                    "channels/mobile_pairing.py 仍包含独立的 MobilePairingManager 实现，"
-                    "应删除或合并到 api/endpoints/mobile_pairing.py"
-                )
-        except ImportError:
-            # channels/mobile_pairing.py 已删除 — 通过
-            pass
+        import neurova.channels
+
+        channels_mp = Path(neurova.channels.__file__).resolve().parent / "mobile_pairing.py"
+        assert not channels_mp.exists(), (
+            "channels/mobile_pairing.py 复活：与 api/endpoints/mobile_pairing.py 双实现回归，"
+            "应删除或合并到 api/endpoints/mobile_pairing.py"
+        )
 
     def test_no_business_code_imports_channels_mobile_pairing(self):
         """RED: 业务代码不应导入 channels/mobile_pairing.py"""
