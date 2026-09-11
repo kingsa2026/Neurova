@@ -10,7 +10,11 @@ export interface UsageAnalytics {
   total_requests: number
   total_tokens: number
   avg_latency_ms: number
-  by_agent: { agent_id: string; name: string; requests: number; tokens: number }[]
+  /** B1-5：Prompt Cache 命中/写入与命中率（读不到明细为 0） */
+  cache_read_tokens: number
+  cache_write_tokens: number
+  cache_hit_rate: number
+  by_agent: { agent_id: string; name: string; requests: number; tokens?: number; calls?: number }[]
   by_model: { model: string; requests: number; tokens: number }[]
   daily_trend: { date: string; requests: number; tokens: number }[]
 }
