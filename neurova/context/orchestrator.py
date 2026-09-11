@@ -126,10 +126,23 @@ class ContextOrchestrator:
             self.context_pool = None
 
     def set_session_id(self, session_id: str) -> None:
-        """根因 C 修复: 运行时切换 session_id（用于跨 session 调取）"""
+        """根因 C 修复: 运行时切换 session_id（用于跨 session 调取）
+
+        RES-P2-4：切换时裁剪 _window_compaction_cache——该缓存按 session_id
+        记账（每会话一条摘要+hash 集合）且此前永不清理，Agent 长期服务多
+        会话时随历史会话数无界增长。摘要可随时按未覆盖消息重建（零丢失），
+        只保留当前会话条目即可。
+        """
         self._session_id = session_id
         if self.context_pool is not None:
             self.context_pool.session_id = session_id
+        cache = self._window_compaction_cache
+        if len(cache) > 1:
+            keep_key = session_id or "_"
+            kept = cache.pop(keep_key, None)
+            cache.clear()
+            if kept is not None:
+                cache[keep_key] = kept
 
     @property
     def session_id(self) -> Optional[str]:
