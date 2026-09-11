@@ -3,13 +3,15 @@ fn main() {
   inject_boot_icon_env();
 }
 
-/// boot 页品牌图标：编译期读取并 base64 注入环境变量（boot 页必须零外部
-/// 资产依赖，dist 缺文件时 boot 窗白屏——白屏回归的根因）。图标优先取
-/// public/img/neurova-icon.png，缺失回退打包 icons/128x128.png。
+/// boot 页品牌字标：编译期读取并 base64 注入环境变量（boot 页必须零外部
+/// 资产依赖，dist 缺文件时 boot 窗白屏——白屏回归的根因）。优先取纯文字
+/// 白标 NEUROVA-WORDMARK-white.png（2026-09-11 用户要求启动页不用图标+文字
+/// 构图），缺失回退 neurova-icon.png / 打包 icons/128x128.png。
 fn inject_boot_icon_env() {
   use std::path::PathBuf;
 
   let candidates = [
+    PathBuf::from("../public/img/NEUROVA-WORDMARK-white.png"),
     PathBuf::from("../public/img/neurova-icon.png"),
     PathBuf::from("icons/128x128.png"),
   ];
@@ -20,9 +22,9 @@ fn inject_boot_icon_env() {
   println!("cargo:rerun-if-changed={}", icon.display());
   println!("cargo:rerun-if-changed=src/boot_page.html");
 
-  let bytes = std::fs::read(icon).expect("读取 boot 页品牌图标失败");
+  let bytes = std::fs::read(icon).expect("读取 boot 页品牌字标失败");
   let b64 = base64_encode(&bytes);
-  println!("cargo:rustc-env=NEUROVA_ICON_B64={b64}");
+  println!("cargo:rustc-env=NEUROVA_WORDMARK_B64={b64}");
 }
 
 /// 最小 base64（标准字母表 + padding），避免引入构建依赖。

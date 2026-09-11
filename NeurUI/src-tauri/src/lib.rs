@@ -24,7 +24,7 @@ fn boot_html() -> &'static str {
     static BOOT_HTML: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     BOOT_HTML.get_or_init(|| {
         include_str!("boot_page.html")
-            .replace("__NEUROVA_ICON_B64__", env!("NEUROVA_ICON_B64"))
+            .replace("__NEUROVA_WORDMARK_B64__", env!("NEUROVA_WORDMARK_B64"))
     })
 }
 
