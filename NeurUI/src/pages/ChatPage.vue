@@ -80,7 +80,7 @@
         <div
           v-for="(msg, idx) in renderedMessages"
           :id="`nr-msg-${absIdx(idx)}`"
-          :key="absIdx(idx)"
+          :key="msgKey(msg, absIdx(idx))"
           class="nr-msg"
           :class="[`nr-msg--${msg.role}`, { 'nr-msg--hit': msgSearchHits.includes(absIdx(idx)) && absIdx(idx) === msgSearchCursor, 'nr-msg--checkpoint': msg.checkpoint }]"
         >
@@ -715,6 +715,13 @@ function absIdx(windowIdx: number): number {
   return renderStart.value + windowIdx
 }
 
+// P2-9（审计 2026-09-11）：v-for key 用消息稳定键——旧实现 key=绝对下标，
+// 上滚扩窗（renderStart 前移）后整窗 key 全变 → DOM 全量重建、滚动锚点跳动。
+// timestamp 同轮共享（user+assistant 同戳），按 role 组合；无 timestamp 回退下标。
+function msgKey(msg: ChatMessage, idx: number): string {
+  return msg.timestamp ? `${msg.timestamp}-${msg.role}` : `idx-${idx}`
+}
+
 // ── 流式状态条 + 步骤时间轴 helpers（2026-09-07 三需求①②） ─────────────
 
 /** 流式阶段 → 图标 + i18n 标签。 */
@@ -1065,6 +1072,12 @@ async function scrollToFirstHit(sessionId: string, keyword: string): Promise<voi
       String(m.content || '').toLowerCase().includes(keyword.toLowerCase()),
     )
     if (idx >= 0) {
+      // P2-10：窗口化渲染下命中可能在窗口外（未渲染，getElementById 必空）
+      // ——先扩窗再取元素（与 jumpToMatch 同法）
+      if (idx < renderStart.value) {
+        renderStart.value = Math.max(0, idx - RENDER_BUFFER)
+      }
+      await nextTick()
       const el = document.getElementById(`nr-msg-${idx}`)
       if (el) {
         el.scrollIntoView({ block: 'center' })
@@ -1538,6 +1551,10 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       // Auto-create session if this is the first exchange
       if (!currentSessionId.value && event.session_id) {
         chatStore.setCurrentSession(event.session_id)
+        // P1-12（审计 2026-09-11）：新会话首轮 done 拿到 session_id 时同步
+        // 流快照——否则 finally 守卫 `currentSessionId === activeStreamSessionId`
+        // 变成 "新id" === null 恒假，流式期间入队的消息永不自动续发
+        activeStreamSessionId = event.session_id
         // BUG-6 修复：标题取发送时文本（inputText 此时已被清空，
         // 流式中又输入的草稿会污染标题）
         chatStore.addSession({
@@ -1858,6 +1875,9 @@ function formatFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
 }
 
+// P2-10：复制按钮复位定时器句柄（卸载时清理，防回调触碰已销毁 DOM）
+const copyResetTimers: number[] = []
+
 // ---------------------------------------------------------------------------
 // Rich Content Rendering
 // ---------------------------------------------------------------------------
@@ -1885,14 +1905,14 @@ function handleContentClick(e: MouseEvent) {
     const code = codeEl ? codeEl.textContent || '' : ''
     navigator.clipboard.writeText(code).then(() => {
       copyBtn.textContent = '✓'
-      setTimeout(() => {
+      copyResetTimers.push(window.setTimeout(() => {
         copyBtn.textContent = t('common.copy')
-      }, 1500)
+      }, 1500))
     }).catch(() => {
       copyBtn.textContent = '✗'
-      setTimeout(() => {
+      copyResetTimers.push(window.setTimeout(() => {
         copyBtn.textContent = t('common.copy')
-      }, 1500)
+      }, 1500))
     })
     return
   }
@@ -1930,23 +1950,28 @@ function onAttachmentClick(file: { name?: string; type?: string; preview?: strin
 // ── 会话内消息搜索（补课 B）─────────────────────────────
 const msgSearchOpen = ref(false)
 const msgSearchQuery = ref('')
-const msgSearchCursor = ref(0)  // 当前命中下标（0..hits.length-1）
+const msgSearchCursor = ref(-1)  // 当前命中的绝对消息下标；-1 = 尚未跳转
 const msgSearchHits = computed(() => findMessageMatches(messages.value, msgSearchQuery.value))
 
 function openMsgSearch(): void {
   msgSearchOpen.value = !msgSearchOpen.value
   if (msgSearchOpen.value) {
     msgSearchQuery.value = ''
-    msgSearchCursor.value = 0
+    msgSearchCursor.value = -1
   }
 }
 
 function jumpToMatch(dir: 1 | -1): void {
   const hits = msgSearchHits.value
   if (hits.length === 0) return
-  // 游标循环移动
-  msgSearchCursor.value = (msgSearchCursor.value + dir + hits.length) % hits.length
-  const idx = hits[msgSearchCursor.value]
+  // 游标循环移动（P1-10：cursor 语义 = 命中消息的绝对下标；旧实现把
+  // "命中在 hits 数组中的序号"与绝对下标混用，高亮落到错误消息）
+  const cursor = hits.indexOf(msgSearchCursor.value)
+  const next = cursor === -1
+    ? (dir === 1 ? 0 : hits.length - 1)
+    : (cursor + dir + hits.length) % hits.length
+  msgSearchCursor.value = hits[next]!
+  const idx = msgSearchCursor.value
   // 窗口化渲染（补课 A6）：命中在窗口外时先前扩窗直到包含该下标
   if (idx < renderStart.value) {
     renderStart.value = Math.max(0, idx - RENDER_BUFFER)
@@ -2237,6 +2262,18 @@ watch(
 
 watch(agentId, (newId, oldId) => {
   if (newId && newId !== oldId) {
+    // P1-11（审计 2026-09-11）：切 Agent 必须先中止在途流并复位 streaming 态——
+    // 旧流继续把增量写进已换走的孤儿 assistant proxy，且 isStreaming 挂到
+    // finally 才复位，新 Agent 页面发送按钮被禁用数十秒；旧草稿同样先存后走
+    if (isStreaming.value) {
+      abortController?.abort()
+      abortController = null
+      activeStreamSessionId = null
+      chatStore.setStreaming(false)
+      stopStreamTTS()
+    }
+    const prevSession = currentSessionId.value
+    if (prevSession) chatDraft.save(prevSession, inputText.value)
     chatStore.clearMessages()
     chatStore.setCurrentSession(null)
     loadSessions()
@@ -2260,6 +2297,9 @@ onBeforeUnmount(() => {
   historyAnchorObserver?.disconnect()
   historyAnchorObserver = null
   stopStreamTTS()
+  // P2-10：清理复制按钮复位定时器
+  for (const t of copyResetTimers) window.clearTimeout(t)
+  copyResetTimers.length = 0
   // 补课 D：离开页面保存当前会话草稿
   if (currentSessionId.value) chatDraft.save(currentSessionId.value, inputText.value)
   disposeMermaid()

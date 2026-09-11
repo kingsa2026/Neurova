@@ -10,7 +10,7 @@
  * - 组件卸载自动释放（release 回调）
  * - 无 locks API（旧浏览器）→ 恒返回 owner=true（能力降级不阻塞）
  */
-import { onUnmounted, ref, watch, type Ref } from 'vue'
+import { getCurrentInstance, onUnmounted, ref, watch, type Ref } from 'vue'
 
 // ---------------------------------------------------------------------------
 // 2026-09-08 dock 收编 / composer 拆分产物：共享单例。
@@ -22,6 +22,11 @@ import { onUnmounted, ref, watch, type Ref } from 'vue'
 const sharedIsOwner = ref(true)
 let sharedReleaseLock: (() => void) | null = null
 let sharedCurrentKey: string | null = null
+// P1-13（审计 2026-09-11）：实例引用计数——ChatPage 与 ChatComposerArea 共享
+// 同一把锁，组件卸载只在最后一个实例离开时释放；原实现声明"卸载自动释放"
+// 却从未接线（onUnmounted 只 import 未调用），持有者路由离开后其他标签
+// 永远抢不到锁，发送按钮恒禁用直到刷新。
+let sharedInstanceCount = 0
 
 function sharedRelease(): void {
   if (sharedReleaseLock) {
@@ -64,6 +69,17 @@ async function sharedAcquire(key: string): Promise<void> {
 }
 
 export function useSessionSendLock(sessionId: Ref<string | null | undefined>) {
+  // P1-13：接线卸载释放（引用计数，最后一个实例卸载才真正释放）
+  if (getCurrentInstance()) {
+    sharedInstanceCount++
+    onUnmounted(() => {
+      sharedInstanceCount--
+      if (sharedInstanceCount <= 0) {
+        sharedIsOwner.value = true
+        sharedRelease()
+      }
+    })
+  }
   // 每个调用方各自 watch 同一 store ref（回调都写共享状态，天然去重：
   // sharedAcquire 内部先 sharedRelease 旧 key，key 未变时跳过重复竞争——
   // 防 Web Locks 同标签自锁：ifAvailable 下自己持有的锁自己再请求会失败）。
@@ -84,7 +100,8 @@ export function useSessionSendLock(sessionId: Ref<string | null | undefined>) {
   return { isOwner: sharedIsOwner, release: sharedRelease }
 }
 
-/** 测试隔离出口：清空单例 watch 安装标记（锁本体由浏览器端释放） */
+/** 测试隔离出口：清空单例 watch 安装标记与引用计数（锁本体由浏览器端释放） */
 export function resetSessionSendLockForTest(): void {
   sharedCurrentKey = null
+  sharedInstanceCount = 0
 }
