@@ -229,9 +229,13 @@ class TestPluginChannelRegistry:
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
 
+        from neurova.api.auth import get_current_user
         from neurova.api.endpoints import channel_config as cc
 
         app = FastAPI()
+        # 路由级鉴权（dependencies=[Depends(get_current_user)]）是正确设计——
+        # 单测 override 后专注 schema 契约本身
+        app.dependency_overrides[get_current_user] = lambda: {"user_id": "t"}
         app.include_router(cc.router)
         client = TestClient(app)
         resp = client.get("/channel-configs/schemas")
