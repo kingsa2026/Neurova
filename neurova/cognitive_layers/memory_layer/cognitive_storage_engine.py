@@ -384,13 +384,31 @@ class CognitiveStorageEngine:
         with self._buffer_lock:
             written_ids = {n.id for n in nodes}
             self._l0_buffer = [n for n in self._l0_buffer if n.id not in written_ids]
-        # Clear WAL after successful flush
+        # WAL 收敛（DATA-P1-3，审计 2026-09-11）：不再无条件清空——原实现在
+        # "快照 nodes" 与 "截断 WAL" 之间并发 store() 追加的节点不在 written_ids
+        # 里却被一起抹掉，其唯一磁盘记录丢失（崩溃即永久丢失）。改为按 id 重写：
+        # 丢弃已写入 L1 的条目，保留其余（并发新增 + 历史失败批次残留）。
         with self._wal_lock:
             try:
-                with open(self._wal_path, "w", encoding="utf-8") as f:
-                    pass  # truncate
+                if self._wal_path.exists():
+                    kept_lines: list = []
+                    with open(self._wal_path, "r", encoding="utf-8") as f:
+                        for line in f:
+                            stripped = line.strip()
+                            if not stripped:
+                                continue
+                            try:
+                                entry_id = json.loads(stripped).get("id")
+                            except Exception:
+                                kept_lines.append(stripped)  # 坏行保留，恢复侧有逐行容错
+                                continue
+                            if entry_id not in written_ids:
+                                kept_lines.append(stripped)
+                    with open(self._wal_path, "w", encoding="utf-8") as f:
+                        for line in kept_lines:
+                            f.write(line + "\n")
             except Exception as e:
-                logger.error("WAL clear failed: %s", e)
+                logger.error("WAL rewrite failed: %s", e)
         logger.debug("Flushed %s nodes from L0 to L1", len(nodes))
 
     def store(self, node: UnifiedMemoryNode) -> str:

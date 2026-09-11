@@ -26,7 +26,7 @@ class TestCacheKeyIsolation:
         # 模拟底层记忆管理器
         mock_memories = [Mock(content="A 的记忆", importance=0.9)]
         with patch.object(manager, "_memory_manager") as mock_mm:
-            mock_mm.search.return_value = mock_memories
+            mock_mm.recall.return_value = mock_memories
             manager.recall_memories(
                 "测试查询", limit=5, user_id="userA", agent_id="agentX"
             )
@@ -47,7 +47,7 @@ class TestCacheKeyIsolation:
 
         with patch.object(manager, "_memory_manager") as mock_mm:
             # 两次底层检索返回不同结果
-            mock_mm.search.side_effect = [user_a_memories, user_b_memories]
+            mock_mm.recall.side_effect = [user_a_memories, user_b_memories]
 
             # user A 检索(写入缓存)
             results_a = manager.recall_memories("查询", limit=5, user_id="userA")
@@ -58,14 +58,14 @@ class TestCacheKeyIsolation:
         assert results_a is user_a_memories, "user A 应得到自己的记忆"
         assert results_b is user_b_memories, "user B 应得到自己的记忆,而非 A 的缓存"
         # 底层 search 应被调用两次(B 也查了底层,未命中缓存)
-        assert mock_mm.search.call_count == 2, "两用户都应触发底层检索"
+        assert mock_mm.recall.call_count == 2, "两用户都应触发底层检索"
 
     def test_different_users_get_different_cache_entries(self):
         """两用户用相同 query/limit 应产生两条独立缓存。"""
         manager = MemoryReadWriteManager()
 
         with patch.object(manager, "_memory_manager") as mock_mm:
-            mock_mm.search.side_effect = [
+            mock_mm.recall.side_effect = [
                 [Mock(content="A", importance=0.5)],
                 [Mock(content="B", importance=0.5)],
             ]
@@ -81,13 +81,13 @@ class TestCacheKeyIsolation:
 
         mock_memories = [Mock(content="A 的记忆", importance=0.9)]
         with patch.object(manager, "_memory_manager") as mock_mm:
-            mock_mm.search.return_value = mock_memories
+            mock_mm.recall.return_value = mock_memories
 
             manager.recall_memories("查询", limit=5, user_id="userA")
             manager.recall_memories("查询", limit=5, user_id="userA")
 
         # 同一用户第二次应命中缓存,底层只调用一次
-        assert mock_mm.search.call_count == 1, "同一用户应命中缓存"
+        assert mock_mm.recall.call_count == 1, "同一用户应命中缓存"
         assert manager._cache_hits == 1, "应有一次缓存命中"
 
     def test_recall_without_user_id_backward_compat(self):
@@ -96,7 +96,7 @@ class TestCacheKeyIsolation:
 
         mock_memories = [Mock(content="记忆", importance=0.5)]
         with patch.object(manager, "_memory_manager") as mock_mm:
-            mock_mm.search.return_value = mock_memories
+            mock_mm.recall.return_value = mock_memories
             # 不传 user_id/agent_id,保持向后兼容
             results = manager.recall_memories("查询", limit=5)
 
@@ -162,7 +162,7 @@ class TestInvalidateCachePrecision:
         # 第一次检索填充缓存
         old_memories = [Mock(content="旧内容", importance=0.5)]
         with patch.object(manager, "_memory_manager") as mock_mm:
-            mock_mm.search.return_value = old_memories
+            mock_mm.recall.return_value = old_memories
             manager.recall_memories("查询", limit=5, user_id="userA")
             # 验证缓存已填充
             assert len(manager._cache) == 1
@@ -180,7 +180,7 @@ class TestInvalidateCachePrecision:
 
         old_memories = [Mock(content="将被删除", importance=0.5)]
         with patch.object(manager, "_memory_manager") as mock_mm:
-            mock_mm.search.return_value = old_memories
+            mock_mm.recall.return_value = old_memories
             manager.recall_memories("查询", limit=5, user_id="userA")
             assert len(manager._cache) == 1
 
