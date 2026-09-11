@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { ChatMessage, Session } from '@/types/chat'
+import { revokeMessageBlobUrls } from '@/utils/blobUrls'
 
 /**
  * Chat store — single source of truth for chat session state.
@@ -130,6 +131,11 @@ export const useChatStore = defineStore('chat', () => {
   // ---------------------------------------------------------------------------
 
   function setMessages(next: ChatMessage[]): void {
+    // #10（台账 2026-09-11）：替换前回收旧数组持有的 blob URL，直设换入的
+    // 客户端活消息不泄漏。现有调用方（useChat.switchSession）先 clearMessages
+    // （已 revoke；revokeObjectURL 对已 revoke 的 URL 是规范 no-op，幂等）或
+    // 传后端映射（无 blob URL），此回收对其无副作用。
+    for (const m of messages.value) revokeMessageBlobUrls(m)
     messages.value = next
   }
 
@@ -147,6 +153,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function clearMessages(): void {
+    // P1-10（审计 2026-09-11）：丢弃前回收每条消息持有的 blob URL
+    // （audioUrl/ttsUrls/attachments[].preview），否则被弃消息的 Blob
+    // 钉死内存直到整页刷新。
+    for (const m of messages.value) revokeMessageBlobUrls(m)
     messages.value = []
   }
 
@@ -165,6 +175,8 @@ export const useChatStore = defineStore('chat', () => {
       // 首条（用户消息）必删；其后仅删连续的 assistant，遇下一条 user 停止。
       // splice 后后继元素前移到 i，故索引不自增，用 removedFirst 标记状态。
       if (removedFirst && messages.value[i].role !== 'assistant') break
+      // P1-10：只回收被删轮次的 blob URL，保留消息不碰。
+      revokeMessageBlobUrls(messages.value[i])
       messages.value.splice(i, 1)
       removedFirst = true
     }
@@ -229,6 +241,8 @@ export const useChatStore = defineStore('chat', () => {
   function reset(): void {
     sessions.value = []
     currentSessionId.value = null
+    // P1-10：同 clearMessages，弃置消息先回收 blob URL
+    for (const m of messages.value) revokeMessageBlobUrls(m)
     messages.value = []
     isStreaming.value = false
     inputText.value = ''
@@ -238,6 +252,8 @@ export const useChatStore = defineStore('chat', () => {
     // 旧 Agent 的用量残留会让环形用量图带出上一 Agent 数据，且 Record 只增不减
     sessionTokenUsage.value = {}
     lastTurnUsage.value = null
+    // P2-19（审计 2026-09-11）：存档列表一并清空，旧 Agent 存档对象残留会串显
+    archivedSessions.value = []
   }
 
   function setRetrievalStatus(status: string): void {
