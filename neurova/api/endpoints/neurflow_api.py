@@ -8,6 +8,7 @@ import asyncio
 import json
 import time
 import uuid
+from collections import OrderedDict
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
@@ -37,6 +38,10 @@ from neurova.collaboration.neurflow.storage import NeurflowStorage
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+# P2-6: fire-and-forget 后台任务必须持强引用并挂 done_callback 回收——
+# 否则任务可能被 GC 中途回收、异常无人收割（对照 multi_model_client._pending_tasks）
+_background_tasks: set = set()
 
 # P0-1 生产装配：事件录制器挂上引擎事件总线（幂等；转发到全局单例，
 # 画布 run / API execute / 调度器触发的执行统一入流）
@@ -651,7 +656,9 @@ async def execute_workflow(
             except Exception as exc:  # noqa: BLE001
                 logger.warning("后台执行落库失败 %s: %s", result.id, exc)
 
-        asyncio.create_task(_run_and_save())
+        task = asyncio.create_task(_run_and_save())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
         return {
             "runId": instance.id,
             "status": "pending",
@@ -1415,8 +1422,37 @@ from neurova.collaboration.neurflow.execution_engine import DebugSession  # noqa
 from neurova.collaboration.neurflow.execution_engine import get_node_mocks as _get_node_mocks  # noqa: E402
 
 
-# 全局注册表：execution_id → DebugSession（in-memory，仅调试用）
-_DEBUG_SESSIONS: Dict[str, DebugSession] = {}
+# 全局注册表：execution_id → DebugSession（in-memory，仅调试用）。
+# 资源修复 #2（台账 2026-09-11）：调试执行无终态回收钩子（后台执行结束不回写本表，
+# collaboration_api 还以裸赋值写入），故在注册表本体做 LRU 封顶——上限
+# _DEBUG_SESSIONS_MAX，超限逐出最久未访问条目；裸赋值同样经 __setitem__ 受约束。
+_DEBUG_SESSIONS_MAX = 100
+
+
+class _BoundedDebugSessions(OrderedDict):
+    """execution_id → DebugSession 有界 LRU 注册表（保持 isinstance dict 契约）。"""
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        self.move_to_end(key)
+        while len(self) > _DEBUG_SESSIONS_MAX:
+            self.popitem(last=False)
+
+    def get(self, key, default=None):
+        if key in self:
+            self.move_to_end(key)
+        return super().get(key, default)
+
+    def setdefault(self, key, default=None):
+        # 覆写 dict.setdefault：C 层实现不会路由到上方 __setitem__
+        if key in self:
+            self.move_to_end(key)
+            return self[key]
+        self[key] = default
+        return default
+
+
+_DEBUG_SESSIONS: Dict[str, DebugSession] = _BoundedDebugSessions()
 
 # 全局注册表：node_id → mock_output（in-memory，调试用）
 
