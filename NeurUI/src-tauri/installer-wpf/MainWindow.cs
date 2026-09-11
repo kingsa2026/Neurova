@@ -566,6 +566,7 @@ namespace Neurova.Installer
                 Content = "安装完成后立即运行 Neurova",
                 IsChecked = true,
                 FontSize = 13,
+                Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(TextMain)),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = new Thickness(0, 24, 0, 0),
             };

@@ -17,9 +17,7 @@
     overflow: hidden;
   }
   .top { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
-  .top img { width: 58px; height: 58px; border-radius: 14px; }
-  .top .brand { font-size: 19px; font-weight: 700; letter-spacing: 4px; color: #fff; }
-  .top .sub { margin-top: 3px; font-size: 11px; color: rgba(232,234,246,.45); letter-spacing: 1px; }
+  .top .wordmark { height: 46px; width: auto; }
 
   .stage {
     min-height: 22px; font-size: 14px; color: #aebcf5; margin-bottom: 12px;
@@ -55,11 +53,7 @@
 </head>
 <body>
   <div class="top">
-    <img id="logo" src="data:image/png;base64,__NEUROVA_ICON_B64__" alt="" />
-    <div>
-      <div class="brand">NEUROVA</div>
-      <div class="sub">神经络织 · 智星启程</div>
-    </div>
+    <img class="wordmark" src="data:image/png;base64,__NEUROVA_WORDMARK_B64__" alt="NEUROVA" />
   </div>
 
   <div class="stage"><span class="dot"></span><span id="stage">正在启动后端服务…</span></div>
