@@ -14,19 +14,38 @@
 /**
  * dock 音频预览（TTS 工具产物 / 注册为 artifact 的音频文件）。
  */
-import { computed } from 'vue'
+import { ref, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { artifactContentUrl } from '@/utils/artifacts'
+import { artifactContentObjectUrl } from '@/utils/artifacts'
 import UiIcon from '@/components/UiIcon.vue'
 import type { DockTab } from '@/stores/rightDock'
 
 const props = defineProps<{ tab: DockTab }>()
 const { t } = useI18n()
 
-const src = computed(() => {
-  if (props.tab.data.url) return props.tab.data.url
-  if (props.tab.data.artifactId) return artifactContentUrl(props.tab.data.artifactId)
-  return ''
+const src = ref('')
+
+/** 内容端点有 JWT 鉴权，<audio>/<a download> 直链必 401 → 经 Bearer 取 blob 转 object URL */
+async function loadSrc(): Promise<void> {
+  if (src.value) {
+    URL.revokeObjectURL(src.value)
+    src.value = ''
+  }
+  try {
+    if (props.tab.data.url) {
+      src.value = props.tab.data.url
+    } else if (props.tab.data.artifactId) {
+      src.value = await artifactContentObjectUrl(props.tab.data.artifactId)
+    }
+  } catch {
+    src.value = ''
+  }
+}
+
+watch(() => [props.tab.data.url, props.tab.data.artifactId], loadSrc, { immediate: true })
+
+onBeforeUnmount(() => {
+  if (src.value) URL.revokeObjectURL(src.value)
 })
 </script>
 
