@@ -332,6 +332,7 @@ class SessionManager(SessionRepository):
         assistant_metadata: Dict[str, Any] = None,
         date: str = None,
         writer_claim=None,
+        user_id: str = "",
     ) -> str:
         """添加一条对话（user + assistant 两条消息）到session
 
@@ -347,6 +348,11 @@ class SessionManager(SessionRepository):
         P1-10 写入围栏: writer_claim=(FenceClaim) 显式参与——check 失效时
         跳过写盘返回 ""（被夺权的 run 永远写不进陈旧数据），不抛异常；
         不传时行为与历史完全一致（等价性）。
+
+        审计 2026-09-11 DATA-P1-1: 新建会话分支补 user_id/title 写入（与
+        create_session/save_message 契约对齐）；存量会话缺 user_id 时回填。
+        原实现新建会话不带 user_id → _collect_summaries 对空属主放行，
+        会话对所有用户可见（越权展示）。
         """
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
@@ -417,6 +423,8 @@ class SessionManager(SessionRepository):
                     "created_at": now,
                     "updated_at": now,
                     "total_messages": len(new_messages),
+                    "title": "新对话",
+                    "user_id": str(user_id or ""),
                 }
             else:
                 # 更新现有session记录
@@ -426,6 +434,9 @@ class SessionManager(SessionRepository):
                 session_data["messages"].extend(new_messages)
                 session_data["updated_at"] = now
                 session_data["total_messages"] = len(session_data["messages"])
+                # DATA-P1-1: 存量会话缺属主时回填（下次过滤即生效）
+                if user_id and not session_data.get("user_id"):
+                    session_data["user_id"] = str(user_id)
 
             # 写入文件 (无锁版本,避免重入死锁)
             # WARN #4 修复: 检查返回值,失败时 logger.error + 抛 IOError.
