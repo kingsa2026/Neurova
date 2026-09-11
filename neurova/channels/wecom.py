@@ -79,7 +79,11 @@ class WeComAdapter(ChannelAdapter):
         # B4-b（#7208/#7001 对齐）：群聊会话共享开关（manager.resolve_session_scope_id
         # 消费）；False=群内按发送者隔离会话。bool 或 "true"/"false" 字符串。
         _cfg_meta = getattr(config, "metadata", None) or getattr(config, "extra", {}) or {}
-        _share = _cfg_meta.get("share_session_in_group", True)
+        # 双键兼容：旧前端写 group_share_session，新契约统一 share_session_in_group
+        _share = _cfg_meta.get(
+            "share_session_in_group",
+            _cfg_meta.get("group_share_session", True),
+        )
         self.share_session_in_group = (
             _share.strip().lower() not in ("false", "0", "no", "off")
             if isinstance(_share, str) else bool(_share)
