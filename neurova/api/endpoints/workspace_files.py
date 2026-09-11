@@ -13,6 +13,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+import io
 import json
 import os
 import re
@@ -203,6 +205,18 @@ async def move_workspace_entry(
     return {"code": 0, "message": "success", "data": {"source": body.source, "path": body.path}}
 
 
+def _zip_directory(target: Path) -> io.BytesIO:
+    """整目录同步打包（P1-9：rglob 遍历 + DEFLATE 压缩在大工作区可达
+    秒级~十秒级，必须丢线程池执行，不得阻塞事件循环）。"""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in sorted(Path(target).rglob("*")):
+            if path.is_file() and not path.name.startswith("."):
+                zf.write(path, arcname=str(path.relative_to(target)))
+    buf.seek(0)
+    return buf
+
+
 @router.get("/{agent_id}/files/zip")
 async def download_workspace_zip(
     agent_id: str,
@@ -210,8 +224,6 @@ async def download_workspace_zip(
     current_user: Dict[str, Any] = Depends(_get_current_user),
 ):
     """整目录打包下载（#7151 zip 下载对齐；运行时打包不落盘）。"""
-    import io as _io
-
     from fastapi.responses import StreamingResponse
 
     _ = current_user
@@ -220,12 +232,8 @@ async def download_workspace_zip(
     if not target.is_dir():
         raise HTTPException(status_code=400, detail=f"不是目录: {subdir}")
 
-    buf = _io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for path in sorted(Path(target).rglob("*")):
-            if path.is_file() and not path.name.startswith("."):
-                zf.write(path, arcname=str(path.relative_to(target)))
-    buf.seek(0)
+    # P1-9: rglob+压缩段丢线程池，事件循环不被打包阻塞
+    buf = await asyncio.to_thread(_zip_directory, target)
     # P0-4：文件名白名单化，subdir 不可向 Content-Disposition 注入
     name = _ZIP_NAME_RE.sub("_", f"{agent_id}_{(subdir or 'workspace').replace('/', '_')}")[:100] or "workspace"
     return StreamingResponse(

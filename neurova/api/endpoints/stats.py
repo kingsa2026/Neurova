@@ -21,6 +21,7 @@ from __future__ import annotations
 - 全部数据源异常回退 0/空，不伪造
 """
 
+import asyncio
 import time
 import uuid
 from datetime import date, datetime, timedelta
@@ -431,7 +432,9 @@ async def get_provider_usage(
 
     # 三轮断链修复①: 读端点顺带按当前用户 scope 触发同步采集
     # （TTL 节流 5 分钟；usage_collection 开启才拉后台，无开启静默）
-    sync_provider_usage_for_user(current_user)
+    # P1-5: 采集内部是同步 httpx.get(timeout=10)×N provider，直调会阻塞
+    # 事件循环至 10s×N——丢线程池执行，返回值使用不变（不消费）。
+    await asyncio.to_thread(sync_provider_usage_for_user, current_user)
 
     from neurova.core.provider_usage import ProviderUsageCollector
 
