@@ -620,6 +620,9 @@ class TaskScheduler:
         self._task_lock = RLock()
         self._event_handlers: List[Callable] = []
         self._dependency_graph: Dict[str, Set[str]] = {}  # task_id -> depends_on
+        # 台账 #7（2026-09-11）：独立重试任务引用集（姿势同
+        # multi_model_client._pending_tasks——持引用防 GC，done_callback 自清理）
+        self._pending_retry_tasks: Set["asyncio.Task"] = set()
 
         # 注册默认执行器
         self._register_default_executors()
@@ -812,7 +815,11 @@ class TaskScheduler:
         """停止调度器"""
         if self._apscheduler and self._apscheduler.running:
             self._apscheduler.shutdown(wait=True)
-            logger.info("TaskScheduler stopped")
+        # 台账 #7c：取消未决重试任务——关停后不得仍在休眠/执行
+        cancelled = self._cancel_pending_retries()
+        if cancelled:
+            logger.info("Cancelled %d pending retry task(s) on shutdown", cancelled)
+        logger.info("TaskScheduler stopped")
 
     def _add_to_scheduler(self, task: AutomationTask):
         """添加任务到 APScheduler"""
@@ -874,9 +881,17 @@ class TaskScheduler:
     # ============================================================
 
     async def execute_task(
-        self, task_id: str, input_override: Optional[Dict[str, Any]] = None, triggered_by: str = "manual"
+        self,
+        task_id: str,
+        input_override: Optional[Dict[str, Any]] = None,
+        triggered_by: str = "manual",
+        _retry_count: int = 0,
     ) -> Optional[TaskExecution]:
-        """执行任务"""
+        """执行任务
+
+        `_retry_count` 为重试链级计数（RES-P1-1）：沿重试调用透传，
+        外部触发方无需感知（默认 0）。
+        """
         task = self._tasks.get(task_id)
         if not task:
             logger.error("Task not found: %s", task_id)
@@ -942,7 +957,7 @@ class TaskScheduler:
 
                 # 重试逻辑
                 if task.retry_policy and task.retry_policy.enabled:
-                    await self._handle_retry(task, execution)
+                    await self._handle_retry(task, execution, _retry_count)
 
         except asyncio.TimeoutError:
             execution.status = TaskStatus.TIMEOUT
@@ -981,30 +996,89 @@ class TaskScheduler:
             asyncio.set_event_loop(loop)
             try:
                 loop.run_until_complete(self.execute_task(task_id, triggered_by="scheduler"))
+                # 台账 #7：重试链已改为独立任务，execute_task 返回时未决
+                # 重试可能仍在本循环上——循环关闭前 drain，否则重试任务随
+                # loop.close() 被销毁（旧 await 链实现天然覆盖此段）。
+                loop.run_until_complete(self.drain_pending_retries())
             finally:
                 loop.close()
         except Exception as e:
             logger.exception("Task execution wrapper failed: %s", e)
 
-    async def _handle_retry(self, task: AutomationTask, execution: TaskExecution):
-        """处理任务重试"""
+    async def _handle_retry(self, task: AutomationTask, execution: TaskExecution, retry_count: int = 0):
+        """处理任务重试——只计算 delay 并 spawn 独立重试任务（台账 #7）。
+
+        旧实现在本帧内 `await sleep + await execute_task` 整条重试链：
+        - 内层 execution 的 finally 先入历史 → history append 顺序与执行
+          顺序相反；
+        - 外层 execution 的 ended_at/duration_ms 与 _running_executions
+          注册跨越整条链。
+
+        现重试体移入 `_run_retry` 独立任务：
+        - max_attempts 封顶与退避序列语义不变（`_retry_count` 沿调用透传）；
+        - 初始 execute_task 的 finally 只覆盖自己那次执行；
+        - 未决重试由 drain_pending_retries()/stop() 收口。
+
+        RES-P1-1：retry_count 沿重试链透传，不再存于每次新建的
+        execution.metadata（计数归零导致 max_attempts 永不生效）。
+        """
         if not task.retry_policy or not task.retry_policy.enabled:
             return
 
         max_attempts = task.retry_policy.max_attempts
-        if execution.metadata.get("_retry_count", 0) >= max_attempts:
+        next_count = retry_count + 1
+        if next_count >= max_attempts:
+            logger.error(
+                "Task %s reached max_attempts=%d, giving up permanently: %s",
+                task.id, max_attempts, execution.error,
+            )
             return
 
         delay = task.retry_policy.retry_delay_seconds
         if task.retry_policy.exponential_backoff:
-            delay *= 2 ** execution.metadata.get("_retry_count", 0)
+            delay *= 2 ** retry_count
 
-        execution.metadata["_retry_count"] = execution.metadata.get("_retry_count", 0) + 1
-        logger.info("Scheduling retry for task %s in %s seconds", task.id, delay)
+        logger.info(
+            "Scheduling retry for task %s in %s seconds (attempt %d/%d)",
+            task.id, delay, next_count + 1, max_attempts,
+        )
 
-        # 延迟重试
-        await asyncio.sleep(delay)
-        await self.execute_task(task.id, triggered_by="retry")
+        retry_task = asyncio.create_task(self._run_retry(task.id, delay, next_count))
+        self._pending_retry_tasks.add(retry_task)
+        retry_task.add_done_callback(self._pending_retry_tasks.discard)
+
+    async def _run_retry(self, task_id: str, delay: float, retry_count: int) -> None:
+        """重试执行体（独立任务）：等待退避 delay 后重新 execute_task。"""
+        try:
+            await asyncio.sleep(delay)
+            await self.execute_task(task_id, triggered_by="retry", _retry_count=retry_count)
+        except asyncio.CancelledError:
+            # 关停取消：不吞 CancelledError，交给事件循环收尾
+            raise
+        except Exception:
+            logger.exception("Retry task for task %s failed", task_id)
+
+    async def drain_pending_retries(self) -> None:
+        """等待全部未决重试任务结束。
+
+        循环 gather 直到没有未完成任务：每个重试任务完成前可能又 spawn
+        下一跳（max_attempts 封顶保证有限跳）。关停/测试收口用。
+        注意：本方法不调用 asyncio.sleep（重试 sleep 属重试任务自身），
+        返回时保证无非 done 任务；引用集清空由 done_callback 在下一轮
+        循环调度中完成。
+        """
+        while True:
+            pending = [t for t in self._pending_retry_tasks if not t.done()]
+            if not pending:
+                return
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    def _cancel_pending_retries(self) -> int:
+        """取消全部未决重试任务（同步关停路径用），返回取消数量。"""
+        pending = [t for t in self._pending_retry_tasks if not t.done()]
+        for retry_task in pending:
+            retry_task.cancel()
+        return len(pending)
 
     def _check_dependencies(self, task_id: str) -> bool:
         """检查任务依赖是否满足
