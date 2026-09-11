@@ -227,7 +227,14 @@ class KnowledgeRepository:
                         if isinstance(items, list)
                     }
             except Exception as e:  # noqa: BLE001
-                logger.warning("Failed to load knowledge repo %s: %s", self._path, e)
+                # DATA-P1-2：解析失败必须把损坏文件隔离——留原路径的话，
+                # 下一次 _save 会用内存空态覆盖真数据（整库丢失）
+                from neurova.core.atomic_io import quarantine_corrupt_file
+
+                quarantined = quarantine_corrupt_file(self._path)
+                logger.error(
+                    "知识库主文件损坏已隔离: %s → %s (%s)", self._path, quarantined, e
+                )
         if self._tombstones_path.exists():
             try:
                 data = json.loads(self._tombstones_path.read_text(encoding="utf-8"))
@@ -280,9 +287,11 @@ class KnowledgeRepository:
 
     def _save(self) -> None:
         try:
-            self._path.write_text(
+            from neurova.core.atomic_io import atomic_write_text
+
+            atomic_write_text(
+                self._path,
                 json.dumps(self._items, ensure_ascii=False, indent=2),
-                encoding="utf-8",
             )
         except Exception as e:  # noqa: BLE001
             logger.error("Failed to save knowledge repo %s: %s", self._path, e)
