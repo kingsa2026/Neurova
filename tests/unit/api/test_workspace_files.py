@@ -24,7 +24,7 @@ def client(tmp_path, monkeypatch):
     # 工作区根锚定到 tmp（防污染真实 agent_workspaces）
     import re
 
-    def fake_root(agent_id: str):
+    def fake_root(agent_id: str, current_user=None):
         if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", agent_id or ""):
             from fastapi import HTTPException
 
