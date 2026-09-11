@@ -14,7 +14,7 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import Enum
-from threading import Lock
+from threading import RLock
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
@@ -539,9 +539,19 @@ class ScriptTaskExecutor(TaskExecutor):
 
             input_data = task.request.input if task.request else {}
 
-            # 创建安全的执行环境
+            # P2-12（审计 2026-09-11）：原实现传入完整 builtins 模块却自名
+            # "安全执行环境"——脚本可 __import__('os').system 任意执行。
+            # 改受限 builtins 白名单（无 __import__/open/eval/exec/compile）。
+            # 注意：CPython 下类对象内省逃逸面仍在，真正隔离需子进程沙箱，
+            # 当前 SCRIPT 任务无外部 API 入口，属纵深防御收口。
             safe_globals = {
-                "__builtins__": __builtins__,
+                "__builtins__": {
+                    "abs": abs, "all": all, "any": any, "bool": bool, "dict": dict,
+                    "enumerate": enumerate, "float": float, "int": int, "len": len,
+                    "list": list, "max": max, "min": min, "print": print,
+                    "range": range, "round": round, "set": set, "sorted": sorted,
+                    "str": str, "sum": sum, "tuple": tuple, "zip": zip,
+                },
                 "input": input_data,
                 "task": task.to_dict(),
                 "execution": execution.to_dict(),
@@ -585,7 +595,7 @@ class TaskScheduler:
     """
 
     _instance: Optional["TaskScheduler"] = None
-    _lock = Lock()
+    _lock = RLock()
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -605,7 +615,9 @@ class TaskScheduler:
         self._executors: Dict[TaskType, TaskExecutor] = {}
         self._scheduler: Optional[AsyncIOScheduler] = None
         self._apscheduler: Optional[BackgroundScheduler] = None
-        self._task_lock = Lock()
+        # P2-4（审计 2026-09-11）：RLock——add/update/delete 持锁期间同步回调
+        # _emit_event，事件处理器若回写调度器（add_task 等）非重入 Lock 同线程自死锁
+        self._task_lock = RLock()
         self._event_handlers: List[Callable] = []
         self._dependency_graph: Dict[str, Set[str]] = {}  # task_id -> depends_on
 
@@ -901,13 +913,22 @@ class TaskScheduler:
             if not valid:
                 raise ValueError(f"Task validation failed: {error}")
 
-            # 合并输入
+            # 合并输入（P2-4：override 只作用于本次执行——原实现直接
+            # task.request.input.update(input_override) 污染任务定义，
+            # 手动执行的临时入参成为后续所有定时执行的默认输入）
             if input_override and task.request:
+                original_input = dict(task.request.input)
                 task.request.input.update(input_override)
+            else:
+                original_input = None
 
-            # 执行任务
-            execution.status = TaskStatus.RUNNING
-            result = await executor.execute(task, execution)
+            try:
+                # 执行任务
+                execution.status = TaskStatus.RUNNING
+                result = await executor.execute(task, execution)
+            finally:
+                if original_input is not None:
+                    task.request.input = original_input
 
             # 处理结果
             if result.get("success"):
