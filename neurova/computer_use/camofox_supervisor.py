@@ -86,12 +86,12 @@ class CamofoxSupervisor:
         # 运行时状态
         self._process: Optional[subprocess.Popen] = None
         self._tracked_pids: List[int] = []  # Windows 下需要跟踪所有子进程
+        self._stdout_drain_thread: Optional[threading.Thread] = None  # 台账 #15:供 stop() join 收尾
         self._last_activity: float = 0.0
         self._start_lock = threading.Lock()
         self._monitor_running = False
         self._monitor_thread: Optional[threading.Thread] = None
         self._managed_by_supervisor = False
-        self._stop_requested: threading.Event = threading.Event()
         # 三层隔离:跟踪最近用过的 userId,stop() 时按列表清理 traces
         self._fallback_user_id: str = cfg.get("user_id") or env_get("NEUROVA_CAMOFOX_USER", "neurova")
         self._tracked_user_ids: set = set()
@@ -166,6 +166,9 @@ class CamofoxSupervisor:
                 )
             # 注意:_tracked_pids 将在 health ready 后填(那时 Camoufox 已起)
             self._tracked_pids = []
+            # RES-P1-3 ①:stdout=PIPE 必须立即持续消费,否则子进程写满管道缓冲
+            # (Windows ~64KB)后整体卡死。daemon 线程逐行读取,进程退出即自然结束。
+            self._start_stdout_drain(self._process)
         except FileNotFoundError as e:
             logger.error("找不到可执行文件:%s", e)
             self._process = None
@@ -280,6 +283,27 @@ class CamofoxSupervisor:
 
     # ── 后台监控线程 ──
 
+    def _start_stdout_drain(self, proc: subprocess.Popen) -> None:
+        """RES-P1-3 ①:起 daemon 线程持续消费子进程 stdout,防管道写满死锁
+
+        台账 #15:持线程引用,stop() 杀进程后 join(timeout=2) 确定性收尾
+        (不再单纯依赖管道 EOF 自然退出)。
+        """
+        self._stdout_drain_thread = threading.Thread(
+            target=self._drain_stdout, args=(proc,), daemon=True, name="camofox-stdout-drain"
+        )
+        self._stdout_drain_thread.start()
+
+    def _drain_stdout(self, proc: subprocess.Popen) -> None:
+        """逐行读取 stdout 落 DEBUG 日志;进程退出/管道关闭时循环自然结束"""
+        try:
+            for raw_line in proc.stdout:
+                line = raw_line.decode("utf-8", errors="replace").rstrip()
+                if line:
+                    logger.debug("camofox: %s", line)
+        except Exception as e:  # noqa: BLE001 - 管道异常关闭等,线程静默收尾
+            logger.debug("camofox stdout drain ended: %s", e)
+
     def _start_monitor(self) -> None:
         if self._monitor_running:
             return
@@ -306,18 +330,34 @@ class CamofoxSupervisor:
         idle = time.time() - self._last_activity
         if idle >= self._idle_timeout:
             logger.info(
-                "空闲 %ds(阈值 %ds),触发停止事件", int(idle), self._idle_timeout
+                "空闲 %ds(阈值 %ds),自动停止 camofox", int(idle), self._idle_timeout
             )
-            self._stop_requested.set()
-            # 实际杀进程由 FastAPI shutdown / 下一次 stop() 调用负责
-            # (后台线程里不能 await async stop,所以只 set 标志位)
+            # RES-P1-3 ②:必须真正停机(杀进程回收内存),而非 set 无人消费的标志
+            self._stop_from_monitor()
+
+    def _stop_from_monitor(self) -> None:
+        """监控线程内的同步停机入口(RES-P1-3 ②,线程安全)
+
+        监控线程没有事件循环,stop() 是 async——用 asyncio.run 自建循环跑完,
+        不触碰主线程事件循环。stop() 内部会跳过 join 当前线程。
+        """
+        try:
+            asyncio.run(self.stop())
+        except Exception as e:  # noqa: BLE001 - 后台线程不能让异常逃逸
+            logger.error("idle auto-stop failed: %s", e)
 
     # ── 关闭接口 ──
 
     async def stop(self) -> None:
         """FastAPI shutdown 共用入口:清理临时痕迹 → 杀进程"""
         self._monitor_running = False
-        if self._monitor_thread and self._monitor_thread.is_alive():
+        # RES-P1-3 ②:idle 自动停机从监控线程内触发 stop(),join 当前线程会
+        # RuntimeError/死锁——跳过自身
+        if (
+            self._monitor_thread
+            and self._monitor_thread is not threading.current_thread()
+            and self._monitor_thread.is_alive()
+        ):
             self._monitor_thread.join(timeout=2.0)
         if not (self._managed_by_supervisor and self.is_running):
             return
@@ -332,6 +372,19 @@ class CamofoxSupervisor:
             )
         # 2. SIGTERM → grace → SIGKILL
         await self._kill_process()
+        # 3. 台账 #15:杀进程后管道 EOF 本会使 drain 线程自然退出(良性),
+        # 此处 join(2) 兜底确定性收尾;超时放弃并 DEBUG 记录——daemon 线程
+        # 不阻塞进程退出,有界 join 不引入死锁(监控线程路径下 drain 线程
+        # 恒非当前线程,无 join 自身风险)
+        drain_thread = self._stdout_drain_thread
+        if (
+            drain_thread
+            and drain_thread.is_alive()
+            and drain_thread is not threading.current_thread()
+        ):
+            drain_thread.join(timeout=2.0)
+            if drain_thread.is_alive():
+                logger.debug("camofox stdout drain thread 未在 2s 内退出,放弃等待(EOF 后自灭)")
 
     def _collect_descendant_pids(self, root_pid: int) -> List[int]:
         """收集 root_pid 的所有后代 PID(包括自己)。
@@ -419,9 +472,12 @@ class CamofoxSupervisor:
                 except Exception:
                     pass
                 # 启动时已记录 cmd + 所有后代 PID,直接批量杀
+                # (台账 #16:弃用的 loop 获取模式改为 to_thread——所有调用点
+                # (_spawn_and_wait_ready/stop/监控线程 asyncio.run)均在
+                # 运行中循环内 await,行为不变)
                 if self._tracked_pids:
-                    await asyncio.get_event_loop().run_in_executor(
-                        None, self._taskkill_all, list(self._tracked_pids)
+                    await asyncio.to_thread(
+                        self._taskkill_all, list(self._tracked_pids)
                     )
                 self._tracked_pids = []
             else:
