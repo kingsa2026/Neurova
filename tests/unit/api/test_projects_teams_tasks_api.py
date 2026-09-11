@@ -36,6 +36,12 @@ def client(tmp_path, monkeypatch):
 
     app = FastAPI()
     app.include_router(projects_api.router, prefix="/api/v1/projects")
+    # P0-5（审计 2026-09-11）：router 级鉴权后的测试身份注入
+    from neurova.api.auth import get_current_user as _gcu
+
+    app.dependency_overrides[_gcu] = lambda: {
+        "user_id": "u1", "username": "u1", "role": "admin", "neuser_id": "u1",
+    }
     client = TestClient(app)
 
     project = manager.create_project(name="测试项目", owner_id="u1")

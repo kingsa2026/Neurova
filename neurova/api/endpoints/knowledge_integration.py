@@ -8,10 +8,11 @@ import typing
 import uuid
 
 from fastapi import APIRouter, Request
+from neurova.api.auth import get_current_user_or_service, Depends
 from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user_or_service)],)
 
 
 class RAGRetrieveRequest(BaseModel):

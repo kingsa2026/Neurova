@@ -10,6 +10,7 @@ from neurova.core.logger import get_logger
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
+from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 
 from neurova.cognitive_layers.memory_layer.share_group import (
@@ -18,7 +19,7 @@ from neurova.cognitive_layers.memory_layer.share_group import (
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/memory-share-groups", tags=["memory-share-groups"])
+router = APIRouter(dependencies=[Depends(get_current_user)],prefix="/memory-share-groups", tags=["memory-share-groups"])
 
 
 # ── 请求/响应模型 ──────────────────────────────────────────────────────────────

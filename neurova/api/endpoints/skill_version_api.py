@@ -10,11 +10,12 @@ from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydant
 import typing
 
 from fastapi import APIRouter, HTTPException
+from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)],)
 
 
 # ── Models ─────────────────────────────────────────────

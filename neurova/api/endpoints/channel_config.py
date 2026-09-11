@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException
+from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 
 from neurova.channels.base import ChannelConfig
@@ -40,7 +41,7 @@ from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydant
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/channel-configs", tags=["渠道配置"])
+router = APIRouter(dependencies=[Depends(get_current_user)],prefix="/channel-configs", tags=["渠道配置"])
 
 # 配置文件路径
 CONFIG_DIR = Path(__file__).parent.parent.parent / "data"
