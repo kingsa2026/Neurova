@@ -13,7 +13,10 @@ export interface SubAgentWindowState {
   subagentId: string
   agentName: string
   task: string
-  chunks: { type: string; data: string }[]
+  /** 流式增量缓存（P2-15）：chunk 到达即追加，替代原 chunks 数组 + 每 chunk 全量 join */
+  bodyText: string
+  /** 已接收 chunk 计数 */
+  chunkCount: number
   status: 'running' | 'completed' | 'failed'
   report: string
   error?: string | null
@@ -29,7 +32,7 @@ const title = computed(() => `${props.state.agentName || t('ui.subagent')} · ${
 
 const bodyText = computed(() => {
   if (props.state.status !== 'running' && props.state.report) return props.state.report
-  return props.state.chunks.map(c => c.data).join('')
+  return props.state.bodyText
 })
 
 const statusIcon = computed(() => {

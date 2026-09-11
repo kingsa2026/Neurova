@@ -18,6 +18,21 @@ const REPORT_URL = import.meta.env.VITE_ERROR_REPORT_URL ?? 'https://www.neurova
 const MAX_QUEUE = 15
 const DEDUPE_WINDOW_MS = 30_000
 const DAILY_CAP = 100
+/** P2-18（审计 2026-09-11）：lastSent 去重 Map 封顶（原实现只增不减） */
+const MAX_DEDUPE_KEYS = 200
+
+/**
+ * 去重 Map 封顶：超限按插入序淘汰最旧键（Map 迭代序 = 插入序）。
+ * 只淘汰最旧而非整体清空，30s 窗口内近期错误的去重能力不受影响。
+ * 导出仅为可测。
+ */
+export function capDedupeMap(map: Map<string, number>, cap: number): void {
+  while (map.size > cap) {
+    const oldest = map.keys().next().value
+    if (oldest === undefined) break
+    map.delete(oldest)
+  }
+}
 
 export type ErrorSource = 'window' | 'promise' | 'vue' | 'manual' | 'app'
 
@@ -317,6 +332,7 @@ export function initErrorReporter(opts: ReporterOptions = {}): ReporterInstance 
 
     const report = buildReport(source, errorCode, message, stack, extra)
     lastSent.set(dedupeKey, now().getTime())
+    capDedupeMap(lastSent, MAX_DEDUPE_KEYS) // P2-18：封顶淘汰，防止只增不减
     enqueue(report)
   }
 
