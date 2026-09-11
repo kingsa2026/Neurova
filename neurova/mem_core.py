@@ -147,7 +147,10 @@ class _PersistDbStore:
             }
             rows = conn.execute(scoped, all_params).fetchall()
             return _PersistDbStore._Rows([dict(r) for r in rows])
-        except Exception:
+        except Exception as e:
+            # P2-1（审计 2026-09-11）：静默吞错让 SQL 故障表现与"无记忆"不可
+            # 区分（schema 漂移/约束冲突不可观测）——留痕后仍按空行集返回
+            logger.warning("PersistDbStore SQL 执行失败: %s | sql=%s", e, sql[:200])
             return _PersistDbStore._Rows([])
 
     def close(self) -> None:
@@ -282,9 +285,20 @@ class Conversation:
 
 
 def _moe_scope_key(mem_system) -> str:
-    """索引状态的作用域键：记忆系统当前持久库路径"""
+    """索引状态的作用域键：agent_id + 记忆系统当前持久库路径。
+
+    DATA-P1-5（审计 2026-09-11）：同 cwd 下多 agent 的 persist 库路径相同
+    （固定 neurova_memories_persist.db），仅按路径哈希会让 Agent B 误读
+    Agent A 的"已完成索引"状态文件，后台全量索引永不启动。
+    """
     try:
-        return str(getattr(mem_system.memory_manager, "_persist_db_path", ""))
+        agent_id = str(
+            getattr(mem_system, "agent_id", None)
+            or getattr(getattr(mem_system, "config", None), "agent_id", "")
+            or ""
+        )
+        db_path = str(getattr(mem_system.memory_manager, "_persist_db_path", ""))
+        return f"{agent_id}:{db_path}"
     except Exception:
         return ""
 
@@ -1324,6 +1338,15 @@ class MemCore:
 
         agent_id = getattr(self.config, "agent_id", "unknown") if self.config else "unknown"
 
+        # DATA-P1-1（审计 2026-09-11）：会话属主随写落盘——请求级身份优先
+        #（ContextVar），无请求上下文（后台任务）时回退空串（共享口径）
+        try:
+            from neurova.core.identity_context import get_request_user_id
+
+            owner_id = str(get_request_user_id() or "")
+        except Exception:  # noqa: BLE001 — 身份模块不可用不阻断保存
+            owner_id = ""
+
         return sm.add_message(
             agent_id=agent_id,
             session_id=session_id,
@@ -1332,6 +1355,7 @@ class MemCore:
             metadata=metadata,
             assistant_metadata=assistant_metadata,
             writer_claim=writer_claim,
+            user_id=owner_id,
         )
 
     # ══════════════════════════════════════════════════════════════
