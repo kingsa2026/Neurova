@@ -168,6 +168,12 @@ class TestGenerationEndpoints:
         from neurova.api.app import create_app
 
         app = create_app()
+        # generation 路由已加路由级鉴权（凭据盗刷面收口，见 generation.py
+        # P0-2 注释，用的是 neurova.api.deps.get_current_user）——
+        # 单测 override 后专注端点契约本身
+        from neurova.api.deps import get_current_user
+
+        app.dependency_overrides[get_current_user] = lambda: {"user_id": "t"}
         return TestClient(app)
 
     def test_image_endpoint_no_longer_501(self, client):

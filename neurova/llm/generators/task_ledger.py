@@ -40,6 +40,8 @@ class TaskRecord:
     local_path: str = ""
     error: str = ""
     prompt: str = ""
+    # P1-9（审计 2026-09-11）：任务属主——/video/status 与 /tasks 据此做归属校验
+    owner_user_id: str = ""
     submitted_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 

@@ -11,18 +11,67 @@ from __future__ import annotations
 """
 
 from neurova.core.logger import get_logger
+import re
 import uuid
-from typing import Optional
+from pathlib import Path
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from neurova.api.deps import get_current_user
 from neurova.api.endpoints import get_agent_instance, get_app_state
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+# P0-2（审计 2026-09-11）：/generation/* 一律需登录——原实现匿名可达且
+# _resolve_generation_creds 会动用服务端已配置的付费凭据（凭据盗刷面）。
+router = APIRouter(dependencies=[Depends(get_current_user)])
+
+# P1-8：产物目录以仓库根为基准（原 CWD 相对路径在服务化/异目录启动下
+# 与 StaticFiles 挂载错位，产物 404）。
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+GENERATION_OUTPUT_DIR = PROJECT_ROOT / "data" / "generations"
+_GENERATION_OUTPUT_DIR = str(GENERATION_OUTPUT_DIR)
+
+# P0-1：task_id 是落盘文件名的组成部分，禁止复用客户端可控的 X-Request-ID。
+_SAFE_TASK_NAME_RE = re.compile(r"[^A-Za-z0-9_-]+")
+
+
+def _safe_task_name(task_id: str) -> str:
+    """文件名安全化：仅保留字母/数字/下划线/连字符，路径穿越字符一律打平。"""
+    cleaned = _SAFE_TASK_NAME_RE.sub("_", str(task_id or "")).strip("_")[:80]
+    return cleaned or "task"
+
+
+def _validate_ref_images(refs: list) -> None:
+    """P1-6：参考图只接受 http(s)/data URI，或允许根内的本地文件。
+
+    原实现接受任意本地路径并被服务端读取后随请求发往 base_url——
+    攻击者自建端点即可外泄任意本地文件。允许根：生成产物目录 + agent 工作区。
+    """
+    allowed_roots = (
+        GENERATION_OUTPUT_DIR.resolve(),
+        (PROJECT_ROOT / "agent_workspaces").resolve(),
+    )
+    for ref in refs or []:
+        r = str(ref or "").strip()
+        if not r:
+            continue
+        if r.lower().startswith(("http://", "https://", "data:")):
+            continue
+        p = Path(r)
+        if not p.is_absolute():
+            raise HTTPException(status_code=400, detail=f"ref_images 非法本地路径: {r}")
+        resolved = p.resolve()
+        if not any(resolved.is_relative_to(root) for root in allowed_roots):
+            raise HTTPException(
+                status_code=400,
+                detail=f"ref_images 本地路径不在允许目录（生成产物/agent 工作区）内: {r}",
+            )
+        if not resolved.is_file():
+            raise HTTPException(status_code=400, detail=f"ref_images 文件不存在: {r}")
 
 
 def _route_model_for_request(request_type: str):
@@ -106,8 +155,8 @@ def _get_agent(agent_id: str = "default"):
 
 
 # ── B2-b/c：按提供商凭据解析 + 媒体落盘 + 任务账本 ─────────────────────────
-
-_GENERATION_OUTPUT_DIR = "data/generations"
+# （产物目录统一用模块顶部的 GENERATION_OUTPUT_DIR/_GENERATION_OUTPUT_DIR——
+#   P1-8 仓库根绝对路径；此处不得再赋值，否则覆盖 P1-8 修复致挂载分裂）
 
 
 def _resolve_generation_creds(
@@ -166,16 +215,22 @@ async def _persist_media(url_or_data: str, kind: str, task_id: str, index: int) 
     """结果 URL 临时有效 → 立即下载本地化（data/generations/）。"""
     import aiohttp
     import base64 as _b64
-    from pathlib import Path
 
     out_dir = Path(_GENERATION_OUTPUT_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
+    # P0-1：task_id 参与文件名拼接，安全化后才允许落盘
+    safe_name = _safe_task_name(task_id)
     if url_or_data.startswith("data:"):
         header, _, payload = url_or_data.partition(",")
         ext = "png" if "image" in header else ("mp4" if "video" in header else "bin")
-        path = out_dir / f"{task_id}_{index}.{ext}"
+        path = out_dir / f"{safe_name}_{index}.{ext}"
         path.write_bytes(_b64.b64decode(payload))
         return str(path)
+    # P1-7：产物 URL 来自 provider 响应（base_url 可被调用方指定为自建端点），
+    # 下载前必须过全局出网校验，防 SSRF 打内网/云元数据。
+    from neurova.security.governance import check_outbound_url
+
+    check_outbound_url(url_or_data)
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
         async with session.get(url_or_data) as resp:
             if resp.status >= 400:
@@ -183,7 +238,7 @@ async def _persist_media(url_or_data: str, kind: str, task_id: str, index: int) 
             content_type = resp.headers.get("content-type", "")
             ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
                    "video/mp4": "mp4"}.get(content_type.split(";")[0], "bin")
-            path = out_dir / f"{task_id}_{index}.{ext}"
+            path = out_dir / f"{safe_name}_{index}.{ext}"
             path.write_bytes(await resp.read())
     return str(path)
 
@@ -261,6 +316,7 @@ async def generate_image(request: Request, body: ImageGenerationRequest):
     )
 
     protocol = resolve_image_protocol(body.protocol or "", body.model or "", body.base_url or "")
+    _validate_ref_images(body.ref_images)
     creds = _resolve_generation_creds(
         protocol.value, body.model, body.provider_id, body.api_key, body.base_url,
         default_base="https://api.openai.com/v1",
@@ -277,7 +333,8 @@ async def generate_image(request: Request, body: ImageGenerationRequest):
         logger.warning("图像生成失败: %s", e)
         raise HTTPException(status_code=502, detail=f"图像生成失败: {str(e)[:300]}")
 
-    task_id = _get_request_id(request)
+    # P0-1：task_id 只用于命名落盘产物，必须服务端生成，与 X-Request-ID 解耦
+    task_id = uuid.uuid4().hex
     images = []
     for i, item in enumerate(result.get("images") or []):
         try:
@@ -367,7 +424,11 @@ async def generate_audio(request: Request, body: AudioGenerationRequest):
 
 
 @router.post("/video")
-async def generate_video(request: Request, body: VideoGenerationRequest):
+async def generate_video(
+    request: Request,
+    body: VideoGenerationRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """视频生成"""
     request_id = _get_request_id(request)
 
@@ -381,6 +442,7 @@ async def generate_video(request: Request, body: VideoGenerationRequest):
     from neurova.llm.generators.task_ledger import TaskRecord, get_generation_task_ledger
 
     protocol = resolve_video_protocol(body.protocol or "", body.model or "", body.base_url or "")
+    _validate_ref_images(body.ref_images)
     creds = _resolve_generation_creds(
         protocol.value, body.model, body.provider_id, body.api_key, body.base_url,
         default_base="https://dashscope.aliyuncs.com/api/v1",
@@ -411,6 +473,7 @@ async def generate_video(request: Request, body: VideoGenerationRequest):
         remote_task_id=remote_task_id,
         poll_url=str(submitted.get("poll_url") or ""),
         prompt=body.prompt[:500],
+        owner_user_id=str(current_user.get("user_id") or ""),
     ))
     return {
         "code": 0,
@@ -423,11 +486,14 @@ async def generate_video(request: Request, body: VideoGenerationRequest):
 
 
 @router.get("/video/status/{task_id}")
-async def get_generation_video_status(request: Request, task_id: str):
+async def get_generation_video_status(
+    request: Request,
+    task_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
     """轮询视频任务（账本 + 远程协议轮询；成功即下载本地化）。"""
     from neurova.api.endpoints import get_app_state  # noqa: F401 — 保持模块一致
 
-    from neurova.core.identity_context import get_request_user_id
     from neurova.llm.generators.protocols import ProtocolCredentials, poll_video
     from neurova.llm.generators.task_ledger import get_generation_task_ledger
 
@@ -436,6 +502,14 @@ async def get_generation_video_status(request: Request, task_id: str):
     record = ledger.get(task_id)
     if record is None:
         raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
+    # P1-9：任务归属校验——新任务落账本时带 owner_user_id；历史无主记录
+    # （升级前存量）仅管理员可见，其余一律 403。
+    owner = str(getattr(record, "owner_user_id", "") or "")
+    uid = str(current_user.get("user_id") or "")
+    if owner and owner != uid:
+        raise HTTPException(status_code=403, detail="无权访问该任务")
+    if not owner and current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="无权访问该任务")
     if record.status in ("succeeded", "failed"):
         return {
             "code": 0,
@@ -486,11 +560,22 @@ async def get_generation_video_status(request: Request, task_id: str):
 
 
 @router.get("/tasks")
-async def list_generation_tasks(request: Request, status: Optional[str] = None):
-    """生成任务列表（账本快照，后台任务面板数据源之一）。"""
+async def list_generation_tasks(
+    request: Request,
+    status: Optional[str] = None,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """生成任务列表（账本快照，后台任务面板数据源之一）。仅返回本人任务；
+    无主存量任务仅管理员可见。"""
     _ = request
     from neurova.llm.generators.task_ledger import get_generation_task_ledger
 
+    uid = str(current_user.get("user_id") or "")
+    is_admin = current_user.get("role") == "admin"
+    visible = [
+        t for t in get_generation_task_ledger().list(status=status)
+        if t.owner_user_id == uid or (not t.owner_user_id and is_admin)
+    ]
     tasks = [
         {
             "task_id": t.task_id, "kind": t.kind, "protocol": t.protocol,
@@ -498,6 +583,6 @@ async def list_generation_tasks(request: Request, status: Optional[str] = None):
             "submitted_at": t.submitted_at, "local_path": t.local_path,
             "error": t.error,
         }
-        for t in get_generation_task_ledger().list(status=status)
+        for t in visible
     ]
     return {"code": 0, "message": "success", "data": {"tasks": tasks}}

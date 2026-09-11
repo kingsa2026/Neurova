@@ -41,6 +41,13 @@ def client(routed_router):
     """最小 FastAPI 只挂 generation router，agent 用桩。"""
     app = FastAPI()
     app.include_router(generation_ep.router, prefix="/api/v1/generation")
+    # P0-2/P0-5（审计 2026-09-11）：router 级鉴权后的测试身份注入
+    # （generation router 依赖 neurova.api.deps.get_current_user）
+    from neurova.api.deps import get_current_user as _gcu_deps
+
+    app.dependency_overrides[_gcu_deps] = lambda: {
+        "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+    }
 
     class FakeAgent:
         async def chat(self, user_input, session_id=None, metadata=None):
