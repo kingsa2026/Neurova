@@ -5,9 +5,10 @@ Memory Timeline API - 记忆时间线API
 import datetime
 from neurova.core.logger import get_logger
 from fastapi import APIRouter, Query
+from neurova.api.auth import get_current_user, Depends
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)],)
 
 
 @router.get("/recent")

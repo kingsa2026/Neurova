@@ -15,6 +15,12 @@ def _make_client():
 
     app = FastAPI()
     app.include_router(benchmark_api.router, prefix="/api/v1/benchmark")
+    # P0-5（审计 2026-09-11）：router 级鉴权后的测试身份注入
+    from neurova.api.auth import get_current_user as _gcu
+
+    app.dependency_overrides[_gcu] = lambda: {
+        "user_id": "tuser", "username": "tuser", "role": "admin", "neuser_id": "tuser",
+    }
     return TestClient(app)
 
 

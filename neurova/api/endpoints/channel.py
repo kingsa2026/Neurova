@@ -18,11 +18,12 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
+from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)],)
 
 
 class ChannelInfo(BaseModel):

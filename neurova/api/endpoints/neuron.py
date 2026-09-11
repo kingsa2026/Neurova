@@ -9,11 +9,12 @@ import threading
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/neuron", tags=["neuron"])
+router = APIRouter(dependencies=[Depends(get_current_user)],prefix="/neuron", tags=["neuron"])
 
 # 共享的依赖图谱实例（线程安全）
 _shared_graph = None

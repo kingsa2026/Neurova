@@ -15,11 +15,12 @@ from neurova.core.logger import get_logger
 import typing
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)],)
 
 _DEPRECATED = True
 """已废弃 — ADR 0013: 统一到 skill_pool_api.py。此端点为 demo 实现（_init_sample_skills 硬编码数据）。"""

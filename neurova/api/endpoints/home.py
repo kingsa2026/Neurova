@@ -21,12 +21,13 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Query, Request
+from neurova.api.auth import get_current_user, Depends
 
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)],)
 
 
 def _get_app_state(request: Request) -> Any:

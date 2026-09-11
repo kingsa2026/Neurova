@@ -15,13 +15,14 @@ import time
 import uuid
 
 from fastapi import APIRouter, Request
+from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel
 
 from neurova.api.endpoints import get_app_state
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)],)
 
 
 class RuntimeStatus(BaseModel):
