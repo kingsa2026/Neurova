@@ -84,6 +84,24 @@ class TimeContextHintTest(unittest.TestCase):
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
 
+    def test_injector_time_block_dedupes_existing_section(self):
+        """base 已含 `## 当前时间` 段（主链 orchestrator 注入）时原样返回，避免双段"""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+
+            mm = MemoryManager(
+                db_path=os.path.join(tmpdir, "time_hint3.db"),
+                agent_id="test_agent",
+                user_id="test_user",
+            )
+            injector = UnifiedContextInjector(memory_manager=mm)
+
+            base = "你是测试助手\n\n## 当前时间\n当前日期:2026年9月11日 星期五\n时区:Asia/Shanghai"
+            self.assertEqual(injector._build_system_prompt(base_prompt=base), base)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
 
 if __name__ == "__main__":
     unittest.main()
