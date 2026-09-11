@@ -320,7 +320,11 @@ class ToolExecutor:
         身份——config 是共享单例的静态配置，请求级登录用户才是归属主体。
         """
         agent = self._agent
-        request_user = getattr(agent, "current_user_id", None) or getattr(agent, "_current_user_id", None)
+        # 读取顺序与 :3054 同契约：必须先读 _current_user_id（无 public
+        # property 别名的 Agent/测试替身走此名），再读 public 别名。
+        # 反序会让真值影子（如 MagicMock auto-attr current_user_id）
+        # 遮蔽显式身份——test_camofox_isolation 两测试的根因。
+        request_user = getattr(agent, "_current_user_id", None) or getattr(agent, "current_user_id", None)
         config = getattr(agent, "config", None)
         user_id = (
             request_user
