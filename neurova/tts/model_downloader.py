@@ -118,15 +118,19 @@ class ModelDownloader:
         return self._base_dir / MODEL_REGISTRY[model_name]["local_dir"]
 
     def is_model_available(self, model_name: str) -> bool:
-        """检查模型是否已下载"""
+        """检查模型是否已下载（DATA-P1-4：存在且非空——0 字节/截断文件
+        `exists()` 为真但不可用，曾使重下自愈永不触发）"""
         try:
             model_dir = self.get_model_dir(model_name)
             if not model_dir.exists():
                 return False
 
             required_files = MODEL_REGISTRY[model_name]["required_files"]
-            return all((model_dir / f).exists() for f in required_files)
-        except (KeyError, ValueError):
+            return all(
+                (model_dir / f).is_file() and (model_dir / f).stat().st_size > 0
+                for f in required_files
+            )
+        except (KeyError, ValueError, OSError):
             return False
 
 
