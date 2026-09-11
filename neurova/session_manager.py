@@ -4,6 +4,7 @@
 """
 
 import json
+import re
 from neurova.core.logger import get_logger
 from neurova.session_repository import SessionRepository
 import threading
@@ -838,6 +839,37 @@ class SessionManager(SessionRepository):
             ]
 
         return self._collect_summaries(archived_dirs, user_id)
+
+    # session_{session_id}_{date}.json 尾部日期后缀（YYYY-MM-DD）
+    _SESSION_DATE_SUFFIX_RE = re.compile(r"_\d{4}-\d{2}-\d{2}$")
+
+    def count_sessions(self, agent_id: str = "", user_id: str = "") -> int:
+        """会话总数（零 JSON 解析快路径）。
+
+        RES-P1-4：home 统计此前 len(list_sessions()) 为取个数而全量
+        json.load 所有会话消息（O(总历史字节)，随历史线性劣化）。
+        session_id 编码在文件名中，无 user_id 过滤时直接 glob + 文件名去重；
+        带 user_id 过滤需读内容，退回摘要路径。
+        """
+        if user_id:
+            return len(self.list_sessions(agent_id=agent_id, user_id=user_id))
+        if agent_id:
+            agent_dirs = [self._get_session_dir(agent_id)]
+        else:
+            if not self._sessions_dir.is_dir():
+                return 0
+            agent_dirs = [d for d in self._sessions_dir.iterdir() if d.is_dir()]
+
+        seen: set = set()
+        for agent_dir in agent_dirs:
+            if not agent_dir.is_dir():
+                continue
+            for fp in agent_dir.glob("session_*.json"):
+                name = fp.stem
+                sid = self._SESSION_DATE_SUFFIX_RE.sub("", name[len("session_"):])
+                if sid:
+                    seen.add(sid)
+        return len(seen)
 
     def _collect_summaries(self, agent_dirs: List[Path], user_id: str = "") -> List[Dict[str, Any]]:
         """扫描目录收集会话摘要（list_sessions / list_archived_sessions 共用）。"""

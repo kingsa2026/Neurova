@@ -5,6 +5,7 @@ Web Console API - 控制台后端 API
 import asyncio
 import datetime
 import json
+from collections import deque
 from neurova.core import config
 from neurova.core.logger import get_logger
 import os
@@ -34,7 +35,8 @@ router = APIRouter()
 class ConnectionManager:
     def __init__(self):
         self._connections: typing.Dict[str, WebSocket] = {}
-        self._messages: typing.Dict[str, list] = {}
+        # RES-P2-13：每用户站内消息有界（旧 list 只增不清，推送频繁时慢漏）
+        self._messages: typing.Dict[str, typing.Deque[dict]] = {}
 
     async def connect(self, websocket: WebSocket, client_id: str):
         await websocket.accept()
@@ -61,8 +63,13 @@ class ConnectionManager:
         for cid in disconnected:
             self.disconnect(cid)
 
+    # 单用户离线缓冲上限：取走前的积压封顶，超限丢最旧
+    MAX_USER_MESSAGES = 100
+
     def store_message(self, user_id: str, message: dict):
-        msgs = self._messages.setdefault(user_id, [])
+        msgs = self._messages.setdefault(
+            user_id, deque(maxlen=self.MAX_USER_MESSAGES)
+        )
         message["stored_at"] = time.time()
         msgs.append(message)
 
