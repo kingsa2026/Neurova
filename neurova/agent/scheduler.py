@@ -8,6 +8,9 @@ Neurova 自动化任务调度器核心模块
 """
 
 import asyncio
+import concurrent.futures
+import os
+import threading
 from neurova.core.logger import get_logger
 import uuid
 from abc import ABC, abstractmethod
@@ -26,6 +29,79 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 logger = get_logger(__name__)
+
+# ============================================================
+# B-7 方案 B：调度域常驻重试事件循环 + 特性开关（2026-09-11 立项 v2 §8）
+# ============================================================
+# 背景（B7基线度量报告）：legacy 形态下重试链绑死在发起 job 的循环上，
+# drain 语义要求 job 线程等整条链（含 2**n 退避 sleep）——10 并发重试链
+# 占满 10 worker 达 7 秒（P2，调度停摆的直接来源）。方案 B 仅把重试出循环：
+# per-job 循环隔离保留，重试体经 run_coroutine_threadsafe 提交到本域常驻
+# 循环，退避期不再占用线程池 worker。
+# 同型实现参照 neurova_recall._get_recall_loop（daemon、懒启动、线程存活
+# 判据防竞态）——域内自持，不跨模块 import。
+
+_SCHEDULER_EXEC_MODE_ENV = "NEUROVA_SCHEDULER_EXEC_MODE"
+_RETRY_LOOP_THREAD_NAME = "neurova-scheduler-retry-loop"
+
+_retry_loop_holder: Dict[str, Any] = {}
+_retry_loop_lock = threading.Lock()
+
+
+def _get_exec_mode() -> str:
+    """读调度器执行模式开关；每次决策点调用时读取（测试可 monkeypatch env）。
+
+    - ``legacy``（默认）：重试任务 spawn 在发起 job 的事件循环上（台账 #7 形态）
+    - ``shared``：重试任务提交到调度域常驻循环（B-7 方案 B）
+    未知值一律归一化为 legacy（kill switch：清掉 env 即回滚）。
+    """
+    mode = os.environ.get(_SCHEDULER_EXEC_MODE_ENV, "legacy").strip().lower()
+    return "shared" if mode == "shared" else "legacy"
+
+
+def _get_retry_loop() -> "asyncio.AbstractEventLoop":
+    """取（或懒启动）调度域常驻重试事件循环；线程存活即视为有效。"""
+    with _retry_loop_lock:
+        entry = _retry_loop_holder.get("entry")
+        if entry is not None:
+            loop, thread = entry
+            if thread.is_alive():
+                return loop
+        loop = asyncio.new_event_loop()
+        thread = threading.Thread(
+            target=loop.run_forever, name=_RETRY_LOOP_THREAD_NAME, daemon=True
+        )
+        thread.start()
+        _retry_loop_holder["entry"] = (loop, thread)
+        return loop
+
+
+def _shutdown_retry_loop(timeout: float = 5.0) -> None:
+    """停机收口：先取消循环上残留协程，再停线程、close 循环（stop()/测试用）。
+
+    先 cancel 后 close——防"close 时仍有任务在跑"的窗口竞态（立项 §5）。
+    """
+    with _retry_loop_lock:
+        entry = _retry_loop_holder.pop("entry", None)
+    if entry is None:
+        return
+    loop, thread = entry
+
+    async def _drain():
+        current = asyncio.current_task()
+        pending = [t for t in asyncio.all_tasks() if t is not current]
+        for t in pending:
+            t.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    try:
+        asyncio.run_coroutine_threadsafe(_drain(), loop).result(timeout=timeout)
+    except Exception:
+        logger.exception("Scheduler retry loop drain on shutdown failed")
+    loop.call_soon_threadsafe(loop.stop)
+    thread.join(timeout=timeout)
+    loop.close()
 
 # ============================================================
 # 枚举定义
@@ -623,6 +699,10 @@ class TaskScheduler:
         # 台账 #7（2026-09-11）：独立重试任务引用集（姿势同
         # multi_model_client._pending_tasks——持引用防 GC，done_callback 自清理）
         self._pending_retry_tasks: Set["asyncio.Task"] = set()
+        # B-7 方案 B：shared 模式重试 future 引用集（run_coroutine_threadsafe
+        # 返回的 concurrent.futures.Future——持引用防 GC，done_callback
+        # 收割异常，防悬空 future 静默吞错）
+        self._pending_retry_futures: Set["concurrent.futures.Future"] = set()
 
         # 注册默认执行器
         self._register_default_executors()
@@ -819,6 +899,13 @@ class TaskScheduler:
         cancelled = self._cancel_pending_retries()
         if cancelled:
             logger.info("Cancelled %d pending retry task(s) on shutdown", cancelled)
+        # B-7 方案 B：shared 模式还需收割未决重试 future，并收口常驻循环
+        # （先 cancel 后 close，见 _shutdown_retry_loop）
+        cancelled_futures = self._cancel_pending_retry_futures()
+        if cancelled_futures:
+            logger.info("Cancelled %d pending retry future(s) on shutdown", cancelled_futures)
+        if _get_exec_mode() == "shared":
+            _shutdown_retry_loop()
         logger.info("TaskScheduler stopped")
 
     def _add_to_scheduler(self, task: AutomationTask):
@@ -999,7 +1086,10 @@ class TaskScheduler:
                 # 台账 #7：重试链已改为独立任务，execute_task 返回时未决
                 # 重试可能仍在本循环上——循环关闭前 drain，否则重试任务随
                 # loop.close() 被销毁（旧 await 链实现天然覆盖此段）。
-                loop.run_until_complete(self.drain_pending_retries())
+                # B-7 方案 B：shared 模式重试已提交到常驻循环，job 循环上
+                # 无未决任务——立即返回（重试退避期不占线程池 worker，P2）。
+                if _get_exec_mode() == "legacy":
+                    loop.run_until_complete(self.drain_pending_retries())
             finally:
                 loop.close()
         except Exception as e:
@@ -1043,6 +1133,19 @@ class TaskScheduler:
             task.id, delay, next_count + 1, max_attempts,
         )
 
+        # B-7 方案 B（特性开关）：shared 模式把重试体提交到调度域常驻循环——
+        # job 循环立即返回，退避 sleep 期不占线程池 worker（P2 消除）。
+        # 返回的 concurrent.futures.Future 入引用集 + done_callback
+        # （自清引用 + 异常收割）。
+        if _get_exec_mode() == "shared":
+            retry_future = asyncio.run_coroutine_threadsafe(
+                self._run_retry(task.id, delay, next_count), _get_retry_loop()
+            )
+            self._pending_retry_futures.add(retry_future)
+            retry_future.add_done_callback(self._on_retry_future_done)
+            return
+
+        # legacy：spawn 在发起 job 的循环上，由 drain_pending_retries()/stop() 收口。
         retry_task = asyncio.create_task(self._run_retry(task.id, delay, next_count))
         self._pending_retry_tasks.add(retry_task)
         retry_task.add_done_callback(self._pending_retry_tasks.discard)
@@ -1061,17 +1164,70 @@ class TaskScheduler:
     async def drain_pending_retries(self) -> None:
         """等待全部未决重试任务结束。
 
+        legacy：等本循环任务集 `_pending_retry_tasks`（台账 #7 形态）。
+        shared（B-7 方案 B）：重试跑在常驻循环上，等 `_pending_retry_futures`
+        ——经 asyncio.wrap_future 桥到当前循环 gather。重试链的下一跳在
+        上一跳协程内提交、先于其 future 完成即已入集，故"快照-重查"循环
+        不会中途漏等；future 集只含未完成任务，不会永久等待。
+
         循环 gather 直到没有未完成任务：每个重试任务完成前可能又 spawn
         下一跳（max_attempts 封顶保证有限跳）。关停/测试收口用。
         注意：本方法不调用 asyncio.sleep（重试 sleep 属重试任务自身），
         返回时保证无非 done 任务；引用集清空由 done_callback 在下一轮
         循环调度中完成。
         """
+        shared = _get_exec_mode() == "shared"
         while True:
-            pending = [t for t in self._pending_retry_tasks if not t.done()]
-            if not pending:
-                return
-            await asyncio.gather(*pending, return_exceptions=True)
+            if shared:
+                pending = [f for f in list(self._pending_retry_futures) if not f.done()]
+                if not pending:
+                    return
+                running_loop = asyncio.get_running_loop()
+                await asyncio.gather(
+                    *(asyncio.wrap_future(f, loop=running_loop) for f in pending),
+                    return_exceptions=True,
+                )
+            else:
+                # 只等本循环的重试任务：`_pending_retry_tasks` 是全实例共享
+                # 注册表，并发 job 在各自工作线程的 per-job 循环上 spawn 重试
+                # ——跨循环 gather 会抛 "future belongs to a different loop"
+                # 并使本方 job 循环提前 close、整链被截断（B-7 占用回放测试
+                # 首次暴露的预存并发缺陷）。他方循环的任务由他方 wrapper 的
+                # drain 收口；本循环 close 前只需等会随 close 一起被销毁的
+                # 本循环任务。
+                current_loop = asyncio.get_running_loop()
+                pending = [
+                    t for t in self._pending_retry_tasks
+                    if not t.done() and t.get_loop() is current_loop
+                ]
+                if not pending:
+                    return
+                await asyncio.gather(*pending, return_exceptions=True)
+
+    def _on_retry_future_done(self, retry_future: "concurrent.futures.Future") -> None:
+        """shared 重试 future 的 done_callback：自清引用 + 异常收割。
+
+        concurrent.futures.Future 的异常无人读取不会告警（与 asyncio.Future
+        不同），必须在此显式收割，否则重试失败被静默吞掉（立项 §5
+        "重试任务逃逸"缓解）。
+        """
+        self._pending_retry_futures.discard(retry_future)
+        if retry_future.cancelled():
+            return
+        exc = retry_future.exception()
+        if exc is not None:
+            logger.error("Retry future failed: %s", exc, exc_info=exc)
+
+    def _cancel_pending_retry_futures(self) -> int:
+        """取消全部未决重试 future（shared 模式同步关停路径用），返回取消数量。
+
+        注：对已在常驻循环上运行的协程，cf.cancel() 不直接生效——真正的
+        协程级取消由 _shutdown_retry_loop 的先 cancel 后 close 收口兜底。
+        """
+        pending = [f for f in list(self._pending_retry_futures) if not f.done()]
+        for retry_future in pending:
+            retry_future.cancel()
+        return len(pending)
 
     def _cancel_pending_retries(self) -> int:
         """取消全部未决重试任务（同步关停路径用），返回取消数量。"""

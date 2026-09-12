@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 # executor 签名：(task, context) -> 任意结果（可为协程函数）
 SubAgentExecutor = Callable[[str, Dict[str, Any]], Any]
 
+# B-11（2026-09-11 终账）：_spawned 登记簿只增不删 → 有界淘汰。
+# 纯展示/排查用途的登记历史，上限 200；插入超限时移除最旧条目。
+_SUBAGENT_HISTORY_LIMIT = 200
+
 
 @dataclass
 class SubAgent:
@@ -107,6 +111,10 @@ class SubAgentManager:
         agent = SubAgent(role=role, task=task, context=context or {}, trace_id=trace_id)
         with self._lock:
             self._spawned.append(agent)
+            # B-11：有界淘汰 —— 超限移除最旧，防长驻进程登记簿无界增长
+            overflow = len(self._spawned) - _SUBAGENT_HISTORY_LIMIT
+            if overflow > 0:
+                del self._spawned[:overflow]
         logger.info("SubAgent 已派生: %s role=%s task=%s", agent.agent_id, role, task)
         return agent
 
