@@ -135,6 +135,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "输入文本"},
+                "interval": {"type": "number", "description": "每字符输入间隔秒数（仅像素兜底路径生效，默认 0.05）"},
             },
             "required": ["text"],
         },
@@ -146,6 +147,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "properties": {
                 "scroll_x": {"type": "integer", "description": "水平滚动量", "default": 0},
                 "scroll_y": {"type": "integer", "description": "垂直滚动量", "default": 0},
+                "x": {"type": "integer", "description": "滚动位置横坐标（可选，不传则在当前指针位置滚动）"},
+                "y": {"type": "integer", "description": "滚动位置纵坐标（可选，不传则在当前指针位置滚动）"},
             },
             "required": [],
         },
@@ -617,6 +620,9 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "code": {"type": "string", "description": "要执行的代码字符串"},
                 "language": {"type": "string", "description": "代码语言：python（默认）或 shell"},
                 "timeout": {"type": "integer", "description": "执行超时秒数（默认 60）"},
+                "runtime_type": {"type": "string", "description": "运行时类型：local（默认）或 docker", "enum": ["local", "docker"], "default": "local"},
+                "cwd": {"type": "string", "description": "工作目录（可选，默认执行器当前目录）"},
+                "env": {"type": "object", "description": "附加环境变量字典（可选，如 {\"KEY\": \"value\"}）"},
             },
             "required": ["code"],
         },
