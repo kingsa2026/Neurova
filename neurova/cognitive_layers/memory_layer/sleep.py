@@ -145,6 +145,7 @@ class SleepConsolidation:
         memory_manager=None,
         storage=None,
         settings_store: Optional["SleepSettingsStore"] = None,
+        logs_store_path: Optional[str] = None,
     ):
         """初始化睡眠整合引擎
 
@@ -156,6 +157,9 @@ class SleepConsolidation:
             storage: 存储实例（可选）
             settings_store: 设置持久化存储（可选）。提供时 update_settings
                 落盘、初始化时加载 —— 此前设置仅存内存，agent 重启即丢
+            logs_store_path: 梦境/合并/冲突审计落盘路径（可选）。提供时
+                run_sleep_cycle 写入后落盘、初始化时加载 —— 此前四页签数据
+                仅存进程内存，agent 重启即全空（2026-09-12 未接线功能清剿）
         """
         self.similarity_threshold = similarity_threshold
         self.archive_threshold = archive_threshold
@@ -198,6 +202,9 @@ class SleepConsolidation:
         self._merge_history: List[Dict[str, Any]] = []
         # 冲突解决审计记录（多成员簇合并时产生, /conflicts 端点数据源）
         self._conflict_resolutions: List[Dict[str, Any]] = []
+        # 梦境/合并/冲突落盘（2026-09-12 未接线功能清剿：四页签重启不丢）
+        self._logs_store_path: Optional[str] = logs_store_path
+        self._load_logs()
         self._settings: Dict[str, Any] = {
             "auto_sleep_enabled": True,
             "sleep_threshold_minutes": 30,
@@ -692,6 +699,8 @@ class SleepConsolidation:
                 logger.warning("主动睡眠整理失败: %s", e)
 
         logger.info("主动睡眠开始: 时长=%s 分钟, 处理=%s 条", duration_minutes, result["total_processed"])
+        # 2026-09-12：本轮产生的梦境/合并/冲突随周期落盘，重启四页签不再空
+        self._persist_logs_locked()
         return result
 
     def wake(self) -> Dict[str, Any]:
@@ -707,6 +716,52 @@ class SleepConsolidation:
             "total_sleep_duration": self._total_sleep_duration,
             "sleep_cycles": self._sleep_cycles,
         }
+
+    def _load_logs(self) -> None:
+        """从磁盘加载梦境/合并/冲突审计（logs_store_path 未配置则跳过）。"""
+        if not self._logs_store_path:
+            return
+        import json
+        import os
+
+        if not os.path.exists(self._logs_store_path):
+            return
+        try:
+            with open(self._logs_store_path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                self._dream_logs = list(raw.get("dream_logs", []))
+                self._merge_history = list(raw.get("merge_history", []))
+                self._conflict_resolutions = list(raw.get("conflict_resolutions", []))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to load sleep logs from %s: %s", self._logs_store_path, e)
+
+    def _persist_logs_locked(self) -> None:
+        """写盘（假定调用方持锁或无并发）。原子写，损坏不影响内存态。"""
+        if not self._logs_store_path:
+            return
+        import json
+        import os
+        from pathlib import Path
+
+        try:
+            p = Path(self._logs_store_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "dream_logs": self._dream_logs[: self._MAX_DREAM_LOGS],
+                "merge_history": self._merge_history[-self._MAX_MERGE_HISTORY:],
+                "conflict_resolutions": self._conflict_resolutions[: 2 * self._MAX_MERGE_HISTORY],
+            }
+            tmp = p.with_name(p.name + ".tmp")
+            tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            tmp.replace(p)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Failed to persist sleep logs: %s", e)
+
+    def persist_logs(self) -> None:
+        """公开落盘入口（持 _settings_lock），供外部主动持久化。"""
+        with self._settings_lock:
+            self._persist_logs_locked()
 
     def get_dream_logs(self, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
         """获取梦境（整理回放）记录，最新在前"""

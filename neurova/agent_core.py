@@ -1406,6 +1406,8 @@ class Agent:
                 memory_manager=self.memory_manager,
                 storage=self.storage,
                 settings_store=settings_store,
+                # 梦境/合并/冲突落盘：此前四页签仅存内存，agent 重启即全空
+                logs_store_path=str(self.workspace_path / "sleep_logs.json"),
             )
             # 连接 IdleTimeTracker 和 SleepConsolidation
             if hasattr(self, "idle_tracker") and self.idle_tracker:
