@@ -50,12 +50,13 @@ export interface MotivationState {
 }
 
 export interface ConstitutionRule {
-  id: string
+  rule_id: string
   agent_id: string
-  rule: string
+  rule_type: string
+  content: string
   priority: number
   enabled: boolean
-  created_at: string
+  timestamp: number
 }
 
 // ---------------------------------------------------------------------------
@@ -106,20 +107,20 @@ export function updatePersonality(agentId: string, data: Partial<PersonalityProf
 
 /** Get constitution rules. */
 export function getConstitution(agentId: string) {
-  return api.get<ApiResponse<ConstitutionRule[]>>(`${BASE}/constitution`, { params: { agent_id: agentId } })
+  return api.get<ConstitutionRule[]>(`${BASE}/constitution/rules`, { params: { agent_id: agentId } })
 }
 
 /** Add a constitution rule. */
 export function addConstitutionRule(agentId: string, rule: string, priority?: number) {
-  return api.post<ApiResponse<ConstitutionRule>>(`${BASE}/constitution`, { agent_id: agentId, rule, priority })
+  return api.post<ConstitutionRule>(`${BASE}/constitution/rules`, { content: rule, priority }, { params: { agent_id: agentId } })
 }
 
-/** Update a constitution rule. */
-export function updateConstitutionRule(ruleId: string, data: Partial<ConstitutionRule>) {
-  return api.put<ApiResponse<ConstitutionRule>>(`${BASE}/constitution/${ruleId}`, data)
+/** Update a constitution rule (partial: content/priority/enabled). */
+export function updateConstitutionRule(agentId: string, ruleId: string, data: Partial<ConstitutionRule>) {
+  return api.put<ConstitutionRule>(`${BASE}/constitution/rules/${ruleId}`, data, { params: { agent_id: agentId } })
 }
 
 /** Delete a constitution rule. */
-export function deleteConstitutionRule(ruleId: string) {
-  return api.delete<ApiResponse<null>>(`${BASE}/constitution/${ruleId}`)
+export function deleteConstitutionRule(agentId: string, ruleId: string) {
+  return api.delete<unknown>(`${BASE}/constitution/rules/${ruleId}`, { params: { agent_id: agentId } })
 }

@@ -81,7 +81,12 @@ class TestContextPoolSettingsAPI:
         assert settings["default_token_budget"] == 16000
 
     def test_update_pool_settings(self, client):
-        """测试更新上下文池设置"""
+        """更新上下文池设置 —— 2026-09-12 P7 诚实化后返回 501
+
+        原测试锁的是"PUT 谎报成功写内存"的假契约。该设置与真实 ContextPool
+        运行时零接线（无消费者、池创建不读这些键），保存"成功"但运行时不变
+        属假持久化，端点已改 501 如实上报。GET（读预览）不受影响。
+        """
         update_data = {
             "max_size": 150,
             "ttl_seconds": 7200,
@@ -90,16 +95,8 @@ class TestContextPoolSettingsAPI:
 
         response = client.put(BASE, json=update_data)
 
-        assert response.status_code == 200
-        data = response.json()
-        assert data["code"] == 0
-        assert "message" in data
-        assert "data" in data
-
-        updated_settings = data["data"]
-        assert updated_settings["max_size"] == 150
-        assert updated_settings["ttl_seconds"] == 7200
-        assert updated_settings["default_token_budget"] == 32000
+        assert response.status_code == 501
+        assert "未与运行时接线" in response.json()["detail"]
 
     def test_get_token_budget_for_model(self, client):
         """测试获取特定模型的Token预算"""
