@@ -528,6 +528,7 @@ export default {
     thinking: 'Réflexion en cours...',
     toolCalling: 'Appel d\'outil',
     toolDone: 'Terminé',
+    toolFailed: 'Échoué',
     toolResult: 'Résultat de l\'outil',
     sshCredentialTitle: 'Configurer les identifiants SSH',
     sshCredentialHint: 'Première connexion à {host} ; saisissez les identifiants (chiffrés, visibles par vous seul)',

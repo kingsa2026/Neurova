@@ -528,6 +528,7 @@ export default {
     thinking: 'Denke nach...',
     toolCalling: 'Werkzeug aufrufen',
     toolDone: 'Fertig',
+    toolFailed: 'Fehlgeschlagen',
     toolResult: 'Werkzeugergebnis',
     sshCredentialTitle: 'SSH-Anmeldedaten konfigurieren',
     sshCredentialHint: 'Erste Verbindung zu {host}; bitte Anmeldedaten eingeben (verschlüsselt, nur für Sie sichtbar)',

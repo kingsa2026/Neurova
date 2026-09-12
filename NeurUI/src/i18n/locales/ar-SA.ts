@@ -528,6 +528,7 @@ export default {
     thinking: 'جارٍ التفكير...',
     toolCalling: 'استدعاء الأداة',
     toolDone: 'تم',
+    toolFailed: 'فشل',
     toolResult: 'نتيجة الأداة',
     sshCredentialTitle: 'إعداد بيانات اعتماد SSH',
     sshCredentialHint: 'أول اتصال بـ {host}؛ أدخل بيانات اعتماد الدخول (مشفّرة، مرئية لك وحدك)',

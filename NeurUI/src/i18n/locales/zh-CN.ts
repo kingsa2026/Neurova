@@ -533,6 +533,7 @@ export default {
     thinking: '思考中...',
     toolCalling: '调用中',
     toolDone: '已完成',
+    toolFailed: '失败',
     toolResult: '工具结果',
     sshCredentialTitle: '配置 SSH 凭据',
     sshCredentialHint: '首次连接 {host}，请填写登录凭据（加密保存，仅你可见）',
