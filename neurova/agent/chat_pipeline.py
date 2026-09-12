@@ -1682,6 +1682,19 @@ class ChatPipeline:
         self._apply_thinking_effort(ctx)
         tools_for_llm = await self.context_orchestrator.build_tools_for_llm()
 
+        # 工具链升级 T5：本轮可见文本 = system 轮 + 最近 8 条消息内容，供日期
+        # 落地校验（Needle "system facts 许可"同构：system 含注入当前日期事实）。
+        # ContextVar 在同一 asyncio 任务链内对下游 _execute_single_tool 可见。
+        try:
+            from neurova.security.arg_grounding import set_conversation_source
+
+            _msgs = ctx.context or []
+            _lead = [_msgs[0]] if _msgs and _msgs[0].get("role") == "system" else []
+            set_conversation_source("\n".join(
+                str(m.get("content", "")) for m in _lead + _msgs[-8:]))
+        except Exception:  # noqa: BLE001 - 防线数据注入失败不阻断对话
+            pass
+
         # 移除已自动执行的工具
         if ctx.tool_decision == "auto_executed" and ctx.auto_execute_result and tools_for_llm:
             executed_tool = ctx.auto_execute_result.get("tool_name", "")

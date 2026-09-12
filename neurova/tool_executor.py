@@ -1034,6 +1034,28 @@ class ToolExecutor:
                     }
                     return result
 
+            # 工具链升级 T5：日期臆造防线（默认关，NEUROVA_ARG_GROUNDING=1 开启；
+            # 生效开关=schema format 标记，见 arg_grounding 模块 docstring）
+            from neurova.security.arg_grounding import (
+                find_ungrounded_date_fields,
+                get_conversation_source,
+                grounding_enabled,
+            )
+            from neurova.security.tool_arg_validator import get_tool_arg_schema
+
+            if grounding_enabled():
+                _g_schema = get_tool_arg_schema(tool_name)
+                if _g_schema is not None:
+                    _ungrounded = find_ungrounded_date_fields(
+                        _g_schema, params, get_conversation_source())
+                    if _ungrounded:
+                        result = {
+                            "success": False,
+                            "error": "参数落地校验未通过: " + "; ".join(_ungrounded),
+                            "validation": {"ungrounded": _ungrounded},
+                        }
+                        return result
+
             # 方案 P0-1.5: 统一治理预检 —— DENY 拦截、SANDBOX 隔离执行、
             # ASK 待确认；ALLOW / 无裁决内容返回 None 放行。
             # E3（P2）：MCP 工具持久授权命中 → 免审批直达（等价审批重放的
