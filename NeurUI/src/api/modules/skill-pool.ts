@@ -207,3 +207,55 @@ export function executeSkill(skillId: string, agentId: string, args: Record<stri
     arguments: args,
   })
 }
+
+
+// ---------------------------------------------------------------------------
+// C10 治理收紧（2026-09-12）：待审产物审批面（技能 + 经验）
+// ---------------------------------------------------------------------------
+
+export interface PendingExperience {
+  record_id: string
+  skill_id: string
+  source: string
+  content: string
+  context?: string
+  created_at?: number
+}
+
+export interface PendingSkillItem {
+  template_id?: string
+  skill_id?: string
+  name?: string
+  description?: string
+  [key: string]: unknown
+}
+
+/** C10 审批面：列出待审自动技能（评审闸默认开）。 */
+export function listPendingSkills(agentId: string = '_all') {
+  return api.get<ApiResponse<PendingSkillItem[]>>(`${BASE}/agent/${agentId}/pending-skills`)
+}
+
+/** C10 审批面：批准待审技能。 */
+export function approvePendingSkill(agentId: string, templateId: string) {
+  return api.post(`${BASE}/agent/${agentId}/pending-skills/${templateId}/approve`)
+}
+
+/** C10 审批面：拒绝待审技能。 */
+export function rejectPendingSkill(agentId: string, templateId: string) {
+  return api.post(`${BASE}/agent/${agentId}/pending-skills/${templateId}/reject`)
+}
+
+/** C10 审批面：列出待审的自动化 applied 经验记录。 */
+export function listPendingExperiences(agentId: string = '_all') {
+  return api.get<ApiResponse<PendingExperience[]>>(`${BASE}/agent/${agentId}/pending-experiences`)
+}
+
+/** C10 审批面：批准待审经验（注入技能描述并计入重建阈值）。 */
+export function approvePendingExperience(agentId: string, recordId: string) {
+  return api.post(`${BASE}/agent/${agentId}/pending-experiences/${recordId}/approve`)
+}
+
+/** C10 审批面：拒绝待审经验。 */
+export function rejectPendingExperience(agentId: string, recordId: string) {
+  return api.post(`${BASE}/agent/${agentId}/pending-experiences/${recordId}/reject`)
+}

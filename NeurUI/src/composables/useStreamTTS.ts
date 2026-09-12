@@ -138,8 +138,13 @@ export function createSpeechAnnouncer(
         try {
           const blob = await synthesize(text)
           if (!blob || blob.size === 0) return
+          // 台账 N6（2026-09-11）：被打断的上一条播报 pause 后 onended 永不
+          // 触发——先显式停掉并回收其 object URL，否则每次打断泄漏一个 blob。
+          if (current) {
+            current.pause()
+            if (current.src) URL.revokeObjectURL(current.src)
+          }
           const audio = new Audio(URL.createObjectURL(blob))
-          current?.pause()
           current = audio
           audio.onended = () => {
             URL.revokeObjectURL(audio.src)
@@ -152,7 +157,10 @@ export function createSpeechAnnouncer(
       })()
     },
     dispose(): void {
-      current?.pause()
+      if (current) {
+        current.pause()
+        if (current.src) URL.revokeObjectURL(current.src)
+      }
       current = null
     },
   }

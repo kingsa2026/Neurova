@@ -66,6 +66,13 @@ async function loadSrc(): Promise<void> {
       src.value = ownedUrl = await artifactContentObjectUrl(props.tab.data.artifactId)
     } else if (props.tab.data.fileId) {
       src.value = ownedUrl = await fileContentObjectUrl(props.tab.data.fileId)
+    } else if (props.tab.data.content && props.tab.data.language === 'svg') {
+      // 台账 N5（2026-09-11）：openCodeBlockTab 的 svg 代码块走 kind:'image'
+      // 但只带 content（无 url/artifactId/fileId）——旧实现三个分支都不命中，
+      // 视口恒空白。面板自建 object URL 渲染，所有权归面板统一释放；
+      // 经 <img> 加载的 SVG 内脚本不执行。
+      const blob = new Blob([props.tab.data.content], { type: 'image/svg+xml' })
+      src.value = ownedUrl = URL.createObjectURL(blob)
     }
   } catch {
     error.value = 'load'
@@ -73,7 +80,7 @@ async function loadSrc(): Promise<void> {
 }
 
 watch(
-  () => [props.tab.data.url, props.tab.data.artifactId, props.tab.data.fileId],
+  () => [props.tab.data.url, props.tab.data.artifactId, props.tab.data.fileId, props.tab.data.content],
   loadSrc,
   { immediate: true },
 )

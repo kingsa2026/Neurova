@@ -118,4 +118,79 @@ describe('createComputerPanel', () => {
     expect(() => panel.handleComputerAction({})).not.toThrow()
     expect(panel.state.actions).toHaveLength(0)
   })
+
+  it('R2-5 refreshed 事件更新最近一条动作的画面而非新开日志行', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({ tool: 'computer_click', params: { x: 10, y: 20 }, success: true })
+    expect(panel.state.actions).toHaveLength(1)
+    expect(panel.state.actions[0].screenshot).toBeUndefined()
+
+    panel.handleComputerAction({
+      tool: 'computer_click',
+      params: { x: 10, y: 20 },
+      success: true,
+      refreshed: true,
+      screenshot: 'UkVGUkVTSA==',
+    })
+    // 不新增日志行
+    expect(panel.state.actions).toHaveLength(1)
+    // 该动作的画面被补上，且成为最新截图
+    expect(panel.state.actions[0].screenshot).toBe('data:image/png;base64,UkVGUkVTSA==')
+    expect(panel.state.latestScreenshot).toBe('data:image/png;base64,UkVGUkVTSA==')
+  })
+
+  it('R2-5 点击动作设置位置标记（供面板渲染 agent 点击点）', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({
+      tool: 'computer_click',
+      params: { x: 300, y: 200 },
+      success: true,
+    })
+    expect(panel.state.clickMarker).toBeDefined()
+    expect(panel.state.clickMarker!.x).toBe(300)
+    expect(panel.state.clickMarker!.y).toBe(200)
+
+    panel.clear()
+    expect(panel.state.clickMarker).toBeUndefined()
+  })
+
+  it('R2-5 非 computer_click 动作不设置标记', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({ tool: 'computer_type', params: { text: 'x' }, success: true })
+    expect(panel.state.clickMarker).toBeUndefined()
+  })
+
+  it('R2-5 ActionResult 契约字段落到日志条目', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({
+      tool: 'computer_click_element',
+      params: { index: 0 },
+      success: true,
+      action_result: {
+        route: 'uia',
+        effect: 'confirmed',
+        delivery: 'background',
+        evidence: ['delivery_ack'],
+      },
+    })
+    const entry = panel.state.actions[0]
+    expect(entry.route).toBe('uia')
+    expect(entry.effect).toBe('confirmed')
+
+    panel.handleComputerAction({
+      tool: 'browser_click_role',
+      params: { role: 'button' },
+      success: false,
+      error: '快照中未找到',
+      action_result: { route: 'camofox_ref', effect: 'refused', refusal_code: 'ref_not_found' },
+    })
+    expect(panel.state.actions[1].route).toBe('camofox_ref')
+    expect(panel.state.actions[1].refusalCode).toBe('ref_not_found')
+  })
+
+  it('R2-5 新桌面工具生成可读摘要', () => {
+    expect(describeComputerAction('computer_dom_snapshot', {})).toContain('桌面')
+    expect(describeComputerAction('computer_click_element', { index: 3 })).toContain('3')
+    expect(describeComputerAction('computer_set_value', { value: '你好世界' })).toContain('你好世界')
+  })
 })

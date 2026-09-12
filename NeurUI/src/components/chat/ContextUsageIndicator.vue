@@ -196,7 +196,10 @@ function fmtCompact(n: number | null | undefined): string {
 /** 拉 composition 快照（usage 空时环图兜底 + 面板数据源）。404=尚无实测。
  *  审计⑰：请求发起时快照 agentId，响应回来时已切走则丢弃（防旧响应覆盖）。 */
 async function fetchComposition(): Promise<void> {
-  if (!props.agentId || compositionFetched.value) return
+  // 无会话不发请求：composition 是会话级数据，session_id 为空时后端
+  // 回落 agent 级快照（别的会话的上下文，2026-09-08 反串台语义）或必然
+  // 404，都不该在未选会话状态展示
+  if (!props.agentId || !props.sessionId || compositionFetched.value) return
   compositionFetched.value = true
   const reqAgentId = props.agentId
   try {

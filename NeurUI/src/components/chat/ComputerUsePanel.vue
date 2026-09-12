@@ -27,6 +27,18 @@ const manualNavUrl = ref('')
 const manualCommand = ref('')
 const manualLoading = ref(false)
 const lastClickCoords = ref<{ x: number; y: number } | null>(null)
+const shotImgEl = ref<HTMLImageElement | null>(null)
+
+/** R2-5 agent 点击标记：截图像素坐标 → 图片容器百分比（跟随 object-fit 缩放） */
+const markerStyle = computed(() => {
+  const m = props.state.clickMarker
+  const img = shotImgEl.value
+  if (!m || !img || !img.naturalWidth || !img.naturalHeight) return null
+  return {
+    left: `${(m.x / img.naturalWidth) * 100}%`,
+    top: `${(m.y / img.naturalHeight) * 100}%`,
+  }
+})
 
 const statusText = computed(() => (props.state.busy ? t('computerPanel.live') : t('computerPanel.idle')))
 
@@ -133,14 +145,18 @@ async function doRunCommand() {
     <template v-if="!state.minimized">
       <!-- Screenshot viewport -->
       <div class="cu-shot-wrap">
-        <img
-          v-if="state.latestScreenshot"
-          :src="state.latestScreenshot"
-          :alt="t('computerPanel.title')"
-          class="cu-shot"
-          :title="t('computerPanel.clickHint')"
-          @click="onScreenshotClick"
-        />
+        <div v-if="state.latestScreenshot" class="cu-shot-frame">
+          <img
+            ref="shotImgEl"
+            :src="state.latestScreenshot"
+            :alt="t('computerPanel.title')"
+            class="cu-shot"
+            :title="t('computerPanel.clickHint')"
+            @click="onScreenshotClick"
+          />
+          <!-- R2-5 agent 点击位置标记（脉冲两次后淡出） -->
+          <span v-if="markerStyle" class="cu-marker" :style="markerStyle" />
+        </div>
         <div v-else class="cu-shot-empty">
           <span><UiIcon name="monitor" :size="13" /></span>
           <p>{{ t('computerPanel.empty') }}</p>
@@ -169,6 +185,15 @@ async function doRunCommand() {
             <span class="cu-log-summary" :title="entry.error || entry.summary">
               {{ entry.summary }}
               <template v-if="entry.error"> · {{ entry.error }}</template>
+            </span>
+            <!-- R2-5 ActionResult 契约徽标：投递路径/效果；refused 显示精确拒绝码 -->
+            <span
+              v-if="entry.route"
+              class="cu-badge"
+              :class="{ refused: entry.effect === 'refused', unverified: entry.effect === 'unverifiable' }"
+              :title="t('computerPanel.actionResultHint')"
+            >
+              {{ entry.effect === 'refused' ? entry.refusalCode : `${entry.route}·${entry.effect}` }}
             </span>
             <span class="cu-log-status">{{ entry.success ? '✓' : '✗' }}</span>
           </div>
@@ -283,6 +308,51 @@ async function doRunCommand() {
   max-height: 100%;
   object-fit: contain;
   cursor: crosshair;
+}
+/* R2-5：图片容器（与 img 同尺寸），标记百分比相对它定位 */
+.cu-shot-frame {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  max-height: 100%;
+}
+/* R2-5：agent 点击位置标记（脉冲动画） */
+.cu-marker {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  border: 2px solid #facc15;
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.25);
+  pointer-events: none;
+  animation: cu-marker-pulse 1s ease-out 2;
+}
+@keyframes cu-marker-pulse {
+  0% { transform: scale(0.6); opacity: 1; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+/* R2-5：ActionResult 契约徽标 */
+.cu-badge {
+  flex-shrink: 0;
+  font-family: var(--nr-font-mono, monospace);
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+  border: 1px solid rgba(74, 222, 128, 0.3);
+}
+.cu-badge.unverified {
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.08);
+  border-color: rgba(250, 204, 21, 0.3);
+}
+.cu-badge.refused {
+  color: #fca5a5;
+  background: rgba(252, 165, 165, 0.08);
+  border-color: rgba(252, 165, 165, 0.3);
 }
 .cu-shot-empty {
   display: flex;
