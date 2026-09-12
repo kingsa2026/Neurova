@@ -5,9 +5,11 @@ langchain 壳（模型目录/连接测试），聊天主链（multi_model_client
 LLMClient）只说 OpenAI 协议，Claude 官方 API（原生 /v1/messages）
 根本走不通。
 
-接口对齐 LLMClient（chat/chat_stream/chat_stream_async/count_message_tokens），
+接口对齐 LLMClient（chat/chat_stream_async/count_message_tokens），
 multi_model_client 鸭子类型零改动。思考内容经 protocol_thinking 归一为
 LLMResponse.reasoning_content —— Router 以上零改动。
+（B-11：原同步 chat_stream 的 async→sync 桥已删除 —— multi_model_client
+流式主链只走 chat_stream_async，同步桥零调用方且每 chunk 新建事件循环。）
 
 thinking 映射（前端深度选择器）：
 - light/未开启 → 不带 thinking 参数（普通模式）
@@ -96,7 +98,7 @@ def build_anthropic_body(
 class AnthropicNativeClient:
     """Anthropic 原生协议聊天客户端（aiohttp /v1/messages）。
 
-    与 LLMClient 接口鸭子兼容：chat / chat_stream / chat_stream_async /
+    与 LLMClient 接口鸭子兼容：chat / chat_stream_async /
     count_message_tokens / count_tokens —— multi_model_client 零改动消费。
     """
 
@@ -163,10 +165,6 @@ class AnthropicNativeClient:
         async for chunk in aiter_anthropic_stream_events(lines):
             yield chunk
 
-    def chat_stream(self, messages, **kwargs):
-        """同步流式 —— 桥接到异步实现（与 LLMClient.chat_stream 对偶语义）"""
-        return _SyncStreamBridge(self.chat_stream_async(messages, **kwargs))
-
     def count_tokens(self, text: str) -> int:
         """粗估 token 数（Anthropic 无本地分词器可用，按 ~4 字符/token）"""
         return max(1, len(text or "") // 4)
@@ -177,26 +175,3 @@ class AnthropicNativeClient:
             content = msg.get("content") or ""
             total += self.count_tokens(str(content)) + 4
         return total
-
-
-class _SyncStreamBridge:
-    """把 async generator 桥接成同步迭代器（事件循环内禁止时退化为报错）"""
-
-    def __init__(self, agen):
-        self._agen = agen
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        import asyncio
-
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        if loop and loop.is_running():
-            raise RuntimeError(
-                "chat_stream(同步) 在事件循环内不可用，请使用 chat_stream_async"
-            )
-        return asyncio.run(self._agen.__anext__())

@@ -133,6 +133,16 @@ class ModelRateLimiter:
             self._pause_until.pop(model, None)
             self._consecutive_429.pop(model, None)
 
+    def clear_pause(self, model: str) -> None:
+        """仅清除暂停、保留连续 429 计数（429 主动重试路径专用）。
+
+        ZCode 对齐（2026-09-11）：同模型等待重试前调用——重试是"每 10s 一次"
+        的温和流量，不应被自身上一轮上报的暂停挡在闸门外；连续计数保留，
+        其他并发调用方的退避升级语义不受影响（report_success 仍全量复位）。
+        """
+        with self._lock:
+            self._pause_until.pop(model, None)
+
     def pause_remaining(self, model: str) -> float:
         with self._lock:
             until = self._pause_until.get(model)
