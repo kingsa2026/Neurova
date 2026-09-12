@@ -136,6 +136,10 @@ async def shutdown_agent(agent) -> None:
         (agent, "attachment_manager"),
         (getattr(agent, "memory_manager", None), "_emotion_module"),
         (getattr(agent, "memory_agent", None), "_persist_db_store"),
+        # B-1 轮补（2026-09-11）：3820cdd9 的 MemoryManager._persist_conn
+        # 常驻 WAL 连接（sqlite3.Connection 自带 close，幂等）——不入清单
+        # 则包导入回滚 rmtree 撞 neurova_memories_persist.db 句柄。
+        (getattr(agent, "memory_manager", None), "_persist_conn"),
     ):
         if _holder is None:
             continue

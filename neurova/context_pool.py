@@ -117,8 +117,10 @@ class ContextPool:
 
         # RES-P2-1：hash→条目索引——add 去重与 ack 标记此前是全池 O(n) 线性扫
         # （每条消息追加/每轮 ack 都扫一遍，池为永久归档只增不减，随历史线性劣化）。
-        # 列表被整体重排（TTL/compress/dedup/clear）时须调用 _rebuild_hash_index 同步。
+        # 列表被整体重排（TTL/compress/dedup/clear）时须调用 _rebuild_indexes 同步。
         self._by_hash: Dict[str, Any] = {}
+        # B-8：turn_id→条目列表索引——mark_turn_seen 此前同为全池 O(n) 线性扫。
+        self._by_turn: Dict[str, List[Any]] = {}
 
         # P1-1③：驱逐台账持久层 + 摘要压缩器（可选注入；None=保持内存行为）
         self._ledger_db = ledger_db
@@ -150,6 +152,9 @@ class ContextPool:
                         idx = self._collector._contexts.index(existing_entry)
                         self._collector._contexts[idx] = context
                         self._by_hash[context.hash] = context
+                        # B-8：turn 索引随替换同步（旧条目可能换了 turn）
+                        self._turn_index_remove(existing_entry)
+                        self._turn_index_add(context)
                         self._cache_version += 1
                         logger.debug("ContextPool 替换条目: hash=%s, priority=%s→%s",
                                      context.hash[:8], existing_entry.priority, context.priority)
@@ -164,11 +169,39 @@ class ContextPool:
             self._collector.add_context(context)
             if context.hash:
                 self._by_hash[context.hash] = context
+            self._turn_index_add(context)
             self._cache_version += 1
 
-    def _rebuild_hash_index(self) -> None:
-        """整体重排 _contexts 后重建 hash→条目索引（调用方须持 _lock）。"""
+    @staticmethod
+    def _entry_turn_id(entry) -> Optional[str]:
+        return (entry.metadata or {}).get("turn_id")
+
+    def _turn_index_add(self, entry) -> None:
+        tid = self._entry_turn_id(entry)
+        if not tid:
+            return
+        self._by_turn.setdefault(tid, []).append(entry)
+
+    def _turn_index_remove(self, entry) -> None:
+        tid = self._entry_turn_id(entry)
+        if not tid:
+            return
+        bucket = self._by_turn.get(tid)
+        if bucket is None:
+            return
+        try:
+            bucket.remove(entry)
+        except ValueError:
+            pass
+        if not bucket:
+            self._by_turn.pop(tid, None)
+
+    def _rebuild_indexes(self) -> None:
+        """整体重排 _contexts 后重建 hash/turn 双索引（调用方须持 _lock）。"""
         self._by_hash = {c.hash: c for c in self._collector._contexts if c.hash}
+        self._by_turn = {}
+        for c in self._collector._contexts:
+            self._turn_index_add(c)
 
     def _inject_isolation_tags(self, context) -> None:
         """根因 A 修复: 把 session_id/agent_id/user_id 注入到 chunk.metadata
@@ -402,13 +435,15 @@ class ContextPool:
     def mark_turn_seen(self, turn_id: str) -> int:
         """P1-1④ ack 集：标记指定轮次的全部 chunk 为已读（模型请求成功后）。
 
+        B-8：经 _by_turn 索引 O(k) 直取，旧实现全池 O(n) 线性扫。
+
         Returns:
             标记数量
         """
         with self._lock:
             count = 0
-            for chunk in self._collector._contexts:
-                if (chunk.metadata or {}).get("turn_id") == turn_id and not chunk.seen_confirmed:
+            for chunk in self._by_turn.get(turn_id, []):
+                if not chunk.seen_confirmed:
                     chunk.seen_confirmed = True
                     count += 1
             return count
@@ -487,7 +522,7 @@ class ContextPool:
             removed_items = [c for c in self._collector._contexts if c not in valid]
             original_count = len(self._collector._contexts)
             self._collector._contexts = valid
-            self._rebuild_hash_index()
+            self._rebuild_indexes()
 
             removed_count = original_count - len(valid)
             for item in removed_items:
@@ -592,7 +627,7 @@ class ContextPool:
             contexts = self.get_contexts()
             compressed = self._compressor.compress(contexts)
             self._collector._contexts = compressed
-            self._rebuild_hash_index()
+            self._rebuild_indexes()
 
     def merge_with(self, other_pool: "ContextPool"):
         with self._lock:
@@ -605,6 +640,7 @@ class ContextPool:
         with self._lock:
             self._collector._contexts.clear()
             self._by_hash.clear()
+            self._by_turn.clear()
             self._cache.clear()
             self._cache_version += 1
 
@@ -631,7 +667,7 @@ class ContextPool:
             all_drops = self._collector.collect()
             deduped = self._deduplicator.dedup(all_drops, stage=stage)
             self._collector._contexts = deduped
-            self._rebuild_hash_index()
+            self._rebuild_indexes()
             return len(deduped)
 
 

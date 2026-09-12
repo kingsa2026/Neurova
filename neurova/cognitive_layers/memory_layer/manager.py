@@ -82,6 +82,15 @@ def _row_origin(row) -> "MemoryOrigin":
 # 作用域只覆盖第 2/3 层 (neuser_id/user_id); agent_id 始终取实例自身的。
 _scope_var: ContextVar = ContextVar("memory_isolation_scope", default=None)
 
+
+def clear_memory_request_scope() -> None:
+    """模块级复位：请求作用域 ContextVar 归未设置态（default=None）。
+
+    同步上下文（pytest 单线程/长寿命线程）中 ContextVar 值跨测试/跨任务
+    存活——显式设置过作用域的调用方用完必须归还。见 MemoryManager.clear_request_scope。
+    """
+    _scope_var.set(None)
+
 # 全局单例
 _default_manager: Optional["MemoryManager"] = None
 # 根因修复 (2026-09-02): 按 (agent_id, neuser_id, user_id, db_path) 作用域注册表，
@@ -629,6 +638,16 @@ class MemoryManager:
         上下文中的旧值 (每个请求应显式声明完整作用域)。
         """
         _scope_var.set((neuser_id or self._neuser_id, user_id or self._user_id))
+
+    def clear_request_scope(self) -> None:
+        """归还未设置态（ContextVar 回到 default=None，作用域回落实例默认）。
+
+        set_request_scope 的值在同步测试/长寿命线程上下文中不会自动销毁
+        （"随请求上下文销毁"仅对异步任务成立）——显式设置作用域的调用方
+        （测试/后台任务）用完后必须归还，否则同上下文的后续写入/读取
+        全部落在被污染的作用域上。
+        """
+        _scope_var.set(None)
 
     @contextmanager
     def request_scope(self, neuser_id: Optional[str] = None, user_id: Optional[str] = None):
@@ -3159,8 +3178,21 @@ class MemoryManager:
     # ────── Close ──────
 
     def close(self) -> None:
-        """优雅关闭"""
+        """优雅关闭：停标志 + 关闭常驻 WAL 连接。
+
+        B-1 轮实证（2026-09-11）：3820cdd9 引入 _persist_conn 常驻连接时漏修
+        本生命周期——不关则 agent 工作区删除/包导入回滚 rmtree 撞
+        neurova_memories_persist.db 句柄（Windows WinError 32）。
+        """
         self._started = False
+        conn = getattr(self, "_persist_conn", None)
+        if conn is not None:
+            with self._persist_db_lock:
+                try:
+                    conn.close()
+                except Exception as e:  # noqa: BLE001 — 收尾不外泄
+                    logger.warning("persist conn close failed: %s", e)
+                self._persist_conn = None
         logger.info("MemoryManager closed: agent_id=%s", self._agent_id)
 
     def __repr__(self) -> str:

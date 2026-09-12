@@ -95,13 +95,23 @@ class PatternCrystallizer:
                 此前 _buffer 纯内存，重启丢计数，低频场景"≥3 次结晶"
                 永远凑不齐。提供时按模式键持久化聚合计数，重启恢复）
         """
+        import os as _os
+
         self.engine = engine
         self.evolution = evolution_orchestrator
         self._state_path = state_path
         self._buffer: Dict[str, List[Dict[str, Any]]] = {}
+        # 混合信号层（QP 对齐启发 #1）：规则预筛（≥3 次 & 成功率≥60%）通过后，
+        # 候选不再直写存储引擎，进入 _pending 队列等待 LLM 可复用性裁决
+        # （低频批量，由 post_chat 复盘通道触发）。默认开；LLM 不可用时
+        # 超龄候选自动放行（零 LLM 环境行为退化为原直写，不丢数据）。
+        # NEUROVA_CRYSTALLIZATION_LLM_GATE=0 显式关闭（回退直写）。
+        self._llm_gate = _os.environ.get("NEUROVA_CRYSTALLIZATION_LLM_GATE", "1") != "0"
+        self._llm_judge = None  # 复盘通道注入的 LLM client；None = 零 LLM 语义（直写）
+        self._pending: List[Dict[str, Any]] = []
         self._load_buffer_state()
 
-        logger.info("PatternCrystallizer 初始化完成")
+        logger.info("PatternCrystallizer 初始化完成 (llm_gate=%s)", self._llm_gate)
 
     def _load_buffer_state(self) -> None:
         """从 state 文件恢复观察聚合计数（C9；缺文件/损坏静默跳过）。"""
@@ -119,6 +129,8 @@ class PatternCrystallizer:
             # "last_context": str}}；恢复为等价缓冲条目（合成条目不含原文，
             # 只保计数语义）
             for key, agg in data.items():
+                if key == "pending":
+                    continue  # 待裁决队列单独恢复
                 n = int(agg.get("observations", 0))
                 succ = int(agg.get("successes", 0))
                 if n <= 0 or n >= 3:
@@ -128,6 +140,10 @@ class PatternCrystallizer:
                     {"tool": agg.get("tool", key), "success": i < succ, "context": ctx}
                     for i in range(n)
                 ]
+            # 待裁决队列恢复（混合信号层；重启不丢候选）
+            pending = data.get("pending")
+            if isinstance(pending, list):
+                self._pending = [p for p in pending if isinstance(p, dict) and p.get("key")][-20:]
         except Exception as e:
             logger.debug("结晶缓冲状态恢复跳过: %s", e)
 
@@ -149,6 +165,8 @@ class PatternCrystallizer:
                     "tool": entries[0].get("tool", ""),
                     "last_context": entries[-1].get("context", ""),
                 }
+            if self._pending:
+                data["pending"] = self._pending
             p = _Path(self._state_path)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(_json.dumps(data, ensure_ascii=False), encoding="utf-8")
@@ -225,6 +243,40 @@ class PatternCrystallizer:
         # pattern_key（管道符键），自然语言检索永远命中不了结晶经验；
         # 顺修 f-string 的 %% 笔误（字面双百分号）
         sample_ctx = entries[0].get("context", "")[:80]
+
+        # 先清缓冲再存储/通知（闭环审查修 E2）：自喂 observe 在通知链内
+        # 重新观察同一 key，缓冲不清空会触发递归重结晶与二删 KeyError；
+        # 清空后自喂观察从干净周期起步（1 条 < 3 阈值，无递归）
+        self._buffer.pop(key, None)
+
+        candidate = {
+            "key": key,
+            "primary_tool": primary_tool,
+            "rate": rate,
+            "sample_count": len(entries),
+            "sample_context": sample_ctx,
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # 混合信号层：规则预筛通过 ≠ 直接写库——闸开启且 LLM judge 在位时
+        # 先进待裁决队列，由 post_chat 复盘通道低频批量裁决（过滤词面匹配
+        # 伪模式）。judge 未注入 = 零 LLM 语义，保持原直写行为。
+        if self._llm_gate and self._llm_judge is not None:
+            self._pending.append(candidate)
+            del self._pending[:-20]  # 有界：最多 20 条待裁决
+            self._save_buffer_state()
+            logger.info("结晶候选进入 LLM 待裁决队列: '%s' (待审 %d 条)", key, len(self._pending))
+            return
+
+        self._store_candidate(candidate)
+        self._save_buffer_state()
+
+    def _store_candidate(self, candidate: Dict[str, Any]) -> None:
+        """按候选构造 PATTERN 节点写入存储引擎并通知进化编排器。"""
+        key = candidate["key"]
+        primary_tool = candidate["primary_tool"]
+        rate = candidate["rate"]
+        sample_ctx = candidate.get("sample_context", "")[:80]
         node = UnifiedMemoryNode(
             content=(
                 f"模式: '{key}' 类任务用 {primary_tool} 成功率 {rate * 100:.0f}%"
@@ -237,14 +289,9 @@ class PatternCrystallizer:
                 "pattern_key": key,
                 "primary_tool": primary_tool,
                 "success_rate": rate,
-                "sample_count": len(entries),
+                "sample_count": candidate.get("sample_count", 0),
             },
         )
-
-        # 先清缓冲再存储/通知（闭环审查修 E2）：自喂 observe 在通知链内
-        # 重新观察同一 key，缓冲不清空会触发递归重结晶与二删 KeyError；
-        # 清空后自喂观察从干净周期起步（1 条 < 3 阈值，无递归）
-        self._buffer.pop(key, None)
 
         # 存储
         self.engine.store(node)
@@ -264,6 +311,116 @@ class PatternCrystallizer:
                 )
             except Exception as e:
                 logger.warning("通知 EvolutionOrchestrator 失败: %s", e)
+
+    # ── 混合信号层：待裁决队列管理 ──
+
+    def set_llm_judge(self, llm_client: Any) -> None:
+        """注入复盘通道的 LLM client（幂等）。注入后闸分流生效。"""
+        self._llm_judge = llm_client
+
+    def list_pending(self) -> List[Dict[str, Any]]:
+        """待 LLM 裁决的结晶候选（只读快照）。"""
+        return [dict(c) for c in self._pending]
+
+    def _candidate_age_hours(self, candidate: Dict[str, Any]) -> float:
+        try:
+            queued = datetime.fromisoformat(candidate.get("queued_at"))
+            return (datetime.now(timezone.utc) - queued).total_seconds() / 3600.0
+        except (ValueError, TypeError):
+            return 0.0
+
+    def _prune_expired_pending(self, max_age_hours: float = 48.0) -> int:
+        """超龄候选自动放行（LLM 长期不可用时的兜底——零 LLM 环境不丢数据）。"""
+        expired = [c for c in self._pending if self._candidate_age_hours(c) >= max_age_hours]
+        for c in expired:
+            self._store_candidate(c)
+            logger.info("结晶候选超龄自动放行: '%s'", c["key"])
+        if expired:
+            self._pending = [c for c in self._pending if self._candidate_age_hours(c) < max_age_hours]
+            self._save_buffer_state()
+        return len(expired)
+
+    async def review_pending_with_llm(self, llm_client: Any = None, max_age_hours: float = 48.0) -> Dict[str, Any]:
+        """复盘通道入口：批量请求 LLM 对待裁决候选做可复用性裁决。
+
+        judge 失败/不可用时不丢数据——候选留队等下轮（超龄由 _prune 兜底放行）。
+        Returns: {"reviewed": n, "approved": n, "rejected": n, "skipped": n}
+        """
+        client = llm_client or self._llm_judge
+        if not self._pending:
+            return {"reviewed": 0, "approved": 0, "rejected": 0, "skipped": 0}
+        self._prune_expired_pending(max_age_hours)
+        if not self._pending:
+            return {"reviewed": 0, "approved": 0, "rejected": 0, "skipped": 0}
+
+        if client is None:
+            return {"reviewed": 0, "approved": 0, "rejected": 0, "skipped": len(self._pending)}
+
+        listing = "\n".join(
+            f"- [{c['key']}] 工具={c['primary_tool']} 成功率={c['rate']*100:.0f}% "
+            f"样本={c['sample_count']} 上下文片段: {c.get('sample_context', '')[:60]}"
+            for c in self._pending
+        )
+        prompt = (
+            "以下是从工具使用记录中按统计规则预筛出的候选行为模式。请逐条判断该模式"
+            "是否为可复用的行为规律（可复用），还是一次性事实/临时环境故障/个人偏好/"
+            "无依据猜测（不可复用）。只依据给定证据判断，不要臆测。\n\n"
+            f"{listing}\n\n"
+            '只输出 JSON：{"verdicts": [{"key": "<原模式键>", "reusable": true/false, "reason": "<一句话>"}]}'
+        )
+        try:
+            response = await client.generate(prompt)
+        except Exception as e:
+            logger.warning("结晶 LLM 裁决调用失败（候选留队）: %s", e)
+            return {"reviewed": 0, "approved": 0, "rejected": 0, "skipped": len(self._pending)}
+
+        verdicts = self._parse_verdicts(response if isinstance(response, str) else str(response))
+        return self.confirm_pending(verdicts)
+
+    def _parse_verdicts(self, response: str) -> List[Dict[str, Any]]:
+        """从 LLM 响应解析裁决列表（宽松 JSON 提取；坏行跳过）。"""
+        import json as _json
+        import re as _re
+
+        try:
+            match = _re.search(r"\{[\s\S]*\}", response)
+            if not match:
+                return []
+            data = _json.loads(match.group())
+            verdicts = []
+            for v in data.get("verdicts", []):
+                if not isinstance(v, dict) or not v.get("key"):
+                    continue
+                verdicts.append(
+                    {
+                        "key": str(v["key"]),
+                        "approved": bool(v.get("reusable", False)),
+                        "reason": str(v.get("reason", "")),
+                    }
+                )
+            return verdicts
+        except (ValueError, TypeError):
+            return []
+
+    def confirm_pending(self, verdicts: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """按裁决结果处置待审候选：approved → 写库并通知；否则丢弃。"""
+        by_key = {v["key"]: v for v in verdicts if isinstance(v, dict) and v.get("key")}
+        approved = rejected = 0
+        kept: List[Dict[str, Any]] = []
+        for candidate in self._pending:
+            verdict = by_key.get(candidate["key"])
+            if verdict is None:
+                kept.append(candidate)  # 未裁决（LLM 漏判）→ 留队等下轮
+                continue
+            if verdict.get("approved"):
+                self._store_candidate(candidate)
+                approved += 1
+            else:
+                rejected += 1
+                logger.info("结晶候选被 LLM 否决: '%s' (%s)", candidate["key"], verdict.get("reason", ""))
+        self._pending = kept
+        self._save_buffer_state()
+        return {"reviewed": len(by_key), "approved": approved, "rejected": rejected, "skipped": len(kept)}
 
 
     def retrieve(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
