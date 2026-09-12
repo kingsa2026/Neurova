@@ -638,22 +638,9 @@ async def get_proactive_actions(
         except Exception as e:
             logger.warning("Failed to get proactive actions: %s", e)
 
-    # 如果没有数据，返回模拟数据
-    if not actions:
-        for i in range(min(limit, 3)):
-            actions.append(
-                ProactiveAction(
-                    action_id=str(uuid.uuid4()),
-                    agent_id=agent_id,
-                    timestamp=time.time() - (i * 7200),
-                    action_type="communication",
-                    trigger="inactivity",
-                    content=f"Proactive message about topic {i+1}",
-                    success=True,
-                    response_received=i % 2 == 0,
-                )
-            )
-
+    # 2026-09-12 诚实化：原实现在无数据时用 uuid 编造 3 条
+    # "Proactive message about topic i" mock（活跃假数据违规）。
+    # proactive_behavior_engine 全仓未实例化 → 如实返回空列表。
     return actions
 
 

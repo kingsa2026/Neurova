@@ -97,7 +97,8 @@ _templates_store: Dict[str, Dict[str, Any]] = {
     },
 }
 
-_builds_store: Dict[str, Dict[str, Any]] = {}
+# _builds_store 已删（2026-09-12 读写归一）：构建历史唯一真源是
+# ImagePipelineManager.get_builds()，本模块不再自带平行车库。
 
 
 # ---------------------------------------------------------------------------
@@ -185,21 +186,21 @@ async def list_builds(
     status: Optional[str] = Query(default=None, description="按状态筛选"),
     limit: int = Query(default=50, le=200),
 ):
-    """查看构建历史"""
-    builds = list(_builds_store.values())
+    """查看构建历史
 
+    2026-09-12 读写归一：POST /build 的记录进 ImagePipelineManager，
+    原列表却读端点自带的恒空 _builds_store（写读两套存储分离，页面永远空）。
+    """
+    builds = get_image_pipeline_manager().get_builds(limit=limit)
     if template_name:
-        builds = [b for b in builds if b.get("template_name") == template_name]
+        builds = [b for b in builds if b.get("template_id") == template_name]
     if status:
         builds = [b for b in builds if b.get("status") == status]
-
-    # 按开始时间降序排序
-    builds.sort(key=lambda x: x.get("started_at", 0), reverse=True)
 
     return {
         "code": 0,
         "data": {
-            "builds": builds[:limit],
+            "builds": builds,
             "total": len(builds),
         },
     }
@@ -207,12 +208,8 @@ async def list_builds(
 
 @router.get("/builds/{build_id}")
 async def get_build(build_id: str):
-    """查看某次构建详情"""
-    build = _builds_store.get(build_id)
-    if not build:
-        raise HTTPException(status_code=404, detail=f"Build '{build_id}' not found")
-
-    return {
-        "code": 0,
-        "data": build,
-    }
+    """查看某次构建详情（读 manager 真源）"""
+    for build in get_image_pipeline_manager().get_builds(limit=200):
+        if build.get("build_id") == build_id:
+            return {"code": 0, "data": build}
+    raise HTTPException(status_code=404, detail=f"Build '{build_id}' not found")
