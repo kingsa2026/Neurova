@@ -18,10 +18,12 @@
 
 import asyncio
 import logging
+import time
 from typing import Any, Dict
 
 import pytest
 
+import neurova.agent.scheduler as sched_mod
 from neurova.agent.scheduler import (
     AutomationTask,
     RetryPolicy,
@@ -33,8 +35,23 @@ from neurova.agent.scheduler import (
 
 EXECUTE_TIMEOUT = 5  # 修复后毫秒级完成；旧实现无限重试必然超时
 
+# 真实让出助手：经线程池执行 OS 级 time.sleep（高分辨率）。
+# 不用 asyncio.sleep——Windows 上 loop.time() 粗粒度（~15.6ms）会让短
+# sleep 的定时器因时钟刻度跳变提前到期（实测 0.01s sleep 34µs 返回），
+# "真实让出"退化为微秒级，重试跳得以在初始执行入史前入史（跨线程
+# 入史顺序竞态；生产退避为秒级不受此影响，纯测试装置问题）。
+_REAL_TIME_SLEEP = time.sleep
+
+
+async def _real_yield(seconds: float = 0.01):
+    await asyncio.get_running_loop().run_in_executor(None, _REAL_TIME_SLEEP, seconds)
+
+
 # 台账 #7（2026-09-11）：重试链改为独立任务后，execute_task 返回≠重试链
 # 结束——断言前必须 drain 未决重试任务（新的收口契约点）。断言本身不变。
+# B-7（2026-09-12）：drain/drain 后断言随模式而异的是收口机制（task/future），
+# 以下核心断言两模式逐字一致：max_attempts 封顶、退避序列、终态日志、
+# triggered_by 语义、history 顺序==执行顺序。
 async def _execute_and_drain(scheduler, task_id: str, **kwargs):
     execution = await asyncio.wait_for(
         scheduler.execute_task(task_id, **kwargs), timeout=EXECUTE_TIMEOUT
@@ -43,11 +60,19 @@ async def _execute_and_drain(scheduler, task_id: str, **kwargs):
     return execution
 
 
-@pytest.fixture
-def scheduler():
+@pytest.fixture(params=["legacy", "shared"])
+def scheduler(request, monkeypatch):
+    # B-7：双模式参数化——env 开关全程生效（_get_exec_mode 每次读取）
+    monkeypatch.setenv("NEUROVA_SCHEDULER_EXEC_MODE", request.param)
     TaskScheduler._instance = None
     s = TaskScheduler()
     yield s
+    # 收尾：清掉可能残留的未决重试（两模式）与常驻重试循环，防跨测试泄漏
+    for t in list(s._pending_retry_tasks):
+        t.cancel()
+    for f in list(getattr(s, "_pending_retry_futures", ())):
+        f.cancel()
+    sched_mod._shutdown_retry_loop()
     TaskScheduler._instance = None
 
 
@@ -93,7 +118,7 @@ async def test_persistent_failure_bounded_by_max_attempts(scheduler, monkeypatch
     scheduler.add_task(_make_failing_task("t-bounded", max_attempts=3))
 
     async def fake_sleep(_delay):
-        pass
+        await _real_yield()  # 真实让出：见模块头竞态说明
 
     import neurova.agent.scheduler as sched_mod
 
@@ -119,6 +144,7 @@ async def test_backoff_delay_doubles_with_retry_count(scheduler, monkeypatch):
 
     async def fake_sleep(delay):
         delays.append(delay)
+        await _real_yield()  # 真实让出：见模块头竞态说明
 
     import neurova.agent.scheduler as sched_mod
 
@@ -145,6 +171,7 @@ async def test_no_backoff_keeps_constant_delay(scheduler, monkeypatch):
 
     async def fake_sleep(delay):
         delays.append(delay)
+        await _real_yield()  # 真实让出：见模块头竞态说明
 
     import neurova.agent.scheduler as sched_mod
 
@@ -163,7 +190,7 @@ async def test_max_attempts_terminal_state_logged(scheduler, monkeypatch, caplog
     scheduler._executors[TaskType.AGENT] = executor
 
     async def fake_sleep(_delay):
-        pass
+        await _real_yield()  # 真实让出：见模块头竞态说明
 
     import neurova.agent.scheduler as sched_mod
 

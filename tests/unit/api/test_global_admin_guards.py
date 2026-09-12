@@ -36,6 +36,17 @@ MOCK_USER = {"user_id": "test_user", "username": "testuser", "role": "user"}
 MOCK_ADMIN = {"user_id": "admin_user", "username": "adminuser", "role": "admin"}
 
 
+@pytest.fixture(autouse=True)
+def _isolate_app_settings(tmp_path, monkeypatch):
+    """设置持久化重定向到 tmp——admin 写用例（PUT /settings）不得污染真实
+    data/app_settings.json（EKB-3920 同模式：测试经端点打真库）。"""
+    from neurova.core import app_settings as _app_settings
+
+    monkeypatch.setattr(
+        _app_settings, "_settings_path", lambda path=None: tmp_path / "app_settings.json"
+    )
+
+
 @pytest.fixture
 def app():
     a = FastAPI()

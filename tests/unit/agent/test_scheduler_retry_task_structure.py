@@ -13,10 +13,12 @@
 """
 
 import asyncio
-from typing import Any, Dict
+import time
+from typing import Any, Dict, List
 
 import pytest
 
+import neurova.agent.scheduler as sched_mod
 from neurova.agent.scheduler import (
     AutomationTask,
     RetryPolicy,
@@ -26,15 +28,62 @@ from neurova.agent.scheduler import (
     TaskType,
 )
 
+# B-7（2026-09-12）：shared 模式（方案 B）重试跑在常驻循环上，未决重试的
+# 持引用形态是 concurrent.futures.Future（_pending_retry_futures）而非
+# asyncio.Task（_pending_retry_tasks）。以下两个助手提供双模式统一的
+# "未决/收口"视图——核心断言（未决数、全部收口、引用集清空）语义不变。
+# 真实让出助手：经线程池执行 OS 级 time.sleep（高分辨率）。
+# 不用 asyncio.sleep——Windows 上 loop.time() 粗粒度（~15.6ms）会让短
+# sleep 的定时器因时钟刻度跳变提前到期（实测 0.01s sleep 34µs 返回），
+# "真实让出"退化为微秒级，重试跳得以在初始执行入史前入史（跨线程
+# 入史顺序竞态；生产退避为秒级不受此影响，纯测试装置问题）。
+_REAL_TIME_SLEEP = time.sleep
 
-@pytest.fixture
-def scheduler():
+
+async def _real_yield(seconds: float = 0.01):
+    await asyncio.get_running_loop().run_in_executor(None, _REAL_TIME_SLEEP, seconds)
+
+
+
+def _pending_retry_work(s) -> List[Any]:
+    """双模式统一：未决重试工作（task 或 future）清单。"""
+    tasks = [t for t in s._pending_retry_tasks if not t.done()]
+    futures = [f for f in getattr(s, "_pending_retry_futures", ()) if not f.done()]
+    return tasks + futures
+
+
+def _all_retry_work_done(s) -> bool:
+    tasks_done = all(t.done() for t in s._pending_retry_tasks)
+    futures = getattr(s, "_pending_retry_futures", ())
+    futures_done = all(f.done() for f in futures)
+    return tasks_done and futures_done
+
+
+async def _wait_until(predicate, timeout: float = 2.0) -> bool:
+    """真实时间轮询：shared 模式 done_callback 在常驻循环线程上完成，
+    跨线程收口无同步通知，deadline 兜底防永久等待。"""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        if predicate():
+            return True
+        await _real_yield()
+    return predicate()
+
+
+@pytest.fixture(params=["legacy", "shared"])
+def scheduler(request, monkeypatch):
+    # B-7：双模式参数化——env 开关全程生效（_get_exec_mode 每次读取）
+    monkeypatch.setenv("NEUROVA_SCHEDULER_EXEC_MODE", request.param)
     TaskScheduler._instance = None
     s = TaskScheduler()
     yield s
-    # 收尾：清掉可能残留的未决重试任务，防跨测试泄漏
+    # 收尾：清掉可能残留的未决重试任务/future，防跨测试泄漏
     for t in list(s._pending_retry_tasks):
         t.cancel()
+    for f in list(getattr(s, "_pending_retry_futures", ())):
+        f.cancel()
+    sched_mod._shutdown_retry_loop()
     TaskScheduler._instance = None
 
 
@@ -81,7 +130,10 @@ async def test_outer_duration_covers_only_own_execution(scheduler, monkeypatch):
     scheduler.add_task(_make_task("t-dur", max_attempts=3))
 
     async def fake_sleep(_delay):
-        return  # 注意：asyncio.sleep 已被 patch，体内不得再调它（自递归）
+        # 注意：不得调已被 patch 的 asyncio.sleep（自递归）；经线程池真实让出
+        # 10ms——shared 模式重试跳在常驻线程上，若不让出真实时间，跳可在初始
+        # 执行的 finally 入史前入史（生产退避秒级无此竞态，纯装置伪影）。
+        await _real_yield()
 
     import neurova.agent.scheduler as sched_mod
 
@@ -111,7 +163,10 @@ async def test_history_append_order_matches_execution_order(scheduler, monkeypat
     scheduler.add_task(_make_task("t-order", max_attempts=3))
 
     async def fake_sleep(_delay):
-        return  # 注意：asyncio.sleep 已被 patch，体内不得再调它（自递归）
+        # 注意：不得调已被 patch 的 asyncio.sleep（自递归）；经线程池真实让出
+        # 10ms——shared 模式重试跳在常驻线程上，若不让出真实时间，跳可在初始
+        # 执行的 finally 入史前入史（生产退避秒级无此竞态，纯装置伪影）。
+        await _real_yield()
 
     import neurova.agent.scheduler as sched_mod
 
@@ -136,7 +191,10 @@ async def test_running_executions_not_held_across_retry_chain(scheduler, monkeyp
     scheduler.add_task(_make_task("t-run", max_attempts=3))
 
     async def fake_sleep(_delay):
-        return  # 注意：asyncio.sleep 已被 patch，体内不得再调它（自递归）
+        # 注意：不得调已被 patch 的 asyncio.sleep（自递归）；经线程池真实让出
+        # 10ms——shared 模式重试跳在常驻线程上，若不让出真实时间，跳可在初始
+        # 执行的 finally 入史前入史（生产退避秒级无此竞态，纯装置伪影）。
+        await _real_yield()
 
     import neurova.agent.scheduler as sched_mod
 
@@ -151,7 +209,12 @@ async def test_running_executions_not_held_across_retry_chain(scheduler, monkeyp
 
 @pytest.mark.asyncio
 async def test_stop_cancels_pending_retry_tasks(scheduler, monkeypatch):
-    """stop() 必须取消未决重试任务（shutdown 收口）"""
+    """stop() 必须取消未决重试任务（shutdown 收口）
+
+    B-7 shared 适配：未决形态随模式为 task/future（核心断言语义不变——
+    execute_task 返回后恰有 1 个持引用的未决重试；stop() 后全部收口且
+    引用集清空；被取消的第一跳不得再执行）。
+    """
     executor = FlakyThenFailingExecutor()
     scheduler._executors[TaskType.AGENT] = executor
     scheduler.add_task(_make_task("t-stop", max_attempts=3))
@@ -160,19 +223,19 @@ async def test_stop_cancels_pending_retry_tasks(scheduler, monkeypatch):
     execution = await asyncio.wait_for(scheduler.execute_task("t-stop"), timeout=5)
     assert execution.status == TaskStatus.FAILED
 
-    # execute_task 返回时应有 1 个未决重试任务（正在 sleep）
-    pending = [t for t in scheduler._pending_retry_tasks if not t.done()]
+    # execute_task 返回时应有 1 个未决重试（正在 sleep）
+    pending = _pending_retry_work(scheduler)
     assert len(pending) == 1, "execute_task 返回后必须存在持引用的未决重试任务"
 
     scheduler.stop()  # 无 apscheduler 也应安全执行取消逻辑
 
-    # 取消后 done_callback（discard）在循环调度中清空引用集
-    for _ in range(50):
-        if not scheduler._pending_retry_tasks:
-            break
-        await asyncio.sleep(0)
-    assert all(t.done() for t in pending), "stop() 后未决重试任务必须被取消"
-    assert not scheduler._pending_retry_tasks, "done_callback 必须清空引用集"
+    # 收口后：全部未决完成、引用集清空（shared 回调在常驻线程上，轮询等待）
+    assert await _wait_until(lambda: _all_retry_work_done(scheduler)), "stop() 后未决重试必须全部收口"
+    assert await _wait_until(
+        lambda: not scheduler._pending_retry_tasks
+        and not getattr(scheduler, "_pending_retry_futures", set())
+    ), "done_callback 必须清空引用集"
+    assert all(w.done() for w in pending), "stop() 后未决重试任务必须被取消"
     # 第一跳重试被取消 → 永远不会执行第二次 execute
     assert len([r for r in executor.records if r[0] == "execute_start"]) == 1
 
@@ -184,10 +247,13 @@ async def test_drain_pending_retries_waits_full_chain(scheduler, monkeypatch):
     scheduler._executors[TaskType.AGENT] = executor
     scheduler.add_task(_make_task("t-drain", max_attempts=4))
 
-    real_sleep = asyncio.sleep  # 先捕获真 sleep，供测试内 flush 调度
-
+    # B-7：真等待已由模块级 _real_yield 提供（经线程池 OS 级 sleep），
+    # 此处可安全 patch 成短让出协程。
     async def fake_sleep(_delay):
-        return  # 注意：asyncio.sleep 已被 patch，体内不得再调它（自递归）
+        # 注意：不得调已被 patch 的 asyncio.sleep（自递归）；经线程池真实让出
+        # 10ms——shared 模式重试跳在常驻线程上，若不让出真实时间，跳可在初始
+        # 执行的 finally 入史前入史（生产退避秒级无此竞态，纯装置伪影）。
+        await _real_yield()
 
     import neurova.agent.scheduler as sched_mod
 
@@ -198,7 +264,10 @@ async def test_drain_pending_retries_waits_full_chain(scheduler, monkeypatch):
 
     # max_attempts=4 → 共 4 次执行；drain 后无非 done 重试任务
     assert len([r for r in executor.records if r[0] == "execute_start"]) == 4
-    assert all(t.done() for t in scheduler._pending_retry_tasks)
+    assert _all_retry_work_done(scheduler)
     # 真 sleep 让一轮循环调度跑完 done_callback（discard）→ 引用集清空
-    await real_sleep(0)
-    assert not scheduler._pending_retry_tasks
+    # （B-7 shared：discard 回调在常驻循环线程上完成，需真实时间轮询收口）
+    assert await _wait_until(
+        lambda: not scheduler._pending_retry_tasks
+        and not getattr(scheduler, "_pending_retry_futures", set())
+    )
