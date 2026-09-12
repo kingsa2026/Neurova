@@ -1,0 +1,34 @@
+{
+  "surface": "weather_file_memory",
+  "description": "天气/文件/记忆工具面冻结验收（T6 首批，含别名与字符串数字归一路径）",
+  "records": [
+    {
+      "query": "北京现在多少度",
+      "answers": [{"name": "weather", "arguments": {"city": "北京"}}]
+    },
+    {
+      "query": "查一下上海的实时天气",
+      "answers": [{"name": "weather", "arguments": {"location": "上海"}}]
+    },
+    {
+      "query": "刚才聊的那件事帮我找回来",
+      "answers": [{"name": "recall_history", "arguments": {"query": "那件事", "limit": "5"}}]
+    },
+    {
+      "query": "我之前是不是提过我的猫叫什么",
+      "answers": [{"name": "memory_search", "arguments": {"query": "猫的名字"}}]
+    },
+    {
+      "query": "从第 20 行开始读 README.md",
+      "answers": [{"name": "file_read", "arguments": {"file_path": "README.md", "offset": 20}}]
+    },
+    {
+      "query": "把会议纪要写到 notes/meeting.md",
+      "answers": [{"name": "file_write", "arguments": {"file_path": "notes/meeting.md", "content": "纪要内容"}}]
+    },
+    {
+      "query": "搜一下 2026 年 AI Agent 框架",
+      "answers": [{"name": "web_search", "arguments": {"keywords": "2026 AI Agent 框架"}}]
+    }
+  ]
+}
