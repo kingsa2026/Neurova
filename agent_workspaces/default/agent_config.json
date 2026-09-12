@@ -1,14 +1,15 @@
 {
   "name": "Neurova",
   "description": "",
-  "model": "DeepSeek-V4-Flash-Vision-Exp",
-  "provider": "amd",
+  "model": "glm-5.3-flash",
+  "provider": "bai",
+  "temperature": 0.7,
   "personality": "",
   "constitution": "",
   "owner_user_id": "",
-  "enable_tts": true,
+  "enable_tts": false,
   "tts_engine": "auto",
-  "tts_voice": "Lingyu",
+  "tts_voice": "zh-CN-XiaoxiaoNeural",
   "tts_speed": 1.0,
   "tts_pitch": 1.0
 }
