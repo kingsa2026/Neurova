@@ -147,8 +147,32 @@ class AutoSkillImprover:
                     optimization_goal = OptimizationGoal.CONCISENESS
                     break
 
-        # 优化提示词
-        result = await optimizer.optimize_prompt(current_prompt, optimization_goal)
+        # 优化提示词（v2 评测集驱动）：无显式评测集时用默认结构评测集
+        # （角色/执行步骤/约束/输出格式四要素），goal 仅作元数据标记
+        from .prompt_optimizer import PromptEvalCase, PromptEvalSet
+
+        default_eval_set = PromptEvalSet(
+            [
+                PromptEvalCase(
+                    case_id="role", description="必须声明角色", required_elements=["你是一名"]
+                ),
+                PromptEvalCase(
+                    case_id="structure", description="必须有执行步骤小节",
+                    required_elements=["## 执行步骤"],
+                ),
+                PromptEvalCase(
+                    case_id="constraints", description="必须有约束小节",
+                    required_elements=["## 约束"],
+                ),
+                PromptEvalCase(
+                    case_id="format", description="必须有输出格式小节",
+                    required_elements=["## 输出格式"],
+                ),
+            ]
+        )
+        result = await optimizer.optimize_prompt(
+            current_prompt, default_eval_set, optimization_type=optimization_goal
+        )
 
         # 记录优化历史
         if result.success:

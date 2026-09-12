@@ -215,6 +215,10 @@ class SkillPacker:
         self._muscle: Dict[str, MuscleMemory] = {}
         self._lock = threading.RLock()
         self._state = "uninitialized"
+        # C10 治理收紧（2026-09-12）：打包产物默认待审
+        from neurova.evolution.skill_review_gate import skill_review_gate_enabled
+
+        self._review_gate = skill_review_gate_enabled()
         self._load()
 
     def on_initialize(self) -> None:
@@ -334,10 +338,49 @@ class SkillPacker:
                 metadata={"task_type": task_type, "source_records": len(records)},
             )
             self._skills[sid] = packed
+            if self._review_gate:
+                # C10 治理收紧（2026-09-12）：打包产物默认待审——批准后才写
+                # 工具记忆/经验沉淀（改行为的两步都压在审批之后）
+                packed.metadata["review_pending"] = True
+                logger.info("Packed skill %s 进待审（评审闸开启）", sid)
+            else:
+                self._write_to_toolmemory(packed)
+                self._record_experience(packed)
+            self._save()
+            return sid
+
+    def list_pending_skills(self) -> List[Dict[str, Any]]:
+        """C10 审批面：待审打包技能列表（评审闸开启时非空）。"""
+        with self._lock:
+            return [
+                s.to_dict()
+                for s in self._skills.values()
+                if s.metadata.get("review_pending")
+            ]
+
+    def approve_skill(self, skill_id: str) -> bool:
+        """批准待审技能：写工具记忆 + 经验沉淀，清除待审标记。"""
+        with self._lock:
+            packed = self._skills.get(skill_id)
+            if packed is None or not packed.metadata.get("review_pending"):
+                return False
+            packed.metadata.pop("review_pending", None)
             self._write_to_toolmemory(packed)
             self._record_experience(packed)
             self._save()
-            return sid
+        logger.info("Packed skill %s 已批准生效", skill_id)
+        return True
+
+    def reject_skill(self, skill_id: str) -> bool:
+        """拒绝待审技能：直接移除。"""
+        with self._lock:
+            packed = self._skills.get(skill_id)
+            if packed is None or not packed.metadata.get("review_pending"):
+                return False
+            del self._skills[skill_id]
+            self._save()
+        logger.info("Packed skill %s 已拒绝移除", skill_id)
+        return True
 
     def pack_skill(
         self,
@@ -369,8 +412,12 @@ class SkillPacker:
                 metadata=dict(metadata) if metadata else {},
             )
             self._skills[sid] = packed
-            self._write_to_toolmemory(packed)
-            self._record_experience(packed)
+            if self._review_gate:
+                # C10 治理收紧：同 _create_skill_from_records——批准后才生效
+                packed.metadata["review_pending"] = True
+            else:
+                self._write_to_toolmemory(packed)
+                self._record_experience(packed)
             self._save()
             return sid
 

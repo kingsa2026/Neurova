@@ -13,7 +13,10 @@ import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
+from neurova.evolution.persistence import PersistedStateMixin
 
 logger = get_logger(__name__)
 
@@ -64,7 +67,7 @@ class ToolLifecycleEntry:
         }
 
 
-class ToolLifecycleManager:
+class ToolLifecycleManager(PersistedStateMixin):
     """
     工具生命周期管理器：管理工具从活跃到归档的完整生命周期。
     """
@@ -95,6 +98,8 @@ class ToolLifecycleManager:
         self._frozen_after = (
             self.FROZEN_AFTER_SECONDS if frozen_after_seconds is None else frozen_after_seconds
         )
+        # 持久化挂载（未挂载=纯内存/测试语义，零 IO）
+        self._init_state_persistence()
         logger.debug("ToolLifecycleManager initialized")
 
     def register_tool(self, tool_name: str) -> ToolLifecycleEntry:
@@ -122,6 +127,8 @@ class ToolLifecycleManager:
             # 如果工具已降级或归档，重新激活
             if entry.state in (ToolLifecycleState.DEGRADED, ToolLifecycleState.ARCHIVED):
                 self._transition(tool_name, ToolLifecycleState.ACTIVE)
+        # C-15 教义：落盘在锁外执行（磁盘 IO 不串行化读路径）
+        self._maybe_persist()
 
     def get_usage_count(self, tool_name: str) -> int:
         """获取工具总使用次数（兼容 Version A API）。"""
@@ -140,22 +147,29 @@ class ToolLifecycleManager:
 
             # 评估所有工具
             results = {}
+            mutated = False
             for name, entry in self._entries.items():
                 # 根据不活跃时间自动转换状态
                 inactive = entry.inactive_seconds
                 if inactive >= self._frozen_after and entry.state != ToolLifecycleState.FROZEN:
                     self._transition(name, ToolLifecycleState.FROZEN)
+                    mutated = True
                 elif inactive >= self._archived_after and entry.state not in (
                     ToolLifecycleState.ARCHIVED,
                     ToolLifecycleState.FROZEN,
                 ):
                     self._transition(name, ToolLifecycleState.ARCHIVED)
+                    mutated = True
                 elif inactive >= self._degraded_after and entry.state == ToolLifecycleState.ACTIVE:
                     self._transition(name, ToolLifecycleState.DEGRADED)
+                    mutated = True
 
                 results[name] = entry.to_dict()
 
-            return results
+        # 仅状态迁移过才落盘（单工具查询分支是纯读，不触发 IO）
+        if mutated:
+            self._maybe_persist()
+        return results
 
     def revive(self, tool_name: str) -> bool:
         """将工具恢复到 ACTIVE 状态。"""
@@ -164,7 +178,8 @@ class ToolLifecycleManager:
                 return False
 
             self._transition(tool_name, ToolLifecycleState.ACTIVE)
-            return True
+        self._maybe_persist()
+        return True
 
     def delete_tool(self, tool_name: str) -> bool:
         """删除工具。
@@ -181,7 +196,8 @@ class ToolLifecycleManager:
                     f"cannot delete ACTIVE tool '{tool_name}'; archive it first"
                 )
             del self._entries[tool_name]
-            return True
+        self._maybe_persist()
+        return True
 
     def get_state(self, tool_name: str) -> Optional[ToolLifecycleState]:
         """获取工具的生命周期状态（H6: 返回枚举而非字符串）。"""
@@ -212,7 +228,8 @@ class ToolLifecycleManager:
                     self._transition(name, ToolLifecycleState.DEGRADED)
                     changes["degraded"] += 1
 
-            return changes
+        self._maybe_persist()
+        return changes
 
     def get_tools_by_state(self, state: ToolLifecycleState) -> List[str]:
         """获取指定状态的工具列表。"""
@@ -243,6 +260,47 @@ class ToolLifecycleManager:
     def _now(self) -> float:
         """获取当前时间。"""
         return time.time()
+
+    def _snapshot_payload(self) -> Dict[str, Any]:
+        """四态快照（锁内取数，写盘由 mixin 在锁外完成）。"""
+        with self._lock:
+            return {
+                "version": 1,
+                "tools": {
+                    name: {
+                        "state": entry.state.value,
+                        "total_calls": entry.total_calls,
+                        "success_calls": entry.success_calls,
+                        "failure_calls": entry.failure_calls,
+                        "last_used": entry.last_used,
+                        "created_at": entry.created_at,
+                        "state_changed_at": entry.state_changed_at,
+                    }
+                    for name, entry in self._entries.items()
+                },
+            }
+
+    def _restore_payload(self, data: Dict[str, Any]) -> None:
+        tools = data.get("tools", {})
+        entries: Dict[str, ToolLifecycleEntry] = {}
+        for name, payload in tools.items():
+            try:
+                state = ToolLifecycleState(payload.get("state", "active"))
+            except ValueError:
+                # 未知状态串 → 回退 ACTIVE（工具重新挣生命周期）
+                state = ToolLifecycleState.ACTIVE
+            entries[name] = ToolLifecycleEntry(
+                tool_name=name,
+                state=state,
+                total_calls=int(payload.get("total_calls", 0)),
+                success_calls=int(payload.get("success_calls", 0)),
+                failure_calls=int(payload.get("failure_calls", 0)),
+                last_used=float(payload.get("last_used", time.time())),
+                created_at=float(payload.get("created_at", time.time())),
+                state_changed_at=float(payload.get("state_changed_at", time.time())),
+            )
+        with self._lock:
+            self._entries = entries
 
     def _advance_time(self, seconds: float) -> None:
         """测试辅助：将所有工具的 last_used 向前推进。"""

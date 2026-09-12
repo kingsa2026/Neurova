@@ -1,22 +1,157 @@
-"""
-提示优化器 (Prompt Optimizer)
+"""PromptOptimizer — 评测集驱动的提示词优化（v2 重写）
 
-优化技能提示词以提高性能和准确性。
-实现 Meta-skill 的 prompt-optimizer 能力。
+对齐 agent-core 的做法（QP 对比启发 #6）：**小型评测集 + 变体打分驱动迭代**，
+而非对提示词原文做关键词启发打分。
+
+v1 的问题（自注"模拟评估逻辑，实际应该基于测试用例的预期输出"）：五个
+_analyze_* 全是关键词计数启发，所谓打分没有真值基准——分数高≠提示词好。
+
+v2 的评估语义：
+- **PromptEvalCase**：声明式评测用例（required_elements 必须出现的要素 /
+  forbidden_patterns 禁止出现的反模式 / max_length 长度上限）——像单元测试
+  一样为"这个提示词应该长什么样"提供真值基准；
+- **PromptEvalSet.score_prompt**：变体过一遍全部用例，得分 = 加权通过率（0..1）；
+- **generate_variants**：确定性变体生成（补结构小节 / 角色声明 / 输出格式段 /
+  约束段 / 去冗余）——生成侧保持零 LLM 规则实现；
+- **optimize_prompt**：迭代循环——每轮生成变体、全量打分、保留最优，
+  满分提前收敛。score_before/score_after 是真实通过率变化，不再是无基准噪声。
+
+兼容说明：保留 OptimizationGoal/PromptAnalysis/OptimizedPrompt/
+VariantTestResults 类名与 optimize_prompt/test_prompt_variants/analyze_prompt
+入口形状（历史引用面 skills/auto_skill_improver.py）；PromptAnalysis 的四个
+启发式分数字段废弃（恒 0，仅保留字段兼容）——真实信号在 eval set 通过率。
 """
 
-from __future__ import annotations
+import re
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional
 
 logger = get_logger(__name__)
 
 
-class OptimizationGoal(Enum):
-    """优化目标"""
+# ────── 评测集 ──────
+
+
+@dataclass
+class PromptEvalCase:
+    """单条评测用例：为提示词声明一条可机械验证的真值。
+
+    Attributes:
+        case_id: 用例标识
+        description: 人读说明（这条用例在检查什么）
+        required_elements: 提示词中必须出现的子串（任一缺失即该用例失败）
+        forbidden_patterns: 禁止出现的正则（任一命中即失败，如模糊指令/越权模式）
+        max_length: 提示词最大长度（None 不限制）
+        weight: 用例权重（默认 1）
+    """
+
+    case_id: str
+    description: str
+    required_elements: List[str] = field(default_factory=list)
+    forbidden_patterns: List[str] = field(default_factory=list)
+    max_length: Optional[int] = None
+    weight: float = 1.0
+
+
+class PromptEvalSet:
+    """提示词评测集：一组 PromptEvalCase + 确定性打分器。"""
+
+    def __init__(self, cases: Optional[List[PromptEvalCase]] = None):
+        self.cases = list(cases or [])
+
+    def add_case(self, case: PromptEvalCase) -> None:
+        self.cases.append(case)
+
+    def score_prompt(self, prompt: str) -> Tuple[float, List[Dict[str, Any]]]:
+        """提示词过全部用例，返回 (加权通过率 0..1, 逐用例明细)。"""
+        if not self.cases:
+            return 0.0, []
+        total_weight = sum(c.weight for c in self.cases) or 1.0
+        earned = 0.0
+        details: List[Dict[str, Any]] = []
+        for case in self.cases:
+            passed, failures = self._check_case(prompt, case)
+            if passed:
+                earned += case.weight
+            details.append(
+                {
+                    "case_id": case.case_id,
+                    "description": case.description,
+                    "passed": passed,
+                    "failures": failures,
+                }
+            )
+        return earned / total_weight, details
+
+    @staticmethod
+    def _check_case(prompt: str, case: PromptEvalCase) -> Tuple[bool, List[str]]:
+        failures: List[str] = []
+        for element in case.required_elements:
+            if element not in prompt:
+                failures.append(f"缺少要素: {element}")
+        for pattern in case.forbidden_patterns:
+            try:
+                if re.search(pattern, prompt):
+                    failures.append(f"命中禁止模式: {pattern}")
+            except re.error:
+                failures.append(f"非法正则（用例配置错误）: {pattern}")
+        if case.max_length is not None and len(prompt) > case.max_length:
+            failures.append(f"超长: {len(prompt)} > {case.max_length}")
+        return not failures, failures
+
+
+# ────── 变体生成（确定性规则；评估才是真值来源）──────
+
+_STRUCTURE_SECTION = (
+    "\n\n## 执行步骤\n"
+    "1. 理解任务目标与输入。\n"
+    "2. 按上述要求逐项处理。\n"
+    "3. 输出前自查是否符合全部约束。"
+)
+
+_FORMAT_SECTION = (
+    "\n\n## 输出格式\n"
+    "以清晰的结构化文本回复：先给结论，再给依据；列表用短横线，代码用代码块。"
+)
+
+_CONSTRAINT_SECTION = (
+    "\n\n## 约束\n"
+    "- 不得编造事实；不确定时明确说明。\n"
+    "- 不要输出与任务无关的内容。"
+)
+
+_ROLE_PREFIX = "你是一名严谨、专业的任务执行助手。\n\n"
+
+
+def generate_variants(base_prompt: str) -> List[Tuple[str, str]]:
+    """从基准提示词生成确定性变体，返回 [(variant_name, prompt_text), ...]。
+
+    变体集是超集候选——哪个变体在评测集上得分最高由打分决定，
+    生成器不做价值判断。
+    """
+    base = base_prompt.rstrip()
+    return [
+        ("base", base),
+        ("with_role", _ROLE_PREFIX + base),
+        ("with_structure", base + _STRUCTURE_SECTION),
+        ("with_format", base + _FORMAT_SECTION),
+        ("with_constraints", base + _CONSTRAINT_SECTION),
+        ("role_structure_format", _ROLE_PREFIX + base + _STRUCTURE_SECTION + _FORMAT_SECTION),
+        (
+            "full",
+            _ROLE_PREFIX + base + _STRUCTURE_SECTION + _FORMAT_SECTION + _CONSTRAINT_SECTION,
+        ),
+        ("tightened", re.sub(r"\n{3,}", "\n\n", base)),
+    ]
+
+
+# ────── 兼容数据类（字段保留，语义见类注释）──────
+
+
+class OptimizationGoal:
+    """优化目标（v2 中仅作元数据标记；方向由评测集驱动）"""
 
     CLARITY = "clarity"
     SPECIFICITY = "specificity"
@@ -28,7 +163,7 @@ class OptimizationGoal(Enum):
 
 @dataclass
 class PromptAnalysis:
-    """提示词分析结果"""
+    """结构化分析结果（v2：启发式四分数已废弃恒 0，真实信号在 eval set）"""
 
     clarity_score: float = 0.0
     specificity_score: float = 0.0
@@ -42,7 +177,7 @@ class PromptAnalysis:
 
 @dataclass
 class OptimizedPrompt:
-    """优化后的提示词"""
+    """优化结果：score_before/after 是评测集真实通过率"""
 
     success: bool = False
     original_prompt: str = ""
@@ -50,13 +185,13 @@ class OptimizedPrompt:
     improvements: List[str] = field(default_factory=list)
     score_before: float = 0.0
     score_after: float = 0.0
-    optimization_type: OptimizationGoal = OptimizationGoal.CLARITY
+    optimization_type: str = OptimizationGoal.CLARITY
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class VariantTestResults:
-    """变体测试结果"""
+    """变体打分结果"""
 
     variants: List[str] = field(default_factory=list)
     variant_scores: List[float] = field(default_factory=list)
@@ -67,506 +202,114 @@ class VariantTestResults:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+# ────── 主类 ──────
+
+
 class PromptOptimizer:
+    """评测集驱动的提示词优化器。
+
+    用法：
+        eval_set = PromptEvalSet([
+            PromptEvalCase(case_id="role", description="必须声明角色",
+                           required_elements=["你是一名"]),
+            ...
+        ])
+        result = await optimizer.optimize_prompt(base_prompt, eval_set)
+        result.optimized_prompt  # 评测集通过率最高的变体
     """
-    提示优化器
 
-    优化技能提示词以提高性能和准确性。
-    实现 Meta-skill 的 prompt-optimizer 能力。
-    """
-
-    def __init__(self, llm_client=None):
-        """
-        初始化提示优化器
-
-        Args:
-            llm_client: LLM 客户端，用于提示词分析和生成
-        """
+    def __init__(self, llm_client: Optional[Any] = None):
+        # llm_client 预留：接入执行回路后可加"输出质量"维度的 LLM 评审；
+        # 当前评测核为确定性结构用例，不依赖 LLM。
         self.llm_client = llm_client
-        self._optimization_history: Dict[str, OptimizedPrompt] = {}
-
-        logger.info("PromptOptimizer 初始化完成")
-
-    async def analyze_prompt(self, prompt: str, skill_context: Optional[Dict[str, Any]] = None) -> PromptAnalysis:
-        """
-        分析提示词
-
-        Args:
-            prompt: 提示词
-            skill_context: 技能上下文
-
-        Returns:
-            PromptAnalysis: 分析结果
-        """
-        try:
-            # 基础分析
-            clarity_score = await self._analyze_clarity(prompt)
-            specificity_score = await self._analyze_specificity(prompt, skill_context)
-            completeness_score = await self._analyze_completeness(prompt, skill_context)
-            conciseness_score = await self._analyze_conciseness(prompt)
-
-            # 计算总体分数
-            overall_score = (
-                clarity_score * 0.3 + specificity_score * 0.25 + completeness_score * 0.25 + conciseness_score * 0.2
-            )
-
-            # 生成建议
-            suggestions = await self._generate_suggestions(
-                prompt, clarity_score, specificity_score, completeness_score, conciseness_score
-            )
-
-            # 识别问题
-            issues = await self._identify_issues(prompt)
-
-            return PromptAnalysis(
-                clarity_score=clarity_score,
-                specificity_score=specificity_score,
-                completeness_score=completeness_score,
-                conciseness_score=conciseness_score,
-                overall_score=overall_score,
-                suggestions=suggestions,
-                issues=issues,
-                metadata={
-                    "prompt_length": len(prompt),
-                    "word_count": len(prompt.split()),
-                    "skill_context": skill_context,
-                },
-            )
-
-        except Exception as e:
-            logger.error("提示词分析失败: %s", e)
-            return PromptAnalysis(metadata={"error": str(e)})
 
     async def optimize_prompt(
-        self, prompt: str, optimization_goal: OptimizationGoal = OptimizationGoal.CLARITY
+        self,
+        prompt: str,
+        eval_set: PromptEvalSet,
+        rounds: int = 2,
+        optimization_type: str = OptimizationGoal.CLARITY,
+        **kwargs,
     ) -> OptimizedPrompt:
-        """
-        优化提示词
-
-        Args:
-            prompt: 原始提示词
-            optimization_goal: 优化目标
-
-        Returns:
-            OptimizedPrompt: 优化结果
-        """
-        try:
-            # 分析原始提示词
-            analysis = await self.analyze_prompt(prompt)
-
-            # 根据优化目标选择优化策略
-            if optimization_goal == OptimizationGoal.CLARITY:
-                optimized = await self._optimize_for_clarity(prompt, analysis)
-            elif optimization_goal == OptimizationGoal.SPECIFICITY:
-                optimized = await self._optimize_for_specificity(prompt, analysis)
-            elif optimization_goal == OptimizationGoal.CONCISENESS:
-                optimized = await self._optimize_for_conciseness(prompt, analysis)
-            elif optimization_goal == OptimizationGoal.COMPLETENESS:
-                optimized = await self._optimize_for_completeness(prompt, analysis)
-            elif optimization_goal == OptimizationGoal.PERFORMANCE:
-                optimized = await self._optimize_for_performance(prompt, analysis)
-            elif optimization_goal == OptimizationGoal.SECURITY:
-                optimized = await self._optimize_for_security(prompt, analysis)
-            else:
-                optimized = await self._optimize_for_clarity(prompt, analysis)
-
-            # 分析优化后的提示词
-            optimized_analysis = await self.analyze_prompt(optimized)
-
-            # 记录改进点
-            improvements = await self._identify_improvements(prompt, optimized, analysis, optimized_analysis)
-
-            result = OptimizedPrompt(
-                success=True,
+        """迭代优化：生成变体 → 评测集打分 → 保留最优；满分提前收敛。"""
+        if not isinstance(eval_set, PromptEvalSet) or not eval_set.cases:
+            return OptimizedPrompt(
+                success=False,
                 original_prompt=prompt,
-                optimized_prompt=optimized,
-                improvements=improvements,
-                score_before=analysis.overall_score,
-                score_after=optimized_analysis.overall_score,
-                optimization_type=optimization_goal,
-                metadata={
-                    "improvement_count": len(improvements),
-                    "score_improvement": optimized_analysis.overall_score - analysis.overall_score,
-                },
+                metadata={"error": "eval_set 为空——v2 优化必须有评测集基准"},
             )
 
-            # 记录优化历史
-            history_key = f"{prompt[:50]}_{optimization_goal.value}"
-            self._optimization_history[history_key] = result
+        score_before, _ = eval_set.score_prompt(prompt)
+        best_prompt, best_score = prompt, score_before
+        improvements: List[str] = []
+        history: List[Dict[str, Any]] = [{"round": 0, "best": best_score, "source": "base"}]
 
-            logger.info(
-                f"提示词优化成功，分数提升: {analysis.overall_score:.2f} -> {optimized_analysis.overall_score:.2f}"
-            )
-            return result
-
-        except Exception as e:
-            logger.error("提示词优化失败: %s", e)
-            return OptimizedPrompt(success=False, original_prompt=prompt, optimized_prompt=prompt, error=str(e))
-
-    async def test_prompt_variants(self, variants: List[str], test_cases: List[Dict[str, Any]]) -> VariantTestResults:
-        """
-        测试提示词变体
-
-        Args:
-            variants: 提示词变体列表
-            test_cases: 测试用例列表
-
-        Returns:
-            VariantTestResults: 测试结果
-        """
-        try:
-            variant_scores = []
-            detailed_results = []
-
-            # 测试每个变体
-            for i, variant in enumerate(variants):
-                variant_result = await self._test_single_variant(variant, test_cases)
-                variant_scores.append(variant_result["score"])
-                detailed_results.append(variant_result)
-
-                logger.debug("变体 %s 分数: %.2f", i+1, variant_result['score'])
-
-            # 找出最佳变体
-            best_index = variant_scores.index(max(variant_scores))
-            best_variant = variants[best_index]
-
-            result = VariantTestResults(
-                variants=variants,
-                variant_scores=variant_scores,
-                best_variant_index=best_index,
-                best_variant=best_variant,
-                test_cases=test_cases,
-                detailed_results=detailed_results,
-                metadata={
-                    "variant_count": len(variants),
-                    "test_case_count": len(test_cases),
-                    "score_range": {
-                        "min": min(variant_scores),
-                        "max": max(variant_scores),
-                        "avg": sum(variant_scores) / len(variant_scores),
-                    },
-                },
-            )
-
-            logger.info("提示词变体测试完成，最佳变体索引: %s", best_index)
-            return result
-
-        except Exception as e:
-            logger.error("提示词变体测试失败: %s", e)
-            return VariantTestResults(variants=variants, metadata={"error": str(e)})
-
-    async def _analyze_clarity(self, prompt: str) -> float:
-        """分析清晰度"""
-        score = 0.0
-
-        # 检查句子结构
-        sentences = prompt.split(".")
-        if len(sentences) > 1:
-            score += 0.2
-
-        # 检查是否有明确指令
-        instruction_keywords = ["请", "帮我", "执行", "运行", "生成", "创建", "搜索", "查找"]
-        for keyword in instruction_keywords:
-            if keyword in prompt:
-                score += 0.1
+        for round_no in range(1, max(1, rounds) + 1):
+            candidates = [
+                (name, text)
+                for name, text in generate_variants(best_prompt)
+                if text != best_prompt
+            ]
+            if not candidates:
                 break
+            scored = [(name, text, eval_set.score_prompt(text)[0]) for name, text in candidates]
+            round_best = max(scored, key=lambda x: x[2])
+            history.append({"round": round_no, "best": round_best[2], "source": round_best[0]})
+            if round_best[2] > best_score:
+                improvements.append(round_best[0])
+                best_prompt, best_score = round_best[1], round_best[2]
+            if best_score >= 1.0:
+                break  # 满分提前收敛
 
-        # 检查是否有明确对象
-        object_keywords = ["文件", "数据", "信息", "内容", "结果", "代码"]
-        for keyword in object_keywords:
-            if keyword in prompt:
-                score += 0.1
-                break
+        return OptimizedPrompt(
+            success=best_score > score_before,
+            original_prompt=prompt,
+            optimized_prompt=best_prompt,
+            improvements=improvements,
+            score_before=score_before,
+            score_after=best_score,
+            optimization_type=optimization_type,
+            metadata={"rounds": history},
+        )
 
-        # 检查长度适中
-        if 10 <= len(prompt) <= 200:
-            score += 0.2
-
-        # 检查是否有歧义词
-        ambiguous_words = ["东西", "什么", "一些", "某些", "可能"]
-        for word in ambiguous_words:
-            if word in prompt:
-                score -= 0.1
-
-        return max(0.0, min(1.0, score + 0.4))  # 基础分 0.4
-
-    async def _analyze_specificity(self, prompt: str, skill_context: Optional[Dict[str, Any]] = None) -> float:
-        """分析具体性"""
-        score = 0.0
-
-        # 检查是否有具体参数
-        if skill_context:
-            score += 0.2
-
-        # 检查是否有数字
-        import re
-
-        numbers = re.findall(r"\d+", prompt)
-        if numbers:
-            score += 0.2
-
-        # 检查是否有特定名词
-        specific_terms = ["Python", "JavaScript", "JSON", "API", "HTTP", "数据库"]
-        for term in specific_terms:
-            if term.lower() in prompt.lower():
-                score += 0.1
-                break
-
-        # 检查是否有格式要求
-        format_terms = ["格式", "样式", "模板", "结构"]
-        for term in format_terms:
-            if term in prompt:
-                score += 0.1
-                break
-
-        return max(0.0, min(1.0, score + 0.3))  # 基础分 0.3
-
-    async def _analyze_completeness(self, prompt: str, skill_context: Optional[Dict[str, Any]] = None) -> float:
-        """分析完整性"""
-        score = 0.0
-
-        # 检查是否有输入描述
-        input_keywords = ["输入", "提供", "给定", "已知"]
-        for keyword in input_keywords:
-            if keyword in prompt:
-                score += 0.2
-                break
-
-        # 检查是否有输出描述
-        output_keywords = ["输出", "返回", "得到", "生成"]
-        for keyword in output_keywords:
-            if keyword in prompt:
-                score += 0.2
-                break
-
-        # 检查是否有约束条件
-        constraint_keywords = ["必须", "需要", "要求", "限制", "约束"]
-        for keyword in constraint_keywords:
-            if keyword in prompt:
-                score += 0.2
-                break
-
-        # 检查是否有示例
-        example_keywords = ["例如", "比如", "示例", "例子"]
-        for keyword in example_keywords:
-            if keyword in prompt:
-                score += 0.2
-                break
-
-        return max(0.0, min(1.0, score + 0.2))  # 基础分 0.2
-
-    async def _analyze_conciseness(self, prompt: str) -> float:
-        """分析简洁性"""
-        score = 0.0
-
-        # 检查长度
-        length = len(prompt)
-        if length < 50:
-            score += 0.4
-        elif length < 100:
-            score += 0.3
-        elif length < 200:
-            score += 0.2
-        else:
-            score += 0.1
-
-        # 检查是否有冗余词
-        redundant_words = ["的", "了", "在", "是", "有", "和", "与"]
-        redundant_count = sum(1 for word in redundant_words if word in prompt)
-        if redundant_count <= 3:
-            score += 0.3
-        elif redundant_count <= 5:
-            score += 0.2
-        else:
-            score += 0.1
-
-        # 检查句子数量
-        sentences = [s.strip() for s in prompt.split(".") if s.strip()]
-        if len(sentences) <= 3:
-            score += 0.3
-        elif len(sentences) <= 5:
-            score += 0.2
-        else:
-            score += 0.1
-
-        return max(0.0, min(1.0, score))
-
-    async def _generate_suggestions(
-        self, prompt: str, clarity: float, specificity: float, completeness: float, conciseness: float
-    ) -> List[str]:
-        """生成改进建议"""
-        suggestions = []
-
-        if clarity < 0.6:
-            suggestions.append("建议使用更清晰的指令，避免歧义")
-
-        if specificity < 0.6:
-            suggestions.append("建议添加具体参数或约束条件")
-
-        if completeness < 0.6:
-            suggestions.append("建议明确输入输出要求和约束条件")
-
-        if conciseness < 0.6:
-            suggestions.append("建议精简语言，去除冗余表达")
-
-        # 通用建议
-        if len(prompt) > 300:
-            suggestions.append("提示词过长，建议控制在200字以内")
-
-        if not any(char in prompt for char in ["?", "？", "!", "！"]):
-            suggestions.append("建议添加明确的指令或问题")
-
-        return suggestions
-
-    async def _identify_issues(self, prompt: str) -> List[str]:
-        """识别问题"""
-        issues = []
-
-        # 检查常见问题
-        if len(prompt.strip()) == 0:
-            issues.append("提示词为空")
-
-        if len(prompt) > 1000:
-            issues.append("提示词过长，可能影响性能")
-
-        # 检查敏感词
-        sensitive_words = ["密码", "password", "secret", "key", "token"]
-        for word in sensitive_words:
-            if word.lower() in prompt.lower():
-                issues.append(f"提示词包含敏感词: {word}")
-
-        return issues
-
-    async def _optimize_for_clarity(self, prompt: str, analysis: PromptAnalysis) -> str:
-        """为清晰度优化"""
-        optimized = prompt
-
-        # 添加明确指令
-        if not any(keyword in prompt for keyword in ["请", "帮我", "执行"]):
-            optimized = f"请{optimized}"
-
-        # 添加句号
-        if not optimized.endswith(("。", "！", "？", ".", "!", "?")):
-            optimized += "。"
-
-        return optimized
-
-    async def _optimize_for_specificity(self, prompt: str, analysis: PromptAnalysis) -> str:
-        """为具体性优化"""
-        optimized = prompt
-
-        # 添加具体参数提示
-        if "文件" in prompt and "路径" not in prompt:
-            optimized += "，请指定文件路径"
-
-        if "数据" in prompt and "格式" not in prompt:
-            optimized += "，请指定数据格式"
-
-        return optimized
-
-    async def _optimize_for_conciseness(self, prompt: str, analysis: PromptAnalysis) -> str:
-        """为简洁性优化"""
-        # 移除冗余词
-        redundant_patterns = [
-            ("的的", "的"),
-            ("了了", "了"),
-            ("在在", "在"),
-            ("是是", "是"),
-        ]
-
-        optimized = prompt
-        for pattern, replacement in redundant_patterns:
-            optimized = optimized.replace(pattern, replacement)
-
-        return optimized
-
-    async def _optimize_for_completeness(self, prompt: str, analysis: PromptAnalysis) -> str:
-        """为完整性优化"""
-        optimized = prompt
-
-        # 添加输入输出描述
-        if "输入" not in prompt and "输出" not in prompt:
-            optimized += "。输入数据格式为字典，输出结果也为字典"
-
-        return optimized
-
-    async def _optimize_for_performance(self, prompt: str, analysis: PromptAnalysis) -> str:
-        """为性能优化"""
-        # 性能优化通常涉及代码层面，这里只是提示词优化
-        return prompt
-
-    async def _optimize_for_security(self, prompt: str, analysis: PromptAnalysis) -> str:
-        """为安全性优化"""
-        optimized = prompt
-
-        # 添加安全约束
-        if "安全" not in prompt:
-            optimized += "。请确保操作安全，避免执行危险命令"
-
-        return optimized
-
-    async def _identify_improvements(
-        self, original: str, optimized: str, original_analysis: PromptAnalysis, optimized_analysis: PromptAnalysis
-    ) -> List[str]:
-        """识别改进点"""
-        improvements = []
-
-        if optimized_analysis.clarity_score > original_analysis.clarity_score:
-            improvements.append("提高了指令清晰度")
-
-        if optimized_analysis.specificity_score > original_analysis.specificity_score:
-            improvements.append("增加了具体性")
-
-        if optimized_analysis.completeness_score > original_analysis.completeness_score:
-            improvements.append("补充了完整性")
-
-        if optimized_analysis.conciseness_score > original_analysis.conciseness_score:
-            improvements.append("优化了简洁性")
-
-        if len(optimized) > len(original):
-            improvements.append("添加了必要信息")
-        elif len(optimized) < len(original):
-            improvements.append("精简了表达")
-
-        return improvements
-
-    async def _test_single_variant(self, variant: str, test_cases: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """测试单个变体"""
-        scores = []
-
-        for test_case in test_cases:
-            # 模拟测试执行
-            # 实际应该调用技能执行
-            score = await self._evaluate_variant(variant, test_case)
+    async def test_prompt_variants(
+        self, variants: List[str], eval_set: PromptEvalSet
+    ) -> VariantTestResults:
+        """变体全量打分（评测集通过率），返回最优变体。"""
+        scores: List[float] = []
+        detailed: List[Dict[str, Any]] = []
+        for i, variant in enumerate(variants):
+            score, details = eval_set.score_prompt(variant)
             scores.append(score)
+            detailed.append({"variant_index": i, "score": score, "cases": details})
+        best_index = max(range(len(variants)), key=lambda i: scores[i]) if variants else 0
+        return VariantTestResults(
+            variants=list(variants),
+            variant_scores=scores,
+            best_variant_index=best_index,
+            best_variant=variants[best_index] if variants else "",
+            detailed_results=detailed,
+            metadata={"scoring": "eval_set_pass_rate"},
+        )
 
-        avg_score = sum(scores) / len(scores) if scores else 0.0
+    async def analyze_prompt(
+        self, prompt: str, skill_context: Optional[Dict[str, Any]] = None
+    ) -> PromptAnalysis:
+        """结构化分析：报告可评测的结构要素是否在位（诚实信号，非启发式打分）。
 
-        return {"variant": variant, "score": avg_score, "test_scores": scores, "test_case_count": len(test_cases)}
-
-    async def _evaluate_variant(self, variant: str, test_case: Dict[str, Any]) -> float:
-        """评估变体"""
-        # 模拟评估逻辑
-        # 实际应该基于测试用例的预期输出
-
-        score = 0.0
-
-        # 检查是否包含关键词
-        input_text = test_case.get("input", "")
-        expected_output = test_case.get("expected_output", "")
-
-        if input_text in variant:
-            score += 0.3
-
-        if expected_output in variant:
-            score += 0.3
-
-        # 基于长度评分
-        if 10 <= len(variant) <= 200:
-            score += 0.2
-
-        # 基于结构评分
-        if "。" in variant or "！" in variant or "？" in variant:
-            score += 0.2
-
-        return min(1.0, score)
+        历史引用兼容：PromptAnalysis 字段保留；真实质量评估请用
+        optimize_prompt/test_prompt_variants + PromptEvalSet。
+        """
+        checks = {
+            "role_declaration": "你是一名" in prompt or "你是" in prompt,
+            "has_constraints": "约束" in prompt or "不得" in prompt,
+            "has_output_format": "输出格式" in prompt or "格式" in prompt,
+            "has_steps": "步骤" in prompt or "1." in prompt,
+        }
+        missing = [k for k, ok in checks.items() if not ok]
+        return PromptAnalysis(
+            overall_score=sum(1 for ok in checks.values() if ok) / len(checks),
+            suggestions=[f"缺少结构要素: {k}" for k in missing],
+            issues=missing,
+            metadata={"structural_checks": checks},
+        )

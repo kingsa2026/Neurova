@@ -19,6 +19,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from neurova.evolution.persistence import PersistedStateMixin
+
 logger = get_logger(__name__)
 
 # 工具名模式：下划线分隔的英文单词
@@ -84,7 +86,7 @@ class TaskToolAssociation:
         }
 
 
-class ExperienceFeedback:
+class ExperienceFeedback(PersistedStateMixin):
     """
     经验反哺系统：从经验中提取工具洞察并更新任务-工具关联。
     """
@@ -106,7 +108,14 @@ class ExperienceFeedback:
         # RSI 可优化参数
         self.crystallize_min_observations: int = 3
         self.crystallize_min_success_rate: float = 0.6
-        self.pattern_min_support: float = 0.3
+        # 模式最小支持度（经 attach_pattern_miner 桥同步到 PatternMiner.min_support；
+        # 此前默认 0.3 且零消费——与 PatternMiner 默认 2 及 setpoint 均不一致）
+        self._pattern_min_support: float = 2
+        self._pattern_miner: Optional[Any] = None
+
+        # 持久化挂载（未挂载=纯内存/测试语义，零 IO；只落成败计数
+        # _associations，洞察流水属无限增长的日志态不落盘）
+        self._init_state_persistence()
 
         logger.debug("ExperienceFeedback initialized")
 
@@ -228,6 +237,7 @@ class ExperienceFeedback:
 
         assoc.last_used = time.time()
 
+        self._maybe_persist()
         return assoc
 
     def process_experience(
@@ -280,6 +290,26 @@ class ExperienceFeedback:
         logger.debug("Processed experience: %s", result)
         return result
 
+    # ── pattern_min_support 桥（RSI 活表参数）──
+    # 跟随 ToolMemoryIntegration 的 property 模式：setter 保持 setattr 语义，
+    # 同时把值推进挂接的 PatternMiner.min_support——此前该参数定义后零消费。
+
+    @property
+    def pattern_min_support(self) -> float:
+        return self._pattern_min_support
+
+    @pattern_min_support.setter
+    def pattern_min_support(self, value: float) -> None:
+        self._pattern_min_support = float(value)
+        if self._pattern_miner is not None:
+            self._pattern_miner.min_support = max(1, int(round(self._pattern_min_support)))
+
+    def attach_pattern_miner(self, miner: Optional[Any]) -> None:
+        """挂接模式挖掘器（EvolutionOrchestrator 装配；None 安全）。"""
+        self._pattern_miner = miner
+        if miner is not None:
+            miner.min_support = max(1, int(round(self._pattern_min_support)))
+
     def get_task_tool_patterns(self, task_type: str) -> List[Dict[str, Any]]:
         """获取任务-工具模式。
 
@@ -317,7 +347,12 @@ class ExperienceFeedback:
             for assoc in task_assocs.values():
                 total_success += assoc.success_count
                 total_count += assoc.total_count
-                if assoc.total_count >= 3 and assoc.success_rate > 0.6:
+                # 结晶门槛消费 RSI 可优化属性（此前硬编码 3/0.6，属性是死旋钮；
+                # 默认值与硬编码一致，行为零变化——eval_harness 依赖此可测性）
+                if (
+                    assoc.total_count >= self.crystallize_min_observations
+                    and assoc.success_rate > self.crystallize_min_success_rate
+                ):
                     crystallized += 1
 
         success_rate = total_success / total_count if total_count > 0 else 0.0
@@ -341,3 +376,39 @@ class ExperienceFeedback:
             "total_experiences": len(self._insights),
             "top_task_tool_patterns": top_patterns,
         }
+
+    def _snapshot_payload(self) -> Dict[str, Any]:
+        """成败计数快照（task_type -> tool -> TaskToolAssociation 字段）。"""
+        return {
+            "version": 1,
+            "associations": {
+                task_type: {
+                    tool_name: {
+                        "success_count": assoc.success_count,
+                        "failure_count": assoc.failure_count,
+                        "total_count": assoc.total_count,
+                        "avg_confidence": assoc.avg_confidence,
+                        "last_used": assoc.last_used,
+                    }
+                    for tool_name, assoc in tools.items()
+                }
+                for task_type, tools in self._associations.items()
+            },
+        }
+
+    def _restore_payload(self, data: Dict[str, Any]) -> None:
+        associations: Dict[str, Dict[str, TaskToolAssociation]] = {}
+        for task_type, tools in data.get("associations", {}).items():
+            bucket: Dict[str, TaskToolAssociation] = {}
+            for tool_name, payload in tools.items():
+                bucket[tool_name] = TaskToolAssociation(
+                    task_type=task_type,
+                    tool_name=tool_name,
+                    success_count=int(payload.get("success_count", 0)),
+                    failure_count=int(payload.get("failure_count", 0)),
+                    total_count=int(payload.get("total_count", 0)),
+                    avg_confidence=float(payload.get("avg_confidence", 0.0)),
+                    last_used=float(payload.get("last_used", time.time())),
+                )
+            associations[task_type] = bucket
+        self._associations = associations

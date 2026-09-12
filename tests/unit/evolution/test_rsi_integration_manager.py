@@ -81,8 +81,8 @@ class TestRSIIntegrationManager(unittest.TestCase):
         self.assertIn('experience', parameters)
         self.assertIn('tool_memory', parameters)
         
-        # 验证参数数量
-        self.assertEqual(len(parameters['sleep']), 3)
+        # 验证参数数量（治理对齐 2026-09-12：merge_threshold 别名幻影已移除）
+        self.assertEqual(len(parameters['sleep']), 2)
         self.assertEqual(len(parameters['emotion']), 2)
         self.assertEqual(len(parameters['experience']), 3)
         self.assertEqual(len(parameters['tool_memory']), 4)
