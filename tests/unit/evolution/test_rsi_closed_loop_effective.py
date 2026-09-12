@@ -117,11 +117,14 @@ def test_rsi_improves_off_setpoint_parameter_end_to_end():
 def test_harmful_adjustment_is_reverted():
     """当所有参数已在 setpoint（任何移动都降低性能）时，应用后的实测增益≤0，
     RSI 必须把参数回滚到原值——否则棘轮会劣化系统（这正是"失控漂移"的本质）。"""
+    # 治理对齐（2026-09-12）：mock 值 = 新 setpoint 表（merge_threshold 幻影
+    # 已移除；penalty 0.05/decay 0.01/factor 0.3 为文档钉死的设计默认）。
+    # 注：显式注入有害候选的回滚覆盖在 test_rsi_eval_harness.py。
     params_all_at_setpoint = {
-        "sleep": {"base_decay_rate": 0.1, "similarity_threshold": 0.8, "merge_threshold": 0.9},
-        "emotion": {"emotional_protection_threshold": 0.5, "emotional_protection_factor": 1.0},
+        "sleep": {"base_decay_rate": 0.1, "similarity_threshold": 0.7},
+        "emotion": {"emotional_protection_threshold": 0.5, "emotional_protection_factor": 0.3},
         "experience": {"crystallize_min_observations": 3, "crystallize_min_success_rate": 0.6, "pattern_min_support": 2},
-        "tool_memory": {"success_bonus": 0.1, "failure_penalty": 0.2, "decay_rate": 0.05, "muscle_memory_threshold": 0.8},
+        "tool_memory": {"success_bonus": 0.1, "failure_penalty": 0.05, "decay_rate": 0.01, "muscle_memory_threshold": 0.8},
     }
     sleep = _mock_system("sleep", {"consolidation_count": 10, "merge_rate": 0.0, "avg_temperature": 50.0}, params_all_at_setpoint["sleep"])
     emotion = _mock_system("emotion", {"emotional_memories": 0, "avg_intensity": 0.0, "protection_triggered": 0}, params_all_at_setpoint["emotion"])

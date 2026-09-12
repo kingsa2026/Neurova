@@ -25,11 +25,13 @@ class RSIIntegrationManager:
     """RSI 集成管理器 - 协调 RSI 与四大闭环的交互"""
 
     # 四大闭环系统的可优化参数定义
+    # 治理对齐（2026-09-12）：移除 sleep.merge_threshold——它是
+    # similarity_threshold 的别名幻影（独立属性后零消费方），同一真实参数
+    # 不得有两个 setpoint 互斥；现 merge_threshold 为 property 别名。
     OPTIMIZABLE_PARAMETERS = {
         "sleep": [
             {"name": "base_decay_rate", "description": "基础衰减率"},
             {"name": "similarity_threshold", "description": "相似度阈值"},
-            {"name": "merge_threshold", "description": "合并阈值"},
         ],
         "emotion": [
             {"name": "emotional_protection_threshold", "description": "情感保护阈值"},
@@ -156,7 +158,6 @@ class RSIIntegrationManager:
     PARAMETER_BOUNDS = {
         ("sleep", "base_decay_rate"): (0.0, 1.0),
         ("sleep", "similarity_threshold"): (0.0, 1.0),
-        ("sleep", "merge_threshold"): (0.0, 1.0),
         ("emotion", "emotional_protection_threshold"): (0.0, 100.0),
         ("emotion", "emotional_protection_factor"): (0.0, 10.0),
         ("experience", "crystallize_min_observations"): (1.0, 1000.0),

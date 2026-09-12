@@ -349,6 +349,8 @@ class EvolutionOrchestrator:
         self.genetic_engine = ToolGeneticEngine()
         self.tool_synthesizer = PatternBasedToolSynthesizer(self.pattern_miner)
         self.experience_feedback = ExperienceFeedback()
+        # pattern_min_support 桥（RSI 活表）：属性 setter 同步到模式挖掘器
+        self.experience_feedback.attach_pattern_miner(self.pattern_miner)
         self.crystallizer = crystallizer
 
         # 根因 2 修复: 持有 RSIOrchestrator 引用, 使经验/工具/记忆信号可触发递归进化
@@ -666,12 +668,46 @@ def default_evolution_weights_path() -> Path:
     return Path("data") / "evolution" / "tool_weights.json"
 
 
+def default_evolution_patterns_path() -> Path:
+    """默认模式序列持久化路径（环境变量可覆盖，测试隔离用）。"""
+    env_path = os.environ.get("NEUROVA_EVOLUTION_PATTERNS")
+    if env_path:
+        return Path(env_path)
+    return Path("data") / "evolution" / "pattern_sequences.json"
+
+
+def default_evolution_lifecycle_path() -> Path:
+    """默认工具生命周期持久化路径（环境变量可覆盖，测试隔离用）。"""
+    env_path = os.environ.get("NEUROVA_EVOLUTION_LIFECYCLE")
+    if env_path:
+        return Path(env_path)
+    return Path("data") / "evolution" / "tool_lifecycle.json"
+
+
+def default_evolution_experience_path() -> Path:
+    """默认经验成败计数持久化路径（环境变量可覆盖，测试隔离用）。"""
+    env_path = os.environ.get("NEUROVA_EVOLUTION_EXPERIENCE")
+    if env_path:
+        return Path(env_path)
+    return Path("data") / "evolution" / "experience_feedback.json"
+
+
+def default_evolution_skill_experience_path() -> Path:
+    """默认技能经验库持久化路径（环境变量可覆盖，测试隔离用）。"""
+    env_path = os.environ.get("NEUROVA_EVOLUTION_SKILL_EXPERIENCE")
+    if env_path:
+        return Path(env_path)
+    return Path("data") / "evolution" / "skill_experiences.json"
+
+
 def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
-    """显式挂载权重持久化并恢复（幂等；启动时调用一次）。
+    """显式挂载进化状态持久化并恢复（幂等；启动时调用一次）。
 
     与 get_evolution_orchestrator 分离：单例保持零 IO 副作用，
     测试/嵌入场景不会污染 data/；生产由 start_server 显式装配。
-    返回是否从既有文件恢复了权重。
+    装配五件：工具权重 + 模式序列 + 工具生命周期 + 经验成败计数 + 技能经验库
+    （后四件此前纯内存，重启进化史清零）。
+    返回是否从既有文件恢复了权重（后四件恢复结果只记日志，失败不阻断启动）。
     """
     orchestrator = get_evolution_orchestrator()
     persist_path = path or default_evolution_weights_path()
@@ -679,7 +715,65 @@ def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
     restored = orchestrator.tool_weights.load(persist_path)
     if restored:
         logger.info("进化权重已从 %s 恢复", persist_path)
+
+    for attr, state_path in (
+        ("pattern_miner", default_evolution_patterns_path()),
+        ("tool_lifecycle", default_evolution_lifecycle_path()),
+        ("experience_feedback", default_evolution_experience_path()),
+    ):
+        component = getattr(orchestrator, attr, None)
+        if component is None or not hasattr(component, "attach_persistence"):
+            continue
+        try:
+            component.attach_persistence(state_path)
+            if component.load(state_path):
+                logger.info("%s 已从 %s 恢复", attr, state_path)
+        except Exception:  # noqa: BLE001 - 单件装配失败不拖垮其余组件
+            logger.warning("%s 持久化装配失败: %s", attr, state_path, exc_info=True)
+
+    # 技能经验库（非 orchestrator 属性，模块单例）：applied 记录 + usage_stats
+    # + 归档 + 淘汰台账跨重启保留
+    try:
+        from neurova.evolution.skill_experience import get_skill_experience_store
+
+        se_store = get_skill_experience_store()
+        se_path = default_evolution_skill_experience_path()
+        se_store.attach_persistence(se_path)
+        if se_store.load(se_path):
+            logger.info("技能经验库已从 %s 恢复", se_path)
+    except Exception:  # noqa: BLE001 - 单件装配失败不拖垮其余组件
+        logger.warning("技能经验库持久化装配失败", exc_info=True)
     return restored
+
+
+def flush_evolution_persistence() -> Dict[str, bool]:
+    """关停时强制落盘五件进化状态（绕过节流）。
+
+    节流落盘（默认 10s）意味着关停前最后窗口期内的变更只在内存——
+    优雅关停必须 flush 一次，否则每次短会话重启都会丢尾部变更。
+    返回各组件是否落盘成功（未挂载持久化的组件 save() 返回 False）。
+    """
+    orchestrator = get_evolution_orchestrator()
+    result: Dict[str, bool] = {}
+    for attr in ("tool_weights", "pattern_miner", "tool_lifecycle", "experience_feedback"):
+        component = getattr(orchestrator, attr, None)
+        if component is None or not hasattr(component, "save"):
+            continue
+        try:
+            result[attr] = component.save()
+        except Exception:  # noqa: BLE001 - 单件失败不拖垮其余组件
+            logger.warning("%s 关停落盘失败", attr, exc_info=True)
+            result[attr] = False
+
+    # 技能经验库（模块单例，同批 flush）
+    try:
+        from neurova.evolution.skill_experience import get_skill_experience_store
+
+        result["skill_experience_store"] = get_skill_experience_store().save()
+    except Exception:  # noqa: BLE001
+        logger.warning("技能经验库关停落盘失败", exc_info=True)
+        result["skill_experience_store"] = False
+    return result
 
 
 def bootstrap_evolution_protections() -> Dict[str, bool]:

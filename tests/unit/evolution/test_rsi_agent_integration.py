@@ -266,7 +266,9 @@ class TestRSIOptimizableParameters(unittest.TestCase):
         
         self.assertEqual(exp.crystallize_min_observations, 3)
         self.assertEqual(exp.crystallize_min_success_rate, 0.6)
-        self.assertEqual(exp.pattern_min_support, 0.3)
+        # 治理对齐（2026-09-12）：默认 0.3 与 PatternMiner/setpoint(2) 不一致
+        # 且零消费——已激活为属性桥（同步 PatternMiner.min_support），默认对齐 2
+        self.assertEqual(exp.pattern_min_support, 2)
     
     def test_tool_memory_system_has_rsi_params(self):
         """ToolMemoryIntegration 应该有 RSI 可优化参数"""

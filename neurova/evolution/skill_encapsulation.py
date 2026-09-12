@@ -141,14 +141,15 @@ class AutoSkillBuilder:
         self._min_success_rate = min_success_rate
         self._max_patterns = max_patterns
         self._similarity_threshold = similarity_threshold
-        # C10 技能评审闸：默认关（新扩展点默认关教义）——NEUROVA_SKILL_REVIEW_GATE=1
-        # 开启后产物 is_active=False 进 pending，经 skill API 的 approve 端点（审批面）
-        # 或 builder.approve_template 才会被 register_to_skill_registry 注册。
-        # 第二遍闭环审计修正：此前默认开但无任何审批 HTTP 面，生产上自动技能
-        # 会永久滞留 pending 不可见且无人能批——闸开必须有面，否则即为断点。
-        import os as _os
+        # C10 技能评审闸（治理收紧 2026-09-12）：默认开——改行为的产物
+        # （自动封装技能）强制审批，NEUROVA_SKILL_REVIEW_GATE=0 显式关闭。
+        # 开启后产物 is_active=False 进 pending，经 skill API 的 approve 端点
+        # （审批面）或 builder.approve_template 才会被 register_to_skill_registry
+        # 注册。第二遍闭环审计修正的历史依据（闸开必须有面）已成立：
+        # skill_pool_api 的 pending-skills list/approve/reject 审批面在位。
+        from neurova.evolution.skill_review_gate import skill_review_gate_enabled
 
-        self._review_gate = _os.environ.get("NEUROVA_SKILL_REVIEW_GATE") == "1"
+        self._review_gate = skill_review_gate_enabled()
         self._lock = threading.RLock()
 
         # 模式库

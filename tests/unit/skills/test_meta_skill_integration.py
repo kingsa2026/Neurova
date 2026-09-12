@@ -298,35 +298,49 @@ class TestPromptOptimizer:
 
     @pytest.mark.asyncio
     async def test_optimize_prompt(self, optimizer):
-        """测试提示词优化"""
+        """测试提示词优化（v2：评测集驱动——必须有 PromptEvalSet 基准）"""
+        from neurova.skills.prompt_optimizer import PromptEvalCase, PromptEvalSet
+
         original_prompt = "搜索AI新闻"
-        optimization_goal = Mock()
-        optimization_goal.type = "clarity"
-        optimization_goal.weight = 0.8
-        
-        optimized = await optimizer.optimize_prompt(original_prompt, optimization_goal)
-        
+        eval_set = PromptEvalSet(
+            [
+                PromptEvalCase(case_id="role", description="必须声明角色",
+                               required_elements=["你是一名"]),
+                PromptEvalCase(case_id="structure", description="必须有执行步骤",
+                               required_elements=["## 执行步骤"]),
+                PromptEvalCase(case_id="constraints", description="必须有约束",
+                               required_elements=["## 约束"]),
+            ]
+        )
+
+        optimized = await optimizer.optimize_prompt(original_prompt, eval_set)
+
         assert optimized is not None
         assert optimized.success is True
         assert optimized.optimized_prompt != original_prompt
         assert len(optimized.improvements) > 0
+        assert optimized.score_after > optimized.score_before
 
     @pytest.mark.asyncio
     async def test_test_prompt_variants(self, optimizer):
-        """测试提示词变体测试"""
+        """测试提示词变体测试（v2：评测集打分=加权通过率）"""
+        from neurova.skills.prompt_optimizer import PromptEvalCase, PromptEvalSet
+
         variants = [
             "搜索AI新闻",
             "请搜索最近的人工智能新闻",
             "查找关于AI技术发展的最新报道"
         ]
-        
-        test_cases = [
-            {"input": "AI新闻", "expected_output": "相关结果"},
-            {"input": "人工智能", "expected_output": "技术新闻"}
-        ]
-        
-        results = await optimizer.test_prompt_variants(variants, test_cases)
-        
+
+        eval_set = PromptEvalSet(
+            [
+                PromptEvalCase(case_id="specific", description="须含具体对象",
+                               required_elements=["人工智能"]),
+            ]
+        )
+
+        results = await optimizer.test_prompt_variants(variants, eval_set)
+
         assert results is not None
         assert len(results.variant_scores) == 3
         assert results.best_variant_index >= 0

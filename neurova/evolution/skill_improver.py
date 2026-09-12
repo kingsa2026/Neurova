@@ -492,7 +492,10 @@ class AutoSkillImprover:
             import hashlib as _hashlib
             import json as _json
 
-            version_before = str(skill.version or "1.0.0")
+            # getattr 兜底：真实 skill_system.Skill 对象没有 version 属性——
+            # 直接访问 AttributeError 被 RSI 步 try/except 吞掉 = version-less
+            # 技能的改进被静默跳过（live-verify 2026-09-11 抓出）
+            version_before = str(getattr(skill, "version", None) or "1.0.0")
             config_before = _copy.deepcopy(config)
             revision_hash_before = _hashlib.sha256(
                 _json.dumps(config_before, sort_keys=True, default=str).encode("utf-8")
@@ -523,7 +526,7 @@ class AutoSkillImprover:
 
             # patch 位递增（1.0.x）
             try:
-                parts = str(skill.version or "1.0.0").split(".")
+                parts = str(getattr(skill, "version", None) or "1.0.0").split(".")
                 while len(parts) < 3:
                     parts.append("0")
                 parts[2] = str(int(parts[2]) + 1)
@@ -546,6 +549,28 @@ class AutoSkillImprover:
                     )
                 except Exception as svc_err:
                     logger.warning("改进落盘失败 %s: %s", skill_id, svc_err)
+
+            # 经验-定义分离（QP 对齐启发 #2）：改进内容同步落为 applied 经验
+            # 记录并立即组合进技能描述——config.improvements 只是元数据，LLM
+            # 永远看不到（"只改元数据不改行为"根因）；描述才是模型工具面。
+            # 失败不影响改进本身（元数据通道已在上方完成）。
+            try:
+                from neurova.evolution.skill_experience import get_skill_experience_store
+
+                get_skill_experience_store().record_experience(
+                    skill_id=skill_id,
+                    content=str(
+                        (improvement.changes or {}).get("suggested_fix")
+                        or improvement.description
+                        or improvement.reason
+                        or ""
+                    ),
+                    source="improver",
+                    context=improvement.reason or "",
+                    registry=registry,
+                )
+            except Exception as exp_err:
+                logger.debug("applied 经验记录写入失败 %s: %s", skill_id, exp_err)
 
             logger.info(
                 "技能改进已应用: %s (%s) → v%s",

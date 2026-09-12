@@ -559,6 +559,16 @@ class ToolGeneticEngine:
                         skill_id,
                         genotype.fitness,
                     )
+                    # C10 治理收紧（2026-09-12）：评审闸开启时遗传产物注册即
+                    # 禁用（待审），经技能启停审批面激活——改行为的产物不再
+                    # 默认直接进入模型工具面
+                    from neurova.evolution.skill_review_gate import (
+                        skill_review_gate_enabled,
+                    )
+
+                    if skill_review_gate_enabled() and hasattr(registry, "set_skill_enabled"):
+                        registry.set_skill_enabled(skill_id, False)
+                        logger.info("进化工具 %s 进待审（评审闸开启，注册即禁用）", skill_id)
                     # 断点 #2：可选持久化到 SkillService（磁盘 manifest）
                     if skill_service is not None:
                         try:

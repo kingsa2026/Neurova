@@ -99,10 +99,40 @@ class RSIOrchestrator:
         # 迭代计数器
         self._iteration_count = 0
 
+        # 端到端评测集（Auto Harness：gain 的统一度量，懒加载）
+        self._eval_harness: Optional[Any] = None
+        self._last_eval_outcome: Optional[Dict[str, Any]] = None
+
         logger.info("RSIOrchestrator initialized")
 
     def _measure_performance(self) -> float:
-        """实测当前整体性能：四系统 setpoint 梯度估算的平均值。"""
+        """实测当前整体性能：端到端评测集优先（Auto Harness 统一度量），
+        信号估算兜底（评测集不可用时保持旧行为）。"""
+        try:
+            harness = self._eval_harness
+            if harness is None:
+                from .eval_harness import RSIEvalHarness
+
+                harness = RSIEvalHarness()
+                self._eval_harness = harness
+            live_params = {
+                system: {
+                    p.name: p.current_value
+                    for p in params
+                    if p.current_value is not None
+                }
+                for system, params in self.integration_manager.get_optimizable_parameters().items()
+            }
+            outcome = harness.run(live_params)
+            self._last_eval_outcome = {"score": outcome["score"], "cases": outcome["cases"]}
+            return float(outcome["score"])
+        except Exception as e:  # noqa: BLE001 - 评测故障不阻断迭代
+            logger.debug("端到端评测失败，回退信号估算: %s", e)
+            self._last_eval_outcome = None
+            return self._measure_performance_from_signals()
+
+    def _measure_performance_from_signals(self) -> float:
+        """信号估算性能：四系统 setpoint 梯度估算的平均值（评测集兜底路径）。"""
         from .system_performance import estimate_system_performance
 
         signals = self.collect_feedback_signals()
@@ -183,6 +213,7 @@ class RSIOrchestrator:
 
         if optimizations and self.deployment_controller.can_auto_execute("low"):
             perf_before = self._measure_performance()
+            eval_before = self._last_eval_outcome
             snapshot = self._snapshot_optimizable()
 
             applied_results = self.apply_optimizations(optimizations)
@@ -190,12 +221,16 @@ class RSIOrchestrator:
 
             if applied_count:
                 perf_after = self._measure_performance()
+                eval_after = self._last_eval_outcome
                 gain = perf_after - perf_before
                 if gain < 0:
                     # 有害调整：回滚到应用前快照（失控漂移的本质防护）
                     self._restore_optimizable(snapshot)
                     applied_count = 0
                     gain = 0.0
+        else:
+            eval_before = None
+            eval_after = None
 
         # 5. 喂入收敛数据——只喂有意义的迭代。
         # 此前每轮无条件喂 gain=0，导致"什么都没做却被判定收敛"的虚假收敛。
@@ -208,6 +243,8 @@ class RSIOrchestrator:
         self.metrics.record_metric("feedback_signals_count", len(feedback_signals))
         self.metrics.record_metric("optimizations_count", len(optimizations))
         self.metrics.record_metric("applied_count", applied_count)
+        if isinstance(eval_after, dict) and "score" in eval_after:
+            self.metrics.record_metric("eval_score", eval_after["score"])
 
         # 7. P0-A3 修复：检测到发散/振荡时，升级给 SelfImprovementProposer
         escalation_proposals = self._escalate_to_proposer_if_needed(convergence, feedback_signals)
@@ -243,6 +280,7 @@ class RSIOrchestrator:
             "applied_results": applied_results,
             "applied_count": applied_count,
             "gain": gain,
+            "eval": {"before": eval_before, "after": eval_after},
             "escalation_proposals": escalation_proposals,
             "phase_advanced": phase_advanced,
             "metrics": self.metrics.get_dashboard_data(),
