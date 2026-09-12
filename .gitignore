@@ -390,3 +390,6 @@ agent_workspaces/kai/
 # 审计事故 2026-09-10：stash 误弹恢复暂存区（含 6 月旧 WIP 快照副本 361 文件，
 # 审计后删除；不入库、不进工作区）
 .stash-recovery-20260910/
+
+# UIAutomation/pywinauto 调试日志垃圾件（desktop_uia 开发运行时落根目录）
+@AutomationLog.txt
