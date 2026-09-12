@@ -10,7 +10,7 @@ import logging
 import threading
 import time
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 try:
     import requests
@@ -206,14 +206,54 @@ class DiscordAdapter(ChannelAdapter):
             self.session = None
         logging.info("Discord adapter disconnected")
 
-    def send_message(self, message: UnifiedMessage) -> bool:
-        """发送Discord消息"""
+    async def send_message(
+        self,
+        chat_id: str,
+        content: str,
+        message_type: str = "text",
+        **kwargs,
+    ) -> Optional[str]:
+        """Gen2 契约：基类签名发送（manager 按 base.py 契约直连），委托 _send_unified
+        复用既有 UnifiedMessage 处理逻辑。
+
+        kwargs 中 message_id/user_id 用作消息标识，其余键透传为 metadata。
+        成功返回平台真实 message_id（响应缺失时回落本地生成 id），失败返回 None。
+        """
+        try:
+            content_type = ContentType(message_type)
+        except ValueError:
+            logging.warning("未知 message_type=%s，按 text 发送", message_type)
+            content_type = ContentType.TEXT
+
+        message_id = str(kwargs.pop("message_id", "") or f"discord_{int(time.time())}")
+        # 任务3（台账 2026-09-11 渠道域收尾）：_send_unified 现返回平台真实
+        # message_id（响应无 ID 时回落本地生成），失败 None——直接透传。
+        return self._send_unified(
+            UnifiedMessage(
+                message_id=message_id,
+                channel=MessageChannel.DISCORD,
+                content_type=content_type,
+                content=content,
+                user_id=str(kwargs.pop("user_id", "") or ""),
+                chat_id=chat_id,
+                metadata=kwargs or None,
+            )
+        )
+
+    def _send_unified(self, message: UnifiedMessage) -> Optional[str]:
+        """发送Discord消息（UnifiedMessage 路径，供基类签名 send_message 委托）
+
+        任务3（台账 2026-09-11 渠道域收尾）：返回 Optional[str]——成功返回
+        Discord 响应体的平台真实消息 ID（`id` 雪花字段；响应缺失时回落
+        message.message_id 本地生成），失败返回 None。非空 str 为真、None 为假，
+        与原 bool 契约的真值语义兼容。
+        """
         if not self._ensure_authenticated():
-            return False
+            return None
 
         if not REQUESTS_AVAILABLE:
             logging.info("[Discord模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
-            return True
+            return message.message_id
 
         try:
             # 根据chat_id判断是私聊还是频道消息
@@ -237,20 +277,24 @@ class DiscordAdapter(ChannelAdapter):
             resp = self.session.post(url, headers=headers, json=payload, timeout=10)
 
             if resp.status_code in [200, 202]:
-                return True
+                try:
+                    platform_id = str(resp.json().get("id") or "")
+                except Exception:
+                    platform_id = ""  # 响应体缺失/非 JSON：回落本地生成 id
+                return platform_id or message.message_id
             else:
                 data = resp.json()
                 logging.error("Discord消息发送失败: %s", data)
-                return False
+                return None
         except requests.exceptions.Timeout as e:
             logging.error("Discord消息发送超时: %s", e)
-            return False
+            return None
         except requests.exceptions.RequestException as e:
             logging.error("Discord消息发送请求异常: %s", e)
-            return False
+            return None
         except Exception as e:
             logging.error("Discord消息发送异常: %s", e)
-            return False
+            return None
 
     def parse_raw_message(self, raw_data: Any) -> UnifiedMessage:
         """

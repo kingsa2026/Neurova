@@ -290,7 +290,8 @@ async def test_websocket_send_message_is_async_and_awaits_connection(monkeypatch
         user_id="u1",
         chat_id="c1",
     )
-    assert await adapter.send_message(msg) is True
+    # B-4: 旧 UnifiedMessage 路径更名为内部 _send_unified（基类签名由 test_b4 覆盖）
+    assert await adapter._send_unified(msg) is True
     assert "hello" in "".join(conn.sent), "send_message 必须 await 真实 ws 连接发送"
 
     await adapter.disconnect()
@@ -425,9 +426,12 @@ async def test_sip_connect_honest_fail_even_with_valid_config(monkeypatch, caplo
     """配置齐全也必须诚实失败——SIP 协议栈未实现，绝不虚构能力"""
     import neurova.channels.sip as sip_module
 
-    monkeypatch.setattr(sip_module, "PYVOIP_AVAILABLE", False)  # 隔离：authenticate 走模拟分支即可
+    monkeypatch.setattr(sip_module, "PYVOIP_AVAILABLE", False)
     adapter = SIPAdapter()
-    assert adapter.authenticate({"sip_username": "u", "sip_password": "p"}) is True
+    # B-3: pyVoIP 缺失时 dev 初始化不再"模拟成功"——authenticate 诚实返回 False，
+    # 但凭据已写入，connect 仍越过凭据检查走到"未实现"诚实警告
+    assert adapter.authenticate({"sip_username": "u", "sip_password": "p"}) is False
+    assert adapter._initialized is False
 
     with caplog.at_level("WARNING"):
         assert await adapter.connect() is False

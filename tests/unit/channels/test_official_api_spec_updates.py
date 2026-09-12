@@ -338,7 +338,9 @@ class TestQQV2MessageSpec:
         captured = self._patch_send(monkeypatch)
         adapter = _make_qq_adapter()
 
-        assert adapter.send_message(self._msg("group")) is True
+        # 任务3（台账 2026-09-11）：_send_unified 返回平台真实 message_id
+        # （Optional[str]），fake 响应体 id="M1" → 必须透传，不得回本地生成 id
+        assert adapter._send_unified(self._msg("group")) == "M1"
 
         assert captured["url"] == "https://api.sgroup.qq.com/v2/groups/TARGET123/messages"
         assert captured["json"]["content"] == "hello"
@@ -350,7 +352,7 @@ class TestQQV2MessageSpec:
         captured = self._patch_send(monkeypatch)
         adapter = _make_qq_adapter()
 
-        assert adapter.send_message(self._msg("c2c")) is True
+        assert adapter._send_unified(self._msg("c2c")) == "M1"
 
         assert captured["url"] == "https://api.sgroup.qq.com/v2/users/TARGET123/messages"
         assert captured["json"]["msg_id"] == "MSGID1"
@@ -359,23 +361,26 @@ class TestQQV2MessageSpec:
         captured = self._patch_send(monkeypatch)
         adapter = _make_qq_adapter()
 
-        assert adapter.send_message(self._msg()) is True
+        assert adapter._send_unified(self._msg()) == "M1"
 
         assert captured["url"] == "https://api.sgroup.qq.com/channels/TARGET123/messages"
 
     @pytest.mark.parametrize("status", [200, 202, 204])
     def test_success_status_codes(self, monkeypatch, status):
-        """官方 HTTP 约定: 200 成功、204 成功无包体、202 异步成功（如消息审核）"""
+        """官方 HTTP 约定: 200 成功、204 成功无包体、202 异步成功（如消息审核）。
+        任务3 后 _send_unified 返回 Optional[str]：成功=真值 str（fake 响应含
+        id="M1" → 透传；真实 204 无包体时回落本地生成 id，同为真值）。"""
         self._patch_send(monkeypatch, status=status)
         adapter = _make_qq_adapter()
 
-        assert adapter.send_message(self._msg()) is True
+        ret = adapter._send_unified(self._msg())
+        assert isinstance(ret, str) and ret
 
     def test_msg_seq_and_msg_type_override(self, monkeypatch):
         captured = self._patch_send(monkeypatch)
         adapter = _make_qq_adapter()
 
-        adapter.send_message(self._msg("group", msg_seq=2, msg_type=2))
+        adapter._send_unified(self._msg("group", msg_seq=2, msg_type=2))
 
         assert captured["json"]["msg_seq"] == 2
         assert captured["json"]["msg_type"] == 2
