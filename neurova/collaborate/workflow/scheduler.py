@@ -309,11 +309,45 @@ class AgentScheduler:
 _global_scheduler: Optional[AgentScheduler] = None
 
 
+def _on_scheduler_task_event(event_data: Dict[str, Any]) -> None:
+    """调度任务完成/失败 → 站内通知镜像（2026-09-12 负一屏残留修复）。
+
+    task_completed 用 type="task_completed"，经 NotificationManager 统一入口
+    触发负一屏推送判定；task_failed 为普通站内通知不推送。
+    接收人=notify_admins（无注册管理员兜底 default，与门面语义一致）。
+    镜像失败只记日志，不阻断调度线程。
+    """
+    et = event_data.get("event_type")
+    if et not in ("task_completed", "task_failed"):
+        return
+    try:
+        from neurova.api.endpoints.notifications import notify_admins
+
+        name = event_data.get("task_name", "")
+        if et == "task_completed":
+            notify_admins(
+                f"定时任务完成: {name}",
+                f"任务 {event_data.get('task_id', '')} 已完成",
+                "task_completed",
+                data=event_data,
+            )
+        else:
+            notify_admins(
+                f"定时任务失败: {name}",
+                f"任务 {event_data.get('task_id', '')} 失败: {event_data.get('error', '')}",
+                "task_failed",
+                data=event_data,
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("调度事件通知镜像失败 (%s): %s", et, e)
+
+
 def get_scheduler() -> AgentScheduler:
-    """获取全局调度器"""
+    """获取全局调度器（创建时注册通知桥；单例创建路径天然幂等，不叠加 handler）"""
     global _global_scheduler
     if _global_scheduler is None:
         _global_scheduler = AgentScheduler()
+        _global_scheduler.add_event_handler(_on_scheduler_task_event)
     return _global_scheduler
 
 

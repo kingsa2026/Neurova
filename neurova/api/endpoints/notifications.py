@@ -23,12 +23,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import json
-import os
-import threading
-import time
 import uuid
-from dataclasses import dataclass, field
-from pathlib import Path as FsPath
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
@@ -42,265 +37,21 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 
-_DEFAULT_STORAGE = "./data/notifications.json"
+# ── 单一通知存储（2026-09-12 双实现收口） ──────────────────────────
+#
+# 本文件曾自带一套 JSON 持久版 NotificationManager，与
+# neurova/notifications/manager.py（approval 镜像写入、含负一屏推送）
+# 是两个互不相通的单例 → 审批通知在铃铛/NotificationPage 永远不可见。
+# 收口后全站唯一实现为 neurova.notifications.manager（已补 JSON 持久化），
+# 此处 re-export 保持既有消费方（端点/门面/测试经本模块取单例）契约不变。
 
+from neurova.notifications.manager import (  # noqa: F401  re-export
+    Notification,
+    NotificationManager,
+    get_notification_manager,
+    reset_notification_manager,
+)
 
-@dataclass
-class Notification:
-    """通知数据结构"""
-
-    notification_id: str
-    user_id: str
-    title: str
-    message: str
-    notification_type: str = "info"
-    read: bool = False
-    created_at: float = field(default_factory=time.time)
-    data: Dict[str, Any] = field(default_factory=dict)
-
-
-class NotificationManager:
-    """通知管理器（JSON 文件持久化 + RLock 并发保护）"""
-
-    def __init__(self, storage_path: Optional[str] = None):
-        self._storage_path = FsPath(
-            storage_path or os.environ.get("NEUROVA_NOTIFICATIONS_PATH") or _DEFAULT_STORAGE
-        )
-        self._notifications: Dict[str, Notification] = {}
-        self._user_notifications: Dict[str, List[str]] = {}  # user_id -> notification_ids
-        self._lock = threading.RLock()
-        self._load()
-
-    # ── 持久化 ──────────────────────────────────────────
-
-    def _load(self) -> None:
-        if not self._storage_path.exists():
-            return
-        try:
-            raw = json.loads(self._storage_path.read_text(encoding="utf-8"))
-            for nid, item in (raw.get("notifications") or {}).items():
-                self._notifications[nid] = Notification(
-                    notification_id=nid,
-                    user_id=item.get("user_id", ""),
-                    title=item.get("title", ""),
-                    message=item.get("message", ""),
-                    notification_type=item.get("notification_type", "info"),
-                    read=bool(item.get("read")),
-                    created_at=float(item.get("created_at", 0.0)),
-                    data=item.get("data") or {},
-                )
-            for uid, ids in (raw.get("index") or {}).items():
-                self._user_notifications[uid] = [i for i in ids if i in self._notifications]
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to load notifications from %s: %s", self._storage_path, exc)
-
-    def _save(self) -> None:
-        try:
-            self._storage_path.parent.mkdir(parents=True, exist_ok=True)
-            payload = {
-                "notifications": {
-                    nid: {
-                        "user_id": n.user_id,
-                        "title": n.title,
-                        "message": n.message,
-                        "notification_type": n.notification_type,
-                        "read": n.read,
-                        "created_at": n.created_at,
-                        "data": n.data,
-                    }
-                    for nid, n in self._notifications.items()
-                },
-                "index": self._user_notifications,
-            }
-            self._storage_path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to save notifications to %s: %s", self._storage_path, exc)
-
-    def add_notification(
-        self,
-        user_id: str,
-        title: str,
-        message: str,
-        notification_type: str = "info",
-        data: Optional[Dict[str, Any]] = None,
-    ) -> Notification:
-        """添加通知"""
-        with self._lock:
-            notification_id = str(uuid.uuid4())
-            notification = Notification(
-                notification_id=notification_id,
-                user_id=user_id,
-                title=title,
-                message=message,
-                notification_type=notification_type,
-                read=False,
-                created_at=time.time(),
-                data=data or {},
-            )
-
-            self._notifications[notification_id] = notification
-
-            # 添加到用户索引
-            if user_id not in self._user_notifications:
-                self._user_notifications[user_id] = []
-            self._user_notifications[user_id].append(notification_id)
-
-            self._save()
-
-            return notification
-
-    def get_user_notifications(
-        self,
-        user_id: str,
-        read: Optional[bool] = None,
-        notification_type: Optional[str] = None,
-        limit: int = 20,
-        offset: int = 0,
-    ) -> List[Notification]:
-        """获取用户通知"""
-        with self._lock:
-            notification_ids = self._user_notifications.get(user_id, [])
-            notifications = []
-
-            for nid in notification_ids:
-                if nid in self._notifications:
-                    notification = self._notifications[nid]
-
-                    # 应用过滤条件
-                    if read is not None and notification.read != read:
-                        continue
-                    if notification_type and notification.notification_type != notification_type:
-                        continue
-
-                    notifications.append(notification)
-
-            # 按时间倒序排序
-            notifications.sort(key=lambda n: n.created_at, reverse=True)
-
-            # 应用分页
-            return notifications[offset : offset + limit]
-
-    def get_notification(self, notification_id: str) -> Optional[Notification]:
-        """获取单个通知"""
-        return self._notifications.get(notification_id)
-
-    def mark_as_read(self, notification_id: str, user_id: str) -> bool:
-        """标记通知为已读"""
-        with self._lock:
-            notification = self._notifications.get(notification_id)
-            if not notification:
-                return False
-
-            # 检查权限
-            if notification.user_id != user_id:
-                return False
-
-            notification.read = True
-            self._save()
-            return True
-
-    def mark_all_as_read(self, user_id: str) -> int:
-        """标记用户所有通知为已读"""
-        with self._lock:
-            notification_ids = self._user_notifications.get(user_id, [])
-            count = 0
-
-            for nid in notification_ids:
-                if nid in self._notifications:
-                    notification = self._notifications[nid]
-                    if not notification.read:
-                        notification.read = True
-                        count += 1
-
-            if count:
-                self._save()
-            return count
-
-    def delete_notification(self, notification_id: str, user_id: str) -> bool:
-        """删除通知"""
-        with self._lock:
-            notification = self._notifications.get(notification_id)
-            if not notification:
-                return False
-
-            # 检查权限
-            if notification.user_id != user_id:
-                return False
-
-            # 从存储中删除
-            del self._notifications[notification_id]
-
-            # 从用户索引中删除
-            if user_id in self._user_notifications:
-                self._user_notifications[user_id] = [
-                    nid for nid in self._user_notifications[user_id] if nid != notification_id
-                ]
-
-            self._save()
-
-            return True
-
-    def get_unread_count(self, user_id: str) -> int:
-        """获取用户未读通知数量"""
-        with self._lock:
-            notification_ids = self._user_notifications.get(user_id, [])
-            count = 0
-
-            for nid in notification_ids:
-                if nid in self._notifications:
-                    notification = self._notifications[nid]
-                    if not notification.read:
-                        count += 1
-
-            return count
-
-    def get_push_statistics(self, user_id: str) -> Dict[str, Any]:
-        """获取推送统计"""
-        with self._lock:
-            notification_ids = self._user_notifications.get(user_id, [])
-
-            total = 0
-            pushed = 0
-            failed = 0
-
-            for nid in notification_ids:
-                if nid in self._notifications:
-                    notification = self._notifications[nid]
-                    if notification.notification_type == "task_completed":
-                        total += 1
-                        # 内存管理器无推送状态，默认未推送
-                        failed += 1
-
-            return {
-                "total_task_notifications": total,
-                "pushed_to_negative_screen": pushed,
-                "push_failed": failed,
-                "push_rate": pushed / total if total > 0 else 0.0,
-            }
-
-
-# 全局通知管理器单例
-_notification_manager: Optional[NotificationManager] = None
-_manager_lock = threading.Lock()
-
-
-def get_notification_manager() -> NotificationManager:
-    """获取全局通知管理器单例（NEUROVA_NOTIFICATIONS_PATH 隔离，默认落盘 data/）"""
-    global _notification_manager
-    if _notification_manager is None:
-        with _manager_lock:
-            if _notification_manager is None:
-                _notification_manager = NotificationManager()
-    return _notification_manager
-
-
-def reset_notification_manager() -> None:
-    """重置全局通知管理器（用于测试）"""
-    global _notification_manager
-    with _manager_lock:
-        _notification_manager = None
 
 
 # ── 通知门面（生产者统一入口） ────────────────────────────
