@@ -40,6 +40,34 @@ from neurova.channels.base import (
 )
 
 
+if DINGTALK_STREAM_AVAILABLE:
+
+    class _NeurovaChatbotHandler(dingtalk_stream.ChatbotHandler):
+        """官方契约的机器人消息回调处理器（ChatbotHandler 子类）。
+
+        SDK 只向 register_callback_handler 注册的 ChatbotHandler 实例
+        分发 /v1.0/im/bot/messages/get 事件；旧代码把普通函数注册给不存在的
+        register_callback_listener——事件永远进不来（2026-09-13 根修）。
+        """
+
+        def __init__(self, adapter: "DingTalkAdapter"):
+            super().__init__()
+            self._adapter = adapter
+
+        async def process(self, callback: "dingtalk_stream.CallbackMessage"):
+            data = getattr(callback, "data", None) or {}
+            self._adapter._handle_bot_message(data)
+            return dingtalk_stream.AckMessage.STATUS_OK, "OK"
+
+else:
+
+    class _NeurovaChatbotHandler:  # type: ignore[no-redef]
+        """dingtalk-stream 未安装时的占位（_connect_stream 已先行诚实返回 False）。"""
+
+        def __init__(self, adapter):
+            self._adapter = adapter
+
+
 class DingTalkAdapter(ChannelAdapter):
     """
     钉钉渠道适配器
@@ -84,6 +112,10 @@ class DingTalkAdapter(ChannelAdapter):
             _share.strip().lower() not in ("false", "0", "no", "off")
             if isinstance(_share, str) else bool(_share)
         )
+        # QwenPaw DingTalkConfig 对齐：robot_code 缺省=Client ID（官方 robotCode==AppKey）；
+        # endpoint=自定义 API 基址（专有云），空=官方 api.dingtalk.com
+        self._robot_code = str(_cfg_meta.get("robot_code", "") or "").strip() or self.config.app_id
+        self._api_base = str(_cfg_meta.get("endpoint", "") or "").strip().rstrip("/") or "https://api.dingtalk.com"
 
     async def connect(self) -> bool:
         """建立钉钉连接"""
@@ -99,10 +131,17 @@ class DingTalkAdapter(ChannelAdapter):
             return False
 
     async def _connect_stream(self) -> bool:
-        """Stream 模式: 通过 WebSocket 长连接接收事件"""
-        try:
+        """Stream 模式: 通过 WebSocket 长连接接收事件
 
-            # 创建凭证
+        官方 SDK 契约（2026-09-13 根修，此前调用不存在的 API 恒 AttributeError）：
+        - Credential / DingtalkStreamClient 构造
+        - register_callback_handler(topic, ChatbotHandler 子类实例)（非 ..._listener）
+        - start_forever() 启动循环（内部重连；非 start()）
+        """
+        if not DINGTALK_STREAM_AVAILABLE:
+            logger.error("dingtalk-stream not installed. Run: pip install dingtalk-stream")
+            return False
+        try:
             credential = dingtalk_stream.Credential(
                 self.config.app_id,
                 self.config.app_secret,
@@ -111,17 +150,18 @@ class DingTalkAdapter(ChannelAdapter):
             # 创建流式客户端
             self._stream_client = dingtalk_stream.DingtalkStreamClient(credential)
 
-            # 注册机器人消息回调（topic 为官方规范值，见 STREAM_BOT_MESSAGE_TOPIC）
-            self._stream_client.register_callback_listener(
+            # 注册机器人消息回调（handler 必须是 ChatbotHandler 子类，官方契约）
+            handler = _NeurovaChatbotHandler(self)
+            self._stream_client.register_callback_handler(
                 self.STREAM_BOT_MESSAGE_TOPIC,
-                self._handle_bot_message,
+                handler,
             )
 
-            # 启动连接（非阻塞）
+            # 启动连接（非阻塞线程 + start_forever 内部重连）
             import threading
 
             self._ws_thread = threading.Thread(
-                target=self._stream_client.start,
+                target=self._stream_client.start_forever,
                 daemon=True,
             )
             self._ws_thread.start()
@@ -130,9 +170,6 @@ class DingTalkAdapter(ChannelAdapter):
             logger.info("DingTalk Stream connected")
             return True
 
-        except ImportError:
-            logger.error("dingtalk-stream not installed. Run: pip install dingtalk-stream")
-            return False
         except Exception as e:
             logger.exception("DingTalk Stream connect error: %s", e)
             return False
@@ -222,6 +259,12 @@ class DingTalkAdapter(ChannelAdapter):
     ) -> Optional[str]:
         """发送消息到钉钉"""
         try:
+            # QwenPaw DingTalkConfig.message_type 对齐：渠道配置了 markdown 渲染时，
+            # 上游默认 "text" 的回复升级为 markdown（会话预览带标题）
+            if message_type == "text":
+                _cfg_meta = getattr(self.config, "metadata", None) or self.config.extra or {}
+                if _cfg_meta.get("message_type") == "markdown":
+                    message_type = "markdown"
             # 优先使用 session_webhook 回复（Stream 模式）
             session_webhook = kwargs.get("session_webhook", "")
             if session_webhook:
@@ -283,14 +326,14 @@ class DingTalkAdapter(ChannelAdapter):
         """通过 DingTalk OpenAPI 发送单聊消息（官方接口: 机器人发送单聊消息）"""
         import aiohttp
 
-        url = "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
+        url = f"{self._api_base}/v1.0/robot/oToMessages/batchSend"
         headers = {
             "x-acs-dingtalk-access-token": self._access_token,
             "Content-Type": "application/json",
         }
 
         payload = {
-            "robotCode": self.config.app_id,
+            "robotCode": self._robot_code,
             "userIds": [chat_id],
             "msgKey": "sampleText" if message_type == "text" else "sampleMarkdown",
             "msgParam": json.dumps(self._build_msg_param(message_type, content)),
@@ -325,14 +368,14 @@ class DingTalkAdapter(ChannelAdapter):
                 logger.error("Failed to get DingTalk access token")
                 return None
 
-            url = "https://api.dingtalk.com/v1.0/robot/groupMessages/send"
+            url = f"{self._api_base}/v1.0/robot/groupMessages/send"
             headers = {
                 "x-acs-dingtalk-access-token": self._access_token,
                 "Content-Type": "application/json",
             }
 
             payload = {
-                "robotCode": self.config.app_id,
+                "robotCode": self._robot_code,
                 "openConversationId": open_conversation_id,
                 "msgKey": "sampleText" if message_type == "text" else "sampleMarkdown",
                 "msgParam": json.dumps(self._build_msg_param(message_type, content)),
@@ -357,7 +400,7 @@ class DingTalkAdapter(ChannelAdapter):
         """刷新钉钉 Access Token"""
         import aiohttp
 
-        url = "https://api.dingtalk.com/v1.0/oauth2/accessToken"
+        url = f"{self._api_base}/v1.0/oauth2/accessToken"
         payload = {"appKey": self.config.app_id, "appSecret": self.config.app_secret}
 
         async with aiohttp.ClientSession() as session:
