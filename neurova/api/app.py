@@ -698,6 +698,28 @@ def _add_health_routes(app: FastAPI, app_state: AppState) -> None:
         }
 
 
+def _schedule_channel_bootstrap(app_state: AppState):
+    """渠道启动装配后台化（对齐 _schedule_mcp_bootstrap 先例）。
+
+    适配器工厂含同步网络工作（iLink 认证等），后台 create_task 执行不阻塞
+    /health 就绪；失败仅告警。未注册渠道时零开销。"""
+
+    async def _run():
+        try:
+            from neurova.api.endpoints.channel_config import bootstrap_channel_adapters
+
+            if app_state.channel_manager is None:
+                return
+            await bootstrap_channel_adapters(app_state.channel_manager)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("渠道启动装配失败（不影响其他服务）: %s", e)
+
+    try:
+        asyncio.get_running_loop().create_task(_run())
+    except RuntimeError:
+        pass
+
+
 def _schedule_mcp_bootstrap(app_state: AppState):
     """MCP bootstrap 后台化（启动性能 2026-09-09）。
 
@@ -832,6 +854,9 @@ async def _on_startup(app_state: AppState) -> None:
     # MCP bootstrap：按共享配置连接 enabled 的 MCP 服务器（后台任务，不阻塞
     # 就绪；完成后补挂到已存在 agent 的 ToolRouter）
     _schedule_mcp_bootstrap(app_state)
+
+    # 渠道启动装配（2026-09-13 agent 隔离 Phase B）：按持久化配置逐 agent 重建适配器连接
+    _schedule_channel_bootstrap(app_state)
 
     # 更新全局应用状态（TTS/Audio/VoiceEngine 已初始化）
     from neurova.api.endpoints import set_app_state as _update_app_state

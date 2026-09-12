@@ -70,6 +70,8 @@ class ChannelManager:
         if ChannelManager._instance is not None:
             raise RuntimeError("Use get_channel_manager() instead of direct construction")
         self._adapters: Dict[str, ChannelAdapter] = {}
+        # agent 多实例全量表（2026-09-13 渠道 agent 隔离，QP 装配期绑定模型）
+        self._agent_adapters: Dict[tuple, ChannelAdapter] = {}
         self._message_handler: Optional[MessageHandler] = None
         # C-24: 构造期直接建表——原惰性 hasattr 建表存在竞态（并发 add 时
         # 两个线程都可能通过 hasattr 检查并各自重建列表）
@@ -86,36 +88,81 @@ class ChannelManager:
     # 适配器管理
     # ============================================================
 
-    def register_adapter(self, adapter: ChannelAdapter):
-        """注册渠道适配器"""
+    def register_adapter(self, adapter: ChannelAdapter, agent_id: str = "default"):
+        """注册渠道适配器（2026-09-13 agent 多实例，对齐 QwenPaw 装配期绑定）
+
+        实例即路由：注册时绑定 agent_id 与事件回调，入站消息 metadata 携带来源
+        agent（QP "哪个 bot 收到 = 哪个 agent 处理"，无运行时查表）。
+        `_adapters[type]` 保持 default agent 兼容视图（既有 get_adapter 调用零破坏）；
+        `_agent_adapters[(agent_id, type)]` 为全量实例表（跨 agent 多实例）。
+        """
         channel_type = adapter.channel_type
-        if channel_type in self._adapters:
-            logger.warning("Replacing existing adapter for %s", channel_type)
-        adapter.set_event_callback(self._on_channel_event)
-        self._adapters[channel_type] = adapter
-        logger.info("Registered adapter: %s", channel_type)
+        if not hasattr(self, "_agent_adapters"):
+            self._agent_adapters: Dict[tuple, ChannelAdapter] = {}
+        adapter.agent_id = agent_id
+        adapter.set_event_callback(self._make_event_callback(agent_id))
+        self._agent_adapters[(agent_id, channel_type)] = adapter
+        if agent_id == "default":
+            if channel_type in self._adapters:
+                logger.warning("Replacing existing adapter for %s", channel_type)
+            self._adapters[channel_type] = adapter
+        logger.info("Registered adapter: %s (agent=%s)", channel_type, agent_id)
 
-    def unregister_adapter(self, channel_type: str) -> bool:
+    def _make_event_callback(self, agent_id: str):
+        """装配期闭包：事件进入统一处理链前注入来源 agent。"""
+        async def _callback(event_type: ChannelEventType, message: ChannelMessage):
+            # metadata 随 ingress 队列 JSON 内嵌持久化（channel_ingress_queue:56），
+            # agent 上下文可跨重启排水存活；已有值不覆盖（同一消息不串台）
+            if "agent_id" not in message.metadata:
+                message.metadata["agent_id"] = agent_id
+            return await self._on_channel_event(event_type, message)
+        return _callback
+
+    def unregister_adapter(self, channel_type: str, agent_id: str = "default") -> bool:
         """注销渠道适配器"""
-        if channel_type in self._adapters:
+        found = False
+        if hasattr(self, "_agent_adapters") and (agent_id, channel_type) in self._agent_adapters:
+            del self._agent_adapters[(agent_id, channel_type)]
+            found = True
+        if agent_id == "default" and channel_type in self._adapters:
             del self._adapters[channel_type]
-            logger.info("Unregistered adapter: %s", channel_type)
-            return True
-        return False
+            found = True
+        if found:
+            logger.info("Unregistered adapter: %s (agent=%s)", channel_type, agent_id)
+        return found
 
-    def get_adapter(self, channel_type: str) -> Optional[ChannelAdapter]:
-        """获取指定渠道的适配器"""
-        return self._adapters.get(channel_type)
+    def get_adapter(self, channel_type: str, agent_id: str = "default") -> Optional[ChannelAdapter]:
+        """获取指定渠道的适配器（默认 agent 视图向后兼容）"""
+        if hasattr(self, "_agent_adapters"):
+            adapter = self._agent_adapters.get((agent_id, channel_type))
+            if adapter is not None:
+                return adapter
+        if agent_id == "default":
+            return self._adapters.get(channel_type)
+        return None
 
     def list_adapters(self) -> Dict[str, Dict[str, Any]]:
-        """列出所有已注册的适配器状态"""
+        """列出所有已注册的适配器状态（跨 agent 全量；key 带 agent 前缀，
+        default 保留裸 channel 键向后兼容）"""
         result = {}
-        for channel_type, adapter in self._adapters.items():
-            result[channel_type] = {
+        table = getattr(self, "_agent_adapters", {}) or {}
+        for (agent_id, channel_type), adapter in table.items():
+            key = channel_type if agent_id == "default" else f"{agent_id}:{channel_type}"
+            result[key] = {
                 "channel_type": channel_type,
+                "agent_id": agent_id,
                 "connected": adapter.is_connected,
                 "enabled": adapter.config.enabled,
             }
+        # 兼容：仅存在于 _adapters 而无复合键的实例（理论不发生，兜底）
+        for channel_type, adapter in self._adapters.items():
+            if ("default", channel_type) not in table:
+                result[channel_type] = {
+                    "channel_type": channel_type,
+                    "agent_id": "default",
+                    "connected": adapter.is_connected,
+                    "enabled": adapter.config.enabled,
+                }
         return result
 
     # ============================================================
@@ -370,7 +417,9 @@ class ChannelManager:
             if not session:
                 # 尝试从元数据获取 user_id
                 user_id = getattr(message, "sender_id", None) or "anonymous"
-                agent_id = "default"
+                # 2026-09-13 agent 隔离：归属取来源 adapter（装配期注入），
+                # 替换原硬编码 "default"——渠道多 agent 路由的数据通路根点。
+                agent_id = str(message.metadata.get("agent_id") or "default")
                 session = sync_manager.create_session(
                     user_id=user_id,
                     agent_id=agent_id,
@@ -415,7 +464,11 @@ class ChannelManager:
             queue.start_drain(self._dispatch_message, poll_interval=0.5)
 
         tasks = []
+        # agent 多实例：遍历全量表（default 视图兜底保留，防只写 _adapters 的旧路径）
+        table = dict(getattr(self, "_agent_adapters", {}) or {})
         for channel_type, adapter in self._adapters.items():
+            table.setdefault(("default", channel_type), adapter)
+        for (_aid, _ctype), adapter in table.items():
             if adapter.config.enabled:
                 tasks.append(self._connect_adapter(adapter))
 
@@ -539,9 +592,13 @@ class ChannelManager:
         False → ``chat_id:sender_id``（按发送者隔离，QwenPaw 隔离模式语义）。
         配置取适配器的 share_session_in_group 属性（bool/"true"/"false"），
         未声明的适配器默认共享——与既有行为等价，只提升不下降。
+        agent 隔离（2026-09-13）：非 default agent 的实例前缀 ``agent:``
+        （等价 QP 群聊 session key 带 bot 后缀，同群多 agent 不互染）；
+        default 保持旧键格式——既有会话历史零迁移。
         """
-        scope = message.chat_id
-        adapter = self.get_adapter(message.channel_type)
+        agent = str(message.metadata.get("agent_id") or "default")
+        scope = message.chat_id if agent == "default" else f"{agent}:{message.chat_id}"
+        adapter = self.get_adapter(message.channel_type, agent_id=agent)
         if adapter is not None:
             share = getattr(adapter, "share_session_in_group", True)
             if not self._coerce_share_flag(share) and message.sender_id:

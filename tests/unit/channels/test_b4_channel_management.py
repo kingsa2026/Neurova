@@ -45,6 +45,14 @@ class _FakeAdapter:
         return {"connected": self.connected}
 
 
+@pytest.fixture(autouse=True)
+def _clean_singleton():
+    """直构型用例的单例卫生：前后归零 _instance，防跨文件 get_channel_manager 泄漏"""
+    ChannelManager._instance = None
+    yield
+    ChannelManager._instance = None
+
+
 class TestIngressClear:
     def test_clear_only_pending(self, tmp_path):
         from neurova.channels.channel_ingress_queue import ChannelIngressQueue
@@ -72,6 +80,7 @@ class TestIngressClear:
 
 class TestRestartChannel:
     def test_restart_disconnect_then_connect(self):
+        ChannelManager._instance = None
         manager = ChannelManager()
         adapter = _FakeAdapter("feishu")
         manager.register_adapter(adapter)
@@ -82,12 +91,14 @@ class TestRestartChannel:
         assert adapter.disconnected == 1
 
     def test_restart_unregistered_fails_honest(self):
+        ChannelManager._instance = None
         manager = ChannelManager()
         result = asyncio.run(manager.restart_channel("nope"))
         assert result["success"] is False
         assert "error" in result
 
     def test_restart_connect_failure_reported(self):
+        ChannelManager._instance = None
         manager = ChannelManager()
         adapter = _FakeAdapter("dingtalk", connect_ok=False)
         manager.register_adapter(adapter)
@@ -96,6 +107,7 @@ class TestRestartChannel:
         assert "boom" in result["error"]
 
     def test_conflict_check_detects_shared_identity(self):
+        ChannelManager._instance = None
         manager = ChannelManager()
         a = _FakeAdapter("feishu")
         a.config.app_id = "shared-app"
@@ -123,11 +135,13 @@ class TestSessionScopeResolution:
         )
 
     def test_default_shares_session(self):
+        ChannelManager._instance = None
         manager = ChannelManager()
         manager.register_adapter(_FakeAdapter("feishu"))
         assert manager.resolve_session_scope_id(self._message()) == "grp1"
 
     def test_isolated_uses_sender_suffix(self):
+        ChannelManager._instance = None
         manager = ChannelManager()
         adapter = _FakeAdapter("feishu")
         adapter.share_session_in_group = False
@@ -135,6 +149,7 @@ class TestSessionScopeResolution:
         assert manager.resolve_session_scope_id(self._message()) == "grp1:u1"
 
     def test_string_false_coerced(self):
+        ChannelManager._instance = None
         manager = ChannelManager()
         adapter = _FakeAdapter("feishu")
         adapter.share_session_in_group = "false"
@@ -142,6 +157,7 @@ class TestSessionScopeResolution:
         assert manager.resolve_session_scope_id(self._message()) == "grp1:u1"
 
     def test_isolated_without_sender_falls_back_to_chat(self):
+        ChannelManager._instance = None
         manager = ChannelManager()
         adapter = _FakeAdapter("feishu")
         adapter.share_session_in_group = False
