@@ -438,9 +438,10 @@ class TestNotificationManagerIntegration:
             )
             config_manager.save_config(config)
 
-            # 创建通知管理器
+            # 创建通知管理器（storage_path 隔离 tmpdir，禁打真实 data/notifications.json）
             notification_manager = NotificationManager(
                 negative_screen_config_manager=config_manager,
+                storage_path=f"{tmpdir}/notifications.json",
             )
 
             # Mock _schedule_negative_screen_push
@@ -473,9 +474,10 @@ class TestNotificationManagerIntegration:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_manager = NegativeScreenConfigManager(data_dir=tmpdir)
 
-            # 创建通知管理器
+            # 创建通知管理器（storage_path 隔离 tmpdir，禁打真实 data/notifications.json）
             notification_manager = NotificationManager(
                 negative_screen_config_manager=config_manager,
+                storage_path=f"{tmpdir}/notifications.json",
             )
 
             # Mock _schedule_negative_screen_push
