@@ -1,0 +1,26 @@
+{
+  "surface": "code_calc_datetime",
+  "description": "代码执行/计算/时间工具面（钉枚举合法值与字符串数字宽容归一路径）",
+  "records": [
+    {
+      "query": "帮我跑一下这段 Python 算阶乘",
+      "answers": [{"name": "run_code", "arguments": {"code": "import math; print(math.factorial(10))", "language": "python"}}]
+    },
+    {
+      "query": "在 docker 里执行这段代码，90 秒超时",
+      "answers": [{"name": "run_code", "arguments": {"code": "echo hi", "language": "shell", "runtime_type": "docker", "timeout": "90"}}]
+    },
+    {
+      "query": "列出工作目录下的所有 markdown 文件",
+      "answers": [{"name": "file_list", "arguments": {"pattern": "*.md"}}]
+    },
+    {
+      "query": "算一下 (1+2)*3 开根号",
+      "answers": [{"name": "calculator", "arguments": {"expression": "sqrt((1+2)*3)"}}]
+    },
+    {
+      "query": "现在纽约几点了",
+      "answers": [{"name": "get_datetime", "arguments": {"timezone": "America/New_York"}}]
+    }
+  ]
+}
