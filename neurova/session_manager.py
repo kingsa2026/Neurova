@@ -5,6 +5,7 @@
 
 import json
 import re
+from collections import OrderedDict
 from neurova.core.logger import get_logger
 from neurova.session_repository import SessionRepository
 import threading
@@ -108,6 +109,36 @@ class SessionManager(SessionRepository):
     _instance = None
     _lock = Lock()
 
+    # B-9: 摘要/反馈缓存条目上限（LRU，超限逐出最旧）
+    _SUMMARY_CACHE_MAX = 2000
+    _FEEDBACK_CACHE_MAX = 2000
+    # B-9 (台账 2026-09-11): 摘要/反馈聚合的进程级读缓存，键 =
+    # (文件路径, st_mtime_ns, st_size)。写路径 mtime/size 变化自然失效，
+    # 无需主动失效；只挂读路径（_collect_summaries / get_feedback_counts），
+    # S4/S3 写锁语义不受影响。挂在类上而非 __init__：存在
+    # object.__new__ 绕过 __init__ 的实例构造路径（单例测试隔离），
+    # 单例语义下缓存本就是进程级共享。
+    _parse_cache_lock = RLock()
+    _summary_cache: "OrderedDict" = OrderedDict()
+    _feedback_cache: "OrderedDict" = OrderedDict()
+
+    # ── B-9 v2（2026-09-11 拍板）：落盘摘要 sidecar 索引 ──────────────
+    # 每 agent 目录一份 _summary_index.json：session_id → 摘要字段 +
+    # like/dislike 聚合 + 最近反馈明细 + 指纹 fp（该会话全部日期文件的
+    # st_mtime_ns+st_size 之和）。写路径在既有锁内同步维护；读路径优先
+    # 读索引（零会话文件解析），索引缺失/损坏/版本不符/指纹失配 → 回退
+    # 全量扫描并顺手重建（自愈）。锁序：会话文件锁 → sidecar 文件锁
+    # （sidecar 锁为叶子锁，重建扫描不取会话锁，不成环）。
+    _SIDECAR_NAME = "_summary_index.json"
+    _SIDECAR_SCHEMA_VERSION = 1
+    _SIDECAR_FEEDBACK_ITEMS_MAX = 20
+    _SIDECAR_CACHE_MAX = 64
+    _SUMMARY_FIELDS = (
+        "id", "session_id", "agent_id", "title", "user_id",
+        "created_at", "updated_at", "total_messages", "pinned", "sort_order",
+    )
+    _sidecar_cache: "OrderedDict" = OrderedDict()
+
     def __new__(cls):
         if cls._instance is None:
             with cls._lock:
@@ -205,6 +236,8 @@ class SessionManager(SessionRepository):
 
         if moved > 0:
             logger.info("Session已存档: agent=%s, session=%s, 文件数=%s", agent_id, session_id, moved)
+            # B-9 sidecar: 主索引移除条目（archived 侧由读路径指纹校验自愈重建）
+            self._sidecar_mutate(agent_dir, session_id, remove=True)
             return True
         logger.warning("未找到可存档的session文件（agent_id=%s, session_id=%s）", agent_id, session_id)
         return False
@@ -227,6 +260,8 @@ class SessionManager(SessionRepository):
 
         if moved > 0:
             logger.info("Session已恢复: agent=%s, session=%s, 文件数=%s", agent_id, session_id, moved)
+            # B-9 sidecar: 存档索引移除条目（主索引由读路径指纹校验自愈重建）
+            self._sidecar_mutate(archived_dir, session_id, remove=True)
             return True
         logger.warning("未找到可恢复的存档文件（agent_id=%s, session_id=%s）", agent_id, session_id)
         return False
@@ -452,6 +487,18 @@ class SessionManager(SessionRepository):
                     f"写入 session 文件失败: agent_id={agent_id}, session_id={session_id}"
                 )
 
+            # B-9 sidecar: 摘要/反馈同步索引（仍在会话文件锁内，锁序 =
+            # 会话锁 → sidecar 锁；新增 assistant 消息若带 feedback 一并计入）
+            fb = self._feedback_from_data({"messages": [assistant_msg]})
+            self._sidecar_mutate(
+                self._get_session_dir(agent_id),
+                session_id,
+                summary_data=session_data,
+                like_delta=fb["like"],
+                dislike_delta=fb["dislike"],
+                add_items=fb["items"],
+            )
+
         return f"{agent_id}_{session_id}"
 
     def get_session(self, agent_id: str, session_id: str, date: str = None) -> SessionRecord:
@@ -580,6 +627,8 @@ class SessionManager(SessionRepository):
         if not self._write_session_file(file_path, session_data):
             logger.error("create_session 持久化失败 (silent failure antipattern 修复): session_id=%s, file=%s", session_id, file_path)
             raise RuntimeError(f"Failed to persist session file: {file_path}")
+        # B-9 sidecar: 空会话摘要同步落盘索引
+        self._sidecar_mutate(self._get_session_dir(agent_id), session_id, summary_data=session_data)
         return session_id
 
     def delete_session(self, agent_id: str, session_id: str, date: str = None) -> bool:
@@ -595,6 +644,9 @@ class SessionManager(SessionRepository):
                     with file_lock:
                         file_path.unlink()
                         logger.info("Session已删除: %s", file_path)
+                        # B-9 sidecar: 移除索引条目；残留其他日期文件时
+                        # 读路径指纹校验会自愈重建代表条目
+                        self._sidecar_mutate(self._get_session_dir(agent_id), session_id, remove=True)
                         return True
                 except Exception as e:
                     logger.error("删除session文件失败: %s", e)
@@ -618,6 +670,8 @@ class SessionManager(SessionRepository):
 
             if deleted_count > 0:
                 logger.info("共删除 %s 个文件（session_id=%s）", deleted_count, session_id)
+                # B-9 sidecar: 该会话全部日期文件已删除 → 移除索引条目
+                self._sidecar_mutate(self._get_session_dir(agent_id), session_id, remove=True)
                 return True
             else:
                 logger.warning("未找到 session_id=%s 的任何文件（agent_id=%s）", session_id, agent_id)
@@ -753,7 +807,24 @@ class SessionManager(SessionRepository):
                 session_data["updated_at"] = now
                 session_data["total_messages"] = len(session_data["messages"])
 
-            return self._write_session_file_unlocked(file_path, session_data)
+            # S4: 写入在 file_lock 内；B-9 sidecar 同步索引（assistant 消息
+            # 携带 feedback 时计入增量——fork 复制带反馈历史的消息走此路径）
+            write_ok = self._write_session_file_unlocked(file_path, session_data)
+            if write_ok:
+                fb = (
+                    self._feedback_from_data({"messages": [msg]})
+                    if role == "assistant"
+                    else {"like": 0, "dislike": 0, "items": []}
+                )
+                self._sidecar_mutate(
+                    self._get_session_dir(agent_id),
+                    session_id,
+                    summary_data=session_data,
+                    like_delta=fb["like"],
+                    dislike_delta=fb["dislike"],
+                    add_items=fb["items"],
+                )
+            return write_ok
 
     def get_history(self, agent_id: str, session_id: str, max_messages: int = 0) -> List[Dict[str, Any]]:
         """获取 session 所有日期的所有消息（聚合）。
@@ -776,6 +847,67 @@ class SessionManager(SessionRepository):
         if max_messages > 0 and len(all_messages) > max_messages:
             return all_messages[-max_messages:]
         return all_messages
+
+    def get_feedback_counts(self, agent_id: str, session_id: str) -> Dict[str, Any]:
+        """单会话点赞/点踩聚合（B-9, 台账 2026-09-11）。
+
+        优先读 sidecar 索引条目（指纹校验，O(索引)，零会话文件解析）；
+        索引缺失/指纹失配/条目无反馈字段时回退逐文件
+        (路径, mtime_ns, size) 缓存聚合。
+
+        Returns:
+            {"like": int, "dislike": int,
+             "items": [{"session_id", "timestamp", "content"(≤100), "feedback"}]}
+            （items 为最近 ≤_SIDECAR_FEEDBACK_ITEMS_MAX 条，按落盘顺序；
+             跨会话聚合与排序由调用方完成）
+        """
+        agent_dir = self._get_session_dir(agent_id)
+        index = self._load_sidecar(agent_dir)
+        if index is not None:
+            entry = index["sessions"].get(session_id)
+            if (
+                isinstance(entry, dict)
+                and "like_count" in entry
+                and entry.get("fp") == self._session_fingerprint(agent_dir, session_id)
+            ):
+                return {
+                    "like": int(entry.get("like_count", 0)),
+                    "dislike": int(entry.get("dislike_count", 0)),
+                    "items": [
+                        dict(it, session_id=session_id)
+                        for it in entry.get("recent_feedback", [])
+                        if isinstance(it, dict)
+                    ],
+                }
+        like = 0
+        dislike = 0
+        items: List[Dict[str, Any]] = []
+        for file_path in self._iter_session_files(agent_id, session_id):
+            agg = self._get_cached_feedback(file_path)
+            if not agg:
+                continue
+            like += agg["like"]
+            dislike += agg["dislike"]
+            for it in agg["items"]:
+                item = dict(it)
+                item["session_id"] = session_id
+                items.append(item)
+        return {"like": like, "dislike": dislike, "items": items}
+
+    def _get_cached_feedback(self, file_path: Path) -> Optional[Dict[str, Any]]:
+        """单文件反馈聚合（缓存值不含 session_id，同一文件跨会话复用安全）。"""
+        key = self._stat_cache_key(file_path)
+        if key is None:
+            return None
+        cached = self._cache_get(self._feedback_cache, key)
+        if cached is not None:
+            return cached
+        session_data = self._read_session_file(file_path)
+        if not session_data:
+            return None
+        agg = self._feedback_from_data(session_data)
+        self._cache_put(self._feedback_cache, key, agg, self._FEEDBACK_CACHE_MAX)
+        return agg
 
     def find_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """按 session_id 定位会话摘要（审计 P1-F4 索引式查找）。
@@ -817,7 +949,10 @@ class SessionManager(SessionRepository):
         """列出所有会话摘要（按 agent_id/user_id 过滤）。
 
         返回字段：session_id / agent_id / title / created_at / updated_at / total_messages / user_id
-        按 created_at 倒序。
+        按 created_at 倒序（sort_order>0 升序在前）。
+
+        B-9 v2：优先读落盘 sidecar 索引（O(索引)，零会话文件解析）；索引
+        缺失/损坏/版本不符/指纹失配 → 回退全量扫描并顺手重建索引（自愈）。
         """
         # 确定扫描目录范围
         if agent_id:
@@ -825,10 +960,17 @@ class SessionManager(SessionRepository):
         else:
             agent_dirs = [d for d in self._sessions_dir.iterdir() if d.is_dir()]
 
-        return self._collect_summaries(agent_dirs, user_id)
+        fast = self._summaries_via_sidecar(agent_dirs, user_id)
+        if fast is not None:
+            return fast
+        summaries = self._collect_summaries(agent_dirs, user_id)
+        # 自愈：回退扫描后顺手重建各目录索引（best-effort，失败不影响本次结果）
+        for agent_dir in agent_dirs:
+            self._rebuild_sidecar(agent_dir)
+        return summaries
 
     def list_archived_sessions(self, agent_id: str = "", user_id: str = "") -> List[Dict[str, Any]]:
-        """列出存档会话摘要（过滤规则与 list_sessions 一致）。"""
+        """列出存档会话摘要（过滤规则与 list_sessions 一致，读路径同走 sidecar）。"""
         if agent_id:
             archived_dirs = [self._get_archived_dir(agent_id)]
         else:
@@ -838,10 +980,24 @@ class SessionManager(SessionRepository):
                 if d.is_dir() and (d / "archived").is_dir()
             ]
 
-        return self._collect_summaries(archived_dirs, user_id)
+        fast = self._summaries_via_sidecar(archived_dirs, user_id)
+        if fast is not None:
+            return fast
+        summaries = self._collect_summaries(archived_dirs, user_id)
+        for archived_dir in archived_dirs:
+            self._rebuild_sidecar(archived_dir)
+        return summaries
 
     # session_{session_id}_{date}.json 尾部日期后缀（YYYY-MM-DD）
     _SESSION_DATE_SUFFIX_RE = re.compile(r"_\d{4}-\d{2}-\d{2}$")
+
+    @classmethod
+    def _sid_from_filename(cls, file_path: Path) -> str:
+        """从文件名解析 session_id（session_{sid}_{date}.json → sid，零内容读取）。"""
+        name = file_path.stem
+        if not name.startswith("session_"):
+            return ""
+        return cls._SESSION_DATE_SUFFIX_RE.sub("", name[len("session_"):])
 
     def count_sessions(self, agent_id: str = "", user_id: str = "") -> int:
         """会话总数（零 JSON 解析快路径）。
@@ -865,63 +1021,432 @@ class SessionManager(SessionRepository):
             if not agent_dir.is_dir():
                 continue
             for fp in agent_dir.glob("session_*.json"):
-                name = fp.stem
-                sid = self._SESSION_DATE_SUFFIX_RE.sub("", name[len("session_"):])
+                sid = self._sid_from_filename(fp)
                 if sid:
                     seen.add(sid)
         return len(seen)
 
+    # ── B-9: (路径, mtime_ns, size) 键的进程内读缓存 ──────────────────
+
+    def _stat_cache_key(self, file_path: Path) -> Optional[tuple]:
+        """构造缓存键 (路径, st_mtime_ns, st_size)；stat 失败（文件消失）返回 None。"""
+        try:
+            st = file_path.stat()
+        except OSError:
+            return None
+        return (str(file_path), st.st_mtime_ns, st.st_size)
+
+    def _cache_get(self, cache: OrderedDict, key: tuple) -> Any:
+        with self._parse_cache_lock:
+            value = cache.get(key)
+            if value is not None:
+                cache.move_to_end(key)
+            return value
+
+    def _cache_put(self, cache: OrderedDict, key: tuple, value: Any, max_entries: int) -> None:
+        with self._parse_cache_lock:
+            cache[key] = value
+            cache.move_to_end(key)
+            while len(cache) > max_entries:
+                cache.popitem(last=False)
+
+    @staticmethod
+    def _summary_from_data(session_data: Dict[str, Any]) -> Dict[str, Any]:
+        """从 session 文件数据提取摘要字段（纯函数，v1 _get_cached_summary 抽出）。"""
+        sid = session_data.get("session_id", "")
+        return {
+            "id": sid,
+            "session_id": sid,
+            "agent_id": session_data.get("agent_id", ""),
+            "title": session_data.get("title", "新对话"),
+            "user_id": session_data.get("user_id", ""),
+            "created_at": session_data.get("created_at", ""),
+            "updated_at": session_data.get("updated_at", ""),
+            "total_messages": session_data.get("total_messages", 0),
+            "pinned": bool(session_data.get("pinned", False)),
+            "sort_order": int(session_data.get("sort_order", 0) or 0),
+        }
+
+    @staticmethod
+    def _feedback_from_data(session_data: Dict[str, Any]) -> Dict[str, Any]:
+        """从 session 文件数据提取反馈聚合（纯函数，v1 _get_cached_feedback 抽出）。
+
+        仅统计 assistant 消息的 metadata.feedback ∈ {like, dislike}。
+        """
+        like = 0
+        dislike = 0
+        items: List[Dict[str, Any]] = []
+        for m in session_data.get("messages", []) or []:
+            if not isinstance(m, dict) or m.get("role") != "assistant":
+                continue
+            fb = (m.get("metadata") or {}).get("feedback")
+            if fb not in ("like", "dislike"):
+                continue
+            if fb == "like":
+                like += 1
+            else:
+                dislike += 1
+            items.append(
+                {
+                    "timestamp": m.get("timestamp", ""),
+                    "content": (m.get("content") or "")[:100],
+                    "feedback": fb,
+                }
+            )
+        return {"like": like, "dislike": dislike, "items": items}
+
+    def _get_cached_summary(self, file_path: Path) -> Optional[Dict[str, Any]]:
+        """单文件会话摘要；mtime/size 未变时复用上次解析，不再 json.load。"""
+        key = self._stat_cache_key(file_path)
+        if key is None:
+            return None
+        cached = self._cache_get(self._summary_cache, key)
+        if cached is not None:
+            return dict(cached)
+        session_data = self._read_session_file(file_path)
+        if not session_data:
+            return None
+        summary = self._summary_from_data(session_data)
+        self._cache_put(self._summary_cache, key, summary, self._SUMMARY_CACHE_MAX)
+        return dict(summary)
+
     def _collect_summaries(self, agent_dirs: List[Path], user_id: str = "") -> List[Dict[str, Any]]:
-        """扫描目录收集会话摘要（list_sessions / list_archived_sessions 共用）。"""
-        summaries: List[Dict[str, Any]] = []
+        """扫描目录收集会话摘要（list_sessions / list_archived_sessions 共用）。
+
+        B-9: 单文件摘要经 (路径, mtime_ns, size) 缓存——文件未变不重复
+        json.load（此前每次列表都全量解析所有会话的全部消息正文）。
+        """
         seen_session_ids: Dict[str, Dict[str, Any]] = {}
 
         for agent_dir in agent_dirs:
             if not agent_dir.is_dir():
                 continue
             for file_path in agent_dir.glob("session_*.json"):
-                session_data = self._read_session_file(file_path)
-                if not session_data:
+                summary = self._get_cached_summary(file_path)
+                if not summary:
                     continue
 
-                sid = session_data.get("session_id", "")
-                s_user_id = session_data.get("user_id", "")
-                s_agent_id = session_data.get("agent_id", "")
+                sid = summary["session_id"]
 
                 # user_id 过滤（空 user_id 不过滤）
-                if user_id and s_user_id and s_user_id != user_id:
+                if user_id and summary["user_id"] and summary["user_id"] != user_id:
                     continue
 
                 # 同一 session_id 多日期文件，取最新日期作为代表
-                created_at = session_data.get("created_at", "")
                 existing = seen_session_ids.get(sid)
-                if existing is None or created_at > existing.get("created_at", ""):
-                    summary = {
-                        "id": sid,
-                        "session_id": sid,
-                        "agent_id": s_agent_id,
-                        "title": session_data.get("title", "新对话"),
-                        "user_id": s_user_id,
-                        "created_at": created_at,
-                        "updated_at": session_data.get("updated_at", ""),
-                        "total_messages": session_data.get("total_messages", 0),
-                        "pinned": bool(session_data.get("pinned", False)),
-                        "sort_order": int(session_data.get("sort_order", 0) or 0),
-                    }
+                if existing is None or summary["created_at"] > existing.get("created_at", ""):
                     seen_session_ids[sid] = summary
 
         summaries = list(seen_session_ids.values())
-        # 拖拽排序落库:sort_order>0 的会话按其升序在前,未排序(0)按 created_at
-        # 倒序垫底(新→旧)。951d8c0b 曾把此排序写成三键升序元组——未排序区
-        # created_at 变升序(最老在前),最新会话全部沉底,前端 loadSessions
-        # auto-select 列表第一项打开的是老空会话,用户感知"重启后会话全丢"。
-        # ISO 时间串无法取负,单一 sort 表达不出 ASC/DESC 混排,分区排序实现。
+        return self._order_summaries(summaries)
+
+    @staticmethod
+    def _order_summaries(summaries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """拖拽排序落库:sort_order>0 的会话按其升序在前,未排序(0)按 created_at
+        倒序垫底(新→旧)。951d8c0b 曾把此排序写成三键升序元组——未排序区
+        created_at 变升序(最老在前),最新会话全部沉底,前端 loadSessions
+        auto-select 列表第一项打开的是老空会话,用户感知"重启后会话全丢"。
+        ISO 时间串无法取负,单一 sort 表达不出 ASC/DESC 混排,分区排序实现。
+        （sidecar 读路径与全量扫描共用，保证两条路径排序逐字段一致。）
+        """
         ordered = [x for x in summaries if int(x.get("sort_order", 0) or 0)]
         unsorted_ = [x for x in summaries if not int(x.get("sort_order", 0) or 0)]
         ordered.sort(key=lambda x: int(x.get("sort_order", 0) or 0))
         unsorted_.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-        summaries = ordered + unsorted_
-        return summaries
+        return ordered + unsorted_
+
+    # ── B-9 v2: 落盘摘要 sidecar 索引（_summary_index.json） ──────────
+
+    @staticmethod
+    def _read_json_plain(file_path: Path) -> Optional[Dict[str, Any]]:
+        """sidecar 专用直读：不隔离、不取会话文件锁。
+
+        重建/读路径可能持有 sidecar 锁，此时不得再取会话文件锁
+        （写路径锁序为 会话锁→sidecar 锁，反向获取会成环死锁）；
+        损坏索引交由读路径回退重建（原子写覆盖坏文件）处理。
+        """
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _atomic_write_json(file_path: Path, data: Dict[str, Any]) -> bool:
+        """小 JSON 文件原子写（tmp + os.replace + fsync，同会话文件写纪律）。"""
+        try:
+            text = json.dumps(data, ensure_ascii=False)
+        except (TypeError, ValueError, OverflowError) as e:
+            logger.debug("JSON 序列化失败, 跳过写入 %s: %s", file_path, e)
+            return False
+        try:
+            tmp_path = file_path.with_name(file_path.name + ".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(text)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, file_path)
+            return True
+        except Exception as e:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            logger.debug("写入 %s 失败: %s", file_path, e)
+            return False
+
+    def _session_fingerprint(self, agent_dir: Path, session_id: str) -> int:
+        """单会话指纹 = 全部日期文件的 st_mtime_ns + st_size 之和。
+
+        内容级变更探测：任何绕过 manager 的写入都会改变 mtime/size →
+        指纹失配 → 读路径回退重建。零 JSON 解析，仅 stat。
+        """
+        total = 0
+        for fp in agent_dir.glob(f"session_{session_id}_*.json"):
+            try:
+                st = fp.stat()
+            except OSError:
+                continue
+            total += st.st_mtime_ns + st.st_size
+        return total
+
+    def _dir_fingerprints(self, agent_dir: Path) -> Optional[Dict[str, int]]:
+        """整目录 session_id → 指纹映射；stat 失败（文件正消失）返回 None。"""
+        fps: Dict[str, int] = {}
+        for fp in agent_dir.glob("session_*.json"):
+            sid = self._sid_from_filename(fp)
+            if not sid:
+                continue
+            try:
+                st = fp.stat()
+            except OSError:
+                return None
+            fps[sid] = fps.get(sid, 0) + st.st_mtime_ns + st.st_size
+        return fps
+
+    def _load_sidecar(self, agent_dir: Path) -> Optional[Dict[str, Any]]:
+        """读取并校验 sidecar 索引（进程内按 (路径, mtime, size) 缓存）。
+
+        缺失/损坏/版本不符返回 None（调用方回退全量扫描并重建）。
+        """
+        idx_path = agent_dir / self._SIDECAR_NAME
+        key = self._stat_cache_key(idx_path)
+        if key is None:
+            return None
+        cached = self._cache_get(self._sidecar_cache, key)
+        if cached is not None:
+            return cached
+        data = self._read_json_plain(idx_path)
+        if (
+            not isinstance(data, dict)
+            or data.get("schema_version") != self._SIDECAR_SCHEMA_VERSION
+            or not isinstance(data.get("sessions"), dict)
+        ):
+            return None
+        self._cache_put(self._sidecar_cache, key, data, self._SIDECAR_CACHE_MAX)
+        return data
+
+    def _compute_sidecar_entry(
+        self, agent_dir: Path, session_id: str, quarantine: bool = True
+    ) -> Optional[Dict[str, Any]]:
+        """从该会话的全部日期文件重算索引条目（rep 摘要 + 全量反馈聚合 + 指纹）。
+
+        quarantine=False（sidecar 锁内的 mutate 重算路径）跳过损坏文件隔离：
+        隔离会取会话文件锁，与写路径「会话锁→sidecar 锁」次序成环；
+        损坏文件由其他读路径（列表回退/历史读取）照常隔离，隔离后文件
+        消失 → 指纹变化 → 下次读路径重建收敛。
+        """
+        rep: Optional[Dict[str, Any]] = None
+        like = 0
+        dislike = 0
+        items: List[Dict[str, Any]] = []
+        for fp in sorted(agent_dir.glob(f"session_{session_id}_*.json")):
+            data = self._read_session_file(fp) if quarantine else self._read_json_plain(fp)
+            if not data:
+                continue
+            summary = self._summary_from_data(data)
+            if rep is None or str(summary.get("created_at", "")) >= str(rep.get("created_at", "")):
+                rep = summary
+            fb = self._feedback_from_data(data)
+            like += fb["like"]
+            dislike += fb["dislike"]
+            items.extend(fb["items"])
+        if rep is None:
+            return None
+        entry = dict(rep)
+        entry["like_count"] = like
+        entry["dislike_count"] = dislike
+        entry["recent_feedback"] = items[-self._SIDECAR_FEEDBACK_ITEMS_MAX:]
+        entry["fp"] = self._session_fingerprint(agent_dir, session_id)
+        return entry
+
+    def _rebuild_sidecar(self, agent_dir: Path) -> Optional[Dict[str, Any]]:
+        """全量扫描重建索引并原子落盘（自愈出口）。
+
+        扫描阶段不持 sidecar 锁（_read_session_file 可能隔离损坏文件、
+        取会话文件锁）；落盘阶段持 sidecar 文件锁。并发写路径在扫描窗口
+        内的增量可能被本次覆盖，但其会话文件 mtime 已变 → 指纹失配 →
+        下次读路径自动再重建（收敛）。
+        """
+        if not agent_dir.is_dir():
+            return None
+        sids = set()
+        for fp in agent_dir.glob("session_*.json"):
+            sid = self._sid_from_filename(fp)
+            if sid:
+                sids.add(sid)
+        entries: Dict[str, Dict[str, Any]] = {}
+        for sid in sorted(sids):
+            entry = self._compute_sidecar_entry(agent_dir, sid)
+            if entry is not None:
+                entries[sid] = entry
+        index = {
+            "schema_version": self._SIDECAR_SCHEMA_VERSION,
+            "rebuilt_at": datetime.now().isoformat(),
+            "sessions": entries,
+        }
+        idx_path = agent_dir / self._SIDECAR_NAME
+        try:
+            lock = self._get_file_lock(idx_path)
+            with lock:
+                self._atomic_write_json(idx_path, index)
+        except Exception as e:
+            logger.warning("sidecar 索引重建落盘失败（内存结果仍可用于本次请求）: %s", e)
+        return index
+
+    def _summary_from_entry(self, sid: str, entry: Dict[str, Any]) -> Dict[str, Any]:
+        """索引条目 → 对外摘要视图（仅 _SUMMARY_FIELDS，不泄漏内部字段）。"""
+        return {
+            "id": sid,
+            "session_id": sid,
+            "agent_id": entry.get("agent_id", ""),
+            "title": entry.get("title", "新对话"),
+            "user_id": entry.get("user_id", ""),
+            "created_at": entry.get("created_at", ""),
+            "updated_at": entry.get("updated_at", ""),
+            "total_messages": entry.get("total_messages", 0),
+            "pinned": bool(entry.get("pinned", False)),
+            "sort_order": int(entry.get("sort_order", 0) or 0),
+        }
+
+    def _summaries_via_sidecar(self, agent_dirs: List[Path], user_id: str = "") -> Optional[List[Dict[str, Any]]]:
+        """B-9 v2 读路径：全部目录索引有效时返回摘要列表，否则 None（回退重建）。
+
+        有效性 = 索引可读且版本匹配 + 目录文件集与索引键一致 + 每会话
+        指纹匹配（探测一切绕过 manager 的内容改写）。user_id 过滤与
+        跨目录同 sid 去重规则与 _collect_summaries 逐字段对齐。
+        """
+        seen: Dict[str, Dict[str, Any]] = {}
+        for agent_dir in agent_dirs:
+            if not agent_dir.is_dir():
+                continue
+            index = self._load_sidecar(agent_dir)
+            if index is None:
+                return None
+            disk_fps = self._dir_fingerprints(agent_dir)
+            if disk_fps is None:
+                return None
+            sessions = index["sessions"]
+            if set(sessions.keys()) != set(disk_fps.keys()):
+                return None
+            for sid, entry in sessions.items():
+                if not isinstance(entry, dict) or entry.get("fp") != disk_fps[sid]:
+                    return None
+                entry_user = str(entry.get("user_id", "") or "")
+                if user_id and entry_user and entry_user != user_id:
+                    continue
+                summary = self._summary_from_entry(sid, entry)
+                existing = seen.get(sid)
+                if existing is None or summary["created_at"] > existing.get("created_at", ""):
+                    seen[sid] = summary
+        return self._order_summaries(list(seen.values()))
+
+    def _sidecar_mutate(
+        self,
+        agent_dir: Path,
+        session_id: str,
+        *,
+        remove: bool = False,
+        summary_data: Optional[Dict[str, Any]] = None,
+        like_delta: int = 0,
+        dislike_delta: int = 0,
+        add_items: Optional[List[Dict[str, Any]]] = None,
+        remove_item_timestamps: Optional[List[str]] = None,
+    ) -> None:
+        """写路径同步更新 sidecar 索引（自身文件锁内读-改-写）。
+
+        - remove=True：删除条目（delete/archive/unarchive 后调用）。
+        - summary_data：写路径持有的该会话文件最新数据；仅当其 created_at
+          ≥ 现条目（即写入的是代表文件）时更新摘要字段（与全量扫描
+          "同 sid 取 created_at 最新文件"口径一致）。条目缺失时整体重算。
+        - like/dislike_delta / add_items / remove_item_timestamps：反馈增量
+          （会话级跨日期聚合，与代表文件无关，恒应用）。
+
+        索引不存在/损坏时以空索引冷启动并写入本次变更（部分索引由读路径
+        文件集/指纹校验自愈补全）；remove 遇缺失索引无事可做直接跳过。
+        任何异常降级为移除索引文件（下次读路径全量重建），绝不阻断主写路径。
+        """
+        idx_path = agent_dir / self._SIDECAR_NAME
+        try:
+            lock = self._get_file_lock(idx_path)
+            with lock:
+                index = self._read_json_plain(idx_path)
+                if (
+                    not isinstance(index, dict)
+                    or index.get("schema_version") != self._SIDECAR_SCHEMA_VERSION
+                    or not isinstance(index.get("sessions"), dict)
+                ):
+                    if remove:
+                        return
+                    index = {
+                        "schema_version": self._SIDECAR_SCHEMA_VERSION,
+                        "rebuilt_at": datetime.now().isoformat(),
+                        "sessions": {},
+                    }
+                sessions = index["sessions"]
+                if remove:
+                    sessions.pop(session_id, None)
+                else:
+                    entry = sessions.get(session_id)
+                    if entry is None:
+                        # 锁外不可行的重算：quarantine=False 避免持 sidecar
+                        # 锁时取会话文件锁（锁序成环，见 _compute_sidecar_entry）
+                        entry = self._compute_sidecar_entry(agent_dir, session_id, quarantine=False)
+                        if entry is None:
+                            return
+                        sessions[session_id] = entry
+                    else:
+                        if summary_data is not None:
+                            summary = self._summary_from_data(summary_data)
+                            if str(summary.get("created_at", "")) >= str(entry.get("created_at", "")):
+                                entry.update(summary)
+                        if like_delta or dislike_delta or add_items or remove_item_timestamps:
+                            entry["like_count"] = int(entry.get("like_count", 0)) + like_delta
+                            entry["dislike_count"] = int(entry.get("dislike_count", 0)) + dislike_delta
+                            items = entry.get("recent_feedback")
+                            if not isinstance(items, list):
+                                items = []
+                            for ts in remove_item_timestamps or []:
+                                for i, it in enumerate(items):
+                                    if isinstance(it, dict) and it.get("timestamp") == ts:
+                                        del items[i]
+                                        break
+                            for it in add_items or []:
+                                items.append(dict(it))
+                            entry["recent_feedback"] = items[-self._SIDECAR_FEEDBACK_ITEMS_MAX:]
+                    entry["fp"] = self._session_fingerprint(agent_dir, session_id)
+                if self._atomic_write_json(idx_path, index):
+                    # 写后直刷进程内缓存：杜绝 mtime_ns+size 同刻不变导致的
+                    # 读陈旧窗口（读路径本会因键变化失效，此为双保险）
+                    new_key = self._stat_cache_key(idx_path)
+                    if new_key is not None:
+                        self._cache_put(self._sidecar_cache, new_key, index, self._SIDECAR_CACHE_MAX)
+        except Exception as e:
+            logger.warning("sidecar 索引更新失败（已失效，读路径将自愈重建）: %s", e)
+            try:
+                os.remove(idx_path)
+            except OSError:
+                pass
 
     def set_session_pinned(self, agent_id: str, session_id: str, pinned: bool) -> bool:
         """置顶/取消置顶 session（写入所有日期文件的 pinned 字段）。"""
@@ -932,6 +1457,7 @@ class SessionManager(SessionRepository):
             return False
 
         ok = True
+        rep_data: Optional[Dict[str, Any]] = None
         for file_path in file_paths:
             file_lock = self._get_file_lock(file_path)
             with file_lock:
@@ -942,6 +1468,12 @@ class SessionManager(SessionRepository):
                 session_data["pinned"] = bool(pinned)
                 if not self._write_session_file_unlocked(file_path, session_data):
                     ok = False
+                    continue
+                # B-9: 记录代表文件（created_at 最新）数据供索引更新
+                if rep_data is None or str(session_data.get("created_at", "")) >= str(rep_data.get("created_at", "")):
+                    rep_data = session_data
+        if rep_data is not None:
+            self._sidecar_mutate(self._get_session_dir(agent_id), session_id, summary_data=rep_data)
         return ok
 
     def set_sessions_sort_order(self, agent_id: str, ordered_ids: List[str]) -> bool:
@@ -956,6 +1488,7 @@ class SessionManager(SessionRepository):
             return False
 
         order_map = {sid: idx + 1 for idx, sid in enumerate(ordered_ids)}
+        rep_by_sid: Dict[str, Dict[str, Any]] = {}
         ok = True
         for file_path in agent_dir.glob("session_*.json"):
             file_lock = self._get_file_lock(file_path)
@@ -972,6 +1505,13 @@ class SessionManager(SessionRepository):
                 session_data["sort_order"] = new_order
                 if not self._write_session_file_unlocked(file_path, session_data):
                     ok = False
+                    continue
+                prev = rep_by_sid.get(sid)
+                if prev is None or str(session_data.get("created_at", "")) >= str(prev.get("created_at", "")):
+                    rep_by_sid[sid] = session_data
+        # B-9 sidecar: 被重排会话的索引逐条同步（重排低频，逐条 RMW 足够）
+        for sid, data in rep_by_sid.items():
+            self._sidecar_mutate(agent_dir, session_id=sid, summary_data=data)
         return ok
 
     def rename_session(self, agent_id: str, session_id: str, title: str) -> bool:
@@ -983,6 +1523,7 @@ class SessionManager(SessionRepository):
             return False
 
         ok = True
+        rep_data: Optional[Dict[str, Any]] = None
         for file_path in file_paths:
             file_lock = self._get_file_lock(file_path)
             with file_lock:
@@ -993,6 +1534,12 @@ class SessionManager(SessionRepository):
                 session_data["title"] = title
                 if not self._write_session_file_unlocked(file_path, session_data):
                     ok = False
+                    continue
+                # B-9: 记录代表文件（created_at 最新）数据供索引更新
+                if rep_data is None or str(session_data.get("created_at", "")) >= str(rep_data.get("created_at", "")):
+                    rep_data = session_data
+        if rep_data is not None:
+            self._sidecar_mutate(self._get_session_dir(agent_id), session_id, summary_data=rep_data)
         return ok
 
 
@@ -1060,6 +1607,18 @@ class SessionManager(SessionRepository):
                 session_data["total_messages"] = len(session_data["messages"])
                 session_data["updated_at"] = datetime.now().isoformat()
                 if self._write_session_file_unlocked(file_path, session_data):
+                    # B-9 sidecar: 摘要字段 + 被删轮次反馈增量同步索引
+                    # （_feedback_from_data 只认 assistant 消息，被删 user
+                    # 消息时间戳的明细移除是天然 no-op）
+                    fb = self._feedback_from_data({"messages": deleted})
+                    self._sidecar_mutate(
+                        self._get_session_dir(agent_id),
+                        session_id,
+                        summary_data=session_data,
+                        like_delta=-fb["like"],
+                        dislike_delta=-fb["dislike"],
+                        remove_item_timestamps=[m.get("timestamp", "") for m in deleted],
+                    )
                     return deleted
                 logger.error(
                     "delete_round 写入失败: agent_id=%s, session_id=%s, file=%s",
@@ -1136,11 +1695,44 @@ class SessionManager(SessionRepository):
                     continue
 
                 msg = messages[idx]
-                meta = dict(msg.get("metadata") or {})
+                # B-9: 捕获合并前的旧 feedback，供索引增量计算
+                old_meta = msg.get("metadata") or {}
+                meta = dict(old_meta)
                 meta.update(metadata_patch)
                 msg["metadata"] = meta
                 session_data["updated_at"] = datetime.now().isoformat()
                 if self._write_session_file_unlocked(file_path, session_data):
+                    # B-9 sidecar: updated_at 随代表文件更新；feedback 增量
+                    # 仅对 assistant 消息生效（与 _feedback_from_data 同口径，
+                    # feedback=None 合法——取消反馈时计数/明细同步回落）
+                    if msg.get("role") == "assistant":
+                        old_fb = old_meta.get("feedback")
+                        new_fb = metadata_patch.get("feedback", old_fb)
+                        like_delta = int(new_fb == "like") - int(old_fb == "like")
+                        dislike_delta = int(new_fb == "dislike") - int(old_fb == "dislike")
+                        add_items = (
+                            [{"timestamp": msg.get("timestamp", ""),
+                              "content": (msg.get("content") or "")[:100],
+                              "feedback": new_fb}]
+                            if new_fb in ("like", "dislike") else []
+                        )
+                        remove_ts = (
+                            [msg.get("timestamp", "")]
+                            if old_fb in ("like", "dislike") else []
+                        )
+                    else:
+                        like_delta = dislike_delta = 0
+                        add_items = []
+                        remove_ts = []
+                    self._sidecar_mutate(
+                        self._get_session_dir(agent_id),
+                        session_id,
+                        summary_data=session_data,
+                        like_delta=like_delta,
+                        dislike_delta=dislike_delta,
+                        add_items=add_items,
+                        remove_item_timestamps=remove_ts,
+                    )
                     return True
                 logger.error(
                     "update_message_metadata 写入失败: agent_id=%s, session_id=%s, file=%s",

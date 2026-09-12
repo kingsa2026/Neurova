@@ -117,3 +117,40 @@ class TestOrchestratorCacheTrim:
         orch = self._make_orch()
         orch.set_session_id("s9")
         assert orch._window_compaction_cache == {}
+
+
+class TestTurnIndex:
+    """B-8：mark_turn_seen 经 turn 索引 O(k) 直取（旧行为为全池 O(n) 扫）。"""
+
+    def test_mark_turn_seen_via_index_and_idempotent(self):
+        pool = _make_pool()
+        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="q", metadata={"turn_id": "t1"}))
+        pool.add_context(ContextInput(source=ContextSource.CONVERSATION, content="a", metadata={"turn_id": "t1"}))
+        assert pool.mark_turn_seen("t1") == 2
+        assert pool._collector._contexts[0].seen_confirmed is True
+        assert pool.mark_turn_seen("t1") == 0
+
+    def test_turn_index_rebuilt_after_clear(self):
+        pool = _make_pool()
+        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="q", metadata={"turn_id": "t1"}))
+        pool.clear()
+        assert pool.mark_turn_seen("t1") == 0
+        assert pool._by_turn == {}
+
+    def test_replace_updates_turn_index(self):
+        pool = _make_pool()
+        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="low", priority=10, metadata={"turn_id": "t1"}))
+        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="low", priority=99, metadata={"turn_id": "t2"}))
+        # 替换后旧 turn 不再持有该条目、新 turn 持有
+        assert pool.mark_turn_seen("t1") == 0
+        assert pool.mark_turn_seen("t2") == 1
+
+    def test_dedup_rebuild_keeps_turn_index_consistent(self):
+        pool = _make_pool()
+        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="a", metadata={"turn_id": "t1"}))
+        pool.add_context(ContextInput(source=ContextSource.CONVERSATION, content="b", metadata={"turn_id": "t1"}))
+        pool.dedup(stage="output")
+        for c in pool._collector._contexts:
+            tid = (c.metadata or {}).get("turn_id")
+            if tid:
+                assert c in pool._by_turn.get(tid, [])
