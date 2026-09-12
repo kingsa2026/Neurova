@@ -334,3 +334,23 @@ def _isolate_ekb(tmp_path, monkeypatch):
     reset_experience_knowledge_base()
     yield
     reset_experience_knowledge_base()
+
+
+@pytest.fixture(autouse=True)
+def _reset_memory_request_scope():
+    """每个测试后归还未设置态：MemoryManager 的请求作用域是模块级 ContextVar。
+
+    根因（2026-09-12 甄别）：set_request_scope 的"随请求上下文销毁"仅对
+    异步任务成立——pytest 单线程同步执行下 ContextVar 值跨测试存活，
+    任一测试 set_request_scope 后不归还，后续测试的记忆写入/读取全部落在
+    被污染的作用域上（曾致 test_moe_router_reads_persist_db 顺序依赖失败：
+    remember 写进 user_id='7' 的作用域，MoE 适配器按 n1/u1 过滤读空）。
+    """
+    yield
+    try:
+        from neurova.cognitive_layers.memory_layer.manager import (
+            clear_memory_request_scope,
+        )
+    except Exception:  # pragma: cover - 模块未就绪时跳过
+        return
+    clear_memory_request_scope()

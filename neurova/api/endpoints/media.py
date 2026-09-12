@@ -7,6 +7,7 @@ Media Storage API - 媒体存储管理接口
 - GET /api/v1/media/{media_id}/metadata - 获取媒体元数据
 - GET /api/v1/media/list - 列出媒体文件
 - DELETE /api/v1/media/{media_id} - 删除媒体文件
+- POST /api/v1/media/batch-delete - 批量删除媒体文件
 - GET /api/v1/media/stats/{agent_id} - 获取存储统计
 - GET /api/v1/media/memory/{memory_id} - 获取关联记忆的媒体
 - GET /api/v1/media/config - 获取媒体存储配置
@@ -57,6 +58,12 @@ class MediaListRequest(BaseModel):
     media_type: Optional[str] = Field(default=None, description="媒体类型筛选")
     limit: int = Field(default=50, le=200, description="返回数量")
     offset: int = Field(default=0, description="偏移量")
+
+
+class BatchDeleteRequest(BaseModel):
+    """批量删除请求（F-1 契约对齐：NeurUI batchDeleteMedia）"""
+
+    media_ids: List[str] = Field(..., description="要删除的媒体 ID 列表")
 
 
 class UpdateConfigRequest(BaseModel):
@@ -162,6 +169,27 @@ def _content_disposition(filename: Optional[str]) -> str:
         return f'attachment; filename="{name}"'
     fallback = re.sub(r"[^A-Za-z0-9._-]", "_", name)[:80] or "download"
     return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(name, safe='')}"
+
+
+def _remove_media_entry(media_id: str) -> Optional[Dict[str, Any]]:
+    """删除单个媒体（磁盘文件 + 内存元数据）。
+
+    返回被删的元数据；media_id 不存在时返回 None。
+    """
+    media = _media_store.get(media_id)
+    if not media:
+        return None
+
+    # P1-2: 内容已落盘，删元数据须同步删磁盘文件
+    disk_path = _media_disk_path(media)
+    try:
+        if disk_path.is_file():
+            disk_path.unlink()
+    except OSError as e:
+        logger.warning("删除媒体磁盘文件失败 %s: %s", disk_path, e)
+
+    del _media_store[media_id]
+    return media
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +323,58 @@ async def list_media(
     }
 
 
+@router.get("/config")
+async def get_config():
+    """获取媒体存储配置（F-1 路由顺序锚：字面段路由必须注册在
+    GET /{media_id} 之前，否则被参数路由吞掉 404 "Media 'config' not found"）。"""
+    return {
+        "code": 0,
+        "data": _media_config.copy(),
+    }
+
+
+@router.put("/config")
+async def update_config(body: UpdateConfigRequest):
+    """更新媒体存储配置"""
+    if body.max_file_size is not None:
+        _media_config["max_file_size"] = body.max_file_size
+    if body.allowed_types is not None:
+        _media_config["allowed_types"] = body.allowed_types
+    if body.storage_path is not None:
+        _media_config["storage_path"] = body.storage_path
+    if body.enable_compression is not None:
+        _media_config["enable_compression"] = body.enable_compression
+
+    _media_config["updated_at"] = time.time()
+
+    return {
+        "code": 0,
+        "message": "媒体存储配置已更新",
+        "data": _media_config.copy(),
+    }
+
+
+@router.post("/batch-delete")
+async def batch_delete_media(body: BatchDeleteRequest):
+    """批量删除媒体文件（F-1 契约对齐：前端 batchDeleteMedia）。
+
+    逐个删除（磁盘文件 + 元数据），不存在的 ID 记入 failed，不中断整批。
+    """
+    succeeded: List[str] = []
+    failed: List[Dict[str, str]] = []
+    for media_id in body.media_ids:
+        if _remove_media_entry(media_id) is not None:
+            succeeded.append(media_id)
+        else:
+            failed.append({"media_id": media_id, "reason": "media not found"})
+
+    return {
+        "code": 0,
+        "message": f"批量删除完成: 成功 {len(succeeded)} 个, 失败 {len(failed)} 个",
+        "data": {"succeeded": succeeded, "failed": failed},
+    }
+
+
 @router.get("/{media_id}")
 async def get_media(media_id: str):
     """获取媒体文件内容（P1-2: 从磁盘 FileResponse 流式读取，不再驻留内存）"""
@@ -360,20 +440,9 @@ async def download_attachment(media_id: str):
 @router.delete("/{media_id}")
 async def delete_media(media_id: str):
     """删除媒体文件"""
-    media = _media_store.get(media_id)
-    if not media:
+    media = _remove_media_entry(media_id)
+    if media is None:
         raise HTTPException(status_code=404, detail=f"Media '{media_id}' not found")
-
-    # P1-2: 内容已落盘，删元数据须同步删磁盘文件
-    disk_path = _media_disk_path(media)
-    try:
-        if disk_path.is_file():
-            disk_path.unlink()
-    except OSError as e:
-        logger.warning("删除媒体磁盘文件失败 %s: %s", disk_path, e)
-
-    # 删除元数据
-    del _media_store[media_id]
 
     return {
         "code": 0,
@@ -425,36 +494,6 @@ async def get_memory_media(memory_id: str):
             "media": memory_media,
             "total": len(memory_media),
         },
-    }
-
-
-@router.get("/config")
-async def get_config():
-    """获取媒体存储配置"""
-    return {
-        "code": 0,
-        "data": _media_config.copy(),
-    }
-
-
-@router.put("/config")
-async def update_config(body: UpdateConfigRequest):
-    """更新媒体存储配置"""
-    if body.max_file_size is not None:
-        _media_config["max_file_size"] = body.max_file_size
-    if body.allowed_types is not None:
-        _media_config["allowed_types"] = body.allowed_types
-    if body.storage_path is not None:
-        _media_config["storage_path"] = body.storage_path
-    if body.enable_compression is not None:
-        _media_config["enable_compression"] = body.enable_compression
-
-    _media_config["updated_at"] = time.time()
-
-    return {
-        "code": 0,
-        "message": "媒体存储配置已更新",
-        "data": _media_config.copy(),
     }
 
 

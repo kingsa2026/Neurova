@@ -131,6 +131,72 @@ class SessionRepository(ABC):
         """
         return False
 
+    # ── B-9（台账 2026-09-11）：反馈聚合接口 ─────────────────────────
+
+    def get_feedback_counts(self, agent_id: str, session_id: str) -> Dict:
+        """单会话点赞/点踩聚合（非抽象默认实现：经 get_history 全量聚合）。
+
+        实现方可用索引/缓存覆盖（SessionManager 走 sidecar 索引）。
+
+        Returns:
+            {"like": int, "dislike": int,
+             "items": [{"session_id", "timestamp", "content"(≤100), "feedback"}]}
+            （items 为最近 ≤20 条，按落盘顺序）
+        """
+        like = 0
+        dislike = 0
+        items: List[Dict] = []
+        for m in self.get_history(agent_id=agent_id, session_id=session_id, max_messages=0):
+            if not isinstance(m, dict) or m.get("role") != "assistant":
+                continue
+            fb = (m.get("metadata") or {}).get("feedback")
+            if fb not in ("like", "dislike"):
+                continue
+            if fb == "like":
+                like += 1
+            else:
+                dislike += 1
+            items.append(
+                {
+                    "session_id": session_id,
+                    "timestamp": m.get("timestamp", ""),
+                    "content": (m.get("content") or "")[:100],
+                    "feedback": fb,
+                }
+            )
+        return {"like": like, "dislike": dislike, "items": items[-20:]}
+
+    def get_feedback_aggregate(self, agent_id: str = "", user_id: str = "", limit: int = 50) -> Dict:
+        """跨会话反馈聚合（console /chat/feedback/stats 数据源）。
+
+        默认实现：list_sessions 前 limit 个（排序与列表契约一致）逐会话
+        get_feedback_counts 后合并；实现方各环节均可被索引化覆盖。
+        """
+        sessions = self.list_sessions(agent_id=agent_id, user_id=user_id)[:limit]
+        like = 0
+        dislike = 0
+        recent: List[Dict] = []
+        for s in sessions:
+            sid = s.get("session_id") or s.get("id", "")
+            if not sid:
+                continue
+            try:
+                counts = self.get_feedback_counts(
+                    agent_id=agent_id or s.get("agent_id", ""), session_id=sid
+                )
+            except Exception:
+                continue
+            like += counts.get("like", 0)
+            dislike += counts.get("dislike", 0)
+            recent.extend(counts.get("items", []))
+        recent.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+        return {
+            "like": like,
+            "dislike": dislike,
+            "recent": recent[:20],
+            "sessions_scanned": len(sessions),
+        }
+
 
 # ── 工厂函数（单例） ──────────────────────────────────────
 

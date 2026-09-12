@@ -261,6 +261,12 @@ def _sse_events_from_emitter_item(
         if kind == "reasoning":
             text = str(data or "")
             return [{"type": "reasoning", "content": text}] if text else []
+        if kind == "retry":
+            # 429 重试/切换倒计时（ZCode 对齐 2026-09-11）：结构化 payload
+            # 直接透传（phase/retry/max_retries/wait_seconds/model/reset…），
+            # 前端 i18n 组装文案
+            payload = data if isinstance(data, dict) else {}
+            return [{"type": "retry", **payload}] if payload else []
         if kind == "usage":
             # P2-6：run_chat 同任务内读取的本调用真实 usage，直接透传
             payload = data if isinstance(data, dict) else {}
@@ -575,6 +581,8 @@ async def post_console_chat(
                 "event_emitter": _emit,
                 # 开启工具事件实时转发（默认关闭以保持蜂群子 Agent 纯文本流契约）
                 "emit_tool_events": True,
+                # 429 重试/切换倒计时事件转发（retry_status → SSE retry）
+                "emit_status_events": True,
             }
             # R-3 修复: 附件元数据注入（file_ids → attachments，供 pipeline 附件注入）
             attachments = attach_files(getattr(body, "file_ids", None), user_id)
@@ -1410,55 +1418,30 @@ async def get_feedback_stats(
 ):
     """点赞/点踩统计（按 agent 聚合，供回复质量分析看板）。
 
-    扫描最近 limit 个会话的 assistant 消息 metadata.feedback 聚合计数，
-    并返回最近 20 条反馈明细（按时间倒序）。
+    B-9 v2（sidecar 索引）：经 repo.get_feedback_aggregate 走会话摘要
+    sidecar 索引聚合——计数 O(索引)、明细取索引内最近反馈条目，
+    不再逐会话 get_history 全量拉消息正文。响应契约字段不变。
     """
     user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
-    sessions = repo.list_sessions(agent_id=agent_id, user_id=user_id)[:limit]
+    try:
+        agg = repo.get_feedback_aggregate(agent_id=agent_id, user_id=user_id, limit=limit)
+    except Exception as e:
+        logger.warning("feedback stats 聚合失败: %s", e)
+        agg = {"like": 0, "dislike": 0, "recent": [], "sessions_scanned": 0}
 
-    like = 0
-    dislike = 0
-    recent: typing.List[dict] = []
-    for s in sessions:
-        sid = s.get("session_id") or s.get("id", "")
-        if not sid:
-            continue
-        try:
-            msgs = repo.get_history(agent_id=agent_id or s.get("agent_id", ""), session_id=sid)
-        except Exception as e:
-            logger.warning("feedback stats 读取历史失败 (session=%s): %s", sid, e)
-            continue
-        for m in msgs:
-            if not isinstance(m, dict) or m.get("role") != "assistant":
-                continue
-            fb = (m.get("metadata") or {}).get("feedback")
-            if fb not in ("like", "dislike"):
-                continue
-            if fb == "like":
-                like += 1
-            else:
-                dislike += 1
-            recent.append(
-                {
-                    "session_id": sid,
-                    "timestamp": m.get("timestamp", ""),
-                    "content": (m.get("content") or "")[:100],
-                    "feedback": fb,
-                }
-            )
-
-    recent.sort(key=lambda r: r["timestamp"], reverse=True)
+    like = agg.get("like", 0)
+    dislike = agg.get("dislike", 0)
     return {
         "code": 0,
         "message": "success",
         "data": {
             "agent_id": agent_id,
-            "sessions_scanned": len(sessions),
+            "sessions_scanned": agg.get("sessions_scanned", 0),
             "total_feedback": like + dislike,
             "like": like,
             "dislike": dislike,
-            "recent": recent[:20],
+            "recent": agg.get("recent", [])[:20],
         },
     }
 
