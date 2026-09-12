@@ -141,7 +141,7 @@ class TestNotificationMirror(_StateMachineTest):
     def test_creation_mirrors_notification(self):
         from neurova.notifications.manager import NotificationManager
 
-        nm = NotificationManager()
+        nm = NotificationManager(storage_path=f"{self.tmp}/notifications.json")
         with patch(
             "neurova.notifications.manager.get_notification_manager", return_value=nm
         ):
@@ -152,7 +152,7 @@ class TestNotificationMirror(_StateMachineTest):
     def test_decision_mirrors_notification(self):
         from neurova.notifications.manager import NotificationManager
 
-        nm = NotificationManager()
+        nm = NotificationManager(storage_path=f"{self.tmp}/notifications.json")
         with patch(
             "neurova.notifications.manager.get_notification_manager", return_value=nm
         ):
