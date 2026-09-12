@@ -528,6 +528,7 @@ export default {
     thinking: '考え中...',
     toolCalling: 'ツール呼び出し中',
     toolDone: '完了',
+    toolFailed: '失敗',
     toolResult: 'ツール結果',
     sshCredentialTitle: 'SSH認証情報を設定',
     sshCredentialHint: '{host} への初回接続です。ログイン認証情報を入力してください（暗号化保存、本人のみ表示）',
