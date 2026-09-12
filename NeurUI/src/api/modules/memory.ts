@@ -363,31 +363,6 @@ export interface MemoryActivation {
   last_accessed?: string
 }
 
-// ---------------------------------------------------------------------------
-// Reflection Log Types
-// ---------------------------------------------------------------------------
-
-export interface ReflectionLog {
-  id: string
-  reflection_type: string
-  situation: string
-  thought: string
-  action: string
-  result: string
-  lesson: string
-  improvement?: string
-  status: string
-  validation_result?: string
-  created_at: string
-}
-
-export interface ReflectionStats {
-  total: number
-  by_type: Record<string, number>
-  by_status: Record<string, number>
-  avg_lesson_quality?: number
-}
-
 // ===========================================================================
 // API Functions
 // ===========================================================================
@@ -665,36 +640,6 @@ export function generateMetaSkill(agentId: string, description: string, category
 /** Match skills to query. */
 export function matchMetaSkills(agentId: string, query: string, topK = 5) {
   return api.post<ApiResponse<Record<string, unknown>[]>>(`${META_BASE}/skills/match`, { query, top_k: topK }, { params: { agent_id: agentId } })
-}
-
-// ---------------------------------------------------------------------------
-// Reflection Log  (prefix: /memory/reflection)
-// ---------------------------------------------------------------------------
-
-const REFLECTION_BASE = '/memory/reflection'
-
-/** Get reflection logs. */
-export function getReflectionLogs(agentId: string, params?: { reflection_type?: string; status?: string; limit?: number; offset?: number }) {
-  return api.get<ApiResponse<ReflectionLog[]>>(`${REFLECTION_BASE}/logs`, { params: { ...params, agent_id: agentId } })
-}
-
-/** Generate a reflection log. */
-export function generateReflection(agentId: string, data: {
-  reflection_type: string; situation: string; thought: string; action: string
-  result: string; lesson: string; improvement?: string
-  trigger_event?: string; related_memories?: string[]; emotion_score?: number; tags?: string[]
-}) {
-  return api.post<ApiResponse<ReflectionLog>>(`${REFLECTION_BASE}/generate`, data, { params: { agent_id: agentId } })
-}
-
-/** Validate a reflection log. */
-export function validateReflection(agentId: string, logId: string, validationResult: string, feedback?: string) {
-  return api.put<ApiResponse<ReflectionLog>>(`${REFLECTION_BASE}/${logId}/validate`, { validation_result: validationResult, feedback }, { params: { agent_id: agentId } })
-}
-
-/** Get reflection statistics. */
-export function getReflectionStats(agentId: string) {
-  return api.get<ApiResponse<ReflectionStats>>(`${REFLECTION_BASE}/stats`, { params: { agent_id: agentId } })
 }
 
 // ---------------------------------------------------------------------------

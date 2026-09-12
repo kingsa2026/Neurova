@@ -29,6 +29,12 @@ class TestTraceRecorderCleanup(unittest.TestCase):
         rec = TrajectoryRecorder()
         rec._storage_dir = Path(tempfile.mkdtemp())
         rec._auto_save = False
+        # 顺序耦合修复（预存）：TrajectoryRecorder 是进程单例，前序文件的用例
+        # 可留下活动轨迹；本用例断言"end_trace 后全局清空"，起点必须归零，
+        # 否则测的是文件间隔离性而非 end_trace 行为。
+        rec._active_traces.clear()
+        rec._active_spans.clear()
+        rec._active_traces_by_user.clear()
         tid = rec.start_trace("sess-1", "agent-1", "user-1")
         self.assertIn(tid, rec._active_traces)
         self.assertTrue(rec._active_spans)

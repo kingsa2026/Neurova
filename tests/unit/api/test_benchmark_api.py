@@ -58,3 +58,19 @@ def test_run_unknown_suite_404():
         json={"suite_id": "no-such-suite", "agent_id": "default"},
     )
     assert resp.status_code == 404
+
+
+# ── P6 诚实化（2026-09-12）：/run 原用 random.randint 伪造分数 ──
+
+
+def test_run_is_marked_simulated_and_has_no_fabricated_score():
+    client = _make_client()
+    resp = client.post("/api/v1/benchmark/run", json={"suite_id": "reasoning-v1", "agent_id": "default"})
+    assert resp.status_code == 200
+    run = resp.json()["data"]
+    assert run["simulated"] is True, "模拟运行必须如实标注"
+    assert run["status"] == "simulated"
+    # 不得再出现 random 伪造的具体分数/延迟
+    assert run["score"] is None
+    assert run["avg_latency_ms"] is None
+    assert run["tasks_correct"] is None

@@ -47,7 +47,7 @@ const i18n = createI18n({
 function contractMocks() {
   growthMocks.getMotivation.mockResolvedValue({ code: 0, data: { level: 0.6, factors: [], updated_at: '2026-09-05T00:00:00Z' } })
   growthMocks.getPersonality.mockResolvedValue({ code: 0, data: { traits: { curiosity: 0.7 } } })
-  growthMocks.getConstitution.mockResolvedValue({ code: 0, data: [{ id: 'c1', rule: '规则A', enabled: true, priority: 1, created_at: '2026-09-05T00:00:00Z' }] })
+  growthMocks.getConstitution.mockResolvedValue([{ rule_id: 'c1', agent_id: 'a1', rule_type: 'behavior', content: '规则A', enabled: true, priority: 1, timestamp: 1789000000 }])
   growthMocks.getQuestions.mockResolvedValue({ code: 0, data: [] })
   growthMocks.getProactiveActions.mockResolvedValue({ code: 0, data: [] })
 }
