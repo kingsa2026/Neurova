@@ -66,6 +66,8 @@ class BrowserResult:
     title: Optional[str] = None
     duration_ms: float = 0.0
     generation: Optional[int] = None  # 操作时活动 tab 的代数（agent 回传用于新鲜度校验）
+    # R1-2 ActionResult：后端自报投递路径（知识在后端）——action/result.py 据此推导契约
+    route: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = {
@@ -79,6 +81,8 @@ class BrowserResult:
         }
         if self.generation is not None:
             d["generation"] = self.generation
+        if self.route is not None:
+            d["route"] = self.route
         return d
 
 
@@ -294,7 +298,7 @@ class BrowserBackend(ABC):
         """后端能力清单，子类按实际支持覆盖"""
         return {"aria_snapshot": False, "role_locator": False, "pixel_screenshot": False}
 
-    async def dom_snapshot(self) -> BrowserResult:
+    async def dom_snapshot(self, generation: Optional[int] = None, max_nodes: Optional[int] = None, max_depth: Optional[int] = None) -> BrowserResult:
         return BrowserResult(success=False, error=f"{type(self).__name__} does not support aria snapshot")
 
     async def click_role(self, role: str, name: Optional[str] = None) -> BrowserResult:
@@ -428,8 +432,16 @@ class PlaywrightBackend(BrowserBackend):
             self._active_target_id = next(iter(self._tabs), None)
         return BrowserResult(success=True)
 
-    async def dom_snapshot(self, generation: Optional[int] = None) -> BrowserResult:
-        """aria 可访问性树快照 —— 结构化观察，代替原始 HTML（省 token、可精确引用）"""
+    async def dom_snapshot(
+        self,
+        generation: Optional[int] = None,
+        max_nodes: Optional[int] = None,
+        max_depth: Optional[int] = None,
+    ) -> BrowserResult:
+        """aria 可访问性树快照 —— 结构化观察，代替原始 HTML（省 token、可精确引用）。
+
+        max_nodes/max_depth：观察预算（R1-5），超限裁剪并如实标注 truncated。
+        """
         start_time = time.time()
         stale = self._check_active_generation(generation)
         if stale:
@@ -438,6 +450,7 @@ class PlaywrightBackend(BrowserBackend):
             if not self._page:
                 raise RuntimeError("Not initialized")
             tree = await self._page.locator("html").aria_snapshot()
+            tree, _truncated = _trim_snapshot_tree(tree, max_nodes, max_depth)
             return BrowserResult(
                 success=True,
                 data=tree,
@@ -464,13 +477,14 @@ class PlaywrightBackend(BrowserBackend):
             await locator.click(timeout=10000)
             return BrowserResult(
                 success=True,
+                route="playwright_role",
                 url=self._page.url,
                 title=await self._page.title(),
                 duration_ms=(time.time() - start_time) * 1000,
                 generation=self._active_generation(),
             )
         except Exception as e:
-            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(success=False, route="playwright_role", error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
     async def fill_role(
         self, role: str, name: Optional[str] = None, text: str = "", generation: Optional[int] = None
@@ -491,13 +505,14 @@ class PlaywrightBackend(BrowserBackend):
             await locator.fill(text, timeout=10000)
             return BrowserResult(
                 success=True,
+                route="playwright_role",
                 url=self._page.url,
                 title=await self._page.title(),
                 duration_ms=(time.time() - start_time) * 1000,
                 generation=self._active_generation(),
             )
         except Exception as e:
-            return BrowserResult(success=False, error=str(e), duration_ms=(time.time() - start_time) * 1000)
+            return BrowserResult(success=False, route="playwright_role", error=str(e), duration_ms=(time.time() - start_time) * 1000)
 
     async def initialize(self) -> bool:
         if not HAS_PLAYWRIGHT:
@@ -752,6 +767,39 @@ class ScraplingBackend(BrowserBackend):
         self._current_page = None
 
 
+# ── 模块级辅助 ──
+
+
+def _trim_snapshot_tree(
+    tree: str,
+    max_nodes: Optional[int],
+    max_depth: Optional[int],
+) -> "tuple[str, bool]":
+    """快照预算裁剪（R1-5）：aria/YAML 树 2 空格一级缩进。
+
+    返回 (裁剪后文本, truncated)；不传预算原样透传。观察预算防上下文
+    爆炸——与 OCU max_tree_nodes/max_tree_depth 契约同构。
+    """
+    if not tree:
+        return tree, False
+    lines = tree.splitlines()
+    truncated = False
+    if max_depth is not None:
+        kept = []
+        for line in lines:
+            indent = len(line) - len(line.lstrip())
+            depth = indent // 2 + 1
+            if depth <= max_depth:
+                kept.append(line)
+            else:
+                truncated = True
+        lines = kept
+    if max_nodes is not None and len(lines) > max_nodes:
+        lines = lines[:max_nodes]
+        truncated = True
+    return "\n".join(lines), truncated
+
+
 class BrowserManager:
     """浏览器管理器"""
 
@@ -862,10 +910,16 @@ class BrowserManager:
         b = await self._get_backend(backend)
         return await b.navigate(url, generation)
 
-    async def dom_snapshot(self, backend: Optional[str] = None, generation: Optional[int] = None) -> BrowserResult:
-        """获取 aria 可访问性树快照（观察优先）"""
+    async def dom_snapshot(
+        self,
+        backend: Optional[str] = None,
+        generation: Optional[int] = None,
+        max_nodes: Optional[int] = None,
+        max_depth: Optional[int] = None,
+    ) -> BrowserResult:
+        """获取 aria 可访问性树快照（观察优先）；预算参数透传后端（R1-5）"""
         b = await self._get_backend(backend)
-        return await b.dom_snapshot(generation)
+        return await b.dom_snapshot(generation, max_nodes=max_nodes, max_depth=max_depth)
 
     # 快照正文分片上限：与 tool_executor 的 LLM 面截断（8000）同口径——
     # 首片即既有契约量，尾部由续读游标接管而非丢弃

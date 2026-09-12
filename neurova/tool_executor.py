@@ -46,6 +46,9 @@ COMPUTER_USE_TOOLS = frozenset(
         "computer_type",
         "computer_scroll",
         "computer_shell",
+        "computer_dom_snapshot",
+        "computer_click_element",
+        "computer_set_value",
         "browser_navigate",
         "browser_click",
         "browser_type",
@@ -57,6 +60,82 @@ COMPUTER_USE_TOOLS = frozenset(
         "browser_fill_role",
     }
 )
+
+# R0-3：成功动作后自动补拍刷新截图（观察闭环，OCU 动作即观察契约）
+COMPUTER_ACTION_REFRESH_TOOLS = frozenset(
+    {"computer_click", "computer_type", "computer_scroll", "computer_click_element", "computer_set_value"}
+)
+ACTION_REFRESH_DELAY_SECONDS = 0.5  # 等待 UI 渲染出动作效果后再补拍
+ACTION_REFRESH_NOTE = "操作后的画面已实时回传到操作面板（如需在结果中确认请再调用 computer_screenshot）"
+
+
+# ── R1-3 执行前归一化层（Cua OperatorNormalizer 思想）──────────────────
+# computer/browser 工具的 LLM 产出参数在分发前统一归一：button 词表、
+# 数值强转、未知键拒绝（HTTP 侧 extra="forbid" 精神推广到 agent 侧）。
+
+_COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
+    "computer_screenshot": frozenset(),
+    "computer_click": frozenset({"x", "y", "button"}),
+    "computer_type": frozenset({"text", "interval"}),
+    "computer_scroll": frozenset({"scroll_x", "scroll_y", "x", "y"}),
+    "computer_shell": frozenset({"command"}),
+    "computer_dom_snapshot": frozenset({"window_title", "max_nodes", "max_depth"}),
+    "computer_click_element": frozenset({"index", "runtime_id", "window_title", "button", "generation"}),
+    "computer_set_value": frozenset({"value", "index", "runtime_id", "window_title", "generation"}),
+    "browser_navigate": frozenset({"url", "generation"}),
+    "browser_click": frozenset({"selector", "text"}),
+    "browser_type": frozenset({"selector", "text"}),
+    "browser_screenshot": frozenset(),
+    "browser_extract_text": frozenset(),
+    "browser_dom_snapshot": frozenset({"generation", "max_nodes", "max_depth"}),
+    "browser_dom_read": frozenset({"session_id", "offset", "chunk_size"}),
+    "browser_click_role": frozenset({"role", "name", "generation"}),
+    "browser_fill_role": frozenset({"role", "name", "text", "generation"}),
+}
+
+_BUTTON_ALIASES = {
+    "left": "left", "right": "right", "middle": "middle",
+    "left_click": "left", "right_click": "right", "middle_click": "middle",
+    "primary": "left", "secondary": "right", "middle_button": "middle",
+}
+
+_INT_KEYS = frozenset({"scroll_x", "scroll_y", "max_nodes", "max_depth", "generation", "index", "offset", "chunk_size"})
+_FLOAT_KEYS = frozenset({"x", "y", "interval"})
+
+
+def normalize_computer_params(tool_name: str, params: Optional[Dict]) -> Dict:
+    """computer/browser 工具参数执行前归一。
+
+    非法输入抛 ValueError（调用方转 error 结果），绝不让畸形参数直通底层。
+    非 computer/browser 工具原样放行（本层不越权）。
+    """
+    allowed = _COMPUTER_TOOL_PARAM_KEYS.get(tool_name)
+    if allowed is None:
+        return params
+    if not params:
+        return {}
+    unknown = set(params) - allowed
+    if unknown:
+        raise ValueError(f"未知参数 {sorted(unknown)}（{tool_name} 只接受 {sorted(allowed)}）")
+
+    cleaned: Dict[str, Any] = dict(params)
+    if "button" in cleaned:
+        raw = str(cleaned["button"] or "left").strip().lower().replace("-", "_")
+        button = _BUTTON_ALIASES.get(raw)
+        if button is None:
+            raise ValueError(f"button 词表外: {raw!r}（允许 left/right/middle）")
+        cleaned["button"] = button
+    for key in _INT_KEYS & cleaned.keys():
+        try:
+            cleaned[key] = int(cleaned[key]) if cleaned[key] is not None else cleaned[key]
+        except (TypeError, ValueError):
+            raise ValueError(f"参数 {key} 必须是整数，得到 {cleaned[key]!r}")
+    for key in _FLOAT_KEYS & cleaned.keys():
+        try:
+            cleaned[key] = float(cleaned[key]) if cleaned[key] is not None else cleaned[key]
+        except (TypeError, ValueError):
+            raise ValueError(f"参数 {key} 必须是数值，得到 {cleaned[key]!r}")
+    return cleaned
 
 
 def describe_computer_action(tool_name: str, params: Dict) -> str:
@@ -75,6 +154,14 @@ def describe_computer_action(tool_name: str, params: Dict) -> str:
     if tool_name == "computer_shell":
         cmd = str(params.get("command", ""))
         return f"执行命令 {cmd[:60]}{'…' if len(cmd) > 60 else ''}"
+    if tool_name == "computer_dom_snapshot":
+        return "获取桌面控件树快照"
+    if tool_name == "computer_click_element":
+        target = params.get("runtime_id") or params.get("index", "?")
+        return f"点击桌面控件 #{target}"
+    if tool_name == "computer_set_value":
+        text = str(params.get("value", ""))
+        return f"向桌面控件写入「{text[:30]}{'…' if len(text) > 30 else ''}」"
     if tool_name == "browser_navigate":
         return f"打开网页 {params.get('url', '')}"
     if tool_name == "browser_click":
@@ -140,6 +227,7 @@ class ToolExecutor:
         "web_search": "_execute_web_search",
         "weather": "_execute_weather",
         "file_read": "_execute_file_read",
+        "file_parse": "_execute_file_parse",
         "file_write": "_execute_file_write",
         "file_create": "_execute_file_create",
         "file_delete": "_execute_file_delete",
@@ -154,6 +242,9 @@ class ToolExecutor:
         "computer_type": "_execute_computer_type",
         "computer_scroll": "_execute_computer_scroll",
         "computer_shell": "_execute_computer_shell",
+        "computer_dom_snapshot": "_execute_computer_dom_snapshot",
+        "computer_click_element": "_execute_computer_click_element",
+        "computer_set_value": "_execute_computer_set_value",
         "browser_navigate": "_execute_browser_navigate",
         "browser_click": "_execute_browser_click",
         "browser_type": "_execute_browser_type",
@@ -1274,8 +1365,8 @@ class ToolExecutor:
     # 文件写等不在列，一律 fail-closed（未知代码面无治理审查放行 = 裸奔）。
     _GOVERNANCE_FAILOPEN_READONLY_TOOLS = frozenset({
         "memory_search", "recall_history", "voice_memory_search",
-        "computer_screenshot", "get_datetime", "weather", "web_search",
-        "file_list", "file_search", "file_read", "list_agents",
+        "computer_screenshot", "computer_dom_snapshot", "get_datetime", "weather", "web_search",
+        "file_list", "file_search", "file_read", "file_parse", "list_agents",
         "calculator", "emotion_analyze", "planning",
     })
 
@@ -1419,6 +1510,12 @@ class ToolExecutor:
         # 让 BrowserManager(单例)能按 user 池化 camofox 后端,避免 _tabs/_active_target_id 跨用户污染。
         if tool_name.startswith("browser_"):
             self._inject_browser_identity()
+        # R1-3：computer/browser 工具执行前归一化（button 词表/数值强转/未知键拒绝）
+        if tool_name in COMPUTER_USE_TOOLS:
+            try:
+                params = normalize_computer_params(tool_name, params)
+            except ValueError as e:
+                return {"error": f"参数非法: {e}"}
         return await getattr(self, method_name)(params)
 
     def _inject_browser_identity(self) -> None:
@@ -2287,6 +2384,51 @@ class ToolExecutor:
         except Exception as e:
             return {"error": str(e)}
 
+    # file_parse 文本族扩展名：走 decode 通道（与 attachment_parser 文本族口径一致）
+    _PARSE_TEXT_EXTS = frozenset({".txt", ".md", ".rst", ".json", ".yaml", ".yml", ".toml", ".log"})
+    # 解析前置体积闸门（50MB）——防超大文件拖垮内存；超限诚实报错
+    _PARSE_MAX_BYTES = 50 * 1024 * 1024
+
+    async def _execute_file_parse(self, params: Dict) -> Dict:
+        """执行文档解析（P0-1：PDF/Office 二进制 → 文本，复用 attachment_parser）"""
+        max_chars = int(params.get("max_chars") or 50000)
+
+        file_path, err = self._resolve_agent_path(params.get("file_path", ""))
+        if err:
+            return {"error": err}
+
+        try:
+            import os
+
+            if not os.path.isfile(file_path):
+                return {"error": f"文件不存在: {file_path}"}
+            size = os.path.getsize(file_path)
+            if size > self._PARSE_MAX_BYTES:
+                return {"error": f"文件过大（{size} 字节 > {self._PARSE_MAX_BYTES} 上限），无法解析"}
+
+            from neurova.attachment_parser import extract_attachment_text
+
+            def _parse() -> Dict:
+                with open(file_path, "rb") as f:
+                    data = f.read()
+                filename = os.path.basename(file_path)
+                ext = os.path.splitext(filename)[1].lower()
+                file_type = "text" if ext in self._PARSE_TEXT_EXTS else "document"
+                text, status = extract_attachment_text(data, filename, file_type)
+                if text is None:
+                    return {"error": f"无法解析文档 {filename}: {status}"}
+                total = len(text)
+                return {
+                    "content": text[:max_chars],
+                    "format": status,
+                    "total_chars": total,
+                    "truncated": total > max_chars,
+                }
+
+            return await asyncio.to_thread(_parse)
+        except Exception as e:
+            return {"error": str(e)}
+
     async def _execute_file_write(self, params: Dict) -> Dict:
         """执行文件写入"""
         content = params.get("content", "")
@@ -2599,6 +2741,26 @@ class ToolExecutor:
 
                 b64_str = base64.b64encode(screenshot_data).decode("utf-8")
                 result = {"success": True, "format": "png", "size_bytes": len(screenshot_data)}
+                # 盲截图循环根治：随结果回带 DPI/多屏元数据（150% 缩放等环境
+                # agent 无需再跑 reg query），并把 UI 元素事实引向 dom_snapshot。
+                # 元数据失败不影响截图主结果（截图本身已成功）。
+                try:
+                    meta = manager.screen_metadata()
+                    if meta and len(meta.get("pixel_size") or ()) == 2:
+                        px_w, px_h = meta["pixel_size"]
+                        origin = meta.get("virtual_origin") or (0, 0)
+                        result["screen"] = {
+                            "width": int(px_w),
+                            "height": int(px_h),
+                            "scale": meta.get("scale", 1.0),
+                            "virtual_origin": [origin[0], origin[1]],
+                        }
+                        result["note"] = (
+                            "坐标请用截图像素坐标（DPI 换算已内置）；UI 元素事实"
+                            "用 computer_dom_snapshot 获取，避免盲截图循环。"
+                        )
+                except Exception:
+                    logger.debug("截图元数据附带回带失败（不影响截图结果）", exc_info=True)
                 await self._emit_computer_event("computer_screenshot", params, result, screenshot_base64=b64_str)
                 return result
             else:
@@ -2610,74 +2772,107 @@ class ToolExecutor:
             return {"error": f"截图执行失败: {str(e)}"}
 
     async def _execute_computer_click(self, params: Dict) -> Dict:
-        """执行鼠标点击"""
+        """执行鼠标点击（实现体在 computer_use.actions，宿主/来宾共用）"""
         try:
-            x = params.get("x")
-            y = params.get("y")
-            button = params.get("button", "left")
+            from neurova.computer_use import actions, get_computer_use_manager
 
-            if x is None or y is None:
-                return {"error": "缺少必要的坐标参数 x, y"}
-
-            from neurova.computer_use import get_computer_use_manager
-
-            manager = get_computer_use_manager()
-            # pyautogui 阻塞调用放线程池
-            success = await asyncio.to_thread(manager.click, int(x), int(y), button)
-
-            result = (
-                {"success": True, "x": x, "y": y, "button": button}
-                if success
-                else {"error": "点击操作失败", "x": x, "y": y}
+            # 坐标链（R0-2）：LLM 给的是截图像素坐标，经 DPI/多屏元数据换算成
+            # 屏幕坐标点再落 pyautogui（单屏 100% 时恒等，行为不变）
+            result = await asyncio.to_thread(
+                actions.click_screenshot_point,
+                get_computer_use_manager(),
+                params.get("x"),
+                params.get("y"),
+                params.get("button", "left"),
             )
+            success = result.get("success") is True
+            if success:
+                result["refreshed_screenshot"] = True
+                result["note"] = ACTION_REFRESH_NOTE
+                # R1-2 诚实档：pyautogui 无投递回执，明确 unverifiable + foreground
+                from neurova.computer_use import action_result as _ar
+
+                _ar.attach(result, _ar.unverifiable("global_input", "foreground"))
             await self._emit_computer_event("computer_click", params, result)
+            if success:
+                await self._emit_action_refreshed_screenshot("computer_click", params, result)
             return result
         except Exception as e:
             logger.error("点击执行失败: %s", e)
             return {"error": f"点击执行失败: {str(e)}"}
 
     async def _execute_computer_type(self, params: Dict) -> Dict:
-        """执行键盘输入"""
+        """执行键盘输入（R2-1：focused 可编辑控件语义写入优先，pyautogui 兜底）"""
         try:
+            from neurova.computer_use import actions, get_computer_use_manager
+
             text = params.get("text", "")
-            if not text:
-                return {"error": "缺少输入文本"}
+            # 语义路径：UIA ValuePattern 直接追加（不依赖焦点运气、不抢全局焦点）
+            try:
+                from neurova.computer_use.desktop_uia import get_desktop_uia_manager
 
-            from neurova.computer_use import get_computer_use_manager
+                semantic = await asyncio.to_thread(
+                    get_desktop_uia_manager().type_text_semantic, text
+                )
+            except Exception as e:
+                logger.debug("语义输入探测失败（走兜底）: %s", e)
+                semantic = None
 
-            manager = get_computer_use_manager()
-            success = await asyncio.to_thread(manager.type_text, text)
+            if semantic is not None:
+                result = {
+                    "success": True,
+                    "text": text,
+                    "length": len(text),
+                    "action_result": semantic["action_result"],
+                }
+            else:
+                result = await asyncio.to_thread(
+                    actions.type_text,
+                    get_computer_use_manager(),
+                    text,
+                    float(params.get("interval", 0.05)),
+                )
+                if result.get("success") is True:
+                    from neurova.computer_use import action_result as _ar
 
-            result = (
-                {"success": True, "text": text, "length": len(text)}
-                if success
-                else {"error": "输入操作失败"}
-            )
+                    _ar.attach(result, _ar.unverifiable("global_input", "foreground"))
+
+            success = result.get("success") is True
+            if success:
+                result["refreshed_screenshot"] = True
+                result["note"] = ACTION_REFRESH_NOTE
             await self._emit_computer_event("computer_type", params, result)
+            if success:
+                await self._emit_action_refreshed_screenshot("computer_type", params, result)
             return result
         except Exception as e:
             logger.error("输入执行失败: %s", e)
             return {"error": f"输入执行失败: {str(e)}"}
 
     async def _execute_computer_scroll(self, params: Dict) -> Dict:
-        """执行屏幕滚动"""
+        """执行屏幕滚动（实现体在 computer_use.actions；方向语义经单源，符号保留）"""
         try:
-            scroll_y = params.get("scroll_y", 0)
+            from neurova.computer_use import actions, get_computer_use_manager
+
             # 不指定坐标时在当前指针位置滚动（避免把鼠标强制移到屏幕中心/角落）
-            x = params.get("x")
-            y = params.get("y")
-
-            from neurova.computer_use import get_computer_use_manager
-
-            manager = get_computer_use_manager()
-            success = await asyncio.to_thread(manager.scroll, x, y, int(scroll_y) or 3)
-
-            result = (
-                {"success": True, "scroll_x": params.get("scroll_x", 0), "scroll_y": scroll_y}
-                if success
-                else {"error": "滚动操作失败（需要 pyautogui）"}
+            result = await asyncio.to_thread(
+                actions.scroll,
+                get_computer_use_manager(),
+                params.get("scroll_x", 0),
+                params.get("scroll_y", 0),
+                params.get("x"),
+                params.get("y"),
             )
+            success = result.get("success") is True
+            if success:
+                result["refreshed_screenshot"] = True
+                result["note"] = ACTION_REFRESH_NOTE
+                from neurova.computer_use import action_result as _ar
+
+                _ar.attach(result, _ar.unverifiable("global_input", "foreground"))
             await self._emit_computer_event("computer_scroll", params, result)
+            if success:
+                await self._emit_action_refreshed_screenshot("computer_scroll", params, result)
             return result
         except Exception as e:
             logger.error("滚动执行失败: %s", e)
@@ -2708,26 +2903,111 @@ class ToolExecutor:
             logger.error("Shell 命令执行失败: %s", e)
             return {"error": f"Shell 命令执行失败: {str(e)}"}
 
+    # ── 桌面语义操作（R1-1：UIA 快照 → 按元素交互，与浏览器侧观察优先协议同构）──
+
+    async def _execute_computer_dom_snapshot(self, params: Dict) -> Dict:
+        """桌面控件树快照（观察优先：先快照拿 index，再按元素交互）"""
+        try:
+            from neurova.computer_use.desktop_uia import get_desktop_uia_manager
+
+            manager = get_desktop_uia_manager()
+            result = await asyncio.to_thread(
+                manager.snapshot,
+                params.get("window_title"),
+                int(params["max_nodes"]) if params.get("max_nodes") else None,
+                int(params["max_depth"]) if params.get("max_depth") else None,
+            )
+            await self._emit_computer_event("computer_dom_snapshot", params, result)
+            return result
+        except Exception as e:
+            logger.error("桌面快照失败: %s", e)
+            return {"error": f"桌面快照失败: {str(e)}"}
+
+    async def _execute_computer_click_element(self, params: Dict) -> Dict:
+        """按快照元素点击桌面控件（五级递降链，默认不抢焦点）"""
+        try:
+            from neurova.computer_use.desktop_uia import get_desktop_uia_manager
+
+            manager = get_desktop_uia_manager()
+            result = await asyncio.to_thread(
+                manager.click_element,
+                params.get("index"),
+                params.get("runtime_id"),
+                params.get("window_title"),
+                params.get("button", "left"),
+                int(params["generation"]) if params.get("generation") is not None else None,
+            )
+            success = result.get("success") is True
+            if success:
+                result["refreshed_screenshot"] = True
+                result["note"] = ACTION_REFRESH_NOTE
+            await self._emit_computer_event("computer_click_element", params, result)
+            if success:
+                await self._emit_action_refreshed_screenshot("computer_click_element", params, result)
+            return result
+        except Exception as e:
+            logger.error("桌面元素点击失败: %s", e)
+            return {"error": f"桌面元素点击失败: {str(e)}"}
+
+    async def _execute_computer_set_value(self, params: Dict) -> Dict:
+        """按快照元素向桌面控件写入文本（ValuePattern 优先）"""
+        try:
+            from neurova.computer_use.desktop_uia import get_desktop_uia_manager
+
+            manager = get_desktop_uia_manager()
+            result = await asyncio.to_thread(
+                manager.set_value,
+                params.get("value"),
+                params.get("index"),
+                params.get("runtime_id"),
+                params.get("window_title"),
+                int(params["generation"]) if params.get("generation") is not None else None,
+            )
+            success = result.get("success") is True
+            if success:
+                result["refreshed_screenshot"] = True
+                result["note"] = ACTION_REFRESH_NOTE
+            await self._emit_computer_event("computer_set_value", params, result)
+            if success:
+                await self._emit_action_refreshed_screenshot("computer_set_value", params, result)
+            return result
+        except Exception as e:
+            logger.error("桌面控件赋值失败: %s", e)
+            return {"error": f"桌面控件赋值失败: {str(e)}"}
+
     # ── 浏览器操作工具（ComputerUseManager → BrowserManager 多后端）──
 
     @staticmethod
     def _normalize_browser_result(result: Any) -> Dict:
-        """BrowserResult(dataclass)/dict/None → LLM 面向的紧凑 dict（不含截图大对象）"""
+        """BrowserResult(dataclass)/dict/None → LLM 面向的紧凑 dict（不含截图大对象）
+
+        R1-2：后端自报 route 的结果自动附加 action_result 封闭契约
+        （成功→confirmed，失败→精确拒绝码）；无 route 的历史路径不附加（不编造）。
+        """
         if isinstance(result, dict):
             normalized = dict(result)
             normalized.pop("image_base64", None)
             if normalized.get("error"):
                 normalized["success"] = False
-            return normalized
         if result is None:
-            return {"success": False, "error": "浏览器管理器不可用"}
-        to_dict = getattr(result, "to_dict", None)
-        if not callable(to_dict):
-            return {"success": False, "error": "浏览器返回格式未知"}
-        normalized = dict(to_dict())
-        normalized.pop("has_screenshot", None)
-        if not normalized.get("success") and not normalized.get("error"):
-            normalized["error"] = "浏览器操作失败"
+            normalized = {"success": False, "error": "浏览器管理器不可用"}
+        else:
+            to_dict = getattr(result, "to_dict", None)
+            if not callable(to_dict):
+                normalized = {"success": False, "error": "浏览器返回格式未知"}
+            else:
+                normalized = dict(to_dict())
+                normalized.pop("has_screenshot", None)
+                if not normalized.get("success") and not normalized.get("error"):
+                    normalized["error"] = "浏览器操作失败"
+        try:
+            from neurova.computer_use.action_result import derive_from_browser_result
+
+            action_result = derive_from_browser_result(normalized)
+            if action_result:
+                normalized["action_result"] = action_result
+        except Exception:  # noqa: BLE001 - 契约推导失败不影响主结果
+            pass
         return normalized
 
     async def _emit_computer_event(
@@ -2769,6 +3049,12 @@ class ToolExecutor:
                 payload["url"] = url
             if screenshot_base64:
                 payload["screenshot"] = screenshot_base64
+            # R0-3 刷新标记 + R1-2 动作结果契约（新增字段，旧前端不受影响）
+            if isinstance(result, dict) and result.get("refreshed"):
+                payload["refreshed"] = True
+            action_result = result.get("action_result") if isinstance(result, dict) else None
+            if isinstance(action_result, dict):
+                payload["action_result"] = action_result
 
             mgr = get_session_sync_manager()
             mgr.register_or_create_session(session_id=session_id, user_id="agent")
@@ -2781,6 +3067,36 @@ class ToolExecutor:
             await mgr.broadcast_event(session_id, event)
         except Exception as e:  # noqa: BLE001 - 广播失败不影响主流程
             logger.debug("computer_action 事件广播失败 (%s): %s", tool_name, e)
+
+    async def _emit_action_refreshed_screenshot(
+        self, tool_name: str, params: Dict, result: Dict
+    ) -> None:
+        """R0-3：成功动作后自动补拍一张并推给面板（观察闭环）。
+
+        截图只走 computer_action WS 旁路（双通道契约不变，base64 不进 LLM 结果）；
+        事件带 refreshed=True，前端据此更新最近一条动作的画面而非新开日志行。
+        任何失败静默——刷新是增强，绝不影响动作主流程。
+        """
+        try:
+            await asyncio.sleep(ACTION_REFRESH_DELAY_SECONDS)
+            from neurova.computer_use import get_computer_use_manager
+
+            manager = get_computer_use_manager()
+            data = await asyncio.to_thread(manager.screenshot)
+            if not data:
+                return
+            import base64
+
+            refreshed_result = dict(result)
+            refreshed_result["refreshed"] = True
+            await self._emit_computer_event(
+                tool_name,
+                params,
+                refreshed_result,
+                screenshot_base64=base64.b64encode(data).decode("utf-8"),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("动作刷新截图回传失败 (%s): %s", tool_name, e)
 
     async def _execute_browser_navigate(self, params: Dict) -> Dict:
         """浏览器导航到 URL"""
@@ -2879,7 +3195,11 @@ class ToolExecutor:
             manager = get_computer_use_manager()
             generation = params.get("generation")
             result = self._normalize_browser_result(
-                await manager.browser_dom_snapshot(generation=int(generation) if generation is not None else None)
+                await manager.browser_dom_snapshot(
+                    generation=int(generation) if generation is not None else None,
+                    max_nodes=params.get("max_nodes"),
+                    max_depth=params.get("max_depth"),
+                )
             )
             data = result.get("data")
             if isinstance(data, str) and len(data) > 8000:

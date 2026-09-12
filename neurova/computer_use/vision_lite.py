@@ -9,6 +9,9 @@ Computer Use 轻量级视觉理解模块 v1.0.0-beta1
 适合在资源受限环境或无法安装 PyTorch 时使用
 """
 
+# [R1-6 弃用注记]注意：本模块当前无生产消费方（CUA 升级方案 R1-6 定性）——保留至 R3-1 SOM 视觉复活决策点；在未接入前禁止新代码引用。
+
+
 from __future__ import annotations
 
 import base64
