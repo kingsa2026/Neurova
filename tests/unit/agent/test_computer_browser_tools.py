@@ -377,12 +377,13 @@ class TestComputerRestEndpoints:
         from neurova.api.endpoints.computer import ClickRequest, click
 
         fake_mgr = MagicMock()
-        fake_mgr.click = MagicMock(return_value=True)
+        # R0-2 契约升级：端点消费 click_screenshot_point（截图像素→屏幕坐标换算）
+        fake_mgr.click_screenshot_point = MagicMock(return_value=True)
         with patch("neurova.computer_use.get_computer_use_manager", return_value=fake_mgr):
             resp = await click(ClickRequest(x=10, y=20))
 
         assert resp["code"] == 0
-        fake_mgr.click.assert_called_once_with(10, 20, "left")
+        fake_mgr.click_screenshot_point.assert_called_once_with(10, 20, "left")
 
     @pytest.mark.asyncio
     async def test_browser_navigate_endpoint_real_backend(self):
@@ -450,7 +451,7 @@ class TestBrowserExecuteEndpoint:
         )
         with patch("neurova.computer_use.get_computer_use_manager", return_value=fake_mgr):
             cmd = computer.BrowserCommandAdapter.validate_python({"command": "navigate", "url": "https://example.com"})
-            resp = await computer.browser_execute(cmd, current_user={"user_id": "1"})
+            resp = await computer.browser_execute_route(cmd, current_user={"user_id": "1"})
 
         assert resp["code"] == 0
         fake_mgr.browser_navigate.assert_awaited_once_with("https://example.com", generation=None)
@@ -465,7 +466,7 @@ class TestBrowserExecuteEndpoint:
             cmd = computer.BrowserCommandAdapter.validate_python(
                 {"command": "click_role", "role": "button", "name": "登录", "generation": 3}
             )
-            resp = await computer.browser_execute(cmd, current_user={"user_id": "1"})
+            resp = await computer.browser_execute_route(cmd, current_user={"user_id": "1"})
 
         assert resp["code"] == 0
         fake_mgr.browser_click_role.assert_awaited_once_with("button", "登录", generation=3)
@@ -480,7 +481,7 @@ class TestBrowserExecuteEndpoint:
         )
         with patch("neurova.computer_use.get_computer_use_manager", return_value=fake_mgr):
             cmd = computer.BrowserCommandAdapter.validate_python({"command": "dom_snapshot"})
-            resp = await computer.browser_execute(cmd, current_user={"user_id": "1"})
+            resp = await computer.browser_execute_route(cmd, current_user={"user_id": "1"})
 
         assert resp["code"] == 0
         assert resp["data"]["data"] == '- button "x"'
@@ -496,7 +497,7 @@ class TestBrowserExecuteEndpoint:
         )
         with patch("neurova.computer_use.get_computer_use_manager", return_value=fake_mgr):
             cmd = computer.BrowserCommandAdapter.validate_python({"command": "list_targets"})
-            resp = await computer.browser_execute(cmd, current_user={"user_id": "1"})
+            resp = await computer.browser_execute_route(cmd, current_user={"user_id": "1"})
 
         assert resp["code"] == 0
         assert resp["data"]["data"][0]["target_id"] == "t1"
@@ -511,7 +512,7 @@ class TestBrowserExecuteEndpoint:
             cmd = computer.BrowserCommandAdapter.validate_python(
                 {"command": "switch_target", "target_id": "t2", "generation": 4}
             )
-            resp = await computer.browser_execute(cmd, current_user={"user_id": "1"})
+            resp = await computer.browser_execute_route(cmd, current_user={"user_id": "1"})
 
         assert resp["code"] == 0
         fake_mgr.browser_switch_target.assert_awaited_once_with("t2", 4)
@@ -529,7 +530,7 @@ class TestBrowserExecuteEndpoint:
         with patch("neurova.computer_use.get_computer_use_manager", return_value=fake_mgr):
             cmd = computer.BrowserCommandAdapter.validate_python({"command": "click_role", "role": "button"})
             with pytest.raises(HTTPException) as exc:
-                await computer.browser_execute(cmd, current_user={"user_id": "1"})
+                await computer.browser_execute_route(cmd, current_user={"user_id": "1"})
 
         assert exc.value.status_code == 502
 

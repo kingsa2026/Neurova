@@ -1087,6 +1087,29 @@ class ChatPipeline:
             # 先激活图像轮路由再清切片（激活守卫读 _pending_vision_parts 判定图像轮）
             self._maybe_activate_vision_routing(ctx)
             ctx._pending_vision_parts = None
+        # R2-4 防线：请求装配最终出口强制"历史图片只保留最近 N 轮"。
+        # 当前设计图片仅当轮挂载（本调用为 no-op），但上游任何未来变化
+        # （截图进上下文、RS 远程会话平面）都不会悄悄撑爆 LLM 上下文。
+        self._apply_image_retention(ctx)
+
+    _IMAGE_RETENTION_KEEP_LAST = 4
+
+    def _apply_image_retention(self, ctx: ChatContext):
+        """对 ctx.context 应用历史图片保留策略（失败静默，不影响主流程）。"""
+        context = getattr(ctx, "context", None)
+        if not isinstance(context, list) or not context:
+            return
+        try:
+            from neurova.agent.image_retention import apply_image_retention
+
+            cleaned, stats = apply_image_retention(
+                context, keep_last=self._IMAGE_RETENTION_KEEP_LAST
+            )
+            if stats.get("images_removed"):
+                logger.info("历史图片保留策略生效: %s", stats)
+            ctx.context = cleaned
+        except Exception:  # noqa: BLE001 - 防线失败不影响主流程
+            logger.debug("历史图片保留策略执行失败（跳过）", exc_info=True)
 
     def _current_model_name(self) -> str:
         """当前 agent 配置的模型名（测试/异常安全）。"""
@@ -1839,6 +1862,22 @@ class ChatPipeline:
                         emitter("reasoning", event.get("data", ""))
                     except Exception as e:  # noqa: BLE001
                         logger.debug("event_emitter 回调失败: %s", e)
+            elif etype == "retry_status":
+                # 429 重试/切换倒计时事件（ZCode 对齐 2026-09-11）：reset=
+                # 半截回复作废（清空 reply_parts，防重复拼接）；经 emitter
+                # 转发需 emit_status_events 门控（蜂群子 Agent 纯文本流不透传）
+                _retry_data = event.get("data") or {}
+                if _retry_data.get("reset"):
+                    reply_parts.clear()
+                if (
+                    emitter is not None
+                    and isinstance(ctx.metadata, dict)
+                    and ctx.metadata.get("emit_status_events")
+                ):
+                    try:
+                        emitter("retry", _retry_data)
+                    except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
+                        logger.debug("event_emitter 转发 retry 失败: %s", e)
             elif etype in ("tool_call", "tool_result"):
                 # C1: 原生 function-calling 元数据，接入工具消息列表
                 native_tool_events.append(event)
@@ -2063,6 +2102,12 @@ class ChatPipeline:
         emitter = ctx.event_emitter
         async for chunk in self.llm_client.chat_stream(ctx.context):
             if isinstance(chunk, dict):
+                if chunk.get("retry_status"):
+                    # 429 重试/切换过程事件：legacy 路径无倒计时 UI，仅 reset
+                    # 时清空半截回复（防重试后内容重复拼接），不透传
+                    if (chunk.get("retry_status") or {}).get("reset"):
+                        reply_parts.clear()
+                    continue
                 if chunk.get("error"):
                     raise self._raise_for_llm_error_dict(chunk)
                 continue

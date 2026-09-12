@@ -20,6 +20,78 @@ import typing
 logger = get_logger(__name__)
 
 
+def scroll_semantics(
+    scroll_x: typing.Optional[int] = 0,
+    scroll_y: typing.Optional[int] = 0,
+    default_clicks: int = 3,
+) -> typing.Tuple[int, int]:
+    """滚动语义单源（CUA 升级方案 R0-1）。
+
+    唯一换算口径，所有滚动消费方（agent 工具路径 / HTTP 端点）都必须经此函数：
+    - scroll_y: 正=向上，负=向下（与 pyautogui.scroll 正=上 同向，**保留符号**——
+      此前 HTTP 路径用 abs() 丢符号导致 dy=-3 被翻转为向上）
+    - scroll_x: 正=向右，负=向左（pyautogui.hscroll 正=右；此前被整体忽略）
+    - 两轴全 0 时回退 default_clicks（保持旧行为 int(dy) or 3）
+
+    返回 (vertical_clicks, horizontal_clicks)。
+    """
+    try:
+        vertical = int(scroll_y or 0)
+    except (TypeError, ValueError):
+        vertical = 0
+    try:
+        horizontal = int(scroll_x or 0)
+    except (TypeError, ValueError):
+        horizontal = 0
+    if vertical == 0 and horizontal == 0:
+        vertical = int(default_clicks)
+    return vertical, horizontal
+
+
+def compute_screen_metadata(
+    virtual_origin: typing.Tuple[int, int],
+    screen_size: typing.Tuple[int, int],
+    pixel_size: typing.Tuple[int, int],
+) -> typing.Dict[str, typing.Any]:
+    """组装屏幕元数据（纯函数，R0-2 坐标链的事实源）。
+
+    - virtual_origin: 虚拟屏原点（多屏时可为负，如副屏在左侧 → (-1920, 0)）
+    - screen_size: GetSystemMetrics 口径的虚拟屏尺寸
+    - pixel_size: 全虚拟屏截图的实际像素尺寸
+    - scale: pixel/screen（HiDPI 下 >1；system-DPI-aware 进程两者一致 → 1.0）
+    """
+    sw, sh = screen_size
+    pw, ph = pixel_size
+    scale = (pw / sw) if sw else 1.0
+    return {
+        "virtual_origin": (int(virtual_origin[0]), int(virtual_origin[1])),
+        "screen_size": (int(sw), int(sh)),
+        "pixel_size": (int(pw), int(ph)),
+        "scale": scale if scale > 0 else 1.0,
+    }
+
+
+def screenshot_px_to_screen_point(
+    px: float, py: float, metadata: typing.Dict[str, typing.Any]
+) -> typing.Tuple[float, float]:
+    """截图像素坐标（LLM 视角，虚拟屏原点相对）→ 屏幕坐标点（pyautogui 可用）。
+
+    纯函数；metadata 为 None 时由调用方自行恒等回退。
+    """
+    origin_x, origin_y = metadata["virtual_origin"]
+    scale = metadata.get("scale") or 1.0
+    return (origin_x + float(px) / scale, origin_y + float(py) / scale)
+
+
+def screen_point_to_screenshot_px(
+    x: float, y: float, metadata: typing.Dict[str, typing.Any]
+) -> typing.Tuple[float, float]:
+    """screenshot_px_to_screen_point 的逆映射（屏幕坐标点 → 截图像素）"""
+    origin_x, origin_y = metadata["virtual_origin"]
+    scale = metadata.get("scale") or 1.0
+    return ((float(x) - origin_x) * scale, (float(y) - origin_y) * scale)
+
+
 class ComputerUseManager:
     """计算机使用管理器 - 整合桌面操作、文件操作和浏览器操作"""
 
@@ -37,11 +109,14 @@ class ComputerUseManager:
 
         self._config = config or {}
         self._browser_manager = None
-        self._firewall = None
         self._screenshot_backend = None
+        self.dpi_aware = False
+        self._screen_metadata_cache: typing.Optional[dict] = None
 
         # 检测截图后端
         self._detect_screenshot_backend()
+        # R0-2：进程级 DPI awareness（system-aware；已设置过时 API 返回拒绝但等效成功）
+        self._ensure_dpi_aware()
 
         self._initialized = True
         logger.info("ComputerUseManager 初始化完成")
@@ -56,16 +131,120 @@ class ComputerUseManager:
             self._screenshot_backend = "basic"
         logger.info("截图后端: %s", self._screenshot_backend)
 
-    def _get_firewall(self):
-        """获取防火墙"""
-        if self._firewall is None:
-            try:
-                from neurova.core.firewall import get_firewall
+    def _ensure_dpi_aware(self) -> None:
+        """进程级 DPI awareness（R0-2）：无 awareness 的进程坐标被系统虚拟化，
+        150% 缩放下截图与点击坐标系错位。system-aware 即满足"截图=可点击坐标"
+        的同空间要求；重复设置返回拒绝码属预期（等效已设置）。"""
+        try:
+            if os.name != "nt":
+                self.dpi_aware = False
+                return
+            import ctypes
 
-                self._firewall = get_firewall()
-            except ImportError:
-                logger.warning("防火墙不可用")
-        return self._firewall
+            try:
+                ctypes.windll.shcore.SetProcessDpiAwareness(2)  # SYSTEM_DPI_AWARE
+            except Exception:
+                try:
+                    ctypes.windll.user32.SetProcessDPIAware()
+                except Exception:
+                    pass
+            self.dpi_aware = True
+        except Exception as e:
+            logger.warning("DPI awareness 设置失败（坐标按未感知处理）: %s", e)
+            self.dpi_aware = False
+
+    def _get_virtual_screen_metrics(self) -> typing.Optional[typing.Tuple[int, int, int, int]]:
+        """虚拟屏 (origin_x, origin_y, width, height)，非 Windows / 探测失败返回 None"""
+        try:
+            if os.name != "nt":
+                return None
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            return (
+                user32.GetSystemMetrics(76),  # SM_XVIRTUALSCREEN
+                user32.GetSystemMetrics(77),  # SM_YVIRTUALSCREEN
+                user32.GetSystemMetrics(78),  # SM_CXVIRTUALSCREEN
+                user32.GetSystemMetrics(79),  # SM_CYVIRTUALSCREEN
+            )
+        except Exception as e:
+            logger.debug("虚拟屏度量不可用: %s", e)
+            return None
+
+    def screen_metadata(self, force_refresh: bool = False) -> typing.Optional[dict]:
+        """当前虚拟屏元数据（compute_screen_metadata 结构），不可用返回 None。
+
+        像素尺寸取自一次全虚拟屏截图（缓存），scale=截图像素/系统度量。
+        """
+        if not force_refresh and self._screen_metadata_cache is not None:
+            return self._screen_metadata_cache
+        try:
+            from PIL import ImageGrab
+
+            metrics = self._get_virtual_screen_metrics()
+            if not metrics or not metrics[2] or not metrics[3]:
+                self._screen_metadata_cache = None
+                return None
+            img = ImageGrab.grab(all_screens=True)
+            self._screen_metadata_cache = compute_screen_metadata(
+                virtual_origin=(metrics[0], metrics[1]),
+                screen_size=(metrics[2], metrics[3]),
+                pixel_size=(img.width, img.height),
+            )
+        except Exception as e:
+            logger.warning("屏幕元数据计算失败（坐标链退化为恒等）: %s", e)
+            self._screen_metadata_cache = None
+        return self._screen_metadata_cache
+
+    def convert_screenshot_point(
+        self, px: float, py: float
+    ) -> typing.Tuple[float, float]:
+        """截图像素坐标 → 屏幕坐标点；元数据不可用时恒等回退（保底可用）。"""
+        metadata = self.screen_metadata()
+        if not metadata:
+            return (px, py)
+        return screenshot_px_to_screen_point(px, py, metadata)
+
+    def click_screenshot_point(self, px: float, py: float, button: str = "left") -> bool:
+        """按截图像素坐标点击（LLM/前端都拿到过同一张截图，坐标同源）。
+
+        内部先换算成屏幕坐标点再落 pyautogui——单屏 100% 时为恒等，行为不变。
+        """
+        screen_x, screen_y = self.convert_screenshot_point(px, py)
+        return self.click(screen_x, screen_y, button)
+
+    def input_available(self) -> bool:
+        """输入能力真实探测（R0-4）：pyautogui 可导入且 position() 可执行。
+
+        截图后端可用不代表能点击/键入——/status 与 /doctor 据此拆分上报。
+        """
+        try:
+            import pyautogui
+
+            pyautogui.position()
+            return True
+        except Exception as e:
+            logger.debug("输入能力不可用: %s", e)
+            return False
+
+    def uia_available(self) -> bool:
+        """桌面 UIA 语义层可用性（R1-1 desktop_uia；未落地/非 Windows 返回 False）"""
+        try:
+            from neurova.computer_use.desktop_uia import is_available
+
+            return bool(is_available())
+        except Exception:
+            return False
+
+    def doctor_report(self) -> typing.Dict[str, typing.Any]:
+        """能力自检逐项报告（/doctor 数据源）"""
+        return {
+            "pillow": self._screenshot_backend == "PIL",
+            "pyautogui_input": self.input_available(),
+            "uia": self.uia_available(),
+            "dpi_aware": bool(self.dpi_aware),
+            "screen_metadata": self.screen_metadata(),
+        }
 
     def _get_browser_manager(self):
         """获取浏览器管理器"""
@@ -79,12 +258,21 @@ class ComputerUseManager:
         return self._browser_manager
 
     def screenshot(self, region: typing.Tuple[int, int, int, int] = None) -> typing.Optional[bytes]:
-        """截取屏幕截图（进程内 Pillow，PNG 字节流）"""
+        """截取屏幕截图（进程内 Pillow，PNG 字节流）。
+
+        region=None 时截取**全虚拟屏**（all_screens，多屏合成，坐标原点=虚拟屏
+        左上角）——返回的截图像素坐标系与 convert_screenshot_point 的输入一致；
+        传 region 时保持原语义（主屏相对区域）。
+        """
         try:
             from PIL import ImageGrab
             import io
 
-            img = ImageGrab.grab(region)
+            img = (
+                ImageGrab.grab(all_screens=True)
+                if region is None
+                else ImageGrab.grab(region)
+            )
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             return buf.getvalue()
@@ -126,15 +314,32 @@ class ComputerUseManager:
             logger.error("输入失败: %s", e)
             return False
 
-    def scroll(self, x: typing.Optional[int], y: typing.Optional[int], clicks: int = 3) -> bool:
-        """滚动操作（x/y 为 None 时在当前指针位置滚动）"""
+    def scroll(
+        self,
+        x: typing.Optional[int],
+        y: typing.Optional[int],
+        clicks: int = 3,
+        horizontal_clicks: int = 0,
+    ) -> bool:
+        """滚动操作（x/y 为 None 时在当前指针位置滚动）。
+
+        clicks: 垂直滚动档数，正=向上、负=向下（pyautogui 契约，符号必须保留）；
+        horizontal_clicks: 水平滚动档数，正=向右、负=向左（R0-1 新增，0=不滚动）。
+        """
         try:
             import pyautogui
 
-            if x is None or y is None:
-                pyautogui.scroll(int(clicks))
-            else:
-                pyautogui.scroll(int(clicks), int(x), int(y))
+            if horizontal_clicks:
+                if x is None or y is None:
+                    pyautogui.hscroll(int(horizontal_clicks))
+                else:
+                    pyautogui.hscroll(int(horizontal_clicks), int(x), int(y))
+            # 纯水平滚动（clicks=0 且有水平分量）时跳过垂直调用，避免空档噪声
+            if clicks or not horizontal_clicks:
+                if x is None or y is None:
+                    pyautogui.scroll(int(clicks))
+                else:
+                    pyautogui.scroll(int(clicks), int(x), int(y))
             return True
         except ImportError:
             logger.warning("滚动失败：缺少 pyautogui")
@@ -305,11 +510,18 @@ class ComputerUseManager:
             return await bm.snapshot()
         return None
 
-    async def browser_dom_snapshot(self, generation: int = None) -> typing.Any:
-        """aria 可访问性树快照（结构化观察，优先于 HTML/截图）；generation 用于新鲜度校验"""
+    async def browser_dom_snapshot(
+        self,
+        generation: int = None,
+        max_nodes: int = None,
+        max_depth: int = None,
+    ) -> typing.Any:
+        """aria 可访问性树快照（结构化观察）；generation 新鲜度 + 观察预算（R1-5）"""
         bm = self._get_browser_manager()
         if bm:
-            return await bm.dom_snapshot(generation=generation)
+            return await bm.dom_snapshot(
+                generation=generation, max_nodes=max_nodes, max_depth=max_depth
+            )
         return {"error": "浏览器管理器不可用"}
 
     async def browser_dom_read(

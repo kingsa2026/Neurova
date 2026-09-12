@@ -262,7 +262,12 @@ class CamofoxServerBackend(BrowserBackend):
 
     # ── ARIA 快照 ──
 
-    async def dom_snapshot(self, generation: Optional[int] = None) -> BrowserResult:
+    async def dom_snapshot(
+        self,
+        generation: Optional[int] = None,
+        max_nodes: Optional[int] = None,
+        max_depth: Optional[int] = None,
+    ) -> BrowserResult:
         start = time.time()
         stale = self._check_active_generation(generation)
         if stale:
@@ -277,12 +282,22 @@ class CamofoxServerBackend(BrowserBackend):
                 params={"userId": self._eff_user_id()},
             )
             active = self._active_tab() or {}
+            # R1-5 观察预算：超限裁剪并如实并入 truncated 标记
+            snapshot_text = data.get("snapshot", "")
+            if max_nodes is not None or max_depth is not None:
+                from neurova.computer_use.browser_manager import _trim_snapshot_tree
+
+                snapshot_text, budget_truncated = _trim_snapshot_tree(
+                    snapshot_text, max_nodes, max_depth
+                )
+            else:
+                budget_truncated = False
             return BrowserResult(
                 success=True,
                 data={
-                    "snapshot": data.get("snapshot", ""),
+                    "snapshot": snapshot_text,
                     "refs_count": data.get("refsCount", 0),
-                    "truncated": data.get("truncated", False),
+                    "truncated": bool(data.get("truncated", False)) or budget_truncated,
                 },
                 url=data.get("url", active.get("url", "")),
                 title=active.get("title", ""),
@@ -334,18 +349,36 @@ class CamofoxServerBackend(BrowserBackend):
     async def _resolve_ref_via_snapshot(
         self, role: str, name: Optional[str]
     ) -> Tuple[Optional[str], Optional[BrowserResult]]:
-        """拉最新快照并解析 (role, name) → ref;找不到返回 (None, BrowserResult)"""
+        """拉最新快照并解析 (role, name) → ref;失败返回 (None, 结构化拒绝 BrowserResult)。
+
+        R2-6 加固：
+        - 零匹配 → refused(ref_not_found) + 同 role 候选名（给 agent 下一步事实）
+        - 多匹配且无法唯一化 → refused(ambiguous_ref) + 候选 ref（不猜）
+        """
         snap = await self.dom_snapshot(generation=self._active_generation())
         if not snap.success:
             return None, snap
         yaml_text = (snap.data or {}).get("snapshot", "")
-        ref = _find_ref_in_yaml(yaml_text, role.strip(), name)
-        if not ref:
+        matches = _find_refs_in_yaml(yaml_text, role.strip(), name)
+        if not matches:
+            # 收集同 role 的候选名，把"找不到"变成"找到了什么"的事实
+            candidates = _list_role_names(yaml_text, role.strip())[:5]
+            hint = f"，快照中该 role 的候选: {candidates}" if candidates else ""
             return None, BrowserResult(
                 success=False,
-                error=f"快照中未找到 role={role!r} name={name!r} 的可交互元素",
+                route="camofox_ref",
+                error=f"快照中未找到 role={role!r} name={name!r} 的可交互元素{hint}",
+                data={"candidates": candidates},
             )
-        return ref, None
+        if len(matches) > 1 and name is not None:
+            # name 传入时 _find_refs_in_yaml 已按 name 过滤，>1 说明同名多个——拒绝猜测
+            return None, BrowserResult(
+                success=False,
+                route="camofox_ref",
+                error=f"role={role!r} name={name!r} 匹配到 {len(matches)} 个元素，拒绝猜测（{matches[:5]}）",
+                data={"candidates": matches[:5]},
+            )
+        return matches[0], None
 
     async def _click_ref(self, ref: str) -> BrowserResult:
         start = time.time()
@@ -363,13 +396,14 @@ class CamofoxServerBackend(BrowserBackend):
                 tab["generation"] += 1  # 交互使快照事实失效
             return BrowserResult(
                 success=True,
+                route="camofox_ref",
                 url=tab["url"] if tab else "",
                 duration_ms=(time.time() - start) * 1000,
                 generation=self._active_generation(),
             )
         except Exception as e:
             return BrowserResult(
-                success=False, error=str(e), duration_ms=(time.time() - start) * 1000
+                success=False, route="camofox_ref", error=str(e), duration_ms=(time.time() - start) * 1000
             )
 
     async def _type_ref(self, ref: str, text: str) -> BrowserResult:
@@ -388,13 +422,14 @@ class CamofoxServerBackend(BrowserBackend):
                 tab["generation"] += 1
             return BrowserResult(
                 success=True,
+                route="camofox_ref",
                 url=tab["url"] if tab else "",
                 duration_ms=(time.time() - start) * 1000,
                 generation=self._active_generation(),
             )
         except Exception as e:
             return BrowserResult(
-                success=False, error=str(e), duration_ms=(time.time() - start) * 1000
+                success=False, route="camofox_ref", error=str(e), duration_ms=(time.time() - start) * 1000
             )
 
     # ── Tab 生命周期 ──
@@ -606,29 +641,62 @@ class CamofoxServerBackend(BrowserBackend):
 # ── 模块级辅助函数 ──
 
 
-# camofox YAML 快照行格式:`- button 'Login' [e3]` / `- button "Login" [e3]` / `- textbox [e5]:`
-# 单引号为主(实测 camofox 输出),双引号作为 YAML 兼容回退
-_REF_LINE_RE = re.compile(r'-\s+(\w+)(?:\s+(["\'])([^"\']*)\2)?\s+\[e(\d+)\]')
-
-
-def _find_ref_in_yaml(yaml_text: str, role: str, name: Optional[str]) -> Optional[str]:
-    """从 camofox YAML 快照中找出第一个匹配 (role, name) 的 [eN] ref。
-
-    匹配规则:
-    - 行必须以 `- role` 开头
-    - name 为 None 时,取该 role 第一个出现的 ref
-    - name 非 None 时,name 必须严格相等(quoted)
-    """
-    if not yaml_text or not role:
+# camofox YAML 快照行格式:`- button 'Login' [e3]` / `- button "Login" [e3]` /
+# `- button Login [e3]`（裸名）/ `- textbox [e5]:`（无名）
+# R2-6 加固：逐行解析替代单一正则——引号样式不再限定、含引号/括号的 name
+# 不再静默失配、同 (role, name) 多匹配可被收集而非静默取第一个
+def _parse_ref_line(line: str) -> Optional[Tuple[str, Optional[str], str]]:
+    """解析一行 `- role 'name' [eN]` → (role, name|None, "N")；非 ref 行返回 None"""
+    s = line.strip()
+    if not s.startswith("- "):
         return None
+    m = re.search(r"\[e(\d+)\]", s)
+    if not m:
+        return None
+    rest = s[2 : m.start()].strip()
+    role, _, name = rest.partition(" ")
+    name = name.strip()
+    if len(name) >= 2 and name[0] in "\"'" and name[-1] == name[0]:
+        name = name[1:-1]
+    else:
+        name = name.strip("'\"")
+    return role, (name or None), m.group(1)
+
+
+def _find_refs_in_yaml(yaml_text: str, role: str, name: Optional[str] = None) -> list:
+    """收集快照中所有匹配 (role, name) 的 [eN] ref（顺序保留）。
+
+    name 为 None 时匹配该 role 的全部 ref；否则严格相等（引号样式无关）。
+    """
+    matches: list = []
+    if not yaml_text or not role:
+        return matches
     for line in yaml_text.splitlines():
-        m = _REF_LINE_RE.search(line)
-        if not m:
+        parsed = _parse_ref_line(line)
+        if not parsed:
             continue
-        line_role, line_name, ref_num = m.group(1), m.group(3), m.group(4)
+        line_role, line_name, ref_num = parsed
         if line_role != role:
             continue
         if name is not None and line_name != name:
             continue
-        return f"e{ref_num}"
-    return None
+        matches.append(f"e{ref_num}")
+    return matches
+
+
+def _find_ref_in_yaml(yaml_text: str, role: str, name: Optional[str]) -> Optional[str]:
+    """兼容入口：第一个匹配的 ref（多匹配场景请用 _find_refs_in_yaml 自行裁决）"""
+    matches = _find_refs_in_yaml(yaml_text, role, name)
+    return matches[0] if matches else None
+
+
+def _list_role_names(yaml_text: str, role: str) -> list:
+    """列出快照中该 role 的全部具名元素（ref_not_found 时的候选事实）"""
+    names: list = []
+    if not yaml_text or not role:
+        return names
+    for line in yaml_text.splitlines():
+        parsed = _parse_ref_line(line)
+        if parsed and parsed[0] == role and parsed[1]:
+            names.append(parsed[1])
+    return names
