@@ -477,7 +477,13 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                     "description": "地点查询字符串（location 的别名，二选一即可）",
                 },
             },
-            "required": ["location"],
+            # 三别名任一即合法——required 单指 location 与"二选一"矛盾（T2
+            # 校验上线抓出的存量契约 bug，执行体 _execute_weather 本就三选一读参）
+            "anyOf": [
+                {"required": ["location"]},
+                {"required": ["city"]},
+                {"required": ["query"]},
+            ],
         },
     },
     "web_search": {
@@ -498,7 +504,12 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                     "description": "搜索关键词（query 的别名，二选一即可）",
                 },
             },
-            "required": ["query"],
+            # 同 weather：别名三选一，required 单指 query 与描述矛盾（T2 抓出）
+            "anyOf": [
+                {"required": ["query"]},
+                {"required": ["q"]},
+                {"required": ["keywords"]},
+            ],
         },
     },
     "spawn_subagent": {
