@@ -82,6 +82,58 @@
         </GlassCard>
       </a-tab-pane>
 
+      <!-- Model：LLM 429 重试/切换容错参数（ZCode 对齐 2026-09-11） -->
+      <a-tab-pane key="model" :tab="t('settings.modelTab')">
+        <GlassCard :title="t('settings.llmRetryTitle')">
+          <p class="governance-hint">{{ t('settings.llmRetryHint') }}</p>
+          <a-form layout="vertical">
+            <a-form-item :label="t('settings.llmRetryMaxRetries')">
+              <a-input-number
+                v-model:value="llmRetry.max_retries"
+                :min="0"
+                :max="50"
+                :step="1"
+                style="width: 100%"
+              />
+              <p class="governance-hint">{{ t('settings.llmRetryMaxRetriesHint') }}</p>
+            </a-form-item>
+            <a-form-item :label="t('settings.llmRetryInterval')">
+              <a-input-number
+                v-model:value="llmRetry.interval"
+                :min="1"
+                :max="600"
+                :step="1"
+                style="width: 100%"
+              />
+              <p class="governance-hint">{{ t('settings.llmRetryIntervalHint') }}</p>
+            </a-form-item>
+            <a-form-item :label="t('settings.llmRetryWaitCap')">
+              <a-input-number
+                v-model:value="llmRetry.wait_cap"
+                :min="1"
+                :max="3600"
+                :step="10"
+                style="width: 100%"
+              />
+              <p class="governance-hint">{{ t('settings.llmRetryWaitCapHint') }}</p>
+            </a-form-item>
+            <a-form-item :label="t('settings.llmRetryMaxSwitches')">
+              <a-input-number
+                v-model:value="llmRetry.max_switches"
+                :min="1"
+                :max="20"
+                :step="1"
+                style="width: 100%"
+              />
+              <p class="governance-hint">{{ t('settings.llmRetryMaxSwitchesHint') }}</p>
+            </a-form-item>
+          </a-form>
+          <template #footer>
+            <GlassButton variant="primary" size="sm" :loading="savingLlmRetry" @click="saveLlmRetry">{{ t('common.save') }}</GlassButton>
+          </template>
+        </GlassCard>
+      </a-tab-pane>
+
       <!-- Advanced -->
       <a-tab-pane key="advanced" :tab="t('settings.advanced')">
         <div class="advanced-stack">
@@ -100,6 +152,15 @@
             </a-form-item>
             <a-form-item :label="t('settings.enableTelemetry')">
               <a-switch v-model:checked="advanced.telemetry" />
+            </a-form-item>
+            <a-form-item :label="t('settings.maxOutputTokens')" :extra="t('settings.maxOutputTokensHint')">
+              <a-input-number
+                v-model:value="advanced.max_output_tokens"
+                :min="1024"
+                :max="200000"
+                :step="1024"
+                style="width: 100%"
+              />
             </a-form-item>
           </a-form>
           <template #footer>
@@ -168,7 +229,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits } from '@/api/modules/settings'
+import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getLlmRetrySettings, updateLlmRetrySettings } from '@/api/modules/settings'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { supportedLocales } from '@/i18n'
@@ -190,7 +251,7 @@ const isDark = ref(appStore.isDark)
 const general = ref({ app_name: 'Neurova', language: locale.value })
 const security = ref({ jwt_secret: '', jwt_expiry_hours: 24, min_password_length: 8, require_special: true })
 const storage = ref({ media_path: '/data/media', max_upload_mb: 50, cache_ttl_minutes: 60 })
-const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false })
+const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false, max_output_tokens: 131072 })
 
 // 进化治理设置（独立于扁平 settings 的治理面）
 const governance = ref({ conversation_rules_enabled: false, rsi_phase: 0 })
@@ -199,6 +260,43 @@ const savingGovernance = ref(false)
 /** Agent 运行限制（Token 预算上限 / 单次会话最大 Loop 轮次） */
 const agentLimits = ref({ token_budget: 100000, max_loop_rounds: 20 })
 const savingAgentLimits = ref(false)
+
+/** LLM 429 重试/切换容错参数（ZCode 对齐 2026-09-11） */
+const llmRetry = ref({ max_retries: 10, interval: 10, wait_cap: 120, max_switches: 5 })
+const savingLlmRetry = ref(false)
+const llmRetryLoaded = ref(false)
+
+const fetchLlmRetry = async () => {
+  try {
+    const res = await getLlmRetrySettings()
+    const data = (res as any)?.data?.data ?? (res as any)?.data
+    if (data) {
+      llmRetry.value = { ...llmRetry.value, ...data }
+      llmRetryLoaded.value = true
+    }
+  } catch (err) {
+    console.error('[Settings] fetchLlmRetry failed:', err)
+    llmRetryLoaded.value = false
+    // 读取失败不阻断设置页（保留默认值）
+  }
+}
+
+const saveLlmRetry = async () => {
+  if (!llmRetryLoaded.value) {
+    // F-12：未成功加载 → 表单里是前端默认值，提交会覆盖线上配置
+    message.warning(t('settings.notLoadedSaveBlocked'))
+    return
+  }
+  savingLlmRetry.value = true
+  try {
+    await updateLlmRetrySettings({ ...llmRetry.value })
+    message.success(t('common.success'))
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    savingLlmRetry.value = false
+  }
+}
 // F-12：加载成功标志——未成功加载就保存会把默认值回写覆盖线上配置
 const agentLimitsLoaded = ref(false)
 const governanceLoaded = ref(false)
@@ -275,7 +373,10 @@ const onThemeToggle = () => {
 const fetchSettings = async () => {
   try {
     const res = await getSettings()
-    const data = res?.data
+    // 后端 GET /settings 返回 {settings: {...}} 包裹壳（拦截器已剥 axios 层）；
+    // 兼容历史 ApiResponse.data 形状，两者皆缺视为空对象
+    const body: any = res as any
+    const data = body?.settings ?? body?.data
     if (data?.general) general.value = { ...general.value, ...data.general }
     if (data?.security) security.value = { ...security.value, ...data.security }
     if (data?.storage) storage.value = { ...storage.value, ...data.storage }
@@ -320,6 +421,7 @@ onMounted(() => {
   fetchSettings()
   fetchGovernance()
   fetchAgentLimits()
+  fetchLlmRetry()
 })
 </script>
 

@@ -25,7 +25,7 @@ class FakeWebSocket {
   readyState = FakeWebSocket.OPEN
   onopen: (() => void) | null = null
   onmessage: ((evt: { data: string }) => void) | null = null
-  onclose: (() => void) | null = null
+  onclose: ((evt: { code: number }) => void) | null = null
   onerror: (() => void) | null = null
   sent: string[] = []
   constructor(url: string) {
@@ -35,8 +35,8 @@ class FakeWebSocket {
   send(data: string) {
     this.sent.push(data)
   }
-  close() {
-    this.onclose?.()
+  close(code = 1005) {
+    this.onclose?.({ code })
   }
   open() {
     this.onopen?.()
@@ -125,7 +125,7 @@ describe('useSessionSync gap 检测', () => {
       expect(seen).toEqual([48, 49, 50])
 
       // 服务端断开 → 客户端自动重连（退避 1s）
-      first.onclose?.()
+      first.onclose?.({ code: 1006 })
       vi.advanceTimersByTime(10_000) // 退避封顶（retry=1 → 2s，取上限稳健）
       const second = lastWs()
       expect(second).not.toBe(first)
@@ -154,7 +154,7 @@ describe('useSessionSync gap 检测', () => {
       const first = lastWs()
       first.open()
       first.emit(evt(7))
-      first.onclose?.()
+      first.onclose?.({ code: 1006 })
       vi.advanceTimersByTime(10_000) // 退避封顶（retry=1 → 2s，取上限稳健）
       const second = lastWs()
       second.open()
@@ -181,7 +181,7 @@ describe('useSessionSync gap 检测', () => {
       first.emit(evt(3))
       expect(seen).toEqual([1, 2, 3])
 
-      first.onclose?.()
+      first.onclose?.({ code: 1006 })
       vi.advanceTimersByTime(10_000) // 退避封顶（retry=1 → 2s，取上限稳健）
       const second = lastWs()
       second.open()
@@ -310,7 +310,7 @@ describe('useSessionSync gap 检测', () => {
       // （若区间未清，resume 会取 gap[0][0]-1=2 巧合相同——用 lastSeq 验证：
       // 新流推进到 3 后断连，resume 应为 3 而非旧区间污染值）
       second.emit(evt(3))
-      second.onclose?.()
+      second.onclose?.({ code: 1006 })
       vi.advanceTimersByTime(10_000)
       const third = lastWs()
       third.open()
@@ -340,7 +340,7 @@ describe('useSessionSync gap 检测', () => {
       ws2.emit(evt(1))
       ws2.emit(evt(2))
       ws2.emit(evt(3)) // 新流推进到 3
-      ws2.onclose?.()
+      ws2.onclose?.({ code: 1006 })
       vi.advanceTimersByTime(10_000)
       const ws3 = lastWs()
       ws3.open()

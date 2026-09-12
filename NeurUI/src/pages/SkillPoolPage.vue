@@ -164,7 +164,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -187,7 +187,69 @@ interface PoolSkill {
 
 const { t } = useI18n()
 
-const activeTab = ref<'public' | 'private'>('public')
+const activeTab = ref<'public' | 'private' | 'pending'>('public')
+
+// C10 治理收紧：待审产物审批面
+const pendingLoading = ref(false)
+const pendingExperiences = ref<any[]>([])
+const pendingSkills = ref<any[]>([])
+
+async function fetchPending() {
+  pendingLoading.value = true
+  try {
+    const [expRes, skillRes] = await Promise.all([
+      skillPoolApi.listPendingSkills('_all'),
+      skillPoolApi.listPendingExperiences('_all'),
+    ])
+    const unwrap = (r: any) => (Array.isArray(r?.data) ? r.data : r?.data?.items ?? [])
+    pendingSkills.value = unwrap(skillRes)
+    pendingExperiences.value = unwrap(expRes)
+  } catch (err: any) {
+    message.error(err?.response?.data?.error || err?.message || t('skillPool.loadError'))
+  } finally {
+    pendingLoading.value = false
+  }
+}
+
+async function handleApproveExperience(recordId: string) {
+  try {
+    await skillPoolApi.approvePendingExperience('_all', recordId)
+    message.success(t('skillPool.approve') + ' ✓')
+    await fetchPending()
+  } catch (err: any) {
+    message.error(err?.response?.data?.error || err?.message)
+  }
+}
+
+async function handleRejectExperience(recordId: string) {
+  try {
+    await skillPoolApi.rejectPendingExperience('_all', recordId)
+    await fetchPending()
+  } catch (err: any) {
+    message.error(err?.response?.data?.error || err?.message)
+  }
+}
+
+async function handleApproveSkill(templateId: string) {
+  try {
+    await skillPoolApi.approvePendingSkill('_all', templateId)
+    message.success(t('skillPool.approve') + ' ✓')
+    await fetchPending()
+  } catch (err: any) {
+    message.error(err?.response?.data?.error || err?.message)
+  }
+}
+
+async function handleRejectSkill(templateId: string) {
+  try {
+    await skillPoolApi.rejectPendingSkill('_all', templateId)
+    await fetchPending()
+  } catch (err: any) {
+    message.error(err?.response?.data?.error || err?.message)
+  }
+}
+
+watch(activeTab, (tab) => { if (tab === 'pending') fetchPending() })
 const publicSkills = ref<PoolSkill[]>([])
 const privateSkills = ref<PoolSkill[]>([])
 const publicLoading = ref(false)

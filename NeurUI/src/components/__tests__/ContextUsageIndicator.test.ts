@@ -89,11 +89,17 @@ describe('ContextUsageIndicator 可见性（2026-09-07 环图消失根因修复�
   })
 
   it('usage 为空时拉 composition 兜底渲染（根因：原 v-if="usage" 刷新即消失）', async () => {
-    const wrapper = await mountIndicator({ usage: null, agentId: 'default' })
+    const wrapper = await mountIndicator({ usage: null, agentId: 'default', sessionId: 'sess-1' })
     expect(wrapper.find('.nr-ctx-usage').exists()).toBe(true)
     expect(wrapper.find('.nr-ctx-ring').exists()).toBe(true)
     // 文本来自 composition.total_tokens=124000 → 12.4万
     expect(wrapper.find('.nr-ctx-usage-text').text()).toBe('12.4万')
+  })
+
+  it('无 sessionId 时不发 composition 请求（会话级数据，空 session 必 404/串台）', async () => {
+    const mod = await import('@/api')
+    await mountIndicator({ usage: null, agentId: 'default' })
+    expect(mod.default.get).not.toHaveBeenCalled()
   })
 
   it('usage 与 composition 都为空仍常驻渲染 0（环图常驻语义）', async () => {
@@ -104,7 +110,7 @@ describe('ContextUsageIndicator 可见性（2026-09-07 环图消失根因修复�
   })
 
   it('悬停展开明细面板：分段行 + 命中率', async () => {
-    const wrapper = await mountIndicator({ usage: null, agentId: 'default' })
+    const wrapper = await mountIndicator({ usage: null, agentId: 'default', sessionId: 'sess-1' })
     await wrapper.find('.nr-ctx-usage').trigger('mouseenter')
     await flushPromises()
     const panel = wrapper.find('.nr-ctx-panel')

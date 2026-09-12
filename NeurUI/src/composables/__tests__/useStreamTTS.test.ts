@@ -186,3 +186,69 @@ describe('StreamTTSRunner', () => {
     expect(hooks.synthesize.mock.calls.length).toBeLessThanOrEqual(afterAbort + 1)
   })
 })
+
+// ── 台账 N6（2026-09-11）：语音提示播报打断/销毁不泄漏 object URL ──
+// 旧实现被打断的上一条播报 pause 后 onended 永不触发，object URL 每次打断
+// 泄漏一个；dispose 同样只 pause 不回收。根修：打断/销毁路径显式 revoke。
+describe('createSpeechAnnouncer object URL 回收（N6）', () => {
+  let createCalls: string[]
+  let revokeMock: ReturnType<typeof vi.fn>
+  interface FakeAudioInstance { src: string; paused: boolean; onended: (() => void) | null; play: ReturnType<typeof vi.fn>; pause: ReturnType<typeof vi.fn> }
+  let audioInstances: FakeAudioInstance[]
+
+  function FakeAudio(this: unknown, src: string) {
+    const self = this as Record<string, unknown>
+    self.src = src
+    self.paused = false
+    self.onended = null
+    self.play = vi.fn().mockResolvedValue(undefined)
+    self.pause = vi.fn(() => { self.paused = true })
+    audioInstances.push(self as unknown as FakeAudioInstance)
+  }
+
+  beforeEach(async () => {
+    vi.resetModules()
+    audioInstances = []
+    createCalls = []
+    revokeMock = vi.fn()
+    ;(URL as unknown as Record<string, unknown>).createObjectURL = vi.fn(() => `blob:announce-${createCalls.push('x')}`)
+    ;(URL as unknown as Record<string, unknown>).revokeObjectURL = revokeMock
+    Object.defineProperty(globalThis, 'Audio', { value: FakeAudio, configurable: true, writable: true });
+    // 动态引入保证 stub 先于模块加载生效
+    ({ createSpeechAnnouncer } = await import('@/composables/useStreamTTS'))
+  })
+
+  let createSpeechAnnouncer: (typeof import('@/composables/useStreamTTS'))['createSpeechAnnouncer']
+
+  it('播报被打断：上一条 object URL 被显式 revoke', async () => {
+    const announcer = createSpeechAnnouncer(async (t) => new Blob([t]), { enabled: () => true })
+    announcer.announce('第一条')
+    await vi.waitFor(() => expect(audioInstances.length).toBe(1))
+    announcer.announce('第二条')
+    await vi.waitFor(() => expect(audioInstances.length).toBe(2))
+    // 第一条被 pause 且其 URL 已回收
+    expect(audioInstances[0].paused).toBe(true)
+    expect(revokeMock).toHaveBeenCalledWith('blob:announce-1')
+    announcer.dispose()
+  })
+
+  it('dispose：当前播报 pause 且 URL 被回收', async () => {
+    const announcer = createSpeechAnnouncer(async (t) => new Blob([t]), { enabled: () => true })
+    announcer.announce('只此一条')
+    await vi.waitFor(() => expect(audioInstances.length).toBe(1))
+    announcer.dispose()
+    expect(audioInstances[0].paused).toBe(true)
+    expect(revokeMock).toHaveBeenCalledWith('blob:announce-1')
+  })
+
+  it('自然播完路径不受影响（onended 仍回收自身 URL）', async () => {
+    const announcer = createSpeechAnnouncer(async (t) => new Blob([t]), { enabled: () => true })
+    announcer.announce('播完')
+    await vi.waitFor(() => expect(audioInstances.length).toBe(1))
+    audioInstances[0].onended?.()
+    expect(revokeMock).toHaveBeenCalledWith('blob:announce-1')
+    announcer.dispose()
+    // 已被 onended 回收，dispose 不重复计数（幂等 no-op）
+    expect(revokeMock).toHaveBeenCalledTimes(1)
+  })
+})

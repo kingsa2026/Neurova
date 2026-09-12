@@ -153,6 +153,37 @@ export function toggleStep(steps: ChatStep[], stepId: string): void {
 }
 
 /**
+ * 思考段滚动跟随（2026-09-12 bug 修复）。
+ *
+ * 流式推理段文本持续追加，容器 .nr-step-reasoning 有 max-height 内部滚动条；
+ * 无跟随逻辑时视图停在顶部，最新思考在可视区外（报障"思考较多出现滚动条
+ * 后不能展示最新思考过程"）。
+ * 跟随语义：贴底（距底 ≤ 阈值）则每次追加后滚到底；用户向上翻阅即暂停，
+ * 回到底部附近自动恢复。
+ */
+
+/** 活跃推理段滚动容器选择器（ChatPage 模板契约：is-active 只挂在流式段上）。 */
+export const ACTIVE_REASONING_SELECTOR = '.nr-step-item.is-active .nr-step-reasoning'
+
+/** 距底判定：scrollHeight - scrollTop - clientHeight ≤ threshold 视为贴底。 */
+export function isNearBottom(
+  scrollTop: number,
+  scrollHeight: number,
+  clientHeight: number,
+  threshold = 32,
+): boolean {
+  return scrollHeight - scrollTop - clientHeight <= threshold
+}
+
+/** 在 root 内找活跃推理段容器并贴底（scrollTop=scrollHeight）；无命中返回 null 不误滚。 */
+export function followActiveReasoningScroll(root: ParentNode = document): HTMLElement | null {
+  const el = root.querySelector<HTMLElement>(ACTIVE_REASONING_SELECTOR)
+  if (!el) return null
+  el.scrollTop = el.scrollHeight
+  return el
+}
+
+/**
  * 从历史消息（后端落盘形状）合成 steps。
  *
  * 历史只有" reasoning 全文 + toolCalls 数组"两路数据，无顺序信息；

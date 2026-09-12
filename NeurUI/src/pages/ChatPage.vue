@@ -94,6 +94,11 @@
               <span class="nr-stream-status-label">{{ streamPhaseMeta(deriveStreamPhase(msg)).label }}</span>
               <span class="nr-stream-status-shimmer" />
             </div>
+            <!-- 429 重试/切换倒计时（ZCode 对齐）：限流等待/模型切换提示条 -->
+            <div v-if="msg.retryNotice" class="nr-retry-notice">
+              <span class="nr-retry-notice-icon"><UiIcon name="radar" :size="13" /></span>
+              <span class="nr-retry-notice-label">{{ retryNoticeText(msg) }}</span>
+            </div>
 
             <!-- 步骤化时间轴（三需求②）：推理/工具按到达顺序成段，独立折叠 -->
             <div v-if="msg.steps && msg.steps.length > 0" class="nr-steps-timeline">
@@ -115,7 +120,7 @@
                 </div>
                 <div v-show="step.open" class="nr-step-body">
                   <template v-if="step.kind === 'reasoning'">
-                    <div class="nr-step-reasoning">{{ step.text }}</div>
+                    <div class="nr-step-reasoning" @scroll="onReasoningScroll">{{ step.text }}</div>
                   </template>
                   <template v-else>
                     <pre class="nr-tool-args">{{ formatJSON(step.arguments) }}</pre>
@@ -458,7 +463,7 @@ import CrossSessionSearch from '@/components/chat/CrossSessionSearch.vue'
 import { useComputerPanel, isComputerTool, } from '@/composables/useComputerPanel'
 import { useRightDockStore } from '@/stores/rightDock'
 import { useSessionOps } from '@/composables/useSessionOps'
-import { useChatModels } from '@/composables/useChatModels'
+import { registerRateLimitSwitchHook, useChatModels } from '@/composables/useChatModels'
 import { usePendingFiles } from '@/composables/usePendingFiles'
 import { useASRRecording } from '@/composables/useASRRecording'
 import { useAutoVoice } from '@/composables/useAutoVoice'
@@ -480,6 +485,8 @@ import {
   buildStepsFromHistory,
   toggleStep,
   deriveStreamPhase,
+  followActiveReasoningScroll,
+  isNearBottom,
   type ChatStep,
 } from '@/utils/chatSteps'
 import { createQueueDrainer } from '@/utils/queueDrain'
@@ -754,6 +761,54 @@ function legacyToolList(
   if (msg.toolCalls && msg.toolCalls.length > 0) return msg.toolCalls
   if (msg.toolCall) return [{ ...msg.toolCall, result: msg.toolResult }]
   return []
+}
+
+// ── 429 重试/切换倒计时（ZCode 对齐，2026-09-11）─────────────────────────
+
+const retryTickNow = ref(Date.now())
+let retryTicker: ReturnType<typeof setInterval> | null = null
+
+/** 每秒驱动倒计时；无任何活跃提示时自停。 */
+function startRetryTicker(): void {
+  if (retryTicker) return
+  retryTicker = setInterval(() => {
+    retryTickNow.value = Date.now()
+    if (!messages.value.some((m) => m.retryNotice)) stopRetryTicker()
+  }, 1000)
+}
+
+function stopRetryTicker(): void {
+  if (retryTicker) {
+    clearInterval(retryTicker)
+    retryTicker = null
+  }
+}
+
+/** 流式恢复/结束 → 清除倒计时提示。 */
+function clearRetryNotice(msg: ChatMessage): void {
+  if (msg.retryNotice) {
+    msg.retryNotice = undefined
+    stopRetryTicker()
+  }
+}
+
+/** 提示条文案：等待倒计时 / 已切换模型 / 全部耗尽，i18n 组装。 */
+function retryNoticeText(msg: ChatMessage): string {
+  const n = msg.retryNotice
+  if (!n) return ''
+  if (n.phase === 'waiting') {
+    const elapsed = n.receivedAt ? Math.floor((retryTickNow.value - n.receivedAt) / 1000) : 0
+    const remain = Math.max(0, Math.round((n.remainingSeconds ?? 0) - elapsed))
+    return t('chat.retryWaiting', { retry: n.retry ?? 0, max: n.maxRetries ?? 0, seconds: remain })
+  }
+  if (n.phase === 'switched') {
+    return t('chat.retrySwitched', {
+      model: n.model ?? '',
+      count: n.failCount ?? 0,
+      total: n.maxSwitches ?? 0,
+    })
+  }
+  return t('chat.retryExhausted', { count: n.failCount ?? 0 })
 }
 
 watch(
@@ -1130,6 +1185,19 @@ async function drainMessageQueue(force = false, sessionId?: string | null): Prom
 let activeStreamSessionId: string | null = null
 let lastSentMessageText = ''
 
+/**
+ * 429 横幅一键切换后的闭环（ZCode 对齐）：切到候选模型 → 自动重发上一条
+ * 消息继续推理，用户不再需要"点了候选却毫无反应"地手动重发。
+ * 仅重发纯文本（lastSentMessageText）；附件轮由后端同模型重试/自动切换兜底。
+ */
+function onRateLimitSwitch(_model: string): void {
+  if (isStreaming.value) return
+  const text = (lastSentMessageText || '').trim()
+  if (!text) return
+  inputText.value = text
+  void sendMessage()
+}
+
 async function sendMessage() {
   closeSlashPanel()
   const text = inputText.value.trim()
@@ -1184,7 +1252,6 @@ async function sendMessage() {
   // 捕获流所属会话（流式中用户切走时，usage/drain 仍归属发起会话）
   activeStreamSessionId = currentSessionId.value
   lastSentMessageText = text
-
   chatStore.addMessage(userMsg)
 
   // Prepare assistant placeholder
@@ -1358,6 +1425,49 @@ async function sendMessage() {
   return _sendOk
 }
 
+/**
+ * F-4 带凭证内容端点（台账 2026-09-11）：后端 audio 事件 url / done.audio_url
+ * 指向 /api/ 鉴权内容端点（JWT 在 Authorization header，<audio> 直链带不了
+ * 凭证）→ 带凭证取流转 blob URL（与 synthesize-stream 同模式；blob 生命
+ * 周期由 revokeMessageBlobUrls 统一回收）。其余形态（blob: 等）原样透传。
+ */
+async function attachAudioUrl(msg: ChatMessage, url: string): Promise<void> {
+  msg.audioProgress = 0
+  msg.audioCurrentTime = 0
+  msg.audioSpeed = 1
+  if (!url.startsWith('/api/')) {
+    msg.audioUrl = url
+    return
+  }
+  try {
+    const token = secureStorage.get('auth_token')
+    const resp = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+    if (!resp.ok) return
+    msg.audioUrl = URL.createObjectURL(requireNonEmptyAudioBlob(await resp.blob()))
+  } catch {
+    // 内容端点取流失败：不设 audioUrl，气泡回落"生成语音"手动合成链路
+  }
+}
+
+// 思考段滚动跟随（2026-09-12 bug）：流式推理段出内部滚动条后贴底展示最新思考。
+// reasoningStick 记录用户最近一次滚动是否贴底——向上翻阅即暂停拽回，回到底部恢复。
+const reasoningStick = ref(true)
+
+function onReasoningScroll(e: Event): void {
+  const el = e.target as HTMLElement
+  reasoningStick.value = isNearBottom(el.scrollTop, el.scrollHeight, el.clientHeight)
+}
+
+function followReasoningScroll(): void {
+  if (!reasoningStick.value) return
+  // nextTick：文本已入 DOM（scrollHeight 增长）后再贴底
+  nextTick(() => {
+    followActiveReasoningScroll()
+  })
+}
+
 /** Process a single SSE event and update the assistant message. */
 function processSSEEvent(event: any, msg: ChatMessage) {
   const type = event.type || event.event
@@ -1395,11 +1505,18 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'reasoning':
     case 'thinking': {
       const rText = event.content || event.text || ''
+      // 流式恢复 → 清除 429 重试倒计时提示
+      clearRetryNotice(msg)
       // 步骤化时间轴：推理按到达顺序成段（工具打断即封口，再次思考开新段）
       if (rText) {
+        const tail = msg.steps?.[msg.steps.length - 1]
+        // 新开推理段 → 新滚动容器，恢复默认贴底跟随（上一段被用户翻阅过的 stick 态不继承）
+        const newSegment = !(tail && tail.kind === 'reasoning' && tail.active)
         if (!msg.steps) msg.steps = []
         appendReasoningStep(msg.steps, rText)
         msg.reasoning = (msg.reasoning || '') + rText
+        if (newSegment) reasoningStick.value = true
+        followReasoningScroll()
       }
       break
     }
@@ -1484,6 +1601,8 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'chunk':
       // 回复内容开始 → 检索已结束，清空临时进度显示
       if (chatStore.retrievalStatus) chatStore.retrievalStatus = ''
+      // 流式恢复 → 清除 429 重试倒计时提示
+      clearRetryNotice(msg)
       // 步骤化时间轴：正文开始输出，封口一切仍活跃的推理/工具段
       if (msg.steps?.some((s) => s.active)) finishAllSteps(msg.steps)
       msg.content += event.content || event.text || event.delta || ''
@@ -1498,10 +1617,7 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       // autoVoice 已实时逐句播过——忽略整段音频事件避免重复
       if (autoVoice.value && streamTTSRunner) break
       if (event.url) {
-        msg.audioUrl = event.url
-        msg.audioProgress = 0
-        msg.audioCurrentTime = 0
-        msg.audioSpeed = 1
+        void attachAudioUrl(msg, event.url)
       }
       break
 
@@ -1531,23 +1647,44 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'stopped':
       // P0-2：用户主动停止（后端真取消任务后发的显式事件）——气泡收口并标记
       msg.streaming = false
+      clearRetryNotice(msg)
       if (msg.steps?.some((s) => s.active)) finishAllSteps(msg.steps)
       msg.content += `\n\n_(${t('chat.stoppedByUser')})_`
       break
 
+    case 'retry': {
+      // 429 限流重试/切换（ZCode 对齐 2026-09-11）：reset=半截回复作废；
+      // 写入倒计时提示条（等待期间每秒本地倒数，流式恢复即清除）
+      if (event.reset) {
+        msg.content = ''
+        msg.reasoning = ''
+        if (msg.steps?.length) msg.steps = []
+      }
+      msg.retryNotice = {
+        phase: event.phase || 'waiting',
+        retry: event.retry,
+        maxRetries: event.max_retries,
+        remainingSeconds: event.wait_seconds,
+        receivedAt: Date.now(),
+        failCount: event.fail_count,
+        maxSwitches: event.max_switches,
+        model: event.model,
+      }
+      startRetryTicker()
+      break
+    }
+
     case 'done':
     case 'complete':
       msg.streaming = false
+      clearRetryNotice(msg)
       // 步骤化时间轴：整轮流收尾（活跃段全部封口收起）
       if (msg.steps?.some((s) => s.active)) finishAllSteps(msg.steps)
       // 补课：流式语音会话收尾（滞留句 flush；回放列表定稿）
       if (autoVoice.value && streamTTSRunner) streamTTSRunner.end()
       // 补课 4.4 兜底：后端把 audio_url 附在 done 事件上（而非独立 audio 帧）
       if (event.audio_url && !msg.audioUrl && !msg.ttsUrls) {
-        msg.audioUrl = event.audio_url
-        msg.audioProgress = 0
-        msg.audioCurrentTime = 0
-        msg.audioSpeed = 1
+        void attachAudioUrl(msg, event.audio_url)
       }
       // Auto-create session if this is the first exchange
       if (!currentSessionId.value && event.session_id) {
@@ -1570,6 +1707,7 @@ function processSSEEvent(event: any, msg: ChatMessage) {
     case 'error': {
       // 2026-09-07 修复：429 限流错误 → 触发限流横幅（一键换模型），
       // 不把原始 429 JSON 拼进气泡；其余错误仍追加错误文本
+      clearRetryNotice(msg)
       const errMsg = String(event.message || event.error || 'Unknown error')
       if (handleRateLimit({ message: errMsg })) break
       msg.content += `\n\n**Error:** ${errMsg}`
@@ -2324,6 +2462,8 @@ onMounted(() => {
   initASR()
   checkTTSAvailability()
   loadChatModels()
+  // 429 横幅一键切换 → 自动重发上一条消息（切走后继续推理的闭环）
+  registerRateLimitSwitchHook(onRateLimitSwitch)
   // 打开页面即定位到最新记录（loadSessions 自动切换首会话后双保险）
   void nextTick().then(() => scrollToBottomForHistory())
 })
@@ -2331,6 +2471,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   historyAnchorObserver?.disconnect()
   historyAnchorObserver = null
+  // 429 切换钩子随页面卸载解除（composable 为模块级单例，防跨页残留）
+  registerRateLimitSwitchHook(null)
   stopStreamTTS()
   // P2-10：清理复制按钮复位定时器
   for (const t of copyResetTimers) window.clearTimeout(t)
@@ -3010,6 +3152,25 @@ onBeforeUnmount(() => {
 .nr-stream-status-label {
   font-size: 12px;
   color: var(--nr-text-secondary, #9aa0ac);
+  white-space: nowrap;
+}
+
+/* 429 重试/切换倒计时提示条（ZCode 对齐）：琥珀色系区分于常规流式状态 */
+.nr-retry-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px 5px 10px;
+  margin: 0 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(230, 160, 60, 0.35);
+  background: rgba(230, 160, 60, 0.1);
+  max-width: 100%;
+}
+
+.nr-retry-notice-label {
+  font-size: 12px;
+  color: #d2994a;
   white-space: nowrap;
 }
 
