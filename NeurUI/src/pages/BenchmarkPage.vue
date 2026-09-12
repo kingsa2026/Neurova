@@ -62,10 +62,11 @@
             <span>{{ suiteLabel(record) }}</span>
           </template>
           <template v-if="column.key === 'score'">
-            <a-progress :percent="record.score ?? 0" :stroke-color="record.score >= 80 ? '#10b981' : record.score >= 50 ? '#f59e0b' : '#ef4444'" size="small" />
+            <a-progress v-if="record.score != null" :percent="record.score" :stroke-color="record.score >= 80 ? '#10b981' : record.score >= 50 ? '#f59e0b' : '#ef4444'" size="small" />
+            <span v-else class="mono">—</span>
           </template>
           <template v-if="column.key === 'status'">
-            <a-tag :color="record.status === 'completed' ? 'green' : 'blue'">{{ record.status === 'completed' ? t('benchmark.pass') : (record.status || '-') }}</a-tag>
+            <a-tag :color="record.simulated ? 'orange' : record.status === 'completed' ? 'green' : 'blue'">{{ record.simulated ? 'simulated' : record.status === 'completed' ? t('benchmark.pass') : (record.status || '-') }}</a-tag>
           </template>
         </template>
       </a-table>
@@ -211,11 +212,11 @@ const runBenchmark = async () => {
   if (!selectedSuite.value) return
   running.value = true
   try {
-    await request.post('/benchmark/run', {
+    const res: any = await request.post('/benchmark/run', {
       suite_id: selectedSuite.value.id,
       agent_id: effectiveAgentId.value,
     })
-    message.success(t('common.success'))
+    message.success(res?.message || t('common.success'))
     await fetchResults(selectedSuite.value.id)
   } catch {
     message.error(t('common.error'))
@@ -227,11 +228,11 @@ const runBenchmark = async () => {
 const runSuite = async (suiteId: string) => {
   running.value = true
   try {
-    await request.post('/benchmark/run', {
+    const res: any = await request.post('/benchmark/run', {
       suite_id: suiteId,
       agent_id: effectiveAgentId.value,
     })
-    message.success(t('common.success'))
+    message.success(res?.message || t('common.success'))
     await fetchResults(suiteId)
     await fetchSuites()
   } catch {

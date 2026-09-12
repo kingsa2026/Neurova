@@ -72,7 +72,7 @@
           <!-- Constitution summary -->
           <GlassCard :title="t('growth.constitution')" style="margin-top: 20px">
             <div v-if="constitutionRules.length > 0" class="constitution-preview">
-              <p>{{ constitutionRules.slice(0, 3).map((r: any) => r.rule).join('\n') }}</p>
+              <p>{{ constitutionRules.slice(0, 3).map((r: any) => r.content).join('\n') }}</p>
               <a v-if="constitutionRules.length > 3" class="show-more-link" @click="activeTab = 'constitution'">
                 +{{ constitutionRules.length - 3 }} {{ t('growth.moreRules') || 'more rules' }}
               </a>
@@ -175,14 +175,14 @@
         <a-spin :spinning="loadingConstitution">
           <GlassCard :title="t('growth.rules')">
             <div v-if="constitutionRules.length > 0" class="rules-list">
-              <div v-for="rule in constitutionRules" :key="rule.id" class="rule-item">
+              <div v-for="rule in constitutionRules" :key="rule.rule_id" class="rule-item">
                 <div class="rule-header">
                   <span class="rule-index">{{ rule.priority ?? (constitutionRules.indexOf(rule) + 1) }}</span>
                   <div class="rule-body">
-                    <span class="rule-text">{{ rule.rule }}</span>
+                    <span class="rule-text">{{ rule.content }}</span>
                     <div class="rule-meta">
                       <a-badge :status="rule.enabled ? 'success' : 'default'" :text="rule.enabled ? 'Enabled' : 'Disabled'" />
-                      <span class="rule-date">{{ formatTime(rule.created_at) }}</span>
+                      <span class="rule-date">{{ formatTime(rule.timestamp) }}</span>
                     </div>
                   </div>
                   <div class="rule-actions">
@@ -195,7 +195,7 @@
                     </a-tooltip>
                     <a-popconfirm
                       :title="t('common.delete') + '?'"
-                      @confirm="removeRule(rule.id)"
+                      @confirm="removeRule(rule.rule_id)"
                       :ok-text="t('common.yes')"
                       :cancel-text="t('common.no')"
                     >
@@ -303,7 +303,7 @@ const deletingRule = ref(false)
 const formatPercent = (val: number | undefined) =>
   val !== undefined && val !== null ? `${Math.round(val * 100)}%` : '-'
 
-const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
+const formatTime = (ts: string | number) => ts ? new Date(typeof ts === 'number' ? ts * 1000 : ts).toLocaleString() : ''
 
 const traitColor = (val: number) => {
   if (val >= 0.7) return '#10b981'
@@ -340,7 +340,7 @@ const fetchOverview = async () => {
       }))
     }
 
-    constitutionRules.value = Array.isArray(constitutionRes.data) ? constitutionRes.data : []
+    constitutionRules.value = Array.isArray(constitutionRes) ? constitutionRes : ((constitutionRes as any)?.data?.constitution ?? [])
   } catch (e: any) {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
@@ -438,7 +438,8 @@ const fetchConstitution = async () => {
   loadingConstitution.value = true
   try {
     const res = await growthApi.getConstitution(agentId.value)
-    constitutionRules.value = Array.isArray(res.data) ? res.data : []
+    const list = Array.isArray(res) ? res : ((res as any)?.data?.constitution ?? [])
+    constitutionRules.value = Array.isArray(list) ? list : []
   } catch (e: any) {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
@@ -468,7 +469,7 @@ const addRule = async () => {
 
 const toggleRule = async (rule: ConstitutionRule, enabled: boolean) => {
   try {
-    await growthApi.updateConstitutionRule(rule.id, { enabled })
+    await growthApi.updateConstitutionRule(agentId.value, rule.rule_id, { enabled })
     message.success(t('common.success'))
     await fetchConstitution()
   } catch (e: any) {
@@ -479,7 +480,7 @@ const toggleRule = async (rule: ConstitutionRule, enabled: boolean) => {
 const removeRule = async (ruleId: string) => {
   deletingRule.value = true
   try {
-    await growthApi.deleteConstitutionRule(ruleId)
+    await growthApi.deleteConstitutionRule(agentId.value, ruleId)
     message.success(t('common.success'))
     await fetchConstitution()
   } catch (e: any) {
