@@ -164,11 +164,6 @@ class GeminiNativeClient:
             if chunk.content or chunk.reasoning_content or chunk.finish_reason:
                 yield chunk
 
-    def chat_stream(self, messages, **kwargs):
-        from neurova.llm.providers.anthropic_client import _SyncStreamBridge
-
-        return _SyncStreamBridge(self.chat_stream_async(messages, **kwargs))
-
     def count_tokens(self, text: str) -> int:
         return max(1, len(text or "") // 4)
 
