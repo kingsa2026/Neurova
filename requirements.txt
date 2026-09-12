@@ -61,3 +61,5 @@ prometheus-client
 pyautogui>=0.9.54
 playwright>=1.40.0
 cryptography>=41.0
+paramiko>=3.4.0
+jsonschema>=4.0

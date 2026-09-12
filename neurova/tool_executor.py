@@ -1020,6 +1020,20 @@ class ToolExecutor:
                     result = _guard_rejection
                     return result
 
+            # 工具链升级 T2：schema 约束的后置等价——执行前参数校验，失败拒执行、
+            # 逐字段错误回传 LLM 自纠（与 loops/base.py 解析失败同错误通道）。
+            from neurova.security.tool_arg_validator import validation_enabled, validate_tool_args
+
+            if validation_enabled():
+                params, _arg_errors = validate_tool_args(tool_name, params)
+                if _arg_errors:
+                    result = {
+                        "success": False,
+                        "error": "参数校验未通过: " + "; ".join(_arg_errors),
+                        "param_errors": _arg_errors,
+                    }
+                    return result
+
             # 方案 P0-1.5: 统一治理预检 —— DENY 拦截、SANDBOX 隔离执行、
             # ASK 待确认；ALLOW / 无裁决内容返回 None 放行。
             # E3（P2）：MCP 工具持久授权命中 → 免审批直达（等价审批重放的
