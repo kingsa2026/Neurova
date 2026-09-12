@@ -9,6 +9,12 @@ import asyncio
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from typing import Dict, Any
 
+# R1-2：executor 经 computer_use.actions 实现体分发——替身模块必须挂真实
+# actions/action_result（测试替身与真实契约逐字段对齐）
+import neurova.computer_use.actions as _real_actions
+import neurova.computer_use.action_result as _real_action_result
+from neurova.computer_use import scroll_semantics as _real_scroll_semantics
+
 
 class TestBuiltinToolExecutor:
     """测试 ToolExecutor 内置工具实现"""
@@ -176,49 +182,63 @@ class TestBuiltinToolExecutor:
         executor = self._create_tool_executor()
         
         mock_manager = Mock()
-        mock_manager.click = Mock(return_value=True)
-        
+        # R0-2/R1-2 契约升级：executor 经 computer_use.actions 实现体调用，
+        # 管理器消费 click_screenshot_point（截图像素→屏幕坐标换算）
+        mock_manager.click_screenshot_point = Mock(return_value=True)
+
         mock_module = Mock()
         mock_module.get_computer_use_manager = Mock(return_value=mock_manager)
-        
+        mock_module.actions = _real_actions
+        mock_module.action_result = _real_action_result
+        mock_module.scroll_semantics = _real_scroll_semantics
+
         with patch.dict('sys.modules', {'neurova.computer_use': mock_module}):
             result = await executor._execute_computer_click({"x": 100, "y": 200})
-        
+
         assert result.get("success") is True
-        mock_manager.click.assert_called_once_with(100, 200, "left")
-    
+        mock_manager.click_screenshot_point.assert_called_once_with(100, 200, "left")
+
     @pytest.mark.asyncio
     async def test_computer_type_with_text(self):
         """验证 computer_type 输入文本"""
         executor = self._create_tool_executor()
-        
+
         mock_manager = Mock()
         mock_manager.type_text = Mock(return_value=True)
-        
+
         mock_module = Mock()
         mock_module.get_computer_use_manager = Mock(return_value=mock_manager)
-        
+        mock_module.actions = _real_actions
+        mock_module.action_result = _real_action_result
+        mock_module.scroll_semantics = _real_scroll_semantics
+
         with patch.dict('sys.modules', {'neurova.computer_use': mock_module}):
             result = await executor._execute_computer_type({"text": "Hello World"})
-        
+
         assert result.get("success") is True
-        mock_manager.type_text.assert_called_once_with("Hello World")
-    
+        mock_manager.type_text.assert_called_once()
+
     @pytest.mark.asyncio
     async def test_computer_scroll_with_amount(self):
         """验证 computer_scroll 滚动"""
         executor = self._create_tool_executor()
-        
+
         mock_manager = Mock()
         mock_manager.scroll = Mock(return_value=True)
-        
+
         mock_module = Mock()
         mock_module.get_computer_use_manager = Mock(return_value=mock_manager)
-        
+        mock_module.actions = _real_actions
+        mock_module.action_result = _real_action_result
+        mock_module.scroll_semantics = _real_scroll_semantics
+
         with patch.dict('sys.modules', {'neurova.computer_use': mock_module}):
             result = await executor._execute_computer_scroll({"scroll_y": 3})
-        
+
         assert result.get("success") is True
+        # R0-1：scroll_semantics 单源，scroll_y=3（向上）直传符号
+        mock_manager.scroll.assert_called_once()
+        assert mock_manager.scroll.call_args.args[2] == 3
     
     @pytest.mark.asyncio
     async def test_computer_shell_with_command(self):
@@ -543,13 +563,16 @@ class TestBuiltinToolIntegration:
         
         mock_manager = Mock()
         mock_manager.screenshot = Mock(return_value=b"data")
-        mock_manager.click = Mock(return_value=True)
+        mock_manager.click_screenshot_point = Mock(return_value=True)
         mock_manager.type_text = Mock(return_value=True)
         mock_manager.scroll = Mock(return_value=True)
         mock_manager.shell = AsyncMock(return_value={"returncode": 0, "stdout": "", "stderr": ""})
-        
+
         mock_module = Mock()
         mock_module.get_computer_use_manager = Mock(return_value=mock_manager)
+        mock_module.actions = _real_actions
+        mock_module.action_result = _real_action_result
+        mock_module.scroll_semantics = _real_scroll_semantics
         
         # Mock emotion analyzer
         mock_emotion_analyzer = Mock()

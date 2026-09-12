@@ -168,6 +168,9 @@ class Test404Reconnect(unittest.TestCase):
         client._init_lock = __import__("threading").RLock()
         client._retry_guards = {}
         client._last_404_reconnect = {}
+        # 404 重连簿记（7afaedde 起 _reconnect_provider 用）：骨架缺它会让
+        # fire-and-forget 重发现任务在 add 时 AttributeError
+        client._pending_tasks = set()
         return client
 
     def test_404_triggers_refresh_once(self):
@@ -250,6 +253,10 @@ class TestAutoFailoverSwitch(unittest.TestCase):
         client._init_lock = __import__("threading").RLock()
         client._retry_guards = {}
         client._last_404_reconnect = {}
+        client._pending_tasks = set()
+        # 404 重连的同步 refresh_provider 会用 MagicMock provider 重建真客户端
+        # （拉真 HTTP），failover 应解析原脚本化客户端——本域测试桩掉重建
+        client.refresh_provider = MagicMock()
         return client
 
     def test_429_switches_to_next_model(self):
@@ -287,13 +294,13 @@ class TestAutoFailoverSwitch(unittest.TestCase):
 
         with patch.object(
             MultiModelLLMClient, "_next_failover_client", autospec=True,
-            side_effect=lambda self, failed: self._clients.get("p1/model-b"),
+            side_effect=lambda self, failed, excluded=None: self._clients.get("p1/model-b"),
         ) as next_mock:
             result = asyncio_run(client.chat([{"role": "user", "content": "hi"}]))
         self.assertFalse(result["success"])
-        # model-b 也失败后：_next_failover_client 第二次被调用返回同一 model-b？不会——
-        # exclude 会累积，model-b 已在排除集。此处 side_effect 固定返回 model-b 会导致
-        # 死循环风险，因此实现必须按"排除集已含全部候选"终止。
+        # 排除集自 2026-09-07 起作为第二参传入（旧 lambda 签名缺它 → TypeError）；
+        # 有界性由 max_attempts=len(_clients)=3 保证：stub 恒回 model-b 也最多
+        # 触发 failover 决策 len-1 次
         self.assertLessEqual(next_mock.call_count, 3)
 
     def test_explicit_provider_no_failover(self):

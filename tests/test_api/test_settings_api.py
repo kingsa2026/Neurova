@@ -41,11 +41,14 @@ def app() -> FastAPI:
     application = FastAPI()
     application.include_router(settings_router)
 
-    # PUT 端点依赖 get_current_user，override 为测试用户
-    from neurova.api.auth import get_current_user
+    # 端点依赖 neurova.api.deps.get_current_user（b1dfb744 起从 auth 迁入，
+    # 并加 require_admin 写锁）；require_admin→require_role→check_role 内部
+    # 同样 Depends(get_current_user)，故覆盖 deps 对象 + 假用户带 admin 角色
+    # 即可同时放行 GET（登录）与 PUT（管理员）。
+    from neurova.api.deps import get_current_user
 
     async def _fake_current_user() -> dict:
-        return {"user_id": "test_user", "username": "tester"}
+        return {"user_id": "test_user", "username": "tester", "role": "admin"}
 
     application.dependency_overrides[get_current_user] = _fake_current_user
     return application

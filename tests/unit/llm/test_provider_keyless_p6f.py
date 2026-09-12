@@ -35,7 +35,13 @@ def test_discover_missing_key_hint_respects_provider_type(provider_id, expect_hi
         models=[],
     )
     fake_manager.get_provider = MagicMock(return_value=fake_cfg)
-    fake_manager.fetch_provider_models = AsyncMock(return_value=[])
+    # 接口改名同步（B1-6）：discover_models 端点现走结构化
+    # discover_provider_models（fetch_provider_models 为旧名）
+    fake_manager.discover_provider_models = AsyncMock(return_value={
+        "success": False, "models": [], "discovered_count": 0,
+        "last_synced_at": None, "used_static_fallback": False,
+        "error_kind": None, "message": "",
+    })
     with patch.object(provider_module, "_get_provider_manager", return_value=fake_manager):
         request = MagicMock()
         request.state.request_id = "hint-check"

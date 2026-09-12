@@ -69,10 +69,22 @@ def _chat_via(client, messages=None):
 
 @pytest.fixture(autouse=True)
 def _isolate_guards():
-    """每个测试独立熔断器缓存（跨测试隔离）"""
+    """每个测试独立熔断器缓存（跨测试隔离）。
+
+    MultiModelLLMClient 是单例 __new__——实例级 `_retry_guards_inst` 在测试间
+    共享，必须显式重置；类属性 `_retry_guards` 仅旧引用兜底（2026-09-11 修：
+    旧实现只清类属性，单例实例上的熔断器状态跨测试泄漏，CircuitBreaker 组
+    跑完后 IncrementAccounting 组撞打开态熔断器误报 increment(False)）。
+    """
     MultiModelLLMClient._retry_guards = {}
+    inst = MultiModelLLMClient._instance
+    if inst is not None and hasattr(inst, "_retry_guards_inst"):
+        inst._retry_guards_inst = {}
     yield
     MultiModelLLMClient._retry_guards = {}
+    inst = MultiModelLLMClient._instance
+    if inst is not None and hasattr(inst, "_retry_guards_inst"):
+        inst._retry_guards_inst = {}
 
 
 class TestRetryWiring:
