@@ -197,6 +197,17 @@ class TrajectoryRecorder:
         span_id: Optional[str] = None,
     ) -> None:
         """记录一个事件"""
+        # 2026-09-12 根因修复：chat_pipeline 以字符串传 event_type，而持久化
+        # TrajectoryEvent.to_dict 读 .value → AttributeError 被 save_trace 的
+        # except 吞掉，但 open('w') 已把文件截断成 0 字节（实测 trajectories/
+        # 1525 文件中 1168 个空文件）。入口统一归一为枚举，非法值落 INFO。
+        if isinstance(event_type, str):
+            try:
+                event_type = TrajectoryEventType(event_type)
+            except ValueError:
+                logger.warning("Unknown trajectory event_type %r, fallback to INFO", event_type)
+                event_type = TrajectoryEventType.INFO
+
         if not self._enabled:
             return
 
@@ -295,8 +306,13 @@ class TrajectoryRecorder:
             save_path = trace_dir / f"{trace_id}.json"
 
         try:
-            with open(save_path, "w", encoding="utf-8") as f:
-                json.dump(trace.to_dict(), f, indent=2, ensure_ascii=False)
+            # 先序列化再原子写：序列化异常绝不截断已有旧文件
+            # （原实现 open(path,'w') 在 json.dump 抛错后留下 0 字节残档）。
+            payload = json.dumps(trace.to_dict(), indent=2, ensure_ascii=False)
+            tmp_path = save_path.with_name(save_path.name + ".tmp")
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(payload)
+            tmp_path.replace(save_path)
 
             # 更新索引
             self._saved_traces.append(
@@ -397,6 +413,8 @@ class TrajectoryRecorder:
                                     "session_id": trace.session_id,
                                     "created_at": trace.start_time,
                                     "duration_ms": trace.total_duration_ms,
+                                    # 2026-09-12 供 /v1/trace 列表端点派生 status/steps_count
+                                    "stats": trace.stats,
                                 }
                             )
 

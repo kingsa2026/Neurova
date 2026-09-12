@@ -100,35 +100,22 @@ async def batch_rag_retrieve(body: dict, request: Request):
 
 @router.post("/gaps/analyze")
 async def analyze_knowledge_gaps(body: AnalyzeGapsRequest, request: Request):
-    """分析知识盲点"""
-    gaps = [
-        {
-            "topic": body.topic or "general",
-            "access_count": 10,
-            "knowledge_depth": "low",
-            "suggestion": "Consider adding more structured knowledge on this topic",
-        }
-    ]
-    return {
-        "code": 0,
-        "message": "success",
-        "data": {"gaps": gaps, "analyzed_at": datetime.datetime.now(datetime.timezone.utc).isoformat()},
-    }
+    """分析知识盲点
+
+    2026-09-12 P7 诚实化：原实现回显一条编造 gap（access_count=10/depth=low
+    写死，不做任何真实分析）。盲点检测未实现 → 501。
+    """
+    raise HTTPException(status_code=501, detail="知识盲点分析未实现（原返回编造数据）")
 
 
 @router.post("/learn")
 async def learn_from_knowledge(body: LearnRequest, request: Request):
-    """从知识库学习特定主题"""
-    record = {
-        "id": str(uuid.uuid4())[:12],
-        "topic": body.topic,
-        "depth": body.depth,
-        "learned_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "items_learned": 0,
-        "status": "completed",
-    }
-    _learning_records.append(record)
-    return {"code": 0, "message": "Learning complete", "data": record}
+    """从知识库学习特定主题
+
+    2026-09-12 P7 诚实化：原实现 items_learned=0 却谎报 status=completed，
+    并向内存 _learning_records 写假记录。学习闭环未接线 → 501。
+    """
+    raise HTTPException(status_code=501, detail="知识学习闭环未实现（原谎报 completed）")
 
 
 @router.get("/evolution/progress")

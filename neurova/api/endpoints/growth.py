@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from neurova.api.auth import get_current_user, Depends
+from neurova.api.endpoints._pydantic_compat import safe_model_dump
 from pydantic import BaseModel, Field
 
 logger = get_logger(__name__)
@@ -153,7 +154,18 @@ class ConstitutionRuleCreate(BaseModel):
 
     rule_type: str = Field(default="behavior", description="规则类型")
     content: str = Field(..., description="规则内容")
-    priority: int = Field(default=0, ge=0, le=10, description="优先级")
+    priority: int = Field(default=0, ge=0, le=100, description="优先级")
+    # FE 启用/禁用开关（toggle）：None = 不改，缺省新建为 enabled True
+    enabled: Optional[bool] = Field(default=None, description="是否启用")
+
+
+class ConstitutionRuleUpdate(BaseModel):
+    """局部更新宪法规则请求（toggle 只传 enabled，不得覆写 content）"""
+
+    rule_type: Optional[str] = None
+    content: Optional[str] = None
+    priority: Optional[int] = Field(default=None, ge=0, le=100)
+    enabled: Optional[bool] = None
 
 
 def _get_request_id(request: Request) -> str:
@@ -799,23 +811,64 @@ async def evolve_personality(
     agent_id: str = Query(default="default", description="Agent ID"),
     learning_data: Dict[str, Any] = {},
 ):
-    """根据学习数据进化人格"""
+    """根据学习数据进化人格
+
+    2026-09-12 诚实化：此前 TODO 未实现却直返成功壳（谎报 code 0）。
+    """
     request_id = _get_request_id(request)
 
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    # TODO: 实现人格进化逻辑
-    return {
-        "code": 0,
-        "message": "Personality evolution not implemented yet",
-        "data": {
-            "agent_id": agent_id,
-            "learning_data": learning_data,
-        },
-        "request_id": request_id,
-    }
+    raise HTTPException(
+        status_code=501,
+        detail="人格自动进化尚未实现（Personality evolution not implemented）",
+    )
+
+
+# 宪法规则独立持久源（2026-09-12 P1 台账清剿）：
+# 原读写 agent.constitution 内存属性（构造默认 ""，add 时 setattr 成 list）
+# → 无落盘重启即丢，且 FE growth.ts 路径 /constitution[/{id}] 与 BE
+# /constitution/rules[/{id}] 错位增删改恒 404。规则落
+# data/constitution/{agent_id}.json（与 personality 特质持久同源风格）。
+
+_CONSTITUTION_DIR = "data/constitution"
+
+
+def _constitution_path(agent_id: str) -> "pathlib.Path":
+    safe = str(agent_id).replace("/", "_").replace("\\", "_")
+    return pathlib.Path(_CONSTITUTION_DIR) / f"{safe}.json"
+
+
+def _load_constitution_rules(agent_id: str) -> List[Dict[str, Any]]:
+    try:
+        with open(_constitution_path(agent_id), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+
+def _save_constitution_rules(agent_id: str, rules: List[Dict[str, Any]]) -> None:
+    p = _constitution_path(agent_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(rules, f, ensure_ascii=False, indent=2)
+    tmp.replace(p)
+
+
+def _rule_to_model(agent_id: str, rule: Dict[str, Any]) -> ConstitutionRule:
+    return ConstitutionRule(
+        rule_id=rule.get("rule_id", ""),
+        agent_id=agent_id,
+        timestamp=rule.get("timestamp", 0.0),
+        rule_type=rule.get("rule_type", "behavior"),
+        content=rule.get("content", ""),
+        priority=rule.get("priority", 0),
+        enabled=rule.get("enabled", True),
+    )
 
 
 @router.get("/constitution")
@@ -823,19 +876,15 @@ async def get_constitution(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
 ):
-    """获取宪法信息"""
+    """获取宪法信息（overview，读持久源）"""
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    constitution = []
-    if hasattr(agent, "constitution") and agent.constitution:
-        constitution = agent.constitution
-
     return {
         "code": 0,
         "message": "success",
-        "data": {"constitution": constitution},
+        "data": {"constitution": _load_constitution_rules(agent_id)},
     }
 
 
@@ -845,16 +894,14 @@ async def update_constitution(
     agent_id: str = Query(default="default", description="Agent ID"),
     constitution: List[Dict[str, Any]] = [],
 ):
-    """更新宪法"""
+    """整表更新宪法（落盘）"""
     request_id = _get_request_id(request)
 
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    if hasattr(agent, "constitution"):
-        agent.constitution = constitution
-
+    _save_constitution_rules(agent_id, constitution)
     return {
         "code": 0,
         "message": "Constitution updated",
@@ -873,23 +920,7 @@ async def get_constitution_rules(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    rules = []
-    if hasattr(agent, "constitution") and agent.constitution:
-        for i, rule in enumerate(agent.constitution):
-            if isinstance(rule, dict):
-                rules.append(
-                    ConstitutionRule(
-                        rule_id=rule.get("rule_id", str(uuid.uuid4())),
-                        agent_id=agent_id,
-                        timestamp=rule.get("timestamp", time.time()),
-                        rule_type=rule.get("rule_type", "behavior"),
-                        content=rule.get("content", ""),
-                        priority=rule.get("priority", 0),
-                        enabled=rule.get("enabled", True),
-                    )
-                )
-
-    return rules
+    return [_rule_to_model(agent_id, r) for r in _load_constitution_rules(agent_id)]
 
 
 @router.post("/constitution/rules", response_model=ConstitutionRule)
@@ -905,31 +936,19 @@ async def add_constitution_rule(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    rule_id = str(uuid.uuid4())
-    timestamp = time.time()
-
-    if not hasattr(agent, "constitution") or agent.constitution is None:
-        agent.constitution = []
-
-    new_rule = {
-        "rule_id": rule_id,
-        "timestamp": timestamp,
+    rule = {
+        "rule_id": str(uuid.uuid4()),
+        "timestamp": time.time(),
         "rule_type": body.rule_type,
         "content": body.content,
         "priority": body.priority,
-        "enabled": True,
+        "enabled": body.enabled if body.enabled is not None else True,
     }
-    agent.constitution.append(new_rule)
+    rules = _load_constitution_rules(agent_id)
+    rules.append(rule)
+    _save_constitution_rules(agent_id, rules)
 
-    return ConstitutionRule(
-        rule_id=rule_id,
-        agent_id=agent_id,
-        timestamp=timestamp,
-        rule_type=body.rule_type,
-        content=body.content,
-        priority=body.priority,
-        enabled=True,
-    )
+    return _rule_to_model(agent_id, rule)
 
 
 @router.put("/constitution/rules/{rule_id}", response_model=ConstitutionRule)
@@ -937,37 +956,22 @@ async def update_constitution_rule(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
     rule_id: str = Path(..., description="规则ID"),
-    body: ConstitutionRuleCreate = ConstitutionRuleCreate(content=""),
+    body: ConstitutionRuleUpdate = ConstitutionRuleUpdate(),
 ):
-    """更新宪法规则"""
+    """更新宪法规则（局部：只改请求里出现的键）"""
     _get_request_id(request)
 
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    if not hasattr(agent, "constitution") or agent.constitution is None:
-        raise HTTPException(status_code=404, detail="No constitution rules found")
-
-    # 查找并更新规则
-    for rule in agent.constitution:
-        if isinstance(rule, dict) and rule.get("rule_id") == rule_id:
-            rule.update(
-                {
-                    "rule_type": body.rule_type,
-                    "content": body.content,
-                    "priority": body.priority,
-                }
-            )
-            return ConstitutionRule(
-                rule_id=rule_id,
-                agent_id=agent_id,
-                timestamp=rule.get("timestamp", time.time()),
-                rule_type=body.rule_type,
-                content=body.content,
-                priority=body.priority,
-                enabled=rule.get("enabled", True),
-            )
+    updates = {k: v for k, v in safe_model_dump(body).items() if v is not None}
+    rules = _load_constitution_rules(agent_id)
+    for rule in rules:
+        if rule.get("rule_id") == rule_id:
+            rule.update(updates)
+            _save_constitution_rules(agent_id, rules)
+            return _rule_to_model(agent_id, rule)
 
     raise HTTPException(status_code=404, detail=f"Rule '{rule_id}' not found")
 
@@ -985,50 +989,14 @@ async def delete_constitution_rule(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    if not hasattr(agent, "constitution") or agent.constitution is None:
-        raise HTTPException(status_code=404, detail="No constitution rules found")
-
-    # 查找并删除规则
-    for i, rule in enumerate(agent.constitution):
-        if isinstance(rule, dict) and rule.get("rule_id") == rule_id:
-            agent.constitution.pop(i)
-            return {
-                "code": 0,
-                "message": f"Rule '{rule_id}' deleted",
-                "data": {"rule_id": rule_id},
-                "request_id": request_id,
-            }
-
-    raise HTTPException(status_code=404, detail=f"Rule '{rule_id}' not found")
-
-
-@router.post("/constitution/evaluate")
-async def evaluate_against_constitution(
-    request: Request,
-    agent_id: str = Query(default="default", description="Agent ID"),
-    action: str = Query(..., description="待评估的行为"),
-):
-    """评估行为是否符合宪法"""
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-
-    # 简单评估逻辑
-    is_compliant = True
-    violations = []
-
-    if hasattr(agent, "constitution") and agent.constitution:
-        for rule in agent.constitution:
-            if isinstance(rule, dict) and rule.get("enabled", True):
-                # TODO: 实现真正的规则评估逻辑
-                pass
-
+    rules = _load_constitution_rules(agent_id)
+    remaining = [r for r in rules if r.get("rule_id") != rule_id]
+    if len(remaining) == len(rules):
+        raise HTTPException(status_code=404, detail=f"Rule '{rule_id}' not found")
+    _save_constitution_rules(agent_id, remaining)
     return {
         "code": 0,
-        "message": "success",
-        "data": {
-            "action": action,
-            "is_compliant": is_compliant,
-            "violations": violations,
-        },
+        "message": f"Rule '{rule_id}' deleted",
+        "data": {"rule_id": rule_id},
+        "request_id": request_id,
     }

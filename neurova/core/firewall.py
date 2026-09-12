@@ -11,6 +11,7 @@ L2: 文件访问保护
 """
 
 import json
+import os
 from neurova.core.logger import get_logger
 import re
 import threading
@@ -355,12 +356,21 @@ _lock = threading.Lock()
 
 
 def get_firewall(config_path: Optional[str] = None) -> AgentFirewall:
-    """获取全局防火墙实例"""
+    """获取全局防火墙实例
+
+    2026-09-12 P3：此前生产调用方从不传 config_path → AgentFirewall._load/
+    _save_global 早退，经 API 增删的规则只活在内存重启即丢。现默认落盘
+    NEUROVA_FIREWALL_PATH 或 data/firewall.json。
+    """
     global _firewall
     if _firewall is None:
         with _lock:
             if _firewall is None:
-                _firewall = AgentFirewall(config_path=config_path)
+                _firewall = AgentFirewall(
+                    config_path=config_path
+                    or os.environ.get("NEUROVA_FIREWALL_PATH")
+                    or "data/firewall.json"
+                )
     return _firewall
 
 

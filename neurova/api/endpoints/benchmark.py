@@ -100,21 +100,20 @@ async def list_suites():
 
 @router.post("/run")
 async def run_benchmark(body: BenchmarkRunRequest, request: Request):
-    """执行基准测试"""
+    """执行基准测试（2026-09-12 P6 诚实化）
+
+    原实现用 random.randint 伪造分数/延迟并谎称 status=completed——假数据。
+    真实评测执行器（neurova/benchmark 框架 + LLM 答题打分）未接线，属功能
+    决策项（登记台账），本端点不投机实现；现如实记录一次 simulated 运行：
+    仅登记"跑了个模拟"的事实，score 等指标一律 None，不编造数字。
+    """
     suite = next((s for s in _SUITES if s["id"] == body.suite_id), None)
     if not suite:
         raise HTTPException(status_code=404, detail=f"Suite '{body.suite_id}' not found")
 
     user_id = _get_user_id(request)
     run_id = str(uuid.uuid4())
-
-    # Simulate benchmark execution
-    import random
-
-    tasks_completed = suite["tasks"]
-    correct = random.randint(int(tasks_completed * 0.5), int(tasks_completed * 0.95))
-    score = round(correct / tasks_completed * 100, 2)
-    latency_ms = round(random.uniform(50, 500), 2)
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     run_data = {
         "run_id": run_id,
@@ -122,22 +121,27 @@ async def run_benchmark(body: BenchmarkRunRequest, request: Request):
         "suite_name": suite["name"],
         "agent_id": body.agent_id,
         "user_id": user_id,
-        "status": "completed",
-        "score": score,
-        "tasks_total": tasks_completed,
-        "tasks_correct": correct,
-        "avg_latency_ms": latency_ms,
+        "status": "simulated",
+        "simulated": True,
+        "score": None,
+        "tasks_total": suite["tasks"],
+        "tasks_correct": None,
+        "avg_latency_ms": None,
         "tags": body.tags,
         "config": body.config or {},
-        "started_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "completed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "started_at": now,
+        "completed_at": now,
     }
 
     _RUNS_STORE[run_id] = run_data
     _USER_RUNS.setdefault(user_id, []).append(run_id)
 
-    logger.info("Benchmark run %s completed: score=%.1f%%", run_id, score)
-    return {"code": 0, "message": "Benchmark completed", "data": run_data}
+    logger.info("Benchmark simulated run %s recorded (engine not wired)", run_id)
+    return {
+        "code": 0,
+        "message": "Benchmark simulated run recorded — 评测执行器未接线，未产生真实分数",
+        "data": run_data,
+    }
 
 
 @router.get("/runs")

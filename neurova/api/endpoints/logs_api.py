@@ -12,6 +12,9 @@
 
 import datetime
 from neurova.core.logger import get_logger
+import json
+import os
+import pathlib
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -88,20 +91,45 @@ class LogStats(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# In-Memory Store
+# JSON 落盘存储（2026-09-12 P5c：原纯内存 dict 重启即空；
+# neurova.projects.work_log 不存在的死桥已删）
 # ---------------------------------------------------------------------------
+
+_STORE_FILE = os.environ.get("NEUROVA_WORKLOGS_PATH", "data/work_logs.json")
 
 _logs_store: Dict[str, Dict[str, Any]] = {}
 
 
-def _get_wls():
-    """获取工作日志系统"""
+def _load_store() -> None:
     try:
-        from neurova.projects.work_log import WorkLogSystem
+        with open(_STORE_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            _logs_store.update(raw.get("logs", {}) or {})
+    except FileNotFoundError:
+        pass
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to load work logs store: %s", e)
 
-        return WorkLogSystem()
-    except Exception:
-        return None
+
+def _save_store() -> None:
+    p = pathlib.Path(_STORE_FILE)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"logs": _logs_store}, f, indent=2, ensure_ascii=False)
+    tmp.replace(p)
+
+
+def _reboot_load() -> None:
+    """测试钩子：模拟进程重启。"""
+    _logs_store.clear()
+    global _STORE_FILE
+    _STORE_FILE = os.environ.get("NEUROVA_WORKLOGS_PATH", "data/work_logs.json")
+    _load_store()
+
+
+_load_store()
 
 
 def _scoped_logs(user: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -124,21 +152,6 @@ async def create_log(body: LogCreate, current_user: Dict[str, Any] = Depends(get
     now = time.time()
     owner_id = str(current_user.get("user_id", "default"))
 
-    # 尝试使用后端系统
-    wls = _get_wls()
-    if wls and hasattr(wls, "create_log"):
-        try:
-            result = await wls.create_log(
-                title=body.title,
-                content=body.content,
-                category=body.category,
-                tags=body.tags,
-                duration_minutes=body.duration_minutes,
-            )
-            return LogEntry(**result)
-        except Exception as e:
-            logger.warning("WorkLogSystem.create_log failed: %s", e)
-
     # 使用内存存储
     entry = {
         "log_id": log_id,
@@ -152,6 +165,7 @@ async def create_log(body: LogCreate, current_user: Dict[str, Any] = Depends(get
         "created_at": now,
     }
     _logs_store[log_id] = entry
+    _save_store()
     return LogEntry(**entry)
 
 
@@ -165,22 +179,7 @@ async def list_logs(
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """获取日志列表"""
-    # 尝试使用后端系统
-    wls = _get_wls()
-    if wls and hasattr(wls, "list_logs"):
-        try:
-            logs = await wls.list_logs(
-                category=category,
-                tag=tag,
-                start_date=start_date,
-                end_date=end_date,
-                limit=limit,
-            )
-            return [LogEntry(**l) for l in logs]
-        except Exception as e:
-            logger.warning("WorkLogSystem.list_logs failed: %s", e)
-
-    # 使用内存存储
+    # 使用 JSON 落盘存储（S-16 属主隔离）
     logs = _scoped_logs(current_user)
 
     if category:

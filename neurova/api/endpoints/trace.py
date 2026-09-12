@@ -3,461 +3,218 @@ from __future__ import annotations
 """
 轨迹追踪接口 - Trace Endpoint
 
-功能:
-1. 获取轨迹列表 (GET /api/v1/trace)
-2. 获取轨迹详情 (GET /api/v1/trace/{id})
-3. 获取轨迹事件 (GET /api/v1/trace/{id}/events)
-4. 获取轨迹统计 (GET /api/v1/trace/stats)
+数据源（2026-09-12 台账清剿 P2）：chat 管线真实记录器 TrajectoryRecorder
+（neurova/core/trace_recorder.py，trajectories/<user>/<agent>/<session>/<trace>.json）。
+本文件此前自带一套进程内 TraceManager 平行假存储（全仓零写入方 → 列表恒空、
+详情恒 404），与真实链路完全脱钩，已删除；响应形状对齐前端 api/modules/trace.ts：
+
+1. GET /api/v1/trace          列表 {id,name,status,duration_ms,steps_count,started_at}
+2. GET /api/v1/trace/stats    {total,avg_duration_ms,success_rate,avg_steps}
+3. GET /api/v1/trace/{id}     详情 + tool_calls/llm_calls/breakdown/events
+4. GET /api/v1/trace/{id}/events  事件时间轴（同详情 events 字段，兼容保留）
+5. GET /api/v1/trace/{id}/export  JSON 附件（FE exportTrace 原调此路后端缺失）
+
+鉴权（BUG AUDIT S-08 契约保持）：全端点登录即可（非 admin 页面）。
 """
 
 from neurova.core.logger import get_logger
-import threading
-import time
-import uuid
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from neurova.api.deps import get_current_user
 
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_current_user)],)
 
 
-class TraceItem(BaseModel):
-    """轨迹条目"""
+class TraceListItem(BaseModel):
+    """列表条目（FE TraceItem 契约）"""
 
-    trace_id: str
-    agent_id: str
-    session_id: Optional[str] = None
-    start_time: float
-    end_time: Optional[float] = None
-    duration: float = 0.0
-    status: str = "active"
-    event_count: int = 0
-    span_count: int = 0
+    id: str
+    name: str = ""
+    status: str = "completed"
+    duration_ms: float = 0.0
+    steps_count: int = 0
+    started_at: Optional[str] = None
 
 
-@dataclass
-class TraceData:
-    """轨迹数据结构"""
+class TraceStatsOut(BaseModel):
+    """统计（FE TraceStats 契约）"""
 
-    trace_id: str
-    agent_id: str
-    session_id: Optional[str] = None
-    start_time: float = field(default_factory=time.time)
-    end_time: Optional[float] = None
-    duration: float = 0.0
-    status: str = "active"
-    events: List[Dict[str, Any]] = field(default_factory=list)
-    spans: List[Dict[str, Any]] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    total: int = 0
+    avg_duration_ms: float = 0.0
+    success_rate: float = 0.0
+    avg_steps: float = 0.0
 
 
-class TraceManager:
-    """轨迹管理器（内存存储）"""
+def _recorder():
+    from neurova.core.trace_recorder import get_trajectory_recorder
 
-    def __init__(self):
-        """初始化轨迹管理器"""
-        self._traces: Dict[str, TraceData] = {}
-        self._agent_traces: Dict[str, List[str]] = {}  # agent_id -> trace_ids
-        self._lock = threading.RLock()
-
-    def start_trace(
-        self,
-        agent_id: str,
-        session_id: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> TraceData:
-        """开始一个轨迹"""
-        with self._lock:
-            trace_id = str(uuid.uuid4())
-            trace = TraceData(
-                trace_id=trace_id,
-                agent_id=agent_id,
-                session_id=session_id,
-                start_time=time.time(),
-                status="active",
-                metadata=metadata or {},
-            )
-
-            self._traces[trace_id] = trace
-
-            # 添加到agent索引
-            if agent_id not in self._agent_traces:
-                self._agent_traces[agent_id] = []
-            self._agent_traces[agent_id].append(trace_id)
-
-            return trace
-
-    def add_event(
-        self,
-        trace_id: str,
-        event_type: str = "info",
-        message: str = "",
-        data: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        """添加事件到轨迹"""
-        with self._lock:
-            trace = self._traces.get(trace_id)
-            if not trace:
-                return False
-
-            event = {
-                "event_id": str(uuid.uuid4()),
-                "trace_id": trace_id,
-                "timestamp": time.time(),
-                "event_type": event_type,
-                "message": message,
-                "data": data or {},
-            }
-
-            trace.events.append(event)
-            return True
-
-    def add_span(
-        self,
-        trace_id: str,
-        span_name: str,
-        start_time: float,
-        end_time: float,
-        data: Optional[Dict[str, Any]] = None,
-    ) -> bool:
-        """添加跨度到轨迹"""
-        with self._lock:
-            trace = self._traces.get(trace_id)
-            if not trace:
-                return False
-
-            span = {
-                "span_id": str(uuid.uuid4()),
-                "trace_id": trace_id,
-                "name": span_name,
-                "start_time": start_time,
-                "end_time": end_time,
-                "duration": end_time - start_time,
-                "data": data or {},
-            }
-
-            trace.spans.append(span)
-            return True
-
-    def finish_trace(self, trace_id: str) -> bool:
-        """完成轨迹"""
-        with self._lock:
-            trace = self._traces.get(trace_id)
-            if not trace:
-                return False
-
-            trace.end_time = time.time()
-            trace.duration = trace.end_time - trace.start_time
-            trace.status = "completed"
-            return True
-
-    def get_trace(self, trace_id: str) -> Optional[TraceData]:
-        """获取轨迹"""
-        return self._traces.get(trace_id)
-
-    def get_agent_traces(
-        self,
-        agent_id: str,
-        status: Optional[str] = None,
-        limit: int = 20,
-        offset: int = 0,
-    ) -> List[TraceData]:
-        """获取agent的轨迹"""
-        with self._lock:
-            trace_ids = self._agent_traces.get(agent_id, [])
-            traces = []
-
-            for tid in trace_ids:
-                if tid in self._traces:
-                    trace = self._traces[tid]
-
-                    # 应用状态过滤
-                    if status and trace.status != status:
-                        continue
-
-                    traces.append(trace)
-
-            # 按开始时间倒序排序
-            traces.sort(key=lambda t: t.start_time, reverse=True)
-
-            # 应用分页
-            return traces[offset : offset + limit]
-
-    def get_trace_events(
-        self,
-        trace_id: str,
-        event_type: Optional[str] = None,
-        limit: int = 50,
-    ) -> List[Dict[str, Any]]:
-        """获取轨迹事件"""
-        with self._lock:
-            trace = self._traces.get(trace_id)
-            if not trace:
-                return []
-
-            events = trace.events
-
-            # 应用事件类型过滤
-            if event_type:
-                events = [e for e in events if e["event_type"] == event_type]
-
-            # 按时间排序
-            events.sort(key=lambda e: e["timestamp"])
-
-            # 应用限制
-            return events[:limit]
-
-    def get_trace_stats(self, agent_id: str) -> Dict[str, Any]:
-        """获取轨迹统计"""
-        with self._lock:
-            trace_ids = self._agent_traces.get(agent_id, [])
-            traces = [self._traces[tid] for tid in trace_ids if tid in self._traces]
-
-            if not traces:
-                return {
-                    "total_traces": 0,
-                    "active_traces": 0,
-                    "average_duration": 0,
-                    "total_events": 0,
-                    "event_types": {},
-                }
-
-            # 计算统计
-            total_traces = len(traces)
-            active_traces = sum(1 for t in traces if t.status == "active")
-            completed_traces = [t for t in traces if t.status == "completed"]
-
-            # 计算平均时长
-            if completed_traces:
-                avg_duration = sum(t.duration for t in completed_traces) / len(completed_traces)
-            else:
-                avg_duration = 0
-
-            # 计算事件总数和类型
-            total_events = 0
-            event_types = {}
-
-            for trace in traces:
-                total_events += len(trace.events)
-                for event in trace.events:
-                    event_type = event["event_type"]
-                    event_types[event_type] = event_types.get(event_type, 0) + 1
-
-            return {
-                "total_traces": total_traces,
-                "active_traces": active_traces,
-                "average_duration": avg_duration,
-                "total_events": total_events,
-                "event_types": event_types,
-            }
+    return get_trajectory_recorder()
 
 
-# 全局轨迹管理器单例
-_trace_manager: Optional[TraceManager] = None
-_manager_lock = threading.Lock()
+def _derive_status(stats: Dict[str, Any]) -> str:
+    """stats.status 是 span 状态计数 dict，派生轨迹级状态"""
+    counts = stats.get("status") or {}
+    if isinstance(counts, str):
+        return counts
+    if counts.get("error") or counts.get("failed"):
+        return "failed"
+    if counts.get("running"):
+        return "running"
+    return "completed"
 
 
-def get_trace_manager() -> TraceManager:
-    """获取全局轨迹管理器单例"""
-    global _trace_manager
-    if _trace_manager is None:
-        with _manager_lock:
-            if _trace_manager is None:
-                _trace_manager = TraceManager()
-    return _trace_manager
-
-
-def reset_trace_manager() -> None:
-    """重置全局轨迹管理器（用于测试）"""
-    global _trace_manager
-    with _manager_lock:
-        _trace_manager = None
-
-
-class TraceEvent(BaseModel):
-    """轨迹事件"""
-
-    event_id: str
-    trace_id: str
-    timestamp: float
-    event_type: str = "info"
-    message: str = ""
-    data: Dict[str, Any] = {}
-
-
-class TraceStats(BaseModel):
-    """轨迹统计"""
-
-    total_traces: int = 0
-    active_traces: int = 0
-    average_duration: float = 0
-    total_events: int = 0
-    event_types: Dict[str, int] = {}
-
-
-def _get_request_id(request: Request) -> str:
-    """获取请求ID"""
-    return getattr(request.state, "request_id", str(uuid.uuid4()))
-
-
-def _get_agent(agent_id: str = "default"):
-    """获取 Agent 实例"""
-    from neurova.api.endpoints import get_agent_instance
-
-    return get_agent_instance(agent_id)
-
-
-def _convert_trace_data_to_item(trace: TraceData) -> TraceItem:
-    """将TraceData转换为API响应格式"""
-    return TraceItem(
-        trace_id=trace.trace_id,
-        agent_id=trace.agent_id,
-        session_id=trace.session_id,
-        start_time=trace.start_time,
-        end_time=trace.end_time,
-        duration=trace.duration,
-        status=trace.status,
-        event_count=len(trace.events),
-        span_count=len(trace.spans),
+def _entry_to_item(entry: Dict[str, Any]) -> TraceListItem:
+    stats = entry.get("stats") or {}
+    return TraceListItem(
+        id=entry.get("trace_id", ""),
+        name=entry.get("session_id", "") or "",
+        status=_derive_status(stats),
+        duration_ms=float(entry.get("duration_ms", 0.0) or 0.0),
+        steps_count=int(stats.get("span_count", 0) or 0),
+        started_at=entry.get("created_at"),
     )
 
 
-@router.get("", response_model=List[TraceItem])
+def _flatten_events(trace_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """展平全部 span 的事件（时间升序）为 FE TraceEvent 形状。
+
+    不能只走 root_span.child_spans 树：Trajectory.add_span 仅对
+    parent_span_id 命中的 span 挂树，无父 span 是孤儿（chat 管线多数
+    span 即如此），走树会丢工具/LLM 事件。spans dict 才是全量事实源。
+    """
+    events: List[Dict[str, Any]] = []
+    for span_dict in (trace_dict.get("spans") or {}).values():
+        for ev in span_dict.get("events") or []:
+            data = ev.get("data") or {}
+            message = ""
+            for key in ("user_input", "error_message", "reply_length", "result", "message"):
+                if data.get(key):
+                    message = str(data[key])[:200]
+                    break
+            events.append({
+                "type": str(ev.get("event_type", "info")),
+                "timestamp": str(ev.get("timestamp", "")),
+                "message": message,
+                "data": data,
+                "duration_ms": float(ev.get("duration_ms", 0.0) or 0.0),
+            })
+    events.sort(key=lambda e: e["timestamp"] or "")
+    return events
+
+
+def _build_detail(trace_dict: Dict[str, Any], trace_id: str) -> Dict[str, Any]:
+    stats = trace_dict.get("stats") or {}
+    events = _flatten_events(trace_dict)
+
+    tool_calls = [
+        {
+            "tool": e["data"].get("tool_name", "unknown"),
+            "name": e["data"].get("tool_name", "unknown"),
+            "duration_ms": float(e["data"].get("execution_time", e.get("duration_ms", 0.0)) or 0.0),
+            "success": bool(e["data"].get("success", e["type"] != "tool_call_error")),
+        }
+        for e in events
+        if e["type"] in ("tool_call_end", "tool_call_error")
+    ]
+    llm_calls = [
+        {
+            "model": e["data"].get("model", e["data"].get("model_name", "")),
+            "tokens_in": int(e["data"].get("input_tokens", 0) or 0),
+            "tokens_out": int(e["data"].get("output_tokens", 0) or 0),
+            "duration_ms": float(e["data"].get("duration_ms", 0.0) or 0.0),
+        }
+        for e in events
+        if e["type"] == "llm_call_end"
+    ]
+    return {
+        "id": trace_id,
+        "name": trace_dict.get("session_id", "") or "",
+        "status": _derive_status(stats),
+        "duration_ms": float(trace_dict.get("total_duration_ms", 0.0) or 0.0),
+        "steps_count": int(stats.get("span_count", 0) or 0),
+        "started_at": trace_dict.get("start_time"),
+        "agent_id": trace_dict.get("agent_id", ""),
+        "session_id": trace_dict.get("session_id", ""),
+        "tool_calls": tool_calls,
+        "llm_calls": llm_calls,
+        "breakdown": {
+            "tool_ms": round(sum(t["duration_ms"] for t in tool_calls), 2),
+            "llm_ms": round(sum(l["duration_ms"] for l in llm_calls), 2),
+            "total": float(trace_dict.get("total_duration_ms", 0.0) or 0.0),
+        },
+        "events": events,
+    }
+
+
+@router.get("", response_model=List[TraceListItem])
 async def get_traces(
-    request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
-    status: Optional[str] = Query(default=None, description="状态筛选"),
-    limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
-    offset: int = Query(default=0, ge=0, description="偏移量"),
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    limit: int = Query(default=50, ge=1, le=200, description="数量限制"),
 ):
-    """获取轨迹列表（BUG AUDIT S-08: 原零鉴权; 前端 AgentTrajectory/AgentTrace
-    为非 admin 页面调用 → 收口为登录即可）"""
+    """获取轨迹列表（真实数据源：TrajectoryRecorder 落盘轨迹）"""
     try:
-        # 获取轨迹管理器
-        manager = get_trace_manager()
-
-        # 获取轨迹列表
-        traces = manager.get_agent_traces(
-            agent_id=agent_id,
-            status=status,
-            limit=limit,
-            offset=offset,
-        )
-
-        # 转换为API格式
-        return [_convert_trace_data_to_item(trace) for trace in traces]
-
-    except Exception as e:
+        entries = _recorder().list_traces(agent_id=agent_id, limit=limit)
+        items = [_entry_to_item(e) for e in entries]
+        items.sort(key=lambda i: i.started_at or "", reverse=True)
+        return items
+    except Exception as e:  # noqa: BLE001
         logger.exception("Failed to get traces: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get traces: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get traces: {str(e)}")
 
 
-@router.get("/stats", response_model=TraceStats)
+@router.get("/stats", response_model=TraceStatsOut)
 async def get_trace_stats(
-    request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
-    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """获取轨迹统计"""
+    """获取轨迹统计（聚合真实轨迹）"""
     try:
-        # 获取轨迹管理器
-        manager = get_trace_manager()
-
-        # 获取轨迹统计
-        stats = manager.get_trace_stats(agent_id)
-
-        return TraceStats(
-            total_traces=stats["total_traces"],
-            active_traces=stats["active_traces"],
-            average_duration=stats["average_duration"],
-            total_events=stats["total_events"],
-            event_types=stats["event_types"],
+        items = [_entry_to_item(e) for e in _recorder().list_traces(agent_id=agent_id, limit=1000)]
+        if not items:
+            return TraceStatsOut()
+        total = len(items)
+        completed = sum(1 for i in items if i.status == "completed")
+        return TraceStatsOut(
+            total=total,
+            avg_duration_ms=round(sum(i.duration_ms for i in items) / total, 2),
+            success_rate=round(completed / total, 4),
+            avg_steps=round(sum(i.steps_count for i in items) / total, 2),
         )
-
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         logger.exception("Failed to get trace stats: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get trace stats: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to get trace stats: {str(e)}")
 
 
-@router.get("/{trace_id}", response_model=TraceItem)
-async def get_trace(
-    request: Request,
-    trace_id: str = Path(..., description="轨迹ID"),
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """获取单个轨迹详情"""
-    try:
-        # 获取轨迹管理器
-        manager = get_trace_manager()
-
-        # 获取轨迹
-        trace = manager.get_trace(trace_id)
-
-        if not trace:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Trace '{trace_id}' not found")
-
-        return _convert_trace_data_to_item(trace)
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to get trace: %s", e)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get trace: {str(e)}")
+@router.get("/{trace_id}")
+async def get_trace(trace_id: str = Path(..., description="轨迹ID")):
+    """获取单个轨迹详情（tool_calls/llm_calls/breakdown/events 按 FE TraceDetail 契约）"""
+    trace = _recorder().load_trace(trace_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail=f"Trace '{trace_id}' not found")
+    return _build_detail(trace.to_dict(), trace_id)
 
 
-@router.get("/{trace_id}/events", response_model=List[TraceEvent])
-async def get_trace_events(
-    request: Request,
-    trace_id: str = Path(..., description="轨迹ID"),
-    event_type: Optional[str] = Query(default=None, description="事件类型筛选"),
-    limit: int = Query(default=50, ge=1, le=500, description="数量限制"),
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """获取轨迹事件"""
-    try:
-        # 获取轨迹管理器
-        manager = get_trace_manager()
+@router.get("/{trace_id}/events")
+async def get_trace_events(trace_id: str = Path(..., description="轨迹ID")):
+    """获取轨迹事件时间轴（S-08 契约路由保留；数据源同详情 events）"""
+    trace = _recorder().load_trace(trace_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail=f"Trace '{trace_id}' not found")
+    return _build_detail(trace.to_dict(), trace_id)["events"]
 
-        # 检查轨迹是否存在
-        trace = manager.get_trace(trace_id)
-        if not trace:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Trace '{trace_id}' not found")
 
-        # 获取事件
-        events = manager.get_trace_events(
-            trace_id=trace_id,
-            event_type=event_type,
-            limit=limit,
-        )
-
-        # 转换为API格式
-        result = []
-        for event in events:
-            trace_event = TraceEvent(
-                event_id=event["event_id"],
-                trace_id=event["trace_id"],
-                timestamp=event["timestamp"],
-                event_type=event["event_type"],
-                message=event["message"],
-                data=event["data"],
-            )
-            result.append(trace_event)
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("Failed to get trace events: %s", e)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to get trace events: {str(e)}"
-        )
+@router.get("/{trace_id}/export")
+async def export_trace(trace_id: str = Path(..., description="轨迹ID")):
+    """导出完整轨迹 JSON（FE exportTrace 按钮；原后端无此路由恒 404）"""
+    trace = _recorder().load_trace(trace_id)
+    if trace is None:
+        raise HTTPException(status_code=404, detail=f"Trace '{trace_id}' not found")
+    return JSONResponse(
+        content=trace.to_dict(),
+        headers={"Content-Disposition": f"attachment; filename=trace_{trace_id}.json"},
+    )

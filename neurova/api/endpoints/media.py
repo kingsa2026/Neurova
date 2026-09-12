@@ -5,7 +5,7 @@ Media Storage API - 媒体存储管理接口
 - POST /api/v1/media/save - 保存媒体文件
 - GET /api/v1/media/{media_id} - 获取媒体文件
 - GET /api/v1/media/{media_id}/metadata - 获取媒体元数据
-- GET /api/v1/media/list - 列出媒体文件
+- GET /api/v1/media/list - 列出媒体文件（支持 search 过滤 filename/media_id）
 - DELETE /api/v1/media/{media_id} - 删除媒体文件
 - POST /api/v1/media/batch-delete - 批量删除媒体文件
 - GET /api/v1/media/stats/{agent_id} - 获取存储统计
@@ -19,6 +19,7 @@ Media Storage API - 媒体存储管理接口
 from __future__ import annotations
 
 from neurova.core.logger import get_logger
+import json
 import os
 import re
 import time
@@ -51,15 +52,6 @@ class SaveMediaRequest(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict, description="附加元数据")
 
 
-class MediaListRequest(BaseModel):
-    """媒体列表请求"""
-
-    agent_id: str = Field(default="default", description="Agent ID")
-    media_type: Optional[str] = Field(default=None, description="媒体类型筛选")
-    limit: int = Field(default=50, le=200, description="返回数量")
-    offset: int = Field(default=0, description="偏移量")
-
-
 class BatchDeleteRequest(BaseModel):
     """批量删除请求（F-1 契约对齐：NeurUI batchDeleteMedia）"""
 
@@ -75,34 +67,13 @@ class UpdateConfigRequest(BaseModel):
     enable_compression: Optional[bool] = Field(default=None, description="是否启用压缩")
 
 
-class MediaInfo(BaseModel):
-    """媒体信息"""
-
-    media_id: str
-    filename: str
-    media_type: str
-    mime_type: str
-    size: int
-    agent_id: str
-    user_id: Optional[str] = None
-    memory_id: Optional[str] = None
-    storage_path: str
-    created_at: float
-    metadata: Dict[str, Any] = {}
-
-
-class MediaStats(BaseModel):
-    """媒体统计"""
-
-    total_files: int
-    total_size: int
-    by_type: Dict[str, Dict[str, Any]]
-    by_agent: Dict[str, Dict[str, Any]]
-
-
 # ---------------------------------------------------------------------------
-# In-Memory Store
+# 持久化存储（2026-09-12 P8：原纯内存——上传文件字节在盘上但索引重启即丢，
+# AgentMediaPage 列表恒空且孤儿文件不可管；config 保存同样不落盘）
 # ---------------------------------------------------------------------------
+
+_INDEX_FILE = os.environ.get("NEUROVA_MEDIA_INDEX_PATH", "data/media_index.json")
+_CONFIG_FILE = os.environ.get("NEUROVA_MEDIA_CONFIG_PATH", "data/media_config.json")
 
 _media_store: Dict[str, Dict[str, Any]] = {}
 _media_config: Dict[str, Any] = {
@@ -113,6 +84,58 @@ _media_config: Dict[str, Any] = {
     "created_at": time.time(),
     "updated_at": time.time(),
 }
+
+
+def _load_index() -> None:
+    try:
+        with open(_INDEX_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+        if isinstance(raw, dict):
+            # 重启后磁盘文件被外部清理的行剔除（files_api hydrate 同口径）
+            for mid, rec in (raw.get("media", {}) or {}).items():
+                sp = rec.get("storage_path")
+                if sp and not Path(os.path.abspath(sp)).exists():
+                    continue
+                _media_store[mid] = rec
+    except FileNotFoundError:
+        pass
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to load media index: %s", e)
+
+
+def _save_index() -> None:
+    p = Path(_INDEX_FILE)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(
+        json.dumps({"media": _media_store}, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+    tmp.replace(p)
+
+
+def _load_config() -> None:
+    try:
+        with open(_CONFIG_FILE, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+        if isinstance(saved, dict):
+            _media_config.update(saved)
+    except FileNotFoundError:
+        pass
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to load media config: %s", e)
+
+
+def _save_config() -> None:
+    p = Path(_CONFIG_FILE)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(json.dumps(_media_config, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(p)
+
+
+_load_index()
+_load_config()
 
 # ---------------------------------------------------------------------------
 # Helper Functions
@@ -189,6 +212,7 @@ def _remove_media_entry(media_id: str) -> Optional[Dict[str, Any]]:
         logger.warning("删除媒体磁盘文件失败 %s: %s", disk_path, e)
 
     del _media_store[media_id]
+    _save_index()
     return media
 
 
@@ -285,6 +309,7 @@ async def save_media(
     }
 
     _media_store[media_id] = media_info
+    _save_index()
 
     return {
         "code": 0,
@@ -297,14 +322,26 @@ async def save_media(
 async def list_media(
     agent_id: str = Query(default="default", description="Agent ID"),
     media_type: Optional[str] = Query(default=None, description="媒体类型筛选"),
+    search: Optional[str] = Query(
+        default=None, description="搜索关键词（不区分大小写匹配 filename/media_id，空串视同不过滤）"
+    ),
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0),
 ):
-    """列出媒体文件"""
+    """列出媒体文件（search 后端过滤，total 反映过滤后总数，分页语义不变）。"""
     media_list = [m for m in _media_store.values() if m.get("agent_id") == agent_id]
 
     if media_type:
         media_list = [m for m in media_list if m.get("media_type") == media_type]
+
+    # 台账 2026-09-11 ③：搜索后端化——旧前端过滤只覆盖已加载 limit 页，
+    # 大数据量搜不到未加载条目。filename/media_id 不区分大小写子串匹配。
+    q = (search or "").strip().lower()
+    if q:
+        media_list = [
+            m for m in media_list
+            if q in m.get("filename", "").lower() or q in m.get("media_id", "").lower()
+        ]
 
     # 按创建时间降序排序
     media_list.sort(key=lambda x: x.get("created_at", 0), reverse=True)
@@ -346,6 +383,7 @@ async def update_config(body: UpdateConfigRequest):
         _media_config["enable_compression"] = body.enable_compression
 
     _media_config["updated_at"] = time.time()
+    _save_config()
 
     return {
         "code": 0,
@@ -452,7 +490,12 @@ async def delete_media(media_id: str):
 
 @router.get("/stats/{agent_id}")
 async def get_media_stats(agent_id: str):
-    """获取媒体存储统计信息"""
+    """获取媒体存储统计信息。
+
+    台账 2026-09-11 ⑤：前端无 /stats 消费（getMediaStats 已移除且 vitest 锁定），
+    故有意不补 GET /stats 单段变体——单段字面路由若新增须注册在 /{media_id}
+    之前（守卫见 tests/unit/api/test_media_route_order_guard.py）。
+    """
     agent_media = [m for m in _media_store.values() if m.get("agent_id") == agent_id]
 
     total_files = len(agent_media)

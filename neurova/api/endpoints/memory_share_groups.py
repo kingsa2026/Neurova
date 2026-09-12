@@ -21,6 +21,17 @@ logger = get_logger(__name__)
 
 router = APIRouter(dependencies=[Depends(get_current_user)],prefix="/memory-share-groups", tags=["memory-share-groups"])
 
+# P7（2026-09-12）：ShareGroupManager 自带 JSON 持久化，但原端点调用
+# get_share_group_manager() 从不传 storage_path（None → _save_to_file 直接
+# return）→ 持久化能力存在却从未接线，恒内存假保存。现缺省传真实路径。
+_STORE_PATH = "data/memory_share_groups.json"
+
+
+def _manager():
+    import os
+
+    return get_share_group_manager(os.environ.get("NEUROVA_SHARE_GROUPS_PATH") or _STORE_PATH)
+
 
 # ── 请求/响应模型 ──────────────────────────────────────────────────────────────
 
@@ -72,7 +83,7 @@ class RemoveAgentRequest(BaseModel):
 @router.get("", response_model=List[ShareGroupResponse])
 async def list_share_groups():
     """获取所有共享组"""
-    manager = get_share_group_manager()
+    manager = _manager()
     groups = manager.list_groups()
     return [group.to_dict() for group in groups]
 
@@ -80,7 +91,7 @@ async def list_share_groups():
 @router.post("", response_model=ShareGroupResponse)
 async def create_share_group(request: ShareGroupCreate):
     """创建共享组"""
-    manager = get_share_group_manager()
+    manager = _manager()
 
     # 验证 agent_ids 不为空
     if not request.agent_ids:
@@ -103,7 +114,7 @@ async def create_share_group(request: ShareGroupCreate):
 @router.get("/{group_id}", response_model=ShareGroupResponse)
 async def get_share_group(group_id: str):
     """获取共享组详情"""
-    manager = get_share_group_manager()
+    manager = _manager()
     group = manager.get_group(group_id)
     if not group:
         raise HTTPException(status_code=404, detail="共享组不存在")
@@ -113,7 +124,7 @@ async def get_share_group(group_id: str):
 @router.put("/{group_id}", response_model=ShareGroupResponse)
 async def update_share_group(group_id: str, request: ShareGroupUpdate):
     """更新共享组信息"""
-    manager = get_share_group_manager()
+    manager = _manager()
     group = manager.update_group(
         group_id=group_id,
         name=request.name,
@@ -128,7 +139,7 @@ async def update_share_group(group_id: str, request: ShareGroupUpdate):
 @router.delete("/{group_id}")
 async def delete_share_group(group_id: str):
     """删除共享组"""
-    manager = get_share_group_manager()
+    manager = _manager()
     success = manager.delete_group(group_id)
     if not success:
         raise HTTPException(status_code=404, detail="共享组不存在")
@@ -138,7 +149,7 @@ async def delete_share_group(group_id: str):
 @router.post("/{group_id}/agents")
 async def add_agent_to_group(group_id: str, request: AddAgentRequest):
     """将 Agent 添加到共享组"""
-    manager = get_share_group_manager()
+    manager = _manager()
     success = manager.add_agent_to_group(group_id, request.agent_id)
     if not success:
         raise HTTPException(status_code=404, detail="共享组不存在")
@@ -148,7 +159,7 @@ async def add_agent_to_group(group_id: str, request: AddAgentRequest):
 @router.delete("/{group_id}/agents/{agent_id}")
 async def remove_agent_from_group(group_id: str, agent_id: str):
     """从共享组移除 Agent"""
-    manager = get_share_group_manager()
+    manager = _manager()
     success = manager.remove_agent_from_group(group_id, agent_id)
     if not success:
         raise HTTPException(status_code=404, detail="共享组不存在")
@@ -158,7 +169,7 @@ async def remove_agent_from_group(group_id: str, agent_id: str):
 @router.get("/{group_id}/agents")
 async def get_agents_in_group(group_id: str):
     """获取共享组中的所有 Agent"""
-    manager = get_share_group_manager()
+    manager = _manager()
     agents = manager.get_agents_in_group(group_id)
     if agents is None:
         raise HTTPException(status_code=404, detail="共享组不存在")
@@ -168,7 +179,7 @@ async def get_agents_in_group(group_id: str):
 @router.get("/agent/{agent_id}")
 async def get_groups_for_agent(agent_id: str):
     """获取 Agent 所属的所有共享组"""
-    manager = get_share_group_manager()
+    manager = _manager()
     groups = manager.get_groups_for_agent(agent_id)
     return {
         "agent_id": agent_id,
@@ -179,7 +190,7 @@ async def get_groups_for_agent(agent_id: str):
 @router.get("/agent/{agent_id}/shared-agents")
 async def get_shared_agents(agent_id: str):
     """获取与指定 Agent 共享记忆的所有 Agent"""
-    manager = get_share_group_manager()
+    manager = _manager()
     shared_agents = manager.get_shared_agent_ids(agent_id)
     return {
         "agent_id": agent_id,
@@ -190,7 +201,7 @@ async def get_shared_agents(agent_id: str):
 @router.get("/check/{agent_id_1}/{agent_id_2}")
 async def check_agents_shared(agent_id_1: str, agent_id_2: str):
     """检查两个 Agent 是否在同一共享组中"""
-    manager = get_share_group_manager()
+    manager = _manager()
     is_shared = manager.are_agents_shared(agent_id_1, agent_id_2)
     return {
         "agent_id_1": agent_id_1,
