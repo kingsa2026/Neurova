@@ -29,6 +29,8 @@ export interface AdvancedSettings {
   telemetry: boolean
   /** 全局默认输出预算（单次回复 max_tokens 上限）；131072 = 跟随模型默认 */
   max_output_tokens: number
+  /** 桌面运行权限档：full/sandbox/review/auto */
+  desktop_runtime_mode: string
 }
 
 export interface AppSettings {
@@ -58,6 +60,60 @@ export function updateSettings(section: string, data: Record<string, unknown>) {
 /** Clear application cache. */
 export function clearCache() {
   return api.post<ApiResponse<null>>(`${BASE}/clear-cache`)
+}
+
+// ---------------------------------------------------------------------------
+// SSH 多主机凭据（computer_ssh_exec 消费；按 host 分键，密钥/密码加密落盘不回显）
+// ---------------------------------------------------------------------------
+
+export interface SshHost {
+  host: string
+  user: string
+  port: number
+  /** 认证类型：key（私钥）/password/agent（系统默认） */
+  auth: string
+}
+
+export interface SshCredentialPayload {
+  host: string
+  user?: string
+  port?: number
+  key_text?: string
+  password?: string
+}
+
+export function listSSHCredentials() {
+  return api.get<ApiResponse<{ hosts: SshHost[] }>>(`${BASE}/ssh-credentials`)
+}
+
+export function upsertSSHCredential(data: SshCredentialPayload) {
+  return api.post<ApiResponse<{ host: string }>>(`${BASE}/ssh-credentials`, data)
+}
+
+export function deleteSSHCredential(host: string) {
+  return api.delete<ApiResponse<{ host: string }>>(`${BASE}/ssh-credentials/${encodeURIComponent(host)}`)
+}
+
+// ---------------------------------------------------------------------------
+// 社交平台凭据（web_reach social_exec 消费；与 SSH 复用同一配置面/加密桶）
+// ---------------------------------------------------------------------------
+
+export interface SocialPlatformStatus {
+  platform: string
+  keys: { key: string; set: boolean }[]
+  configured: boolean
+}
+
+export function listSocialCredentials() {
+  return api.get<ApiResponse<{ platforms: SocialPlatformStatus[] }>>(`${BASE}/social-credentials`)
+}
+
+export function setSocialCredential(platform: string, credentials: Record<string, string>) {
+  return api.post<ApiResponse<{ platform: string }>>(`${BASE}/social-credentials`, { platform, credentials })
+}
+
+export function clearSocialCredential(platform: string) {
+  return api.delete<ApiResponse<{ platform: string }>>(`${BASE}/social-credentials/${encodeURIComponent(platform)}`)
 }
 
 // ---------------------------------------------------------------------------
