@@ -613,7 +613,14 @@ class PostChatPipeline:
             # A-03: Agent 无 agent_id 实例属性（在 config.agent_id，与
             # :1463/:1588/:1973 兄弟调用点一致）——原写法恒为空串
             agent_id = str(getattr(self._agt.config, "agent_id", "") or "")
-            user_id = str(getattr(self._agt, "current_user_id", "") or "")
+            # B-5 契约注释：身份读取序与 tool_executor._agent_identity 一致——
+            # 先读 _current_user_id（请求级显式身份），再回退 public 别名，
+            # 防真值影子（如 MagicMock auto-attr）遮蔽显式身份
+            user_id = str(
+                getattr(self._agt, "_current_user_id", None)
+                or getattr(self._agt, "current_user_id", None)
+                or ""
+            )
             for tm in tool_msgs or []:
                 if not isinstance(tm, dict) or tm.get("type") != "tool_result":
                     continue
@@ -2033,6 +2040,63 @@ class PostChatPipeline:
                         logger.debug("改进提案写入反思日志失败: %s", pe)
         except Exception as e:
             logger.debug("技能改进提案扫描跳过: %s", e)
+
+        # 经验-定义分离维护（QP 对齐启发 #2）：未合并 applied 记录攒够阈值
+        # → 定期重建技能定义（先归档可回滚）；使用统计圈淘汰候选（自动禁用
+        # 默认关，NEUROVA_SKILL_AUTO_RETIRE=1 才执行）。
+        try:
+            from neurova.evolution.skill_experience import run_skill_experience_maintenance
+
+            # 归因教训源：MetaLedger 的活跃工具级教训（SelfModelEngine 产出）
+            _meta_ledger = None
+            try:
+                from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
+
+                _meta_ledger = get_meta_ledger(
+                    str(getattr(getattr(self._agent, "config", None), "agent_id", "default") or "default")
+                )
+            except Exception as ledger_err:
+                logger.debug("MetaLedger 获取失败，归因跳过: %s", ledger_err)
+
+            _mtn = run_skill_experience_maintenance(
+                registry=skill_registry, skill_service=skill_service, ledger=_meta_ledger
+            )
+            if _mtn.get("attributed") or _mtn.get("rebuilt") or _mtn.get("retired") or _mtn.get("retire_candidates"):
+                logger.info(
+                    "🔧 技能经验维护: attributed=%s rebuilt=%s retired=%s retire_candidates=%s",
+                    len(_mtn.get("attributed") or []),
+                    _mtn.get("rebuilt"),
+                    _mtn.get("retired"),
+                    _mtn.get("retire_candidates"),
+                )
+        except Exception as mtn_err:
+            logger.debug("技能经验维护跳过: %s", mtn_err)
+
+        # 结晶候选 LLM 裁决（混合信号层 QP 对齐 #1）：规则预筛过的候选在此
+        # 批量做可复用性裁决——仅当有待审候选时才消耗一次 LLM 调用（天然
+        # 低频）；LLM 不可用时候选留队等下轮（48h 超龄自动放行，不丢数据）。
+        # 注意：不挂在 _step_extract_conversation_rules——该步有 LLM 成本闸
+        # 默认关，挂在那里裁决在默认配置下永不运行（复核抓出的断点）。
+        try:
+            _crystallizer = getattr(self._agt, "crystallizer", None)
+            if (
+                _crystallizer is not None
+                and hasattr(_crystallizer, "review_pending_with_llm")
+                and _crystallizer.list_pending()
+            ):
+                _llm_client = self._get_dependency("llm_client")
+                if _llm_client:
+                    _crystallizer.set_llm_judge(_llm_client)  # 幂等：注入后闸分流生效
+                    _review = await _crystallizer.review_pending_with_llm()
+                    if _review.get("reviewed"):
+                        logger.info(
+                            "🧊 结晶候选 LLM 裁决: approved=%s rejected=%s 留队=%s",
+                            _review.get("approved"),
+                            _review.get("rejected"),
+                            _review.get("skipped"),
+                        )
+        except Exception as _ce:
+            logger.debug("结晶候选裁决失败（候选留队）: %s", _ce)
 
         # 根因修复: MetaCognition 认知负荷模块此前零调用——每轮用真实轮次指标
         # （工具步数/错误率/耗时/记忆规模）更新认知状态；低负荷且到达轮次间隔时

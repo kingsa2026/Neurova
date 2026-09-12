@@ -73,7 +73,11 @@ def manager(tmp_path):
     mgr._load_from_db()
     # 模拟登录用户 scope（页面带 token 时的注入值）
     mgr.set_request_scope(neuser_id="7", user_id="7")
-    return mgr
+    yield mgr
+    # 请求作用域是模块级 ContextVar，pytest 单线程下跨测试存活——
+    # 不归还未设置态会让后续测试的写入/读取全部落在本测试的作用域上
+    # （曾致 test_moe_router_reads_persist_db 顺序依赖失败）
+    mgr.clear_request_scope()
 
 
 class TestAgentWideViews:
