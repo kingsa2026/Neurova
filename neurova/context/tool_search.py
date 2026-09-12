@@ -89,10 +89,8 @@ def build_catalog(tools: List[Dict]) -> List[Dict[str, Any]]:
     return entries
 
 
-def search_catalog(query: str, entries: List[Dict[str, Any]], limit: int = 8) -> List[Dict[str, Any]]:
-    """Okapi BM25 词法检索（静态；与 OC tool-search-ranking 同参数）。"""
-    if not query or not entries:
-        return []
+def _bm25_scores(query: str, entries: List[Dict[str, Any]]) -> Dict[str, float]:
+    """Okapi BM25 词法打分（静态；与 OC tool-search-ranking 同参数）。"""
     docs = [_tokenize(f"{e['name']} {e['description']} {e.get('params_text', '')}") for e in entries]
     doc_count = len(docs)
     avgdl = sum(len(d) for d in docs) / max(1, doc_count)
@@ -102,7 +100,7 @@ def search_catalog(query: str, entries: List[Dict[str, Any]], limit: int = 8) ->
             df[term] = df.get(term, 0) + 1
 
     q_terms = _tokenize(query)
-    scored: List[tuple] = []
+    scores: Dict[str, float] = {}
     for idx, doc in enumerate(docs):
         score = 0.0
         dl = len(doc) or 1
@@ -113,9 +111,125 @@ def search_catalog(query: str, entries: List[Dict[str, Any]], limit: int = 8) ->
             idf = math.log(1 + (doc_count - df.get(term, 0) + 0.5) / (df.get(term, 0) + 0.5))
             score += idf * (tf * (_BM25_K1 + 1)) / (tf + _BM25_K1 * (1 - _BM25_B + _BM25_B * dl / avgdl))
         if score > 0:
-            scored.append((score, idx))
-    scored.sort(reverse=True)
-    return [entries[idx] for _, idx in scored[: max(1, limit)]]
+            scores[entries[idx]["name"]] = score
+    return scores
+
+
+# ── T3 语义混合检索（docs/Neurova_工具调用链升级计划_2026-09-13）────────────
+# NEUROVA_TOOL_SEARCH_EMBEDDING=0 或引擎缺失 → 纯 BM25（现行为逐字节不变）。
+# 目录向量按（模型类名+维度）模型级指纹 + 条目内容级指纹双层持久化
+# data/tool_search_index.json：模型换→整体作废；条目 description/参数变更
+# →只重嵌该条（Needle tool_index 指纹增量式设计移植）。
+import hashlib
+import json
+import threading
+
+_EMB_WEIGHT = 0.6
+_BM25_WEIGHT = 0.4
+_INDEX_PATH = os.path.join("data", "tool_search_index.json")
+_index_lock = threading.RLock()
+
+
+def _embedding_enabled() -> bool:
+    return os.environ.get("NEUROVA_TOOL_SEARCH_EMBEDDING", "1") != "0"
+
+
+def _get_engine():
+    try:
+        from neurova.embedding import get_embedding_engine
+
+        return get_embedding_engine()
+    except Exception:  # noqa: BLE001 - 引擎缺失属正常态（未装模型）
+        return None
+
+
+def _embed_text(e: Dict[str, Any]) -> str:
+    return f"{e['name']} {e['description']} {e.get('params_text', '')}"
+
+
+def _entry_fingerprint(e: Dict[str, Any]) -> str:
+    """条目内容指纹：description/参数名变更即触发该条重嵌（Needle 增量式）。"""
+    return hashlib.sha256(_embed_text(e).encode("utf-8")).hexdigest()[:16]
+
+
+def _model_fingerprint(engine) -> str:
+    raw = f"{engine.__class__.__name__}:{getattr(engine, 'dimension', 0)}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _load_index(fp: str) -> Dict[str, Dict[str, Any]]:
+    """vectors 结构: {name: {"fp": 条目指纹, "v": 向量}}；模型级指纹不符整体作废。"""
+    try:
+        with open(_INDEX_PATH, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        if doc.get("fp") == fp:
+            return doc.get("vectors") or {}
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+def _save_index(fp: str, vectors: Dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(_INDEX_PATH) or ".", exist_ok=True)
+    tmp = _INDEX_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump({"fp": fp, "vectors": vectors}, fh, ensure_ascii=False)
+    os.replace(tmp, _INDEX_PATH)
+
+
+def _cosine(a, b) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a)) or 1.0
+    nb = math.sqrt(sum(x * x for x in b)) or 1.0
+    return dot / (na * nb)
+
+
+def _hybrid_scores(query: str, entries: List[Dict[str, Any]]) -> Optional[Dict[str, float]]:
+    """BM25 与嵌入余弦各按最高值归一后加权合并；引擎不可用返回 None（调用方回落 BM25）。"""
+    if not _embedding_enabled():
+        return None
+    engine = _get_engine()
+    if engine is None:
+        return None
+    bm25 = _bm25_scores(query, entries)
+    try:
+        q_vec = engine.encode(query)
+    except Exception as err:  # noqa: BLE001 - 编码故障降级，不阻断检索
+        logger.debug("T3 查询嵌入失败，回落 BM25: %s", err)
+        return None
+    with _index_lock:
+        vectors = _load_index(_model_fingerprint(engine))
+        changed = False
+        for e in entries:
+            stored = vectors.get(e["name"])
+            if stored is None or stored.get("fp") != _entry_fingerprint(e):
+                try:
+                    vectors[e["name"]] = {"fp": _entry_fingerprint(e), "v": engine.encode(_embed_text(e))}
+                    changed = True
+                except Exception as err:  # noqa: BLE001 - 单条失败该条仅 BM25 分
+                    logger.debug("T3 条目 %s 嵌入失败: %s", e["name"], err)
+        if changed:
+            _save_index(_model_fingerprint(engine), vectors)
+    bmax = max(bm25.values()) if bm25 else 1.0
+    scores: Dict[str, float] = {}
+    for e in entries:
+        stored = vectors.get(e["name"])
+        sim = _cosine(q_vec, stored["v"]) if stored else 0.0
+        combined = _EMB_WEIGHT * sim + _BM25_WEIGHT * (bm25.get(e["name"], 0.0) / (bmax or 1.0))
+        if combined > 0:
+            scores[e["name"]] = combined
+    return scores
+
+
+def search_catalog(query: str, entries: List[Dict[str, Any]], limit: int = 8) -> List[Dict[str, Any]]:
+    """混合检索：语义嵌入×BM25 加权；引擎缺失/关闭时逐字节等价原 BM25 行为。"""
+    if not query or not entries:
+        return []
+    scores = _hybrid_scores(query, entries)
+    if scores is None:
+        scores = _bm25_scores(query, entries)
+    ranked = sorted(entries, key=lambda e: -scores.get(e["name"], 0.0))
+    return [e for e in ranked[: max(1, limit)] if scores.get(e["name"], 0.0) > 0]
 
 
 def render_directory(entries: List[Dict[str, Any]], max_chars: Optional[int] = None) -> str:
