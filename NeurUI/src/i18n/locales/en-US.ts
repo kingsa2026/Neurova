@@ -73,6 +73,7 @@ export default {
     adminOnlyHint: 'Only administrators can access and operate; your account does not have permission',
   },
   nav: {
+    myCredentials: 'My Credentials',
     home: 'Home',
     dashboard: 'Dashboard',
     agents: 'Agents',
@@ -487,6 +488,16 @@ export default {
   },
 
   chat: {
+    runtimeMode: 'Runtime Access',
+    runtimeModeAdminOnly: 'Runtime access is admin-only',
+    runtimeModeAuto: 'Auto',
+    runtimeModeAutoDesc: 'Low-risk runs automatically; medium/high-risk uses the sandbox.',
+    runtimeModeFull: 'Full Access',
+    runtimeModeFullDesc: 'Execute locally, governed only by policy.',
+    runtimeModeReview: 'Ask for Approval',
+    runtimeModeReviewDesc: 'Agent commands require your approval in the panel.',
+    runtimeModeSandbox: 'Sandbox',
+    runtimeModeSandboxDesc: 'Run mutating actions in an isolated desktop session.',
     artifactUnavailable: 'Artifact content unavailable (it may have been moved or deleted)',
     openInPreview: 'Open in preview',
     retrievalUnified: 'Unified Retrieval',
@@ -1168,6 +1179,11 @@ export default {
 
   },
   channel: {
+    defaultAgent: "Default Agent",
+    enabledNotConnected: "Enabled, not connected",
+    agentChannels: "Channel Configuration",
+    agentChannelsDesc: "Configure per-platform bots for this agent (the same platform can have a distinct bot per agent)",
+    removeChannelConfirm: "Delete {name} channel config? Its adapter will be disconnected and unregistered.",
     ingressQueue: 'Inbound Queue',
     ingressPending: 'Pending',
     ingressProcessing: 'Processing',
@@ -1805,6 +1821,12 @@ export default {
     activeLabel: 'Active',
   },
   settings: {
+    desktopProviderHint: 'Sandbox/Auto modes claim an isolated desktop session for mutating actions; without a provider they are refused (never run on this machine).',
+    desktopProviderNone: 'Not configured (mutating actions will be refused)',
+    desktopProviderRdp: 'RDP Direct',
+    desktopProviderSandbox: 'Windows Sandbox',
+    desktopProviderTitle: 'Desktop Sandbox Provider',
+    myCredentialsHint: 'Manage your own SSH hosts and social platform credentials (encrypted, visible only to you)',
     general: 'General',
     generalSettings: 'General Settings',
     appName: 'App Name',
