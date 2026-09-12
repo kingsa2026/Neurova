@@ -54,61 +54,103 @@
       </span>
     </div>
 
-    <!-- Channel Grid -->
+    <!-- Channel Grid（布局对齐 QwenPaw 频道页：已激活大卡面板 / 未激活紧凑小卡面板） -->
     <a-spin :spinning="loadingConfigs">
-    <div v-if="filteredChannels.length > 0" class="nr-ci-grid">
-      <GlassCard
-        v-for="ch in filteredChannels"
-        :key="ch.channelKey"
-        variant="default"
-        padding="0"
-      >
-        <div class="nr-ci-card">
-          <div class="nr-ci-card-body">
-            <div class="nr-ci-icon" :style="ch.iconSrc ? {} : { background: ch.color }">
-              <img v-if="ch.iconSrc" :src="ch.iconSrc" :alt="ch.name" class="nr-ci-icon-img" />
-              <span v-else>{{ ch.icon }}</span>
-            </div>
-            <div class="nr-ci-info">
-              <span class="nr-ci-name">{{ ch.name }}</span>
-              <div class="nr-ci-meta">
-                <span class="nr-ci-type-badge" :class="ch.type">{{ ch.type === 'builtin' ? t('channel.builtin') : t('channel.customChannel') }}</span>
-                <span v-if="ch.connected" class="nr-ci-conn-badge connected">{{ t('channel.connected') }}</span>
+    <template v-if="filteredChannels.length > 0">
+      <section v-if="enabledChannels.length > 0" class="nr-ci-panel" data-testid="panel-enabled">
+        <div class="nr-ci-panel-head">
+          <span class="nr-ci-panel-dot on" />
+          <span>{{ t('channel.enabledSection') }}</span>
+          <b class="nr-ci-panel-count">{{ enabledChannels.length }}</b>
+        </div>
+        <div class="nr-ci-grid">
+          <GlassCard
+            v-for="ch in enabledChannels"
+            :key="ch.channelKey"
+            variant="default"
+            padding="0"
+          >
+            <div class="nr-ci-card">
+              <div class="nr-ci-card-body">
+                <div class="nr-ci-icon" :style="ch.iconSrc ? {} : { background: ch.color }">
+                  <img v-if="ch.iconSrc" :src="ch.iconSrc" :alt="ch.name" class="nr-ci-icon-img" />
+                  <span v-else>{{ ch.icon }}</span>
+                </div>
+                <div class="nr-ci-info">
+                  <span class="nr-ci-name">
+                    {{ ch.name }}
+                    <span class="nr-ci-type-badge" :class="ch.type">{{ ch.type === 'builtin' ? t('channel.builtin') : t('channel.customChannel') }}</span>
+                  </span>
+                  <span class="nr-ci-prefix">
+                    {{ t('channel.botPrefixLabel') }}:
+                    <b :class="{ unset: !botPrefixOf(ch) }">{{ botPrefixOf(ch) || t('channel.notSet') }}</b>
+                  </span>
+                </div>
+                <div class="nr-ci-status">
+                  <span class="nr-ci-status-dot" :class="{ enabled: ch.enabled }" />
+                  <span class="nr-ci-status-text">{{ ch.connected ? t('channel.connected') : t('channel.enabled') }}</span>
+                </div>
+              </div>
+              <div class="nr-ci-card-actions">
+                <GlassButton
+                  :variant="'ghost'"
+                  size="sm"
+                  @click="toggleChannel(ch)"
+                >
+                  {{ t('channel.disable') }}
+                </GlassButton>
+                <GlassButton variant="secondary" size="sm" @click="openConfigModal(ch)">
+                  {{ t('channel.configure') }}
+                </GlassButton>
+                <GlassButton variant="secondary" size="sm" @click="testChannel(ch)">
+                  {{ t('channel.test') }}
+                </GlassButton>
+                <!-- B4-a：渠道重启（disconnect→connect，配置变更生效）；
+                     负一屏走独立 API 且无适配器类型，不渲染 -->
+                <GlassButton
+                  v-if="ch.backendType"
+                  variant="ghost"
+                  size="sm"
+                  @click="restartAdapter(ch)"
+                >
+                  {{ t('channel.restart') }}
+                </GlassButton>
               </div>
             </div>
-            <div class="nr-ci-status">
-              <span class="nr-ci-status-dot" :class="{ enabled: ch.enabled }" />
-              <span class="nr-ci-status-text">{{ ch.enabled ? t('channel.enabled') : t('channel.disabled') }}</span>
+          </GlassCard>
+        </div>
+      </section>
+
+      <section v-if="disabledChannels.length > 0" class="nr-ci-panel nr-ci-panel--dashed" data-testid="panel-disabled">
+        <div class="nr-ci-panel-head">
+          <span class="nr-ci-panel-dot" />
+          <span>{{ t('channel.disabledSection') }}</span>
+        </div>
+        <div class="nr-ci-grid-compact">
+          <div
+            v-for="ch in disabledChannels"
+            :key="ch.channelKey"
+            class="nr-ci-chip"
+            @click="openConfigModal(ch)"
+          >
+            <div class="nr-ci-chip-left">
+              <span class="nr-ci-chip-icon" :style="ch.iconSrc ? {} : { background: ch.color }">
+                <img v-if="ch.iconSrc" :src="ch.iconSrc" :alt="ch.name" />
+                <span v-else>{{ ch.icon }}</span>
+              </span>
+              <span class="nr-ci-chip-name">{{ ch.name }}</span>
             </div>
-          </div>
-          <div class="nr-ci-card-actions">
             <GlassButton
-              :variant="ch.enabled ? 'ghost' : 'primary'"
+              variant="primary"
               size="sm"
-              @click="toggleChannel(ch)"
+              @click.stop="toggleChannel(ch)"
             >
-              {{ ch.enabled ? t('channel.disable') : t('channel.enable') }}
-            </GlassButton>
-            <GlassButton variant="secondary" size="sm" @click="openConfigModal(ch)">
-              {{ t('channel.configure') }}
-            </GlassButton>
-            <GlassButton variant="secondary" size="sm" @click="testChannel(ch)">
-              {{ t('channel.test') }}
-            </GlassButton>
-            <!-- B4-a：渠道重启（disconnect→connect，配置变更生效）；
-                 负一屏走独立 API 且无适配器类型，不渲染 -->
-            <GlassButton
-              v-if="ch.backendType"
-              variant="ghost"
-              size="sm"
-              @click="restartAdapter(ch)"
-            >
-              {{ t('channel.restart') }}
+              {{ t('channel.enable') }}
             </GlassButton>
           </div>
         </div>
-      </GlassCard>
-    </div>
+      </section>
+    </template>
     <a-empty v-else :description="t('channel.noChannels')" />
     </a-spin>
 
@@ -141,6 +183,23 @@
             <!-- 负一屏推送：复用专用设置组件（含授权码指引/测试推送/统计/删除） -->
             <NegativeScreenSettings v-if="currentChannel?.channelKey === 'negative-screen'" />
             <template v-else>
+            <!-- 扫码授权（QwenPaw 两段式对齐）：飞书/钉钉/QQ/微信——扫码即取凭据回填表单 -->
+            <QrcodeAuthBlock
+              v-if="currentQrcodeMeta"
+              :key="'qr-' + currentChannel?.channelKey"
+              :channel="currentQrcodeMeta.channel"
+              :label="t('channel.scanAuth')"
+              :button-text="t('channel.getQrcode')"
+              :hint-text="t('channel.scanHint')"
+              :success-status="currentQrcodeMeta.successStatus"
+              :success-credential-key="currentQrcodeMeta.successCredentialKey"
+              :poll-interval="currentQrcodeMeta.pollInterval"
+              :poll-timeout="currentQrcodeMeta.pollTimeout"
+              :max-poll-count="currentQrcodeMeta.maxPollCount"
+              :params="qrcodeParams"
+              @success="onQrSuccess"
+              @error="onQrError"
+            />
             <!-- Common Settings -->
             <div class="nr-ci-section">
               <div class="nr-ci-section-title">{{ t('channel.commonSettings') }}</div>
@@ -258,9 +317,10 @@ import GlassInput from '@/components/GlassInput.vue'
 import { useAgentStore } from '@/stores/agents'
 import {
   buildChannelCatalog, buildChannelFieldsMap, buildCommonFields,
-  pluginSchemaToFields, COMMON_FIELD_KEYS,
+  pluginSchemaToFields, COMMON_FIELD_KEYS, QRCODE_CHANNELS,
   type FieldSchema, type ChannelCatalogItem,
 } from '@/config/channelFields'
+import QrcodeAuthBlock from '@/components/QrcodeAuthBlock.vue'
 
 type ChannelItem = ChannelCatalogItem
 
@@ -299,6 +359,31 @@ const qrId = ref('')
 const qrContext = ref<{ channel: ChannelItem; fromSave: boolean; extra: Record<string, any> } | null>(null)
 /** 已保存配置的 extra（F-2：测试连接发送真实已存凭据，而非恒空 {}） */
 const savedExtras = ref<Record<string, Record<string, any>>>({})
+
+// ─── QwenPaw 对齐·通用扫码授权（飞书/钉钉/QQ/微信）────────────────────────
+const currentQrcodeMeta = computed(() =>
+  currentChannel.value ? QRCODE_CHANNELS[currentChannel.value.channelKey] : undefined,
+)
+const qrcodeParams = computed<Record<string, string>>(() => {
+  const meta = currentQrcodeMeta.value
+  const p: Record<string, string> = {}
+  for (const key of meta?.paramsFromForm || []) {
+    if (configForm[key]) p[key] = String(configForm[key])
+  }
+  return p
+})
+function onQrSuccess(credentials: Record<string, string>) {
+  const meta = currentQrcodeMeta.value
+  if (!meta) return
+  // 凭据按渠道映射回填表单键（如钉钉 client_id→app_id）
+  for (const [credKey, formKey] of Object.entries(meta.credentialToForm)) {
+    if (credentials[credKey]) configForm[formKey] = credentials[credKey]
+  }
+  showToast(t('channel.scanAuthSuccess'))
+}
+function onQrError(type: 'fetch' | 'expired' | 'fail') {
+  showToast(type === 'expired' ? t('channel.scanExpired') : t('channel.scanFailed'))
+}
 
 // ─── Helpers ───
 function openConfigModal(ch: ChannelItem) {
@@ -660,6 +745,14 @@ const filteredChannels = computed(() => {
   return list
 })
 
+// 布局对齐 QwenPaw：已激活大卡面板 / 未激活紧凑小卡面板
+const enabledChannels = computed(() => filteredChannels.value.filter((ch) => ch.enabled))
+const disabledChannels = computed(() => filteredChannels.value.filter((ch) => !ch.enabled))
+function botPrefixOf(ch: ChannelItem): string {
+  const extra = savedExtras.value[ch.backendType] || {}
+  return typeof extra.bot_prefix === 'string' ? extra.bot_prefix : ''
+}
+
 const tabs = computed(() => [
   { key: 'all' as const, label: t('channel.all') },
   { key: 'builtin' as const, label: t('channel.builtin') },
@@ -778,6 +871,104 @@ onMounted(() => {
   gap: 16px;
 }
 
+/* 布局对齐 QwenPaw：已激活/未激活双面板 */
+.nr-ci-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--nr-border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.015);
+}
+.nr-ci-panel--dashed {
+  border-style: dashed;
+}
+.nr-ci-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--nr-text-primary);
+}
+.nr-ci-panel-count {
+  color: var(--nr-success, #22c55e);
+}
+.nr-ci-panel-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--nr-text-tertiary, #6b7280);
+}
+.nr-ci-panel-dot.on {
+  background: var(--nr-success, #22c55e);
+}
+.nr-ci-prefix {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--nr-text-tertiary);
+}
+.nr-ci-prefix b {
+  font-weight: 600;
+  color: var(--nr-text-secondary);
+}
+.nr-ci-prefix b.unset {
+  color: var(--nr-text-tertiary);
+  font-weight: 400;
+}
+.nr-ci-grid-compact {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+.nr-ci-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--nr-border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.nr-ci-chip:hover {
+  border-color: var(--nr-accent, #6366f1);
+  background: rgba(99, 102, 241, 0.06);
+}
+.nr-ci-chip-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.nr-ci-chip-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.nr-ci-chip-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.nr-ci-chip-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--nr-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .nr-ci-card {
   display: flex;
   flex-direction: column;
@@ -821,12 +1012,13 @@ onMounted(() => {
 }
 
 .nr-ci-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 15px;
   font-weight: 600;
   color: var(--nr-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .nr-ci-meta {

@@ -22,7 +22,7 @@ import json
 from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
-from neurova.channels.feishu_auth import AuthMixin, FEISHU_API_BASE
+from neurova.channels.feishu_auth import AuthMixin
 from neurova.channels.base import (
     ChannelAdapter,
     ChannelConfig,
@@ -72,6 +72,20 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
             if isinstance(_share, str) else bool(_share)
         )
 
+        # QwenPaw FeishuConfig.domain 对齐（2026-09-13）：'feishu'（国内）/'lark'
+        # （国际）或完整 http(s) 网关 URL。此前前端有 region 字段而后端从不消费
+        # ——Lark 国际租户恒认证失败（摆设字段根修）。
+        _domain = str(_cfg_meta.get("domain", "feishu") or "feishu")
+        if _domain in ("feishu", "lark"):
+            _open_base = "https://open.larksuite.com" if _domain == "lark" else "https://open.feishu.cn"
+        elif _domain.startswith(("http://", "https://")):
+            _open_base = _domain.rstrip("/")
+        else:
+            _open_base = "https://open.feishu.cn"
+        self.domain = "lark" if _open_base == "https://open.larksuite.com" else _domain
+        self.open_base = _open_base
+        self.api_base = f"{_open_base}/open-apis"
+
     async def connect(self) -> bool:
         """建立飞书连接"""
         # 修复 P0-4 (C3): 捕获主 loop 引用，供 _handle_message_event 跨线程调度
@@ -99,12 +113,13 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
             # 注册消息接收事件
             self._event_handler.register_p2_im_message_receive_v1(self._handle_message_event)
 
-            # 创建长连接客户端
+            # 创建长连接客户端（domain 随 feishu/lark 切换——官方多站点要求）
             self._ws_client = lark.ws.Client(
                 self.config.app_id,
                 self.config.app_secret,
                 event_handler=self._event_handler.build(),
                 log_level=lark.LogLevel.DEBUG,
+                domain=self.open_base,
             )
 
             # 启动长连接（非阻塞）
@@ -214,7 +229,7 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
 
             token = self._get_tenant_access_token()
             resp = requests.get(
-                f"{FEISHU_API_BASE}/im/v1/messages/{message_id}/resources/{file_key}",
+                f"{self.api_base}/im/v1/messages/{message_id}/resources/{file_key}",
                 headers={"Authorization": f"Bearer {token}"},
                 params={"type": "file"},
                 timeout=15,
@@ -251,7 +266,7 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
 
             if not self._client:
                 self._client = (
-                    lark.Client.builder().app_id(self.config.app_id).app_secret(self.config.app_secret).build()
+                    lark.Client.builder().app_id(self.config.app_id).app_secret(self.config.app_secret).domain(self.open_base).build()
                 )
 
             # 构造消息内容

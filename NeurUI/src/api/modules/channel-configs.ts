@@ -97,6 +97,36 @@ export function getWechatIlinkQrcodeStatus(qrId: string, agentId?: string) {
   })
 }
 
+// ---------------------------------------------------------------------------
+// 通用二维码授权（对齐 QwenPaw /channels/{channel}/qrcode 两段式，2026-09-13）
+// 覆盖 feishu/dingtalk/qq/wecom/wechat——扫码即取凭据回填表单后再保存。
+// 后端返回裸对象（与 iLink 端点一致，无信封）。
+// ---------------------------------------------------------------------------
+
+/** GET 二维码结果：base64 PNG + 轮询 token。 */
+export interface ChannelQrcode {
+  qrcode_img: string
+  poll_token: string
+}
+
+/** 轮询扫码状态：credentials 供成功后回填表单。 */
+export interface ChannelQrcodeStatus {
+  status: string
+  credentials: Record<string, string>
+}
+
+/** 生成指定渠道的登录/授权二维码。params 透传（如 feishu 的 domain）。 */
+export function getChannelQrcode(channel: string, params?: Record<string, string>) {
+  return api.get<ChannelQrcode>(`${BASE}/${channel}/qrcode`, { params: params || {} })
+}
+
+/** 单次轮询扫码授权状态（未确认由调用方继续轮询）。 */
+export function getChannelQrcodeStatus(channel: string, token: string, params?: Record<string, string>) {
+  return api.get<ChannelQrcodeStatus>(`${BASE}/${channel}/qrcode/status`, {
+    params: { token, ...(params || {}) },
+  })
+}
+
 /** P0-5：入站持久化队列状态（裸对象，无信封）。 */
 export function getIngressStats() {
   return api.get<ChannelIngressStats>(`${BASE}/ingress/stats`)

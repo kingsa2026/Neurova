@@ -30,9 +30,28 @@
       </div>
     </a-spin>
 
-    <!-- Config modal（字段表与系统页共享单一来源） -->
-    <a-modal v-model:open="showModal" :title="`${current?.name} · ${t('channel.configure')}`" :confirm-loading="saving" @ok="saveConfig">
-      <a-form layout="vertical">
+    <!-- Config modal（字段表与系统页共享单一来源；负一屏复用专属组件） -->
+    <a-modal v-model:open="showModal" :title="`${current?.name} · ${t('channel.configure')}`" :confirm-loading="saving"
+      :footer="current?.channelKey === 'negative-screen' ? null : undefined" @ok="saveConfig">
+      <NegativeScreenSettings v-if="current?.channelKey === 'negative-screen'" />
+      <a-form v-else layout="vertical">
+        <!-- 扫码授权（QwenPaw 两段式对齐）：飞书/钉钉/QQ/微信——扫码即取凭据回填表单 -->
+        <QrcodeAuthBlock
+          v-if="currentQrcodeMeta"
+          :key="'qr-' + current?.channelKey"
+          :channel="currentQrcodeMeta.channel"
+          :label="t('channel.scanAuth')"
+          :button-text="t('channel.getQrcode')"
+          :hint-text="t('channel.scanHint')"
+          :success-status="currentQrcodeMeta.successStatus"
+          :success-credential-key="currentQrcodeMeta.successCredentialKey"
+          :poll-interval="currentQrcodeMeta.pollInterval"
+          :poll-timeout="currentQrcodeMeta.pollTimeout"
+          :max-poll-count="currentQrcodeMeta.maxPollCount"
+          :params="qrcodeParams"
+          @success="onQrSuccess"
+          @error="onQrError"
+        />
         <a-form-item :label="t('common.enable')">
           <a-switch v-model:checked="form.enabled" />
         </a-form-item>
@@ -75,8 +94,11 @@ import {
 } from '@/api/modules/channel-configs'
 import {
   buildChannelCatalog, buildChannelFieldsMap, buildCommonFields,
+  QRCODE_CHANNELS,
   type FieldSchema, type ChannelCatalogItem,
 } from '@/config/channelFields'
+import QrcodeAuthBlock from '@/components/QrcodeAuthBlock.vue'
+import NegativeScreenSettings from '@/components/NegativeScreenSettings.vue'
 import { useAgentStore } from '@/stores/agents'
 
 const { t } = useI18n()
@@ -113,7 +135,37 @@ const agentSelectOptions = computed(() => [
 ])
 
 function baseCatalog(): AgentChannel[] {
-  return buildChannelCatalog(t).map((c) => ({ ...c, configured: false }))
+  // NV 独有渠道：鸿蒙负一屏推送（Phase C 换共享目录时只加在系统页，
+  // Agent 页一并恢复——用户级配置，打开即复用 NegativeScreenSettings）
+  return [...buildChannelCatalog(t), NEG_SCREEN_CARD].map((c) => ({ ...c, configured: false }))
+}
+
+// ─── NV 独有·负一屏推送卡（backendType='' → 不参与平台配置行匹配）───
+const NEG_SCREEN_CARD: ChannelCatalogItem = { name: t('settings.negativeScreen'), icon: '📲', type: 'builtin', enabled: false, color: '#e11d48', channelKey: 'negative-screen', backendType: '', connected: false }
+
+// ─── QwenPaw 对齐·通用扫码授权（飞书/钉钉/QQ/微信）────────────────────────
+const currentQrcodeMeta = computed(() =>
+  current.value ? QRCODE_CHANNELS[current.value.channelKey] : undefined,
+)
+const qrcodeParams = computed<Record<string, string>>(() => {
+  const meta = currentQrcodeMeta.value
+  const p: Record<string, string> = {}
+  for (const key of meta?.paramsFromForm || []) {
+    if (form.values[key]) p[key] = String(form.values[key])
+  }
+  return p
+})
+function onQrSuccess(credentials: Record<string, string>) {
+  const meta = currentQrcodeMeta.value
+  if (!meta) return
+  // 凭据按渠道映射回填表单键（如钉钉 client_id→app_id）
+  for (const [credKey, formKey] of Object.entries(meta.credentialToForm)) {
+    if (credentials[credKey]) form.values[formKey] = credentials[credKey]
+  }
+  message.success(t('channel.scanAuthSuccess'))
+}
+function onQrError(type: 'fetch' | 'expired' | 'fail') {
+  message.error(type === 'expired' ? t('channel.scanExpired') : t('channel.scanFailed'))
 }
 
 async function fetchConfigs() {
