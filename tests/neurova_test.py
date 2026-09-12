@@ -67,7 +67,6 @@ async def test_imports():
         ("neurova.cognitive_layers.memory_layer.manager", "记忆管理"),
         ("neurova.api.endpoints.chat", "Chat API"),
         ("neurova.api.endpoints.media", "Media API"),
-        ("neurova.api.endpoints.channel", "Channel API"),
         ("neurova.api.auth", "认证模块"),
         ("neurova.security.rbac", "RBAC权限"),
         ("neurova.tts.manager", "TTS管理"),

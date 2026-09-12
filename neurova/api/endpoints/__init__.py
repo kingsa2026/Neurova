@@ -211,7 +211,6 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.runtime", "/v1/runtime", "Runtime API"),
         ("neurova.api.endpoints.scheduler", "/v1/scheduler", "Scheduler API"),
         ("neurova.api.endpoints.trace", "/v1/trace", "Trace API"),
-        ("neurova.api.endpoints.channel", "/v1/channels", "Channel API"),
         ("neurova.api.endpoints.channels", "/v1/channel-adapters", "Channel Adapters API"),
         ("neurova.api.endpoints.channel_config", "/v1", "Channel Config API"),
         ("neurova.api.endpoints.notifications", "/v1/notifications", "Notifications API"),

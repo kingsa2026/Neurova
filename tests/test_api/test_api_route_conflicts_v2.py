@@ -15,12 +15,7 @@ def test_channel_route_registration():
     """测试channel和channels模块的实际路由注册"""
     app = create_test_app()
     
-    # 注册channel模块
-    try:
-        from neurova.api.endpoints import channel
-        app.include_router(channel.router, prefix="/api/v1/channels", tags=["channel"])
-    except ImportError:
-        pytest.skip("channel模块导入失败")
+    # 2026-09-13 死壳清理：endpoints.channel(/v1/channels 假桥)已删除，冲突主体不复存在
     
     # 注册channels模块
     try:
@@ -122,7 +117,6 @@ def test_actual_registration_simulation():
     
     # 模拟注册列表中的前几个模块
     endpoint_modules = [
-        ("neurova.api.endpoints.channel", "/v1/channels", "Channel API"),
         ("neurova.api.endpoints.channels", "/v1/channels", "Channels API"),
         ("neurova.api.endpoints.context", "/v1/context", "Context API"),
         ("neurova.api.endpoints.context_pool_settings", "/v1/context", "Context Pool Settings API"),
@@ -167,7 +161,7 @@ def test_frontend_api_coverage_analysis():
     frontend_modules = [
         "agents.ts", "chat.ts", "auth.ts", "memory.ts", "models.ts",
         "providers.ts", "skill.ts", "settings.ts", "stats.ts", "scheduler.ts",
-        "trace.ts", "marketplace.ts", "channel.ts", "channel_config.ts",
+        "trace.ts", "marketplace.ts", "channel_config.ts",
         "notifications.ts", "audit.ts", "firewall.ts", "collaboration.ts",
         "workflows.ts", "tasks.ts", "files_api.ts", "benchmark.ts",
         "sleep.ts", "knowledge_api.ts", "emotion.ts", "webhooks.ts",
