@@ -12,10 +12,12 @@ Phase 2 P2-1: 从工具执行日志中发现高频工具序列模式。
 ...
 """
 
-from neurova.core.logger import get_logger
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
+
+from neurova.core.logger import get_logger
+from neurova.evolution.persistence import PersistedStateMixin
 
 logger = get_logger(__name__)
 
@@ -29,7 +31,7 @@ class FrequentPattern:
     context: str = ""
 
 
-class PatternMiner:
+class PatternMiner(PersistedStateMixin):
     """
     PatternMiner v1.0.0 — PrefixSpan 序列模式挖掘
 
@@ -58,6 +60,8 @@ class PatternMiner:
         self._all_tools: Set[str] = set()
         # 存储挖掘结果
         self._patterns: List[FrequentPattern] = []
+        # 持久化挂载（未挂载=纯内存/测试语义，零 IO）
+        self._init_state_persistence()
 
         logger.info(
             f"PatternMiner initialized: min_support={min_support}, min_length={min_length}, max_length={max_length}"
@@ -100,6 +104,7 @@ class PatternMiner:
             else:
                 self._contexts.append("")
             logger.debug("Added sequence: %s", tool_names)
+            self._maybe_persist()
 
     def mine(self) -> List[FrequentPattern]:
         """
@@ -141,7 +146,29 @@ class PatternMiner:
         self._contexts.clear()
         self._all_tools.clear()
         self._patterns.clear()
+        self._maybe_persist()
         logger.info("PatternMiner reset")
+
+    def _snapshot_payload(self) -> Dict[str, Any]:
+        """序列缓冲快照（_patterns 为派生态，不落盘、按需重挖）。"""
+        return {
+            "version": 1,
+            "sequences": [list(seq) for seq in self._sequences],
+            "contexts": list(self._contexts),
+        }
+
+    def _restore_payload(self, data: Dict[str, Any]) -> None:
+        sequences = data.get("sequences", [])
+        contexts = data.get("contexts", [])
+        self._sequences = [
+            [str(t) for t in seq] for seq in sequences if isinstance(seq, list)
+        ]
+        # 上下文与序列按位置对齐：缺失补空串、超长截断（损坏容忍）
+        self._contexts = [str(c) for c in contexts][: len(self._sequences)]
+        while len(self._contexts) < len(self._sequences):
+            self._contexts.append("")
+        self._all_tools = {tool for seq in self._sequences for tool in seq}
+        self._patterns = []
 
     def to_skill_template_list(
         self,

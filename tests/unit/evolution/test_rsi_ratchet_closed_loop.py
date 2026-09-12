@@ -190,10 +190,13 @@ def test_rsi_closedloop_real_toolmemory_convergence():
     experience = ExperienceFeedback(known_tools=["search_tool", "file_tool"])
     tm = ToolMemoryIntegration()
 
-    # 设置初始参数偏离 setpoint
+    # 设置初始参数：行为上有害的偏离（端到端评测集可测的退化）
     # tool_memory setpoints: success_bonus=0.1, failure_penalty=0.5, decay_rate=0.1, muscle_memory_threshold=0.8
-    tm.success_bonus = 0.8  # 远离 0.1
-    tm.failure_penalty = 0.9  # 远离 0.5
+    # bonus=0（奖励失活）→ 好坏工具乘数并列（eval_harness 的
+    # tm_multiplier_differentiation 用例失分）——RSI 收敛 bonus 应产生
+    # 真实的行为正增益（penalty 留在 setpoint 提供分化下坠力）
+    tm.success_bonus = 0.0  # 远离 0.1（奖励失活）
+    tm.failure_penalty = 0.5  # setpoint：惩罚在场，好坏工具才能分化
     tm.decay_rate = 0.3  # 远离 0.1
 
     orch = RSIOrchestrator(

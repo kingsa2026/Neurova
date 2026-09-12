@@ -10,15 +10,18 @@ setpoint（设计最优点），性能分 = 基础反馈信号 + 参数贴近度
 from typing import Any, Dict
 
 # 各系统可优化参数的设计最优点（setpoint）
+# 对齐治理（2026-09-12）：原表从 Agent 镜像属性抄写，与真实消费方的设计
+# 默认冲突——已全表对齐（依据：融合文档 §7 钉死 tool_memory 三参数；
+# EmotionModule/SleepConsolidation/ExperienceFeedback/PatternMiner 类默认）。
+# merge_threshold 移除：similarity_threshold 的别名幻影（同一真实参数）。
 SYSTEM_SETPOINTS: Dict[str, Dict[str, float]] = {
     "sleep": {
         "base_decay_rate": 0.1,
-        "similarity_threshold": 0.8,
-        "merge_threshold": 0.9,
+        "similarity_threshold": 0.7,
     },
     "emotion": {
         "emotional_protection_threshold": 0.5,
-        "emotional_protection_factor": 1.0,
+        "emotional_protection_factor": 0.3,
     },
     "experience": {
         "crystallize_min_observations": 3,
@@ -27,8 +30,8 @@ SYSTEM_SETPOINTS: Dict[str, Dict[str, float]] = {
     },
     "tool_memory": {
         "success_bonus": 0.1,
-        "failure_penalty": 0.5,
-        "decay_rate": 0.1,
+        "failure_penalty": 0.05,
+        "decay_rate": 0.01,
         "muscle_memory_threshold": 0.8,
     },
 }

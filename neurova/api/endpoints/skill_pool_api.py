@@ -314,6 +314,57 @@ async def reject_pending_skill(agent_id: str, template_id: str):
     return {"code": 0, "data": {"rejected": True, "template_id": template_id}}
 
 
+# ── C10 治理收紧（2026-09-12）：经验记录待审面 ──
+
+
+@router.get("/agent/{agent_id}/pending-experiences")
+async def list_pending_experiences(agent_id: str):
+    """C10 审批面：列出待审的自动化 applied 经验记录（评审闸开启时非空）。"""
+    try:
+        from neurova.evolution.skill_experience import get_skill_experience_store
+
+        items = get_skill_experience_store().list_pending_experiences()
+        return [
+            {
+                "record_id": r.record_id,
+                "skill_id": r.skill_id,
+                "source": r.source,
+                "content": r.content,
+                "context": r.context,
+                "created_at": r.created_at,
+            }
+            for r in items
+        ]
+    except Exception as e:
+        logger.exception("list_pending_experiences failed: %s", e)
+        return []
+
+
+@router.post("/agent/{agent_id}/pending-experiences/{record_id}/approve")
+async def approve_pending_experience(agent_id: str, record_id: str):
+    """批准待审经验：注入技能描述（立即生效）并计入重建阈值。"""
+    from neurova.api.endpoints.governance import _get_agent
+    from neurova.evolution.skill_experience import get_skill_experience_store
+
+    agent = _get_agent()
+    registry = getattr(agent, "_skill_registry", None) if agent is not None else None
+    ok = get_skill_experience_store().approve_experience(record_id, registry=registry)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"待审经验不存在: {record_id}")
+    return {"code": 0, "data": {"approved": True, "record_id": record_id}}
+
+
+@router.post("/agent/{agent_id}/pending-experiences/{record_id}/reject")
+async def reject_pending_experience(agent_id: str, record_id: str):
+    """拒绝待审经验：直接丢弃。"""
+    from neurova.evolution.skill_experience import get_skill_experience_store
+
+    ok = get_skill_experience_store().reject_experience(record_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"待审经验不存在: {record_id}")
+    return {"code": 0, "data": {"rejected": True, "record_id": record_id}}
+
+
 async def get_agent_skills(agent_id: str):
     """获取 Agent 的所有技能
 
