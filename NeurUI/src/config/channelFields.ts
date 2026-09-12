@@ -103,12 +103,12 @@ export function buildChannelFieldsMap(t: T): Record<string, FieldSchema[]> {
       { key: 'client_secret', label: 'Client Secret', type: 'password', required: true },
     ],
     wechat: [
-      // iLink 语义：bot_token 由扫码授权取得并自动回填，不要求手填
+      // iLink 语义：bot_token 由扫码授权取得并自动回填，不要求手填；
+      // 端到端收发由 wechat_ilink.WechatILinkAdapter 真实协议接管
       { key: 'bot_token', label: 'Bot Token', type: 'password' },
       { key: 'base_url', label: 'iLink Base URL', type: 'text', placeholder: 'https://ilinkai.weixin.qq.com' },
       { key: 'token_file', label: t('nav.tokenFile'), type: 'text', placeholder: '~/.Neurova/weixin_bot_token' },
       { key: 'media_directory', label: t('nav.mediaDirectory'), type: 'text', placeholder: './media' },
-      { key: 'message_merge', label: t('nav.messageMerge'), type: 'toggle', defaultValue: false },
     ],
     wecom: [
       { key: 'app_id', label: 'Bot ID (CorpID)', type: 'text', required: true },

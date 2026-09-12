@@ -206,7 +206,7 @@ class TestSaveNeedsScan:
 
         assert result["success"] is True
         assert result["needs_scan"] is False
-        manager.register_adapter.assert_called_once_with(adapter)
+        manager.register_adapter.assert_called_once_with(adapter, agent_id="default")
 
     def test_save_non_wechat_channel_unchanged(self, isolated_env, monkeypatch):
         """向后兼容：其他渠道绝不带 needs_scan 阻断，适配器照常创建。"""
@@ -244,13 +244,26 @@ class TestWechatTestConnection:
         _create_adapter_spy.assert_not_called()
 
     def test_with_token_authenticate_really_runs(self, isolated_env, monkeypatch):
-        """F-2 核心：有 token 测试连接 → 真实工厂→authenticate→verify 链路执行。"""
+        """有 token 测试连接 → 真实协议适配器 connect 的 getconfig 校验执行并通过。
+
+        2026-09-13 ilink 端到端移植：test_connection 对 ilink 走
+        wechat_ilink.WechatILinkAdapter（真实协议），凭据校验由虚构 /auth/verify
+        换为有界 getconfig（ilinkai.weixin.qq.com）。
+        """
         token_file = isolated_env / "weixin_bot_token"
         token_file.write_text("tok-4", encoding="utf-8")
 
-        # verify 调用返回有效 → authenticate 置 _ilink_initialized=True
-        get = MagicMock(return_value=_fake_response({"valid": True}))
-        monkeypatch.setattr("neurova.channels.wechat_auth.requests.get", get)
+        getconfig = AsyncMock(return_value={"ret": 0})
+        monkeypatch.setattr(
+            "neurova.channels.wechat_ilink_client.ILinkClient.getconfig", getconfig)
+        monkeypatch.setattr(
+            "neurova.channels.wechat_ilink_client.ILinkClient.start", AsyncMock())
+        monkeypatch.setattr(
+            "neurova.channels.wechat_ilink_client.ILinkClient.stop", AsyncMock())
+        # 轮询挂起不真发网络（connect 成功后 test_connection 会 disconnect 取消）
+        monkeypatch.setattr(
+            "neurova.channels.wechat_ilink_client.ILinkClient.getupdates",
+            AsyncMock(side_effect=asyncio.CancelledError))
 
         request = ChannelConfigRequest(
             channel_type="wechat",
@@ -259,16 +272,20 @@ class TestWechatTestConnection:
         result = asyncio.run(cc.test_connection("wechat", request))
 
         assert result.success is True
-        get.assert_called_once()  # verify 真正发生（有界单次）
-        assert "/auth/verify" in get.call_args.args[0]
+        getconfig.assert_awaited_once()  # 真实凭据校验发生
 
     def test_with_invalid_token_honest_false(self, isolated_env, monkeypatch):
-        """token 无效（verify 失败）→ 诚实失败，绝不借 connect() 恒 True 假阳性。"""
+        """token 无效（getconfig 校验失败）→ 诚实失败，绝不假阳性。"""
         token_file = isolated_env / "weixin_bot_token"
         token_file.write_text("bad-token", encoding="utf-8")
 
-        get = MagicMock(return_value=_fake_response({"valid": False}))
-        monkeypatch.setattr("neurova.channels.wechat_auth.requests.get", get)
+        getconfig = AsyncMock(side_effect=RuntimeError("401 unauthorized"))
+        monkeypatch.setattr(
+            "neurova.channels.wechat_ilink_client.ILinkClient.getconfig", getconfig)
+        monkeypatch.setattr(
+            "neurova.channels.wechat_ilink_client.ILinkClient.start", AsyncMock())
+        monkeypatch.setattr(
+            "neurova.channels.wechat_ilink_client.ILinkClient.stop", AsyncMock())
 
         request = ChannelConfigRequest(
             channel_type="wechat",

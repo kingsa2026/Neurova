@@ -748,25 +748,35 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
 
     elif channel_type == "wechat":
         try:
+            mode = str(extra.get("mode", "ilink") or "ilink")
+            if mode == "ilink":
+                # 2026-09-13 端到端重建：ilink 走真实协议适配器
+                # （wechat_ilink.WechatILinkAdapter，QwenPaw 照搬——getupdates 收/
+                # sendmessage 发/CDN 媒体），旧 WeChatAdapter 的 ilink 路径建立在
+                # 代码自注"假设的端点"上，真实网络永不可用。wecom/official 仍走旧路。
+                from neurova.channels.wechat_ilink import WeChatILinkAdapter
+
+                wechat_kwargs = dict(extra)
+                wechat_kwargs.pop("mode", None)
+                wechat_kwargs.pop("agentid", None)
+                if wechat_kwargs.get("bot_token_file") and not wechat_kwargs.get("token_file"):
+                    wechat_kwargs["token_file"] = wechat_kwargs.pop("bot_token_file")
+                config.extra = wechat_kwargs
+                return WeChatILinkAdapter(config)
+
             # RES-P0-2 根修：mode/agentid 此前与 **extra 重复传参——extra 携带
             # mode（前端必带）时必然 TypeError→400，保存/测试从未真正可达。
-            # QwenPaw 键名对齐：bot_token_file→token_file；base_url 覆盖实例
-            # ILINK_API_BASE（扫码 confirmed 回填的真实 iLink 网关）。
+            # 同族键 corpid/corpsecret 一并剥除（均为位置参数，防同型冲突）。
             wechat_kwargs = dict(extra)
-            wechat_kwargs.setdefault("mode", "ilink")
-            wechat_kwargs.pop("agentid", None)
-            base_url = str(wechat_kwargs.pop("base_url", "") or "").rstrip("/")
-            if wechat_kwargs.get("bot_token_file") and not wechat_kwargs.get("token_file"):
-                wechat_kwargs["token_file"] = wechat_kwargs.pop("bot_token_file")
-            adapter = create_wechat_adapter(
+            for _positional in ("mode", "agentid", "corpid", "corpsecret"):
+                wechat_kwargs.pop(_positional, None)
+            return create_wechat_adapter(
                 corpid=config.app_id,
                 corpsecret=config.app_secret,
                 agentid=extra.get("agentid", ""),
+                mode=mode,
                 **wechat_kwargs,
             )
-            if base_url:
-                adapter.ILINK_API_BASE = base_url
-            return adapter
         except Exception as e:
             logger.warning("Failed to create wechat adapter: %s", e)
             raise HTTPException(status_code=400, detail=str(e))
