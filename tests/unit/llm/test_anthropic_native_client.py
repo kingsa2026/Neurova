@@ -62,14 +62,14 @@ class TestClientDuckTyping:
         assert c.count_message_tokens([{"role": "user", "content": "hi"}]) > 0
 
     def test_stream_sync_rejects_inside_loop(self):
-        import asyncio
-
         c = self._client()
-        async def inside():
-            it = c.chat_stream([{"role": "user", "content": "hi"}])
-            next(iter(it))
-        with pytest.raises(RuntimeError, match="chat_stream_async"):
-            asyncio.run(inside())
+        # B-11 防复活锁存对齐：Native 客户端不提供同步 chat_stream
+        # （同步桥每 chunk 新建事件循环、零运行时调用方，已判死删除）；
+        # 流式主路径只有 chat_stream_async
+        assert not hasattr(c, "chat_stream"), (
+            "同步 chat_stream 桥不得复活（B-11 判定删除，见 "
+            "test_b11_no_sync_stream_bridge_revival.py）"
+        )
 
     @pytest.mark.asyncio
     async def test_chat_normalizes_response(self, monkeypatch):

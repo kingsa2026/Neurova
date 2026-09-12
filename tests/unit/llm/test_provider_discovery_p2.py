@@ -82,9 +82,13 @@ class TestDiscoveryPersistsModels:
         with patch.object(manager, "_get_provider_instance", return_value=instance):
             models = asyncio.run(manager.fetch_provider_models("openai"))
 
-        assert models == []
+        # B1 契约（QwenPaw 对齐）：失败不再静默空列表——回退"配置存量静态视图"
+        # （connectable=False 标记未连通），但绝不改写 provider.models 配置本体
         assert manager.get_provider("openai").models == ["gpt-4o"]
-        manager._save_config.assert_not_called()
+        assert [m.id for m in models] == ["gpt-4o"]
+        assert all(m.metadata.get("connectable") is False for m in models)
+        # 失败也记录同步错误（models_last_sync_error 落盘，供前端展示）
+        manager._save_config.assert_called()
 
     def test_discovery_keeps_user_order_and_removed_models_out(self, manager):
         manager._providers["openai"] = _provider("openai", ["z-model", "a-model"])

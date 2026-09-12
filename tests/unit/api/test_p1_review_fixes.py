@@ -97,7 +97,7 @@ class TestSaveSessionFenceFallback:
     """修⑥: 围栏拒绝后 session_id 回退"""
 
     @pytest.mark.asyncio
-    async def test_fenced_save_returns_original_session_id(self, tmp_path):
+    async def test_fenced_save_returns_original_session_id(self, tmp_path, monkeypatch):
         from neurova.agent.history_fence import get_history_write_fence, reset_history_write_fence
         from neurova.post_chat_pipeline import PostChatPipeline, StepStatus
 
@@ -106,7 +106,10 @@ class TestSaveSessionFenceFallback:
             from neurova.session_manager import SessionManager
 
             sm = SessionManager()
-            sm._sessions_dir = Path(tmp_path) / "sessions"
+            # 登记项清尾（2026-09-11）：直赋值无恢复会毒化单例——后续依赖
+            # "相对 sessions/ 跟随 CWD" 的测试（round_ops）全量顺序下必挂。
+            # monkeypatch.setattr 结束后自动恢复原值，双向不毒化。
+            monkeypatch.setattr(sm, "_sessions_dir", Path(tmp_path) / "sessions", raising=False)
             sm._sessions_dir.mkdir(parents=True, exist_ok=True)
 
             agt = SimpleNamespace(

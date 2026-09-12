@@ -290,10 +290,12 @@ class TestWSMessageDispatcher:
         ws = MagicMock()
         ws.send_json = AsyncMock()
 
-        # mock _handle_chat_send 抛异常
-        with patch.object(mp, "_handle_chat_send", side_effect=RuntimeError("boom")):
+        # 双路径归一（台账第五节登记③）后 chat:send 由 receive 循环统一拦截，
+        # 分发器不再内联承载；handler_error 契约用仍由分发器内联分发的
+        # session:list 验证，断言语义不变
+        with patch.object(mp, "_handle_session_list", side_effect=RuntimeError("boom")):
             await mp._handle_ws_message(
-                ws, {"type": "chat:send", "content": "hi"}, "user-1", "pair-1"
+                ws, {"type": "session:list", "agent_id": "default"}, "user-1", "pair-1"
             )
 
         sent = ws.send_json.call_args.args[0]

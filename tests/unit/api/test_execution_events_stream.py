@@ -205,6 +205,9 @@ class TestExecutionEventsStream(ExecutionStreamTestBase):
             self.module.get_current_user_or_default
         ] = lambda: {"user_id": "user_a"}
         try:
+            # 归属隔离（P0-1 fail-closed）：setUp 以默认属主 'default' 落的工作流
+            # 对 user_a 不可见（404）——先以 user_a 身份重存使其持有该工作流
+            self.storage.save_workflow(_linear_workflow(), user_id="user_a")
             resp = await self._execute({"inputs": {}, "wait": False})
             self.assertEqual(resp.status_code, 200, resp.text)
             run_id = resp.json()["runId"]
