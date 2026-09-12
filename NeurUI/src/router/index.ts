@@ -185,6 +185,12 @@ const routes: RouteRecordRaw[] = [
         props: true,
       },
       {
+        path: 'agent/:agentId/channel',
+        name: 'AgentChannel',
+        component: () => import('@/pages/AgentChannelPage.vue'),
+        props: true,
+      },
+      {
         path: 'agent/:agentId/channel-sharing',
         name: 'AgentChannelSharing',
         component: () => import('@/pages/ContextChannelPage.vue'),

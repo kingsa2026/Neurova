@@ -7,6 +7,8 @@ import type { ApiResponse } from '@/types/response'
 
 export interface ChannelConfig {
   channel_type: string
+  /** agent 隔离多实例（2026-09-13）：配置归属 agent，缺省 default */
+  agent_id?: string
   enabled: boolean
   connected?: boolean
   app_id?: string
@@ -55,30 +57,43 @@ export interface ChannelIngressStats {
 
 const BASE = '/channel-configs'
 
-/** List all channel configurations. */
-export function listChannelConfigs() {
-  return api.get<ApiResponse<ChannelConfig[]>>(`${BASE}`)
+/** List channel configurations of an agent (default agent when omitted). */
+export function listChannelConfigs(agentId?: string) {
+  return api.get<ApiResponse<ChannelConfig[]>>(`${BASE}`, { params: agentId ? { agent_id: agentId } : {} })
 }
 
-/** Create or update a channel configuration. */
-export function createChannelConfig(data: ChannelConfig) {
-  return api.post<ApiResponse<{ success: boolean; needs_scan?: boolean }>>(`${BASE}`, data)
+/** Create or update a channel configuration of an agent. */
+export function createChannelConfig(data: ChannelConfig, agentId?: string) {
+  return api.post<ApiResponse<{ success: boolean; needs_scan?: boolean }>>(
+    `${BASE}`, data, { params: agentId ? { agent_id: agentId } : {} },
+  )
+}
+
+/** Delete a channel configuration of an agent (unregisters adapter too). */
+export function deleteChannelConfig(type: string, agentId?: string) {
+  return api.delete<ApiResponse<unknown>>(`${BASE}/${type}`, {
+    params: agentId ? { agent_id: agentId } : {},
+  })
 }
 
 /** Test a channel configuration. */
-export function testChannelConfig(type: string, data: ChannelConfig) {
-  return api.post<ApiResponse<ChannelConfigTestResult>>(`${BASE}/${type}/test`, data)
+export function testChannelConfig(type: string, data: ChannelConfig, agentId?: string) {
+  return api.post<ApiResponse<ChannelConfigTestResult>>(
+    `${BASE}/${type}/test`, data, { params: agentId ? { agent_id: agentId } : {} },
+  )
 }
 
 /** F-3：生成 iLink 登录二维码（后端只生成不等待；已有有效 token 返回 ready）。 */
-export function createWechatIlinkQrcode(data?: { token_file?: string; bot_token?: string }) {
-  return api.post<WechatIlinkQrcodeResponse>(`${BASE}/wechat/ilink/qrcode`, data ?? {})
+export function createWechatIlinkQrcode(data?: { token_file?: string; bot_token?: string }, agentId?: string) {
+  return api.post<WechatIlinkQrcodeResponse>(
+    `${BASE}/wechat/ilink/qrcode`, data ?? {}, { params: agentId ? { agent_id: agentId } : {} },
+  )
 }
 
 /** F-3：单次查询 iLink 扫码状态（轮询节奏由前端驱动，3s/次）。 */
-export function getWechatIlinkQrcodeStatus(qrId: string) {
+export function getWechatIlinkQrcodeStatus(qrId: string, agentId?: string) {
   return api.get<WechatIlinkQrcodeStatus>(`${BASE}/wechat/ilink/qrcode/status`, {
-    params: { qr_id: qrId },
+    params: { qr_id: qrId, ...(agentId ? { agent_id: agentId } : {}) },
   })
 }
 
