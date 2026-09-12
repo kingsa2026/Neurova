@@ -31,7 +31,7 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/v1/settings")
 
-# 默认设置
+# 默认设置（平铺 legacy 键，供 /{key} 兼容读写）
 _default_settings = {
     "theme": "dark",
     "language": "zh-CN",
@@ -40,7 +40,14 @@ _default_settings = {
     "stream_mode": True,
     # 2026-09-10：max_tokens/temperature 两键移除——全链零消费的死参数；
     # 温度已迁记忆设置 llm.temperature（全局默认生成温度，agent 显式值优先）
+    # 2026-09-12 更正：max_tokens 有真实消费方（openai_loop 每请求读
+    # llm_client.config.max_tokens），以 advanced.max_output_tokens 形式
+    # 回归（见 core/app_settings.py，全局默认、显式 agent 配置优先）。
 }
+
+# 结构化 section（真持久化，data/app_settings.json——替换内存 stub：
+# 此前高级选项卡保存即丢、读取形状错位，整页为装饰性）
+_SETTINGS_SECTIONS = ("general", "security", "storage", "advanced")
 
 # CORS 配置文件路径
 _CORS_CONFIG_FILE = FilePath(__file__).parent.parent.parent.parent / "config" / "cors.json"
@@ -81,16 +88,35 @@ async def get_settings(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """获取全局设置 — 登录用户可读"""
+    """获取全局设置 — 登录用户可读（结构化 section 持久化 + 平铺 legacy 键）"""
     _get_request_id(request)
 
-    # TODO: 从数据库或文件加载设置
+    from neurova.core.app_settings import load_app_settings
+
     settings = dict(_default_settings)
+    settings.update(load_app_settings())
 
     return SettingsResponse(
         settings=settings,
         updated_at=str(time.time()),
     )
+
+
+def _hot_apply_output_budget(request: Request) -> int:
+    """把全局默认输出预算热应用到存活 agent（仅补默认/跟进自己应用过的值，
+    用户显式配置永不覆盖）。失败静默——预算在 agent 重建时仍会应用。"""
+    applied = 0
+    try:
+        agents = getattr(getattr(request.app, "state", None), "agents", None) or {}
+        from neurova.core.app_settings import apply_global_output_budget
+
+        for agent in agents.values():
+            config = getattr(getattr(agent, "llm_client", None), "config", None)
+            if config is not None and apply_global_output_budget(config):
+                applied += 1
+    except Exception:  # noqa: BLE001
+        logger.debug("输出预算热应用失败（跳过）", exc_info=True)
+    return applied
 
 
 @router.put("", response_model=SettingsResponse)
@@ -99,14 +125,27 @@ async def update_settings(
     body: UpdateSettingsRequest,
     admin: Dict[str, Any] = Depends(require_admin()),
 ):
-    """更新全局设置（仅管理员）"""
+    """更新全局设置（仅管理员）— section 值为 dict 时持久化到 app_settings"""
     _get_request_id(request)
 
-    # TODO: 保存设置到数据库或文件
-    _default_settings.update(body.settings)
+    from neurova.core.app_settings import load_app_settings, save_app_settings
+
+    for key, value in body.settings.items():
+        if key in _SETTINGS_SECTIONS and isinstance(value, dict):
+            save_app_settings(key, value)
+        else:
+            _default_settings[key] = value
+
+    if "advanced" in body.settings:
+        applied = _hot_apply_output_budget(request)
+        if applied:
+            logger.info("全局输出预算已热应用到 %d 个存活 agent", applied)
+
+    settings = dict(_default_settings)
+    settings.update(load_app_settings())
 
     return SettingsResponse(
-        settings=dict(_default_settings),
+        settings=settings,
         updated_at=str(time.time()),
     )
 

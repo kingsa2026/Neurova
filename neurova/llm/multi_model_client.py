@@ -594,12 +594,20 @@ class MultiModelLLMClient:
             self._retry_guards_inst[pid] = guard
         return guard
 
-    async def _chat_with_retry(self, client, messages: List[Dict[str, str]], **kwargs) -> Any:
+    async def _sleep_for_retry(self, seconds: float) -> None:
+        """429 等待重试的睡眠点（测试桩注入点：替换本方法即可免真实等待）。"""
+        await asyncio.sleep(max(0.0, seconds))
+
+    async def _chat_with_retry(
+        self, client, messages: List[Dict[str, str]], *, bypass_guard: bool = False, **kwargs
+    ) -> Any:
         """per-provider retry/circuit 装配的单次底层调用。
 
         重试集合内的异常（限流/连接/超时）指数退避重试；认证错误与其余异常
         立即上抛（由 chat() 转 error 信封）。同 provider 连续失败触发熔断
         （拒绝请求不触达底层），recovery_timeout 后半开恢复。
+        bypass_guard：429 同模型等待重试的直调路径——外层已有 10s 间隔的
+        重试预算，跳过内层快速重试与熔断计数（预算不喂爆 5 次阈值的熔断器）。
         """
         from neurova.llm.providers.rate_limiter import RetryConfig
 
@@ -615,6 +623,8 @@ class MultiModelLLMClient:
                 return await chat_fn(messages, **kwargs)
             return await asyncio.to_thread(chat_fn, messages, **kwargs)
 
+        if bypass_guard:
+            return await _attempt()
         wrapped = with_retry_and_circuit_breaker(retry_config=rc, circuit_breaker=cb)(_attempt)
         return await wrapped()
 
@@ -666,6 +676,27 @@ class MultiModelLLMClient:
             # 跨模型切换（transient 旧版缺失——网络抖动/超时/5xx 整轮失败）；
             # 认证/参数/上下文溢出/内容安全换模型无意义，不切换
             error_kind = self._classify_error(result.get("error") or "")
+            # ZCode 对齐（2026-09-11）：429 先同模型等待重试（默认 ≤10 次、间隔
+            # 10s、单次封顶 120s；非流式信封不携带 Retry-After 头，按间隔等待），
+            # 耗尽才走跨模型回退。重试直调绕过熔断（见 _chat_with_retry），
+            # 每次重试前清除自身 429 暂停。
+            if error_kind == "rate_limited":
+                cfg = _get_429_retry_config()
+                from neurova.llm.model_rate_limiter import get_shared_limiter
+
+                _limiter = get_shared_limiter()
+                for _retry in range(cfg["max_retries"]):
+                    await self._sleep_for_retry(min(cfg["interval"], cfg["cap"]))
+                    _limiter.clear_pause(client.model or "unknown")
+                    result = await self._chat_single_attempt(
+                        client, messages, bypass_guard=True, **kwargs
+                    )
+                    if result.get("success"):
+                        return result
+                    last_result = result
+                    if self._classify_error(result.get("error") or "") != "rate_limited":
+                        break
+                error_kind = self._classify_error(last_result.get("error") or "")
             from neurova.llm.model_error_policy import is_fallback_eligible
 
             if not auto_failover or not is_fallback_eligible(result.get("error") or ""):
@@ -682,6 +713,7 @@ class MultiModelLLMClient:
         self,
         client: ModelClient,
         messages: List[Dict[str, str]],
+        bypass_guard: bool = False,
         **kwargs,
     ) -> Dict[str, Any]:
         """单模型一次聊天尝试（原 chat 主体：限流/调用/记账/错误分类）。"""
@@ -701,8 +733,11 @@ class MultiModelLLMClient:
 
         try:
             start_time = time.time()
-            # P2-2：底层调用经 per-provider retry/circuit 装配
-            result = await self._chat_with_retry(client, messages, **kwargs)
+            # P2-2：底层调用经 per-provider retry/circuit 装配（bypass_guard：
+            # 429 同模型等待重试直调，见 _chat_with_retry）
+            result = await self._chat_with_retry(
+                client, messages, bypass_guard=bypass_guard, **kwargs
+            )
             duration = time.time() - start_time
 
             client.increment_request(success=True)
@@ -891,179 +926,251 @@ class MultiModelLLMClient:
 
         # 审计 P0-C2：流式路径与 chat() 同源限流——原实现无 acquire/release/
         # 429 上报，per-model QPM/并发上限/暂停在主流量（前端全走流式）上是空的
-        from neurova.llm.model_rate_limiter import RateLimitExceeded, get_shared_limiter
+        from neurova.llm.model_rate_limiter import (
+            RateLimitExceeded,
+            get_shared_limiter,
+            parse_retry_after,
+        )
 
         limiter = get_shared_limiter()
-        model_key = client.model or "unknown"
-        acquired = False
-        try:
-            limiter.acquire(model_key, blocking=False)
-            acquired = True
-        except RateLimitExceeded as e:
-            client.increment_request(success=False)
-            yield _instream_error_dict(RuntimeError(f"模型限流: {e}"))
-            return
+        # ZCode 对齐（2026-09-11）：429 同模型等待重试 + 切换容错。
+        # - retry_no：当前模型已等待重试次数（≤ max_retries，默认 10）
+        # - fail_count：连续失败模型数（≤ max_switches，默认 5）——任一模型
+        #   成功出过内容（"链接成功"）即归零重计；预算按次调用计，工具循环
+        #   每轮成功开启新一轮时自然归零
+        # - yielded_any：本尝试已吐内容；此后失败的重试/切换事件带 reset=True
+        #   （消费方清空半截回复再重来，ZCode 重试替换语义，防重复拼接）
+        cfg = _get_429_retry_config()
+        retry_no = 0
+        fail_count = 0
+        switch_count = 0
+        yielded_any = False
+        switched_models: set = set()
 
-        try:
+        while True:
+            model_key = client.model or "unknown"
+            acquired = False
             start_time = time.time()
-            # P1 修复: chat_stream 是同步生成器，无法 `async for`（TypeError）。
-            # 必须调用异步版本 chat_stream_async。
-            stream_usage: Dict[str, int] = {}
-            _cache_read, _cache_write = 0, 0
-            reply_text = ""
-            first_token_ms = 0  # P1-8（OpenOcta 启发）：首块耗时入账
-            # 审计 P0-C5：上游声明回传 usage（OpenAI 标准行为）→ 无需整段缓冲
-            _needs_reply_text = not getattr(client.client, "_compat_include_stream_usage", lambda: True)()
-            # 流内静默看门狗（2026-09-10 流中断事故遥测）：任何退出路径都必须
-            # 取消（try/finally 包住整个异步迭代，含消费方中途放弃的 aclose）
-            _stream_state = {
-                "last_chunk_at": time.time(),
-                "warned_at": 0.0,
-                "reasoning_chars": 0,
-                "content_chars": 0,
-                "read_timeout": getattr(getattr(client.client, "config", None), "timeout", "?"),
-            }
-            _silence_task = asyncio.create_task(
-                _warn_stream_silence(client.provider.id, client.model, _stream_state)
-            )
             try:
-                async for chunk in client.client.chat_stream_async(messages, **kwargs):
-                    _stream_state["last_chunk_at"] = time.time()
-                    _stream_state["warned_at"] = 0.0
-                    if first_token_ms == 0:
-                        # 首个有效 chunk（含 reasoning/content/usage 任一载荷）
-                        first_token_ms = int((time.time() - start_time) * 1000)
-                    # 根因修复 (2026-09-02): 流式 usage 在最后一个 chunk 携带全量
-                    # （LLMClient 已请求 stream_options.include_usage）——
-                    # 取最后一次非空值，逐 chunk 累加会把 token 双计。
-                    _u = getattr(chunk, "usage", None)
-                    if _u:
-                        stream_usage = {
-                            "prompt_tokens": getattr(_u, "prompt_tokens", None) if not isinstance(_u, dict) else _u.get("prompt_tokens"),
-                            "completion_tokens": getattr(_u, "completion_tokens", None) if not isinstance(_u, dict) else _u.get("completion_tokens"),
-                        }
-                        stream_usage = {k: int(v or 0) for k, v in stream_usage.items()}
-                        # B1-5：流式路径同样提取 cache 命中/写入
-                        _cache_read, _cache_write = self._extract_cache_tokens(_u)
-                    # 审计 P0-C5：条件缓冲——仅当上游网关声明不回传 usage（估算
-                    # token 必须整段重放）时才累积；正常路径长响应内存不再翻倍
-                    if _needs_reply_text:
-                        reply_text += getattr(chunk, "content", "") or ""
-                        reply_text += getattr(chunk, "reasoning_content", "") or ""
-                    # 静默遥测计数：判读"思考/正文各吐了多少"的证据
-                    _rc = getattr(chunk, "reasoning_content", None)
-                    if _rc:
-                        _stream_state["reasoning_chars"] += len(_rc)
-                    _cc = getattr(chunk, "content", None)
-                    if _cc:
-                        _stream_state["content_chars"] += len(_cc)
-                    yield chunk
-            finally:
-                _silence_task.cancel()
                 try:
-                    await _silence_task
-                except BaseException:  # noqa: BLE001 — 取消收尾，遥测异常不外泄
+                    limiter.acquire(model_key, blocking=False)
+                    acquired = True
+                except RateLimitExceeded as e:
+                    # 原：立即死。现：统一走下方 429 决策——工具循环续轮撞上
+                    # 本轮自己上报的暂停不再断流。_acquire_blocked 标记避免把
+                    # 本地闸门拒绝误当上游 429（不升级暂停计数）。
+                    _blocked = LLMRateLimitError(f"模型限流 (rate limit): {e}")
+                    _blocked._acquire_blocked = True
+                    raise _blocked from e
+                # P1 修复: chat_stream 是同步生成器，无法 `async for`（TypeError）。
+                # 必须调用异步版本 chat_stream_async。
+                stream_usage: Dict[str, int] = {}
+                _cache_read, _cache_write = 0, 0
+                reply_text = ""
+                first_token_ms = 0  # P1-8（OpenOcta 启发）：首块耗时入账
+                # 审计 P0-C5：上游声明回传 usage（OpenAI 标准行为）→ 无需整段缓冲
+                _needs_reply_text = not getattr(client.client, "_compat_include_stream_usage", lambda: True)()
+                # 流内静默看门狗（2026-09-10 流中断事故遥测）：任何退出路径都必须
+                # 取消（try/finally 包住整个异步迭代，含消费方中途放弃的 aclose）
+                _stream_state = {
+                    "last_chunk_at": time.time(),
+                    "warned_at": 0.0,
+                    "reasoning_chars": 0,
+                    "content_chars": 0,
+                    "read_timeout": getattr(getattr(client.client, "config", None), "timeout", "?"),
+                }
+                _silence_task = asyncio.create_task(
+                    _warn_stream_silence(client.provider.id, client.model, _stream_state)
+                )
+                try:
+                    async for chunk in client.client.chat_stream_async(messages, **kwargs):
+                        _stream_state["last_chunk_at"] = time.time()
+                        _stream_state["warned_at"] = 0.0
+                        if first_token_ms == 0:
+                            # 首个有效 chunk（含 reasoning/content/usage 任一载荷）
+                            first_token_ms = int((time.time() - start_time) * 1000)
+                        # 根因修复 (2026-09-02): 流式 usage 在最后一个 chunk 携带全量
+                        # （LLMClient 已请求 stream_options.include_usage）——
+                        # 取最后一次非空值，逐 chunk 累加会把 token 双计。
+                        _u = getattr(chunk, "usage", None)
+                        if _u:
+                            stream_usage = {
+                                "prompt_tokens": getattr(_u, "prompt_tokens", None) if not isinstance(_u, dict) else _u.get("prompt_tokens"),
+                                "completion_tokens": getattr(_u, "completion_tokens", None) if not isinstance(_u, dict) else _u.get("completion_tokens"),
+                            }
+                            stream_usage = {k: int(v or 0) for k, v in stream_usage.items()}
+                            # B1-5：流式路径同样提取 cache 命中/写入
+                            _cache_read, _cache_write = self._extract_cache_tokens(_u)
+                        # 审计 P0-C5：条件缓冲——仅当上游网关声明不回传 usage（估算
+                        # token 必须整段重放）时才累积；正常路径长响应内存不再翻倍
+                        if _needs_reply_text:
+                            reply_text += getattr(chunk, "content", "") or ""
+                            reply_text += getattr(chunk, "reasoning_content", "") or ""
+                        # 静默遥测计数：判读"思考/正文各吐了多少"的证据
+                        _rc = getattr(chunk, "reasoning_content", None)
+                        if _rc:
+                            _stream_state["reasoning_chars"] += len(_rc)
+                        _cc = getattr(chunk, "content", None)
+                        if _cc:
+                            _stream_state["content_chars"] += len(_cc)
+                        yielded_any = True
+                        yield chunk
+                finally:
+                    _silence_task.cancel()
+                    try:
+                        await _silence_task
+                    except BaseException:  # noqa: BLE001 — 取消收尾，遥测异常不外泄
+                        pass
+                    # RES-P0-1 根修：并发槽位随流式段收尾归一释放。本 finally 覆盖
+                    # 成功/异常/消费方中断（GeneratorExit）/取消全部退出路径；
+                    # except 分支的兜底 release 由 acquired 守卫防双释放。
+                    if acquired:
+                        limiter.release(model_key)
+                        acquired = False
+                duration = time.time() - start_time  # P2-4 补刀：原为丢弃结果的死语句
+                client.increment_request(success=True)
+                limiter.report_success(model_key)
+                try:
+                    from neurova.core.metrics import get_metrics
+
+                    get_metrics().record_llm_call(client.provider.id, client.model, True, duration)
+                except Exception:
                     pass
-                # RES-P0-1 根修：并发槽位随流式段收尾归一释放。本 finally 覆盖
-                # 成功/异常/消费方中断（GeneratorExit）/取消全部退出路径；
-                # except 分支的兜底 release 由 acquired 守卫防双释放。
-                if acquired:
-                    limiter.release(model_key)
-                    acquired = False
-            duration = time.time() - start_time  # P2-4 补刀：原为丢弃结果的死语句
-            client.increment_request(success=True)
-            limiter.report_success(model_key)
-            try:
-                from neurova.core.metrics import get_metrics
+                # 根因修复 (2026-09-02): 流式调用此前只透传 chunk、从不 record——
+                # 无 usage 也记 1 次调用（calls 恒 0 的根因），有 usage 记真实 token。
+                # 网关不回传 usage 时（实测 sensetime 流式恒空）用 tiktoken 估值并
+                # 显式标记 estimated=True，供对账区分真值/估计值。
+                try:
+                    from neurova.core.usage_accounting import get_usage_accounting
 
-                get_metrics().record_llm_call(client.provider.id, client.model, True, duration)
-            except Exception:
-                pass
-            # 根因修复 (2026-09-02): 流式调用此前只透传 chunk、从不 record——
-            # 无 usage 也记 1 次调用（calls 恒 0 的根因），有 usage 记真实 token。
-            # 网关不回传 usage 时（实测 sensetime 流式恒空）用 tiktoken 估值并
-            # 显式标记 estimated=True，供对账区分真值/估计值。
-            try:
-                from neurova.core.usage_accounting import get_usage_accounting
+                    _prompt = stream_usage.get("prompt_tokens")
+                    _completion = stream_usage.get("completion_tokens")
+                    _estimated = False
+                    if _prompt is None or _completion is None:
+                        _est_client = getattr(client.client, "count_tokens", None)
+                        if _est_client:
+                            try:
+                                _prompt = client.client.count_message_tokens(messages, tools=kwargs.get("tools"))
+                            except Exception:  # noqa: BLE001 - 估值失败退 0，不阻断主流程
+                                _prompt = 0
+                            _completion = _est_client(reply_text)
+                            _estimated = True
+                        else:
+                            _prompt = _prompt or 0
+                            _completion = _completion or 0
+                    # P2-6：任务级回填（同 chat 路径）
+                    from neurova.core.usage_accounting import set_task_last_call
 
-                _prompt = stream_usage.get("prompt_tokens")
-                _completion = stream_usage.get("completion_tokens")
-                _estimated = False
-                if _prompt is None or _completion is None:
-                    _est_client = getattr(client.client, "count_tokens", None)
-                    if _est_client:
-                        try:
-                            _prompt = client.client.count_message_tokens(messages, tools=kwargs.get("tools"))
-                        except Exception:  # noqa: BLE001 - 估值失败退 0，不阻断主流程
-                            _prompt = 0
-                        _completion = _est_client(reply_text)
-                        _estimated = True
-                    else:
-                        _prompt = _prompt or 0
-                        _completion = _completion or 0
-                # P2-6：任务级回填（同 chat 路径）
-                from neurova.core.usage_accounting import set_task_last_call
+                    set_task_last_call(get_usage_accounting().record(
+                        model=client.model or "unknown",
+                        provider=client.provider.id,
+                        prompt_tokens=_prompt or 0,
+                        completion_tokens=_completion or 0,
+                        estimated=_estimated,
+                        cache_read_tokens=_cache_read,
+                        cache_write_tokens=_cache_write,
+                    ))
+                    # 持久化历史（同 chat 路径）：user_id 取请求级 ContextVar，缺失记 anonymous
+                    from neurova.core.identity_context import get_request_user_id
+                    from neurova.core.usage_history import get_usage_history
 
-                set_task_last_call(get_usage_accounting().record(
-                    model=client.model or "unknown",
-                    provider=client.provider.id,
-                    prompt_tokens=_prompt or 0,
-                    completion_tokens=_completion or 0,
-                    estimated=_estimated,
-                    cache_read_tokens=_cache_read,
-                    cache_write_tokens=_cache_write,
-                ))
-                # 持久化历史（同 chat 路径）：user_id 取请求级 ContextVar，缺失记 anonymous
-                from neurova.core.identity_context import get_request_user_id
-                from neurova.core.usage_history import get_usage_history
+                    get_usage_history().record(
+                        model=client.model or "unknown",
+                        provider=client.provider.id,
+                        prompt_tokens=_prompt or 0,
+                        completion_tokens=_completion or 0,
+                        estimated=_estimated,
+                        user_id=get_request_user_id() or "anonymous",
+                        first_token_ms=first_token_ms,
+                        duration_ms=int(duration * 1000),
+                        cache_read_tokens=_cache_read,
+                        cache_write_tokens=_cache_write,
+                    )
+                except Exception:
+                    logger.debug("流式 usage 入账跳过", exc_info=True)
+                return
+            except Exception as e:
+                client.increment_request(success=False)
+                # 审计 P0-C2：流内 429 与 chat() 同源——分类后 report_429 暂停该模型
+                # B1-2：分类名对齐 model_error_policy（rate_limited/model_not_found）
+                error_kind = self._classify_error(e)
+                retry_after = None
+                if error_kind == "rate_limited" and not getattr(e, "_acquire_blocked", False):
+                    # B1-6（#6617）：服务端 Retry-After 头优先（缺失回落 30s 默认退避）
+                    _headers = getattr(getattr(e, "response", None), "headers", None)
+                    retry_after = parse_retry_after(_headers.get("retry-after") if _headers else None)
+                    limiter.report_429(model_key, pause_seconds=retry_after or 30.0)
+                elif error_kind == "model_not_found":
+                    self._note_404_reconnect(client.provider.id, client.model)
+                try:
+                    from neurova.core.metrics import get_metrics
 
-                get_usage_history().record(
-                    model=client.model or "unknown",
-                    provider=client.provider.id,
-                    prompt_tokens=_prompt or 0,
-                    completion_tokens=_completion or 0,
-                    estimated=_estimated,
-                    user_id=get_request_user_id() or "anonymous",
-                    first_token_ms=first_token_ms,
-                    duration_ms=int(duration * 1000),
-                    cache_read_tokens=_cache_read,
-                    cache_write_tokens=_cache_write,
-                )
-            except Exception:
-                logger.debug("流式 usage 入账跳过", exc_info=True)
-        except Exception as e:
-            client.increment_request(success=False)
-            # 审计 P0-C2：流内 429 与 chat() 同源——分类后 report_429 暂停该模型
-            # B1-2：分类名对齐 model_error_policy（rate_limited/model_not_found）
-            error_kind = self._classify_error(e)
-            if error_kind == "rate_limited":
-                # B1-6（#6617）：服务端 Retry-After 头优先（缺失回落 30s 默认退避）
-                from neurova.llm.model_rate_limiter import parse_retry_after
-
-                _headers = getattr(getattr(e, "response", None), "headers", None)
-                pause = parse_retry_after(_headers.get("retry-after") if _headers else None) or 30.0
-                limiter.report_429(model_key, pause_seconds=pause)
-            elif error_kind == "model_not_found":
-                self._note_404_reconnect(client.provider.id, client.model)
-            try:
-                from neurova.core.metrics import get_metrics
-
-                get_metrics().record_llm_call(
-                    client.provider.id, client.model, False, time.time() - start_time
-                )
-            except Exception:
-                pass
-            finally:
-                # RES-P0-1：兜底释放，仅覆盖流式段开始前的异常；正常路径已在
-                # 流式段 finally 释放（acquired 已置 False，此处为 no-op）。
-                if acquired:
-                    limiter.release(model_key)
-            # OpenClaw 启发 P0-1 流内错误编码铁律：provider 调用一旦开始，
-            # 一切失败编码为流内错误消息而非异常（llm-core types.ts L202）。
-            # error_type 用五类标准错误（error_mapping 单一事实源），消费方
-            # （openai_loop._raise_for_error_dict / chat_pipeline）据此分类，
-            # 不再靠 HTTP 语义字符串二次猜测。
-            yield _instream_error_dict(e)
+                    get_metrics().record_llm_call(
+                        client.provider.id, client.model, False, time.time() - start_time
+                    )
+                except Exception:
+                    pass
+                finally:
+                    # RES-P0-1：兜底释放，仅覆盖流式段开始前的异常；正常路径已在
+                    # 流式段 finally 释放（acquired 已置 False，此处为 no-op）。
+                    if acquired:
+                        limiter.release(model_key)
+                        acquired = False
+                # ── ZCode 对齐决策链：同模型等待重试 → 切换容错 → exhausted + 死 ──
+                if yielded_any:
+                    fail_count = 0  # "链接成功"归零重计（本尝试吐过内容）
+                if error_kind == "rate_limited" and retry_no < cfg["max_retries"]:
+                    retry_no += 1
+                    wait = min(retry_after if retry_after is not None else cfg["interval"], cfg["cap"])
+                    payload: Dict[str, Any] = dict(
+                        phase="waiting", retry=retry_no, max_retries=cfg["max_retries"],
+                        wait_seconds=wait, model=model_key, provider=client.provider.id,
+                        reason=error_kind,
+                    )
+                    if yielded_any:
+                        payload["reset"] = True  # 半截回复作废，消费方清空后重来
+                    yield {"retry_status": payload}
+                    await self._sleep_for_retry(wait)
+                    # 主动重试清除自身暂停：重试流量 = 每隔 wait 一次的温和请求，
+                    # 其余并发调用方仍受各自暂停/闸门约束（连续计数保留升级语义）
+                    limiter.clear_pause(model_key)
+                    yielded_any = False
+                    continue
+                fail_count += 1  # 本模型被放弃，计入连续失败链
+                if (
+                    error_kind in ("rate_limited", "transient", "model_not_found")
+                    and fail_count < cfg["max_switches"]
+                ):
+                    nxt = self._next_failover_client(client.model, switched_models)
+                    if nxt is not None:
+                        switch_count += 1
+                        switched_models.add(client.model or "unknown")
+                        payload = dict(
+                            phase="switched", fail_count=fail_count,
+                            max_switches=cfg["max_switches"], switch_count=switch_count,
+                            model=nxt.model, from_model=model_key,
+                            provider=nxt.provider.id, reason=error_kind,
+                        )
+                        if yielded_any:
+                            payload["reset"] = True
+                        yield {"retry_status": payload}
+                        client = nxt
+                        retry_no = 0
+                        yielded_any = False
+                        continue
+                if retry_no or fail_count:
+                    yield {"retry_status": dict(
+                        phase="exhausted", fail_count=fail_count,
+                        max_switches=cfg["max_switches"], retries=retry_no,
+                        max_retries=cfg["max_retries"], model=model_key, reason=error_kind,
+                    )}
+                # OpenClaw 启发 P0-1 流内错误编码铁律：provider 调用一旦开始，
+                # 一切失败编码为流内错误消息而非异常（llm-core types.ts L202）。
+                # error_type 用五类标准错误（error_mapping 单一事实源），消费方
+                # （openai_loop._raise_for_error_dict / chat_pipeline）据此分类，
+                # 不再靠 HTTP 语义字符串二次猜测。
+                yield _instream_error_dict(e)
+                return
 
     def _next_failover_client(self, failed_model: Optional[str], excluded: Optional[set] = None) -> Optional[ModelClient]:
         """auto 失败切换：返回排除已失败模型后的下一候选（None=无候选）。
@@ -1200,6 +1307,42 @@ _multi_model_client: Optional[MultiModelLLMClient] = None
 # NEUROVA_LLM_MOCK=1 时 chat/chat_stream 在 provider 解析之前返回 canned
 # 响应（无 Key/无网络可跑通全链路：e2e/CI/本地演示）。信封与真实路径同形。
 MOCK_ENV_FLAG = "NEUROVA_LLM_MOCK"
+
+
+def _get_429_retry_config() -> Dict[str, Any]:
+    """429 重试策略（ZCode 对齐，2026-09-11）——调用时读取生效值。
+
+    优先级：env 显式 > 设置页持久化（data/llm_retry_settings.json，管理端
+    /governance/llm-retry 读写）> 内置默认。持久层不可用时退回纯 env 口径。
+    """
+    try:
+        from neurova.security.llm_retry_settings import get_effective_llm_retry_settings
+
+        s = get_effective_llm_retry_settings()
+        return {
+            "max_retries": int(s["max_retries"]),
+            "interval": float(s["interval"]),
+            "cap": float(s["wait_cap"]),
+            "max_switches": int(s["max_switches"]),
+        }
+    except Exception:  # noqa: BLE001 - 持久层缺失/损坏时退回纯 env 口径
+        def _num(key: str, default):
+            import os
+
+            raw = os.environ.get(key, "")
+            if not raw:
+                return default
+            try:
+                return type(default)(raw)
+            except (TypeError, ValueError):
+                return default
+
+        return {
+            "max_retries": max(0, _num("NEUROVA_LLM_429_MAX_RETRIES", 10)),
+            "interval": max(1.0, _num("NEUROVA_LLM_429_RETRY_INTERVAL", 10.0)),
+            "cap": max(1.0, _num("NEUROVA_LLM_429_WAIT_CAP", 120.0)),
+            "max_switches": max(1, _num("NEUROVA_LLM_MAX_SWITCHES", 5)),
+        }
 
 
 def _instream_error_dict(error: Exception) -> Dict[str, Any]:

@@ -343,6 +343,47 @@ async def get_governance_settings(admin=Depends(_governance_admin_dep)):
     return {"code": 0, "data": load_governance_settings()}
 
 
+# ── LLM 429 重试设置（设置页"模型"tab，2026-09-11 ZCode 对齐）──
+
+
+@router.get("/llm-retry")
+async def get_llm_retry_settings(admin=Depends(_governance_admin_dep)):
+    """LLM 429 重试/切换容错参数（仅管理员）"""
+    from neurova.security.llm_retry_settings import get_effective_llm_retry_settings
+
+    return {"code": 0, "data": get_effective_llm_retry_settings()}
+
+
+class LlmRetrySettingsUpdate(BaseModel):
+    """LLM 429 重试设置更新
+
+    max_retries：同模型最大等待重试次数；interval：重试间隔秒（服务端
+    Retry-After 优先）；wait_cap：单次等待封顶秒；max_switches：连续失败
+    模型容错数（任一模型成功出内容即归零重计）。
+    """
+
+    max_retries: Optional[int] = Field(None, ge=0, le=50)
+    interval: Optional[float] = Field(None, ge=1.0, le=600.0)
+    wait_cap: Optional[float] = Field(None, ge=1.0, le=3600.0)
+    max_switches: Optional[int] = Field(None, ge=1, le=20)
+
+
+@router.put("/llm-retry")
+async def update_llm_retry_settings(body: LlmRetrySettingsUpdate, admin=Depends(_governance_admin_dep)):
+    """更新 LLM 429 重试设置（仅管理员；env 显式设置仍优先于持久化值）"""
+    from neurova.security.llm_retry_settings import (
+        get_effective_llm_retry_settings,
+        save_llm_retry_settings,
+    )
+
+    payload = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not payload:
+        raise HTTPException(status_code=422, detail="无有效更新字段")
+    if not save_llm_retry_settings(payload):
+        raise HTTPException(status_code=500, detail="LLM 429 重试设置保存失败")
+    return {"code": 0, "data": get_effective_llm_retry_settings()}
+
+
 class GovernanceSettingsUpdate(BaseModel):
     """治理设置更新（rsi_phase: 0..4；conversation_rules_enabled: LLM 成本门控）"""
 
