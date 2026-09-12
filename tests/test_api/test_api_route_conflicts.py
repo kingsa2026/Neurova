@@ -5,38 +5,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
-def test_channel_route_conflict():
-    """测试channel和channels模块路由冲突"""
-    # 根据分析文档，两个模块都注册到 /v1/channels
-    # 这会导致第二个模块覆盖第一个模块的路由
-    
-    app = FastAPI()
-    
-    # 尝试导入两个模块
-    try:
-        from neurova.api.endpoints import channel
-        from neurova.api.endpoints import channels
-        
-        # 检查两个模块是否都有router
-        assert hasattr(channel, 'router'), "channel模块应该有router"
-        assert hasattr(channels, 'router'), "channels模块应该有router"
-        
-        # 检查路由前缀
-        # channel模块的router前缀
-        channel_prefix = channel.router.prefix
-        channels_prefix = channels.router.prefix
-        
-        print(f"channel模块路由前缀: {channel_prefix}")
-        print(f"channels模块路由前缀: {channels_prefix}")
-        
-        # 根据分析文档，两个模块都注册到 /v1/channels
-        # 这会导致冲突
-        # 实际测试中，我们检查它们是否会导致路由覆盖
-        
-    except ImportError as e:
-        pytest.skip(f"跳过测试: 模块导入失败 - {e}")
-
-
+# 2026-09-13 死壳清理：endpoints/channel.py(/v1/channels 假桥) 已删除，
+# 原 channel-vs-channels 冲突测试主体消失；渠道唯一真集为 channel_config.py(/v1/channel-configs)
+# 与 channels.py(/v1/channel-adapters)，防复活钉见 tests/unit/api/test_channel_shell_removed.py
 def test_context_route_conflict():
     """测试context和context_pool_settings模块路由冲突"""
     # 根据分析文档，两个模块都注册到 /v1/context

@@ -24,7 +24,6 @@ def test_route_prefix_changes():
 def test_import_after_fix():
     """测试修复后模块导入"""
     try:
-        from neurova.api.endpoints import channel
         from neurova.api.endpoints import channels
         from neurova.api.endpoints import context
         from neurova.api.endpoints import context_pool_settings
@@ -34,7 +33,6 @@ def test_import_after_fix():
         print("所有模块导入成功")
         
         # 检查router属性
-        assert hasattr(channel, 'router'), "channel模块应该有router"
         assert hasattr(channels, 'router'), "channels模块应该有router"
         assert hasattr(context, 'router'), "context模块应该有router"
         assert hasattr(context_pool_settings, 'router'), "context_pool_settings模块应该有router"

@@ -56,96 +56,10 @@ class TestChannelManagerSingleton:
         # 这说明 channel.py 中的代码有问题
 
 
-class TestChannelEndpointSingletonIssue:
-    """测试 channel.py 端点的单例问题（修复后）"""
-
-    def test_get_channel_manager_returns_singleton(self):
-        """验证 _get_channel_manager() 返回单例实例"""
-        # 这个测试验证修复后的行为
-        from neurova.api.endpoints.channel import _get_channel_manager
-        
-        # 重置单例
-        ChannelManager._instance = None
-        
-        # 第一次调用
-        manager1 = _get_channel_manager()
-        assert manager1 is not None
-        
-        # 第二次调用 - 应该返回同一个单例实例
-        manager2 = _get_channel_manager()
-        
-        # 修复后，应该返回同一个实例
-        assert manager1 is manager2
-        assert id(manager1) == id(manager2)
-    
-    def test_state_persists_between_requests(self):
-        """验证请求之间状态保持"""
-        # 重置单例
-        ChannelManager._instance = None
-        
-        from neurova.api.endpoints.channel import _get_channel_manager
-        
-        # 第一次请求：添加渠道
-        manager1 = _get_channel_manager()
-        manager1._adapters["feishu"] = MagicMock()
-        
-        # 第二次请求：获取渠道列表
-        manager2 = _get_channel_manager()
-        
-        # 修复后，由于使用单例，第二次请求可以看到第一次添加的渠道
-        assert "feishu" in manager2._adapters
-
-
-class TestChannelEndpointFix:
-    """测试修复后的 channel.py 端点"""
-
-    def test_use_singleton_get_instance(self):
-        """验证修复后使用 get_instance()"""
-        # 模拟修复后的代码
-        def fixed_get_channel_manager():
-            try:
-                from neurova.channels.manager import ChannelManager
-                return ChannelManager.get_instance()
-            except Exception:
-                return None
-        
-        # 重置单例
-        ChannelManager._instance = None
-        
-        # 第一次调用
-        manager1 = fixed_get_channel_manager()
-        assert manager1 is not None
-        
-        # 第二次调用 - 应该返回同一个实例
-        manager2 = fixed_get_channel_manager()
-        
-        # 现在应该是同一个实例
-        assert manager1 is manager2
-        assert id(manager1) == id(manager2)
-    
-    def test_state_persists_between_requests(self):
-        """验证修复后状态在请求之间保持"""
-        # 模拟修复后的代码
-        def fixed_get_channel_manager():
-            try:
-                from neurova.channels.manager import ChannelManager
-                return ChannelManager.get_instance()
-            except Exception:
-                return None
-        
-        # 重置单例
-        ChannelManager._instance = None
-        
-        # 第一次请求：添加渠道
-        manager1 = fixed_get_channel_manager()
-        manager1._adapters["feishu"] = MagicMock()
-        
-        # 第二次请求：获取渠道列表
-        manager2 = fixed_get_channel_manager()
-        
-        # 由于使用单例，第二次请求可以看到第一次添加的渠道
-        assert "feishu" in manager2._adapters
-
-
+# 说明（2026-09-13 死壳清理）：原 TestChannelEndpointSingletonIssue/TestChannelEndpointFix
+# 测 neurova/api/endpoints/channel.py 的 _get_channel_manager——该端点为 ChannelManager
+# 假桥死壳（方法不存在、GET 恒 []、POST 假成功），渠道唯一真集为
+# channel_config.py(/v1/channel-configs)，死壳连同前端 AgentChannelPage/channels.ts 一并移除；
+# ChannelManager 单例语义由上方 TestChannelManagerSingleton 直接钉住，覆盖无损失。
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
