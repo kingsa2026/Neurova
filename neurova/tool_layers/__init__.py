@@ -11,7 +11,6 @@
 - capability_graph: 工具能力关系图
 - tool_orchestrator: DAG 工具编排器
 - tool_marketplace: 工具市场（含贝叶斯评分）
-- tool_cache: 三级智能工具缓存
 - tool_logger: 结构化工具执行日志
 - cli_tool: CLI 工具执行器
 - browser_capability: 浏览器后端能力描述
@@ -71,11 +70,6 @@ try:
     )
 except ImportError as e:
     logger.warning("Failed to import tool_marketplace: %s", e)
-
-try:
-    from neurova.tool_layers.tool_cache import CacheEntry, ToolCache
-except ImportError as e:
-    logger.warning("Failed to import tool_cache: %s", e)
 
 try:
     from neurova.tool_layers.tool_logger import ToolExecutionEntry, ToolExecutionLogger
@@ -186,8 +180,6 @@ __all__ = [
     "BayesianRating",
     "ToolReview",
     "ToolFork",
-    "ToolCache",
-    "CacheEntry",
     "ToolExecutionLogger",
     "ToolExecutionEntry",
     "CLIToolExecutor",
