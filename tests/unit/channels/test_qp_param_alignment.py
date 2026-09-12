@@ -153,11 +153,13 @@ def test_qq_consumes_client_secret_from_extra():
 
 
 # ------------------------------------------------------------------
-# 微信 iLink：base_url/bot_token/bot_token_file 透传（QR confirmed 回填）
+# 微信 iLink：工厂路由到真实协议新适配器（端到端重建）；wecom 模式留旧路
 # ------------------------------------------------------------------
 
 
-def test_wechat_ilink_base_url_and_token_passthrough():
+def test_wechat_ilink_factory_routes_to_real_protocol_adapter(tmp_path):
+    from neurova.channels.wechat_ilink import WeChatILinkAdapter
+
     adapter = _create_adapter(
         "wechat",
         _cfg(
@@ -166,13 +168,23 @@ def test_wechat_ilink_base_url_and_token_passthrough():
                 "mode": "ilink",
                 "base_url": "https://gw.custom.example",
                 "bot_token": "tok-xyz",
-                "bot_token_file": "~/nv_test_ilink_token",
+                "bot_token_file": str(tmp_path / "wx_token"),
             },
         ),
     )
-    assert adapter.mode == "ilink"
-    # bot_token 经认证链落到 ilink_bot_token；bot_token_file 映射为 NV 的 token_file；
-    # base_url 覆盖实例 ILINK_API_BASE（QR confirmed 回填的真实网关）
-    assert adapter.ilink_bot_token == "tok-xyz"
-    assert adapter.ilink_token_file == str(Path("~/nv_test_ilink_token").expanduser())
-    assert adapter.ILINK_API_BASE == "https://gw.custom.example"
+    assert isinstance(adapter, WeChatILinkAdapter), "ilink 必须走真实协议适配器"
+    assert adapter._base_url == "https://gw.custom.example"
+    assert adapter._bot_token == "tok-xyz"
+    # QwenPaw 键名 bot_token_file 映射为 NV 的 token_file
+    assert adapter._token_file == str(tmp_path / "wx_token")
+
+
+def test_wechat_wecom_mode_stays_on_legacy_adapter():
+    from neurova.channels.wechat import WeChatAdapter
+    from neurova.channels.wechat_ilink import WeChatILinkAdapter
+
+    adapter = _create_adapter(
+        "wechat", _cfg("wechat", extra={"mode": "wecom", "corpid": "", "corpsecret": ""})
+    )
+    assert isinstance(adapter, WeChatAdapter)
+    assert not isinstance(adapter, WeChatILinkAdapter)

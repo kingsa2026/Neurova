@@ -86,6 +86,7 @@ def httpx_routes(monkeypatch):
     def _setup(routes):
         FakeAsyncClient._next_routes = routes
         FakeAsyncClient.calls = []
+        FakeAsyncClient._usage = {}  # 每用例重置：route dict 新对象但 id() 可能复用
         monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
 
     return _setup
