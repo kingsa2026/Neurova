@@ -12,6 +12,7 @@ import typing
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+import pydantic
 from pydantic import BaseModel
 
 from neurova.api.auth import get_current_user
@@ -266,8 +267,49 @@ BrowserCommand = typing.Union[
 ]
 
 # 程序化校验入口（FastAPI 请求体校验与本适配器共享同一份 schema）
-# 注：原代码使用 pydantic v2 的 TypeAdapter，当前运行环境为 pydantic v1，
-# 该适配器未被任何代码引用（死代码），移除以避免导入失败。
+# pydantic v2 用 TypeAdapter；v1 环境回退 parse_obj_as（双版本兼容——
+# 此前曾因"当前环境为 v1"的误判整体删除，实测 venv 为 pydantic 2.13）
+if pydantic.VERSION >= "2":
+    BrowserCommandAdapter = pydantic.TypeAdapter(BrowserCommand)
+else:  # pragma: no cover - v1 环境兜底
+    class _BrowserCommandAdapterV1:
+        @staticmethod
+        def validate_python(data):
+            return pydantic.parse_obj_as(BrowserCommand, data)
+
+    BrowserCommandAdapter = _BrowserCommandAdapterV1()
+
+
+async def _dispatch_browser_command(cmd) -> Any:
+    """命令 → BrowserManager 方法分发（generation 随命令透传）。
+
+    R1-4 单源化：这是全部浏览器命令的唯一映射点——此前 /browser/execute
+    注册了两条路由、三份 if/elif 副本，历史上已漂移。
+    """
+    from neurova.computer_use import get_computer_use_manager
+
+    mgr = get_computer_use_manager()
+    if isinstance(cmd, NavigateCmd):
+        return await mgr.browser_navigate(cmd.url, generation=cmd.generation)
+    if isinstance(cmd, DomSnapshotCmd):
+        return await mgr.browser_dom_snapshot(generation=cmd.generation)
+    if isinstance(cmd, ClickRoleCmd):
+        return await mgr.browser_click_role(cmd.role, cmd.name, generation=cmd.generation)
+    if isinstance(cmd, FillRoleCmd):
+        return await mgr.browser_fill_role(cmd.role, cmd.name, cmd.text, generation=cmd.generation)
+    if isinstance(cmd, ScreenshotCmd):
+        return await mgr.browser_screenshot()
+    if isinstance(cmd, ExtractTextCmd):
+        return await mgr.browser_extract_text()
+    if isinstance(cmd, ListTargetsCmd):
+        return await mgr.browser_list_targets()
+    if isinstance(cmd, OpenTargetCmd):
+        return await mgr.browser_open_target(cmd.url)
+    if isinstance(cmd, SwitchTargetCmd):
+        return await mgr.browser_switch_target(cmd.target_id, cmd.generation)
+    if isinstance(cmd, CloseTargetCmd):
+        return await mgr.browser_close_target(cmd.target_id, cmd.generation)
+    raise HTTPException(status_code=422, detail=f"未知浏览器命令类型: {type(cmd).__name__}")
 
 
 
@@ -326,9 +368,9 @@ async def screenshot(body: ScreenshotRequest):
 
 @router.post("/click")
 async def click(body: ClickRequest):
-    """鼠标点击操作（真实实现：pyautogui）"""
+    """鼠标点击操作（真实实现：pyautogui；入参=截图像素坐标，经坐标链换算）"""
     _log_action("click", {"x": body.x, "y": body.y, "button": body.button})
-    ok = await asyncio.to_thread(_get_manager().click, int(body.x), int(body.y), body.button)
+    ok = await asyncio.to_thread(_get_manager().click_screenshot_point, body.x, body.y, body.button)
     if not ok:
         raise HTTPException(status_code=503, detail="点击失败：需要 pyautogui")
     return {
@@ -350,14 +392,25 @@ async def type_text(body: TypeRequest):
 
 @router.post("/scroll")
 async def scroll(body: ScrollRequest):
-    """滚轮操作（真实实现：pyautogui）"""
+    """滚轮操作（真实实现：pyautogui；方向语义经 scroll_semantics 单源——符号保留）"""
+    from neurova.computer_use import scroll_semantics
+
     _log_action("scroll", {"dx": body.dx, "dy": body.dy})
-    # dy 负值向下、正值向上，与前端 direction/amount 语义换算
-    clicks = abs(int(body.dy)) or 3
-    ok = await asyncio.to_thread(_get_manager().scroll, None, None, clicks)
+    vertical, horizontal = scroll_semantics(body.dx, body.dy)
+    ok = await asyncio.to_thread(_get_manager().scroll, None, None, vertical, horizontal)
     if not ok:
         raise HTTPException(status_code=503, detail="滚动失败：需要 pyautogui")
-    return {"code": 0, "message": "Scrolled", "data": {"success": True, "dx": body.dx, "dy": body.dy}}
+    return {
+        "code": 0,
+        "message": "Scrolled",
+        "data": {
+            "success": True,
+            "dx": body.dx,
+            "dy": body.dy,
+            "vertical_clicks": vertical,
+            "horizontal_clicks": horizontal,
+        },
+    }
 
 
 @router.post("/shell", dependencies=[Depends(_require_admin_dep())])
@@ -448,12 +501,16 @@ async def smart_type(body: SmartTypeRequest):
 
 @router.get("/status")
 async def get_status():
-    """查询 Computer Use 服务状态（真实探测桌面/浏览器后端可用性）"""
-    desktop_available = False
+    """查询 Computer Use 服务状态（R0-4：截图/输入/UIA 能力拆分真实探测）"""
+    screenshot_available = False
+    input_available = False
+    uia_available = False
     browser_backends: typing.List[str] = []
     try:
         manager = _get_manager()
-        desktop_available = getattr(manager, "_screenshot_backend", "basic") != "basic"
+        screenshot_available = getattr(manager, "_screenshot_backend", "basic") != "basic"
+        input_available = bool(manager.input_available())
+        uia_available = bool(manager.uia_available())
     except Exception as e:
         logger.warning("探测桌面能力失败: %s", e)
     try:
@@ -467,7 +524,11 @@ async def get_status():
         "code": 0,
         "message": "success",
         "data": {
-            "desktop_available": desktop_available,
+            # desktop_available 语义收紧：截图+输入都可用才算（旧键保留向后兼容）
+            "desktop_available": screenshot_available and input_available,
+            "screenshot_available": screenshot_available,
+            "input_available": input_available,
+            "uia_available": uia_available,
             "browser_available": bool(browser_backends),
             "browser_backends": browser_backends,
             "vision_available": False,
@@ -475,6 +536,23 @@ async def get_status():
             "browser_url": _browser_state.get("url"),
         },
     }
+
+
+@router.get("/doctor")
+async def doctor():
+    """桌面能力自检（R0-4，OCU doctor 思想）：逐项真实探测，绝不报假可用"""
+    try:
+        report = _get_manager().doctor_report()
+    except Exception as e:
+        logger.warning("doctor 自检失败: %s", e)
+        report = {
+            "pillow": False,
+            "pyautogui_input": False,
+            "uia": False,
+            "dpi_aware": False,
+            "screen_metadata": None,
+        }
+    return {"code": 0, "message": "success", "data": report}
 
 
 # ── Browser endpoints ──────────────────────────────────
@@ -677,50 +755,30 @@ async def browser_capabilities(
 
 
 @router.post("/browser/execute")
-async def browser_execute(
+async def browser_execute_route(
     cmd: BrowserCommand,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """浏览器命令总线：单一入口分发全部浏览器命令。
+    """浏览器命令总线：POST /browser/execute 唯一入口（R1-4 单源化）。
 
     严格 schema 在解析层生效——未知命令无法构成判别联合、多余字段被
-    extra_forbidden 拒绝；命令失败返回 502 携带后端错误说明。
+    extra_forbidden 拒绝；命令映射单点走 _dispatch_browser_command，
+    失败返回 502 携带后端错误说明。
     """
     _with_browser_identity(current_user)
     _log_action("browser_execute", {"command": getattr(cmd, "command", "?")})
-    mgr = _get_manager()
-
-    if isinstance(cmd, NavigateCmd):
-        result = _normalize_browser_result(await mgr.browser_navigate(cmd.url, generation=cmd.generation))
-    elif isinstance(cmd, DomSnapshotCmd):
-        result = _normalize_browser_result(await mgr.browser_dom_snapshot(generation=cmd.generation))
-    elif isinstance(cmd, ClickRoleCmd):
-        result = _normalize_browser_result(
-            await mgr.browser_click_role(cmd.role, cmd.name, generation=cmd.generation)
-        )
-    elif isinstance(cmd, FillRoleCmd):
-        result = _normalize_browser_result(
-            await mgr.browser_fill_role(cmd.role, cmd.name, cmd.text, generation=cmd.generation)
-        )
-    elif isinstance(cmd, ScreenshotCmd):
-        result = _normalize_browser_result(await mgr.browser_screenshot())
-        result.pop("has_screenshot", None)
-    elif isinstance(cmd, ExtractTextCmd):
-        result = _normalize_browser_result(await mgr.browser_extract_text())
-    elif isinstance(cmd, ListTargetsCmd):
-        result = _normalize_browser_result(await mgr.browser_list_targets())
-    elif isinstance(cmd, OpenTargetCmd):
-        result = _normalize_browser_result(await mgr.browser_open_target(cmd.url))
-    elif isinstance(cmd, SwitchTargetCmd):
-        result = _normalize_browser_result(await mgr.browser_switch_target(cmd.target_id, cmd.generation))
-    elif isinstance(cmd, CloseTargetCmd):
-        result = _normalize_browser_result(await mgr.browser_close_target(cmd.target_id, cmd.generation))
-    else:  # pragma: no cover - 判别联合已穷举
-        raise HTTPException(status_code=422, detail="未知命令")
-
-    if not result.get("success"):
-        raise HTTPException(status_code=502, detail=result.get("error") or "浏览器命令执行失败")
-    return {"code": 0, "message": f"Command {cmd.command} executed", "data": result}
+    try:
+        result = await _dispatch_browser_command(cmd)
+    except HTTPException:
+        raise
+    except Exception as e:  # noqa: BLE001 - 上游异常统一 502，不裸穿
+        raise HTTPException(status_code=502, detail=f"浏览器命令执行失败: {e}")
+    normalized = _normalize_browser_result(result)
+    if isinstance(cmd, ScreenshotCmd):
+        normalized.pop("has_screenshot", None)
+    if not normalized.get("success"):
+        raise HTTPException(status_code=502, detail=normalized.get("error") or "浏览器命令执行失败")
+    return {"code": 0, "message": f"Command {cmd.command} executed", "data": normalized}
 
 
 @router.post("/browser/scrape")

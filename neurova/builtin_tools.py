@@ -53,6 +53,17 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["file_path"],
         },
     },
+    "file_parse": {
+        "description": "【文档解析】把 PDF/Word/Excel/PPT/RTF/ODF 等二进制文档抽取为纯文本（复用附件抽取通道）。已知是二进制办公文档时用本工具；【何时不用】纯文本/代码/markdown/json 用 file_read（保留行号/编码语义）；网页抓取用 web_fetch；图片/音频/视频不要用本工具（走 vision/asr 通道）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "文档路径（相对锚定工作区，绝对路径按原语义）"},
+                "max_chars": {"type": "integer", "description": "返回文本上限（默认 50000，超出截断并标 truncated）", "default": 50000},
+            },
+            "required": ["file_path"],
+        },
+    },
     "file_write": {
         "description": "【文件写入】写入（整体覆盖）指定路径文件的内容。【何时不用】对已有文件做局部修改改用 file_edit（查找替换，避免整文件重写）；创建全新文件用 file_create。",
         "parameters": {
@@ -99,7 +110,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
         },
     },
     "computer_screenshot": {
-        "description": "截取屏幕截图",
+        "description": "截取屏幕截图。结果回带 screen 元数据（宽高/DPI scale/虚拟屏原点）与引导信息；UI 元素事实（按钮/输入框/菜单）不要靠反复截图观察，用 computer_dom_snapshot 获取。",
         "parameters": {
             "type": "object",
             "properties": {},
@@ -139,13 +150,56 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": [],
         },
     },
+    # ── 桌面可访问性快照 + 语义操作（观察优先协议，与浏览器侧 dom_snapshot 同构）──
+    # 协议：先 computer_dom_snapshot 拿控件树事实，再按 index 语义操作；
+    # 像素坐标 computer_click 仅作快照无法表达时的兜底
+    "computer_dom_snapshot": {
+        "description": "【桌面可访问性快照】枚举前台（或指定标题）窗口的控件树（按钮/输入框/菜单等，带 index、角色、名称、矩形、可交互标记）。桌面交互前必须先调用本工具，从快照事实中获取元素 index，再用 computer_click_element/computer_set_value 语义操作，不要盲猜屏幕坐标。窗口内容变化后旧快照失效（generation 递增），需重新快照。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "window_title": {"type": "string", "description": "可选。目标窗口标题（包含匹配，不区分大小写）；缺省为当前前台窗口"},
+                "max_nodes": {"type": "integer", "description": "可选。最多枚举的控件节点数（默认 400）", "minimum": 1},
+                "max_depth": {"type": "integer", "description": "可选。控件树最大深度（默认 32）", "minimum": 1},
+            },
+            "required": [],
+        },
+    },
+    "computer_click_element": {
+        "description": "【按元素点击】通过快照元素 index 点击桌面控件（来自 computer_dom_snapshot 快照事实）。内部走语义动作→消息直投的递降链，默认不抢用户焦点、不移动真实光标。快照过期（generation 不符）会被拒绝并提示重新快照。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "index": {"type": "integer", "description": "元素序号（来自 computer_dom_snapshot 快照）"},
+                "runtime_id": {"type": "string", "description": "可选。UIA runtime id（跨快照更稳，优先于 index）"},
+                "window_title": {"type": "string", "description": "可选。目标窗口标题；缺省为最近快照的前台窗口"},
+                "button": {"type": "string", "description": "鼠标按钮 left/right/middle", "default": "left"},
+                "generation": {"type": "integer", "description": "可选。最近一次快照返回的 generation；过期会被拒绝"},
+            },
+            "required": [],
+        },
+    },
+    "computer_set_value": {
+        "description": "【按元素赋值】通过快照元素 index 向桌面输入框/可编辑控件直接写入文本（UIA ValuePattern，比逐键敲入更快更可靠，且不依赖焦点位置）。参数必须来自 computer_dom_snapshot 快照。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "value": {"type": "string", "description": "要写入的文本"},
+                "index": {"type": "integer", "description": "元素序号（来自 computer_dom_snapshot 快照）"},
+                "runtime_id": {"type": "string", "description": "可选。UIA runtime id"},
+                "window_title": {"type": "string", "description": "可选。目标窗口标题"},
+                "generation": {"type": "integer", "description": "可选。快照 generation"},
+            },
+            "required": ["value"],
+        },
+    },
     "computer_shell": {
-        "description": "【Shell 命令】在用户计算机上执行 shell 命令（Windows 下经 cmd.exe /c）。适合系统操作：进程/服务管理、环境变量、批量文件整理、安装依赖。【何时不用】数据处理/算法计算/文本批量处理改用 run_code；纯数值计算禁止在本工具里心算或在 shell 里拼算式，用 run_code 跑 Python；抓取网页不要用 curl（用 web_fetch）。",
+        "description": "【Shell 命令】在用户计算机上执行 shell 命令（Windows 下经 cmd.exe /c）。适合系统操作：进程/服务管理、环境变量、批量文件整理、安装依赖。Windows 注意：cmd.exe 不认单引号包裹的参数（会被当字面量），含空格/特殊字符的路径与参数必须用双引号（如 reg query \"HKLM\\...\"）；查询系统信息类需求优先用本机工具结果（如 computer_screenshot 回带的 screen 元数据），不要跑 reg query 探测。【何时不用】数据处理/算法计算/文本批量处理改用 run_code；纯数值计算禁止在本工具里心算或在 shell 里拼算式，用 run_code 跑 Python；抓取网页不要用 curl（用 web_fetch）。",
         "sandbox_required": True,
         "parameters": {
             "type": "object",
             "properties": {
-                "command": {"type": "string", "description": "shell 命令"},
+                "command": {"type": "string", "description": "shell 命令（Windows 下为 cmd.exe 语法，字符串参数用双引号包裹）"},
             },
             "required": ["command"],
         },
@@ -204,11 +258,13 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     # 协议：先 browser_dom_snapshot 拿结构化页面事实，再从快照里取 role+name 交互；
     # 快照已包含目标信息时禁止用 evaluate/HTML 探索；禁止猜测 CSS 选择器
     "browser_dom_snapshot": {
-        "description": "【页面可访问性快照】获取当前页面的 aria 结构化树（按钮/链接/输入框等元素的角色和名称）。与页面交互前必须先调用本工具，从快照事实中获取目标元素的 role 和 name，再用 browser_click_role/browser_fill_role 精确定位；不要凭空猜测 CSS 选择器。返回含本次快照对应的 generation。",
+        "description": "【页面可访问性快照】获取当前页面的 aria 结构化树（按钮/链接/输入框等元素的角色和名称）。与页面交互前必须先调用本工具，从快照事实中获取目标元素的 role 和 name，再用 browser_click_role/browser_fill_role 精确定位；不要凭空猜测 CSS 选择器。返回含本次快照对应的 generation。可见长页面/长列表快照不完整时，可调大 max_nodes/max_depth 预算（默认节点 1200/深度 32）。",
         "parameters": {
             "type": "object",
             "properties": {
                 "generation": {"type": "integer", "description": "可选。持有的页面代数；页面已变化时返回过期错误提示重新快照"},
+                "max_nodes": {"type": "integer", "description": "可选。最多渲染的快照节点数（默认 1200；长列表/表格可调大）", "minimum": 1},
+                "max_depth": {"type": "integer", "description": "可选。快照树最大深度（默认 32）", "minimum": 1},
             },
             "required": [],
         },

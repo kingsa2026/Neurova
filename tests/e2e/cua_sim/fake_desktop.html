@@ -1,0 +1,37 @@
+<!-- CUA simulated 假桌面（cua-bench simulated 思想：零 VM、DOM 派发动作、
+     评测器读页面真实状态）。三个任务页面由 harness 按 task 名注入。 -->
+<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><title>Neurova CUA Sim</title></head>
+<body>
+  <div id="task-root"></div>
+  <script>
+    window.__task = new URLSearchParams(location.search).get("task") || "click-button";
+    const root = document.getElementById("task-root");
+    if (window.__task === "click-button") {
+      root.innerHTML = '<h1>订单</h1><button id="confirm">确认订单</button>';
+      document.getElementById("confirm").addEventListener("click", () => { window.__confirmed = true; });
+    } else if (window.__task === "form-fill") {
+      root.innerHTML = `
+        <form id="f">
+          <input id="u" aria-label="用户名" placeholder="用户名">
+          <input id="p" aria-label="密码" type="password">
+          <button type="submit">提交</button>
+        </form>`;
+      document.getElementById("f").addEventListener("submit", (e) => {
+        e.preventDefault();
+        window.__submitted = true;
+        window.__username = document.getElementById("u").value;
+      });
+    } else if (window.__task === "snapshot-budget") {
+      // 生成宽而深的控件树，验证 max_nodes/max_depth 裁剪
+      let html = "<ul>";
+      for (let i = 0; i < 30; i++) html += `<li><button class="leaf">项目按钮${i}</button></li>`;
+      html += "</ul>";
+      root.innerHTML = html;
+      window.__leaf_count = 30;
+    }
+    window.__ready = true;
+  </script>
+</body>
+</html>

@@ -195,6 +195,10 @@ class AgentLLMClient:
         async for chunk in self._get_client().chat_stream(
             messages, model=call_model, provider_id=call_provider, **kwargs
         ):
+            # 渠道消费者无倒计时 UI：retry_status 过程事件不下发（错误 dict 照旧
+            # 透传）。Web 聊天走 chat_pipeline→loop→llm_client，不经过此处。
+            if isinstance(chunk, dict) and chunk.get("retry_status") and not chunk.get("error"):
+                continue
             yield chunk
 
     def get_stats(self):
@@ -600,6 +604,15 @@ class SubSystemContainer:
         c = self.config
 
         a.context_orchestrator.init_context_system()
+        # 全局默认输出预算（设置-高级 max_output_tokens）：仅补"未显式设置"的
+        # agent（max_tokens == LLMConfig 数据类默认），显式配置永不覆盖
+        try:
+            from neurova.core.app_settings import apply_global_output_budget
+
+            if hasattr(c, "llm_config") and c.llm_config is not None:
+                apply_global_output_budget(c.llm_config)
+        except Exception:
+            logger.debug("全局输出预算应用失败（agent 重建时会再应用）", exc_info=True)
         # 普通用户 Agent 按 owner 使用自己的 LLM 配置;无 owner(default/admin)走全局
         from neurova.llm.multi_model_client import scope_for_owner
 
@@ -1476,6 +1489,11 @@ class Agent:
                 s for s in [sleep_system, emotion_system, experience_system, tool_memory_system] if s is not None
             ]
             if available_systems:
+                # 情感保护桥（RSI 活表收尾）：EmotionModule 的保护参数此前
+                # 零消费——衰减真正发生在 a.temperature_engine（默认参数构造），
+                # 装桥后 RSI 调整经 setter 转发到引擎（factor/threshold 激活）
+                if emotion_system is not None and hasattr(emotion_system, "attach_temperature_engine"):
+                    emotion_system.attach_temperature_engine(getattr(self, "temperature_engine", None))
                 self.rsi_orchestrator = RSIOrchestrator(
                     sleep_system=sleep_system or _NullSystem(),
                     emotion_system=emotion_system or _NullSystem(),
@@ -1593,6 +1611,14 @@ class Agent:
                 from neurova.skills.skill_service import SkillService
 
                 SkillService(agent_id=self.config.agent_id).record_skill_usage(
+                    skill_id, success=bool(result and result.success)
+                )
+
+                # usage_stats 累积（经验-定义分离 QP 对齐 #2）：技能级淘汰的
+                # 数据依据（times_used/positive/negative），与上方两条记账同源
+                from neurova.evolution.skill_experience import get_skill_experience_store
+
+                get_skill_experience_store().record_usage(
                     skill_id, success=bool(result and result.success)
                 )
         except Exception as e:

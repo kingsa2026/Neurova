@@ -246,7 +246,8 @@ class TestManagerTargetPassthrough:
         mgr._get_backend = AsyncMock(return_value=fb)
 
         await mgr.dom_snapshot(generation=7)
-        fb.dom_snapshot.assert_awaited_once_with(7)
+        # R1-5：预算参数贯通（不传=None 透传）
+        fb.dom_snapshot.assert_awaited_once_with(7, max_nodes=None, max_depth=None)
 
         await mgr.click_role("button", name="x", generation=7)
         fb.click_role.assert_awaited_once_with("button", "x", 7)

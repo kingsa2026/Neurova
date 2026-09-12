@@ -53,6 +53,20 @@ def _looks_like_unsupported_tools_error(err_str: str) -> bool:
     return bool(_HTTP_4XX_KEYS.search(err_str) or _SCHEMA_ERR_KEYS.search(err_str))
 
 
+def _raised_output_budget(cur: Any) -> int:
+    """length 空回复重试时的输出预算放宽（病根在输出侧：思考吃满 max_tokens）。
+
+    规则：翻倍、至少 +4096、绝对下限 8192、上限 65536；无效/缺失值取 8192。
+    """
+    try:
+        cur_int = int(cur)
+    except (TypeError, ValueError):
+        return 8192
+    if cur_int <= 0:
+        return 8192
+    return min(65536, max(cur_int * 2, cur_int + 4096, 8192))
+
+
 class OpenAILoop(BaseAgentLoop):
     """
     OpenAI 模型 Loop
@@ -415,8 +429,9 @@ class OpenAILoop(BaseAgentLoop):
                     got_content = True
                 # 修3（2026-09-09）：输出预算耗尽防线——finish_reason=length
                 # 且正文为空（思考模型把 max_tokens 吃满，HTTP 200 无异常，
-                # TokenLimitExceeded 溢出恢复永远不触发）。压缩消息后单次
-                # 重试；重试仍空则原样转发该 done（不二次重试，防循环）。
+                # TokenLimitExceeded 溢出恢复永远不触发）。放宽输出预算+
+                # 思考降级+压缩消息后单次重试；重试仍空则原样转发该 done
+                # （不二次重试，防循环）。
                 if (
                     isinstance(event, dict)
                     and event.get("type") == "done"
@@ -426,12 +441,23 @@ class OpenAILoop(BaseAgentLoop):
                     and str(event.get("finish_reason") or "").lower() in ("length", "max_tokens")
                 ):
                     compact, info = compact_messages_for_overflow(request_params.get("messages") or [])
-                    if info.get("folded_count", 0) > 0:
+                    # 可动旋钮判定：输出预算（max_tokens）或思考档位任一存在即值得
+                    # 重试；两者皆无且输入无可折叠 → 不重试（防空转循环）。
+                    # 病根在输出侧（思考吃满 max_tokens），重试必须同步放宽输出
+                    # 预算+思考降级，只压缩输入会原样撞同一堵墙。
+                    _budget_knobs = "max_tokens" in request_params or any(
+                        k in request_params
+                        for k in ("thinking_enabled", "thinking_effort", "reasoning_effort", "thinking_budget")
+                    )
+                    if info.get("folded_count", 0) > 0 or _budget_knobs:
                         logger.warning(
-                            "[CTX_RECOVERY] 输出预算耗尽(length)且正文为空，折叠 %d 条消息后单次重试",
-                            info["folded_count"],
+                            "[CTX_RECOVERY] 输出预算耗尽(length)且正文为空，放宽输出预算+思考降级后单次重试（折叠 %d 条）",
+                            info.get("folded_count", 0),
                         )
-                        yield {"type": "reasoning", "data": "检测到回复为空（输出预算被思考过程耗尽），正在压缩上下文后重试…"}
+                        yield {
+                            "type": "reasoning",
+                            "data": "检测到回复为空（输出预算被思考过程耗尽），正在放宽输出预算并压缩上下文后重试…",
+                        }
                         # 被折叠消息摘要回写池（fire-and-forget，与溢出恢复同构）
                         try:
                             pool = getattr(
@@ -447,7 +473,19 @@ class OpenAILoop(BaseAgentLoop):
                             **request_params,
                             "messages": compact,
                             "_length_empty_retried": True,
+                            # 输出侧放宽：思考关停（预算让位给正文）；仅当原请求
+                            # 显式带预算/档位键时才覆写对应键，不凭空注入预算。
+                            "thinking_enabled": False,
                         }
+                        if "max_tokens" in request_params:
+                            retry_params["max_tokens"] = _raised_output_budget(
+                                request_params.get("max_tokens")
+                            )
+                        if "thinking_effort" in request_params:
+                            retry_params["thinking_effort"] = "light"
+                        if "reasoning_effort" in request_params:
+                            retry_params["reasoning_effort"] = "low"
+                        retry_params.pop("thinking_budget", None)
                         async for ev in self._predict_stream(retry_params):
                             # 重试仍空 → 补可见提示（杜绝空气泡），done.reply 同步改写
                             # 使 ctx.reply 非空、落盘与前端气泡均有内容（闭环）
@@ -525,6 +563,17 @@ class OpenAILoop(BaseAgentLoop):
         }
         async for chunk in self.llm_client.chat_stream(request_params["messages"], **stream_kwargs):
             if isinstance(chunk, dict):
+                if chunk.get("retry_status"):
+                    # 429 重试/切换过程事件（ZCode 对齐 2026-09-11）：转成 typed
+                    # 事件供管线/前端倒计时；reset=半截回复作废，本轮已累积的
+                    # content/reasoning/未执行 tool_calls 全部清空后重来
+                    payload = chunk["retry_status"]
+                    if payload.get("reset"):
+                        reply_parts.clear()
+                        reasoning_parts.clear()
+                        pending_tool_calls.clear()
+                    yield {"type": "retry_status", "data": payload}
+                    continue
                 if chunk.get("error"):
                     raise self._raise_for_error_dict(chunk)
                 continue
