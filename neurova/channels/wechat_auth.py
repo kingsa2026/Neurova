@@ -144,7 +144,7 @@ class WeChatAuthMixin:
 
     def _generate_qr_code(self) -> bool:
         """
-        生成登录二维码
+        生成登录二维码并等待扫码（同步 connect 流程用）。
 
         返回:
         如果请求成功返回 True (需要用户扫码)
@@ -155,6 +155,21 @@ class WeChatAuthMixin:
             a._ilink_initialized = True
             return True
 
+        qr = self._request_ilink_qrcode()
+        if qr is None:
+            return False
+        return self._wait_for_scan(qr["qr_id"])
+
+    def _request_ilink_qrcode(self) -> Optional[Dict[str, str]]:
+        """
+        只生成二维码，绝不轮询（F-3 非阻塞两段式的"生成"段）。
+
+        HTTP API 语义: POST {ILINK_API_BASE}/auth/qrcode → {success, qr_code_url, qr_id}
+
+        返回:
+        {"qr_url", "qr_id"}；网络/参数失败返回 None（诚实失败语义）
+        """
+        a = self.adapter
         try:
             url = f"{a.ILINK_API_BASE}/auth/qrcode"
             resp = requests.post(url, timeout=10)
@@ -165,19 +180,38 @@ class WeChatAuthMixin:
                 qr_id = data.get("qr_id", "")
                 logger.info("iLink 登录二维码: %s", qr_url)
                 logger.info("请扫码登录，QR ID: %s", qr_id)
-
-                # 轮询等待扫码
-                return self._wait_for_scan(qr_id)
-            else:
-                logger.error("生成二维码失败: %s", data)
-                return False
+                return {"qr_url": qr_url, "qr_id": qr_id}
+            logger.error("生成二维码失败: %s", data)
+            return None
         except (requests.RequestException, json.JSONDecodeError) as e:
             logger.error("生成二维码异常: %s", e)
-            return False
+            return None
+
+    def _poll_scan_once(self, qr_id: str) -> Dict[str, Any]:
+        """
+        单次查询扫码状态，不做循环等待（F-3 非阻塞两段式的"轮询"段）。
+
+        HTTP API 语义: GET {ILINK_API_BASE}/auth/status?qr_id= → {status, bot_token?}
+        status: pending | scanned | confirmed | expired
+
+        返回:
+        原始状态字典；网络异常时返回 {"status": "error", "message": ...}（如实暴露）
+        """
+        a = self.adapter
+        try:
+            url = f"{a.ILINK_API_BASE}/auth/status"
+            resp = requests.get(url, params={"qr_id": qr_id}, timeout=10)
+            data = resp.json()
+            if data.get("status") == "scanned":
+                logger.info("二维码已扫描，等待确认...")
+            return data
+        except (requests.RequestException, json.JSONDecodeError) as e:
+            logger.error("轮询扫码状态异常: %s", e)
+            return {"status": "error", "message": str(e)}
 
     def _wait_for_scan(self, qr_id: str, timeout: int = 300) -> bool:
         """
-        等待用户扫码登录
+        等待用户扫码登录（后台 connect 流程的同步阻塞循环，复用单次轮询）。
 
         参数:
         qr_id: 二维码ID
@@ -192,28 +226,18 @@ class WeChatAuthMixin:
         poll_interval = 3
 
         while time.time() - start_time < timeout:
-            try:
-                url = f"{a.ILINK_API_BASE}/auth/status"
-                resp = requests.get(url, params={"qr_id": qr_id}, timeout=10)
-                data = resp.json()
-
-                status = data.get("status", "")
-                if status == "scanned":
-                    logger.info("二维码已扫描，等待确认...")
-                elif status == "confirmed":
-                    a.ilink_bot_token = data.get("bot_token", "")
-                    self._save_ilink_token()
-                    a._ilink_initialized = True
-                    logger.info("iLink 登录成功!")
-                    return True
-                elif status == "expired":
-                    logger.error("二维码已过期，请重新生成")
-                    return False
-
-                time.sleep(poll_interval)
-            except (requests.RequestException, json.JSONDecodeError) as e:
-                logger.error("轮询扫码状态异常: %s", e)
-                time.sleep(poll_interval)
+            data = self._poll_scan_once(qr_id)
+            status = data.get("status", "")
+            if status == "confirmed":
+                a.ilink_bot_token = data.get("bot_token", "")
+                self._save_ilink_token()
+                a._ilink_initialized = True
+                logger.info("iLink 登录成功!")
+                return True
+            if status == "expired":
+                logger.error("二维码已过期，请重新生成")
+                return False
+            time.sleep(poll_interval)
 
         logger.error("扫码登录超时")
         return False

@@ -336,15 +336,43 @@ class MQTTAdapter(ChannelAdapter):
             },
         )
 
-    def send_message(self, message: UnifiedMessage) -> bool:
-        """发送 MQTT 消息"""
+    async def send_message(
+        self, chat_id: str, content: str, message_type: str = "text", **kwargs
+    ) -> Optional[str]:
+        """基类契约签名（B-4 同根因收口，2026-09-11）：manager 按基类签名直连。
+
+        成功返回消息标识，失败返回 None；发布经 to_thread 下沉（paho 客户端
+        线程模型下 publish 本身轻量，to_thread 保证事件循环零占用）。
+        """
+        message = UnifiedMessage(
+            message_id=kwargs.get("message_id", ""),
+            channel=MessageChannel.MQTT,
+            content_type=ContentType.TEXT,
+            content=content,
+            user_id=kwargs.get("user_id", ""),
+            chat_id=chat_id,
+            agent_id="",
+            metadata={k: v for k, v in kwargs.items() if k not in ("message_id", "user_id")},
+        )
+        ok = await asyncio.to_thread(self._send_unified, message)
+        if not ok:
+            return None
+        return message.message_id or f"mqtt-{chat_id}-{int(time.time() * 1000)}"
+
+    def _send_unified(self, message: UnifiedMessage) -> bool:
+        """发送 MQTT 消息（原 UnifiedMessage 签名，内部路径）"""
         if not self._initialized or not self._connected:
             logging.error("MQTT 未连接")
             return False
 
         if not MQTT_AVAILABLE or not self._client:
-            logging.info("[MQTT模拟] 发布到 %s: %s", self.publish_topic, message.content[:50])
-            return True
+            # 诚实化（2026-09-11，与 websocket/sip 同族收口）：paho 缺失或
+            # 客户端不在位时发布必然失败，模拟成功会让调用方误判已送达。
+            logging.warning(
+                "MQTT 发布失败: paho-mqtt 未安装或客户端未就绪 (topic=%s)",
+                self.publish_topic,
+            )
+            return False
 
         try:
             # 构建发布主题（替换 {client_id} 占位符）

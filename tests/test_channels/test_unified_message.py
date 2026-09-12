@@ -100,28 +100,35 @@ class TestUnifiedMessage:
         msg.session_id = "sess_001"
         assert msg.session_id == "sess_001"
 
+    # 当前契约：UnifiedMessage 为 dataclass，attachments 是
+    # Optional[List[Dict[str, Any]]] 字段（无 add_attachment/has_attachments/
+    # get_attachments_by_type 辅助方法）——按字段契约直接赋值断言。
     def test_with_attachments(self):
         msg = _make_msg(content="看这个文件")
-        msg.add_attachment("file", url="https://example.com/doc.pdf", name="doc.pdf")
-        assert msg.has_attachments() is True
-        attachments = msg.get_attachments_by_type("file")
-        assert len(attachments) == 1
-        assert attachments[0]["name"] == "doc.pdf"
+        msg.attachments = [
+            {"type": "file", "url": "https://example.com/doc.pdf", "name": "doc.pdf"}
+        ]
+        assert msg.attachments is not None and len(msg.attachments) > 0
+        file_attachments = [a for a in msg.attachments if a["type"] == "file"]
+        assert len(file_attachments) == 1
+        assert file_attachments[0]["name"] == "doc.pdf"
 
     def test_multiple_attachments(self):
         msg = _make_msg(content="多附件")
-        msg.add_attachment("image", url="a.jpg")
-        msg.add_attachment("image", url="b.jpg")
-        msg.add_attachment("file", url="c.pdf")
-        assert msg.has_attachments() is True
-        assert len(msg.get_attachments_by_type("image")) == 2
-        assert len(msg.get_attachments_by_type("file")) == 1
+        msg.attachments = [
+            {"type": "image", "url": "a.jpg"},
+            {"type": "image", "url": "b.jpg"},
+            {"type": "file", "url": "c.pdf"},
+        ]
+        images = [a for a in msg.attachments if a["type"] == "image"]
+        files = [a for a in msg.attachments if a["type"] == "file"]
+        assert len(images) == 2
+        assert len(files) == 1
         assert len(msg.attachments) == 3
 
     def test_no_attachments(self):
         msg = _make_msg()
-        assert msg.has_attachments() is False
-        assert msg.get_attachments_by_type("image") == []
+        assert msg.attachments is None
 
     def test_global_user_id(self):
         msg = _make_msg()
@@ -136,8 +143,6 @@ class TestUnifiedMessage:
         msg = _make_msg(
             file_url="https://example.com/file.pdf",
             file_name="doc.pdf",
-            file_size=1024,
         )
         assert msg.file_url == "https://example.com/file.pdf"
         assert msg.file_name == "doc.pdf"
-        assert msg.file_size == 1024

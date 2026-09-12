@@ -234,9 +234,43 @@ class QQBotAdapter(ChannelAdapter):
             logging.error("QQ Bot API 请求异常: %s", e)
             return {"retcode": 1, "data": {}, "message": str(e)}
 
-    def send_message(self, message: UnifiedMessage) -> bool:
+    async def send_message(
+        self,
+        chat_id: str,
+        content: str,
+        message_type: str = "text",
+        **kwargs,
+    ) -> Optional[str]:
+        """Gen2 契约：基类签名发送（manager 按 base.py 契约直连），委托 _send_unified
+        复用既有 UnifiedMessage 处理逻辑。
+
+        kwargs 中 message_id/user_id 用作消息标识，其余键透传为 metadata。
+        成功返回平台真实 message_id（响应缺失时回落本地生成 id），失败返回 None。
         """
-        发送QQ Bot消息
+        try:
+            content_type = ContentType(message_type)
+        except ValueError:
+            logging.warning("未知 message_type=%s，按 text 发送", message_type)
+            content_type = ContentType.TEXT
+
+        message_id = str(kwargs.pop("message_id", "") or f"qqbot_{int(time.time())}")
+        # 任务3（台账 2026-09-11 渠道域收尾）：_send_unified 现返回 OneBot
+        # 平台真实 message_id（响应无 ID 时回落本地生成），失败 None——直接透传。
+        return self._send_unified(
+            UnifiedMessage(
+                message_id=message_id,
+                channel=MessageChannel.QQBOT,
+                content_type=content_type,
+                content=content,
+                user_id=str(kwargs.pop("user_id", "") or ""),
+                chat_id=chat_id,
+                metadata=kwargs or None,
+            )
+        )
+
+    def _send_unified(self, message: UnifiedMessage) -> Optional[str]:
+        """
+        发送QQ Bot消息（UnifiedMessage 路径，供基类签名 send_message 委托）
 
         支持文本、图片、语音、视频、文件等消息类型
 
@@ -244,14 +278,17 @@ class QQBotAdapter(ChannelAdapter):
         message: 统一消息对象
 
         返回:
-        发送成功返回 True
+        成功返回平台真实消息 ID（OneBot 响应 data.message_id，整型转 str；
+        响应缺失时回落 message.message_id 本地生成），失败返回 None。
+        非空 str 为真、None 为假，与原 bool 契约的真值语义兼容
+        （既有调用方 _send_typing 忽略返回值，同样兼容）。
         """
         if not self._ensure_authenticated():
-            return False
+            return None
 
         if not REQUESTS_AVAILABLE:
             logging.info("[QQ Bot模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
-            return True
+            return message.message_id
 
         try:
             # 根据chat_id判断是私聊还是群聊
@@ -276,13 +313,15 @@ class QQBotAdapter(ChannelAdapter):
             data = self._api_request("POST", api_endpoint, json=payload)
 
             if data.get("retcode") == 0:
-                return True
+                # OneBot 发送消息响应: {"retcode":0, "data": {"message_id": ...}}
+                platform_id = str((data.get("data") or {}).get("message_id") or "")
+                return platform_id or message.message_id
             else:
                 logging.error("QQ Bot消息发送失败: %s", data)
-                return False
+                return None
         except Exception as e:
             logging.error("QQ Bot消息发送异常: %s", e)
-            return False
+            return None
 
     def _build_cq_message(self, message: UnifiedMessage) -> str:
         """
@@ -1348,7 +1387,7 @@ async def handle_ai_generation(self, message: UnifiedMessage) -> bool:
 
 def _send_typing(self, message: UnifiedMessage, content: str):
     """发送临时消息提示"""
-    self.send_message(
+    self._send_unified(
         UnifiedMessage(
             message_id="temp",
             channel=MessageChannel.QQBOT,
