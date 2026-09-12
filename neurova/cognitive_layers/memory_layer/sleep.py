@@ -161,6 +161,9 @@ class SleepConsolidation:
         self.archive_threshold = archive_threshold
         self.decay_rate = decay_rate
         self.base_decay_rate = decay_rate  # RSI 可优化参数别名
+        # merge_threshold 别名（RSI 活表清理）：此前为独立属性（构造期拷贝后
+        # 各自漂移、零消费方），与 similarity_threshold 是同一真实参数——
+        # property 别名保证单一定义，setpoint 表已移除该幻影条目
         self.merge_threshold = similarity_threshold  # RSI 可优化参数别名
         self.memory_manager = memory_manager
         self.storage = storage
@@ -357,6 +360,15 @@ class SleepConsolidation:
         logger.debug("合并簇: %s 条记忆 → %s", len(cluster), merged_id)
         return result
 
+    @property
+    def merge_threshold(self) -> float:
+        """合并阈值——similarity_threshold 的别名（同一真实参数）。"""
+        return self.similarity_threshold
+
+    @merge_threshold.setter
+    def merge_threshold(self, value: float) -> None:
+        self.similarity_threshold = float(value)
+
     def apply_sleep_decay(self, memories: List[MemoryRecord]) -> List[MemoryRecord]:
         """应用睡眠期间的温度衰减（补课 5.3 收敛：委托 TemperatureEngine.on_decay）
 
@@ -374,10 +386,10 @@ class SleepConsolidation:
         try:
             from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
 
-            engine = getattr(self, "_temperature_engine", None)
-            if engine is None:
-                engine = TemperatureEngine()
-                self._temperature_engine = engine
+            # base_decay_rate 透传（RSI 可优化参数别名此前只喂死回退分支，
+            # 引擎恒用默认 0.1——默认值相等，行为零变化，eval_harness 依赖可测性）
+            engine = TemperatureEngine(base_decay_rate=self.base_decay_rate)
+            self._temperature_engine = engine
         except Exception as e:
             logger.debug("TemperatureEngine 不可用，回退内联衰减: %s", e)
 

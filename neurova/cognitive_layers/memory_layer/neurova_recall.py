@@ -25,9 +25,60 @@ logger = get_logger(__name__)
 
 # M-13: 插件通道挂起曾永久阻塞召回 —— 协程线程 join 与 gather 均无超时。
 # gather 层统一走 recall 链路 self.timeout_seconds（与 _phase1_multichannel_recall
-# 的 as_completed(timeout=) 先例同口径）；此处为线程 join 的模块级兜底值。
+# 的 as_completed(timeout=) 先例同口径）；此处为协程等待的模块级兜底值。
 _COROUTINE_JOIN_TIMEOUT_SECONDS = 12.0
 _PLUGIN_RECALL_JOIN_GRACE_SECONDS = 5.0
+
+
+# ────── B-10: 召回专用常驻事件循环线程 ──────
+# 历史：BUG-5 用"每次派生新线程 + asyncio.run()"，M-13 补 join 超时。但每轮
+# chat 召回都要新建线程+事件循环（churn），且 join 超时后线程被弃置、协程
+# 不可取消 —— 插件挂起场景线程渐进堆积。现改为模块级常驻单事件循环线程
+# （daemon、懒启动、永久运行），投递用 run_coroutine_threadsafe + 有界等待。
+_recall_loop_holder: Dict[str, Any] = {}
+_recall_loop_lock = threading.Lock()
+
+
+def _get_recall_loop() -> "asyncio.AbstractEventLoop":
+    """取（或懒启动）召回共享事件循环；线程存活即视为有效。"""
+    with _recall_loop_lock:
+        entry = _recall_loop_holder.get("entry")
+        if entry is not None:
+            loop, thread = entry
+            if thread.is_alive():
+                return loop
+        loop = asyncio.new_event_loop()
+        thread = threading.Thread(
+            target=loop.run_forever, name="neurova-recall-loop", daemon=True
+        )
+        thread.start()
+        _recall_loop_holder["entry"] = (loop, thread)
+        return loop
+
+
+def shutdown_recall_loop(timeout: float = 5.0) -> None:
+    """停机收口：取消共享 loop 上残留协程并停止线程（测试/进程退出用）。"""
+    with _recall_loop_lock:
+        entry = _recall_loop_holder.pop("entry", None)
+    if entry is None:
+        return
+    loop, thread = entry
+
+    async def _drain():
+        current = asyncio.current_task()
+        pending = [t for t in asyncio.all_tasks(loop) if t is not current]
+        for t in pending:
+            t.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    try:
+        asyncio.run_coroutine_threadsafe(_drain(), loop).result(timeout=timeout)
+    except Exception:  # noqa: BLE001 - 收口尽力而为
+        pass
+    loop.call_soon_threadsafe(loop.stop)
+    thread.join(timeout=timeout)
+    loop.close()
 
 
 # ────── Enums ──────
@@ -774,38 +825,37 @@ class NeurovaRecallEngine:
 
     @staticmethod
     def _run_coroutine_in_thread(coro, join_timeout: Optional[float] = None) -> Any:
-        """在独立线程中运行协程, 用 asyncio.run() 创建并关闭独立 event loop。
+        """把协程投递到模块级常驻事件循环线程执行（B-10 单例化）。
 
-        BUG-5 修复: 替代废弃的 asyncio.get_event_loop() + loop.run_until_complete()。
-        - 避开 "This event loop is already running" RuntimeError (在已有运行 loop 时)
-        - 确保每次创建的 loop 都被 close, 无资源泄漏
-        M-13 修复: thread.join(timeout=None) 永久等待 → 默认模块级兜底超时,
-        超时记 warning 并放弃等待（协程结果丢失时调用方以部分结果/空结果继续）。
+        历史：BUG-5 修复曾用"每次派生新线程 + asyncio.run()"（避开
+        "event loop already running"）；M-13 修复补 join 兜底超时。但每轮
+        chat 召回都新建线程+事件循环，且 join 超时后线程被弃置、协程不可
+        取消 —— 挂起场景线程渐进堆积。
+
+        现契约：
+        - 常驻单事件循环线程（daemon、懒启动，见 _get_recall_loop），
+          本方法仅 run_coroutine_threadsafe 投递 + 有界等待；
+        - 超时返回 None（M-13 语义不变：调用方以空结果继续）并**真取消**
+          底层 task —— run_coroutine_threadsafe 的 future.cancel() 经
+          _chain_future 传播为 asyncio Task.cancel()，CancelledError 在
+          共享 loop 上就地消化：无线程弃置、无协程残留（B-10 根修口径）；
+        - 协程异常照旧向调用方 re-raise；正常路径返回结果。
+        shutdown_recall_loop() 供测试/停机收口。
         """
-        import concurrent.futures
-
         effective_timeout = (
             join_timeout if join_timeout is not None else _COROUTINE_JOIN_TIMEOUT_SECONDS
         )
-        result_box: Dict[str, Any] = {}
-
-        def _worker():
-            try:
-                result_box["value"] = asyncio.run(coro)
-            except BaseException as e:  # noqa: BLE001 — 显式存异常, 主线程 re-raise
-                result_box["error"] = e
-
-        thread = threading.Thread(target=_worker, daemon=True)
-        thread.start()
-        thread.join(timeout=effective_timeout)
-        if thread.is_alive():
+        loop = _get_recall_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        try:
+            return future.result(timeout=effective_timeout)
+        except FuturesTimeoutError:
             logger.warning(
-                "协程线程 %ss 未完成, 放弃等待（daemon 线程随进程退出）",
+                "召回协程 %ss 未完成, 已取消底层任务（常驻共享 loop, 无线程弃置）",
                 effective_timeout,
             )
-        if "error" in result_box:
-            raise result_box["error"]
-        return result_box.get("value")
+            future.cancel()
+            return None
 
     def _phase1_multichannel_recall(
         self,

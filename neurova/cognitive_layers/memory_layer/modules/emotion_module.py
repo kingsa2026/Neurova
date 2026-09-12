@@ -96,11 +96,44 @@ class EmotionModule:
         self._protection_triggered: int = 0
         # Bug 14 修复: 移除重复的私有阈值 _emotional_protection_threshold,
         # 统一使用公开属性 emotional_protection_threshold(可被 RSI 调整)
-        self.emotional_protection_threshold: float = 0.5  # RSI 可优化参数
-        self.emotional_protection_factor: float = 0.3  # RSI 可优化参数
+        # 情感保护桥（RSI 活表清理）：真正的消费方是记忆衰减引擎
+        # TemperatureEngine——attach_temperature_engine 后 setter 转发，
+        # 此前两个属性在模块内定义后 factor 零消费（死旋钮）
+        self._temperature_engine = None
+        self._emotional_protection_threshold: float = 0.5  # RSI 可优化参数
+        self._emotional_protection_factor: float = 0.3  # RSI 可优化参数
 
         if db_path:
             self._init_db()
+
+    # ── 情感保护桥（RSI 活表参数）──
+
+    def attach_temperature_engine(self, engine: Optional[Any]) -> None:
+        """挂接记忆衰减引擎（agent_core 装配；None 安全）。挂接即同步当前值。"""
+        self._temperature_engine = engine
+        if engine is not None:
+            engine.emotional_protection_threshold = self._emotional_protection_threshold
+            engine.emotional_protection_factor = self._emotional_protection_factor
+
+    @property
+    def emotional_protection_threshold(self) -> float:
+        return self._emotional_protection_threshold
+
+    @emotional_protection_threshold.setter
+    def emotional_protection_threshold(self, value: float) -> None:
+        self._emotional_protection_threshold = float(value)
+        if self._temperature_engine is not None:
+            self._temperature_engine.emotional_protection_threshold = float(value)
+
+    @property
+    def emotional_protection_factor(self) -> float:
+        return self._emotional_protection_factor
+
+    @emotional_protection_factor.setter
+    def emotional_protection_factor(self, value: float) -> None:
+        self._emotional_protection_factor = float(value)
+        if self._temperature_engine is not None:
+            self._temperature_engine.emotional_protection_factor = float(value)
 
     def _init_db(self) -> None:
         """初始化 SQLite 数据库"""
