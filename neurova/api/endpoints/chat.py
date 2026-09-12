@@ -14,12 +14,13 @@ import datetime
 import asyncio
 import json
 from neurova.core.logger import get_logger
+import re
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, Path, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Path as FastAPIPath, Query, Request
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user
@@ -100,6 +101,55 @@ def _user_can_access_agent(user_id: str, agent_id: str, role: str = "user") -> b
     return owner_user_id == user_id
 
 
+# F-4 根修（台账 2026-09-11）：TTS 产物文件名白名单——tts_{session}_{ts}.wav
+# 平名文件；拒路径分隔符/`..`/非 TTS 命名，内容端点据此防路径穿越。
+_TTS_FILENAME_RE = re.compile(r"^tts_[A-Za-z0-9._-]+\.wav$")
+
+
+def _tts_audio_http_url(audio_path: Optional[str], agent_id: str) -> Optional[str]:
+    """本地 TTS 产物路径 → 鉴权内容端点 HTTP URL（F-4 根修，API 边界转换）。
+
+    内部契约 audio_path 保持本地路径（artifacts_api 按路径注册本地产物依赖
+    它），仅在把值交给 HTTP 客户端处转换；无产物返回 None（事件照旧不发）。
+    """
+    if not audio_path:
+        return None
+    return f"/api/v1/chat/tts-audio/{agent_id}/{Path(audio_path).name}"
+
+
+@router.get("/tts-audio/{agent_id}/{filename}")
+async def get_tts_audio(
+    agent_id: str,
+    filename: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """TTS 产物鉴权内容端点（attachment_dir 落盘音频的唯一 HTTP 取回路径）。
+
+    登录态（get_current_user）+ agent 访问权（复用 _user_can_access_agent，
+    与 chat 端点同语义）+ 文件名白名单（只服务 tts_*.wav 平名产物）；
+    禁止无鉴权静态暴露。
+    """
+    user_id = current_user.get("user_id", "")
+    role = current_user.get("role", "user")
+    if not _user_can_access_agent(user_id, agent_id, role):
+        raise HTTPException(
+            status_code=403,
+            detail="Permission denied: you don't have access to this Agent",
+        )
+    agent = _get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    if not _TTS_FILENAME_RE.fullmatch(filename):
+        raise HTTPException(status_code=400, detail="Invalid TTS audio filename")
+    attachment_dir = Path(getattr(agent.config, "attachment_dir", "") or "")
+    if not str(attachment_dir):
+        raise HTTPException(status_code=404, detail="TTS audio not found")
+    audio_file = (attachment_dir / filename).resolve()
+    if not audio_file.is_relative_to(attachment_dir.resolve()) or not audio_file.is_file():
+        raise HTTPException(status_code=404, detail="TTS audio not found")
+    return FileResponse(path=audio_file, media_type="audio/wav", filename=filename)
+
+
 @router.post("")
 async def chat(request: Request, body: ChatRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     """普通对话"""
@@ -160,7 +210,7 @@ async def chat(request: Request, body: ChatRequest, current_user: Dict[str, Any]
 
             if audio_path or audio_data:
                 audio_info = {
-                    "url": audio_path,
+                    "url": _tts_audio_http_url(audio_path, body.agent_id),
                     "data": audio_data,
                     "filename": f"tts_{int(__import__('time').time())}.wav",
                 }
@@ -245,6 +295,8 @@ async def chat_stream(
 
         call_metadata = dict(body.metadata or {})
         call_metadata["event_emitter"] = _emit
+        # 429 重试/切换倒计时事件转发（管线 retry_status → SSE retry）
+        call_metadata["emit_status_events"] = True
 
         async def run_chat():
             try:
@@ -286,13 +338,17 @@ async def chat_stream(
                     yield f"event: message\ndata: {json.dumps({'content': str(data or '')})}\n\n"
                 elif kind == "reasoning":
                     yield f"event: reasoning\ndata: {json.dumps({'content': str(data or '')})}\n\n"
+                elif kind == "retry":
+                    _retry = data if isinstance(data, dict) else {}
+                    if _retry:
+                        yield f"event: retry\ndata: {json.dumps({'type': 'retry', **_retry})}\n\n"
 
             # 整轮结束后取 chat() 返回值：TTS audio 产物 + 兜底文本
             response = await task
             reply_text = ""
             if isinstance(response, dict):
                 reply_text = response.get("text", "")
-                audio_url = response.get("audio_path")
+                audio_url = _tts_audio_http_url(response.get("audio_path"), body.agent_id)
                 if audio_url:
                     yield (
                         "event: audio\n"

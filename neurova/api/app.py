@@ -977,6 +977,14 @@ async def _on_shutdown(app_state: AppState) -> None:
         except Exception as e:
             logger.warning("Agent '%s' shutdown error: %s", agent_id, e)
 
+    # 进化状态关停 flush（P-2：节流窗口内未落盘的最后变更不丢失）
+    try:
+        from neurova.evolution.closed_loop import flush_evolution_persistence
+
+        flush_evolution_persistence()
+    except Exception as e:  # noqa: BLE001 - 落盘失败不阻断关停
+        logger.warning("进化状态关停落盘失败: %s", e)
+
     # 停止启动管理器
     if app_state.startup_manager:
         app_state.startup_manager.stop()
