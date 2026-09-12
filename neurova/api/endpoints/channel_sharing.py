@@ -14,6 +14,9 @@
 from __future__ import annotations
 
 from neurova.core.logger import get_logger
+import copy
+import json
+import pathlib
 import time
 from typing import Any, Dict, List
 
@@ -44,18 +47,53 @@ class TestSharingRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# In-Memory Store
+# Persistent Store (2026-09-12 空数据页面修复)
+#
+# 根因: _sharing_config 原为进程内 dict，POST /enable /disable /channels 改动
+# 只写内存 → 重启回硬编码默认，ContextChannelPage 保存不持久。
+# 现落 data/channel_sharing.json，启动加载，写操作即时落盘。
 # ---------------------------------------------------------------------------
 
-_sharing_config: Dict[str, Any] = {
+_DEFAULT_CONFIG: Dict[str, Any] = {
     "enabled": True,
     "shared_channels": ["web", "mobile", "api"],
     "default_context": "user_profile",
     "auto_sync": True,
     "sync_interval": 300,
-    "created_at": time.time(),
-    "updated_at": time.time(),
+    "created_at": 0.0,
+    "updated_at": 0.0,
 }
+
+_STORE_FILE = "data/channel_sharing.json"
+
+_sharing_config: Dict[str, Any] = {}
+
+
+def _load_store() -> None:
+    _sharing_config.clear()
+    _sharing_config.update(copy.deepcopy(_DEFAULT_CONFIG))
+    now = time.time()
+    _sharing_config["created_at"] = now
+    _sharing_config["updated_at"] = now
+    try:
+        with open(_STORE_FILE, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+        if isinstance(saved, dict):
+            _sharing_config.update(saved)
+    except FileNotFoundError:
+        pass
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Failed to load channel sharing config: %s", e)
+
+
+def _save_store() -> None:
+    p = pathlib.Path(_STORE_FILE)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(_sharing_config, f, indent=2, ensure_ascii=False)
+
+
+_load_store()
 
 _channel_sharing_status: Dict[str, Dict[str, Any]] = {}
 
@@ -178,6 +216,7 @@ async def enable_sharing():
     """启用渠道上下文共享"""
     _sharing_config["enabled"] = True
     _sharing_config["updated_at"] = time.time()
+    _save_store()
     return {
         "code": 0,
         "message": "渠道上下文共享已启用",
@@ -193,6 +232,7 @@ async def disable_sharing():
     """禁用渠道上下文共享，禁用后每个渠道的上下文将完全隔离"""
     _sharing_config["enabled"] = False
     _sharing_config["updated_at"] = time.time()
+    _save_store()
     return {
         "code": 0,
         "message": "渠道上下文共享已禁用",
@@ -217,6 +257,7 @@ async def set_shared_channels(body: SetChannelsRequest):
     _sharing_config["shared_channels"] = body.channels
     _sharing_config["enabled"] = body.shared_context
     _sharing_config["updated_at"] = time.time()
+    _save_store()
 
     return {
         "code": 0,
