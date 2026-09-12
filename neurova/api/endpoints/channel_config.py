@@ -22,7 +22,7 @@ from neurova.core.logger import get_logger
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 
@@ -74,6 +74,7 @@ class ChannelConfigResponse(BaseModel):
     """渠道配置响应"""
 
     channel_type: str
+    agent_id: str = "default"
     enabled: bool
     app_id_masked: str
     use_stream: bool
@@ -98,27 +99,102 @@ class WechatIlinkQrcodeRequest(BaseModel):
 
 
 # ============================================================
-# 配置持久化
+# 配置持久化（2026-09-13 渠道按 agent 多实例隔离，对齐 QwenPaw：
+# agent 是渠道的所有者——存储升 v2 {version:2, agents:{agent_id:{channel_type:cfg}}}，
+# 旧 v1 平铺首载幂等迁移进 default）
 # ============================================================
 
 
-def _load_configs() -> Dict[str, Dict[str, Any]]:
-    """从文件加载配置"""
-    if not CONFIG_FILE.exists():
-        return {}
-    try:
-        return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, IOError):
-        return {}
-
-
-def _save_configs(configs: Dict[str, Dict[str, Any]]):
-    """保存配置到文件"""
+def _save_store(store: Dict[str, Any]) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(
-        json.dumps(configs, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    tmp = CONFIG_FILE.with_name(CONFIG_FILE.name + ".tmp")
+    tmp.write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(CONFIG_FILE)
+
+
+def _load_store() -> Dict[str, Any]:
+    if not CONFIG_FILE.exists():
+        return {"version": 2, "agents": {}}
+    try:
+        raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, IOError):
+        return {"version": 2, "agents": {}}
+    if isinstance(raw, dict) and raw.get("version") == 2 and isinstance(raw.get("agents"), dict):
+        return raw
+    # v1 平铺 {channel_type: cfg} → 迁移为 default agent 并落盘（幂等）
+    v1 = {k: v for k, v in raw.items() if isinstance(v, dict)} if isinstance(raw, dict) else {}
+    store = {"version": 2, "agents": {"default": v1}}
+    if v1:
+        _save_store(store)
+    return store
+
+
+def _agent_map(store: Dict[str, Any], agent_id: str) -> Dict[str, Dict[str, Any]]:
+    return store["agents"].setdefault(agent_id, {})
+
+
+def _load_configs() -> Dict[str, Dict[str, Any]]:
+    """v1 兼容门面：default agent 的平铺视图（既有调用/测试零破坏）。"""
+    return _agent_map(_load_store(), "default")
+
+
+def _save_configs(configs: Dict[str, Dict[str, Any]]) -> None:
+    """v1 兼容门面：整表覆盖 default agent 视图并升 v2 落盘。"""
+    store = _load_store()
+    store["agents"]["default"] = configs
+    _save_store(store)
+
+
+# 各平台身份字段（QwenPaw channels/conflict.py _CHANNEL_IDENTITY_FIELDS 对齐）：
+# 同平台跨 agent 撞身份 → 平台回调会串号，保存必须拒绝。
+_IDENTITY_FIELDS: Dict[str, tuple] = {
+    "feishu": ("app_id", None),
+    "dingtalk": ("app_id", None),
+    "wecom": ("app_id", None),
+    "qq": ("app_id", None),
+    "yuanbao": ("app_id", None),
+    "telegram": ("bot_token", "extra"),
+    "discord": ("bot_token", "extra"),
+    "wechat": ("bot_token", "extra"),
+    "xiaoyi": ("access_key", "extra"),
+    "matrix": ("access_token", "extra"),
+    "qqbot": ("access_token", "extra"),
+    "sip": ("sip_username", "extra"),
+}
+
+
+def _extract_identity(channel_type: str, cfg: Dict[str, Any]) -> str:
+    """取渠道实例的平台身份值（空身份不参与冲突比对）。"""
+    spec = _IDENTITY_FIELDS.get(channel_type)
+    if not spec or not isinstance(cfg, dict):
+        return ""
+    field, where = spec
+    scope = cfg.get(where, {}) if where else cfg
+    if not isinstance(scope, dict):
+        return ""
+    return str(scope.get(field) or "")
+
+
+def _norm_agent(agent_id) -> str:
+    """端点被直调（不经 FastAPI DI）时，`Query(default=...)` 会以 Query 对象
+    作默认值进入函数体——回落到 default，保证直调式测试（blocking regression）
+    与 DI 路径行为一致。"""
+    return agent_id if isinstance(agent_id, str) and agent_id else "default"
+
+
+def _identity_conflict_owner(store: Dict[str, Any], agent_id: str, channel_type: str,
+                             cfg: Dict[str, Any]) -> Optional[str]:
+    """QP conflict 语义：同平台同身份已被其他 agent 配置 → 返回冲突 agent_id。"""
+    ident = _extract_identity(channel_type, cfg)
+    if not ident:
+        return None
+    for other_agent, channels in store["agents"].items():
+        if other_agent == agent_id or not isinstance(channels, dict):
+            continue
+        other_cfg = channels.get(channel_type)
+        if isinstance(other_cfg, dict) and _extract_identity(channel_type, other_cfg) == ident:
+            return other_agent
+    return None
 
 
 # ============================================================
@@ -178,13 +254,17 @@ def _wechat_authenticated(adapter) -> bool:
 
 
 @router.post("/wechat/ilink/qrcode", summary="生成 iLink 登录二维码（非阻塞，只生成不等待）")
-async def create_wechat_ilink_qrcode(request: Optional[WechatIlinkQrcodeRequest] = None):
+async def create_wechat_ilink_qrcode(
+    request: Optional[WechatIlinkQrcodeRequest] = None,
+    agent_id: str = Query(default="default"),
+):
+    agent_id = _norm_agent(agent_id)
     """F-3 两段式·生成段：已有有效 token 直接 ready；否则一次 POST 生成二维码即返回。
 
     绝不在后端循环等待扫码（等待由前端轮询 status 端点驱动）。
     """
     req = request or WechatIlinkQrcodeRequest()
-    saved_extra = (_load_configs().get("wechat", {}) or {}).get("extra", {}) or {}
+    saved_extra = (_agent_map(_load_store(), agent_id).get("wechat", {}) or {}).get("extra", {}) or {}
 
     bot_token = req.bot_token or saved_extra.get("bot_token", "")
     token_file = str(Path(req.token_file or saved_extra.get("token_file", "") or ILINK_DEFAULT_TOKEN_FILE).expanduser())
@@ -201,7 +281,8 @@ async def create_wechat_ilink_qrcode(request: Optional[WechatIlinkQrcodeRequest]
 
 
 @router.get("/wechat/ilink/qrcode/status", summary="单次查询 iLink 扫码状态（confirmed 落盘 token）")
-async def get_wechat_ilink_qrcode_status(qr_id: str = ""):
+async def get_wechat_ilink_qrcode_status(qr_id: str = "", agent_id: str = Query(default="default")):
+    agent_id = _norm_agent(agent_id)
     """F-3 两段式·轮询段：单次 GET /auth/status，如实返回 pending/scanned/expired。
 
     confirmed → 将 bot_token 写入 token 文件（与后台 connect 流程同一落盘路径）；
@@ -210,7 +291,7 @@ async def get_wechat_ilink_qrcode_status(qr_id: str = ""):
     if not qr_id:
         raise HTTPException(status_code=400, detail="qr_id 不能为空")
 
-    saved_extra = (_load_configs().get("wechat", {}) or {}).get("extra", {}) or {}
+    saved_extra = (_agent_map(_load_store(), agent_id).get("wechat", {}) or {}).get("extra", {}) or {}
     token_file = _wechat_extra_token_file(saved_extra)
     adapter = _make_ilink_adapter(token_file)
 
@@ -237,6 +318,61 @@ async def get_wechat_ilink_qrcode_status(qr_id: str = ""):
 # ============================================================
 
 
+async def bootstrap_channel_adapters(manager=None) -> Dict[str, int]:
+    """启动装配（2026-09-13 Phase B，QP start_all_configured_agents 对齐）
+
+    服务启动时按持久化配置逐 (agent_id, channel_type) 重建适配器并连接——
+    此前无任何装配环节，配置在但重启后全渠道不连接（保存时才注册）。
+    - enabled=False 跳过；wechat iLink 无 token 跳过（等扫码，绝不 300s 轮询）；
+    - 工厂同步网络下沉线程池（RES-P0-2 同约束）；单渠道失败仅告警。
+    """
+    manager = manager or get_channel_manager()
+    stats = {"registered": 0, "connected": 0, "skipped": 0, "failed": 0}
+    store = _load_store()
+    for agent_id, channels in (store.get("agents") or {}).items():
+        if not isinstance(channels, dict):
+            continue
+        for channel_type, cfg in channels.items():
+            if not isinstance(cfg, dict) or not cfg.get("enabled", True):
+                stats["skipped"] += 1
+                continue
+            if channel_type == "wechat" and _wechat_needs_scan(cfg.get("extra") or {}):
+                stats["skipped"] += 1
+                continue
+            channel_config = ChannelConfig(
+                channel_type=channel_type,
+                enabled=True,
+                app_id=cfg.get("app_id", "") or "",
+                app_secret=cfg.get("app_secret", "") or "",
+                use_stream=cfg.get("use_stream", True),
+                webhook_url=cfg.get("webhook_url", "") or "",
+                webhook_token=cfg.get("webhook_token", "") or "",
+                encrypt_key=cfg.get("encrypt_key", "") or "",
+                verification_token=cfg.get("verification_token", "") or "",
+                extra=cfg.get("extra", {}) or {},
+            )
+            try:
+                adapter = await asyncio.to_thread(_create_adapter, channel_type, channel_config)
+            except Exception as e:  # noqa: BLE001 - 单渠道故障不拖装配
+                stats["failed"] += 1
+                logger.warning("渠道装配失败 %s(agent=%s): %s", channel_type, agent_id, e)
+                continue
+            if adapter is None:
+                stats["skipped"] += 1
+                continue
+            manager.register_adapter(adapter, agent_id=agent_id)
+            stats["registered"] += 1
+            try:
+                ok = await adapter.connect()
+                if ok:
+                    stats["connected"] += 1
+            except Exception as e:  # noqa: BLE001
+                stats["failed"] += 1
+                logger.warning("渠道连接失败 %s(agent=%s): %s", channel_type, agent_id, e)
+    logger.info("渠道启动装配完成: %s", stats)
+    return stats
+
+
 @router.get("/ingress/stats", summary="入站持久化队列状态（P0-5）")
 async def ingress_stats():
     """渠道入站持久化队列统计（pending/processing/dead_letter/processed）。
@@ -254,23 +390,24 @@ async def ingress_stats():
         return {"enabled": False, "error": str(e)}
 
 
-@router.get("", summary="列出所有渠道配置")
-async def list_configs():
-    """列出所有已配置的渠道"""
-    configs = _load_configs()
+@router.get("", summary="列出渠道配置")
+async def list_configs(agent_id: str = Query(default="default", description="Agent ID")):
+    agent_id = _norm_agent(agent_id)
+    """列出指定 agent 已配置的渠道（agent 隔离视图，缺省 default 向后兼容）"""
     manager = get_channel_manager()
 
     result = []
-    for channel_type, cfg in configs.items():
-        adapter = manager.get_adapter(channel_type)
+    for channel_type, cfg in _agent_map(_load_store(), agent_id).items():
+        adapter = manager.get_adapter(channel_type, agent_id=agent_id)
         result.append(
             ChannelConfigResponse(
                 channel_type=channel_type,
+                agent_id=agent_id,
                 enabled=cfg.get("enabled", True),
                 app_id_masked=(cfg.get("app_id", "")[:8] + "***") if cfg.get("app_id") else "",
                 use_stream=cfg.get("use_stream", True),
                 connected=adapter.is_connected if adapter else False,
-                extra=cfg.get("extra", {}),
+                extra=cfg.get("extra", {}) or {},
             )
         )
     return result
@@ -293,37 +430,55 @@ async def list_plugin_channel_schemas():
 
 
 @router.get("/{channel_type}", summary="获取指定渠道配置")
-async def get_config(channel_type: str):
-    """获取指定渠道的配置"""
-    configs = _load_configs()
+async def get_config(channel_type: str, agent_id: str = Query(default="default")):
+    agent_id = _norm_agent(agent_id)
+    """获取指定 agent 的渠道配置"""
+    configs = _agent_map(_load_store(), agent_id)
     if channel_type not in configs:
         raise HTTPException(status_code=404, detail=f"Channel '{channel_type}' not configured")
 
     cfg = configs[channel_type]
     manager = get_channel_manager()
-    adapter = manager.get_adapter(channel_type)
+    adapter = manager.get_adapter(channel_type, agent_id=agent_id)
 
     return ChannelConfigResponse(
         channel_type=channel_type,
+        agent_id=agent_id,
         enabled=cfg.get("enabled", True),
         app_id_masked=(cfg.get("app_id", "")[:8] + "***") if cfg.get("app_id") else "",
         use_stream=cfg.get("use_stream", True),
         connected=adapter.is_connected if adapter else False,
-        extra=cfg.get("extra", {}),
+        extra=cfg.get("extra", {}) or {},
     )
 
 
 @router.post("", summary="创建/更新渠道配置")
-async def create_or_update_config(request: ChannelConfigRequest):
-    """创建或更新渠道配置，并可选地自动注册适配器"""
-    # 持久化配置
-    configs = _load_configs()
+async def create_or_update_config(
+    request: ChannelConfigRequest,
+    agent_id: str = Query(default="default", description="归属 Agent（agent 隔离多实例）"),
+):
+    agent_id = _norm_agent(agent_id)
+    """创建或更新指定 agent 的渠道配置并注册适配器
+
+    2026-09-13 agent 隔离（QP：agent 是渠道所有者）：配置写 agents[agent_id]、
+    适配器按 (agent_id, channel_type) 复合键注册；保存前做平台身份冲突检测
+    （同 bot 撞两 agent → 平台回调串号，409 拒，对齐 QP conflict.py）。
+    """
+    store = _load_store()
     config_data = safe_model_dump(request)  # s9: pydantic v1 兼容
     # 不保存明文密钥到文件
     if request.app_secret:
         config_data["_app_secret_stored"] = True
-    configs[request.channel_type] = config_data
-    _save_configs(configs)
+
+    owner = _identity_conflict_owner(store, agent_id, request.channel_type, config_data)
+    if owner:
+        raise HTTPException(
+            status_code=409,
+            detail=f"平台身份冲突：agent『{owner}』已配置同身份渠道；同一 bot 双接入会导致消息串台",
+        )
+
+    _agent_map(store, agent_id)[request.channel_type] = config_data
+    _save_store(store)
 
     # 创建适配器并注册
     channel_config = ChannelConfig(
@@ -349,41 +504,45 @@ async def create_or_update_config(request: ChannelConfigRequest):
         adapter = await asyncio.to_thread(_create_adapter, request.channel_type, channel_config)
         manager = get_channel_manager()
         if adapter is not None:
-            manager.register_adapter(adapter)
+            manager.register_adapter(adapter, agent_id=agent_id)
 
     return {
         "success": True,
         "channel_type": request.channel_type,
-        "message": f"Channel '{request.channel_type}' configured and registered",
+        "agent_id": agent_id,
+        "message": f"Channel '{request.channel_type}' configured and registered (agent={agent_id})",
         "needs_scan": needs_scan,
     }
 
 
 @router.delete("/{channel_type}", summary="删除渠道配置")
-async def delete_config(channel_type: str):
-    """删除渠道配置并注销适配器"""
-    configs = _load_configs()
+async def delete_config(channel_type: str, agent_id: str = Query(default="default")):
+    agent_id = _norm_agent(agent_id)
+    """删除指定 agent 的渠道配置并注销其适配器实例"""
+    store = _load_store()
+    configs = _agent_map(store, agent_id)
     if channel_type not in configs:
         raise HTTPException(status_code=404, detail=f"Channel '{channel_type}' not found")
 
     # 先断开连接
     manager = get_channel_manager()
-    adapter = manager.get_adapter(channel_type)
+    adapter = manager.get_adapter(channel_type, agent_id=agent_id)
     if adapter and adapter.is_connected:
         await adapter.disconnect()
 
-    # 注销适配器
-    manager.unregister_adapter(channel_type)
+    # 注销适配器（复合键视图，不动其他 agent 的同平台实例）
+    manager.unregister_adapter(channel_type, agent_id=agent_id)
 
     # 删除配置
     del configs[channel_type]
-    _save_configs(configs)
+    _save_store(store)
 
-    return {"success": True, "message": f"Channel '{channel_type}' deleted"}
+    return {"success": True, "message": f"Channel '{channel_type}' deleted", "agent_id": agent_id}
 
 
 @router.post("/{channel_type}/test", summary="测试渠道连接")
-async def test_connection(channel_type: str, request: ChannelConfigRequest):
+async def test_connection(channel_type: str, request: ChannelConfigRequest, agent_id: str = Query(default="default")):
+    agent_id = _norm_agent(agent_id)
     """测试渠道连接是否正常"""
     # F-2：wechat iLink 无 token 时诚实失败并引导扫码——绝不创建适配器
     # （旧路径会进入 authenticate→二维码 300s 阻塞轮询，或空 extra 假成功）
