@@ -13,6 +13,8 @@ Muscle Memory - 真正的肌肉记忆系统（条件反射级）
 
 import hashlib
 import json
+import math
+import os
 from neurova.core.logger import get_logger
 import re
 import threading
@@ -24,6 +26,45 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = get_logger(__name__)
+
+
+# ── T4 语义置信（docs/Neurova_工具调用链升级计划_2026-09-13）──────────────
+# 废 MD5 假向量优先路径：条目存有嵌入时按余弦分档给向量分量（0.75→0 线性
+# 映射到 0.95→满 0.3，区间保守防误自动执行）；引擎缺失/开关关/旧条目无向量
+# 三种情况逐位回落原 MD5 等值语义（只提升不下降）。
+def _semantic_enabled() -> bool:
+    return os.environ.get("NEUROVA_MUSCLE_SEMANTIC", "1") != "0"
+
+
+def _get_engine():
+    try:
+        from neurova.embedding import get_embedding_engine
+
+        return get_embedding_engine()
+    except Exception:  # noqa: BLE001 - 未装模型属正常态
+        return None
+
+
+def _semantic_vector(text: str) -> Optional[List[float]]:
+    """计算语义向量；失败/关闭返回 None（调用方回落 MD5 分支）。"""
+    if not text or not _semantic_enabled():
+        return None
+    engine = _get_engine()
+    if engine is None:
+        return None
+    try:
+        vec = engine.encode(text)
+    except Exception:  # noqa: BLE001
+        return None
+    # 存储瘦身：4 位小数足够分档，落盘体积减半以上
+    return [round(float(x), 4) for x in vec]
+
+
+def _cosine(a: List[float], b: List[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a)) or 1.0
+    nb = math.sqrt(sum(x * x for x in b)) or 1.0
+    return dot / (na * nb)
 
 
 class MemoryLevel(Enum):
@@ -151,20 +192,21 @@ class MuscleMemory:
         """
         fingerprint = self._extract_keywords(query)
         vector_fp = self._text_to_embedding_hash(query)
+        query_emb = _semantic_vector(query)  # T4：每查询一次编码（~10-50ms，对秒级 LLM 链路无感）
 
         with self._lock:
             results = []
 
             # L1: 精确匹配（毫秒级）
-            l1_matches = self._match_l1(tool_name, fingerprint, vector_fp)
+            l1_matches = self._match_l1(tool_name, fingerprint, vector_fp, query_emb)
             results.extend(l1_matches)
 
             # L2: 模糊匹配
-            l2_matches = self._match_l2(tool_name, fingerprint, vector_fp)
+            l2_matches = self._match_l2(tool_name, fingerprint, vector_fp, query_emb)
             results.extend(l2_matches)
 
             # L3: 广泛检索
-            l3_matches = self._match_l3(tool_name, fingerprint, vector_fp)
+            l3_matches = self._match_l3(tool_name, fingerprint, vector_fp, query_emb)
             results.extend(l3_matches)
 
             # 去重并按置信度排序
@@ -197,6 +239,7 @@ class MuscleMemory:
         """
         fingerprint = self._extract_keywords(query)
         vector_fp = self._text_to_embedding_hash(query)
+        query_emb = _semantic_vector(query)
 
         with self._lock:
             results = []
@@ -208,7 +251,7 @@ class MuscleMemory:
                 (self._l3, 0.2),
             ]:
                 for item_id, item in store.items():
-                    conf = self._compute_confidence(item, fingerprint, vector_fp)
+                    conf = self._compute_confidence(item, fingerprint, vector_fp, query_emb=query_emb)
                     if conf > min_conf:
                         results.append((item, conf))
 
@@ -223,31 +266,34 @@ class MuscleMemory:
             unique_results.sort(key=lambda x: x[1], reverse=True)
             return unique_results[:top_k]
 
-    def _match_l1(self, tool_name: str, fingerprint: str, vector_fp: str) -> List[Tuple[MuscleMemoryItem, float]]:
+    def _match_l1(self, tool_name: str, fingerprint: str, vector_fp: str,
+                  query_emb: Optional[List[float]] = None) -> List[Tuple[MuscleMemoryItem, float]]:
         """L1 精确匹配"""
         with self._lock:
             results = []
             for item_id, item in self._l1.items():
                 if item.tool_name != tool_name:
                     continue
-                conf = self._compute_confidence(item, fingerprint, vector_fp)
+                conf = self._compute_confidence(item, fingerprint, vector_fp, query_emb=query_emb)
                 if conf > 0.7:
                     results.append((item, conf))
             return results
 
-    def _match_l2(self, tool_name: str, fingerprint: str, vector_fp: str) -> List[Tuple[MuscleMemoryItem, float]]:
+    def _match_l2(self, tool_name: str, fingerprint: str, vector_fp: str,
+                  query_emb: Optional[List[float]] = None) -> List[Tuple[MuscleMemoryItem, float]]:
         """L2 模糊匹配"""
         with self._lock:
             results = []
             for item_id, item in self._l2.items():
                 if item.tool_name != tool_name:
                     continue
-                conf = self._compute_confidence(item, fingerprint, vector_fp)
+                conf = self._compute_confidence(item, fingerprint, vector_fp, query_emb=query_emb)
                 if conf > 0.5:
                     results.append((item, conf))
             return results
 
-    def _match_l3(self, tool_name: str, fingerprint: str, vector_fp: str) -> List[Tuple[MuscleMemoryItem, float]]:
+    def _match_l3(self, tool_name: str, fingerprint: str, vector_fp: str,
+                  query_emb: Optional[List[float]] = None) -> List[Tuple[MuscleMemoryItem, float]]:
         """L3 广泛检索"""
         with self._lock:
             results = []
@@ -262,7 +308,7 @@ class MuscleMemory:
                 item = self._l3.get(item_id)
                 if item is None:
                     continue
-                conf = self._compute_confidence(item, fingerprint, vector_fp)
+                conf = self._compute_confidence(item, fingerprint, vector_fp, query_emb=query_emb)
                 if conf > 0.3:
                     results.append((item, conf))
             return results
@@ -272,8 +318,13 @@ class MuscleMemory:
         item: MuscleMemoryItem,
         fingerprint: str,
         vector_fp: str,
+        query_emb: Optional[List[float]] = None,
     ) -> float:
-        """计算匹配置信度"""
+        """计算匹配置信度
+
+        向量分量（T4）：条目存有语义向量时用余弦分档（0.75→0.95 线性到 0~0.3）；
+        任一侧缺失/开关关闭 → 逐位回落原 MD5 等值分支。
+        """
         # 空指纹不产生虚假匹配
         if not fingerprint and not item.query_fingerprint:
             return 0.0
@@ -294,8 +345,15 @@ class MuscleMemory:
             if total > 0:
                 score += 0.4 * (overlap / total)
 
-        # 向量指纹匹配
-        if vector_fp and item.vector_fingerprint == vector_fp:
+        # 向量分量：语义余弦优先，缺失逐位回落 MD5 等值
+        item_emb = item.metadata.get("query_embedding") if _semantic_enabled() else None
+        if query_emb and item_emb:
+            sim = _cosine(query_emb, item_emb)
+            if sim > 0.75:
+                score += 0.3 * min(1.0, (sim - 0.75) / 0.2)
+            else:
+                score += 0.3 if (vector_fp and item.vector_fingerprint == vector_fp) else 0.0
+        elif vector_fp and item.vector_fingerprint == vector_fp:
             score += 0.3
 
         # 成功率加成
@@ -337,6 +395,11 @@ class MuscleMemory:
         metadata.update(kwargs)
         fingerprint = self._extract_keywords(query)
         vector_fp = self._text_to_embedding_hash(query)
+        # T4：语义向量随条目入库（旧条目无该键 → _compute_confidence 逐位回落，
+        # 见单测 test_record_then_match_full_confidence/test_switch_off_is_bitwise_identical）
+        emb = _semantic_vector(query)
+        if emb:
+            metadata["query_embedding"] = emb
 
         with self._lock:
             # 尝试找到已有的条目
