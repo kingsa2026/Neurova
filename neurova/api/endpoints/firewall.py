@@ -52,8 +52,13 @@ class FirewallRuleCreate(BaseModel):
     name: str = Field(..., description="规则名称")
     rule_type: str = Field(default="ip", description="规则类型")
     action: str = Field(default="block", description="动作")
+    # 空值拒绝放 handler（不放 min_length）：PUT 默认实例构造含 value=""，
+    # schema 级校验会在 import 期抛 ValidationError。
     value: str = Field(..., description="规则值")
     enabled: bool = Field(default=True, description="是否启用")
+    # P3：rate_limit 目标窗口显式字段（minute|hour）。原实现靠
+    # "minute" in name.lower() 关键字匹配，名字不含英文关键字时静默不写仍 200。
+    window: Optional[str] = Field(default=None, description="rate_limit 窗口: minute|hour")
 
 
 def _get_request_id(request: Request) -> str:
@@ -109,6 +114,22 @@ async def get_firewall_rules(
                 )
             )
 
+        # IP 白名单规则（P3 读写对称：POST allow 写入后 GET 必须可见，
+        # 原实现合成列表不含 allowed_ips → 写了读不回）
+        for ip in global_rules.get("allowed_ips", []):
+            rules.append(
+                FirewallRule(
+                    rule_id=f"ip_allow_{ip}",
+                    name=f"Allow IP {ip}",
+                    rule_type="ip",
+                    action="allow",
+                    value=ip,
+                    enabled=True,
+                    created_at=time.time(),
+                    updated_at=time.time(),
+                )
+            )
+
         # 速率限制规则
         rules.append(
             FirewallRule(
@@ -140,6 +161,10 @@ async def get_firewall_rules(
         if rule_type:
             rules = [r for r in rules if r.rule_type == rule_type]
 
+        # P3：enabled_only 此前收了从未参与过滤
+        if enabled_only:
+            rules = [r for r in rules if r.enabled]
+
         # 限制数量
         rules = rules[:limit]
 
@@ -161,6 +186,8 @@ async def create_firewall_rule(
         raise HTTPException(status_code=503, detail="Firewall service not available")
 
     try:
+        if not str(body.value or "").strip():
+            raise HTTPException(status_code=400, detail="value 不得为空")
         firewall = get_firewall()
 
         # 根据规则类型更新防火墙配置
@@ -188,11 +215,27 @@ async def create_firewall_rule(
                     blocked_paths.append(body.value)
                     firewall.update_global_rules({"blocked_paths": blocked_paths})
         elif body.rule_type == "rate_limit":
-            # 更新速率限制
-            if "minute" in body.name.lower():
-                firewall.update_global_rules({"rate_limit_per_minute": int(body.value)})
-            elif "hour" in body.name.lower():
-                firewall.update_global_rules({"rate_limit_per_hour": int(body.value)})
+            # P3 诚实化：窗口由显式 window 字段指定（缺省回退名称关键字兼容），
+            # 无法判定窗口或值非整数 → 400（原静默不写仍返 200）。
+            try:
+                rate_value = int(body.value)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="rate_limit 规则 value 须为整数")
+            window = (body.window or "").strip().lower()
+            if not window:
+                if "minute" in body.name.lower():
+                    window = "minute"
+                elif "hour" in body.name.lower():
+                    window = "hour"
+            if window == "minute":
+                firewall.update_global_rules({"rate_limit_per_minute": rate_value})
+            elif window == "hour":
+                firewall.update_global_rules({"rate_limit_per_hour": rate_value})
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="rate_limit 规则须指定窗口：window=minute|hour（或规则名含 minute/hour）",
+                )
 
         timestamp = time.time()
 
@@ -206,6 +249,8 @@ async def create_firewall_rule(
             created_at=timestamp,
             updated_at=timestamp,
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Error creating firewall rule: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to create firewall rule: {str(e)}")
@@ -225,6 +270,31 @@ async def update_firewall_rule(
 
     try:
         firewall = get_firewall()
+
+        # P3：rate_limit 合成 id 原会 fall-through 到 ip/path 分支静默 no-op
+        # 仍返 200 回显（假成功）。现真更新对应全局速率并回读。
+        if rule_id in ("rate_limit_minute", "rate_limit_hour"):
+            try:
+                rate_value = int(body.value)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="rate_limit 规则 value 须为整数")
+            key = (
+                "rate_limit_per_minute"
+                if rule_id == "rate_limit_minute"
+                else "rate_limit_per_hour"
+            )
+            firewall.update_global_rules({key: rate_value})
+            timestamp = time.time()
+            return FirewallRule(
+                rule_id=rule_id,
+                name=body.name or f"Rate limit per {key.split('_')[-1]}",
+                rule_type="rate_limit",
+                action="limit",
+                value=str(rate_value),
+                enabled=True,
+                created_at=timestamp,
+                updated_at=timestamp,
+            )
 
         # 解析规则ID获取规则类型和值
         parts = rule_id.split("_", 2)
@@ -292,6 +362,13 @@ async def delete_firewall_rule(
 
     try:
         firewall = get_firewall()
+
+        # P3：速率规则常驻（GET 恒合成），删除语义不成立——原实现谎报 deleted。
+        if rule_id in ("rate_limit_minute", "rate_limit_hour"):
+            raise HTTPException(
+                status_code=400,
+                detail="速率限制规则不可删除（请用 PUT /rules/{rule_id} 更新 value）",
+            )
 
         # 解析规则ID获取规则类型和值
         parts = rule_id.split("_", 2)

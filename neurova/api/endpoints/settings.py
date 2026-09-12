@@ -78,9 +78,43 @@ class UpdateSettingsRequest(BaseModel):
     settings: Dict[str, Any] = Field(..., description="设置键值对")
 
 
+class SshCredentialRequest(BaseModel):
+    """SSH 主机凭据（多主机按 host 分键；密钥/密码加密落盘，读取永不回显）"""
+
+    host: str = Field(..., description="目标主机 IP/域名（作为分键）")
+    user: str = Field("", description="SSH 用户名")
+    port: int = Field(22, ge=1, le=65535, description="SSH 端口")
+    key_text: str = Field("", description="私钥文本（粘贴，与 password 二选一，优先）")
+    password: str = Field("", description="密码（无密钥时用）")
+
+
+class SocialCredentialRequest(BaseModel):
+    """社交平台凭据（web_reach social_exec 消费；键由该平台所需集决定）"""
+
+    platform: str = Field(..., description="平台：twitter/reddit/xiaohongshu/facebook/instagram/linkedin/github")
+    credentials: Dict[str, str] = Field(default_factory=dict, description="凭据键值（仅接受该平台所需键）")
+
+
 def _get_request_id(request: Request) -> str:
     """安全获取 request_id"""
     return getattr(request.state, "request_id", str(uuid.uuid4()))
+
+
+def _merged_settings() -> Dict[str, Any]:
+    """设置统一读源（2026-09-12 P7）：进程内默认 + 持久化 flat 段 + 结构化 section。
+
+    原缺陷：flat 键（theme/language/auto_save/...）PUT 只写内存 `_default_settings`
+    谎报保存且重启丢；单键 GET 只读内存与整表 GET（已合并持久层）语义分裂。
+    flat 键现统一落 data/app_settings.json 的 "flat" section。
+    """
+    from neurova.core.app_settings import load_app_settings
+
+    stored = load_app_settings()
+    flat = stored.pop("flat", None) or {}
+    settings = dict(_default_settings)
+    settings.update(flat)
+    settings.update(stored)
+    return settings
 
 
 @router.get("", response_model=SettingsResponse)
@@ -91,13 +125,8 @@ async def get_settings(
     """获取全局设置 — 登录用户可读（结构化 section 持久化 + 平铺 legacy 键）"""
     _get_request_id(request)
 
-    from neurova.core.app_settings import load_app_settings
-
-    settings = dict(_default_settings)
-    settings.update(load_app_settings())
-
     return SettingsResponse(
-        settings=settings,
+        settings=_merged_settings(),
         updated_at=str(time.time()),
     )
 
@@ -128,26 +157,134 @@ async def update_settings(
     """更新全局设置（仅管理员）— section 值为 dict 时持久化到 app_settings"""
     _get_request_id(request)
 
-    from neurova.core.app_settings import load_app_settings, save_app_settings
+    from neurova.core.app_settings import save_app_settings
 
+    flat_updates: Dict[str, Any] = {}
     for key, value in body.settings.items():
         if key in _SETTINGS_SECTIONS and isinstance(value, dict):
             save_app_settings(key, value)
         else:
-            _default_settings[key] = value
+            flat_updates[key] = value
+    if flat_updates:
+        # P7：flat 键落盘（原只写内存谎报保存）；同步进程内默认保持读一致
+        save_app_settings("flat", flat_updates)
+        _default_settings.update(flat_updates)
 
     if "advanced" in body.settings:
         applied = _hot_apply_output_budget(request)
         if applied:
             logger.info("全局输出预算已热应用到 %d 个存活 agent", applied)
 
-    settings = dict(_default_settings)
-    settings.update(load_app_settings())
-
     return SettingsResponse(
-        settings=settings,
+        settings=_merged_settings(),
         updated_at=str(time.time()),
     )
+
+
+# ─── SSH 多主机凭据（computer_ssh_exec 消费；按当前用户分桶，登录即可自管）───
+
+
+@router.get("/ssh-credentials")
+async def list_ssh_credentials(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """列出当前用户已配置的 SSH 主机（脱敏：host/user/port/auth，不回显密钥/密码）。"""
+    from neurova.web_reach.credentials import get_credential_store
+
+    uid = str(current_user.get("user_id") or "default")
+    return {"code": 0, "data": {"hosts": get_credential_store().list_ssh_hosts(uid)}}
+
+
+@router.post("/ssh-credentials")
+async def upsert_ssh_credential(
+    request: Request,
+    body: SshCredentialRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """新增/更新一个 SSH 主机凭据（加密落盘）。host 必填；key_text 与 password 至少其一。"""
+    host = (body.host or "").strip()
+    if not host:
+        raise HTTPException(status_code=422, detail="host 不能为空")
+    if not body.key_text and not body.password:
+        raise HTTPException(status_code=422, detail="需提供 key_text（私钥）或 password 之一")
+    from neurova.web_reach.credentials import get_credential_store
+
+    uid = str(current_user.get("user_id") or "default")
+    ok = get_credential_store().set_ssh_host(
+        uid, host, user=body.user, port=body.port, key_text=body.key_text, password=body.password
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="SSH 凭据保存失败")
+    return {"code": 0, "data": {"host": host, "saved": True}}
+
+
+@router.delete("/ssh-credentials/{host}")
+async def delete_ssh_credential(
+    request: Request,
+    host: str = Path(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """删除一个 SSH 主机凭据。"""
+    from neurova.web_reach.credentials import get_credential_store
+
+    uid = str(current_user.get("user_id") or "default")
+    if not get_credential_store().delete_ssh_host(uid, host):
+        raise HTTPException(status_code=404, detail=f"未找到主机凭据: {host}")
+    return {"code": 0, "data": {"host": host, "deleted": True}}
+
+
+# ─── 社交平台凭据（web_reach social_exec 消费；与 SSH 复用同一配置面/加密桶）───
+
+
+@router.get("/social-credentials")
+async def list_social_credentials(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """列出各社交平台凭据配置状态（脱敏：平台 + 所需键是否已配，不回显值）。"""
+    from neurova.web_reach.credentials import get_credential_store
+
+    uid = str(current_user.get("user_id") or "default")
+    return {"code": 0, "data": {"platforms": get_credential_store().platform_status(uid)}}
+
+
+@router.post("/social-credentials")
+async def set_social_credential(
+    request: Request,
+    body: SocialCredentialRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """保存某社交平台凭据（只接受该平台所需键；空值不覆盖）。"""
+    from neurova.web_reach.credentials import PLATFORM_REQUIRED_KEYS, get_credential_store
+
+    platform = (body.platform or "").strip().lower()
+    if platform not in PLATFORM_REQUIRED_KEYS:
+        raise HTTPException(status_code=422, detail=f"不支持的平台: {body.platform}")
+    if not any((body.credentials or {}).values()):
+        raise HTTPException(status_code=422, detail="未提供任何凭据值")
+    uid = str(current_user.get("user_id") or "default")
+    ok = get_credential_store().set_platform_credentials(uid, platform, body.credentials)
+    if not ok:
+        raise HTTPException(status_code=500, detail="凭据保存失败")
+    return {"code": 0, "data": {"platform": platform, "saved": True}}
+
+
+@router.delete("/social-credentials/{platform}")
+async def clear_social_credential(
+    request: Request,
+    platform: str = Path(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """清除某社交平台的全部凭据。"""
+    from neurova.web_reach.credentials import PLATFORM_REQUIRED_KEYS, get_credential_store
+
+    platform = (platform or "").strip().lower()
+    if platform not in PLATFORM_REQUIRED_KEYS:
+        raise HTTPException(status_code=404, detail=f"不支持的平台: {platform}")
+    uid = str(current_user.get("user_id") or "default")
+    n = get_credential_store().clear_platform_credentials(uid, platform)
+    return {"code": 0, "data": {"platform": platform, "cleared": n}}
 
 
 # ─── CORS 配置管理（必须在 /{key} 之前注册，避免被路径参数遮蔽）───
@@ -276,17 +413,18 @@ async def get_setting(
     key: str = Path(...),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """获取特定设置 — 登录用户可读"""
+    """获取特定设置 — 登录用户可读（读源与整表一致：默认+持久化）"""
     _get_request_id(request)
 
-    if key not in _default_settings:
+    settings = _merged_settings()
+    if key not in settings:
         raise HTTPException(status_code=404, detail=f"Setting '{key}' not found")
 
     return {
         "code": 0,
         "data": {
             "key": key,
-            "value": _default_settings[key],
+            "value": settings[key],
         },
     }
 
@@ -295,12 +433,20 @@ async def get_setting(
 async def update_setting(
     request: Request,
     key: str = Path(...),
-    value: Any = Body(...),
+    value: Any = Body(..., embed=True),
     admin: Dict[str, Any] = Depends(require_admin()),
 ):
-    """更新特定设置（仅管理员）"""
+    """更新特定设置（仅管理员）— 落 app_settings 的 flat 段（P7：原只写内存谎报保存）"""
     _get_request_id(request)
 
+    from neurova.core.app_settings import save_app_settings
+
+    if key in _SETTINGS_SECTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{key}' 是结构化 section，请用 PUT /v1/settings 提交对象",
+        )
+    save_app_settings("flat", {key: value})
     _default_settings[key] = value
 
     return {
