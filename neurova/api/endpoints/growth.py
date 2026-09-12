@@ -13,6 +13,8 @@ from __future__ import annotations
 """
 
 from neurova.core.logger import get_logger
+import json
+import pathlib
 import time
 import uuid
 from typing import Any, Dict, List, Optional
@@ -166,6 +168,41 @@ def _get_agent(agent_id: str = "default"):
     return get_agent_instance(agent_id)
 
 
+# ---------------------------------------------------------------------------
+# 人格特质独立持久源（2026-09-12 空数据页面修复）
+#
+# 根因: Agent.personality 实为 personality.md 身份文本字符串，此前端点要求
+# isinstance(agent.personality, dict)（永假）→ traits 恒空、PUT 静默 no-op
+# 谎报成功、/growth 主页在非空 md 上 .get() 抛 AttributeError。
+# 特质/价值观/风格与身份 md 正交，独立落 data/personality/{agent_id}.json。
+# ---------------------------------------------------------------------------
+
+_PERSONALITY_DIR = "data/personality"
+
+
+def _personality_path(agent_id: str) -> "pathlib.Path":
+    safe = str(agent_id).replace("/", "_").replace("\\", "_")
+    return pathlib.Path(_PERSONALITY_DIR) / f"{safe}.json"
+
+
+def _load_personality_data(agent_id: str) -> Dict[str, Any]:
+    try:
+        with open(_personality_path(agent_id), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_personality_data(agent_id: str, data: Dict[str, Any]) -> None:
+    p = _personality_path(agent_id)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    tmp.replace(p)
+
+
 def _get_growth_manager(agent_id: str = "default"):
     """获取成长管理器"""
     agent = _get_agent(agent_id)
@@ -277,14 +314,14 @@ async def get_agent_growth(
         except Exception as e:
             logger.warning("Failed to get motivation level: %s", e)
 
-    # 获取人格
-    if hasattr(agent, "personality") and agent.personality:
-        growth_data["personality"] = {
-            "traits": agent.personality.get("traits", {}),
-            "values": agent.personality.get("values", []),
-            "communication_style": agent.personality.get("communication_style", "balanced"),
-            "decision_style": agent.personality.get("decision_style", "analytical"),
-        }
+    # 获取人格（读独立持久源；agent.personality 是 md 文本不可当 dict 用）
+    pdata = _load_personality_data(agent_id)
+    growth_data["personality"] = {
+        "traits": pdata.get("traits", {}),
+        "values": pdata.get("values", []),
+        "communication_style": pdata.get("communication_style", "balanced"),
+        "decision_style": pdata.get("decision_style", "analytical"),
+    }
 
     # 获取宪法
     if hasattr(agent, "constitution") and agent.constitution:
@@ -706,28 +743,20 @@ async def get_personality(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
 ):
-    """获取人格信息"""
+    """获取人格信息（traits/values/风格读独立持久源，非 agent.personality md 文本）"""
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    personality = Personality(
+    data = _load_personality_data(agent_id)
+    return Personality(
         agent_id=agent_id,
         timestamp=time.time(),
+        traits=data.get("traits", {}),
+        values=data.get("values", []),
+        communication_style=data.get("communication_style", "balanced"),
+        decision_style=data.get("decision_style", "analytical"),
     )
-
-    if hasattr(agent, "personality") and agent.personality:
-        if isinstance(agent.personality, dict):
-            personality = Personality(
-                agent_id=agent_id,
-                timestamp=time.time(),
-                traits=agent.personality.get("traits", {}),
-                values=agent.personality.get("values", []),
-                communication_style=agent.personality.get("communication_style", "balanced"),
-                decision_style=agent.personality.get("decision_style", "analytical"),
-            )
-
-    return personality
 
 
 @router.put("/personality", response_model=Personality)
@@ -736,16 +765,14 @@ async def update_personality(
     agent_id: str = Query(default="default", description="Agent ID"),
     body: PersonalityUpdate = PersonalityUpdate(),
 ):
-    """更新人格信息"""
+    """更新人格信息（写独立持久源并回读）"""
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    if hasattr(agent, "personality") and agent.personality:
-        if isinstance(agent.personality, dict):
-            update_data = body.dict(exclude_unset=True)
-            agent.personality.update(update_data)
-
+    data = _load_personality_data(agent_id)
+    data.update(body.dict(exclude_unset=True))
+    _save_personality_data(agent_id, data)
     return await get_personality(request, agent_id)
 
 
@@ -759,15 +786,10 @@ async def get_personality_traits(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    traits = {}
-    if hasattr(agent, "personality") and agent.personality:
-        if isinstance(agent.personality, dict):
-            traits = agent.personality.get("traits", {})
-
     return {
         "code": 0,
         "message": "success",
-        "data": {"traits": traits},
+        "data": {"traits": _load_personality_data(agent_id).get("traits", {})},
     }
 
 
