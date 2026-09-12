@@ -528,6 +528,7 @@ export default {
     thinking: 'सोच रहा हूं...',
     toolCalling: 'उपकरण कॉल कर रहा है',
     toolDone: 'पूर्ण',
+    toolFailed: 'विफल',
     toolResult: 'उपकरण परिणाम',
     sshCredentialTitle: 'SSH क्रेडेंशियल कॉन्फ़िगर करें',
     sshCredentialHint: '{host} से पहला कनेक्शन; लॉगिन क्रेडेंशियल दर्ज करें (एन्क्रिप्टेड, केवल आपको दिखें)',

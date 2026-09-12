@@ -528,6 +528,7 @@ export default {
     thinking: 'Думаю...',
     toolCalling: 'Вызов инструмента',
     toolDone: 'Готово',
+    toolFailed: 'Сбой',
     toolResult: 'Результат инструмента',
     sshCredentialTitle: 'Настроить учётные данные SSH',
     sshCredentialHint: 'Первое подключение к {host}; введите учётные данные (шифруются, видны только вам)',

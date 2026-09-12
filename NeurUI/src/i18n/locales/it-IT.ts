@@ -528,6 +528,7 @@ export default {
     thinking: 'Sto pensando...',
     toolCalling: 'Chiamata strumento',
     toolDone: 'Fatto',
+    toolFailed: 'Fallito',
     toolResult: 'Risultato strumento',
     sshCredentialTitle: 'Configura credenziali SSH',
     sshCredentialHint: 'Prima connessione a {host}; inserisci le credenziali (cifrata, visibile solo a te)',

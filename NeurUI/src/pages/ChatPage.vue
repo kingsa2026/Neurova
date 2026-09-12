@@ -112,8 +112,8 @@
                   <span class="nr-step-icon"><UiIcon :name="step.kind === 'reasoning' ? 'brain' : variantIcon(toolCardVariant(step.name))" :size="14" /></span>
                   <span class="nr-step-title">{{ step.kind === 'reasoning' ? t('chat.stepThinking') : (step.taskName || step.name) }}</span>
                   <span v-if="step.active" class="nr-step-badge is-running">{{ t('chat.stepRunning') }}</span>
-                  <span v-else-if="step.kind === 'tool'" class="nr-step-badge" :class="step.result ? 'is-done' : 'is-error'">
-                    {{ step.result ? t('chat.toolDone') : t('chat.stepNoResult') }}
+                  <span v-else-if="step.kind === 'tool'" class="nr-step-badge" :class="!step.result || isToolFailureResult(step.result) ? 'is-error' : 'is-done'">
+                    {{ !step.result ? t('chat.stepNoResult') : isToolFailureResult(step.result) ? t('chat.toolFailed') : t('chat.toolDone') }}
                   </span>
                   <span v-if="stepDurationText(step)" class="nr-step-duration">{{ stepDurationText(step) }}</span>
                   <span class="nr-step-toggle">{{ step.open ? '▾' : '▸' }}</span>
@@ -160,8 +160,8 @@
                 <div class="nr-tool-header" @click="msg.toolOpen = !msg.toolOpen">
                   <span class="nr-tool-icon"><UiIcon :name="variantIcon(toolCardVariant(tc.name))" :size="14" /></span>
                   <span class="nr-tool-name">{{ tc.name }}</span>
-                  <a-tag :color="isBackgroundResult(tc.result) ? 'warning' : tc.result ? 'success' : 'processing'">
-                    {{ isBackgroundResult(tc.result) ? t('chat.toolBackground') : tc.result ? t('chat.toolDone') : t('chat.toolCalling') }}
+                  <a-tag :color="isBackgroundResult(tc.result) ? 'warning' : isToolFailureResult(tc.result) ? 'error' : tc.result ? 'success' : 'processing'">
+                    {{ isBackgroundResult(tc.result) ? t('chat.toolBackground') : isToolFailureResult(tc.result) ? t('chat.toolFailed') : tc.result ? t('chat.toolDone') : t('chat.toolCalling') }}
                   </a-tag>
                   <span class="nr-tool-toggle">{{ msg.toolOpen ? '▾' : '▸' }}</span>
                 </div>
@@ -475,7 +475,7 @@ import { useMermaidRenderer } from '@/composables/useMermaidRenderer'
 import { useChatDraft } from '@/composables/useChatDraft'
 import { useInputHistory } from '@/composables/useInputHistory'
 import { useIMEComposition } from '@/composables/useIMEComposition'
-import { isBackgroundResult } from '@/utils/toolCallStatus'
+import { isBackgroundResult, isToolFailureResult } from '@/utils/toolCallStatus'
 import { findMessageMatches } from '@/utils/messageSearch'
 import {
   appendReasoningStep,

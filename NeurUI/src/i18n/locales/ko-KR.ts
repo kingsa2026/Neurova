@@ -528,6 +528,7 @@ export default {
     thinking: '생각 중...',
     toolCalling: '도구 호출 중',
     toolDone: '완료',
+    toolFailed: '실패',
     toolResult: '도구 결과',
     sshCredentialTitle: 'SSH 자격 증명 구성',
     sshCredentialHint: '{host}에 처음 연결합니다. 로그인 자격 증명을 입력하세요(암호화 저장, 본인만 표시)',
