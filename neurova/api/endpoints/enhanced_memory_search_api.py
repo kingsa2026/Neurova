@@ -151,23 +151,91 @@ async def get_retrieval_stats():
     }
 
 
+# ---------------------------------------------------------------------------
+# 记忆检索设置页（MemorySearchSettingsPage）读写契约
+#
+# 2026-09-12 空数据页面修复：原 GET 返回扁平硬编码 search_method/top_k/
+# score_threshold（前端从不消费，search/enhancement 整段保存被 PUT 丢弃），
+# PUT 按 0-1 校验前端 0-100 滑杆值 → settings_config.update() 范围校验
+# 静默跳过、端点谎报 "Updated 0"。现约定：
+# - API 边界单位 = 前端滑杆单位（rate/score_threshold/min_score 百分制）；
+# - decay.rate/half_life_days/min_score 落 memory-settings 真实消费键
+#   （0-1/天数 存储单位换算），search/enhancement/decay.enabled 暂无运行时
+#   消费者，落 data/memory_search_ui_settings.json 预留位，重启可回读；
+# - 越界/非法枚举 → 422，不再假成功。
+# ---------------------------------------------------------------------------
+
+_UI_FILE = "data/memory_search_ui_settings.json"
+
+_UI_DEFAULTS: typing.Dict[str, typing.Any] = {
+    "search": {"method": "hybrid", "top_k": 10, "score_threshold": 0.5},
+    "decay": {"enabled": True},
+    "enhancement": {
+        "enabled": True, "boost_factor": 2.0,
+        "recency_weight": 0.6, "frequency_weight": 0.4,
+    },
+}
+
+_METHOD_CHOICES = {"hybrid", "bm25", "vector"}
+
+
+def _load_ui_settings() -> typing.Dict[str, typing.Any]:
+    import copy
+    import json
+    try:
+        with open(_UI_FILE, "r", encoding="utf-8") as f:
+            saved = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        saved = {}
+    merged = copy.deepcopy(_UI_DEFAULTS)
+    for section, vals in saved.items():
+        if isinstance(vals, dict) and isinstance(merged.get(section), dict):
+            merged[section].update(vals)
+    return merged
+
+
+def _save_ui_settings(data: typing.Dict[str, typing.Any]) -> None:
+    import json
+    from pathlib import Path
+
+    Path(_UI_FILE).parent.mkdir(parents=True, exist_ok=True)
+    with open(_UI_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def _check_range(value, lo, hi, name):
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise HTTPException(status_code=422, detail=f"{name} 必须为数字")
+    if value < lo or value > hi:
+        raise HTTPException(status_code=422, detail=f"{name} 超出范围 [{lo}, {hi}]，收到 {value}")
+
+
 @router.get("/settings")
 async def get_memory_search_settings(current_user: dict = Depends(get_current_user)):
-    """获取记忆搜索设置 — 登录用户可读"""
+    """获取记忆搜索设置 — 登录用户可读（与 PUT 对称的嵌套契约）"""
     from neurova.cognitive_layers.memory_layer.settings_config import get_memory_settings as _get
     cfg = _get()
+    ui = _load_ui_settings()
     return {
         "code": 0,
         "message": "success",
         "data": {
-            "search_method": "hybrid",
-            "top_k": 10,
-            "score_threshold": 0.5,
+            "search": {
+                "method": ui["search"]["method"],
+                "top_k": ui["search"]["top_k"],
+                "score_threshold": round(ui["search"]["score_threshold"] * 100, 6),
+            },
             "decay": {
-                "enabled": True,
-                "rate": cfg.get("temperature.decay_rate"),
+                "enabled": ui["decay"]["enabled"],
+                "rate": round(cfg.get("temperature.decay_rate") * 100, 6),
                 "half_life_days": cfg.get("auto_context.compression_threshold_days"),
-                "min_score": cfg.get("threshold.default"),
+                "min_score": round(cfg.get("threshold.default") * 100, 6),
+            },
+            "enhancement": {
+                "enabled": ui["enhancement"]["enabled"],
+                "boost_factor": ui["enhancement"]["boost_factor"],
+                "recency_weight": round(ui["enhancement"]["recency_weight"] * 100, 6),
+                "frequency_weight": round(ui["enhancement"]["frequency_weight"] * 100, 6),
             },
         },
     }
@@ -175,20 +243,67 @@ async def get_memory_search_settings(current_user: dict = Depends(get_current_us
 
 @router.put("/settings")
 async def update_memory_search_settings(body: dict, admin: dict = Depends(require_admin())):
-    """更新记忆搜索设置 — 仅管理员"""
+    """更新记忆搜索设置 — 仅管理员。越界/非法值 422，不再谎报成功。"""
     from neurova.cognitive_layers.memory_layer.settings_config import get_memory_settings as _get
     cfg = _get()
-    updates = {}
-    if "decay" in body:
-        decay = body["decay"]
-        if "rate" in decay:
-            updates["temperature.decay_rate"] = decay["rate"]
-        if "half_life_days" in decay:
-            updates["auto_context.compression_threshold_days"] = decay["half_life_days"]
-        if "min_score" in decay:
-            updates["threshold.default"] = decay["min_score"]
-    updated = cfg.update_and_save(updates)
-    return {"code": 0, "message": f"Updated {len(updated)} setting(s)", "data": {"updated": updated}}
+    ui = _load_ui_settings()
+    touched = []
+
+    search = body.get("search") or {}
+    if "method" in search:
+        if search["method"] not in _METHOD_CHOICES:
+            raise HTTPException(status_code=422, detail=f"search.method 须为 {sorted(_METHOD_CHOICES)}")
+        ui["search"]["method"] = search["method"]
+        touched.append("search.method")
+    if "top_k" in search:
+        _check_range(search["top_k"], 1, 100, "search.top_k")
+        ui["search"]["top_k"] = int(search["top_k"])
+        touched.append("search.top_k")
+    if "score_threshold" in search:
+        _check_range(search["score_threshold"], 0, 100, "search.score_threshold")
+        ui["search"]["score_threshold"] = round(search["score_threshold"] / 100, 6)
+        touched.append("search.score_threshold")
+
+    decay = body.get("decay") or {}
+    if "enabled" in decay:
+        ui["decay"]["enabled"] = bool(decay["enabled"])
+        touched.append("decay.enabled")
+    updates: typing.Dict[str, typing.Any] = {}
+    if "rate" in decay:
+        _check_range(decay["rate"], 0, 100, "decay.rate")
+        updates["temperature.decay_rate"] = round(decay["rate"] / 100, 6)
+        touched.append("decay.rate")
+    if "half_life_days" in decay:
+        _check_range(decay["half_life_days"], 1, 365, "decay.half_life_days")
+        updates["auto_context.compression_threshold_days"] = int(decay["half_life_days"])
+        touched.append("decay.half_life_days")
+    if "min_score" in decay:
+        _check_range(decay["min_score"], 0, 100, "decay.min_score")
+        updates["threshold.default"] = round(decay["min_score"] / 100, 6)
+        touched.append("decay.min_score")
+
+    enh = body.get("enhancement") or {}
+    if "enabled" in enh:
+        ui["enhancement"]["enabled"] = bool(enh["enabled"])
+        touched.append("enhancement.enabled")
+    if "boost_factor" in enh:
+        _check_range(enh["boost_factor"], 1, 10, "enhancement.boost_factor")
+        ui["enhancement"]["boost_factor"] = enh["boost_factor"]
+        touched.append("enhancement.boost_factor")
+    for k in ("recency_weight", "frequency_weight"):
+        if k in enh:
+            _check_range(enh[k], 0, 100, f"enhancement.{k}")
+            ui["enhancement"][k] = round(enh[k] / 100, 6)
+            touched.append(f"enhancement.{k}")
+
+    if updates:
+        applied = cfg.update_and_save(updates)
+        missing = [k for k in updates if k not in applied]
+        if missing:
+            # 值已过边界校验仍被存储层拒绝 = 服务端契约漂移，如实报错
+            raise HTTPException(status_code=500, detail=f"settings 存储层拒绝写入: {missing}")
+    _save_ui_settings(ui)
+    return {"code": 0, "message": "success", "data": {"updated": touched}}
 
 
 @router.get("/nerf-settings")
