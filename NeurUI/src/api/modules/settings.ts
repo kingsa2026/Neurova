@@ -27,6 +27,8 @@ export interface AdvancedSettings {
   debug_mode: boolean
   log_level: string
   telemetry: boolean
+  /** 全局默认输出预算（单次回复 max_tokens 上限）；131072 = 跟随模型默认 */
+  max_output_tokens: number
 }
 
 export interface AppSettings {
@@ -90,4 +92,27 @@ export function getAgentLimits() {
 
 export function updateAgentLimits(data: Partial<AgentLimits>) {
   return api.put<ApiResponse<AgentLimits>>('/governance/agent-limits', data)
+}
+
+// ---------------------------------------------------------------------------
+// LLM 429 重试设置（设置页"模型"tab，ZCode 对齐 2026-09-11）
+// ---------------------------------------------------------------------------
+
+export interface LlmRetrySettings {
+  /** 同模型最大等待重试次数 */
+  max_retries: number
+  /** 重试间隔秒（服务端 Retry-After 优先于该间隔） */
+  interval: number
+  /** 单次等待封顶秒 */
+  wait_cap: number
+  /** 连续失败模型容错数（任一模型成功出内容即归零重计） */
+  max_switches: number
+}
+
+export function getLlmRetrySettings() {
+  return api.get<ApiResponse<LlmRetrySettings>>('/governance/llm-retry')
+}
+
+export function updateLlmRetrySettings(data: Partial<LlmRetrySettings>) {
+  return api.put<ApiResponse<LlmRetrySettings>>('/governance/llm-retry', data)
 }

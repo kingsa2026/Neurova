@@ -53,6 +53,21 @@ export interface ChatMessage {
    * 历史回放无此数据（后端 artifact 注册表会话级，不落盘）。
    */
   artifacts?: import('@/utils/artifacts').MessageArtifact[]
+  /**
+   * 429 限流重试/切换倒计时（ZCode 对齐 2026-09-11）：SSE retry 事件写入；
+   * reset 时半截回复已清空。流式恢复（content/reasoning/done/error）即清除。
+   */
+  retryNotice?: {
+    phase: 'waiting' | 'switched' | 'exhausted'
+    retry?: number
+    maxRetries?: number
+    /** waiting 时的总等待秒数（前端按 receivedAt 本地倒数） */
+    remainingSeconds?: number
+    receivedAt?: number
+    failCount?: number
+    maxSwitches?: number
+    model?: string
+  }
 }
 
 export interface Session {

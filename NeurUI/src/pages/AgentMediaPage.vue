@@ -40,9 +40,9 @@
             class="media-card"
           >
             <div class="media-thumb" @click="openDetail(item)">
-              <img v-if="item.type === 'image'" :src="item.thumbnail_url ?? item.url" :alt="item.name" />
+              <img v-if="item.type === 'image' && item.url" :src="item.url" :alt="item.name" />
               <div v-else class="thumb-placeholder">
-                <span>{{ item.type === 'audio' ? '🎵' : '🎬' }}</span>
+                <span>{{ item.type === 'audio' ? '🎵' : item.type === 'file' ? '📄' : '🎬' }}</span>
                 <span class="thumb-label">{{ item.name }}</span>
               </div>
             </div>
@@ -117,31 +117,27 @@
       :footer="null"
       width="680px"
     >
-      <div v-if="detailItem" class="detail-body">
-        <div class="detail-preview">
-          <img v-if="detailItem.type === 'image'" :src="detailItem.url" :alt="detailItem.name" style="max-width: 100%; border-radius: 8px" />
-          <audio v-else-if="detailItem.type === 'audio'" controls :src="detailItem.url" style="width: 100%" />
-          <video v-else-if="detailItem.type === 'video'" controls :src="detailItem.url" style="max-width: 100%; border-radius: 8px" />
+        <div v-if="detailItem" class="detail-body">
+          <div class="detail-preview">
+            <a-spin v-if="!detailItem.url" size="small" />
+            <img v-else-if="detailItem.type === 'image'" :src="detailItem.url" :alt="detailItem.name" style="max-width: 100%; border-radius: 8px" />
+            <audio v-else-if="detailItem.type === 'audio'" controls :src="detailItem.url" style="width: 100%" />
+            <video v-else-if="detailItem.type === 'video'" controls :src="detailItem.url" style="max-width: 100%; border-radius: 8px" />
+            <span v-else>{{ detailItem.name }}</span>
+          </div>
+          <a-descriptions :column="2" bordered size="small" style="margin-top: 16px">
+            <a-descriptions-item :label="t('media.metaName')">{{ detailItem.name }}</a-descriptions-item>
+            <a-descriptions-item :label="t('media.metaType')">{{ detailItem.type }}</a-descriptions-item>
+            <a-descriptions-item :label="t('media.metaSize')">{{ formatSize(detailItem.size) }}</a-descriptions-item>
+            <a-descriptions-item :label="t('media.metaCreated')">{{ formatDate(detailItem.created_at) }}</a-descriptions-item>
+          </a-descriptions>
         </div>
-        <a-descriptions :column="2" bordered size="small" style="margin-top: 16px">
-          <a-descriptions-item :label="t('media.metaName')">{{ detailItem.name }}</a-descriptions-item>
-          <a-descriptions-item :label="t('media.metaType')">{{ detailItem.type }}</a-descriptions-item>
-          <a-descriptions-item :label="t('media.metaSize')">{{ formatSize(detailItem.size) }}</a-descriptions-item>
-          <a-descriptions-item v-if="detailItem.width" :label="t('media.dimensions')">
-            {{ detailItem.width }} x {{ detailItem.height }}
-          </a-descriptions-item>
-          <a-descriptions-item v-if="detailItem.duration" :label="t('media.duration')">
-            {{ detailItem.duration }}s
-          </a-descriptions-item>
-          <a-descriptions-item :label="t('media.metaCreated')">{{ formatDate(detailItem.created_at) }}</a-descriptions-item>
-        </a-descriptions>
-      </div>
     </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -149,17 +145,16 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import * as mediaApi from '@/api/modules/media'
 
+/** 页面视图模型：由后端 MediaItem（media_id/filename/media_type/size/created_at）映射而来。 */
 interface MediaItem {
   id: string
   name: string
-  type: 'image' | 'audio' | 'video'
-  url: string
-  thumbnail_url?: string
+  type: 'image' | 'audio' | 'video' | 'file'
+  /** 预览/播放用 object URL（后端无 url 字段，按需经 GET /media/{id} 拉取 blob 生成） */
+  url?: string
   size?: number
-  width?: number
-  height?: number
-  duration?: number
-  created_at?: string
+  /** epoch 秒（后端 time.time()） */
+  created_at?: number
 }
 
 const props = defineProps<{ agentId: string }>()
@@ -177,6 +172,9 @@ const pageSize = ref(12)
 // Detail modal
 const detailVisible = ref(false)
 const detailItem = ref<MediaItem | null>(null)
+
+// 预览 object URL 缓存（组件卸载时统一 revoke）
+const previewUrls = new Map<string, string>()
 
 const viewOptions = [
   { label: '▦ Grid', value: 'grid' },
@@ -214,25 +212,50 @@ function formatSize(bytes?: number) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function formatDate(d?: string) {
-  return d ? new Date(d).toLocaleDateString() : '—'
+function formatDate(d?: number) {
+  return d ? new Date(d * 1000).toLocaleDateString() : '—'
+}
+
+/** 拉取媒体字节生成预览 object URL（带缓存；失败返回空串）。 */
+async function resolvePreviewUrl(id: string): Promise<string> {
+  const cached = previewUrls.get(id)
+  if (cached) return cached
+  try {
+    const blob = await mediaApi.getMedia(id)
+    const url = URL.createObjectURL(blob)
+    previewUrls.set(id, url)
+    return url
+  } catch {
+    return ''
+  }
+}
+
+/** 为列表项按需加载预览 URL（图片缩略图 / 音视频详情播放）。 */
+function loadPreviews() {
+  for (const item of mediaItems.value) {
+    if (item.url) continue
+    void resolvePreviewUrl(item.id).then((url) => {
+      if (url) item.url = url
+    })
+  }
 }
 
 async function fetchMedia() {
   loading.value = true
   try {
-    const res = await mediaApi.listMedia({ agent_id: props.agentId, search: searchQuery.value || undefined, mime_type: typeFilter.value || undefined })
-    const data = res?.data
-    const items = data?.items ?? (Array.isArray(data) ? data : [])
-    mediaItems.value = items.map((m: any) => ({
-      id: m.id,
-      name: m.filename || m.name,
-      type: (m.mime_type?.startsWith('image') ? 'image' : m.mime_type?.startsWith('audio') ? 'audio' : 'video') as any,
-      url: m.url || '',
-      thumbnail_url: m.url,
+    // F-1 契约对齐：GET /media/list（offset/limit 参数），响应 data.media/total/offset/limit；
+    // 后端无 search 参数，搜索走前端 filteredMedia 过滤。
+    const res = await mediaApi.listMedia({ agent_id: props.agentId, media_type: typeFilter.value || undefined })
+    const items = res?.data?.media ?? []
+    mediaItems.value = items.map((m) => ({
+      id: m.media_id,
+      name: m.filename,
+      type: m.media_type as MediaItem['type'],
+      url: '',
       size: m.size,
       created_at: m.created_at,
     }))
+    loadPreviews()
   } catch {
     message.error(t('media.loadError'))
   } finally {
@@ -262,13 +285,26 @@ async function onFileSelected(e: Event) {
 function openDetail(item: MediaItem) {
   detailItem.value = item
   detailVisible.value = true
+  if (!item.url) {
+    void resolvePreviewUrl(item.id).then((url) => {
+      if (url && detailItem.value?.id === item.id) detailItem.value.url = url
+    })
+  }
 }
 
-function downloadMedia(item: MediaItem) {
-  const a = document.createElement('a')
-  a.href = item.url
-  a.download = item.name
-  a.click()
+async function downloadMedia(item: MediaItem) {
+  // F-1：下载走后端 GET /media/download/{id} 字节流（原实现依赖不存在的 item.url）
+  try {
+    const blob = await mediaApi.downloadMedia(item.id)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = item.name
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch {
+    message.error(t('media.downloadError'))
+  }
 }
 
 function confirmDelete(item: MediaItem) {
@@ -290,6 +326,11 @@ function confirmDelete(item: MediaItem) {
 }
 
 onMounted(fetchMedia)
+
+onUnmounted(() => {
+  previewUrls.forEach((url) => URL.revokeObjectURL(url))
+  previewUrls.clear()
+})
 </script>
 
 <style scoped>

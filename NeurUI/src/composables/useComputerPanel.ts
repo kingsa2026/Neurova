@@ -25,6 +25,12 @@ export interface ComputerActionEntry {
   screenshot?: string
   /** 浏览器当前 URL */
   url?: string
+  /** R1-2 ActionResult 契约：投递路径（uia/app_post/playwright_role/...） */
+  route?: string
+  /** R1-2 ActionResult 契约：效果档（confirmed/unverifiable/refused/...） */
+  effect?: string
+  /** R1-2 ActionResult 契约：精确拒绝码（refused 时） */
+  refusalCode?: string
 }
 
 export interface ComputerPanelState {
@@ -35,6 +41,8 @@ export interface ComputerPanelState {
   actions: ComputerActionEntry[]
   latestScreenshot?: string
   browserUrl?: string
+  /** R2-5 agent 点击位置标记（截图像素坐标，面板按图片尺寸换算成百分比） */
+  clickMarker?: { x: number; y: number; ts: number }
 }
 
 const COMPUTER_TOOL_PREFIXES = ['computer_', 'browser_']
@@ -91,12 +99,35 @@ export function describeComputerAction(tool: string, params: Record<string, unkn
       return i18n.global.t('ui.actBrowserScreenshot')
     case 'browser_extract_text':
       return i18n.global.t('ui.actExtractText')
+    case 'computer_dom_snapshot':
+      return i18n.global.t('computerPanel.actDesktopSnapshot')
+    case 'computer_click_element':
+      return i18n.global.t('computerPanel.actClickElement', {
+        target: String(p.runtime_id ?? p.index ?? '?'),
+      })
+    case 'computer_set_value':
+      return i18n.global.t('computerPanel.actSetValue', {
+        text: ellipsize(String(p.value ?? ''), 30),
+      })
     default:
       return tool
   }
 }
 
 let entrySeq = 0
+
+/** R2-5 ActionResult 契约字段抽取（payload.action_result → 条目展示字段） */
+function extractActionResult(payload: Record<string, any>):
+  | { route?: string; effect?: string; refusalCode?: string }
+  | undefined {
+  const ar = payload.action_result
+  if (!ar || typeof ar !== 'object') return undefined
+  const out: { route?: string; effect?: string; refusalCode?: string } = {}
+  if (typeof ar.route === 'string') out.route = ar.route
+  if (typeof ar.effect === 'string') out.effect = ar.effect
+  if (typeof ar.refusal_code === 'string') out.refusalCode = ar.refusal_code
+  return out.route || out.effect || out.refusalCode ? out : undefined
+}
 
 export function createComputerPanel(maxActions = 50): ComputerPanelApi {
   const state = reactive<ComputerPanelState>({
@@ -116,6 +147,20 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
       string,
       unknown
     >
+    const actionResult = extractActionResult(payload)
+
+    // R0-3/R2-5 刷新事件：不新开日志行，把操作后画面补到最近一条同工具动作上
+    if (payload.refreshed === true) {
+      const last = [...state.actions].reverse().find((e) => e.tool === tool)
+      if (b64) {
+        const dataUrl = `data:image/png;base64,${b64}`
+        if (last) last.screenshot = dataUrl
+        state.latestScreenshot = dataUrl
+      }
+      state.busy = false
+      return
+    }
+
     entrySeq += 1
     const entry: ComputerActionEntry = {
       id: `${Date.now()}-${entrySeq}`,
@@ -127,6 +172,7 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
       timestamp: String(payload.timestamp || new Date().toISOString()),
       screenshot: b64 ? `data:image/png;base64,${b64}` : undefined,
       url: payload.url ? String(payload.url) : undefined,
+      ...(actionResult ?? {}),
     }
 
     state.actions.push(entry)
@@ -135,12 +181,26 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
     }
     if (entry.screenshot) state.latestScreenshot = entry.screenshot
     if (entry.url) state.browserUrl = entry.url
+    // R2-5 agent 点击位置标记（截图像素坐标）
+    if (tool === 'computer_click' && entry.success && typeof params.x === 'number' && typeof params.y === 'number') {
+      state.clickMarker = { x: params.x, y: params.y, ts: Date.now() }
+      scheduleMarkerClear()
+    }
     state.busy = false
     // 自动分屏：Agent 操作电脑时自动展开（ZCode 式跟随）。
     // 2026-09-08 dock 收编：开屏统一走 rightDock（computer tab），state.open
     // 保留为兼容位（组件挂载已迁入 dock，不再由它驱动 v-if）。
     state.open = true
     openComputerDockTab()
+  }
+
+  /** R2-5 标记 2s 后自动淡出（测试环境无计时器依赖问题） */
+  function scheduleMarkerClear(): void {
+    const ts = state.clickMarker?.ts
+    if (typeof setTimeout !== 'function') return
+    setTimeout(() => {
+      if (state.clickMarker?.ts === ts) state.clickMarker = undefined
+    }, 2000)
   }
 
   /** 打开 dock 的 computer tab（延迟导入防循环依赖：rightDock 不依赖本模块） */
@@ -178,6 +238,7 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
     state.actions.splice(0)
     state.latestScreenshot = undefined
     state.browserUrl = undefined
+    state.clickMarker = undefined
   }
 
   return (_sharedPanel = { state, handleComputerAction, handleToolCall, markIdle, open, close, toggleMinimized, clear })

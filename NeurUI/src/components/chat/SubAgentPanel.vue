@@ -5,9 +5,10 @@
  * 显示主 Agent 派生的子 Agent 的任务与流式输出；支持最小化（折叠为标题条）、
  * 恢复、关闭。多个小窗在聊天页右下角堆叠（由父容器 flex 布局管理）。
  */
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import UiIcon from '@/components/UiIcon.vue'
+import { isNearBottom } from '@/utils/chatSteps'
 
 export interface SubAgentWindowState {
   subagentId: string
@@ -44,6 +45,26 @@ const statusIcon = computed(() => {
 function toggleMinimize() {
   minimized.value = !minimized.value
 }
+
+// 流式输出滚动跟随（2026-09-12 与 ChatPage 思考段同根因）：
+// .panel-content 出内部滚动条后贴底展示最新输出；用户向上翻阅（距底超
+// 阈值）暂停跟随，回到底部附近恢复。stick 判定取自滚动事件（追加前的
+// 状态），不受本次 chunk 增长影响。
+const outputEl = ref<HTMLElement | null>(null)
+const outputStick = ref(true)
+
+watch(bodyText, () => {
+  if (!outputStick.value) return
+  void nextTick(() => {
+    const el = outputEl.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
+})
+
+function onOutputScroll(e: Event): void {
+  const el = e.target as HTMLElement
+  outputStick.value = isNearBottom(el.scrollTop, el.scrollHeight, el.clientHeight)
+}
 </script>
 
 <template>
@@ -58,7 +79,7 @@ function toggleMinimize() {
     </div>
     <div v-if="!minimized" class="panel-body">
       <div class="panel-task" :title="state.task">{{ state.task }}</div>
-      <div class="panel-content">
+      <div ref="outputEl" class="panel-content" @scroll="onOutputScroll">
         <template v-if="state.status === 'failed'">⚠ {{ state.error || t('ui.execFailed') }}</template>
         <template v-else-if="bodyText">{{ bodyText }}<span v-if="state.status === 'running'" class="cursor">▌</span></template>
         <template v-else-if="state.status === 'running'"><span class="cursor">▌</span> {{ t('ui.thinking') }}</template>

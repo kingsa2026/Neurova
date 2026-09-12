@@ -194,11 +194,20 @@ function handleRateLimit(err: any): boolean {
   return true
 }
 
-/** 横幅一键切换：选定备选模型后关闭横幅（用户重发即走新模型）。 */
+/** 横幅一键切换后的回调（页面编排层注册：切模型 → 自动重发上一条消息，
+ *  闭环"切换后继续推理"；不注册则保持旧行为=仅切换，用户手动重发）。 */
+let rateLimitSwitchHook: ((model: string) => void) | null = null
+
+export function registerRateLimitSwitchHook(fn: ((model: string) => void) | null): void {
+  rateLimitSwitchHook = fn
+}
+
+/** 横幅一键切换：选定备选模型后关闭横幅并触发注册的切换后回调。 */
 function switchAfterRateLimit(modelValue: string): void {
   selectedModel.value = modelValue
   rateLimitBanner.value = null
   uiMessage.success(i18n.global.t('chat.rateLimitSwitched'))
+  rateLimitSwitchHook?.(modelValue)
 }
 
 export function useChatModels() {

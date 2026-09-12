@@ -86,3 +86,59 @@ describe.each([
     expect(calls).not.toContain('https://srv.example/y.png')
   })
 })
+
+// ── 台账 N5（2026-09-11）：svg 代码块 dock 预览 ──
+// openCodeBlockTab 的 svg 走 kind:'image' 但只带 content——旧实现三分支
+// 都不命中，视口恒空白。根修：面板自建 SVG blob URL（所有权归面板）。
+describe('ImagePreviewPanel svg content 分支（N5）', () => {
+  const createMock = vi.fn((blob: Blob) => `blob:svg-${createMock.mock.calls.length}`)
+  ;(URL as unknown as Record<string, unknown>).createObjectURL = createMock
+
+  beforeEach(() => {
+    revokeMock.mockClear()
+    createMock.mockClear()
+  })
+
+  it('content+language=svg 的 tab 渲染 <img> 且 src 为面板自建 blob URL', async () => {
+    const wrapper = mountPanel(
+      ImagePreviewPanel,
+      makeTab({ content: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', language: 'svg' }),
+    )
+    await flushPromises()
+    const img = wrapper.find('img')
+    expect(img.exists()).toBe(true)
+    expect(img.attributes('src')).toMatch(/^blob:svg-/)
+    wrapper.unmount()
+    expect(revokeCalls()).toContain(img.attributes('src') as string)
+  })
+
+  it('非 svg content 不走图片分支（视口无 <img>，不建 URL）', async () => {
+    const wrapper = mountPanel(
+      ImagePreviewPanel,
+      makeTab({ content: 'print(hello)', language: 'python' }),
+    )
+    await flushPromises()
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(createMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+    expect(revokeMock).not.toHaveBeenCalled()
+  })
+
+  it('svg tab 之间切换：旧自建 URL 被 revoke、渲染新图（watch 源含 content）', async () => {
+    const wrapper = mountPanel(
+      ImagePreviewPanel,
+      makeTab({ content: '<svg id="a"></svg>', language: 'svg' }, 'svg-a'),
+    )
+    await flushPromises()
+    const firstSrc = wrapper.find('img').attributes('src')
+    await wrapper.setProps({
+      tab: makeTab({ content: '<svg id="b"></svg>', language: 'svg' }, 'svg-b'),
+    })
+    await flushPromises()
+    const secondSrc = wrapper.find('img').attributes('src')
+    expect(secondSrc).not.toBe(firstSrc)
+    wrapper.unmount()
+    expect(revokeCalls()).toContain(firstSrc as string)
+    expect(revokeCalls()).toContain(secondSrc as string)
+  })
+})

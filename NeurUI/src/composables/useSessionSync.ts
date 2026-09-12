@@ -1,4 +1,5 @@
 import { onBeforeUnmount, watch } from 'vue'
+import { secureStorage } from '@/utils/security'
 
 /**
  * 会话实时事件订阅（WebSocket /api/v1/sync/ws/{session_id}）
@@ -62,7 +63,11 @@ export function useSessionSync(
   function buildUrl(sessionId: string): string {
     const base = import.meta.env.VITE_API_BASE_URL || '/api/v1'
     const wsBase = base.replace(/^http/, 'ws')
-    return `${wsBase}/sync/ws/${encodeURIComponent(sessionId)}?channel_type=${channelType}`
+    // S-03 鉴权契约：握手必须带 ?token=<JWT>（与 axios Authorization 同源，
+    // 取 secureStorage auth_token；缺失时不带参数，后端将以 4401 关闭）
+    const token = secureStorage.get('auth_token') || ''
+    const auth = token ? `&token=${encodeURIComponent(token)}` : ''
+    return `${wsBase}/sync/ws/${encodeURIComponent(sessionId)}?channel_type=${channelType}${auth}`
   }
 
   function handleSeqFrame(event: SessionSyncEvent): boolean {
@@ -153,8 +158,14 @@ export function useSessionSync(
     // BUG-26 修复：捕获各自的 socket 实例——旧连接的 error/close 事件
     // 在重连创建新 ws 之后异步到达时，原闭包读共享变量会误杀新连接
     const sock = ws
-    sock.onclose = () => {
+    sock.onclose = evt => {
       if (ws !== sock) return // 已被新连接取代，忽略旧事件
+      // 4401=鉴权失败（token 缺失/过期）：非瞬态故障，重连必然复现，
+      // 停止退避循环；凭据过期由 axios 401 拦截器统一刷新/跳登录
+      if (evt?.code === 4401) {
+        closed = true
+        return
+      }
       if (!closed && currentSession === sessionId) scheduleReconnect(sessionId)
     }
 
