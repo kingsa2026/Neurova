@@ -1180,6 +1180,18 @@ export default {
 
   },
   channel: {
+    scanAuth: 'QR Authorization',
+    getQrcode: 'Get QR Code',
+    scanHint: 'Scan with your phone and confirm; credentials auto-fill on success',
+    scanAuthSuccess: 'Authorized; credentials filled in',
+    scanExpired: 'QR code expired, please refresh',
+    scanFailed: 'QR authorization failed',
+    qrcodeFetching: 'Generating…',
+    defaultSameAsClientId: 'Defaults to Client ID',
+    enabledSection: 'Active',
+    disabledSection: 'Inactive',
+    botPrefixLabel: 'Bot Prefix',
+    notSet: 'Not set',
     defaultAgent: "Default Agent",
     enabledNotConnected: "Enabled, not connected",
     agentChannels: "Channel Configuration",

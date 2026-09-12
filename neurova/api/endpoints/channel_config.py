@@ -22,7 +22,7 @@ from neurova.core.logger import get_logger
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 
@@ -314,6 +314,47 @@ async def get_wechat_ilink_qrcode_status(qr_id: str = "", agent_id: str = Query(
 
 
 # ============================================================
+# 通用二维码授权端点（对齐 QwenPaw GET /channels/{channel}/qrcode 两段式）
+# 覆盖 feishu/dingtalk/qq/wecom/wechat——扫码即取凭据并回填表单。
+# 路由段数=2/3，不与 GET /{channel_type}(1) 冲突；须先于 /{channel_type} 注册。
+# ============================================================
+
+
+@router.get("/{channel_type}/qrcode", summary="生成渠道登录/授权二维码（通用，对齐 QwenPaw）")
+async def get_channel_qrcode(channel_type: str, request: Request):
+    from neurova.channels.qrcode_auth import QRCODE_AUTH_HANDLERS, generate_qrcode_image
+
+    handler = QRCODE_AUTH_HANDLERS.get(channel_type)
+    if handler is None:
+        raise HTTPException(status_code=404, detail=f"渠道 '{channel_type}' 不支持扫码授权")
+    try:
+        result = await handler.fetch_qrcode(request)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"生成二维码失败: {e}") from e
+    return {"qrcode_img": generate_qrcode_image(result.scan_url), "poll_token": result.poll_token}
+
+
+@router.get("/{channel_type}/qrcode/status", summary="轮询扫码授权状态（返回可回填凭据）")
+async def get_channel_qrcode_status(channel_type: str, request: Request, token: str = ""):
+    from neurova.channels.qrcode_auth import QRCODE_AUTH_HANDLERS
+
+    handler = QRCODE_AUTH_HANDLERS.get(channel_type)
+    if handler is None:
+        raise HTTPException(status_code=404, detail=f"渠道 '{channel_type}' 不支持扫码授权")
+    if not token:
+        raise HTTPException(status_code=400, detail="token 不能为空")
+    try:
+        poll = await handler.poll_status(token, request)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"查询扫码状态失败: {e}") from e
+    return {"status": poll.status, "credentials": poll.credentials}
+
+
+# ============================================================
 # API 端点
 # ============================================================
 
@@ -452,6 +493,28 @@ async def get_config(channel_type: str, agent_id: str = Query(default="default")
     )
 
 
+# QwenPaw 键名→NV 规范顶层凭据的提升表（仅语义完全等价的渠道）：
+# 钉钉 Client ID == AppKey == app_id；Client Secret == AppSecret == app_secret。
+# 提升后掩码回读、跨 agent 身份冲突检测、启动重装配统一走规范键。
+# wecom 不在此列：QwenPaw wecom=智能机器人(bot_id/secret)，NV wecom=企业应用
+# (corpid/agentid)，不同协议，假映射属表面抹除，登记为协议移植后续项。
+_QP_CRED_PROMOTION: Dict[str, tuple] = {
+    "dingtalk": ("client_id", "client_secret"),
+}
+
+
+def _promote_qp_credentials(channel_type: str, request: ChannelConfigRequest) -> None:
+    """把 QwenPaw 规范凭据键提升到 request.app_id/app_secret（in-place）。"""
+    alias = _QP_CRED_PROMOTION.get(channel_type)
+    if not alias:
+        return
+    id_key, secret_key = alias
+    if not request.app_id and request.extra.get(id_key):
+        request.app_id = str(request.extra.get(id_key))
+    if not request.app_secret and request.extra.get(secret_key):
+        request.app_secret = str(request.extra.get(secret_key))
+
+
 @router.post("", summary="创建/更新渠道配置")
 async def create_or_update_config(
     request: ChannelConfigRequest,
@@ -464,6 +527,8 @@ async def create_or_update_config(
     适配器按 (agent_id, channel_type) 复合键注册；保存前做平台身份冲突检测
     （同 bot 撞两 agent → 平台回调串号，409 拒，对齐 QP conflict.py）。
     """
+    # QwenPaw 键名对齐：钉钉 client_id/client_secret 提升为规范 app_id/app_secret
+    _promote_qp_credentials(request.channel_type, request)
     store = _load_store()
     config_data = safe_model_dump(request)  # s9: pydantic v1 兼容
     # 不保存明文密钥到文件
@@ -615,9 +680,10 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
             extra=extra,
         )
     elif channel_type == "dingtalk":
+        # QwenPaw 规范键 client_id/client_secret 优先，兼容旧 NV 顶层 app_id
         return create_dingtalk_adapter(
-            app_id=config.app_id,
-            app_secret=config.app_secret,
+            app_id=config.app_id or extra.get("client_id", ""),
+            app_secret=config.app_secret or extra.get("client_secret", ""),
             use_stream=config.use_stream,
             extra=extra,
         )
@@ -684,15 +750,23 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
         try:
             # RES-P0-2 根修：mode/agentid 此前与 **extra 重复传参——extra 携带
             # mode（前端必带）时必然 TypeError→400，保存/测试从未真正可达。
+            # QwenPaw 键名对齐：bot_token_file→token_file；base_url 覆盖实例
+            # ILINK_API_BASE（扫码 confirmed 回填的真实 iLink 网关）。
             wechat_kwargs = dict(extra)
             wechat_kwargs.setdefault("mode", "ilink")
             wechat_kwargs.pop("agentid", None)
-            return create_wechat_adapter(
+            base_url = str(wechat_kwargs.pop("base_url", "") or "").rstrip("/")
+            if wechat_kwargs.get("bot_token_file") and not wechat_kwargs.get("token_file"):
+                wechat_kwargs["token_file"] = wechat_kwargs.pop("bot_token_file")
+            adapter = create_wechat_adapter(
                 corpid=config.app_id,
                 corpsecret=config.app_secret,
                 agentid=extra.get("agentid", ""),
                 **wechat_kwargs,
             )
+            if base_url:
+                adapter.ILINK_API_BASE = base_url
+            return adapter
         except Exception as e:
             logger.warning("Failed to create wechat adapter: %s", e)
             raise HTTPException(status_code=400, detail=str(e))

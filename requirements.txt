@@ -63,3 +63,9 @@ playwright>=1.40.0
 cryptography>=41.0
 paramiko>=3.4.0
 jsonschema>=4.0
+
+# 渠道官方 SDK / 二维码授权（B-2 环境声明补齐，2026-09-13）
+# 飞书/钉钉 Stream 适配器此前依赖但未声明；segno 供通用二维码端点渲染 PNG
+segno>=1.6
+lark-oapi>=1.6
+dingtalk-stream>=0.20

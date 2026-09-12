@@ -102,19 +102,27 @@ class TestDingTalkStreamTopic:
         assert DingTalkAdapter.STREAM_BOT_MESSAGE_TOPIC == "/v1.0/im/bot/messages/get"
 
     def test_connect_stream_registers_official_topic(self, monkeypatch):
+        """注册契约（2026-09-13 根修）：官方 SDK 只有 register_callback_handler
+        （旧实现调不存在的 register_callback_listener，普通函数 handler 也被 SDK
+        忽略）——本用例钉死：正确 topic + handler 为 ChatbotHandler 子类 +
+        start_forever 启动，三缺一即回归。"""
         import asyncio
         import importlib
 
         registered = {}
 
+        class ChatbotHandler:
+            pass
+
         class FakeClient:
             def __init__(self, credential):
                 pass
 
-            def register_callback_listener(self, topic, handler):
+            def register_callback_handler(self, topic, handler):
                 registered["topic"] = topic
+                registered["handler"] = handler
 
-            def start(self):
+            def start_forever(self):
                 pass
 
         fake = types.ModuleType("dingtalk_stream")
@@ -123,8 +131,13 @@ class TestDingTalkStreamTopic:
             def __init__(self, app_id, secret):
                 pass
 
+        class AckMessage:
+            STATUS_OK = 200
+
         fake.Credential = Credential
         fake.DingtalkStreamClient = FakeClient
+        fake.ChatbotHandler = ChatbotHandler
+        fake.AckMessage = AckMessage
         monkeypatch.setitem(sys.modules, "dingtalk_stream", fake)
 
         # 重新加载模块，使模块级 `import dingtalk_stream` 绑定到假模块
@@ -145,6 +158,9 @@ class TestDingTalkStreamTopic:
         assert registered["topic"] == "/v1.0/im/bot/messages/get", (
             "钉钉官方三语言 SDK 的机器人回调 topic 均为 /v1.0/im/bot/messages/get，"
             "注册其他 topic 将收不到任何机器人消息"
+        )
+        assert isinstance(registered["handler"], ChatbotHandler), (
+            "官方 SDK 只向 ChatbotHandler 子类分发机器人消息，普通函数会被忽略"
         )
 
 

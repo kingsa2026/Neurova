@@ -36,6 +36,11 @@ class AuthMixin:
         self._tenant_access_token: Optional[str] = None
         self._token_expires_at: float = 0.0
 
+    def _api_base(self) -> str:
+        """当前 adapter 的 API 基址（lark 国际域由 FeishuAdapter.__init__ 设置，
+        未设时回落国内默认——此前恒用模块常量，Lark 租户恒 401）。"""
+        return getattr(self, "api_base", None) or FEISHU_API_BASE
+
     def _get_tenant_access_token(self) -> str:
         """
         获取 tenant_access_token
@@ -50,7 +55,7 @@ class AuthMixin:
             # 请求新 token
             try:
                 response = requests.post(
-                    f"{FEISHU_API_BASE}/auth/v3/tenant_access_token/internal",
+                    f"{self._api_base()}/auth/v3/tenant_access_token/internal",
                     json={
                         "app_id": self.config.app_id,
                         "app_secret": self.config.app_secret,
@@ -102,7 +107,7 @@ class AuthMixin:
             "Content-Type": "application/json; charset=utf-8",
         }
 
-        url = f"{FEISHU_API_BASE}{path}"
+        url = f"{self._api_base()}{path}"
 
         try:
             response = requests.request(

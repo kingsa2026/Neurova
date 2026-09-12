@@ -64,10 +64,15 @@ export function buildChannelFieldsMap(t: T): Record<string, FieldSchema[]> {
       { key: 'ws_url', label: 'WebSocket URL', type: 'text', placeholder: 'wss://hag.cloud.huawei.com/openclaw/v1/ws/link' },
     ],
     dingtalk: [
+      // 键对齐官方语义：钉钉 Client ID == AppKey（后端 _promote_qp_credentials 双键兼容）
       { key: 'app_id', label: 'Client ID', type: 'text', required: true, placeholder: t('nav.dingtalkAppKey') },
       { key: 'app_secret', label: 'Client Secret', type: 'password', required: true, placeholder: t('nav.dingtalkAppSecret') },
       { key: 'use_stream', label: t('nav.streamMode'), type: 'toggle', defaultValue: true },
-      { key: 'reply_at_sender', label: t('nav.replyAtSender'), type: 'toggle', defaultValue: false },
+      { key: 'message_type', label: 'Message Type', type: 'select', defaultValue: 'text', options: [
+        { value: 'text', label: 'text' }, { value: 'markdown', label: 'markdown' },
+      ] },
+      { key: 'robot_code', label: 'Robot Code', type: 'text', placeholder: t('channel.defaultSameAsClientId') },
+      { key: 'endpoint', label: 'API Endpoint', type: 'text', placeholder: 'https://api.dingtalk.com' },
       { key: 'share_session_in_group', label: t('nav.groupShareSession'), type: 'toggle', defaultValue: true },
     ],
     feishu: [
@@ -75,10 +80,9 @@ export function buildChannelFieldsMap(t: T): Record<string, FieldSchema[]> {
       { key: 'app_secret', label: 'App Secret', type: 'password', required: true },
       { key: 'encrypt_key', label: 'Encrypt Key', type: 'password' },
       { key: 'verification_token', label: 'Verification Token', type: 'password' },
-      { key: 'region', label: t('nav.region'), type: 'select', defaultValue: 'feishu', options: [
+      { key: 'domain', label: t('nav.region'), type: 'select', defaultValue: 'feishu', options: [
         { value: 'feishu', label: t('nav.feishuChina') }, { value: 'lark', label: t('nav.larkInternational') },
       ] },
-      { key: 'media_directory', label: t('nav.mediaDirectory'), type: 'text', placeholder: './media' },
       { key: 'share_session_in_group', label: t('nav.groupShareSession'), type: 'toggle', defaultValue: true },
     ],
     discord: [
@@ -97,11 +101,12 @@ export function buildChannelFieldsMap(t: T): Record<string, FieldSchema[]> {
     qq: [
       { key: 'app_id', label: 'App ID', type: 'text', required: true },
       { key: 'client_secret', label: 'Client Secret', type: 'password', required: true },
-      { key: 'instant_confirm', label: t('nav.instantConfirm'), type: 'toggle', defaultValue: false },
     ],
     wechat: [
-      { key: 'bot_token', label: 'Bot Token', type: 'password', required: true },
-      { key: 'token_file', label: t('nav.tokenFile'), type: 'text', placeholder: './token.json' },
+      // iLink 语义：bot_token 由扫码授权取得并自动回填，不要求手填
+      { key: 'bot_token', label: 'Bot Token', type: 'password' },
+      { key: 'base_url', label: 'iLink Base URL', type: 'text', placeholder: 'https://ilinkai.weixin.qq.com' },
+      { key: 'token_file', label: t('nav.tokenFile'), type: 'text', placeholder: '~/.Neurova/weixin_bot_token' },
       { key: 'media_directory', label: t('nav.mediaDirectory'), type: 'text', placeholder: './media' },
       { key: 'message_merge', label: t('nav.messageMerge'), type: 'toggle', defaultValue: false },
     ],
@@ -205,4 +210,49 @@ export function pluginSchemaToFields(
     defaultValue: f.default,
     placeholder: f.placeholder,
   }))
+}
+
+// ---------------------------------------------------------------------------
+// 扫码授权渠道元数据（对齐后端 neurova/channels/qrcode_auth.QRCODE_AUTH_HANDLERS）
+// 参数键按 NV 适配器实际消费集裁剪——不摆 QwenPaw 有而 NV 后端不吃的字段。
+// wecom 暂不接线：QwenPaw wecom=智能机器人(bot_id/secret+ws)，NV wecom=企业应用
+// (corpid/agentid)，不同协议（假映射=表面抹除），登记为协议移植后续项。
+// ---------------------------------------------------------------------------
+
+export interface QrcodeChannelMeta {
+  /** 后端 handler 键 */
+  channel: string
+  /** 判定成功的 status（多数 success；wechat iLink 为 confirmed） */
+  successStatus: string
+  /** 成功时须非空的凭据键 */
+  successCredentialKey: string
+  pollInterval?: number
+  pollTimeout?: number
+  maxPollCount?: number
+  /** 凭据键 → 表单字段键（自动回填映射） */
+  credentialToForm: Record<string, string>
+  /** 表单字段 → 二维码 API query 参数（如 feishu domain / wechat base_url） */
+  paramsFromForm?: string[]
+}
+
+export const QRCODE_CHANNELS: Record<string, QrcodeChannelMeta> = {
+  dingtalk: {
+    channel: 'dingtalk', successStatus: 'success', successCredentialKey: 'client_id', pollInterval: 5000,
+    credentialToForm: { client_id: 'app_id', client_secret: 'app_secret' },
+  },
+  feishu: {
+    channel: 'feishu', successStatus: 'success', successCredentialKey: 'app_id', pollInterval: 2000,
+    credentialToForm: { app_id: 'app_id', app_secret: 'app_secret' },
+    paramsFromForm: ['domain'],
+  },
+  qq: {
+    channel: 'qq', successStatus: 'success', successCredentialKey: 'app_id', pollInterval: 2000,
+    pollTimeout: 300000, maxPollCount: 180,
+    credentialToForm: { app_id: 'app_id', client_secret: 'client_secret' },
+  },
+  wechat: {
+    channel: 'wechat', successStatus: 'confirmed', successCredentialKey: 'bot_token', pollInterval: 2000,
+    credentialToForm: { bot_token: 'bot_token', base_url: 'base_url' },
+    paramsFromForm: ['base_url'],
+  },
 }

@@ -609,9 +609,14 @@ class QQAdapter(ChannelAdapter):
 
 
 def create_qq_adapter(app_id: str = "", token: str = "", secret: str = "") -> QQAdapter:
-    """创建QQ频道适配器"""
+    """创建QQ频道适配器
+
+    官方 v2 鉴权仅需 appId+clientSecret（Bot {appid}.{token} 头已废弃，
+    token 为 HTTP 回调验签可选）——旧门禁 `app_id and token and secret`
+    使纯 WebSocket/主动凭证场景永不调用 authenticate，属性恒空。
+    """
     adapter = QQAdapter()
-    if app_id and token and secret:
+    if app_id and secret:
         adapter.authenticate(
             {
                 "app_id": app_id,
