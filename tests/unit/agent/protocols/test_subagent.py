@@ -144,6 +144,25 @@ class TestSpawnAPI(unittest.TestCase):
         b = mgr.spawn(role="a", task="t2")
         self.assertNotEqual(a.agent_id, b.agent_id)
 
+    def test_spawn_history_bounded_evicts_oldest(self):
+        """B-11：_spawned 登记簿有界（上限 200），插入超限移除最旧。"""
+        from neurova.agent import subagent as subagent_module
+
+        limit = subagent_module._SUBAGENT_HISTORY_LIMIT
+        mgr = get_subagent_manager()
+        first = mgr.spawn(role="a", task="first")
+        for i in range(limit + 10):
+            mgr.spawn(role="a", task=f"t{i}")
+
+        spawned = mgr.list_spawned()
+        self.assertEqual(
+            len(spawned), limit, "登记簿超上限未淘汰（B-11 有界要求）"
+        )
+        self.assertNotIn(
+            first.agent_id, [a.agent_id for a in spawned], "最旧条目未被淘汰"
+        )
+        self.assertEqual(spawned[-1].task, f"t{limit + 9}", "最新条目必须在场")
+
     def test_singleton_identity_and_reset(self):
         first = get_subagent_manager()
         self.assertIs(first, get_subagent_manager())
