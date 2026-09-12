@@ -15,7 +15,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 REMOVED_PY = ROOT / "neurova" / "api" / "endpoints" / "channel.py"
 REMOVED_FE = [
-    ROOT / "NeurUI" / "src" / "pages" / "AgentChannelPage.vue",
+    # 死壳前端 API 模块永久删除；AgentChannelPage.vue 已按真集 agent 隔离语义重建
     ROOT / "NeurUI" / "src" / "api" / "modules" / "channels.ts",
 ]
 REGISTRY = ROOT / "neurova" / "api" / "endpoints" / "__init__.py"
@@ -34,12 +34,19 @@ class TestDeadShellGone:
         assert '"neurova.api.endpoints.channel_config"' in src
         assert '"neurova.api.endpoints.channels"' in src
 
-    def test_frontend_files_removed_and_unrouted(self):
+    def test_frontend_dead_api_removed_and_new_page_is_clean(self):
+        # 死壳 API 模块永久删除；channels.ts 不得以任何形式复活
         for f in REMOVED_FE:
             assert not f.exists(), f"死壳前端文件复活: {f}"
         router_src = ROUTER.read_text(encoding="utf-8")
-        assert "AgentChannelPage" not in router_src
-        assert "agent/:agentId/channel'" not in router_src, "AgentChannel 死路由复活"
+        assert "'@/api/modules/channels'" not in router_src
+        # AgentChannelPage 允许以【真集 agent 隔离版】重建（2026-09-13 Phase C），
+        # 但绝不得重新引用死壳 channels 模块
+        page = ROOT / "NeurUI" / "src" / "pages" / "AgentChannelPage.vue"
+        if page.exists():
+            src = page.read_text(encoding="utf-8")
+            assert "api/modules/channels'" not in src, "AgentChannelPage 复活挂死壳 /v1/channels"
+            assert "channel-configs" in src, "AgentChannelPage 必须走真集 /v1/channel-configs"
 
     def test_channel_manager_helpers_untouched(self):
         """清理仅删假桥；真适配器管理器与运行时面完好。"""
