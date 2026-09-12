@@ -375,20 +375,55 @@ class WebSocketAdapter(ChannelAdapter):
                 },
             )
 
-    async def send_message(self, message: UnifiedMessage) -> bool:
-        """发送 WebSocket 消息
+    async def send_message(
+        self,
+        chat_id: str,
+        content: str,
+        message_type: str = "text",
+        **kwargs,
+    ) -> Optional[str]:
+        """Gen2 契约：基类签名发送（manager 按 base.py 契约直连），await _send_unified
+        复用既有 UnifiedMessage 处理逻辑。
+
+        kwargs 中 message_id/user_id 用作消息标识，其余键透传为 metadata。
+        成功返回本次发送的 message_id，失败返回 None。
+        """
+        try:
+            content_type = ContentType(message_type)
+        except ValueError:
+            logging.warning("未知 message_type=%s，按 text 发送", message_type)
+            content_type = ContentType.TEXT
+
+        message_id = str(kwargs.pop("message_id", "") or f"ws_{int(time.time())}")
+        ok = await self._send_unified(
+            UnifiedMessage(
+                message_id=message_id,
+                channel=MessageChannel.WEBSOCKET,
+                content_type=content_type,
+                content=content,
+                user_id=str(kwargs.pop("user_id", "") or ""),
+                chat_id=chat_id,
+                metadata=kwargs or None,
+            )
+        )
+        return message_id if ok else None
+
+    async def _send_unified(self, message: UnifiedMessage) -> bool:
+        """发送 WebSocket 消息（UnifiedMessage 路径，供基类签名 send_message 委托）
 
         P1-8 同族：原 sync 实现在捕获 loop 上 run_until_complete（运行中循环上
-        必抛 RuntimeError）——基类 send_message 契约为 async（base.py:166），改 async
-        直接 await 连接发送。
+        必抛 RuntimeError）——改 async 直接 await 连接发送。
         """
         if not self._initialized or not self._connected:
             logging.error("WebSocket 未连接")
             return False
 
         if not WEBSOCKETS_AVAILABLE or not self._ws_connection:
-            logging.info("[WebSocket模拟] 发送消息: %s", message.content[:50])
-            return True
+            # 任务1（台账 2026-09-11 渠道域收尾）：_connected=True 的窄窗口
+            # （断开收尾竞态/依赖缺失）可达时原 "[WebSocket模拟]" return True
+            # 假成功——改诚实失败，发送结果必须如实反映。
+            logging.warning("WebSocket 发送失败: 连接不可用（websockets 未安装或 _ws_connection 已丢失）")
+            return False
 
         try:
             # 构建消息体

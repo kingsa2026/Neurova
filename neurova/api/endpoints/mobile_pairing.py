@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -147,6 +148,29 @@ def _get_ws_secret() -> str:
 # 流终态弹出；无在流会话消费的孤儿标记按 _CANCELLED_SESSIONS_MAX 封顶逐出最旧。
 _CANCELLED_SESSIONS_MAX = 512
 _cancelled_sessions: Dict[str, bool] = {}
+
+# B-6 (台账 2026-09-11): chat:send spawn 的独立流式 task 引用集
+# （参照 multi_model_client._pending_tasks 姿势）——持强引用防 GC 回收
+# 未完成 task，done_callback 自动 discard。
+_chat_tasks: Set["asyncio.Task"] = set()
+
+
+async def _run_chat_stream(ws, data: dict, user_id: str):
+    """B-6: 独立 task 执行 chat:send 流式回复。
+
+    任务被 cancel（chat:cancel 中途取消 / 连接断开收尸）时 CancelledError
+    不经 _handle_chat_send 的 except Exception（BaseException 不被捕获），
+    在此补发 chat:cancelled 保持客户端取消事件契约，再原样上抛。
+    """
+    sid = data.get("session_id", "")
+    try:
+        await _handle_chat_send(ws, data, user_id)
+    except asyncio.CancelledError:
+        try:
+            await ws.send_json({"type": "chat:cancelled", "session_id": sid})
+        except Exception:
+            pass  # 连接已断，通知失败不影响收尸
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -471,11 +495,14 @@ async def _handle_session_create(ws, data: dict, user_id: str):
 
 
 async def _handle_ws_message(ws, data: dict, user_id: str, pairing_id: str):
-    """WS 消息分发器"""
+    """WS 消息分发器
+
+    任务4（台账第五节登记③，双路径归一）：chat:send/chat:cancel 由
+    mobile_websocket 的 receive 循环统一拦截（B-6 在流 task 路径），
+    分发器不再内联承载平行分支——两类消息唯一处理入口为连接循环。
+    """
     msg_type = data.get("type", "")
     handlers = {
-        "chat:send": lambda: _handle_chat_send(ws, data, user_id),
-        "chat:cancel": lambda: _handle_chat_cancel(ws, data),
         "agent:switch": lambda: _handle_agent_switch(ws, data),
         "session:list": lambda: _handle_session_list(ws, data, user_id),
         "session:create": lambda: _handle_session_create(ws, data, user_id),
@@ -782,6 +809,9 @@ async def mobile_websocket(websocket: WebSocket):
         _paired_devices[pairing_id]["is_online"] = True
         _paired_devices[pairing_id]["last_active"] = time.time()
 
+    # B-6: 在流 task 跟踪（spawn 时赋值；断开收尸/中途取消用）
+    current_chat_task: Optional[asyncio.Task] = None
+    current_chat_sid = ""
     try:
         # 消息循环
         while True:
@@ -797,6 +827,40 @@ async def mobile_websocket(websocket: WebSocket):
             if pairing_id in _paired_devices:
                 _paired_devices[pairing_id]["last_active"] = time.time()
 
+            msg_type = message.get("type", "")
+
+            # B-6 (台账 2026-09-11): chat:send spawn 独立 task，receive 循环
+            # 继续读消息——chat:cancel 不再要等流结束才被处理。
+            if msg_type == "chat:send":
+                if current_chat_task is not None and not current_chat_task.done():
+                    # 同一连接同时只允许一条在流回复：流式中新 send 拒绝
+                    await websocket.send_json({
+                        "type": "error",
+                        "code": "chat_busy",
+                        "message": "当前连接已有回复进行中，请等待完成或先取消",
+                    })
+                    continue
+                current_chat_task = asyncio.create_task(
+                    _run_chat_stream(websocket, message, user_id)
+                )
+                current_chat_sid = message.get("session_id", "")
+                _chat_tasks.add(current_chat_task)
+                current_chat_task.add_done_callback(_chat_tasks.discard)
+                continue
+
+            # B-6: 中途取消 = 复用 #3 取消标记 + 立即 cancel 在流 task
+            if msg_type == "chat:cancel":
+                sid = message.get("session_id", "")
+                if (
+                    sid
+                    and current_chat_task is not None
+                    and not current_chat_task.done()
+                    and sid == current_chat_sid
+                ):
+                    current_chat_task.cancel()
+                await _handle_chat_cancel(websocket, message)
+                continue
+
             # 分发消息到处理函数
             await _handle_ws_message(websocket, message, user_id, pairing_id)
 
@@ -805,6 +869,9 @@ async def mobile_websocket(websocket: WebSocket):
     except Exception as e:
         logger.error("WebSocket error: %s", e)
     finally:
+        # B-6: 连接断开 → 收尸在流 task（wrapper 补发 chat:cancelled）
+        if current_chat_task is not None and not current_chat_task.done():
+            current_chat_task.cancel()
         # 清理连接
         manager.disconnect(connection_id, user_id)
         _ws_connections.pop(pairing_id, None)

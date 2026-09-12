@@ -26,7 +26,7 @@ import logging
 import threading
 import time
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 try:
     import requests
@@ -266,18 +266,59 @@ class QQAdapter(ChannelAdapter):
         self.token_expire_time = 0
         logging.info("QQ adapter disconnected")
 
-    def send_message(self, message: UnifiedMessage) -> bool:
-        """发送QQ频道消息"""
+    async def send_message(
+        self,
+        chat_id: str,
+        content: str,
+        message_type: str = "text",
+        **kwargs,
+    ) -> Optional[str]:
+        """Gen2 契约：基类签名发送（manager 按 base.py 契约直连），委托 _send_unified
+        复用既有 UnifiedMessage 处理逻辑。
+
+        kwargs 中 message_id/user_id 用作消息标识，其余键透传为 metadata
+        （如 chat_type/msg_seq/msg_type 等平台特有参数）。
+        成功返回平台真实 message_id（响应缺失时回落本地生成 id），失败返回 None。
+        """
+        try:
+            content_type = ContentType(message_type)
+        except ValueError:
+            logging.warning("未知 message_type=%s，按 text 发送", message_type)
+            content_type = ContentType.TEXT
+
+        message_id = str(kwargs.pop("message_id", "") or f"qq_{int(time.time())}")
+        # 任务3（台账 2026-09-11 渠道域收尾）：_send_unified 现返回 QQ 平台
+        # 真实 message_id（响应无 ID 时回落本地生成），失败 None——直接透传。
+        return self._send_unified(
+            UnifiedMessage(
+                message_id=message_id,
+                channel=MessageChannel.QQ,
+                content_type=content_type,
+                content=content,
+                user_id=str(kwargs.pop("user_id", "") or ""),
+                chat_id=chat_id,
+                metadata=kwargs or None,
+            )
+        )
+
+    def _send_unified(self, message: UnifiedMessage) -> Optional[str]:
+        """发送QQ频道消息（UnifiedMessage 路径，供基类签名 send_message 委托）
+
+        任务3（台账 2026-09-11 渠道域收尾）：返回 Optional[str]——成功返回
+        响应体的平台真实消息 ID（`id` 字段，频道消息对象与 v2 群聊/C2C 响应
+        同名；204 无包体等响应缺失场景回落 message.message_id 本地生成），
+        失败返回 None。非空 str 为真、None 为假，与原 bool 契约真值语义兼容。
+        """
         if not self._ensure_token():
-            return False
+            return None
 
         if not REQUESTS_AVAILABLE:
             logging.info("[QQ模拟] 发送消息到 %s: %s", message.chat_id, message.content[:50])
-            return True
+            return message.message_id
 
         if not message.chat_id or not self._validate_resource_id(message.chat_id):
             logging.error("QQ消息发送失败: chat_id 缺失或含非法字符")
-            return False
+            return None
 
         try:
             headers = {**self._auth_headers(), "Content-Type": "application/json"}
@@ -316,13 +357,17 @@ class QQAdapter(ChannelAdapter):
                 )
 
             if resp.status_code in self._OK_STATUS:
-                return True
+                try:
+                    platform_id = str(resp.json().get("id") or "")
+                except Exception:
+                    platform_id = ""  # 204 无包体等响应体缺失：回落本地生成 id
+                return platform_id or message.message_id
 
             logging.error("QQ消息发送失败 (HTTP %s): %s", resp.status_code, resp.text[:200])
-            return False
+            return None
         except Exception as e:
             logging.error("QQ消息发送异常: %s", e)
-            return False
+            return None
 
     def _build_v2_payload(self, message: UnifiedMessage) -> Dict[str, Any]:
         """构造 v2 群聊/私聊消息体（content/msg_type/msg_id/msg_seq）"""

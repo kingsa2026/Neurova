@@ -12,7 +12,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from neurova.api.auth import create_access_token
 from neurova.api.endpoints import session_sync
+
+
+_TOKEN = create_access_token(
+    {"sub": "u1", "username": "u1", "role": "user", "neuser_id": "u1", "user_id": "u1"}
+)
+_TOKEN_QS = f"&token={_TOKEN}"
 
 
 @pytest.fixture
@@ -24,7 +31,7 @@ def client():
 
 class TestSyncWsSeqHandshake:
     def test_hello_precedes_history_and_carries_next_seq(self, client):
-        with client.websocket_connect("/api/v1/sync/ws/ws-seq-hello?channel_type=web&user_id=u1") as ws:
+        with client.websocket_connect("/api/v1/sync/ws/ws-seq-hello?channel_type=web&user_id=u1" + _TOKEN_QS) as ws:
             hello = ws.receive_json()
             assert hello["type"] == "sync_hello"
             assert isinstance(hello["next_seq"], int) and hello["next_seq"] >= 1
@@ -34,7 +41,7 @@ class TestSyncWsSeqHandshake:
             assert replayed.get("seq") == 1
 
     def test_sync_resume_replays_events_above_cursor(self, client):
-        with client.websocket_connect("/api/v1/sync/ws/ws-seq-resume?channel_type=web&user_id=u1") as ws:
+        with client.websocket_connect("/api/v1/sync/ws/ws-seq-resume?channel_type=web&user_id=u1" + _TOKEN_QS) as ws:
             hello = ws.receive_json()
             assert hello["type"] == "sync_hello"
             # 初始重放：SESSION_CREATED(1) + register_channel 写入的 CHANNEL_CONNECTED(2)

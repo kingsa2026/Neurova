@@ -134,7 +134,11 @@ async def websocket_sync(
     """
     payload = verify_access_token(token) if token else None
     if not payload:
-        await websocket.close(code=4401)
+        # 必须先 accept 再 close：uvicorn 对"未 accept 即 close"一律回
+        # HTTP 403 握手拒绝，4401 语义到不了客户端（浏览器报"握手 403"，
+        # 前端无法区分鉴权失败与网络故障）
+        await websocket.accept()
+        await websocket.close(code=4401, reason="unauthorized")
         return
     user_id = payload.get("neuser_id") or payload.get("user_id") or payload.get("sub") or "anonymous"
 

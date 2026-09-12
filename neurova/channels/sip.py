@@ -150,10 +150,8 @@ class SIPAdapter(ChannelAdapter):
         Dev 模式在本地处理 SIP/RTP
         """
         if not PYVOIP_AVAILABLE:
-            logging.warning("pyVoIP 未安装，Dev 模式不可用")
-            logging.info("安装命令: pip install pyvoip")
-            self._initialized = True  # 模拟初始化
-            return True
+            logging.warning("SIP 通道未实现: pyVoIP 未安装，Dev 模式不可用（安装命令: pip install pyvoip）")
+            return False
 
         try:
             # 创建 SIP 客户端
@@ -180,14 +178,11 @@ class SIPAdapter(ChannelAdapter):
         """
         Production 模式初始化 - 使用 LiveKit SIP Server
 
-        Production 模式使用外部 SIP 服务器
+        LiveKit SIP Server 对接从未实现——与 connect 诚实语义一致，
+        绝不虚构"初始化成功"（原无条件 _initialized=True/return True 假成功已清除）。
         """
-        if not self.sip_server:
-            logging.info("SIP Production 模式: 使用内置注册服务器")
-
-        logging.info("SIP Production 模式初始化 - 服务器: %s", self.sip_server or '内置')
-        self._initialized = True
-        return True
+        logging.warning("SIP 通道未实现: Production 模式（LiveKit SIP Server）未实现")
+        return False
 
     async def connect(self) -> bool:
         """Gen2 契约：SIP 协议栈未实现——配置校验后诚实失败（禁假成功）。
@@ -225,8 +220,10 @@ class SIPAdapter(ChannelAdapter):
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info("[TTS模拟] 文本: %s", text[:50])
-            return b""
+            # 任务2（台账 2026-09-11 渠道域收尾）：requests 缺失禁止假成功
+            # （原虚构空音频数据），与 B-3/B-9 诚实语义一致。
+            logging.warning("SIP 通道未实现: requests 未安装，TTS 不可用（安装命令: pip install requests）")
+            return None
 
         try:
             headers = {
@@ -278,8 +275,9 @@ class SIPAdapter(ChannelAdapter):
             return None
 
         if not REQUESTS_AVAILABLE:
-            logging.info("[STT模拟] 音频数据长度: %s bytes", len(audio_data))
-            return "用户语音内容"
+            # 同 text_to_speech：requests 缺失禁止虚构识别文本（原假数据）。
+            logging.warning("SIP 通道未实现: requests 未安装，STT 不可用（安装命令: pip install requests）")
+            return None
 
         try:
             headers = {
@@ -331,8 +329,8 @@ class SIPAdapter(ChannelAdapter):
     def _send_dev_audio(self, audio_data: bytes, chat_id: str) -> bool:
         """Dev 模式发送音频"""
         if not PYVOIP_AVAILABLE:
-            logging.info("[SIP模拟] 发送音频到 %s", chat_id)
-            return True
+            logging.warning("SIP 通道未实现: pyVoIP 未安装，Dev 模式音频发送不可用")
+            return False
 
         try:
             # 在现有通话中发送音频
@@ -347,10 +345,9 @@ class SIPAdapter(ChannelAdapter):
             return False
 
     def _send_production_audio(self, audio_data: bytes, chat_id: str) -> bool:
-        """Production 模式发送音频"""
-        # Production 模式下，音频通过 SIP 服务器转发
-        logging.info("[SIP Production] 发送音频到 %s", chat_id)
-        return True
+        """Production 模式发送音频——LiveKit 通路未实现，诚实失败（原无条件 return True 已清除）"""
+        logging.warning("SIP 通道未实现: Production 模式音频发送未实现")
+        return False
 
     def parse_raw_message(self, raw_data: Any) -> UnifiedMessage:
         """
