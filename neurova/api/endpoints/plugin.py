@@ -38,52 +38,10 @@ _PLUGINS: typing.Dict[str, dict] = {}
 _MARKET_PLUGINS: typing.List[dict] = []  # Reserved for marketplace
 
 
-def _init_sample_plugins():
-    if _PLUGINS:
-        return
-    samples = [
-        {
-            "id": "builtin-tools",
-            "name": "Builtin Tools",
-            "version": "1.0.0",
-            "description": "Core builtin tool set",
-            "author": "Neurova",
-            "status": "enabled",
-            "loaded": True,
-            "type": "system",
-            "config": {},
-        },
-        {
-            "id": "web-scraper",
-            "name": "Web Scraper",
-            "version": "0.9.0",
-            "description": "Web scraping plugin",
-            "author": "Community",
-            "status": "disabled",
-            "loaded": False,
-            "type": "custom",
-            "config": {"max_depth": 3},
-        },
-        {
-            "id": "data-viz",
-            "name": "Data Visualization",
-            "version": "1.2.0",
-            "description": "Charts and graphs generation",
-            "author": "Neurova",
-            "status": "enabled",
-            "loaded": True,
-            "type": "extension",
-            "config": {"theme": "default"},
-        },
-    ]
-    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    for p in samples:
-        p["created_at"] = now
-        p["updated_at"] = now
-        _PLUGINS[p["id"]] = p
+# 假样例注入已删（2026-09-12 P7）：原 import 时塞 3 条虚构插件（builtin-tools/
+# web-scraper/data-viz）伪装真实注册表；插件列表改为反映真实注册动作。
 
 
-_init_sample_plugins()
 
 
 def _get_request_id(request) -> str:

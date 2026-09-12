@@ -231,7 +231,6 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.user_group_api", "/v1/user-groups", "User Groups API"),
         ("neurova.api.endpoints.files_api", "/v1/files", "Files API"),
         ("neurova.api.endpoints.artifacts_api", "/v1/artifacts", "Artifacts API"),
-        ("neurova.api.endpoints.file_flows_api", "/v1/file-flows", "File Flows API"),
         ("neurova.api.endpoints.tool_schema", "/v1/tools", "Tool Schema API"),
         ("neurova.api.endpoints.tool_layers", "/v1/tool-layers", "Tool Layers API"),
         ("neurova.api.endpoints.skill_pool_api", "/v1/skill-pool", "Skill Pool API"),

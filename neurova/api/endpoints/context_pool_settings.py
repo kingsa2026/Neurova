@@ -103,18 +103,18 @@ async def update_pool_settings(
     body: UpdatePoolSettingsRequest,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """更新上下文池设置"""
+    """更新上下文池设置
+
+    2026-09-12 P7 诚实化：本设置与真实 ContextPool 运行时零接线（全仓无
+    消费者，池创建不读这些键）——保存"成功"但运行时行为不变属假持久化，
+    改 501 如实上报，待接线后恢复。GET 预览仍可读。
+    """
     _get_request_id(request)
 
-    try:
-        # 更新设置
-        update_data = body.dict(exclude_unset=True)
-        _default_pool_settings.update(update_data)
-
-        return PoolSettingsResponse(code=0, message="上下文池设置已更新", data=dict(_default_pool_settings))
-    except Exception as e:
-        logger.error(f"Update pool settings error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Failed to update pool settings: {str(e)}")
+    raise HTTPException(
+        status_code=501,
+        detail="上下文池设置未与运行时接线（ContextPool 不消费这些键），暂不支持保存；防止假持久化",
+    )
 
 
 @router.get("/pool-settings/token-budget/{model_name}")
