@@ -43,6 +43,14 @@ def _known_node_types() -> set:
     """注册表中已知的节点类型集合（含 builtin/tool/skill/mcp/comfyui/custom）"""
     registry = get_node_registry()
     registry.ensure_builtin()
+    # 批次4 根因修复：drama/comfyui/commerce 等节点原先仅在 GET /neurflow/nodes
+    # / POST /nodes/sync 时 sync_all——新进程若未先拉节点库，含短剧流水线节点
+    # 的画布 run 会按"未注册类型"被拒绝（一键成片链路不通）。校验前同步
+    # 适配器（幂等；失败降级不阻塞 builtin 画布）。
+    try:
+        registry.sync_all()
+    except Exception as e:  # noqa: BLE001
+        logger.warning("节点适配器同步失败（画布校验降级仅认 builtin/custom）: %s", e)
     # 遗留 A：恢复自定义节点（load_into_registry 幂等——画布运行校验
     # 必须能认出 custom:*，否则重启后含自定义节点的画布 400 未注册）
     try:

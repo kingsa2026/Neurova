@@ -87,20 +87,23 @@ class TestCanvasConversion:
 
     def test_unknown_type_raises_with_type_listed(self):
         # 重置全局注册表：其他测试（如 ComfyUI 导入）会向单例注册节点类型，
-        # 本测试必须与执行顺序无关
+        # 本测试必须与执行顺序无关。
+        # 批次4 注：原样本用 comfyui:KSampler 充当未知类型——彼时 sync_all 仅在
+        # 拉节点库时执行；本批次修复注册时序后 KSampler 已属已知目录，故样本
+        # 改为任何目录/服务商均不存在的类型，"未知类型拒绝并列出"语义不变。
         from neurova.collaboration.neurflow.node_registry import reset_node_registry
 
         reset_node_registry()
         snapshot = make_snapshot(
             nodes=[
-                node("k", "comfyui:KSampler"),
+                node("k", "comfyui:DefinitelyNotAnyCatalogNode_9f3a"),
                 node("start", "builtin:start"),
             ],
             edges=[],
         )
         with pytest.raises(ValueError) as exc:
             canvas_to_workflow(snapshot)
-        assert "comfyui:KSampler" in str(exc.value)
+        assert "comfyui:DefinitelyNotAnyCatalogNode_9f3a" in str(exc.value)
 
     def test_empty_canvas_raises(self):
         with pytest.raises(ValueError) as exc:
