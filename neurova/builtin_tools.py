@@ -196,6 +196,43 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["value"],
         },
     },
+    # ── SOM 视觉快照 + 编号点击（R3-1，无 UIA 树桌面的语义中间档）──
+    "computer_som_snapshot": {
+        "description": "【SOM 视觉快照】对自绘 UI/游戏/远程像素流等无 UIA 树的目标，把截图标注成编号可交互区域图（推操作面板），返回 marks（id/中心坐标/label）。拿到编号后用 computer_click_mark(index=编号) 点击。【何时不用】有 UIA 树的标准窗口一律先 computer_dom_snapshot（结构化更准），本工具是其无法表达时的兜底档。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "max_marks": {"type": "integer", "description": "可选。最多标注区域数", "minimum": 1},
+            },
+            "required": [],
+        },
+    },
+    "computer_click_mark": {
+        "description": "【按 SOM 编号点击】点击 computer_som_snapshot 返回的某个编号区域中心（内部经 id2xy 解算像素坐标并走 DPI/多屏换算的点击链）。编号来自最近一次 SOM 快照，过期需重新快照。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "index": {"type": "integer", "description": "SOM 编号（来自 computer_som_snapshot 的 marks.id）"},
+                "button": {"type": "string", "description": "鼠标按钮 left/right/middle", "default": "left"},
+            },
+            "required": ["index"],
+        },
+    },
+    "computer_ssh_exec": {
+        "description": "【SSH 远程命令】经 SSH 在远程 Linux/macOS 机器上执行命令，返回 stdout/stderr/退出码，操作在聊天页的终端窗口展示。用于远程跑命令（无需图形桌面）。host 必填；用户名/密钥/密码从你的 SSH 凭据配置读取（platform=ssh），不必在此传密码。【何时不用】本机命令用 computer_shell；数据处理/算法用 run_code。",
+        "sandbox_required": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "host": {"type": "string", "description": "目标主机（IP 或域名）"},
+                "command": {"type": "string", "description": "要在远端执行的命令"},
+                "user": {"type": "string", "description": "可选。SSH 用户名（缺省用凭据配置）"},
+                "port": {"type": "integer", "description": "可选。SSH 端口，默认 22"},
+                "timeout": {"type": "number", "description": "可选。命令超时秒，默认 60"},
+            },
+            "required": ["host", "command"],
+        },
+    },
     "computer_shell": {
         "description": "【Shell 命令】在用户计算机上执行 shell 命令（Windows 下经 cmd.exe /c）。适合系统操作：进程/服务管理、环境变量、批量文件整理、安装依赖。Windows 注意：cmd.exe 不认单引号包裹的参数（会被当字面量），含空格/特殊字符的路径与参数必须用双引号（如 reg query \"HKLM\\...\"）；查询系统信息类需求优先用本机工具结果（如 computer_screenshot 回带的 screen 元数据），不要跑 reg query 探测。【何时不用】数据处理/算法计算/文本批量处理改用 run_code；纯数值计算禁止在本工具里心算或在 shell 里拼算式，用 run_code 跑 Python；抓取网页不要用 curl（用 web_fetch）。",
         "sandbox_required": True,
@@ -609,6 +646,30 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "max_results": {"type": "integer", "description": "返回的最大匹配条数", "default": 50},
             },
             "required": ["pattern", "path"],
+        },
+    },
+    "git": {
+        "description": "【Git 仓库操作】在指定仓库执行 git 命令。command 为完整命令行（含 git 前缀），如 'git status --short'；仓库目录由 path 锚定（相对锚定工作区，默认工作区根，禁止 --git-dir/-C/--work-tree 等逃逸选项）。读操作（status/diff/log/show/blame/ls-files）直接执行；写操作（add/commit/push/checkout/reset…）触发人工确认。【何时不用】GitHub PR/issue/CI 等远程托管操作用 github MCP 工具；不要用本工具跑 shell 通用命令（用 run_code/computer_shell）；不要用 curl 代替 git fetch。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "完整 git 命令行，必须以 git 开头（如 git log --oneline -10）"},
+                "path": {"type": "string", "description": "仓库目录（相对锚定 agent 工作区；缺省为工作区根）", "default": "."},
+                "timeout": {"type": "integer", "description": "超时秒数", "default": 60},
+            },
+            "required": ["command"],
+        },
+    },
+    "deep_research": {
+        "description": "【深度研究采集】对主题做多源检索+正文摘录，返回带 [n] 编号引用的源料包（title/url/excerpt），你在其基础上综合撰写带引用的研究报告。比逐条 web_search+web_fetch 省往返，适合'调研X现状/对比A与B'类任务。【何时不用】单条已知链接用 web_fetch；简单事实查 web_search；本工具只采集源料，不做结论（结论由你写）。可传 sub_queries 给出多个检索角度（拆解子问题）。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "研究主题"},
+                "sub_queries": {"type": "array", "items": {"type": "string"}, "description": "可选：拆解的检索角度/子问题（不传则仅用 query）"},
+                "max_sources": {"type": "integer", "description": "去重后最多抓取正文的源数（默认 6，上限 15）", "default": 6},
+            },
+            "required": ["query"],
         },
     },
     "web_fetch": {

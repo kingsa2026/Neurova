@@ -152,4 +152,42 @@ P0-1 → P0-3 → P0-2（依赖用户安装确认交互）→ P1-1 → P1-2 → 
 
 ---
 
-*附：本报告 star 数为 2026-09-12 GitHub API 实测，仅取整到百位口径。配套调研原始输出见会话记录。*
+## 8. 实施记录（2026-09-12 P0~P1 开工轮）
+
+红绿灯 TDD 全项落地，交付明细与**对计划的三处收敛修正**（均为实施时实测代码后的修正，非简化）：
+
+| 项 | 状态 | 测试锚点 | 对计划的修正与理由 |
+|----|------|----------|-------------------|
+| P0-1 file_parse | ✅ 12/12 | tests/unit/tools/test_file_parse.py | **引擎修正**：markitdown 未装且引新依赖；实测 `neurova/attachment_parser.py` 已实现 PDF/DOCX/XLSX/PPTX/RTF/ODF/HTML 全谱解析（附件链路在用）→ 工具做其薄封装，零新依赖（只提升不下降） |
+| P0-2 catalog 后端 | ✅ 17/17 | tests/unit/tools/test_mcp_catalog.py | **首批收敛**：官方 servers 的 git/fetch 与 P0-3 原生 git + web_fetch 重叠→剔除；保留 github(Docker)/context7(npx)/dbhub(npx) 三真缺口。**安全门根修**：抽 `_register_mcp_server` 共享入口，connect 与 install 单路径（防两条注册链漂移，同 schema↔分派表历史教训） |
+| P0-2 前端入口 | ✅ vue-tsc+1353 全绿 | ToolLayerPage「工具包」页签 | 安装弹窗按条目 required_secrets 动态收凭据；docker/只读警示；i18n 4 键×11 语言同步 |
+| P0-3 git 工具族 | ✅ 31/31 | tests/unit/tools/test_git_tool.py | **形态收敛**：`git_*` 十族→单 `git` 工具（command 含前缀）。省 10 个 schema 位、治理规则按命令文本命中与 computer_shell 一致；写动词 HIGH→ASK、RCE 形态 CRITICAL→DENY 加在 **tool_guard 规则源**（裁决根因位），执行体只守输入域契约（子命令白名单/仓库锚点唯一入口 path） |
+| P1-1 deep_research | ✅ 7/7 | tests/unit/tools/test_deep_research.py | **设计修正**：不做重型 LLM 编排引擎（阻塞整轮+重复 spawn_subagent）→ 有界多源采集器（检索→去重→抓正文→编号引用料包），综合交回在环主 LLM；工具内零 LLM 调用 |
+| P1-2 searxng provider | ✅ 5/5 + 既有 web_search 32/32 | tests/unit/tools/test_web_search_searxng.py | **假设修正**：计划"搜索 provider 管理已有"不成立（web_search 系硬编码 Bing 抓取）→ 落为 settings.searxng_url 单配置源优先 + 失败回退 Bing，backend 字段诚实标注 |
+| P1-4 只读 SQL | ✅ 契约测试并入 catalog | 同上 read_only_required | **反剧场落点**：dbhub 无 `--readonly` CLI（官方文档证实）；代理层正则匹配 SQL 写关键字=误伤所有 MCP 文本+mcp_config 注释点名的安全剧场 → 只读契约固化到 DSN 必须只读账号 + `read_only_required` 标记供前端强提示 |
+| P1-3 趋势监控 | ⏸ 延期 | — | 依赖 AgentScheduler 暴露 LLM 可调用工具（现状调度器无工具面，[[neurova-scheduler-status]] 为 delicade 子系统）；组合技能需先补 scheduler_create 工具 + 通知链实测，独立排期避免与 MCP 重构并行冲突 |
+
+回归结论：后端 tools 套件 comm-diff HEAD 基线**零新增失败**（49 项预存债不变，含并行会话 MCP 重构删除 mcp_client_manager 所致）；security 910 全绿（tool_guard 新规则无涟漪）；前端 1555+1353 全绿；`vue-tsc --noEmit` 干净。
+
+净 LOC 说明（修复教义第 2 条要求列去向）：本批为**新功能实施**非 bug fix，净增=7 个工具/端点页签的正当实现体 + 计划文档 §8 修正记录；无表面抹除、无降级断言。
+
+---
+
+## 9. 复核轮（2026-09-12 收口，用户要求"确保无 bug/无断点/闭环/前端 UI 匹配"）
+
+端到端复核抓出并修复 5 处，其中 3 处为**实施轮未覆盖到的预存/衍生缺陷**（红绿灯补齐）：
+
+| # | 缺陷 | 性质 | 修复 | 回归测试 |
+|---|------|------|------|----------|
+| 1 | `POST /mcp-servers/{id}/test` 后端**从未实现**，前端"刷新"按钮一直 404 | 预存契约断裂（ToolLayerPage 早已调用） | 实现端点：按持久化配置重连并返回实时状态 MCPServerInfo | test_mcp_catalog 未知→404 |
+| 2 | 前端 `MCPServer` 读 `id`/`tool_count`，后端 `MCPServerInfo` 实际返回 `server_id`/`tools_count` | 预存契约错位（servers 卡片 key/测试/删除全打空） | interface + 模板 6 处对齐真实字段；卡片显 transport（stdio 工具包 url 空不再空白） | 见 §8 P0-2 前端 |
+| 3 | register 弹窗按 URL 注册恒 400：后端 `MCPServerConnectRequest.transport` 默认 `stdio`→validate 要 command | 预存（非我改动引入，但在扩展页上） | 前端 URL 注册显式 `transport:"http"` | test_register_http_url_not_rejected_as_stdio |
+| 4 | `deep_research` 串行扇出最坏 275s，撞 `run_with_timeout` 默认 60s **中途转后台**（整轮断点） | 实施轮缺陷 | 检索并发 + 抓取信号量(6)并发；表内超时 deep_research=180/file_parse=120/git=120；file_parse 入并发安全名单 | TestToolTimeouts；git e2e 写→ASK/读→放行经真实 `_execute_single_tool` |
+| 5 | 治理闭环此前仅测 `_execute_builtin_tool`（绕过预检） | 实施轮测试盲区 | 补端到端：`_execute_single_tool("git", commit)` 经 tool_guard 真实单例→pending_approval；确认审批重放 `skip_governance` 不再二次 ASK（无审批死循环） | TestGitGovernanceEndToEnd |
+| 6 | register 弹窗 auth_token 输入框不起作用（复核轮报告如实披露的遗留项，用户指示修复） | 预存断点：后端 `MCPServerConnectRequest` 无承载字段，前端载荷的 auth_token 被 pydantic 静默丢弃；协议层 `_open_session`（httpx/sse_client）本已消费 `config.headers`，断点仅在请求体 | 后端补 `headers` 字段贯通（validate/持久化/连接实参全链）；前端 `buildMCPRegisterPayload` 纯函数：token→`Authorization: Bearer`，空值不发；token 不回显于 MCPServerInfo | tool-layers-register.test.ts(4) + test_register_with_auth_token_headers_persisted_and_used（持久化实参+连接实参+不回显三点锁死） |
+
+闭环确认（复核通过项）：新工具经统一 `execute→_governance_precheck`（治理/审批/肌肉记忆全链生效）；schema↔分派不变量 60/60；审批重放不循环；deep_research/file_parse 无 shell 注入、只读语义。
+
+终态：后端 tools comm-diff HEAD 零新增失败（49 预存不变），security+我的用例 1007 绿；前端 vue-tsc 净、vitest 1353 绿。P1-3 趋势监控维持延期（依赖 scheduler 工具面，非本轮改动可闭环）。
+
+

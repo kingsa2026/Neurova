@@ -39,7 +39,19 @@ def _get_mcp_server():
             registry = get_skill_registry()
         except Exception:  # noqa: BLE001
             registry = None
-        _MCP_SERVER = NeurovaMCPServer(storage=storage, skill_registry=registry)
+        # R3-3 CUA 导出：惰性 provider（首次 MCP 调用时 agent 可能尚未就绪，
+        # 每次现取 default agent；导出默认关，无 agent 时清单不含 computer_*）
+        def _agent_provider():
+            try:
+                from neurova.api.endpoints import get_agent_instance
+
+                return get_agent_instance("default")
+            except Exception:  # noqa: BLE001
+                return None
+
+        _MCP_SERVER = NeurovaMCPServer(
+            storage=storage, skill_registry=registry, agent_provider=_agent_provider
+        )
     return _MCP_SERVER
 
 
