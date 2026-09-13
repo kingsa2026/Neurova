@@ -46,7 +46,7 @@
               variant="secondary"
               size="sm"
               :loading="testing"
-              :disabled="!config.enabled || !config.auth_code"
+              :disabled="!config.enabled || (!config.auth_code && !maskedAuthCode)"
               @click="testPush"
             >
               {{ t('negativeScreen.testPush') }}
