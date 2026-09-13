@@ -10,10 +10,10 @@
 """
 
 from neurova.core.logger import get_logger
+from neurova.security.safe_archive import safe_extract_zip
 from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
 import os
 import tempfile
-import zipfile
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, File, UploadFile
@@ -118,8 +118,8 @@ async def install_skill_from_zip(file: UploadFile = File(...)):
         content = await file.read()
         with open(zip_path, "wb") as f:
             f.write(content)
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(os.path.join(tmpdir, "extracted"))
+        # 安全审计 L3: 原 extractall 无成员校验，恶意 ZIP 可 Zip Slip 越界写文件
+        safe_extract_zip(zip_path, os.path.join(tmpdir, "extracted"))
     return {"code": 0, "message": "Skill installed from ZIP"}
 
 
