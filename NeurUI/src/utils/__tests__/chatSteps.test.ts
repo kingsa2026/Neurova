@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  appendPlanStep,
   appendReasoningStep,
   appendToolStep,
   attachToolResult,
@@ -118,5 +119,42 @@ describe('deriveStreamPhase 流式状态派生（三需求①）', () => {
     const steps: ChatStep[] = []
     appendReasoningStep(steps, '想')
     expect(deriveStreamPhase({ content: '你好', steps, streaming: true })).toBe('output')
+  })
+})
+
+describe('appendPlanStep（P1-7 plan_update → 计划快照段）', () => {
+  it('生成整体封口的 plan 段（状态标记+步骤文本）', () => {
+    const steps: ChatStep[] = []
+    appendPlanStep(steps, [
+      { step: '读代码', status: 'completed' },
+      { step: '写测试', status: 'in_progress' },
+      { step: '实现', status: 'pending' },
+    ])
+    expect(steps).toHaveLength(1)
+    expect(steps[0].kind).toBe('plan')
+    expect(steps[0].active).toBe(false)
+    expect(steps[0].text).toContain('● 读代码')
+    expect(steps[0].text).toContain('◐ 写测试')
+    expect(steps[0].text).toContain('○ 实现')
+  })
+
+  it('note 作为正文首行', () => {
+    const steps: ChatStep[] = []
+    appendPlanStep(steps, [{ step: 'a', status: 'pending' }], '开始调研')
+    expect(steps[0].text).toMatch(/^开始调研\n/)
+  })
+
+  it('封口未完成的尾段（推理段被计划打断）', () => {
+    const steps: ChatStep[] = []
+    appendReasoningStep(steps, '想')
+    appendPlanStep(steps, [{ step: 'a', status: 'pending' }])
+    expect(steps[0].active).toBe(false)
+    expect(steps[1].kind).toBe('plan')
+  })
+
+  it('空计划不产生段落', () => {
+    const steps: ChatStep[] = []
+    appendPlanStep(steps, [])
+    expect(steps).toHaveLength(0)
   })
 })
