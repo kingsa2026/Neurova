@@ -24,6 +24,8 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 
+from neurova.security.safe_expr import SafeExprError, safe_eval
+
 logger = get_logger(__name__)
 
 
@@ -295,9 +297,10 @@ class WorkflowEngine:
         """执行条件节点"""
         condition = node.condition or ""
 
-        # 简单条件评估
+        # 安全审计 H3: 原 eval 可经属性链沙箱逃逸 → RCE。
+        # 改走 safe_eval 的 AST 白名单校验（仅纯计算语法，禁属性访问/任意调用）。
         try:
-            result = eval(condition, {"__builtins__": {}}, instance.variables)
+            result = safe_eval(condition, instance.variables)
             return result
         except Exception:
             return False
