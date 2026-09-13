@@ -734,6 +734,9 @@ class SessionManager(SessionRepository):
         sessions.sort(key=lambda x: x.get("session_date", ""), reverse=True)
 
         # 收集所有消息
+        # Yuxi 对比 P2 #14 不变量：模型上下文只含 user/assistant 轮次——
+        # 工具/审计型行（save_message 写侧不设防，如 session fork 带入）
+        # 不得回灌模型诱发幻觉。展示路径 get_history 不筛（UI 可见性不变）。
         all_messages = []
         for session in sessions:
             messages = session.get("messages", [])
@@ -741,7 +744,7 @@ class SessionManager(SessionRepository):
                 if isinstance(msg, dict):
                     role = msg.get("role", "")
                     content = msg.get("content", "")
-                    if role and content:
+                    if role and content and role in ("user", "assistant"):
                         all_messages.append(
                             {
                                 "role": role,

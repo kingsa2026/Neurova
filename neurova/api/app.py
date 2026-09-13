@@ -775,6 +775,17 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as _persist_err:  # noqa: BLE001 - 权重恢复失败不阻断启动
         logger.warning("进化权重恢复失败（忽略）: %s", _persist_err)
 
+    # Yuxi 对比 P0-1：AgentRun 台账预热 + 启动收敛——上一进程遗留的
+    # running 行收敛为 failed(process_died)、queued 行 cancelled(server_restart)，
+    # 重启后不留幽灵行（收敛在 AgentRunStore.__init__ 内，单例此处触发）。
+    try:
+        from neurova.core import agent_run_store as _ars
+
+        if _ars.run_gate_enabled():
+            await asyncio.to_thread(_ars.get_agent_run_store)
+    except Exception as _ledger_err:  # noqa: BLE001 - 台账故障不阻断启动
+        logger.warning("AgentRun 台账启动收敛失败（忽略）: %s", _ledger_err)
+
     # 初始化 TTS 引擎
     if hasattr(app_state, "tts_manager") and app_state.tts_manager:
         try:

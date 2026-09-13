@@ -32,6 +32,15 @@ TOOL_TIMEOUTS_S: Dict[str, float] = {
     "browser_screenshot": 60,
     "browser_extract_text": 60,
     "dom_snapshot": 45,
+    # computer_ssh_exec：缺凭据时按需卡弹出后有限轮询等待（≤90s）+ SSH 命令本身，
+    # 放宽到 180s 避免等待期被协调器掐断（当场续跑的前提）
+    "computer_ssh_exec": 180,
+    # P0/P1 工具族（2026-09-12）：deep_research 并发扇出（检索≤5 + 抓取≤15，
+    # 信号量 6），慢站最坏需 >60s，表内放宽避免中途转后台
+    "deep_research": 180,
+    # file_parse 大 PDF/Office 解析留线程池慢余量
+    "file_parse": 120,
+    "git": 120,
 }
 
 TOOL_DEFAULT_TIMEOUT_S = 60.0
@@ -54,6 +63,7 @@ _CONCURRENCY_SAFE_TOOLS = {
     "recall_history",
     "web_search",
     "web_fetch",
+    "file_parse",
     "weather",
     "get_time",
     "time_now",

@@ -19,8 +19,12 @@ class ModelRerankRunner:
     ):
         self._provider = rerank_provider
         self._fallback = WeightRerankRunner(fallback_weights) if fallback_weights else None
+        # provider 调用失败退化时记录原因（P0-3 Yuxi 对比：后端故障与
+        # "零结果"必须可区分）；成功时清空
+        self.last_error: Optional[str] = None
 
     def rerank(self, query, docs):
+        self.last_error = None
         if not docs:
             return []
         try:
@@ -30,9 +34,13 @@ class ModelRerankRunner:
                 raise ValueError(
                     f"rerank provider 返回 {len(scores)} 个分数 vs {len(docs)} 个候选"
                 )
-        except Exception:
+        except Exception as e:
             if self._fallback is None:
                 raise
+            kind = getattr(e, "kind", None)
+            self.last_error = (
+                f"{type(e).__name__}({kind}): {e}" if kind else f"{type(e).__name__}: {e}"
+            )
             return self._fallback.rerank(query, docs)
         scored = [
             {"index": int(doc.get("index", pos)), "score": scores[pos], "doc": doc}

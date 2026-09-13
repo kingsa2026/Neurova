@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 from neurova.core.logger import get_logger
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -109,7 +110,29 @@ class NegativeScreenConfigManager:
         # 缓存
         self._cache: Dict[str, NegativeScreenConfig] = {}
 
+        self._migrate_legacy_default_user()
+
         logger.info("NegativeScreenConfigManager 初始化完成: %s", self._data_dir)
+
+    def _migrate_legacy_default_user(self) -> None:
+        """一次性口径迁移（2026-09-12）：设置端点旧实现读从未注入的
+        request.state.user_id，配置恒存 "default_user"；与通知/统计侧认证
+        口径 "default" 分裂，自动推送链 get_config 永不命中。存量文件迁到
+        default.json（仅当目标不存在，防覆盖新数据）。"""
+        legacy = self._data_dir / "default_user.json"
+        target = self._data_dir / "default.json"
+        if not legacy.exists() or target.exists():
+            return
+        try:
+            data = json.loads(legacy.read_text(encoding="utf-8"))
+            data["user_id"] = "default"
+            target.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            legacy.unlink()
+            logger.info("负一屏配置口径迁移: default_user.json → default.json")
+        except Exception as e:
+            logger.error("负一屏配置口径迁移失败: %s", e)
 
     def _get_config_path(self, user_id: str) -> Path:
         """获取用户配置文件路径"""
@@ -362,7 +385,7 @@ class NegativeScreenPusher:
         task_result: str,
         task_id: str,
     ) -> Dict[str, Any]:
-        """构建推送数据"""
+        """构建推送数据（对齐官方 today-task skill 标准数据格式，字段必填性见 SKILL.md）"""
         return {
             "data": {
                 "authCode": config.auth_code,
@@ -370,9 +393,12 @@ class NegativeScreenPusher:
                     {
                         "msgId": task_id,
                         "scheduleTaskId": task_id,
+                        "scheduleTaskName": task_name,
                         "summary": task_name,
                         "result": task_result,
                         "content": task_content,
+                        "source": "Neurova",
+                        "taskFinishTime": int(time.time()),
                     }
                 ],
             }
@@ -388,10 +414,20 @@ class NegativeScreenPusher:
         try:
             import aiohttp
 
+            # 华为 HiBoard 网关校验请求头：x-trace-id 缺失/为空直接拒绝
+            # （"Parameter x-trace-id is empty"），契约对齐官方 today-task skill
+            trace_id = f"neurova-task-push-{int(time.time())}-{uuid.uuid4().hex[:8]}"
+            headers = {
+                "Content-Type": "application/json; charset=utf-8",
+                "User-Agent": "Neurova-TaskPusher/1.0",
+                "x-trace-id": trace_id,
+            }
+
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     push_url,
                     json=push_data,
+                    headers=headers,
                     timeout=aiohttp.ClientTimeout(total=self._timeout),
                 ) as response:
                     response_data = await response.json()
