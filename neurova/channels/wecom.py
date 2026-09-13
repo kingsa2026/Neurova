@@ -193,6 +193,10 @@ class WeComAdapter(ChannelAdapter):
             msg_type = root.findtext("MsgType", "text")
             content = root.findtext("Content", "").strip()
             msg_id = root.findtext("MsgId", "")
+            # 群聊：企业微信回调群消息带 <ChatId>；此前硬编码 p2p → 群消息会话键
+            # 退化成发送者、无法按群绑定/回复。
+            chat_id = root.findtext("ChatId", "") or ""
+            is_group = bool(chat_id)
 
             # 构造统一消息
             channel_msg = self._make_message(
@@ -200,8 +204,8 @@ class WeComAdapter(ChannelAdapter):
                 sender_id=from_user,
                 sender_name=from_user,  # 企业微信回调中没有发送者昵称
                 content=content,
-                chat_id=from_user,  # 企业微信单聊以 user id 为会话 ID
-                chat_type="p2p",
+                chat_id=chat_id or from_user,  # 群用 ChatId，单聊以 user id 为会话 ID
+                chat_type="group" if is_group else "p2p",
                 message_type=msg_type,
                 raw_event={
                     "to_user_name": to_user_name,
