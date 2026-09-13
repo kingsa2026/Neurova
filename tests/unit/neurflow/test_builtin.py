@@ -335,6 +335,14 @@ class TestDataNodeExecutors:
         result = await exec_transform(config, ctx)
         assert result["status"] == "success"
 
+    @pytest.mark.asyncio
+    async def test_exec_transform_blocks_sandbox_escape(self):
+        """安全审计 H3: eval 沙箱逃逸载荷须被拒（返回 failed 而非 RCE）"""
+        config = {"expression": "(1).__class__.__mro__[1].__subclasses__()"}
+        ctx = {"input": "hello"}
+        result = await exec_transform(config, ctx)
+        assert result["status"] == "failed"
+
 
 class TestInputNodeExecutors:
     """测试人工输入节点执行器"""
