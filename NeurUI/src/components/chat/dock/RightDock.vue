@@ -20,6 +20,7 @@
       <ImagePreviewPanel v-else-if="dock.activeTab.kind === 'image'" :tab="dock.activeTab" />
       <TextPreviewPanel v-else-if="dock.activeTab.kind === 'text'" :tab="dock.activeTab" />
       <AudioPreviewPanel v-else-if="dock.activeTab.kind === 'audio'" :tab="dock.activeTab" />
+      <VideoPreviewPanel v-else-if="dock.activeTab.kind === 'video'" :tab="dock.activeTab" />
       <HistoryTab v-else-if="dock.activeTab.kind === 'history'" @switch="onSessionSwitch" @cross-search="onCrossSearch" />
       <ArchiveTab v-else-if="dock.activeTab.kind === 'archive'" />
       <ComputerTab v-else-if="dock.activeTab.kind === 'computer'" :agent-id="agentId" />
@@ -45,6 +46,7 @@ import HtmlPreviewPanel from './panels/HtmlPreviewPanel.vue'
 import ImagePreviewPanel from './panels/ImagePreviewPanel.vue'
 import TextPreviewPanel from './panels/TextPreviewPanel.vue'
 import AudioPreviewPanel from './panels/AudioPreviewPanel.vue'
+import VideoPreviewPanel from './panels/VideoPreviewPanel.vue'
 import HistoryTab from './panels/HistoryTab.vue'
 import ArchiveTab from './panels/ArchiveTab.vue'
 import ComputerTab from './panels/ComputerTab.vue'

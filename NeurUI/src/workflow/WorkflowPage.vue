@@ -3,6 +3,7 @@
     <div class="page-header">
       <h2>{{ t('workflow.title') }}</h2>
       <div class="header-actions">
+        <GlassButton variant="ghost" size="sm" @click="openTemplates">{{ t('workflow.fromTemplate') }}</GlassButton>
         <GlassButton variant="ghost" size="sm" @click="handleImportComfyui">{{ t('workflow.importWf') }}</GlassButton>
         <GlassButton variant="primary" size="sm" @click="showCreateModal = true">{{ t('workflow.create') }}</GlassButton>
       </div>
@@ -132,6 +133,24 @@
       </a-form>
     </a-modal>
 
+    <!-- 批次4：从模板新建（GET /neurflow/templates 首次消费；短剧一键成片等内置模板入口） -->
+    <a-modal v-model:open="showTemplatesModal" :title="t('workflow.fromTemplate')" :footer="null" width="560px">
+      <a-spin :spinning="loadingTemplates">
+        <div v-if="templateList.length" class="template-list">
+          <div v-for="tpl in templateList" :key="tpl.id" class="template-item">
+            <div class="template-info">
+              <div class="template-name">{{ tpl.name }}</div>
+              <div class="template-desc">{{ tpl.description }}</div>
+            </div>
+            <GlassButton variant="primary" size="sm" :loading="instantiatingId === tpl.id" @click="instantiateTpl(tpl)">
+              {{ t('workflow.useTemplate') }}
+            </GlassButton>
+          </div>
+        </div>
+        <a-empty v-else :description="t('workflow.noTemplates')" />
+      </a-spin>
+    </a-modal>
+
     <!-- Rename modal -->
     <a-modal
       v-model:open="showRenameModal"
@@ -188,8 +207,11 @@ import {
   validateWorkflow,
   publishWorkflow,
   getComfyuiStatus,
+  getTemplates,
+  instantiateTemplate,
   type WorkflowDefinition,
 } from '@/api/modules/neurflow'
+import { message } from 'ant-design-vue'
 import {
   listCanvases,
   deleteCanvas,
@@ -239,6 +261,45 @@ const loading = ref(false)
 const executingId = ref<string | null>(null)
 const creating = ref(false)
 const showCreateModal = ref(false)
+
+// 批次4：从模板新建（模板端点的前端首个消费方）
+const showTemplatesModal = ref(false)
+const loadingTemplates = ref(false)
+const templateList = ref<WorkflowDefinition[]>([])
+const instantiatingId = ref('')
+
+function unwrapTpl<T = unknown>(res: unknown): T {
+  return ((res as { data?: T })?.data ?? res) as T
+}
+
+async function openTemplates() {
+  showTemplatesModal.value = true
+  loadingTemplates.value = true
+  try {
+    const raw = unwrapTpl<{ templates?: WorkflowDefinition[]; total?: number }>(await getTemplates())
+    templateList.value = Array.isArray(raw?.templates) ? raw.templates : []
+  } catch {
+    templateList.value = []
+  } finally {
+    loadingTemplates.value = false
+  }
+}
+
+async function instantiateTpl(tpl: WorkflowDefinition) {
+  instantiatingId.value = String(tpl.id)
+  try {
+    await instantiateTemplate(String(tpl.id), { name: `${tpl.name} - ${Date.now().toString(36)}` })
+    message.success(t('workflow.tplOk'))
+    showTemplatesModal.value = false
+    activeTab.value = 'definitions'
+    await fetchWorkflows()
+  } catch (e: unknown) {
+    const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+    message.error(detail || t('workflow.tplFail'))
+  } finally {
+    instantiatingId.value = ''
+  }
+}
 const showDetail = ref(false)
 const detailWorkflow = ref<WorkflowDefinition | null>(null)
 
@@ -518,6 +579,19 @@ onMounted(() => {
 .wf-meta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
 .meta-text { font-size: 12px; color: var(--nr-text-tertiary); }
 .wf-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.template-list { display: flex; flex-direction: column; gap: 10px; }
+.template-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--nr-border, rgba(255, 255, 255, 0.08));
+}
+.template-name { font-size: 14px; color: var(--nr-text-primary); }
+.template-desc { margin-top: 2px; font-size: 12px; color: var(--nr-text-secondary); }
 .empty-state { padding: 48px 0; }
 .detail-body { display: flex; flex-direction: column; gap: 16px; }
 .detail-body p { color: var(--nr-text-secondary); font-size: 14px; }
