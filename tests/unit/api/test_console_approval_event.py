@@ -45,6 +45,24 @@ class TestExtractApprovalPayload(unittest.TestCase):
     def test_plain_text_returns_empty(self):
         self.assertEqual(_extract_approval_payload("just text", {}), {})
 
+    def test_desktop_review_gate_payload(self):
+        """审核模式运行门（_desktop_runtime_gate REQUIRE_APPROVAL）产出的
+        结果必须被识别为审批事件——对话页交互面板的唯一弹出通道。"""
+        result = {
+            "success": False,
+            "pending_approval": True,
+            "approval_id": "req-9",
+            "tool_name": "computer_click",
+            "params": {"x": 1, "y": 2},
+            "error": "审核模式：computer_click 待用户批准（审批请求 req-9）",
+            "desktop_runtime": {"mode": "review", "action": "require_approval",
+                                "request_id": "req-9"},
+        }
+        payload = _extract_approval_payload(result, {"tool_name": "computer_click"})
+        self.assertEqual(payload["approval_id"], "req-9")
+        self.assertEqual(payload["tool_name"], "computer_click")
+        self.assertEqual(payload["params"], {"x": 1, "y": 2})
+
 
 if __name__ == "__main__":
     unittest.main()

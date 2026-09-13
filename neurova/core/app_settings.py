@@ -29,6 +29,11 @@ ADVANCED_DEFAULTS: Dict[str, Any] = {
     "log_level": "info",
     "telemetry": False,
     "max_output_tokens": LLM_DEFAULT_MAX_TOKENS,
+    # 桌面运行权限档（full/sandbox/review/auto），默认 full = 现状本机执行
+    "desktop_runtime_mode": "full",
+    # 沙箱会话提供方（sandbox/rdp），默认空=无池：sandbox/auto 档变更动作
+    # fail-closed 拒绝（诚实降级，不误跑本机）。env NEUROVA_DESKTOP_PROVIDER 显式优先。
+    "desktop_provider": "",
 }
 SECTION_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "general": GENERAL_DEFAULTS,

@@ -10,6 +10,7 @@ from neurova.core import config
 from neurova.core.logger import get_logger
 import os
 import re
+import threading
 import time
 import typing
 import uuid
@@ -215,6 +216,118 @@ async def _gc_replay_buffers() -> None:
         expired = [sid for sid, b in _replay_buffers.items() if now - b["last_active"] > _REPLAY_BUFFER_TTL_SECONDS]
         for sid in expired:
             _replay_buffers.pop(sid, None)
+
+
+# ── AgentRun 台账接线（Yuxi 对比 P0-1/P0-2）───────────────────────
+
+
+class _AgentRunLedger:
+    """一次 chat run 的持久化台账（对位 Yuxi run/attempt 状态机裁剪版）。
+
+    不变量（见 neurova/core/agent_run_store.py 模块注释）：
+    - 先落库再执行：intake(queued) 成功才进入等待晋升；
+    - 同 session 单活 + FIFO：claim_next 由部分唯一索引强制；
+    - 终态单点收敛：task.add_done_callback（SSE 生成器早退/断线不丢终态，
+      run 在后台继续跑完由回调落账）；
+    - fail-open：台账任何异常只记日志，永不阻断聊天（对位入站队列契约）。
+    """
+
+    HEARTBEAT_SECONDS = 5.0
+
+    def __init__(self, session_id: str, user_id: str, agent_id: str, message: str):
+        self.session_id = session_id
+        self._args = (session_id, user_id, agent_id, message)
+        self.run_id: typing.Optional[str] = None
+        self.rejected = False
+        self._store = None
+        self._owner: typing.Optional[str] = None
+        self._last_hb = 0.0
+
+    async def acquire(self) -> typing.List[Dict[str, Any]]:
+        """登记并等待队头晋升 running；返回需先行的事件（queued / 超时 error+done）。"""
+        try:
+            from neurova.core import agent_run_store as _ars
+
+            if not _ars.run_gate_enabled():
+                return []
+            store = _ars.get_agent_run_store()
+            run_id = await asyncio.to_thread(store.intake, *self._args)
+            self._owner = _ars.OWNER_IDENTITY
+            wait_max = float(os.environ.get("NEUROVA_RUN_QUEUE_WAIT") or 120.0)
+            deadline = time.monotonic() + wait_max
+            events: typing.List[Dict[str, Any]] = []
+            last_note = 0.0
+            while True:
+                claimed = await asyncio.to_thread(store.claim_next, self.session_id)
+                if claimed == run_id:
+                    self.run_id, self._store = run_id, store
+                    return events
+                now = time.monotonic()
+                if now - last_note >= 1.0:
+                    pos = await asyncio.to_thread(store.queued_position, run_id)
+                    events.append({"type": "queued", "session_id": self.session_id, "position": pos})
+                    last_note = now
+                if now > deadline:
+                    # 排队超时：如实报错并弃列（不让占用者的幽灵挡住后来者太久）
+                    await asyncio.to_thread(store.abandon, run_id, "queue_timeout")
+                    events.append(
+                        {"type": "error", "message": "该会话已有运行中的任务，排队等待超时，请稍后再发"}
+                    )
+                    events.append({"type": "done", "session_id": self.session_id})
+                    self.rejected = True
+                    return events
+                await asyncio.sleep(0.25)
+        except Exception:  # noqa: BLE001 - fail-open：台账故障不阻断聊天
+            logger.warning("AgentRun 台账登记失败（fail-open，聊天不受影响）", exc_info=True)
+            self.run_id = None
+            return []
+
+    async def heartbeat(self) -> None:
+        """续租（内部 5s 节流；主循环每轮调用，空闲时 15s ping 分支保底）。"""
+        if self.run_id is None:
+            return
+        now = time.monotonic()
+        if now - self._last_hb < self.HEARTBEAT_SECONDS:
+            return
+        self._last_hb = now
+        try:
+            await asyncio.to_thread(self._store.heartbeat, self.run_id, self._owner)
+        except Exception:  # noqa: BLE001 - 续租失败下轮再试，reconcile 兜底
+            logger.debug("AgentRun 台账心跳失败（忽略）", exc_info=True)
+
+    def attach(self, task: "asyncio.Task") -> None:
+        if self.run_id is not None:
+            task.add_done_callback(self.settle)
+
+    def settle(self, task: "asyncio.Task") -> None:
+        """task 完成回调 = 终态单点收敛（独立线程写库，回调上下文无 running loop 依赖）。"""
+        if self.run_id is None or self._store is None:
+            return
+        try:
+            if task.cancelled():
+                status, error_type = "cancelled", "stopped"
+            elif task.exception() is not None:
+                status, error_type = "failed", "chat_error"
+            else:
+                res = task.result() if isinstance(task.result(), dict) else {}
+                if res.get("stopped"):
+                    status, error_type = "cancelled", "user_stopped"
+                elif res.get("error"):
+                    status, error_type = "failed", "chat_error"
+                else:
+                    status, error_type = "completed", None
+            store, run_id, owner = self._store, self.run_id, self._owner
+
+            def _fin():
+                try:
+                    if not store.finish(run_id, owner, status, error_type):
+                        logger.debug("AgentRun 终态被 owner 栅栏拒绝（已被对账收敛）: run=%s", run_id)
+                except Exception:  # noqa: BLE001 - 台账收尾失败仅日志
+                    logger.warning("AgentRun 台账终态写入失败（忽略）", exc_info=True)
+
+            threading.Thread(target=_fin, daemon=True).start()
+        except Exception:  # noqa: BLE001
+            logger.warning("AgentRun 台账收敛失败（忽略）", exc_info=True)
 
 
 def _call_key(name: str, arguments: str) -> str:
@@ -566,6 +679,20 @@ async def post_console_chat(
 
             queue: asyncio.Queue = asyncio.Queue()
 
+            # Yuxi 对比 P0-1/P0-2：run 先落库（queued）再执行，同 session
+            # 单活 + FIFO 晋升；排队期先行 queued 事件（fail-open 见类注释）
+            ledger = _AgentRunLedger(session_id, user_id, agent_id, body.message or "")
+            live_events: typing.List[Dict[str, Any]] = []
+            for event in await ledger.acquire():
+                live_events.append(event)
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            if ledger.rejected:
+                _buffer_replay_events(session_id, live_events)
+                buf = _replay_buffers.get(session_id)
+                if buf:
+                    buf["done"] = True
+                return
+
             def _emit(kind, data):
                 # 管线在事件循环线程内同步回调；put_nowait 不阻塞主流程
                 try:
@@ -647,11 +774,12 @@ async def post_console_chat(
             from neurova.core.task_tracker import get_task_tracker
 
             get_task_tracker().register_async_task(session_id, task, kind="chat")
+            # 台账终态单点收敛：task 完成回调（生成器早退也不丢）
+            ledger.attach(task)
             seen_calls: set = set()
             seen_results: set = set()
 
             try:
-                live_events: typing.List[Dict[str, Any]] = []
                 # B3-1（#7244 对齐）：chunk/reasoning delta 合并节流——
                 # 逐 delta yield 造成每字符一次 json.dumps+SSE 帧（长回复
                 # 开销放大）。攒 buffer，FLUSH_INTERVAL 到期或非 delta 事件
@@ -673,6 +801,8 @@ async def post_console_chat(
                     buf["content"] += text
 
                 while True:
+                    # 台账心跳（内部 5s 节流；空闲时 15s ping 分支保底唤醒）
+                    await ledger.heartbeat()
                     # 15s 无事件发 SSE 注释心跳（": ping"）：agent 工具执行/LLM
                     # 慢响应期间流可能长时间无数据，代理/杀软/网络栈会掐空闲
                     # 连接造成"对话中断"。SSE 规范里冒号开头是注释，前端解析
@@ -809,6 +939,15 @@ async def post_console_chat_stop(
     from neurova.core.task_tracker import get_task_tracker
 
     stopped = get_task_tracker().request_session_stop(session_id)
+    # Yuxi 对比 P0-2：取消意图落库（台账里的活跃 run 标 cancel_requested，
+    # 供执行侧/审计/重启对账可见；fail-open 不影响停止结果）
+    try:
+        from neurova.core import agent_run_store as _ars
+
+        if _ars.run_gate_enabled():
+            await asyncio.to_thread(_ars.get_agent_run_store().request_cancel, session_id)
+    except Exception:  # noqa: BLE001
+        logger.debug("AgentRun 取消意图落库失败（忽略）", exc_info=True)
     return {
         "code": 0,
         "message": "Chat stopped" if stopped else "No running task",

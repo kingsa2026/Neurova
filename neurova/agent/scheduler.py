@@ -9,8 +9,10 @@ Neurova 自动化任务调度器核心模块
 
 import asyncio
 import concurrent.futures
+import json
 import os
 import threading
+import time as _time
 from neurova.core.logger import get_logger
 import uuid
 from abc import ABC, abstractmethod
@@ -707,7 +709,60 @@ class TaskScheduler:
         # 注册默认执行器
         self._register_default_executors()
 
+        # Yuxi 对比 P2 #11：任务台账从纯内存升级为 JSON 落盘（本文件实测
+        # "台账内存 dict 重启丢"）。加载只读文件，不触盘写。
+        self._load_tasks_ledger()
+
         logger.info("TaskScheduler initialized")
+
+    # ============================================================
+    # 台账持久化（Yuxi 对比 P2 #11）
+    # ============================================================
+
+    def _ledger_path(self):
+        from pathlib import Path
+
+        return Path(os.environ.get("NEUROVA_SCHEDULER_LEDGER") or "data/agent_scheduler_tasks.json")
+
+    def _load_tasks_ledger(self) -> None:
+        path = self._ledger_path()
+        if not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            raw_tasks = data.get("tasks", {}) if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError) as e:
+            # 损坏台账：备份留证后空载——静默清空是数据销毁，静默崩溃是拒启动
+            backup = path.with_name(f"{path.name}.corrupt-{int(_time.time())}")
+            try:
+                path.replace(backup)
+                logger.error("调度台账损坏，已备份 %s 后以空台账启动: %s", backup, e)
+            except OSError:
+                logger.error("调度台账损坏且备份失败: %s", e)
+            return
+        for tid, raw in raw_tasks.items():
+            try:
+                self._tasks[tid] = AutomationTask.from_dict(raw)
+            except Exception as e:  # noqa: BLE001 - 单条坏行不拖垮恢复
+                logger.error("跳过损坏的调度任务台账行 %s: %s", tid, e)
+        if self._tasks:
+            logger.info("调度台账恢复完成: %d 任务", len(self._tasks))
+
+    def _save_tasks_ledger(self) -> None:
+        """原子落盘（temp+os.replace）。自持 _task_lock（RLock，与写路径重入安全）。"""
+        try:
+            path = self._ledger_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with self._task_lock:
+                payload = {
+                    "version": 1,
+                    "tasks": {tid: t.to_dict() for tid, t in self._tasks.items()},
+                }
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(tmp, path)
+        except Exception as e:  # noqa: BLE001 - 台账写失败不炸调度器本体
+            logger.error("调度台账落盘失败: %s", e)
 
     def _register_default_executors(self):
         """注册默认任务执行器"""
@@ -747,6 +802,7 @@ class TaskScheduler:
                     self._add_to_scheduler(task)
 
                 logger.info("Task added: %s (%s)", task.id, task.name)
+                self._save_tasks_ledger()
                 self._emit_event("task_added", task)
                 return True
             except Exception as e:
@@ -781,6 +837,7 @@ class TaskScheduler:
                     self._add_to_scheduler(new_task)
 
                 logger.info("Task updated: %s", task_id)
+                self._save_tasks_ledger()
                 self._emit_event("task_updated", new_task)
                 return new_task
             except Exception as e:
@@ -808,6 +865,7 @@ class TaskScheduler:
                 self._executions.pop(task_id, None)
 
                 logger.info("Task deleted: %s", task_id)
+                self._save_tasks_ledger()
                 self._emit_event("task_deleted", {"task_id": task_id})
                 return True
             except Exception as e:
@@ -853,6 +911,7 @@ class TaskScheduler:
             task.enabled = False
             task.updated_at = datetime.now()
 
+            self._save_tasks_ledger()
             self._emit_event("task_disabled", task)
             return task
 
@@ -885,6 +944,8 @@ class TaskScheduler:
                     self._add_to_scheduler(task)
 
             self._apscheduler.start()
+            # next_run_at 在挂载时刷新，落盘留证
+            self._save_tasks_ledger()
             logger.info("TaskScheduler started")
 
         except Exception as e:
@@ -1001,6 +1062,8 @@ class TaskScheduler:
         self._running_executions[execution.id] = execution
         task.run_count += 1
         task.last_run_at = datetime.now()
+        # 台账持久化：执行计数/最近运行时刻落盘（P2 #11）
+        self._save_tasks_ledger()
 
         self._emit_event("execution_started", execution)
 
