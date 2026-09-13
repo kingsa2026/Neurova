@@ -21,6 +21,8 @@ from typing import Any, Callable, Dict, List, Optional
 from .agent_manager import get_agent_manager
 from .models import NodeDefinition
 
+from neurova.security.safe_expr import SafeExprError, safe_eval
+
 logger = get_logger(__name__)
 
 
@@ -1622,19 +1624,15 @@ async def exec_transform(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[st
             "output": None,
         }
 
-    # 安全的表达式求值
+    # 安全审计 H3: eval("__builtins__": {}) 可经属性链逃逸
+    # ((1).__class__.__mro__[1].__subclasses__() 可达 147 个子类 → RCE)。
+    # 改走 safe_eval：AST 白名单前置校验，封死属性访问/任意调用。
     safe_globals = {
         "input": ctx.get("input"),
-        "str": str,
-        "int": int,
-        "float": float,
-        "len": len,
-        "list": list,
-        "dict": dict,
     }
 
     try:
-        result = eval(expression, {"__builtins__": {}}, safe_globals)
+        result = safe_eval(expression, safe_globals)
         return {
             "status": "success",
             "output": result,
