@@ -7,7 +7,7 @@
 - 收消息 → _emit_event 送达 ChannelMessage（chat_id/metadata 完整）；
 - 回复必须携带该用户最近 context_token（缓存落盘 sidecar），无缓存诚实 None；
 - 语音优先平台 ASR 文本，无 ASR 走 audio_bytes（NV voice_precheck 契约）；
-- 表单直填 token connect 成功后落盘 token 文件（重启免扫码）。
+- connect() 无写副作用（token 文件仅作回读兜底，不因连接而落盘）。
 """
 
 from __future__ import annotations
@@ -116,8 +116,9 @@ async def test_connect_validates_and_starts_poll(tmp_path, received):
     assert m.chat_id == "u1@im.wechat"
     assert m.metadata["wechat_context_token"] == "ctx-1"
     assert a._cursor == "c2"
-    # 表单直填 token 落盘（重启免扫码）
-    assert Path(tmp_path / "bot_token").read_text(encoding="utf-8") == "tok-9"
+    # connect() 不得有写 token 文件的副作用（凭据以 extra.bot_token 为准，文件仅作
+    # 外部登录的回读兜底）——与 test_connection "test 路径不得写 token 文件" 红线一致。
+    assert not Path(tmp_path / "bot_token").exists()
     await a.disconnect()
     assert fake.stopped
 
