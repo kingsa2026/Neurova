@@ -36,6 +36,9 @@ class ChannelEventType(str, Enum):
     BOT_ERROR = "bot_error"
     USER_SUBSCRIBED = "user_subscribed"
     USER_UNSUBSCRIBED = "user_unsubscribed"
+    # 群成员变更（各渠道"机器人被移出群/入群"事件归一，供会话归档等）
+    CHAT_BOT_ADDED = "chat_bot_added"
+    CHAT_BOT_REMOVED = "chat_bot_removed"
 
 
 class MessageChannel(str, Enum):
