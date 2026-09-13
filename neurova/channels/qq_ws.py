@@ -376,6 +376,12 @@ class QQWebSocketAdapter(ChannelAdapter):
             "content": content, "msg_id": msg_id, "msg_seq": self._msg_seq[seq_key],
             "msg_type": 0 if message_type == "text" else kwargs.get("qq_msg_type", 0),
         }
+        # 群聊回复@提问者：官方 at 对象（type=3 按群成员 openid @）。at_user_id/chat_type
+        # 由 manager._dispatch_message 回发注入。字段以 QQ 开放平台"发送群聊消息"为准，
+        # 若网关拒绝可回退去掉 at（不影响正文）。
+        at_uid = kwargs.get("at_user_id") or ""
+        if kwargs.get("chat_type") == "group" and at_uid:
+            body["at"] = {"name": "", "qq": str(at_uid), "type": 3}
         path = self._reply_path(chat_id, kwargs.get("qq_message_type", message_type))
         try:
             resp = await asyncio.to_thread(

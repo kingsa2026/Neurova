@@ -1356,6 +1356,8 @@ class MemCore:
             assistant_metadata=assistant_metadata,
             writer_claim=writer_claim,
             user_id=owner_id,
+            # 渠道首条消息带可读标题（channel_router 注入 session_title）；仅建记录时生效
+            title=(metadata or {}).get("session_title", ""),
         )
 
     # ══════════════════════════════════════════════════════════════
