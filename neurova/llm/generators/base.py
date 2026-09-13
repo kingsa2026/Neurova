@@ -7,7 +7,7 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 class GeneratorType(str, Enum):
@@ -27,34 +27,58 @@ class GeneratorType(str, Enum):
 
 @dataclass
 class GenerationConfig:
-    """生成配置"""
+    """生成配置。
+
+    字段以渠道三 mixin（telegram_ai_generation / qqbot / wechat_ai_generation）
+    实传形态为准一次收齐（批次0：契约单源，消费侧想象字段转正为真实字段，
+    facade 侧 image_url/negative_prompt/duration/fps 等映射到 protocols 实测协议）。
+    """
 
     type: GeneratorType = GeneratorType.TEXT_GENERATION
     prompt: str = ""
     negative_prompt: str = ""
     model_id: str = ""
+    model: str = ""  # 渠道实传别名（facade 取 model or model_id）
     width: int = 512
     height: int = 512
     num_frames: int = 1
+    num_outputs: int = 1  # 图像张数（渠道实传别名 num_images 由 LegacyBytesAdapter 映射）
     duration: float = 0.0
     fps: int = 24
     num_inference_steps: int = 50
     guidance_scale: float = 7.5
     seed: Optional[int] = None
+    style: str = ""
+    strength: float = 0.75
+    # 参考媒体（i2i / i2v / keyframe / v2v 消费位）
+    image_url: str = ""
+    video_url: str = ""
+    start_image_url: str = ""
+    end_image_url: str = ""
     extra_params: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class GenerationResult:
-    """生成结果"""
+    """生成结果。
+
+    urls 契约（批次0）：facade 成功时填**服务端本地产物路径**列表
+    （provider URL 临时有效，成功后立即落盘）；渠道 _download_url 支持本地路径分支。
+    error_message 为 error 的别名（渠道三 mixin 读取字段转正）。
+    """
 
     success: bool = False
     output_path: str = ""
     output_data: Optional[bytes] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     error: str = ""
+    urls: List[str] = field(default_factory=list)
     duration: float = 0.0
     seed_used: Optional[int] = None
+
+    @property
+    def error_message(self) -> str:
+        return self.error
 
 
 class BaseGenerator(ABC):

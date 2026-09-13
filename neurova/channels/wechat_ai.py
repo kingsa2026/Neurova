@@ -406,6 +406,16 @@ class AIMixin:
             return None
 
     def _download_url(self, url: str) -> Optional[bytes]:
+        # 批次0：facade 产物契约是服务端本地路径（provider URL 临时有效，生成即落盘）
+        if url and not url.lower().startswith(("http://", "https://", "data:")):
+            from pathlib import Path as _Path
+
+            try:
+                p = _Path(url)
+                if p.is_file():
+                    return p.read_bytes()
+            except OSError:
+                pass
         """
         下载 URL 内容
 
