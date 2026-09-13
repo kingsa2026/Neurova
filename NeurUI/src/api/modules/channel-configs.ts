@@ -28,19 +28,6 @@ export interface ChannelConfigTestResult {
   needs_scan?: boolean
 }
 
-/** F-3：iLink 二维码生成响应（两段式·生成段，裸对象）。 */
-export interface WechatIlinkQrcodeResponse {
-  status: 'ready' | 'pending'
-  qr_url?: string
-  qr_id?: string
-}
-
-/** F-3：iLink 扫码状态（两段式·轮询段，单次查询，裸对象）。 */
-export interface WechatIlinkQrcodeStatus {
-  status: 'pending' | 'scanned' | 'confirmed' | 'expired'
-  token_saved?: boolean
-}
-
 /** P0-5 入站持久化队列统计（重启不丢消息的健康面）。 */
 export interface ChannelIngressStats {
   enabled: boolean
@@ -81,20 +68,6 @@ export function testChannelConfig(type: string, data: ChannelConfig, agentId?: s
   return api.post<ApiResponse<ChannelConfigTestResult>>(
     `${BASE}/${type}/test`, data, { params: agentId ? { agent_id: agentId } : {} },
   )
-}
-
-/** F-3：生成 iLink 登录二维码（后端只生成不等待；已有有效 token 返回 ready）。 */
-export function createWechatIlinkQrcode(data?: { token_file?: string; bot_token?: string }, agentId?: string) {
-  return api.post<WechatIlinkQrcodeResponse>(
-    `${BASE}/wechat/ilink/qrcode`, data ?? {}, { params: agentId ? { agent_id: agentId } : {} },
-  )
-}
-
-/** F-3：单次查询 iLink 扫码状态（轮询节奏由前端驱动，3s/次）。 */
-export function getWechatIlinkQrcodeStatus(qrId: string, agentId?: string) {
-  return api.get<WechatIlinkQrcodeStatus>(`${BASE}/wechat/ilink/qrcode/status`, {
-    params: { qr_id: qrId, ...(agentId ? { agent_id: agentId } : {}) },
-  })
 }
 
 // ---------------------------------------------------------------------------
