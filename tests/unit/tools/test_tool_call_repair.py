@@ -119,5 +119,73 @@ class TestRepairedToolCallsExecution(unittest.TestCase):
         self.assertEqual(out, "普通回复，无工具调用")
 
 
+class TestHermesFormatRepair(unittest.TestCase):
+    """2026-09-14 飞书"全是代码"事故第二环。
+
+    qwen3.8-flash 等模型文本泄漏用的是 Hermes 原生格式：
+      TC = chr(60) + "|tool_call|" + chr(62) 标记包裹
+      function=NAME 标签 + parameter=KEY 子标签（值在标签间换行文本）
+    三形态文法（XML-ish/Harmony/尾标）均不覆盖 → 泄漏调用不被执行，
+    原始 XML 直接进正文发给渠道。本类锁定第四形态 + 协议噪声剥离。
+    """
+
+    TC_OPEN = "\u003c|tool_call|\u003e"
+    TC_CLOSE = "\u003c|/tool_call|\u003e"
+    FN_OPEN = "\u003cfunction="
+    FN_CLOSE = "\u003c/function\u003e"
+    P_OPEN = "\u003cparameter="
+    P_CLOSE = "\u003c/parameter\u003e"
+
+    def _hermes_reply(self):
+        return (
+            "我来搜一下。\n"
+            f"{self.TC_OPEN}\n{self.FN_OPEN}web_search\u003e\n"
+            f"{self.P_OPEN}query\u003e\nAI 最新新闻\n{self.P_CLOSE}\n"
+            f"{self.P_OPEN}taskNameActive\u003e\n搜中文AI新闻\n{self.P_CLOSE}\n"
+            f"{self.FN_CLOSE}\n{self.TC_CLOSE}\n"
+            f"{self.TC_OPEN}\n{self.FN_OPEN}rss_read\u003e\n"
+            f"{self.P_OPEN}url\u003e\nhttps://hnns.ru\n{self.P_CLOSE}\n"
+            f"{self.FN_CLOSE}\n{self.TC_CLOSE}"
+        )
+
+    def test_hermes_calls_parsed(self):
+        ex = _executor()
+        calls = ex._extract_repaired_tool_calls(self._hermes_reply())
+        got = [(c["name"], c["arguments"]) for c in calls]
+        self.assertEqual(got, [
+            ("web_search", {"query": "AI 最新新闻", "taskNameActive": "搜中文AI新闻"}),
+            ("rss_read", {"url": "https://hnns.ru"}),
+        ])
+
+    def test_hermes_executed_and_raw_stripped(self):
+        """泄漏调用被执行，且协议原文不得留在回复里（正文保留、结果追加）。"""
+        ex = _executor()
+        out = asyncio.run(ex._execute_from_text(self._hermes_reply(), ""))
+        self.assertEqual(ex._execute_single_tool.await_count, 2)
+        self.assertNotIn(self.TC_OPEN, out)
+        self.assertNotIn(self.FN_OPEN, out)
+        self.assertIn("我来搜一下", out)
+        self.assertIn("web_search 结果", out)
+
+    def test_hermes_in_code_fence_not_promoted(self):
+        """code fence 内的 Hermes 示例是用户原文，不得误伤。"""
+        reply = (
+            "```\n"
+            f"{self.TC_OPEN}\n{self.FN_OPEN}evil\u003e\n{self.FN_CLOSE}\n{self.TC_CLOSE}\n"
+            "```"
+        )
+        ex = _executor()
+        self.assertEqual(ex._extract_repaired_tool_calls(reply), [])
+
+    def test_legacy_marker_stripped_from_reply(self):
+        """既有 [TOOL_CALL:] 协议噪声同样不得留在回复里。"""
+        ex = _executor()
+        out = asyncio.run(ex._execute_from_text('前文 [TOOL_CALL:ping({"n": 1})] 后文', ""))
+        self.assertNotIn("[TOOL_CALL:", out)
+        self.assertIn("前文", out)
+        self.assertIn("后文", out)
+        self.assertIn("ping 结果", out)
+
+
 if __name__ == "__main__":
     unittest.main()

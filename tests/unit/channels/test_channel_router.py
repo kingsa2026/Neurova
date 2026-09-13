@@ -18,14 +18,18 @@ from neurova.channels.manager import ChannelManager
 
 
 class FakeAgent:
-    def __init__(self, reply="pong", reasoning=""):
+    def __init__(self, reply="pong", reasoning="", tools=None):
         self.reply = reply
         self.reasoning = reasoning
+        self.tools = tools or []
         self.calls = []
 
     @property
     def current_reasoning(self):
         return self.reasoning
+
+    def get_tool_messages_snapshot(self):
+        return list(self.tools)
 
     async def chat(self, user_input, session_id=None, metadata=None, **kw):
         self.calls.append({"user_input": user_input, "session_id": session_id, "metadata": metadata})
@@ -38,8 +42,10 @@ class _CfgAdapter:
         self.config = SimpleNamespace(extra=extra)
         self.channel_type = "feishu"
         self.is_connected = True
+        self.sent = []
 
     async def send_message(self, chat_id, content, message_type="text", **kw):
+        self.sent.append(content)
         return "mid"
 
 
@@ -65,7 +71,7 @@ async def test_handler_routes_to_agent_and_returns_reply(manager):
     handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
     msg = _msg("嗨")
     reply = await handler(msg)
-    assert reply == "你好，我是Neurova"
+    assert reply == ["你好，我是Neurova"]
     assert agent.calls[0]["user_input"] == "嗨"
     # session 用 manager 的固定作用域键（agent+渠道+chat）
     assert agent.calls[0]["session_id"] == manager.resolve_session_scope_id(msg)
@@ -133,13 +139,13 @@ async def test_dispatch_sends_reply_back_to_channel(manager, monkeypatch):
 # ------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_show_thinking_prepends_reasoning(manager):
+async def test_show_thinking_sends_reasoning_as_separate_part(manager):
+    """2026-09-14 需求：思考过程/正文分条消息，不再拼成一条大消息。"""
     agent = FakeAgent("答案", reasoning="先分析问题再回答")
     manager._adapters["feishu"] = _CfgAdapter({"show_thinking": True})
     handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
-    reply = await handler(_msg("你好"))
-    assert "先分析问题再回答" in reply and "答案" in reply
-    assert reply.index("思考过程") < reply.index("答案")
+    parts = await handler(_msg("你好"))
+    assert parts == ["💭 思考过程：\n先分析问题再回答", "答案"]
 
 
 @pytest.mark.asyncio
@@ -148,7 +154,49 @@ async def test_show_thinking_off_excludes_reasoning(manager):
     manager._adapters["feishu"] = _CfgAdapter({"show_thinking": False})
     handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
     reply = await handler(_msg("你好"))
-    assert reply == "答案"
+    assert reply == ["答案"]
+
+
+@pytest.mark.asyncio
+async def test_show_tool_messages_sends_tool_summary_part(manager):
+    """show_tool_messages 开：工具调用单独一条摘要消息，夹在思考与正文之间。"""
+    tools = [
+        {"type": "tool_call", "tool_name": "web_search", "params": {"query": "AI新闻"}, "task_name": "搜中文AI新闻"},
+        {"type": "tool_result", "tool_name": "web_search", "content": "{}", "success": True},
+        {"type": "tool_call", "tool_name": "rss_read", "params": {"url": "https://x"}},
+    ]
+    agent = FakeAgent("答案", reasoning="思考", tools=tools)
+    manager._adapters["feishu"] = _CfgAdapter({"show_thinking": True, "show_tool_messages": True})
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+    parts = await handler(_msg("你好"))
+    assert len(parts) == 3, "思考/工具/正文 三条"
+    assert parts[0].startswith("💭")
+    assert parts[1].startswith("🔧")
+    assert "web_search" in parts[1] and "搜中文AI新闻" in parts[1]
+    assert "rss_read" in parts[1]
+    assert "tool_result" not in parts[1]  # 只列调用，不刷结果 JSON
+    assert parts[2] == "答案"
+
+
+@pytest.mark.asyncio
+async def test_tool_messages_hidden_by_default(manager):
+    """show_tool_messages 默认关：有工具记录也不发摘要条。"""
+    tools = [{"type": "tool_call", "tool_name": "web_search", "params": {}}]
+    agent = FakeAgent("答案", tools=tools)
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+    parts = await handler(_msg("你好"))
+    assert parts == ["答案"]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_sends_each_part_in_order(manager):
+    """manager._dispatch_message 支持 handler 返回多条：按序逐条回发。"""
+    agent = FakeAgent("答案", reasoning="思考")
+    adapter = _CfgAdapter({"show_thinking": True})
+    manager._adapters["feishu"] = adapter
+    channel_router.install_channel_router(manager, agent_lookup=lambda aid: agent)
+    await manager._dispatch_message(_msg("你好"))
+    assert adapter.sent == ["💭 思考过程：\n思考", "答案"]
 
 
 @pytest.mark.asyncio
@@ -168,7 +216,7 @@ async def test_group_require_mention_without_mention_skips(manager):
     assert await handler(_msg("随便聊天", chat_type="group")) is None
     # 带 @ 或 mentions 元数据则放行
     m = _msg("@机器人 你好", chat_type="group")
-    assert await handler(m) == "pong"
+    assert await handler(m) == ["pong"]
 
 
 @pytest.mark.asyncio

@@ -124,3 +124,39 @@ class TestDegradeDetection:
         )
         assert resp.content == "降级回答"
         assert call_count["n"] == 2
+
+
+class TestDictToolCallsGateSignature:
+    """2026-09-14 飞书"全是代码+无成品答案"事故根因。
+
+    LLMResponse.tool_calls 的契约是 List[Dict]（llm_client.py 把 SDK 对象转 dict，
+    base.py 执行链也按 dict 访问），但 _predict_normal 非流式路径的门控签名
+    用 tc.name/tc.arguments 属性访问 → AttributeError: 'dict' object has no
+    attribute 'name' → chat_pipeline 整轮回退 legacy 单发，工具环丢失，
+    模型工具调用以原始 XML 泄漏进正文。流式路径（pending_tool_calls）已按
+    dict 访问，本用例锁定非流式路径同契约。
+    """
+
+    def test_dict_tool_calls_survive_gate_and_execute(self):
+        loop = make_loop()
+        dict_calls = [
+            {"id": "c1", "function": {"name": "web_search", "arguments": '{"query":"news"}'}},
+            {"id": "c2", "function": {"name": "rss_read", "arguments": '{"url":"https://x"}'}},
+        ]
+        first = SimpleNamespace(
+            content="", reasoning_content=None, tool_calls=dict_calls, finish_reason="tool_calls"
+        )
+        final = SimpleNamespace(
+            content="成品答案", reasoning_content=None, tool_calls=None, finish_reason="stop"
+        )
+        n = {"calls": 0}
+
+        class TwoStepLLM:
+            async def chat(self, **params):
+                n["calls"] += 1
+                return first if n["calls"] == 1 else final
+
+        loop.llm_client = TwoStepLLM()
+        resp = asyncio.run(loop._predict_normal({"messages": [{"role": "user", "content": "hi"}]}))
+        assert resp.content == "成品答案", "dict 型 tool_calls 不得炸掉循环，须执行工具后回喂 LLM"
+        assert n["calls"] == 2, "第一轮 tool_calls → 执行 → 第二轮合成，共 2 次 LLM 调用"

@@ -118,8 +118,11 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
             text = str(resp or "")
         text = text.strip()
 
-        # show_thinking 传导：把本轮思考过程（agent.current_reasoning，ContextVar）
-        # 拼到回复前——此前渠道从不转发思考，飞书"没收到思考过程"即此断链。
+        # 2026-09-14 需求：思考/工具/正文拆成独立消息条（此前全拼一条大消息，
+        # 思考过程混在正文里）。顺序：思考 → 工具摘要 → 正文。
+        parts: list = []
+        # show_thinking 传导：本轮思考过程（agent.current_reasoning，ContextVar）
+        # 单独一条——此前渠道从不转发思考，飞书"没收到思考过程"即此断链。
         if _flag(cfg.get("show_thinking"), default=True):
             reasoning = ""
             try:
@@ -127,8 +130,28 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
             except Exception:
                 reasoning = ""
             if reasoning:
-                text = f"💭 思考过程：\n{reasoning}\n\n{text}" if text else f"💭 思考过程：\n{reasoning}"
-        return text or None
+                parts.append(f"💭 思考过程：\n{reasoning}")
+        # show_tool_messages 传导：本轮工具调用单条摘要（只列调用，不刷结果 JSON）。
+        if _flag(cfg.get("show_tool_messages")):
+            try:
+                snap = agent.get_tool_messages_snapshot() if hasattr(agent, "get_tool_messages_snapshot") else []
+            except Exception:
+                snap = []
+            call_records = [r for r in (snap or []) if isinstance(r, dict) and r.get("type") == "tool_call"]
+            if call_records:
+                lines = []
+                for r in call_records:
+                    name = str(r.get("tool_name") or r.get("name") or "工具")
+                    label = str(r.get("task_name") or "").strip()
+                    if not label:
+                        for v in (r.get("params") or {}).values():
+                            label = str(v).strip()[:40]
+                            break
+                    lines.append(f"• {name}（{label}）" if label else f"• {name}")
+                parts.append("🔧 本轮工具调用：\n" + "\n".join(lines))
+        if text:
+            parts.append(text)
+        return parts or None
 
     return _handler
 
