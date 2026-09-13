@@ -468,6 +468,17 @@ class ToolExecutor:
     # 避免正则贪婪/非贪婪在嵌套与多尾标场景下的跨对象吞并
     _TRAILER_MARKER_RE = re.compile(r"\[END_TOOL_REQUEST\]")
     _CODE_FENCE_RE = re.compile(r"```|~~~")
+    # 第四形态（2026-09-14 飞书事故）：Hermes 原生格式，qwen3.8-flash 等模型
+    # 把工具调用以 <tool_call><function=NAME><parameter=K>V</parameter>… 纯文本
+    # 漏出，前三文法均不覆盖 → 调用不执行、原始 XML 直进正文。
+    _HERMES_RE = re.compile(
+        r"\u003c\|tool_call\|\u003e\s*\u003cfunction=([A-Za-z0-9_.:-]+)\u003e(.*?)\u003c/function\u003e\s*\u003c\|/tool_call\|\u003e",
+        re.DOTALL,
+    )
+    _HERMES_PARAM_RE = re.compile(
+        r"\u003cparameter=([A-Za-z0-9_.:-]+)\u003e\s*(.*?)\s*\u003c/parameter\u003e",
+        re.DOTALL,
+    )
 
     def _protected_ranges(self, text: str):
         """code fence 围栏区（成对 ``` / ~~~ 之间）——保护用户示例原文。"""
@@ -545,6 +556,13 @@ class ToolExecutor:
                 continue
             calls.append({"name": m.group(1), "arguments": args, "raw": m.group(0)})
 
+        for m in self._HERMES_RE.finditer(reply):
+            if self._in_protected(m.start(), protected):
+                continue
+            # parameter 子标签值是换行文本（非 JSON）；无参数 → 空 dict
+            args = dict(self._HERMES_PARAM_RE.findall(m.group(2)))
+            calls.append({"name": m.group(1), "arguments": args, "raw": m.group(0)})
+
         for m in self._HARMONY_RE.finditer(reply):
             if self._in_protected(m.start(), protected):
                 continue
@@ -591,6 +609,13 @@ class ToolExecutor:
 
         if not matches and not repaired:
             return reply
+
+        # 剥离协议噪声（2026-09-14 飞书"全是代码"事故）：泄漏的调用原文是协议
+        # 内容而非用户产物，执行后不得留在回复里发给渠道/控制台；正文保留，
+        # 结果以 **工具 结果** 追加。
+        for call in repaired:
+            reply = reply.replace(call["raw"], "")
+        reply = re.sub(pattern, "", reply).strip()
 
         results = []
         # 修复调用与原生标记调用共用执行链；结果同样入 _tool_messages_list
