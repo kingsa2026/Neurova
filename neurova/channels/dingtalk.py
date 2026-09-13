@@ -235,6 +235,11 @@ class DingTalkAdapter(ChannelAdapter):
 
             # 保存 session_webhook 用于回复
             channel_msg.metadata["session_webhook"] = data.get("sessionWebhook", "")
+            # @提及信息（供 require_mention 判定）：atUsers 列表 + isInAtList
+            channel_msg.metadata["at_users"] = data.get("atUsers", []) or []
+            channel_msg.metadata["is_in_at_list"] = bool(data.get("isInAtList", False))
+            if channel_msg.metadata["at_users"]:
+                channel_msg.metadata["mentions"] = channel_msg.metadata["at_users"]
 
             # 同步回调转异步
             # 修复 P0-5 (C4): 用 _main_loop 引用 + run_coroutine_threadsafe 调度到主 loop
@@ -265,12 +270,20 @@ class DingTalkAdapter(ChannelAdapter):
                 _cfg_meta = getattr(self.config, "metadata", None) or self.config.extra or {}
                 if _cfg_meta.get("message_type") == "markdown":
                     message_type = "markdown"
-            # 优先使用 session_webhook 回复（Stream 模式）
-            session_webhook = kwargs.get("session_webhook", "")
+            reply_meta = kwargs.get("reply_metadata") or {}
+            # 优先 session_webhook 回复（Stream 模式，单聊/群聊皆可）；此前 dispatch
+            # 不传 → 恒空 → 群聊误落 oToMessages/batchSend(userIds=[conversationId])
+            # 必失败被吞。现从回发上下文 metadata 取。
+            session_webhook = kwargs.get("session_webhook", "") or reply_meta.get("session_webhook", "")
             if session_webhook:
-                return await self._send_via_session_webhook(session_webhook, content, message_type)
+                return await self._send_via_session_webhook(
+                    session_webhook, content, message_type, at_user_id=kwargs.get("at_user_id", ""))
 
-            # 使用 Access Token API
+            # 群聊无 session_webhook → 走群消息 API（openConversationId），不再误用单聊 API
+            if kwargs.get("chat_type") == "group":
+                return await self.send_group_message(chat_id, content, message_type)
+
+            # 使用 Access Token API（单聊）
             if not self._access_token or time.time() > self._token_expires_at:
                 await self._refresh_access_token()
 
@@ -284,8 +297,9 @@ class DingTalkAdapter(ChannelAdapter):
             logger.exception("DingTalk send error: %s", e)
             return None
 
-    async def _send_via_session_webhook(self, webhook_url: str, content: str, message_type: str) -> Optional[str]:
-        """通过 session webhook 发送回复"""
+    async def _send_via_session_webhook(self, webhook_url: str, content: str, message_type: str,
+                                        at_user_id: str = "") -> Optional[str]:
+        """通过 session webhook 发送回复（群聊可 @ 提问者）"""
         import aiohttp
 
         payload = {
@@ -298,6 +312,9 @@ class DingTalkAdapter(ChannelAdapter):
             payload["markdown"] = {"title": "回复", "text": content}
         else:
             payload["text"] = {"content": content}
+        # 群回复@提问者：钉钉 session webhook 的 at.atUserIds（senderStaffId）
+        if at_user_id:
+            payload["at"] = {"atUserIds": [at_user_id], "isAtAll": False}
 
         async with aiohttp.ClientSession() as session:
             async with session.post(webhook_url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp:
