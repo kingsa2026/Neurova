@@ -33,6 +33,7 @@
         >
           <span class="nr-session-icon"><UiIcon name="chat" :size="14" /></span>
           <span class="nr-session-name">{{ session.title }}</span>
+          <span v-if="session.sourceChannel" class="nr-session-channel" :title="session.channelName || session.sourceChannel">{{ session.sourceChannel }}</span>
           <a-dropdown :trigger="['click']" :get-popup-container="getPopupContainer" @click.stop>
             <span class="nr-session-menu-btn" @click.stop>⋯</span>
             <template #overlay>
@@ -161,6 +162,20 @@ const {
   flex: 1;
   font-size: 13px;
   color: var(--nr-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nr-session-channel {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 6px;
+  margin-right: 4px;
+  border-radius: 8px;
+  color: var(--nr-primary-light, #6366f1);
+  background: rgba(99, 102, 241, 0.12);
+  max-width: 72px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

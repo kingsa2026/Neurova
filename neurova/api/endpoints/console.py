@@ -262,6 +262,15 @@ class _AgentRunLedger:
                 if claimed == run_id:
                     self.run_id, self._store = run_id, store
                     return events
+                # P1-#8：排队等待期消费持久取消意图（/chat/stop 对 queued 行
+                # 打标即在此被吸收——stopped+done 收尾，行弃列为 cancelled）
+                if await asyncio.to_thread(store.cancel_requested, run_id):
+                    await asyncio.to_thread(store.abandon, run_id, "user_stopped_while_queued")
+                    self.run_id = None
+                    events.append({"type": "stopped", "session_id": self.session_id})
+                    events.append({"type": "done", "session_id": self.session_id})
+                    self.rejected = True
+                    return events
                 now = time.monotonic()
                 if now - last_note >= 1.0:
                     pos = await asyncio.to_thread(store.queued_position, run_id)
@@ -1018,6 +1027,8 @@ async def get_chat_sessions(
             "updated_at": s.get("updated_at", ""),
             "pinned": bool(s.get("pinned", False)),
             "sort_order": int(s.get("sort_order", 0) or 0),
+            "source_channel": s.get("source_channel", ""),
+            "channel_name": s.get("channel_name", ""),
         }
         for s in sessions
     ]

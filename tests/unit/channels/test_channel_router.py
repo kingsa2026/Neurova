@@ -70,7 +70,7 @@ async def test_handler_routes_to_agent_and_returns_reply(manager):
     # session 用 manager 的固定作用域键（agent+渠道+chat）
     assert agent.calls[0]["session_id"] == manager.resolve_session_scope_id(msg)
     md = agent.calls[0]["metadata"]
-    assert md["user_id"] == "ou_9"
+    assert md["channel_user_id"] == "ou_9"  # 渠道侧身份入 metadata（会话属主走 ContextVar）
     assert md["source_channel"] == "feishu"
 
 
@@ -215,3 +215,22 @@ async def test_dispatch_forwards_reply_kwargs(manager):
     assert seen.get("at_user_id") == "ou_55"
     assert seen.get("chat_type") == "group"
     assert "agent_id" not in seen, "agent_id 用于查实例，不透传适配器"
+
+
+@pytest.mark.asyncio
+async def test_session_owned_by_agent_owner_via_request_context(manager):
+    """阶段4.1：agent.chat 期间请求上下文 user = agent.owner_user_id（会话归管理员）。"""
+    from neurova.core.identity_context import get_request_user_id
+    seen = {}
+
+    class OwnerAgent(FakeAgent):
+        owner_user_id = "admin-77"
+        async def chat(self, user_input, session_id=None, metadata=None, **kw):
+            seen["req_user"] = get_request_user_id()
+            return {"text": "ok"}
+
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: OwnerAgent())
+    await handler(_msg("嗨"))
+    assert seen["req_user"] == "admin-77"
+    # chat 结束后清除，不污染后续
+    assert get_request_user_id() in (None, "")

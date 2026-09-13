@@ -95,6 +95,8 @@ export function useChat(options: UseChatOptions = {}) {
           title: s.title || s.name || i18n.global.t('ui.newConversation'),
           updatedAt: s.created_at || s.updated_at,
           pinned: !!s.pinned,
+          sourceChannel: s.source_channel || '',
+          channelName: s.channel_name || '',
         }),
       )
       store.setSessions(mapped)
