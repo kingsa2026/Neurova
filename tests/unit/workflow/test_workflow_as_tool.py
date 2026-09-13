@@ -137,3 +137,64 @@ class TestToolExecutorWiring:
         result_dict, success, source = result
         assert success is True, result_dict
         assert source == "workflow_tool"
+
+
+class TestInputsSchemaSupport:
+    """批次5 验收发现的全量模板断点：start 入参声明有两种形态——
+
+    内置 8 个模板（media/writing/…/short_drama）用 ``inputs_schema``（dict），
+    而 workflow_as_tool 两处消费方只认 ``fields``（list）→ Agent 工具的
+    parameters 恒空、必填校验失效。修复后两种形态等价。
+    """
+
+    def _make_wf_inputs_schema(self):
+        from neurova.collaboration.neurflow.models import (
+            WorkflowDefinition, WorkflowNode, WorkflowEdge, WorkflowStatus,
+        )
+        import time as _t
+        return WorkflowDefinition(
+            id="wf_is_1", name="短剧一键成片", description="主题→成片", version="1.0.0",
+            nodes=[
+                WorkflowNode(id="s", type="builtin:start", position={"x": 0, "y": 0}, config={
+                    "inputs_schema": {
+                        "theme": {"type": "textarea", "required": True, "description": "一句话主题"},
+                        "style": {"type": "input", "default": "cinematic"},
+                        "episodes": {"type": "slider", "default": 1},
+                        "with_audio": {"type": "toggle", "default": True},
+                    },
+                }),
+                WorkflowNode(id="e", type="builtin:end", position={"x": 100, "y": 0}, config={}),
+            ],
+            edges=[WorkflowEdge(id="e1", source="s", target="e")],
+            variables=[], tags=[], category="media", author="t",
+            created_at=_t.time(), updated_at=_t.time(), status=WorkflowStatus.PUBLISHED,
+        )
+
+    def test_schema_from_inputs_schema_dict(self):
+        from neurova.collaboration.neurflow.workflow_as_tool import build_workflow_tool_schema
+
+        s = build_workflow_tool_schema(self._make_wf_inputs_schema())
+        props = s["parameters"]["properties"]
+        assert set(props) == {"theme", "style", "episodes", "with_audio"}
+        assert props["theme"]["description"] == "一句话主题"
+        assert s["parameters"]["required"] == ["theme"]
+        # 类型规一：slider→number、toggle→boolean
+        assert props["episodes"]["type"] == "number"
+        assert props["with_audio"]["type"] == "boolean"
+
+    def test_required_validation_honours_inputs_schema(self):
+        from neurova.collaboration.neurflow.workflow_as_tool import _validate_required_inputs
+
+        wf = self._make_wf_inputs_schema()
+        err = _validate_required_inputs(wf, {"style": "x"})
+        assert err and "theme" in err
+        assert _validate_required_inputs(wf, {"theme": "龙王归来"}) is None
+
+    def test_builtin_short_drama_template_schema(self):
+        from neurova.collaboration.neurflow.templates.short_drama import get_short_drama_template
+        from neurova.collaboration.neurflow.workflow_as_tool import build_workflow_tool_schema
+
+        s = build_workflow_tool_schema(get_short_drama_template())
+        props = s["parameters"]["properties"]
+        assert {"theme", "genre", "style", "aspect_ratio", "image_provider"} <= set(props)
+        assert s["parameters"]["required"] == ["theme"]

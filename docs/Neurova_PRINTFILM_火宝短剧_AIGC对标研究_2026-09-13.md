@@ -40,8 +40,9 @@
 | 4a | `feat(neurflow): 引擎+节点成真` | loop items_from 数组迭代；canvas_bridge sync_all 时序修复；storyboard LLM 分镜+风格注入；voice-over 真 TTS；scene-gen/voice-over 批量扇出；video-compose 禁假文件名（FFmpeg concat / slideshow manifest）；external_api await 修复；短剧模板+启动种子 |
 | 4b | `feat(aigc): 创作Tab打通画布` | useWorkflowRun（实例化→run/stream→SSE→产物）；AIGC 创作 Tab + SlideshowPlayer；WorkflowPage 从模板新建；dock video 全链路 |
 | 5 | `feat(aigc): FFmpeg 自动下载` | FFmpeg 决策落地：**不打包**，首次启动后台自动下载——core/ffmpeg.py 引导器（npmmirror 主源 + GitHub ffmpeg-static 回退，单文件免解压，`-version` 真实校验才就位，NEUROVA_FFMPEG_AUTODOWNLOAD=0 可关）；compose 解析顺序 显式路径>env>托管件>PATH；实测 2.9s/77.4MB 下载+真拼接全链路通过 |
+| 6 | `fix(aigc): 验收闭环修复` | 全量核验 + Live HTTP 闭环（注册→种子→实例化→执行→产物）发现并根治 **3 个真断点**：① end 节点 `output_mapping` 从未被消费（8 个内置模板恒声明，execution.outputs 恒裸输出）→ 引擎按映射组装结构化产物；② drama/comfyui/commerce 执行器未注册时**静默假成功**（模板 execute 路径不触发 sync_all，产物恒 None）→ 引擎惰性补偿同步 + 仍无执行器诚实节点失败 + 启动预注册；③ workflow_as_tool 只认 `fields` 列表而全模板用 `inputs_schema` 字典 → Agent 工具入参恒空/必填校验失效 → 双形态规一单源（含类型映射 select/slider/toggle→string/number/boolean+enum）。前端 useWorkflowRun 兼容 outputs.result 信封 |
 
-测试终态：后端生成链/画布链/渠道全量绿（仅 3 条**预存**失败经 worktree 基线甄别：cron trigger dispatch、evolution 节点签名 ×2，与本次改动面不相交）；前端 vue-tsc 0 错、vitest 1428 全绿。
+测试终态：后端全量 unit+api **14218 通过**（10 失败全部位于本次改动面之外且经 worktree 基线甄别为既有/环境性：embedding onnx ×2、cron ×1、evolution ×2、weather ×2、tools ×3）；前端 vue-tsc 0 错、vitest 1432 全绿。**Live 闭环 ALL PASS**：临时实例（空 CWD 隔离，顺带验证 P1-8 绝对路径）上 注册→模板种子→实例化→run/stream 执行→分镜 2 镜+逐镜产物（无凭据诚实占位）+ 风格注入验证 + 连播清单 + 账本端点 + 产物匿名 401，全链真实走通。
 
 ## 5. 缓后台账（登记不修）
 
