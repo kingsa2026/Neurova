@@ -101,14 +101,6 @@ class WeChatILinkAdapter(ChannelAdapter):
         except (OSError, IOError):
             return ""
 
-    def _save_token_file(self) -> None:
-        try:
-            Path(self._token_file).parent.mkdir(parents=True, exist_ok=True)
-            Path(self._token_file).write_text(self._bot_token, encoding="utf-8")
-            logger.info("iLink bot_token 已持久化: %s", self._token_file)
-        except OSError as e:
-            logger.warning("iLink bot_token 持久化失败: %s", e)
-
     def _load_context_tokens(self) -> None:
         try:
             if self._context_file.exists():
@@ -145,9 +137,6 @@ class WeChatILinkAdapter(ChannelAdapter):
             await self._client.stop()
             self._connected = False
             return False
-        # 表单直填的 token（非扫码路径）也落盘，重启免再扫码
-        if not self._read_token_file():
-            self._save_token_file()
         self._connected = True
         self._stop_event = asyncio.Event()
         self._poll_task = asyncio.create_task(self._poll_loop())
