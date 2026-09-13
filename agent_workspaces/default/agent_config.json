@@ -1,7 +1,7 @@
 {
   "name": "Neurova",
   "description": "",
-  "model": "glm-5.3-flash",
+  "model": "qwen3.8-flash",
   "provider": "bai",
   "temperature": 0.7,
   "personality": "",

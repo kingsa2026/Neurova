@@ -701,6 +701,33 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["code"],
         },
     },
+    "exec_command": {
+        "description": "【会话式命令执行】启动一个常驻 shell 命令/进程并等待 yield_time_ms 毫秒：已完成直接返回输出与退出码（status=completed）；未结束返回 session_id（status=running），之后用 write_stdin 向该会话写输入或轮询新输出。适合构建、测试、dev server、交互式脚本等长任务。【何时不用】一次性快速命令用 computer_shell；跑 Python 数据处理用 run_code；需要远程机器用 computer_ssh_exec。",
+        "sandbox_required": True,
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "要执行的 shell 命令"},
+                "workdir": {"type": "string", "description": "工作目录（相对路径锚定 agent 工作区，缺省为工作区根）"},
+                "yield_time_ms": {"type": "integer", "description": "等待毫秒数（250-30000，超时未结束则返回 session_id 继续后台运行，默认 1000）"},
+                "max_output_tokens": {"type": "integer", "description": "返回输出 token 上限（超出保留首尾并标注，默认 10000）"},
+            },
+            "required": ["command"],
+        },
+    },
+    "write_stdin": {
+        "description": "【会话输入/轮询】向 exec_command 返回的 session_id 会话写入文本（自动补换行）并等待新输出；chars 传空串表示纯轮询输出。进程结束后返回 exit_code。【何时不用】没有进行中的 exec_command 会话时不要调用。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "integer", "description": "exec_command 返回的会话 id"},
+                "chars": {"type": "string", "description": "要写入的文本（空串=纯轮询；写命令时以 \\n 结尾或自动补）"},
+                "yield_time_ms": {"type": "integer", "description": "等待毫秒数（250-30000，默认 1000）"},
+                "max_output_tokens": {"type": "integer", "description": "返回输出 token 上限（默认 10000）"},
+            },
+            "required": ["session_id"],
+        },
+    },
     "calculator": {
         "description": "【计算器】精确计算数学表达式。支持 + - * / // % **、括号，以及 sqrt/abs/round/min/max/sin/cos/tan/log/floor/ceil 函数和 pi/e 常量。涉及数值计算时应调用此工具，不要心算，避免算术错误。",
         "parameters": {
@@ -709,6 +736,28 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "expression": {"type": "string", "description": "数学表达式，如 (1+2)*3、sqrt(16)、round(pi*2, 2)"},
             },
             "required": ["expression"],
+        },
+    },
+    "update_plan": {
+        "description": "【任务计划】维护当前任务的步骤清单（todo list）：复杂/多阶段任务开工前建立计划，每完成一步立即更新状态，计划变化时说明原因。约束：同一时刻至多一个 in_progress。【何时不用】简单单步任务不要建计划。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "explanation": {"type": "string", "description": "计划或状态变化的简要说明（可选）"},
+                "plan": {
+                    "type": "array",
+                    "description": "步骤清单（全量提交，覆盖上一版计划）",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "step": {"type": "string", "description": "步骤内容"},
+                            "status": {"type": "string", "description": "pending / in_progress / completed", "enum": ["pending", "in_progress", "completed"]},
+                        },
+                        "required": ["step", "status"],
+                    },
+                },
+            },
+            "required": ["plan"],
         },
     },
     "get_datetime": {
@@ -903,6 +952,8 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "computer_screenshot", "computer_som_snapshot", "computer_dom_snapshot",
     "browser_click", "browser_click_role", "browser_fill_role",
     "browser_type", "browser_navigate", "browser_screenshot",
+    # 会话式 shell：进程输出不可重放（重跑时系统状态已变）
+    "exec_command", "write_stdin",
     # 子代理派生：spawn 有副作用
     "spawn_subagent",
 })

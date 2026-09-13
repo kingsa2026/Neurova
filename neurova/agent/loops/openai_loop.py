@@ -404,6 +404,27 @@ class OpenAILoop(BaseAgentLoop):
             # 执行工具
             tool_messages = await self.handle_tool_calls(tool_calls, request_params["messages"])
 
+            # P2-6（Codex encrypted reasoning 回放对齐）：工具轮间回放推理链。
+            # 默认关（NEUROVA_REASONING_REPLAY=1 开）+ 能力门——DeepSeek 等
+            # provider 禁止回传 reasoning_content，盲目回放是兼容回归。
+            if reasoning_content:
+                try:
+                    from neurova.agent.loops.reasoning_replay import (
+                        build_reasoning_assistant_message,
+                        should_replay_reasoning,
+                    )
+
+                    if should_replay_reasoning(
+                        str(getattr(self.agent.config, "llm_model", "") or "")
+                    ):
+                        request_params["messages"].append(
+                            build_reasoning_assistant_message(
+                                reasoning_content, tool_calls=tool_calls
+                            )
+                        )
+                except Exception:  # noqa: BLE001 - 回放失败不影响工具轮
+                    logger.debug("reasoning 回放失败(忽略)", exc_info=True)
+
             # 将工具结果添加到消息
             request_params["messages"].extend(tool_messages)
 

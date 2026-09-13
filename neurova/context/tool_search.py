@@ -6,7 +6,7 @@
 - 检索为静态 BM25（Okapi K1=1.2, B=0.75），零学习信号（与 OC 同构；
   学习信号在工具权重棘轮层，两层正交）
 - tool_call 经 ToolExecutor 正常执行——治理预检/审批/肌肉记忆全链路生效
-- 激活条件：NEUROVA_TOOL_SEARCH=1 且工具数 > NEUROVA_TOOL_SEARCH_MIN_CATALOG（默认 40）
+- 激活条件（P1-5 默认激活）：NEUROVA_TOOL_SEARCH!=0 且隐藏候选 > NEUROVA_TOOL_SEARCH_MIN_CATALOG（默认 40）；=0 显式关闭
 
 控制工具的执行由 ToolExecutor.execute 入口拦截（见该文件 A6 注释）。
 """

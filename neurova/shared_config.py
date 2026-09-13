@@ -69,7 +69,15 @@ class SharedConfigManager:
         if self._config_path.exists():
             try:
                 with open(self._config_path, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    config = json.load(f)
+                # P2-3：密文 api_key 解密（存量明文原样兼容）
+                try:
+                    from neurova.security.secret_store import decrypt_config_secrets
+
+                    decrypt_config_secrets(config)
+                except Exception:  # noqa: BLE001
+                    pass
+                return config
             except Exception as e:
                 logger.error("加载配置文件失败: %s", e)
 
@@ -152,12 +160,21 @@ class SharedConfigManager:
         }
 
     def _save_config(self) -> None:
-        """保存配置"""
+        """保存配置（P2-3：api_key 写侧加密落盘，内存态保持明文）"""
         try:
             self._config["last_updated"] = datetime.datetime.now().isoformat()
 
+            import copy as _copy
+
+            try:
+                from neurova.security.secret_store import encrypt_config_secrets
+
+                persist = encrypt_config_secrets(_copy.deepcopy(self._config))
+            except Exception:  # noqa: BLE001
+                persist = self._config
+
             with open(self._config_path, "w", encoding="utf-8") as f:
-                json.dump(self._config, f, ensure_ascii=False, indent=2)
+                json.dump(persist, f, ensure_ascii=False, indent=2)
 
             logger.debug("配置已保存")
         except Exception as e:
