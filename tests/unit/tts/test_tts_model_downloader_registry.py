@@ -83,7 +83,9 @@ class TestIsModelAvailable:
         model_dir = tmp_path / MODEL_REGISTRY["moss-tts-nano"]["local_dir"]
         for f in MODEL_REGISTRY["moss-tts-nano"]["required_files"]:
             (model_dir / f).parent.mkdir(parents=True, exist_ok=True)
-            (model_dir / f).touch()
+            # DATA-P1-4：现行契约要求非零尺寸（touch 0 字节=截断文件，
+            # is_model_available 判不可用）。残留处理 2026-09-13
+            (model_dir / f).write_bytes(b"x")
         assert d.is_model_available("moss-tts-nano") is True
 
     def test_not_available_when_core_onnx_missing(self, tmp_path):

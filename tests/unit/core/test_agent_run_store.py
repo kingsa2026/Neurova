@@ -188,3 +188,24 @@ def test_singleton_and_reset(tmp_path, monkeypatch):
     s2 = mod.get_agent_run_store()
     assert s1 is s2
     mod.reset_agent_run_store()
+
+
+# ── P1 #8：取消意图覆盖 queued 行（排队中可停）─────────────────────
+
+def test_request_cancel_marks_queued_when_no_running(store):
+    r1 = store.intake("s1", "u", "a", "1")
+    r2 = store.intake("s1", "u", "a", "2")
+    # 无 active run：意图落到全部 queued 行
+    assert store.request_cancel("s1") == r1
+    assert store.cancel_requested(r1) and store.cancel_requested(r2)
+    # 有 active run：running 行优先且 queued 行同样打标（整棵等待树可停）
+    assert store.claim_next("s1", "w") == r1
+    r3 = store.intake("s1", "u", "a", "3")
+    assert store.request_cancel("s1") == r1
+    assert store.cancel_requested(r1) and store.cancel_requested(r3)
+
+
+def test_request_cancel_idempotent_returns_first(store):
+    r1 = store.intake("s1", "u", "a", "1")
+    assert store.request_cancel("s1") == r1
+    assert store.request_cancel("s1") == r1  # 重放幂等

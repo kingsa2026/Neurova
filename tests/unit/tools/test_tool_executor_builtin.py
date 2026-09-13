@@ -483,13 +483,14 @@ class TestBuiltinToolExecutor:
             name = "file_operation"
             config = {}
 
-            async def execute(self, params, context=None):
-                captured["params"] = dict(params)
-                return {"success": True}
+        async def _capture_execute_skill(skill_name, params, context=None):
+            captured["params"] = dict(params)
+            return {"success": True}
 
         registry = Mock()
         registry.has_skill.return_value = True
-        registry.get_skill.return_value = _CaptureSkill()
+        registry.skills = {"file_operation": _CaptureSkill()}
+        registry.execute_skill = _capture_execute_skill
         executor._agent._skill_registry = registry
 
         # builtin 注册表查不到该名（file_operation 是技能面工具）
@@ -516,13 +517,14 @@ class TestBuiltinToolExecutor:
             name = "memory"
             config = {}
 
-            async def execute(self, params, context=None):
-                captured["params"] = dict(params)
-                return {"success": True}
+        async def _capture_execute_skill(skill_name, params, context=None):
+            captured["params"] = dict(params)
+            return {"success": True}
 
         registry = Mock()
         registry.has_skill.return_value = True
-        registry.get_skill.return_value = _CaptureSkill()
+        registry.skills = {"memory": _CaptureSkill()}
+        registry.execute_skill = _capture_execute_skill
         executor._agent._skill_registry = registry
 
         with patch("neurova.tool_executor.get_builtin_tool_params", return_value=None):

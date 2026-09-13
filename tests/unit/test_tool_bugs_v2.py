@@ -93,6 +93,9 @@ class TestN4GetToolMessagesWrongList:
         mock_agent._tool_messages_list = [
             {"role": "tool", "tool_call_id": "call_1", "content": "result_1"},
         ]
+        # P0-B1：轮次状态已迁 ContextVar，实现读 agent 公有快照 API——
+        # mock 桥接（残留处理 2026-09-13）
+        mock_agent.get_tool_messages_snapshot = lambda: mock_agent._tool_messages_list
         executor = ToolExecutor(mock_agent)
 
         msgs = executor.get_tool_messages()
@@ -108,6 +111,7 @@ class TestN4GetToolMessagesWrongList:
         mock_agent._tool_messages_list = [
             {"role": "tool", "tool_call_id": "call_agent", "content": "from_agent"},
         ]
+        mock_agent.get_tool_messages_snapshot = lambda: mock_agent._tool_messages_list
         executor = ToolExecutor(mock_agent)
         # 本地列表为空（默认），agent 列表有数据
         assert len(executor._messages_list) == 0
@@ -125,6 +129,8 @@ class TestN4GetToolMessagesWrongList:
         mock_agent._tool_messages_list = [
             {"role": "tool", "tool_call_id": "call_1", "content": "result_1"},
         ]
+        # P0-B1：清空走 reset_tool_messages 公有 API（残留处理 2026-09-13）
+        mock_agent.reset_tool_messages = lambda: mock_agent._tool_messages_list.clear()
         executor = ToolExecutor(mock_agent)
 
         executor.clear_tool_messages()
@@ -218,9 +224,10 @@ class TestN5DuplicateToolResultOnException:
             m for m in mock_agent._tool_messages_list if m.get("type") == "tool_result"
         ]
         assert len(tool_results) == 1
-        # 第一次写的格式是 "执行出错: ..."，重复的第二次是 "Error: ..."
-        assert "执行出错" in tool_results[0]["result"], (
-            f"应保留第一次写的格式，实际: {tool_results[0]['result']}"
+        # 契约统一后单一失败文案（原 N5 bug=两种格式双写；现"执行失败"
+        # 为唯一格式，条数仍钉 1。残留处理 2026-09-13）
+        assert "执行失败" in tool_results[0]["result"], (
+            f"应写入统一失败文案，实际: {tool_results[0]['result']}"
         )
 
 
@@ -305,11 +312,14 @@ class TestN6StreamEventStringification:
         from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
 
         async def mock_predict(messages, tools=None, stream=True, **kwargs):
-            yield {"type": "content", "data": "Hello"}
-            yield {"type": "reasoning", "data": "thinking..."}
-            yield {"type": "tool_call", "data": {"name": "search"}}
-            yield {"type": "content", "data": " world"}
-            yield {"type": "done", "reply": "Hello world"}
+            async def aiter():
+                yield {"type": "content", "data": "Hello"}
+                yield {"type": "reasoning", "data": "thinking..."}
+                yield {"type": "tool_call", "data": {"name": "search"}}
+                yield {"type": "content", "data": " world"}
+                yield {"type": "done", "reply": "Hello world"}
+
+            return aiter()  # V2-6 契约：predict_step 为 await 后返回异步迭代器
 
         mock_agent = MagicMock()
         mock_agent.loop = MagicMock()

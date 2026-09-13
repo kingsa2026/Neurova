@@ -55,3 +55,20 @@ async def test_bot_removed_emits_event():
         await asyncio.sleep(0.01)
     assert events and events[0][0] == ChannelEventType.CHAT_BOT_REMOVED
     assert events[0][1].chat_id == "gr_gone"
+
+
+@pytest.mark.asyncio
+async def test_qq_at_rejected_falls_back_to_plain(monkeypatch):
+    """带 at 被网关拒 → 自动去 at 重发（真机核验未知格式的自愈回退）。"""
+    calls = []
+    class _Resp:
+        def __init__(self, ok): self._ok = ok; self.status_code = 200 if ok else 400; self.text = "" if ok else "invalid at"
+        def json(self): return {"id": "sent-1"} if self._ok else {}
+    def fake_post(url, json=None, headers=None, timeout=None):
+        calls.append(dict(json))
+        return _Resp("at" not in json)  # 带 at 时失败，去 at 后成功
+    monkeypatch.setattr(qq_ws.requests, "post", fake_post)
+    a = _ad(); a.access_token = "t"; a.token_expire_time = float("inf"); a._last_msg_id["gr_1"] = "M1"
+    mid = await a.send_message("gr_1", "回复", "text", chat_type="group", at_user_id="mb_9", qq_message_type="group")
+    assert mid == "sent-1"
+    assert "at" in calls[0] and "at" not in calls[1]  # 第一次带 at 被拒，第二次回退无 at

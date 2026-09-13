@@ -258,6 +258,8 @@ class TestA2ToolMessagesListFormatSplit:
 
         mock_agent = MagicMock()
         mock_agent._tool_messages_list = []
+        # P0-B1 契约桥（残留处理 2026-09-13）：写入走公有 API
+        mock_agent.append_tool_messages = lambda records: mock_agent._tool_messages_list.extend(records or [])
         executor = ToolExecutor(mock_agent)
 
         async def _execute_single_tool(name, args):
@@ -299,6 +301,7 @@ class TestA2ToolMessagesListFormatSplit:
                 "function": {"name": "search_file", "arguments": '{"q": "test"}'},
             }
         ]
+        mock_agent.append_tool_messages = lambda records: mock_agent._tool_messages_list.extend(records or [])
         asyncio.run(executor.execute_text_tool_calls(tool_calls, []))
 
         assert len(mock_agent._tool_messages_list) == 1, (
@@ -393,17 +396,16 @@ class TestA6GeneticEngineNotRegistered:
             registered_ids = set(skill_registry._skills.keys())
             assert registered_ids, "SkillRegistry 应包含注册的进化工具"
 
-            # 检查注册的 manifest 字段
-            for skill_id, (manifest, _path) in skill_registry._skills.items():
-                assert manifest.source == SkillSource.LOCAL, (
-                    f"进化工具 {skill_id} source 应为 LOCAL，实际: {manifest.source}"
+            # 检查注册的技能字段（ADR 0011：_skills 值为 Skill 对象，
+            # manifest.source 面随 class B 删除；config.tool_sequence 意图保留。
+            # 残留处理 2026-09-13）
+            for skill_id, skill in skill_registry._skills.items():
+                assert skill.config, (
+                    f"进化工具 {skill_id} config 不应为空，应携带 tool_sequence 元数据"
                 )
-                assert manifest.config, (
-                    f"进化工具 {skill_id} config 不应为空，应携带 tool_sequence/fingerprint 等元数据"
-                )
-                assert "tool_sequence" in manifest.config, (
+                assert "tool_sequence" in (skill.config or {}), (
                     f"进化工具 {skill_id} config 应包含 tool_sequence 字段，"
-                    f"实际字段: {list(manifest.config.keys())}"
+                    f"实际字段: {list((skill.config or {}).keys())}"
                 )
         finally:
             skill_registry._skills.clear()

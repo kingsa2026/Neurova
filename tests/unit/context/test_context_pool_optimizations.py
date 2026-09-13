@@ -22,6 +22,7 @@ class TestChannelManagerMessageHandler:
     def test_set_message_handler_stores_handler(self):
         """测试 set_message_handler 正确存储处理器"""
         manager = ChannelManager()
+        manager._message_handler = None  # 单例自防：清除跨套件泄漏态（残留处理 2026-09-13）
         mock_handler = AsyncMock()
         
         manager.set_message_handler(mock_handler)
@@ -32,6 +33,7 @@ class TestChannelManagerMessageHandler:
     async def test_message_handler_called_on_event(self, tmp_path):
         """测试收到消息时正确调用处理器"""
         manager = ChannelManager()
+        manager._message_handler = None  # 单例自防（残留处理 2026-09-13）
         mock_handler = AsyncMock(return_value="回复内容")
         manager.set_message_handler(mock_handler)
 

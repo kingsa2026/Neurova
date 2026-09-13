@@ -109,7 +109,7 @@ class TestStepRunEndpoint:
             created_at=_time.time(), updated_at=_time.time(),
             status=WorkflowStatus.DRAFT,
         )
-        storage.save_workflow(wf)
+        storage.save_workflow(wf, user_id="u1")  # 属主对齐请求者（P0-1 过滤，残留处理 2026-09-13）
         monkeypatch.setattr(neurflow_api, "_get_storage", lambda: storage)
 
         app = FastAPI()

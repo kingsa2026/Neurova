@@ -440,6 +440,9 @@ class TestConcurrencyAndContract:
         sid = repo.create_session("fields", user_id="u1")
         repo.add_message("fields", sid, "q", "a", user_id="u1")
         summary = repo.list_sessions(agent_id="fields")[0]
+        # +channel_name/source_channel（阶段2 统一会话底座 385991cd 扩展，
+        # 仍不含 sidecar 内部字段——泄漏检查意图不变。残留处理 2026-09-13）
         assert set(summary) == {"id", "session_id", "agent_id", "title", "user_id",
                                 "created_at", "updated_at", "total_messages",
-                                "pinned", "sort_order"}
+                                "pinned", "sort_order",
+                                "channel_name", "source_channel"}
