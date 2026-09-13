@@ -182,22 +182,26 @@ class AgentRunStore:
             return cur.rowcount == 1
 
     def request_cancel(self, session_id: str) -> Optional[str]:
-        """持久取消意图：给活跃 run 打 cancel_requested 标（不落状态）。
+        """持久取消意图：running 行优先返回；同 session 全部 queued 行一并
+        打标（P1-#8 排队中可停——等待方在晋升轮询中消费该意图自行收尾）。
 
-        in-process 真取消仍走 task_tracker；本列的价值是意图先于进程动作
-        落库、且执行侧/重启对账可见（Yuxi PG durable + 信号加速的裁剪版）。
+        重放幂等：已打标行重复打标无害，返回值恒为本 session 最老的活跃/
+        排队行（无则 None，调用方保持旧语义）。
         """
         with self._lock, self._conn:
-            row = self._conn.execute(
-                "SELECT run_id FROM agent_runs WHERE session_id=? AND status='running' LIMIT 1",
+            rows = self._conn.execute(
+                "SELECT run_id, status FROM agent_runs"
+                " WHERE session_id=? AND status IN ('running','queued') ORDER BY seq",
                 (session_id,),
-            ).fetchone()
-            if not row:
+            ).fetchall()
+            if not rows:
                 return None
             self._conn.execute(
-                "UPDATE agent_runs SET cancel_requested=1 WHERE run_id=?", (row[0],)
+                "UPDATE agent_runs SET cancel_requested=1"
+                " WHERE session_id=? AND status IN ('running','queued')",
+                (session_id,),
             )
-            return row[0]
+            return rows[0]["run_id"]
 
     def abandon(self, run_id: str, reason: str = "client_abandoned") -> bool:
         """等待方离开：仅未晋升（queued）的行可弃——正在跑的绝不在此误杀。"""
