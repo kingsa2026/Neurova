@@ -312,6 +312,9 @@ class LLMClient:
 
         try:
             # 构建请求参数（公共组装：tools/reasoning_effort 等）
+            # chat() 恒非流式；调用方（chat_pipeline）可能把 stream 一并塞进 kwargs，
+            # 与下面显式 stream=False 冲突 → "got multiple values for 'stream'"。先剥离。
+            kwargs.pop("stream", None)
             params = self._build_request_params(messages, stream=False, **kwargs)
 
             # 调用 API
