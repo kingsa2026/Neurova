@@ -393,3 +393,6 @@ agent_workspaces/kai/
 
 # UIAutomation/pywinauto 调试日志垃圾件（desktop_uia 开发运行时落根目录）
 @AutomationLog.txt
+
+# 工具执行日志默认落根目录的运行时垃圾（tool_logger；测试/默认配置会生成）
+/tool_execution.jsonl
