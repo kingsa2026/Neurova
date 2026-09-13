@@ -118,6 +118,14 @@ def openai_images_url(base_url: str) -> str:
     return f"{base}/v1/images/generations"
 
 
+def openai_images_edits_url(base_url: str) -> str:
+    """批次3：参考图编辑端点（文件头承诺的 images/edits multipart，此前未实现）。"""
+    base = (base_url or "https://api.openai.com/v1").rstrip("/")
+    if "/v1" in base:
+        return f"{base}/images/edits"
+    return f"{base}/v1/images/edits"
+
+
 def ark_images_url(base_url: str) -> str:
     base = (base_url or DEFAULT_ARK_BASE).rstrip("/")
     if "/api/v3" in base:
@@ -231,6 +239,29 @@ async def _get_json(url: str, headers: Dict[str, str],
             return status, data
 
 
+async def _post_form(
+    url: str,
+    headers: Dict[str, str],
+    fields: Dict[str, str],
+    files: List[Tuple[str, str, bytes, str]],
+    timeout: float = 60.0,
+) -> Tuple[int, Dict[str, Any]]:
+    """multipart/form-data POST。files 项 = (field, filename, content, content_type)。"""
+    form = aiohttp.FormData()
+    for key, value in fields.items():
+        form.add_field(key, str(value))
+    for field, filename, content, ctype in files:
+        form.add_field(field, content, filename=filename, content_type=ctype)
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+        async with session.post(url, headers=headers, data=form) as resp:
+            status = resp.status
+            try:
+                data = await resp.json(content_type=None)
+            except Exception:
+                data = {"raw": await resp.text()}
+            return status, data
+
+
 # ── 图片协议：统一 generate（同步返回，异步型内部轮询） ──
 
 
@@ -327,20 +358,41 @@ async def _ark_image_generate(
     return {"images": images, "task_id": None, "raw": data}
 
 
+def _data_url_bytes(data_url: str) -> Tuple[bytes, str, str]:
+    """data URL → (原始字节, mime, 文件扩展名)。"""
+    header, _, payload = data_url.partition(",")
+    mime = header[5:].split(";")[0] if header.startswith("data:") else "image/png"
+    ext = (mime.split("/")[-1] or "png").replace("+xml", "")
+    return base64.b64decode(payload), mime, ext
+
+
 async def _openai_image_generate(
     creds: ProtocolCredentials, prompt: str, size: str, n: int,
     ref_images: List[str], timeout: float,
 ) -> Dict[str, Any]:
-    url = openai_images_url(creds.base_url)
     headers = {"Authorization": f"Bearer {creds.api_key}"}
-    body: Dict[str, Any] = {
-        "model": creds.model or "gpt-image-1",
-        "prompt": prompt,
-        "n": max(1, n),
-    }
-    if size and "x" in size:
-        body["size"] = size
-    status, data = await _post_json(url, headers, body, timeout)
+    if ref_images:
+        # 批次3：带参考图走 images/edits multipart（此前静默丢参考图走 generations）
+        files: List[Tuple[str, str, bytes, str]] = []
+        for i, ref in enumerate(ref_images):
+            raw, mime, ext = _data_url_bytes(media_to_data_url(ref))
+            files.append(("image", f"ref_{i}.{ext}", raw, mime))
+        fields: Dict[str, str] = {"model": creds.model or "gpt-image-1",
+                                  "prompt": prompt, "n": str(max(1, n))}
+        if size and "x" in size:
+            fields["size"] = size
+        status, data = await _post_form(
+            openai_images_edits_url(creds.base_url), headers, fields, files, timeout)
+    else:
+        url = openai_images_url(creds.base_url)
+        body: Dict[str, Any] = {
+            "model": creds.model or "gpt-image-1",
+            "prompt": prompt,
+            "n": max(1, n),
+        }
+        if size and "x" in size:
+            body["size"] = size
+        status, data = await _post_json(url, headers, body, timeout)
     if status >= 400:
         raise RuntimeError(f"OpenAI 兼容图像端点失败 HTTP {status}: {str(data)[:300]}")
     images = []

@@ -1181,22 +1181,15 @@ def create_app(
         _app_instance = app
         logger.info("FastAPI application created")
 
-        # B2-c：生成产物静态目录（data/generations → /api/v1/generation/files/*）
+        # 批次3：产物文件访问从匿名 StaticFiles 挂载收口为 generation 路由内的
+        # 鉴权端点 GET /api/v1/generation/files/{name}（Bearer 或 ?access_token=，
+        # 账本属主校验）。此处仅预创建目录，不再 mount。
         try:
-            from starlette.staticfiles import StaticFiles as _StaticFiles
-
-            # P1-8：目录基准与 generation 端点同源（仓库根绝对路径），
-            # 防 CWD 漂移导致挂载点与落盘目录分裂
             from neurova.api.endpoints.generation import GENERATION_OUTPUT_DIR as _gen_dir
 
             _gen_dir.mkdir(parents=True, exist_ok=True)
-            app.mount(
-                "/api/v1/generation/files",
-                _StaticFiles(directory=str(_gen_dir)),
-                name="generation_files",
-            )
-        except Exception as _e:  # noqa: BLE001 — 静态挂载失败不影响主服务
-            logger.warning("generation files 挂载失败: %s", _e)
+        except Exception as _e:  # noqa: BLE001 — 目录创建失败不影响主服务
+            logger.warning("generation files 目录预创建失败: %s", _e)
 
         return app
 

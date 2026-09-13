@@ -16,6 +16,10 @@ export interface FileItem {
   url?: string
   agent_id?: string
   created_at: string
+  // 后端 FileInfo 实测契约（批次3：上传返回绝对落盘 path，供 AIGC 参考图引用）
+  file_id?: string
+  filename?: string
+  path?: string
 }
 
 export interface FileVersion {
