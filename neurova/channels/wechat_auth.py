@@ -102,9 +102,10 @@ class WeChatAuthMixin:
         认证 iLink 协议
 
         流程:
-        1. 如果提供了 bot_token，直接使用
-        2. 如果没有 token，生成二维码URL，等待扫码
-        3. 扫码成功后，token 保存到本地文件
+        1. 如果提供了 bot_token，直接验证使用
+        2. 否则尝试从 token 文件加载并验证
+        3. 均无凭证：生成二维码（单次 POST）后诚实返回 False，绝不同步等待扫码
+           （等待由渠道页 /wechat/ilink/qrcode + .../status 两段式非阻塞端点闭环）
         """
         a = self.adapter
         a.ilink_bot_token = config.get("bot_token", "")
@@ -138,27 +139,20 @@ class WeChatAuthMixin:
             except (OSError, IOError) as e:
                 logger.warning("加载 Token 文件失败: %s", e)
 
-        # 首次启动，需要扫码登录
-        logger.info("iLink 协议首次启动，需要扫码登录")
-        return self._generate_qr_code()
-
-    def _generate_qr_code(self) -> bool:
-        """
-        生成登录二维码并等待扫码（同步 connect 流程用）。
-
-        返回:
-        如果请求成功返回 True (需要用户扫码)
-        """
-        a = self.adapter
-        if not REQUESTS_AVAILABLE:
-            logger.info("[iLink 模拟] 生成二维码链接: https://ilink.wechat.bot/qr/xxxxx")
-            a._ilink_initialized = True
-            return True
-
-        qr = self._request_ilink_qrcode()
-        if qr is None:
-            return False
-        return self._wait_for_scan(qr["qr_id"])
+        # 无凭证：只生成二维码（单次 POST、零轮询）并诚实返回 False——绝不同步等待扫码
+        # （台账②根修：旧的 300s requests.get + time.sleep(3) 同步轮询等待体已删除，
+        # 服务启动/程序化 create_wechat_adapter 不再阻塞调用线程最长 5 分钟）。
+        # 扫码闭环由渠道页非阻塞两段式端点承担：
+        # POST /channel-configs/wechat/ilink/qrcode（生成）+
+        # GET .../qrcode/status（单次轮询，confirmed 落盘 token）；token 就绪后
+        # 重新保存即走 _verify_ilink_token 认证成功链路（connect True，台账①闭环）。
+        if REQUESTS_AVAILABLE:
+            self._request_ilink_qrcode()  # 二维码链接已在方法内 logger.info 记录
+        logger.warning(
+            "iLink 未登录（无 bot_token 且无可用 token 文件）：二维码已生成，"
+            "请在渠道页或经 /wechat/ilink/qrcode 端点完成扫码登录"
+        )
+        return False
 
     def _request_ilink_qrcode(self) -> Optional[Dict[str, str]]:
         """
@@ -208,39 +202,6 @@ class WeChatAuthMixin:
         except (requests.RequestException, json.JSONDecodeError) as e:
             logger.error("轮询扫码状态异常: %s", e)
             return {"status": "error", "message": str(e)}
-
-    def _wait_for_scan(self, qr_id: str, timeout: int = 300) -> bool:
-        """
-        等待用户扫码登录（后台 connect 流程的同步阻塞循环，复用单次轮询）。
-
-        参数:
-        qr_id: 二维码ID
-        timeout: 超时时间 (秒)
-        """
-        a = self.adapter
-        if not REQUESTS_AVAILABLE:
-            a._ilink_initialized = True
-            return True
-
-        start_time = time.time()
-        poll_interval = 3
-
-        while time.time() - start_time < timeout:
-            data = self._poll_scan_once(qr_id)
-            status = data.get("status", "")
-            if status == "confirmed":
-                a.ilink_bot_token = data.get("bot_token", "")
-                self._save_ilink_token()
-                a._ilink_initialized = True
-                logger.info("iLink 登录成功!")
-                return True
-            if status == "expired":
-                logger.error("二维码已过期，请重新生成")
-                return False
-            time.sleep(poll_interval)
-
-        logger.error("扫码登录超时")
-        return False
 
     def _verify_ilink_token(self) -> bool:
         """验证 iLink Token 是否有效"""

@@ -8,7 +8,8 @@
 
 iLink 协议说明:
 - 微信个人账号 Bot 协议
-- 首次启动若未配置 Bot Token，系统将打印二维码链接，请扫码登录
+- 若未配置 Bot Token，仅打印二维码链接指引（不阻塞等待）；
+  请在渠道页扫码完成登录，token 落盘后重新保存配置即认证成功
 - Token 将自动保存到本地文件供后续使用
 - iLink 平台限制: 每条用户消息对应的 context_token 最多只能回复 10 条消息
 
@@ -75,10 +76,40 @@ class WeChatAdapter(
         return MessageChannel.WECHAT
 
     async def connect(self) -> bool:
+        """建立微信连接——诚实反映当前 mode 的真实认证状态（台账①，此前恒 True 假成功）。
+
+        微信三模式的可用性由 authenticate() 置位各模式初始化标志建立（iLink 扫码/
+        凭据验证、wecom/official access_token 获取）；未认证成功返回 False 并
+        warning 引导，与 feishu/dingtalk 的 connect 失败语义一致
+        （manager._connect_adapter 告警跳过、send_message 诚实 None，不崩溃）。
+        """
+        if self.mode == "ilink":
+            authenticated = self._ilink_initialized
+        elif self.mode == "official":
+            authenticated = self._official_initialized
+        else:
+            authenticated = self._wecom_initialized
+
+        if not authenticated:
+            if self.mode == "ilink":
+                logger.warning(
+                    "wechat(ilink) 未连接：尚未完成扫码登录，"
+                    "请在渠道页或经 /wechat/ilink/qrcode 端点完成扫码后重新保存配置"
+                )
+            else:
+                logger.warning(
+                    "wechat(%s) 未连接：尚未认证成功，请先配置有效凭据并完成 authenticate",
+                    self.mode,
+                )
+            self._connected = False
+            return False
+
+        self._connected = True
+        logger.info("wechat(%s) connected", self.mode)
         return True
 
     async def disconnect(self):
-        pass
+        self._connected = False
 
     async def send_message(self, chat_id: str, content: str, message_type: str = "text", **kwargs) -> Optional[str]:
         msg = UnifiedMessage(
