@@ -600,12 +600,68 @@ class ChatPipeline:
     # ══════════════════════════════════════════════════════════════
 
     async def _step_pre_llm_checks(self, ctx: ChatContext):
-        """命令分发（B4）、/compact 压缩命令、ToolMemory 检查、技能获取、NL 合成"""
+        """命令分发（B4）、/compact 压缩命令、/review 评审命令、ToolMemory 检查、技能获取、NL 合成"""
         await self._check_compact_command(ctx)
+        await self._check_review_command(ctx)
         await self._check_command_dispatch(ctx)
         await self._check_tool_memory(ctx)
         await self._check_skill_acquisition(ctx)
         await self._check_nl_synthesis(ctx)
+
+    async def _check_review_command(self, ctx: ChatContext):
+        """/review 受限评审子会话命令（P1-8 命令面，交互契约与 /compact 同构）。
+
+        /review           → 以最近会话历史（≤12 条）为评审对象
+        /review <内容>    → 直接评审给定 diff/文本
+        run_review 禁工具禁网、结构化 findings；异常回落正常 LLM 流程。
+        """
+        from neurova.agent.review_command import extract_review_target
+
+        target_arg = extract_review_target(ctx.user_input or "")
+        if target_arg is None:
+            return
+        # 命令回复不经 LLM：SSE 客户端靠 emitter 的 chunk 事件看到回复（同 /compact）
+        if ctx.event_emitter is None and isinstance(ctx.metadata, dict):
+            candidate = ctx.metadata.get("event_emitter")
+            if callable(candidate):
+                ctx.event_emitter = candidate
+        try:
+            from neurova.agent.review import run_review
+            from neurova.agent.review_command import build_history_target
+
+            if target_arg:
+                target = target_arg[:24000]
+            else:
+                session_id = ctx.session_id or "default"
+                history = self.session_manager.get_recent_context(
+                    agent_id=self.config.agent_id,
+                    session_id=session_id,
+                    max_messages=12,
+                )
+                target = build_history_target(history or [])
+            if not target.strip():
+                ctx.reply = (
+                    "🔍 /review：会话内容为空。请在命令后附上要评审的内容，"
+                    "例如：/review <diff 或文本>"
+                )
+            else:
+                logger.info("/review 命令: session=%s target=%d chars", ctx.session_id, len(target))
+                llm = getattr(self._agent, "llm_client", None)
+                result = await run_review(
+                    lambda messages: llm.chat(messages), target
+                )
+                from neurova.agent.review_command import format_review_reply
+
+                ctx.reply = format_review_reply(result)
+            ctx.metadata = dict(ctx.metadata or {})
+            ctx.metadata["command_dispatched"] = True
+            if callable(getattr(ctx, "event_emitter", None)):
+                try:
+                    ctx.event_emitter("content", ctx.reply)
+                except Exception:  # noqa: BLE001
+                    logger.debug("/review 回复发射失败", exc_info=True)
+        except Exception as e:  # noqa: BLE001 - 命令失败回落 LLM 流程
+            logger.warning("/review 命令失败（回落 LLM 流程）: %s", e)
 
     async def _check_compact_command(self, ctx: ChatContext):
         """/compact 手动压缩命令（对齐 zcode）：不调 LLM 正文轮，直接折叠

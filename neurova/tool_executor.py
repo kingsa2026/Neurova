@@ -311,6 +311,9 @@ class ToolExecutor:
         ".venv", "venv", "dist", "build", ".idea", ".vscode",
     })
 
+    # P0-3：会话式 shell 工具（自管常驻进程，不走一次性沙箱裁决路由）
+    _SESSION_SHELL_TOOLS = frozenset({"exec_command", "write_stdin"})
+
     # calculator 指数上限 — 防止 9**999999999 这类表达式撑爆内存
     _CALC_MAX_EXPONENT = 10000
 
@@ -1473,6 +1476,13 @@ class ToolExecutor:
             }
 
         if verdict.decision == GovernanceDecision.SANDBOX:
+            # P0-3 核验修正（断点③）：会话式 shell 自管进程生命周期——
+            # exec_command 产出 session_id 供 write_stdin 跨轮复用，一次性
+            # 沙箱包装会切断会话连续性（write_stdin 无 command 参数还会被
+            # 下方文件保护分支误拦）。放行至自有执行器；上方 _audit_governance
+            # 已记录裁决，审计不丢。沙箱化常驻会话属后续独立工作。
+            if tool_name in self._SESSION_SHELL_TOOLS:
+                return None
             if is_mcp:
                 # MCP 调用（远端协议/子进程）没有命令行沙箱语义——JSON 参数
                 # 落沙箱执行无意义，按阻断处理（fail-closed 语义一致）
