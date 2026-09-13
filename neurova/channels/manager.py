@@ -214,6 +214,7 @@ class ChannelManager:
         # 按 (agent_id, channel_type) 取实例（agent 多实例隔离）；缺 agent 上下文
         # 或非 default 未注册时回落 default 视图，保证既有调用零破坏。
         agent_id = str(kwargs.pop("agent_id", "default") or "default")
+        session_scope = kwargs.pop("session_scope", "") or chat_id  # 回复广播按 scope 反查
         adapter = getattr(self, "_agent_adapters", {}).get((agent_id, channel_type)) \
             or self._adapters.get(channel_type)
         if not adapter:
@@ -243,13 +244,13 @@ class ChannelManager:
                                channel_type, str(chat_id)[:20], parts.index(part) + 1, len(parts))
             elif first_id is None:
                 first_id = result
-            await self._sync_reply_to_session(chat_id, part, channel_type)
+            await self._sync_reply_to_session(session_scope, part, channel_type)
         if failed:
             logger.error("渠道 %s 回复有 %d/%d 片发送失败（chat=%s）", channel_type, failed, len(parts), str(chat_id)[:20])
         return first_id
 
     async def _sync_reply_to_session(self, chat_id: str, content: str, channel_type: str):
-        """同步回复消息到 SessionSyncManager"""
+        """同步回复消息到 SessionSyncManager（chat_id 处传入统一 scope 键）"""
         sync_manager = _get_session_sync_manager()
         if not sync_manager:
             return
@@ -386,6 +387,9 @@ class ChannelManager:
             "chat_type": message.chat_type,
             # 渠道专属回发上下文（钉钉 session_webhook 等）随 metadata 透传给适配器
             "reply_metadata": dict(message.metadata or {}),
+            # 统一会话作用域键：回复广播到内存层须用与入站一致的 scope（此前用裸
+            # chat_id 反查 → 按发送者隔离/非 default agent 时查不到、实时同步断链）
+            "session_scope": self.resolve_session_scope_id(message),
         }
 
     async def _dispatch_message(self, message: ChannelMessage):

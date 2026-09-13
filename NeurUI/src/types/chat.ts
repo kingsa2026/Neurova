@@ -76,6 +76,10 @@ export interface Session {
   updatedAt?: string
   /** 置顶标记（补课 2.3；后端 session 文件 pinned 字段） */
   pinned?: boolean
+  /** 渠道来源（飞书/钉钉/…；空=网页会话）——控制台列表打"渠道"标签 */
+  sourceChannel?: string
+  /** 渠道侧会话名（群名/用户名） */
+  channelName?: string
 }
 
 export interface PendingFile {

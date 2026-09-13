@@ -136,6 +136,7 @@ class SessionManager(SessionRepository):
     _SUMMARY_FIELDS = (
         "id", "session_id", "agent_id", "title", "user_id",
         "created_at", "updated_at", "total_messages", "pinned", "sort_order",
+        "source_channel", "channel_name",
     )
     _sidecar_cache: "OrderedDict" = OrderedDict()
 
@@ -1057,6 +1058,16 @@ class SessionManager(SessionRepository):
     def _summary_from_data(session_data: Dict[str, Any]) -> Dict[str, Any]:
         """从 session 文件数据提取摘要字段（纯函数，v1 _get_cached_summary 抽出）。"""
         sid = session_data.get("session_id", "")
+        # 渠道来源：从消息 metadata 派生（channel_router 落 source_channel/channel_name），
+        # 供控制台会话列表打"渠道"标签、区分渠道对话与网页对话。
+        source_channel = ""
+        channel_name = ""
+        for m in session_data.get("messages", []) or []:
+            md = (m.get("metadata") or {}) if isinstance(m, dict) else {}
+            if md.get("source_channel"):
+                source_channel = md["source_channel"]
+                channel_name = md.get("channel_name") or channel_name
+                break
         return {
             "id": sid,
             "session_id": sid,
@@ -1068,6 +1079,8 @@ class SessionManager(SessionRepository):
             "total_messages": session_data.get("total_messages", 0),
             "pinned": bool(session_data.get("pinned", False)),
             "sort_order": int(session_data.get("sort_order", 0) or 0),
+            "source_channel": source_channel,
+            "channel_name": channel_name,
         }
 
     @staticmethod
@@ -1330,6 +1343,8 @@ class SessionManager(SessionRepository):
             "total_messages": entry.get("total_messages", 0),
             "pinned": bool(entry.get("pinned", False)),
             "sort_order": int(entry.get("sort_order", 0) or 0),
+            "source_channel": entry.get("source_channel", ""),
+            "channel_name": entry.get("channel_name", ""),
         }
 
     def _summaries_via_sidecar(self, agent_dirs: List[Path], user_id: str = "") -> Optional[List[Dict[str, Any]]]:
