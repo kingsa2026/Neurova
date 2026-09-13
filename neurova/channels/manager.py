@@ -401,12 +401,17 @@ class ChannelManager:
                 try:
                     reply = await handler(message)
                     if reply:
-                        await self.send_message(
-                            message.channel_type,
-                            message.chat_id,
-                            reply,
-                            **self._reply_kwargs(message),
-                        )
+                        # 2026-09-14 契约扩展：handler 可返回多条消息（思考/工具/
+                        # 正文拆分）；str 视为单条，逐条回发。
+                        for part in (reply if isinstance(reply, (list, tuple)) else [reply]):
+                            if not part:
+                                continue
+                            await self.send_message(
+                                message.channel_type,
+                                message.chat_id,
+                                part,
+                                **self._reply_kwargs(message),
+                            )
                         break  # 第一个返回回复的处理器获胜
                 except Exception as e:
                     logger.exception("Message handler %s error: %s", handler_id, e)
@@ -415,12 +420,15 @@ class ChannelManager:
             try:
                 reply = await self._message_handler(message)
                 if reply:
-                    await self.send_message(
-                        message.channel_type,
-                        message.chat_id,
-                        reply,
-                        **self._reply_kwargs(message),
-                    )
+                    for part in (reply if isinstance(reply, (list, tuple)) else [reply]):
+                        if not part:
+                            continue
+                        await self.send_message(
+                            message.channel_type,
+                            message.chat_id,
+                            part,
+                            **self._reply_kwargs(message),
+                        )
             except Exception as e:
                 logger.exception("Message handler error: %s", e)
                 # 尝试发送错误提示

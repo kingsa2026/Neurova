@@ -383,9 +383,13 @@ class OpenAILoop(BaseAgentLoop):
             from neurova.agent.gates import StopAction as _SA
 
             self._ensure_gate_runner()
+            # LLMResponse.tool_calls 契约是 List[Dict]（llm_client 已把 SDK 对象转
+            # dict，base.py 执行链同样按 dict 访问）；原属性访问 tc.name 在 dict 上
+            # AttributeError → 整轮回退 legacy、工具环丢失（2026-09-14 飞书事故）
             _tool_sigs = "|".join(
-                f"{tc.name}:{str(tc.arguments)[:64]}"
-                for tc in (getattr(response, "tool_calls", None) or [])
+                f"{(tc.get('function') or {}).get('name', '')}:"
+                f"{str((tc.get('function') or {}).get('arguments', ''))[:64]}"
+                for tc in tool_calls
             )
             _gd = self._gate_runner.on_round_end({
                 "tool_rounds": self._tool_rounds,
