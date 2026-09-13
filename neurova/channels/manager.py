@@ -384,6 +384,8 @@ class ChannelManager:
             "agent_id": str(message.metadata.get("agent_id") or "default"),
             "at_user_id": message.sender_id,
             "chat_type": message.chat_type,
+            # 渠道专属回发上下文（钉钉 session_webhook 等）随 metadata 透传给适配器
+            "reply_metadata": dict(message.metadata or {}),
         }
 
     async def _dispatch_message(self, message: ChannelMessage):
