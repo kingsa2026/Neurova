@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import threading
+
 from neurova.core.logger import get_logger
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from neurova.channels import ChannelAdapter, ChannelConfig, MessageChannel
+from neurova.channels.base import ChannelEventType, ChannelMessage
 
 from neurova.channels.telegram_api_client import TelegramAPIMixin
 from neurova.channels.telegram_sender import TelegramSenderMixin
@@ -69,6 +73,10 @@ class TelegramAdapter(
         self._last_update_id = 0
         self._polling_timeout = 30
         self._polling_limit = 100
+        # getUpdates 长轮询后台线程状态（connect 时启动）
+        self._poll_thread: Optional[Any] = None
+        self._stop_event = threading.Event()
+        self._main_loop: Optional[asyncio.AbstractEventLoop] = None
 
         self._webhook_url = ""
         self._webhook_secret = ""
@@ -203,11 +211,125 @@ class TelegramAdapter(
         self._last_update_id = 0
 
     async def connect(self) -> bool:
-        return self._ensure_initialized()
+        """getMe 校验 + 启动 getUpdates 长轮询后台线程（此前只 getMe、无接收回路
+        → Telegram 收不到任何消息）。"""
+        if not self._ensure_initialized():
+            return False
+        self._main_loop = asyncio.get_running_loop()
+        self._stop_event = threading.Event()
+        if not (self._poll_thread and self._poll_thread.is_alive()):
+            self._poll_thread = threading.Thread(target=self._run_poll_forever, daemon=True,
+                                                 name="telegram-poll")
+            self._poll_thread.start()
+        self._connected = True
+        logger.info("Telegram 已连接，getUpdates 轮询启动")
+        return True
 
     async def disconnect(self):
+        self._connected = False
+        ev = getattr(self, "_stop_event", None)
+        if ev is not None:
+            ev.set()
+        t = getattr(self, "_poll_thread", None)
+        if t is not None and t.is_alive():
+            t.join(timeout=5)
+        self._poll_thread = None
         self._initialized = False
         self.bot_token = ""
+
+    def _run_poll_forever(self) -> None:
+        """后台线程：同步 requests.getUpdates 长轮询，逐条解析回投主事件循环。"""
+        offset = self._last_update_id
+        while not getattr(self, "_stop_event", threading.Event()).is_set():
+            try:
+                resp = self._api_request(
+                    "GET", f"/bot{self.bot_token}/getUpdates",
+                    params={"offset": offset, "timeout": self._polling_timeout,
+                            "limit": self._polling_limit,
+                            "allowed_updates": ["message", "edited_message",
+                                                 "my_chat_member", "channel_post"]},
+                )
+                if not resp.get("ok"):
+                    threading.Event().wait(3)  # 退避（不持有 GIL 长时）
+                    continue
+                for upd in resp.get("result") or []:
+                    uid = upd.get("update_id")
+                    if isinstance(uid, int):
+                        offset = max(offset, uid + 1)
+                        self._last_update_id = offset
+                    self._process_update(upd)
+            except Exception as e:  # noqa: BLE001 - 轮询异常退避重试，绝不退出线程
+                logger.warning("Telegram 轮询异常，3s 后重试: %s", e)
+                threading.Event().wait(3)
+
+    def _process_update(self, upd: Dict[str, Any]) -> None:
+        msg = upd.get("message") or upd.get("edited_message") or upd.get("channel_post")
+        if not msg:
+            # my_chat_member：机器人被移出群 → CHAT_BOT_REMOVED
+            mcm = upd.get("my_chat_member")
+            if mcm:
+                self._handle_my_chat_member(mcm)
+            return
+        if not self.should_process_message(upd):
+            return
+        chat = msg.get("chat", {})
+        sender = msg.get("from", {}) or {}
+        chat_id = str(chat.get("id", ""))
+        ctype = chat.get("type", "")
+        chat_type = "p2p" if ctype == "private" else "group"
+        text = msg.get("text") or msg.get("caption") or ""
+        mentions = [e for e in (msg.get("entities") or []) if e.get("type") == "mention"]
+        channel_msg = self._make_message(
+            message_id=str(msg.get("message_id", "")),
+            sender_id=str(sender.get("id", "")),
+            sender_name=sender.get("username") or sender.get("first_name", "") or str(sender.get("id", "")),
+            content=text.strip(),
+            chat_id=chat_id,
+            chat_type=chat_type,
+            message_type="text",
+            metadata={"mentions": mentions} if mentions else {},
+            raw_event=msg,
+        )
+        if self._main_loop is not None and self._main_loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self._emit_event(ChannelEventType.MESSAGE_RECEIVED, channel_msg), self._main_loop)
+
+    def _handle_my_chat_member(self, mcm: Dict[str, Any]) -> None:
+        """机器人被移出群（my_chat_member new_status=kicked/left）→ CHAT_BOT_REMOVED。"""
+        new = (mcm.get("new_chat_member") or {})
+        if new.get("status") not in ("kicked", "left"):
+            return
+        chat_id = str((mcm.get("chat") or {}).get("id", ""))
+        if not chat_id:
+            return
+        msg = self._make_message(message_id="", sender_id="", sender_name="", content="",
+                                 chat_id=chat_id, chat_type="group", message_type="event")
+        if self._main_loop is not None and self._main_loop.is_running():
+            asyncio.run_coroutine_threadsafe(
+                self._emit_event(ChannelEventType.CHAT_BOT_REMOVED, msg), self._main_loop)
+
+    async def send_message(self, chat_id: str, content: str,
+                           message_type: str = "text", **kwargs) -> Optional[str]:
+        """base 契约异步发送（覆盖 TelegramSenderMixin 的旧 sync(UnifiedMessage) 签名，
+        此前 manager 按 base 契约调用 → 不可 await/TypeError 被吞 → 无法回发）。"""
+        if not self._ensure_initialized():
+            return None
+        try:
+            if message_type == "image" and kwargs.get("image_path"):
+                ok = self._send_photo(str(chat_id), kwargs["image_path"])
+                return "sent" if ok else None
+            resp = self._send_text_message(str(chat_id), content)
+            if isinstance(resp, dict) and resp.get("ok"):
+                mid = (resp.get("result") or {}).get("message_id")
+                return str(mid) if mid else "sent"
+            if resp is True:
+                return "sent"
+            logger.warning("Telegram 发送失败: %s", resp)
+            return None
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Telegram 发送异常: %s", e)
+            return None
+
 
     def should_process_message(self, raw_data: Dict) -> bool:
         msg = raw_data.get("message") or raw_data.get("edited_message") or {}
