@@ -723,7 +723,9 @@ class VideoGenClient:
         if not self.is_available(provider, api_key):
             return _fail(f"视频服务商 '{VIDEO_PROVIDERS[provider]}' 未配置 API Key", provider)
         if provider == "comfyui":
-            return self._fail_not_impl("ComfyUI 图生视频暂未支持", provider)
+            # 批次4 根因修复：_fail_not_impl 是 async 方法，漏 await 会把协程对象
+            # 直接返回给调用方（.get 抛错被外层 except 吞成降级路径，错误原文丢失）
+            return await self._fail_not_impl("ComfyUI 图生视频暂未支持", provider)
         key = resolve_api_key(VIDEO_KEY_NAMES[provider], api_key)
         base = _base_url(provider, base_url)
         headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}

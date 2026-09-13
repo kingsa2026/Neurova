@@ -1014,14 +1014,25 @@ class WorkflowExecutor:
         max_iterations = max(1, min(max_iterations, 1000))
         break_condition = resolved_config.get("break_condition", "") or ""
 
-        # 初始迭代值：上游最后完成的输出，否则工作流输入
-        current_value: Any = inputs
-        for e in in_edges.get(loop_id, []):
-            if is_loop_back_edge(e):
-                continue
-            up_res = resolution_context.node_results.get(e.source)
-            if isinstance(up_res, dict) and up_res.get("output") is not None:
-                current_value = up_res.get("output")
+        # 批次4：items_from 数组迭代（分镜 shots[] 逐镜扇出的引擎级挂载点）。
+        # 变量引用（如 ${storyboard.output.shots}）经上方 resolve_config 解析为
+        # list 时按数组逐元素迭代，body 用 ${loopId.output} 取当轮元素；数组长度
+        # 优先于 max_iterations（1000 上限保护不变）。解析失败留下原始字符串 →
+        # 回退既有计数循环语义——增强不替换。
+        items_value = resolved_config.get("items_from", "")
+        iter_items = items_value if isinstance(items_value, list) else None
+        if iter_items is not None:
+            max_iterations = min(len(iter_items), 1000)
+
+        # 初始迭代值：数组模式取首元素；否则上游最后完成的输出，否则工作流输入
+        current_value: Any = iter_items[0] if iter_items else inputs
+        if iter_items is None:
+            for e in in_edges.get(loop_id, []):
+                if is_loop_back_edge(e):
+                    continue
+                up_res = resolution_context.node_results.get(e.source)
+                if isinstance(up_res, dict) and up_res.get("output") is not None:
+                    current_value = up_res.get("output")
 
         broken = False
         iterations_done = 0
@@ -1102,11 +1113,15 @@ class WorkflowExecutor:
 
             iterations_done = iteration
 
-            # 迭代产出：出口节点（回边源）的最后输出
-            for exit_id in plan["exits"]:
-                exit_res = resolution_context.node_results.get(exit_id)
-                if isinstance(exit_res, dict) and exit_res.get("output") is not None:
-                    current_value = exit_res.get("output")
+            # 迭代产出：数组模式取下一元素；否则出口节点（回边源）的最后输出
+            if iter_items is not None:
+                if iteration < len(iter_items):
+                    current_value = iter_items[iteration]
+            else:
+                for exit_id in plan["exits"]:
+                    exit_res = resolution_context.node_results.get(exit_id)
+                    if isinstance(exit_res, dict) and exit_res.get("output") is not None:
+                        current_value = exit_res.get("output")
 
             # 跳出条件（安全 DSL 求值，无 eval）
             if break_condition and safe_eval_condition(

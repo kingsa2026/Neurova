@@ -98,6 +98,13 @@ BUILTIN_NODES: List[Dict[str, Any]] = [
                 "max": 1000,
             },
             {"id": "break_condition", "title": "跳出条件", "type": "input", "description": "满足条件时跳出循环"},
+            {
+                "id": "items_from",
+                "title": "迭代数组引用",
+                "type": "input",
+                "description": "如 $node.分镜节点.output.shots：解析为数组时逐元素迭代"
+                               "（循环体用 $node.loopId.output 取当轮元素，数组长度优先于最大迭代次数）",
+            },
         ],
         "inputs": [{"id": "input", "label": "输入"}, {"id": "loop_body", "label": "循环体"}],
         "outputs": [{"id": "loop_done", "label": "完成"}, {"id": "current", "label": "当前迭代"}],
