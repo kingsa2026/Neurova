@@ -1,9 +1,8 @@
 import api from '@/api'
 import type { ApiResponse } from '@/types/response'
-import { request } from '@/api'
 
 // ---------------------------------------------------------------------------
-// Types
+// Types（批次2：与 neurova/api/endpoints/generation.py 实测契约逐字段对齐）
 // ---------------------------------------------------------------------------
 
 export interface TextGenerationPayload {
@@ -11,32 +10,83 @@ export interface TextGenerationPayload {
   model?: string
   temperature?: number
   max_tokens?: number
-  system_prompt?: string
-  agent_id?: string
+  session_id?: string
 }
 
+/** 后端 /generation/text 实返：{text, model, routed, routed_model?, routed_provider?, request_id} */
 export interface TextGenerationResult {
-  id: string
   text: string
   model: string
-  tokens_used: number
-  duration_ms: number
+  routed: boolean
+  routed_model?: string | null
+  routed_provider?: string | null
+  request_id: string
 }
 
+/** 后端 ImageGenerationRequest：无 style 字段（旧实现的 style 被静默丢弃，已删）。 */
 export interface ImageGenerationPayload {
   prompt: string
-  style?: string
+  model?: string
   width?: number
   height?: number
-  model?: string
+  num_images?: number
+  protocol?: string
+  provider_id?: string
+  api_key?: string
+  base_url?: string
+  ref_images?: string[]
   negative_prompt?: string
+}
+
+export interface ImageGenerationResult {
+  images: Array<{ url: string; path?: string; error?: string }>
+  task_id: string
 }
 
 export interface AudioGenerationPayload {
   text: string
+  model?: string
   voice?: string
   speed?: number
+}
+
+/** 批次1 起音频统一 JSON 契约（产物落盘 + url），不再是裸二进制。 */
+export interface AudioGenerationResult {
+  url: string
+  path: string
+  task_id: string
+  request_id?: string
+}
+
+export interface VideoGenerationPayload {
+  prompt: string
   model?: string
+  duration?: number
+  resolution?: string
+  protocol?: string
+  provider_id?: string
+  api_key?: string
+  base_url?: string
+  ref_images?: string[]
+  audio?: boolean
+}
+
+export type TaskKind = 'image' | 'video' | 'audio'
+export type TaskStatus = 'submitted' | 'running' | 'succeeded' | 'failed'
+
+export interface GenerationTask {
+  task_id: string
+  kind: TaskKind
+  protocol: string
+  model: string
+  status: TaskStatus
+  prompt: string
+  submitted_at: number
+  updated_at?: number
+  local_path: string
+  url: string
+  source: string
+  error: string
 }
 
 // ---------------------------------------------------------------------------
@@ -45,22 +95,39 @@ export interface AudioGenerationPayload {
 
 const BASE = '/generation'
 
-/** Generate text using an LLM. */
+/** 文本生成（model=auto/缺省 → 后端 LLMRouter 自动路由）。 */
 export function generateText(data: TextGenerationPayload) {
   return api.post<ApiResponse<TextGenerationResult>>(`${BASE}/text`, data)
 }
 
-/** Generate an image. Returns binary image data. */
+/** 图像生成（同步返回本地化产物 + task_id；成败均落任务账本）。 */
 export function generateImage(data: ImageGenerationPayload) {
-  return api.post<ApiResponse<{ url: string; base64?: string }>>(`${BASE}/image`, data)
+  return api.post<ApiResponse<ImageGenerationResult>>(`${BASE}/image`, data)
 }
 
-/** Generate audio (TTS). Returns binary WAV data. */
+/** 音频生成（TTS，JSON 契约：url/path/task_id）。 */
 export function generateAudio(data: AudioGenerationPayload) {
-  return request.post(`${BASE}/audio`, data, { responseType: 'blob' }) as unknown as Promise<Blob>
+  return api.post<ApiResponse<AudioGenerationResult>>(`${BASE}/audio`, data)
 }
 
-/** Get available generation models. */
-export function getGenerationModels() {
-  return api.get<ApiResponse<{ text: string[]; image: string[]; audio: string[] }>>(`${BASE}/models`)
+/** 视频任务提交（异步，返回 task_id 供轮询）。 */
+export function submitVideo(data: VideoGenerationPayload) {
+  return api.post<ApiResponse<{ task_id: string; status: TaskStatus; protocol: string }>>(
+    `${BASE}/video`, data)
+}
+
+/** 视频任务轮询（账本 + 远程协议收口）。 */
+export function getVideoTaskStatus(taskId: string) {
+  return api.get<ApiResponse<{
+    task_id: string
+    status: TaskStatus
+    url?: string
+    error?: string
+    warning?: string
+  }>>(`${BASE}/video/status/${taskId}`)
+}
+
+/** 生成任务历史（账本快照，可按 kind/status 过滤；仅本人任务）。 */
+export function listGenerationTasks(params?: { kind?: TaskKind; status?: TaskStatus }) {
+  return api.get<ApiResponse<{ tasks: GenerationTask[] }>>(`${BASE}/tasks`, { params })
 }
