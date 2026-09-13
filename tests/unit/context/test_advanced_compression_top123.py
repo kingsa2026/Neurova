@@ -110,8 +110,8 @@ class TestTop2ToolResultClearing:
         cleared = orch._clear_old_tool_results(msgs)
 
         tool_contents = [m["content"] for m in cleared if m.get("role") == "tool"]
-        assert tool_contents[0].startswith("[工具输出已清除")
-        assert tool_contents[1].startswith("[工具输出已清除")
+        assert tool_contents[0].startswith("[工具输出已移出上下文")  # P1-#6 寻址化契约
+        assert tool_contents[1].startswith("[工具输出已移出上下文")  # P1-#6 寻址化契约
         assert tool_contents[-1].startswith("工具结果5")  # 最近 3 个保留
         assert tool_contents[-3].startswith("工具结果3")
 
@@ -143,7 +143,7 @@ class TestTop2ToolResultClearing:
         import asyncio
         result = asyncio.run(run())
         joined = "".join(str(m.get("content", "")) for m in result)
-        assert "[工具输出已清除" in joined
+        assert "[工具输出已移出上下文" in joined  # P1-#6 寻址化契约
         assert "工具结果5" in joined  # 最近保留
 
 

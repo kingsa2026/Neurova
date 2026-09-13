@@ -66,7 +66,7 @@ class TestBuildContextWithPool:
             assert isinstance(result, list)
             # [FIX] 对话时序修复后：用户输入不再进语义池，而是拼接在上下文末尾，
             # 保证当前输入是 LLM 看到的最后一条 user 消息
-            assert len(result) == 7
+            assert len(result) == 9  # +时间感知(dc9b9a0f)+恒定规则段(5240f188) 两条 system 注入，契约更新
             assert result[0]["role"] == "system"  # 系统指令
             assert result[-1]["content"].endswith("帮我写一个Python函数")
             # 中间为 system 富化内容（个性、规则、工具描述等）
@@ -259,7 +259,7 @@ class TestBuildContextBackwardCompatibility:
             # 验证结果
             assert isinstance(result, list)
             # [FIX] 默认启用 ContextPool；用户输入拼接在末尾（时序修复）
-            assert len(result) == 7
+            assert len(result) == 9  # +时间感知(dc9b9a0f)+恒定规则段(5240f188) 两条 system 注入，契约更新
             assert result[-1]["content"].endswith("帮我写一个Python函数")
 
             # 验证向后兼容性

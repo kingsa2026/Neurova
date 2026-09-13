@@ -76,22 +76,34 @@ class TestSyncToolsEngineTarget:
             )
             engine = tl.get_tool_engine()
             assert engine.get_tool("mcp.s1.t1") is not None
+            # 残留处理 2026-09-13：前例向（可能是共享的）单例注册后必须清理，
+            # 否则泄漏进 test_explicit_engine_still_respected 的全局无键断言。
+            engine.unregister_tool("mcp.s1.t1")
         finally:
             tl._tool_engine = old
 
     def test_explicit_engine_still_respected(self):
-        """集成测试硬约束：显式传 engine 时注册进该实例（签名不动）"""
+        """集成测试硬约束：显式传 engine 时注册进该实例、不写全局单例。
+
+        残留处理 2026-09-13：原断言依赖"全局干净"，被同目录 MCP 测试在共享
+        单例上的注册污染（跨文件状态泄漏）——改为前后像快照对比，契约更严
+        （显式注册不得改变全局单例状态）且与既有污染解耦。"""
         from neurova.api.endpoints import tool_layers as tl
         from neurova.execution_engine.tool_engine import ToolEngine
         from neurova.tool_layers.mcp_client import MCPToolClient
 
+        def _in_global():
+            eng = tl._tool_engine
+            return eng is not None and eng.get_tool("mcp.s1.t1") is not None
+
+        before = _in_global()
         engine = ToolEngine()
         client = MCPToolClient(user_id="t")
         client._sync_tools_to_engine(
             "s1", [{"name": "t1", "description": "d", "parameters": {}}], engine=engine
         )
         assert engine.get_tool("mcp.s1.t1") is not None
-        assert tl._tool_engine is None or tl.get_tool_engine().get_tool("mcp.s1.t1") is None
+        assert _in_global() == before, "显式 engine 注册不得泄漏进全局单例"
 
 
 # ── 3. 死文件删除 ────────────────────────────────────────────────

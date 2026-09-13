@@ -67,9 +67,10 @@ class TestASREnginePerformanceLearning:
         # 验证每次调用都包含引擎信息
         calls = mock_evolution.on_after_tool_execution.call_args_list
         for i, call in enumerate(calls):
+            # 现行 context 字符串面携带引擎/置信（残留处理 2026-09-13）
             assert call.kwargs["tool_name"] == "asr_transcribe"
-            assert call.kwargs["params"]["engine"] == engines[i]
-            assert call.kwargs["params"]["confidence"] == 0.90
+            assert engines[i] in call.kwargs["context"]
+            assert "0.90" in call.kwargs["context"]
             assert call.kwargs["success"] is True
 
     @pytest.mark.asyncio
@@ -113,8 +114,8 @@ class TestASREnginePerformanceLearning:
 
         # 验证进化系统收到高置信度数据
         call_args = mock_evolution.on_after_tool_execution.call_args
-        assert call_args.kwargs["params"]["confidence"] == 0.98
-        assert call_args.kwargs["execution_time"] == 0.5  # 500ms -> 0.5s
+        assert "0.98" in call_args.kwargs["context"]
+        assert call_args.kwargs["latency"] == 0.5  # 500ms -> 0.5s
 
 
 # ============================================================
@@ -196,10 +197,11 @@ class TestTTSToolCalling:
         mock_evolution.on_after_tool_execution.assert_called_once()
         call_args = mock_evolution.on_after_tool_execution.call_args
         assert call_args.kwargs["tool_name"] == "tts_synthesize"
-        assert call_args.kwargs["params"]["engine"] == "edge-tts"
-        assert call_args.kwargs["params"]["voice"] == "zh-CN-XiaoxiaoNeural"
+        # 现行 context 字符串面（残留处理 2026-09-13）
+        assert "edge-tts" in call_args.kwargs["context"]
+        assert "zh-CN-XiaoxiaoNeural" in call_args.kwargs["context"]
         assert call_args.kwargs["success"] is True
-        assert call_args.kwargs["execution_time"] == 2.0  # 2000ms -> 2.0s
+        assert call_args.kwargs["latency"] == 2.0  # 2000ms -> 2.0s
 
 
 # ============================================================

@@ -23,13 +23,31 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
-from neurova.core.task_tracker import (
-    TaskTracker,
-    TaskStatus,
-    TaskInfo,
-    get_task_tracker,
-)
+from neurova.core.task_tracker import get_task_tracker
+
+
+def _make_ws_token():
+    from neurova.api.auth import create_access_token
+    return create_access_token({'user_id': 'test_user', 'sub': 'test_user', 'role': 'user'})
+
 from neurova.api.app import create_app
+
+def _authed_client(app):
+    """统一注入登录态（admin 角色——console debug 面需管理员）。
+
+    残留处理 2026-09-13：这些 root ad-hoc 用例写于 console 面未收鉴权
+    时期；路径/鉴权契约迁移后统一补 auth 替身（两模块各有 get_current_user，
+    全部覆盖）。"""
+    from fastapi.testclient import TestClient
+    from neurova.api import auth as auth_mod
+    from neurova.api import deps as deps_mod
+
+    user = {"user_id": "test_user", "username": "test_user", "role": "admin"}
+    app.dependency_overrides[deps_mod.get_current_user] = lambda: user
+    app.dependency_overrides[auth_mod.get_current_user] = lambda: user
+    return TestClient(app)
+
+
 
 
 # ============================================================
@@ -48,7 +66,7 @@ def app():
 @pytest.fixture
 def client(app):
     """创建测试客户端"""
-    return TestClient(app)
+    return _authed_client(app)
 
 
 @pytest.fixture
@@ -67,336 +85,13 @@ def sample_metadata():
     }
 
 
-# ============================================================
-# TaskTracker 测试
-# ============================================================
+class TestTaskTrackerSingleton:
+    """全局单例（同步路径删除后仅存的使用面）"""
 
-class TestTaskTracker:
-    """TaskTracker 测试类"""
-    
-    def test_start_tracking(self, tracker, sample_metadata):
-        """测试开始追踪任务"""
-        task_id = "test_task_1"
-        
-        # 创建事件循环来运行异步函数
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            task_info = loop.run_until_complete(
-                tracker.start_tracking(task_id, sample_metadata)
-            )
-        finally:
-            loop.close()
-        
-        assert task_info.task_id == task_id
-        assert task_info.status == TaskStatus.PENDING
-        assert task_info.metadata == sample_metadata
-        assert task_id in tracker._tasks
-    
-    def test_start_tracking_duplicate(self, tracker, sample_metadata):
-        """测试重复创建任务"""
-        task_id = "test_task_2"
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            # 第一次创建
-            task_info1 = loop.run_until_complete(
-                tracker.start_tracking(task_id, sample_metadata)
-            )
-            
-            # 第二次创建（应该返回已存在的任务）
-            task_info2 = loop.run_until_complete(
-                tracker.start_tracking(task_id, sample_metadata)
-            )
-        finally:
-            loop.close()
-        
-        assert task_info1.task_id == task_info2.task_id
-    
-    def test_update_progress(self, tracker, sample_metadata):
-        """测试更新任务进度"""
-        task_id = "test_task_3"
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(tracker.start_tracking(task_id, sample_metadata))
-            
-            # 更新进度
-            result = loop.run_until_complete(
-                tracker.update_progress(task_id, 0.5, "处理中...")
-            )
-        finally:
-            loop.close()
-        
-        assert result is True
-        task_info = tracker.get_task_status(task_id)
-        assert task_info.status == TaskStatus.RUNNING
-        assert task_info.progress == 0.5
-        assert task_info.message == "处理中..."
-        assert task_info.started_at is not None
-    
-    def test_update_progress_invalid_task(self, tracker):
-        """测试更新不存在的任务进度"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(
-                tracker.update_progress("non_existent", 0.5, "test")
-            )
-        finally:
-            loop.close()
-        
-        assert result is False
-    
-    def test_complete_task(self, tracker, sample_metadata):
-        """测试完成任务"""
-        task_id = "test_task_4"
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(tracker.start_tracking(task_id, sample_metadata))
-            loop.run_until_complete(tracker.update_progress(task_id, 0.5, "processing"))
-            
-            # 完成任务
-            result = loop.run_until_complete(
-                tracker.complete_task(task_id, {"result": "success"})
-            )
-        finally:
-            loop.close()
-        
-        assert result is True
-        task_info = tracker.get_task_status(task_id)
-        assert task_info.status == TaskStatus.COMPLETED
-        assert task_info.progress == 1.0
-        assert task_info.result == {"result": "success"}
-        assert task_info.completed_at is not None
-    
-    def test_fail_task(self, tracker, sample_metadata):
-        """测试任务失败"""
-        task_id = "test_task_5"
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(tracker.start_tracking(task_id, sample_metadata))
-            
-            # 任务失败
-            result = loop.run_until_complete(
-                tracker.fail_task(task_id, Exception("Test error"))
-            )
-        finally:
-            loop.close()
-        
-        assert result is True
-        task_info = tracker.get_task_status(task_id)
-        assert task_info.status == TaskStatus.FAILED
-        assert task_info.error is not None
-        assert "Test error" in str(task_info.error)
-    
-    def test_stop_task(self, tracker, sample_metadata):
-        """测试停止任务"""
-        task_id = "test_task_6"
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(tracker.start_tracking(task_id, sample_metadata))
-            loop.run_until_complete(tracker.update_progress(task_id, 0.3, "running"))
-            
-            # 停止任务
-            result = loop.run_until_complete(tracker.stop_task(task_id))
-        finally:
-            loop.close()
-        
-        assert result is True
-        task_info = tracker.get_task_status(task_id)
-        assert task_info.status == TaskStatus.CANCELLED
-        assert task_info._cancel_requested is True
-    
-    def test_stop_task_not_running(self, tracker, sample_metadata):
-        """测试停止已完成的任务"""
-        task_id = "test_task_7"
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(tracker.start_tracking(task_id, sample_metadata))
-            loop.run_until_complete(tracker.complete_task(task_id, {}))
-            
-            # 尝试停止已完成的任务
-            result = loop.run_until_complete(tracker.stop_task(task_id))
-        finally:
-            loop.close()
-        
-        assert result is False
-    
-    def test_get_task_status(self, tracker, sample_metadata):
-        """测试获取任务状态"""
-        task_id = "test_task_8"
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(tracker.start_tracking(task_id, sample_metadata))
-        finally:
-            loop.close()
-        
-        task_info = tracker.get_task_status(task_id)
-        assert task_info is not None
-        assert task_info.task_id == task_id
-        
-        # 不存在的任务
-        non_existent = tracker.get_task_status("non_existent")
-        assert non_existent is None
-    
-    def test_get_all_tasks(self, tracker, sample_metadata):
-        """测试获取所有任务"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            for i in range(3):
-                loop.run_until_complete(
-                    tracker.start_tracking(f"task_{i}", sample_metadata)
-                )
-        finally:
-            loop.close()
-        
-        all_tasks = tracker.get_all_tasks()
-        assert len(all_tasks) == 3
-    
-    def test_get_tasks_by_status(self, tracker, sample_metadata):
-        """测试根据状态筛选任务"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            # 创建几个任务
-            for i in range(3):
-                task_id = f"task_{i}"
-                loop.run_until_complete(tracker.start_tracking(task_id, sample_metadata))
-                if i < 2:
-                    loop.run_until_complete(tracker.update_progress(task_id, 0.5, "running"))
-            
-            # 完成一个任务
-            loop.run_until_complete(tracker.complete_task("task_0", {}))
-        finally:
-            loop.close()
-        
-        pending_tasks = tracker.get_tasks_by_status(TaskStatus.PENDING)
-        running_tasks = tracker.get_tasks_by_status(TaskStatus.RUNNING)
-        completed_tasks = tracker.get_tasks_by_status(TaskStatus.COMPLETED)
-        
-        assert len(pending_tasks) == 1
-        assert len(running_tasks) == 1
-        assert len(completed_tasks) == 1
-    
-    def test_task_info_to_dict(self, sample_metadata):
-        """测试 TaskInfo.to_dict() 方法"""
-        task_info = TaskInfo(
-            task_id="test_task",
-            metadata=sample_metadata,
-            status=TaskStatus.RUNNING,
-            progress=0.5,
-            message="处理中",
-        )
-        
-        task_dict = task_info.to_dict()
-        
-        assert task_dict["task_id"] == "test_task"
-        assert task_dict["status"] == "running"
-        assert task_dict["progress"] == 0.5
-        assert task_dict["message"] == "处理中"
-        assert "created_at" in task_dict
-        assert "started_at" in task_dict
-
-
-# ============================================================
-# 便捷函数测试
-# ============================================================
-
-class TestConvenienceFunctions:
-    """测试便捷函数（全局单例）"""
-    
     def test_get_task_tracker_singleton(self):
-        """测试单例模式"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            tracker1 = loop.run_until_complete(asyncio.to_thread(get_task_tracker))
-            tracker2 = loop.run_until_complete(asyncio.to_thread(get_task_tracker))
-        finally:
-            loop.close()
-        
+        tracker1 = get_task_tracker()
+        tracker2 = get_task_tracker()
         assert tracker1 is tracker2
-    
-    def test_start_tracking_convenience(self, sample_metadata):
-        """测试 start_tracking 便捷函数"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            task_info = loop.run_until_complete(
-                start_tracking("conv_task_1", sample_metadata)
-            )
-        finally:
-            loop.close()
-        
-        assert task_info.task_id == "conv_task_1"
-    
-    def test_update_progress_convenience(self):
-        """测试 update_progress 便捷函数"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(start_tracking("conv_task_2", {}))
-            result = loop.run_until_complete(
-                update_progress("conv_task_2", 0.7, "convenience test")
-            )
-        finally:
-            loop.close()
-        
-        assert result is True
-    
-    def test_complete_task_convenience(self):
-        """测试 complete_task 便捷函数"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(start_tracking("conv_task_3", {}))
-            result = loop.run_until_complete(
-                complete_task("conv_task_3", {"done": True})
-            )
-        finally:
-            loop.close()
-        
-        assert result is True
-    
-    def test_fail_task_convenience(self):
-        """测试 fail_task 便捷函数"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(start_tracking("conv_task_4", {}))
-            result = loop.run_until_complete(
-                fail_task("conv_task_4", Exception("Convenience error"))
-            )
-        finally:
-            loop.close()
-        
-        assert result is True
-    
-    def test_stop_task_convenience(self):
-        """测试 stop_task 便捷函数"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(start_tracking("conv_task_5", {}))
-            result = loop.run_until_complete(stop_task("conv_task_5"))
-        finally:
-            loop.close()
-        
-        assert result is True
 
 
 # ============================================================
@@ -409,7 +104,7 @@ class TestConsoleAPI:
     def test_chat_endpoint(self, client):
         """测试聊天接口"""
         response = client.post(
-            "/console/chat",
+            "/api/v1/console/chat",
             json={
                 "message": "Hello, Neurova!",
                 "session_id": "test_session",
@@ -422,35 +117,34 @@ class TestConsoleAPI:
         assert "text/event-stream" in response.headers.get("content-type", "")
     
     def test_chat_stop_endpoint(self, client):
-        """测试停止聊天接口"""
-        # 先创建一个任务
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(start_tracking("stop_test_task", {}))
-        finally:
-            loop.close()
-        
-        # 停止任务
-        response = client.post("/console/chat/stop?task_id=stop_test_task")
-        
+        """停止聊天接口（现行 session 面契约）。
+
+        残留处理 2026-09-13：原用例基于 B-11/B-12 已删的同步任务 API
+        （start_tracking/?task_id=），迁移到现行 /chat/stop?session_id= 面——
+        无运行任务时诚实返回 stopped=False 而非 404。"""
+        response = client.post("/api/v1/console/chat/stop?session_id=stop_test_session")
+
         assert response.status_code == 200
         data = response.json()
-        assert "stopped" in data
+        assert data["data"]["stopped"] is False
     
     def test_chat_history_endpoint(self, client):
-        """测试获取聊天历史接口"""
-        response = client.get("/console/chat/history?session_id=test_session&limit=10")
-        
+        """获取聊天历史（现行契约：信封 {code,data:{messages,session_id}}；
+        未知会话 404——归属校验收口，先建会话再查）。残留处理 2026-09-13"""
+        sid = client.post("/api/v1/console/chat/new", json={}).json()["data"]["session_id"]
+        response = client.get(f"/api/v1/console/chat/history?session_id={sid}&limit=10")
+
         assert response.status_code == 200
-        data = response.json()
-        assert "session_id" in data
-        assert "messages" in data
+        data = response.json()["data"]
+        assert data["session_id"] == sid
+        assert isinstance(data["messages"], list)
+        # 未知会话诚实 404（不得伪装空历史）
+        assert client.get("/api/v1/console/chat/history?session_id=no_such_session").status_code == 404
     
     def test_chat_new_endpoint(self, client):
         """测试创建新会话接口"""
         response = client.post(
-            "/console/chat/new",
+            "/api/v1/console/chat/new",
             json={
                 "user_id": "test_user",
                 "metadata": {"source": "test"},
@@ -458,16 +152,17 @@ class TestConsoleAPI:
         )
         
         assert response.status_code == 200
-        data = response.json()
+        # 信封 {code,message,data:{session_id}}（统一响应面）
+        data = response.json()["data"]
         assert "session_id" in data
-        assert "created_at" in data
     
     def test_chat_sessions_endpoint(self, client):
         """测试获取会话列表接口"""
-        response = client.get("/console/chat/sessions?user_id=test_user")
+        response = client.get("/api/v1/console/chat/sessions")
         
         assert response.status_code == 200
-        data = response.json()
+        # 用户维度以 JWT 身份为准（S3 隔离收口），响应在 data 信封内
+        data = response.json()["data"]
         assert "sessions" in data
         assert "total" in data
     
@@ -479,109 +174,85 @@ class TestConsoleAPI:
         
         with open(test_file, "rb") as f:
             response = client.post(
-                "/console/upload",
+                "/api/v1/console/upload",
                 files={"file": ("test.txt", f, "text/plain")},
             )
         
         assert response.status_code == 200
-        data = response.json()
+        # 信封 + 现行键名 filename（非 file_name）；残留处理 2026-09-13
+        data = response.json()["data"]
         assert "file_id" in data
-        assert "file_name" in data
+        assert "filename" in data
         assert data["size"] > 0
     
     def test_upload_list_endpoint(self, client):
         """测试获取上传文件列表接口"""
-        response = client.get("/console/upload/list?limit=10&offset=0")
+        response = client.get("/api/v1/console/uploads?limit=10&offset=0")
         
         assert response.status_code == 200
-        data = response.json()
+        data = response.json()["data"]
         assert "files" in data
         assert "total" in data
     
-    def test_debug_logs_endpoint(self, client, monkeypatch):
-        """测试获取后端日志接口"""
-        # 启用调试端点
-        monkeypatch.setenv("ENABLE_DEBUG_ENDPOINT", "true")
-        
-        response = client.get("/console/debug/backend-logs?lines=50")
+    def test_debug_logs_endpoint(self, client):
+        """后端日志（现行契约：admin 门禁 + data={content,lines}；
+        ENABLE_DEBUG_ENDPOINT env 门禁已被 require_admin 收口取代）。残留处理 2026-09-13"""
+        response = client.get("/api/v1/console/debug/logs?lines=50")
         
         assert response.status_code == 200
-        data = response.json()
-        assert "path" in data
-        assert "exists" in data
+        data = response.json()["data"]
         assert "content" in data
+        assert data["lines"] == 50
     
-    def test_debug_logs_endpoint_disabled(self, client):
-        """测试禁用调试端点时访问日志接口"""
-        import os
-        # 确保环境变量未设置或设置为false
-        enable_debug = os.getenv("ENABLE_DEBUG_ENDPOINT", "false").lower() == "true"
-        
-        response = client.get("/console/debug/backend-logs?lines=50")
-        
-        if not enable_debug:
-            assert response.status_code == 403
-        else:
-            assert response.status_code == 200
+    def test_debug_logs_endpoint_denied_for_non_admin(self, client):
+        """非管理员访问 debug 面 403（现行鉴权契约）。残留处理 2026-09-13：
+        原用例基于已删的 ENABLE_DEBUG_ENDPOINT 门禁。"""
+        from neurova.api import deps as deps_mod
+
+        plain = {"user_id": "plain", "username": "plain", "role": "user"}
+        client.app.dependency_overrides[deps_mod.get_current_user] = lambda: plain
+        try:
+            assert client.get("/api/v1/console/debug/logs?lines=50").status_code == 403
+        finally:
+            client.app.dependency_overrides.pop(deps_mod.get_current_user, None)
     
-    def test_debug_system_status_endpoint(self, client, monkeypatch):
-        """测试获取系统状态接口"""
-        # 启用调试端点
-        monkeypatch.setenv("ENABLE_DEBUG_ENDPOINT", "true")
-        
-        response = client.get("/console/debug/system-status")
+    def test_debug_system_status_endpoint(self, client):
+        """系统状态（现行 data 面：资源水位）。残留处理 2026-09-13：
+        原 status/version/tasks 键随 debug 面收口改为资源指标。"""
+        response = client.get("/api/v1/console/debug/status")
         
         assert response.status_code == 200
-        data = response.json()
-        assert "status" in data
-        assert "version" in data
-        assert "uptime" in data
-        assert "tasks" in data
+        data = response.json()["data"]
+        assert "cpu_percent" in data
+        assert "uptime_seconds" in data
     
-    def test_debug_system_status_endpoint_disabled(self, client):
-        """测试禁用调试端点时访问系统状态接口"""
-        import os
-        # 确保环境变量未设置或设置为false
-        enable_debug = os.getenv("ENABLE_DEBUG_ENDPOINT", "false").lower() == "true"
-        
-        response = client.get("/console/debug/system-status")
-        
-        if not enable_debug:
-            assert response.status_code == 403
-        else:
-            assert response.status_code == 200
+    def test_debug_status_denied_for_non_admin(self, client):
+        """非管理员访问 debug status 403（现行鉴权契约）。"""
+        from neurova.api import deps as deps_mod
+
+        plain = {"user_id": "plain", "username": "plain", "role": "user"}
+        client.app.dependency_overrides[deps_mod.get_current_user] = lambda: plain
+        try:
+            assert client.get("/api/v1/console/debug/status").status_code == 403
+        finally:
+            client.app.dependency_overrides.pop(deps_mod.get_current_user, None)
     
     def test_websocket_endpoint(self, client):
         """测试 WebSocket 接口"""
-        with client.websocket_connect("/console/ws") as websocket:
+        with client.websocket_connect(f"/api/v1/console/ws/test-client?token={_make_ws_token()}") as websocket:
             # 发送 ping
             websocket.send_text(json.dumps({
                 "type": "ping",
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }))
             
-            # 接收 pong
+            # 接收 pong（现行协议键="type"；subscribe 面不存在，未知类型回 ack）
             data = json.loads(websocket.receive_text())
-            assert data["event"] == "pong"
-            
-            # 发送 subscribe
-            task_id = "ws_test_task"
-            websocket.send_text(json.dumps({
-                "type": "subscribe",
-                "task_id": task_id,
-            }))
-            
+            assert data["type"] == "pong"
+
+            websocket.send_text(json.dumps({"type": "whatever"}))
             data = json.loads(websocket.receive_text())
-            assert data["event"] == "subscribed"
-            
-            # 发送 unsubscribe
-            websocket.send_text(json.dumps({
-                "type": "unsubscribe",
-                "task_id": task_id,
-            }))
-            
-            data = json.loads(websocket.receive_text())
-            assert data["event"] == "unsubscribed"
+            assert data["type"] == "ack"
 
 
 # ============================================================
@@ -594,14 +265,14 @@ class TestIntegration:
     def test_chat_and_stop_workflow(self, client):
         """测试完整的聊天和停止工作流"""
         # 1. 创建新会话
-        new_session_resp = client.post("/console/chat/new")
+        new_session_resp = client.post("/api/v1/console/chat/new")
         assert new_session_resp.status_code == 200
-        session_id = new_session_resp.json()["session_id"]
+        session_id = new_session_resp.json()["data"]["session_id"]
         
         # 2. 发送聊天请求（非流式，以便测试）
         # 注意：实际 SSE 响应需要特殊处理，这里只测试接口是否可用
         chat_resp = client.post(
-            "/console/chat",
+            "/api/v1/console/chat",
             json={
                 "message": "Integration test message",
                 "session_id": session_id,
@@ -610,36 +281,36 @@ class TestIntegration:
         )
         # 即使返回 SSE 流，也应该成功（200）
         assert chat_resp.status_code == 200
-    
+
+        # 3. 停止（现行 session 面：无运行任务诚实 stopped=False，不 404）
+        stop_resp = client.post(f"/api/v1/console/chat/stop?session_id={session_id}")
+        assert stop_resp.status_code == 200
+        assert stop_resp.json()["data"]["stopped"] is False
+
     def test_task_lifecycle(self):
-        """测试任务完整生命周期"""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            task_id = "lifecycle_test"
-            metadata = {"test": "lifecycle"}
-            
-            # 1. 创建任务
-            task_info = loop.run_until_complete(
-                start_tracking(task_id, metadata)
-            )
-            assert task_info.status == TaskStatus.PENDING
-            
-            # 2. 更新进度
-            loop.run_until_complete(update_progress(task_id, 0.3, "step 1"))
-            task_info = get_task_tracker().get_task_status(task_id)
-            assert task_info.status == TaskStatus.RUNNING
-            
-            # 3. 继续更新
-            loop.run_until_complete(update_progress(task_id, 0.7, "step 2"))
-            
-            # 4. 完成任务
-            loop.run_until_complete(complete_task(task_id, {"result": "success"}))
-            task_info = get_task_tracker().get_task_status(task_id)
-            assert task_info.status == TaskStatus.COMPLETED
-            assert task_info.result == {"result": "success"}
-        finally:
-            loop.close()
+        """任务登记→运行→停止生命周期（现行 task_tracker API）。
+
+        残留处理 2026-09-13：同步任务面（start_tracking/update_progress/
+        complete_task/TaskStatus）随 B-11/B-12 清理删除；迁移到
+        register_async_task + request_session_stop 等价意图。"""
+        async def scenario():
+            tracker = get_task_tracker()
+            sid = "lifecycle_test"
+
+            async def work():
+                import asyncio as _a
+                await _a.sleep(30)
+
+            task = asyncio.get_running_loop().create_task(work())
+            tracker.register_async_task(sid, task, kind="chat")
+            assert tracker.request_session_stop(sid) >= 1
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            assert task.cancelled()
+
+        asyncio.run(scenario())
 
 
 if __name__ == "__main__":

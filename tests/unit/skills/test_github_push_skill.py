@@ -45,8 +45,11 @@ class TestGitHubPushSkill:
         assert info.name == "github_push"
         assert "git" in info.tags
         assert "github" in info.tags
-        assert "action" in info.parameters
-        assert "message" in info.parameters
+        # 现行 SkillInfo.parameters 为参数定义 dict 列表（name 键），非映射。
+        # 残留处理 2026-09-13 适配形状，意图保留。
+        param_names = {p.get("name") for p in info.parameters}
+        assert "action" in param_names
+        assert "message" in param_names
 
     @pytest.mark.asyncio
     async def test_get_status(self):
@@ -98,7 +101,8 @@ class TestGitHubPushSkill:
     def test_skill_parameters(self):
         """测试技能参数定义"""
         info = self.skill.get_info()
-        params = info.parameters
+        # 列表形参数面 → 建 name→定义 映射后原断言保持（残留处理 2026-09-13）
+        params = {p.get("name"): p for p in info.parameters}
 
         # 检查必要参数
         assert "action" in params

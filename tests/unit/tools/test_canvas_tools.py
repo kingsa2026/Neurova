@@ -41,7 +41,9 @@ def _make_executor():
     agent.tool_lifecycle = Mock()
     agent.skill_packer = Mock()
     agent.config = Mock()
-    agent._current_session_id = "sess_test"
+    # 实现读取面为 public 别名 getattr(agent, 'current_session_id')；
+    # fixture 须设 public 名（残留处理 2026-09-13：原设私有名下 Mock 自动属性漏到断言）
+    agent.current_session_id = "sess_test"
     return ToolExecutor(agent)
 
 

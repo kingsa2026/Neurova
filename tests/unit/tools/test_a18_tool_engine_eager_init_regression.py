@@ -58,3 +58,9 @@ class TestA18EagerToolEngine:
 
         assert ex._tool_engine is None
         assert ex.tool_engine is None
+
+        # 测试卫生（残留处理 2026-09-13）：fake_import 使 _get_tool_engine_class
+        # 走 except 分支置 _TOOL_ENGINE_AVAILABLE=False——该全局 monkeypatch 不
+        # 覆盖，不显式复位会在大合批顺序里泄漏（a18 case1 急切构建被误跳过）。
+        import neurova.tool_executor as _te
+        _te._TOOL_ENGINE_AVAILABLE = True

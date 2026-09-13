@@ -193,3 +193,30 @@ def test_startup_reconcile_converges_ghost_rows(tmp_path, monkeypatch):
     pending = [r for r in s2.list_runs("sb") if r["status"] == "cancelled"]
     assert pending and pending[0]["error_type"] == "server_restart"
     s2.close()
+
+
+def test_stop_while_queued_terminates_stream(client, store):
+    """P1-#8：排队等待中的请求收到 /chat/stop 的持久取消意图 →
+    SSE 以 stopped+done 收尾，自身行 cancelled(user_stopped_while_queued)。"""
+    sid = "led-c7"
+    blocker = store.intake(sid, "u", "a", "blocker")
+    store.claim_next(sid, owner="blocker-w")
+
+    def _stop_soon():
+        time.sleep(0.4)
+        store.request_cancel(sid)
+
+    t = threading.Thread(target=_stop_soon)
+    t.start()
+    try:
+        r = client.post(
+            "/api/v1/console/chat",
+            json={"message": "queued-and-stopped", "session_id": sid, "stream": True},
+        )
+    finally:
+        t.join()
+    types = _sse_types(r.text)
+    assert "queued" in types and "stopped" in types and types[-1] == "done"
+    mine = [x for x in store.list_runs(sid) if x["message_digest"] == "queued-and-stopped"]
+    assert mine and mine[0]["status"] == "cancelled"
+    assert mine[0]["error_type"] == "user_stopped_while_queued"

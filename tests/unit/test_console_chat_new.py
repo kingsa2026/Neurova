@@ -39,7 +39,7 @@ class FakeRepo:
 
 def test_post_console_chat_new_reads_agent_id_and_title(monkeypatch):
     repo = FakeRepo()
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda *a: "u1")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
     resp = asyncio.run(
         console_module.post_console_chat_new(
@@ -54,7 +54,7 @@ def test_post_console_chat_new_reads_agent_id_and_title(monkeypatch):
 
 def test_post_console_chat_new_defaults_when_body_missing(monkeypatch):
     repo = FakeRepo()
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda *a: "u1")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
     resp = asyncio.run(
         console_module.post_console_chat_new(_make_json_request(None))

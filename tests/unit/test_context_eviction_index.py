@@ -1,8 +1,10 @@
 """Scroll Context 式被驱逐轮次索引单元测试。
 
 对齐升级方案 P1-2.2：对话轮次持久化 + 被驱逐轮次索引、按需召回。
-现状：ContextPool 驱逐（FIFO pop / TTL 过期）直接丢弃条目，不可恢复；
-升级后被驱逐条目进入有界「驱逐台账」，可按内容关键词召回。
+契约更新（残留处理 2026-09-13）：P1-1"永久归档"决议已废除容量驱逐——
+池定位=永不丢失，容量控制移到视图层（Drawer 预算整条选取）。因此
+①容量溢出不再产生台账（本文件钉此新行为）；②台账语义（倒序/有界/
+limit/统计）经 TTL 过期与手动 `_archive_evicted` 两条现行归档路径验证。
 """
 
 import unittest
@@ -28,30 +30,32 @@ def _ctx(content: str, source=ContextSource.CONVERSATION) -> ContextInput:
 class TestFifoEvictionArchived(unittest.TestCase):
     """容量驱逐不再丢失：进台账，可召回。"""
 
-    def test_overflow_archives_evicted_entry(self):
+    def test_overflow_does_not_lose_entry(self):
+        # P1-1 永久归档契约：max_size 不再驱逐，三条全部无损在池
         pool = _make_pool(max_size=2)
         pool.add_context(_ctx("第一轮：讨论项目目标"))
         pool.add_context(_ctx("第二轮：确定技术选型"))
         pool.add_context(_ctx("第三轮：分配任务"))
 
-        # 池内只剩最新 2 条
         active = [c.content for c in pool.get_contexts()]
-        self.assertNotIn("第一轮：讨论项目目标", active)
-        # 但被驱逐条目可召回
+        self.assertIn("第一轮：讨论项目目标", active)
+        self.assertEqual(len(active), 3)
+        # 容量路径不再产生台账；TTL/手动归档路径见下
+        self.assertEqual(pool.recall_evicted("项目目标"), [])
+        pool._archive_evicted(_ctx("第一轮：讨论项目目标"))
         recalled = pool.recall_evicted("项目目标")
         self.assertEqual(len(recalled), 1)
-        self.assertIn("项目目标", recalled[0].content)
 
     def test_recall_without_query_returns_latest_first(self):
+        # 台账倒序语义经手动归档路径验证（容量驱逐已废除）
         pool = _make_pool(max_size=1)
-        pool.add_context(_ctx("旧轮次A"))
-        pool.add_context(_ctx("旧轮次B"))
-        pool.add_context(_ctx("活跃轮次C"))
+        a, b = _ctx("旧轮次A"), _ctx("旧轮次B")
+        pool._archive_evicted(a)
+        pool._archive_evicted(b)
         recalled = pool.recall_evicted(limit=10)
         contents = [c.content for c in recalled]
-        # max_size=1: C 仍在活动池；台账=[A,B]，按驱逐时间倒序 → B 在前
+        # 台账按驱逐时间倒序 → 后驱逐的 B 在前
         self.assertEqual(contents, ["旧轮次B", "旧轮次A"])
-        self.assertNotIn("活跃轮次C", contents)
 
     def test_recall_no_match_returns_empty(self):
         pool = _make_pool(max_size=1)
@@ -63,7 +67,7 @@ class TestFifoEvictionArchived(unittest.TestCase):
         pool = _make_pool(max_size=1)
         pool._max_eviction_ledger = 5  # 收紧台账上限便于测试
         for i in range(20):
-            pool.add_context(_ctx(f"轮次-{i}"))
+            pool._archive_evicted(_ctx(f"轮次-{i}"))
         stats = pool.get_eviction_stats()
         self.assertLessEqual(stats["ledger_size"], 5)
 
@@ -103,17 +107,17 @@ class TestEvictionStats(unittest.TestCase):
 
     def test_stats_shape_and_counts(self):
         pool = _make_pool(max_size=1)
-        pool.add_context(_ctx("x1"))
-        pool.add_context(_ctx("x2"))
+        pool._archive_evicted(_ctx("x1"))
+        pool._archive_evicted(_ctx("x2"))
         stats = pool.get_eviction_stats()
         self.assertIn("evicted_total", stats)
         self.assertIn("ledger_size", stats)
-        self.assertGreaterEqual(stats["evicted_total"], 1)
+        self.assertGreaterEqual(stats["evicted_total"], 2)
 
     def test_recall_respects_limit(self):
         pool = _make_pool(max_size=1)
         for i in range(6):
-            pool.add_context(_ctx(f"公共词-{i}"))
+            pool._archive_evicted(_ctx(f"公共词-{i}"))
         self.assertEqual(len(pool.recall_evicted("公共词", limit=3)), 3)
 
 
