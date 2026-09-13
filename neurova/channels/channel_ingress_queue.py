@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Callable, List, Optional
 
 from neurova.channels.base import ChannelMessage
+from neurova.core.db_migration import migrate as apply_migrations, register_migration
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -51,6 +52,9 @@ CREATE TABLE IF NOT EXISTS channel_ingress_events (
 );
 CREATE INDEX IF NOT EXISTS idx_ingress_status ON channel_ingress_events(status, id);
 """
+# Yuxi 对比 P0-4：表结构纳入版本域（v1=现行 schema，幂等可重放）；
+# 后续 schema 变更加 v2/3 注册，禁止再直接改 _SCHEMA 而无迁移条目。
+register_migration(1, _SCHEMA, domain="channel_ingress")
 
 # payload ↔ ChannelMessage 的往返由 dataclasses.asdict/from_dict 承担
 # （timestamp ISO 往返，raw_event/metadata JSON 内嵌）
