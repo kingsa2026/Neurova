@@ -96,6 +96,24 @@ class TemplateRegistry:
 _template_registry_instance: Optional[TemplateRegistry] = None
 
 
+def seed_short_drama_template(storage) -> bool:
+    """启动种子（批次4，PRINTFILM 模板启动写库语义）：短剧一键成片模板
+    写入工作流库（id 固定、幂等——已存在不覆盖用户修改）。
+
+    Returns:
+        True=本次新种入，False=已存在跳过。
+    """
+    from .short_drama import SHORT_DRAMA_TEMPLATE_ID, get_short_drama_template
+
+    try:
+        if storage.get_workflow(SHORT_DRAMA_TEMPLATE_ID) is not None:
+            return False
+        storage.save_workflow(get_short_drama_template(), user_id=None)
+        return True
+    except Exception:  # noqa: BLE001 - 种子失败不阻塞启动（模板非关键路径）
+        return False
+
+
 def get_template_registry() -> TemplateRegistry:
     """获取模板注册表单例"""
     global _template_registry_instance
@@ -117,4 +135,5 @@ __all__ = [
     "TemplateRegistry",
     "get_template_registry",
     "reset_template_registry",
+    "seed_short_drama_template",
 ]
