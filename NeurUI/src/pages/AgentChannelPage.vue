@@ -135,6 +135,7 @@ import {
 } from '@/config/channelFields'
 import QrcodeAuthBlock from '@/components/QrcodeAuthBlock.vue'
 import NegativeScreenSettings from '@/components/NegativeScreenSettings.vue'
+import { getNegativeScreenConfig } from '@/api/modules/negative-screen'
 import { useAgentStore } from '@/stores/agents'
 
 const { t } = useI18n()
@@ -226,6 +227,15 @@ async function fetchConfigs() {
       }
       return c
     })
+    // 负一屏是用户级独立 API（不在 channel-configs 里）——同步其真实启用态，
+    // 否则永远显示未启用（与系统页 loadConfigs 的 negCh 分支对齐）。
+    try {
+      const neg: any = await getNegativeScreenConfig()
+      const negCh = channels.value.find((c) => c.channelKey === 'negative-screen')
+      if (negCh) negCh.enabled = !!(neg?.enabled ?? neg?.data?.enabled)
+    } catch {
+      /* 保持默认停用 */
+    }
   } catch {
     channels.value = baseCatalog()
     message.error(t('common.error'))
