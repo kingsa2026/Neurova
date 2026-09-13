@@ -383,16 +383,28 @@ class QQWebSocketAdapter(ChannelAdapter):
         if kwargs.get("chat_type") == "group" and at_uid:
             body["at"] = {"name": "", "qq": str(at_uid), "type": 3}
         path = self._reply_path(chat_id, kwargs.get("qq_message_type", message_type))
-        try:
+
+        async def _post(b):
             resp = await asyncio.to_thread(
-                lambda: requests.post(path, json=body, headers=self._auth_headers(), timeout=15))
+                lambda: requests.post(path, json=b, headers=self._auth_headers(), timeout=15))
             if resp.status_code in (200, 202, 204):
                 try:
-                    return str((resp.json() or {}).get("id") or f"qq_{int(time.time())}")
+                    return str((resp.json() or {}).get("id") or f"qq_{int(time.time())}"), None
                 except Exception:
-                    return f"qq_{int(time.time())}"
-            logger.error("qq 发送失败 %s: %s", resp.status_code, resp.text[:200])
-            return None
+                    return f"qq_{int(time.time())}", None
+            return None, f"{resp.status_code} {getattr(resp, 'text', '')[:200]}"
+
+        try:
+            mid, err = await _post(body)
+            if mid is None and "at" in body:
+                # at 字段被网关拒（真机核验未知格式）→ 去 at 重发，保证正文送达（自愈回退）
+                logger.warning("qq 带 at 发送被拒(%s)，去掉 at 回退重发", err)
+                body.pop("at", None)
+                mid, err = await _post(body)
+            if mid is None:
+                logger.error("qq 发送失败: %s", err)
+                return None
+            return mid
         except Exception as e:
             logger.exception("qq 发送异常: %s", e)
             return None
