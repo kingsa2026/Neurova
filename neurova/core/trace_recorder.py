@@ -5,6 +5,7 @@
 """
 
 import json
+import re
 from neurova.core.logger import get_logger
 from neurova.core.trace_context import clear_trace_id, set_trace_id
 from collections import defaultdict
@@ -19,6 +20,15 @@ from neurova.core.trace_models import (
 )
 
 logger = get_logger(__name__)
+
+# Windows/POSIX 文件名非法字符（渠道 user_id/session 可能含冒号，如 "channel:feishu"）
+_UNSAFE_PATH_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _safe_path_seg(value: str) -> str:
+    """把 user_id/agent_id/session_id/trace_id 变成可作目录/文件名的安全段。"""
+    s = _UNSAFE_PATH_CHARS.sub("_", str(value or ""))
+    return s.strip() or "unknown"
 
 
 class TrajectoryRecorder:
@@ -301,9 +311,16 @@ class TrajectoryRecorder:
             user_id = trace.user_id or "unknown"
             agent_id = trace.agent_id or "unknown"
             session_id = trace.session_id or "unknown"
-            trace_dir = self._storage_dir / user_id / agent_id / session_id
+            # Windows 文件名禁 : / \ 等——渠道 user_id/session 可能含冒号
+            # （如 "channel:feishu"、open_id 组合），消毒后作目录/文件名，否则
+            # mkdir 抛 WinError 123 使 agent.chat 崩、渠道无回复。
+            safe_user = _safe_path_seg(user_id)
+            safe_agent = _safe_path_seg(agent_id)
+            safe_session = _safe_path_seg(session_id)
+            safe_trace = _safe_path_seg(trace_id)
+            trace_dir = self._storage_dir / safe_user / safe_agent / safe_session
             trace_dir.mkdir(parents=True, exist_ok=True)
-            save_path = trace_dir / f"{trace_id}.json"
+            save_path = trace_dir / f"{safe_trace}.json"
 
         try:
             # 先序列化再原子写：序列化异常绝不截断已有旧文件
