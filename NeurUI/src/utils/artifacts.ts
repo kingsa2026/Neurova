@@ -35,6 +35,10 @@ const KIND_BY_EXT: Record<string, DockTabKind> = {
   flac: 'audio',
   aac: 'audio',
   m4a: 'audio',
+  mp4: 'video',
+  webm: 'video',
+  mov: 'video',
+  mkv: 'video',
 }
 
 export function kindForFilename(name: string): DockTabKind {
@@ -196,6 +200,7 @@ const DOCK_ICONS: Record<DockTabKind, string> = {
   html: 'browser',
   image: 'image',
   audio: 'audio',
+  video: 'video',
   text: 'file',
   history: 'clock',
   archive: 'archive',

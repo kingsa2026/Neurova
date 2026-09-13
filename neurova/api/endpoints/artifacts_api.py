@@ -60,6 +60,11 @@ _KIND_BY_EXT = {
     ".flac": "audio",
     ".aac": "audio",
     ".m4a": "audio",
+    # 批次4（dock video）：与前端 utils/artifacts.ts KIND_BY_EXT 对齐
+    ".mp4": "video",
+    ".webm": "video",
+    ".mov": "video",
+    ".mkv": "video",
 }
 
 _artifacts_store: Dict[str, Dict[str, Any]] = {}
