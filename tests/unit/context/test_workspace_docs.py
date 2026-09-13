@@ -119,3 +119,30 @@ class TestSystemPromptInjection:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestDualPathConsistency:
+    """P0-1 防漂移钉：主链 build_context 与工具方法 build_system_prompt
+    必须共用 _workspace_docs_section 单源——历史上时间段/规则段曾因双路径
+    各自拼装漂移（本测试防 AGENTS.md 注入重蹈覆辙）。"""
+
+    def test_both_prompt_paths_use_single_source_helper(self):
+        import inspect
+
+        from neurova.context.orchestrator import ContextOrchestrator
+
+        src_main = inspect.getsource(ContextOrchestrator.build_context)
+        src_util = inspect.getsource(ContextOrchestrator.build_system_prompt)
+        assert "_workspace_docs_section()" in src_main, "主链 build_context 未接工作区文档"
+        assert "_workspace_docs_section()" in src_util, "工具方法 build_system_prompt 未接工作区文档"
+
+    def test_helper_returns_section_with_docs(self, tmp_path):
+        (tmp_path / "AGENTS.md").write_text("只在周一部署", encoding="utf-8")
+        orch = TestSystemPromptInjection()._build_orchestrator(str(tmp_path))
+        section = orch._workspace_docs_section()
+        assert section.startswith("## 工作区文档")
+        assert "只在周一部署" in section
+
+    def test_helper_empty_without_docs(self, tmp_path):
+        orch = TestSystemPromptInjection()._build_orchestrator(str(tmp_path))
+        assert orch._workspace_docs_section() == ""
