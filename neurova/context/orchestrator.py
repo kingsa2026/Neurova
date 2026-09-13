@@ -424,6 +424,12 @@ class ContextOrchestrator:
             build_all_sections(workspace_path=str(getattr(self.config, "workspace_path", "") or ""))
         )
 
+        # P0-1（Codex 对齐）：工作区 AGENTS.md 文档树——与 build_system_prompt
+        # 共用单源 helper（本方法是 chat_pipeline 实际调用路径，注入必须在此）
+        workspace_section = self._workspace_docs_section()
+        if workspace_section:
+            system_instructions.append(workspace_section)
+
         # 使用配置的行为规则
         developer_instructions = list(self.config.behavior_rules)
         if tools_desc:
@@ -563,7 +569,13 @@ class ContextOrchestrator:
             for memory in relevant_memories or []:
                 content = memory.get("content", str(memory)) if isinstance(memory, dict) else str(memory)
                 injected_hashes.add(ContextInput.compute_hash(ContextSource.MEMORY, content))
-                context.append({"role": "system", "content": f"[记忆] {content}"})
+                # P2-2 收口：携带溯源标记（模型可引用/归因；无标识字段格式不变）
+                try:
+                    from neurova.memory.citation import render_memory_line
+
+                    context.append({"role": "system", "content": render_memory_line(memory)})
+                except Exception:  # noqa: BLE001 - citation 失败退回旧格式
+                    context.append({"role": "system", "content": f"[记忆] {content}"})
             for experience in experience_items or []:
                 content = experience.get("content", str(experience)) if isinstance(experience, dict) else str(experience)
                 injected_hashes.add(ContextInput.compute_hash(ContextSource.EXPERIENCE, content))
@@ -938,12 +950,23 @@ class ContextOrchestrator:
     # 修2（2026-09-09）：对话窗口 token 预算 + 自动压缩（zcode 式）
     # ══════════════════════════════════════════════════════════════
 
+    # 窗口份额（口径审计 2026-09-14，显式化）：get_token_budget_for_model
+    # 返回值 = 模型窗口 ×0.6 视图安全系数（pool 侧钉死契约，3 个消费方依赖，
+    # 不可动）；本层再取其 60% 作为对话历史窗口份额。两层组合 = 模型窗口的
+    # **约 36%**——这是 kai 3.5 万 token 事故修复（4d1383a7）既定的成本控制
+    # 口径，不是双重折减 bug：pool 系数管"视图 vs 窗口"，本层系数管"历史
+    # 在 prompt 里的份额"，语义不同层。改动任何一层前先看本注释。
+    _WINDOW_SHARE_OF_POOL_BUDGET = 0.6
+
     def _resolve_window_token_budget(self) -> int:
         """窗口 token 预算：显式覆盖（_window_token_budget，测试/运维用）优先，
         否则模型元数据预算（get_token_budget_for_model）。
 
-        窗口只是 prompt 的一部分（system 前缀/工具 schema/记忆注入共享），
-        取池预算的 60% 作为窗口份额，钳位 [3000, 100000]。
+        组合口径（显式化 2026-09-14）：池预算（模型窗口×0.6 视图安全系数，
+        钳 [4000,400000]）× 窗口份额 0.6 = 模型窗口约 36%，钳位 [3000, 100000]。
+        实测参考：8k→3000 / 32k→11520 / 128k→47185 / 200k→72000 / 1M→100000(钳顶)。
+
+        窗口只是 prompt 的一部分（system 前缀/工具 schema/记忆注入共享）。
         """
         override = getattr(self, "_window_token_budget", None)
         if override:
@@ -955,7 +978,7 @@ class ContextOrchestrator:
             pool_budget = ContextPool.get_token_budget_for_model(model_name)
         except Exception:  # noqa: BLE001 - 预算查询失败不阻断
             pool_budget = 16000
-        return max(3000, min(int(pool_budget * 0.6), 100000))
+        return max(3000, min(int(pool_budget * self._WINDOW_SHARE_OF_POOL_BUDGET), 100000))
 
     def _compute_window_budget(
         self,
@@ -1236,6 +1259,26 @@ class ContextOrchestrator:
         pool = getattr(self, "context_pool", None)
         return getattr(pool, "_ledger_db", None) if pool else None
 
+    def _workspace_docs_section(self) -> str:
+        """P0-1（Codex 对齐）：工作区 AGENTS.md 文档树段（根→子目录层级拼接
+        + 字节预算截断）；无文档返回空串（调用方零注入，system prompt 零变化）。
+
+        单源约束：build_context（chat_pipeline 实际调用路径）与
+        build_system_prompt（工具方法）都必须经由此 helper——时间段/规则段
+        曾因双路径各自拼装漂移过，本段从一开始就收敛单源。
+        """
+        try:
+            from neurova.context.workspace_docs import collect_workspace_docs
+
+            docs = collect_workspace_docs(
+                str(getattr(self.config, "workspace_path", "") or "")
+            )
+            if docs:
+                return "## 工作区文档（AGENTS.md）\n" + docs
+        except Exception:  # noqa: BLE001 - 文档收集失败不阻断 system prompt
+            logger.warning("工作区文档收集失败(跳过)", exc_info=True)
+        return ""
+
     def build_system_prompt(self, tools_desc: str = "") -> str:
         """构建系统提示（Phase 6.5: 统一行为规则配置）。
 
@@ -1261,18 +1304,11 @@ class ContextOrchestrator:
             + build_all_sections(workspace_path=str(getattr(self.config, "workspace_path", "") or ""))
         )
 
-        # P0-1（Codex 对齐）：工作区 AGENTS.md 文档树自动注入——根→子目录层级
-        # 拼接 + 字节预算截断；无文档返回空串，system prompt 零变化
-        try:
-            from neurova.context.workspace_docs import collect_workspace_docs
-
-            workspace_docs = collect_workspace_docs(
-                str(getattr(self.config, "workspace_path", "") or "")
-            )
-            if workspace_docs:
-                parts.append("\n\n## 工作区文档（AGENTS.md）\n" + workspace_docs)
-        except Exception:  # noqa: BLE001 - 文档注入失败不阻断 system prompt
-            logger.warning("工作区文档注入失败(跳过)", exc_info=True)
+        # P0-1（Codex 对齐）：工作区 AGENTS.md 文档树——单源 helper，
+        # 与 build_context 主链共用（防双路径漂移）
+        workspace_section = self._workspace_docs_section()
+        if workspace_section:
+            parts.append("\n\n" + workspace_section)
 
         # 使用配置的行为规则
         if self.config.behavior_rules:
