@@ -41,6 +41,16 @@
               <a-form-item :label="t('aigc.template')">
                 <a-select v-model:value="imageTemplate" :options="imageTemplateOptions" :placeholder="t('aigc.selectTemplate')" show-search />
               </a-form-item>
+              <a-form-item :label="t('aigc.refImage')">
+                <a-upload :show-upload-list="false" accept="image/*" :custom-request="(o: any) => onRefUpload(o.file, 'image')">
+                  <GlassButton size="sm">{{ t('common.upload') }}</GlassButton>
+                </a-upload>
+                <div v-if="imageRefImages.length" class="ref-chips">
+                  <span v-for="(p, i) in imageRefImages" :key="i" class="ref-chip">
+                    {{ refFileName(p) }}<button class="ref-chip-x" type="button" @click="removeRef('image', i)">✕</button>
+                  </span>
+                </div>
+              </a-form-item>
               <a-form-item :label="t('aigc.model')">
                 <a-select v-model:value="imageModel" class="model-select-image" :options="imageModelOptions" :placeholder="t('aigc.selectModel')" show-search />
               </a-form-item>
@@ -52,7 +62,7 @@
           <GlassCard :title="t('aigc.gallery')" class="result-panel">
             <div v-if="imageResults.length" class="image-gallery">
               <div v-for="(img, idx) in imageResults" :key="idx" class="gallery-item" @click="previewImage(img)">
-                <img :src="img.url" :alt="img.prompt" />
+                <img :src="withFileToken(img.url)" :alt="img.prompt" />
               </div>
             </div>
             <a-empty v-else :description="t('aigc.noImages')" />
@@ -78,7 +88,7 @@
           </GlassPanel>
           <GlassCard :title="t('aigc.audioResult')" class="result-panel">
             <div v-if="audioUrl" class="audio-player">
-              <audio controls :src="audioUrl" />
+              <audio controls :src="withFileToken(audioUrl)" />
             </div>
             <a-empty v-else :description="t('aigc.noAudio')" />
           </GlassCard>
@@ -118,7 +128,14 @@
                 </a-select>
               </a-form-item>
               <a-form-item :label="t('aigc.refImage')">
-                <a-input v-model:value="videoRefImage" allow-clear :placeholder="t('aigc.refImageHint')" />
+                <a-upload :show-upload-list="false" accept="image/*" :custom-request="(o: any) => onRefUpload(o.file, 'video')">
+                  <GlassButton size="sm">{{ t('common.upload') }}</GlassButton>
+                </a-upload>
+                <div v-if="videoRefImages.length" class="ref-chips">
+                  <span v-for="(p, i) in videoRefImages" :key="i" class="ref-chip">
+                    {{ refFileName(p) }}<button class="ref-chip-x" type="button" @click="removeRef('video', i)">✕</button>
+                  </span>
+                </div>
               </a-form-item>
               <a-form-item :label="t('aigc.audio')">
                 <a-select v-model:value="videoAudio" allow-clear :placeholder="t('aigc.protocolAuto')">
@@ -137,7 +154,7 @@
                 <a-descriptions-item :label="t('aigc.status')">{{ videoStatus.status }}</a-descriptions-item>
                 <a-descriptions-item :label="t('aigc.progress')">{{ videoStatus.progress ?? 0 }}%</a-descriptions-item>
                 <a-descriptions-item v-if="videoStatus.url" :label="t('aigc.videoUrl')">
-                  <a :href="videoStatus.url" target="_blank">{{ videoStatus.url }}</a>
+                  <a :href="withFileToken(videoStatus.url)" target="_blank">{{ videoStatus.url }}</a>
                 </a-descriptions-item>
               </a-descriptions>
               <a-progress :percent="videoStatus.progress ?? 0" :status="videoStatus.status === 'failed' ? 'exception' : 'active'" />
@@ -162,7 +179,7 @@
       <div v-if="historyTasks.length" class="history-list">
         <div v-for="task in historyTasks" :key="task.task_id" class="history-item">
           <div class="history-thumb">
-            <img v-if="task.kind === 'image' && task.url" :src="task.url" :alt="task.prompt" />
+            <img v-if="task.kind === 'image' && task.url" :src="withFileToken(task.url)" :alt="task.prompt" />
             <span v-else class="history-kind-badge">{{ task.kind }}</span>
           </div>
           <div class="history-info">
@@ -175,7 +192,7 @@
             <div v-if="task.error" class="history-error">{{ task.error }}</div>
           </div>
           <div class="history-actions">
-            <a v-if="task.url" :href="task.url" :download="task.url.split('/').pop()" class="history-download">
+            <a v-if="task.url" :href="withFileToken(task.url)" :download="task.url.split('/').pop()" class="history-download">
               {{ t('aigc.download') }}
             </a>
           </div>
@@ -186,7 +203,7 @@
 
     <!-- Image Preview Modal -->
     <a-modal v-model:open="imagePreviewVisible" :footer="null" width="680px">
-      <img :src="imagePreviewUrl" alt="Preview" style="width: 100%" />
+      <img :src="withFileToken(imagePreviewUrl)" alt="Preview" style="width: 100%" />
     </a-modal>
   </div>
 </template>
@@ -203,6 +220,8 @@ import {
   listGenerationTasks,
   type GenerationTask,
 } from '@/api/modules/generation'
+import { uploadFile } from '@/api/modules/files'
+import { withFileToken } from '@/utils/genFiles'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -395,6 +414,36 @@ const imageResults = ref<{ url: string; prompt: string }[]>([])
 const imagePreviewVisible = ref(false)
 const imagePreviewUrl = ref('')
 
+// --- 批次3：参考图上传（复用 /files/upload，后端允许根含 storage 上传目录）---
+const imageRefImages = ref<string[]>([])
+const videoRefImages = ref<string[]>([])
+
+async function onRefUpload(file: File | { name?: string; size?: number }, target: 'image' | 'video') {
+  const list = target === 'image' ? imageRefImages : videoRefImages
+  try {
+    const fd = new FormData()
+    fd.append('file', file as Blob, (file as any).name || 'ref.png')
+    const res: any = await uploadFile(fd)
+    const path = res?.data?.path || res?.path
+    if (path) {
+      list.value.push(path)
+    } else {
+      message.error(t('aigc.generateError'))
+    }
+  } catch {
+    message.error(t('aigc.generateError'))
+  }
+}
+
+function removeRef(target: 'image' | 'video', idx: number) {
+  const list = target === 'image' ? imageRefImages : videoRefImages
+  list.value.splice(idx, 1)
+}
+
+function refFileName(p: string): string {
+  return p.split(/[\\/]/).pop() || p
+}
+
 async function generateImage() {
   if (!imagePrompt.value.trim()) return
   imageGenerating.value = true
@@ -408,6 +457,7 @@ async function generateImage() {
       model: imageModel.value === 'auto' ? undefined : imageModel.value,
       width: 1024,
       height: 1024,
+      ref_images: imageRefImages.value.length ? [...imageRefImages.value] : undefined,
     })
     const data = res?.data ?? res
     // B2-c 契约：/generation/image 返回 images:[{url, path}]（本地化产物），
@@ -484,7 +534,6 @@ const videoProtocol = ref('')
 const videoProviderId = ref('')
 const videoDuration = ref(5)
 const videoResolution = ref('1080p')
-const videoRefImage = ref('')
 const videoAudio = ref<boolean | null>(null)
 const videoGenerating = ref(false)
 const videoStatus = ref<{ status: string; progress: number; url?: string } | null>(null)
@@ -503,7 +552,7 @@ async function generateVideo() {
     }
     if (videoProtocol.value) payload.protocol = videoProtocol.value
     if (videoProviderId.value) payload.provider_id = videoProviderId.value
-    if (videoRefImage.value.trim()) payload.ref_images = [videoRefImage.value.trim()]
+    if (videoRefImages.value.length) payload.ref_images = [...videoRefImages.value]
     if (videoAudio.value !== null) payload.audio = videoAudio.value
     const res: any = await request.post('/generation/video', payload)
     const data = res?.data ?? res
@@ -710,5 +759,33 @@ function pollVideoStatus(taskId: string) {
 .history-download {
   font-size: 13px;
   color: var(--nr-accent, #4096ff);
+}
+
+/* 批次3：参考图上传 chips */
+.ref-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  background: rgba(125, 125, 125, 0.15);
+}
+
+.ref-chip-x {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: inherit;
+  font-size: 11px;
+  padding: 0;
 }
 </style>
