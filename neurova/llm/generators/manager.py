@@ -1,8 +1,14 @@
 """
 Generator manager
-Unified management for text-to-image, text-to-video, image-to-video, keyframe-to-video, video-to-video
+统一管理与分发 AIGC 生成类型（text_to_image / image_to_image / text_to_video / image_to_video …）
 
-集成 LLMRouter 实现自动模型选择
+批次0 修复（渠道 AIGC 复活）：
+- 原 ``generate()`` 使用未导入的 ``GenType``/``GenerationConfig`` 名字——NameError
+  被外层 except 吞成 error，任何调用必失败；现改为真实导入并按 GeneratorType 分发。
+- ``_map_to_llm_request_type`` 返回大写枚举名但查 ``RequestType(值)``（小写值），
+  恒 ValueError 被静默吞；现映射到 RequestType 真实值。
+- 六个 BaseGenerator「虚构端点」实现体（文档判定假 API 路径，从未真实产出）
+  已随批次0删除；统一走 ``runtime.ProtocolGenerator`` → ``protocols.py`` 实测矩阵。
 """
 
 from neurova.core.logger import get_logger
@@ -11,17 +17,20 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from neurova.llm.generators.base import GenerationConfig, GenerationResult, GeneratorType
+from neurova.llm.generators.runtime import GenerationCredsError, ProtocolGenerator
+
 logger = get_logger(__name__)
 
-# BUG AUDIT L-02: 生成器类型 → (模块后缀, 类名) 映射，用于按类型注册真实实例
-_GENERATOR_REGISTRY: Dict[str, tuple] = {
-    "text_to_image": ("text_to_image", "TextToImageGenerator"),
-    "image_to_image": ("image_to_image", "ImageToImageGenerator"),
-    "text_to_video": ("text_to_video", "TextToVideoGenerator"),
-    "image_to_video": ("image_to_video", "ImageToVideoGenerator"),
-    "keyframe_to_video": ("keyframe_to_video", "KeyframeToVideoGenerator"),
-    "video_to_video": ("video_to_video", "VideoToVideoGenerator"),
-}
+# 生成器类型（注册面 key 用 GeneratorType 值字符串）
+_GENERATOR_TYPES = [
+    GeneratorType.TEXT_TO_IMAGE,
+    GeneratorType.IMAGE_TO_IMAGE,
+    GeneratorType.TEXT_TO_VIDEO,
+    GeneratorType.IMAGE_TO_VIDEO,
+    GeneratorType.KEYFRAME_TO_VIDEO,
+    GeneratorType.VIDEO_TO_VIDEO,
+]
 
 
 @dataclass
@@ -49,7 +58,7 @@ class GeneratorResult:
 
 
 class GeneratorManager:
-    """生成器统一管理器"""
+    """生成器统一管理器（facade：一切生成类型 → ProtocolGenerator → 实测协议）。"""
 
     _instance: Optional["GeneratorManager"] = None
     _lock = threading.Lock()
@@ -89,36 +98,14 @@ class GeneratorManager:
         except ImportError:
             logger.warning("ProviderManager not available")
 
-        # BUG AUDIT L-02: 此前 self._generators 全局唯一赋值处只有 `{}`，
-        # 从不写入，导致所有 AIGC 调用返回 "not available"。在此注册真实实例。
         self._register_default_generators()
 
     def _register_default_generators(self) -> None:
-        """按 _GENERATOR_REGISTRY 注册真实生成器实例（BUG AUDIT L-02 根因修复）。
-
-        旧实现中 self._generators 从不写入，get_generator 恒返回 None，
-        所有文生图/图生图/文生视频/图生视频均报 "not available"。
-        """
-        api_key = ""
-        base_url = ""
-        if self._provider_manager is not None:
-            try:
-                api_key = getattr(self._provider_manager, "default_api_key", "") or ""
-                base_url = getattr(self._provider_manager, "default_base_url", "") or ""
-            except Exception as e:
-                logger.warning("读取 provider 凭据失败: %s", e)
-
-        for gen_type, (module_suffix, cls_name) in _GENERATOR_REGISTRY.items():
-            try:
-                import importlib
-
-                mod = importlib.import_module(f"neurova.llm.generators.{module_suffix}")
-                cls = getattr(mod, cls_name)
-                self._generators[gen_type] = cls(
-                    generator_id=gen_type, api_key=api_key, base_url=base_url
-                )
-            except Exception as e:
-                logger.error("注册生成器 %s(%s) 失败: %s", gen_type, cls_name, e)
+        """注册实测协议 facade 实例（批次0：六件虚构端点实现已删，统一 ProtocolGenerator）。"""
+        for gtype in _GENERATOR_TYPES:
+            self._generators[gtype.value] = ProtocolGenerator(
+                generator_id=gtype.value, generator_type=gtype
+            )
 
     def _load_providers(self) -> None:
         """加载可用的提供者"""
@@ -129,30 +116,33 @@ class GeneratorManager:
             except Exception as e:
                 logger.warning("Failed to load providers: %s", str(e))
 
-    def get_generator(self, generator_type: str) -> Optional[Any]:
+    def get_generator(self, generator_type: str, model: Optional[str] = None) -> Optional[Any]:
         """
-        获取指定类型的生成器
+        获取指定类型的生成器。
 
         Args:
-            generator_type: 生成器类型 (text_to_image, text_to_video, etc.)
+            generator_type: 生成器类型（str 或 GeneratorType 枚举值）
+            model: 兼容位——渠道 mixin 以 ``get_generator(type, model)`` 二参调用；
+                模型选择发生在 config/generate 阶段，此处仅接受不消费。
 
         Returns:
             生成器实例或 None
         """
-        return self._generators.get(generator_type)
+        key = generator_type.value if isinstance(generator_type, GeneratorType) else str(generator_type)
+        return self._generators.get(key)
 
     async def generate(
         self, generator_type: str, prompt: str, model: Optional[str] = None, provider: Optional[str] = None, **kwargs
     ) -> GeneratorResult:
         """
-        执行生成任务
+        执行生成任务（facade 入口；渠道/脚本可用的高层 API）。
 
         Args:
             generator_type: 生成器类型
             prompt: 生成提示
-            model: 指定模型（可选）
+            model: 指定模型（可选；缺省时 LLMRouter 按能力路由）
             provider: 指定提供者（可选）
-            **kwargs: 其他参数
+            **kwargs: 透传 GenerationConfig.extra_params
 
         Returns:
             GeneratorResult 执行结果
@@ -160,16 +150,20 @@ class GeneratorManager:
         start_time = time.time()
 
         try:
-            # 获取生成器
-            generator = self.get_generator(generator_type)
+            try:
+                gtype = GeneratorType(generator_type)
+            except ValueError:
+                return self._create_error_result(
+                    f"Generator type '{generator_type}' not supported", duration_ms=0.0
+                )
+
+            generator = self.get_generator(gtype)
             if generator is None:
                 return self._create_error_result(f"Generator type '{generator_type}' not available")
 
             # 如果未指定模型，使用 LLMRouter 选择
-            # BUG AUDIT L-02: 旧代码调用不存在的 get_best_model()，且返回值为
-            # ModelSelectionResult（含 .model / .provider_id 属性而非 dict）。
             if model is None and self._llm_router:
-                request_type = self._map_to_llm_request_type(generator_type)
+                request_type = self._map_to_llm_request_type(gtype.value)
                 if request_type:
                     try:
                         from neurova.llm.llm_router import RequestType as _RT
@@ -181,45 +175,47 @@ class GeneratorManager:
                     except Exception as e:
                         logger.warning("模型自动选择失败，使用默认模型: %s", e)
 
-            # 构造 GenerationConfig 并调用生成器
-            # BUG AUDIT L-02: BaseGenerator.generate 接收 config: GenerationConfig，
-            # 旧代码用 generate(prompt=..., model=...) 会 TypeError。
-            try:
-                gtype = GenType(generator_type)
-            except ValueError:
-                gtype = GenType.TEXT_GENERATION
             config = GenerationConfig(
                 type=gtype,
                 prompt=prompt,
+                model=model or "",
                 model_id=model or "",
                 extra_params=kwargs,
             )
-            result = await generator.generate(config)
+            result: GenerationResult = await generator.generate(config)
 
             duration_ms = (time.time() - start_time) * 1000
 
             return GeneratorResult(
-                success=True,
+                success=result.success,
                 data=result,
+                error=result.error or None,
                 model_used=model,
                 provider_used=provider,
                 duration_ms=duration_ms,
             )
 
+        except GenerationCredsError as e:
+            duration_ms = (time.time() - start_time) * 1000
+            return self._create_error_result(str(e), duration_ms=duration_ms)
         except Exception as e:
             duration_ms = (time.time() - start_time) * 1000
             logger.error("Generation failed: %s", str(e))
             return self._create_error_result(str(e), duration_ms=duration_ms)
 
     def _map_to_llm_request_type(self, generator_type: str) -> Optional[str]:
-        """映射生成器类型到 LLM 请求类型"""
+        """映射生成器类型到 LLM 请求类型（RequestType 枚举值，小写）。
+
+        批次0 根因修复：旧实现返回 ``"IMAGE_GENERATION"``（大写名）喂
+        ``RequestType(...)``（其值为小写 ``image_generation`` 等）→ 恒 ValueError
+        被上层静默吞掉，auto 路由从未生效。
+        """
         mapping = {
-            "text_to_image": "IMAGE_GENERATION",
-            "text_to_video": "VIDEO_GENERATION",
-            "image_to_image": "IMAGE_GENERATION",
-            "image_to_video": "VIDEO_GENERATION",
-            "keyframe_to_video": "VIDEO_GENERATION",
-            "video_to_video": "VIDEO_GENERATION",
+            "text_to_image": "text_to_image",
+            "text_to_video": "text_to_video",
+            "image_to_image": "image_to_image",
+            "image_to_video": "image_to_video",
+            "keyframe_to_video": "image_to_video",
         }
         return mapping.get(generator_type)
 

@@ -41,6 +41,16 @@ class TelegramAPIMixin:
             return {"ok": False, "description": str(e)}
 
     async def _download_url(self: Any, url: str, timeout: int = 60) -> bytes | None:
+        # 批次0：facade 产物契约是服务端本地路径（provider URL 临时有效，生成即落盘）
+        if url and not url.lower().startswith(("http://", "https://", "data:")):
+            from pathlib import Path as _Path
+
+            try:
+                p = _Path(url)
+                if p.is_file():
+                    return p.read_bytes()
+            except OSError:
+                pass
         try:
             import httpx  # type: ignore[import-not-found]
             async with httpx.AsyncClient(timeout=timeout) as client:

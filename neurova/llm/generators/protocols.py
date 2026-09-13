@@ -261,7 +261,9 @@ async def _dashscope_image_generate(
         "Authorization": f"Bearer {creds.api_key}",
         "X-DashScope-OssResourceResolve": "enable",
     }
-    body = _dashscope_image_body(creds.model, prompt, size, n, ref_images)
+    # 端点允许本地参考图（P1-6 白名单）→ 发请求前转 data URL（批次0 补齐）
+    body = _dashscope_image_body(
+        creds.model, prompt, size, n, [media_to_data_url(r) for r in ref_images])
     status, data = await _post_json(endpoint, {**headers, **dashscope_async_header()}, body, timeout)
 
     if status == 403:
@@ -316,8 +318,8 @@ async def _ark_image_generate(
     if size and "x" in size:
         body["size"] = size
     if ref_images:
-        # seedream 参考图：image 字段（URL 直传 / 本地 data URL）
-        body["image"] = ref_images[0]
+        # seedream 参考图：image 字段（URL 直传 / 本地转 data URL —— 批次0 兑现注释承诺）
+        body["image"] = media_to_data_url(ref_images[0])
     status, data = await _post_json(url, headers, body, timeout)
     if status >= 400:
         raise RuntimeError(f"ARK 提交失败 HTTP {status}: {str(data)[:300]}")

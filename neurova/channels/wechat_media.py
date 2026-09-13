@@ -367,12 +367,22 @@ class WeChatMediaMixin:
         """下载URL内容
 
         参数:
-            url: 目标URL
+            url: 目标URL（http/https）或 facade 产物本地路径
             timeout: 超时时间（秒）
 
         返回:
             成功返回二进制数据，失败返回 None
         """
+        # 批次0：facade 产物契约是服务端本地路径（provider URL 临时有效，生成即落盘）
+        if url and not url.lower().startswith(("http://", "https://", "data:")):
+            from pathlib import Path as _Path
+
+            try:
+                p = _Path(url)
+                if p.is_file():
+                    return p.read_bytes()
+            except OSError:
+                pass
         if HTTPX_AVAILABLE:
             try:
                 async with httpx.AsyncClient(timeout=timeout) as client:
