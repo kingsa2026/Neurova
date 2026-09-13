@@ -93,6 +93,12 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
             "source_channel": message.channel_type,
             "channel": message.channel_type,
         }
+        # 可读会话标题（仅首轮建记录时生效）：渠道·发送者/群，替代恒"新对话"，
+        # 控制台列表一眼区分是哪个渠道哪个会话。
+        who = meta["channel_name"] or (message.chat_id[:8] if message.chat_id else "")
+        if who:
+            prefix = "群" if message.chat_type == "group" else ""
+            meta["session_title"] = f"{message.channel_type}{prefix}·{who}"
         # 会话归属：把请求级身份设为 agent 所有者（owner_user_id），使渠道对话落盘的
         # session 归该管理员、在其控制台正常可见可续聊（外部发送者身份留在 metadata）。
         # 请求上下文为空时 save_to_session 会落"共享可见"，故必须显式设定。

@@ -289,6 +289,11 @@ class WeComAdapter(ChannelAdapter):
                     "agentid": int(self._agentid) if self._agentid else 0,
                     "text": {"content": content},
                 }
+                # 群回复@提问者：官方 text.mentioned_list（成员 userid 列表，"@all" 全员）。
+                # at_user_id/chat_type 由 manager._dispatch_message 回发注入。
+                at_uid = kwargs.get("at_user_id") or ""
+                if kwargs.get("chat_type") == "group" and at_uid:
+                    payload["text"]["mentioned_list"] = [str(at_uid)]
             elif message_type == "markdown":
                 payload = {
                     "touser": chat_id,
