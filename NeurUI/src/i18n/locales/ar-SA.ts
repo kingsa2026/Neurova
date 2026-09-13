@@ -1178,6 +1178,9 @@ export default {
 
   },
   channel: {    ingressQueue: 'Inbound Queue',
+    wecomMode: 'وضع التكامل',
+    wecomModeAibot: 'روبوت الذكاء (WebSocket)',
+    wecomModeEnterprise: 'تطبيق المؤسسة (استدعاء)',
     scanAuth: 'التفويض عبر QR',
     getQrcode: 'الحصول على رمز QR',
     scanHint: 'امسح بالهاتف ووافق؛ ستُملأ بيانات الاعتماد تلقائيًا',

@@ -111,10 +111,16 @@ export function buildChannelFieldsMap(t: T): Record<string, FieldSchema[]> {
       { key: 'media_directory', label: t('nav.mediaDirectory'), type: 'text', placeholder: './media' },
     ],
     wecom: [
-      { key: 'app_id', label: 'Bot ID (CorpID)', type: 'text', required: true },
+      // mode=aibot：智能机器人 WebSocket 长连接（BotID+Secret，无需公网回调，官方 101039）
+      // mode=enterprise：企业自建应用（corpid+agentid+HTTP 回调）
+      { key: 'mode', label: t('channel.wecomMode'), type: 'select', defaultValue: 'aibot', options: [
+        { value: 'aibot', label: t('channel.wecomModeAibot') }, { value: 'enterprise', label: t('channel.wecomModeEnterprise') },
+      ] },
+      { key: 'app_id', label: 'Bot ID / CorpID', type: 'text', required: true },
       { key: 'app_secret', label: 'Secret', type: 'password', required: true },
+      { key: 'agentid', label: 'Agent ID（企业应用）', type: 'text' },
+      { key: 'ws_url', label: 'WebSocket URL', type: 'text', placeholder: 'wss://openws.work.weixin.qq.com' },
       { key: 'media_directory', label: t('nav.mediaDirectory'), type: 'text', placeholder: './media' },
-      { key: 'welcome_message', label: t('nav.welcomeMessage'), type: 'text', placeholder: 'Hello! I am Neurova' },
       { key: 'share_session_in_group', label: t('nav.groupShareSession'), type: 'toggle', defaultValue: true },
     ],
     yuanbao: [
@@ -254,5 +260,10 @@ export const QRCODE_CHANNELS: Record<string, QrcodeChannelMeta> = {
     channel: 'wechat', successStatus: 'confirmed', successCredentialKey: 'bot_token', pollInterval: 2000,
     credentialToForm: { bot_token: 'bot_token', base_url: 'base_url' },
     paramsFromForm: ['base_url'],
+  },
+  wecom: {
+    // 智能机器人扫码授权：回 bot_id/secret → 填 Bot ID(app_id)/Secret(app_secret)
+    channel: 'wecom', successStatus: 'success', successCredentialKey: 'bot_id', pollInterval: 3000,
+    credentialToForm: { bot_id: 'app_id', secret: 'app_secret' },
   },
 }

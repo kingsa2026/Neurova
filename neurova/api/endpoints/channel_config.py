@@ -32,7 +32,6 @@ from neurova.channels.discord import create_discord_adapter
 from neurova.channels.feishu import create_feishu_adapter
 from neurova.channels.manager import get_channel_manager
 from neurova.channels.mqtt import create_mqtt_adapter
-from neurova.channels.qq import create_qq_adapter
 from neurova.channels.qqbot import create_qqbot_adapter
 from neurova.channels.qclaw import create_qclaw_adapter
 from neurova.channels.sip import create_sip_adapter
@@ -688,6 +687,13 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
             extra=extra,
         )
     elif channel_type == "wecom":
+        # mode=aibot → 智能机器人 WebSocket 长连接（BotID+Secret，无需公网回调，
+        # 官方文档 101039）；缺省/enterprise → 旧企业自建应用（corpid+agentid+回调）。
+        # 存量配置无 mode 字段 → 落 enterprise 旧路，行为不变。
+        if str(extra.get("mode", "")) == "aibot":
+            from neurova.channels.wecom_aibot import WeComAIBotAdapter
+
+            return WeComAIBotAdapter(config)
         return create_wecom_adapter(
             corpid=config.app_id,
             app_secret=config.app_secret,
@@ -726,12 +732,12 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
             raise HTTPException(status_code=400, detail=str(e))
 
     elif channel_type == "qq":
+        # 2026-09-13 端到端：官方规范 WebSocket 网关收 + HTTP 回复。旧 create_qq_adapter
+        # 只能发不能收（无接收回路），qq 渠道实际不可用。QQWebSocketAdapter 补齐接收。
         try:
-            return create_qq_adapter(
-                app_id=config.app_id or extra.get("app_id", ""),
-                token=extra.get("token", ""),
-                secret=config.app_secret or extra.get("client_secret", ""),
-            )
+            from neurova.channels.qq_ws import QQWebSocketAdapter
+
+            return QQWebSocketAdapter(config)
         except Exception as e:
             logger.warning("Failed to create qq adapter: %s", e)
             raise HTTPException(status_code=400, detail=str(e))
