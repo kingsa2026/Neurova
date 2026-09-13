@@ -119,7 +119,7 @@ class TestAudioMessageWiring:
             FeishuAdapter, "_emit_event", _capture
         ), patch.object(FeishuAdapter, "_download_media_bytes", return_value=b"VOICE_DATA") as dl_mock:
             try:
-                ad._handle_message_event(MagicMock(), _FakeEvent())
+                ad._handle_message_event(_FakeEvent())
                 for _ in range(100):
                     if "msg" in emitted:
                         break
@@ -146,7 +146,7 @@ class TestAudioMessageWiring:
             FeishuAdapter, "_download_media_bytes", return_value=None
         ):
             try:
-                ad._handle_message_event(MagicMock(), _FakeEvent())
+                ad._handle_message_event(_FakeEvent())
                 for _ in range(100):
                     if "msg" in emitted:
                         break
@@ -175,7 +175,7 @@ class TestAudioMessageWiring:
         ad._emit_event = MagicMock()
         ad._main_loop = None  # 走 warning 分支也行，重点是没下载调用
         with patch.object(FeishuAdapter, "_download_media_bytes") as dl_mock:
-            t = threading.Thread(target=lambda: ad._handle_message_event(MagicMock(), _TextEvent()))
+            t = threading.Thread(target=lambda: ad._handle_message_event(_TextEvent()))
             t.start()
             t.join(2)
         dl_mock.assert_not_called()
