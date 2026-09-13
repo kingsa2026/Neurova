@@ -472,6 +472,13 @@ async function loadConfigs() {
       /* schema 拉取失败不阻塞页面（无插件渠道时恒空） */
     }
 
+    // 切换 agent 前重置所有卡片启用/连接态：否则上一 agent 的 enabled 残留，
+    // 新 agent 未配置的渠道仍显示"已启用"→ 列表看着无响应（agent 隔离视图根修）。
+    channels.value.forEach((c) => {
+      c.enabled = false
+      c.connected = false
+    })
+
     const data: any = await listChannelConfigs(agentId.value)
     if (Array.isArray(data)) {
       data.forEach((cfg: any) => {
