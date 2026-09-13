@@ -122,11 +122,31 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
                 domain=self.open_base,
             )
 
-            # 启动长连接（非阻塞）
+            # 启动长连接（非阻塞）。lark_oapi.ws.client 在**模块导入时**就把 `loop`
+            # 绑成全局 asyncio.get_event_loop()——NV 在主运行循环里首次 import lark，
+            # 该全局即主循环；client.start() 用 `loop.run_until_complete(_connect())`
+            # 落到主循环 → "This event loop is already running"，线程即崩、WS 永不建立
+            # （飞书收不到消息根因）。故线程内建独立循环，并把 lark 模块全局 loop 重绑
+            # 到它，start() 才会用本线程的循环。
             import threading
+            import lark_oapi.ws.client as _lark_ws
+
+            def _run_ws():
+                _loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(_loop)
+                _lark_ws.loop = _loop  # 覆盖 lark 导入期捕获的主循环
+                try:
+                    self._ws_client.start()
+                except Exception as e:  # noqa: BLE001 - 线程内失败仅记日志
+                    logger.exception("Feishu ws thread failed: %s", e)
+                finally:
+                    try:
+                        _loop.close()
+                    except Exception:
+                        pass
 
             self._ws_thread = threading.Thread(
-                target=self._ws_client.start,
+                target=_run_ws,
                 daemon=True,
             )
             self._ws_thread.start()
