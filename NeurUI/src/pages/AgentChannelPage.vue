@@ -10,24 +10,60 @@
     </div>
 
     <a-spin :spinning="loading">
-      <div class="nr-ac-grid">
-        <GlassCard v-for="ch in channels" :key="ch.channelKey" class="nr-ac-card" :style="{ borderColor: ch.enabled ? ch.color : undefined }">
-          <div class="nr-ac-card-head">
-            <img v-if="ch.iconSrc" :src="ch.iconSrc" class="nr-ac-icon" :alt="ch.name" />
-            <span v-else class="nr-ac-icon emoji">{{ ch.icon }}</span>
-            <div class="nr-ac-title">
-              <span class="nr-ac-name">{{ ch.name }}</span>
-              <a-tag :color="ch.connected ? 'green' : ch.enabled ? 'orange' : 'default'">
-                {{ ch.connected ? t('channel.connected') : ch.enabled ? t('channel.enabledNotConnected') : t('common.disabled') }}
-              </a-tag>
+      <template v-if="channels.length > 0">
+        <section v-if="enabledChannels.length > 0" class="nr-ac-panel" data-testid="panel-enabled">
+          <div class="nr-ac-panel-head">
+            <span class="nr-ac-panel-dot on" />
+            <span>{{ t('channel.enabledSection') }}</span>
+            <b class="nr-ac-panel-count">{{ enabledChannels.length }}</b>
+          </div>
+          <div class="nr-ac-grid">
+            <GlassCard v-for="ch in enabledChannels" :key="ch.channelKey" class="nr-ac-card" :style="{ borderColor: ch.color }">
+              <div class="nr-ac-card-head">
+                <img v-if="ch.iconSrc" :src="ch.iconSrc" class="nr-ac-icon" :alt="ch.name" />
+                <span v-else class="nr-ac-icon emoji">{{ ch.icon }}</span>
+                <div class="nr-ac-title">
+                  <span class="nr-ac-name">
+                    {{ ch.name }}
+                    <a-tag :color="ch.connected ? 'green' : 'orange'">
+                      {{ ch.connected ? t('channel.connected') : t('channel.enabled') }}
+                    </a-tag>
+                  </span>
+                  <span class="nr-ac-prefix">
+                    {{ t('channel.botPrefixLabel') }}:
+                    <b :class="{ unset: !botPrefixOf(ch) }">{{ botPrefixOf(ch) || t('channel.notSet') }}</b>
+                  </span>
+                </div>
+              </div>
+              <div class="nr-ac-actions">
+                <GlassButton size="sm" variant="secondary" @click="openConfigModal(ch)">{{ t('channel.configure') }}</GlassButton>
+                <GlassButton size="sm" variant="ghost" @click="toggleChannel(ch)">{{ t('channel.disable') }}</GlassButton>
+                <GlassButton v-if="ch.configured" size="sm" variant="danger" @click="removeChannel(ch)">{{ t('common.delete') }}</GlassButton>
+              </div>
+            </GlassCard>
+          </div>
+        </section>
+
+        <section v-if="disabledChannels.length > 0" class="nr-ac-panel nr-ac-panel--dashed" data-testid="panel-disabled">
+          <div class="nr-ac-panel-head">
+            <span class="nr-ac-panel-dot" />
+            <span>{{ t('channel.disabledSection') }}</span>
+          </div>
+          <div class="nr-ac-grid-compact">
+            <div v-for="ch in disabledChannels" :key="ch.channelKey" class="nr-ac-chip" @click="openConfigModal(ch)">
+              <span class="nr-ac-chip-left">
+                <span class="nr-ac-chip-icon" :style="ch.iconSrc ? {} : { background: ch.color }">
+                  <img v-if="ch.iconSrc" :src="ch.iconSrc" :alt="ch.name" />
+                  <span v-else>{{ ch.icon }}</span>
+                </span>
+                <span class="nr-ac-chip-name">{{ ch.name }}</span>
+              </span>
+              <GlassButton size="sm" variant="primary" @click.stop="toggleChannel(ch)">{{ t('channel.enable') }}</GlassButton>
             </div>
           </div>
-          <div class="nr-ac-actions">
-            <GlassButton size="sm" variant="secondary" @click="openConfigModal(ch)">{{ t('channel.configure') }}</GlassButton>
-            <GlassButton v-if="ch.configured" size="sm" variant="danger" @click="removeChannel(ch)">{{ t('common.delete') }}</GlassButton>
-          </div>
-        </GlassCard>
-      </div>
+        </section>
+      </template>
+      <a-empty v-else :description="t('channel.noChannels')" />
     </a-spin>
 
     <!-- Config modal（字段表与系统页共享单一来源；负一屏复用专属组件） -->
@@ -124,6 +160,14 @@ const channels = ref<AgentChannel[]>([])
 const commonFields = computed<FieldSchema[]>(() => buildCommonFields(t))
 const channelFieldsMap = computed<Record<string, FieldSchema[]>>(() => buildChannelFieldsMap(t))
 
+// 列表布局对齐 QwenPaw 频道页：已激活大卡面板 / 未激活紧凑小卡面板
+const enabledChannels = computed(() => channels.value.filter((c) => c.enabled))
+const disabledChannels = computed(() => channels.value.filter((c) => !c.enabled))
+function botPrefixOf(ch: AgentChannel): string {
+  const extra = savedExtras.value[ch.backendType] || {}
+  return typeof extra.bot_prefix === 'string' ? extra.bot_prefix : ''
+}
+
 const allFields = computed<FieldSchema[]>(() => {
   if (!current.value) return []
   return [...commonFields.value, ...(channelFieldsMap.value[current.value.channelKey] || [])]
@@ -205,6 +249,16 @@ function openConfigModal(ch: AgentChannel) {
 
 function allFieldsFor(ch: AgentChannel): FieldSchema[] {
   return [...commonFields.value, ...(channelFieldsMap.value[ch.channelKey] || [])]
+}
+
+// 与系统页一致：紧凑卡「启用」/大卡「禁用」本地翻转 enabled（真正落盘在保存时）；
+// 负一屏是独立 API 的用户级开关，点「启用」直接打开其专属设置面板。
+function toggleChannel(ch: AgentChannel) {
+  if (ch.channelKey === 'negative-screen') {
+    openConfigModal(ch)
+    return
+  }
+  ch.enabled = !ch.enabled
 }
 
 async function saveConfig() {
@@ -291,12 +345,48 @@ onMounted(() => {
 .nr-ac-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .nr-ac-header h2 { margin: 0; font-size: 18px; color: var(--nr-text-primary); }
 .nr-ac-desc { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-tertiary); }
+
+/* 双面板布局（对齐 QwenPaw 频道页 / 系统渠道页） */
+.nr-ac-panel {
+  display: flex; flex-direction: column; gap: 16px; padding: 20px;
+  border: 1px solid var(--nr-border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 16px; background: rgba(255, 255, 255, 0.015);
+}
+.nr-ac-panel--dashed { border-style: dashed; }
+.nr-ac-panel-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: 600; color: var(--nr-text-primary);
+}
+.nr-ac-panel-count { color: var(--nr-success, #22c55e); }
+.nr-ac-panel-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--nr-text-tertiary, #6b7280); }
+.nr-ac-panel-dot.on { background: var(--nr-success, #22c55e); }
+
 .nr-ac-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .nr-ac-card { display: flex; flex-direction: column; gap: 12px; }
 .nr-ac-card-head { display: flex; gap: 10px; align-items: center; }
 .nr-ac-icon { width: 32px; height: 32px; object-fit: contain; }
 .nr-ac-icon.emoji { font-size: 26px; }
-.nr-ac-title { display: flex; flex-direction: column; gap: 4px; }
-.nr-ac-name { font-weight: 600; color: var(--nr-text-primary); }
+.nr-ac-title { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.nr-ac-name { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--nr-text-primary); min-width: 0; }
+.nr-ac-prefix { font-size: 12px; color: var(--nr-text-tertiary); }
+.nr-ac-prefix b { font-weight: 600; color: var(--nr-text-secondary); }
+.nr-ac-prefix b.unset { font-weight: 400; color: var(--nr-text-tertiary); }
 .nr-ac-actions { display: flex; gap: 8px; }
+
+/* 未激活紧凑小卡 */
+.nr-ac-grid-compact { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
+.nr-ac-chip {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 12px 14px; border: 1px solid var(--nr-border-color, rgba(255, 255, 255, 0.08));
+  border-radius: 12px; background: rgba(255, 255, 255, 0.02); cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.nr-ac-chip:hover { border-color: var(--nr-accent, #6366f1); background: rgba(99, 102, 241, 0.06); }
+.nr-ac-chip-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.nr-ac-chip-icon {
+  width: 26px; height: 26px; border-radius: 7px; display: flex; align-items: center;
+  justify-content: center; font-size: 15px; flex-shrink: 0; overflow: hidden;
+}
+.nr-ac-chip-icon img { width: 100%; height: 100%; object-fit: contain; }
+.nr-ac-chip-name { font-size: 13px; font-weight: 600; color: var(--nr-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
