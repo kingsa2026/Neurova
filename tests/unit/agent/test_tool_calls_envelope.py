@@ -73,8 +73,12 @@ async def test_record_carries_call_id_reproducible_and_offload(tmp_path, monkeyp
     assert big in p.read_text(encoding="utf-8")
 
 
-async def test_record_non_reproducible_exempt_full_text(tmp_path, monkeypatch):
-    """run_code 大输出：不可重现豁免——不裁不写文件，原文进记录（会话台账保真）。"""
+async def test_record_non_reproducible_offloads_with_head_tail(tmp_path, monkeypatch):
+    """run_code 大输出（P0-4 契约变更）：落盘保全全文 + head+tail+截断标注。
+
+    原"不可重现豁免全文直进窗口"会在窗口折叠中整段丢失；现在落盘文件是
+    全文真相，消息体保留首尾+指针，reproducible 元数据仍如实记录 False。
+    """
     monkeypatch.setenv("NEUROVA_TOOL_OFFLOAD_THRESHOLD_KB", "8")
     big = "y" * 40000
 
@@ -87,9 +91,16 @@ async def test_record_non_reproducible_exempt_full_text(tmp_path, monkeypatch):
     )
     rec = next(r for r in agent.tool_messages if r.get("type") == "tool_result")
     assert rec["reproducible"] is False
-    assert rec.get("offload_path") is None
-    assert big in str(rec["result"])
-    assert big in tool_msgs[0]["content"]
+    assert rec.get("offload_path")  # 全文落盘保全
+    from pathlib import Path
+
+    p = Path(rec["offload_path"])
+    if not p.is_absolute():
+        p = tmp_path / rec["offload_path"]
+    full = p.read_text(encoding="utf-8")
+    assert big in full  # 全文（JSON 包装串内）一条不丢
+    assert "截断" in str(rec["result"])
+    assert big not in str(rec["result"])  # 消息体不再是全文（head+tail）
 
 
 async def test_small_result_no_offload(tmp_path, monkeypatch):

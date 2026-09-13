@@ -710,6 +710,28 @@ class OpenAILoop(BaseAgentLoop):
             # predict_step 顶层从 get_effective_limits() 读取）——消除硬编码 10 漂移
             if self._tool_rounds <= (getattr(self, "_max_tool_rounds", None) or 10):
                 # 工具结果入历史后流式续写（递归），保持后续轮次同样逐 token 转发
+                # P2-6（断点④核验补齐）：流式路径同样回放推理链（与非流式
+                # _predict_normal 同闸门——env 默认关 + REASONING 能力门）
+                _round_reasoning = "".join(reasoning_parts)
+                if _round_reasoning:
+                    try:
+                        from neurova.agent.loops.reasoning_replay import (
+                            build_reasoning_assistant_message,
+                            should_replay_reasoning,
+                        )
+
+                        if should_replay_reasoning(
+                            str(getattr(self.agent.config, "llm_model", "") or "")
+                        ):
+                            request_params["messages"].append(
+                                build_reasoning_assistant_message(
+                                    _round_reasoning,
+                                    round_reply=round_reply,
+                                    tool_calls=pending_tool_calls,
+                                )
+                            )
+                    except Exception:  # noqa: BLE001 - 回放失败不影响工具轮
+                        logger.debug("reasoning 回放失败(忽略)", exc_info=True)
                 request_params["messages"].extend(tool_messages)
                 if stagnant:
                     stagnation_prompt = (
