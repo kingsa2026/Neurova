@@ -11,6 +11,7 @@ Agent 技能服务 (SkillService)
 import datetime
 import importlib.util
 import json
+from neurova.security.safe_archive import safe_extract_zip
 from neurova.core.logger import get_logger
 import shutil
 import threading
@@ -113,11 +114,10 @@ class SkillService:
 
             # 如果是压缩包，先解压
             if skill_path.suffix == ".zip":
-                import zipfile
 
                 extract_dir = self.skills_dir / skill_path.stem
-                with zipfile.ZipFile(skill_path, "r") as zip_ref:
-                    zip_ref.extractall(extract_dir)
+                # 安全审计 L3: 原 extractall 无成员校验 → Zip Slip
+                safe_extract_zip(skill_path, extract_dir)
                 skill_path = extract_dir
 
             # 读取技能清单

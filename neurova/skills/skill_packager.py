@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime
 import json
+from neurova.security.safe_archive import safe_extract_zip
 from neurova.core.logger import get_logger
 import shutil
 import zipfile
@@ -181,8 +182,8 @@ class SkillPackager:
                         meta = json.loads(zf.read(name))
                         break
 
-                # 解压文件
-                zf.extractall(target)
+                # 安全审计 L3: 原 extractall 无成员校验 → Zip Slip
+                safe_extract_zip(zf, target)
 
                 logger.info("Unpacked package to: %s", target)
                 return meta
