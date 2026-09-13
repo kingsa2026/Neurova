@@ -11,11 +11,14 @@ AI 短剧视频生成工作流的专用节点定义与执行器：
 7. 短剧发布（video-publish）
 8. 文本转语音（tts）
 """
+import json
 import re
 import time
+from pathlib import Path
 from typing import Any, Callable, Dict, List
 
 from neurova.core.logger import get_logger
+from neurova.llm.generators.runtime import GENERATION_OUTPUT_DIR as _GEN_OUTPUT_DIR
 from .models import NodeDefinition
 from .external_api import ImageGenClient, VideoGenClient, PublishPlatformClient
 
@@ -71,7 +74,7 @@ DRAMA_NODES: List[Dict[str, Any]] = [
         "label": "分镜脚本",
         "icon": "🎞️",
         "category": "media",
-        "description": "将剧本拆分为分镜镜头，定义景别、运镜、时长与转场，供画面生成使用",
+        "description": "剧本 → LLM 智能分镜（镜头描述/画面提示词/旁白/景别运镜转场），风格与画幅注入每镜提示词；无模型或解析失败回退规则拆分",
         "sub_blocks": [
             {
                 "id": "script",
@@ -88,6 +91,22 @@ DRAMA_NODES: List[Dict[str, Any]] = [
                 "label": "画面比例",
                 "default": "9:16",
                 "options": ["9:16 竖屏", "16:9 横屏", "1:1 方形"],
+            },
+            {
+                "id": "style",
+                "name": "style",
+                "type": "input",
+                "label": "视觉风格（注入每镜提示词）",
+                "default": "cinematic",
+                "placeholder": "如：国风水墨 / 电影感 / 赛博朋克",
+            },
+            {
+                "id": "use_llm",
+                "name": "use_llm",
+                "type": "toggle",
+                "label": "LLM 智能分镜",
+                "default": True,
+                "description": "关闭或失败时回退按句规则拆分",
             },
         ],
         "inputs": [{"id": "input", "label": "剧本输入"}],
@@ -146,7 +165,7 @@ DRAMA_NODES: List[Dict[str, Any]] = [
         "label": "配音 / 旁白",
         "icon": "🎙️",
         "category": "media",
-        "description": "为剧本台词生成配音文案并预估配音时长，可衔接 TTS 节点合成音频",
+        "description": "整理台词/旁白并预估时长；TTS 引擎可用时逐段合成 wav 音频落产物目录（不可用时诚实标注并仅输出文本）",
         "sub_blocks": [
             {
                 "id": "lines",
@@ -177,6 +196,7 @@ DRAMA_NODES: List[Dict[str, Any]] = [
         "outputs": [
             {"id": "output", "label": "配音结果"},
             {"id": "duration", "label": "预估时长"},
+            {"id": "audio_paths", "label": "合成音频列表"},
         ],
     },
     {
@@ -222,7 +242,7 @@ DRAMA_NODES: List[Dict[str, Any]] = [
         "label": "视频合成",
         "icon": "🎥",
         "category": "media",
-        "description": "将场景片段、配音、字幕合成为成片视频（预留 FFmpeg / 云端合成接口）",
+        "description": "成片合成：本地片段+FFmpeg 真拼接；无 FFmpeg 时输出连播清单 manifest（前端连播播放器消费），不产出虚假文件路径",
         "sub_blocks": [
             {
                 "id": "clips",
@@ -230,7 +250,15 @@ DRAMA_NODES: List[Dict[str, Any]] = [
                 "type": "textarea",
                 "label": "片段列表（逗号分隔）",
                 "default": "",
-                "placeholder": "scene_001.mp4, scene_002.mp4",
+                "placeholder": "/data/generations/scene_0.mp4, /data/generations/scene_1.mp4",
+            },
+            {
+                "id": "ffmpeg_path",
+                "name": "ffmpeg_path",
+                "type": "input",
+                "label": "FFmpeg 可执行路径",
+                "default": "ffmpeg",
+                "placeholder": "默认从 PATH 探测 ffmpeg",
             },
             {
                 "id": "transition",
@@ -266,6 +294,7 @@ DRAMA_NODES: List[Dict[str, Any]] = [
         "outputs": [
             {"id": "output", "label": "成片结果"},
             {"id": "video", "label": "视频文件"},
+            {"id": "manifest", "label": "连播清单"},
         ],
     },
     {
@@ -461,15 +490,32 @@ async def exec_short_drama_script(config: Dict[str, Any], ctx: Dict[str, Any]) -
 
 
 async def exec_storyboard(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """分镜脚本执行器
+    """分镜脚本执行器（批次4：LLM 真分镜，失败回退规则拆分——增强不替换）
 
-    将剧本文本按句子拆分为分镜镜头，定义景别/运镜/时长/转场。
+    LLM 输出逐镜结构化：描述/画面提示词/旁白/景别/运镜/转场/时长；
+    风格与画幅项目锁注入每镜 visual_prompt（火宝式：每镜提示词携带统一风格）。
     """
     script = config.get("script", "") or str(ctx.get("input") or ctx.get("inputs") or "")
     aspect_ratio = config.get("aspect_ratio", "9:16")
+    style = str(config.get("style", "") or "").strip()
+    use_llm = bool(config.get("use_llm", True))
 
     if not script:
         script = "第一幕：主角登场，面对众人的嘲讽。"
+
+    def _aspect_token(v: Any) -> str:
+        # 选项文案是 "9:16 竖屏" 形态，取比例 token
+        return str(v or "9:16").split()[0]
+
+    aspect = _aspect_token(aspect_ratio)
+
+    if use_llm:
+        try:
+            llm_out = await _storyboard_via_llm(script, style, aspect)
+            if llm_out is not None:
+                return {"status": "success", "output": llm_out}
+        except Exception as e:  # noqa: BLE001 — LLM 失败回退规则拆分，不中断流水线
+            logger.warning("LLM 分镜失败，回退规则拆分: %s", e)
 
     sentences = [s.strip() for s in re.split(r"[。！？!?\n]", script) if s.strip()]
     if not sentences:
@@ -481,11 +527,13 @@ async def exec_storyboard(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[s
             {
                 "shot": idx,
                 "description": sent,
+                "visual_prompt": _style_inject(sent, style, aspect),
+                "narration": sent,
                 "duration": 3.0,
                 "camera": "中景",
                 "move": "固定",
                 "transition": "cut",
-                "aspect_ratio": aspect_ratio,
+                "aspect_ratio": aspect,
             }
         )
 
@@ -494,69 +542,177 @@ async def exec_storyboard(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[s
         "output": {
             "shots": shots,
             "count": len(shots),
-            "aspect_ratio": aspect_ratio,
+            "aspect_ratio": aspect,
+            "style": style,
+            "fallback": True,
         },
     }
 
 
-async def exec_scene_gen(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """场景画面生成执行器
+def _style_inject(prompt: str, style: str, aspect: str) -> str:
+    """风格 + 画幅注入画面提示词（火宝式项目锁）。"""
+    parts = [prompt]
+    if style:
+        parts.append(style)
+    parts.append(f"{aspect} aspect ratio")
+    return ", ".join(p for p in parts if p)
 
-    根据场景描述调用 AI 图像生成服务商（ComfyUI / OpenAI / 可灵 / 即梦 / 通义万相 / Stability）。
-    服务不可用时自动降级为纯提示词生成。
-    """
+
+async def _storyboard_via_llm(script: str, style: str, aspect: str) -> Any:
+    """LLM 分镜：返回标准化 shots dict 或 None（无可用 JSON）。"""
+    prompt = (
+        "你是专业短剧分镜师。把下面的剧本拆成 3-8 个镜头，"
+        "只输出 JSON 数组（不要其他文字），每个元素字段："
+        '{"description": 镜头剧情, "visual_prompt": 英文画面提示词, '
+        '"narration": 旁白台词, "duration": 秒数, "camera": 景别, '
+        '"move": 运镜, "transition": 转场}\n\n剧本：\n' + script[:4000]
+    )
+    text = await _call_agent(prompt, system_prompt="你是资深短剧分镜师，只输出 JSON。")
+    match = re.search(r"\[[\s\S]*\]", str(text or ""))
+    if not match:
+        return None
+    try:
+        raw = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(raw, list) or not raw:
+        return None
+    shots = []
+    for idx, item in enumerate(raw, 1):
+        if not isinstance(item, dict):
+            continue
+        desc = str(item.get("description") or item.get("shot_desc") or "").strip()
+        vp = str(item.get("visual_prompt") or desc).strip()
+        if not desc and not vp:
+            continue
+        shots.append({
+            "shot": idx,
+            "description": desc or vp,
+            "visual_prompt": _style_inject(vp, style, aspect),
+            "narration": str(item.get("narration") or desc).strip(),
+            "duration": float(item.get("duration") or 3.0),
+            "camera": str(item.get("camera") or "中景"),
+            "move": str(item.get("move") or "固定"),
+            "transition": str(item.get("transition") or "cut"),
+            "aspect_ratio": aspect,
+        })
+    if not shots:
+        return None
+    return {"shots": shots, "count": len(shots), "aspect_ratio": aspect,
+            "style": style, "fallback": False}
+
+
+# 服务商 → 实测协议映射（批次4：非 comfyui 分支收敛到 llm/generators 协议单源；
+# kling/jimeng/stability 等无实测协议服务商诚实降级，不再打未验证端点）
+_SCENE_PROTOCOLS = {
+    "openai": "openai_compat",
+    "wanx": "dashscope",
+    "dashscope": "dashscope",
+    "ark": "ark",
+    "seedream": "ark",
+}
+
+
+async def exec_scene_gen(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """场景画面生成执行器（批次4：实测协议矩阵单源；comfyui 自建通道保留）"""
     scene = config.get("scene", "") or str(ctx.get("input") or ctx.get("inputs") or "")
     style = config.get("style", "cinematic")
-    provider = config.get("provider", "comfyui")
+    provider = str(config.get("provider", "comfyui") or "comfyui").lower()
 
     if not scene:
         scene = "女主角在雨夜的城市街头奔跑"
-
-    # 尝试调用外部图像生成服务
-    try:
-        result = await ImageGenClient().generate(
-            provider=provider,
-            prompt=scene,
-            size="1024x1024",
-        )
-        if result.get("status") == "success":
-            output = result.get("output", {})
-            return {
-                "status": "success",
-                "output": {
-                    "image_url": output.get("url", ""),
-                    "image_data": output.get("image_data"),
-                    "scene": scene,
-                    "style": style,
-                    "provider": provider,
-                },
-            }
-    except Exception as e:  # noqa: BLE001
-        logger.warning("场景图像生成失败，降级为提示词模式: %s", e)
 
     prompts = [
         f"电影感全景画面：{scene}，{style}风格，高细节，8K，戏剧性光影",
         f"特写镜头：{scene}，浅景深，自然光，{style}风格，情绪饱满",
         f"空镜过渡：{scene}，无人机航拍视角，{style}风格，氛围感",
     ]
+    full_prompt = config.get("prompt") or prompts[0]
+
+    # comfyui 自建通道保留原实现
+    if provider == "comfyui":
+        try:
+            result = await ImageGenClient().generate(provider=provider, prompt=full_prompt, size="1024x1024")
+            if result.get("status") == "success":
+                output = result.get("output", {})
+                return {
+                    "status": "success",
+                    "output": {
+                        "image_url": output.get("url", ""),
+                        "image_data": output.get("image_data"),
+                        "scene": scene, "style": style, "provider": provider,
+                    },
+                }
+        except Exception as e:  # noqa: BLE001
+            logger.warning("ComfyUI 场景生成失败，降级为提示词模式: %s", e)
+        return {
+            "status": "success",
+            "output": {"prompts": prompts, "scene": scene, "style": style,
+                       "provider": provider, "count": len(prompts), "fallback": True,
+                       "degrade_reason": "ComfyUI 服务不可用"},
+        }
+
+    if provider not in _SCENE_PROTOCOLS:
+        # 无实测协议：诚实降级（不打未验证端点）
+        logger.info("服务商 %s 无实测协议，降级为提示词输出", provider)
+        return {
+            "status": "success",
+            "output": {"prompts": prompts, "scene": scene, "style": style,
+                       "provider": provider, "count": len(prompts), "fallback": True,
+                       "degrade_reason": f"服务商 {provider} 无实测协议（缓后台账登记），已输出可直接使用的绘图提示词"},
+        }
+
+    from neurova.llm.generators import protocols as _protocols
+    from neurova.llm.generators.runtime import (
+        GenerationCredsError,
+        local_url_for,
+        persist_media,
+        resolve_generation_creds,
+    )
+
+    hint = _SCENE_PROTOCOLS[provider]
+    model = str(config.get("model") or "")
+    try:
+        creds = resolve_generation_creds(
+            hint, model, config.get("provider_id"), None,
+            config.get("base_url"), "https://api.openai.com/v1")
+        gen = await _protocols.generate_image(
+            creds, full_prompt, size=str(config.get("size", "1024x1024")),
+            n=max(1, int(config.get("num_images", 1) or 1)),
+        )
+        remote = [u for u in (gen.get("images") or []) if u]
+        if remote:
+            path = await persist_media(remote[0], "image", gen.get("task_id") or "scene", 0)
+            return {
+                "status": "success",
+                "output": {
+                    "image_url": local_url_for(path),
+                    "image_path": path,
+                    "image_remote_url": remote[0],
+                    "scene": scene, "style": style, "provider": provider,
+                    "prompts": [full_prompt], "fallback": False,
+                },
+            }
+        degrade_reason = "协议未返回图像产物"
+    except GenerationCredsError as e:
+        degrade_reason = str(e)
+    except Exception as e:  # noqa: BLE001 — 上游失败降级提示词，原因诚实可见
+        logger.warning("场景生成协议调用失败(%s): %s", provider, e)
+        degrade_reason = f"图像生成失败: {str(e)[:200]}"
 
     return {
         "status": "success",
-        "output": {
-            "prompts": prompts,
-            "scene": scene,
-            "style": style,
-            "provider": provider,
-            "count": len(prompts),
-            "fallback": True,
-        },
+        "output": {"prompts": prompts, "scene": scene, "style": style,
+                   "provider": provider, "count": len(prompts), "fallback": True,
+                   "degrade_reason": degrade_reason},
     }
 
 
 async def exec_voice_over(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """配音 / 旁白执行器
+    """配音 / 旁白执行器（批次4：接真 TTS 合成并落盘产物；不可用时诚实标注）
 
-    整理台词并预估配音时长（中文语速约 4 字/秒）。
+    整理台词 + 预估时长（中文语速约 4 字/秒）语义保持向后兼容；
+    TTS 可用时每段台词合成 wav 落 data/generations（产物进「记录」同目录体系）。
     """
     lines = config.get("lines", "") or str(ctx.get("input") or ctx.get("inputs") or "")
     voice = config.get("voice", "女声 温柔")
@@ -572,6 +728,31 @@ async def exec_voice_over(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[s
     char_count = sum(len(l) for l in line_list)
     duration = round(max(1.0, char_count / 4.0), 2)
 
+    audio_paths: List[Dict[str, Any]] = []
+    voiceover_error = ""
+    tts = _get_tts_manager()
+    if tts is None:
+        voiceover_error = "TTS 引擎不可用，仅输出台词文本（未合成音频）"
+    else:
+        import uuid as _uuid
+
+        from neurova.llm.generators.runtime import local_url_for, persist_bytes
+
+        for i, line in enumerate(line_list):
+            try:
+                audio = await tts.synthesize(line, voice=voice, language=language, rate=1.0)
+                if audio:
+                    task_id = _uuid.uuid4().hex[:16]
+                    path = await persist_bytes(audio, "wav", task_id, 0)
+                    audio_paths.append({
+                        "line": line, "index": i + 1,
+                        "path": path, "url": local_url_for(path),
+                        "duration": round(max(1.0, len(line) / 4.0), 2),
+                    })
+            except Exception as e:  # noqa: BLE001 — 单段失败诚实记录，不假成功
+                logger.warning("旁白合成失败（第 %d 段）: %s", i + 1, e)
+                voiceover_error = f"部分旁白合成失败: {str(e)[:200]}"
+
     return {
         "status": "success",
         "output": {
@@ -580,6 +761,8 @@ async def exec_voice_over(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[s
             "voice": voice,
             "language": language,
             "estimated_chars_per_sec": 4.0,
+            "audio_paths": audio_paths,
+            "voiceover_error": voiceover_error,
         },
     }
 
@@ -627,53 +810,108 @@ async def exec_subtitle_gen(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict
 
 
 async def exec_video_compose(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """视频合成执行器
+    """视频合成执行器（批次4：禁假文件名根修）
 
-    调用 AI 视频生成服务（可灵 / 即梦 / 通义万相 / ComfyUI）合成场景视频。
-    服务不可用时降级为模拟合成任务描述。
+    三级诚实策略：
+    1. 本地片段 + 系统 FFmpeg → concat demuxer 真拼接，产出 mp4 落产物目录；
+    2. 云视频生成服务商可用 → 原通道返回 video_url；
+    3. 均不可用 → 输出**连播清单 manifest**（前端连播播放器消费），
+       不再返回并不存在的 composed_*.mp4 假文件名（原降级即"表面抹除"，
+       下游按 URL 取片必然 404 且无从排查）。
     """
-    clips = config.get("clips", "") or str(ctx.get("input") or ctx.get("inputs") or "")
+    raw_clips = config.get("clips", "")
+    if isinstance(raw_clips, str):
+        raw_clips = raw_clips or str(ctx.get("input") or ctx.get("inputs") or "")
+        clip_list = [c.strip() for c in str(raw_clips).split(",") if c.strip()]
+    elif isinstance(raw_clips, (list, tuple)):
+        clip_list = [str(c).strip() for c in raw_clips if str(c).strip()]
+    else:
+        clip_list = []
     transition = config.get("transition", "fade")
     resolution = config.get("resolution", "1080x1920")
-    provider = config.get("provider", "kling")
+    provider = str(config.get("provider", "") or "").lower()
 
-    scene_text = str(clips) if clips else "AI 生成短剧场景合成"
+    # ① FFmpeg 真拼接（本地文件片段）
+    local_files = [c for c in clip_list if c and not c.startswith("http") and Path(c).is_file()]
+    import shutil
 
-    try:
-        result = await VideoGenClient().generate(
-            provider=provider,
-            prompt=scene_text,
-            duration=15,
-        )
-        if result.get("status") == "success":
-            output = result.get("output", {})
-            return {
-                "status": "success",
-                "output": {
-                    "video_url": output.get("video_url", ""),
-                    "video_data": output.get("video_data"),
-                    "provider": provider,
-                    "resolution": resolution,
-                    "duration": output.get("duration", 15),
-                },
-            }
-    except Exception as e:  # noqa: BLE001
-        logger.warning("视频合成失败，降级为模拟合成: %s", e)
+    ffmpeg = shutil.which(str(config.get("ffmpeg_path") or "ffmpeg"))
+    if ffmpeg and local_files:
+        try:
+            import subprocess
+            import tempfile as _tf
 
-    clip_list = [c.strip() for c in str(clips).split(",") if c.strip()]
-    if not clip_list:
-        clip_list = ["scene_001.mp4", "scene_002.mp4"]
+            out_dir = Path(_GEN_OUTPUT_DIR)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = out_dir / f"compose_{int(time.time() * 1000)}.mp4"
+            with _tf.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as lf:
+                for f in local_files:
+                    lf.write("file '" + str(f).replace("'", "'\\''") + "'\n")
+                list_file = lf.name
+            proc = subprocess.run(
+                [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", list_file,
+                 "-c", "copy", str(out_path)],
+                capture_output=True, timeout=300, check=False,
+            )
+            Path(list_file).unlink(missing_ok=True)
+            if proc.returncode == 0 and out_path.is_file():
+                from neurova.llm.generators.runtime import local_url_for
 
+                return {
+                    "status": "success",
+                    "output": {
+                        "composed": True,
+                        "mode": "ffmpeg_concat",
+                        "video": str(out_path),
+                        "video_url": local_url_for(str(out_path)),
+                        "clips": local_files,
+                        "transition": transition, "provider": provider or "ffmpeg",
+                        "resolution": resolution,
+                    },
+                }
+            degrade = f"FFmpeg 合成失败: {(proc.stderr or b'')[-200:].decode(errors='ignore')}"
+        except Exception as e:  # noqa: BLE001 — 失败落到诚实降级，不伪造成功
+            degrade = f"FFmpeg 合成异常: {str(e)[:200]}"
+        logger.warning("%s", degrade)
+    else:
+        degrade = "本机未检测到 FFmpeg" if not ffmpeg else "片段非本地文件，跳过本地拼接"
+
+    # ② 云生成通道（原行为保持）
+    scene_text = ", ".join(clip_list) or "AI 生成短剧场景合成"
+    if provider:
+        try:
+            result = await VideoGenClient().generate(
+                provider=provider, prompt=scene_text, duration=15)
+            if result.get("status") == "success":
+                output = result.get("output", {})
+                return {
+                    "status": "success",
+                    "output": {
+                        "composed": True,
+                        "video_url": output.get("video_url", ""),
+                        "video_data": output.get("video_data"),
+                        "provider": provider, "resolution": resolution,
+                        "duration": output.get("duration", 15),
+                    },
+                }
+        except Exception as e:  # noqa: BLE001
+            logger.warning("视频云合成失败(%s): %s", provider, e)
+
+    # ③ 连播清单 manifest（诚实降级产物）
+    items = [{"index": i + 1, "clip": c} for i, c in enumerate(clip_list)]
     return {
         "status": "success",
         "output": {
-            "video": f"composed_{int(time.time())}.mp4",
+            "composed": False,
+            "mode": "slideshow_manifest",
+            "items": items,
             "clips": clip_list,
             "transition": transition,
-            "provider": provider,
+            "provider": provider or "none",
             "resolution": resolution,
             "duration": round(len(clip_list) * 3.0, 2),
             "fallback": True,
+            "degrade_reason": degrade,
         },
     }
 
