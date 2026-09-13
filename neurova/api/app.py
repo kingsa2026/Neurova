@@ -1006,6 +1006,15 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("短剧模板种子失败: %s", e)
 
+    # 批次5（用户决策）：FFmpeg 不打包——首次启动后台自动下载（系统已有则零网络；
+    # NEUROVA_FFMPEG_AUTODOWNLOAD=0 可关）
+    try:
+        from neurova.core.ffmpeg import start_ffmpeg_bootstrap
+
+        start_ffmpeg_bootstrap()
+    except Exception as e:
+        logger.warning("FFmpeg 引导启动失败: %s", e)
+
     logger.info("=" * 60)
     logger.info("Neurova API Server started successfully")
     logger.info("=" * 60)
