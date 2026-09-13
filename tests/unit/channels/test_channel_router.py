@@ -169,3 +169,49 @@ async def test_group_require_mention_without_mention_skips(manager):
     # 带 @ 或 mentions 元数据则放行
     m = _msg("@机器人 你好", chat_type="group")
     assert await handler(m) == "pong"
+
+
+@pytest.mark.asyncio
+async def test_send_message_resolves_agent_instance_and_forwards_context(manager):
+    """2.2：send_message 按 (agent_id,channel) 取实例，并把 at_user_id/chat_type 转发适配器。"""
+    captured = {}
+
+    class SpyAdapter:
+        channel_type = "feishu"
+        is_connected = True
+        def set_event_callback(self, cb): pass
+        async def send_message(self, chat_id, content, message_type="text", **kw):
+            captured["chat_id"] = chat_id
+            captured["at_user_id"] = kw.get("at_user_id")
+            captured["chat_type"] = kw.get("chat_type")
+            captured["has_agent_id"] = "agent_id" in kw  # agent_id 不应转发给适配器
+            return "mid"
+
+    agent_inst = SpyAdapter()
+    manager._agent_adapters[("a7", "feishu")] = agent_inst
+    manager._adapters["feishu"] = SpyAdapter()  # default 视图（不应被 a7 命中）
+
+    mid = await manager.send_message("feishu", "oc_x", "回复", agent_id="a7",
+                                     at_user_id="ou_9", chat_type="group")
+    assert mid == "mid"
+    assert captured["at_user_id"] == "ou_9" and captured["chat_type"] == "group"
+    assert captured["has_agent_id"] is False, "agent_id 用于查实例，不应透传给适配器"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_forwards_reply_kwargs(manager):
+    """_dispatch_message 回发带 sender/chat_type/agent_id 上下文。"""
+    seen = {}
+    class SpyAdapter:
+        channel_type = "feishu"
+        is_connected = True
+        async def send_message(self, chat_id, content, message_type="text", **kw):
+            seen.update(kw); return "m"
+    manager._adapters["feishu"] = SpyAdapter()
+    agent = FakeAgent("回复")
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+    manager.add_message_handler(handler, priority=50)
+    await manager._dispatch_message(_msg("你好", chat_type="group", sender="ou_55"))
+    assert seen.get("at_user_id") == "ou_55"
+    assert seen.get("chat_type") == "group"
+    assert "agent_id" not in seen, "agent_id 用于查实例，不透传适配器"

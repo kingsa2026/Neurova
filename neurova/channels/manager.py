@@ -211,7 +211,11 @@ class ChannelManager:
         **kwargs,
     ) -> Optional[str]:
         """通过指定渠道发送消息（长文本按渠道上限分片，失败不静默）"""
-        adapter = self._adapters.get(channel_type)
+        # 按 (agent_id, channel_type) 取实例（agent 多实例隔离）；缺 agent 上下文
+        # 或非 default 未注册时回落 default 视图，保证既有调用零破坏。
+        agent_id = str(kwargs.pop("agent_id", "default") or "default")
+        adapter = getattr(self, "_agent_adapters", {}).get((agent_id, channel_type)) \
+            or self._adapters.get(channel_type)
         if not adapter:
             logger.error("No adapter for channel: %s", channel_type)
             return None
@@ -367,6 +371,16 @@ class ChannelManager:
             self._ingress_queue_failed = True
             return None
 
+    def _reply_kwargs(self, message: ChannelMessage) -> dict:
+        """回发时携带的上下文：agent 归属（按实例查适配器）+ 群@提问者所需 sender/群标记。
+        此前 _dispatch_message 回发只传 (channel_type, chat_id, reply)，丢失 sender/
+        chat_type/agent_id → 群回复无法@提问者、非 default agent 回发拿错实例。"""
+        return {
+            "agent_id": str(message.metadata.get("agent_id") or "default"),
+            "at_user_id": message.sender_id,
+            "chat_type": message.chat_type,
+        }
+
     async def _dispatch_message(self, message: ChannelMessage):
         """把一条渠道消息送进处理器链（原 _on_channel_event 分发体）。"""
         # 优先使用多处理器链
@@ -380,6 +394,7 @@ class ChannelManager:
                             message.channel_type,
                             message.chat_id,
                             reply,
+                            **self._reply_kwargs(message),
                         )
                         break  # 第一个返回回复的处理器获胜
                 except Exception as e:
@@ -393,6 +408,7 @@ class ChannelManager:
                         message.channel_type,
                         message.chat_id,
                         reply,
+                        **self._reply_kwargs(message),
                     )
             except Exception as e:
                 logger.exception("Message handler error: %s", e)
@@ -402,6 +418,7 @@ class ChannelManager:
                         message.channel_type,
                         message.chat_id,
                         "抱歉，处理消息时出现错误，请稍后重试。",
+                        **self._reply_kwargs(message),
                     )
                 except Exception:
                     pass
