@@ -39,13 +39,14 @@
 | 3 | `feat(aigc): 参考图+鉴权` | BearerOrQuery 查询凭证；/files/{name} 鉴权路由替代匿名挂载；ref_images 允许根补 storage；OPENAI edits multipart；前端上传闭环 |
 | 4a | `feat(neurflow): 引擎+节点成真` | loop items_from 数组迭代；canvas_bridge sync_all 时序修复；storyboard LLM 分镜+风格注入；voice-over 真 TTS；scene-gen/voice-over 批量扇出；video-compose 禁假文件名（FFmpeg concat / slideshow manifest）；external_api await 修复；短剧模板+启动种子 |
 | 4b | `feat(aigc): 创作Tab打通画布` | useWorkflowRun（实例化→run/stream→SSE→产物）；AIGC 创作 Tab + SlideshowPlayer；WorkflowPage 从模板新建；dock video 全链路 |
+| 5 | `feat(aigc): FFmpeg 自动下载` | FFmpeg 决策落地：**不打包**，首次启动后台自动下载——core/ffmpeg.py 引导器（npmmirror 主源 + GitHub ffmpeg-static 回退，单文件免解压，`-version` 真实校验才就位，NEUROVA_FFMPEG_AUTODOWNLOAD=0 可关）；compose 解析顺序 显式路径>env>托管件>PATH；实测 2.9s/77.4MB 下载+真拼接全链路通过 |
 
 测试终态：后端生成链/画布链/渠道全量绿（仅 3 条**预存**失败经 worktree 基线甄别：cron trigger dispatch、evolution 节点签名 ×2，与本次改动面不相交）；前端 vue-tsc 0 错、vitest 1428 全绿。
 
 ## 5. 缓后台账（登记不修）
 
 1. **@角色/资产一致性注入**（火宝 extractor 资产库 + 参考图映射）——需资产提取 LLM 节点 + 项目资产库，独立排期。
-2. **FFmpeg 二进制分发**：成片真合成依赖打包包含 ffmpeg（用户硬约束：打包项须用户决定）。
+2. ~~**FFmpeg 二进制分发**~~（已决策落地，批次5：不打包 + 首次启动自动下载，见上表）。
 3. **AIGC 用量计费/统计**：usage_history 无图像/视频维度（PRINTFILM billing 需定价体系，本地场景价值低）。
 4. **任务租约调度/看门狗**：多 worker 扩展时再接（PRINTFILM scheduler/poller/watchdog）。
 5. **开放 API key 面**（printfilm /api/v1 + X-Api-Key）。
