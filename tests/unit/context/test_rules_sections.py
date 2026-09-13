@@ -1,4 +1,4 @@
-"""批次 C：恒定规则段（工具使用规则/环境块/记忆写入规则）
+"""批次 C：恒定规则段（工具使用规则/环境块/记忆写入规则）+ CUA 使用纪律（R3-5）
 
 验收点：
 1. 三段恒定且会话内字节稳定（含日期，日级精度不破缓存）
@@ -8,6 +8,8 @@
    同步（双路径一致，T-1 教训）
 4. 与 tools_desc 策略头去重（memory_search 互斥句不重复出现）
 5. 记忆写入三条款存在；并行纪律、错误恢复、反注入、信息优先级存在
+6. CUA 使用纪律段（R3-5 尾巴）：观察→语义→像素阶梯、快照过期、敏感禁区、
+   外部可见动作先问；恒定（无动态内容）不破前缀缓存
 """
 
 import datetime as dt
@@ -17,6 +19,7 @@ from neurova.context.rules_sections import (
     build_memory_rules_section,
     build_env_section,
     build_tool_rules_section,
+    build_computer_use_rules_section,
     build_all_sections,
 )
 
@@ -62,6 +65,55 @@ class TestPureSections:
         b = build_all_sections(workspace_path="/w", platform_name="Windows")
         assert a == b
         assert a.index("## 工具使用规则") < a.index("## 环境") < a.index("## 记忆写入规则")
+
+
+class TestComputerUseDiscipline:
+    """R3-5 尾巴：CUA 使用纪律写入恒定技能段（观察→语义→像素 + 敏感禁区）。"""
+
+    def test_ladder_order_snapshot_then_semantic_then_pixel(self):
+        text = build_computer_use_rules_section()
+        # 阶梯顺序：快照 → 语义操作 → 像素兜底
+        assert "computer_dom_snapshot" in text
+        assert "computer_click_element" in text or "语义" in text
+        assert "兜底" in text
+        assert text.index("computer_dom_snapshot") < text.index("兜底")
+
+    def test_anti_blind_screenshot_loop(self):
+        """杀盲截图循环：不要对同一区域反复截图。"""
+        text = build_computer_use_rules_section()
+        assert "computer_screenshot" in text
+        assert "反复" in text or "盲" in text
+
+    def test_snapshot_generation_expiry(self):
+        """快照会过期：界面变化后旧 index 失效需重新快照。"""
+        text = build_computer_use_rules_section()
+        assert "过期" in text or "失效" in text
+
+    def test_sensitive_and_external_visible_actions_require_consent(self):
+        """敏感禁区 + 外部可见动作先问。"""
+        text = build_computer_use_rules_section()
+        assert "敏感" in text
+        assert any(k in text for k in ("支付", "转账", "删除"))
+        assert "先" in text and ("同意" in text or "征询" in text or "确认" in text)
+
+    def test_section_is_constant_no_dynamic_content(self):
+        """恒定约束：两次调用字节相等，且不含日期/时间/路径等动态量（不破前缀缓存）。"""
+        a = build_computer_use_rules_section()
+        b = build_computer_use_rules_section()
+        assert a == b
+        assert str(dt.date.today().year) not in a
+        assert "E:" not in a and "/home" not in a
+
+    def test_discipline_in_all_sections(self):
+        text = build_all_sections(workspace_path="/w", platform_name="Windows")
+        assert "## 桌面操作纪律" in text
+        # 排在记忆写入规则之后（末段）
+        assert text.index("## 记忆写入规则") < text.index("## 桌面操作纪律")
+
+    def test_dual_path_injects_discipline(self):
+        orch = TestDualPathIntegration._make_orch()
+        text = orch.build_system_prompt()
+        assert "## 桌面操作纪律" in text
 
     def test_deliverable_reporting_clause(self):
         """产出物报告条款（2026-09-08）：回答结尾把本轮真实产出展示成清单。

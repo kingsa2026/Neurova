@@ -174,6 +174,17 @@ async def approve_and_execute(request: Request, request_id: str,
     ):
         raise HTTPException(status_code=500, detail="批准操作失败")
 
+    # R3-4：kind=profile_grant 的审批批准后落附身授权（无 tool_name 重放，
+    # 批准本身即授权动作，须在下方"无可重放内容"早返回之前处理）。
+    if metadata.get("kind") == "profile_grant":
+        try:
+            from neurova.security.profile_grant import mint_from_approval
+
+            minted = mint_from_approval(metadata, approved_by=str(body.approved_by or ""))
+            logger.info("profile 附身授权已铸造: %s (minted=%s)", request_id, minted)
+        except Exception as _pg_err:  # noqa: BLE001
+            logger.warning("profile 授权铸造失败: %s", _pg_err)
+
     # 无可重放内容（纯记录型请求）→ 仅返回批准结果
     if not tool_name:
         return {"code": 0, "data": {"approved": True, "executed": False}}
@@ -405,3 +416,70 @@ async def update_governance_settings(body: GovernanceSettingsUpdate, admin=Depen
     if not save_governance_settings(payload):
         raise HTTPException(status_code=500, detail="治理设置保存失败")
     return {"code": 0, "data": load_governance_settings()}
+
+
+# ── 桌面动作审计（R3-4，docs/Neurova_CUA_Phase3立项_2026-09-12.md §3）──
+
+
+@router.get("/desktop-audit")
+async def list_desktop_audit(
+    request: Request,
+    tool: Optional[str] = Query(default=None, description="按工具名过滤"),
+    user: Optional[str] = Query(default=None, description="按用户 ID 过滤"),
+    days: int = Query(default=7, ge=0, le=365, description="时间窗（天），0=不限"),
+    needs_human: Optional[bool] = Query(default=None, description="只看需人工行"),
+    limit: int = Query(default=200, ge=1, le=2000),
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """桌面动作审计查询（仅管理员；元数据白名单，无内容字段）。"""
+    import time
+
+    from neurova.security.desktop_audit import get_desktop_audit_store
+
+    since = (time.time() - days * 86400) if days else None
+    rows = get_desktop_audit_store().query_actions(
+        tool=tool, user=user, since=since, needs_human=needs_human, limit=limit
+    )
+    return {"code": 0, "data": {"entries": rows}}
+
+
+# ── profile 附身授权管理（R3-4）─────────────────────────────────
+
+
+class ProfileGrantRequest(BaseModel):
+    user_id: str
+    profile: str
+    scope: str = Field("session", description="task/session/long")
+
+
+@router.get("/profile-grants")
+async def list_profile_grants(request: Request, _admin: Any = Depends(_governance_admin_dep)):
+    """列出有效 profile 授权（仅管理员）。"""
+    from neurova.security.profile_grant import get_profile_grant_store
+
+    return {"code": 0, "data": {"grants": get_profile_grant_store().list_grants()}}
+
+
+@router.post("/profile-grants")
+async def mint_profile_grant(request: Request, body: ProfileGrantRequest, _admin: Any = Depends(_governance_admin_dep)):
+    """直接铸造 profile 授权（管理员显式授予；正常路径走审批批准后自动铸造）。"""
+    from neurova.security.profile_grant import get_profile_grant_store
+
+    ok = get_profile_grant_store().mint(body.user_id, body.profile, scope=body.scope, approved_by="admin")
+    if not ok:
+        raise HTTPException(status_code=422, detail="授权铸造失败（user_id/profile 不能为空）")
+    return {"code": 0, "data": {"granted": True}}
+
+
+@router.delete("/profile-grants")
+async def revoke_profile_grant(
+    request: Request, user_id: str = Query(...), profile: str = Query(...),
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """撤销 profile 授权。"""
+    from neurova.security.profile_grant import get_profile_grant_store
+
+    ok = get_profile_grant_store().revoke(user_id, profile)
+    if not ok:
+        raise HTTPException(status_code=404, detail="无该授权")
+    return {"code": 0, "data": {"revoked": True}}

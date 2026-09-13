@@ -14,6 +14,7 @@ Computer Use 能力 v1.0.0-beta1 - 浏览器自动化增强版（集成 browser-
 from __future__ import annotations
 
 from neurova.core.logger import get_logger
+import contextvars
 import os
 import typing
 
@@ -563,9 +564,32 @@ class ComputerUseManager:
 # 工厂函数
 _manager: typing.Optional[ComputerUseManager] = None
 
+# RS-1 会话路由：绑定远程会话后，get_computer_use_manager() 返回该会话的
+# RemoteComputerUseManager（同 duck-type），computer_* 动作即到来宾执行。
+# 默认无绑定 → 本地单例，行为与既有一致（远程是增强不是替换）。
+_active_remote_desktop: "contextvars.ContextVar[typing.Any]" = contextvars.ContextVar(
+    "neurova_active_remote_desktop", default=None
+)
+
+
+def bind_remote_desktop(manager: typing.Any) -> "contextvars.Token":
+    """绑定当前上下文的活动远程桌面（返回 token 供 unbind 恢复）。"""
+    return _active_remote_desktop.set(manager)
+
+
+def unbind_remote_desktop(token: "contextvars.Token") -> None:
+    _active_remote_desktop.reset(token)
+
+
+def get_active_remote_desktop() -> typing.Any:
+    return _active_remote_desktop.get()
+
 
 def get_computer_use_manager(config: typing.Dict[str, typing.Any] = None) -> ComputerUseManager:
-    """获取 ComputerUseManager 单例"""
+    """获取 ComputerUseManager 单例；若上下文绑定了远程会话则返回其代理。"""
+    remote = _active_remote_desktop.get()
+    if remote is not None:
+        return remote
     global _manager
     if _manager is None:
         _manager = ComputerUseManager(config)
