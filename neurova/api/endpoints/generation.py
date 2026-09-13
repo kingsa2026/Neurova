@@ -27,6 +27,7 @@ from neurova.llm.generators.runtime import (
     GENERATION_OUTPUT_DIR,
     PROJECT_ROOT,
     GenerationCredsError,
+    local_url_for,
     safe_task_name,
 )
 
@@ -194,12 +195,9 @@ async def _persist_media(url_or_data: str, kind: str, task_id: str, index: int) 
                                out_dir=_GENERATION_OUTPUT_DIR)
 
 
-def _local_url(path: str, request: Request) -> str:
-    """本地文件 → 可访问的静态 URL（/generation/files 挂载）。"""
-    from pathlib import Path
-
-    name = Path(path).name
-    return f"/api/v1/generation/files/{name}"
+def _local_url(path: str) -> str:
+    """本地文件 → 可访问的静态 URL（批次2：委托 runtime.local_url_for 单源）。"""
+    return local_url_for(path)
 
 
 @router.post("/text")
@@ -329,7 +327,7 @@ async def generate_image(
     for i, item in enumerate(result.get("images") or []):
         try:
             path = await _persist_media(item, "image", task_id, i)
-            images.append({"url": _local_url(path, request), "path": path})
+            images.append({"url": _local_url(path), "path": path})
         except Exception as e:  # noqa: BLE001 — 单图下载失败不影响其余
             images.append({"url": item if item.startswith("http") else "", "error": str(e)[:200]})
     if not images:
@@ -373,7 +371,7 @@ async def generate_audio(
             "code": 0,
             "message": "success",
             "data": {
-                "url": _local_url(str(path), request),
+                "url": _local_url(str(path)),
                 "path": str(path),
                 "task_id": task_id,
                 "request_id": request_id,
@@ -521,13 +519,12 @@ async def get_generation_video_status(
     task_id: str,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """轮询视频任务（账本 + 远程协议轮询；成功即下载本地化）。"""
-    from neurova.api.endpoints import get_app_state  # noqa: F401 — 保持模块一致
-
-    from neurova.llm.generators.protocols import ProtocolCredentials, poll_video
+    """轮询视频任务（批次2：收口逻辑委托 generators.recovery.settle_video_record，
+    与后台重启恢复循环同一实现——口径单源）。"""
+    _ = request
+    from neurova.llm.generators.recovery import settle_video_record
     from neurova.llm.generators.task_ledger import get_generation_task_ledger
 
-    _ = request
     ledger = get_generation_task_ledger()
     record = ledger.get(task_id)
     if record is None:
@@ -545,58 +542,27 @@ async def get_generation_video_status(
             "code": 0,
             "message": "success",
             "data": {"task_id": task_id, "status": record.status,
-                     "url": _local_url(record.local_path, request) if record.local_path else record.result_url,
+                     "url": _local_url(record.local_path) if record.local_path else record.result_url,
                      "error": record.error},
         }
 
-    creds = ProtocolCredentials(api_key="", base_url=record.base_url, model=record.model,
-                                protocol=record.protocol)
-    # 凭据：账本不落 api_key（敏感），轮询前按 provider_id 重新解析
-    if record.provider_id:
-        try:
-            creds = _resolve_generation_creds(
-                record.protocol, record.model, record.provider_id, None, None,
-                default_base=record.base_url or "https://dashscope.aliyuncs.com/api/v1",
-            )
-        except HTTPException:
-            pass
-    try:
-        result = await poll_video(creds, record.remote_task_id, record.poll_url)
-    except Exception as e:  # noqa: BLE001
-        result = {"status": "failed", "error": str(e)[:300]}
-
-    if result["status"] == "succeeded":
-        video_url = result.get("video_url") or ""
-        if video_url.startswith("http"):
-            try:
-                path = await _persist_media(video_url, "video", task_id, 0)
-                ledger.update(task_id, status="succeeded", result_url=video_url, local_path=path)
-                return {"code": 0, "message": "success", "data": {
-                    "task_id": task_id, "status": "succeeded", "url": _local_url(path, request)}}
-            except Exception as e:  # noqa: BLE001 — 下载失败仍回成功+远端 URL（可能已过期）
-                ledger.update(task_id, status="succeeded", result_url=video_url)
-                return {"code": 0, "message": "success", "data": {
-                    "task_id": task_id, "status": "succeeded", "url": video_url,
-                    "warning": f"本地化失败: {str(e)[:200]}"}}
-        ledger.update(task_id, status="succeeded", result_url=video_url)
-        return {"code": 0, "message": "success", "data": {
-            "task_id": task_id, "status": "succeeded", "url": video_url}}
-    if result["status"] == "failed":
-        ledger.update(task_id, status="failed", error=str(result.get("error") or "")[:300])
-        return {"code": 0, "message": "success", "data": {
-            "task_id": task_id, "status": "failed", "error": str(result.get("error") or "")[:300]}}
-    ledger.update(task_id, status="running")
-    return {"code": 0, "message": "success", "data": {"task_id": task_id, "status": "running"}}
+    result = await settle_video_record(record, ledger=ledger)
+    data: Dict[str, Any] = {"task_id": task_id, "status": result["status"]}
+    for key in ("url", "error", "warning"):
+        if result.get(key):
+            data[key] = result[key]
+    return {"code": 0, "message": "success", "data": data}
 
 
 @router.get("/tasks")
 async def list_generation_tasks(
     request: Request,
     status: Optional[str] = None,
+    kind: Optional[str] = None,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """生成任务列表（账本快照，后台任务面板数据源之一）。仅返回本人任务；
-    无主存量任务仅管理员可见。"""
+    """生成任务列表（批次2：历史面板数据源——kind 过滤 + 产物可访问 url）。
+    仅返回本人任务；无主存量任务仅管理员可见。"""
     _ = request
     from neurova.llm.generators.task_ledger import get_generation_task_ledger
 
@@ -604,13 +570,17 @@ async def list_generation_tasks(
     is_admin = current_user.get("role") == "admin"
     visible = [
         t for t in get_generation_task_ledger().list(status=status)
-        if t.owner_user_id == uid or (not t.owner_user_id and is_admin)
+        if (not kind or t.kind == kind)
+        and (t.owner_user_id == uid or (not t.owner_user_id and is_admin))
     ]
     tasks = [
         {
             "task_id": t.task_id, "kind": t.kind, "protocol": t.protocol,
             "model": t.model, "status": t.status, "prompt": t.prompt,
-            "submitted_at": t.submitted_at, "local_path": t.local_path,
+            "submitted_at": t.submitted_at, "updated_at": t.updated_at,
+            "local_path": t.local_path,
+            "url": _local_url(t.local_path) if t.local_path else (t.result_url or ""),
+            "source": getattr(t, "source", "rest"),
             "error": t.error,
         }
         for t in visible

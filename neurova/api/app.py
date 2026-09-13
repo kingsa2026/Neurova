@@ -988,6 +988,14 @@ async def _on_startup(app_state: AppState) -> None:
         except Exception as e:
             logger.warning("Channel manager start failed: %s", e)
 
+    # 批次2（PRINTFILM 对标）：生成任务重启恢复轮询——账本 unfinished() 收口
+    try:
+        from neurova.llm.generators.recovery import start_generation_recovery
+
+        start_generation_recovery()
+    except Exception as e:
+        logger.warning("生成任务恢复轮询启动失败: %s", e)
+
     logger.info("=" * 60)
     logger.info("Neurova API Server started successfully")
     logger.info("=" * 60)
@@ -1010,6 +1018,14 @@ async def _on_shutdown(app_state: AppState) -> None:
         await shutdown_workflow_triggers()
     except Exception as e:
         logger.warning("workflow triggers shutdown error: %s", e)
+
+    # 批次2：停止生成任务恢复轮询
+    try:
+        from neurova.llm.generators.recovery import stop_generation_recovery
+
+        await stop_generation_recovery()
+    except Exception as e:
+        logger.warning("generation recovery shutdown error: %s", e)
 
     # 停止渠道管理器（stop() 是 async 方法；加超时防止挂起阻塞关闭流程）
     if app_state.channel_manager:

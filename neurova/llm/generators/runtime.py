@@ -58,6 +58,15 @@ def safe_task_name(task_id: str) -> str:
     return cleaned or "task"
 
 
+# 产物静态挂载前缀（与 api/app.py StaticFiles 挂载同源语义）
+FILES_URL_PREFIX = "/api/v1/generation/files"
+
+
+def local_url_for(path: str) -> str:
+    """本地产物文件 → 可访问的静态 URL（批次2：单源，端点与恢复循环共用）。"""
+    return f"{FILES_URL_PREFIX}/{Path(path).name}"
+
+
 # ── 凭据解析（自端点搬移，语义不变：显式凭据 > provider_id > 协议匹配服务商）──
 
 

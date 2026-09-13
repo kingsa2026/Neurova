@@ -148,6 +148,42 @@
       </a-tab-pane>
     </a-tabs>
 
+    <!-- 批次2：历史记录面板（消费 GET /generation/tasks，PRINTFILM 工具创作记录对标） -->
+    <GlassPanel v-if="activeTab === 'history'" class="history-panel" variant="subtle">
+      <div class="history-toolbar">
+        <a-radio-group v-model:value="historyKind" size="small" @change="onHistoryKindChange">
+          <a-radio-button value="">{{ t('aigc.all') }}</a-radio-button>
+          <a-radio-button value="image">{{ t('aigc.image') }}</a-radio-button>
+          <a-radio-button value="video">{{ t('aigc.video') }}</a-radio-button>
+          <a-radio-button value="audio">{{ t('aigc.audio') }}</a-radio-button>
+        </a-radio-group>
+        <GlassButton size="sm" @click="loadHistory(historyKind || undefined)">{{ t('common.refresh') }}</GlassButton>
+      </div>
+      <div v-if="historyTasks.length" class="history-list">
+        <div v-for="task in historyTasks" :key="task.task_id" class="history-item">
+          <div class="history-thumb">
+            <img v-if="task.kind === 'image' && task.url" :src="task.url" :alt="task.prompt" />
+            <span v-else class="history-kind-badge">{{ task.kind }}</span>
+          </div>
+          <div class="history-info">
+            <div class="history-prompt">{{ task.prompt || '—' }}</div>
+            <div class="history-meta">
+              <a-tag :color="taskStatusColor(task.status)">{{ taskStatusText(task.status) }}</a-tag>
+              <span v-if="task.model">{{ task.model }}</span>
+              <span>{{ formatTaskTime(task.submitted_at) }}</span>
+            </div>
+            <div v-if="task.error" class="history-error">{{ task.error }}</div>
+          </div>
+          <div class="history-actions">
+            <a v-if="task.url" :href="task.url" :download="task.url.split('/').pop()" class="history-download">
+              {{ t('aigc.download') }}
+            </a>
+          </div>
+        </div>
+      </div>
+      <a-empty v-else :description="t('aigc.noHistory')" />
+    </GlassPanel>
+
     <!-- Image Preview Modal -->
     <a-modal v-model:open="imagePreviewVisible" :footer="null" width="680px">
       <img :src="imagePreviewUrl" alt="Preview" style="width: 100%" />
@@ -156,12 +192,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { request } from '@/api'
 import { listModels } from '@/api/modules/models'
-import { generateText as apiGenerateText, generateImage as apiGenerateImage } from '@/api/modules/generation'
+import {
+  generateText as apiGenerateText,
+  generateImage as apiGenerateImage,
+  listGenerationTasks,
+  type GenerationTask,
+} from '@/api/modules/generation'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
@@ -169,7 +210,7 @@ import { renderMarkdown } from '@/utils/markdown'
 
 const { t } = useI18n()
 
-const activeTab = ref<'text' | 'image' | 'audio' | 'video'>('text')
+const activeTab = ref<'text' | 'image' | 'audio' | 'video' | 'history'>('text')
 
 // 图像风格模板（批次1）：原实现错接 GET /v1/image/templates —— 那是 Docker
 // 镜像构建模板（base_image/dockerfile），与图像风格无关；且提交的 style 字段
@@ -234,11 +275,76 @@ const textModelOptions = computed(() => capOptions('text'))
 const imageModelOptions = computed(() => capOptions('image_generation'))
 const videoModelOptions = computed(() => capOptions('video_generation'))
 
+// --- 批次2：历史记录（账本快照 + 未决自动刷新）---
+const historyTasks = ref<GenerationTask[]>([])
+const historyKind = ref('')
+let historyPollTimer: ReturnType<typeof setInterval> | null = null
+
+async function loadHistory(kind?: string) {
+  try {
+    const res: any = await listGenerationTasks(kind ? ({ kind } as any) : undefined)
+    historyTasks.value = res?.data?.tasks ?? []
+  } catch {
+    /* 保留已渲染列表，错误不打断浏览 */
+  }
+  ensureHistoryPolling()
+}
+
+function onHistoryKindChange() {
+  loadHistory(historyKind.value || undefined)
+}
+
+function ensureHistoryPolling() {
+  const pending = historyTasks.value.some(
+    (task) => task.status === 'submitted' || task.status === 'running')
+  if (pending && !historyPollTimer) {
+    historyPollTimer = setInterval(() => {
+      loadHistory(historyKind.value || undefined)
+    }, 5000)
+  } else if (!pending && historyPollTimer) {
+    clearInterval(historyPollTimer)
+    historyPollTimer = null
+  }
+}
+
+function taskStatusText(status: string): string {
+  const keyMap: Record<string, string> = {
+    submitted: 'aigc.stSubmitted',
+    running: 'aigc.stRunning',
+    succeeded: 'aigc.stSucceeded',
+    failed: 'aigc.stFailed',
+  }
+  return keyMap[status] ? t(keyMap[status]) : status
+}
+
+function taskStatusColor(status: string): string {
+  const colorMap: Record<string, string> = {
+    submitted: 'default',
+    running: 'processing',
+    succeeded: 'success',
+    failed: 'error',
+  }
+  return colorMap[status] ?? 'default'
+}
+
+function formatTaskTime(ts: number): string {
+  if (!ts) return ''
+  return new Date(ts * 1000).toLocaleString()
+}
+
+watch(activeTab, (tab) => {
+  if (tab === 'history') loadHistory(historyKind.value || undefined)
+})
+
 onUnmounted(() => {
   // BUG-24 修复：卸载时清理视频轮询定时器（原实现泄漏直到任务终态）
   if (videoPollTimer) {
     clearInterval(videoPollTimer)
     videoPollTimer = null
+  }
+  if (historyPollTimer) {
+    clearInterval(historyPollTimer)
+    historyPollTimer = null
   }
 })
 
@@ -530,5 +636,79 @@ function pollVideoStatus(taskId: string) {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* 批次2：历史记录面板 */
+.history-panel {
+  padding: 16px 20px;
+}
+
+.history-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.history-item {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--nr-bg-elevated, rgba(255, 255, 255, 0.04));
+}
+
+.history-thumb img {
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.history-kind-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  color: var(--nr-text-secondary);
+  background: rgba(125, 125, 125, 0.15);
+}
+
+.history-prompt {
+  font-size: 13px;
+  color: var(--nr-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--nr-text-tertiary, var(--nr-text-secondary));
+}
+
+.history-error {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--nr-danger, #ff4d4f);
+}
+
+.history-download {
+  font-size: 13px;
+  color: var(--nr-accent, #4096ff);
 }
 </style>
