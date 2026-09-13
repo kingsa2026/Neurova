@@ -7,6 +7,7 @@ import asyncio
 import pytest
 
 from neurova.channels.base import ChannelConfig, ChannelEventType
+from neurova.channels import qq_ws
 from neurova.channels.qq_ws import QQWebSocketAdapter
 
 
