@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Neurova 模块 ↔ 7 大 AI Agent 架构 对照图",
+    "subtitle": "对照《7大AI Agent架构深度拆解》选型框架，标注 Neurova 各模块归属",
+    "output": "docs/Neurova_架构对照图_2026-09-12.html",
+    "locale": "zh-CN",
+    "quality_profile": "standard",
+    "viewBox": [960, 1100],
+    "repository": { "url": "https://github.com/kingsa2026/Neurova", "provider": "github", "link_mode": "web", "revision": "666f14a2349da09891fec46c1b3ed4020585da47" }
+  },
+  "components": [
+    { "id": "hub", "type": "backend", "label": "ChatPipeline", "sublabel": "6 步对话管线 · 中枢", "tag": "串接全部", "pos": [60, 470], "size": [160, 120], "sources": [ { "path": "neurova/agent/chat_pipeline.py" } ] },
+
+    { "id": "n1a", "type": "backend", "label": "Agent.chat()", "sublabel": "单轮 LLM 全链路", "tag": "原型基础", "pos": [320, 32], "size": [176, 78], "sources": [ { "path": "neurova/agent_core.py" } ] },
+
+    { "id": "n2a", "type": "backend", "label": "Agent Loop", "sublabel": "think→act→observe", "tag": "内核能力", "pos": [320, 188], "size": [176, 78], "sources": [ { "path": "neurova/agent/loops/openai_loop.py" } ] },
+    { "id": "n2b", "type": "backend", "label": "Tool 执行", "sublabel": "调用解析/后处理", "pos": [516, 188], "size": [176, 78], "sources": [ { "path": "neurova/tool_executor.py" } ] },
+
+    { "id": "n3a", "type": "backend", "label": "workflow_agent", "sublabel": "Workflow→Agent 编译", "tag": "部分采用", "pos": [320, 344], "size": [176, 78], "sources": [ { "path": "neurova/agent/workflow_agent.py" } ] },
+    { "id": "n3b", "type": "backend", "label": "NL Designer", "sublabel": "自然语言→工作流", "pos": [516, 344], "size": [176, 78], "sources": [ { "path": "neurova/collaboration/neurflow/nl_designer.py" } ] },
+
+    { "id": "n4a", "type": "backend", "label": "Swarm 蜂群", "sublabel": "主 Agent 动态派生", "tag": "内核能力", "pos": [320, 500], "size": [176, 78], "sources": [ { "path": "neurova/agent/swarm.py" } ] },
+    { "id": "n4b", "type": "messagebus", "label": "AgentTeam", "sublabel": "多角色 ACP 编排", "pos": [516, 500], "size": [176, 78], "sources": [ { "path": "neurova/agent/team.py" } ] },
+    { "id": "n4c", "type": "backend", "label": "SubAgent / Matrix", "sublabel": "子代理 / 矩阵", "pos": [712, 500], "size": [176, 78], "sources": [ { "path": "neurova/agent/matrix/agent_matrix.py" } ] },
+
+    { "id": "n5a", "type": "backend", "label": "LLM Router", "sublabel": "10 类请求路由", "tag": "主落点", "pos": [320, 656], "size": [176, 78], "sources": [ { "path": "neurova/llm/llm_router.py" } ] },
+    { "id": "n5b", "type": "security", "label": "Skill Gates", "sublabel": "意图→技能匹配", "pos": [516, 656], "size": [176, 78], "sources": [ { "path": "neurova/agent/gates.py" } ] },
+    { "id": "n5c", "type": "backend", "label": "Skill Manager", "sublabel": "技能闭环 / 市场", "pos": [712, 656], "size": [176, 78], "sources": [ { "path": "neurova/skills/agent_skill_manager.py" } ] },
+
+    { "id": "n6a", "type": "database", "label": "上下文池", "sublabel": "共享状态 / 语义召回", "tag": "主落点", "pos": [320, 812], "size": [176, 78], "sources": [ { "path": "neurova/agent/session_snapshot.py" } ] },
+    { "id": "n6b", "type": "database", "label": "MemCore", "sublabel": "记忆检索 / 温度", "pos": [516, 812], "size": [176, 78], "sources": [ { "path": "neurova/mem_core.py" } ] },
+    { "id": "n6c", "type": "database", "label": "池归档", "sublabel": "子Agent→经验源", "pos": [712, 812], "size": [176, 78], "sources": [ { "path": "neurova/agent/swarm.py", "label": "EXPERIENCE 源" } ] },
+
+    { "id": "n7a", "type": "backend", "label": "NeurFlow DAG", "sublabel": "图执行引擎", "tag": "主落点·骨架", "pos": [320, 968], "size": [176, 78], "sources": [ { "path": "neurova/collaboration/neurflow/execution_engine.py" } ] },
+    { "id": "n7b", "type": "backend", "label": "重试 / 回溯", "sublabel": "trigger_retry + checkpoint", "pos": [516, 968], "size": [176, 78], "sources": [ { "path": "neurova/collaboration/neurflow/trigger_retry.py" } ] },
+    { "id": "n7c", "type": "backend", "label": "Subflow", "sublabel": "子流程 / 校验", "pos": [712, 968], "size": [176, 78], "sources": [ { "path": "neurova/collaboration/neurflow/subflow.py" } ] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "#1 单智能体 · 原型基础", "wraps": [ "n1a" ], "pad": 18 },
+    { "kind": "region", "label": "#2 ReAct 推理循环 · 内核能力", "wraps": [ "n2a", "n2b" ], "pad": 18 },
+    { "kind": "region", "label": "#3 Plan & Execute · 部分采用", "wraps": [ "n3a", "n3b" ], "pad": 18 },
+    { "kind": "region", "label": "#4 多Agent协作 · 内核能力", "wraps": [ "n4a", "n4b", "n4c" ], "pad": 18 },
+    { "kind": "region", "label": "#5 Router + Skill · 主落点", "wraps": [ "n5a", "n5b", "n5c" ], "pad": 18 },
+    { "kind": "region", "label": "#6 黑板共享态 · 主落点", "wraps": [ "n6a", "n6b", "n6c" ], "pad": 18 },
+    { "kind": "region", "label": "#7 Graph Workflow 图工作流 · 主落点·骨架", "wraps": [ "n7a", "n7b", "n7c" ], "pad": 18 }
+  ],
+  "connections": [
+    { "id": "hub-n1", "from": "hub", "to": "n1a", "variant": "default" },
+    { "id": "hub-n2", "from": "hub", "to": "n2a", "variant": "default" },
+    { "id": "hub-n3", "from": "hub", "to": "n3a", "variant": "dashed" },
+    { "id": "hub-n4", "from": "hub", "to": "n4a", "variant": "default" },
+    { "id": "hub-n5", "from": "hub", "to": "n5a", "variant": "emphasis" },
+    { "id": "hub-n6", "from": "hub", "to": "n6a", "variant": "emphasis" },
+    { "id": "hub-n7", "from": "hub", "to": "n7a", "variant": "emphasis" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "选型主轴", "items": [
+      "横轴：灵活 ↔ 稳定；Neurova 明确落在'工程强管控·生产'端",
+      "#7 图工作流为编排骨架：NeurFlow DAG + 重试/回溯/校验",
+      "#5 路由+技能 是 To B 主用的能力层"
+    ] },
+    { "dot": "emerald", "title": "组合定位", "items": [
+      "主落点：#5 Router+Skill、#6 黑板共享态、#7 Graph Workflow",
+      "内核能力：#4 多Agent(swarm/team)、#2 ReAct loop",
+      "基础/部分：#1 单轮 chat；#3 经 workflow_agent 编译落地"
+    ] },
+    { "dot": "rose", "title": "中枢与共享态", "items": [
+      "ChatPipeline 6 步为中枢（实线），串接全部 7 类能力",
+      "#6 上下文池=LangGraph 式共享状态：记忆与子Agent报告双向读写",
+      "各模块代码归属见节点 sources 标签（锚定 HEAD 提交）"
+    ] }
+  ]
+}
