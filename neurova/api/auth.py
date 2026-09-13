@@ -42,6 +42,63 @@ class AuthError(Exception):
         super().__init__(message)
 
 
+# 安全审计 M1: JWT 密钥最小长度（HS256 对称密钥，过短可被暴力破解）
+_MIN_SECRET_LENGTH = 32
+
+# .env.example 里的占位默认值，生产环境必须替换
+_INSECURE_DEFAULT_SECRETS = {
+    "your-secret-key-change-in-production",
+    "changeme",
+    "secret",
+    "test",
+}
+
+_SECRET_FILE = Path(".jwt_secret")
+
+
+def _is_production() -> bool:
+    """是否生产环境（NEUROVA_ENV=production/prod，或显式关闭 debug）。"""
+    import os
+
+    env = (os.environ.get("NEUROVA_ENV") or config.get("NEUROVA_ENV") or "").strip().lower()
+    if env in ("prod", "production"):
+        return True
+    # 未显式设 ENV 时，默认生产（fail-safe）；显式 NEUROVA_DEBUG=1 视为开发
+    return os.environ.get("NEUROVA_DEBUG", "0") != "1"
+
+
+def _validate_secret(secret: str) -> str:
+    """校验密钥强度，弱密钥在生产环境直接拒绝启动（fail-closed）。"""
+    if len(secret) < _MIN_SECRET_LENGTH:
+        msg = (
+            f"NEUROVA_JWT_SECRET 过短（{len(secret)} < {_MIN_SECRET_LENGTH} 字节），"
+            "存在被暴力破解风险"
+        )
+        if _is_production():
+            raise RuntimeError(msg + "；生产环境拒绝启动，请设置 ≥32 字节的强随机密钥")
+        logger.warning(msg + "（开发环境放行）")
+    if secret in _INSECURE_DEFAULT_SECRETS:
+        msg = "检测到 .env.example 默认 JWT 密钥，必须替换"
+        if _is_production():
+            raise RuntimeError(msg + "；生产环境拒绝启动")
+        logger.warning(msg + "（开发环境放行）")
+    return secret
+
+
+def _write_secret_file(secret: str) -> None:
+    """写入 .jwt_secret，并收紧到 0600（仅属主可读，安全审计 M1）。"""
+    import os
+
+    try:
+        _SECRET_FILE.write_text(secret)
+        try:
+            os.chmod(_SECRET_FILE, 0o600)
+        except OSError as e:  # 非 POSIX 或权限不足（如 Windows）降级为告警
+            logger.warning("Failed to chmod .jwt_secret to 0600: %s", e)
+    except Exception as e:
+        logger.warning("Failed to save JWT secret: %s", e)
+
+
 def _load_or_create_secret_key() -> str:
     """
     加载或创建持久化 JWT Secret Key
@@ -49,28 +106,35 @@ def _load_or_create_secret_key() -> str:
     优先级:
     1. 环境变量 NEUROVA_JWT_SECRET
     2. 配置文件 .jwt_secret
-    3. 自动生成并保存
+    3. 自动生成并保存（0600）
+
+    安全审计 M1: 环境变量来源的密钥强制强度校验；文件来源自动收紧权限。
     """
     # 1. 环境变量
     env_key = config.get("NEUROVA_JWT_SECRET")
     if env_key:
-        return env_key
+        return _validate_secret(env_key)
 
     # 2. 配置文件
-    secret_file = Path(".jwt_secret")
-    if secret_file.exists():
+    if _SECRET_FILE.exists():
         try:
-            return secret_file.read_text().strip()
+            secret = _SECRET_FILE.read_text().strip()
+            if secret:
+                # 启动即收紧历史遗留文件的权限
+                import os
+
+                try:
+                    if (os.stat(_SECRET_FILE).st_mode & 0o077) != 0:
+                        os.chmod(_SECRET_FILE, 0o600)
+                except OSError:
+                    pass
+                return _validate_secret(secret)
         except Exception:
             pass
 
     # 3. 自动生成
     secret = secrets.token_hex(32)
-    try:
-        secret_file.write_text(secret)
-    except Exception as e:
-        logger.warning("Failed to save JWT secret: %s", e)
-
+    _write_secret_file(secret)
     return secret
 
 
