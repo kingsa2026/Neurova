@@ -32,7 +32,7 @@
     <a-spin :spinning="loading">
       <!-- Grid View -->
       <template v-if="viewMode === 'grid'">
-        <div v-if="filteredMedia.length" class="media-grid">
+        <div v-if="mediaItems.length" class="media-grid">
           <GlassCard
             v-for="item in pagedMedia"
             :key="item.id"
@@ -59,7 +59,7 @@
             </div>
           </GlassCard>
         </div>
-        <a-pagination v-if="filteredMedia.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="filteredMedia.length" size="small" style="margin-top: 16px; text-align: center" />
+        <a-pagination v-if="mediaItems.length > pageSize" v-model:current="currentPage" :pageSize="pageSize" :total="mediaItems.length" size="small" style="margin-top: 16px; text-align: center" />
         <a-empty v-else :description="t('media.noMedia')" />
       </template>
 
@@ -68,7 +68,7 @@
         <GlassPanel>
           <a-table
             :columns="columns"
-            :data-source="filteredMedia"
+            :data-source="mediaItems"
             :loading="loading"
             :pagination="{ pageSize: 20 }"
             row-key="id"
@@ -137,7 +137,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message, Modal } from 'ant-design-vue'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -181,20 +181,13 @@ const viewOptions = [
   { label: '☰ List', value: 'list' },
 ]
 
-const filteredMedia = computed(() => {
-  let list = mediaItems.value
-  if (typeFilter.value) {
-    list = list.filter((m) => m.type === typeFilter.value)
-  }
-  const q = searchQuery.value.toLowerCase()
-  if (q) {
-    list = list.filter((m) => m.name.toLowerCase().includes(q))
-  }
-  return list
-})
-
+/**
+ * 搜索后端化（台账 2026-09-11 ③）：数据源即服务端过滤结果，不做本地二次过滤——
+ * 后端 search 同时匹配 filename 与 media_id，本地 name includes 会误删仅 id 命中的条目。
+ * 类型过滤同理走服务端 media_type。
+ */
 const pagedMedia = computed(() =>
-  filteredMedia.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
+  mediaItems.value.slice((currentPage.value - 1) * pageSize.value, currentPage.value * pageSize.value),
 )
 
 const columns = computed(() => [
@@ -244,8 +237,12 @@ async function fetchMedia() {
   loading.value = true
   try {
     // F-1 契约对齐：GET /media/list（offset/limit 参数），响应 data.media/total/offset/limit；
-    // 后端无 search 参数，搜索走前端 filteredMedia 过滤。
-    const res = await mediaApi.listMedia({ agent_id: props.agentId, media_type: typeFilter.value || undefined })
+    // 台账 ③：搜索后端化，search 传服务端（匹配 filename/media_id），覆盖未加载条目。
+    const res = await mediaApi.listMedia({
+      agent_id: props.agentId,
+      media_type: typeFilter.value || undefined,
+      search: searchQuery.value.trim() || undefined,
+    })
     const items = res?.data?.media ?? []
     mediaItems.value = items.map((m) => ({
       id: m.media_id,
@@ -262,6 +259,28 @@ async function fetchMedia() {
     loading.value = false
   }
 }
+
+/**
+ * 搜索/类型过滤走服务端（台账 2026-09-11 ③）：search 经 300ms 防抖后重拉，
+ * 变化即回到第一页（offset=0 与既有分页协同）；类型切换立即重拉。
+ * 连续输入经防抖合并为一次请求，避免每次按键都打后端。
+ */
+const SEARCH_DEBOUNCE_MS = 300
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+
+watch(searchQuery, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    searchTimer = undefined
+    currentPage.value = 1
+    void fetchMedia()
+  }, SEARCH_DEBOUNCE_MS)
+})
+
+watch(typeFilter, () => {
+  currentPage.value = 1
+  void fetchMedia()
+})
 
 function triggerUpload() {
   fileInputRef.value?.click()
@@ -328,6 +347,7 @@ function confirmDelete(item: MediaItem) {
 onMounted(fetchMedia)
 
 onUnmounted(() => {
+  if (searchTimer) clearTimeout(searchTimer)
   previewUrls.forEach((url) => URL.revokeObjectURL(url))
   previewUrls.clear()
 })

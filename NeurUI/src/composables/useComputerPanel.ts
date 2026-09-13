@@ -31,6 +31,8 @@ export interface ComputerActionEntry {
   effect?: string
   /** R1-2 ActionResult 契约：精确拒绝码（refused 时） */
   refusalCode?: string
+  /** SSH/shell 终端负载（命令 + 输出），面板渲染成终端窗口 */
+  terminal?: { command: string; stdout: string; stderr: string; host?: string; exit?: number }
 }
 
 export interface ComputerPanelState {
@@ -43,6 +45,10 @@ export interface ComputerPanelState {
   browserUrl?: string
   /** R2-5 agent 点击位置标记（截图像素坐标，面板按图片尺寸换算成百分比） */
   clickMarker?: { x: number; y: number; ts: number }
+  /** 主视口模式：桌面截图 / 终端（SSH·shell 命令流） */
+  view: 'desktop' | 'terminal'
+  /** 累积终端转录（$ 命令 + stdout + stderr），终端视口渲染 */
+  terminalTranscript: string
 }
 
 const COMPUTER_TOOL_PREFIXES = ['computer_', 'browser_']
@@ -109,6 +115,15 @@ export function describeComputerAction(tool: string, params: Record<string, unkn
       return i18n.global.t('computerPanel.actSetValue', {
         text: ellipsize(String(p.value ?? ''), 30),
       })
+    case 'computer_som_snapshot':
+      return i18n.global.t('computerPanel.actSomSnapshot')
+    case 'computer_click_mark':
+      return i18n.global.t('computerPanel.actClickMark', { id: String(p.index ?? '?') })
+    case 'computer_ssh_exec':
+      return i18n.global.t('computerPanel.actSsh', {
+        host: String(p.host ?? ''),
+        cmd: ellipsize(String(p.command ?? ''), 60),
+      })
     default:
       return tool
   }
@@ -135,6 +150,8 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
     minimized: false,
     busy: false,
     actions: [],
+    view: 'desktop',
+    terminalTranscript: '',
   })
   /** 处理 WS computer_action 事件 payload */
   function handleComputerAction(payload: Record<string, any> | undefined | null): void {
@@ -148,6 +165,10 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
       unknown
     >
     const actionResult = extractActionResult(payload)
+    const term =
+      payload.terminal && typeof payload.terminal === 'object'
+        ? (payload.terminal as { command?: string; stdout?: string; stderr?: string; host?: string; exit?: number })
+        : undefined
 
     // R0-3/R2-5 刷新事件：不新开日志行，把操作后画面补到最近一条同工具动作上
     if (payload.refreshed === true) {
@@ -172,6 +193,9 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
       timestamp: String(payload.timestamp || new Date().toISOString()),
       screenshot: b64 ? `data:image/png;base64,${b64}` : undefined,
       url: payload.url ? String(payload.url) : undefined,
+      terminal: term
+        ? { command: String(term.command ?? ''), stdout: String(term.stdout ?? ''), stderr: String(term.stderr ?? ''), host: term.host ? String(term.host) : undefined, exit: typeof term.exit === 'number' ? term.exit : undefined }
+        : undefined,
       ...(actionResult ?? {}),
     }
 
@@ -181,6 +205,18 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
     }
     if (entry.screenshot) state.latestScreenshot = entry.screenshot
     if (entry.url) state.browserUrl = entry.url
+    // 终端视图：SSH/shell 命令到达 → 累积转录并切到终端视口；截图动作切回桌面
+    if (entry.terminal) {
+      const t = entry.terminal
+      const head = t.host ? `$ [${t.host}] ${t.command}` : `$ ${t.command}`
+      state.terminalTranscript += (state.terminalTranscript ? '\n' : '') + head
+      if (t.stdout) state.terminalTranscript += '\n' + t.stdout.replace(/\n+$/, '')
+      if (t.stderr) state.terminalTranscript += '\n' + t.stderr.replace(/\n+$/, '')
+      if (typeof t.exit === 'number' && t.exit !== 0) state.terminalTranscript += `\n[exit ${t.exit}]`
+      state.view = 'terminal'
+    } else if (entry.screenshot) {
+      state.view = 'desktop'
+    }
     // R2-5 agent 点击位置标记（截图像素坐标）
     if (tool === 'computer_click' && entry.success && typeof params.x === 'number' && typeof params.y === 'number') {
       state.clickMarker = { x: params.x, y: params.y, ts: Date.now() }
@@ -239,6 +275,8 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
     state.latestScreenshot = undefined
     state.browserUrl = undefined
     state.clickMarker = undefined
+    state.terminalTranscript = ''
+    state.view = 'desktop'
   }
 
   return (_sharedPanel = { state, handleComputerAction, handleToolCall, markIdle, open, close, toggleMinimized, clear })
