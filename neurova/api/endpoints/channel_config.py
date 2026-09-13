@@ -12,8 +12,8 @@ from __future__ import annotations
 - POST   /api/channel-configs                  - 创建/更新渠道配置
 - DELETE /api/channel-configs/{channel_type}   - 删除渠道配置
 - POST   /api/channel-configs/{channel_type}/test - 测试连接
-- POST   /api/channel-configs/wechat/ilink/qrcode        - 生成 iLink 登录二维码（只生成不等待）
-- GET    /api/channel-configs/wechat/ilink/qrcode/status - 单次查询 iLink 扫码状态
+- GET    /api/channel-configs/{channel_type}/qrcode        - 生成渠道登录/授权二维码（通用，对齐 QwenPaw）
+- GET    /api/channel-configs/{channel_type}/qrcode/status - 轮询扫码授权状态（返回可回填凭据）
 """
 
 import asyncio
@@ -88,13 +88,6 @@ class ChannelTestResult(BaseModel):
     message: str
     needs_scan: bool = False  # F-2：wechat iLink 无 token 时诚实失败并引导扫码
     details: Dict[str, Any] = Field(default_factory=dict)
-
-
-class WechatIlinkQrcodeRequest(BaseModel):
-    """iLink 二维码生成请求（字段缺省时回退已保存配置/默认路径）"""
-
-    token_file: str = Field("", description="Token 文件路径")
-    bot_token: str = Field("", description="已填写的 Bot Token（有则无需扫码）")
 
 
 # ============================================================
@@ -231,13 +224,6 @@ def _wechat_needs_scan(extra: Dict[str, Any]) -> bool:
     return not _read_token_file(_wechat_extra_token_file(extra))
 
 
-def _make_ilink_adapter(token_file: str):
-    """创建仅用于扫码两段式端点的轻量 iLink 适配器（无 kwargs → 不触发 authenticate/网络）。"""
-    adapter = create_wechat_adapter(mode="ilink")
-    adapter.ilink_token_file = token_file
-    return adapter
-
-
 def _wechat_authenticated(adapter) -> bool:
     """核验 wechat 适配器的真实认证状态。
 
@@ -250,73 +236,6 @@ def _wechat_authenticated(adapter) -> bool:
     if mode == "official":
         return bool(getattr(adapter, "_official_initialized", False))
     return bool(getattr(adapter, "_wecom_initialized", False))
-
-
-@router.post("/wechat/ilink/qrcode", summary="生成 iLink 登录二维码（非阻塞，只生成不等待）")
-async def create_wechat_ilink_qrcode(
-    request: Optional[WechatIlinkQrcodeRequest] = None,
-    agent_id: str = Query(default="default"),
-):
-    agent_id = _norm_agent(agent_id)
-    """F-3 两段式·生成段：已有有效 token 直接 ready；否则一次 POST 生成二维码即返回。
-
-    绝不在后端循环等待扫码（等待由前端轮询 status 端点驱动）。
-    """
-    req = request or WechatIlinkQrcodeRequest()
-    saved_extra = (_agent_map(_load_store(), agent_id).get("wechat", {}) or {}).get("extra", {}) or {}
-
-    bot_token = req.bot_token or saved_extra.get("bot_token", "")
-    token_file = str(Path(req.token_file or saved_extra.get("token_file", "") or ILINK_DEFAULT_TOKEN_FILE).expanduser())
-
-    if bot_token or _read_token_file(token_file):
-        return {"status": "ready"}
-
-    adapter = _make_ilink_adapter(token_file)
-    # RES-P0-2 红线延续：同步网络工作必须下沉线程池
-    qr = await asyncio.to_thread(adapter._request_ilink_qrcode)
-    if qr is None:
-        raise HTTPException(status_code=502, detail="生成 iLink 二维码失败（iLink 服务不可达或返回异常）")
-    return {"status": "pending", "qr_url": qr.get("qr_url", ""), "qr_id": qr.get("qr_id", "")}
-
-
-@router.get("/wechat/ilink/qrcode/status", summary="单次查询 iLink 扫码状态（confirmed 落盘 token）")
-async def get_wechat_ilink_qrcode_status(qr_id: str = "", agent_id: str = Query(default="default")):
-    agent_id = _norm_agent(agent_id)
-    """F-3 两段式·轮询段：单次 GET /auth/status，如实返回 pending/scanned/expired。
-
-    confirmed → 将 bot_token 写入 token 文件（与后台 connect 流程同一落盘路径）；
-    网络失败 → 502（诚实暴露，由前端决定重试）。
-    """
-    if not qr_id:
-        raise HTTPException(status_code=400, detail="qr_id 不能为空")
-
-    saved_extra = (_agent_map(_load_store(), agent_id).get("wechat", {}) or {}).get("extra", {}) or {}
-    token_file = _wechat_extra_token_file(saved_extra)
-    adapter = _make_ilink_adapter(token_file)
-
-    def _poll_and_maybe_save() -> Dict[str, Any]:
-        data = adapter._poll_scan_once(qr_id)
-        if data.get("status") == "confirmed":
-            adapter.ilink_bot_token = data.get("bot_token", "")
-            adapter._save_ilink_token()
-        return data
-
-    data = await asyncio.to_thread(_poll_and_maybe_save)
-    status = data.get("status", "pending")
-    if status == "error":
-        raise HTTPException(status_code=502, detail=data.get("message", "查询扫码状态失败"))
-
-    result: Dict[str, Any] = {"status": status}
-    if status == "confirmed":
-        result["token_saved"] = bool(adapter.ilink_bot_token)
-    return result
-
-
-# ============================================================
-# 通用二维码授权端点（对齐 QwenPaw GET /channels/{channel}/qrcode 两段式）
-# 覆盖 feishu/dingtalk/qq/wecom/wechat——扫码即取凭据并回填表单。
-# 路由段数=2/3，不与 GET /{channel_type}(1) 冲突；须先于 /{channel_type} 注册。
-# ============================================================
 
 
 @router.get("/{channel_type}/qrcode", summary="生成渠道登录/授权二维码（通用，对齐 QwenPaw）")

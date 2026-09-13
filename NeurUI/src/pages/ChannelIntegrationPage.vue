@@ -290,16 +290,6 @@
         </div>
       </div>
     </Teleport>
-
-    <!-- F-3：iLink 扫码对话框（save/test 返回 needs_scan 时弹出） -->
-    <WechatQrcodeDialog
-      :visible="qrDialogVisible"
-      :qr-url="qrUrl"
-      :qr-id="qrId"
-      @update:visible="onQrDialogClose"
-      @confirmed="onQrConfirmed"
-      @regenerate="onQrRegenerate"
-    />
   </div>
 </template>
 
@@ -307,10 +297,9 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { listChannelConfigs, createChannelConfig, testChannelConfig, getIngressStats, restartChannelAdapter, clearChannelQueue, checkChannelConflicts, listPluginChannelSchemas, createWechatIlinkQrcode, type ChannelIngressStats } from '@/api/modules/channel-configs'
+import { listChannelConfigs, createChannelConfig, testChannelConfig, getIngressStats, restartChannelAdapter, clearChannelQueue, checkChannelConflicts, listPluginChannelSchemas, type ChannelIngressStats } from '@/api/modules/channel-configs'
 import { getNegativeScreenConfig, updateNegativeScreenConfig, testNegativeScreenPush } from '@/api/modules/negative-screen'
 import NegativeScreenSettings from '@/components/NegativeScreenSettings.vue'
-import WechatQrcodeDialog from '@/components/WechatQrcodeDialog.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
@@ -351,12 +340,6 @@ const loadingConfigs = ref(false)
 const testingChannel = ref<string | null>(null)
 const toastMessage = ref('')
 
-// ─── F-3：iLink 扫码闭环状态 ───
-const qrDialogVisible = ref(false)
-const qrUrl = ref('')
-const qrId = ref('')
-/** 打开扫码对话框时的上下文：保存流程确认后需重发保存注册适配器 */
-const qrContext = ref<{ channel: ChannelItem; fromSave: boolean; extra: Record<string, any> } | null>(null)
 /** 已保存配置的 extra（F-2：测试连接发送真实已存凭据，而非恒空 {}） */
 const savedExtras = ref<Record<string, Record<string, any>>>({})
 
@@ -547,12 +530,8 @@ async function saveConfig() {
     await createChannelConfig(payload as any, agentId.value).then(async (res: any) => {
       const data = res?.data ?? res
       savedExtras.value[ch.backendType] = { ...extra }
-      if (data?.needs_scan) {
-        // F-3：wechat iLink 无 token——配置已持久化，进入扫码闭环；
-        // 确认后由 onQrConfirmed 重发保存以注册适配器
-        await openQrcodeFlow(ch, extra, true)
-        return
-      }
+      // 扫码已由弹窗内 QrcodeAuthBlock 承担（取码→轮询→回填 bot_token→再保存）；
+      // needs_scan 仅表示"未带 token 保存"，配置照常持久化，适配器待扫码后重存注册。
       ch.enabled = payload.enabled
       showToast(t('channel.configSaved'))
       closeConfigModal()
@@ -595,86 +574,12 @@ async function testChannel(ch: ChannelItem) {
     }
     const result: any = await testChannelConfig(ch.backendType, payload as any, agentId.value)
     const data = result?.data ?? result
-    if (data?.needs_scan) {
-      // F-3：wechat iLink 无 token → 扫码闭环（诚实失败，不假成功）
-      await openQrcodeFlow(ch, saved, false)
-      return
-    }
     showToast(data?.success ? t('channel.testSuccess') : t('channel.testFailed'))
   } catch (e: any) {
     showToast(t('channel.testFailed'))
   } finally {
     testingChannel.value = null
   }
-}
-
-// ── F-3：iLink 扫码闭环 ────────────────────────────────────────────────
-
-/** 生成二维码并打开扫码对话框；已有有效 token（ready）则直接走确认后路径 */
-async function openQrcodeFlow(ch: ChannelItem, extra: Record<string, any>, fromSave: boolean) {
-  try {
-    const res: any = await createWechatIlinkQrcode({
-      token_file: extra.token_file || '',
-      bot_token: extra.bot_token || '',
-    }, agentId.value)
-    const data = res?.data ?? res
-    if (data?.status === 'pending' && data.qr_id) {
-      qrUrl.value = data.qr_url || ''
-      qrId.value = data.qr_id
-      qrContext.value = { channel: ch, fromSave, extra }
-      qrDialogVisible.value = true
-      return
-    }
-    if (data?.status === 'ready') {
-      // 已有有效 token：无需扫码，直接收尾
-      await finishQrcodeFlow(ch, fromSave)
-      return
-    }
-    showToast(t('channel.qrGenerateFailed'))
-  } catch (e: any) {
-    showToast(e?.response?.data?.detail || t('channel.qrGenerateFailed'))
-  }
-}
-
-/** 扫码确认收尾：保存流程 → 重发保存注册适配器；测试流程 → 刷新渠道状态 */
-async function finishQrcodeFlow(ch: ChannelItem, fromSave: boolean) {
-  closeQrcodeDialog()
-  showToast(t('channel.qrLoginSuccess'))
-  if (fromSave) {
-    // token 已落盘：重发保存，本次 needs_scan=False，适配器正常注册
-    await saveConfig()
-  } else {
-    ch.connected = true
-    await loadConfigs()
-  }
-}
-
-async function onQrConfirmed() {
-  const ctx = qrContext.value
-  if (!ctx) {
-    closeQrcodeDialog()
-    return
-  }
-  await finishQrcodeFlow(ctx.channel, ctx.fromSave)
-}
-
-async function onQrRegenerate() {
-  const ctx = qrContext.value
-  if (!ctx) return
-  // 清空 qr_id 会让对话框停止旧轮询；openQrcodeFlow 会写入新 qr_id 重启轮询
-  qrId.value = ''
-  await openQrcodeFlow(ctx.channel, ctx.extra, ctx.fromSave)
-}
-
-function onQrDialogClose() {
-  closeQrcodeDialog()
-}
-
-function closeQrcodeDialog() {
-  qrDialogVisible.value = false
-  qrId.value = ''
-  qrUrl.value = ''
-  qrContext.value = null
 }
 
 // ── B4-a：运行管理（重启 / 清空队列 / 身份冲突检测） ──────────────────────
