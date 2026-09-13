@@ -32,6 +32,29 @@ def _default_agent_lookup(agent_id: str):
     return get_agent_instance(agent_id)
 
 
+def _channel_cfg(manager, channel_type: str, agent_id: str) -> Dict[str, Any]:
+    """读该 (agent,渠道) 适配器的配置 extra（公共参数：show_thinking 等存这里）。
+    未注册适配器时返回空 dict（各开关取默认）。"""
+    try:
+        adapter = manager.get_adapter(channel_type, agent_id=agent_id)
+    except Exception:
+        return {}
+    if adapter is None:
+        return {}
+    cfg = getattr(adapter, "config", None)
+    extra = dict(getattr(cfg, "extra", {}) or {}) if cfg else {}
+    # 兼容顶层 use_stream 作为连接方式，不覆盖 extra 的 stream_mode（流式回复开关）
+    return extra
+
+
+def _flag(value: Any, default: bool = False) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() not in ("false", "0", "no", "off", "")
+    if value is None:
+        return default
+    return bool(value)
+
+
 def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -> Callable:
     """构造渠道→agent 处理器。agent_lookup(agent_id)->Agent|None 可注入（测试用）。"""
     lookup = agent_lookup or _default_agent_lookup
@@ -41,6 +64,20 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         if not content:
             return None
         agent_id = str(message.metadata.get("agent_id") or "default")
+        cfg = _channel_cfg(manager, message.channel_type, agent_id)
+
+        # 访问控制传导（此前所有渠道都忽略这两个开关）：
+        # 私聊/群聊策略 closed → 不处理；群聊 require_mention 且未 @ 机器人 → 不处理。
+        strategy = cfg.get("group_chat_strategy") if message.chat_type == "group" else cfg.get("private_chat_strategy")
+        if str(strategy or "open").lower() == "closed":
+            logger.info("ChannelRouter: %s %s 策略=closed，忽略消息", message.channel_type, message.chat_type)
+            return None
+        if message.chat_type == "group" and _flag(cfg.get("require_mention")):
+            mentioned = bool(message.metadata.get("mentions")) or "@" in content
+            if not mentioned:
+                logger.info("ChannelRouter: 群聊 require_mention 且未@机器人，忽略")
+                return None
+
         agent = lookup(agent_id)
         if agent is None:
             logger.warning("ChannelRouter: agent『%s』不存在，%s 消息未处理", agent_id, message.channel_type)
@@ -62,6 +99,17 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         else:
             text = str(resp or "")
         text = text.strip()
+
+        # show_thinking 传导：把本轮思考过程（agent.current_reasoning，ContextVar）
+        # 拼到回复前——此前渠道从不转发思考，飞书"没收到思考过程"即此断链。
+        if _flag(cfg.get("show_thinking"), default=True):
+            reasoning = ""
+            try:
+                reasoning = (getattr(agent, "current_reasoning", None) or "").strip()
+            except Exception:
+                reasoning = ""
+            if reasoning:
+                text = f"💭 思考过程：\n{reasoning}\n\n{text}" if text else f"💭 思考过程：\n{reasoning}"
         return text or None
 
     return _handler

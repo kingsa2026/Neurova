@@ -8,6 +8,7 @@ process 注入 + resolve_session_id 模型）。
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,19 +18,35 @@ from neurova.channels.manager import ChannelManager
 
 
 class FakeAgent:
-    def __init__(self, reply="pong"):
+    def __init__(self, reply="pong", reasoning=""):
         self.reply = reply
+        self.reasoning = reasoning
         self.calls = []
+
+    @property
+    def current_reasoning(self):
+        return self.reasoning
 
     async def chat(self, user_input, session_id=None, metadata=None, **kw):
         self.calls.append({"user_input": user_input, "session_id": session_id, "metadata": metadata})
         return {"text": self.reply}
 
 
-def _msg(content="嗨", channel_type="feishu", chat_id="oc_1", sender="ou_9", agent_id="default"):
+class _CfgAdapter:
+    """仅承载 config.extra 供 _channel_cfg 读取。"""
+    def __init__(self, extra):
+        self.config = SimpleNamespace(extra=extra)
+        self.channel_type = "feishu"
+        self.is_connected = True
+
+    async def send_message(self, chat_id, content, message_type="text", **kw):
+        return "mid"
+
+
+def _msg(content="嗨", channel_type="feishu", chat_id="oc_1", sender="ou_9", agent_id="default", chat_type="p2p"):
     return ChannelMessage(
         channel_type=channel_type, message_id="m1", sender_id=sender, sender_name=sender,
-        content=content, chat_id=chat_id, chat_type="p2p",
+        content=content, chat_id=chat_id, chat_type=chat_type,
         metadata={"agent_id": agent_id},
     )
 
@@ -109,3 +126,46 @@ async def test_dispatch_sends_reply_back_to_channel(manager, monkeypatch):
     await manager._dispatch_message(_msg("嗨"))
     assert sent.get("content") == "回复内容"
     assert sent.get("chat_id") == "oc_1"
+
+
+# ------------------------------------------------------------------
+# 公共参数传导（show_thinking / 访问控制 / require_mention）
+# ------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_show_thinking_prepends_reasoning(manager):
+    agent = FakeAgent("答案", reasoning="先分析问题再回答")
+    manager._adapters["feishu"] = _CfgAdapter({"show_thinking": True})
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+    reply = await handler(_msg("你好"))
+    assert "先分析问题再回答" in reply and "答案" in reply
+    assert reply.index("思考过程") < reply.index("答案")
+
+
+@pytest.mark.asyncio
+async def test_show_thinking_off_excludes_reasoning(manager):
+    agent = FakeAgent("答案", reasoning="不该出现的思考")
+    manager._adapters["feishu"] = _CfgAdapter({"show_thinking": False})
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+    reply = await handler(_msg("你好"))
+    assert reply == "答案"
+
+
+@pytest.mark.asyncio
+async def test_private_strategy_closed_skips(manager):
+    agent = FakeAgent()
+    manager._adapters["feishu"] = _CfgAdapter({"private_chat_strategy": "closed"})
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+    assert await handler(_msg("你好", chat_type="p2p")) is None
+    assert agent.calls == []
+
+
+@pytest.mark.asyncio
+async def test_group_require_mention_without_mention_skips(manager):
+    agent = FakeAgent()
+    manager._adapters["feishu"] = _CfgAdapter({"group_chat_strategy": "open", "require_mention": True})
+    handler = channel_router.make_handler(manager, agent_lookup=lambda aid: agent)
+    assert await handler(_msg("随便聊天", chat_type="group")) is None
+    # 带 @ 或 mentions 元数据则放行
+    m = _msg("@机器人 你好", chat_type="group")
+    assert await handler(m) == "pong"
