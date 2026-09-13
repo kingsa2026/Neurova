@@ -243,6 +243,10 @@ class QQWebSocketAdapter(ChannelAdapter):
                 self._reconnect_attempts = 0
             elif t in _MESSAGE_EVENT_SPECS:
                 self._on_msg_event(t, d or {})
+            elif t in ("GROUP_DEL_ROBOT", "KICK_GROUP_ROBOT"):
+                self._on_bot_removed(d or {})
+            elif t == "GROUP_ADD_ROBOT":
+                self._on_bot_added(d or {})
             return None
 
         if op == OP_HEARTBEAT_ACK:
@@ -290,6 +294,10 @@ class QQWebSocketAdapter(ChannelAdapter):
         }
         for key in extra_keys:
             meta[key] = d.get(key, "")
+        # @提及：官方群消息 at_infos（被@成员列表）→ metadata.mentions，供 require_mention 判定
+        at_infos = d.get("at_infos") or d.get("mentions") or []
+        if at_infos:
+            meta["mentions"] = at_infos
         # 记录被动回复所需 msg_id
         chat_id = meta.get("group_openid") or meta.get("channel_id") or sender
         if msg_id:
@@ -327,8 +335,29 @@ class QQWebSocketAdapter(ChannelAdapter):
     # 发：HTTP 被动回复（msg_id + 递增 msg_seq）
     # ------------------------------------------------------------------
 
+    def _emit_chat_event(self, event_type, group_openid: str) -> None:
+        """群成员变更（机器人被移出/加入群）→ CHAT_BOT_REMOVED/ADDED。"""
+        if not group_openid:
+            return
+        msg = self._make_message(
+            message_id="", sender_id="", sender_name="", content="",
+            chat_id=group_openid, chat_type="group", message_type="event",
+        )
+        if self._main_loop is not None and self._main_loop.is_running():
+            asyncio.run_coroutine_threadsafe(self._emit_event(event_type, msg), self._main_loop)
+
+    def _on_bot_removed(self, d: Dict[str, Any]) -> None:
+        self._emit_chat_event(ChannelEventType.CHAT_BOT_REMOVED, d.get("group_openid", ""))
+
+    def _on_bot_added(self, d: Dict[str, Any]) -> None:
+        self._emit_chat_event(ChannelEventType.CHAT_BOT_ADDED, d.get("group_openid", ""))
+
     def _reply_path(self, chat_id: str, message_type: str) -> str:
-        if message_type in ("group", "guild") or chat_id.startswith(("g_", "oc_")):
+        # 官方分三类端点：频道(guild/dm)→/channels/{channel_id}、群→/v2/groups/{group_openid}、
+        # 单聊→/v2/users/{openid}。此前 guild 误并入 group → 频道回复走错端点必失败。
+        if message_type == "guild" or message_type == "dm":
+            return f"{API_BASE}/channels/{chat_id}/messages"
+        if message_type == "group" or chat_id.startswith(("g_", "oc_")):
             return f"{API_BASE}/v2/groups/{chat_id}/messages"
         return f"{API_BASE}/v2/users/{chat_id}/messages"
 
