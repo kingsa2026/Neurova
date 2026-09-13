@@ -11,6 +11,7 @@ from __future__ import annotations
 """
 
 from neurova.core.logger import get_logger
+import re
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -48,11 +49,13 @@ def _validate_ref_images(refs: list) -> None:
     """P1-6：参考图只接受 http(s)/data URI，或允许根内的本地文件。
 
     原实现接受任意本地路径并被服务端读取后随请求发往 base_url——
-    攻击者自建端点即可外泄任意本地文件。允许根：生成产物目录 + agent 工作区。
+    攻击者自建端点即可外泄任意本地文件。允许根：生成产物目录 + agent 工作区
+    + 用户上传目录（批次3：/files/upload 落盘于此，上传→参考图引用闭环）。
     """
     allowed_roots = (
         GENERATION_OUTPUT_DIR.resolve(),
         (PROJECT_ROOT / "agent_workspaces").resolve(),
+        (PROJECT_ROOT / "storage").resolve(),
     )
     for ref in refs or []:
         r = str(ref or "").strip()
@@ -586,3 +589,45 @@ async def list_generation_tasks(
         for t in visible
     ]
     return {"code": 0, "message": "success", "data": {"tasks": tasks}}
+
+
+# 产物文件名白名单（批次3：替代 app.py 匿名 StaticFiles 挂载）
+_SAFE_FILE_NAME_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+@router.get("/files/{name}")
+async def serve_generation_file(
+    request: Request,
+    name: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """批次3：产物文件访问（鉴权路由）。
+
+    根因：原 app.py 以匿名 StaticFiles 挂载 data/generations，与路由级鉴权
+    不同源——任何知道文件名的人都能匿名读取他人产物。此处收口：
+    文件名白名单 + 账本属主反查（无主存量登录即可读，向后兼容）+ 防穿越。
+    访问凭证支持 ?access_token=（<img>/<audio> 资源标签无法带 Bearer 头）。
+    """
+    import mimetypes
+
+    from fastapi.responses import FileResponse
+
+    from neurova.llm.generators.task_ledger import get_generation_task_ledger
+
+    _ = request
+    if not name or not _SAFE_FILE_NAME_RE.fullmatch(name) or name in (".", ".."):
+        raise HTTPException(status_code=400, detail="非法文件名")
+    root = Path(_GENERATION_OUTPUT_DIR).resolve()
+    path = (root / name).resolve()
+    if not str(path).startswith(str(root)) or not path.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    owner = ""
+    for t in get_generation_task_ledger().list():
+        if t.local_path and Path(t.local_path).name == name:
+            owner = str(t.owner_user_id or "")
+            break
+    uid = str(current_user.get("user_id") or "")
+    if owner and owner != uid and current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="无权访问该产物")
+    mime, _ = mimetypes.guess_type(name)
+    return FileResponse(path, media_type=mime or "application/octet-stream")

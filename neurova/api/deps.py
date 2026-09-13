@@ -13,7 +13,22 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 logger = get_logger(__name__)
 
 # HTTP Bearer scheme
-security = HTTPBearer(auto_error=False)
+# 批次3（AIGC 产物鉴权）：<img>/<audio>/<a download> 等资源标签无法携带
+# Authorization 头。在凭证方案层扩展 ?access_token= 回退（头凭证优先，无头
+# 无参行为不变），get_current_user 签名与全部既有 dependency_overrides 契约
+# 零改动。
+class BearerOrQuery(HTTPBearer):
+    async def __call__(self, request: Request) -> Optional[HTTPAuthorizationCredentials]:  # type: ignore[override]
+        creds = await super().__call__(request)
+        if creds:
+            return creds
+        token = request.query_params.get("access_token")
+        if token:
+            return HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+        return None
+
+
+security = BearerOrQuery(auto_error=False)
 
 # 模块级导入（避免重复导入）
 from neurova.api.auth import verify_access_token, _user_identity
@@ -25,6 +40,9 @@ async def get_current_user(
 ) -> Dict[str, Any]:
     """
     FastAPI 依赖：获取当前认证用户
+
+    凭证来源：Authorization Bearer 头优先；?access_token= 查询参数回退
+    （批次3，见 BearerOrQuery——资源标签场景无法带头的既有拒绝行为不变）。
 
     Args:
         credentials: HTTP Bearer 凭证
@@ -43,6 +61,7 @@ async def get_current_user(
         )
 
     token = credentials.credentials
+
     try:
         payload = verify_access_token(token)
     except Exception as e:
