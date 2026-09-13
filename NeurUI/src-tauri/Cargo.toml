@@ -24,3 +24,4 @@ log = "0.4"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 ureq = { version = "2", features = ["json"] }
+glib = { version = "0.20.0", default-features = false, features = ["v2_58"] }
