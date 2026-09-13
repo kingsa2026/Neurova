@@ -310,6 +310,9 @@ class SkillService:
 
         collection-review/改进提案的消费面——此前技能层没有使用计数，
         只有肌肉记忆侧有。manifest 写穿（文件小，频率=技能执行频率）。
+
+        生命周期（2026-09-13 Hermes curator 对齐）：同时维护
+        last_activity_at_ms（状态机活动锚）并 seed 状态/钉住/来源字段。
         """
         import time as _time
 
@@ -324,12 +327,31 @@ class SkillService:
                 usage["use_count"] = int(usage.get("use_count", 0)) + 1
                 if success:
                     usage["success_count"] = int(usage.get("success_count", 0)) + 1
-                usage["last_used_at_ms"] = int(_time.time() * 1000)
+                now_ms = int(_time.time() * 1000)
+                usage["last_used_at_ms"] = now_ms
+                usage["last_activity_at_ms"] = now_ms
+                usage.setdefault("state", "active")
+                usage.setdefault("pinned", False)
+                usage.setdefault("created_at_ms", now_ms)
+                usage.setdefault("created_by", self._derive_created_by(info))
             self._save_manifest()
             return True
         except Exception as e:
             self._logger.warning("记录技能使用失败: %s", e)
             return False
+
+    @staticmethod
+    def _derive_created_by(info: Dict[str, Any]) -> str:
+        """来源标记：从 manifest.source 显式标记派生,绝不按目录位置推断。
+
+        auto=agent 生成；marketplace/hub=市场安装；其余视为 user。
+        """
+        source = str((info.get("manifest") or {}).get("source") or info.get("source") or "")
+        if source == "auto":
+            return "agent"
+        if source in ("marketplace", "hub", "skillhub"):
+            return "hub"
+        return "user"
 
     def get_skill_usage(self, skill_id: str) -> Dict[str, Any]:
         """读取技能使用计数（无记录返回零值）。"""
@@ -340,6 +362,109 @@ class SkillService:
             "success_count": int(usage.get("success_count", 0)),
             "last_used_at_ms": int(usage.get("last_used_at_ms", 0)),
         }
+
+    # ── 生命周期接口（2026-09-13 Hermes curator 对齐）──────
+    # 供 neurova.evolution.skill_lifecycle.apply_transitions 消费的最小面。
+
+    def iter_skills(self):
+        """遍历 (skill_id, info)。生命周期状态机的数据源。"""
+        with self._lock:
+            for skill_id, info in list(self._skills.items()):
+                yield skill_id, info
+
+    def set_skill_lifecycle_state(self, skill_id: str, state: str) -> bool:
+        """更新生命周期状态(active/stale)并落盘。归档走 archive_skill。"""
+        try:
+            with self._lock:
+                info = self._skills.get(skill_id)
+                if info is None:
+                    return False
+                usage = info.setdefault("usage", {})
+                usage["state"] = state
+                if not usage.get("created_at_ms"):
+                    usage["created_at_ms"] = int(usage.get("last_used_at_ms") or 0)
+            self._save_manifest()
+            return True
+        except Exception as e:
+            self._logger.warning("更新技能状态失败 %s -> %s: %s", skill_id, state, e)
+            return False
+
+    def set_skill_pinned(self, skill_id: str, pinned: bool) -> bool:
+        """钉住/解钉：pinned 技能绕开生命周期自动迁移(Hermes curator 同语义)。"""
+        try:
+            with self._lock:
+                info = self._skills.get(skill_id)
+                if info is None:
+                    return False
+                usage = info.setdefault("usage", {})
+                usage["pinned"] = bool(pinned)
+                usage.setdefault("state", "active")
+            self._save_manifest()
+            return True
+        except Exception as e:
+            self._logger.warning("更新技能钉住失败 %s: %s", skill_id, e)
+            return False
+
+    def seed_skill_usage(self, skill_id: str) -> bool:
+        """首见播种(Hermes curator.seed_record_if_missing 同语义)。
+
+        无 usage 记录的技能以 now 锚 created_at 并延迟一个周期——没有活动
+        证据就不参与老化;但时钟必须从此开始,否则"永不活跃"技能永远停在
+        seeded、不进 stale/archived 通道。
+        """
+        import time as _time
+
+        try:
+            with self._lock:
+                info = self._skills.get(skill_id)
+                if info is None:
+                    return False
+                usage = info.setdefault("usage", {})
+                now_ms = int(_time.time() * 1000)
+                usage.setdefault("state", "active")
+                usage.setdefault("pinned", False)
+                usage.setdefault("use_count", 0)
+                usage.setdefault("last_activity_at_ms", 0)
+                usage.setdefault("created_at_ms", now_ms)
+                usage.setdefault("created_by", self._derive_created_by(info))
+            self._save_manifest()
+            return True
+        except Exception as e:
+            self._logger.warning("播种技能使用记录失败 %s: %s", skill_id, e)
+            return False
+
+    def archive_skill(self, skill_id: str) -> Dict[str, Any]:
+        """归档技能——移到 .archive/（可恢复），**永不删除**。
+
+        Hermes curator 教义：归档是最大破坏动作，删除绝不。磁盘上存在
+        技能目录的物理搬迁；纯元数据技能（auto 注册、无文件）只改状态。
+        """
+        try:
+            with self._lock:
+                info = self._skills.get(skill_id)
+                if info is None:
+                    return {"success": False, "error": f"Skill not found: {skill_id}"}
+                usage = info.setdefault("usage", {})
+                usage["state"] = "archived"
+
+                skill_path = Path(str(info.get("path") or ""))
+                moved = False
+                if skill_path.is_dir() and skill_path.parent.resolve() == self.skills_dir.resolve():
+                    archive_dir = self.skills_dir / ".archive"
+                    archive_dir.mkdir(exist_ok=True)
+                    target = archive_dir / skill_path.name
+                    if target.exists():  # 重名归档：加时间戳后缀,不覆盖
+                        target = archive_dir / f"{skill_path.name}_{int(datetime.datetime.now().timestamp())}"
+                    shutil.move(str(skill_path), str(target))
+                    info["path"] = str(target)
+                    info["archived_from"] = str(skill_path)
+                    moved = True
+            self._save_manifest()
+            self._logger.info("Archived skill %s (moved=%s)", skill_id, moved)
+            return {"success": True, "moved": moved}
+        except Exception as e:
+            self._logger.error("归档技能失败 %s: %s", skill_id, e)
+            return {"success": False, "error": str(e)}
 
     def register_auto_skill(
         self,
@@ -453,6 +578,8 @@ class SkillService:
                             "description": skill_info.get("description", ""),
                             "enabled": skill_info.get("enabled", True),
                             "installed_at": skill_info.get("installed_at", ""),
+                            # 生命周期与用量（前端状态列/徽标数据源, C11 延伸）
+                            "usage": skill_info.get("usage") or {},
                         }
                     )
 
@@ -487,6 +614,8 @@ class SkillService:
                     "installed_at": skill_info.get("installed_at", ""),
                     "path": skill_info.get("path", ""),
                     "manifest": skill_info.get("manifest", {}),
+                    # 生命周期/用量状态(Hermes 对齐:状态机消费面与 UI 徽标)
+                    "usage": skill_info.get("usage", {}),
                 }
 
         except Exception as e:

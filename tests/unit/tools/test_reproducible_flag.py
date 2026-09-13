@@ -26,6 +26,8 @@ EXPECTED_NON_REPRODUCIBLE = {
     "browser_click", "browser_click_role", "browser_fill_role",
     "browser_type", "browser_navigate", "browser_screenshot",
     "computer_som_snapshot", "computer_dom_snapshot",
+    # P0-3 会话式 shell：进程输出不可重放（重跑时系统状态已变）
+    "exec_command", "write_stdin",
 }
 
 

@@ -301,6 +301,59 @@ def docker_available() -> bool:
 _DOCKER_AVAILABLE_CACHE: Optional[bool] = None
 
 
+# ── P1-4 沙箱拒绝归因（Codex violation/denial 启发式对齐）──────────────
+# 关键词判据与 codex sandboxing/src/denial.rs 同构：operation not permitted /
+# permission denied / read-only file system / seccomp / sandbox / landlock /
+# failed to write file，另补 Windows "access is denied"。
+_SANDBOX_DENIAL_KEYWORDS = (
+    "operation not permitted",
+    "permission denied",
+    "access is denied",
+    "read-only file system",
+    "seccomp",
+    "sandbox",
+    "landlock",
+    "failed to write file",
+)
+# shell 自身错误退出码（codex violation.rs 同构）：找不到命令/用法错等与沙箱无关
+_SHELL_OWN_ERROR_CODES = frozenset({2, 126, 127})
+_SIGSYS_EXIT_CODE = 128 + 31  # Linux seccomp SIGSYS 终止 → 128+31
+
+
+def attribution_sandbox_denial(result: Any) -> Optional[Dict[str, Any]]:
+    """归因一次沙箱内执行失败：是沙箱拦截还是命令本身错误。
+
+    判据（保守启发式）：
+    - returncode 缺失或 0 → 非失败，不归因
+    - returncode == 159（128+SIGSYS）→ 直接判定（seccomp 杀进程，无需关键词）
+    - returncode ∈ {2,126,127} → shell 自身错误，排除
+    - stdout+stderr 命中沙箱关键词 → 归因命中
+    - 其余 → 命令本身错误，不归因
+
+    Returns:
+        {"kind": "filesystem", "reason": <关键词>, "snippet": <输出末尾 512 字符>}
+        或 None。
+    """
+    if not isinstance(result, dict):
+        return None
+    returncode = result.get("returncode")
+    if not isinstance(returncode, int) or returncode == 0:
+        return None
+    combined = " ".join(
+        str(result.get(k) or "") for k in ("stdout", "stderr")
+    ).strip()
+    snippet = combined[-512:]
+    if returncode == _SIGSYS_EXIT_CODE:
+        return {"kind": "filesystem", "reason": "sigsys", "snippet": snippet}
+    if returncode in _SHELL_OWN_ERROR_CODES:
+        return None
+    low = combined.lower()
+    for kw in _SANDBOX_DENIAL_KEYWORDS:
+        if kw in low:
+            return {"kind": "filesystem", "reason": kw, "snippet": snippet}
+    return None
+
+
 async def execute_in_sandbox_async(
     command: str,
     timeout: float = 30.0,

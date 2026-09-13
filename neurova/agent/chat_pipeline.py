@@ -1066,6 +1066,20 @@ class ChatPipeline:
 
         无 attachments 时零副作用；文件读取失败不抛异常（附件问题不拖垮聊天）。
         """
+        # P1-6（Codex skills 对齐）：$/@ 技能 mention 全文注入——命中技能的
+        # SKILL.md 指令体随本轮 user_input 进入 LLM（随请求消亡，同附件语义）；
+        # 无 mention/registry 时原样，任何失败不影响聊天
+        try:
+            from neurova.skills.skill_injection import inject_skill_mentions
+
+            registry = getattr(self._agent, "_skill_registry", None)
+            _enriched = inject_skill_mentions(ctx.user_input or "", registry)
+            if _enriched != ctx.user_input:
+                ctx.user_input = _enriched
+                logger.info("[技能注入] mention 指令体已注入本轮")
+        except Exception:  # noqa: BLE001
+            logger.debug("技能 mention 注入失败(忽略)", exc_info=True)
+
         if not isinstance(ctx.metadata, dict):
             return
         attachments = ctx.metadata.get("attachments")
@@ -1292,6 +1306,7 @@ class ChatPipeline:
         )
 
         ctx.context = await self.context_orchestrator.build_context(
+
             user_input=ctx.user_input,
             tool_memory_result=ctx.tool_memory_result,
             auto_execute_result=ctx.auto_execute_result,
@@ -1302,6 +1317,28 @@ class ChatPipeline:
             session_context=ctx.session_context,
             voice_context=voice_context,
         )
+
+        # P2-4（Codex WorldState diff 对齐）：环境指纹增量——会话内
+        # workspace/model/平台变化时向当轮上下文追加一条增量提示；
+        # 未变化零注入（环境全量仍由 system 段承载）
+        try:
+            from neurova.context.env_delta import (
+                compute_env_fingerprint,
+                get_env_delta_tracker,
+            )
+
+            _cfg = getattr(self._agent, "config", None)
+            _note = get_env_delta_tracker().note(
+                str(ctx.session_id or ""),
+                compute_env_fingerprint(
+                    str(getattr(_cfg, "workspace_path", "") or ""),
+                    str(getattr(_cfg, "llm_model", "") or ""),
+                ),
+            )
+            if _note and isinstance(ctx.context, list) and ctx.context:
+                ctx.context.append({"role": "system", "content": _note})
+        except Exception:  # noqa: BLE001 - 增量提示失败不影响主链路
+            logger.debug("环境增量注入失败(忽略)", exc_info=True)
 
     async def _retrieve_memories(self, ctx: ChatContext):
         """统一检索（使用 MemoryRetrievalChain 深度模块）"""

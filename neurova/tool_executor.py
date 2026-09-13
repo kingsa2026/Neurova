@@ -284,6 +284,9 @@ class ToolExecutor:
         "voice_memory_search": "_execute_voice_memory_search",
         "run_code": "_execute_run_code",
         "execute_code": "_execute_run_code",
+        "exec_command": "_execute_exec_command",
+        "write_stdin": "_execute_write_stdin",
+        "update_plan": "_execute_update_plan",
         "git": "_execute_git",
         "spawn_subagent": "_execute_spawn_subagent",
         "subagent_status": "_execute_subagent_status",
@@ -1041,6 +1044,59 @@ class ToolExecutor:
 
     async def _execute_single_tool(self, tool_name: str, params: Dict,
                                    skip_governance: bool = False) -> Dict:
+        """单工具执行入口（P2-1：PreToolUse/PostToolUse hooks 链挂接层）。
+
+        hooks 故障 fail-open 不阻断执行；PreToolUse 可拦截，PostToolUse
+        的 additionalContext 以 hook_context 字段并入结果。
+        """
+        try:
+            from neurova.core.hooks_engine import get_hook_engine
+
+            for outcome in get_hook_engine().run(
+                "PreToolUse",
+                {
+                    "tool_name": tool_name,
+                    "params": params,
+                    "session_id": getattr(self._agent, "current_session_id", None),
+                },
+            ):
+                if outcome.get("blocked"):
+                    logger.warning(
+                        "PreToolUse hook 拦截 %s: %s", tool_name, outcome.get("reason")
+                    )
+                    return {
+                        "success": False,
+                        "error": f"操作被安全钩子拦截: {outcome.get('reason') or '未说明原因'}",
+                        "hook_blocked": True,
+                    }
+        except Exception:  # noqa: BLE001
+            logger.debug("PreToolUse hook 链失败(忽略)", exc_info=True)
+
+        result = await self._execute_single_tool_inner(tool_name, params, skip_governance)
+
+        try:
+            from neurova.core.hooks_engine import get_hook_engine
+
+            _notes = []
+            for outcome in get_hook_engine().run(
+                "PostToolUse",
+                {
+                    "tool_name": tool_name,
+                    "params": params,
+                    "result": result,
+                    "session_id": getattr(self._agent, "current_session_id", None),
+                },
+            ):
+                if outcome.get("additional_context"):
+                    _notes.append(outcome["additional_context"])
+            if _notes and isinstance(result, dict):
+                result["hook_context"] = "\n".join(_notes)
+        except Exception:  # noqa: BLE001
+            logger.debug("PostToolUse hook 链失败(忽略)", exc_info=True)
+        return result
+
+    async def _execute_single_tool_inner(self, tool_name: str, params: Dict,
+                                   skip_governance: bool = False) -> Dict:
         """
         执行单个工具（内部实现，含四级回退链）
 
@@ -1436,6 +1492,34 @@ class ToolExecutor:
                 # 否则回退平台后端（Windows AppContainer 为占位）
                 sandbox_result = await execute_in_sandbox_async(command, severity=verdict.severity)
                 sandbox_result["governance"] = verdict.to_dict()
+                # P1-4（Codex 升级审批对齐）：沙箱内失败先归因——命中沙箱拦截
+                # 则创建升级审批请求，批准后经既有 approve 重放链
+                # （skip_governance）在沙箱外重跑；归因不命中保持原样
+                if not sandbox_result.get("success"):
+                    try:
+                        from neurova.sandbox.exec_sandbox import attribution_sandbox_denial
+
+                        _denial = attribution_sandbox_denial(sandbox_result)
+                    except Exception:  # noqa: BLE001 - 归因失败不改变原语义
+                        _denial = None
+                    if _denial:
+                        _escalation_id = self._create_sandbox_escalation_request(
+                            tool_name, params, _denial
+                        )
+                        if _escalation_id:
+                            sandbox_result.update(
+                                {
+                                    "pending_approval": True,
+                                    "approval_id": _escalation_id,
+                                    "sandbox_denial": _denial,
+                                    "error": (
+                                        "沙箱内执行失败，疑似沙箱拦截"
+                                        f"（{_denial.get('reason', 'unknown')}）："
+                                        f"{_denial.get('snippet', '')[:200]}；"
+                                        "已创建升级审批，批准后将在沙箱外重跑"
+                                    ),
+                                }
+                            )
                 return sandbox_result
             # 文件类操作暂无文件系统沙箱后端：降级为阻止并说明原因
             logger.warning("文件操作命中沙箱策略但无文件沙箱后端，已阻止: %s", file_path)
@@ -1533,6 +1617,32 @@ class ToolExecutor:
             return getattr(request, "request_id", None)
         except Exception as e:  # noqa: BLE001 - 审批系统故障时保持可用
             logger.warning("创建审批请求失败，ASK 降级为直接拒绝: %s", e)
+            return None
+
+    def _create_sandbox_escalation_request(
+        self, tool_name: str, params: Dict, denial: Dict
+    ) -> Optional[str]:
+        """沙箱拒绝升级审批（P1-4）：metadata 带原始 params 供批准后重放。"""
+        try:
+            am = _get_approval_manager()
+            command = str(params.get("command") or params.get("code") or "")
+            _user_id, _agent_id = self._agent_identity()
+            request = am.create_approval_request(
+                agent_id=str(_agent_id or "default"),
+                user_id=str(_user_id or ""),
+                command=command or f"{tool_name}({params})",
+                description=f"工具 {tool_name} 沙箱内执行失败，申请沙箱外重跑",
+                danger_reason=f"沙箱拒绝归因: {denial.get('reason', 'unknown')}",
+                metadata={
+                    "tool_name": tool_name,
+                    "params": params,
+                    "kind": "sandbox_escalation",
+                    "sandbox_denial": denial,
+                },
+            )
+            return getattr(request, "request_id", None)
+        except Exception as e:  # noqa: BLE001 - 审批系统故障时保持可用
+            logger.warning("创建沙箱升级审批失败: %s", e)
             return None
 
     def _audit_governance(self, tool_name: str, governance_info: Dict, params: Dict) -> None:
@@ -1847,15 +1957,32 @@ class ToolExecutor:
             return {"error": "缺少 task 参数"}
 
         swarm = get_swarm_manager()
-        return await swarm.spawn(
+        session_id = getattr(self._agent, "current_session_id", None)
+        result = await swarm.spawn(
             task=str(task),
             agent_id=params.get("agent_id") or None,
-            session_id=getattr(self._agent, "current_session_id", None),
+            session_id=session_id,
             background=bool(params.get("background", False)),
             origin="chat",
             stream=True,
             initiator_agent=self._agent,
         )
+        # P2-5（Codex 邮箱对齐）：完成结果投递父会话邮箱——嵌套模式下工具轮
+        # 间隙排空注入做显式回灌；后台模式下是逐轮可见的回传通道。fail-open。
+        try:
+            if isinstance(result, dict) and result.get("success") is not False:
+                from neurova.agent.mailbox import get_agent_mailbox
+
+                _summary = str(
+                    result.get("reply") or result.get("result") or result.get("output") or ""
+                ).strip()
+                get_agent_mailbox().push(
+                    str(session_id or ""),
+                    f"[子代理 {result.get('agent_id', '') or ''} 回传] {_summary[:400]}",
+                )
+        except Exception:  # noqa: BLE001
+            logger.debug("子代理邮箱投递失败(忽略)", exc_info=True)
+        return result
 
     async def _execute_subagent_status(self, params: Dict) -> Dict:
         """查询后台子 Agent 状态/结果（subagent_id 可省略→最近派生列表）"""
@@ -3570,6 +3697,98 @@ class ToolExecutor:
         except Exception as e:
             logger.error("Shell 命令执行失败: %s", e)
             return {"error": f"Shell 命令执行失败: {str(e)}"}
+
+    async def _execute_exec_command(self, params: Dict) -> Dict:
+        """会话式命令执行（P0-3，Codex unified_exec 对齐）。
+
+        启动常驻进程并等待 yield_time_ms：结束→completed+exit_code；
+        未结束→running+session_id，后续经 write_stdin 交互/轮询。
+        相对 workdir 锚定 agent 工作区（同 file_operation 沙箱根语义）。
+        """
+        try:
+            command = str(params.get("command", "") or "").strip()
+            if not command:
+                return {"error": "缺少 command 参数"}
+
+            import os as _os
+
+            from neurova.execution_engine.shell_sessions import get_shell_session_manager
+
+            workdir = str(params.get("workdir", "") or "").strip()
+            if workdir and not _os.path.isabs(workdir):
+                ws = str(getattr(self._agent, "workspace_path", "") or "")
+                if ws:
+                    workdir = _os.path.join(ws, workdir)
+            return await get_shell_session_manager().start_session(
+                command,
+                workdir=workdir or None,
+                yield_time_ms=params.get("yield_time_ms"),
+                max_output_tokens=params.get("max_output_tokens") or 10000,
+            )
+        except Exception as e:
+            logger.error("exec_command 执行失败: %s", e)
+            return {"error": f"exec_command 执行失败: {str(e)}"}
+
+    async def _execute_write_stdin(self, params: Dict) -> Dict:
+        """向 exec_command 会话写输入并轮询输出（P0-3）。"""
+        try:
+            session_id = params.get("session_id")
+            if session_id in (None, ""):
+                return {"error": "缺少 session_id 参数"}
+
+            from neurova.execution_engine.shell_sessions import get_shell_session_manager
+
+            return await get_shell_session_manager().poll_session(
+                int(session_id),
+                chars=str(params.get("chars", "") or ""),
+                yield_time_ms=params.get("yield_time_ms"),
+                max_output_tokens=params.get("max_output_tokens") or 10000,
+            )
+        except (TypeError, ValueError):
+            return {"error": "session_id 必须是整数"}
+        except Exception as e:
+            logger.error("write_stdin 执行失败: %s", e)
+            return {"error": f"write_stdin 执行失败: {str(e)}"}
+
+    async def _execute_update_plan(self, params: Dict) -> Dict:
+        """update_plan（P1-7，Codex plan_tool 对齐）：维护任务步骤清单。
+
+        状态机约束：plan 非空、status ∈ {pending,in_progress,completed}、
+        至多一个 in_progress——违规返回明确错误让模型自纠。
+        """
+        plan = params.get("plan")
+        if not isinstance(plan, list) or not plan:
+            return {"success": False, "error": "plan 必须是非空步骤数组"}
+        _ALLOWED = ("pending", "in_progress", "completed")
+        normalized = []
+        in_progress_count = 0
+        for i, item in enumerate(plan):
+            if not isinstance(item, dict):
+                return {"success": False, "error": f"plan[{i}] 必须是对象"}
+            step = str(item.get("step", "") or "").strip()
+            status = str(item.get("status", "") or "").strip().lower()
+            if not step:
+                return {"success": False, "error": f"plan[{i}].step 不能为空"}
+            if status not in _ALLOWED:
+                return {
+                    "success": False,
+                    "error": f"plan[{i}].status 必须是 {'/'.join(_ALLOWED)}，得到 {status!r}",
+                }
+            if status == "in_progress":
+                in_progress_count += 1
+            normalized.append({"step": step, "status": status})
+        if in_progress_count > 1:
+            return {
+                "success": False,
+                "error": f"至多允许一个 in_progress，当前 {in_progress_count} 个——请把其余步骤标为 pending",
+            }
+        logger.info(
+            "[UPDATE_PLAN] %d 步（in_progress=%d）%s",
+            len(normalized),
+            in_progress_count,
+            str(params.get("explanation") or "")[:80],
+        )
+        return {"success": True, "plan": normalized, "explanation": str(params.get("explanation") or "")}
 
     async def _execute_computer_ssh_exec(self, params: Dict) -> Dict:
         """SSH 远程命令执行（Linux/macOS 远程 = SSH，无 GUI）。

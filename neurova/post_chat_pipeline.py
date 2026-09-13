@@ -2002,7 +2002,6 @@ class PostChatPipeline:
             )
 
             improver = get_skill_improver()
-            proposals = improver.propose_pending_improvements()
             growth_log_manager = self._get_dependency("growth_log_manager")
             skill_registry = getattr(self._agt, "_skill_registry", None)
             # 改进落盘最后一米（复审残余点 C）：SkillService 传给 apply_improvement，
@@ -2015,6 +2014,19 @@ class PostChatPipeline:
                 skill_service = SkillService(agent_id=agent_id)
             except Exception as svc_err:
                 logger.debug("创建 SkillService 失败, 改进仅内存态: %s", svc_err)
+            # 判据升级（Hermes 对比 2026-09-13）：开启文本进化时走反射式改进——
+            # 把真实失败记录喂给 ReflectiveMutator 产出 improved_text；开关关闭/
+            # 无正文时内部退回字典建议（零破坏）。
+            skill_text_loader = None
+            if skill_registry is not None:
+                def skill_text_loader(skill_id, _reg=skill_registry):
+                    try:
+                        cfg = getattr(_reg.get_skill(skill_id), "config", None) or {}
+                        text = str(cfg.get("context_template") or "")
+                        return text or None
+                    except Exception:
+                        return None
+            proposals = await improver.propose_pending_improvements_async(skill_text_loader)
             for proposal in proposals[:3]:
                 applied = False
                 if skill_registry is not None:
@@ -2071,6 +2083,26 @@ class PostChatPipeline:
                 )
         except Exception as mtn_err:
             logger.debug("技能经验维护跳过: %s", mtn_err)
+
+        # 技能生命周期扫描（Hermes curator 对齐 2026-09-13）：确定性、零 LLM，
+        # active→stale(14d)→archived(30d)；首次 seed 不动库；间隔自持
+        # （.lifecycle_state.json），不借本步 RSI 成本闸——同下方法内
+        # 结晶裁决的接线教训。设置文件 lifecycle_sweep=false 可关。
+        try:
+            from neurova.evolution.evolution_settings import load_settings
+            from neurova.evolution.skill_lifecycle import run_sweep_if_due
+            from neurova.skills.skill_service import SkillService as _Svc
+
+            _evo_settings = load_settings()
+            if _evo_settings.lifecycle_sweep:
+                agent_id = getattr(self._agt.config, "agent_id", "default")
+                _svc = _Svc(agent_id=agent_id)
+                run_sweep_if_due(
+                    _svc, _svc.skills_dir,
+                    interval_hours=_evo_settings.lifecycle_interval_hours,
+                )
+        except Exception as lc_err:
+            logger.debug("技能生命周期扫描跳过: %s", lc_err)
 
         # 结晶候选 LLM 裁决（混合信号层 QP 对齐 #1）：规则预筛过的候选在此
         # 批量做可复用性裁决——仅当有待审候选时才消耗一次 LLM 调用（天然

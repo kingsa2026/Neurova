@@ -24,6 +24,7 @@ from typing import Any, Dict, Optional
 from neurova.api.deps import get_current_user, require_admin
 from neurova.api.endpoints import get_agent_instance
 from neurova.api.endpoints.artifacts_api import extract_tool_artifacts
+from neurova.api.endpoints.sse_items import ItemEventMapper
 from neurova.session_repository import get_session_repository
 
 logger = get_logger(__name__)
@@ -448,6 +449,10 @@ def _sse_events_from_emitter_item(
             approval_payload = _extract_approval_payload(content, {"tool_name": name})
             if approval_payload:
                 events.append({"type": "approval_required", **approval_payload})
+            # P1-7：update_plan 结果 → plan_update 事件（完整文本上解析）
+            plan_payload = _extract_plan_update(content)
+            if plan_payload:
+                events.append(plan_payload)
             # 产物事件（dock 预览）：在截断前的完整文本上提取 file_path/
             # audio_path/output_ref.path，注册 artifact 并追加结构化事件。
             # 失败只丢增强能力，不影响 tool_result 本体。
@@ -467,6 +472,62 @@ class CommandRequest(BaseModel):
 
 
 # ── Chat endpoints ─────────────────────────────────────
+
+
+def _error_event_payload(message) -> dict:
+    """P1-3：错误事件结构化分型（model_error_policy 单源，Codex 错误白名单对齐）。
+
+    可重试白名单 = rate_limited / transient；认证/参数/上下文溢出等不可重试。
+    分类失败 fail-open 返回空 dict，不影响 error 事件本体。
+    """
+    text = str(message or "")
+    if not text.strip():
+        return {}
+    try:
+        from neurova.llm.model_error_policy import classify_model_error
+
+        decision = classify_model_error(text)
+        return {"error_kind": decision.kind, "retryable": decision.retryable}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _should_emit_quota_event(message) -> bool:
+    """配额类错误（rate_limited）发独立 quota_limited 事件（配额横幅引导）。"""
+    return _error_event_payload(message).get("error_kind") == "rate_limited"
+
+
+def _extract_plan_update(result_text) -> dict:
+    """P1-7：update_plan 成功结果 → 独立 plan_update 事件（前端时间轴渲染）。
+
+    非计划结果/失败结果/空 plan → 空 dict（不产生事件）。
+    """
+    parsed = None
+    if isinstance(result_text, dict):
+        parsed = result_text
+    elif isinstance(result_text, str):
+        try:
+            candidate = json.loads(result_text)
+            if isinstance(candidate, dict):
+                parsed = candidate
+        except Exception:
+            return {}
+    if not parsed or parsed.get("success") is not True:
+        return {}
+    plan = parsed.get("plan")
+    if not isinstance(plan, list) or not plan:
+        return {}
+    clean = [
+        {"step": str(item.get("step", "")), "status": str(item.get("status", ""))}
+        for item in plan
+        if isinstance(item, dict)
+    ]
+    if not clean:
+        return {}
+    event = {"type": "plan_update", "plan": clean}
+    if parsed.get("explanation"):
+        event["explanation"] = str(parsed["explanation"])
+    return event
 
 
 def _extract_approval_payload(result_text, tm: dict) -> dict:
@@ -579,6 +640,10 @@ def _build_tool_events(
         approval_payload = _extract_approval_payload(result_text, tm)
         if approval_payload:
             events.append({"type": "approval_required", **approval_payload})
+        # P1-7：update_plan 结果 → plan_update 事件（完整文本上解析）
+        plan_payload = _extract_plan_update(result_text)
+        if plan_payload:
+            events.append(plan_payload)
         # 产物事件：同上，完整文本上提取（脱敏会剥掉 base64 值但保留路径字段；
         # 正则兜底覆盖 [:500] 截断的半截 JSON）
         try:
@@ -787,6 +852,30 @@ async def post_console_chat(
             ledger.attach(task)
             seen_calls: set = set()
             seen_results: set = set()
+            # P1-1/P1-2（Codex 对齐）：item 事件旁路映射 + 会话时间线落盘。
+            # 旧事件流原样保留（兼容别名），item 事件/时间线是增强面，任何
+            # 失败 fail-open 不影响主链路。
+            item_mapper = ItemEventMapper(
+                thread_id=session_id, turn_id=f"turn-{int(time.time() * 1000)}"
+            )
+            _timeline_append = getattr(
+                get_session_repository(), "append_timeline_event", None
+            )
+
+            def _item_events(events):
+                try:
+                    return item_mapper.on_legacy_events(events)
+                except Exception:  # noqa: BLE001 - item 增强失败不影响旧事件流
+                    return []
+
+            def _record_timeline(events):
+                if not _timeline_append or not events:
+                    return
+                try:
+                    for ev in events:
+                        _timeline_append(agent_id, session_id, ev)
+                except Exception:  # noqa: BLE001
+                    pass
 
             try:
                 # B3-1（#7244 对齐）：chunk/reasoning delta 合并节流——
@@ -829,17 +918,26 @@ async def post_console_chat(
                         _buffer_delta("chunk" if item[0] == "content" else "reasoning",
                                       str(item[1] or ""))
                         if time.monotonic() - last_flush_at >= _FLUSH_INTERVAL:
-                            for event in _delta_flush_events():
+                            events = _delta_flush_events()
+                            item_events = _item_events(events)
+                            _record_timeline(events + item_events)
+                            for event in events + item_events:
                                 live_events.append(event)
                                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                             last_flush_at = time.monotonic()
                         continue
                     # 非 delta 事件：先刷掉积压 delta 再原样发（顺序保持）
-                    for event in _delta_flush_events():
+                    _delta_events = _delta_flush_events()
+                    _delta_items = _item_events(_delta_events)
+                    _record_timeline(_delta_events + _delta_items)
+                    for event in _delta_events + _delta_items:
                         live_events.append(event)
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                     last_flush_at = time.monotonic()
-                    for event in _sse_events_from_emitter_item(item, seen_calls, seen_results, agent_id=agent_id, user_id=user_id):
+                    _live_events = _sse_events_from_emitter_item(item, seen_calls, seen_results, agent_id=agent_id, user_id=user_id)
+                    _live_items = _item_events(_live_events)
+                    _record_timeline(_live_events + _live_items)
+                    for event in _live_events + _live_items:
                         # 复核修正（P2-6 闭环）：usage 是累加语义记账事件，
                         # 不进断线重连缓冲——重放会把它再消费一遍（用量双计）
                         if event.get("type") == "usage":
@@ -848,7 +946,10 @@ async def post_console_chat(
                         live_events.append(event)  # 补课 8：断线重连缓冲
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                 # 收尾：刷出残余 delta
-                for event in _delta_flush_events():
+                _residual = _delta_flush_events()
+                _residual_items = _item_events(_residual)
+                _record_timeline(_residual + _residual_items)
+                for event in _residual + _residual_items:
                     live_events.append(event)
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
             finally:
@@ -900,8 +1001,20 @@ async def post_console_chat(
                 # 用户看到空白气泡
                 if result.get("error"):
                     err_event = {"type": "error", "message": result["error"]}
+                    # P1-3：结构化分型（配额/认证/参数/瞬时），前端据 error_kind 决策
+                    err_event.update(_error_event_payload(result["error"]))
                     flush_events.append(err_event)
                     yield f"data: {json.dumps(err_event, ensure_ascii=False)}\n\n"
+                    # P1-3：配额类错误独立事件（配额横幅/一键换模型引导）
+                    if _should_emit_quota_event(result["error"]):
+                        quota_event = {
+                            "type": "quota_limited",
+                            "message": result["error"],
+                            "model": str(getattr(body, "model", "") or ""),
+                            "session_id": session_id,
+                        }
+                        flush_events.append(quota_event)
+                        yield f"data: {json.dumps(quota_event, ensure_ascii=False)}\n\n"
 
                 # P0-2：用户主动停止的显式事件（前端据此标记"已手动停止"）
                 if result.get("stopped"):
@@ -909,10 +1022,18 @@ async def post_console_chat(
                     flush_events.append(stopped_event)
                     yield f"data: {json.dumps(stopped_event, ensure_ascii=False)}\n\n"
 
-                flush_events.append({"type": "done", "session_id": session_id})
+                # P1-1/P1-2：flush 阶段 item 事件（done 收口未闭合 item）+ 时间线
+                _flush_done = {"type": "done", "session_id": session_id}
+                flush_item_events = _item_events(flush_events + [_flush_done])
+                _record_timeline(flush_events + flush_item_events + [_flush_done])
+                for event in flush_item_events:
+                    live_events.append(event)
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+                flush_events.append(_flush_done)
                 # P2-6：usage 事件已改由 run_chat 任务内发射（并发串号根修），
                 # 此处不再读全局 last_call 补发
-                _buffer_replay_events(session_id, flush_events)
+                _buffer_replay_events(session_id, flush_events + flush_item_events)
                 yield f"data: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
                 buf = _replay_buffers.get(session_id)
                 if buf:
@@ -921,6 +1042,65 @@ async def post_console_chat(
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
     return {"code": 0, "message": "success", "data": {"reply": reply, "session_id": session_id}}
+
+
+class ReviewRequest(BaseModel):
+    content: str = ""
+    focus: str = ""
+    agent_id: str = ""
+
+
+@router.post("/chat/review")
+async def post_console_chat_review(
+    body: ReviewRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """代码评审受限子会话（P1-8，Codex review task 对齐）。
+
+    禁工具/禁网（纯文本进出）、独立 rubric、强制 JSON findings
+    （P0-P3 优先级 + code_location），解析失败如实返回 raw。
+    """
+    content = (body.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="content 不能为空（提供待评审的 diff 或文本）")
+    agent = get_agent_instance(body.agent_id or "default")
+    if agent is None or getattr(agent, "llm_client", None) is None:
+        raise HTTPException(status_code=503, detail="Agent 未就绪")
+    from neurova.agent.review import run_review
+
+    llm = agent.llm_client
+    result = await run_review(lambda messages: llm.chat(messages), content, focus=body.focus)
+    return {"code": 0, "message": "success", "data": result}
+
+
+@router.post("/chat/steer")
+async def post_console_chat_steer(
+    body: Dict[str, Any],
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """turn 进行中插话（P1-9，Codex TurnInputMode::Steer 对齐）。
+
+    消息进会话级 steer 邮箱，agent loop 在工具轮间隙排空并并入下一轮
+    采样（不取消、不重启 turn）。TTL 300s 无消费自动丢弃。
+    """
+    session_id = str(body.get("session_id", "") or "")
+    message = str(body.get("message", "") or "")
+    if not session_id or not message.strip():
+        raise HTTPException(status_code=400, detail="session_id 与 message 不能为空")
+    repo = get_session_repository()
+    target = repo.find_session(session_id)
+    if target is not None:
+        _check_session_ownership(target, _get_user_id(request, current_user))
+    from neurova.core.steer_queue import get_steer_queue
+
+    queue = get_steer_queue()
+    queued = queue.push(session_id, message)
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"queued": queued, "pending": queue.pending(session_id)},
+    }
 
 
 @router.post("/chat/stop")
@@ -985,6 +1165,31 @@ async def get_chat_history(
         agent_id = matched[0].get("agent_id", "")
         messages = repo.get_history(agent_id=agent_id, session_id=session_id)
     return {"code": 0, "message": "success", "data": {"messages": messages, "session_id": session_id}}
+
+
+@router.get("/chat/sessions/{session_id}/timeline")
+async def get_console_session_timeline(
+    session_id: str,
+    request: Request,
+    limit: int = Query(default=0, ge=0, le=5000),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """会话时间线（P1-2，Codex rollout 重放对齐）。
+
+    SSE 事件的 append-only JSONL 只读重放面：断线重连/审计回放按行取回，
+    limit>0 取最近 N 条。归属校验与 history 端点同规。
+    """
+    user_id = _get_user_id(request, current_user)
+    repo = get_session_repository()
+    target = _find_session_target(repo, session_id, user_id) or {}
+    agent_id = str(target.get("agent_id", ""))
+    read_tl = getattr(repo, "read_timeline", None)
+    events = read_tl(agent_id, session_id, limit=limit) if callable(read_tl) else []
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {"session_id": session_id, "events": events, "total": len(events)},
+    }
 
 
 @router.post("/chat/new")

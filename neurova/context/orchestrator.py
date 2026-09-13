@@ -40,6 +40,9 @@ class ContextOrchestrator:
     - growth_log_manager, recall_engine
     """
 
+    # P0-2：自动压缩默认开启（类级默认兜底 __new__ 直构路径；__init__ 按 env 覆盖）
+    auto_compact_enabled: bool = True
+
     def __init__(
         self,
         agent_ref,
@@ -66,6 +69,15 @@ class ContextOrchestrator:
         # 本轮刚折叠消息的 hash 集（当轮 draw 防召回；下轮起正常参与语义召回）
         self._last_folded_hashes: set = set()
         self._last_archived_window_hashes: set = set()
+
+        # P0-2（Codex 对齐）：自动压缩开关 + 上下文窗口硬顶
+        # - auto_compact_enabled：默认 True（存量折叠行为不回退）；env 关闭
+        # - _window_hard_limit：min(窗口预算, 模型上下文×90%) 的硬顶；
+        #   None=按 llm_router 元数据动态解析，测试/运维可直接赋值覆盖
+        import os as _os
+
+        self.auto_compact_enabled = _os.environ.get("NEUROVA_AUTO_COMPACT", "1") != "0"
+        self._window_hard_limit: Optional[int] = None
 
         # 初始化 ContextPool（如果启用）
         if use_pool:
@@ -992,6 +1004,26 @@ class ContextOrchestrator:
         self._window_summarizer = _summarize
         return self._window_summarizer
 
+    def _resolve_auto_compact_hard_limit(self) -> Optional[int]:
+        """自动压缩硬顶（P0-2，Codex 90% 语义）：min 候选 = 模型上下文窗口×90%。
+
+        显式覆盖（_window_hard_limit，测试/运维用）优先；否则经 llm_router
+        统一入口取模型元数据窗口；不可得返回 None（退回既有窗口预算语义）。
+        """
+        override = getattr(self, "_window_hard_limit", None)
+        if override:
+            return max(1000, int(override))
+        try:
+            from neurova.llm.llm_router import resolve_model_context_window
+
+            model_name = str(getattr(self.config, "llm_model", "") or "")
+            window = resolve_model_context_window(model_name)
+            if window and window > 0:
+                return max(1000, int(window * 0.9))
+        except Exception:  # noqa: BLE001 - 硬顶解析失败退回原语义
+            pass
+        return None
+
     async def _apply_window_budget(
         self,
         conversation_context: list,
@@ -1003,8 +1035,23 @@ class ContextOrchestrator:
           后续折叠只对新落入折叠区的消息做增量摘要（previous_summary 传递）。
         - 归档先行：本方法在 _archive_conversation_to_pool 之后调用，
           折叠只影响视图，原文零丢失。
+        - P0-2（Codex 对齐）：auto_compact_enabled=False 时原样返回；
+          有效预算 = min(budget, 模型上下文窗口×90%) 硬顶。
         """
         from neurova.context.window_compactor import compact_window, estimate_window_tokens
+
+        # P0-2：显式关闭语义——超预算也原样返回（调用方自行承担窗口超限）
+        if not getattr(self, "auto_compact_enabled", True):
+            return [
+                {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
+                for m in (conversation_context or [])
+                if isinstance(m, dict) and (m or {}).get("content")
+            ]
+
+        # P0-2：硬顶钳制——配置预算再大也不越过模型上下文的 90%
+        hard_limit = self._resolve_auto_compact_hard_limit()
+        if hard_limit and hard_limit < budget_tokens:
+            budget_tokens = hard_limit
 
         msgs = [
             {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
@@ -1214,6 +1261,19 @@ class ContextOrchestrator:
             + build_all_sections(workspace_path=str(getattr(self.config, "workspace_path", "") or ""))
         )
 
+        # P0-1（Codex 对齐）：工作区 AGENTS.md 文档树自动注入——根→子目录层级
+        # 拼接 + 字节预算截断；无文档返回空串，system prompt 零变化
+        try:
+            from neurova.context.workspace_docs import collect_workspace_docs
+
+            workspace_docs = collect_workspace_docs(
+                str(getattr(self.config, "workspace_path", "") or "")
+            )
+            if workspace_docs:
+                parts.append("\n\n## 工作区文档（AGENTS.md）\n" + workspace_docs)
+        except Exception:  # noqa: BLE001 - 文档注入失败不阻断 system prompt
+            logger.warning("工作区文档注入失败(跳过)", exc_info=True)
+
         # 使用配置的行为规则
         if self.config.behavior_rules:
             parts.append("\n\n## 行为规则\n")
@@ -1417,7 +1477,9 @@ class ContextOrchestrator:
         """
         import os as _os
 
-        if not tools or _os.environ.get("NEUROVA_TOOL_SEARCH") != "1":
+        # P1-5（Codex Deferred+tool_search 对齐）：默认激活——隐藏候选达阈值
+        # 即压缩；NEUROVA_TOOL_SEARCH=0 显式关闭（保留退路）
+        if not tools or _os.environ.get("NEUROVA_TOOL_SEARCH", "1") == "0":
             return tools
         try:
             from neurova.context.tool_search import (

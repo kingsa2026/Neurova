@@ -12,6 +12,11 @@ from dataclasses import dataclass
 # 每条消息的协议开销（role/分隔符等的保守估计）
 _PER_MSG_OVERHEAD = 4
 
+# 摘要失败收敛（P0-2，Codex compact 对齐）：摘要请求失败时从折叠区丢最旧一条
+# 重试（输入变小更易成功），最多重试 _SUMMARY_MAX_RETRIES 次；仍失败则回落
+# 静态桩（编排层既有语义）。压缩自身必须收敛，不允许摘要失败拖垮整轮压缩。
+_SUMMARY_MAX_RETRIES = 3
+
 
 def estimate_window_tokens(msgs: typing.Iterable) -> int:
     """估算窗口消息序列的 token 总量（统一估算器 BALANCED 策略）。"""
@@ -118,16 +123,30 @@ async def compact_window(
             break
 
         round_summary = None
+        skipped_oldest = 0
         if summarize is not None:
-            try:
-                round_summary = await summarize(dropped, previous_summary)
-            except Exception:  # noqa: BLE001 - 摘要失败不阻断上下文构建
-                round_summary = None
-            if isinstance(round_summary, str) and not round_summary.strip():
-                round_summary = None
+            # P0-2 收敛保证：摘要失败 → 丢最旧一条缩小输入重试（上限 3 次），
+            # 而非直接放弃摘要。被丢弃的前缀在摘要行显式标注，不静默消失。
+            dropped_for_summary = list(dropped)
+            for attempt in range(_SUMMARY_MAX_RETRIES + 1):
+                try:
+                    round_summary = await summarize(dropped_for_summary, previous_summary)
+                except Exception:  # noqa: BLE001 - 摘要失败不阻断上下文构建
+                    round_summary = None
+                if isinstance(round_summary, str) and round_summary.strip():
+                    skipped_oldest = attempt
+                    break
+                if attempt >= _SUMMARY_MAX_RETRIES or len(dropped_for_summary) <= 1:
+                    round_summary = None
+                    break
+                dropped_for_summary = dropped_for_summary[1:]
 
         window: typing.List[dict] = []
         if round_summary:
+            if skipped_oldest > 0:
+                round_summary = (
+                    f"[摘要收敛时丢弃最早 {skipped_oldest} 条消息] " + round_summary
+                )
             window.append({"role": "system", "content": f"{summary_prefix}{round_summary}"})
         window.extend(kept)
 

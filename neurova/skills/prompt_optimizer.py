@@ -45,6 +45,11 @@ class PromptEvalCase:
         forbidden_patterns: 禁止出现的正则（任一命中即失败，如模糊指令/越权模式）
         max_length: 提示词最大长度（None 不限制）
         weight: 用例权重（默认 1）
+        task_input: 判定路径的真实任务输入（judge 用；空则不适用）
+        expected_behavior: 评分细则（rubric）——描述"好的提示词应做到什么"，
+            不是精确文本。判据升级（2026-09-13 Hermes 对比）：子串只能查
+            "要素在不在"，rubric 走 LLM judge 才能判"好不好"。
+        scorer: "auto"（有 rubric 走 judge，否则子串）|"judge"|"substring"
     """
 
     case_id: str
@@ -53,6 +58,20 @@ class PromptEvalCase:
     forbidden_patterns: List[str] = field(default_factory=list)
     max_length: Optional[int] = None
     weight: float = 1.0
+    task_input: str = ""
+    expected_behavior: str = ""
+    scorer: str = "auto"
+
+    def has_rubric(self) -> bool:
+        return bool(self.expected_behavior.strip())
+
+    def wants_judge(self) -> bool:
+        """该用例是否应走 LLM judge 判定路径。"""
+        if self.scorer == "judge":
+            return True
+        if self.scorer == "substring":
+            return False
+        return self.has_rubric()  # auto
 
 
 class PromptEvalSet:
@@ -65,13 +84,27 @@ class PromptEvalSet:
         self.cases.append(case)
 
     def score_prompt(self, prompt: str) -> Tuple[float, List[Dict[str, Any]]]:
-        """提示词过全部用例，返回 (加权通过率 0..1, 逐用例明细)。"""
+        """提示词过全部用例，返回 (加权通过率 0..1, 逐用例明细)。
+
+        同步确定性路径:rubric 用例按零分处理(无 judge 时诚实降权,不假装通过)。
+        带 judge 的评测请用 score_prompt_async。
+        """
         if not self.cases:
             return 0.0, []
         total_weight = sum(c.weight for c in self.cases) or 1.0
         earned = 0.0
         details: List[Dict[str, Any]] = []
         for case in self.cases:
+            if case.wants_judge():
+                # judge 路径在同步方法里不可用——诚实记失败并标注原因,
+                # 不静默退回子串假绿(rubric 用例本就没有 required_elements)
+                details.append({
+                    "case_id": case.case_id,
+                    "description": case.description,
+                    "passed": False,
+                    "failures": ["judge 路径需 score_prompt_async(同步打分无 judge)"],
+                })
+                continue
             passed, failures = self._check_case(prompt, case)
             if passed:
                 earned += case.weight
@@ -100,6 +133,62 @@ class PromptEvalSet:
         if case.max_length is not None and len(prompt) > case.max_length:
             failures.append(f"超长: {len(prompt)} > {case.max_length}")
         return not failures, failures
+
+    async def score_prompt_async(
+        self, prompt: str, judge: Optional[Any] = None
+    ) -> Tuple[float, List[Dict[str, Any]]]:
+        """异步双路径打分:rubric 用例走 LLM judge,其余走子串。
+
+        判据升级(Hermes 对比 2026-09-13):子串只能查"要素在不在",
+        judge 才能判"好不好"。judge 缺省时用 eval.fitness.LLMJudge
+        (走 llm_router);judge 判分失败按零分计,不静默放行。
+        语义:这里评的是**提示词文本**对 rubric 的符合度(judge 的
+        output 参数即被评的 prompt)。
+        """
+        if not self.cases:
+            return 0.0, []
+        if judge is None:
+            from neurova.evolution.eval.fitness import LLMJudge
+            from neurova.evolution.eval.config import EvolutionConfig
+
+            judge = LLMJudge(EvolutionConfig())
+
+        total_weight = sum(c.weight for c in self.cases) or 1.0
+        earned = 0.0
+        details: List[Dict[str, Any]] = []
+        for case in self.cases:
+            failures: List[str] = []
+            if case.wants_judge():
+                try:
+                    score = await judge.score(
+                        task_input=case.task_input,
+                        expected_behavior=case.expected_behavior,
+                        output=prompt,
+                        skill_text=case.description,
+                    )
+                    composite = float(getattr(score, "composite", score))
+                    if composite < 0.5:
+                        failures.append(
+                            f"judge 判分不足: {composite:.2f}"
+                            + (f"（{getattr(score, 'feedback', '')}）" if getattr(score, "feedback", "") else "")
+                        )
+                    passed = composite >= 0.5
+                except Exception as e:  # noqa: BLE001 - judge 失败按零分,不静默放行
+                    failures.append(f"judge 异常: {e}")
+                    passed = False
+            else:
+                passed, failures = self._check_case(prompt, case)
+            if passed:
+                earned += case.weight
+            details.append(
+                {
+                    "case_id": case.case_id,
+                    "description": case.description,
+                    "passed": passed,
+                    "failures": failures,
+                }
+            )
+        return earned / total_weight, details
 
 
 # ────── 变体生成（确定性规则；评估才是真值来源）──────

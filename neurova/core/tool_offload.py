@@ -1,16 +1,24 @@
 # -*- coding: utf-8 -*-
-"""工具结果溢出分层（P1 #6 触点3核心判定，对比报告 §5.6 定稿）。
+"""工具结果溢出分层（P1 #6 触点3核心判定 + P0-4 截断显式化）。
 
-三档策略（按 reproducible × 大小）：
+三档策略（按 大小 × 落盘成败）：
   ① 未超阈值            → 原样（全文驻留消息与会话台账）
-  ② 可重现 + 超阈值     → 全文落工作区文件 outputs/tool_offload/<call>-<sha16>.txt，
-                          消息体 = 预览 + 硬指针（call_id/ts/文件路径），
-                          全文一条不丢，生命周期=随工作区
-  ③ 不可重现 + 超阈值   → 豁免：原样全文（当时的原文即唯一记录，禁止外移）
+  ② 超阈值（可重现与否）→ 全文落工作区文件 outputs/tool_offload/<tool>-<sha16>.txt，
+                          消息体 = head+tail 预览 + 截断标注 + 指针
+                          （call_id/ts/文件路径/原始体量），全文一条不丢，
+                          生命周期=随工作区
+  ③ 落盘失败            → fail-open：原样放行（消息完整性优先，宁可窗口大
+                          也不丢结果）
+
+P0-4 契约变更（Codex head+tail 对齐，docs/Neurova_Codex代码级对比_2026-09-14.md
+§2.7）：原 ② 仅可重现工具溢出、③ 不可重现工具全文直进窗口——巨量输出挤占
+窗口后在折叠中整段丢失。现在统一"落盘保全 + head+tail + 显式标注"：模型
+永远知道被截了多少、去哪取回全文（recall_history 按指针直取）。落盘失败时
+fail-open 保留原保真方向。
 
 预览格式与 microcompact 视图占位统一寻址语法（tool/call/ts），模型经
 recall_history 按指针直取。Yuxi 同构先例：large_tool_results offload
-（summary.py:591-626），差异在 NV 用可重现性做豁免维度。
+（summary.py:591-626），差异在 NV 用 head+tail 双端预览。
 """
 from __future__ import annotations
 
@@ -27,6 +35,20 @@ logger = get_logger(__name__)
 
 OFFLOAD_SUBDIR = "outputs/tool_offload"
 _PREVIEW_CHARS = 400
+
+
+def _head_tail_preview(text: str) -> str:
+    """head+tail 双端预览（P0-4）：中段以省略行显式计数，绝不静默消失。"""
+    if len(text) <= _PREVIEW_CHARS:
+        return text
+    if len(text) <= _PREVIEW_CHARS * 2:
+        return text[:_PREVIEW_CHARS] + "…"
+    omitted = len(text) - _PREVIEW_CHARS * 2
+    return (
+        text[:_PREVIEW_CHARS]
+        + f"\n…[中间省略 {omitted} 字符]…\n"
+        + text[-_PREVIEW_CHARS:]
+    )
 
 
 @dataclass
@@ -77,10 +99,11 @@ def apply_offload_policy(
 
     任何落盘异常降级为"原样不溢出"（fail-open：消息完整性优先，
     宁可窗口大也不丢结果）——异常本身记日志。
+    reproducible 保留为元数据（记录进台账），不再作为豁免维度（P0-4）。
     """
     text = str(content or "")
     kb = get_threshold_kb() if threshold_kb is None else max(1, int(threshold_kb))
-    if not reproducible or len(text.encode("utf-8", "replace")) <= kb * 1024:
+    if len(text.encode("utf-8", "replace")) <= kb * 1024:
         return OffloadOutcome(content=text, offloaded=False)
 
     root = Path(workspace_root) if workspace_root else Path("data")
@@ -98,16 +121,17 @@ def apply_offload_policy(
         logger.error("工具结果溢出落盘失败（原样放行，不截断）: %s", e)
         return OffloadOutcome(content=text, offloaded=False)
 
-    preview = text[:_PREVIEW_CHARS] + ("…" if len(text) > _PREVIEW_CHARS else "")
     try:
         rel_path = str(target.relative_to(root))
     except ValueError:
         rel_path = str(target)
     pointer = (
-        f"[工具输出已溢出至工作区文件: tool={tool_name} call={call_id} "
+        f"[工具输出已截断并溢出至工作区文件: tool={tool_name} call={call_id} "
         f"ts={datetime.now().isoformat(timespec='seconds')} size={len(text)} "
-        f"path={rel_path}；完整内容经 recall_history(session_id, tool_call_id=\"{call_id}\") 取回]\n{preview}"
+        f"path={rel_path}；完整内容经 recall_history(session_id, tool_call_id=\"{call_id}\") 取回]\n"
+        f"{_head_tail_preview(text)}"
     )
     return OffloadOutcome(
-        content=pointer, offloaded=True, offload_path=rel_path, preview=preview
+        content=pointer, offloaded=True, offload_path=rel_path,
+        preview=_head_tail_preview(text),
     )

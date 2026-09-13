@@ -49,6 +49,8 @@ class SkillInfo(BaseModel):
     enabled: bool = True
     created_at: float = 0
     updated_at: float = 0
+    # 生命周期与用量（前端状态徽标数据源；C11 遥测延伸）
+    usage: Dict[str, Any] = Field(default_factory=dict)
 
 
 class SkillCreate(BaseModel):
@@ -165,6 +167,7 @@ async def list_private_skills(agent_id: str = Query(default="default")):
                     enabled=s.get("enabled", True),
                     scope="private",
                     owner_id=agent_id,
+                    usage=s.get("usage") or {},
                 )
             )
     except Exception as e:
@@ -263,7 +266,6 @@ async def unpush_skill_from_agent(skill_id: str, agent_id: str = Query(default="
     return {"code": 0, "message": f"Skill unpushed from agent '{agent_id}'"}
 
 
-@router.get("/agent/{agent_id}/skills", response_model=List[SkillInfo])
 @router.get("/agent/{agent_id}/pending-skills")
 async def list_pending_skills(agent_id: str):
     """C10 审批面：列出待审自动技能（评审闸开启时的配套生态）。
@@ -365,12 +367,17 @@ async def reject_pending_experience(agent_id: str, record_id: str):
     return {"code": 0, "data": {"rejected": True, "record_id": record_id}}
 
 
+@router.get("/agent/{agent_id}/skills", response_model=List[SkillInfo])
 async def get_agent_skills(agent_id: str):
     """获取 Agent 的所有技能
 
     修复 (s1 P0 #7+#6): 原 `return []` 让前端 AgentSkillPage 永远显示空列表。
     改为调用 SkillService(agent_id).list_skills() 读取真实安装的技能。
     异常时记录 logger.exception 并优雅降级返回 [] (不静默吞)。
+
+    路由断裂修复 (核验 2026-09-13): 本函数一度**无任何装饰器**(被堆叠在
+    /agent/{agent_id}/skills 上的 pending-skills 路由顶替),技能页实际拿到
+    的是待审模板列表——装饰器已分离,路径重新挂回本函数。
     """
     try:
         from neurova.skills.skill_service import SkillService
@@ -382,6 +389,7 @@ async def get_agent_skills(agent_id: str):
                 skill_id=s.get("id", ""),
                 name=s.get("name", ""),
                 description=s.get("description", ""),
+                usage=s.get("usage") or {},
                 version=s.get("version", "1.0.0"),
                 enabled=s.get("enabled", True),
                 scope="agent",

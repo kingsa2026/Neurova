@@ -225,6 +225,76 @@ class PendingMemoryStore:
             rec = self.get(rec_id)
             return rec if rec is not None else {"id": rec_id, "status": "pending"}
 
+    # ── P2-2 提炼租约（Codex memories 租约认领对齐）────────────────
+
+    def _ensure_lease_table(self) -> None:
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS extraction_leases ("
+            " id TEXT PRIMARY KEY,"
+            " fingerprint TEXT NOT NULL UNIQUE,"
+            " holder TEXT NOT NULL DEFAULT '',"
+            " created_at REAL NOT NULL,"
+            " expires_at REAL NOT NULL)"
+        )
+
+    def claim(
+        self, content: str, holder: str = "", lease_seconds: float = 300.0
+    ) -> Dict[str, Any]:
+        """后台提炼前的租约认领：同指纹在租约窗口内只允许一个持有者。
+
+        - 认领成功 → {"claimed": True, "lease_id": ...}
+        - 租约被他人持有 → {"claimed": False, "reason": "lease_held"}
+        - 命中既有未决记录 → {"claimed": False, "reason": "pending_exists"}
+        - 租约过期自动回收（惰性清理）
+        """
+        fp = _fingerprint((content or "").strip())
+        with self._lock:
+            self._ensure_lease_table()
+            now = time.time()
+            row = self._conn.execute(
+                "SELECT holder, expires_at FROM extraction_leases WHERE fingerprint = ?",
+                (fp,),
+            ).fetchone()
+            if row is not None:
+                if row[1] > now:
+                    return {
+                        "claimed": False,
+                        "reason": "lease_held",
+                        "holder": row[0],
+                    }
+                self._conn.execute(
+                    "DELETE FROM extraction_leases WHERE fingerprint = ?", (fp,)
+                )
+            pend = self._conn.execute(
+                "SELECT id FROM pending_memories"
+                " WHERE fingerprint = ? AND status = 'pending'",
+                (fp,),
+            ).fetchone()
+            if pend is not None:
+                return {
+                    "claimed": False,
+                    "reason": "pending_exists",
+                    "pending_id": pend[0],
+                }
+            lease_id = str(uuid.uuid4())
+            self._conn.execute(
+                "INSERT INTO extraction_leases (id, fingerprint, holder, created_at, expires_at)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (lease_id, fp, str(holder or ""), now, now + lease_seconds),
+            )
+            self._conn.commit()
+            return {"claimed": True, "lease_id": lease_id}
+
+    def release_lease(self, lease_id: str) -> bool:
+        """处理完成后主动释放租约。"""
+        with self._lock:
+            self._ensure_lease_table()
+            cur = self._conn.execute(
+                "DELETE FROM extraction_leases WHERE id = ?", (str(lease_id or ""),)
+            )
+            self._conn.commit()
+            return cur.rowcount > 0
+
     # ── 查询 ──────────────────────────────────────────────────
 
     def get(self, pending_id: str) -> Optional[Dict[str, Any]]:
