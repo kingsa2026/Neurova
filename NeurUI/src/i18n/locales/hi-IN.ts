@@ -1178,6 +1178,9 @@ export default {
 
   },
   channel: {    ingressQueue: 'Inbound Queue',
+    wecomMode: 'इंटिग्रेशन मोड',
+    wecomModeAibot: 'AI बॉट (WebSocket)',
+    wecomModeEnterprise: 'एंटरप्राइज़ ऐप (कॉलबैक)',
     scanAuth: 'QR अधिकार',
     getQrcode: 'QR कोड पाएँ',
     scanHint: 'फ़ोन से स्कैन कर पुष्टि करें; क्रेडेंशियल स्वतः भर जाएँगे',
