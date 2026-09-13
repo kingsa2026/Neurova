@@ -481,13 +481,31 @@ async def create_or_update_config(
     # 只持久化配置并返回 needs_scan，适配器注册推迟到扫码确认后（前端重发保存）
     needs_scan = request.channel_type == "wechat" and _wechat_needs_scan(request.extra)
 
-    if not needs_scan:
+    manager = get_channel_manager()
+    # 先拆旧实例的连接：重存同 (agent,渠道) 时，register_adapter 只替换登记，
+    # 旧适配器的后台线程/长连接会残留——飞书单机器人仅允许 1 条长连接，
+    # 双连接会被平台拒绝导致"启用后仍无响应"。
+    prev = manager.get_adapter(request.channel_type, agent_id=agent_id)
+    if prev is not None:
+        try:
+            await prev.disconnect()
+        except Exception as e:  # noqa: BLE001 - 拆旧连接失败不阻断保存
+            logger.warning("渠道旧适配器断开失败 %s(agent=%s): %s", request.channel_type, agent_id, e)
+        manager.unregister_adapter(request.channel_type, agent_id=agent_id)
+
+    if not needs_scan and request.enabled:
         # RES-P0-2：工厂内含同步网络工作（如 iLink 认证最长 300s 轮询），
         # 必须下沉线程池，否则一次保存即冻结整个事件循环
         adapter = await asyncio.to_thread(_create_adapter, request.channel_type, channel_config)
-        manager = get_channel_manager()
         if adapter is not None:
             manager.register_adapter(adapter, agent_id=agent_id)
+            # 启用即连接：保存路径此前只 register 不 connect，导致"启用后
+            # 不重启就收不到消息"（飞书/钉钉/微信长连接渠道实测无响应根因）。
+            try:
+                ok = await adapter.connect()
+                logger.info("渠道保存后连接 %s(agent=%s): %s", request.channel_type, agent_id, ok)
+            except Exception as e:  # noqa: BLE001 - 连接失败不阻断保存（配置已持久化）
+                logger.warning("渠道保存后连接失败 %s(agent=%s): %s", request.channel_type, agent_id, e)
 
     return {
         "success": True,
