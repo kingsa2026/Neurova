@@ -36,11 +36,10 @@ describe('渠道参数表·QwenPaw 对齐契约（防摆设字段回归）', () 
 })
 
 describe('扫码授权渠道元数据', () => {
-  it('仅注册后端 QRCODE_AUTH_HANDLERS 支持的渠道，wecom 暂不接线（协议不同）', () => {
+  it('注册后端 QRCODE_AUTH_HANDLERS 支持的 5 渠道（含 wecom 智能机器人）', () => {
     expect(Object.keys(QRCODE_CHANNELS).sort()).toEqual(
-      ['dingtalk', 'feishu', 'qq', 'wechat'],
+      ['dingtalk', 'feishu', 'qq', 'wechat', 'wecom'],
     )
-    expect(QRCODE_CHANNELS.wecom).toBeUndefined()
   })
 
   it('每个渠道的表单回填目标键必须存在于该渠道参数表', () => {

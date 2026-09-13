@@ -1178,6 +1178,9 @@ export default {
 
   },
   channel: {    ingressQueue: 'Inbound Queue',
+    wecomMode: 'Режим интеграции',
+    wecomModeAibot: 'ИИ-бот (WebSocket)',
+    wecomModeEnterprise: 'Корп. приложение (callback)',
     scanAuth: 'Авторизация по QR',
     getQrcode: 'Получить QR-код',
     scanHint: 'Отсканируйте телефоном и подтвердите — учётные данные заполнятся автоматически',
