@@ -161,7 +161,6 @@ import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { request } from '@/api'
 import { listModels } from '@/api/modules/models'
-import { getTemplates as getImageTemplates } from '@/api/modules/image'
 import { generateText as apiGenerateText, generateImage as apiGenerateImage } from '@/api/modules/generation'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
@@ -171,6 +170,17 @@ import { renderMarkdown } from '@/utils/markdown'
 const { t } = useI18n()
 
 const activeTab = ref<'text' | 'image' | 'audio' | 'video'>('text')
+
+// 图像风格模板（批次1）：原实现错接 GET /v1/image/templates —— 那是 Docker
+// 镜像构建模板（base_image/dockerfile），与图像风格无关；且提交的 style 字段
+// 后端 ImageGenerationRequest 无此字段，静默丢弃零作用。改为内置风格常量，
+// 生成时把风格提示词注入 prompt（火宝式「风格注入每镜提示词」）。
+const STYLE_TEMPLATES: { value: string; hint: string }[] = [
+  { value: 'default', hint: '' },
+  { value: 'photorealistic', hint: 'photorealistic, ultra-detailed, 8k' },
+  { value: 'anime', hint: 'anime style, vibrant colors, clean lineart' },
+  { value: 'oil-painting', hint: 'oil painting style, visible textured brush strokes' },
+]
 
 // --- 能力感知模型下拉（2026-09-03）---
 // 数据源 = GET /models（capabilities 由后端自动检测并持久化），
@@ -183,7 +193,14 @@ interface CapModel {
 }
 
 const allCapModels = ref<CapModel[]>([])
-const imageTemplateOptions = ref<{ label: string; value: string }[]>([])
+const TEMPLATE_LABEL_KEYS: Record<string, string> = {
+  default: 'default',
+  photorealistic: 'photorealistic',
+  anime: 'anime',
+  'oil-painting': 'oilPainting',
+}
+const imageTemplateOptions = computed(() =>
+  STYLE_TEMPLATES.map((tpl) => ({ label: t(`aigc.${TEMPLATE_LABEL_KEYS[tpl.value]}`), value: tpl.value })))
 
 function normalizeCapModel(m: any): CapModel {
   return {
@@ -227,25 +244,11 @@ onUnmounted(() => {
 
 onMounted(async () => {
   try {
-    const [modelsRes, templatesRes] = await Promise.allSettled([listModels(), getImageTemplates()])
-    if (modelsRes.status === 'fulfilled') {
-      const raw = (modelsRes.value as any)?.data ?? modelsRes.value
-      const list = Array.isArray(raw) ? raw : (raw?.models ?? raw?.data ?? [])
-      allCapModels.value = list.map(normalizeCapModel)
-    }
-    if (templatesRes.status === 'fulfilled') {
-      const templates = templatesRes.value?.data?.templates ?? []
-      imageTemplateOptions.value = templates.map((t: any) => ({ label: t.name ?? t.description ?? t.base_image, value: t.name }))
-    }
+    const raw = (await listModels()) as any
+    const data = raw?.data ?? raw
+    const list = Array.isArray(data) ? data : (data?.models ?? data?.data ?? [])
+    allCapModels.value = list.map(normalizeCapModel)
   } catch { /* use defaults */ }
-  if (!imageTemplateOptions.value.length) {
-    imageTemplateOptions.value = [
-      { label: t('aigc.default'), value: 'default' },
-      { label: t('aigc.photorealistic'), value: 'photorealistic' },
-      { label: t('aigc.anime'), value: 'anime' },
-      { label: t('aigc.oilPainting'), value: 'oil-painting' },
-    ]
-  }
 })
 
 // --- Text ---
@@ -290,10 +293,15 @@ async function generateImage() {
   if (!imagePrompt.value.trim()) return
   imageGenerating.value = true
   try {
+    const tpl = STYLE_TEMPLATES.find((x) => x.value === imageTemplate.value)
+    // 批次1：风格模板注入提示词（后端无 style 字段，旧实现发的 style 被静默丢弃）；
+    // model=auto 不再当模型名透传（后端已按图像生成能力自动路由，undefined 对齐视频 Tab）
+    const styledPrompt = tpl?.hint ? `${imagePrompt.value.trim()}\n${tpl.hint}` : imagePrompt.value.trim()
     const res: any = await apiGenerateImage({
-      prompt: imagePrompt.value,
-      style: imageTemplate.value,
-      model: imageModel.value,
+      prompt: styledPrompt,
+      model: imageModel.value === 'auto' ? undefined : imageModel.value,
+      width: 1024,
+      height: 1024,
     })
     const data = res?.data ?? res
     // B2-c 契约：/generation/image 返回 images:[{url, path}]（本地化产物），
@@ -342,8 +350,18 @@ async function generateAudio() {
       text: audioText.value,
       voice: audioVoice.value,
     })
+    // 批次1：后端统一 JSON 契约 {code,data:{url}}；code=-1 是诚实失败（TTS 未就绪/
+    // 合成失败），不得再打成功 toast（原实现二进制与 JSON 劈叉，恒显示空播放器）
+    if (res?.code === -1) {
+      message.error(res?.message || t('aigc.generateError'))
+      return
+    }
     const data = res?.data ?? res
     audioUrl.value = data?.url ?? data?.audio_url ?? ''
+    if (!audioUrl.value) {
+      message.error(t('aigc.generateError'))
+      return
+    }
     message.success(t('aigc.audioSuccess'))
   } catch {
     message.error(t('aigc.generateError'))

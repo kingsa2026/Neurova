@@ -72,23 +72,27 @@ def _validate_ref_images(refs: list) -> None:
             raise HTTPException(status_code=400, detail=f"ref_images 文件不存在: {r}")
 
 
+def _route_selection(request_type: str):
+    """按请求类型经 LLMRouter 选模的原始结果（ModelSelectionResult 或 None）。"""
+    try:
+        from neurova.llm.llm_router import RequestType, select_model_for_request
+
+        return select_model_for_request(RequestType(request_type))
+    except Exception as e:
+        logger.warning("Auto route failed (%s), degrade to default: %s", request_type, e)
+        return None
+
+
 def _route_model_for_request(request_type: str):
     """按请求类型经 LLMRouter 自动选模型（model=auto/缺省时）。
 
     Returns:
         (model_id, provider_name)；路由不可用时 (None, None)。
     """
-    try:
-        from neurova.llm.llm_router import RequestType, select_model_for_request
-
-        rt = RequestType(request_type)
-        result = select_model_for_request(rt)
-        if result is None:
-            return None, None
-        return result.model, result.provider_name
-    except Exception as e:
-        logger.warning("Auto route failed (%s), degrade to agent default: %s", request_type, e)
+    result = _route_selection(request_type)
+    if result is None:
         return None, None
+    return result.model, result.provider_name
 
 
 class TextGenerationRequest(BaseModel):
@@ -251,23 +255,60 @@ async def generate_text(request: Request, body: TextGenerationRequest):
 
 
 @router.post("/image")
-async def generate_image(request: Request, body: ImageGenerationRequest):
-    """图像生成"""
+async def generate_image(
+    request: Request,
+    body: ImageGenerationRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """图像生成（批次1：model=auto/缺省 → LLMRouter 按图像生成能力路由；成败均落账本）"""
     request_id = _get_request_id(request)
 
     # B2-a/c：真实协议实现（OPENAI_COMPAT/ARK/DASHSCOPE 实测矩阵）
     from neurova.llm.generators.protocols import (
-        ProtocolCredentials,
         generate_image,
         resolve_image_protocol,
     )
+    from neurova.llm.generators.task_ledger import TaskRecord, get_generation_task_ledger
 
-    protocol = resolve_image_protocol(body.protocol or "", body.model or "", body.base_url or "")
+    # 批次1 根因修复：原实现把前端默认值 "auto" 当真实模型名透传并覆盖服务商
+    # 默认模型（`model or default` 中 "auto" 为真值），图像/视频端点从未走过
+    # auto 路由 → 默认配置下必然 4xx。与 /text 同口径收口。
+    requested_model = (body.model or "").strip()
+    routed = None
+    if (not requested_model or requested_model.lower() == "auto") and not (
+        body.api_key or body.base_url or body.provider_id
+    ):
+        routed = _route_selection(
+            "image_to_image" if body.ref_images else "text_to_image")
+
+    effective_model = (getattr(routed, "model", "") or "") or requested_model
+    provider_id = getattr(routed, "provider_id", None) if routed is not None else body.provider_id
+
+    protocol = resolve_image_protocol(
+        body.protocol or "", effective_model or (body.model or ""), body.base_url or "")
     _validate_ref_images(body.ref_images)
     creds = _resolve_generation_creds(
-        protocol.value, body.model, body.provider_id, body.api_key, body.base_url,
+        protocol.value, effective_model or None, provider_id, body.api_key, body.base_url,
         default_base="https://api.openai.com/v1",
     )
+    uid = str(current_user.get("user_id") or "")
+
+    def _ledger_add(status: str, local_path: str = "", error: str = "") -> None:
+        # 批次1：图像落账本（kind="image"）——历史面板数据源；status 终态直落，
+        # 不进 unfinished（无 remote_task_id）。
+        get_generation_task_ledger().add(TaskRecord(
+            kind="image",
+            provider_id=str(provider_id or ""),
+            protocol=protocol.value,
+            model=creds.model or "",
+            base_url=creds.base_url or "",
+            status=status,
+            local_path=local_path,
+            error=error[:300],
+            prompt=body.prompt[:500],
+            owner_user_id=uid,
+        ))
+
     size = f"{body.width}x{body.height}"
     try:
         result = await generate_image(
@@ -275,9 +316,11 @@ async def generate_image(request: Request, body: ImageGenerationRequest):
             ref_images=list(body.ref_images or []),
         )
     except FileNotFoundError as e:
+        _ledger_add("failed", error=str(e))
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:  # noqa: BLE001 — 诚实 5xx，不伪造成功
         logger.warning("图像生成失败: %s", e)
+        _ledger_add("failed", error=str(e))
         raise HTTPException(status_code=502, detail=f"图像生成失败: {str(e)[:300]}")
 
     # P0-1：task_id 只用于命名落盘产物，必须服务端生成，与 X-Request-ID 解耦
@@ -290,16 +333,52 @@ async def generate_image(request: Request, body: ImageGenerationRequest):
         except Exception as e:  # noqa: BLE001 — 单图下载失败不影响其余
             images.append({"url": item if item.startswith("http") else "", "error": str(e)[:200]})
     if not images:
+        _ledger_add("failed", error="图像生成未返回产物")
         raise HTTPException(status_code=502, detail="图像生成未返回产物")
+    _ledger_add("succeeded", local_path=str(images[0].get("path") or ""))
     return {"code": 0, "message": "success", "data": {"images": images, "task_id": task_id}}
 
 
 @router.post("/audio")
-async def generate_audio(request: Request, body: AudioGenerationRequest):
-    """音频生成（TTS 语音合成）"""
-    from fastapi.responses import Response
+async def generate_audio(
+    request: Request,
+    body: AudioGenerationRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """音频生成（TTS 语音合成，批次1：统一 JSON 契约 + 落账）
 
+    根因修复：原实现在成功路径返回 audio/wav 二进制，而前端按 JSON 取
+    data.url → 恒空串、播放器永不出现。与图像/视频同契约：产物落盘返回 url。
+    """
     request_id = _get_request_id(request)
+
+    from neurova.llm.generators.task_ledger import TaskRecord, get_generation_task_ledger
+
+    def _finish(audio_bytes: bytes):
+        task_id = uuid.uuid4().hex
+        out_dir = Path(_GENERATION_OUTPUT_DIR)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        path = out_dir / f"{_safe_task_name(task_id)}_0.wav"
+        path.write_bytes(audio_bytes)
+        get_generation_task_ledger().add(TaskRecord(
+            kind="audio",
+            status="succeeded",
+            protocol="tts",
+            model=body.model or "",
+            prompt=body.text[:500],
+            local_path=str(path),
+            owner_user_id=str(current_user.get("user_id") or ""),
+        ))
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {
+                "url": _local_url(str(path), request),
+                "path": str(path),
+                "task_id": task_id,
+                "request_id": request_id,
+            },
+        }
 
     try:
         state = get_app_state()
@@ -330,11 +409,7 @@ async def generate_audio(request: Request, body: AudioGenerationRequest):
                     "data": {"request_id": request_id},
                 }
 
-            return Response(
-                content=result.audio_data,
-                media_type="audio/wav",
-                headers={"X-Request-ID": request_id},
-            )
+            return _finish(result.audio_data)
 
         # 降级到旧的 TTSManager
         tts_manager = state.get("tts_manager") if state else None
@@ -355,11 +430,7 @@ async def generate_audio(request: Request, body: AudioGenerationRequest):
                 "data": {"request_id": request_id},
             }
 
-        return Response(
-            content=audio_bytes,
-            media_type="audio/wav",
-            headers={"X-Request-ID": request_id},
-        )
+        return _finish(audio_bytes)
 
     except Exception as e:
         logger.error(f"Audio generation error: {e}", exc_info=True)
@@ -388,10 +459,22 @@ async def generate_video(
     )
     from neurova.llm.generators.task_ledger import TaskRecord, get_generation_task_ledger
 
-    protocol = resolve_video_protocol(body.protocol or "", body.model or "", body.base_url or "")
+    # 批次1：model=auto/缺省 → 按视频生成能力路由（与 /image 同口径）
+    requested_model = (body.model or "").strip()
+    routed = None
+    if (not requested_model or requested_model.lower() == "auto") and not (
+        body.api_key or body.base_url or body.provider_id
+    ):
+        routed = _route_selection(
+            "image_to_video" if body.ref_images else "text_to_video")
+    effective_model = (getattr(routed, "model", "") or "") or requested_model
+    provider_id = getattr(routed, "provider_id", None) if routed is not None else body.provider_id
+
+    protocol = resolve_video_protocol(
+        body.protocol or "", effective_model or (body.model or ""), body.base_url or "")
     _validate_ref_images(body.ref_images)
     creds = _resolve_generation_creds(
-        protocol.value, body.model, body.provider_id, body.api_key, body.base_url,
+        protocol.value, effective_model or None, provider_id, body.api_key, body.base_url,
         default_base="https://dashscope.aliyuncs.com/api/v1",
     )
     try:
