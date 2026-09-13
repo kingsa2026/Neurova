@@ -353,6 +353,11 @@ def _initialize_components(app_state: AppState) -> None:
         from neurova.channels.manager import ChannelManager
 
         app_state.channel_manager = ChannelManager.get_instance()
+        # 渠道入站统一路由到 agent（补齐"消息通路"：否则飞书/钉钉/微信等消息
+        # 收进来无人接、无回复）。幂等，注册一个常驻 handler。
+        from neurova.channels.channel_router import install_channel_router
+
+        install_channel_router(app_state.channel_manager)
     except Exception as e:
         logger.warning("ChannelManager init failed: %s", e)
 
@@ -785,6 +790,20 @@ async def _on_startup(app_state: AppState) -> None:
             await asyncio.to_thread(_ars.get_agent_run_store)
     except Exception as _ledger_err:  # noqa: BLE001 - 台账故障不阻断启动
         logger.warning("AgentRun 台账启动收敛失败（忽略）: %s", _ledger_err)
+
+    # Yuxi 对比 P1-#9：知识摄取队列排水循环（sync=false 入队任务的后台执行；
+    # NEUROVA_KNOWLEDGE_ASYNC=off 显式停用）。fail-open 不阻断启动。
+    if (os.environ.get("NEUROVA_KNOWLEDGE_ASYNC") or "on").strip().lower() != "off":
+        try:
+            from neurova.knowledge.ingest_worker import run_ingress_drain
+
+            _ingress_task = asyncio.create_task(run_ingress_drain())
+            _ingress_task.add_done_callback(
+                lambda t: t.exception() if not t.cancelled() else None  # 收割异常防悬空
+            )
+            logger.info("知识摄取队列排水循环已启动")
+        except Exception as _ingress_err:  # noqa: BLE001
+            logger.warning("知识摄取排水循环启动失败（忽略）: %s", _ingress_err)
 
     # 初始化 TTS 引擎
     if hasattr(app_state, "tts_manager") and app_state.tts_manager:
