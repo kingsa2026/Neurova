@@ -996,6 +996,16 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("生成任务恢复轮询启动失败: %s", e)
 
+    # 批次4：内置短剧一键成片模板种子入工作流库（幂等；AIGC 页实例化消费）
+    try:
+        from neurova.collaboration.neurflow.storage import NeurflowStorage
+        from neurova.collaboration.neurflow.templates import seed_short_drama_template
+
+        if seed_short_drama_template(NeurflowStorage()):
+            logger.info("短剧一键成片模板已种子入库")
+    except Exception as e:
+        logger.warning("短剧模板种子失败: %s", e)
+
     logger.info("=" * 60)
     logger.info("Neurova API Server started successfully")
     logger.info("=" * 60)

@@ -58,6 +58,10 @@ def safe_task_name(task_id: str) -> str:
     return cleaned or "task"
 
 
+# 落盘文件扩展名白名单（防经 ext 注入路径分隔符）
+_SAFE_EXT_RE = re.compile(r"[^A-Za-z0-9]")
+
+
 # 产物静态挂载前缀（与 api/app.py StaticFiles 挂载同源语义）
 FILES_URL_PREFIX = "/api/v1/generation/files"
 
@@ -120,6 +124,21 @@ def resolve_generation_creds(
 
 
 # ── 产物落盘（自端点搬移；SSRF 出网校验随迁）──────────────────────────────
+
+
+async def persist_bytes(
+    data: bytes,
+    ext: str,
+    task_id: str,
+    index: int = 0,
+    out_dir: Optional[str] = None,
+) -> str:
+    """原始字节直接落盘产物目录（批次4：画布 voice-over/TTS 节点等内存产物用）。"""
+    root = Path(out_dir) if out_dir else GENERATION_OUTPUT_DIR
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / f"{safe_task_name(task_id)}_{index}.{_SAFE_EXT_RE.sub('', str(ext or 'bin'))}"
+    path.write_bytes(data)
+    return str(path)
 
 
 async def persist_media(
