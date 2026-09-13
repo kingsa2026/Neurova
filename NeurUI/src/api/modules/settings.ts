@@ -151,6 +151,26 @@ export function updateAgentLimits(data: Partial<AgentLimits>) {
 }
 
 // ---------------------------------------------------------------------------
+// 工具结果溢出阈值（P1-#6：可重现大结果超阈值落工作区文件、留预览+指针；
+// 不可重现工具豁免。范围 8–512KB，默认 64KB，2026-09-13 拍板）
+// ---------------------------------------------------------------------------
+
+export interface ToolOffloadSettings {
+  threshold_kb: number
+  min_kb?: number
+  max_kb?: number
+  default_kb?: number
+}
+
+export function getToolOffloadSettings() {
+  return api.get<ApiResponse<ToolOffloadSettings>>('/governance/tool-offload')
+}
+
+export function updateToolOffloadSettings(data: Partial<ToolOffloadSettings>) {
+  return api.put<ApiResponse<ToolOffloadSettings>>('/governance/tool-offload', data)
+}
+
+// ---------------------------------------------------------------------------
 // LLM 429 重试设置（设置页"模型"tab，ZCode 对齐 2026-09-11）
 // ---------------------------------------------------------------------------
 

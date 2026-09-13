@@ -7,7 +7,7 @@ from neurova.core.logger import get_logger
 import typing
 import uuid
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel
 
@@ -53,7 +53,8 @@ def _get_request_id(request) -> str:
 
 @router.get("/")
 async def list_plugins(
-    request,
+    request: Request,  # 残留处理 2026-09-13 真 bug：request 无标注曾被 FastAPI
+    # 当作必填 query 参数 → GET /plugins/ 实测 422（插件列表页接口面失效面）
     status: typing.Optional[str] = None,
     plugin_type: typing.Optional[str] = None,
     page: int = 1,

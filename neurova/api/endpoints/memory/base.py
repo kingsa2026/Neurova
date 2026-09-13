@@ -133,7 +133,15 @@ def memory_to_dict(memory) -> dict:
                 "lifecycle_stage": str(memory.get("lifecycle_stage", "")),
                 # P1-9 来源信任级透传（缺失回退 agent，等价旧行为）
                 "origin": _origin_to_str(memory.get("origin")),
-                "is_important": bool(memory.get("is_important", metadata.get("is_important", importance >= 80.0))),
+                # 残留处理 2026-09-13 真缺陷根修：Memory.to_dict() 恒带
+                # is_important=False 键，get(k, default) 的第三级 importance 兜底
+                # 永不被触发（recall 来源的高重要性记忆在 API 上恒 False，
+                # docstring 自述的"映射"契约成空文）。显式 True 或 importance≥80 任一成立。
+                "is_important": bool(
+                    memory.get("is_important")
+                    or metadata.get("is_important")
+                    or importance >= 80.0
+                ),
                 "is_crystallized": bool(
                     memory.get("is_crystallized", memory.get("lifecycle_stage") == "crystallized")
                 ),

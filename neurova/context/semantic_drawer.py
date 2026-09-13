@@ -46,7 +46,12 @@ class SemanticMatchDrawer:
     # 全路径统一刻度（见 _calculate_match_score）：0.5 = 不相关基线，
     # 实测相关内容 ≥0.64 → 门槛 0.55 取空隙中点，双向留余量。
     # 仅在 need 非空时生效。
-    RELEVANCE_FLOOR = 0.55
+    # 残留处理 2026-09-13 校准：`(cos+1)/2` 刻度下"语种相同但语义无关"
+    # 短文本基线约 0.60-0.61（raw cos≈0.2），0.55 门槛无区分力
+    # （实测"爬虫记忆 vs 今天天气"= 0.6127 泄漏进视图）。相关对有
+    # 实测 ≥0.64 锚点，门槛抬至 0.65 落在两带之间。
+    # ⚠️ 刻度系减基线重标定（更根本方案）仍属待产品决策项（台账十二）。
+    RELEVANCE_FLOOR = 0.65
 
     def __init__(self, max_tokens: int = 16000):
         self.max_tokens = max_tokens

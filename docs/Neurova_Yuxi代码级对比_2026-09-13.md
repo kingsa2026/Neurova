@@ -141,11 +141,11 @@ Yuxi 值得抄的只有 SSE 工程：手写帧解析、**45s 无事件看门狗�
 | 2 | **P0** ✅ | **线程级单活+FIFO**：SQLite 同样支持部分唯一索引（`CREATE UNIQUE INDEX … WHERE status NOT IN (…)`），同 session 活跃 run 互斥由库强制，前端 messageQueue 语义后移到服务端 | `models_business.py:1257-1265` | chat/console 入站 |
 | 3 | **P0** ✅ | **rerank 模型通道接线**：工厂/runner 都在，补一个 provider 装配点（llm_router 已有 rerank capability 映射）；同时按 Yuxi 反面教材保证检索/重排错误**显式分型**不吞成空结果 | 反面：`milvus.py:1050-1052` | `knowledge/rerank/model_rerank_runner.py` |
 | 4 | **P0** ✅ | **schema 版本闭环**：db_migration 从只挂记忆库推广到全部 SQLite 库——每库版本域登记+启动精确校验+防降级拒绝打开 | `postgres/manager.py:26-27,500-514` | `core/db_migration.py` 接入面 |
-| 5 | **P1** | **RAG 评估执行器**：P/R/F1@K+JSONL 数据集+自动出题（邻居采样），纯 Python 无依赖，直接让 benchmark 摘掉 simulated | `knowledge/eval/metrics.py`、`benchmark_generation.py` | `benchmark/` 执行器 |
-| 6 | **P1** | **Offload 前移 + 存根寻址化**：NV 已有"池归档→FTS 台账→recall_history→microcompact 占位"闭环（初稿误判为缺，已复核更正），真缺口两处——① executor `max_chars` 硬截断改"全文入池/落台账、消息体留存根"（被截尾部现状永久丢失，违背归档无损语义）；② 占位串补 turn_id+预览，recall_history 从猜子串变按指针直取 | `summary.py:591-626` | `tool_executor.py` 截断点 + `orchestrator._clear_old_tool_results` |
-| 7 | **P1** | **Skill 依赖工具三层门控**：构建期全注册、每轮按激活集剔可见、read SKILL.md=激活（带授权面校验防自激活） | `middlewares/skills.py:103-141,215-269` | skills 体系/tool 装配面 |
-| 8 | **P1** | **取消语义升级**：stop 先落 DB durable 意图，执行侧轮询消费；**读状态失败 fail-closed 停执行** | `run_worker.py:184-211,567-574` | task_tracker + stop 端点 |
-| 9 | **P1** | **知识解析 Durable Task 化**：上传即入队（claim+heartbeat+failure hook 同事务收敛文件错误态），导入不再阻塞请求；文件状态迁移全走 CAS | `task_service.py:414-533`、`knowledge_file_repository.py:807-826` | `knowledge.py:881-943` 同步链 |
+| 5 | **P1** ✅已实施（§台账十一） | **RAG 评估执行器**：P/R/F1@K+JSONL 数据集+自动出题（邻居采样），纯 Python 无依赖，直接让 benchmark 摘掉 simulated | `knowledge/eval/metrics.py`、`benchmark_generation.py` | `benchmark/` 执行器 |
+| 6 | **P1** ✅已实施（§台账十） | **Offload 前移 + 存根寻址化**：设计经三轮讨论定稿（**决策纪实见 §5.6**）——会话 metadata.tool_calls 即全文台账（≤阈值驻留/不可重现豁免直进），超阈值可重现结果落工作区文件+预览+指针，占位存根携带 call_id/ts 寻址，recall_history 加直取模式；阈值参数进设置-高级（默认 64KB，范围 8–512KB）；`reproducible` 工具元数据全量强制声明+agent 自创工具标准 | `summary.py:591-626` | `tool_executor.py` 截断点 + `orchestrator._clear_old_tool_results` + `session_manager`/`recall_history` |
+| 7 | **P1** ⚪定性不实施（§台账十一） | **Skill 依赖工具三层门控**：构建期全注册、每轮按激活集剔可见、read SKILL.md=激活（带授权面校验防自激活） | `middlewares/skills.py:103-141,215-269` | skills 体系/tool 装配面 |
+| 8 | **P1** ✅已实施（§台账十一） | **取消语义升级**：stop 先落 DB durable 意图，执行侧轮询消费；**读状态失败 fail-closed 停执行** | `run_worker.py:184-211,567-574` | task_tracker + stop 端点 |
+| 9 | **P1** ✅已实施（§台账十一） | **知识解析 Durable Task 化**：上传即入队（claim+heartbeat+failure hook 同事务收敛文件错误态），导入不再阻塞请求；文件状态迁移全走 CAS | `task_service.py:414-533`、`knowledge_file_repository.py:807-826` | `knowledge.py:881-943` 同步链 |
 | 10 | **P2** ✅ | **openat 文件原语移植**：逐组件 `dir_fd+O_NOFOLLOW+fstat` 两函数直接可用于 agent_workspaces 防符号链逃逸 | `utils/paths.py:8-78` | workspace_files/沙箱层 |
 | 11 | **P2** ✅ | **定时任务防重**：三唯一约束+到期领取+stuck 恢复扫描；TaskScheduler 台账落库（现状重启丢） | `models_business.py:995-1043` | `agent/scheduler.py` |
 | 12 | **P2** ✅ | **API key 幂等+tombstone**：request_id advisory（SQLite 用 BEGIN IMMEDIATE 即可）+撤销保留行拒重放 | `api_key_repository.py:114-188` | openplatform_keys |
@@ -220,6 +220,24 @@ console.py 因 ledger 插入行号平移：`create_task(run_chat())` 644→**771
 2. NV 侧首评判断被当日实施验证为**可移植且已移植**（部分唯一索引/CAS/租约/防降级/openat 语义在 SQLite+Windows 全部有等价物），首评"落后一个量级"的表述对当前状态应修正为"最薄板块已从机制缺失降为形态约束"。
 3. 真正剩余的真差距只有三块，全部需要**形态决策**而非代码移植：独立 worker 的执行续跑（P1 #9 的 Durable Task 化可解知识解析一块）、HITL/checkpoint 人在环路、CI/CD 纪律；外加两个本评审新登记的断链——nrv_ 密钥认证消费、api_key_manager 孤岛库。
 4. 启发清单执行进度：**P0 4/4、P2 6/6 已实施；P1 0/5**（#5 RAG 评估执行器、#6 offload 前移+存根寻址、#7 skill 门控、#8 取消三层完整体、#9 知识解析 Durable 化），#5 是下一性价比之王。
+
+### 5.6 P1 #6 设计定稿（同日三轮讨论，用户拍板）
+
+| 决策项 | 定稿 | 依据/拍板记录 |
+|---|---|---|
+| 全文真相源 | **会话 metadata.tool_calls**（实测已存全文+timestamp，不截断；`[:2000]` 仅展示层拼接） | 用户提出"按 sessionID+时间戳检索会话"方案，核实地基已存在；不新建第二真相源（单源纪律） |
+| 驻留阈值默认 | 64KB（可配 8–512KB，用户拍板上限 512） | 2M 否决理由：file_read max_chars≈150KB 天然封顶，>512KB 实际只剩 execute 类长输出，其要么可重放（落文件零损失）要么走豁免，2M 受益面为空、成本全在会话读取面 |
+| 阈值参数位置 | 设置→高级，走 config_schema 单源（P2 #15），env `NEUROVA_TOOL_OFFLOAD_THRESHOLD_KB` 兜底 | 键位契约漂移根治 |
+| 溢出分层（可重现） | 全文落**工作区文件**（生命周期=随工作区，非 30 天 FTS 台账——台账语义是窗口驱逐归档，错配）+ 会话存 预览+指针 | Yuxi large_tool_results 同构；会话内文件/指针永不过期 |
+| 溢出分层（不可重现） | **豁免阈值**，全文直进会话 metadata | 当时原文即唯一记录，重放救不回 |
+| 降级链 | 预览+指针（永久）→ 重放工具（params 就在 tool_calls 条目里，可重放描述符）→ 重放失败如实告知漂移 | "30 天后按记忆检索"否决：记忆是语义提炼层非对象存储（EKB 3920 垃圾事故先例；语义召回给不出逐字原文） |
+| 记忆系统定位 | 只承接**结论层**（Evocate/睡眠巩固链现有路径，不动） | |
+| `reproducible` 字段 | **全量工具强制声明**（用户拍板）：注册面 fail-closed 校验，默认 True，execute/写回执类显式 False；落盘时写进 tool_calls 条目作证据（防工具改标/删除后语义漂移）；agent 自创工具继承标准——生成模板默认 True+副作用声明，skill_review_gate 审批项加"可重现性声明与实际副作用一致" | 用户指示"全部都打，也作为 agent 自创工具的一个标准" |
+| 存根格式 | `[工具输出已移出上下文: tool=<name> call=<tool_call_id> ts=<ISO> <若溢出: 文件指针>]` | microcompact 视图占位与 executor 溢出占位统一寻址语法 |
+| tool_calls 条目增强 | 补 `tool_call_id`（SSE 桥接已有、收集时丢失）+ `reproducible` 证据 + `offload_path`（溢出时） | 硬地址三件套 session_id+timestamp+call_id |
+| recall_history 增强 | 新增直取模式（session_id+timestamp+call_id 精确读会话条目/溢出文件）；原子串 FTS 保留为兜底（覆盖窗口驱逐历史） | |
+
+
 
 ---
 

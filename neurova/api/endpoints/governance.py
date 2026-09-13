@@ -346,6 +346,42 @@ async def update_agent_limits(body: AgentLimitsUpdate, admin=Depends(_governance
     return {"code": 0, "data": get_effective_limits()}
 
 
+# ── 工具结果溢出阈值（P1-#6，2026-09-13 设置-高级）──────────────────
+
+
+def _tool_offload_payload() -> dict:
+    from neurova.security import tool_offload_settings as tos
+
+    return {
+        "threshold_kb": tos.get_threshold_kb(),
+        "min_kb": tos.MIN_THRESHOLD_KB,
+        "max_kb": tos.MAX_THRESHOLD_KB,
+        "default_kb": tos.DEFAULT_THRESHOLD_KB,
+    }
+
+
+@router.get("/tool-offload")
+async def get_tool_offload(admin=Depends(_governance_admin_dep)):
+    """工具结果溢出阈值（仅管理员）：可重现大结果超阈值落工作区文件留指针"""
+    return {"code": 0, "data": _tool_offload_payload()}
+
+
+class ToolOffloadUpdate(BaseModel):
+    """工具溢出阈值更新（范围外 422；8–512KB，2026-09-13 拍板）"""
+
+    threshold_kb: int = Field(..., ge=8, le=512)
+
+
+@router.put("/tool-offload")
+async def update_tool_offload(body: ToolOffloadUpdate, admin=Depends(_governance_admin_dep)):
+    """更新工具结果溢出阈值（仅管理员）"""
+    from neurova.security import tool_offload_settings as tos
+
+    if not tos.save_settings({"threshold_kb": body.threshold_kb}):
+        raise HTTPException(status_code=500, detail="工具溢出阈值保存失败")
+    return {"code": 0, "data": _tool_offload_payload()}
+
+
 @router.get("/settings")
 async def get_governance_settings(admin=Depends(_governance_admin_dep)):
     """治理设置（仅管理员）"""
