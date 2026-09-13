@@ -163,6 +163,53 @@
           </GlassCard>
         </div>
       </a-tab-pane>
+      <!-- STUDIO TAB（批次4：一句话主题 → 内置短剧模板工作流 → 连播成片） -->
+      <a-tab-pane key="studio" :tab="t('aigc.studio')">
+        <div class="generation-layout">
+          <GlassPanel class="input-panel" variant="subtle">
+            <a-form layout="vertical">
+              <a-form-item :label="t('aigc.studioTheme')">
+                <a-textarea v-model:value="studioTheme" :rows="3" :placeholder="t('aigc.studioThemePlaceholder')" />
+              </a-form-item>
+              <a-form-item :label="t('aigc.studioGenre')">
+                <a-select v-model:value="studioGenre" :options="studioGenreOptions" />
+              </a-form-item>
+              <a-form-item :label="t('aigc.studioStyle')">
+                <a-input v-model:value="studioStyle" :placeholder="t('aigc.studioStylePlaceholder')" />
+              </a-form-item>
+              <a-form-item :label="t('aigc.studioAspect')">
+                <a-select v-model:value="studioAspect" :options="studioAspectOptions" />
+              </a-form-item>
+              <a-form-item :label="t('aigc.studioProvider')">
+                <a-select v-model:value="studioProvider" :options="studioProviderOptions" />
+              </a-form-item>
+              <GlassButton variant="primary" :loading="studioRunning" @click="runStudio">
+                {{ t('aigc.studioGenerate') }}
+              </GlassButton>
+            </a-form>
+          </GlassPanel>
+          <GlassCard :title="t('aigc.result')" class="result-panel">
+            <div v-if="studioSteps.length" class="studio-steps">
+              <div v-for="step in studioSteps" :key="step.id" class="studio-step">
+                <a-tag :color="step.status === 'success' ? 'success' : step.status === 'failed' ? 'error' : step.status === 'running' ? 'processing' : 'default'">
+                  {{ step.label }}
+                </a-tag>
+              </div>
+            </div>
+            <SlideshowPlayer v-if="studioItems.length" :items="studioItems" />
+            <div v-else-if="!studioRunning" class="studio-empty-hint">
+              <a-empty :description="t('aigc.studioEmpty')" />
+            </div>
+            <div v-if="composedVideoUrl" class="studio-composed">
+              <video controls :src="withFileToken(composedVideoUrl)" style="width: 100%; border-radius: 10px" />
+              <a :href="withFileToken(composedVideoUrl)" :download="composedVideoUrl.split('/').pop()" class="history-download">{{ t('aigc.download') }}</a>
+            </div>
+            <a v-if="studioWorkflowId" class="studio-open" @click="router.push('/collaboration/workflows')">
+              {{ t('aigc.studioOpenWorkflow') }}
+            </a>
+          </GlassCard>
+        </div>
+      </a-tab-pane>
     </a-tabs>
 
     <!-- 批次2：历史记录面板（消费 GET /generation/tasks，PRINTFILM 工具创作记录对标） -->
@@ -211,6 +258,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { request } from '@/api'
 import { listModels } from '@/api/modules/models'
@@ -222,14 +270,18 @@ import {
 } from '@/api/modules/generation'
 import { uploadFile } from '@/api/modules/files'
 import { withFileToken } from '@/utils/genFiles'
+import { useWorkflowRun } from '@/composables/useWorkflowRun'
+import SlideshowPlayer from '@/components/aigc/SlideshowPlayer.vue'
+import type { SlideshowItem } from '@/components/aigc/types'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { renderMarkdown } from '@/utils/markdown'
 
 const { t } = useI18n()
+const router = useRouter()
 
-const activeTab = ref<'text' | 'image' | 'audio' | 'video' | 'history'>('text')
+const activeTab = ref<'text' | 'image' | 'audio' | 'video' | 'history' | 'studio'>('text')
 
 // 图像风格模板（批次1）：原实现错接 GET /v1/image/templates —— 那是 Docker
 // 镜像构建模板（base_image/dockerfile），与图像风格无关；且提交的 style 字段
@@ -353,6 +405,77 @@ function formatTaskTime(ts: number): string {
 
 watch(activeTab, (tab) => {
   if (tab === 'history') loadHistory(historyKind.value || undefined)
+})
+
+// --- 批次4：创作（一键成片 = 跑内置短剧模板工作流，与画布引擎同内核）---
+const SHORT_DRAMA_TEMPLATE_ID = 'template_short_drama'
+const studioTheme = ref('')
+const studioGenre = ref('都市逆袭')
+const studioStyle = ref('cinematic')
+const studioAspect = ref('9:16 竖屏')
+const studioProvider = ref('openai')
+const {
+  running: studioRunning,
+  steps: studioSteps,
+  outputs: studioOutputs,
+  workflowId: studioWorkflowId,
+  runTemplate: runStudioTemplate,
+} = useWorkflowRun()
+
+const studioGenreOptions = [
+  '都市逆袭', '甜宠恋爱', '悬疑惊悚', '古装权谋', '战神归来',
+].map((g) => ({ label: g, value: g }))
+const studioAspectOptions = [
+  { label: '9:16 竖屏', value: '9:16 竖屏' },
+  { label: '16:9 横屏', value: '16:9 横屏' },
+  { label: '1:1 方形', value: '1:1 方形' },
+]
+const studioProviderOptions = [
+  { label: 'OpenAI 兼容', value: 'openai' },
+  { label: '通义万相/百炼', value: 'wanx' },
+  { label: '火山 Seedream', value: 'ark' },
+  { label: 'ComfyUI 自建', value: 'comfyui' },
+]
+
+async function runStudio() {
+  if (!studioTheme.value.trim()) return
+  const outcome = await runStudioTemplate(
+    SHORT_DRAMA_TEMPLATE_ID,
+    `短剧-${studioTheme.value.trim().slice(0, 20)}`,
+    {
+      theme: studioTheme.value.trim(),
+      genre: studioGenre.value,
+      style: studioStyle.value.trim() || 'cinematic',
+      aspect_ratio: studioAspect.value,
+      image_provider: studioProvider.value,
+    },
+  )
+  if (outcome.ok) {
+    message.success(t('aigc.studioOk'))
+  } else {
+    message.error(outcome.error || t('aigc.generateError'))
+  }
+}
+
+const studioItems = computed<SlideshowItem[]>(() => {
+  const o = (studioOutputs.value || {}) as any
+  const images: any[] = o.images || []
+  const sb: any[] = o.storyboard || []
+  const audio: any[] = o.audio || []
+  return images.map((img, i) => ({
+    shot: img.shot ?? i + 1,
+    url: img.url || '',
+    path: img.path || '',
+    prompt: img.prompt || '',
+    description: sb[i]?.description || sb[i]?.narration || '',
+    narration: sb[i]?.narration || '',
+    audio: audio[i]?.url || '',
+  }))
+})
+
+const composedVideoUrl = computed<string>(() => {
+  const compose = (studioOutputs.value as any)?.compose || {}
+  return String(compose.video_url || '')
 })
 
 onUnmounted(() => {
@@ -787,5 +910,26 @@ function pollVideoStatus(taskId: string) {
   color: inherit;
   font-size: 11px;
   padding: 0;
+}
+
+/* 批次4：创作 Tab */
+.studio-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.studio-composed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+.studio-open {
+  display: inline-block;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--nr-accent, #4096ff);
+  cursor: pointer;
 }
 </style>

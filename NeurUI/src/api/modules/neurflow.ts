@@ -149,6 +149,18 @@ export function executeWorkflow(workflowId: string, inputs: Record<string, unkno
   return api.post<ApiResponse<{ instance: WorkflowExecution }>>(`${BASE}/workflows/${workflowId}/execute`, { inputs, ...options })
 }
 
+/** run/stream 分离（P0-1）：wait=false 立即返回 runId，后台执行；配 SSE 订阅节点事件。 */
+export interface WorkflowRunAccepted {
+  runId: string
+  status: string
+  workflow_id: string
+  events_url: string
+}
+
+export function requestRun(workflowId: string, inputs: Record<string, unknown> = {}) {
+  return api.post<WorkflowRunAccepted>(`${BASE}/workflows/${workflowId}/execute`, { inputs, wait: false })
+}
+
 /** List executions. */
 export function getExecutions(params?: { workflow_id?: string; status?: string; limit?: number; offset?: number }) {
   return api.get<ApiResponse<{ executions: Pick<WorkflowExecution, 'id' | 'workflow_id' | 'status' | 'started_at' | 'finished_at' | 'duration' | 'error'>[] }>>(`${BASE}/executions`, { params })
