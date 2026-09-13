@@ -19,7 +19,7 @@
     "@vue-flow/core": "^1.41.5",
     "@vue-flow/minimap": "^1.5.2",
     "ant-design-vue": "^4.2.6",
-    "axios": "^1.18.0",
+    "axios": "^1.19.0",
     "dayjs": "^1.11.13",
     "dompurify": "^3.4.12",
     "echarts": "6.1.0",
