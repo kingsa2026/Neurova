@@ -152,3 +152,40 @@ class TestSchemaAndDispatchWiring:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class TestSandboxEnforcePassThrough:
+    @pytest.mark.asyncio
+    async def test_session_shell_not_hijacked_by_sandbox_verdict(self, monkeypatch):
+        """断点③核验：enforce 场景下 SANDBOX 裁决不再劫持会话 shell——
+        exec_command/write_stdin 直通自有执行器（审计已在上游落账）。"""
+        from unittest.mock import MagicMock
+
+        from neurova.security.governance import GovernanceDecision
+        from neurova import tool_executor as te
+
+        class _FakeVerdict:
+            decision = GovernanceDecision.SANDBOX
+            severity = None
+            reasons = ["policy"]
+
+            def to_dict(self):
+                return {"decision": "sandbox"}
+
+        class _FakeGov:
+            def evaluate_tool_call(self, *a, **k):
+                return _FakeVerdict()
+
+        monkeypatch.setattr(
+            "neurova.security.governance.get_governance", lambda: _FakeGov()
+        )
+        agent = MagicMock()
+        agent.config.user_id = "u1"
+        agent.config.agent_id = "a1"
+        executor = te.ToolExecutor(agent)
+        for name, params in (
+            ("exec_command", {"command": "echo hi"}),
+            ("write_stdin", {"session_id": 1, "chars": "x"}),
+        ):
+            result = await executor._governance_precheck(name, params)
+            assert result is None, f"{name} 被沙箱裁决劫持"
