@@ -449,3 +449,24 @@ uvicorn[standard]>=0.24.0
 | `requirements.txt` | 依赖安全 |
 | `NeurUI/src/pages/ChatPage.vue` | XSS（M3） |
 | `NeurUI/src/pages/AIGCPage.vue` | XSS（M3） |
+
+---
+
+## 修复进展（2026-09 复查）
+
+本轮针对"已查明的高危漏洞"做代码级复查与修复：
+
+| 编号 | 问题 | 状态 | 修复方式 |
+|------|------|------|---------|
+| H1 | `/computer/shell` 等无认证 RCE | ✅ 已修复 | 路由级 `Depends(get_current_user)` + 敏感端点收敛 `require_admin` |
+| H2 | 文件上传路径穿越 / 无认证 | ✅ 已修复 | `_validate_path_segment` + `relative_to` 边界校验 + 文件名 basename + 大小/类型限制 + 认证 |
+| M4 | debug 端点未认证 | ✅ 已修复 | `/debug/logs|status|command` 全部 `require_admin` |
+| M2 | 密码哈希回退无盐 SHA-256 | ✅ 已修复 | `verify_password` 仅接受 bcrypt / pbkdf2，未知格式一律拒绝 |
+| **H3** | **eval() 沙箱逃逸** | ✅ 本轮修复 | 新增 `neurova/security/safe_expr.py`（AST 白名单），替换 `builtin.py` / `workflow_engine.py` 两处 eval |
+| **L3** | **Zip/Tar Slip 解包越界写** | ✅ 本轮修复 | 新增 `neurova/security/safe_archive.py`（成员路径/链接校验），替换 8 处 `extractall` |
+| **M3** | **AIGCPage v-html XSS** | ✅ 本轮修复 | 手写正则伪 MD + 原始 v-html → 共享 `renderMarkdown`（marked + DOMPurify 白名单） |
+| **M1** | **JWT 密钥管理** | ✅ 本轮修复（部分） | 环境变量密钥强度校验（≥32 字节 + 拒绝占位默认值）；`.jwt_secret` 收紧 0600；生产环境弱密钥拒绝启动 |
+
+验证：新增回归测试 `tests/unit/security/test_security_audit_high_fixes.py`（33 例）+ `exec_transform` 逃逸用例 1 例，全部通过；`tests/unit/auth/`、`tests/unit/security/` 相关用例无回归。
+
+未在本轮处理（需产品/架构决策）：JWT 迁移 RS256、token 吊销黑名单、CORS 动态修改权限、依赖版本锁定。

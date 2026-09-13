@@ -166,6 +166,7 @@ import { generateText as apiGenerateText, generateImage as apiGenerateImage } fr
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import { renderMarkdown } from '@/utils/markdown'
 
 const { t } = useI18n()
 
@@ -253,15 +254,10 @@ const textModel = ref('auto')
 const textGenerating = ref(false)
 const textResult = ref('')
 
-const renderedText = computed(() => {
-  // Basic markdown: bold, italic, code blocks, line breaks
-  return textResult.value
-    .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/\n/g, '<br />')
-})
+// 安全审计 M3: 原实现为手写正则伪 MD 直出 v-html，模型返回内容（可含用户
+// 提示词注入的 HTML）未转义 → 存储型/DOM XSS。改用共享的 renderMarkdown
+// （marked + DOMPurify 白名单），与 ChatPage 同源净化。
+const renderedText = computed(() => renderMarkdown(textResult.value, t('common.copy')))
 
 async function generateText() {
   if (!textPrompt.value.trim()) return
