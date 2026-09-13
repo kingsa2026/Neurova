@@ -398,6 +398,15 @@
     <!-- Governance Approval Modal (P0: ASK 人工确认，状态在 useGovernanceApproval) -->
     <GovernanceApprovalModal />
 
+    <!-- 会话内按需 SSH 凭据卡（computer_ssh_exec 缺凭据触发，按当前用户隔离） -->
+    <div v-if="sshCredRequest" class="ssh-cred-overlay" @click.self="sshCredRequest = null">
+      <SshCredentialCard
+        :host="sshCredRequest.host"
+        @done="sshCredRequest = null"
+        @cancel="sshCredRequest = null"
+      />
+    </div>
+
     <!-- 计划模式面板（/plan）：澄清问答 → MD 计划预览 → 审批执行 -->
     <PlanPanel
       :open="planPanelOpen"
@@ -430,6 +439,7 @@ import { useChatStore } from '@/stores/chat'
 import { useMessageQueueStore } from '@/stores/messageQueue'
 import { useSessionSendLock } from '@/composables/useSessionSendLock'
 import { StreamTTSRunner, audioSourceFor, requireNonEmptyAudioBlob, prepareSpeechText, createSpeechAnnouncer, toolAnnouncementText, type SpeechAnnouncer } from '@/composables/useStreamTTS'
+import { resolveAudioUrl } from '@/utils/audioUrl'
 import { useTtsAudioGate } from '@/composables/useTtsAudioGate'
 import { isDefaultChatTitle } from '@/utils/sessionTitle'
 import { useRouter } from 'vue-router'
@@ -455,6 +465,7 @@ import SessionRenameModal from '@/components/chat/SessionRenameModal.vue'
 import ChatSessionSidebar from '@/components/chat/ChatSessionSidebar.vue'
 import ChatComposerArea from '@/components/chat/ChatComposerArea.vue'
 import GovernanceApprovalModal from '@/components/chat/GovernanceApprovalModal.vue'
+import SshCredentialCard from '@/components/chat/SshCredentialCard.vue'
 import RightDock from '@/components/chat/dock/RightDock.vue'
 import ContextUsageIndicator from '@/components/chat/ContextUsageIndicator.vue'
 import QueuedMessageCards from '@/components/chat/QueuedMessageCards.vue'
@@ -551,6 +562,11 @@ function onSessionSyncEvent(event: { event_type: string; payload: Record<string,
   // 电脑操作实时事件 → 分屏面板（不携带 subagent_id，先于子 Agent 分支处理）
   if (event.event_type === 'computer_action') {
     computerPanel.handleComputerAction(event.payload)
+    // 按需 SSH 凭据卡：computer_ssh_exec 缺凭据 → WS 通道携带 needs_credential + host
+    const p = event.payload as Record<string, any>
+    if (p && p.needs_credential && p.host) {
+      sshCredRequest.value = { host: String(p.host) }
+    }
     return
   }
   handleSubAgentSyncEvent(event)
@@ -610,6 +626,9 @@ function onSendQueuedNow(id: string): void {
 
 // 治理审批弹窗（P0: ASK 人工确认）→ 状态机收敛在 useGovernanceApproval
 const { approvalModal, openApprovalModal, confirmApproval, rejectApproval } = useGovernanceApproval()
+
+// 会话内按需 SSH 凭据卡（computer_ssh_exec 缺凭据 → needs_credential 触发，按当前用户隔离）
+const sshCredRequest = ref<{ host: string } | null>(null)
 
 // 斜杠命令面板（共享单例；命令注册表在 ChatComposerArea 组装）
 const { closeSlashPanel } = useSlashCommands()
@@ -1426,29 +1445,16 @@ async function sendMessage() {
 }
 
 /**
- * F-4 带凭证内容端点（台账 2026-09-11）：后端 audio 事件 url / done.audio_url
- * 指向 /api/ 鉴权内容端点（JWT 在 Authorization header，<audio> 直链带不了
- * 凭证）→ 带凭证取流转 blob URL（与 synthesize-stream 同模式；blob 生命
- * 周期由 revokeMessageBlobUrls 统一回收）。其余形态（blob: 等）原样透传。
+ * F-4 带凭证内容端点（台账 2026-09-11）：解析逻辑抽至 utils/audioUrl.ts
+ * （resolveAudioUrl，可单测）——/api/ URL 凭证据 fetch 转 blob，其余形态透传，
+ * 取流失败不设 audioUrl 回落手动合成；blob 由 revokeMessageBlobUrls 统一回收。
  */
 async function attachAudioUrl(msg: ChatMessage, url: string): Promise<void> {
   msg.audioProgress = 0
   msg.audioCurrentTime = 0
   msg.audioSpeed = 1
-  if (!url.startsWith('/api/')) {
-    msg.audioUrl = url
-    return
-  }
-  try {
-    const token = secureStorage.get('auth_token')
-    const resp = await fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    })
-    if (!resp.ok) return
-    msg.audioUrl = URL.createObjectURL(requireNonEmptyAudioBlob(await resp.blob()))
-  } catch {
-    // 内容端点取流失败：不设 audioUrl，气泡回落"生成语音"手动合成链路
-  }
+  const resolved = await resolveAudioUrl(url)
+  if (resolved !== null) msg.audioUrl = resolved
 }
 
 // 思考段滚动跟随（2026-09-12 bug）：流式推理段出内部滚动条后贴底展示最新思考。
@@ -3695,6 +3701,17 @@ onBeforeUnmount(() => {
   background: rgba(245, 158, 11, 0.08);
   color: #b45309;
   font-size: 12px;
+}
+
+/* 会话内按需 SSH 凭据卡覆盖层 */
+.ssh-cred-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
 }
 
 </style>

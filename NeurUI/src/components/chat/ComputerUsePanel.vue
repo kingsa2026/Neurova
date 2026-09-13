@@ -143,9 +143,10 @@ async function doRunCommand() {
     </div>
 
     <template v-if="!state.minimized">
-      <!-- Screenshot viewport -->
+      <!-- Screenshot / Terminal viewport -->
       <div class="cu-shot-wrap">
-        <div v-if="state.latestScreenshot" class="cu-shot-frame">
+        <pre v-if="state.view === 'terminal' && state.terminalTranscript" class="cu-terminal">{{ state.terminalTranscript }}</pre>
+        <div v-else-if="state.latestScreenshot" class="cu-shot-frame">
           <img
             ref="shotImgEl"
             :src="state.latestScreenshot"
@@ -308,6 +309,23 @@ async function doRunCommand() {
   max-height: 100%;
   object-fit: contain;
   cursor: crosshair;
+}
+/* SSH/shell 终端视图：等宽、左对齐、可滚动 */
+.cu-terminal {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  overflow: auto;
+  text-align: left;
+  font-family: 'Cascadia Code', 'Consolas', 'Menlo', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #d6e2c0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  align-self: stretch;
 }
 /* R2-5：图片容器（与 img 同尺寸），标记百分比相对它定位 */
 .cu-shot-frame {

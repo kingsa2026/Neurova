@@ -57,6 +57,23 @@
             <GlassButton variant="primary" size="sm" :loading="saving" @click="saveSection('security')">{{ t('common.save') }}</GlassButton>
           </template>
         </GlassCard>
+        <!-- 桌面沙箱提供方：值存 advanced 段（与运行权限档同族，后端热读），
+             未配置时 sandbox/auto 档变更动作 fail-closed 拒绝 -->
+        <GlassCard :title="t('settings.desktopProviderTitle')">
+          <p class="section-hint">{{ t('settings.desktopProviderHint') }}</p>
+          <a-form layout="vertical">
+            <a-form-item :label="t('settings.desktopProviderTitle')">
+              <a-select v-model:value="advanced.desktop_provider" style="width: 100%">
+                <a-select-option value="">{{ t('settings.desktopProviderNone') }}</a-select-option>
+                <a-select-option value="sandbox">{{ t('settings.desktopProviderSandbox') }}</a-select-option>
+                <a-select-option value="rdp">{{ t('settings.desktopProviderRdp') }}</a-select-option>
+              </a-select>
+            </a-form-item>
+          </a-form>
+          <template #footer>
+            <GlassButton variant="primary" size="sm" :loading="saving" @click="saveDesktopProvider">{{ t('common.save') }}</GlassButton>
+          </template>
+        </GlassCard>
       </a-tab-pane>
 
       <!-- Storage -->
@@ -162,11 +179,22 @@
                 style="width: 100%"
               />
             </a-form-item>
+            <a-form-item :label="t('settings.desktopRuntimeMode')" :extra="t('settings.desktopRuntimeModeHint')">
+              <a-select v-model:value="advanced.desktop_runtime_mode" style="width: 100%">
+                <a-select-option value="full">{{ t('settings.runtimeFull') }}</a-select-option>
+                <a-select-option value="sandbox">{{ t('settings.runtimeSandbox') }}</a-select-option>
+                <a-select-option value="review">{{ t('settings.runtimeReview') }}</a-select-option>
+                <a-select-option value="auto">{{ t('settings.runtimeAuto') }}</a-select-option>
+              </a-select>
+            </a-form-item>
           </a-form>
           <template #footer>
             <GlassButton variant="primary" size="sm" :loading="saving" @click="saveSection('advanced')">{{ t('common.save') }}</GlassButton>
           </template>
         </GlassCard>
+
+        <!-- 凭据管理（SSH 多主机 + 社交平台），按当前用户隔离；与"我的凭据"页共用组件 -->
+        <CredentialManager />
 
         <!-- Agent 运行限制（Token 预算上限 + 单次会话最大 Loop 轮次） -->
         <GlassCard :title="t('settings.agentLimitsTitle')">
@@ -235,6 +263,7 @@ import { useAuthStore } from '@/stores/auth'
 import { supportedLocales } from '@/i18n'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
+import CredentialManager from '@/components/settings/CredentialManager.vue'
 import { message } from 'ant-design-vue'
 
 const { t, locale } = useI18n()
@@ -251,7 +280,7 @@ const isDark = ref(appStore.isDark)
 const general = ref({ app_name: 'Neurova', language: locale.value })
 const security = ref({ jwt_secret: '', jwt_expiry_hours: 24, min_password_length: 8, require_special: true })
 const storage = ref({ media_path: '/data/media', max_upload_mb: 50, cache_ttl_minutes: 60 })
-const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false, max_output_tokens: 131072 })
+const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false, max_output_tokens: 131072, desktop_runtime_mode: 'full', desktop_provider: '' })
 
 // 进化治理设置（独立于扁平 settings 的治理面）
 const governance = ref({ conversation_rules_enabled: false, rsi_phase: 0 })
@@ -405,6 +434,20 @@ const saveSection = async (section: string) => {
   }
 }
 
+/** 提供方卡独立保存：只写 advanced 段的 desktop_provider 键
+ *（后端 save_app_settings 按 key merge，不触碰同段运行档/输出预算） */
+const saveDesktopProvider = async () => {
+  saving.value = true
+  try {
+    await updateSettings('advanced', { desktop_provider: advanced.value.desktop_provider })
+    message.success(t('common.success'))
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    saving.value = false
+  }
+}
+
 const clearCache = async () => {
   clearingCache.value = true
   try {
@@ -451,5 +494,12 @@ onMounted(() => {
 :deep(.settings-tabs .ant-tabs-tab-active .ant-tabs-tab-btn) { color: var(--nr-text-primary) !important; }
 .storage-actions { display: flex; gap: 8px; }
 .advanced-stack { display: flex; flex-direction: column; gap: 16px; }
+.ssh-host-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.ssh-host-row { display: flex; align-items: center; gap: 10px; }
+.ssh-host-name { font-family: 'Consolas', 'Menlo', monospace; flex: 1; }
+.ssh-add-form { border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 12px; }
+.social-status-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.social-status-row { display: flex; align-items: center; gap: 10px; }
+.social-platform-name { font-family: 'Consolas', 'Menlo', monospace; flex: 1; text-transform: capitalize; }
 .governance-hint { font-size: 12px; color: var(--nr-text-secondary, #8a8a92); margin: 0 0 12px; }
 </style>

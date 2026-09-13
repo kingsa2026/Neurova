@@ -53,6 +53,8 @@ const messages = {
     advanced: '高级', advancedSettings: '高级设置', debugMode: '调试模式', logLevel: '日志级别',
     debug: '调试', info: '信息', warning: '警告', error: '错误', enableTelemetry: '遥测',
     maxOutputTokens: '最大输出 Token', maxOutputTokensHint: '单次回复的输出预算上限',
+    desktopRuntimeMode: '桌面运行权限', desktopRuntimeModeHint: '本机/沙箱/审批',
+    runtimeFull: '完全放开', runtimeSandbox: '沙箱运行', runtimeReview: '审核模式', runtimeAuto: '自动模式',
     negativeScreen: '负一屏推送',
     governanceTitle: '进化治理', governanceHint: '提示', governanceRsiPhase: 'RSI 部署阶段',
     agentLimitsTitle: 'Agent 运行限制', agentLimitsHint: '提示', agentTokenBudget: 'Token 预算上限',
@@ -145,5 +147,21 @@ describe('SettingPage — 最大输出 Token 设置（max_output_tokens）', () 
     expect(labels).toContain('最大输出 Token')
     expect(wrapper.find('.ant-form-item .form-extra').text()).toContain('单次回复的输出预算上限')
     expect(wrapper.findAll('.ant-input-number').length).toBeGreaterThan(0)
+  })
+
+  it('桌面运行权限档默认 full，可保存提交', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    expect(vm.advanced.desktop_runtime_mode).toBe('full')
+    // 渲染出运行档选择器（label 走 data-label 属性）
+    const labels = wrapper.findAll('.ant-form-item').map((el) => el.attributes('data-label'))
+    expect(labels).toContain('桌面运行权限')
+    vm.advanced.desktop_runtime_mode = 'sandbox'
+    await vm.saveSection('advanced')
+    expect(updateSettings).toHaveBeenCalledWith(
+      'advanced',
+      expect.objectContaining({ desktop_runtime_mode: 'sandbox' }),
+    )
   })
 })

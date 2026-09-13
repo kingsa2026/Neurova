@@ -72,6 +72,16 @@ describe('listMedia（后端 GET /media/list 契约）', () => {
     expect(res.data.media[0]).not.toHaveProperty('url')
     expect(res.data.media[0]).not.toHaveProperty('tags')
   })
+
+  it('search 参数透传至后端 GET /media/list（台账 ③：搜索后端化）', async () => {
+    apiGet.mockResolvedValue({ code: 0, message: 'ok', data: { media: [], total: 0, offset: 0, limit: 50 } })
+
+    await mediaApi.listMedia({ agent_id: 'a1', search: 'clip', offset: 0, limit: 50 })
+
+    expect(apiGet).toHaveBeenCalledWith('/media/list', {
+      params: { agent_id: 'a1', search: 'clip', offset: 0, limit: 50 },
+    })
+  })
 })
 
 describe('saveMedia（后端 POST /media/save 契约）', () => {

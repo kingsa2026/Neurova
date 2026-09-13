@@ -12,7 +12,7 @@
         <a-form-item :label="t('negativeScreen.authCode')">
           <a-input-password
             v-model:value="config.auth_code"
-            :placeholder="t('negativeScreen.authCodePlaceholder')"
+            :placeholder="authCodePlaceholder"
             :disabled="!config.enabled"
           >
             <template #prefix>
@@ -101,22 +101,36 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { request } from '@/api'
 import { LockOutlined } from '@ant-design/icons-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
+import {
+  getNegativeScreenConfig,
+  updateNegativeScreenConfig,
+  deleteNegativeScreenConfig,
+  testNegativeScreenPush,
+  getPushStatistics,
+} from '@/api/modules/negative-screen'
 
 const { t } = useI18n()
 
-// 配置数据
+// 配置数据（auth_code 不回填：GET 已不回传明文，仅用户新输入时提交）
 const config = ref({
   auth_code: '',
   enabled: false,
   push_url: 'https://hiboard-claw-drcn.ai.dbankcloud.cn/distribution/message/cloud/claw/msg/upload'
 })
+
+// 已存授权码脱敏值（后端 masked_auth_code）
+const maskedAuthCode = ref<string | null>(null)
+const authCodePlaceholder = computed(() =>
+  maskedAuthCode.value
+    ? t('negativeScreen.authCodeConfigured', { masked: maskedAuthCode.value })
+    : t('negativeScreen.authCodePlaceholder')
+)
 
 // 统计数据
 const statistics = ref({
@@ -135,18 +149,12 @@ const testResult = ref<{ success: boolean; error?: string } | null>(null)
 // 加载配置
 const loadConfig = async () => {
   try {
-    const res: any = await request.get('/negative-screen')
-    const data = res?.data ?? res ?? {}
-    
-    if (data.auth_code) {
-      config.value.auth_code = data.auth_code
-    }
-    if (data.enabled !== undefined) {
-      config.value.enabled = data.enabled
-    }
+    const data = await getNegativeScreenConfig()
+    config.value.enabled = !!data.enabled
     if (data.push_url) {
       config.value.push_url = data.push_url
     }
+    maskedAuthCode.value = data.masked_auth_code ?? null
   } catch (error) {
     console.error(t('ui.loadNegScreenConfigFailed') + ':', error)
   }
@@ -155,9 +163,8 @@ const loadConfig = async () => {
 // 加载统计
 const loadStatistics = async () => {
   try {
-    const res: any = await request.get('/notifications/push-statistics')
-    const data = res?.data ?? res ?? {}
-    statistics.value = data
+    const res = await getPushStatistics()
+    statistics.value = res?.data ?? statistics.value
   } catch (error) {
     console.error(t('ui.loadPushStatsFailed') + ':', error)
   }
@@ -167,8 +174,18 @@ const loadStatistics = async () => {
 const saveConfig = async () => {
   saving.value = true
   try {
-    await request.put('/negative-screen', config.value)
+    const payload: Record<string, unknown> = {
+      enabled: config.value.enabled,
+      push_url: config.value.push_url,
+    }
+    // 留空 = 保留存量授权码（后端 PUT 省略即保留）
+    if (config.value.auth_code.trim()) {
+      payload.auth_code = config.value.auth_code.trim()
+    }
+    await updateNegativeScreenConfig(payload)
+    config.value.auth_code = ''
     message.success(t('negativeScreen.configSaved'))
+    await loadConfig()
   } catch (error) {
     message.error(t('negativeScreen.saveFailed'))
     console.error(t('ui.saveNegScreenConfigFailed') + ':', error)
@@ -181,12 +198,13 @@ const saveConfig = async () => {
 const deleteConfig = async () => {
   deleting.value = true
   try {
-    await request.delete('/negative-screen')
+    await deleteNegativeScreenConfig()
     config.value = {
       auth_code: '',
       enabled: false,
       push_url: 'https://hiboard-claw-drcn.ai.dbankcloud.cn/distribution/message/cloud/claw/msg/upload'
     }
+    maskedAuthCode.value = null
     message.success(t('negativeScreen.configDeleted'))
   } catch (error) {
     message.error(t('negativeScreen.deleteFailed'))
@@ -200,20 +218,19 @@ const deleteConfig = async () => {
 const testPush = async () => {
   testing.value = true
   testResult.value = null
-  
+
   try {
-    const res: any = await request.post('/negative-screen/test', {
+    const data = await testNegativeScreenPush({
       task_name: t('ui.testPushTaskName'),
       task_content: t('ui.testPushContent') + new Date().toLocaleString(),
       task_result: t('ui.testPushResult')
     })
-    
-    const data = res?.data ?? res ?? {}
+
     testResult.value = {
       success: data.success || false,
-      error: data.error
+      error: data.error ?? undefined
     }
-    
+
     if (data.success) {
       message.success(t('negativeScreen.testPushSuccess'))
     } else {

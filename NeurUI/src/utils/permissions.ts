@@ -13,8 +13,8 @@ export interface ModuleAccessContext {
   allowed_modules?: string[]
 }
 
-/** /dashboard 是兜底主页，恒可见 */
-const ALWAYS_VISIBLE_PREFIXES = ['/dashboard']
+/** /dashboard 兜底主页 + /my-credentials 个人凭据（按用户隔离，恒对登录用户可见） */
+const ALWAYS_VISIBLE_PREFIXES = ['/dashboard', '/my-credentials']
 
 function matchModule(moduleKey: string, path: string): boolean {
   if (!moduleKey.includes(':')) {
