@@ -84,16 +84,28 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
             return None
         session_id = manager.resolve_session_scope_id(message)
         meta: Dict[str, Any] = {
-            "user_id": message.sender_id or f"channel_{message.channel_type}",
+            # 渠道侧真实身份（open_id/群）记入 metadata 供来源展示/@；会话属主另设
+            "channel_user_id": message.sender_id or f"channel_{message.channel_type}",
+            "channel_name": message.sender_name or message.sender_id or "",
+            "chat_id": message.chat_id,
+            "chat_type": message.chat_type,
             "role": "user",
             "source_channel": message.channel_type,
             "channel": message.channel_type,
         }
+        # 会话归属：把请求级身份设为 agent 所有者（owner_user_id），使渠道对话落盘的
+        # session 归该管理员、在其控制台正常可见可续聊（外部发送者身份留在 metadata）。
+        # 请求上下文为空时 save_to_session 会落"共享可见"，故必须显式设定。
+        from neurova.core.identity_context import clear_request_user_id, set_request_user_id
+        owner = str(getattr(agent, "owner_user_id", "") or "") or None
         try:
+            set_request_user_id(owner)
             resp = await agent.chat(user_input=content, session_id=session_id, metadata=meta)
         except Exception:
             logger.exception("ChannelRouter: agent.chat 失败（channel=%s agent=%s）", message.channel_type, agent_id)
             return None
+        finally:
+            clear_request_user_id()
         if isinstance(resp, dict):
             text = resp.get("text") or ""
         else:

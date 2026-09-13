@@ -74,12 +74,16 @@ describe('useChat', () => {
         title: 'Alpha',
         updatedAt: '2026-01-01',
         pinned: false,
+        sourceChannel: '',
+        channelName: '',
       })
       expect(store.sessions[1]).toEqual({
         id: 's2',
         title: 'Beta',
         updatedAt: '2026-02-01',
         pinned: false,
+        sourceChannel: '',
+        channelName: '',
       })
     })
 
