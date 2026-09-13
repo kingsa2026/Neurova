@@ -50,5 +50,8 @@
     "vite": "^6.2.0",
     "vitest": "^3.0.7",
     "vue-tsc": "^2.2.8"
+  },
+  "overrides": {
+    "nanoid": "5.1.6"
   }
 }
