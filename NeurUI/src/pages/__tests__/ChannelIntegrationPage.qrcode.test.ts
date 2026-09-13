@@ -18,7 +18,6 @@ vi.mock('@/api/modules/channel-configs', () => ({
   clearChannelQueue: vi.fn().mockResolvedValue({}),
   checkChannelConflicts: vi.fn().mockResolvedValue({ data: { conflicts: [] } }),
   listPluginChannelSchemas: vi.fn().mockResolvedValue({ data: { schemas: [] } }),
-  createWechatIlinkQrcode: vi.fn().mockResolvedValue({ status: 'ready' }),
   getChannelQrcode: vi.fn().mockResolvedValue({ qrcode_img: 'ZmFrZS1wbmc=', poll_token: 'pt-1' }),
   getChannelQrcodeStatus: vi.fn().mockResolvedValue({
     status: 'success',

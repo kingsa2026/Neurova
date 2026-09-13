@@ -103,8 +103,6 @@
         </template>
       </a-form>
     </a-modal>
-
-    <WechatQrcodeDialog v-model:visible="qrVisible" :qr-url="qr.url" :qr-id="qr.qrId" @confirmed="onQrConfirmed" />
   </div>
 </template>
 
@@ -123,10 +121,8 @@ import { useRoute } from 'vue-router'
 import { message, Modal } from 'ant-design-vue'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
-import WechatQrcodeDialog from '@/components/WechatQrcodeDialog.vue'
 import {
   listChannelConfigs, createChannelConfig, deleteChannelConfig,
-  createWechatIlinkQrcode,
 } from '@/api/modules/channel-configs'
 import {
   buildChannelCatalog, buildChannelFieldsMap, buildCommonFields,
@@ -152,8 +148,6 @@ const loading = ref(false)
 const saving = ref(false)
 const showModal = ref(false)
 const current = ref<AgentChannel | null>(null)
-const qrVisible = ref(false)
-const qr = reactive({ url: '', qrId: '' })
 const form = reactive<{ enabled: boolean; values: Record<string, any> }>({ enabled: true, values: {} })
 const savedExtras = ref<Record<string, Record<string, unknown>>>({})
 
@@ -286,11 +280,8 @@ async function saveConfig() {
       verification_token: typeof extra.verification_token === 'string' ? extra.verification_token : '',
       extra,
     }, agentId.value)
-    const data = res?.data ?? res
-    if (data?.needs_scan) {
-      await startQrFlow(extra)
-      return
-    }
+    // 扫码由弹窗内 QrcodeAuthBlock 承担（取码→轮询→回填 bot_token→再保存）；
+    // needs_scan 仅表示未带 token 保存，配置照常持久化，适配器待扫码后重存注册。
     message.success(t('common.success'))
     showModal.value = false
     await fetchConfigs()
@@ -300,30 +291,6 @@ async function saveConfig() {
   } finally {
     saving.value = false
   }
-}
-
-async function startQrFlow(extra: Record<string, any>) {
-  try {
-    const res: any = await createWechatIlinkQrcode(
-      { token_file: String(extra.token_file || ''), bot_token: String(extra.bot_token || '') },
-      agentId.value,
-    )
-    const d = res?.data ?? res
-    if (d?.status === 'ready') {
-      message.success(t('common.success'))
-    } else if (d?.qr_url) {
-      qr.url = d.qr_url
-      qr.qrId = d.qr_id || ''
-      qrVisible.value = true
-    }
-  } catch {
-    message.error(t('channel.configSaveFailed'))
-  }
-}
-
-function onQrConfirmed() {
-  showModal.value = false
-  fetchConfigs()
 }
 
 function removeChannel(ch: AgentChannel) {

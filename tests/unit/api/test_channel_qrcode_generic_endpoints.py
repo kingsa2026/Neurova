@@ -76,8 +76,8 @@ def test_legacy_single_segment_routes_not_shadowed(client, monkeypatch):
     assert r.status_code == 404
 
 
-def test_legacy_wechat_ilink_routes_still_present(client):
-    """并行会话的 F-3 旧端点保留兼容（POST 生成 + GET 轮询）。"""
+def test_legacy_wechat_ilink_routes_removed(client):
+    """旧 /wechat/ilink/qrcode* 端点已随两套扫码合并而删除（防复活钉）。"""
     paths = [getattr(r, "path", "") for r in client.app.routes]
-    assert any(p.endswith("/channel-configs/wechat/ilink/qrcode") for p in paths)
-    assert any(p.endswith("/channel-configs/wechat/ilink/qrcode/status") for p in paths)
+    assert not any(p.endswith("/channel-configs/wechat/ilink/qrcode") for p in paths)
+    assert not any(p.endswith("/channel-configs/wechat/ilink/qrcode/status") for p in paths)
