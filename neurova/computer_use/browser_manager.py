@@ -843,6 +843,12 @@ class BrowserManager:
             return "scrapling"
         raise RuntimeError("No browser backend available")
 
+    def camofox_active(self) -> bool:
+        """R3-4 附身授权门判据：本次 browser_* 是否会走携带登录态的 camofox
+        profile。默认优先级 playwright > camofox，故仅当 camofox 启用且无
+        playwright 兜底时，动作才真正以用户身份对外——此时需显式授权。"""
+        return bool(self._camofox_enabled) and "playwright" not in self._backends
+
     async def _get_backend(self, backend_name: Optional[str] = None) -> BrowserBackend:
         """获取并初始化后端(camofox 按 user 池化,其它共享)"""
         name = self._resolve_backend(backend_name)
