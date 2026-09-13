@@ -55,7 +55,7 @@ class TestOrchestratorParallelExecution:
         )
         
         # 验证两个工具都成功
-        assert result.status.value == "success"
+        assert result.status.value == "completed"
         assert len(result.steps) == 2
         
         # 验证并行：两个工具的开始时间应该接近（< 50ms），而不是顺序（> 150ms）
@@ -104,7 +104,7 @@ class TestOrchestratorParallelExecution:
         
         # 验证两个工具都执行了
         assert len(result.steps) == 2
-        assert all(r.status.value == "success" for r in result.steps)
+        assert all(r.status.value == "completed" for r in result.steps)
         
         # 验证并行性
         start_diff = abs(start_times["fast_tool_a"] - start_times["fast_tool_b"])
@@ -151,7 +151,7 @@ class TestOrchestratorDAG:
         
         # 验证执行顺序
         assert execution_order == ["A", "B", "C"]
-        assert result.status.value == "success"
+        assert result.status.value == "completed"
     
     @pytest.mark.asyncio
     async def test_dag_parallel_layers(self):
@@ -186,7 +186,7 @@ class TestOrchestratorDAG:
         result = await orchestrator.orchestrate(goal="multi-layer", tool_plan=plan)
         
         assert len(result.steps) == 4
-        assert all(r.status.value == "success" for r in result.steps)
+        assert all(r.status.value == "completed" for r in result.steps)
         
         # 验证 B 和 C 并行：它们的开始时间应该接近
         assert "B" in start_times and "C" in start_times
@@ -305,7 +305,7 @@ class TestOrchestratorFallback:
         )
         
         # 验证降级成功
-        assert fallback_result.status.value == "success"
+        assert fallback_result.status.value == "completed"
         assert call_count["fallback"] == 1
 
 
@@ -342,9 +342,9 @@ class TestOrchestratorIntegration:
         
         # 验证结果
         assert len(result.steps) == 2
-        assert all(r.status.value == "success" for r in result.steps)
+        assert all(r.status.value == "completed" for r in result.steps)
         assert execution_log == ["step_a", "step_b"]
-        assert result.status.value == "success"
+        assert result.status.value == "completed"
     
     @pytest.mark.asyncio
     async def test_orchestrate_with_goal_parsing(self):
@@ -400,7 +400,7 @@ class TestOrchestratorIntegration:
         result = await orchestrator.orchestrate(goal="mixed", tool_plan=plan)
         
         # 验证结果
-        assert result.status.value == "success"
+        assert result.status.value == "completed"
         assert len(result.steps) == 4
         
         # 验证依赖顺序：A < B,C < D

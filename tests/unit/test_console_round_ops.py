@@ -59,6 +59,14 @@ class FakeRepo:
             return self.agent_sessions
         return self.sessions
 
+    def find_session(self, session_id):
+        """P1-F4 索引式定位（_find_session_target 现走此面）。
+        残留处理 2026-09-13：FakeRepo 补方法。"""
+        for sess in self.sessions:
+            if sess.get("session_id") == session_id or sess.get("id") == session_id:
+                return sess
+        return None
+
     def delete_round(self, agent_id, session_id, timestamp):
         self.delete_round_calls.append(
             {"agent_id": agent_id, "session_id": session_id, "timestamp": timestamp}
@@ -72,6 +80,32 @@ class FakeRepo:
 
     def get_round(self, agent_id, session_id, timestamp):
         return self.round_data
+
+    def get_feedback_aggregate(self, agent_id="", user_id="", limit=50):
+        """B-9 v2：stats 端点现走 repo sidecar 聚合——FakeRepo 基于配置的
+        histories_by_session 模拟同语义聚合。残留处理 2026-09-13。"""
+        like = dislike = 0
+        recent = []
+        for sess in self.list_sessions(agent_id=agent_id, user_id=user_id):
+            if sess.get("agent_id") != agent_id or sess.get("user_id") != user_id:
+                continue
+            sid = sess.get("session_id") or sess.get("id")
+            for msg in self.histories_by_session.get(
+                sid, self.history if not self.histories_by_session else []
+            ):
+                fb = (msg.get("metadata") or {}).get("feedback")
+                if fb == "like":
+                    like += 1
+                    recent.append({"session_id": sid, "feedback": "like",
+                                   "timestamp": msg.get("timestamp")})
+                elif fb == "dislike":
+                    dislike += 1
+                    recent.append({"session_id": sid, "feedback": "dislike",
+                                   "timestamp": msg.get("timestamp")})
+        # 最近反馈优先（时间戳降序，与 sidecar 聚合语义一致）
+        recent.sort(key=lambda r: str(r.get("timestamp") or ""), reverse=True)
+        return {"like": like, "dislike": dislike, "recent": recent[:20],
+                "sessions_scanned": len(self.list_sessions())}
 
     def update_message_metadata(self, agent_id, session_id, timestamp, metadata_patch, role=None):
         self.metadata_calls.append(
@@ -141,7 +175,7 @@ class FakeAgent:
 def test_delete_round_happy_path_purges_memory_and_syncs_history(monkeypatch):
     repo = FakeRepo()
     agent = FakeAgent()
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda *a: "u1")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
     monkeypatch.setattr(console_module, "get_agent_instance", lambda agent_id="default": agent)
 
@@ -176,7 +210,7 @@ def test_delete_round_happy_path_purges_memory_and_syncs_history(monkeypatch):
 
 def test_delete_round_404_when_session_missing(monkeypatch):
     repo = FakeRepo(sessions=[])
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda *a: "u1")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
 
     from fastapi import HTTPException
@@ -195,7 +229,7 @@ def test_delete_round_404_when_session_missing(monkeypatch):
 
 def test_delete_round_403_on_user_mismatch(monkeypatch):
     repo = FakeRepo()
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u-other")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda *a: "u-other")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
 
     from fastapi import HTTPException
@@ -214,7 +248,7 @@ def test_delete_round_403_on_user_mismatch(monkeypatch):
 
 def test_delete_round_404_when_round_not_found(monkeypatch):
     repo = FakeRepo(deleted=[])
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda *a: "u1")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
     monkeypatch.setattr(console_module, "get_agent_instance", lambda agent_id="default": None)
 
@@ -235,7 +269,7 @@ def test_delete_round_404_when_round_not_found(monkeypatch):
 def test_delete_round_works_without_live_agent(monkeypatch):
     """后端重启后 agent 不可用：session 删除照常，记忆/历史同步跳过。"""
     repo = FakeRepo()
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda *a: "u1")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
     monkeypatch.setattr(console_module, "get_agent_instance", lambda agent_id="default": None)
 
@@ -249,7 +283,7 @@ def test_delete_round_works_without_live_agent(monkeypatch):
 
 def test_feedback_persists_to_assistant_metadata(monkeypatch):
     repo = FakeRepo()
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda *a: "u1")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
 
     body = console_module.FeedbackRequest(
@@ -282,7 +316,7 @@ def test_feedback_rejects_unknown_value():
 
 def test_feedback_404_when_message_missing(monkeypatch):
     repo = FakeRepo(metadata_ok=False)
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda *a: "u1")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
 
     from fastapi import HTTPException
@@ -315,7 +349,7 @@ def test_feedback_applies_memory_temperature(monkeypatch):
         "assistant": {"role": "assistant", "content": "A1"},
     }
     agent = FakeAgent()
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda *a: "u1")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
     monkeypatch.setattr(console_module, "get_agent_instance", lambda agent_id="default": agent)
 
@@ -344,7 +378,7 @@ def test_feedback_cancel_does_not_touch_memory(monkeypatch):
         "assistant": {"role": "assistant", "content": "A1"},
     }
     agent = FakeAgent()
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda *a: "u1")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
     monkeypatch.setattr(console_module, "get_agent_instance", lambda agent_id="default": agent)
 
@@ -375,7 +409,7 @@ def test_feedback_stats_aggregates_across_sessions(monkeypatch):
              "metadata": {"feedback": "like"}},
         ],
     }
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda *a: "u1")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
 
     resp = asyncio.run(console_module.get_feedback_stats(agent_id="a1", limit=50, request=_make_request()))
@@ -393,7 +427,7 @@ def test_feedback_stats_aggregates_across_sessions(monkeypatch):
 def test_feedback_stats_empty_agent_returns_zeros(monkeypatch):
     repo = FakeRepo()
     repo.agent_sessions = []
-    monkeypatch.setattr(console_module, "_get_user_id", lambda request: "u1")
+    monkeypatch.setattr(console_module, "_get_user_id", lambda *a: "u1")
     monkeypatch.setattr(console_module, "get_session_repository", lambda: repo)
 
     resp = asyncio.run(console_module.get_feedback_stats(agent_id="a1", limit=50, request=_make_request()))

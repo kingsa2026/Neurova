@@ -82,11 +82,13 @@ class TestB3RequiresBins(unittest.TestCase):
         skill = MagicMock()
         skill.config = {"requires": {"bins": ["definitely_not_exist_xyz_9137"]}}
 
-        async def _fake_execute(params, context):
+        async def _fake_execute_skill(skill_name, params, context=None):
             return {"ok": True}
 
-        skill.execute = _fake_execute
-        registry.get_skill.return_value = skill
+        # 正典 seam（SkillRegistryProtocol：调用方依赖 execute_skill，
+        # skills 只读视图供 config 解析——残留处理 2026-09-13 随执行链迁移）
+        registry.skills = {"s": skill}
+        registry.execute_skill = _fake_execute_skill
 
         import asyncio
 

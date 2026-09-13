@@ -28,6 +28,9 @@ def _executor() -> ToolExecutor:
     ex = ToolExecutor.__new__(ToolExecutor)
     ex._agent = MagicMock()
     ex._agent._tool_messages_list = []
+    # 契约迁移（P0-B1，残留处理 2026-09-13）：实现经 append_tool_messages 公有
+    # API 写入轮次记录，fixture 把该 API 桥接到列表以保持断言原意图。
+    ex._agent.append_tool_messages = lambda records: ex._agent._tool_messages_list.extend(records)
     ex._execute_single_tool = AsyncMock(return_value={"ok": True})
     return ex
 

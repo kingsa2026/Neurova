@@ -77,14 +77,14 @@ class _FakeMemoryManager:
     def storage(self):
         return _FakeStorage(self._store)
 
-    def get_hot_memories(self, limit=10):
+    def get_hot_memories(self, limit=10, **kwargs):  # agent_wide 等口径参数透传（接口演进同步）
         # 与真实 MemoryManager.recall() 契约一致：返回 Memory.to_dict() 字典列表
         return [self._store[k] for k in list(self._store)[:limit]]
 
-    def get_crystallized(self, limit=20):
+    def get_crystallized(self, limit=20, **kwargs):
         return []
 
-    def get_stats(self):
+    def get_stats(self, **kwargs):
         return {"total_memories": len(self._store)}
 
     def get_self_model(self):
@@ -94,7 +94,7 @@ class _FakeMemoryManager:
         self.cleared = True
         return True
 
-    def forget(self, memory_id):
+    def forget(self, memory_id, **kwargs):  # agent_wide 口径透传（接口演进同步）
         if memory_id in self._store:
             self._store.pop(memory_id)
             return True

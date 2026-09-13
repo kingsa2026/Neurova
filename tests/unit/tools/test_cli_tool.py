@@ -52,12 +52,14 @@ class TestCLIToolExecutor:
     def test_assess_risk_high(self):
         """测试高风险评估"""
         # 高风险命令
+        # 根目录强删命中 critical 0.95（与 test_assess_risk_critical 同档，
+        # 残留处理 2026-09-13 修正错档）
         risk = self.executor.assess_risk("rm -rf /")
-        assert risk["level"] == "high"
+        assert risk["level"] == "critical"
         assert risk["score"] > 0.7
         
         risk = self.executor.assess_risk("sudo rm -rf /tmp/*")
-        assert risk["level"] == "high"
+        assert risk["level"] == "critical"
 
     def test_assess_risk_critical(self):
         """测试极高风险评估"""
@@ -130,7 +132,7 @@ class TestCLIToolExecutor:
             result = self.executor.execute_sync("sleep 10", timeout=1)
             
             assert result["success"] == False
-            assert "timeout" in result["error"].lower()
+            assert "timed out" in result["error"].lower()  # 消息串契约（cli_tool.py:222，从未用过 "timeout"）
 
     def test_execute_sync_high_risk_blocked(self):
         """测试高风险命令被阻止"""
@@ -380,7 +382,7 @@ class TestCLIToolExecutor:
             )
             
             assert result["success"] == False
-            assert "timeout" in result["error"].lower()
+            assert "timed out" in result["error"].lower()  # 消息串契约（cli_tool.py:222，从未用过 "timeout"）
 
 
 if __name__ == "__main__":

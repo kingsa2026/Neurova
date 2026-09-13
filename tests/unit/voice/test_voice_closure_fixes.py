@@ -64,11 +64,13 @@ class TestASRToEvolution:
         # 验证进化系统被调用
         mock_evolution.on_after_tool_execution.assert_called_once()
         call_args = mock_evolution.on_after_tool_execution.call_args
+        # 现行 voice_memory_bridge kwargs 面（context 字符串携带引擎/置信，
+        # latency 秒）。残留处理 2026-09-13 对齐，信息意图保留。
         assert call_args.kwargs["tool_name"] == "asr_transcribe"
         assert call_args.kwargs["success"] is True
-        assert call_args.kwargs["execution_time"] == 0.8  # 800ms -> 0.8s
-        assert call_args.kwargs["params"]["engine"] == "funasr"
-        assert call_args.kwargs["params"]["confidence"] == 0.92
+        assert call_args.kwargs["latency"] == 0.8  # 800ms -> 0.8s
+        assert "funasr" in call_args.kwargs["context"]
+        assert "0.92" in call_args.kwargs["context"]
 
     @pytest.mark.asyncio
     async def test_asr_evolution_failure_does_not_block(self):

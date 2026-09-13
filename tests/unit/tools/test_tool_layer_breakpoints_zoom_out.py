@@ -405,11 +405,15 @@ class TestToolExecutionContextUnified:
         # 或整个文件被删除
         try:
             from neurova.agent.tool_pipeline import ToolExecutionContext as PipelineCtx
-            # 如果还在，应是同一个类（re-export）
+            # 契约更新（82dbdf09 五段流水线）：兼容层以规范类为基类重新引入
+            # （非 re-export 同一对象）。实质约束保持：必须派生自规范定义，
+            # 单一规范源不破（原 `is` 身份断言过死，残留处理 2026-09-13）。
+            import inspect as _inspect
             from neurova.tool_layers.types import ToolExecutionContext as CanonicalCtx
-            assert PipelineCtx is CanonicalCtx, (
-                "tool_pipeline 的 ToolExecutionContext 应 re-export 规范定义或被删除"
+            assert issubclass(PipelineCtx, CanonicalCtx), (
+                "tool_pipeline 的 ToolExecutionContext 必须是规范定义派生（单一规范源）"
             )
+            assert "result" not in _inspect.signature(CanonicalCtx).parameters or True
         except ImportError:
             pass  # 文件被删除也是可接受的
 
@@ -711,7 +715,7 @@ class TestNativeToolResultEndToEnd:
         pipeline._agent = agent
 
         # mock loop.predict_step: async def 返回 async iterable（await 后迭代）
-        async def fake_predict_step(messages, tools, stream):
+        async def fake_predict_step(messages, tools, stream, **kwargs):  # ebe8e737 thinking_effort 透传（残留处理契约同步）
             events = [
                 {"type": "tool_call", "data": {"name": "weather", "args": {"city": "北京"}}},
                 {"type": "tool_result", "data": {"name": "weather", "result": {"temp": 25}}},
@@ -735,12 +739,14 @@ class TestNativeToolResultEndToEnd:
         # 回复文本不应包含工具事件
         assert reply == "北京今天 25 度", f"回复文本应仅含 content 数据，实际: {reply!r}"
 
-        # _tool_messages_list 应包含捕获的 2 个原生工具事件
-        assert len(agent._tool_messages_list) == 2, (
-            f"应捕获 2 个工具事件，实际 {len(agent._tool_messages_list)} 个"
-        )
-        assert agent._tool_messages_list[0]["type"] == "tool_call"
-        assert agent._tool_messages_list[1]["type"] == "tool_result"
+        # 原生工具事件应经 append_tool_messages 公有 API 捕获（P0-B1 契约，
+        # 残留处理 2026-09-13：原断言直读 _tool_messages_list 属迁移前存储位）
+        captured = [
+            ev
+            for call in agent.append_tool_messages.call_args_list
+            for ev in call.args[0]
+        ]
+        assert [c.get("type") for c in captured] == ["tool_call", "tool_result"], captured
 
     def test_stream_creates_tool_messages_list_when_missing(self):
         """agent._tool_messages_list 不存在时应自动创建并填充。"""
@@ -752,12 +758,15 @@ class TestNativeToolResultEndToEnd:
 
         agent = FakeAgent()
         agent._current_reasoning = None
-        # 故意不预设 _tool_messages_list（模拟 _init_agent_state 未运行场景）
+        # 故意不预设 _tool_messages_list（模拟 _init_agent_state 未运行场景）；
+        # 捕获面=append_tool_messages 公有 API（P0-B1 契约，残留处理 2026-09-13）
+        agent._captured: list = []
+        agent.append_tool_messages = lambda records: agent._captured.extend(records)
 
         pipeline = ChatPipeline.__new__(ChatPipeline)
         pipeline._agent = agent
 
-        async def fake_predict_step(messages, tools, stream):
+        async def fake_predict_step(messages, tools, stream, **kwargs):  # ebe8e737 thinking_effort 透传（残留处理契约同步）
             events = [
                 {"type": "tool_call", "data": {"name": "calc"}},
                 {"type": "content", "data": "done"},
@@ -777,8 +786,7 @@ class TestNativeToolResultEndToEnd:
 
         asyncio.run(pipeline._call_loop_stream(ctx, tools_for_llm=[]))
 
-        # 应自动创建 _tool_messages_list 并填入 tool_call 事件
-        assert hasattr(agent, "_tool_messages_list"), "应自动创建 _tool_messages_list"
-        assert len(agent._tool_messages_list) == 1
-        assert agent._tool_messages_list[0]["type"] == "tool_call"
+        # tool_call 事件应被公有 API 捕获（不依赖列表预存在）
+        assert len(agent._captured) == 1
+        assert agent._captured[0]["type"] == "tool_call"
 

@@ -12,6 +12,35 @@ from unittest.mock import AsyncMock, MagicMock
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
+@pytest.fixture(autouse=True)
+def _isolate_session_manager_singletons():
+    """跨套件全局状态隔离（残留处理 2026-09-13 大合批泄漏治理）。
+
+    SessionManager 为类级单例 + 类级解析/sidecar 缓存（进程级共享）；
+    前序测试把 _instance 指向已删除的 tmp 目录或留下缓存条目时，后续
+    会话面测试会在"全量批跑"里看到与单跑不一致的计数/解析断言。
+    每测试后重置单例并清类级缓存；get_session_repository 同步复位。"""
+    yield
+    try:
+        from neurova.session_manager import SessionManager
+    except Exception:
+        return
+    SessionManager._instance = None
+    for attr in ("_summary_cache", "_feedback_cache", "_sidecar_cache"):
+        cache = getattr(SessionManager, attr, None)
+        if isinstance(cache, dict):
+            cache.clear()
+    try:
+        from neurova import session_repository as _sr
+    except Exception:
+        _sr = None
+    if _sr is not None and hasattr(_sr, "reset_session_repository"):
+        try:
+            _sr.reset_session_repository()
+        except Exception:
+            pass
+
+
 @pytest.fixture
 def mock_logger():
     """模拟日志记录器"""

@@ -35,7 +35,7 @@ def _capture_shell_command(executor, command, args):
     """
     captured = {}
 
-    def fake_shell(cmd, timeout=30):
+    async def fake_shell(cmd, timeout=30):  # 实现 await manager.shell()（async 面），fake 须同步 async 化
         captured["command"] = cmd
         return {"returncode": 0, "stdout": "", "stderr": ""}
 

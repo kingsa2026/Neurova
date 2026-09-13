@@ -96,19 +96,22 @@ class TestW2OrchestratorForbidsRealtime:
             )
 
     def test_positive_guidance_for_realtime_tools(self):
-        from neurova.context.orchestrator import ContextOrchestrator
+        # 引导文案随 A1/A4 单源化迁入模块级 render_tools_description
+        # （get_tools_description 渲染消费它）。残留处理 2026-09-13 对齐。
+        from neurova.context import orchestrator as orch_mod
 
-        src = inspect.getsource(ContextOrchestrator.get_tools_description)
+        src = inspect.getsource(orch_mod.render_tools_description)
         # 应包含正向引导：使用 weather / web_search 工具
-        assert "weather" in src or "web_search" in src, (
-            "get_tools_description 应正向引导使用 weather / web_search 工具获取实时信息"
+        assert "weather" in src and "web_search" in src, (
+            "render_tools_description 应正向引导使用 weather / web_search 获取实时信息"
         )
 
     def test_keeps_memory_search_limit(self):
-        """保留对 memory_search 的限制（用户决策：只去掉禁止查实时信息，保留 memory 限制）"""
-        from neurova.context.orchestrator import ContextOrchestrator
+        """保留对 memory_search 的限制（用户决策：只去掉禁止查实时信息，保留 memory 限制）。
+        文案同随单源化位于 render_tools_description。残留处理 2026-09-13"""
+        from neurova.context import orchestrator as orch_mod
 
-        src = inspect.getsource(ContextOrchestrator.get_tools_description)
+        src = inspect.getsource(orch_mod.render_tools_description)
         assert "memory_search" in src, (
             "应保留对 memory_search 的说明（仅限内部记忆）"
         )

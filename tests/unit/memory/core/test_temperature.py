@@ -172,13 +172,15 @@ class TestTemperatureOnDecay:
     def test_ebbinghaus_curve(self):
         """遗忘曲线应该影响衰减率"""
         days_ago_1 = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-        days_ago_7 = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        # 6 天而非 7 天整：7 天落在曲线分段边界，微秒级 timing 抖动会两支
+        # 同因子（大合批曾现 9.375 > 9.375）。残留处理 2026-09-13
+        days_ago_6 = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
 
         result_1 = TemperatureEngine.on_decay(
             current_temp=50.0, last_accessed=days_ago_1
         )
         result_7 = TemperatureEngine.on_decay(
-            current_temp=50.0, last_accessed=days_ago_7
+            current_temp=50.0, last_accessed=days_ago_6
         )
 
         # 1天内衰减曲线因子2.0，7天内1.0

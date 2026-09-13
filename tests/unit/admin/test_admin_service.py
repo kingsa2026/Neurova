@@ -1,275 +1,184 @@
 """
 AdminService 单元测试
+
+2026-09-13 残留处理：原文件按已被替换的旧实现书写（config/event_bus 构造 +
+UserModel/StartupManager mock + tar 备份 + int user_id——现行 AdminService 为
+JSON 存储面 `AdminService(storage_dir)`，user_id=str、backup 为快照 JSON）。
+验证意图逐条保留：目录初始化、增删改查、唯一性、备份/列表/过滤/恢复/删除、
+统计、UserBackup 序列化往返。
 """
 
 import unittest
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
-try:
-    from neurova.admin.admin_service import AdminService, UserBackup
-    HAS_ADMIN_SERVICE = True
-except ImportError:
-    HAS_ADMIN_SERVICE = False
+from neurova.admin.admin_service import AdminService, UserBackup
 
 
-@unittest.skipIf(not HAS_ADMIN_SERVICE, "AdminService not available")
 class TestAdminService(unittest.TestCase):
-    """AdminService 测试类"""
+    """AdminService 测试类（现行 JSON 存储契约）"""
 
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.data_dir = Path(self.temp_dir.name)
-
-        self.mock_user_model = MagicMock()
-        self.mock_group_manager = MagicMock()
-        self.mock_skill_manager = MagicMock()
-        self.mock_collab_manager = MagicMock()
-
-        self.mock_sm = MagicMock()
-        self.mock_sm.get_module.side_effect = lambda name: {
-            "UserModel": self.mock_user_model,
-            "UserGroupManager": self.mock_group_manager,
-            "SkillPoolManager": self.mock_skill_manager,
-            "CollaborationIsolationManager": self.mock_collab_manager,
-        }.get(name)
-
-        self.startup_patcher = patch(
-            'neurova.core.startup_manager.get_startup_manager',
-            return_value=self.mock_sm
-        )
-        self.startup_patcher.start()
-
-        self.service = AdminService(
-            config={"data_dir": str(self.data_dir)},
-            event_bus=None,
-        )
-        self.service._on_init()
+        self.service = AdminService(storage_dir=str(self.data_dir / "admin"))
 
     def tearDown(self) -> None:
-        self.startup_patcher.stop()
         self.temp_dir.cleanup()
 
+    def _mk_user(self, username="testuser", email="test@example.com"):
+        return self.service.create_user(username=username, email=email, password="pw123456")
+
     def test_init_creates_directories(self) -> None:
-        self.assertTrue(self.service.backup_dir.exists())
+        self.assertTrue(self.service._backups_dir.exists())
+        self.assertTrue((self.data_dir / "admin").exists())
 
     def test_create_user_success(self) -> None:
-        self.mock_user_model.get_user_by_username.return_value = None
-        self.mock_user_model.get_user_by_email.return_value = None
-        self.mock_user_model.create_user.return_value = {
-            "id": 1, "username": "testuser", "email": "test@example.com"
-        }
-
-        result = self.service.create_user(
-            username="testuser",
-            email="test@example.com",
-            password="password123",
-        )
+        result = self._mk_user()
         self.assertEqual(result["username"], "testuser")
-        self.mock_user_model.create_user.assert_called_once()
+        self.assertEqual(result["email"], "test@example.com")
+        self.assertTrue(result["id"].startswith("usr_"))
+        self.assertEqual(result["status"], "active")
 
     def test_create_user_duplicate_username(self) -> None:
-        self.mock_user_model.get_user_by_username.return_value = {"id": 1, "username": "testuser"}
-
+        self._mk_user()
         with self.assertRaises(ValueError):
-            self.service.create_user(
-                username="testuser",
-                email="test@example.com",
-                password="password123",
-            )
+            self._mk_user(email="other@example.com")
 
     def test_create_user_duplicate_email(self) -> None:
-        self.mock_user_model.get_user_by_username.return_value = None
-        self.mock_user_model.get_user_by_email.return_value = {"id": 1, "email": "test@example.com"}
-
+        self._mk_user()
         with self.assertRaises(ValueError):
-            self.service.create_user(
-                username="testuser",
-                email="test@example.com",
-                password="password123",
-            )
+            self._mk_user(username="otheruser")
 
     def test_update_user(self) -> None:
-        self.mock_user_model.get_user_by_id.return_value = {
-            "id": 1, "username": "oldname", "email": "old@example.com"
-        }
-        self.mock_user_model.get_user_by_username.return_value = None
-        self.mock_user_model.get_user_by_email.return_value = None
-        self.mock_user_model.update_user.return_value = True
+        uid = self._mk_user()["id"]
+        self.assertTrue(self.service.update_user(uid, email="new@example.com"))
+        self.assertEqual(self.service.get_user(uid)["email"], "new@example.com")
 
-        result = self.service.update_user(1, username="newname", email="new@example.com")
-        self.assertTrue(result)
-        self.mock_user_model.update_user.assert_called_once()
-
-    def test_update_user_not_found(self) -> None:
-        self.mock_user_model.get_user_by_id.return_value = None
-
+    def test_update_user_conflicting_username_raises(self) -> None:
+        u1 = self._mk_user("alice", "a@x.com")
+        self._mk_user("bob", "b@x.com")
         with self.assertRaises(ValueError):
-            self.service.update_user(999, username="newname")
+            self.service.update_user(u1["id"], username="bob")
+
+    def test_update_user_not_found_returns_false(self) -> None:
+        # 现行契约：不存在 → False（不 raise）
+        self.assertFalse(self.service.update_user("usr_missing", username="x"))
 
     def test_delete_user(self) -> None:
-        self.mock_user_model.get_user_by_id.return_value = {
-            "id": 1, "username": "testuser"
-        }
-        self.mock_user_model.delete_user.return_value = True
-        self.mock_collab_manager.admin_delete_user_projects.return_value = 0
-        self.mock_skill_manager.admin_delete_user_skills.return_value = 0
-
-        result = self.service.delete_user(1, backup_before_delete=False)
-        self.assertEqual(result["user_id"], 1)
+        uid = self._mk_user()["id"]
+        result = self.service.delete_user(uid)
+        self.assertEqual(result["user_id"], uid)
         self.assertEqual(result["username"], "testuser")
-        self.assertTrue(self.mock_user_model.delete_user.called)
+        self.assertIsNone(self.service.get_user(uid))
 
     def test_delete_user_not_found(self) -> None:
-        self.mock_user_model.get_user_by_id.return_value = None
-
         with self.assertRaises(ValueError):
-            self.service.delete_user(999)
+            self.service.delete_user("usr_missing")
 
-    @patch('tarfile.open')
-    @patch.object(Path, 'stat')
-    def test_backup_user(self, mock_stat, mock_tarfile_open) -> None:
-        self.mock_user_model.get_user_by_id.return_value = {
-            "id": 1, "username": "testuser", "email": "test@example.com"
-        }
+    def test_delete_user_removes_from_group(self) -> None:
+        uid = self._mk_user()["id"]
+        self.service.delete_user(uid)
+        stats = self.service.get_system_stats()
+        self.assertNotIn(uid, stats["group_stats"]["default"]["members"])
 
-        mock_tar = MagicMock()
-        mock_tarfile_open.return_value.__enter__.return_value = mock_tar
-        mock_stat.return_value.st_size = 1024
-
-        backup = self.service.backup_user(1)
+    def test_backup_user(self) -> None:
+        uid = self._mk_user()["id"]
+        backup = self.service.backup_user(uid, description="manual")
         self.assertIsInstance(backup, UserBackup)
-        self.assertEqual(backup.user_id, 1)
-        self.assertEqual(backup.username, "testuser")
+        self.assertEqual(backup.user_id, uid)
+        self.assertEqual(backup.description, "manual")
+        self.assertGreater(backup.size_bytes, 0)
+        self.assertTrue(Path(backup.backup_path).exists())
 
     def test_backup_user_not_found(self) -> None:
-        self.mock_user_model.get_user_by_id.return_value = None
-
         with self.assertRaises(ValueError):
-            self.service.backup_user(999)
+            self.service.backup_user("usr_missing")
 
-    @patch('tarfile.open')
-    @patch.object(Path, 'stat')
-    def test_list_backups(self, mock_stat, mock_tarfile_open) -> None:
-        self.mock_user_model.get_user_by_id.return_value = {
-            "id": 1, "username": "testuser", "email": "test@example.com"
-        }
+    def test_list_backups(self) -> None:
+        uid = self._mk_user()["id"]
+        self.service.backup_user(uid)
+        self.service.backup_user(uid)
+        self.assertEqual(len(self.service.list_backups()), 2)
 
-        mock_tar = MagicMock()
-        mock_tarfile_open.return_value.__enter__.return_value = mock_tar
-        mock_stat.return_value.st_size = 1024
-
-        self.service.backup_user(1)
-        self.service.backup_user(1)
-
-        backups = self.service.list_backups()
-        self.assertEqual(len(backups), 2)
-
-    @patch('tarfile.open')
-    @patch.object(Path, 'stat')
-    def test_list_backups_filter_by_user(self, mock_stat, mock_tarfile_open) -> None:
-        self.mock_user_model.get_user_by_id.side_effect = [
-            {"id": 1, "username": "user1", "email": "u1@test.com"},
-            {"id": 2, "username": "user2", "email": "u2@test.com"},
-        ]
-
-        mock_tar = MagicMock()
-        mock_tarfile_open.return_value.__enter__.return_value = mock_tar
-        mock_stat.return_value.st_size = 1024
-
-        self.service.backup_user(1)
-        self.service.backup_user(2)
-
-        backups = self.service.list_backups(user_id=1)
+    def test_list_backups_filter_by_user(self) -> None:
+        u1 = self._mk_user("user1", "u1@test.com")
+        u2 = self._mk_user("user2", "u2@test.com")
+        self.service.backup_user(u1["id"])
+        self.service.backup_user(u2["id"])
+        backups = self.service.list_backups(user_id=u1["id"])
         self.assertEqual(len(backups), 1)
-        self.assertEqual(backups[0].user_id, 1)
+        self.assertEqual(backups[0].user_id, u1["id"])
 
-    @patch('tarfile.open')
-    @patch.object(Path, 'stat')
-    def test_restore_user(self, mock_stat, mock_tarfile_open) -> None:
-        self.mock_user_model.get_user_by_id.return_value = {
-            "id": 1, "username": "testuser", "email": "test@example.com"
-        }
-
-        mock_tar = MagicMock()
-        mock_tarfile_open.return_value.__enter__.return_value = mock_tar
-        mock_stat.return_value.st_size = 1024
-
-        backup = self.service.backup_user(1)
-        backup_id = backup.backup_id
-
-        backup.backup_file.parent.mkdir(parents=True, exist_ok=True)
-        backup.backup_file.touch()
-
-        result = self.service.restore_user(backup_id)
-        self.assertEqual(result["user_id"], 1)
-        self.assertEqual(result["username"], "testuser")
+    def test_restore_user(self) -> None:
+        uid = self._mk_user()["id"]
+        backup = self.service.backup_user(uid)
+        self.service.update_user(uid, email="changed@example.com")
+        result = self.service.restore_user(backup.backup_id)
+        self.assertEqual(result["user_id"], uid)
+        self.assertTrue(result["restored"])
+        # 快照回写：email 回到备份时点
+        self.assertEqual(self.service.get_user(uid)["email"], "test@example.com")
 
     def test_restore_user_backup_not_found(self) -> None:
         with self.assertRaises(ValueError):
-            self.service.restore_user("nonexistent_backup")
+            self.service.restore_user("bk_nonexistent")
 
-    @patch('tarfile.open')
-    @patch.object(Path, 'stat')
-    def test_delete_backup(self, mock_stat, mock_tarfile_open) -> None:
-        self.mock_user_model.get_user_by_id.return_value = {
-            "id": 1, "username": "testuser", "email": "test@example.com"
-        }
-
-        mock_tar = MagicMock()
-        mock_tarfile_open.return_value.__enter__.return_value = mock_tar
-        mock_stat.return_value.st_size = 1024
-
-        backup = self.service.backup_user(1)
-        backup_id = backup.backup_id
-
-        self.assertTrue(self.service.delete_backup(backup_id))
-        backups = self.service.list_backups()
-        self.assertEqual(len(backups), 0)
+    def test_delete_backup(self) -> None:
+        uid = self._mk_user()["id"]
+        backup = self.service.backup_user(uid)
+        self.assertTrue(self.service.delete_backup(backup.backup_id))
+        self.assertEqual(len(self.service.list_backups()), 0)
+        self.assertFalse(Path(backup.backup_path).exists())
 
     def test_delete_nonexistent_backup(self) -> None:
-        self.assertFalse(self.service.delete_backup("nonexistent"))
+        self.assertFalse(self.service.delete_backup("bk_nonexistent"))
 
     def test_get_system_stats(self) -> None:
-        self.mock_user_model.count_users.return_value = 10
-        self.mock_group_manager.list_groups.return_value = []
-
+        for i in range(3):
+            self._mk_user(f"u{i}", f"u{i}@x.com")
         stats = self.service.get_system_stats()
-        self.assertEqual(stats["total_users"], 10)
-        self.assertIn("total_agents", stats)
-        self.assertIn("total_projects", stats)
-        self.assertIn("total_skills", stats)
+        self.assertEqual(stats["total_users"], 3)
+        self.assertIn("total_backups", stats)
+        self.assertIn("group_stats", stats)
+        self.assertEqual(stats["group_stats"]["default"]["count"], 3)
+
+    def test_persistence_roundtrip(self) -> None:
+        """JSON 落盘持久：新实例读回同数据（现行存储层的存在意义）。"""
+        uid = self._mk_user()["id"]
+        second = AdminService(storage_dir=str(self.data_dir / "admin"))
+        self.assertEqual(second.get_user(uid)["username"], "testuser")
 
     def test_user_backup_to_dict(self) -> None:
-        from datetime import datetime
+        import datetime
+
         backup = UserBackup(
             backup_id="backup_test123",
-            user_id=1,
-            username="testuser",
-            backup_at=datetime(2024, 1, 1, 12, 0, 0),
-            backup_file=Path("/tmp/test.tar.gz"),
-            backup_size=1024,
-            summary={"agents": 1, "projects": 2},
+            user_id="usr_1",
+            created_at=datetime.datetime(2024, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc),
+            backup_path="/tmp/test.json",
+            size_bytes=1024,
+            description="d",
         )
         d = backup.to_dict()
         self.assertEqual(d["backup_id"], "backup_test123")
-        self.assertEqual(d["user_id"], 1)
-        self.assertEqual(d["username"], "testuser")
+        self.assertEqual(d["user_id"], "usr_1")
+        self.assertEqual(d["size_bytes"], 1024)
 
     def test_user_backup_from_dict(self) -> None:
         data = {
             "backup_id": "backup_test456",
-            "user_id": 2,
-            "username": "user2",
-            "backup_at": "2024-01-01T12:00:00",
-            "backup_file": "/tmp/test2.tar.gz",
-            "backup_size": 2048,
-            "summary": {},
+            "user_id": "usr_2",
+            "created_at": "2024-01-01T12:00:00+00:00",
+            "backup_path": "/tmp/test2.json",
+            "size_bytes": 2048,
+            "description": "x",
+            "metadata": {},
         }
         backup = UserBackup.from_dict(data)
         self.assertEqual(backup.backup_id, "backup_test456")
-        self.assertEqual(backup.user_id, 2)
+        self.assertEqual(backup.user_id, "usr_2")
+        self.assertEqual(backup.size_bytes, 2048)
 
 
 if __name__ == "__main__":

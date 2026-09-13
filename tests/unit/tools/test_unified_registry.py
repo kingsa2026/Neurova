@@ -1,7 +1,28 @@
 """
 Test cases for neurova.tool_layers.unified_registry
 """
+import contextlib
+import time
+from unittest.mock import patch
+
 import pytest
+
+
+def _advancing_clock(start=1000.0, step=0.5):
+    """time.time() 在本路径被调用 ≥3 次（start/duration/entry timestamp），
+    固定 tick 迭代会 StopIteration——用持续递增时钟。"""
+    t = {"v": start}
+
+    def _fake():
+        t["v"] += step
+        return t["v"]
+    return _fake
+
+
+@contextlib.contextmanager
+def _patch_clock(start=1000.0):
+    with patch.object(time, "time", side_effect=_advancing_clock(start)):
+        yield
 import time
 from unittest.mock import Mock, AsyncMock, patch
 
@@ -63,7 +84,9 @@ class TestUnifiedToolRegistry:
         graph = self.registry.get_capability_graph()
         
         assert graph is not None
-        assert hasattr(graph, 'get_related_tools')
+        # 真实关系查询面（残留处理 2026-09-13：get_related_tools 从未存在于实现）
+        assert hasattr(graph, 'suggest_companion_tools')
+        assert hasattr(graph, 'get_prerequisites')
     
     def test_get_cli_executor(self):
         """Test getting CLI executor."""
@@ -87,7 +110,10 @@ class TestUnifiedToolRegistry:
         
         self.registry.register_builtin("test_tool", mock_tool)
         
-        result = await self.registry.execute_and_log("test_tool", {"param": "value"})
+        # 确定性时钟：两次 time() 差 0.5s（Windows 时钟粒度粗，AsyncMock
+        # 毫秒级完成会同 tick 打平——先例 2ab8df86；残留处理 2026-09-13）
+        with _patch_clock():
+            result = await self.registry.execute_and_log("test_tool", {"param": "value"})
         
         assert result.success is True
         assert result.tool_name == "test_tool"

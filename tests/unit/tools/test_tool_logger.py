@@ -240,9 +240,10 @@ class TestToolExecutionLogger:
         recent = self.logger.query_recent(limit=5)
         
         assert len(recent) == 5
-        # 验证是最近的5条
-        assert recent[0].params["index"] == 5
-        assert recent[4].params["index"] == 9
+        # 契约=最近 5 条、最新在前（tool_logger.py:211 sort
+        # reverse=True 注释自明；残留处理 2026-09-13 修正断言方向）
+        assert recent[0].params["index"] == 9
+        assert recent[4].params["index"] == 5
 
     def test_query_by_tool(self):
         """测试按工具查询"""

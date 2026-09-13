@@ -12,7 +12,7 @@
 参数但不传——改进落盘通道在此处断开。
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -100,7 +100,8 @@ class TestRsiStepPassesSkillService:
         improver = MagicMock()
         proposal = MagicMock()
         proposal.applied = False
-        improver.propose_pending_improvements.return_value = [proposal]
+        # 2026-09-13 契约升级(Hermes 对比):pipeline 改调异步反射式提案口
+        improver.propose_pending_improvements_async = AsyncMock(return_value=[proposal])
         improver.apply_improvement.return_value = True
 
         captured = {}
