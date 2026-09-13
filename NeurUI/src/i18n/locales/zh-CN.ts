@@ -1189,6 +1189,9 @@ export default {
 
   },
   channel: {    ingressQueue: '入站消息队列',
+    wecomMode: '接入模式',
+    wecomModeAibot: '智能机器人（长连接）',
+    wecomModeEnterprise: '企业自建应用（回调）',
     scanAuth: '扫码授权',
     getQrcode: '获取二维码',
     scanHint: '使用手机扫码并确认授权，成功后自动回填凭据',
