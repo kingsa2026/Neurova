@@ -370,6 +370,7 @@ class SessionManager(SessionRepository):
         date: str = None,
         writer_claim=None,
         user_id: str = "",
+        title: str = "",
     ) -> str:
         """添加一条对话（user + assistant 两条消息）到session
 
@@ -460,7 +461,7 @@ class SessionManager(SessionRepository):
                     "created_at": now,
                     "updated_at": now,
                     "total_messages": len(new_messages),
-                    "title": "新对话",
+                    "title": (title or "").strip() or "新对话",
                     "user_id": str(user_id or ""),
                 }
             else:
