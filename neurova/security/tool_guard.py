@@ -256,6 +256,41 @@ class RuleBasedToolGuardian(BaseGuardian):
                 category=GuardThreatCategory.DATA_LEAKAGE,
                 message="检测到清除命令历史操作",
             ),
+            # ── P0-3 git 工具族治理（裁决根因位置，执行体内零策略守卫）──
+            # 写动词 → HIGH（生产 ask_on_high=True 即 ASK 弹窗确认）；
+            # 读动词（status/diff/log/show/blame/ls-files…）不命中 → 放行。
+            # 按命令文本命中：git 工具与 computer_shell 跑 git 同受此规则（一致性）。
+            ToolGuardRule(
+                rule_id="git_write_operation",
+                name="Git 写操作",
+                pattern=(
+                    r"\bgit\s+(add|commit|push|pull|fetch|clone|checkout|switch|restore"
+                    r"|merge|rebase|reset|revert|cherry-pick|stash|tag|clean|am|apply|init"
+                    r"|mv|rm|worktree|submodule|gc|prune|filter-branch|remote|config)\b"
+                    r"|\bgit\s+branch\s+-[dDmM]\b"
+                ),
+                severity=GuardSeverity.HIGH,
+                category=GuardThreatCategory.DESTRUCTIVE_COMMAND,
+                message="Git 写操作需人工确认（变更仓库状态）",
+            ),
+            # RCE / 持久化劫持形态：通过全局配置键（core.pager/editor/fsmonitor/
+            # sshCommand…）、config --global/--system 持久化、--exec-path 替换、
+            # GIT_* 执行环境注入，把只读 git 变成命令执行。一律 CRITICAL 阻断。
+            ToolGuardRule(
+                rule_id="git_rce_vectors",
+                name="Git 执行劫持",
+                pattern=(
+                    r"\bgit\s+(-c|--config-env)\s+\S*(?:core\.(?:pager|editor|fsmonitor"
+                    r"|sshCommand|ssh_command|attributesFile|hooksPath|repositoryformatversion"
+                    r"|ignoreCase)|sequence\.editor|mergetool\..*cmd|difftool\..*cmd|help\..*)"
+                    r"|\bgit\s+config\s+--(?:global|system|file)\b"
+                    r"|\bgit\s+--exec-path(?:=|\s)"
+                    r"|\bGIT_(?:SSH_COMMAND|SSH|PROXY_COMMAND|EXTERNAL_DIFF|CUSTOM_COMMITTER|DIR)\s*="
+                ),
+                severity=GuardSeverity.CRITICAL,
+                category=GuardThreatCategory.COMMAND_INJECTION,
+                message="Git 命令含执行劫持/持久化配置注入特征，已阻断",
+            ),
         ]
 
         for rule in default_rules:
