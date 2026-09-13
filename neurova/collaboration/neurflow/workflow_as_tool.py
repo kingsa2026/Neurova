@@ -25,25 +25,67 @@ logger = get_logger(__name__)
 
 _WORKFLOW_TOOL_PREFIX = "workflow:"
 
+# 批次5 验收修复：start 入参声明存在两种形态——内置模板（media/writing/…
+# /short_drama 共 8 个）用 ``inputs_schema``（dict），而本模块原两处消费方只认
+# ``fields``（list）→ 全部模板的 Agent 工具 parameters 恒空、必填校验失效。
+# 单源规一：fields 优先，inputs_schema dict 转同构列表，两种形态等价。
+_INPUT_TYPE_MAP = {
+    "textarea": "string", "input": "string", "select": "string",
+    "slider": "number", "number": "number",
+    "toggle": "boolean", "switch": "boolean",
+}
 
-def build_workflow_tool_schema(workflow) -> Dict[str, Any]:
-    """WorkflowDefinition → OpenAI function schema（parameters 来自 start 节点 fields）"""
+
+def _start_input_fields(workflow) -> List[Dict[str, Any]]:
+    """start 节点入参声明规一为 [{name,type,label,description,required,options}]。"""
     start_config: Dict[str, Any] = {}
     for node in workflow.nodes:
         if node.type == "builtin:start":
             start_config = node.config or {}
             break
 
-    fields = start_config.get("fields") or []
+    fields = start_config.get("fields")
+    if isinstance(fields, list) and fields:
+        return [f for f in fields if isinstance(f, dict)]
+
+    schema = start_config.get("inputs_schema")
+    if isinstance(schema, dict):
+        normalized: List[Dict[str, Any]] = []
+        for name, spec in schema.items():
+            if not isinstance(spec, dict):
+                spec = {"type": "string"}
+            ftype = _INPUT_TYPE_MAP.get(str(spec.get("type") or "string"), "string")
+            entry: Dict[str, Any] = {
+                "name": str(name),
+                "type": ftype,
+                "label": spec.get("label") or spec.get("description") or str(name),
+                "description": spec.get("description") or spec.get("label") or "",
+                "required": bool(spec.get("required")),
+            }
+            options = spec.get("options")
+            if isinstance(options, list) and options and ftype == "string":
+                entry["options"] = [
+                    o.get("value", o) if isinstance(o, dict) else o for o in options
+                ]
+            normalized.append(entry)
+        return normalized
+    return []
+
+
+def build_workflow_tool_schema(workflow) -> Dict[str, Any]:
+    """WorkflowDefinition → OpenAI function schema（parameters 来自 start 节点入参声明）"""
+    fields = _start_input_fields(workflow)
     properties: Dict[str, Any] = {}
     required: List[str] = []
     for f in fields:
-        if not isinstance(f, dict) or not f.get("name"):
+        if not f.get("name"):
             continue
         props: Dict[str, Any] = {"type": str(f.get("type") or "string")}
         desc = f.get("label") or f.get("description")
         if desc:
             props["description"] = str(desc)
+        if f.get("options"):
+            props["enum"] = [str(o) for o in f["options"]]
         properties[str(f["name"])] = props
         if f.get("required"):
             required.append(str(f["name"]))
@@ -78,17 +120,14 @@ def list_published_workflows_as_tools(storage) -> List[Dict[str, Any]]:
 
 def _validate_required_inputs(workflow, inputs: Dict[str, Any]) -> Optional[str]:
     """start 节点必填字段校验；缺失返回错误消息（含字段名），齐全返回 None"""
-    for node in workflow.nodes:
-        if node.type != "builtin:start":
-            continue
-        missing = [
-            str(f.get("name") or f.get("label") or "?")
-            for f in (node.config or {}).get("fields") or []
-            if isinstance(f, dict) and f.get("required") and not (inputs or {}).get(f.get("name"))
-        ]
-        if missing:
-            return f"缺少必填输入: {', '.join(missing)}（工作流 {workflow.id} 的 start 节点声明）"
-        return None
+    fields = _start_input_fields(workflow)
+    missing = [
+        str(f.get("name") or f.get("label") or "?")
+        for f in fields
+        if f.get("required") and not (inputs or {}).get(f.get("name"))
+    ]
+    if missing:
+        return f"缺少必填输入: {', '.join(missing)}（工作流 {workflow.id} 的 start 节点声明）"
     return None
 
 

@@ -56,11 +56,15 @@ export function useWorkflowRun() {
     const detail = unwrap(await getExecution(executionId))
     const exec = detail?.execution ?? detail
     const status = String(exec?.status || '')
+    // engine 契约：instance.outputs = {"result": end 节点输出}；end 声明
+    // output_mapping 时 result 即结构化产物 dict（批次5 验收修复）
+    const rawOutputs = (exec?.outputs ?? null) as Record<string, unknown> | null
+    const outputs = (rawOutputs && rawOutputs.result ? (rawOutputs.result as Record<string, unknown>) : rawOutputs)
     return {
       ok: status === 'completed' || status === 'success',
       executionId,
       status,
-      outputs: exec?.outputs ?? null,
+      outputs,
       error: exec?.status === 'failed' ? String(exec?.error || '工作流执行失败') : '',
     }
   }

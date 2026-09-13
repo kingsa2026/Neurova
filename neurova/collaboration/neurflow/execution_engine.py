@@ -1188,7 +1188,30 @@ class WorkflowExecutor:
             return {"output": context.get("inputs", {})}
 
         elif node.type == "builtin:end":
-            # 收集所有节点输出
+            # 收集所有节点输出；声明了 output_mapping 时（批次5 验收修复：
+            # media/short_drama 等模板一直声明该键但从未被消费，导致
+            # execution.outputs 恒为 {"result": 末节点裸输出}、前端按
+            # mapping 键取产物恒空）按映射组装结构化输出。config 已由
+            # _execute_single_node 完成变量解析，mapping 值即为对象本体。
+            output_mapping = config.get("output_mapping")
+            if isinstance(output_mapping, dict) and output_mapping:
+                resolved_mapping: Dict[str, Any] = {}
+                node_results = context.get("node_results", {})
+                for key, value in output_mapping.items():
+                    if isinstance(value, str):
+                        # 防御：未解析的引用串按 "$node.<id>.<path>" 手工取值
+                        ref = value
+                        if ref.startswith("$node."):
+                            parts = ref[len("$node."):].split(".")
+                            cur: Any = node_results.get(parts[0]) if parts else None
+                            for seg in parts[1:]:
+                                cur = cur.get(seg) if isinstance(cur, dict) else None
+                            resolved_mapping[str(key)] = cur
+                        else:
+                            resolved_mapping[str(key)] = ref
+                    else:
+                        resolved_mapping[str(key)] = value
+                return {"output": resolved_mapping}
             node_results = context.get("node_results", {})
             if node_results:
                 last_output = None
@@ -1209,11 +1232,21 @@ class WorkflowExecutor:
         # 注册表中的节点（registry 动态解析，防单例重建后旧引用落空）
         node_type = node.type
         executor = get_node_registry().get_executor(node_type)
+        if executor is None:
+            # 批次5 验收根修：drama/comfyui/commerce 执行器此前仅在 GET /nodes、
+            # 画布校验等路径 sync_all——模板实例化的 execute 路径未同步时，
+            # 节点在此静默 {"output": None} 假成功（一键成片产物恒空的真因）。
+            # 惰性补偿同步（幂等，仅 miss 触发一次）后仍无执行器 → 节点失败
+            # （与画布"未注册类型拒绝"语义一致，不假成功）。
+            try:
+                get_node_registry().sync_all()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("节点适配器惰性同步失败: %s", e)
+            executor = get_node_registry().get_executor(node_type)
         if executor:
             return await executor(config, context)
 
-        # 默认返回
-        return {"output": None}
+        raise ValueError(f"节点类型未注册执行器: {node_type}")
 
     async def step_run(
         self,

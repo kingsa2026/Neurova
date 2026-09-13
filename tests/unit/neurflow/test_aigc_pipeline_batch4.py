@@ -136,3 +136,111 @@ class TestCanvasBridgeSyncAdapters:
             assert "builtin:short-drama-script" in known
         finally:
             reset_node_registry()
+
+
+class TestEndOutputMapping:
+    """批次5 验收发现：end 的 output_mapping 从未被消费（media/short_drama
+    模板恒声明），execution.outputs 恒为 {"result": 末节点裸输出}。"""
+
+    @pytest.mark.asyncio
+    async def test_output_mapping_structured(self):
+        from neurova.collaboration.neurflow.execution_engine import WorkflowExecutor
+        from neurova.collaboration.neurflow.models import (
+            WorkflowDefinition, WorkflowEdge, WorkflowNode, WorkflowStatus,
+        )
+        nodes = [
+            WorkflowNode(id="start", type="builtin:start", position={"x": 0, "y": 0}, config={}),
+            WorkflowNode(id="src", type="builtin:variable", position={"x": 1, "y": 0},
+                         config={"name": "k", "value": [{"shot": 1, "url": "/f/a.png"}]}),
+            WorkflowNode(id="end", type="builtin:end", position={"x": 2, "y": 0}, config={
+                "output_mapping": {"storyboard": "$node.src.output.value",
+                                   "plain": "literal-tag"},
+            }),
+        ]
+        edges = [WorkflowEdge(id="e1", source="start", target="src"),
+                 WorkflowEdge(id="e2", source="src", target="end")]
+        wf = WorkflowDefinition(
+            id="wf_map", name="m", description="", version="1.0.0", nodes=nodes,
+            edges=edges, variables=[], tags=[], category="t", author="t",
+            created_at=0, updated_at=0, status=WorkflowStatus.PUBLISHED,
+        )
+        instance = await WorkflowExecutor().execute(wf, inputs={})
+        assert instance.status == WorkflowStatus.COMPLETED
+        result = instance.outputs["result"]
+        assert result["plain"] == "literal-tag"
+        assert result["storyboard"] == [{"shot": 1, "url": "/f/a.png"}]
+
+    @pytest.mark.asyncio
+    async def test_end_without_mapping_keeps_last_output(self):
+        from neurova.collaboration.neurflow.execution_engine import WorkflowExecutor
+        from neurova.collaboration.neurflow.models import (
+            WorkflowDefinition, WorkflowEdge, WorkflowNode, WorkflowStatus,
+        )
+        nodes = [
+            WorkflowNode(id="start", type="builtin:start", position={"x": 0, "y": 0}, config={}),
+            WorkflowNode(id="src", type="builtin:variable", position={"x": 1, "y": 0},
+                         config={"name": "k", "value": "hello"}),
+            WorkflowNode(id="end", type="builtin:end", position={"x": 2, "y": 0}, config={}),
+        ]
+        edges = [WorkflowEdge(id="e1", source="start", target="src"),
+                 WorkflowEdge(id="e2", source="src", target="end")]
+        wf = WorkflowDefinition(
+            id="wf_nomap", name="m", description="", version="1.0.0", nodes=nodes,
+            edges=edges, variables=[], tags=[], category="t", author="t",
+            created_at=0, updated_at=0, status=WorkflowStatus.PUBLISHED,
+        )
+        instance = await WorkflowExecutor().execute(wf, inputs={})
+        # 向后兼容：无 mapping 的 end 仍传末节点输出
+        assert instance.outputs["result"] == {"name": "k", "value": "hello"}
+
+
+class TestLazyExecutorSync:
+    """批次5 验收根修：模板 execute 路径此前不触发 sync_all——drama 执行器
+    未注册时节点静默 {"output": None} 假成功（一键成片产物恒空的真因）。
+    引擎现惰性补偿同步（幂等）+ 仍无执行器时节点失败。"""
+
+    @pytest.mark.asyncio
+    async def test_drama_nodes_execute_without_prior_sync(self):
+        from neurova.collaboration.neurflow.execution_engine import WorkflowExecutor
+        from neurova.collaboration.neurflow.node_registry import reset_node_registry
+        from neurova.collaboration.neurflow.templates.short_drama import get_short_drama_template
+
+        reset_node_registry()  # 新进程语义：仅 builtin
+        try:
+            instance = await WorkflowExecutor().execute(
+                get_short_drama_template(),
+                inputs={"theme": "测试", "genre": "都市逆袭", "style": "国风",
+                        "aspect_ratio": "9:16", "image_provider": "openai"},
+            )
+        finally:
+            reset_node_registry()
+        from neurova.collaboration.neurflow.models import WorkflowStatus
+        assert instance.status == WorkflowStatus.COMPLETED
+        result = (instance.outputs or {}).get("result") or {}
+        # drama 节点经惰性补偿真实执行：分镜/合成产物非 None
+        assert result.get("storyboard"), "storyboard 输出不应为 None"
+        assert result.get("compose"), "compose 输出不应为 None"
+
+    @pytest.mark.asyncio
+    async def test_unknown_type_fails_honest(self):
+        from neurova.collaboration.neurflow.execution_engine import WorkflowExecutor
+        from neurova.collaboration.neurflow.models import (
+            WorkflowDefinition, WorkflowEdge, WorkflowNode, WorkflowStatus,
+        )
+        nodes = [
+            WorkflowNode(id="start", type="builtin:start", position={"x": 0, "y": 0}, config={}),
+            WorkflowNode(id="x", type="builtin:definitely_not_registered_zz",
+                         position={"x": 1, "y": 0}, config={}),
+            WorkflowNode(id="end", type="builtin:end", position={"x": 2, "y": 0}, config={}),
+        ]
+        edges = [WorkflowEdge(id="e1", source="start", target="x"),
+                 WorkflowEdge(id="e2", source="x", target="end")]
+        wf = WorkflowDefinition(
+            id="wf_unknown", name="m", description="", version="1.0.0", nodes=nodes,
+            edges=edges, variables=[], tags=[], category="t", author="t",
+            created_at=0, updated_at=0, status=WorkflowStatus.PUBLISHED,
+        )
+        instance = await WorkflowExecutor().execute(wf, inputs={})
+        # 诚实失败：不再静默 output=None 假成功
+        assert instance.status == WorkflowStatus.FAILED
+        assert "未注册执行器" in str(instance.error)

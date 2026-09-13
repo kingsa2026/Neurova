@@ -1006,6 +1006,23 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("短剧模板种子失败: %s", e)
 
+    # 批次5 验收根修：启动即预注册 drama/comfyui/commerce 执行器——模板
+    # 实例化的 execute 路径此前不触发 sync_all，未注册节点静默假成功（输出 None）
+    try:
+        from neurova.collaboration.neurflow.node_registry import get_node_registry
+        from neurova.collaboration.neurflow.drama_nodes import register_drama_nodes
+        from neurova.collaboration.neurflow.comfyui_nodes import register_comfyui_nodes
+        from neurova.collaboration.neurflow.commerce_nodes import register_commerce_nodes
+
+        _reg = get_node_registry()
+        _reg.ensure_builtin()
+        register_comfyui_nodes(_reg)
+        register_commerce_nodes(_reg)
+        register_drama_nodes(_reg)
+        logger.info("AIGC/媒体节点执行器已预注册")
+    except Exception as e:
+        logger.warning("媒体节点执行器预注册失败（执行时将惰性补偿）: %s", e)
+
     # 批次5（用户决策）：FFmpeg 不打包——首次启动后台自动下载（系统已有则零网络；
     # NEUROVA_FFMPEG_AUTODOWNLOAD=0 可关）
     try:
