@@ -99,7 +99,7 @@ class TestFeishuEventLoopSafety:
 
             def trigger():
                 try:
-                    adapter._handle_message_event(mock_ctx, mock_event)
+                    adapter._handle_message_event(mock_event)
                 except Exception as e:
                     errors.append(e)
 

@@ -148,8 +148,14 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
         logger.info("Feishu Webhook mode configured. " f"Register webhook at: %s", self.config.webhook_url)
         return True
 
-    def _handle_message_event(self, ctx, event):
-        """处理飞书消息事件（Stream 模式回调）"""
+    def _handle_message_event(self, event):
+        """处理飞书消息事件（Stream 模式回调）。
+
+        lark-oapi 的 P2ImMessageReceiveV1Processor.do 以 self.f(data) 单参数调用
+        （data: P2ImMessageReceiveV1，其 .event 为 P2ImMessageReceiveV1Data）。
+        此前签名多一个 ctx 形参 → data 绑到 ctx、event 缺参 TypeError 被 SDK 吞掉，
+        收消息静默丢弃（"飞书发消息无响应"根因）。
+        """
         try:
             msg = event.event.message
             sender = event.event.sender
@@ -197,7 +203,6 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
                 message_type=msg.message_type or "text",
                 metadata=audio_metadata,
                 raw_event={
-                    "header": ctx.__dict__ if hasattr(ctx, "__dict__") else {},
                     "event": event.__dict__ if hasattr(event, "__dict__") else {},
                 },
             )
