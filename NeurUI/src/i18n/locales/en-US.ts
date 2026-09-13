@@ -1180,6 +1180,9 @@ export default {
 
   },
   channel: {
+    wecomMode: 'Integration Mode',
+    wecomModeAibot: 'AI Bot (WebSocket)',
+    wecomModeEnterprise: 'Enterprise App (Callback)',
     scanAuth: 'QR Authorization',
     getQrcode: 'Get QR Code',
     scanHint: 'Scan with your phone and confirm; credentials auto-fill on success',

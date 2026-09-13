@@ -1178,6 +1178,9 @@ export default {
 
   },
   channel: {    ingressQueue: 'Inbound Queue',
+    wecomMode: '接続モード',
+    wecomModeAibot: 'AIボット（WebSocket）',
+    wecomModeEnterprise: '企業アプリ（コールバック）',
     scanAuth: 'QRコード認証',
     getQrcode: 'QRコードを取得',
     scanHint: 'スマホでスキャンして承認すると、認証情報が自動入力されます',
