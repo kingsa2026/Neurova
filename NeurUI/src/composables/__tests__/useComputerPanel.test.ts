@@ -193,4 +193,67 @@ describe('createComputerPanel', () => {
     expect(describeComputerAction('computer_click_element', { index: 3 })).toContain('3')
     expect(describeComputerAction('computer_set_value', { value: '你好世界' })).toContain('你好世界')
   })
+
+  it('SSH 工具生成含 host 与命令的摘要', () => {
+    expect(describeComputerAction('computer_ssh_exec', { host: '10.0.0.5', command: 'uptime' })).toContain('10.0.0.5')
+    expect(describeComputerAction('computer_ssh_exec', { host: 'h', command: 'uptime' })).toContain('uptime')
+  })
+})
+
+describe('SSH/shell 终端视图', () => {
+  it('terminal 负载切到终端视口并累积转录', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({
+      tool: 'computer_ssh_exec',
+      params: { host: 'h1', command: 'ls' },
+      success: true,
+      terminal: { command: 'ls', stdout: 'file1\nfile2', stderr: '', host: 'h1', exit: 0 },
+    })
+    expect(panel.state.view).toBe('terminal')
+    expect(panel.state.terminalTranscript).toContain('$ [h1] ls')
+    expect(panel.state.terminalTranscript).toContain('file1')
+  })
+
+  it('非零退出码追加 exit 标记', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({
+      tool: 'computer_ssh_exec',
+      params: { host: 'h1', command: 'false' },
+      success: false,
+      terminal: { command: 'false', stdout: '', stderr: 'boom', host: 'h1', exit: 1 },
+    })
+    expect(panel.state.terminalTranscript).toContain('boom')
+    expect(panel.state.terminalTranscript).toContain('[exit 1]')
+  })
+
+  it('截图动作把视口切回桌面', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({
+      tool: 'computer_ssh_exec',
+      params: { host: 'h1', command: 'ls' },
+      success: true,
+      terminal: { command: 'ls', stdout: 'x', stderr: '', host: 'h1', exit: 0 },
+    })
+    expect(panel.state.view).toBe('terminal')
+    panel.handleComputerAction({
+      tool: 'computer_screenshot',
+      params: {},
+      success: true,
+      screenshot: 'AAAA',
+    })
+    expect(panel.state.view).toBe('desktop')
+  })
+
+  it('clear 重置终端转录与视口', () => {
+    const panel = createComputerPanel()
+    panel.handleComputerAction({
+      tool: 'computer_ssh_exec',
+      params: { host: 'h1', command: 'ls' },
+      success: true,
+      terminal: { command: 'ls', stdout: 'x', stderr: '', host: 'h1', exit: 0 },
+    })
+    panel.clear()
+    expect(panel.state.terminalTranscript).toBe('')
+    expect(panel.state.view).toBe('desktop')
+  })
 })

@@ -150,6 +150,9 @@
       <GlassNavItem to="/neuron" :label="t('nav.neuron')" :collapsed="appStore.sidebarCollapsed" v-if="can('/neuron')">
         <template #icon><NodeIndexOutlined /></template>
       </GlassNavItem>
+      <GlassNavItem to="/my-credentials" :label="t('nav.myCredentials')" :collapsed="appStore.sidebarCollapsed" v-if="can('/my-credentials')">
+        <template #icon><SafetyOutlined /></template>
+      </GlassNavItem>
 
       <!-- 用户: 协作（低频折叠，含全局渠道接入） -->
       <GlassNavGroup

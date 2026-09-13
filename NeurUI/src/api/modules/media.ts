@@ -2,14 +2,15 @@
  * Media storage API — 与后端 neurova/api/endpoints/media.py 一一对应的契约层。
  *
  * F-1 契约对齐（台账 docs/资源型修复登记台账_2026-09-11.md）：
- * - listMedia → GET /media/list（offset/limit 分页；响应 data.media/total/offset/limit）；
+ * - listMedia → GET /media/list（offset/limit 分页 + search 服务端过滤；响应
+ *   data.media/total/offset/limit）；
  * - getMediaInfo → GET /media/{id}/metadata（原 /{id}/info 404）；
  * - downloadMedia → GET /media/download/{id}（原 /{id}/download 404）；
  * - batchDeleteMedia → POST /media/batch-delete，body { media_ids }（原 /batch-delete 404）；
  * - saveMedia 必须携带后端必填的 media_type 表单字段（缺省 422）；
  * - getMediaStats 移除：后端无 /stats?agent_id= 查询参数版本（仅 /stats/{agent_id}
  *   路径版本），且 UI 无统计展示；
- * - 字段对齐后端 MediaInfo：media_id/filename/media_type/mime_type/size/created_at
+ * - 字段对齐后端 save_media 返回的 media_info：media_id/filename/media_type/mime_type/size/created_at
  *   （epoch 秒），无 url/tags。
  */
 import api, { request } from '@/api'
@@ -87,8 +88,14 @@ export function getMedia(id: string) {
   return request.get(`${BASE}/${id}`, { responseType: 'blob' }) as unknown as Promise<Blob>
 }
 
-/** List media files (offset/limit 分页；响应 data.media/total/offset/limit). */
-export function listMedia(params?: { offset?: number; limit?: number; agent_id?: string; media_type?: string }) {
+/** List media files (offset/limit 分页；search 走服务端过滤 filename/media_id；响应 data.media/total/offset/limit). */
+export function listMedia(params?: {
+  offset?: number
+  limit?: number
+  agent_id?: string
+  media_type?: string
+  search?: string
+}) {
   return api.get<ApiResponse<MediaListResult>>(`${BASE}/list`, { params })
 }
 

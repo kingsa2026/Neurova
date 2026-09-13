@@ -90,6 +90,34 @@
             :class="{ 'is-active': isComputerTabActive }"
             :title="t('computerPanel.title')"
             @click="toggleComputerPanel"><svg class="nr-ico" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg></button>
+          <a-dropdown :trigger="['click']" placement="topLeft" :disabled="!isAdmin">
+            <button
+              class="nr-composer-pill"
+              :class="{ 'is-disabled': !isAdmin }"
+              :title="isAdmin ? t('chat.runtimeMode') : t('chat.runtimeModeAdminOnly')"
+            >
+              <svg class="nr-ico" viewBox="0 0 24 24"><path d="M12 2l8 3v6c0 5-3.5 9.3-8 11-4.5-1.7-8-6-8-11V5z"/></svg>
+              <span>{{ currentRuntimeLabel }}</span>
+              <span class="nr-composer-pill-arrow">▾</span>
+            </button>
+            <template #overlay>
+              <div class="nr-glass-dropdown">
+                <div
+                  v-for="opt in runtimeModeOptions"
+                  :key="opt.value"
+                  class="nr-glass-dropdown-item nr-composer-menu-item nr-runtime-item"
+                  :class="{ 'is-active': runtimeMode === opt.value }"
+                  @click="setRuntimeMode(opt.value)"
+                >
+                  <div class="nr-runtime-item-text">
+                    <span>{{ t(opt.label) }}</span>
+                    <span class="nr-runtime-item-desc">{{ t(opt.desc) }}</span>
+                  </div>
+                  <span v-if="runtimeMode === opt.value" class="nr-composer-check">✓</span>
+                </div>
+              </div>
+            </template>
+          </a-dropdown>
           <button
             v-if="asrAvailable"
             class="nr-composer-pill nr-composer-pill--icon"
@@ -249,12 +277,13 @@
  * ASR（useASRRecording 单例）、自动语音（useAutoVoice 单例）。
  * 发送/停止与流式状态机耦合，emit 上抛页面编排。
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { useChatStore } from '@/stores/chat'
 import { useMessageQueueStore } from '@/stores/messageQueue'
 import { useRightDockStore } from '@/stores/rightDock'
+import { useAuthStore } from '@/stores/auth'
 import { useSessionSendLock } from '@/composables/useSessionSendLock'
 import { useChatModels } from '@/composables/useChatModels'
 import { usePendingFiles } from '@/composables/usePendingFiles'
@@ -262,6 +291,7 @@ import { useASRRecording } from '@/composables/useASRRecording'
 import { useAutoVoice } from '@/composables/useAutoVoice'
 import { useSlashCommands, setupSlashCommands } from '@/composables/useSlashCommands'
 import { useThinkingEffort, type ThinkingEffort } from '@/composables/useThinkingEffort'
+import { useDesktopRuntimeMode, type DesktopRuntimeMode } from '@/composables/useDesktopRuntimeMode'
 import { useInputHistory } from '@/composables/useInputHistory'
 import { useIMEComposition } from '@/composables/useIMEComposition'
 import ContextUsageIndicator from '@/components/chat/ContextUsageIndicator.vue'
@@ -374,6 +404,26 @@ function toggleComputerPanel(): void {
     rightDock.openComputer()
   }
 }
+
+// ── 桌面运行权限档（ZCode 式下拉，与设置页同源 advanced.desktop_runtime_mode）──
+// 写侧后端契约 = PUT /settings require_admin：非管理员只读展示当前档
+//（composable 写失败回滚是兜底，UI 禁用是明示）。
+const authStore = useAuthStore()
+const isAdmin = computed(() => authStore.user?.role === 'admin')
+const { mode: runtimeMode, load: loadRuntimeMode, setMode: setRuntimeMode } = useDesktopRuntimeMode()
+const runtimeModeOptions: Array<{ value: DesktopRuntimeMode; label: string; desc: string }> = [
+  { value: 'sandbox', label: 'chat.runtimeModeSandbox', desc: 'chat.runtimeModeSandboxDesc' },
+  { value: 'review', label: 'chat.runtimeModeReview', desc: 'chat.runtimeModeReviewDesc' },
+  { value: 'full', label: 'chat.runtimeModeFull', desc: 'chat.runtimeModeFullDesc' },
+  { value: 'auto', label: 'chat.runtimeModeAuto', desc: 'chat.runtimeModeAutoDesc' },
+]
+const currentRuntimeLabel = computed<string>(() => {
+  const opt = runtimeModeOptions.find((o) => o.value === runtimeMode.value)
+  return opt ? t(opt.label) : ''
+})
+onMounted(() => {
+  void loadRuntimeMode()
+})
 
 // ── 顶入卡片（队列编辑态，DeepSeek 截图对齐）────────────────
 const editingQueuedId = ref<string | null>(null)
@@ -897,6 +947,26 @@ defineExpose({ closeSlashPanel, autoResize })
 .nr-composer-check {
   color: var(--nr-primary, #4a9eff);
   font-size: 12px;
+}
+/* 运行权限档下拉：标题 + 说明两行（ZCode 对话框模式对齐） */
+.nr-composer-pill.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.nr-runtime-item {
+  align-items: flex-start;
+  min-width: 200px;
+}
+.nr-runtime-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.nr-runtime-item-desc {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.65;
+  white-space: normal;
 }
 .nr-composer-model-menu {
   max-height: 320px;
