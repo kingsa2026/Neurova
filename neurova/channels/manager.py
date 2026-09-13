@@ -210,7 +210,7 @@ class ChannelManager:
         message_type: str = "text",
         **kwargs,
     ) -> Optional[str]:
-        """通过指定渠道发送消息"""
+        """通过指定渠道发送消息（长文本按渠道上限分片，失败不静默）"""
         adapter = self._adapters.get(channel_type)
         if not adapter:
             logger.error("No adapter for channel: %s", channel_type)
@@ -221,12 +221,28 @@ class ChannelManager:
                 logger.error("Failed to connect adapter: %s", channel_type)
                 return None
 
-        result = await adapter.send_message(chat_id, content, message_type, **kwargs)
+        # 统一出站分片：长回复按渠道单条上限切分逐条发，避免超限被截断/整条失败
+        # （各平台 text 上限不同；此前全渠道单条整发且吞错）。非文本类型原样发。
+        from neurova.channels.message_chunker import split_message, text_limit_for
 
-        # 广播回复到 SessionSyncManager
-        await self._sync_reply_to_session(chat_id, content, channel_type)
+        parts = [content]
+        if message_type == "text":
+            parts = split_message(content, text_limit_for(channel_type))
 
-        return result
+        first_id: Optional[str] = None
+        failed = 0
+        for part in parts:
+            result = await adapter.send_message(chat_id, part, message_type, **kwargs)
+            if result is None:
+                failed += 1
+                logger.warning("渠道 %s 分片发送失败（chat=%s，第 %d/%d 片）",
+                               channel_type, str(chat_id)[:20], parts.index(part) + 1, len(parts))
+            elif first_id is None:
+                first_id = result
+            await self._sync_reply_to_session(chat_id, part, channel_type)
+        if failed:
+            logger.error("渠道 %s 回复有 %d/%d 片发送失败（chat=%s）", channel_type, failed, len(parts), str(chat_id)[:20])
+        return first_id
 
     async def _sync_reply_to_session(self, chat_id: str, content: str, channel_type: str):
         """同步回复消息到 SessionSyncManager"""

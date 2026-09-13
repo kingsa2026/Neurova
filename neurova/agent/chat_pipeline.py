@@ -52,6 +52,16 @@ def _thinking_directive(effort: Optional[str]) -> str:
     return _THINKING_DIRECTIVES.get((effort or "").lower(), "")
 
 
+# 输出因长度被截断的 finish_reason 变体：OpenAI 兼容网关口径不一（length /
+# max_tokens / MAX_TOKENS），严格 =="length" 会漏判导致截断不续写（飞书等渠道
+# 非流式"输出截断"根因之一）。对齐流式侧 openai_loop.py 的判定集合。
+_TRUNCATED_FINISH_REASONS = frozenset({"length", "max_tokens"})
+
+
+def _is_length_truncated(finish_reason: Any) -> bool:
+    return str(finish_reason or "").strip().lower() in _TRUNCATED_FINISH_REASONS
+
+
 def _adaptive_retrieval_enabled(agent: Any, ctx: "ChatContext") -> bool:
     """Adaptive Retrieval 开关（批次 4）：默认关闭。
 
@@ -1933,6 +1943,30 @@ class ChatPipeline:
         if response and hasattr(response, "reasoning_content") and response.reasoning_content:
             self._agent.set_current_reasoning(response.reasoning_content)
 
+        # 非流式对等"输出预算耗尽"恢复（对齐流式 openai_loop._predict_stream）：
+        # 思考模型把 max_tokens 吃满 → finish_reason=length 但正文为空，HTTP 200
+        # 无异常、_auto_continue 因空正文护栏直接放弃 → 渠道收到空气泡/截断。
+        # 关思考 + 放宽输出预算单次重试；重试仍空则交回原逻辑（不二次重试防循环）。
+        if (
+            response
+            and _is_length_truncated(getattr(response, "finish_reason", ""))
+            and not (reply or "").strip()
+            and not getattr(response, "tool_calls", None)
+        ):
+            try:
+                from neurova.agent.loops.openai_loop import _raised_output_budget
+                cur_budget = getattr(self.llm_client.config, "max_tokens", None)
+                logger.warning("[CTX_RECOVERY] 非流式输出预算耗尽(length)且正文为空，关思考+放宽预算单次重试")
+                retry = await self.loop.predict_step(
+                    messages=ctx.context, tools=tools_for_llm, stream=False,
+                    thinking_enabled=False, max_tokens=_raised_output_budget(cur_budget),
+                )
+                if retry and (getattr(retry, "content", "") or "").strip():
+                    response = retry
+                    reply = retry.content
+            except Exception:
+                logger.debug("非流式 length 重试跳过", exc_info=True)
+
         # 自动续写
         reply = await self._auto_continue(ctx, response, reply, tools_for_llm)
 
@@ -1986,7 +2020,7 @@ class ChatPipeline:
 
         while (
             response
-            and getattr(response, "finish_reason", "") == "length"
+            and _is_length_truncated(getattr(response, "finish_reason", ""))
             and not getattr(response, "tool_calls", None)
             and continue_round < MAX_CONTINUE_ROUNDS
             and len(reply) < MAX_TOTAL_CHARS
