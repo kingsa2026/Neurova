@@ -202,6 +202,12 @@ class TestJwtSecretHardening:
         assert auth._validate_secret(strong) == strong
 
     def test_secret_file_permissions_0600(self, monkeypatch, tmp_path):
+        # NTFS 无 POSIX 权限位（os.chmod 仅切只读位，st_mode 恒 0o666），
+        # 本断言仅在 Linux/macOS 有意义；Windows 环境性跳过（生产 chmod 尽力而为）。
+        import pytest
+
+        if os.name != "posix":
+            pytest.skip("POSIX mode bits not enforced on NTFS")
         import neurova.api.auth as auth
 
         monkeypatch.chdir(tmp_path)
