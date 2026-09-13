@@ -11,7 +11,6 @@ from __future__ import annotations
 """
 
 from neurova.core.logger import get_logger
-import re
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -22,6 +21,14 @@ from pydantic import BaseModel, Field
 from neurova.api.deps import get_current_user
 from neurova.api.endpoints import get_agent_instance, get_app_state
 from neurova.core.logger import get_logger
+# 批次0（三栈收敛）：凭据解析/产物落盘/路径常量单源在 llm.generators.runtime，
+# 端点保留同名薄包装（tests/api/test_generation_security.py 的模块全局 patch 面不变）
+from neurova.llm.generators.runtime import (
+    GENERATION_OUTPUT_DIR,
+    PROJECT_ROOT,
+    GenerationCredsError,
+    safe_task_name,
+)
 
 logger = get_logger(__name__)
 
@@ -29,20 +36,11 @@ logger = get_logger(__name__)
 # _resolve_generation_creds 会动用服务端已配置的付费凭据（凭据盗刷面）。
 router = APIRouter(dependencies=[Depends(get_current_user)])
 
-# P1-8：产物目录以仓库根为基准（原 CWD 相对路径在服务化/异目录启动下
-# 与 StaticFiles 挂载错位，产物 404）。
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-GENERATION_OUTPUT_DIR = PROJECT_ROOT / "data" / "generations"
+# P1-8：产物目录以仓库根为基准（runtime 单源常量，不再本地重复计算）
 _GENERATION_OUTPUT_DIR = str(GENERATION_OUTPUT_DIR)
 
 # P0-1：task_id 是落盘文件名的组成部分，禁止复用客户端可控的 X-Request-ID。
-_SAFE_TASK_NAME_RE = re.compile(r"[^A-Za-z0-9_-]+")
-
-
-def _safe_task_name(task_id: str) -> str:
-    """文件名安全化：仅保留字母/数字/下划线/连字符，路径穿越字符一律打平。"""
-    cleaned = _SAFE_TASK_NAME_RE.sub("_", str(task_id or "")).strip("_")[:80]
-    return cleaned or "task"
+_safe_task_name = safe_task_name
 
 
 def _validate_ref_images(refs: list) -> None:
@@ -167,80 +165,29 @@ def _resolve_generation_creds(
     base_url: Optional[str],
     default_base: str,
 ) -> "ProtocolCredentials":
-    """凭据解析（B2-b）：显式凭据 > provider_id 配置 > 协议匹配服务商。"""
-    from neurova.llm.generators.protocols import ProtocolCredentials
+    """凭据解析（B2-b）：显式凭据 > provider_id 配置 > 协议匹配服务商。
 
-    if api_key and base_url:
-        return ProtocolCredentials(api_key=api_key, base_url=base_url,
-                                   model=model or "", protocol=protocol_hint or "")
+    批次0：实现体已上移 llm.generators.runtime（单源），此处仅映射 HTTP 400。
+    """
+    from neurova.llm.generators.runtime import resolve_generation_creds
 
-    from neurova.llm.provider_manager import get_provider_manager
-
-    manager = get_provider_manager()
-    provider = manager.get_provider(provider_id) if provider_id else None
-    if provider is None and not provider_id:
-        # 按协议启发在启用服务商里找：base_url host 匹配
-        for p in manager.list_providers(enabled_only=True):
-            host = (getattr(p, "base_url", "") or "").lower()
-            if ("dashscope" in host and "dashscope" in (protocol_hint or "").lower()) or (
-                "volces.com" in host and ("ark" in (protocol_hint or "").lower() or "seedance" in (protocol_hint or "").lower() or "volcengine" in (protocol_hint or "").lower())
-            ) or ("googleapis.com" in host and "veo" in (protocol_hint or "").lower()):
-                provider = p
-                break
-    if provider is not None:
-        try:
-            from neurova.llm.providers.secret_store import decrypt_api_key
-
-            key = decrypt_api_key(getattr(provider, "api_key", "") or "")
-        except Exception:
-            key = getattr(provider, "api_key", "") or ""
-        if key:
-            return ProtocolCredentials(
-                api_key=key,
-                base_url=base_url or getattr(provider, "base_url", "") or default_base,
-                model=model or getattr(provider, "default_model", "") or "",
-                protocol=protocol_hint or "",
-            )
-    # 显式 base_url 无 key（自托管网关可无鉴权）
-    if base_url:
-        return ProtocolCredentials(api_key="", base_url=base_url, model=model or "",
-                                   protocol=protocol_hint or "")
-    raise HTTPException(
-        status_code=400,
-        detail="缺少生成凭据：请传 api_key+base_url，或 provider_id，或先在模型页配置并启用对应服务商（填 API Key）",
-    )
+    try:
+        return resolve_generation_creds(
+            protocol_hint, model, provider_id, api_key, base_url, default_base)
+    except GenerationCredsError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 async def _persist_media(url_or_data: str, kind: str, task_id: str, index: int) -> str:
-    """结果 URL 临时有效 → 立即下载本地化（data/generations/）。"""
-    import aiohttp
-    import base64 as _b64
+    """结果 URL 临时有效 → 立即下载本地化（data/generations/）。
 
-    out_dir = Path(_GENERATION_OUTPUT_DIR)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    # P0-1：task_id 参与文件名拼接，安全化后才允许落盘
-    safe_name = _safe_task_name(task_id)
-    if url_or_data.startswith("data:"):
-        header, _, payload = url_or_data.partition(",")
-        ext = "png" if "image" in header else ("mp4" if "video" in header else "bin")
-        path = out_dir / f"{safe_name}_{index}.{ext}"
-        path.write_bytes(_b64.b64decode(payload))
-        return str(path)
-    # P1-7：产物 URL 来自 provider 响应（base_url 可被调用方指定为自建端点），
-    # 下载前必须过全局出网校验，防 SSRF 打内网/云元数据。
-    from neurova.security.governance import check_outbound_url
+    批次0：实现体上移 llm.generators.runtime（与渠道 facade 同源）；
+    端点 out_dir 取自身模块全局（安全测试 monkeypatch 面保持）。
+    """
+    from neurova.llm.generators.runtime import persist_media
 
-    check_outbound_url(url_or_data)
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120)) as session:
-        async with session.get(url_or_data) as resp:
-            if resp.status >= 400:
-                raise RuntimeError(f"产物下载失败 HTTP {resp.status}")
-            content_type = resp.headers.get("content-type", "")
-            ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp",
-                   "video/mp4": "mp4"}.get(content_type.split(";")[0], "bin")
-            path = out_dir / f"{safe_name}_{index}.{ext}"
-            path.write_bytes(await resp.read())
-    return str(path)
+    return await persist_media(url_or_data, kind, task_id, index,
+                               out_dir=_GENERATION_OUTPUT_DIR)
 
 
 def _local_url(path: str, request: Request) -> str:

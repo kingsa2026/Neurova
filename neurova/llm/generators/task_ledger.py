@@ -42,6 +42,10 @@ class TaskRecord:
     prompt: str = ""
     # P1-9（审计 2026-09-11）：任务属主——/video/status 与 /tasks 据此做归属校验
     owner_user_id: str = ""
+    # 批次0（PRINTFILM 对标）：产物溯源——rest/channel/workflow 三入口同池区分；
+    # execution_id 关联画布工作流执行实例（workflow 来源时）
+    source: str = "rest"
+    execution_id: str = ""
     submitted_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
