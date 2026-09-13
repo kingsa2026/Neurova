@@ -47,7 +47,7 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
             return None
         session_id = manager.resolve_session_scope_id(message)
         meta: Dict[str, Any] = {
-            "user_id": message.sender_id or f"channel:{message.channel_type}",
+            "user_id": message.sender_id or f"channel_{message.channel_type}",
             "role": "user",
             "source_channel": message.channel_type,
             "channel": message.channel_type,

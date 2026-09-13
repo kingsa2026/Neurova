@@ -213,10 +213,15 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
                 except Exception as dl_err:  # noqa: BLE001 - 下载失败降级占位
                     logger.warning("Feishu 语音下载失败，降级占位: %s", dl_err)
 
+            # 外部用户 user_id 常为 null（只有 open_id/union_id）——回退取，否则
+            # sender_id 空 → ChannelRouter 的 user_id 落到带冒号的回退值，且记忆隔离失效。
+            _sid = sender.sender_id if sender else None
+            _sender_id = ((_sid.user_id or _sid.open_id or _sid.union_id) if _sid else "") or ""
+
             channel_msg = self._make_message(
                 message_id=msg.message_id or "",
-                sender_id=sender.sender_id.user_id if sender.sender_id else "",
-                sender_name=sender.sender_id.user_id if sender.sender_id else "",
+                sender_id=_sender_id,
+                sender_name=_sender_id,
                 content=content.strip(),
                 chat_id=msg.chat_id or "",
                 chat_type=msg.chat_type or "p2p",
