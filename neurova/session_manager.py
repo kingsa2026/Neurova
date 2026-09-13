@@ -218,6 +218,71 @@ class SessionManager(SessionRepository):
         archived_dir.mkdir(exist_ok=True)
         return archived_dir
 
+    # ── P1-2 会话时间线（append-only JSONL，Codex rollout 对齐） ──────
+
+    def _get_timeline_file(self, agent_id: str, session_id: str) -> Path:
+        """时间线文件路径（sessions/{agent_id}/_timeline/{sid}.jsonl）。
+
+        独立子目录避免与 session_*.json 的日期 glob / 归档扫描互相干扰。
+        """
+        return self._get_session_dir(agent_id) / "_timeline" / f"{session_id}.jsonl"
+
+    def append_timeline_event(self, agent_id: str, session_id: str, event: Dict[str, Any]) -> bool:
+        """追加一条事件到会话时间线（append-only，逐行 JSON）。
+
+        fail-open：写失败只记日志返回 False，绝不影响对话主链路。
+        """
+        try:
+            path = self._get_timeline_file(agent_id, session_id)
+            file_lock = self._get_file_lock(path)
+            with file_lock:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with open(path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(_json_safe(event), ensure_ascii=False, default=str) + "\n")
+            return True
+        except Exception as e:  # noqa: BLE001 - 时间线是增强面，不阻断主链路
+            logger.warning("时间线追加失败(忽略): agent=%s sid=%s: %s", agent_id, session_id, e)
+            return False
+
+    def read_timeline(
+        self, agent_id: str, session_id: str, limit: int = 0
+    ) -> List[Dict[str, Any]]:
+        """读取会话时间线（坏行跳过；limit>0 取最近 N 条——重放语义）。"""
+        path = self._get_timeline_file(agent_id, session_id)
+        if not path.exists():
+            return []
+        events: List[Dict[str, Any]] = []
+        file_lock = self._get_file_lock(path)
+        with file_lock:
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError as e:
+                logger.warning("时间线读取失败: %s", e)
+                return []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(parsed, dict):
+                events.append(parsed)
+        if limit and len(events) > limit:
+            events = events[-int(limit):]
+        return events
+
+    def _delete_timeline(self, agent_id: str, session_id: str) -> None:
+        """删除会话时间线文件（best-effort，不留孤儿）。"""
+        try:
+            path = self._get_timeline_file(agent_id, session_id)
+            if path.exists():
+                path.unlink()
+        except OSError:
+            logger.debug("时间线清理失败(忽略): agent=%s sid=%s", agent_id, session_id, exc_info=True)
+
+
     def archive_session(self, agent_id: str, session_id: str) -> bool:
         """存档会话：该 session 的所有日期文件移入 archived/ 子目录。"""
         agent_dir = self._get_session_dir(agent_id)
@@ -649,6 +714,8 @@ class SessionManager(SessionRepository):
                         # B-9 sidecar: 移除索引条目；残留其他日期文件时
                         # 读路径指纹校验会自愈重建代表条目
                         self._sidecar_mutate(self._get_session_dir(agent_id), session_id, remove=True)
+                        # P1-2：时间线联动清理（不留孤儿）
+                        self._delete_timeline(agent_id, session_id)
                         return True
                 except Exception as e:
                     logger.error("删除session文件失败: %s", e)
@@ -674,6 +741,8 @@ class SessionManager(SessionRepository):
                 logger.info("共删除 %s 个文件（session_id=%s）", deleted_count, session_id)
                 # B-9 sidecar: 该会话全部日期文件已删除 → 移除索引条目
                 self._sidecar_mutate(self._get_session_dir(agent_id), session_id, remove=True)
+                # P1-2：时间线联动清理（不留孤儿）
+                self._delete_timeline(agent_id, session_id)
                 return True
             else:
                 logger.warning("未找到 session_id=%s 的任何文件（agent_id=%s）", session_id, agent_id)

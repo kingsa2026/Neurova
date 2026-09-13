@@ -484,8 +484,11 @@ class ApprovalManager:
             request.approval_note = note
             request.updated_at = datetime.datetime.now(datetime.timezone.utc)
 
-            # 记录到历史（用于智能模式）
-            self._approved_history[request.command] = datetime.datetime.now(datetime.timezone.utc)
+            # 记录到历史（用于智能模式）——P0-5：按规范化 key 记与查，
+            # shell 包装/绝对路径差异不产生"同命令重复审批"
+            self._approved_history[self.canonicalize_command(request.command)] = (
+                datetime.datetime.now(datetime.timezone.utc)
+            )
 
             # P1-c：审批记忆沉淀
             self._remember_approval(request.command, approved_by, remember)
@@ -550,6 +553,72 @@ class ApprovalManager:
         with self._lock:
             return self._requests.get(request_id)
 
+    # ── P0-5 命令规范化（Codex canonicalize_command_for_approval 对齐）──
+
+    # shell 包装识别：可执行名 ∈ 包装器集合 且 带执行标志（-c/-lc//c/-Command…）
+    # → 整条命令视为"包装器执行内层命令"，规范化剥出内层。
+    _WRAPPER_EXECUTABLES = frozenset(
+        {"bash", "sh", "zsh", "dash", "ksh", "cmd", "powershell", "pwsh"}
+    )
+    _WRAPPER_FLAG_RE = re.compile(
+        r"^(?:-{1,2}[\w-]+|/c|/k)\s+", re.IGNORECASE
+    )
+    _EXEC_NAME_RE = re.compile(
+        r"^(?P<exec>(?:\"[^\"]+\"|'[^']+'|[^\s]+?))(?:\.exe)?(?P<rest>\s+.*)?$",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def canonicalize_command(cls, command: str) -> str:
+        """命令规范化 key（P0-5）：剥 shell 包装、可执行名去路径、空白折叠。
+
+        - bash -lc 'git push origin main' → git push origin main
+        - C:\\Python311\\python.exe -m pytest → python -m pytest
+        - 无包装 flag 的命令原样保留骨架（bash script.sh ≠ bash -c script.sh）
+        - 危险语义不因规范化放大的前提：匹配端一律对规范化命令再过危险检测
+        """
+        cmd = " ".join((command or "").split())
+        cmd = cls._strip_exec_path(cmd)
+        # 剥包装：最多两层（bash -lc "sh -c '…'" 剥出 sh -c '…' 层级已可匹配）
+        for _ in range(2):
+            cmd = cls._strip_one_wrapper(cmd)
+        return cmd
+
+    @classmethod
+    def _strip_exec_path(cls, cmd: str) -> str:
+        """首 token 可执行名去路径（引号包裹/裸路径/exe 后缀均归一为裸名）。"""
+        m = cls._EXEC_NAME_RE.match(cmd)
+        if not m:
+            return cmd
+        exec_tok = m.group("exec")
+        if "/" not in exec_tok and "\\" not in exec_tok:
+            return cmd
+        name = exec_tok.strip("\"'").replace("\\", "/").rsplit("/", 1)[-1]
+        if name.lower().endswith(".exe"):
+            name = name[:-4]
+        if not name:
+            return cmd
+        return name + (m.group("rest") or "")
+
+    @classmethod
+    def _strip_one_wrapper(cls, cmd: str) -> str:
+        tokens = cmd.split(" ", 1)
+        if len(tokens) != 2:
+            return cmd
+        exec_tok, remainder = tokens
+        exec_name = exec_tok.strip("\"'").replace("\\", "/").rsplit("/", 1)[-1]
+        exec_name = exec_name[:-4] if exec_name.lower().endswith(".exe") else exec_name
+        if exec_name.lower() not in cls._WRAPPER_EXECUTABLES:
+            return cmd
+        m = cls._WRAPPER_FLAG_RE.match(remainder)
+        if not m:
+            return cmd
+        inner = remainder[m.end():]
+        # 内层为成对引号包裹时剥掉外层引号
+        if len(inner) >= 2 and inner[0] == inner[-1] and inner[0] in "\"'":
+            inner = inner[1:-1]
+        return " ".join(inner.split())
+
     # ── P1-c 审批记忆（EXACT/SIMILAR） ──
 
     @staticmethod
@@ -572,11 +641,12 @@ class ApprovalManager:
         if remember not in ("exact", "similar"):
             return
         try:
+            # P0-5：记忆 key 一律规范化——同命令换 shell 包装/绝对路径可命中
             if remember == "exact":
-                pattern = (command or "").strip()
+                pattern = self.canonicalize_command(command)
                 kind = "exact"
             else:
-                pattern = self._generalize_command(command)
+                pattern = self._generalize_command(self.canonicalize_command(command))
                 kind = "similar"
 
             # 同 pattern 同 kind 去重（刷新时间戳即可）
@@ -609,7 +679,8 @@ class ApprovalManager:
         危险命令豁免 SIMILAR——用户只泛化批准过一条结构，
         不代表所有同构危险命令（rm -rf *）都自动放行。
         """
-        cmd = (command or "").strip()
+        # P0-5：匹配端同样规范化（与记忆端同 key 空间），再过危险检测
+        cmd = self.canonicalize_command(command)
         if not cmd:
             return None
         is_dangerous = self._detector.is_dangerous(cmd)
@@ -676,15 +747,16 @@ class ApprovalManager:
         return False
 
     def _check_historical_approval(self, command: str) -> bool:
-        """检查命令是否已历史批准"""
-        if command in self._approved_history:
+        """检查命令是否已历史批准（P0-5：按规范化 key 查，与写入端同空间）"""
+        key = self.canonicalize_command(command)
+        if key in self._approved_history:
             # 检查批准是否在24小时内
-            approved_time = self._approved_history[command]
+            approved_time = self._approved_history[key]
             if datetime.datetime.now(datetime.timezone.utc) - approved_time < datetime.timedelta(hours=24):
                 return True
             else:
                 # 过期，移除记录
-                del self._approved_history[command]
+                del self._approved_history[key]
 
         return False
 

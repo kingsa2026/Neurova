@@ -108,6 +108,32 @@ class BaseAgentLoop(ABC):
             new_messages.append(msg)
             self.agent.append_tool_messages(records)
 
+        # P1-9（Codex steer 对齐）：工具轮间隙排空插话邮箱——turn 进行中
+        # 用户补充的消息以 user 角色并入消息序列，下一次采样即可见
+        try:
+            from neurova.core.steer_queue import get_steer_queue
+
+            _sid = getattr(self.agent, "current_session_id", "") or ""
+            for _steer_text in get_steer_queue().drain(str(_sid)):
+                new_messages.append(
+                    {"role": "user", "content": f"[用户插话] {_steer_text}"}
+                )
+        except Exception:  # noqa: BLE001 - 插话排空失败不影响工具结果回装
+            logger.debug("steer 排空失败(忽略)", exc_info=True)
+
+        # P2-5（Codex 邮箱对齐）：排空子代理回传邮箱——后台子代理的完成
+        # 结果逐轮可见；嵌套模式的完成摘要同样显式回灌
+        try:
+            from neurova.agent.mailbox import get_agent_mailbox
+
+            _sid = getattr(self.agent, "current_session_id", "") or ""
+            for _mail_text in get_agent_mailbox().drain(str(_sid)):
+                new_messages.append(
+                    {"role": "user", "content": _mail_text}
+                )
+        except Exception:  # noqa: BLE001
+            logger.debug("子代理邮箱排空失败(忽略)", exc_info=True)
+
         return new_messages
 
     async def _execute_tool_call_worker(self, tool_call: Dict) -> tuple:
