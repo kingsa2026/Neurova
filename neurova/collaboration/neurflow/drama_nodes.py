@@ -257,8 +257,8 @@ DRAMA_NODES: List[Dict[str, Any]] = [
                 "name": "ffmpeg_path",
                 "type": "input",
                 "label": "FFmpeg 可执行路径",
-                "default": "ffmpeg",
-                "placeholder": "默认从 PATH 探测 ffmpeg",
+                "default": "",
+                "placeholder": "留空自动解析：首次启动自动下载件 → 系统 PATH",
             },
             {
                 "id": "transition",
@@ -910,11 +910,12 @@ async def exec_video_compose(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dic
     resolution = config.get("resolution", "1080x1920")
     provider = str(config.get("provider", "") or "").lower()
 
-    # ① FFmpeg 真拼接（本地文件片段）
+    # ① FFmpeg 真拼接（本地文件片段）。批次5：ffmpeg 不打包，解析顺序
+    # 显式路径 > env > 托管自动下载件(data/tools/ffmpeg) > 系统 PATH。
     local_files = [c for c in clip_list if c and not c.startswith("http") and Path(c).is_file()]
-    import shutil
+    from neurova.core.ffmpeg import resolve_ffmpeg_path
 
-    ffmpeg = shutil.which(str(config.get("ffmpeg_path") or "ffmpeg"))
+    ffmpeg = resolve_ffmpeg_path(str(config.get("ffmpeg_path") or ""))
     if ffmpeg and local_files:
         try:
             import subprocess
