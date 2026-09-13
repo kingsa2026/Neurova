@@ -49,6 +49,9 @@ COMPUTER_USE_TOOLS = frozenset(
         "computer_dom_snapshot",
         "computer_click_element",
         "computer_set_value",
+        "computer_som_snapshot",
+        "computer_click_mark",
+        "computer_ssh_exec",
         "browser_navigate",
         "browser_click",
         "browser_type",
@@ -82,6 +85,9 @@ _COMPUTER_TOOL_PARAM_KEYS: Dict[str, frozenset] = {
     "computer_dom_snapshot": frozenset({"window_title", "max_nodes", "max_depth"}),
     "computer_click_element": frozenset({"index", "runtime_id", "window_title", "button", "generation"}),
     "computer_set_value": frozenset({"value", "index", "runtime_id", "window_title", "generation"}),
+    "computer_som_snapshot": frozenset({"max_marks"}),
+    "computer_click_mark": frozenset({"index", "button"}),
+    "computer_ssh_exec": frozenset({"host", "command", "user", "port", "timeout"}),
     "browser_navigate": frozenset({"url", "generation"}),
     "browser_click": frozenset({"selector", "text"}),
     "browser_type": frozenset({"selector", "text"}),
@@ -162,6 +168,13 @@ def describe_computer_action(tool_name: str, params: Dict) -> str:
     if tool_name == "computer_set_value":
         text = str(params.get("value", ""))
         return f"向桌面控件写入「{text[:30]}{'…' if len(text) > 30 else ''}」"
+    if tool_name == "computer_som_snapshot":
+        return "生成桌面 SOM 编号标注快照"
+    if tool_name == "computer_click_mark":
+        return f"点击 SOM 编号 #{params.get('index', '?')}"
+    if tool_name == "computer_ssh_exec":
+        cmd = str(params.get("command", ""))
+        return f"SSH {params.get('user', '')}@{params.get('host', '?')}: {cmd[:60]}{'…' if len(cmd) > 60 else ''}"
     if tool_name == "browser_navigate":
         return f"打开网页 {params.get('url', '')}"
     if tool_name == "browser_click":
@@ -235,6 +248,7 @@ class ToolExecutor:
         "file_list": "_execute_file_list",
         "file_search": "_execute_file_search",
         "web_fetch": "_execute_web_fetch",
+        "deep_research": "_execute_deep_research",
         "calculator": "_execute_calculator",
         "get_datetime": "_execute_get_datetime",
         "computer_screenshot": "_execute_computer_screenshot",
@@ -245,6 +259,9 @@ class ToolExecutor:
         "computer_dom_snapshot": "_execute_computer_dom_snapshot",
         "computer_click_element": "_execute_computer_click_element",
         "computer_set_value": "_execute_computer_set_value",
+        "computer_som_snapshot": "_execute_computer_som_snapshot",
+        "computer_click_mark": "_execute_computer_click_mark",
+        "computer_ssh_exec": "_execute_computer_ssh_exec",
         "browser_navigate": "_execute_browser_navigate",
         "browser_click": "_execute_browser_click",
         "browser_type": "_execute_browser_type",
@@ -267,6 +284,7 @@ class ToolExecutor:
         "voice_memory_search": "_execute_voice_memory_search",
         "run_code": "_execute_run_code",
         "execute_code": "_execute_run_code",
+        "git": "_execute_git",
         "spawn_subagent": "_execute_spawn_subagent",
         "subagent_status": "_execute_subagent_status",
         "list_agents": "_execute_list_agents",
@@ -1114,11 +1132,20 @@ class ToolExecutor:
             # loop 原生/文本兜底/肌肉记忆自动执行最终都汇到这里）
             from neurova.agent.tool_coordinator import get_tool_timeout
 
-            core_out = await self.tool_coordinator.run_with_timeout(
-                tool_name,
-                self._execute_tool_core(tool_name, params),
-                timeout=get_tool_timeout(tool_name),
-            )
+            # 审批重放/持久授权（skip_governance=True）旁路桌面运行门，避免审核模式
+            # 批准后重放再次触发审批成死循环。
+            from neurova.computer_use.runtime_policy import reset_gate_bypass, set_gate_bypass
+
+            _bypass_tok = set_gate_bypass(skip_governance)
+            try:
+                with self._sandbox_scope(tool_name, skip_governance):
+                    core_out = await self.tool_coordinator.run_with_timeout(
+                        tool_name,
+                        self._execute_tool_core(tool_name, params),
+                        timeout=get_tool_timeout(tool_name),
+                    )
+            finally:
+                reset_gate_bypass(_bypass_tok)
             if isinstance(core_out, dict) and core_out.get("status") == "background":
                 result = core_out
                 success = False  # 未完成（后台继续）；结果经 pending hints 注入下一轮
@@ -1546,13 +1573,208 @@ class ToolExecutor:
         # 让 BrowserManager(单例)能按 user 池化 camofox 后端,避免 _tabs/_active_target_id 跨用户污染。
         if tool_name.startswith("browser_"):
             self._inject_browser_identity()
+            # R3-4 附身授权门：browser_* 若将走携带登录态的 camofox profile，
+            # 需用户显式授权（fail-closed，无 grant 不触达后端）。
+            _refusal = self._profile_grant_gate(tool_name)
+            if _refusal is not None:
+                return _refusal
         # R1-3：computer/browser 工具执行前归一化（button 词表/数值强转/未知键拒绝）
         if tool_name in COMPUTER_USE_TOOLS:
             try:
                 params = normalize_computer_params(tool_name, params)
             except ValueError as e:
                 return {"error": f"参数非法: {e}"}
+        # 桌面运行权限档（full/sandbox/review/auto）：computer_* 变更动作按档决定
+        # 本机执行 / 进沙箱 / 先审批；只读与 full 档直接放行（现状零回归）。
+        if tool_name.startswith("computer_"):
+            _rt = self._desktop_runtime_gate(tool_name, params)
+            if _rt is not None:
+                return _rt
+        # R3-4 桌面动作审计：分发咽喉点单写（本地/远程会话平面/MCP 导出三
+        # 入口都收口到这里，见 docs/Neurova_CUA_Phase3立项_2026-09-12.md §3）。
+        if tool_name in COMPUTER_USE_TOOLS or tool_name.startswith("browser_"):
+            import time as _t
+
+            _t0 = _t.time()
+            try:
+                result = await getattr(self, method_name)(params)
+            except Exception:
+                self._record_desktop_audit(tool_name, params, {"success": False}, (_t.time() - _t0) * 1000)
+                raise
+            self._record_desktop_audit(tool_name, params, result, (_t.time() - _t0) * 1000)
+            return result
         return await getattr(self, method_name)(params)
+
+    def _record_desktop_audit(
+        self, tool_name: str, params: Dict, result: Any, duration_ms: float
+    ) -> None:
+        """写一条桌面动作审计（元数据白名单，见 neurova/security/desktop_audit）。
+        身份尽力解析，任何失败静默——审计永不阻断工具流。"""
+        try:
+            from neurova.security.desktop_audit import get_desktop_audit_store
+
+            user_id, agent_id = self._agent_identity()
+            get_desktop_audit_store().record_computer_action(
+                tool_name,
+                params,
+                result,
+                duration_ms,
+                user_id=user_id,
+                agent_id=agent_id,
+                session_id=getattr(self._agent, "current_session_id", None),
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("桌面动作审计记录失败（不阻断）", exc_info=True)
+
+    def _desktop_uia(self):
+        """桌面语义层 manager 解析（RS-1 远程路由对语义动作同样生效）。
+
+        绑定远程会话时返回 RemoteComputerUseManager（snapshot/click_element/
+        set_value 同签名，代理到来宾），否则本地 desktop_uia 单例。否则远程模式下
+        截图/点击走来宾而控件树走本机 = 看错屏幕。"""
+        from neurova.computer_use import get_active_remote_desktop
+
+        remote = get_active_remote_desktop()
+        if remote is not None:
+            return remote
+        from neurova.computer_use.desktop_uia import get_desktop_uia_manager
+
+        return get_desktop_uia_manager()
+
+    @staticmethod
+    def _pixel_action_result() -> Dict:
+        """像素动作（click/type/scroll/click_mark）的 ActionResult 档：远程会话绑定
+        →route=remote/delivery=background（来宾隔离机，不抢用户真机焦点，回执即确认）；
+        本地→global_input/foreground 诚实档（pyautogui 无投递回执）。"""
+        from neurova.computer_use import action_result as _ar, get_active_remote_desktop
+
+        if get_active_remote_desktop() is not None:
+            return _ar.confirmed("remote", "background", ["delivery_ack"])
+        return _ar.unverifiable("global_input", "foreground")
+
+    def _sandbox_scope(self, tool_name: str, skip_governance: bool):
+        """沙箱运行/自动档的会话领用上下文：变更动作需进隔离桌面且当前无活动会话、
+        且已配置会话池时，返回 use_remote_session（本动作执行期绑定来宾，退出归还）。
+        其余情形返回 nullcontext——无池时由 _desktop_runtime_gate fail-closed 拒绝。"""
+        from contextlib import nullcontext
+
+        if skip_governance or not tool_name.startswith("computer_"):
+            return nullcontext()
+        try:
+            from neurova.computer_use import get_active_remote_desktop
+            from neurova.computer_use import runtime_policy as rp
+            from neurova.computer_use.session_pool import get_default_desktop_pool
+
+            if rp.is_gate_bypassed() or get_active_remote_desktop() is not None:
+                return nullcontext()
+            if rp.decide_desktop(rp.get_runtime_mode(), tool_name)["action"] != rp.DesktopAction.REQUIRE_SANDBOX.value:
+                return nullcontext()
+            pool = get_default_desktop_pool()
+            if pool is None:
+                return nullcontext()
+            user_id, _ = self._agent_identity()
+            from neurova.computer_use.remote_backend import use_remote_session
+
+            return use_remote_session(pool, user_id)
+        except Exception:  # noqa: BLE001 — 领用异常降级为无沙箱（门会 fail-closed 拒）
+            return nullcontext()
+
+    def _desktop_runtime_gate(self, tool_name: str, params: Dict) -> Optional[Dict]:
+        """桌面运行权限档门（full/sandbox/review/auto）。返回 None=放行；dict=拒绝/待批。
+
+        - PROCEED（含 full 档、只读动作、审批重放旁路）→ 放行
+        - REQUIRE_SANDBOX → 已绑定远程会话则放行（正在沙箱内），否则拒（无会话）
+        - REQUIRE_APPROVAL → 经 ApprovalManager 铸审批（批准后重放执行本动作），返回待批
+        """
+        from neurova.computer_use.runtime_policy import (
+            DesktopAction,
+            decide_desktop,
+            get_runtime_mode,
+            is_gate_bypassed,
+        )
+
+        if is_gate_bypassed():
+            return None
+        decision = decide_desktop(get_runtime_mode(), tool_name)
+        action = decision["action"]
+        if action == DesktopAction.PROCEED.value:
+            return None
+        mode = get_runtime_mode()
+        if action == DesktopAction.REQUIRE_SANDBOX.value:
+            from neurova.computer_use import get_active_remote_desktop
+
+            if get_active_remote_desktop() is not None:
+                return None  # 已在隔离桌面会话中执行
+            return {
+                "success": False,
+                "error": "桌面运行档要求隔离沙箱会话，但当前无活动会话（未领用/未配置会话池）",
+                "desktop_runtime": {"mode": mode, "action": action, "reason": decision["reason"]},
+            }
+        # REQUIRE_APPROVAL：铸审批请求，批准后由 approve 端点重放执行（metadata 带 tool_name/params）
+        try:
+            from neurova.security.approval_manager import get_approval_manager
+
+            user_id, agent_id = self._agent_identity()
+            req = get_approval_manager().create_approval_request(
+                agent_id=agent_id or "",
+                user_id=user_id,
+                command=f"desktop::{tool_name}",
+                description=f"审核模式：agent 请求执行 {tool_name}",
+                danger_reason="桌面运行权限=审核模式",
+                metadata={"kind": "desktop_review", "tool_name": tool_name, "params": params},
+            )
+            rid = getattr(req, "request_id", None)
+            return {
+                "success": False,
+                # 顶层 pending_approval/approval_id 契约：console._extract_approval_payload
+                # 据此发 approval_required SSE 事件，对话页交互面板弹出审批；
+                # 批准后 approve 端点按 metadata 重放（skip_governance 旁路本门）。
+                "pending_approval": True,
+                "approval_id": rid,
+                "tool_name": tool_name,
+                "params": params,
+                "error": f"审核模式：{tool_name} 待用户批准（审批请求 {rid}）",
+                "desktop_runtime": {"mode": mode, "action": action, "request_id": rid},
+            }
+        except Exception as e:  # noqa: BLE001 — 审批子系统不可用仍 fail-closed
+            return {
+                "success": False,
+                "error": f"审核模式：无法发起审批（{e}），已拒绝",
+                "desktop_runtime": {"mode": mode, "action": action},
+            }
+
+    def _profile_grant_gate(self, tool_name: str) -> Optional[Dict]:
+        """R3-4 附身授权门（fail-closed）。browser_* 若将走携带登录态的 camofox
+        profile，需用户显式授权。返回 None=放行；dict=结构化拒绝（不触达后端）。
+        camofox 未激活（playwright 常态）或后端判定失败 → 放行不阻断。"""
+        try:
+            from neurova.computer_use.browser_manager import get_browser_manager
+
+            if not get_browser_manager().camofox_active():
+                return None
+        except Exception:  # noqa: BLE001
+            return None
+        try:
+            from neurova.security.profile_grant import ensure_profile_grant
+
+            user_id, agent_id = self._agent_identity()
+            out = ensure_profile_grant(
+                user_id,
+                f"camofox:{user_id}",
+                agent_id=agent_id or "",
+                session_id=getattr(self._agent, "current_session_id", None),
+                reason=f"browser 工具 {tool_name} 需以登录态 profile 对外操作",
+            )
+            if out.get("granted"):
+                return None
+            return {
+                "success": False,
+                "error": out.get("message", "需要附身授权"),
+                "profile_grant": {"granted": False, "request_id": out.get("request_id")},
+            }
+        except Exception as e:  # noqa: BLE001 — 授权子系统异常仍 fail-closed 拒绝
+            logger.warning("profile 授权门异常（fail-closed 拒绝）: %s", e)
+            return {"success": False, "error": f"附身授权检查失败，已拒绝: {e}"}
 
     def _inject_browser_identity(self) -> None:
         """从 _agent_identity 取 userId,写到 ContextVar + 通知 supervisor track。
@@ -2052,11 +2274,53 @@ class ToolExecutor:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8", errors="replace")
 
+    def _searxng_search(self, query: str, base_url: str) -> str:
+        """searxng 自托管实例 JSON 检索（P1-2）。返回拼好的摘要文本。
+
+        非法响应（非 JSON / 无 results 键 / format=json 未在实例端开启）
+        抛 ValueError——由调用方决定回退，不静默吞错。
+        """
+        import json
+        import urllib.parse
+
+        url = f"{base_url.rstrip('/')}/search?{urllib.parse.urlencode({'q': query, 'format': 'json'})}"
+        raw = self._blocking_fetch(url, "Mozilla/5.0", timeout=10)
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            raise ValueError("searxng 响应非 JSON（实例端需启用 format=json）")
+        if not isinstance(payload, dict) or "results" not in payload:
+            raise ValueError("searxng 响应缺少 results 字段")
+        lines = []
+        for r in (payload.get("results") or [])[:5]:
+            title = str(r.get("title") or "").strip()
+            content = str(r.get("content") or "").strip()
+            rurl = str(r.get("url") or "").strip()
+            if title or content:
+                lines.append(f"{title} — {content} ({rurl})" if rurl else f"{title} — {content}")
+        return "\n".join(lines)
+
     async def _execute_web_search(self, params: Dict) -> Dict:
-        """执行网页搜索"""
+        """执行网页搜索（P1-2：settings.searxng_url 配置自托管实例时优先 searxng
+        JSON API，失败回退 Bing HTML；backend 字段诚实标注实际来源）。"""
         query = params.get("query") or params.get("q") or params.get("keywords", "")
         if not query:
             return {"error": "缺少搜索查询"}
+
+        searxng_url = ""
+        try:
+            from neurova.shared_config import get_shared_config_manager
+
+            searxng_url = str(get_shared_config_manager().get_settings().get("searxng_url") or "").strip()
+        except Exception as e:  # noqa: BLE001 - 设置不可达回退默认后端，不阻断搜索
+            logger.warning("读取 searxng_url 设置失败，回退默认后端: %s", e)
+        if searxng_url:
+            try:
+                text = await asyncio.to_thread(self._searxng_search, query, searxng_url)
+                return {"query": query, "results": text, "backend": "searxng"}
+            except Exception as e:
+                logger.warning("searxng 搜索失败（%s），回退 Bing", e)
+
         try:
             import urllib.parse
             # BUGFIX: 原生 google.com/search 页面需 JS 渲染且反爬，静态抓取拿不到摘要。
@@ -2071,7 +2335,8 @@ class ToolExecutor:
                 snippets = re.findall(r'<p[^>]*class="[^"]*"[^>]*>(.*?)</p>', html, re.DOTALL)
             text = re.sub(r'<[^>]+>', '', ' '.join(snippets[:5]))
             text = re.sub(r'\s+', ' ', text).strip()[:500]
-            return {"query": query, "results": text or f"搜索 '{query}' 完成，但未能提取摘要。请直接告诉用户搜索结果。"}
+            backend = "searxng_fallback_bing" if searxng_url else "bing"
+            return {"query": query, "results": text or f"搜索 '{query}' 完成，但未能提取摘要。请直接告诉用户搜索结果。", "backend": backend}
         except Exception as e:
             return {"query": query, "results": f"搜索 '{query}' 时出错: {e}"}
 
@@ -2151,6 +2416,132 @@ class ToolExecutor:
             }
         except Exception as e:
             return {"url": url, "error": f"网页抓取失败: {e}"}
+
+    # ── P1-1 深度研究采集器（复用搜索/抓取，工具内零 LLM 调用）──
+
+    def _search_structured(self, query: str) -> list:
+        """一次检索返回结构化结果 [{title,url,snippet}]（searxng 优先，回退 Bing HTML）。
+
+        同步方法（内部走 _blocking_fetch），调用方须置于线程池。
+        返回空列表 = 无结果（诚实，不抛错）；网络失败向上抛由调用方按源降级。
+        """
+        import json
+        import re
+        import urllib.parse
+
+        searxng_url = ""
+        try:
+            from neurova.shared_config import get_shared_config_manager
+
+            searxng_url = str(get_shared_config_manager().get_settings().get("searxng_url") or "").strip()
+        except Exception:  # noqa: BLE001 - 设置不可达回退 Bing
+            searxng_url = ""
+
+        if searxng_url:
+            try:
+                u = f"{searxng_url.rstrip('/')}/search?{urllib.parse.urlencode({'q': query, 'format': 'json'})}"
+                payload = json.loads(self._blocking_fetch(u, "Mozilla/5.0", timeout=10))
+                out = []
+                for r in payload.get("results", []):
+                    url = str(r.get("url") or "").strip()
+                    if url:
+                        out.append({
+                            "title": str(r.get("title") or "").strip() or url,
+                            "url": url,
+                            "snippet": str(r.get("content") or "").strip(),
+                        })
+                return out
+            except Exception:
+                pass  # searxng 不可用 → 落 Bing
+
+        # Bing 结构化解析（b_algo 结果块：标题链接 + 摘要）
+        bing = f"https://www.bing.com/search?q={urllib.parse.quote(query)}&setlang=zh-hans"
+        html = self._blocking_fetch(bing, "Mozilla/5.0", timeout=10)
+        results = []
+        for block in re.findall(r'<li class="b_algo"[\s\S]*?</li>', html):
+            m = re.search(r'<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)</a>', block)
+            if not m:
+                continue
+            url = m.group(1).strip()
+            title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+            sm = re.search(r'<p[^>]*>([\s\S]*?)</p>', block)
+            snippet = re.sub(r"<[^>]+>", "", sm.group(1)).strip() if sm else ""
+            if url.startswith("http"):
+                results.append({"title": title or url, "url": url, "snippet": snippet[:300]})
+        return results
+
+    async def _execute_deep_research(self, params: Dict) -> Dict:
+        """深度研究采集器（P1-1）：多子查询检索 → 去重 → 抓正文摘录 → 编号引用料包。
+
+        并发扇出（复核修正 2026-09-12）：原逐查询/逐源串行，最坏 5×10s 检索 +
+        15×15s 抓取 = 275s，必撞 run_with_timeout 默认 60s 中途转后台（断点）。
+        改为检索并发 + 抓取限流并发（信号量 6），配合 TOOL_TIMEOUTS_S 放宽与
+        转后台提示；单查询/单源失败各自降级，不吞整体。
+        """
+        query = str(params.get("query") or "").strip()
+        if not query:
+            return {"error": "缺少 query 参数"}
+
+        sub_queries = params.get("sub_queries") or []
+        if not isinstance(sub_queries, list):
+            sub_queries = [str(sub_queries)]
+        # 检索面：query 本身 + 拆解角度，去重、限量（≤5 次检索，防刷）
+        queries = [query] + [str(q).strip() for q in sub_queries if str(q).strip()]
+        queries = list(dict.fromkeys(queries))[:5]
+
+        try:
+            max_sources = int(params.get("max_sources") or 6)
+        except (TypeError, ValueError):
+            max_sources = 6
+        max_sources = max(1, min(max_sources, 15))
+
+        # 1) 并发检索（return_exceptions 隔离单查询失败），再跨查询按 URL 去重
+        search_lists = await asyncio.gather(
+            *(asyncio.to_thread(self._search_structured, q) for q in queries),
+            return_exceptions=True,
+        )
+        seen: Dict[str, Dict] = {}
+        search_errors = []
+        for q, res in zip(queries, search_lists):
+            if isinstance(res, BaseException):
+                search_errors.append(f"{q}: {res}")
+                continue
+            for r in res:
+                url = r["url"]
+                if url not in seen and len(seen) < max_sources:
+                    seen[url] = {"title": r["title"], "url": url, "snippet": r["snippet"]}
+
+        # 2) 限流并发抓正文（信号量 6 防瞬时打爆目标站），单源失败诚实剔除
+        sem = asyncio.Semaphore(6)
+
+        async def _grab(meta: Dict):
+            async with sem:
+                try:
+                    fetched = await self._execute_web_fetch({"url": meta["url"], "max_chars": 600})
+                except Exception:  # noqa: BLE001 - 单源异常不影响整包
+                    return None
+            content = (fetched.get("content") or "").strip()
+            if fetched.get("error") or not content:
+                return None
+            return {"title": meta["title"], "url": meta["url"], "excerpt": content[:600]}
+
+        grabs = await asyncio.gather(*(_grab(m) for m in seen.values()))
+        sources = [{**g, "index": i} for i, g in enumerate((x for x in grabs if x), start=1)]
+
+        citation_block = "\n".join(f"[{s['index']}] {s['title']} — {s['url']}" for s in sources)
+        result = {
+            "query": query,
+            "sub_queries": queries[1:],
+            "sources": sources,
+            "citation_block": citation_block,
+            "message": (
+                "未采集到可用源（搜索无结果或全部抓取失败）" if not sources
+                else f"已采集 {len(sources)} 个源，请基于 excerpt 综合撰写带 [n] 编号引用的报告"
+            ),
+        }
+        if search_errors:
+            result["search_errors"] = search_errors
+        return result
 
     async def _execute_calculator(self, params: Dict) -> Dict:
         """安全数学计算：AST 白名单求值，绝不执行任意代码（无 eval/exec）"""
@@ -2554,6 +2945,122 @@ class ToolExecutor:
         except Exception as e:
             return {"error": str(e)}
 
+    # git 子命令白名单（工具输入域契约，非治理守卫）：读操作 + 写操作
+    # （写操作能否执行由 tool_guard git_write_operation 规则在治理层裁决）
+    _GIT_ALLOWED_SUBCOMMANDS = frozenset({
+        # 读
+        "status", "diff", "log", "show", "blame", "ls-files", "cat-file",
+        "rev-parse", "describe", "shortlog", "grep", "branch", "tag",
+        "remote", "config", "ls-tree",
+        # 写（治理层 ASK 确认后才到这）
+        "add", "commit", "push", "pull", "fetch", "clone", "checkout",
+        "switch", "restore", "merge", "rebase", "reset", "revert",
+        "cherry-pick", "stash", "clean", "am", "apply", "init", "mv", "rm",
+        "worktree", "submodule", "gc", "prune", "bisect",
+    })
+    # 改变仓库锚点/执行路径的全局选项——仓库位置只由 path 参数决定
+    # （09-08 工作区契约），执行路径不得被命令行改写。
+    _GIT_REPO_ANCHOR_OPTIONS = ("--git-dir", "--work-tree", "-C", "--namespace", "--exec-path")
+
+    async def _execute_git(self, params: Dict) -> Dict:
+        """执行 git 命令（P0-3）：shlex 拆分 + 列表式 subprocess，零 shell 注入面。
+
+        裁决链：command 参数经 _governance_precheck → tool_guard 规则
+        （写动词 HIGH→ASK / RCE 形态 CRITICAL→DENY / 读动词放行）。
+        本方法只守工具输入域契约（git 前缀/子命令白名单/仓库锚点唯一入口），
+        策略裁决一律在治理层，执行体内不放策略守卫。
+        """
+        import shlex
+        import subprocess
+
+        command = (params.get("command") or "").strip()
+        if not command:
+            return {"error": "缺少 command 参数"}
+
+        # 工具输入域契约：必须是 git 命令行（不是通用 shell——那是 run_code）
+        try:
+            argv = shlex.split(command, posix=True)
+        except ValueError as e:
+            return {"error": f"命令引号不配对，无法解析: {e}"}
+        if not argv or argv[0] != "git":
+            return {"error": "command 必须以 git 开头（通用命令请用 run_code/computer_shell）"}
+        if len(argv) < 2:
+            return {"error": "缺少 git 子命令"}
+
+        # 全局选项扫描（git <全局选项> <子命令> ...）：锚点/执行路径选项拒绝；
+        # -c/--config-env 危险键拒绝，常规身份键（user.email 等）放行——
+        # 治理层 git_rce_vectors 规则同特征双保险。
+        i = 1
+        while i < len(argv) and argv[i].startswith("-"):
+            tok = argv[i]
+            base = tok.split("=", 1)[0]
+            if base in self._GIT_REPO_ANCHOR_OPTIONS:
+                return {"error": f"禁止用 {base} 改变仓库锚点/执行路径，仓库目录请用 path 参数"}
+            if base in ("-c", "--config-env"):
+                kv = tok.split("=", 1)[1] if "=" in tok else (argv[i + 1] if i + 1 < len(argv) else "")
+                if self._is_git_rce_config_key(kv):
+                    return {"error": f"禁止的 git 配置键: {kv}"}
+                i += 1 if "=" in tok else 2
+                continue
+            i += 1
+        if i >= len(argv):
+            return {"error": "缺少 git 子命令"}
+        subcommand = argv[i]
+        if subcommand not in self._GIT_ALLOWED_SUBCOMMANDS:
+            return {"error": f"不支持的 git 子命令: {subcommand}"}
+
+        path, err = self._resolve_agent_path(params.get("path") or ".")
+        if err:
+            return {"error": err}
+        timeout = max(1, min(int(params.get("timeout") or 60), 600))
+
+        try:
+            import shutil
+            import os
+
+            git_bin = shutil.which("git")
+            if not git_bin:
+                return {"error": "系统未安装 git（PATH 中找不到 git）"}
+
+            def _run() -> Dict:
+                env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_PAGER": "cat", "GIT_EDITOR": "true"}
+                proc = subprocess.run(
+                    [git_bin, *argv[1:]],
+                    cwd=path, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace",
+                    timeout=timeout, env=env, shell=False,
+                )
+                return {
+                    "success": proc.returncode == 0,
+                    "returncode": proc.returncode,
+                    "stdout": proc.stdout or "",
+                    "stderr": proc.stderr or "",
+                    "command": command,
+                    "path": path,
+                }
+
+            return await asyncio.to_thread(_run)
+        except subprocess.TimeoutExpired:
+            return {"error": f"git 命令超时（{timeout}s）: {command}"}
+        except FileNotFoundError:
+            return {"error": "系统未安装 git"}
+        except Exception as e:
+            return {"error": f"git 执行失败: {e}"}
+
+    @staticmethod
+    def _is_git_rce_config_key(key_val: str) -> bool:
+        """key=value 形态的配置项是否为可执行代码注入的危险键（core.pager 等）。"""
+        if not key_val or "=" not in key_val:
+            return False
+        key = key_val.split("=", 1)[0].lower()
+        if key in {
+            "core.pager", "core.editor", "core.fsmonitor", "core.sshcommand",
+            "core.ssh_command", "core.attributefile", "core.hookspath",
+            "sequence.editor",
+        }:
+            return True
+        return key.endswith((".cmd", ".command", ".hookspath", ".fsmonitor", ".pager", ".editor"))
+
     # ── 常规 Agent 工具：文件枚举 / 内容搜索（对标 Glob/Grep）──
     # 安全设计：path 参数会进入治理预检（_governance_precheck 扫描 path），
     # 但 pattern 不会；因此此处额外做路径规范化 + 拒绝 .. 段 + 结果约束在
@@ -2828,7 +3335,7 @@ class ToolExecutor:
                 # R1-2 诚实档：pyautogui 无投递回执，明确 unverifiable + foreground
                 from neurova.computer_use import action_result as _ar
 
-                _ar.attach(result, _ar.unverifiable("global_input", "foreground"))
+                _ar.attach(result, self._pixel_action_result())
             await self._emit_computer_event("computer_click", params, result)
             if success:
                 await self._emit_action_refreshed_screenshot("computer_click", params, result)
@@ -2871,7 +3378,7 @@ class ToolExecutor:
                 if result.get("success") is True:
                     from neurova.computer_use import action_result as _ar
 
-                    _ar.attach(result, _ar.unverifiable("global_input", "foreground"))
+                    _ar.attach(result, self._pixel_action_result())
 
             success = result.get("success") is True
             if success:
@@ -2905,7 +3412,7 @@ class ToolExecutor:
                 result["note"] = ACTION_REFRESH_NOTE
                 from neurova.computer_use import action_result as _ar
 
-                _ar.attach(result, _ar.unverifiable("global_input", "foreground"))
+                _ar.attach(result, self._pixel_action_result())
             await self._emit_computer_event("computer_scroll", params, result)
             if success:
                 await self._emit_action_refreshed_screenshot("computer_scroll", params, result)
@@ -2939,14 +3446,105 @@ class ToolExecutor:
             logger.error("Shell 命令执行失败: %s", e)
             return {"error": f"Shell 命令执行失败: {str(e)}"}
 
+    async def _execute_computer_ssh_exec(self, params: Dict) -> Dict:
+        """SSH 远程命令执行（Linux/macOS 远程 = SSH，无 GUI）。
+
+        凭据（user/key/password）从当前用户的凭据分桶 platform=ssh 解析；host/command
+        由调用方给。结果经 terminal 事件推面板渲染成 SSH 终端窗口。
+        """
+        try:
+            host = params.get("host")
+            command = params.get("command", "")
+            if not host:
+                return {"error": "缺少 host 参数"}
+            if not command:
+                return {"error": "缺少 command 参数"}
+
+            from neurova.computer_use.ssh_runner import resolve_ssh_credentials, run_ssh_command
+
+            # 凭据桶键必须与凭据 API（current_user["user_id"]）同源：优先请求级
+            # identity_context（chat 流由 JWT user_id 注入），回退 agent 身份。
+            # 否则按需卡存到真实用户桶、工具却读 default 桶 → 白存死循环。
+            from neurova.core.identity_context import get_request_user_id
+
+            user_id = get_request_user_id() or self._agent_identity()[0]
+
+            def _has_cred(c: Dict) -> bool:
+                return bool(c.get("user") or c.get("key_text") or c.get("password") or params.get("user"))
+
+            creds = resolve_ssh_credentials(user_id, host)
+            if not _has_cred(creds):
+                # 弹按需凭据卡（WS computer_action 通道），随后有限轮询等待用户填写：
+                # 凭据到位即在同一轮内继续执行（当场续跑），超时才以 needs_credential 终止。
+                await self._emit_computer_event("computer_ssh_exec", params, {
+                    "success": False, "needs_credential": True, "host": host,
+                    "error": f"未配置主机 {host} 的 SSH 凭据，请在弹出的凭据卡中填写",
+                })
+                creds = await self._await_ssh_credential(user_id, host)
+                if not _has_cred(creds):
+                    return {
+                        "success": False, "needs_credential": True, "host": host,
+                        "error": f"等待主机 {host} 凭据超时，命令未执行",
+                    }
+            result = await asyncio.to_thread(
+                run_ssh_command,
+                host,
+                command,
+                user=params.get("user") or creds.get("user"),
+                port=int(params.get("port") or creds.get("port") or 22),
+                key_text=creds.get("key_text"),
+                password=creds.get("password"),
+                timeout=float(params.get("timeout") or 60),
+            )
+            compact = {
+                "success": result.get("returncode") == 0,
+                "returncode": result.get("returncode", -1),
+                "stdout": result.get("stdout", ""),
+                "stderr": result.get("stderr", ""),
+                "command": command,
+                "host": host,
+            }
+            await self._emit_computer_event(
+                "computer_ssh_exec", params, compact,
+                terminal={
+                    "command": command,
+                    "stdout": compact["stdout"],
+                    "stderr": compact["stderr"],
+                    "host": host,
+                    "exit": compact["returncode"],
+                },
+            )
+            return compact
+        except Exception as e:
+            logger.error("SSH 命令执行失败: %s", e)
+            return {"error": f"SSH 命令执行失败: {str(e)}"}
+
+    async def _await_ssh_credential(
+        self, user_id: str, host: str, timeout: float = 90.0, interval: float = 1.5
+    ) -> Dict:
+        """按需凭据卡弹出后有限轮询等待用户填写该主机凭据（当场续跑）。
+
+        凭据到位返回 creds dict；超时返回 {}（调用方据此以 needs_credential 终止）。
+        轮询读的是与凭据 API 同一用户桶（identity_context user_id），故卡存即被读到。
+        """
+        import time
+
+        from neurova.computer_use.ssh_runner import resolve_ssh_credentials
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            await asyncio.sleep(interval)
+            creds = resolve_ssh_credentials(user_id, host)
+            if creds.get("user") or creds.get("key_text") or creds.get("password"):
+                return creds
+        return {}
+
     # ── 桌面语义操作（R1-1：UIA 快照 → 按元素交互，与浏览器侧观察优先协议同构）──
 
     async def _execute_computer_dom_snapshot(self, params: Dict) -> Dict:
         """桌面控件树快照（观察优先：先快照拿 index，再按元素交互）"""
         try:
-            from neurova.computer_use.desktop_uia import get_desktop_uia_manager
-
-            manager = get_desktop_uia_manager()
+            manager = self._desktop_uia()
             result = await asyncio.to_thread(
                 manager.snapshot,
                 params.get("window_title"),
@@ -2962,9 +3560,7 @@ class ToolExecutor:
     async def _execute_computer_click_element(self, params: Dict) -> Dict:
         """按快照元素点击桌面控件（五级递降链，默认不抢焦点）"""
         try:
-            from neurova.computer_use.desktop_uia import get_desktop_uia_manager
-
-            manager = get_desktop_uia_manager()
+            manager = self._desktop_uia()
             result = await asyncio.to_thread(
                 manager.click_element,
                 params.get("index"),
@@ -2988,9 +3584,7 @@ class ToolExecutor:
     async def _execute_computer_set_value(self, params: Dict) -> Dict:
         """按快照元素向桌面控件写入文本（ValuePattern 优先）"""
         try:
-            from neurova.computer_use.desktop_uia import get_desktop_uia_manager
-
-            manager = get_desktop_uia_manager()
+            manager = self._desktop_uia()
             result = await asyncio.to_thread(
                 manager.set_value,
                 params.get("value"),
@@ -3010,6 +3604,81 @@ class ToolExecutor:
         except Exception as e:
             logger.error("桌面控件赋值失败: %s", e)
             return {"error": f"桌面控件赋值失败: {str(e)}"}
+
+    # ── SOM 视觉快照 + 编号点击（R3-1，无 UIA 树桌面的语义中间档）──
+
+    async def _execute_computer_som_snapshot(self, params: Dict) -> Dict:
+        """截图 → SOM 编号标注：返回 marks（id/label/center）+ id2xy，标注图推面板。
+
+        LLM 面向结果只含编号摘要（base64 撑爆上下文），标注图走 computer_action
+        事件到分屏面板供人看；agent 据 marks 用 computer_click_mark 按编号点击。
+        """
+        try:
+            from neurova.computer_use import get_computer_use_manager
+            from neurova.computer_use.som import mark_screenshot
+
+            manager = get_computer_use_manager()
+            png = await asyncio.to_thread(manager.screenshot)
+            if not png:
+                return {"error": "SOM 快照失败：无可用截图后端"}
+            marked = await asyncio.to_thread(mark_screenshot, png)
+            marks = marked.get("marks") or []
+            # 编号→坐标映射暂存，供 computer_click_mark 解算（同会话最近一次快照）
+            self._last_som_id2xy = marked.get("id2xy") or {}
+            result = {
+                "success": True,
+                "count": len(marks),
+                "marks": [
+                    {"id": m["id"], "center": m["center"], "label": m.get("label", "")}
+                    for m in marks
+                ],
+                "note": (
+                    "已生成编号标注图（见操作面板）。用 computer_click_mark(index=编号) "
+                    "点击目标；有 UIA 树时优先 computer_dom_snapshot。"
+                ),
+            }
+            await self._emit_computer_event(
+                "computer_som_snapshot", params, result,
+                screenshot_base64=marked.get("annotated_png_b64"),
+            )
+            return result
+        except Exception as e:
+            logger.error("SOM 快照失败: %s", e)
+            return {"error": f"SOM 快照失败: {str(e)}"}
+
+    async def _execute_computer_click_mark(self, params: Dict) -> Dict:
+        """按 SOM 编号点击：id2xy 解算中心坐标 → 复用像素点击链（含 DPI 换算）。"""
+        try:
+            from neurova.computer_use import actions, get_computer_use_manager
+            from neurova.computer_use import action_result as _ar
+
+            id2xy = getattr(self, "_last_som_id2xy", None) or {}
+            mid = str(params.get("index"))
+            if mid not in id2xy:
+                return {
+                    "success": False,
+                    "error": f"SOM 编号 {mid} 不在最近快照中（已过期或未快照），请重新 computer_som_snapshot",
+                    "refusal_code": "stale_generation",
+                }
+            cx, cy = id2xy[mid]
+            result = await asyncio.to_thread(
+                actions.click_screenshot_point,
+                get_computer_use_manager(),
+                cx,
+                cy,
+                params.get("button", "left"),
+            )
+            if result.get("success") is True:
+                result["refreshed_screenshot"] = True
+                result["note"] = ACTION_REFRESH_NOTE
+                _ar.attach(result, self._pixel_action_result())
+            await self._emit_computer_event("computer_click_mark", params, result)
+            if result.get("success"):
+                await self._emit_action_refreshed_screenshot("computer_click_mark", params, result)
+            return result
+        except Exception as e:
+            logger.error("SOM 编号点击失败: %s", e)
+            return {"error": f"SOM 编号点击失败: {str(e)}"}
 
     # ── 浏览器操作工具（ComputerUseManager → BrowserManager 多后端）──
 
@@ -3052,11 +3721,13 @@ class ToolExecutor:
         params: Dict,
         result: Dict,
         screenshot_base64: Optional[str] = None,
+        terminal: Optional[Dict[str, Any]] = None,
     ) -> None:
         """电脑/浏览器操作实时事件广播（computer_action）
 
         通过 SessionSyncManager 推送到会话 WS，驱动聊天页分屏面板；
         广播失败静默处理，绝不影响工具执行主流程。
+        terminal={command,stdout,stderr} 时前端渲染终端视图（SSH/shell 窗口）。
         """
         if tool_name not in COMPUTER_USE_TOOLS:
             return
@@ -3085,6 +3756,12 @@ class ToolExecutor:
                 payload["url"] = url
             if screenshot_base64:
                 payload["screenshot"] = screenshot_base64
+            if terminal:
+                payload["terminal"] = terminal
+            # 按需凭据卡触发：computer_ssh_exec 缺凭据 → 经 WS computer_action 通道透传
+            if isinstance(result, dict) and result.get("needs_credential"):
+                payload["needs_credential"] = True
+                payload["host"] = result.get("host")
             # R0-3 刷新标记 + R1-2 动作结果契约（新增字段，旧前端不受影响）
             if isinstance(result, dict) and result.get("refreshed"):
                 payload["refreshed"] = True

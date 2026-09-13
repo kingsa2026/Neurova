@@ -64,6 +64,10 @@ class MCPServerConnectRequest(BaseModel):
     command: Optional[str] = Field(default=None, description="stdio 模式的命令")
     args: List[str] = Field(default_factory=list, description="stdio 模式的参数")
     env: Dict[str, str] = Field(default_factory=dict, description="环境变量")
+    # http/sse 传输的附加请求头（Bearer token 走 {"Authorization": "Bearer <tok>"}）。
+    # 协议层 _open_session 已消费 config.headers（httpx/sse_client），本字段补通
+    # connect 请求体断点（2026-09-12 复核修复：register 弹窗 auth_token 此前无处安放）
+    headers: Dict[str, str] = Field(default_factory=dict, description="http/sse 请求头")
 
 
 class MCPOAuthAuthorizeRequest(BaseModel):
@@ -140,22 +144,16 @@ async def connect_mcp_server(
     body: MCPServerConnectRequest,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """注册（持久化）并连接 MCP Server；失败原因可经 GET /mcp-servers 查询
+    """注册（持久化）并连接 MCP Server；失败原因可经 GET /mcp-servers 查询。
 
-    P0-1 安全门（按序裁决）：
-    1. stdio 传输 = 本机进程派生面，仅限 admin 角色（403）
-    2. 配置 schema 校验 + shell 拒绝表（400，指名字段）
-    3. 非 admin 的 http/sse 拒绝私网/环回 URL（400）——admin 豁免，
-       保住自托管 localhost MCP server 场景
+    安全门与 catalog 安装共用 _register_mcp_server（P0-2 抽取，防两条注册路径
+    漂移）：stdio 需 admin / schema+shell 校验 / 非 admin 私网 URL 拒绝。
     """
     import re
 
-    from neurova.shared_config import get_shared_config_manager
-    from neurova.tool_layers.mcp_client import get_mcp_client
-
     role = str(current_user.get("role") or "user")
     sid = re.sub(r"\W+", "_", body.name or "").strip("_") or str(uuid.uuid4())
-    config = {
+    config_raw = {
         "id": sid,
         "name": body.name,
         "transport": body.transport or "",
@@ -163,13 +161,39 @@ async def connect_mcp_server(
         "command": body.command or "",
         "args": body.args,
         "env": body.env,
+        "headers": body.headers,
         "enabled": True,
     }
 
-    # P0-4 修正：先校验拿归一化 transport，门禁按归一化值裁决——transport
-    # 省略时按 command/url 推断为 stdio，查原始字符串会漏掉推断路径
+    result = await _register_mcp_server(config_raw, role)
+    config, ok, status = result["config"], result["connected"], result["status"]
+    return MCPServerInfo(
+        server_id=sid,
+        name=body.name,
+        url=body.url,
+        transport=config["transport"],
+        status="connected" if ok else "error",
+        tools_count=int(status.get("tool_count", 0)),
+        user_id="default",
+        created_at=time.time(),
+    )
+
+
+async def _register_mcp_server(config_raw: Dict[str, Any], role: str) -> Dict[str, Any]:
+    """MCP server 注册唯一入口（P0-2 抽取）：schema 校验 + 角色门 + 私网门 + 持久化 + 连接。
+
+    与 connect / catalog-install 共用，避免两条平行注册路径漂移（同 schema↔分派
+    表历史根因教训）。安全序（P0-1 原样迁移）：
+    1. 归一化校验（未知键/shell/字段非法 → 400，指名字段）
+    2. stdio = 本机进程派生面 → 仅 admin（403）
+    3. 非 admin 的 http/sse 私网/环回 URL 拒绝（400）——admin 豁免保自托管
+    4. 持久化（重复/非法 → 400）→ 连接（失败也返回 error 态，原因可查）
+    """
+    from neurova.shared_config import get_shared_config_manager
+    from neurova.tool_layers.mcp_client import get_mcp_client
+
     try:
-        config = validate_mcp_server_config(config)
+        config = validate_mcp_server_config(config_raw)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -185,7 +209,7 @@ async def connect_mcp_server(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"MCP server url 被拒绝: {e}")
 
-    # 持久化（内部做严格 schema 校验，非法返回 False）
+    sid = config["id"]
     if not get_shared_config_manager().add_mcp_server(config):
         if get_shared_config_manager().get_mcp_server(sid) is None:
             raise HTTPException(status_code=400, detail="MCP Server 配置非法或已存在")
@@ -196,10 +220,54 @@ async def connect_mcp_server(
     if not ok:
         logger.warning("MCP Server %s 连接失败: %s", sid, status.get("last_error"))
 
+    return {"config": config, "connected": ok, "status": status}
+
+
+@router.get("/mcp-catalog")
+async def list_mcp_catalog():
+    """MCP 白名单目录（P0-2）：精选能力包清单（不触发安装）。"""
+    from neurova.tool_layers.mcp_catalog import list_catalog
+
+    return list_catalog()
+
+
+class MCPCatalogInstallRequest(BaseModel):
+    secrets: Dict[str, str] = Field(default_factory=dict, description="目录条目所需密钥（进 env，不落 args/日志）")
+
+
+@router.post("/mcp-catalog/{entry_id}/install", response_model=MCPServerInfo)
+async def install_mcp_catalog_server(
+    entry_id: str,
+    body: MCPCatalogInstallRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """一键安装白名单 MCP server（P0-2）。
+
+    目录条目 → build_server_config → 与 connect 端点同一注册入口
+    （_register_mcp_server）：stdio 需 admin、schema/私网门、持久化、连接。
+    """
+    from neurova.tool_layers.mcp_catalog import build_server_config
+
+    role = str(current_user.get("role") or "user")
+    try:
+        config_raw = build_server_config(entry_id, body.secrets)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"目录中不存在: {entry_id}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        result = await _register_mcp_server(config_raw, role)
+    except HTTPException as e:
+        if e.status_code == 400 and "已存在" in str(e.detail):
+            raise HTTPException(status_code=409, detail="该工具包已安装，请先卸载或改用手动配置")
+        raise
+
+    config, ok, status = result["config"], result["connected"], result["status"]
     return MCPServerInfo(
-        server_id=sid,
-        name=body.name,
-        url=body.url,
+        server_id=config["id"],
+        name=config["name"],
+        url=config.get("url", ""),
         transport=config["transport"],
         status="connected" if ok else "error",
         tools_count=int(status.get("tool_count", 0)),
@@ -260,6 +328,41 @@ async def disconnect_mcp_server(server_id: str):
     if not removed:
         raise HTTPException(status_code=404, detail="MCP Server not found")
     return {"code": 0, "message": "MCP Server disconnected"}
+
+
+@router.post("/mcp-servers/{server_id}/test", response_model=MCPServerInfo)
+async def test_mcp_server(server_id: str):
+    """连接测试：对持久化配置重新连接并返回实时状态（前端"刷新"按钮的真实语义）。
+
+    复核补全 2026-09-12：前端 ToolLayerPage 一直在调用本端点，后端从未实现
+    （404 静默）——契约错位属预存缺陷，纳入本批闭环。
+    """
+    from neurova.shared_config import get_shared_config_manager
+    from neurova.tool_layers.mcp_client import get_mcp_client
+
+    entry = get_shared_config_manager().get_mcp_server(server_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="MCP Server not found")
+    try:
+        config = validate_mcp_server_config(entry)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"持久化配置已非法: {e}")
+
+    client = get_mcp_client()
+    ok = await client.connect_server(server_id, config)
+    status = client.get_server_status(server_id)
+    if not ok:
+        logger.warning("MCP Server %s 连接测试失败: %s", server_id, status.get("last_error"))
+    return MCPServerInfo(
+        server_id=server_id,
+        name=config["name"],
+        url=config.get("url", ""),
+        transport=config["transport"],
+        status="connected" if ok else "error",
+        tools_count=int(status.get("tool_count", 0)),
+        user_id="default",
+        created_at=time.time(),
+    )
 
 
 @router.get("/mcp-servers/{server_id}/tools", response_model=List[ToolInfo])

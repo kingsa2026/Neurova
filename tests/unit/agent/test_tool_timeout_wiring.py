@@ -37,7 +37,7 @@ class TestTimeoutOffloadWiring:
             return {"ok": True}, True, "builtin"
 
         executor = _make_executor(core)
-        result = await executor._execute_single_tool("memory_search", {}, skip_governance=True)
+        result = await executor._execute_single_tool("memory_search", {"query": "x"}, skip_governance=True)
         assert result == {"ok": True}
 
     @pytest.mark.asyncio
@@ -54,7 +54,7 @@ class TestTimeoutOffloadWiring:
             return {"late": True}, True, "builtin"
 
         executor = _make_executor(slow_core)
-        result = await executor._execute_single_tool("web_search", {}, skip_governance=True)
+        result = await executor._execute_single_tool("web_search", {"query": "x"}, skip_governance=True)
 
         assert result["status"] == "background"
         assert result["tool_name"] == "web_search"
@@ -79,7 +79,7 @@ class TestTimeoutOffloadWiring:
             return {"fine": True}, True, "builtin"
 
         executor = _make_executor(medium_core)
-        result = await executor._execute_single_tool("memory_search", {}, skip_governance=True)
+        result = await executor._execute_single_tool("memory_search", {"query": "x"}, skip_governance=True)
         assert result == {"fine": True}  # 10s 注册表超时未触发
 
     @pytest.mark.asyncio
@@ -89,7 +89,7 @@ class TestTimeoutOffloadWiring:
 
         executor = _make_executor(broken_core)
         with pytest.raises(RuntimeError, match="core boom"):
-            await executor._execute_single_tool("memory_search", {}, skip_governance=True)
+            await executor._execute_single_tool("memory_search", {"query": "x"}, skip_governance=True)
 
 
 if __name__ == "__main__":

@@ -78,19 +78,18 @@ def _workspace_root(agent_id: str, current_user: Dict[str, Any]) -> Path:
 
 
 def _resolve_inside(root: Path, rel_path: str) -> Path:
-    """把 rel_path 解析到 root 内；逃逸/隐藏目录一律 400（fail-closed）。"""
+    """把 rel_path 解析到 root 内；逃逸/隐藏目录/软链一律 400（fail-closed）。
+
+    单源原语（Yuxi 对比 P2 #10）：语法拒绝 + 组件级 symlink/junction 拒绝 +
+    realpath containment 三层，见 neurova/core/safe_paths.py。
+    """
+    from neurova.core.safe_paths import UnsafePathError, resolve_within
+
     rel = (rel_path or "").strip().replace("\\", "/").lstrip("/")
-    if rel in ("", "."):
-        return root
-    # P0-4：隐藏目录（.git/.tmp 等）整棵拒绝，防凭据/内部文件借道读取
-    if any(part.startswith(".") for part in rel.split("/")):
-        raise HTTPException(status_code=400, detail=f"隐藏路径不允许访问: {rel_path}")
-    candidate = (root / rel).resolve()
     try:
-        candidate.relative_to(root)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"路径越界: {rel_path}")
-    return candidate
+        return resolve_within(root, rel, reject_hidden=True)
+    except UnsafePathError as e:
+        raise HTTPException(status_code=400, detail=f"路径非法（越界/隐藏/软链）: {rel_path}（{e}）")
 
 
 def _current_user_stub() -> Dict[str, Any]:
