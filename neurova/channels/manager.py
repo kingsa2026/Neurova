@@ -304,6 +304,11 @@ class ChannelManager:
         # 广播到 SessionSyncManager
         await self._sync_to_session_sync(event_type, message)
 
+        # 机器人被移出群 → 归档该会话（不再处理该群消息、控制台隐藏）
+        if event_type == ChannelEventType.CHAT_BOT_REMOVED:
+            await self.archive_channel_session(message)
+            return
+
         if event_type == ChannelEventType.MESSAGE_RECEIVED:
             # P1-12 语音预检: 语音消息先转写再进 handler 链（@提及/关键词
             # 判定拿真实文本；失败降级占位，绝不阻断）
@@ -617,6 +622,25 @@ class ChannelManager:
         if isinstance(value, str):
             return value.strip().lower() not in ("false", "0", "no", "off")
         return bool(value)
+
+    async def archive_channel_session(self, message: ChannelMessage) -> bool:
+        """机器人被移出群 → 归档该会话文件（移入 archived/，控制台与实时同步消失）。
+
+        会话键与 channel_router 落盘时一致：resolve_session_scope_id(message)。
+        归档失败仅告警，不抛（事件旁路）。"""
+        agent_id = str(message.metadata.get("agent_id") or "default")
+        session_id = self.resolve_session_scope_id(message)
+        try:
+            from neurova.session_manager import SessionManager
+            repo = SessionManager()
+            ok = repo.archive_session(agent_id, session_id)
+            if ok:
+                logger.info("已归档渠道会话（机器人被移出群）: agent=%s session=%s", agent_id, session_id)
+            return bool(ok)
+        except Exception as e:  # noqa: BLE001 - 归档失败不影响事件处理
+            logger.warning("归档渠道会话失败 agent=%s session=%s: %s", agent_id, session_id, e)
+            return False
+
 
     def resolve_session_scope_id(self, message: ChannelMessage) -> str:
         """群聊会话隔离键（单点裁决，供会话同步/处理器共用）。
