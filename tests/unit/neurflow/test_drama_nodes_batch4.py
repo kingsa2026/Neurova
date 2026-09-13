@@ -104,6 +104,28 @@ class TestVoiceOverTTS:
         assert out["voiceover_error"] == ""
 
     @pytest.mark.asyncio
+    async def test_batch_shots_uses_narration(self, monkeypatch, tmp_path):
+        class FakeTTS:
+            async def synthesize(self, text, voice="", language="", rate=1.0):
+                return b"RIFF"
+
+        monkeypatch.setattr(dn, "_get_tts_manager", lambda: FakeTTS())
+        from neurova.llm.generators import runtime as gen_runtime
+
+        async def fake_persist_bytes(data, ext, task_id, index, out_dir=None):
+            p = tmp_path / f"vo_{index}.wav"
+            p.write_bytes(data)
+            return str(p)
+
+        monkeypatch.setattr(gen_runtime, "persist_bytes", fake_persist_bytes)
+        shots = [{"narration": "旁白一", "description": "d1"},
+                 {"narration": "旁白二", "description": "d2"}]
+        result = await dn.exec_voice_over({"shots": shots}, {})
+        out = result["output"]
+        assert [a["line"] for a in out["audio_paths"]] == ["旁白一", "旁白二"]
+        assert len(out["audio_paths"]) == 2
+
+    @pytest.mark.asyncio
     async def test_tts_unavailable_honest_flag(self, monkeypatch):
         monkeypatch.setattr(dn, "_get_tts_manager", lambda: None)
         result = await dn.exec_voice_over({"lines": "台词"}, {})
@@ -117,6 +139,40 @@ class TestVoiceOverTTS:
 
 
 class TestSceneGenProtocols:
+    @pytest.mark.asyncio
+    async def test_batch_shots_fanout(self, monkeypatch, tmp_path):
+        """逐镜扇出：shots 数组 → 每镜一张图（PRINTFILM 批量生成语义）。"""
+        from neurova.llm.generators import protocols as proto_mod
+        from neurova.llm.generators import runtime as gen_runtime
+        from neurova.llm.generators.protocols import ProtocolCredentials
+
+        monkeypatch.setattr(
+            gen_runtime, "resolve_generation_creds",
+            lambda hint, model, pid, ak, bu, db: ProtocolCredentials(
+                api_key="k", base_url="https://x", model="m", protocol=hint))
+
+        async def fake_gen(creds, prompt, **kw):
+            return {"images": [f"http://cdn/{abs(hash(prompt)) % 999}.png"], "task_id": None, "raw": {}}
+
+        async def fake_persist(url, kind, task_id, index, out_dir=None):
+            p = tmp_path / f"b_{index}.png"
+            p.write_bytes(b"P")
+            return str(p)
+
+        monkeypatch.setattr(proto_mod, "generate_image", fake_gen)
+        monkeypatch.setattr(gen_runtime, "persist_media", fake_persist)
+
+        shots = [
+            {"shot": 1, "visual_prompt": "vp one", "description": "镜一"},
+            {"shot": 2, "visual_prompt": "vp two", "description": "镜二"},
+        ]
+        result = await dn.exec_scene_gen({"shots": shots, "provider": "wanx"}, {})
+        out = result["output"]
+        assert out["batch"] is True
+        assert len(out["images"]) == 2
+        assert out["images"][0]["url"].startswith("/api/v1/generation/files/")
+        assert out["images"][0]["shot"] == 1
+
     @pytest.mark.asyncio
     async def test_wanx_routes_to_dashscope_protocol(self, monkeypatch, tmp_path):
         from neurova.llm.generators import protocols as proto_mod

@@ -613,8 +613,89 @@ _SCENE_PROTOCOLS = {
 }
 
 
+async def _scene_gen_via_protocol(provider: str, prompt: str, config: Dict[str, Any]) -> Dict[str, Any]:
+    """单镜走实测协议矩阵生成。返回 {url?, path?, remote_url?, reason?}。"""
+    from neurova.llm.generators import protocols as _protocols
+    from neurova.llm.generators.runtime import (
+        GenerationCredsError,
+        local_url_for,
+        persist_media,
+        resolve_generation_creds,
+    )
+
+    hint = _SCENE_PROTOCOLS[provider]
+    model = str(config.get("model") or "")
+    try:
+        creds = resolve_generation_creds(
+            hint, model, config.get("provider_id"), None,
+            config.get("base_url"), "https://api.openai.com/v1")
+        gen = await _protocols.generate_image(
+            creds, prompt, size=str(config.get("size", "1024x1024")), n=1,
+        )
+        remote = [u for u in (gen.get("images") or []) if u]
+        if not remote:
+            return {"reason": "协议未返回图像产物"}
+        path = await persist_media(remote[0], "image", gen.get("task_id") or "scene", 0)
+        return {"url": local_url_for(path), "path": path, "remote_url": remote[0]}
+    except GenerationCredsError as e:
+        return {"reason": str(e)}
+    except Exception as e:  # noqa: BLE001 — 上游失败原因诚实回传
+        logger.warning("场景生成协议调用失败(%s): %s", provider, e)
+        return {"reason": f"图像生成失败: {str(e)[:200]}"}
+
+
+async def _exec_scene_gen_batch(config: Dict[str, Any], shots: List[Any]) -> Dict[str, Any]:
+    """逐镜扇出（一键成片模板主链）：每镜一张，失败诚实占位不中断整批。"""
+    provider = str(config.get("provider", "openai") or "openai").lower()
+    style = config.get("style", "cinematic")
+    images: List[Dict[str, Any]] = []
+    for idx, shot in enumerate(shots, 1):
+        s = shot if isinstance(shot, dict) else {"description": str(shot)}
+        prompt = str(s.get("visual_prompt") or s.get("description") or "").strip()
+        item: Dict[str, Any] = {
+            "shot": s.get("shot", idx), "prompt": prompt,
+            "url": "", "path": "", "fallback": True, "degrade_reason": "",
+        }
+        if provider == "comfyui":
+            try:
+                res = await ImageGenClient().generate(provider=provider, prompt=prompt, size="1024x1024")
+                output = (res.get("output") or {}) if res.get("status") == "success" else {}
+                if output.get("url"):
+                    item.update(url=output["url"], path="", fallback=False)
+                else:
+                    item["degrade_reason"] = "ComfyUI 未返回产物"
+            except Exception as e:  # noqa: BLE001
+                item["degrade_reason"] = f"ComfyUI 失败: {str(e)[:160]}"
+        elif provider in _SCENE_PROTOCOLS:
+            got = await _scene_gen_via_protocol(provider, prompt, config)
+            if got.get("url"):
+                item.update(url=got["url"], path=got.get("path", ""),
+                            remote_url=got.get("remote_url", ""), fallback=False)
+            else:
+                item["degrade_reason"] = got.get("reason", "生成失败")
+        else:
+            item["degrade_reason"] = f"服务商 {provider} 无实测协议（缓后台账登记）"
+        images.append(item)
+    return {
+        "status": "success",
+        "output": {
+            "batch": True, "images": images, "count": len(images),
+            "generated": sum(1 for i in images if not i["fallback"]),
+            "provider": provider, "style": style,
+        },
+    }
+
+
 async def exec_scene_gen(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
-    """场景画面生成执行器（批次4：实测协议矩阵单源；comfyui 自建通道保留）"""
+    """场景画面生成执行器（批次4：实测协议矩阵单源；comfyui 自建通道保留）
+
+    批次模式：config.shots 传入分镜数组时逐镜扇出生成（PRINTFILM 批量生成
+    语义，供内置一键成片模板使用），单镜失败/无凭据诚实标注占位提示词。
+    """
+    shots = config.get("shots")
+    if isinstance(shots, list) and shots:
+        return await _exec_scene_gen_batch(config, shots)
+
     scene = config.get("scene", "") or str(ctx.get("input") or ctx.get("inputs") or "")
     style = config.get("style", "cinematic")
     provider = str(config.get("provider", "comfyui") or "comfyui").lower()
@@ -662,43 +743,19 @@ async def exec_scene_gen(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[st
                        "degrade_reason": f"服务商 {provider} 无实测协议（缓后台账登记），已输出可直接使用的绘图提示词"},
         }
 
-    from neurova.llm.generators import protocols as _protocols
-    from neurova.llm.generators.runtime import (
-        GenerationCredsError,
-        local_url_for,
-        persist_media,
-        resolve_generation_creds,
-    )
-
-    hint = _SCENE_PROTOCOLS[provider]
-    model = str(config.get("model") or "")
-    try:
-        creds = resolve_generation_creds(
-            hint, model, config.get("provider_id"), None,
-            config.get("base_url"), "https://api.openai.com/v1")
-        gen = await _protocols.generate_image(
-            creds, full_prompt, size=str(config.get("size", "1024x1024")),
-            n=max(1, int(config.get("num_images", 1) or 1)),
-        )
-        remote = [u for u in (gen.get("images") or []) if u]
-        if remote:
-            path = await persist_media(remote[0], "image", gen.get("task_id") or "scene", 0)
-            return {
-                "status": "success",
-                "output": {
-                    "image_url": local_url_for(path),
-                    "image_path": path,
-                    "image_remote_url": remote[0],
-                    "scene": scene, "style": style, "provider": provider,
-                    "prompts": [full_prompt], "fallback": False,
-                },
-            }
-        degrade_reason = "协议未返回图像产物"
-    except GenerationCredsError as e:
-        degrade_reason = str(e)
-    except Exception as e:  # noqa: BLE001 — 上游失败降级提示词，原因诚实可见
-        logger.warning("场景生成协议调用失败(%s): %s", provider, e)
-        degrade_reason = f"图像生成失败: {str(e)[:200]}"
+    got = await _scene_gen_via_protocol(provider, full_prompt, config)
+    if got.get("url"):
+        return {
+            "status": "success",
+            "output": {
+                "image_url": got["url"],
+                "image_path": got.get("path", ""),
+                "image_remote_url": got.get("remote_url", ""),
+                "scene": scene, "style": style, "provider": provider,
+                "prompts": [full_prompt], "fallback": False,
+            },
+        }
+    degrade_reason = got.get("reason", "生成失败")
 
     return {
         "status": "success",
@@ -717,6 +774,17 @@ async def exec_voice_over(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[s
     lines = config.get("lines", "") or str(ctx.get("input") or ctx.get("inputs") or "")
     voice = config.get("voice", "女声 温柔")
     language = config.get("language", "zh")
+
+    # 批次4：分镜数组直连（一键成片模板）——每镜 narration 即一段旁白
+    if isinstance(lines, list) and lines and isinstance(lines[0], dict):
+        lines = "\n".join(
+            str(s.get("narration") or s.get("description") or "").strip()
+            for s in lines if isinstance(s, dict))
+    shots = config.get("shots")
+    if isinstance(shots, list) and shots:
+        lines = "\n".join(
+            str(s.get("narration") or s.get("description") or "").strip()
+            for s in shots if isinstance(s, dict) and (s.get("narration") or s.get("description")))
 
     if not lines:
         lines = "你好，世界！欢迎来到我的短剧。"
@@ -820,11 +888,22 @@ async def exec_video_compose(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dic
        下游按 URL 取片必然 404 且无从排查）。
     """
     raw_clips = config.get("clips", "")
+    clip_meta: List[Dict[str, Any]] = []
     if isinstance(raw_clips, str):
         raw_clips = raw_clips or str(ctx.get("input") or ctx.get("inputs") or "")
         clip_list = [c.strip() for c in str(raw_clips).split(",") if c.strip()]
     elif isinstance(raw_clips, (list, tuple)):
-        clip_list = [str(c).strip() for c in raw_clips if str(c).strip()]
+        # 批次4：归一 scene-gen batch 产物（dict 项取 path/url，保留 shot 关联）
+        clip_list = []
+        clip_meta = []
+        for c in raw_clips:
+            if isinstance(c, dict):
+                path = str(c.get("path") or c.get("url") or c.get("clip") or "").strip()
+                if path:
+                    clip_list.append(path)
+                    clip_meta.append(c)
+            elif str(c).strip():
+                clip_list.append(str(c).strip())
     else:
         clip_list = []
     transition = config.get("transition", "fade")
@@ -898,7 +977,15 @@ async def exec_video_compose(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dic
             logger.warning("视频云合成失败(%s): %s", provider, e)
 
     # ③ 连播清单 manifest（诚实降级产物）
-    items = [{"index": i + 1, "clip": c} for i, c in enumerate(clip_list)]
+    items = []
+    for i, c in enumerate(clip_list):
+        entry: Dict[str, Any] = {"index": i + 1, "clip": c}
+        if i < len(clip_meta):
+            m = clip_meta[i]
+            entry["shot"] = m.get("shot", i + 1)
+            entry["url"] = m.get("url", "")
+            entry["prompt"] = m.get("prompt", "")
+        items.append(entry)
     return {
         "status": "success",
         "output": {
