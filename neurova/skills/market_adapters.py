@@ -2,6 +2,7 @@
 技能市场适配器 - 支持多个技能市场平台的技能导入
 """
 
+from neurova.security.safe_archive import safe_extract_tar, safe_extract_zip
 from neurova.core.logger import get_logger
 import os
 import re
@@ -204,10 +205,8 @@ class SkillsShAdapter(SkillMarketAdapter):
                 return False
 
             # 解压到目标目录
-            import zipfile
-
-            with zipfile.ZipFile(tmp_path, "r") as zip_ref:
-                zip_ref.extractall(target_dir)
+            # 安全审计 L3: 原 extractall 无成员校验 → Zip Slip
+            safe_extract_zip(tmp_path, target_dir)
 
             # 清理临时文件
             os.unlink(tmp_path)
@@ -294,10 +293,8 @@ class ClawHubAdapter(SkillMarketAdapter):
                 return False
 
             # 解压到目标目录
-            import tarfile
-
-            with tarfile.open(tmp_path, "r:gz") as tar_ref:
-                tar_ref.extractall(target_dir)
+            # 安全审计 L3: 原 extractall 无成员校验 → Tar Slip
+            safe_extract_tar(tmp_path, target_dir)
 
             # 清理临时文件
             os.unlink(tmp_path)
@@ -450,10 +447,8 @@ class LobeHubAdapter(SkillMarketAdapter):
                 return False
 
             # 解压到目标目录
-            import zipfile
-
-            with zipfile.ZipFile(tmp_path, "r") as zip_ref:
-                zip_ref.extractall(target_dir)
+            # 安全审计 L3: 原 extractall 无成员校验 → Zip Slip
+            safe_extract_zip(tmp_path, target_dir)
 
             # 清理临时文件
             os.unlink(tmp_path)

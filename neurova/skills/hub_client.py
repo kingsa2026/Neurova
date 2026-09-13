@@ -16,12 +16,11 @@ Neurova Skill系统2.0架构。
 import io
 import json
 from neurova.core import config
+from neurova.security.safe_archive import safe_extract_tar, safe_extract_zip
 from neurova.core.logger import get_logger
 import re
-import tarfile
 import threading
 import time
-import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -658,14 +657,13 @@ class SkillHubClient:
         skill_dir.mkdir(parents=True, exist_ok=True)
 
         # 判断文件类型并解压
+        # 安全审计 L3: 原 extractall 无成员校验，远程 skill 包可 Zip/Tar Slip 越界写文件
         if url.endswith(".zip"):
             # ZIP 文件
-            with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                zf.extractall(skill_dir)
+            safe_extract_zip(content, skill_dir)
         elif url.endswith(".tar.gz") or url.endswith(".tgz"):
             # TAR.GZ 文件
-            with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as tf:
-                tf.extractall(skill_dir)
+            safe_extract_tar(io.BytesIO(content), skill_dir)
         else:
             # 直接保存
             with open(skill_dir / "skill.py", "wb") as f:
