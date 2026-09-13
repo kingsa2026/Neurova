@@ -225,6 +225,14 @@
             </template>
           </div>
           <button
+            v-if="isStreaming && inputText.trim() && !editingQueuedId"
+            class="nr-composer-send is-steer"
+            :title="t('chat.steer')"
+            @click="onSteerClick"
+          >
+            <svg class="nr-ico nr-ico--send" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
+          </button>
+          <button
             class="nr-composer-send"
             :class="{ 'is-confirm': !!editingQueuedId }"
             :disabled="(!inputText.trim() && pendingFiles.length === 0 && !isStreaming) || !isSendLockOwner"
@@ -305,6 +313,8 @@ defineOptions({ name: 'ChatComposerArea' })
 const emit = defineEmits<{
   send: []
   stop: []
+  /** steer 插话（P1-9）：流式进行中把输入框内容投递会话邮箱 */
+  steer: [text: string]
   /** 「↑ 立即」排队项（页面编排层调 drainMessageQueue force 入口） */
   sendQueuedNow: [id: string]
   /** /plan 斜杠命令（页面持有 planPanelOpen/planRequestSeed） */
@@ -345,6 +355,14 @@ const chatStore = useChatStore()
 const messageQueue = useMessageQueueStore()
 const rightDock = useRightDockStore()
 const { inputText, isStreaming, currentSessionId, retrievalStatus, eventsLostBanner } = storeToRefs(chatStore)
+
+/** steer 插话：流式中把输入框内容投递会话邮箱（不取消当前轮），投递后清空输入 */
+function onSteerClick(): void {
+  const text = inputText.value.trim()
+  if (!text) return
+  emit('steer', text)
+  inputText.value = ''
+}
 const { agentId } = useAgentPage()
 const { isOwner: isSendLockOwner } = useSessionSendLock(currentSessionId)
 
@@ -1128,6 +1146,10 @@ defineExpose({ closeSlashPanel, autoResize })
 }
 .nr-composer-send.is-stop {
   background: var(--nr-danger, #f56c6c);
+}
+/* P1-9 steer 插话：流式中与停止按钮并列，用主色区分语义（不取消当前轮） */
+.nr-composer-send.is-steer {
+  background: var(--nr-primary, #409eff);
 }
 .nr-composer-send.is-confirm {
   color: var(--nr-primary);

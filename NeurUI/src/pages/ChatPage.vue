@@ -109,8 +109,8 @@
                 :class="[`nr-step--${step.kind}`, { 'is-active': step.active, 'is-open': step.open }]"
               >
                 <div class="nr-step-header" @click="toggleStep(msg.steps!, step.id)">
-                  <span class="nr-step-icon"><UiIcon :name="step.kind === 'reasoning' ? 'brain' : variantIcon(toolCardVariant(step.name))" :size="14" /></span>
-                  <span class="nr-step-title">{{ step.kind === 'reasoning' ? t('chat.stepThinking') : (step.taskName || step.name) }}</span>
+                  <span class="nr-step-icon"><UiIcon :name="step.kind === 'reasoning' ? 'brain' : step.kind === 'plan' ? 'check' : variantIcon(toolCardVariant(step.name))" :size="14" /></span>
+                  <span class="nr-step-title">{{ step.kind === 'reasoning' ? t('chat.stepThinking') : step.kind === 'plan' ? t('chat.stepPlan') : (step.taskName || step.name) }}</span>
                   <span v-if="step.active" class="nr-step-badge is-running">{{ t('chat.stepRunning') }}</span>
                   <span v-else-if="step.kind === 'tool'" class="nr-step-badge" :class="!step.result || isToolFailureResult(step.result) ? 'is-error' : 'is-done'">
                     {{ !step.result ? t('chat.stepNoResult') : isToolFailureResult(step.result) ? t('chat.toolFailed') : t('chat.toolDone') }}
@@ -119,7 +119,7 @@
                   <span class="nr-step-toggle">{{ step.open ? '▾' : '▸' }}</span>
                 </div>
                 <div v-show="step.open" class="nr-step-body">
-                  <template v-if="step.kind === 'reasoning'">
+                  <template v-if="step.kind !== 'tool'">
                     <div class="nr-step-reasoning" @scroll="onReasoningScroll">{{ step.text }}</div>
                   </template>
                   <template v-else>
@@ -373,6 +373,7 @@
         @send-queued-now="onSendQueuedNow"
         @slash-plan="onSlashPlan"
         @slash-compact="onSlashCompact"
+        @steer="onSteer"
       />
 
 
@@ -489,6 +490,7 @@ import { useIMEComposition } from '@/composables/useIMEComposition'
 import { isBackgroundResult, isToolFailureResult } from '@/utils/toolCallStatus'
 import { findMessageMatches } from '@/utils/messageSearch'
 import {
+  appendPlanStep,
   appendReasoningStep,
   appendToolStep,
   attachToolResult,
@@ -625,6 +627,19 @@ function onSendQueuedNow(id: string): void {
 }
 
 // 治理审批弹窗（P0: ASK 人工确认）→ 状态机收敛在 useGovernanceApproval
+/** steer 插话（P1-9，ChatComposerArea emit 上抛）：流式进行中把补充消息
+ *  投递会话邮箱，工具轮间隙并入下一轮采样；不取消当前轮 */
+async function onSteer(text: string): Promise<void> {
+  const sid = currentSessionId.value
+  if (!sid || !text.trim()) return
+  try {
+    await api.post('/console/chat/steer', { session_id: sid, message: text })
+    uiMessage.success(t('chat.steerSent'))
+  } catch {
+    uiMessage.error(t('chat.steerFail'))
+  }
+}
+
 const { approvalModal, openApprovalModal, confirmApproval, rejectApproval } = useGovernanceApproval()
 
 // 会话内按需 SSH 凭据卡（computer_ssh_exec 缺凭据 → needs_credential 触发，按当前用户隔离）
@@ -1579,6 +1594,17 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       if (isComputerTool(event.name || '')) {
         computerPanel.markIdle()
       }
+      break
+    }
+
+    case 'plan_update': {
+      // P1-7：update_plan → 计划快照段（整体封口，不参与流式扫光）
+      if (!msg.steps) msg.steps = []
+      appendPlanStep(
+        msg.steps,
+        Array.isArray(event.plan) ? event.plan : [],
+        event.explanation ? String(event.explanation) : undefined,
+      )
       break
     }
 

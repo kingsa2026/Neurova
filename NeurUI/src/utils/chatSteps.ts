@@ -12,7 +12,7 @@
  * 纯函数 + 数据契约，供 ChatPage / useChat 历史合成 / 单测共用。
  */
 
-export type ChatStepKind = 'reasoning' | 'tool'
+export type ChatStepKind = 'reasoning' | 'tool' | 'plan'
 
 export interface ChatStep {
   /** 稳定 key（v-for :key 用，段序号即可——steps 只追加不重排） */
@@ -77,6 +77,34 @@ export function appendToolStep(steps: ChatStep[], name: string, args: string, ta
     open: true,
     active: true,
     startedAt: Date.now(),
+  })
+  return steps
+}
+
+/**
+ * 追加任务计划段（P1-7 update_plan → plan_update 事件，Codex update_plan 对齐）。
+ * 计划是一次性快照（非流式段）：整体封口落位，不参与流式扫光；正文 =
+ * 状态标记（○ 待办 / ◐ 进行中 / ● 完成）+ 步骤文本，note 为模型解释（首行）。
+ */
+export function appendPlanStep(
+  steps: ChatStep[],
+  plan: Array<{ step: string; status: string }>,
+  note?: string,
+): ChatStep[] {
+  if (!plan || plan.length === 0) return steps
+  if (steps.length) finishStep(steps[steps.length - 1])
+  const marks: Record<string, string> = { pending: '○', in_progress: '◐', completed: '●' }
+  const lines = plan.map((item) => `${marks[item.status] || '○'} ${item.step}`)
+  const text = (note ? `${note}\n` : '') + lines.join('\n')
+  steps.push({
+    id: `s${steps.length}-${Date.now().toString(36)}`,
+    kind: 'plan',
+    name: 'plan',
+    text,
+    open: true,
+    active: false,
+    startedAt: Date.now(),
+    endedAt: Date.now(),
   })
   return steps
 }
