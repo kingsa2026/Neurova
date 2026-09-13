@@ -32,7 +32,7 @@
     "pinia": "^2.3.1",
     "postcss": "^8.5.23",
     "vue": "^3.5.13",
-    "vue-echarts": "^7.0.3",
+    "vue-echarts": "^8.3.0",
     "vue-i18n": "^10.0.7",
     "vue-router": "^4.5.0"
   },
