@@ -20,7 +20,10 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-DEFAULT_LEDGER_PATH = Path("data") / "generation_tasks.json"
+# 批次1（P1-8 同源补齐）：与产物目录一致用仓库根绝对路径。
+# 原 CWD 相对路径在异目录/服务化启动下账本分裂丢失（P1-8 当时只修了产物侧）。
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_LEDGER_PATH = _PROJECT_ROOT / "data" / "generation_tasks.json"
 
 
 @dataclass
