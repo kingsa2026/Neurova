@@ -19,6 +19,7 @@ P0-3（Dify 对标 2026-09-03）：
 """
 
 from neurova.core.logger import get_logger
+import asyncio
 import math
 import re
 import typing
@@ -310,33 +311,29 @@ def _vector_search_knowledge(query: str, current_user: Dict[str, Any], top_k: in
 
 
 def _build_rerank_runner(config: dict):
-    """按请求配置装配 rerank runner（P0-3；显式装配，无全局态）。
+    """按请求配置装配 rerank runner（P0-3 Yuxi 对比接线轮；显式装配，无全局态）。
 
-    返回 (runner, method_label)：method="model" 但 provider 不可用时
-    退化为加权融合，label 如实回 "weight"。
+    返回 (runner, method_label, note)：note=None 表示正常；method="model"
+    但模型通道不可用时退化为加权融合，note 必须携带原因（
+    {"requested": "model", "reason": ...}）——静默降级是 Yuxi 的反面教材
+    （milvus.py aquery 吞错 return []，零结果与后端故障不可分），
+    note 随响应体 rerank_note 字段如实透出。
     """
     from neurova.knowledge.rerank import ModelRerankRunner, WeightRerankRunner
+    from neurova.llm import rerank_client as rc
 
     method = (config.get("method") or "weight").strip().lower()
     weights = config.get("weights") or None
 
     if method == "model":
         provider_name = str(config.get("rerank_provider") or "").strip()
-        provider = _resolve_rerank_provider(provider_name) if provider_name else None
-        if provider is not None:
-            return ModelRerankRunner(provider, fallback_weights=weights), "model"
-        # 无可用 provider → 加权融合退化（多路分数明细仍在）
-        logger.info("rerank: 无可用模型重排 provider，退化加权融合")
-    return WeightRerankRunner(weights), "weight"
-
-
-def _resolve_rerank_provider(name: str):
-    """解析命名 rerank provider（扩展点：当前无内置实现，恒 None）。
-
-    预留接入面：bge-reranker（本地 ONNX）/ cohere rerank API 等装配后
-    在此注册，端点与管线代码无需再改。
-    """
-    return None
+        try:
+            provider = rc.build_rerank_provider(provider_name)
+        except rc.RerankConfigError as e:
+            logger.info("rerank: 模型通道不可用，退化加权融合: %s", e)
+            return WeightRerankRunner(weights), "weight", {"requested": "model", "reason": e.reason}
+        return ModelRerankRunner(provider, fallback_weights=weights), "model", None
+    return WeightRerankRunner(weights), "weight", None
 
 
 def _single_channel_results(scored, corpus, channel: str) -> List[Dict[str, Any]]:
@@ -374,6 +371,8 @@ async def hybrid_search(
     except ValueError:
         retrieval_method = RetrievalMethod.HYBRID_SEARCH
     is_knowledge = (getattr(body, "source", "memory") or "memory") == "knowledge"
+    # 模型重排退化原因（响应字段，见 hybrid 分支）；非 hybrid/未请求时恒 None
+    rerank_note = None
 
     try:
         if retrieval_method == RetrievalMethod.SEMANTIC_SEARCH:
@@ -431,10 +430,11 @@ async def hybrid_search(
                     }
                 )
 
-            # rerank 出口（异常降级 rrf 原序，不阻断检索）
+            # rerank 出口（异常降级 rrf 原序，不阻断检索；P0-3：降级原因显式透出）
+            rerank_note = None
             if body.rerank and results:
                 try:
-                    runner, rerank_label = _build_rerank_runner(body.rerank)
+                    runner, rerank_label, rerank_note = _build_rerank_runner(body.rerank)
                     candidates = [
                         {
                             "index": i,
@@ -446,7 +446,11 @@ async def hybrid_search(
                         }
                         for i, r in enumerate(results)
                     ]
-                    reranked = runner.rerank(body.query, candidates)
+                    # provider 为同步 HTTP 调用——offload 线程，不阻塞事件循环
+                    reranked = await asyncio.to_thread(runner.rerank, body.query, candidates)
+                    if getattr(runner, "last_error", None):
+                        rerank_note = {"requested": "model", "reason": str(runner.last_error)}
+                        rerank_label = "weight"
                     results = [
                         {**results[rr["index"]],
                          "rerank_score": round(float(rr["score"]), 6),
@@ -454,6 +458,7 @@ async def hybrid_search(
                         for rr in reranked
                     ]
                 except Exception as e:
+                    rerank_note = {"reason": f"rerank_failed:{e}"}
                     logger.warning("hybrid rerank 失败（降级 rrf 原序）: %s", e)
     except Exception as e:
         logger.error("hybrid_search 融合失败: %s", e)
@@ -470,6 +475,9 @@ async def hybrid_search(
             "total": len(results),
             "weights": {"bm25": body.bm25_weight, "vector": body.vector_weight, "fts": body.fts_weight},
             "features": features,
+            # P0-3：模型重排退化原因（None=正常/未请求重排）——前端/调用方
+            # 可区分"加权融合结果"与"模型重排结果/重排后端故障"
+            "rerank_note": rerank_note,
         },
     }
 

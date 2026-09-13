@@ -35,6 +35,17 @@ from neurova.api.endpoints.settings import router as settings_router
 # Fixtures
 # ============================================================
 
+@pytest.fixture(autouse=True)
+def _isolate_app_settings(tmp_path, monkeypatch):
+    """app_settings 持久化重定向到 tmp——PUT /settings 用例（section + P7 flat）
+    不得污染真实 data/app_settings.json（EKB-3920 同模式：测试打真库）。"""
+    from neurova.core import app_settings as asm
+
+    monkeypatch.setattr(
+        asm, "_settings_path", lambda path=None: path or (tmp_path / "app_settings.json")
+    )
+
+
 @pytest.fixture
 def app() -> FastAPI:
     """创建测试用 FastAPI 应用（仅挂载 settings_router）"""
@@ -92,8 +103,8 @@ class TestSettingsAPI:
         assert data["data"]["key"] == "theme"
 
     def test_update_single_setting(self, client: TestClient):
-        """更新单个设置"""
-        response = client.put("/v1/settings/theme", json="light")
+        """更新单个设置（P7 后 update_setting 用 Body(embed=True)，body 需 {"value": ...}）"""
+        response = client.put("/v1/settings/theme", json={"value": "light"})
         assert response.status_code == 200
         result = response.json()
         assert result["data"]["key"] == "theme"

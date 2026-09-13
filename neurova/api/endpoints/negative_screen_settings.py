@@ -12,11 +12,13 @@ from __future__ import annotations
 
 from neurova.core.logger import get_logger
 import uuid
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
+from neurova.api.auth import get_current_user_or_default
+from neurova.core.config_schema import form_options
 from neurova.notifications.negative_screen import (
     NegativeScreenConfig,
     NegativeScreenConfigManager,
@@ -34,21 +36,26 @@ router = APIRouter()
 
 
 class NegativeScreenConfigResponse(BaseModel):
-    """负一屏配置响应"""
+    """负一屏配置响应（不含明文 auth_code，仅 masked 供 UI 展示已配置状态）"""
 
     user_id: str
-    auth_code: Optional[str] = None
     enabled: bool = False
     push_url: str = ""
     masked_auth_code: Optional[str] = None
+    # Yuxi 对比 P2 #15：表单契约单源（form_options 反射生成；加性字段，
+    # 存量前端不消费不受影响）。secret=true 的键前端只写不读。
+    # 注：字段名用 form_schema——"schema" 遮蔽 pydantic BaseModel.schema()。
+    form_schema: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class UpdateNegativeScreenConfigRequest(BaseModel):
     """更新负一屏配置请求"""
 
-    auth_code: Optional[str] = Field(None, description="授权码")
-    enabled: Optional[bool] = Field(None, description="是否启用")
-    push_url: Optional[str] = Field(None, description="推送URL")
+    auth_code: Optional[str] = Field(
+        None, description="授权码", title="授权码", json_schema_extra={"secret": True}
+    )
+    enabled: Optional[bool] = Field(None, description="是否启用", title="启用负一屏推送")
+    push_url: Optional[str] = Field(None, description="推送URL", title="推送 URL")
 
 
 class TestPushRequest(BaseModel):
@@ -57,6 +64,9 @@ class TestPushRequest(BaseModel):
     task_name: str = Field("测试任务", description="任务名称")
     task_content: str = Field("## 测试内容\n\n这是一条测试推送", description="任务内容")
     task_result: str = Field("测试完成", description="任务结果")
+
+# 表单契约单源快照（P2 #15；导入期反射一次，GET 响应原样透出）
+_NEGSCREEN_FORM_SCHEMA = form_options(UpdateNegativeScreenConfigRequest)
 
 
 class TestPushResponse(BaseModel):
@@ -86,28 +96,18 @@ def _get_request_id(request: Request) -> str:
     return getattr(request.state, "request_id", str(uuid.uuid4()))
 
 
-def _get_current_user_id(request: Request) -> str:
-    """
-    获取当前用户ID
-
-    TODO: 从 JWT token 或 session 中获取实际用户ID
-    """
-    # 这里简化处理，实际应该从认证中获取
-    # 可以从 request.state.user_id 或 JWT token 中获取
-    return getattr(request.state, "user_id", "default_user")
-
-
 # ─── API 端点 ────────────────────────────────────────────────────────────────
 
 
 @router.get("", response_model=NegativeScreenConfigResponse)
 async def get_negative_screen_config(
     request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
     config_manager: NegativeScreenConfigManager = Depends(_get_config_manager),
 ):
     """获取用户负一屏配置"""
     _get_request_id(request)
-    user_id = _get_current_user_id(request)
+    user_id = current_user["user_id"]
 
     try:
         config = config_manager.get_config(user_id)
@@ -116,18 +116,18 @@ async def get_negative_screen_config(
             # 返回默认配置
             return NegativeScreenConfigResponse(
                 user_id=user_id,
-                auth_code=None,
                 enabled=False,
                 push_url="https://hiboard-claw-drcn.ai.dbankcloud.cn/distribution/message/cloud/claw/msg/upload",
                 masked_auth_code=None,
+                form_schema=_NEGSCREEN_FORM_SCHEMA,
             )
 
         return NegativeScreenConfigResponse(
             user_id=config.user_id,
-            auth_code=config.auth_code,
             enabled=config.enabled,
             push_url=config.push_url,
             masked_auth_code=config.masked_auth_code,
+            form_schema=_NEGSCREEN_FORM_SCHEMA,
         )
 
     except Exception as e:
@@ -142,11 +142,12 @@ async def get_negative_screen_config(
 async def update_negative_screen_config(
     request: Request,
     body: UpdateNegativeScreenConfigRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
     config_manager: NegativeScreenConfigManager = Depends(_get_config_manager),
 ):
     """更新用户负一屏配置"""
     request_id = _get_request_id(request)
-    user_id = _get_current_user_id(request)
+    user_id = current_user["user_id"]
 
     try:
         # 获取现有配置或创建新配置
@@ -155,8 +156,8 @@ async def update_negative_screen_config(
         if config is None:
             config = NegativeScreenConfig(user_id=user_id)
 
-        # 更新字段
-        if body.auth_code is not None:
+        # 更新字段（auth_code 为空/省略 = 保留存量，渠道卡开关只 PUT {enabled}）
+        if body.auth_code:
             config.auth_code = body.auth_code
         if body.enabled is not None:
             config.enabled = body.enabled
@@ -199,12 +200,13 @@ async def update_negative_screen_config(
 async def test_negative_screen_push(
     request: Request,
     body: TestPushRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
     config_manager: NegativeScreenConfigManager = Depends(_get_config_manager),
     pusher: NegativeScreenPusher = Depends(_get_pusher),
 ):
     """测试负一屏推送"""
     _get_request_id(request)
-    user_id = _get_current_user_id(request)
+    user_id = current_user["user_id"]
 
     try:
         # 获取用户配置
@@ -263,11 +265,12 @@ async def test_negative_screen_push(
 @router.delete("")
 async def delete_negative_screen_config(
     request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
     config_manager: NegativeScreenConfigManager = Depends(_get_config_manager),
 ):
     """删除用户负一屏配置"""
     request_id = _get_request_id(request)
-    user_id = _get_current_user_id(request)
+    user_id = current_user["user_id"]
 
     try:
         success = config_manager.delete_config(user_id)

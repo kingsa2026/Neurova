@@ -273,6 +273,50 @@ class TestNegativeScreenConfigManager:
             assert len(results) == 10
 
 
+    def test_legacy_default_user_config_migrated(self):
+        """存量迁移：口径收口前配置存在 default_user.json，
+        新口径 "default" 必须能读到（一次性改名迁移，非读侧兜底）"""
+        import json as _json
+
+        from neurova.notifications.negative_screen import NegativeScreenConfigManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            legacy = Path(tmpdir) / "default_user.json"
+            legacy.write_text(
+                _json.dumps(
+                    {"user_id": "default_user", "auth_code": "legacy-code", "enabled": True}
+                ),
+                encoding="utf-8",
+            )
+
+            manager = NegativeScreenConfigManager(data_dir=tmpdir)
+            config = manager.get_config("default")
+
+            assert config is not None, "存量 default_user 配置未迁移到 default 口径"
+            assert config.auth_code == "legacy-code"
+            assert config.user_id == "default"
+            assert not legacy.exists(), "迁移应改名而非复制（防双写分叉）"
+            assert (Path(tmpdir) / "default.json").exists()
+
+    def test_legacy_migration_does_not_overwrite_new(self):
+        """迁移不得覆盖已存在的 default.json"""
+        import json as _json
+
+        from neurova.notifications.negative_screen import NegativeScreenConfigManager
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            (Path(tmpdir) / "default_user.json").write_text(
+                _json.dumps({"user_id": "default_user", "auth_code": "old"}), encoding="utf-8"
+            )
+            (Path(tmpdir) / "default.json").write_text(
+                _json.dumps({"user_id": "default", "auth_code": "new"}), encoding="utf-8"
+            )
+
+            manager = NegativeScreenConfigManager(data_dir=tmpdir)
+            config = manager.get_config("default")
+            assert config.auth_code == "new"
+
+
 # ─── 测试 NegativeScreenPusher ──────────────────────────────────────────────
 
 
@@ -413,6 +457,137 @@ class TestNegativeScreenPusher:
             assert "error" in result.error.lower() or "失败" in result.error or "Network error" in result.error
 
 
+# ─── 测试 _execute_push 真实 HTTP 请求契约 ──────────────────────────────────
+
+
+class TestNegativeScreenPushHeaders:
+    """
+    防回归：华为 HiBoard claw msg/upload 网关校验请求头，
+    x-trace-id 缺失/为空直接拒绝（"Parameter x-trace-id is empty"）。
+    既有测试全部 mock 掉 _execute_push，从未覆盖真实请求头，此契约必须钉住。
+    """
+
+    @pytest.mark.asyncio
+    async def test_execute_push_sends_non_empty_trace_id_header(self):
+        """真实请求必须携带非空 x-trace-id 头"""
+        import aiohttp
+
+        from neurova.notifications.negative_screen import (
+            NegativeScreenConfig,
+            NegativeScreenPusher,
+        )
+
+        captured: dict = {}
+
+        class FakeResponse:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def json(self):
+                return {"code": "0000000000", "desc": "success"}
+
+        class FakeSession:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            def post(self, url, **kwargs):
+                captured.update(kwargs)
+                captured["url"] = url
+                return FakeResponse()
+
+        config = NegativeScreenConfig(
+            user_id="user_001",
+            auth_code="test_auth_code",
+            enabled=True,
+        )
+        pusher = NegativeScreenPusher()
+
+        with patch.object(aiohttp, "ClientSession", FakeSession):
+            result = await pusher.push_task(
+                config=config,
+                task_name="测试任务",
+                task_content="## 测试内容",
+                task_result="任务完成",
+            )
+
+        assert result.success is True
+        headers = captured.get("headers") or {}
+        trace_id = headers.get("x-trace-id", "")
+        assert isinstance(trace_id, str) and trace_id.strip(), (
+            f"华为 HiBoard 网关要求非空 x-trace-id 头，实际 headers={headers}"
+        )
+        assert trace_id.isascii(), "x-trace-id 必须为 ASCII（官方契约：必须使用ASCII字符）"
+
+        # 官方 msgContent 必填字段契约（SKILL.md 标准数据格式）
+        body = captured.get("json") or {}
+        msg = body["data"]["msgContent"][0]
+        assert msg.get("scheduleTaskName"), "scheduleTaskName 为官方必填字段"
+        assert msg.get("source"), "source 为官方必填字段"
+        assert isinstance(msg.get("taskFinishTime"), int) and msg["taskFinishTime"] > 0, (
+            "taskFinishTime 为官方必填字段（UTC 秒级时间戳）"
+        )
+
+    @pytest.mark.asyncio
+    async def test_execute_push_trace_id_unique_per_request(self):
+        """每次推送的 x-trace-id 必须唯一（请求追踪语义）"""
+        import aiohttp
+
+        from neurova.notifications.negative_screen import (
+            NegativeScreenConfig,
+            NegativeScreenPusher,
+        )
+
+        trace_ids: list = []
+
+        class FakeResponse:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def json(self):
+                return {"code": "0000000000", "desc": "success"}
+
+        class FakeSession:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            def post(self, url, **kwargs):
+                trace_ids.append((kwargs.get("headers") or {}).get("x-trace-id"))
+                return FakeResponse()
+
+        config = NegativeScreenConfig(
+            user_id="user_001",
+            auth_code="test_auth_code",
+            enabled=True,
+        )
+        pusher = NegativeScreenPusher()
+
+        with patch.object(aiohttp, "ClientSession", FakeSession):
+            await pusher.push_task(config=config, task_name="任务1", task_content="c1")
+            await pusher.push_task(config=config, task_name="任务2", task_content="c2")
+
+        assert len(trace_ids) == 2
+        assert all(t and t.strip() for t in trace_ids)
+        assert trace_ids[0] != trace_ids[1]
+
+
 # ─── 测试 NotificationManager 集成 ──────────────────────────────────────────
 
 
@@ -505,21 +680,53 @@ class TestNegativeScreenSettingsAPI:
     """测试负一屏设置 API"""
 
     @pytest.fixture
-    def client(self):
-        """创建测试客户端"""
+    def client(self, tmp_path):
+        """创建测试客户端
+
+        防污染：_get_config_manager 缺省 data_dir 是真实 data/negative_screen，
+        直构 app 的 PUT 测试曾把测试值写进真实配置（覆盖用户真实 authCode，
+        EKB-3920 同模式）。必须 override 依赖到 tmp_path。
+        """
         from fastapi.testclient import TestClient
         from neurova.api.app import create_app
+        from neurova.api.endpoints import negative_screen_settings as ns_ep
+        from neurova.notifications.negative_screen import NegativeScreenConfigManager
 
         app = create_app()
-        return TestClient(app)
+        isolated_manager = NegativeScreenConfigManager(
+            data_dir=str(tmp_path / "negative_screen")
+        )
+        app.dependency_overrides[ns_ep._get_config_manager] = lambda: isolated_manager
+        client = TestClient(app)
+        # 供测试读回隔离存储验证落盘（GET 已不回传明文 auth_code）
+        client.ns_manager = isolated_manager
+        return client
 
     def test_get_negative_screen_config(self, client):
-        """测试获取负一屏配置"""
+        """测试获取负一屏配置：口径=认证用户（无凭证回落 default），且不得回传明文 authCode"""
         response = client.get("/api/v1/negative-screen")
 
         assert response.status_code == 200
         data = response.json()
-        assert data["user_id"] == "default_user"
+        # 2026-09-12 口径收口：原 _get_current_user_id 读从未被中间件注入的
+        # request.state.user_id 恒回落 "default_user"，与通知/统计侧 "default"
+        # 分裂 → 自动推送链 get_config 永不命中。统一走 get_current_user_or_default。
+        assert data["user_id"] == "default"
+        # 明文 authCode 不出 API 响应（masked 字段仅供 UI 展示已配置状态）
+        assert not data.get("auth_code"), "GET 响应禁止回传明文 auth_code"
+
+    def test_put_preserves_auth_code_when_omitted(self, client):
+        """PUT 省略 auth_code 时保留已存授权码（渠道卡开关只 PUT {enabled} 不得清空）"""
+        r1 = client.put("/api/v1/negative-screen", json={"auth_code": "secret-abc", "enabled": True})
+        assert r1.status_code == 200
+
+        r2 = client.put("/api/v1/negative-screen", json={"enabled": False})
+        assert r2.status_code == 200
+
+        stored = client.ns_manager.get_config("default")
+        assert stored is not None
+        assert stored.auth_code == "secret-abc", "PUT 省略 auth_code 必须保留存量"
+        assert stored.enabled is False
 
     def test_update_negative_screen_config(self, client):
         """测试更新负一屏配置"""
