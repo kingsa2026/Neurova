@@ -13,7 +13,7 @@
         </div>
         <a-spin :spinning="loadingServers">
           <div class="servers-grid">
-            <GlassCard               v-for="server in pagedServers" :key="server.id" variant="default">
+            <GlassCard               v-for="server in pagedServers" :key="server.server_id" variant="default">
               <template #header>
                 <div class="server-header">
                   <span class="server-name">{{ server.name }}</span>
@@ -23,23 +23,23 @@
                 </div>
               </template>
               <div class="server-body">
-                <p class="server-url">{{ server.url }}</p>
-                <p class="server-tools">{{ server.tool_count || 0 }} {{ t('tool.tools').toLowerCase() }}</p>
+                <p class="server-url">{{ server.transport }}{{ server.url ? ` · ${server.url}` : '' }}</p>
+                <p class="server-tools">{{ server.tools_count || 0 }} {{ t('tool.tools').toLowerCase() }}</p>
               </div>
               <template #footer>
                 <div class="server-actions">
                   <GlassButton
                     v-if="server.oauth_grant === 'authorization_code'"
                     variant="ghost" size="sm"
-                    :loading="authorizingId === server.id"
-                    @click="authorizeServer(server.id)"
+                    :loading="authorizingId === server.server_id"
+                    @click="authorizeServer(server.server_id)"
                   >
                     {{ t('tool.oauthAuthorize') }}
                   </GlassButton>
-                  <GlassButton variant="ghost" size="sm" @click="testServer(server.id)">
+                  <GlassButton variant="ghost" size="sm" @click="testServer(server.server_id)">
                     {{ t('common.refresh') }}
                   </GlassButton>
-                  <a-popconfirm :title="t('common.confirm') + '?'" @confirm="unregisterServer(server.id)">
+                  <a-popconfirm :title="t('common.confirm') + '?'" @confirm="unregisterServer(server.server_id)">
                     <GlassButton variant="danger" size="sm">
                       {{ t('common.delete') }}
                     </GlassButton>
@@ -77,6 +77,34 @@
         </a-spin>
       </a-tab-pane>
 
+      <!-- MCP 工具包白名单目录（P0-2）：精选能力包一键安装 -->
+      <a-tab-pane key="catalog" :tab="t('tool.toolkits')">
+        <a-spin :spinning="loadingCatalog">
+          <div class="servers-grid">
+            <GlassCard v-for="entry in catalog" :key="entry.id" variant="default">
+              <template #header>
+                <div class="server-header">
+                  <span class="server-name">{{ entry.name }}</span>
+                  <a-tag v-if="entry.requires" color="blue">{{ t('tool.requires') }}: {{ entry.requires }}</a-tag>
+                </div>
+              </template>
+              <div class="server-body">
+                <p class="server-tools">{{ entry.description }}</p>
+                <p class="server-url">{{ entry.source }}</p>
+              </div>
+              <template #footer>
+                <div class="server-actions">
+                  <GlassButton variant="primary" size="sm" @click="openInstall(entry)">
+                    {{ t('skill.install') }}
+                  </GlassButton>
+                </div>
+              </template>
+            </GlassCard>
+          </div>
+          <a-empty v-if="!catalog.length && !loadingCatalog" :description="t('common.noData')" />
+        </a-spin>
+      </a-tab-pane>
+
       <!-- Public tools tab -->
       <a-tab-pane key="public" :tab="t('tool.public')">
         <a-spin :spinning="loadingTools">
@@ -108,6 +136,39 @@
       </a-form>
     </a-modal>
 
+    <!-- 工具包安装弹窗（P0-2）：按目录条目的 required_secrets 动态收凭据 -->
+    <a-modal
+      v-model:open="showInstall"
+      :title="`${t('skill.install')} · ${installingEntry?.name || ''}`"
+      :confirm-loading="installing"
+      @ok="confirmInstall"
+    >
+      <a-alert
+        v-if="installingEntry?.requires === 'docker'"
+        type="warning"
+        :message="`${t('tool.requires')}: Docker`"
+        style="margin-bottom: 12px"
+      />
+      <a-alert
+        v-for="spec in (installingEntry?.required_secrets || []).filter((s: any) => s.read_only_required)"
+        :key="spec.key"
+        type="error"
+        :message="t('tool.readOnlyRequired')"
+        style="margin-bottom: 12px"
+      />
+      <p class="server-tools" style="margin-bottom: 12px">{{ t('tool.catalogSecrets') }}</p>
+      <a-form layout="vertical" :model="installSecrets">
+        <a-form-item
+          v-for="spec in (installingEntry?.required_secrets || [])"
+          :key="spec.key"
+          :label="spec.prompt"
+          :required="spec.required"
+        >
+          <a-input-password v-model:value="installSecrets[spec.key]" :placeholder="spec.key" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
+
     <!-- Execute tool modal -->
     <a-modal v-model:open="showExecute" :title="t('tool.execute')" @ok="runTool" :confirm-loading="executing">
       <p v-if="selectedTool" class="exec-tool-name">{{ selectedTool.name }}</p>
@@ -129,7 +190,8 @@ import GlassButton from '@/components/GlassButton.vue'
 import { message } from 'ant-design-vue'
 import {
   listMCPServers, listTools, registerMCPServer, unregisterMCPServer, testMCPServer, authorizeMCPOAuth, installTool as installToolApi, executeTool as executeToolApi,
-  type MCPServer, type Tool,
+  listMCPCatalog, installMCPCatalogEntry,
+  type MCPServer, type Tool, type MCPCatalogEntry,
 } from '@/api/modules/tool-layers'
 
 const { t } = useI18n()
@@ -275,9 +337,52 @@ const runTool = async () => {
   }
 }
 
+// ── MCP 工具包白名单目录（P0-2）──
+const loadingCatalog = ref(false)
+const installing = ref(false)
+const showInstall = ref(false)
+const catalog = ref<MCPCatalogEntry[]>([])
+const installingEntry = ref<MCPCatalogEntry | null>(null)
+const installSecrets = ref<Record<string, string>>({})
+
+const fetchCatalog = async () => {
+  loadingCatalog.value = true
+  try {
+    const res = await listMCPCatalog()
+    catalog.value = Array.isArray(res) ? res : []
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    loadingCatalog.value = false
+  }
+}
+
+const openInstall = (entry: MCPCatalogEntry) => {
+  installingEntry.value = entry
+  installSecrets.value = {}
+  showInstall.value = true
+}
+
+const confirmInstall = async () => {
+  if (!installingEntry.value) return
+  installing.value = true
+  try {
+    await installMCPCatalogEntry(installingEntry.value.id, installSecrets.value)
+    message.success(t('common.success'))
+    showInstall.value = false
+    await fetchServers()
+    activeTab.value = 'servers'
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || t('common.error'))
+  } finally {
+    installing.value = false
+  }
+}
+
 onMounted(() => {
   fetchServers()
   fetchTools()
+  fetchCatalog()
 })
 </script>
 
