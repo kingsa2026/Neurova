@@ -451,6 +451,15 @@ class SharedConfigManager:
                     logger.error("导入的配置格式不正确")
                     return False
 
+                # P2-3 核验修正：导入树内密文 api_key 解密（明文原样——兼容
+                # 本系统导出的明文与手工备份的加密形态两种来源）
+                try:
+                    from neurova.security.secret_store import decrypt_config_secrets
+
+                    decrypt_config_secrets(imported_config)
+                except Exception:  # noqa: BLE001
+                    pass
+
                 # 更新配置
                 self._config.update(imported_config)
                 self._save_config()
