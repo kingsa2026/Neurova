@@ -262,3 +262,173 @@ async def compare_agents(request_body: dict, request: Request):
         }
 
     return {"code": 0, "message": "success", "data": {"comparison": results}}
+
+
+# ── RAG 评估（P1-#5：Yuxi 对比落地，benchmark 摘 simulated 的第一条真路）──
+
+
+class RagDatasetCreateRequest(BaseModel):
+    name: str = Field(..., description="数据集名称")
+    description: str = ""
+    items: typing.List[dict] = Field(default_factory=list, description='[{query, gold_chunk_ids:[knowledge_id#chunk_index], gold_answer?}]')
+
+
+class RagGenerateRequest(BaseModel):
+    sample_n: int = Field(10, ge=1, le=200, description="采样锚块数")
+    neighbors: int = Field(1, ge=0, le=10, description="同条目邻居窗口")
+    agent_id: str = "default"
+    save_as_dataset: bool = False
+
+
+class RagEvaluateRequest(BaseModel):
+    dataset_id: str
+    top_k: int = Field(5, ge=1, le=50)
+    agent_id: str = "default"
+    use_judge: bool = False
+
+
+@router.get("/rag-datasets")
+async def rag_datasets_list():
+    from neurova.benchmark.rag_eval import load_datasets
+
+    return {"code": 0, "data": {"datasets": load_datasets()}}
+
+
+@router.post("/rag-datasets")
+async def rag_datasets_create(body: RagDatasetCreateRequest):
+    from neurova.benchmark.rag_eval import save_dataset
+
+    ds = save_dataset(body.model_dump())
+    return {"code": 0, "data": ds}
+
+
+@router.put("/rag-datasets/{dataset_id}")
+async def rag_datasets_update(dataset_id: str, body: RagDatasetCreateRequest):
+    from neurova.benchmark.rag_eval import save_dataset
+
+    try:
+        ds = save_dataset(body.model_dump(), dataset_id=dataset_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+    return {"code": 0, "data": ds}
+
+
+@router.delete("/rag-datasets/{dataset_id}")
+async def rag_datasets_delete(dataset_id: str):
+    from neurova.benchmark.rag_eval import delete_dataset
+
+    if not delete_dataset(dataset_id):
+        raise HTTPException(status_code=404, detail=f"Dataset '{dataset_id}' not found")
+    return {"code": 0, "message": "Dataset deleted"}
+
+
+def _rag_llm_fn(agent_id: str):
+    """出题/Judge 的同步 LLM 通道（graph_bridge 同款：agent 候选 llm_client）。"""
+    from neurova.api.endpoints import get_agent_instance
+
+    clients = []
+    for agent in (get_agent_instance(agent_id=agent_id), get_agent_instance(agent_id="default")):
+        client = getattr(agent, "llm_client", None) if agent else None
+        if client is not None and client not in clients:
+            clients.append(client)
+    if not clients:
+        return None
+
+    def _call(prompt: str) -> str:
+        from neurova.mem_core import run_async_safely
+
+        for client in clients:
+            try:
+                resp = run_async_safely(client.chat([{"role": "user", "content": prompt}]))
+            except Exception:  # noqa: BLE001 - 换下一个候选
+                continue
+            content = getattr(resp, "content", "") or ""
+            if content.startswith("[LLM Error]"):
+                continue
+            return content
+        return ""
+
+    return _call
+
+
+@router.post("/rag-datasets/generate")
+async def rag_datasets_generate(
+    body: RagGenerateRequest,
+    current_user: typing.Dict[str, typing.Any] = Depends(get_current_user),
+):
+    """自动出题（锚块=可见知识条目块，gold=`knowledge_id#chunk_index`）。
+
+    LLM 通道不可用时如实 503——拒绝伪造题目（simulated 诚实纪律）。
+    LLM 调用 N 次为秒级重活，to_thread 隔离不阻塞事件循环。
+    """
+    import asyncio as _asyncio
+
+    from neurova.benchmark.rag_dataset_gen import generate_items
+    from neurova.knowledge.repository import get_knowledge_repository
+
+    llm_fn = _rag_llm_fn(body.agent_id)
+    if llm_fn is None:
+        raise HTTPException(status_code=503, detail="LLM 通道不可用（无已配置模型），自动出题拒绝伪造")
+
+    repo = get_knowledge_repository()
+    items = repo.visible_items(current_user, scope="all", agent_id=body.agent_id)
+    result = await _asyncio.to_thread(
+        generate_items, items, body.sample_n, body.neighbors, llm_fn
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=422, detail=result["error"])
+    if body.save_as_dataset:
+        from neurova.benchmark.rag_eval import save_dataset
+
+        result["saved_dataset_id"] = save_dataset(result["dataset"])["id"]
+    return {"code": 0, "data": result}
+
+
+@router.post("/rag-evaluate")
+async def rag_evaluate(
+    body: RagEvaluateRequest,
+    current_user: typing.Dict[str, typing.Any] = Depends(get_current_user),
+):
+    """对数据集跑真检索评估（P/R/F1@K；use_judge 时逐题 LLM 二值判分）。"""
+    from neurova.benchmark.rag_eval import evaluate_dataset, load_datasets
+    from neurova.knowledge.repository import get_knowledge_repository
+
+    ds = next((d for d in load_datasets() if d["id"] == body.dataset_id), None)
+    if ds is None:
+        raise HTTPException(status_code=404, detail=f"Dataset '{body.dataset_id}' not found")
+
+    repo = get_knowledge_repository()
+
+    def _retrieve(query: str, top_k: int):
+        ordered = []
+        for item in repo.search_visible_items(
+            current_user, query, agent_id=body.agent_id, limit=top_k
+        ):
+            kid = item.get("knowledge_id", "")
+            for h in item.get("chunk_hits") or []:
+                ordered.append(f"{kid}#{h.get('chunk_index')}")
+        return ordered
+
+    judge_fn = None
+    if body.use_judge:
+        raw = _rag_llm_fn(body.agent_id)
+        if raw is not None:
+            def judge_fn(question, expected, context):
+                reply = raw(
+                    f"判断以下回答是否正确回答了问题（只答 true/false）。\n"
+                    f"问题：{question}\n标准答案：{expected}\n检索上下文：{context[:2000]}"
+                )
+                return "true" in reply.lower()
+
+    report = await __import__("asyncio").to_thread(
+        evaluate_dataset, ds, _retrieve, body.top_k, (1, 3, 5, 10), judge_fn
+    )
+    return {"code": 0, "data": report}
+
+
+@router.get("/health-rag")
+async def rag_health():
+    """RAG 评估能力就绪探针（benchmark 执行器接线状态）。"""
+    from neurova.benchmark.rag_eval import load_datasets
+
+    return {"code": 0, "data": {"rag_executor": "wired", "datasets": len(load_datasets())}}

@@ -880,14 +880,27 @@ class ContextOrchestrator:
 
     # microcompact 保留窗口：最近 N 个工具结果保留原文，更早的占位替换
     _TOOL_RESULT_KEEP_RECENT = 3
-    _TOOL_RESULT_PLACEHOLDER = "[工具输出已清除（原文已归档，可检索回忆）]"
+
+    @classmethod
+    def _tool_placeholder(cls, msg: dict) -> str:
+        """P1-#6（§5.6）：占位串携带硬地址（tool/call/ts），与 executor 溢出
+        指针同一寻址语法——模型经 recall_history(session_id, tool_call_id)
+        按指针直取，替代"猜子串"。缺 call_id/name 时降级保留可得字段。"""
+        name = str((msg or {}).get("name") or (msg or {}).get("tool_name") or "?")
+        call = str((msg or {}).get("tool_call_id") or "")
+        tail = f" call={call}" if call else ""
+        return (
+            f"[工具输出已移出上下文: tool={name}{tail}；"
+            "完整内容经 recall_history(session_id, tool_call_id) 取回]"
+        )
 
     def _clear_old_tool_results(self, window_msgs: list) -> list:
         """microcompact（Anthropic context editing 对齐）：老工具结果占位清除。
 
         只在窗口 token 超过 8k 时启用（短对话不做无谓替换）；保留最近
-        _TOOL_RESULT_KEEP_RECENT 个工具结果原文，更早的替换为占位指针。
-        原文已由 _archive_conversation_to_pool 无损归档，召回不受影响。
+        _TOOL_RESULT_KEEP_RECENT 个工具结果原文，更早的替换为寻址占位指针。
+        原文真相在会话台账（metadata.tool_calls，P1-#6）与池归档，
+        占位携带 call_id 硬地址供 recall_history 直取。
         """
         from neurova.context.window_compactor import estimate_window_tokens
 
@@ -906,7 +919,7 @@ class ContextOrchestrator:
             if i < cutoff:
                 content = str(cleared[i].get("content", "") or "")
                 if len(content) >= 80:  # 极短结果（如状态码）保留原文
-                    cleared[i] = {**cleared[i], "content": self._TOOL_RESULT_PLACEHOLDER}
+                    cleared[i] = {**cleared[i], "content": self._tool_placeholder(cleared[i])}
         return cleared
 
     # ══════════════════════════════════════════════════════════════

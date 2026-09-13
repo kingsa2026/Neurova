@@ -846,8 +846,12 @@ class ToolExecutor:
             return {"error": "Skill 注册表未初始化"}
 
         try:
-            # 获取 Skill
-            skill = self._skill_registry.get_skill(skill_name)
+            # 获取 Skill——经 Protocol 只读视图（skill_system.SkillRegistryProtocol
+            # 正典面）。原 get_skill() 不在接口内：对纯 Protocol 注册表拿到协程
+            # 对象恒真绕过存在检查、`.execute` 于协程上 AttributeError 被吞、
+            # 且绕开 execute_skill 丢失 before/after 生命周期事件（残留处理
+            # 2026-09-13 根治，防回归=AsyncMock 契约测试必踩此面）。
+            skill = self._skill_registry.skills.get(skill_name)
             if not skill:
                 return {"error": f"Skill {skill_name} 不存在"}
 
@@ -885,8 +889,17 @@ class ToolExecutor:
                 # 防线），覆盖 chat 主链与审批重放等全部 skill 执行路径。
                 if skill_name == "file_operation":
                     params = {**(params or {}), "_base_dir": self._workspace_base()}
-                # 执行 Skill
-                result = await skill.execute(params, context)
+                # 执行 Skill——走 registry.execute_skill 正典 seam（生命周期
+                # 事件/未注册 ValueError 语义由其统一承载，P1-#9 残留处理）
+                result = await self._skill_registry.execute_skill(skill_name, params, context)
+            # SkillResult dataclass → dict 归一（函数契约 Dict；下游
+            # _result_is_success/展示层均按 dict 消费）
+            if not isinstance(result, dict):
+                result = {
+                    "success": bool(getattr(result, "success", False)),
+                    "output": getattr(result, "data", None) or getattr(result, "output", None),
+                    "error": getattr(result, "error", None),
+                }
             if _deps_warning and isinstance(result, dict):
                 result.setdefault("deps_warning", _deps_warning)
             return result
@@ -1927,6 +1940,14 @@ class ToolExecutor:
             declared_tools = []
         permissions = {"tools": {"enabled": True, "allow": declared_tools}} if declared_tools else None
 
+        # §5.6 自创工具标准：序列技能的可重现性=每一步都可重现（与行为一致，
+        # 同 P0-4 permissions 声明哲学）；任一突变/不可重现步 → 整体 False。
+        from neurova.builtin_tools import is_builtin_tool_reproducible
+
+        skill_reproducible = all(
+            is_builtin_tool_reproducible(s["tool"]) for s in tool_sequence
+        ) if tool_sequence else False
+
         manifest = SimpleNamespace(
             name=name,
             id=name,
@@ -1935,6 +1956,7 @@ class ToolExecutor:
             config={
                 "tool_sequence": tool_sequence,
                 "source": "llm_created",
+                "reproducible": skill_reproducible,
                 **({"permissions": permissions} if permissions else {}),
             },
         )
@@ -2656,13 +2678,91 @@ class ToolExecutor:
             "timestamp": int(base_dt.timestamp()),
         }
 
-    async def _execute_recall_history(self, params: Dict) -> Dict:
-        """召回被折叠/驱逐的历史上下文（P1-1③）。
+    async def _recall_by_call_id(self, tool_call_id: str, params: Dict) -> Dict:
+        """P1-#6 直取模式：session 历史 metadata.tool_calls 台账按 call_id 精确取回。
 
-        经 agent.context_orchestrator.context_pool.recall_evicted：
-        内存台账（本进程驱逐）+ 持久台账（SQLite FTS，覆盖重启前历史）双源召回。
+        返回全文来源三态：内联 result 原文 / 溢出文件全文（offload_path 存在
+        且文件在）/ 文件缺失（如实报 preview + 指针 + 原因，不伪装空结果）。
+        """
+        session_id = str(params.get("session_id") or "").strip() or getattr(
+            self._agent, "current_session_id", ""
+        ) or ""
+        if not session_id:
+            return {"error": "直取模式需要 session_id（当前无活动会话）"}
+        repo = getattr(self._agent, "session_repo", None)
+        if repo is None:
+            from neurova.session_repository import get_session_repository
+
+            repo = get_session_repository()
+        history = repo.get_history(agent_id="", session_id=session_id) or []
+        entry = None
+        for msg in reversed(history):
+            for tc in ((msg or {}).get("metadata") or {}).get("tool_calls") or []:
+                if (tc or {}).get("tool_call_id") == tool_call_id and tc.get("type") == "tool_result":
+                    entry = tc
+                    break
+            if entry:
+                break
+        if entry is None:
+            return {"error": f"会话 {session_id} 台账中未找到调用 {tool_call_id}——确认 session_id/call_id 或改用 query 模糊召回"}
+
+        offload_rel = entry.get("offload_path")
+        if offload_rel:
+            from pathlib import Path
+
+            p = Path(str(offload_rel))
+            ws = getattr(self._agent, "workspace_path", None)
+            full = p if p.is_absolute() else (Path(ws) / p if ws else p)
+            try:
+                if full.exists():
+                    return {
+                        "mode": "direct",
+                        "session_id": session_id,
+                        "tool_call_id": tool_call_id,
+                        "tool_name": entry.get("tool_name"),
+                        "timestamp": entry.get("timestamp"),
+                        "source": "offload_file",
+                        "content": full.read_text(encoding="utf-8", errors="replace"),
+                    }
+            except OSError as e:
+                return {
+                    "error": f"溢出文件不可读（{e}）",
+                    "mode": "direct",
+                    "tool_call_id": tool_call_id,
+                    "preview": str(entry.get("result") or ""),
+                    "offload_path": str(offload_rel),
+                }
+            return {
+                "error": "溢出文件不存在（工作区可能已清理）——返回内联预览",
+                "mode": "direct",
+                "tool_call_id": tool_call_id,
+                "preview": str(entry.get("result") or ""),
+                "offload_path": str(offload_rel),
+            }
+        return {
+            "mode": "direct",
+            "session_id": session_id,
+            "tool_call_id": tool_call_id,
+            "tool_name": entry.get("tool_name"),
+            "timestamp": entry.get("timestamp"),
+            "source": "session_ledger",
+            "content": entry.get("result"),
+        }
+
+    async def _execute_recall_history(self, params: Dict) -> Dict:
+        """召回历史上下文（P1-1③ + P1-#6 双模式）。
+
+        直取模式（传 tool_call_id）：按硬地址在会话 metadata.tool_calls 台账
+        精确匹配（溢出条目顺 offload_path 读回工作区文件全文），未命中/文件
+        缺失如实报错并附预览——禁止伪装空结果（Yuxi 吞错反面教材）。
+        子串模式（仅 query）：经 context_pool.recall_evicted 内存台账（本进程
+        驱逐）+ 持久台账（SQLite FTS，覆盖重启前历史）双源模糊召回（原语义）。
         """
         try:
+            tool_call_id = str(params.get("tool_call_id") or "").strip()
+            if tool_call_id:
+                return await self._recall_by_call_id(tool_call_id, params)
+
             query = (params.get("query") or "").strip() or None
             try:
                 limit = int(params.get("limit", 10))

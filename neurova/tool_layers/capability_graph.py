@@ -27,6 +27,12 @@ class ToolCapabilityNode:
     fallbacks: typing.List[str] = field(default_factory=list)
     companions: typing.List[str] = field(default_factory=list)
     metadata: typing.Dict[str, typing.Any] = field(default_factory=dict)
+    # Phase3 契约字段（测试先行，见 tests/unit/tools/test_capability_graph_phase3
+    # 的 xfail 规格钉）：provides=该工具产出的能力、requires=前置能力、
+    # degrades_to=降级替代。默认图与既有消费方暂不使用，加性零影响。
+    provides: typing.List[str] = field(default_factory=list)
+    requires: typing.List[str] = field(default_factory=list)
+    degrades_to: typing.List[str] = field(default_factory=list)
 
 
 class ToolCapabilityGraph:
@@ -40,8 +46,13 @@ class ToolCapabilityGraph:
     - 共现关系（统计关联）
     """
 
-    def __init__(self):
-        """初始化图"""
+    def __init__(self, load_defaults: bool = True):
+        """初始化图。
+
+        load_defaults=False：空图（测试隔离/子图重建用）。原实现恒注入默认
+        节点，曾致 `build_execution_plan` 临时子图混入默认工具——执行计划
+        被无关工具污染（残留处理 2026-09-13 坐实的生产缺陷）。
+        """
         self._nodes: typing.Dict[str, ToolCapabilityNode] = {}
         self._adjacency: typing.Dict[str, typing.List[str]] = {}
         self._reverse_adjacency: typing.Dict[str, typing.List[str]] = {}
@@ -49,7 +60,26 @@ class ToolCapabilityGraph:
         self._capability_index: typing.Dict[str, typing.List[str]] = {}
 
         # 构建默认图
-        self._build_default_graph()
+        if load_defaults:
+            self._build_default_graph()
+
+    @property
+    def nodes(self) -> typing.Dict[str, "ToolCapabilityNode"]:
+        """节点表公共视图（测试隔离清空/只读遍历；带结构的写入仍走 add_node）。"""
+        return self._nodes
+
+    def tools_for_capabilities(self, capabilities: typing.List[str]) -> typing.List[str]:
+        """能力名→承载工具名映射（保持输入序，无承载者的能力跳过）。
+
+        根治 tool_orchestrator 把能力名直接当 target_tools 传入
+        build_execution_plan 的语义错配（恒空计划）。
+        """
+        out: typing.List[str] = []
+        for cap in capabilities or []:
+            for tool in self._capability_index.get(cap, []):
+                if tool not in out:
+                    out.append(tool)
+        return out
 
     def register_tool(
         self,
@@ -258,8 +288,9 @@ class ToolCapabilityGraph:
         # 创建子图并进行拓扑排序
         subgraph_nodes = {name: node for name, node in self._nodes.items() if name in needed}
 
-        # 临时图用于排序
-        temp_graph = ToolCapabilityGraph()
+        # 临时图用于排序——load_defaults=False：空图重建子图，否则默认节点
+        # 混入排序结果，执行计划被无关工具污染（残留处理 2026-09-13 坐实）。
+        temp_graph = ToolCapabilityGraph(load_defaults=False)
         for node in subgraph_nodes.values():
             # 只添加在子图中的依赖
             filtered_deps = [d for d in node.dependencies if d in needed]

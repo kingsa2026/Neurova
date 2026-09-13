@@ -104,9 +104,13 @@ class ToolOrchestrator:
         # 解析目标为能力列表
         capabilities = self._resolve_goal_to_capabilities_sync(goal)
 
-        # 使用能力图构建执行计划
+        # 使用能力图构建执行计划——能力名先经 capability_index 映射为承载
+        # 工具再入计划（残留处理 2026-09-13：原实现把能力名直接当
+        # target_tools 传 build_execution_plan，参数语义错配=恒空/污染计划）
         if capabilities:
-            return self._capability_graph.build_execution_plan(capabilities)
+            tools = self._capability_graph.tools_for_capabilities(capabilities)
+            if tools:
+                return self._capability_graph.build_execution_plan(tools)
 
         # 如果无法解析，返回默认计划
         return []

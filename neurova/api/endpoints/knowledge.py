@@ -674,6 +674,61 @@ async def delete_kb_collection(request: Request, mapping_id: str = Path(...), cu
     return {"code": 0, "message": "deleted"}
 
 
+# ── 知识摄取队列观测（P1-#9） ─────────────────────────────────────
+
+
+@router.get("/ingress-tasks")
+async def list_ingress_tasks(
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=200),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """摄取任务列表 + 计数（本人任务；admin 全量）。"""
+    from neurova.knowledge.ingest_queue import get_ingress_queue
+
+    queue = get_ingress_queue()
+    uid = str(current_user.get("user_id") or "")
+    is_admin = str(current_user.get("role") or "") == "admin"
+    tasks = queue.list_recent(limit=limit)
+    if not is_admin:
+        tasks = [t for t in tasks if t.get("user_id") == uid]
+    return {"code": 0, "data": {"tasks": tasks, "stats": queue.stats()}}
+
+
+@router.get("/ingress-tasks/{task_id}")
+async def get_ingress_task(
+    task_id: str,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """单任务状态（pending/processing/done/dead；done 附 item_ids）。"""
+    from neurova.knowledge.ingest_queue import get_ingress_queue
+
+    row = get_ingress_queue().get(task_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+    uid = str(current_user.get("user_id") or "")
+    if row.get("user_id") != uid and str(current_user.get("role") or "") != "admin":
+        # 他人任务对普通用户按不存在处理（不泄露存在性）
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+    row = dict(row)
+    try:
+        import json as _json
+
+        row["item_ids"] = _json.loads(row.get("result_ids") or "[]")
+    except Exception:  # noqa: BLE001
+        row["item_ids"] = []
+    row.pop("storage_path", None)  # 服务端绝对路径不外露
+    return {"code": 0, "data": row}
+
+
+def _title_from_url(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    path = parsed.path.rstrip("/") or "root"
+    name = path.rsplit("/", 1)[-1]
+    return name[:64] or parsed.netloc or "Web Page"
+
+
 @router.get("/{knowledge_id}", response_model=KnowledgeItem)
 async def get_knowledge_item(
     request: Request,
@@ -884,14 +939,25 @@ async def import_knowledge_file(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
     agent_id: str = Query(default="default", description="Agent ID"),
+    sync: bool = Query(default=True, description="true=同步导入（现行为）；false=入队后台处理，返回 task_id（P1-#9）"),
 ):
     """导入知识文件（txt/md/docx/xlsx/pptx/pdf/html/csv）。
 
     R-4: 复用 attachment_parser 抽取文本，抽取成功则创建知识条目
     （归属当前用户、默认私有）。批次 3：导入后触发图谱抽取。
+    P1-#9：sync=false 走持久化摄取队列（落文件+入队即返 task_id，崩溃可重跑；
+    异步路径不做图谱抽取，结果标 skipped_async）。
     """
     filename = file.filename or "imported"
     data = await file.read()
+    if not sync:
+        from neurova.knowledge.ingest_queue import get_ingress_queue
+
+        task = get_ingress_queue().enqueue_upload(
+            filename=filename, data=data, agent_id=agent_id,
+            user_id=str(current_user.get("user_id") or ""),
+        )
+        return {"code": 0, "message": "Queued", "data": {"task_id": task["task_id"], "status": task.get("status"), "replayed": task.get("replayed", False)}}
     items, extract_status = _import_file_data(data, filename, agent_id, current_user)
     if not items:
         # 2026-09-06 修复：抽取失败显式化——此前以成功语义静默返回空列表，
@@ -1021,23 +1087,37 @@ async def import_knowledge_url(
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
     agent_id: str = Query(default="default", description="Agent ID"),
     url: str = Query(..., description="远程网页 URL"),
+    sync: bool = Query(default=True, description="true=同步导入；false=入队后台处理（P1-#9）"),
 ):
     """导入远程网页（抽取正文存为知识条目，归属当前用户、默认私有）"""
     if not _validate_import_url(url):
         raise HTTPException(status_code=400, detail="Invalid URL: only public http(s) allowed")
+
+    if not sync:
+        # SSRF 校验已在上方（安全门不后置）；抓取挪到 worker 执行。
+        from neurova.knowledge.ingest_queue import get_ingress_queue
+
+        task = get_ingress_queue().enqueue_url(
+            url=url, title_hint=_title_from_url(url), agent_id=agent_id,
+            user_id=str(current_user.get("user_id") or ""),
+        )
+        return {"code": 0, "message": "Queued", "data": {"task_id": task["task_id"], "status": task.get("status"), "replayed": task.get("replayed", False)}}
 
     try:
         data = _fetch_url(url)
     except Exception as e:
         raise HTTPException(status_code=502, detail="Fetch failed: %s" % e)
 
-    items = _import_file_data(data, _title_from_url(url), agent_id, current_user)
+    # P1-#9 顺带修复预存 bug：原实现 `items = _import_file_data(...)` 未解包，
+    # items 实为 (list, status) 元组——抽取失败仍返回 code=0 谎报成功，且
+    # data.items 形状是 [条目列表, 状态串]（前端消费 items[0] 才碰巧对）。
+    # 与 /import 对齐：解包 + 失败显式 code=1。
+    items, extract_status = _import_file_data(data, _title_from_url(url), agent_id, current_user)
+    if not items:
+        return {
+            "code": 1,
+            "message": f"extract_failed:{extract_status}",
+            "data": {"items": [], "status": extract_status},
+        }
     _try_extract_to_graph(items, request, agent_id=agent_id)
     return {"code": 0, "message": "URL import completed", "data": {"items": items}}
-
-
-def _title_from_url(url: str) -> str:
-    parsed = urllib.parse.urlparse(url)
-    path = parsed.path.rstrip("/") or "root"
-    name = path.rsplit("/", 1)[-1]
-    return name[:64] or parsed.netloc or "Web Page"

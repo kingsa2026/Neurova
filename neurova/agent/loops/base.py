@@ -265,6 +265,20 @@ class BaseAgentLoop(ABC):
                 else:
                     content = _safe_json_dumps({"error": exec_result.error})
 
+                # P1-#6（§5.6）：溢出分层——可重现大结果全文落工作区文件、
+                # 消息体换预览+指针；不可重现（含 MCP/自创未声明）豁免原文直进。
+                from neurova.core.tool_offload import apply_offload_policy, resolve_tool_reproducible
+
+                _reproducible = resolve_tool_reproducible(self.agent, _tc_function_name)
+                _offload = apply_offload_policy(
+                    tool_name=_tc_function_name,
+                    call_id=_tc_id,
+                    content=content,
+                    reproducible=_reproducible,
+                    workspace_root=getattr(self.agent, "workspace_path", None) or None,
+                )
+                content = _offload.content
+
                 tool_msg = {
                     "role": "tool",
                     "tool_call_id": _tc_id,
@@ -276,12 +290,17 @@ class BaseAgentLoop(ABC):
                 # 完整保留 content（不预截断）：SSE 去重 key 基于完整内容 hash，
                 # 截断会让"前缀相同正文不同"的结果（如同计划 create/mark_step）
                 # 被误判为重复；展示层截断由 console._build_tool_events 的 [:500] 处理
+                # P1-#6 条目增强：call_id 硬地址 + reproducible 落盘证据（防工具
+                # 改标/删除后历史语义漂移）+ offload_path（溢出时全文真相指针）
                 _result_record = {
                     "type": "tool_result",
                     "tool_name": _tc_function_name,
+                    "tool_call_id": _tc_id,
                     "result": content if content else "执行完成",
                     "success": exec_result.success,
                     "timestamp": datetime.now().isoformat(),
+                    "reproducible": _reproducible,
+                    "offload_path": _offload.offload_path,
                 }
                 if _task_name_complete:
                     _result_record["task_name"] = _task_name_complete

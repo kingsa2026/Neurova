@@ -20,10 +20,12 @@ logger = get_logger(__name__)
 
 _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     "recall_history": {
-        "description": "【历史召回】召回本会话被折叠/驱逐出当前上下文窗口的早期对话内容（P1-1③）。当用户提到“之前讨论过”“刚才说的”而当前上下文里找不到时，用本工具按关键词召回被压缩归档的历史轮次。与 memory_search 的区别：memory_search 查长期记忆库（跨会话持久），本工具查当前会话的上下文台账（本会话内被折叠的内容）。【何时不用】查跨会话长期记忆改用 memory_search；查用户语音说过的话用 voice_memory_search；当前上下文里还找得到的内容不要召回。",
+        "description": "【历史召回】召回本会话被折叠/驱逐出当前上下文窗口的早期对话与工具结果（P1-1③ + P1-#6）。两种模式：①按指针直取——上下文里看到『[工具输出已移出上下文/已溢出至工作区文件: ... call=<id> ...]』的占位时，传 tool_call_id 精确取回完整结果（溢出条目自动读回工作区文件全文）；②按关键词召回——用户提到“之前讨论过”“刚才说的”时用 query 模糊匹配折叠台账。与 memory_search 的区别：memory_search 查长期记忆库（跨会话持久），本工具查当前会话的上下文台账（本会话内被折叠的内容）。【何时不用】查跨会话长期记忆改用 memory_search；查用户语音说过的话用 voice_memory_search；当前上下文里还找得到的内容不要召回。",
         "parameters": {
             "type": "object",
             "properties": {
+                "tool_call_id": {"type": "string", "description": "直取模式：占位指针里的 call= 值（如 tc-123），与 session_id 联用精确取回该次工具结果全文"},
+                "session_id": {"type": "string", "description": "直取模式可选：目标会话 id，缺省用当前会话"},
                 "query": {"type": "string", "description": "召回关键词（在折叠台账中匹配，留空返回最近折叠的内容）"},
                 "limit": {"type": "integer", "description": "返回数量上限", "default": 10},
             },
@@ -881,6 +883,37 @@ def get_builtin_tool_params(tool_name: str) -> Optional[Dict]:
 
 _SANDBOX_REQUIRED_KEY = "sandbox_required"
 
+# P1-#6 全量打标单源（用户拍板 2026-09-13）：此集合列"结果不可重现"的内置
+# 工具（突变/副作用/瞬时快照类）——重放不可能或重放制造新副作用；集合之外
+# 一律 True。误标 True 的后果=溢出文件 30 天被清且重放失败丢原文；误标
+# False 的后果=会话文件偏大。方向上取"数据保真优先"，故名单从严。
+_NON_REPRODUCIBLE_TOOLS = frozenset({
+    # 任意代码/命令：输出依赖外部状态且可能已产生副作用
+    "run_code", "computer_shell", "computer_ssh_exec",
+    # git 含写子命令（commit/push/checkout），tool 粒度从严
+    "git",
+    # 文件/画布/技能写操作：结果即回执，重放制造新变更
+    "file_write", "file_create", "file_edit", "file_delete",
+    "create_skill", "planning",
+    "canvas_add_node", "canvas_connect", "canvas_create", "canvas_remove_node",
+    "canvas_move_node", "canvas_set_config", "canvas_layout", "canvas_run",
+    # 桌面/浏览器操作：突变或瞬时快照（截图重放不回当时画面）
+    "computer_click", "computer_click_element", "computer_click_mark",
+    "computer_type", "computer_scroll", "computer_set_value",
+    "computer_screenshot", "computer_som_snapshot", "computer_dom_snapshot",
+    "browser_click", "browser_click_role", "browser_fill_role",
+    "browser_type", "browser_navigate", "browser_screenshot",
+    # 子代理派生：spawn 有副作用
+    "spawn_subagent",
+})
+
+
+def is_builtin_tool_reproducible(tool_name: str) -> bool:
+    """内置工具可重现性查询（单源 _NON_REPRODUCIBLE_TOOLS）；未知工具 False。"""
+    if tool_name not in _BUILTIN_SCHEMAS:
+        return False
+    return tool_name not in _NON_REPRODUCIBLE_TOOLS
+
 # B3（v0 启发）：执行摘要参数——模型自述"进行中/完成态"的 2-6 字动作短语，
 # 经 SSE 透传给步骤化时间轴作段标题。单一注入点（to_openai_format），54 个
 # 内置工具自动获得；执行层在分发前剥离（不污染真实参数）。
@@ -946,6 +979,11 @@ class BuiltinTool:
     # P2-15 声明位：True=声明必须在沙箱下执行；None=未声明。
     # 不进入 to_openai_format()，模型可见面零变化。
     sandbox_required: Optional[bool] = None
+    # P1-#6（§5.6 定稿）：结果可重现性——True=可用相同参数重放取回原文，
+    # 溢出可外移工作区文件；False/None=当时的原文即唯一记录，禁止外移。
+    # 不进入 to_openai_format()（模型可见面零变化）；外部注册未声明按
+    # False 保守处理（register_tool fail-closed，数据保真优先）。
+    reproducible: Optional[bool] = None
 
     def to_openai_format(self) -> Dict[str, Any]:
         """转换为 OpenAI function calling 格式。
@@ -987,6 +1025,7 @@ class BuiltinToolRegistry:
                 parameters=schema["parameters"],
                 required=schema["parameters"].get("required", []),
                 sandbox_required=get_builtin_tool_sandbox_declaration(tool_name),
+                reproducible=is_builtin_tool_reproducible(tool_name),
             )
             self._tools[tool_name] = tool
 
@@ -1028,8 +1067,21 @@ class BuiltinToolRegistry:
         return exec_func(params)
 
     def register_tool(self, tool: BuiltinTool):
-        """注册新工具"""
+        """注册新工具。
+
+        P1-#6 fail-closed：外部/动态注册未声明 reproducible → 保守判 False
+        （不可重放即数据保真优先，大结果不外移工作区文件）；显式声明值保留。
+        """
+        if tool.reproducible is None:
+            tool.reproducible = False
         self._tools[tool.name] = tool
+
+    def is_tool_reproducible(self, tool_name: str) -> bool:
+        """查询工具结果可重现性（溢出策略消费点）。未知工具一律 False。"""
+        tool = self._tools.get(tool_name)
+        if tool is not None:
+            return bool(tool.reproducible)
+        return is_builtin_tool_reproducible(tool_name)
 
     def unregister_tool(self, tool_name: str):
         """注销工具"""
