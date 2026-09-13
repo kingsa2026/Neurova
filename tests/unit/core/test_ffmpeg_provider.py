@@ -72,8 +72,12 @@ class TestPlatformAssets:
 
 class TestEnsureDownload:
     @pytest.mark.asyncio
-    async def test_skip_when_available(self, monkeypatch):
+    async def test_skip_when_available(self, monkeypatch, tmp_path):
         monkeypatch.delenv("NEUROVA_FFMPEG_PATH", raising=False)
+        # MANAGED_DIR 隔离（同 test_download_verifies_and_places 惯例）：否则
+        # data/tools/ffmpeg 一旦有真实缓存（全量跑时可能触发真下载），本地
+        # 缓存会短路 which 分支，本测试永远红
+        monkeypatch.setattr(ff, "MANAGED_DIR", tmp_path / "ffmpeg")
         monkeypatch.setattr(ff.shutil, "which", lambda _: "/usr/bin/ffmpeg")
         called = {"n": 0}
 
