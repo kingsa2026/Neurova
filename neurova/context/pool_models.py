@@ -8,8 +8,9 @@ ContextSource 和 ContextInput 是 context_pool 模块的核心数据类型，
 """
 
 import hashlib
+import threading
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List
 
@@ -45,14 +46,28 @@ class ContextInput:
     updated_at: datetime = None  # 更新时间
     seen_confirmed: bool = False  # P1-1④ ack 集：已被成功模型请求读过
 
+    # created_at 单调化守卫（残留处理 2026-09-13 真 bug 根治）：
+    # Windows 时钟分辨率粗（datetime.now() 同 tick 打平），而 drawer/query
+    # 的排序只用 created_at 单键——打平后 sort 退化为"保留传入顺序"，
+    # 同一批条目跨请求相对位置漂移，破坏 [缓存稳定] 前缀缓存契约
+    # （semantic_drawer.py 注释自述目标）。守卫令同 tick 的 created_at
+    # 严格 +1μs 递增，单键排序即稳定插入序。
+    _created_at_lock = threading.Lock()
+    _last_created_at = None
+
     def __post_init__(self):
         """初始化后处理"""
         # 自动生成哈希
         if self.hash is None:
             self.hash = self.compute_hash(self.source, self.content)
 
-        # 自动设置时间
-        now = datetime.now()
+        # 自动设置时间（同 tick 单调化，见类注释）
+        with ContextInput._created_at_lock:
+            now = datetime.now()
+            last = ContextInput._last_created_at
+            if last is not None and now <= last:
+                now = last + timedelta(microseconds=1)
+            ContextInput._last_created_at = now
         if self.created_at is None:
             self.created_at = now
         if self.updated_at is None:

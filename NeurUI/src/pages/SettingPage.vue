@@ -226,6 +226,26 @@
           </template>
         </GlassCard>
 
+        <!-- 工具结果溢出阈值（P1-#6：可重现大结果落工作区文件留指针） -->
+        <GlassCard :title="t('settings.toolOffloadTitle')">
+          <p class="governance-hint">{{ t('settings.toolOffloadHint') }}</p>
+          <a-form layout="vertical">
+            <a-form-item :label="t('settings.toolOffloadThreshold')">
+              <a-input-number
+                v-model:value="toolOffload.threshold_kb"
+                :min="8"
+                :max="512"
+                :step="8"
+                style="width: 100%"
+              />
+              <p class="governance-hint">{{ t('settings.toolOffloadThresholdHint') }}</p>
+            </a-form-item>
+          </a-form>
+          <template #footer>
+            <GlassButton variant="primary" size="sm" :loading="savingToolOffload" @click="saveToolOffload">{{ t('common.save') }}</GlassButton>
+          </template>
+        </GlassCard>
+
         <!-- 进化治理（RSI 部署阶段 + 对话规则提取 LLM 成本门控） -->
         <GlassCard :title="t('settings.governanceTitle')">
           <p class="governance-hint">{{ t('settings.governanceHint') }}</p>
@@ -257,7 +277,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getLlmRetrySettings, updateLlmRetrySettings } from '@/api/modules/settings'
+import { getSettings, updateSettings, clearCache as clearCacheApi, getGovernanceSettings, updateGovernanceSettings, getAgentLimits, updateAgentLimits, getToolOffloadSettings, updateToolOffloadSettings, getLlmRetrySettings, updateLlmRetrySettings } from '@/api/modules/settings'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { supportedLocales } from '@/i18n'
@@ -289,6 +309,12 @@ const savingGovernance = ref(false)
 /** Agent 运行限制（Token 预算上限 / 单次会话最大 Loop 轮次） */
 const agentLimits = ref({ token_budget: 100000, max_loop_rounds: 20 })
 const savingAgentLimits = ref(false)
+
+/** 工具结果溢出阈值（P1-#6，KB；范围 8–512，默认 64） */
+const toolOffload = ref({ threshold_kb: 64 })
+const savingToolOffload = ref(false)
+// F-12 同款守卫：未成功加载就保存会把前端默认值覆盖线上配置
+const toolOffloadLoaded = ref(false)
 
 /** LLM 429 重试/切换容错参数（ZCode 对齐 2026-09-11） */
 const llmRetry = ref({ max_retries: 10, interval: 10, wait_cap: 120, max_switches: 5 })
@@ -359,6 +385,37 @@ const saveAgentLimits = async () => {
     message.error(t('common.error'))
   } finally {
     savingAgentLimits.value = false
+  }
+}
+
+const fetchToolOffload = async () => {
+  try {
+    const res = await getToolOffloadSettings()
+    const data = (res as any)?.data?.data ?? (res as any)?.data
+    if (data) {
+      toolOffload.value = { ...toolOffload.value, ...data }
+      toolOffloadLoaded.value = true
+    }
+  } catch (err) {
+    console.error('[Settings] fetchToolOffload failed:', err)
+    toolOffloadLoaded.value = false
+    // 读取失败不阻断设置页（保留默认值）
+  }
+}
+
+const saveToolOffload = async () => {
+  if (!toolOffloadLoaded.value) {
+    message.warning(t('settings.notLoadedSaveBlocked'))
+    return
+  }
+  savingToolOffload.value = true
+  try {
+    await updateToolOffloadSettings({ threshold_kb: toolOffload.value.threshold_kb })
+    message.success(t('common.success'))
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    savingToolOffload.value = false
   }
 }
 
@@ -464,6 +521,7 @@ onMounted(() => {
   fetchSettings()
   fetchGovernance()
   fetchAgentLimits()
+  fetchToolOffload()
   fetchLlmRetry()
 })
 </script>

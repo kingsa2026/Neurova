@@ -39,7 +39,7 @@ class CLIToolExecutor:
             (r"dd\s+if=.*of=/dev/", "critical", 0.95),
             (r"mkfs\.", "critical", 0.9),
             (r"fork\s*bomb|:\(\)\{.*\}\;", "critical", 0.95),
-            (r"chmod\s+-R\s+777\s+/", "critical", 0.9),
+            (r"chmod\s+-r\s+777\s+/", "critical", 0.9),  # 匹配对象已 lower()（残留处理 2026-09-13：原大写 R 永不命中，灾难命令降为 medium 兜底=安全缺陷）
             # 高风险模式
             (r"sudo\s+rm\s+-rf", "high", 0.8),
             (r"rm\s+-rf\s+", "high", 0.7),
@@ -313,10 +313,12 @@ class CLIToolExecutor:
         # 移除多余空格
         command = " ".join(command.split())
 
-        # 使用 shlex 分割和重新组合（处理引号）
+        # 使用 shlex 分割和重新组合（处理引号）——shlex.join 为含空格参数
+        # 还原引号；原 `" ".join(parts)` 拆掉引号后经 shell=True 执行，
+        # `echo 'hello world'` 变成两参数=清洗改变命令语义（残留处理 2026-09-13）。
         try:
             parts = shlex.split(command)
-            return " ".join(parts)
+            return shlex.join(parts)
         except ValueError:
             # 如果 shlex 解析失败，返回原始命令
             return command
