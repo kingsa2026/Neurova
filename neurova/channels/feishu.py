@@ -112,6 +112,12 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
 
             # 注册消息接收事件
             self._event_handler.register_p2_im_message_receive_v1(self._handle_message_event)
+            # 注册"机器人被移出群"事件 → CHAT_BOT_REMOVED（会话归档，阶段4）
+            try:
+                self._event_handler.register_p2_im_chat_member_bot_deleted_v1(
+                    self._handle_bot_removed_event)
+            except (AttributeError, Exception) as e:  # noqa: BLE001 - 老 SDK 无此注册器则跳过
+                logger.debug("飞书未支持 bot_deleted 事件注册: %s", e)
 
             # 创建长连接客户端（domain 随 feishu/lark 切换——官方多站点要求）
             self._ws_client = lark.ws.Client(
@@ -218,11 +224,30 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
             _sid = sender.sender_id if sender else None
             _sender_id = ((_sid.user_id or _sid.open_id or _sid.union_id) if _sid else "") or ""
 
+            # 解析 @提及：msg.mentions=[{key:"@_user_1", id:{open_id..}, name}]。
+            # 1) 结构化进 metadata.mentions 供 ChannelRouter require_mention 判定；
+            # 2) 把正文里的 "@_user_N" 占位符替换为可读 "@昵称"，避免污染 agent 输入。
+            mentions: list = []
+            for m in (getattr(msg, "mentions", None) or []):
+                mid = getattr(m, "id", None)
+                mentions.append({
+                    "key": getattr(m, "key", "") or "",
+                    "name": getattr(m, "name", "") or "",
+                    "open_id": getattr(mid, "open_id", "") if mid else "",
+                    "user_id": getattr(mid, "user_id", "") if mid else "",
+                })
+            content_out = content.strip()
+            for mm in mentions:
+                if mm["key"]:
+                    content_out = content_out.replace(mm["key"], f"@{mm['name'] or mm['key']}")
+            if mentions:
+                audio_metadata["mentions"] = mentions
+
             channel_msg = self._make_message(
                 message_id=msg.message_id or "",
                 sender_id=_sender_id,
                 sender_name=_sender_id,
-                content=content.strip(),
+                content=content_out,
                 chat_id=msg.chat_id or "",
                 chat_type=msg.chat_type or "p2p",
                 message_type=msg.message_type or "text",
@@ -246,6 +271,27 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
 
         except Exception as e:
             logger.exception("Feishu message handler error: %s", e)
+
+    def _handle_bot_removed_event(self, event):
+        """机器人被移出群 → 发 CHAT_BOT_REMOVED（manager/ChannelRouter 据此归档会话）。"""
+        try:
+            chat_id = ""
+            ev = getattr(event, "event", None)
+            if ev is not None:
+                chat_id = getattr(ev, "chat_id", "") or ""
+            if not chat_id:
+                return
+            channel_msg = self._make_message(
+                message_id="", sender_id="", sender_name="", content="",
+                chat_id=chat_id, chat_type="group", message_type="event",
+            )
+            if self._main_loop and self._main_loop.is_running():
+                asyncio.run_coroutine_threadsafe(
+                    self._emit_event(ChannelEventType.CHAT_BOT_REMOVED, channel_msg),
+                    self._main_loop,
+                )
+        except Exception as e:  # noqa: BLE001 - 事件旁路失败不影响主链路
+            logger.warning("飞书 bot_removed 事件处理异常: %s", e)
 
     def _download_media_bytes(self, message_id: str, file_key: str) -> Optional[bytes]:
         """下载消息媒体文件的二进制内容（P1-12 断点③）。
@@ -301,6 +347,11 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
 
             # 构造消息内容
             if message_type == "text":
+                # 群聊回复@提问者（飞书 text 内联 <at user_id="ou_x"></at>）；
+                # at_user_id/chat_type 由 manager._dispatch_message 回发注入。
+                at_uid = kwargs.get("at_user_id") or ""
+                if kwargs.get("chat_type") == "group" and at_uid:
+                    content = f'<at user_id="{at_uid}"></at> {content}'
                 msg_content = json.dumps({"text": content})
                 receive_id_type = "chat_id"
             else:
