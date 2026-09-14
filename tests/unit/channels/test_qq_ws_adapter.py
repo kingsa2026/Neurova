@@ -210,3 +210,64 @@ async def test_connect_fails_when_verify_fails(adapter, monkeypatch):
     monkeypatch.setattr(adapter, "_verify_credentials", lambda: False)
     assert await adapter.connect() is False
     assert adapter.is_connected is False
+
+
+@pytest.mark.asyncio
+async def test_ws_main_wraps_sync_ensure_token_in_to_thread(adapter, monkeypatch):
+    """_ensure_token 是同步方法（返回 bool），_ws_main 必须经 to_thread 调用。
+
+    2026-09-15 QQ"该机器人未连接服务"事故：_ws_main 直接 await 同步方法
+    → TypeError: object bool can't be used in 'await' expression → 重连
+    死循环，网关永远连不上；connect()/send_message 路径都包了 to_thread，
+    唯独重连循环漏了。
+    """
+    import json as _json
+    import sys
+    import types
+
+    calls = {"ensure": 0}
+
+    def fake_ensure_token():
+        calls["ensure"] += 1
+        return True
+
+    monkeypatch.setattr(adapter, "_ensure_token", fake_ensure_token)
+    monkeypatch.setattr(adapter, "_fetch_gateway_url", lambda: "ws://fake")
+
+    class FakeStreamWS(FakeWS):
+        def __init__(self, frames):
+            super().__init__()
+            self._frames = frames
+
+        async def __aiter__(self):
+            for f in self._frames:
+                yield f
+
+    ws = FakeStreamWS([_json.dumps({"op": 11, "d": {}})])
+
+    def fake_handle(frame, sock):
+        adapter._stop_event.set()
+        return "break"
+
+    monkeypatch.setattr(adapter, "_handle_frame", fake_handle)
+
+    class FakeCtx:
+        def __init__(self, w):
+            self._w = w
+
+        async def __aenter__(self):
+            return self._w
+
+        async def __aexit__(self, *a):
+            return False
+
+    fake_wsmod = types.ModuleType("websockets")
+    fake_wsmod.connect = lambda url: FakeCtx(ws)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "websockets", fake_wsmod)
+
+    warnings: list = []
+    monkeypatch.setattr(qq_ws.logger, "warning", lambda msg, *a, **k: warnings.append(str(msg % a if a else msg)))
+
+    await asyncio.wait_for(adapter._ws_main(), timeout=5)
+    assert calls["ensure"] == 1, "握手前应调用 token 刷新"
+    assert not any("连接中断" in w for w in warnings), f"重连循环不得崩溃：{warnings}"
