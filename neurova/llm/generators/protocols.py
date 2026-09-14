@@ -266,7 +266,7 @@ async def _post_form(
 
 
 def _dashscope_image_body(model: str, prompt: str, size: str, n: int,
-                          ref_images: List[str]) -> Dict[str, Any]:
+                          ref_images: List[str], seed: Optional[int] = None) -> Dict[str, Any]:
     content: List[Dict[str, Any]] = []
     for ref in ref_images:
         content.append({"image": ref})
@@ -278,13 +278,19 @@ def _dashscope_image_body(model: str, prompt: str, size: str, n: int,
     }
     if size and "x" in size:
         body["parameters"]["size"] = size
+    # R2 能力自适应：wanx/qwen-image parameters.seed 支持
+    if seed is not None:
+        body["parameters"]["seed"] = int(seed)
     return body
 
 
 async def _dashscope_image_generate(
     creds: ProtocolCredentials, prompt: str, size: str, n: int,
     ref_images: List[str], timeout: float,
+    seed: Optional[int] = None, strength: Optional[float] = None,
 ) -> Dict[str, Any]:
+    # R2 能力自适应路由：seed 支持（parameters.seed）；strength 无通道 → 显式忽略标注
+    ignored = ["strength"] if strength is not None else []
     endpoint = creds.base_url or (
         f"{DEFAULT_DASHSCOPE_API_ROOT}/services/aigc/multimodal-generation/generation"
     )
@@ -294,7 +300,7 @@ async def _dashscope_image_generate(
     }
     # 端点允许本地参考图（P1-6 白名单）→ 发请求前转 data URL（批次0 补齐）
     body = _dashscope_image_body(
-        creds.model, prompt, size, n, [media_to_data_url(r) for r in ref_images])
+        creds.model, prompt, size, n, [media_to_data_url(r) for r in ref_images], seed)
     status, data = await _post_json(endpoint, {**headers, **dashscope_async_header()}, body, timeout)
 
     if status == 403:
@@ -304,7 +310,8 @@ async def _dashscope_image_generate(
             raise RuntimeError(f"DASHSCOPE 同步回退失败 HTTP {status}: {str(data)[:300]}")
         output = data.get("output") or {}
         urls = [r.get("url") or r.get("b64_image") for r in (output.get("results") or [])]
-        return {"images": [u for u in urls if u], "task_id": None, "raw": data}
+        return {"images": [u for u in urls if u], "task_id": None, "raw": data,
+                "ignored_params": ignored}
 
     if status >= 400:
         raise RuntimeError(f"DASHSCOPE 提交失败 HTTP {status}: {str(data)[:300]}")
@@ -313,7 +320,8 @@ async def _dashscope_image_generate(
     task_id = output.get("task_id")
     if not task_id:
         urls = [r.get("url") or r.get("b64_image") for r in (output.get("results") or [])]
-        return {"images": [u for u in urls if u], "task_id": None, "raw": data}
+        return {"images": [u for u in urls if u], "task_id": None, "raw": data,
+                "ignored_params": ignored}
 
     # 异步：轮询 {api_root}/tasks/{task_id}
     api_root = DEFAULT_DASHSCOPE_API_ROOT
@@ -328,7 +336,8 @@ async def _dashscope_image_generate(
         task_status = str(p_out.get("task_status") or "").upper()
         if task_status == "SUCCEEDED":
             urls = [r.get("url") or r.get("b64_image") for r in (p_out.get("results") or [])]
-            return {"images": [u for u in urls if u], "task_id": task_id, "raw": poll_data}
+            return {"images": [u for u in urls if u], "task_id": task_id, "raw": poll_data,
+                    "ignored_params": ignored}
         if task_status in ("FAILED", "CANCELED", "UNKNOWN"):
             raise RuntimeError(f"DASHSCOPE 任务失败: {str(p_out)[:300]}")
     raise TimeoutError("DASHSCOPE 异步任务轮询超时")
@@ -337,7 +346,10 @@ async def _dashscope_image_generate(
 async def _ark_image_generate(
     creds: ProtocolCredentials, prompt: str, size: str, n: int,
     ref_images: List[str], timeout: float,
+    seed: Optional[int] = None, strength: Optional[float] = None,
 ) -> Dict[str, Any]:
+    # R2 能力自适应路由：seedream 支持 seed；strength 无通道 → 显式忽略标注
+    ignored = ["strength"] if strength is not None else []
     url = ark_images_url(creds.base_url)
     headers = {"Authorization": f"Bearer {creds.api_key}"}
     body: Dict[str, Any] = {
@@ -348,6 +360,8 @@ async def _ark_image_generate(
     }
     if size and "x" in size:
         body["size"] = size
+    if seed is not None:
+        body["seed"] = int(seed)
     if ref_images:
         # seedream 参考图：image 字段（URL 直传 / 本地转 data URL —— 批次0 兑现注释承诺）
         body["image"] = media_to_data_url(ref_images[0])
@@ -355,7 +369,7 @@ async def _ark_image_generate(
     if status >= 400:
         raise RuntimeError(f"ARK 提交失败 HTTP {status}: {str(data)[:300]}")
     images = [item.get("url") for item in (data.get("data") or []) if item.get("url")]
-    return {"images": images, "task_id": None, "raw": data}
+    return {"images": images, "task_id": None, "raw": data, "ignored_params": ignored}
 
 
 def _data_url_bytes(data_url: str) -> Tuple[bytes, str, str]:
@@ -369,7 +383,14 @@ def _data_url_bytes(data_url: str) -> Tuple[bytes, str, str]:
 async def _openai_image_generate(
     creds: ProtocolCredentials, prompt: str, size: str, n: int,
     ref_images: List[str], timeout: float,
+    seed: Optional[int] = None, strength: Optional[float] = None,
 ) -> Dict[str, Any]:
+    # R2 能力自适应路由：OpenAI 兼容 images 端点无 seed/strength 通道 → 全部显式忽略
+    ignored: List[str] = []
+    if seed is not None:
+        ignored.append("seed")
+    if strength is not None:
+        ignored.append("strength")
     headers = {"Authorization": f"Bearer {creds.api_key}"}
     if ref_images:
         # 批次3：带参考图走 images/edits multipart（此前静默丢参考图走 generations）
@@ -401,7 +422,7 @@ async def _openai_image_generate(
             images.append(f"data:image/png;base64,{item['b64_json']}")
         elif item.get("url"):
             images.append(item["url"])
-    return {"images": images, "task_id": None, "raw": data}
+    return {"images": images, "task_id": None, "raw": data, "ignored_params": ignored}
 
 
 async def generate_image(
@@ -411,8 +432,15 @@ async def generate_image(
     n: int = 1,
     ref_images: Optional[List[str]] = None,
     timeout: float = 120.0,
+    seed: Optional[int] = None,
+    strength: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """图片生成统一入口（同步返回；DASHSCOPE 异步型内部轮询收口）。"""
+    """图片生成统一入口（同步返回；DASHSCOPE 异步型内部轮询收口）。
+
+    R2 能力自适应路由：seed/strength 透传给支持的协议；不支持的参数由协议函数
+    在返回 `ignored_params` 中显式标注（端点写入任务账本，历史面板可见——
+    不假生效、不静默丢弃）。
+    """
     protocol = (
         ImageProtocol(creds.protocol)
         if creds.protocol in (p.value for p in ImageProtocol)
@@ -420,10 +448,13 @@ async def generate_image(
     )
     refs = ref_images or []
     if protocol == ImageProtocol.DASHSCOPE:
-        return await _dashscope_image_generate(creds, prompt, size, n, refs, timeout)
+        return await _dashscope_image_generate(
+            creds, prompt, size, n, refs, timeout, seed=seed, strength=strength)
     if protocol == ImageProtocol.ARK:
-        return await _ark_image_generate(creds, prompt, size, n, refs, timeout)
-    return await _openai_image_generate(creds, prompt, size, n, refs, timeout)
+        return await _ark_image_generate(
+            creds, prompt, size, n, refs, timeout, seed=seed, strength=strength)
+    return await _openai_image_generate(
+        creds, prompt, size, n, refs, timeout, seed=seed, strength=strength)
 
 
 # ── 视频协议：submit / poll 抽象（异步任务型） ──

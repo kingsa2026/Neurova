@@ -49,6 +49,8 @@ class TaskRecord:
     # execution_id 关联画布工作流执行实例（workflow 来源时）
     source: str = "rest"
     execution_id: str = ""
+    # R2 能力自适应路由：服务商不支持而被显式忽略的参数（csv，如 "seed,strength"）
+    ignored_params: str = ""
     submitted_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 

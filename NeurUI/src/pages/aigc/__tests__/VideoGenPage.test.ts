@@ -16,9 +16,10 @@ vi.mock('@/api/modules/models', () => ({
   ]),
 }))
 const submitVideoMock = vi.fn()
+const generateImageMock = vi.fn()
 vi.mock('@/api/modules/generation', () => ({
   generateText: vi.fn(),
-  generateImage: vi.fn(),
+  generateImage: (p: any) => generateImageMock(p),
   generateAudio: vi.fn(),
   submitVideo: (p: any) => submitVideoMock(p),
   listGenerationTasks: vi.fn().mockResolvedValue({ code: 0, data: { tasks: [] } }),
@@ -44,6 +45,8 @@ describe('VideoGenPage', () => {
   beforeEach(() => {
     submitVideoMock.mockReset()
     submitVideoMock.mockResolvedValue({ data: { task_id: 'tk1', status: 'submitted', protocol: 'wan' } })
+    generateImageMock.mockReset()
+    generateImageMock.mockResolvedValue({ data: { images: [] } })
     uploadFileMock.mockReset()
     uploadFileMock.mockResolvedValue({ data: { file_id: 'f1', filename: 'frame.png', path: 'C:/proj/storage/users/u1/frame.png' } })
     requestGetMock.mockReset()
@@ -72,6 +75,34 @@ describe('VideoGenPage', () => {
     expect(payload.prompt).toBe('奔跑的柴犬')
     expect(payload.task_id).toBeUndefined?.() // 载荷不含 task_id（提交响应才有）
     wrapper.unmount() // 清理轮询定时器（BUG-24 契约）
+  })
+
+  it('R2 两段式：先出静帧，静帧本地产物作首帧 ref_images 提交', async () => {
+    generateImageMock.mockResolvedValue({
+      data: { images: [{ url: '/api/v1/generation/files/f_0.png', path: 'C:/data/generations/f_0.png' }] },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.prompt = '猫宇航员'
+    vm.staticFirst = true
+    await vm.generate()
+    await flushPromises()
+    expect(generateImageMock).toHaveBeenCalledTimes(1)
+    const payload = submitVideoMock.mock.calls[0][0]
+    expect(payload.ref_images).toEqual(['C:/data/generations/f_0.png'])
+    wrapper.unmount()
+  })
+
+  it('R2 两段式关闭时不先生成静帧', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.prompt = 'p'
+    vm.staticFirst = false
+    await vm.generate()
+    expect(generateImageMock).not.toHaveBeenCalled()
+    wrapper.unmount()
   })
 
   it('参考图上传进 ref_images', async () => {

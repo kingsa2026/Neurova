@@ -124,6 +124,9 @@ class ImageGenerationRequest(BaseModel):
     base_url: Optional[str] = Field(default=None, description="显式端点")
     ref_images: list = Field(default_factory=list, description="参考图（URL 或本地路径）")
     negative_prompt: Optional[str] = Field(default=None, description="负向提示")
+    # R2 能力自适应路由：按协议支持面透传，不支持的参数进账本 ignored_params
+    seed: Optional[int] = Field(default=None, description="随机种子（ARK/DASHSCOPE 支持）")
+    strength: Optional[float] = Field(default=None, description="图生图变化强度（暂无实测通道，会被显式忽略并标注）")
 
 
 class AudioGenerationRequest(BaseModel):
@@ -294,9 +297,10 @@ async def generate_image(
     )
     uid = str(current_user.get("user_id") or "")
 
-    def _ledger_add(status: str, local_path: str = "", error: str = "") -> None:
+    def _ledger_add(status: str, local_path: str = "", error: str = "",
+                    ignored: str = "") -> None:
         # 批次1：图像落账本（kind="image"）——历史面板数据源；status 终态直落，
-        # 不进 unfinished（无 remote_task_id）。
+        # 不进 unfinished（无 remote_task_id）。R2：ignored_params 显式标注。
         get_generation_task_ledger().add(TaskRecord(
             kind="image",
             provider_id=str(provider_id or ""),
@@ -308,6 +312,7 @@ async def generate_image(
             error=error[:300],
             prompt=body.prompt[:500],
             owner_user_id=uid,
+            ignored_params=ignored,
         ))
 
     size = f"{body.width}x{body.height}"
@@ -315,6 +320,7 @@ async def generate_image(
         result = await generate_image(
             creds, body.prompt, size=size, n=body.num_images,
             ref_images=list(body.ref_images or []),
+            seed=body.seed, strength=body.strength,
         )
     except FileNotFoundError as e:
         _ledger_add("failed", error=str(e))
@@ -323,6 +329,8 @@ async def generate_image(
         logger.warning("图像生成失败: %s", e)
         _ledger_add("failed", error=str(e))
         raise HTTPException(status_code=502, detail=f"图像生成失败: {str(e)[:300]}")
+
+    ignored_csv = ",".join(result.get("ignored_params") or [])
 
     # P0-1：task_id 只用于命名落盘产物，必须服务端生成，与 X-Request-ID 解耦
     task_id = uuid.uuid4().hex
@@ -334,10 +342,54 @@ async def generate_image(
         except Exception as e:  # noqa: BLE001 — 单图下载失败不影响其余
             images.append({"url": item if item.startswith("http") else "", "error": str(e)[:200]})
     if not images:
-        _ledger_add("failed", error="图像生成未返回产物")
+        _ledger_add("failed", error="图像生成未返回产物", ignored=ignored_csv)
         raise HTTPException(status_code=502, detail="图像生成未返回产物")
-    _ledger_add("succeeded", local_path=str(images[0].get("path") or ""))
-    return {"code": 0, "message": "success", "data": {"images": images, "task_id": task_id}}
+    _ledger_add("succeeded", local_path=str(images[0].get("path") or ""),
+                ignored=ignored_csv)
+    data: Dict[str, Any] = {"images": images, "task_id": task_id}
+    if ignored_csv:
+        data["ignored_params"] = ignored_csv
+    return {"code": 0, "message": "success", "data": data}
+
+
+@router.get("/voices")
+async def list_generation_voices(request: Request):
+    """R2：可用音色列表（前端音频页下拉真实化，替换硬编码 OpenAI 别名假列表）。
+
+    VoiceEngine(tts) 底层引擎（TTSManager 等）支持 list_voices 则归一返回；
+    引擎不可用/不支持枚举返回空数组——诚实空，不伪造列表。
+    """
+    _ = request
+    voices: list = []
+    try:
+        state = get_app_state() or {}
+        engine = (state.get("voice_engines") or {}).get("tts")
+        inner = getattr(engine, "_engine", None) if engine else None
+        lister = getattr(inner, "list_voices", None)
+        if engine and engine.is_available() and callable(lister):
+            raw = await lister()
+        else:
+            mgr = state.get("tts_manager")
+            raw = await mgr.list_voices() if mgr and mgr.is_initialized else []
+        for v in raw or []:
+            if not isinstance(v, dict):
+                continue
+            name = str(v.get("ShortName") or v.get("short_name") or v.get("name") or "")
+            if not name:
+                continue
+            gender = str(v.get("Gender") or v.get("gender") or "")
+            locale = str(v.get("Locale") or v.get("locale") or "")
+            suffix = " ".join(x for x in (gender, locale) if x)
+            voices.append({
+                "id": name,
+                "label": f"{name}（{suffix}）" if suffix else name,
+                "gender": gender,
+                "locale": locale,
+            })
+    except Exception as e:  # noqa: BLE001 — 枚举失败回空列表，前端走默认音色
+        logger.warning("音色列表获取失败: %s", e)
+        voices = []
+    return {"code": 0, "message": "success", "data": {"voices": voices}}
 
 
 @router.post("/audio")
@@ -584,6 +636,7 @@ async def list_generation_tasks(
             "local_path": t.local_path,
             "url": _local_url(t.local_path) if t.local_path else (t.result_url or ""),
             "source": getattr(t, "source", "rest"),
+            "ignored_params": getattr(t, "ignored_params", ""),
             "error": t.error,
         }
         for t in visible

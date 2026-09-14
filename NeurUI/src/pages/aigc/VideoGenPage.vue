@@ -8,7 +8,7 @@ import { onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { request } from '@/api'
-import { submitVideo, type VideoGenerationPayload } from '@/api/modules/generation'
+import { generateImage, submitVideo, type VideoGenerationPayload } from '@/api/modules/generation'
 import { uploadFile } from '@/api/modules/files'
 import { useAigcModels } from '@/composables/useAigcModels'
 import { withFileToken } from '@/utils/genFiles'
@@ -28,6 +28,8 @@ const duration = ref(5)
 const resolution = ref('1080p')
 const refImages = ref<string[]>([])
 const withAudio = ref<boolean | null>(null)
+// R2 两段式（PRINTFILM t2v 语义）：先出静帧，静帧作首帧再生成视频
+const staticFirst = ref(true)
 const generating = ref(false)
 const status = ref<{ status: string; progress: number; url?: string } | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -60,9 +62,18 @@ async function generate() {
       duration: duration.value,
       resolution: resolution.value,
     }
+    const refs = [...refImages.value]
+    // R2 两段式（PRINTFILM t2v：先静帧后视频）：无参考图时先生成一张静帧，
+    // 以服务端本地产物路径作首帧 → i2v（protocols 本地路径转 data URL 已实测）
+    if (staticFirst.value && !refs.length) {
+      status.value = { status: 'static-frame', progress: 5 }
+      const frameRes: any = await generateImage({ prompt: prompt.value.trim(), width: 1024, height: 1024 })
+      const frame = (frameRes?.data?.images ?? [])[0]
+      if (frame?.path) refs.push(frame.path)
+    }
+    if (refs.length) payload.ref_images = refs
     if (protocol.value) payload.protocol = protocol.value
     if (providerId.value) payload.provider_id = providerId.value
-    if (refImages.value.length) payload.ref_images = [...refImages.value]
     if (withAudio.value !== null) payload.audio = withAudio.value
     const res: any = await submitVideo(payload)
     const data = res?.data ?? res
@@ -155,6 +166,10 @@ onUnmounted(() => {
               <a-select-option :value="true">{{ t('common.yes') }}</a-select-option>
               <a-select-option :value="false">{{ t('common.no') }}</a-select-option>
             </a-select>
+          </a-form-item>
+          <a-form-item :label="t('aigc.staticFirst')">
+            <a-switch v-model:checked="staticFirst" />
+            <div class="aigc-hint">{{ t('aigc.staticFirstHint') }}</div>
           </a-form-item>
           <GlassButton variant="primary" :loading="generating" @click="generate">
             {{ t('aigc.generate') }}
