@@ -144,7 +144,13 @@ class TestByCapabilityEndpoint:
     def test_filter_image_generation(self, client):
         resp = client.get("/api/v1/models/by-capability", params={"cap": "image_generation"})
         ids = [m["model_id"] for m in resp.json()]
-        assert ids == ["flux.1-dev"]
+        # 显式添加的 TestVision provider 模型必在列
+        assert "flux.1-dev" in ids
+        # AIGC 服务商预置（agnes 双网关 / volcengine seedream）的正确图像模型也应被检出
+        assert "agnes-image-2.1-flash" in ids
+        assert "doubao-seedream-4-0-250828" in ids
+        # 纯文本/对话模型不得混入图像生成能力清单
+        assert "doubao-seed-2-1-pro-260628" not in ids
 
     def test_filter_unknown_cap_400(self, client):
         resp = client.get("/api/v1/models/by-capability", params={"cap": "telepathy"})
@@ -196,3 +202,50 @@ class TestRouterConsumesPersistedCaps:
         result = select_model_for_request(RequestType.TEXT_TO_VIDEO)
         assert result is not None
         assert result.model == "wan2.2-t2v-a14b"
+
+
+class TestCapabilitySerializationRootCause:
+    """D1 走查抓出的根因（2026-09-15）：capabilities 含 ProviderCapability 枚举对象时
+    响应出口 str(c) 产出 'ProviderCapability.TEXT'（Python str-mixin Enum 类名前缀），
+    前端按 'image_generation' 精确匹配全失配 → 图/视能力下拉恒空。
+    修复=出口归一化单源 + 缺生成类时名称推断合并（历史持久化只标了 text/vision）。"""
+
+    def test_enum_capabilities_serialize_as_values(self, mgr, client):
+        from neurova.llm.providers.types import ProviderCapability
+
+        mgr._test_provider.model_metadata = {
+            "deepseek-chat": {"capabilities": [ProviderCapability.VISION, ProviderCapability.TEXT]},
+        }
+        models = {m["model_id"]: m for m in client.get("/api/v1/models").json()}
+        caps = models["deepseek-chat"]["capabilities"]
+        assert "vision" in caps and "text" in caps
+        assert not any("ProviderCapability" in c for c in caps), caps
+
+    def test_legacy_classname_strings_normalized(self, mgr, client):
+        """存量脏数据形态（'ProviderCapability.XXX' 字符串）出口同样归一。"""
+        mgr._test_provider.model_metadata = {
+            "deepseek-r1": {"capabilities": ["ProviderCapability.VISION", "text"]},
+        }
+        models = {m["model_id"]: m for m in client.get("/api/v1/models").json()}
+        caps = models["deepseek-r1"]["capabilities"]
+        assert "vision" in caps
+        assert not any("ProviderCapability" in c for c in caps)
+
+    def test_generation_caps_merged_from_name_heuristic(self, mgr, client):
+        """已存标记缺生成类：flux/wan 名称命中的模型在响应中补 image/video_generation
+        （不篡改持久化，仅出口合并推断——图/视下拉有模可选的数据面根因）。"""
+        models = {m["model_id"]: m for m in client.get("/api/v1/models").json()}
+        assert "image_generation" in models["flux.1-dev"]["capabilities"]
+        assert "video_generation" in models["wan2.2-t2v-a14b"]["capabilities"]
+
+    def test_by_capability_matches_generation_cap(self, mgr, client):
+        from neurova.llm.providers.types import ProviderCapability
+
+        mgr._test_provider.model_metadata = {
+            "some-diffusion": {"capabilities": [ProviderCapability.IMAGE_GENERATION]},
+        }
+        mgr._test_provider.models = list(mgr._test_provider.models) + ["some-diffusion"]
+        got = [m["model_id"] for m in client.get(
+            "/api/v1/models/by-capability", params={"cap": "image_generation"}).json()]
+        assert "some-diffusion" in got
+        assert "flux.1-dev" in got  # 名称推断合并同样进入过滤结果
