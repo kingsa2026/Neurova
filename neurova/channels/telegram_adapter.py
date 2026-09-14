@@ -321,6 +321,7 @@ class TelegramAdapter(
             resp = self._send_text_message(str(chat_id), content)
             if isinstance(resp, dict) and resp.get("ok"):
                 mid = (resp.get("result") or {}).get("message_id")
+                logger.info("telegram message sent: %s", mid or chat_id)
                 return str(mid) if mid else "sent"
             if resp is True:
                 return "sent"
