@@ -1,163 +1,189 @@
 <script setup lang="ts">
 /**
- * AIGC 创作专区（2026-09-14 R1 承接批次4 一键成片；R4/R5 扩为项目化四 Phase 向导）。
- *
- * 当前形态：主题 → 实例化内置短剧模板 → run/stream 工作流 → SSE 步骤点亮 →
- * 连播成片（SlideshowPlayer）/FFmpeg 成片视频。与画布引擎同一底座。
+ * 创作专区 · 项目列表（R4，对标 huobao 项目管理）。
+ * 卡片：封面/标题/题材/风格/画幅/集数进度/更新时间；新建向导弹窗；删除确认。
  */
-import { computed, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
-import { useWorkflowRun } from '@/composables/useWorkflowRun'
-import { withFileToken } from '@/utils/genFiles'
-import SlideshowPlayer from '@/components/aigc/SlideshowPlayer.vue'
-import type { SlideshowItem } from '@/components/aigc/types'
+import {
+  createProject, deleteProject, listProjects,
+  type StudioProject,
+} from '@/api/modules/studio'
 import GlassPanel from '@/components/GlassPanel.vue'
-import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 
 const { t } = useI18n()
 const router = useRouter()
 
-const SHORT_DRAMA_TEMPLATE_ID = 'template_short_drama'
-const theme = ref('')
-const genre = ref('都市逆袭')
-const style = ref('cinematic')
-const aspect = ref('9:16 竖屏')
-const provider = ref('openai')
+const projects = ref<StudioProject[]>([])
+const loading = ref(false)
+const showCreate = ref(false)
+const creating = ref(false)
+const form = ref({
+  title: '',
+  genre: '都市逆袭',
+  style: 'cinematic',
+  aspect_ratio: '9:16 竖屏',
+  total_episodes: 1,
+  description: '',
+})
 
-const {
-  running,
-  steps,
-  outputs,
-  workflowId: studioWorkflowId,
-  runTemplate,
-} = useWorkflowRun()
+const genreOptions = ['都市逆袭', '甜宠恋爱', '悬疑惊悚', '古装权谋', '战神归来']
+  .map((g) => ({ label: g, value: g }))
+const aspectOptions = ['9:16 竖屏', '16:9 横屏', '1:1 方形']
+  .map((a) => ({ label: a, value: a }))
 
-const genreOptions = [
-  '都市逆袭', '甜宠恋爱', '悬疑惊悚', '古装权谋', '战神归来',
-].map((g) => ({ label: g, value: g }))
-const aspectOptions = [
-  { label: '9:16 竖屏', value: '9:16 竖屏' },
-  { label: '16:9 横屏', value: '16:9 横屏' },
-  { label: '1:1 方形', value: '1:1 方形' },
-]
-const providerOptions = [
-  { label: 'OpenAI 兼容', value: 'openai' },
-  { label: '通义万相/百炼', value: 'wanx' },
-  { label: '火山 Seedream', value: 'ark' },
-  { label: 'ComfyUI 自建', value: 'comfyui' },
-]
-
-async function run() {
-  if (!theme.value.trim()) return
-  const outcome = await runTemplate(
-    SHORT_DRAMA_TEMPLATE_ID,
-    `短剧-${theme.value.trim().slice(0, 20)}`,
-    {
-      theme: theme.value.trim(),
-      genre: genre.value,
-      style: style.value.trim() || 'cinematic',
-      aspect_ratio: aspect.value,
-      image_provider: provider.value,
-    },
-  )
-  if (outcome.ok) message.success(t('aigc.studioOk'))
-  else message.error(outcome.error || t('aigc.generateError'))
+async function load() {
+  loading.value = true
+  try {
+    const res: any = await listProjects()
+    projects.value = res?.data?.projects ?? []
+  } catch {
+    message.error(t('aigc.generateError'))
+  } finally {
+    loading.value = false
+  }
 }
 
-const studioItems = computed<SlideshowItem[]>(() => {
-  const o = (outputs.value || {}) as any
-  const images: any[] = o.images || []
-  const sb: any[] = o.storyboard || []
-  const audio: any[] = o.audio || []
-  return images.map((img, i) => ({
-    shot: img.shot ?? i + 1,
-    url: img.url || '',
-    path: img.path || '',
-    prompt: img.prompt || '',
-    description: sb[i]?.description || sb[i]?.narration || '',
-    narration: sb[i]?.narration || '',
-    audio: audio[i]?.url || '',
-  }))
-})
+async function create() {
+  if (!form.value.title.trim()) return
+  creating.value = true
+  try {
+    const res: any = await createProject({
+      title: form.value.title.trim(),
+      genre: form.value.genre,
+      style: form.value.style.trim() || 'cinematic',
+      aspect_ratio: form.value.aspect_ratio,
+      total_episodes: form.value.total_episodes,
+      description: form.value.description,
+    })
+    const pid = res?.data?.project?.id
+    showCreate.value = false
+    form.value = { title: '', genre: '都市逆袭', style: 'cinematic', aspect_ratio: '9:16 竖屏', total_episodes: 1, description: '' }
+    if (pid) router.push(`/aigc/studio/${pid}`)
+  } catch {
+    message.error(t('aigc.generateError'))
+  } finally {
+    creating.value = false
+  }
+}
 
-const composedVideoUrl = computed<string>(() => {
-  const compose = (outputs.value as any)?.compose || {}
-  return String(compose.video_url || '')
-})
+async function remove(p: StudioProject) {
+  try {
+    await deleteProject(p.id)
+    await load()
+  } catch {
+    message.error(t('aigc.generateError'))
+  }
+}
+
+function fmt(ts: number): string {
+  return ts ? new Date(ts * 1000).toLocaleString() : ''
+}
+
+onMounted(load)
 </script>
 
 <template>
-  <div class="aigc-studio-page">
-    <div class="aigc-gen-layout">
-      <GlassPanel class="aigc-input-panel" variant="subtle">
-        <a-form layout="vertical">
-          <a-form-item :label="t('aigc.studioTheme')">
-            <a-textarea v-model:value="theme" :rows="3" :placeholder="t('aigc.studioThemePlaceholder')" />
-          </a-form-item>
-          <a-form-item :label="t('aigc.studioGenre')">
-            <a-select v-model:value="genre" :options="genreOptions" />
-          </a-form-item>
-          <a-form-item :label="t('aigc.studioStyle')">
-            <a-input v-model:value="style" :placeholder="t('aigc.studioStylePlaceholder')" />
-          </a-form-item>
-          <a-form-item :label="t('aigc.studioAspect')">
-            <a-select v-model:value="aspect" :options="aspectOptions" />
-          </a-form-item>
-          <a-form-item :label="t('aigc.studioProvider')">
-            <a-select v-model:value="provider" :options="providerOptions" />
-          </a-form-item>
-          <GlassButton variant="primary" :loading="running" @click="run">
-            {{ t('aigc.studioGenerate') }}
-          </GlassButton>
-        </a-form>
-      </GlassPanel>
-      <GlassCard :title="t('aigc.result')" class="aigc-result-panel">
-        <div v-if="steps.length" class="studio-steps">
-          <div v-for="step in steps" :key="step.id" class="studio-step">
-            <a-tag :color="step.status === 'success' ? 'success' : step.status === 'failed' ? 'error' : step.status === 'running' ? 'processing' : 'default'">
-              {{ step.label }}
-            </a-tag>
-          </div>
-        </div>
-        <SlideshowPlayer v-if="studioItems.length" :items="studioItems" />
-        <div v-else-if="!running" class="studio-empty-hint">
-          <a-empty :description="t('aigc.studioEmpty')" />
-        </div>
-        <div v-if="composedVideoUrl" class="studio-composed">
-          <video controls :src="withFileToken(composedVideoUrl)" style="width: 100%; border-radius: 10px" />
-          <a :href="withFileToken(composedVideoUrl)" :download="composedVideoUrl.split('/').pop()" class="aigc-download">{{ t('aigc.download') }}</a>
-        </div>
-        <a v-if="studioWorkflowId" class="studio-open" @click="router.push('/collaboration/workflows')">
-          {{ t('aigc.studioOpenWorkflow') }}
-        </a>
-      </GlassCard>
+  <div class="studio-list-page">
+    <div class="studio-list-head">
+      <div>
+        <h3 class="studio-h3">{{ t('studio.title') }}</h3>
+        <div class="studio-sub">{{ t('studio.subtitle') }}</div>
+      </div>
+      <GlassButton variant="primary" @click="showCreate = true">{{ t('studio.newProject') }}</GlassButton>
     </div>
+
+    <a-spin :spinning="loading">
+      <div v-if="projects.length" class="studio-grid">
+        <GlassPanel
+          v-for="p in projects"
+          :key="p.id"
+          class="studio-card"
+          variant="subtle"
+        >
+          <div class="studio-card-title" @click="router.push(`/aigc/studio/${p.id}`)">{{ p.title }}</div>
+          <div class="studio-card-meta">
+            <a-tag color="purple">{{ p.genre }}</a-tag>
+            <a-tag>{{ p.aspect_ratio }}</a-tag>
+            <a-tag color="cyan">{{ p.style }}</a-tag>
+          </div>
+          <div class="studio-card-desc">{{ p.description || '—' }}</div>
+          <div class="studio-card-foot">
+            <span class="studio-card-time">{{ t('studio.updatedAt') }} {{ fmt(p.updated_at) }}</span>
+            <span class="studio-card-actions">
+              <GlassButton size="sm" variant="primary" @click="router.push(`/aigc/studio/${p.id}`)">
+                {{ t('common.open') }}
+              </GlassButton>
+              <a-popconfirm :title="t('common.confirm') + '?'" @confirm="remove(p)">
+                <GlassButton size="sm" variant="danger">{{ t('common.delete') }}</GlassButton>
+              </a-popconfirm>
+            </span>
+          </div>
+        </GlassPanel>
+      </div>
+      <a-empty v-else-if="!loading" :description="t('studio.noProjects')" />
+    </a-spin>
+
+    <a-modal
+      v-model:open="showCreate"
+      :title="t('studio.newProject')"
+      :confirm-loading="creating"
+      @ok="create"
+    >
+      <a-form layout="vertical">
+        <a-form-item :label="t('common.name')">
+          <a-input v-model:value="form.title" :placeholder="t('studio.projectTitleHint')" />
+        </a-form-item>
+        <a-form-item :label="t('studio.genre')">
+          <a-select v-model:value="form.genre" :options="genreOptions" />
+        </a-form-item>
+        <a-form-item :label="t('studio.style')">
+          <a-input v-model:value="form.style" :placeholder="t('studio.styleHint')" />
+        </a-form-item>
+        <a-form-item :label="t('studio.aspect')">
+          <a-select v-model:value="form.aspect_ratio" :options="aspectOptions" />
+        </a-form-item>
+        <a-form-item :label="t('studio.episodes')">
+          <a-input-number v-model:value="form.total_episodes" :min="1" :max="100" style="width: 100%" />
+        </a-form-item>
+      </a-form>
+    </a-modal>
   </div>
 </template>
 
 <style scoped>
-.studio-steps {
+.studio-list-head {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
   margin-bottom: 16px;
+  gap: 12px;
 }
-
-.studio-composed {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 14px;
+.studio-h3 { margin: 0; font-size: 16px; color: var(--nr-text-primary); }
+.studio-sub { margin-top: 4px; font-size: 12px; color: var(--nr-text-secondary); }
+.studio-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
 }
-
-.studio-open {
-  display: inline-block;
-  margin-top: 12px;
-  font-size: 13px;
-  color: var(--nr-accent, #4096ff);
-  cursor: pointer;
+.studio-card { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.studio-card-title { font-size: 15px; font-weight: 600; color: var(--nr-text-primary); cursor: pointer; }
+.studio-card-title:hover { color: var(--nr-accent, #4096ff); }
+.studio-card-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.studio-card-desc {
+  font-size: 12px;
+  color: var(--nr-text-secondary);
+  min-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
+.studio-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.studio-card-time { font-size: 11px; color: var(--nr-text-secondary); }
+.studio-card-actions { display: flex; gap: 6px; }
 </style>
