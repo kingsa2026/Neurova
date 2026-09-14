@@ -246,3 +246,113 @@ class TestMerge:
         res = await services.merge_episode(store, p["id"], ep["id"])
         assert res["ok"] is False
         assert "无就绪产物" in res["error"]
+
+
+class TestA1LastFrame:
+    """A1：镜头尾帧列 + 服务透传（台账 A1 全链路，前端另有页面测试）。"""
+
+    def test_storyboard_has_end_frame_column(self, store):
+        ep = store.add_episode("p1", {"number": 1, "title": "e"})
+        sb = store.add_storyboard(ep["id"], {"number": 1, "end_frame_path": "/x/z.png"})
+        assert store.get_storyboard(sb["id"])["end_frame_path"] == "/x/z.png"
+
+    @pytest.mark.asyncio
+    async def test_generate_videos_passes_last_frame(self, store, tmp_path, monkeypatch):
+        from neurova.aigc_studio import services
+        from neurova.llm.generators import protocols as proto_mod
+        from neurova.llm.generators import runtime as gen_runtime
+        from neurova.llm.generators import task_ledger as ledger_mod
+        from neurova.llm.generators.protocols import ProtocolCredentials
+        from neurova.llm.generators.task_ledger import GenerationTaskLedger
+
+        led = GenerationTaskLedger(path=str(tmp_path / "led.json"))
+        monkeypatch.setattr(ledger_mod, "_ledger", led)
+        monkeypatch.setattr(
+            gen_runtime, "resolve_generation_creds",
+            lambda hint, model, pid, ak, bu, db: ProtocolCredentials(
+                api_key="k", base_url="https://ark", model="seedance", protocol="seedance2"))
+        seen = {}
+
+        async def fake_submit(creds, prompt, **kw):
+            seen["last_frame"] = kw.get("last_frame")
+            return {"task_id": "r1", "poll_url": "https://ark/t/r1", "raw": {}}
+
+        monkeypatch.setattr(proto_mod, "submit_video", fake_submit)
+        p = _project(store)
+        ep = store.add_episode(p["id"], {"number": 1, "title": "e"})
+        f1 = tmp_path / "a.png"; f1.write_bytes(b"A")
+        f2 = tmp_path / "z.png"; f2.write_bytes(b"Z")
+        store.add_storyboard(ep["id"], {
+            "number": 1, "video_prompt": "vp",
+            "first_frame_path": str(f1), "end_frame_path": str(f2)})
+        await services.generate_shot_videos(store, p["id"], ep["id"],
+                                            provider="seedance")
+        assert seen["last_frame"] == str(f2)
+
+    @pytest.mark.asyncio
+    async def test_generate_videos_without_end_frame_passes_none(self, store, tmp_path, monkeypatch):
+        from neurova.aigc_studio import services
+        from neurova.llm.generators import protocols as proto_mod
+        from neurova.llm.generators import runtime as gen_runtime
+        from neurova.llm.generators import task_ledger as ledger_mod
+        from neurova.llm.generators.protocols import ProtocolCredentials
+        from neurova.llm.generators.task_ledger import GenerationTaskLedger
+
+        led = GenerationTaskLedger(path=str(tmp_path / "led.json"))
+        monkeypatch.setattr(ledger_mod, "_ledger", led)
+        monkeypatch.setattr(
+            gen_runtime, "resolve_generation_creds",
+            lambda *a, **k: ProtocolCredentials(api_key="k", base_url="https://x",
+                                                model="m", protocol="wan"))
+        seen = {}
+
+        async def fake_submit(creds, prompt, **kw):
+            seen["last_frame"] = kw.get("last_frame", "SENTINEL")
+            return {"task_id": "r2", "poll_url": "", "raw": {}}
+
+        monkeypatch.setattr(proto_mod, "submit_video", fake_submit)
+        p = _project(store)
+        ep = store.add_episode(p["id"], {"number": 1, "title": "e"})
+        f1 = tmp_path / "a.png"; f1.write_bytes(b"A")
+        store.add_storyboard(ep["id"], {"number": 1, "video_prompt": "vp",
+                                        "first_frame_path": str(f1)})
+        await services.generate_shot_videos(store, p["id"], ep["id"])
+        assert seen["last_frame"] in (None, "SENTINEL")  # 缺省不传或 None，语义等价
+
+    @pytest.mark.asyncio
+    async def test_generate_videos_records_ignored_params(self, store, tmp_path, monkeypatch):
+        """A1 放大视角：Studio 提交账本与 REST 端点同契约——WAN 无尾帧通道时
+        submit_video 返回的 ignored_params 必须写进 TaskRecord（记录面板可见，
+        不静默丢弃）。REST 侧已由 test_generation_lastframe 覆盖，此处补画布侧。"""
+        from neurova.aigc_studio import services
+        from neurova.llm.generators import protocols as proto_mod
+        from neurova.llm.generators import runtime as gen_runtime
+        from neurova.llm.generators import task_ledger as ledger_mod
+        from neurova.llm.generators.protocols import ProtocolCredentials
+        from neurova.llm.generators.task_ledger import GenerationTaskLedger
+
+        led = GenerationTaskLedger(path=str(tmp_path / "led.json"))
+        monkeypatch.setattr(ledger_mod, "_ledger", led)
+        monkeypatch.setattr(
+            gen_runtime, "resolve_generation_creds",
+            lambda *a, **k: ProtocolCredentials(api_key="k", base_url="https://x",
+                                                model="m", protocol="wan"))
+
+        async def fake_submit(creds, prompt, **kw):
+            out = {"task_id": "r9", "poll_url": "", "raw": {}}
+            if kw.get("last_frame"):
+                out["ignored_params"] = ["last_frame"]  # 模拟 WAN 分支真实返回
+            return out
+
+        monkeypatch.setattr(proto_mod, "submit_video", fake_submit)
+        p = _project(store)
+        ep = store.add_episode(p["id"], {"number": 1, "title": "e"})
+        f1 = tmp_path / "a.png"; f1.write_bytes(b"A")
+        f2 = tmp_path / "z.png"; f2.write_bytes(b"Z")
+        store.add_storyboard(ep["id"], {
+            "number": 1, "video_prompt": "vp",
+            "first_frame_path": str(f1), "end_frame_path": str(f2)})
+        await services.generate_shot_videos(store, p["id"], ep["id"],
+                                            provider="wan")
+        rec = led.list()[0]
+        assert rec.ignored_params == "last_frame"

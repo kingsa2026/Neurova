@@ -166,6 +166,39 @@ async function addManualShot() {
   await loadStoryboards()
 }
 
+/** A1：镜头尾帧（先画后动）——上传落盘后写入 end_frame_path */
+function fileNameOf(p?: string): string {
+  return (p || '').split(/[\\/]/).pop() || ''
+}
+function fileUrlOf(p?: string): string {
+  return p ? withFileToken(`/api/v1/generation/files/${fileNameOf(p)}`) : ''
+}
+
+async function applyShotEndFrame(sb: StudioStoryboard, path: string) {
+  await updateStoryboard(sb.id, { end_frame_path: path })
+  await loadStoryboards()
+}
+
+function setShotEndFrame(sb: StudioStoryboard) {
+  try {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.onchange = async () => {
+      const file = input.files?.[0]
+      if (!file) return
+      const fd = new FormData()
+      fd.append('file', file, file.name)
+      const up: any = await uploadFile(fd)
+      const path = up?.data?.path || up?.path
+      if (path) await applyShotEndFrame(sb, path)
+    }
+    input.click()
+  } catch {
+    message.error(t('aigc.generateError'))
+  }
+}
+
 async function saveShot(sb: StudioStoryboard, refs?: { name: string; id: string }[]) {
   await updateStoryboard(sb.id, {
     image_prompt: sb.image_prompt,
@@ -258,7 +291,7 @@ defineExpose({
   novel, scriptModel, mergeResult, slideshowItems, composedUrl,
   splitScript, saveEpisode, extractAssets, batchAssetImages, uploadAssetImage,
   breakStoryboards, saveShot, genImages, genVideos, genNarration, retryShot,
-  addManualShot,
+  addManualShot, setShotEndFrame, applyShotEndFrame, fileUrlOf,
   doMerge, switchPhase, switchEpisode, loadStoryboards, loadDetail,
 })
 </script>
@@ -379,9 +412,17 @@ defineExpose({
             </div>
             <div class="studio-shot-grid">
               <div class="studio-shot-media">
-                <img v-if="sb.first_frame_path" :src="withFileToken('/api/v1/generation/files/' + sb.first_frame_path.split(/[\\/]/).pop())" class="studio-shot-img" />
-                <video v-else-if="sb.video_path" controls :src="withFileToken('/api/v1/generation/files/' + sb.video_path.split(/[\\/]/).pop())" class="studio-shot-img" />
+                <img v-if="sb.first_frame_path" :src="fileUrlOf(sb.first_frame_path)" class="studio-shot-img" />
+                <video v-else-if="sb.video_path" controls :src="fileUrlOf(sb.video_path)" class="studio-shot-img" />
                 <div v-else class="studio-shot-placeholder">{{ t('studio.noFrame') }}</div>
+                <!-- A1：尾帧（先画后动；Seedance/VEO 真透传，WAN 不假生效、进账本 ignored_params 橙标） -->
+                <div class="studio-shot-lastframe">
+                  <img v-if="sb.end_frame_path" :src="fileUrlOf(sb.end_frame_path)" class="studio-shot-thumb" :alt="t('studio.endFrame')" />
+                  <GlassButton size="sm" @click="setShotEndFrame(sb)">
+                    {{ sb.end_frame_path ? t('studio.replaceEndFrame') : t('studio.setEndFrame') }}
+                  </GlassButton>
+                </div>
+                <div v-if="sb.end_frame_path" class="studio-lf-note">{{ t('studio.endFrameNote') }}</div>
               </div>
               <div class="studio-shot-form">
                 <div class="studio-shot-desc">{{ sb.description }}</div>
@@ -478,6 +519,9 @@ defineExpose({
 .studio-shot-error { font-size: 12px; color: #ff4d4f; }
 .studio-shot-grid { display: grid; grid-template-columns: 180px 1fr; gap: 14px; }
 .studio-shot-img { width: 100%; border-radius: 8px; }
+.studio-shot-lastframe { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.studio-shot-thumb { width: 72px; aspect-ratio: 9/16; object-fit: cover; border-radius: 6px; border: 1px solid var(--nr-border, rgba(255,255,255,.12)); }
+.studio-lf-note { font-size: 10px; line-height: 1.4; color: var(--nr-text-secondary, rgba(255,255,255,.55)); margin-top: 4px; }
 .studio-shot-placeholder { aspect-ratio: 9/16; max-height: 220px; border-radius: 8px; background: rgba(0,0,0,.25); display: flex; align-items: center; justify-content: center; color: var(--nr-text-secondary); font-size: 12px; }
 .studio-shot-form { display: flex; flex-direction: column; gap: 6px; }
 .studio-shot-desc { font-size: 13px; color: var(--nr-text-primary); }

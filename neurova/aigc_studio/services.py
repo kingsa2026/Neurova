@@ -331,7 +331,10 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
             submitted = await submit_video(
                 creds, vprompt, duration=int(sb.get("duration") or duration),
                 resolution=resolution,
-                ref_images=[frame] if frame and Path(frame).is_file() else [])
+                ref_images=[frame] if frame and Path(frame).is_file() else [],
+                # A1：镜头尾帧（存在才透传；WAN 无通道进 ignored_params，
+                # Seedance first+last 插值）
+                last_frame=(sb.get("end_frame_path") or None))
             remote_id = str(submitted.get("task_id") or "")
             if not remote_id:
                 raise RuntimeError("提交未返回 task_id")
@@ -341,6 +344,7 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
                 poll_url=str(submitted.get("poll_url") or ""),
                 prompt=vprompt[:500], owner_user_id=owner_user_id,
                 source="workflow", batch_key=eid, project_id=pid,
+                ignored_params=",".join(submitted.get("ignored_params") or []),
             ))
             store.update_storyboard(sb["id"], {
                 "video_status": "running", "ledger_task_id": record.task_id,
