@@ -3345,6 +3345,8 @@ studio: {
   retryVideo: 'Повторить видео',
   noShots: 'Нет планов — разбейте',
   mergeNow: 'Собрать и экспортировать',
+  uploadBgm: 'Загрузить BGM',
+  replaceBgm: 'Заменить BGM',
   mergedMp4: 'Готовое видео',
   mergedManifest: 'Слайдшоу-манифест',
   noExport: 'Нечего экспортировать',

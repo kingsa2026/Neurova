@@ -3270,6 +3270,8 @@ studio: {
   retryVideo: '重试视频',
   noShots: '尚无镜头，先拆解分镜',
   mergeNow: '合成导出',
+  uploadBgm: '上传 BGM',
+  replaceBgm: '更换 BGM',
   mergedMp4: '已生成成片',
   mergedManifest: '输出连播清单',
   noExport: '暂无可导出内容',

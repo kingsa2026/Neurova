@@ -3345,6 +3345,8 @@ studio: {
   retryVideo: '영상 재시도',
   noShots: '샷 없음 (먼저 분할)',
   mergeNow: '합쳐서 내보내기',
+  uploadBgm: 'BGM 업로드',
+  replaceBgm: 'BGM 교체',
   mergedMp4: '완성 영상',
   mergedManifest: '슬라이드쇼 목록',
   noExport: '내보낼 내용 없음',

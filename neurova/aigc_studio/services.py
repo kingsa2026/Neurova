@@ -525,8 +525,13 @@ def build_srt(shots: List[Dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-async def merge_episode(store, pid: str, eid: str) -> Dict[str, Any]:
-    """制片导出：FFmpeg 真拼接（有二进制且镜头有视频）→ mp4；否则连播清单 manifest。"""
+async def merge_episode(store, pid: str, eid: str,
+                        bgm_path: str = "") -> Dict[str, Any]:
+    """制片导出：FFmpeg 真拼接（有二进制且镜头有视频）→ mp4；否则连播清单 manifest。
+
+    bgm_path（A3）：用户提供的循环乐轨（本地音频文件），concat 后第二级混音；
+    有字幕时第三级烧录（-c:a copy 保留混音轨）。BGM 生成协议无实测服务商，
+    维持台账 blocked——本函数只做真混音，不假生成。"""
     from neurova.core.ffmpeg import resolve_ffmpeg_path
     from neurova.llm.generators.runtime import (
         GENERATION_OUTPUT_DIR, local_url_for, persist_bytes,
@@ -568,23 +573,38 @@ async def merge_episode(store, pid: str, eid: str) -> Dict[str, Any]:
             proc = subprocess.run(cmd, capture_output=True, timeout=600, check=False)
             Path(list_file).unlink(missing_ok=True)
             if proc.returncode == 0 and out_path.is_file():
-                # A5：concat 成功后第二步烧字幕。无中文字体烧出来只有方框
-                # （假成功），先探测；烧录失败回退无字幕成片——warning 留痕，不中断。
-                from neurova.core.ffmpeg import burn_subtitles, has_cjk_font
+                # 三级流水线：concat → A3 BGM 混音 → A5 字幕烧录。
+                # 每级失败回退上一级产物 + warning 留痕，不中断交付。
+                from neurova.core.ffmpeg import (
+                    burn_subtitles, has_cjk_font, mix_bgm, probe_has_audio,
+                )
 
-                burned, warning = False, ""
+                burned, mixed, warning = False, False, ""
                 final_path = out_path
+                if bgm_path:
+                    bgm_file = Path(bgm_path)
+                    if bgm_file.is_file():
+                        mix_path = GENERATION_OUTPUT_DIR / f"studio_episode_{eid}_bgm.mp4"
+                        ok, err = mix_bgm(ffmpeg, str(final_path), str(bgm_file),
+                                          str(mix_path),
+                                          has_audio=probe_has_audio(ffmpeg, str(final_path)))
+                        if ok:
+                            mixed, final_path = True, mix_path
+                        else:
+                            warning = f"BGM 混音失败，输出无 BGM 成片：{err}"
+                    else:
+                        warning = "BGM 文件不存在，已跳过混音"
                 if subtitle_path:
                     if not has_cjk_font():
-                        warning = "本机缺少中文字体，未烧录字幕（播放器可外挂 SRT 字幕文件）"
+                        warning = ((warning + "；") if warning else "") +                             "本机缺少中文字体，未烧录字幕（播放器可外挂 SRT 字幕文件）"
                     else:
                         sub_path = GENERATION_OUTPUT_DIR / f"studio_episode_{eid}_sub.mp4"
-                        ok, err = burn_subtitles(ffmpeg, str(out_path),
+                        ok, err = burn_subtitles(ffmpeg, str(final_path),
                                                  subtitle_path, str(sub_path))
                         if ok:
                             burned, final_path = True, sub_path
                         else:
-                            warning = f"字幕烧录失败，输出无字幕成片：{err}"
+                            warning = ((warning + "；") if warning else "") +                                 f"字幕烧录失败，输出无字幕成片：{err}"
                 merge = store.add_merge({
                     "project_id": pid, "episode_id": eid, "mode": "ffmpeg_concat",
                     "status": "done", "output_path": str(final_path),
@@ -595,7 +615,8 @@ async def merge_episode(store, pid: str, eid: str) -> Dict[str, Any]:
                                            "status": "exported"})
                 return {"ok": True, "composed": True, "mode": "ffmpeg_concat",
                         "url": merge["output_url"], "merge": merge, "items": items,
-                        "subtitle_burned": burned, "warning": warning}
+                        "subtitle_burned": burned, "bgm_mixed": mixed,
+                        "warning": warning}
             err = f"FFmpeg 失败: {(proc.stderr or b'')[-200:].decode(errors='ignore')}"
         except Exception as e:  # noqa: BLE001
             err = f"FFmpeg 异常: {str(e)[:200]}"
@@ -610,7 +631,8 @@ async def merge_episode(store, pid: str, eid: str) -> Dict[str, Any]:
             "items": items})
         return {"ok": False, "composed": False, "mode": "none",
                 "error": "无就绪产物（镜头未生成图/音/视频）",
-                "merge": merge, "items": items}
+                "merge": merge, "items": items, "subtitle_burned": False,
+                "bgm_mixed": False, "warning": ""}
 
     merge = store.add_merge({
         "project_id": pid, "episode_id": eid, "mode": "slideshow_manifest",
@@ -618,4 +640,4 @@ async def merge_episode(store, pid: str, eid: str) -> Dict[str, Any]:
         "items": items})
     return {"ok": True, "composed": False, "mode": "slideshow_manifest",
             "merge": merge, "items": items,
-            "error": ""}
+            "error": "", "subtitle_burned": False, "bgm_mixed": False, "warning": ""}
