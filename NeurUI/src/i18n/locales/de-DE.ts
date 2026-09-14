@@ -3322,6 +3322,7 @@ studio: {
   noAssets: 'Keine Assets – erst extrahieren',
   breakStoryboards: 'Storyboards erzeugen',
   rebreak: 'Neu erzeugen',
+  manualShot: 'Manueller Shot',
   genFirstFrames: 'Erstbilder',
   genVideos: 'Videos erzeugen',
   genNarration: 'Erzählstimme',

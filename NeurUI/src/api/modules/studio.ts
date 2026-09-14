@@ -218,6 +218,12 @@ export function updateStoryboard(sid: string, fields: Record<string, unknown>) {
   return api.put<ApiResponse<{ storyboard: StudioStoryboard }>>(`${BASE}/storyboards/${sid}`, fields)
 }
 
+/** 手动新增镜头（LLM 拆解失败/不可用时工作台不被阻塞；与后台拆解
+ * POST /episodes/{eid}/storyboards 区分路径） */
+export function addStoryboardManually(eid: string, data: Record<string, unknown>) {
+  return api.post<ApiResponse<{ storyboard: StudioStoryboard }>>(`${BASE}/episodes/${eid}/storyboards/manual`, data)
+}
+
 // ── merge / assets ────────────────────────────────────────────────────────
 
 export interface MergeResult {

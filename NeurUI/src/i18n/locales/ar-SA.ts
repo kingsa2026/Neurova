@@ -3322,6 +3322,7 @@ studio: {
   noAssets: 'لا أصول — استخرج أولًا',
   breakStoryboards: 'تقسيم إلى لقطات',
   rebreak: 'إعادة التقسيم',
+  manualShot: 'لقطة يدوية',
   genFirstFrames: 'أطر أولى',
   genVideos: 'فيديوهات',
   genNarration: 'سرد',

@@ -3322,6 +3322,7 @@ studio: {
   noAssets: '에셋 없음 (먼저 추출)',
   breakStoryboards: '스토리보드 분할',
   rebreak: '재분할',
+  manualShot: '수동 샷',
   genFirstFrames: '첫 프레임 일괄',
   genVideos: '영상 일괄',
   genNarration: '내레이션',
