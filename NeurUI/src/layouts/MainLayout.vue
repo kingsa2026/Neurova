@@ -141,9 +141,7 @@
       <GlassNavItem to="/marketplace/skills" :label="t('nav.skillMarket')" :collapsed="appStore.sidebarCollapsed" v-if="can('/marketplace/skills')">
         <template #icon><ShopOutlined /></template>
       </GlassNavItem>
-      <GlassNavItem to="/aigc" :label="t('nav.aigc')" :collapsed="appStore.sidebarCollapsed" v-if="can('/aigc')">
-        <template #icon><RocketOutlined /></template>
-      </GlassNavItem>
+      <!-- AIGC 已迁至顶部「模型与工具」二级菜单（2026-09-14 用户决策） -->
       <GlassNavItem to="/files" :label="t('nav.files')" :collapsed="appStore.sidebarCollapsed" v-if="can('/files')">
         <template #icon><FileOutlined /></template>
       </GlassNavItem>
