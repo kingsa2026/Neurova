@@ -12,11 +12,12 @@ from __future__ import annotations
 
 from neurova.core.logger import get_logger
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.deps import get_current_user
@@ -314,7 +315,17 @@ async def generate_image(
             owner_user_id=uid,
             ignored_params=ignored,
         ))
+        # L4：AIGC 用量统计（张数计 items，写失败静默不阻断主流程）
+        from neurova.core.aigc_usage import get_aigc_usage
 
+        get_aigc_usage().record(
+            kind="image", user_id=uid, provider=str(provider_id or ""),
+            model=creds.model or "", protocol=protocol.value,
+            status="success" if status == "succeeded" else "failed",
+            items=body.num_images if status == "succeeded" else 0,
+            duration_ms=(time.monotonic() - _t0) * 1000)
+
+    _t0 = time.monotonic()
     size = f"{body.width}x{body.height}"
     try:
         result = await generate_image(
@@ -407,6 +418,8 @@ async def generate_audio(
 
     from neurova.llm.generators.task_ledger import TaskRecord, get_generation_task_ledger
 
+    _t0 = time.monotonic()
+
     def _finish(audio_bytes: bytes):
         task_id = uuid.uuid4().hex
         out_dir = Path(_GENERATION_OUTPUT_DIR)
@@ -422,6 +435,13 @@ async def generate_audio(
             local_path=str(path),
             owner_user_id=str(current_user.get("user_id") or ""),
         ))
+        # L4：AIGC 用量统计（音频条数；写失败静默）
+        from neurova.core.aigc_usage import get_aigc_usage
+
+        get_aigc_usage().record(
+            kind="audio", user_id=str(current_user.get("user_id") or ""),
+            model=body.model or "", protocol="tts", status="success",
+            items=1, duration_ms=(time.monotonic() - _t0) * 1000)
         return {
             "code": 0,
             "message": "success",
@@ -607,6 +627,22 @@ async def get_generation_video_status(
         if result.get(key):
             data[key] = result[key]
     return {"code": 0, "message": "success", "data": data}
+
+
+@router.get("/usage")
+async def generation_usage(
+    request: Request,
+    days: int = Query(default=30, ge=1, le=365),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """L4：AIGC 生成用量统计（近 N 天按天/类型聚合；admin 可看全量）。"""
+    _ = request
+    from neurova.core.aigc_usage import get_aigc_usage
+
+    uid = str(current_user.get("user_id") or "")
+    scope = None if current_user.get("role") == "admin" else uid
+    return {"code": 0, "message": "success",
+            "data": get_aigc_usage().summary(user_id=scope, days=days)}
 
 
 @router.get("/tasks")
