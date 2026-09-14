@@ -112,7 +112,10 @@ def start_backend(port: int = BACKEND_PORT, log_file: str = None) -> tuple:
         log_dir = ROOT_DIR / "logs"
         log_dir.mkdir(exist_ok=True)
         _rotate_log_file(log_dir / log_file)
-        stdout_target = open(log_dir / log_file, "w", encoding="utf-8")
+        # append 而非 "w"：旧模式每次重启清空 server.log，重启前窗口的
+        # 故障现场（扫码/渠道连接记录）随之丢失，事后无法取证
+        # （2026-09-15 QQ 扫码排查实坑）；无界增长已由 _rotate_log_file 兜住
+        stdout_target = open(log_dir / log_file, "a", encoding="utf-8")
 
     cmd = _get_backend_python() + [str(get_backend_script())]
 
@@ -387,36 +390,45 @@ def restart_services(
 # ═══════════════════════════════════════════════════════════════
 
 def check_python_deps() -> bool:
-    """检查 Python 依赖"""
-    try:
-        import fastapi
-        import uvicorn
+    """检查 Python 依赖——在后端解释器（venv 优先）上检查。
+
+    旧版用当前 sys.executable import fastapi：系统 Python 恰好有 fastapi
+    就跳过，而 venv 缺依赖时后端照样崩——检查对象与运行对象错位。
+    """
+    py = _get_backend_python()[0]
+    probe = subprocess.run(
+        [py, "-c", "import fastapi, uvicorn"], capture_output=True,
+    )
+    if probe.returncode == 0:
         return True
-    except ImportError:
-        print(f"\n  {c('!', Colors.YELLOW)} 缺少 Python 依赖，正在安装...")
-        venv_python = get_venv_python()
-        if venv_python.exists():
-            subprocess.run(
-                [str(venv_python), "-m", "pip", "install", "-r", "requirements.txt"],
-                cwd=str(ROOT_DIR), check=True,
-            )
-        else:
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
-                cwd=str(ROOT_DIR), check=True,
-            )
-        return True
+    print(f"\n  {c('!', Colors.YELLOW)} 缺少 Python 依赖，正在安装...")
+    subprocess.run(
+        [py, "-m", "pip", "install", "-r", "requirements.txt"],
+        cwd=str(ROOT_DIR), check=True,
+    )
+    return True
 
 
 def check_node_deps() -> bool:
-    """检查 Node.js 依赖"""
-    node_modules = FRONTEND_DIR / "node_modules"
-    if not node_modules.exists():
-        print(f"\n  {c('!', Colors.YELLOW)} 缺少前端依赖，正在安装...")
-        subprocess.run(
-            ["npm", "install"],
-            cwd=str(FRONTEND_DIR), check=True, shell=True,
-        )
+    """检查 Node.js 依赖
+
+    2026-09-15 前端"启动不起来"事故：旧检查只看 node_modules 目录存在——
+    半损坏状态（.bin 全丢/部分包缺失，npm 中断或清理工具所伤）骗过检查，
+    npm run dev 报 "'vite' 不是内部或外部命令" 且不自愈。判据改为 vite
+    可执行文件在位；缺失时按 lock 用 npm ci 干净重装。
+    """
+    vite_bin = FRONTEND_DIR / "node_modules" / ".bin" / (
+        "vite.cmd" if sys.platform == "win32" else "vite"
+    )
+    if vite_bin.exists():
+        return True
+    print(f"\n  {c('!', Colors.YELLOW)} 前端依赖缺失或损坏，正在重装...")
+    lock = FRONTEND_DIR / "package-lock.json"
+    cmd = ["npm", "ci"] if lock.exists() else ["npm", "install"]
+    subprocess.run(
+        cmd,
+        cwd=str(FRONTEND_DIR), check=True, shell=True,
+    )
     return True
 
 
