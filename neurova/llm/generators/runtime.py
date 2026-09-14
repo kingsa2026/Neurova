@@ -40,7 +40,9 @@ DEFAULT_OPENAI_BASE = "https://api.openai.com/v1"
 DEFAULT_WAN_BASE = "https://dashscope.aliyuncs.com/api/v1"
 
 # L5：keyframe_to_video 转真实通道（Seedance first_frame+last_frame 先画后动）；
-# video_to_video 仍无实测协议（登记缓后台账）
+# video_to_video 仍无实测协议（台账 A4 blocked）：候选=DashScope wan2.7-videoedit
+# （by-capability 数据面已见该模型 ID），但端点/请求体未实测——批次0 虚构端点
+# （4000 行假协议）教训禁止盲写，需有效 DashScope key 实测后再接
 _VIDEO_TYPES = ("text_to_video", "image_to_video", "keyframe_to_video")
 _IMAGE_TYPES = ("text_to_image", "image_to_image")
 _UNSUPPORTED_TYPES = ("video_to_video",)
