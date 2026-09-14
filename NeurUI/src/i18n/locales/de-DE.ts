@@ -3345,6 +3345,8 @@ studio: {
   retryVideo: 'Video erneut versuchen',
   noShots: 'Keine Shots – erst erzeugen',
   mergeNow: 'Zusammenführen & exportieren',
+  uploadBgm: 'BGM hochladen',
+  replaceBgm: 'BGM ersetzen',
   mergedMp4: 'Fertiges Video',
   mergedManifest: 'Slideshow-Manifest',
   noExport: 'Nichts zu exportieren',

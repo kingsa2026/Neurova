@@ -3345,6 +3345,8 @@ studio: {
   retryVideo: 'वीडियो पुनः',
   noShots: 'कोई शॉट नहीं — पहले बाँटें',
   mergeNow: 'मिलाकर निर्यात',
+  uploadBgm: 'BGM अपलोड करें',
+  replaceBgm: 'BGM बदलें',
   mergedMp4: 'वीडियो तैयार',
   mergedManifest: 'स्लाइडशो मेनिफेस्ट',
   noExport: 'निर्यात हेतु कुछ नहीं',
