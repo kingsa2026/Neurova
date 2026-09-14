@@ -466,6 +466,8 @@ defineExpose({
           <div v-if="composedUrl" class="studio-composed">
             <video controls :src="withFileToken(composedUrl)" style="width: 100%; border-radius: 10px" />
             <a :href="withFileToken(composedUrl)" :download="composedUrl.split('/').pop()" class="aigc-download">{{ t('aigc.download') }}</a>
+            <!-- A5：无中文字体/烧录失败时诚实标注（无字幕成片照常交付） -->
+            <div v-if="mergeResult?.warning" class="studio-merge-warn">{{ mergeResult.warning }}</div>
           </div>
           <SlideshowPlayer v-else-if="slideshowItems.length" :items="slideshowItems" />
           <a-empty v-else :description="t('studio.noExport')" />
@@ -529,6 +531,7 @@ defineExpose({
 .studio-shot-row { display: flex; gap: 8px; }
 .studio-shot-actions { display: flex; gap: 8px; margin-top: 6px; }
 .studio-composed { display: flex; flex-direction: column; gap: 8px; }
+.studio-merge-warn { font-size: 12px; color: #d48806; }
 .studio-merge-mode { font-size: 12px; color: var(--nr-text-secondary); }
 @media (max-width: 900px) { .studio-body { grid-template-columns: 1fr; } .studio-shot-grid { grid-template-columns: 1fr; } }
 </style>

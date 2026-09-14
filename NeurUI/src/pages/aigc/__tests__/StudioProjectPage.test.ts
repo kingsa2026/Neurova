@@ -193,6 +193,8 @@ describe('StudioProjectPage', () => {
       code: 0,
       data: {
         ok: true, composed: true, mode: 'ffmpeg_concat', url: '/api/v1/generation/files/m1.mp4',
+        // A5：诚实降级标注（无中文字体不假烧录，warning 原文上屏）
+        subtitle_burned: false, warning: '本机缺少中文字体，未烧录字幕（播放器可外挂 SRT 字幕文件）',
         merge: { id: 'm1' }, items: [],
       },
     })
@@ -204,6 +206,7 @@ describe('StudioProjectPage', () => {
     await flushPromises()
     expect(vm.composedUrl).toBe('/api/v1/generation/files/m1.mp4')
     expect(wrapper.html()).toContain('access_token=tok')
+    expect(wrapper.find('.studio-merge-warn').text()).toContain('中文字体')
 
     mergeMock.mockResolvedValue({
       code: 0,
