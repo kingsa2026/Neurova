@@ -40,6 +40,27 @@ class ProviderCapability(str, Enum):
     TOOL_USE = "tool_use"
 
 
+def capability_names(caps) -> "list[str]":
+    """能力集归一化（响应出口单源，2026-09-15 D1 走查根因）：
+
+    ProviderCapability 是 (str, Enum) mixin——str() 产出 ``ProviderCapability.TEXT``
+    类名形态（Python Enum.__str__ 覆盖 str mixin），且 pydantic List[ProviderCapability]
+    字段会把传入字符串强制为枚举实例，导致 ``[str(c) for c in caps]`` 全链路污染。
+    前端与路由均按小写 value 精确匹配，故一切出口必须经本函数。
+
+    兼容三种输入：枚举实例、干净 value 串、历史脏数据 ``ProviderCapability.X`` 串。
+    """
+    out: "list[str]" = []
+    for c in caps or []:
+        v = c.value if isinstance(c, Enum) else str(c)
+        v = str(v).strip().lower()
+        if v.startswith("providercapability."):
+            v = v.split(".", 1)[1]
+        if v:
+            out.append(v)
+    return out
+
+
 class ModelInfo(BaseModel):
     """模型信息"""
 

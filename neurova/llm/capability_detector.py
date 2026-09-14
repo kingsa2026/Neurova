@@ -214,10 +214,15 @@ _VISION_PAT = re.compile(
     r"(vision|vlm|vl[\d_-]|vl$|multimodal|multi-modal|internvl|image[-_]understand|视觉|看图|多模态)", re.IGNORECASE
 )
 _IMAGE_GEN_PAT = re.compile(
-    r"(dall|stable[-_]diffusion|sd3|sd-|sdxl|flux|imagen|seedream|cogview|wanx|hidream|text[-_]to[-_]image|t2i|生图|绘画|文生图)", re.IGNORECASE
+    r"(dall|stable[-_]diffusion|sd3|sd-|sdxl|flux|imagen|seedream|cogview|wanx|hidream"
+    r"|gpt-image|qwen-image|agnes-image|text[-_]to[-_]image|t2i|生图|绘画|文生图)", re.IGNORECASE
 )
+# seedance/agnes-video：doubao-seedance-* 多为裸版本号命名（无 t2v 后缀），目录前缀
+# 匹配（族首段 doubao-seed）吃不到，必须走名称信号；video_generation 判定先于
+# _VIDEO_UNDERSTAND_PAT，不会误标视频理解。
 _VIDEO_GEN_PAT = re.compile(
-    r"(sora|veo[-_]|kling|cogvideox|t2v|i2v|text[-_]to[-_]video|image[-_]to[-_]video|文生视频|图生视频)", re.IGNORECASE
+    r"(sora|veo[-_]|kling|cogvideox|seedance|agnes-video|t2v|i2v"
+    r"|text[-_]to[-_]video|image[-_]to[-_]video|文生视频|图生视频)", re.IGNORECASE
 )
 _VIDEO_UNDERSTAND_PAT = re.compile(r"(video|视频)", re.IGNORECASE)
 _AUDIO_PAT = re.compile(r"(audio|asr|whisper|语音识别|listen)", re.IGNORECASE)
@@ -354,7 +359,11 @@ def detect_model_capabilities(
         canonical 排序的能力列表（永不为空，至少含 text）
     """
     if existing:
-        known = [str(c) for c in existing if str(c) in _KNOWN_CAPS]
+        from neurova.llm.providers.types import capability_names
+
+        # 枚举对象经 str() 产出 'ProviderCapability.TEXT' 会整条丢失显式标记
+        # （2026-09-15 D1 走查根因，capability_names 单源归一）
+        known = [c for c in capability_names(existing) if c in _KNOWN_CAPS]
         if known:
             if "text" not in known and not (set(known) & _GENERATION_ONLY_CAPS):
                 known.append("text")

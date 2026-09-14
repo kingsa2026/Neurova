@@ -75,7 +75,9 @@ def _get_provider_manager():
 def _model_has_capability(provider, model_id: str, capability: str) -> bool:
     """模型能力判定：显式元数据优先，名称/目录推断兜底（与探测回写同源）。"""
     meta = (getattr(provider, "model_metadata", None) or {}).get(model_id, {}) or {}
-    caps = [str(c) for c in (meta.get("capabilities") or [])]
+    from neurova.llm.providers.types import capability_names
+
+    caps = capability_names(meta.get("capabilities"))
     if not caps:
         try:
             from neurova.llm.capability_detector import infer_capabilities

@@ -98,6 +98,25 @@ class ProbeRequest(BaseModel):
     force: bool = Field(default=False, description="元数据已有标记时是否强制真实探测")
 
 
+
+def _response_capabilities(model_id: str, raw_caps, display_name: str = "") -> "list[str]":
+    """GET /models 与 /by-capability 的能力出口单源（2026-09-15 D1 走查根因）：
+    ① 枚举/脏串归一（capability_names）；② 缺生成类标记时按名称推断合并——
+    历史持久化只标了 text/vision 等理解类，图/视频能力下拉否则恒空。
+    仅合并 image/video_generation 两类（理解类信任已存标记，不加噪音），不篡改持久化。"""
+    from neurova.llm.capability_detector import detect_model_capabilities
+    from neurova.llm.providers.types import capability_names
+
+    caps = capability_names(raw_caps)
+    if caps:
+        infer = detect_model_capabilities(model_id, display_name=display_name)
+        for c in infer:
+            if c in ("image_generation", "video_generation") and c not in caps:
+                caps.append(c)
+    else:
+        caps = detect_model_capabilities(model_id, display_name=display_name)
+    return caps
+
 def _get_request_id(request: Request) -> str:
     """安全获取 request_id"""
     return getattr(request.state, "request_id", str(uuid.uuid4()))
@@ -154,14 +173,11 @@ async def list_models(
                 for model in all_models:
                     # PydanticModelInfo uses 'owned_by' for provider_id
                     # 能力标记兜底:元数据缺失时即时推断,响应永不缺 capabilities(AIGC 下拉/路由依赖)
-                    caps = [str(c) for c in (getattr(model, "capabilities", None) or [])]
-                    if not caps:
-                        from neurova.llm.capability_detector import detect_model_capabilities
-
-                        caps = detect_model_capabilities(
-                            getattr(model, "id", ""),
-                            display_name=getattr(model, "name", "") or "",
-                        )
+                    caps = _response_capabilities(
+                        getattr(model, "id", ""),
+                        getattr(model, "capabilities", None) or [],
+                        getattr(model, "name", "") or "",
+                    )
                     models.append(
                         ModelInfo(
                             model_id=getattr(model, "id", "unknown"),
@@ -261,7 +277,11 @@ async def list_models_by_capability(
     matched: List[ModelInfo] = []
     try:
         for model in provider_manager.get_all_models():
-            caps = [str(c) for c in (getattr(model, "capabilities", None) or [])]
+            caps = _response_capabilities(
+                getattr(model, "id", ""),
+                getattr(model, "capabilities", None) or [],
+                getattr(model, "name", "") or "",
+            )
             if cap_value in caps:
                 matched.append(
                     ModelInfo(
