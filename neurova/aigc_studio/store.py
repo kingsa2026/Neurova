@@ -61,7 +61,8 @@ CREATE TABLE IF NOT EXISTS storyboards(
   atmosphere TEXT DEFAULT '', bgm_prompt TEXT DEFAULT '', sound_effect TEXT DEFAULT '',
   duration REAL DEFAULT 3,
   characters_json TEXT DEFAULT '[]', props_json TEXT DEFAULT '[]',
-  first_frame_path TEXT DEFAULT '', injected_prompt TEXT DEFAULT '',
+  first_frame_path TEXT DEFAULT '', end_frame_path TEXT DEFAULT '',
+  injected_prompt TEXT DEFAULT '',
   video_path TEXT DEFAULT '', video_status TEXT DEFAULT 'pending',
   ledger_task_id TEXT DEFAULT '', subtitle_path TEXT DEFAULT '',
   audio_path TEXT DEFAULT '',
@@ -115,6 +116,14 @@ class StudioStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
+        # A1：既有库幂等补列（旧版 storyboards 无 end_frame_path——PRAGMA 探测，
+        # 不依赖异常吞 duplicate：重复执行安全）
+        cols = {r["name"] for r in self._conn.execute(
+            "PRAGMA table_info(storyboards)").fetchall()}
+        if "end_frame_path" not in cols:
+            self._conn.execute(
+                "ALTER TABLE storyboards ADD COLUMN end_frame_path TEXT DEFAULT ''")
+            self._conn.commit()
 
     # ── 内部 ────────────────────────────────────────────────────────────
 
