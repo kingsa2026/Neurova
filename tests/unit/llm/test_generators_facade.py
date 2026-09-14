@@ -287,14 +287,16 @@ def test_facade_video_success_and_failure_honest(runtime_patched):
     assert "审核" in result2.error
 
 
-def test_facade_keyframe_v2v_unsupported_not_fake(runtime_patched):
+def test_facade_v2v_unsupported_not_fake(runtime_patched):
+    """L5+：keyframe_to_video 已转真实通道（Seedance 首尾帧，见
+    test_generation_lastframe.py::TestFacadeKeyframe）；v2v 仍诚实报错。"""
     runtime, calls = runtime_patched
     from neurova.llm.generators import GenerationConfig, GeneratorType
 
-    gen = runtime.ProtocolGenerator(GeneratorType.KEYFRAME_TO_VIDEO)
+    gen = runtime.ProtocolGenerator(GeneratorType.VIDEO_TO_VIDEO)
     result = _run(gen.generate(GenerationConfig(
-        type=GeneratorType.KEYFRAME_TO_VIDEO,
-        start_image_url="a.png", end_image_url="b.png",
+        type=GeneratorType.VIDEO_TO_VIDEO,
+        video_url="v.mp4", prompt="p",
     )))
     assert not result.success
     assert "协议" in result.error  # 诚实说明原因，而非假成功或空 error
