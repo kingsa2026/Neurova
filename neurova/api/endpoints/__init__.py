@@ -203,6 +203,7 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.stats", "/v1/stats", "Stats API"),
         ("neurova.api.endpoints.monitor", "/v1/monitor", "Monitor API"),
         ("neurova.api.endpoints.generation", "/v1/generation", "Generation API"),
+        ("neurova.api.endpoints.studio_api", "/v1/studio", "Studio API"),
         ("neurova.api.endpoints.image", "/v1/image", "Image API"),
         ("neurova.api.endpoints.media", "/v1/media", "Media API"),
         ("neurova.api.endpoints.knowledge", "/v1/knowledge", "Knowledge API"),
