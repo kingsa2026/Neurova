@@ -378,3 +378,42 @@ async def test_wechat_poll_custom_base_url(httpx_routes):
     h = QRCODE_AUTH_HANDLERS["wechat"]
     qr = await h.fetch_qrcode(_req(base_url="https://my.gateway.local"))
     assert qr.poll_token == "q2"
+
+
+# ------------------------------------------------------------------
+# 可观测性：poll 回传状态必须落日志（2026-09-15 QQ 扫码"无反应"排查
+# 发现 poll_bind_result 响应体从不记录，无法回答平台是否推送确认事件）
+# ------------------------------------------------------------------
+
+import logging
+
+
+@pytest.mark.asyncio
+async def test_qq_poll_logs_platform_status(httpx_routes, caplog):
+    from neurova.channels.qrcode_auth import QRCODE_AUTH_HANDLERS, _encode_poll_token
+
+    httpx_routes([
+        {"method": "POST", "url_startswith": "https://q.qq.com/lite/poll_bind_result",
+         "json": {"retcode": 0, "data": {"status": 1}}},
+    ])
+    h = QRCODE_AUTH_HANDLERS["qq"]
+    with caplog.at_level(logging.INFO, logger="neurova.channels.qrcode_auth"):
+        await h.poll_status(_encode_poll_token("t", base64.b64encode(b"k" * 32).decode()), _req())
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any("qq" in m and "status=1" in m for m in msgs), f"poll 回传状态必须落日志，实际: {msgs}"
+
+
+@pytest.mark.asyncio
+async def test_qq_poll_logs_nonzero_retcode(httpx_routes, caplog):
+    from neurova.channels.qrcode_auth import QRCODE_AUTH_HANDLERS, _encode_poll_token
+
+    httpx_routes([
+        {"method": "POST", "url_startswith": "https://q.qq.com/lite/poll_bind_result",
+         "json": {"retcode": 40001, "msg": "task not found"}},
+    ])
+    h = QRCODE_AUTH_HANDLERS["qq"]
+    with caplog.at_level(logging.INFO, logger="neurova.channels.qrcode_auth"):
+        poll = await h.poll_status(_encode_poll_token("t", base64.b64encode(b"k" * 32).decode()), _req())
+    assert poll.status == "fail"
+    msgs = [r.getMessage() for r in caplog.records]
+    assert any("40001" in m for m in msgs), f"非零 retcode 必须落日志，实际: {msgs}"

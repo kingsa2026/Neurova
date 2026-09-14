@@ -167,6 +167,7 @@ class WeChatQRCodeAuthHandler(QRCodeAuthHandler):
                 detail=f"WeChat status check failed: {exc}",
             ) from exc
 
+        logger.info("qrcode poll [wechat]: status=%s", data.get("status"))
         return PollResult(
             status=data.get("status", "waiting"),
             credentials={
@@ -261,6 +262,7 @@ class WecomQRCodeAuthHandler(QRCodeAuthHandler):
         data = result.get("data", {})
         bot_info = data.get("bot_info", {})
 
+        logger.info("qrcode poll [wecom]: status=%s", data.get("status"))
         return PollResult(
             status=data.get("status", "waiting"),
             credentials={
@@ -375,6 +377,7 @@ class DingtalkQRCodeAuthHandler(QRCodeAuthHandler):
         status = _clean_str(data.get("status")).upper()
         client_id = _clean_str(data.get("client_id"))
         client_secret = _clean_str(data.get("client_secret"))
+        logger.info("qrcode poll [dingtalk]: status=%s errcode=%s", status, data.get("errcode"))
 
         if client_id and client_secret:
             return PollResult(
@@ -504,6 +507,10 @@ class FeishuQRCodeAuthHandler(QRCodeAuthHandler):
                 detail=f"Feishu status check failed: {exc}",
             ) from exc
 
+        logger.info(
+            "qrcode poll [feishu]: error=%s has_credentials=%s",
+            data.get("error", ""), bool(data.get("client_id")),
+        )
         if data.get("client_id") and data.get("client_secret"):
             user_info = data.get("user_info", {})
             return PollResult(
@@ -644,6 +651,10 @@ class QQQRCodeAuthHandler(QRCodeAuthHandler):
             raise HTTPException(status_code=502, detail=f"QQ poll_bind_result failed: {exc}") from exc
 
         retcode = data.get("retcode")
+        logger.info(
+            "qrcode poll [qq]: retcode=%s status=%s", retcode,
+            (data.get("data") or {}).get("status"),
+        )
         if retcode != 0:
             return PollResult(status="fail", credentials={"fail_reason": data.get("msg", "unknown")})
 
