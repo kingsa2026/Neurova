@@ -14,16 +14,24 @@ export interface ModelSelectOption {
  *
  * @param models 模型列表
  * @param providerFilter 可选 provider 过滤（联动 model_provider 字段）
+ * @param capability 可选能力过滤（用户口径 2026-09-14：仅生成类能力生效——
+ *        image_generation/video_generation 按 capabilities 筛；text/vision 等
+ *        不做能力过滤，chat 模型能力检测常缺标记会误伤）
  *
  * 只保留 enabled 的模型——「可联通」的第一道过滤；
  * 联通性深度校验由 provider check-connection 惰性触发（见 verifyProvider）。
  */
+const GENERATIVE_CAPS = new Set(['image_generation', 'video_generation'])
+
 export function buildModelOptions(
   models: ModelItem[],
   providerFilter?: string,
+  capability?: string,
 ): ModelSelectOption[] {
   return models
     .filter((m) => m.enabled !== false)
+    .filter((m) => !capability || !GENERATIVE_CAPS.has(capability)
+      || (m.capabilities ?? []).includes(capability))
     .filter((m) => !providerFilter || m.provider_id === providerFilter)
     .map((m) => ({
       label: `${m.name} (${m.provider_id}/${m.id})`,

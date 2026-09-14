@@ -72,6 +72,41 @@ class TestBackgroundRuns:
         eps = client.get(f"/api/v1/studio/projects/{pid}").json()["data"]["episodes"]
         assert eps and eps[0]["title"] == "注入集"
 
+
+    def test_generate_endpoints_pass_provider_id(self, client, monkeypatch):
+        """模型选择全链端点层：body.provider_id 透传给 services（hint 推导在 services）。"""
+        from neurova.aigc_studio import services as svc
+
+        seen = {}
+
+        async def fake_images(store, pid, eid, provider="openai", model="",
+                              provider_id="", shot_ids=None):
+            seen["images"] = (model, provider_id)
+            return {"done": 1, "failed": 0, "skipped_no_prompt": 0}
+
+        async def fake_videos(store, pid, eid, provider="wan", model="",
+                              resolution="1080p", duration=5, owner_user_id="",
+                              provider_id="", shot_ids=None):
+            seen["videos"] = (model, provider_id)
+            return {"submitted": 1, "skipped": 0, "failed": 0}
+
+        monkeypatch.setattr(svc, "generate_shot_images", fake_images)
+        monkeypatch.setattr(svc, "generate_shot_videos", fake_videos)
+        pid = client.post("/api/v1/studio/projects", json={"title": "T"}).json()["data"]["project"]["id"]
+        eid = client.store.add_episode(pid, {"number": 1, "title": "e"})["id"]
+        r = client.post(f"/api/v1/studio/episodes/{eid}/generate-images",
+                        json={"model": "flux.1", "provider_id": "prov-x"})
+        assert r.status_code == 200
+        r = client.post(f"/api/v1/studio/episodes/{eid}/generate-videos",
+                        json={"model": "seedance-2-0", "provider_id": "prov-y"})
+        assert r.status_code == 200
+        for _ in range(50):
+            runs = client.store.list_runs(pid)
+            if len(runs) >= 2 and all(x["status"] in ("done", "failed") for x in runs):
+                break
+        assert seen.get("images") == ("flux.1", "prov-x")
+        assert seen.get("videos") == ("seedance-2-0", "prov-y")
+
     def test_bad_request_validation(self, client):
         pid = client.post("/api/v1/studio/projects", json={"title": "T"}).json()["data"]["project"]["id"]
         assert client.post(f"/api/v1/studio/projects/{pid}/script", json={}).status_code == 400

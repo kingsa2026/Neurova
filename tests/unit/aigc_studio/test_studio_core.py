@@ -120,6 +120,12 @@ class TestExtractAssets:
 
 
 class TestShotImageGeneration:
+    @pytest.fixture(autouse=True)
+    def _no_auto_route(self, monkeypatch):
+        """本类只测注入/风格锁/隔离，显式关闭 auto 路由不打真实 router。"""
+        from neurova.aigc_studio import services
+        monkeypatch.setattr(services, "_auto_route", lambda kind: ("", ""))
+
     @pytest.mark.asyncio
     async def test_ref_injection_and_style_lock_and_per_shot_fail_isolated(
         self, store, tmp_path, monkeypatch,
@@ -174,6 +180,11 @@ class TestShotImageGeneration:
 
 
 class TestVideoSubmit:
+    @pytest.fixture(autouse=True)
+    def _no_auto_route(self, monkeypatch):
+        from neurova.aigc_studio import services
+        monkeypatch.setattr(services, "_auto_route", lambda kind: ("", ""))
+
     @pytest.mark.asyncio
     async def test_i2v_submit_links_ledger(self, store, tmp_path, monkeypatch):
         from neurova.aigc_studio import services
@@ -209,6 +220,45 @@ class TestVideoSubmit:
         task = led.get(rec["ledger_task_id"])
         assert task is not None and task.batch_key == ep["id"]
         assert task.source == "workflow" or task.source == "rest"
+
+
+    @pytest.mark.asyncio
+    async def test_auto_route_used_when_no_selection(self, store, tmp_path, monkeypatch):
+        """不指定 model/provider_id → 经 LLMRouter 能力路由取模型+服务商，hint 随之推导。"""
+        from neurova.aigc_studio import services
+        from neurova.llm.generators import runtime as gen_runtime
+        from neurova.llm.generators import task_ledger as ledger_mod
+        from neurova.llm.generators.protocols import ProtocolCredentials
+        from neurova.llm.generators.task_ledger import GenerationTaskLedger
+
+        led = GenerationTaskLedger(path=str(tmp_path / "led.json"))
+        monkeypatch.setattr(ledger_mod, "_ledger", led)
+        monkeypatch.setattr(services, "_auto_route",
+                            lambda kind: ("seedance-2-0", "prov-seed"))
+        seen = {}
+
+        def fake_resolve(hint, model, provider_id, api_key, base_url, default_base):
+            seen["args"] = (hint, model, provider_id)
+            return ProtocolCredentials(api_key="k", base_url="https://ark",
+                                       model=model, protocol=hint)
+
+        async def fake_submit(creds, prompt, **kw):
+            return {"task_id": "r5", "poll_url": "", "raw": {}}
+
+        monkeypatch.setattr(gen_runtime, "resolve_generation_creds", fake_resolve)
+        import neurova.llm.provider_manager as pm_mod
+        prov = type("P", (), {"base_url": "https://ark.cn-beijing.volces.com/api/v3"})()
+        monkeypatch.setattr(pm_mod, "get_provider_manager",
+                            lambda: type("M", (), {"get_provider": lambda self, pid: prov})())
+        from neurova.llm.generators import protocols as proto_mod
+        monkeypatch.setattr(proto_mod, "submit_video", fake_submit)
+        p = _project(store)
+        ep = store.add_episode(p["id"], {"number": 1, "title": "e"})
+        store.add_storyboard(ep["id"], {"number": 1, "video_prompt": "vp"})
+        await services.generate_shot_videos(store, p["id"], ep["id"])  # 全默认不选模型
+        hint, model, pid = seen["args"]
+        assert pid == "prov-seed" and model == "seedance-2-0"
+        assert hint == "seedance2"  # volces base_url → seedance2 协议（非旧默认 wan）
 
 
 class TestMerge:
@@ -357,6 +407,113 @@ class TestA1LastFrame:
                                             provider="wan")
         rec = led.list()[0]
         assert rec.ignored_params == "last_frame"
+
+
+class TestModelRouting:
+    """模型选择全链（用户口径 2026-09-14）：Studio 生成支持 model+provider_id
+    透传，协议 hint 按服务商 base_url 推导（不再硬编码 ark/wan）。"""
+
+    @pytest.mark.asyncio
+    async def test_generate_images_passes_provider_id_and_derives_hint(self, store, tmp_path, monkeypatch):
+        from neurova.aigc_studio import services
+        from neurova.llm.generators import runtime as gen_runtime
+        import neurova.llm.provider_manager as pm_mod
+        import neurova.llm.generators.protocols as proto_mod
+
+        seen = {}
+
+        def fake_resolve(hint, model, provider_id, api_key, base_url, default_base):
+            seen["args"] = (hint, model, provider_id)
+            return gen_runtime.ProtocolCredentials(api_key="k", base_url="https://b",
+                                                   model=model, protocol=hint)
+
+        async def fake_gen(creds, prompt, **kw):
+            return {"images": ["http://c/1.png"], "task_id": "t1", "raw": {}}
+
+        async def fake_persist(url, kind, task_id, index, out_dir=None):
+            return str(tmp_path / "o.png")
+
+        prov = type("P", (), {"base_url": "https://ark.cn-beijing.volces.com/api/v3",
+                              "api_key": "enc", "default_model": "doub-seedream"})()
+        monkeypatch.setattr(gen_runtime, "resolve_generation_creds", fake_resolve)
+        monkeypatch.setattr(proto_mod, "generate_image", fake_gen)
+        monkeypatch.setattr(gen_runtime, "persist_media", fake_persist)
+        monkeypatch.setattr(pm_mod, "get_provider_manager",
+                            lambda: type("M", (), {"get_provider": lambda self, pid: prov})())
+        p = _project(store)
+        ep = store.add_episode(p["id"], {"number": 1, "title": "e"})
+        store.add_storyboard(ep["id"], {"number": 1, "image_prompt": "ip"})
+        await services.generate_shot_images(store, p["id"], ep["id"],
+                                            model="doub-seedream-4", provider_id="prov-ark")
+        hint, model, pid = seen["args"]
+        assert pid == "prov-ark"
+        assert model == "doub-seedream-4"
+        assert hint == "ark"  # base_url volces.com → ark 协议（resolve_image_protocol 推导）
+
+    @pytest.mark.asyncio
+    async def test_generate_videos_passes_provider_id(self, store, tmp_path, monkeypatch):
+        from neurova.aigc_studio import services
+        from neurova.llm.generators import protocols as proto_mod
+        from neurova.llm.generators import runtime as gen_runtime
+        from neurova.llm.generators import task_ledger as ledger_mod
+        from neurova.llm.generators.protocols import ProtocolCredentials
+        from neurova.llm.generators.task_ledger import GenerationTaskLedger
+
+        led = GenerationTaskLedger(path=str(tmp_path / "led.json"))
+        monkeypatch.setattr(ledger_mod, "_ledger", led)
+        seen = {}
+
+        def fake_resolve(hint, model, provider_id, api_key, base_url, default_base):
+            seen["args"] = (hint, model, provider_id)
+            return ProtocolCredentials(api_key="k", base_url="https://ark",
+                                       model=model, protocol=hint)
+
+        async def fake_submit(creds, prompt, **kw):
+            return {"task_id": "r1", "poll_url": "", "raw": {}}
+
+        monkeypatch.setattr(gen_runtime, "resolve_generation_creds", fake_resolve)
+        monkeypatch.setattr(proto_mod, "submit_video", fake_submit)
+        p = _project(store)
+        ep = store.add_episode(p["id"], {"number": 1, "title": "e"})
+        f1 = tmp_path / "a.png"; f1.write_bytes(b"A")
+        store.add_storyboard(ep["id"], {"number": 1, "video_prompt": "vp",
+                                        "first_frame_path": str(f1)})
+        await services.generate_shot_videos(store, p["id"], ep["id"],
+                                            model="seedance-2-0", provider_id="prov-seed")
+        assert seen["args"][2] == "prov-seed"
+        assert seen["args"][1] == "seedance-2-0"
+
+    @pytest.mark.asyncio
+    async def test_no_provider_id_keeps_legacy_hint(self, store, tmp_path, monkeypatch):
+        """auto 路由不可得（无路由器）→ 回落旧口径 hint=provider 映射。"""
+        from neurova.aigc_studio import services
+        monkeypatch.setattr(services, "_auto_route", lambda kind: ("", ""))
+        from neurova.llm.generators import protocols as proto_mod
+        from neurova.llm.generators import runtime as gen_runtime
+        from neurova.llm.generators import task_ledger as ledger_mod
+        from neurova.llm.generators.protocols import ProtocolCredentials
+        from neurova.llm.generators.task_ledger import GenerationTaskLedger
+
+        led = GenerationTaskLedger(path=str(tmp_path / "led.json"))
+        monkeypatch.setattr(ledger_mod, "_ledger", led)
+        seen = {}
+
+        def fake_resolve(hint, model, provider_id, api_key, base_url, default_base):
+            seen["args"] = (hint, model, provider_id)
+            return ProtocolCredentials(api_key="k", base_url="https://x",
+                                       model="m", protocol=hint)
+
+        async def fake_submit(creds, prompt, **kw):
+            return {"task_id": "r2", "poll_url": "", "raw": {}}
+
+        monkeypatch.setattr(gen_runtime, "resolve_generation_creds", fake_resolve)
+        monkeypatch.setattr(proto_mod, "submit_video", fake_submit)
+        p = _project(store)
+        ep = store.add_episode(p["id"], {"number": 1, "title": "e"})
+        store.add_storyboard(ep["id"], {"number": 1, "video_prompt": "vp"})
+        await services.generate_shot_videos(store, p["id"], ep["id"], provider="wan")
+        assert seen["args"][0] == "wan"
+        assert seen["args"][2] is None
 
 
 class TestA5SubtitleBurn:

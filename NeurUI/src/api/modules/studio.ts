@@ -183,12 +183,12 @@ export function runStoryboards(eid: string, force = false) {
   return api.post<ApiResponse<RunAccepted>>(`${BASE}/episodes/${eid}/storyboards`, { force })
 }
 
-export function runGenerateImages(eid: string, opts?: { provider?: string; model?: string }) {
+export function runGenerateImages(eid: string, opts?: { provider?: string; model?: string; provider_id?: string }) {
   return api.post<ApiResponse<RunAccepted>>(`${BASE}/episodes/${eid}/generate-images`, opts ?? {})
 }
 
 export function runGenerateVideos(eid: string, opts?: {
-  provider?: string; model?: string; resolution?: string; duration?: number
+  provider?: string; model?: string; provider_id?: string; resolution?: string; duration?: number
 }) {
   return api.post<ApiResponse<RunAccepted>>(`${BASE}/episodes/${eid}/generate-videos`, opts ?? {})
 }
@@ -197,11 +197,11 @@ export function runNarration(eid: string, voice = 'default') {
   return api.post<ApiResponse<RunAccepted>>(`${BASE}/episodes/${eid}/narration`, { voice })
 }
 
-export function runAssetImages(pid: string, opts?: { provider?: string; ids?: string[] }) {
+export function runAssetImages(pid: string, opts?: { provider?: string; ids?: string[]; model?: string; provider_id?: string }) {
   return api.post<ApiResponse<RunAccepted>>(`${BASE}/projects/${pid}/assets/images`, opts ?? {})
 }
 
-export function retryStoryboard(sid: string, opts?: { stage?: 'image' | 'video'; provider?: string; model?: string }) {
+export function retryStoryboard(sid: string, opts?: { stage?: 'image' | 'video'; provider?: string; model?: string; provider_id?: string }) {
   return api.post<ApiResponse<RunAccepted>>(`${BASE}/storyboards/${sid}/retry`, opts ?? {})
 }
 

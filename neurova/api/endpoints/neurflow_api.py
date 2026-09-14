@@ -83,6 +83,9 @@ def _sub_block_to_dict(b) -> Dict[str, Any]:
             "min": b.get("min"),
             "max": b.get("max"),
             "language": b.get("language"),
+            # model-selector 能力过滤声明（image_generation/video_generation——
+            # 图/视生成节点下拉按能力筛+仅已配置联通；用户口径 2026-09-14）
+            "provider_capability": b.get("provider_capability"),
             # 条件可见（联动下拉）：{field, operator, value}，前端按当前 config 过滤字段显隐
             "condition": b.get("condition"),
         }
@@ -99,6 +102,7 @@ def _sub_block_to_dict(b) -> Dict[str, Any]:
         "min": getattr(b, "min", None),
         "max": getattr(b, "max", None),
         "language": getattr(b, "language", None),
+        "provider_capability": getattr(b, "provider_capability", None),
         "condition": getattr(b, "condition", None),
     }
 

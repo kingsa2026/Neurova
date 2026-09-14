@@ -49,6 +49,7 @@ import StudioProjectPage from '@/pages/aigc/StudioProjectPage.vue'
 import { waitStudioRun } from '@/composables/useStudioRun'
 import {
   getProject, getEpisode, runSplitScript, retryStoryboard, updateStoryboard, mergeEpisode,
+  runGenerateImages, runGenerateVideos, runAssetImages,
 } from '@/api/modules/studio'
 
 const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': zhCN } })
@@ -188,6 +189,24 @@ describe('StudioProjectPage', () => {
     expect(vm.fileUrlOf('')).toBe('')
   })
 
+
+  it('模型选择透传：auto 不传参（后端能力路由），选定模型带 model+provider_id', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    await vm.genImages()
+    await flushPromises()
+    expect((runGenerateImages as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]).toEqual({})
+    vm.imgModel = 'flux.1'
+    await vm.genImages()
+    const call = (runGenerateImages as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]
+    expect(call).toEqual({ model: 'flux.1' }) // mock 列表无 providerOf 命中 → provider_id undefined 不入体
+    await vm.genVideos()
+    expect((runGenerateVideos as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]).toEqual({ resolution: '720p' })
+    await vm.batchAssetImages()
+    // 资产定妆与首帧共享 imgModel 选择
+    expect((runAssetImages as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]).toEqual({ model: 'flux.1', ids: undefined })
+  })
   it('Phase04 导出：成片 URL 与连播清单双形态', async () => {
     mergeMock.mockResolvedValue({
       code: 0,
