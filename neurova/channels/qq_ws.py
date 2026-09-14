@@ -179,7 +179,10 @@ class QQWebSocketAdapter(ChannelAdapter):
         import websockets
         while not self._stop_event.is_set():
             try:
-                await self._ensure_token()
+                # _ensure_token 是同步方法：必须 to_thread 包装。直接 await 其
+                # bool 返回 → TypeError → 重连死循环，网关永远连不上
+                # （2026-09-15 QQ"该机器人未连接服务"事故）
+                await asyncio.to_thread(self._ensure_token)
                 url = await asyncio.to_thread(self._fetch_gateway_url)
                 if not url:
                     raise RuntimeError("gateway url empty")
