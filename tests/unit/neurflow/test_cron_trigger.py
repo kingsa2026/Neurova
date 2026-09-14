@@ -129,7 +129,11 @@ class TestFire:
 
         tr = _cron_trigger()
         await m.fire(tr, {"k": "v"})
-        dispatch.assert_awaited_once_with("wf_1", {"k": "v"})
+        # 现行契约：fire 注入触发来源追踪键（trigger_source/trigger_id），
+        # 供执行实例审计与 webhook/cron 区分——断言对齐实现（与渠道批次
+        # _reply_kwargs 契约同步修正同类）
+        dispatch.assert_awaited_once_with(
+            "wf_1", {"k": "v", "trigger_source": "cron", "trigger_id": "trg_c1"})
 
     @pytest.mark.asyncio
     async def test_fire_without_dispatch_is_safe(self):
