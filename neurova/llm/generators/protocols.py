@@ -468,15 +468,25 @@ async def submit_video(
     ref_images: Optional[List[str]] = None,
     audio: Optional[bool] = None,
     timeout: float = 60.0,
+    last_frame: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """提交视频生成任务，返回 {task_id, poll_url?, raw}。"""
+    """提交视频生成任务，返回 {task_id, poll_url?, raw, ignored_params?}。
+
+    L5 尾帧通道（能力自适应，对齐 R2 教义）：Seedance i2v 官方支持
+    first_frame/last_frame 角色（先画后动插值）；VEO instances 支持
+    lastFrame（Google 公开 API 字段）；WAN 无尾帧通道 → 尾帧进
+    ignored_params 显式标注（首帧照常提交，不静默丢弃不假生效）。
+    """
     protocol = (
         VideoProtocol(creds.protocol)
         if creds.protocol in (p.value for p in VideoProtocol)
         else resolve_video_protocol(creds.protocol, creds.model, creds.base_url)
     )
     refs = ref_images or []
+    ignored: List[str] = []
     if protocol == VideoProtocol.WAN:
+        if last_frame:
+            ignored.append("last_frame")
         headers = {"Authorization": f"Bearer {creds.api_key}", **dashscope_async_header()}
         body: Dict[str, Any] = {
             "model": creds.model or "wan3.0-t2v-bundle",
@@ -495,8 +505,11 @@ async def submit_video(
         if status >= 400:
             raise RuntimeError(f"WAN 提交失败 HTTP {status}: {str(data)[:300]}")
         task_id = (data.get("output") or {}).get("task_id")
-        return {"task_id": task_id, "poll_url": dashscope_tasks_url(
+        out: Dict[str, Any] = {"task_id": task_id, "poll_url": dashscope_tasks_url(
             wan_tasks_root(creds.base_url), task_id or ""), "raw": data}
+        if ignored:
+            out["ignored_params"] = ignored
+        return out
 
     if protocol == VideoProtocol.SEEDANCE2:
         headers = {"Authorization": f"Bearer {creds.api_key}"}
@@ -504,6 +517,11 @@ async def submit_video(
         for i, ref in enumerate(refs):
             role = "first_frame" if i == 0 else "reference_image"
             content.append({"type": "image_url", "role": role, "image_url": {"url": media_to_data_url(ref)}})
+        if last_frame:
+            # 首帧存在时尾帧才有插值意义；无首帧直接给尾帧按 reference 兜底
+            role = "last_frame" if refs else "reference_image"
+            content.append({"type": "image_url", "role": role,
+                            "image_url": {"url": media_to_data_url(last_frame)}})
         body = {"model": creds.model, "content": content}
         status, data = await _post_json(seedance_submit_url(creds.base_url), headers, body, timeout)
         if status >= 400:
@@ -517,6 +535,9 @@ async def submit_video(
     for ref in refs:
         instance["image"] = {"bytesBase64Encoded": media_to_data_url(ref).split(",", 1)[-1],
                              "mimeType": "image/png"}
+    if last_frame:
+        instance["lastFrame"] = {"bytesBase64Encoded": media_to_data_url(last_frame).split(",", 1)[-1],
+                                 "mimeType": "image/png"}
     body = {
         "instances": [instance],
         "parameters": {"durationSeconds": int(duration), "sampleCount": 1},
@@ -594,9 +615,11 @@ async def generate_video_wait(
     audio: Optional[bool] = None,
     poll_interval: float = 10.0,
     max_wait: float = 900.0,
+    last_frame: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """submit + 轮询直到完成（阻塞式封装，供同步调用方使用）。"""
-    submitted = await submit_video(creds, prompt, duration, resolution, ref_images, audio)
+    """submit + 轮询直到完成（阻塞式封装，供同步调用方使用；透传尾帧）。"""
+    submitted = await submit_video(creds, prompt, duration, resolution, ref_images,
+                                   audio, last_frame=last_frame)
     task_id = submitted.get("task_id")
     if not task_id:
         raise RuntimeError(f"视频任务提交未返回 task_id: {str(submitted.get('raw'))[:300]}")

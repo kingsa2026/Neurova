@@ -152,6 +152,8 @@ class VideoGenerationRequest(BaseModel):
     base_url: Optional[str] = Field(default=None, description="显式端点")
     ref_images: list = Field(default_factory=list, description="参考图/首帧（URL 或本地路径）")
     audio: Optional[bool] = Field(default=None, description="是否生成音频（wan3）")
+    # L5 尾帧通道：Seedance first+last 插值；WAN 无通道 → ignored_params 标注
+    last_frame: Optional[str] = Field(default=None, description="尾帧（URL 或本地路径，Seedance i2v 支持）")
 
 
 def _get_request_id(request: Request) -> str:
@@ -554,6 +556,7 @@ async def generate_video(
         submitted = await submit_video(
             creds, body.prompt, duration=body.duration, resolution=body.resolution,
             ref_images=list(body.ref_images or []), audio=body.audio,
+            last_frame=body.last_frame or None,
         )
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -566,6 +569,7 @@ async def generate_video(
     remote_task_id = str(submitted.get("task_id") or "")
     if not remote_task_id:
         raise HTTPException(status_code=502, detail="提交未返回 task_id（协议响应异常）")
+    ignored_csv = ",".join(submitted.get("ignored_params") or [])
     record = get_generation_task_ledger().add(TaskRecord(
         kind="video",
         provider_id=body.provider_id or "",
@@ -577,11 +581,13 @@ async def generate_video(
         poll_url=str(submitted.get("poll_url") or ""),
         prompt=body.prompt[:500],
         owner_user_id=str(current_user.get("user_id") or ""),
+        ignored_params=ignored_csv,
     ))
     return {
         "code": 0,
         "message": "success",
-        "data": {"task_id": record.task_id, "status": "submitted", "protocol": protocol.value},
+        "data": {"task_id": record.task_id, "status": "submitted", "protocol": protocol.value,
+                 **({"ignored_params": ignored_csv} if ignored_csv else {})},
     }
 
 
