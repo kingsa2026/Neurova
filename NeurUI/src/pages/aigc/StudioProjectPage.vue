@@ -13,7 +13,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
-  getEpisode, getProject,
+  addStoryboardManually, getEpisode, getProject,
   runAssetImages, runExtract, runGenerateImages, runGenerateVideos,
   runNarration, runSplitScript, runStoryboards,
   retryStoryboard, updateAsset, updateEpisode, updateStoryboard,
@@ -160,6 +160,12 @@ async function breakStoryboards(force = false) {
   await loadStoryboards()
 }
 
+async function addManualShot() {
+  if (!currentEid.value) return
+  await addStoryboardManually(currentEid.value, { description: '（新镜头，填写画面提示词）', image_prompt: '' })
+  await loadStoryboards()
+}
+
 async function saveShot(sb: StudioStoryboard, refs?: { name: string; id: string }[]) {
   await updateStoryboard(sb.id, {
     image_prompt: sb.image_prompt,
@@ -252,6 +258,7 @@ defineExpose({
   novel, scriptModel, mergeResult, slideshowItems, composedUrl,
   splitScript, saveEpisode, extractAssets, batchAssetImages, uploadAssetImage,
   breakStoryboards, saveShot, genImages, genVideos, genNarration, retryShot,
+  addManualShot,
   doMerge, switchPhase, switchEpisode, loadStoryboards, loadDetail,
 })
 </script>
@@ -351,6 +358,7 @@ defineExpose({
               {{ t('studio.breakStoryboards') }}
             </GlassButton>
             <GlassButton :disabled="!storyboards.length" @click="breakStoryboards(true)">{{ t('studio.rebreak') }}</GlassButton>
+            <GlassButton :disabled="!currentEid" @click="addManualShot">+ {{ t('studio.manualShot') }}</GlassButton>
             <GlassButton :loading="busy.images" :disabled="!storyboards.length" @click="genImages">
               {{ t('studio.genFirstFrames') }}
             </GlassButton>

@@ -3322,6 +3322,7 @@ studio: {
   noAssets: 'अभी कोई एसेट नहीं — पहले निकालें',
   breakStoryboards: 'शॉट में बाँटें',
   rebreak: 'फिर से बाँटें',
+  manualShot: 'मैन्युअल शॉट',
   genFirstFrames: 'फ़्रेम जनरेट',
   genVideos: 'वीडियो जनरेट',
   genNarration: 'वर्णन',

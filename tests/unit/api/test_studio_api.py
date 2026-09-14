@@ -127,3 +127,18 @@ class TestMergeEndpoint:
         # 字幕 SRT 已生成并挂到分集
         assert json.loads(client.store.get_merge(data["merge"]["id"])["items_json"])[0]["text"] == "旁白"
         assert client.store.get_episode(ep["id"])["subtitle_path"].endswith(".srt")
+
+
+class TestManualShot:
+    def test_add_manual_shot_without_llm(self, client):
+        """手动镜头（R6 堵点：LLM 不可用时工作台不被阻塞）。"""
+        pid = client.post("/api/v1/studio/projects", json={"title": "T"}).json()["data"]["project"]["id"]
+        ep = client.store.add_episode(pid, {"number": 1, "title": "e"})
+        r = client.post(f"/api/v1/studio/episodes/{ep['id']}/storyboards/manual",
+                        json={"description": "主角推门", "image_prompt": "man enters"})
+        assert r.status_code == 200
+        sb = r.json()["data"]["storyboard"]
+        assert sb["number"] == 1 and sb["episode_id"] == ep["id"]
+        # 空镜头拒绝：三提示字段全空
+        r2 = client.post(f"/api/v1/studio/episodes/{ep['id']}/storyboards/manual", json={"title": "x"})
+        assert r2.status_code == 400

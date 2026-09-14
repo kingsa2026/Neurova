@@ -3322,6 +3322,7 @@ studio: {
   noAssets: 'Нет ассетов — сначала извлеките',
   breakStoryboards: 'Разбить на планы',
   rebreak: 'Разбить заново',
+  manualShot: 'Ручной план',
   genFirstFrames: 'Первые кадры',
   genVideos: 'Видео',
   genNarration: 'Закадровый текст',
