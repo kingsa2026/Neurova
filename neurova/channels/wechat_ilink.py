@@ -381,7 +381,9 @@ class WeChatILinkAdapter(ChannelAdapter):
             if resp.get("ret", 0) != 0:
                 logger.error("wechat ilink 发送失败: %s", resp)
                 return None
-            return str(resp.get("msg_id") or resp.get("message_id") or f"wx_{int(time.time())}")
+            mid = str(resp.get("msg_id") or resp.get("message_id") or f"wx_{int(time.time())}")
+            logger.info("wechat ilink message sent: %s", mid)
+            return mid
         except Exception as e:
             logger.exception("wechat ilink 发送异常: %s", e)
             return None
