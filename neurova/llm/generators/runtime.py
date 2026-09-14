@@ -39,9 +39,11 @@ GENERATION_OUTPUT_DIR = PROJECT_ROOT / "data" / "generations"
 DEFAULT_OPENAI_BASE = "https://api.openai.com/v1"
 DEFAULT_WAN_BASE = "https://dashscope.aliyuncs.com/api/v1"
 
-_VIDEO_TYPES = ("text_to_video", "image_to_video")
+# L5：keyframe_to_video 转真实通道（Seedance first_frame+last_frame 先画后动）；
+# video_to_video 仍无实测协议（登记缓后台账）
+_VIDEO_TYPES = ("text_to_video", "image_to_video", "keyframe_to_video")
 _IMAGE_TYPES = ("text_to_image", "image_to_image")
-_UNSUPPORTED_TYPES = ("keyframe_to_video", "video_to_video")
+_UNSUPPORTED_TYPES = ("video_to_video",)
 
 
 class GenerationCredsError(ValueError):
@@ -215,7 +217,7 @@ class ProtocolGenerator:
             result = await self._generate_video(t, config)
         else:
             result = GenerationResult(success=False, error=(
-                f"{t}：无实测协议支撑（首尾帧需百炼临时上传、视频生视频需专协议，"
+                f"{t}：无实测协议支撑（视频生视频需专协议，"
                 "登记缓后台账），见 docs/Neurova_PRINTFILM_火宝短剧_AIGC对标研究_2026-09-13.md"
             ))
         result.duration = time.monotonic() - start
@@ -270,7 +272,14 @@ class ProtocolGenerator:
 
     async def _generate_video(self, t: str, config: GenerationConfig) -> GenerationResult:
         model = (config.model or config.model_id or "").strip()
-        refs = [config.image_url] if (t == "image_to_video" and config.image_url) else []
+        refs: List[str] = []
+        last_frame = ""
+        if t == "image_to_video" and config.image_url:
+            refs = [config.image_url]
+        elif t == "keyframe_to_video":
+            if config.start_image_url:
+                refs = [config.start_image_url]
+            last_frame = config.end_image_url or ""
         protocol = protocols.resolve_video_protocol("", model, "")
         try:
             creds = resolve_generation_creds(
@@ -283,7 +292,8 @@ class ProtocolGenerator:
         try:
             result = await protocols.generate_video_wait(
                 creds, config.prompt, duration=duration, resolution=resolution,
-                ref_images=refs, max_wait=max_wait)
+                ref_images=refs, max_wait=max_wait,
+                last_frame=last_frame or None)
         except Exception as e:  # noqa: BLE001 — 诚实回传
             logger.warning("facade 视频生成失败: %s", e)
             return GenerationResult(success=False, error=f"视频生成失败: {str(e)[:300]}")
