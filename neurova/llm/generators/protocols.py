@@ -27,12 +27,13 @@ URL/请求体构建为纯函数（可测），HTTP 用 aiohttp（可选依赖，
 from __future__ import annotations
 
 import base64
+import mimetypes
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import asyncio
 
@@ -460,6 +461,50 @@ async def generate_image(
 # ── 视频协议：submit / poll 抽象（异步任务型） ──
 
 
+async def dashscope_upload_file(
+    api_key: str, model: str, local_path: str,
+    base_url: str = "", timeout: float = 60.0,
+) -> str:
+    """百炼临时文件上传（A2），返回可被 media 引用的 `oss://` URL。
+
+    契约事实源=官方 SDK dashscope/utils/oss_utils.py（OssUtils.upload）：
+    ① GET {api_root}/uploads?action=getPolicy&model=<m> 取上传凭证；
+    ② POST upload_host multipart（policy/signature/key/x-oss-* + file）→
+       200 → `oss://<upload_dir>/<basename>`（官方说明有效期 48h）。
+    失败诚实抛错（不假提交、不回退公网 URL）。调用方提交模型时对
+    oss:// 引用必须携带 X-DashScope-OssResourceResolve: enable。
+    """
+    path = Path(local_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"参考文件不存在: {local_path}")
+    cert_url = (f"{wan_tasks_root(base_url)}/uploads"
+                f"?action=getPolicy&model={quote(model or 'wan2.2-i2v-plus')}")
+    status, data = await _get_json(cert_url, {"Authorization": f"Bearer {api_key}"},
+                                   timeout=timeout)
+    output = (data or {}).get("output") or {}
+    if status >= 400 or not output.get("upload_host"):
+        raise RuntimeError(
+            f"百炼上传凭证获取失败 HTTP {status}: {str(data)[:260]}")
+    key = f"{output['upload_dir']}/{path.name}"
+    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    fields = {
+        "OSSAccessKeyId": output["oss_access_key_id"],
+        "Signature": output["signature"],
+        "policy": output["policy"],
+        "key": key,
+        "x-oss-object-acl": output.get("x_oss_object_acl", "private"),
+        "x-oss-forbid-overwrite": str(output.get("x_oss_forbid_overwrite", "true")),
+        "success_action_status": "200",
+        "x-oss-content-type": mime,
+    }
+    st, resp = await _post_form(output["upload_host"], {}, fields,
+                                [("file", path.name, path.read_bytes(), mime)],
+                                timeout=600.0)
+    if st != 200:
+        raise RuntimeError(f"百炼 OSS 直传失败 HTTP {st}: {str(resp)[:200]}")
+    return f"oss://{key}"
+
+
 async def submit_video(
     creds: ProtocolCredentials,
     prompt: str,
@@ -496,11 +541,19 @@ async def submit_video(
         if audio is not None:
             body["parameters"]["audio"] = bool(audio)
         if refs:
-            # wan 参考媒体：公网 URL 直传（本地文件需百炼临时上传，暂不支持——诚实报错）
+            # A2：本地参考媒体走百炼临时上传（oss://，48h）；公网/oss 引用直传。
+            # 上传失败诚实抛错——不假提交（原「暂未实现」断点解除）。
+            resolved_refs: List[str] = []
             for ref in refs:
-                if not ref.startswith("http"):
-                    raise ValueError("WAN 协议本地参考媒体需经百炼临时上传（暂未实现），请传公网 URL")
-            body["input"]["media"] = refs
+                if ref.startswith(("http://", "https://", "oss://")):
+                    resolved_refs.append(ref)
+                else:
+                    resolved_refs.append(await dashscope_upload_file(
+                        creds.api_key, creds.model or "wan2.2-i2v-plus",
+                        ref, creds.base_url))
+            body["input"]["media"] = resolved_refs
+            if any(str(r).startswith("oss://") for r in resolved_refs):
+                headers["X-DashScope-OssResourceResolve"] = "enable"
         status, data = await _post_json(wan_submit_url(creds.base_url), headers, body, timeout)
         if status >= 400:
             raise RuntimeError(f"WAN 提交失败 HTTP {status}: {str(data)[:300]}")
