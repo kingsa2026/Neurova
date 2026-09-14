@@ -62,6 +62,7 @@ import agentFirewallPageTest from './AgentFirewallPage.test';
 import skillPoolPageTest from './SkillPoolPage.test';
 import skillMarketPageTest from './SkillMarketPage.test';
 import aigcPageTest from './AIGCPage.test';
+import aigcApiTest from './AigcApi.test';
 import toolLayerPageTest from './ToolLayerPage.test';
 // M4 P2 协作与工作流页面测试套件
 import workflowPageTest from './WorkflowPage.test';
@@ -165,6 +166,7 @@ export default function testsuite() {
   skillPoolPageTest();
   skillMarketPageTest();
   aigcPageTest();
+  aigcApiTest();
   toolLayerPageTest();
   // M4 P2 协作与工作流页面测试套件
   workflowPageTest();

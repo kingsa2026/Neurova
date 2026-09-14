@@ -1301,3 +1301,105 @@ export interface MemorySearchSettings {
   enabled: boolean;
   updatedAt: string;
 }
+
+// ── AIGC 生成域（M5a，对齐 Web generation.ts 契约 2026-09-15）──
+
+/** 服务端账本任务状态（比本地 AIGCTaskStatus 多 submitted/done 两态） */
+export type AigcServerTaskStatus =
+  'pending' | 'submitted' | 'running' | 'done' | 'succeeded' | 'failed';
+
+/** GET /v1/generation/tasks 返回的服务端账本行 */
+export interface AigcGenerationTask {
+  task_id: string;
+  kind: string;            // image | video | audio
+  protocol: string;
+  model: string;
+  status: AigcServerTaskStatus;
+  prompt: string;
+  submitted_at: number;    // epoch 秒
+  updated_at?: number;
+  local_path: string;
+  url: string;             // 已删产物（file_missing）时后端置空
+  source: string;          // rest | channel | workflow
+  error: string;
+  ignored_params?: string;
+  /** C3：产物被保留清理删除，账本行保留 */
+  file_missing?: boolean;
+}
+
+export interface AigcTextPayload {
+  prompt: string;
+  model?: string;
+  system_prompt?: string;
+}
+
+export interface AigcImagePayload {
+  prompt: string;
+  model?: string;
+  provider_id?: string;
+  width?: number;
+  height?: number;
+  num_images?: number;
+  negative_prompt?: string;
+  seed?: number;
+}
+
+export interface AigcAudioPayload {
+  text: string;
+  voice?: string;
+  model?: string;
+}
+
+export interface AigcVideoPayload {
+  prompt: string;
+  model?: string;
+  provider_id?: string;
+  duration?: number;
+  resolution?: string;
+  image_url?: string;      // 两段式 t2v：首帧图本地路径
+}
+
+export interface AigcTextResult {
+  text: string;
+  model: string;
+  routed?: boolean;
+}
+
+export interface AigcImageResult {
+  urls: string[];
+  task_id?: string;
+}
+
+export interface AigcVideoSubmitResult {
+  task_id: string;
+  status: AigcServerTaskStatus;
+  protocol: string;
+}
+
+export interface AigcVideoStatusResult {
+  task_id: string;
+  status: AigcServerTaskStatus;
+  url?: string;
+  error?: string;
+  warning?: string;
+}
+
+export interface AigcVoiceOption {
+  id: string;
+  name: string;
+}
+
+export interface AigcUsageRow {
+  usage_date?: string;
+  kind: string;
+  provider?: string;
+  model?: string;
+  items: number;
+  failed: number;
+}
+
+export interface AigcUsageSummary {
+  daily: AigcUsageRow[];
+  totals: AigcUsageRow[];
+  days: number;
+}
