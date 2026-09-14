@@ -68,11 +68,17 @@ class TestChannelManagerMessageHandler:
                 assert dispatched.chat_id == "test_chat"
                 assert dispatched.content == "你好"
 
-                # 验证回复被发送
+                # 验证回复被发送（渠道会话模型后回发携带 _reply_kwargs 上下文：
+                # agent 归属 + 群@提问者 sender/chat_type + metadata 透传 + 统一会话 scope）
                 mock_send.assert_called_once_with(
                     "feishu",
                     "test_chat",
-                    "回复内容"
+                    "回复内容",
+                    agent_id="default",
+                    at_user_id="user_001",
+                    chat_type="p2p",
+                    reply_metadata={},
+                    session_scope="test_chat",
                 )
         finally:
             queue.close()
