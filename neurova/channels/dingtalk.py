@@ -134,7 +134,7 @@ class DingTalkAdapter(ChannelAdapter):
         """Stream 模式: 通过 WebSocket 长连接接收事件
 
         官方 SDK 契约（2026-09-13 根修，此前调用不存在的 API 恒 AttributeError）：
-        - Credential / DingtalkStreamClient 构造
+        - Credential / DingTalkStreamClient 构造
         - register_callback_handler(topic, ChatbotHandler 子类实例)（非 ..._listener）
         - start_forever() 启动循环（内部重连；非 start()）
         """
@@ -148,7 +148,7 @@ class DingTalkAdapter(ChannelAdapter):
             )
 
             # 创建流式客户端
-            self._stream_client = dingtalk_stream.DingtalkStreamClient(credential)
+            self._stream_client = dingtalk_stream.DingTalkStreamClient(credential)
 
             # 注册机器人消息回调（handler 必须是 ChatbotHandler 子类，官方契约）
             handler = _NeurovaChatbotHandler(self)
@@ -433,7 +433,7 @@ class DingTalkAdapter(ChannelAdapter):
 
     async def disconnect(self):
         """断开钉钉连接（幂等）"""
-        # C-13: 真正关闭长连接——dingtalk_stream.DingtalkStreamClient 提供
+        # C-13: 真正关闭长连接——dingtalk_stream.DingTalkStreamClient 提供
         # async stop()（设置 stop_event 并关闭 websocket）；SDK 版本差异安全
         # 探测 stop/close，awaitable 结果在主 loop 上等待
         client = self._stream_client

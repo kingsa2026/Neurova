@@ -154,6 +154,46 @@ class TestStartupBootstrap:
         finally:
             ChannelManager._instance = None
 
+    def test_bootstrap_counts_connect_false_as_failed(self, tmp_path, monkeypatch):
+        """2026-09-14 钉钉事故统计盲区：connect() 诚实返回 False 此前不计数，
+        装配日志 connected=1/failed=0 完全掩盖连接失败。必须计入 failed。"""
+        import asyncio
+
+        from neurova.api.endpoints import channel_config as cc
+
+        class _Failing:
+            def __init__(self):
+                self.channel_type = "dingtalk"
+                self.is_connected = False
+                self.config = type("C", (), {"enabled": True})()
+
+            async def connect(self):
+                return False  # 真实契约：连接失败诚实返回 False
+
+            async def disconnect(self):
+                pass
+
+            def set_event_callback(self, cb):
+                self.cb = cb
+
+        monkeypatch.setattr(cc, "CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(cc, "CONFIG_FILE", tmp_path / "channel_configs.json")
+        monkeypatch.setattr(cc, "_create_adapter", lambda *a, **k: _Failing())
+        (tmp_path / "channel_configs.json").write_text(
+            json.dumps({
+                "version": 2,
+                "agents": {"default": {"dingtalk": {"channel_type": "dingtalk", "enabled": True, "app_id": "x"}}},
+            }),
+            encoding="utf-8",
+        )
+        ChannelManager._instance = None
+        try:
+            stats = asyncio.run(cc.bootstrap_channel_adapters())
+            assert stats["failed"] == 1, "connect 返回 False 必须计 failed，不得静默"
+            assert stats["connected"] == 0
+        finally:
+            ChannelManager._instance = None
+
 
 class _FakeAdapter:
     def __init__(self, channel_type):

@@ -123,7 +123,7 @@ class TestDingTalkStreamTopic:
                 registered["handler"] = handler
 
             def start_forever(self):
-                pass
+                registered["started"] = True
 
         fake = types.ModuleType("dingtalk_stream")
 
@@ -135,7 +135,10 @@ class TestDingTalkStreamTopic:
             STATUS_OK = 200
 
         fake.Credential = Credential
-        fake.DingtalkStreamClient = FakeClient
+        # 真实 SDK 类名是 DingTalkStreamClient（大写 T）。此前 fake 按代码里的
+        # 错误拼写 DingtalkStreamClient 造属性 → 假绿，生产装配才暴露
+        # AttributeError（2026-09-14 钉钉无响应事故）
+        fake.DingTalkStreamClient = FakeClient
         fake.ChatbotHandler = ChatbotHandler
         fake.AckMessage = AckMessage
         monkeypatch.setitem(sys.modules, "dingtalk_stream", fake)

@@ -325,6 +325,12 @@ async def bootstrap_channel_adapters(manager=None) -> Dict[str, int]:
                 ok = await adapter.connect()
                 if ok:
                     stats["connected"] += 1
+                else:
+                    # 诚实返回 False 的连接失败必须计 failed——此前是统计盲区：
+                    # 装配日志 connected=1/failed=0 把钉钉连接失败完全掩盖
+                    # （2026-09-14 无响应事故）
+                    stats["failed"] += 1
+                    logger.warning("渠道连接失败(connect 返回 False) %s(agent=%s)", channel_type, agent_id)
             except Exception as e:  # noqa: BLE001
                 stats["failed"] += 1
                 logger.warning("渠道连接失败 %s(agent=%s): %s", channel_type, agent_id, e)
