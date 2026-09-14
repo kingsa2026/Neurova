@@ -342,6 +342,6 @@ async def update_asset(table: str, asset_id: str, body: Dict[str, Any] = Body(..
         raise HTTPException(status_code=404, detail="资产不存在")
     _owned_project(store, row["project_id"], current_user)
     keep = {"description", "appearance", "styling", "personality", "final_prompt",
-            "prompt", "lighting", "name", "role"}
+            "prompt", "lighting", "name", "role", "image_path"}
     store.update_asset_row(table, asset_id, {k: v for k, v in body.items() if k in keep})
     return {"code": 0, "data": {"asset": store.get_asset_row(table, asset_id)}}

@@ -1,91 +1,89 @@
 /**
- * StudioPage 契约（迁移自 AIGCPage.studio.test.ts）：
- * 一键成片以固定模板 id 与表单入参跑工作流；产物合并为连播数据。
+ * StudioPage（R4 项目列表）契约：新建项目跳转、列表渲染、删除。
+ * 创作专区 = 项目化四 Phase 工作台入口（对标 huobao 项目管理）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { createI18n } from 'vue-i18n'
+import zhCN from '@/i18n/locales/zh-CN'
 
-vi.mock('@/utils/security', () => ({
-  secureStorage: { get: () => 'tok', set: vi.fn(), remove: vi.fn() },
-}))
-vi.mock('@/api/modules/models', () => ({ listModels: vi.fn().mockResolvedValue([]) }))
-vi.mock('@/api/modules/generation', () => ({
-  generateText: vi.fn(), generateImage: vi.fn(), generateAudio: vi.fn(), submitVideo: vi.fn(),
-  listGenerationTasks: vi.fn().mockResolvedValue({ code: 0, data: { tasks: [] } }),
-}))
-vi.mock('@/api', () => ({
-  default: { post: vi.fn(), get: vi.fn() },
-  request: { post: vi.fn(), get: vi.fn().mockResolvedValue({ data: {} }) },
-}))
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
-  return { ...actual, useRouter: () => ({ push: vi.fn() }) }
+  return { ...actual, useRouter: () => ({ push: vi.fn() }), useRoute: () => ({ params: {}, path: '/aigc/studio' }) }
 })
-const messageSuccess = vi.fn()
-vi.mock('ant-design-vue', () => ({
-  message: { success: (...a: any[]) => messageSuccess(...a), error: vi.fn(), info: vi.fn() },
+vi.mock('@/api/modules/studio', () => ({
+  listProjects: vi.fn(),
+  createProject: vi.fn(),
+  deleteProject: vi.fn().mockResolvedValue({}),
 }))
-
-let studioOutputs: Record<string, unknown> | null = null
-const runTemplateMock = vi.fn()
-vi.mock('@/composables/useWorkflowRun', () => ({
-  useWorkflowRun: () => ({
-    running: { value: false },
-    steps: { value: [{ id: 'script', label: '剧本生成', status: 'success' }] },
-    lastError: { value: '' },
-    outputs: { value: studioOutputs },
-    workflowId: { value: 'wf_test_1' },
-    runTemplate: (...a: any[]) => runTemplateMock(...a),
-    cleanup: vi.fn(),
-  }),
+vi.mock('ant-design-vue', () => ({
+  message: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }))
 
 import StudioPage from '@/pages/aigc/StudioPage.vue'
-import { makeAigcI18n, AIGC_STUBS } from './testUtils'
+import { listProjects, createProject } from '@/api/modules/studio'
+
+const listMock = listProjects as unknown as ReturnType<typeof vi.fn>
+const createMock = createProject as unknown as ReturnType<typeof vi.fn>
+
+const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': zhCN } })
+
+const PROJECT = {
+  id: 'p1', owner_user_id: 'u1', title: '赘婿龙王', description: '三年之期', genre: '战神归来',
+  style: 'cinematic', aspect_ratio: '9:16 竖屏', total_episodes: 1, status: 'draft',
+  thumbnail: '', created_at: 1757700000, updated_at: 1757700100,
+}
 
 const mountPage = () =>
-  mount(StudioPage, { global: { plugins: [makeAigcI18n()], stubs: { ...AIGC_STUBS } } })
+  mount(StudioPage, {
+    global: {
+      plugins: [i18n],
+      stubs: {
+        GlassPanel: { template: '<div><slot /></div>' },
+        GlassButton: { template: '<button @click="$emit(\'click\')"><slot /></button>' },
+        'a-spin': { template: '<div><slot /></div>' },
+        'a-empty': { template: '<div><slot /></div>' },
+        'a-modal': { template: '<div><slot /></div>' },
+        'a-form': { template: '<div><slot /></div>' },
+        'a-form-item': { props: ['label'], template: '<div><slot /></div>' },
+        'a-input': { props: ['value'], template: '<input />' },
+        'a-input-number': { template: '<input />' },
+        'a-select': { props: ['options'], template: '<select />' },
+        'a-tag': { template: '<span><slot /></span>' },
+        'a-popconfirm': { props: ['title'], template: '<div><slot /></div>' },
+      },
+    },
+  })
 
-describe('StudioPage', () => {
+describe('StudioPage（项目列表）', () => {
   beforeEach(() => {
-    runTemplateMock.mockReset()
-    messageSuccess.mockClear()
-    studioOutputs = null
+    listMock.mockReset()
+    listMock.mockResolvedValue({ code: 0, data: { projects: [PROJECT] } })
+    createMock.mockReset()
   })
 
-  it('一键成片：固定模板 id + 表单入参跑工作流', async () => {
-    runTemplateMock.mockResolvedValue({ ok: true, executionId: 'ex', status: 'completed', outputs: null, error: '' })
+  it('挂载拉取并渲染项目卡片', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(listMock).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('赘婿龙王')
+    expect(wrapper.text()).toContain('战神归来')
+  })
+
+  it('新建项目成功后跳转工作台', async () => {
+    createMock.mockResolvedValue({ code: 0, data: { project: { ...PROJECT, id: 'p2' } } })
     const wrapper = mountPage()
     await flushPromises()
     const vm = wrapper.vm as any
-    vm.theme = '落魄赘婿龙王归来'
-    vm.style = '国风水墨'
-    await vm.run()
-    expect(runTemplateMock).toHaveBeenCalledTimes(1)
-    const [templateId, name, inputs] = runTemplateMock.mock.calls[0]
-    expect(templateId).toBe('template_short_drama')
-    expect(name).toContain('落魄赘婿')
-    expect(inputs.theme).toBe('落魄赘婿龙王归来')
-    expect(inputs.style).toBe('国风水墨')
-    expect(messageSuccess).toHaveBeenCalled()
+    vm.form = { ...vm.form, title: '新项目' }
+    await vm.create()
+    expect(createMock).toHaveBeenCalledWith(expect.objectContaining({ title: '新项目' }))
   })
 
-  it('完成后连播数据合并（images+storyboard+audio）', async () => {
-    studioOutputs = {
-      storyboard: [{ description: '镜一', narration: '旁白一' }],
-      images: [{ shot: 1, url: '/api/v1/generation/files/a_0.png', prompt: 'p' }],
-      audio: [{ url: '/api/v1/generation/files/v_0.wav' }],
-      compose: { composed: false, mode: 'slideshow_manifest' },
-    }
-    runTemplateMock.mockResolvedValue({ ok: true, executionId: 'ex', status: 'completed', outputs: studioOutputs, error: '' })
+  it('空列表显示空态', async () => {
+    listMock.mockResolvedValue({ code: 0, data: { projects: [] } })
     const wrapper = mountPage()
     await flushPromises()
-    const vm = wrapper.vm as any
-    vm.theme = 't'
-    await vm.run()
-    await flushPromises()
-    expect(vm.studioItems.length).toBe(1)
-    expect(vm.studioItems[0].audio).toContain('v_0.wav')
-    expect(vm.studioItems[0].description).toBe('镜一')
+    expect(wrapper.text()).not.toContain('赘婿龙王')
   })
 })
