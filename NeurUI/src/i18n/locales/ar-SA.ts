@@ -1764,6 +1764,7 @@ export default {
     seedPlaceholder: 'فارغ = عشوائي',
     ignoredParams: 'غير مدعوم من المزود، تم تجاهله: {params}',
     ignoredTag: 'متجاهل {params}',
+    expired: 'منتهي الصلاحية',
     voiceDefault: 'الصوت الافتراضي',
     staticFirst: 'إطار ثابت أولاً',
     staticFirstHint: 'أنشئ إطارًا ثابتًا أولًا واستخدمه كإطار أول للفيديو (~1–3 دقائق)',

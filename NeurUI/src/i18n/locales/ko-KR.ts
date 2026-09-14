@@ -1764,6 +1764,7 @@ export default {
     seedPlaceholder: '비우면 랜덤',
     ignoredParams: '제공자 미지원으로 무시: {params}',
     ignoredTag: '무시 {params}',
+    expired: '만료됨',
     voiceDefault: '기본 음성',
     staticFirst: '정지 이미지 먼저 생성',
     staticFirstHint: '정지 이미지를 먼저 만들고 첫 프레임으로 영상 생성(약 1~3분)',

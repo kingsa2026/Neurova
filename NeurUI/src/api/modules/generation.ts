@@ -102,6 +102,8 @@ export interface GenerationTask {
   error: string
   /** R2：服务商不支持而被显式忽略的参数（csv） */
   ignored_params?: string
+  /** C3：保留清理已删文件（账本行保留）——url 恒空，UI 显示「已过期」 */
+  file_missing?: boolean
 }
 
 // ---------------------------------------------------------------------------

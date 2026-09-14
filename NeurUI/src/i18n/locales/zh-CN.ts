@@ -1777,6 +1777,7 @@ export default {
     seedPlaceholder: '留空则随机',
     ignoredParams: '当前服务商不支持，已忽略：{params}',
     ignoredTag: '已忽略 {params}',
+    expired: '已过期',
     voiceDefault: '默认音色',
     staticFirst: '先生成静帧',
     staticFirstHint: '先生成一张静帧画面，再以其为首帧生成视频（约 1–3 分钟）',

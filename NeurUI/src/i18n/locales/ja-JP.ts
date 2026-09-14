@@ -1764,6 +1764,7 @@ export default {
     seedPlaceholder: '空欄はランダム',
     ignoredParams: 'プロバイダー非対応のため無視: {params}',
     ignoredTag: '無視 {params}',
+    expired: '期限切れ',
     voiceDefault: 'デフォルトボイス',
     staticFirst: 'まず静止画を生成',
     staticFirstHint: '静止画を先に生成し、最初のフレームとして動画を作成（約1〜3分）',

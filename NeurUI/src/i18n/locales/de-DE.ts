@@ -1764,6 +1764,7 @@ export default {
     seedPlaceholder: 'Leer = zufällig',
     ignoredParams: 'Vom Anbieter nicht unterstützt, ignoriert: {params}',
     ignoredTag: 'Ignoriert {params}',
+    expired: 'Abgelaufen',
     voiceDefault: 'Standardstimme',
     staticFirst: 'Zuerst Standbild',
     staticFirstHint: 'Erst ein Standbild erzeugen, dann als Erstbild des Videos verwenden (~1–3 Min)',
