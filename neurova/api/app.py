@@ -1032,6 +1032,15 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("FFmpeg 引导启动失败: %s", e)
 
+    # C3：data/generations 产物保留清理（NEUROVA_GENERATION_RETENTION_DAYS
+    # 默认 0=关闭；开启才后台执行，账本行永不删、Studio 引用保护）
+    try:
+        from neurova.llm.generators.retention import start_retention_bootstrap
+
+        start_retention_bootstrap()
+    except Exception as e:
+        logger.warning("产物保留清理启动失败: %s", e)
+
     logger.info("=" * 60)
     logger.info("Neurova API Server started successfully")
     logger.info("=" * 60)

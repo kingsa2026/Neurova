@@ -1764,6 +1764,7 @@ export default {
     seedPlaceholder: 'खाली = रैंडम',
     ignoredParams: 'प्रदाता समर्थित नहीं, छोड़ा: {params}',
     ignoredTag: 'छोड़ा {params}',
+    expired: 'समाप्त',
     voiceDefault: 'डिफ़ॉल्ट वॉइस',
     staticFirst: 'पहले स्थिर फ़्रेम',
     staticFirstHint: 'पहले एक स्थिर फ़्रेम बनाएँ, फिर उसे वीडियो का पहला फ़्रेम बनाएँ (~1–3 मिनट)',

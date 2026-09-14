@@ -163,3 +163,34 @@ class TestGenerationFileAuth:
         client, _, _ = auth_client
         resp = client.get("/api/v1/generation/files/art.png?access_token=bad")
         assert resp.status_code == 401
+
+
+class TestTasksExpiredDisplay:
+    """C3：保留清理删除文件后账本行不删——/tasks 须以 file_missing 显式标注，
+    历史面板据此显示「已过期」，不得继续给必 404 的 url 装作可用。"""
+
+    def test_missing_file_after_purge_flagged(self, auth_client):
+        import time
+        led = auth_client[1]
+        gone = str(auth_client[2] / "purged.png")
+        led.add(TaskRecord(kind="image", task_id="px1", status="done",
+                           local_path=gone, owner_user_id="u1",
+                           submitted_at=time.time(), updated_at=time.time()))
+        resp = auth_client[0].get("/api/v1/generation/tasks?kind=image",
+                                  headers={"Authorization": "Bearer good"})
+        row = resp.json()["data"]["tasks"][0]
+        assert row["file_missing"] is True
+        assert row["url"] == ""
+        assert row["status"] == "done"  # 账本原状态不篡改
+
+    def test_present_file_not_flagged(self, auth_client):
+        led = auth_client[1]
+        art = auth_client[2] / "live.png"
+        art.write_bytes(b"X")
+        led.add(TaskRecord(kind="image", task_id="px2", status="done",
+                           local_path=str(art), owner_user_id="u1"))
+        resp = auth_client[0].get("/api/v1/generation/tasks?kind=image",
+                                  headers={"Authorization": "Bearer good"})
+        row = next(x for x in resp.json()["data"]["tasks"] if x["task_id"] == "px2")
+        assert row.get("file_missing") is False
+        assert row["url"].startswith("/api/v1/generation/files/")

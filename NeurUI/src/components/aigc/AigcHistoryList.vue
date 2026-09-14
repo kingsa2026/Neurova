@@ -100,6 +100,8 @@ defineExpose({ load, tasks, kindFilter, setKind })
           <div class="aigc-history-prompt">{{ task.prompt || '—' }}</div>
           <div class="aigc-history-meta">
             <a-tag :color="statusColor(task.status)">{{ statusText(task.status) }}</a-tag>
+            <!-- C3：产物已被保留清理删除（账本行保留），诚实标注过期 -->
+            <a-tag v-if="task.file_missing" color="default">{{ t('aigc.expired') }}</a-tag>
             <a-tag v-if="task.source && task.source !== 'rest'" color="blue">{{ task.source }}</a-tag>
             <a-tag v-if="task.ignored_params" color="orange" :title="task.ignored_params">
               {{ t('aigc.ignoredTag', { params: task.ignored_params }) }}

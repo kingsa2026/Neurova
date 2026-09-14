@@ -1764,6 +1764,7 @@ export default {
     seedPlaceholder: 'Пусто = случайно',
     ignoredParams: 'Не поддерживается провайдером, проигнорировано: {params}',
     ignoredTag: 'Пропущено {params}',
+    expired: 'Устарело',
     voiceDefault: 'Голос по умолчанию',
     staticFirst: 'Сначала стоп-кадр',
     staticFirstHint: 'Сначала создать стоп-кадр и использовать его как первый кадр видео (~1–3 мин)',

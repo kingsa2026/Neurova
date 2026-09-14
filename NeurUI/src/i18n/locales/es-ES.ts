@@ -1764,6 +1764,7 @@ export default {
     seedPlaceholder: 'Vacío = aleatoria',
     ignoredParams: 'No compatible con el proveedor, ignorado: {params}',
     ignoredTag: 'Ignorado {params}',
+    expired: 'Caducado',
     voiceDefault: 'Voz predeterminada',
     staticFirst: 'Primero fotograma fijo',
     staticFirstHint: 'Generar primero una imagen fija y usarla como primer fotograma (~1–3 min)',

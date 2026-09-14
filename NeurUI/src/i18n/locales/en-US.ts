@@ -1767,6 +1767,7 @@ export default {
     seedPlaceholder: 'Empty = random',
     ignoredParams: 'Unsupported by provider, ignored: {params}',
     ignoredTag: 'Ignored {params}',
+    expired: 'Expired',
     voiceDefault: 'Default voice',
     staticFirst: 'Generate still frame first',
     staticFirstHint: 'Generate a still frame, then use it as the first frame of the video (~1–3 min)',

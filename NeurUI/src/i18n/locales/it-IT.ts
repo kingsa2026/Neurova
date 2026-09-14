@@ -1764,6 +1764,7 @@ export default {
     seedPlaceholder: 'Vuoto = casuale',
     ignoredParams: 'Non supportato dal provider, ignorato: {params}',
     ignoredTag: 'Ignorato {params}',
+    expired: 'Scaduto',
     voiceDefault: 'Voce predefinita',
     staticFirst: 'Prima il fermo immagine',
     staticFirstHint: 'Genera prima un fermo immagine e usalo come primo fotogramma (~1–3 min)',

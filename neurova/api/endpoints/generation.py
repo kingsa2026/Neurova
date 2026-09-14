@@ -572,7 +572,9 @@ async def generate_video(
     ignored_csv = ",".join(submitted.get("ignored_params") or [])
     record = get_generation_task_ledger().add(TaskRecord(
         kind="video",
-        provider_id=body.provider_id or "",
+        # 账本不存 api_key（敏感），轮询靠 settle_video_record 按 provider_id 重取——
+        # 必须写生效值（auto 模式下为 routed.provider_id，body 里是空），否则轮询恒 401。
+        provider_id=str(provider_id or ""),
         protocol=protocol.value,
         model=creds.model,
         base_url=creds.base_url,
@@ -676,7 +678,14 @@ async def list_generation_tasks(
             "model": t.model, "status": t.status, "prompt": t.prompt,
             "submitted_at": t.submitted_at, "updated_at": t.updated_at,
             "local_path": t.local_path,
-            "url": _local_url(t.local_path) if t.local_path else (t.result_url or ""),
+            # C3：保留清理删除文件后账本行仍在——file_missing 显式标注并清空
+            # url（历史面板显示「已过期」，不给必 404 的链接装作可用）
+            "file_missing": bool(t.local_path)
+                            and t.status in ("done", "failed", "succeeded")
+                            and not Path(t.local_path).is_file(),
+            "url": (_local_url(t.local_path)
+                    if t.local_path and Path(t.local_path).is_file()
+                    else (t.result_url or "")),
             "source": getattr(t, "source", "rest"),
             "ignored_params": getattr(t, "ignored_params", ""),
             "error": t.error,
