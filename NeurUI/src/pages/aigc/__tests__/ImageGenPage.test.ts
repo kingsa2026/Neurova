@@ -95,6 +95,28 @@ describe('ImageGenPage', () => {
     expect(generateImageMock.mock.calls[0][0].ref_images).toEqual(['C:/proj/storage/users/u1/ref.png'])
   })
 
+  it('R2：反向提示词/画幅/张数/seed/相似度随 payload 透传', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.prompt = '猫'
+    vm.negativePrompt = '文字 水印'
+    vm.ratio = '16:9'
+    vm.numImages = 3
+    vm.seed = 77
+    vm.refImages = ['C:/proj/ref.png']
+    vm.strengthLevel = 'high'
+    await vm.generate()
+    const payload = generateImageMock.mock.calls[0][0]
+    expect(payload.negative_prompt).toBe('文字 水印')
+    expect(payload.width).toBe(1280)
+    expect(payload.height).toBe(720)
+    expect(payload.num_images).toBe(3)
+    expect(payload.seed).toBe(77)
+    expect(payload.strength).toBe(0.9)
+    expect(payload.ref_images).toEqual(['C:/proj/ref.png'])
+  })
+
   it('挂载记录侧栏（默认过滤 image）', async () => {
     const wrapper = mountPage()
     await flushPromises()

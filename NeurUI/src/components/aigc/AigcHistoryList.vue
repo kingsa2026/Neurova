@@ -101,6 +101,9 @@ defineExpose({ load, tasks, kindFilter, setKind })
           <div class="aigc-history-meta">
             <a-tag :color="statusColor(task.status)">{{ statusText(task.status) }}</a-tag>
             <a-tag v-if="task.source && task.source !== 'rest'" color="blue">{{ task.source }}</a-tag>
+            <a-tag v-if="task.ignored_params" color="orange" :title="task.ignored_params">
+              {{ t('aigc.ignoredTag', { params: task.ignored_params }) }}
+            </a-tag>
             <span v-if="task.model">{{ task.model }}</span>
             <span>{{ taskTime(task.submitted_at) }}</span>
           </div>

@@ -4,17 +4,18 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-
 vi.mock('@/utils/security', () => ({
   secureStorage: { get: () => 'tok', set: vi.fn(), remove: vi.fn() },
 }))
 vi.mock('@/api/modules/models', () => ({ listModels: vi.fn().mockResolvedValue([]) }))
 const generateAudioMock = vi.fn()
+const listVoicesMock = vi.fn().mockResolvedValue({ code: 0, data: { voices: [] } })
 vi.mock('@/api/modules/generation', () => ({
   generateText: vi.fn(),
   generateImage: vi.fn(),
   generateAudio: (p: any) => generateAudioMock(p),
   submitVideo: vi.fn(),
+  listGenerationVoices: () => listVoicesMock(),
   listGenerationTasks: vi.fn().mockResolvedValue({ code: 0, data: { tasks: [] } }),
 }))
 vi.mock('@/api', () => ({
@@ -36,6 +37,7 @@ const mountPage = () =>
 describe('AudioGenPage', () => {
   beforeEach(() => {
     generateAudioMock.mockReset()
+    listVoicesMock.mockResolvedValue({ code: 0, data: { voices: [] } })
     messageError.mockClear()
     messageSuccess.mockClear()
   })
@@ -64,5 +66,21 @@ describe('AudioGenPage', () => {
     expect(vm.audioUrl).toBe('')
     expect(messageError).toHaveBeenCalledWith('TTS 引擎未就绪')
     expect(messageSuccess).not.toHaveBeenCalled()
+  })
+
+  it('R2：音色下拉用引擎真实枚举，不再硬编码假列表', async () => {
+    listVoicesMock.mockResolvedValue({
+      code: 0,
+      data: { voices: [
+        { id: 'en-US-AriaNeural', label: 'Aria（Female en-US）', gender: 'Female', locale: 'en-US' },
+        { id: 'zh-CN-XiaoxiaoNeural', label: '晓晓（Female zh-CN）', gender: 'Female', locale: 'zh-CN' },
+      ] },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    const values = wrapper.find('.voice-select').findAll('option').map((o) => o.attributes('value'))
+    // 中文音色排前
+    expect(values[0]).toBe('zh-CN-XiaoxiaoNeural')
+    expect(values).not.toContain('alloy')
   })
 })

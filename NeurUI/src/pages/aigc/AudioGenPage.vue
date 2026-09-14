@@ -1,13 +1,14 @@
 <script setup lang="ts">
 /**
- * AIGC 音频生成页（2026-09-14 R1 自 AIGCPage 拆分）。
+ * AIGC 音频生成页（2026-09-14 R1 拆分；R2 音色真实化）。
  * JSON 契约（批次1）：{code,data:{url,path,task_id}}；code=-1 诚实失败不误报成功。
- * 音色列表当前仍为引擎别名常量（R2 换 GET /generation/voices 真实列表）。
+ * R2：音色下拉来自 GET /generation/voices（引擎真实枚举）；引擎不可用时
+ * 仅保留 default 项（服务端默认音色）——不再硬编码 OpenAI 别名假列表。
  */
-import { ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { generateAudio as apiGenerateAudio } from '@/api/modules/generation'
+import { generateAudio as apiGenerateAudio, listGenerationVoices, type VoiceOption } from '@/api/modules/generation'
 import { withFileToken } from '@/utils/genFiles'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
@@ -17,19 +18,30 @@ import AigcHistoryList from '@/components/aigc/AigcHistoryList.vue'
 const { t } = useI18n()
 
 const text = ref('')
-const voice = ref('alloy')
+const voice = ref('default')
 const speed = ref(1.0)
 const generating = ref(false)
 const audioUrl = ref('')
+const voices = ref<VoiceOption[]>([])
 
-const voiceOptions = [
-  { label: t('aigc.voiceAlloy'), value: 'alloy' },
-  { label: t('aigc.voiceEcho'), value: 'echo' },
-  { label: t('aigc.voiceFable'), value: 'fable' },
-  { label: t('aigc.voiceOnyx'), value: 'onyx' },
-  { label: t('aigc.voiceNova'), value: 'nova' },
-  { label: t('aigc.voiceShimmer'), value: 'shimmer' },
-]
+const voiceOptions = computed(() => {
+  if (!voices.value.length) {
+    return [{ label: t('aigc.voiceDefault'), value: 'default' }]
+  }
+  // 中文音色排前（本地化体验），其余保持引擎顺序
+  return [...voices.value]
+    .sort((a, b) => Number(b.locale?.startsWith('zh') ?? false) - Number(a.locale?.startsWith('zh') ?? false))
+    .map((v) => ({ label: v.label, value: v.id }))
+})
+
+onMounted(async () => {
+  try {
+    const res: any = await listGenerationVoices()
+    voices.value = res?.data?.voices ?? []
+  } catch {
+    voices.value = []
+  }
+})
 
 async function synthesize() {
   if (!text.value.trim()) return
@@ -69,7 +81,7 @@ async function synthesize() {
             <a-textarea v-model:value="text" :rows="4" :placeholder="t('aigc.audioPromptPlaceholder')" />
           </a-form-item>
           <a-form-item :label="t('aigc.voice')">
-            <a-select v-model:value="voice" :options="voiceOptions" :placeholder="t('aigc.selectVoice')" />
+            <a-select v-model:value="voice" class="voice-select" :options="voiceOptions" :placeholder="t('aigc.selectVoice')" />
           </a-form-item>
           <a-form-item :label="t('aigc.speed')">
             <a-slider v-model:value="speed" :min="0.5" :max="2" :step="0.05" />
