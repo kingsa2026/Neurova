@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -356,3 +357,96 @@ class TestA1LastFrame:
                                             provider="wan")
         rec = led.list()[0]
         assert rec.ignored_params == "last_frame"
+
+
+class TestA5SubtitleBurn:
+    """A5：concat 成功后第二步烧字幕；字体缺失/烧录失败均诚实降级（台账验收）。"""
+
+    @staticmethod
+    def _setup_video_shot(store, tmp_path, monkeypatch):
+        """一镜有视频 + 旁白（触发 srt）；产物目录与 ffmpeg 重定向 tmp。"""
+        from neurova.aigc_studio import services
+        from neurova.llm.generators import runtime as gen_runtime
+
+        monkeypatch.setattr(gen_runtime, "GENERATION_OUTPUT_DIR", tmp_path)
+        p = _project(store)
+        ep = store.add_episode(p["id"], {"number": 1, "title": "e1"})
+        v = tmp_path / "shot1.mp4"
+        v.write_bytes(b"VID")
+        store.add_storyboard(ep["id"], {
+            "number": 1, "description": "主角推门", "video_prompt": "vp",
+            "narration": "他回来了", "video_path": str(v)})
+        return services, p, ep
+
+    @staticmethod
+    def _fake_run_factory(burn_ok=True):
+        import subprocess as sp
+
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(list(cmd))
+            # concat 步：-c copy 的最后一个参数是输出；烧录步：含 -vf
+            out = cmd[-1]
+            if "-vf" not in cmd or burn_ok:
+                open(out, "wb").write(b"MPEG")
+            return type("P", (), {"returncode": 0 if (("-vf" not in cmd) or burn_ok) else 1,
+                                  "stderr": b"" if burn_ok else b"Subtitles filter not found"})()
+
+        return sp, calls, fake_run
+
+    @pytest.mark.asyncio
+    async def test_concat_then_burn_two_step(self, store, tmp_path, monkeypatch):
+        services, p, ep = self._setup_video_shot(store, tmp_path, monkeypatch)
+        import neurova.core.ffmpeg as ff
+        monkeypatch.setattr(ff, "resolve_ffmpeg_path", lambda preferred="": "/x/ffmpeg")
+        monkeypatch.setattr(ff, "has_cjk_font", lambda: True)
+        sp, calls, fake_run = self._fake_run_factory()
+        monkeypatch.setattr(sp, "run", fake_run)
+
+        res = await services.merge_episode(store, p["id"], ep["id"])
+        assert res["composed"] is True
+        assert res["subtitle_burned"] is True
+        assert len(calls) == 2  # concat + 烧录
+        assert any("-vf" in c for c in calls)
+        assert str(calls[1][calls[1].index("-vf") + 1]).startswith("subtitles=filename=")
+        assert res["merge"]["output_path"].endswith("_sub.mp4")
+        assert Path(res["merge"]["output_path"]).is_file()
+
+    @pytest.mark.asyncio
+    async def test_missing_font_skips_burn_with_warning(self, store, tmp_path, monkeypatch):
+        services, p, ep = self._setup_video_shot(store, tmp_path, monkeypatch)
+        import neurova.core.ffmpeg as ff
+        monkeypatch.setattr(ff, "resolve_ffmpeg_path", lambda preferred="": "/x/ffmpeg")
+        monkeypatch.setattr(ff, "has_cjk_font", lambda: False)
+        sp, calls, fake_run = self._fake_run_factory()
+        monkeypatch.setattr(sp, "run", fake_run)
+
+        res = await services.merge_episode(store, p["id"], ep["id"])
+        assert res["composed"] is True
+        assert res["subtitle_burned"] is False
+        assert "字体" in res["warning"]
+        assert len(calls) == 1  # 无烧录步
+        assert not any("-vf" in c for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_burn_failure_falls_back_to_plain(self, store, tmp_path, monkeypatch):
+        services, p, ep = self._setup_video_shot(store, tmp_path, monkeypatch)
+        import neurova.core.ffmpeg as ff
+        monkeypatch.setattr(ff, "resolve_ffmpeg_path", lambda preferred="": "/x/ffmpeg")
+        monkeypatch.setattr(ff, "has_cjk_font", lambda: True)
+
+        def fake_run(cmd, **kw):
+            out = cmd[-1]
+            if "-vf" in cmd:
+                return type("P", (), {"returncode": 1, "stderr": b"open filter failed"})()
+            open(out, "wb").write(b"MPEG")
+            return type("P", (), {"returncode": 0, "stderr": b""})()
+
+        import subprocess as sp
+        monkeypatch.setattr(sp, "run", fake_run)
+        res = await services.merge_episode(store, p["id"], ep["id"])
+        assert res["composed"] is True          # 无字幕成片照常交付
+        assert res["subtitle_burned"] is False
+        assert "字幕" in res["warning"]
+        assert Path(res["merge"]["output_path"]).is_file()

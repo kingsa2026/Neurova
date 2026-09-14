@@ -234,6 +234,9 @@ export interface MergeResult {
   mode: string
   url?: string
   error?: string
+  // A5：字幕烧录诚实降级（无中文字体/烧录失败 → 无字幕成片 + warning 原文）
+  subtitle_burned?: boolean
+  warning?: string
   merge: StudioMerge
   items: Array<{
     index: number

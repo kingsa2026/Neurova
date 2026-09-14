@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS merges(
   id TEXT PRIMARY KEY, project_id TEXT NOT NULL, episode_id TEXT NOT NULL,
   mode TEXT DEFAULT '', status TEXT DEFAULT 'pending',
   output_path TEXT DEFAULT '', output_url TEXT DEFAULT '', error TEXT DEFAULT '',
+  warning TEXT DEFAULT '',
   items_json TEXT DEFAULT '[]', created_at REAL, updated_at REAL
 );
 CREATE TABLE IF NOT EXISTS runs(
@@ -116,14 +117,15 @@ class StudioStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
-        # A1：既有库幂等补列（旧版 storyboards 无 end_frame_path——PRAGMA 探测，
+        # A1/A5：既有库幂等补列（旧版表缺新列——PRAGMA 探测，
         # 不依赖异常吞 duplicate：重复执行安全）
-        cols = {r["name"] for r in self._conn.execute(
-            "PRAGMA table_info(storyboards)").fetchall()}
-        if "end_frame_path" not in cols:
-            self._conn.execute(
-                "ALTER TABLE storyboards ADD COLUMN end_frame_path TEXT DEFAULT ''")
-            self._conn.commit()
+        for table, col in (("storyboards", "end_frame_path"), ("merges", "warning")):
+            cols = {r["name"] for r in self._conn.execute(
+                f"PRAGMA table_info({table})").fetchall()}
+            if col not in cols:
+                self._conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {col} TEXT DEFAULT ''")
+                self._conn.commit()
 
     # ── 内部 ────────────────────────────────────────────────────────────
 

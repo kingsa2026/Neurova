@@ -508,15 +508,34 @@ async def merge_episode(store, pid: str, eid: str) -> Dict[str, Any]:
             proc = subprocess.run(cmd, capture_output=True, timeout=600, check=False)
             Path(list_file).unlink(missing_ok=True)
             if proc.returncode == 0 and out_path.is_file():
+                # A5：concat 成功后第二步烧字幕。无中文字体烧出来只有方框
+                # （假成功），先探测；烧录失败回退无字幕成片——warning 留痕，不中断。
+                from neurova.core.ffmpeg import burn_subtitles, has_cjk_font
+
+                burned, warning = False, ""
+                final_path = out_path
+                if subtitle_path:
+                    if not has_cjk_font():
+                        warning = "本机缺少中文字体，未烧录字幕（播放器可外挂 SRT 字幕文件）"
+                    else:
+                        sub_path = GENERATION_OUTPUT_DIR / f"studio_episode_{eid}_sub.mp4"
+                        ok, err = burn_subtitles(ffmpeg, str(out_path),
+                                                 subtitle_path, str(sub_path))
+                        if ok:
+                            burned, final_path = True, sub_path
+                        else:
+                            warning = f"字幕烧录失败，输出无字幕成片：{err}"
                 merge = store.add_merge({
                     "project_id": pid, "episode_id": eid, "mode": "ffmpeg_concat",
-                    "status": "done", "output_path": str(out_path),
-                    "output_url": local_url_for(str(out_path)), "items": items,
+                    "status": "done", "output_path": str(final_path),
+                    "output_url": local_url_for(str(final_path)), "items": items,
+                    "warning": warning,
                 })
-                store.update_episode(eid, {"video_path": str(out_path),
+                store.update_episode(eid, {"video_path": str(final_path),
                                            "status": "exported"})
                 return {"ok": True, "composed": True, "mode": "ffmpeg_concat",
-                        "url": merge["output_url"], "merge": merge, "items": items}
+                        "url": merge["output_url"], "merge": merge, "items": items,
+                        "subtitle_burned": burned, "warning": warning}
             err = f"FFmpeg 失败: {(proc.stderr or b'')[-200:].decode(errors='ignore')}"
         except Exception as e:  # noqa: BLE001
             err = f"FFmpeg 异常: {str(e)[:200]}"
