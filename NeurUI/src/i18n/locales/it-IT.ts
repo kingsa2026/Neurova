@@ -3322,6 +3322,7 @@ studio: {
   noAssets: 'Nessun asset — estrai prima',
   breakStoryboards: 'Dividi in inquadrature',
   rebreak: 'Ridividi',
+  manualShot: 'Inquadratura manuale',
   genFirstFrames: 'Primi fotogrammi',
   genVideos: 'Video',
   genNarration: 'Voce narrante',

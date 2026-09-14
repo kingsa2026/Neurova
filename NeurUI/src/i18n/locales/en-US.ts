@@ -3326,6 +3326,7 @@ studio: {
   noAssets: 'No assets yet — extract first',
   breakStoryboards: 'Break into shots',
   rebreak: 'Re-break',
+  manualShot: 'Manual shot',
   genFirstFrames: 'Generate first frames',
   genVideos: 'Generate videos',
   genNarration: 'Narration',

@@ -3322,6 +3322,7 @@ studio: {
   noAssets: 'Aucun asset — extrayez d’abord',
   breakStoryboards: 'Découper en plans',
   rebreak: 'Re-découper',
+  manualShot: 'Plan manuel',
   genFirstFrames: 'Premières images',
   genVideos: 'Vidéos',
   genNarration: 'Narration',

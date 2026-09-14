@@ -3322,6 +3322,7 @@ studio: {
   noAssets: 'アセットなし（先に抽出）',
   breakStoryboards: '絵コンテ分解',
   rebreak: '再分解',
+  manualShot: '手動でショット',
   genFirstFrames: '首フレーム一括',
   genVideos: '動画一括',
   genNarration: 'ナレーション',

@@ -39,6 +39,7 @@ vi.mock('@/api/modules/studio', () => ({
   updateEpisode: vi.fn(),
   updateAsset: vi.fn(),
   mergeEpisode: vi.fn(),
+  addStoryboardManually: vi.fn(),
 }))
 vi.mock('ant-design-vue', () => ({
   message: { success: vi.fn(), error: vi.fn(), info: vi.fn() },

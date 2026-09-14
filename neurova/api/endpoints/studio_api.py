@@ -267,6 +267,25 @@ async def update_episode(eid: str, body: Dict[str, Any] = Body(...),
     return {"code": 0, "data": {"episode": store.get_episode(eid)}}
 
 
+@router.post("/episodes/{eid}/storyboards/manual")
+async def add_storyboard_manual(eid: str, body: Dict[str, Any] = Body(...),
+                                current_user: Dict[str, Any] = Depends(get_current_user)):
+    """手动新增镜头：LLM 拆解失败/不可用（如欠费）时工作台不被阻塞——
+    分镜是数据行，拆解只是填充方式之一。"""
+    store = get_store()
+    _project, ep = _episode_with_project(store, eid, current_user)
+    keep = ("number", "title", "description", "image_prompt", "video_prompt",
+            "narration", "camera", "movement", "atmosphere", "bgm_prompt",
+            "sound_effect", "duration", "characters", "props", "scene_id")
+    row = {k: v for k, v in body.items() if k in keep}
+    if not any(str(row.get(k) or "").strip() for k in ("description", "image_prompt", "video_prompt")):
+        raise HTTPException(status_code=400, detail="镜头至少需要 description/image_prompt/video_prompt 之一")
+    if "number" not in row:
+        row["number"] = len(store.list_storyboards(eid)) + 1
+    sb = store.add_storyboard(eid, row)
+    return {"code": 0, "data": {"storyboard": sb}}
+
+
 @router.put("/storyboards/{sid}")
 async def update_storyboard(sid: str, body: Dict[str, Any] = Body(...),
                             current_user: Dict[str, Any] = Depends(get_current_user)):

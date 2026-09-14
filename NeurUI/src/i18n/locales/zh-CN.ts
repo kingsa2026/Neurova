@@ -3247,6 +3247,7 @@ studio: {
   noAssets: '暂无资产，先抽取',
   breakStoryboards: '分镜拆解',
   rebreak: '重新拆解',
+  manualShot: '手动加镜头',
   genFirstFrames: '批量首帧',
   genVideos: '批量视频',
   genNarration: '旁白配音',
