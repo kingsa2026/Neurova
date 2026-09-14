@@ -23,6 +23,9 @@
         <GlassStatCard :label="t('usageStats.longestSession')" :value="formatDuration(summary.longest_session_seconds)" emoji="⏱️" spark-color="#34d399" :spark-data="sparkCalls" />
         <GlassStatCard :label="t('usageStats.currentStreak')" :value="`${summary.current_streak_days} ${t('usageStats.days')}`" emoji="🔥" spark-color="#fbbf24" :spark-data="sparkCalls" />
         <GlassStatCard :label="t('usageStats.longestStreak')" :value="`${summary.longest_streak_days} ${t('usageStats.days')}`" emoji="🏆" spark-color="#f472b6" :spark-data="sparkCalls" />
+        <GlassStatCard :label="t('usageStats.aigcImages')" :value="aigcItems('image')" emoji="🖼️" spark-color="#60a5fa" :spark-data="aigcSpark('image')" />
+        <GlassStatCard :label="t('usageStats.aigcVideos')" :value="aigcItems('video')" emoji="🎬" spark-color="#a78bfa" :spark-data="aigcSpark('video')" />
+        <GlassStatCard :label="t('usageStats.aigcAudios')" :value="aigcItems('audio')" emoji="🔊" spark-color="#34d399" :spark-data="aigcSpark('audio')" />
       </div>
 
       <!-- Token 活动热力图（每日网格 / 每周 / 累计） -->
@@ -93,6 +96,7 @@ import {
   type ProviderUsageSnapshot,
   type ProviderUsageResponse,
 } from '@/api/modules/stats'
+import { getGenerationUsage, type AigcUsageSummary } from '@/api/modules/generation'
 
 const { t } = useI18n()
 
@@ -129,6 +133,20 @@ const scopeLabel = computed(() =>
 /** P1-13 provider 账单快照（采集器未装配/无启用 provider 时恒空 → 卡片隐藏） */
 const providerSnapshots = ref<ProviderUsageSnapshot[]>([])
 const providerErrors = ref<ProviderUsageResponse['errors']>([])
+
+/** L4：AIGC 生成用量（图/视频/音频计数；读失败回空账不影响主看板） */
+const aigcUsage = ref<AigcUsageSummary>({ daily: [], totals: [], days: 30 })
+
+function aigcItems(kind: string, status = 'success'): number {
+  const row = aigcUsage.value.totals.find(r => r.kind === kind && r.status === status)
+  return row ? (row.items || row.calls) : 0
+}
+
+function aigcSpark(kind: string): number[] {
+  return aigcUsage.value.daily
+    .filter(r => r.kind === kind && r.status === 'success')
+    .map(r => r.items || r.calls)
+}
 
 /** 每日 token 序列（KPI spark 用） */
 const heatDays = computed<UsageOverviewHeatmapDay[]>(() => overview.value.heatmap ?? [])
@@ -267,6 +285,13 @@ async function fetchData() {
   } catch {
     providerSnapshots.value = []
     providerErrors.value = []
+  }
+  // L4: AIGC 生成用量副路径（失败回空账，不影响主看板）
+  try {
+    const au: any = await getGenerationUsage(30)
+    aigcUsage.value = (au?.data ?? au) as AigcUsageSummary
+  } catch {
+    aigcUsage.value = { daily: [], totals: [], days: 30 }
   }
 }
 

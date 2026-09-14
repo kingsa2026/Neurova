@@ -151,3 +151,23 @@ export function getVideoTaskStatus(taskId: string) {
 export function listGenerationTasks(params?: { kind?: TaskKind; status?: TaskStatus }) {
   return api.get<ApiResponse<{ tasks: GenerationTask[] }>>(`${BASE}/tasks`, { params })
 }
+
+/** L4：AIGC 生成用量聚合（近 N 天按天/类型/状态）。 */
+export interface AigcUsageRow {
+  kind: string
+  status: string
+  items: number
+  calls: number
+  duration_ms: number
+  usage_date?: string
+}
+
+export interface AigcUsageSummary {
+  daily: AigcUsageRow[]
+  totals: AigcUsageRow[]
+  days: number
+}
+
+export function getGenerationUsage(days = 30) {
+  return api.get<ApiResponse<AigcUsageSummary>>(`${BASE}/usage`, { params: { days } })
+}

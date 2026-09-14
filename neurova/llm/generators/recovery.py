@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
@@ -66,19 +67,38 @@ async def settle_video_record(record: TaskRecord, ledger: Optional[GenerationTas
                 path = await persist_media(video_url, "video", record.task_id, 0)
                 ledger.update(record.task_id, status="succeeded", result_url=video_url,
                               local_path=path)
+                _record_video_usage(record, "success")
                 return {"status": "succeeded", "url": local_url_for(path)}
             except Exception as e:  # noqa: BLE001 — 下载失败仍回成功+远端 URL（可能已过期）
                 ledger.update(record.task_id, status="succeeded", result_url=video_url)
+                _record_video_usage(record, "success")
                 return {"status": "succeeded", "url": video_url,
                         "warning": f"本地化失败: {str(e)[:200]}"}
         ledger.update(record.task_id, status="succeeded", result_url=video_url)
+        _record_video_usage(record, "success")
         return {"status": "succeeded", "url": video_url}
     if status == "failed":
         err = str(result.get("error") or "")[:300]
         ledger.update(record.task_id, status="failed", error=err)
+        _record_video_usage(record, "failed")
         return {"status": "failed", "error": err}
     ledger.update(record.task_id, status="running")
     return {"status": "running"}
+
+
+def _record_video_usage(record: TaskRecord, status: str) -> None:
+    """L4：视频终态入账 AIGC 用量（时长=提交至终态耗时；写失败静默）。"""
+    try:
+        from neurova.core.aigc_usage import get_aigc_usage
+
+        duration_ms = max(0.0, (time.time() - (record.submitted_at or time.time())) * 1000)
+        get_aigc_usage().record(
+            kind="video", user_id=record.owner_user_id or "",
+            provider=record.provider_id, model=record.model,
+            protocol=record.protocol, status=status,
+            items=1 if status == "success" else 0, duration_ms=duration_ms)
+    except Exception:  # noqa: BLE001 — 统计永不影响收口
+        pass
 
 
 def _recovery_interval() -> float:

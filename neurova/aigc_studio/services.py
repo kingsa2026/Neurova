@@ -277,7 +277,23 @@ async def generate_shot_images(store, pid: str, eid: str,
             store.update_storyboard(sb["id"], {
                 "status": "failed", "error": str(e)[:200]})
             stats["failed"] += 1
+    _record_usage("image", stats.get("done", 0), stats.get("failed", 0),
+                  project.get("owner_user_id", ""))
     return stats
+
+
+def _record_usage(kind: str, ok: int, failed: int, user_id: str) -> None:
+    """L4：Studio 批量生成聚合入账 AIGC 用量（写失败静默）。"""
+    try:
+        from neurova.core.aigc_usage import get_aigc_usage
+
+        usage = get_aigc_usage()
+        if ok:
+            usage.record(kind=kind, user_id=user_id, status="success", items=ok)
+        if failed:
+            usage.record(kind=kind, user_id=user_id, status="failed", items=0)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
@@ -335,6 +351,7 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
             store.update_storyboard(sb["id"], {
                 "video_status": "failed", "error": str(e)[:200]})
             stats["failed"] += 1
+    _record_usage("video", stats.get("submitted", 0), stats.get("failed", 0), "")
     return stats
 
 
