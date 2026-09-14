@@ -34,7 +34,7 @@ const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const pid = String(route.params.pid || '')
-const { textModelOptions } = useAigcModels()
+const { textModelOptions, imageModelOptions, videoModelOptions, providerOf } = useAigcModels()
 
 type Phase = 'script' | 'assets' | 'workbench' | 'export'
 const PHASES: { key: Phase; labelKey: string }[] = [
@@ -48,6 +48,8 @@ const phase = ref<Phase>('script')
 const detail = ref<ProjectDetail | null>(null)
 const novel = ref('')
 const scriptModel = ref('auto')
+const imgModel = ref('auto')
+const vdModel = ref('auto')
 const currentEid = ref('')
 const busy = ref<Record<string, boolean>>({})
 const mergeResult = ref<MergeResult | null>(null)
@@ -104,7 +106,7 @@ async function extractAssets() {
 }
 
 async function batchAssetImages(ids?: string[]) {
-  const res: any = await runAssetImages(pid, { provider: 'ark', ids })
+  const res: any = await runAssetImages(pid, { ...imgParams(), ids })
   await track('assetImages', res?.data?.run_id || '')
 }
 
@@ -212,16 +214,26 @@ async function saveShot(sb: StudioStoryboard, refs?: { name: string; id: string 
   message.success(t('studio.saved'))
 }
 
+/** 选定模型 → 请求参数（auto=不传，后端按能力路由；选中项反查 provider_id） */
+function imgParams(): { model?: string; provider_id?: string } {
+  if (!imgModel.value || imgModel.value === 'auto') return {}
+  return { model: imgModel.value, provider_id: providerOf(imgModel.value) || undefined }
+}
+function vdParams(): { model?: string; provider_id?: string } {
+  if (!vdModel.value || vdModel.value === 'auto') return {}
+  return { model: vdModel.value, provider_id: providerOf(vdModel.value) || undefined }
+}
+
 async function genImages() {
   if (!currentEid.value) return
-  const res: any = await runGenerateImages(currentEid.value, { provider: 'ark' })
+  const res: any = await runGenerateImages(currentEid.value, imgParams())
   await track('images', res?.data?.run_id || '')
   await loadStoryboards()
 }
 
 async function genVideos() {
   if (!currentEid.value) return
-  const res: any = await runGenerateVideos(currentEid.value, { provider: 'wan', resolution: '720p' })
+  const res: any = await runGenerateVideos(currentEid.value, { ...vdParams(), resolution: '720p' })
   await track('videos', res?.data?.run_id || '')
   await loadStoryboards()
 }
@@ -234,7 +246,7 @@ async function genNarration() {
 }
 
 async function retryShot(sb: StudioStoryboard, stage: 'image' | 'video') {
-  await retryStoryboard(sb.id, { stage, provider: stage === 'image' ? 'ark' : 'wan' })
+  await retryStoryboard(sb.id, { stage, ...(stage === 'image' ? imgParams() : vdParams()) })
   message.success(t('studio.retryStarted'))
   setTimeout(() => { void loadStoryboards() }, 3000)
 }
@@ -288,9 +300,10 @@ onUnmounted(() => {
 
 defineExpose({
   phase, detail, episodes, characters, storyboards, currentEid, busy,
-  novel, scriptModel, mergeResult, slideshowItems, composedUrl,
+  novel, scriptModel, imgModel, vdModel, mergeResult, slideshowItems, composedUrl,
   splitScript, saveEpisode, extractAssets, batchAssetImages, uploadAssetImage,
   breakStoryboards, saveShot, genImages, genVideos, genNarration, retryShot,
+  imgParams, vdParams,
   addManualShot, setShotEndFrame, applyShotEndFrame, fileUrlOf,
   doMerge, switchPhase, switchEpisode, loadStoryboards, loadDetail,
 })
@@ -365,6 +378,7 @@ defineExpose({
             <GlassButton variant="primary" :loading="busy.assetImages" :disabled="!characters.length" @click="batchAssetImages()">
               {{ t('studio.generateAssetImages') }}
             </GlassButton>
+            <a-select v-model:value="imgModel" class="model-select-script" :options="imageModelOptions" size="small" style="min-width: 180px" />
           </div>
           <div class="studio-asset-grid">
             <div v-for="c in characters" :key="c.id" class="studio-asset-card">
@@ -395,9 +409,11 @@ defineExpose({
             <GlassButton :loading="busy.images" :disabled="!storyboards.length" @click="genImages">
               {{ t('studio.genFirstFrames') }}
             </GlassButton>
+            <a-select v-model:value="imgModel" class="model-select-script" :options="imageModelOptions" size="small" style="min-width: 180px" />
             <GlassButton :loading="busy.videos" :disabled="!storyboards.length" @click="genVideos">
               {{ t('studio.genVideos') }}
             </GlassButton>
+            <a-select v-model:value="vdModel" class="model-select-script" :options="videoModelOptions" size="small" style="min-width: 180px" />
             <GlassButton :loading="busy.narration" :disabled="!storyboards.length" @click="genNarration">
               {{ t('studio.genNarration') }}
             </GlassButton>

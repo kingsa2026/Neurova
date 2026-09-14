@@ -146,6 +146,16 @@ DRAMA_NODES: List[Dict[str, Any]] = [
                 ],
             },
             {
+                # 画布图像节点接能力过滤模型下拉（用户口径 2026-09-14：
+                # 图/视生成按 image_generation 能力筛 + 仅已配置联通）。
+                # comfyui 自建通道不消费此字段（走 workloads 分支）。
+                "id": "model_name",
+                "name": "model_name",
+                "type": "model-selector",
+                "label": "生成模型",
+                "provider_capability": "image_generation",
+            },
+            {
                 "id": "style",
                 "name": "style",
                 "type": "select",
@@ -624,10 +634,13 @@ async def _scene_gen_via_protocol(provider: str, prompt: str, config: Dict[str, 
     )
 
     hint = _SCENE_PROTOCOLS[provider]
-    model = str(config.get("model") or "")
+    # 键名对齐画布 model-selector 渲染契约（model_name/model_provider 由属性面板
+    # 写入；model/provider_id 保留模板与变量注入形态）
+    model = str(config.get("model") or config.get("model_name") or "")
+    provider_id = config.get("provider_id") or config.get("model_provider")
     try:
         creds = resolve_generation_creds(
-            hint, model, config.get("provider_id"), None,
+            hint, model, provider_id, None,
             config.get("base_url"), "https://api.openai.com/v1")
         gen = await _protocols.generate_image(
             creds, prompt, size=str(config.get("size", "1024x1024")), n=1,
