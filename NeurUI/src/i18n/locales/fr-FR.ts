@@ -1764,6 +1764,7 @@ export default {
     seedPlaceholder: 'Vide = aléatoire',
     ignoredParams: 'Non pris en charge, ignoré : {params}',
     ignoredTag: 'Ignoré {params}',
+    expired: 'Expiré',
     voiceDefault: 'Voix par défaut',
     staticFirst: 'Image fixe d’abord',
     staticFirstHint: 'Générer d’abord une image fixe comme première image de la vidéo (~1–3 min)',

@@ -68,6 +68,19 @@ describe('AigcHistoryList', () => {
     expect(wrapper.text()).toContain('channel') // 非 rest 来源徽标（工作流/渠道可追溯）
   })
 
+  it('C3：file_missing 记录显示「已过期」且不再渲染缩略图/下载链接', async () => {
+    listTasksMock.mockResolvedValue({
+      code: 0,
+      data: { tasks: [{ ...TASKS[0], url: '', file_missing: true }] },
+    })
+    const wrapper = mountList()
+    await flushPromises()
+    expect(wrapper.text()).toContain('已过期')
+    // url 已清空：该记录无带凭证的 img/download 链接（不给 404 装可用）
+    const html = wrapper.html()
+    expect(html).not.toContain('t1_0.png')
+  })
+
   it('kind prop 决定初始过滤', async () => {
     const wrapper = mountList('image')
     await flushPromises()
