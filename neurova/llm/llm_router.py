@@ -383,12 +383,14 @@ def register_provider_from_config(
 
     router = get_llm_router()
     metadata = model_metadata or {}
+    from neurova.llm.providers.types import capability_names
+
     models = []
     for m in model_names or []:
         meta = metadata.get(m, {}) or {}
         caps = detect_model_capabilities(
             m,
-            existing=[str(c) for c in (meta.get("capabilities") or [])],
+            existing=capability_names(meta.get("capabilities")),
             display_name=str(meta.get("name") or ""),
         )
         models.append(

@@ -1205,7 +1205,13 @@ class LLMProviderManager(Module):
             provider_type = ProviderType(provider.provider)
         except ValueError:
             provider_type = ProviderType.OPENAI
-        capabilities = meta.get("capabilities") or []
+        # 2026-09-15 D1 走查根因：meta 里的 capabilities 可能是枚举对象或
+        # 历史脏串（'ProviderCapability.TEXT'）——pydantic List[ProviderCapability]
+        # 构造遇脏串会单条抛错、经端点外层 try 放大为整批 /models 清零。
+        # 构造层先按 value/类名前缀归一（capability_names 单源），保证永不带病构造。
+        from neurova.llm.providers.types import capability_names
+
+        capabilities = capability_names(meta.get("capabilities"))
         return PydanticModelInfo(
             id=model_id,
             name=meta.get("name") or model_id,
