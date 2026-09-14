@@ -341,6 +341,7 @@ const routes: RouteRecordRaw[] = [
           { path: 'audio', name: 'AigcAudio', component: () => import('@/pages/aigc/AudioGenPage.vue') },
           { path: 'video', name: 'AigcVideo', component: () => import('@/pages/aigc/VideoGenPage.vue') },
           { path: 'studio', name: 'AigcStudio', component: () => import('@/pages/aigc/StudioPage.vue') },
+          { path: 'studio/:pid', name: 'AigcStudioProject', component: () => import('@/pages/aigc/StudioProjectPage.vue') },
         ],
       },
 
