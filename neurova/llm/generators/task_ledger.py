@@ -51,6 +51,9 @@ class TaskRecord:
     execution_id: str = ""
     # R2 能力自适应路由：服务商不支持而被显式忽略的参数（csv，如 "seed,strength"）
     ignored_params: str = ""
+    # R3（Studio 批量）：批次关联（episode/batch id）与项目关联，供进度聚合与追溯
+    batch_key: str = ""
+    project_id: str = ""
     submitted_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
