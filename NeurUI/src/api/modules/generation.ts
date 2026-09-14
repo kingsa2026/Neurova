@@ -23,7 +23,8 @@ export interface TextGenerationResult {
   request_id: string
 }
 
-/** 后端 ImageGenerationRequest：无 style 字段（旧实现的 style 被静默丢弃，已删）。 */
+/** 后端 ImageGenerationRequest：无 style 字段（旧实现的 style 被静默丢弃，已删）。
+ * seed/strength 走 R2 能力自适应路由：支持则透传，不支持进 ignored_params 显式标注。 */
 export interface ImageGenerationPayload {
   prompt: string
   model?: string
@@ -36,11 +37,23 @@ export interface ImageGenerationPayload {
   base_url?: string
   ref_images?: string[]
   negative_prompt?: string
+  seed?: number
+  strength?: number
 }
 
 export interface ImageGenerationResult {
   images: Array<{ url: string; path?: string; error?: string }>
   task_id: string
+  /** 服务商不支持而被显式忽略的参数（csv），如 "seed,strength" */
+  ignored_params?: string
+}
+
+/** 音色条目（GET /generation/voices，引擎真实列表）。 */
+export interface VoiceOption {
+  id: string
+  label: string
+  gender?: string
+  locale?: string
 }
 
 export interface AudioGenerationPayload {
@@ -87,6 +100,8 @@ export interface GenerationTask {
   url: string
   source: string
   error: string
+  /** R2：服务商不支持而被显式忽略的参数（csv） */
+  ignored_params?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +123,11 @@ export function generateImage(data: ImageGenerationPayload) {
 /** 音频生成（TTS，JSON 契约：url/path/task_id）。 */
 export function generateAudio(data: AudioGenerationPayload) {
   return api.post<ApiResponse<AudioGenerationResult>>(`${BASE}/audio`, data)
+}
+
+/** R2：可用音色列表（引擎真实枚举；引擎不可用时为空数组，非硬编码假列表）。 */
+export function listGenerationVoices() {
+  return api.get<ApiResponse<{ voices: VoiceOption[] }>>(`${BASE}/voices`)
 }
 
 /** 视频任务提交（异步，返回 task_id 供轮询）。 */
