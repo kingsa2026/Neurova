@@ -181,3 +181,65 @@ def start_ffmpeg_bootstrap() -> Optional[asyncio.Task]:
     _bootstrap_task = asyncio.create_task(_bg(), name="ffmpeg-bootstrap")
     logger.info("FFmpeg 首次启动自动下载已排队（后台，不阻塞服务）")
     return _bootstrap_task
+
+
+# ── A5：字幕烧录支撑（subtitles filter 转义 / 中文字体探测 / 两步烧录）──
+
+_CJK_FONT_NAMES = ("msyh.ttc", "msyhbd.ttc", "simhei.ttf", "simsun.ttc",
+                   "simfang.ttf", "NotoSansCJKsc-Regular.otf", "NotoSansCJK-Regular.ttc")
+
+
+def escape_subtitles_path(p) -> str:
+    """subtitles filter 的 filename 转义（实测 ffmpeg b6.0 多形态对照）：
+    反斜杠→正斜杠 + 冒号转义为 ``\\:``——filter 层以未转义 ``:`` 分参数，
+    盘符 ``E:`` 会被截成 ``E``（报 "parse as image size" 的假 Invalid argument）；
+    外层单引号保护空格。含单引号会破坏引号结构，诚实拒绝（ValueError）
+    而非拼出错误命令——Studio 生成名可控，出现即异常。"""
+    s = str(p).replace("\\", "/")
+    if "'" in s:
+        raise ValueError(f"字幕路径含单引号，拒绝烧录: {s}")
+    return s.replace(":", "\\:")
+
+
+def _cjk_font_candidates() -> List[Path]:
+    """各平台常见中文字体路径（纯文件探测，不依赖 fc-list——pf1 教训：
+    无中文字体时烧录只会得到方框假成功，必须先探测再决定烧或不烧）。"""
+    if os.name == "nt":
+        fonts = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "Fonts"
+        return [fonts / n for n in _CJK_FONT_NAMES]
+    if platform.system() == "Darwin":
+        return [Path("/System/Library/Fonts/PingFang.ttc"),
+                Path("/System/Library/Fonts/Supplemental/Songti.ttc")]
+    hits: List[Path] = []
+    for root in ("/usr/share/fonts", "/usr/local/share/fonts"):
+        if not os.path.isdir(root):
+            continue
+        for f in Path(root).rglob("*"):
+            name = f.name.lower()
+            if f.suffix in (".ttc", ".ttf", ".otf") and any(
+                    k in name for k in ("cjk", "wenquanyi", "wqy", "sourcehan", "notosans")):
+                hits.append(f)
+    return hits
+
+
+def has_cjk_font() -> bool:
+    return any(p.is_file() for p in _cjk_font_candidates())
+
+
+def burn_subtitles(ffmpeg: str, in_path, srt_path, out_path,
+                   timeout: int = 600) -> "tuple[bool, str]":
+    """第二步烧录：``-i in -vf subtitles=<esc> -c:a copy out``。
+    失败不抛（调用方回退无字幕成片 + warning），返回 (ok, err_tail)。"""
+    try:
+        esc = escape_subtitles_path(srt_path)
+    except ValueError as e:
+        return False, str(e)
+    cmd = [ffmpeg, "-y", "-i", str(in_path),
+           "-vf", f"subtitles=filename='{esc}'",
+           "-c:a", "copy", str(out_path)]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=timeout, check=False)
+    except Exception as e:  # noqa: BLE001
+        return False, str(e)[:200]
+    ok = proc.returncode == 0 and Path(out_path).is_file()
+    return ok, "" if ok else (proc.stderr or b"")[-200:].decode(errors="ignore")
