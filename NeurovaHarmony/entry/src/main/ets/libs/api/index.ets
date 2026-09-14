@@ -24,3 +24,5 @@ export { MonitorApi } from './modules/MonitorApi';
 // M4.6 新增模块（渠道系统）
 export { ChannelIntegrationApi } from './modules/ChannelIntegrationApi';
 export { SessionSyncApi } from './modules/SessionSyncApi';
+// M5a 新增模块（AIGC 生成域）
+export { AigcApi } from './modules/AigcApi';

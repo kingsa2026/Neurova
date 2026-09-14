@@ -31,6 +31,7 @@ import { PersonalityApi } from './modules/PersonalityApi';
 import { CollaborationApi } from './modules/CollaborationApi';
 import { MonitorApi } from './modules/MonitorApi';
 import { ChannelIntegrationApi } from './modules/ChannelIntegrationApi';
+import { AigcApi } from './modules/AigcApi';
 import { SessionSyncApi } from './modules/SessionSyncApi';
 
 export class ApiFacade {
@@ -62,6 +63,8 @@ export class ApiFacade {
   // 业务模块（M4.6 新增 2 个 - 渠道系统）
   public channelIntegration: ChannelIntegrationApi;
   public sessionSync: SessionSyncApi;
+  // 业务模块（M5a 新增 1 个 - AIGC 生成域，对齐 Web generation.ts 契约）
+  public aigc: AigcApi;
 
   private constructor() {
     this.client = HttpClient.getInstance();
@@ -88,6 +91,8 @@ export class ApiFacade {
     // M4.6 新增模块（渠道系统）
     this.channelIntegration = new ChannelIntegrationApi(this.client);
     this.sessionSync = new SessionSyncApi(this.client);
+    // M5a 新增模块（AIGC 生成域）
+    this.aigc = new AigcApi(this.client);
   }
 
   static getInstance(): ApiFacade {

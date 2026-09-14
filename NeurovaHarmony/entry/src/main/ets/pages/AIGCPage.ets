@@ -12,11 +12,11 @@
  *     errorMessage（failed 时）、createdAt、finishedAt、操作（查看详情/取消/重试）；
  *   - 新建 CustomDialog：type 选择（text/image/audio/video）、prompt 文本域；
  *   - 颜色统一走 StyleManager，路由走 Router，API 暂无 AIGC 专用模块 →
- *     aboutToAppear 加载 mock 静态数据 + TODO 注释 M5 阶段补充真实 API。
+ *     aboutToAppear 经 api.aigc.listTasks 拉真实账本；processing 存在时 5s 自动刷新。
  *
  * 依赖：
  *   - ../components/glass：TopNavMenu、GlassCard、GlassButton、GlassInput、GlassPanel
- *   - ../libs/api/ApiFacade：统一 API 门面（仅作为占位，未实际调用）
+ *   - ../libs/api/ApiFacade：统一 API 门面（M5a 已接 aigc 域真实 API）
  *   - ../routing/Router：统一路由跳转
  *   - ../libs/style/StyleManager：统一样式 token
  *   - ../libs/logger/Logger：统一日志
@@ -25,12 +25,12 @@
  *
  * 用法：
  *   由 Router.push(RouteNames.AIGC) 跳转进入；
- *   aboutToAppear 加载 mock 任务列表（TODO M5 接入真实 API）；
+ *   aboutToAppear 经 api.aigc.listTasks() 加载真实任务列表；
  *   status 筛选 Tab 切换 → 本地按 status 过滤；
- *   新建 → 弹窗选择 type + 填 prompt → 提交 → TODO M5 接入 API；
+ *   新建 → 弹窗选择 type + 填 prompt → 提交 → api.aigc.generateText/Image/Audio/submitVideo；
  *   查看详情 → AlertDialog 展示完整 prompt + 元数据；
- *   取消（queued/processing）→ AlertDialog 二次确认 → TODO M5 接入 API；
- *   重试（failed）→ TODO M5 接入 API。
+ *   取消（queued/processing）→ 服务端账本无取消端点，诚实提示不支持（Web 端契约同）；
+ *   重试（failed）→ 以同 prompt 重新提交（新任务，服务端账本保留失败历史）。
  *
  * TDD：AIGCViewHelper 各方法按红绿灯垂直切片逐步实现，详见 AIGCPage.test.ets
  */
@@ -41,7 +41,7 @@ import { Router } from '../routing/Router';
 import { StyleManager } from '../libs/style/StyleManager';
 import { Logger } from '../libs/logger/Logger';
 import { MessageManager } from '../libs/message/MessageManager';
-import { AIGCTask, AIGCTaskStatus } from '../libs/types';
+import { AIGCTask, AIGCTaskStatus, AigcGenerationTask } from '../libs/types';
 
 /** 日志标签 */
 const TAG = 'AIGCPage';
@@ -194,48 +194,27 @@ const DEFAULT_FORM: AIGCTaskFormData = {
   prompt: '',
 };
 
-/**
- * Mock AIGC 任务数据
- * TODO M5 阶段：替换为 api.aigc.list() 真实 API
- */
-const MOCK_TASKS: AIGCTask[] = [
-  {
-    id: 'task_1',
-    agentId: 'agent_1',
-    type: 'image',
-    prompt: '生成一只可爱的猫咪',
-    status: 'succeeded',
-    resultUrl: 'https://example.com/image1.png',
-    createdAt: '2025-03-01T10:00:00Z',
-    finishedAt: '2025-03-01T10:00:05.500Z',
-  },
-  {
-    id: 'task_2',
-    agentId: 'agent_1',
-    type: 'text',
-    prompt: '写一首关于秋天的诗',
-    status: 'processing',
-    createdAt: '2025-03-01T11:00:00Z',
-  },
-  {
-    id: 'task_3',
-    agentId: 'agent_1',
-    type: 'audio',
-    prompt: '生成一段欢快的背景音乐',
-    status: 'queued',
-    createdAt: '2025-03-01T12:00:00Z',
-  },
-  {
-    id: 'task_4',
-    agentId: 'agent_1',
-    type: 'video',
-    prompt: '生成一段 30 秒的产品介绍视频',
-    status: 'failed',
-    errorMessage: '生成超时，请重试',
-    createdAt: '2025-03-01T09:00:00Z',
-    finishedAt: '2025-03-01T09:00:30.000Z',
-  },
-];
+/** 服务端账本行 → 本地 AIGCTask（纯函数，供 AIGCPage.test.ets 契约测试） */
+export function aigcTaskFromServer(t: AigcGenerationTask, fileUrl: string): AIGCTask {
+  const status: AIGCTaskStatus =
+    t.status === 'succeeded' || t.status === 'done' ? 'succeeded'
+      : t.status === 'failed' ? 'failed'
+      : t.status === 'pending' ? 'queued' : 'processing';
+  const task: AIGCTask = {
+    id: t.task_id,
+    agentId: '',
+    type: (t.kind === 'text' ? 'text' : t.kind === 'audio' ? 'audio'
+      : t.kind === 'video' ? 'video' : 'image') as AIGCTask['type'],
+    prompt: t.prompt,
+    status: status,
+    resultUrl: t.file_missing ? undefined : (fileUrl || undefined),
+    errorMessage: t.file_missing ? '产物已按保留策略清理'
+      : (t.error || (status === 'succeeded' && !fileUrl ? '产物尚未落盘' : undefined)),
+    createdAt: new Date(t.submitted_at * 1000).toISOString(),
+    finishedAt: t.updated_at ? new Date(t.updated_at * 1000).toISOString() : undefined,
+  };
+  return task;
+}
 
 @Component
 export struct AIGCPage {
@@ -257,26 +236,50 @@ export struct AIGCPage {
   private logger = Logger.getInstance();
   private msg = MessageManager.getInstance();
 
+  // 未决任务自动刷新定时器句柄（-1=未启动）
+  private pollTimer: number = -1;
+
   aboutToAppear() {
     this.loadTasks();
   }
 
+  aboutToDisappear() {
+    if (this.pollTimer >= 0) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = -1;
+    }
+  }
+
   /**
-   * 加载任务列表
-   * TODO M5 阶段：替换为真实 API（api.aigc.list）
+   * 加载任务列表（api.aigc.listTasks → 服务端账本映射；processing 存在时 5s 轮询）
    */
   private async loadTasks(): Promise<void> {
-    this.loading = true;
     try {
-      // TODO M5 阶段补充真实 API
-      // const res = await this.api.aigc.list();
-      // if (res.code === 0 && res.data) { this.tasks = res.data.items; }
-      this.tasks = MOCK_TASKS.slice();
+      const res = await this.api.aigc.listTasks();
+      if (res.code === 0 && res.data) {
+        this.tasks = res.data.map((t: AigcGenerationTask) =>
+          aigcTaskFromServer(t, this.api.aigc.fileUrl(t.url)));
+        this.ensurePolling();
+      } else {
+        this.msg.error(res.message || '加载 AIGC 任务失败');
+      }
     } catch (e) {
       this.logger.error(TAG, '加载任务失败', e as Error);
       this.msg.error('加载 AIGC 任务失败');
     } finally {
       this.loading = false;
+    }
+  }
+
+  /** 存在 processing 任务 → 5s 自动刷新；全终态自停（Web AigcHistoryList 同语义） */
+  private ensurePolling(): void {
+    const running = this.tasks.some((t: AIGCTask) =>
+      t.status === 'processing' || t.status === 'queued');
+    if (running && this.pollTimer < 0) {
+      this.pollTimer = setInterval(() => { this.loadTasks(); }, 5000);
+    } else if (!running && this.pollTimer >= 0) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = -1;
     }
   }
 
@@ -302,32 +305,42 @@ export struct AIGCPage {
   }
 
   /**
-   * 提交新建任务
-   * TODO M5 阶段：调用真实 API（api.aigc.create）
-   * 当前为本地追加 + TODO 提示
+   * 提交新建任务（按 type 分派真实端点；image/audio/text 同步出结果，video 异步轮询）
    */
   private async submitCreate(): Promise<void> {
-    if (!this.formData.prompt.trim()) {
+    const prompt = this.formData.prompt.trim();
+    if (!prompt) {
       this.msg.warning('请填写 prompt');
       return;
     }
+    this.msg.info('任务已提交，生成中…');
+    this.showCreateDialog = false;
     try {
-      // TODO M5 阶段：const res = await this.api.aigc.create({ type, prompt });
-      // 临时：本地追加一个 queued 任务
-      const newTask: AIGCTask = {
-        id: `task_${Date.now()}`,
-        agentId: 'agent_1',
-        type: this.formData.type,
-        prompt: this.formData.prompt.trim(),
-        status: 'queued',
-        createdAt: new Date().toISOString(),
-      };
-      this.tasks = [newTask, ...this.tasks];
-      this.msg.success('已提交');
-      this.showCreateDialog = false;
+      if (this.formData.type === 'text') {
+        const res = await this.api.aigc.generateText({ prompt: prompt });
+        if (res.code === 0 && res.data) {
+          AlertDialog.show({ title: '生成结果', message: res.data.text.slice(0, 500),
+            autoCancel: true, alignment: DialogAlignment.Center,
+            primaryButton: { value: '关闭', action: () => {} } });
+        } else {
+          this.msg.error(res.message || '文本生成失败');
+        }
+      } else if (this.formData.type === 'image') {
+        const res = await this.api.aigc.generateImage({ prompt: prompt });
+        if (res.code !== 0) { this.msg.error(res.message || '图像生成失败'); }
+      } else if (this.formData.type === 'audio') {
+        const res = await this.api.aigc.generateAudio({ text: prompt });
+        if (res.code !== 0) { this.msg.error(res.message || '语音合成失败'); }
+      } else {
+        const res = await this.api.aigc.submitVideo({ prompt: prompt });
+        if (res.code !== 0) { this.msg.error(res.message || '视频提交失败'); }
+      }
     } catch (e) {
       this.logger.error(TAG, '创建任务失败', e as Error);
       this.msg.error('创建任务失败');
+    } finally {
+      // 账本刷新：image/audio/video 成败均已落账，列表直读服务端状态
+      this.loadTasks();
     }
   }
 
@@ -386,35 +399,29 @@ export struct AIGCPage {
   }
 
   /**
-   * 执行取消任务
-   * TODO M5 阶段：调用真实 API（api.aigc.cancel）
+   * 取消任务：服务端生成账本无取消端点（Web 契约同）——本地移除是假取消，
+   * 任务仍会跑完计费，M5a 改诚实提示（任务将继续生成，可在结果中忽略）。
    */
   private async cancelTask(taskId: string): Promise<void> {
-    try {
-      // TODO M5 阶段：const res = await this.api.aigc.cancel(taskId);
-      this.tasks = this.tasks.filter((t: AIGCTask) => t.id !== taskId);
-      this.msg.success('已取消');
-    } catch (e) {
-      this.logger.error(TAG, '取消任务失败', e as Error);
-      this.msg.error('取消任务失败');
-    }
+    this.msg.warning('生成任务不支持取消：远端将继续完成，可忽略结果');
   }
 
   /**
-   * 重试失败任务
-   * TODO M5 阶段：调用真实 API（api.aigc.retry）
+   * 重试失败任务：以同 prompt 重新提交（新账本任务；失败历史保留可追溯）
    */
   private async retryTask(task: AIGCTask): Promise<void> {
     try {
-      // TODO M5 阶段：const res = await this.api.aigc.retry(task.id);
-      // 临时：本地将状态改回 queued
-      this.tasks = this.tasks.map((t: AIGCTask) => {
-        if (t.id === task.id) {
-          return { ...t, status: 'queued' as AIGCTaskStatus, errorMessage: undefined };
-        }
-        return t;
-      });
+      if (task.type === 'image') {
+        await this.api.aigc.generateImage({ prompt: task.prompt });
+      } else if (task.type === 'video') {
+        await this.api.aigc.submitVideo({ prompt: task.prompt });
+      } else if (task.type === 'audio') {
+        await this.api.aigc.generateAudio({ text: task.prompt });
+      } else {
+        await this.api.aigc.generateText({ prompt: task.prompt });
+      }
       this.msg.success('已重新提交');
+      this.loadTasks();
     } catch (e) {
       this.logger.error(TAG, '重试任务失败', e as Error);
       this.msg.error('重试任务失败');
