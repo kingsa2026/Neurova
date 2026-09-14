@@ -331,9 +331,17 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/SkillPoolPage.vue'),
       },
       {
+        // AIGC：2026-09-14 起挂「模型与工具」二级菜单（5 个独立页，旧单页 Tab 废除）
         path: 'aigc',
-        name: 'AIGC',
-        component: () => import('@/pages/AIGCPage.vue'),
+        component: () => import('@/pages/aigc/AigcLayout.vue'),
+        children: [
+          { path: '', redirect: '/aigc/text' },
+          { path: 'text', name: 'AigcText', component: () => import('@/pages/aigc/TextGenPage.vue') },
+          { path: 'image', name: 'AigcImage', component: () => import('@/pages/aigc/ImageGenPage.vue') },
+          { path: 'audio', name: 'AigcAudio', component: () => import('@/pages/aigc/AudioGenPage.vue') },
+          { path: 'video', name: 'AigcVideo', component: () => import('@/pages/aigc/VideoGenPage.vue') },
+          { path: 'studio', name: 'AigcStudio', component: () => import('@/pages/aigc/StudioPage.vue') },
+        ],
       },
 
       // ----- Models & Tools -----

@@ -1,0 +1,148 @@
+<script setup lang="ts">
+/**
+ * AIGC 图片生成页（2026-09-14 R1 自 AIGCPage 拆分）。
+ *
+ * 契约保持：风格模板内置常量 + 提示词注入（批次1）；参考图上传 →
+ * ref_images（批次3，/files/upload + 后端允许根）；model=auto 不透传
+ * （后端按 image_generation 能力路由）；产物 URL 带访问凭证；记录侧栏
+ * 默认过滤 image。
+ */
+import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { message } from 'ant-design-vue'
+import { generateImage as apiGenerateImage } from '@/api/modules/generation'
+import { uploadFile } from '@/api/modules/files'
+import { useAigcModels } from '@/composables/useAigcModels'
+import { withFileToken } from '@/utils/genFiles'
+import GlassPanel from '@/components/GlassPanel.vue'
+import GlassCard from '@/components/GlassCard.vue'
+import GlassButton from '@/components/GlassButton.vue'
+import AigcHistoryList from '@/components/aigc/AigcHistoryList.vue'
+
+const { t } = useI18n()
+const { imageModelOptions } = useAigcModels()
+
+// 内置风格模板（非 Docker 模板接口，批次1 决策保持）
+const STYLE_TEMPLATES: { value: string; hint: string }[] = [
+  { value: 'default', hint: '' },
+  { value: 'photorealistic', hint: 'photorealistic, ultra-detailed, 8k' },
+  { value: 'anime', hint: 'anime style, vibrant colors, clean lineart' },
+  { value: 'oil-painting', hint: 'oil painting style, visible textured brush strokes' },
+]
+const TEMPLATE_LABEL_KEYS: Record<string, string> = {
+  default: 'default',
+  photorealistic: 'photorealistic',
+  anime: 'anime',
+  'oil-painting': 'oilPainting',
+}
+const templateOptions = computed(() =>
+  STYLE_TEMPLATES.map((tpl) => ({ label: t(`aigc.${TEMPLATE_LABEL_KEYS[tpl.value]}`), value: tpl.value })))
+
+const prompt = ref('')
+const template = ref('default')
+const model = ref('auto')
+const generating = ref(false)
+const results = ref<{ url: string; prompt: string }[]>([])
+const previewVisible = ref(false)
+const previewUrl = ref('')
+const refImages = ref<string[]>([])
+
+async function onRefUpload(file: File) {
+  try {
+    const fd = new FormData()
+    fd.append('file', file, (file as any).name || 'ref.png')
+    const res: any = await uploadFile(fd)
+    const path = res?.data?.path || res?.path
+    if (path) refImages.value.push(path)
+    else message.error(t('aigc.generateError'))
+  } catch {
+    message.error(t('aigc.generateError'))
+  }
+}
+
+function refFileName(p: string): string {
+  return p.split(/[\\/]/).pop() || p
+}
+
+async function generate() {
+  if (!prompt.value.trim()) return
+  generating.value = true
+  try {
+    const tpl = STYLE_TEMPLATES.find((x) => x.value === template.value)
+    const styledPrompt = tpl?.hint ? `${prompt.value.trim()}\n${tpl.hint}` : prompt.value.trim()
+    const res: any = await apiGenerateImage({
+      prompt: styledPrompt,
+      model: model.value === 'auto' ? undefined : model.value,
+      width: 1024,
+      height: 1024,
+      ref_images: refImages.value.length ? [...refImages.value] : undefined,
+    })
+    const data = res?.data ?? res
+    const rawImages: any[] = data?.images ?? data?.urls ?? (data?.url ? [data.url] : [])
+    const urls: string[] = rawImages
+      .map((i: any) => (typeof i === 'string' ? i : i?.url))
+      .filter(Boolean)
+    for (const url of urls) {
+      results.value.unshift({ url, prompt: prompt.value })
+    }
+    message.success(t('aigc.imageSuccess'))
+  } catch {
+    message.error(t('aigc.generateError'))
+  } finally {
+    generating.value = false
+  }
+}
+
+function preview(img: { url: string }) {
+  previewUrl.value = img.url
+  previewVisible.value = true
+}
+</script>
+
+<template>
+  <div class="aigc-image-page">
+    <div class="aigc-gen-layout">
+      <GlassPanel class="aigc-input-panel" variant="subtle">
+        <a-form layout="vertical">
+          <a-form-item :label="t('aigc.prompt')">
+            <a-textarea v-model:value="prompt" :rows="4" :placeholder="t('aigc.imagePromptPlaceholder')" />
+          </a-form-item>
+          <a-form-item :label="t('aigc.template')">
+            <a-select v-model:value="template" :options="templateOptions" :placeholder="t('aigc.selectTemplate')" show-search />
+          </a-form-item>
+          <a-form-item :label="t('aigc.refImage')">
+            <a-upload :show-upload-list="false" accept="image/*" :custom-request="(o: any) => onRefUpload(o.file)">
+              <GlassButton size="sm">{{ t('common.upload') }}</GlassButton>
+            </a-upload>
+            <div v-if="refImages.length" class="aigc-ref-chips">
+              <span v-for="(p, i) in refImages" :key="i" class="aigc-ref-chip">
+                {{ refFileName(p) }}<button class="aigc-ref-chip-x" type="button" @click="refImages.splice(i, 1)">✕</button>
+              </span>
+            </div>
+          </a-form-item>
+          <a-form-item :label="t('aigc.model')">
+            <a-select v-model:value="model" class="model-select-image" :options="imageModelOptions" :placeholder="t('aigc.selectModel')" show-search />
+          </a-form-item>
+          <GlassButton variant="primary" :loading="generating" @click="generate">
+            {{ t('aigc.generate') }}
+          </GlassButton>
+        </a-form>
+      </GlassPanel>
+      <div>
+        <GlassCard :title="t('aigc.gallery')" class="aigc-result-panel">
+          <div v-if="results.length" class="aigc-image-gallery">
+            <div v-for="(img, idx) in results" :key="idx" class="aigc-gallery-item" @click="preview(img)">
+              <img :src="withFileToken(img.url)" :alt="img.prompt" />
+            </div>
+          </div>
+          <a-empty v-else :description="t('aigc.noImages')" />
+        </GlassCard>
+        <AigcHistoryList kind="image" />
+      </div>
+    </div>
+
+    <a-modal v-model:open="previewVisible" :footer="null" width="680px">
+      <img :src="withFileToken(previewUrl)" alt="Preview" style="width: 100%" />
+    </a-modal>
+  </div>
+</template>

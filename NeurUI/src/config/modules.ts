@@ -30,6 +30,11 @@ const TOP_MODULES: ModuleItem[] = [
   { key: '/models', labelKey: 'models' },
   { key: '/tool-layers', labelKey: 'toolLayers' },
   { key: '/sandbox', labelKey: 'sandbox' },
+  { key: '/aigc/text', labelKey: 'aigcText' },
+  { key: '/aigc/image', labelKey: 'aigcImage' },
+  { key: '/aigc/audio', labelKey: 'aigcAudio' },
+  { key: '/aigc/video', labelKey: 'aigcVideo' },
+  { key: '/aigc/studio', labelKey: 'aigcStudio' },
   { key: '/monitor', labelKey: 'monitor' },
   { key: '/health', labelKey: 'health' },
   { key: '/logs', labelKey: 'logs' },
@@ -72,7 +77,8 @@ const USER_MODULES: ModuleItem[] = [
   { key: '/knowledge', labelKey: 'knowledge' },
   { key: '/skill-pool', labelKey: 'skillPool' },
   { key: '/marketplace/skills', labelKey: 'skillMarket' },
-  { key: '/aigc', labelKey: 'aigc' },
+  // /aigc 已迁至「模型与工具」区 /aigc/* 五个二级页（2026-09-14 用户决策）；
+  // 存量用户组的 '/aigc' 授权 key 经 matchModule 前缀规则天然继续命中 /aigc/*
   { key: '/files', labelKey: 'files' },
   { key: '/neuron', labelKey: 'neuron' },
   { key: '/collaboration', labelKey: 'collaboration' },
