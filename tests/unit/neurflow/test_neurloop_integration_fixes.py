@@ -255,7 +255,8 @@ class TestEvolutionNodeSignature:
                 text="成功使用工具完成任务",
                 task="文件处理",
                 tools=["file_read", "file_write"],
-                success=True
+                success=True,
+                crystallizer=None
             )
 
     def test_exec_evolution_should_handle_missing_fields(self, mock_evolution):
@@ -283,7 +284,8 @@ class TestEvolutionNodeSignature:
                 text="部分数据",
                 task="",
                 tools=[],
-                success=False
+                success=False,
+                crystallizer=None
             )
 
 
