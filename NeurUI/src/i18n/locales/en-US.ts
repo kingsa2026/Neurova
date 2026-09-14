@@ -3349,6 +3349,8 @@ studio: {
   retryVideo: 'Retry video',
   noShots: 'No shots yet — break first',
   mergeNow: 'Merge & export',
+  uploadBgm: 'Upload BGM',
+  replaceBgm: 'Replace BGM',
   mergedMp4: 'Final video ready',
   mergedManifest: 'Slideshow manifest',
   noExport: 'Nothing to export yet',

@@ -3345,6 +3345,8 @@ studio: {
   retryVideo: '動画を再試行',
   noShots: 'ショットなし（まず分解）',
   mergeNow: '合成して書き出し',
+  uploadBgm: 'BGM をアップロード',
+  replaceBgm: 'BGM を変更',
   mergedMp4: '完成動画',
   mergedManifest: 'スライドショー',
   noExport: '書き出し対象なし',
