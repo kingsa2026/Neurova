@@ -219,6 +219,45 @@ def _resolve_creds(hint: str, model: str, provider_id: Any):
                                     "https://api.openai.com/v1")
 
 
+def _auto_route(kind: str) -> "tuple[str, str]":
+    """model/provider_id 均缺省时按能力经 LLMRouter 选模型（与 REST
+    /generation/image、/video 的 auto 路由同口径）；路由不可得返回 ("","")
+    交给 _resolve_creds 诚实报错。
+
+    测试隔离：monkeypatch services._auto_route 即可，勿打真实路由器。
+    """
+    try:
+        from neurova.llm.llm_router import RequestType, select_model_for_request
+
+        rt = {"image": RequestType.TEXT_TO_IMAGE,
+              "video": RequestType.TEXT_TO_VIDEO}[kind]
+        sel = select_model_for_request(rt)
+        if sel is not None:
+            return str(getattr(sel, "model", "") or ""), str(getattr(sel, "provider_id", "") or "")
+    except Exception:  # noqa: BLE001
+        pass
+    return "", ""
+
+
+def _hint_for_provider(kind: str, provider_id: str, model: str, fallback: str) -> str:
+    """用户选定具体模型时，协议 hint 按该服务商 base_url 实测矩阵推导
+    （resolve_image/video_protocol 单源），不再依赖页面硬编码 provider 名。"""
+    if not provider_id:
+        return fallback
+    from neurova.llm.generators.protocols import (
+        resolve_image_protocol, resolve_video_protocol,
+    )
+    from neurova.llm.provider_manager import get_provider_manager
+
+    manager = get_provider_manager()
+    provider = manager.get_provider(provider_id) if manager else None
+    base = str(getattr(provider, "base_url", "") or "")
+    if not base:
+        return fallback
+    fn = resolve_image_protocol if kind == "image" else resolve_video_protocol
+    return fn("", model, base).value
+
+
 def _inject_style(prompt: str, project: Dict[str, Any]) -> str:
     """火宝式项目锁：风格 + 画幅注入每镜提示词。"""
     parts = [prompt]
@@ -231,10 +270,12 @@ def _inject_style(prompt: str, project: Dict[str, Any]) -> str:
 
 async def generate_shot_images(store, pid: str, eid: str,
                                provider: str = "openai", model: str = "",
+                               provider_id: str = "",
                                shot_ids: Optional[List[str]] = None) -> Dict[str, int]:
     """逐镜首帧（@角色参考图注入 + 风格/画幅项目锁；单镜失败诚实标注不中断）。
 
     shot_ids：仅重跑指定镜头（Phase03 单镜重试）；None = 整集。
+    provider_id：用户选定具体模型的服务商（协议 hint 按其实测 base_url 推导）。
     """
     from neurova.llm.generators.protocols import generate_image
     from neurova.llm.generators.runtime import (
@@ -242,7 +283,10 @@ async def generate_shot_images(store, pid: str, eid: str,
     )
 
     project = store.get_project(pid, "admin", is_admin=True) or {}
-    hint = _PROVIDER_HINTS.get(str(provider or "").lower(), "openai_compat")
+    if not model and not provider_id:
+        model, provider_id = _auto_route("image")
+    fallback = _PROVIDER_HINTS.get(str(provider or "").lower(), "openai_compat")
+    hint = _hint_for_provider("image", provider_id, model, fallback)
     stats = {"done": 0, "failed": 0, "skipped_no_prompt": 0}
     chars = {c["id"]: c for c in store.list_characters(pid)}
     for sb in store.list_storyboards(eid):
@@ -261,7 +305,7 @@ async def generate_shot_images(store, pid: str, eid: str,
                 if c.get("id") in chars and chars[c["id"]].get("image_path")]
         store.update_storyboard(sb["id"], {"injected_prompt": injected})
         try:
-            creds = _resolve_creds(hint, model, None)
+            creds = _resolve_creds(hint, model, provider_id)
             result = await generate_image(
                 creds, injected, size="1024x1024", n=1,
                 ref_images=refs)
@@ -299,16 +343,25 @@ def _record_usage(kind: str, ok: int, failed: int, user_id: str) -> None:
 async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
                                model: str = "", resolution: str = "1080p",
                                duration: int = 5, owner_user_id: str = "",
+                               provider_id: str = "",
                                shot_ids: Optional[List[str]] = None) -> Dict[str, int]:
-    """逐镜 i2v 提交（首帧为参考）→ 账本 batch_key=episode 关联 → 恢复循环收口。"""
+    """逐镜 i2v 提交（首帧为参考）→ 账本 batch_key=episode 关联 → 恢复循环收口。
+
+    provider_id：用户选定具体模型的服务商（协议 hint 按其实测 base_url 推导）。
+    """
     from neurova.llm.generators.protocols import submit_video
     from neurova.llm.generators.task_ledger import TaskRecord, get_generation_task_ledger
 
-    hint = {"wan": "wan", "seedance": "seedance2", "veo": "veo"}.get(
+    _BASES = {"wan": "https://dashscope.aliyuncs.com/api/v1",
+              "seedance2": "https://ark.cn-beijing.volces.com",
+              "veo": "https://generativelanguage.googleapis.com/v1beta",
+              "agnes": "https://apihub.agnes-ai.com/v1"}
+    if not model and not provider_id:
+        model, provider_id = _auto_route("video")
+    fallback = {"wan": "wan", "seedance": "seedance2", "veo": "veo"}.get(
         str(provider or "").lower(), "wan")
-    default_base = ("https://dashscope.aliyuncs.com/api/v1" if hint == "wan"
-                    else "https://ark.cn-beijing.volces.com" if hint == "seedance2"
-                    else "https://generativelanguage.googleapis.com/v1beta")
+    hint = _hint_for_provider("video", provider_id, model, fallback)
+    default_base = _BASES.get(hint, _BASES["wan"])
     stats = {"submitted": 0, "skipped": 0, "failed": 0}
     for sb in store.list_storyboards(eid):
         if shot_ids and sb["id"] not in shot_ids:
@@ -322,12 +375,12 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
             stats["skipped"] += 1
             continue
         try:
-            creds = _resolve_creds(hint, model, None)
+            creds = _resolve_creds(hint, model, provider_id)
             from neurova.llm.generators.protocols import ProtocolCredentials
 
             creds = ProtocolCredentials(
                 api_key=creds.api_key, base_url=creds.base_url or default_base,
-                model=creds.model, protocol=hint)
+                model=creds.model or model, protocol=hint)
             submitted = await submit_video(
                 creds, vprompt, duration=int(sb.get("duration") or duration),
                 resolution=resolution,
@@ -360,13 +413,20 @@ async def generate_shot_videos(store, pid: str, eid: str, provider: str = "wan",
 
 
 async def generate_asset_images(store, pid: str, provider: str = "ark",
-                                ids: Optional[List[str]] = None) -> Dict[str, Any]:
-    """资产定妆图（同角色复用 seed_value 保一致性；单资产失败可重试）。"""
+                                ids: Optional[List[str]] = None,
+                                model: str = "", provider_id: str = "") -> Dict[str, Any]:
+    """资产定妆图（同角色复用 seed_value 保一致性；单资产失败可重试）。
+
+    模型口径与 Phase03 首帧一致：显式 model+provider_id 或 auto 能力路由。
+    """
     from neurova.llm.generators.protocols import generate_image
     from neurova.llm.generators.runtime import persist_media
 
     project = store.get_project(pid, "admin", is_admin=True) or {}
-    hint = _PROVIDER_HINTS.get(str(provider or "").lower(), "openai_compat")
+    if not model and not provider_id:
+        model, provider_id = _auto_route("image")
+    fallback = _PROVIDER_HINTS.get(str(provider or "").lower(), "openai_compat")
+    hint = _hint_for_provider("image", provider_id, model, fallback)
     stats = {"done": 0, "failed": 0}
     for c in store.list_characters(pid):
         if ids and c["id"] not in ids:
@@ -375,7 +435,7 @@ async def generate_asset_images(store, pid: str, provider: str = "ark",
                   f"character sheet, {c.get('appearance') or c.get('name')}, "
                   f"{c.get('styling') or ''}").strip()
         try:
-            creds = _resolve_creds(hint, "", None)
+            creds = _resolve_creds(hint, model, provider_id)
             import zlib
             # 稳定 seed：同一资产恒定（跨进程可复现），支撑 huobao 式定妆一致性
             seed = zlib.crc32(c["id"].encode("utf-8")) % (10 ** 8)

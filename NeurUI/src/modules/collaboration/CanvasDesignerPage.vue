@@ -325,7 +325,7 @@
             <template v-else-if="field.type === 'model-selector'">
               <a-select
                 :value="selectedNode.config.model_name || undefined"
-                :options="modelOptions"
+                :options="capModelOptions(field)"
                 size="small"
                 allow-clear
                 show-search
@@ -556,6 +556,9 @@ interface SubBlockDef {
   type?: string // input | textarea | select | slider | model-selector
   options?: SubBlockOption[]
   default_value?: unknown
+  /** model-selector：后端 schema 声明的过滤能力（image_generation/video_generation
+   *  时下拉只出对应能力模型；用户口径 2026-09-14） */
+  provider_capability?: string
   required?: boolean
   min?: number
   max?: number
@@ -1559,6 +1562,7 @@ async function loadDynamicNodes() {
         type: (b.type as string) || 'input',
         options,
         default_value: b.default ?? b.default_value,
+        provider_capability: (b.provider_capability as string) || undefined,
       }
       if (typeof b.min === 'number') sb.min = b.min
       if (typeof b.max === 'number') sb.max = b.max
@@ -1646,9 +1650,16 @@ function addNodeAt(paletteNode: PaletteNode, x: number, y: number) {
 // 节点选中
 const selectedNode = computed(() => canvasNodes.value.find(n => n.id === selectedNodeId.value) || null)
 
-// ── 可联通模型下拉（builtin:llm 的 model-selector 数据源，惰性加载） ──
+// ── 可联通模型下拉（model-selector 数据源，惰性加载）──
 const { models: reachableModels, load: loadReachableModels } = useReachableModels()
 const modelOptions = computed(() => buildModelOptions(reachableModels.value))
+/** 字段级能力过滤（provider_capability=image_generation/video_generation
+ *  时只出对应能力模型；用户口径 2026-09-14） */
+function capModelOptions(field: { provider_capability?: string; [k: string]: unknown }) {
+  return field.provider_capability
+    ? buildModelOptions(reachableModels.value, undefined, field.provider_capability)
+    : modelOptions.value
+}
 const providerOptions = computed(() => {
   const providers = new Set(reachableModels.value.filter(m => m.enabled !== false).map(m => m.provider_id))
   return [{ label: t('canvas.c0182'), value: 'auto' }, ...[...providers].map(p => ({ label: p, value: p }))]
@@ -1684,6 +1695,7 @@ const configFields = computed(() => {
       options: (b.options ?? []).map(o => ({ label: o.label, value: o.value })),
       min: b.min,
       max: b.max,
+      provider_capability: b.provider_capability,
     }))
   }
   // 回退：遍历现有 config 键（旧快照/未知类型兼容）

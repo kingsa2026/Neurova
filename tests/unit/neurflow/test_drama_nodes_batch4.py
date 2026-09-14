@@ -208,6 +208,63 @@ class TestSceneGenProtocols:
         assert out["fallback"] is True
         assert "kling" in out.get("degrade_reason", "")
 
+    @pytest.mark.asyncio
+    async def test_model_selector_keys_flow_to_creds(self, monkeypatch, tmp_path):
+        """画布 model-selector 契约：model_name/model_provider（属性面板写入）
+        须流到凭据解析（键名劈叉曾致节点选择静默无效）。"""
+        from neurova.llm.generators import protocols as proto_mod
+        from neurova.llm.generators import runtime as gen_runtime
+        from neurova.llm.generators.protocols import ProtocolCredentials
+
+        seen = {}
+
+        def fake_resolve(hint, model, pid, ak, bu, db):
+            seen["args"] = (hint, model, pid)
+            return ProtocolCredentials(api_key="k", base_url="https://x",
+                                       model="m", protocol=hint)
+
+        async def fake_gen(creds, prompt, **kw):
+            return {"images": ["http://cdn/x.png"], "task_id": None, "raw": {}}
+
+        async def fake_persist(url, kind, task_id, index, out_dir=None):
+            fp = tmp_path / "m_0.png"
+            fp.write_bytes(b"P")
+            return str(fp)
+
+        monkeypatch.setattr(gen_runtime, "resolve_generation_creds", fake_resolve)
+        monkeypatch.setattr(proto_mod, "generate_image", fake_gen)
+        monkeypatch.setattr(gen_runtime, "persist_media", fake_persist)
+        await dn.exec_scene_gen({"scene": "s", "provider": "openai",
+                                 "model_name": "flux.1", "model_provider": "prov-x"}, {})
+        assert seen["args"][1] == "flux.1"
+        assert seen["args"][2] == "prov-x"
+
+    def test_scene_gen_schema_exposes_capability_model_selector(self):
+        """schema：scene-gen 有 model-selector 字段且声明 image_generation
+        能力过滤（前端按 provider_capability 筛下拉）。"""
+        defn = next(d for d in dn.DRAMA_NODES
+                    if d["type"] == "builtin:scene-gen")
+        field = next(f for f in defn["sub_blocks"] if f.get("type") == "model-selector")
+        assert field["id"] == "model_name"
+        assert field["provider_capability"] == "image_generation"
+
+    def test_scene_gen_serialization_keeps_capability(self):
+        """序列化链根因修复：_sub_block_to_dict 白名单曾丢 provider_capability
+        （后端声明到不了前端 → 能力过滤失效）。两分支都要透传。"""
+        from neurova.api.endpoints.neurflow_api import _sub_block_to_dict
+
+        d = _sub_block_to_dict({"id": "model_name", "label": "生成模型",
+                                "type": "model-selector",
+                                "provider_capability": "image_generation"})
+        assert d["provider_capability"] == "image_generation"
+
+        from neurova.collaboration.neurflow.models import SubBlockConfig
+
+        o = _sub_block_to_dict(SubBlockConfig(id="model_name", title="生成模型",
+                                              type="model-selector",
+                                              provider_capability="video_generation"))
+        assert o["provider_capability"] == "video_generation"
+
 
 # ── 4. video-compose 禁假文件名 ────────────────────────────────────────────
 

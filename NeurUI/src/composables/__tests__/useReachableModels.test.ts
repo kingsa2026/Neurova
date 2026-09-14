@@ -42,6 +42,20 @@ describe('buildModelOptions', () => {
   })
 })
 
+  it('capability 过滤：生成类能力只出对应模型；非生成能力不过滤', () => {
+    const ms = [
+      model({ id: 'flux', capabilities: ['image_generation'] }),
+      model({ id: 'seedance', capabilities: ['video_generation'] }),
+      model({ id: 'chat', capabilities: ['text'] }),
+      model({ id: 'naked' }), // 无 capabilities → 非生成过滤时保留
+    ]
+    expect(buildModelOptions(ms, undefined, 'image_generation').map(o => o.value)).toEqual(['flux'])
+    expect(buildModelOptions(ms, undefined, 'video_generation').map(o => o.value)).toEqual(['seedance'])
+    // text/vision 等不做能力过滤（chat 模型标记常缺，误伤教训）
+    expect(buildModelOptions(ms, undefined, 'text').map(o => o.value)).toEqual(['flux', 'seedance', 'chat', 'naked'])
+    expect(buildModelOptions(ms).map(o => o.value)).toEqual(['flux', 'seedance', 'chat', 'naked'])
+  })
+
 describe('useReachableModels', () => {
   beforeEach(() => {
     listModelsMock.mockReset()

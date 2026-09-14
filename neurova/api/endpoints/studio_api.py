@@ -176,9 +176,11 @@ async def generate_images(eid: str, body: Optional[Dict[str, Any]] = Body(defaul
     project, _ep = _episode_with_project(store, eid, current_user)
     provider = str((body or {}).get("provider") or "openai")
     model = str((body or {}).get("model") or "")
+    provider_id = str((body or {}).get("provider_id") or "")
     return _spawn_run(store, project["id"], "images",
                       lambda: services.generate_shot_images(store, project["id"], eid,
-                                                            provider=provider, model=model))
+                                                            provider=provider, model=model,
+                                                            provider_id=provider_id))
 
 
 @router.post("/episodes/{eid}/generate-videos")
@@ -192,6 +194,7 @@ async def generate_videos(eid: str, body: Optional[Dict[str, Any]] = Body(defaul
                           store, project["id"], eid,
                           provider=str(b.get("provider") or "wan"),
                           model=str(b.get("model") or ""),
+                          provider_id=str(b.get("provider_id") or ""),
                           resolution=str(b.get("resolution") or "1080p"),
                           duration=int(b.get("duration") or 5),
                           owner_user_id=_uid(current_user)))
@@ -216,7 +219,10 @@ async def asset_images(pid: str, body: Optional[Dict[str, Any]] = Body(default=N
     provider = str(b.get("provider") or "ark")
     ids = [str(i) for i in (b.get("ids") or [])] or None
     return _spawn_run(store, pid, "asset_images",
-                      lambda: services.generate_asset_images(store, pid, provider=provider, ids=ids))
+                      lambda: services.generate_asset_images(
+                          store, pid, provider=provider, ids=ids,
+                          model=str(b.get("model") or ""),
+                          provider_id=str(b.get("provider_id") or "")))
 
 
 # ── episodes / storyboards 读与编辑 ───────────────────────────────────────
@@ -316,15 +322,16 @@ async def retry_storyboard(sid: str, body: Optional[Dict[str, Any]] = Body(defau
     stage = str(b.get("stage") or "image")
     provider = str(b.get("provider") or ("openai" if stage == "image" else "wan"))
     model = str(b.get("model") or "")
+    provider_id = str(b.get("provider_id") or "")
 
     if stage == "video":
         work = lambda: services.generate_shot_videos(  # noqa: E731
             store, project["id"], sb["episode_id"], provider=provider, model=model,
-            owner_user_id=_uid(current_user), shot_ids=[sid])
+            provider_id=provider_id, owner_user_id=_uid(current_user), shot_ids=[sid])
     else:
         work = lambda: services.generate_shot_images(  # noqa: E731
             store, project["id"], sb["episode_id"], provider=provider, model=model,
-            shot_ids=[sid])
+            provider_id=provider_id, shot_ids=[sid])
     return _spawn_run(store, project["id"], f"retry_{stage}", work)
 
 
