@@ -407,6 +407,7 @@ class QQWebSocketAdapter(ChannelAdapter):
             if mid is None:
                 logger.error("qq 发送失败: %s", err)
                 return None
+            logger.info("qq message sent: %s", mid)
             return mid
         except Exception as e:
             logger.exception("qq 发送异常: %s", e)
