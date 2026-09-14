@@ -164,6 +164,30 @@ describe('StudioProjectPage', () => {
     expect(retryMock).toHaveBeenCalledWith('s1', expect.objectContaining({ stage: 'image' }))
   })
 
+  it('A1 尾帧：按钮文案随 end_frame_path 切换 + applyShotEndFrame 透传', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.switchPhase('workbench')
+    await flushPromises()
+    // 无尾帧 → 「设为尾帧」
+    expect(wrapper.text()).toContain('设为尾帧')
+    // 有尾帧 → 缩略图 + 「更换尾帧」
+    const withEnd = { ...SHOT, end_frame_path: 'data\\generations\\tail.png' }
+    getEpisodeMock.mockResolvedValue({ code: 0, data: { episode: DETAIL.episodes[0], storyboards: [withEnd] } })
+    await vm.loadStoryboards()
+    expect(wrapper.text()).toContain('更换尾帧')
+    // R2 诚实呈现：设置尾帧后显示能力提示（WAN 默认通道记为忽略项）
+    expect(wrapper.text()).toContain('仅支持首尾帧插值的通道')
+    // applyShotEndFrame → updateStoryboard(s1, { end_frame_path }) 并刷新
+    await vm.applyShotEndFrame(SHOT, 'data/generations/tail.png')
+    await flushPromises()
+    expect(updateSbMock).toHaveBeenCalledWith('s1', { end_frame_path: 'data/generations/tail.png' })
+    // fileUrlOf：Windows 反斜杠路径取文件名 + 鉴权 token
+    expect(vm.fileUrlOf('data\\generations\\tail.png')).toBe('/api/v1/generation/files/tail.png?access_token=tok')
+    expect(vm.fileUrlOf('')).toBe('')
+  })
+
   it('Phase04 导出：成片 URL 与连播清单双形态', async () => {
     mergeMock.mockResolvedValue({
       code: 0,

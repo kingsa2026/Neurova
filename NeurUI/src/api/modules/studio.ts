@@ -95,6 +95,8 @@ export interface StudioStoryboard {
   characters_json: string
   props_json: string
   first_frame_path: string
+  /** A1：镜头尾帧（Seedance first+last 插值；WAN 无通道 ignored_params 标注） */
+  end_frame_path?: string
   injected_prompt: string
   video_path: string
   video_status: string
