@@ -82,6 +82,15 @@ export class HttpClient {
     this.token = token;
   }
 
+  /** 只读访问器：<img>/<video> 等资源标签 URL 拼接用（AigcApi.fileUrl） */
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }
+
+  getAuthToken(): string {
+    return this.token;
+  }
+
   addInterceptor(interceptor: HttpInterceptor): void {
     this.interceptors.push(interceptor);
   }
