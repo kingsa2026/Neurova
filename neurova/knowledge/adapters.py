@@ -435,6 +435,78 @@ class FeishuKBAdapter(KBAdapter):
 
         return {"status": "success", "results": results}
 
+    async def list_space_nodes(self, space_id: str, max_pages: int = 50) -> Dict[str, Any]:
+        """枚举知识空间节点（分页）。返回 {"nodes":[{id,sig,title,obj_type}], "partial":bool}。
+
+ P1#9：分页拉全部节点，游标 sig 取 obj_edit_time
+        （缺失回退 create_time/空串，仅用于相等比较）。任一页失败或有 has_more 却
+        取不到 page_token → partial=True（残缺清单，同步侧据此抑制删除检测——
+        """
+        token = await self._ensure_token()
+        if not token:
+            return {"nodes": [], "partial": True}
+        timeout = float(self._config.get("timeout", 30))
+        nodes: List[Dict[str, Any]] = []
+        partial = False
+        page_token = ""
+        for _ in range(max_pages):
+            path = f"/open-apis/wiki/v2/spaces/{space_id}/nodes?page_size=50"
+            if page_token:
+                path += f"&page_token={page_token}"
+            try:
+                status, body = self._raw_call("GET", path, token=token, timeout=timeout)
+            except Exception as e:  # noqa: BLE001
+                # 半程失败：已列出的保留、如实标 partial（同步侧抑制删除检测）
+                logger.info("飞书节点枚举中断（已列 %d 条，partial）: %s", len(nodes), e)
+                partial = True
+                break
+            if status != 200:
+                partial = True
+                break
+            data = (body or {}).get("data", body) or {}
+            for n in data.get("items") or []:
+                obj_token = n.get("obj_token")
+                if not obj_token:
+                    continue
+                nodes.append(
+                    {
+                        "id": str(obj_token),
+                        "sig": str(n.get("obj_edit_time") or n.get("obj_create_time") or ""),
+                        "title": n.get("title") or "",
+                        "obj_type": n.get("obj_type") or "",
+                    }
+                )
+            if not data.get("has_more"):
+                break
+            page_token = str(data.get("page_token") or "")
+            if not page_token:
+                partial = True
+                break
+        return {"nodes": nodes, "partial": partial}
+
+    async def fetch_doc_content(self, doc_token: str) -> Optional[str]:
+        """拉取文档正文（docx raw_content）。P1#9：修飞书适配器"只回标题"硬伤。
+
+ 失败/无正文返回 None。
+        """
+        token = await self._ensure_token()
+        if not token:
+            return None
+        try:
+            status, body = self._raw_call(
+                "GET",
+                f"/open-apis/docx/v1/documents/{doc_token}/raw_content",
+                token=token,
+                timeout=float(self._config.get("timeout", 30)),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.debug("飞书正文拉取失败 %s: %s", doc_token, e)
+            return None
+        if status != 200 or not body:
+            return None
+        content = (body.get("data") or {}).get("content") or body.get("content") or ""
+        return content or None
+
 
 class ImaKBAdapter(KBAdapter):
     """腾讯 ima 知识库适配器（MCP-over-HTTP，JSON-RPC 2.0）。

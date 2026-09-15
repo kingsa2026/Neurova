@@ -80,6 +80,12 @@ async def run_ingress_drain(poll_interval: float = 1.0) -> None:
         if ev is None:
             await asyncio.sleep(poll_interval)
             continue
+        # P1#12：span 时间线起点。claim 后任务转 processing，先记 parse=running；
+        # 取消守卫：若已被 cancel_task 标 cancelled，跳过执行（ack/nack 侧也会拦截）。
+        tid = ev["task_id"]
+        if queue.is_cancelled(tid):
+            continue
+        queue.record_span(tid, "parse", "running")
         try:
             from neurova.api.endpoints.knowledge import _fetch_url, _import_file_data
 
@@ -90,8 +96,14 @@ async def run_ingress_drain(poll_interval: float = 1.0) -> None:
         except Exception as e:  # noqa: BLE001 - 依赖装配异常按可重试处理
             result = {"ok": False, "error": str(e), "status": "wiring_error", "retry": True}
         if result.get("ok"):
-            await asyncio.to_thread(queue.ack, ev["task_id"], result.get("item_ids") or [])
+            queue.record_span(tid, "index", "running")
+            await asyncio.to_thread(queue.ack, tid, result.get("item_ids") or [])
+            # ack 后 is_cancelled 仍可能为真（在飞时用户取消）——span 如实反映
+            queue.record_span(tid, "parse", "done" if not queue.is_cancelled(tid) else "cancelled")
+            queue.record_span(tid, "index", "done" if not queue.is_cancelled(tid) else "cancelled")
         elif result.get("retry", True):
-            await asyncio.to_thread(queue.nack, ev["task_id"], str(result.get("error") or result["status"]))
+            await asyncio.to_thread(queue.nack, tid, str(result.get("error") or result["status"]))
+            queue.record_span(tid, "parse", "failed", error=str(result.get("error") or result["status"]))
         else:
-            await asyncio.to_thread(queue.dead, ev["task_id"], str(result.get("error") or result["status"]))
+            await asyncio.to_thread(queue.dead, tid, str(result.get("error") or result["status"]))
+            queue.record_span(tid, "parse", "failed", error=str(result.get("error") or result["status"]))

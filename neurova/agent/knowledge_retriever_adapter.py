@@ -1,7 +1,9 @@
 """KnowledgeRetrieverAdapter - 知识库检索器适配器
 
-将知识库 repository.search_visible_items 接入 MemoryRetrievalChain，
-使 Agent 对话时自动检索用户可见知识（隔离透传 + 质量评分）。
+P0#4：chat 路从裸 TF-IDF 分片切到 knowledge.hybrid
+四路 RRF（tfidf 分片 + bm25 + fts + ONNX 向量持久化索引）——双索引器合一，
+语义路首次进入对话管线；向量引擎不可用时各辅助路自动降级，主路（tfidf）
+异常仍上抛由责任链决定 fallback。用户隔离与质量评分契约不变。
 """
 
 from __future__ import annotations
@@ -59,18 +61,19 @@ class KnowledgeRetrieverAdapter:
             metadata = getattr(context, "metadata", None) or {}
             agent_id = metadata.get("agent_id")
 
-            # 调用 repository（兼容同步/async）
-            result = self._repo.search_visible_items(
+            # P0#4：双索引器合一——chat 路走 hybrid 四路（tfidf/bm25/fts/vector）。
+            # 向量引擎不可用时辅助路各自降级，主路 tfidf 异常上抛给责任链决定
+            # fallback（错误方向是"整级检索失败可被感知"，不是"静默返回空"）。
+            from neurova.knowledge import hybrid as _kb_hybrid
+
+            knowledge_items = _kb_hybrid.hybrid_search_knowledge(
+                self._repo,
                 user=user,
                 query=context.query,
+                limit=context.limit,
                 scope="all",
                 agent_id=agent_id,
-                limit=context.limit,
             )
-            if asyncio.iscoroutine(result):
-                knowledge_items = await result
-            else:
-                knowledge_items = result
 
             elapsed = time.monotonic() - start_time
 
@@ -159,10 +162,20 @@ class KnowledgeRetrieverAdapter:
 
     @classmethod
     def _normalize_item(cls, item: Dict[str, Any]) -> Dict[str, Any]:
-        """单条知识条目 → 检索链 memories 载荷（含 origin 信任级）"""
+        """单条知识条目 → 检索链 memories 载荷（含 origin 信任级）。
+
+ P1#6：父子分块命中时用
+        context_passages（父块上下文，按命中块定位）作为 content，
+        而非整篇正文——细粒度命中 + 完整上下文 + 有界长度。
+        """
+        passages = item.get("context_passages")
+        if passages:
+            content = "\n".join(passages)
+        else:
+            content = item.get("content") or item.get("title") or ""
         return {
             "memory_id": item.get("knowledge_id"),
-            "content": item.get("content") or item.get("title") or "",
+            "content": content,
             "title": item.get("title", ""),
             "category": item.get("category", "knowledge"),
             "tags": item.get("tags", []),

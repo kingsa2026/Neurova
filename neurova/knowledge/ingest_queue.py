@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""知识摄取持久队列（Yuxi 对比 P1 #9：Durable Task 化）。
+"""知识摄取持久队列。
 
 channel_ingress_queue 同型、按知识面裁剪：
   - SQLite（版本域 knowledge_ingress）+ dedupe_key UNIQUE 幂等 + FIFO claim
@@ -54,6 +54,24 @@ CREATE TABLE IF NOT EXISTS knowledge_ingress_events (
 CREATE INDEX IF NOT EXISTS idx_knowledge_ingress_status ON knowledge_ingress_events(status, id);
 """
 register_migration(1, _SCHEMA, domain="knowledge_ingress")
+
+# P1#12：阶段 span 表——
+# 每个 (task, stage) 一行，worker 在各阶段边界记录 running/done/failed，
+# UI 渲染解析时间线；cancel 把未完结阶段标 cancelled。单进程秒级任务，
+_SPAN_SCHEMA = """
+CREATE TABLE IF NOT EXISTS knowledge_ingress_spans (
+    task_id    TEXT NOT NULL,
+    stage      TEXT NOT NULL,
+    status     TEXT NOT NULL DEFAULT 'pending',
+    error      TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (task_id, stage)
+);
+"""
+register_migration(2, _SPAN_SCHEMA, domain="knowledge_ingress")
+
+# 阶段顺序（UI 时间线渲染序）：claim 后 parse → 抽取 extract → 入库 index
+SPAN_STAGES = ("parse", "extract", "index")
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -166,10 +184,12 @@ class KnowledgeIngressQueue:
             return dict(row)
 
     def ack(self, task_id: str, item_ids: Optional[List[str]] = None) -> None:
+        # P1#12：cancelled 守卫——在飞 worker 完成后不得把取消的任务复活为 done
         with self._lock, self._conn:
             self._conn.execute(
                 "UPDATE knowledge_ingress_events SET status='done', error=NULL, result_ids=?,"
-                " claimed_by=NULL, claimed_at=NULL, updated_at=? WHERE task_id=?",
+                " claimed_by=NULL, claimed_at=NULL, updated_at=?"
+                " WHERE task_id=? AND status != 'cancelled'",
                 (json.dumps(item_ids or []), _now_iso(), task_id),
             )
         self._cleanup_file(task_id)
@@ -179,7 +199,8 @@ class KnowledgeIngressQueue:
             self._conn.execute(
                 "UPDATE knowledge_ingress_events SET"
                 " status=CASE WHEN attempt >= ? THEN 'dead' ELSE 'pending' END,"
-                " error=?, claimed_by=NULL, claimed_at=NULL, updated_at=? WHERE task_id=?",
+                " error=?, claimed_by=NULL, claimed_at=NULL, updated_at=?"
+                " WHERE task_id=? AND status != 'cancelled'",
                 (self.max_attempts, error[:500], _now_iso(), task_id),
             )
 
@@ -189,7 +210,8 @@ class KnowledgeIngressQueue:
         with self._lock, self._conn:
             self._conn.execute(
                 "UPDATE knowledge_ingress_events SET status='dead', error=?,"
-                " claimed_by=NULL, claimed_at=NULL, updated_at=? WHERE task_id=?",
+                " claimed_by=NULL, claimed_at=NULL, updated_at=?"
+                " WHERE task_id=? AND status != 'cancelled'",
                 (error[:500], _now_iso(), task_id),
             )
 
@@ -238,13 +260,70 @@ class KnowledgeIngressQueue:
 
     def stats(self) -> Dict[str, int]:
         with self._lock:
-            counts = {s: 0 for s in ("pending", "processing", "done", "dead")}
+            counts = {s: 0 for s in ("pending", "processing", "done", "dead", "cancelled")}
             for status, n in self._conn.execute(
                 "SELECT status, COUNT(*) FROM knowledge_ingress_events GROUP BY status"
             ).fetchall():
                 if status in counts:
                     counts[status] = int(n)
         return counts
+
+    # ── P1#12 阶段 span 时间线 + stop-parse──
+
+    def record_span(self, task_id: str, stage: str, status: str, error: Optional[str] = None) -> None:
+        """记录/更新某任务某阶段状态（upsert）。失败不阻断摄取主流程。"""
+        try:
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "INSERT INTO knowledge_ingress_spans (task_id, stage, status, error, updated_at)"
+                    " VALUES (?,?,?,?,?)"
+                    " ON CONFLICT(task_id, stage) DO UPDATE SET status=excluded.status,"
+                    " error=excluded.error, updated_at=excluded.updated_at",
+                    (task_id, stage, status, (error or "")[:500] if error else None, _now_iso()),
+                )
+        except Exception as e:  # noqa: BLE001 - span 观测面故障绝不影响摄取
+            logger.debug("record_span 失败（忽略）: %s", e)
+
+    def get_spans(self, task_id: str) -> List[Dict[str, Any]]:
+        """任务阶段时间线（按 SPAN_STAGES 序；未记录阶段不出现）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT stage, status, error, updated_at FROM knowledge_ingress_spans WHERE task_id=?",
+                (task_id,),
+            ).fetchall()
+        by_stage = {r["stage"]: dict(r) for r in rows}
+        return [by_stage[s] for s in SPAN_STAGES if s in by_stage]
+
+    def cancel_task(self, task_id: str, by: str = "") -> bool:
+        """取消待处理/处理中的任务（stop-parse 语义 lite）。
+
+        pending：直接标 cancelled（claim 不再取）；processing：标 cancelled，
+        在飞的 worker 于 ack/nack 处被守卫拦住（不复活为 done/dead）。
+        done/dead/cancelled/不存在 → False（无操作，不谎报成功）。
+        """
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE knowledge_ingress_events SET status='cancelled', error=?, updated_at=?"
+                " WHERE task_id=? AND status IN ('pending','processing')",
+                ("cancelled_by:" + (by or "user"), _now_iso(), task_id),
+            )
+            if cur.rowcount == 0:
+                return False
+            # 未完结阶段一并标 cancelled（时间线诚实：不留下永远 running 的段）
+            self._conn.execute(
+                "UPDATE knowledge_ingress_spans SET status='cancelled', updated_at=?"
+                " WHERE task_id=? AND status IN ('running','pending')",
+                (_now_iso(), task_id),
+            )
+        self.record_span(task_id, "parse", "cancelled", error="cancelled_by:" + (by or "user"))
+        return True
+
+    def is_cancelled(self, task_id: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT status FROM knowledge_ingress_events WHERE task_id=?", (task_id,)
+            ).fetchone()
+        return bool(row) and row["status"] == "cancelled"
 
 
 # ── 单例工厂 ──────────────────────────────────────────────────────

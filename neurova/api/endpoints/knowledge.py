@@ -253,6 +253,66 @@ async def search_knowledge(
     return [_item_response(i) for i in results]
 
 
+# 切分 live-preview——只读、不入库、不算 embedding
+# 与摄取路径共享 split_with_meta 单源。
+# 字面路由注册在 /{knowledge_id} 之前（knowledge API 层路由顺序契约）。
+_PREVIEW_MAX_CHARS = 64 * 1024
+
+
+@router.post("/preview-chunking")
+async def preview_chunking(
+    body: dict,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """分块预览：{content, max_chars?, overlap?} → chunks + 统计。
+
+    与 POST /knowledge（导入）同一分块实现（split_with_meta），供导入前
+    "这份文本会被切成什么样"的所见即所得核对；正文只在响应内回显，
+    不持久化、不索引。
+    """
+    from neurova.knowledge.splitter import (
+        DEFAULT_MAX_CHARS,
+        DEFAULT_OVERLAP,
+        split_with_meta,
+    )
+
+    content = str((body or {}).get("content") or "")
+    if not content.strip():
+        return {"code": 1, "message": "content 不能为空", "data": None}
+    if len(content) > _PREVIEW_MAX_CHARS:
+        return {
+            "code": 1,
+            "message": "预览文本超过 %d 字符上限（请分段预览）" % _PREVIEW_MAX_CHARS,
+            "data": None,
+        }
+    try:
+        max_chars = int((body or {}).get("max_chars") or DEFAULT_MAX_CHARS)
+        overlap = int((body or {}).get("overlap") or DEFAULT_OVERLAP)
+    except (TypeError, ValueError):
+        return {"code": 1, "message": "max_chars/overlap 必须是整数", "data": None}
+    # 钳制与摄取端可接受域对齐
+    max_chars = max(100, min(4000, max_chars))
+    overlap = max(0, min(overlap, max_chars // 2))
+    chunks = split_with_meta(content, max_chars=max_chars, overlap=overlap)
+    # P1#6：同时预览生产形态——子块进索引、父块作 LLM 上下文
+    from neurova.knowledge.splitter import build_entry_chunks
+
+    children, parents = build_entry_chunks(content, parent_max=max_chars, parent_overlap=overlap)
+    return {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "chunks": chunks,
+            "total": len(chunks),
+            "children": children,
+            "parents": parents,
+            "char_total": len(content),
+            "max_chars": max_chars,
+            "overlap": overlap,
+        },
+    }
+
+
 @router.post("", response_model=KnowledgeItem)
 async def create_knowledge(
     request: Request,
@@ -353,7 +413,7 @@ async def list_deleted_knowledge(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """墓碑清单（仅管理员）：软删条目审计视图，Utopia 0022 删除是事件。"""
+    """墓碑清单（仅管理员）：软删条目审计视图"""
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="仅管理员可查看墓碑清单")
     repo = _get_repository()
@@ -408,6 +468,78 @@ async def list_knowledge_revisions(
     repo = _get_repository()
     _entry_or_404(repo, knowledge_id, current_user)
     return repo.list_revisions(knowledge_id)
+
+
+# ── P1#8：块级编辑乐观锁 + 修订账本 + 自动重索引 ──
+
+
+class ChunkUpdate(BaseModel):
+    """块编辑请求：content 必填；expected_revision 乐观锁（不传=不校验）。"""
+
+    content: str
+    expected_revision: Optional[int] = None
+
+
+@router.get("/{knowledge_id}/chunks")
+async def list_knowledge_chunks(
+    request: Request,
+    knowledge_id: str = Path(..., description="知识ID"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """块清单（含 revision/index_status；仅可见条目）"""
+    repo = _get_repository()
+    _entry_or_404(repo, knowledge_id, current_user)
+    return repo.list_chunks(knowledge_id) or []
+
+
+@router.get("/{knowledge_id}/chunks/{index}/revisions")
+async def list_chunk_revisions(
+    request: Request,
+    knowledge_id: str = Path(..., description="知识ID"),
+    index: int = Path(..., description="块序号"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """单块追加式修订账本（最新在前；仅可见条目）"""
+    repo = _get_repository()
+    _entry_or_404(repo, knowledge_id, current_user)
+    revs = repo.chunk_revisions(knowledge_id, index)
+    if revs is None:
+        raise HTTPException(status_code=404, detail="知识条目不存在")
+    return revs
+
+
+@router.put("/{knowledge_id}/chunks/{index}")
+async def update_knowledge_chunk(
+    request: Request,
+    body: ChunkUpdate,
+    knowledge_id: str = Path(..., description="知识ID"),
+    index: int = Path(..., description="块序号"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """编辑单个块（属主/管理员；乐观锁 + 自动重索引）。
+
+    409=修订冲突（携带 expected_revision 且与当前不符）——客户端须重读后重试；
+    成功返回新 revision 与块序号。
+    """
+    from neurova.knowledge.repository import ChunkRevisionConflict
+
+    _get_request_id(request)
+    repo = _get_repository()
+    _entry_or_404(repo, knowledge_id, current_user)
+    try:
+        revision = repo.update_chunk(
+            knowledge_id, index, body.content, user=current_user,
+            expected_revision=body.expected_revision,
+        )
+    except ChunkRevisionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "message": "success", "data": {"knowledge_id": knowledge_id, "index": index, "revision": revision}}
 
 
 @router.post("/{knowledge_id}/share", response_model=KnowledgeItem)
@@ -640,6 +772,52 @@ async def delete_kb_config(request: Request, config_id: str = Path(...), current
     return {"code": 0, "message": "deleted"}
 
 
+@router.post("/configs/{config_id}/sync")
+async def sync_kb_config(
+    request: Request,
+    config_id: str = Path(...),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """触发一次远程数据源增量同步落库（P1#9，当前支持飞书知识空间）。
+
+    属主校验 → 装配适配器 → run_feishu_sync（游标持久化在 settings._sync）。
+ 并发互斥：同配置已有同步在跑 → 409。
+    """
+    from neurova.knowledge.datasource_sync import SyncBusyError, run_feishu_sync
+
+    user_id = str(current_user.get("user_id", ""))
+    storage = _get_kb_storage()
+    cfg = storage.get_config_by_id(config_id)
+    if not cfg or cfg.get("user_id") != user_id:
+        raise HTTPException(status_code=404, detail=f"Config '{config_id}' not found")
+    if str(cfg.get("source_type", "")) != "feishu":
+        raise HTTPException(status_code=400, detail="当前仅飞书知识空间支持同步落库")
+    settings = dict(cfg.get("settings") or {})
+    api_key = storage.decrypt_api_key(config_id)
+    if api_key:
+        # 飞书 app_secret 经顶层 api_key Fernet 加密存储（见创建表单主凭据通道）
+        # ——FeishuKBAdapter 契约读 app_secret，映射回去；api_key 一并保留兼容。
+        settings.setdefault("app_secret", api_key)
+        settings["api_key"] = api_key
+    try:
+        from neurova.knowledge.adapters import FeishuKBAdapter
+
+        adapter = FeishuKBAdapter(settings)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail="适配器装配失败: %s" % e)
+    repo = _get_repository()
+    try:
+        stats = await run_feishu_sync(
+            adapter, repo, storage, config_id=config_id, user_id=user_id,
+            agent_id=str(request.query_params.get("agent_id") or "default"),
+        )
+    except SyncBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"code": 0, "message": "success", "data": stats}
+
+
 @router.get("/collections")
 async def list_kb_collections(request: Request, current_user: Dict[str, Any] = Depends(get_current_user_or_service)):
     """列出当前用户的集合映射。"""
@@ -701,10 +879,12 @@ async def get_ingress_task(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """单任务状态（pending/processing/done/dead；done 附 item_ids）。"""
+    """单任务状态（pending/processing/done/dead/cancelled；done 附 item_ids，
+    并附 P1#12 spans 阶段时间线）。"""
     from neurova.knowledge.ingest_queue import get_ingress_queue
 
-    row = get_ingress_queue().get(task_id)
+    queue = get_ingress_queue()
+    row = queue.get(task_id)
     if row is None:
         raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
     uid = str(current_user.get("user_id") or "")
@@ -718,8 +898,38 @@ async def get_ingress_task(
         row["item_ids"] = _json.loads(row.get("result_ids") or "[]")
     except Exception:  # noqa: BLE001
         row["item_ids"] = []
+    row["spans"] = queue.get_spans(task_id)
     row.pop("storage_path", None)  # 服务端绝对路径不外露
     return {"code": 0, "data": row}
+
+
+@router.post("/ingress-tasks/{task_id}/cancel")
+async def cancel_ingress_task(
+    task_id: str,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """取消待处理/处理中的摄取任务（P1#12 stop-parse lite）。
+
+    属主/admin；已 done/dead/cancelled → 409（不谎报取消）。在飞 worker 完成
+    时被队列 ack/nack 守卫拦截，不会把 cancelled 复活为 done/dead。
+    """
+    from neurova.knowledge.ingest_queue import get_ingress_queue
+
+    queue = get_ingress_queue()
+    row = queue.get(task_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+    uid = str(current_user.get("user_id") or "")
+    if row.get("user_id") != uid and str(current_user.get("role") or "") != "admin":
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+    ok = queue.cancel_task(task_id, by=uid)
+    if not ok:
+        raise HTTPException(
+            status_code=409,
+            detail="任务已完成或已终结，无法取消（当前状态: %s）" % row.get("status"),
+        )
+    return {"code": 0, "message": "cancelled", "data": {"task_id": task_id}}
 
 
 def _title_from_url(url: str) -> str:
@@ -987,7 +1197,11 @@ def _import_file_data(
 
     repo = _get_repository()
     title = _title_from_filename(filename)
-    # P0-2 分块：摄取即分块（段落→句→硬切降级），检索命中可溯源到块
+    # P0-2 分块：摄取即分块（段落→句→硬切降级），检索命中可溯源到块。
+    # P1#6：子块进索引细命中，父块作 LLM 上下文回传
+    from neurova.knowledge.splitter import build_entry_chunks
+
+    _children, _parents = build_entry_chunks(text)
     item = repo.create_knowledge(
         agent_id=agent_id,
         title=title,
@@ -998,7 +1212,8 @@ def _import_file_data(
         confidence=0.7,
         visibility="private",
         owner_user_id=str((user or {}).get("user_id", "") or "default"),
-        chunks=split_with_meta(text),
+        chunks=_children,
+        parents=_parents,
         # P0-3 闭环审查修 D：批量导入不进同值冲突队列——同名文件批量导入
         # （课件/周报）会瞬间产生 N-1 条 pending 刷屏待审；导入条目已有
         # source 字段独立溯源，冲突检测留给交互式单条创建路径
