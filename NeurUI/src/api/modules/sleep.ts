@@ -45,29 +45,53 @@ export interface SleepSettings {
   idle_threshold_rem: number
   idle_threshold_hibernate: number
   monitor_interval_seconds: number
-  // 每阶段最长停留（分钟）：dwell 超时强制向更深推进；最深超时=整觉完成→醒
+  // 每阶段最长停留（分钟）：dwell 超时强制沿链推进（浅睡→REM→深睡→休眠）；链尾超时=整觉完成→醒
   phase_max_minutes_light_sleep: number
   phase_max_minutes_deep_sleep: number
   phase_max_minutes_rem: number
   phase_max_minutes_hibernate: number
 }
 
+// 与后端 DreamLogItem 严格对齐（/sleep/{id}/dreams 裸数组；timestamp 为 epoch 秒）。
+// 此前前端自造 type/created_at/insights[] 字段，后端真实 dream_type/timestamp/
+// insights_generated 全部落空 —— 有数据也渲染不出。
 export interface Dream {
-  id: string
+  dream_id: string
   agent_id: string
+  timestamp: number
+  /** replay(手动回放) | consolidation(浅睡) | creative(REM) | problem_solving(休眠) */
+  dream_type: string
   content: string
-  type: 'consolidation' | 'creative' | 'problem_solving'
-  insights?: string[]
-  created_at: string
+  memories_involved: string[]
+  involved_total?: number
+  insights_generated?: number
+  duration?: number
 }
 
+// 与后端 DreamInsightItem 严格对齐。后端无"应用洞察"端点/状态——此前前端
+// applied/applyInsight 为幻影契约（恒 404），洞察只读展示。
 export interface SleepInsight {
-  id: string
+  insight_id: string
+  dream_id?: string
   agent_id: string
+  timestamp: number
+  insight_type: string
   content: string
-  source_dream_id?: string
-  applied: boolean
-  created_at: string
+  confidence: number
+  related_memories: string[]
+}
+
+// 与后端 MemoryMergeItem 对齐（/sleep/{id}/merges 裸数组）
+export interface MemoryMerge {
+  merge_id: string
+  agent_id: string
+  timestamp: number
+  source_memories: string[]
+  source_total?: number
+  target_memory: string
+  merge_type: string
+  success: boolean
+  conflicts_resolved?: number
 }
 
 export interface MergeConflict {
@@ -130,17 +154,17 @@ export function wakeUp(agentId: string) {
 
 /** Get dreams list. */
 export function getDreams(agentId: string, params?: { limit?: number; offset?: number; type?: string }) {
-  return api.get<ApiResponse<{ items: Dream[]; total: number }>>(`${BASE}/${agentId}/dreams`, { params })
+  return api.get<ApiResponse<Dream[]>>(`${BASE}/${agentId}/dreams`, { params })
 }
 
 /** Get sleep insights. */
 export function getSleepInsights(agentId: string, params?: { limit?: number; offset?: number }) {
-  return api.get<ApiResponse<{ items: SleepInsight[]; total: number }>>(`${BASE}/${agentId}/insights`, { params })
+  return api.get<ApiResponse<SleepInsight[]>>(`${BASE}/${agentId}/insights`, { params })
 }
 
-/** Apply a sleep insight. */
-export function applyInsight(agentId: string, insightId: string) {
-  return api.post<ApiResponse<null>>(`${BASE}/${agentId}/insights/${insightId}/apply`)
+/** Get memory merge history (补齐 A：状态页合并卡取数源，此前页面硬编码空数组). */
+export function getMemoryMerges(agentId: string, params?: { limit?: number; offset?: number }) {
+  return api.get<ApiResponse<MemoryMerge[]>>(`${BASE}/${agentId}/merges`, { params })
 }
 
 /** Get merge conflicts from sleep consolidation. */
@@ -148,7 +172,14 @@ export function getMergeConflicts(agentId: string, params?: { limit?: number; of
   return api.get<ApiResponse<MergeConflict[]>>(`${BASE}/${agentId}/conflicts`, { params })
 }
 
-/** Resolve a merge conflict. */
-export function resolveConflict(agentId: string, conflictId: string, resolution: string) {
-  return api.post<ApiResponse<null>>(`${BASE}/${agentId}/conflicts/${conflictId}/resolve`, { resolution })
+/**
+ * 解决/改策略一条冲突审计。resolution 合法集 = 引擎
+ * (keep_longest/keep_newest/merge)，非法值后端 404。
+ * applyToStore=true 时按策略真写回记忆库（引擎含诚实边界）。
+ */
+export function resolveConflict(agentId: string, conflictId: string, resolution: string, applyToStore = false) {
+  return api.post<ApiResponse<null>>(`${BASE}/${agentId}/conflicts/${conflictId}/resolve`, {
+    resolution,
+    apply_to_store: applyToStore,
+  })
 }

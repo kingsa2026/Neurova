@@ -66,7 +66,7 @@ const messages = {
     monitorIntervalSeconds: '阶段监控间隔',
     phaseMaxSection: '每阶段最长停留（分钟）',
     phaseMax: '最长停留',
-    phaseMaxHint: '0=不设上限；超时自动向更深阶段推进，休眠超时视为整觉完成并唤醒',
+    phaseMaxHint: '0=不设上限；超时自动沿链推进（浅睡→REM→深睡→休眠），休眠超时视为整觉完成并唤醒',
     seconds: '秒',
     hibernatePhase: '休眠阶段',
     lightPhase: '浅睡眠阶段',
