@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """P2-7 防回归：delete_agent 的目录树删除不得阻塞事件循环。
 
-原缺陷（docs/资源型Bug扫描报告_2026-09-11.md P2 第7条）：
+原缺陷（P2 第7条）：
 async delete_agent 内同步调用 ``_remove_tree_with_retry``（shutil.rmtree
 + time.sleep 重试），删大工作区（几百 MB）卡事件循环秒级~十秒级。
 
@@ -63,7 +63,12 @@ def test_delete_agent_offloads_tree_removal_from_event_loop(isolated_env, monkey
     monkeypatch.setattr(agent_module, "_remove_tree_with_retry", spy)
 
     resp = asyncio.run(
-        agent_module.delete_agent(request=Request(scope={"type": "http"}), agent_id="loop1")
+        agent_module.delete_agent(
+            request=Request(scope={"type": "http"}),
+            agent_id="loop1",
+            # Wave H-W0：属主门为 admin（本文件验证线程卸载语义，无主走 admin）
+            current_user={"user_id": "root", "username": "root", "role": "admin", "neuser_id": "root"},
+        )
     )
 
     assert len(seen_threads) == 2, "工作区与 data 目录两处删除都应执行"

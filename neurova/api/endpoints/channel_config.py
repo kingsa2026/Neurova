@@ -12,7 +12,7 @@ from __future__ import annotations
 - POST   /api/channel-configs                  - 创建/更新渠道配置
 - DELETE /api/channel-configs/{channel_type}   - 删除渠道配置
 - POST   /api/channel-configs/{channel_type}/test - 测试连接
-- GET    /api/channel-configs/{channel_type}/qrcode        - 生成渠道登录/授权二维码（通用，对齐 QwenPaw）
+- GET /api/channel-configs/{channel_type}/qrcode - 生成渠道登录/授权二维码
 - GET    /api/channel-configs/{channel_type}/qrcode/status - 轮询扫码授权状态（返回可回填凭据）
 """
 
@@ -91,9 +91,7 @@ class ChannelTestResult(BaseModel):
 
 
 # ============================================================
-# 配置持久化（2026-09-13 渠道按 agent 多实例隔离，对齐 QwenPaw：
-# agent 是渠道的所有者——存储升 v2 {version:2, agents:{agent_id:{channel_type:cfg}}}，
-# 旧 v1 平铺首载幂等迁移进 default）
+# 配置持久化
 # ============================================================
 
 
@@ -137,7 +135,7 @@ def _save_configs(configs: Dict[str, Dict[str, Any]]) -> None:
     _save_store(store)
 
 
-# 各平台身份字段（QwenPaw channels/conflict.py _CHANNEL_IDENTITY_FIELDS 对齐）：
+# 各平台身份字段：
 # 同平台跨 agent 撞身份 → 平台回调会串号，保存必须拒绝。
 _IDENTITY_FIELDS: Dict[str, tuple] = {
     "feishu": ("app_id", None),
@@ -176,7 +174,7 @@ def _norm_agent(agent_id) -> str:
 
 def _identity_conflict_owner(store: Dict[str, Any], agent_id: str, channel_type: str,
                              cfg: Dict[str, Any]) -> Optional[str]:
-    """QP conflict 语义：同平台同身份已被其他 agent 配置 → 返回冲突 agent_id。"""
+    """同平台同身份已被其他 agent 配置 → 返回冲突 agent_id"""
     ident = _extract_identity(channel_type, cfg)
     if not ident:
         return None
@@ -238,7 +236,7 @@ def _wechat_authenticated(adapter) -> bool:
     return bool(getattr(adapter, "_wecom_initialized", False))
 
 
-@router.get("/{channel_type}/qrcode", summary="生成渠道登录/授权二维码（通用，对齐 QwenPaw）")
+@router.get("/{channel_type}/qrcode", summary="生成渠道登录/授权二维码（通用）")
 async def get_channel_qrcode(channel_type: str, request: Request):
     from neurova.channels.qrcode_auth import QRCODE_AUTH_HANDLERS, generate_qrcode_image
 
@@ -278,7 +276,7 @@ async def get_channel_qrcode_status(channel_type: str, request: Request, token: 
 
 
 async def bootstrap_channel_adapters(manager=None) -> Dict[str, int]:
-    """启动装配（2026-09-13 Phase B，QP start_all_configured_agents 对齐）
+    """启动装配
 
     服务启动时按持久化配置逐 (agent_id, channel_type) 重建适配器并连接——
     此前无任何装配环节，配置在但重启后全渠道不连接（保存时才注册）。
@@ -417,19 +415,17 @@ async def get_config(channel_type: str, agent_id: str = Query(default="default")
     )
 
 
-# QwenPaw 键名→NV 规范顶层凭据的提升表（仅语义完全等价的渠道）：
 # 钉钉 Client ID == AppKey == app_id；Client Secret == AppSecret == app_secret。
 # 提升后掩码回读、跨 agent 身份冲突检测、启动重装配统一走规范键。
-# wecom 不在此列：QwenPaw wecom=智能机器人(bot_id/secret)，NV wecom=企业应用
-# (corpid/agentid)，不同协议，假映射属表面抹除，登记为协议移植后续项。
-_QP_CRED_PROMOTION: Dict[str, tuple] = {
+# wecom 不在此列：NV wecom=企业应用
+# (corpid/agentid)，不同协议，假映射属表面抹除，登记为协议移植后续项
+_CRED_PROMOTION_ALIASES: Dict[str, tuple] = {
     "dingtalk": ("client_id", "client_secret"),
 }
 
 
-def _promote_qp_credentials(channel_type: str, request: ChannelConfigRequest) -> None:
-    """把 QwenPaw 规范凭据键提升到 request.app_id/app_secret（in-place）。"""
-    alias = _QP_CRED_PROMOTION.get(channel_type)
+def _promote_credential_aliases(channel_type: str, request: ChannelConfigRequest) -> None:
+    alias = _CRED_PROMOTION_ALIASES.get(channel_type)
     if not alias:
         return
     id_key, secret_key = alias
@@ -447,12 +443,11 @@ async def create_or_update_config(
     agent_id = _norm_agent(agent_id)
     """创建或更新指定 agent 的渠道配置并注册适配器
 
-    2026-09-13 agent 隔离（QP：agent 是渠道所有者）：配置写 agents[agent_id]、
+ 2026-09-13 agent 隔离：配置写 agents[agent_id]、
     适配器按 (agent_id, channel_type) 复合键注册；保存前做平台身份冲突检测
-    （同 bot 撞两 agent → 平台回调串号，409 拒，对齐 QP conflict.py）。
     """
-    # QwenPaw 键名对齐：钉钉 client_id/client_secret 提升为规范 app_id/app_secret
-    _promote_qp_credentials(request.channel_type, request)
+# 钉钉 client_id/client_secret 提升为规范 app_id/app_secret
+    _promote_credential_aliases(request.channel_type, request)
     store = _load_store()
     config_data = safe_model_dump(request)  # s9: pydantic v1 兼容
     # 不保存明文密钥到文件
@@ -622,7 +617,7 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
             extra=extra,
         )
     elif channel_type == "dingtalk":
-        # QwenPaw 规范键 client_id/client_secret 优先，兼容旧 NV 顶层 app_id
+# 兼容旧 NV 顶层 app_id
         return create_dingtalk_adapter(
             app_id=config.app_id or extra.get("client_id", ""),
             app_secret=config.app_secret or extra.get("client_secret", ""),
@@ -699,9 +694,7 @@ def _create_adapter(channel_type: str, config: ChannelConfig):
         try:
             mode = str(extra.get("mode", "ilink") or "ilink")
             if mode == "ilink":
-                # 2026-09-13 端到端重建：ilink 走真实协议适配器
-                # （wechat_ilink.WechatILinkAdapter，QwenPaw 照搬——getupdates 收/
-                # sendmessage 发/CDN 媒体），旧 WeChatAdapter 的 ilink 路径建立在
+                # 2026-09-13 端到端重建：ilink 走真实协议适配器 #，旧 WeChatAdapter 的 ilink 路径建立在
                 # 代码自注"假设的端点"上，真实网络永不可用。wecom/official 仍走旧路。
                 from neurova.channels.wechat_ilink import WeChatILinkAdapter
 

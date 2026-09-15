@@ -5,7 +5,7 @@ Agent 外部通信协议模块
 1. 定义标准通信协议（握手、消息格式、心跳等）
 2. 实现握手协议（避免未授权连接）
 3. 实现消息队列和流量控制（避免信息风暴）
-4. 支持多种外部代理框架（OpenClaw、Hermes、Cloud Code、Trae、QwenCoder、QwenPaw等）
+4. 支持多种外部代理框架
 """
 
 import json
@@ -99,7 +99,7 @@ class HandshakeRequest:
     """握手请求"""
 
     client_id: str
-    client_type: str  # openclaw, hermes, cloud_code, etc.
+    client_type: str
     client_version: str
     capabilities: List[str]
     auth_token: Optional[str] = None
@@ -316,7 +316,7 @@ class CommunicationProtocol:
             pass
 
         # 检查客户端类型
-        supported_clients = ["openclaw", "hermes", "cloud_code", "trae", "qwen_coder", "qwen_paw"]
+        supported_clients = ["external_agent", "sub_agent", "plugin_agent"]
         if request.client_type not in supported_clients:
             logger.warning("未知客户端类型: %s", request.client_type)
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-Agent 应用包端点（P2-16，OpenClaw 对比 #16：Claw 式一清单收敛）。
+Agent 应用包端点。
 
 一清单（manifest v1）= agent 配置 + 技能清单 + 调度任务 + MCP 引用 +
 provenance。导出读真实子系统（SkillService / AgentScheduler / shared_config），

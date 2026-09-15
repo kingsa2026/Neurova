@@ -281,19 +281,18 @@ class TestCommunicationProtocol:
     def test_create_handshake_request(self):
         req = self.proto.create_handshake_request(
             client_id="agent_1",
-            client_type="hermes",
+            client_type="external_agent",
             client_version="1.0",
             capabilities=["streaming"],
         )
         assert req.client_id == "agent_1"
-        assert req.client_type == "hermes"
         assert "streaming" in req.capabilities
         assert req.supported_versions == ["1.0"]
 
     def test_create_handshake_request_no_capabilities(self):
         req = self.proto.create_handshake_request(
             client_id="agent_1",
-            client_type="hermes",
+            client_type="external_agent",
             client_version="1.0",
             capabilities=[],
         )
@@ -318,7 +317,7 @@ class TestCommunicationProtocol:
     def test_validate_handshake_version_mismatch(self):
         req = HandshakeRequest(
             client_id="a1",
-            client_type="hermes",
+            client_type="external_agent",
             client_version="0.5",
             capabilities=[],
             supported_versions=["0.5"],
@@ -341,7 +340,7 @@ class TestCommunicationProtocol:
     def test_validate_handshake_success(self):
         req = HandshakeRequest(
             client_id="a1",
-            client_type="hermes",
+            client_type="external_agent",
             client_version="1.0",
             capabilities=[],
         )

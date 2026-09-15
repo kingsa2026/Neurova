@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""开放平台 API key 持久化 + 创建幂等 + 撤销防重放（Yuxi 对比 P2 #12）。
+"""开放平台 API key 持久化 + 创建幂等 + 撤销防重放。
 
 根因：/v1/openplatform 端点用模块级内存 `_KEYS_STORE`——**重启即全丢**
 （假保存族；仓库另有 api_key_manager.py 孤岛库但无生产消费方）。
-对位 Yuxi api_key_repository：创建幂等（creation_request_id + intent 指纹）、
+创建幂等（creation_request_id + intent 指纹）
 撤销保留 tombstone 拒绝同 request_id 复活重放、DB 只存哈希（已有不降）。
 """
 import json
@@ -76,7 +76,7 @@ def test_revoked_tombstone_blocks_replay(client):
     kid = _create(client, creation_request_id="req-y").json()["data"]["id"]
     assert client.post(f"/api/v1/openplatform/{kid}/revoke").status_code == 200
     r = _create(client, creation_request_id="req-y")
-    assert r.status_code == 409, "撤销后同请求重放不得复活凭据（Yuxi tombstone 语义）"
+    assert r.status_code == 409, "撤销后同请求重放不得复活凭据（tombstone 语义）"
     # 撤销行保留（tombstone，不物理删）
     persisted = json.loads(client._keys_db.read_text(encoding="utf-8"))
     assert kid in persisted and persisted[kid]["revoked"] is True
