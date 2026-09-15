@@ -1,5 +1,5 @@
 /**
- * 模型级连接测试 + 多模态探测 + 结构化发现 — 前端契约测试（QwenPaw 对齐）
+ * 模型级连接测试 + 多模态探测 + 结构化发现 — 前端契约测试
  *
  * 锁定：
  * 1. models.ts / providers.ts 新 API 函数打到正确端点与参数；
@@ -22,7 +22,7 @@ vi.mock('@/api', () => ({
 import { checkModelConnection, probeModelMultimodal } from '@/api/modules/models'
 import { discoverModelsStructured } from '@/api/modules/providers'
 
-describe('模型管理 API 契约（QwenPaw 对齐）', () => {
+describe('模型管理 API 契约', () => {
   beforeEach(() => {
     postMock.mockReset()
     getMock.mockReset()

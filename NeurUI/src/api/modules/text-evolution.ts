@@ -67,7 +67,9 @@ export interface EvolutionProposal {
 
 export type ProposalSummary = Omit<EvolutionProposal, 'baseline_text' | 'improved_text'>
 
-const BASE = '/v1/evolution'
+// axios baseURL 已是 config.apiBaseUrl='/api/v1'（全库模块统一不带 /v1 前缀），
+// 故此处 BASE 只写资源段；曾误写 '/v1/evolution' 拼成 /api/v1/v1/... 致技能页 usage 404。
+const BASE = '/evolution'
 
 // ---------------------------------------------------------------------------
 // Settings
