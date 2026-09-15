@@ -64,7 +64,7 @@ COMPUTER_USE_TOOLS = frozenset(
     }
 )
 
-# R0-3：成功动作后自动补拍刷新截图（观察闭环，OCU 动作即观察契约）
+# R0-3：成功动作后自动补拍刷新截图
 COMPUTER_ACTION_REFRESH_TOOLS = frozenset(
     {"computer_click", "computer_type", "computer_scroll", "computer_click_element", "computer_set_value"}
 )
@@ -72,7 +72,7 @@ ACTION_REFRESH_DELAY_SECONDS = 0.5  # 等待 UI 渲染出动作效果后再补�
 ACTION_REFRESH_NOTE = "操作后的画面已实时回传到操作面板（如需在结果中确认请再调用 computer_screenshot）"
 
 
-# ── R1-3 执行前归一化层（Cua OperatorNormalizer 思想）──────────────────
+# ── R1-3 执行前归一化层──────────────────
 # computer/browser 工具的 LLM 产出参数在分发前统一归一：button 词表、
 # 数值强转、未知键拒绝（HTTP 侧 extra="forbid" 精神推广到 agent 侧）。
 
@@ -239,6 +239,7 @@ class ToolExecutor:
         "search": "_execute_web_search",
         "web_search": "_execute_web_search",
         "weather": "_execute_weather",
+        "discover_skills": "_execute_discover_skills",
         "file_read": "_execute_file_read",
         "file_parse": "_execute_file_parse",
         "file_write": "_execute_file_write",
@@ -458,12 +459,12 @@ class ToolExecutor:
             return self._messages_list
         return messages
 
-    # ── tool-call-repair（OpenClaw 启发 P0-3）─────────────────────────────
+    # ── tool-call-repair─────────────────────────────
 
     # 三种纯文本工具调用文法（OC packages/tool-call-repair/grammar.ts）：
-    #   XML-ish: <function name="ns.tool">{...}</function>（名称容忍命名空间标点）
-    #   Harmony: <|channel|>…<|message|>{"name":…,"arguments":…}<|call|>（gpt-oss 系）
-    #   尾标:    {"name":…,"arguments":…}[END_TOOL_REQUEST]
+    # XML-ish: <function name="ns.tool">{...}</function>（名称容忍命名空间标点）
+    # Harmony: <|channel|>…<|message|>{"name":…,"arguments":…}<|call|>（gpt-oss 系）
+    # 尾标:    {"name":…,"arguments":…}[END_TOOL_REQUEST]
     _REPAIR_MAX_PAYLOAD_BYTES = 256_000  # OC 默认上限，防恶意/失控输出
 
     _XMLISH_RE = re.compile(r'<function\s+name="([A-Za-z0-9_.:-]+)"\s*>(\{.*?\})\s*</function>', re.DOTALL)
@@ -474,14 +475,14 @@ class ToolExecutor:
     # 避免正则贪婪/非贪婪在嵌套与多尾标场景下的跨对象吞并
     _TRAILER_MARKER_RE = re.compile(r"\[END_TOOL_REQUEST\]")
     _CODE_FENCE_RE = re.compile(r"```|~~~")
-    # 第四形态（2026-09-14 飞书事故）：Hermes 原生格式，qwen3.8-flash 等模型
+    # 第四形态（2026-09-14 飞书事故）：qwen3.8-flash 等模型
     # 把工具调用以 <tool_call><function=NAME><parameter=K>V</parameter>… 纯文本
-    # 漏出，前三文法均不覆盖 → 调用不执行、原始 XML 直进正文。
-    _HERMES_RE = re.compile(
+    # 漏出，前三文法均不覆盖 → 调用不执行、原始 XML 直进正文
+    _TOOLCALL_XML_RE = re.compile(
         r"\u003c\|tool_call\|\u003e\s*\u003cfunction=([A-Za-z0-9_.:-]+)\u003e(.*?)\u003c/function\u003e\s*\u003c\|/tool_call\|\u003e",
         re.DOTALL,
     )
-    _HERMES_PARAM_RE = re.compile(
+    _TOOLCALL_PARAM_RE = re.compile(
         r"\u003cparameter=([A-Za-z0-9_.:-]+)\u003e\s*(.*?)\s*\u003c/parameter\u003e",
         re.DOTALL,
     )
@@ -562,11 +563,11 @@ class ToolExecutor:
                 continue
             calls.append({"name": m.group(1), "arguments": args, "raw": m.group(0)})
 
-        for m in self._HERMES_RE.finditer(reply):
+        for m in self._TOOLCALL_XML_RE.finditer(reply):
             if self._in_protected(m.start(), protected):
                 continue
             # parameter 子标签值是换行文本（非 JSON）；无参数 → 空 dict
-            args = dict(self._HERMES_PARAM_RE.findall(m.group(2)))
+            args = dict(self._TOOLCALL_PARAM_RE.findall(m.group(2)))
             calls.append({"name": m.group(1), "arguments": args, "raw": m.group(0)})
 
         for m in self._HARMONY_RE.finditer(reply):
@@ -792,7 +793,7 @@ class ToolExecutor:
 
         return results
 
-    # P-E 修复（docs/tool-memory-muscle-analysis.md）：原 execute_from_memory
+    # P-E 修复：原 execute_from_memory
     # 同步版已删除——它把工具名当用户输入做语义匹配，且 confidence > 0.8 时
     # 直接返回 memory_result.get("result", {})（MuscleMemoryItem 无 result 字段，
     # 恒为空 dict）冒充工具执行结果；该方法无调用方，实际使用的是下方的
@@ -878,10 +879,31 @@ class ToolExecutor:
 
         # P0-1 质量漏斗（turn_context 轮次账本）：本函数是全部技能执行路径
         # （chat 主链/审批重放/子代理）的唯一咽喉，三处记账：
-        #   查无此技能 → selection 无 application；进入 execute_skill → applied；
-        #   异常 → applied（执行确已尝试）ok=False。回合成败归因在
-        #   PostChatPipeline flush（兜底完成不计功），此处不判任务完成。
+        # 查无此技能 → selection 无 application；进入 execute_skill → applied；
+        # 异常 → applied（执行确已尝试）ok=False。回合成败归因在
+        # PostChatPipeline flush（兜底完成不计功），此处不判任务完成。
         from neurova.core.turn_context import record_turn_skill_funnel
+
+        # Wave H-W2 轮级可见门：视图在场时，视图外执行体拒绝执行（跨用户
+        # 私库点名调用面的根治——registry 是执行体池，可见集才是授权面），
+        # 且不入账（不可见技能不产生账本噪声）。账本 provenance 同样取自
+        # 视图：命中的副本属哪库，账就记到哪库（flush 按库路由，W1 就位）。
+        _view = None
+        try:
+            from neurova.core.turn_context import get_turn_skill_view
+
+            _view = get_turn_skill_view()
+        except Exception:  # noqa: BLE001
+            _view = None
+
+        def _prov(name: str):
+            if _view is not None:
+                return _view.provenance_for(name)
+            return ("agent", "")
+
+        if _view is not None and not _view.invocable(skill_name):
+            logger.warning("技能 %s 不在本轮可见集，执行被拒（Wave H-W2）", skill_name)
+            return {"error": f"Skill {skill_name} 在当前会话不可用"}
 
         # 漏斗账本局部态：id 先取 skill_name（查无此技能/异常早于对象解析时
         # 仍有可记账身份），applied 仅在确已进入执行作用域后置真
@@ -895,12 +917,14 @@ class ToolExecutor:
             # 2026-09-13 根治，防回归=AsyncMock 契约测试必踩此面）。
             skill = self._skill_registry.skills.get(skill_name)
             if not skill:
-                record_turn_skill_funnel(skill_name, applied=False, ok=False)
+                _p, _o = _prov(skill_name)
+                record_turn_skill_funnel(skill_name, applied=False, ok=False, pool=_p, owner_key=_o)
                 return {"error": f"Skill {skill_name} 不存在"}
 
-            _funnel_id = str(
-                getattr(skill, "skill_id", "") or getattr(skill, "id", "") or skill_name
-            )
+            # Wave G-2：身份解析单源（skill_contract）；fallback 用派发键名
+            from neurova.skills.skill_contract import resolve_skill_identity as _resolve_id
+
+            _funnel_id = _resolve_id(skill, fallback=skill_name)
 
             # B3（工具面审计）：依赖前置声明（config.requires.bins）——声明的外部
             # 可执行文件缺失时快速失败并提示安装，而非运行时以晦涩的
@@ -950,14 +974,22 @@ class ToolExecutor:
                 }
             if _deps_warning and isinstance(result, dict):
                 result.setdefault("deps_warning", _deps_warning)
+            _p, _o = _prov(skill_name)
             record_turn_skill_funnel(
-                _funnel_id, applied=True, ok=self._result_is_success(result)
+                _funnel_id,
+                applied=True,
+                ok=self._result_is_success(result),
+                pool=_p,
+                owner_key=_o,
             )
             return result
 
         except Exception as e:
             logger.error("Skill 执行失败: %s", e)
-            record_turn_skill_funnel(_funnel_id, applied=_funnel_applied, ok=False)
+            _p, _o = _prov(skill_name)
+            record_turn_skill_funnel(
+                _funnel_id, applied=_funnel_applied, ok=False, pool=_p, owner_key=_o
+            )
             return {"error": str(e)}
 
     async def execute_cli_tool(self, command: str, args: Optional[Dict] = None) -> Dict:
@@ -1142,7 +1174,7 @@ class ToolExecutor:
         result = None
         tool_source = "unknown"
         try:
-            # P1-5（OpenOcta 启发 toolArgumentsGuard）：工具参数守卫——
+            # P1-5：工具参数守卫——
             # 别名归一 + 截断 JSON 配平；修不了的残缺参数拒绝执行并返回
             # 修复建议（is_policy_denial 识别 param_guard 键，不计工具故障）。
             # 默认未装配 = get_param_guard() None = 原样透传（零行为变化）。
@@ -1270,7 +1302,7 @@ class ToolExecutor:
                 tool_source = "background"
                 return result
             result, success, tool_source = core_out
-            # P1-6（OpenOcta 启发 OutputRef）：大输出落盘为引用——默认未
+            # P1-6：大输出落盘为引用——默认未
             # 装配恒透传；写盘失败诚实降级原样返回（宁可膨胀不丢输出）。
             from neurova.agent.tool_output_ref import maybe_output_ref
 
@@ -1523,7 +1555,7 @@ class ToolExecutor:
                 # 否则回退平台后端（Windows AppContainer 为占位）
                 sandbox_result = await execute_in_sandbox_async(command, severity=verdict.severity)
                 sandbox_result["governance"] = verdict.to_dict()
-                # P1-4（Codex 升级审批对齐）：沙箱内失败先归因——命中沙箱拦截
+                # P1-4：沙箱内失败先归因——命中沙箱拦截
                 # 则创建升级审批请求，批准后经既有 approve 重放链
                 # （skip_governance）在沙箱外重跑；归因不命中保持原样
                 if not sandbox_result.get("success"):
@@ -1582,6 +1614,7 @@ class ToolExecutor:
     _GOVERNANCE_FAILOPEN_READONLY_TOOLS = frozenset({
         "memory_search", "recall_history", "voice_memory_search",
         "computer_screenshot", "computer_dom_snapshot", "get_datetime", "weather", "web_search",
+        "discover_skills",
         "file_list", "file_search", "file_read", "file_parse", "list_agents",
         "calculator", "emotion_analyze", "planning",
     })
@@ -1770,7 +1803,7 @@ class ToolExecutor:
             if _rt is not None:
                 return _rt
         # R3-4 桌面动作审计：分发咽喉点单写（本地/远程会话平面/MCP 导出三
-        # 入口都收口到这里，见 docs/Neurova_CUA_Phase3立项_2026-09-12.md §3）。
+        # 入口都收口到这里， §3）。
         if tool_name in COMPUTER_USE_TOOLS or tool_name.startswith("browser_"):
             import time as _t
 
@@ -1998,7 +2031,7 @@ class ToolExecutor:
             stream=True,
             initiator_agent=self._agent,
         )
-        # P2-5（Codex 邮箱对齐）：完成结果投递父会话邮箱——嵌套模式下工具轮
+        # P2-5：完成结果投递父会话邮箱——嵌套模式下工具轮
         # 间隙排空注入做显式回灌；后台模式下是逐轮可见的回传通道。fail-open。
         try:
             if isinstance(result, dict) and result.get("success") is not False:
@@ -2083,7 +2116,7 @@ class ToolExecutor:
                 }
             tool_sequence.append({"tool": step_name, "params": step_params})
 
-        # 注入扫描（补课 5.4，抄 QP materialize_skill 安全闸）：name/description/
+        # 注入扫描：name/description/
         # 步骤参数拼成受检文本过 PromptInjectionAnalyzer（中英双语 11 签名）。
         # fail-closed：扫描器异常视为发现风险（拒绝优于静默放行）
         scanned_text = "\n".join(
@@ -2181,8 +2214,8 @@ class ToolExecutor:
     # 所有写操作经 canvas_ops（与 HTTP 端点 /canvas/{id}/ops 共用同一层，
     # 乐观锁 + 事件广播）。错误统一转为 {"success": False, "code": ...}
     # 供 LLM 分支处理：
-    #   version_conflict  → 画布被用户抢占，canvas_read 重读后按新版本重试
-    #   unknown_node_type → canvas_list_nodes 查询可用节点类型
+    # version_conflict  → 画布被用户抢占，canvas_read 重读后按新版本重试
+    # unknown_node_type → canvas_list_nodes 查询可用节点类型
 
     def _canvas_session_id(self) -> Optional[str]:
         return getattr(self._agent, "current_session_id", None)
@@ -2544,6 +2577,90 @@ class ToolExecutor:
         except Exception as e:
             return {"query": query, "results": f"搜索 '{query}' 时出错: {e}"}
 
+    async def _execute_discover_skills(self, params: Dict) -> Dict:
+        """DiscoverSkills。
+
+        元数据检索面：返回候选技能的 name/description/how_to_invoke，**绝不
+        返回指令正文**（正文唯一通道=$mention 注入 / 用户显式调用）。打分=
+        关键词档恒在 + 语义档 best-effort（引擎/设置故障静默缺席）；零命中
+        如实返回空清单+提示，不硬凑。
+        """
+        query = str((params or {}).get("query") or "").strip()
+        if not query:
+            return {"error": "缺少 query 参数"}
+        try:
+            limit = max(1, min(20, int((params or {}).get("limit") or 5)))
+        except (TypeError, ValueError):
+            limit = 5
+        if not self._skill_registry:
+            return {"query": query, "results": [], "note": "技能注册表未初始化"}
+
+        from neurova.skill_system.compat import unpack_skill
+        from neurova.skills.skill_injection import score_skill_for_query
+
+        ranked = []
+        unpacked = {}
+        # Wave H-W2：发现面同样受轮级可见集约束（不泄露他人私库技能名/描述）
+        _view = None
+        try:
+            from neurova.core.turn_context import get_turn_skill_view as _gsv
+
+            _view = _gsv()
+        except Exception:  # noqa: BLE001
+            _view = None
+        for name, raw in self._skill_registry.skills.items():
+            if _view is not None and not _view.invocable(name):
+                continue
+            skill = unpack_skill(raw)
+            cfg = getattr(skill, "config", None)
+            if isinstance(cfg, dict) and cfg.get("model_invocable") is False:
+                continue
+            unpacked[name] = skill
+            ranked.append([name, score_skill_for_query(skill, query)])
+
+        # 语义档 best-effort（与工具面阶梯同源缓存；失败静默降级关键词档）
+        try:
+            _uid, _aid = self._agent_identity()
+            _agent_id = str(_aid or "default")
+            from neurova.context.orchestrator import _VECTOR_CACHES
+            from neurova.skills.skill_semantics import SkillVectorCache, _cosine
+            from neurova.skills.skill_semantics import skill_semantic_text
+
+            cache = _VECTOR_CACHES.get(_agent_id)
+            if cache is None:
+                from pathlib import Path as _P
+
+                cache = SkillVectorCache(
+                    cache_file=_P(f"data/agents/{_agent_id}/skills/embeddings.json")
+                )
+                _VECTOR_CACHES[_agent_id] = cache
+            qvec = cache.encode_query(query)
+            if qvec is not None:
+                vecs = cache.vectors_for(unpacked)
+                for row in ranked:
+                    vec = vecs.get(row[0])
+                    if vec is not None:
+                        cos = _cosine(qvec, vec)
+                        if cos >= 0.15:
+                            row[1] += cos
+        except Exception as sem_err:  # noqa: BLE001 - 语义档是增强
+            logger.debug("discover_skills 语义档降级: %s", sem_err)
+
+        ranked.sort(key=lambda r: r[1], reverse=True)
+        hits = [r for r in ranked if r[1] > 0][:limit]
+        results = [
+            {
+                "name": name,
+                "description": str(getattr(unpacked[name], "description", "") or "")[:250],
+                "how_to_invoke": f"${name}",
+            }
+            for name, _score in hits
+        ]
+        note = (
+            "无匹配技能。" if not results else "用 $名称 加载完整指令后按其执行。"
+        )
+        return {"query": query, "results": results, "note": note}
+
     async def _execute_weather(self, params: Dict) -> Dict:
         """执行天气查询"""
         location = params.get("location") or params.get("city") or params.get("query", "")
@@ -2570,7 +2687,7 @@ class ToolExecutor:
         except Exception as e:
             return {"location": location, "error": f"天气查询失败: {e}"}
 
-    # ── 常规 Agent 工具：网页抓取 / 计算 / 时间（对标 WebFetch 等标配）──
+    # ── 常规 Agent 工具：网页抓取 / 计算 / 时间（标配）──
 
     @staticmethod
     def _html_to_text(html: str) -> str:
@@ -2936,7 +3053,7 @@ class ToolExecutor:
 
         直取模式（传 tool_call_id）：按硬地址在会话 metadata.tool_calls 台账
         精确匹配（溢出条目顺 offload_path 读回工作区文件全文），未命中/文件
-        缺失如实报错并附预览——禁止伪装空结果（Yuxi 吞错反面教材）。
+ 缺失如实报错并附预览——禁止伪装空结果。
         子串模式（仅 query）：经 context_pool.recall_evicted 内存台账（本进程
         驱逐）+ 持久台账（SQLite FTS，覆盖重启前历史）双源模糊召回（原语义）。
         """
@@ -3729,7 +3846,7 @@ class ToolExecutor:
             return {"error": f"Shell 命令执行失败: {str(e)}"}
 
     async def _execute_exec_command(self, params: Dict) -> Dict:
-        """会话式命令执行（P0-3，Codex unified_exec 对齐）。
+        """会话式命令执行。
 
         启动常驻进程并等待 yield_time_ms：结束→completed+exit_code；
         未结束→running+session_id，后续经 write_stdin 交互/轮询。
@@ -3781,7 +3898,7 @@ class ToolExecutor:
             return {"error": f"write_stdin 执行失败: {str(e)}"}
 
     async def _execute_update_plan(self, params: Dict) -> Dict:
-        """update_plan（P1-7，Codex plan_tool 对齐）：维护任务步骤清单。
+        """update_plan：维护任务步骤清单。
 
         状态机约束：plan 非空、status ∈ {pending,in_progress,completed}、
         至多一个 in_progress——违规返回明确错误让模型自纠。

@@ -1,7 +1,6 @@
 """
 KbBuilderSkillExecutor 测试
 
-知识库构建技能（工作流规范源自 tinyfish-cookbook 的 kb-builder：
 "合成心智模型，而非来源摘要堆"；工具层替换为 Neurova 原生
 web_search + web_reach.web_read，产出直接写入 KnowledgeRepository）。
 

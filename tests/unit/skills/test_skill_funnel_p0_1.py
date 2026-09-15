@@ -1,11 +1,10 @@
-"""P0-1 技能质量漏斗（OpenSpace 代码级对比 2026-09-14 启发落地）
+"""P0-1 技能质量漏斗
 
-契约（对齐 OpenSpace skill_engine 五计数漏斗 + 归因防污染规则）：
+契约：
 - selections   = LLM 调用技能、通过治理预检进入技能派发（execute_skill_tool）
 - applications = 技能实际进入执行（registry.execute_skill 被调到）
 - completions  = applied ∧ 执行成功 ∧ 本轮任务完成
 - fallbacks    = applied ∧ ¬completions——**技能执行失败但本轮靠其它工具
-  兜底完成时不得记 completion**（OpenSpace skill_phase_failed_skill_ids 同源规则：
   "兜底完成不得给技能记功"）
 
 数据流：tool_executor.execute_skill_tool 写轮次账本（turn_context ContextVar，
@@ -26,7 +25,7 @@ from neurova.skills.skill_service import SkillService, compute_skill_funnel_upda
 
 def test_funnel_completed():
     """执行成功且任务完成 → completion。"""
-    entries = [{"skill_id": "s1", "applied": True, "ok": True}]
+    entries = [{"skill_id": "s1", "applied": True, "ok": True, "pool": "agent", "owner_key": ""}]
     updates = compute_skill_funnel_update(entries, task_completed=True)
     assert updates == {
         "s1": {"selections": 1, "applications": 1, "completions": 1, "fallbacks": 0}
@@ -35,7 +34,7 @@ def test_funnel_completed():
 
 def test_funnel_fallback_recovery_gets_no_credit():
     """归因防污染核心：技能执行失败，本轮靠兜底完成 → fallbacks，不是 completions。"""
-    entries = [{"skill_id": "s1", "applied": True, "ok": False}]
+    entries = [{"skill_id": "s1", "applied": True, "ok": False, "pool": "agent", "owner_key": ""}]
     updates = compute_skill_funnel_update(entries, task_completed=True)
     u = updates["s1"]
     assert u["completions"] == 0
@@ -44,8 +43,8 @@ def test_funnel_fallback_recovery_gets_no_credit():
 
 
 def test_funnel_task_incomplete_no_credit():
-    """技能执行成功但任务未完成 → 不得记 completion（OpenSpace: not task_completed → fallback）。"""
-    entries = [{"skill_id": "s1", "applied": True, "ok": True}]
+    """技能执行成功但任务未完成 → 不得记 completion。"""
+    entries = [{"skill_id": "s1", "applied": True, "ok": True, "pool": "agent", "owner_key": ""}]
     updates = compute_skill_funnel_update(entries, task_completed=False)
     assert updates["s1"]["completions"] == 0
     assert updates["s1"]["fallbacks"] == 1
@@ -63,8 +62,8 @@ def test_funnel_unapplied_selection_only():
 def test_funnel_aggregates_same_skill():
     """同一技能多条目聚合计数。"""
     entries = [
-        {"skill_id": "s1", "applied": True, "ok": True},
-        {"skill_id": "s1", "applied": True, "ok": False},
+        {"skill_id": "s1", "applied": True, "ok": True, "pool": "agent", "owner_key": ""},
+        {"skill_id": "s1", "applied": True, "ok": False, "pool": "agent", "owner_key": ""},
         {"skill_id": "s2", "applied": False, "ok": False},
         {"skill_id": "", "applied": True, "ok": True},  # 无身份丢弃
     ]
@@ -138,7 +137,7 @@ def test_get_skill_usage_backcompat_and_rates(svc):
     # 存量键保持
     assert usage["use_count"] == 1
     assert "success_count" in usage and "last_used_at_ms" in usage
-    # 漏斗派生率（OpenSpace applied_rate/completion_rate/fallback_rate/effective_rate 同语义）
+    # 漏斗派生率
     assert usage["applied_rate"] == 1.0
     assert usage["completion_rate"] == 0.5
     assert usage["fallback_rate"] == 0.5
@@ -166,8 +165,8 @@ def test_turn_funnel_record_and_snapshot():
     turn_context.record_turn_skill_funnel("s1", applied=True, ok=False)
     snap = turn_context.get_turn_skill_funnel()
     assert snap == [
-        {"skill_id": "s1", "applied": True, "ok": True},
-        {"skill_id": "s1", "applied": True, "ok": False},
+        {"skill_id": "s1", "applied": True, "ok": True, "pool": "agent", "owner_key": ""},
+        {"skill_id": "s1", "applied": True, "ok": False, "pool": "agent", "owner_key": ""},
     ]
     # 快照是副本，改不污染
     snap.clear()
@@ -227,7 +226,7 @@ async def test_execute_skill_records_applied_success():
     assert result.get("success") is True
 
     entries = turn_context.get_turn_skill_funnel()
-    assert entries == [{"skill_id": "deploy_helper", "applied": True, "ok": True}]
+    assert entries == [{"skill_id": "deploy_helper", "applied": True, "ok": True, "pool": "agent", "owner_key": ""}]
 
 
 @pytest.mark.asyncio
@@ -246,7 +245,7 @@ async def test_execute_skill_records_applied_failure():
     await executor.execute_skill_tool("deploy_helper", {})
 
     entries = turn_context.get_turn_skill_funnel()
-    assert entries == [{"skill_id": "deploy_helper", "applied": True, "ok": False}]
+    assert entries == [{"skill_id": "deploy_helper", "applied": True, "ok": False, "pool": "agent", "owner_key": ""}]
 
 
 @pytest.mark.asyncio
@@ -265,7 +264,7 @@ async def test_execute_skill_records_selection_without_apply():
     assert "error" in result
 
     entries = turn_context.get_turn_skill_funnel()
-    assert entries == [{"skill_id": "deploy_helper", "applied": False, "ok": False}]
+    assert entries == [{"skill_id": "deploy_helper", "applied": False, "ok": False, "pool": "agent", "owner_key": ""}]
 
 
 @pytest.mark.asyncio
@@ -284,7 +283,7 @@ async def test_execute_skill_exception_records_applied_failure():
     await executor.execute_skill_tool("deploy_helper", {})
 
     entries = turn_context.get_turn_skill_funnel()
-    assert entries == [{"skill_id": "deploy_helper", "applied": True, "ok": False}]
+    assert entries == [{"skill_id": "deploy_helper", "applied": True, "ok": False, "pool": "agent", "owner_key": ""}]
 
 
 @pytest.mark.asyncio

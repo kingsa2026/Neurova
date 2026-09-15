@@ -123,13 +123,17 @@ def _get_skills_from_registry() -> List[Dict[str, Any]]:
         registry = get_skill_registry()
         if registry is None:
             return _get_builtin_skills()
+        # Wave G-2：身份解析单源（skill_contract 规范次序 skill_id→id→name——
+        # API 展示向记账面对齐；此处曾取 id 优先，与其他消费方矛盾）
+        from neurova.skills.skill_contract import resolve_skill_identity
+
         skills = []
         for skill in registry.list_skills() or []:
             if isinstance(skill, dict):
                 data = dict(skill)
             elif hasattr(skill, "__dict__"):
                 data = {
-                    "skill_id": getattr(skill, "id", None) or getattr(skill, "skill_id", "") or getattr(skill, "name", ""),
+                    "skill_id": resolve_skill_identity(skill),
                     "name": getattr(skill, "name", "") or "",
                     "description": getattr(skill, "description", ""),
                     "version": getattr(skill, "version", "1.0"),
@@ -140,8 +144,8 @@ def _get_skills_from_registry() -> List[Dict[str, Any]]:
             elif hasattr(skill, "to_dict"):
                 data = skill.to_dict()
             elif hasattr(skill, "__dict__"):
-                # skill_id 优先 manifest.id（mock/SkillInfo 均有 id），回退 name
-                sid = getattr(skill, "id", None) or getattr(skill, "skill_id", "") or getattr(skill, "name", "")
+                # skill_id 单源解析（mock/SkillInfo 形态兜底分支）
+                sid = resolve_skill_identity(skill)
                 data = {
                     "skill_id": sid,
                     "name": getattr(skill, "name", "") or sid,

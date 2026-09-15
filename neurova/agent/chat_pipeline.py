@@ -517,17 +517,28 @@ class ChatPipeline:
                 channel_user_id=_md.get("channel_user_id"),
                 channel=_md.get("channel"),
             )
-            _tc.set_turn_skill_view(
-                build_turn_view(
-                    str(getattr(self._agent.config, "agent_id", "") or ""),
-                    _user_key,
-                    registry_skills=(
-                        dict(getattr(self._agent, "_skill_registry", None).skills)
-                        if getattr(self._agent, "_skill_registry", None) is not None
-                        else None
-                    ),
-                )
+            _view = build_turn_view(
+                str(getattr(self._agent.config, "agent_id", "") or ""),
+                _user_key,
+                registry_skills=(
+                    dict(getattr(self._agent, "_skill_registry", None).skills)
+                    if getattr(self._agent, "_skill_registry", None) is not None
+                    else None
+                ),
             )
+            _tc.set_turn_skill_view(_view)
+            # 需求 2 执行面闭环：视图在场但 registry 缺席的用户库/公共库副本
+            # 物化为可执行体（仅带 tool_sequence 的条目；元目类目录条目留在
+            # 发现面——与 marketplace 未安装条目同语义）。registry 同名先到
+            # （agent 层/内置）跳过，幂等。
+            _reg = getattr(self._agent, "_skill_registry", None)
+            if _reg is not None:
+                try:
+                    from neurova.skills.market_registry import restore_library_skills_for_turn
+
+                    restore_library_skills_for_turn(_reg, _view)
+                except Exception:
+                    logger.debug("库技能执行桥物化失败（不放大为对话失败）", exc_info=True)
         except Exception:
             logger.debug("技能可见视图装配失败（回退现状 agent 视图）", exc_info=True)
         # [蜂群流式] event_emitter 允许经 metadata 透传（Agent.chat 未显式

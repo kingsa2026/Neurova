@@ -1,4 +1,4 @@
-"""P0-4 安装门 bypass 收口（OpenSpace 对比报告，NV 存量信任边界不一致债）
+"""P0-4 安装门 bypass 收口
 
 根因：scan_skill_for_install 只接在 hub_client(的市场导入路径)，
 SkillService.install_skill 本地目录/zip 安装与 /skill-pool/install-from-zip

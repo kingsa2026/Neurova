@@ -1,15 +1,15 @@
-"""s8 TDD: _private_skills / _public_skills 加 RLock 保护
+"""s8 TDD（历史）→ Wave F 契约演化：并发保护面从 API 内存 dict 下沉到 SkillService
 
-背景:
-- AGENTS.md 规定 "Thread safety: use threading.RLock for shared state"
-- _private_skills / _public_skills 是模块级共享 dict, create/update/delete
-  进行 read-modify-write, 多线程部署 (uvicorn --threads N) 会有 TOCTOU race
-- 当前 async def 无 await 点, 单事件循环线程内原子, 但违反防御性规范
+历史 (s8): _private_skills / _public_skills 模块级共享 dict 多线程 read-modify-write
+TOCTOU → 加模块级 RLock。
 
-契约:
-1. skill_pool_api 模块应有 _lock 属性, 类型为 threading.RLock
-2. create/update/delete 临界区应在 with _lock: 内 (静态契约)
-3. list 端点也应用 _lock 保护读
+Wave F (2026-09-15): private 链落 SkillService manifest——API 层不再有 private
+共享内存态，锁语义由 SkillService._lock（RLock）+ 原子写承载；模块级 _lock
+仍保护存量的 _public_skills（公共演示轨）。本文件断言随之演化：
+  1. 模块 _lock 仍在且为 RLock（public 轨）；
+  2. private CRUD 源码不再引用 _private_skills（内存轨已废除）；
+  3. private 链的并发保护验证下沉到 SkillService（register/update/uninstall
+     源码 with self._lock 静态断言）。
 """
 
 import inspect
@@ -19,76 +19,55 @@ import pytest
 
 
 def test_skill_pool_api_has_rlock():
-    """s8.1: skill_pool_api 模块应有 _lock 属性, 类型为 RLock"""
+    """s8.1 保持: 模块仍有 _lock（现服务 _public_skills 轨）。"""
     from neurova.api.endpoints import skill_pool_api as mod
 
     assert hasattr(mod, "_lock"), "skill_pool_api 应有 _lock 保护共享状态"
-    # RLock 可重入; Lock 不可重入. RLock 实例 acquire() 后再 acquire() 不死锁
-    assert isinstance(mod._lock, type(threading.RLock())), (
-        f"_lock 应为 RLock 类型 (可重入), 实际: {type(mod._lock)}"
-    )
-
-
-def test_create_private_skill_uses_lock():
-    """s8.2 静态契约: create_private_skill 应在 with _lock: 内写 _private_skills"""
-    from neurova.api.endpoints import skill_pool_api as mod
-
-    src = inspect.getsource(mod.create_private_skill)
-    assert "with _lock" in src or "with mod._lock" in src, (
-        "create_private_skill 应在 with _lock: 内写入 _private_skills"
-    )
-
-
-def test_update_private_skill_uses_lock():
-    """s8.3 静态契约: update_private_skill 应在 with _lock: 内 read-modify-write"""
-    from neurova.api.endpoints import skill_pool_api as mod
-
-    src = inspect.getsource(mod.update_private_skill)
-    assert "with _lock" in src or "with mod._lock" in src, (
-        "update_private_skill 应在 with _lock: 内 read-modify-write"
-    )
-
-
-def test_delete_private_skill_uses_lock():
-    """s8.4 静态契约: delete_private_skill 应在 with _lock: 内删除"""
-    from neurova.api.endpoints import skill_pool_api as mod
-
-    src = inspect.getsource(mod.delete_private_skill)
-    assert "with _lock" in src or "with mod._lock" in src, (
-        "delete_private_skill 应在 with _lock: 内删除 _private_skills[sid]"
-    )
-
-
-def test_list_private_skills_uses_lock():
-    """s8.5 静态契约: list_private_skills 应在 with _lock: 内读 _private_skills"""
-    from neurova.api.endpoints import skill_pool_api as mod
-
-    src = inspect.getsource(mod.list_private_skills)
-    assert "with _lock" in src or "with mod._lock" in src, (
-        "list_private_skills 应在 with _lock: 内读 _private_skills (防止迭代时被并发修改)"
-    )
+    assert isinstance(mod._lock, type(threading.RLock()))
 
 
 def test_lock_is_rlock_not_lock():
-    """s8.6 类型断言: _lock 必须是 RLock, 不能是 Lock
+    """s8.6 保持: _lock 必须可重入。"""
+    from neurova.api.endpoints import skill_pool_api as mod
 
-    Lock 不可重入, 若某方法持锁后调用同对象另一个持锁方法会死锁.
-    RLock 可重入, 安全.
+    lock = mod._lock
+    a1 = lock.acquire(blocking=False)
+    a2 = lock.acquire(blocking=False)
+    if a1:
+        lock.release()
+    if a2:
+        lock.release()
+    assert a1 and a2, "_lock 必须是 RLock（可重入）"
+
+
+@pytest.mark.parametrize(
+    "fn_name",
+    ["list_private_skills", "create_private_skill", "update_private_skill", "delete_private_skill"],
+)
+def test_private_chain_no_longer_touches_memory_dict(fn_name):
+    """Wave F: private 链不得再引用 _private_skills（双轨合一的静态护栏）。
+
+    用访问式模式检查（`_private_skills[` / `_private_skills.`）——裸子串会被
+    函数名 list_private_skills 自身误撞。
     """
     from neurova.api.endpoints import skill_pool_api as mod
 
-    if not hasattr(mod, "_lock"):
-        pytest.skip("_lock 不存在, s8.1 已暴露")
+    src = inspect.getsource(getattr(mod, fn_name))
+    assert "_private_skills[" not in src and "_private_skills." not in src, (
+        f"{fn_name} 不应再读写已废除的内存 dict——单源=SkillService manifest"
+    )
 
-    lock = mod._lock
-    # RLock.acquire() 后再次 acquire() 不死锁
-    acquired1 = lock.acquire(blocking=False)
-    acquired2 = lock.acquire(blocking=False)
-    if acquired1:
-        lock.release()
-    if acquired2:
-        lock.release()
-    assert acquired1 and acquired2, (
-        "_lock 必须是 RLock (可重入). Lock 第二次 acquire 会阻塞/失败. "
-        f"acquired1={acquired1}, acquired2={acquired2}"
+
+@pytest.mark.parametrize(
+    "method_name",
+    ["register_auto_skill", "update_auto_skill", "uninstall_skill", "install_skill"],
+)
+def test_skill_service_critical_sections_hold_rlock(method_name):
+    """Wave F 并发契约下沉: SkillService 读改写临界区必须 with self._lock。"""
+    from neurova.skills.skill_service import SkillService
+
+    src = inspect.getsource(getattr(SkillService, method_name))
+    assert "with self._lock" in src, (
+        f"{method_name} 必须在 self._lock 内做 read-modify-write（API 层已把"
+        "并发保护责任交给服务层）"
     )

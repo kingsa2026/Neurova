@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""ChannelRouter —— 渠道入站消息统一路由到 agent 并回发（对齐 QwenPaw process 注入）。
+"""ChannelRouter —— 渠道入站消息统一路由到 agent 并回发。
 
 背景（"下消息通路"缺失环）：ChannelManager 此前没有任何常驻消息处理器，飞书/钉钉/
 微信等渠道把消息收进来后 `_dispatch_message` 找不到 handler → 无人调用 agent →
-无回复。QwenPaw 的做法是给所有渠道注入统一的 `process`（agent 调用）+ 各渠道用
+无回复
 `resolve_session_id` 得到稳定会话键。NV 复用既有 `ChannelManager.add_message_handler`
 与 `resolve_session_scope_id`，用**一个**常驻 handler 打通：
 
@@ -103,7 +103,10 @@ def make_handler(manager, agent_lookup: Optional[Callable[[str], Any]] = None) -
         # session 归该管理员、在其控制台正常可见可续聊（外部发送者身份留在 metadata）。
         # 请求上下文为空时 save_to_session 会落"共享可见"，故必须显式设定。
         from neurova.core.identity_context import clear_request_user_id, set_request_user_id
-        owner = str(getattr(agent, "owner_user_id", "") or "") or None
+        # Wave H-W0 修复：owner_user_id 在 agent.config 上——原读
+        # getattr(agent, "owner_user_id") 恒 None，渠道会话归属链自
+        # 2026-09 断链设计起从未生效（save_to_session 落"共享可见"）。
+        owner = str(getattr(getattr(agent, "config", None), "owner_user_id", "") or "") or None
         try:
             set_request_user_id(owner)
             resp = await agent.chat(user_input=content, session_id=session_id, metadata=meta)

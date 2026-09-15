@@ -1,7 +1,6 @@
-"""Wave C 进化闸门（OpenSpace 对比 P1-1/P1-2/P1-3/P2-1）
+"""Wave C 进化闸门
 
 - P1-1 routing 回归：技能批准前跑确定性自检（名述自洽/正例可召回/负例不抢召），
-  零 LLM——对应 OpenSpace behavior_eval 的 routing 段最小移植；
 - P1-2 进化输入脱敏+预算：improver 记录面（record_usage 写入侧根治）——
   input/output/error 摘要落库前密钥脱敏 + 字符预算（此前会话原文直喂
   ReflectiveMutator LLM 有外流面）；
@@ -44,7 +43,7 @@ def test_routing_positive_queries_must_recall():
 
 
 def test_routing_negative_queries_must_not_recall():
-    """负例命中 = 描述过泛抢无关召回（OpenSpace negative_trigger_queries 同语义）。"""
+    """负例命中 = 描述过泛抢无关召回。"""
     issues = routing_sanity_check(
         "pdf-tool", "pdf 转换 pdf 文档", negative_queries=["pdf"]
     )

@@ -1,4 +1,4 @@
-"""P1-6 技能身份与版本真数据（OpenSpace .skill_id/版本 DAG 最小移植）
+"""P1-6 技能身份与版本真数据
 
 两件事：
 1. manifest 条目带 identity（稳定身份+revision 链）与 version_history

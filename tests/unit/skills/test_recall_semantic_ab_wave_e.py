@@ -1,11 +1,10 @@
 """Wave E：召回闭环（语义档+熔断+目录标注）+ skills_off A/B 接线 + 开关三级
 
-对应 OpenSpace 对账表残项：
 - §2.5 trust/质量的召回消费面：高 fallback / 零完成技能在阶梯预算中被熔断
-  （OpenSpace registry.py:1336-1352 同判据）；目录对 provisional 打标（软信号，
+；目录对 provisional 打标（软信号，
   同它 listing 里 "(provisional; success 3/5)" 的语义）；
 - §2.4 检索阶梯补 embedding 档：keyword→semantic 混合打分；向量缓存以
-  **内容哈希为键**（OpenSpace 缓存键无哈希的坑，对比报告 §2.4 已点名）；
+ **内容哈希为键**；
 - P2-4 replay 接线：turn 级 skills_off 上下文 + make_agent_ab_executor
   （cold 臂=技能库对模型不可见：schema 与目录同时缺席；warm=正常）；
 - A6 tool_search 开关三级化：env 显式 > app_settings（新增 tool_search_enabled，
@@ -39,7 +38,7 @@ def _q(applications=0, completions=0, fallbacks=0):
 
 
 def test_quality_excludes_chronic_fallback():
-    """applications>=2 且 fallback 率>0.5 → 熔断出局（OpenSpace 同判据）。"""
+    """applications>=2 且 fallback 率>0.5 → 熔断出局。"""
     skills = {n: _Skill(n, "pdf 工具") for n in ("good", "bad")}
     lookup = {"bad": _q(applications=3, completions=1, fallbacks=2)}
     picked = select_skills_for_turn(
@@ -166,7 +165,7 @@ def test_vector_cache_recomputes_on_content_change(tmp_path):
     # 内容不变 → 命中缓存不重编码
     cache.vectors_for({"a": _Skill("a", "第一版描述")})
     assert len(eng.calls) == 1
-    # 内容变 → 哈希失配重编码（OpenSpace 缓存坑的反面纪律）
+    # 内容变 → 哈希失配重编码
     cache.vectors_for({"a": _Skill("a", "第二版描述")})
     assert len(eng.calls) == 2
     # 重启可复用（持久化 + 哈希键）

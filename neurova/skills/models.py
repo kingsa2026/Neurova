@@ -344,7 +344,6 @@ class ExperienceRecord:
     """经验记录
 
     2.0 契约（来源：tests/test_experience_knowledge_base.py + 设计文档
-    docs/dev_progress/module_designs/experience_knowledge_base.md）：
     - skill_name: 关联的技能名
     - context: 调用上下文 (通常含 user_input/topic)
     - result: 技能输出结果 (失败时可为 None)

@@ -42,15 +42,14 @@ class TestAdminService:
         
         # 创建增强用户模型（实现契约：单 storage_dir；组/配额本地实现）
         user_model = EnhancedUserModel(storage_dir=str(tmp_path))
-        
-        # 创建技能池管理器
-        from neurova.skill_system.skill_pool_manager import SkillPoolManager
-        skill_manager = SkillPoolManager(base_dir=str(tmp_path))
-        
+
+        # （原 skill_manager = SkillPoolManager(...) 两行删除：AdminService 自持
+        # 存储从不消费它，孤岛 2026-09-15 退役。）
+
         # 创建协作管理器
         from neurova.collaboration.collaboration_isolation import CollaborationIsolationManager
         collab_manager = CollaborationIsolationManager(tmp_path)
-        
+
         # 创建管理员服务（实现契约：单 storage_dir；自持 JSON 存储）
         admin_service = AdminService(storage_dir=str(tmp_path))
 
@@ -58,7 +57,6 @@ class TestAdminService:
             "group_manager": group_manager,
             "quota_manager": quota_manager,
             "user_model": user_model,
-            "skill_manager": skill_manager,
             "collab_manager": collab_manager,
             "admin_service": admin_service,
             "tmp_path": tmp_path,

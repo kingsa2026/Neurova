@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""技能语义向量层（OpenSpace 对比 §2.4 施工项：检索阶梯的 embedding 档）。
+"""技能语义向量层。
 
 底座复用本地 bge ONNX（neurova.embedding.get_embedding_engine，模型缺失/
 初始化失败 → 全链路优雅降级为纯关键词档，零报错零阻断）。
 
-缓存纪律（OpenSpace 的坑，对比报告点名）：缓存条目以**内容哈希**为键——
+缓存纪律：缓存条目以**内容哈希**为键——
 skill 文本（name+description+when_to_use）一变立即重编码，杜绝"原地改
 SKILL.md 但向量陈旧"。引擎失败返回的零向量不入缓存、不参与排序。
 """
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,9 +21,27 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
+_MODEL_KEY = "bge-small-zh-v1.5"
+
+
+def semantic_recall_enabled() -> bool:
+    """语义档开关三级：env NEUROVA_SKILL_SEMANTIC 显式值 > app_settings
+    advanced.skill_semantic_recall_enabled（默认开）> True；读取故障开。"""
+    raw = os.environ.get("NEUROVA_SKILL_SEMANTIC", "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    try:
+        from neurova.core.app_settings import get_advanced_settings
+
+        return bool(get_advanced_settings().get("skill_semantic_recall_enabled", True))
+    except Exception:  # noqa: BLE001 - 设置故障保持开（降级安全在引擎侧）
+        return True
+
 
 def skill_semantic_text(skill: Any) -> str:
-    """编码口径：name + description + when_to_use（对齐 OpenSpace 12000 截断）。"""
+    """编码口径：name + description + when_to_use。"""
     name = str(getattr(skill, "name", "") or "")
     desc = str(getattr(skill, "description", "") or "")
     cfg = getattr(skill, "config", None)
@@ -60,13 +79,35 @@ class SkillVectorCache:
         if self._engine_resolved:
             return self.engine
         self._engine_resolved = True
+        # 显式注入 engine（测试/高级装配）不受开关摆布；懒解析路径才尊重
+        # env/设置 kill-switch——保证单测永不加载 ONNX 模型（conftest 全局置 0）。
+        if not semantic_recall_enabled():
+            self.engine = None
+            return None
+        try:
+            from neurova.tts.model_downloader import get_model_downloader
+
+            # 召回热路径禁止触发模型下载（09-10 事故纪律延伸 + 测试网络隔离）：
+            # 模型可用性只查询；缺失=降级关键词档，模型安装归模型管理/封包面。
+            if not get_model_downloader().is_model_available(_MODEL_KEY):
+                logger.info("嵌入模型未安装，技能检索使用关键词档")
+                self.engine = None
+                return None
+        except Exception as e:  # noqa: BLE001 - 可用性探测失败按不可用处理
+            logger.debug("嵌入模型可用性探测失败，降级关键词档: %s", e)
+            self.engine = None
+            return None
         try:
             from neurova.embedding import get_embedding_engine
 
             self.engine = get_embedding_engine()
-            if self.engine is not None and not self.engine.is_initialized():
+            # is_initialized 是 property（mem_core/voice_engine 同读取式）——
+            # 误当方法调用会抛 TypeError 并被静默吞成"降级关键词档"（live 走查抓出）
+            if self.engine is not None and not getattr(self.engine, "is_initialized", False):
                 self.engine.initialize_sync()
-        except Exception as e:  # noqa: BLE001 - 语义档是增强，故障即降级关键词档
+            if self.engine is not None and not getattr(self.engine, "is_initialized", False):
+                self.engine = None
+        except Exception as e:  # noqa: BLE001 - 语义档是增强，故障即降级
             logger.info("embedding 引擎不可用，技能检索降级关键词档: %s", e)
             self.engine = None
         return self.engine

@@ -2,10 +2,10 @@
 Neurova 技能系统
 
 功能:
-1. 技能注册和管理
-2. 技能池管理（公共池 + 专属池）
-3. 技能推送机制
-4. 技能隔离和权限控制
+1. 技能注册和管理（SkillRegistry 规范实现）
+2. 内置技能装配（create_default_skills）
+（原"技能池管理/推送/隔离"由 skill_pool_manager 孤岛承担，2026-09-15 退役——
+零生产调用方；三层库设计吸收其词汇，。）
 """
 
 import importlib.util
@@ -68,22 +68,8 @@ def __getattr__(name: str) -> Any:
     # SkillEvent 不在此代理：skills.events 门面反向 from neurova.skill_system
     # import SkillEvent——在此引 events 会循环导入（partially initialized）。
     # SkillEvent 走下方 standalone 加载分支，与 events 门面同源同对象。
-    elif name == "SkillPoolManager":
-        from neurova.skill_system.skill_pool_manager import SkillPoolManager
-
-        return SkillPoolManager
-    elif name == "SkillPoolType":
-        from neurova.skill_system.skill_pool_manager import SkillPoolType
-
-        return SkillPoolType
-    elif name == "SkillVisibility":
-        from neurova.skill_system.skill_pool_manager import SkillVisibility
-
-        return SkillVisibility
-    elif name == "SkillMetadata":
-        from neurova.skill_system.skill_pool_manager import SkillMetadata
-
-        return SkillMetadata
+    # （原 SkillPoolManager/SkillPoolType/SkillVisibility/SkillMetadata 四代理
+    # 随孤岛退役移除，2026-09-15——零生产调用方，词汇由三层技能库设计吸收。）
     elif name == "SkillStatus":
         # SkillStatus 枚举
         from enum import Enum
@@ -245,16 +231,8 @@ try:
 except ImportError as e:
     logger.warning("Failed to import create_default_skills: %s", e)
 
-# 导入核心类（向后兼容）
-try:
-    from neurova.skill_system.skill_pool_manager import (
-        SkillMetadata,
-        SkillPoolManager,
-        SkillPoolType,
-        SkillVisibility,
-    )
-except ImportError as e:
-    logger.warning("Failed to import skill_pool_manager: %s", e)
+# （原"向后兼容"导入 SkillPoolManager/SkillMetadata/SkillPoolType/SkillVisibility
+# 块随孤岛退役删除，2026-09-15。）
 
 # 导入 Skill 类（从被遮蔽的 skill_system.py 模块导入，避免占位降级）
 try:
@@ -294,10 +272,6 @@ class SkillInfo:
 
 
 __all__ = [
-    "SkillPoolManager",
-    "SkillPoolType",
-    "SkillVisibility",
-    "SkillMetadata",
     "SkillStatus",
     "Skill",
     "SkillResult",

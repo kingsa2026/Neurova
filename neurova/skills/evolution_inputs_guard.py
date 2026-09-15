@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""进化输入护栏（P1-2，OpenSpace evidence/redaction.py 同语义最小移植）。
+"""进化输入护栏。
 
 进化闭环（反射式文本改进/失败分析/审批 UI）历史上把会话原文与技能 IO 摘要
 直喂 LLM——密钥随文本外流的面。本模块在**写入侧**（record_usage）根治：
 落库前脱敏 + 字符预算；所有下游消费方天然拿到干净文本。
 
-模式集对齐 OpenSpace redaction.py:10-26：
 - 键名=value/冒号形态：api[_-]?key|token|authorization|cookie|secret|password|credential
 - Authorization: Bearer xxx
 - OpenAI 风格 sk-[A-Za-z0-9_-]{16,}
@@ -18,7 +17,7 @@ from typing import List
 
 __all__ = ["redact_secrets", "contains_secret", "bound_text"]
 
-_EVOLUTION_INPUT_BUDGET = 2000  # 单字段字符预算（OpenSpace snippet 预算同思想）
+_EVOLUTION_INPUT_BUDGET = 2000  # 单字段字符预算
 
 _KV_RE = re.compile(
     r"(?i)(api[_\- ]?key|token|authorization|cookie|secret|password|credential|access[_\- ]?key)"

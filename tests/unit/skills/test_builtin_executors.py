@@ -147,7 +147,7 @@ class TestFileOperationSkillExecutor:
 class TestBuiltinFactoryPendingStore:
     def test_factory_mounts_pending_store(self, monkeypatch, tmp_path):
         """工厂构造的 memory executor 携带待确认队列——聊天 memory_save
-        写入默认进待审，确认后才入主库（Utopia 0018 交互式写入语义）。
+ 写入默认进待审，确认后才入主库。
         store 指向 tmp（防项目根测试污染），接线契约以 _mount_pending_store
         是否被调用并传入构造为准。"""
         from neurova.memory.pending_memory import PendingMemoryStore

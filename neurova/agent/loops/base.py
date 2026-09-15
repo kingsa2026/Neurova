@@ -40,7 +40,6 @@ class BaseAgentLoop(ABC):
     每个 Loop 实现特定的模型交互逻辑。
     子类必须实现 predict_step() 方法。
 
-    设计参考: cua-main 的 Agent Loop 系统
     """
 
     def __init__(self, agent: "Agent"):
@@ -108,7 +107,7 @@ class BaseAgentLoop(ABC):
             new_messages.append(msg)
             self.agent.append_tool_messages(records)
 
-        # P1-9（Codex steer 对齐）：工具轮间隙排空插话邮箱——turn 进行中
+        # P1-9：工具轮间隙排空插话邮箱——turn 进行中
         # 用户补充的消息以 user 角色并入消息序列，下一次采样即可见
         try:
             from neurova.core.steer_queue import get_steer_queue
@@ -121,7 +120,7 @@ class BaseAgentLoop(ABC):
         except Exception:  # noqa: BLE001 - 插话排空失败不影响工具结果回装
             logger.debug("steer 排空失败(忽略)", exc_info=True)
 
-        # P2-5（Codex 邮箱对齐）：排空子代理回传邮箱——后台子代理的完成
+        # P2-5：排空子代理回传邮箱——后台子代理的完成
         # 结果逐轮可见；嵌套模式的完成摘要同样显式回灌
         try:
             from neurova.agent.mailbox import get_agent_mailbox
@@ -218,8 +217,20 @@ class BaseAgentLoop(ABC):
             # 执行工具：优先 SkillRegistry → 失败/异常则 fallback ToolRouter
             exec_result = None
 
+            # Wave H-W2 可见门（第二执行链）：轮级视图在场时视图外技能直接
+            # 跳过 skill_registry 尝试（ToolRouter/内置照常）。不在此链入账
+            # （该链现状本就不经漏斗咽喉，见对比文档 §7.1 备注）。
+            try:
+                from neurova.core.turn_context import get_turn_skill_view
+
+                _skill_view = get_turn_skill_view()
+            except Exception:  # noqa: BLE001
+                _skill_view = None
+
             # 1. 尝试 SkillRegistry（异常时 fallback 到 ToolRouter，不直接报错）
-            if self.agent.skill_registry:
+            if self.agent.skill_registry and not (
+                _skill_view is not None and not _skill_view.invocable(_tc_function_name)
+            ):
                 try:
                     # 隔离注入：身份并入 params（kb_builder 等据此归属知识条目），
                     # 同时以 context 透传；服务端赋值优先，防 LLM 参数伪造

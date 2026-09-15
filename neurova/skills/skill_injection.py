@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""P1-6 技能注入：$mention 全文注入 + 清单预算（Codex skills 对齐）。
+"""P1-6 技能注入：$mention 全文注入 + 清单预算。
 
 - parse_skill_mentions：用户消息里的 $skill-name / @skill-name mention 提取
 - collect_skill_mention_docs：命中技能的 SKILL.md 指令体全文注入本轮
-  （Codex 语义：mention 后把完整技能正文作为本 turn 的用户片段注入）
 - render_skill_catalog：技能清单渲染（name+description），超预算降级为
-  仅名清单（Codex 别名压缩同构）——供提示词注入技能目录使用，token 有界
+ 仅名清单——供提示词注入技能目录使用，token 有界
 """
 from __future__ import annotations
 
@@ -30,7 +29,7 @@ class QualityInfo:
 _MENTION_RE = re.compile(r"[$@]([A-Za-z0-9_\-\u4e00-\u9fa5]+)")
 _DEFAULT_CATALOG_BUDGET = 6000
 _DEFAULT_DOC_BUDGET = 12000
-_MAX_DESC_CHARS = 250  # OpenSpace protocol.py MAX_LISTING_DESC_CHARS 同值
+_MAX_DESC_CHARS = 250
 
 
 def parse_skill_mentions(text: str) -> List[str]:
@@ -64,11 +63,16 @@ def _skill_doc_text(skill: Any) -> str:
 
 
 def collect_skill_mention_docs(
-    registry: Any, mentions: List[str], max_chars: int = _DEFAULT_DOC_BUDGET
+    registry: Any,
+    mentions: List[str],
+    max_chars: int = _DEFAULT_DOC_BUDGET,
+    allowed_names: Optional[set] = None,
 ) -> str:
     """按 mention 收集技能指令体全文块；无命中返回空串。
 
     名字解析优先精确匹配，其次前缀/包含匹配（@web 会命中 web-search）。
+    allowed_names（Wave H-W2 三层库）：非 None 时仅可见集内技能可注入正文
+    ——mention 是全文泄露面，视图外技能即使 registry 有执行体也拒绝注入。
     """
     if not registry or not mentions:
         return ""
@@ -85,6 +89,10 @@ def collect_skill_mention_docs(
                     skill = cand
                     break
         if skill is None:
+            continue
+        _nm = str(getattr(skill, "name", "") or "")
+        if allowed_names is not None and mention not in allowed_names and _nm not in allowed_names:
+            logger.info("[技能注入] %s 不在本轮可见集，跳过正文注入", mention)
             continue
         doc = _skill_doc_text(skill).strip()
         if not doc:
@@ -110,11 +118,10 @@ def render_skill_catalog(
     user_input: str = "",
     trust_lookup: Optional[Callable[[str], Optional[str]]] = None,
 ) -> str:
-    """技能清单渲染（P0-3 预算化目录，OpenSpace protocol.py:57-63 同参）。
+    """技能清单渲染。
 
     - 每行 `- name — description[:250]`（MAX_LISTING_DESC_CHARS 同值）
     - 行数超 max_lines：截断并在块尾提示未列数与发现途径
-      （OpenSpace >100 裁剪后追加 DiscoverSkills 引导的同构语义）
     - 总长超预算：别名压缩——丢描述保名字
     - model_invocable=False / enabled=False 的技能不进目录；paths 未激活的
       技能仅在**传入 user_input 时**过滤（常驻目录调用 user_input="" →
@@ -137,8 +144,7 @@ def render_skill_catalog(
             continue
         desc = str(getattr(s, "description", "") or "")[:_MAX_DESC_CHARS]
         line = f"- {name} — {desc}" if desc else f"- {name}"
-        # P0-2 消费面：进化产物未晋升前对模型软标注（OpenSpace listing 打
-        # "(provisional; …)" 同语义——不剔除、让模型知情权衡）
+        # P0-2 消费面：进化产物未晋升前对模型软标注
         if trust_lookup is not None and trust_lookup(name) == "provisional":
             line += " (provisional)"
         lines.append(line)
@@ -162,13 +168,13 @@ def render_skill_catalog(
     return alias[:max_chars]
 
 
-# ── P2-5 paths 条件激活 + P2-2 阶梯检索（OpenSpace registry.py/protocol.py 语义）──
+# ── P2-5 paths 条件激活 + P2-2 阶梯检索──
 
 import fnmatch
 
 
 def match_skill_paths(skill: Any, user_input: str) -> bool:
-    """config.paths glob 条件激活（P2-5，OpenSpace paths frontmatter 同语义）。
+    """config.paths glob 条件激活。
 
     未设定 paths → 恒 True（存量技能行为零变化）；设定后，仅当本轮用户输入
     命中任一 glob（对输入里的文件名/路径 token 逐个 fnmatch，或整段子串命中）
@@ -194,10 +200,9 @@ def match_skill_paths(skill: Any, user_input: str) -> bool:
 
 
 def score_skill_for_query(skill: Any, query: str, quality: Optional[Dict[str, Any]] = None) -> float:
-    """关键词重合打分（OpenSpace keyword 权重 name4/desc2/when_to_use2 + 质量微调）。
+    """关键词重合打分。
 
     quality 传入 {completions, fallbacks} 时叠加 ±min(n,5)*0.05 微调——
-    与 OpenSpace protocol.py:645-690 的召回打分同源（无 quality 零影响）。
     """
     name = str(getattr(skill, "name", "") or "")
     desc = str(getattr(skill, "description", "") or "")
@@ -225,13 +230,12 @@ def score_skill_for_query(skill: Any, query: str, quality: Optional[Dict[str, An
     return score
 
 
-# 语义 cosine 计入排序的最低门槛（对齐 OpenSpace hybrid ratio 保守精神：
-# 弱相关不得把技能抬进 top-k）
+# 语义 cosine 计入排序的最低门槛
 _SEMANTIC_FLOOR = 0.15
 
 
 def quality_blocked(q: Optional[QualityInfo]) -> bool:
-    """质量熔断判据（唯一权威；OpenSpace registry.py:1336-1352 同判据）：
+    """质量熔断判据：
     applications≥2 且（零完成 或 fallback 率>0.5）→ 本轮不得出现在模型工具面。
     无数据/样本不足一律放行（增量不下降：新技能冷启动零误杀）。"""
     if q is None or q.applications < 2:
@@ -251,7 +255,6 @@ def select_skills_for_turn(
     零命中回退全量——宁可全而不缺（不可让模型瞎掉所有技能）。paths 未激活
     /禁用/model_invocable=False 的技能直接出局（与目录渲染同过滤）。
 
-    quality_lookup 提供时先过**熔断**（OpenSpace registry.py:1336-1352 同判据：
     applications≥2 且（零完成 或 fallback 率>0.5）→ 本轮不再进工具面；无数据
     不熔断）。semantic_scores 提供时并入打分（keyword + max(0, cos≥floor)）。
     """
@@ -307,7 +310,7 @@ def routing_sanity_check(
     positive_queries: Optional[List[str]] = None,
     negative_queries: Optional[List[str]] = None,
 ) -> List[str]:
-    """技能路由确定性自检（P1-1，OpenSpace behavior_eval routing 段最小移植）。
+    """技能路由确定性自检。
 
     批准/进化提交前跑，零 LLM：
     - 描述为空 = 死技能种子（模型无信息判断何时使用）；
@@ -344,13 +347,20 @@ def routing_sanity_check(
 
 
 def inject_skill_mentions(
-    user_input: str, registry: Any, max_chars: int = _DEFAULT_DOC_BUDGET
+    user_input: str,
+    registry: Any,
+    max_chars: int = _DEFAULT_DOC_BUDGET,
+    allowed_names: Optional[set] = None,
 ) -> str:
-    """入口：无 registry/无 mention/无命中时原样返回（零副作用）。"""
+    """入口：无 registry/无 mention/无命中时原样返回（零副作用）。
+
+    allowed_names：Wave H-W2 可见集白名单（None=现状全量）。"""
     mentions = parse_skill_mentions(user_input or "")
     if not mentions or registry is None:
         return user_input or ""
-    docs = collect_skill_mention_docs(registry, mentions, max_chars=max_chars)
+    docs = collect_skill_mention_docs(
+        registry, mentions, max_chars=max_chars, allowed_names=allowed_names
+    )
     if not docs:
         return user_input or ""
     return f"{user_input}\n\n{docs}"
