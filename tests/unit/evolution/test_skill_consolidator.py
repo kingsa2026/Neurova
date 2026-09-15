@@ -15,9 +15,9 @@ from neurova.evolution.skill_consolidator import (
 class TestFindPrefixClusters:
     def test_groups_by_domain_prefix(self):
         clusters = find_prefix_clusters([
-            "hermes-config-a", "hermes-config-b", "hermes-config-c", "unrelated",
+            "plugin-config-a", "plugin-config-b", "plugin-config-c", "unrelated",
         ])
-        assert clusters == [["hermes-config-a", "hermes-config-b", "hermes-config-c"]]
+        assert clusters == [["plugin-config-a", "plugin-config-b", "plugin-config-c"]]
 
     def test_min_size_filters_singletons(self):
         clusters = find_prefix_clusters(["a-x", "b-y"], min_size=2)

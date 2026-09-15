@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
-"""技能库 cold/warm A/B 评测 harness（P2-4，OpenSpace Terminal-Bench 方法论移植）。
+"""技能库 cold/warm A/B 评测 harness。
 
-回答的问题：**进化出来的技能库到底带来多少跨任务泛化收益？**（Hermes 评测
+回答的问题
 已有 simulated/文本进化 A/B，但"库级 cold/warm"对照此前没有。）
 
-方法学纪律（针对 OpenSpace 数字的最大水分——warm 分支把同任务 verifier
 输出/reward/验收目标打包成"反馈技能"注入，等价于带答案重放，见
-docs/Neurova_OpenSpace代码级对比_2026-09-14.md §2.11）：
+ §2.11）：
 
 1. 执行面只见任务：executor 签名 (task_input, *, skills_enabled, seed)，
    seed 只允许 sanitize_warm_seed 白名单字段（任务输入/成功工具序列/
@@ -32,6 +31,7 @@ __all__ = [
     "SeedLeakError",
     "sanitize_warm_seed",
     "build_seed_from_successful_run",
+    "collect_warm_seeds_from_patterns",
     "make_agent_ab_executor",
     "run_cold_warm_ab",
 ]
@@ -80,6 +80,38 @@ def build_seed_from_successful_run(run_record: Dict[str, Any]) -> Dict[str, Any]
     if isinstance(summary, str):
         seed["summary"] = summary
     return sanitize_warm_seed(seed)
+
+
+def collect_warm_seeds_from_patterns(patterns: List[Any], min_independent_successes: int = 2) -> List[Dict[str, Any]]:
+    """从 AutoSkillBuilder 的 ToolPattern 物化 warm 种子集（P2-4 replay 接线）。
+
+ 采集纪律：
+    - 只取**成功证据**：pattern.source_evidence 中 "s" 源数 ≥ min_independent_successes
+      （单源自证不入种子——回声室红线）；
+    - 字段白名单：task_input←上下文关键词（非答案）、tool_sequence←成功序列、
+      summary=模式统计摘要；全程经 sanitize_warm_seed，verifier/reward 形态键
+      结构上不可能混入。
+    """
+    seeds: List[Dict[str, Any]] = []
+    for p in patterns or []:
+        evidence = getattr(p, "source_evidence", None) or {}
+        independent = sum(1 for v in evidence.values() if v == "s")
+        if independent < max(1, int(min_independent_successes)):
+            continue
+        seq = [str(t) for t in (getattr(p, "tool_sequence", None) or [])]
+        if len(seq) < 2:
+            continue
+        keywords = " ".join(str(k) for k in (getattr(p, "context_keywords", None) or [])[:6])
+        seed = build_seed_from_successful_run(
+            {
+                "task_input": keywords or seq[0],
+                "tool_sequence": seq,
+                "success": True,
+                "summary": f"跨 {independent} 个独立任务复现的成功序列",
+            }
+        )
+        seeds.append(seed)
+    return seeds
 
 
 def make_agent_ab_executor(agent, *, sender: str = "ab-eval"):

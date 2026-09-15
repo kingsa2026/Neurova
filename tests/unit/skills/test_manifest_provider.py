@@ -26,6 +26,21 @@ from neurova.skills.manifest_source import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """单测禁止外呼：默认 provider 链含 RemoteHubSource，它只在**异常**时降级为空，
+    而 HTTP 层是「重试 + 指数退避 + 长连接超时」——Agent.get_skill_manifest() 于是
+    真打远端 hub，卡满 pytest 30s 超时（非 hermetic，无网/限流环境必抖）。
+    让 HTTP 层立刻失败：RemoteHubSource 的 except→[] 降级语义不变，本模块仍完整
+    走默认链（local builtin + remote 降级支），只是不再碰网络。"""
+    import neurova.skills.hub_client as hub
+
+    def _offline(*_args, **_kwargs):
+        raise OSError("network disabled in unit tests")
+
+    monkeypatch.setattr(hub, "_http_fetch", _offline)
+
+
 class TestListManifests:
     """Slice 1: list_manifests() 返回 manifest 列表（tracer bullet）"""
 
