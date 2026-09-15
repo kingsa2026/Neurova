@@ -172,6 +172,48 @@
               :addon-after="t('sleep.seconds')"
             />
           </a-form-item>
+          <a-divider style="margin: 8px 0">{{ t('sleep.phaseMaxSection') }}</a-divider>
+          <a-form-item :label="`${t('sleep.lightPhase')} · ${t('sleep.phaseMax')}`">
+            <a-input-number
+              v-model:value="settingsForm.phase_max_minutes_light_sleep"
+              :min="0"
+              :max="1440"
+              :precision="0"
+              style="width: 100%"
+              :addon-after="t('sleep.minutes')"
+            />
+          </a-form-item>
+          <a-form-item :label="`${t('sleep.deepPhase')} · ${t('sleep.phaseMax')}`">
+            <a-input-number
+              v-model:value="settingsForm.phase_max_minutes_deep_sleep"
+              :min="0"
+              :max="1440"
+              :precision="0"
+              style="width: 100%"
+              :addon-after="t('sleep.minutes')"
+            />
+          </a-form-item>
+          <a-form-item :label="`${t('sleep.remPhase')} · ${t('sleep.phaseMax')}`">
+            <a-input-number
+              v-model:value="settingsForm.phase_max_minutes_rem"
+              :min="0"
+              :max="1440"
+              :precision="0"
+              style="width: 100%"
+              :addon-after="t('sleep.minutes')"
+            />
+          </a-form-item>
+          <a-form-item :label="`${t('sleep.hibernatePhase')} · ${t('sleep.phaseMax')}`">
+            <a-input-number
+              v-model:value="settingsForm.phase_max_minutes_hibernate"
+              :min="0"
+              :max="1440"
+              :precision="0"
+              style="width: 100%"
+              :addon-after="t('sleep.minutes')"
+            />
+            <template #extra>{{ t('sleep.phaseMaxHint') }}</template>
+          </a-form-item>
         </a-form>
         <template #footer>
           <GlassButton
@@ -289,7 +331,12 @@ import * as sleepApi from '@/api/modules/sleep'
 import type { SleepSettings, MergeConflict } from '@/api/modules/sleep'
 
 const { t } = useI18n()
-const { agentId } = useAgentPage()
+const { agentId } = useAgentPage({
+  onAgentChange: () => {
+    fetchSettings()
+    fetchConflicts()
+  },
+})
 
 const sleepTabs = computed(() => [
   { labelKey: 'nav.sleepstatus', to: `/agent/${agentId.value}/sleep/status` },
@@ -320,6 +367,10 @@ const settingsForm = reactive<{
   idle_threshold_rem: number
   idle_threshold_hibernate: number
   monitor_interval_seconds: number
+  phase_max_minutes_light_sleep: number
+  phase_max_minutes_deep_sleep: number
+  phase_max_minutes_rem: number
+  phase_max_minutes_hibernate: number
 }>({
   auto_sleep_enabled: true,
   sleep_threshold_minutes: 30,
@@ -337,6 +388,10 @@ const settingsForm = reactive<{
   idle_threshold_rem: 90,
   idle_threshold_hibernate: 120,
   monitor_interval_seconds: 60,
+  phase_max_minutes_light_sleep: 30,
+  phase_max_minutes_deep_sleep: 60,
+  phase_max_minutes_rem: 120,
+  phase_max_minutes_hibernate: 240,
 })
 
 // --- Custom resolve modal ---
@@ -384,6 +439,14 @@ const fetchSettings = async () => {
         settings.idle_threshold_hibernate ?? settingsForm.idle_threshold_hibernate
       settingsForm.monitor_interval_seconds =
         settings.monitor_interval_seconds ?? settingsForm.monitor_interval_seconds
+      settingsForm.phase_max_minutes_light_sleep =
+        settings.phase_max_minutes_light_sleep ?? settingsForm.phase_max_minutes_light_sleep
+      settingsForm.phase_max_minutes_deep_sleep =
+        settings.phase_max_minutes_deep_sleep ?? settingsForm.phase_max_minutes_deep_sleep
+      settingsForm.phase_max_minutes_rem =
+        settings.phase_max_minutes_rem ?? settingsForm.phase_max_minutes_rem
+      settingsForm.phase_max_minutes_hibernate =
+        settings.phase_max_minutes_hibernate ?? settingsForm.phase_max_minutes_hibernate
     }
   } catch (e: any) {
     message.error(e?.message || t('common.error'))
@@ -396,7 +459,8 @@ const fetchConflicts = async () => {
   conflictsLoading.value = true
   try {
     const res = await sleepApi.getMergeConflicts(agentId.value)
-    const data = res?.data
+    // /conflicts 返回裸数组；此前 res?.data 读裸数组恒 undefined → 冲突卡恒空白
+    const data = sleepApi.unwrapSleep<MergeConflict[]>(res)
     conflicts.value = Array.isArray(data) ? data : []
   } catch {
     conflicts.value = []
@@ -435,6 +499,10 @@ const handleSave = async () => {
     idle_threshold_rem: settingsForm.idle_threshold_rem,
     idle_threshold_hibernate: settingsForm.idle_threshold_hibernate,
     monitor_interval_seconds: settingsForm.monitor_interval_seconds,
+    phase_max_minutes_light_sleep: settingsForm.phase_max_minutes_light_sleep,
+    phase_max_minutes_deep_sleep: settingsForm.phase_max_minutes_deep_sleep,
+    phase_max_minutes_rem: settingsForm.phase_max_minutes_rem,
+    phase_max_minutes_hibernate: settingsForm.phase_max_minutes_hibernate,
   }
 
   const result = await saveMutation.execute(payload)

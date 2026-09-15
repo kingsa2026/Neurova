@@ -180,7 +180,12 @@ import type { MotivationState, PersonalityProfile } from '@/api/modules/growth'
 import { getEmotionSummary } from '@/api/modules/memory'
 
 const { t } = useI18n()
-const { agentId } = useAgentPage()
+// onAgentChange：切换 agent 后全页按新 agent 重拉（同族页面 Memory/Metacognition 的既有接线契约）
+const { agentId } = useAgentPage({
+  onAgentChange: () => {
+    refreshAll()
+  },
+})
 
 const activeTab = ref('emotion')
 const refreshing = ref(false)
@@ -325,7 +330,7 @@ const fetchEmotionProfile = async () => {
 const fetchPersonality = async () => {
   loading.value = true
   try {
-    const res: any = await request.get('/growth/personality')
+    const res: any = await request.get('/growth/personality', { params: { agent_id: agentId.value } })
     const data = res?.data ?? res ?? {}
     const traits = data.traits ?? data.profile ?? {}
     if (typeof traits === 'object' && !Array.isArray(traits)) {
@@ -346,7 +351,7 @@ const savePersonality = async () => {
   try {
     const traits: Record<string, number> = {}
     traitList.value.forEach(t => { traits[t.key] = t.percent / 100 })
-    await request.put('/growth/personality', { traits })
+    await request.put('/growth/personality', { traits }, { params: { agent_id: agentId.value } })
     message.success(t('common.success'))
     editing.value = false
     traitList.value = traitList.value.map(t => ({ ...t, value: t.percent / 100 }))
@@ -360,7 +365,7 @@ const savePersonality = async () => {
 const evolvePersonality = async () => {
   evolving.value = true
   try {
-    await request.post('/growth/personality/evolve')
+    await request.post('/growth/personality/evolve', {}, { params: { agent_id: agentId.value } })
     message.success(t('common.success'))
     await Promise.all([fetchPersonality(), fetchEmotionProfile()])
   } catch {

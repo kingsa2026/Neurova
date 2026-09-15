@@ -347,10 +347,37 @@
               </div>
             </div>
 
+            <!-- 发现候选模型：获取模型仅产出"可添加的模型"，手动添加后才并入配置（2026-09-14 契约） -->
+            <div v-if="discoveredCandidates.length > 0" class="nr-mm-candidates">
+              <div class="nr-mm-candidates-head">
+                <span class="nr-mm-candidates-title">{{ t('model.discoverAddable') }} ({{ discoveredCandidates.length }})</span>
+                <button class="nr-mm-btn-submit" :disabled="addingAllCandidates" @click="addAllDiscoveredModels">
+                  {{ t('model.addAll') }}
+                </button>
+              </div>
+              <div v-for="dm in discoveredCandidates" :key="candidateId(dm)" class="nr-mm-item nr-mm-candidate">
+                <div class="nr-mm-item-info">
+                  <div class="nr-mm-item-name-row">
+                    <span class="nr-mm-item-name">{{ dm.name || candidateId(dm) }}</span>
+                  </div>
+                  <span class="nr-mm-item-id">{{ candidateId(dm) }}</span>
+                  <div v-if="coreCapabilityLabels(dm).length > 0" class="nr-mm-item-caps">
+                    <span v-for="cap in coreCapabilityLabels(dm)" :key="cap.key" class="nr-mm-cap" :class="'nr-mm-cap-' + cap.key">{{ cap.label }}</span>
+                  </div>
+                </div>
+                <div class="nr-mm-item-actions">
+                  <button class="nr-mm-btn-submit" :disabled="addingCandidateId === candidateId(dm)" @click="addDiscoveredModel(dm)">
+                    {{ t('model.addFiltered') }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <!-- Model list -->
             <div class="nr-mm-list">
               <div v-if="filteredModels.length === 0" class="nr-mm-empty">{{ t('model.noModels') }}</div>
-              <div v-for="m in filteredModels" :key="m.id" class="nr-mm-item" :class="{ 'is-active': m.is_active }">
+              <template v-for="m in filteredModels" :key="m.id">
+              <div class="nr-mm-item" :class="{ 'is-active': m.is_active }">
                 <div class="nr-mm-item-info">
                   <div class="nr-mm-item-name-row">
                     <span class="nr-mm-item-name">{{ m.name }}</span>
@@ -379,13 +406,19 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                   </button>
                   <button class="nr-mm-icon-btn" :title="t('model.settings')" @click="activateModel(m)">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51 1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                   </button>
                   <button class="nr-mm-icon-btn nr-mm-icon-danger" :title="t('model.delete')" @click="deleteModel(m)">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                   </button>
                 </div>
               </div>
+              <!-- 连接测试结果容器：显示在该模型行正下方（缺 key/余额不足/失败原因就地可见） -->
+              <div v-if="modelTestResults[m.id]" class="nr-mm-item-result" :class="'result-' + modelTestResults[m.id].type">
+                <span class="nr-mm-result-text">{{ modelTestResults[m.id].text }}</span>
+                <button class="nr-mm-result-dismiss" @click="delete modelTestResults[m.id]">&times;</button>
+              </div>
+              </template>
             </div>
 
             <!-- Edit model section -->
@@ -451,7 +484,7 @@
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api'
-import { listProviders, getActiveModel, activateModel as apiActivateModel, updateProvider, createProvider as apiCreateProvider, deleteProvider as apiDeleteProvider, discoverModelsStructured, filterProviderModels, getProviderSeries, testConnection } from '@/api/modules/providers'
+import { listProviders, getActiveModel, activateModel as apiActivateModel, updateProvider, createProvider as apiCreateProvider, deleteProvider as apiDeleteProvider, discoverModelsStructured, mergeDiscoveredModels, filterProviderModels, getProviderSeries, testConnection } from '@/api/modules/providers'
 import type { FilteredProviderModel } from '@/api/modules/providers'
 import { listModels, updateModel, deleteModel as apiDeleteModel, detectCapabilities as apiDetectCapabilities, checkModelConnection, probeModelMultimodal } from '@/api/modules/models'
 import type { ModelConnectionResult } from '@/api/modules/models'
@@ -542,6 +575,10 @@ const BUILTIN_PROVIDERS: SeedProvider[] = [
   { id: 'volcano-agentplan', name: 'Volcano Engine Agent Plan', icon: '🌋', iconSrc: 'https://img.alicdn.com/imgextra/i1/O1CN01KusRg42AJPkUV5ken_!!6000000008182-2-tps-1892-1660.png', color: '#991b1b', type: 'builtin', category: 'paid', base_url: 'https://ark.cn-beijing.volces.com/api/plan/v3', protocol: 'openai', enabled: true },
   { id: 'mimo', name: 'Xiaomi MiMo', icon: 'Mi', color: '#f97316', type: 'builtin', category: 'paid', base_url: 'https://api.xiaomimimo.com/v1', protocol: 'openai', enabled: true },
   { id: 'xiaomi-mimo', name: 'Xiaomi MiMo Token Plan', icon: 'Mi', iconSrc: 'https://img.alicdn.com/imgextra/i1/O1CN01TSCOAt1XP7fywLDei_!!6000000002915-2-tps-3483-3483.png', color: '#ea580c', type: 'builtin', category: 'paid', base_url: 'https://api.xiaomi.com/v1', protocol: 'openai', enabled: true },
+  // ── Agnes 双网关（AIGC 预置 2026-09-14；id 与后端 _BUILTIN_PROVIDER_DEFS 对齐；
+  //    free 门户但注册取 key，category=paid 免被 free 的默认「已配置」判定误标）──
+  { id: 'agnes-intl', name: 'Agnes (International)', icon: 'AG', color: '#0d9488', type: 'builtin', category: 'paid', base_url: 'https://apihub.agnes-ai.com/v1', protocol: 'openai', enabled: true },
+  { id: 'agnes-cn', name: 'Agnes (China)', icon: 'AG', color: '#0891b2', type: 'builtin', category: 'paid', base_url: 'https://api.agnes-ai.cn/v1', protocol: 'openai', enabled: true },
 ]
 
 // ---------------------------------------------------------------------------
@@ -599,6 +636,10 @@ const filterFreeOnly = ref(false)
 const filteringModels = ref(false)
 const filterApplied = ref(false)
 const filteredResultModels = ref<FilteredProviderModel[]>([])
+// 发现候选（获取模型 ≠ 添加模型）：discover 只填候选面板，点"添加"才 merge 进配置
+const discoveredCandidates = ref<any[]>([])
+const addingCandidateId = ref<string | null>(null)
+const addingAllCandidates = ref(false)
 const MODALITY_OPTIONS = [
   { key: 'image', label: 'modalityImage' },
   { key: 'audio', label: 'modalityAudio' },
@@ -961,32 +1002,74 @@ async function discoverModels(providerId: string) {
         invalid_response: t('model.discoverInvalidResponse'),
         configuration: t('model.discoverNotConfigured'),
       }
-      message.warning(kindHints[data.error_kind] || data.message || t('model.discoverFailed'))
+      message.warning(data.message || kindHints[data.error_kind] || t('model.discoverFailed'))
       return
     }
-    if (discovered.length === 0) {
+    const provider = providers.value.find((p) => p.id === providerId)
+    const existingIds = new Set((provider?.models ?? []).map((m) => m.id))
+    // 获取模型仅产出"可添加的模型"候选，不自动并入模型列表（2026-09-14 契约）
+    const candidates = discovered.filter((dm) => !existingIds.has(candidateId(dm)))
+    discoveredCandidates.value = candidates
+    if (candidates.length === 0) {
       // 后端 message(如"请先配置 API Key")优先;无可行动脚本时回到通用文案
       message.info(data.message || t('model.noNewModels'))
       return
     }
-    const provider = providers.value.find((p) => p.id === providerId)
-    if (provider) {
-      const existingIds = new Set(provider.models.map((m) => m.id))
-      for (const dm of discovered) {
-        const mapped = mapModel(dm, providerId)
-        if (!existingIds.has(mapped.id)) {
-          provider.models.push(mapped)
-          allModels.value.push(mapped)
-        }
-      }
-      provider.model_count = provider.models.length
-    }
-    const newCount = typeof data.discovered_count === 'number' ? data.discovered_count : discovered.length
-    message.success(t('model.modelsDiscovered', { n: newCount }))
+    message.success(t('model.modelsDiscovered', { n: candidates.length }))
   } catch {
     message.error(t('model.discoverFailed'))
   } finally {
     discoveringId.value = null
+  }
+}
+
+/** 候选条目（后端 ModelInfo dict / 前端映射后对象）的稳定 id。 */
+function candidateId(dm: any): string {
+  return String(dm.model_id || dm.id || dm.name || '')
+}
+
+/** 候选并入后同步本地列表(与 addFilteredModel 同一惯法)。 */
+function mergeCandidateIntoLocal(dm: any, providerId: string) {
+  const mapped = mapModel({ ...dm, provider_id: providerId }, providerId)
+  if (!allModels.value.some((x) => x.id === mapped.id && x.provider_id === providerId)) {
+    allModels.value.push(mapped)
+  }
+  const live = providers.value.find((p) => p.id === providerId)
+  if (live && !live.models.some((x) => x.id === mapped.id)) {
+    live.models.push(mapped)
+    live.model_count = live.models.length
+  }
+}
+
+async function addDiscoveredModel(dm: any) {
+  if (!modelTarget.value) return
+  const id = candidateId(dm)
+  addingCandidateId.value = id
+  try {
+    await mergeDiscoveredModels(modelTarget.value.id, [id])
+    discoveredCandidates.value = discoveredCandidates.value.filter((x) => candidateId(x) !== id)
+    mergeCandidateIntoLocal(dm, modelTarget.value.id)
+    message.success(t('common.success'))
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    addingCandidateId.value = null
+  }
+}
+
+async function addAllDiscoveredModels() {
+  if (!modelTarget.value || discoveredCandidates.value.length === 0) return
+  addingAllCandidates.value = true
+  try {
+    const ids = discoveredCandidates.value.map((x) => candidateId(x))
+    await mergeDiscoveredModels(modelTarget.value.id, ids)
+    for (const dm of discoveredCandidates.value) mergeCandidateIntoLocal(dm, modelTarget.value.id)
+    discoveredCandidates.value = []
+    message.success(t('common.success'))
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    addingAllCandidates.value = false
   }
 }
 
@@ -1025,6 +1108,9 @@ const detectingCaps = ref(false)
 // ---------------------------------------------------------------------------
 const testingModelId = ref<string | null>(null)
 const probingModelId = ref<string | null>(null)
+// 模型连接测试结果容器（2026-09-14）：结果就地显示在对应模型行下方，
+// 缺 API Key / 余额不足等失败原因不再一闪而过的 toast。
+const modelTestResults = ref<Record<string, { type: 'success' | 'warning' | 'error'; text: string }>>({})
 
 /** 可用性七态 → 结果消息的语气与文案。 */
 function modelTestResultMessage(r: ModelConnectionResult): { type: 'success' | 'warning' | 'error'; text: string } {
@@ -1039,22 +1125,22 @@ function modelTestResultMessage(r: ModelConnectionResult): { type: 'success' | '
     incompatible_api: t('model.testIncompatible'),
     rate_limited: t('model.testRateLimited'),
     transient_error: t('model.testTransient'),
+    insufficient_balance: t('model.testInsufficientBalance'),
+    configuration: t('model.testMissingApiKey'),
   }
   // 后端 error_hint（脱敏可行动提示）优先
   return { type: 'error', text: r.error_hint || kindHints[r.status || ''] || r.message || t('model.connectionFailed') }
 }
 
-/** 对单个模型发真实连接测试（chat ping），结果以消息展示。 */
+/** 对单个模型发真实连接测试（chat ping），结果容器显示在该模型行下方。 */
 async function testModelConnection(m: ModelItem) {
   testingModelId.value = m.id
   try {
     const res: any = await checkModelConnection(m.id) as any
     const data: ModelConnectionResult = res?.data ?? res ?? {}
-    const result = modelTestResultMessage(data)
-    if (result.type === 'success') message.success(result.text)
-    else message.error(result.text)
+    modelTestResults.value[m.id] = modelTestResultMessage(data)
   } catch {
-    message.error(t('model.connectionFailed'))
+    modelTestResults.value[m.id] = { type: 'error', text: t('model.connectionFailed') }
   } finally {
     testingModelId.value = null
   }
@@ -1205,6 +1291,7 @@ function openModelManagement(p: Provider) {
   newModelId.value = ''
   newModelName.value = ''
   addModelExpanded.value = false
+  modelTestResults.value = {}
   // 重置筛选状态;OpenRouter 展开时预载系列列表
   filterExpanded.value = false
   providerSeries.value = []
@@ -1213,6 +1300,7 @@ function openModelManagement(p: Provider) {
   filterFreeOnly.value = false
   filterApplied.value = false
   filteredResultModels.value = []
+  discoveredCandidates.value = []
   showModelManagement.value = true
   if (p.id === 'openrouter') {
     void loadProviderSeries(p)
@@ -2256,6 +2344,71 @@ watch(() => defaultConfig.provider_id, () => {
 .nr-mm-filter-results-title {
   font-size: 12px;
   color: var(--nr-text-secondary, #8a8a92);
+}
+
+/* 发现候选面板：获取模型只列出可添加项，手动"添加"才并入配置 */
+.nr-mm-candidates {
+  border-top: 1px solid rgba(127, 127, 127, 0.15);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nr-mm-candidates-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.nr-mm-candidates-title {
+  font-size: 12px;
+  color: var(--nr-text-secondary, #8a8a92);
+}
+
+/* 模型连接测试结果容器：紧贴模型行下方的内嵌条（成功绿/失败红/警示黄） */
+.nr-mm-item-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 4px 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.nr-mm-item-result.result-success {
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.35);
+  color: #16a34a;
+}
+
+.nr-mm-item-result.result-warning {
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #d97706;
+}
+
+.nr-mm-item-result.result-error {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #ef4444;
+}
+
+.nr-mm-result-text {
+  word-break: break-word;
+}
+
+.nr-mm-result-dismiss {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0.7;
 }
 
 .nr-mm-btn-submit {
