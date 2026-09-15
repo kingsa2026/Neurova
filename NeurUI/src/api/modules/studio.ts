@@ -236,8 +236,6 @@ export interface MergeResult {
   error?: string
   // A5：字幕烧录诚实降级（无中文字体/烧录失败 → 无字幕成片 + warning 原文）
   subtitle_burned?: boolean
-  // A3：BGM 混音态（用户乐轨存在且 FFmpeg 成功才 true）
-  bgm_mixed?: boolean
   warning?: string
   merge: StudioMerge
   items: Array<{
@@ -250,8 +248,8 @@ export interface MergeResult {
   }>
 }
 
-export function mergeEpisode(eid: string, opts?: { bgm_path?: string }) {
-  return api.post<ApiResponse<MergeResult>>(`${BASE}/episodes/${eid}/merge`, opts ?? {})
+export function mergeEpisode(eid: string) {
+  return api.post<ApiResponse<MergeResult>>(`${BASE}/episodes/${eid}/merge`)
 }
 
 export function getMerge(mid: string) {

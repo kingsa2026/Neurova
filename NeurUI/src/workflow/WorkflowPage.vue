@@ -3,8 +3,16 @@
     <div class="page-header">
       <h2>{{ t('workflow.title') }}</h2>
       <div class="header-actions">
+        <a-select
+          v-model:value="workflowView"
+          size="small"
+          style="width: 120px"
+          :options="viewOptions"
+          @change="reloadAll"
+        />
         <GlassButton variant="ghost" size="sm" @click="openTemplates">{{ t('workflow.fromTemplate') }}</GlassButton>
         <GlassButton variant="ghost" size="sm" @click="handleImportComfyui">{{ t('workflow.importWf') }}</GlassButton>
+        <GlassButton variant="ghost" size="sm" @click="openCustomNodeModal">{{ t('workflow.registerNode') }}</GlassButton>
         <GlassButton variant="primary" size="sm" @click="showCreateModal = true">{{ t('workflow.create') }}</GlassButton>
       </div>
     </div>
@@ -35,7 +43,9 @@
             >
               <div class="wf-meta">
                 <a-tag v-if="cv.project_id" color="blue">{{ projectNameOf(cv.project_id) }}</a-tag>
+                <a-tag v-else-if="cv.agent_id" color="purple">{{ t('workflow.viewAgent') }}</a-tag>
                 <a-tag v-else>{{ t('workflow.noProject') }}</a-tag>
+                <a-tag v-if="cv.origin && cv.origin !== 'manual'" color="orange">{{ originLabel(cv.origin) }}</a-tag>
                 <span class="meta-text">{{ t('workflow.nodes') }}: {{ cv.node_count ?? 0 }}</span>
                 <span class="meta-text">{{ t('workflow.edges') }}: {{ cv.edge_count ?? 0 }}</span>
                 <span v-if="cv.updated_at" class="meta-text">{{ t('workflow.updatedAt') }}: {{ formatTime(cv.updated_at) }}</span>
@@ -77,11 +87,15 @@
             >
               <div class="wf-meta">
                 <a-tag :color="wf.status === 'published' ? 'green' : wf.status === 'draft' ? 'blue' : 'default'">{{ wf.status }}</a-tag>
+                <a-tag v-if="wf.project_id" color="cyan">{{ projectNameOf(wf.project_id) }}</a-tag>
+                <a-tag v-else-if="wf.agent_id" color="purple">{{ t('workflow.viewAgent') }}</a-tag>
+                <a-tag v-if="wf.origin && wf.origin !== 'manual'" color="orange">{{ originLabel(wf.origin) }}</a-tag>
                 <span class="meta-text">{{ t('workflow.nodes') }}: {{ wf.nodes?.length ?? 0 }}</span>
               </div>
               <div class="wf-actions">
                 <GlassButton variant="primary" size="sm" :loading="executingId === wf.id" @click="handleExecute(wf.id)">{{ t('workflow.execute') }}</GlassButton>
-                <GlassButton variant="ghost" size="sm" @click="handleViewDetail(wf)">{{ t('common.open') }}</GlassButton>
+                <GlassButton variant="ghost" size="sm" @click="openDefinitionInCanvas(wf.id)">{{ t('common.open') }}</GlassButton>
+                <GlassButton variant="ghost" size="sm" @click="handleViewDetail(wf)">{{ t('workflow.detail') }}</GlassButton>
                 <GlassButton variant="ghost" size="sm" @click="openRename('workflow', wf.id, wf.name)">{{ t('common.rename') }}</GlassButton>
                 <GlassButton variant="ghost" size="sm" @click="handleDuplicate(wf.id)">{{ t('workflow.duplicate') }}</GlassButton>
                 <a-popconfirm :title="t('common.confirm') + '?'" @confirm="handleDeleteWorkflow(wf.id)">
@@ -191,6 +205,53 @@
         </a-form-item>
       </a-form>
     </a-modal>
+    <!-- B5 自定义节点类型注册 -->
+    <a-modal
+      v-model:open="showCustomNodeModal"
+      :title="t('workflow.registerNode')"
+      :ok-text="t('workflow.create')"
+      :confirm-loading="savingCustomNode"
+      @ok="submitCustomNode"
+    >
+      <a-form layout="vertical" size="small">
+        <a-form-item :label="t('workflow.nodeType')" required>
+          <a-input v-model:value="customNodeForm.type" placeholder="custom:summarize" />
+        </a-form-item>
+        <a-form-item :label="t('common.name')" required>
+          <a-input v-model:value="customNodeForm.label" />
+        </a-form-item>
+        <a-form-item :label="t('workflow.nodeTier')">
+          <a-select
+            v-model:value="customNodeForm.tier"
+            :options="[
+              { label: t('workflow.tierDeclarative'), value: 'declarative' },
+              { label: t('workflow.tierComposite'), value: 'composite' },
+            ]"
+          />
+        </a-form-item>
+        <a-form-item v-if="customNodeForm.tier === 'declarative'" :label="t('workflow.nodeTemplate')">
+          <a-input v-model:value="customNodeForm.template" type="textarea" :rows="2" placeholder="{{input}}" />
+        </a-form-item>
+        <a-form-item :label="t('workflow.nodeFormSchema')">
+          <a-input
+            v-model:value="customNodeForm.formSchemaJson"
+            type="textarea"
+            :rows="3"
+            placeholder='[{"id":"input","label":"输入","type":"textarea"}]'
+          />
+        </a-form-item>
+      </a-form>
+      <a-divider style="margin: 8px 0" />
+      <div v-if="customNodes.length" class="custom-node-list">
+        <div v-for="n in customNodes" :key="String(n.type)" class="custom-node-item">
+          <span>{{ n.label }} <code>{{ n.type }}</code></span>
+          <a-popconfirm :title="t('common.confirm') + '?'" @confirm="removeCustomNode(String(n.type))">
+            <GlassButton variant="danger" size="sm">{{ t('common.delete') }}</GlassButton>
+          </a-popconfirm>
+        </div>
+      </div>
+      <a-empty v-else :description="t('common.noData')" />
+    </a-modal>
   </div>
 </template>
 
@@ -209,6 +270,9 @@ import {
   getComfyuiStatus,
   getTemplates,
   instantiateTemplate,
+  listCustomNodes,
+  createCustomNode,
+  deleteCustomNode,
   type WorkflowDefinition,
 } from '@/api/modules/neurflow'
 import { message } from 'ant-design-vue'
@@ -232,6 +296,32 @@ const router = useRouter()
 const route = useRoute()
 
 const activeTab = ref<'canvases' | 'definitions'>('canvases')
+
+// B1 三视图过滤：'' = 全部（含成员可见的项目工作流）, personal|project|agent
+const workflowView = ref<'' | 'personal' | 'project' | 'agent'>('')
+const viewOptions = computed(() => [
+  { label: t('workflow.viewAll'), value: '' },
+  { label: t('workflow.viewPersonal'), value: 'personal' },
+  { label: t('workflow.viewProject'), value: 'project' },
+  { label: t('workflow.viewAgent'), value: 'agent' },
+])
+function originLabel(origin?: string): string {
+  const map: Record<string, string> = {
+    nl_chat: t('workflow.originNlChat'),
+    template: t('workflow.originTemplate'),
+    comfyui: t('workflow.originComfyui'),
+    evolution: t('workflow.originEvolution'),
+    manual: t('workflow.originManual'),
+  }
+  return map[origin || 'manual'] || origin || ''
+}
+async function reloadAll() {
+  await Promise.all([fetchCanvases(), fetchWorkflows()])
+}
+// B2：定义在无限画布编辑器中打开（保存回写定义本体）
+function openDefinitionInCanvas(id: string) {
+  router.push({ path: `/collaboration/canvas/${id}`, query: { source: 'definition' } })
+}
 
 /** 项目归属筛选：'' = 全部, 'none' = 未归属, project_id = 指定项目 */
 const projectFilter = ref('')
@@ -356,7 +446,7 @@ const nodeColumns = [
 async function fetchCanvases() {
   loadingCanvases.value = true
   try {
-    const res = await listCanvases()
+    const res = await listCanvases(undefined, workflowView.value || undefined)
     const data = (res as unknown as { data?: CanvasSummary[] })?.data ?? res
     canvases.value = Array.isArray(data) ? data : []
   } catch {
@@ -369,7 +459,7 @@ async function fetchCanvases() {
 async function fetchWorkflows() {
   loading.value = true
   try {
-    const res = await getWorkflows()
+    const res = await getWorkflows(workflowView.value ? { view: workflowView.value } : undefined)
     workflows.value = extractWorkflowList(res)
   } catch {
     workflows.value = []
@@ -445,6 +535,76 @@ async function handleExecute(id: string) {
 function handleViewDetail(wf: WorkflowDefinition) {
   detailWorkflow.value = wf
   showDetail.value = true
+}
+
+// ── B5 自定义节点注册 ──
+const showCustomNodeModal = ref(false)
+const savingCustomNode = ref(false)
+const customNodes = ref<Array<Record<string, unknown>>>([])
+const customNodeForm = reactive({
+  type: '',
+  label: '',
+  tier: 'declarative' as 'declarative' | 'composite',
+  template: '',
+  formSchemaJson: '',
+})
+async function loadCustomNodes() {
+  try {
+    const res = await listCustomNodes()
+    const data = (res as unknown as { nodes?: Array<Record<string, unknown>> })?.nodes
+      ?? (res as unknown as { data?: { nodes?: Array<Record<string, unknown>> } })?.data?.nodes
+    customNodes.value = Array.isArray(data) ? data : []
+  } catch {
+    customNodes.value = []
+  }
+}
+async function openCustomNodeModal() {
+  showCustomNodeModal.value = true
+  await loadCustomNodes()
+}
+function nodeErrorDetail(e: unknown): string {
+  const d = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  if (typeof d === 'string') return d
+  return d ? JSON.stringify(d) : t('common.error')
+}
+async function submitCustomNode() {
+  if (!customNodeForm.type.trim() || !customNodeForm.label.trim()) return
+  savingCustomNode.value = true
+  try {
+    let formSchema: Array<Record<string, unknown>> = []
+    if (customNodeForm.formSchemaJson.trim()) {
+      formSchema = JSON.parse(customNodeForm.formSchemaJson)
+    }
+    const executorBody =
+      customNodeForm.tier === 'declarative'
+        ? { template: customNodeForm.template }
+        : { steps: [] }
+    await createCustomNode({
+      type: customNodeForm.type.trim(),
+      label: customNodeForm.label.trim(),
+      tier: customNodeForm.tier,
+      executor_body: executorBody,
+      form_schema: formSchema,
+    })
+    message.success(t('common.success'))
+    customNodeForm.type = ''
+    customNodeForm.label = ''
+    customNodeForm.template = ''
+    customNodeForm.formSchemaJson = ''
+    await loadCustomNodes()
+  } catch (e: unknown) {
+    message.error(nodeErrorDetail(e))
+  } finally {
+    savingCustomNode.value = false
+  }
+}
+async function removeCustomNode(type: string) {
+  try {
+    await deleteCustomNode(type)
+    await loadCustomNodes()
+  } catch (e: unknown) {
+    message.error(nodeErrorDetail(e))
+  }
 }
 
 async function handleDuplicate(id: string) {
@@ -629,4 +789,7 @@ onMounted(() => {
 /* 项目归属筛选 */
 .canvas-filter { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .canvas-filter .filter-label { font-size: 12px; color: var(--nr-text-secondary); }
+.custom-node-list { display: flex; flex-direction: column; gap: 8px; max-height: 260px; overflow-y: auto; }
+.custom-node-item { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
+.custom-node-item code { color: var(--nr-text-secondary); }
 </style>

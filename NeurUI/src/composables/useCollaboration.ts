@@ -125,9 +125,9 @@ export function useCollaboration() {
     }
   }
 
-  async function loadCanvas(canvasId: string): Promise<CanvasSnapshot | null> {
+  async function loadCanvas(canvasId: string, source?: 'definition'): Promise<CanvasSnapshot | null> {
     try {
-      return await store.fetchCanvas(canvasId)
+      return await store.fetchCanvas(canvasId, source)
     } catch {
       return null
     }

@@ -207,20 +207,6 @@ describe('StudioProjectPage', () => {
     // 资产定妆与首帧共享 imgModel 选择
     expect((runAssetImages as unknown as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1]).toEqual({ model: 'flux.1', ids: undefined })
   })
-  it('A3：BGM 上传状态 → merge 透传 bgm_path', async () => {
-    mergeMock.mockResolvedValue({ code: 0, data: { ok: true, composed: true, mode: 'ffmpeg_concat', url: '/api/v1/generation/files/m1.mp4', bgm_mixed: true, merge: { id: 'm1' }, items: [] } })
-    const wrapper = mountPage()
-    await flushPromises()
-    const vm = wrapper.vm as any
-    vm.switchPhase('export')
-    await flushPromises()
-    expect(wrapper.text()).toContain('上传 BGM')
-    vm.bgmPath = 'uploads/bg.mp3'
-    await vm.doMerge()
-    await flushPromises()
-    expect(mergeMock).toHaveBeenCalledWith(expect.any(String), { bgm_path: 'uploads/bg.mp3' })
-  })
-
   it('Phase04 导出：成片 URL 与连播清单双形态', async () => {
     mergeMock.mockResolvedValue({
       code: 0,
