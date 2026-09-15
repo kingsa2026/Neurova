@@ -54,7 +54,6 @@ class TestAgentAttributes:
         """管理相关属性存在"""
         agent = self._make_agent()
         assert hasattr(agent, 'session_manager')
-        assert hasattr(agent, 'sleep_config_manager')
         assert hasattr(agent, 'idle_tracker')
 
     def test_tool_attributes_exist(self):

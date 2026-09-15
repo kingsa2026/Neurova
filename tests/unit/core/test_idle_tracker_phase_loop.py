@@ -99,6 +99,13 @@ class IdleTrackerPhaseLoopTest(unittest.TestCase):
         self.assertEqual(hot.get_current_phase(), "active")
 
     def test_phase_transition_triggers_consolidation_and_write_back(self):
+        """阶段迁移回调链触发整合+写回。
+
+        2026-09-15 递进式分工：light_sleep 只回放梦境、不动记忆，不再整合
+        （见 tests/unit/memory/test_sleep_phase_cycle.py::
+        test_light_sleep_writes_only_dream_replay）。本测试意图
+        （迁移→巩固→写回）改由深睡承载（深睡执行整合内核）。
+        """
         tracker = IdleTimeTracker()
         tracker.set_temperature_provider(lambda: 100.0)  # 保持 active，避免监控线程干扰
         fake_mm = FakeMemoryManager(_sample_memories())
@@ -114,7 +121,7 @@ class IdleTrackerPhaseLoopTest(unittest.TestCase):
                 registered,
                 "阶段迁移回调必须在启动时注册，否则巩固永不触发",
             )
-            self.assertTrue(tracker.enter_manual_phase("light_sleep"))
+            self.assertTrue(tracker.enter_manual_phase("deep_sleep"))
         finally:
             tracker.on_stop()
 
