@@ -42,6 +42,9 @@ class SleepStatusResponse(BaseModel):
     last_wake_time: Optional[float] = None
     total_sleep_duration: float = 0
     sleep_cycles: int = 0
+    # 预计唤醒时刻：手动会话=duration deadline；自动阶段=当前阶段 dwell 到期；
+    # 清醒/无上限=None（前端 SleepStatusPage.next_wake 数据源，此前恒空白）
+    next_wake: Optional[float] = None
 
 
 class SleepSettings(BaseModel):
@@ -64,6 +67,11 @@ class SleepSettings(BaseModel):
     idle_threshold_rem: int = 90
     idle_threshold_hibernate: int = 120
     monitor_interval_seconds: int = 60
+    # ── 每阶段最长停留（分钟，dwell 超时强制向更深推进；最深超时=整觉完成→醒）──
+    phase_max_minutes_light_sleep: int = 30
+    phase_max_minutes_deep_sleep: int = 60
+    phase_max_minutes_rem: int = 120
+    phase_max_minutes_hibernate: int = 240
 
 
 class SleepSettingsRequest(BaseModel):
@@ -85,6 +93,10 @@ class SleepSettingsRequest(BaseModel):
     idle_threshold_rem: Optional[int] = None
     idle_threshold_hibernate: Optional[int] = None
     monitor_interval_seconds: Optional[int] = None
+    phase_max_minutes_light_sleep: Optional[int] = None
+    phase_max_minutes_deep_sleep: Optional[int] = None
+    phase_max_minutes_rem: Optional[int] = None
+    phase_max_minutes_hibernate: Optional[int] = None
 
 
 class DreamLogItem(BaseModel):
@@ -221,6 +233,21 @@ async def get_sleep_status(
         if hasattr(sleep_manager, "get_sleep_cycles"):
             sleep_cycles = sleep_manager.get_sleep_cycles()
 
+    # 阶段状态统一源修复：此前只读 SleepConsolidation._sleep_phase（仅 awake/deep_sleep
+    # 两值），IdleTimeTracker 的真实阶段推进（light_sleep/rem/hibernate）从不外露，
+    # 状态页进度条永不点亮。手动会话（is_sleeping）优先，否则以 tracker 为准。
+    next_wake = None
+    if is_sleeping and hasattr(sleep_manager, "get_next_wake"):
+        next_wake = sleep_manager.get_next_wake()
+    elif not is_sleeping:
+        tracker = getattr(agent, "idle_tracker", None)
+        if tracker is not None and hasattr(tracker, "get_current_phase"):
+            phase = tracker.get_current_phase()
+            if phase and phase != "active":
+                sleep_phase = phase
+                if hasattr(tracker, "get_phase_deadline"):
+                    next_wake = tracker.get_phase_deadline()
+
     return SleepStatusResponse(
         agent_id=agent_id,
         is_sleeping=is_sleeping,
@@ -229,6 +256,7 @@ async def get_sleep_status(
         last_wake_time=last_wake_time,
         total_sleep_duration=total_sleep_duration,
         sleep_cycles=sleep_cycles,
+        next_wake=next_wake,
     )
 
 

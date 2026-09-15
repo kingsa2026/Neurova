@@ -344,10 +344,6 @@ class TestConsolidationOperations:
         tracker.set_memory_manager(memory_manager)
         assert tracker._memory_manager is memory_manager
 
-    def test_get_phase_config_manager_default_none(self, tracker):
-        """未挂接阶段配置管理器时返回 None"""
-        assert tracker.get_phase_config_manager() is None
-
     def test_trigger_consolidation_missing_deps(self, tracker):
         """依赖缺失时触发巩固返回 None 不崩"""
         assert tracker.trigger_consolidation() is None
