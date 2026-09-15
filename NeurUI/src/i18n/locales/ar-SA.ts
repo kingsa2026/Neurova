@@ -3345,8 +3345,6 @@ studio: {
   retryVideo: 'إعادة الفيديو',
   noShots: 'لا لقطات — قسّم أولًا',
   mergeNow: 'دمج وتصدير',
-  uploadBgm: 'تحميل الموسيقى الخلفية',
-  replaceBgm: 'تغيير الموسيقى الخلفية',
   mergedMp4: 'فيديو جاهز',
   mergedManifest: 'قائمة عرض شرائح',
   noExport: 'لا شيء للتصدير',

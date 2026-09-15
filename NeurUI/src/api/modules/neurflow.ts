@@ -44,6 +44,11 @@ export interface WorkflowDefinition {
   template: boolean
   public: boolean
   metadata: Record<string, unknown>
+  // B1 归属模型 v2
+  user_id?: string | null
+  project_id?: string | null
+  agent_id?: string | null
+  origin?: string
 }
 
 export interface WorkflowExecution {
@@ -105,8 +110,16 @@ const BASE = '/neurflow'
 
 // --- Workflows CRUD ---
 
-/** List workflows. */
-export function getWorkflows(params?: { category?: string; status?: string; limit?: number; offset?: number }) {
+/** List workflows. view（B1 三视图）：personal|project|agent；配合 project_id/agent_id 细化。 */
+export function getWorkflows(params?: {
+  category?: string
+  status?: string
+  limit?: number
+  offset?: number
+  view?: 'personal' | 'project' | 'agent'
+  project_id?: string
+  agent_id?: string
+}) {
   return api.get<ApiResponse<{ workflows: WorkflowDefinition[]; total: number }>>(`${BASE}/workflows`, { params })
 }
 
@@ -213,6 +226,43 @@ export function syncNodes() {
 /** Get node statistics. */
 export function getNodeStats() {
   return api.get<ApiResponse<{ summary: unknown }>>(`${BASE}/nodes/stats`)
+}
+
+// --- B5 自定义节点类型 CRUD（/nodes/custom）---
+
+/** 自定义节点 spec（POST/PUT body，form_schema 用 {id,label,type,options,...} 数组）。 */
+export interface CustomNodeSpec {
+  type: string
+  label: string
+  icon?: string
+  category?: string
+  description?: string
+  tier: 'declarative' | 'composite'
+  executor_body: Record<string, unknown>
+  form_schema?: Array<Record<string, unknown>>
+  inputs?: Array<Record<string, unknown>>
+  outputs?: Array<Record<string, unknown>>
+}
+
+export function listCustomNodes() {
+  return api.get<ApiResponse<{ nodes: Array<Record<string, unknown>>; total: number }>>(`${BASE}/nodes/custom`)
+}
+
+export function createCustomNode(spec: CustomNodeSpec) {
+  return api.post<ApiResponse<{ node: Record<string, unknown> }>>(`${BASE}/nodes/custom`, spec)
+}
+
+export function updateCustomNode(nodeType: string, spec: Partial<CustomNodeSpec>) {
+  return api.put<ApiResponse<{ node: Record<string, unknown> }>>(
+    `${BASE}/nodes/custom/${encodeURIComponent(nodeType)}`,
+    spec,
+  )
+}
+
+export function deleteCustomNode(nodeType: string) {
+  return api.delete<ApiResponse<{ type: string }>>(
+    `${BASE}/nodes/custom/${encodeURIComponent(nodeType)}`,
+  )
 }
 
 // --- Templates ---

@@ -532,6 +532,7 @@ import {
   getCanvasRun,
   setNodeMock,
   subscribeExecutionEvents,
+  writebackDefinition,
   type CanvasRunStatus,
 } from '@/api/modules/collaboration'
 import type { CanvasNodeSnapshot, CanvasEdgeSnapshot } from '@/api/modules/collaboration'
@@ -556,9 +557,6 @@ interface SubBlockDef {
   type?: string // input | textarea | select | slider | model-selector
   options?: SubBlockOption[]
   default_value?: unknown
-  /** model-selector：后端 schema 声明的过滤能力（image_generation/video_generation
-   *  时下拉只出对应能力模型；用户口径 2026-09-14） */
-  provider_capability?: string
   required?: boolean
   min?: number
   max?: number
@@ -603,6 +601,12 @@ const canvasId = ref<string | null>(null)
 /** 服务端画布版本号（乐观锁）：保存时作为 base_version 回传，
  *  收到 canvas_op 事件时同步推进；冲突说明被其他编辑者（agent）抢占 */
 const canvasVersion = ref<number | null>(null)
+// ── B2 双源编辑：'canvas'=画布文件库；'definition'=NeurFlow 定义（保存回写）──
+const editorSource = ref<'canvas' | 'definition'>('canvas')
+/** B1 归属列（加载后原样带回，任何保存不丢失归属；NL 生成会更新 origin/agent） */
+const canvasProjectId = ref<string | null>(null)
+const canvasAgentId = ref<string | null>(null)
+const canvasOrigin = ref('manual')
 const selectedNodeId = ref<string | null>(null)
 const nodeSearch = ref('')
 const canvasRef = ref<HTMLElement>()
@@ -1562,7 +1566,6 @@ async function loadDynamicNodes() {
         type: (b.type as string) || 'input',
         options,
         default_value: b.default ?? b.default_value,
-        provider_capability: (b.provider_capability as string) || undefined,
       }
       if (typeof b.min === 'number') sb.min = b.min
       if (typeof b.max === 'number') sb.max = b.max
@@ -1612,7 +1615,14 @@ function addNodeToCanvas(node: PaletteNode) {
 }
 
 /** R-8: 应用 AI 生成的画布快照（替换现有画布，供用户细化/保存/执行） */
-function applyNlDesign(payload: { nodes: CanvasNodeSnapshot[]; edges: CanvasEdgeSnapshot[]; name: string; description: string }) {
+function applyNlDesign(payload: {
+  nodes: CanvasNodeSnapshot[]
+  edges: CanvasEdgeSnapshot[]
+  name: string
+  description: string
+  origin?: string
+  agent_id?: string
+}) {
   canvasNodes.value = payload.nodes.map((n, i) => ({
     ...n,
     // 重命名 id 避免冲突（AI 生成 n1/n2… 可能与已有节点冲突）
@@ -1628,6 +1638,9 @@ function applyNlDesign(payload: { nodes: CanvasNodeSnapshot[]; edges: CanvasEdge
     target: e.target?.nodeId ? { nodeId: idMap.get(e.target.nodeId) || e.target.nodeId, portId: e.target.portId } : e.target,
   }))
   if (payload.name) workflowName.value = payload.name
+  // B4 对话生成归位：标记来源与归属 agent（保存画布时透传到归属列）
+  canvasOrigin.value = payload.origin || canvasOrigin.value
+  if (payload.agent_id) canvasAgentId.value = payload.agent_id
   selectedNodeId.value = null
 }
 
@@ -1695,7 +1708,6 @@ const configFields = computed(() => {
       options: (b.options ?? []).map(o => ({ label: o.label, value: o.value })),
       min: b.min,
       max: b.max,
-      provider_capability: b.provider_capability,
     }))
   }
   // 回退：遍历现有 config 键（旧快照/未知类型兼容）
@@ -1985,8 +1997,57 @@ function onCanvasBlankMousedown() {
 }
 
 // 工具栏操作 ── 通过 composable 落库，不再 console.log 占位
+
+/** 画布快照节点/边 → 定义写回载荷（WorkflowNode/WorkflowEdge 形态）。 */
+function snapshotToDefinitionPayload(name: string) {
+  return {
+    name,
+    nodes: canvasNodes.value.map(n => ({
+      id: n.id,
+      type: n.type,
+      position: { x: n.position?.x ?? 0, y: n.position?.y ?? 0 },
+      config: n.config ?? {},
+      label: n.label ?? undefined,
+    })),
+    edges: canvasEdges.value
+      .filter(e => e.source?.nodeId && e.target?.nodeId)
+      .map(e => ({
+        id: e.id,
+        source: e.source!.nodeId,
+        target: e.target!.nodeId,
+        source_handle: e.source!.portId || undefined,
+        target_handle: e.target!.portId || undefined,
+      })),
+    viewport: { x: viewport.panX, y: viewport.panY, zoom: viewport.zoom },
+  }
+}
+
 async function handleSave() {
   const name = workflowName.value || t('collab.canvasNew')
+  // B2：来自「定义」的快照回写定义本体，不落画布文件库
+  if (editorSource.value === 'definition' && canvasId.value) {
+    try {
+      await writebackDefinition(
+        canvasId.value,
+        snapshotToDefinitionPayload(name),
+        canvasVersion.value ?? undefined,
+      )
+      // 回写成功后取最新版本号（乐观锁基线推进）
+      const refreshed = await loadCanvas(canvasId.value, 'definition')
+      if (refreshed) canvasVersion.value = refreshed.version ?? null
+      workflowName.value = name
+      uiMessage.success(t('common.success'))
+    } catch (e: unknown) {
+      const resp = (e as any)?.response
+      if (resp?.status === 409) {
+        uiMessage.warning(t('canvas.canvasReloadedByOther'))
+        await loadFromRoute(canvasId.value ?? undefined)
+      } else {
+        uiMessage.error(t('common.error'))
+      }
+    }
+    return
+  }
   try {
     const saved = await saveCanvas(
       {
@@ -1994,6 +2055,11 @@ async function handleSave() {
         name,
         nodes: canvasNodes.value,
         edges: canvasEdges.value,
+        // B1/B4：归属透传（项目上下文/agent 来源）+ B2 视口持久化
+        project_id: canvasProjectId.value ?? undefined,
+        agent_id: canvasAgentId.value ?? undefined,
+        origin: canvasOrigin.value,
+        viewport: { x: viewport.panX, y: viewport.panY, zoom: viewport.zoom },
       },
       // 乐观锁：已有画布携带本地版本号；期间被其他编辑者（如 agent）
       // 修改过后端返回 409，composable 抛 CanvasVersionConflictError
@@ -2026,6 +2092,11 @@ async function handleRun() {
     await handleSave()
     if (!canvasId.value) return
   }
+  // B3：来自定义的画布——执行前先回写定义（所见即所跑），执行走持久化 id
+  const runSource = editorSource.value === 'definition' ? ('definition' as const) : undefined
+  if (runSource && canvasId.value) {
+    await handleSave()
+  }
   // 蜂群编排：执行 + 事件流实时点亮节点（SSE），轮询兜底
   runState.value = 'running'
   runStatus.value = {}
@@ -2033,6 +2104,7 @@ async function handleRun() {
     const res = await runCanvasApi(canvasId.value, {
       debug: debugController.breakpoints.value.size > 0,
       breakpoints: Array.from(debugController.breakpoints.value),
+      source: runSource,
     })
     const runId = res?.data?.runId
     if (!runId) {
@@ -2041,7 +2113,7 @@ async function handleRun() {
     }
     lastRunId.value = runId
     if (debugController.breakpoints.value.size > 0) showDebugPanel.value = true
-    await waitForRunCompletion(canvasId.value, runId)
+    await waitForRunCompletion(canvasId.value, runId, runSource)
   } catch (err: any) {
     runState.value = 'failed'
     // 节点配置校验失败：后端 400 detail={code:1, errors:[{node_id,label,type,missing,message}]}
@@ -2057,8 +2129,9 @@ async function handleRun() {
 /**
  * P0-1 run/stream 分离：优先订阅执行事件流实时点亮节点；
  * 流异常断开（未到终态）时降级 1s 轮询，两种路径共享同一终态处理。
+ * runSource='definition'（B3）：轮询走定义读取校验。
  */
-async function waitForRunCompletion(canvasId: string, runId: string) {
+async function waitForRunCompletion(canvasId: string, runId: string, runSource?: 'definition') {
   const terminalTypes = ['workflow_completed', 'workflow_failed']
   let streamEnded = false
   let sawTerminal = false
@@ -2138,7 +2211,7 @@ async function waitForRunCompletion(canvasId: string, runId: string) {
     await new Promise(r => setTimeout(r, 1000))
     if (isDisposed) return
     try {
-      const statusRes = await getCanvasRun(canvasId, runId)
+      const statusRes = await getCanvasRun(canvasId, runId, runSource)
       const data = statusRes as unknown as CanvasRunStatus
       if (!data) continue
       runStatus.value = data.node_results ?? {}
@@ -2195,7 +2268,9 @@ function showNodeConfigIssues(opts: {
   })
 }
 
-// 初始化：如果 URL 有 :id 参数，加载已有工作流
+// 初始化：如果 URL 有 :id 参数，加载已有工作流。
+// B2：?source=definition 时加载的是「定义」编译的画布快照，
+// 保存回写走 PUT /neurflow/workflows/{id}/definition（不再落画布文件库）。
 async function loadFromRoute(workflowId: string | undefined) {
   if (!workflowId) {
     canvasId.value = null
@@ -2204,9 +2279,15 @@ async function loadFromRoute(workflowId: string | undefined) {
     canvasNodes.value = []
     canvasEdges.value = []
     runStatus.value = {}
+    editorSource.value = 'canvas'
+    canvasProjectId.value = route.query.project ? String(route.query.project) : null
+    canvasAgentId.value = null
+    canvasOrigin.value = 'manual'
     return
   }
-  const snapshot = await loadCanvas(workflowId)
+  const source = route.query.source === 'definition' ? ('definition' as const) : undefined
+  editorSource.value = source ?? 'canvas'
+  const snapshot = await loadCanvas(workflowId, source)
   if (snapshot) {
     canvasId.value = snapshot.id ?? workflowId
     canvasVersion.value = snapshot.version ?? null
@@ -2214,6 +2295,15 @@ async function loadFromRoute(workflowId: string | undefined) {
     canvasNodes.value = snapshot.nodes ?? []
     canvasEdges.value = snapshot.edges ?? []
     runStatus.value = {}
+    // B1 归属回带 + B2 视口恢复（definition 快照由后端从 metadata.viewport 带出）
+    canvasProjectId.value = snapshot.project_id ?? null
+    canvasAgentId.value = snapshot.agent_id ?? null
+    canvasOrigin.value = snapshot.origin ?? 'manual'
+    if (snapshot.viewport) {
+      viewport.panX = snapshot.viewport.x ?? 0
+      viewport.panY = snapshot.viewport.y ?? 0
+      viewport.zoom = clampZoom(snapshot.viewport.zoom || 1)
+    }
   } else {
     workflowName.value = t('canvas.workflowNamePrefix') + ' ' + workflowId
   }

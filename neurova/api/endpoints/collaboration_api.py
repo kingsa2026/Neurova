@@ -475,11 +475,44 @@ def _get_canvas_op_service():
     return get_canvas_op_service()
 
 
+# ── B0 画布属主隔离：请求者上下文 helpers（语义对齐 neurflow P0-1）──
+
+
+def _canvas_identity(current_user: Dict[str, Any]) -> "tuple[str, bool]":
+    """(requester_id, is_admin)。无凭证依赖已回退 default 用户。"""
+    return (
+        str(current_user.get("user_id") or "default"),
+        str(current_user.get("role") or "") == "admin",
+    )
+
+
+def _requester_project_ids(user_id: str) -> set:
+    """请求者参与的项目集合（画布/定义项目视图可读面）。单源见 project_access。"""
+    from neurova.api.project_access import requester_project_ids
+
+    return requester_project_ids(user_id)
+
+
+def _is_project_member(user_id: str, project_id: str) -> bool:
+    """归属校验（创建时）：default（桌面首启）放行；其余需真实成员关系。"""
+    from neurova.api.project_access import is_project_member
+
+    return is_project_member(user_id, project_id)
+
+
 @router.post("/canvas")
-async def create_canvas(request: Request, payload: Dict[str, Any] = Body(...)):
-    """创建画布快照，返回带 id 的完整记录"""
+async def create_canvas(
+    request: Request,
+    payload: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """创建画布快照，返回带 id 的完整记录（B0：属主=JWT 用户）"""
+    user_id, is_admin = _canvas_identity(current_user)
+    project_id = payload.get("project_id")
+    if project_id and not is_admin and not _is_project_member(user_id, str(project_id)):
+        raise HTTPException(status_code=400, detail=f"无权将画布归属到项目: {project_id}")
     try:
-        record = _get_canvas_store().create(payload)
+        record = _get_canvas_store().create(payload, user_id=user_id)
         return {"code": 0, "message": "success", "data": record}
     except Exception as e:
         logger.exception("Error creating canvas: %s", e)
@@ -487,25 +520,94 @@ async def create_canvas(request: Request, payload: Dict[str, Any] = Body(...)):
 
 
 @router.get("/canvas")
-async def list_canvases(request: Request, project_id: Optional[str] = Query(default=None)):
+async def list_canvases(
+    request: Request,
+    project_id: Optional[str] = Query(default=None),
+    agent_id: Optional[str] = Query(default=None),
+    view: Optional[str] = Query(default=None, pattern="^(personal|project|agent)$"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
     """画布摘要列表（不含节点数据），按更新时间倒序——前端"我的画布"入口。
 
-    project_id 可选：限定项目归属的画布（项目顶层 → 工作流归属模型）。
+    B0 属主过滤：登录用户只见自己的 + 项目成员可见（admin 全量）。
+    B1 三视图：view=personal|project|agent；project_id/agent_id 细化过滤。
     """
+    user_id, is_admin = _canvas_identity(current_user)
     try:
-        items = _get_canvas_store().list()
-        if project_id:
-            items = [i for i in items if i.get("project_id") == project_id]
+        items = _get_canvas_store().list(
+            requester_id=user_id,
+            is_admin=is_admin,
+            project_ids=_requester_project_ids(user_id),
+            view=view,
+            project_id=project_id,
+            agent_id=agent_id,
+        )
         return {"code": 0, "message": "success", "data": items}
     except Exception as e:
         logger.exception("Error listing canvases: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to list canvases: {str(e)}")
 
 
+def _load_definition_as_canvas(workflow_id: str, user_id: str, is_admin: bool) -> Optional[Dict[str, Any]]:
+    """B2：把 WorkflowDefinition 编译为画布快照（编辑器从「定义」打开）。
+
+    属主语义复用 neurflow storage（owner/admin/项目成员/public 可读）；
+    快照携带 id/version（乐观锁基线）/viewport/归属列与 workflow_id 溯源标记。
+    """
+    try:
+        from neurova.collaboration.canvas_bridge import definition_to_canvas
+        from neurova.api.endpoints.neurflow_api import _get_storage as get_neurflow_storage
+
+        storage = get_neurflow_storage()
+        wf = storage.get_workflow(
+            workflow_id, requester_id=user_id, is_admin=is_admin,
+            project_ids=_requester_project_ids(user_id),
+        )
+        if wf is None:
+            return None
+        snapshot = definition_to_canvas(wf)
+        snapshot["id"] = wf.id
+        snapshot["version"] = storage.get_workflow_version_number(wf.id)
+        snapshot["created_at"] = wf.created_at
+        snapshot["updated_at"] = wf.updated_at
+        snapshot["project_id"] = wf.project_id
+        snapshot["agent_id"] = wf.agent_id
+        snapshot["origin"] = wf.origin
+        viewport = (wf.metadata or {}).get("viewport")
+        if viewport:
+            snapshot["viewport"] = viewport
+        return snapshot
+    except Exception:  # noqa: BLE001 - 编译失败按不存在处理（404 同构，不泄露存在性）
+        logger.exception("定义转画布快照失败: %s", workflow_id)
+        return None
+
+
 @router.get("/canvas/{canvas_id}")
-async def get_canvas_detail(request: Request, canvas_id: str):
-    """读取画布快照"""
-    record = _get_canvas_store().get(canvas_id)
+async def get_canvas_detail(
+    request: Request,
+    canvas_id: str,
+    source: Optional[str] = Query(
+        default=None, pattern="^definition$",
+        description="B2：source=definition 时把 NeurFlow 定义编译为画布快照返回",
+    ),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """读取画布快照（B0：非属主/非项目成员 → 404 同构）
+
+    source=definition：打开「定义」tab 的条目进画布编辑器——返回的是
+    WorkflowDefinition 的编译快照（metadata.workflow_id 溯源，保存走
+    PUT /neurflow/workflows/{id}/definition 回写，不再落画布文件）。
+    """
+    user_id, is_admin = _canvas_identity(current_user)
+    if source == "definition":
+        record = _load_definition_as_canvas(canvas_id, user_id, is_admin)
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"工作流定义不存在: {canvas_id}")
+        return {"code": 0, "message": "success", "data": record}
+    record = _get_canvas_store().get(
+        canvas_id, requester_id=user_id, is_admin=is_admin,
+        project_ids=_requester_project_ids(user_id),
+    )
     if record is None:
         raise HTTPException(status_code=404, detail=f"画布不存在: {canvas_id}")
     return {"code": 0, "message": "success", "data": record}
@@ -517,17 +619,24 @@ async def update_canvas_detail(
     canvas_id: str,
     payload: Dict[str, Any] = Body(...),
     base_version: Optional[int] = Query(None),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
     """更新画布快照（全量保存）
 
     base_version：可选乐观锁。指定时与服务端版本不一致返回 409
     （detail 含 current_version），不落盘；不指定则后写优先
     （兼容不带版本号的旧前端），版本仍递增。
+    B0：仅属主/admin 可写（项目成员只读），非属主 → 404 同构。
     """
     from neurova.collaboration.canvas_store import CanvasVersionConflict
 
+    user_id, is_admin = _canvas_identity(current_user)
+    if payload.get("project_id") and not is_admin and not _is_project_member(user_id, str(payload["project_id"])):
+        raise HTTPException(status_code=400, detail=f"无权将画布归属到项目: {payload['project_id']}")
     try:
-        record = _get_canvas_store().update(canvas_id, payload, base_version=base_version)
+        record = _get_canvas_store().update(
+            canvas_id, payload, base_version=base_version, requester_id=user_id, is_admin=is_admin
+        )
     except CanvasVersionConflict as e:
         raise HTTPException(
             status_code=409,
@@ -576,21 +685,34 @@ async def canvas_from_nl(
             "message": "failed",
             "data": {"status": "failed", "error": result.get("error", "生成失败")},
         }
-    return {"code": 0, "message": "success", "data": result["data"]}
+    # B4 对话生成归位：前端保存画布时把这两个字段透传到归属列（origin/agent_id）
+    data = dict(result["data"])
+    data.setdefault("origin", "nl_chat")
+    data["agent_id"] = agent_id
+    return {"code": 0, "message": "success", "data": data}
 
 
 @router.post("/canvas/{canvas_id}/ops")
-async def apply_canvas_op(request: Request, canvas_id: str, body: Dict[str, Any] = Body(...)):
+async def apply_canvas_op(
+    request: Request,
+    canvas_id: str,
+    body: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
     """应用单个画布语义 op（agent 工具与前端共用的写入口）
 
     Body: {"op": "add_node|connect|set_config|move_node|remove_node|remove_edge|layout",
            ...op 参数, "base_version"?: int, "session_id"?: str, "actor"?: str}
 
-    语义：未知画布 → 404；op 业务错误 → 400；版本冲突 → 409
+    语义：未知画布/非属主（B0 写校验）→ 404；op 业务错误 → 400；版本冲突 → 409
     （detail 含 current_version，调用方重读后重试）。成功时经
     session_id 广播 canvas_op 事件，画布页实时渲染。
     """
     from neurova.collaboration.canvas_ops import CanvasOpError, CanvasVersionConflict
+
+    user_id, is_admin = _canvas_identity(current_user)
+    if not _get_canvas_store().writable(canvas_id, user_id, is_admin):
+        raise HTTPException(status_code=404, detail=f"画布不存在: {canvas_id}")
 
     op = str(body.get("op") or "").strip()
     common = {
@@ -669,16 +791,28 @@ async def apply_canvas_op(request: Request, canvas_id: str, body: Dict[str, Any]
 
 
 @router.delete("/canvas/{canvas_id}")
-async def delete_canvas_detail(request: Request, canvas_id: str):
-    """删除画布快照（工作流=画布工作流，删除即删除该工作流）"""
-    deleted = _get_canvas_store().delete(canvas_id)
+async def delete_canvas_detail(
+    request: Request,
+    canvas_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """删除画布快照（工作流=画布工作流，删除即删除该工作流）
+
+    B0：仅属主/admin 可删，非属主 → 404 同构。
+    """
+    user_id, is_admin = _canvas_identity(current_user)
+    deleted = _get_canvas_store().delete(canvas_id, requester_id=user_id, is_admin=is_admin)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"画布不存在: {canvas_id}")
     return {"code": 0, "message": "success", "data": {"id": canvas_id, "deleted": True}}
 
 
 @router.post("/comfyui/import-canvas")
-async def import_comfyui_as_canvas(request: Request, payload: Dict[str, Any] = Body(...)):
+async def import_comfyui_as_canvas(
+    request: Request,
+    payload: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
     """导入 ComfyUI 工作流 JSON 直接落为画布快照
 
     工作流 = 无限画布工作流：导入结果是一张可编辑画布，
@@ -692,6 +826,7 @@ async def import_comfyui_as_canvas(request: Request, payload: Dict[str, Any] = B
     if not isinstance(comfy_workflow, dict) or not comfy_workflow:
         raise HTTPException(status_code=400, detail="缺少 ComfyUI 工作流 JSON")
 
+    user_id, _is_admin = _canvas_identity(current_user)
     try:
         from neurova.collaboration.neurflow.comfyui_importer import import_comfyui_workflow
         from neurova.collaboration.neurflow.node_registry import get_node_registry
@@ -708,8 +843,10 @@ async def import_comfyui_as_canvas(request: Request, payload: Dict[str, Any] = B
             comfy_workflow, name=name, description=str(payload.get("description") or "")
         )
         snapshot = definition_to_canvas(definition, name=name)
+        # B1：来源标记——纯画布快照保留 source，但临时编译定义 id 无意义，仅留来源
         snapshot.pop("metadata", None)
-        record = _get_canvas_store().create(snapshot)
+        snapshot["origin"] = "comfyui"
+        record = _get_canvas_store().create(snapshot, user_id=user_id)
         return {"code": 0, "message": "success", "data": record}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -729,34 +866,62 @@ async def run_canvas_workflow(
 ):
     """执行画布工作流（画布快照 → neurflow WorkflowDefinition → 执行引擎）
 
-    Body（可选）: {"session_id": "聊天会话ID"} —— 工作流内 agent 节点派生的
-    子 Agent 事件将广播到该会话（聊天页子 Agent 小窗的数据源）。
+    Body（可选）: {"session_id": "聊天会话ID", "source": "definition",
+                  "inputs": {...}} —— 工作流内 agent 节点派生的子 Agent
+    事件将广播到该会话（聊天页子 Agent 小窗的数据源）。
+    B3：source=definition 时直接执行持久化定义（canvas_id 即定义 id）——
+    执行记录挂真实 workflow id 并落 executions 表，发布/版本/subflow 引用
+    与历史对齐；纯画布仍走临时编译（行为不变）。
 
     用户隔离：user_id 取 JWT 实名（未认证回退 default），透传执行引擎——
     画布内知识库节点引用用户级远程配置（默认私有）时做属主校验。
+    B0：非属主/非项目成员 → 404（读取语义）。
 
     返回: {runId: neurflow execution_id, status}，用
-    GET /canvas/{canvas_id}/runs/{run_id} 轮询执行状态。
+    GET /canvas/{canvas_id}/runs/{run_id}（definition 带 ?source=definition）
+    轮询执行状态。
     """
-    record = _get_canvas_store().get(canvas_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail=f"画布不存在: {canvas_id}")
-
+    user_id, is_admin = _canvas_identity(current_user)
     body = body or {}
+    definition_branch = str(body.get("source") or "") == "definition"
+    inputs = body.get("inputs") or {}
+
+    if definition_branch:
+        from neurova.api.endpoints.neurflow_api import _get_storage as _nf_get_storage
+        from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
+
+        try:
+            workflow = _nf_get_storage().get_workflow(
+                canvas_id, requester_id=user_id, is_admin=is_admin,
+                project_ids=_requester_project_ids(user_id),
+            )
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"定义读取失败: {str(e)}")
+        if workflow is None:
+            raise HTTPException(status_code=404, detail=f"工作流不存在: {canvas_id}")
+    else:
+        record = _get_canvas_store().get(
+            canvas_id, requester_id=user_id, is_admin=is_admin,
+            project_ids=_requester_project_ids(user_id),
+        )
+        if record is None:
+            raise HTTPException(status_code=404, detail=f"画布不存在: {canvas_id}")
+
+        try:
+            from neurova.collaboration.canvas_bridge import canvas_to_workflow
+            from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
+
+            workflow = canvas_to_workflow(record, name=record.get("name") or canvas_id)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"画布转换失败: {str(e)}")
+
     session_id = body.get("session_id")
     debug = bool(body.get("debug"))
     breakpoints = body.get("breakpoints") or []
-    user_id = str(current_user.get("user_id") or "default")
-
-    try:
-        from neurova.collaboration.canvas_bridge import canvas_to_workflow
-        from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
-
-        workflow = canvas_to_workflow(record, name=record.get("name") or canvas_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"画布转换失败: {str(e)}")
 
     # 执行前节点配置校验：全图缺失收集 → 400 带字段级清单（前端弹窗），
     # 不进后台任务 = 停止工作流执行
@@ -780,7 +945,7 @@ async def run_canvas_workflow(
     from neurova.collaboration.neurflow.models import WorkflowStatus
 
     workflow.status = WorkflowStatus.PUBLISHED
-    execution = executor.create_instance(workflow, inputs={}, user_id=user_id)
+    execution = executor.create_instance(workflow, inputs=inputs, user_id=user_id)
 
     # 修复① — 调试运行：debug=true 时创建 DebugSession 并注册到
     # _DEBUG_SESSIONS（resume/variables 端点按 execution_id 查找），
@@ -799,17 +964,29 @@ async def run_canvas_workflow(
     # 后台执行（立即返回 execution_id 供前端轮询；session_id 透传给蜂群事件）
     import asyncio
 
-    task = asyncio.create_task(
-        executor.execute(
+    async def _execute_and_maybe_persist():
+        result = await executor.execute(
             workflow,
-            inputs={},
+            inputs=inputs,
             user_id=user_id,
             agent_id=body.get("agent_id"),
             session_id=session_id,
             instance=execution,
             debug_session=debug_session,
         )
-    )
+        # B3：来自定义的运行落 executions 表（执行历史挂持久化定义 id）
+        if definition_branch:
+            try:
+                from neurova.api.endpoints.neurflow_api import (
+                    _get_storage as _nf_get_storage,
+                )
+
+                _nf_get_storage().save_execution(result)
+            except Exception as exc:  # noqa: BLE001 - 落库失败不打断执行语义
+                logger.warning("定义执行落库失败 %s: %s", result.id, exc)
+        return result
+
+    task = asyncio.create_task(_execute_and_maybe_persist())
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
@@ -826,12 +1003,36 @@ async def run_canvas_workflow(
 
 
 @router.get("/canvas/{canvas_id}/runs/{run_id}")
-async def get_canvas_run_status(canvas_id: str, run_id: str):
-    """查询画布运行状态（代理 neurflow execution）"""
+async def get_canvas_run_status(
+    canvas_id: str,
+    run_id: str,
+    source: Optional[str] = Query(
+        default=None, pattern="^definition$",
+        description="B3：definition 运行状态轮询（canvas_id 为持久化定义 id）",
+    ),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
+):
+    """查询画布运行状态（代理 neurflow execution；B0 画布可读校验）"""
     from neurova.collaboration.neurflow.execution_engine import (
         ExecutionStatus,
         get_workflow_executor,
     )
+
+    user_id, is_admin = _canvas_identity(current_user)
+    if source == "definition":
+        from neurova.api.endpoints.neurflow_api import _get_storage as _nf_get_storage
+
+        readable = _nf_get_storage().get_workflow(
+            canvas_id, requester_id=user_id, is_admin=is_admin,
+            project_ids=_requester_project_ids(user_id),
+        )
+    else:
+        readable = _get_canvas_store().get(
+            canvas_id, requester_id=user_id, is_admin=is_admin,
+            project_ids=_requester_project_ids(user_id),
+        )
+    if readable is None:
+        raise HTTPException(status_code=404, detail=f"画布不存在: {canvas_id}")
 
     executor = get_workflow_executor()
     instance = executor._instances.get(run_id)

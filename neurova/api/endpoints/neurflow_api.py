@@ -114,6 +114,39 @@ def _get_storage() -> NeurflowStorage:
     return _get_storage._instance
 
 
+# ── B1 归属模型 v2：项目归属 helper（单源 project_access）──
+
+
+def _requester_project_ids(user_id: str) -> set:
+    from neurova.api.project_access import requester_project_ids
+
+    return requester_project_ids(user_id)
+
+
+def _is_project_member(user_id: str, project_id: str) -> bool:
+    from neurova.api.project_access import is_project_member
+
+    return is_project_member(user_id, project_id)
+
+
+def _check_ownership_fields(workflow: "WorkflowDefinition", current_user: Dict[str, Any]) -> None:
+    """创建/更新时的归属列校验（B1）。
+
+    - project_id 非空需项目成员（admin/default 放行）；
+    - agent_id 非空需对该 agent 有访问权（防污染他人 agent 资产池）。
+    违规 → HTTPException 400。
+    """
+    user_id = str(current_user.get("user_id") or "")
+    is_admin = current_user.get("role") == "admin"
+    if workflow.project_id and not is_admin and not _is_project_member(user_id, workflow.project_id):
+        raise HTTPException(status_code=400, detail=f"无权将工作流归属到项目: {workflow.project_id}")
+    if workflow.agent_id and not is_admin and user_id not in ("", "default"):
+        from neurova.api.endpoints.chat import _user_can_access_agent
+
+        if not _user_can_access_agent(user_id, workflow.agent_id, str(current_user.get("role") or "user")):
+            raise HTTPException(status_code=400, detail=f"无权归属到 agent: {workflow.agent_id}")
+
+
 # ==================== 店铺连接（/stores） ====================
 
 _STORE_FIELD_KEYS = (
@@ -397,15 +430,22 @@ async def list_workflows(
     status: Optional[str] = Query(None, description="按状态过滤"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    view: Optional[str] = Query(None, pattern="^(personal|project|agent)$",
+                                description="B1 三视图：personal|project|agent"),
+    project_id: Optional[str] = Query(None, description="视图细化：指定项目"),
+    agent_id: Optional[str] = Query(None, description="视图细化：指定 agent"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """列出工作流（P0-1 属主隔离：自己的 + public；admin 全量）"""
+    """列出工作流（P0-1 属主隔离：自己的 + public + B1 项目成员行；admin 全量）"""
     storage = _get_storage()
     ws_status = WorkflowStatus(status) if status else None
+    requester = str(current_user.get("user_id") or "")
     workflows = storage.list_workflows(
         category=category, status=ws_status, limit=limit, offset=offset,
-        requester_id=str(current_user.get("user_id") or ""),
+        requester_id=requester,
         is_admin=current_user.get("role") == "admin",
+        view=view, project_id=project_id, agent_id=agent_id,
+        project_ids=_requester_project_ids(requester),
     )
     return {"workflows": [w.to_dict() for w in workflows], "total": len(workflows)}
 
@@ -415,7 +455,7 @@ async def create_workflow(
     data: Dict[str, Any] = Body(...),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """创建工作流（P0-1：属主=当前登录用户）"""
+    """创建工作流（P0-1：属主=当前登录用户；B1：归属列校验）"""
     storage = _get_storage()
     try:
         # 如果前端没有提供 id，则生成一个新的 UUID
@@ -427,19 +467,25 @@ async def create_workflow(
         workflow = WorkflowDefinition.from_dict(data)
         workflow.created_at = time.time()
         workflow.updated_at = time.time()
+        _check_ownership_fields(workflow, current_user)
         storage.save_workflow(workflow, user_id=str(current_user.get("user_id") or "") or None)
         return {"workflow": workflow.to_dict(), "message": "工作流创建成功"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"创建工作流失败: {str(e)}")
 
 
 def _owned_workflow_or_404(storage, workflow_id: str, current_user: Dict[str, Any],
                            writable: bool = False):
-    """P0-1 属主判定单点：owner/admin 全通过；非 owner 仅 public 可读；
-    写操作（writable=True）要求 owner/admin。deny 与不存在同构 → 404。"""
+    """P0-1 属主判定单点：owner/admin 全通过；非 owner 仅 public 或 B1 项目成员可读；
+    写操作（writable=True）要求 owner/admin（成员只读）。deny 与不存在同构 → 404。"""
     requester_id = str(current_user.get("user_id") or "")
     is_admin = current_user.get("role") == "admin"
-    workflow = storage.get_workflow(workflow_id, requester_id=requester_id, is_admin=is_admin)
+    workflow = storage.get_workflow(
+        workflow_id, requester_id=requester_id, is_admin=is_admin,
+        project_ids=_requester_project_ids(requester_id),
+    )
     if workflow is None:
         raise HTTPException(status_code=404, detail="工作流不存在")
     if writable:
@@ -465,15 +511,25 @@ async def update_workflow(
     data: Dict[str, Any] = Body(...),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """更新工作流"""
+    """更新工作流（P0-1：属主保留既有行；B1：归属列 payload 缺失时以存量为准——
+    旧前端全量 PUT 不得抹除 project_id/agent_id/origin）"""
     storage = _get_storage()
     existing = _owned_workflow_or_404(storage, workflow_id, current_user, writable=True)
     try:
         workflow = WorkflowDefinition.from_dict(data)
         workflow.id = workflow_id
         workflow.updated_at = time.time()
+        if "project_id" not in data:
+            workflow.project_id = existing.project_id
+        if "agent_id" not in data:
+            workflow.agent_id = existing.agent_id
+        if not data.get("origin"):
+            workflow.origin = existing.origin or "manual"
+        _check_ownership_fields(workflow, current_user)
         storage.save_workflow(workflow)
         return {"workflow": workflow.to_dict(), "message": "工作流更新成功"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"更新工作流失败: {str(e)}")
 
@@ -483,8 +539,16 @@ async def delete_workflow(
     workflow_id: str,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """删除工作流"""
+    """删除工作流（B1：先写校验 → subflow 引用守卫 → 删除）"""
     storage = _get_storage()
+    # 属主写校验（deny 同构 404，不向无关用户泄露引用关系）
+    _owned_workflow_or_404(storage, workflow_id, current_user, writable=True)
+    refs = storage.find_subflow_references(workflow_id)
+    if refs:
+        raise HTTPException(
+            status_code=400,
+            detail=f"该工作流被以下工作流的 subflow 节点引用，无法删除: {', '.join(refs)}",
+        )
     result = storage.delete_workflow(
         workflow_id,
         requester_id=str(current_user.get("user_id") or ""),
@@ -500,12 +564,14 @@ async def search_workflows(
     query: str,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """搜索工作流（P0-1 属主过滤）"""
+    """搜索工作流（P0-1 属主过滤 + B1 项目成员行）"""
     storage = _get_storage()
+    requester = str(current_user.get("user_id") or "")
     workflows = storage.search_workflows(
         query,
-        requester_id=str(current_user.get("user_id") or ""),
+        requester_id=requester,
         is_admin=current_user.get("role") == "admin",
+        project_ids=_requester_project_ids(requester),
     )
     return {"workflows": [w.to_dict() for w in workflows], "total": len(workflows)}
 
@@ -881,6 +947,120 @@ async def list_nodes(
     }
 
 
+# ── B5 自定义节点类型 CRUD（CustomNodeService 首次暴露 HTTP 面）────────
+# 注册顺序硬约束：/nodes/custom 必须先于 /nodes/{node_type:path} 声明。
+
+
+def _get_custom_node_service():
+    from neurova.collaboration.neurflow.custom_nodes import get_custom_node_service
+
+    return get_custom_node_service()
+
+
+def _custom_node_to_dict(node) -> Dict[str, Any]:
+    return {
+        "type": node.type,
+        "label": node.label,
+        "icon": node.icon,
+        "category": node.category,
+        "description": node.description,
+        "source": node.source,
+        "version": node.version,
+        "tags": node.tags,
+        "inputs": [_port_to_dict(p) for p in (node.inputs or [])],
+        "outputs": [_port_to_dict(p) for p in (node.outputs or [])],
+        "sub_blocks": [_sub_block_to_dict(b) for b in (node.sub_blocks or [])],
+        "tier": node.tier,
+        "executor_body": node.executor_body,
+        "status": node.status,
+        "created_by": node.created_by,
+    }
+
+
+def _custom_node_error_http(e) -> HTTPException:
+    """CustomNodeError.code → HTTP 语义映射。"""
+    from neurova.collaboration.neurflow.custom_nodes import CustomNodeError
+
+    if isinstance(e, CustomNodeError):
+        status = {"exists": 409, "not_found": 404}.get(e.code, 400)
+        return HTTPException(status_code=status, detail=str(e))
+    return HTTPException(status_code=400, detail=f"自定义节点操作失败: {e}")
+
+
+def _custom_node_writable_or_404(service, node_type: str, current_user: Dict[str, Any]):
+    """PUT/DELETE 守卫。
+
+    - 类型在注册表（builtin/tool/skill 等非 custom 来源）但库内无自定义行 → 400
+      （明确"不可改非自定义类型"，而非误导性的不存在）；
+    - 库内不存在且注册表也没有 → 404；
+    - 非 custom 行 → 400；非属主且非 admin → 404（与不存在同构）。
+    """
+    existing = service.get_node(node_type)
+    if existing is None:
+        if service.is_registered(node_type):
+            raise HTTPException(status_code=400, detail=f"非自定义节点类型，不可修改: {node_type}")
+        raise HTTPException(status_code=404, detail=f"节点不存在: {node_type}")
+    if existing.source != "custom":
+        raise HTTPException(status_code=400, detail=f"非自定义节点类型，不可修改: {node_type}")
+    requester_id = str(current_user.get("user_id") or "")
+    is_admin = current_user.get("role") == "admin"
+    if not is_admin and (existing.created_by or "default") != requester_id:
+        raise HTTPException(status_code=404, detail=f"节点不存在: {node_type}")
+    return existing
+
+
+@router.post("/nodes/custom", status_code=201)
+async def create_custom_node(
+    data: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """注册自定义节点类型（spec：type/label/tier/executor_body/form_schema/inputs/outputs）"""
+    service = _get_custom_node_service()
+    try:
+        node = service.create_node(data, created_by=str(current_user.get("user_id") or ""))
+    except Exception as e:  # noqa: BLE001
+        raise _custom_node_error_http(e)
+    return {"node": _custom_node_to_dict(node)}
+
+
+@router.get("/nodes/custom")
+async def list_custom_nodes(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """列出自定义节点类型（含属主 created_by）。"""
+    service = _get_custom_node_service()
+    nodes = service.list_nodes()
+    return {"nodes": [_custom_node_to_dict(n) for n in nodes], "total": len(nodes)}
+
+
+@router.put("/nodes/custom/{node_type:path}")
+async def update_custom_node(
+    node_type: str,
+    data: Dict[str, Any] = Body(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """更新自定义节点类型（属主/admin；更新自动快照旧版本，版本号 patch +1）"""
+    service = _get_custom_node_service()
+    _custom_node_writable_or_404(service, node_type, current_user)
+    try:
+        node = service.update_node(node_type, data, created_by=str(current_user.get("user_id") or ""))
+    except Exception as e:  # noqa: BLE001
+        raise _custom_node_error_http(e)
+    return {"node": _custom_node_to_dict(node)}
+
+
+@router.delete("/nodes/custom/{node_type:path}")
+async def delete_custom_node(
+    node_type: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """删除自定义节点类型（仅 custom 且属主/admin；builtin 守卫 400）"""
+    service = _get_custom_node_service()
+    _custom_node_writable_or_404(service, node_type, current_user)
+    deleted = service.delete_node(node_type)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"节点不存在: {node_type}")
+    return {"message": "自定义节点已删除", "type": node_type}
+
+
 @router.get("/nodes/search/{query}")
 async def search_nodes(query: str):
     """搜索节点"""
@@ -974,6 +1154,18 @@ async def duplicate_workflow(
             template=existing.template,
             public=False,  # 副本默认不公开
             metadata=existing.metadata.copy(),
+            # B1：副本来源=template；归属继承（owner 或项目成员才带上）
+            origin="template",
+            project_id=(
+                existing.project_id
+                if (
+                    existing.user_id == str(current_user.get("user_id") or "")
+                    or (existing.project_id and _is_project_member(
+                        str(current_user.get("user_id") or ""), existing.project_id))
+                )
+                else None
+            ),
+            agent_id=existing.agent_id if existing.user_id == str(current_user.get("user_id") or "") else None,
         )
         storage.save_workflow(
             new_workflow, user_id=str(current_user.get("user_id") or "") or None
@@ -1005,11 +1197,26 @@ async def get_workflow_definition(
 async def update_workflow_definition(
     workflow_id: str,
     data: Dict[str, Any] = Body(...),
+    base_version: Optional[int] = Query(None, description="B2 乐观锁基版本（画布编辑器回写携带）"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """更新工作流定义（节点/边/变量）"""
+    """更新工作流定义（节点/边/变量/名称/描述）。
+
+    局部更新语义：未提供的字段不动——variables/status 等编辑面之外的字段
+    永不被画布回写抹除（B2 "往返不丢字段"由此端点保证，画布快照不再重建定义）。
+    base_version：与当前内容版本号不一致 → 409（detail 含 current_version）。
+    """
     storage = _get_storage()
     existing = _owned_workflow_or_404(storage, workflow_id, current_user, writable=True)
+
+    if base_version is not None:
+        current = storage.get_workflow_version_number(workflow_id)
+        if int(base_version) != current:
+            raise HTTPException(
+                status_code=409,
+                detail={"error": f"定义版本冲突: base_version={base_version} 落后于当前版本 {current}",
+                        "current_version": current},
+            )
 
     try:
         # 更新节点
@@ -1024,9 +1231,28 @@ async def update_workflow_definition(
         if "variables" in data:
             existing.variables = [WorkflowVariable(**v) for v in data["variables"]]
 
+        # B2：编辑器改名/描述回写
+        if data.get("name"):
+            existing.name = str(data["name"])
+        if "description" in data:
+            existing.description = str(data["description"])
+        # B2：视口随定义回写落 metadata.viewport（省去单独 PUT viewport 往返）
+        if isinstance(data.get("viewport"), dict):
+            existing.metadata["viewport"] = {
+                "x": float(data["viewport"].get("x", 0) or 0),
+                "y": float(data["viewport"].get("y", 0) or 0),
+                "zoom": float(data["viewport"].get("zoom", 1) or 1),
+            }
+
         existing.updated_at = time.time()
         storage.save_workflow(existing)
-        return {"message": "工作流定义更新成功", "workflow": existing.to_dict()}
+        return {
+            "message": "工作流定义更新成功",
+            "workflow": existing.to_dict(),
+            "version": storage.get_workflow_version_number(workflow_id),
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"更新工作流定义失败: {str(e)}")
 
@@ -1350,7 +1576,12 @@ async def instantiate_template(
             template=False,
             public=False,
             metadata=template.metadata.copy(),
+            # B1：模板实例来源标记；归属可选带上下文（project 需成员校验）
+            origin="template",
+            project_id=data.get("project_id"),
+            agent_id=data.get("agent_id"),
         )
+        _check_ownership_fields(new_workflow, current_user)
 
         # 应用变量覆盖
         if "variables" in data:

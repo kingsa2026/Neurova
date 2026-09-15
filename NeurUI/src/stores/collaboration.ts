@@ -168,10 +168,10 @@ export const useCollaborationStore = defineStore('collaboration', () => {
     }
   }
 
-  async function fetchCanvas(canvasId: string) {
+  async function fetchCanvas(canvasId: string, source?: 'definition') {
     loading.value = true
     try {
-      const res = await getCanvas(canvasId)
+      const res = await getCanvas(canvasId, source)
       currentCanvas.value = ((res as any)?.data ?? res) as CanvasSnapshot
       return currentCanvas.value
     } catch (e) {
