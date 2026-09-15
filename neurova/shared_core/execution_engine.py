@@ -24,6 +24,9 @@ from neurova.tool_layers.types import ExecutionStatus
 
 logger = get_logger(__name__)
 
+if typing.TYPE_CHECKING:  # 仅类型检查期：monitor 为可选组件，运行期函数内 try/except 懒加载
+    from neurova.execution_engine.execution_monitor import ExecutionMonitor
+
 
 @dataclass
 class ExecutionResult:

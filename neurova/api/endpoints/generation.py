@@ -15,7 +15,7 @@ import re
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -32,6 +32,9 @@ from neurova.llm.generators.runtime import (
     local_url_for,
     safe_task_name,
 )
+
+if TYPE_CHECKING:  # 仅类型检查期：运行期不需要（避免端点导入面加宽）
+    from neurova.llm.generators.protocols import ProtocolCredentials
 
 logger = get_logger(__name__)
 

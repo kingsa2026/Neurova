@@ -1,7 +1,6 @@
-"""tool-call-repair 文本工具调用修复测试（OpenClaw 启发 P0-3）
+"""tool-call-repair 文本工具调用修复测试
 
-背景（docs/Neurova_OpenClaw代码级对比_2026-09-04.md §3 P0-3）：
-  OpenClaw 的 packages/tool-call-repair 把模型以纯文本"漏出"的工具调用
+背景（§3 P0-3）：
   流内扫描修复为结构化 ToolCall，保护 code fence 内用户原文，专救
   Ollama/vLLM 类弱端点。三形态文法（grammar.ts）：
     1. XML-ish：<function name="ls">{"path": "."}</function>（命名空间点号容忍）
@@ -122,7 +121,6 @@ class TestRepairedToolCallsExecution(unittest.TestCase):
 class TestHermesFormatRepair(unittest.TestCase):
     """2026-09-14 飞书"全是代码"事故第二环。
 
-    qwen3.8-flash 等模型文本泄漏用的是 Hermes 原生格式：
       TC = chr(60) + "|tool_call|" + chr(62) 标记包裹
       function=NAME 标签 + parameter=KEY 子标签（值在标签间换行文本）
     三形态文法（XML-ish/Harmony/尾标）均不覆盖 → 泄漏调用不被执行，
@@ -136,7 +134,7 @@ class TestHermesFormatRepair(unittest.TestCase):
     P_OPEN = "\u003cparameter="
     P_CLOSE = "\u003c/parameter\u003e"
 
-    def _hermes_reply(self):
+    def _xml_toolcall_reply(self):
         return (
             "我来搜一下。\n"
             f"{self.TC_OPEN}\n{self.FN_OPEN}web_search\u003e\n"
@@ -148,27 +146,27 @@ class TestHermesFormatRepair(unittest.TestCase):
             f"{self.FN_CLOSE}\n{self.TC_CLOSE}"
         )
 
-    def test_hermes_calls_parsed(self):
+    def test_xml_toolcall_parsed(self):
         ex = _executor()
-        calls = ex._extract_repaired_tool_calls(self._hermes_reply())
+        calls = ex._extract_repaired_tool_calls(self._xml_toolcall_reply())
         got = [(c["name"], c["arguments"]) for c in calls]
         self.assertEqual(got, [
             ("web_search", {"query": "AI 最新新闻", "taskNameActive": "搜中文AI新闻"}),
             ("rss_read", {"url": "https://hnns.ru"}),
         ])
 
-    def test_hermes_executed_and_raw_stripped(self):
+    def test_xml_toolcall_executed_and_raw_stripped(self):
         """泄漏调用被执行，且协议原文不得留在回复里（正文保留、结果追加）。"""
         ex = _executor()
-        out = asyncio.run(ex._execute_from_text(self._hermes_reply(), ""))
+        out = asyncio.run(ex._execute_from_text(self._xml_toolcall_reply(), ""))
         self.assertEqual(ex._execute_single_tool.await_count, 2)
         self.assertNotIn(self.TC_OPEN, out)
         self.assertNotIn(self.FN_OPEN, out)
         self.assertIn("我来搜一下", out)
         self.assertIn("web_search 结果", out)
 
-    def test_hermes_in_code_fence_not_promoted(self):
-        """code fence 内的 Hermes 示例是用户原文，不得误伤。"""
+    def test_xml_toolcall_in_code_fence_not_promoted(self):
+        """不得误伤"""
         reply = (
             "```\n"
             f"{self.TC_OPEN}\n{self.FN_OPEN}evil\u003e\n{self.FN_CLOSE}\n{self.TC_CLOSE}\n"

@@ -1,5 +1,5 @@
 /**
- * /plan 斜杠命令 — slashCommands 契约测试（ZCode 计划模式对齐）
+ * /plan 斜杠命令 — slashCommands 契约测试
  *
  * 锁定 ChatPage slash 面板对带参命令的契约：
  * 1. /plan 命令注册、descKey 走 i18n（chat.slashPlan）；
@@ -42,7 +42,7 @@ describe('/plan 斜杠命令契约', () => {
     expect(filterSlashCommands(names, '/plansomething')).not.toContain('/plan')
   })
 
-  it('/compact 已注册且 /comp 前缀命中（zcode 上下文压缩对齐）', () => {
+  it('/compact 已注册且 /comp 前缀命中', () => {
     const names = ['/plan', '/new', '/clear', '/archive', '/compact']
     expect(names).toContain('/compact')
     expect(filterSlashCommands(names, '/compact')).toContain('/compact')

@@ -211,7 +211,7 @@ def run_async_safely(coro):
 # 注：mem_core.Memory dataclass 已删除（Tier 4A.2 统一 dataclass）。
 # 唯一 Memory dataclass 现为 neurova.cognitive_layers.memory_layer.models.Memory。
 # 旧导入 `from neurova.mem_core import Memory` 的使用方已改为从 models 导入。
-# 详见 docs/adr/0001-unify-memory-dataclass.md。
+#。
 
 
 @dataclass
@@ -660,6 +660,28 @@ class MemCore:
                 max_questions=100,
             )
             logger.info("Agent %s: QuestionQueueManager（问题队列）已启用", self.config.name)
+
+            # 主动行为引擎 + 动机账本（2026-09-15 真实化：消灭 /growth/proactive
+            # 与 motivation 假接口——按 agent 工作区落盘，信号源为 post_chat
+            # 轮次观察与问题回答回流）。可选组件独立容错（同 growth_analyzer/
+            # NeuHebb 惯例）：异常类型 config（如测试 mock 的 workspace_path）
+            # 或磁盘故障不得级联中断其后组件装配。
+            try:
+                from neurova.cognitive_layers.meta_cognition_layer.proactive_behavior import ProactiveBehaviorEngine
+                from neurova.core.motivation_ledger import get_motivation_ledger
+
+                self._agent.proactive_behavior_engine = ProactiveBehaviorEngine(
+                    agent_id=str(self.config.agent_id),
+                    persistence_path=str(Path(self.config.workspace_path) / "memory" / "proactive_actions.json"),
+                )
+                self._agent.intrinsic_motivation = get_motivation_ledger(
+                    str(self.config.agent_id), str(self.config.workspace_path)
+                )
+                logger.info("Agent %s: ProactiveBehaviorEngine + MotivationLedger 已启用", self.config.name)
+            except Exception as e:
+                logger.warning("Agent %s: 主动行为引擎/动机账本初始化失败: %s", self.config.name, e)
+                self._agent.proactive_behavior_engine = None
+                self._agent.intrinsic_motivation = None
 
             # 初始化工作记忆
             self.working_memory = WorkingMemoryAugmenter(

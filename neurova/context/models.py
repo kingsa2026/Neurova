@@ -25,6 +25,25 @@ class ContextPriority(Enum):
     LOW = 20  # 低温记忆、归档内容
 
 
+# ────── 反思注入预算守卫（2026-09-15 单源，效力闭环 P3） ──────
+# 全文反思只存于存储层（growth_log + context pool 无损归档）；进 prompt
+# 前必须封顶，否则一条长正文反思即可撑爆每轮恒定注入。两条注入路径共用：
+# - system [反思] 行（orchestrator）：REFLECTION_LESSON_PROMPT_LIMIT
+# - 信封 reflection 块（injector，多条共享小块）：REFLECTION_ENVELOPE_LESSON_LIMIT
+REFLECTION_LESSON_PROMPT_LIMIT = 400
+REFLECTION_ENVELOPE_LESSON_LIMIT = 200
+
+
+def clip_reflection_lesson(lesson: Any, limit: int = REFLECTION_LESSON_PROMPT_LIMIT) -> str:
+    text = str(lesson or "")
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def render_reflection_line(log: Dict[str, Any]) -> str:
+    """渲染恒定注入的 [反思] system 行（注入侧封顶，单源见上）"""
+    return f"[反思] {clip_reflection_lesson(log.get('lesson', str(log)))}"
+
+
 @dataclass
 class TokenBudget:
     """Token 预算配置 - 增强版"""
