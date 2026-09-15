@@ -16,11 +16,13 @@ vi.mock('@/api/modules/models', () => ({
   ]),
 }))
 const generateImageMock = vi.fn()
+const resolveGenerationMock = vi.fn()
 vi.mock('@/api/modules/generation', () => ({
   generateText: vi.fn(),
   generateImage: (p: any) => generateImageMock(p),
   generateAudio: vi.fn(),
   submitVideo: vi.fn(),
+  resolveGeneration: (kind: string, model: string, pid?: string) => resolveGenerationMock(kind, model, pid),
   listGenerationTasks: vi.fn().mockResolvedValue({ code: 0, data: { tasks: [] } }),
 }))
 const uploadFileMock = vi.fn()
@@ -122,5 +124,28 @@ describe('ImageGenPage', () => {
     await flushPromises()
     expect(wrapper.findComponent({ name: 'AigcHistoryList' }).exists()
       || wrapper.html().includes('aigc-history')).toBe(true)
+  })
+
+  // ── 2026-09-15 模型自适应展示（协议由后端同源推导，前端不手填）──────
+  it('选具体模型 → 调 /generation/resolve 自适应展示协议', async () => {
+    resolveGenerationMock.mockReset()
+    resolveGenerationMock.mockResolvedValue({ data: { protocol: 'openai_compat', provider_id: 'prov-b' } })
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.model = 'flux.1-dev'
+    await flushPromises()
+    expect(resolveGenerationMock).toHaveBeenCalledWith('image', 'flux.1-dev', 'prov-b')
+    expect(wrapper.find('.aigc-derived-hint').text()).toContain('openai_compat')
+    wrapper.unmount()
+  })
+
+  it('auto 态不查推导，提示自动识别', async () => {
+    resolveGenerationMock.mockReset()
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(resolveGenerationMock).not.toHaveBeenCalled()
+    expect(wrapper.find('.aigc-derived-hint').text()).toContain('自动识别')
+    wrapper.unmount()
   })
 })

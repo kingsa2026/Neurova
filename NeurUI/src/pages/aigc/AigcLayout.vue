@@ -133,6 +133,17 @@ const { t } = useI18n()
   color: var(--nr-accent, #4096ff);
 }
 
+/* 2026-09-15 模型自适应推导展示（图/视频页选模型后只读协议/服务商徽标） */
+.aigc-derived-hint {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--nr-text-secondary, rgba(255, 255, 255, 0.65));
+}
+
 @media (max-width: 900px) {
   .aigc-gen-layout {
     grid-template-columns: 1fr;

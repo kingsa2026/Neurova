@@ -105,6 +105,9 @@ def resolve_generation_creds(
                 # agnes 视频：协议标签 agnes ↔ host agnes（auto 路由无 provider_id 时）
                 "agnes" in host and "agnes" in (protocol_hint or "").lower()
             ) or (
+                # sora 视频：OpenAI 官方 /videos 端点（auto 路由无 provider_id 时）
+                "sora" in (protocol_hint or "").lower() and "openai" in host
+            ) or (
                 # openai_compat：Agnes/自托管等 host 无法穷举——协议为 openai_compat 时
                 # 取任一含 openai/agnes 的已启用服务商兜底（前端正常已透传 provider_id）
                 "openai_compat" in (protocol_hint or "").lower() and ("openai" in host or "agnes" in host)
@@ -132,6 +135,53 @@ def resolve_generation_creds(
     raise GenerationCredsError(
         "缺少生成凭据：请传 api_key+base_url，或 provider_id，或先在模型页配置并启用对应服务商（填 API Key）",
     )
+
+
+def derive_generation_protocol(
+    kind: str,
+    model: str = "",
+    provider_id: Optional[str] = None,
+    protocol_label: str = "",
+    base_url: str = "",
+) -> Tuple[str, str]:
+    """自适应推导单源：返回 (生效 provider_id, 协议标签)。
+
+    2026-09-15 推导顺序根因修：REST 端点原在凭据解析前推导协议，入参
+    base_url 恒空（前端服务商经 provider_id 上报、不传 base_url）→
+    OpenAI/Sora、火山具名模型全落默认支（视频→WAN、图像→OPENAI_COMPAT）
+    请求发错端点。本函数按 provider base_url 参与推导（与 Studio
+    _hint_for_provider 同语义，升级为共享单源）：
+    1. 显式协议标签最优先（不覆盖）；
+    2. provider_id → 其 base_url；pid 缺省按模型反查含该模型的启用服务商
+       （反查值回填 pid——auto/手填之外的 API 消费方同享）；
+    3. 其余走 resolve_*_protocol 的 模型名+base 兜底探测 → 默认支。
+    """
+    fn = (protocols.resolve_image_protocol if kind == "image"
+          else protocols.resolve_video_protocol)
+    pid = str(provider_id or "")
+    base = str(base_url or "")
+    if not base and not protocol_label:
+        manager = None
+        try:
+            from neurova.llm.provider_manager import get_provider_manager
+
+            manager = get_provider_manager()
+        except Exception:  # noqa: BLE001 — 服务商栈不可用时退回矩阵默认语义
+            manager = None
+        if manager is not None:
+            provider = manager.get_provider(pid) if pid else None
+            if provider is None and model:
+                for p in manager.list_providers(enabled_only=True):
+                    if any(
+                        getattr(m, "id", "") == model or getattr(m, "name", "") == model
+                        for m in (getattr(p, "models", None) or [])
+                    ):
+                        provider = p
+                        break
+            if provider is not None:
+                pid = str(getattr(provider, "id", "") or pid)
+                base = str(getattr(provider, "base_url", "") or "")
+    return pid, fn(protocol_label or "", model or "", base).value
 
 
 # ── 产物落盘（自端点搬移；SSRF 出网校验随迁）──────────────────────────────
@@ -237,10 +287,11 @@ class ProtocolGenerator:
         n = max(1, int(config.num_outputs or 1))
         size = f"{max(1, int(config.width or 1024))}x{max(1, int(config.height or 1024))}"
         refs = [config.image_url] if (t == "image_to_image" and config.image_url) else []
-        protocol = protocols.resolve_image_protocol("", model, "")
+        # 2026-09-15 自适应推导单源（含 model→provider 反查，画布/渠道同享）
+        provider_id, protocol = derive_generation_protocol("image", model)
         try:
             creds = resolve_generation_creds(
-                protocol.value, model, None, None, None, DEFAULT_OPENAI_BASE)
+                protocol, model, provider_id or None, None, None, DEFAULT_OPENAI_BASE)
         except GenerationCredsError as e:
             return GenerationResult(success=False, error=str(e))
         try:
@@ -274,7 +325,7 @@ class ProtocolGenerator:
             metadata={
                 "task_id": task_id,
                 "remote_urls": remote,
-                "protocol": protocol.value,
+                "protocol": protocol,
                 "model": creds.model,
             },
         )
@@ -289,10 +340,10 @@ class ProtocolGenerator:
             if config.start_image_url:
                 refs = [config.start_image_url]
             last_frame = config.end_image_url or ""
-        protocol = protocols.resolve_video_protocol("", model, "")
+        provider_id, protocol = derive_generation_protocol("video", model)
         try:
             creds = resolve_generation_creds(
-                protocol.value, model, None, None, None, DEFAULT_WAN_BASE)
+                protocol, model, provider_id or None, None, None, DEFAULT_WAN_BASE)
         except GenerationCredsError as e:
             return GenerationResult(success=False, error=str(e))
         duration = int(config.duration or 5)
@@ -331,7 +382,7 @@ class ProtocolGenerator:
             metadata={
                 "task_id": task_id,
                 "remote_urls": [video_url],
-                "protocol": protocol.value,
+                "protocol": protocol,
                 "model": creds.model,
             },
         )

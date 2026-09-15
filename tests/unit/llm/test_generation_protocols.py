@@ -270,3 +270,135 @@ class TestDialogueSync:
         prompt = build_video_prompt_with_dialogue("场景", ["台词一。"])
         result = check_dialogue_presence(prompt, ["台词一。"])
         assert result["ok"] is True
+
+
+# ── 2026-09-15 SORA 协议补录（OpenAI 官方 SDK videos.py 实核契约）──────────────
+# POST {base}/videos multipart（prompt/model/seconds∈{4,8,12}/size/input_reference）
+# → GET {base}/videos/{id}（queued/in_progress/completed/failed + progress）
+# → GET {base}/videos/{id}/content 二进制下载（无公开产物 URL →
+#   轮询成功转 data URL 交 persist_media 落盘）。事实源：openai-python
+#   src/openai/resources/videos.py + types/video.py（sora-2/sora-2-pro）。
+from neurova.llm.generators import protocols as proto
+
+
+class TestSoraProtocolMatrix:
+    def test_resolve_sora_by_model_name(self):
+        assert proto.resolve_video_protocol("", "sora-2-pro", "") == proto.VideoProtocol.SORA
+        assert proto.resolve_video_protocol("", "Sora 2 Pro", "") == proto.VideoProtocol.SORA
+
+    def test_resolve_sora_explicit_label(self):
+        assert proto.resolve_video_protocol("sora", "", "") == proto.VideoProtocol.SORA
+
+    def test_openai_base_alone_not_sora(self):
+        # openai 域名单独不足以判 Sora（兼容网关多用该域名）——以模型名为准
+        assert proto.resolve_video_protocol("", "my-video", "https://api.openai.com/v1") \
+            == proto.VideoProtocol.WAN
+
+    def test_sora_urls(self):
+        assert proto.sora_videos_url("https://api.openai.com/v1") == \
+            "https://api.openai.com/v1/videos"
+        assert proto.sora_videos_url("https://gw.example.com") == \
+            "https://gw.example.com/v1/videos"
+        assert proto.sora_video_poll_url("https://api.openai.com/v1", "vid_1") == \
+            "https://api.openai.com/v1/videos/vid_1"
+        assert proto.sora_video_content_url("https://api.openai.com/v1", "vid_1") == \
+            "https://api.openai.com/v1/videos/vid_1/content"
+
+    def test_sora_seconds_snap_size_map(self):
+        assert proto.sora_seconds(5) == "4"    # 官方 4/8/12 三档就近取整
+        assert proto.sora_seconds(10) == "8"   # 平距取低档
+        assert proto.sora_seconds(30) == "12"
+        assert proto.sora_size("1080p") == "1792x1024"
+        assert proto.sora_size("720p") == "1280x720"
+        assert proto.sora_size("") == "1280x720"
+
+    @pytest.mark.asyncio
+    async def test_submit_sora_multipart_fields_and_ignored(self, monkeypatch):
+        captured = {}
+
+        async def fake_post_form(url, headers, fields, files, timeout=60.0):
+            captured.update(url=url, fields=dict(fields), files=list(files))
+            return 200, {"id": "vid_9", "status": "queued"}
+
+        async def fake_binary(url, headers=None, timeout=30.0):
+            return b"PNG-BYTES"
+
+        monkeypatch.setattr(proto, "_post_form", fake_post_form)
+        monkeypatch.setattr(proto, "_get_binary", fake_binary)
+        creds = ProtocolCredentials(api_key="k", base_url="https://api.openai.com/v1",
+                                    model="sora-2-pro", protocol="sora")
+        out = await proto.submit_video(
+            creds, "cat in rain", duration=5, resolution="1080p",
+            ref_images=["https://cdn/x.png"], audio=True, last_frame="C:/tmp/end.png")
+        assert out["task_id"] == "vid_9"
+        assert out["poll_url"] == "https://api.openai.com/v1/videos/vid_9"
+        assert captured["url"] == "https://api.openai.com/v1/videos"
+        assert captured["fields"] == {"model": "sora-2-pro", "prompt": "cat in rain",
+                                      "seconds": "4", "size": "1792x1024"}
+        # Sora 参考图仅一个槽位 input_reference；http 引用服务端取字节进 multipart
+        assert captured["files"][0][0] == "input_reference"
+        assert captured["files"][0][2] == b"PNG-BYTES"
+        ignored = out.get("ignored_params") or []
+        assert "audio" in ignored and "last_frame" in ignored
+
+    @pytest.mark.asyncio
+    async def test_submit_sora_local_ref_file_bytes(self, tmp_path, monkeypatch):
+        p = tmp_path / "ref.png"
+        p.write_bytes(b"LOCALPNG")
+        captured = {}
+
+        async def fake_post_form(url, headers, fields, files, timeout=60.0):
+            captured["files"] = list(files)
+            return 200, {"id": "v"}
+
+        monkeypatch.setattr(proto, "_post_form", fake_post_form)
+        creds = ProtocolCredentials(api_key="k", base_url="https://api.openai.com/v1",
+                                    model="sora-2", protocol="sora")
+        await proto.submit_video(creds, "p", ref_images=[str(p)])
+        assert captured["files"][0][0] == "input_reference"
+        assert captured["files"][0][2] == b"LOCALPNG"
+
+    @pytest.mark.asyncio
+    async def test_poll_sora_completed_downloads_content_as_data_url(self, monkeypatch):
+        seen = {}
+
+        async def fake_get_json(url, headers, timeout=30.0):
+            seen["poll"] = url
+            return 200, {"id": "vid_1", "status": "completed", "progress": 100}
+
+        async def fake_binary(url, headers=None, timeout=30.0):
+            seen["content"] = url
+            return b"MP4-BYTES"
+
+        monkeypatch.setattr(proto, "_get_json", fake_get_json)
+        monkeypatch.setattr(proto, "_get_binary", fake_binary)
+        creds = ProtocolCredentials(api_key="k", base_url="https://api.openai.com/v1",
+                                    model="sora-2", protocol="sora")
+        r = await proto.poll_video(creds, "vid_1")
+        assert r["status"] == "succeeded"
+        assert r["video_url"].startswith("data:video/mp4;base64,")
+        assert seen["poll"] == "https://api.openai.com/v1/videos/vid_1"
+        assert seen["content"] == "https://api.openai.com/v1/videos/vid_1/content"
+
+    @pytest.mark.asyncio
+    async def test_poll_sora_in_progress_running(self, monkeypatch):
+        async def fake_get_json(url, headers, timeout=30.0):
+            return 200, {"status": "in_progress", "progress": 33}
+
+        monkeypatch.setattr(proto, "_get_json", fake_get_json)
+        creds = ProtocolCredentials(api_key="k", base_url="https://api.openai.com/v1",
+                                    model="sora-2", protocol="sora")
+        r = await proto.poll_video(creds, "vid_1")
+        assert r["status"] == "running"
+
+    @pytest.mark.asyncio
+    async def test_poll_sora_failed_carries_error(self, monkeypatch):
+        async def fake_get_json(url, headers, timeout=30.0):
+            return 200, {"status": "failed", "error": {"message": "safety violation"}}
+
+        monkeypatch.setattr(proto, "_get_json", fake_get_json)
+        creds = ProtocolCredentials(api_key="k", base_url="https://api.openai.com/v1",
+                                    model="sora-2", protocol="sora")
+        r = await proto.poll_video(creds, "vid_1")
+        assert r["status"] == "failed"
+        assert "safety violation" in r["error"]
