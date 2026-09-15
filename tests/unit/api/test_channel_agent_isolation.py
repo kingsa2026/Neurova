@@ -1,11 +1,11 @@
-"""渠道按 agent 多实例隔离——Phase A 后端核心回归（2026-09-13，对齐 QwenPaw 路由）。
+"""渠道按 agent 多实例隔离——Phase A 后端核心回归。
 
-契约（docs/渠道agent隔离改造计划_2026-09-13.md）：
+契约：
 1. 存储升 v2 `{version:2, agents:{agent_id:{channel_type:cfg}}}`；v1 平铺首载迁移进 default；
 2. /v1/channel-configs 全端点加 agent_id（Query 默认 "default" 保旧调用兼容）；
 3. manager 双视图：`_adapters[type]`=default agent 兼容视图（12 处既有 get_adapter 零破坏），
    `_agent_adapters[(agent_id,type)]`=全量实例表；register_adapter(adapter, agent_id=...)；
-4. 装配期绑定（QP 式"adapter 实例即路由"）：事件回调按来源实例携带 agent，入站消息
+4. 装配期绑定：事件回调按来源实例携带 agent，入站消息
    dispatch 时 metadata["agent_id"] 可见（替换 manager.py:373 硬编码 default 的数据通路）；
 5. 配置级身份冲突检测：两 agent 配同 app_id/bot_token → 第二个保存 409。
 """
@@ -79,7 +79,7 @@ class TestIdentityConflict:
         assert r1.status_code == 200
         r2 = c.post("/api/v1/channel-configs", params={"agent_id": "a2"},
                    json={"channel_type": "feishu", "app_id": "same-bot", "app_secret": "s"})
-        assert r2.status_code == 409, "两 agent 撞同一 bot 身份必须拒（QP conflict 语义）"
+        assert r2.status_code == 409, "两 agent 撞同一 bot 身份必须拒（conflict 语义）"
         # 同 agent 自身覆盖保存不算冲突
         r3 = c.post("/api/v1/channel-configs", params={"agent_id": "a1"},
                    json={"channel_type": "feishu", "app_id": "same-bot", "app_secret": "s2"})

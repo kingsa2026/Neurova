@@ -3,7 +3,7 @@ import { buildChannelFieldsMap, QRCODE_CHANNELS, buildChannelCatalog } from '@/c
 
 const t = (k: string) => k
 
-describe('渠道参数表·QwenPaw 对齐契约（防摆设字段回归）', () => {
+describe('渠道参数表契约（防摆设字段回归）', () => {
   const fields = buildChannelFieldsMap(t)
 
   it('钉钉补齐后端消费的 message_type/robot_code/endpoint，去掉未消费的 reply_at_sender', () => {

@@ -83,7 +83,14 @@ def _make_ghost(isolated_env: Path, agent_id: str) -> tuple[FakeAgent, Path, Pat
 
 def _call_delete(agent_id: str):
     request = Request(scope={"type": "http", "method": "DELETE"})
-    return asyncio.run(agent_module.delete_agent(request=request, agent_id=agent_id))
+    return asyncio.run(
+        agent_module.delete_agent(
+            request=request,
+            agent_id=agent_id,
+            # Wave H-W0：属主门为 admin（本文件验证清理机制非归属，无主 agent 走 admin 身份）
+            current_user={"user_id": "root", "username": "root", "role": "admin", "neuser_id": "root"},
+        )
+    )
 
 
 def test_delete_agent_actually_awaits_async_shutdown(isolated_env):

@@ -78,27 +78,15 @@ def _user_can_access_agent(user_id: str, agent_id: str, role: str = "user") -> b
     """
     检查用户是否有权访问 Agent
 
-    权限规则:
-    1. admin 角色: 可访问所有 Agent
-    2. 普通用户: 只能访问自己创建的 Agent (owner_user_id 匹配)
-    3. agent 无 owner_user_id: 仅 admin 可访问（防止未授权访问）
+    Wave H-W0：判定委托 agent_access 单源（admin 全量 / owner 匹配 /
+    无主仅 admin）——列表/详情/写口/执行门同一口径，杜绝双实现漂移。
     """
-    if role == "admin":
-        return True
+    from neurova.api.agent_access import can_access_agent, resolve_agent_owner
 
     agent = _get_agent(agent_id)
     if not agent:
         return False
-
-    # 获取 Agent 的 owner_user_id
-    owner_user_id = getattr(agent.config, "owner_user_id", None)
-
-    # 无 owner: 普通用户无法访问
-    if not owner_user_id:
-        return False
-
-    # 仅 owner 可访问
-    return owner_user_id == user_id
+    return can_access_agent(user_id, role, resolve_agent_owner(agent_id, state_agent=agent))
 
 
 # F-4 根修（台账 2026-09-11）：TTS 产物文件名白名单——tts_{session}_{ts}.wav
@@ -395,12 +383,12 @@ async def chat_stream(
 
 # #7 已删除 4 个 /sessions 死端点:
 # - GET /sessions(与 console.py /chat/sessions 重复,且 hasattr(agent, "get_sessions") 守卫
-#   Agent 类无 get_sessions 方法,只有 session_manager 属性)
+# Agent 类无 get_sessions 方法,只有 session_manager 属性)
 # - POST /sessions(与 console.py /chat/sessions POST 重复)
 # - PUT /sessions/{session_id}(纯 stub,注释明确说"我们没有实际的会话存储")
 # - DELETE /sessions/{session_id}(纯 stub,注释明确说"我们没有实际的会话存储")
 # 前端只用 /api/v1/console/chat/sessions(console.py 路由,已通过 SessionRepository 接入真实存储)。
-# 详见 docs/adr/0008-session-repository.md
+# 
 
 
 @router.get("/history")
