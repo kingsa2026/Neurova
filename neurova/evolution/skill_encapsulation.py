@@ -41,6 +41,8 @@ class ToolPattern:
     first_seen: datetime.datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
     last_seen: datetime.datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # P1-3 独立证据台账：source_key → "s"/"f"（每源一条，成功优先记账）
+    source_evidence: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self):
         if not self.pattern_id and self.tool_sequence:
@@ -82,6 +84,8 @@ class SkillTemplate:
     created_at: datetime.datetime = field(default_factory=lambda: datetime.datetime.now(datetime.timezone.utc))
     last_used: Optional[datetime.datetime] = None
     is_active: bool = True
+    # P1-1 routing 自检未通过原因（approve_template 拒绝激活时填充，审批面取证）
+    routing_issues: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -96,6 +100,7 @@ class SkillTemplate:
             "created_at": self.created_at.isoformat(),
             "last_used": self.last_used.isoformat() if self.last_used else None,
             "is_active": self.is_active,
+            "routing_issues": list(self.routing_issues),
         }
 
 
@@ -127,6 +132,7 @@ class AutoSkillBuilder:
         min_success_rate: float = 0.7,
         max_patterns: int = 1000,
         similarity_threshold: float = 0.8,
+        min_independent_successes: int = 2,
     ):
         """
         初始化技能构建器
@@ -136,11 +142,16 @@ class AutoSkillBuilder:
             min_success_rate: 最小成功率阈值
             max_patterns: 最大模式数量
             similarity_threshold: 模式相似度阈值
+            min_independent_successes: P1-3 反回声室——成功证据须来自
+                ≥N 个不同来源任务（observe metadata.source_key；无标注
+                的存量调用方逐观测独立，兼容原计数语义）
         """
         self._min_occurrences = min_pattern_occurrences
         self._min_success_rate = min_success_rate
         self._max_patterns = max_patterns
         self._similarity_threshold = similarity_threshold
+        self._min_independent_successes = max(1, int(min_independent_successes))
+        self._anon_seq = 0
         # C10 技能评审闸（治理收紧 2026-09-12）：默认开——改行为的产物
         # （自动封装技能）强制审批，NEUROVA_SKILL_REVIEW_GATE=0 显式关闭。
         # 开启后产物 is_active=False 进 pending，经 skill API 的 approve 端点
@@ -183,13 +194,21 @@ class AutoSkillBuilder:
             metadata: 元数据
         """
         with self._lock:
-            # 记录观察
+            # P1-3 独立证据源键（反回声室，OpenSpace capture "procedure 与
+            # validation 不得同一 observation" 的封装侧同构）：调用方给
+            # metadata.source_key（session#turn 类身份）则按源聚合；无标注
+            # 逐观测合成唯一键（存量调用方行为=原计数语义，不回退）。
+            _meta = metadata or {}
+            source_key = str(_meta.get("source_key") or "")
+            if not source_key:
+                self._anon_seq += 1
+                source_key = f"anon-{self._anon_seq}"
             record = ObservationRecord(
                 tool_sequence=tool_sequence,
                 context=context,
                 success=success,
                 duration=duration,
-                metadata=metadata or {},
+                metadata=_meta,
             )
             self._observations.append(record)
 
@@ -199,9 +218,16 @@ class AutoSkillBuilder:
 
             # 提取或更新模式
             if len(tool_sequence) >= 2:  # 至少2个工具才算模式
-                self._update_pattern(tool_sequence, context, success, duration)
+                self._update_pattern(tool_sequence, context, success, duration, source_key)
 
-    def _update_pattern(self, tool_sequence: List[str], context: str, success: bool, duration: float):
+    def _update_pattern(
+        self,
+        tool_sequence: List[str],
+        context: str,
+        success: bool,
+        duration: float,
+        source_key: str = "",
+    ):
         """更新模式"""
         # 生成模式ID
         content = ":".join(tool_sequence)
@@ -221,6 +247,13 @@ class AutoSkillBuilder:
             else:
                 pattern.failure_count += 1
 
+            # P1-3 独立证据：每源一票，已成功过的源不被后续失败覆盖
+            # （证据方向与 OpenSpace trust observation 一致：只增干净票）
+            if source_key:
+                prev = pattern.source_evidence.get(source_key)
+                if success or prev is None:
+                    pattern.source_evidence[source_key] = "s" if success else "f"
+
             # 更新平均时长
             pattern.avg_duration = (pattern.avg_duration * (pattern.total_uses - 1) + duration) / pattern.total_uses
 
@@ -238,6 +271,7 @@ class AutoSkillBuilder:
                 failure_count=0 if success else 1,
                 total_uses=1,
                 avg_duration=duration,
+                source_evidence=({source_key: "s" if success else "f"} if source_key else {}),
             )
             self._patterns[pattern_id] = pattern
 
@@ -296,6 +330,21 @@ class AutoSkillBuilder:
         # 检查成功率
         if pattern.success_rate < self._min_success_rate:
             return
+
+        # P1-3（OpenSpace 反回声室同构）：出现次数够 ≠ 证据独立——同一任务
+        # 反复跑出的成功会自我强化（09-05 睡眠巩固翻倍/肌肉记忆回声室同类
+        # 病灶）。要求成功票来自 ≥min_independent_successes 个不同来源。
+        if pattern.source_evidence:
+            independent_successes = sum(1 for v in pattern.source_evidence.values() if v == "s")
+            if independent_successes < self._min_independent_successes:
+                logger.debug(
+                    "模式 %s 成功 %d 次但独立来源仅 %d（<%d），不封装",
+                    pattern.pattern_id,
+                    pattern.success_count,
+                    independent_successes,
+                    self._min_independent_successes,
+                )
+                return
 
         # 检查是否已存在相似技能
         for template in self._templates.values():
@@ -464,10 +513,23 @@ class AutoSkillBuilder:
             ]
 
     def approve_template(self, template_id: str) -> bool:
-        """批准待审模板（激活后可被 register_to_skill_registry 注册）。"""
+        """批准待审模板（激活后可被 register_to_skill_registry 注册）。
+
+        P1-1 routing 回归：批准前跑确定性自检（名述自洽/正负例召回），未过
+        则拒绝激活、模板留在 pending 并回填 routing_issues（供审批面取证）。
+        """
         with self._lock:
             t = self._templates.get(template_id)
             if t is None:
+                return False
+            from neurova.skills.skill_injection import routing_sanity_check
+
+            positive = list((t.parameter_hints or {}).get("trigger_queries") or [])
+            negative = list((t.parameter_hints or {}).get("negative_queries") or [])
+            issues = routing_sanity_check(t.name, t.description, positive, negative)
+            t.routing_issues = issues
+            if issues:
+                logger.warning("技能模板 %s 路由自检未通过，保持 pending: %s", template_id, issues)
                 return False
             t.is_active = True
             logger.info("技能模板 %s 已批准", template_id)

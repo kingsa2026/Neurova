@@ -238,17 +238,26 @@ class AdaptiveToolWeights:
         # 衰减即"被读取"，刷新时间戳防止同一次闲置被重复指数放大
         weight.last_used = datetime.now(UTC)
 
-    def _windowed_success_rate(self, weight: ToolWeight) -> float:
+    def _windowed_success_rate(self, weight: ToolWeight, min_observations: int = 3) -> float:
         """滑动窗口内成功率（A 版思想①）。
 
-        回退序：窗口空但有终身观测 → 终身成功率（旧 B 版语义，legacy 数据零跳变）；
-        完全未观测 → 1.0（不受罚）。
+        P2-3（OpenSpace quality/types.py:83-116 等价核对）：补**小样本免疫**
+        ——观测 <min_observations 次不施 rate 罚（一次网络抖动不得把有效权重
+        打到 0；OpenSpace "calls <3 免疫" 同语义）。方向性保留：乘数照常按
+        成败累进（阈值齿轮 get_effective_multiplier 消费，不失明）。
+
+        回退序：窗口空但有终身观测 → 终身成功率（旧 B 版语义，legacy 数据
+        零跳变）；完全未观测 → 1.0（不受罚）。
         """
         if not weight.window:
             total = weight.success_count + weight.failure_count
             if total == 0:
                 return 1.0
+            if total < min_observations:
+                return 1.0
             return weight.success_count / total
+        if len(weight.window) < min_observations:
+            return 1.0
         wins = sum(1 for _, ok in weight.window if ok)
         return wins / len(weight.window)
 
@@ -743,6 +752,18 @@ def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
             logger.info("技能经验库已从 %s 恢复", se_path)
     except Exception:  # noqa: BLE001 - 单件装配失败不拖垮其余组件
         logger.warning("技能经验库持久化装配失败", exc_info=True)
+
+    # P1-4 进化作业队列崩溃恢复（默认关时不建单例、零副作用）：把上一进程
+    # 遗留的 running 租约超时作业释放回可重试池，供下一次 post_chat drain。
+    try:
+        from neurova.evolution.job_queue import get_evolution_job_queue, queue_enabled
+
+        if queue_enabled():
+            recovered = get_evolution_job_queue().recover_stale()
+            if recovered:
+                logger.info("进化作业队列恢复 %d 条超时租约", recovered)
+    except Exception:  # noqa: BLE001 - 队列恢复失败不阻断启动
+        logger.warning("进化作业队列恢复失败", exc_info=True)
     return restored
 
 

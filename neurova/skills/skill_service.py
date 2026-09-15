@@ -19,6 +19,89 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
+# ── 技能质量漏斗归因（P0-1，OpenSpace 代码级对比 2026-09-14 落地）──
+
+
+def compute_skill_funnel_update(
+    entries: Optional[List[Dict[str, Any]]], task_completed: bool
+) -> Dict[str, Dict[str, int]]:
+    """轮次派发账本 → {skill_id: {selections/applications/completions/fallbacks}} 增量。
+
+    归因规则对齐 OpenSpace skill_engine（types.py:344-350 skill_phase_failed
+    不得记功 / store.py:1587-1659 completed/fallback 判定）：
+    - selection = 该技能本轮被 LLM 派发一次（治理预检放行后进入 execute_skill_tool）
+    - application = 真正进入执行（查无此技能/未初始化 = 有 selection 无 application）
+    - completion = application ∧ 执行成功 ∧ 本轮任务完成
+    - fallback = application ∧ ¬completion——**执行失败但本轮靠其它工具兜底
+      完成时不得给技能记 completion**，这是本函数存在的意义（防漏斗被污染）
+    """
+    updates: Dict[str, Dict[str, int]] = {}
+    for entry in entries or []:
+        skill_id = str(entry.get("skill_id") or "")
+        if not skill_id:
+            continue
+        delta = updates.setdefault(
+            skill_id,
+            {"selections": 0, "applications": 0, "completions": 0, "fallbacks": 0},
+        )
+        delta["selections"] += 1
+        if not entry.get("applied"):
+            continue
+        delta["applications"] += 1
+        if entry.get("ok") and task_completed:
+            delta["completions"] += 1
+        else:
+            delta["fallbacks"] += 1
+    return updates
+
+
+# ── 信任生命周期（P0-2，OpenSpace store.py:1310-1354 两态状态机）──
+
+
+def compute_trust_transition(
+    state: str, outcome: str, successes_since_failure: int, min_successes: int = 2
+) -> tuple:
+    """provisional↔trusted 迁移纯函数。
+
+    语义照 OpenSpace：failure 即刻降级并清零计数；晋升须
+    successes_since_failure ≥ min_successes 个**独立任务**观测；trusted
+    成功不计数（无意义）。未知态按保守 provisional 处理。
+    """
+    state = state if state in ("provisional", "trusted") else "provisional"
+    count = max(0, int(successes_since_failure or 0))
+    if outcome == "failure":
+        return "provisional", 0
+    if outcome != "success":
+        return state, count
+    if state == "trusted":
+        return "trusted", 0
+    count += 1
+    return ("trusted", 0) if count >= max(1, int(min_successes)) else ("provisional", count)
+
+
+def compute_trust_observations(
+    entries: Optional[List[Dict[str, Any]]], task_completed: bool
+) -> Dict[str, str]:
+    """从派发账本派生本轮每技能的信任观测（一票制：每任务一次）。
+
+    保守规则：同回合混合成败记 failure（晋升证据必须干净）；技能执行成功
+    但任务未完成同样记 failure——与 P0-1 fallback 归因同源，不为兜底/未
+    完成的回合记功。只有 selection 无 application 不投票。
+    """
+    seen: Dict[str, Dict[str, bool]] = {}
+    for entry in entries or []:
+        skill_id = str(entry.get("skill_id") or "")
+        if not skill_id or not entry.get("applied"):
+            continue
+        agg = seen.setdefault(skill_id, {"ok": True})
+        if not entry.get("ok"):
+            agg["ok"] = False
+    return {
+        skill_id: ("success" if agg["ok"] and task_completed else "failure")
+        for skill_id, agg in seen.items()
+    }
+
+
 class SkillService:
     """
     Agent 技能服务
@@ -74,12 +157,32 @@ class SkillService:
         """
         保存技能清单
 
+        P1-5（OpenSpace 对比）：tmp + os.replace 原子替换——原 open(w) 先截断，
+        写一半崩溃 = manifest 清零（providers-config-loss 事故同型病灶）。
+        失败时旧文件内容保持完整（原子性即此意）。
+
         Returns:
             保存是否成功
         """
         try:
-            with open(self.manifest_path, "w", encoding="utf-8") as f:
-                json.dump(self._skills, f, indent=2, ensure_ascii=False)
+            import os
+            import tempfile
+
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(self.skills_dir), prefix="manifest_", suffix=".tmp"
+            )
+            try:
+                with open(fd, "w", encoding="utf-8") as f:
+                    json.dump(self._skills, f, indent=2, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, self.manifest_path)
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
             self._logger.debug("Saved manifest with %d skills", len(self._skills))
             return True
         except Exception as e:
@@ -99,9 +202,16 @@ class SkillService:
 
         Notes:
             - 远程 URL（http:// 或 https://）会委托给 SkillHubClient 处理
-              （SkillHubClient 已实现 HTTP 下载 + zip/tar.gz 解压 + skill.md 解析）
-            - 本地路径走原解压 + copytree 流程
+              （SkillHubClient 已实现 HTTP 下载 + zip/tar.gz 解压 + skill.md 解析，
+              内含安装扫描门）
+            - 本地目录/zip 走"独立解压 → copytree 到 .incoming 暂存 → P0-4 安装门
+              → 原子交换"流程：被拦不碰旧版本、不落清单；扫描器故障 fail-closed。
+              （修复预存根因 bug：原 zip 流程解压目录与 target 同路径，
+              rmtree(target) 先删源 → copytree FileNotFoundError，zip 安装从未成功过。）
         """
+        import time as _time
+        import tempfile
+
         try:
             # 远程 URL 委托 SkillHubClient（已具备 HTTP 下载 + 解压能力）
             if isinstance(skill_path, str) and skill_path.startswith(("http://", "https://")):
@@ -112,54 +222,76 @@ class SkillService:
             if not skill_path.exists():
                 return {"success": False, "error": f"Skill path not found: {skill_path}"}
 
-            # 如果是压缩包，先解压
-            if skill_path.suffix == ".zip":
+            _extract_tmp: Optional[Path] = None
+            try:
+                # 如果是压缩包，先解压到独立临时目录（不与安装目录同路径）
+                if skill_path.suffix == ".zip":
+                    _extract_tmp = Path(tempfile.mkdtemp(prefix="neurova_skill_zip_"))
+                    # 安全审计 L3: 原 extractall 无成员校验 → Zip Slip
+                    safe_extract_zip(skill_path, _extract_tmp)
+                    skill_path = _extract_tmp
 
-                extract_dir = self.skills_dir / skill_path.stem
-                # 安全审计 L3: 原 extractall 无成员校验 → Zip Slip
-                safe_extract_zip(skill_path, extract_dir)
-                skill_path = extract_dir
+                # 读取技能清单
+                manifest_file = skill_path / "manifest.json"
+                if not manifest_file.exists():
+                    return {"success": False, "error": "manifest.json not found in skill directory"}
 
-            # 读取技能清单
-            manifest_file = skill_path / "manifest.json"
-            if not manifest_file.exists():
-                return {"success": False, "error": "manifest.json not found in skill directory"}
+                with open(manifest_file, "r", encoding="utf-8") as f:
+                    manifest = json.load(f)
 
-            with open(manifest_file, "r", encoding="utf-8") as f:
-                manifest = json.load(f)
+                # 确定技能ID
+                if skill_id is None:
+                    skill_id = manifest.get("id") or manifest.get("name")
 
-            # 确定技能ID
-            if skill_id is None:
-                skill_id = manifest.get("id") or manifest.get("name")
+                if not skill_id:
+                    return {"success": False, "error": "Skill ID not found in manifest"}
 
-            if not skill_id:
-                return {"success": False, "error": "Skill ID not found in manifest"}
+                # 复制技能到技能目录（加锁防止并发写）
+                with self._lock:
+                    # P0-4 安装门收口（OpenSpace 对比 2026-09-15）：本地目录/zip/
+                    # /skill-pool/install-from-zip 全部汇聚到本咽喉——先复制到
+                    # .incoming 暂存再扫描，被拦即删暂存、旧版本原地保留。
+                    from neurova.skills.skill_install_gate import scan_skill_for_install
 
-            # 复制技能到技能目录（加锁防止并发写）
-            with self._lock:
-                target_dir = self.skills_dir / skill_id
-                if target_dir.exists():
-                    shutil.rmtree(target_dir)
+                    incoming = self.skills_dir / f".incoming_{skill_id}_{int(_time.time() * 1000)}"
+                    shutil.copytree(skill_path, incoming)
+                    scan = scan_skill_for_install(skill_id, str(incoming))
+                    if scan.get("blocked"):
+                        shutil.rmtree(incoming, ignore_errors=True)
+                        self._logger.warning("技能 %s 安装被安全门拦截: %s", skill_id, scan.get("error"))
+                        return {
+                            "success": False,
+                            "error": scan.get("error") or "安全扫描未通过",
+                            "findings": scan.get("findings") or [],
+                        }
 
-                shutil.copytree(skill_path, target_dir)
+                    target_dir = self.skills_dir / skill_id
+                    if target_dir.exists():
+                        shutil.rmtree(target_dir)
+                    shutil.move(str(incoming), str(target_dir))
 
-                # 更新技能信息
-                self._skills[skill_id] = {
-                    "id": skill_id,
-                    "name": manifest.get("name", skill_id),
-                    "version": manifest.get("version", "1.0.0"),
-                    "description": manifest.get("description", ""),
-                    "enabled": True,
-                    "installed_at": datetime.datetime.now().isoformat(),
-                    "path": str(target_dir),
-                    "manifest": manifest,
-                }
+                    # 更新技能信息
+                    self._skills[skill_id] = {
+                        "id": skill_id,
+                        "name": manifest.get("name", skill_id),
+                        "version": manifest.get("version", "1.0.0"),
+                        "description": manifest.get("description", ""),
+                        "enabled": True,
+                        "installed_at": datetime.datetime.now().isoformat(),
+                        "path": str(target_dir),
+                        "manifest": manifest,
+                    }
+                    # P1-6 安装即出生修订 @1（origin=import）
+                    self._append_revision(self._skills[skill_id], trigger="install", origin="import")
 
-                # 保存清单
-                self._save_manifest()
+                    # 保存清单
+                    self._save_manifest()
 
-            self._logger.info("Installed skill: %s", skill_id)
-            return {"success": True, "skill_id": skill_id}
+                self._logger.info("Installed skill: %s", skill_id)
+                return {"success": True, "skill_id": skill_id}
+            finally:
+                if _extract_tmp is not None:
+                    shutil.rmtree(_extract_tmp, ignore_errors=True)
 
         except Exception as e:
             # 与 _install_from_url 一致：用 exception 记录完整 traceback
@@ -340,6 +472,107 @@ class SkillService:
             self._logger.warning("记录技能使用失败: %s", e)
             return False
 
+    def record_skill_funnel(
+        self,
+        skill_id: str,
+        *,
+        selections: int = 0,
+        applications: int = 0,
+        completions: int = 0,
+        fallbacks: int = 0,
+    ) -> bool:
+        """累加技能质量漏斗计数并落盘（P0-1）。
+
+        与 record_skill_usage（C11）同层共存、互不替代：use_count 是执行次数
+        原始账，漏斗是"选用→应用→完成/兜底"归因账（消费方：召回过滤、P0-2
+        信任态、前端质量徽标）。manifest 写穿，频率=回合数，非每 token。
+        """
+        try:
+            with self._lock:
+                info = self._skills.get(skill_id)
+                if info is None:
+                    return False
+                usage = info.setdefault("usage", {})
+                # 漏斗四键恒定存在（读侧 manifest 直读不判缺；脏值归一）
+                for key in ("selections", "applications", "completions", "fallbacks"):
+                    try:
+                        usage[key] = max(0, int(usage.get(key, 0) or 0))
+                    except (TypeError, ValueError):
+                        usage[key] = 0
+                for key, value in (
+                    ("selections", selections),
+                    ("applications", applications),
+                    ("completions", completions),
+                    ("fallbacks", fallbacks),
+                ):
+                    try:
+                        increment = max(0, int(value))
+                    except (TypeError, ValueError):
+                        increment = 0
+                    if increment:
+                        usage[key] = max(0, int(usage.get(key, 0) or 0)) + increment
+                self._save_manifest()
+            return True
+        except Exception as e:
+            self._logger.warning("记录技能漏斗失败 %s: %s", skill_id, e)
+            return False
+
+    def record_trust_observation(
+        self, skill_id: str, outcome: str, task_id: str, min_successes: int = 2
+    ) -> bool:
+        """记一次独立任务信任观测并落盘（P0-2）。
+
+        task_id 去重 = OpenSpace UNIQUE(skill_id, observation_id) 的一票制；
+        observed_task_ids 有界 20（仅防近期重复，超出窗口的历史任务按新
+        观测处理——有界换页语义，非漏洞：晋升只依赖最近计数链）。
+        """
+        import time as _time
+
+        if outcome not in ("success", "failure"):
+            return False
+        try:
+            with self._lock:
+                info = self._skills.get(skill_id)
+                if info is None:
+                    return False
+                # trust 寄居 identity 块（出生属性，不预建 usage——生命周期
+                # seed-on-first-sight 契约）；无 trust 记录（导入/存量）默认 trusted
+                identity = info.setdefault("identity", {})
+                trust = identity.setdefault(
+                    "trust",
+                    {"state": "trusted", "successes_since_failure": 0, "observed_task_ids": []},
+                )
+                observed = trust.setdefault("observed_task_ids", [])
+                if task_id and task_id in observed:
+                    return False
+                new_state, new_count = compute_trust_transition(
+                    str(trust.get("state") or "trusted"),
+                    outcome,
+                    int(trust.get("successes_since_failure", 0) or 0),
+                    min_successes,
+                )
+                old_state = trust.get("state")
+                trust["state"] = new_state
+                trust["successes_since_failure"] = new_count
+                if task_id:
+                    observed.append(task_id)
+                    del observed[:-20]
+                if new_state != old_state:
+                    transitions = identity.setdefault("trust_transitions", [])
+                    transitions.append(
+                        {
+                            "event": "trust_promoted" if new_state == "trusted" else "trust_demoted",
+                            "task_id": task_id,
+                            "at_ms": int(_time.time() * 1000),
+                        }
+                    )
+                    del transitions[:-10]
+                self._save_manifest()
+            return True
+        except Exception as e:
+            self._logger.warning("记录信任观测失败 %s: %s", skill_id, e)
+            return False
+
     @staticmethod
     def _derive_created_by(info: Dict[str, Any]) -> str:
         """来源标记：从 manifest.source 显式标记派生,绝不按目录位置推断。
@@ -354,14 +587,38 @@ class SkillService:
         return "user"
 
     def get_skill_usage(self, skill_id: str) -> Dict[str, Any]:
-        """读取技能使用计数（无记录返回零值）。"""
+        """读取技能使用计数 + 质量漏斗（无记录返回零值；存量键名不变）。"""
         info = self._skills.get(skill_id) or {}
         usage = info.get("usage") or {}
-        return {
+        identity = info.get("identity") or {}
+        trust = identity.get("trust") or {}
+        funnel = {
+            key: max(0, int(usage.get(key, 0) or 0))
+            for key in ("selections", "applications", "completions", "fallbacks")
+        }
+        selections = funnel["selections"]
+        applications = funnel["applications"]
+        result = {
             "use_count": int(usage.get("use_count", 0)),
             "success_count": int(usage.get("success_count", 0)),
             "last_used_at_ms": int(usage.get("last_used_at_ms", 0)),
+            # P0-2 信任态：无 trust 记录（导入/存量）默认 trusted
+            "trust_state": str(trust.get("state") or "trusted"),
+            "trust_transitions": list(identity.get("trust_transitions") or []),
+            **funnel,
+            # 派生率（OpenSpace types.py:472-496 同语义；分母 0 → 0.0）
+            "applied_rate": round(applications / selections, 4) if selections else 0.0,
+            "completion_rate": (
+                round(funnel["completions"] / applications, 4) if applications else 0.0
+            ),
+            "fallback_rate": (
+                round(funnel["fallbacks"] / applications, 4) if applications else 0.0
+            ),
+            "effective_rate": (
+                round(funnel["completions"] / selections, 4) if selections else 0.0
+            ),
         }
+        return result
 
     # ── 生命周期接口（2026-09-13 Hermes curator 对齐）──────
     # 供 neurova.evolution.skill_lifecycle.apply_transitions 消费的最小面。
@@ -510,6 +767,15 @@ class SkillService:
                         "config": config or {},
                     },
                 }
+                # P1-6 自动技能出生修订 @1（origin=auto）；P0-2 出生信任态
+                # provisional——trust 是出生属性，寄居 identity 块，**不预建
+                # usage**（生命周期 seed-on-first-sight 契约依赖"注册无 usage"）
+                self._append_revision(self._skills[skill_id], trigger="register", origin="auto")
+                self._skills[skill_id]["identity"]["trust"] = {
+                    "state": "provisional",
+                    "successes_since_failure": 0,
+                    "observed_task_ids": [],
+                }
                 self._save_manifest()
                 self._logger.info("Registered auto skill: %s", skill_id)
                 return True
@@ -542,16 +808,65 @@ class SkillService:
                 if entry is None:
                     self._logger.debug("update_auto_skill: skill_id=%s 不存在", skill_id)
                     return False
+                import copy as _copy
+
+                _prev = _copy.deepcopy(entry)  # 深拷贝：version_history/identity 可变容器不回滚遗漏
                 if version is not None:
                     entry["version"] = str(version)
                 if config is not None:
                     entry["manifest"] = {**entry.get("manifest", {}), "config": dict(config)}
-                self._save_manifest()
+                # P1-6 版本 DAG（线性 parent 边）：version 变化追加修订历史
+                if version is not None:
+                    self._append_revision(entry, trigger="update")
+                if not self._save_manifest():
+                    # 落盘失败 → 内存整体回滚（防盘/内存 split-brain）
+                    self._skills[skill_id] = _prev
+                    self._logger.warning("update_auto_skill 落盘失败，已回滚内存态: %s", skill_id)
+                    return False
                 self._logger.info("Updated auto skill: %s → v%s", skill_id, entry["version"])
                 return True
         except Exception as e:
             self._logger.exception("Failed to update auto skill %s: %s", skill_id, e)
             return False
+
+    def _append_revision(self, entry: Dict[str, Any], trigger: str = "", origin: str = "") -> Dict[str, Any]:
+        """P1-6 身份 + 最小版本 DAG：version 变化时新建修订并挂 parent 边。
+
+        revision_id 形如 ``{skill_id}@{n}``，parent_revision_id 指向上一修订，
+        构成线性链（Neurova 场景为原地改进，无多父合成——对照 OpenSpace
+        FIXED 恰一父）。version_history 有界 20，manifest 直读不判缺。
+        """
+        import uuid
+
+        history = entry.setdefault("version_history", [])
+        identity = entry.setdefault("identity", {})
+        next_n = (len(history) + 1) if history else 1
+        revision_id = f"{entry.get('id', '')}@{next_n}"
+        parent = identity.get("revision_id") if identity else None
+        entry["identity"] = {
+            "skill_id": entry.get("id", ""),
+            "revision_id": revision_id,
+            "revision_uuid": uuid.uuid4().hex[:8],
+            "origin": origin or identity.get("origin", "auto" if not parent else "evolved"),
+            "parent_revision_id": parent,
+            "trigger": trigger,
+            "version": str(entry.get("version", "")),
+        }
+        # 信任账本随修订迁移（version bump 不得丢出生 trust/晋升历史）
+        for _keep in ("trust", "trust_transitions"):
+            if _keep in identity:
+                entry["identity"][_keep] = identity[_keep]
+        history.append(
+            {
+                "revision_id": revision_id,
+                "version": str(entry.get("version", "")),
+                "parent_revision_id": parent,
+                "trigger": trigger,
+                "created_at": datetime.datetime.now().isoformat(),
+            }
+        )
+        del history[:-20]  # 有界
+        return entry["identity"]
 
     def list_skills(self, enabled_only: bool = False) -> List[Dict[str, Any]]:
         """
@@ -616,6 +931,9 @@ class SkillService:
                     "manifest": skill_info.get("manifest", {}),
                     # 生命周期/用量状态(Hermes 对齐:状态机消费面与 UI 徽标)
                     "usage": skill_info.get("usage", {}),
+                    # P1-6 身份与版本 DAG（线性修订链）
+                    "identity": skill_info.get("identity", {}),
+                    "version_history": skill_info.get("version_history", []),
                 }
 
         except Exception as e:
