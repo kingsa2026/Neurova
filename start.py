@@ -86,6 +86,66 @@ def _rotate_log_file(path: Path, max_bytes: int = 20 * 1024 * 1024, backups: int
         pass  # 轮转失败不阻塞启动
 
 
+def _mirror_console_log():
+    """取证修复（2026-09-16 "依旧闪退"排查）：start.py 自身输出此前只进控制台，
+    窗口随进程退出即灭——快速退出路径（服务已在运行/后端启动失败/子进程停止
+    触发清场）里用户永远读不到原因，闪退故障无法归案。镜像写入
+    logs/launcher.log（append + 启动轮转，与 server.log 同因同法）。"""
+    try:
+        log_dir = ROOT_DIR / "logs"
+        log_dir.mkdir(exist_ok=True)
+        path = log_dir / "launcher.log"
+        _rotate_log_file(path)
+        fh = open(path, "a", encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+    class _Tee:
+        def __init__(self, stream, file):
+            self._stream, self._file = stream, file
+
+        def write(self, data):
+            try:
+                self._stream.write(data)
+            except Exception:
+                pass
+            try:
+                self._file.write(data)
+                self._file.flush()
+            except Exception:
+                pass
+
+        def flush(self):
+            for s in (self._stream, self._file):
+                try:
+                    s.flush()
+                except Exception:
+                    pass
+
+        def isatty(self):
+            return self._stream.isatty()
+
+        def fileno(self):
+            return self._stream.fileno()
+
+    sys.stdout = _Tee(sys.stdout, fh)
+    sys.stderr = _Tee(sys.stderr, fh)
+    return fh
+
+
+def _close_console_mirror(fh) -> None:
+    if fh is None:
+        return
+    for attr in ("stdout", "stderr"):
+        inner = getattr(getattr(sys, attr, None), "_stream", None)
+        if inner is not None:
+            setattr(sys, attr, inner)
+    try:
+        fh.close()
+    except Exception:
+        pass
+
+
 def start_backend(port: int = BACKEND_PORT, log_file: str = None) -> tuple:
     """
     启动后端服务器
@@ -789,6 +849,7 @@ def main():
 
 
 if __name__ == "__main__":
+    _log_fh = _mirror_console_log()
     try:
         sys.exit(main())
     except KeyboardInterrupt:
@@ -799,3 +860,5 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        _close_console_mirror(_log_fh)

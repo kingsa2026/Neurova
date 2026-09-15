@@ -31,6 +31,12 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# Windows 控制台/重定向默认 GBK：本脚本面向人读、汇报含 emoji，直接打印会
+# UnicodeEncodeError 崩在第一行（门禁完全跑不起来）。把标准输出重配为 UTF-8，
+# 不可编码字符替换而非抛错——报告可读性与跨平台可跑性都要。
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # 语法 / 未定义名称检查覆盖的目录
 CHECK_DIRS = ["neurova", "scripts"]
 
