@@ -188,10 +188,12 @@
           <a-col :span="12">
             <a-form-item :label="t('common.type')">
               <a-select v-model:value="createForm.category" style="width: 100%">
-                <a-select-option value="general">{{ t('growth.general') }}</a-select-option>
-                <a-select-option value="insight">{{ t('growth.insight') }}</a-select-option>
-                <a-select-option value="lesson">{{ t('growth.lesson') }}</a-select-option>
-                <a-select-option value="mistake">{{ t('growth.mistake') }}</a-select-option>
+                <a-select-option value="improvement">{{ t('growth.typeImprovement') }}</a-select-option>
+                <a-select-option value="error">{{ t('growth.typeError') }}</a-select-option>
+                <a-select-option value="insight">{{ t('growth.typeInsight') }}</a-select-option>
+                <a-select-option value="strategy">{{ t('growth.typeStrategy') }}</a-select-option>
+                <a-select-option value="pattern">{{ t('growth.typePattern') }}</a-select-option>
+                <a-select-option value="performance">{{ t('growth.typePerformance') }}</a-select-option>
               </a-select>
             </a-form-item>
           </a-col>
@@ -346,7 +348,7 @@ const selectedReflection = ref<any>(null)
 
 const createForm = ref({
   content: '',
-  category: 'general',
+  category: 'improvement',
   quality: 3,
   insights: '',
 })
@@ -363,6 +365,7 @@ const tableColumns = computed(() => [
 const categoryColor = (cat: string) => {
   const map: Record<string, string> = {
     general: 'blue', insight: 'purple', lesson: 'green', mistake: 'red',
+    improvement: 'cyan', error: 'red', strategy: 'gold', pattern: 'geekblue', performance: 'blue',
   }
   return map[cat] || 'default'
 }
@@ -401,18 +404,14 @@ const onTableChange = (pagination: any) => {
 const fetchReflections = async () => {
   loading.value = true
   try {
-    const res = await growthApi.getReflections(agentId.value, {
-      page: page.value,
-      size: size.value,
+    // 2026-09-15 契约收口：api 拦截器返回裸 body，BE 返回裸数组——
+    // 原 res.data 取法恒 undefined（mock {code,data} 掩盖），列表在前端永空
+    const list = await growthApi.getReflections(agentId.value, {
+      limit: size.value,
+      offset: (page.value - 1) * size.value,
     })
-    const data = res.data
-    if (data && typeof data === 'object' && 'items' in data) {
-      reflections.value = data.items ?? []
-      total.value = data.total ?? 0
-    } else {
-      reflections.value = Array.isArray(data) ? data : []
-      total.value = reflections.value.length
-    }
+    reflections.value = list
+    total.value = list.length
   } catch (e: any) {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
@@ -431,6 +430,9 @@ const createReflection = async () => {
       agentId.value,
       createForm.value.content,
       createForm.value.category,
+      // 此前弹窗填写的 insights/quality 未提交（静默丢弃）——真实入库
+      createForm.value.insights.split('\n').map((s: string) => s.trim()).filter(Boolean),
+      Math.max(0, Math.min(1, (createForm.value.quality || 3) / 5)),
     )
     message.success(t('common.success'))
     showCreateModal.value = false

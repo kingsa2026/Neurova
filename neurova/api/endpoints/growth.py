@@ -55,12 +55,15 @@ class ReflectionLogCreate(BaseModel):
 class QuestionItem(BaseModel):
     """问题条目"""
 
+    id: str = ""
     question_id: str
     agent_id: str
     timestamp: float
+    created_at: float = 0
     question_type: str = "curiosity"
     question: str = ""
     status: str = "pending"
+    answered: bool = False
     answer: Optional[str] = None
     priority: int = 0
 
@@ -94,27 +97,10 @@ class ProactiveActionCreate(BaseModel):
     content: str = Field(..., description="行为内容")
 
 
-class MotivationLevel(BaseModel):
-    """动机水平"""
+class MotivationWeightsUpdate(BaseModel):
+    """驱动权重更新（全量替换：未传键置 0，自动归一）"""
 
-    agent_id: str
-    timestamp: float
-    overall_motivation: float = 0.5
-    curiosity: float = 0.5
-    creativity: float = 0.5
-    persistence: float = 0.5
-    social: float = 0.5
-    factors: Dict[str, float] = {}
-
-
-class MotivationLevelUpdate(BaseModel):
-    """更新动机水平请求"""
-
-    overall_motivation: Optional[float] = None
-    curiosity: Optional[float] = None
-    creativity: Optional[float] = None
-    persistence: Optional[float] = None
-    social: Optional[float] = None
+    drive_weights: Dict[str, float] = Field(default_factory=dict, description="{competence|autonomy|growth|purpose: 权重}")
 
 
 class Personality(BaseModel):
@@ -215,21 +201,6 @@ def _save_personality_data(agent_id: str, data: Dict[str, Any]) -> None:
     tmp.replace(p)
 
 
-def _get_growth_manager(agent_id: str = "default"):
-    """获取成长管理器"""
-    agent = _get_agent(agent_id)
-    if not agent:
-        return None
-
-    # 尝试获取成长管理器
-    if hasattr(agent, "growth_log_manager"):
-        return agent.growth_log_manager
-    if hasattr(agent, "proactive_behavior_engine"):
-        return agent.proactive_behavior_engine
-
-    return None
-
-
 def _reflection_entry_to_item(entry, agent_id: str) -> Dict[str, Any]:
     """把 GrowthLogManager 的 ReflectionLogEntry 序列化为 ReflectionLog 兼容 dict
 
@@ -255,19 +226,62 @@ def _reflection_entry_to_item(entry, agent_id: str) -> Dict[str, Any]:
 
 
 def _question_entry_to_item(entry, agent_id: str) -> Dict[str, Any]:
-    """把 QuestionEntry 序列化为 QuestionItem 兼容 dict"""
+    """把 QuestionEntry 序列化为 QuestionItem 兼容 dict
+
+    2026-09-15 契约对齐: 补 id（前端 GrowthQuestion 契约名）/answered/created_at，
+    status 保留枚举值原文供筛选回显。
+    """
+    from neurova.cognitive_layers.meta_cognition_layer.question_queue import QuestionStatus
+
     priority_rank = {"high": 0, "normal": 1, "low": 2}
     priority_value = entry.priority.value if hasattr(entry.priority, "value") else str(entry.priority)
+    status_value = entry.status.value if hasattr(entry.status, "value") else str(entry.status)
     return {
+        "id": entry.id,
         "question_id": entry.id,
         "agent_id": agent_id,
         "timestamp": entry.created_at,
+        "created_at": entry.created_at,
         "question_type": (entry.metadata or {}).get("question_type", "curiosity"),
         "question": entry.content,
-        "status": entry.status.value if hasattr(entry.status, "value") else str(entry.status),
+        "status": status_value,
+        "answered": status_value == QuestionStatus.ANSWERED.value,
         "answer": (entry.metadata or {}).get("answer"),
         "priority": priority_rank.get(priority_value, 1),
     }
+
+
+def _all_questions(qm):
+    """按创建时间倒序返回全部状态的问题。
+
+    2026-09-15 根因修复: 原端点只取 pending+cooldown，而主动提问闭环运行后
+    状态即 ASKED 终态 → 生产 22 条全 asked 队列页面恒空。
+    """
+    from neurova.cognitive_layers.meta_cognition_layer.question_queue import QuestionStatus
+
+    entries = []
+    for status in QuestionStatus:
+        entries.extend(qm.get_questions_by_status(status))
+    entries.sort(key=lambda e: e.created_at, reverse=True)
+    return entries
+
+
+def _capabilities_payload(agent) -> Optional[Dict[str, Any]]:
+    """读 GrowthAnalyzer 真实成长状态；未装配返回 None（不得造假分数）
+
+    2026-09-15 根因修复: analyzer 每轮对话写 growth.json，但 API 全层零消费
+    端点 → 能力数据是信息孤岛，成长页永远看不到。
+    """
+    analyzer = getattr(agent, "growth_analyzer", None)
+    if analyzer is None:
+        return None
+    try:
+        status = analyzer.get_growth_status()
+        status["capability_scores"] = analyzer.get_capability()
+        return status
+    except Exception as e:
+        logger.warning("Failed to get growth capabilities: %s", e)
+        return None
 
 
 @router.get("", response_model=Dict[str, Any])
@@ -286,6 +300,7 @@ async def get_agent_growth(
     growth_data = {
         "agent_id": agent_id,
         "timestamp": time.time(),
+        "capabilities": _capabilities_payload(agent),
         "reflection_logs": [],
         "questions": [],
         "proactive_actions": [],
@@ -302,11 +317,13 @@ async def get_agent_growth(
         except Exception as e:
             logger.warning("Failed to get reflection logs: %s", e)
 
-    # 获取问题队列（根因修复: get_pending_questions 无 limit 参数 → 结果切片）
+    # 获取问题队列（2026-09-15 根因修复: 原只取 pending，主动提问后状态即
+    # asked 终态导致页面恒空 → 全状态按时间倒序）
     if hasattr(agent, "question_queue_manager") and agent.question_queue_manager:
         try:
-            pending = agent.question_queue_manager.get_pending_questions()
-            growth_data["questions"] = [_question_entry_to_item(q, agent_id) for q in pending[:10]]
+            growth_data["questions"] = [
+                _question_entry_to_item(q, agent_id) for q in _all_questions(agent.question_queue_manager)[:10]
+            ]
         except Exception as e:
             logger.warning("Failed to get questions: %s", e)
 
@@ -318,11 +335,11 @@ async def get_agent_growth(
         except Exception as e:
             logger.warning("Failed to get proactive actions: %s", e)
 
-    # 获取动机水平
-    if hasattr(agent, "proactive_behavior_engine") and agent.proactive_behavior_engine:
+    # 获取动机水平（真实快照；未装配保持 None，不吐常量）
+    ledger = getattr(agent, "intrinsic_motivation", None)
+    if ledger:
         try:
-            if hasattr(agent.proactive_behavior_engine, "get_motivation_level"):
-                growth_data["motivation_level"] = agent.proactive_behavior_engine.get_motivation_level()
+            growth_data["motivation_level"] = ledger.snapshot()
         except Exception as e:
             logger.warning("Failed to get motivation level: %s", e)
 
@@ -343,6 +360,26 @@ async def get_agent_growth(
         "code": 0,
         "message": "success",
         "data": growth_data,
+        "request_id": request_id,
+    }
+
+
+@router.get("/capabilities", response_model=Dict[str, Any])
+async def get_growth_capabilities(
+    request: Request,
+    agent_id: str = Query(default="default", description="Agent ID"),
+):
+    """获取 Agent 能力成长分数（GrowthAnalyzer 真实数据；未装配返回 data=null）"""
+    request_id = _get_request_id(request)
+
+    agent = _get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    return {
+        "code": 0,
+        "message": "success",
+        "data": _capabilities_payload(agent),
         "request_id": request_id,
     }
 
@@ -473,9 +510,11 @@ async def get_question_queue(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
     status: Optional[str] = Query(default=None, description="状态筛选"),
+    answered: Optional[bool] = Query(default=None, description="已回答过滤：true 仅已回答，false 含 pending/cooldown/asked"),
     limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
+    offset: int = Query(default=0, ge=0, description="偏移量"),
 ):
-    """获取问题队列"""
+    """获取问题队列（默认返回全部状态，含已提问 asked——主动提问闭环的终态）"""
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
@@ -485,7 +524,6 @@ async def get_question_queue(
         try:
             from neurova.cognitive_layers.meta_cognition_layer.question_queue import QuestionStatus
 
-            # 根因修复: get_questions(status=, limit=) 不存在 → 按状态取真实数据
             qm = agent.question_queue_manager
             if status:
                 try:
@@ -493,8 +531,10 @@ async def get_question_queue(
                 except ValueError:
                     entries = []
             else:
-                entries = qm.get_pending_questions() + qm.get_questions_by_status(QuestionStatus.COOLDOWN)
-            questions = [_question_entry_to_item(e, agent_id) for e in entries[:limit]]
+                entries = _all_questions(qm)
+            if answered is not None:
+                entries = [e for e in entries if (e.status == QuestionStatus.ANSWERED) == answered]
+            questions = [_question_entry_to_item(e, agent_id) for e in entries[offset : offset + limit]]
         except Exception as e:
             logger.warning("Failed to get questions: %s", e)
 
@@ -611,6 +651,21 @@ async def mark_question_answered(
         except Exception as e:
             logger.warning("Failed to mark question answered: %s", e)
 
+    # 2026-09-15 真实化回流：用户对主动提问的回答 → 主动行为标记已回应
+    # + 使命感驱动观察（purpose 的真实信号源之一）
+    engine = getattr(agent, "proactive_behavior_engine", None)
+    if engine:
+        try:
+            engine.mark_response_received_by_trigger(f"proactive_question:{question_id}")
+        except Exception as e:
+            logger.debug("主动行为回应回流失败: %s", e)
+    ledger = getattr(agent, "intrinsic_motivation", None)
+    if ledger:
+        try:
+            ledger.observe_purpose(contribution=f"主动提问获得回答: {question_id[:8]}", impact=0.8)
+        except Exception as e:
+            logger.debug("动机 purpose 观察失败: %s", e)
+
     return {
         "code": 0,
         "message": f"Question '{question_id}' marked as answered",
@@ -650,89 +705,73 @@ async def trigger_proactive_action(
     agent_id: str = Query(default="default", description="Agent ID"),
     body: ProactiveActionCreate = ProactiveActionCreate(content=""),
 ):
-    """触发主动行为"""
+    """触发主动行为（真实落账本；未装配引擎诚实 400，不再回显假记录）"""
     _get_request_id(request)
 
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    action_id = str(uuid.uuid4())
-    timestamp = time.time()
+    engine = getattr(agent, "proactive_behavior_engine", None)
+    if not engine:
+        raise HTTPException(status_code=400, detail="proactive_behavior_engine 未装配，无法记录主动行为")
 
-    if hasattr(agent, "proactive_behavior_engine") and agent.proactive_behavior_engine:
-        try:
-            if hasattr(agent.proactive_behavior_engine, "trigger_action"):
-                agent.proactive_behavior_engine.trigger_action(
-                    action_id=action_id,
-                    action_type=body.action_type,
-                    trigger=body.trigger,
-                    content=body.content,
-                )
-        except Exception as e:
-            logger.warning("Failed to trigger proactive action: %s", e)
-
-    return ProactiveAction(
-        action_id=action_id,
-        agent_id=agent_id,
-        timestamp=timestamp,
+    action = engine.record_action(
         action_type=body.action_type,
-        trigger=body.trigger,
+        trigger=body.trigger or "manual",
         content=body.content,
-        success=True,
-        response_received=False,
+    )
+    return ProactiveAction(
+        action_id=action["action_id"],
+        agent_id=agent_id,
+        timestamp=action["timestamp"],
+        action_type=action["action_type"],
+        trigger=action["trigger"],
+        content=action["content"],
+        success=action["success"],
+        response_received=action["response_received"],
     )
 
 
-@router.get("/motivation", response_model=MotivationLevel)
+@router.get("/motivation", response_model=Dict[str, Any])
 async def get_motivation_level(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
 ):
-    """获取内在动机水平"""
+    """获取内在动机真实快照（MotivationLedger；未装配返回 data=null，不吐常量假状态）"""
+    request_id = _get_request_id(request)
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    motivation = MotivationLevel(
-        agent_id=agent_id,
-        timestamp=time.time(),
-    )
-
-    if hasattr(agent, "proactive_behavior_engine") and agent.proactive_behavior_engine:
-        try:
-            if hasattr(agent.proactive_behavior_engine, "get_motivation_level"):
-                data = agent.proactive_behavior_engine.get_motivation_level()
-                if isinstance(data, dict):
-                    motivation = MotivationLevel(
-                        agent_id=agent_id,
-                        timestamp=time.time(),
-                        **data,
-                    )
-        except Exception as e:
-            logger.warning("Failed to get motivation level: %s", e)
-
-    return motivation
+    ledger = getattr(agent, "intrinsic_motivation", None)
+    return {
+        "code": 0,
+        "message": "success",
+        "data": ledger.snapshot() if ledger else None,
+        "request_id": request_id,
+    }
 
 
-@router.put("/motivation", response_model=MotivationLevel)
+@router.put("/motivation", response_model=Dict[str, Any])
 async def update_motivation_level(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
-    body: MotivationLevelUpdate = MotivationLevelUpdate(),
+    body: MotivationWeightsUpdate = MotivationWeightsUpdate(),
 ):
-    """更新动机水平"""
+    """更新驱动权重（全量替换语义：传入键=完整分布，未传键置 0，自动归一）"""
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    if hasattr(agent, "proactive_behavior_engine") and agent.proactive_behavior_engine:
-        try:
-            if hasattr(agent.proactive_behavior_engine, "update_motivation"):
-                update_data = body.dict(exclude_unset=True)
-                agent.proactive_behavior_engine.update_motivation(update_data)
-        except Exception as e:
-            logger.warning("Failed to update motivation level: %s", e)
+    ledger = getattr(agent, "intrinsic_motivation", None)
+    if not ledger:
+        raise HTTPException(status_code=400, detail="intrinsic_motivation 未装配，无法调整权重")
+
+    try:
+        ledger.update_drive_weights(body.drive_weights)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
     return await get_motivation_level(request, agent_id)
 
