@@ -456,7 +456,7 @@ class PostChatPipeline:
             self._step_record_workflow_experience(user_input, reply, actual_session_id),
         )
 
-        # 步骤 9.06: 技能质量漏斗回写（P0-1 OpenSpace 对齐）——把本轮
+        # 步骤 9.06: 技能质量漏斗回写——把本轮
         # tool_executor 记的技能派发账本按归因规则写穿 SkillService manifest；
         # P0-2 信任观测同源（每回合一个独立 task 观测，session#turn 身份）
         await self._safe_step(
@@ -486,6 +486,13 @@ class PostChatPipeline:
         # 步骤 10: 主动提问决策
         proactive_question = await self._safe_step(
             "proactive_question", self._step_proactive_question(user_input, reply), default=None
+        )
+
+        # 步骤 10.5: 动机观察（2026-09-15 真实化）——本轮真实信号灌入四驱动：
+        # 回合成败→能力感 / 认知分析分→成长感 / 主动提问→自主性
+        await self._safe_step(
+            "motivation_observations",
+            self._step_motivation_observations(user_input, reply, cognitive_score, proactive_question),
         )
 
         # 步骤 11: RSI 迭代
@@ -594,6 +601,13 @@ class PostChatPipeline:
             _artifacts = self._collect_round_artifacts(_tool_msgs)
             if _artifacts:
                 assistant_meta["artifacts"] = _artifacts
+            # P0a 注入留痕（效力闭环）：本轮进了 prompt 的反思日志 id 随消息
+            # 落盘，/chat/feedback 赞踩据此裁决反思效力（session 跨重启可回溯）。
+            from neurova.core.turn_context import get_turn_injected_reflections
+
+            _injected = get_turn_injected_reflections()
+            if _injected:
+                assistant_meta["injected_reflections"] = list(_injected)
             # 过滤 None 值
             assistant_meta = {k: v for k, v in assistant_meta.items() if v is not None}
 
@@ -1058,16 +1072,35 @@ class PostChatPipeline:
         try:
             reflection_type = self._infer_reflection_type(user_input, reply)
             title = f"对话反思 - {reflection_type.value}"
-            content = f"用户输入: {user_input[:200]}\nAgent 回复: {reply[:200]}"
+            is_confusion = any(kw in user_input.lower() for kw in self.REFLECTION_CONFUSION_KEYWORDS)
+            is_uncertain = any(kw in reply.lower() for kw in self.REFLECTION_UNCERTAINTY_KEYWORDS)
+            # 根因修复（2026-09-15）：原 user_input[:200]/reply[:200] 在生成时
+            # 就把正文切掉——反思日志落库即永久残缺（详情弹窗看到的半句即此）。
+            # 全文只在存储层，截断收口到展示/注入侧（orchestrator 注入封顶 + 前端预览）。
+            # P1 教训化：原 insights=[] 恒为空 → 注入进 prompt 的"反思"只是原始回声，
+            # 无指导性。现确定性合成教训句，insights[0] 进注入（orchestrator/injector
+            # 均优先取 insights[0]），全文对话仍完整保留在正文尾部（存储无损契约不变）。
+            lesson, action = self._compose_reflection_lesson(user_input, reply, is_confusion, is_uncertain)
+            content = f"{lesson}\n用户输入: {user_input}\nAgent 回复: {reply}"
             context = {
                 "trigger": self._get_reflection_trigger_reason(user_input, reply),
                 "source": "post_chat",
                 "user_input_length": len(user_input),
                 "reply_length": len(reply),
             }
-            insights = []
-            action_items = []
+            insights = [lesson]
+            action_items = [action]
             confidence = 0.5
+
+            # P0c 效力反馈：用户困惑 = 对本轮被注入的反思的负证据（注入了仍困惑）。
+            # 只降不删：register_negative_feedback 跌破阈值转 rejected，脱离恒定注入
+            # 但原文仍可语义召回。仅困惑降权——回复含不确定词是 Agent 自我怀疑，
+            # 不构成对旧注入的否定。
+            if is_confusion:
+                from neurova.core.turn_context import get_turn_injected_reflections
+
+                for rid in get_turn_injected_reflections() or []:
+                    growth_log_manager.register_negative_feedback(rid)
 
             entry = await growth_log_manager.generate_log(
                 type=reflection_type,
@@ -1081,8 +1114,6 @@ class PostChatPipeline:
 
             # 根因修复: QuestionQueueManager 此前零调用——反思检测到困惑/不确定时
             # 生成澄清型问题入队，形成 反思 → 问题队列 → 上下文注入/主动提问 的闭环
-            is_confusion = any(kw in user_input.lower() for kw in self.REFLECTION_CONFUSION_KEYWORDS)
-            is_uncertain = any(kw in reply.lower() for kw in self.REFLECTION_UNCERTAINTY_KEYWORDS)
             question_manager = self._get_dependency("question_queue_manager")
             if question_manager and (is_confusion or is_uncertain):
                 try:
@@ -1138,6 +1169,31 @@ class PostChatPipeline:
                     duration_ms=(time.time() - start_time) * 1000,
                 )
             )
+
+    def _compose_reflection_lesson(
+        self, user_input: str, reply: str, is_confusion: bool, is_uncertain: bool
+    ) -> "tuple[str, str]":
+        """确定性合成教训句与行动项（P1 教训化，零 LLM）。
+
+        触发路径与 _should_reflect 的三分支一一对应；关键词取首个命中，
+        让"下次怎么办"进注入（insights[0]），而不是原始对话回声。
+        """
+        if is_confusion:
+            kw = next((k for k in self.REFLECTION_CONFUSION_KEYWORDS if k in user_input.lower()), "")
+            return (
+                f"用户对回答表示困惑或不满（命中「{kw}」）：下次先复述确认用户真正关心的点，再给出针对性回答",
+                "回答前确认用户关注点，答后主动询问是否解决了疑问",
+            )
+        if is_uncertain:
+            kw = next((k for k in self.REFLECTION_UNCERTAINTY_KEYWORDS if k in reply.lower()), "")
+            return (
+                f"回答中存在不确定表述（命中「{kw}」）：下次先补充信息来源或先向用户澄清所需信息",
+                "对不确定结论标注依据，必要时先提问再作答",
+            )
+        return (
+            "周期性反思：回顾本轮对话的信息缺口与用户反馈信号",
+            "关注后续轮次用户反馈以校准回答风格",
+        )
 
     def _should_reflect(self, user_input: str, reply: str) -> bool:
         """判断是否应该触发反思"""
@@ -1497,7 +1553,7 @@ class PostChatPipeline:
             # 对降级/归档的工具应用权重衰减
             # Bug #9 fix: 使用公开的 tool_weights API，而非直接访问 _tool_weights 私有属性
             # 原代码: if evolution and hasattr(evolution, "_tool_weights"):
-            #         evolution._tool_weights[tool_name].adaptive_multiplier *= factor
+            # evolution._tool_weights[tool_name].adaptive_multiplier *= factor
             # 修复后: 通过公开 API 操作
             # 融合修复（闭环审计 2026-09-04）：A/B 融合删除 tool_weights.py 后
             # get_tool_entry/record_failure 不存在，两处 hasattr 恒 False 静默
@@ -2064,6 +2120,17 @@ class PostChatPipeline:
             entry = question_manager.get_next_question()
             if entry:
                 question_manager.mark_asked(entry.id)
+                # 主动行为账本：提问是真实发生的主动行为（2026-09-15 真实化接线）
+                engine = self._get_dependency("proactive_behavior_engine")
+                if engine:
+                    try:
+                        engine.record_action(
+                            action_type="communication",
+                            trigger=f"proactive_question:{entry.id}",
+                            content=entry.content,
+                        )
+                    except Exception as ae:
+                        logger.debug("主动行为记录失败: %s", ae)
                 logger.info("🤔 主动提问: %s", entry.content[:50])
                 self._step_results.append(
                     StepResult(
@@ -2098,6 +2165,68 @@ class PostChatPipeline:
 
         return None
 
+    async def _step_motivation_observations(
+        self,
+        user_input: str,
+        reply: str,
+        cognitive_score: float,
+        proactive_question: Optional[str],
+    ) -> None:
+        """Step 10.5: 动机观察（2026-09-15 真实化）——把本轮真实信号灌入 MotivationLedger
+
+        信号源（不造假）：
+        - 能力感: 本轮步骤无 FAILED 即成功，难度按输入长度估算
+        - 成长感: Step 8 认知分析分作为理解度，输入前 60 字作为概念
+        - 自主性: 本轮主动提问发生即记录（satisfaction=0.7）
+        - 使命感: 不在本步（信号源=用户对主动提问的回答，见 growth 端点回流）
+        """
+        step_name = "motivation_observations"
+        start_time = time.time()
+
+        ledger = self._get_dependency("intrinsic_motivation")
+        if not ledger:
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.SKIPPED,
+                    message="intrinsic_motivation not available",
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
+            return
+
+        try:
+            failed_this_round = any(r.status == StepStatus.FAILED for r in self._step_results)
+            difficulty = min(1.0, max(0.05, len(user_input) / 500.0))
+            ledger.observe_competence(success=not failed_this_round, difficulty=difficulty)
+
+            concept = user_input[:60].strip() or user_input[:60]
+            if concept:
+                ledger.observe_growth(concept=concept, understanding=round(float(cognitive_score or 0.5), 3))
+
+            if proactive_question:
+                ledger.observe_autonomy(choice=str(proactive_question)[:80], satisfaction=0.7)
+
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.EXECUTED,
+                    message="Motivation observations recorded",
+                    duration_ms=(time.time() - start_time) * 1000,
+                    data={"success": not failed_this_round, "difficulty": round(difficulty, 3)},
+                )
+            )
+        except Exception as e:
+            logger.warning("动机观察失败: %s", e)
+            self._step_results.append(
+                StepResult(
+                    step_name=step_name,
+                    status=StepStatus.FAILED,
+                    message=str(e),
+                    duration_ms=(time.time() - start_time) * 1000,
+                )
+            )
+
     async def _step_rsi_iteration(self) -> Optional[Dict[str, Any]]:
         """Step 11: RSI 迭代（递归自我改进）
 
@@ -2114,7 +2243,7 @@ class PostChatPipeline:
         # 断点 #3 修复：提案先尝试 apply_improvement 回写技能本体（保守语义：
         # 仅追加 config.improvements 记录+版本递增，不改工具序列），已应用的
         # 提案不再重复刷反思日志；未应用的（registry 不可用等）保持原提案日志。
-        # P1-4（OpenSpace trigger_jobs 最小移植）：NEUROVA_EVOLUTION_QUEUE=1
+        # P1-4：NEUROVA_EVOLUTION_QUEUE=1
         # 时改道"入队 + 就地 drain"——作业持久化，崩溃/失败可重试（启动
         # recover_stale 释放租约）；默认关=现状直跑，行为零变化。
         try:
@@ -2136,7 +2265,7 @@ class PostChatPipeline:
                 skill_service = SkillService(agent_id=agent_id)
             except Exception as svc_err:
                 logger.debug("创建 SkillService 失败, 改进仅内存态: %s", svc_err)
-            # 判据升级（Hermes 对比 2026-09-13）：开启文本进化时走反射式改进——
+            # 判据升级：开启文本进化时走反射式改进——
             # 把真实失败记录喂给 ReflectiveMutator 产出 improved_text；开关关闭/
             # 无正文时内部退回字典建议（零破坏）。
             skill_text_loader = None
@@ -2191,7 +2320,7 @@ class PostChatPipeline:
         except Exception as e:
             logger.debug("技能改进提案扫描跳过: %s", e)
 
-        # 经验-定义分离维护（QP 对齐启发 #2）：未合并 applied 记录攒够阈值
+        # 经验-定义分离维护：未合并 applied 记录攒够阈值
         # → 定期重建技能定义（先归档可回滚）；使用统计圈淘汰候选（自动禁用
         # 默认关，NEUROVA_SKILL_AUTO_RETIRE=1 才执行）。
         try:
@@ -2222,7 +2351,7 @@ class PostChatPipeline:
         except Exception as mtn_err:
             logger.debug("技能经验维护跳过: %s", mtn_err)
 
-        # 技能生命周期扫描（Hermes curator 对齐 2026-09-13）：确定性、零 LLM，
+        # 技能生命周期扫描：确定性、零 LLM，
         # active→stale(14d)→archived(30d)；首次 seed 不动库；间隔自持
         # （.lifecycle_state.json），不借本步 RSI 成本闸——同下方法内
         # 结晶裁决的接线教训。设置文件 lifecycle_sweep=false 可关。
@@ -2242,7 +2371,7 @@ class PostChatPipeline:
         except Exception as lc_err:
             logger.debug("技能生命周期扫描跳过: %s", lc_err)
 
-        # 结晶候选 LLM 裁决（混合信号层 QP 对齐 #1）：规则预筛过的候选在此
+        # 结晶候选 LLM 裁决：规则预筛过的候选在此
         # 批量做可复用性裁决——仅当有待审候选时才消耗一次 LLM 调用（天然
         # 低频）；LLM 不可用时候选留队等下轮（48h 超龄自动放行，不丢数据）。
         # 注意：不挂在 _step_extract_conversation_rules——该步有 LLM 成本闸

@@ -40,8 +40,8 @@ class MockAgent:
         # 模拟 growth_log_manager
         self.growth_log_manager = MagicMock(spec=GrowthLogManager)
         self.growth_log_manager.generate_log = AsyncMock()
-        self.growth_log_manager.get_validated_logs = AsyncMock(return_value=[])
-        self.growth_log_manager.get_pending_logs = AsyncMock(return_value=[])
+        # 2026-09-15 效力闭环 P3：注入选择改为分层单源 read_logs(limit=50)
+        self.growth_log_manager.read_logs = MagicMock(return_value=[])
 
         # 模拟其他必要属性
         self.memory_manager = MagicMock()
@@ -76,8 +76,7 @@ def mock_agent():
     agent = MockAgent()
     # 重置 growth_log_manager 的 mock
     agent.growth_log_manager.generate_log.reset_mock()
-    agent.growth_log_manager.get_validated_logs.reset_mock()
-    agent.growth_log_manager.get_pending_logs.reset_mock()
+    agent.growth_log_manager.read_logs.reset_mock()
     return agent
 
 
@@ -248,16 +247,15 @@ class TestBuildContextReflection:
             )
         ]
 
-        mock_agent.growth_log_manager.get_validated_logs.return_value = validated_logs
-        mock_agent.growth_log_manager.get_pending_logs.return_value = pending_logs
+        # P3 效力闭环后注入选择单源 read_logs(limit=50)
+        mock_agent.growth_log_manager.read_logs = MagicMock(return_value=validated_logs + pending_logs)
 
         # 执行 - mock context_pool.draw to avoid internal ContextPool issues
         with patch.object(orchestrator.context_pool, 'draw', return_value=[]):
             await orchestrator.build_context("测试输入")
 
             # 验证 growth_log_manager methods were called
-            mock_agent.growth_log_manager.get_validated_logs.assert_called_once()
-            mock_agent.growth_log_manager.get_pending_logs.assert_called_once()
+            mock_agent.growth_log_manager.read_logs.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_reflection_logs_injected_into_context(self, orchestrator, mock_agent):
@@ -273,23 +271,21 @@ class TestBuildContextReflection:
                 confidence=0.9,
             )
         ]
-        mock_agent.growth_log_manager.get_validated_logs.return_value = validated_logs
-        mock_agent.growth_log_manager.get_pending_logs.return_value = []
+        # P3 效力闭环后注入选择单源 read_logs(limit=50)
+        mock_agent.growth_log_manager.read_logs = MagicMock(return_value=validated_logs)
 
         # 执行
         with patch.object(orchestrator.context_pool, 'draw', return_value=[]):
             await orchestrator.build_context("测试输入")
 
             # 验证 growth_log_manager methods were called
-            mock_agent.growth_log_manager.get_validated_logs.assert_called_once()
-            mock_agent.growth_log_manager.get_pending_logs.assert_called_once()
+            mock_agent.growth_log_manager.read_logs.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_reflection_logs_error_handling(self, orchestrator, mock_agent):
         """测试反思日志收集的错误处理"""
         # 设置 mock 抛出异常
-        mock_agent.growth_log_manager.get_validated_logs.side_effect = Exception("测试异常")
-        mock_agent.growth_log_manager.get_pending_logs.side_effect = Exception("测试异常")
+        mock_agent.growth_log_manager.read_logs.side_effect = Exception("测试异常")
 
         # 执行 - 不应该抛出异常
         with patch.object(orchestrator.context_pool, 'draw', return_value=[]):
@@ -342,15 +338,15 @@ class TestGrowthClosedLoop:
                 confidence=0.7,
             )
         ]
-        mock_agent.growth_log_manager.get_validated_logs.return_value = validated_logs
-        mock_agent.growth_log_manager.get_pending_logs.return_value = []
+        # P3 效力闭环后注入选择单源 read_logs(limit=50)
+        mock_agent.growth_log_manager.read_logs = MagicMock(return_value=validated_logs)
 
         # 步骤3: 构建上下文（应该包含反思日志）
         with patch.object(orchestrator.context_pool, 'draw', return_value=[]):
             await orchestrator.build_context("新的用户输入")
 
             # 验证反思日志被记录
-            mock_agent.growth_log_manager.get_validated_logs.assert_called_once()
+            mock_agent.growth_log_manager.read_logs.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_multiple_reflections_accumulate(self, pipeline, orchestrator, mock_agent):
@@ -395,15 +391,15 @@ class TestGrowthClosedLoop:
                 confidence=0.8,
             ),
         ]
-        mock_agent.growth_log_manager.get_validated_logs.return_value = validated_logs
-        mock_agent.growth_log_manager.get_pending_logs.return_value = []
+        # P3 效力闭环后注入选择单源 read_logs(limit=50)
+        mock_agent.growth_log_manager.read_logs = MagicMock(return_value=validated_logs)
 
         # 构建上下文（应该包含两个反思）
         with patch.object(orchestrator.context_pool, 'draw', return_value=[]):
             await orchestrator.build_context("新输入")
 
             # 验证反思日志方法被调用
-            mock_agent.growth_log_manager.get_validated_logs.assert_called_once()
+            mock_agent.growth_log_manager.read_logs.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_reflection_influences_behavior(self, pipeline, orchestrator, mock_agent):
@@ -420,15 +416,15 @@ class TestGrowthClosedLoop:
             confidence=0.85,
         )
 
-        mock_agent.growth_log_manager.get_validated_logs.return_value = [action_reflection]
-        mock_agent.growth_log_manager.get_pending_logs.return_value = []
+        # P3 效力闭环后注入选择单源 read_logs(limit=50)
+        mock_agent.growth_log_manager.read_logs = MagicMock(return_value=[action_reflection])
 
         # 构建上下文
         with patch.object(orchestrator.context_pool, 'draw', return_value=[]):
             await orchestrator.build_context("需要帮助")
 
             # 验证反思日志被记录
-            mock_agent.growth_log_manager.get_validated_logs.assert_called_once()
+            mock_agent.growth_log_manager.read_logs.assert_called_once()
 
 
 # ============================================================
@@ -504,16 +500,15 @@ class TestGrowthConfiguration:
     async def test_empty_reflection_logs(self, orchestrator, mock_agent):
         """测试空反思日志"""
         # 设置返回空列表
-        mock_agent.growth_log_manager.get_validated_logs.return_value = []
-        mock_agent.growth_log_manager.get_pending_logs.return_value = []
+        # P3 效力闭环后注入选择单源 read_logs(limit=50)
+        mock_agent.growth_log_manager.read_logs = MagicMock(return_value=[])
 
         # 构建上下文
         with patch.object(orchestrator.context_pool, 'draw', return_value=[]):
             await orchestrator.build_context("输入")
 
             # 验证反思日志方法被调用
-            mock_agent.growth_log_manager.get_validated_logs.assert_called_once()
-            mock_agent.growth_log_manager.get_pending_logs.assert_called_once()
+            mock_agent.growth_log_manager.read_logs.assert_called_once()
 
 
 # ============================================================

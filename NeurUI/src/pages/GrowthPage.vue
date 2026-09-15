@@ -69,6 +69,26 @@
             </GlassCard>
           </div>
 
+          <!-- 能力成长（GrowthAnalyzer 真实数据，2026-09-15 接通读链） -->
+          <GlassCard :title="t('growth.capabilities')" style="margin-top: 20px">
+            <div v-if="capabilities" class="traits-list">
+              <div class="trait-row">
+                <div class="trait-info">
+                  <span class="trait-name">{{ t('growth.overallScore') }}</span>
+                  <span class="trait-value">{{ Math.round(capabilities.overall_score) }}/100 · {{ capabilities.total_records }} {{ t('growth.totalRecords') }}</span>
+                </div>
+              </div>
+              <div v-for="(dim, key) in capabilities.dimension_statuses" :key="key" class="trait-row">
+                <div class="trait-info">
+                  <span class="trait-name">{{ dimLabel(key) }}</span>
+                  <span class="trait-value">{{ Math.round(dim.score) }}/100</span>
+                </div>
+                <a-progress :percent="Math.min(Math.round(dim.score), 100)" :stroke-color="traitColor(dim.score / 100)" size="small" :show-info="false" />
+              </div>
+            </div>
+            <a-empty v-else :description="t('common.noData')" />
+          </GlassCard>
+
           <!-- Constitution summary -->
           <GlassCard :title="t('growth.constitution')" style="margin-top: 20px">
             <div v-if="constitutionRules.length > 0" class="constitution-preview">
@@ -110,7 +130,6 @@
                     {{ q.answered ? t('growth.answered') : t('growth.pending') }}
                   </a-tag>
                 </div>
-                <div v-if="q.context" class="question-context">{{ q.context }}</div>
                 <div v-if="q.answer" class="question-answer">{{ q.answer }}</div>
                 <div class="question-actions">
                   <GlassButton v-if="!q.answered" size="sm" variant="ghost" @click="openAnswerModal(q)">
@@ -126,38 +145,27 @@
 
       <!-- Proactive Actions Tab -->
       <a-tab-pane key="actions" :tab="t('growth.proactive')">
-        <div class="tab-toolbar">
-          <a-select
-            v-model:value="actionsFilter"
-            :placeholder="t('common.filter') || 'Filter'"
-            allow-clear
-            style="min-width: 140px; margin-right: 12px"
-            @change="fetchActions"
-          >
-            <a-select-option value="all">{{ t('common.all') }}</a-select-option>
-            <a-select-option value="pending">{{ t('growth.pending') }}</a-select-option>
-            <a-select-option value="completed">{{ t('growth.completed') || 'Completed' }}</a-select-option>
-            <a-select-option value="skipped">{{ t('growth.skipped') || 'Skipped' }}</a-select-option>
-          </a-select>
-        </div>
         <a-spin :spinning="loadingActions">
           <a-table
             v-if="actions.length > 0"
             :columns="actionColumns"
             :data-source="actions"
             :pagination="false"
-            row-key="id"
+            row-key="action_id"
             size="middle"
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'status'">
                 <a-badge
-                  :status="record.status === 'completed' ? 'success' : record.status === 'in_progress' ? 'processing' : record.status === 'skipped' ? 'warning' : 'default'"
-                  :text="record.status"
+                  :status="record.response_received ? 'success' : 'processing'"
+                  :text="record.response_received ? t('growth.responded') : t('growth.notResponded')"
                 />
               </template>
               <template v-else-if="column.key === 'type'">
-                <a-tag>{{ record.type }}</a-tag>
+                <a-tag>{{ record.action_type }}</a-tag>
+              </template>
+              <template v-else-if="column.key === 'timestamp'">
+                <span class="meta-timestamp">{{ formatTime(record.timestamp) }}</span>
               </template>
             </template>
           </a-table>
@@ -254,7 +262,7 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import * as growthApi from '@/api/modules/growth'
-import type { MotivationState, PersonalityProfile, ConstitutionRule, GrowthQuestion, ProactiveAction } from '@/api/modules/growth'
+import type { MotivationState, PersonalityProfile, ConstitutionRule, GrowthQuestion, ProactiveAction, GrowthCapabilities } from '@/api/modules/growth'
 
 const { t } = useI18n()
 const { agentId, currentAgent } = useAgentPage({
@@ -270,6 +278,7 @@ const activeTab = ref('overview')
 
 // Overview state
 const loadingOverview = ref(false)
+const capabilities = ref<GrowthCapabilities | null>(null)
 const motivationData = ref<MotivationState | null>(null)
 const personalityProfile = ref<PersonalityProfile | null>(null)
 const personalityTraits = ref<{ name: string; value: number }[]>([])
@@ -290,7 +299,6 @@ const submittingAnswer = ref(false)
 // Actions state
 const loadingActions = ref(false)
 const actions = ref<ProactiveAction[]>([])
-const actionsFilter = ref<string>('all')
 
 // Constitution state
 const loadingConstitution = ref(false)
@@ -303,6 +311,9 @@ const deletingRule = ref(false)
 const formatPercent = (val: number | undefined) =>
   val !== undefined && val !== null ? `${Math.round(val * 100)}%` : '-'
 
+// 能力维度标签：i18n 两层键契约（growth.dimensionCognitive 等）
+const dimLabel = (key: string) => t(`growth.dimension${key.charAt(0).toUpperCase()}${key.slice(1)}`)
+
 const formatTime = (ts: string | number) => ts ? new Date(typeof ts === 'number' ? ts * 1000 : ts).toLocaleString() : ''
 
 const traitColor = (val: number) => {
@@ -312,10 +323,10 @@ const traitColor = (val: number) => {
 }
 
 const actionColumns = computed(() => [
-  { title: t('common.description'), dataIndex: 'description', key: 'description', ellipsis: true },
-  { title: t('common.type'), key: 'type', dataIndex: 'type', width: 120 },
+  { title: t('common.description'), dataIndex: 'content', key: 'content', ellipsis: true },
+  { title: t('common.type'), key: 'type', dataIndex: 'action_type', width: 120 },
   { title: t('common.status'), key: 'status', width: 140 },
-  { title: t('common.createdAt'), dataIndex: 'created_at', width: 180 },
+  { title: t('common.createdAt'), dataIndex: 'timestamp', key: 'timestamp', width: 180 },
 ])
 
 // --- Fetch functions using growth API module ---
@@ -323,14 +334,16 @@ const actionColumns = computed(() => [
 const fetchOverview = async () => {
   loadingOverview.value = true
   try {
-    const [motivationRes, personalityRes, constitutionRes] = await Promise.all([
+    const [motivationRes, personalityRes, constitutionRes, capabilitiesRes] = await Promise.all([
       growthApi.getMotivation(agentId.value),
       growthApi.getPersonality(agentId.value),
       growthApi.getConstitution(agentId.value),
+      growthApi.getCapabilities(agentId.value),
     ])
 
     motivationData.value = motivationRes.data ?? null
     personalityProfile.value = personalityRes.data ?? null
+    capabilities.value = capabilitiesRes?.data ?? null
 
     const personality = personalityRes.data
     if (personality?.traits) {
@@ -351,16 +364,10 @@ const fetchOverview = async () => {
 const fetchQuestions = async () => {
   loadingQuestions.value = true
   try {
-    const params: { page?: number; size?: number; answered?: boolean } = { size: 50 }
+    const params: { limit?: number; answered?: boolean } = { limit: 50 }
     if (questionsFilter.value === 'answered') params.answered = true
     if (questionsFilter.value === 'unanswered') params.answered = false
-    const res = await growthApi.getQuestions(agentId.value, params)
-    const data = res.data
-    if (data && typeof data === 'object' && 'items' in data) {
-      questions.value = data.items ?? []
-    } else {
-      questions.value = Array.isArray(data) ? data : []
-    }
+    questions.value = await growthApi.getQuestions(agentId.value, params)
   } catch (e: any) {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
@@ -375,13 +382,8 @@ const createQuestion = async () => {
   }
   creatingQuestion.value = true
   try {
-    // The API module does not expose a createQuestion function directly,
-    // so we use answerQuestion pattern. But since the growth API module
-    // has no createQuestion, we'll use the existing approach via getQuestions
-    // The growth module has getQuestions and answerQuestion. For creation,
-    // we still need a POST. Let's use a direct call for this edge case.
-    const api = (await import('@/api')).default
-    await api.post('/growth/questions', { agent_id: agentId.value, question: newQuestion.value })
+    // 2026-09-15 契约对齐: agent_id 必须走 query（原 body 传法被 BE 忽略，问题恒落 default agent）
+    await growthApi.createQuestion(agentId.value, newQuestion.value)
     message.success(t('common.success'))
     showQuestionModal.value = false
     newQuestion.value = ''
@@ -406,7 +408,7 @@ const submitAnswer = async () => {
   }
   submittingAnswer.value = true
   try {
-    await growthApi.answerQuestion(questionToAnswer.value.id, answerText.value)
+    await growthApi.answerQuestion(agentId.value, questionToAnswer.value.id, answerText.value)
     message.success(t('common.success'))
     showAnswerModal.value = false
     await fetchQuestions()
@@ -420,13 +422,7 @@ const submitAnswer = async () => {
 const fetchActions = async () => {
   loadingActions.value = true
   try {
-    const params: { status?: string } = {}
-    if (actionsFilter.value && actionsFilter.value !== 'all') {
-      params.status = actionsFilter.value
-    }
-    const res = await growthApi.getProactiveActions(agentId.value, params)
-    const data = res.data
-    actions.value = Array.isArray(data) ? data : []
+    actions.value = await growthApi.getProactiveActions(agentId.value)
   } catch (e: any) {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
