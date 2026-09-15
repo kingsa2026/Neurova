@@ -641,3 +641,15 @@ Wave 1 的核心断言是 **"过拟合变体被留出集拒绝"**——这条测
 
 `NEUROVA_TEXT_EVOLUTION` 未设且 `config/evolution_settings.json` 缺省 → 文本进化**关闭**(默认态零行为变化);生命周期扫描**默认开**(纯确定性、零 LLM、首见只 seed)。开发可用 env 显式覆盖(env 赢过设置文件)。
 
+### 8.6 第二轮核验(数据流断点专项)
+
+换视角复审,专攻"声明的数据流是否真的在流":
+
+1. **judge→mutator 反馈断链(真断点,已修)**:`runner._collect_failures` 把 `JudgeFailure.feedback` 硬编码为空串——judge 的文字反馈(反射式变异的核心输入,GEPA 的"理解为何失败")从未流进变异器,反射退化为盲改。修复:`_score_example` 透传 `(composite, output, feedback)`,新增回归测试 `test_judge_feedback_flows_into_mutator` 锁死该数据流。
+2. **`optimize_prompt` 判据缝隙(已修)**:评测集含 rubric 用例时仍走同步子串打分(rubric 用例被诚实记 0),优化将在错误标尺上选"最优" → 含 rubric 时改走 `score_prompt_async(judge=...)`,`optimize_prompt` 增加 `judge` 注入参。
+3. **前端 iterations 空值(已修)**:`a-input-number` 清空后为 null → 后端 `ge=1` 校验 422;钳制 `|| 5`。
+4. **组件契约核对(通过,无需改)**:GlassButton 支持 `ghost/secondary/primary/danger` 四 variant;`_step_rsi_iteration` 经 `_safe_step` 注册(维护块随其执行);`AgentSkillPage` 路由已注册;`test_runner_holdout` 的死代码 `_ScriptedJudge` 清除。
+
+第二轮回归:后端 evolution 116(eval)+ 782(总)+ skills 728;前端 vue-tsc 零错、i18n+api 234 测、全量 vitest exit 0。
+
+
