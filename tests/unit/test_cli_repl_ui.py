@@ -1,4 +1,4 @@
-"""cli.py REPL 界面（Hermes 对齐 · 蓝色系）渲染契约测试。
+"""cli.py REPL 界面渲染契约测试。
 
 锁定界面元素：
 - 用户消息回显: `❯ 你` 标签 + 正文（primary 蓝）
@@ -86,7 +86,7 @@ class TestRenderHelpers(unittest.TestCase):
         self.assertIn("✕ 无法连接", cli.render_welcome_icon_line("✕", "无法连接", style="err").plain)
 
     def test_welcome_panel_rounded_with_title(self):
-        """欢迎屏内容包进双线 panel,标题在左上（Hermes 窗口范式 + logo 同款线框）。"""
+        """欢迎屏内容包进双线 panel,标题在左上。"""
         import cli
         from rich import box
 
@@ -97,8 +97,8 @@ class TestRenderHelpers(unittest.TestCase):
         # 双线框 (DOUBLE, 与 print_logo 同款 ╔═╗║╚═╝)
         self.assertIs(panel.box, box.DOUBLE)
 
-    def test_status_bar_hermes_style(self):
-        """回合收尾状态栏: `⚑ 模型 | 轮次 · 会话 | 用时`（Hermes 底栏范式）。"""
+    def test_status_bar_panel_style(self):
+        """回合收尾状态栏: `⚑ 模型 | 轮次 · 会话 | 用时`。"""
         import cli
 
         out = cli.render_status_bar("deepseek-v4-pro", "a1b2c3d4", turn=3, elapsed=4.2)
@@ -272,7 +272,6 @@ class TestChatMessageExperience(unittest.TestCase):
         out = buf.getvalue()
         self.assertIn("❯ 你", out)
         self.assertIn("测试消息", out)
-        # Hermes 底栏: ⚑ 模型 | 轮次 · 会话 | 用时
         self.assertIn("⚑", out)
         self.assertIn("第 1 轮", out)
         self.assertIn("s1", out)

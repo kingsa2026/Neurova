@@ -845,7 +845,7 @@ Section WebView2
             ReadRegStr $R1 HKCU "SOFTWARE\Microsoft\EdgeUpdate" "path"
           ${EndIf}
           ${If} $R1 != ""
-            ; Chromium updater docs: https://source.chromium.org/chromium/chromium/src/+/main:docs/updater/user_manual.md
+; Chromium updater docs: https://source.chromium.org/chromium/chromium/src/+/main:
             ; Modified from "HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Microsoft EdgeWebView\ModifyPath"
             ExecWait `"$R1" /install appguid=${WEBVIEW2APPGUID}&needsadmin=true` $1
             ${If} $1 = 0
