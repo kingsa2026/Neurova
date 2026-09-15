@@ -151,22 +151,21 @@ class GeminiProvider(BaseProvider):
         """获取可用的模型列表
 
         Returns:
-            模型信息列表
-        """
-        # 尝试从 API 获取模型列表
-        api_models = await self._fetch_models_from_api()
-        if api_models:
-            return api_models
+            模型信息列表（真实为空时即空）
 
-        # 如果 API 获取失败，返回已知模型列表
-        self.logger.info("使用已知模型列表")
-        return self._get_known_models()
+        2026-09-14 根治假数据：API 失败不再回落已知静态列表（对齐 OpenRouter
+        先例），失败由 _fetch_models_from_api 上抛并经 error_mapping 归一。
+        """
+        return await self._fetch_models_from_api()
 
     async def _fetch_models_from_api(self) -> typing.List[ModelInfo]:
         """从 API 获取模型列表
 
         Returns:
-            模型信息列表，失败返回空列表
+            模型信息列表，无 key 时为空（管理器预检已拦截该场景）
+
+        Raises:
+            非 200/网络失败 — 带 status_code 的异常上抛。
         """
         if not aiohttp:
             self.logger.warning("aiohttp 未安装，无法从 API 获取模型列表")
@@ -176,29 +175,25 @@ class GeminiProvider(BaseProvider):
             self.logger.warning("API 密钥未配置，无法获取模型列表")
             return []
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.base_url}/v1beta/models?key={self.api_key}", timeout=aiohttp.ClientTimeout(total=10)
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        models = []
-                        for model_data in data.get("models", []):
-                            model_name = model_data.get("name", "")
-                            if model_name:
-                                # 提取模型 ID（去掉 "models/" 前缀）
-                                model_id = model_name.replace("models/", "")
-                                model_info = self._parse_api_model(model_data, model_id)
-                                models.append(model_info)
-                        self.logger.info("从 API 获取到 %s 个模型", len(models))
-                        return models
-                    else:
-                        self.logger.warning("获取模型列表失败: HTTP %s", response.status)
-                        return []
-        except Exception as e:
-            self.logger.warning("从 API 获取模型列表失败: %s", e)
-            return []
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{self.base_url}/v1beta/models?key={self.api_key}", timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                if response.status != 200:
+                    exc = RuntimeError(f"获取模型列表失败: HTTP {response.status}")
+                    exc.status_code = response.status
+                    raise exc
+                data = await response.json()
+                models = []
+                for model_data in data.get("models", []):
+                    model_name = model_data.get("name", "")
+                    if model_name:
+                        # 提取模型 ID（去掉 "models/" 前缀）
+                        model_id = model_name.replace("models/", "")
+                        model_info = self._parse_api_model(model_data, model_id)
+                        models.append(model_info)
+                self.logger.info("从 API 获取到 %s 个模型", len(models))
+                return models
 
     def _parse_api_model(self, model_data: Dict[str, Any], model_id: str) -> ModelInfo:
         """解析 API 返回的模型数据

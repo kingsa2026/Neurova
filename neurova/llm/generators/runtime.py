@@ -40,7 +40,9 @@ DEFAULT_OPENAI_BASE = "https://api.openai.com/v1"
 DEFAULT_WAN_BASE = "https://dashscope.aliyuncs.com/api/v1"
 
 # L5：keyframe_to_video 转真实通道（Seedance first_frame+last_frame 先画后动）；
-# video_to_video 仍无实测协议（登记缓后台账）
+# video_to_video 仍无实测协议（台账 A4 blocked）：候选=DashScope wan2.7-videoedit
+# （by-capability 数据面已见该模型 ID），但端点/请求体未实测——批次0 虚构端点
+# （4000 行假协议）教训禁止盲写，需有效 DashScope key 实测后再接
 _VIDEO_TYPES = ("text_to_video", "image_to_video", "keyframe_to_video")
 _IMAGE_TYPES = ("text_to_image", "image_to_image")
 _UNSUPPORTED_TYPES = ("video_to_video",)
@@ -99,7 +101,14 @@ def resolve_generation_creds(
             host = (getattr(p, "base_url", "") or "").lower()
             if ("dashscope" in host and "dashscope" in (protocol_hint or "").lower()) or (
                 "volces.com" in host and ("ark" in (protocol_hint or "").lower() or "seedance" in (protocol_hint or "").lower() or "volcengine" in (protocol_hint or "").lower())
-            ) or ("googleapis.com" in host and "veo" in (protocol_hint or "").lower()):
+            ) or ("googleapis.com" in host and "veo" in (protocol_hint or "").lower()) or (
+                # agnes 视频：协议标签 agnes ↔ host agnes（auto 路由无 provider_id 时）
+                "agnes" in host and "agnes" in (protocol_hint or "").lower()
+            ) or (
+                # openai_compat：Agnes/自托管等 host 无法穷举——协议为 openai_compat 时
+                # 取任一含 openai/agnes 的已启用服务商兜底（前端正常已透传 provider_id）
+                "openai_compat" in (protocol_hint or "").lower() and ("openai" in host or "agnes" in host)
+            ):
                 provider = p
                 break
     if provider is not None:

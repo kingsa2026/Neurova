@@ -18,7 +18,7 @@ import GlassButton from '@/components/GlassButton.vue'
 import AigcHistoryList from '@/components/aigc/AigcHistoryList.vue'
 
 const { t } = useI18n()
-const { videoModelOptions } = useAigcModels()
+const { videoModelOptions, providerOf } = useAigcModels()
 
 const prompt = ref('')
 const model = ref('auto')
@@ -73,7 +73,9 @@ async function generate() {
     }
     if (refs.length) payload.ref_images = refs
     if (protocol.value) payload.protocol = protocol.value
-    if (providerId.value) payload.provider_id = providerId.value
+    // 手填服务商优先；否则由选中模型反查其服务商上报（auto 不报，走后端能力路由）
+    const effProvider = providerId.value || providerOf(model.value)
+    if (effProvider) payload.provider_id = effProvider
     if (withAudio.value !== null) payload.audio = withAudio.value
     const res: any = await submitVideo(payload)
     const data = res?.data ?? res

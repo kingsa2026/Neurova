@@ -21,6 +21,10 @@
   轮询同 URL + ``/{task_id}``。
 - VEO (Gemini Veo): 提交 ``{base}/models/{model}:predictLongRunning``（裸
   googleapis 主机自动补 /v1beta），头 x-goog-api-key，轮询 GET operation name。
+- AGNES (Agnes video v2.0，2026-09-14 官方仓 AgnesAI-Labs/AgnesAI-Models 实核):
+  提交 ``POST {root}/v1/videos`` body={model,prompt,width,height,num_frames,
+  frame_rate}（无 Sora 的 mode 字段），轮询独立端点 ``GET {root}/agnesapi
+  ?video_id=<id>``——官方明示勿用 task_id。
 
 URL/请求体构建为纯函数（可测），HTTP 用 aiohttp（可选依赖，缺库诚实报错）。
 """
@@ -58,6 +62,10 @@ class VideoProtocol(str, Enum):
     WAN = "wan"
     SEEDANCE2 = "seedance2"
     VEO = "veo"
+    # 2026-09-14 官方仓 AgnesAI-Labs/AgnesAI-Models 实核补录：
+    # 提交 POST {root}/v1/videos（无 mode 字段），轮询独立端点
+    # GET {root}/agnesapi?video_id=<id>——与三家任务形态全不同。
+    AGNES = "agnes"
 
 
 # ── 协议解析：显式标签 → 后端映射（含中文标签）→ model/base_url 兜底探测 ──
@@ -69,6 +77,7 @@ _PROTOCOL_LABELS = {
     VideoProtocol.WAN: ("wan", "wan2", "wan3", "百炼", "阿里云百炼", "dashscope"),
     VideoProtocol.SEEDANCE2: ("seedance", "seedance2", "火山", "火山引擎", "volcengine", "ark"),
     VideoProtocol.VEO: ("veo", "gemini", "google"),
+    VideoProtocol.AGNES: ("agnes", "agnes-video", "agnes-video-v2.0"),
 }
 
 
@@ -104,6 +113,8 @@ def resolve_video_protocol(
     text = f"{model_name} {base_url}".lower()
     if "seedance" in text or "volces.com" in text:
         return VideoProtocol.SEEDANCE2
+    if "agnes" in text:
+        return VideoProtocol.AGNES
     if "veo" in text or "googleapis.com" in text:
         return VideoProtocol.VEO
     return VideoProtocol.WAN
@@ -142,16 +153,31 @@ def dashscope_tasks_url(api_root: str, task_id: str) -> str:
     return f"{(api_root or DEFAULT_DASHSCOPE_API_ROOT).rstrip('/')}/tasks/{task_id}"
 
 
-def wan_submit_url(base_url: str) -> str:
+def dashscope_native_root(base_url: str) -> str:
+    """阿里文本/生成双地址分歧归一（2026-09-14 用户实测反馈）：
+
+    服务商 base_url 多按文本配 `…/compatible-mode/v1`，而 wan 视频 / qwen-image
+    必须走原生 `…/api/v1` 根——provider_id 凭据解析带出文本 base 时，直接拼接会
+    得到 `compatible-mode/v1/services/aigc/…` 错误端点。已是原生/完整 services
+    端点则原样返回，向后兼容不破坏既有实测矩阵。
+    """
     base = (base_url or DEFAULT_DASHSCOPE_API_ROOT).rstrip("/")
+    if "compatible-mode" in base and "/services/" not in base:
+        parts = base.split("/")  # ['https:', '', 'host', path…]
+        if len(parts) >= 3 and parts[2]:
+            return f"{parts[0]}//{parts[2]}/api/v1"
+    return base
+
+
+def wan_submit_url(base_url: str) -> str:
+    base = dashscope_native_root(base_url)
     if "/services/aigc" in base:
         return f"{base}/video-generation/video-synthesis"
     return f"{base}/services/aigc/video-generation/video-synthesis"
 
 
 def wan_tasks_root(base_url: str) -> str:
-    base = (base_url or DEFAULT_DASHSCOPE_API_ROOT).rstrip("/")
-    return base
+    return dashscope_native_root(base_url)
 
 
 def seedance_submit_url(base_url: str) -> str:
@@ -180,6 +206,55 @@ def veo_poll_url(base_url: str, operation_name: str) -> str:
     if operation_name.startswith("/"):
         return f"{urlparse(base).scheme}://{urlparse(base).netloc}{operation_name}"
     return f"{base}/{operation_name}"
+
+
+# ── Agnes 视频（2026-09-14 官方仓 AgnesAI-Labs/AgnesAI-Models 实核）──
+
+
+def _agnes_root(base_url: str) -> str:
+    """Agnes 提交/轮询端点挂站点根（服务商 base 常带 /v1 文本前缀，轮询
+    端点 agnesapi 不在 /v1 下——须剥回 scheme://host）。"""
+    parsed = urlparse((base_url or "https://apihub.agnes-ai.com/v1").rstrip("/"))
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return "https://apihub.agnes-ai.com"
+
+
+def agnes_videos_url(base_url: str) -> str:
+    return f"{_agnes_root(base_url)}/v1/videos"
+
+
+def agnes_poll_url(base_url: str, video_id: str) -> str:
+    """官方契约：GET {root}/agnesapi?video_id=<id>（明示勿用 task_id 语义）。"""
+    return f"{_agnes_root(base_url)}/agnesapi?video_id={quote(video_id or '', safe='')}"
+
+
+def agnes_video_body(
+    model: str, prompt: str, duration: int = 5, resolution: str = "",
+) -> Dict[str, Any]:
+    """请求体={model,prompt,width,height,num_frames,frame_rate}。
+
+    无 OpenAI Sora 的 ``mode`` 字段（此前按 Sora 形态探测恒报
+    "invalid mode" 的根因）。num_frames 换算以官方示例为准：
+    5s@24fps → 121 帧；像素尺寸默认取官方示例 1152x768。
+    """
+    frame_rate = 24
+    width, height = 1152, 768
+    res = (resolution or "").lower()
+    if "1080" in res:
+        width, height = 1920, 1080
+    elif "720" in res:
+        width, height = 1280, 720
+    elif "480" in res:
+        width, height = 854, 480
+    return {
+        "model": model or "agnes-video-v2.0",
+        "prompt": prompt,
+        "width": width,
+        "height": height,
+        "num_frames": max(1, int(duration)) * frame_rate + 1,
+        "frame_rate": frame_rate,
+    }
 
 
 # ── 凭据载体 ──
@@ -292,9 +367,13 @@ async def _dashscope_image_generate(
 ) -> Dict[str, Any]:
     # R2 能力自适应路由：seed 支持（parameters.seed）；strength 无通道 → 显式忽略标注
     ignored = ["strength"] if strength is not None else []
+    # 端点契约=完整端点原样用（含 /services/，如 wanx text2image 路径保留）；
+    # 文本服务商带出的 compatible-mode/api 根 base → 归一拼原生 multimodal 端点。
     endpoint = creds.base_url or (
         f"{DEFAULT_DASHSCOPE_API_ROOT}/services/aigc/multimodal-generation/generation"
     )
+    if "/services/" not in endpoint:
+        endpoint = f"{dashscope_native_root(endpoint)}/services/aigc/multimodal-generation/generation"
     headers = {
         "Authorization": f"Bearer {creds.api_key}",
         "X-DashScope-OssResourceResolve": "enable",
@@ -324,8 +403,13 @@ async def _dashscope_image_generate(
         return {"images": [u for u in urls if u], "task_id": None, "raw": data,
                 "ignored_params": ignored}
 
-    # 异步：轮询 {api_root}/tasks/{task_id}
-    api_root = DEFAULT_DASHSCOPE_API_ROOT
+    # 异步：轮询 {api_root}/tasks/{task_id}。api_root 从 base_url 归一
+    # （文本 base→api/v1；完整端点→剥离 /services/ 段；缺省→默认根）。
+    if creds.base_url:
+        _root = dashscope_native_root(creds.base_url)
+        api_root = _root.split("/services/")[0] if "/services/" in _root else _root
+    else:
+        api_root = DEFAULT_DASHSCOPE_API_ROOT
     for _ in range(60):
         await asyncio.sleep(5.0)
         poll_status, poll_data = await _get_json(
@@ -582,6 +666,26 @@ async def submit_video(
         task_id = data.get("id") or (data.get("output") or {}).get("task_id")
         return {"task_id": task_id, "poll_url": seedance_poll_url(creds.base_url, task_id or ""), "raw": data}
 
+    if protocol == VideoProtocol.AGNES:
+        # i2v/多图/keyframe 官方列为能力但未公布参数字段，按"不虚构字段"
+        # 教义诚实报错，参考图生成引导走 Seedance/WAN（两家有实测通道）。
+        if refs or last_frame:
+            raise ValueError(
+                "Agnes 视频的图生视频/关键帧参数官方未公开（示例仅文生视频），"
+                "参考图生成请改用火山 Seedance 或阿里 WAN"
+            )
+        headers = {"Authorization": f"Bearer {creds.api_key}"}
+        body = agnes_video_body(creds.model, prompt, duration=duration, resolution=resolution)
+        status, data = await _post_json(agnes_videos_url(creds.base_url), headers, body, timeout)
+        if status >= 400:
+            raise RuntimeError(f"AGNES 提交失败 HTTP {status}: {str(data)[:300]}")
+        video_id = data.get("video_id") or data.get("id")
+        return {
+            "task_id": video_id,
+            "poll_url": agnes_poll_url(creds.base_url, str(video_id or "")),
+            "raw": data,
+        }
+
     # VEO
     headers = {"x-goog-api-key": creds.api_key}
     instance: Dict[str, Any] = {"prompt": prompt}
@@ -641,6 +745,27 @@ async def poll_video(
         if st == "succeeded":
             return {"status": "succeeded", "video_url": video_url, "raw": data}
         if st in ("failed", "cancelled"):
+            return {"status": "failed", "error": str(data)[:300], "raw": data}
+        return {"status": "running", "raw": data}
+
+    if protocol == VideoProtocol.AGNES:
+        url = poll_url or agnes_poll_url(creds.base_url, task_id)
+        status, data = await _get_json(url, {"Authorization": f"Bearer {creds.api_key}"})
+        if status >= 400:
+            return {"status": "failed", "error": f"HTTP {status}", "raw": data}
+        st = str(data.get("status") or "").lower()
+        if st in ("succeeded", "success", "completed", "done"):
+            # 官方未给轮询响应示例，产物 URL 候选字段宽松解析（首个命中）
+            video_url = (
+                data.get("video_url")
+                or data.get("url")
+                or (data.get("output") or {}).get("video_url")
+                or (data.get("output") or {}).get("url")
+                or ((data.get("data") or [{}])[0].get("url")
+                    if isinstance(data.get("data"), list) and data.get("data") else None)
+            )
+            return {"status": "succeeded", "video_url": video_url, "raw": data}
+        if st in ("failed", "error", "cancelled"):
             return {"status": "failed", "error": str(data)[:300], "raw": data}
         return {"status": "running", "raw": data}
 

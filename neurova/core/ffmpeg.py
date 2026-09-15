@@ -243,3 +243,36 @@ def burn_subtitles(ffmpeg: str, in_path, srt_path, out_path,
         return False, str(e)[:200]
     ok = proc.returncode == 0 and Path(out_path).is_file()
     return ok, "" if ok else (proc.stderr or b"")[-200:].decode(errors="ignore")
+
+
+def probe_has_audio(ffmpeg: str, media_path) -> bool:
+    """主片是否自带音轨（混音滤镜选择依据）。ffmpeg 无输出参数时 rc=1 但
+    stderr 含流枚举——以 'Audio:' 标记判断，误判代价低（两形态均真执行）。"""
+    try:
+        proc = subprocess.run([ffmpeg, "-i", str(media_path)],
+                              capture_output=True, timeout=60, check=False)
+    except Exception:  # noqa: BLE001
+        return False
+    return b"Audio:" in (proc.stderr or b"")
+
+
+def mix_bgm(ffmpeg: str, main_path, bgm_path, out_path, has_audio: bool,
+            volume: float = 0.35, timeout: int = 600) -> "tuple[bool, str]":
+    """A3：BGM 混音（用户提供的循环乐轨，非 AI 生成）。主片有音轨 →
+    amix（BGM 压至 volume 后与原声混合）；主片静音（wan 系常见）→ 直接映射
+    BGM 音轨。失败不抛，返回 (ok, err_tail) 由调用方降级。"""
+    cmd = [ffmpeg, "-y", "-i", str(main_path), "-i", str(bgm_path)]
+    if has_audio:
+        cmd += ["-filter_complex",
+                f"[1:a]volume={volume}[bg];[0:a][bg]amix=inputs=2:duration=first"
+                ":dropout_transition=0[a]",
+                "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac"]
+    else:
+        cmd += ["-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-shortest"]
+    cmd.append(str(out_path))
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=timeout, check=False)
+    except Exception as e:  # noqa: BLE001
+        return False, str(e)[:200]
+    ok = proc.returncode == 0 and Path(out_path).is_file()
+    return ok, "" if ok else (proc.stderr or b"")[-200:].decode(errors="ignore")

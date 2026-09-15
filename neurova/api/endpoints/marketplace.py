@@ -644,6 +644,38 @@ async def submit_market_skill(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Skill '{body.skill_id}' already exists in marketplace",
             )
+
+        # P2-1 提交证据门（OpenSpace upload_trust 本地化）：文本注入扫描 +
+        # 密钥脱敏 + 本地同源 provisional 拒上架。人工 admin 审批保留，二者
+        # 叠加=机器拦底、人裁质量。
+        from neurova.skills.skill_install_gate import evaluate_submission_gate
+
+        local_trust_state = None
+        try:
+            from neurova.skills.skill_service import SkillService
+
+            info = SkillService(agent_id="default").get_skill_info(body.skill_id) or {}
+            local_trust_state = ((info.get("identity") or {}).get("trust") or {}).get("state")
+        except Exception:  # noqa: BLE001 - 本地查不到=纯市场申请，交文本门
+            pass
+        verdict = evaluate_submission_gate(
+            {
+                "skill_id": body.skill_id,
+                "name": body.name,
+                "description": body.description,
+                "category": body.category,
+                "tags": " ".join(body.tags or []),
+                "download_url": body.download_url or "",
+                "author": body.author or "",
+            },
+            local_trust_state,
+        )
+        if verdict["blocked"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="；".join(verdict["errors"]) or "提交内容未过证据门",
+            )
+
         submissions = get_market_submission_store()
         if any(
             s.get("skill_id") == body.skill_id and s.get("status") == "pending"

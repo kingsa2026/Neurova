@@ -187,39 +187,37 @@ class OpenRouterProvider(BaseProvider):
     async def _fetch_models_from_api(self) -> typing.List[ModelInfo]:
         """从 API 获取模型列表
 
+        OpenRouter /models 是公开端点（无 key 也可获取真实列表）。
+
         Returns:
-            模型信息列表，失败返回空列表
+            模型信息列表（真实为空时即空）
+
+        Raises:
+            非 200/网络失败 — 带 status_code 的异常上抛，经 error_mapping
+            归一为可行动错误（吞错返回空列表会让连接测试误判成功）。
         """
         if not aiohttp:
             self.logger.warning("aiohttp 未安装，无法从 API 获取模型列表")
             return []
 
-        if not self.api_key:
-            self.logger.warning("API 密钥未配置，无法获取模型列表")
-            return []
-
-        try:
-            headers = self._make_headers()
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.base_url}/models", headers=headers, timeout=aiohttp.ClientTimeout(total=10)
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        models = []
-                        for model_data in data.get("data", []):
-                            model_id = model_data.get("id", "")
-                            if model_id:
-                                model_info = self._parse_api_model(model_data)
-                                models.append(model_info)
-                        self.logger.info("从 API 获取到 %s 个模型", len(models))
-                        return models
-                    else:
-                        self.logger.warning("获取模型列表失败: HTTP %s", response.status)
-                        return []
-        except Exception as e:
-            self.logger.warning("从 API 获取模型列表失败: %s", e)
-            return []
+        headers = self._make_headers()
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{self.base_url}/models", headers=headers, timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                if response.status != 200:
+                    exc = RuntimeError(f"获取模型列表失败: HTTP {response.status}")
+                    exc.status_code = response.status
+                    raise exc
+                data = await response.json()
+                models = []
+                for model_data in data.get("data", []):
+                    model_id = model_data.get("id", "")
+                    if model_id:
+                        model_info = self._parse_api_model(model_data)
+                        models.append(model_info)
+                self.logger.info("从 API 获取到 %s 个模型", len(models))
+                return models
 
     # OpenRouter architecture.input_modalities → ProviderCapability 映射
     _MODALITY_TO_CAPABILITY = {
@@ -280,7 +278,7 @@ class OpenRouterProvider(BaseProvider):
             max_tokens=max_completion_tokens,
             context_window=context_length,
             pricing=pricing,
-            is_free=self._is_free_model(pricing),
+            is_free=self._is_free_model(model_id, pricing),
             metadata={
                 "description": model_data.get("description", ""),
                 "architecture": model_data.get("architecture", {}),
@@ -290,8 +288,16 @@ class OpenRouterProvider(BaseProvider):
         )
 
     @staticmethod
-    def _is_free_model(pricing: Dict[str, float]) -> bool:
-        """免费判定:所有有效 price 字段均为 0(与 QwenPaw 语义一致)。"""
+    def _is_free_model(model_id: str, pricing: Dict[str, float]) -> bool:
+        """免费判定：`:free` 后缀为权威标记，全零定价兜底。
+
+        - OpenRouter 官方免费变体以 ID 的 ``:free`` 后缀标记（如
+          ``meta-llama/llama-3.3-70b-instruct:free``），以此为据：命中即免费，
+          不受 pricing 缺失/脏数据影响（2026-09-14 修复筛选免费模型漏判）。
+        - 无后缀时保留 QwenPaw 语义：所有有效 price 字段均为 0 才算免费。
+        """
+        if model_id.endswith(":free"):
+            return True
         if not pricing:
             return False
         values = [v for v in pricing.values() if v is not None]

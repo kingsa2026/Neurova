@@ -170,6 +170,13 @@ logger = get_logger(__name__)
 # 免 API Key 的服务商(免费网关内置定义):无 key 时发现/筛选仍须放行
 KEYLESS_PROVIDER_IDS: frozenset = frozenset({"opencode", "kilo-code"})
 
+# 无需填 API 即可发现真实模型列表的服务商白名单(2026-09-14):
+# openrouter 的 /models 是公开端点;openai 常指向免 key OpenAI 兼容网关。
+# 其余服务商无 key 时获取模型/测试连接必须提示先配置 API,不得触上游拿假数据。
+NO_API_REQUIRED_PROVIDER_IDS: frozenset = (
+    KEYLESS_PROVIDER_IDS | frozenset({"openrouter", "openai"})
+)
+
 # 内置服务商定义(与前端 ModelPage 种子卡片对齐;缺失时才补入,绝不覆盖用户配置)
 _BUILTIN_PROVIDER_DEFS: tuple[dict, ...] = (
     {
@@ -233,6 +240,13 @@ _BUILTIN_PROVIDER_DEFS: tuple[dict, ...] = (
             "glm-5-2-260617",
             "kimi-k2-250905",
             "deepseek-v3-2-251201",
+            # AIGC 预置（方舟目录实测 ID：seedream 图像 / seedance 视频）
+            "doubao-seedream-4-0-250828",
+            "doubao-seedream-5-0-260128",
+            "doubao-seedream-5-0-pro-260628",
+            "doubao-seedance-1-0-pro-250528",
+            "doubao-seedance-2-0-260128",
+            "doubao-seedance-2-5-260628",
         ],
     },
     {
@@ -270,6 +284,37 @@ _BUILTIN_PROVIDER_DEFS: tuple[dict, ...] = (
         "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
         "api_key_prefix": "",
         "models": ["mimo-v2.5", "mimo-v2.5-pro"],
+    },
+    # ── AIGC 服务商预置（2026-09-14 实测端点矩阵，docs/08-research/AIGC生成端点矩阵）──
+    # 模型 ID 仅收录已证实存在的（/models 或图像端点 200 实测）；视频端点未证实的不放。
+    {
+        # 国际网关：本会话实测 GET /v1/models 200、POST /v1/images/generations 200 出图。
+        "id": "agnes-intl",
+        "name": "Agnes（国际网关）",
+        "provider": "openai",
+        "base_url": "https://apihub.agnes-ai.com/v1",
+        "api_key_prefix": "sk-",
+        "models": [
+            "agnes-3.0-flash", "agnes-2.5-pro-alpha", "agnes-2.5-flash",
+            "agnes-image-2.1-flash", "agnes-image-2.1-flashv",
+            "agnes-image-2.0-flash", "agnes-image-2.0-flashv",
+            # 2026-09-14 官方仓 AgnesAI-Labs/AgnesAI-Models 实核端点契约后解锁
+            "agnes-video-v2.0",
+        ],
+    },
+    {
+        # 国内网关：与本会话所用 key 不匹配（该 key 返回 401）；按用户实际所属选填。
+        "id": "agnes-cn",
+        "name": "Agnes（国内网关）",
+        "provider": "openai",
+        "base_url": "https://api.agnes-ai.cn/v1",
+        "api_key_prefix": "sk-",
+        "models": [
+            "agnes-3.0-flash", "agnes-2.5-pro-alpha", "agnes-2.5-flash",
+            "agnes-image-2.1-flash", "agnes-image-2.1-flashv",
+            "agnes-image-2.0-flash", "agnes-image-2.0-flashv",
+            "agnes-video-v2.0",
+        ],
     },
 )
 
@@ -1231,6 +1276,19 @@ class LLMProviderManager(Module):
             is_free=bool(meta.get("is_free", False)),
         )
 
+    def _requires_api_key_missing(self, provider: ProviderConfig) -> bool:
+        """需 API Key 却未配置的服务商(发现/测试连接统一预检,单一事实源)。
+
+        豁免:本地服务(ollama/lm_studio 免 key)、免 key 白名单
+        (openrouter/openai/opencode/kilo-code)。命中者不得触上游 —
+        否则会拿静态兜底列表当真数据/把"连上 base_url"当连接成功。
+        """
+        if provider.api_key:
+            return False
+        if provider.provider in ("ollama", "lm_studio"):
+            return False
+        return provider.id not in NO_API_REQUIRED_PROVIDER_IDS
+
     def _is_provider_connectable(self, provider: ProviderConfig) -> bool:
         """服务商级可联通判定（与前端聊天切换器过滤口径一致，单一事实源）。"""
         if not provider.enabled:
@@ -1298,6 +1356,19 @@ class LLMProviderManager(Module):
                 self._build_model_view(provider, model_id)
                 for model_id in getattr(provider, "models", [])
             ]
+
+        # 无 key 预检(2026-09-14):需 key 未配置者不触上游——否则 provider 静态
+        # 兜底列表会被当真数据返回,用户以为"获取模型"成功(实为假数据)。
+        if self._requires_api_key_missing(provider):
+            return {
+                "success": False,
+                "models": _static_view(),
+                "discovered_count": 0,
+                "last_synced_at": provider.models_last_synced_at,
+                "used_static_fallback": True,
+                "error_kind": "configuration",
+                "message": "该服务商尚未配置 API Key，请先在设置中填写后再获取模型",
+            }
 
         instance = self._get_provider_instance(provider_id)
         if instance is None:
@@ -1765,10 +1836,20 @@ class LLMProviderManager(Module):
         instance = self._get_provider_instance(provider.id)
         if instance is None:
             return ConnectionResult(success=False, error="Provider instance unavailable")
-        try:
-            result = await instance.check_model_connection(model_id)
-        except Exception as e:
-            return ConnectionResult(success=False, error=str(e))
+        # 无 key 预检(2026-09-14):缺 key 不得"连上就报成功"——结果照常走下方
+        # 统一派生与持久化链,前端模型行容器/徽标与后端 availability 同源。
+        if self._requires_api_key_missing(provider):
+            result = ConnectionResult(
+                success=False,
+                error="Provider API key not configured",
+                error_category="configuration",
+                error_hint="该服务商尚未配置 API Key，请先填写 API Key 后再测试模型连接",
+            )
+        else:
+            try:
+                result = await instance.check_model_connection(model_id)
+            except Exception as e:
+                return ConnectionResult(success=False, error=str(e))
 
         result.checked_at = datetime.now(timezone.utc).isoformat()
         if result.retryable is None:
@@ -1814,6 +1895,16 @@ class LLMProviderManager(Module):
         if not provider:
             logger.error("Provider %s not found", provider_id)
             return ConnectionResult(success=False, error="Provider not found")
+
+        # 无 key 预检(2026-09-14):provider 层静态列表兜底会让"无 key"也报成功,
+        # 连接测试必须先有真实凭证,缺 key 是配置问题而非网络健康问题(不改 health)。
+        if self._requires_api_key_missing(provider):
+            return ConnectionResult(
+                success=False,
+                error="Provider API key not configured",
+                error_category="configuration",
+                error_hint="该服务商尚未配置 API Key，请先填写 API Key 后再测试连接",
+            )
 
         instance = self._get_provider_instance(provider_id)
         if instance is None:

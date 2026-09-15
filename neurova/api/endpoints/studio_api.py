@@ -339,11 +339,15 @@ async def retry_storyboard(sid: str, body: Optional[Dict[str, Any]] = Body(defau
 
 
 @router.post("/episodes/{eid}/merge")
-async def merge(eid: str, current_user: Dict[str, Any] = Depends(get_current_user)):
-    """合并导出同步执行（本地 FFmpeg 拼接或连播清单，秒级）。"""
+async def merge(eid: str, body: Optional[Dict[str, Any]] = Body(default=None),
+                current_user: Dict[str, Any] = Depends(get_current_user)):
+    """合并导出同步执行（本地 FFmpeg 拼接或连播清单，秒级）。
+
+    body.bgm_path（A3）：用户已上传的 BGM 音频本地路径，参与二级混音。"""
     store = get_store()
     project, _ep = _episode_with_project(store, eid, current_user)
-    res = await services.merge_episode(store, project["id"], eid)
+    res = await services.merge_episode(store, project["id"], eid,
+                                       bgm_path=str((body or {}).get("bgm_path") or ""))
     code = 0 if res.get("ok") else -1
     return {"code": code, "data": res}
 

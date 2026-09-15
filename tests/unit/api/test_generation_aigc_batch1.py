@@ -178,6 +178,9 @@ class TestVideoAutoRoute:
         assert captured["provider_id"] == "prov-img"
         rec = tmp_ledger.get(resp.json()["data"]["task_id"])
         assert rec.model == "wan2.2-t2v"
+        # 轮询凭闭环：账本必须落 routed 的 provider_id（settle_video_record 凭它
+        # 重取 api_key，账本不存 key）——auto 模式下漏写即轮询恒 401
+        assert rec.provider_id == "prov-img"
 
 
 class TestAudioJsonContract:

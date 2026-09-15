@@ -163,6 +163,54 @@ class TestDiscoverEndpointContract:
             assert key in data, f"discover 响应缺 {key}"
 
 
+class TestDiscoverEndpointCandidateOnly:
+    """2026-09-14 产品契约：获取模型 ≠ 添加模型。
+
+    GET models/discover 仅发现"可添加的模型"：候选存入
+    provider.discovered_models，绝不自动并入 provider.models；
+    并入配置必须经 POST /discover/merge 显式动作。
+    """
+
+    def _inst(self):
+        from neurova.llm.providers.types import ModelInfo as _MI
+
+        class _Inst:
+            async def fetch_models(self):
+                return [_MI(id="existing-1", name="e1"), _MI(id="new-1", name="n1"), _MI(id="new-2", name="n2")]
+
+        return _Inst()
+
+    def test_discover_does_not_auto_merge_into_config(self, client, mgr):
+        mgr._get_provider_instance = lambda pid: self._inst()
+        resp = client.get(f"/api/v1/providers/{mgr._pid}/models/discover")
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+
+        provider = mgr.get_provider(mgr._pid)
+        # 核心红线：配置列表原封不动（不因"获取模型"多出一个模型）
+        assert provider.models == ["existing-1"], "discover 不得自动把新模型并入配置列表"
+        # 新模型只进候选（刷新不丢失，等待用户手动添加）
+        assert provider.discovered_models == ["new-1", "new-2"]
+        # 响应把全量发现结果透出，供前端渲染"可添加"列表
+        assert data["discovered_count"] == 2
+        assert {m["id"] for m in data["models"]} == {"existing-1", "new-1", "new-2"}
+
+    def test_manual_merge_then_model_enters_config(self, client, mgr):
+        mgr._get_provider_instance = lambda pid: self._inst()
+        client.get(f"/api/v1/providers/{mgr._pid}/models/discover")
+        # 用户勾选 new-2 手动添加 → 仅此 id 进配置，new-1 留在候选
+        resp = client.post(
+            f"/api/v1/providers/{mgr._pid}/models/discover/merge",
+            json={"model_ids": ["new-2"]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["data"]["merged_count"] == 1
+
+        provider = mgr.get_provider(mgr._pid)
+        assert provider.models == ["existing-1", "new-2"]
+        assert provider.discovered_models == ["new-1"]
+
+
 class TestProbeForceContract:
     def test_probe_endpoint_accepts_force(self, mgr):
         from neurova.api.endpoints import model as model_ep

@@ -114,8 +114,12 @@ class TestNormalizeByHttpStatus:
             assert self._norm(code).category is ErrorCategory.UNAVAILABLE, code
 
     def test_bad_request_4xx(self):
-        for code in (400, 402, 422):
+        for code in (400, 422):
             assert self._norm(code).category is ErrorCategory.BAD_REQUEST, code
+
+    def test_402_insufficient_balance(self):
+        """402 Payment Required = 余额/积分不足（2026-09-14 归类，不再混入坏请求）。"""
+        assert self._norm(402).category is ErrorCategory.INSUFFICIENT_BALANCE
 
     def test_provider_error_passthrough(self):
         """已是 ProviderError 的直接返回（幂等）"""
