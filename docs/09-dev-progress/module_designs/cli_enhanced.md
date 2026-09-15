@@ -15,7 +15,6 @@
 ### 1.2 设计依据
 - 架构文档第 2662-2700 行（8.6.1 CLI 说明）
 - 现有 `neurova/cli.py` 的功能分析
-- QwenPaw 的 CLI 实现参考
 
 ---
 
@@ -283,7 +282,6 @@ class NeurovaCLI(cmd.Cmd):
 ## 5. CLI 使用文档
 
 ### 5.1 文档位置
-`docs/cli_usage.md`
 
 ### 5.2 文档内容
 1. 安装和启动

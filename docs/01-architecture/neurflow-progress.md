@@ -1,7 +1,7 @@
 # Neurflow 实施进度跟踪
 
 > **最后更新**: 2026-08-28  
-> **基于规范**: docs/neurflow-dev-spec.md v1.0.0
+> **基于规范**: v1.0.0
 
 ---
 
@@ -217,8 +217,6 @@
 **目标**: 完善用户文档和 API 文档
 
 **文件**:
-- `docs/neurflow-user-guide.md`
-- `docs/neurflow-api-reference.md`
 
 **依赖**:
 - 集成测试完成 ✅

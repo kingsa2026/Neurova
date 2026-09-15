@@ -23,9 +23,9 @@
 - [x] 更新 `neurova/vue/js/language.js`（前端语言列表）
 
 ### 2. 文档更新
-- [x] 创建 `docs/dev_progress/module_designs/system_settings.md`（模块设计文档）
-- [x] 更新 `docs/dev_progress/progress_tracker.md`（进度跟踪表）
-- [x] 创建本每日报告 `docs/dev_progress/daily_reports/2026-05-12.md`
+- [x] 创建 ``（模块设计文档）
+- [x] 更新 ``（进度跟踪表）
+- [x] 创建本每日报告 ``
 
 ### 3. 测试
 - [x] 所有代码已通过 lint 检查

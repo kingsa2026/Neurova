@@ -1,6 +1,6 @@
 # Neurova 鸿蒙应用上架发布检查清单
 
-> 文档路径：`docs/HARMONYOS_RELEASE_CHECKLIST.md`
+> 文档路径：``
 > 适用范围：NeurovaHarmony 鸿蒙 App（HarmonyOS 6.1 / API 13）
 > 用途：上架华为应用市场前的全面自检清单，确保每次发布版本均通过
 > 更新日期：2026-06-25
@@ -55,7 +55,7 @@
 | 3.5 | GET_NETWORK_INFO | `ohos.permission.GET_NETWORK_INFO` | `when: always`，reason 说明用于网络状态监测 | ☐ |
 | 3.6 | CAMERA 权限 | `ohos.permission.CAMERA` | `when: inuse`，reason 说明用于扫码配对（与 `string.json` 中 `reason_camera` 一致） | ☐ |
 | 3.7 | 敏感权限 | 检查是否使用 `ohos.permission.READ_*` / `WRITE_*` | 未使用任何位置、通讯录、文件等敏感权限 | ☐ |
-| 3.8 | 权限与隐私政策一致 | 对照 `docs/HARMONYOS_PRIVACY_POLICY.md` 第二章 | 文档中列出的权限与 `module.json5` 一致 | ☐ |
+| 3.8 | 权限与隐私政策一致 | 对照 `` 第二章 | 文档中列出的权限与 `module.json5` 一致 | ☐ |
 
 ---
 
@@ -63,7 +63,7 @@
 
 | # | 检查项 | 检查方法 | 通过标准 | 状态 |
 |---|--------|----------|----------|------|
-| 4.1 | 隐私政策文档存在 | `docs/HARMONYOS_PRIVACY_POLICY.md` | 文件存在且内容完整（9 章节） | ☐ |
+| 4.1 | 隐私政策文档存在 | `` | 文件存在且内容完整（9 章节） | ☐ |
 | 4.2 | 隐私政策 URL 可访问 | 将文档部署到公开 URL | 应用市场审核需可访问的 HTTPS URL | ☐ |
 | 4.3 | AGC 隐私政策 URL | AGC 控制台 → 应用信息 → 隐私政策 | 已填写可访问 URL，与 4.2 一致 | ☐ |
 | 4.4 | 用户首次启动提示 | 应用首次启动时弹窗 | 显示隐私政策摘要 + 「同意」/「不同意」按钮 | ☐ |
@@ -78,7 +78,7 @@
 
 | # | 检查项 | 检查方法 | 通过标准 | 状态 |
 |---|--------|----------|----------|------|
-| 5.1 | 签名配置文档 | `docs/HARMONYOS_SIGNING_GUIDE.md` | 已按指南完成全部步骤 | ☐ |
+| 5.1 | 签名配置文档 | `` | 已按指南完成全部步骤 | ☐ |
 | 5.2 | 密钥库文件存在 | `NeurovaHarmony/signing/neurova-release.p12` | 文件存在且未损坏 | ☐ |
 | 5.3 | 发布证书存在 | `signing/neurova-release.cer` | 华为签发，未过期 | ☐ |
 | 5.4 | Profile 文件存在 | `signing/neurova-profile.p7b` | 华为签发，未过期（默认 1 年） | ☐ |
@@ -283,10 +283,10 @@ hvigorw ohosTest
 
 ## 附录 B：相关文档索引
 
-- 设计文档：`docs/HARMONYOS_DESIGN.md`
-- 隐私政策：`docs/HARMONYOS_PRIVACY_POLICY.md`
-- 签名指南：`docs/HARMONYOS_SIGNING_GUIDE.md`
-- 执行计划：`.trae/documents/harmonyos-rewrite-execution-plan.md`
+- 设计文档：``
+- 隐私政策：``
+- 签名指南：``
+- 执行计划：
 - 项目说明：`AGENTS.md`
 
 ---

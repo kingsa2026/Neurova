@@ -63,17 +63,17 @@ Agent (1621 行, 37 方法)
 
 #### 持久化领域模型（Tier 4A 统一）
 
-记忆系统使用 **3+1 套 dataclass**，各司其职，通过显式转换方法互操作。架构决策详见 [ADR 索引](docs/01-architecture/adr/README.md)。
+记忆系统使用 **3+1 套 dataclass**，各司其职，通过显式转换方法互操作。架构决策详见 [ADR 索引]()。
 
 **相关 ADR**：
-- [ADR 0001: 统一 Memory dataclass](docs/01-architecture/adr/0001-unify-memory-dataclass.md) — 3+1 套量纲统一
-- [ADR 0002: 保留 UnifiedMemoryNode](docs/01-architecture/adr/0002-retain-unified-memory-node.md) — LSM-Tree 独立数据模型
-- [ADR 0003: 记忆系统架构](docs/01-architecture/adr/0003-memory-system-architecture.md) — 分层 + 深度模块
-- [ADR 0004: CognitiveStorageEngine LSM-Tree](docs/01-architecture/adr/0004-cognitive-storage-engine-lsm.md) — 五层架构 L0-L4
-- [ADR 0005: NeurovaRecallEngine 签名](docs/01-architecture/adr/0005-neurova-recall-engine-signature.md) — `memory_manager` 唯一注入点
-- [ADR 0006: embedding 工厂](docs/01-architecture/adr/0006-embedding-factory.md) — 懒加载 + 单例 + 测试重置
-- [ADR 0007: API 端点 RRF 融合](docs/01-architecture/adr/0007-semantic-search-api-rrf.md) — Okapi BM25 + RRF 三路融合
-- [ADR 0008: SessionRepository 统一接口](docs/01-architecture/adr/0008-session-repository.md) — 5 套会话存储收敛到 ABC
+- [ADR 0001: 统一 Memory dataclass]() — 3+1 套量纲统一
+- [ADR 0002: 保留 UnifiedMemoryNode]() — LSM-Tree 独立数据模型
+- [ADR 0003: 记忆系统架构]() — 分层 + 深度模块
+- [ADR 0004: CognitiveStorageEngine LSM-Tree]() — 五层架构 L0-L4
+- [ADR 0005: NeurovaRecallEngine 签名]() — `memory_manager` 唯一注入点
+- [ADR 0006: embedding 工厂]() — 懒加载 + 单例 + 测试重置
+- [ADR 0007: API 端点 RRF 融合]() — Okapi BM25 + RRF 三路融合
+- [ADR 0008: SessionRepository 统一接口]() — 5 套会话存储收敛到 ABC
 
 | dataclass | 文件 | 字段数 | temperature | importance | 用途 |
 |-----------|------|--------|-------------|------------|------|

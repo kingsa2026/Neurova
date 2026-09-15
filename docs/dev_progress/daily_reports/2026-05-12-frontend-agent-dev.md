@@ -94,7 +94,7 @@
 1. 与 `frontend-arch-dev` 协调，集成前端基础架构
 2. 与 `console-api-dev` 协调，集成后端 API
 3. 完善单元测试，确保测试覆盖率 > 80%
-4. 创建模块设计文档 `docs/dev_progress/module_designs/agent-config.md`
+4. 创建模块设计文档 ``
 
 ## 需要帮助
 

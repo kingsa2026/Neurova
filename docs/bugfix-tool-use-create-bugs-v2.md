@@ -332,4 +332,4 @@ zoom-out 全局视角下发现以下架构断裂点，不在本次修复范围�
 
 ## 关联文档
 
-- [第一轮 bug 报告](file:///e:/项目/Neurova/docs/bugfix-tool-use-create-bugs.md) — T-1~T-4 修复
+- [第一轮 bug 报告](file:///e:/项目/Neurova/) — T-1~T-4 修复

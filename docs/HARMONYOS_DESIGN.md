@@ -920,7 +920,7 @@ export class PairingStore {
 
 ### 14.1 文件使用说明
 
-本文件：`docs/HARMONYOS_DESIGN.md`
+本文件：``
 - **路径**：`e:\项目\Neurova\docs\HARMONYOS_DESIGN.md`
 - **内容**：鸿蒙 App C 方案（纯 ArkTS 重写）完整设计文档
 - **功能**：作为鸿蒙端开发的唯一设计依据，涵盖架构、统一库、页面映射、路由、配对、国际化、安全、性能、测试、计划、风险

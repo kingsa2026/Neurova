@@ -9,10 +9,8 @@
 | 版本 | 日期 | 说明 |
 |-----|-----|------|
 | 2.9 | 2026-05-12 | 新增系统设置功能：多语言支持（11种语言）、多用户管理与数据隔离、时区管理 |
-| 2.8 | 2026-05-12 | 新增融合 QwenPaw 特性的 Neurova 安全体系 2.0（工具守卫 + 技能扫描 + 认证 + 认知安全）|
-| 2.7 | 2026-05-12 | 新增融合 QwenPaw 特性的 Neurova 技能系统 2.0（公共池 + Agent 专属 + 自主进化）|
 | 2.6 | 2026-05-12 | 新增多 Agent 架构（大脑/办公室、共用小脑/脑干/脊髓）的完整设计方案 |
-| 2.5 | 2026-05-12 | 新增借鉴 QwenPaw 的 LLM 大模型配置、渠道管理和 Console 前端完整方案 |
+渠道管理和 Console 前端完整方案 |
 | 2.4 | 2026-05-12 | 完整扫描 Neurova 项目，新增所有遗漏模块的映射和详细解释 |
 | 2.3 | 2026-05-12 | 新增 LLM 配置、消息路由、渠道模块的详细映射和解释 |
 | 2.2 | 2026-05-12 | 完善了 Sleep、Skill 系统映射，新增 CLI & Console/Shell 接口层设计 |
@@ -85,9 +83,7 @@
 
 ---
 
-### 2.3 借鉴 QwenPaw 的 MultiAgentManager
 
-#### QwenPaw 的特点：
 1. **Lazy Loading**：工作区只在第一次请求时才创建，节省资源
 2. **Lifecycle Management**：启动、停止、重载工作区
 3. **Thread-safe**：使用 async lock 进行并发访问控制
@@ -98,14 +94,14 @@
 #### Neurova 的 MultiAgentManager 设计：
 
 ```python
-# Neurova 专属的 MultiAgentManager（结合 QwenPaw 优点 + 我们的架构）
+# Neurova 专属的 MultiAgentManager
 
 class MultiAgentManager:
     """
     多 Agent 管理器
     - 每个 Agent 有自己的大脑（Memory DB）和办公室（Workspace）
     - 所有 Agent 共用 Plan Orchestrator（小脑）、Execution Engine（脑干）和 Infrastructure（脊髓）
-    - Lazy Loading + Parallel Startup + Hot Reload（借鉴 QwenPaw）
+ - Lazy Loading + Parallel Startup + Hot Reload
     """
 
     def __init__(self):
@@ -128,7 +124,7 @@ class MultiAgentManager:
 
     async def get_agent(self, agent_id: str) -> NeurovaAgent:
         """
-        获取 Agent（Lazy Loading，借鉴 QwenPaw）
+ 获取 Agent
         - 如果 Agent 不存在，创建它的大脑（Memory DB）和办公室（Workspace）
         - 但小脑、脑干、脊髓是共用的，不需要重复创建
         """
@@ -136,7 +132,7 @@ class MultiAgentManager:
         if agent_id in self.agents:
             return self.agents[agent_id]
         
-        # 检查并启动 Agent（借鉴 QwenPaw 的细粒度锁策略）
+ # 检查并启动 Agent
         # ...
 
     async def execute_with_shared_cerebellum(
@@ -178,7 +174,7 @@ class MultiAgentManager:
 |------|------|
 | **共用组件的单例模式** | Plan Orchestrator、Execution Engine、Provider Manager 等共用组件只创建一个实例 |
 | **Lazy Loading** | 每个 Agent 只在第一次请求时才加载，节省资源 |
-| **细粒度锁** | 借鉴 QwenPaw，允许并行初始化多个 Agent |
+允许并行初始化多个 Agent |
 | **热重载** | 单个 Agent 重载不影响其他 Agent，零停机 |
 | **记忆共享（可选）** | 允许 Agent 之间选择性地共享部分记忆，促进协作 |
 
@@ -222,9 +218,9 @@ shared:
 
 ---
 
-## 三、Neurova 技能系统 2.0（融合 QwenPaw 特性）
+## 三、Neurova 技能系统 2.0
 
-> **核心理念**：借鉴 QwenPaw 的公共池 + Agent 专属池架构，同时保持 Neurova 的自主打包、自主进化、经验调用特性！
+> **核心理念**：同时保持 Neurova 的自主打包、自主进化、经验调用特性！
 
 ---
 
@@ -270,7 +266,7 @@ shared:
 │  └─────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │  UI & API LAYER (借鉴 QwenPaw)                                  │   │
+│ │ UI & API LAYER │ │
 │  │  ├─ 技能列表 (公共池 + 专属池)                                 │   │
 │  │  ├─ 技能创建/编辑/删除                                          │   │
 │  │  ├─ 技能导入/导出 (ZIP 格式)                                    │   │
@@ -335,7 +331,6 @@ neurova/
 #### 3.2.3 核心服务类设计
 
 ```python
-# 借鉴 QwenPaw + Neurova 特色
 
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Any
@@ -353,7 +348,7 @@ class SkillSource(Enum):
 
 @dataclass
 class SkillInfo:
-    """技能信息模型 (借鉴 QwenPaw)"""
+ """技能信息模型 """
     name: str
     description: str = ""
     version_text: str = ""
@@ -393,7 +388,7 @@ class ExperienceRecord:
 # ============ 公共池服务 ============
 
 class SkillPoolService:
-    """公共技能池服务 (借鉴 QwenPaw)"""
+ """公共技能池服务 """
     
     def __init__(self, pool_dir: Path):
         self.pool_dir = pool_dir
@@ -416,7 +411,7 @@ class SkillPoolService:
         pass
     
     def import_from_hub(self, hub_url: str, version: str = "") -> SkillInfo:
-        """从 Hub 导入技能 (借鉴 QwenPaw)"""
+ """从 Hub 导入技能 """
         pass
     
     def export_skill(self, skill_name: str, output_path: Path) -> bool:
@@ -426,14 +421,13 @@ class SkillPoolService:
 # ============ Agent 技能服务 ============
 
 class SkillService:
-    """Agent 技能服务 (借鉴 QwenPaw + Neurova 特色)"""
+ """Agent 技能服务 """
     
     def __init__(self, workspace_dir: Path, agent_id: str):
         self.workspace_dir = workspace_dir
         self.agent_id = agent_id
         self.skills_dir = workspace_dir / "skills"
     
-    # ============ QwenPaw 风格的基础功能 ============
     
     def list_skills(self) -> List[SkillInfo]:
         """列出 Agent 的所有技能"""
@@ -569,12 +563,11 @@ class SkillPackager:
 
 ---
 
-### 3.3 UI & API 设计（借鉴 QwenPaw）
+### 3.3 UI & API 设计
 
 #### 3.3.1 API 端点设计
 
 ```python
-# 借鉴 QwenPaw 的 API 设计
 
 # 技能相关 API
 /api/skills
@@ -620,7 +613,7 @@ class SkillPackager:
 /api/skills/pool/{skill_name}/download
     POST   /                          # 公共池 → Agent
 
-# Hub API (借鉴 QwenPaw)
+# Hub API 
 /api/skills/hub
     GET    /search                    # 搜索 Hub 技能
     POST   /install/start             # 开始安装
@@ -640,13 +633,7 @@ class SkillPackager:
 
 | 功能模块 | 说明 | 来源 |
 |---------|------|------|
-| 技能列表 | 显示公共池 + Agent 专属技能 | QwenPaw |
-| 技能创建/编辑 | 可视化技能编辑器 | QwenPaw |
-| 技能导入/导出 | ZIP 格式导入导出 | QwenPaw |
-| Hub 技能商店 | 搜索、安装、评分 | QwenPaw |
-| 技能配置 | 技能参数配置 | QwenPaw |
-| 标签管理 | 技能分类标签 | QwenPaw |
-| 公共池同步 | Agent ↔ 公共池 | QwenPaw |
+| Hub 技能商店 | 搜索、安装
 | **技能进化历史** | 查看技能进化过程 | **Neurova 特色** |
 | **经验调用面板** | 查看相似场景经验 | **Neurova 特色** |
 | **技能效果评估** | 技能使用效果统计 | **Neurova 特色** |
@@ -654,9 +641,7 @@ class SkillPackager:
 
 ---
 
-### 3.4 与 QwenPaw 的对比与融合
 
-| 特性 | QwenPaw | Neurova 2.0 |
 |-----|---------|-------------|
 | **存储架构** | 内置 + 公共池 + 工作区 | ✅ 相同 + **经验知识库** |
 | **SkillService** | ✅ 完整 | ✅ 保留 + **进化功能** |
@@ -673,7 +658,7 @@ class SkillPackager:
 
 ### 3.5 实施路线图
 
-1. **Phase 1**: 实现基础架构（借鉴 QwenPaw）
+1. **Phase 1**: 实现基础架构
    - SkillService, SkillPoolService
    - 四层存储结构
    - 基础 API
@@ -684,7 +669,6 @@ class SkillPackager:
    - SkillPackager
 
 3. **Phase 3**: UI 整合
-   - 借鉴 QwenPaw 的 UI
    - 添加 Neurova 特色面板
 
 4. **Phase 4**: 集成测试与优化
@@ -831,9 +815,9 @@ class SkillPackager:
 
 ---
 
-## 四、Neurova 安全体系 2.0（借鉴 QwenPaw）
+## 四、Neurova 安全体系 2.0
 
-> **核心理念**：采用 QwenPaw 成熟的三层安全架构，结合 Neurova 的认知增强特性，构建全面的安全防护体系。
+> **核心理念**：结合 Neurova 的认知增强特性，构建全面的安全防护体系
 
 ---
 
@@ -1424,7 +1408,7 @@ class LanguageService:
         }
 ```
 
-#### 前端 language 配置（参考 QwenPaw）
+#### 前端 language 配置
 
 ```typescript
 import i18n from "i18next";
@@ -3011,9 +2995,7 @@ neurova/
 
 ---
 
-## 九、与 QwenPaw 的本质区别
 
-| 维度 | QwenPaw | Neurova CogArch 2.0 |
 |-----|---------|---------------------|
 | 核心理念 | Workspace + Service Manager | 大脑 + 小脑 + 手脚 |
 | 设计焦点 | 工程化 | 认知增强 + 强执行力 |
@@ -3124,7 +3106,7 @@ CogArch 2.0 架构          现有 Neurova 模块
 | **基础设施 - LLM 配置** | neurova/llm/provider_manager.py | LLMProviderManager | ✅ 已实现 | 统一管理多个 API Key 和服务商配置 |
 | **基础设施 - 预设管理** | neurova/llm/presets.py | LLMPresetRegistry | ✅ 已实现 | 模型预设配置管理 |
 | **接口层 - CLI** | neurova/cli.py | NeurovaCLI | ✅ 已实现 | 命令行交互界面（chat, recall, skills等）|
-| **接口层 - Console/Shell** | (借鉴QwenPaw) | ConsoleChannel | ✅ 可借鉴 | Web控制台接口（streaming, upload等）|
+| **接口层 - Console/Shell** | | ConsoleChannel | ✅ 可借鉴 | Web控制台接口（streaming, upload等）|
 | **接口层 - API 路由** | neurova/core/api_router.py | ApiRouter | ✅ 已实现 | API 路由管理 |
 | **接口层 - API 标准** | neurova/core/api_standard.py | ApiStandard | ✅ 已实现 | API 标准定义 |
 | **功能壳 / 渠道连接** | neurova/channels/manager.py | ChannelManager | ✅ 已实现 | 渠道管理 |
@@ -3161,8 +3143,8 @@ CogArch 2.0 架构          现有 Neurova 模块
 | **基础设施 - 睡眠配置** | neurova/core/sleep_config_manager.py | SleepConfigManager | ✅ 已实现 | 睡眠配置管理 |
 | **基础设施 - 睡眠阶段配置** | neurova/core/sleep_phase_config_manager.py | SleepPhaseConfigManager | ✅ 已实现 | 睡眠阶段配置管理 |
 | **基础设施 - 多代理睡眠** | neurova/core/multi_agent_sleep_manager.py | MultiAgentSleepManager | ✅ 已实现 | 多代理睡眠管理 |
-| **基础设施** | neurova/core/service_manager.py | ServiceManager | ✅ 已实现 | 服务管理（借鉴 QwenPaw）|
-| | neurova/core/workspace.py | Workspace | ✅ 已实现 | 工作空间（借鉴 QwenPaw）|
+| **基础设施** | neurova/core/service_manager.py | ServiceManager | ✅ 已实现 | 服务管理|
+| | neurova/core/workspace.py | Workspace | ✅ 已实现 | 工作空间|
 | | neurova/core/event_bus.py | EventBus | ✅ 已实现 | 事件总线 |
 | | neurova/core/config_manager.py | ConfigManager | ✅ 已实现 | 配置管理 |
 | | neurova/core/logger.py | Logger | ✅ 已实现 | 日志系统 |
@@ -3171,7 +3153,7 @@ CogArch 2.0 架构          现有 Neurova 模块
 
 ### 8.3 Neurova 现有模块分析 - 优势与缺失
 
-#### ✅ 已有的核心优势（强于 QwenPaw）
+#### ✅ 已有的核心优势
 1. **认知系统** - 完整的元认知、自我反思、自我优化
 2. **记忆系统** - EKI 贝叶斯优化 + 时序知识图谱 + 工作记忆增强 + 温度系统
 3. **项目协作** - 完整的项目管理 + 任务看板 + 团队管理 + 文件流
@@ -3183,7 +3165,7 @@ CogArch 2.0 架构          现有 Neurova 模块
 2. **ToolEngine** - 智能工具调用、参数填充、工具链
 3. **ExecutionMonitor** - 完整的执行追踪、监控、超时处理
 4. **增强的 WorkflowEngine** - 状态机、暂停/恢复、回滚
-5. **安全系统** - ToolGuard 类似的防护机制（QwenPaw 有）
+5. **安全系统** - ToolGuard 类似的防护机制
 
 #### ⚠️ 已有但需要整合的模块
 1. **MultiAgentManager** - 已有雏形，需要整合到执行引擎中
@@ -3242,7 +3224,7 @@ CogArch 2.0 架构          现有 Neurova 模块
 
 ### 8.5 MCP & ACP - 标准协议集成
 
-这两个是 QwenPaw 中非常有价值的标准协议，完全可以借鉴到 Neurova 中！
+完全可以借鉴到 Neurova 中！
 
 ---
 
@@ -3254,7 +3236,6 @@ CogArch 2.0 架构          现有 Neurova 模块
 - 支持热重载
 - 统一的工具调用接口
 
-**QwenPaw 中的实现**：
 - `MCPClientManager` - 管理 MCP 客户端生命周期
 - `HttpStatefulClient` / `StdIOStatefulClient` - 两种传输方式
 - 支持配置驱动，热更新
@@ -3291,8 +3272,7 @@ MCP 架构映射：
 - 支持模型切换
 - 支持配置管理
 
-**QwenPaw 中的实现**：
-- `QwenPawACPAgent` - ACP 协议实现
+- - ACP 协议实现
 - 完整的 Workspace 集成
 - 流式输出转换（从 snapshot 到 delta）
 
@@ -3352,7 +3332,7 @@ Neurova CogArch 2.0 完整协议栈：
 
 ### 8.6 CLI & Console/Shell - 命令行与 Web 界面接口
 
-这两个是与用户直接交互的接口层，Neurova 已有 CLI，QwenPaw 有完善的 Web Console，我们可以借鉴结合！
+这两个是与用户直接交互的接口层，Neurova 已有 CLI，我们可以借鉴结合！
 
 ---
 
@@ -3387,8 +3367,8 @@ Neurova CogArch 2.0 完整协议栈：
 
 **未来发展方向**：
 1. **增强 CLI 功能**
-   - 支持流式输出（QwenPaw 那样）
-   - 支持文件上传（类似 QwenPaw 的 console/upload）
+ - 支持流式输出
+ - 支持文件上传
    - 支持会话管理（切换会话、加载历史会话）
 
 2. **与 CogArch 集成**
@@ -3399,9 +3379,8 @@ Neurova CogArch 2.0 完整协议栈：
 
 #### 8.6.2 Console/Shell (Web 控制台)
 
-**借鉴来源**：QwenPaw 的 `console.py` → **接口层 - Web Console**
+**借鉴来源**
 
-**QwenPaw 中的功能**：
 - ✅ `/console/chat` - 聊天接口（streaming response）
 - ✅ `/console/chat/stop` - 停止运行中的对话
 - ✅ `/console/upload` - 文件上传
@@ -3429,7 +3408,7 @@ Neurova CogArch 2.0 完整协议栈：
 1. **流式响应 (SSE)** - Server-Sent Events，实时展示 Agent 思考和工具调用
 2. **任务追踪器 (TaskTracker)** - 支持停止、重连、状态追踪
 3. **推送消息系统** - 用于异步事件和用户通知
-4. **审批系统** - 用于需要用户确认的敏感操作（类似 QwenPaw 的 ToolGuard）
+4. **审批系统** - 用于需要用户确认的敏感操作
 5. **文件上传与处理** - 完善的文件管理机制
 6. **调试界面** - 查看后端日志和系统状态
 
@@ -3610,7 +3589,7 @@ Neurova CogArch 2.0 接口层架构：
 | **Constitution** | `constitution.py` | 宪法/基本指令 | **认知核** - 核心原则与价值观 |
 | **Personality** | `personality.py` | 人格设定 | **认知核** - 性格特征与行为风格 |
 
-**重要性**：这是 Neurova 区别于 QwenPaw 的重要特色！提供了人格化的基础，让 Agent 有自己的性格、价值观和自主行为能力！
+**重要性**：让 Agent 有自己的性格、价值观和自主行为能力！
 
 ---
 
@@ -3691,7 +3670,7 @@ Neurova CogArch 2.0 接口层架构：
 
 ### 8.9 完整的 Neurova 功能模块总结
 
-#### 核心特色（Neurova 特有，超越 QwenPaw）
+#### 核心特色
 
 1. **完整的认知系统**
    - Cognition Orchestrator（待实现）
@@ -3738,27 +3717,27 @@ Neurova CogArch 2.0 接口层架构：
    - 技能修补
    - 技能压缩
 
-#### 基础设施（与 QwenPaw 互补）
+#### 基础设施
 
 1. **接口层**
    - CLI（命令行界面）
-   - Web Console（Web 控制台，借鉴 QwenPaw）
+ - Web Console
    - Channels（多渠道连接：Discord、QQ、飞书、Telegram、微信、钉钉等）
    - MessageRouter（消息路由）
    - ApiRouter（API 路由）
    - ApiStandard（API 标准）
-   - ACP Server（Agent 控制协议，借鉴 QwenPaw）
+ - ACP Server
 
 2. **执行引擎（待完善）**
    - PlanOrchestrator（任务编排器，小脑）
-   - ToolEngine（工具引擎，借鉴 QwenPaw 的 MCP）
+ - ToolEngine
    - WorkflowEngine（工作流引擎）
    - MultiAgentManager（多代理协作）
    - ExecutionMonitor（执行监控）
 
 3. **基础设施**
-   - ServiceManager（服务管理，借鉴 QwenPaw）
-   - Workspace（工作空间，借鉴 QwenPaw）
+ - ServiceManager
+ - Workspace
    - EventBus（事件总线）
    - ConfigManager（配置管理）
    - Logger（日志系统）
@@ -3774,15 +3753,14 @@ Neurova CogArch 2.0 接口层架构：
 
 ---
 
-## 十一、借鉴 QwenPaw：LLM 大模型配置与渠道（含前端）
+## 十一、LLM 大模型配置与渠道（含前端）
 
-通过分析 QwenPaw 的实现，我们可以借鉴以下优秀设计：
+我们可以借鉴以下优秀设计
 
 ---
 
-### 9.1 LLM 大模型配置管理（借鉴 QwenPaw 的 Provider 系统）
+### 9.1 LLM 大模型配置管理
 
-#### QwenPaw 的优点：
 - **统一 Provider 基类和 Provider Manager**
   - 支持多个内置 Provider（OpenAI、Anthropic、Gemini、Ollama、LM Studio、OpenRouter 等）
   - 统一的接口和配置管理
@@ -3805,7 +3783,6 @@ Neurova CogArch 2.0 接口层架构：
 
 **需要新增的：**
 1. **统一 Provider 基类**
-   - 参考 QwenPaw 的 `Provider` 基类
    - 标准接口：`get_available_models()`, `create_chat_model()`, `test_connection()`
 2. **内置 Provider 支持**
    - OpenAI（兼容）
@@ -3823,9 +3800,8 @@ Neurova CogArch 2.0 接口层架构：
 
 ---
 
-### 9.2 消息渠道（借鉴 QwenPaw 的 Console 设计）
+### 9.2 消息渠道
 
-#### QwenPaw 的渠道系统：
 - **Console 渠道（核心）**
   - Web UI 界面（基于 React + TypeScript + Vite）
   - 实时 WebSocket 通信
@@ -3837,8 +3813,7 @@ Neurova CogArch 2.0 接口层架构：
 - ChannelManager
 - Discord、QQ、飞书、Telegram、微信、钉钉、WebSocket、API 等多种渠道
 
-**需要借鉴 QwenPaw 的：**
-1. **Console 渠道的 Web UI（借鉴 QwenPaw 的 console 前端）**
+1. **Console 渠道的 Web UI**
    - 会话管理（创建、加载、恢复、关闭）
    - 模型选择器（实时切换）
    - 流式渲染输出
@@ -3853,9 +3828,8 @@ Neurova CogArch 2.0 接口层架构：
 
 ---
 
-### 9.3 Console 前端架构（借鉴 QwenPaw）
+### 9.3 Console 前端架构
 
-#### QwenPaw 的 console 前端架构：
 ```
 console/
 ├── src/
@@ -3881,7 +3855,6 @@ console/
 
 #### Neurova 可以借鉴的前端页面功能：
 
-| 页面 | Neurova 已有 | 需要借鉴 QwenPaw |
 |-----|-------------|---------------|
 | **Chat** | WebUI 存在 | 模型选择器、会话管理、消息搜索、流式渲染、任务追踪 |
 | **Agent/Config** | 部分功能 | 上下文管理、工具调用级别、LLM 重试/速率限制、React Agent 配置 |
@@ -3898,10 +3871,10 @@ console/
 
 ---
 
-### 9.4 LLM 提供商与模型配置页面设计（借鉴 QwenPaw）
+### 9.4 LLM 提供商与模型配置页面设计
 
 #### 后端：
-1. **Provider Manager API**（参考 QwenPaw 的 `provider_manager.py`）
+1. **Provider Manager API**
    - 列出所有提供商
    - 测试连接
    - 配置管理
@@ -3910,7 +3883,7 @@ console/
 2. **模型槽配置**
 
 #### 前端：
-1. **Models 页面**（参考 QwenPaw 的 `Settings/Models`）
+1. **Models 页面**
    - 远程提供商卡片（ProviderCard）
    - 本地提供商卡片（LocalProviderCard）
    - 提供商配置弹窗（ProviderConfigModal）
@@ -3923,8 +3896,8 @@ console/
 
 ## 十二、迭代规划
 
-### 阶段 0：完善基础设施（借鉴 QwenPaw）
-- [ ] 统一 Provider 基类和 Provider Manager（借鉴 QwenPaw 的 provider 系统）
+### 阶段 0：完善基础设施
+- [ ] 统一 Provider 基类和 Provider Manager
 - [ ] 内置 Provider 支持：OpenAI、Anthropic、Gemini、Ollama、LM Studio、OpenRouter
 - [ ] 密钥安全存储与加密
 - [ ] 模型能力缓存
@@ -3932,7 +3905,7 @@ console/
 - [ ] 多模态能力探测
 
 ### 阶段 1：建立多 Agent 管理基础（共用小脑/脑干/脊髓）
-- [ ] 实现 MultiAgentManager（借鉴 QwenPaw，结合我们的架构）
+- [ ] 实现 MultiAgentManager
 - [ ] Lazy Loading + 细粒度锁 + 并行启动
 - [ ] 每个 Agent 的独立大脑（Memory DB）和办公室（Workspace）
 - [ ] 共用小脑（Plan Orchestrator）的初始化
@@ -3956,9 +3929,9 @@ console/
 ### 阶段 4：接口层（完善 Console 后端 API）
 - [ ] CLI 增强（支持多 Agent 切换）
 - [ ] MultiAgentManager API（列出 Agent、创建 Agent、重载 Agent）
-- [ ] Web Console API（借鉴 QwenPaw 的 console.py）
-- [ ] Console 静态资源服务（借鉴 QwenPaw 的 console_static.py）
-- [ ] Provider Manager API（借鉴 QwenPaw）
+- [ ] Web Console API
+- [ ] Console 静态资源服务
+- [ ] Provider Manager API
   - [ ] 列出提供商
   - [ ] 配置管理
   - [ ] 连接测试
@@ -3974,7 +3947,7 @@ console/
 - [ ] 模型切换
 - [ ] 配置管理
 
-### 阶段 6：Web Console 前端（借鉴 QwenPaw 的 console 前端）
+### 阶段 6：Web Console 前端
 - [ ] 基础项目架构（React + TypeScript + Vite）
 - [ ] Agent 选择器（多 Agent 切换）
 - [ ] Chat 页面
@@ -4017,7 +3990,7 @@ console/
 
 - **小脑类比**：感谢用户的绝妙洞察！
 - **多 Agent 架构类比**：感谢用户提出的「大脑/办公室 + 共用小脑/脑干/脊髓」绝妙类比！
-- **QwenPaw**：工程化架构、工具系统、安全机制、MCP/ACP 协议实现、Web Console、MultiAgentManager
+工程化架构、工具系统、安全机制、MCP/ACP 协议实现、Web Console、MultiAgentManager
 - **MCP (Model Context Protocol)**：标准化的工具连接协议
 - **ACP (Agent Control Protocol)**：标准化的 Agent 控制协议
 - **认知科学**：记忆三层模型、认知循环理论

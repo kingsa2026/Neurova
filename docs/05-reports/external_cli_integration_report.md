@@ -342,4 +342,4 @@ CLI v2: ✓ 通过
 ---
 
 **报告生成时间**: 2026-05-14  
-**执行人**: AI Assistant (CodeBuddy)
+**执行人**: AI Assistant

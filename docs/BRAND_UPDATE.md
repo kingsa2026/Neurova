@@ -14,15 +14,15 @@
 | 文件 | 状态 | 更新内容 |
 |------|------|----------|
 | [README.md](../README.md) | ✅ 已更新 | 项目名称、品牌口号、GitHub 链接 |
-| [docs/architecture/01-core-architecture.md](architecture/01-core-architecture.md) | ✅ 已更新 | 项目名称 |
+| [) | ✅ 已更新 | 项目名称 |
 | 其他架构文档 | 🔄 待更新 | 代码示例中的类名等 |
 
 ### 2. 新增品牌文档
 
 | 文件 | 状态 | 描述 |
 |------|------|------|
-| [docs/BRAND_GUIDELINES.md](BRAND_GUIDELINES.md) | ✅ 已创建 | 品牌指南和视觉识别规范 |
-| [docs/BRAND_UPDATE.md](BRAND_UPDATE.md) | ✅ 已创建 | 本文档 |
+| [) | ✅ 已创建 | 品牌指南和视觉识别规范 |
+| [) | ✅ 已创建 | 本文档 |
 
 ---
 
@@ -54,27 +54,21 @@
 
 以下文档中的代码示例需要更新类名和模块名:
 
-1. **docs/architecture/02-memory-system.md**
    - `MemoryManager` 保持不变
    - 配置文件中的 `framework.name` 改为 "KingPolo"
 
-2. **docs/architecture/03-message-routing.md**
    - 代码示例保持不变 (通用类名)
    - 文档描述中的 "AgentFlow" 改为 "KingPolo"
 
-3. **docs/architecture/04-multi-agent-collaboration.md**
    - `AgentOrchestrator` 保持不变
    - 文档描述更新
 
-4. **docs/architecture/05-skill-system.md**
    - `SkillManager` 保持不变
    - 文档描述更新
 
-5. **docs/architecture/06-plugin-cli-system.md**
    - CLI 命令从 `agentflow` 改为 `kingpolo`
    - 模块名从 `agentflow` 改为 `kingpolo`
 
-6. **docs/architecture/07-implementation-plan.md**
    - API 路径从 `/api/v1/agentflow/` 改为 `/api/v1/kingpolo/`
    - Python SDK 从 `agentflow` 改为 `kingpolo`
 

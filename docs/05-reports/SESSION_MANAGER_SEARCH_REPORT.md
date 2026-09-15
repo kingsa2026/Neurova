@@ -85,7 +85,7 @@ class SessionManager:
 
 ### 选项2: 检查其他版本
 - 检查 `backup_neuUI_full.zip` 是否包含此文件
-- 检查 `QwenPaw-main` 项目是否有类似实现
+- 检查 项目是否有类似实现
 
 ### 选项3: 重新实现
 - 基于测试文件的接口要求重新实现

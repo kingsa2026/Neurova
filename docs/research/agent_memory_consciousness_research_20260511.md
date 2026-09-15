@@ -109,7 +109,6 @@ AI觉知分为四个相互关联但功能独立的维度：
 3. **自适应计算时间(ACT)**：快思考/慢思考自动切换
 4. **推理时间扩展**：无需重训练即可增加推理深度
 
-### 1.6 自进化Agent框架 - Hermes
 
 **核心突破**：从"工具"进化到"物种"
 
@@ -157,7 +156,6 @@ AI觉知分为四个相互关联但功能独立的维度：
 | **Procedural Memory** | 无技能/工具调用记忆 | CoALA第四层 |
 | **治理记忆** | 无审计追溯层 | Governance Memory |
 | **神经架构** | 无分层推理机制 | HRM双模块 |
-| **自进化** | 无技能沉淀与自我修补 | Hermes Skills |
 
 ---
 
@@ -440,12 +438,9 @@ class SkillsManager:
 9. [Less is More: Recursive Reasoning - arXiv:2510.04871](https://arxiv.org/abs/2510.04871)
 
 ### 自进化Agent研究
-10. [Hermes Agent - Nous Research](https://github.com/NousResearch/hermes-agent)
-11. [OpenClaw Agent](https://github.com/openclaw/agent)
 12. [GEPA: Genetic-Pareto Prompt Evolution - ICLR 2026](https://arxiv.org/abs/2603.XXXXX)
 
 ### Agent框架生态研究
 13. [LangChain Framework](https://github.com/langchain-ai/langchain)
 14. [CrewAI Framework](https://github.com/crewai/crewai)
-15. [Claude Code - Anthropic](https://docs.anthropic.com/en/docs/claude-code)
 16. [AutoGen - Microsoft](https://github.com/microsoft/autogen)

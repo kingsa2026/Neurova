@@ -328,4 +328,61 @@ checkpoint/信号/人工 → TriggerJob（SQLite 异步队列，claim/attempts/s
 | DiscoverSkills 独立元数据工具 | 可选增强 | 现由目录+$mention+阶梯承担发现职能，缺口不致命 |
 | replay 种子自动采集器 | 半接线 | `build_seed_from_successful_run` 白名单已就绪，缺"历史成功 run → 种子集"的持久化约定 |
 | embedding 档生产实测 | 待办 | 单测以替身引擎验证；真机首轮向量化待一次 live 走查 |
-| pool/API 双轨用户模型分裂（越权面） | 存量债 | 基线巡检发现（skill_pool_api 鉴权缺位），不属 OpenSpace 十项，另案处理 |
+| pool/API 双轨用户模型分裂（越权面） | ~~存量债~~ **已偿** | 基线巡检发现的 skill_pool_api 鉴权缺位，已由 Wave F 路由收口 + Wave H 三层库整体根治，见 §8 |
+
+---
+
+## 8. Wave F/H 三层技能库落地终态（2026-09-15，未提交）
+
+> 驱动：用户五需求——agent 私库 / 用户私库 / 公共库三层；agent 只可调用「自己私库 + 所属用户私库 + 公共库」；agent→用户推送（用户确认）、用户→公共（管理员审批）、公共升级反向广播（用户确认后迭代）。前置：SkillPoolManager 孤岛退役（归属词汇 `pool_type/owner_user_id` 被吸收，copy+lineage 定案，键注入教训入 W1）。
+
+**Wave H 后端 58 用例绿（h0=10/h1=10/h2=16/h3=7/h4=8，含参数化）；前端 transfers 页签 4 测 + i18n 12 键×11 语 + vue-tsc 净。**
+
+| 波次 | 落点（文件:锚点） | 关键语义 |
+|---|---|---|
+| H0 属主门 | 新模块 `api/agent_access.py`；agent.py list/get/update/delete；agent_config `owner_user_id` 落盘；channel_router 读 owner 修复（原恒 None） | admin 全量；属主匹配；**无属主=admin only（与 chat 执行闸同口径）**；get 越权 **deny≡404**（防枚举）；403 闸先于副作用 |
+| H1 三层存储 | 新模块 `skills/library_service.py`；skill_service `pool_type/owner_user_id` 条目字段 | 单引擎三目录命名空间：agent=`data/agents/{aid}/skills`、user=`data/users/{ukey}/skills`（ukey=`u:{jwt_sub}`/`ch:{渠道}:{sender}`）、public=`data/public/skills`；同进程单例缓存防 last-writer-wins；`_KEY_RE` 命名空间+字母段白名单（`u:..` 穿越拒）；`apply_transfer` **副本+血缘**（config.transferred_from），跨源同名顶替拒绝，卡片快照版本优先（override_version） |
+| H2 轮级可见视图 | 新模块 `skills/skill_visibility.py`；turn_context `_skill_view_var`；三执行链咽喉（tool_executor.execute_skill_tool / loops.base / agent_core._orchestrator_executor）+ orchestrator 目录与工具面 view-first | registry≠visibility（registry 是执行池，视图是白名单）；view 外执行拒绝**且不记漏斗账**（未发生的应用不污染质量信号）；内建技能并入 agent 层底（否则会被视图滤成不可见）；nearest-wins 优先级 **agent>user>public**；`resolve_user_key`：ch: 优先，系统身份（""/default/system/anonymous/unknown）→None |
+| H3 公共库真人化 | marketplace approve → `_materialize_public_entry` | kind 分支：create=注册进 public 库；update=就地 update_auto_skill（保台账）；提交/审核 404/400/409 契约齐 |
+| H4 推送升级链 | 新模块 `skills/skill_transfers.py`（JSON 原子写，env `NEUROVA_SKILL_TRANSFERS`）；skill_pool_api transfers 端点族；`_broadcast_public_upgrade` | create 仅 agent_to_user（用户→公共走 marketplace 审批面，双轨不互抄）；transfer_key pending 去重；**confirm_owner 字段**（公共→agent 的确认人=agent 属主账号，缺省 admin）；accept 非确认人非 admin=403、非 pending=409；公共升级广播扫 transferred_from==public 的 manifest→upgrade transfer+站内通知，已新则跳 |
+| H5 前端 | SkillPoolPage「推送确认」页签（卡片+接受/拒绝）、skill-pool.ts 四 API | 列表按 confirm_owner 作用域；kind 标签区分首推/升级 |
+
+**设计定案（用户未答选择题，按推荐默认执行，可复议）**：「所属用户」=当前会话用户；市场安装落**用户库**；agent→用户推送**首次也要确认**（与升级同型）；各库漏斗/信任**分库记账**，公共库聚合记账。
+
+**测试卫生**：conftest 新增 autouse `_isolate_turn_context`（轮前后 clear_turn_state）——根治同线程直调链把 SkillView 泄漏给后续用例的批跑污染（生产 asyncio 任务上下文天然隔离，不受影响）。
+
+**全量回归**：后端 6737 passed / 4 failed——4 条均为预存/并行中间态（3 条 channel-handler + mcp_catalog 鉴权=api 套件状态泄漏，stash 证与本波无关）；`test_tools_prompt_and_schema` 与 mem_core 二条在后续运行转绿/定责并行会话。前端 vitest 187 文件 1524 全绿；i18n 守卫净。
+
+### 8.1 闭环核验轮（同日 V 轮，验收"无 bug/无断点/UI 适配"全量巡检后落地）
+
+只读巡检抓出 7 类问题，全部修复或定责；后端新增 15 用例（h1+7/h4+1/me 文件 6+1），前端 +7：
+
+| 问题 | 根因修复（文件:锚点） |
+|---|---|
+| 用户库目录 token 反解不闭环 | `library_service._dir_token` 改 `%3A` 编码 + 新增 `from_dir_token` 单源逆函数；`marketplace._broadcast_public_upgrade` 弃用 `replace("_",":",1)`（ch: 双冒号键必产非法值→accept 恒 409）；旧 `u_` 编码零存量（data/users 不存在），无迁移 |
+| 无血缘顶替缺口 | `apply_transfer`：目标同名条目**无** transferred_from（用户本地技能）→ 拒绝（原 ex_from 空短路直覆，本地实现被静默顶掉）；同源升级正例回归锁同批补 |
+| 安装 ID 路径穿越 | `skill_service.install_skill` 咽喉加 `_SAFE_SKILL_ID_RE` 白名单（manifest 自含 `../../x` 同样拒；与用户键 `_KEY_RE` 同纪律，此前仅用户键有闸） |
+| 技能库页恒空（P1） | SkillPoolPage fetch 弃 `res?.data`（拦截器已解 body，裸数组/裸 {items} 恒 undefined）→ `res?.data ?? res` 归一 + `skill_id→id` 映射（AgentSkillPage 正解样板对齐）；测试 mock 同步改**忠实形状**（假 data 包装掩盖断链的教训重犯根治） |
+| 私有页签落幽灵桶（P1） | 后端新增 `/skill-pool/me/skills` CRUD + `from-public` 自助安装（用户私库真人面，副本+血缘）；前端私有页签=我的用户库；`_pool_service` 单源化改走 `get_library("agent",…)`（端点写侧与 transfers/flush 同实例，消跨实例互踩；auth_consolidation 等既有打桩面兼容）；幽灵 `data/agents/_all` 清理 |
+| ts 五函数 404（P2） | getPrivateSkills/getSkill/createSkill/updateSkill/deleteSkill/shareSkill/pushSkill 与 /private 路由断裂且消费者仅 SkillPoolPage → 删除，页迁 me 系函数；"共享/推送池"双按钮退役为**发布到公共库**（submitSkillForReview=需求 3 管理员审批正道） |
+| 启停/执行假通道（P2） | `SkillUpdate.enabled` 行级真通道（旧 config.enabled 从不触发行级，call_skill 读行级=静默空操作）；`POST /private/{id}/execute` 补齐（AgentSkillPage 执行按钮此前恒 404，走 call_skill 咽喉）；`enableSkill` ts 透传 agent_id（旧恒落 default 库） |
+| 通知可见不可行动（P2） | NotificationPage：skill_transfer 类型色 + 详情弹窗就地确认/拒绝（transfer_id 分支，确认人=收件人非 admin，后端归属闸兜底）；复用 reviewSuccess/Error 零新键 |
+| agent→user 无生产者（P2） | AgentSkillPage 每技能卡新增**推送到我的库**（createSkillTransfer）→ 确认队列卡 → SkillPoolPage/通知双入口 accept，需求 3/4 UI 全链闭合 |
+| **需求 2 执行面断点** | 新桥 `market_registry.restore_library_skills_for_turn`：chat_pipeline 视图装配后把用户库/公共库 tool_sequence 副本物化进 agent 执行池（元目类条目留发现面不造空壳；agent 层/同名跳过，幂等）。**边界定案**：跨库代码型（marketplace zip）技能执行仍需安装落库，轮级桥只覆盖 tool_sequence 合成技能——与"marketplace 未安装条目不可执行"同语义 |
+| pool 裸字面量（P3 登记不修） | 值全一致零漂移，纯建议级；改动面 5 文件零行为收益，遵"手术刀"原则留档 |
+
+**回归（V 轮终态）**：后端 skills/api/agent/core/context **6006 passed** / 4 failed（channel-handler×3 + mem_core resource_bounding×1，均登记预存：后者=并行会话 mem_core/unified_vector_store 在途中间态）；evolution/security/channels/cognitive/llm **3333 passed / 0 failed**；前端 **189 文件 1540 全绿**（上轮 LoginPage 3 败=并行在途，本轮自愈）；vue-tsc 净；i18n 守卫 35 绿（V 轮 +6 键×11 语）。
+
+### 8.2 V 轮清零批（"解决已发现的所有问题"，同日）
+
+上轮"定责不修/待定"全部落地 + 自查新抓 3 个闭合缺口：
+
+| 项 | 修复 |
+|---|---|
+| pool 字面量单源 | `skill_visibility`/`marketplace`/`skill_pool_api` 三文件库路由字面量统一 import `POOL_*` 常量（**`manifest_source` 的 user/auto/community 是"出生来源"另一套词汇，不并入**——巡检报告该条措辞已修正）；`get_agent_skills` 顺带改走 `_pool_service` |
+| install_skill 重装清零坑（本体） | 覆盖式重装**保留 usage/identity/version_history/pool 落款/enabled**，修订链追加非重建（h1 回归锁；此前仅 apply_transfer 绕开，咽喉本体未修） |
+| 发布到公共库丢可执行体 | `MarketplaceSkillSubmit.pool_skill_id`：提交人用户私库条目**服务端白名单快照** tool_sequence/permissions 随单存档（名称/版本以库内为权威，快照在证据门**之前**防漏检）；materialize 透传→公共副本保可执行→from-public 装机不再退化元目（h3 端到端锁） |
+| 导入落点与"我的库"页签劈叉 | `/install-from-url`（body.target）与 `/install-from-zip`（Form target）新增 `me`=当前账号用户私库（pool 落款随行）；空/agent=default agent 库**存量语义零变化**（SkillMarketPage 等调用方不受影响）；SkillPoolPage 两导入按钮已传 me（其 handler 本就刷新私有页签，此前装完必空转） |
+| 误伤自纠 | 脚本化替换打到 try 块内同名 import 致缩进毁（两处）——发现即修；教训：全局字符串替换必须复核所有命中点 |
+
+**回归（清零批终态）**：新增 B/C/D 测试 3+2+1 全绿（h1 27、h3 9、me 7）；后端 skills/api/agent **3623 passed / 0 failed**；前端 vue-tsc 净 + **189 文件 1540 全绿**；启动复验 84/84、me/install 路由全挂载。剩余唯一"定责不修"项=已消除。

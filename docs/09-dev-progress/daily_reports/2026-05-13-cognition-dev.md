@@ -79,7 +79,7 @@ python test_rate_limiter_async.py
 **审查结果**：✅ **批准合并**
 
 **交付物**：
-- 详细审查报告：`docs/dev_progress/code_reviews/2026-05-13-console-api-dev-review.md`
+- 详细审查报告：``
 - 审查意见：已发送给console-api-dev和team-lead
 
 ---
@@ -238,7 +238,7 @@ python test_rate_limiter_async.py
 
 1. **修复方案**：`rate_limiter_async_fix.py`
 2. **测试脚本**：`test_rate_limiter_async.py`
-3. **审查报告**：`docs/dev_progress/code_reviews/2026-05-13-console-api-dev-review.md`
+3. **审查报告**：``
 4. **协助工具**：
    - `aiohttp_mock.py`
    - `debug_command_security_fix_detailed.py`

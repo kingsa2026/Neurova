@@ -6,7 +6,7 @@
 
 **更新日期**: 2026-05-14  
 **更新人员**: AI Assistant  
-**相关文档**: `docs/API_CALLING_SPECIFICATION.md`
+**相关文档**: ``
 
 ---
 
@@ -325,7 +325,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000
 - [FastAPI 官方文档](https://fastapi.tiangolo.com/)
 - [Pydantic 数据验证](https://docs.pydantic.dev/)
 - [Semantic Versioning](https://semver.org/)
-- `docs/API_CALLING_SPECIFICATION.md` - API 调用规范文档
+- `` - API 调用规范文档
 
 ---
 

@@ -297,7 +297,7 @@ async def post_debug_run_command(request: CommandRequest):
 
 ### 2. 每4小时提交一次进度报告 ✅
 - **报告频率**: 每4小时
-- **报告位置**: `docs/dev_progress/daily_reports/2026-05-13-console-api-dev.md`
+- **报告位置**: ``
 - **下次报告时间**: 2026-05-13 06:00
 
 ### 3. 遇到问题时立即向cognition-dev求助 ✅

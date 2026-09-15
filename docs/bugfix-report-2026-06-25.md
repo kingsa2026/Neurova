@@ -311,7 +311,7 @@ recognition.onend = () => {
 - `models.py:266` - Memory 数据类有 `neuser_id: str = ""` 字段
 - `isolation.py:56` - IsolationContext 有 `neuser_id: str = "default"` 字段
 - `agent_core.py:985` - `_init_memory_modules(neuser_id, user_id)` 三级隔离设计
-- `docs/architecture/01-core-architecture.md:479` - 文档明确记载
+- `:479` - 文档明确记载
 
 **三级隔离设计**: `agent_id`（L1）→ `neuser_id`（L2）→ `user_id`（L3），两列共存是设计意图
 

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
-> **来源**：`docs/Neurova_QwenPaw全方位对比_v4_2026-09-01.md` §19 合并补课清单（原 §12，前端功能篇 09-02 并入后重新编号）的细化。每项都经代码级落点核实（文件:行号），含计划撰写时的现场复核修正（见 §0）。
+> **来源**： §19 合并补课清单（原 §12，前端功能篇 09-02 并入后重新编号）的细化。每项都经代码级落点核实（文件:行号），含计划撰写时的现场复核修正。
 >
 > **测试纪律**（用户长期规则）：临时验证脚本即用即删；正式测试放 `tests/unit/<域>/`。注意 `.gitignore:269` 有 `/tests/` 规则——**新增测试文件必须 `git add -f`**。
 >
@@ -784,7 +784,7 @@ git commit -m "docs: CONTRIBUTING + SECURITY 补齐 — DX 补课 P2-b"
 
 **Files:**
 - Test: `tests/unit/memory/test_moe_background_index.py`（新建）
-- Modify: `docs/Neurova_QwenPaw全方位对比_v4_2026-09-01.md`（§5/§12 P3-b 行加勘误注记）
+- Modify: （§5/§12 P3-b 行加勘误注记）
 
 - [ ] **Step 1: 写行为测试**（锁定既有实现，防未来回归）
 
@@ -850,13 +850,13 @@ Expected: 3 PASS（若 FAIL，读实现修正测试对齐真实语义——本�
 
 - [ ] **Step 3: v4 文档勘误（✅ 已完成——09-02 两篇对比合并为一份文档时写入，本步跳过）**
 
-勘误已落在 `docs/Neurova_QwenPaw全方位对比_v4_2026-09-01.md` §5 数据层段与 §11 评分表数据层行（NV 5→5.5）；P3-b 补课行见该文档 §19 合并补课清单。本 Task 仅剩 Step 1/2 的行为锁定测试与 Step 4 提交。
+勘误已落在 §5 数据层段与 §11 评分表数据层行（NV 5→5.5）；P3-b 补课行见该文档 §19 合并补课清单。本 Task 仅剩 Step 1/2 的行为锁定测试与 Step 4 提交。
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add -f tests/unit/memory/test_moe_background_index.py
-git add docs/Neurova_QwenPaw全方位对比_v4_2026-09-01.md
+git add
 git commit -m "test(memory): MoE 后台渐进索引行为锁定 + v4 对比文档勘误（已实现非未实现）"
 ```
 

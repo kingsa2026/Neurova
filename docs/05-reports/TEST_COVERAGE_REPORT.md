@@ -171,7 +171,7 @@ pytest tests/unit/core/ --cov=neurova/core --cov-report=html
 ## 相关文档
 
 - [conftest.py](tests/unit/core/conftest.py) - 共享测试配置和 fixtures
-- [测试指南](../docs/testing/TESTING_GUIDE.md) - 测试最佳实践
+- [测试指南] - 测试最佳实践
 
 ## 维护指南
 

@@ -12,7 +12,7 @@
 
 ### 1.1 功能描述
 
-实现 Neurova CogArch 2.0 的技能系统2.0架构，融合 QwenPaw 的成熟设计（公共池 + Agent 专属池）与 Neurova 特色功能（自主进化、经验调用、自主打包）。
+实现 Neurova CogArch 2.0 的技能系统2.0架构，经验调用、自主打包）
 
 主要功能：
 - **公共技能池管理**：所有 Agent 共享的技能池，支持从 Hub 安装、同步内置技能
@@ -25,7 +25,7 @@
 ### 1.2 设计依据
 
 - **NEUROVA_CogArch_2.0.md 第3章**：技能系统2.0完整设计
-- **借鉴 QwenPaw**：SkillPoolService、SkillService 基础架构
+SkillPoolService、SkillService 基础架构
 - **Neurova 特色**：SkillsEvolutionEngine、ExperienceCaller、SkillPackager
 
 ### 1.3 与其他模块的关系
@@ -57,7 +57,7 @@ class SkillSource(Enum):
 
 @dataclass
 class SkillInfo:
-    """技能信息模型（借鉴 QwenPaw + Neurova 扩展）"""
+ """技能信息模型"""
     name: str
     description: str = ""
     version_text: str = "0.1.0"
@@ -99,7 +99,7 @@ class ExperienceRecord:
 
 ```python
 class SkillPoolService:
-    """公共技能池服务（借鉴 QwenPaw）"""
+ """公共技能池服务"""
 
     def __init__(self, pool_dir: Path, registry: Optional[SkillRegistry] = None):
         """初始化公共池服务"""
@@ -140,9 +140,8 @@ class SkillPoolService:
 
 ```python
 class SkillService:
-    """Agent 技能服务（借鉴 QwenPaw + Neurova 特色）"""
+ """Agent 技能服务"""
 
-    # ============ QwenPaw 风格的基础功能 ============
 
     def __init__(self, workspace_dir: Path, agent_id: str, registry: Optional[SkillRegistry] = None):
         """初始化 Agent 技能服务"""
@@ -430,8 +429,8 @@ class SkillPackager:
 
 ### 8.1 参考资料
 
-- `docs/NEUROVA_CogArch_2.0.md` 第3章：技能系统2.0设计
-- QwenPaw 官方文档：Plugin 架构设计
+- `` 第3章：技能系统2.0设计
+Plugin 架构设计
 - Python dataclasses 官方文档
 
 ### 8.2 相关文件

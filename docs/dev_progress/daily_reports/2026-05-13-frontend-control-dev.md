@@ -99,7 +99,7 @@ neurova-ui/src/pages/Control/
 - 目标：将测试覆盖率提高到 80% 以上
 
 ### 3. 创建模块设计文档
-- 创建 `docs/dev_progress/module_designs/control_page.md`
+- 创建 ``
 - 记录架构设计、组件层次、API 接口
 
 ### 4. E2E 测试（可选）
@@ -113,8 +113,8 @@ neurova-ui/src/pages/Control/
 - **任务17（Control 页面）**: 100% 完成
 - **代码迁移**: 100% 完成
 - **组件集成**: 100% 完成
-- **进度跟踪表**: 已更新（`docs/dev_progress/progress_tracker.md`）
-- **每日报告**: 已创建（`docs/dev_progress/daily_reports/2026-05-12-frontend-control-dev.md`）
+- **进度跟踪表**: 已更新
+- **每日报告**: 已创建
 
 ---
 

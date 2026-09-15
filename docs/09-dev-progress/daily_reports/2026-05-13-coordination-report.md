@@ -125,7 +125,7 @@ allowed, info = await self.limiter.is_allowed(client_ip)  # ❌ 错误！
 - ✅ `neurova/llm/providers/` (6个Provider实现)
 - ✅ `neurova/api/endpoints/provider.py` (16.01 KB)
 - ✅ `neurova/tests/test_provider_manager.py` (9.04 KB)
-- ✅ `docs/dev_progress/module_designs/provider_enhanced.md` (19.39 KB)
+- ✅ `` (19.39 KB)
 
 **缺失**：
 - ❌ 每日报告（`docs/dev_progress/daily_reports/` 下无）
@@ -153,7 +153,7 @@ allowed, info = await self.limiter.is_allowed(client_ip)  # ❌ 错误！
 
 **找到的工作产物**：
 - ✅ `neurova/core/acp_server.py` (36.5 KB) - 核心实现
-- ✅ `docs/dev_progress/module_designs/acp_server.md` (25.65 KB) - 设计文档
+- ✅ `` (25.65 KB) - 设计文档
 
 **设计文档显示**：
 - 状态：✅ 已完成
@@ -248,7 +248,7 @@ allowed, info = await self.limiter.is_allowed(client_ip)  # ❌ 错误！
 
 ### 参考文档
 
-- `docs/dev_progress/progress_tracker.md` - 进度跟踪表
+- `` - 进度跟踪表
 - `docs/dev_progress/module_designs/` - 模块设计文档
 - `neurova/api/middleware.py` - 速率限制中间件代码
 - `neurova-ui/src/pages/Agent/` - Agent配置页面代码

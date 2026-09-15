@@ -719,7 +719,6 @@ WorkspacePage (工作区管理页面)
 - [Zustand 官方文档](https://docs.pmnd.rs/zustand/getting-started/introduction)
 - [Vitest 官方文档](https://vitest.dev/)
 - [React Testing Library 官方文档](https://testing-library.com/docs/react-testing-library/intro/)
-- [QwenPaw 参考实现](e:/项目/Neurova/QwenPaw-1.1.6/)
 
 ### 11.2 变更日志
 

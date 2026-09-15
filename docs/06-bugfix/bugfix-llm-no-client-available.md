@@ -348,7 +348,7 @@ Invoke-WebRequest -Uri "http://localhost:9527/api/v1/console/chat" -Method POST 
 |---|---|---|
 | `neurova/llm/multi_model_client.py` | 新增 `reset()` 类方法 + chat() 自愈 + _init_lock 改 RLock | +28 行 |
 | `tests/unit/llm/test_multi_model_client_reinit.py` | 新增 6 个 TDD 测试 | +242 行 |
-| `docs/bugfix-llm-no-client-available.md` | 新增 bug 报告 | 本文件 |
+| `` | 新增 bug 报告 | 本文件 |
 
 ---
 

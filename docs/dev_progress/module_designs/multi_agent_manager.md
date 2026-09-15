@@ -22,7 +22,7 @@ MultiAgentManager 是 Neurova CogArch 2.0 多 Agent 架构的核心管理模块�
 ### 1.2 设计依据
 
 - **NEUROVA_CogArch_2.0.md 第2章**：多 Agent 架构设计（大脑/办公室 + 共用小脑/脑干/脊髓）
-- **QwenPaw 设计**：借鉴其 MultiAgentManager 的 Lazy Loading、细粒度锁、Hot Reload 设计
+借鉴其 MultiAgentManager 的 Lazy Loading、细粒度锁、Hot Reload 设计
 
 ### 1.3 与其他模块的关系
 
@@ -182,7 +182,7 @@ async def initialize_shared_components(
 ```python
 async def get_agent(self, agent_id: str) -> NeurovaAgent:
     """
-    获取 Agent（Lazy Loading，借鉴 QwenPaw）
+ 获取 Agent
     
     如果 Agent 不存在，创建它的大脑（Memory DB）和办公室（Workspace），
     但小脑、脑干、脊髓是共用的，不需要重复创建。
@@ -593,8 +593,8 @@ async def execute_with_shared_cerebellum(
 
 ### 8.1 参考资料
 
-- `docs/NEUROVA_CogArch_2.0.md` 第2章：多 Agent 架构设计
-- QwenPaw 设计文档：MultiAgentManager 设计
+- `` 第2章：多 Agent 架构设计
+MultiAgentManager 设计
 
 ### 8.2 相关文件
 

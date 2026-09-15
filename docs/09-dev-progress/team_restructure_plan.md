@@ -49,7 +49,7 @@
 | 14:00-16:00 | 代码自我审查，准备提交审查 | 代码符合TypeScript严格模式 |
 | 16:00 | **最终截止时间** | 任务必须100%完成 |
 
-**每日报告要求**: 每4小时提交一次进度报告到 `docs/dev_progress/daily_reports/2026-05-13-frontend-agent-dev.md`
+**每日报告要求**: 每4小时提交一次进度报告到 ``
 
 ---
 
@@ -78,7 +78,7 @@
 
 **紧急协助**: 安排cognition-dev协助修复速率限制中间件bug（01:00前完成）
 
-**每日报告要求**: 每4小时提交一次进度报告到 `docs/dev_progress/daily_reports/2026-05-13-console-api-dev.md`
+**每日报告要求**: 每4小时提交一次进度报告到 ``
 
 ---
 
@@ -103,7 +103,7 @@
 **关键问题**: 缺少设计文档，未提交日报
 
 **追赶计划**:
-- 今日内补充设计文档 `docs/dev_progress/module_designs/workflow_engine_enhanced.md`
+- 今日内补充设计文档 ``
 - 今日内提交每日报告
 - 明天16:00前完成任务
 
@@ -299,13 +299,13 @@
 ## 📎 附件
 
 ### 参考文档
-- `docs/dev_progress/progress_tracker.md` - 进度跟踪表
-- `docs/dev_progress/team_launch_report.md` - 原团队启动报告
-- `docs/dev_progress/daily_reports/2026-05-13-coordination-report.md` - 协调报告
+- `` - 进度跟踪表
+- `` - 原团队启动报告
+- `` - 协调报告
 
 ### 待创建文档
-- `docs/dev_progress/team_restructure_announcement.md` - 团队重组公告
-- `docs/dev_progress/sprint_plan.md` - 冲刺计划（48小时）
+- `` - 团队重组公告
+- `` - 冲刺计划（48小时）
 
 ---
 
