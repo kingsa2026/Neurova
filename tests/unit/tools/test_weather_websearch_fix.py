@@ -1,7 +1,7 @@
 """
 天气 / 网络搜索工具执行修复 — 回归测试
 
-根因（本次修复）：
+根因（历史修复，契约仍有效）：
   R-1: _execute_weather 使用 User-Agent: Mozilla/5.0。
        wttr.in 对浏览器 UA 返回完整 HTML 网页（~12KB），导致 format=3 / lang=zh
        参数失效，返回一整页 HTML 污染结果（LLM 无法解析、前端展示乱码），
@@ -13,11 +13,14 @@
 修复：
   F-1: weather 改用 curl UA，wttr.in 才返回 format=3 精简文本；并加 HTML 兜底提取。
   F-2: web_search 改用 Bing HTML 接口（無 JS 请求可解析的 b_caption / b_lineclamp 摘要）。
+
+桩点说明（2026-09-14）：_blocking_fetch 已委托共享抓取层 neurova.http_fetch.fetch_text
+（curl_cffi 浏览器 TLS 指纹优先，urllib 兜底），不再直接调 urllib.request.urlopen。
+本文件统一桩 fetch_text 边界，UA/URL 断言落在 fetch_text 调用参数上。
 """
 
 import pytest
 from unittest.mock import Mock, patch
-import urllib.request
 
 
 def _make_executor():
@@ -36,18 +39,7 @@ def _make_executor():
     return ToolExecutor(agent)
 
 
-def _urlopen_returning(body_bytes):
-    """构造一个模拟 urllib.request.urlopen 返回值的 context manager。
-
-    urlopen 返回的对象需支持 `with ... as resp:`，且 resp.read() 返回 bytes。
-    """
-    resp = Mock()
-    resp.read = Mock(return_value=body_bytes)
-
-    cm = Mock()
-    cm.__enter__ = Mock(return_value=resp)
-    cm.__exit__ = Mock(return_value=False)
-    return cm
+_FETCH_STUB = "neurova.http_fetch.fetch_text"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -61,15 +53,14 @@ class TestWeatherFix:
         executor = _make_executor()
         captured = {}
 
-        def fake_urlopen(req, timeout=None):
-            captured["req"] = req
-            return _urlopen_returning("许昌: 🌦️ +80°F".encode("utf-8"))
+        def fake_fetch(url, user_agent, timeout=None):
+            captured["ua"] = user_agent
+            return "许昌: 🌦️ +80°F"
 
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch(_FETCH_STUB, side_effect=fake_fetch):
             result = await executor._execute_weather({"location": "许昌"})
 
-        req = captured["req"]
-        ua = req.get_header("User-agent") or req.get_header("User-Agent")
+        ua = captured.get("ua")
         assert ua is not None, "weather 请求必须携带 User-Agent"
         assert "Mozilla" not in ua, (
             f"weather 不能用浏览器 UA（wttr.in 会返回 HTML），实际: {ua}"
@@ -82,14 +73,14 @@ class TestWeatherFix:
         executor = _make_executor()
         captured = {}
 
-        def fake_urlopen(req, timeout=None):
-            captured["req"] = req
-            return _urlopen_returning("北京: 🌫️ +69°F".encode("utf-8"))
+        def fake_fetch(url, user_agent, timeout=None):
+            captured["url"] = url
+            return "北京: 🌫️ +69°F"
 
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch(_FETCH_STUB, side_effect=fake_fetch):
             result = await executor._execute_weather({"city": "北京"})
 
-        full_url = captured["req"].full_url
+        full_url = captured["url"]
         assert "wttr.in" in full_url
         assert "format=3" in full_url, f"weather URL 必须含 format=3: {full_url}"
 
@@ -98,7 +89,7 @@ class TestWeatherFix:
         """修复后 weather 返回精简文本，而非 HTML"""
         executor = _make_executor()
 
-        with patch("urllib.request.urlopen", return_value=_urlopen_returning("许昌: 🌦️ +80°F".encode("utf-8"))):
+        with patch(_FETCH_STUB, return_value="许昌: 🌦️ +80°F"):
             result = await executor._execute_weather({"location": "许昌"})
 
         assert result.get("location") == "许昌"
@@ -116,7 +107,7 @@ class TestWeatherFix:
             "<body><h1>许昌: 🌦️ +80°F</h1></body></html>"
         )
 
-        with patch("urllib.request.urlopen", return_value=_urlopen_returning(html.encode("utf-8"))):
+        with patch(_FETCH_STUB, return_value=html):
             result = await executor._execute_weather({"location": "许昌"})
 
         weather = result.get("weather", "")
@@ -129,10 +120,10 @@ class TestWeatherFix:
         """缺地点应返回明确错误，而非调用网络"""
         executor = _make_executor()
 
-        with patch("urllib.request.urlopen") as mock_urlopen:
+        with patch(_FETCH_STUB) as mock_fetch:
             result = await executor._execute_weather({})
 
-        mock_urlopen.assert_not_called()
+        mock_fetch.assert_not_called()
         assert result.get("error") == "缺少地点信息"
 
 
@@ -147,19 +138,18 @@ class TestWebSearchFix:
         executor = _make_executor()
         captured = {}
 
-        def fake_urlopen(req, timeout=None):
-            captured["req"] = req
-            html = (
+        def fake_fetch(url, user_agent, timeout=None):
+            captured["url"] = url
+            return (
                 '<html><body>'
                 '<div class="b_caption"><p>北京天气预报，及时准确发布中央气象台天气信息</p></div>'
                 '</body></html>'
             )
-            return _urlopen_returning(html.encode("utf-8"))
 
-        with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+        with patch(_FETCH_STUB, side_effect=fake_fetch):
             result = await executor._execute_web_search({"query": "北京天气"})
 
-        full_url = captured["req"].full_url
+        full_url = captured["url"]
         assert "bing.com" in full_url, f"web_search 应使用 Bing：{full_url}"
         assert "google.com" not in full_url
 
@@ -174,7 +164,7 @@ class TestWebSearchFix:
             '</body></html>'
         )
 
-        with patch("urllib.request.urlopen", return_value=_urlopen_returning(html.encode("utf-8"))):
+        with patch(_FETCH_STUB, return_value=html):
             result = await executor._execute_web_search({"query": "北京天气"})
 
         results = result.get("results", "")
@@ -187,8 +177,8 @@ class TestWebSearchFix:
         """缺查询词应返回明确错误"""
         executor = _make_executor()
 
-        with patch("urllib.request.urlopen") as mock_urlopen:
+        with patch(_FETCH_STUB) as mock_fetch:
             result = await executor._execute_web_search({})
 
-        mock_urlopen.assert_not_called()
+        mock_fetch.assert_not_called()
         assert "error" in result

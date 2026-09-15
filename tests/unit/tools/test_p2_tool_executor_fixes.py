@@ -124,13 +124,13 @@ class TestBlockingHttpOffloaded:
     @pytest.mark.asyncio
     async def test_web_search_does_not_block_event_loop(self, monkeypatch):
         executor, agent = _make_executor(monkeypatch)
-        import urllib.request
+        from neurova import http_fetch
 
-        def fake_urlopen(req, timeout=None):
+        def fake_fetch(url, user_agent, timeout=None):
             time.sleep(0.3)
             raise RuntimeError("network disabled in test")
 
-        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        monkeypatch.setattr(http_fetch, "fetch_text", fake_fetch)
 
         ticks = 0
         stop = False
@@ -148,20 +148,20 @@ class TestBlockingHttpOffloaded:
 
         assert ticks >= 10, (
             f"web_search 期间事件循环被阻塞（ticks={ticks}），"
-            "阻塞式 urlopen 必须移出事件循环（如 asyncio.to_thread）"
+            "阻塞式抓取必须移出事件循环（如 asyncio.to_thread）"
         )
         assert result.get("query") == "test query"
 
     @pytest.mark.asyncio
     async def test_weather_does_not_block_event_loop(self, monkeypatch):
         executor, agent = _make_executor(monkeypatch)
-        import urllib.request
+        from neurova import http_fetch
 
-        def fake_urlopen(req, timeout=None):
+        def fake_fetch(url, user_agent, timeout=None):
             time.sleep(0.3)
             raise RuntimeError("network disabled in test")
 
-        monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+        monkeypatch.setattr(http_fetch, "fetch_text", fake_fetch)
 
         ticks = 0
         stop = False
@@ -179,7 +179,7 @@ class TestBlockingHttpOffloaded:
 
         assert ticks >= 10, (
             f"weather 查询期间事件循环被阻塞（ticks={ticks}），"
-            "阻塞式 urlopen 必须移出事件循环"
+            "阻塞式抓取必须移出事件循环"
         )
         assert result.get("location") == "Xuchang"
 
