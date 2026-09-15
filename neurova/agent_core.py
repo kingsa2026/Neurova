@@ -223,7 +223,7 @@ class AgentConfig:
         enable_active_skill_acquisition: bool = False,  # 主动技能获取
         llm_provider: str = "",  # LLM 服务商 ID
         enable_skill_packer: bool = True,  # 自动打包技能（默认开启：让反复出现的工具序列沉淀为可执行技能）
-        # P0-3/P2-2（OpenSpace 召回注入对齐）：三态——None=跟随全局开关
+        # P0-3/P2-2：三态——None=跟随全局开关
         # （app_settings advanced 段，默认开）；True/False=该 agent 显式覆盖
         skill_catalog_enabled: Optional[bool] = None,  # 系统提示常驻预算化技能目录
         skill_catalog_budget_chars: int = 8000,  # 目录字符预算（超则别名压缩）
@@ -323,7 +323,7 @@ class AgentConfig:
         self.enable_streaming = enable_streaming
         self.enable_active_skill_acquisition = enable_active_skill_acquisition  # 主动技能获取
         self.enable_skill_packer = enable_skill_packer  # 自动打包技能
-        # P0-3/P2-2（OpenSpace 召回注入）——默认关=现状语义，getattr 兜底兼容
+        # P0-3/P2-2——默认关=现状语义，getattr 兜底兼容
         self.skill_catalog_enabled = skill_catalog_enabled
         self.skill_catalog_budget_chars = skill_catalog_budget_chars
         self.skill_schema_budget_enabled = skill_schema_budget_enabled
@@ -601,7 +601,7 @@ class SubSystemContainer:
                     muscle_memory=muscle_memory,
                     confidence_threshold=0.8,
                     temperature_threshold=30.0,
-                    # P-G 修复（docs/tool-memory-muscle-analysis.md）：显式传入
+                    # P-G 修复：显式传入
                     # muscle_memory_threshold（单源 = AgentConfig 配置字段）。
                     # 注意 self 是 SubSystemContainer——阈值此前误写在 _NullSystem
                     # 类上，经 self 取值必 AttributeError 致 ToolMemory 初始化整体失败。
@@ -670,8 +670,7 @@ class SubSystemContainer:
             try:
                 from neurova.tts.manager import TTSConfig, TTSManager
 
-                # 倍率 → edge-tts 调整串：语速 +X%（50%-200%），音调 +XHz
-                #（每 0.1 倍率 ≈ 20Hz，1.0 → +0Hz）。sapi5/moss 忽略 pitch。
+                # 倍率 → edge-tts 调整串：语速 +X%（50%-200%），音调 +XHz                #（每 0.1 倍率 ≈ 20Hz，1.0 → +0Hz）。sapi5/moss 忽略 pitch。
                 speed = max(0.5, min(2.0, float(getattr(c, "tts_speed", 1.0) or 1.0)))
                 pitch = max(0.5, min(2.0, float(getattr(c, "tts_pitch", 1.0) or 1.0)))
                 rate_str = f"{round((speed - 1.0) * 100):+d}%"
@@ -899,12 +898,12 @@ class SubSystemContainer:
         # 冷启动后按清单恢复注册, 保证重启后 LLM 仍可感知与调用。
         # 必须在 tool_router 绑定之后执行(合成技能恢复为可执行 ToolSequenceSkill)。
         try:
+            from neurova.skills import library_service as _lib
             from neurova.skills.market_registry import restore_market_skills_from_service
-            from neurova.skills.skill_service import SkillService
 
             if a._skill_registry is not None:
                 restore_market_skills_from_service(
-                    SkillService(agent_id=a.config.agent_id), a._skill_registry
+                    _lib.get_library("agent", a.config.agent_id), a._skill_registry
                 )
         except Exception as _re:
             logger.warning("Agent %s: 恢复持久化技能失败: %s", a.config.name, _re)
@@ -928,7 +927,18 @@ class SubSystemContainer:
 
             async def _orchestrator_executor(tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
                 if a._skill_registry:
-                    skill = a._skill_registry.get_skill(tool_name)
+                    # Wave H-W2 可见门（第三执行链）：轮级视图在场且视图外
+                    # 技能 → 不尝试执行（ToolRouter 路径照常）
+                    try:
+                        from neurova.core.turn_context import get_turn_skill_view
+
+                        _sv = get_turn_skill_view()
+                    except Exception:  # noqa: BLE001
+                        _sv = None
+                    if _sv is not None and not _sv.invocable(tool_name):
+                        skill = None
+                    else:
+                        skill = a._skill_registry.get_skill(tool_name)
                     if skill:
                         # 沙箱根注入（2026-09-08 相对路径乱放根因修复）：
                         # file_operation 相对路径锚定本 agent 工作区，服务端
@@ -1431,6 +1441,21 @@ class Agent:
                 from neurova.agent_shutdown import bind_and_start_sleep_loop
 
                 bind_and_start_sleep_loop(self)
+
+                # P2 反思生命周期生产者（2026-09-15）：每轮睡眠整理完成后
+                # 治理反思日志——重复 pending 去重 + 30 天归档。此前
+                # archive/prune 无任何生产者，pending 无限堆积把注入名额
+                # 全喂给同问回声。回调跑在空闲监控线程，只同步操作。
+                def _maintain_reflection_logs(_result):
+                    glog = getattr(self, "growth_log_manager", None)
+                    if glog is None:
+                        return
+                    try:
+                        glog.maintain_lifecycle(max_age_days=30)
+                    except Exception as e:  # noqa: BLE001 - 治理失败不阻断睡眠链
+                        logger.warning("反思日志生命周期维护失败: %s", e)
+
+                self.idle_tracker.register_callback("consolidation", _maintain_reflection_logs)
             logger.info("Agent %s: SleepConsolidation（睡眠整理）已初始化", self.config.name)
         except Exception as e:
             logger.warning("SleepConsolidation 初始化失败: %s", e)
@@ -1471,7 +1496,7 @@ class Agent:
         # NameError 被调用方 try/except 吞掉——cognitive_engine/unified_retriever/
         # crystallizer/RSI/trace_manager 五组件在真实 Agent 上从未初始化
         # （crystallizer 恒 None → 结晶写入/检索/注入全链死路；
-        #   rsi_orchestrator 缺失 → RSI 迭代/审批/phase 全链死路）。
+        # rsi_orchestrator 缺失 → RSI 迭代/审批/phase 全链死路）。
         c = self.config
         evolution = getattr(self, "evolution", None)
         self.crystallizer = PatternCrystallizer(
@@ -1606,9 +1631,10 @@ class Agent:
         try:
             from neurova.evolution.skill_improver import get_skill_improver
 
-            skill_id = str(
-                getattr(skill, "skill_id", "") or getattr(skill, "id", "") or getattr(skill, "name", "") or ""
-            )
+            # Wave G-2：身份三跳链收敛进 skill_contract 单源解析器
+            from neurova.skills.skill_contract import resolve_skill_identity
+
+            skill_id = resolve_skill_identity(skill)
             if skill_id:
                 get_skill_improver().record_usage(
                     skill_id=skill_id,
@@ -1627,7 +1653,7 @@ class Agent:
                     skill_id, success=bool(result and result.success)
                 )
 
-                # usage_stats 累积（经验-定义分离 QP 对齐 #2）：技能级淘汰的
+                # usage_stats 累积：技能级淘汰的
                 # 数据依据（times_used/positive/negative），与上方两条记账同源
                 from neurova.evolution.skill_experience import get_skill_experience_store
 
@@ -1853,7 +1879,7 @@ class Agent:
         # 1. 重置肌肉记忆的连续成功计数（触发自动降级）
         try:
             muscle = getattr(self.tool_memory, "muscle_memory", None) if self.tool_memory else None
-            # Bug 修复（docs/tool-memory-muscle-analysis.md P-B）：原实现遍历
+            # Bug 修复：原实现遍历
             # muscle.items（属性不存在，恒被 hasattr 跳过）且字段名拼错为
             # consecutive_success（实际是 consecutive_successes），失败降级静默失效
             if muscle is not None:
@@ -1917,8 +1943,8 @@ class Agent:
             # 使用 MemoryManager.run_decay_cycle() 批量衰减记忆温度
             # 衰减参数：hours=1.0 表示每小时衰减一次，rate=1.0 使用默认衰减率
             # 性能修复(2026-08-28): 116 万条记忆全量遍历会阻塞事件循环 → HTTP 超时
-            #   1. max_memories=500: 单次最多处理 500 条（轮询游标公平覆盖）
-            #   2. min_interval_seconds=300: 5 分钟内不重复运行（节流）
+            # 1. max_memories=500: 单次最多处理 500 条（轮询游标公平覆盖）
+            # 2. min_interval_seconds=300: 5 分钟内不重复运行（节流）
             count = self.memory_manager.run_decay_cycle(
                 hours=1.0, rate=1.0, max_memories=500, min_interval_seconds=300.0
             )

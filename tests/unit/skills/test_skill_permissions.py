@@ -1,11 +1,11 @@
-"""SkillPermissions 声明式权限模型（TDD — P0-4，Dify 对标）。
+"""SkillPermissions 声明式权限模型。
 
-契约（docs/Neurova_Dify代码级对比_2026-09-03.md §2.4 resource.permission /
+契约（§2.4 resource.permission /
 §4 P0-4）：
 
 - 安装时声明（manifest），调用时强制（tool_executor）——Neurova 治理
   原本只管"调用时"（DENY/SANDBOX/ASK），缺"安装时声明"这层。
-- 六类能力对齐 Dify resource.permission：tools（工具白名单）/ network /
+tools（工具白名单）/ network /
   file / model / node / storage；未声明的能力默认拒绝（fail-closed）。
 - manifest dict 解析（skill.json / SKILL.md frontmatter 均可透传 dict）：
   非法键忽略、类型错误宽松降级——安装门负责报错，模型负责解析。

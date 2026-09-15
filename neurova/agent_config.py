@@ -180,15 +180,24 @@ class AgentConfigManager:
 
             return agent.get(key, default)
 
-    def create_agent(self, agent_id: str, name: str, description: str = "", config: Dict[str, Any] = None) -> bool:
+    def create_agent(
+        self,
+        agent_id: str,
+        name: str,
+        description: str = "",
+        config: Dict[str, Any] = None,
+        owner_user_id: Optional[str] = None,
+    ) -> bool:
         """
         创建 Agent
 
         Args:
             agent_id: Agent ID
-            name: Agent 名称
+            name: 名称
             description: 描述
             config: 配置
+            owner_user_id: 属主用户 ID（Wave H-W0：中枢登记面带 owner，
+                未启动实例的属主过滤依据）
 
         Returns:
             是否创建成功
@@ -207,6 +216,8 @@ class AgentConfigManager:
                 "last_active": datetime.datetime.now().isoformat(),
                 "config": config or {},
             }
+            if owner_user_id:
+                agent_config["owner_user_id"] = str(owner_user_id)
 
             self._agents[agent_id] = agent_config
             self._save_agents_list(self._agents)

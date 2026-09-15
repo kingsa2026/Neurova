@@ -1,6 +1,6 @@
 """PromptOptimizer — 评测集驱动的提示词优化（v2 重写）
 
-对齐 agent-core 的做法（QP 对比启发 #6）：**小型评测集 + 变体打分驱动迭代**，
+对齐 agent-core 的做法：**小型评测集 + 变体打分驱动迭代**，
 而非对提示词原文做关键词启发打分。
 
 v1 的问题（自注"模拟评估逻辑，实际应该基于测试用例的预期输出"）：五个
@@ -47,7 +47,7 @@ class PromptEvalCase:
         weight: 用例权重（默认 1）
         task_input: 判定路径的真实任务输入（judge 用；空则不适用）
         expected_behavior: 评分细则（rubric）——描述"好的提示词应做到什么"，
-            不是精确文本。判据升级（2026-09-13 Hermes 对比）：子串只能查
+ 不是精确文本。判据升级：子串只能查
             "要素在不在"，rubric 走 LLM judge 才能判"好不好"。
         scorer: "auto"（有 rubric 走 judge，否则子串）|"judge"|"substring"
     """
@@ -139,7 +139,7 @@ class PromptEvalSet:
     ) -> Tuple[float, List[Dict[str, Any]]]:
         """异步双路径打分:rubric 用例走 LLM judge,其余走子串。
 
-        判据升级(Hermes 对比 2026-09-13):子串只能查"要素在不在",
+ 判据升级:子串只能查"要素在不在",
         judge 才能判"好不好"。judge 缺省时用 eval.fitness.LLMJudge
         (走 llm_router);judge 判分失败按零分计,不静默放行。
         语义:这里评的是**提示词文本**对 rubric 的符合度(judge 的

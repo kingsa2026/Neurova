@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""create_skill 注入扫描闸测试（补课 5.4，抄 QP materialize_skill 安全闸）。
+"""create_skill 注入扫描闸测试。
 
 fail-closed：name/description/steps 拼接文本过 PromptInjectionAnalyzer
 （中英双语 11 签名），命中即拒绝；扫描器异常同样拒绝。

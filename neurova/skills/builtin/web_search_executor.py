@@ -10,7 +10,7 @@ SkillResult(success=True)，网络失败时把错误信息放进 output 而不
 - duckduckgo html.duckduckgo.com 结果页解析（返回真实结果链接）
 - 扩展：register_search_backend(name, fn) 注册自定义后端
   （fn 契约：fn(query, max_results, timeout) -> List[Dict[str, Any]]，
-  如 TinyFish Search、SearXNG 等均可零改动接入）
+SearXNG 等均可零改动接入）
 
 后端选择优先级：params.backend > 环境变量 NEUROVA_SEARCH_BACKEND > bing。
 所选后端异常时自动回退 bing；全部失败返回 error 条目（不抛出）。

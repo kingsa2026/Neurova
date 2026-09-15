@@ -11,6 +11,7 @@ Agent 技能服务 (SkillService)
 import datetime
 import importlib.util
 import json
+import re
 from neurova.security.safe_archive import safe_extract_zip
 from neurova.core.logger import get_logger
 import shutil
@@ -18,8 +19,11 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# 安装技能 ID 白名单：字母数字开头，仅含 . _ - 与字母数字（拒路径穿越/绝对/相对点段）
+_SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]*$")
 
-# ── 技能质量漏斗归因（P0-1，OpenSpace 代码级对比 2026-09-14 落地）──
+
+# ── 技能质量漏斗归因──
 
 
 def compute_skill_funnel_update(
@@ -27,7 +31,6 @@ def compute_skill_funnel_update(
 ) -> Dict[str, Dict[str, int]]:
     """轮次派发账本 → {skill_id: {selections/applications/completions/fallbacks}} 增量。
 
-    归因规则对齐 OpenSpace skill_engine（types.py:344-350 skill_phase_failed
     不得记功 / store.py:1587-1659 completed/fallback 判定）：
     - selection = 该技能本轮被 LLM 派发一次（治理预检放行后进入 execute_skill_tool）
     - application = 真正进入执行（查无此技能/未初始化 = 有 selection 无 application）
@@ -55,7 +58,7 @@ def compute_skill_funnel_update(
     return updates
 
 
-# ── 信任生命周期（P0-2，OpenSpace store.py:1310-1354 两态状态机）──
+# ── 信任生命周期──
 
 
 def compute_trust_transition(
@@ -63,7 +66,7 @@ def compute_trust_transition(
 ) -> tuple:
     """provisional↔trusted 迁移纯函数。
 
-    语义照 OpenSpace：failure 即刻降级并清零计数；晋升须
+failure 即刻降级并清零计数；晋升须
     successes_since_failure ≥ min_successes 个**独立任务**观测；trusted
     成功不计数（无意义）。未知态按保守 provisional 处理。
     """
@@ -157,7 +160,7 @@ class SkillService:
         """
         保存技能清单
 
-        P1-5（OpenSpace 对比）：tmp + os.replace 原子替换——原 open(w) 先截断，
+ P1-5：tmp + os.replace 原子替换——原 open 先截断，
         写一半崩溃 = manifest 清零（providers-config-loss 事故同型病灶）。
         失败时旧文件内容保持完整（原子性即此意）。
 
@@ -189,7 +192,13 @@ class SkillService:
             self._logger.error("Failed to save manifest: %s", e)
             return False
 
-    def install_skill(self, skill_path: str, skill_id: str = None) -> Dict[str, Any]:
+    def install_skill(
+        self,
+        skill_path: str,
+        skill_id: str = None,
+        pool_type: str = "agent",
+        owner_user_id: str = "",
+    ) -> Dict[str, Any]:
         """
         安装技能
 
@@ -246,9 +255,18 @@ class SkillService:
                 if not skill_id:
                     return {"success": False, "error": "Skill ID not found in manifest"}
 
+                # 安装 ID 路径守卫：skill_id 直接拼成 skills_dir 子目录名，
+                # 恶意包 manifest 自含 "../../x" 或 "C:\..." 会越出技能目录。
+                # 与用户键 _KEY_RE 同纪律（目录名安全 = 路径注入第一道闸）。
+                if not _SAFE_SKILL_ID_RE.match(str(skill_id)):
+                    return {
+                        "success": False,
+                        "error": f"非法技能 ID（须字母数字开头且不含路径字符）: {skill_id!r}",
+                    }
+
                 # 复制技能到技能目录（加锁防止并发写）
                 with self._lock:
-                    # P0-4 安装门收口（OpenSpace 对比 2026-09-15）：本地目录/zip/
+                    # P0-4 安装门收口：本地目录/zip/
                     # /skill-pool/install-from-zip 全部汇聚到本咽喉——先复制到
                     # .incoming 暂存再扫描，被拦即删暂存、旧版本原地保留。
                     from neurova.skills.skill_install_gate import scan_skill_for_install
@@ -270,18 +288,30 @@ class SkillService:
                         shutil.rmtree(target_dir)
                     shutil.move(str(incoming), str(target_dir))
 
-                    # 更新技能信息
+                    # 更新技能信息（覆盖式重装）。
+                    # V 轮根治：既有账本字段必须保留——旧实现整条替换，
+                    # usage/trust/修订链在重装瞬间清零（apply_transfer 当初
+                    # 特意绕开本咽喉的"force 清零坑"，本体一直没修）。
+                    _prev = self._skills.get(skill_id) or {}
                     self._skills[skill_id] = {
                         "id": skill_id,
                         "name": manifest.get("name", skill_id),
                         "version": manifest.get("version", "1.0.0"),
                         "description": manifest.get("description", ""),
-                        "enabled": True,
+                        "enabled": bool(_prev.get("enabled", True)),
                         "installed_at": datetime.datetime.now().isoformat(),
                         "path": str(target_dir),
+                        # Wave H-W1 归属坐标（安装目标库由实例目录决定；
+                        # 默认 agent 库 = 现状链，user/public 库经参数覆写）
+                        "pool_type": str(_prev.get("pool_type") or pool_type or "agent"),
+                        "owner_user_id": str(_prev.get("owner_user_id") or owner_user_id or "") or self.agent_id,
                         "manifest": manifest,
                     }
-                    # P1-6 安装即出生修订 @1（origin=import）
+                    for _keep in ("usage", "identity", "version_history"):
+                        if _keep in _prev:
+                            self._skills[skill_id][_keep] = _prev[_keep]
+                    # P1-6 安装即出生修订 @1（origin=import）；存量重装则
+                    # 追加修订（_append_revision 读保留下来的 history 计数）
                     self._append_revision(self._skills[skill_id], trigger="install", origin="import")
 
                     # 保存清单
@@ -458,7 +488,7 @@ class SkillService:
         collection-review/改进提案的消费面——此前技能层没有使用计数，
         只有肌肉记忆侧有。manifest 写穿（文件小，频率=技能执行频率）。
 
-        生命周期（2026-09-13 Hermes curator 对齐）：同时维护
+ 生命周期：同时维护
         last_activity_at_ms（状态机活动锚）并 seed 状态/钉住/来源字段。
         """
         import time as _time
@@ -537,7 +567,6 @@ class SkillService:
     ) -> bool:
         """记一次独立任务信任观测并落盘（P0-2）。
 
-        task_id 去重 = OpenSpace UNIQUE(skill_id, observation_id) 的一票制；
         observed_task_ids 有界 20（仅防近期重复，超出窗口的历史任务按新
         观测处理——有界换页语义，非漏洞：晋升只依赖最近计数链）。
         """
@@ -621,7 +650,7 @@ class SkillService:
             "trust_state": str(trust.get("state") or "trusted"),
             "trust_transitions": list(identity.get("trust_transitions") or []),
             **funnel,
-            # 派生率（OpenSpace types.py:472-496 同语义；分母 0 → 0.0）
+            # 派生率
             "applied_rate": round(applications / selections, 4) if selections else 0.0,
             "completion_rate": (
                 round(funnel["completions"] / applications, 4) if applications else 0.0
@@ -635,7 +664,7 @@ class SkillService:
         }
         return result
 
-    # ── 生命周期接口（2026-09-13 Hermes curator 对齐）──────
+    # ── 生命周期接口──────
     # 供 neurova.evolution.skill_lifecycle.apply_transitions 消费的最小面。
 
     def iter_skills(self):
@@ -662,7 +691,7 @@ class SkillService:
             return False
 
     def set_skill_pinned(self, skill_id: str, pinned: bool) -> bool:
-        """钉住/解钉：pinned 技能绕开生命周期自动迁移(Hermes curator 同语义)。"""
+        """钉住/解钉：pinned 技能绕开生命周期自动迁移。"""
         try:
             with self._lock:
                 info = self._skills.get(skill_id)
@@ -678,7 +707,7 @@ class SkillService:
             return False
 
     def seed_skill_usage(self, skill_id: str) -> bool:
-        """首见播种(Hermes curator.seed_record_if_missing 同语义)。
+        """首见播种。
 
         无 usage 记录的技能以 now 锚 created_at 并延迟一个周期——没有活动
         证据就不参与老化;但时钟必须从此开始,否则"永不活跃"技能永远停在
@@ -708,7 +737,7 @@ class SkillService:
     def archive_skill(self, skill_id: str) -> Dict[str, Any]:
         """归档技能——移到 .archive/（可恢复），**永不删除**。
 
-        Hermes curator 教义：归档是最大破坏动作，删除绝不。磁盘上存在
+归档是最大破坏动作，删除绝不。磁盘上存在
         技能目录的物理搬迁；纯元数据技能（auto 注册、无文件）只改状态。
         """
         try:
@@ -746,6 +775,8 @@ class SkillService:
         version: str = "1.0.0",
         config: Optional[Dict[str, Any]] = None,
         manifest_source: str = "auto",
+        pool_type: str = "agent",
+        owner_user_id: str = "",
     ) -> bool:
         """
         注册元数据技能 (无文件路径, 仅 manifest 持久化)
@@ -758,6 +789,10 @@ class SkillService:
         pool 手工创建的条目走 "user"（restore/进化通道不认领），默认 "auto"
         保持进化产物存量行为零变化。
 
+        Wave H-W1（三层库）：条目带归属坐标 pool_type/owner_user_id（词汇
+        沿用退役孤岛 SkillPoolType）。默认 agent + 本服务 agent_id；user/
+        public 库实例由调用方（library_service 路由方）显式传参。
+
         Args:
             skill_id: 技能 ID
             name: 技能名称
@@ -765,6 +800,9 @@ class SkillService:
             version: 版本
             config: 配置 (tool_sequence/context_template 等)
             manifest_source: manifest.source 标记（auto=进化产物 / user=池创建）
+            pool_type: 归属库 agent/user/public
+            owner_user_id: 归属键（agent 库=agent_id；user 库=u:/ch: 键；
+                public 库=空），缺省回退本服务 agent_id
 
         Returns:
             True 注册成功, False 已存在 (重复)
@@ -783,6 +821,8 @@ class SkillService:
                     "enabled": True,
                     "installed_at": datetime.datetime.now().isoformat(),
                     "path": "",  # 自动技能无文件路径
+                    "pool_type": str(pool_type or "agent"),
+                    "owner_user_id": str(owner_user_id or "") or self.agent_id,
                     "manifest": {
                         "source": manifest_source,
                         "config": config or {},
@@ -864,7 +904,7 @@ class SkillService:
         """P1-6 身份 + 最小版本 DAG：version 变化时新建修订并挂 parent 边。
 
         revision_id 形如 ``{skill_id}@{n}``，parent_revision_id 指向上一修订，
-        构成线性链（Neurova 场景为原地改进，无多父合成——对照 OpenSpace
+ 构成线性链（Neurova 场景为原地改进
         FIXED 恰一父）。version_history 有界 20，manifest 直读不判缺。
         """
         import uuid
@@ -960,7 +1000,7 @@ class SkillService:
                     "installed_at": skill_info.get("installed_at", ""),
                     "path": skill_info.get("path", ""),
                     "manifest": skill_info.get("manifest", {}),
-                    # 生命周期/用量状态(Hermes 对齐:状态机消费面与 UI 徽标)
+                    # 生命周期/用量状态
                     "usage": skill_info.get("usage", {}),
                     # P1-6 身份与版本 DAG（线性修订链）
                     "identity": skill_info.get("identity", {}),

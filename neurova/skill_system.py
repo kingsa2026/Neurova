@@ -481,7 +481,16 @@ class SkillRegistry:
         self.tool_router = tool_router
 
     def register(self, skill: Skill):
-        """注册 Skill"""
+        """注册 Skill。
+
+        Wave G-2 注册边界单源化：入口处 canonicalize——无显式 skill_id 的
+        运行时对象补写身份（fallback=注册键名），此后所有消费方（漏斗/记账/
+        schema/API）对注册对象的取值恒单跳命中 skill_id；已有身份永不覆写
+        （工具名与账本 id 可以合法不同，覆写撕裂血缘）。
+        """
+        from neurova.skills.skill_contract import canonicalize_skill_identity
+
+        canonicalize_skill_identity(skill, fallback=getattr(skill, "name", "") or "")
         self._skills[skill.name] = skill
         skill.add_event_handler(self._on_skill_event)
 
@@ -540,15 +549,30 @@ class SkillRegistry:
                     tool_router=tool_router,
                 )
                 skill.config = config_dict  # 保留原 manifest 的所有元数据
+                self._carry_manifest_identity(skill, manifest)
                 self.register(skill)
                 return True
 
             skill = Skill(name=name, description=description)
             skill.config = config_dict
+            self._carry_manifest_identity(skill, manifest)
             self.register(skill)
             return True
         except Exception:
             return False
+
+    @staticmethod
+    def _carry_manifest_identity(skill, manifest) -> None:
+        """register_skill 兼容 API 边界：manifest 上的账本身份（id/skill_id）
+        传递给运行时对象——注册键=name 不得冒充身份（Wave G-2 单源化）。"""
+        from neurova.skills.skill_contract import resolve_skill_identity
+
+        ident = resolve_skill_identity(manifest)
+        try:
+            if ident and not (getattr(skill, "skill_id", "") or "").strip():
+                skill.skill_id = ident
+        except Exception:  # noqa: BLE001 - 只读对象降级，register() 仍按 name 归一
+            pass
 
     def set_skill_enabled(self, skill_name: str, enabled: bool) -> bool:
         """启用/禁用技能（2026-09-07 C1 闭环：skill 端点 enable/disable 的真实实现）。

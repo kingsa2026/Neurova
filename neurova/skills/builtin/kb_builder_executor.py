@@ -1,8 +1,7 @@
 """
 知识库构建 Skill Executor（kb_builder）
 
-工作流规范移植自 tinyfish-cookbook 的 kb-builder（MIT 社区技能库），
-核心理念："合成心智模型，而非来源摘要堆"。工具层不依赖 TinyFish：
+核心理念："合成心智模型，而非来源摘要堆"
 - 来源发现：web_search（可插拔搜索后端，见 web_search_executor）
 - 来源抓取：web_reach.reach.web_read（协议与 SSRF 主机边界校验在其内部）
 - 产出落库：knowledge.repository.KnowledgeRepository

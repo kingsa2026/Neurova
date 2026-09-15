@@ -1,6 +1,6 @@
 """P0-4 声明式权限 — 安装门与运行时强制（TDD）。
 
-契约（docs/Neurova_Dify代码级对比_2026-09-03.md §4 P0-4）：
+契约（§4 P0-4）：
 
 1. 安装门：manifest permissions 非法（未知能力键 / tools.allow 非列表 /
    未声明网络但 manifest 描述声称联网）→ validate_permissions_for_install

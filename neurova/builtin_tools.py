@@ -246,7 +246,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["command"],
         },
     },
-    # ── 浏览器操作工具（BrowserManager 多后端：Playwright/Scrapling）──
+    # ── 浏览器操作工具──
     # 执行过程的页面截图会实时推送到聊天页的电脑操作分屏面板
     "browser_navigate": {
         "description": "【浏览器导航】在内置自动化浏览器中打开指定 URL。这是工具阶梯中最重的一档：仅当 web_search/web_fetch 无法完成任务（需要页面交互、登录或 JS 动态渲染）时才使用；纯读取内容一律先用 web_search 搜索、web_fetch 抓取。打开后可用 browser_extract_text 提取正文、browser_click/browser_type 交互、browser_screenshot 截图。【何时不用】已知 URL 的静态页读取不要导航（直接 web_fetch）；站点内搜索不要用导航拼 URL（用 web_search 或 bilibili_search 等垂直工具）。",
@@ -336,7 +336,7 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["role", "text"],
         },
     },
-    # ── 互联网平台直达（Web Reach，对标 Agent-Reach 零配置路径）──
+    # ── 互联网平台直达（Web Reach，零配置路径）──
     "youtube_transcript": {
         "description": "【YouTube 字幕】提取 YouTube 视频的字幕/自动字幕文本，用于总结视频内容、翻译、要点提取。仅支持 youtube.com/watch 或 youtu.be 链接。",
         "parameters": {
@@ -498,6 +498,20 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     # 但未注册到 _BUILTIN_SCHEMAS（LLM 工具列表的单一事实源），
     # 导致 LLM 永远看不到这两个工具，agent 只能回复"无法获取实时信息"。
     # 参数与 tool_executor._execute_weather / _execute_web_search 的读取逻辑对齐。
+    # Wave F DiscoverSkills：目录被裁剪
+    # 或 schema 预算化时，模型主动发现技能库的元数据检索面——只回
+    # name/description/调用提示，绝不回指令正文（正文经 $mention 按需加载）。
+    "discover_skills": {
+        "description": "【技能发现】按查询词检索已安装技能库，返回候选技能的元数据清单（名称/描述/何时用）。当你判断需要某个已有技能、但它不在当前工具面时调用；确认要用后，通过 $技能名 加载完整指令执行。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "能力关键词或自然语言描述"},
+                "limit": {"type": "integer", "description": "最多返回条数，默认 5"},
+            },
+            "required": ["query"],
+        },
+    },
     "weather": {
         "description": "【实时天气查询】通过 wttr.in 服务获取指定地点的实时天气信息。可查询当前天气、温度、降水、风力等。支持中文城市名（如'许昌'、'北京'）或英文地名。需要实时天气信息时必须调用此工具，不要回复'无法获取'。",
         "parameters": {
@@ -620,11 +634,8 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["name", "description", "steps"],
         },
     },
-    # ── 常规 Agent 工具（2026-08 扩充，对标主流 harness 标配工具基座）──
-    # file_list/file_search ↔ Claude Code Glob/Grep、OpenHands glob/search
-    # web_fetch ↔ Claude Code WebFetch；run_code ↔ DeepSeek code_interpreter
-    # （run_code 执行体早已存在于 tool_executor，此处补 schema 使其对 LLM 可见）
-    # calculator/get_datetime ↔ Hermes function calling 标配
+    # ── 常规 Agent 工具（2026-08 扩充，run_code ↔ DeepSeek code_interpreter
+    # （run_code 执行体早已存在于 tool_executor
     "file_list": {
         "description": "【文件枚举】按 glob 模式列出文件（如 *.py、docs/**/*.md），支持递归子目录。用于查看某目录下存在哪些文件。找到文件后可用 file_read 读取内容，或用 file_search 按内容关键词搜索。",
         "parameters": {
@@ -922,10 +933,9 @@ def get_builtin_tool_params(tool_name: str) -> Optional[Dict]:
 
 
 # ═══════════════════════════════════════════════════════════════
-# 工具声明位（P2-15，OpenClaw 对比 #15）
-#
+# 工具声明位
 # schema 可携带与 description/parameters 平级的 sandbox_required 布尔键，
-# 语义 = "该工具必须在沙箱隔离下执行"（OpenClaw exec 审批的声明面）。
+# 语义 = "该工具必须在沙箱隔离下执行"。
 # 声明位不进入 to_openai_format()（模型可见面零变化），仅供治理与
 # 展示面消费；NEUROVA_TOOL_SANDBOX_ENFORCE=1 时治理层强制路由。
 # ═══════════════════════════════════════════════════════════════

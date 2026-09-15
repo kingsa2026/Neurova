@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P1-6 技能注入：$mention 全文注入 + 清单预算（Codex skills 对齐）。"""
+"""P1-6 技能注入：$mention 全文注入 + 清单预算。"""
 import pytest
 
 from neurova.skills.skill_injection import (

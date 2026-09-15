@@ -301,6 +301,47 @@ def restore_market_skills_from_service(service: Any, registry: Any, market_skill
     return restored
 
 
+def restore_library_skills_for_turn(registry: Any, view: Any) -> int:
+    """需求 2 执行面桥（Wave V）：轮级视图在场、registry 缺席的**用户库/公共库**
+    副本物化为可执行体（ToolSequenceSkill），使跨库可见技能真正可调用——
+    修复"可见但不可执行"断点。纪律：
+    - 仅物化 config.tool_sequence 非空条目（元目类目录条目留在发现面，
+      与 marketplace 未安装条目同语义，不造空壳可执行体）；
+    - agent 层条目与 registry 同名先到（内置/启动恢复）一律跳过——
+      幂等，重复调用零副作用；
+    - 视图缺席/构建失败路径不调用本函数（chat_pipeline 已 try 包裹），
+      注册表写失败只 warn 不炸对话。
+    """
+    restored = 0
+    try:
+        existing = getattr(registry, "skills", {}) or {}
+        from types import SimpleNamespace
+
+        for name, v in (getattr(view, "skills", {}) or {}).items():
+            if getattr(v, "pool", "agent") == "agent" or name in existing:
+                continue
+            cfg = v.config or {}
+            ts = cfg.get("tool_sequence")
+            if not (isinstance(ts, list) and ts):
+                continue
+            m = SimpleNamespace(
+                id=getattr(v, "skill_id", None) or str(name),
+                name=str(name),
+                description=getattr(v, "description", "") or "",
+                config={"tool_sequence": ts, "source": "library", **({"permissions": cfg["permissions"]} if cfg.get("permissions") is not None else {})},
+            )
+            try:
+                if registry.register_skill(m):
+                    restored += 1
+            except Exception as e:  # noqa: BLE001
+                logger.warning("库技能轮级物化失败 %s: %s", name, e)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("restore_library_skills_for_turn 异常: %s", e)
+    if restored:
+        logger.info("轮级库技能物化 %d 条（用户库/公共库→执行池）", restored)
+    return restored
+
+
 def unlink_market_skill_from_agent(skill_id: str, service: Any, registry: Any) -> Dict[str, Any]:
     """卸载：注册表移除 + 技能页 manifest 移除"""
     registry.unregister(skill_id)
