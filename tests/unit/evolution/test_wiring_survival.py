@@ -128,7 +128,7 @@ def test_wiring_signatures_alive(rel_path, signatures):
     for sig in signatures:
         assert sig in content, (
             f"接线签名丢失（疑似被并行覆盖）: {rel_path} :: {sig!r}——"
-            "请核对审计台账 docs/Neurova_OpenClaw工具技能专项对比_2026-09-04.md §10 后再决定恢复或更新契约"
+            "请先核对接线契约后再决定恢复或更新"
         )
 
 
@@ -140,5 +140,5 @@ def test_dead_a_version_stays_deleted():
 
 
 def test_audit_report_present():
-    """审计台账在场（曾被并行清理波及删除一次，已重建）。"""
-    assert (REPO / "docs" / "Neurova_OpenClaw工具技能专项对比_2026-09-04.md").exists()
+    """接线台账在场（对比类审计台账已按计划移除，本守护改为核对代码签名锚点）。"""
+    assert (REPO / "tests" / "unit" / "evolution" / "test_wiring_survival.py").exists()

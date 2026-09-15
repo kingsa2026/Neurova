@@ -12,10 +12,13 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from neurova.core.logger import get_logger
 from neurova.evolution.eval.config import EvolutionConfig, text_evolution_enabled
+
+if TYPE_CHECKING:  # 仅类型检查期：runner 保持函数内懒加载（装配体重、总开关默认关）
+    from neurova.evolution.eval.runner import SkillEvolutionRunner
 
 logger = get_logger(__name__)
 

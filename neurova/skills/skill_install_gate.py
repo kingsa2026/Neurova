@@ -198,7 +198,7 @@ def evaluate_submission_gate(
     Returns:
         {"blocked": bool, "errors": [...], "findings": [...]}
     """
-    errors: List[str] = []
+    errors: list = []
     findings: list = []
 
     text_fields = {k: v for k, v in (fields or {}).items() if isinstance(v, str) and v.strip()}

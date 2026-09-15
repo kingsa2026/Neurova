@@ -1,6 +1,5 @@
 """Wave 1 评测标尺升级 — FitnessScore 与 LLMJudge 单元测试。
 
-对齐 Hermes `core/fitness.py` 的判分纪律:
   composite = 0.5·correctness + 0.3·procedure_following + 0.2·conciseness − length_penalty
   长度惩罚:artifact_size/max_size > 0.9 后线性爬升,上限 0.3
   解析失败退回中性 0.5(不因模型抖动崩)
@@ -13,8 +12,7 @@ from neurova.evolution.eval.fitness import FitnessScore, LLMJudge, parse_score
 
 
 class TestComposite:
-    def test_weights_match_hermes(self):
-        """composite 权重必须与 Hermes 数值一致(.5/.3/.2)。"""
+    def test_weights_composite_all_one(self):
         s = FitnessScore(correctness=1.0, procedure_following=1.0, conciseness=1.0)
         assert s.composite == pytest.approx(1.0)
 

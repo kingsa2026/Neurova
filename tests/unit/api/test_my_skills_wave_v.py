@@ -174,3 +174,53 @@ def test_install_target_routing(env):
     svc2, pool2, owner2 = skill_pool_api._install_target("me", USER)
     assert pool2 == "user" and owner2 == "u:7"
     assert "users/u%3A7/skills" in str(svc2.skills_dir).replace("\\", "/")
+
+
+# ── 导入落点必须在两条 HTTP 导入链上真生效（85ba8aa7 回归）────────────
+# 根因：V 轮把落点解析抽成 _install_target 后，/install-from-url 改用了它，
+# /install-from-zip 仍调用**不存在的** _install_target_service → NameError 被
+# 函数兜底 except Exception 吞成 {"success": false, "error": "name ... is not
+# defined"}，端点恒 200 假失败。helper 单测（上一条）看不到调用点错位。
+
+
+def _skill_zip(skill_id: str) -> bytes:
+    """最小可安装技能 zip（manifest.json + 干净 SKILL.md，过安装门）。"""
+    import io
+    import json as _json
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("manifest.json", _json.dumps({"id": skill_id, "name": skill_id, "version": "1.0.0"}))
+        zf.writestr("SKILL.md", "# helper\n\n把日期格式化为 ISO 标准格式的技能说明。\n")
+    return buf.getvalue()
+
+
+def test_install_from_zip_default_target_lands_in_agent_library(env):
+    """默认 target：落 agent 库（default），且不得再出现假失败 payload。"""
+    client, tmp = env
+    r = client.post(
+        f"{BASE}/install-from-zip",
+        files={"file": ("zipdemo.zip", _skill_zip("zipdemo"), "application/zip")},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body.get("success") is True, body
+    assert lib.get_library("agent", "default").get_skill_info("zipdemo") is not None
+    assert (tmp / "agents" / "default" / "skills" / "manifest.json").exists()
+
+
+def test_install_from_zip_target_me_lands_in_user_library(env):
+    """target=me：落当前账号用户私库（u:7），不可落到 agent 库。"""
+    client, tmp = env
+    r = client.post(
+        f"{BASE}/install-from-zip",
+        data={"target": "me"},
+        files={"file": ("zipmine.zip", _skill_zip("zipmine"), "application/zip")},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body.get("success") is True, body
+    assert (tmp / "users" / "u%3A7" / "skills" / "manifest.json").exists()
+    assert lib.get_library("user", "u:7").get_skill_info("zipmine") is not None
+    assert lib.get_library("agent", "default").get_skill_info("zipmine") is None
