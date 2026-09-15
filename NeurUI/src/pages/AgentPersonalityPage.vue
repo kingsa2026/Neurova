@@ -241,7 +241,7 @@ const emotionLabel = (emotion?: string) => {
   return t(key) !== key ? t(key) : emotion
 }
 
-const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
+const formatTime = (ts: string | number) => ts ? new Date(typeof ts === 'number' ? ts * 1000 : ts).toLocaleString() : ''
 
 const formatPercent = (val: number | undefined) =>
   val !== undefined && val !== null ? `${Math.round(val * 100)}%` : '-'
