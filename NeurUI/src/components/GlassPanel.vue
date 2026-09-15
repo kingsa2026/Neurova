@@ -36,6 +36,22 @@
           <feComposite in="CENTER" in2="INV_MASK" operator="in" result="CENTER_CLEAN" />
           <feComposite in="EDGE" in2="CENTER_CLEAN" operator="over" />
         </filter>
+        <!-- iOS 皮肤 · 动态位移图折射滤镜（Vue Bits GlassSurface 机制，绝对值参数） -->
+        <filter :id="liquidFilterId" color-interpolation-filters="sRGB" x="0%" y="0%" width="100%" height="100%">
+          <feImage ref="liquidFeImageRef" x="0" y="0" width="100%" height="100%" preserveAspectRatio="none" result="map" />
+          <feDisplacementMap ref="liquidRedRef" in="SourceGraphic" in2="map" result="dispRed" />
+          <feColorMatrix in="dispRed" type="matrix"
+            values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="red" />
+          <feDisplacementMap ref="liquidGreenRef" in="SourceGraphic" in2="map" result="dispGreen" />
+          <feColorMatrix in="dispGreen" type="matrix"
+            values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="green" />
+          <feDisplacementMap ref="liquidBlueRef" in="SourceGraphic" in2="map" result="dispBlue" />
+          <feColorMatrix in="dispBlue" type="matrix"
+            values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="blue" />
+          <feBlend in="red" in2="green" mode="screen" result="rg" />
+          <feBlend in="rg" in2="blue" mode="screen" result="output" />
+          <feGaussianBlur ref="liquidBlurRef" in="output" stdDeviation="0.7" />
+        </filter>
       </defs>
     </svg>
 
@@ -56,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import type { CSSProperties } from 'vue'
 
 const props = withDefaults(defineProps<{
@@ -87,6 +103,127 @@ const filterId = `nr-glass-${uid}`
 
 const displacementMap = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAgAAZABkAAD/2wCEAAQDAwMDAwQDAwQGBAMEBgcFBAQFBwgHBwcHBwgLCAkJCQkICwsMDAwMDAsNDQ4ODQ0SEhISEhQUFBQUFBQUFBQBBQUFCAgIEAsLEBQODg4UFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFP/CABEIAQABAAMBEQACEQEDEQH/8QAFgABAQEAAAAAAAAAAAAAAAAABgUEB//EAB8QAAIBBAMBAAAAAAAAAAAAAAECAxEEBSESMUH/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8A'
 
+/* ─── iOS 皮肤 · Liquid Glass backdrop 真折射（2026-09-16 皮肤重制） ───
+ * cosmic 皮肤行为零变化（62 消费方回归基线）；data-skin=ios 时 backdrop 层
+ * 前置 url(#liquid) 位移滤镜，折射带按面板实测尺寸 + radius 动态生成。
+ * 参数为 Vue Bits 官方绝对像素值（liquid-glass-web 根因 2：禁止按尺寸比例缩放）。 */
+const LIQUID = {
+  borderWidth: 0.07,
+  brightness: 50,
+  opacity: 0.93,
+  blur: 11,
+  displace: 0.5,
+  distortionScale: -180,
+  redOffset: 0,
+  greenOffset: 10,
+  blueOffset: 20,
+} as const
+
+const liquidFilterId = `glass-liquid-${uid}`
+const liquidRedGradId = `liquid-red-${uid}`
+const liquidBlueGradId = `liquid-blue-${uid}`
+
+const liquidFeImageRef = ref<SVGFEImageElement | null>(null)
+const liquidRedRef = ref<SVGFEDisplacementMapElement | null>(null)
+const liquidGreenRef = ref<SVGFEDisplacementMapElement | null>(null)
+const liquidBlueRef = ref<SVGFEDisplacementMapElement | null>(null)
+const liquidBlurRef = ref<SVGFEGaussianBlurElement | null>(null)
+
+const isIosSkin = ref(false)
+let skinObserver: MutationObserver | null = null
+let liquidResizeObserver: ResizeObserver | null = null
+
+const readSkin = () => document.documentElement.getAttribute('data-skin') === 'ios'
+
+/** backdrop-filter: url() 仅 Chromium/WebView2 支持；Safari/Firefox 走毛玻璃降级 */
+const supportsBackdropUrl = () => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false
+  const isWebkit = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent)
+  const isFirefox = /Firefox/.test(navigator.userAgent)
+  if (isWebkit || isFirefox) return false
+  const div = document.createElement('div')
+  div.style.backdropFilter = `url(#${liquidFilterId})`
+  return div.style.backdropFilter !== ''
+}
+
+const liquidActive = computed(() => isIosSkin.value && supportsBackdropUrl())
+
+const generateLiquidMap = () => {
+  const rect = panelRef.value?.getBoundingClientRect()
+  const actualWidth = rect?.width || 400
+  const actualHeight = rect?.height || 200
+  const edgeSize = Math.min(actualWidth, actualHeight) * (LIQUID.borderWidth * 0.5)
+  const svgContent = `
+      <svg viewBox="0 0 ${actualWidth} ${actualHeight}" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="${liquidRedGradId}" x1="100%" y1="0%" x2="0%" y2="0%">
+            <stop offset="0%" stop-color="#0000"/>
+            <stop offset="100%" stop-color="red"/>
+          </linearGradient>
+          <linearGradient id="${liquidBlueGradId}" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#0000"/>
+            <stop offset="100%" stop-color="blue"/>
+          </linearGradient>
+        </defs>
+        <rect x="0" y="0" width="${actualWidth}" height="${actualHeight}" fill="black"></rect>
+        <rect x="0" y="0" width="${actualWidth}" height="${actualHeight}" rx="${props.radius}" fill="url(#${liquidRedGradId})" />
+        <rect x="0" y="0" width="${actualWidth}" height="${actualHeight}" rx="${props.radius}" fill="url(#${liquidBlueGradId})" style="mix-blend-mode: difference" />
+        <rect x="${edgeSize}" y="${edgeSize}" width="${actualWidth - edgeSize * 2}" height="${actualHeight - edgeSize * 2}" rx="${props.radius}" fill="hsl(0 0% ${LIQUID.brightness}% / ${LIQUID.opacity})" style="filter:blur(${LIQUID.blur}px)" />
+      </svg>
+    `
+  return `data:image/svg+xml,${encodeURIComponent(svgContent)}`
+}
+
+const updateLiquidMap = () => {
+  liquidFeImageRef.value?.setAttribute('href', generateLiquidMap())
+}
+
+const updateLiquidFilter = () => {
+  const channels = [
+    { el: liquidRedRef, offset: LIQUID.redOffset },
+    { el: liquidGreenRef, offset: LIQUID.greenOffset },
+    { el: liquidBlueRef, offset: LIQUID.blueOffset },
+  ]
+  channels.forEach(({ el, offset }) => {
+    if (el.value) {
+      el.value.setAttribute('scale', String(LIQUID.distortionScale + offset))
+      el.value.setAttribute('xChannelSelector', 'R')
+      el.value.setAttribute('yChannelSelector', 'G')
+    }
+  })
+  liquidBlurRef.value?.setAttribute('stdDeviation', String(LIQUID.displace))
+}
+
+onMounted(() => {
+  isIosSkin.value = readSkin()
+  if (typeof MutationObserver !== 'undefined') {
+    skinObserver = new MutationObserver(() => {
+      isIosSkin.value = readSkin()
+    })
+    skinObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-skin'] })
+  }
+  nextTick(() => {
+    updateLiquidMap()
+    updateLiquidFilter()
+    if (panelRef.value && typeof ResizeObserver !== 'undefined') {
+      liquidResizeObserver = new ResizeObserver(() => setTimeout(updateLiquidMap, 0))
+      liquidResizeObserver.observe(panelRef.value)
+    }
+  })
+})
+
+onUnmounted(() => {
+  skinObserver?.disconnect()
+  skinObserver = null
+  liquidResizeObserver?.disconnect()
+  liquidResizeObserver = null
+})
+
+watch(() => props.radius, () => {
+  updateLiquidMap()
+  updateLiquidFilter()
+})
+
 const variantConfig = computed(() => {
   switch (props.variant) {
     case 'elevated': return { bg: 0.06, bgHover: 0.1, border: 0.12, borderHover: 0.22, shadow: 40 }
@@ -105,9 +242,18 @@ const panelStyle = computed<CSSProperties>(() => ({
 
 const backdropStyle = computed<CSSProperties>(() => ({
   position: 'absolute', inset: 0, zIndex: 0,
-  filter: `url(#${filterId})`,
-  backdropFilter: `blur(${props.blur}px) saturate(${props.saturation}%)`,
-  WebkitBackdropFilter: `blur(${props.blur}px) saturate(${props.saturation}%)`,
+  // iOS 皮肤折射分支：backdrop 采样位移（真折射），撤掉旧自身背景 filter 避免双重扭曲；
+  // cosmic / 降级分支：与 09-06 行为完全一致
+  ...(liquidActive.value
+    ? {
+        backdropFilter: `url(#${liquidFilterId}) blur(${props.blur}px) saturate(${props.saturation}%)`,
+        WebkitBackdropFilter: `url(#${liquidFilterId}) blur(${props.blur}px) saturate(${props.saturation}%)`,
+      }
+    : {
+        filter: `url(#${filterId})`,
+        backdropFilter: `blur(${props.blur}px) saturate(${props.saturation}%)`,
+        WebkitBackdropFilter: `blur(${props.blur}px) saturate(${props.saturation}%)`,
+      }),
   background: `
     radial-gradient(ellipse 70% 42% at 24% 6%, var(--nr-glass-highlight) 0%, transparent 60%),
     radial-gradient(ellipse 120% 80% at 30% 10%, color-mix(in srgb, var(--nr-primary) 6%, transparent) 0%, transparent 60%),
