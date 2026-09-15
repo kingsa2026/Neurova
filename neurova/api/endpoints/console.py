@@ -119,7 +119,7 @@ class ChatRequest(BaseModel):
     model: typing.Optional[str] = None
     # 思考程度：light(简单) / standard(标准) / deep(深度)；空串=默认
     thinking_effort: typing.Optional[str] = ""
-    # B1-3 思考控制两级旋钮（QwenPaw #6302）：开关 + token 预算，
+    # B1-3 思考控制两级旋钮：开关 + token 预算，
     # 经 metadata → 管线 → LLMClient 按 compat 门控注入请求体
     thinking_enabled: typing.Optional[bool] = None
     thinking_budget: typing.Optional[int] = None
@@ -219,11 +219,11 @@ async def _gc_replay_buffers() -> None:
             _replay_buffers.pop(sid, None)
 
 
-# ── AgentRun 台账接线（Yuxi 对比 P0-1/P0-2）───────────────────────
+# ── AgentRun 台账接线───────────────────────
 
 
 class _AgentRunLedger:
-    """一次 chat run 的持久化台账（对位 Yuxi run/attempt 状态机裁剪版）。
+    """一次 chat run 的持久化台账。
 
     不变量（见 neurova/core/agent_run_store.py 模块注释）：
     - 先落库再执行：intake(queued) 成功才进入等待晋升；
@@ -385,7 +385,7 @@ def _sse_events_from_emitter_item(
             text = str(data or "")
             return [{"type": "reasoning", "content": text}] if text else []
         if kind == "retry":
-            # 429 重试/切换倒计时（ZCode 对齐 2026-09-11）：结构化 payload
+            # 429 重试/切换倒计时：结构化 payload
             # 直接透传（phase/retry/max_retries/wait_seconds/model/reset…），
             # 前端 i18n 组装文案
             payload = data if isinstance(data, dict) else {}
@@ -475,7 +475,7 @@ class CommandRequest(BaseModel):
 
 
 def _error_event_payload(message) -> dict:
-    """P1-3：错误事件结构化分型（model_error_policy 单源，Codex 错误白名单对齐）。
+    """P1-3：错误事件结构化分型。
 
     可重试白名单 = rate_limited / transient；认证/参数/上下文溢出等不可重试。
     分类失败 fail-open 返回空 dict，不影响 error 事件本体。
@@ -753,8 +753,8 @@ async def post_console_chat(
 
             queue: asyncio.Queue = asyncio.Queue()
 
-            # Yuxi 对比 P0-1/P0-2：run 先落库（queued）再执行，同 session
-            # 单活 + FIFO 晋升；排队期先行 queued 事件（fail-open 见类注释）
+# run 先落库（queued）再执行，同 session
+# 单活 + FIFO 晋升；排队期先行 queued 事件（fail-open 见类注释）
             ledger = _AgentRunLedger(session_id, user_id, agent_id, body.message or "")
             live_events: typing.List[Dict[str, Any]] = []
             for event in await ledger.acquire():
@@ -843,8 +843,7 @@ async def post_console_chat(
                     queue.put_nowait(_EMIT_DONE)
 
             task = asyncio.create_task(run_chat())
-            # P0-2：注册到 per-session asyncio 任务表，/chat/stop 据此真取消
-            #（旧 stop 端点空壳假停止——只回 success，后端照常跑完整轮耗 token）
+            # P0-2：注册到 per-session asyncio 任务表，/chat/stop 据此真取消            #（旧 stop 端点空壳假停止——只回 success，后端照常跑完整轮耗 token）
             from neurova.core.task_tracker import get_task_tracker
 
             get_task_tracker().register_async_task(session_id, task, kind="chat")
@@ -852,7 +851,7 @@ async def post_console_chat(
             ledger.attach(task)
             seen_calls: set = set()
             seen_results: set = set()
-            # P1-1/P1-2（Codex 对齐）：item 事件旁路映射 + 会话时间线落盘。
+            # P1-1/P1-2：item 事件旁路映射 + 会话时间线落盘。
             # 旧事件流原样保留（兼容别名），item 事件/时间线是增强面，任何
             # 失败 fail-open 不影响主链路。
             item_mapper = ItemEventMapper(
@@ -958,8 +957,7 @@ async def post_console_chat(
                     result = await task
                 except asyncio.CancelledError:
                     if task.cancelled():
-                        # P0-2：stop 端点取消——SSE 以 stopped 事件收尾
-                        #（done 恒发，前端状态机正常收口）
+                        # P0-2：stop 端点取消——SSE 以 stopped 事件收尾                        #（done 恒发，前端状态机正常收口）
                         result = {"text": "", "reasoning": None,
                                   "tool_messages": [], "stopped": True}
                     else:
@@ -975,8 +973,7 @@ async def post_console_chat(
                     for event in _build_tool_events(tm, agent_id=agent_id, user_id=user_id):
                         etype = event.get("type")
                         if etype == "tool_call":
-                            # 核验轮修复①：键与流式侧共用 _call_key 规范化
-                            #（剔 taskName* + 紧凑序列化），否则 taskName 一出现
+                            # 核验轮修复①：键与流式侧共用 _call_key 规范化                            #（剔 taskName* + 紧凑序列化），否则 taskName 一出现
                             # 必然两键不同 → 同一调用被重复推送
                             key = _call_key(
                                 str(event.get("name", "")),
@@ -1055,7 +1052,7 @@ async def post_console_chat_review(
     body: ReviewRequest,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """代码评审受限子会话（P1-8，Codex review task 对齐）。
+    """代码评审受限子会话。
 
     禁工具/禁网（纯文本进出）、独立 rubric、强制 JSON findings
     （P0-P3 优先级 + code_location），解析失败如实返回 raw。
@@ -1079,7 +1076,7 @@ async def post_console_chat_steer(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """turn 进行中插话（P1-9，Codex TurnInputMode::Steer 对齐）。
+    """turn 进行中插话。
 
     消息进会话级 steer 邮箱，agent loop 在工具轮间隙排空并并入下一轮
     采样（不取消、不重启 turn）。TTL 300s 无消费自动丢弃。
@@ -1128,8 +1125,8 @@ async def post_console_chat_stop(
     from neurova.core.task_tracker import get_task_tracker
 
     stopped = get_task_tracker().request_session_stop(session_id)
-    # Yuxi 对比 P0-2：取消意图落库（台账里的活跃 run 标 cancel_requested，
-    # 供执行侧/审计/重启对账可见；fail-open 不影响停止结果）
+# 取消意图落库（台账里的活跃 run 标 cancel_requested，
+# 供执行侧/审计/重启对账可见；fail-open 不影响停止结果）
     try:
         from neurova.core import agent_run_store as _ars
 
@@ -1174,7 +1171,7 @@ async def get_console_session_timeline(
     limit: int = Query(default=0, ge=0, le=5000),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """会话时间线（P1-2，Codex rollout 重放对齐）。
+    """会话时间线。
 
     SSE 事件的 append-only JSONL 只读重放面：断线重连/审计回放按行取回，
     limit>0 取最近 N 条。归属校验与 history 端点同规。
@@ -1251,7 +1248,7 @@ async def reorder_chat_sessions(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """按用户拖拽顺序持久化会话排序（QwenPaw /chats/groups/order 对齐）。"""
+    """按用户拖拽顺序持久化会话排序。"""
     user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     ordered_ids = [sid for sid in (body.ordered_ids or []) if sid]
@@ -1279,7 +1276,7 @@ async def delete_chat_session(session_id: str, request: Request,
     if not target:
         raise HTTPException(status_code=404, detail="Session not found")
     # user_id 校验口径不变: 空 user_id (None 或 "") 视为"共享"，允许任何已认证用户删除
-    # （修复 "看得到删不掉" 死锁，docs/bugfix-delete-session-userid-mismatch.md）
+    # （修复 "看得到删不掉" 死锁）
     target_user_id = target.get("user_id") or ""
     if target_user_id and user_id and target_user_id != user_id:
         raise HTTPException(status_code=403, detail="Forbidden")
@@ -1587,6 +1584,37 @@ def _apply_feedback_to_memory(
         logger.warning("反馈记忆温度更新失败 (session=%s): %s", session_id, e)
 
 
+async def _apply_feedback_to_reflections(agent, repo, session_id: str, timestamp: str, feedback: str) -> int:
+    """反思效力反馈（P0b）：赞踩裁决该轮实际注入过的反思日志。
+
+    该轮 assistant metadata.injected_reflections（P0a 留痕）→ 逐条：
+    like→validate_application（进入最高信任层，validated 优先注入）；
+    dislike→register_negative_feedback（降置信，跌破阈值转 rejected）。
+    返回裁决条数。无痕迹（该轮未注入反思）返回 0。
+    """
+    glog = getattr(agent, "growth_log_manager", None) if agent else None
+    if glog is None:
+        return 0
+    round_data = repo.get_round(
+        agent_id=getattr(agent, "config", None).agent_id if getattr(agent, "config", None) else "",
+        session_id=session_id,
+        timestamp=timestamp,
+    )
+    if not round_data:
+        return 0
+    assistant = round_data.get("assistant") or {}
+    trace = (assistant.get("metadata") or {}).get("injected_reflections") or []
+    count = 0
+    for rid in trace:
+        if feedback == "like":
+            if await glog.validate_application(rid, {"source": "user_vote", "vote": "like"}):
+                count += 1
+        elif feedback == "dislike":
+            if glog.register_negative_feedback(rid):
+                count += 1
+    return count
+
+
 def _maybe_crystallize_annotation(
     store,
     feedback: str,
@@ -1650,6 +1678,34 @@ async def post_chat_feedback(
     # 记忆温度反馈（best-effort，不阻断反馈持久化结果；取消反馈不做温度操作）
     if body.feedback:
         _apply_feedback_to_memory(repo, agent_id, body.session_id, body.timestamp, body.feedback)
+        # 2026-09-15 P0b 反思效力反馈：赞/踩裁决该轮实际注入过的反思日志
+        # （assistant metadata.injected_reflections 留痕，见 turn_context）。
+        # like→validated（升最高信任层）；dislike→降置信/转 rejected。best-effort。
+        try:
+            _rflx_agent = get_agent_instance(agent_id=agent_id or "default")
+            _verdicts = await _apply_feedback_to_reflections(
+                _rflx_agent, repo, body.session_id, body.timestamp, body.feedback
+            )
+            if _verdicts:
+                logger.info(
+                    "反思效力反馈裁决 %s 条 (session=%s, feedback=%s)", _verdicts, body.session_id, body.feedback
+                )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("反思效力反馈处理失败: %s", e)
+        # 2026-09-15 动机真实化：点赞→使命感观察（用户肯定贡献价值）。
+        # 点踩不记贡献——PurposeDrive 强度按窗口内贡献计数，低 impact 同样
+        # 虚增；负反馈的真实效果已由上方记忆温度 -15 链路承担。best-effort。
+        if body.feedback == "like":
+            try:
+                _agent = get_agent_instance(agent_id=agent_id or "default")
+                _ledger = getattr(_agent, "intrinsic_motivation", None) if _agent else None
+                if _ledger:
+                    _ledger.observe_purpose(
+                        contribution=f"用户对回复点赞（session {body.session_id[:8]}）",
+                        impact=0.9,
+                    )
+            except Exception as e:  # noqa: BLE001
+                logger.debug("反馈动机观察失败: %s", e)
         # P2 标注闭环：点赞 + 修正 → 精准回复命中表（best-effort）
         if body.corrected_answer is not None:
             try:
@@ -1682,7 +1738,7 @@ async def fork_chat_session(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """会话分叉（ZCode fork 对齐）：按 until_timestamp 截取历史复制为新会话。
+    """会话分叉：按 until_timestamp 截取历史复制为新会话。
 
     双路定位（timestamp / metadata.client_timestamp）与删除轮次同一套规则；
     分叉出的新会话独立演进，原会话不动。agent 内存历史不注入（由新会话
@@ -1743,7 +1799,7 @@ async def set_chat_checkpoint(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """消息钩子/检查点（ZCode checkpoint 对齐）：写消息 metadata.checkpoint。
+    """消息钩子/检查点：写消息 metadata.checkpoint。
 
     前端在消息操作条设/撤钩子；加载历史时读取 metadata 渲染锚点标记。
     复用 feedback 的双路定位契约。

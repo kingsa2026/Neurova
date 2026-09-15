@@ -60,13 +60,11 @@ const LESSON = {
 const HISTORY = { created_at: '2026-09-05T01:00:00Z', confidence: 0.9, trigger: 'manual', summary: '1 条洞察' }
 
 function contractMocks() {
-  growthMocks.getReflections.mockResolvedValue({
-    code: 0,
-    data: {
-      items: [{ id: 'r1', content: '反思日志内容X', category: 'insight', quality_score: 4, insights: ['要点'], created_at: '2026-09-05T00:00:00Z' }],
-      total: 1,
-    },
-  })
+  // 2026-09-15 契约收口：模块函数返回归一后的裸数组（模拟真实运行时形状；
+  // 原 {code,data} mock 与拦截器返回值不符，属假绿）
+  growthMocks.getReflections.mockResolvedValue([
+    { id: 'r1', agent_id: 'a1', content: '反思日志内容X', category: 'insight', insights: ['要点'], quality: 4, created_at: '2026-09-05T00:00:00Z' },
+  ])
   metacogMocks.getLessons.mockResolvedValue({ code: 0, data: { items: [LESSON], total: 1 } })
   metacogMocks.getReflectionHistory.mockResolvedValue({ code: 0, data: { items: [HISTORY], total: 1 } })
   metacogMocks.triggerReflection.mockResolvedValue({
@@ -135,7 +133,8 @@ describe('ReflectionPage 反思|反思日志 双页签契约', () => {
     expect(vm.reflections).toHaveLength(1)
     expect(vm.reflections[0].content).toBe('反思日志内容X')
     expect(vm.total).toBe(1)
-    expect(growthMocks.getReflections).toHaveBeenCalledWith('a1', expect.objectContaining({ page: 1 }))
+    // limit/offset 对齐 BE Query（原 page/size 被后端静默忽略）
+    expect(growthMocks.getReflections).toHaveBeenCalledWith('a1', expect.objectContaining({ limit: 12, offset: 0 }))
   })
 
   it('手动触发反思调用 triggerReflection 并刷新洞察/时间线', async () => {

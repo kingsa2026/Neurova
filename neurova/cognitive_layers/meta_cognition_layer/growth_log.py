@@ -466,15 +466,63 @@ class GrowthLogManager:
         self._logger.info("验证反思日志应用: %s", entry_id)
         return True
 
-    async def archive_old_logs(self, max_age_days: float = 30.0) -> int:
-        """归档旧日志
+    def register_negative_feedback(
+        self, entry_id: str, penalty: float = 0.15, reject_below: float = 0.3
+    ) -> bool:
+        """效力反馈（P0b）：点踩/困惑信号降置信，跌破阈值转 rejected。
 
-        Args:
-            max_age_days: 最大保留天数
-
-        Returns:
-            归档的日志数量
+        只降不删：rejected 条目脱离恒定注入（select 过滤），但记忆原文
+        仍在，可经 context pool 语义召回——负反馈不等于证据销毁。
         """
+        entry = self._cache.get(entry_id)
+        if entry is None:
+            return False
+
+        entry.confidence = max(0.0, entry.confidence - penalty)
+        if entry.confidence < reject_below:
+            entry.status = ReflectionLogStatus.REJECTED
+
+        self._save_entry(entry)
+        self._logger.info("反思日志负反馈降权: %s → conf=%.2f (%s)", entry_id, entry.confidence, entry.status.value)
+        return True
+
+    def maintain_lifecycle(self, max_age_days: float = 30.0) -> dict:
+        """生命周期治理（P2）：合并重复 pending + 归档过期日志。
+
+        同步方法——睡眠整理线程回调直接调用（asyncio 事件循环里也可安全
+        调用 archive_old_logs 异步包装）。
+        """
+        pruned = self._prune_duplicate_pending()
+        archived = self._archive_old_logs_sync(max_age_days)
+        return {"pruned": pruned, "archived": archived}
+
+    def _prune_duplicate_pending(self) -> int:
+        """同一标题+正文前缀的 pending 重复条目只保留最新，其余归档。
+
+        根因防护（EKB 3920 事故同款病灶）：Step 8.5 每轮困惑都写一条，
+        同问重复不收敛会把注入名额与检索噪声全喂给回声。
+        """
+        groups: dict = {}
+        for entry in self._cache.values():
+            if entry.status != ReflectionLogStatus.PENDING:
+                continue
+            key = (entry.title, entry.content[:120])
+            groups.setdefault(key, []).append(entry)
+
+        pruned = 0
+        for dupes in groups.values():
+            if len(dupes) < 2:
+                continue
+            dupes.sort(key=lambda e: e.timestamp)
+            for old in dupes[:-1]:
+                old.status = ReflectionLogStatus.ARCHIVED
+                self._save_entry(old)
+                pruned += 1
+        if pruned:
+            self._logger.info("反思日志去重归档: %s 条重复 pending", pruned)
+        return pruned
+
+    def _archive_old_logs_sync(self, max_age_days: float = 30.0) -> int:
         cutoff_time = time.time() - (max_age_days * 24 * 3600)
         archived_count = 0
 
@@ -488,6 +536,10 @@ class GrowthLogManager:
             self._logger.info("归档了 %s 条旧反思日志", archived_count)
 
         return archived_count
+
+    async def archive_old_logs(self, max_age_days: float = 30.0) -> int:
+        """归档旧日志（异步包装；同步实现见 _archive_old_logs_sync）"""
+        return self._archive_old_logs_sync(max_age_days)
 
     async def get_statistics(self) -> typing.Dict[str, typing.Any]:
         """获取统计信息

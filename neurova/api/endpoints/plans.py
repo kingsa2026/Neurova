@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Plans API —— 计划模式端点（ZCode 计划模式对齐）
+"""Plans API —— 计划模式端点
 
 交互式计划工作流的 HTTP 面：
 1. POST /api/v1/plans/sessions                     — 发起计划会话（首轮澄清问题）
