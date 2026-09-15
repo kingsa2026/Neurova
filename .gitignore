@@ -109,6 +109,9 @@ logs/
 # 但保留 .github/（GitHub Actions 工作流必须入库）
 !.github/
 !.github/**
+# 但保留 .clinerules/（Cline 工作区规则必须入库，否则协作者/CI 拿不到系统提示词规则）
+!.clinerules/
+!.clinerules/**
 
 # ==================== 根目录临时文件 ====================
 
@@ -184,11 +187,13 @@ logs/
 /neurova-dataflow-diagram.html
 /neurova-dependency-diagram*.html
 /risk-mitigation-plan.html
-/docs/cache-cleanup-report.html
 
 # 临时脚本（仅根目录）
 /*.ps1
 /*.bat
+# 入口脚本非临时件：曾被 /*.bat 误杀致克隆/打包丢失（同 credentials* 误杀案）
+!start.bat
+!restart.bat
 
 # 临时报告
 /*_REPORT*.json
@@ -245,11 +250,6 @@ token.txt
 # Agent 工作区
 /agents/
 
-# 大型第三方项目
-/QwenPaw-main/
-/QwenPaw-1.1.6/
-/openhuman-main/
-
 # 备份/补丁/其他
 /backups/
 /backup_test_files/
@@ -279,7 +279,6 @@ token.txt
 *.db-wal
 
 # 文档构建
-/docs/*_INTEGRATION.md
 
 # ==================== LLM 配置（敏感信息） ====================
 llm_config*
@@ -298,7 +297,6 @@ secret_*.json
 !Dockerfile
 !Makefile
 !LICENSE
-!docs/**/*.md
 
 # ==================== 会话临时产物（不入库） ====================
 /_em.txt
@@ -380,10 +378,9 @@ NeurUI/src-tauri/installer-wpf/bin/installer-shell.exe
 .jwt_secret
 .agents/
 
-# 凯（QwenPaw）记忆迁移操作产物（本地工具，不入库）
 /scripts/import_kai_to_neurova.py
 /tests/unit/migration/
-/docs/05-reports/Kai*迁移报告*.md
+# 记忆迁移操作产物（本地工具，不入库）
 /docs/05-reports/kai-import-render-verify-*.png
 agent_workspaces/kai/
 

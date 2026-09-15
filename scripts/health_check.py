@@ -3,13 +3,19 @@ Neurova 健康检查模块
 提供统一的健康检查、服务器等待、日志监控等功能
 """
 
+import json
+import subprocess
+import sys
 import time
 import urllib.request
 import urllib.error
 import os
 from typing import Optional, Callable
 
-from .config import get_health_url, HEALTH_CHECK_TIMEOUT, HEALTH_CHECK_INTERVAL, LOG_FILE
+from .config import (
+    get_health_url, get_venv_python,
+    HEALTH_CHECK_TIMEOUT, HEALTH_CHECK_INTERVAL, LOG_FILE,
+)
 
 
 def health_check(port: Optional[int] = None, timeout: int = 3) -> bool:
@@ -311,31 +317,101 @@ def wait_for_server_with_progress(
     return False
 
 
+# 体检清单用 import 名作键；playwright/pillow 的包名与 import 名不同但检测按 import 名
+_DEPENDENCIES_TO_PROBE = (
+    "fastapi",          # Web 框架
+    "uvicorn",          # ASGI 服务器
+    "sentence_transformers",  # 记忆向量模型
+    "PIL",              # Pillow：桌面截图（Computer Use）
+    "pyautogui",        # 鼠标/键盘控制（Computer Use）
+    "playwright",       # 浏览器自动化（Computer Use）
+)
+
+# 子进程探测协议：脚本用固定 marker 包裹结果，父进程只信 marker 之后到行尾的 JSON，
+# 避免第三方库在 import 期向 stdout 打印噪声污染解析（sentinel framing）
+_DEPS_MARKER = "@@NEUROVA_DEPS@@"
+
+_PROBE_SCRIPT = (
+    "import importlib, json, sys\n"
+    "out = {}\n"
+    "for m in sys.argv[1:]:\n"
+    "    try:\n"
+    "        importlib.import_module(m)\n"
+    "        out[m] = True\n"
+    "    except BaseException:\n"
+    "        out[m] = False\n"
+    f"print('{_DEPS_MARKER}' + json.dumps(out))\n"
+)
+
+# 结果按解释器路径缓存（探测含 sentence_transformers 等重导入，同一脚本运行内
+# 多处调用 check_all_services/print_dependencies_status 只付一次全量 import 成本）
+_deps_cache = {}
+
+
+def _probe_python() -> str:
+    """依赖探测应跑在哪个解释器：venv 优先，缺失时回退当前解释器。
+
+    venv 才是后端实际运行的解释器，检查对象与运行对象对齐。
+    """
+    venv_py = get_venv_python()
+    if venv_py.exists():
+        return str(venv_py)
+    return sys.executable
+
+
 def check_dependencies() -> dict:
     """
-    检查依赖项
-    
+    检查后端依赖是否可导入。
+
+    在目标解释器（venv 优先，见 _probe_python）的隔离子进程里真实 import，
+    从而：
+    1. 检查对象与运行对象对齐——venv 才是后端实际使用的解释器；
+    2. 宿主解释器（如 PATH 上 ABI 不匹配的 alpha 版）无论多坏，其损坏 C 扩展
+       import 时抛的 SystemError 都被子进程捕获，只记为"该依赖不可用"，
+       绝不穿透崩溃启动脚本本身。
+
     Returns:
-        dict: 依赖项状态
+        dict: {依赖名: 是否可用(bool)}
     """
-    dependencies = {
-        "fastapi": False,
-        "uvicorn": False,
-        "sentence_transformers": False,
-        # Computer Use（桌面控制 + 浏览器自动化）
-        "PIL": False,          # Pillow：桌面截图
-        "pyautogui": False,    # 鼠标/键盘控制
-        "playwright": False,   # 浏览器自动化
-    }
-    
-    for dep in dependencies:
-        try:
-            __import__(dep)
-            dependencies[dep] = True
-        except ImportError:
-            pass
-    
-    return dependencies
+    py = _probe_python()
+    cached = _deps_cache.get(py)
+    if cached is not None:
+        return dict(cached)
+
+    argv = [py, "-c", _PROBE_SCRIPT, *_DEPENDENCIES_TO_PROBE]
+    deps = {name: False for name in _DEPENDENCIES_TO_PROBE}
+    try:
+        # 不拼源码、不走 shell：依赖名作为 argv 传入，无注入面
+        proc = subprocess.run(
+            argv, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=120,
+        )
+    except Exception:
+        # 解释器缺失/超时/子进程起不来 → 全部记不可用，仍不抛出
+        _deps_cache[py] = dict(deps)
+        return deps
+
+    payload = _extract_sentinel(proc.stdout)
+    if payload is not None:
+        for name in _DEPENDENCIES_TO_PROBE:
+            deps[name] = bool(payload.get(name))
+    _deps_cache[py] = dict(deps)
+    return deps
+
+
+def _extract_sentinel(stdout: str):
+    """从子进程 stdout 中取 _DEPS_MARKER 之后到行尾的 JSON；无合法帧返回 None。"""
+    start = stdout.find(_DEPS_MARKER)
+    if start < 0:
+        return None
+    rest = stdout[start + len(_DEPS_MARKER):]
+    nl = rest.find("\n")
+    frame = rest if nl < 0 else rest[:nl]
+    try:
+        data = json.loads(frame)
+    except (ValueError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def print_dependencies_status() -> None:

@@ -119,7 +119,7 @@ def package(skip_tauri: bool, legacy_zip: bool, open_dir: bool) -> int:
         # legacy：三文件 zip，内核可独立双击安装
         shell = build_shell(None)
         if not LOGO_SRC.exists():
-            raise RuntimeError(f"Logo 缺失：{ICON_SRC}")
+            raise RuntimeError(f"Logo 缺失：{LOGO_SRC}")
         out_path = OUT_DIR / f"Neurova_Installer_{ver}_{stamp}_x64.zip"
         OUT_DIR.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
