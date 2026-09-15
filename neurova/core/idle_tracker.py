@@ -16,7 +16,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 from neurova.cognitive_layers.memory_layer.sleep import SleepConsolidation
 from neurova.core.base_module import BaseModule
-from neurova.core.sleep_phase_config_manager import SleepPhaseConfigManager
 
 
 @dataclass
@@ -91,7 +90,6 @@ class IdleTimeTracker(BaseModule):
         self._current_idle_time = 0.0
         self._current_phase = "active"
         self._phase_start_time = time.time()
-        self._phase_config_manager: Optional[SleepPhaseConfigManager] = None
         self._sleep_consolidation: Optional[SleepConsolidation] = None
         self._sleep_mode = "temperature"
         self._idle_thresholds = SleepPhaseThresholds()
@@ -124,16 +122,12 @@ class IdleTimeTracker(BaseModule):
 
     def on_initialize(self) -> None:
         self.log_info("Initializing Idle Time Tracker")
-        if self._phase_config_manager:
-            self._phase_config_manager.on_initialize()
         if self._sleep_consolidation:
             self._sleep_consolidation.set_state_value("initialized", True)
         self._current_phase = "active"
 
     def on_start(self) -> None:
         self.log_info("Starting Idle Time Tracker")
-        if self._phase_config_manager:
-            self._phase_config_manager.on_start()
         if self._sleep_consolidation:
             self._sleep_consolidation.set_state_value("started", True)
         # 根因修复: _on_phase_changed 此前从未注册，阶段迁移永远不触发记忆巩固
@@ -144,8 +138,6 @@ class IdleTimeTracker(BaseModule):
     def on_stop(self) -> None:
         self.log_info("Stopping Idle Time Tracker")
         self._stop_monitoring()
-        if self._phase_config_manager:
-            self._phase_config_manager.on_stop()
         if self._sleep_consolidation:
             self._sleep_consolidation.set_state_value("stopped", True)
         self.set_state_value("running", False)
@@ -222,9 +214,18 @@ class IdleTimeTracker(BaseModule):
 
     def _on_phase_changed(self, old_phase: str, new_phase: str, event_data: Optional[Dict] = None) -> None:
         """阶段变更回调"""
-        if self._sleep_consolidation:
-            self.log_info(f"Phase changed: {old_phase} -> {new_phase}")
-            self._trigger_consolidation(new_phase)
+        if not self._sleep_consolidation:
+            return
+        self.log_info(f"Phase changed: {old_phase} -> {new_phase}")
+        if new_phase == "active":
+            # 回到 active = 醒来（用户活动，或休眠 dwell 超时整觉完成）：wake 记账，
+            # 不跑巩固周期 —— 此前活动返回也会触发整轮整理
+            try:
+                self._sleep_consolidation.wake()
+            except Exception as e:
+                self.log_error(f"Error waking on return to active: {e}")
+            return
+        self._trigger_consolidation(new_phase)
 
     def _trigger_consolidation(self, phase: Optional[str] = None) -> None:
         """触发记忆巩固"""
@@ -244,10 +245,11 @@ class IdleTimeTracker(BaseModule):
         except Exception as e:  # noqa: BLE001 - 晋升失败不影响巩固主流程
             self.log_debug(f"Promotion cycle skipped: {e}")
 
-        # 设置通路修复: memory_consolidation_enabled 此前仅在手动 start_sleep
-        # 生效, 睡眠阶段触发的巩固从不检查。phase 非空 = 睡眠阶段触发;
-        # phase=None = 手动/过载触发, 不受此开关限制。
-        if phase is not None:
+        # 递进式分工: memory_consolidation_enabled 只门控动记忆的阶段
+        # (deep_sleep/hibernate); light_sleep/rem 仅跑梦境/洞察, 由引擎内
+        # dream_replay_enabled 等各自门控。phase=None = 手动/过载触发,
+        # 不受此开关限制（与旧行为一致）。
+        if phase in ("deep_sleep", "hibernate"):
             try:
                 settings = self._sleep_consolidation.get_settings()
             except Exception as e:
@@ -264,12 +266,17 @@ class IdleTimeTracker(BaseModule):
                 from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord
 
                 memory_records = [MemoryRecord.from_dict(m) for m in memories]
-                result = self._sleep_consolidation.run_sleep_cycle(memory_records)
+                # 阶段透传（修复：此前所有阶段跑同一套旧默认路径）
+                result = self._sleep_consolidation.run_sleep_cycle(
+                    memory_records, phase=phase or "sleep"
+                )
                 self._last_consolidation_result = result
                 self.log_info(f"Consolidation completed: {len(memories)} memories processed")
 
-                # 写回合并后的记忆
-                self._write_back_consolidated_memories(result)
+                # 写回合并后的记忆：仅动记忆的阶段（深睡/休眠/旧默认路径）。
+                # light_sleep/rem 不动记忆，无需写回。
+                if phase not in ("light_sleep", "rem"):
+                    self._write_back_consolidated_memories(result)
 
                 # 通知回调
                 for callback in self._callbacks.get("consolidation", []):
@@ -323,10 +330,6 @@ class IdleTimeTracker(BaseModule):
     def set_memory_manager(self, memory_manager) -> None:
         """设置记忆管理器"""
         self._memory_manager = memory_manager
-
-    def get_phase_config_manager(self) -> Optional[SleepPhaseConfigManager]:
-        """获取阶段配置管理器"""
-        return self._phase_config_manager
 
     def record_activity(self) -> None:
         """记录用户活动（重置空闲时间）
@@ -472,10 +475,25 @@ class IdleTimeTracker(BaseModule):
             if isinstance(interval, (int, float)) and interval >= 10:
                 self._monitor_interval = int(interval)
 
+            # 到点自动醒（手动 start_sleep 会话）。刻意在 auto_sleep_enabled 门
+            # 之前执行：用户手动进入的睡眠会话即使关闭自动推进也应准时结束
+            try:
+                self._sleep_consolidation.check_auto_wake()
+            except Exception as e:  # noqa: BLE001 - 到点醒失败不影响阶段判定
+                self.log_debug(f"check_auto_wake skipped: {e}")
+
             # 设置通路修复: auto_sleep_enabled 此前全库无消费方（开关形同摆设）
             if not settings.get("auto_sleep_enabled", True):
                 self.log_debug("auto_sleep_enabled=False, 跳过自动阶段迁移")
                 return None
+
+            # 每阶段最长停留可配: dwell 超时 → 强制向更深推进；
+            # hibernate（最深）超时 = 整觉完成 → 回 active（wake 记账走阶段回调链）
+            if self._current_phase != "active":
+                forced = self._dwell_forced_phase(settings)
+                if forced:
+                    self._transition_to_phase(forced)
+                    return forced
 
             # sleep_threshold_minutes 通路修复: 活跃使用中不自动入睡 ——
             # 仅拦截从 active 的首次迁移（深层迁移走各阶段自身阈值）。
@@ -494,6 +512,37 @@ class IdleTimeTracker(BaseModule):
             self._transition_to_phase(next_phase)
             return next_phase
         return None
+
+    def _dwell_forced_phase(self, settings: Dict[str, Any]) -> Optional[str]:
+        """当前阶段停留超过 phase_max_minutes_{phase} → 返回强制推进的下一阶段。
+
+        PHASE_ORDER 递进：light_sleep→deep_sleep→rem→hibernate；
+        hibernate（最深）超时 = 整觉完成 → "active"（阶段回调链负责 wake 记账）。
+        未配置/0 = 该阶段不设上限（保持旧行为）。
+        """
+        phase = self._current_phase
+        if phase == "active" or phase not in self.PHASE_ORDER:
+            return None
+        max_minutes = settings.get(f"phase_max_minutes_{phase}")
+        if not isinstance(max_minutes, (int, float)) or max_minutes <= 0:
+            return None
+        if time.time() - self._phase_start_time < max_minutes * 60:
+            return None
+        idx = self.PHASE_ORDER.index(phase)
+        return self.PHASE_ORDER[idx + 1] if idx + 1 < len(self.PHASE_ORDER) else "active"
+
+    def get_phase_deadline(self) -> Optional[float]:
+        """当前睡眠阶段的停留到期时刻（/status next_wake 数据源）。
+
+        active / 未配置阶段上限时返回 None。
+        """
+        settings = self._active_sleep_settings or {}
+        if self._current_phase == "active" or self._current_phase not in self.PHASE_ORDER:
+            return None
+        max_minutes = settings.get(f"phase_max_minutes_{self._current_phase}")
+        if not isinstance(max_minutes, (int, float)) or max_minutes <= 0:
+            return None
+        return self._phase_start_time + max_minutes * 60
 
     def _transition_to_phase(self, new_phase: str) -> None:
         """过渡到新阶段"""

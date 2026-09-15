@@ -191,17 +191,25 @@ class SleepConsolidation:
         self._last_sleep_time: Optional[float] = None
         self._last_wake_time: Optional[float] = None
         self._sleep_started_at: Optional[float] = None
+        # 自动醒来：手动会话 start_sleep 以 sleep_duration_minutes 登记的唤醒时刻；
+        # check_auto_wake（IdleTimeTracker 监控循环驱动，不起新线程）到点执行 wake 记账
+        self._sleep_deadline: Optional[float] = None
         self._total_sleep_duration: float = 0.0
         self._sleep_cycles: int = 0
         # 资源修复: _dream_logs/_merge_history 曾只增不减/全量 id 内嵌,
         # 静态期睡眠整理每轮把整库 id 列表永久留存 → 现在有界+截断内嵌
         self._MAX_DREAM_LOGS = 200
         self._MAX_MERGE_HISTORY = 500
+        self._MAX_INSIGHTS = 200
         self._MAX_INVOLVED_IDS = 100
         self._dream_logs: List[Dict[str, Any]] = []
         self._merge_history: List[Dict[str, Any]] = []
+        # REM/休眠洞察：从真实合并统计派生（_last_cycle_stats），/insights 端点数据源
+        self._insights: List[Dict[str, Any]] = []
         # 冲突解决审计记录（多成员簇合并时产生, /conflicts 端点数据源）
         self._conflict_resolutions: List[Dict[str, Any]] = []
+        # 深睡/休眠周期的真实统计留存 —— REM 洞察的唯一来源（无来源如实为空，不编造）
+        self._last_cycle_stats: Optional[Dict[str, Any]] = None
         # 梦境/合并/冲突落盘（2026-09-12 未接线功能清剿：四页签重启不丢）
         self._logs_store_path: Optional[str] = logs_store_path
         self._load_logs()
@@ -223,6 +231,12 @@ class SleepConsolidation:
             "idle_threshold_rem": 90,
             "idle_threshold_hibernate": 120,
             "monitor_interval_seconds": 60,
+            # ── 每阶段最长停留（分钟）：dwell 超时强制向更深推进，休眠超时=整觉完成→醒。
+            #    默认值承接旧 SleepConfigManager(B) 的 PhaseDurations 秒值÷60 ──
+            "phase_max_minutes_light_sleep": 30,
+            "phase_max_minutes_deep_sleep": 60,
+            "phase_max_minutes_rem": 120,
+            "phase_max_minutes_hibernate": 240,
         }
         if self._settings_store is not None:
             self._load_settings()
@@ -543,23 +557,90 @@ class SleepConsolidation:
             "avg_temperature": avg_temperature,
         }
 
+    # ── 阶段功能分工（递进式）：每个睡眠阶段只执行自己的功能 ──
+    #   light_sleep 浅睡: 只写回放梦境（不动记忆）
+    #   deep_sleep  深睡: 整理+合并历史+真实统计留存（洞察来源）
+    #   rem         REM:  基于真实合并统计派生洞察 + 创造型梦境
+    #   hibernate   休眠: 全套
+    _PHASE_CAPS = {
+        "light_sleep": ("dream",),
+        "deep_sleep": ("consolidate", "merge_history", "stats"),
+        "rem": ("dream", "insight"),
+        "hibernate": ("consolidate", "merge_history", "stats", "dream", "insight"),
+    }
+    _PHASE_DREAM_TYPES = {
+        "light_sleep": "consolidation",
+        "rem": "creative",
+        "hibernate": "problem_solving",
+    }
+
     def run_sleep_cycle(self, memories: List[MemoryRecord], phase: str = "sleep") -> Dict[str, Any]:
-        """执行睡眠周期（向后兼容包装）
+        """执行睡眠周期 —— 按阶段分工（2026-09-15 补齐：此前所有阶段跑同一套，
+        梦境/合并记录仅手动 start_sleep 才写，自动睡眠四页签恒空）。
 
         Args:
             memories: 记忆列表
-            phase: 睡眠阶段（默认 "sleep"）
+            phase: 睡眠阶段。默认 "sleep"=旧行为（只整合，不写记录/不落盘 ——
+                shutdown/过载/手动包装路径零回归）；light_sleep/deep_sleep/rem/
+                hibernate 按 _PHASE_CAPS 执行各自功能并随周期落盘。
 
         Returns:
-            Dict[str, Any]: 包含整合结果的字典
+            Dict[str, Any]: 整合结果（含 insights_generated 键）
         """
+        caps = self._PHASE_CAPS.get(phase)
+        if caps is None:
+            # 旧路径：仅整合（写回/落盘由调用方自理，行为与历史一致）
+            return self._cycle_consolidate(memories, phase, record=False)
+
+        now = time.time()
+        agent_id = memories[0].agent_id if memories else "default"
+        involved = [m.id for m in memories]
+
+        if "consolidate" in caps:
+            result = self._cycle_consolidate(memories, phase, record=True, agent_id=agent_id)
+        else:
+            # 浅睡/REM 不动记忆：直通统计
+            result = {
+                "phase": phase,
+                "total_processed": 0,
+                "merged_count": 0,
+                "archived_count": 0,
+                "active_count": 0,
+                "merged_memories": list(memories),
+                "merge_results": [],
+            }
+
+        new_insights: List[Dict[str, Any]] = []
+        if "insight" in caps:
+            new_insights = self._record_insights_locked(now, agent_id)
+        dream_entry = None
+        if "dream" in caps:
+            dream_entry = self._record_phase_dream_locked(
+                now, phase, agent_id, involved, result, len(new_insights)
+            )
+        if dream_entry is not None and new_insights:
+            for e in new_insights:
+                e["dream_id"] = dream_entry["dream_id"]
+        result["insights_generated"] = len(new_insights)
+
+        # 阶段路径落盘：重启后 /dreams /insights /merges /conflicts 不再空
+        self.persist_logs()
+        logger.info(
+            "睡眠周期完成: 阶段=%s, 处理=%s 条, 合并=%s, 洞察=%s",
+            phase, result["total_processed"], result["merged_count"], len(new_insights),
+        )
+        return result
+
+    def _cycle_consolidate(
+        self, memories: List[MemoryRecord], phase: str, record: bool, agent_id: str = "default"
+    ) -> Dict[str, Any]:
+        """执行整合内核。record=True（深睡/休眠）时留存真实统计并写合并历史。"""
         merged_memories, merge_results = self.consolidate(memories)
 
         # 计算统计信息
         active_count = sum(1 for m in merged_memories if not m.is_archived)
         archived_count = sum(1 for m in merged_memories if m.is_archived)
 
-        # 构建结果字典（向后兼容）
         result = {
             "phase": phase,
             "total_processed": len(memories),
@@ -570,8 +651,114 @@ class SleepConsolidation:
             "merge_results": merge_results,
         }
 
-        logger.info("睡眠周期完成: 阶段=%s, 处理=%s 条记忆", phase, len(memories))
+        if record:
+            # REM 洞察唯一来源：本轮真实合并结果（单例簇不算）
+            self._last_cycle_stats = {
+                "timestamp": time.time(),
+                "merged_count": sum(1 for mr in merge_results if len(mr.source_ids) >= 2),
+                "archived_count": archived_count,
+                "merge_results": [mr for mr in merge_results if len(mr.source_ids) >= 2],
+            }
+            self._record_merges_locked(merge_results, agent_id)
+
         return result
+
+    def _record_dream_locked(
+        self, now: float, agent_id: str, involved: List[str], dream_type: str, content: str,
+        insights_count: int = 0,
+    ) -> Optional[Dict[str, Any]]:
+        """写一条梦境日志（dream_replay_enabled=False 时跳过）。返回写入的条目。"""
+        if not self._settings.get("dream_replay_enabled", True):
+            return None
+        entry = {
+            "dream_id": f"dream_{int(now * 1000)}_{self._sleep_cycles}_{dream_type}",
+            "agent_id": agent_id,
+            "timestamp": now,
+            "dream_type": dream_type,
+            "content": content,
+            "memories_involved": involved[: self._MAX_INVOLVED_IDS],
+            "involved_total": len(involved),
+            "insights_generated": insights_count,
+            "duration": time.time() - now,
+        }
+        self._dream_logs.insert(0, entry)
+        if len(self._dream_logs) > self._MAX_DREAM_LOGS:
+            self._dream_logs = self._dream_logs[: self._MAX_DREAM_LOGS]
+        return entry
+
+    def _record_phase_dream_locked(
+        self, now: float, phase: str, agent_id: str, involved: List[str],
+        result: Dict[str, Any], insights_count: int,
+    ) -> Optional[Dict[str, Any]]:
+        """阶段梦境：内容全部来自本轮真实统计，不编造。"""
+        dream_type = self._PHASE_DREAM_TYPES.get(phase, "replay")
+        if phase == "light_sleep":
+            content = (
+                f"回放 {result['total_processed']} 条记忆"
+                f"（活跃 {result['active_count']}，本阶段未触发整理）"
+            )
+        elif phase == "rem":
+            stats = self._last_cycle_stats or {}
+            content = (
+                f"从 {stats.get('merged_count', 0)} 个合并簇派生 {insights_count} 条洞察"
+            )
+        else:  # hibernate 全套
+            content = (
+                f"整觉全套: 整理 {result['total_processed']} 条记忆, "
+                f"合并 {result['merged_count']} 组, 归档 {result['archived_count']} 条, "
+                f"洞察 {insights_count} 条"
+            )
+        return self._record_dream_locked(now, agent_id, involved, dream_type, content, insights_count)
+
+    def _record_merges_locked(self, merge_results: List[MergeResult], agent_id: str) -> None:
+        """写合并历史（真实合并：≥2 源；单例簇不算）。start_sleep/深睡/休眠共用。"""
+        now = time.time()
+        for merge_result in merge_results:
+            if len(merge_result.source_ids) < 2:
+                continue  # 单例簇不是真实合并
+            self._merge_history.append(
+                {
+                    "merge_id": merge_result.merged_id,
+                    "agent_id": agent_id,
+                    "timestamp": now,
+                    # 资源修复: source_ids 原样嵌入可到整库规模 → 截断
+                    "source_memories": merge_result.source_ids[: self._MAX_INVOLVED_IDS],
+                    "source_total": len(merge_result.source_ids),
+                    "target_memory": merge_result.merged_id,
+                    "merge_type": "consolidation",
+                    "success": True,
+                    "conflicts_resolved": 0,
+                }
+            )
+            if len(self._merge_history) > self._MAX_MERGE_HISTORY:
+                self._merge_history = self._merge_history[-self._MAX_MERGE_HISTORY:]
+
+    def _record_insights_locked(self, now: float, agent_id: str) -> List[Dict[str, Any]]:
+        """REM/休眠洞察：仅从 _last_cycle_stats 的真实合并簇派生；无来源返回空（不编造）。"""
+        stats = self._last_cycle_stats
+        if not stats or not stats.get("merge_results"):
+            return []
+        new_entries: List[Dict[str, Any]] = []
+        for i, mr in enumerate(stats["merge_results"]):
+            cats = "、".join((mr.combined_categories or [])[:3]) or "未分类"
+            entry = {
+                "insight_id": f"insight_{int(now * 1000)}_{i}",
+                "dream_id": "",
+                "agent_id": agent_id,
+                "timestamp": now,
+                "insight_type": "pattern",
+                "content": (
+                    f"{len(mr.source_ids)} 条同类记忆收敛为 1 条，主题：{cats}，"
+                    f"均温 {mr.avg_temperature:.0f}"
+                ),
+                "confidence": round(min(0.9, 0.4 + 0.1 * len(mr.source_ids)), 2),
+                "related_memories": mr.source_ids[: self._MAX_INVOLVED_IDS],
+            }
+            self._insights.insert(0, entry)
+            new_entries.append(entry)
+        if len(self._insights) > self._MAX_INSIGHTS:
+            self._insights = self._insights[: self._MAX_INSIGHTS]
+        return new_entries
 
     # ────── API 能力层（/api/v1/sleep 端点契约）──────
 
@@ -621,6 +808,8 @@ class SleepConsolidation:
         self._sleep_phase = "deep_sleep"
         self._last_sleep_time = now
         self._sleep_started_at = now
+        # 自动醒来：按会话时长登记唤醒时刻（不传时回退 sleep_duration_minutes 设置）
+        self._sleep_deadline = now + duration_minutes * 60
         self._sleep_cycles += 1
 
         result: Dict[str, Any] = {
@@ -636,6 +825,8 @@ class SleepConsolidation:
                 all_memories = self.memory_manager.get_all_memories()
                 if all_memories:
                     records = [MemoryRecord.from_dict(m) for m in all_memories]
+                    # 深睡分工：整合+统计留存+合并历史（写记录由 run_sleep_cycle
+                    # 统一承担，start_sleep 此前内联的合并循环移入 helper 去重）
                     cycle = self.run_sleep_cycle(records, phase="deep_sleep")
 
                     from neurova.cognitive_layers.memory_layer.sleep_writeback import (
@@ -645,6 +836,7 @@ class SleepConsolidation:
                     write_stats = write_back_consolidation_result(self.memory_manager, cycle)
 
                     result = {
+                        "duration_minutes": duration_minutes,
                         "total_processed": cycle["total_processed"],
                         "merged_count": cycle["merged_count"],
                         "archived_count": cycle["archived_count"],
@@ -654,47 +846,18 @@ class SleepConsolidation:
                     agent_id = records[0].agent_id if records else "default"
                     involved = [m.id for m in records]
                     # 梦境回放开关: dream_replay_enabled=False 时不记录梦境,
-                    # 但整合与合并历史照常（此前该设置键无消费方）
-                    if self._settings.get("dream_replay_enabled", True):
-                        self._dream_logs.insert(
-                            0,
-                            {
-                                "dream_id": f"dream_{int(now * 1000)}_{self._sleep_cycles}",
-                                "agent_id": agent_id,
-                                "timestamp": now,
-                                "dream_type": "replay",
-                                "content": (
-                                    f"整理 {cycle['total_processed']} 条记忆，"
-                                    f"合并 {cycle['merged_count']} 组，归档 {cycle['archived_count']} 条"
-                                ),
-                                # 资源修复: 原样嵌入整库 id 列表 → 截断到前 100
-                                "memories_involved": involved[: self._MAX_INVOLVED_IDS],
-                                "involved_total": len(involved),
-                                "insights_generated": cycle["merged_count"],
-                                "duration": time.time() - now,
-                            },
-                        )
-                        if len(self._dream_logs) > self._MAX_DREAM_LOGS:
-                            self._dream_logs = self._dream_logs[: self._MAX_DREAM_LOGS]
-                    for merge_result in cycle["merge_results"]:
-                        if len(merge_result.source_ids) < 2:
-                            continue  # 单例簇不是真实合并
-                        self._merge_history.append(
-                            {
-                                "merge_id": merge_result.merged_id,
-                                "agent_id": agent_id,
-                                "timestamp": now,
-                                # 资源修复: source_ids 原样嵌入可到整库规模 → 截断
-                                "source_memories": merge_result.source_ids[: self._MAX_INVOLVED_IDS],
-                                "source_total": len(merge_result.source_ids),
-                                "target_memory": merge_result.merged_id,
-                                "merge_type": "consolidation",
-                                "success": True,
-                                "conflicts_resolved": 0,
-                            }
-                        )
-                        if len(self._merge_history) > self._MAX_MERGE_HISTORY:
-                            self._merge_history = self._merge_history[-self._MAX_MERGE_HISTORY:]
+                    # 但整合与合并历史照常（helper 内门控，与此前一致）
+                    self._record_dream_locked(
+                        now,
+                        agent_id,
+                        involved,
+                        "replay",
+                        (
+                            f"整理 {cycle['total_processed']} 条记忆，"
+                            f"合并 {cycle['merged_count']} 组，归档 {cycle['archived_count']} 条"
+                        ),
+                        cycle["merged_count"],
+                    )
             except Exception as e:
                 logger.warning("主动睡眠整理失败: %s", e)
 
@@ -712,10 +875,28 @@ class SleepConsolidation:
         self._sleep_phase = "awake"
         self._last_wake_time = now
         self._sleep_started_at = None
+        self._sleep_deadline = None
         return {
             "total_sleep_duration": self._total_sleep_duration,
             "sleep_cycles": self._sleep_cycles,
         }
+
+    def get_next_wake(self) -> Optional[float]:
+        """手动会话的计划唤醒时刻；未睡眠返回 None"""
+        return self._sleep_deadline if self._is_sleeping else None
+
+    def check_auto_wake(self, now: Optional[float] = None) -> bool:
+        """到点自动醒（由 IdleTimeTracker 监控循环每轮驱动，不起新线程）。
+
+        仅对手动 start_sleep 会话生效——自动阶段推进的整觉完成（休眠 dwell 超时
+        回 active）走 tracker 的阶段链。
+        """
+        if not self._is_sleeping or self._sleep_deadline is None:
+            return False
+        if (now if now is not None else time.time()) < self._sleep_deadline:
+            return False
+        self.wake()
+        return True
 
     def _load_logs(self) -> None:
         """从磁盘加载梦境/合并/冲突审计（logs_store_path 未配置则跳过）。"""
@@ -732,6 +913,7 @@ class SleepConsolidation:
             if isinstance(raw, dict):
                 self._dream_logs = list(raw.get("dream_logs", []))
                 self._merge_history = list(raw.get("merge_history", []))
+                self._insights = list(raw.get("insight_logs", []))
                 self._conflict_resolutions = list(raw.get("conflict_resolutions", []))
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to load sleep logs from %s: %s", self._logs_store_path, e)
@@ -750,6 +932,7 @@ class SleepConsolidation:
             payload = {
                 "dream_logs": self._dream_logs[: self._MAX_DREAM_LOGS],
                 "merge_history": self._merge_history[-self._MAX_MERGE_HISTORY:],
+                "insight_logs": self._insights[: self._MAX_INSIGHTS],
                 "conflict_resolutions": self._conflict_resolutions[: 2 * self._MAX_MERGE_HISTORY],
             }
             tmp = p.with_name(p.name + ".tmp")
@@ -768,8 +951,8 @@ class SleepConsolidation:
         return self._dream_logs[offset : offset + limit]
 
     def get_dream_insights(self, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
-        """获取梦境洞察（当前由合并记录派生，无独立洞察时返回空）"""
-        return []
+        """获取梦境洞察（REM/休眠从真实合并统计派生；无来源如实为空，不编造）"""
+        return self._insights[offset : offset + limit]
 
     def get_memory_merges(self, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
         """获取记忆合并历史，最新在前"""
