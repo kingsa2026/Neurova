@@ -1,11 +1,10 @@
-"""交互式记忆写入待确认中间态（P1-2，Utopia pending_facts 裁剪版）。
+"""交互式记忆写入待确认中间态。
 
-设计（docs/Neurova_Utopia代码级对比_2026-09-04.md §2.3）：
+设计：
 - 独立 SQLite（与主记忆库分库）——失败方向：漏读 pending 的后果是
-  "待审队列看不见"，不是"未确认记忆混进主库检索"（与 Utopia 0018
+ "待审队列看不见"
   把 pending_facts 独立成表同理：忘读的代价方向必须选错的那头）；
 - 拒绝过的内容记指纹（归一化 sha256），同内容不再被重复提议
-  （Utopia rejected_facts 同理）；
 - confirm 经注入的 remember_fn 真正落库——本模块不依赖 MemoryManager，
   依赖方向是调用方（API/执行器）注入；
 - remember_fn 失败时记录保持 pending（未确认的记忆不能凭空消失）。
@@ -132,6 +131,83 @@ def _fingerprint(content: str) -> str:
     return hashlib.sha256(content.strip().lower().encode("utf-8")).hexdigest()
 
 
+# ── P1#11② NormalizedKey──────────
+# 折叠口径刻意保守：大小写/全半角/标点/空白 + 说话人前缀。key 相同 ≈
+# "同一事实的新说法"；语义级判断（话题归并/矛盾检测）不做——那是 LLM 的
+# 职责（KB 冲突账本/巩固簇合并），写路径保持零模型调用、确定性可复现。
+
+_SPEAKER_PREFIXES = (
+    "助手：", "助手:", "用户：", "用户:", "assistant:", "user:",
+    "助手", "用户",
+)
+
+
+def normalized_key(content: str) -> str:
+    """确定性归一化键：NFKC + 小写 + 去说话人前缀 + 剔除标点/空白。"""
+    import re
+    import unicodedata
+
+    text = unicodedata.normalize("NFKC", str(content or "")).strip().lower()
+    for p in _SPEAKER_PREFIXES:
+        if text.startswith(p):
+            text = text[len(p):].strip()
+            break
+    return re.sub(r"[\W_]+", "", text, flags=re.UNICODE)
+
+
+def find_supersede_ids(memories: Any, content: str) -> List[str]:
+    """活跃记忆中 normalized_key 与 content 完全相同的条目 id（排除已遗忘）。"""
+    key = normalized_key(content)
+    if not key:
+        return []
+    out: List[str] = []
+    for m in memories or []:
+        if not isinstance(m, dict):
+            continue
+        stage = str(m.get("lifecycle_stage") or "active").lower()
+        if stage != "active":
+            continue
+        if normalized_key(str(m.get("content") or "")) == key:
+            mid = str(m.get("id") or m.get("memory_id") or "")
+            if mid:
+                out.append(mid)
+    return out
+
+
+def supersede_same_key(manager: Any, content: str) -> List[str]:
+    """确认落库前的确定性覆盖：同 normalized_key 旧活跃记忆软遗忘，返回已遗忘 id。
+
+    错误方向：漏覆盖 = 新旧并存（下轮巩固簇合并兜底）；任何一步失败都静默
+    跳过、不阻断 confirm——绝不因覆盖故障丢新记忆。
+    """
+    try:
+        mems = manager.get_all_memories() or []
+    except Exception:  # noqa: BLE001
+        return []
+    done: List[str] = []
+    for mid in find_supersede_ids(mems, content):
+        try:
+            if manager.forget(mid, soft=True):
+                done.append(mid)
+        except Exception:  # noqa: BLE001
+            logger.debug("normalized_key 覆盖失败（忽略）: %s", mid, exc_info=True)
+    return done
+
+
+# P1#11 遗忘墓碑：用户主动遗忘的内容
+# 指纹独立成表——propose/confirm 命中即拒绝，再提炼/重复提议不得复活已删记忆。
+# 错误方向：漏记墓碑 = 记忆可被复活；
+# 误记墓碑 = 一条新记忆提议被拒（可解释、可人工放行）。后者代价远小于前者。
+_TOMBSTONE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS content_tombstones (
+    fingerprint  TEXT PRIMARY KEY,
+    by_user      TEXT NOT NULL DEFAULT '',
+    source       TEXT NOT NULL DEFAULT '',
+    created_at   REAL NOT NULL
+);
+"""
+
+
 class PendingMemoryStore:
     """待确认记忆账本。独立分库，绝不与主记忆检索混表。"""
 
@@ -140,6 +216,7 @@ class PendingMemoryStore:
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.executescript(_SCHEMA)
+        self._conn.executescript(_TOMBSTONE_SCHEMA)
         self._conn.executescript(_MIGRATION_DROP_OLD)
         self._migrate_columns()
         self._conn.executescript(_LEGACY_CLEANUP)
@@ -152,6 +229,34 @@ class PendingMemoryStore:
             self._conn.commit()
         except Exception:  # noqa: BLE001 - 迁移失败不阻断建库，待下次启动重试
             self._conn.rollback()
+
+    # ── P1#11 遗忘墓碑 ────────────────────────────────────────
+
+    def tombstone_content(self, content: str, by_user: str = "", source: str = "") -> None:
+        """登记内容级遗忘墓碑（幂等）。用户主动删除/确认遗忘已入库记忆时调用。"""
+        content = (content or "").strip()
+        if not content:
+            return
+        fp = _fingerprint(content)
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR IGNORE INTO content_tombstones"
+                " (fingerprint, by_user, source, created_at) VALUES (?, ?, ?, ?)",
+                (fp, str(by_user or ""), str(source or ""), time.time()),
+            )
+            self._conn.commit()
+
+    def is_content_tombstoned(self, content: str) -> bool:
+        """内容是否命中遗忘墓碑（归一化指纹判等）。"""
+        content = (content or "").strip()
+        if not content:
+            return False
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM content_tombstones WHERE fingerprint = ?",
+                (_fingerprint(content),),
+            ).fetchone()
+        return row is not None
 
     # ── 提议 ──────────────────────────────────────────────────
 
@@ -181,6 +286,10 @@ class PendingMemoryStore:
         target = str(target_memory_id or "").strip()
         if action == "forget" and not target:
             raise ValueError("forget 提议缺少 target_memory_id")
+        # P1#11：store 提议命中遗忘墓碑 → 直接拒绝（不新建 pending）。
+        # forget 动作提议不受内容墓碑误伤（其语义是"删目标记忆"，非复活）。
+        if action == "store" and self.is_content_tombstoned(content):
+            return {"rejected": True, "reason": "previously_forgotten", "content": content}
         fp = _fingerprint(content)
         # 审计⑤：forget 提议的判重指纹只绑定目标记忆——content 是模型自填
         # 摘要（展示用），旧口径哈希 content 导致：不同 target 的同摘要提议
@@ -225,7 +334,7 @@ class PendingMemoryStore:
             rec = self.get(rec_id)
             return rec if rec is not None else {"id": rec_id, "status": "pending"}
 
-    # ── P2-2 提炼租约（Codex memories 租约认领对齐）────────────────
+    # ── P2-2 提炼租约────────────────
 
     def _ensure_lease_table(self) -> None:
         self._conn.execute(
@@ -370,6 +479,18 @@ class PendingMemoryStore:
                 raise LookupError("待确认记录不存在: %s" % pending_id)
             if rec["status"] != "pending":
                 raise ValueError("该记录已裁决（%s），不能重复确认" % rec["status"])
+            # P1#11：确认落库前二次把关遗忘墓碑（propose 后、confirm 前用户
+            # 可能已遗忘同内容）。命中 → 记录转 rejected、绝不执行 remember_fn。
+            if rec.get("proposed_action", "store") != "forget" and self.is_content_tombstoned(
+                rec["content"]
+            ):
+                self._conn.execute(
+                    "UPDATE pending_memories SET status = 'rejected', decided_at = ?,"
+                    " note = 'previously_forgotten' WHERE id = ?",
+                    (time.time(), pending_id),
+                )
+                self._conn.commit()
+                raise ValueError("该内容已被用户遗忘（墓碑拦截），不能确认入库")
             memory_id = remember_fn(rec["content"], rec["category"], rec["memory_type"])
             self._conn.execute(
                 "UPDATE pending_memories SET status = 'confirmed', memory_id = ?,"

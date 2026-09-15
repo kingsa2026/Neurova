@@ -11,7 +11,7 @@ Semantic Search API - 语义搜索API端点
   供前端展示召回可信度
 - 检索端点接入 JWT 鉴权（知识语料依赖用户身份；前端此前无调用方）
 
-P0-3（Dify 对标 2026-09-03）：
+P0-3：
 - fts 路复活：full_text_search（IDF 加权词覆盖，真分数）替换 0.0 占位
 - body.retrieval_method 四态（RetrievalMethod）：semantic/full_text/hybrid/keyword
 - body.rerank 双模重排出口（WeightRerankRunner/ModelRerankRunner），
@@ -31,6 +31,8 @@ from pydantic import BaseModel, Field
 from neurova.api.auth import get_current_user_or_service
 from neurova.cognitive_layers.memory_layer.manager import get_memory_manager
 from neurova.cognitive_layers.memory_layer.semantic_search import get_semantic_search
+from neurova.knowledge import hybrid as _knowledge_hybrid
+from neurova.knowledge.rerank import refine
 from neurova.knowledge.search import RetrievalMethod, full_text_search as _kb_full_text_search
 from neurova.knowledge.search import tokenize as _kb_tokenize
 
@@ -178,55 +180,8 @@ def _tokenize(text: str) -> List[str]:
     return _kb_tokenize(text)
 
 
-def _bm25_search(
-    query: str,
-    corpus: List[Dict[str, Any]],
-    top_k: int = 10,
-    k1: float = 1.5,
-    b: float = 0.75,
-) -> List[Tuple[str, float]]:
-    """Okapi BM25 搜索
-
-    分数归一化到 [0, 1]（除以最大原始分数）。
-    """
-    if not corpus or not query:
-        return []
-    query_terms = _tokenize(query)
-    if not query_terms:
-        return []
-    N = len(corpus)
-    doc_lens: List[int] = []
-    df: Dict[str, int] = {}
-    doc_tokens: List[List[str]] = []
-    for doc in corpus:
-        tokens = _tokenize(str(doc.get("content", "")))
-        doc_tokens.append(tokens)
-        doc_lens.append(len(tokens))
-        for t in set(tokens):
-            df[t] = df.get(t, 0) + 1
-    avgdl = (sum(doc_lens) / N) if N > 0 else 0.0
-    raw_scores: List[Tuple[str, float]] = []
-    for i, tokens in enumerate(doc_tokens):
-        score = 0.0
-        tf: Dict[str, int] = {}
-        for t in tokens:
-            tf[t] = tf.get(t, 0) + 1
-        dl = doc_lens[i]
-        for term in query_terms:
-            if term not in tf:
-                continue
-            n = df.get(term, 0)
-            idf = math.log((N - n + 0.5) / (n + 0.5) + 1.0)
-            denom = tf[term] + k1 * (1 - b + b * (dl / avgdl if avgdl > 0 else 0))
-            if denom > 0:
-                score += idf * (tf[term] * (k1 + 1)) / denom
-        raw_scores.append((str(corpus[i].get("id", "")), score))
-    max_score = max((s for _, s in raw_scores), default=0.0)
-    if max_score > 0:
-        raw_scores = [(mid, s / max_score) for mid, s in raw_scores]
-    # 不过滤零分文档：调用方可能需要对比 relevant vs irrelevant（含零分）
-    raw_scores.sort(key=lambda x: x[1], reverse=True)
-    return raw_scores[:top_k]
+def _bm25_search(query, corpus, top_k=10, k1=1.5, b=0.75):
+    return _knowledge_hybrid.bm25_rank(query, corpus, top_k=top_k, k1=k1, b=b)
 
 
 def _rrf_fusion(
@@ -238,25 +193,16 @@ def _rrf_fusion(
     fts_weight: float = 0.2,
     k: int = 60,
 ) -> List[Tuple[str, float]]:
-    """RRF (Reciprocal Rank Fusion) 三路融合
+    """RRF 三路融合——委托 knowledge.hybrid.rrf_fusion（P0#4 单源）。
 
-    RRF(d) = Σ w_i / (k + r_i(d))，其中 r_i(d) 为 d 在第 i 路结果中的排名（从 1 起）。
+    RRF(d) = Σ w_i / (k + r_i(d))，rank 从 1 起。BM25 分数不归一
+    直接参与：融合只看秩（rank-based），分数域无关。
     """
-    all_ids = set(r[0] for r in bm25_results) | set(r[0] for r in vector_results) | set(r[0] for r in fts_results)
-    fused: Dict[str, float] = {}
-    for mid in all_ids:
-        score = 0.0
-        for results, weight in [
-            (bm25_results, bm25_weight),
-            (vector_results, vector_weight),
-            (fts_results, fts_weight),
-        ]:
-            for rank, (rid, _) in enumerate(results, 1):
-                if rid == mid:
-                    score += weight / (k + rank)
-                    break
-        fused[mid] = score
-    return sorted(fused.items(), key=lambda x: x[1], reverse=True)
+    return _knowledge_hybrid.rrf_fusion(
+        {"bm25": bm25_results, "vector": vector_results, "fts": fts_results},
+        {"bm25": bm25_weight, "vector": vector_weight, "fts": fts_weight},
+        k=k,
+    )
 
 
 def _vector_search_impl(query: str, all_memories: List[Dict[str, Any]], top_k: int) -> List[Tuple[str, float]]:
@@ -311,11 +257,10 @@ def _vector_search_knowledge(query: str, current_user: Dict[str, Any], top_k: in
 
 
 def _build_rerank_runner(config: dict):
-    """按请求配置装配 rerank runner（P0-3 Yuxi 对比接线轮；显式装配，无全局态）。
+    """按请求配置装配 rerank runner。
 
     返回 (runner, method_label, note)：note=None 表示正常；method="model"
     但模型通道不可用时退化为加权融合，note 必须携带原因（
-    {"requested": "model", "reason": ...}）——静默降级是 Yuxi 的反面教材
     （milvus.py aquery 吞错 return []，零结果与后端故障不可分），
     note 随响应体 rerank_note 字段如实透出。
     """
@@ -434,12 +379,20 @@ async def hybrid_search(
             rerank_note = None
             if body.rerank and results:
                 try:
-                    runner, rerank_label, rerank_note = _build_rerank_runner(body.rerank)
+                    cfg = body.rerank
+                    runner, rerank_label, rerank_note = _build_rerank_runner(cfg)
                     candidates = [
                         {
                             "index": i,
                             "id": r["id"],
-                            "content": r["content"],
+                            # P0#3：模型打分文本先清洗——代码围栏/表格/
+                            # 链接拆壳不删料，代码/表格块不再被模型恒判 0；
+                            # 展示 content 保持原文（results 原样引用）
+                            "content": (
+                                refine.clean_passage_for_rerank(r["content"])
+                                if rerank_label == "model"
+                                else r["content"]
+                            ),
                             "bm25": r["confidence_breakdown"]["bm25"],
                             "vector": r["confidence_breakdown"]["vector"],
                             "fts": r["confidence_breakdown"]["fts"],
@@ -451,9 +404,30 @@ async def hybrid_search(
                     if getattr(runner, "last_error", None):
                         rerank_note = {"requested": "model", "reason": str(runner.last_error)}
                         rerank_label = "weight"
+                    # P0#3 精修管线（默认全关=原行为零回归；开启项：
+                    # composite / threshold / mmr_lambda / top_k）
+                    use_refine = bool(
+                        cfg.get("composite")
+                        or cfg.get("threshold") is not None
+                        or cfg.get("mmr_lambda") is not None
+                        or cfg.get("top_k") is not None
+                    )
+                    if use_refine:
+                        reranked = refine.finalize_reranked(
+                            body.query,
+                            reranked,
+                            docs=results,
+                            base_scores={i: float(r["rrf_score"]) for i, r in enumerate(results)},
+                            top_k=cfg.get("top_k"),
+                            mmr_lambda=cfg.get("mmr_lambda"),
+                            use_composite=bool(cfg.get("composite")),
+                            threshold=cfg.get("threshold"),
+                        )
                     results = [
                         {**results[rr["index"]],
-                         "rerank_score": round(float(rr["score"]), 6),
+                         "rerank_score": round(
+                             float(rr.get("composite") if rr.get("composite") is not None else rr["score"]), 6
+                         ),
                          "rerank_method": rerank_label}
                         for rr in reranked
                     ]

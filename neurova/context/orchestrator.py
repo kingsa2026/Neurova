@@ -62,10 +62,10 @@ class ContextOrchestrator:
         # P1-1④ ack 集：最近一次 build_context 视图内的池 chunk hash
         self._last_view_hashes: set = set()
 
-        # 修2（2026-09-09）：对话窗口 token 预算压缩（zcode 式）
+        # 修2（2026-09-09）：对话窗口 token 预算压缩
         # _window_summarizer: async (dropped_msgs, previous_summary) -> Optional[str]
         # _window_compaction_cache: session_id -> {"summary", "covered_hashes"}
-        #   （已摘要覆盖的消息 hash，跨轮增量摘要不重复调 LLM）
+        # （已摘要覆盖的消息 hash，跨轮增量摘要不重复调 LLM）
         self._window_summarizer = None
         self._window_compaction_cache: dict = {}
         # 增量防抖阈值（类级常量语义）：距上次摘要新追加消息数 ≤ 此值时复用缓存摘要
@@ -74,10 +74,10 @@ class ContextOrchestrator:
         self._last_folded_hashes: set = set()
         self._last_archived_window_hashes: set = set()
 
-        # P0-2（Codex 对齐）：自动压缩开关 + 上下文窗口硬顶
+        # P0-2：自动压缩开关 + 上下文窗口硬顶
         # - auto_compact_enabled：默认 True（存量折叠行为不回退）；env 关闭
         # - _window_hard_limit：min(窗口预算, 模型上下文×90%) 的硬顶；
-        #   None=按 llm_router 元数据动态解析，测试/运维可直接赋值覆盖
+        # None=按 llm_router 元数据动态解析，测试/运维可直接赋值覆盖
         import os as _os
 
         self.auto_compact_enabled = _os.environ.get("NEUROVA_AUTO_COMPACT", "1") != "0"
@@ -373,6 +373,7 @@ class ContextOrchestrator:
         session_context: Optional[list] = None,
         crystallized_patterns: Optional[list] = None,
         voice_context: Optional[Dict] = None,
+        citation_registry: Optional[Any] = None,
     ) -> List[Dict]:
         """构建完整的 LLM 上下文（Phase 2-5）
 
@@ -386,6 +387,8 @@ class ContextOrchestrator:
             session_context: Session 文件提取的最近对话上下文（B3修复）
             crystallized_patterns: 结晶经验检索结果（认知图谱 PatternCrystallizer）
             voice_context: 语音上下文（ASR 元数据、情感分析等）
+            citation_registry: P0#5 本轮引用句柄表（CitationRegistry）——注入
+                记忆/知识时把长 UUID 压缩为 m1/k1 句柄；None 保持旧全 id 格式
 
         Returns:
             上下文消息列表，可直接传给 LLM
@@ -397,7 +400,7 @@ class ContextOrchestrator:
         tools_desc = await self.get_tools_description()
 
         # Phase 2: 构建系统提示
-        # P2-11（OpenOcta 启发 SnapshotForSession）：优先消费会话身份快照
+        # P2-11：优先消费会话身份快照
         # （ChatPipeline 每轮经 session_snapshot 冻结，同会话内身份写入
         # 不改变当前 prompt，下次会话生效）；未装配快照时活值兜底（零行为
         # 变化）。
@@ -428,13 +431,13 @@ class ContextOrchestrator:
             build_all_sections(workspace_path=str(getattr(self.config, "workspace_path", "") or ""))
         )
 
-        # P0-1（Codex 对齐）：工作区 AGENTS.md 文档树——与 build_system_prompt
+        # P0-1：工作区 AGENTS.md 文档树——与 build_system_prompt
         # 共用单源 helper（本方法是 chat_pipeline 实际调用路径，注入必须在此）
         workspace_section = self._workspace_docs_section()
         if workspace_section:
             system_instructions.append(workspace_section)
 
-        # P0-3（OpenSpace 对齐）：可用技能目录段——同单源纪律，默认关=零注入
+        # P0-3：可用技能目录段——同单源纪律，默认关=零注入
         catalog_section = self._skill_catalog_section()
         if catalog_section:
             system_instructions.append(catalog_section)
@@ -469,7 +472,7 @@ class ContextOrchestrator:
         # Phase 3: 构建 ContextInput → ContextCollector → 候选池
         # session_context 包含完整的 user+assistant 历史（优先使用）
         # conversation_history 只有 user 消息且不更新（仅作 fallback）
-        # P1-7（OpenOcta 启发 toolTurnRepair）：repair 配对完整性
+        # P1-7：repair 配对完整性
         # 审计⑦：repair 必须在视图重建（剥 tool_calls）之后——先 repair 会在
         # tool_calls 在场时判"配对完整"保留 role:"tool"，随后重建剥掉
         # tool_calls → 孤儿 tool 消息直发 LLM（provider 400）。
@@ -527,8 +530,8 @@ class ContextOrchestrator:
             # ════════════════════════════════════════════════════════
             # 视图层（按需调取 + 稳定前缀）
             # 顺序设计（缓存友好）：
-            #   [固定 system 前缀] → [对话窗口 append-only] →
-            #   [语义调取块] → [本轮瞬态] → [当前输入]
+            # [固定 system 前缀] → [对话窗口 append-only] →
+            # [语义调取块] → [本轮瞬态] → [当前输入]
             # 调取块变化只影响尾部，不破坏前缀缓存。
             # ════════════════════════════════════════════════════════
 
@@ -566,7 +569,7 @@ class ContextOrchestrator:
                 context.append({"role": msg.get("role", "user"), "content": msg["content"]})
 
             # 3. 本轮检索产物直接注入（不经抽屉门槛——它们由上游检索链按当前
-            #    查询专门检索，是"本轮相关"的定义本身；同时已归档供未来召回）
+            # 查询专门检索，是"本轮相关"的定义本身；同时已归档供未来召回）
             window_hashes = {
                 ContextInput.compute_hash(ContextSource.CONVERSATION, msg["content"])
                 for msg in window_msgs
@@ -579,10 +582,13 @@ class ContextOrchestrator:
                 content = memory.get("content", str(memory)) if isinstance(memory, dict) else str(memory)
                 injected_hashes.add(ContextInput.compute_hash(ContextSource.MEMORY, content))
                 # P2-2 收口：携带溯源标记（模型可引用/归因；无标识字段格式不变）
+                # P0#5：citation_registry 在场走句柄格式（m1/k1）
                 try:
                     from neurova.memory.citation import render_memory_line
 
-                    context.append({"role": "system", "content": render_memory_line(memory)})
+                    context.append(
+                        {"role": "system", "content": render_memory_line(memory, registry=citation_registry)}
+                    )
                 except Exception:  # noqa: BLE001 - citation 失败退回旧格式
                     context.append({"role": "system", "content": f"[记忆] {content}"})
             for experience in experience_items or []:
@@ -602,7 +608,7 @@ class ContextOrchestrator:
                 context.append({"role": "system", "content": f"[待探索问题] {question['content']}"})
 
             # 4. 跨轮语义调取块：从归档池按当前输入召回**历史**相关内容
-            #    排除已注入条目（窗口 + 本轮产物），只召回往轮归档
+            # 排除已注入条目（窗口 + 本轮产物），只召回往轮归档
             # 审验闭环（2026-09-10）：draw 侧预算与窗口剩余空间联动——
             # 否则窗口折叠省下的 token 会被 draw 召回加倍吃回（实测
             # prompt 65920：draw 29 条归档撑爆）。固定前缀不占 draw 预算
@@ -956,7 +962,7 @@ class ContextOrchestrator:
         return cleared
 
     # ══════════════════════════════════════════════════════════════
-    # 修2（2026-09-09）：对话窗口 token 预算 + 自动压缩（zcode 式）
+    # 修2（2026-09-09）：对话窗口 token 预算 + 自动压缩
     # ══════════════════════════════════════════════════════════════
 
     # 窗口份额（口径审计 2026-09-14，显式化）：get_token_budget_for_model
@@ -1037,7 +1043,7 @@ class ContextOrchestrator:
         return self._window_summarizer
 
     def _resolve_auto_compact_hard_limit(self) -> Optional[int]:
-        """自动压缩硬顶（P0-2，Codex 90% 语义）：min 候选 = 模型上下文窗口×90%。
+        """自动压缩硬顶：min 候选 = 模型上下文窗口×90%。
 
         显式覆盖（_window_hard_limit，测试/运维用）优先；否则经 llm_router
         统一入口取模型元数据窗口；不可得返回 None（退回既有窗口预算语义）。
@@ -1067,7 +1073,7 @@ class ContextOrchestrator:
           后续折叠只对新落入折叠区的消息做增量摘要（previous_summary 传递）。
         - 归档先行：本方法在 _archive_conversation_to_pool 之后调用，
           折叠只影响视图，原文零丢失。
-        - P0-2（Codex 对齐）：auto_compact_enabled=False 时原样返回；
+ - P0-2：auto_compact_enabled=False 时原样返回；
           有效预算 = min(budget, 模型上下文窗口×90%) 硬顶。
         """
         from neurova.context.window_compactor import compact_window, estimate_window_tokens
@@ -1173,7 +1179,7 @@ class ContextOrchestrator:
 
         与 _apply_window_budget 共用折叠/摘要桥和跨轮缓存——手动压缩
         生成的摘要直接进 _window_compaction_cache，后续轮次超预算折叠
-        时携带同一摘要（zcode 语义：压缩后窗口立即变小且不重复摘要）。
+ 时携带同一摘要。
 
         Returns:
             {compacted, folded, kept, tokens_before, tokens_after,
@@ -1269,7 +1275,7 @@ class ContextOrchestrator:
         return getattr(pool, "_ledger_db", None) if pool else None
 
     def _workspace_docs_section(self) -> str:
-        """P0-1（Codex 对齐）：工作区 AGENTS.md 文档树段（根→子目录层级拼接
+        """P0-1：工作区 AGENTS.md 文档树段（根→子目录层级拼接
         + 字节预算截断）；无文档返回空串（调用方零注入，system prompt 零变化）。
 
         单源约束：build_context（chat_pipeline 实际调用路径）与
@@ -1305,7 +1311,7 @@ class ContextOrchestrator:
             return True
 
     def _skill_catalog_section(self) -> str:
-        """P0-3 可用技能目录段（OpenSpace 预算化目录；默认开，SettingPage 可关）。
+        """P0-3 可用技能目录段。
 
         单源 helper：build_context（实际调用路径）与 build_system_prompt 共用，
         与 _workspace_docs_section 同纪律（防双路径漂移）。目录按**稳定模式**
@@ -1314,7 +1320,6 @@ class ContextOrchestrator:
         输入执行。无注册表/无启用技能返回空串（零注入，system prompt 零变化）。
 
         Wave E：turn skills_off（P2-4 cold 臂）整体压制；provisional 技能软标注
-        （信任账本的模型侧消费面，OpenSpace listing 同语义）。
         """
         try:
             from neurova.core.turn_context import get_turn_skills_off
@@ -1329,6 +1334,25 @@ class ContextOrchestrator:
             return ""
         try:
             from neurova.skills.skill_injection import render_skill_catalog
+
+            budget = int(getattr(self.config, "skill_catalog_budget_chars", 8000) or 8000)
+
+            # Wave H-W2：轮级可见视图在场 → 目录源 = 三库合并视图（trust 软
+            # 标注同视图）；视图缺席回退现状 agent registry + agent 库账本。
+            _view = None
+            try:
+                from neurova.core.turn_context import get_turn_skill_view
+
+                _view = get_turn_skill_view()
+            except Exception:  # noqa: BLE001
+                _view = None
+            if _view is not None:
+                catalog = render_skill_catalog(
+                    _view.registry_view(), max_chars=budget, trust_lookup=_view.trust_for
+                )
+                if catalog:
+                    return "## 可用技能目录\n" + catalog + "\n可用 $技能名 显式调用完整内容。"
+                return ""
 
             _trust = None
             try:
@@ -1346,7 +1370,6 @@ class ContextOrchestrator:
             except Exception:  # noqa: BLE001 - 信任读数不可用不影响目录
                 _trust = None
 
-            budget = int(getattr(self.config, "skill_catalog_budget_chars", 8000) or 8000)
             catalog = render_skill_catalog(
                 self.skill_registry, max_chars=budget, trust_lookup=_trust
             )
@@ -1381,13 +1404,13 @@ class ContextOrchestrator:
             + build_all_sections(workspace_path=str(getattr(self.config, "workspace_path", "") or ""))
         )
 
-        # P0-1（Codex 对齐）：工作区 AGENTS.md 文档树——单源 helper，
+        # P0-1：工作区 AGENTS.md 文档树——单源 helper，
         # 与 build_context 主链共用（防双路径漂移）
         workspace_section = self._workspace_docs_section()
         if workspace_section:
             parts.append("\n\n" + workspace_section)
 
-        # P0-3（OpenSpace 对齐）：可用技能目录段——同单源 helper
+        # P0-3：可用技能目录段——同单源 helper
         catalog_section = self._skill_catalog_section()
         if catalog_section:
             parts.append("\n\n" + catalog_section)
@@ -1595,7 +1618,7 @@ class ContextOrchestrator:
         """
         import os as _os
 
-        # P1-5（Codex Deferred+tool_search 对齐）：默认激活——隐藏候选达阈值
+        # P1-5：默认激活——隐藏候选达阈值
         # 即压缩；Wave E 收口 SettingPage：env 显式值 > tool_search_enabled
         # （app_settings，默认 True）> True
         from neurova.context.tool_search import tool_search_enabled as _ts_on
@@ -1878,23 +1901,41 @@ async def _build_tools_for_llm(self) -> Optional[List[Dict]]:
             except Exception:  # noqa: BLE001 - 质量面故障不影响注入
                 pass
 
+            # Wave H-W2：轮级可见视图在场时——质量读数改取视图（三库各自的
+            # 账：agent 副本记 agent 账、user 副本记 user 账、public 为聚合
+            # 账），并以视图白名单过滤 registry（视图外执行体不进 schema；
+            # 内置技能已由 build_turn_view 的 registry 底座并入白名单）。
+            _view = None
+            try:
+                from neurova.core.turn_context import get_turn_skill_view
+
+                _view = get_turn_skill_view()
+            except Exception:  # noqa: BLE001
+                _view = None
+            if _view is not None:
+                _quality_lookup = _view.quality_for
+
             _items = [
-                (n, unpack_skill(raw)) for n, raw in self.skill_registry.skills.items()
+                (n, unpack_skill(raw))
+                for n, raw in self.skill_registry.skills.items()
             ]
+            if _view is not None:
+                _items = [(n, s) for n, s in _items if _view.invocable(n)]
             # 质量熔断先行（quality_blocked 单源判据）
             if _quality_lookup is not None:
                 from neurova.skills.skill_injection import quality_blocked as _qb
 
                 _items = [(n, s) for n, s in _items if not _qb(_quality_lookup(n))]
 
-            # 语义档（skill_semantic_recall_enabled 三态：agent > 设置中心 > True）
+            # 语义档（三态：agent 显式配置 > env/设置中心 skill_semantic_recall_enabled，
+            # 判定单源在 skill_semantics.semantic_recall_enabled）
             _semantic: dict = {}
             _sem_cfg = getattr(self.config, "skill_semantic_recall_enabled", None)
             if _sem_cfg is None:
                 try:
-                    from neurova.core.app_settings import get_advanced_settings
+                    from neurova.skills.skill_semantics import semantic_recall_enabled
 
-                    _sem_on = bool(get_advanced_settings().get("skill_semantic_recall_enabled", True))
+                    _sem_on = semantic_recall_enabled()
                 except Exception:  # noqa: BLE001
                     _sem_on = True
             else:

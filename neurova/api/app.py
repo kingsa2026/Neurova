@@ -51,7 +51,7 @@ class AppState:
         self.channel_manager = None
         self.admin_service = None
         self.resource_quota_manager = None
-        self.skill_pool_manager = None
+        # skill_pool_manager 属性随孤岛退役删除（2026-09-15：赋值后全仓零读取方）
         self.user_group_manager = None
         self.token_manager = None
         self.tts_manager = None
@@ -780,9 +780,9 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as _persist_err:  # noqa: BLE001 - 权重恢复失败不阻断启动
         logger.warning("进化权重恢复失败（忽略）: %s", _persist_err)
 
-    # Yuxi 对比 P0-1：AgentRun 台账预热 + 启动收敛——上一进程遗留的
-    # running 行收敛为 failed(process_died)、queued 行 cancelled(server_restart)，
-    # 重启后不留幽灵行（收敛在 AgentRunStore.__init__ 内，单例此处触发）。
+# AgentRun 台账预热 + 启动收敛——上一进程遗留的
+# running 行收敛为 failed(process_died)、queued 行 cancelled(server_restart)，
+# 重启后不留幽灵行（收敛在 AgentRunStore.__init__ 内，单例此处触发）
     try:
         from neurova.core import agent_run_store as _ars
 
@@ -791,8 +791,8 @@ async def _on_startup(app_state: AppState) -> None:
     except Exception as _ledger_err:  # noqa: BLE001 - 台账故障不阻断启动
         logger.warning("AgentRun 台账启动收敛失败（忽略）: %s", _ledger_err)
 
-    # Yuxi 对比 P1-#9：知识摄取队列排水循环（sync=false 入队任务的后台执行；
-    # NEUROVA_KNOWLEDGE_ASYNC=off 显式停用）。fail-open 不阻断启动。
+# 知识摄取队列排水循环（sync=false 入队任务的后台执行；
+# NEUROVA_KNOWLEDGE_ASYNC=off 显式停用）。fail-open 不阻断启动
     if (os.environ.get("NEUROVA_KNOWLEDGE_ASYNC") or "on").strip().lower() != "off":
         try:
             from neurova.knowledge.ingest_worker import run_ingress_drain
@@ -804,6 +804,20 @@ async def _on_startup(app_state: AppState) -> None:
             logger.info("知识摄取队列排水循环已启动")
         except Exception as _ingress_err:  # noqa: BLE001
             logger.warning("知识摄取排水循环启动失败（忽略）: %s", _ingress_err)
+
+    # 飞书远程 KB 定时同步循环（P1#11③；NEUROVA_KB_SYNC=off 停用）。fail-open；
+    # 仅对 settings.sync_interval_minutes>0 的 active 飞书配置触发，未配置=空转
+    if (os.environ.get("NEUROVA_KB_SYNC") or "on").strip().lower() != "off":
+        try:
+            from neurova.knowledge.datasource_sync import run_feishu_sync_loop
+
+            _kbsync_task = asyncio.create_task(run_feishu_sync_loop())
+            _kbsync_task.add_done_callback(
+                lambda t: t.exception() if not t.cancelled() else None
+            )
+            logger.info("飞书 KB 定时同步循环已启动")
+        except Exception as _kbsync_err:  # noqa: BLE001
+            logger.warning("飞书 KB 定时同步循环启动失败（忽略）: %s", _kbsync_err)
 
     # 初始化 TTS 引擎
     if hasattr(app_state, "tts_manager") and app_state.tts_manager:
@@ -988,7 +1002,7 @@ async def _on_startup(app_state: AppState) -> None:
         except Exception as e:
             logger.warning("Channel manager start failed: %s", e)
 
-    # 批次2（PRINTFILM 对标）：生成任务重启恢复轮询——账本 unfinished() 收口
+    # 批次2：生成任务重启恢复轮询——账本 unfinished() 收口
     try:
         from neurova.llm.generators.recovery import start_generation_recovery
 

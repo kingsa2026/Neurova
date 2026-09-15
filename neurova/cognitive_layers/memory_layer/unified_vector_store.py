@@ -191,6 +191,9 @@ class UnifiedVectorStore:
         self._tfidf_vocabulary: Dict[str, int] = {}
         self._idf_values: Dict[str, float] = {}
         self._document_vectors: List[Dict[int, float]] = []
+        # 累积文档频率（_update_idf 全量重算 / _extend_idf 增量扩展共用）
+        self._tfidf_df: Dict[str, int] = {}
+        self._tfidf_n_docs: int = 0
 
         # Neurova Hebb 向量索引
         self._neurova_hebb_vectors: List[List[float]] = []
@@ -421,7 +424,7 @@ class UnifiedVectorStore:
         return english_words + chinese_chars
 
     def _update_idf(self, documents: List[str]):
-        """更新 IDF 值"""
+        """全量重算 IDF，并重置累积 df/文档数（增量路径改用 _extend_idf）。"""
         import math
 
         n_docs = len(documents)
@@ -435,15 +438,56 @@ class UnifiedVectorStore:
             for token in tokens:
                 df[token] = df.get(token, 0) + 1
 
-        # 计算 IDF
-        self._idf_values = {}
-        for token, freq in df.items():
-            self._idf_values[token] = math.log((n_docs + 1) / (freq + 1)) + 1
+        self._tfidf_df = df
+        self._tfidf_n_docs = n_docs
+        self._recompute_idf()
 
+    def _extend_idf(self, new_docs: List[str]):
+        """增量扩展 IDF：df/文档数对全语料累积，idf 按新语料统计全表重算。
+
+        根因修复：原增量路径直接调 _update_idf(new_docs)，会把 IDF 重置为
+        "仅新文档"统计——老词项从 _idf_values 消失（查询老词时权重清零、
+        存量向量不可达），N 也退化为新增文档数。KB 分片增量索引与记忆
+        侧渐进索引都依赖本语义。
+        """
+        import math
+
+        if not new_docs:
+            return
+        for doc in new_docs:
+            for token in set(self._tokenize(doc)):
+                self._tfidf_df[token] = self._tfidf_df.get(token, 0) + 1
+            self._tfidf_n_docs += 1
+        self._recompute_idf()
+
+    def _recompute_idf(self):
+        """按累积 _tfidf_df/_tfidf_n_docs 重算 _idf_values 与词汇表。"""
+        import math
+
+        n = self._tfidf_n_docs
+        self._idf_values = {
+            token: math.log((n + 1) / (freq + 1)) + 1 for token, freq in self._tfidf_df.items()
+        }
         # 更新词汇表
         for token in self._idf_values:
             if token not in self._tfidf_vocabulary:
                 self._tfidf_vocabulary[token] = len(self._tfidf_vocabulary)
+
+    def remove_documents(self, predicate) -> int:
+        """按 id 谓词移除已索引文档（知识库分片增量删除通道）。
+
+        注：TF-IDF 的 df 统计不回退（不保存逐文档词集），IDF 轻微陈旧由
+        调用方的全量重建阈值收敛——删除影响的是分母 N，排序位漂移有界。
+        """
+        drop = {i for i, mid in enumerate(self.memory_ids) if predicate(str(mid))}
+        if not drop:
+            return 0
+        for i in sorted(drop, reverse=True):
+            self.memory_vectors.pop(i)
+            self.memory_ids.pop(i)
+            self.memory_metadata.pop(i)
+        self._refresh_numpy_matrix()
+        return len(drop)
 
     def initialize_centroids(self, experts: Dict[str, Dict[str, Any]]):
         """
@@ -495,18 +539,21 @@ class UnifiedVectorStore:
             incremental: True 时追加到已有索引（后台渐进索引用），
                          默认 False 保持原语义（清空重建）
         """
-        # 增量去重：同 id 不重复索引
-        existing_ids = set(self.memory_ids)
+        # 增量去重：同 id 不重复索引。全量重建对非空 store 调用时必须清空
+        # 基准集——原实现取旧 memory_ids，非增量分支清空向量后仍按旧 id
+        # 跳过"未变更"文档 → 老文档被静默清出索引（KB 分片全量重建必踩）。
+        existing_ids = set(self.memory_ids) if incremental else set()
 
         if incremental:
             # 资源修复: 原实现每次调用都对全批文档重新分词统计 IDF,
             # _semantic_recall 每轮召回都传入全量记忆列表 → 纯 Python
-            # 全库分词一次。现在只对新文档更新 IDF(编码前的词表/IDF 一致)。
+            # 全库分词一次。现在只对新文档扩展 IDF（_extend_idf 对全语料
+            # 累积 df，编码前词表/IDF 一致，且老词项不被清零）。
             new_docs = [
                 m.get("content", "") for m in memories if m.get("id", "") not in existing_ids
             ]
             if new_docs:
-                self._update_idf(new_docs)
+                self._extend_idf(new_docs)
         else:
             self._update_idf([m.get("content", "") for m in memories])
             self.memory_vectors = []

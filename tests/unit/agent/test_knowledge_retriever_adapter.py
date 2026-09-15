@@ -1,9 +1,13 @@
 """KnowledgeRetrieverAdapter 单元测试
 
 知识库检索器接入 MemoryRetrievalChain：
-- 通过 repository.search_visible_items 检索用户可见知识
+- P0#4：adapter 改走 knowledge.hybrid 四路 RRF（tfidf/bm25/fts/vector），
+  tfidf 主路仍调 repository.search_visible_items（隔离透传契约不变）
 - 用户隔离透传（user_id / agent_id）
 - 结果转换为 RetrievalResult（memories 载荷 + 质量评分）
+
+向量路由 get_knowledge_vector_index 单例提供——测试统一打桩为空命中，
+避免真 ONNX 引擎在单测里加载（语义检索端点的既有测试同惯例）。
 """
 
 import asyncio
@@ -22,6 +26,17 @@ try:
     from neurova.agent.knowledge_retriever_adapter import KnowledgeRetrieverAdapter
 except ImportError:
     KnowledgeRetrieverAdapter = None
+
+
+@pytest.fixture(autouse=True)
+def _stub_vector_index(monkeypatch):
+    """hybrid 向量路单例 → 空命中桩（生产语义由 test_hybrid_service 覆盖）"""
+    import types
+
+    monkeypatch.setattr(
+        "neurova.knowledge.vector_index.get_knowledge_vector_index",
+        lambda: types.SimpleNamespace(search=lambda *a, **k: []),
+    )
 
 
 @pytest.fixture
@@ -75,7 +90,8 @@ class TestKnowledgeRetrieverAdapter:
         # 用户隔离：user 参数必须非空（透传检索上下文）
         assert call_kwargs.get("user") is not None
         assert call_kwargs.get("query") == "NeurFlow 工作流"
-        assert call_kwargs.get("limit") == 5
+        # P0#4：hybrid 对 tfidf 主路过采样（limit*2≥10），最终截到 limit
+        assert call_kwargs.get("limit") >= 5
         # 返回的是 RetrievalResult
         assert result.source == "KnowledgeRetriever"
 

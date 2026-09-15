@@ -182,6 +182,11 @@ class KnowledgeStorage:
         with self._lock:
             return [dict(c) for c in self._configs.values() if c.get("user_id") == user_id]
 
+    def get_all_configs(self) -> List[Dict[str, Any]]:
+        """全量配置清单（后台定时同步跨用户扫描；每条仍按自身 user_id 隔离消费）。"""
+        with self._lock:
+            return [dict(c) for c in self._configs.values()]
+
     def get_default_config(self, user_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
             for c in self._configs.values():

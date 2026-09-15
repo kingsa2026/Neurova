@@ -39,6 +39,10 @@ _SUBMISSION_REJECTED = "rejected"
 # graph_node_ids 等引擎簿记字段不在列——graph_bridge 回写不该刷屏账本。
 _REVISION_FIELDS = ("title", "content", "category", "tags", "confidence", "source")
 
+# 增量操作数达到该阈值退回全量重建——删除不回退 df/词表，
+# 陈旧 IDF 由本阈值有界收敛（同时约束 TF-IDF 词表漂移导致的向量维度不齐）
+_INCREMENTAL_OPS_LIMIT = 200
+
 
 def _norm_title(title: str) -> str:
     """冲突检测的 subject 归一化：大小写/首尾空白不敏感。"""
@@ -48,14 +52,32 @@ def _norm_title(title: str) -> str:
 def _chunk_hit(item: Dict[str, Any], chunk_index: int, score: float) -> Dict[str, Any]:
     """按块序号取块命中明细（content 实时从 content 切片，不存正文副本）。"""
     chunks = item.get("chunks") or []
+    parent_index = None
     if 0 <= chunk_index < len(chunks):
         ch = chunks[chunk_index]
         content = ch.get("content", "")
         if not content and item.get("content"):
             content = item["content"][ch.get("char_start", 0) : ch.get("char_end", 0)]
+        parent_index = ch.get("parent_index")
     else:
         content = ""
-    return {"chunk_index": chunk_index, "content": content, "score": score}
+    hit = {"chunk_index": chunk_index, "content": content, "score": score}
+    if parent_index is not None:
+        hit["parent_index"] = parent_index
+    return hit
+
+
+def parent_context_text(item: Dict[str, Any], parent_index: int) -> str:
+    """父块正文（P1#6）：优先存储副本，退回偏移切片。"""
+    for p in item.get("parents") or []:
+        if p.get("index") != parent_index:
+            continue
+        content = p.get("content") or ""
+        if content:
+            return str(content)
+        full = item.get("content") or ""
+        return full[p.get("char_start", 0) : p.get("char_end", 0)]
+    return ""
 
 
 def _substring_chunk_hits(item: Dict[str, Any], q_lower: str) -> List[Dict[str, Any]]:
@@ -75,6 +97,12 @@ def _substring_chunk_hits(item: Dict[str, Any], q_lower: str) -> List[Dict[str, 
                 }
             ]
     return []
+
+
+class ChunkRevisionConflict(Exception):
+    """P1#8 chunk 编辑乐观锁：expected_revision 与块当前 revision 不符。
+
+    时不静默覆盖，调用方须重读最新块后重试。"""
 
 
 class KnowledgeRepository:
@@ -97,7 +125,10 @@ class KnowledgeRepository:
         self._conflicts: Dict[str, Dict[str, Any]] = {}
         # 分片索引：public（公库无隔离）/ user:<uid>（按属主私库）/ shared（共享集）
         self._indexes: Dict[str, Any] = {}
-        self._index_dirty = True   # 索引脏标记（写入后置位，检索时按需重建）
+        self._index_dirty = True   # 索引脏标记（未建立/退回全量时置位，检索前按需重建）
+        # P0#1 增量操作队列：[("reindex"|"remove", knowledge_id)]，检索前按序应用；
+        # 达 _INCREMENTAL_OPS_LIMIT 或异常退回全量重建
+        self._pending_ops: List[Tuple[str, str]] = []
         self._load()
 
     # ── TF-IDF 分片索引（复用 UnifiedVectorStore tfidf 后端）─────────────────
@@ -137,32 +168,66 @@ class KnowledgeRepository:
             self._indexes[key] = None
         return self._indexes[key]
 
-    def _rebuild_indexes(self, agent_id: str) -> None:
-        """重建全部相关分片（懒重建，按脏标记触发）。仅在 dirty 时全量；否则增量由各分片维护。
+    def _item_index_docs(self, item: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """条目 → 索引文档载荷（doc_id 形态与拼接的唯一单源，rebuild/增量共用）。
 
-        P0-2 分块：索引粒度从"条目"降为"块"——
-        - 存量条目无 chunks 字段 → 就地惰性分块（split_with_meta 回写，一次性成本）
-        - doc id = f"{knowledge_id}#{chunk_index}"，content = 标题 + 块正文
-          （标题进块正文提升命中率，同 Dify chunk 策略）
+        - 分块条目：doc id = f"{knowledge_id}#{chunk_index}"，content 空时按
+          偏移从正文切片复原（存储不存正文副本的旧契约兼容）。
+        - 整篇模式：doc id = knowledge_id。
+        两种形态都经 build_index_content（标题+context_header+正文）组装，
+ preview/重索引/embedding 可字节级复现索引输入。
         """
-        items = self._items.get(agent_id, [])
+        from neurova.knowledge.splitter import build_index_content
+
+        kid = item.get("knowledge_id")
+        if not kid:
+            return []
+        title = item.get("title", "")
+        full = item.get("content", "")
+        docs: List[Dict[str, Any]] = []
+        chunks = item.get("chunks")
+        if chunks:
+            for ch in chunks:
+                content = ch.get("content") or ""
+                if not content and full:
+                    content = full[ch.get("char_start", 0) : ch.get("char_end", 0)]
+                docs.append(
+                    {
+                        "id": f"{kid}#{ch.get('index', 0)}",
+                        "content": build_index_content(title, content, ch.get("context_header", "")),
+                    }
+                )
+        else:
+            docs.append({"id": str(kid), "content": build_index_content(title, full)})
+        return docs
+
+    def _rebuild_indexes(self, agent_id: str = "") -> None:
+        """全量重建全部分片（覆盖**所有** agent 分组）。
+
+        修复（P0#1 同根因放大视角）：原实现只重建传入 agent 的条目，其他
+        分组条目在重建时被静默清出索引。索引按可见性分片、与 agent 分组
+        无关，故全量重建必须遍历全库。agent_id 参数仅保留签名兼容。
+
+        P0-2 分块粒度与 P0#1 增量共用 _item_index_docs 单源：
+        - 存量条目无 chunks → 就地惰性分块（split_with_meta 回写，一次性成本）
+        """
         grouped: Dict[str, List[Dict[str, Any]]] = {}
         migrated = False
-        for it in items:
-            # 惰性分块迁移：整篇模式条目补 chunks（幂等）
-            if it.get("chunks") is None and it.get("content"):
-                try:
-                    from neurova.knowledge.splitter import split_with_meta
+        for items in self._items.values():
+            for it in items:
+                if it.get("chunks") is None and it.get("content"):
+                    try:
+                        from neurova.knowledge.splitter import split_with_meta
 
-                    it["chunks"] = split_with_meta(it["content"])
-                    migrated = True
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("知识条目分块失败（按整篇索引）: %s", e)
-            scope = self._get_shard_scope(it)
-            if scope == "private":
-                grouped.setdefault(f"user:{it.get('owner_user_id', 'default')}", []).append(it)
-            else:
-                grouped.setdefault(scope, []).append(it)
+                        it["chunks"] = split_with_meta(it["content"])
+                        migrated = True
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning("知识条目分块失败（按整篇索引）: %s", e)
+                scope = self._get_shard_scope(it)
+                if scope == "private":
+                    grouped.setdefault(f"user:{it.get('owner_user_id', 'default')}", []).append(it)
+                else:
+                    grouped.setdefault(scope, []).append(it)
         if migrated:
             self._save()
 
@@ -174,21 +239,7 @@ class KnowledgeRepository:
                 continue
             docs: List[Dict[str, Any]] = []
             for it in shard_items:
-                kid = it.get("knowledge_id")
-                if not kid:
-                    continue
-                title = it.get("title", "")
-                chunks = it.get("chunks")
-                if chunks:
-                    for ch in chunks:
-                        docs.append(
-                            {
-                                "id": f"{kid}#{ch.get('index', 0)}",
-                                "content": f"{title}\n{ch.get('content', '')}",
-                            }
-                        )
-                else:
-                    docs.append({"id": kid, "content": f"{title} {it.get('content', '')}"})
+                docs.extend(self._item_index_docs(it))
             try:
                 if docs:
                     store.index_memories(docs, incremental=False)
@@ -200,13 +251,78 @@ class KnowledgeRepository:
             except Exception as e:
                 logger.warning("知识库 TF-IDF 分片 %s 重建失败: %s", key, e)
 
+        # 本帧已无条目的历史分片清空（全删后不留陈旧向量/漂移词表）
+        for key, store in self._indexes.items():
+            if store is not None and key not in grouped:
+                store.memory_vectors = []
+                store.memory_ids = []
+                store.memory_metadata = []
+                store._np_matrix = None
+
+        self._pending_ops = []
         self._index_dirty = False
-        logger.debug("知识库 TF-IDF 分片索引重建完成: agent=%s, shards=%d", agent_id, len(grouped))
+        logger.debug("知识库 TF-IDF 分片索引全量重建完成: shards=%d", len(grouped))
+
+    def _record_index_op(self, kind: str, knowledge_id: str) -> None:
+        """记录分片级增量操作（reindex / remove，调用方持锁）。
+
+        索引未建立/待重建（dirty）时为空操作——随后的全量重建覆盖一切，
+        增量操作无需也不必重复应用。
+        """
+        if self._index_dirty or not knowledge_id:
+            return
+        self._pending_ops.append((kind, str(knowledge_id)))
+
+    def _apply_pending_ops(self) -> None:
+        """把待应用操作落到分片索引（调用方持锁；异常由 _ensure_indexes 兜底）。
+
+        reindex 统一语义 = 先从所有已加载分片剥离该条目的旧向量（含块级
+        doc id），再按条目当前分片增量写入——新增/更新/换分片（visibility/
+        shared_with 变更）共用一条路径，无需在记录侧区分。
+        """
+        ops = self._pending_ops
+        self._pending_ops = []
+        for kind, kid in ops:
+            for store in self._indexes.values():
+                if store is not None:
+                    store.remove_documents(
+                        lambda mid, _k=kid: mid == _k or str(mid).startswith(_k + "#")
+                    )
+            if kind != "reindex":
+                continue
+            found = self.find_item(kid)  # 墓碑/已删除 → None：只剥离不回灌
+            if found is None:
+                continue
+            item = found[1]
+            docs = self._item_index_docs(item)
+            scope = self._get_shard_scope(item)
+            store = (
+                self._get_vector_store("private", item.get("owner_user_id", "default"))
+                if scope == "private"
+                else self._get_vector_store(scope)
+            )
+            if store is not None and docs:
+                store.index_memories(docs, incremental=True)
 
     def _ensure_indexes(self, agent_id: str) -> None:
-        """检索前按脏标记重建索引（幂等）。"""
+        """检索前维护索引（幂等）：dirty→全量重建；有增量操作→按序应用；
+        操作数达阈值/应用异常→退回全量重建（陈旧 IDF 有界收敛）。"""
         with self._lock:
             if self._index_dirty:
+                self._rebuild_indexes(agent_id)
+                return
+            if not self._pending_ops:
+                return
+            if len(self._pending_ops) >= _INCREMENTAL_OPS_LIMIT:
+                logger.debug(
+                    "知识库增量操作达阈值(%d)，退回全量重建", len(self._pending_ops)
+                )
+                self._rebuild_indexes(agent_id)
+                return
+            try:
+                self._apply_pending_ops()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("知识库索引增量应用失败，退回全量重建: %s", e)
                 self._rebuild_indexes(agent_id)
 
     # 兼容：旧方法名包装（分片架构下返回 public 分片）
@@ -311,6 +427,7 @@ class KnowledgeRepository:
         visibility: str = VISIBILITY_PRIVATE,
         owner_user_id: str = "",
         chunks: Optional[List[Dict[str, Any]]] = None,
+        parents: Optional[List[Dict[str, Any]]] = None,
         detect_conflict: bool = True,
     ) -> Dict[str, Any]:
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
@@ -331,11 +448,15 @@ class KnowledgeRepository:
             "submission": None,
             # P0-2 分块（[{content, index, char_start, char_end}]）；None=整篇模式
             "chunks": chunks,
+            # P1#6 父子分块：chunks 存子块（进索引），parents 存父块（LLM 上下文）；
+            # None=扁平模式（存量条目与 create 默认，行为不变）
+            "parents": parents if parents else None,
         }
         with self._lock:
             self._items.setdefault(agent_id, []).append(item)
             self._save()
-            self._index_dirty = True
+            # P0#1：索引已建立时走分片级增量；dirty 时空操作（重建覆盖）
+            self._record_index_op("reindex", item["knowledge_id"])
             if detect_conflict:
                 # P0-3 同值冲突可见化：检测失败绝不阻断写入（错误方向是
                 # "少一个待审项"，不是"新知识丢失"）
@@ -439,10 +560,14 @@ class KnowledgeRepository:
             items = self._items.get(agent_id, [])
             for idx, stored in enumerate(items):
                 if stored.get("knowledge_id") == item["knowledge_id"]:
+                    # 仅分片归属变化才需要重索引（visibility/shared_with 影响分片；
+                    # submission 等簿记字段不进索引文本）
+                    moved = self._get_shard_scope(stored) != self._get_shard_scope(item)
                     item["updated_at"] = datetime.datetime.now(datetime.timezone.utc).timestamp()
                     items[idx] = item
                     self._save()
-                    self._index_dirty = True
+                    if moved:
+                        self._record_index_op("reindex", str(item["knowledge_id"]))
                     return dict(item)
         raise LookupError("知识条目不存在: %s" % item.get("knowledge_id"))
 
@@ -635,11 +760,9 @@ class KnowledgeRepository:
         合并按 score 排序，再回映可见集过滤（隔离双保险）。
         """
         try:
-            with self._lock:
-                if self._index_dirty:
-                    self._rebuild_indexes(agent_id or "default")
+            self._ensure_indexes(agent_id or "default")
         except Exception as e:
-            logger.warning("知识库索引重建失败（回退 substring）: %s", e)
+            logger.warning("知识库索引维护失败（回退 substring）: %s", e)
             return None
 
         uid = self._user_id(user) or ""
@@ -678,6 +801,10 @@ class KnowledgeRepository:
                 if item is None:
                     continue
                 score = float(hit.get("score", 0.0))
+                if score <= 0.0:
+                    # 零词面重叠=不相关，不进结果（与 substring 路径"须命中"语义对齐；
+                    # 否则 TF-IDF 路把全部可见条目以 score=0 灌进检索链）
+                    continue
                 if chunk_idx:
                     hits_by_kid.setdefault(kid, []).append(
                         _chunk_hit(item, int(chunk_idx), score)
@@ -695,6 +822,28 @@ class KnowledgeRepository:
             hits = hits_by_kid.get(r.get("knowledge_id", ""), [])
             hits.sort(key=lambda h: h.get("score", 0.0), reverse=True)
             r["chunk_hits"] = hits
+            # P1#6：命中子块 → 回传父块上下文（LLM 消费父非子），
+            # 按命中分数序去重、封顶 3 个父块（防超长文档灌爆窗口）
+            if r.get("parents"):
+                passages: List[str] = []
+                seen_parents: set = set()
+                for h in hits:
+                    pi = h.get("parent_index")
+                    if pi is None or pi in seen_parents:
+                        continue
+                    text = parent_context_text(r, pi)
+                    if text:
+                        passages.append(text)
+                        seen_parents.add(pi)
+                    if len(passages) >= 3:
+                        break
+                if passages:
+                    r["context_passages"] = passages
+        if not results:
+            # 索引零命中交回 substring 兜底：TF-IDF 分词对字母数字混合词
+            # （"BatchTerm2"）与纯数字（"2024"）失明（\b[a-zA-Z]+\b 不匹配），
+            # 包含匹配仍可命中——避免 score floor 把这类查询整体打死
+            return None
         return results[:limit]
 
     def update_knowledge(self, agent_id: str, knowledge_id: str, fields: Dict[str, Any]) -> bool:
@@ -721,9 +870,28 @@ class KnowledgeRepository:
                         # 公开与共享只能走专用方法（share/submit/review），防提权
                         if k in ("title", "content", "category", "tags", "confidence", "source", "graph_node_ids"):
                             item[k] = v
+                    # P0#1：content 变更时同步重切 chunks——旧块正文/偏移会同时
+                    # 污染索引与 chunk_hits（读到已删除的旧文本）
+                    if "content" in fields and item.get("chunks") is not None:
+                        try:
+                            new_content = str(fields.get("content", ""))
+                            if item.get("parents") is not None:
+                                # P1#6：父子模式条目重切走同一构造，parents 同步更新
+                                from neurova.knowledge.splitter import build_entry_chunks
+
+                                item["chunks"], item["parents"] = build_entry_chunks(new_content)
+                            else:
+                                from neurova.knowledge.splitter import split_with_meta
+
+                                item["chunks"] = split_with_meta(new_content)
+                        except Exception as e:  # noqa: BLE001
+                            logger.warning("知识条目内容更新重切分块失败（保留旧块）: %s", e)
                     item["updated_at"] = datetime.datetime.now(datetime.timezone.utc).timestamp()
                     self._save()
-                    self._index_dirty = True
+                    # 索引文本只含 title+chunks(+header)：graph_node_ids 等回写
+                    # （graph_bridge）不再触发任何索引操作
+                    if "title" in fields or "content" in fields:
+                        self._record_index_op("reindex", knowledge_id)
                     return True
         return False
 
@@ -732,7 +900,7 @@ class KnowledgeRepository:
     ) -> bool:
         """tombstone 软删：条目移入墓碑账本（所有读路径不可见），数据保留可恢复。
 
-        Utopia 0022「删除是事件不是减法」：物理清除走 purge_knowledge 显式通道。
+物理清除走 purge_knowledge 显式通道
         """
         with self._lock:
             items = self._items.get(agent_id, [])
@@ -748,7 +916,7 @@ class KnowledgeRepository:
                     }
                     self._save()
                     self._save_tombstones()
-                    self._index_dirty = True
+                    self._record_index_op("remove", knowledge_id)
                     return True
         return False
 
@@ -762,7 +930,7 @@ class KnowledgeRepository:
                     self._tombstones.pop(knowledge_id, None)
                     self._save()
                     self._save_tombstones()
-                    self._index_dirty = True
+                    self._record_index_op("remove", knowledge_id)
                     return True
         # 不在主存储也可能躺在墓碑里（已被软删过）
         if knowledge_id in self._tombstones:
@@ -782,7 +950,7 @@ class KnowledgeRepository:
             del self._tombstones[knowledge_id]
             self._save()
             self._save_tombstones()
-            self._index_dirty = True
+            self._record_index_op("reindex", knowledge_id)
             return True
 
     def list_deleted(self) -> List[Dict[str, Any]]:
@@ -797,6 +965,89 @@ class KnowledgeRepository:
             if found is None:
                 return []
             return list(reversed((found[1].get("revisions") or [])))
+
+    # ── P1#8 块级编辑──
+
+    def list_chunks(self, knowledge_id: str) -> List[Dict[str, Any]]:
+        """块清单（含 revision/index_status 视图）。条目不存在返回 None。"""
+        with self._lock:
+            found = self.find_item(knowledge_id)
+            if found is None:
+                return None
+            return [dict(ch) for ch in (found[1].get("chunks") or [])]
+
+    def chunk_revisions(self, knowledge_id: str, index: int) -> Optional[List[Dict[str, Any]]]:
+        """单块追加式修订账本（最新在前）。条目不存在 None。"""
+        with self._lock:
+            found = self.find_item(knowledge_id)
+            if found is None:
+                return None
+            chunks = found[1].get("chunks") or []
+            if not (0 <= index < len(chunks)):
+                return []
+            return list(reversed(chunks[index].get("revisions") or []))
+
+    def update_chunk(
+        self,
+        knowledge_id: str,
+        index: int,
+        content: str,
+        user: Optional[Dict[str, Any]] = None,
+        expected_revision: Optional[int] = None,
+    ) -> int:
+        """编辑单个块，返回新 revision。
+
+        - 块是其文本的权威副本：_chunk_hit/_item_index_docs 优先读块 content，
+          整篇 content 保持原文不联动重写（导出/参照语义）；
+        - expected_revision 乐观锁（None = 不校验，属主自担）；
+        - 旧值先进块 revisions 账本再覆盖（append-only，对齐条目级 P0-2 账本）；
+        - 写完记录 reindex 增量操作——下一次检索即带新文本（P0#1 通道）。
+        """
+        text = str(content or "").strip()
+        if not text:
+            raise ValueError("块内容不得为空")
+        with self._lock:
+            found = self.find_item(knowledge_id)
+            if found is None:
+                raise LookupError("知识条目不存在: %s" % knowledge_id)
+            agent_id = found[0]
+            stored = None
+            for item in self._items.get(agent_id, []):
+                if item.get("knowledge_id") == knowledge_id:
+                    stored = item
+                    break
+            if stored is None:
+                raise LookupError("知识条目不存在: %s" % knowledge_id)
+            if not self.can_modify(user, stored):
+                raise PermissionError("仅条目属主或管理员可编辑块")
+            chunks = stored.get("chunks")
+            if not chunks:
+                raise ValueError("条目未分块（整篇模式），请走条目更新")
+            if not (0 <= index < len(chunks)):
+                raise LookupError("块序号越界: %s" % index)
+            ch = chunks[index]
+            cur_rev = int(ch.get("revision", 0) or 0)
+            if expected_revision is not None and int(expected_revision) != cur_rev:
+                raise ChunkRevisionConflict(
+                    "块 %d 修订冲突：期望 %s，当前 %s" % (index, expected_revision, cur_rev)
+                )
+            ch.setdefault("revisions", []).append(
+                {
+                    "content": ch.get("content", ""),
+                    "at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "by": self._user_id(user),
+                }
+            )
+            ch["content"] = text
+            ch["revision"] = cur_rev + 1
+            ch["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            # 索引器可用 → 编辑将被增量应用；不可用（store=None）如实标 pending
+            ch["index_status"] = "pending" if self._index_dirty else "ready"
+            item_meta = stored
+            item_meta["updated_at"] = datetime.datetime.now(datetime.timezone.utc).timestamp()
+            self._save()
+            self._record_index_op("reindex", knowledge_id)
+            return ch["revision"]
 
     # ── P0-3 同值冲突可见化 ────────────────────────────────────
 
@@ -870,7 +1121,7 @@ class KnowledgeRepository:
         self, conflict_id: str, resolution: str, resolved_by: str = ""
     ) -> bool:
         """人工裁决冲突：keep_both 保留双条目关闭记录；supersede_old 旧条目
-        打 superseded_by 链并 tombstone（新说法接管，旧值按 Utopia 0022 原路
+ 打 superseded_by 链并 tombstone（新说法接管
         入墓碑可复活）。非法裁决值抛 ValueError。"""
         if resolution not in ("keep_both", "supersede_old"):
             raise ValueError("未知裁决: %r（有效值: keep_both / supersede_old）" % resolution)
@@ -909,7 +1160,10 @@ class KnowledgeRepository:
                 self._tombstones[rec["old_id"]] = supersede_payload
                 self._save_tombstones()
             self._save_conflicts()
-            self._index_dirty = True
+            # keep_both 不改条目文本（conflict 簿记字段不进索引）；仅
+            # supersede_old 使旧条目墓碑化 → 增量剥离
+            if resolution == "supersede_old":
+                self._record_index_op("remove", rec["old_id"])
             return True
 
 

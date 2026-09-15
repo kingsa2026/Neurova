@@ -251,7 +251,7 @@ export function exportAnnotationTrainingSet() {
 }
 
 // ---------------------------------------------------------------------------
-// P0-2 revision 账本 / tombstone + P0-3 同值冲突（Utopia 对标落地）
+// P0-2 revision 账本 / tombstone + P0-3 同值冲突
 // ---------------------------------------------------------------------------
 
 /** 知识条目 revision（update 前的旧值快照）。 */
@@ -345,4 +345,76 @@ export function runEntityResolution(agentId: string) {
   return api.post<ApiResponse<{ result: { merged: number; kept: number; escalated: number }; human_reviews: number }>>(
     `/knowledge-graph/${agentId}/knowledge-graph/resolution/run`,
   )
+}
+
+
+// ---------------------------------------------------------------------------
+// P1#12：飞书同步 / 块编辑 / 切分预览
+// ---------------------------------------------------------------------------
+
+/** 手动触发一次远程数据源同步落库（当前仅飞书知识空间）。 */
+export interface KbSyncStats {
+  upserted: number
+  skipped: number
+  skipped_type: number
+  failed: number
+  deleted: number
+  partial: boolean
+}
+
+export function syncKbConfig(id: string) {
+  return api.post<ApiResponse<KbSyncStats>>(`${BASE}/configs/${id}/sync`)
+}
+
+/** 条目块清单（含 revision/parent_index，块编辑弹窗消费）。 */
+export interface KnowledgeChunkRow {
+  index: number
+  content: string
+  char_start: number
+  char_end: number
+  context_header?: string
+  parent_index?: number
+  revision?: number
+  index_status?: string
+}
+
+export function listKnowledgeChunks(knowledgeId: string) {
+  return api.get<ApiResponse<KnowledgeChunkRow[]>>(`${BASE}/${knowledgeId}/chunks`)
+}
+
+/** 块编辑（乐观锁：expectedRevision 与当前不符 → 409）。 */
+export function updateKnowledgeChunk(
+  knowledgeId: string,
+  index: number,
+  data: { content: string; expected_revision?: number },
+) {
+  return api.put<ApiResponse<{ index: number; revision: number }>>(
+    `${BASE}/${knowledgeId}/chunks/${index}`,
+    data,
+  )
+}
+
+/** 块修订账本（最新在前）。 */
+export interface KnowledgeChunkRevision {
+  content: string
+  at: string
+  by: string
+}
+
+export function listKnowledgeChunkRevisions(knowledgeId: string, index: number) {
+  return api.get<ApiResponse<KnowledgeChunkRevision[]>>(
+    `${BASE}/${knowledgeId}/chunks/${index}/revisions`,
+  )
+}
+
+/** 切分 live-preview（只读，与生产单源）。 */
+export function previewChunking(data: { content: string; max_chars?: number; overlap?: number }) {
+  return api.post<ApiResponse<{
+    chunks: Array<Record<string, unknown>>
+    total: number
+    children: Array<Record<string, unknown>>
+    parents: Array<Record<string, unknown>>
+    max_chars: number
+    overlap: number
+  }>>(`${BASE}/preview-chunking`, data)
 }
