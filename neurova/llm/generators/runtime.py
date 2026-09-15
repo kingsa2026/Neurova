@@ -2,7 +2,7 @@
 """AIGC 统一 runtime facade（批次0，三栈收敛单源）。
 
 背景（根因）：AIGC 曾有三套并行客户栈——
-1. ``protocols.py``：QwenPaw 实测协议矩阵（REST /generation/* 在用，真实端点）；
+1. ``protocols.py``：真实端点）
 2. ``text_to_image.py`` 等六件 BaseGenerator 实现：文档已判定打的是**虚构端点**，
    从未真实产出（本批次随修删除）；
 3. 渠道层（telegram/qqbot/wechat/wechat_ai/feishu）：因包零导出恒 ImportError。
@@ -23,7 +23,7 @@ import re
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
 from neurova.llm.generators import protocols as protocols
@@ -277,7 +277,7 @@ class ProtocolGenerator:
         else:
             result = GenerationResult(success=False, error=(
                 f"{t}：无实测协议支撑（视频生视频需专协议，"
-                "登记缓后台账），见 docs/Neurova_PRINTFILM_火宝短剧_AIGC对标研究_2026-09-13.md"
+                "登记缓后台账）"
             ))
         result.duration = time.monotonic() - start
         return result

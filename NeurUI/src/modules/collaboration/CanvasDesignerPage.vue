@@ -5,7 +5,6 @@
     设计：三栏布局（左侧节点库 | 中间画布 | 右侧属性面板）
 
     当前为骨架版本，后续可集成 Vue Flow / reactflow 风格的节点画布。
-    Infinite-Canvas 整合后可复用其画布组件。
   -->
   <div class="canvas-designer" ref="canvasRoot">
     <!-- 顶部工具栏 -->

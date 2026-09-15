@@ -76,7 +76,6 @@ def create_all_tables(conn: sqlite3.Connection):
         -- #4 已删除孤儿表:sessions / session_messages / session_context_snapshots
         -- 这三张表仅有 CREATE TABLE,无任何 INSERT/SELECT/UPDATE 代码引用。
         -- 会话持久化由 SessionManager 文件层负责(sessions/<agent_id>/session_<sid>_<date>.json)。
-        -- 详见 docs/adr/0008-session-repository.md
         CREATE TABLE IF NOT EXISTS memory_emotions (
             id TEXT PRIMARY KEY,
             memory_id TEXT NOT NULL,

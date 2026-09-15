@@ -9,7 +9,7 @@ from __future__ import annotations
 from neurova.core.logger import get_logger
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .cognitive_storage_engine import CognitiveStorageEngine, MemoryType, UnifiedMemoryNode
 
