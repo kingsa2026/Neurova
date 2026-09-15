@@ -300,12 +300,21 @@
         :file-list="importFiles"
         :before-upload="beforeImportUpload"
         :multiple="true"
-        directory
-        accept=".json,.jsonl,.csv,.txt,.md,.rst,.html,.htm,.xml,.yaml,.yml,.toml,.log,.rtf,.odt,.ods,.odp,.docx,.xlsx,.pptx,.pdf"
+        :accept="kbImportAcceptAttr"
       >
         <p class="ant-upload-text">{{ t('knowledge.dragOrClick') }}</p>
         <p class="ant-upload-hint">{{ t('knowledge.importFormats') }}</p>
       </a-upload-dragger>
+      <!-- 整文件夹为独立入口：原生目录对话框会忽略 accept（无类型过滤），入队前按扩展名过滤兜底 -->
+      <div style="margin-top: 8px">
+        <a-upload
+          :before-upload="beforeImportUpload"
+          :show-upload-list="false"
+          directory
+        >
+          <GlassButton variant="ghost" size="sm">{{ t('knowledge.importFolder') }}</GlassButton>
+        </a-upload>
+      </div>
 
       <a-divider style="margin: 12px 0" />
       <a-input
@@ -587,11 +596,13 @@ const form = ref({ title: '', category: '', content: '', tags: [] as string[] })
 const importVisible = ref(false)
 const importing = ref(false)
 const importFiles = ref<UploadFile[]>([])
-// 批量导入：支持多选 + 整文件夹（directory）；不支持扩展名入队时过滤并计数
+// 批量导入：文件多选走主拖拽区（accept 让原生对话框置灰非支持类型）+ 整文件夹
+// 独立入口；两路共用 beforeImportUpload 按扩展名过滤并计数。accept 单源于此表，防漂移。
 const KB_IMPORT_EXTS = [
   'json', 'jsonl', 'csv', 'txt', 'md', 'rst', 'html', 'htm', 'xml',
   'yaml', 'yml', 'toml', 'log', 'rtf', 'odt', 'ods', 'odp', 'docx', 'xlsx', 'pptx', 'pdf',
 ]
+const kbImportAcceptAttr = computed(() => KB_IMPORT_EXTS.map((e) => `.${e}`).join(','))
 const MAX_IMPORT_BATCH = 50
 const importSkipped = ref(0)
 const importTooMany = ref(0)
