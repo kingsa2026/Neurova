@@ -159,20 +159,31 @@ class TestVectorStoreIncrementalIdf(unittest.TestCase):
             {"id": f"m{i}", "content": f"这是第 {i} 条测试记忆内容，用于验证"}
             for i in range(20)
         ]
-        with mock.patch.object(store, "_update_idf", wraps=store._update_idf) as spy:
+        with mock.patch.object(store, "_update_idf", wraps=store._update_idf) as full_rebuild:
             store.index_memories(docs, incremental=False)
-            self.assertEqual(spy.call_count, 1)
+            self.assertEqual(full_rebuild.call_count, 1, "全量重建应走 _update_idf")
+
+        # 增量路径自 4448c54a 根因修复起改走 _extend_idf（原实现调
+        # _update_idf(new_docs) 会把 IDF 重置为"仅新文档"统计：老词项从
+        # _idf_values 消失、存量向量不可达、N 退化）。本用例 spy 同步跟进，
+        # 并钉死该根因的两条不变量（老词项存活 + N 对全语料累积）。
+        with mock.patch.object(store, "_extend_idf", wraps=store._extend_idf) as extend:
             vocab_before = dict(store._tfidf_vocabulary)
+            idf_before = dict(store._idf_values)
+            n_before = store._tfidf_n_docs
 
             # 同一批再增量索引(模拟每轮召回传入全量) → 不应重新分词
             store.index_memories(docs, incremental=True)
-            self.assertEqual(spy.call_count, 1, "已存在文档不应触发 IDF 重建")
+            self.assertEqual(extend.call_count, 0, "已存在文档不应触发 IDF 扩展")
             self.assertEqual(store._tfidf_vocabulary, vocab_before)
 
             # 新文档增量 → 才触发一次
             new_docs = [{"id": "new1", "content": "这是一条全新的记忆内容"}]
             store.index_memories(new_docs, incremental=True)
-            self.assertEqual(spy.call_count, 2, "新文档应触发一次 IDF 更新")
+            self.assertEqual(extend.call_count, 1, "新文档应触发一次 IDF 增量扩展")
+            for token in idf_before:
+                self.assertIn(token, store._idf_values, f"老词项 {token!r} 不应从 IDF 消失")
+            self.assertEqual(store._tfidf_n_docs, n_before + 1, "文档数应按全语料累积")
 
 
 class TestMetricsCollectorCaps(unittest.TestCase):

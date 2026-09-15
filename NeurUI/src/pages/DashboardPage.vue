@@ -308,7 +308,7 @@ onMounted(() => {
 
 @keyframes dash-enter {
   from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+  to { opacity: 1; }
 }
 
 /* Welcome Section */

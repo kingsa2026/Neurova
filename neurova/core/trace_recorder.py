@@ -51,6 +51,10 @@ class TrajectoryRecorder:
         self._initialized = True
         self._active_traces: Dict[str, Trajectory] = {}
         self._active_spans: Dict[str, TrajectorySpan] = {}
+        # 与上面两个活动注册表同批初始化：曾走 start_trace 内 hasattr 懒建，
+        # 使 end_trace/delete_trace 的行为依赖"此前是否有人起过 trace"
+        #（单测单文件跑必 AttributeError，全套跑才绿——顺序耦合根因）。
+        self._active_traces_by_user: Dict[str, List[str]] = defaultdict(list)
         self._storage_dir = Path("trajectories")
         self._storage_dir.mkdir(exist_ok=True)
         self._enabled = True
@@ -111,9 +115,7 @@ class TrajectoryRecorder:
         self._active_traces[trace.trace_id] = trace
         self._active_spans[root_span.span_id] = root_span
 
-        # 按用户分组存储
-        if not hasattr(self, "_active_traces_by_user"):
-            self._active_traces_by_user = defaultdict(list)
+        # 按用户分组存储（__init__ 已初始化，不再 hasattr 懒建）
         self._active_traces_by_user[user_id].append(trace.trace_id)
 
         logger.info("Started trace %s for session %s", trace.trace_id, session_id)
@@ -147,12 +149,11 @@ class TrajectoryRecorder:
         for span_id in list(trace.spans.keys()):
             self._active_spans.pop(span_id, None)
         self._active_traces.pop(trace_id, None)
-        if hasattr(self, "_active_traces_by_user"):
-            by_user = self._active_traces_by_user.get(trace.user_id)
-            if by_user and trace_id in by_user:
-                by_user.remove(trace_id)
-                if not by_user:
-                    self._active_traces_by_user.pop(trace.user_id, None)
+        by_user = self._active_traces_by_user.get(trace.user_id)
+        if by_user and trace_id in by_user:
+            by_user.remove(trace_id)
+            if not by_user:
+                self._active_traces_by_user.pop(trace.user_id, None)
         clear_trace_id()
 
     def start_span(
@@ -471,11 +472,9 @@ class TrajectoryRecorder:
             self._saved_traces.remove(trace_info)
             self._save_traces_index()
 
-        # 从用户索引中删除
-        if hasattr(self, "_active_traces_by_user") and user_id:
-            if user_id in self._active_traces_by_user:
-                if trace_id in self._active_traces_by_user[user_id]:
-                    self._active_traces_by_user[user_id].remove(trace_id)
+        # 从用户索引中删除（__init__ 已初始化，不再 hasattr 守卫）
+        if user_id and trace_id in self._active_traces_by_user.get(user_id, []):
+            self._active_traces_by_user[user_id].remove(trace_id)
 
         return True
 
