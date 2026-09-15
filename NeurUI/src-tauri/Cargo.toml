@@ -24,4 +24,5 @@ log = "0.4"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 ureq = { version = "2", features = ["json"] }
-glib = { version = "0.20.0", default-features = false, features = ["v2_58"] }
+# 勿无条件加 glib：Windows 上 glib-sys 需 pkg-config+系统 GLib 必编译失败；
+# 漏洞修复应走 tauri Linux 栈的传递版本（29be2081 曾因此打断打包，已回退）
