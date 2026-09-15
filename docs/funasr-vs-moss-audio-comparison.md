@@ -85,7 +85,7 @@
 | **功能全面** | 集成 VAD、说话人分离、情感检测、自动标点 |
 | **多语言** | 50+ 种语言支持，包括中文方言 |
 | **部署灵活** | Docker、Kubernetes、本地 API、WebSocket |
-| **生态完善** | MCP Server、LangChain 集成、Dify 集成 |
+| **生态完善** | MCP Server、LangChain 集成
 | **MIT 开源** | 商业友好，无许可证限制 |
 | **CPU 可用** | CPU 性能优于 Whisper GPU 性能 |
 

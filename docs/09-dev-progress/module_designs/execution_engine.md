@@ -19,7 +19,6 @@
 
 ### 1.2 设计依据
 - NEUROVA_CogArch_2.0.md 第6章
-- 借鉴 QwenPaw 的执行引擎设计
 - 与 `cognitive/orchestrator.py` 对接
 
 ### 1.3 与其他模块的关系
@@ -420,7 +419,6 @@ async def call_tool(self, server_name: str, tool_name: str, arguments: Dict) -> 
 
 ### 7.1 参考资料
 - NEUROVA_CogArch_2.0.md 第6章
-- QwenPaw 执行引擎设计
 - MCP 协议规范: https://modelcontextprotocol.io/
 
 ### 7.2 相关文件

@@ -56,17 +56,8 @@
 ## 文件清单
 
 ### 修改的文件
-1. `docs/architecture/21-recursive-self-improvement.md`
-2. `docs/architecture/INDEX.md`
-3. `docs/DOCS_ALIGNMENT_PLAN.md`
 
 ### 新增的文件
-1. `docs/architecture/21-recursive-self-improvement-v1.2-summary.md`
-2. `docs/architecture/RSI_INTEGRATION_COMPLETE.md`
-3. `docs/architecture/RSI_INTEGRATION_FINAL_REPORT.md`
-4. `docs/architecture/RSI_INTEGRATION_SUMMARY.md`
-5. `docs/architecture/RSI_INTEGRATION_CHECKLIST.md`
-6. `docs/architecture/RSI_FINAL_SUMMARY.md`
 7. `tests/unit/test_rsi_v1_2.py`
 
 ## 设计优势

@@ -70,4 +70,4 @@ build.cmd                                  :: 壳 only（开发迭代）
 - NSIS 模板（内核逻辑 + nsDialogs 单页版，独立双击安装仍可用）：
   `NeurUI/src-tauri/nsis/installer.nsi`
 - 美术资产：`scripts/desktop/gen_installer_art.py`
-- 排障表：`~/.zcode/skills/neurova-installer-pack/SKILL.md`
+- 排障表：

@@ -180,7 +180,6 @@
 |--------|------|------|--------|------|
 | mode | string | ✅ | ilink | 运行模式 (ilink) |
 | bot_token | string | ❌ | - | Bot Token (首次扫码后自动生成) |
-| token_file | string | ❌ | ~/.qwenpaw/weixin_bot_token | Token 文件路径 |
 | media_directory | string | ❌ | - | 媒体文件目录 |
 | message_merge | bool | ❌ | false | 消息合并 (避免超出平台限制) |
 | private_chat_strategy | string | ❌ | open | 私聊策略 |
@@ -271,7 +270,7 @@
 | tts_voice | string | ❌ | longxiaochun | TTS 语音 |
 | stt_provider | string | ❌ | aliyun | STT 提供商 |
 | language | string | ❌ | zh-CN | 语言 |
-| welcome_message | string | ❌ | 你好，我是QwenPaw | 欢迎语 |
+| welcome_message | string | ❌ | 你好
 
 **语音处理**:
 - **TTS (文本转语音)**: 使用 DashScope API 将 Agent 回复转换为语音

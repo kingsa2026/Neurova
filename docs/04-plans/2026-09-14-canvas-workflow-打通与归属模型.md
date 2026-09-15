@@ -8,7 +8,7 @@
 
 「工作流」页（`NeurUI/src/workflow/WorkflowPage.vue`，路由 `/collaboration/workflows`）下两个 tab：
 - **画布**：无限画布编辑形态。文件存储 `data/collaboration/canvases/<id>.json`（`neurova/collaboration/canvas_store.py`），快照含 nodes/edges/position，带 `version` 乐观锁。
-- **定义**：NeurFlow 执行内核 `WorkflowDefinition`。SQLite `neurflow.db` 的 `workflows` 表（`neurova/collaboration/neurflow/storage.py`），已有 `user_id` 属主 + `public` 全局可见（Langflow 对比 P0-1，已提交 6238766c）。
+- **定义**：NeurFlow 执行内核 `WorkflowDefinition`。SQLite `neurflow.db` 的 `workflows` 表（`neurova/collaboration/neurflow/storage.py`），已有 `user_id` 属主 + `public` 全局可见。
 
 设计意图是"画布是可编辑形态，定义是执行内核"（`WorkflowPage.vue:12` 注释），但实际是**单向、临时编译式**关系，断点清单：
 

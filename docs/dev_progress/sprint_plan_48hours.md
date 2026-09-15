@@ -101,9 +101,9 @@
 **截止时间**: 2026-05-13 10:00
 
 **具体要求**:
-- provider-dev: 提交 `docs/dev_progress/daily_reports/2026-05-13-provider-dev.md`
-- workflow-dev: 提交 `docs/dev_progress/daily_reports/2026-05-13-workflow-dev.md`
-- acp-dev: 提交 `docs/dev_progress/daily_reports/2026-05-13-acp-dev.md`
+- provider-dev: 提交 ``
+- workflow-dev: 提交 ``
+- acp-dev: 提交 ``
 
 **报告内容**:
 1. 完成的工作（附代码证据）
@@ -151,7 +151,7 @@
    - 测试所有用户交互
 
 3. **14:00-16:00**: 创建模块设计文档
-   - 文件：`docs/dev_progress/module_designs/agent_config.md`
+ - 文件：``
    - 包含：模块概述、架构设计、API设计、测试计划
 
 ---
@@ -170,7 +170,7 @@
 
 3. **14:00-16:00**: 添加API文档
    - 为所有endpoint添加docstring
-   - 创建API文档：`docs/api/console_api.md`
+ - 创建API文档：``
 
 ---
 
@@ -218,7 +218,7 @@
    - 修复所有lint警告
 
 4. **22:00-00:00**: 更新进度跟踪表
-   - 文件：`docs/dev_progress/progress_tracker.md`
+ - 文件：``
    - 更新任务状态为100%完成
 
 ---
@@ -271,9 +271,9 @@
 4. 做出决策（警告、移除任务等）
 
 **工作产品**:
-- `docs/dev_progress/sprint_plan_48hours.md`（本文档）
-- `docs/dev_progress/progress_tracker.md`（每日更新2次）
-- `docs/dev_progress/daily_reports/2026-05-13-team-lead.md`（每日报告）
+- ``（本文档）
+- ``（每日更新2次）
+- ``（每日报告）
 
 ---
 
@@ -365,13 +365,13 @@
 ## 📎 附件
 
 ### 参考文档
-- `docs/dev_progress/team_restructure_plan.md` - 团队重组计划
-- `docs/dev_progress/team_restructure_announcement.md` - 团队重组公告
-- `docs/dev_progress/progress_tracker.md` - 进度跟踪表
+- `` - 团队重组计划
+- `` - 团队重组公告
+- `` - 进度跟踪表
 
 ### 模板文档
-- `docs/dev_progress/daily_reports/TEMPLATE.md` - 每日报告模板
-- `docs/dev_progress/module_designs/TEMPLATE.md` - 模块设计文档模板
+- `` - 每日报告模板
+- `` - 模块设计文档模板
 
 ---
 

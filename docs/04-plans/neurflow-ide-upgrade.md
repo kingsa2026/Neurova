@@ -102,7 +102,7 @@
 - [ ] 单元测试 100% 通过（含新增 ≥ 15 用例）
 - [ ] E2E：`tests/e2e/canvas/test_workflow_debug.py` 走通"设断点→执行→暂停→检查变量→修改 mock→单步→完成"完整路径
 - [ ] `Mimosa` 安全扫描过（断点 API 不暴露敏感数据）
-- [ ] 文档：更新 `docs/用户指南/工作流调试指南.md`
+- [ ] 文档：更新 ``
 
 ---
 
@@ -304,10 +304,10 @@ workflow_versions 表（每次 save 触发快照）
 - 新 API 错误信息走 `unwrap_error(envelope)` 规范
 
 ### 5.5 文档
-- P0 完成：写 `docs/用户指南/工作流调试指南.md`
-- P1 完成：写 `docs/用户指南/触发器配置指南.md`（含 curl + HMAC 示例）
-- P2 完成：写 `docs/用户指南/工作流发布为Agent.md` + `docs/用户指南/版本管理.md`
-- 更新 `docs/分析报告/smart-flow-vs-neurova.md`（执行总结）
+- P0 完成：写 ``
+- P1 完成：写 ``（含 curl + HMAC 示例）
+- P2 完成：写 `` + ``
+- 更新 ``（执行总结）
 
 ---
 

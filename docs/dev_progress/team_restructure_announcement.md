@@ -153,7 +153,7 @@
 
 ### 2. 进度跟踪表实时更新
 
-我会每天更新2次进度跟踪表（`docs/dev_progress/progress_tracker.md`）：
+我会每天更新2次进度跟踪表：
 - **上午10:00**
 - **下午16:00**
 
@@ -276,9 +276,9 @@
 ## 七、联系方式
 
 - **团队负责人**: team-lead
-- **进度跟踪表**: `docs/dev_progress/progress_tracker.md`
-- **团队重组计划**: `docs/dev_progress/team_restructure_plan.md`
-- **冲刺计划**: `docs/dev_progress/sprint_plan.md`（待创建）
+- **进度跟踪表**: ``
+- **团队重组计划**: ``
+- **冲刺计划**: ``（待创建）
 
 ---
 
@@ -290,7 +290,7 @@
 2. 确认理解新的要求
 3. 确认能够按时完成任务（或说明困难）
 
-**回复方式**: 创建 `docs/dev_progress/daily_reports/2026-05-13-confirmation.md`，列出所有开发者的确认状态。
+**回复方式**: 创建 ``，列出所有开发者的确认状态。
 
 ---
 

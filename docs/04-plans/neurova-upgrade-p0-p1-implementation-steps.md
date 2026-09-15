@@ -152,8 +152,8 @@ is_concurrency_safe 才 gather，任一未声明整轮保守串行；结果按�
 1. 红测：三通道（loop 原生/文本兜底/肌肉记忆）同入口；独立工具并行结果完整；超时转后台语义；hint 注入下一轮
 2. 统一入口 `execute(tool_name, params, source, context)`（`tool_executor.py` 收敛；肌肉记忆自动执行=白名单+高置信直通）
 3. 并行：`loops/base.py:69-277` 独立调用 `asyncio.gather`（工具元数据 `is_concurrency_safe` 声明制，默认串行保守）
-4. per-tool 超时注册表（对标 QP shell 60s/grep 30s 元数据方式）
-5. 超时**转后台不取消**：返回 `{"status":"background","task_id":...}`，完成经 pending_hints 注入（QP `_coordinator.py` offload 语义）
+4. per-tool 超时注册表
+5. 超时**转后台不取消**：返回 `{"status":"background","task_id":...}_coordinator.py` offload 语义）
 6. 文本正则兜底收窄到 openai 兼容层 tools-400 降级路径
 
 ### P1-3 MCP 可靠性 ☑（a7e1e98，2026-09-01）
@@ -188,7 +188,7 @@ AppContainer available() 诚实 False + Windows 降级 ProcessSandbox；ExecSand
 
 e2e boot 冒烟（纯 subprocess——in-process create_app 实测卡死故弃用；路径经 openapi 校准）5 用例；context pool 压测 4 用例（关键词降级路径锁频，ONNX 变量剔除）；CI e2e job；vitest coverage 阈值起步线 30（实测 43.6%）。mock LLM chat 与登录 e2e 依赖后端注入点与测试账号（诚实未做，标注待办）。
 
-新 `tests/e2e/test_backend_boot.py`（subprocess 拉起 + `/api/version` 探活 + 登录 + mock LLM chat + MCP 生命周期，对标 QP `test_hub_local_runtime.py`）；`tests/performance/` 填 context pool 100 轮压测（兼作 P1-1 验收）；`NeurUI/vitest.config.ts` coverage thresholds lines 30 起步；CI 加 e2e job（push main）。
+新 `tests/e2e/test_backend_boot.py`（subprocess 拉起 + `/api/versiontest_hub_local_runtime.py`）；`tests/performance/` 填 context pool 100 轮压测（兼作 P1-1 验收）；`NeurUI/vitest.config.ts` coverage thresholds lines 30 起步；CI 加 e2e job（push main）。
 
 **Phase 1 出口**：长会话不炸 / 工具并行+超时优雅 / MCP 自愈 / 死循环可终止 / 误操作可回滚 / 内容级安全扫描 / 沙箱诚实 / e2e 真实存在。
 
@@ -202,7 +202,7 @@ e2e boot 冒烟（纯 subprocess——in-process create_app 实测卡死故弃�
 **P2-4 首刀 ☑（同 commit）**：core/metrics.py（prometheus_client 指标集单一事实源：tool/llm/circuit counter+histogram+gauges）+ /metrics 端点替换手拼 + tool_executor/llm.chat 全量埋点。
 **P2-4c ☑（82c64a7）**：chat_pipeline trace total_tokens 切换——usage_accounting.last_call() 真实值优先，无则回退字符估算；last_call() API 新增。4 用例。**P2-4d ☑（已提交 1eb1316）**：openai_loop 流式 chunk usage 逐轮聚合进 done 事件 + chat_pipeline 消费入账——**usage 对账三路齐备**（非流式 chat/流式 done/后续多模型）。
 **P2-7 测试处置批（☑ 53b3ca9）**：tool_engine_v2 修复全绿（守卫 mock should_block 契约 + 3 类 setUp 补 mock_security_system）；closed_loop 修复（模块路径 + skill_packer.observe 闭环补线 + duration 修复）12/12；monitor_v2 删除（断言的富 API 已移除）。剩余 7F 定性预存（plan_orchestrator 签名漂移 + async 缺 marker）。
-**P2-6 MCP OAuth ☑（已提交 9a82b38）**：tool_layers/mcp_oauth.py（PKCE + client_credentials 带 60s 提前刷新/force_refresh、resolve_mcp_token per-call 解析——QP 烘焙坑规避）+ call_tool 401→刷新→重试一次。10 用例。
+**P2-6 MCP OAuth ☑（已提交 9a82b38）**：tool_layers/mcp_oauth.py+ call_tool 401→刷新→重试一次。10 用例。
 **P2-5 循环门控+goal 模式 ☑（f11e162）**：gates.py（StopAction 三态+DoomLoop/Iteration/TokenBudget/Goal 四 gate+Runner 故障隔离）+ openai_loop 双路径接入（懒初始化；INTERRUPT=提示注入消息序列；TERMINATE yield gate_terminate）+ set_goal_gate。21 用例。
 
 ---
@@ -222,4 +222,3 @@ e2e boot 冒烟（纯 subprocess——in-process create_app 实测卡死故弃�
 - **JSON 结构化日志**：NEUROVA_LOG_JSON=1 → 单行 JSON（json.dumps 引号安全、exc 结构化）——structlog 核心价值落地，零新依赖。
 - **Windows 受限令牌沙箱（真隔离）**：SAFER/SRP NormalUser 令牌 → CreateProcessAsUserW，特权剥离（Administrators→deny-only，自证 S-1-5-114）；诚实边界 enforced_severities=∅（SRP 无网络/FS 语义，governance DENY 不受影响）；_detect_backend Windows 无 docker/bwrap/seatbelt 时优先 restricted_token。**AppContainer（COM/SECURITY_CAPABILITIES 语义）仍留待真需求出现**——受限令牌已覆盖特权剥离安全增益。
 
-**QwenPaw 升级计划 P0/P1/P2/P3 + 可选项全部收官。**

@@ -392,7 +392,6 @@ ErrorCode (neurova/core/error_handler.py)
 |--------|------|
 | `ollama` | Ollama 本地模型 |
 | `lm-studio` | LM Studio 本地模型 |
-| `qwenpaw-local` | QwenPaw 本地模型 |
 
 ### 7.2 国内模型 (11个)
 

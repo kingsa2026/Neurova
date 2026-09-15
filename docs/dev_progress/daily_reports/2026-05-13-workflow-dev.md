@@ -10,7 +10,7 @@
 ## 一、今日完成工作
 
 ### 1.1 设计文档创建
-- ✅ 完成 `docs/dev_progress/module_designs/workflow_engine_enhanced.md`
+- ✅ 完成 ``
 - 参考 `provider_enhanced.md` 格式
 - 包含完整的模块设计、架构设计、详细设计、API 设计、测试计划等
 
@@ -56,8 +56,6 @@
 - **整体进度**: 60%
 
 ### 2.2 已提交产物
-- ✅ `docs/dev_progress/module_designs/workflow_engine_enhanced.md`
-- ✅ `docs/dev_progress/daily_reports/2026-05-13-workflow-dev.md`
 - ✅ `neurova/projects/workflow_engine.py`
 - ✅ `neurova/projects/test_workflow_engine.py`
 - ✅ `neurova/api/endpoints/workflows_api.py`

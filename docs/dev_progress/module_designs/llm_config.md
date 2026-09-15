@@ -543,6 +543,6 @@ class ChannelManager:
 2. 创建单元测试
 3. 检查并创建 Vue 前端页面
 4. 进行集成测试
-5. 更新进度跟踪表（`docs/dev_progress/progress_tracker.md`）
-6. 创建每日进度报告（`docs/dev_progress/daily_reports/2026-05-12.md`）
+5. 更新进度跟踪表
+6. 创建每日进度报告
 7. 通知 team-lead 任务完成

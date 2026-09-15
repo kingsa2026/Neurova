@@ -113,7 +113,7 @@ async def _step_evocate_generation(
 1. `tests/unit/test_evocate_loop.py` — Evocate 闭环测试
 
 ### 更新的文档
-1. `docs/architecture/closed-loop-analysis.md` — 更新日志
+1. `` — 更新日志
 
 ## 技术细节
 

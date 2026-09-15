@@ -28,14 +28,14 @@
    - 测试持久化功能（保存、加载、报表生成）
    - 所有测试符合 PEP 8 规范，有完整的类型注解和文档字符串
 
-4. **创建模块设计文档** - `docs/dev_progress/module_designs/execution_monitor.md`
+4. **创建模块设计文档** - ``
    - 完整的模块概述（功能描述、设计依据、与其他模块的关系）
    - 详细的架构设计（类/函数设计、数据流图、状态机）
    - 实现细节（已完成的子任务、关键代码片段）
    - 测试计划（单元测试、集成测试、性能测试）
    - 已知问题、变更记录、附录
 
-5. **更新进度跟踪表** - `docs/dev_progress/progress_tracker.md`
+5. **更新进度跟踪表** - ``
    - 将 ExecutionMonitor 状态从 "0%" 和 "⏳ 待开始" 更新为 "100%" 和 "✅ 已完成"
    - 添加实际开始时间和完成时间
 
@@ -75,8 +75,8 @@
 - 总计 30 个测试用例，全部通过
 
 ### 5. 文档创建与更新（22:00 - 22:30）
-- 创建 `docs/dev_progress/module_designs/execution_monitor.md` 设计文档
-- 更新 `docs/dev_progress/progress_tracker.md` 进度跟踪表
+- 创建 `` 设计文档
+- 更新 `` 进度跟踪表
 - 创建本每日报告
 
 ---
@@ -154,8 +154,8 @@
 1. `neurova/execution_engine/execution_monitor.py` - 添加数据类和核心方法
 2. `neurova/execution_engine/__init__.py` - 更新导出列表
 3. `tests/test_execution_monitor.py` - 新建单元测试文件
-4. `docs/dev_progress/module_designs/execution_monitor.md` - 新建模块设计文档
-5. `docs/dev_progress/progress_tracker.md` - 更新进度跟踪表
+4. `` - 新建模块设计文档
+5. `` - 更新进度跟踪表
 
 ### 关键代码片段
 所有代码均已上传到 Git 仓库（待提交）

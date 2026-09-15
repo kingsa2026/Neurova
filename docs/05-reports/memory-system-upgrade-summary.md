@@ -37,7 +37,7 @@
 - 新增检索通道只需修改 Facade 内部
 - 测试更简单（mock Facade 即可）
 
-**讨论框架**：`docs/grilling-memory-retrieval-facade.md`
+**讨论框架**：``
 
 ---
 
@@ -58,7 +58,7 @@
 - 错误处理统一管理
 - 性能监控更清晰
 
-**讨论框架**：`docs/grilling-tool-lifecycle-manager.md`
+**讨论框架**：``
 
 ---
 
@@ -79,7 +79,7 @@
 - 自动从对话中构建知识图谱
 - 支持关联记忆检索
 
-**讨论框架**：`docs/grilling-memory-knowledge-bridge.md`
+**讨论框架**：``
 
 ---
 
@@ -100,7 +100,7 @@
 - 内部组件可以独立升级
 - 测试更简单
 
-**讨论框架**：`docs/grilling-evolution-facade.md`
+**讨论框架**：``
 
 ---
 
@@ -121,7 +121,7 @@
 - 格式转换自动处理
 - Token 预算统一管理
 
-**讨论框架**：`docs/grilling-context-facade.md`
+**讨论框架**：``
 
 ## 实施建议
 
@@ -176,8 +176,3 @@
 - 模块地图：`zoom-out-module-map.md`
 - 架构审查报告：`architecture-review-20260612.html`
 - Grilling 讨论框架：
-  - `docs/grilling-memory-retrieval-facade.md`
-  - `docs/grilling-tool-lifecycle-manager.md`
-  - `docs/grilling-memory-knowledge-bridge.md`
-  - `docs/grilling-evolution-facade.md`
-  - `docs/grilling-context-facade.md`

@@ -1,9 +1,9 @@
 # Neurova 威胁模型（MITRE ATLAS 式，2026-09-04）
 
-> OpenClaw 对比 #17 落地。参照 `openclaw/docs/security/THREAT-MODEL-ATLAS.md` 的结构：
+参照 的结构
 > 威胁编号（T-XXX）+ 信任边界图 + 攻击链示例 + 现有控制映射 + 残余风险。
 > 范围：Neurova 后端（FastAPI/SQLite）+ NeurUI 前端 + 桌面壳 + 14 渠道适配器 + MCP 层。
-> 方法论：ATLAS 是针对 AI 系统的敌对威胁分类法；本文不做形式化验证（TLA+ 参考 OpenClaw，
+> 方法论：ATLAS 是针对 AI 系统的敌对威胁分类法
 > 收益/成本比暂不成立），以"攻击者视角走查 + 现有控制对照"为准。
 
 ---
@@ -38,7 +38,7 @@
 2. 同一服务器上的操作系统账户不可信程度低于服务进程（本地单机部署模型）。
 3. LLM 输出**完全不可信**——它可能被提示注入操纵（跨 B3 的核心假设）。
 4. 外部网页/技能包/MCP server 返回的内容**完全不可信**。
-5. 多用户共享实例时，用户之间互不信任（区别于 OpenClaw 的 trusted-operator 单用户边界）。
+5. 多用户共享实例时，用户之间互不信任。
 
 ---
 
@@ -73,17 +73,17 @@
 | T-303 | 技能声明绕过（manifest 声明与实际行为不符） | H | ⚠️ | 运行时按声明 fail-closed 裁决工具调用；**残余**：声明是"承诺"而非能力证明，未做行为级校验（动态分析登记待办） |
 | T-304 | MCP server 恶意/被劫持 | H | ⚠️ | MCP 配置校验（未知键拒绝+stdio shell 拒绝）+ mcp.* 全参数扫描 + 治理故障 fail-closed；**残余**：MCP 工具命中沙箱策略直接 DENY（无进程级沙箱） |
 | T-305 | SSRF（web_fetch/browser_read 打内网） | H | ✅ | url_guard/check_outbound_url + fake-ip 代理段排除（agent-reach）；**残余**：无 DNS pinning（rebinding 缓解不完整，登记待办） |
-| T-306 | 外部内容注入→二次提示注入（结果直入上下文） | H | ⚠️ | browser_read 文本上限 60k + SSE SHA-256 去重；**残余**：无结果侧包裹脱敏（对标 OpenClaw external-content.ts，登记待办） |
+| T-306 | 外部内容注入→二次提示注入（结果直入上下文） | H | ⚠️ | browser_read 文本上限 60k + SSE SHA-256 去重；**残余**：无结果侧包裹脱敏 |
 | T-307 | 工具参数注入（换键名绕过守卫） | M | ✅ | scan_all 全参数序列化扫描（MCP 面）+ 参数守卫 schema 感知档 |
 | T-308 | 子代理滥用（spawn 无限递归/资源耗尽） | M | ✅ | spawn 三明治（MAX_ACTIVE_CHILDREN=5/结构化拒绝）+ 快照冻结（身份层 LRU） |
-| T-309 | 审批流社会工程（模型诱导用户批准恶意操作） | M | ⚠️ | 审批 metadata 存完整调用供批准后重放 + is_policy_denial 单源口径；**残余**：审批卡无渠道镜像路由，拒绝文案未按 OpenClaw 规范约束（P1 #11 登记） |
+| T-309 | 审批流社会工程（模型诱导用户批准恶意操作） | M | ⚠️ | 审批 metadata 存完整调用供批准后重放 + is_policy_denial 单源口径；**残余**：审批卡无渠道镜像路由
 
 ### 边界 B4 — 持久化面与可用性
 
 | ID | 威胁 | 严重度 | 状态 | 控制/缺口 |
 |----|------|--------|------|-----------|
 | T-401 | SQLite 并发损坏（跨进程/线程写） | M | ✅ | threading.RLock 咽喉 + tmp+os.replace 原子写（session JSON）+ .corrupt-*.bak 隔离 |
-| T-402 | 渠道入站消息重启丢失（可用性） | M | 🚫 | 入站内存态（OpenClaw 对比 P0 #5：channel_ingress_events 表登记待办） |
+| T-402 | 渠道入站消息重启丢失（可用性） | M | 🚫 | 入站内存态 |
 | T-403 | 备份/恢复引入恶意产物 | M | ✅ | BackupOrchestrator Ed25519 签名 + trust.py 校验 |
 | T-404 | agent 应用包导入携带恶意载荷 | H | ✅ | 本日落地（P2-16）：manifest 结构 fail-closed 校验（kind/版本/agent 面缺一即 422）；MCP 只出引用面（id/name/transport），env/headers/command/args/url 凭据与宿主拓扑**永不离开宿主**；技能只登记清单不执行代码体；agent_id 白名单正则 + 冲突 409 + 失败全量回滚 |
 | T-405 | 桌面版安装包供应链（NSIS 2GB/解压损坏类） | M | ✅ | 打包暂存排除 __pycache__（pyc 225MB 红线案）+ 签名入 tauri.conf |
@@ -145,11 +145,6 @@
 
 | 优先级 | 项 | 来源对比 | 状态 |
 |--------|----|----------|------|
-| P0 | 渠道入站持久化队列（T-402） | OpenClaw #5 | 登记待办 |
-| P1 | 记忆写入 origin 信任分级（T-204/毒化面） | OpenClaw #9 | 登记待办（并行会话已见 test_memory_origin_trust.py） |
-| P1 | 审批持久化状态机+渠道镜像路由（T-309） | OpenClaw #11 | 登记待办 |
-| P1 | DNS pinning 防 rebinding（T-305） | OpenClaw 网络三道闸 | 登记待办 |
-| P2 | 外部内容包裹脱敏（T-306） | OpenClaw external-content | 登记待办 |
 | P2 | JWT 撤销/轮换（T-104） | 通用 | 登记待办 |
 | P2 | 技能行为级动态校验（T-303） | 本分析 | 登记待办 |
 

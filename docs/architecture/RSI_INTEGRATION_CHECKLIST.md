@@ -118,16 +118,8 @@
 ## 文件完整性检查
 
 ### 修改的文件
-- [x] `docs/architecture/21-recursive-self-improvement.md`
-- [x] `docs/architecture/INDEX.md`
-- [x] `docs/DOCS_ALIGNMENT_PLAN.md`
 
 ### 新增的文件
-- [x] `docs/architecture/21-recursive-self-improvement-v1.2-summary.md`
-- [x] `docs/architecture/RSI_INTEGRATION_COMPLETE.md`
-- [x] `docs/architecture/RSI_INTEGRATION_FINAL_REPORT.md`
-- [x] `docs/architecture/RSI_INTEGRATION_SUMMARY.md`
-- [x] `docs/architecture/RSI_INTEGRATION_CHECKLIST.md`
 - [x] `tests/unit/test_rsi_v1_2.py`
 
 ### 待实现的文件（设计阶段）

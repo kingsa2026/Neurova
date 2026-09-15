@@ -226,7 +226,6 @@ TDD 垂直切片执行:一次一个测试 → 一次一个实现(遵循 tdd skil
 
 V1+V2+V3 已修复全部 12 个工具调用断点。剩余的架构债通过 improve-codebase-architecture skill 识别为 4 个深化候选,详见 HTML 架构报告:
 
-→ [docs/architecture-review-tool-call.html](file:///e:/项目/Neurova/docs/architecture-review-tool-call.html)
 
 ### 已实现(2026-07-02 第二轮,tdd + zoom-out + improve-codebase-architecture)
 
@@ -268,4 +267,4 @@ V1+V2+V3 已修复全部 12 个工具调用断点。剩余的架构债通过 imp
 - OpenAI 官方文档 — Tool message name 字段为可选,但 DeepSeek/通义/智谱/Kimi 在 strict 模式下要求必含 name(社区共识,GitHub issue 验证)
 - Python 文档 — `@property` 装饰器用于暴露只读字段
 - bug-hunt 方法论 — `C:\Users\xccoo\.agents\skills\bug-hunt.keep\SKILL.md`
-- 项目 memory — `c:\Users\xccoo\.trae-cn\memory\projects\-e----Neurova\project_memory.md`(工具调用相关硬约束)
+- 项目 memory — (工具调用相关硬约束)

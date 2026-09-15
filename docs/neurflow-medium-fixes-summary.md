@@ -61,7 +61,7 @@
 2. `neurova/collaboration/neurflow/node_registry.py` - 修复 `_register_builtin_nodes` 方法
 3. `neurova/collaboration/neurflow/builtin.py` - 实现 4 个节点执行器
 4. `tests/unit/test_neurloop_medium_fixes.py` - 新增 9 个测试
-5. `docs/neurflow-progress.md` - 更新进度文档
+5. `` - 更新进度文档
 
 ## 技术细节
 

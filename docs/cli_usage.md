@@ -614,8 +614,8 @@ echo '{"llm_api_key": "your-api-key"}' > cli_config.json
 
 ## 10. 参考资料
 
-- 架构文档：`docs/NEUROVA_CogArch_2.0.md`（第 2662-2700 行）
-- 模块设计文档：`docs/dev_progress/module_designs/cli_enhanced.md`
+- 架构文档：``（第 2662-2700 行）
+- 模块设计文档：``
 - LLM 客户端：`neurova/llm_client.py`
 - 会话管理器：`neurova/session_manager.py`
 - 认知编排器：`neurova/cognitive/orchestrator.py`

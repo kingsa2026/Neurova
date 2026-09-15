@@ -2,7 +2,6 @@
 name: mind-expander
 description: |
   mind-expander opens a live, interactive diagram of the user's
-  codebase in their browser: an infinite-canvas workspace for coding
   with AI agents. Use it to pin narrated steps to exact file:line
   locations.
 

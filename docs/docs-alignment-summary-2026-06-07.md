@@ -28,7 +28,7 @@
 
 ### 2. 架构审查报告 ✅
 
-创建了详细的 HTML 架构审查报告：`docs/architecture-review-2026-06-07.html`
+创建了详细的 HTML 架构审查报告：``
 
 #### 报告内容：
 - **项目概览**：500+ Python 文件、77+ API 端点、82 Vue 页面、532 测试文件
@@ -58,10 +58,10 @@
 ## 生成的文件
 
 1. **README.md** - 更新了 1800+ 行文档
-2. **docs/architecture-review-2026-06-07.html** - 架构审查 HTML 报告
+2. **** - 架构审查 HTML 报告
 3. **CONTEXT.md** - 更新了项目上下文文档
-4. **docs/DOCS_ALIGNMENT_PLAN.md** - 更新了文档对齐计划
-5. **docs/docs-alignment-summary-2026-06-07.md** - 本文档
+4. **** - 更新了文档对齐计划
+5. **** - 本文档
 
 ## 关键发现
 

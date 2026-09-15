@@ -34,7 +34,7 @@
 - [x] 修复 `WorkspacePage.tsx` 中 `workspaceApi.readFile` 的返回类型处理（`{ content: string }`）
 
 ### 4. 创建模块设计文档
-- [x] 创建 `docs/dev_progress/module_designs/agent-config.md` ✅
+- [x] 创建 `` ✅
 
 ## ⚠️ 遇到的问题
 

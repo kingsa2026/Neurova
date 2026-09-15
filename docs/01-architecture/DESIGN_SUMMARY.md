@@ -44,7 +44,6 @@
 | 文档 | 内容 | 状态 |
 |------|------|------|
 | [README.md](../README.md) | 项目概述和快速开始 | ✅ 完成 |
-| [.trae/project_rules.md]() | 项目规则和开发规范 | ✅ 完成 |
 
 ## 🎯 核心设计亮点
 
@@ -167,8 +166,6 @@ RoutingRule(
 - `translator` - 翻译
 
 **协议兼容:**
-- OpenClaw 适配器
-- Qwenpaw 适配器
 - 自定义 Skill
 
 ### 6. 插件系统

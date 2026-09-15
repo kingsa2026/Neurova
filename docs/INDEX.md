@@ -7,7 +7,7 @@
 
 1. **`/CONTEXT.md`** —— 项目总览、核心架构、ChatPipeline、记忆温度系统（最高权威，先于本目录）
 2. **`/AGENTS.md`** —— 开发者快速上手与关键约定
-3. 本索引 `docs/INDEX.md` —— 按领域定位详细文档
+3. 本索引 `` —— 按领域定位详细文档
 4. 进入具体领域后，只读该领域的 **[权威]** 文档，历史/对比类仅作参考
 
 ## 1. 文档归属领域与权威文档
@@ -16,9 +16,9 @@
 
 | 领域 | 权威文档 | 说明 |
 |------|----------|------|
-| 整体架构 | `/CONTEXT.md`（根）+ `docs/architecture/OVERVIEW.md` | 系统级事实源 |
+| 整体架构 | `/CONTEXT.md`+ `` | 系统级事实源 |
 | 架构决策(ADR) | `docs/adr/` | 已编号的决策记录，不可覆盖 |
-| API 规范 | `docs/api/` + `docs/API_REFERENCE.md` | 接口事实源 |
+| API 规范 | `docs/api/` + `` | 接口事实源 |
 | 记忆系统 | `docs/memory/` | 记忆层事实源 |
 | 认知架构 | `NEUROVA_CogArch_2.0.md` | 认知层演进总纲 |
 | 开发进度 | `docs/dev_progress/` | 迭代记录（历史） |
@@ -30,7 +30,7 @@
 
 ## 2. 文档真实分布（实测，2026-08-23）
 
-> 说明：扫描时混入的 `.venv/`(102)、`.trae/`(22)、`flow-kb-sdk/`(18) 等是**虚拟环境/第三方工具缓存**，
+> 说明：扫描时混入的 `.venv/`(102)、(22)、`flow-kb-sdk/`(18) 等是**虚拟环境/第三方工具缓存**，
 > 不属于项目文档，已排除。真实项目 markdown 约 **377 篇**，其中 `docs/` 占 **297 篇**。
 
 | 位置 | 数量 | 性质 | 处置 |
@@ -61,7 +61,7 @@
 | `docs/plugins-skills/`（新建） | 3 | plugin / skill / 技能 |
 | `docs/harmony/`（新建） | 2 | harmony / 鸿蒙 |
 
-> 具体每篇文件的移动映射由 `scripts/reorg_docs.py --dry-run` 生成（见 `docs/REORG_PLAN.md`）。
+> 具体每篇文件的移动映射由 `scripts/reorg_docs.py --dry-run` 生成。
 
 ### 2.2 已识别的冗余簇（应删除/降级，非合并）
 
@@ -127,11 +127,8 @@
 
 ### 2.4 竞品 / 外部对标（研究参考，不可作为事实源）
 
-`bailongma_vs_neurova_comparison.md`、`comparison-openmythos-vs-neurova.md`、
+`bailongma_vs_neurova_comparison.md`、、
 `mflow_vs_neurova_memory_comparison.md`、`sirchmunk_vs_neurova_comparison.md`、
-`supermemory-vs-neurova_comparison.md`、`tencentdb_vs_neurova_comparison.md`、
-`QwenPaw_Neurova_Comparison_Analysis.md`、`QwenPaw_Integration_Summary.md`、
-`sim-studio-analysis-for-neurova.md`、`sim-studio-frontend-analysis.md`、
 `CODE_BASED_COMPARISON_ANALYSIS.md`、`CODE_BASED_COMPREHENSIVE_COMPARISON.md`、
 `agent-memory-cutting-edge-research-2026.md`、`funasr-vs-moss-audio-comparison.md`、
 `moss-audio-completeness-check.md`、`neurova_skill_vs_meta_skill_comparison.md`
@@ -177,7 +174,7 @@
 | `cognitive_graph_storage_architecture.md`（一步到位方案）↔ `cognitive-graph-storage-architecture.md`（分层设计 v1.0） | ⚠ 文件名仅连字符差异，但**内容不同**：前者为单步替换方案，后者为分层深度设计（基于 unified-storage-format-discussion） | **两篇均保留**，不可合并/删除 |
 | 记忆升级 6 篇（`memory-system-upgrade-*` / `neurova-memory-system-upgrade-*` / `memory-nerf-*` / `nerf-memory-*`） | 以 `memory-system-upgrade-plan-final.md` 为 [权威] | 其余标注"已被 final 取代" |
 | `thought-memory-upgrade-dev-doc.md` 与 Evocate 集群 | 归入记忆领域参考 | 链接到 2.1 |
-| `QwenPaw_Integration_Summary.md` 与 `QwenPaw_Neurova_Comparison_Analysis.md` | 一篇集成、一篇对比，保留两者 | 已分类 |
+| 与 | 一篇集成、一篇对比，保留两者 | 已分类 |
 
 ## 4. 文档管理规则（保持单一事实源）
 
@@ -185,7 +182,7 @@
 2. **历史/评审/对标类**保留原文件，但不得被当作事实源引用。
 3. **禁止同名近似文件**（如连字符差异）。新建前先检索本索引。
 4. **根目录不再堆砌**：新文档按领域落入 `docs/<领域>/` 子目录，并在本索引登记。
-5. 本索引由人工/脚本在每次文档变更时同步更新；`docs/INDEX.md` 是文档体系的唯一导航事实源。
+5. 本索引由人工/脚本在每次文档变更时同步更新；`` 是文档体系的唯一导航事实源。
 
 ---
 最后更新：2026-08-23 ｜ 文档总数：约 296 篇（含 `docs/` 子目录）

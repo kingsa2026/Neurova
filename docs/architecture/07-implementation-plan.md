@@ -190,8 +190,6 @@ neurova/
 - [ ] 搜索 Skill
 - [ ] 计算器 Skill
 - [ ] 文件操作 Skill
-- [ ] OpenClaw 兼容层
-- [ ] Qwenpaw 兼容层
 
 **交付物:**
 - Skill 系统
