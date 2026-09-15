@@ -580,7 +580,8 @@ async function runEvolve() {
   try {
     const res = await evolutionApi.evolveSkill(props.agentId, {
       skill_id: evolveTarget.value.id,
-      iterations: evolveIterations.value,
+      // a-input-number 清空后是 null——钳到默认,避免后端 422
+      iterations: evolveIterations.value || 5,
       dataset_source: evolveSource.value,
     })
     const data = ((res as any)?.data ?? res) as import('@/api/modules/text-evolution').EvolutionRunData
