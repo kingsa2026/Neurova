@@ -52,6 +52,26 @@ def get_directory_budget() -> int:
     return _env_int("NEUROVA_TOOL_SEARCH_BUDGET", _DIR_BUDGET_DEFAULT)
 
 
+def tool_search_enabled() -> bool:
+    """A6 工具面延迟加载总开关，三级优先（Wave E 收口 SettingPage）：
+
+    1. env NEUROVA_TOOL_SEARCH 显式值（运维逃生门，最优先）；
+    2. app_settings advanced.tool_search_enabled（默认 True=现状激活）；
+    3. 存储故障回退 True（保持落地前行为）。
+    """
+    raw = os.environ.get("NEUROVA_TOOL_SEARCH", "").strip().lower()
+    if raw in ("1", "true", "yes", "on"):
+        return True
+    if raw in ("0", "false", "no", "off"):
+        return False
+    try:
+        from neurova.core.app_settings import get_advanced_settings
+
+        return bool(get_advanced_settings().get("tool_search_enabled", True))
+    except Exception:  # noqa: BLE001 - 设置故障保持功能开
+        return True
+
+
 def _clip_desc(desc: str, limit: int = _DIR_DESC_MAX_DEFAULT) -> str:
     """目录单行内的 description 截断：塌缩空白 + 超限截断加省略号。"""
     collapsed = " ".join(str(desc or "").split())

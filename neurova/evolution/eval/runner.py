@@ -141,7 +141,12 @@ class SkillEvolutionRunner:
 
     async def _score_example(
         self, skill_text: str, ex: EvalExample, artifact_type: str
-    ) -> tuple[float, str]:
+    ) -> tuple[float, str, str]:
+        """返回 (composite, agent 输出, judge 反馈文本)。
+
+        feedback 必须透传——反射式变异的输入就是它(Hermes GEPA:reads
+        execution traces to understand WHY things fail);丢掉它变异退化成盲改。
+        """
         output = await self.agent.run(skill_text=skill_text, task_input=ex.task_input)
         max_size = (
             self.config.max_tool_desc_size
@@ -156,18 +161,22 @@ class SkillEvolutionRunner:
             artifact_size=len(skill_text),
             max_size=max_size,
         )
-        return float(getattr(score, "composite", score)), output
+        return (
+            float(getattr(score, "composite", score)),
+            output,
+            str(getattr(score, "feedback", "") or ""),
+        )
 
     async def _evaluate(
         self, skill_text: str, examples: list[EvalExample], artifact_type: str
-    ) -> tuple[float, list[tuple[EvalExample, float, str]]]:
+    ) -> tuple[float, list[tuple[EvalExample, float, str, str]]]:
         if not examples:
             return 0.0, []
-        details: list[tuple[EvalExample, float, str]] = []
+        details: list[tuple[EvalExample, float, str, str]] = []
         for ex in examples:
-            score, output = await self._score_example(skill_text, ex, artifact_type)
-            details.append((ex, score, output))
-        avg = sum(s for _, s, _ in details) / len(details)
+            score, output, feedback = await self._score_example(skill_text, ex, artifact_type)
+            details.append((ex, score, output, feedback))
+        avg = sum(s for _, s, _, _ in details) / len(details)
         return avg, details
 
     async def _collect_failures(
@@ -176,13 +185,8 @@ class SkillEvolutionRunner:
         _, details = await self._evaluate(skill_text, examples, artifact_type)
         worst = sorted(details, key=lambda d: d[1])[:_MAX_FAILURES]
         return [
-            JudgeFailure(
-                task_input=ex.task_input,
-                output=output,
-                feedback="",  # judge 实现可在 score 内累积;此处给结构占位
-                score=score,
-            )
-            for ex, score, output in worst
+            JudgeFailure(task_input=ex.task_input, output=output, feedback=feedback, score=score)
+            for ex, score, output, feedback in worst
         ]
 
     # ── 主循环 ──
