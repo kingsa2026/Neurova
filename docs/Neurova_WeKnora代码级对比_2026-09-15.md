@@ -82,3 +82,11 @@ Neurova = 单进程桌面个人智能体。结论：**只抄机制、不抄架�
 **非本会话失败归属**（mtime 实据，并行会话在途）：sleep 阶段 6、graph_llm_bridge 3、public_library_wave_h3 7、skill_pool 2、growth wave H0 红测 1——本会话未触碰其文件，不代修。
 **遗留观察**：块编辑对父子模式的 parent 叠加重建（WeKnora rebuildParentContent）未做——子块 content 已是权威副本，父上下文暂为原文；如需编辑可见于父回传，另立需求。`/knowledge-integration/*` 前端旧模块路径与后端仍不一致（零消费者死码），删除或重写待拍板。
 **纪律**：新测试文件与本报告均须 `git add -f`（tests 目录 gitignore），随本轮改动提交以免共享区 clean 事故三度吞档。
+
+## 10.1 提交与核验记录（同日，commit `4448c54a`，54 文件 +5349/-458）
+
+- **共享区安全**：提交前 `git diff --cached` 发现并行会话暂存 46 文件（docs 比对批删除）——用 `git commit --only <paths>` 精确提交，对方暂存原样保留；提交范围复核零并行域文件（前端死模块 `knowledge-integration.ts` 已删除并摘 index.ts 导出）。
+- **HTTP 层闭环冒烟**：真实 `create_app()` + TestClient，11 个新/改端点（preview-chunking / chunks GET·PUT·revisions / configs sync / ingress-tasks cancel / integration rag·sync·501 / semantic hybrid）全部 401 鉴权生效、**零 404 零装配异常**。
+- **前端闭环**：`npm run build`（vue-tsc 全量 + vite 产物）通过；i18n 守卫+页面挂载 56 测绿（修复 fr/it 撇号转义、previewResult 类型收紧 2 处提交前 TS 错）。
+- **提交自洽核验**：从 HEAD 建干净 worktree 跑本轮全部核心套件 → **310 passed**（提交不含任何未提交依赖）。唯一收集错为**历史遗留断链**：HEAD 旧测试 `test_pending_memory.py` → `neurova.web_reach.credentials`——web_reach 为早前 Agent-Reach 会话的未跟踪目录（[[neurova-agent-reach-integration]] 记录「须一起提交」），主工作区有该目录故全绿，与本轮提交无关，登记待其会话入库。
+- **全量归属复核**：unit 主跑 governance 一次顺序 flake（单跑/复跑均绿）；api 目录 4-5 失败集中在 `test_my_skills_wave_v`/`test_transfers_wave_h4`（并行会话本会话内新建的在途测试）——零涉及本轮文件。**待拍板登记**：块编辑→父块叠加重建、ingress span 的前端可视化（当前 API 就绪）为下批候选。
