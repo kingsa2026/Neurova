@@ -1,5 +1,5 @@
 import api from '@/api'
-import type { ApiResponse, LimitOffsetParams, PaginatedData, PageParams } from '@/types/response'
+import type { ApiResponse, LimitOffsetParams, PaginatedData } from '@/types/response'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,45 +62,61 @@ export function getPublicSkills(
   })
 }
 
-/** List private (installed) skills for an agent. */
-export function getPrivateSkills(agentId: string, params?: PageParams) {
-  return api.get<ApiResponse<PaginatedData<Skill>>>(`${BASE}/private`, { params: { ...params, agent_id: agentId } })
+// ---------------------------------------------------------------------------
+// 三层技能库（闭环核验轮 V）：公共库真源 + 用户私库 CRUD
+// 旧 getPrivateSkills/getSkill/createSkill/updateSkill/deleteSkill/shareSkill/
+// pushSkill 与后端 /private 系路由断裂（404/落幽灵 _all 桶），消费者仅
+// SkillPoolPage，已整体迁移至下列 me/public 库函数，旧函数删除。
+// ---------------------------------------------------------------------------
+
+/** 库条目（后端 SkillInfo 契约：主键字段是 skill_id，非 id）。 */
+export interface LibrarySkill {
+  skill_id: string
+  name: string
+  description?: string
+  category?: string
+  version?: string
+  scope?: string
+  owner_id?: string
+  enabled?: boolean
+  shared?: boolean
+  usage?: Record<string, unknown>
 }
 
-/** Get a single skill by ID. */
-export function getSkill(skillId: string) {
-  return api.get<ApiResponse<Skill>>(`${BASE}/${skillId}`)
+/** 公共技能库（pool=public，审批物化/管理员登记的条目，所有用户可见可读）。 */
+export function listPublicLibrarySkills() {
+  return api.get<ApiResponse<LibrarySkill[]>>(`${BASE}/public`)
 }
 
-/** Create a new custom skill. */
-export function createSkill(data: SkillCreatePayload) {
-  return api.post<ApiResponse<Skill>>(BASE, data)
+/** 我的用户私库（pool=user，ukey=u:{user_id}；接收 agent 推送与公共升级）。 */
+export function listMySkills() {
+  return api.get<ApiResponse<LibrarySkill[]>>(`${BASE}/me/skills`)
 }
 
-/** Update an existing skill. */
-export function updateSkill(skillId: string, data: SkillUpdatePayload) {
-  return api.put<ApiResponse<Skill>>(`${BASE}/${skillId}`, data)
+/** 用户私库创建技能。 */
+export function createMySkill(data: SkillCreatePayload) {
+  return api.post<ApiResponse<LibrarySkill>>(`${BASE}/me/skills`, data)
 }
 
-/** Delete a skill. */
-export function deleteSkill(skillId: string) {
-  return api.delete<ApiResponse<null>>(`${BASE}/${skillId}`)
+/** 用户私库更新（enabled 走行级真通道，V5）。 */
+export function updateMySkill(skillId: string, data: SkillUpdatePayload & { enabled?: boolean }) {
+  return api.put<ApiResponse<LibrarySkill>>(`${BASE}/me/skills/${skillId}`, data)
+}
+
+/** 用户私库删除（属主自决，无确认队列；跨库才走 transfers）。 */
+export function deleteMySkill(skillId: string) {
+  return api.delete<ApiResponse<null>>(`${BASE}/me/skills/${skillId}`)
+}
+
+/** 公共库→我的私库自助安装：副本+血缘（公共升级广播据此可达）。 */
+export function installPublicToMine(skillId: string) {
+  return api.post<ApiResponse<{ applied: string }>>(`${BASE}/me/skills/${skillId}/from-public`)
 }
 
 /** Install a marketplace skill (canonical /marketplace/skills/{id}/install；
  *  原 /skill-pool/{id}/install 路由不存在恒 404，ADR 0013 写侧迁移漏项）。 */
 export function installSkill(skillId: string, agentId: string) {
   return api.post<ApiResponse<Skill>>(`/marketplace/skills/${skillId}/install`, { agent_id: agentId })
-}
-
-/** Share a private skill to the public pool. */
-export function shareSkill(skillId: string) {
-  return api.post<ApiResponse<null>>(`${BASE}/${skillId}/share`)
-}
-
-/** Push a skill update to the public pool. */
-export function pushSkill(skillId: string) {
-  return api.post<ApiResponse<null>>(`${BASE}/${skillId}/push`)
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +150,8 @@ export interface SkillSubmitPayload {
   tags?: string[]
   download_url?: string
   author?: string
+  /** 发布来源=本人用户私库条目（服务端快照 tool_sequence 载荷，V 轮） */
+  pool_skill_id?: string
 }
 
 /** Submit a skill for marketplace review (pending until admin approves). */
@@ -161,15 +179,17 @@ export function reviewSkillSubmission(id: string, approve: boolean, note = '') {
 // Skill Market (ZIP / Remote Install)
 // ---------------------------------------------------------------------------
 
-/** Install a skill from a remote URL. */
-export function installSkillFromUrl(url: string, version?: string) {
-  return api.post<ApiResponse<{ url: string }>>(`${BASE}/install-from-url`, { url, version })
+/** Install a skill from a remote URL. target=''(默认)=agent 技能池（现状语义）；
+ *  target='me'=落当前账号用户私库（V 轮，技能库页导入语义）。 */
+export function installSkillFromUrl(url: string, version?: string, target?: string) {
+  return api.post<ApiResponse<{ url: string }>>(`${BASE}/install-from-url`, { url, version, target })
 }
 
-/** Install a skill from a ZIP file upload. */
-export function installSkillFromZip(file: File) {
+/** Install a skill from a ZIP file upload. target 语义同上。 */
+export function installSkillFromZip(file: File, target?: string) {
   const formData = new FormData()
   formData.append('file', file)
+  if (target) formData.append('target', target)
   return api.post<ApiResponse<{ message: string }>>(`${BASE}/install-from-zip`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
@@ -193,10 +213,11 @@ export function getAgentSkills(agentId: string) {
   return api.get<ApiResponse<Skill[]>>(`${BASE}/agent/${agentId}/skills`)
 }
 
-/** Enable or disable a private skill. */
-export function enableSkill(skillId: string, enabled: boolean) {
-  return api.put<ApiResponse<Skill>>(`${BASE}/private/${skillId}`, {
-    config: { enabled },
+/** Enable or disable a private skill（V5：agent 定库 + enabled 行级真通道。
+ *  旧实现 config.enabled 从不触发行级 enabled 且缺 agent_id 落 default 库）。 */
+export function enableSkill(skillId: string, enabled: boolean, agentId = 'default') {
+  return api.put<ApiResponse<Skill>>(`${BASE}/private/${skillId}`, { enabled }, {
+    params: { agent_id: agentId },
   })
 }
 
@@ -258,4 +279,53 @@ export function approvePendingExperience(agentId: string, recordId: string) {
 /** C10 审批面：拒绝待审经验。 */
 export function rejectPendingExperience(agentId: string, recordId: string) {
   return api.post(`${BASE}/agent/${agentId}/pending-experiences/${recordId}/reject`)
+}
+
+// ---------------------------------------------------------------------------
+// Wave H-W4 三层技能库流转（agent→user 推送 / 公共库升级，均需确认）
+// ---------------------------------------------------------------------------
+
+export interface SkillTransfer {
+  transfer_id: string
+  transfer_type: string
+  skill_id: string
+  src_pool: string
+  src_owner: string
+  dst_pool: string
+  dst_owner: string
+  confirm_owner?: string
+  kind: string
+  version: string
+  name: string
+  status: string
+  note?: string
+  created_at?: number
+}
+
+/** 发起流转提案（当前仅 agent_to_user；进确认队列）。 */
+export function createSkillTransfer(body: {
+  transfer_type: string
+  skill_id: string
+  src_pool: string
+  src_owner: string
+  note?: string
+}) {
+  return api.post<ApiResponse<SkillTransfer>>(`${BASE}/transfers`, body)
+}
+
+/** 我的待确认流转队列。 */
+export function listSkillTransfers(status = 'pending') {
+  return api.get<ApiResponse<{ items: SkillTransfer[]; total: number }>>(`${BASE}/transfers`, {
+    params: { status },
+  })
+}
+
+/** 确认流转：落副本/原地升级（账本保留）。 */
+export function acceptSkillTransfer(transferId: string, note = '') {
+  return api.post(`${BASE}/transfers/${transferId}/accept`, { note })
+}
+
+/** 拒绝流转：仅记账不动库。 */
+export function rejectSkillTransfer(transferId: string, note = '') {
+  return api.post(`${BASE}/transfers/${transferId}/reject`, { note })
 }

@@ -49,13 +49,15 @@ vi.mock('@/api/modules/knowledge', () => ({
 
 vi.mock('@/api/modules/skill-pool', () => ({
   reviewSkillSubmission: vi.fn().mockResolvedValue({ code: 0 }),
+  acceptSkillTransfer: vi.fn().mockResolvedValue({ code: 0 }),
+  rejectSkillTransfer: vi.fn().mockResolvedValue({ code: 0 }),
 }))
 
 import NotificationPage from '@/pages/NotificationPage.vue'
 import { useNotificationStore } from '@/stores/notifications'
 import { markRead } from '@/api/modules/notifications'
 import { reviewKnowledgePublic } from '@/api/modules/knowledge'
-import { reviewSkillSubmission } from '@/api/modules/skill-pool'
+import { reviewSkillSubmission, acceptSkillTransfer, rejectSkillTransfer } from '@/api/modules/skill-pool'
 
 const messages = {
   common: { all: 'All', refresh: '刷新', confirm: '确认', delete: '删除', noData: '暂无数据', success: '成功', error: '失败', markAllRead: '全部标记已读', markRead: '标记已读' },
@@ -169,6 +171,35 @@ describe('NotificationPage 契约', () => {
     await btn!.trigger('click')
     await flushPromises()
     expect(notifApi.markAllRead).toHaveBeenCalledTimes(1)
+  })
+
+  it('skill_transfer 通知：非管理员也能就地确认/拒绝（三层库流转闭环）', async () => {
+    // 流转卡的确认人是收通知的用户本人，admin 专属审批闸不适用
+    authHolder.user = { id: 'u7', username: 'alice', role: 'user' }
+    vi.mocked(notifApi.getNotifications).mockResolvedValue({
+      code: 0,
+      data: {
+        items: [
+          {
+            id: 'n-t', type: 'skill_transfer', title: '技能推送待确认',
+            message: 'Agent 向我推送技能', read: false,
+            created_at: '2026-09-15T08:00:00+00:00',
+            data: { transfer_id: 't1', skill_id: 'gen', action: 'skill_transfer' },
+          },
+        ],
+        total: 1,
+      },
+    } as any)
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.find('.notification-item').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.notif-review').exists()).toBe(true)
+    const approve = wrapper.findAll('.notif-review-actions button').find((b) => b.text().includes('通过'))
+    await approve!.trigger('click')
+    await flushPromises()
+    expect(acceptSkillTransfer).toHaveBeenCalledWith('t1')
+    authHolder.user = { id: 'a9', username: 'admin', role: 'admin' }
   })
 })
 
