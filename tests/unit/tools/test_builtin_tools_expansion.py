@@ -52,17 +52,6 @@ def _make_executor():
     return ToolExecutor(agent)
 
 
-def _urlopen_returning(body_bytes):
-    """构造模拟 urllib.request.urlopen 返回值的 context manager"""
-    resp = Mock()
-    resp.read = Mock(return_value=body_bytes)
-
-    cm = Mock()
-    cm.__enter__ = Mock(return_value=resp)
-    cm.__exit__ = Mock(return_value=False)
-    return cm
-
-
 # ═══════════════════════════════════════════════════════════════
 # 1. Schema 注册（LLM 可见性）
 # ═══════════════════════════════════════════════════════════════
@@ -322,9 +311,8 @@ class TestWebFetchTool:
             "<html><head><script>var x=1;</script><style>.a{}</style></head>"
             "<body><h1>Neurova</h1><p>Agent framework.</p></body></html>"
         )
-        with patch(
-            "urllib.request.urlopen", return_value=_urlopen_returning(html.encode("utf-8"))
-        ):
+        # 桩点=共享抓取层 fetch_text（_blocking_fetch 内部实现，curl_cffi 优先）
+        with patch("neurova.http_fetch.fetch_text", return_value=html):
             result = await _make_executor()._execute_web_fetch({"url": "https://example.com"})
         assert "error" not in result
         content = result["content"]
@@ -336,7 +324,7 @@ class TestWebFetchTool:
     @pytest.mark.asyncio
     async def test_max_chars_truncation(self):
         body = "A" * 50000
-        with patch("urllib.request.urlopen", return_value=_urlopen_returning(body.encode())):
+        with patch("neurova.http_fetch.fetch_text", return_value=body):
             result = await _make_executor()._execute_web_fetch(
                 {"url": "https://example.com", "max_chars": 1000}
             )
@@ -346,7 +334,7 @@ class TestWebFetchTool:
     @pytest.mark.asyncio
     async def test_rejects_non_http_scheme(self):
         """file:// 等非 http(s) 协议必须拒绝（防本地文件读取/SSRF 扩大面）"""
-        with patch("urllib.request.urlopen") as mocked:
+        with patch("neurova.http_fetch.fetch_text") as mocked:
             result = await _make_executor()._execute_web_fetch({"url": "file:///C:/secret.txt"})
         mocked.assert_not_called()
         assert "error" in result
@@ -358,7 +346,7 @@ class TestWebFetchTool:
 
     @pytest.mark.asyncio
     async def test_network_error_returns_error_dict(self):
-        with patch("urllib.request.urlopen", side_effect=OSError("connection refused")):
+        with patch("neurova.http_fetch.fetch_text", side_effect=OSError("connection refused")):
             result = await _make_executor()._execute_web_fetch({"url": "https://down.example.com"})
         assert "error" in result
         assert result.get("url") == "https://down.example.com"
