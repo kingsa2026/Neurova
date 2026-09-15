@@ -4,11 +4,11 @@
  * 异步提交 + 账本轮询（B2-c 参数面保持）；model=auto → 后端按视频能力路由；
  * 参考图上传 → ref_images；未决任务轮询卸载清理（BUG-24）保持。
  */
-import { onUnmounted, ref } from 'vue'
+import { onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import { request } from '@/api'
-import { generateImage, submitVideo, type VideoGenerationPayload } from '@/api/modules/generation'
+import { generateImage, submitVideo, resolveGeneration, type VideoGenerationPayload } from '@/api/modules/generation'
 import { uploadFile } from '@/api/modules/files'
 import { useAigcModels } from '@/composables/useAigcModels'
 import { withFileToken } from '@/utils/genFiles'
@@ -22,9 +22,23 @@ const { videoModelOptions, providerOf } = useAigcModels()
 
 const prompt = ref('')
 const model = ref('auto')
-const protocol = ref('')
-const providerId = ref('')
 const duration = ref(5)
+// 2026-09-15 自适应：协议/服务商由后端按「模型→服务商 base_url」同源推导
+// （GET /generation/resolve），不再手填；auto 态提交时由后端按能力路由+推导。
+const derived = ref<{ protocol: string; providerId: string } | null>(null)
+let deriveSeq = 0
+watch(model, async (m) => {
+  if (m === 'auto') { derived.value = null; return }
+  const seq = ++deriveSeq
+  const pid = providerOf(m)
+  try {
+    const res: any = await resolveGeneration('video', m, pid || undefined)
+    const d = res?.data ?? res
+    if (seq === deriveSeq && d?.protocol) {
+      derived.value = { protocol: d.protocol, providerId: d.provider_id || pid }
+    }
+  } catch { /* 推导服务不可用不阻断：提交路径服务端同样自适应推导 */ }
+})
 const resolution = ref('1080p')
 const refImages = ref<string[]>([])
 const withAudio = ref<boolean | null>(null)
@@ -72,9 +86,8 @@ async function generate() {
       if (frame?.path) refs.push(frame.path)
     }
     if (refs.length) payload.ref_images = refs
-    if (protocol.value) payload.protocol = protocol.value
-    // 手填服务商优先；否则由选中模型反查其服务商上报（auto 不报，走后端能力路由）
-    const effProvider = providerId.value || providerOf(model.value)
+    // 协议不随请求下发：服务端 derive_generation_protocol 按 模型→服务商 base_url 自适应推导
+    const effProvider = providerOf(model.value)
     if (effProvider) payload.provider_id = effProvider
     if (withAudio.value !== null) payload.audio = withAudio.value
     const res: any = await submitVideo(payload)
@@ -132,16 +145,13 @@ onUnmounted(() => {
           </a-form-item>
           <a-form-item :label="t('aigc.model')">
             <a-select v-model:value="model" class="model-select-video" :options="videoModelOptions" :placeholder="t('aigc.selectModel')" show-search />
-          </a-form-item>
-          <a-form-item :label="t('aigc.protocol')">
-            <a-select v-model:value="protocol" allow-clear :placeholder="t('aigc.protocolAuto')">
-              <a-select-option value="wan">wan（百炼 Wan）</a-select-option>
-              <a-select-option value="seedance2">seedance2（火山 Ark）</a-select-option>
-              <a-select-option value="veo">veo（Gemini）</a-select-option>
-            </a-select>
-          </a-form-item>
-          <a-form-item :label="t('aigc.providerId')">
-            <a-input v-model:value="providerId" allow-clear :placeholder="t('aigc.providerIdHint')" />
+            <div class="aigc-derived-hint">
+              <template v-if="derived">
+                <a-tag color="blue">{{ t('aigc.protocol') }}: {{ derived.protocol }}</a-tag>
+                <a-tag v-if="derived.providerId">{{ t('aigc.providerId') }}: {{ derived.providerId }}</a-tag>
+              </template>
+              <span v-else-if="model === 'auto'">{{ t('aigc.protocolAuto') }}</span>
+            </div>
           </a-form-item>
           <a-form-item :label="t('aigc.duration')">
             <a-input-number v-model:value="duration" :min="1" :max="60" style="width: 100%" />

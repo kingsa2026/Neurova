@@ -149,6 +149,22 @@ export function getVideoTaskStatus(taskId: string) {
   }>>(`${BASE}/video/status/${taskId}`)
 }
 
+/**
+ * 2026-09-15 自适应推导查询：选定模型后查询将生效的服务商/协议做只读展示。
+ * 与提交路径同源（后端 derive_generation_protocol 单源），前端不重复矩阵规则。
+ */
+export interface GenerationProtocolInfo {
+  kind: string
+  model: string
+  provider_id: string
+  protocol: string
+}
+export function resolveGeneration(kind: 'image' | 'video', model: string, providerId?: string) {
+  return api.get<ApiResponse<GenerationProtocolInfo>>(`${BASE}/resolve`, {
+    params: { kind, model, provider_id: providerId || '' },
+  })
+}
+
 /** 生成任务历史（账本快照，可按 kind/status 过滤；仅本人任务）。 */
 export function listGenerationTasks(params?: { kind?: TaskKind; status?: TaskStatus }) {
   return api.get<ApiResponse<{ tasks: GenerationTask[] }>>(`${BASE}/tasks`, { params })

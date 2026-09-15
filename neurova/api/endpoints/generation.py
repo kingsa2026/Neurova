@@ -100,6 +100,25 @@ def _route_model_for_request(request_type: str):
     return result.model, result.provider_name
 
 
+def _derive_selection(kind: str, model: str, provider_id: Optional[str],
+                      protocol_label: Optional[str], base_url: Optional[str]):
+    """自适应推导 (provider_id, 协议枚举)——委托 runtime.derive_generation_protocol 单源。
+
+    2026-09-15 顺序根因修：原实现在凭据解析前用 resolve_*_protocol 推导，
+    入参 base_url 恒为 body.base_url（前端服务商经 provider_id 上报、从不传
+    base_url）→ OpenAI/Sora 2 Pro 等具名模型全落默认支（视频 WAN/图像
+    OPENAI_COMPAT），请求发错端点。现先定位 provider base_url（pid 缺省按
+    模型反查启用服务商）再推导；显式协议标签仍最优先，旧请求行为不变。
+    """
+    from neurova.llm.generators import runtime as gen_runtime
+    from neurova.llm.generators.protocols import ImageProtocol, VideoProtocol
+
+    pid, value = gen_runtime.derive_generation_protocol(
+        kind, model or "", provider_id, protocol_label or "", base_url or "")
+    cls = ImageProtocol if kind == "image" else VideoProtocol
+    return (pid or None), cls(value)
+
+
 class TextGenerationRequest(BaseModel):
     """文本生成请求"""
 
@@ -271,10 +290,7 @@ async def generate_image(
     request_id = _get_request_id(request)
 
     # B2-a/c：真实协议实现（OPENAI_COMPAT/ARK/DASHSCOPE 实测矩阵）
-    from neurova.llm.generators.protocols import (
-        generate_image,
-        resolve_image_protocol,
-    )
+    from neurova.llm.generators.protocols import generate_image
     from neurova.llm.generators.task_ledger import TaskRecord, get_generation_task_ledger
 
     # 批次1 根因修复：原实现把前端默认值 "auto" 当真实模型名透传并覆盖服务商
@@ -291,8 +307,8 @@ async def generate_image(
     effective_model = (getattr(routed, "model", "") or "") or requested_model
     provider_id = getattr(routed, "provider_id", None) if routed is not None else body.provider_id
 
-    protocol = resolve_image_protocol(
-        body.protocol or "", effective_model or (body.model or ""), body.base_url or "")
+    provider_id, protocol = _derive_selection("image", effective_model, provider_id,
+                                              body.protocol, body.base_url)
     _validate_ref_images(body.ref_images)
     creds = _resolve_generation_creds(
         protocol.value, effective_model or None, provider_id, body.api_key, body.base_url,
@@ -525,13 +541,10 @@ async def generate_video(
     """视频生成"""
     request_id = _get_request_id(request)
 
-    # B2-a/c：wan/seedance2/veo 异步协议提交 + 持久任务账本
+    # B2-a/c：wan/seedance2/veo/sora 异步协议提交 + 持久任务账本
     import asyncio as _asyncio
 
-    from neurova.llm.generators.protocols import (
-        resolve_video_protocol,
-        submit_video,
-    )
+    from neurova.llm.generators.protocols import submit_video
     from neurova.llm.generators.task_ledger import TaskRecord, get_generation_task_ledger
 
     # 批次1：model=auto/缺省 → 按视频生成能力路由（与 /image 同口径）
@@ -545,8 +558,8 @@ async def generate_video(
     effective_model = (getattr(routed, "model", "") or "") or requested_model
     provider_id = getattr(routed, "provider_id", None) if routed is not None else body.provider_id
 
-    protocol = resolve_video_protocol(
-        body.protocol or "", effective_model or (body.model or ""), body.base_url or "")
+    provider_id, protocol = _derive_selection("video", effective_model, provider_id,
+                                              body.protocol, body.base_url)
     _validate_ref_images(body.ref_images)
     creds = _resolve_generation_creds(
         protocol.value, effective_model or None, provider_id, body.api_key, body.base_url,
@@ -591,6 +604,28 @@ async def generate_video(
         "data": {"task_id": record.task_id, "status": "submitted", "protocol": protocol.value,
                  **({"ignored_params": ignored_csv} if ignored_csv else {})},
     }
+
+
+@router.get("/resolve")
+async def resolve_generation_protocol_for_model(
+    request: Request,
+    kind: str = "video",
+    model: str = "",
+    provider_id: str = "",
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """自适应推导查询端点（2026-09-15）：图/视频页选定模型后，前端查询将生效的
+    服务商/协议做只读展示——与提交路径同源（derive_generation_protocol），
+    前端不重复实现矩阵规则（口径单源）。"""
+    _ = request
+    kind = (kind or "").lower()
+    if kind not in ("image", "video"):
+        raise HTTPException(status_code=400, detail="kind 仅支持 image/video")
+    pid, protocol = _derive_selection(
+        kind, (model or "").strip(), (provider_id or "").strip() or None, None, None)
+    return {"code": 0, "message": "success",
+            "data": {"kind": kind, "model": model or "",
+                     "provider_id": pid or "", "protocol": protocol.value}}
 
 
 # ── B2-c：任务轮询 / 任务列表 / 产物静态文件 ────────────────────────────────

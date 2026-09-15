@@ -66,6 +66,10 @@ class VideoProtocol(str, Enum):
     # 提交 POST {root}/v1/videos（无 mode 字段），轮询独立端点
     # GET {root}/agnesapi?video_id=<id>——与三家任务形态全不同。
     AGNES = "agnes"
+    # 2026-09-15 OpenAI 官方 SDK videos.py 实核补录：
+    # POST {base}/videos（multipart）→ GET {base}/videos/{id}（queued/in_progress/
+    # completed/failed）→ GET {base}/videos/{id}/content 二进制（无公开产物 URL）。
+    SORA = "sora"
 
 
 # ── 协议解析：显式标签 → 后端映射（含中文标签）→ model/base_url 兜底探测 ──
@@ -78,6 +82,7 @@ _PROTOCOL_LABELS = {
     VideoProtocol.SEEDANCE2: ("seedance", "seedance2", "火山", "火山引擎", "volcengine", "ark"),
     VideoProtocol.VEO: ("veo", "gemini", "google"),
     VideoProtocol.AGNES: ("agnes", "agnes-video", "agnes-video-v2.0"),
+    VideoProtocol.SORA: ("sora", "sora-2", "sora-2-pro", "sora2", "sora2-pro", "openai_sora"),
 }
 
 
@@ -117,6 +122,9 @@ def resolve_video_protocol(
         return VideoProtocol.AGNES
     if "veo" in text or "googleapis.com" in text:
         return VideoProtocol.VEO
+    # 2026-09-15：Sora 以模型名判定——openai 域名单独不足以判（兼容网关多用该域名）
+    if "sora" in text:
+        return VideoProtocol.SORA
     return VideoProtocol.WAN
 
 
@@ -206,6 +214,38 @@ def veo_poll_url(base_url: str, operation_name: str) -> str:
     if operation_name.startswith("/"):
         return f"{urlparse(base).scheme}://{urlparse(base).netloc}{operation_name}"
     return f"{base}/{operation_name}"
+
+
+# ── Sora 视频（2026-09-15 OpenAI 官方 SDK videos.py 实核）────────────────────
+
+DEFAULT_SORA_BASE = "https://api.openai.com/v1"
+_SORA_SECONDS = (4, 8, 12)  # 官方仅三档，其余时长就近取整
+
+
+def sora_videos_url(base_url: str) -> str:
+    base = (base_url or DEFAULT_SORA_BASE).rstrip("/")
+    if "/v1" in base:
+        return f"{base}/videos"
+    return f"{base}/v1/videos"
+
+
+def sora_video_poll_url(base_url: str, video_id: str) -> str:
+    return f"{sora_videos_url(base_url)}/{video_id}"
+
+
+def sora_video_content_url(base_url: str, video_id: str) -> str:
+    return f"{sora_video_poll_url(base_url, video_id)}/content"
+
+
+def sora_seconds(duration: int) -> str:
+    """官方 seconds 枚举 4/8/12 就近取整（平距取低档）。"""
+    d = int(duration or 0)
+    return str(min(_SORA_SECONDS, key=lambda s: (abs(s - d), s)))
+
+
+def sora_size(resolution: str) -> str:
+    """分辨率 → 官方 size 枚举（默认横屏 1280x720；1080p 取最大横档）。"""
+    return {"1080p": "1792x1024"}.get((resolution or "").lower(), "1280x720")
 
 
 # ── Agnes 视频（2026-09-14 官方仓 AgnesAI-Labs/AgnesAI-Models 实核）──
@@ -336,6 +376,17 @@ async def _post_form(
             except Exception:
                 data = {"raw": await resp.text()}
             return status, data
+
+
+async def _get_binary(
+    url: str, headers: Optional[Dict[str, str]] = None, timeout: float = 300.0,
+) -> bytes:
+    """GET 二进制字节（Sora 产物 content 端点等无公开 URL 的下载）。"""
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+        async with session.get(url, headers=headers or {}) as resp:
+            if resp.status >= 400:
+                raise RuntimeError(f"产物下载失败 HTTP {resp.status}: {url[:120]}")
+            return await resp.read()
 
 
 # ── 图片协议：统一 generate（同步返回，异步型内部轮询） ──
@@ -686,6 +737,46 @@ async def submit_video(
             "raw": data,
         }
 
+    if protocol == VideoProtocol.SORA:
+        # 官方 SDK 契约：POST {base}/videos multipart；参考图仅一个槽位
+        # input_reference（本仓取首图，多余进 ignored 标注）；audio 原生自带
+        # 无开关、无尾帧通道 → 两参数显式标注，不静默丢弃不假生效。
+        headers = {"Authorization": f"Bearer {creds.api_key}"}
+        fields = {
+            "model": creds.model or "sora-2",
+            "prompt": prompt,
+            "seconds": sora_seconds(duration),
+            "size": sora_size(resolution),
+        }
+        files: List[Tuple[str, str, bytes, str]] = []
+        if refs:
+            src = media_to_data_url(refs[0])
+            if src.startswith("http"):
+                blob = await _get_binary(src)
+                name = src.split("/")[-1].split("?")[0] or "reference.png"
+                mime = mimetypes.guess_type(name)[0] or "image/png"
+            else:
+                blob, mime, ext = _data_url_bytes(src)
+                name = f"reference.{ext}"
+            files.append(("input_reference", name, blob, mime))
+            if len(refs) > 1:
+                ignored.append("extra_ref_images")
+        if last_frame:
+            ignored.append("last_frame")
+        if audio is not None:
+            ignored.append("audio")
+        status, data = await _post_form(
+            sora_videos_url(creds.base_url), headers, fields, files, timeout)
+        if status >= 400:
+            raise RuntimeError(f"SORA 提交失败 HTTP {status}: {str(data)[:300]}")
+        video_id = str(data.get("id") or "")
+        out = {"task_id": video_id,
+               "poll_url": sora_video_poll_url(creds.base_url, video_id),
+               "raw": data}
+        if ignored:
+            out["ignored_params"] = ignored
+        return out
+
     # VEO
     headers = {"x-goog-api-key": creds.api_key}
     instance: Dict[str, Any] = {"prompt": prompt}
@@ -767,6 +858,28 @@ async def poll_video(
             return {"status": "succeeded", "video_url": video_url, "raw": data}
         if st in ("failed", "error", "cancelled"):
             return {"status": "failed", "error": str(data)[:300], "raw": data}
+        return {"status": "running", "raw": data}
+
+    if protocol == VideoProtocol.SORA:
+        url = poll_url or sora_video_poll_url(creds.base_url, task_id)
+        status, data = await _get_json(url, {"Authorization": f"Bearer {creds.api_key}"})
+        if status >= 400:
+            return {"status": "failed", "error": f"HTTP {status}", "raw": data}
+        st = str(data.get("status") or "").lower()
+        if st == "completed":
+            # 产物无公开 URL：content 端点带鉴权下载 → data URL 交 persist_media 落盘
+            raw = await _get_binary(
+                sora_video_content_url(creds.base_url, task_id),
+                {"Authorization": f"Bearer {creds.api_key}",
+                 "Accept": "application/binary"}, timeout=300.0)
+            return {"status": "succeeded",
+                    "video_url": "data:video/mp4;base64," + base64.b64encode(raw).decode(),
+                    "raw": data}
+        if st == "failed":
+            err = data.get("error")
+            msg = err.get("message") if isinstance(err, dict) else err
+            return {"status": "failed", "error": str(msg or data)[:300], "raw": data}
+        # queued / in_progress
         return {"status": "running", "raw": data}
 
     # VEO
