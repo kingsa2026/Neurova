@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""渠道二维码授权 handler 契约测试（对齐 QwenPaw qrcode_auth_handler，2026-09-13）。
+"""渠道二维码授权 handler 契约测试。
 
-覆盖 5 个 handler 的真实官方协议语义（QwenPaw 照搬）：
+覆盖 5 个 handler 的真实官方协议语义：
 - feishu   : RFC 8628 device flow @ accounts.feishu.cn / accounts.larksuite.com
 - dingtalk : /app/registration init→begin→poll @ oapi.dingtalk.com
 - qq       : /lite/create_bind_task + poll_bind_result @ q.qq.com（AES-256-GCM 解出 bot secret）

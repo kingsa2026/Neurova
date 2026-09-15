@@ -1,5 +1,4 @@
 """
-执行检查点摘要（Probe）— 借鉴 langflow lfx/graph/checkpoint 的探针形态
 
 execution_checkpoint_summary：基于 ExecutionInstance（node_results/variables）
 输出进度摘要：completed/failed/pending/变量快照/错误。纯函数，供

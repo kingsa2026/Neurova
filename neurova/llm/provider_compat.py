@@ -1,7 +1,6 @@
-"""声明式 provider 兼容开关（OpenClaw 启发 P0-2）
+"""声明式 provider 兼容开关
 
-背景（docs/Neurova_OpenClaw代码级对比_2026-09-04.md §3 P0-2）：
-  OpenClaw 用 OpenAICompletionsCompat 约 30 个声明式字段支撑几十个
+背景（§3 P0-2）：
   OpenAI 兼容 provider——兼容逻辑是"开关表 + baseUrl 自动探测"而非
   if 分支。Neurova 的 sensetime/model_limits/商汤三层根因这类 bug 的
   共性就是兼容逻辑散落在 per-provider 代码分支里。
@@ -52,7 +51,7 @@ class ProviderCompat:
     # 仅 supports_reasoning_effort=True 的 provider 消费。
     _REASONING_EFFORT_MAP = {"light": None, "standard": "medium", "deep": "high"}
 
-    # B1-3（QwenPaw #6302 对齐）：是否支持思考开关两级参数
+    # B1-3：是否支持思考开关两级参数
     # enable_thinking(bool) / thinking_budget(int)（Qwen3/DashScope 风格）。
     # 仅声明 True 的网关注入；thinking_budget 只在 thinking_enabled=True 时随发。
     supports_thinking_toggle: bool = False

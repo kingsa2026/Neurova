@@ -1,10 +1,9 @@
-"""渠道入站持久化队列（OpenClaw 启发 P0-5）
+"""渠道入站持久化队列
 
-对位 OpenClaw `src/channels/message/ingress-queue.ts`：入站消息先持久化
+入站消息先持久化
 再分发——SQLite channel_ingress_events 表 + claim 租约 + tombstone 幂等
 去重 + attempt 计数 + dead-letter + requeue，重启不丢消息。
 
-与 OpenClaw 的取舍差异：
   - OC 是多 lane 串行排水 + ack 策略四档；Neurova 14 渠道适配器入站是
     单线程事件回调，这里提供 start_drain 单排水循环（按 chat_id lane
     串行语义由"单 worker 顺序 claim"保证），ack 策略固定
@@ -52,8 +51,8 @@ CREATE TABLE IF NOT EXISTS channel_ingress_events (
 );
 CREATE INDEX IF NOT EXISTS idx_ingress_status ON channel_ingress_events(status, id);
 """
-# Yuxi 对比 P0-4：表结构纳入版本域（v1=现行 schema，幂等可重放）；
-# 后续 schema 变更加 v2/3 注册，禁止再直接改 _SCHEMA 而无迁移条目。
+# 表结构纳入版本域（v1=现行 schema，幂等可重放）；
+# 后续 schema 变更加 v2/3 注册，禁止再直接改 _SCHEMA 而无迁移条目
 register_migration(1, _SCHEMA, domain="channel_ingress")
 
 # payload ↔ ChannelMessage 的往返由 dataclasses.asdict/from_dict 承担
@@ -103,7 +102,7 @@ class ChannelIngressQueue:
         self._processed_total = 0
 
     def clear(self, channel_type: str) -> int:
-        """B4-a（QP manager.py:689 对齐）：清空指定渠道的待处理事件。
+        """B4-a：清空指定渠道的待处理事件。
 
         仅删除 pending（未消费）事件；processing/done/dead 等终态或租赁中
         的行不动（防并发消费竞争）。返回清除条数；DB 故障抛 IngressQueueUnavailable。

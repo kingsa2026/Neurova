@@ -1,6 +1,6 @@
-"""P1-1 图谱实体消解（Utopia 对标落地清单，0005/adjudication 裁剪版）。
+"""P1-1 图谱实体消解。
 
-契约（docs/Neurova_Utopia代码级对比_2026-09-04.md §2.4/§4 P1-1）：
+契约（§2.4/§4 P1-1）：
 
 resolution.pair_key：
 - 裁决缓存键与节点 ID 无关：sha256(label 小写|类型|描述摘要)，双方排序后哈希——
@@ -282,7 +282,7 @@ class TestClosedLoopReview:
 
     def test_pair_key_changes_when_description_changes(self, graph):
         """契约澄清：pair_key 的稳定性以 label+别名+类型不变为前提，
-        description 参与签名（跨对撞名时用 top_facts 区分是 Utopia 原意）——
+ description 参与签名——
         重传不改 desc 不重复付费，改了 desc 视为新证据重新裁决。"""
         a1 = _node(graph, "同名实体", description="旧描述")
         a2 = _node(graph, "同名实体", description="旧描述")

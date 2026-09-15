@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P2-5 子代理完成回传 mailbox（Codex 邮箱+trigger_turn 对齐）。
+"""P2-5 子代理完成回传 mailbox。
 
 - 会话级 mailbox：子代理完成结果投递父会话邮箱；agent loop 工具轮间隙
   排空注入（嵌套等待模式是增强可见性，后台模式是唯一回传通道）

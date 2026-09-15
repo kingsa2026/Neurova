@@ -1,6 +1,6 @@
-"""Provider 错误归一（P0 补课 — Dify `_invoke_error_mapping` 对标）。
+"""Provider 错误归一。
 
-五类标准错误（docs/Neurova_Dify代码级对比_2026-09-03.md §2.5）：
+五类标准错误：
 connection_failed / service_unavailable / rate_limited / auth_failed /
 bad_request，每类带 retryable 与 user_hint（前端可行动提示）。
 
@@ -30,7 +30,7 @@ logger = get_logger(__name__)
 
 
 class ErrorCategory(enum.Enum):
-    """五类标准错误（值对齐 Dify `_invoke_error_mapping` 语义）"""
+    """五类标准错误"""
 
     CONNECTION = "connection_failed"
     UNAVAILABLE = "service_unavailable"
@@ -217,7 +217,7 @@ def normalize_provider_error(exc: BaseException) -> ProviderError:
         return ProviderError(ErrorCategory.INSUFFICIENT_BALANCE, _mask_secrets(message), cause=exc)
 
     # 0. 超时家族最优先（openai.APITimeoutError 也继承自内建 TimeoutError 族时
-    #    不被前面的 SDK 分类抢走——B1-6 #7268）
+    # 不被前面的 SDK 分类抢走——B1-6 #7268）
     if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
         return ProviderError(ErrorCategory.TIMEOUT, _mask_secrets(message), cause=exc)
 
@@ -265,7 +265,7 @@ def exception_classes_for(categories: typing.Iterable[ErrorCategory]) -> tuple:
     return tuple(classes)
 
 
-# ── 模型可用性七态派生（对齐 QwenPaw provider_model_availability） ──
+# ── 模型可用性七态派生 ──
 
 _NOT_FOUND_PATTERN = re.compile(
     r"(not.?found|does.?not.?exist|模型不存在|未找到该模型|无此模型|no such model)", re.I,
@@ -281,7 +281,7 @@ def availability_status_of(
     message: str = "",
     http_status: typing.Optional[int] = None,
 ) -> str:
-    """把连接检查结果派生为可用性七态（QwenPaw ModelAvailabilityStatus 对齐）。
+    """把连接检查结果派生为可用性七态。
 
     available / permission_denied / model_not_found / incompatible_api /
     rate_limited / transient_error / unverified。

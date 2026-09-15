@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""OpenClaw 对比 #16：Claw 式 agent 应用包（agent package manifest v1）。
+"""Claw 式 agent 应用包（agent package manifest v1）
 
 一清单 = 多 agent 面（配置/技能/调度任务/MCP 引用）+ provenance。
 语义约定：

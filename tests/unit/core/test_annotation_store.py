@@ -1,6 +1,6 @@
-"""P2 标注闭环（TDD — Dify Annotation Reply 对标）。
+"""P2 标注闭环。
 
-契约（docs/Neurova_Dify代码级对比_2026-09-03.md §2.7/§4 P2）：
+契约（§2.7/§4 P2）：
 - AnnotationStore：人工修正的问答固化为"精准回复"命中表
   （query 指纹 → 精准回复文本 + 元数据），SQLite 持久化
 - 固化入口：feedback=like 且提供 corrected_answer 时沉淀为标注；

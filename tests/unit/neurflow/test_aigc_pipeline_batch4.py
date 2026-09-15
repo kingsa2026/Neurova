@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """批次4（打通画布）引擎侧：loop items_from 数组迭代 + 节点注册时序。
 
-1. items_from：分镜 shots[] → 逐镜扇出的正解挂载点（火宝式批量逐镜生成）。
+1. items_from：分镜 shots[] → 逐镜扇出的正解挂载点。
    配置变量引用（resolve 后为 list）时按数组逐元素迭代，body 经
    ``${loopId.output}`` 取当轮元素；迭代次数=数组长度（优先于 max_iterations，
    上限仍受 1000 保护）。非数组引用回退既有计数循环语义（增强不替换）。

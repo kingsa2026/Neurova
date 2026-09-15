@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """P0-3 会话式 shell（exec_command + write_stdin）。
 
-Codex 对齐（docs/Neurova_Codex代码级对比_2026-09-14.md §2.7/P0-3）：
 - exec_command 启动常驻进程，yield_time_ms 内未结束返回 session_id+running
 - write_stdin 向同一会话写输入并轮询新输出；进程结束返回 exit_code
 - 输出按 token 预算 head+tail 截断，带 original_chars/truncated 元数据

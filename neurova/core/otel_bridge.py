@@ -1,8 +1,8 @@
-"""OTel 兼容层（P0-5 — Dify unified_trace 对标）。
+"""OTel 兼容层。
 
 自研 TrajectoryRecorder 已有完整 span 模型（trace/span/event/parent/
 duration），本桥把它投影为 OpenTelemetry span——不改业务代码，不改
-记录器语义。设计约束（docs/Neurova_Dify代码级对比_2026-09-03.md §5）：
+记录器语义。设计约束：
 
 - **可选依赖**：opentelemetry-api 缺席 → no-op 桥（只记账）；api 在位、
   sdk 缺位 → enabled=False（无 exporter 可投）；两者都在 → 真实投影。

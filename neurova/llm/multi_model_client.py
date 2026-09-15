@@ -307,9 +307,9 @@ class MultiModelLLMClient:
             )
             # 协议分派（2026-09-09 原生通道接入）：
             # - anthropic 类型 → AnthropicNativeClient（/v1/messages 原生协议，
-            #   thinking blocks 归一为 LLMResponse.reasoning_content）
+            # thinking blocks 归一为 LLMResponse.reasoning_content）
             # - google/gemini 类型 → GeminiNativeClient（generateContent 原生协议，
-            #   thought parts 归一为 reasoning_content）
+            # thought parts 归一为 reasoning_content）
             # - 其余 → LLMClient（OpenAI 兼容协议）
             # 三者鸭子接口对齐（chat/chat_stream/chat_stream_async），上层零改动
             provider_kind = str(provider.provider).lower()
@@ -616,7 +616,7 @@ class MultiModelLLMClient:
         async def _attempt():
             # BUG AUDIT L-01: AnthropicNativeClient.chat / GeminiNativeClient.chat
             # 是 async 方法。asyncio.to_thread 只会"创建"协程并立刻返回它，
-            # 从不执行、从不 await → 调用方拿到 coroutine 对象（空回复 + 
+            # 从不执行、从不 await → 调用方拿到 coroutine 对象（空回复 +
             # "coroutine was never awaited" 告警），token 按 0 记账。
             chat_fn = client.client.chat
             if inspect.isawaitable(chat_fn) or inspect.iscoroutinefunction(chat_fn):
@@ -676,10 +676,10 @@ class MultiModelLLMClient:
             # 跨模型切换（transient 旧版缺失——网络抖动/超时/5xx 整轮失败）；
             # 认证/参数/上下文溢出/内容安全换模型无意义，不切换
             error_kind = self._classify_error(result.get("error") or "")
-            # ZCode 对齐（2026-09-11）：429 先同模型等待重试（默认 ≤10 次、间隔
-            # 10s、单次封顶 120s；非流式信封不携带 Retry-After 头，按间隔等待），
-            # 耗尽才走跨模型回退。重试直调绕过熔断（见 _chat_with_retry），
-            # 每次重试前清除自身 429 暂停。
+# 429 先同模型等待重试（默认 ≤10 次、间隔
+# 10s、单次封顶 120s；非流式信封不携带 Retry-After 头，按间隔等待），
+# 耗尽才走跨模型回退。重试直调绕过熔断（见 _chat_with_retry），
+# 每次重试前清除自身 429 暂停
             if error_kind == "rate_limited":
                 cfg = _get_429_retry_config()
                 from neurova.llm.model_rate_limiter import get_shared_limiter
@@ -933,13 +933,12 @@ class MultiModelLLMClient:
         )
 
         limiter = get_shared_limiter()
-        # ZCode 对齐（2026-09-11）：429 同模型等待重试 + 切换容错。
-        # - retry_no：当前模型已等待重试次数（≤ max_retries，默认 10）
-        # - fail_count：连续失败模型数（≤ max_switches，默认 5）——任一模型
-        #   成功出过内容（"链接成功"）即归零重计；预算按次调用计，工具循环
-        #   每轮成功开启新一轮时自然归零
-        # - yielded_any：本尝试已吐内容；此后失败的重试/切换事件带 reset=True
-        #   （消费方清空半截回复再重来，ZCode 重试替换语义，防重复拼接）
+# 429 同模型等待重试 + 切换容错。
+# - retry_no：当前模型已等待重试次数（≤ max_retries，默认 10）
+# - fail_count：连续失败模型数（≤ max_switches，默认 5）——任一模型
+# 成功出过内容（"链接成功"）即归零重计；预算按次调用计，工具循环
+# 每轮成功开启新一轮时自然归零
+# - yielded_any：本尝试已吐内容；此后失败的重试/切换事件带 reset=True #
         cfg = _get_429_retry_config()
         retry_no = 0
         fail_count = 0
@@ -967,7 +966,7 @@ class MultiModelLLMClient:
                 stream_usage: Dict[str, int] = {}
                 _cache_read, _cache_write = 0, 0
                 reply_text = ""
-                first_token_ms = 0  # P1-8（OpenOcta 启发）：首块耗时入账
+                first_token_ms = 0  # P1-8：首块耗时入账
                 # 审计 P0-C5：上游声明回传 usage（OpenAI 标准行为）→ 无需整段缓冲
                 _needs_reply_text = not getattr(client.client, "_compat_include_stream_usage", lambda: True)()
                 # 流内静默看门狗（2026-09-10 流中断事故遥测）：任何退出路径都必须
@@ -1116,7 +1115,7 @@ class MultiModelLLMClient:
                     if acquired:
                         limiter.release(model_key)
                         acquired = False
-                # ── ZCode 对齐决策链：同模型等待重试 → 切换容错 → exhausted + 死 ──
+# 同模型等待重试 → 切换容错 → exhausted + 死 ──
                 if yielded_any:
                     fail_count = 0  # "链接成功"归零重计（本尝试吐过内容）
                 if error_kind == "rate_limited" and retry_no < cfg["max_retries"]:
@@ -1164,11 +1163,11 @@ class MultiModelLLMClient:
                         max_switches=cfg["max_switches"], retries=retry_no,
                         max_retries=cfg["max_retries"], model=model_key, reason=error_kind,
                     )}
-                # OpenClaw 启发 P0-1 流内错误编码铁律：provider 调用一旦开始，
-                # 一切失败编码为流内错误消息而非异常（llm-core types.ts L202）。
-                # error_type 用五类标准错误（error_mapping 单一事实源），消费方
-                # （openai_loop._raise_for_error_dict / chat_pipeline）据此分类，
-                # 不再靠 HTTP 语义字符串二次猜测。
+# provider 调用一旦开始，
+# 一切失败编码为流内错误消息而非异常（llm-core types.ts L202）。
+# error_type 用五类标准错误（error_mapping 单一事实源），消费方
+# （openai_loop._raise_for_error_dict / chat_pipeline）据此分类，
+# 不再靠 HTTP 语义字符串二次猜测
                 yield _instream_error_dict(e)
                 return
 
@@ -1310,7 +1309,7 @@ MOCK_ENV_FLAG = "NEUROVA_LLM_MOCK"
 
 
 def _get_429_retry_config() -> Dict[str, Any]:
-    """429 重试策略（ZCode 对齐，2026-09-11）——调用时读取生效值。
+    """429 重试策略——调用时读取生效值。
 
     优先级：env 显式 > 设置页持久化（data/llm_retry_settings.json，管理端
     /governance/llm-retry 读写）> 内置默认。持久层不可用时退回纯 env 口径。
@@ -1346,7 +1345,7 @@ def _get_429_retry_config() -> Dict[str, Any]:
 
 
 def _instream_error_dict(error: Exception) -> Dict[str, Any]:
-    """流内错误编码（OpenClaw 启发 P0-1 铁律）。
+    """流内错误编码。
 
     provider 调用一旦开始，一切失败编码为流内错误消息而非异常。dict
     固定三键：error（脱敏原文）/ error_type（五类标准错误，error_mapping

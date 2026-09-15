@@ -1,6 +1,6 @@
 """RES-P2-2 回归测试：/chat SSE 客户端断连必须取消后台生成任务。
 
-背景（docs/资源型Bug扫描报告_2026-09-11.md P2-2）：
+背景（P2-2）：
 chat.py /stream 的 event_generator 断连（GeneratorExit）时不取消
 run_chat 任务——孤儿任务继续跑完全程（LLM/工具/记忆落盘照常），
 断连风暴下 token 白烧叠加；console /chat/stop 对其无效。

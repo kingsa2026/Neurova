@@ -1,6 +1,5 @@
 """优化循环 — 变异 → 打分 → 约束闸 → 留出集对比 → 部署/拒绝。
 
-对位 Hermes `evolution/skills/evolve_skill.py` 的骨架,核心纪律照搬:
 
   - **留出集是判据**:变体在 holdout 上必须优于基线,而非在训练集选最优;
   - **benchmark 是 GATE 不是 fitness**:技能分涨但 bench 回退 → 拒绝;
@@ -129,9 +128,8 @@ class SkillEvolutionRunner:
     # ── 内部:评测 ──
 
     async def _call_judge(self, **kwargs) -> Any:
-        """判分器适配:实例带 .score(LLMJudge)或纯函数(Hermes metric 式)。
+        """判分器适配:实例带 .score(LLMJudge)或纯函数。
 
-        两种形态都接受——对齐 Hermes 把 metric 当函数传的用法,同时保留
         LLMJudge 的面向对象形态。
         """
         scorer = getattr(self.judge, "score", None)
@@ -144,7 +142,6 @@ class SkillEvolutionRunner:
     ) -> tuple[float, str, str]:
         """返回 (composite, agent 输出, judge 反馈文本)。
 
-        feedback 必须透传——反射式变异的输入就是它(Hermes GEPA:reads
         execution traces to understand WHY things fail);丢掉它变异退化成盲改。
         """
         output = await self.agent.run(skill_text=skill_text, task_input=ex.task_input)

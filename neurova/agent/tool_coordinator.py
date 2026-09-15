@@ -1,7 +1,7 @@
 """
-工具执行协调器（P1-2，对标 QP tool_calls/_coordinator 的 offload 语义）
+工具执行协调器
 
-- per-tool 超时注册表：元数据声明制（对标 QP shell 60s/grep 30s）
+- per-tool 超时注册表：元数据声明制
 - 超时转后台不取消：执行超时的任务转入后台继续跑并持有独立引用，
   立即返回 background 信封（{"status":"background","task_id",...}），
   后台完成后结果/错误落入 pending hints，供下一轮注入 LLM 上下文
@@ -101,7 +101,7 @@ class ToolCoordinator:
     ) -> Any:
         """带超时执行；超时不取消——同一任务继续在后台跑完，返回 background 信封。
 
-        语义（对标 QP offload）：转后台的必须是**同一个**任务——工厂重建会
+ 语义：转后台的必须是**同一个**任务——工厂重建会
         让副作用工具双执行。本方法持有任务引用防止 GC 静默吞掉；观察者协程
         在任务完成后把结果/错误推入 pending hints。
 

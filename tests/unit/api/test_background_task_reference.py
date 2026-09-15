@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """P2-6 防回归：fire-and-forget 后台任务必须持强引用并回收。
 
-原缺陷（docs/资源型Bug扫描报告_2026-09-11.md P2 第6条）：
+原缺陷（P2 第6条）：
 ``neurflow_api.py`` execute(wait=false) 与 ``collaboration_api.py``
 canvas run 的 ``asyncio.create_task(...)`` 返回值被丢弃——任务可能被
 GC 中途回收，异常成为 unretrieved-exception。

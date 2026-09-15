@@ -2,7 +2,7 @@
 P1-1① 上下文管线期① — 溢出恢复纯函数测试
 
 compact_messages_for_overflow：把超窗消息折叠为可重试的紧凑序列。
-折叠策略（对标 QP scroll 语义，单次恢复）：
+折叠策略：
 - 保留全部 system 消息（角色契约）
 - 保留第一条 user 消息（任务锚点）
 - 保留末尾 recent_keep 条（近期上下文完整）

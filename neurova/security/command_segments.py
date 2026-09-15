@@ -1,7 +1,6 @@
-"""shell 命令分段解析器（OpenClaw 启发 P0-6 exec 命令分段审批）
+"""shell 命令分段解析器
 
-背景（docs/Neurova_OpenClaw代码级对比_2026-09-04.md §3 P0-6 / §2.5）：
-  OpenClaw 的 exec 审批把 shell 命令解析成候选段（pipeline、&& 链、
+背景（§3 P0-6 / §2.5）：
   inline command 全拆开）逐段匹配白名单或要求人工审批——"白名单命令 +
   注入段"无法搭便车。Neurova 的 governance.match_whitelist 对整条命令
   做前缀匹配且优先于内容检测，``ls && evil`` 会命中前缀 ``ls`` 直接

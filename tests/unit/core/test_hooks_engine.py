@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P2-1 hooks 引擎：配置加载/匹配/wire 决策/开关（Claude Code 兼容子集）。"""
+"""P2-1 hooks 引擎：配置加载/匹配/wire 决策/开关。"""
 import json
 import subprocess
 import sys

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-P2-b GateCatalog 声明式门控配置层防回归网（对标 QP beta.5 GateCatalog）
+P2-b GateCatalog 声明式门控配置层防回归网
 
 语义：
 - 可配置 gate 白名单：iteration / token_budget / doom_loop（goal 类需要

@@ -35,7 +35,7 @@ class TaskTracker:
     旧 stop_task 只翻状态不取消任何 asyncio Task——空壳假停止，后端
     照常跑完整轮并消耗 token。此注册表持有运行中的 asyncio.Task，
     request_session_stop 据此 Task.cancel()，取消沿 await 点天然传播
-    中断 LLM/工具协程（对齐 QwenPaw app/task_tracker.py 机制）。
+ 中断 LLM/工具协程。
     """
 
     def __init__(self):

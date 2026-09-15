@@ -1,4 +1,4 @@
-"""Web Reach 实现：平台直达读取（路由选型对齐 Agent-Reach 零配置路径）。
+"""Web Reach 实现：平台直达读取（零配置路径路由）。
 
 安全边界：
 - URL 仅接受 http/https（file/ftp 等本地协议在入口拒绝）
@@ -281,7 +281,7 @@ def bilibili_search(query: str, limit: int = 5, timeout: float = _YTDLP_TIMEOUT)
     """B 站视频搜索（yt-dlp bilisearch 前缀；不依赖 bili-cli 外部安装）。
 
     B 站风控对搜索接口有概率性 412（Precondition Failed），内置一次退避
-    重试（对齐 Agent-Reach 的失败重试链设计）。
+    重试（失败退避）。
     """
     if not query or not query.strip():
         return _error("缺少搜索关键词")
@@ -359,7 +359,7 @@ def social_search(
 ) -> Dict[str, Any]:
     """社交平台搜索（渐进式暴露 + 按用户凭据真实执行）。
 
-    隔离边界（对齐上游 Agent-Reach）：
+    隔离边界（凭据归上游库）：
     - 凭据按 user_id 分桶（UserCredentialStore，加密落盘），不共享、
       不自动登录、不碰用户浏览器
     - 后端就绪且该用户凭据齐备 → 凭据经子进程 env 注入执行上游 CLI

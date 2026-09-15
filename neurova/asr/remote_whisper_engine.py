@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Remote Whisper Engine — OpenAI 兼容 /audio/transcriptions 远程调用。
 
-补课对比文档"抄 QP 的 ASR 双模架构"落地：本地 FunASR 中文首选，
+本地 FunASR 中文首选
 远程 Whisper 多语言（无需本地 torch/模型），本地 whisper 离线兜底。
 
 配置（env）:

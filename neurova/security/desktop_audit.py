@@ -1,4 +1,4 @@
-"""桌面动作审计（CUA Phase 3 立项 R3-4，docs/Neurova_CUA_Phase3立项_2026-09-12.md §3）
+"""桌面动作审计
 
 所有 computer_*/browser_* 动作（本地 / 远程会话平面 / MCP 导出三入口同源，
 统一收口在 tool_executor 分发咽喉点）落一行**元数据白名单**审计。

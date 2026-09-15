@@ -1,4 +1,4 @@
-"""A6 Tool Search（P2，docs/Neurova_OpenClaw工具技能专项对比 §1.3 A6）。
+"""A6 Tool Search。
 
 大工具目录的检索式延迟加载（对齐 OC Tool Search 的 directory 模式朴素版）：
 - 非 direct 工具的参数 schema 不进 prompt，只留有界能力目录（name+description）
@@ -27,7 +27,7 @@ _BM25_B = 0.75
 
 _TOKEN_SPLIT = re.compile(r"[^a-z0-9\u4e00-\u9fff]+")
 
-# B0 预算治理（docs/04-plans/2026-09-07-提示词与工具面升级实施方案.md）：
+# B0 预算治理：
 # 目录单条 description 截断上限——超预算时旧行为是整行丢工具（工具对模型
 # 消失），新行为先截断再装填，同预算容纳全部工具。
 _DIR_DESC_MAX_DEFAULT = 120

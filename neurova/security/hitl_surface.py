@@ -1,6 +1,6 @@
-"""HITL surface 安全模型（P1-2 — Dify `HumanInputSurface` 对标）。
+"""HITL surface 安全模型。
 
-Dify 语义（docs/Neurova_Dify代码级对比_2026-09-03.md §2.3）：按调用面
+按调用面
 裁剪接收方——SERVICE_API/OPENAPI 只能接收 STANDALONE_WEB_APP 类 web
 表单请求，CONSOLE 只接收 CONSOLE/BACKSTAGE。这是对 API 安全模型的
 显式声明：防"API 请求伪装成控制台审批"。
@@ -23,7 +23,7 @@ logger = get_logger(__name__)
 
 
 class HumanInputSurface(str, Enum):
-    """审批/人工输入的调用面（Dify HumanInputSurface 对齐）"""
+    """审批/人工输入的调用面"""
 
     SERVICE_API = "service_api"
     CONSOLE = "console"
@@ -31,14 +31,14 @@ class HumanInputSurface(str, Enum):
 
 
 class RequestOrigin(str, Enum):
-    """审批请求的来源（Dify 接收方语义：web 表单 / 控制台 / 后台任务）"""
+    """审批请求的来源"""
 
     STANDALONE_WEB_APP = "standalone_web_app"
     CONSOLE = "console"
     BACKSTAGE = "backstage"
 
 
-# 接收方裁剪表：surface → 可接收的 origin 集合（Dify 表对齐）
+# 接收方裁剪表：surface → 可接收的 origin 集合
 _ALLOWED_RECIPIENTS: dict = {
     HumanInputSurface.SERVICE_API: frozenset({RequestOrigin.STANDALONE_WEB_APP}),
     HumanInputSurface.OPENAPI: frozenset({RequestOrigin.STANDALONE_WEB_APP}),

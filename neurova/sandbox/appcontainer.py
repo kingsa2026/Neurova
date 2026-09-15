@@ -13,7 +13,7 @@ CreateProcessW(EXTENDED_STARTUPINFO_PRESENT)。子进程 Low integrity
 - Administrators/S-1-5-114 全部"仅用于拒绝的组"
 
 实现要点（ctypes 三坑，全部踩过）：
-1. DeriveAppContainerSidFromAppContainerName 第二参是 **PSID\***（非字符串）
+1. DeriveAppContainerSidFromAppContainerName 第二参是 **PSID\\***（非字符串）
 2. lpCommandLine 需可写缓冲（create_unicode_buffer），c_wchar_p 只读会 err 2
 3. **必须显式传 cwd**——容器进程 CWD 解析失败会得到"当前目录无效"
 4. 结构按 c_void_p 传（argtypes+cast），PI 用独立实例（内联 byref 会 segfault）

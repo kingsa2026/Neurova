@@ -1,6 +1,6 @@
 """RES-P0-2 回归测试：渠道适配器创建/测试不得阻塞事件循环。
 
-背景（docs/资源型Bug扫描报告_2026-09-11.md P0-2）：
+背景（P0-2）：
 channel_config.py 两个 async 端点曾在事件循环上同步调用 _create_adapter；
 iLink 微信模式的 authenticate 含最长 300s 的 requests+sleep 轮询——
 一次保存/测试即冻结全站。根修=to_thread 下沉；F-2/F-3 后续将无 token

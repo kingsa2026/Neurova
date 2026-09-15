@@ -1,6 +1,6 @@
 """技能评审闸（C10 治理收紧，2026-09-12）。
 
-对齐 jiuwenswarm auto_save 默认 false 的哲学：改行为的进化产物默认先进
+auto_save 默认 false 的哲学：改行为的进化产物默认先进
 待审，经审批面激活后才生效。NEUROVA_SKILL_REVIEW_GATE=0 显式关闭
 （回退旧行为：产物直接生效）。
 

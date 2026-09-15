@@ -2,7 +2,7 @@
 """P1-5 Tool Search 默认激活（inert-but-ready → live）。
 
 原 A6 机制（neurova/context/tool_search.py）已完整交付但 env 门控默认关
-（NEUROVA_TOOL_SEARCH=1 才激活）。P1-5（Codex Deferred+tool_search 对齐）：
+（NEUROVA_TOOL_SEARCH=1 才激活）。P1-5：
 翻转为默认激活——未设置 env 时按规模阈值自动启用；NEUROVA_TOOL_SEARCH=0
 保留显式关闭开关（只提升不下降约束的退路）。
 """

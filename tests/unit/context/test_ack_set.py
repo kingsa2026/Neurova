@@ -1,7 +1,7 @@
 """
 P1-1④ ack 集 + 分层剪枝测试
 
-语义（对标 QP scroll "已读才可折叠"）：
+语义：
 - ContextInput.seen_confirmed：已被成功模型请求读过的标志（默认 False）
 - ContextPool.mark_turn_seen / mark_hashes_seen：ack 写入
 - orchestrator.mark_last_view_seen：确认最近一次视图内的 chunk 已读

@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-"""P2-6 工具轮 reasoning 回放（Codex encrypted reasoning replay 对齐）。
+"""P2-6 工具轮 reasoning 回放。
 
 机制就绪、**默认关闭**（NEUROVA_REASONING_REPLAY=1 显式开启）：
 - DeepSeek reasoner 等提供方显式禁止把 reasoning_content 回传（会 400），
   盲目回放对多 provider 兼容面是回归风险（增量不下降约束）
 - 开启时仍受能力门约束：仅 llm_router._infer_capabilities 标记 REASONING
-  的模型回放——与 Codex 按模型家族启用 encrypted reasoning 回放同构
 """
 from __future__ import annotations
 

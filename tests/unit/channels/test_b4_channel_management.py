@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""B4-a/b 渠道管理能力面 + 群聊会话隔离测试（QP #7208/#7001 对齐）。
+"""B4-a/b 渠道管理能力面 + 群聊会话隔离测试。
 
 锁定契约：
 1. ChannelIngressQueue.clear(channel_type) 只清 pending，返回条数。

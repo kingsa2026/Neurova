@@ -1,4 +1,4 @@
-"""工具执行后处理管线 — 五段流水线版本（对齐 DeepSeek Harness 工具流水线）。
+"""工具执行后处理管线 — 五段流水线版本。
 
 五段语义：pre → guard → execute(main) → post → result
 
@@ -9,7 +9,6 @@
   经 execute_wrapper（middleware）环绕——超时/重试/指标可在此插桩。
 - post：记忆 / 生命周期 / 技能 / 进化四类步骤（旧语义保留，含并行段）。
 - result：观察者收到**独立深拷贝快照**（不可变语义：观察者改动不污染报告），
-  彼此异常隔离——DSH tools/result 的冻结结果通知对应物。
 
 历史：C2/ADR 0010 曾将本模块标记为死代码（生产路径不调用，仅测试引用）。
 本次升级后：post 段四步仍由 ToolExecutor.on_tool_executed 承担（未迁移，防回归），
@@ -255,7 +254,7 @@ class PipelineConfig:
 class PipelineGuardAdapter:
     """适配单调守卫协议（monotonic_guard.Guard）为管线 guard。
 
-    check 必须返回 GuardVerdict.DENY/ABSTAIN——契约上不存在放行（dsh 语义）。
+ check 必须返回 GuardVerdict.DENY/ABSTAIN——契约上不存在放行。
     该适配器同样可直接注册到 GovernancePolicy 的守卫注册表（rule_id+check）。
     """
 

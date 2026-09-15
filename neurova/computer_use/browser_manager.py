@@ -1,8 +1,7 @@
 """
 Browser Manager - 浏览器自动化管理器
 
-整合 Hermes Browser 的多后端浏览器自动化能力：
-- 多后端支持（Playwright, Scrapling, camofox-browser）
+- 多后端支持
 - 混合路由（自动选择云端/本地）
 - CDP WebSocket 监控
 - 反检测浏览（camofox-browser 后端）
@@ -193,7 +192,7 @@ class BrowserSupervisor:
 
 
 class ScraplingSpiderTool:
-    """Scrapling 爬虫工具"""
+    """"""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self._config = config or {}
@@ -291,8 +290,8 @@ class BrowserBackend(ABC):
         pass
 
     # ── 可访问性快照 + role 定位（能力裁剪模式）──
-    # 基类默认"不支持"降级：不支持的后端（Scrapling 等）无需改动即自动降级为
-    # 错误结果而非抛异常；能力清单供调用方按后端选路（对标 unsupportedByDefaultIn）
+    # 基类默认"不支持"降级：不支持的后端无需改动即自动降级为
+    # 错误结果而非抛异常；能力清单供调用方按后端选路
     @property
     def capabilities(self) -> Dict[str, bool]:
         """后端能力清单，子类按实际支持覆盖"""
@@ -323,7 +322,7 @@ class PlaywrightBackend(BrowserBackend):
     def capabilities(self) -> Dict[str, bool]:
         return {"aria_snapshot": True, "role_locator": True, "pixel_screenshot": True}
 
-    # ── Tab 级 target 代际管理（对标 ZCode browserGeneration）──
+    # ── Tab 级 target 代际管理──
     # 每个 tab 持有自己的 generation，navigate 该 tab 时 +1；调用方携带过期
     # generation 操作会被拒绝（快照事实已失效），不携带则跳过校验（向后兼容）
 
@@ -687,7 +686,7 @@ class PlaywrightBackend(BrowserBackend):
 
 
 class ScraplingBackend(BrowserBackend):
-    """Scrapling 浏览器后端"""
+    """"""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config)
@@ -778,7 +777,6 @@ def _trim_snapshot_tree(
     """快照预算裁剪（R1-5）：aria/YAML 树 2 空格一级缩进。
 
     返回 (裁剪后文本, truncated)；不传预算原样透传。观察预算防上下文
-    爆炸——与 OCU max_tree_nodes/max_tree_depth 契约同构。
     """
     if not tree:
         return tree, False
@@ -834,7 +832,6 @@ class BrowserManager:
         """解析要使用的后端"""
         if preferred and preferred in self._backends:
             return preferred
-        # 默认优先级: playwright(通用) > camofox(反检测,按 user 池化) > scrapling(静态爬取)
         if "playwright" in self._backends:
             return "playwright"
         if self._camofox_enabled:

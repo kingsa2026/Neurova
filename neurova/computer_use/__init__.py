@@ -26,7 +26,7 @@ def scroll_semantics(
     scroll_y: typing.Optional[int] = 0,
     default_clicks: int = 3,
 ) -> typing.Tuple[int, int]:
-    """滚动语义单源（CUA 升级方案 R0-1）。
+    """滚动语义单源。
 
     唯一换算口径，所有滚动消费方（agent 工具路径 / HTTP 端点）都必须经此函数：
     - scroll_y: 正=向上，负=向下（与 pyautogui.scroll 正=上 同向，**保留符号**——

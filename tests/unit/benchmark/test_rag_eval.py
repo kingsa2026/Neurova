@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-"""RAG 评估执行器（Yuxi 对比 P1 #5：benchmark 摘 simulated 的第一条真路）。
+"""RAG 评估执行器。
 
-对位 Yuxi knowledge/eval（P/R/F1@K + JSONL 数据集 + 自动出题），按 §2.5
 前车之鉴反向设计：**gold_chunk_ids 用 `knowledge_id#chunk_index`**——NV 分片
-索引既有块 id，重新分块只影响条目内部（条目 id 稳定），不像 Yuxi 的
+索引既有块 id，重新分块只影响条目内部（条目 id 稳定）
 `{file_id}_chunk_{idx}` 那样重分块即废数据集。
 LLM 相关能力（出题/Judge）为注入式，无注入如实报错不伪造。
 """

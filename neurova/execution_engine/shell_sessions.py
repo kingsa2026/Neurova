@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""会话式 shell 执行器（P0-3，Codex unified_exec 对齐）。
+"""会话式 shell 执行器。
 
-语义（docs/Neurova_Codex代码级对比_2026-09-14.md §2.7）：
+语义：
 - exec_command：启动常驻进程，yield_time_ms 内未结束返回 session_id（running），
   已结束直接返回 exit_code（completed）——长任务不再卡死在一次性调用上
 - write_stdin：向同一会话写输入并轮询新输出（chars 空串=纯轮询）
 - 输出 head+tail 双端缓冲（HEAD 50k + TAIL 200k 字符），按 token 预算截断并
   显式标注 original_chars/truncated——模型永远知道被截了多少
-- 会话上限 64（Codex MAX_UNIFIED_EXEC_PROCESSES 同值）；已完成会话按 TTL 回收；
-  yield 钳位 [250ms, 30000ms]（Codex 同值）
+- 会话上限 64；已完成会话按 TTL 回收；
+ yield 钳位 [250ms, 30000ms]
 
 实现说明：subprocess 管道 + 读线程（非 PTY）——跨平台一致（Windows 无 ConPTY
 依赖）；交互语义以 stdin 写入 + 输出轮询承载，足够覆盖构建/测试/长脚本场景。

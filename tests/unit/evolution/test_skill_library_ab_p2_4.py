@@ -1,6 +1,5 @@
-"""P2-4 技能库 cold/warm A/B 评测（OpenSpace benchmark 方法论移植 + 避坑）
+"""P2-4 技能库 cold/warm A/B 评测
 
-OpenSpace 的 65.2%→78.7% warm 数字把**同任务 verifier 输出/reward/验收目标**
 打包成技能注入（带答案重放），不能当技能库泛化收益引用（对比报告 §2.11）。
 本 harness 的可信度纪律：
 
@@ -59,7 +58,7 @@ async def test_degradation_reported_honestly():
 
 @pytest.mark.asyncio
 async def test_verifier_never_reaches_executor():
-    """执行面只见任务，评分面才见预期——OpenSpace warm 分支泄漏的根治。"""
+    """执行面只见任务"""
     seen_kwargs = []
 
     async def executor(task_input, *, skills_enabled, seed=None):

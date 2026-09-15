@@ -1,10 +1,10 @@
-"""会话身份快照缓存（OpenOcta 启发 P2 #11：SnapshotForSession）。
+"""会话身份快照缓存。
 
 问题：记忆温度/结晶引擎/进化写入即时生效——长会话中途 soul.md 更新、
 性格调整会改变当前 system prompt，破坏可复现性（同会话内两次相同提问
 可能因 prompt 漂移得到不同回答）。
 
-OpenOcta 方案：会话开始时冻结注入 prompt 的身份快照，写入只在**下次
+会话开始时冻结注入 prompt 的身份快照，写入只在**下次
 会话**生效。Neurova 等价实现：
 - SessionSnapshotCache：session_id → {soul, personality, constitution}
   首轮冻结，同会话轮次复用；会话切换重建；LRU 上限防膨胀
@@ -13,7 +13,6 @@ OpenOcta 方案：会话开始时冻结注入 prompt 的身份快照，写入只
 - 无 session_id 的无状态调用不缓存（每次现取，诚实降级）
 
 边界：冻结的是 prompt 身份层（soul/性格/宪法），不是上下文检索层——
-结晶经验/记忆检索每轮变化属正常语义（OpenOcta SnapshotForSession
 同口径：冻结 memory/soul/prompt markdown，不冻结会话历史）。
 """
 

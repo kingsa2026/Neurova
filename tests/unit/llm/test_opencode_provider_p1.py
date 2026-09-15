@@ -3,7 +3,6 @@ P1 升级:OpenCode Provider 特化 — free 后缀判定、失效模型封禁、
 
 TDD Red Phase:以下测试定义目标行为,当前实现应全部失败。
 
-对齐 QwenPaw:
 1. OpenCode 网关模型以 ``-free`` 后缀标识;部分模型网关列出但不再服务
    (deepseek-v4-flash-free / nemotron-3-super-free),发现时必须剔除。
 2. 网关无 API key 要求(free tier),空 key 也应能发现。

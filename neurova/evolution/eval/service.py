@@ -5,10 +5,9 @@
     → SkillEvolutionRunner(留出集 + 约束闸 + bench 门)
     → 通过 → 落 pending 提案(proposals.json,含改进前后与三集分数)
     → 人工批准 → 写回技能正文;拒绝 → 标记 rejected
-  审计:每次运行落 data/agents/<id>/evolution/runs/*.json(Hermes metrics.json 同语义)。
+ 审计:每次运行落 data/agents/<id>/evolution/runs/*.json。
 
-执行器默认用 SimulatedAgent(对位 Hermes SkillModule:LLM 按技能指令执行任务)
-——不跑真实 agent 回路是 Phase-1 的诚实设计,Hermes 同款;注入真实 executor
+执行器默认用 SimulatedAgent
 只需替换 agent 参数。
 
 提案绝不自动应用:approve 必须显式调用(C10 评审闸哲学在进化面的延伸)。
@@ -36,7 +35,7 @@ STATUS_REJECTED = "rejected"
 
 
 class SimulatedAgent:
-    """技能→输出的模拟执行器(Hermes SkillModule.forward 的同语义)。
+    """技能→输出的模拟执行器。
 
     llm_call 可注入离线测试;默认走 llm_router。
     """

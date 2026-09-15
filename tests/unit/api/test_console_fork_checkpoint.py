@@ -1,6 +1,5 @@
 """会话分叉（fork）+ 钩子/检查点（checkpoint）— 后端契约测试（红绿灯 TDD）
 
-对齐 ZCode 消息操作条（fork/checkpoint 图标）：
 1. POST /console/chat/sessions/{id}/fork：按 until_timestamp 双路定位截取
    历史（含该条）到新会话，返回新 session_id；新会话消息数与截取数一致；
    未知 timestamp → 400；越权/不存在 → 404。

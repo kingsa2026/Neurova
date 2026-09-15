@@ -1,4 +1,4 @@
-"""rerank 双模入口（Dify RerankRunnerFactory 同型）。
+"""rerank 双模入口。
 
 method="weight"（默认，无外部依赖）/ "model"（需 rerank_provider）。
 空输入恒返回 []。

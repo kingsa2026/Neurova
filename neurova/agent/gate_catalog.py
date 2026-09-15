@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-GateCatalog 声明式门控配置层（P2-b，对标 QP beta.5 GateCatalog）
+GateCatalog 声明式门控配置层
 
 NV 的 gates.py 提供全部执行面（DoomLoop/Iteration/TokenBudget/GoalGate +
 GateRunner 故障隔离）。本模块补配置层：

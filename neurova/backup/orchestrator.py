@@ -7,7 +7,6 @@
   TRUSTED/显式信任的 LEGACY 才执行 apply_fn（payload 与
   CheckpointService.restore_snapshot 同形：session_json/kb_files）
 - import_backup(zip, trust=False)：外来/legacy 备份导入即本地重签
-  （绑定本地决定，QP 语义）
 
 诚实边界：编排层只负责"包+信任+内容交付"，写回动作（会话/文件落盘）
 由调用方经 apply_fn 注入；回滚复用 CheckpointService.restore_with_rollback。

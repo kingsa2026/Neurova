@@ -1,6 +1,6 @@
-"""rerank 双模模块（TDD — Dify 对标 P0-3）。
+"""rerank 双模模块。
 
-契约（docs/Neurova_Dify代码级对比_2026-09-03.md §2.6 RerankRunnerFactory）：
+契约（§2.6 RerankRunnerFactory）：
 - WeightRerankRunner（加权分融合）：多路分数加权求和后重排，无外部依赖
 - ModelRerankRunner（模型重排）：调 rerank_provider callable（注入式，便于
   接 bge-reranker/cohere），provider 失败时可选退化到加权模式

@@ -283,7 +283,7 @@ def _empty_usage_overview(days: int, scope: str) -> Dict[str, Any]:
         ],
         "trends": [],
         "by_model": [],
-        # P1-8（OpenOcta 启发）：按模型延迟 p50/p95/max（缺延迟数据为空数组）
+        # P1-8：按模型延迟 p50/p95/max（缺延迟数据为空数组）
         "latency_stats": [],
     }
 
@@ -403,7 +403,7 @@ async def get_usage_overview(
             "heatmap": heatmap,
             "trends": trends,
             "by_model": by_model,
-            # P1-8（OpenOcta 启发）：按模型延迟 p50/p95/max 报表
+            # P1-8：按模型延迟 p50/p95/max 报表
             "latency_stats": history.latency_stats(user_id=user_id),
         }
     except Exception as e:  # noqa: BLE001 - 诚实回退零态，绝不 500
@@ -417,7 +417,7 @@ async def get_provider_usage(
     request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """provider 真账单快照（P1-13，OpenClaw provider-usage 启发）。
+    """provider 真账单快照。
 
     数据源: neurova.core.provider_usage 采集器（默认关，provider
     usage_collection=True 才拉后台账单）。返回裸对象 {snapshots, errors}

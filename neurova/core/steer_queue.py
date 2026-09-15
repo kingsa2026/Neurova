@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""P1-9 steer 插话队列（Codex TurnInputMode::Steer 对齐）。
+"""P1-9 steer 插话队列。
 
 turn 进行中用户补充的消息先进会话级邮箱；工具轮间隙由 agent loop 排空，
-以 user 角色并入下一轮采样消息（Codex pending input 语义）。
+以 user 角色并入下一轮采样消息。
 TTL 过期自动丢弃（无 turn 消费时不出积压）；会话队列有上限防刷。
 """
 from __future__ import annotations

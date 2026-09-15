@@ -1,6 +1,6 @@
 """AIGC 生成器 facade（批次0：渠道/画布/REST 统一入口）。
 
-真实协议实现单源 = ``protocols.py``（QwenPaw 实测协议矩阵）；本包 re-export：
+真实协议实现单源 = ``protocols.py``；本包 re-export：
 - ``base``：GeneratorType / GenerationConfig / GenerationResult / BaseGenerator
 - ``manager``：GeneratorManager / GeneratorResult / get_generator_manager
 - ``runtime``：ProtocolGenerator / LegacyBytesAdapter / 凭据与落盘（单源搬移）

@@ -1,5 +1,5 @@
 """
-Checkpoint API 测试 — Probe/Retry（借鉴 langflow checkpoints）
+Checkpoint API 测试 — Probe/Retry
 
 契约：
 - GET  /executions/{id}/checkpoint：存在→摘要（completed/failed/pending/

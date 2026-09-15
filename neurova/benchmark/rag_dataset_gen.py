@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""RAG 评估数据集自动出题（P1 #5，对位 Yuxi benchmark_generation 的裁剪版）。
+"""RAG 评估数据集自动出题。
 
 锚点=可见知识条目的块（`knowledge_id#chunk_index`），上下文取锚块+同条目
-邻居窗口（Yuxi 的 vector/graph_enhanced 邻居扩散依赖 Milvus/Neo4j，NV 零
+NV 零
 依赖形态用"同条目邻块窗口"作邻居源——gold_chunk_ids 因此天然落在条目内，
 跨条目干扰题不生成，如实标注 limit 而非假装全覆盖）。
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P1-8 /review 受限子会话（Codex review task 对齐）。
+"""P1-8 /review 受限子会话。
 
 - 独立 rubric 系统提示词：P0-P3 优先级标注、建议块规则、overall correctness
 - 禁工具/禁网：review 调用不携带 tools（纯文本进出）

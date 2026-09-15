@@ -1,5 +1,5 @@
 """
-驱逐台账持久化（P1-1③，对标 QP scroll HistoryStore）
+驱逐台账持久化
 
 SQLite WAL + FTS5：被驱逐/折叠的上下文 chunk 落库，重启后经 FTS 召回。
 多用户分区：所有查询字面携带 user_id/agent_id 参数化条件——跨用户不可见

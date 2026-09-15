@@ -1,7 +1,7 @@
 """
 P0-1 file_parse 文档理解工具（TDD 先红后绿）。
 
-缺口（docs/Neurova_Agent工具扩展计划_2026-09-12.md P0-1）：file_read 只按
+缺口（P0-1）：file_read 只按
 文本解码，PDF/Office 二进制文档 agent 只能看文件名。attachment_parser.
 extract_attachment_text 已有完整文档解析（docx/xlsx/pptx/pdf/csv/html/rtf/
 odf）但仅被附件链路消费——本工具将其接入内置工具面。计划原定 markitdown

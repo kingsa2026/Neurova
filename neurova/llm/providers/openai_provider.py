@@ -375,7 +375,7 @@ class OpenAIProvider(BaseProvider):
         return self._DEFAULT_MODELS.copy()
 
     async def check_model_connection(self, model_id: str) -> ConnectionResult:
-        """检查特定模型的连接状态（QwenPaw 对齐：真实 chat 探测）。
+        """检查特定模型的连接状态。
 
         对该模型发一次受限 max_tokens 的 chat 请求（live 验证）；
         非对话模型（embedding/tts/whisper/rerank）无法走 chat 端点，
@@ -459,7 +459,7 @@ class OpenAIProvider(BaseProvider):
                 await response.json()
 
     async def probe_model_multimodal(self, model_id: str) -> ProbeResult:
-        """探测模型的多模态能力（QwenPaw 对齐：真实图像探测）。
+        """探测模型的多模态能力。
 
         发送 32x32 纯红 PNG data URL + 主色调提问（受限 max_tokens），
         语义校验答案含红色系关键词才判 vision 支持（防纯文本模型静默
@@ -501,8 +501,8 @@ class OpenAIProvider(BaseProvider):
         from neurova.llm.providers.multimodal_prober import evaluate_image_probe_answer
 
         evaluation = evaluate_image_probe_answer(answer)
-        # QwenPaw 语义校验：探测图为纯红，答案含红色系关键词才算真支持
-        # （防纯文本模型静默忽略图片答非所问造成假阳性）
+# 探测图为纯红，答案含红色系关键词才算真支持
+# （防纯文本模型静默忽略图片答非所问造成假阳性）
         _red_keywords = ("red", "scarlet", "crimson", "红", "赤")
         answer_text = str(answer or "").lower()
         saw_red = any(k in answer_text for k in _red_keywords)

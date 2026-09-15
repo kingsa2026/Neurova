@@ -1,4 +1,4 @@
-"""远程桌面后端（CUA Phase 3 扩展 RS-1/RS-2 宿主侧）
+"""远程桌面后端
 
 RemoteComputerUseManager 与本地 ComputerUseManager 同方法面（duck-type），但把
 动作代理到来宾 neurova-guest-agent（经 GuestAgentClient）。宿主侧统一附加

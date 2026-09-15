@@ -1,11 +1,11 @@
-"""经验-技能定义分离 + usage_stats 测试（QP 对齐启发 #2）。
+"""经验-技能定义分离 + usage_stats 测试。
 
 两个已知痛点：
 1. AutoSkillImprover.apply_improvement 只把改进追加进 config.improvements
    元数据——LLM 永远看不到，行为零变化；
 2. 技能级没有自动淘汰机制（只有工具级遗忘曲线），只生不死。
 
-设计（对齐 jiuwenswarm evolutions.json 模型）：
+设计（evolutions.json 分离模型）：
 - 进化经验先作为 applied 记录立即生效（组合进技能描述，LLM 下一轮可见），
   技能定义基线保持纯净（config.base_description）；
 - usage_stats（times_presented/times_used/positive/negative）按执行成败累积；

@@ -1,6 +1,6 @@
-"""tool-turn 修复测试（OpenOcta 启发 P1-7：toolTurnRepair）
+"""tool-turn 修复测试
 
-问题（OpenOcta toolTurnRepair 对症的坑）：折叠/压缩历史后 assistant 的
+问题：折叠/压缩历史后 assistant 的
 tool_calls 配对可能断裂——
 - 孤儿 tool 结果：role:"tool" 消息的 tool_call_id 不在任何前文 assistant
   的 tool_calls 中 → OpenAI API 400（"messages with role 'tool' must be a

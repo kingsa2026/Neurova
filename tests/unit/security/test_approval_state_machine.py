@@ -1,6 +1,6 @@
-"""P1-11 审批持久化状态机（OpenClaw 启发）— TDD 测试
+"""P1-11 审批持久化状态机— TDD 测试
 
-参照 OpenClaw exec-approvals：审批是持久化状态机——
+审批是持久化状态机
 - first-answer-wins：并发/重复裁决只有第一次 PENDING→terminal 生效，其余返回 False；
 - 状态机迁移合法：仅 PENDING 可迁出到 APPROVED/REJECTED/EXPIRED；
 - 通知镜像：创建与裁决都发站内通知（聊天渠道/铃铛镜像路由的底座）；

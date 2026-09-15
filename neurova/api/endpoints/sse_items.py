@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-"""SSE 事件 item 化映射器（P1-1，Codex item 语义对齐）。
+"""SSE 事件 item 化映射器。
 
-设计（docs/Neurova_Codex代码级对比_2026-09-14.md §2.1/P1-1）：
+设计（§2.1/P1-1）：
 - 事件按 item 建模：item_started / item_delta / item_completed，每事件携带
   thread_id / turn_id / item_id / item_type —— 前端分区渲染与历史重放的
   结构地基；旧事件流原样保留（本映射器是旁路增强，兼容别名=零破坏）。
 - item_type：agent_message（content delta）/ reasoning（reasoning delta）/
   tool_call / tool_result。
 - 生命周期：首个 delta 开启 item（started 携带首片文本）；工具调用开启时
-  收口未完成的 message/reasoning（Codex 语义：消息在工具前结束）；
+ 收口未完成的 message/reasoning；
   done/stopped/error 收口所有未闭合 item。
 - usage/memory_progress/retry/approval_required/artifact 不进 item 语义
   （瞬态/记账类），映射为空。
@@ -83,7 +83,7 @@ class ItemEventMapper:
                 if text:
                     self._stream_delta(out, "reasoning", text)
             elif ev_type == "tool_call":
-                # 工具开始：收口未完成的流式 item（Codex：消息在工具前结束）
+                # 工具开始：收口未完成的流式 item
                 self._close_open(out, only=_STREAM_ITEM_TYPES)
                 data = {
                     "name": str(ev.get("name") or ""),

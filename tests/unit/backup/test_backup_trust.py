@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-P3-c backup 信任模型核心防回归网（对标 QP beta.5 backup/signing）
+P3-c backup 信任模型核心防回归网
 
 语义：把备份 zip 当信任边界——
 - 本地实例 key（32 字节，0600 O_EXCL 创建、拒绝 symlink）HMAC 签名

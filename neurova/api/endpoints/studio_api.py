@@ -312,7 +312,7 @@ async def update_storyboard(sid: str, body: Dict[str, Any] = Body(...),
 @router.post("/storyboards/{sid}/retry")
 async def retry_storyboard(sid: str, body: Optional[Dict[str, Any]] = Body(default=None),
                            current_user: Dict[str, Any] = Depends(get_current_user)):
-    """单镜重试（huobao 批量失败一键重试语义）：stage=image|video。"""
+    """单镜重试：stage=image|video。"""
     store = get_store()
     sb = store.get_storyboard(sid)
     if sb is None:

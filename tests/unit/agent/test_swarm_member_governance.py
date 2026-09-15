@@ -1,12 +1,11 @@
-"""Member 即 SessionKey + spawn 三明治治理测试（OpenOcta 启发 P2 #9/#10）
+"""Member 即 SessionKey + spawn 三明治治理测试
 
 #9 Member 即 SessionKey：
-  OpenOcta 蜂群成员只是一条 `agent:<id>:swarm:<ws>:<member>` 命名空间下的
   普通会话——完全复用单 agent 的 Runtime 池、transcript、usage 管线，多
   agent 编排不引入第二套运行时。
   Neurova 等价实现：SwarmManager 派生时把子 Agent 的会话键定为
   `swarm_<subagent_id>`（member 命名空间，Windows 文件名安全——冒号在
-  NTFS 非法，OpenOcta 的冒号分节形式在此等价转写），代替原
+ NTFS 非法，代替原
   session_id=None（不落盘、无历史、member 每轮任务从零开始）。member 的
   任务对话经既有 save_to_session → SessionManager.add_message 持久化到
   sessions/<agent_id>/session_swarm_<id>_*.json，复用全部会话存储——
@@ -14,7 +13,7 @@
   member 键（chat 管线请求级回写），治理阀门天然覆盖递归。
 
 #10 spawn 三明治治理：
-  OpenOcta：常量硬限制 → 数据层结构化拒绝（SpawnRejectReason）→ 返回值
+常量硬限制 → 数据层结构化拒绝（SpawnRejectReason）→ 返回值
   带配额闭环。LLM 自主繁殖子 agent 时"提示词约束必然被忽略"由数据层
   硬拒绝兜底。本文件测前两层+闭环；第三层（提示词纪律内嵌工具描述）
   见 builtin_tools.py spawn_subagent schema 静态文案。

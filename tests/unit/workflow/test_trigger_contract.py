@@ -1,4 +1,4 @@
-"""P2 trigger 统一契约（TDD — Dify 对标 §4 P2）。
+"""P2 trigger 统一契约。
 
 契约：
 - TriggerType 补全三态：WEBHOOK / CRON / MANUAL 既有 + PLUGIN 新增

@@ -1,5 +1,5 @@
 """
-上下文溢出恢复（P1-1① 期①，对标 QP scroll 的单次恢复重试语义）
+上下文溢出恢复
 
 三个纯函数，零 I/O：
 - assign_turn_ids：给对话消息序列标注轮次 id（写入侧配对锚点的依据）
@@ -68,7 +68,7 @@ def _opens_tool_block(msg: Dict[str, Any]) -> bool:
     return (msg or {}).get("role") == "assistant" and bool(msg.get("tool_calls"))
 
 
-# ── tool-turn 修复（OpenOcta 启发 P1-7：toolTurnRepair） ──────────────────
+# ── tool-turn 修复 ──────────────────
 
 
 def _synth_tool_result(calls_seen: List[str]) -> str:
@@ -89,7 +89,7 @@ def repair_tool_turns(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     纯函数：返回新列表，不修改输入；非 tool 语义消息原样保留。
 
-    接线点（OpenOcta 思想：修复链放在"最后进入模型前"，任何上游折叠
+修复链放在"最后进入模型前"，任何上游折叠
     策略变化都无需各自重推配对规则）：
     - context.orchestrator.build_context：视图重建剥 tool_calls 后的
       残留 role:"tool"（caller_provided_history/渠道回传混入）
@@ -153,8 +153,7 @@ def repair_tool_turns(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             missing = [cid for cid in expected_ids if cid not in seen_ids]
             if missing:
                 # 审计⑭：逐 call 补独立合成结果——此前只补一条
-                # tool_call_id="id1,id2" 的拼接消息，与任何单个调用都不匹配
-                #（OpenAI 要求 tool 消息与 assistant.tool_calls 的 id 一一对应）
+                # tool_call_id="id1,id2" 的拼接消息，与任何单个调用都不匹配                #（OpenAI 要求 tool 消息与 assistant.tool_calls 的 id 一一对应）
                 calls_by_id = {c.get("id"): c for c in calls if c.get("id")}
                 for cid in missing:
                     name = (
@@ -207,7 +206,7 @@ def compact_messages_for_overflow(
     )
 
     # 3) 近期保留区起点：len - recent_keep，向前回退对齐到轮次边界
-    #    （边界落在 tool 结果或工具块中间会破坏协议配对）
+    # （边界落在 tool 结果或工具块中间会破坏协议配对）
     cut = max(original_count - max(recent_keep, 0), 0)
     while cut > 0 and _is_tool_result(messages[cut]):
         cut -= 1

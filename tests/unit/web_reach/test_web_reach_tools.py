@@ -1,6 +1,6 @@
-"""Web Reach 整合测试（TDD 红绿）—— docs/agent-reach-integration.md 方案 B
+"""Web Reach 整合测试（TDD 红绿）—— 方案 B
 
-对标 Agent-Reach（Panniantong/Agent-Reach）的零配置读取能力，封装为 Neurova
+零配置读取能力，封装为 Neurova
 一等内置工具。设计约束：
 - 不经 agent-reach CLI 中转（实际读取就是上游命令组合：Jina/V2EX API/
   feedparser/yt-dlp），直接在 Python 内实现，少一层子进程

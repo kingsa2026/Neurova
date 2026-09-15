@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-"""rerank 模型通道生产装配（Yuxi 对比 P0-3）。
+"""rerank 模型通道生产装配。
 
-根因：Dify 对标轮把 ModelRerankRunner/factory 全写好了，但唯一生产入口
+根因：但唯一生产入口
 `semantic_search_api._resolve_rerank_provider` 是恒 None 占位（"声明未接线"
-台账惯犯）；且 Yuxi 的反面教训——重排失败不得静默伪装成加权/空结果。
+台账惯犯）
 
 契约：
 - neurova/llm/rerank_client.build_rerank_provider(model)：从 provider_manager

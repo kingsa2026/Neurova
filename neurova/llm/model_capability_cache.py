@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""学习型模型能力缓存（对齐 QwenPaw providers/model_capability_cache.py）。
+"""学习型模型能力缓存。
 
 试错发现的模型能力（如：标记支持多模态却拒绝图片输入、thinking 模式
 要求每条 assistant 消息带 reasoning_content）按 ``provider_id:model`` 键
@@ -24,7 +24,7 @@ CAPABILITY_CACHE_TTL_SECONDS = float(
     os.environ.get("NEUROVA_CAPABILITY_CACHE_TTL_SECONDS", "86400")
 )
 
-# 已知能力键（与 QwenPaw 语义对齐）
+# 已知能力键
 CAP_NEEDS_REASONING_CONTENT = "needs_reasoning_content"
 CAP_REJECTS_MEDIA = "rejects_media"
 CAP_REJECTS_AUDIO = "rejects_audio"

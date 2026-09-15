@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P1-7 update_plan 工具（Codex update_plan 对齐）。
+"""P1-7 update_plan 工具。
 
 - schema: {explanation?, plan: [{step, status: pending|in_progress|completed}]}
 - 状态机约束：plan 非空、status 词表、**至多一个 in_progress**（违规报错让模型自纠）

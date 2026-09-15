@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P0-1 Shell 续行解析差分修复（QwenPaw #7472 同款漏洞）回归测试。
+"""P0-1 Shell 续行解析差分修复回归测试。
 
 POSIX shell 在分词前移除行尾 ``\\`` + 换行。守卫若对"检查时看到的命令"做
 正则，与"shell 实际执行的命令"存在解析差分——``cat /etc/pas\\<LF>swd`` 可
@@ -12,7 +12,7 @@ from neurova.security.tool_guard import ToolGuardEngine
 
 
 class TestNormalizePosixLineContinuations:
-    """归一化函数本体（移植 QwenPaw utils/shell_normalization.py 语义）。"""
+    """归一化函数本体。"""
 
     def test_strips_backslash_newline(self):
         assert normalize_posix_line_continuations("cat /etc/pas\\\nswd") == "cat /etc/passwd"

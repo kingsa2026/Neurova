@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-"""配置契约单源生成 + 防漂移守卫（Yuxi 对比 P2 #15）。
+"""配置契约单源生成 + 防漂移守卫。
 
-对位 Yuxi `get_query_params_config`（dataclass metadata 反射出表单/参数契约
 单源）。Neurova 历次键位契约漂移事故（睡眠设置键位/负一屏公共字段丢弃/
 ChannelIntegration 不回填）共同根因=前后端各写各的字段清单。
 

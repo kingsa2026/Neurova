@@ -1,9 +1,9 @@
-"""RetrievalMethod 四态枚举（TDD — Dify 对标 P0-3）。
+"""RetrievalMethod 四态枚举。
 
-契约（docs/Neurova_Dify代码级对比_2026-09-03.md §2.6 / §4 P0-3）：
+契约（§2.6 / §4 P0-3）：
 - 四态：SEMANTIC_SEARCH / FULL_TEXT_SEARCH / HYBRID_SEARCH / KEYWORD_SEARCH
 - 能力助手：is_support_semantic_search / is_support_fulltext_search
-  按后端类型决定支持集（与 Dify 的向量库类型能力位对齐）
+ 按后端类型决定支持集
 - from_str 宽松解析（大小写不敏感、接受连字符/空格），非法值报 ValueError
 """
 

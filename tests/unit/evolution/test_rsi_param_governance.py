@@ -2,7 +2,7 @@
 
 遗留项处理（2026-09-12）：
 1. setpoint 表此前从 Agent 镜像属性抄写（failure_penalty 0.5/decay_rate 0.1/
-   factor 1.0），与融合文档钉死的设计值冲突（docs/Neurova_OpenClaw工具技能
+ factor 1.0）
    专项对比 §7："success_bonus=0.1/failure_penalty=0.05/decay_rate=0.01，
    与 ToolMemoryIntegration 构造默认精确对齐零偏差"）→ 全表对齐真实消费方默认。
 2. experience.pattern_min_support 死参数（定义后零消费）→ 属性桥同步

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P1-12 渠道语音消息预转写（OpenClaw 音频预检启发）— TDD 测试
+"""P1-12 渠道语音消息预转写— TDD 测试
 
 OC 语义：「音频预检——先转录再判断是否需要 @ 提及，群语音消息不漏」。
 Neurova 落点：ChannelManager 收口处（_on_channel_event）对带 audio_bytes 的

@@ -1,4 +1,4 @@
-"""RES-P1-1 防回归：任务重试计数必须沿重试链透传（docs/资源型Bug扫描报告_2026-09-11.md）
+"""RES-P1-1 防回归：任务重试计数必须沿重试链透传
 
 历史缺陷：`_retry_count` 存放在每次执行都新建的 `TaskExecution.metadata` 上，
 `execute_task` 重试时新建 execution → metadata 为空 dict → 计数归零：

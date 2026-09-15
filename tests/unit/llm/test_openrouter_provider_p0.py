@@ -3,11 +3,10 @@ P0 升级:OpenRouter Provider — 必备请求头 + API 元数据能力判定 + 
 
 TDD Red Phase:以下测试定义目标行为,当前实现应全部失败。
 
-问题根因(对照 QwenPaw):
+问题根因:
 1. 缺少 OpenRouter 强制要求的 HTTP-Referer / X-OpenRouter-Title 请求头,
    请求会被拒绝/限流 — 这是"免费模型可用但实际调不通"的最可能根因。
 2. 能力判定走名称关键字启发式,而不是 API 返回的 architecture.input_modalities
-   (QwenPaw 以 OpenRouter /models 元数据为权威)。
 3. top_provider.max_completion_tokens 为 None 时(常见字段缺失),
    ModelInfo(max_tokens=None) 触发 pydantic 校验错误,导致整批模型发现被吞
    并回落到 10 个陈旧默认模型 — 这是发现机制失效的深层根因之一。

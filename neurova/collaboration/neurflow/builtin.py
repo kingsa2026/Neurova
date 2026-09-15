@@ -28,8 +28,7 @@ logger = get_logger(__name__)
 
 # ==================== 内置节点定义 ====================
 
-# 所有内置节点的定义列表
-# 使用 dict 格式，便于序列化和测试
+# 所有内置节点的定义列表# 使用 dict 格式，便于序列化和测试
 BUILTIN_NODES: List[Dict[str, Any]] = [
     # ========== 流程控制节点 ==========
     {
@@ -1295,7 +1294,7 @@ async def exec_memory_save(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[
 
     P1-2 闭环审查修 E：工作流的 memory-save 节点是交互式单条写入口
     （与聊天 memory_save 工具平行），默认进待确认队列、人工确认后才
-    入主库（Utopia 0018 语义）；config.confirm=True 按次直写。
+ 入主库；config.confirm=True 按次直写。
     队列不可用时降级直写——错误方向是"少一个待审项"，不是"工作流坏掉"。
     """
     memory_manager = ctx.get("memory_manager") or _get_memory_manager()

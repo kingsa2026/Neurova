@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Agent 工作区文件管理 API（B3-4，QwenPaw #7078/#7151 对齐）。
+"""Agent 工作区文件管理 API。
 
 提供 per-agent 工作区（agent_workspaces/{agent_id}）的文件管理能力：
 - GET  列目录（含子目录）
@@ -80,7 +80,7 @@ def _workspace_root(agent_id: str, current_user: Dict[str, Any]) -> Path:
 def _resolve_inside(root: Path, rel_path: str) -> Path:
     """把 rel_path 解析到 root 内；逃逸/隐藏目录/软链一律 400（fail-closed）。
 
-    单源原语（Yuxi 对比 P2 #10）：语法拒绝 + 组件级 symlink/junction 拒绝 +
+ 单源原语：语法拒绝 + 组件级 symlink/junction 拒绝 +
     realpath containment 三层，见 neurova/core/safe_paths.py。
     """
     from neurova.core.safe_paths import UnsafePathError, resolve_within

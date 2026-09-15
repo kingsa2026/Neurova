@@ -2,7 +2,7 @@
 """A5：FFmpeg 字幕烧录支撑件（core/ffmpeg 扩展）。
 
 契约（台账 A5，pf1 字体教训 + ffmpeg b6.0 Live 实测转义矩阵）：
-- escape_subtitles_path：反斜杠→正斜杠 + 冒号转义为 \:（filter 层以未转义 :
+- escape_subtitles_path：反斜杠→正斜杠 + 冒号转义为 \\:（filter 层以未转义 :
   分参数，盘符 E: 截断致假 Invalid argument）；单引号包裹保空格；
   含单引号的路径直接拒绝（ValueError）——诚实拒烧而非拼出错误 filter。
 - has_cjk_font：无中文字体时烧录只会得到方框（假成功），必须先探测；

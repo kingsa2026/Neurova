@@ -1,4 +1,4 @@
-"""PlanStore 三层隔离测试（TDD 红绿）—— docs/isolation-fit-assessment.md §3.3
+"""PlanStore 三层隔离测试（TDD 红绿）—— §3.3
 
 三层 = (agent_id, neuser_id, user_id)；工具链路的身份来源是 tool_executor 的
 _agent_identity() → (user_id, agent_id)（JWT sub，neuser_id 与 user_id 同源）。

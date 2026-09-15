@@ -97,7 +97,7 @@ _template_registry_instance: Optional[TemplateRegistry] = None
 
 
 def seed_short_drama_template(storage) -> bool:
-    """启动种子（批次4，PRINTFILM 模板启动写库语义）：短剧一键成片模板
+    """启动种子：短剧一键成片模板
     写入工作流库（id 固定、幂等——已存在不覆盖用户修改）。
 
     Returns:

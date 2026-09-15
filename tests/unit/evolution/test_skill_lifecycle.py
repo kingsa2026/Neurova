@@ -1,6 +1,5 @@
 """Wave 3 — 技能遥测生命周期状态机测试。
 
-对位 Hermes curator.apply_automatic_transitions:
   active → stale(14天)→ archived(30天);用后回暖 reactivated
 保护语义:pinned 全绕开;created_by != agent 不动;从未活跃者锚 created_at 不自归档。
 """

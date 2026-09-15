@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""技能进化异步作业队列（P1-4，OpenSpace trigger_jobs 最小移植）
+"""技能进化异步作业队列
 
-动机（OpenSpace 对比 2026-09-15）：Neurova 的进化提案此前在 post_chat 同步
+动机：Neurova 的进化提案此前在 post_chat 同步
 直跑——分析失败即丢、无重试、崩溃留半态。本队列把"提案产生"与"提案消费"
 解耦为持久作业：
 

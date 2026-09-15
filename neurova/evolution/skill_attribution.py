@@ -1,6 +1,6 @@
 """失败归因器 — 把 SelfModelEngine 的工具级教训归因到具体技能。
 
-对比启发（jiuwenswarm SkillSelfEvolution 的 reviewer feedback 归因模型，
+reviewer feedback 归因模型，
 置信度阈值 react.evolution.review_feedback_min_confidence=0.7）：
 
 现状缺口：SelfModelEngine 五算子产出的教训全部是工具粒度
@@ -37,7 +37,7 @@ logger = get_logger(__name__)
 # SelfModelEngine 五算子产出的教训算子集合（subject 均为工具名）
 _KNOWN_OPERATORS = {"drift", "sequence", "contrast", "calibration", "budget"}
 
-# 默认归因置信度阈值（对齐 jiuwenswarm review_feedback_min_confidence=0.7）
+# 默认归因置信度阈值（默认置信度阈值 0.7）
 DEFAULT_MIN_CONFIDENCE = 0.7
 
 # 行为佐证加成的门槛

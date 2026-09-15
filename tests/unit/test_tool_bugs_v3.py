@@ -1,7 +1,7 @@
 """
 工具使用/创建 bug 第三轮排查测试 (TDD RED→GREEN)
 
-基于 docs/bugfix-tool-use-create-bugs-v2.md "未修复的架构观察" 清单，
+基于 "未修复的架构观察" 清单，
 按 TDD vertical slice + bug-hunt 五阶段逐个推进。
 
 Bug 清单（架构观察项）:

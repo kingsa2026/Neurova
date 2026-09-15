@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""AIGC 生成任务持久账本（B2-b，QwenPaw 对齐）。
+"""AIGC 生成任务持久账本。
 
 已提交的异步生成任务（视频为主）落盘 JSON，重启后可恢复轮询——
 结果 URL 临时有效（Ark 24h / BFL 10min），成功后必须立即下载本地化。
@@ -45,7 +45,7 @@ class TaskRecord:
     prompt: str = ""
     # P1-9（审计 2026-09-11）：任务属主——/video/status 与 /tasks 据此做归属校验
     owner_user_id: str = ""
-    # 批次0（PRINTFILM 对标）：产物溯源——rest/channel/workflow 三入口同池区分；
+    # 批次0：产物溯源——rest/channel/workflow 三入口同池区分；
     # execution_id 关联画布工作流执行实例（workflow 来源时）
     source: str = "rest"
     execution_id: str = ""

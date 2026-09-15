@@ -1,8 +1,8 @@
-"""溢出裁剪 tool 配对分割点测试（OpenClaw 启发 P0-8）
+"""溢出裁剪 tool 配对分割点测试
 
-背景（docs/Neurova_OpenClaw代码级对比_2026-09-04.md §3 P0-8）：
-  OpenClaw 压缩语义：分割点落在工具块内就移动边界，保持 tool-call/
-  tool-result 配对完整（docs/concepts/compaction.md）。
+背景（§3 P0-8）：
+分割点落在工具块内就移动边界，保持 tool-call/
+ tool-result 配对完整。
 
 Neurova 现状：
   - recovery.compact_messages_for_overflow（溢出恢复主路径）已实现配对

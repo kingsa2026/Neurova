@@ -1,11 +1,11 @@
-"""ToolExecutionPipeline 五段流水线契约测试（对齐 DeepSeek Harness 工具流水线）。
+"""ToolExecutionPipeline 五段流水线契约测试。
 
 五段语义（与治理中心的关系见模块头注释）：
 pre → guard → execute(main) → post → result
 
 - pre：预处理步骤，可改写上下文或抛 PipelineReject 拒绝（拒绝→跳过 main，
   post/result 仍执行以便观测）
-- guard：dsh 语义单调守卫（DENY/ABSTAIN；abstain 放行、deny 跳过 main）
+- guard：abstain 放行、deny 跳过 main）
 - execute：主执行体（由调用方经 middleware 包装传入；wrapper 可环绕/改写结果）
 - post：既有步骤段（记忆/生命周期/技能/进化），旧四步语义保留
 - result：观察者收到独立冻结的不可变快照，异常彼此隔离
@@ -233,7 +233,7 @@ class TestExecuteStage(unittest.TestCase):
 
         def wrapper(context, next_fn):
             result = next_fn(context)  # 真实主执行
-            result["content"] = result["content"] + "!"  # 环绕改写（dsh 语义）
+            result["content"] = result["content"] + "!"  # 环绕改写
             return result
 
         pipeline = ToolExecutionPipeline()

@@ -1,6 +1,5 @@
 """评测集 — train/val/holdout 划分。
 
-对位 Hermes `core/dataset_builder.py` 的 EvalDataset,但切分用固定种子,
 保证可复现(测试要能断言,进化结果要能重放)。
 """
 

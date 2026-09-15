@@ -1,11 +1,11 @@
 """统一模型契约 — 参数与能力上下文（schema 驱动）。
 
-Dify §2.5「参数与能力上下文全部来自 provider/model YAML schema，能力
+能力
 过滤由 schema 驱动」的 Neurova 落地。数据不另起炉灶——三层既有目录
 （capability_detector.MODEL_PRESETS 预埋 > model_limits 精确表 >
 名称启发式）是单一事实源，本模块只做 schema 视图组装。
 
-能力口径对齐（Dify 六型模型 ↔ Neurova 能力词表）：
+能力口径对齐：
 MODEL_TYPE_CAPABILITIES 是双向映射源（model_types_for_capabilities 反查）。
 """
 
@@ -19,8 +19,8 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-# ── Dify 六型模型 ↔ Neurova 能力词表（口径对齐，双向映射源） ──
-# 约定：一个能力词表组合唯一确定一组模型类型；text 恒归属 llm。
+# 双向映射源） ──
+# 约定：一个能力词表组合唯一确定一组模型类型；text 恒归属 llm
 MODEL_TYPE_CAPABILITIES: Dict[str, frozenset] = {
     "llm": frozenset({"text"}),
     "text_embedding": frozenset({"embedding"}),
@@ -48,10 +48,10 @@ _EXTRA_CAP_TYPES: Dict[str, str] = {
 
 
 def model_types_for_capabilities(capabilities: List[str]) -> List[str]:
-    """能力词表 → 模型类型列表（Dify 口径；按 MODEL_TYPE_CAPABILITIES 规范序）"""
+    """能力词表 → 模型类型列表"""
     caps = set(capabilities or [])
     types: List[str] = []
-    for mt in MODEL_TYPE_CAPABILITIES:  # 规范序：llm 在前，与 Dify 枚举一致
+    for mt in MODEL_TYPE_CAPABILITIES:  # 规范序：llm 在前
         if caps & MODEL_TYPE_CAPABILITIES[mt]:
             types.append(mt)
     for cap in caps:  # 附加面：vision/reasoning 等归 llm 增强
@@ -61,7 +61,7 @@ def model_types_for_capabilities(capabilities: List[str]) -> List[str]:
     return types
 
 
-# ── 参数规则（Dify parameter_rules 同构） ──────────────────────
+# ── 参数规则 ──────────────────────
 
 
 @dataclass

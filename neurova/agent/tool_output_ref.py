@@ -1,6 +1,6 @@
-"""工具大输出 OutputRef 落盘引用（OpenOcta 启发 P1-6）。
+"""工具大输出 OutputRef 落盘引用。
 
-OpenOcta：ToolResult{Success, Output, OutputRef, Data, Error}——大输出
+ToolResult{Success, Output, OutputRef, Data, Error}——大输出
 落盘为文件，上下文只放 {Path, SizeBytes, Truncated} 引用，模型可用 read
 工具按需取。Neurova 的 file_read 接收绝对路径，落盘引用天然可回读。
 
@@ -47,7 +47,6 @@ _install_lock = threading.RLock()
 def install_tool_output_ref(max_chars: int = 8192, output_dirname: str = "tool_outputs") -> OutputRefHandle:
     """装配大输出引用（幂等：已安装返回同一句柄）。
 
-    默认阈值 8KiB 与 OpenOcta 的单消息 8KiB 截断红线同量级。
     """
     global _global_handle
     with _install_lock:

@@ -1,4 +1,4 @@
-"""多知识库路由（P1-4 — Dify `multi_dataset_function_call_router` 对标）。
+"""多知识库路由。
 
 多库场景「先选库再检索」：LLM FunctionCall 按库元数据（name/description）
 选择目标库，再逐库检索合并。检索策略（semantic/hybrid/...）与选库是
@@ -83,7 +83,7 @@ class MultiKBRouter:
         limit: int = 5,
         llm_call: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """先选库后检索，结果合并并附 kb_id 溯源（Dify 多库检索信封）"""
+        """先选库后检索，结果合并并附 kb_id 溯源"""
         chosen = await self.route(query, kbs)
         results: List[Dict[str, Any]] = []
         for kb in chosen:

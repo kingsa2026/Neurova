@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Plan Mode 服务层测试（ZCode 计划模式对齐）。
+"""Plan Mode 服务层测试。
 
 覆盖：
 1. PlanDocStore —— MD 计划文档落盘 agent 工作目录 docs/plan/（自动建目录、

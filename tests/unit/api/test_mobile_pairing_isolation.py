@@ -1,6 +1,6 @@
 """移动配对 WS 隔离与加固测试
 
-审计修复 (docs/audit/three-tier-isolation-audit.md P0-4 / P1-8 / P2-12 / P3-18):
+审计修复 (P0-4 / P1-8 / P2-12 / P3-18):
 - session:list 原实现返回该 agent 下所有用户的完整会话 (含全部消息),
   任何已配对手机可拉取全员对话 → 必须按 user_id 过滤。
 - session:create 原实现不绑定 user_id → 会话无归属。

@@ -1,4 +1,4 @@
-"""肌肉记忆闭环修复测试（TDD 红绿）—— docs/tool-memory-muscle-analysis.md P-B/P-C/P-A/P-D/P-E/P-F
+"""肌肉记忆闭环修复测试（TDD 红绿）—— P-B/P-C/P-A/P-D/P-E/P-F
 
 四个闭环断裂点：
 - P-B: _record_tool_failure_lesson 双重字段错误（muscle.items 不存在 +

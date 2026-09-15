@@ -144,7 +144,7 @@ class BrowserSnapshotRequest(BaseModel):
 
 
 class BrowserClickRoleRequest(BaseModel):
-    # 严格 schema（对标 ZCode 命令模式）：未知字段直接拒绝，防幻觉参数
+    # 严格 schema：未知字段直接拒绝，防幻觉参数
     class Config:
         extra = "forbid"
 
@@ -166,7 +166,7 @@ class BrowserScrapeRequest(BaseModel):
     selectors: typing.Optional[dict] = None
 
 
-# ── 浏览器命令总线（对标 ZCode 单入口 + 严格 schema 模式）──
+# ── 浏览器命令总线──
 # 判别联合：command Literal 字段区分命令；extra="forbid" 逐命令拒绝幻觉参数
 class NavigateCmd(BaseModel):
     class Config:
@@ -540,7 +540,7 @@ async def get_status():
 
 @router.get("/doctor")
 async def doctor():
-    """桌面能力自检（R0-4，OCU doctor 思想）：逐项真实探测，绝不报假可用"""
+    """桌面能力自检：逐项真实探测，绝不报假可用"""
     try:
         report = _get_manager().doctor_report()
     except Exception as e:

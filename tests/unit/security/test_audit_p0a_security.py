@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P0-A 安全收口防回归测试（审计批次 P0-A，计划 docs/04-plans/audit-remediation-plan-2026-09-10.md）。
+"""P0-A 安全收口防回归测试（审计批次 P0-A，计划）。
 
 覆盖五洞：
 - A1 沙箱强制后端探测表：_ENFORCED_SANDBOX_BACKENDS 必须由 exec_sandbox 真实后端填充，

@@ -77,7 +77,7 @@ class ActivateModelRequest(BaseModel):
 
 
 class FilterModelsRequest(BaseModel):
-    """筛选模型请求(对齐 QwenPaw filter_models 四维)"""
+    """筛选模型请求"""
 
     providers: List[str] = Field(default_factory=list, description="系列前缀,如 ['openai']")
     input_modalities: List[str] = Field(default_factory=list, description="必需输入模态,如 ['image']")
@@ -442,9 +442,6 @@ async def discover_models(
                 if hasattr(provider_manager, "get_provider")
                 else None
             )
-            # QwenPaw 对齐:结构化发现结果(元数据全量透传,失败不再静默空列表)
-            # 2026-09-14 产品契约:获取模型只产出"可添加的候选"(discovered_models),
-            # 不得自动并入配置列表;并入配置须用户显式走 POST .../models/discover/merge
             result = await provider_manager.discover_provider_models(provider_id, merge=False)
             message = result.get("message", "")
             if (

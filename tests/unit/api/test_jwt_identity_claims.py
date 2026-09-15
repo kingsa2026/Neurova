@@ -1,6 +1,6 @@
 """JWT 身份声明测试
 
-审计修复 (docs/audit/three-tier-isolation-audit.md P0-2 / Bug 6 / Bug 7):
+审计修复 (P0-2 / Bug 6 / Bug 7):
 - 登录/刷新/注册签发的 JWT 必须携带 neuser_id + user_id 声明,
   否则三层隔离的第 2 层 (neuser_id) 永远回退 "default", 事实上从未生效。
 - get_current_user / get_optional_user / get_current_user_or_default

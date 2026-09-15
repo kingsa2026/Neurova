@@ -1,6 +1,6 @@
-"""P1-5 MCP server 面（TDD — Dify `core/mcp/server` 对标）。
+"""P1-5 MCP server 面。
 
-契约（docs/Neurova_Dify代码级对比_2026-09-03.md §3.4/§4 P1-5）：
+契约（§3.4/§4 P1-5）：
 Neurova 平台自身可作为 MCP server 对外暴露能力面：
 - NeurovaMCPServer：协议无关的核心（清单/调用），传输层（stdio/SSE）
   由 SDK 适配器另行包壳——核心先落，传输后接

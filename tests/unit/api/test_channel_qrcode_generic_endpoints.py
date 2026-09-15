@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""通用渠道二维码 REST 端点契约（对齐 QwenPaw GET /config/channels/{ch}/qrcode 两段式）。
+"""通用渠道二维码 REST 端点契约。
 
 端点（channel_config router, prefix=/channel-configs）：
 - GET /{channel}/qrcode           → {qrcode_img(base64 PNG), poll_token}

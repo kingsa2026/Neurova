@@ -1,6 +1,6 @@
 """RES-P0-1 回归测试：chat_stream 成功/中断路径必须释放并发槽位。
 
-背景（docs/资源型Bug扫描报告_2026-09-11.md P0-1）：
+背景（P0-1）：
 df34c204（BUG AUDIT L-03）把成功路径的 limiter.release 误判为"重复 release"
 删除，导致 ModelRateLimiter._concurrent 单调递增——默认 max_concurrent=8，
 8 次成功/中断流式后该模型对所有用户永久返回"模型限流"，直到进程重启。

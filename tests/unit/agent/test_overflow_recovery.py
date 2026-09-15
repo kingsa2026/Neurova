@@ -1,7 +1,7 @@
 """
 P1-1① 上下文管线期① — openai_loop 溢出恢复接线测试
 
-语义（对标 QP scroll 的单次恢复重试）：
+语义：
 - 请求打开即 token_limit → 折叠消息后单次重试
 - 重试仍溢出 → 原样抛 TokenLimitExceeded（不做第二次重试，防循环）
 - 流中途溢出（已有 content 产出）→ 原样抛（重试会造成内容重复）

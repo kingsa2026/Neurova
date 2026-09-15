@@ -51,7 +51,7 @@ class ToolWeight:
 class AdaptiveToolWeights:
     """自适应权重管理器 — 根据工具表现调整权重
 
-    融合说明（A/B 版裁决，docs/Neurova_OpenClaw工具技能专项对比 §7）：
+ 融合说明：
     B 版骨架（接线/持久化/夹紧/动态阈值齿轮）为正身，吸收 A 版三个思想：
     - 滑动窗口成功率：get_effective_weight 取 window 内近期表现，不用终身计数
     - 惰性时间衰减：读取时按 exp(-decay_rate*hours) 衰减 multiplier（处理非平稳）
@@ -241,9 +241,9 @@ class AdaptiveToolWeights:
     def _windowed_success_rate(self, weight: ToolWeight, min_observations: int = 3) -> float:
         """滑动窗口内成功率（A 版思想①）。
 
-        P2-3（OpenSpace quality/types.py:83-116 等价核对）：补**小样本免疫**
+ P2-3：补**小样本免疫**
         ——观测 <min_observations 次不施 rate 罚（一次网络抖动不得把有效权重
-        打到 0；OpenSpace "calls <3 免疫" 同语义）。方向性保留：乘数照常按
+ 打到 0；方向性保留：乘数照常按
         成败累进（阈值齿轮 get_effective_multiplier 消费，不失明）。
 
         回退序：窗口空但有终身观测 → 终身成功率（旧 B 版语义，legacy 数据

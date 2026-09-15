@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """P1-2 会话时间线 JSONL（追加流）+ 读取 + 删除联动。
 
-Codex 对齐（docs/Neurova_Codex代码级对比_2026-09-14.md §2.4/P1-2）：
 - append-only JSONL（<sessions>/<agent>/_timeline/<sid>.jsonl），逐事件一行
 - 读取容错：坏行跳过不炸；limit 取最近 N 条（重放语义）
 - delete_session 联动清理时间线（不留孤儿文件）

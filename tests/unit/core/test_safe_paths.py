@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""safe_paths 跨平台 no-follow 路径原语（Yuxi 对比 P2 #10）。
+"""safe_paths 跨平台 no-follow 路径原语。
 
-对位 Yuxi utils/paths.py 的 openat(dir_fd+O_NOFOLLOW) 链，按 Neurova 的
+按 Neurova 的
 Windows-first 桌面形态移植等价语义：
 - 组件级 symlink/junction 拒绝（Windows is_junction 覆盖 mklink /J 重解析点，
   is_symlink 覆盖符号链接；POSIX 走 O_NOFOLLOW 真原语）

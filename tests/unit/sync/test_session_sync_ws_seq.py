@@ -1,4 +1,4 @@
-"""sync WS 端点 seq 握手契约测试（OpenOcta 启发 P0-1 配套）
+"""sync WS 端点 seq 握手契约测试
 
 - 连接建立先发 sync_hello{next_seq}（纪元探测），后发历史重放（带 seq）
   ——顺序不能反：纪元更迭时客户端必须先重置游标再收重放帧，否则重放

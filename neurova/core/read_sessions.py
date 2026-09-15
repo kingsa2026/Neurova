@@ -1,6 +1,6 @@
 """ReadSessionStore —— 续读游标的进程内存储（browser_read / dom_read 共用）。
 
-对标 Dokobot 的 canContinue+sessionId 分页续读：长内容一次抓取、分片喂给 LLM，
+长内容一次抓取、分片喂给 LLM
 尾部不再被截断丢弃。设计约束：
 
 - 纯内存、有界：LRU 上限 max_sessions（默认 64）+ TTL（默认 30 分钟，懒清理），

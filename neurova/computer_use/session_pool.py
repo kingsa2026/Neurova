@@ -1,4 +1,4 @@
-"""进程内桌面会话池（CUA Phase 3 扩展 RS-3 核心，非 K8s）
+"""进程内桌面会话池
 
 把 Fleet 的 WarmPool/Claim 概念翻译成单进程内的预热/领用/归还/空闲回收。
 provider 抽象隔离"会话从哪来"（Windows Sandbox / 容器 / RDP 直连），池只管生命周期。
@@ -104,7 +104,7 @@ class DesktopSessionPool:
 
 
 # ── 默认池工厂（提供方名优先级：env 显式 > 设置 advanced.desktop_provider
-#    （安全选项卡可配）> 空=无池；与治理设置 env>设置>默认 约定一致）──────────
+# （安全选项卡可配）> 空=无池；与治理设置 env>设置>默认 约定一致）──────────
 
 _default_pool: Optional[DesktopSessionPool] = None
 _default_pool_name: str = ""

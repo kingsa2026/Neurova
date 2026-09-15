@@ -3,7 +3,7 @@
 
 锁定（放大视角根因——这些节点此前对画布"能用"，但三处名不副实）：
 1. storyboard：正则按句拆分 → LLM 真分镜（坏 JSON / 无凭据回退既有规则，增强不替换）；
-   风格+画幅项目锁注入每镜 visual_prompt（火宝式）；
+ 风格+画幅项目锁注入每镜 visual_prompt；
 2. voice-over：只整理台词未接 TTS → 真调 TTS 合成并落盘产物（不可用时诚实标注，
    不再装作只有文本是设计如此）；
 3. scene-gen / video-compose：
@@ -52,7 +52,7 @@ class TestStoryboardLLM:
         assert out["count"] == 2
         assert out.get("fallback") is None or out.get("fallback") is False
         assert out["shots"][0]["narration"] == "他回来了"
-        # 火宝式：风格注入画面提示词
+        # 风格注入画面提示词
         assert "国风水墨" in out["shots"][0]["visual_prompt"]
 
     @pytest.mark.asyncio
@@ -141,7 +141,7 @@ class TestVoiceOverTTS:
 class TestSceneGenProtocols:
     @pytest.mark.asyncio
     async def test_batch_shots_fanout(self, monkeypatch, tmp_path):
-        """逐镜扇出：shots 数组 → 每镜一张图（PRINTFILM 批量生成语义）。"""
+        """逐镜扇出：shots 数组 → 每镜一张图。"""
         from neurova.llm.generators import protocols as proto_mod
         from neurova.llm.generators import runtime as gen_runtime
         from neurova.llm.generators.protocols import ProtocolCredentials

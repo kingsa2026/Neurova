@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""资源型修复（台账 docs/资源型修复登记台账_2026-09-11.md）API 端点域防回归：
+"""资源型修复（台账）API 端点域防回归：
 
 #2  neurflow_api._DEBUG_SESSIONS 无淘汰 → 有界 LRU 注册表（上限
     _DEBUG_SESSIONS_MAX，超限逐出最久未访问条目；collaboration_api 的

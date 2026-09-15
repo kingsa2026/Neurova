@@ -54,7 +54,7 @@ class TestAppContainerReal:
 
     def test_network_is_denied_by_default(self):
         """默认无 internetClient capability → ping 报"无法联系 IP 驱动程序"
-        （网络隔离生效的正向证据，QP 无此能力）"""
+ """
         sb = AppContainerSandbox()
         result = sb.execute("cmd /c ping -n 1 127.0.0.1", timeout=15)
         assert result["success"] is False

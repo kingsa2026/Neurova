@@ -1,4 +1,4 @@
-"""R1-4 /browser/execute 路由单源化（CUA 升级方案 Phase 1，净 LOC ≤ 0）
+"""R1-4 /browser/execute 路由单源化
 
 病根（修复前）：POST /browser/execute 被 register 了两次（computer.py 两处），
 除 _dispatch_browser_command 外还有两份 if/elif 命令映射副本，历史上已漂移。

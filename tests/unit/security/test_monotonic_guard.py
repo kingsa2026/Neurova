@@ -1,6 +1,6 @@
 """单调守卫（Monotonic Guard）单元与集成测试。
 
-设计契约（对齐 DeepSeek Harness 的 guards 语义，见 docs/TDD 备注）：
+设计契约：
 - 守卫只允许返回 DENY 或 ABSTAIN；契约上不存在 ALLOW ——
   "放行"由"没有任何守卫拒绝"推导，杜绝放行式检查成为最弱环节。
 - 守卫自身异常 → fail-closed 视为 DENY（与治理 fail-closed 纪律一致）。

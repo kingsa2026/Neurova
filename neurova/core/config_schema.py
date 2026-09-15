@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-"""配置表单契约单源（Yuxi 对比 P2 #15）。
+"""配置表单契约单源。
 
-对位 Yuxi `MilvusRetrievalConfig` dataclass metadata → `get_query_params_config`
 反射生成前端参数面板。Neurova 前后端键位契约历次漂移（睡眠设置键位、负一屏
 公共字段丢弃、ChannelIntegration 不回填）的共同根因=字段清单前后端各写各的。
 
