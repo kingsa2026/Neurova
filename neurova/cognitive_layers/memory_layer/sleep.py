@@ -208,8 +208,12 @@ class SleepConsolidation:
         self._insights: List[Dict[str, Any]] = []
         # 冲突解决审计记录（多成员簇合并时产生, /conflicts 端点数据源）
         self._conflict_resolutions: List[Dict[str, Any]] = []
-        # 深睡/休眠周期的真实统计留存 —— REM 洞察的唯一来源（无来源如实为空，不编造）
+        # 深睡/休眠周期的真实统计留存 —— REM 洞察的唯一来源（本周期无则取上一周期/
+        # 手动会话的真实统计，无来源如实为空，不编造）
         self._last_cycle_stats: Optional[Dict[str, Any]] = None
+        # 最近一次"完整周期"（浅睡→REM→深睡→休眠，以进入休眠为准）完成时刻。
+        # IdleTimeTracker 据此做 24h 自动入睡冷却（防过度深睡）；随日志落盘跨重启。
+        self._last_cycle_completed_at: Optional[float] = None
         # 梦境/合并/冲突落盘（2026-09-12 未接线功能清剿：四页签重启不丢）
         self._logs_store_path: Optional[str] = logs_store_path
         self._load_logs()
@@ -220,23 +224,23 @@ class SleepConsolidation:
             "dream_replay_enabled": True,
             "memory_consolidation_enabled": True,
             "conflict_resolution_enabled": True,
-            # ── 阶段推进参数（默认值 = 原 idle_tracker 硬编码, 行为零漂移）──
+            # ── 阶段推进参数（链序：浅睡→REM→深睡→休眠，越深阈值越严）──
             "sleep_mode": "temperature",  # temperature | time | either
             "temp_threshold_light_sleep": 30.0,
-            "temp_threshold_deep_sleep": 25.0,
-            "temp_threshold_rem": 20.0,
+            "temp_threshold_rem": 25.0,
+            "temp_threshold_deep_sleep": 20.0,
             "temp_threshold_hibernate": 15.0,
             "idle_threshold_light_sleep": 30,  # 分钟
-            "idle_threshold_deep_sleep": 60,
-            "idle_threshold_rem": 90,
+            "idle_threshold_rem": 60,
+            "idle_threshold_deep_sleep": 90,
             "idle_threshold_hibernate": 120,
             "monitor_interval_seconds": 60,
-            # ── 每阶段最长停留（分钟）：dwell 超时强制向更深推进，休眠超时=整觉完成→醒。
-            #    默认值承接旧 SleepConfigManager(B) 的 PhaseDurations 秒值÷60 ──
-            "phase_max_minutes_light_sleep": 30,
-            "phase_max_minutes_deep_sleep": 60,
-            "phase_max_minutes_rem": 120,
-            "phase_max_minutes_hibernate": 240,
+            # ── 每阶段最长停留（分钟）：dwell 超时强制沿链向下一阶段推进；
+            #    休眠超时=整觉完成→醒。默认=用户定义整觉预算 ──
+            "phase_max_minutes_light_sleep": 120,
+            "phase_max_minutes_rem": 60,
+            "phase_max_minutes_deep_sleep": 180,
+            "phase_max_minutes_hibernate": 120,
         }
         if self._settings_store is not None:
             self._load_settings()
@@ -786,6 +790,17 @@ class SleepConsolidation:
         """累计睡眠周期数"""
         return self._sleep_cycles
 
+    def mark_sleep_cycle_completed(self, at: Optional[float] = None) -> None:
+        """记录一次完整睡眠周期（浅睡→REM→深睡→休眠）完成时刻（系统时间）。
+
+        at 仅供测试注入；默认 time.time()。落盘随日志。
+        """
+        self._last_cycle_completed_at = at if at is not None else time.time()
+        self.persist_logs()
+
+    def get_sleep_cycle_completed_at(self) -> Optional[float]:
+        return self._last_cycle_completed_at
+
     def start_sleep(self, duration_minutes: Optional[int] = None) -> Dict[str, Any]:
         """主动进入睡眠：立即执行一轮真实的记忆整理并写回
 
@@ -915,6 +930,8 @@ class SleepConsolidation:
                 self._merge_history = list(raw.get("merge_history", []))
                 self._insights = list(raw.get("insight_logs", []))
                 self._conflict_resolutions = list(raw.get("conflict_resolutions", []))
+                _lcc = raw.get("last_cycle_completed_at")
+                self._last_cycle_completed_at = float(_lcc) if isinstance(_lcc, (int, float)) else None
         except Exception as e:  # noqa: BLE001
             logger.warning("Failed to load sleep logs from %s: %s", self._logs_store_path, e)
 
@@ -934,6 +951,7 @@ class SleepConsolidation:
                 "merge_history": self._merge_history[-self._MAX_MERGE_HISTORY:],
                 "insight_logs": self._insights[: self._MAX_INSIGHTS],
                 "conflict_resolutions": self._conflict_resolutions[: 2 * self._MAX_MERGE_HISTORY],
+                "last_cycle_completed_at": self._last_cycle_completed_at,
             }
             tmp = p.with_name(p.name + ".tmp")
             tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

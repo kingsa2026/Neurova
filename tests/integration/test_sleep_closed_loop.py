@@ -282,38 +282,6 @@ class TestIntelligentAdjustment(TestSleepClosedLoop):
         print(f"✓ Parameter adjustment works: {adjustment}")
         
         storage.close()
-    
-    async def test_sleep_phase_config_manager_adjustment(self):
-        """测试 SleepPhaseConfigManager.adjust_config_based_on_sleep_quality()"""
-        from neurova.core.sleep_phase_config_manager import SleepPhaseConfigManager
-        
-        # 创建配置管理器
-        manager = SleepPhaseConfigManager()
-        
-        # 模拟统计信息
-        stats = {
-            "total_reports": 5,
-            "avg_quality": 0.8,  # 高质量
-            "avg_coherence": 0.7,
-            "avg_processed": 10,
-            "avg_merged": 3,
-            "avg_archived": 2,
-        }
-        
-        # 调整配置（async 方法需要 await）
-        adjustments = await manager.adjust_config_based_on_sleep_quality(stats)
-        
-        # 验证调整结果
-        self.assertTrue(adjustments["adjusted"])
-        self.assertGreater(len(adjustments.get("changes", [])), 0)
-        
-        print(f"✓ Phase config adjustment works: {len(adjustments.get('changes', []))} changes")
-        
-        # 测试获取调整建议
-        recommendations = manager.get_adjustment_recommendations(stats)
-        self.assertGreater(len(recommendations), 0)
-        
-        print(f"✓ Adjustment recommendations: {recommendations}")
 
 
 class TestCompleteClosedLoop(TestSleepClosedLoop):

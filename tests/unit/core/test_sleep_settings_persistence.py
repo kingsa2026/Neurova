@@ -101,12 +101,15 @@ class TestIdleThresholdGate:
         assert t.check_and_update_phase() == "light_sleep"
 
     def test_gate_not_applied_to_deeper_transitions(self, consolidation):
-        """已处于睡眠阶段时, 深化迁移不受该门限制 (空闲从阶段起点计)"""
+        """已处于睡眠阶段时, 深化迁移不受该门限制 (空闲从阶段起点计)。
+
+        链序 浅睡→REM→深睡→休眠：从浅睡深化下一站是 REM（阶段持续 60min ≥ REM 空闲阈值）。
+        """
         t = self._tracker(consolidation, 30)
         t._current_phase = "light_sleep"
         t._phase_start_time = time.time() - 3600  # 阶段持续 60 分钟
 
-        assert t.check_and_update_phase() == "deep_sleep"
+        assert t.check_and_update_phase() == "rem"
 
     def test_zero_threshold_disables_gate(self, consolidation):
         t = self._tracker(consolidation, 0)

@@ -38,11 +38,11 @@ class TestSleepPhaseThresholds:
         assert thresholds.idle_hibernate == 43200
 
     def test_default_thresholds(self):
-        """测试默认阈值"""
+        """默认阈值（链序 浅睡→REM→深睡→休眠，REM 空闲门槛先于深睡达成）"""
         thresholds = SleepPhaseThresholds()
         assert thresholds.idle_light_sleep == 1800
-        assert thresholds.idle_deep_sleep == 3600
-        assert thresholds.idle_rem == 5400
+        assert thresholds.idle_rem == 3600
+        assert thresholds.idle_deep_sleep == 5400
         assert thresholds.idle_hibernate == 7200
 
 
@@ -270,8 +270,8 @@ class TestIdleTimeTracker:
         assert tracker.get_current_idle_time() == 0
 
     def test_phase_order(self, tracker):
-        """测试阶段顺序"""
-        assert tracker.PHASE_ORDER == ["active", "light_sleep", "deep_sleep", "rem", "hibernate"]
+        """阶段链序（2026-09-15 用户定义）：活跃→浅睡→REM→深睡→休眠"""
+        assert tracker.PHASE_ORDER == ["active", "light_sleep", "rem", "deep_sleep", "hibernate"]
 
     def test_temperature_thresholds(self, tracker):
         """测试温度阈值（内置默认，light_sleep=30）"""
