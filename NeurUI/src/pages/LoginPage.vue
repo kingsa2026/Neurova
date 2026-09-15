@@ -1,8 +1,31 @@
 <template>
   <div class="nr-auth-page">
-    <StarBackground v-if="appStore.isDark" />
+    <Galaxy
+      v-if="appStore.isDark"
+      :hue-shift="140"
+      :rotation="[0.8660254, 0.5]"
+      :saturation="0.6"
+      :glow-intensity="0.4"
+      :twinkle-intensity="0.1"
+      :rotation-speed="0.1"
+      :density="0.6"
+      :star-speed="0.4"
+      :speed="0.9"
+      :repulsion-strength="1.9"
+    />
     <div class="nr-auth-container">
-      <GlassPanel variant="elevated" :radius="24" padding="40px 36px">
+      <!-- GlassSurface 采用官方 live demo 字面值（经 /glass-demo 三变量对照实拍定案）：
+           组件默认 brightness 50 / opacity 0.93 / blur 11 / distortion -180 / offsets 0·10·20 /
+           difference，此处仅覆写 radius 27、bgOpacity 0.12、displace 0.5。
+           参数为绝对像素语义，不做任何按尺寸的比例放大（放大位移量会把文字扯飞，见 D 实验）。 -->
+      <GlassSurface
+        width="100%"
+        height="auto"
+        :border-radius="27"
+        :background-opacity="0.12"
+        :displace="0.5"
+        padding="40px 36px"
+      >
         <div class="nr-auth-header">
           <BrandLogo size="lg" />
         </div>
@@ -149,7 +172,7 @@
             {{ t('auth.register') }}
           </router-link>
         </div>
-      </GlassPanel>
+      </GlassSurface>
     </div>
   </div>
 </template>
@@ -161,9 +184,9 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { authAPI } from '@/api/auth'
-import StarBackground from '@/components/StarBackground.vue'
+import Galaxy from '@/components/Galaxy.vue'
 import BrandLogo from '@/components/BrandLogo.vue'
-import GlassPanel from '@/components/GlassPanel.vue'
+import GlassSurface from '@/components/GlassSurface.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassInput from '@/components/GlassInput.vue'
 
@@ -313,7 +336,8 @@ async function handleLogin() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--nr-bg-deep);
+  /* 深空蓝底色：Galaxy 为透明模式画布，星流叠加在本底色上 */
+  background: #090020;
   overflow: hidden;
 }
 
@@ -323,7 +347,9 @@ async function handleLogin() {
   width: 100%;
   max-width: 420px;
   padding: 20px;
-  animation: auth-enter 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* fill 禁用 forwards/both：动画结束后残留的 transform（哪怕恒等矩阵）会把本容器
+     变成 backdrop 采样边界，GlassSurface 的折射采不到页面背景（2026-09-15 A/B 实拍定案） */
+  animation: auth-enter 0.6s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 @keyframes auth-enter {
@@ -331,9 +357,9 @@ async function handleLogin() {
     opacity: 0;
     transform: translateY(24px) scale(0.96);
   }
+  /* to 帧不声明 transform：插值终点取基线值 none，动画结束后常态无 transform */
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
   }
 }
 

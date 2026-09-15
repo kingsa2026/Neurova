@@ -58,8 +58,8 @@ const messages = {
 }
 
 const stubs = {
-  StarBackground: true,
-  GlassPanel: { template: '<div><slot/></div>' },
+  Galaxy: true,
+  GlassSurface: { template: '<div><slot/></div>' },
   GlassButton: {
     props: ['variant', 'size', 'loading'],
     emits: ['click'],

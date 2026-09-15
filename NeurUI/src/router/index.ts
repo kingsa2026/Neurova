@@ -24,6 +24,12 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/pages/ForgotPasswordPage.vue'),
     meta: { guest: true },
   },
+  // 临时诊断页：GlassSurface 官方 demo 复刻（视觉找差用，验收后可移除）
+  {
+    path: '/glass-demo',
+    name: 'GlassDemo',
+    component: () => import('@/pages/GlassDemoPage.vue'),
+  },
   // 条款/隐私为公开页（登录与否都可查看；注册/登录页引用）
   {
     path: '/terms',
