@@ -740,13 +740,13 @@ async def install_from_zip(
             content = await file.read()
             with open(zip_path, "wb") as f:
                 f.write(content)
-            service = _install_target_service(target, current_user)
+            service, pool, owner = _install_target(target, current_user)
             skill_id = (file.filename or "skill").replace(".zip", "") or None
             result = service.install_skill(
                 skill_path=zip_path,
                 skill_id=skill_id,
-                pool_type=POOL_USER if str(target or "").lower() == "me" else POOL_AGENT,
-                owner_user_id=_account_key(current_user) if str(target or "").lower() == "me" else "default",
+                pool_type=pool,
+                owner_user_id=owner,
             )
             return {"success": True, "message": "Skill installed from ZIP", "result": result}
     except ValueError as bad:
