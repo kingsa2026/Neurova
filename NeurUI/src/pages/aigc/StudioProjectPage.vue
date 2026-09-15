@@ -562,7 +562,7 @@ defineExpose({
 .studio-shot-card { border: 1px solid var(--nr-border, rgba(255,255,255,.08)); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
 .studio-shot-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .studio-shot-no { font-weight: 700; color: var(--nr-text-primary); }
-.studio-shot-error { font-size: 12px; color: #ff4d4f; }
+.studio-shot-error { font-size: 12px; color: #ff4d4f; flex: 1; min-width: 0; word-break: break-word; }
 .studio-shot-grid { display: grid; grid-template-columns: 180px 1fr; gap: 14px; }
 .studio-shot-img { width: 100%; border-radius: 8px; }
 .studio-shot-lastframe { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
