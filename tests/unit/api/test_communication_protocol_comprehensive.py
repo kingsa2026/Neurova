@@ -152,7 +152,7 @@ class TestHandshakeRequest:
     def test_creation_minimal(self):
         req = HandshakeRequest(
             client_id="agent_001",
-            client_type="hermes",
+            client_type="external_agent",
             client_version="1.0",
             capabilities=[],
         )
@@ -163,7 +163,7 @@ class TestHandshakeRequest:
     def test_creation_full(self):
         req = HandshakeRequest(
             client_id="agent_001",
-            client_type="hermes",
+            client_type="external_agent",
             client_version="1.0",
             capabilities=["memory_access", "streaming"],
             metadata={"source": "test"},
@@ -174,7 +174,7 @@ class TestHandshakeRequest:
     def test_to_dict(self):
         req = HandshakeRequest(
             client_id="agent_001",
-            client_type="hermes",
+            client_type="external_agent",
             client_version="1.0",
             capabilities=["memory_access"],
             metadata={"source": "test"},
@@ -186,7 +186,7 @@ class TestHandshakeRequest:
     def test_from_dict(self):
         data = {
             "client_id": "agent_002",
-            "client_type": "openclaw",
+            "client_type": "sub_agent",
             "client_version": "2.0",
             "capabilities": ["streaming"],
         }
@@ -196,7 +196,7 @@ class TestHandshakeRequest:
 
     def test_from_json(self):
         req = HandshakeRequest.from_json(
-            '{"client_id": "x", "client_type": "hermes", "client_version": "1.0", "capabilities": []}'
+            '{"client_id": "x", "client_type": "external_agent", "client_version": "1.0", "capabilities": []}'
         )
         assert req.client_id == "x"
 
@@ -260,7 +260,7 @@ class TestCommunicationProtocol:
     def test_create_handshake_request(self):
         req = self.proto.create_handshake_request(
             client_id="agent_1",
-            client_type="hermes",
+            client_type="external_agent",
             client_version="1.0",
             capabilities=["streaming"],
             auth_token="sk-xxx",
@@ -272,7 +272,7 @@ class TestCommunicationProtocol:
     def test_create_handshake_request_no_capabilities(self):
         req = self.proto.create_handshake_request(
             client_id="agent_1",
-            client_type="hermes",
+            client_type="external_agent",
             client_version="1.0",
             capabilities=[],
         )
@@ -294,7 +294,7 @@ class TestCommunicationProtocol:
 
     def test_validate_handshake_version_mismatch(self):
         req = HandshakeRequest(
-            client_id="a1", client_type="hermes", client_version="0.5",
+            client_id="a1", client_type="external_agent", client_version="0.5",
             capabilities=[], supported_versions=["0.5"],
         )
         success, error = self.proto.validate_handshake(req)
@@ -311,7 +311,7 @@ class TestCommunicationProtocol:
 
     def test_validate_handshake_success(self):
         req = HandshakeRequest(
-            client_id="a1", client_type="hermes", client_version="1.0",
+            client_id="a1", client_type="external_agent", client_version="1.0",
             capabilities=[],
         )
         success, error = self.proto.validate_handshake(req)
@@ -398,7 +398,7 @@ class TestCommunicationProtocol:
 
     def test_process_handshake_accepted(self):
         req = self.proto.create_handshake_request(
-            client_id="agent_1", client_type="hermes",
+            client_id="agent_1", client_type="external_agent",
             client_version="1.0", capabilities=["streaming"],
         )
         msg = self.proto.create_message(

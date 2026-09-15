@@ -52,6 +52,7 @@ vi.mock('@/api/modules/sleep', () => ({
   getDreams: vi.fn().mockResolvedValue({ data: { items: [] } }),
   getSleepInsights: vi.fn().mockResolvedValue({ data: [] }),
   getMergeConflicts: vi.fn().mockResolvedValue({ data: [] }),
+  getMemoryMerges: vi.fn().mockResolvedValue({ data: [] }),
   getSleepSettings: vi.fn().mockResolvedValue({ data: {} }),
   updateSleepSettings: vi.fn().mockResolvedValue({ data: {} }),
   wakeUp: vi.fn().mockResolvedValue({ data: {} }),
