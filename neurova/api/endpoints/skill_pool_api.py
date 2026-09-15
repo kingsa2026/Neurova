@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from pydantic import BaseModel, Field
 
 from neurova.api.deps import get_current_user, require_admin
+from neurova.skills.skill_service import SkillService
 from neurova.api.endpoints.marketplace import (
     MarketplaceSkillSubmit,
     SkillSubmissionReview,
@@ -35,7 +36,13 @@ from neurova.api.endpoints.marketplace import (
 from neurova.api.endpoints._pydantic_compat import safe_model_dump
 
 logger = get_logger(__name__)
-router = APIRouter()
+
+# Wave F（2026-09-15 基线巡检存量债收口）：router 级登录鉴权——此前 /private
+# CRUD、install-from-*、pending 审批面、agent/{id}/skills 全部裸奔，query
+# agent_id 被当所有权凭据，任何未认证请求可读写他人 agent 技能。对齐
+# /v1/agents 资源先例（登录即可操作，agent 是登录用户共享的运行时资产；
+# 不建 agent-user 归属表）。admin-only 的提交审核面自带 require_admin 叠加。
+router = APIRouter(dependencies=[Depends(get_current_user)])
 
 
 class SkillInfo(BaseModel):
@@ -49,6 +56,8 @@ class SkillInfo(BaseModel):
     enabled: bool = True
     created_at: float = 0
     updated_at: float = 0
+    # Wave F：共享标志（落 manifest config.shared，列表回显供前端徽标）
+    shared: bool = False
     # 生命周期与用量（前端状态徽标数据源；C11 遥测延伸）
     usage: Dict[str, Any] = Field(default_factory=dict)
 
@@ -68,7 +77,7 @@ class SkillUpdate(BaseModel):
 
 
 class SkillShare(BaseModel):
-    target_user_id: str = Field(..., description="目标用户 ID")
+    target_user_id: str = Field(default="", description="目标用户 ID（可空=公开共享标记）")
 
 
 class SkillPush(BaseModel):
@@ -76,11 +85,25 @@ class SkillPush(BaseModel):
 
 
 _public_skills: Dict[str, Dict[str, Any]] = {}
-_private_skills: Dict[str, Dict[str, Any]] = {}
 
-# s8: RLock 保护共享 dict 状态, 防 TOCTOU race (多线程部署时 create/update/delete
-# 的 read-modify-write 临界区). RLock (非 Lock) 因 list 端点可能间接调用其他持锁方法.
+# Wave F：_private_skills 内存 dict 已废除（双轨合一）——private 技能的唯一
+# 事实源是 SkillService manifest（data/agents/{agent_id}/skills/manifest.json，
+# 自带 RLock + 原子写 + usage 遥测）。原内存轨 create 重启即丢、与磁盘
+# manifest 互不可见（split-brain 的另一半）。
+# s8: RLock 仍保护 _public_skills（公共演示轨，读写方均在锁内）。
 _lock = threading.RLock()
+
+
+def _pool_service(agent_id: str) -> SkillService:
+    """private 链统一服务入口。
+
+    经模块属性延迟解析类（非 from-import 快照）——保证测试 monkeypatch
+    neurova.skills.skill_service.SkillService 对端点生效，也避免旧 s2 时代
+    靠打桩类隔离落盘的契约回归为"真写 data/ 污染"。
+    """
+    from neurova.skills import skill_service as _ss_mod
+
+    return _ss_mod.SkillService(agent_id=agent_id)
 
 
 # s5: 已删除 _get_spm() (死代码, 零调用方).
@@ -129,140 +152,178 @@ async def install_public_skill(
 
 @router.get("/private", response_model=List[SkillInfo])
 async def list_private_skills(agent_id: str = Query(default="default")):
-    """列出专属技能 (聚合多数据源)
+    """列出专属技能——Wave F 起单源：SkillService manifest（磁盘持久）。
 
-    修复 (s2 P0 #1): 原仅读 _private_skills (API 内存状态), 导致通过
-    POST /install-from-url 或 /install-from-zip 安装的技能 (SkillService 磁盘 manifest)
-    在前端 SkillPoolPage 不可见 — split-brain.
-    改为聚合:
-      源1: _private_skills (POST /private 创建, 按 owner_id == agent_id 过滤)
-      源2: SkillService(agent_id=agent_id).list_skills() (安装, 磁盘持久化)
-    SkillRegistry 不纳入 /private (global 走 /public).
-
-    修复 (s4 P1 #6): 参数名 user_id → agent_id, 对齐前端
-    skill-pool.ts:53-55 的 getPrivateSkills(agentId) 发送 ?agent_id=xxx.
-
-    修复 (s8): 加 _lock 保护 _private_skills 迭代, 防并发修改.
+    历史（s2 修复曾聚合"内存 dict + 磁盘"两源治 split-brain）；Wave F 把
+    create 侧也落到磁盘后，聚合逻辑删除——单源不存在漂移。s4 参数名对齐
+    前端 ?agent_id=xxx 契约保持不变。
     """
-    # 源1: API 内存状态 (按 owner_id 过滤), 在锁内复制避免迭代时被并发修改
-    with _lock:
-        result = [
-            SkillInfo(**s)
-            for s in _private_skills.values()
-            if s.get("owner_id") == agent_id
-        ]
-
-    # 源2: SkillService 磁盘持久化技能 (锁外执行, 避免 I/O 阻塞持锁)
+    result: List[SkillInfo] = []
     try:
-        from neurova.skills.skill_service import SkillService
-
-        service = SkillService(agent_id=agent_id)
-        for s in service.list_skills():
+        service = _pool_service(agent_id)
+        for sid, info in service.iter_skills():
+            manifest = info.get("manifest") or {}
+            cfg = manifest.get("config") or {}
             result.append(
                 SkillInfo(
-                    skill_id=s.get("id", ""),
-                    name=s.get("name", ""),
-                    description=s.get("description", ""),
-                    version=s.get("version", "1.0.0"),
-                    enabled=s.get("enabled", True),
+                    skill_id=sid,
+                    name=str(info.get("name") or sid),
+                    description=str(info.get("description") or ""),
+                    version=str(info.get("version") or "1.0.0"),
+                    enabled=bool(info.get("enabled", True)),
                     scope="private",
                     owner_id=agent_id,
-                    usage=s.get("usage") or {},
+                    category=str(cfg.get("category") or "general"),
+                    shared=bool(cfg.get("shared")),
+                    usage=info.get("usage") or {},
                 )
             )
     except Exception as e:
-        # 优雅降级: 保留源1结果, 记录日志 (不静默吞)
-        logger.exception(
-            "list_private_skills: SkillService aggregation failed for agent_id=%s: %s",
-            agent_id,
-            e,
-        )
-
+        # 优雅降级：磁盘读失败记录日志返回空（不静默吞）
+        logger.exception("list_private_skills failed for agent_id=%s: %s", agent_id, e)
     return result
 
 
 @router.post("/private", response_model=SkillInfo)
 async def create_private_skill(body: SkillCreate, agent_id: str = Query(default="default")):
-    """创建专属技能
+    """创建专属技能——Wave F 落盘化（原内存 dict 重启即丢）。
 
-    s6 (WARTN 2): 参数名 user_id → agent_id, 与 list_private_skills 对齐.
-    前端 skill-pool.ts 的 createSkill 不传此参数 (走默认 default), 故改名
-    不破坏前端契约; 但同模块参数名一致后, 未来调用方传 ?agent_id=xxx
-    创建→查询链路不再断裂.
-
-    s8: 加 _lock 保护 _private_skills 写入.
-    s9: 改用 safe_model_dump 替代 inline getattr fallback (统一 helper).
+    manifest 条目 source 走 register_auto_skill 通道（origin auto），但归属
+    视图按 agent_id 隔离；config 携带用户侧 category/description 语义。
     """
-    with _lock:
-        sid = str(uuid.uuid4())
-        now = time.time()
-        skill = {
-            "skill_id": sid,
-            "name": body.name,
-            "description": body.description,
-            "category": body.category,
-            "scope": "private",
-            "owner_id": agent_id,
-            "enabled": True,
-            "created_at": now,
-            "updated_at": now,
-        }
-        _private_skills[sid] = skill
-        return SkillInfo(**skill)
+    sid = str(uuid.uuid4())[:8]
+    now = time.time()
+    service = _pool_service(agent_id)
+    ok = service.register_auto_skill(
+        sid,
+        name=body.name,
+        description=body.description,
+        config={**(body.config or {}), "category": body.category},
+        manifest_source="user",
+    )
+    if not ok:
+        raise HTTPException(status_code=409, detail="技能创建失败（同名或存储故障）")
+    return SkillInfo(
+        skill_id=sid,
+        name=body.name,
+        description=body.description,
+        category=body.category,
+        scope="private",
+        owner_id=agent_id,
+        enabled=True,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 @router.put("/private/{skill_id}", response_model=SkillInfo)
 async def update_private_skill(skill_id: str, body: SkillUpdate, agent_id: str = Query(default="default")):
-    """更新专属技能
-
-    s6 (WARTN 2): 参数名 user_id → agent_id, 与 list_private_skills 对齐.
-    s6 附带修复: model_dump() 在 pydantic v1 下 AttributeError, 改用 safe_model_dump (s9 统一).
-    s8: 加 _lock 保护 read-modify-write 临界区, 防 TOCTOU race.
-    """
-    with _lock:
-        skill = _private_skills.get(skill_id)
-        if not skill:
-            raise HTTPException(status_code=404, detail="Skill not found")
-        if skill.get("owner_id") != agent_id:
-            raise HTTPException(status_code=403, detail="Permission denied")
-        for k, v in safe_model_dump(body, exclude_none=True).items():
-            skill[k] = v
-        skill["updated_at"] = time.time()
-        return SkillInfo(**skill)
+    """更新专属技能（磁盘 manifest 单源；跨 agent 视图查无 → 404）。"""
+    service = _pool_service(agent_id)
+    info = service.get_skill_info(skill_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    patch = safe_model_dump(body, exclude_none=True)
+    merged_cfg = dict((info.get("manifest") or {}).get("config") or {})
+    if "category" in patch:
+        merged_cfg["category"] = patch.pop("category")
+    if "config" in patch:
+        merged_cfg.update(patch.pop("config") or {})
+    ok = service.update_auto_skill(
+        skill_id,
+        version=None,
+        config=merged_cfg or None,
+        name=patch.get("name"),
+        description=patch.get("description"),
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="更新落盘失败")
+    fresh = service.get_skill_info(skill_id) or info
+    cfg = (fresh.get("manifest") or {}).get("config") or {}
+    return SkillInfo(
+        skill_id=skill_id,
+        name=str(fresh.get("name") or skill_id),
+        description=str(fresh.get("description") or ""),
+        version=str(fresh.get("version") or "1.0.0"),
+        enabled=bool(fresh.get("enabled", True)),
+        scope="private",
+        owner_id=agent_id,
+        category=str(cfg.get("category") or "general"),
+        shared=bool(cfg.get("shared")),
+        usage=fresh.get("usage") or {},
+    )
 
 
 @router.delete("/private/{skill_id}")
 async def delete_private_skill(skill_id: str, agent_id: str = Query(default="default")):
-    """删除专属技能
-
-    s6 (WARTN 2): 参数名 user_id → agent_id, 与 list_private_skills 对齐.
-    s8: 加 _lock 保护 _private_skills 删除.
-    """
-    with _lock:
-        skill = _private_skills.get(skill_id)
-        if not skill:
-            raise HTTPException(status_code=404, detail="Skill not found")
-        if skill.get("owner_id") != agent_id:
-            raise HTTPException(status_code=403, detail="Permission denied")
-        del _private_skills[skill_id]
-        return {"code": 0, "message": "Skill deleted"}
+    """删除专属技能（manifest 条目移除；纯元数据条目无文件可删即仅清账）。"""
+    service = _pool_service(agent_id)
+    if service.get_skill_info(skill_id) is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    result = service.uninstall_skill(skill_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "删除失败"))
+    return {"code": 0, "message": "Skill deleted"}
 
 
 @router.post("/private/{skill_id}/share")
-async def share_private_skill(skill_id: str, body: SkillShare):
-    """共享专属技能"""
-    return {"code": 0, "message": f"Skill shared with {body.target_user_id}"}
+async def share_private_skill(skill_id: str, body: SkillShare, agent_id: str = Query(default="default")):
+    """共享专属技能——Wave F 真实现：config.shared/shared_with 落盘。
+
+    原实现恒返回成功不持久（前端不传 body 时还恒 422）。桌面多用户语义下
+    "共享"=池内对该 agent 视图外的成员可见标记，真实分发通道随后续
+    多用户需求另立项。
+    """
+    service = _pool_service(agent_id)
+    info = service.get_skill_info(skill_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    cfg = dict((info.get("manifest") or {}).get("config") or {})
+    cfg["shared"] = True
+    target = str(body.target_user_id or "")
+    if target:
+        lst = [x for x in (cfg.get("shared_with") or []) if isinstance(x, str)]
+        if target not in lst:
+            lst.append(target)
+        cfg["shared_with"] = lst
+    if not service.update_auto_skill(skill_id, config=cfg):
+        raise HTTPException(status_code=500, detail="共享状态落盘失败")
+    return {"code": 0, "message": f"Skill shared with {target or 'pool members'}"}
 
 
 @router.post("/private/{skill_id}/push")
-async def push_skill_to_agent(skill_id: str, body: SkillPush):
-    """推送技能到 Agent"""
+async def push_skill_to_agent(skill_id: str, body: SkillPush, agent_id: str = Query(default="default")):
+    """推送技能到 Agent——Wave F 真实现：条目复制到目标 agent manifest（幂等）。"""
+    if not body.agent_id or body.agent_id == agent_id:
+        raise HTTPException(status_code=400, detail="目标 agent 无效（需不同于源视图）")
+    src = _pool_service(agent_id).get_skill_info(skill_id)
+    if src is None:
+        raise HTTPException(status_code=404, detail=f"源技能不存在: {skill_id}")
+    dst = _pool_service(body.agent_id)
+    if dst.get_skill_info(skill_id) is not None:
+        return {"code": 0, "message": f"Skill already pushed to agent '{body.agent_id}'"}
+    cfg = dict((src.get("manifest") or {}).get("config") or {})
+    if not dst.register_auto_skill(
+        skill_id,
+        name=str(src.get("name") or skill_id),
+        description=str(src.get("description") or ""),
+        version=str(src.get("version") or "1.0.0"),
+        config=cfg,
+        manifest_source=str((src.get("manifest") or {}).get("source") or "user"),
+    ):
+        raise HTTPException(status_code=500, detail="推送落盘失败")
     return {"code": 0, "message": f"Skill pushed to agent '{body.agent_id}'"}
 
 
 @router.delete("/private/{skill_id}/push")
 async def unpush_skill_from_agent(skill_id: str, agent_id: str = Query(default="default")):
-    """取消推送"""
+    """取消推送——从指定 agent（query agent_id 即目标）移除条目。"""
+    service = _pool_service(agent_id)
+    if service.get_skill_info(skill_id) is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    result = service.uninstall_skill(skill_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("error", "取消推送失败"))
     return {"code": 0, "message": f"Skill unpushed from agent '{agent_id}'"}
 
 
