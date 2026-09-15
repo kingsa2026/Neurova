@@ -8,10 +8,10 @@
  * R2 新增：反向提示词、画幅 chips、张数、seed、i2i 相似度（低/中/高→strength）、
  * 能力自适应——服务商忽略的参数经 ignored_params 显式提示（不静默丢弃）。
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
-import { generateImage as apiGenerateImage } from '@/api/modules/generation'
+import { generateImage as apiGenerateImage, resolveGeneration } from '@/api/modules/generation'
 import { uploadFile } from '@/api/modules/files'
 import { useAigcModels } from '@/composables/useAigcModels'
 import { withFileToken } from '@/utils/genFiles'
@@ -56,6 +56,22 @@ const numImages = ref(1)
 const seed = ref<number | null>(null)
 const template = ref('default')
 const model = ref('auto')
+// 2026-09-15 自适应：协议由后端按「模型→服务商 base_url」同源推导
+// （GET /generation/resolve）只读展示；auto 态提交时后端能力路由后同口径推导。
+const derived = ref<{ protocol: string; providerId: string } | null>(null)
+let deriveSeq = 0
+watch(model, async (m) => {
+  if (m === 'auto') { derived.value = null; return }
+  const seq = ++deriveSeq
+  const pid = providerOf(m)
+  try {
+    const res: any = await resolveGeneration('image', m, pid || undefined)
+    const d = res?.data ?? res
+    if (seq === deriveSeq && d?.protocol) {
+      derived.value = { protocol: d.protocol, providerId: d.provider_id || pid }
+    }
+  } catch { /* 推导服务不可用不阻断：提交路径服务端同样自适应推导 */ }
+})
 const generating = ref(false)
 const results = ref<{ url: string; prompt: string }[]>([])
 const previewVisible = ref(false)
@@ -169,6 +185,13 @@ function preview(img: { url: string }) {
           </a-form-item>
           <a-form-item :label="t('aigc.model')">
             <a-select v-model:value="model" class="model-select-image" :options="imageModelOptions" :placeholder="t('aigc.selectModel')" show-search />
+            <div class="aigc-derived-hint">
+              <template v-if="derived">
+                <a-tag color="blue">{{ t('aigc.protocol') }}: {{ derived.protocol }}</a-tag>
+                <a-tag v-if="derived.providerId">{{ t('aigc.providerId') }}: {{ derived.providerId }}</a-tag>
+              </template>
+              <span v-else-if="model === 'auto'">{{ t('aigc.protocolAuto') }}</span>
+            </div>
           </a-form-item>
           <GlassButton variant="primary" :loading="generating" @click="generate">
             {{ t('aigc.generate') }}

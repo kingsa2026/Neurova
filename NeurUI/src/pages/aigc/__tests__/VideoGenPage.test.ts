@@ -12,16 +12,19 @@ vi.mock('@/utils/security', () => ({
 vi.mock('@/api/modules/models', () => ({
   listModels: vi.fn().mockResolvedValue([
     { model_id: 'wan2.2-t2v', name: 'Wan', provider: 'p', capabilities: ['video_generation'] },
+    { model_id: 'sora-2-pro', name: 'Sora 2 Pro', provider: 'openai', capabilities: ['video_generation'] },
     { model_id: 'flux.1-dev', name: 'FLUX', provider: 'p', capabilities: ['image_generation'] },
   ]),
 }))
 const submitVideoMock = vi.fn()
 const generateImageMock = vi.fn()
+const resolveGenerationMock = vi.fn()
 vi.mock('@/api/modules/generation', () => ({
   generateText: vi.fn(),
   generateImage: (p: any) => generateImageMock(p),
   generateAudio: vi.fn(),
   submitVideo: (p: any) => submitVideoMock(p),
+  resolveGeneration: (kind: string, model: string, pid?: string) => resolveGenerationMock(kind, model, pid),
   listGenerationTasks: vi.fn().mockResolvedValue({ code: 0, data: { tasks: [] } }),
 }))
 const uploadFileMock = vi.fn()
@@ -115,6 +118,54 @@ describe('VideoGenPage', () => {
     vm.prompt = 'p'
     await vm.generate()
     expect(submitVideoMock.mock.calls[0][0].ref_images).toEqual(['C:/proj/storage/users/u1/frame.png'])
+    wrapper.unmount()
+  })
+
+  // ── 2026-09-15 模型自适应（协议/服务商不再手填）───────────────────────
+  it('无手填「生成协议/服务商 ID」输入（改自适应推导）', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    expect(vm.protocol).toBeUndefined()
+    expect(vm.providerId).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('选具体模型 → 调 /generation/resolve 自适应展示协议与服务商', async () => {
+    resolveGenerationMock.mockReset()
+    resolveGenerationMock.mockResolvedValue({ data: { protocol: 'sora', provider_id: 'openai' } })
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.model = 'sora-2-pro'
+    await flushPromises()
+    expect(resolveGenerationMock).toHaveBeenCalledWith('video', 'sora-2-pro', 'openai')
+    expect(wrapper.find('.aigc-derived-hint').text()).toContain('sora')
+    wrapper.unmount()
+  })
+
+  it('auto 态不查推导，提示自动识别', async () => {
+    resolveGenerationMock.mockReset()
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(resolveGenerationMock).not.toHaveBeenCalled()
+    expect(wrapper.find('.aigc-derived-hint').text()).toContain('自动识别')
+    wrapper.unmount()
+  })
+
+  it('提交载荷=model+provider_id 反查，不传 protocol（服务端推导）', async () => {
+    resolveGenerationMock.mockResolvedValue({ data: { protocol: 'sora', provider_id: 'openai' } })
+    const wrapper = mountPage()
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.prompt = 'p'
+    vm.model = 'sora-2-pro'
+    vm.staticFirst = false
+    await vm.generate()
+    const payload = submitVideoMock.mock.calls[0][0]
+    expect(payload.model).toBe('sora-2-pro')
+    expect(payload.provider_id).toBe('openai')
+    expect('protocol' in payload).toBe(false)
     wrapper.unmount()
   })
 })
