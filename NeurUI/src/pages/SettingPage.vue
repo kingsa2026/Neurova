@@ -193,6 +193,36 @@
           </template>
         </GlassCard>
 
+        <!-- 技能召回与进化（OpenSpace 对比落地三开关，默认全开） -->
+        <GlassCard :title="t('settings.skillRecallTitle')">
+          <p class="governance-hint">{{ t('settings.skillRecallHint') }}</p>
+          <a-form layout="vertical">
+            <a-form-item :label="t('settings.skillCatalogEnabled')">
+              <a-switch v-model:checked="advanced.skill_catalog_enabled" />
+              <p class="governance-hint">{{ t('settings.skillCatalogEnabledHint') }}</p>
+            </a-form-item>
+            <a-form-item :label="t('settings.skillSchemaBudget')">
+              <a-switch v-model:checked="advanced.skill_schema_budget_enabled" />
+              <p class="governance-hint">{{ t('settings.skillSchemaBudgetHint') }}</p>
+            </a-form-item>
+            <a-form-item :label="t('settings.evolutionQueue')">
+              <a-switch v-model:checked="advanced.evolution_queue_enabled" />
+              <p class="governance-hint">{{ t('settings.evolutionQueueHint') }}</p>
+            </a-form-item>
+            <a-form-item :label="t('settings.skillSemanticRecall')">
+              <a-switch v-model:checked="advanced.skill_semantic_recall_enabled" />
+              <p class="governance-hint">{{ t('settings.skillSemanticRecallHint') }}</p>
+            </a-form-item>
+            <a-form-item :label="t('settings.toolSearchEnabled')">
+              <a-switch v-model:checked="advanced.tool_search_enabled" />
+              <p class="governance-hint">{{ t('settings.toolSearchEnabledHint') }}</p>
+            </a-form-item>
+          </a-form>
+          <template #footer>
+            <GlassButton variant="primary" size="sm" :loading="savingRecall" @click="saveSkillRecall">{{ t('common.save') }}</GlassButton>
+          </template>
+        </GlassCard>
+
         <!-- 凭据管理（SSH 多主机 + 社交平台），按当前用户隔离；与"我的凭据"页共用组件 -->
         <CredentialManager />
 
@@ -300,7 +330,8 @@ const isDark = ref(appStore.isDark)
 const general = ref({ app_name: 'Neurova', language: locale.value })
 const security = ref({ jwt_secret: '', jwt_expiry_hours: 24, min_password_length: 8, require_special: true })
 const storage = ref({ media_path: '/data/media', max_upload_mb: 50, cache_ttl_minutes: 60 })
-const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false, max_output_tokens: 131072, desktop_runtime_mode: 'full', desktop_provider: '' })
+const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false, max_output_tokens: 131072, desktop_runtime_mode: 'full', desktop_provider: '', skill_catalog_enabled: true, skill_schema_budget_enabled: true, evolution_queue_enabled: true, skill_semantic_recall_enabled: true, tool_search_enabled: true })
+const savingRecall = ref(false)
 
 // 进化治理设置（独立于扁平 settings 的治理面）
 const governance = ref({ conversation_rules_enabled: false, rsi_phase: 0 })
@@ -502,6 +533,25 @@ const saveDesktopProvider = async () => {
     message.error(t('common.error'))
   } finally {
     saving.value = false
+  }
+}
+
+/** 技能召回与进化卡独立保存：只写 advanced 段三键（后端按 key merge） */
+const saveSkillRecall = async () => {
+  savingRecall.value = true
+  try {
+    await updateSettings('advanced', {
+      skill_catalog_enabled: advanced.value.skill_catalog_enabled,
+      skill_schema_budget_enabled: advanced.value.skill_schema_budget_enabled,
+      evolution_queue_enabled: advanced.value.evolution_queue_enabled,
+      skill_semantic_recall_enabled: advanced.value.skill_semantic_recall_enabled,
+      tool_search_enabled: advanced.value.tool_search_enabled,
+    })
+    message.success(t('common.success'))
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    savingRecall.value = false
   }
 }
 

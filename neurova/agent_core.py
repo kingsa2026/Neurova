@@ -22,7 +22,6 @@ if TYPE_CHECKING:
 
 from neurova.context import ContextOrchestrator
 from neurova.core.idle_tracker import IdleTimeTracker
-from neurova.core.sleep_config_manager import SleepConfigManager
 from neurova.llm_client import LLMConfig
 from neurova.mem_core import MemCore
 from neurova.router import MessageRouter, RouteResult
@@ -224,6 +223,13 @@ class AgentConfig:
         enable_active_skill_acquisition: bool = False,  # 主动技能获取
         llm_provider: str = "",  # LLM 服务商 ID
         enable_skill_packer: bool = True,  # 自动打包技能（默认开启：让反复出现的工具序列沉淀为可执行技能）
+        # P0-3/P2-2（OpenSpace 召回注入对齐）：三态——None=跟随全局开关
+        # （app_settings advanced 段，默认开）；True/False=该 agent 显式覆盖
+        skill_catalog_enabled: Optional[bool] = None,  # 系统提示常驻预算化技能目录
+        skill_catalog_budget_chars: int = 8000,  # 目录字符预算（超则别名压缩）
+        skill_schema_budget_enabled: Optional[bool] = None,  # 技能 function schema 阶梯预算
+        skill_schema_max: int = 20,  # schema 预算的技能数上限
+        skill_semantic_recall_enabled: Optional[bool] = None,  # Wave E 语义档（bge ONNX）三态
         muscle_memory_threshold: float = 0.85,  # 肌肉记忆阈值（RSI tool_memory 系统可优化参数的配置单源）
         enable_cognitive_capabilities: bool = True,  # 认知能力
         enable_evolution: bool = True,  # 进化能力
@@ -317,6 +323,12 @@ class AgentConfig:
         self.enable_streaming = enable_streaming
         self.enable_active_skill_acquisition = enable_active_skill_acquisition  # 主动技能获取
         self.enable_skill_packer = enable_skill_packer  # 自动打包技能
+        # P0-3/P2-2（OpenSpace 召回注入）——默认关=现状语义，getattr 兜底兼容
+        self.skill_catalog_enabled = skill_catalog_enabled
+        self.skill_catalog_budget_chars = skill_catalog_budget_chars
+        self.skill_schema_budget_enabled = skill_schema_budget_enabled
+        self.skill_schema_max = skill_schema_max
+        self.skill_semantic_recall_enabled = skill_semantic_recall_enabled
         self.muscle_memory_threshold = muscle_memory_threshold  # RSI 配置单源（SubSystemContainer 经 agent.config 取用）
 
         # 认知能力配置
@@ -644,7 +656,6 @@ class SubSystemContainer:
         a.session_manager = get_session_manager()
         a._router = None
         a._skill_registry = None
-        a.sleep_config_manager = SleepConfigManager()
         a.idle_tracker = IdleTimeTracker()
         a.skill_manager = None
         a.skill_packer = None

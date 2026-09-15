@@ -34,6 +34,23 @@ ADVANCED_DEFAULTS: Dict[str, Any] = {
     # 沙箱会话提供方（sandbox/rdp），默认空=无池：sandbox/auto 档变更动作
     # fail-closed 拒绝（诚实降级，不误跑本机）。env NEUROVA_DESKTOP_PROVIDER 显式优先。
     "desktop_provider": "",
+    # ── 技能召回与进化三开关（OpenSpace 对比落地 2026-09-15，默认全开）──
+    # 技能目录常驻系统提示（便宜的全量发现面：名字+描述，超预算别名压缩）
+    "skill_catalog_enabled": True,
+    # 技能 function schema 预算化（活跃技能 > skill_schema_max 时按关键词
+    # 阶梯取 top-k，零命中回退全量；$mention 显式调用不受限）
+    "skill_schema_budget_enabled": True,
+    "skill_schema_max": 20,
+    # 进化提案持久作业队列（崩溃不丢/失败重试/可审计；对话延迟不变，
+    # 非后台 worker）。NEUROVA_EVOLUTION_QUEUE 显式值最优先（运维逃生门）
+    "evolution_queue_enabled": True,
+    # 语义检索档：技能召回阶梯加 bge ONNX cosine（引擎缺失/失败自动降级
+    # 关键词档，零报错）
+    "skill_semantic_recall_enabled": True,
+    # A6 工具面 BM25 延迟加载（候选 > NEUROVA_TOOL_SEARCH_MIN_CATALOG 时激活，
+    # 目录常驻+tool_search/tool_describe/tool_call 三控制工具）。
+    # NEUROVA_TOOL_SEARCH 环境变量显式值最优先。
+    "tool_search_enabled": True,
 }
 SECTION_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "general": GENERAL_DEFAULTS,
