@@ -69,7 +69,15 @@ const { t } = useI18n()
 
 const props = defineProps<{ agentId?: string }>()
 const emit = defineEmits<{
-  (e: 'apply', payload: { nodes: CanvasNodeSnapshot[]; edges: CanvasEdgeSnapshot[]; name: string; description: string }): void
+  (e: 'apply', payload: {
+    nodes: CanvasNodeSnapshot[]
+    edges: CanvasEdgeSnapshot[]
+    name: string
+    description: string
+    /** B4 对话生成归位：后端标记的来源与 agent 上下文 */
+    origin?: string
+    agent_id?: string
+  }): void
 }>()
 
 const collapsed = ref(false)
@@ -118,6 +126,8 @@ async function send() {
       edges: data.edges,
       name: data.name || '',
       description: data.description || '',
+      origin: data.origin,
+      agent_id: data.agent_id,
     })
     addMessage(
       'agent',

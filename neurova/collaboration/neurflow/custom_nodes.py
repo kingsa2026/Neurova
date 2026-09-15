@@ -208,6 +208,13 @@ class CustomNodeService:
     def get_node(self, node_type: str) -> Optional[NodeDefinition]:
         return self._storage.get_node_definition(node_type)
 
+    def is_registered(self, node_type: str) -> bool:
+        """类型是否已在注册表（builtin/tool/skill 等非 custom 来源的判据）。"""
+        try:
+            return self._registry.get(node_type) is not None
+        except Exception:  # noqa: BLE001
+            return False
+
     def list_nodes(self) -> List[NodeDefinition]:
         """列出全部自定义节点"""
         return self._storage.list_node_definitions(source="custom")

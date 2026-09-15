@@ -3345,8 +3345,6 @@ studio: {
   retryVideo: 'Réessayer la vidéo',
   noShots: 'Aucun plan — découpez d’abord',
   mergeNow: 'Fusionner et exporter',
-  uploadBgm: 'Télécharger BGM',
-  replaceBgm: 'Remplacer le BGM',
   mergedMp4: 'Vidéo prête',
   mergedManifest: 'Manifeste diaporama',
   noExport: 'Rien à exporter',

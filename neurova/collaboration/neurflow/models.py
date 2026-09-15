@@ -187,6 +187,10 @@ class WorkflowDefinition:
     metadata: Dict[str, Any] = field(default_factory=dict)
     # P0-1 属主（运行时面）：storage 列为准，None=未定属主（默认 default）
     user_id: Optional[str] = None
+    # B1 归属模型 v2：project_id/agent_id 可空归属列 + origin 来源标记
+    project_id: Optional[str] = None
+    agent_id: Optional[str] = None
+    origin: str = "manual"  # manual|nl_chat|template|comfyui|evolution
 
     def to_dict(self) -> Dict[str, Any]:
         """序列化为字典"""
@@ -207,6 +211,9 @@ class WorkflowDefinition:
             "template": self.template,
             "public": self.public,
             "metadata": self.metadata,
+            "project_id": self.project_id,
+            "agent_id": self.agent_id,
+            "origin": self.origin,
         }
 
     @classmethod
@@ -229,6 +236,9 @@ class WorkflowDefinition:
             template=data.get("template", False),
             public=data.get("public", False),
             metadata=data.get("metadata", {}),
+            project_id=data.get("project_id"),
+            agent_id=data.get("agent_id"),
+            origin=data.get("origin") or "manual",
         )
 
 

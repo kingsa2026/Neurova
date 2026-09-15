@@ -85,6 +85,15 @@ export interface CanvasSnapshot {
   edges: CanvasEdgeSnapshot[]
   /** 乐观锁版本号（后端 CanvasStore 维护；保存时作为 base_version 回传） */
   version?: number
+  /** B0/B1 归属列（画布与定义共用口径） */
+  user_id?: string
+  project_id?: string | null
+  agent_id?: string | null
+  origin?: string
+  /** B2：视口状态 {x,y,zoom}（definition 快照由后端从 metadata.viewport 带出） */
+  viewport?: { x: number; y: number; zoom: number }
+  /** definition 来源快照的溯源标记 {source:'workflow', workflow_id} */
+  metadata?: Record<string, unknown>
 }
 
 export interface SaveCanvasPayload {
@@ -92,6 +101,11 @@ export interface SaveCanvasPayload {
   name: string
   nodes: CanvasNodeSnapshot[]
   edges: CanvasEdgeSnapshot[]
+  /** B1：归属列透传（编辑器加载后原样带回，保存不得丢失归属） */
+  project_id?: string | null
+  agent_id?: string | null
+  origin?: string
+  viewport?: { x: number; y: number; zoom: number }
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +165,10 @@ export interface CanvasSummary {
   name: string
   /** 画布归属项目（轻量项目脚手架：工作流=画布，可归属项目） */
   project_id?: string | null
+  /** B1：归属 agent 与来源 */
+  agent_id?: string | null
+  origin?: string
+  user_id?: string
   node_count: number
   edge_count: number
   created_at?: number
@@ -158,10 +176,14 @@ export interface CanvasSummary {
 }
 
 /** List saved canvas summaries (newest first) — "我的画布"入口.
- *  projectId 可选：限定项目归属（项目顶层 → 工作流归属模型）。 */
-export function listCanvases(projectId?: string) {
+ *  projectId 可选：限定项目归属（项目顶层 → 工作流归属模型）。
+ *  view 可选（B1 三视图）：personal|project|agent。 */
+export function listCanvases(projectId?: string, view?: 'personal' | 'project' | 'agent') {
+  const params: Record<string, string> = {}
+  if (projectId) params.project_id = projectId
+  if (view) params.view = view
   return api.get<ApiResponse<CanvasSummary[]>>(`${BASE}/canvas`, {
-    params: projectId ? { project_id: projectId } : undefined,
+    params: Object.keys(params).length ? params : undefined,
   })
 }
 
@@ -179,10 +201,18 @@ export interface CanvasRunStatus {
   duration?: number | null
 }
 
-/** Run a canvas workflow（session_id 可选：子 Agent 事件广播到该聊天会话）. */
+/** Run a canvas workflow（session_id 可选：子 Agent 事件广播到该聊天会话）.
+ *  source='definition'（B3）：canvasId 为持久化定义 id，直跑定义并落 executions。 */
 export function runCanvas(
   canvasId: string,
-  payload?: { session_id?: string; agent_id?: string; debug?: boolean; breakpoints?: string[] },
+  payload?: {
+    session_id?: string
+    agent_id?: string
+    debug?: boolean
+    breakpoints?: string[]
+    source?: 'definition'
+    inputs?: Record<string, unknown>
+  },
 ) {
   return api.post<ApiResponse<{ runId: string; status: string; workflow_id: string; debug?: boolean }>>(
     `${BASE}/canvas/${canvasId}/run`,
@@ -199,12 +229,16 @@ export function canvasFromNl(prompt: string, agentId = 'default', model?: string
     name?: string
     description?: string
     error?: string
+    origin?: string
+    agent_id?: string
   }>>(`${BASE}/canvas/from-nl`, { prompt, agent_id: agentId, model: model || undefined })
 }
 
-/** Poll a canvas run's execution status. */
-export function getCanvasRun(canvasId: string, runId: string) {
-  return api.get<ApiResponse<CanvasRunStatus>>(`${BASE}/canvas/${canvasId}/runs/${runId}`)
+/** Poll a canvas run's execution status. source='definition' 走定义读取校验（B3）。 */
+export function getCanvasRun(canvasId: string, runId: string, source?: 'definition') {
+  return api.get<ApiResponse<CanvasRunStatus>>(`${BASE}/canvas/${canvasId}/runs/${runId}`, {
+    params: source ? { source } : undefined,
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -276,9 +310,11 @@ export function subscribeExecutionEvents(
   return () => controller.abort()
 }
 
-/** Get a canvas workflow by id. */
-export function getCanvas(canvasId: string) {
-  return api.get<ApiResponse<CanvasSnapshot>>(`${BASE}/canvas/${canvasId}`)
+/** Get a canvas workflow by id. source='definition' 时读取的是 NeurFlow 定义编译的画布快照（B2）。 */
+export function getCanvas(canvasId: string, source?: 'definition') {
+  return api.get<ApiResponse<CanvasSnapshot>>(`${BASE}/canvas/${canvasId}`, {
+    params: source ? { source } : undefined,
+  })
 }
 
 /** Update an existing canvas workflow.
@@ -295,6 +331,32 @@ export function updateCanvas(canvasId: string, payload: SaveCanvasPayload, baseV
 /** Delete a canvas workflow. */
 export function deleteCanvas(canvasId: string) {
   return api.delete<ApiResponse<{ id: string; deleted: boolean }>>(`${BASE}/canvas/${canvasId}`)
+}
+
+// ── B2：来自「定义」的画布编辑，保存回写 NeurFlow 定义 ──────────────
+
+/** 画布节点/边 → WorkflowNode/WorkflowEdge 载荷（回写定义用）。 */
+export interface DefinitionWritebackPayload {
+  name?: string
+  description?: string
+  nodes: Array<Record<string, unknown>>
+  edges: Array<Record<string, unknown>>
+  /** 视口状态（保存进 definition.metadata.viewport） */
+  viewport?: { x: number; y: number; zoom: number }
+}
+
+/** 回写工作流定义（画布编辑器编辑来自定义的快照后保存）。
+ *  baseVersion：乐观锁，落后于服务端返回 409。 */
+export function writebackDefinition(
+  workflowId: string,
+  payload: DefinitionWritebackPayload,
+  baseVersion?: number,
+) {
+  return api.put<ApiResponse<{ workflow: unknown; version: number }>>(
+    `${NF_BASE}/workflows/${workflowId}/definition`,
+    payload,
+    { params: baseVersion != null ? { base_version: baseVersion } : undefined },
+  )
 }
 
 /** Import a ComfyUI workflow JSON as an editable canvas. */

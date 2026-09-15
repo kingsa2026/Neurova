@@ -223,6 +223,8 @@ class TestWorkflowsCRUDAPI:
             storage.get_workflow.return_value = test_workflow
             storage.save_workflow.return_value = test_workflow
             storage.delete_workflow.return_value = True
+            # B1 删除守卫：Mock 忠实契约（无引用）
+            storage.find_subflow_references.return_value = []
             mock.return_value = storage
             yield storage
 
@@ -304,6 +306,8 @@ class TestWorkflowDefinitionAPI:
         with patch('neurova.api.endpoints.neurflow_api._get_storage') as mock:
             storage = Mock()
             storage.get_workflow.return_value = _make_workflow()
+            # B2：PUT definition 返回 version 字段（真实 storage 有该方法，Mock 须忠实）
+            storage.get_workflow_version_number.return_value = 1
             mock.return_value = storage
             yield storage
 

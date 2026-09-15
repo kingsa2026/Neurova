@@ -27,6 +27,8 @@ _user_id_var: ContextVar = ContextVar("neurova_turn_user_id", default=None)
 _reasoning_var: ContextVar = ContextVar("neurova_turn_reasoning", default=None)
 _tool_messages_var: ContextVar = ContextVar("neurova_turn_tool_messages", default=None)
 _tool_events_var: ContextVar = ContextVar("neurova_turn_tool_events", default=None)
+_skill_funnel_var: ContextVar = ContextVar("neurova_turn_skill_funnel", default=None)
+_skills_off_var: ContextVar = ContextVar("neurova_turn_skills_off", default=False)
 _turn_count_var: ContextVar = ContextVar("neurova_turn_count", default=0)
 
 
@@ -68,8 +70,13 @@ def get_turn_reasoning() -> Optional[str]:
 
 
 def reset_turn_tool_messages() -> None:
-    """清空本轮工具展示记录（轮次开始时调用；任务上下文内安全）。"""
+    """清空本轮工具展示记录（轮次开始时调用；任务上下文内安全）。
+
+    P0-1 技能质量漏斗：轮次账本与工具展示记录同生命周期（同一轮次起点重置、
+    同一收尾消费），一并清空——两个账本永不错位，调用方无需改签名。
+    """
     _tool_messages_var.set(None)
+    _skill_funnel_var.set(None)
 
 
 def append_turn_tool_messages(records: List[Dict[str, Any]]) -> None:
@@ -85,6 +92,44 @@ def get_turn_tool_messages_snapshot() -> List[Dict[str, Any]]:
     """工具展示记录快照（副本）。"""
     current = _tool_messages_var.get()
     return list(current) if current else []
+
+
+# ── 技能质量漏斗轮次账本（P0-1，OpenSpace 代码级对比 2026-09-14 落地）──
+# tool_executor.execute_skill_tool 每次技能派发记一条；PostChatPipeline
+# 回合收尾统一按"任务完成 + 兜底完成不计功"归因后写穿 SkillService manifest。
+# ContextVar 列表与 _tool_messages_var 同语义：跨 task 边界共享同一列表对象，
+# 子任务记录可见于父轮次（既有轮次账本契约，非新增行为）。
+
+
+def record_turn_skill_funnel(skill_id: str, applied: bool, ok: bool) -> None:
+    """记一条本轮技能派发：applied=是否真正进入执行，ok=执行是否成功。"""
+    current = _skill_funnel_var.get()
+    if not isinstance(current, list):
+        current = []
+        _skill_funnel_var.set(current)
+    current.append({"skill_id": skill_id, "applied": bool(applied), "ok": bool(ok)})
+
+
+def get_turn_skill_funnel() -> List[Dict[str, Any]]:
+    """本轮技能派发账本（副本）。"""
+    current = _skill_funnel_var.get()
+    return list(current) if isinstance(current, list) else []
+
+
+# ── 回合级技能库总开关（P2-4 cold/warm A/B 的执行面）──────
+
+
+def set_turn_skills_off(value: bool):
+    """本回合对模型隐藏技能库（schema/目录同时缺席）；返回 token 供复位。"""
+    return _skills_off_var.set(bool(value))
+
+
+def reset_turn_skills_off(token) -> None:
+    _skills_off_var.reset(token)
+
+
+def get_turn_skills_off() -> bool:
+    return bool(_skills_off_var.get())
 
 
 def append_turn_tool_event(event: Dict[str, Any]) -> None:
@@ -122,9 +167,16 @@ def clear_turn_state() -> None:
         _reasoning_var,
         _tool_messages_var,
         _tool_events_var,
+        _skill_funnel_var,
+        _skills_off_var,
         _turn_count_var,
     ):
-        var.set(None if var is not _turn_count_var else 0)
+        if var is _turn_count_var:
+            var.set(0)
+        elif var is _skills_off_var:
+            var.set(False)
+        else:
+            var.set(None)
 
 
 __all__ = [
@@ -138,6 +190,11 @@ __all__ = [
     "reset_turn_tool_messages",
     "append_turn_tool_messages",
     "get_turn_tool_messages_snapshot",
+    "record_turn_skill_funnel",
+    "get_turn_skill_funnel",
+    "set_turn_skills_off",
+    "reset_turn_skills_off",
+    "get_turn_skills_off",
     "append_turn_tool_event",
     "get_turn_tool_events",
     "increment_turn_count",

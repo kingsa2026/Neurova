@@ -28,7 +28,8 @@ class _FakeStore:
     def __init__(self, storage):
         self._storage = storage
 
-    def get(self, canvas_id):
+    def get(self, canvas_id, **kw):
+        # B0 契约：run 端点带 requester_id/is_admin/project_ids 读取（替身不设属主门槛）
         if canvas_id == "cv_bad":
             return {
                 "id": "cv_bad",

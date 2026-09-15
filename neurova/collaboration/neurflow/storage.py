@@ -74,7 +74,10 @@ class NeurflowStorage:
                     template INTEGER DEFAULT 0,
                     public INTEGER DEFAULT 0,
                     metadata_json TEXT DEFAULT '{}',
-                    user_id TEXT
+                    user_id TEXT,
+                    project_id TEXT,
+                    agent_id TEXT,
+                    origin TEXT
                 )
             """)
             # P0-1 属主隔离：旧库迁移补 user_id 列 + 存量回填（幂等）
@@ -83,8 +86,19 @@ class NeurflowStorage:
             }
             if "user_id" not in wf_cols:
                 self._conn.execute("ALTER TABLE workflows ADD COLUMN user_id TEXT")
+            # B1 归属模型 v2：可空归属双列 + 来源列（旧库幂等补列）
+            for col, ddl in (
+                ("project_id", "ALTER TABLE workflows ADD COLUMN project_id TEXT"),
+                ("agent_id", "ALTER TABLE workflows ADD COLUMN agent_id TEXT"),
+                ("origin", "ALTER TABLE workflows ADD COLUMN origin TEXT"),
+            ):
+                if col not in wf_cols:
+                    self._conn.execute(ddl)
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_workflows_user ON workflows(user_id)"
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_id)"
             )
             self._backfill_workflow_user_ids()
 
@@ -439,8 +453,9 @@ class NeurflowStorage:
                     INSERT OR REPLACE INTO workflows
                     (id, name, description, version, nodes_json, edges_json,
                      variables_json, tags_json, category, author, created_at,
-                     updated_at, status, template, public, metadata_json, user_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     updated_at, status, template, public, metadata_json, user_id,
+                     project_id, agent_id, origin)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                     (
                         workflow.id,
@@ -460,6 +475,9 @@ class NeurflowStorage:
                         1 if workflow.public else 0,
                         json.dumps(workflow.metadata, ensure_ascii=False),
                         user_id,
+                        workflow.project_id,
+                        workflow.agent_id,
+                        workflow.origin or "manual",
                     ),
                 )
                 # P2-4.4：内容变化才产生新版本（首次保存即 v1 基线，上限 20）
@@ -480,7 +498,8 @@ class NeurflowStorage:
                 raise e
 
     def get_workflow(self, workflow_id: str, requester_id: Optional[str] = None,
-                     is_admin: bool = False) -> Optional[WorkflowDefinition]:
+                     is_admin: bool = False,
+                     project_ids: Optional[set] = None) -> Optional[WorkflowDefinition]:
         """
         获取工作流定义
 
@@ -488,9 +507,11 @@ class NeurflowStorage:
             workflow_id: 工作流 ID
             requester_id: 请求者（P0-1 属主语义）。None=系统内部路径
                 （cron/webhook/workflow_agent 派发），不受属主限制；
-                传 ID 时 owner/admin 全通过，非 owner 仅 public=1 可读，
+                传 ID 时 owner/admin 全通过，非 owner 仅 public=1 或
+                B1 项目成员（project_id ∈ project_ids）可读，
                 其余返回 None（与不存在同构，防 UUID 枚举）
             is_admin: 请求者是否 admin（配合 requester_id 使用）
+            project_ids: 请求者参与的项目集合（B1 项目视图可读面）
 
         Returns:
             WorkflowDefinition 或 None
@@ -503,7 +524,10 @@ class NeurflowStorage:
 
             if requester_id is not None:
                 owner = row["user_id"] or "default"
-                if requester_id != owner and not is_admin and not row["public"]:
+                in_project = (
+                    row["project_id"] if "project_id" in row.keys() else None
+                ) in (project_ids or set())
+                if requester_id != owner and not is_admin and not row["public"] and not in_project:
                     return None
 
             return self._row_to_workflow(row)
@@ -576,6 +600,15 @@ class NeurflowStorage:
             for r in rows
         ]
 
+    def get_workflow_version_number(self, workflow_id: str) -> int:
+        """当前内容版本号（B2 乐观锁基线；无版本行返回 0）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT MAX(version) AS v FROM workflow_versions WHERE workflow_id = ?",
+                (workflow_id,),
+            ).fetchone()
+        return int(row["v"]) if row and row["v"] is not None else 0
+
     def rollback_workflow(self, workflow_id: str, version: int) -> bool:
         """回滚到指定历史版本。
 
@@ -622,7 +655,8 @@ class NeurflowStorage:
         return True
 
     def delete_workflow(self, workflow_id: str, requester_id: Optional[str] = None,
-                        is_admin: bool = False) -> bool:
+                        is_admin: bool = False,
+                        project_ids: Optional[set] = None) -> bool:
         """
         删除工作流定义
 
@@ -630,9 +664,8 @@ class NeurflowStorage:
             workflow_id: 工作流 ID
             requester_id: 请求者（P0-1）。None=系统内部路径不受限；
                 非 owner 且非 admin → 不删并返回 False（调用方转 404）
-
-        Returns:
-            bool: 删除是否成功
+            project_ids: B1 成员可读面——对删除无意义（成员只读），仅为
+                统一调用面而接收
         """
         with self._lock:
             if requester_id is not None:
@@ -648,6 +681,30 @@ class NeurflowStorage:
             self._conn.commit()
             return cursor.rowcount > 0
 
+    def find_subflow_references(self, workflow_id: str) -> List[str]:
+        """B1 删除守卫：反查哪些工作流经 subflow 节点引用 workflow_id。
+
+        返回引用方的 workflow id 列表（排除自身）。subflow 节点契约：
+        node.type == "subflow" 且 config.workflow_id == workflow_id
+        （见 neurova/collaboration/neurflow/subflow.py）。
+        """
+        refs: List[str] = []
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, nodes_json FROM workflows WHERE id != ? AND nodes_json LIKE ?",
+                (workflow_id, f'%"{workflow_id}"%'),
+            ).fetchall()
+        for row in rows:
+            try:
+                for node in json.loads(row["nodes_json"] or "[]"):
+                    cfg = node.get("config") or {}
+                    if node.get("type") == "subflow" and cfg.get("workflow_id") == workflow_id:
+                        refs.append(row["id"])
+                        break
+            except Exception:  # noqa: BLE001 - 单行损坏不影响反查
+                continue
+        return refs
+
     def list_workflows(
         self,
         category: Optional[str] = None,
@@ -657,6 +714,10 @@ class NeurflowStorage:
         offset: int = 0,
         requester_id: Optional[str] = None,
         is_admin: bool = False,
+        view: Optional[str] = None,
+        project_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        project_ids: Optional[set] = None,
     ) -> List[WorkflowDefinition]:
         """
         列出工作流定义
@@ -668,7 +729,10 @@ class NeurflowStorage:
             limit: 返回数量限制
             offset: 偏移量
             requester_id: 请求者（P0-1）。None=系统内部路径（返回全量）；
-                传 ID 时只见自己的 + public=1（admin 见全量）
+                传 ID 时只见自己的 + public=1 + B1 项目成员行（admin 全量）
+            view: B1 三视图 personal|project|agent（personal=无项目无 agent 归属）
+            project_id/agent_id: 视图细化过滤
+            project_ids: 请求者参与的项目集合（B1 成员可读面）
 
         Returns:
             工作流定义列表
@@ -678,8 +742,29 @@ class NeurflowStorage:
             params = []
 
             if requester_id is not None and not is_admin:
-                query += " AND (user_id = ? OR public = 1)"
-                params.append(requester_id)
+                vis = ["user_id = ?", "public = 1"]
+                vis_params = [requester_id]
+                if project_ids:
+                    ph = ", ".join("?" for _ in project_ids)
+                    vis.append(f"project_id IN ({ph})")
+                    vis_params.extend(sorted(project_ids))
+                query += f" AND ({' OR '.join(vis)})"
+                params.extend(vis_params)
+
+            if view == "personal":
+                query += " AND project_id IS NULL AND agent_id IS NULL"
+            elif view == "project":
+                query += " AND project_id IS NOT NULL"
+            elif view == "agent":
+                query += " AND agent_id IS NOT NULL"
+
+            if project_id:
+                query += " AND project_id = ?"
+                params.append(project_id)
+
+            if agent_id:
+                query += " AND agent_id = ?"
+                params.append(agent_id)
 
             if category:
                 query += " AND category = ?"
@@ -732,13 +817,14 @@ class NeurflowStorage:
             return [self._row_to_workflow(row) for row in rows]
 
     def search_workflows(self, query: str, requester_id: Optional[str] = None,
-                         is_admin: bool = False) -> List[WorkflowDefinition]:
+                         is_admin: bool = False,
+                         project_ids: Optional[set] = None) -> List[WorkflowDefinition]:
         """
         搜索工作流定义
 
         Args:
             query: 搜索关键词
-            requester_id: 请求者（P0-1，语义同 list_workflows）
+            requester_id: 请求者（P0-1，语义同 list_workflows；B1 含项目成员行）
 
         Returns:
             匹配的工作流定义列表
@@ -748,8 +834,14 @@ class NeurflowStorage:
             scope = ""
             params: list = []
             if requester_id is not None and not is_admin:
-                scope = " AND (user_id = ? OR public = 1)"
-                params.append(requester_id)
+                vis = ["user_id = ?", "public = 1"]
+                vis_params = [requester_id]
+                if project_ids:
+                    ph = ", ".join("?" for _ in project_ids)
+                    vis.append(f"project_id IN ({ph})")
+                    vis_params.extend(sorted(project_ids))
+                scope = f" AND ({' OR '.join(vis)})"
+                params.extend(vis_params)
             cursor = self._conn.execute(
                 f"""
                 SELECT * FROM workflows
@@ -1009,6 +1101,9 @@ class NeurflowStorage:
             public=bool(row["public"]),
             metadata=json.loads(row["metadata_json"]) if row["metadata_json"] else {},
             user_id=row["user_id"] if "user_id" in row.keys() else None,
+            project_id=row["project_id"] if "project_id" in row.keys() else None,
+            agent_id=row["agent_id"] if "agent_id" in row.keys() else None,
+            origin=(row["origin"] if "origin" in row.keys() else None) or "manual",
         )
 
     # ==================== 节点定义 CRUD ====================
