@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-"""跨平台 no-follow 安全路径原语（Yuxi 对比 P2 #10）。
+"""跨平台 no-follow 安全路径原语。
 
-对位 Yuxi `utils/paths.py` 的逐段 `dir_fd + O_NOFOLLOW` openat 链，按
 Neurova 的 Windows-first 桌面形态提供等价语义：
 
   1. 语法层拒绝：绝对路径 / 盘符(C:\\) / UNC(\\\\srv) / ``..`` / 空段

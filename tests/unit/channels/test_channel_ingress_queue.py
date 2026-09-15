@@ -1,7 +1,6 @@
-"""渠道入站持久化队列测试（OpenClaw 启发 P0-5）
+"""渠道入站持久化队列测试
 
-背景（docs/Neurova_OpenClaw代码级对比_2026-09-04.md §3 P0-5 / §2.8）：
-  OpenClaw 的入站是持久化队列（SQLite channel_ingress_events + claim 租约
+背景（§3 P0-5 / §2.8）：
   + tombstone 幂等去重 + dead-letter），重启不丢消息。Neurova 14 渠道
   入站全内存直调，handler 异常即丢、进程重启即丢——可用性硬伤。
 

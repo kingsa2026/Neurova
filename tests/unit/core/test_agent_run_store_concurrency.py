@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-"""AgentRunStore 真并发竞态测试层（Yuxi 对比 P2 #13）。
+"""AgentRunStore 真并发竞态测试层。
 
-对位 Yuxi test_agent_run_lease.py 的"围绕并发正确性写测试"philosophy：
 单赢家、过期 owner 拒写、对账与收尾互踩只收敛一次、FIFO 全序。
 （sendlock 事故同款原则：mock 须忠实——本文件全部真库真线程，零 mock。）
 """
@@ -56,7 +55,7 @@ def test_concurrent_claims_across_sessions_all_win(store):
 
 def test_expired_owner_races_reconcile_exactly_one_terminal(store):
     """租约过期后：旧 owner 的 finish 与 reconcile_stale 竞速，终态恰好收敛一次，
-    绝不双写（对位 Yuxi expired owner cannot finish/publish retry 用例）。"""
+ 绝不双写。"""
     r = store.intake("s1", "u", "a", "x")
     store.claim_next("s1", owner="w1")
     store._conn.execute("UPDATE agent_runs SET lease_expires_at=? WHERE run_id=?", (time.time() - 1, r))

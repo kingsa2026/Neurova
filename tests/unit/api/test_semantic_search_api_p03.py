@@ -1,6 +1,6 @@
 """P0-3 混合检索复活 + rerank — API 层契约测试（TDD）。
 
-契约（docs/Neurova_Dify代码级对比_2026-09-03.md §4 P0-3）：
+契约（§4 P0-3）：
 1. POST /semantic-search/hybrid：data.retrieval_method 回显四态解析结果
    （RetrievalMethod 枚举 value：hybrid_search/semantic_search/
    full_text_search/keyword_search；非法值回退 hybrid_search）

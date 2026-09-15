@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """P0-1 工作区文档（AGENTS.md）自动注入。
 
-Codex 对齐（docs/Neurova_Codex代码级对比_2026-09-14.md §2.3/P0-1）：
 - AGENTS.md 根→子目录层级收集，每目录 AGENTS.override.md 优先
 - 总字节预算（默认 16KB），超预算截断并显式标注
 - 噪音目录跳过（.git/node_modules/__pycache__/.venv…）

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""创作专区 LLM 编排：系统提示词（自研，功能对标 huobao 四 agent）+ JSON 稳健抽取。
+"""创作专区 LLM 编排：系统提示词+ JSON 稳健抽取。
 
 职责映射：script_rewriter（小说→分集剧本）/ extractor（角色场景道具抽取去重）/
 storyboard_breaker（分镜拆解）/ prompt_generator（资产定妆与镜头提示词）。

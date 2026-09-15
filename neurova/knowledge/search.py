@@ -1,6 +1,6 @@
-"""知识检索策略层（P0-3 — Dify 对标）。
+"""知识检索策略层。
 
-RetrievalMethod 四态（参照 Dify api/core/rag/retrieval_methods.py）：
+RetrievalMethod 四态：
 数据源内的检索方法选择，与多库路由是分开的两层。
 
 - full_text_search：IDF 加权词覆盖评分（真实 [0,1] 分数）——复活
@@ -34,7 +34,7 @@ def _normalize_backend(backend: str) -> str:
 
 
 class RetrievalMethod(str, Enum):
-    """检索方法四态（枚举值对齐 Dify RetrievalMethod 命名）"""
+    """检索方法四态"""
 
     SEMANTIC_SEARCH = "semantic_search"
     FULL_TEXT_SEARCH = "full_text_search"

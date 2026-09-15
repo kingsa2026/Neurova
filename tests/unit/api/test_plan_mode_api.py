@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Plans API 契约测试（/api/v1/plans —— ZCode 计划模式对齐）。
+"""Plans API 契约测试。
 
 覆盖：
 1. 鉴权 —— 匿名 401；非 agent 属主 403；agent 不存在 404；

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""RAG 评估执行器（Yuxi 对比 P1 #5，benchmark 摘 simulated 的第一条真路）。
+"""RAG 评估执行器。
 
-对位 Yuxi knowledge/eval：检索指标 Precision/Recall/F1@K（集合交并）+ 数据集
+检索指标 Precision/Recall/F1@K（集合交并）+ 数据集
 （items: {query, gold_chunk_ids, gold_answer}）+ 可选 LLM Judge 二值。
 
 反向设计（§2.5 前车之鉴）：
 - gold_chunk_ids 采用分片索引既有块 id `knowledge_id#chunk_index`——条目 id
-  为 UUID 稳定，不像 Yuxi `{file_id}_chunk_{idx}` 与分块命名强耦合；
+ 为 UUID 稳定
 - 数据集 JSON 原子落盘（temp+os.replace，providers 丢配置教训）；
 - LLM Judge 注入式，无注入=该维度缺席（judge_score None），不伪造分数
   （simulated 诚实标记纪律）。
@@ -136,7 +136,7 @@ def evaluate_dataset(
     """逐题评测：retrieve_fn(query, top_k) 返回有序 chunk id 列表。
 
     judge_fn 提供且条目有 gold_answer 时记 judge_score∈{0,1}；缺任一不评
-    （字段为 None，均值只统计参与题——Yuxi"有 gold_answer 用准确率否则
+ （字段为 None
     recall@10"的口径，本实现两者都给，不静默二选一）。
     """
     per_item: List[Dict[str, Any]] = []

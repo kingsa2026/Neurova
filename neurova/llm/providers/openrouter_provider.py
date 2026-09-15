@@ -176,7 +176,7 @@ class OpenRouterProvider(BaseProvider):
 
         API 失败(无 key/超时)时返回空列表 —— 不回落静态默认模型:
         默认清单已陈旧(如 gemini-1.5-pro / mixtral-8x7b),落到用户列表
-        只会催生"发现成功但无法调用"的误导(对齐 QwenPaw 设计)。
+ 只会催生"发现成功但无法调用"的误导。
         """
         api_models = await self._fetch_models_from_api()
         if api_models:
@@ -231,7 +231,6 @@ class OpenRouterProvider(BaseProvider):
         """解析 API 返回的模型数据
 
         能力判定:优先使用 OpenRouter /models 的 architecture.input_modalities
-        (平台级权威元数据),缺失时回退名称启发式 — 参照 QwenPaw 的做法。
         None 字段必须回退默认值,否则单个模型的 null 值会让整批发现
         在校验层抛错并被吞掉。
         """
@@ -294,7 +293,7 @@ class OpenRouterProvider(BaseProvider):
         - OpenRouter 官方免费变体以 ID 的 ``:free`` 后缀标记（如
           ``meta-llama/llama-3.3-70b-instruct:free``），以此为据：命中即免费，
           不受 pricing 缺失/脏数据影响（2026-09-14 修复筛选免费模型漏判）。
-        - 无后缀时保留 QwenPaw 语义：所有有效 price 字段均为 0 才算免费。
+所有有效 price 字段均为 0 才算免费
         """
         if model_id.endswith(":free"):
             return True
@@ -327,7 +326,7 @@ class OpenRouterProvider(BaseProvider):
         max_prompt_price: typing.Optional[float] = None,
         is_free: typing.Optional[bool] = None,
     ) -> typing.List[ModelInfo]:
-        """按 QwenPaw 四维语义过滤模型:系列 / 输入 modality / 价格 / 仅免费。
+        """
 
         - 系列取自 model_id 前缀('openai/gpt-4o' -> 'openai');
           无前缀 id 回退 model.provider 字段。
@@ -460,7 +459,7 @@ class OpenRouterProvider(BaseProvider):
         """构建请求头
 
         OpenRouter 强制要求 HTTP-Referer 与 X-OpenRouter-Title 头部,
-        缺失时请求会被拒绝/限流(对照 QwenPaw 的 _DEFAULT_HEADERS)。
+ 缺失时请求会被拒绝/限流。
         """
         headers = {
             "Content-Type": "application/json",

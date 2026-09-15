@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """aigc_studio 存储层（R3）：SQLite WAL + 属主隔离。
 
-功能规格对标 huobao-drama 18 表（CC BY-NC-SA：实现自研），按复用裁剪为 9 表：
+实现自研），按复用裁剪为 9 表
 服务商配置复用 Neurova provider 管理、任务队列复用 task_ledger、
 关联关系（角色/道具 ↔ 集/分镜）以 JSON 数组列承载而非 link 表（本地单库形态）。
 """

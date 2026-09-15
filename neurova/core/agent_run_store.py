@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""AgentRun 持久化状态机（Yuxi 代码级对比 P0-1/P0-2 落地）。
+"""AgentRun 持久化状态机。
 
-对位 Yuxi `AgentRunRequest/AgentRun` 状态机，按 Neurova 单进程+SQLite
+按 Neurova 单进程+SQLite
 形态裁剪（同 `channels/channel_ingress_queue.py` 的已验证模式，报告结论
 "渠道入站队列已经懂这套，只是从未推广"）：
 
   - intake：请求先落库（queued）再执行——"先提交事实再投递执行"不变量；
   - claim_next：同 session 至多一个 running，由**部分唯一索引**在库层强制
-    （Yuxi uq_agent_runs_one_active_per_thread 同语义）；队头 FIFO 晋升；
+；队头 FIFO 晋升；
   - heartbeat/finish：owner 栅栏，陈旧 owner 无法续租或写终态；
   - request_cancel：持久取消意图（cancel_requested 列）——stop 端点先落库
     再走 in-process task_tracker，Redis 信号层的等价物是"进程内取消即时、
@@ -18,9 +18,9 @@
     根治第一步：run 事实不再随内存消失，幽灵行不再永驻。
 
 边界（如实，勿超读）：本模块**不提供跨重启的执行续跑**——run 任务活在
-API 进程内，进程死则执行死（Yuxi 靠独立 ARQ worker 解决，属其全家桶形态，
+API 进程内，属其全家桶形态
 Neurova 不引入）。收敛后的 run 在会话历史里如实可见；SSE 重放缓冲仍是
-内存有界结构（对位 Yuxi 事件流 Redis TTL 非持久，其弱点#5 已列入不抄清单）。
+内存有界结构。
 """
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ register_migration(1, _SCHEMA, domain="agent_runs")
 
 TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 
-# 进程 identity（对位 Yuxi WORKER_ID）：owner 栅栏的比较基准
+# 进程 identity：owner 栅栏的比较基准
 OWNER_IDENTITY = f"p{os.getpid()}-{uuid.uuid4().hex[:8]}"
 
 DEFAULT_DB_PATH = Path("data") / "agent_runs.db"
@@ -153,7 +153,7 @@ class AgentRunStore:
     # ------------------------------------------------------------------
 
     def heartbeat(self, run_id: str, owner: str) -> bool:
-        """续租——仅当前且未过期 owner 可续（Yuxi renew_lease 同语义）。"""
+        """续租——仅当前且未过期 owner 可续。"""
         now = time.time()
         with self._lock, self._conn:
             cur = self._conn.execute(
@@ -273,7 +273,7 @@ class AgentRunStore:
         return counts
 
     # ------------------------------------------------------------------
-    # 收敛（对位 Yuxi reconcile_expired_leases / worker_lease_expired）
+    # 收敛
     # ------------------------------------------------------------------
 
     def reconcile_at_startup(self) -> List[Dict[str, Any]]:

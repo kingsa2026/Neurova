@@ -1,11 +1,10 @@
 """会话历史挖掘 — 从真实使用记录生成评测集(解冷启动)。
 
-对位 Hermes `evolution/core/external_importers.py`,数据源换成本项目已有的:
   - 源 A:`core/agent_run_store` 的 agent_runs(真实任务 + 状态)
   - 源 B:会话历史(已完成会话的 user/assistant 对)
   - 源 C:golden JSONL(手写关键技能)
 
-两条不可省的安全与质检线(照搬 Hermes):
+两条不可省的安全与质检线:
   1. **密钥清洗**:任何命中密钥模式的消息一律剔除,绝不进评测集;
   2. **两级筛选**:便宜词面预筛 → LLM 相关性打分(LLM 失败计数上报,
      不让静默失败拉低数据集质量)。
@@ -23,8 +22,7 @@ from neurova.evolution.eval.dataset import EvalDataset, EvalExample
 
 logger = get_logger(__name__)
 
-# ── 密钥检测(对位 Hermes external_importers.SECRET_PATTERNS)──
-# 每条锚定已知密钥格式,尽量减少对正常文本的误报。
+# ── 密钥检测──# 每条锚定已知密钥格式,尽量减少对正常文本的误报。
 SECRET_PATTERNS = re.compile(
     r"("
     r"sk-ant-api\S+"           # Anthropic
@@ -61,7 +59,6 @@ _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 def _effective_len(text: str) -> int:
     """有效长度:CJK 字符按 2 计(信息密度约为拉丁字符两倍)。
 
-    直接用字符数会把"帮我审查代码"(6 字,完整指令)误杀——Hermes 的
     `< 10` 闸是按英文习惯定的,Neurova 面向中文用户,须按脚本密度折算。
     """
     if not text:

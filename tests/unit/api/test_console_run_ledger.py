@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""console 聊天链路的 AgentRun 台账接线（Yuxi 对比 P0-1/P0-2）。
+"""console 聊天链路的 AgentRun 台账接线。
 
-契约（docs/Neurova_Yuxi代码级对比_2026-09-13.md 启发点 #1/#2/#8）：
+契约（启发点 #1/#2/#8）：
 - POST /console/chat 流式轮：请求先落库（intake queued）→ FIFO 晋升 running →
   流结束写终态（completed / failed / cancelled(user_stopped)）
 - 同 session 已有活跃 run：新请求 SSE 先收 queued 事件，等待队头让位后正常流式

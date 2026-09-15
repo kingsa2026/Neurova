@@ -1,4 +1,4 @@
-"""E3 MCP 工具授权铸造（P2，docs/Neurova_OpenClaw工具技能专项对比 §5 E3）。
+"""E3 MCP 工具授权铸造。
 
 审批流（P0-6 分段审批）里用户以 remember 批准某个 MCP 工具后，铸造
 (server, tool) 粒度的持久授权——后续同名调用免审批直达（治理预检短路，

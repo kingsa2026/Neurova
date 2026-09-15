@@ -1,6 +1,6 @@
 """browser_read 续读游标测试（红→绿 TDD）。
 
-契约（对标 Dokobot canContinue/sessionId，本地化命名 read session）：
+契约：
 - 首读：超过 chunk（默认 60_000，与既有 _MAX_TEXT 契约一致）→ 建 session，
   返回首片 + session_id + can_continue + next_offset；未超 → 行为与现状完全一致（无 session）
 - 续读：传 session_id（+可选 offset）→ 纯内存切片，不再启动浏览器

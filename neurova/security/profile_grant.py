@@ -1,4 +1,4 @@
-"""camofox 登录态 profile 附身授权（CUA Phase 3 立项 R3-4，docs/Neurova_CUA_Phase3立项_2026-09-12.md §3）
+"""camofox 登录态 profile 附身授权
 
 camofox 后端携带用户真实网站登录态（profiles + cookies 跨会话保留）。agent 以
 该 profile 对外操作 = 以用户身份行动，属不可逆/外部可见动作，使用前必须显式授权。

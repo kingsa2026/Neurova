@@ -4,7 +4,6 @@
 测试 Neurova 的浏览器自动化能力，包括：
 - 多后端支持
 - 混合路由
-- Scrapling 自适应抓取
 """
 
 import asyncio
@@ -80,7 +79,6 @@ async def test_browser_automation():
     except Exception as e:
         print(f"   错误: {e}")
     
-    # 测试 Scrapling 抓取（如果可用）
     print("\n7. 测试 Scrapling 抓取:")
     try:
         result = await browser.scrape("https://example.com", mode="auto")

@@ -1,8 +1,8 @@
-"""技能评审闸治理收紧测试（QP 对齐启发 #3，2026-09-12）。
+"""技能评审闸治理收紧测试。
 
 C10 评审闸默认从关改为开：改行为的进化产物（自动封装技能/打包技能/
 遗传技能/自动化 applied 经验）默认先进待审，经审批面激活——对齐
-jiuwenswarm auto_save 默认 false 哲学。NEUROVA_SKILL_REVIEW_GATE=0 回退旧行为。
+auto_save 默认 false 哲学。NEUROVA_SKILL_REVIEW_GATE=0 回退旧行为。
 """
 
 import unittest

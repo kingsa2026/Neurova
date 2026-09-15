@@ -1,7 +1,7 @@
-"""流内错误编码铁律测试（OpenClaw 启发 P0-1）
+"""流内错误编码铁律测试
 
-背景（docs/Neurova_OpenClaw代码级对比_2026-09-04.md §3 P0-1）：
-  OpenClaw 的流协议铁律（llm-core types.ts L202）："Once invoked, request/
+背景（§3 P0-1）：
+"Once invoked, request/
   model/runtime failures should be encoded in the returned stream, not
   thrown"——provider 调用一旦开始，一切失败编码为流内错误消息而非异常。
 

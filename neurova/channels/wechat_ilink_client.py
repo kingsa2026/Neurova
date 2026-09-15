@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""iLink Bot HTTP client —— 微信个人号 Bot 协议（QwenPaw wechat/client.py+utils.py 照搬移植）。
+"""iLink Bot HTTP client —— 微信个人号 Bot 协议。
 
 真实端点全部在 https://ilinkai.weixin.qq.com 下，HTTP/JSON 协议，无第三方 SDK。
 
@@ -13,7 +13,6 @@
 媒体：CDN novac2c.cdn.weixin.qq.com/c2c，AES-128-ECB+PKCS7 加密
 （下载解密 / 上传取 x-encrypted-param 回传参数）。
 
-与 QwenPaw 的差异仅两处（均为依赖纪律）：
 - AES 用已声明的 cryptography 实现（不新增 pycryptodome）；
 - ChannelError → 本模块 ILinkError。
 """
@@ -50,7 +49,7 @@ class ILinkError(RuntimeError):
 
 
 # ---------------------------------------------------------------------------
-# 请求头与 AES 工具（QwenPaw wechat/utils.py 照搬）
+# 请求头与 AES 工具
 # ---------------------------------------------------------------------------
 
 

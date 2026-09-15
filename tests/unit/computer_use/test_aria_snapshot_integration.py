@@ -1,4 +1,4 @@
-"""可访问性快照 + role 定位整合测试（对标 ZCode 内置浏览器控制模式）
+"""可访问性快照 + role 定位整合测试（内置浏览器控制模式）
 
 整合的模式要点：
 1. dom_snapshot —— aria 可访问性树文本观察（代替原始 HTML page.content()）
@@ -182,7 +182,7 @@ class TestCapabilityGating:
 
     @pytest.mark.asyncio
     async def test_scrapling_degrades_gracefully(self):
-        """Scrapling 后端不支持 aria/role —— 必须返回错误结果而非抛异常"""
+        """"""
         backend = ScraplingBackend()
         snap = await backend.dom_snapshot()
         click = await backend.click_role("button", name="x")

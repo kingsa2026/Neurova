@@ -1,5 +1,5 @@
 """
-MCP OAuth2 客户端凭证流 + PKCE 授权码流（P2-6/P3-b，对标 QP 教训：凭据每次调用时解析）
+MCP OAuth2 客户端凭证流 + PKCE 授权码流
 
 - client_credentials 机器对机器流（无需浏览器，可端到端测试）
 - 授权码 + PKCE 流（P3-b：授权 URL 构建 → 浏览器跳转 → 本地环回回调捕获
@@ -7,7 +7,7 @@ MCP OAuth2 客户端凭证流 + PKCE 授权码流（P2-6/P3-b，对标 QP 教训
 - token 缓存带过期时间，提前 60s 刷新
 - 401 → 强制刷新 → 重试一次（由 mcp_client.call_tool 驱动）
 
-安全语义（QP 烘焙坑规避）：access token **每次调用时解析**——
+安全语义：access token **每次调用时解析**——
 缓存命中直接返回，过期即刷新；绝不在连接建立时烘焙进长期对象。
 
 授权码流安全要点：
@@ -259,7 +259,7 @@ async def resolve_mcp_token(
     oauth_config: Optional[Dict[str, Any]],
     force_refresh: bool = False,
 ) -> Optional[str]:
-    """P2-6 核心 API：每次工具调用时解析 access token（QP 烘焙坑规避）。
+    """P2-6 核心 API：每次工具调用时解析 access token。
 
     grant_type 感知：
     - client_credentials（默认）：缓存失效自动重取

@@ -1,6 +1,6 @@
-"""P1-2 交互式记忆写入待确认中间态（Utopia pending_facts 裁剪版）。
+"""P1-2 交互式记忆写入待确认中间态。
 
-契约（docs/Neurova_Utopia代码级对比_2026-09-04.md §2.3/§4 P1-2）：
+契约（§2.3/§4 P1-2）：
 
 PendingMemoryStore（独立 SQLite，与主记忆库分库分表——失败方向：
 漏读 pending 的后果是"待审队列看不见"，不是"未确认记忆混进检索"）：

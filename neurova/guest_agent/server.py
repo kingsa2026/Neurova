@@ -1,4 +1,4 @@
-"""neurova-guest-agent 守护进程（CUA Phase 3 扩展 RS-2）
+"""neurova-guest-agent 守护进程
 
 来宾（Windows Sandbox / 容器 / VM）内运行的桌面动作守护进程：把与宿主**同一份**
 actions.py / desktop_uia.py 动作实现经 HTTP 暴露，端口默认 8765。宿主侧 remote

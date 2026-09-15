@@ -1,6 +1,6 @@
 """RSI 端到端评测集 — gain 的统一度量（Auto Harness 思想）。
 
-对比启发（jiuwenswarm Auto Harness：评测驱动优化 harness 本身）：
+Auto Harness：评测驱动优化 harness 本身
 
 现状缺口：RSI 棘轮的 gain 来自 setpoint 梯度的"信号估算"——参数贴近度
 满分不代表行为正确，棘轮缺少"整个 agent 是否变好"的端到端标尺。

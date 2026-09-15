@@ -1,7 +1,7 @@
 """
 SwarmManager — 蜂群编排核心（主 Agent 动态派生子 Agent）
 
-ZCode 式蜂群模型：主 Agent 在对话/工作流中通过 spawn 工具动态派生子 Agent
+主 Agent 在对话/工作流中通过 spawn 工具动态派生子 Agent
 执行子任务，可并行（多次调用）、可后台（background=True）。
 
 输出双通道回流：
@@ -43,12 +43,11 @@ class SubAgentRun:
     task: str = ""
     origin: str = "chat"  # chat | workflow
     session_id: Optional[str] = None  # 事件广播目标（发起者的聊天会话）
-    # P2-9（OpenOcta 启发 Member 即 SessionKey）：member 会话键。
+    # P2-9：member 会话键。
     # member 的任务对话经既有 save_to_session → SessionManager.add_message
     # 持久化到 sessions/<agent_id>/session_<member_session_id>_*.json，
     # 完全复用单 agent 会话存储/历史恢复/usage 记账——不建第二套管线。
-    # Windows 文件名安全（冒号在 NTFS 非法，OpenOcta 冒号分节形式在此
-    # 等价转写为下划线）。
+    # Windows 文件名安全。
     member_session_id: str = ""
     status: str = "pending"  # pending | running | completed | failed
     report: str = ""
@@ -87,7 +86,7 @@ class SubAgentRun:
 class SwarmManager:
     """蜂群管理器：派生、执行、事件广播、结果回流
 
-    spawn 三明治治理（OpenOcta 启发 P2-10）——LLM 自主繁殖子 agent 时
+ spawn 三明治治理——LLM 自主繁殖子 agent 时
     "提示词约束必然被忽略"，由数据层硬拒绝兜底：
     - 常量硬限：MAX_ACTIVE_CHILDREN / MAX_TASK_CHARS（本类属性，数据层
       消费方不可绕过）
@@ -105,7 +104,7 @@ class SwarmManager:
 
     # ── spawn 三明治之常量硬限（数据层） ──────────────────────────
     # 同时运行中的派生上限（pending/running 全局口径；桌面单用户产品的
-    # 进程保护阀门，member 内递归派生同受此限）。OpenOcta 直接子数=5 同量级。
+    # 进程保护阀门，member 内递归派生同受此限）
     MAX_ACTIVE_CHILDREN = 5
     # 单个 task 长度上限（防 LLM 把整段对话历史塞进 task 拖垮子 Agent）
     MAX_TASK_CHARS = 8000
@@ -255,7 +254,7 @@ class SwarmManager:
             return sum(1 for r in self._runs.values() if r.status in ("pending", "running"))
 
     def _quota_snapshot(self) -> Dict[str, Any]:
-        """配额闭环快照（返回值带 active_children/limit，OpenOcta 语义）。"""
+        """配额闭环快照。"""
         return {
             "active_children": self._count_active(),
             "limit": self.MAX_ACTIVE_CHILDREN,
@@ -364,8 +363,7 @@ class SwarmManager:
             # metadata, enable_tts) —— 不接受 temperature/max_tokens，
             # 子 Agent 使用自身 llm_config（独立模型/人设是蜂群的前提）。
             # event_emitter 经 metadata 透传（chat_pipeline._init_agent_state 提取）
-            #
-            # P2-9（OpenOcta 启发 Member 即 SessionKey）：session_id = member
+            # P2-9：session_id = member
             # 会话键——任务对话经既有 save_to_session 落盘到
             # sessions/<agent_id>/session_<member_session_id>_*.json，member
             # 拥有可查询/可审计/跨轮恢复的普通会话，完全复用单 agent 会话

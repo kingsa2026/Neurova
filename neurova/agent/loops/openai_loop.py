@@ -79,14 +79,14 @@ class OpenAILoop(BaseAgentLoop):
         super().__init__(agent)
         self._tool_rounds = 0  # 递归深度计数
         self._tools_supported = True  # 初始假设支持，400 后设为 False
-        # 停滞检测闭环（对标 OpenManus is_stuck/handle_stuck_state）：
+        # 停滞检测闭环：
         # 记录每轮 assistant 回复与工具调用签名，重复时注入"换策略"提示，
         # 连续停滞则终止工具循环（激活 agent_loop_detection 死代码的消费方）
         self._round_replies: List[str] = []
         self._last_round_calls: List[tuple] = []
         self._stagnation_count = 0
         self._round_user_key: Optional[str] = None  # 首轮 predict_step 时计算
-        # P2-5：循环门控（对标 QP loop/gates）——DoomLoop/Iteration/TokenBudget 默认装配，
+        # P2-5：循环门控——DoomLoop/Iteration/TokenBudget 默认装配，
         # goal 模式由调用方经 set_goal_gate 注入 GoalGate
         from neurova.agent.gates import (
             DoomLoopGate,
@@ -404,7 +404,7 @@ class OpenAILoop(BaseAgentLoop):
             # 执行工具
             tool_messages = await self.handle_tool_calls(tool_calls, request_params["messages"])
 
-            # P2-6（Codex encrypted reasoning 回放对齐）：工具轮间回放推理链。
+            # P2-6：工具轮间回放推理链。
             # 默认关（NEUROVA_REASONING_REPLAY=1 开）+ 能力门——DeepSeek 等
             # provider 禁止回传 reasoning_content，盲目回放是兼容回归。
             if reasoning_content:
@@ -437,7 +437,7 @@ class OpenAILoop(BaseAgentLoop):
         """流式预测入口（P1-1① 溢出恢复包装）。
 
         请求打开即上下文溢出（TokenLimitExceeded，且尚无内容产出）→ 折叠
-        消息后单次重试（对标 QP scroll 恢复语义）；重试仍溢出原样抛出，
+ 消息后单次重试；重试仍溢出原样抛出，
         不做第二次重试（防循环）。流中途溢出（已有内容）原样抛——重试会
         造成内容重复。
         """
@@ -589,7 +589,7 @@ class OpenAILoop(BaseAgentLoop):
         async for chunk in self.llm_client.chat_stream(request_params["messages"], **stream_kwargs):
             if isinstance(chunk, dict):
                 if chunk.get("retry_status"):
-                    # 429 重试/切换过程事件（ZCode 对齐 2026-09-11）：转成 typed
+                    # 429 重试/切换过程事件：转成 typed
                     # 事件供管线/前端倒计时；reset=半截回复作废，本轮已累积的
                     # content/reasoning/未执行 tool_calls 全部清空后重来
                     payload = chunk["retry_status"]
@@ -684,7 +684,7 @@ class OpenAILoop(BaseAgentLoop):
                 }
                 return
             if gate_decision.action.value == "interrupt_and_continue":
-                # QP INTERRUPT_AND_CONTINUE 语义：注入提示进消息序列后继续
+                # 注入提示进消息序列后继续
                 # （round_reply/签名仅 yield reasoning 供前端展示，LLM 看到的是消息）
                 request_params["messages"].append(
                     {"role": "user", "content": gate_decision.continuation_prompt}

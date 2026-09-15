@@ -1,6 +1,5 @@
 """合成评测集生成器 — 强模型读产物文本 → 产出评测用例(解冷启动)。
 
-对位 Hermes `core/dataset_builder.SyntheticDatasetBuilder`:技能多数没有
 历史使用数据,评测集先从合成开始(GEPA 最少 3 条样例即可工作)。
 
 expected_behavior 是**评分细则(rubric)**,不是精确文本(如"应指出第 42 行

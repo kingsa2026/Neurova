@@ -1,4 +1,4 @@
-"""B-7 Phase 0 度量脚本（docs/B7调度器事件循环统一立项 v2 §8.1）。
+"""B-7 Phase 0 度量脚本（v2 §8.1）。
 
 M1: 每 job 事件循环开销微基准——per-job new_event_loop+close vs 常驻循环
     run_coroutine_threadsafe 提交，n=1000 报 P50/P95。

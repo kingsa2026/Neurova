@@ -1,6 +1,6 @@
-"""多模态真实探测对齐 QwenPaw — 契约测试（红绿灯 TDD）
+"""
 
-锁定契约（对齐 QwenPaw multimodal_prober / openai_provider probe）：
+锁定契约：
 1. openai_provider.probe_model_multimodal 发真实图像探测请求
    （32x32 纯红 PNG data URL + 主色调提问），不再是纯名称启发式；
 2. 语义校验：答案含红色系关键词才判 vision 支持（防纯文本模型假阳性）；

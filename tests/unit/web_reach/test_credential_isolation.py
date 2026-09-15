@@ -1,6 +1,6 @@
 """社交平台凭据按用户分桶测试（TDD 红绿）—— 遗留项：登录态凭据服务器全局共享
 
-修复目标（docs/agent-reach-integration.md 遗留项）：
+修复目标（遗留项）：
 1. UserCredentialStore：按 (user_id) 分桶的 agent-reach 凭据管理
    - 每用户独立 config.yaml（经 agent-reach Config 的 config_path 指向用户桶）
    - 凭据值经 Neurova SecretStore 加密落盘（明文不落磁盘）

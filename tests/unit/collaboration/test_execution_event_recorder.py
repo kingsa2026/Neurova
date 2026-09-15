@@ -1,6 +1,6 @@
 """执行事件记录器测试（P0-1 工作流执行流式化）。
 
-契约（docs/Neurova_Dify代码级对比_2026-09-03.md §4 P0-1）：
+契约（§4 P0-1）：
 - 引擎已有 _emit/on_event 机制，缺"记录+订阅"传动轴——本模块补齐：
   record() 同步入缓冲（环形上限），subscribe() 回放+实时+终态收尾。
 - 事件帧统一 dict：{seq, type, workflow_id, execution_id, node_id, data, timestamp}，

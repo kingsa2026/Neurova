@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""B1-1/B1-2：模型错误分类单源 + 回退资格门控（对齐 QwenPaw
+"""B1-1/B1-2
 providers/model_error_policy.py 与 model_capability_cache.py）。
 
 锁定契约：
@@ -199,7 +199,7 @@ class TestModelCapabilityCache:
 
 
 class TestDiscoveryErrorKinds:
-    """B1-1：发现失败 error_kind 对齐 QwenPaw 细分（timeout 独立 / 403=authorization）。"""
+    """B1-1"""
 
     def test_timeout_exception_maps_to_timeout_kind(self):
         from neurova.llm.provider_manager import _classify_discovery_error_kind

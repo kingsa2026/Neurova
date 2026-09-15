@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
-"""OpenClaw 对比 #15：工具 schema sandboxRequired 声明位。
+"""工具 schema sandboxRequired 声明位
 
-参照 Dify P0-4 技能声明式权限的语义约定：
 - 声明键缺省 = 旧行为（完全等价，无任何新裁决）
 - 声明生效 = fail-closed 裁决有依据（声明工具强制走沙箱链）
 - 开关默认关（NEUROVA_TOOL_SANDBOX_ENFORCE=1 才启用强制路由）

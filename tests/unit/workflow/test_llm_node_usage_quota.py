@@ -1,4 +1,4 @@
-"""P1-6 工作流节点 token 计量接配额（TDD — Dify 对标 §4 P1-6）。
+"""P1-6 工作流节点 token 计量接配额。
 
 契约：
 1. exec_llm 双路径（多模型客户端 / Agent.chat 回退）产出 usage 真值

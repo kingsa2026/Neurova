@@ -1,4 +1,4 @@
-"""对话窗口 token 预算压缩（zcode 式自动 compact）
+"""对话窗口 token 预算压缩
 
 2026-09-09 kai 空回复事故排查副产物：ContextPool 是归档+语义召回（不裁剪），
 get_recent_context 是固定 20 条消息数窗口——两者都不约束 prompt 大小。
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 # 每条消息的协议开销（role/分隔符等的保守估计）
 _PER_MSG_OVERHEAD = 4
 
-# 摘要失败收敛（P0-2，Codex compact 对齐）：摘要请求失败时从折叠区丢最旧一条
+# 摘要失败收敛：摘要请求失败时从折叠区丢最旧一条
 # 重试（输入变小更易成功），最多重试 _SUMMARY_MAX_RETRIES 次；仍失败则回落
 # 静态桩（编排层既有语义）。压缩自身必须收敛，不允许摘要失败拖垮整轮压缩。
 _SUMMARY_MAX_RETRIES = 3

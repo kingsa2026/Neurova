@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""知识摄取持久队列（Yuxi 对比 P1 #9：Durable Task 化，channel_ingress 同型）。
+"""知识摄取持久队列。
 
 契约：
 - enqueue 幂等（dedupe_key UNIQUE）；claim 租约 + FIFO；max_attempts → dead-letter

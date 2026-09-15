@@ -1,4 +1,4 @@
-"""LLM 录制-回放测试夹具（对齐 DeepSeek Harness 的 llm-replay 思路）。
+"""LLM 录制-回放测试夹具。
 
 背景：Neurova 测试债中 C 类失败源自 mock 缺口——每次改 LLM 接口都要
 手搓 chunk 结构 mock，且 mock 与真实契约对不上（见 test_execute_with_stream

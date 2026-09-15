@@ -1,6 +1,6 @@
-"""工具参数守卫（OpenOcta 启发 P1-5：toolArgumentsGuard）。
+"""工具参数守卫。
 
-把生产踩过的 LLM 参数坑做成执行前守卫（参考 openocta tool_arguments_guard.go）：
+把生产踩过的 LLM 参数坑做成执行前守卫：
 
 1. **参数别名归一**：LLM 手滑写错参数名（path/file/filename/filepath/filePath
    → file_path 一类）时自动重映射，不再让工具以空参数/错参数白跑一轮。
@@ -67,7 +67,7 @@ _SUGGESTIONS = [
 def balance_json_text(text: str) -> Optional[str]:
     """尝试配平半截 JSON 文本。
 
-    手写括号/引号栈计数（参考 openocta tool_arguments_guard 的配平思想）：
+ 手写括号/引号栈计数：
     - 追踪字符串内/外与转义状态，统计未闭合的 { [ 与未闭合字符串
     - 补齐闭合符后再 json.loads 验证；失败再清理尾逗号重验
     - 无法配平返回 None（调用方据此拒绝执行）

@@ -1,4 +1,4 @@
-"""R1-2 ActionResult 封闭契约（CUA 升级方案 Phase 1，Cua C-1 × OCU 诚实降级）
+"""R1-2 ActionResult 封闭契约
 
 契约（构造器强制不变式）：
 - confirmed ⇒ evidence ≥ 1 且无 refusal_code

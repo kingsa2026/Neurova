@@ -1,13 +1,13 @@
-"""P1-4 多知识库路由（TDD — Dify `multi_dataset_function_call_router` 对标）。
+"""P1-4 多知识库路由。
 
-契约（docs/Neurova_Dify代码级对比_2026-09-03.md §2.6/§4 P1-4）：
+契约（§2.6/§4 P1-4）：
 - 多库场景（>1 个 KB）先选库再检索：LLM FunctionCall 选库（提供每个库
   的 name/description 供模型选择），直连 multi_model_client
 - MultiKBRouter.route(query, kbs)：
   - 0/1 个库 → 不调 LLM，直接全部/单库返回（零成本路径）
   - ≥2 个库 → LLM 选库（返回选中的 kb_id 列表），按选择过滤
   - LLM 不可用/失败 → 兜底全库检索（可用性优先，不因路由故障丢检索）
-- schema 驱动：tools 参数从 KB 元数据生成（Dify FunctionCall 选库同型）
+- schema 驱动：tools 参数从 KB 元数据生成
 """
 
 import asyncio

@@ -1,13 +1,13 @@
-"""seq 慢消费者两条例边界纪律（OpenClaw 启发 P0-7）
+"""seq 慢消费者两条例边界纪律
 
-背景（docs/Neurova_OpenClaw代码级对比_2026-09-04.md §3 P0-7）：
-  OpenClaw 的 server-broadcast 把 seq 语义推到崩溃/慢读边界，两条铁律：
+背景（§3 P0-7）：
+两条铁律
   (a) 慢消费者丢帧也推进 seq——让客户端 gap 掐测器看见丢失，重连后
       sync_resume 补发恢复；绝不为了等一个慢客户端阻塞整场广播。
   (b) 序列化失败不推进 seq——毒帧若已盖章进历史，所有客户端的 gap
       探测器会同时触发（重连风暴），且每次重连重放都会在同一帧卡壳。
 
-Neurova 落点（与 OpenOcta P0-1 seq 盖章机制的衔接）：
+Neurova 落点：
   - (b)：broadcast_event / broadcast_event_sync 在 add_event 盖章**前**
     做序列化预检（to_json 无副作用），失败则不入历史不盖章。
   - (a)：_send_to_channel 单帧发送超时（slow_consumer_send_timeout），

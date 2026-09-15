@@ -1,4 +1,4 @@
-"""P0-2/P0-3 API 契约测试（Utopia 对标落地清单）。
+"""P0-2/P0-3 API 契约测试。
 
 端点契约：
 - GET  /v1/knowledge/conflicts            → 冲突清单（仅管理员；非 admin 403）

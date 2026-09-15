@@ -1,6 +1,6 @@
-"""ProviderUsageCollector — provider 真账单采集器（P1-13，OpenClaw 启发）
+"""ProviderUsageCollector — provider 真账单采集器
 
-OpenClaw `src/infra/provider-usage*.ts` 的核心思想：配额/余额/30 天趋势从
+配额/余额/30 天趋势从
 provider 后台 API 直拉，与 token 估值分离——这是"sensetime 网关不回传 usage"
 困局的正解（流内抠不到的账，从后台拿）。
 

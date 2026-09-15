@@ -1,6 +1,5 @@
-"""P1-9 记忆来源信任分级（OpenClaw 启发）— TDD 测试
+"""P1-9 记忆来源信任分级— TDD 测试
 
-参照 OpenClaw memory-core 的 origin 闭集设计：
 - origin 是写入时由调用点结构化赋予的闭集枚举（owner/agent/untrusted/system），
   落 SQLite 列，模型无法用文字（metadata/content）改写。
 - 写入时即定信任级（fail-safe 于写入时而非事后扫描）。

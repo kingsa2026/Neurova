@@ -1,4 +1,4 @@
-"""Skill 递归进化三断点修复契约测试（docs/Neurova_OpenClaw工具技能专项对比_2026-09-04.md §7.2）。
+"""Skill 递归进化三断点修复契约测试。
 
 断点 #1 传动轴：技能执行 → genetic_engine.record_reuse（reuse_count 递增 → fitness 正反馈）。
 断点 #2 持久化：genetic_engine.register_to_skill_registry 接受 skill_service 并写入磁盘 manifest。

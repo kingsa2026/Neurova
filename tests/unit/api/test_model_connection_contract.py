@@ -1,6 +1,6 @@
-"""模型连接测试对齐 QwenPaw — 契约测试（红绿灯 TDD）
+"""
 
-锁定契约（对齐 QwenPaw providers.py / provider_model_availability.py）：
+锁定契约：
 1. 模型级连接测试发真实请求（chat ping），而非仅本地构造实例（恒成功的假实现）；
 2. ConnectionResult 结构化：http_status / retryable / checked_at / verification
    （live = 真实请求验证；provider_only = 仅验证服务商连通；
@@ -18,7 +18,7 @@ from neurova.llm.providers.types import ConnectionResult
 
 
 # ---------------------------------------------------------------------------
-# 七态派生（单一事实源：五类 ErrorCategory → QwenPaw 风格七态）
+# 七态派生
 # ---------------------------------------------------------------------------
 
 class TestAvailabilityStatusDerivation:

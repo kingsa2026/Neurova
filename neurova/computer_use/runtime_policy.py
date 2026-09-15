@@ -1,9 +1,9 @@
-"""桌面运行权限策略（CUA Phase 3 扩展 RS 生产触发层，用户可配 4 档）
+"""桌面运行权限策略
 
 决定 computer_* 动作"在哪跑 / 要不要先问用户"，与既有 governance 内容裁决**组合**
 （governance 先跑 DENY/ASK，本策略是用户选的桌面运行姿态，叠加其上）。
 
-四档（docs/Neurova_CUA_远程会话平面立项_2026-09-12.md 延伸）：
+四档（延伸）：
 - full   完全放开：本机执行（= 现状，默认，零回归），仅受 governance 约束
 - sandbox 沙箱运行：所有变更动作必须在隔离桌面会话执行；无活动会话 → 拒
 - review 审核模式：所有变更动作需用户在交互面板同意/拒绝（走 ApprovalManager）

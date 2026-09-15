@@ -11,7 +11,7 @@ Neurova 认证模块 - 全面单元测试
   其 API (access_expires / _token_store / validate_token 返回元组等) 与
   合并后的 neurova/security/neu_token_manager.py 接口不兼容。
   合并后的统一 NEUTokenManager 由 test_unified_neu_token_manager.py 全面覆盖 (33 个测试)。
-  详见 bug 报告: docs/bugfix-p2.2-neu-token-manager-duplication.md
+ 详见 bug 报告:
 """
 
 import pytest

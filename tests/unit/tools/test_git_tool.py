@@ -1,7 +1,7 @@
 """
 P0-3 git 工具族（TDD 先红后绿）。
 
-设计（docs/Neurova_Agent工具扩展计划_2026-09-12.md P0-3）：
+设计（P0-3）：
 - 单工具 `git`，command 参数为完整 git 命令行（含 git 前缀），
   shlex 拆分 + 列表式 subprocess（无 shell，注入面为零）；
 - 仓库锚点由 path 参数决定（复用 _resolve_agent_path 工作区契约，09-08

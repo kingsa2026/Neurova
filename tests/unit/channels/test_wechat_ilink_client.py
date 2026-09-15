@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""iLink Bot HTTP client 协议契约测试（QwenPaw wechat/client.py + utils.py 照搬移植）。
+"""iLink Bot HTTP client 协议契约测试。
 
 钉死真实官方协议语义（HTTP/JSON @ ilinkai.weixin.qq.com）：
 - make_headers：X-WECHAT-UIN（base64 随机 uint32 防重放）/ AuthorizationType /

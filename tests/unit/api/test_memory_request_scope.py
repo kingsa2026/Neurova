@@ -1,6 +1,6 @@
 """记忆三层隔离请求作用域测试
 
-审计修复 (docs/audit/three-tier-isolation-audit.md P0-1 / P1-6 / P1-7 / P2-11):
+审计修复 (P0-1 / P1-6 / P1-7 / P2-11):
 - 原 deps/base 的 get_memory_manager 直接给共享单例的只读 property
   (neuser_id/user_id) 赋值: base.py 吞 AttributeError 静默失效,
   deps.py 抛 500, 且多请求并发会互相覆盖隔离上下文。

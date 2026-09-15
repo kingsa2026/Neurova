@@ -1,9 +1,9 @@
-"""失败归因器测试 — 教训落到技能粒度（QP 对齐启发 #5）。
+"""失败归因器测试 — 教训落到技能粒度。
 
 现状：SelfModelEngine 五算子产出的教训全部是工具粒度（subject=工具名），
 消费面只有默认关的调控门——教训从未落到技能层，技能无法从失败中学习。
 
-设计（对齐 jiuwenswarm review_feedback 归因模型，置信度阈值 0.7）：
+设计（review_feedback 归因模型，置信度阈值 0.7）：
 - 从 MetaLedger 拉活跃工具级教训 → "工具→技能"倒排索引（registry 的
   tool_sequence 结构归因）→ 置信度过阈值后写入技能经验库（applied 记录
   立即生效，攒够参与重建）；

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-召回循环防护（P1-a，对标 QP beta.5 RecallLoopGuard）
+召回循环防护
 
 问题：模型可在同一轮内反复调用 recall_history 同查询——每次拿到相同
 结果（甚至相同空结果），陷入无效重试循环并浪费 token。

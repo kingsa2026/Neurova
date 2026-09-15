@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
-"""SQLite 版本化迁移（PRAGMA user_version，补课 1.2 + Yuxi 对比 P0-4）。
+"""SQLite 版本化迁移。
 
 替代"仅 IF NOT EXISTS"的无版本 schema 演进。规则：
 - **版本按 domain 隔离**（2026-09-13 根治）：每库一个版本域，A 域的 v2
   不会套到 B 库头上（旧全局单链缺陷）；注册即排序、执行过的版本按
   user_version 跳过
 - **防降级**：库的 user_version 高于本域已注册最大版本 → SchemaVersionError
-  （对位 Yuxi require_current_schema / OpenClaw "user_version 高于当前版本
   拒绝打开"——新代码写过 schema 后回滚旧代码继续跑只会制造脏写）
 - 未注册域 → ValueError：接入纪律显式化，不静默放过拼错的域名
 - 每条 callable 迁移独立事务：失败回滚并上抛（调用方决定启动失败/软降级）

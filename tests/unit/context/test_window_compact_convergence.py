@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """P0-2 窗口压缩收敛保证 + auto_compact_enabled 开关 + 90% 硬顶。
 
-Codex 对齐（docs/Neurova_Codex代码级对比_2026-09-14.md §2.3/P0-2）：
 - 压缩摘要生成失败 → 从折叠区丢最旧一条重试（上限 3 次），压缩自身必须收敛
 - auto_compact_enabled=False 时窗口超预算也原样返回（显式关闭语义）
 - 硬顶：有效预算 = min(窗口预算, 模型上下文窗口×90%)——配置再大也不越过

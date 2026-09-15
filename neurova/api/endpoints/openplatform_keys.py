@@ -1,7 +1,7 @@
 """
 开放平台API密钥管理端点
 
-Yuxi 对比 P2 #12：密钥从模块级内存 dict 升级为**JSON 落盘**（原子写
+密钥从模块级内存 dict 升级为**JSON 落盘**（原子写
 temp+os.replace，providers 丢配置事故三件套教训）+ 创建幂等
 （creation_request_id + 意图指纹）+ 撤销 tombstone 拒绝同请求重放复活。
 明文只在创建成功响应中出现一次；存储面只有 SHA-256 哈希（不降）。
@@ -161,7 +161,7 @@ async def create_api_key(body: CreateApiKeyRequest, request: Request):
             existing = _find_by_request_id(uid, body.creation_request_id)
             if existing is not None:
                 if existing.get("revoked"):
-                    # tombstone：撤销后不得复活重放（Yuxi api_key_repository 语义）
+                    # tombstone：撤销后不得复活重放
                     raise HTTPException(
                         status_code=409,
                         detail="该创建请求的密钥已撤销，不允许复活重放；请使用新的 creation_request_id",

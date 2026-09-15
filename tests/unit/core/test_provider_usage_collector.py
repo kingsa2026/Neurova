@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P1-13 provider 真账单采集器（OpenClaw provider-usage 启发）— TDD 测试
+"""P1-13 provider 真账单采集器— TDD 测试
 
 OC 语义：配额/账单从 provider 后台拉取，而非从流里抠 token（sensetime 网关
 实测不回传 usage 的正解）。Neurova 落点：可选采集器框架，默认关——

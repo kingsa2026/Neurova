@@ -1,8 +1,7 @@
 """适应度函数 — LLM-as-judge 多维细则 + 长度惩罚。
 
-对位 Hermes `hermes-agent-self-evolution/evolution/core/fitness.py`。
 
-判分公式(原样对齐 Hermes 数值,便于两边结果可直接比较):
+判分公式:
     composite = max(0, 0.5·correctness + 0.3·procedure_following
                        + 0.2·conciseness − length_penalty)
 长度惩罚:artifact_size/max_size > 0.9 后线性爬升,上限 0.3。
@@ -58,7 +57,7 @@ def parse_score(value: Any) -> float:
 
 
 def length_penalty_for(artifact_size: Optional[int], max_size: Optional[int]) -> float:
-    """长度惩罚曲线(与 Hermes 同曲线)。"""
+    """长度惩罚曲线。"""
     if not artifact_size or not max_size or max_size <= 0:
         return 0.0
     ratio = artifact_size / max_size
@@ -194,7 +193,6 @@ def quick_proxy_score(expected_behavior: str, output: str) -> float:
     """优化期快速代理分:关键词重叠率。
 
     只在训练集迭代期使用(省钱);留出集对比永远用真 judge。
-    对齐 Hermes `skill_fitness_metric` —— 非空保底 0.3。
     """
     if not (output or "").strip():
         return 0.0

@@ -1,4 +1,4 @@
-"""批次 C：恒定规则段（工具使用规则/环境块/记忆写入规则）+ CUA 使用纪律（R3-5）
+"""批次 C
 
 验收点：
 1. 三段恒定且会话内字节稳定（含日期，日级精度不破缓存）
@@ -8,7 +8,7 @@
    同步（双路径一致，T-1 教训）
 4. 与 tools_desc 策略头去重（memory_search 互斥句不重复出现）
 5. 记忆写入三条款存在；并行纪律、错误恢复、反注入、信息优先级存在
-6. CUA 使用纪律段（R3-5 尾巴）：观察→语义→像素阶梯、快照过期、敏感禁区、
+观察→语义→像素阶梯、快照过期、敏感禁区
    外部可见动作先问；恒定（无动态内容）不破前缀缓存
 """
 
@@ -68,7 +68,7 @@ class TestPureSections:
 
 
 class TestComputerUseDiscipline:
-    """R3-5 尾巴：CUA 使用纪律写入恒定技能段（观察→语义→像素 + 敏感禁区）。"""
+    """R3-5 尾巴"""
 
     def test_ladder_order_snapshot_then_semantic_then_pixel(self):
         text = build_computer_use_rules_section()

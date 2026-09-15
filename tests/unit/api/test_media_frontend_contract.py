@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """F-1 契约对齐防回归：NeurUI media.ts 消费的后端契约形状。
 
-台账 docs/资源型修复登记台账_2026-09-11.md F-1：前端 listMedia 期望
+台账 F-1：前端 listMedia 期望
 ``data.media``/offset/limit（而非 items/page/size），download 走
 ``/download/{media_id}``，info 走 ``/{media_id}/metadata``，批量删除走
 ``POST /batch-delete``。本文件锁定：

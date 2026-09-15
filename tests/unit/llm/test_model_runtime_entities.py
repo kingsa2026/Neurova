@@ -1,8 +1,8 @@
-"""统一模型契约 — 消息族/结果族/参数 schema/结构化输出（TDD — Dify §2.5 对标）。
+"""统一模型契约 — 消息族/结果族/参数 schema/结构化输出。
 
-契约（docs/Neurova_Dify代码级对比_2026-09-03.md §2.5 六型统一契约）：
+契约（§2.5 六型统一契约）：
 
-消息族（Dify 同名对齐，OpenAI dict 双向适配器——管线零破坏）：
+消息族：
 - SystemPromptMessage / UserPromptMessage / AssistantPromptMessage（含
   tool_calls）/ ToolPromptMessage（tool_call_id）/ PromptMessageTool
 - 多模态内容：TextPromptMessageContent / ImagePromptMessageContent
@@ -20,7 +20,7 @@
 
 结构化输出：
 - LLMStructuredOutput 一等契约（围栏/裸 JSON 提取 + jsonschema 校验）
-- 能力口径对齐：Dify 六型模型 ↔ Neurova 能力词表（MODEL_TYPE_CAPABILITIES）
+- 能力口径对齐
 """
 
 import pytest
@@ -295,7 +295,6 @@ class TestStructuredOutput:
 
 class TestCapabilityVocabularyAlignment:
     def test_six_model_types_mapped(self):
-        """Dify 六型 ↔ Neurova 能力词表（口径对齐）"""
         from neurova.llm.model_runtime.schema import MODEL_TYPE_CAPABILITIES, model_types_for_capabilities
 
         assert set(MODEL_TYPE_CAPABILITIES) == {

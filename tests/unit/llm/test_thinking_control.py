@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""B1-3 思考控制三级旋钮（QwenPaw #6302 对齐）。
+"""B1-3 思考控制三级旋钮。
 
 thinking_enabled（bool）/ thinking_budget（int）两级 + 既有 reasoning_effort。
 按声明门控注入：仅 compat.supports_thinking_toggle=True 的网关注入

@@ -214,9 +214,8 @@ _BUILTIN_PROVIDER_DEFS: tuple[dict, ...] = (
         "base_url": "https://token.sensenova.cn/v1",
         "api_key_prefix": "",
     },
-    # ── B1-4（QwenPaw #6515 对齐）：火山引擎（Ark）/ Agent Plan / 小米 MiMo ──
-    # 模型目录搬运自 QwenPaw model_catalog.json（ctx/输出窗口见各模型文档），
-    # 作为静态回退清单：用户填 key 后发现失败时仍有可用模型列表。
+    # ── B1-4：
+    # 作为静态回退清单：用户填 key 后发现失败时仍有可用模型列表
     {
         "id": "volcengine",
         "name": "火山引擎（Ark）",
@@ -320,7 +319,7 @@ _BUILTIN_PROVIDER_DEFS: tuple[dict, ...] = (
 
 
 def _classify_discovery_error_kind(exc: BaseException) -> str:
-    """B1-1：发现失败 error_kind 细分（对齐 QwenPaw DiscoveryErrorKind）。
+    """B1-1：发现失败 error_kind 细分。
 
     在 normalize_provider_error 五类之上细分：超时独立于网络（timeout）、
     403 独立于 401（authorization）。返回值 ∈ authentication / authorization /
@@ -376,14 +375,14 @@ class ProviderConfig:
     models: List[str] = field(default_factory=list)
     # 发现候选(与 models 分离):fetch 写入、merge 显式并入,持久化
     discovered_models: List[str] = field(default_factory=list)
-    # 模型发现同步元数据(QwenPaw 对齐):成功时间戳/最后一次失败原因,持久化
+    # 模型发现同步元数据:成功时间戳/最后一次失败原因,持久化
     models_last_synced_at: Optional[str] = None
     models_last_sync_error: Optional[str] = None
     # 模型元数据:model_id -> 模型档案(dict,含 capabilities/context_window/pricing 等)。
     # models 保持字符串列表契约以兼容存量消费者;元数据仅承载增强信息。
     model_metadata: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     enabled: bool = True
-    # P1-13 真账单采集开关（OpenClaw provider-usage 启发，默认关）：
+    # P1-13 真账单采集开关：
     # 显式置 true 后 /stats/provider-usage 才会拉取该 provider 后台账单
     usage_collection: bool = False
     # 服务商级读超时覆盖（秒）：思考模型经缓冲型网关的流内静默可达数分钟，
@@ -1084,7 +1083,6 @@ class LLMProviderManager(Module):
             self._save_config()
 
         logger.info("Activated model %s in provider %s", model_id, provider.name)
-        # QwenPaw 对齐:激活后对未探测过的模型调度后台多模态探测
         self.maybe_probe_multimodal(provider_id, model_id)
         return True
 
@@ -1173,7 +1171,7 @@ class LLMProviderManager(Module):
         max_prompt_price: Optional[float] = None,
         is_free: Optional[bool] = None,
     ) -> List[PydanticModelInfo]:
-        """按 QwenPaw 四维语义筛选服务商模型列表。
+        """
 
         优先复用 provider 特化的 filter_models(如 OpenRouter 的系列多态);
         无特化实现的实例(OpenCode/OpenAI 兼容等)走通用过滤。
@@ -1329,7 +1327,7 @@ class LLMProviderManager(Module):
         provider_id: str,
         merge: bool = True,
     ) -> Dict[str, Any]:
-        """结构化模型发现（QwenPaw discover_provider_models 对齐）。
+        """结构化模型发现。
 
         Returns:
             {"success", "models", "discovered_count", "last_synced_at",
@@ -1401,7 +1399,7 @@ class LLMProviderManager(Module):
             }
 
         if not models:
-            # 空结果消歧（QwenPaw _probe_discovery_failure_reason）：
+            # 空结果消歧：
             # 可能是真没有模型，也可能是请求失败被底层吞掉 — 拉连通性区分
             check = await self.check_provider_connection(provider_id)
             if not check.success:
@@ -1650,7 +1648,7 @@ class LLMProviderManager(Module):
 
         - ``force=False``(默认):元数据优先,其次 provider 实例,名称启发式兜底
           (兼容既有消费方)。
-        - ``force=True``:跳过元数据直发真实探测(QwenPaw 语义),结果写回
+ - ``force=True``:跳过元数据直发真实探测,结果写回
           model_metadata(capabilities 合并 vision + probe_source)。
         """
         provider = self._resolve_provider(model_id, provider_id)
@@ -1762,7 +1760,7 @@ class LLMProviderManager(Module):
             logger.warning("Persist probe result failed for %s: %s", model_id, e)
 
     def maybe_probe_multimodal(self, provider_id: str, model_id: str) -> None:
-        """激活模型时的自动后台探测(QwenPaw maybe_probe_multimodal 对齐)。
+        """激活模型时的自动后台探测。
 
         仅对该模型无任何能力标记时调度 fire-and-forget 线程,
         不阻塞激活流程;探测结果经 _persist_probe_result 写回。
@@ -1824,7 +1822,6 @@ class LLMProviderManager(Module):
     ) -> ConnectionResult:
         """检查模型连接:按 model_id 定位服务商并调用实例检查。
 
-        QwenPaw 对齐:管理器层统一填 checked_at 并派生可用性七态,
         检查结果持久化进 model_metadata[model_id]["availability"]。
         """
         from datetime import timezone

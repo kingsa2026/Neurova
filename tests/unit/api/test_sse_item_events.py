@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""P1-1 SSE 事件 item 化映射器（Codex item 语义对齐）。
+"""P1-1 SSE 事件 item 化映射器。
 
 - 事件形态：{type: item_started|item_delta|item_completed, thread_id, turn_id,
   item_id, item_type, data}
 - content/reasoning delta → agent_message/reasoning item 的 started(首片)+delta
 - tool_call → item_started(tool_call)；tool_result → item_completed(tool_result)
-- done/stopped/error 收口所有未闭合 item（Codex ItemCompleted 语义）
+- done/stopped/error 收口所有未闭合 item
 - 旧事件流零改动（本映射器是旁路增强，compat 别名=旧事件原样保留）
 """
 import pytest
@@ -52,7 +52,7 @@ class TestItemEventMapper:
         assert start[0]["item_type"] == "tool_call"
         assert start[0]["data"]["name"] == "web_search"
 
-        # 工具调用开启会收口未完成的 message/reasoning（Codex 语义）
+        # 工具调用开启会收口未完成的 message/reasoning
         m.on_legacy_events([{"type": "chunk", "content": "prefix"}])
         start2 = m.on_legacy_events(
             [{"type": "tool_call", "name": "file_read", "arguments": "{}"}]

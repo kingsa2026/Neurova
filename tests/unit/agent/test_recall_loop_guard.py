@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-P1-a RecallLoopGuard 防回归网（对标 QP beta.5 RecallLoopGuard + 双指纹 cursor）
+P1-a RecallLoopGuard 防回归网
 
 语义（适配 NV 单执行器架构）：
 - 请求指纹 = sha256(query|limit)：同指纹再次调用时比对**结果快照指纹**

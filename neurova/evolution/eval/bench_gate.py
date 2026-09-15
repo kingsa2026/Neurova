@@ -1,6 +1,6 @@
 """benchmark 回归门 — 把 RSI 端到端评测集接成文本进化的 GATE。
 
-核心纪律(Hermes 对比 2026-09-13):benchmark 是 GATE 不是 fitness——
+核心纪律:benchmark 是 GATE 不是 fitness——
 变体在评测集上再好,系统基准回退即拒绝。
 
 接线说明(诚实边界,勿超读):

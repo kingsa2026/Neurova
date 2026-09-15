@@ -1,4 +1,4 @@
-"""A/B 版棘轮融合契约测试（融合方案见 docs/Neurova_OpenClaw工具技能专项对比_2026-09-04.md §7）。
+"""A/B 版棘轮融合契约测试（融合方案 §7）。
 
 背景：closed_loop.AdaptiveToolWeights（B 版，生产正身）吸收 evolution/tool_weights.py（A 版）
 的三个科学思想——滑动窗口成功率、惰性时间衰减、参数化（RSI 可调）。

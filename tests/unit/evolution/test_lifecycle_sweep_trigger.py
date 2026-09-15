@@ -1,4 +1,4 @@
-"""Wave 核验 — 生命周期定期扫描触发器(对位 Hermes .curator_state)。"""
+"""Wave 核验 — 生命周期定期扫描触发器。"""
 
 import json
 import time
@@ -35,7 +35,7 @@ def _old_record(now):
 
 class TestRunSweepIfDue:
     def test_first_run_only_seeds_and_defers(self, tmp_path):
-        """首次观察只 seed,绝不动技能库(Hermes 同款保守)。"""
+        """首次观察只 seed,绝不动技能库。"""
         now = int(time.time() * 1000)
         recs = {"old": _old_record(now)}
         result = run_sweep_if_due(_svc(recs), tmp_path, now_ms=now)

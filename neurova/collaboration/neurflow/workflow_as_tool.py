@@ -1,4 +1,4 @@
-"""workflow_as_tool（P1-3 — Dify `workflow_as_tool` 对标：子流程是一等工具）。
+"""workflow_as_tool。
 
 已发布工作流 → agent 可调工具：
 - name = ``workflow:{id}`` 命名空间（与 tool:/skill:/mcp: 同风格）

@@ -1,6 +1,6 @@
 """技能经验库（SkillExperienceStore）— 经验与技能定义分离 + usage_stats。
 
-对齐 jiuwenswarm evolutions.json 模型（2026-09-11 对比研究启发 #2）：
+evolutions.json 分离模型：
 
 - **经验与定义分离**：进化经验作为 applied 记录存本库，立即生效（组合进
   技能描述，LLM 下一轮工具面即可见）；技能定义基线保持纯净
@@ -115,7 +115,7 @@ class SkillExperienceStore(PersistedStateMixin):
 
         # C10 治理收紧（2026-09-12）：自动化来源（improver/attribution）的
         # applied 记录在评审闸开启时先进待审——批准后注入描述并计入重建
-        # （对齐 jiuwenswarm auto_save 默认 false：提案审批后才入经验库）
+        # （auto_save 默认 false：提案审批后才入经验库）
         from neurova.evolution.skill_review_gate import skill_review_gate_enabled
 
         if skill_review_gate_enabled() and source in ("improver", "attribution"):

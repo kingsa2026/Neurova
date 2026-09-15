@@ -1,6 +1,5 @@
-"""P1-10 会话历史写入围栏（writer claim fencing，OpenClaw 启发）— TDD 测试
+"""P1-10 会话历史写入围栏— TDD 测试
 
-参照 OpenClaw `expectedWriterRunId` 事务内双重断言：
 - 并行会话/旧 run 恢复后可能写脏历史（本项目历史上发生过 stash/并行覆盖事故三例）。
 - 围栏语义：新 run 接管会话（claim 夺权）后，旧 run 的历史写入被拒绝——
   「被夺权的 run 永远写不进陈旧数据」。

@@ -1,6 +1,6 @@
-"""P1-3 workflow_as_tool（TDD — Dify 对标 §4 P1-3）。
+"""P1-3 workflow_as_tool。
 
-契约（Dify `workflow_as_tool`：子流程是一等工具）：
+契约：
 1. list_published_workflows_as_tools(storage)：已发布工作流 → 工具清单
    （name=workflow:{id}，description 来自工作流，parameters 来自
    start 节点 fields——天然自带输入校验（DAG 定义））

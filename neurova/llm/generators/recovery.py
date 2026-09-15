@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""生成任务收口轮询 + 重启恢复（批次2，PRINTFILM poller 轻量版）。
+"""生成任务收口轮询 + 重启恢复。
 
 账本 ``unfinished()``（submitted/running 且有 remote_task_id）原本零调用方——
 「重启后可恢复轮询」的承诺未接线（前端关页/服务重启后，远程视频任务无人认领，
@@ -11,7 +11,7 @@
   错误原文入账本，不静默滞留）；
 - ``start/stop_generation_recovery``：随服务启动的 asyncio 轻量循环，
   间隔 ``NEUROVA_GENERATION_RECOVERY_SEC``（默认 60s）。
-  不引入租约/看门狗（Neurova 单进程 uvicorn，租约是 PRINTFILM 多 worker 场景的
+ 不引入租约/看门狗（Neurova 单进程 uvicorn
   设计，此处过度工程，登记缓后）。
 """
 from __future__ import annotations

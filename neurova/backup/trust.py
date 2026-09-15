@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-backup 信任模型核心（P3-c，对标 QP beta.5 backup/signing）
+backup 信任模型核心
 
 把备份 zip 当信任边界：
 - SigningKey：每实例 32 字节 HMAC key（0600、O_EXCL 原子创建、拒绝 symlink）
@@ -96,7 +96,7 @@ def _canonical_meta_bytes(meta: Dict) -> bytes:
 def _compute_backup_digest(zp: Path) -> bytes:
     """备份内容指纹：meta 固定字段 + 全部非 meta 条目（确定性排序、流式）。
 
-    帧格式与 QP 对齐语义：ENTRY\\0name\\0bytes\\0size(8B)\\0
+ENTRY\\0name\\0bytes\\0size(8B)\\0
     """
     h = hashlib.sha256()
     h.update(b"META\x00")

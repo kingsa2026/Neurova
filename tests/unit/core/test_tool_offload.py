@@ -84,7 +84,7 @@ def test_non_reproducible_oversize_offloads_with_head_tail(ws, monkeypatch):
     """不可重现超阈值（P0-4 契约变更）：落盘保全全文 + head+tail+标注。
 
     原"全文直进窗口"会在窗口折叠中整段丢失；现在落盘文件是全文真相，
-    消息体保留首尾+指针（Codex 对齐）；落盘失败仍 fail-open 原样。
+ 消息体保留首尾+指针；落盘失败仍 fail-open 原样。
     """
     monkeypatch.delenv("NEUROVA_TOOL_OFFLOAD_THRESHOLD_KB", raising=False)
     monkeypatch.setenv("NEUROVA_TOOL_OFFLOAD_SETTINGS", str(ws / "none.json"))
@@ -122,7 +122,7 @@ def test_no_workspace_falls_back_data_dir(tmp_path, monkeypatch):
 
 
 def test_offload_filename_content_addressed(ws, monkeypatch):
-    """同内容重复溢出幂等复用同一文件（sha 前缀命名，Yuxi sha16 同构）。"""
+    """同内容重复溢出幂等复用同一文件。"""
     monkeypatch.setenv("NEUROVA_TOOL_OFFLOAD_THRESHOLD_KB", "8")
     big = "same" * 5000
     a = apply_offload_policy("file_read", "c1", big, True, ws)

@@ -1,6 +1,6 @@
-"""ActionResult 封闭契约（CUA 升级方案 R1-2）
+"""ActionResult 封闭契约
 
-把 OCU 的"诚实降级文案"形式化为机器可读协议：每个 computer/browser 动作
+每个 computer/browser 动作
 结果可携带一个 action_result 结构，声明 实际投递路径(route)/投递模式
 (delivery)/效果确认档位(effect)/证据(evidence)/精确拒绝码(refusal_code)。
 
@@ -10,7 +10,7 @@
 - suspected_noop ⇒ 无 evidence（"已投递但无验证手段"的诚实档）
 - 词表封闭
 
-参考：trycua/cua `docs/action-result-contract.md`（effect/route/delivery/
+参考
 evidence/escalation 词汇表），并按 Neurova 双后端扩展 camofox_ref /
 playwright_role / remote。
 """

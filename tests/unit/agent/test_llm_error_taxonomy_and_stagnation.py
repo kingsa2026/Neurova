@@ -1,6 +1,6 @@
 """LLM 错误分类学 + 停滞检测闭环 + token 预算闸门（TDD 红绿）
 
-来源：docs/openmanus-comparison.md P2/P3/P4。
+来源： P2/P3/P4。
 
 实测缺陷链（2026-08-29）：modelscope 限流 → llm_client 包装 RuntimeError →
 _call_agent_loop 静默 fallback → legacy 再炸 → 用户拿到空回复。

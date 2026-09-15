@@ -1,6 +1,6 @@
-"""P1-2 HITL surface 安全模型（TDD — Dify HumanInputSurface 对标）。
+"""P1-2 HITL surface 安全模型。
 
-契约（docs/Neurova_Dify代码级对比_2026-09-03.md §2.3/§4 P1-2）：
+契约（§2.3/§4 P1-2）：
 - HumanInputSurface 三态枚举：SERVICE_API / CONSOLE / OPENAPI
 - 接收方裁剪（allowed_recipients）：SERVICE_API/OPENAPI 只能收
   STANDALONE_WEB_APP 类 web 表单请求；CONSOLE 只收 CONSOLE/BACKSTAGE

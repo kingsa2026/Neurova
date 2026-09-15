@@ -1,4 +1,4 @@
-"""Provider 账单后台适配器（P1-13，OpenClaw provider-usage 启发）
+"""Provider 账单后台适配器
 
 各 provider 后台的账单/配额 API 差异大（鉴权头/路径/响应结构），
 本模块按 base_url host 匹配内置适配；无适配的 host 记入 errors 跳过。

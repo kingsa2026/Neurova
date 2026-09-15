@@ -72,8 +72,6 @@ HISTORY_MAX = 500
 
 # ==================== 模块级纯函数（可单测） ====================
 
-# ---- REPL 界面主题 · Hermes 对齐 · 蓝色系 ----
-# Rich 主题名 -> 颜色（消息流/面板/欢迎屏统一走这组 token）
 REPL_THEME = {
     "nr.primary": "#5b9bff",
     "nr.accent": "#38bdf8",
@@ -104,7 +102,7 @@ _ANSI_SEQ = {
     "reset": "\033[0m",
 }
 
-# 界面符号（Hermes messageLine 范式）
+# 界面符号
 SYM_BULLET = "●"       # 助手回复/工具 marker
 SYM_USER = "❯"         # 用户标签侧翼/prompt
 SYM_THINK = "▸"        # 推理折叠箭头
@@ -139,7 +137,7 @@ def _style_name(style: str) -> str:
 
 
 def render_user_message(text: str) -> "Text":
-    """用户消息回显: 蓝标签行 + 缩进正文（Hermes `❯ You` 范式）。"""
+    """用户消息回显: 蓝标签行 + 缩进正文。"""
     out = Text()
     out.append(f"{SYM_USER} 你", style=_style_name("primary"))
     out.append("\n")
@@ -189,7 +187,7 @@ def render_welcome_icon_line(icon: str, text: str, style: str = "ok") -> "Text":
 
 
 def render_status_bar(model: str = "-", session: str = "-", turn: int = 0, elapsed: float = 0.0) -> "Text":
-    """回合收尾状态栏（Hermes 底栏范式）: `⚑ 模型 | 第 N 轮 · 会话 | 用时`。"""
+    """回合收尾状态栏: `⚑ 模型 | 第 N 轮 · 会话 | 用时`。"""
     out = Text()
     out.append("⚑ ", style="bold nr.accent")
     out.append(model or "-", style="bold nr.text")
@@ -203,7 +201,7 @@ def render_status_bar(model: str = "-", session: str = "-", turn: int = 0, elaps
 
 
 def render_welcome_panel(header_lines: List["Text"], footer: Optional["Text"] = None) -> Panel:
-    """欢迎屏主面板（Hermes 窗口范式）: 圆角蓝框 + 左上标题。"""
+    """欢迎屏主面板: 圆角蓝框 + 左上标题。"""
     body = Text()
     for line in header_lines:
         if isinstance(line, str):
@@ -1806,7 +1804,6 @@ class NeurovaCLI:
             self._write_frame_stream(ansi(f"{SYM_ERR} 生成已中断", "error", self._draw_color) + "\n")
         finally:
             self._end_turn()
-            # 回合收尾: Hermes 状态栏（模型/轮次/会话/用时）——流被中断也保留会话粘性
             elapsed = time.monotonic() - started
             self._turn_count += 1
             self.console.print(
@@ -1893,7 +1890,7 @@ class NeurovaCLI:
     def _flush_reasoning(self) -> None:
         """把聚合的思考段落一次性输出（避免逐 token 刷屏）。
 
-        Hermes 对齐: `▸ 思考 · 摘要` 单行（muted 蓝），在回合帧内输出。
+在回合帧内输出
         """
         if not self._reasoning_buf:
             return
@@ -1991,7 +1988,7 @@ class NeurovaCLI:
 
         self._load_history()
         print_logo("Neurova REPL 聊天客户端")
-        # 欢迎屏（Hermes welcome 范式: 品牌 → 圆角面板状态行 → 帮助提示）
+        # 欢迎屏
         welcome_lines: List[Text] = [
             render_welcome_icon_line(SYM_INFO, f"服务器  {self.base_url}", style="accent"),
         ]

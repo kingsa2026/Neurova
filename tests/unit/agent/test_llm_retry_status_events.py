@@ -1,4 +1,4 @@
-"""429 retry_status 事件转发链路单元测试（ZCode 对齐，2026-09-11）。
+"""429 retry_status 事件转发链路单元测试。
 
 链路：multi_model_client.chat_stream 产出 ``{"retry_status": {...}}`` dict →
 openai_loop._predict_stream_once 转成 ``{"type": "retry_status", "data": ...}``

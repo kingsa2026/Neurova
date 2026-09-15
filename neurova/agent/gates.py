@@ -1,5 +1,5 @@
 """
-循环门控系统（P2-5，对标 QP loop/gates 三态语义）
+循环门控系统
 
 StopAction 三态：
 - BYPASS: 继续（无干预）
@@ -57,7 +57,7 @@ class StopGate(ABC):
 
 
 class IterationGate(StopGate):
-    """轮次上限门控（对标 QP IterationGate）。"""
+    """轮次上限门控。"""
 
     def __init__(self, max_rounds: int = 20):
         self.name = "iteration"
@@ -76,7 +76,7 @@ class IterationGate(StopGate):
 
 
 class TokenBudgetGate(StopGate):
-    """累计 token 预算门控（对标 QP TokenBudgetGate）。"""
+    """累计 token 预算门控。"""
 
     def __init__(self, max_tokens: int = 100000):
         self.name = "token_budget"
@@ -96,7 +96,7 @@ class TokenBudgetGate(StopGate):
 
 
 class DoomLoopGate(StopGate):
-    """死循环门控（对标 QP DoomLoopGate 滑动窗口相似度）。"""
+    """死循环门控。"""
 
     def __init__(
         self,
@@ -147,7 +147,7 @@ class DoomLoopGate(StopGate):
 
 
 class GoalGate(StopGate):
-    """goal 模式门控：目标达成判定 + 轮次预算（对标 QP GoalSession 三 gate 合一）。
+    """goal 模式门控：目标达成判定 + 轮次预算。
 
     completion_check(goal, ctx) 由调用方注入（LLM rubric 或显式条件），
     返回 (achieved: bool, summary: str)。

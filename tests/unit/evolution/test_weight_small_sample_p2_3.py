@@ -1,7 +1,7 @@
-"""P2-3 质量罚分等价核对（OpenSpace quality/types.py:83-116）
+"""P2-3 质量罚分等价核对
 
 核对结论：Neurova AdaptiveToolWeights 已具备滑动窗口/乘数夹紧/惰性衰减/
-连续成败累进奖惩（update_weight），**缺小样本免疫**——OpenSpace 规定调用
+连续成败累进奖惩（update_weight）
 <3 次不受罚（一次网络抖动不得把工具权重打到 0），Neurova 原实现 1 条失败
 观测 → 窗口成功率 0 → 有效权重 0，误伤方向与"声明未接线"病灶同类。
 

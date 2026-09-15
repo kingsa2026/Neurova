@@ -1,7 +1,7 @@
 """
 P0-2 MCP 白名单目录（TDD）。
 
-交付物（docs/Neurova_Agent工具扩展计划_2026-09-12.md P0-2）：
+交付物（P0-2）：
 一份精选 MCP server 目录 + 安装端点，让非专家一键接上原生工具面缺失的
 高星能力（github / context7 / dbhub）。计划的"官方 servers git/fetch"与
 P0-3 原生 git + 已有 web_fetch 重叠，按"不镀金"剔除。

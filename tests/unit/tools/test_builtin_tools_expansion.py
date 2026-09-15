@@ -6,12 +6,7 @@
 
   新增工具          对标
   ────────────────────────────────────────────────
-  file_list        Claude Code Glob / OpenHands glob（文件枚举）
-  file_search      Claude Code Grep / OpenHands search（内容搜索）
-  web_fetch        Claude Code WebFetch（网页正文抓取）
-  run_code         DeepSeek harness code_interpreter
                    （执行体早已存在，但缺 schema → LLM 永远看不到）
-  calculator       Hermes function calling 标配（LLM 算术不可靠）
   get_datetime     时间戳/时区换算（system prompt 只注入当前时间）
 
 根因修复（schema ↔ 执行体漂移）：

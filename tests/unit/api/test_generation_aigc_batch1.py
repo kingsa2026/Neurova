@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """批次1：AIGC 端点 P0 契约修复回归（auto 路由 / 音频 JSON / 图像落账本 / 账本路径）。
 
-锁定契约（对标 PRINTFILM 工具中心 + 实测缺陷）：
+锁定契约：
 1. /generation/image、/generation/video 的 model 空或 "auto" → LLMRouter 按
    text_to_image/image_to_video 等真实请求类型选模（原实现把 "auto" 当真实模型名
    且覆盖服务商默认模型，必然 4xx）；

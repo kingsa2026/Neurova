@@ -1,6 +1,6 @@
-"""Web Reach —— 互联网平台直达读取能力（对标 Agent-Reach 方案 B）
+"""Web Reach —— 互联网平台直达读取能力
 
-路由选型对齐 Panniantong/Agent-Reach 的零配置路径：
+零配置路径的路由选型：
 - 网页阅读: Jina Reader（r.jina.ai 前缀，免费无 Key）
 - 浏览器渲染页读取: browser_read（Playwright headless，JS 页 → Markdown 文本）
 - V2EX: 官方公开 API

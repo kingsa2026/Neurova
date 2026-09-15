@@ -647,7 +647,7 @@ class WorkflowExecutor:
                 )
             )
 
-        # Checkpoint（借鉴）：统一出口保存实例快照（成功/失败均落盘）
+        # Checkpoint：统一出口保存实例快照（成功/失败均落盘）
         self._save_checkpoint(instance, checkpoint_store)
         return instance
 
@@ -1256,7 +1256,7 @@ class WorkflowExecutor:
         inputs: Optional[Dict[str, Any]] = None,
         user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """单节点试跑（P1-1——Dify step-run 画布 UX 的引擎底座）。
+        """单节点试跑。
 
         只执行指定节点：上游输出经 upstream_outputs 注入上下文（画布
         变量检查面板的调试形态），mock 语义与全量 run 一致（node.

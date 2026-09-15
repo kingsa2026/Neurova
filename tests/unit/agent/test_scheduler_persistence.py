@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""TaskScheduler 台账持久化（Yuxi 对比 P2 #11 / 报告实测：台账内存 dict 重启丢）。
+"""TaskScheduler 台账持久化。
 
 契约：
 - add/update/delete/disable 即时原子落盘（temp+os.replace，providers 丢配置

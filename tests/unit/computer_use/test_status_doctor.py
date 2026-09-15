@@ -1,7 +1,7 @@
-"""R0-4 /status 拆分 + /doctor 端点（CUA 升级方案 Phase 0）
+"""R0-4 /status 拆分 + /doctor 端点
 
 病根（修复前）：desktop_available 只反映截图后端（PIL 可导入），pyautogui
-输入能力可能已废却报"可用"——OCU doctor 思想：能力自检必须逐项真实探测。
+能力自检必须逐项真实探测
 
 验收：
 - manager.input_available()：pyautogui 导入 + position() 真实探测，异常即 False

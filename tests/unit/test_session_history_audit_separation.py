@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""会话历史的审计/模型上下文分离（Yuxi 对比 P2 #14）。
+"""会话历史的审计/模型上下文分离。
 
 甄别结论（本次实测）：Neurova 会话持久化天然只写 user+assistant 成对行
-（add_message S1 契约），Yuxi 的 model_audit/tool_audit 双型问题在此不存在；
+（add_message S1 契约）
 但 `save_message(role=任意)` 写侧不设防（当前唯一调用方是 session fork），
 且读侧 `get_recent_context`（模型上下文唯一重建入口，/compact 同源）不过滤
 role——若未来任何链路把工具/审计行写进会话，将直接进模型上下文诱发幻觉。

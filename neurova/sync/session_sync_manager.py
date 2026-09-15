@@ -111,7 +111,7 @@ def _json_safe(value: Any) -> Any:
 def _serialize_event_safe(event: "SessionEvent") -> Optional[str]:
     """事件序列化预检：成功返回 JSON 字符串，失败返回 None（不抛）。
 
-    OpenClaw 启发 P0-7 铁律 (b)：序列化失败的事件不得盖章进历史。毒帧
+序列化失败的事件不得盖章进历史。毒帧
     一旦带 seq 落入历史，所有客户端的 gap 探测器会同时触发（重连风暴），
     且每次重连重放都会在同一帧卡壳。add_event 盖章前调用本函数把关；
     返回值仅作判定（出站帧由发送侧 send_callback 内自行序列化）。
@@ -138,7 +138,7 @@ class SessionEvent:
     source_channel: str = ""
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     payload: Dict[str, Any] = field(default_factory=dict)
-    # 服务端单调序号（OpenOcta 启发 P0-1）。由 UnifiedSession.add_event 在进
+    # 服务端单调序号。由 UnifiedSession.add_event 在进
     # 历史时盖章（per-session 从 1 递增）；未进历史的裸事件保持 None。前端
     # sync WS 据此做 gap 检测（seq > lastSeq+1 = 丢帧），断线重连重放历史
     # 时 seq 随帧带出，游标自然重建。
@@ -311,9 +311,9 @@ class SessionSyncManager:
         self._session_timeout = self._config.get("session_timeout", 3600)  # 1小时
         self._max_history_size = self._config.get("max_history_size", 1000)
 
-        # OpenClaw 启发 P0-7 铁律 (a)：慢消费者单帧发送超时（秒）。超时丢帧
-        # 但 seq 已盖章推进，客户端 gap 探测器看见丢失后可重连补发。0/None
-        # 关闭超时（等价旧行为）。
+# 慢消费者单帧发送超时。超时丢帧
+# 但 seq 已盖章推进，客户端 gap 探测器看见丢失后可重连补发。0/None
+# 关闭超时（等价旧行为）
         self._slow_consumer_send_timeout = self._config.get("slow_consumer_send_timeout", 5.0)
 
         # 异步事件循环引用
@@ -725,8 +725,8 @@ class SessionSyncManager:
             # 设置事件属性
             event.session_id = session_id
 
-            # OpenClaw 启发 P0-7 铁律 (b)：序列化失败不推进 seq——盖章/进历史
-            # 前序列化预检，毒帧被拒绝（不盖章、不入历史、不发送）。
+# 序列化失败不推进 seq——盖章/进历史
+# 前序列化预检，毒帧被拒绝（不盖章、不入历史、不发送）
             if _serialize_event_safe(event) is None:
                 return 0
 
@@ -757,7 +757,7 @@ class SessionSyncManager:
     async def _send_to_channel(self, conn: ChannelConnection, event: SessionEvent) -> bool:
         """发送事件到单个渠道
 
-        OpenClaw 启发 P0-7 铁律 (a)：慢消费者丢帧也推进 seq。单帧发送超过
+慢消费者丢帧也推进 seq。单帧发送超过
         slow_consumer_send_timeout 即放弃（seq 已在 add_event 盖章，客户端
         gap 探测器看见丢失，重连后 sync_resume 从历史补发）。绝不因单个
         慢渠道阻塞整场广播。
@@ -805,7 +805,7 @@ class SessionSyncManager:
 
             event.session_id = session_id
 
-            # OpenClaw 启发 P0-7 铁律 (b)：同步广播同咽喉预检，毒帧不盖章。
+# 同步广播同咽喉预检，毒帧不盖章
             if _serialize_event_safe(event) is None:
                 return 0
 

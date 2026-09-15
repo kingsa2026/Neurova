@@ -1,6 +1,6 @@
-"""HistoryWriteFence — 会话历史写入围栏（P1-10，OpenClaw 启发）
+"""HistoryWriteFence — 会话历史写入围栏
 
-参照 OpenClaw `expectedWriterRunId` 事务内双重断言：并行会话/旧 run 恢复后
+防止并行会话/旧 run 恢复后
 可能写脏历史。围栏语义：
 
 - 每个 (agent_id, session_id) 维护当前 writer 与单调递增 generation；

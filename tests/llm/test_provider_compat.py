@@ -1,6 +1,6 @@
-"""声明式 provider compat 开关测试（OpenClaw 启发 P0-2）
+"""声明式 provider compat 开关测试
 
-背景：docs/Neurova_OpenClaw代码级对比_2026-09-04.md §3 P0-2。
+背景： §3 P0-2。
 per-provider 兼容逻辑从散落 if 分支收编为 ProviderCompat 描述表；
 请求构造（llm_client 两处 stream_options）声明式消费 cfg.compat。
 """

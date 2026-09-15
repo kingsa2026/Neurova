@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """P2-8 防回归：mobile_pairing 三只全局 dict 不得只增不清。
 
-原缺陷（docs/资源型Bug扫描报告_2026-09-11.md P2 第5条）：
+原缺陷（P2 第5条）：
 - ``_pairing_codes``：过期只改 status 从不 pop（每次生成配对码永久+1）；
 - ``_confirm_attempts``：IP 时间线整条滑窗后键残留（每新 IP 永久+1）；
 - ``_paired_devices``：无 unpair 的失效设备条目永驻（附随 _user_devices 空集键）。
