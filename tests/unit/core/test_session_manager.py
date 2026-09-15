@@ -220,7 +220,7 @@ class TestListSessions:
     # create_session 不检查, 是 silent failure antipattern.
     # 新契约: create_session 文件写入失败时抛 RuntimeError, 让 HTTP 端点返回
     # 500 错误, 前端 onError 弹 toast, 不创建幽灵 session.
-    # 详见 docs/bugfix-delete-session-userid-mismatch.md "§8 幽灵 session 自愈".
+    # "§8 幽灵 session 自愈".
     def test_create_session_raises_when_file_write_fails(self, tmp_path):
         from unittest.mock import MagicMock
         mgr = _make_manager(tmp_path)

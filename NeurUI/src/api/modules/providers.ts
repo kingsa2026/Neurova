@@ -32,7 +32,6 @@ export interface ConnectionTestResult {
   latency_ms?: number
   error?: string
   message?: string
-  /** QwenPaw 对齐:结构化检查元数据 */
   status?: string
   http_status?: number | null
   retryable?: boolean | null
@@ -100,7 +99,7 @@ export function discoverModels(providerId: string) {
   return api.get<{ models: Record<string, unknown>[] }>(`${BASE}/${providerId}/models/discover`)
 }
 
-/** 结构化发现结果（QwenPaw 对齐）：元数据全量透传。 */
+/** 结构化发现结果：元数据全量透传。 */
 export interface DiscoverResult {
   provider_id: string
   models: Record<string, unknown>[]
@@ -117,7 +116,7 @@ export function discoverModelsStructured(providerId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Filter / merge (对齐 QwenPaw 的服务商模型筛选与选择式合并)
+// Filter / merge 
 // ---------------------------------------------------------------------------
 
 export interface FilterModelsBody {

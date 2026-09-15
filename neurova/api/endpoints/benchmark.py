@@ -264,7 +264,7 @@ async def compare_agents(request_body: dict, request: Request):
     return {"code": 0, "message": "success", "data": {"comparison": results}}
 
 
-# ── RAG 评估（P1-#5：Yuxi 对比落地，benchmark 摘 simulated 的第一条真路）──
+# ── RAG 评估──
 
 
 class RagDatasetCreateRequest(BaseModel):

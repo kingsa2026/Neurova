@@ -56,7 +56,7 @@
 
 <script setup lang="ts">
 /**
- * Token/上下文用量环形仪表 + 悬停明细面板（QwenPaw ContextUsageIndicator 对齐）。
+ * Token/上下文用量环形仪表 + 悬停明细面板。
  *
  * 双语义（环）：
  * - 有 context-window（当前模型限额已知）：环 = context 占比，双色告警

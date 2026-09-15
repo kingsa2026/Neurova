@@ -4,7 +4,7 @@ import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * 渠道配置页·通用扫码授权闭环（QwenPaw 两段式对齐，2026-09-13）。
+ * 渠道配置页·通用扫码授权闭环。
  * 钉：QR 渠道弹窗出现扫码块 → 点获取二维码出图 → 轮询 success 后凭据自动
  * 回填表单；非 QR 渠道不出现扫码块（诚实接线，不搞摆设按钮）。
  */

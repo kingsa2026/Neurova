@@ -289,7 +289,7 @@ export function getNeurflowStats() {
   return api.get<ApiResponse<{ storage: unknown; nodes: unknown }>>(`${BASE}/stats`)
 }
 
-// --- ComfyUI 整合（Infinite-Canvas） ---
+// --- ComfyUI 整合 ---
 
 /** ComfyUI 服务状态。 */
 export interface ComfyuiStatus {
@@ -331,7 +331,7 @@ export function executeComfyuiNode(data: {
 }
 
 // ---------------------------------------------------------------------------
-// 店铺连接（/stores）— 对齐 docs/neurflow-store-connection-design.md §5.3
+// 店铺连接（/stores）— 对齐 §5.3
 // ---------------------------------------------------------------------------
 
 export interface ConnectedStore {

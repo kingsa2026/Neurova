@@ -11,11 +11,11 @@ import { secureStorage } from '@/utils/security'
  * - channel_type 携带标签页唯一后缀，避免多标签互顶（UnifiedSession 按
  *   channel_type 去重）
  * - 断线自动重连（指数退避，上限 10s）；组件卸载时清理
- * - seq/gap 检测（OpenOcta 启发 P0-1）：服务端每个事件帧带 per-session
+ * - seq/gap 检测：服务端每个事件帧带 per-session
  *   单调 seq；本组合式函数维护游标 lastSeq，检测跳号触发 onGap 并请求
  *   定向补发（sync_resume），旧帧去重，服务端纪元更迭（后端重启）自动
  *   重置游标避免误吞新帧
- * - gap 自愈（OpenClaw 启发 P0-7 慢消费者配套）：检测到缺口立即重连，
+ * - gap 自愈：检测到缺口立即重连，
  *   服务端把丢帧留在历史中（丢帧也推进 seq），重连时以最早缺口的前一
  *   序号作为 sync_resume 游标整段重放；缺口区间内的重放帧回填投递，
  *   区间外已见帧去重——幂等投影合并，中间丢帧不再永久缺失

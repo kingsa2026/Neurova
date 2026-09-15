@@ -1,6 +1,6 @@
 /**
  * StudioPage（R4 项目列表）契约：新建项目跳转、列表渲染、删除。
- * 创作专区 = 项目化四 Phase 工作台入口（对标 huobao 项目管理）。
+ * 创作专区 = 项目化四 Phase 工作台入口。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'

@@ -1,5 +1,5 @@
 /**
- * 工具卡分化（补课 3.1，对齐 QP 领域卡思路的轻量版）。
+ * 工具卡分化。
  *
  * 按工具名映射到五类变体（computer/file/search/shell/code/general），
  * 模板据此选图标/标题文案/tag 颜色——数据层（useChat toolCalls）不动。

@@ -82,7 +82,7 @@ class TestDiscoveryPersistsModels:
         with patch.object(manager, "_get_provider_instance", return_value=instance):
             models = asyncio.run(manager.fetch_provider_models("openai"))
 
-        # B1 契约（QwenPaw 对齐）：失败不再静默空列表——回退"配置存量静态视图"
+        # B1 契约：失败不再静默空列表——回退"配置存量静态视图"
         # （connectable=False 标记未连通），但绝不改写 provider.models 配置本体
         assert manager.get_provider("openai").models == ["gpt-4o"]
         assert [m.id for m in models] == ["gpt-4o"]

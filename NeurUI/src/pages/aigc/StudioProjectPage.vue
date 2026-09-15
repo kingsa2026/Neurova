@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 创作专区 · 项目工作台（R4/R5，对标 huobao-drama 四 Phase + 左侧进度导轨）。
+ * 创作专区 · 项目工作台。
  *
  * Phase01 剧情创作：小说→LLM 分集（可手改）；Phase02 场景角色：资产抽取/定妆
  * 图（稳定 seed 一致性，可上传参考图）；Phase03 AI 工作台：分镜拆解 + @角色
@@ -346,7 +346,7 @@ defineExpose({
     </div>
 
     <div class="studio-body">
-      <!-- 左：进度导轨（huobao 式 Phase 导轨，完成态点亮） -->
+      <!-- 左：进度导轨 -->
       <GlassPanel class="studio-rail" variant="subtle">
         <div
           v-for="(p, i) in PHASES" :key="p.key"

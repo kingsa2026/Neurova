@@ -988,7 +988,6 @@ async function deleteProvider(p: Provider) {
 async function discoverModels(providerId: string) {
   discoveringId.value = providerId
   try {
-    // QwenPaw 对齐:结构化结果(success/discovered_count/used_static_fallback/error_kind)
     const res: any = await discoverModelsStructured(providerId) as any
     const data = res?.data ?? res ?? {}
     const discovered: any[] = data.models ?? []
@@ -1104,7 +1103,7 @@ function modelLimitLabel(m: { context_window?: number; max_tokens?: number }): s
 const detectingCaps = ref(false)
 
 // ---------------------------------------------------------------------------
-// 模型级连接测试 + 多模态真实探测（QwenPaw 对齐）
+// 模型级连接测试 + 多模态真实探测
 // ---------------------------------------------------------------------------
 const testingModelId = ref<string | null>(null)
 const probingModelId = ref<string | null>(null)

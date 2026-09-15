@@ -33,7 +33,7 @@ export interface AdvancedSettings {
   desktop_runtime_mode: string
   /** 桌面沙箱提供方：sandbox/rdp/空=未配置 */
   desktop_provider?: string
-  /** 技能目录常驻系统提示（OpenSpace 召回三开关，默认全开） */
+  /** 技能目录常驻系统提示 */
   skill_catalog_enabled: boolean
   /** 技能 function schema 预算化（超上限按关键词阶梯取 top-k） */
   skill_schema_budget_enabled: boolean
@@ -185,7 +185,7 @@ export function updateToolOffloadSettings(data: Partial<ToolOffloadSettings>) {
 }
 
 // ---------------------------------------------------------------------------
-// LLM 429 重试设置（设置页"模型"tab，ZCode 对齐 2026-09-11）
+// LLM 429 重试设置
 // ---------------------------------------------------------------------------
 
 export interface LlmRetrySettings {

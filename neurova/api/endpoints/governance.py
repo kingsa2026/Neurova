@@ -390,7 +390,7 @@ async def get_governance_settings(admin=Depends(_governance_admin_dep)):
     return {"code": 0, "data": load_governance_settings()}
 
 
-# ── LLM 429 重试设置（设置页"模型"tab，2026-09-11 ZCode 对齐）──
+# ── LLM 429 重试设置──
 
 
 @router.get("/llm-retry")
@@ -454,7 +454,7 @@ async def update_governance_settings(body: GovernanceSettingsUpdate, admin=Depen
     return {"code": 0, "data": load_governance_settings()}
 
 
-# ── 桌面动作审计（R3-4，docs/Neurova_CUA_Phase3立项_2026-09-12.md §3）──
+# ── 桌面动作审计（R3-4， §3）──
 
 
 @router.get("/desktop-audit")

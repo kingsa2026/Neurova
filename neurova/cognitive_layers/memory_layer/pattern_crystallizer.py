@@ -101,7 +101,7 @@ class PatternCrystallizer:
         self.evolution = evolution_orchestrator
         self._state_path = state_path
         self._buffer: Dict[str, List[Dict[str, Any]]] = {}
-        # 混合信号层（QP 对齐启发 #1）：规则预筛（≥3 次 & 成功率≥60%）通过后，
+        # 混合信号层：规则预筛（≥3 次 & 成功率≥60%）通过后，
         # 候选不再直写存储引擎，进入 _pending 队列等待 LLM 可复用性裁决
         # （低频批量，由 post_chat 复盘通道触发）。默认开；LLM 不可用时
         # 超龄候选自动放行（零 LLM 环境行为退化为原直写，不丢数据）。

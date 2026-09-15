@@ -11,7 +11,6 @@
  *   resolveI18nMessage(t, key, fallback) 检测 t(key) === key (缺失翻译信号),
  *   缺失时返回 fallback; 否则返回 t(key). 同时防御空字符串/undefined/null.
  *
- * 详见 docs/bugfix-delete-session-userid-mismatch.md
  *   "前端错误反馈策略深化" → "i18n fallback resolver" 小节.
  */
 import { describe, it, expect, vi } from 'vitest'

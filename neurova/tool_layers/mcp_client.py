@@ -412,8 +412,7 @@ class MCPToolClient:
 
         timeout_s = (server.get("config") or {}).get("timeout_ms", 30000) / 1000
 
-        # P2-6：OAuth 凭据每次调用时解析（QP 烘焙坑规避——缓存命中直接返回，
-        # 过期刷新；token 经 headers 通道进 transport，会话重建时生效）
+        # P2-6：OAuth 凭据每次调用时解析
         oauth_config = (server.get("config") or {}).get("oauth")
         if oauth_config:
             try:

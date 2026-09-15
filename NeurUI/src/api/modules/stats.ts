@@ -82,7 +82,7 @@ export interface UsageOverviewModelTotal {
   calls: number
 }
 
-/** Kimi 式使用统计总览（/stats/usage-overview）。 */
+/** 使用统计总览（/stats/usage-overview）。 */
 export interface UsageOverview {
   scope?: 'user' | 'global'
   summary: {

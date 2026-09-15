@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { getSettings, updateSettings } from '@/api/modules/settings'
 
 /**
- * 桌面运行权限档（对话页 composer 选择器，参考 ZCode 对话框模式）。
+ * 桌面运行权限档。
  *
  * 与系统设置页同源：读写 settings.advanced.desktop_runtime_mode，后端
  * computer_use/runtime_policy.py 热读该值决定 computer_* 动作"在哪跑 /

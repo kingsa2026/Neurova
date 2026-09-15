@@ -709,14 +709,14 @@ class TaskScheduler:
         # 注册默认执行器
         self._register_default_executors()
 
-        # Yuxi 对比 P2 #11：任务台账从纯内存升级为 JSON 落盘（本文件实测
-        # "台账内存 dict 重启丢"）。加载只读文件，不触盘写。
+# 任务台账从纯内存升级为 JSON 落盘（本文件实测
+# "台账内存 dict 重启丢"）。加载只读文件，不触盘写
         self._load_tasks_ledger()
 
         logger.info("TaskScheduler initialized")
 
     # ============================================================
-    # 台账持久化（Yuxi 对比 P2 #11）
+    # 台账持久化
     # ============================================================
 
     def _ledger_path(self):

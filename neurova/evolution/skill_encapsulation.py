@@ -194,8 +194,7 @@ class AutoSkillBuilder:
             metadata: 元数据
         """
         with self._lock:
-            # P1-3 独立证据源键（反回声室，OpenSpace capture "procedure 与
-            # validation 不得同一 observation" 的封装侧同构）：调用方给
+            # P1-3 独立证据源键：调用方给
             # metadata.source_key（session#turn 类身份）则按源聚合；无标注
             # 逐观测合成唯一键（存量调用方行为=原计数语义，不回退）。
             _meta = metadata or {}
@@ -247,8 +246,7 @@ class AutoSkillBuilder:
             else:
                 pattern.failure_count += 1
 
-            # P1-3 独立证据：每源一票，已成功过的源不被后续失败覆盖
-            # （证据方向与 OpenSpace trust observation 一致：只增干净票）
+            # P1-3 独立证据：每源一票，已成功过的源不被后续失败覆盖 # 
             if source_key:
                 prev = pattern.source_evidence.get(source_key)
                 if success or prev is None:
@@ -331,7 +329,7 @@ class AutoSkillBuilder:
         if pattern.success_rate < self._min_success_rate:
             return
 
-        # P1-3（OpenSpace 反回声室同构）：出现次数够 ≠ 证据独立——同一任务
+        # P1-3：出现次数够 ≠ 证据独立——同一任务
         # 反复跑出的成功会自我强化（09-05 睡眠巩固翻倍/肌肉记忆回声室同类
         # 病灶）。要求成功票来自 ≥min_independent_successes 个不同来源。
         if pattern.source_evidence:

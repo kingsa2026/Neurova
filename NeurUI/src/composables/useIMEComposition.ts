@@ -1,5 +1,5 @@
 /**
- * IME 合成防误发（补课：对齐 QP useIMEComposition）。
+ * IME 合成防误发。
  *
  * 中文/日文等输入法选词按回车会先触发 keydown（Chrome 下 isComposing=true；
  * Safari 下 compositionend 先于 keydown、keyCode=229）——直接发送会把

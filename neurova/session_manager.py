@@ -218,7 +218,7 @@ class SessionManager(SessionRepository):
         archived_dir.mkdir(exist_ok=True)
         return archived_dir
 
-    # ── P1-2 会话时间线（append-only JSONL，Codex rollout 对齐） ──────
+    # ── P1-2 会话时间线 ──────
 
     def _get_timeline_file(self, agent_id: str, session_id: str) -> Path:
         """时间线文件路径（sessions/{agent_id}/_timeline/{sid}.jsonl）。
@@ -503,8 +503,7 @@ class SessionManager(SessionRepository):
                 "content": assistant_content,
                 "timestamp": now,
             }
-            # R-2: assistant_metadata 存在时分别写入各消息；否则保留旧行为
-            #（metadata 写入双方，client_timestamp 等轮次定位键依赖此语义）。
+            # R-2: assistant_metadata 存在时分别写入各消息；否则保留旧行为            #（metadata 写入双方，client_timestamp 等轮次定位键依赖此语义）。
             if assistant_metadata is not None:
                 if metadata:
                     user_msg["metadata"] = metadata
@@ -690,7 +689,7 @@ class SessionManager(SessionRepository):
         # ID 加入 sidebar → 用户点击 GET /history → 404 → toast.
         # fail-fast: 文件写入失败时抛 RuntimeError, 让 HTTP 端点返回 500,
         # 前端 onError 弹 toast, 不创建幽灵 session.
-        # 详见 docs/bugfix-delete-session-userid-mismatch.md "§8 幽灵 session 自愈".
+        # "§8 幽灵 session 自愈".
         if not self._write_session_file(file_path, session_data):
             logger.error("create_session 持久化失败 (silent failure antipattern 修复): session_id=%s, file=%s", session_id, file_path)
             raise RuntimeError(f"Failed to persist session file: {file_path}")
@@ -804,10 +803,7 @@ class SessionManager(SessionRepository):
         # 按日期排序，获取最新的
         sessions.sort(key=lambda x: x.get("session_date", ""), reverse=True)
 
-        # 收集所有消息
-        # Yuxi 对比 P2 #14 不变量：模型上下文只含 user/assistant 轮次——
-        # 工具/审计型行（save_message 写侧不设防，如 session fork 带入）
-        # 不得回灌模型诱发幻觉。展示路径 get_history 不筛（UI 可见性不变）。
+        # 模型上下文只含 user/assistant 轮次——工具/审计型行（save_message 写侧不设防，如 session fork 带入）不得回灌模型诱发幻觉。展示路径 get_history 不筛（UI 可见性不变）
         all_messages = []
         for session in sessions:
             messages = session.get("messages", [])

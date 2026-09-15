@@ -1,5 +1,5 @@
 /**
- * 会话内消息搜索（补课 B：对齐 QP ChatSearchPanel 的匹配计算）。
+ * 会话内消息搜索。
  * 纯函数：返回命中消息的下标列表（大小写不敏感子串匹配）。
  */
 export interface SearchableMessage {

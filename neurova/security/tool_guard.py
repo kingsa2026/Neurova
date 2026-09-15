@@ -665,7 +665,7 @@ class ToolGuardEngine:
                 metadata={"skipped": True, "reason": "engine_disabled"},
             )
 
-        # P0-1（QwenPaw #7472 同款漏洞）：POSIX shell 分词前移除 \+换行续行，
+        # P0-1：POSIX shell 分词前移除 \+换行续行，
         # 守卫必须看归一化后的命令形态，否则敏感路径/逃逸特征被物理换行
         # 拆开即可绕过。result.metadata 保留原文供日志审计。
         guard_params = tool_params

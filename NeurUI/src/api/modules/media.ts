@@ -1,7 +1,7 @@
 /**
  * Media storage API — 与后端 neurova/api/endpoints/media.py 一一对应的契约层。
  *
- * F-1 契约对齐（台账 docs/资源型修复登记台账_2026-09-11.md）：
+ * F-1 契约对齐（台账）：
  * - listMedia → GET /media/list（offset/limit 分页 + search 服务端过滤；响应
  *   data.media/total/offset/limit）；
  * - getMediaInfo → GET /media/{id}/metadata（原 /{id}/info 404）；

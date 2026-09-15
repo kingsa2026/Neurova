@@ -238,7 +238,7 @@ class KnowledgeGraphManager:
 
         # P1-1 实体消解合并台账：source_id -> {target_id, moved_edge_ids,
         # source_snapshot, reason, merged_at}。独立结构而非删除——undo 按
-        # 名单原路读回，此前已删的边不在名单不会被误救（Utopia 0005）。
+        # 名单原路读回，此前已删的边不在名单不会被误救。
         self._merge_log: Dict[str, Dict[str, Any]] = {}
 
         # 加载已有数据
@@ -507,7 +507,7 @@ class KnowledgeGraphManager:
             return True
 
     # ============================================================
-    # P1-1 实体消解：合并原语（可回滚，Utopia 0005 裁剪版）
+    # P1-1 实体消解：合并原语
     # ============================================================
 
     def merge_nodes(self, source_id: str, target_id: str, reason: str = "") -> bool:

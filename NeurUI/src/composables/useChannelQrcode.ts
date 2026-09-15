@@ -1,5 +1,5 @@
 /**
- * 渠道扫码授权 composable（对齐 QwenPaw useChannelQrcode.ts 的 Vue 移植）
+ * 渠道扫码授权 composable
  *
  * 流程：取二维码 → 展示 → 递归 setTimeout 轮询（不重叠请求）→ 成功回填凭据/
  * 过期/失败回调。任意 QRCODE_AUTH_HANDLERS 注册的渠道通用。

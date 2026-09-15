@@ -1,7 +1,7 @@
 name: CodeQL
 
 # P0-6：CodeQL 安全扫描（python）。结果进 Security tab，不阻塞 PR
-# （阻塞需在分支保护里启用）；对齐 QwenPaw 的分阶段上线路线。
+# （阻塞需在分支保护里启用）
 
 on:
   push:

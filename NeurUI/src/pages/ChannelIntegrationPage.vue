@@ -54,7 +54,7 @@
       </span>
     </div>
 
-    <!-- Channel Grid（布局对齐 QwenPaw 频道页：已激活大卡面板 / 未激活紧凑小卡面板） -->
+    <!-- Channel Grid -->
     <a-spin :spinning="loadingConfigs">
     <template v-if="filteredChannels.length > 0">
       <section v-if="enabledChannels.length > 0" class="nr-ci-panel" data-testid="panel-enabled">
@@ -183,7 +183,7 @@
             <!-- 负一屏推送：复用专用设置组件（含授权码指引/测试推送/统计/删除） -->
             <NegativeScreenSettings v-if="currentChannel?.channelKey === 'negative-screen'" />
             <template v-else>
-            <!-- 扫码授权（QwenPaw 两段式对齐）：飞书/钉钉/QQ/微信——扫码即取凭据回填表单 -->
+            <!-- 扫码授权：飞书/钉钉/QQ/微信——扫码即取凭据回填表单 -->
             <QrcodeAuthBlock
               v-if="currentQrcodeMeta"
               :key="'qr-' + currentChannel?.channelKey"
@@ -343,7 +343,6 @@ const toastMessage = ref('')
 /** 已保存配置的 extra（F-2：测试连接发送真实已存凭据，而非恒空 {}） */
 const savedExtras = ref<Record<string, Record<string, any>>>({})
 
-// ─── QwenPaw 对齐·通用扫码授权（飞书/钉钉/QQ/微信）────────────────────────
 const currentQrcodeMeta = computed(() =>
   currentChannel.value ? QRCODE_CHANNELS[currentChannel.value.channelKey] : undefined,
 )
@@ -657,7 +656,7 @@ const filteredChannels = computed(() => {
   return list
 })
 
-// 布局对齐 QwenPaw：已激活大卡面板 / 未激活紧凑小卡面板
+// 列表布局：已激活大卡面板 / 未激活紧凑小卡面板
 const enabledChannels = computed(() => filteredChannels.value.filter((ch) => ch.enabled))
 const disabledChannels = computed(() => filteredChannels.value.filter((ch) => !ch.enabled))
 function botPrefixOf(ch: ChannelItem): string {
@@ -783,7 +782,7 @@ onMounted(() => {
   gap: 16px;
 }
 
-/* 布局对齐 QwenPaw：已激活/未激活双面板 */
+/* 已激活/未激活双面板 */
 .nr-ci-panel {
   display: flex;
   flex-direction: column;

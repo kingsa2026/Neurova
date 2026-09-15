@@ -71,7 +71,7 @@ export function testChannelConfig(type: string, data: ChannelConfig, agentId?: s
 }
 
 // ---------------------------------------------------------------------------
-// 通用二维码授权（对齐 QwenPaw /channels/{channel}/qrcode 两段式，2026-09-13）
+// 通用二维码授权
 // 覆盖 feishu/dingtalk/qq/wecom/wechat——扫码即取凭据回填表单后再保存。
 // 后端返回裸对象（与 iLink 端点一致，无信封）。
 // ---------------------------------------------------------------------------

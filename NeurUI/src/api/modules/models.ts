@@ -36,7 +36,7 @@ export function fetchModelsFromProvider(providerId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// 模型级连接测试 + 多模态真实探测（QwenPaw 对齐）
+// 模型级连接测试 + 多模态真实探测
 // ---------------------------------------------------------------------------
 
 export interface ModelConnectionResult {
