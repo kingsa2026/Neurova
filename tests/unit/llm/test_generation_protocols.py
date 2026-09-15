@@ -22,6 +22,9 @@ from neurova.llm.generators.protocols import (
     ImageProtocol,
     ProtocolCredentials,
     VideoProtocol,
+    agnes_poll_url,
+    agnes_video_body,
+    agnes_videos_url,
     ark_images_url,
     dashscope_tasks_url,
     openai_images_url,
@@ -72,6 +75,44 @@ class TestVideoUrlRules:
     def test_veo_submit_with_base_containing_v1beta(self):
         base = "https://generativelanguage.googleapis.com/v1beta"
         assert veo_submit_url(base, "veo-x") == f"{base}/models/veo-x:predictLongRunning"
+
+    # ── Agnes 视频（2026-09-14 官方仓 AgnesAI-Labs/AgnesAI-Models 实核）──
+
+    def test_agnes_videos_url_gw_base_and_root_base(self):
+        """提交 POST {root}/v1/videos——base 已含 /v1 时不重复拼。"""
+        assert agnes_videos_url("https://apihub.agnes-ai.com/v1") == \
+            "https://apihub.agnes-ai.com/v1/videos"
+        assert agnes_videos_url("https://apihub.agnes-ai.com") == \
+            "https://apihub.agnes-ai.com/v1/videos"
+
+    def test_agnes_poll_url_uses_root_agnesapi_video_id(self):
+        """轮询走独立端点 GET {root}/agnesapi?video_id=…（不在 /v1 下，
+        官方明示勿用 task_id）——与 WAN/Seedance 的 tasks 形态全不同。"""
+        assert agnes_poll_url("https://apihub.agnes-ai.com/v1", "vid123") == \
+            "https://apihub.agnes-ai.com/agnesapi?video_id=vid123"
+
+    def test_agnes_video_body_pixel_frames(self):
+        """请求体=像素尺寸+帧数，无 OpenAI Sora 的 mode 字段
+        （此前按 mode 形态探测恒报 invalid mode 的根因）；
+        num_frames 换算以官方示例为准：5s@24fps → 121。"""
+        body = agnes_video_body(
+            model="agnes-video-v2.0", prompt="p", duration=5, resolution="1080p",
+        )
+        assert body["model"] == "agnes-video-v2.0"
+        assert body["prompt"] == "p"
+        assert body["frame_rate"] == 24
+        assert body["num_frames"] == 121
+        assert "mode" not in body
+        assert (body["width"], body["height"]) == (1920, 1080)
+
+    def test_agnes_video_body_default_resolution_matches_official_example(self):
+        body = agnes_video_body(model="m", prompt="p", duration=5, resolution="")
+        assert (body["width"], body["height"]) == (1152, 768)
+
+    def test_agnes_protocol_resolution(self):
+        assert resolve_video_protocol("agnes") is VideoProtocol.AGNES
+        assert resolve_video_protocol("", "agnes-video-v2.0") is VideoProtocol.AGNES
+        assert resolve_video_protocol("", "t2v", "https://apihub.agnes-ai.com/v1") is VideoProtocol.AGNES
 
 
 class TestProtocolResolution:

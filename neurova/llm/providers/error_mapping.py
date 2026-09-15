@@ -40,10 +40,13 @@ class ErrorCategory(enum.Enum):
     # B1-6（#7268/#7308）：超时独立类别——前端可显示"模型超时"，
     # 退避/重试语义与连接错误一致（retryable=True）
     TIMEOUT = "timeout"
+    # 2026-09-14：余额/积分不足独立类别——充值动作才可恢复，
+    # 不得混进 rate_limited（等一等）或 auth_failed（换 key）误导用户
+    INSUFFICIENT_BALANCE = "insufficient_balance"
 
     @property
     def retryable(self) -> bool:
-        """连接/不可用/限频可重试；鉴权/坏请求不可重试（换 key / 改参数才有意义）"""
+        """连接/不可用/限频可重试；鉴权/坏请求/余额不足不可重试（充值/换 key 才有意义）"""
         return self in (ErrorCategory.CONNECTION, ErrorCategory.UNAVAILABLE, ErrorCategory.RATE_LIMIT, ErrorCategory.TIMEOUT)
 
     @property
@@ -56,6 +59,7 @@ class ErrorCategory(enum.Enum):
             ErrorCategory.AUTH: "认证失败，请检查 API Key 是否正确或有对应模型权限",
             ErrorCategory.BAD_REQUEST: "请求被拒绝，请检查模型名称与参数是否有效",
             ErrorCategory.TIMEOUT: "模型响应超时，请稍后重试或更换模型",
+            ErrorCategory.INSUFFICIENT_BALANCE: "账户余额或积分不足，请到该服务商官网充值/续费后重试",
         }[self]
 
 
@@ -148,6 +152,14 @@ _EXCEPTION_MAP: list = _build_exception_map()
 
 # 消息关键词兜底（网关/litellm 自定义异常仅 str 可依；小写匹配）
 _MESSAGE_PATTERNS: list = [
+    # 余额/积分不足在限频/鉴权之前（429+insufficient_quota、"余额不足/欠费"等
+    # 常借用 429/402 状态码返回，落在 RATE_LIMIT/AUTH/BAD_REQUEST 会误导等待或换 key）
+    (re.compile(
+        r"(insufficient.?(balance|quota|credit|funds?)|balance.?(is.?)?(insufficient|exhausted)"
+        r"|out.?of.?(credit|balance|quota)|payment.?required|\b402\b|billing"
+        r"|余额不足|欠费|积分不足|余额耗尽|请充值|prepaid|top.?up)",
+        re.I,
+    ), ErrorCategory.INSUFFICIENT_BALANCE),
     (re.compile(r"\b(40[13]\b|unauthorized|forbidden|invalid.{0,12}api.?key|authentication)", re.I), ErrorCategory.AUTH),
     (re.compile(r"\b(429\b|rate.?limit|too many requests|quota)", re.I), ErrorCategory.RATE_LIMIT),
     (re.compile(r"\b(5\d\d\b|service.?unavailable|bad.?gateway|gateway.?timeout|overloaded|internal server)", re.I), ErrorCategory.UNAVAILABLE),
@@ -166,6 +178,8 @@ def _classify_by_status(status_code: typing.Optional[int]) -> typing.Optional[Er
         return None
     if status_code in (401, 403):
         return ErrorCategory.AUTH
+    if status_code == 402:
+        return ErrorCategory.INSUFFICIENT_BALANCE
     if status_code == 429:
         return ErrorCategory.RATE_LIMIT
     if 500 <= status_code <= 599:
@@ -196,6 +210,11 @@ def normalize_provider_error(exc: BaseException) -> ProviderError:
         return exc
 
     message = str(exc) or exc.__class__.__name__
+
+    # 余额/积分不足：消息特征优先于一切载体（网关随意借用 401/402/429 状态码
+    # 或 openai SDK 异常类返回"余额不足"，只按状态码/类型会误导成换 key/稍后重试）
+    if _classify_by_message(message) == ErrorCategory.INSUFFICIENT_BALANCE:
+        return ProviderError(ErrorCategory.INSUFFICIENT_BALANCE, _mask_secrets(message), cause=exc)
 
     # 0. 超时家族最优先（openai.APITimeoutError 也继承自内建 TimeoutError 族时
     #    不被前面的 SDK 分类抢走——B1-6 #7268）
@@ -272,6 +291,8 @@ def availability_status_of(
         return "available"
     if error_category == "auth_failed":
         return "permission_denied"
+    if error_category == "insufficient_balance":
+        return "insufficient_balance"
     if error_category == "rate_limited":
         return "rate_limited"
     if error_category in ("connection_failed", "service_unavailable"):

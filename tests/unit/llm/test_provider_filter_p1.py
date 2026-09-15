@@ -53,6 +53,40 @@ class TestIsFreeDetection:
         )
         assert model.is_free is True
 
+    def test_free_suffix_id_with_missing_pricing_is_free(
+        self, provider: OpenRouterProvider
+    ):
+        # 2026-09-14 修复：`:free` 后缀是 OpenRouter 官方免费变体标记，
+        # pricing 缺失/异常时不得把免费模型误判为付费
+        model = provider._parse_api_model(
+            {"id": "meta-llama/llama-3.3-70b-instruct:free"},
+        )
+        assert model.is_free is True
+
+    def test_free_suffix_id_overrides_paid_pricing(
+        self, provider: OpenRouterProvider
+    ):
+        # ID 标记为权威：`:free` 变体即使定价数据异常（非零脏数据）也是免费
+        model = provider._parse_api_model(
+            {
+                "id": "x/y:free",
+                "pricing": {"prompt": "0.001", "completion": "0.002"},
+            },
+        )
+        assert model.is_free is True
+
+    def test_paid_suffix_id_with_all_zero_pricing_stays_free_fallback(
+        self, provider: OpenRouterProvider
+    ):
+        # 无 :free 后缀时保留原"全零定价=免费"兜底契约
+        model = provider._parse_api_model(
+            {
+                "id": "z/w",
+                "pricing": {"prompt": "0", "completion": "0"},
+            },
+        )
+        assert model.is_free is True
+
     def test_nonzero_pricing_is_paid(self, provider: OpenRouterProvider):
         model = provider._parse_api_model(
             {

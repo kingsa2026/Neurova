@@ -134,48 +134,46 @@ class OpenAIProvider(BaseProvider):
 
         Returns:
             模型信息列表
-        """
-        # 尝试从 API 获取模型列表
-        api_models = await self._fetch_models_from_api()
-        if api_models:
-            return api_models
 
-        # 如果 API 获取失败，返回默认模型列表
-        self.logger.info("使用默认模型列表")
-        return self._get_default_models()
+        2026-09-14 根治"获取模型假数据"：API 失败不再回落静态默认列表
+        （默认清单已陈旧，落到用户列表只会催生"发现成功但无法调用"的误导，
+        对齐 OpenRouter 先例）。_DEFAULT_MODELS 保留为素材。
+        """
+        return await self._fetch_models_from_api()
 
     async def _fetch_models_from_api(self) -> typing.List[ModelInfo]:
         """从 API 获取模型列表
 
         Returns:
-            模型信息列表，失败返回空列表
+            模型信息列表（真实为空时即空）
+
+        Raises:
+            上游请求失败/非 200 — 带 status_code 的异常上抛，由调用方经
+            error_mapping 归一为可行动错误（吞错返回空列表会把 401/超时
+            伪装成"该服务商没有模型"，且让连接测试误判成功）。
         """
         if not aiohttp:
             self.logger.warning("aiohttp 未安装，无法从 API 获取模型列表")
             return []
 
-        try:
-            headers = self._make_headers()
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.base_url}/models", headers=headers, timeout=aiohttp.ClientTimeout(total=10)
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        models = []
-                        for model_data in data.get("data", []):
-                            model_id = model_data.get("id", "")
-                            if model_id:
-                                model_info = self._parse_api_model(model_data)
-                                models.append(model_info)
-                        self.logger.info("从 API 获取到 %s 个模型", len(models))
-                        return models
-                    else:
-                        self.logger.warning("获取模型列表失败: HTTP %s", response.status)
-                        return []
-        except Exception as e:
-            self.logger.warning("从 API 获取模型列表失败: %s", e)
-            return []
+        headers = self._make_headers()
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{self.base_url}/models", headers=headers, timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                if response.status != 200:
+                    exc = RuntimeError(f"获取模型列表失败: HTTP {response.status}")
+                    exc.status_code = response.status
+                    raise exc
+                data = await response.json()
+                models = []
+                for model_data in data.get("data", []):
+                    model_id = model_data.get("id", "")
+                    if model_id:
+                        model_info = self._parse_api_model(model_data)
+                        models.append(model_info)
+                self.logger.info("从 API 获取到 %s 个模型", len(models))
+                return models
 
     def _parse_api_model(self, model_data: Dict[str, Any]) -> ModelInfo:
         """解析 API 返回的模型数据

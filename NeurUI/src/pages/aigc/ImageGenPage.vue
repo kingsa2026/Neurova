@@ -21,7 +21,7 @@ import GlassButton from '@/components/GlassButton.vue'
 import AigcHistoryList from '@/components/aigc/AigcHistoryList.vue'
 
 const { t } = useI18n()
-const { imageModelOptions } = useAigcModels()
+const { imageModelOptions, providerOf } = useAigcModels()
 
 // 画幅 chips（PRINTFILM ratio 语义）→ 后端 width/height
 const RATIO_SIZE: Record<string, [number, number]> = {
@@ -90,6 +90,8 @@ async function generate() {
       prompt: styledPrompt,
       negative_prompt: negativePrompt.value.trim() || undefined,
       model: model.value === 'auto' ? undefined : model.value,
+      // 选中具名模型时上报其服务商（凭据按 provider_id 解析，Agnes 等可用）
+      provider_id: model.value === 'auto' ? undefined : providerOf(model.value) || undefined,
       width,
       height,
       num_images: Math.max(1, Math.min(4, numImages.value || 1)),
