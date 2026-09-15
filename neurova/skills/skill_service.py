@@ -368,11 +368,26 @@ class SkillService:
                     return {"success": False, "error": f"Skill not found: {skill_id}"}
 
                 skill_info = self._skills[skill_id]
-                skill_path = Path(skill_info.get("path", ""))
 
-                # 删除技能目录
-                if skill_path.exists():
-                    shutil.rmtree(skill_path)
+                # 删除技能目录——Wave F 根治安全缺陷：原实现 Path("") → Path(".")
+                # → exists()=True → rmtree(CWD) 差点删库（元数据条目 path="" 是
+                # 常态：pool 创建/自动封装）。现在：空路径不删文件；删除前校验
+                # 目标在本技能目录子树内（与 archive_skill 同纪律）。
+                raw_path = str(skill_info.get("path") or "")
+                if raw_path:
+                    skill_path = Path(raw_path)
+                    try:
+                        within = skill_path.is_dir() and (
+                            skill_path.parent.resolve() == self.skills_dir.resolve()
+                        )
+                    except OSError:
+                        within = False
+                    if within:
+                        shutil.rmtree(skill_path)
+                    elif skill_path.is_dir():
+                        self._logger.warning(
+                            "uninstall_skill: 拒绝删除技能目录子树外的路径 %s", skill_path
+                        )
 
                 # 从清单中移除
                 del self._skills[skill_id]
@@ -730,13 +745,18 @@ class SkillService:
         description: str = "",
         version: str = "1.0.0",
         config: Optional[Dict[str, Any]] = None,
+        manifest_source: str = "auto",
     ) -> bool:
         """
-        注册自动生成的技能 (无文件路径, 仅元数据持久化)
+        注册元数据技能 (无文件路径, 仅 manifest 持久化)
 
         s3 P0 #2: 桥接 AutoSkillBuilder → SkillService.
         自动技能 (从工具序列提取) 没有磁盘文件, 仅写入 manifest 元数据,
         使 GET /private 聚合 SkillService.list_skills() 时能展示自动技能.
+
+        Wave F（skill_pool_api 双轨合一）：manifest_source 参数化——
+        pool 手工创建的条目走 "user"（restore/进化通道不认领），默认 "auto"
+        保持进化产物存量行为零变化。
 
         Args:
             skill_id: 技能 ID
@@ -744,6 +764,7 @@ class SkillService:
             description: 描述
             version: 版本
             config: 配置 (tool_sequence/context_template 等)
+            manifest_source: manifest.source 标记（auto=进化产物 / user=池创建）
 
         Returns:
             True 注册成功, False 已存在 (重复)
@@ -763,14 +784,16 @@ class SkillService:
                     "installed_at": datetime.datetime.now().isoformat(),
                     "path": "",  # 自动技能无文件路径
                     "manifest": {
-                        "source": "auto",
+                        "source": manifest_source,
                         "config": config or {},
                     },
                 }
-                # P1-6 自动技能出生修订 @1（origin=auto）；P0-2 出生信任态
+                # P1-6 出生修订 @1（origin 跟随来源）；P0-2 出生信任态
                 # provisional——trust 是出生属性，寄居 identity 块，**不预建
                 # usage**（生命周期 seed-on-first-sight 契约依赖"注册无 usage"）
-                self._append_revision(self._skills[skill_id], trigger="register", origin="auto")
+                self._append_revision(
+                    self._skills[skill_id], trigger="register", origin=manifest_source
+                )
                 self._skills[skill_id]["identity"]["trust"] = {
                     "state": "provisional",
                     "successes_since_failure": 0,
@@ -788,16 +811,20 @@ class SkillService:
         skill_id: str,
         version: Optional[str] = None,
         config: Optional[Dict[str, Any]] = None,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
     ) -> bool:
-        """更新已存在自动技能的版本/配置并落盘（改进持久化通道）。
+        """更新已存在元数据技能的版本/配置/名称/描述并落盘（持久化通道）。
 
-        仅允许更新已存在的技能（自动技能由 register_auto_skill 创建）；
-        manifest.source 保持 "auto" 不变。不存在时返回 False。
+        仅允许更新已存在的技能；manifest.source 保持不变。不存在时返回 False。
+        Wave F：name/description 参数支撑 skill_pool_api 的 private 编辑链。
 
         Args:
             skill_id: 技能 ID
             version: 新版本号（None 保持不变）
             config: 新配置（None 保持不变；提供时整体替换 manifest.config）
+            name: 新名称（None 保持不变）
+            description: 新描述（None 保持不变）
 
         Returns:
             bool: 更新并落盘成功
@@ -811,6 +838,10 @@ class SkillService:
                 import copy as _copy
 
                 _prev = _copy.deepcopy(entry)  # 深拷贝：version_history/identity 可变容器不回滚遗漏
+                if name is not None:
+                    entry["name"] = str(name)
+                if description is not None:
+                    entry["description"] = str(description)
                 if version is not None:
                     entry["version"] = str(version)
                 if config is not None:
