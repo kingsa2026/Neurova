@@ -409,6 +409,102 @@ class TestA1LastFrame:
         assert rec.ignored_params == "last_frame"
 
 
+class TestA3BgmMix:
+    """A3：merge_episode 第三级 BGM 混音（用户提供的 BGM 文件，非 AI 生成——
+    生成协议无实测服务商维持 blocked；混音是 FFmpeg 真能力）。"""
+
+    @staticmethod
+    def _setup(store, tmp_path, monkeypatch):
+        import neurova.core.ffmpeg as ff
+        from neurova.llm.generators import runtime as gen_runtime
+
+        monkeypatch.setattr(gen_runtime, "GENERATION_OUTPUT_DIR", tmp_path)
+        monkeypatch.setattr(ff, "resolve_ffmpeg_path", lambda preferred="": "/x/ffmpeg")
+        monkeypatch.setattr(ff, "has_cjk_font", lambda: False)  # 免烧字幕，聚焦混音
+        p = _project(store)
+        ep = store.add_episode(p["id"], {"number": 1, "title": "e"})
+        v = tmp_path / "shot1.mp4"
+        v.write_bytes(b"VID")
+        store.add_storyboard(ep["id"], {"number": 1, "description": "d",
+                                        "video_prompt": "vp", "video_path": str(v)})
+        return p, ep
+
+    def _fake_run(self, monkeypatch, audio_in_main=True):
+        import subprocess as sp
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(list(cmd))
+            if "-i" in cmd and cmd.count("-i") >= 2:  # 混音步（两个输入）
+                open(cmd[-1], "wb").write(b"MIXED")
+            elif "-version" not in " ".join(cmd):
+                out = cmd[-1]
+                open(out, "wb").write(b"MPEG")
+            stderr = (b"Stream #0:1: Audio" if audio_in_main else b"Stream #0:0: Video")
+            return type("P", (), {"returncode": 0, "stderr": stderr})()
+
+        monkeypatch.setattr(sp, "run", fake_run)
+        return calls
+
+    @pytest.mark.asyncio
+    async def test_bgm_mixes_after_concat(self, store, tmp_path, monkeypatch):
+        from neurova.aigc_studio import services as services_mod
+        p, ep = self._setup(store, tmp_path, monkeypatch)
+        bgm = tmp_path / "bg.mp3"
+        bgm.write_bytes(b"MP3")
+        calls = self._fake_run(monkeypatch)
+        res = await services_mod.merge_episode(store, p["id"], ep["id"],
+                                               bgm_path=str(bgm))
+        assert res["composed"] is True
+        assert res["bgm_mixed"] is True
+        mix_cmd = next(c for c in calls if "-filter_complex" in " ".join(c) or c.count("-i") >= 2)
+        assert str(bgm) in " ".join(mix_cmd)
+        assert Path(res["merge"]["output_path"]).read_bytes() == b"MIXED"
+
+    @pytest.mark.asyncio
+    async def test_no_bgm_unchanged(self, store, tmp_path, monkeypatch):
+        from neurova.aigc_studio import services as services_mod
+        p, ep = self._setup(store, tmp_path, monkeypatch)
+        calls = self._fake_run(monkeypatch)
+        res = await services_mod.merge_episode(store, p["id"], ep["id"])
+        assert res["composed"] is True and res["bgm_mixed"] is False
+        assert not any("amix" in " ".join(c) or "volume" in " ".join(c) for c in calls)
+
+    @pytest.mark.asyncio
+    async def test_missing_bgm_file_honest_skip(self, store, tmp_path, monkeypatch):
+        from neurova.aigc_studio import services as services_mod
+        p, ep = self._setup(store, tmp_path, monkeypatch)
+        calls = self._fake_run(monkeypatch)
+        res = await services_mod.merge_episode(store, p["id"], ep["id"],
+                                               bgm_path=str(tmp_path / "ghost.mp3"))
+        assert res["composed"] is True and res["bgm_mixed"] is False
+        assert "BGM" in res["warning"]
+
+    @pytest.mark.asyncio
+    async def test_mix_failure_falls_back_with_warning(self, store, tmp_path, monkeypatch):
+        import subprocess as sp
+        from neurova.aigc_studio import services as services_mod
+        p, ep = self._setup(store, tmp_path, monkeypatch)
+        bgm = tmp_path / "bg.mp3"
+        bgm.write_bytes(b"MP3")
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(list(cmd))
+            if cmd.count("-i") >= 2:  # 混音步（实现判定条件）→ 失败
+                return type("P", (), {"returncode": 1, "stderr": b"codec not supported"})()
+            out = cmd[-1]
+            if str(out).endswith(".mp4"):  # concat 步（单 -i 时）→ 落盘
+                open(out, "wb").write(b"MPEG")
+            return type("P", (), {"returncode": 0, "stderr": b"Stream #0:1: Audio"})()
+
+        monkeypatch.setattr(sp, "run", fake_run)
+        res = await services_mod.merge_episode(store, p["id"], ep["id"], bgm_path=str(bgm))
+        assert res["composed"] is True          # 无 BGM 成片照常交付
+        assert res["bgm_mixed"] is False
+        assert "BGM" in res["warning"]
+
+
 class TestModelRouting:
     """模型选择全链（用户口径 2026-09-14）：Studio 生成支持 model+provider_id
     透传，协议 hint 按服务商 base_url 推导（不再硬编码 ark/wan）。"""

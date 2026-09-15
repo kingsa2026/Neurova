@@ -255,10 +255,33 @@ const mentionCandidates = computed(() =>
   characters.value.map((c) => ({ name: c.name, id: c.id })))
 
 // ── Phase04 制片导出 ─────────────────────────────────────────────────────
+/** A3：用户提供的 BGM 乐轨（上传落盘后混音；AI 生成 BGM 无实测服务商不支持） */
+const bgmPath = ref('')
+async function uploadBgm() {
+  try {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'audio/*'
+    input.onchange = async () => {
+      const file = input.files?.[0]
+      if (!file) return
+      const fd = new FormData()
+      fd.append('file', file, file.name)
+      const up: any = await uploadFile(fd)
+      const path = up?.data?.path || up?.path
+      if (path) bgmPath.value = path
+    }
+    input.click()
+  } catch {
+    message.error(t('aigc.generateError'))
+  }
+}
+
 async function doMerge() {
   if (!currentEid.value) return
   try {
-    const res: any = await mergeEpisode(currentEid.value)
+    const res: any = await mergeEpisode(currentEid.value,
+      bgmPath.value ? { bgm_path: bgmPath.value } : undefined)
     mergeResult.value = res?.data ?? null
     if (res?.code === -1) message.error(res?.data?.error || t('aigc.generateError'))
   } catch {
@@ -305,6 +328,7 @@ defineExpose({
   breakStoryboards, saveShot, genImages, genVideos, genNarration, retryShot,
   imgParams, vdParams,
   addManualShot, setShotEndFrame, applyShotEndFrame, fileUrlOf,
+  bgmPath, uploadBgm,
   doMerge, switchPhase, switchEpisode, loadStoryboards, loadDetail,
 })
 </script>
@@ -475,6 +499,10 @@ defineExpose({
             <GlassButton variant="primary" :disabled="!currentEid" @click="doMerge">
               {{ t('studio.mergeNow') }}
             </GlassButton>
+            <GlassButton size="sm" @click="uploadBgm">
+              {{ bgmPath ? t('studio.replaceBgm') : t('studio.uploadBgm') }}
+            </GlassButton>
+            <span v-if="bgmPath" class="studio-merge-mode">{{ fileNameOf(bgmPath) }}</span>
             <span v-if="mergeResult" class="studio-merge-mode">
               {{ mergeResult.composed ? t('studio.mergedMp4') : t('studio.mergedManifest') }}
             </span>
