@@ -418,3 +418,55 @@ export function previewChunking(data: { content: string; max_chars?: number; ove
     overlap: number
   }>>(`${BASE}/preview-chunking`, data)
 }
+
+// ---------------------------------------------------------------------------
+// P1#12（WeKnora）：摄取任务观测——span 时间线 + stop-parse
+// ---------------------------------------------------------------------------
+
+/** 摄取阶段 span（后端 knowledge_ingress_spans 行）。 */
+export interface IngressSpan {
+  stage: string
+  status: string
+  error?: string | null
+  updated_at?: string
+}
+
+/** 摄取任务行（含详情接口附带的 spans/item_ids）。 */
+export interface IngressTask {
+  task_id: string
+  source: string
+  filename?: string
+  url?: string
+  status: string
+  attempt?: number
+  error?: string | null
+  created_at?: string
+  item_ids?: string[]
+  spans?: IngressSpan[]
+}
+
+export interface IngressStats {
+  pending: number
+  processing: number
+  done: number
+  dead: number
+  cancelled: number
+}
+
+/** 最近摄取任务清单 + 计数（本人任务；admin 全量）。 */
+export function listIngressTasks(limit = 50) {
+  return api.get<ApiResponse<{ tasks: IngressTask[]; stats: IngressStats }>>(
+    `${BASE}/ingress-tasks`,
+    { params: { limit } },
+  )
+}
+
+/** 单任务详情（附 span 时间线）。 */
+export function getIngressTask(taskId: string) {
+  return api.get<ApiResponse<IngressTask>>(`${BASE}/ingress-tasks/${taskId}`)
+}
+
+/** 取消待处理/处理中的摄取任务（已终结 → 409）。 */
+export function cancelIngressTask(taskId: string) {
+  return api.post<ApiResponse<{ task_id: string }>>(`${BASE}/ingress-tasks/${taskId}/cancel`)
+}

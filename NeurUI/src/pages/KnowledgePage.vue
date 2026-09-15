@@ -38,6 +38,9 @@
           <GlassButton variant="ghost" size="sm" @click="configVisible = true; fetchKbConfigs()">
             {{ t('knowledge.remoteConfig') }}
           </GlassButton>
+          <GlassButton variant="ghost" size="sm" @click="openIngress()">
+            {{ t('knowledge.ingressBtn') }}
+          </GlassButton>
           <GlassButton variant="secondary" size="sm" @click="annotationOpen = true">
             {{ t('annotation.entry') }}
           </GlassButton>
@@ -492,6 +495,60 @@
       </a-table>
     </a-modal>
 
+    <!-- P1#12（WeKnora）：摄取任务 span 时间线 + stop-parse -->
+    <a-modal v-model:open="ingressVisible" :title="t('knowledge.ingressTitle')" :footer="null" width="820px">
+      <div class="kb-ingress-toolbar">
+        <a-space size="small">
+          <a-tag v-for="(n, k) in ingressStats" :key="k" :color="ingressStatColor(String(k))">
+            {{ ingressStatusLabel(String(k)) }} {{ n }}
+          </a-tag>
+        </a-space>
+        <GlassButton variant="ghost" size="sm" :loading="ingressLoading" @click="refreshIngress">
+          {{ t('knowledge.ingressRefresh') }}
+        </GlassButton>
+      </div>
+      <a-table
+        :data-source="ingressTasks"
+        :columns="ingressColumns"
+        :pagination="false"
+        :loading="ingressLoading"
+        row-key="task_id"
+        size="small"
+        :expand-column-width="36"
+        @expand="(expanded: boolean, record: IngressTask) => expanded && handleIngressExpand(record)"
+      >
+        <template #expandedRowRender="{ record }">
+          <a-spin :spinning="!!spanLoading[record.task_id]">
+            <div v-if="!(spanMap[record.task_id] || []).length" class="kb-config-hint">
+              {{ t('common.noData') }}
+            </div>
+            <div v-for="sp in spanMap[record.task_id] || []" :key="sp.stage" class="kb-span-row">
+              <a-tag :color="ingressStatusColor(sp.status)">{{ ingressStatusLabel(sp.status) }}</a-tag>
+              <span class="kb-span-stage">{{ ingressStageLabel(sp.stage) }}</span>
+              <span class="kb-span-time">{{ sp.updated_at || '' }}</span>
+              <span v-if="sp.error" class="kb-span-error">{{ sp.error }}</span>
+            </div>
+          </a-spin>
+        </template>
+        <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'status'">
+            <a-tag :color="ingressStatusColor(record.status)">{{ ingressStatusLabel(record.status) }}</a-tag>
+          </template>
+          <template v-if="column.key === 'actions'">
+            <a-button
+              v-if="record.status === 'pending' || record.status === 'processing'"
+              type="link"
+              size="small"
+              danger
+              @click="handleCancelIngress(record)"
+            >
+              {{ t('knowledge.ingressCancel') }}
+            </a-button>
+          </template>
+        </template>
+      </a-table>
+    </a-modal>
+
     <!-- P1#12（WeKnora）：块级查看与编辑（乐观锁 + 修订账本） -->
     <a-modal v-model:open="chunksVisible" :title="t('knowledge.chunksTitle')" :footer="null" width="760px">
       <a-spin :spinning="chunksLoading">
@@ -558,6 +615,9 @@ import {
   listKnowledgeRevisions,
   syncKbConfig,
   previewChunking,
+  listIngressTasks,
+  getIngressTask,
+  cancelIngressTask,
   listKnowledgeChunks,
   updateKnowledgeChunk,
   listKnowledgeChunkRevisions,
@@ -565,7 +625,7 @@ import {
   resolveResolutionReview,
   runEntityResolution,
 } from '@/api/modules/knowledge'
-import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope, KnowledgeConflict, DeletedKnowledge, GraphResolutionReview, KnowledgeChunkRow } from '@/api/modules/knowledge'
+import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope, KnowledgeConflict, DeletedKnowledge, GraphResolutionReview, KnowledgeChunkRow, IngressTask, IngressSpan } from '@/api/modules/knowledge'
 import { request } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -754,6 +814,84 @@ function resetConfigForm(keepName = true) {
 
 // ── P1#12（WeKnora）：飞书同步 + 块级编辑 ──────────────────────────
 const syncingConfigId = ref<string | null>(null)
+
+// 摄取任务 span 时间线 + stop-parse
+const ingressVisible = ref(false)
+const ingressLoading = ref(false)
+const ingressTasks = ref<IngressTask[]>([])
+const ingressStats = ref<Record<string, number>>({})
+const spanMap = ref<Record<string, IngressSpan[]>>({})
+const spanLoading = ref<Record<string, boolean>>({})
+
+const ingressColumns = [
+  { title: 'task', key: 'task_id', dataIndex: 'task_id', ellipsis: true, width: 150 },
+  { title: t('knowledge.itemTitle'), key: 'filename', dataIndex: 'filename', ellipsis: true },
+  { title: t('knowledge.configSource'), key: 'source', dataIndex: 'source', width: 90 },
+  { title: t('common.status'), key: 'status', dataIndex: 'status', width: 90 },
+  { title: t('common.createdAt'), key: 'created_at', dataIndex: 'created_at', width: 150 },
+  { title: '', key: 'actions', width: 70 },
+]
+
+function ingressStatusLabel(status: string): string {
+  const key = `knowledge.ingressStatus${status.charAt(0).toUpperCase()}${status.slice(1)}`
+  const label = t(key)
+  return label === key ? status : label
+}
+function ingressStatusColor(status: string): string {
+  return (
+    { pending: 'default', processing: 'processing', running: 'processing',
+      done: 'success', failed: 'error', dead: 'error', cancelled: 'warning' } as Record<string, string>
+  )[status] || 'default'
+}
+function ingressStatColor(k: string): string { return ingressStatusColor(k) }
+function ingressStageLabel(stage: string): string {
+  const key = `knowledge.ingressStage${stage.charAt(0).toUpperCase()}${stage.slice(1)}`
+  const label = t(key)
+  return label === key ? stage : label
+}
+
+async function refreshIngress() {
+  ingressLoading.value = true
+  try {
+    const res: any = await listIngressTasks()
+    ingressTasks.value = res?.data?.tasks || []
+    ingressStats.value = res?.data?.stats || {}
+  } catch (e: any) {
+    message.error(e?.message || String(e))
+  } finally {
+    ingressLoading.value = false
+  }
+}
+
+function openIngress() {
+  ingressVisible.value = true
+  void refreshIngress()
+}
+
+async function handleIngressExpand(record: IngressTask) {
+  if (spanMap.value[record.task_id]) return
+  spanLoading.value = { ...spanLoading.value, [record.task_id]: true }
+  try {
+    const res: any = await getIngressTask(record.task_id)
+    spanMap.value = { ...spanMap.value, [record.task_id]: res?.data?.spans || [] }
+  } catch (e: any) {
+    message.error(e?.message || String(e))
+  } finally {
+    const next = { ...spanLoading.value }
+    delete next[record.task_id]
+    spanLoading.value = next
+  }
+}
+
+async function handleCancelIngress(record: IngressTask) {
+  try {
+    await cancelIngressTask(record.task_id)
+    message.success(t('knowledge.ingressCancelled'))
+    await refreshIngress()
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || String(e))
+  }
+}
 
 const previewLoading = ref(false)
 const previewResult = ref<{
