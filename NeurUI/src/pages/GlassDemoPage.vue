@@ -27,14 +27,25 @@
         />
       </div>
     </section>
+
+    <section class="gd-slot">
+      <p class="gd-label">D · GlassPanel 皮肤感知折射（html data-skin=ios 时启用 backdrop url()）</p>
+      <div class="gd-stage gd-stage--panel">
+        <h2 class="gd-text">LIQUID GLASS</h2>
+        <GlassPanel :radius="28" style="width: 360px">
+          <div style="height: 200px"></div>
+        </GlassPanel>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 // 临时诊断页：GlassSurface 官方 demo 复刻，单变量对照找登录页无折射的根因。
-// A=官方胶囊基准；C=官方字面值+登录卡尺寸。参数为绝对像素语义，禁止按尺寸比例放大
-// （放大位移量会把文字扯成彩虹拱形，见 D 实验记录）。
+// A=官方胶囊基准；C=官方字面值+登录卡尺寸；D=GlassPanel 双皮肤折射对比。
+// 参数为绝对像素语义，禁止按尺寸比例放大（放大位移量会把文字扯成彩虹拱形，见 D 实验记录）。
 import GlassSurface from '@/components/GlassSurface.vue'
+import GlassPanel from '@/components/GlassPanel.vue'
 </script>
 
 <style scoped>
@@ -70,6 +81,7 @@ import GlassSurface from '@/components/GlassSurface.vue'
 }
 .gd-stage--pill { height: 180px; }
 .gd-stage--card { height: 560px; }
+.gd-stage--panel { height: 300px; }
 .gd-text {
   position: absolute;
   inset: 0;
