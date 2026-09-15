@@ -13,7 +13,7 @@
 
 <script setup lang="ts">
 /**
- * 渠道扫码授权块（对齐 QwenPaw QrcodeAuthBlock.tsx，2026-09-13 移植）。
+ * 渠道扫码授权块。
  *
  * 嵌入配置弹窗：点按钮 → 后端真实平台协议生成二维码 → 轮询 → confirmed/success
  * 时 emit credentials，由页面回填表单。任意 QRCODE_AUTH_HANDLERS 渠道通用。

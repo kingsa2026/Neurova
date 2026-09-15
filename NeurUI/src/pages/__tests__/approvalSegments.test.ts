@@ -1,5 +1,5 @@
 /**
- * P0-6 分段审批前端契约测试（OpenClaw 启发）。
+ * P0-6 分段审批前端契约测试。
  *
  * 后端 governance.segments 经 approval_required 事件送达前端，审批卡
  * 逐段展示链式命令。此处锁定事件 → approvalModal.segments 的映射契约：

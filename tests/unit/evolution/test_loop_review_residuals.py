@@ -100,7 +100,7 @@ class TestRsiStepPassesSkillService:
         improver = MagicMock()
         proposal = MagicMock()
         proposal.applied = False
-        # 2026-09-13 契约升级(Hermes 对比):pipeline 改调异步反射式提案口
+        # 2026-09-13 契约升级:pipeline 改调异步反射式提案口
         improver.propose_pending_improvements_async = AsyncMock(return_value=[proposal])
         improver.apply_improvement.return_value = True
 

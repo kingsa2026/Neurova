@@ -1,5 +1,5 @@
 /**
- * PlanPanel — 计划模式交互面板组件测试（ZCode 计划模式对齐）
+ * PlanPanel — 计划模式交互面板组件测试
  *
  * 锁定（全部走真实流程驱动：start → answers → awaiting → decide）：
  * 1. 初始态（无会话）：需求输入预填 + 「开始澄清」可用性随输入变化；

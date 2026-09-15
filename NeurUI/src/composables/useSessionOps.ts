@@ -77,14 +77,14 @@ export function useSessionOps() {
     e.dataTransfer?.setData('text/plain', sessionId)
   }
 
-  /** 拖拽放下 = 把拖拽会话的 updatedAt 移到目标之后（重排=本地排序，QP 同款语义）。 */
+  /** 拖拽放下 = 把拖拽会话的 updatedAt 移到目标之后。 */
   function onSessionDrop(targetId: string): void {
     const sourceId = draggingSessionId.value
     draggingSessionId.value = null
     dragOverSessionId.value = null
     if (!sourceId || sourceId === targetId) return
     chatStore.moveSessionAfter(sourceId, targetId)
-    // 拖拽排序落库（QwenPaw /chats/groups/order 对齐）：本地视觉排序立即生效，
+    // 拖拽排序落库：本地视觉排序立即生效，
     // 同时异步持久化 sort_order（失败静默——本地排序仍可用，刷新后回退服务端顺序）。
     void persistSessionOrder()
   }

@@ -1,5 +1,5 @@
 /**
- * useIMEComposition 测试（IME 合成防误发，对齐 QP useIMEComposition）。
+ * useIMEComposition 测试。
  *
  * 契约：
  * - compositionstart→end 之间 shouldBlockSend=true（选词回车不发）

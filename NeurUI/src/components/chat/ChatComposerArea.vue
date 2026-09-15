@@ -56,7 +56,7 @@
           @focus="composerFocused = true"
           @blur="composerFocused = false"
         />
-        <!-- 斜杠命令面板（QwenPaw slash commands 对齐）：输入 / 开头时弹出 -->
+        <!-- 斜杠命令面板：输入 / 开头时弹出 -->
         <div v-if="slashOpen" class="nr-slash-panel">
           <div
             v-for="(cmd, i) in slashFiltered"
@@ -72,7 +72,7 @@
         </div>
       </div>
 
-      <!-- Composer 工具条（QwenPaw/ZCode composer 对齐）：
+           <!-- Composer 工具条：
            左 = +附件 / 电脑操作(图标) / 语音输入；右 = 用量环 + 思考程度 + 语音开关 + 模型 + 发送 -->
       <div class="nr-composer-toolbar">
         <div class="nr-composer-left">
@@ -264,7 +264,7 @@
       <button class="nr-rate-limit-dismiss" @click="rateLimitBanner = null">✕</button>
     </div>
 
-    <!-- 实时事件丢失提示（seq gap 检测，OpenOcta 启发 P0-1）：仅提示，不可恢复 -->
+    <!-- 实时事件丢失提示：仅提示，不可恢复 -->
     <div v-if="eventsLostBanner" class="nr-rate-limit-banner">
       <span class="nr-rate-limit-text">
         ⚠ {{ t('chat.eventsLost', { n: eventsLostBanner }) }}
@@ -423,7 +423,7 @@ function toggleComputerPanel(): void {
   }
 }
 
-// ── 桌面运行权限档（ZCode 式下拉，与设置页同源 advanced.desktop_runtime_mode）──
+// ── 桌面运行权限档──
 // 写侧后端契约 = PUT /settings require_admin：非管理员只读展示当前档
 //（composable 写失败回滚是兜底，UI 禁用是明示）。
 const authStore = useAuthStore()
@@ -966,7 +966,7 @@ defineExpose({ closeSlashPanel, autoResize })
   color: var(--nr-primary, #4a9eff);
   font-size: 12px;
 }
-/* 运行权限档下拉：标题 + 说明两行（ZCode 对话框模式对齐） */
+/* 运行权限档下拉：标题 + 说明两行 */
 .nr-composer-pill.is-disabled {
   opacity: 0.55;
   cursor: not-allowed;

@@ -1,5 +1,4 @@
 /**
- * 聊天页对齐 QwenPaw — store 契约测试
  *
  * 锁定：
  * 1. applyTurnUsage：lastTurnUsage 更新 + per-session 累计 + 空 session 忽略累计；
@@ -63,7 +62,7 @@ describe('chat store — token 用量与会话排序', () => {
   })
 })
 
-describe('KaTeX 数学公式渲染（QwenPaw 对齐）', () => {
+describe('KaTeX 数学公式渲染', () => {
   it('$$..$$ display 公式渲染为 katex HTML', () => {
     const html = renderMarkdown('质能方程：$$E = mc^2$$')
     expect(html).toContain('katex')

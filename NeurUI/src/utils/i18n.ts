@@ -22,7 +22,6 @@
  *   const { t } = useI18n()
  *   const msg = resolveI18nMessage(t, 'chat.loadHistoryFailed', '加载历史对话失败')
  *
- * 详见 docs/bugfix-delete-session-userid-mismatch.md
  *   "前端错误反馈策略深化" → "i18n fallback resolver" 小节.
  */
 

@@ -72,9 +72,9 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
             if isinstance(_share, str) else bool(_share)
         )
 
-        # QwenPaw FeishuConfig.domain 对齐（2026-09-13）：'feishu'（国内）/'lark'
-        # （国际）或完整 http(s) 网关 URL。此前前端有 region 字段而后端从不消费
-        # ——Lark 国际租户恒认证失败（摆设字段根修）。
+# 'feishu'（国内）/'lark'
+# （国际）或完整 http 网关 URL。此前前端有 region 字段而后端从不消费
+# ——Lark 国际租户恒认证失败（摆设字段根修）
         _domain = str(_cfg_meta.get("domain", "feishu") or "feishu")
         if _domain in ("feishu", "lark"):
             _open_base = "https://open.larksuite.com" if _domain == "lark" else "https://open.feishu.cn"

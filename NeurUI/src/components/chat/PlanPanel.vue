@@ -123,7 +123,7 @@
 
 <script setup lang="ts">
 /**
- * PlanPanel —— 计划模式交互面板（ZCode 计划模式对齐）
+ * PlanPanel —— 计划模式交互面板
  *
  * 职责：
  * 1. 问答轮（不限轮数）：选项点选 + 自由补充 → 提交 → LLM 出下一轮或生成计划；

@@ -112,8 +112,8 @@ class DingTalkAdapter(ChannelAdapter):
             _share.strip().lower() not in ("false", "0", "no", "off")
             if isinstance(_share, str) else bool(_share)
         )
-        # QwenPaw DingTalkConfig 对齐：robot_code 缺省=Client ID（官方 robotCode==AppKey）；
-        # endpoint=自定义 API 基址（专有云），空=官方 api.dingtalk.com
+# robot_code 缺省=Client ID（官方 robotCode==AppKey）；
+# endpoint=自定义 API 基址（专有云），空=官方 api.dingtalk.com
         self._robot_code = str(_cfg_meta.get("robot_code", "") or "").strip() or self.config.app_id
         self._api_base = str(_cfg_meta.get("endpoint", "") or "").strip().rstrip("/") or "https://api.dingtalk.com"
 
@@ -264,8 +264,8 @@ class DingTalkAdapter(ChannelAdapter):
     ) -> Optional[str]:
         """发送消息到钉钉"""
         try:
-            # QwenPaw DingTalkConfig.message_type 对齐：渠道配置了 markdown 渲染时，
-            # 上游默认 "text" 的回复升级为 markdown（会话预览带标题）
+# 渠道配置了 markdown 渲染时，
+# 上游默认 "text" 的回复升级为 markdown（会话预览带标题）
             if message_type == "text":
                 _cfg_meta = getattr(self.config, "metadata", None) or self.config.extra or {}
                 if _cfg_meta.get("message_type") == "markdown":

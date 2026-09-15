@@ -37,7 +37,7 @@ import i18n from '@/i18n'
  *   - 用户主动调用 (ChatPage.switchSession wrapper): 调 notifySwitchFailure
  *
  * 替换原 `silent: boolean` 浅参数模式 — 接口不再泄漏调用上下文, 决策空间
- * 留给调用方. 详见 docs/bugfix-delete-session-toast.md "架构深化" 小节.
+ * 留给调用方. "架构深化" 小节.
  */
 export type SwitchResult =
   | { ok: true }
@@ -53,7 +53,7 @@ export type SwitchResult =
  *
  * 替换原 `Promise<boolean>` 浅返回模式 — 旧契约吞错 (catch 块 `return false`
  * 不调 onError) 导致 UI 无反馈 (chat.deleteSessionFailed bug).
- * 详见 docs/bugfix-delete-session-userid-mismatch.md "前端错误反馈策略深化" 小节.
+ * "前端错误反馈策略深化" 小节.
  */
 export type DeleteResult = { ok: true } | { ok: false; error: unknown }
 
@@ -116,7 +116,7 @@ export function useChat(options: UseChatOptions = {}) {
   /**
    * Create a new session on the backend, then prepend it to the store and
    * switch to it. Uses the backend-returned session_id to avoid frontend/
-   * backend id drift (see H-1 in docs/bugfix-history-load-bugs.md).
+ * backend id drift (see H-1 in).
    */
   async function createSession(agentId: string, defaultTitle: string = i18n.global.t('ui.newConversation')): Promise<string | null> {
     try {
@@ -126,7 +126,7 @@ export function useChat(options: UseChatOptions = {}) {
       // 旧契约 fallback `|| crypto.randomUUID()` 会生成前端 UUID, 后端不知道,
       // 存到 store 后用户点击 GET /history → 404 → toast "加载历史对话失败".
       // 新契约: 后端不返回 session_id 时返回 null + 弹 toast, 不创建幽灵 session.
-      // 详见 docs/bugfix-delete-session-userid-mismatch.md "幽灵 session 自愈".
+      // "幽灵 session 自愈".
       const newId: string | undefined = data?.session_id || data?.id
       if (!newId) {
         console.error('[Chat] Create session failed: backend response missing session_id', res)
@@ -263,7 +263,7 @@ export function useChat(options: UseChatOptions = {}) {
           // 旧记录缺 timestamp 时回退 metadata.client_timestamp（chat 请求携带）
           timestamp: m.timestamp || m.metadata?.client_timestamp || undefined,
           feedback: m.metadata?.feedback,
-          // 钩子/检查点（ZCode checkpoint 对齐）
+          // 钩子/检查点
           checkpoint: Boolean(m.metadata?.checkpoint),
         }
       })
@@ -276,7 +276,7 @@ export function useChat(options: UseChatOptions = {}) {
       // 404 表示后端不存在该 session (例如前端 UUID fallback 残留 / 后端
       // session 文件被删), 自动从 store 移除, 避免用户反复点击触发 toast.
       // 非 404 错误 (如 500 服务器故障 / 网络错误) 保留 session, 因为可能重试成功.
-      // 详见 docs/bugfix-delete-session-userid-mismatch.md "幽灵 session 自愈".
+      // "幽灵 session 自愈".
       if (status === 404) {
         // BUG FIX (delete-404-ghost): 404 自愈属"预期恢复"而非真错误,
         // 不应以 error 级别污染控制台 (删除会话自动切换落到幽灵时, 旧契约
@@ -546,7 +546,7 @@ export function useChat(options: UseChatOptions = {}) {
   }
 
   /**
-   * 会话分叉（ZCode fork 对齐）：复制 untilTimestamp（含）之前的全部历史
+ * 会话分叉：复制 untilTimestamp之前的全部历史
    * 到新会话；untilTimestamp 缺省 = 整个会话。返回新会话 id。
    */
   async function forkSession(

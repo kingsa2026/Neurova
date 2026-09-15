@@ -67,7 +67,7 @@
 /**
  * 画布店铺管理抽屉（§6.2）
  *
- * 凭据字段按平台动态渲染（与 docs/neurflow-store-connection-design.md §2 表一一对应）；
+ * 凭据字段按平台动态渲染（与 §2 表一一对应）；
  * 提交后自动触发一次连接测试；测试/刷新失败展示状态与错误摘要。
  */
 import { computed, ref, watch } from 'vue'

@@ -86,7 +86,7 @@
         >
           <div class="nr-msg-avatar"><UiIcon :name="msg.role === 'user' ? 'chat' : 'monitor'" :size="16" /></div>
           <div class="nr-msg-body">
-            <!-- 钩子/检查点标记（ZCode checkpoint 对齐） -->
+            <!-- 钩子/检查点标记 -->
             <div v-if="msg.checkpoint" class="nr-msg-checkpoint-badge" :title="t('chat.checkpointSet')"><UiIcon name="anchor" :size="12" /> {{ t('chat.checkpoint') }}</div>
             <!-- 流式状态条（三需求①）：理解→思考→工具→输出，进行中扫光 -->
             <div v-if="msg.streaming" class="nr-stream-status" :data-phase="deriveStreamPhase(msg)">
@@ -94,7 +94,7 @@
               <span class="nr-stream-status-label">{{ streamPhaseMeta(deriveStreamPhase(msg)).label }}</span>
               <span class="nr-stream-status-shimmer" />
             </div>
-            <!-- 429 重试/切换倒计时（ZCode 对齐）：限流等待/模型切换提示条 -->
+            <!-- 429 重试/切换倒计时：限流等待/模型切换提示条 -->
             <div v-if="msg.retryNotice" class="nr-retry-notice">
               <span class="nr-retry-notice-icon"><UiIcon name="radar" :size="13" /></span>
               <span class="nr-retry-notice-label">{{ retryNoticeText(msg) }}</span>
@@ -385,7 +385,7 @@
          左缘可拖拽调宽；tabs 全空时整体不渲染 -->
     <RightDock :agent-id="agentId" @switch="switchSession" @cross-search="crossSearchOpen = true" />
 
-    <!-- 跨会话全文搜索（QwenPaw ChatSearchPanel 对齐） -->
+    <!-- 跨会话全文搜索 -->
     <CrossSessionSearch
       :open="crossSearchOpen"
       :sessions="sessions"
@@ -574,7 +574,7 @@ function onSessionSyncEvent(event: { event_type: string; payload: Record<string,
   handleSubAgentSyncEvent(event)
 }
 
-// 实时事件丢失提示（seq gap 检测，OpenOcta P0-1）：计数入 chatStore（composer 读）
+// 实时事件丢失提示：计数入 chatStore（composer 读）
 function onSyncGap(missed: number) {
   chatStore.bumpEventsLost(missed)
 }
@@ -708,7 +708,7 @@ const {
   // 轮次操作：删除一轮（编辑覆写复用）/ 点赞点踩反馈
   deleteRound: _deleteRound,
   sendFeedback: _sendFeedback,
-  // 会话分叉 / 消息钩子（ZCode fork/checkpoint 对齐）
+  // 会话分叉 / 消息钩子
   forkSession: _forkSession,
   setCheckpoint: _setCheckpoint,
   // 用户主动调用 switchSession / deleteSession 失败时弹 toast 的错误策略 helper
@@ -725,7 +725,7 @@ const {
   // vue-i18n Composition API (legacy: false) 在缺失 key 时返回 key 字符串
   // 本身 (truthy), 导致 `|| fallback` 短路求值不触发, toast 显示 raw key.
   // resolveI18nMessage 用 `t(key) === key` 检测缺失翻译信号, 缺失时返回 fallback.
-  // 详见 docs/bugfix-delete-session-userid-mismatch.md "i18n fallback resolver" 小节.
+  // "i18n fallback resolver" 小节.
   errorMessage: (key, fallback) => resolveI18nMessage(t, key, fallback),
   onError: (msg) => uiMessage.error(msg),
 })
@@ -797,7 +797,7 @@ function legacyToolList(
   return []
 }
 
-// ── 429 重试/切换倒计时（ZCode 对齐，2026-09-11）─────────────────────────
+// ── 429 重试/切换倒计时─────────────────────────
 
 const retryTickNow = ref(Date.now())
 let retryTicker: ReturnType<typeof setInterval> | null = null
@@ -1033,7 +1033,7 @@ async function deleteRoundAt(idx: number): Promise<void> {
 }
 
 /**
- * 重新生成（QwenPaw regenerate 对齐）：以最后一轮用户消息原文重发。
+ * 重新生成：以最后一轮用户消息原文重发。
  * 复用"删旧轮+重发"契约（与编辑重发同链路）：删除旧轮（后端清 session
  * 记录+该轮记忆+agent 内存历史）→ 原文经 sendMessage 原链路重写新轮。
  */
@@ -1070,7 +1070,7 @@ async function regenerateLastRound(): Promise<void> {
 }
 
 /**
- * 会话分叉（ZCode fork 对齐）：从该消息处（含）截取历史复制为新会话并切换。
+ * 会话分叉：从该消息处截取历史复制为新会话并切换。
  * 消息级操作：msg.timestamp 即截取定位键。
  */
 let forkInFlight = false
@@ -1138,7 +1138,7 @@ async function switchSession(sessionId: string): Promise<void> {
   scrollToBottomForHistory()
 }
 
-// 跨会话全文搜索（QwenPaw ChatSearchPanel 对齐）
+// 跨会话全文搜索
 // ---------------------------------------------------------------------------
 const crossSearchOpen = ref(false)
 
@@ -1220,7 +1220,7 @@ let activeStreamSessionId: string | null = null
 let lastSentMessageText = ''
 
 /**
- * 429 横幅一键切换后的闭环（ZCode 对齐）：切到候选模型 → 自动重发上一条
+ * 429 横幅一键切换后的闭环：切到候选模型 → 自动重发上一条
  * 消息继续推理，用户不再需要"点了候选却毫无反应"地手动重发。
  * 仅重发纯文本（lastSentMessageText）；附件轮由后端同模型重试/自动切换兜底。
  */
@@ -1253,7 +1253,7 @@ async function sendMessage() {
     uiMessage.warning(t('chat.anotherTabSending'))
     return
   }
-  // 补课 A2：零可用模型时提示（QP 模型未配 Result 提示对齐）——
+  // 补课 A2：零可用模型时提示——
   // 只拦自动路由且无任何已启用模型的场景；用户已手动选模型则放行
   if (!selectedModel.value && noModelsHint.value) {
     uiMessage.warning(t('chat.noModelsConfigured'))
@@ -1661,7 +1661,6 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       break
 
     case 'usage':
-      // QwenPaw turn_usage 对齐:真实 token 用量入 store（per-session 累计）
       if (typeof event.total_tokens === 'number') {
         // 2026-09-07 根因修复：新会话首轮流式时 activeStreamSessionId 为
         // null（session_id 由后端 done 才回传），原实现把 usage 记到 null
@@ -1685,7 +1684,7 @@ function processSSEEvent(event: any, msg: ChatMessage) {
       break
 
     case 'retry': {
-      // 429 限流重试/切换（ZCode 对齐 2026-09-11）：reset=半截回复作废；
+      // 429 限流重试/切换：reset=半截回复作废；
       // 写入倒计时提示条（等待期间每秒本地倒数，流式恢复即清除）
       if (event.reset) {
         msg.content = ''
@@ -3187,7 +3186,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-/* 429 重试/切换倒计时提示条（ZCode 对齐）：琥珀色系区分于常规流式状态 */
+/* 429 重试/切换倒计时提示条：琥珀色系区分于常规流式状态 */
 .nr-retry-notice {
   display: inline-flex;
   align-items: center;
@@ -3648,8 +3647,8 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.04);
 }
 
-/* ── 斜杠命令面板（QwenPaw slash commands 对齐） ── */
-/* ── Composer 工具条：用量环 + 思考程度 + 语音 + 模型 + 圆形发送（QwenPaw/ZCode 输入条风格） ── */
+/* ── 斜杠命令面板 ── */
+/* ── Composer 工具条：用量环 + 思考程度 + 语音 + 模型 + 圆形发送 ── */
 .nr-chat-header-title {
   font-size: 14px;
   font-weight: 600;
@@ -3665,7 +3664,7 @@ onBeforeUnmount(() => {
 /* 模型连通点：绿=真实可用，灰=不可联通 */
 /* 独立模型子菜单：向左弹出，固定高度+内部滚动（切换服务商主菜单尺寸恒定） */
 /* 顶入编辑确认态：✓ 图标时着色提示"回车/点击=保存改写" */
-/* ── 消息钩子/检查点（ZCode checkpoint 对齐） ── */
+/* ── 消息钩子/检查点 ── */
 .nr-msg-checkpoint-badge {
   display: inline-flex;
   align-items: center;

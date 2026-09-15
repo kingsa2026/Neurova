@@ -181,7 +181,7 @@ class MemorySkillExecutor(BaseSkillExecutor):
             )
 
         # P1-2 待确认中间态：挂载了 pending_store 的实例，交互式单条写入
-        # 默认进待审队列（Utopia 0018：人就在对话里，确认成本最低）；
+        # 默认进待审队列；
         # confirm=True 按次强制直写；未挂载实例保持原直写语义（opt-in 在
         # 构造处，不挂载 = 行为完全不变）。
         if self.pending_store is not None and params.get("confirm") is not True:
