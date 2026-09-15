@@ -40,7 +40,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { request } from '@/api'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -52,10 +52,10 @@ import { useAgentPage } from '@/composables/useAgentPage'
 const { t } = useI18n()
 const { agentId } = useAgentPage()
 
-const channelTabs = [
+const channelTabs = computed(() => [
   { labelKey: 'nav.agentchannel', to: `/agent/${agentId.value}/channel` },
   { labelKey: 'nav.agentchannelsharing', to: `/agent/${agentId.value}/channel-sharing` },
-]
+])
 
 interface ChannelSharing {
   channelId: string

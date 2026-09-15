@@ -5,13 +5,22 @@ import type { ApiResponse } from '@/types/response'
 // Types
 // ---------------------------------------------------------------------------
 
+// 与后端 SleepStatusResponse 严格对齐（裸模型，epoch 秒数值）。
+// 此前前端自造 started_at/duration_seconds 且把 sleep_phase 值域写死
+// light|deep|rem，后端真实值为 tracker 五阶段（light_sleep/... /awake），
+// 状态页三行数据永不渲染、进度条永不点亮。
 export interface SleepStatus {
   agent_id: string
   is_sleeping: boolean
-  sleep_phase?: 'light' | 'deep' | 'rem'
-  started_at?: string
-  duration_seconds?: number
-  next_wake?: string
+  /** 统一阶段源：awake | light_sleep | deep_sleep | rem | hibernate */
+  sleep_phase?: string
+  last_sleep_time?: number | null
+  last_wake_time?: number | null
+  /** 累计睡眠时长（秒） */
+  total_sleep_duration?: number
+  sleep_cycles?: number
+  /** 预计唤醒时刻（epoch 秒）：手动会话 duration deadline 或当前阶段 dwell 到期 */
+  next_wake?: number | null
 }
 
 // 与后端 neurova/api/endpoints/sleep.py::SleepSettings 严格对齐。
@@ -36,6 +45,11 @@ export interface SleepSettings {
   idle_threshold_rem: number
   idle_threshold_hibernate: number
   monitor_interval_seconds: number
+  // 每阶段最长停留（分钟）：dwell 超时强制向更深推进；最深超时=整觉完成→醒
+  phase_max_minutes_light_sleep: number
+  phase_max_minutes_deep_sleep: number
+  phase_max_minutes_rem: number
+  phase_max_minutes_hibernate: number
 }
 
 export interface Dream {

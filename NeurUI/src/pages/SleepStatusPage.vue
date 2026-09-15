@@ -10,7 +10,7 @@
           {{ t('common.refresh') }}
         </GlassButton>
         <GlassButton
-          v-if="!sleepStatus?.is_sleeping"
+          v-if="!isInSleep"
           variant="secondary"
           size="sm"
           :loading="actionLoading"
@@ -33,19 +33,19 @@
     <AgentPageTabs :tabs="sleepTabs" />
 
     <!-- Current sleep state -->
-    <GlassPanel :variant="sleepStatus?.is_sleeping ? 'prominent' : 'subtle'" :glow="sleepStatus?.is_sleeping">
+    <GlassPanel :variant="isInSleep ? 'prominent' : 'subtle'" :glow="isInSleep">
       <div class="sleep-state">
-        <div class="sleep-icon">{{ sleepStatus?.is_sleeping ? '🌙' : '☀️' }}</div>
+        <div class="sleep-icon">{{ isInSleep ? '🌙' : '☀️' }}</div>
         <div class="sleep-info">
-          <h3>{{ sleepStatus?.is_sleeping ? t('sleep.sleeping') : t('sleep.awake') }}</h3>
-          <p v-if="sleepStatus?.sleep_phase" class="sleep-phase">
+          <h3>{{ isInSleep ? t('sleep.sleeping') : t('sleep.awake') }}</h3>
+          <p v-if="sleepStatus?.sleep_phase && sleepStatus.sleep_phase !== 'awake'" class="sleep-phase">
             {{ t('sleep.phase') }}: {{ formatPhase(sleepStatus.sleep_phase) }}
           </p>
-          <p v-if="sleepStatus?.started_at" class="sleep-time">
-            {{ t('sleep.lastSleep') }}{{ formatTime(sleepStatus.started_at) }}
+          <p v-if="sleepStatus?.last_sleep_time" class="sleep-time">
+            {{ t('sleep.lastSleep') }}{{ formatTime(sleepStatus.last_sleep_time) }}
           </p>
-          <p v-if="sleepStatus?.duration_seconds" class="sleep-time">
-            {{ t('sleep.duration') }}: {{ formatDuration(sleepStatus.duration_seconds) }}
+          <p v-if="sleepStatus?.total_sleep_duration" class="sleep-time">
+            {{ t('sleep.duration') }}: {{ formatDuration(sleepStatus.total_sleep_duration) }}
           </p>
           <p v-if="sleepStatus?.next_wake" class="sleep-time">
             {{ t('sleep.nextWake') }}: {{ formatTime(sleepStatus.next_wake) }}
@@ -54,7 +54,7 @@
       </div>
 
       <!-- Sleep phase visualization -->
-      <div v-if="sleepStatus?.is_sleeping && sleepStatus?.sleep_phase" class="phase-visualization">
+      <div v-if="isInSleep && sleepStatus?.sleep_phase" class="phase-visualization">
         <div class="phase-steps">
           <div
             v-for="phase in sleepPhases"
@@ -206,7 +206,11 @@ import * as sleepApi from '@/api/modules/sleep'
 import type { SleepStatus, Dream, SleepInsight, MergeConflict } from '@/api/modules/sleep'
 
 const { t } = useI18n()
-const { agentId, currentAgent } = useAgentPage()
+const { agentId, currentAgent } = useAgentPage({
+  onAgentChange: () => {
+    fetchAll()
+  },
+})
 
 const sleepTabs = computed(() => [
   { labelKey: 'nav.sleepstatus', to: `/agent/${agentId.value}/sleep/status` },
@@ -228,18 +232,29 @@ const conflicts = ref<MergeConflict[]>([])
 const dreamTypeFilter = ref<string | undefined>(undefined)
 
 // --- Sleep phases for visualization ---
+// 键值对齐后端统一阶段源：active|light_sleep|deep_sleep|rem|hibernate|awake
 const sleepPhases = computed(() => [
-  { key: 'light', label: t('sleep.lightPhase') },
-  { key: 'deep', label: t('sleep.deepPhase') },
+  { key: 'light_sleep', label: t('sleep.lightPhase') },
+  { key: 'deep_sleep', label: t('sleep.deepPhase') },
   { key: 'rem', label: t('sleep.remPhase') },
+  { key: 'hibernate', label: t('sleep.hibernatePhase') },
 ])
 
 const isPhaseCompleted = (phaseKey: string) => {
-  const order = ['light', 'deep', 'rem']
+  const order = ['light_sleep', 'deep_sleep', 'rem', 'hibernate']
   const currentIdx = order.indexOf(sleepStatus.value?.sleep_phase || '')
   const phaseIdx = order.indexOf(phaseKey)
   return phaseIdx < currentIdx
 }
+
+// 睡眠态统一判定：手动会话 is_sleeping 或 阶段推进链处于任一睡眠阶段
+// （自动空闲入睡不置 is_sleeping，否则进度条/唤醒按钮与真实阶段脱节）
+const isInSleep = computed(() => {
+  const s = sleepStatus.value
+  if (!s) return false
+  const p = s.sleep_phase
+  return s.is_sleeping || (!!p && p !== 'awake' && p !== 'active')
+})
 
 // --- Polling for real-time status ---
 const {
@@ -257,7 +272,12 @@ const {
 }, 15000) // poll every 15 seconds
 
 // --- Helpers ---
-const formatTime = (ts: string) => ts ? new Date(ts).toLocaleString() : ''
+// 兼容两种时间源：created_at 为 ISO 字符串；last_sleep_time/next_wake 为后端 epoch 秒数值
+const formatTime = (ts?: number | string | null) => {
+  if (ts == null || ts === '') return ''
+  if (typeof ts === 'number') return new Date(ts * 1000).toLocaleString()
+  return new Date(ts).toLocaleString()
+}
 
 const formatDuration = (seconds: number) => {
   if (!seconds) return ''
@@ -273,9 +293,10 @@ const formatDuration = (seconds: number) => {
 
 const formatPhase = (phase: string) => {
   const map: Record<string, string> = {
-    light: t('sleep.lightPhase'),
-    deep: t('sleep.deepPhase'),
+    light_sleep: t('sleep.lightPhase'),
+    deep_sleep: t('sleep.deepPhase'),
     rem: t('sleep.remPhase'),
+    hibernate: t('sleep.hibernatePhase'),
   }
   return map[phase] || phase
 }

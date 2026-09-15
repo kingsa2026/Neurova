@@ -33,7 +33,7 @@ vi.mock('ant-design-vue', async (importOriginal) => {
   return { ...actual, message: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }
 })
 
-import { getSleepSettings } from '@/api/modules/sleep'
+import { getSleepSettings, updateSleepSettings, getMergeConflicts } from '@/api/modules/sleep'
 import type { ApiResponse } from '@/types/response'
 import type { SleepSettings } from '@/api/modules/sleep'
 
@@ -64,6 +64,9 @@ const messages = {
     modeEither: '温度或空闲任一满足',
     threshold: '阈值',
     monitorIntervalSeconds: '阶段监控间隔',
+    phaseMaxSection: '每阶段最长停留（分钟）',
+    phaseMax: '最长停留',
+    phaseMaxHint: '0=不设上限；超时自动向更深阶段推进，休眠超时视为整觉完成并唤醒',
     seconds: '秒',
     hibernatePhase: '休眠阶段',
     lightPhase: '浅睡眠阶段',
@@ -100,6 +103,7 @@ const globalStubs = {
   },
   'a-row': { template: '<div><slot/></div>' },
   'a-col': { template: '<div><slot/></div>' },
+  'a-divider': { props: ['style'], template: '<div class="ant-divider"><slot/></div>' },
   'a-tag': { template: '<span><slot/></span>' },
   'a-empty': { template: '<div/>' },
   'a-space': { template: '<div><slot/></div>' },
@@ -147,6 +151,10 @@ const sleepSettingsResponse: ApiResponse<SleepSettings> = {
     idle_threshold_rem: 90,
     idle_threshold_hibernate: 120,
     monitor_interval_seconds: 60,
+    phase_max_minutes_light_sleep: 30,
+    phase_max_minutes_deep_sleep: 60,
+    phase_max_minutes_rem: 120,
+    phase_max_minutes_hibernate: 240,
   },
 }
 
@@ -224,10 +232,48 @@ describe('SleepSettingsPage 睡眠节奏卡（阶段推进参数）', () => {
     await flushPromises()
 
     const labels = visibleLabels(wrapper)
-    // 空闲阈值的标签同样组合阶段名，切换后 addon 从无变分钟:
-    // 4 个空闲阈值 + 核心卡的"触发阈值"输入 = 5 个分钟后缀; 监控间隔带秒后缀
+    // 空闲阈值同样带分钟后缀；叠加恒显示的每阶段最长停留 4 项，见下方计数
     const addons = wrapper.findAll('.ant-input-number-group-addon').map((a: any) => a.text())
-    expect(addons.filter((t: string) => t === '分钟').length).toBe(5)
+    // 4 空闲阈值 + 触发阈值 + 每阶段最长停留 4 项（新增，模式无关恒显示）= 9
+    expect(addons.filter((t: string) => t === '分钟').length).toBe(9)
     expect(addons.filter((t: string) => t === '秒').length).toBe(1)
+  })
+})
+
+describe('SleepSettingsPage 阶段时长分工 + 冲突解包（2026-09-15 补齐 A）', () => {
+  it('节奏卡显示每阶段最长停留四项', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const labels = visibleLabels(wrapper)
+    for (const p of ['浅睡眠阶段 · 最长停留', '深睡眠阶段 · 最长停留', 'REM 阶段 · 最长停留', '休眠阶段 · 最长停留']) {
+      expect(labels, `${p} 应可见`).to.include(p)
+    }
+  })
+
+  it('保存 payload 携带 4 个 phase_max_minutes 字段（默认 30/60/120/240）', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    const saveBtn = wrapper.findAll('button').find((b) => b.text() === '保存')
+    expect(saveBtn, '应有保存按钮').toBeTruthy()
+    await saveBtn!.trigger('click')
+    await flushPromises()
+    expect(updateSleepSettings).toHaveBeenCalledTimes(1)
+    const payload = vi.mocked(updateSleepSettings).mock.calls[0][1] as Record<string, unknown>
+    expect(payload.phase_max_minutes_light_sleep).toBe(30)
+    expect(payload.phase_max_minutes_deep_sleep).toBe(60)
+    expect(payload.phase_max_minutes_rem).toBe(120)
+    expect(payload.phase_max_minutes_hibernate).toBe(240)
+  })
+
+  it('/conflicts 返回裸数组也能渲染冲突卡（此前 res?.data 恒空白）', async () => {
+    vi.mocked(getMergeConflicts).mockResolvedValue([
+      {
+        id: 'c1', agent_id: 'default', field: 'content', local_value: 'A', remote_value: 'B',
+        resolved: false, created_at: '2026-09-15T00:00:00',
+      },
+    ] as never)
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.findAll('.conflict-card').length).toBe(1)
   })
 })

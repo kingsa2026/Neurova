@@ -118,7 +118,11 @@ import {
 } from '@/pages/knowledge-graph/chartOptions'
 
 const { t } = useI18n()
-const { agentId, currentAgent } = useAgentPage()
+const { agentId, currentAgent } = useAgentPage({
+  onAgentChange: () => {
+    fetchGraph()
+  },
+})
 const appStore = useAppStore()
 
 const loading = ref(false)
