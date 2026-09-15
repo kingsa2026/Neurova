@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * AIGC 图片生成页（2026-09-14 R1 拆分；R2 对齐 PRINTFILM 工具表单面）。
+ * AIGC 图片生成页。
  *
  * 契约保持：风格模板内置常量 + 提示词注入（批次1）；参考图上传 →
  * ref_images（批次3）；model=auto 不透传（后端按 image_generation 能力路由）；
@@ -23,13 +23,13 @@ import AigcHistoryList from '@/components/aigc/AigcHistoryList.vue'
 const { t } = useI18n()
 const { imageModelOptions, providerOf } = useAigcModels()
 
-// 画幅 chips（PRINTFILM ratio 语义）→ 后端 width/height
+// 画幅 chips→ 后端 width/height
 const RATIO_SIZE: Record<string, [number, number]> = {
   '1:1': [1024, 1024],
   '16:9': [1280, 720],
   '9:16': [720, 1280],
 }
-// 相似度 chips（PRINTFILM i2i strength 低/中/高）
+// 相似度 chips
 const STRENGTH_VALUES: Record<string, number> = { low: 0.35, mid: 0.65, high: 0.9 }
 
 // 内置风格模板（非 Docker 模板接口，批次1 决策保持）

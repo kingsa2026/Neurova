@@ -553,7 +553,7 @@ class ApprovalManager:
         with self._lock:
             return self._requests.get(request_id)
 
-    # ── P0-5 命令规范化（Codex canonicalize_command_for_approval 对齐）──
+    # ── P0-5 命令规范化──
 
     # shell 包装识别：可执行名 ∈ 包装器集合 且 带执行标志（-c/-lc//c/-Command…）
     # → 整条命令视为"包装器执行内层命令"，规范化剥出内层。

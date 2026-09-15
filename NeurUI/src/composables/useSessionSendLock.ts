@@ -1,5 +1,5 @@
 /**
- * 跨标签单发送者锁（补课 A4，QP Web Locks 语义）。
+ * 跨标签单发送者锁。
  *
  * 同一 session 在多个浏览器标签打开时，Web Locks API（Navigator.locks，
  * Chrome/Edge/Safari 均已支持）保证同一时刻只有一个标签持有发送权；

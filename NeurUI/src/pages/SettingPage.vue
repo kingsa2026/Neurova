@@ -99,7 +99,7 @@
         </GlassCard>
       </a-tab-pane>
 
-      <!-- Model：LLM 429 重试/切换容错参数（ZCode 对齐 2026-09-11） -->
+      <!-- Model：LLM 429 重试/切换容错参数 -->
       <a-tab-pane key="model" :tab="t('settings.modelTab')">
         <GlassCard :title="t('settings.llmRetryTitle')">
           <p class="governance-hint">{{ t('settings.llmRetryHint') }}</p>
@@ -193,7 +193,7 @@
           </template>
         </GlassCard>
 
-        <!-- 技能召回与进化（OpenSpace 对比落地三开关，默认全开） -->
+        <!-- 技能召回与进化 -->
         <GlassCard :title="t('settings.skillRecallTitle')">
           <p class="governance-hint">{{ t('settings.skillRecallHint') }}</p>
           <a-form layout="vertical">
@@ -347,7 +347,7 @@ const savingToolOffload = ref(false)
 // F-12 同款守卫：未成功加载就保存会把前端默认值覆盖线上配置
 const toolOffloadLoaded = ref(false)
 
-/** LLM 429 重试/切换容错参数（ZCode 对齐 2026-09-11） */
+/** LLM 429 重试/切换容错参数 */
 const llmRetry = ref({ max_retries: 10, interval: 10, wait_cap: 120, max_switches: 5 })
 const savingLlmRetry = ref(false)
 const llmRetryLoaded = ref(false)

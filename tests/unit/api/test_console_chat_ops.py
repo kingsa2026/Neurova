@@ -1,4 +1,4 @@
-"""聊天页对齐 QwenPaw — 后端契约测试（红绿灯 TDD）
+"""
 
 锁定契约：
 1. SSE 流在 done 事件之前发一次 usage 事件：prompt_tokens/completion_tokens/
@@ -77,7 +77,7 @@ async def _call_and_drain(body) -> typing.Tuple[typing.Any, typing.List[dict]]:
 
 class TestSSEUsageEvent:
     def test_usage_event_emitted_before_done(self, monkeypatch):
-        """有真实入账时，done 之前应发 usage 事件（QwenPaw turn_usage 对齐）。"""
+        """有真实入账时，done 之前应发 usage 事件。"""
         from neurova.core import usage_accounting
 
         usage_accounting.reset_usage_accounting()

@@ -45,7 +45,7 @@ export interface ChatMessage {
   ttsUrls?: string[]
   /** 回放当前句块下标 */
   ttsIdx?: number
-  /** 钩子/检查点（ZCode checkpoint 对齐）：持久化在消息 metadata.checkpoint */
+  /** 钩子/检查点：持久化在消息 metadata.checkpoint */
   checkpoint?: boolean
   /**
    * 本轮产出物（2026-09-08 回答结尾产出物卡片）：SSE artifact 事件主通道 +
@@ -54,7 +54,7 @@ export interface ChatMessage {
    */
   artifacts?: import('@/utils/artifacts').MessageArtifact[]
   /**
-   * 429 限流重试/切换倒计时（ZCode 对齐 2026-09-11）：SSE retry 事件写入；
+ * 429 限流重试/切换倒计时：SSE retry 事件写入；
    * reset 时半截回复已清空。流式恢复（content/reasoning/done/error）即清除。
    */
   retryNotice?: {

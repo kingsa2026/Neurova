@@ -71,7 +71,7 @@
       :footer="current?.channelKey === 'negative-screen' ? null : undefined" @ok="saveConfig">
       <NegativeScreenSettings v-if="current?.channelKey === 'negative-screen'" />
       <a-form v-else layout="vertical">
-        <!-- 扫码授权（QwenPaw 两段式对齐）：飞书/钉钉/QQ/微信——扫码即取凭据回填表单 -->
+        <!-- 扫码授权：飞书/钉钉/QQ/微信——扫码即取凭据回填表单 -->
         <QrcodeAuthBlock
           v-if="currentQrcodeMeta"
           :key="'qr-' + current?.channelKey"
@@ -155,7 +155,7 @@ const channels = ref<AgentChannel[]>([])
 const commonFields = computed<FieldSchema[]>(() => buildCommonFields(t))
 const channelFieldsMap = computed<Record<string, FieldSchema[]>>(() => buildChannelFieldsMap(t))
 
-// 列表布局对齐 QwenPaw 频道页：已激活大卡面板 / 未激活紧凑小卡面板
+// 列表布局：已激活大卡面板 / 未激活紧凑小卡面板
 const enabledChannels = computed(() => channels.value.filter((c) => c.enabled))
 const disabledChannels = computed(() => channels.value.filter((c) => !c.enabled))
 function botPrefixOf(ch: AgentChannel): string {
@@ -182,7 +182,6 @@ function baseCatalog(): AgentChannel[] {
 // ─── NV 独有·负一屏推送卡（backendType='' → 不参与平台配置行匹配）───
 const NEG_SCREEN_CARD: ChannelCatalogItem = { name: t('settings.negativeScreen'), icon: '📲', type: 'builtin', enabled: false, color: '#e11d48', channelKey: 'negative-screen', backendType: '', connected: false }
 
-// ─── QwenPaw 对齐·通用扫码授权（飞书/钉钉/QQ/微信）────────────────────────
 const currentQrcodeMeta = computed(() =>
   current.value ? QRCODE_CHANNELS[current.value.channelKey] : undefined,
 )
@@ -323,7 +322,7 @@ onMounted(() => {
 .nr-ac-header h2 { margin: 0; font-size: 18px; color: var(--nr-text-primary); }
 .nr-ac-desc { margin: 4px 0 0; font-size: 12px; color: var(--nr-text-tertiary); }
 
-/* 双面板布局（对齐 QwenPaw 频道页 / 系统渠道页） */
+/* 双面板布局 */
 .nr-ac-panel {
   display: flex; flex-direction: column; gap: 16px; padding: 20px;
   border: 1px solid var(--nr-border-color, rgba(255, 255, 255, 0.08));

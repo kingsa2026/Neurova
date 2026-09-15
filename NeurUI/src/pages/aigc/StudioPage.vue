@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 创作专区 · 项目列表（R4，对标 huobao 项目管理）。
+ * 创作专区 · 项目列表。
  * 卡片：封面/标题/题材/风格/画幅/集数进度/更新时间；新建向导弹窗；删除确认。
  */
 import { onMounted, ref } from 'vue'

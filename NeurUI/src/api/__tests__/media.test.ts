@@ -1,7 +1,7 @@
 /**
  * F-1 契约对齐测试：media.ts 的调用路径与载荷必须命中后端 media.py 真实路由。
  *
- * 台账 docs/资源型修复登记台账_2026-09-11.md F-1（系统性契约错位）：
+ * 台账 F-1（系统性契约错位）：
  * - listMedia → GET /media/list（offset/limit 参数；响应 data.media/total/offset/limit）；
  * - getMediaInfo → GET /media/{id}/metadata（原 /{id}/info 404）；
  * - downloadMedia → GET /media/download/{id}（原 /{id}/download 404）；

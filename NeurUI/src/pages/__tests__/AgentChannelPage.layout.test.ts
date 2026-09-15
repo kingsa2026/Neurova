@@ -4,7 +4,7 @@ import { createI18n } from 'vue-i18n'
 import { createPinia, setActivePinia } from 'pinia'
 
 /**
- * Agent 渠道页·双面板布局（对齐 QwenPaw 频道页 / 系统渠道页，2026-09-13）。
+ * Agent 渠道页·双面板布局。
  * 钉：已激活进大卡面板、未激活进紧凑小卡面板、负一屏出现在未激活面板。
  */
 

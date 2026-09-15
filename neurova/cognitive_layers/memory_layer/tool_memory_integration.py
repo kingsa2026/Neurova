@@ -77,13 +77,13 @@ class ToolMemoryIntegration:
         self.muscle_memory_threshold: float = muscle_memory_threshold
         # tool_weights 最后赋值（property setter 会把上面参数同步进权重对象）
         self.tool_weights = tool_weights
-        # 维护触发（docs/tool-memory-muscle-analysis.md P-A/P-F）：遗忘与生命周期
+        # 维护触发：遗忘与生命周期
         # 清理原为无调用方的死代码，借 record_tool_usage 计数周期性触发
         self.maintenance_interval: int = 50
         self._ops_since_maintenance: int = 0
         logger.info("ToolMemoryIntegration initialized")
 
-    # ── RSI 活表参数：A/B 融合收尾（docs/Neurova_OpenClaw工具技能专项对比 §7）──
+    # ── RSI 活表参数：A/B 融合收尾──
     # RSI apply_optimization 以 setattr(tool_memory_system, name, value) 应用参数，
     # property setter 保持该语义不变，同时把值推进 AdaptiveToolWeights.configure。
 
@@ -328,7 +328,7 @@ class ToolMemoryIntegration:
                         "dynamic_threshold": dynamic_threshold,
                     }
 
-                    # Bug 13 修正（docs/tool-memory-muscle-analysis.md P-C）：命中
+                    # Bug 13 修正：命中
                     # 肌肉记忆本身不是一次工具执行，原实现记 success=True 会系统性
                     # 推高条目成功率（回声室）。改为只记 hit 到使用历史（供 RSI 的
                     # muscle_memory_hits 统计），成功/失败由真实执行结果另行记录

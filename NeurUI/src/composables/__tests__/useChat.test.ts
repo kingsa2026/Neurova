@@ -220,7 +220,7 @@ describe('useChat', () => {
     // 前端 UUID, 但这个 UUID 后端不知道, 存到 store 后用户点击它 GET /history
     // → 404 → toast "加载历史对话失败" (chat.loadHistoryFailed raw key bug).
     // 新契约: 后端不返回 session_id 时返回 null + 弹 toast, 不创建幽灵 session.
-    // 详见 docs/bugfix-delete-session-userid-mismatch.md "幽灵 session 自愈".
+    // "幽灵 session 自愈".
     it('returns null and does NOT create ghost session when backend omits session_id (no UUID fallback)', async () => {
       // 后端返回 200 但 data 里没有 session_id (异常响应, 例如旧版本后端)
       vi.mocked(api.post).mockResolvedValueOnce({ data: {} } as any)
@@ -458,7 +458,7 @@ describe('useChat', () => {
     // 旧契约: catch 块仅 console.error + return { ok: false }, 幽灵 session
     // 永远留在 sidebar, 用户每次点击都触发 toast.
     // 新契约: 404 时自动从 store 移除该 session, 自愈清理, 避免反复 toast.
-    // 详见 docs/bugfix-delete-session-userid-mismatch.md "幽灵 session 自愈".
+    // "幽灵 session 自愈".
     it('auto-removes ghost session from store on 404 (self-healing)', async () => {
       // 模拟 axios 404 错误: error.response.status === 404
       const err: any = new Error('Request failed with status code 404')
@@ -603,7 +603,7 @@ describe('useChat', () => {
   //     * 副作用调用 (无): 无
   //     * 用户主动调用 (ChatPage.deleteSession wrapper): 调 notifyDeleteFailure
   //   - 替换原 `return false` 浅返回模式 — 接口不再吞错, 调用方决策空间完整.
-  //   - 详见 docs/bugfix-delete-session-userid-mismatch.md "前端错误反馈策略深化" 小节.
+  // - "前端错误反馈策略深化" 小节.
 
   describe('deleteSession', () => {
     it('deletes on backend, removes from store, returns { ok: true }', async () => {

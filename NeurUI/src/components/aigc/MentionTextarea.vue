@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * MentionTextarea（R5，功能对标 huobao MentionTextarea）：
+ * MentionTextarea：
  * 提示词编辑器输入 @ 弹出资产候选（角色/道具），选中插入 @名称 并回报映射，
  * 后端 generate_shot_images 依据映射注入参考图（一致性）。
  */

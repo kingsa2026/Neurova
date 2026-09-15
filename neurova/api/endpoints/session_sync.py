@@ -171,7 +171,7 @@ async def websocket_sync(
         metadata={"connection_id": ws_conn.connection_id},
     )
 
-    # 纪元探测帧（OpenOcta 启发 P0-1）：告知客户端当前发号器位置，必须
+    # 纪元探测帧：告知客户端当前发号器位置，必须
     # 先于历史重放发送。客户端游标 >= next_seq 说明服务端已重启（seq 归
     # 零，历史为空或属新纪元），先重置游标再收重放帧，避免重放被当作旧
     # 帧误吞；游标落后则保留（重放中的旧帧由客户端去重跳过）。

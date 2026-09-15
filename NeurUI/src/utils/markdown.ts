@@ -113,7 +113,7 @@ function createRenderer(copyLabel: string, previewLabel = '◫') {
 /**
  * 将 Markdown 文本渲染为安全的 HTML 字符串 (已过 DOMPurify 清洗)。
  *
- * 数学公式（KaTeX，QwenPaw 对齐）：
+ * 数学公式：
  *   1. 渲染前提取 $$...$$ / $...$ / \(..\) / \[..\] 为占位符（跳过代码段），
  *      避免 marked 把数学语法当普通文本破坏；
  *   2. marked + DOMPurify 正常渲染（占位符是纯文本，原样通过白名单）；
@@ -181,7 +181,7 @@ export function renderMarkdown(text: string, copyLabel = '⧉'): string {
 }
 
 // ---------------------------------------------------------------------------
-// KaTeX 数学公式（QwenPaw KaTeX 对齐）
+// KaTeX 数学公式
 // ---------------------------------------------------------------------------
 
 interface MathExtractResult {

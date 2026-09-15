@@ -220,8 +220,7 @@ export function pluginSchemaToFields(
 
 // ---------------------------------------------------------------------------
 // 扫码授权渠道元数据（对齐后端 neurova/channels/qrcode_auth.QRCODE_AUTH_HANDLERS）
-// 参数键按 NV 适配器实际消费集裁剪——不摆 QwenPaw 有而 NV 后端不吃的字段。
-// wecom 暂不接线：QwenPaw wecom=智能机器人(bot_id/secret+ws)，NV wecom=企业应用
+// wecom 暂不接线：NV wecom=企业应用
 // (corpid/agentid)，不同协议（假映射=表面抹除），登记为协议移植后续项。
 // ---------------------------------------------------------------------------
 

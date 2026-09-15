@@ -6,7 +6,7 @@ import { useSessionOps } from '@/composables/useSessionOps'
 import { useSubAgentWindows } from '@/composables/useSubAgentWindows'
 
 /**
- * 斜杠命令面板（QwenPaw slash commands 对齐，2026-09-08 ChatPage 拆分产物）。
+ * 斜杠命令面板。
  *
  * 输入框以 "/" 开头时弹出本地命令面板，Enter 执行 / Tab 补全 / ↑↓ 导航。
  * 纯前端交互：命令落地为既有函数（新会话/清屏/存档），不发后端。
@@ -132,7 +132,7 @@ export function setupSlashCommands(
       },
     },
     {
-      // /compact 手动压缩上下文（zcode 对齐）：不走前端本地处理，
+      // /compact 手动压缩上下文：不走前端本地处理，
       // 经 sendMessage 原链路发往后端命令分发（报告为该轮回复）
       name: '/compact',
       descKey: 'chat.slashCompact',

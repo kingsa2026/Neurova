@@ -223,7 +223,7 @@ export function createComputerPanel(maxActions = 50): ComputerPanelApi {
       scheduleMarkerClear()
     }
     state.busy = false
-    // 自动分屏：Agent 操作电脑时自动展开（ZCode 式跟随）。
+    // 自动分屏：Agent 操作电脑时自动展开。
     // 2026-09-08 dock 收编：开屏统一走 rightDock（computer tab），state.open
     // 保留为兼容位（组件挂载已迁入 dock，不再由它驱动 v-if）。
     state.open = true

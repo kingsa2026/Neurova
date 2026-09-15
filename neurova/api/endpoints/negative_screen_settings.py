@@ -42,9 +42,9 @@ class NegativeScreenConfigResponse(BaseModel):
     enabled: bool = False
     push_url: str = ""
     masked_auth_code: Optional[str] = None
-    # Yuxi 对比 P2 #15：表单契约单源（form_options 反射生成；加性字段，
-    # 存量前端不消费不受影响）。secret=true 的键前端只写不读。
-    # 注：字段名用 form_schema——"schema" 遮蔽 pydantic BaseModel.schema()。
+# 表单契约单源（form_options 反射生成；加性字段，
+# 存量前端不消费不受影响）。secret=true 的键前端只写不读。
+# 注：字段名用 form_schema——"schema" 遮蔽 pydantic BaseModel.schema()
     form_schema: List[Dict[str, Any]] = Field(default_factory=list)
 
 

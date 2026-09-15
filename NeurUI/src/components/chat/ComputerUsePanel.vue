@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 电脑操作分屏面板（ZCode 式跟随视图）
+ * 电脑操作分屏面板
  *
  * Agent 调用 computer_* 与 browser_* 工具时由聊天页自动展开：
  * 上半部分实时显示操作截图（WS computer_action 事件推送），

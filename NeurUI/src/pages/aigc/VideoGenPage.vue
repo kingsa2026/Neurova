@@ -42,7 +42,7 @@ watch(model, async (m) => {
 const resolution = ref('1080p')
 const refImages = ref<string[]>([])
 const withAudio = ref<boolean | null>(null)
-// R2 两段式（PRINTFILM t2v 语义）：先出静帧，静帧作首帧再生成视频
+// R2 两段式：先出静帧，静帧作首帧再生成视频
 const staticFirst = ref(true)
 const generating = ref(false)
 const status = ref<{ status: string; progress: number; url?: string } | null>(null)
@@ -77,7 +77,7 @@ async function generate() {
       resolution: resolution.value,
     }
     const refs = [...refImages.value]
-    // R2 两段式（PRINTFILM t2v：先静帧后视频）：无参考图时先生成一张静帧，
+    // R2 两段式：无参考图时先生成一张静帧，
     // 以服务端本地产物路径作首帧 → i2v（protocols 本地路径转 data URL 已实测）
     if (staticFirst.value && !refs.length) {
       status.value = { status: 'static-frame', progress: 5 }

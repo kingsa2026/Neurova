@@ -1,5 +1,5 @@
 /**
- * 输入历史回溯（补课 C：对齐 QP useMessageHistoryNavigation 的轻量版）。
+ * 输入历史回溯。
  *
  * 语义：
  * - record(text)：发送时记录（去重连续重复，上限 100 条）

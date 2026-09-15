@@ -1,9 +1,9 @@
 /**
- * 消息队列 Pinia store（补课 P3-b：QP messageQueueStore 的 NV 轻量版）。
+ * 消息队列 Pinia store。
  *
  * 流式回复进行中用户再次发送 → 入队而非丢弃；当前轮 done 后自动出队续发。
  * 状态机：pending → sending → sent | failed；失败可 retry（回 pending）。
- * 仅承载文本轮（附件轮即时上传，不排队——QP 同款取舍的简化）。
+ * 仅承载文本轮。
  */
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
@@ -99,7 +99,7 @@ export const useMessageQueueStore = defineStore('messageQueue', () => {
     return true
   }
 
-  /** 重排 pending 项（补课 A3：QP reorder 语义；非 pending 位置不动）。 */
+  /** 重排 pending 项。 */
   function reorder(orderedIds: string[]): void {
     const byId = new Map(items.value.map((i) => [i.id, i]))
     const pendingOrdered = orderedIds

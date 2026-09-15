@@ -53,7 +53,7 @@ class TTSConfig(BaseModel):
     tokenizer_path: Optional[str] = None
     auto_download: bool = True
     fallback_enabled: bool = True
-    # P1-12 有序 fallback 表（OpenClaw autoSelectOrder 启发）：显式指定
+    # P1-12 有序 fallback 表：显式指定
     # 引擎优先级顺序；None=用默认 FALLBACK_CHAIN。非法引擎名被过滤，
     # 全非法回退默认链。默认行为与历史完全一致。
     fallback_chain: Optional[List[str]] = None

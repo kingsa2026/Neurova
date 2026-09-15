@@ -82,7 +82,7 @@ export function appendToolStep(steps: ChatStep[], name: string, args: string, ta
 }
 
 /**
- * 追加任务计划段（P1-7 update_plan → plan_update 事件，Codex update_plan 对齐）。
+ * 追加任务计划段。
  * 计划是一次性快照（非流式段）：整体封口落位，不参与流式扫光；正文 =
  * 状态标记（○ 待办 / ◐ 进行中 / ● 完成）+ 步骤文本，note 为模型解释（首行）。
  */

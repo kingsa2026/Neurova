@@ -118,7 +118,7 @@ class TestMcpServers:
 
     def test_add_server(self, tmp_path):
         mgr = make_manager(tmp_path)
-        # 严格 schema（ZCode 模式）要求 stdio 配置提供 command
+        # 严格 schema要求 stdio 配置提供 command
         assert (
             mgr.add_mcp_server({"id": "git", "name": "Git", "command": "uvx", "args": ["mcp-server-git"], "enabled": True})
             is True

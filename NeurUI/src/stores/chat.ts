@@ -34,8 +34,8 @@ export const useChatStore = defineStore('chat', () => {
   const inputText = ref<string>('')
   const searchQuery = ref<string>('')
 
-  // ── Token 用量（QwenPaw turnUsageStore 对齐）──
-  // per-session 累计（内存态，会话切换不丢；刷新即清 — 与 QwenPaw 一致）。
+  // ── Token 用量──
+  // per-session 累计。
   // 结构：{ [sessionId]: { prompt, completion, total } }
   const sessionTokenUsage = ref<Record<string, { prompt: number; completion: number; total: number }>>({})
   /** 最近一轮的真实 usage（SSE usage 事件，消息级展示用）。 */
@@ -44,7 +44,7 @@ export const useChatStore = defineStore('chat', () => {
   // ── 页面级临时态（2026-09-08 composer 拆分：SSE 编排层写入、composer 读）──
   /** 实时记忆检索进度（SSE memory_progress；回复开始即清空，不落消息历史） */
   const retrievalStatus = ref('')
-  /** 实时事件丢失计数（WS seq gap 检测，OpenOcta P0-1；仅提示不可恢复） */
+  /** 实时事件丢失计数 */
   const eventsLostBanner = ref<number | null>(null)
 
   // ---------------------------------------------------------------------------

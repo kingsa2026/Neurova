@@ -45,7 +45,7 @@ export function deleteConsoleSession(sessionId: string) {
   return api.delete<ApiResponse<null>>(`${BASE}/chat/sessions/${sessionId}`)
 }
 
-/** 按拖拽顺序持久化会话排序（QwenPaw /chats/groups/order 对齐）。 */
+/** 按拖拽顺序持久化会话排序。 */
 export function reorderConsoleSessions(agentId: string, orderedIds: string[]) {
   return api.post<ApiResponse<{ agent_id: string; ordered_ids: string[] }>>(
     `${BASE}/chat/sessions/reorder`,
