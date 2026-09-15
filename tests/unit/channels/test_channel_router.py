@@ -2,7 +2,7 @@
 """ChannelRouter 契约测试——渠道入站消息统一路由到 agent 并回发。
 
 补齐"下消息通路"缺失的环：此前 ChannelManager 无任何常驻处理器把入站消息交给
-agent.chat()，飞书/钉钉/微信等消息进得来却无人接、无回复（对齐 QwenPaw 统一
+agent.chat()，飞书/钉钉/微信等消息进得来却无人接
 process 注入 + resolve_session_id 模型）。
 """
 from __future__ import annotations
@@ -267,12 +267,22 @@ async def test_dispatch_forwards_reply_kwargs(manager):
 
 @pytest.mark.asyncio
 async def test_session_owned_by_agent_owner_via_request_context(manager):
-    """阶段4.1：agent.chat 期间请求上下文 user = agent.owner_user_id（会话归管理员）。"""
+    """阶段4.1：agent.chat 期间请求上下文 user = agent 属主（会话归管理员）。
+
+    Wave H-W0 修正：属主在 agent.config.owner_user_id（真实 Agent 形状）——
+    原测试把 owner 挂在实例属性上，恰好镜像了 channel_router 的读错对象 bug
+    （getattr(agent,"owner_user_id") 恒 None），生产链其实从未生效。
+    """
+    from types import SimpleNamespace
+
     from neurova.core.identity_context import get_request_user_id
     seen = {}
 
     class OwnerAgent(FakeAgent):
-        owner_user_id = "admin-77"
+        def __init__(self):
+            super().__init__()
+            self.config = SimpleNamespace(owner_user_id="admin-77")
+
         async def chat(self, user_input, session_id=None, metadata=None, **kw):
             seen["req_user"] = get_request_user_id()
             return {"text": "ok"}

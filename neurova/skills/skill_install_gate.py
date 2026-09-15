@@ -181,14 +181,14 @@ def scan_skill_for_install(skill_id: str, skill_path: str) -> Dict[str, Any]:
 def evaluate_submission_gate(
     fields: Dict[str, Any], local_trust_state: Optional[str]
 ) -> Dict[str, Any]:
-    """市场提交证据门（P2-1，OpenSpace upload_trust 同语义的本地化）。
+    """市场提交证据门。
 
     三道确定性检查（全部 fail-closed，扫描器故障=拒绝）：
     1. 文本注入扫描（scan_text_for_injection，critical 拦截）；
     2. 密钥脱敏检查（进化护栏同一模式集，含疑似密钥即拒）；
     3. 本地同源技能信任门：manifest 里有同名技能且仍 provisional
        （进化产物未经独立任务验证）→ 拒上架；trusted 放行；本地无
-       条目（纯市场申请，无信任账本可查）放行——与 OpenSpace 对
+ 条目（纯市场申请
        unknown 一律拒有差异：Neurova 提交只含元数据不含产物本体，
        产物在安装通道另过扫描门。
 

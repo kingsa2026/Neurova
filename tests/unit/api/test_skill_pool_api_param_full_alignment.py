@@ -71,97 +71,107 @@ def test_delete_private_skill_param_is_agent_id():
     )
 
 
-# ─── 行为契约: 接受 agent_id kwarg ───
+# ─── 行为契约: 接受 agent_id kwarg（Wave F 演化：内存 dict 已废除，
+# 以"迷你 manifest"服务替身保住 s6 原意——agent_id 参数被接受且
+# create→list 链路在 agent 视图内闭环）───
 
 
-def test_create_private_skill_accepts_agent_id_kwarg():
-    """s6.4 行为契约: create_private_skill 接受 agent_id 关键字参数"""
+class _MiniService:
+    """dict 版 SkillService 替身（按 agent 分目录的 manifest 语义）。"""
+
+    _stores = {}
+
+    def __init__(self, agent_id, **kwargs):
+        self.agent_id = agent_id
+        self._skills = _MiniService._stores.setdefault(agent_id, {})
+
+    def register_auto_skill(self, skill_id, name, description="", version="1.0.0", config=None, manifest_source="auto"):
+        if skill_id in self._skills:
+            return False
+        self._skills[skill_id] = {
+            "name": name, "description": description, "version": version,
+            "enabled": True, "path": "", "usage": {},
+            "manifest": {"source": manifest_source, "config": dict(config or {})},
+        }
+        return True
+
+    def get_skill_info(self, skill_id):
+        return self._skills.get(skill_id)
+
+    def update_auto_skill(self, skill_id, version=None, config=None, name=None, description=None):
+        entry = self._skills.get(skill_id)
+        if entry is None:
+            return False
+        if name is not None:
+            entry["name"] = name
+        if description is not None:
+            entry["description"] = description
+        if config is not None:
+            entry["manifest"]["config"] = dict(config)
+        return True
+
+    def uninstall_skill(self, skill_id):
+        if self._skills.pop(skill_id, None) is None:
+            return {"success": False, "error": "not found"}
+        return {"success": True}
+
+    def iter_skills(self):
+        return list(self._skills.items())
+
+
+@pytest.fixture
+def mini(tmp_path, monkeypatch):
+    _MiniService._stores = {}
+    monkeypatch.setattr("neurova.skills.skill_service.SkillService", _MiniService)
+    return _MiniService
+
+
+def _create(name, desc, agent_id):
     from neurova.api.endpoints import skill_pool_api as mod
     from neurova.api.endpoints.skill_pool_api import SkillCreate
 
-    mod._private_skills.clear()
-    body = SkillCreate(name="test_skill", description="测试", category="general")
-    try:
-        result = asyncio.run(mod.create_private_skill(body, agent_id="alice"))
-        assert result.owner_id == "alice", (
-            f"create_private_skill(agent_id='alice') 应设置 owner_id='alice', "
-            f"实际: {result.owner_id}"
-        )
-    except TypeError as e:
-        pytest.fail(f"create_private_skill 不接受 agent_id kwarg: {e}")
-    finally:
-        mod._private_skills.clear()
+    return asyncio.run(mod.create_private_skill(SkillCreate(name=name, description=desc), agent_id=agent_id))
 
 
-def test_update_private_skill_accepts_agent_id_kwarg():
-    """s6.5 行为契约: update_private_skill 接受 agent_id 关键字参数"""
+def test_create_private_skill_accepts_agent_id_kwarg(mini):
+    """s6.4 演化: create_private_skill 接受 agent_id kwarg 且落对应视图。"""
+    info = _create("test_skill", "测试", "alice")
+    assert info.owner_id == "alice"
+    assert "alice" in mini._stores and mini._stores["alice"], "技能应落 alice 视图"
+
+
+def test_update_private_skill_accepts_agent_id_kwarg(mini):
+    """s6.5 演化: update 接受 agent_id 且改动落回同一视图。"""
     from neurova.api.endpoints import skill_pool_api as mod
-    from neurova.api.endpoints.skill_pool_api import SkillCreate, SkillUpdate
+    from neurova.api.endpoints.skill_pool_api import SkillUpdate
 
-    mod._private_skills.clear()
-    # 先用 agent_id 创建 (s6.4 通过后才能这样创建)
-    body_create = SkillCreate(name="old_name", description="旧", category="general")
-    created = asyncio.run(mod.create_private_skill(body_create, agent_id="alice"))
-    sid = created.skill_id
-
-    try:
-        body_update = SkillUpdate(name="new_name")
-        result = asyncio.run(mod.update_private_skill(sid, body_update, agent_id="alice"))
-        assert result.name == "new_name", f"更新后 name 应为 new_name, 实际: {result.name}"
-    except TypeError as e:
-        pytest.fail(f"update_private_skill 不接受 agent_id kwarg: {e}")
-    finally:
-        mod._private_skills.clear()
-
-
-def test_delete_private_skill_accepts_agent_id_kwarg():
-    """s6.6 行为契约: delete_private_skill 接受 agent_id 关键字参数"""
-    from neurova.api.endpoints import skill_pool_api as mod
-    from neurova.api.endpoints.skill_pool_api import SkillCreate
-
-    mod._private_skills.clear()
-    body = SkillCreate(name="to_delete", description="待删", category="general")
-    created = asyncio.run(mod.create_private_skill(body, agent_id="alice"))
-    sid = created.skill_id
-
-    try:
-        result = asyncio.run(mod.delete_private_skill(sid, agent_id="alice"))
-        assert result["code"] == 0, f"删除应返回 code=0, 实际: {result}"
-        assert sid not in mod._private_skills, "删除后 _private_skills 不应再含该 sid"
-    except TypeError as e:
-        pytest.fail(f"delete_private_skill 不接受 agent_id kwarg: {e}")
-    finally:
-        mod._private_skills.clear()
-
-
-# ─── 语义一致性: create→list 链路 ───
-
-
-def test_create_then_list_roundtrip_uses_agent_id():
-    """s6.7 集成契约: create_private_skill(agent_id=X) → list_private_skills(agent_id=X) 能查到
-
-    这是 WARTN 2 的核心修复动机: 原参数不一致导致 create→list 链路断裂.
-    """
-    from neurova.api.endpoints import skill_pool_api as mod
-    from neurova.api.endpoints.skill_pool_api import SkillCreate
-
-    mod._private_skills.clear()
-
-    # 用 agent_id 创建
-    body = SkillCreate(name="roundtrip_skill", description="链路测试", category="general")
-    asyncio.run(mod.create_private_skill(body, agent_id="bob"))
-
-    # 用 agent_id 查询 (s2 修复: 聚合 _private_skills + SkillService)
-    # 为隔离测试, mock SkillService 返回空列表
-    mock_service = MagicMock()
-    mock_service.list_skills.return_value = []
-    with patch("neurova.skills.skill_service.SkillService", return_value=mock_service):
-        result = asyncio.run(mod.list_private_skills(agent_id="bob"))
-
-    names = {r.name for r in result}
-    assert "roundtrip_skill" in names, (
-        f"create(agent_id=bob) 后 list(agent_id=bob) 应查到 roundtrip_skill, "
-        f"实际 names={names} (参数名不一致会导致 list 用默认 default 过滤掉 bob 的技能)"
+    created = _create("old_name", "旧", "alice")
+    result = asyncio.run(
+        mod.update_private_skill(created.skill_id, SkillUpdate(name="new_name"), agent_id="alice")
     )
+    assert result.name == "new_name"
 
-    mod._private_skills.clear()
+
+def test_delete_private_skill_accepts_agent_id_kwarg(mini):
+    """s6.6 演化: delete 接受 agent_id 并从视图移除。"""
+    from neurova.api.endpoints import skill_pool_api as mod
+
+    created = _create("to_delete", "待删", "alice")
+    result = asyncio.run(mod.delete_private_skill(created.skill_id, agent_id="alice"))
+    assert result["code"] == 0
+    assert created.skill_id not in mini._stores["alice"]
+
+
+def test_create_then_list_roundtrip_uses_agent_id(mini):
+    """s6.7 演化: create(agent_id=bob) → list(agent_id=bob) 查到；
+    其他 agent 视图查不到（目录级隔离，参数名不一致即链路断）。"""
+    from neurova.api.endpoints import skill_pool_api as mod
+
+    _create("roundtrip_skill", "链路测试", "bob")
+
+    names = {r.name for r in asyncio.run(mod.list_private_skills(agent_id="bob"))}
+    assert "roundtrip_skill" in names, (
+        f"create/list 同 agent_id 链路必须闭环, 实际 names={names}"
+    )
+    other = {r.name for r in asyncio.run(mod.list_private_skills(agent_id="someone_else"))}
+    assert "roundtrip_skill" not in other, "视图不得串"

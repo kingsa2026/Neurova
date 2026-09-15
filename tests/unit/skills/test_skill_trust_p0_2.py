@@ -1,4 +1,4 @@
-"""P0-2 信任生命周期两态（provisional↔trusted，OpenSpace store.py:1310-1354 同语义）
+"""P0-2 信任生命周期两态
 
 契约：
 - 进化产物出生 provisional（register_auto_skill）；导入/安装/用户技能默认 trusted
@@ -92,7 +92,7 @@ def test_auto_skill_born_provisional(svc):
 
 
 def test_imported_skill_defaults_trusted(svc):
-    """存量/导入技能无 trust 记录 → 视为 trusted（OpenSpace DDL 默认语义）"""
+    """存量/导入技能无 trust 记录 → 视为 trusted"""
     service, manifest = svc
     src = manifest.parent.parent / "imp1"
     src.mkdir(parents=True, exist_ok=True)

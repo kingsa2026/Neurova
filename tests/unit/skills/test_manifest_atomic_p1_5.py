@@ -1,4 +1,4 @@
-"""P1-5 改进应用/回滚的写盘原子化（OpenSpace commit/rollback 最小移植）
+"""P1-5 改进应用/回滚的写盘原子化
 
 两条根因：
 1. _save_manifest 直接 open(w) 截断——写一半崩溃 = manifest 清零

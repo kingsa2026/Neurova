@@ -1,6 +1,5 @@
 """Web 工具描述中的"轻→重工具阶梯"提示词回归测试
 
-阶梯源自 use-tinyfish 的工具选择原则（search → fetch → agent → browser，
 永远用能回答问题的最轻工具），吸收进 builtin_tools 的工具描述后，
 防止后续改动把升级提示误删。
 """

@@ -11,7 +11,6 @@
 
 2.0 契约来源：
 - tests/test_experience_knowledge_base.py
-- docs/dev_progress/module_designs/experience_knowledge_base.md
 
 构造契约：
     ekb = ExperienceKnowledgeBase(db_path="/path/to/experience.db")

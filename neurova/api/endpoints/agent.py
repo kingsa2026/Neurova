@@ -31,6 +31,8 @@ from fastapi import Query, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user
+# Wave H-W0 属主治理：访问/管理判定单源（与 chat 执行门同源，见 agent_access）
+from neurova.api.agent_access import can_access_agent, resolve_agent_owner
 
 logger = get_logger(__name__)
 
@@ -164,6 +166,8 @@ class AgentInfo(BaseModel):
     last_active: Optional[str] = None
     memory_enabled: bool = False
     tools_count: int = 0
+    # Wave H-W0：属主回传（前端属主徽标/编辑权限判定数据源）
+    owner_user_id: Optional[str] = None
     # 回显 config（TTS 等）：编辑表单重开后从响应恢复已保存参数
     config: Dict[str, Any] = Field(default_factory=dict)
 
@@ -268,6 +272,7 @@ def agent_to_info(agent) -> Dict[str, Any]:
         "status": "running",
         "memory_enabled": enable_memory,
         "tools_count": 0,
+        "owner_user_id": getattr(getattr(agent, "config", None), "owner_user_id", None),
     }
 
     # 获取模型和提供商信息
@@ -303,16 +308,24 @@ def get_agent_from_state(agent_id: str = "default"):
 
 
 @router.get("", response_model=List[AgentInfo])
-async def list_agents(request: Request):
-    """列出所有 Agent"""
+async def list_agents(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """列出 Agent（Wave H-W0 属主过滤：admin 全量；非 admin 仅 owner==self；
+    无主仅 admin——与 chat 执行门同源，显示对齐执行）。"""
     _get_request_id(request)
     state = _get_app_state()
+    uid = str(current_user.get("user_id") or "")
+    role = str(current_user.get("role") or "user")
 
     agents = []
     if state:
         agent_dict = state.get("agents", {})
         for agent_id, agent in agent_dict.items():
             info = agent_to_info(agent)
+            if not can_access_agent(uid, role, info.get("owner_user_id")):
+                continue
             agents.append(AgentInfo(**info))
 
     # 从 AgentConfigManager 加载持久化配置（data/agents/agents.json）
@@ -320,6 +333,9 @@ async def list_agents(request: Request):
         config_manager = get_agent_config_manager()
         for agent_cfg in config_manager.list_agents():
             agent_id = agent_cfg.get("id") or agent_cfg.get("agent_id", "unknown")
+            owner = agent_cfg.get("owner_user_id")
+            if not can_access_agent(uid, role, owner):
+                continue
             if not any(a.agent_id == agent_id for a in agents):
                 agents.append(
                     AgentInfo(
@@ -329,6 +345,7 @@ async def list_agents(request: Request):
                         model=agent_cfg.get("model", ""),
                         provider=agent_cfg.get("provider", ""),
                         status="config_only",
+                        owner_user_id=str(owner) if owner else None,
                     )
                 )
     except Exception as e:
@@ -338,9 +355,15 @@ async def list_agents(request: Request):
 
 
 @router.get("/{agent_id}", response_model=AgentInfo)
-async def get_agent(request: Request, agent_id: str = FastAPIPath(...)):
-    """获取 Agent 详情"""
+async def get_agent(
+    request: Request,
+    agent_id: str = FastAPIPath(...),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """获取 Agent 详情（非可见集按 404 处理——deny 与不存在同构，防枚举）"""
     _get_request_id(request)
+    uid = str(current_user.get("user_id") or "")
+    role = str(current_user.get("role") or "user")
 
     agent = get_agent_from_state(agent_id)
     if not agent:
@@ -348,6 +371,9 @@ async def get_agent(request: Request, agent_id: str = FastAPIPath(...)):
         try:
             cfg = get_agent_config_manager().get_agent(agent_id)
             if cfg:
+                owner = resolve_agent_owner(agent_id, registered_cfg=cfg)
+                if not can_access_agent(uid, role, owner):
+                    raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
                 return AgentInfo(
                     agent_id=agent_id,
                     name=cfg.get("name", "Unknown"),
@@ -355,12 +381,18 @@ async def get_agent(request: Request, agent_id: str = FastAPIPath(...)):
                     model=cfg.get("model", ""),
                     provider=cfg.get("provider", ""),
                     status="config_only",
+                    owner_user_id=owner,
                 )
+        except HTTPException:
+            raise
         except Exception as e:
             logger.warning("AgentConfigManager.get_agent 失败: %s", e)
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
     info = agent_to_info(agent)
+    if not can_access_agent(uid, role, info.get("owner_user_id")):
+        # deny≡404（防枚举）
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
     return AgentInfo(**info)
 
 
@@ -428,6 +460,8 @@ async def create_agent(
                 name=body.name,
                 description=body.description or "",
                 config={"model": body.model or "", "provider": body.provider or ""},
+                # Wave H-W0：中枢登记面带 owner（未启动实例的属主可见性依据）
+                owner_user_id=str(current_user.get("user_id") or "") or None,
             )
         except Exception as e:
             logger.error("AgentConfigManager.create_agent 失败: %s", e, exc_info=True)
@@ -453,6 +487,14 @@ async def update_agent(
     agent = get_agent_from_state(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    # Wave H-W0 写口属主校验（admin 或 owner；无主仅 admin）——拒绝须在
+    # 一切副作用之前
+    owner = resolve_agent_owner(agent_id, state_agent=agent)
+    if not can_access_agent(
+        str(current_user.get("user_id") or ""), str(current_user.get("role") or "user"), owner
+    ):
+        raise HTTPException(status_code=403, detail="无权修改他人 Agent")
 
     # 更新 Agent 属性
     if body.name is not None and hasattr(agent, "config") and hasattr(agent.config, "name"):
@@ -544,6 +586,13 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...), curre
     agents = state.get("agents", {})
     if agent_id not in agents:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+
+    # Wave H-W0 写口属主校验：拒绝路径必须先于 shutdown/文件清理等一切副作用
+    _owner = resolve_agent_owner(agent_id, state_agent=agents[agent_id])
+    if not can_access_agent(
+        str(current_user.get("user_id") or ""), str(current_user.get("role") or "user"), _owner
+    ):
+        raise HTTPException(status_code=403, detail="无权删除他人 Agent")
 
     # 禁止删除系统默认 Agent（保护其工作目录与记忆数据）
     if agent_id == "default":

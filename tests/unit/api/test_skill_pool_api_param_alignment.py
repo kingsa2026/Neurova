@@ -59,42 +59,35 @@ def test_list_private_skills_uses_agent_id_for_skill_service():
 
 
 def test_list_private_skills_uses_agent_id_for_owner_filter():
-    """s4.4 行为契约: _private_skills 按 owner_id == agent_id 过滤"""
+    """s4.4 契约演化 (Wave F): owner 隔离=目录级（agent_id 决定打开哪份
+    manifest），不再是对已废除内存 dict 的 owner_id 字段过滤。"""
     import asyncio
     from neurova.api.endpoints import skill_pool_api as mod
 
-    mod._private_skills.clear()
-    mod._private_skills["a-1"] = {
-        "skill_id": "a-1",
-        "name": "agent_a_skill",
-        "owner_id": "agentA",
-        "scope": "private",
-        "category": "general",
-        "version": "1.0.0",
-        "enabled": True,
-        "created_at": 0,
-        "updated_at": 0,
-    }
-    mod._private_skills["b-1"] = {
-        "skill_id": "b-1",
-        "name": "agent_b_skill",
-        "owner_id": "agentB",
-        "scope": "private",
-        "category": "general",
-        "version": "1.0.0",
-        "enabled": True,
-        "created_at": 0,
-        "updated_at": 0,
+    per_agent = {
+        "agentA": [
+            (
+                "a-1",
+                {"name": "agent_a_skill", "description": "", "version": "1.0.0",
+                 "enabled": True, "manifest": {"config": {}}, "usage": {}},
+            )
+        ],
+        "agentB": [
+            (
+                "b-1",
+                {"name": "agent_b_skill", "description": "", "version": "1.0.0",
+                 "enabled": True, "manifest": {"config": {}}, "usage": {}},
+            )
+        ],
     }
 
-    mock_service = MagicMock()
-    mock_service.list_skills.return_value = []
+    def _factory(agent_id):
+        svc = MagicMock()
+        svc.iter_skills.return_value = per_agent.get(agent_id, [])
+        return svc
 
-    try:
-        with patch("neurova.skills.skill_service.SkillService", return_value=mock_service):
-            result = asyncio.run(mod.list_private_skills(agent_id="agentA"))
-            names = {r.name for r in result}
-            assert "agent_a_skill" in names
-            assert "agent_b_skill" not in names, "应按 agent_id 过滤 owner_id"
-    finally:
-        mod._private_skills.clear()
+    with patch("neurova.skills.skill_service.SkillService", side_effect=lambda agent_id, **k: _factory(agent_id)):
+        result = asyncio.run(mod.list_private_skills(agent_id="agentA"))
+        names = {r.name for r in result}
+        assert "agent_a_skill" in names
+        assert "agent_b_skill" not in names, "视图=agent 目录，不得串看他人技能"

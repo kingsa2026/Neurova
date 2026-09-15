@@ -1,11 +1,11 @@
-"""Skill 声明式权限模型（P0-4 — Dify resource.permission 对标）。
+"""Skill 声明式权限模型。
 
-设计（docs/Neurova_Dify代码级对比_2026-09-03.md §2.4 / §4 P0-4）：
+设计（§2.4 / §4 P0-4）：
 Neurova 治理原本只管"调用时"（DENY/SANDBOX/ASK 内容裁决），缺
 "安装时声明"层。本模块提供声明面（manifest permissions）+ 调用面
 仲裁原语，让 tool_executor / ToolSequenceSkill 以声明为准。
 
-能力键（对齐 Dify resource.permission 六类，Neurova 实际工具面裁剪）：
+能力键：
 - tools:   显式工具白名单 {enabled, allow: [...]}（或直接列表）
 - network: 网络面（web_search/web_fetch/browser_*/weather/rss/mcp.*）
 - file:    文件面（file_read/write/create/delete/edit/list/search，
@@ -188,7 +188,7 @@ class SkillPermissions:
         return self.file
 
 
-# 别名：与 Dify 六类模型命名对齐时的可读别名
+# 别名
 SkillPermissionModel = SkillPermissions
 
 

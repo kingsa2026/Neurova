@@ -28,6 +28,7 @@ _reasoning_var: ContextVar = ContextVar("neurova_turn_reasoning", default=None)
 _tool_messages_var: ContextVar = ContextVar("neurova_turn_tool_messages", default=None)
 _tool_events_var: ContextVar = ContextVar("neurova_turn_tool_events", default=None)
 _skill_funnel_var: ContextVar = ContextVar("neurova_turn_skill_funnel", default=None)
+_skill_view_var: ContextVar = ContextVar("neurova_turn_skill_view", default=None)
 _skills_off_var: ContextVar = ContextVar("neurova_turn_skills_off", default=False)
 _turn_count_var: ContextVar = ContextVar("neurova_turn_count", default=0)
 
@@ -101,19 +102,53 @@ def get_turn_tool_messages_snapshot() -> List[Dict[str, Any]]:
 # 子任务记录可见于父轮次（既有轮次账本契约，非新增行为）。
 
 
-def record_turn_skill_funnel(skill_id: str, applied: bool, ok: bool) -> None:
-    """记一条本轮技能派发：applied=是否真正进入执行，ok=执行是否成功。"""
+def record_turn_skill_funnel(
+    skill_id: str,
+    applied: bool,
+    ok: bool,
+    pool: str = "agent",
+    owner_key: str = "",
+) -> None:
+    """记一条本轮技能派发：applied=是否真正进入执行，ok=执行是否成功。
+
+    Wave H-W1 三层库：pool/owner_key 记录命中的副本所在库（agent 库默认，
+    与既有调用零差异），flush 据此路由回写各库账本。"""
     current = _skill_funnel_var.get()
     if not isinstance(current, list):
         current = []
         _skill_funnel_var.set(current)
-    current.append({"skill_id": skill_id, "applied": bool(applied), "ok": bool(ok)})
+    current.append(
+        {
+            "skill_id": skill_id,
+            "applied": bool(applied),
+            "ok": bool(ok),
+            "pool": str(pool or "agent"),
+            "owner_key": str(owner_key or ""),
+        }
+    )
 
 
 def get_turn_skill_funnel() -> List[Dict[str, Any]]:
     """本轮技能派发账本（副本）。"""
     current = _skill_funnel_var.get()
     return list(current) if isinstance(current, list) else []
+
+
+# ── 轮级技能可见视图（Wave H-W2，三层库装配快照）──────────
+
+
+def set_turn_skill_view(view):
+    """挂载本轮 SkillView（chat 装配步调用）；返回 token 供复位。"""
+    return _skill_view_var.set(view)
+
+
+def reset_turn_skill_view(token) -> None:
+    _skill_view_var.reset(token)
+
+
+def get_turn_skill_view():
+    """本轮可见视图；未装配返回 None（消费方回退现状行为）。"""
+    return _skill_view_var.get()
 
 
 # ── 回合级技能库总开关（P2-4 cold/warm A/B 的执行面）──────
@@ -168,6 +203,7 @@ def clear_turn_state() -> None:
         _tool_messages_var,
         _tool_events_var,
         _skill_funnel_var,
+        _skill_view_var,
         _skills_off_var,
         _turn_count_var,
     ):
@@ -192,6 +228,9 @@ __all__ = [
     "get_turn_tool_messages_snapshot",
     "record_turn_skill_funnel",
     "get_turn_skill_funnel",
+    "set_turn_skill_view",
+    "reset_turn_skill_view",
+    "get_turn_skill_view",
     "set_turn_skills_off",
     "reset_turn_skills_off",
     "get_turn_skills_off",

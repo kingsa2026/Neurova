@@ -1330,18 +1330,22 @@ class PostChatPipeline:
             )
 
     async def _step_skill_funnel_flush(self, reply: str, actual_session_id: str = "") -> None:
-        """Step 9.06: 技能质量漏斗 + 信任观测回写（P0-1/P0-2，OpenSpace 对齐）。
+        """Step 9.06: 技能质量漏斗 + 信任观测回写。
 
         读本轮 tool_executor 写入 turn_context 的技能派发账本，按
-        compute_skill_funnel_update 归因（兜底完成不计功）写穿 SkillService
-        manifest usage；再由 compute_trust_observations 派生每技能一个
-        独立任务观测（task 身份 = session#turn，服务层按 task_id 去重）
-        喂信任状态机。任务完成口径：post-chat 仅在回复成功生成后执行，
-        reply 非空即视为本轮任务完成（空回复=未产出，不记 completion）。
+        compute_skill_funnel_update 归因（兜底完成不计功）写穿 manifest usage；
+        再由 compute_trust_observations 派生每技能一个独立任务观测
+        （task 身份 = session#turn，服务层按 task_id 去重）喂信任状态机。
+        任务完成口径：post-chat 仅在回复成功生成后执行，reply 非空即视为
+        本轮任务完成（空回复=未产出，不记 completion）。
+
+        Wave H-W1 三层库：账本条目自带 (pool, owner_key) 归属，按库分组后
+        经 library_service 路由回写各库实例——agent 副本记 agent 账、user
+        副本记 user 账、public 副本记公共聚合账（缺 owner 的条目回退本
+        agent 视图，与 Wave A/B 既有语义一致）。
         """
         from neurova.core.turn_context import get_turn_count, get_turn_skill_funnel
         from neurova.skills.skill_service import (
-            SkillService,
             compute_skill_funnel_update,
             compute_trust_observations,
         )
@@ -1350,19 +1354,34 @@ class PostChatPipeline:
         if not entries:
             return
         task_completed = bool(reply and reply.strip())
-        updates = compute_skill_funnel_update(entries, task_completed=task_completed)
-        observations = compute_trust_observations(entries, task_completed)
-        if not updates and not observations:
-            return
         agent_id = str(getattr(self._agent.config, "agent_id", "") or "")
         if not agent_id:
             return
-        service = SkillService(agent_id=agent_id)
-        for skill_id, delta in updates.items():
-            service.record_skill_funnel(skill_id, **delta)
+
+        # 按 (pool, owner) 分组（默认 agent+本 agent——无库参数条目零变化）
+        groups: dict = {}
+        for e in entries:
+            pool = str(e.get("pool") or "agent")
+            owner = str(e.get("owner_key") or "") or agent_id
+            groups.setdefault((pool, owner), []).append(e)
+
+        from neurova.skills import library_service as lib
+
         task_id = f"{actual_session_id or 'anon'}#{get_turn_count()}"
-        for skill_id, outcome in observations.items():
-            service.record_trust_observation(skill_id, outcome, task_id=task_id)
+        for (pool, owner), group in groups.items():
+            updates = compute_skill_funnel_update(group, task_completed=task_completed)
+            observations = compute_trust_observations(group, task_completed)
+            if not updates and not observations:
+                continue
+            try:
+                service = lib.get_library(pool, owner if pool != lib.POOL_USER else owner)
+            except ValueError as route_err:
+                logger.warning("技能账本路由失败（pool=%s owner=%s）: %s", pool, owner, route_err)
+                continue
+            for skill_id, delta in updates.items():
+                service.record_skill_funnel(skill_id, **delta)
+            for skill_id, outcome in observations.items():
+                service.record_trust_observation(skill_id, outcome, task_id=task_id)
 
     async def _step_evocate_generation(
         self,

@@ -167,6 +167,25 @@ def test_push_unknown_skill_404(env):
     assert client.post(f"{BASE}/private/ghost/push?agent_id=src", json={"agent_id": "dst"}).status_code == 404
 
 
+def test_push_same_view_is_idempotent_success(env):
+    """前端 pushToPool 形态（无目标差异）：幂等成功，不再假报跨视图推送。"""
+    client, _ = env
+    _authed(client)
+    sid = client.post(f"{BASE}/private?agent_id=a6", json={"name": "same_view"}).json()["skill_id"]
+    r = client.post(f"{BASE}/private/{sid}/push?agent_id=a6", json={"agent_id": "a6"})
+    assert r.status_code == 200
+    assert "already present" in r.json()["message"]
+
+
+def test_share_without_body_accepted(env):
+    """前端 shareSkill 不传 body 的既有形态：200（原必填 body 恒 422）。"""
+    client, _ = env
+    _authed(client)
+    sid = client.post(f"{BASE}/private?agent_id=a7", json={"name": "nob"}).json()["skill_id"]
+    r = client.post(f"{BASE}/private/{sid}/share?agent_id=a7")
+    assert r.status_code == 200, r.text
+
+
 # ── 4. 存量测试兼容护栏：公开面不回归 ─────────────────────
 
 

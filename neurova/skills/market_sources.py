@@ -130,7 +130,7 @@ class XfyunSkillsSource(RemoteSkillSource):
     """科大讯飞 Astron SkillHub (skill.xfyun.cn)
 
     开源实现 github.com/iflytek/skillhub（Apache 2.0），API 设计文档
-    docs/06-api-design.md。列表/详情/下载实测匿名可用；slug 形如
+。列表/详情/下载实测匿名可用；slug 形如
     "ns--slug"，详情/下载路径为 /api/v1/skills/{ns}/{slug}。
     """
 

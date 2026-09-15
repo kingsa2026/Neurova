@@ -97,9 +97,13 @@ class MarketplaceSkillUpdate(BaseModel):
 
 
 class MarketplaceSkillSubmit(BaseModel):
-    """用户提交技能上架申请（进入待审，管理员审批后上架）"""
+    """用户提交技能上架申请（进入待审，管理员审批后上架）
 
-    skill_id: str = Field(..., description="市场技能 ID（与目录内已有技能不可冲突）")
+    Wave H-W3：kind=update 支持对已上架技能提交升级版本（版本号必须递增），
+    不再恒 409 撞库。
+    """
+
+    skill_id: str = Field(..., description="市场技能 ID")
     name: str = Field(..., description="技能名称")
     description: str = ""
     version: str = "1.0.0"
@@ -107,6 +111,11 @@ class MarketplaceSkillSubmit(BaseModel):
     tags: List[str] = []
     download_url: str = ""
     author: str = ""
+    kind: str = Field(default="create", description="create=新上架 / update=升级已上架技能")
+    # 闭环核验轮 V：用户私库技能发布公共库时携带源库条目 ID——materialize
+    # 从该条目快照 tool_sequence/permissions 载荷进公共库（否则需求 3 的
+    # "用户库→公共库"会丢失可执行体，公共副本退化为元目目录条目）。
+    pool_skill_id: str = Field(default="", description="来源用户私库技能 ID（可空）")
 
 
 class SkillSubmissionReview(BaseModel):
@@ -573,6 +582,179 @@ async def get_installed_skills(
 # ---------------------------------------------------------------------------
 
 
+def _broadcast_public_upgrade(skill_id: str, version: str, name: str) -> int:
+    """Wave H-W4（需求 5）：公共库技能升级 → 向持有派生副本的用户/agent 私库
+    广播**确认型**升级卡（skill_transfers），副本迭代权在归属人。
+
+    扫描三库目录找 `config.transferred_from.pool == public` 且 skill_id 匹配的
+    条目；agent 库副本的确认人=其属主账号（agent_config.json.owner_user_id），
+    无属主回退 admin。幂等键保证同一版本只一张 pending 卡。失败仅告警。
+    """
+    created = 0
+    try:
+        import json as _json
+
+        from neurova.skills import library_service as _lib
+        from neurova.skills.skill_transfers import (
+            TT_PUBLIC_TO_AGENT,
+            TT_PUBLIC_TO_USER,
+            get_skill_transfer_store,
+        )
+
+        base = _lib._BASE_DIR
+        targets = []  # (pool, owner_dir_token, confirm_owner, entry)
+        for pool, sub, resolver in (
+            (_lib.POOL_USER, "users", _lib.from_dir_token),
+            (_lib.POOL_AGENT, "agents", None),
+        ):
+            root = base / sub
+            if not root.exists():
+                continue
+            for d in root.iterdir():
+                mf = d / "skills" / "manifest.json"
+                if not d.is_dir() or not mf.exists():
+                    continue
+                try:
+                    entries = _json.loads(mf.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                row = entries.get(skill_id) if isinstance(entries, dict) else None
+                if not row:
+                    continue
+                tf = ((row.get("manifest") or {}).get("config") or {}).get("transferred_from") or {}
+                if tf.get("pool") != _lib.POOL_PUBLIC or str(tf.get("skill_id") or "") != skill_id:
+                    continue
+                owner_key = resolver(d.name) if resolver else d.name
+                if pool == "user":
+                    confirm = owner_key  # u:7
+                else:
+                    acfg = d / "agent_config.json"
+                    acct = ""
+                    try:
+                        if acfg.exists():
+                            acct = str(_json.loads(acfg.read_text(encoding="utf-8")).get("owner_user_id") or "")
+                    except Exception:
+                        acct = ""
+                    confirm = f"u:{acct}" if acct else "admin"
+                targets.append((pool, owner_key, confirm, row))
+
+        store = get_skill_transfer_store()
+        for pool, owner_key, confirm, row in targets:
+            cur_ver = str(row.get("version") or "")
+            try:
+                from neurova.api.endpoints.skill_version_api import compare_versions
+
+                if cur_ver and compare_versions(str(version), cur_ver) <= 0:
+                    continue  # 副本不比公共版新才推
+            except Exception:
+                pass
+            ttype = TT_PUBLIC_TO_USER if pool == "user" else TT_PUBLIC_TO_AGENT
+            entry = store.create(
+                {
+                    "transfer_type": ttype,
+                    "skill_id": skill_id,
+                    "src_pool": _lib.POOL_PUBLIC,
+                    "src_owner": "",
+                    "dst_pool": pool,
+                    "dst_owner": owner_key,
+                    "confirm_owner": confirm,
+                    "kind": "upgrade",
+                    "version": str(version or ""),
+                    "name": str(name or skill_id),
+                    "transfer_key": f"{ttype}:public->{pool}:{owner_key}:{skill_id}@{version}",
+                }
+            )
+            created += 1
+            if str(confirm or "").startswith("u:"):
+                try:
+                    from neurova.api.endpoints.notifications import notify_user
+
+                    notify_user(
+                        confirm.split(":", 1)[1],
+                        title="公共技能升级待确认",
+                        message=f"公共库技能「{name or skill_id}」升级到 v{version}，确认后将同步你的副本",
+                        notification_type="skill_transfer",
+                        data={
+                            "transfer_id": entry["transfer_id"],
+                            "skill_id": skill_id,
+                            "action": "skill_transfer",
+                        },
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.debug("升级广播通知失败（不阻断）", exc_info=True)
+    except Exception:  # noqa: BLE001 - 广播失败不阻断审批物化
+        logger.warning("公共库升级广播失败（skill=%s）", skill_id, exc_info=True)
+    return created
+
+
+def _materialize_public_entry(submission: Dict[str, Any], kind: str) -> None:
+    """Wave H-W3：审批通过后把社区技能物化进公共库 manifest。
+
+    公共库（library_service pool=public）是轮级装配视图的第三层来源。
+    create=登记（pool_type=public、source=community）；update=**原地版本
+    bump**（update_auto_skill 语义：修订链追加 + trust/usage 账本保留——
+    不走 install_skill 重建，绕开 force 重装清零坑）。失败仅告警不阻断
+    审批（catalog 仍为市场权威面）。
+    """
+    try:
+        from neurova.skills import library_service as _lib
+
+        pub = _lib.get_library(_lib.POOL_PUBLIC)
+        sid = str(submission.get("skill_id") or "")
+        if not sid:
+            return
+        version = str(submission.get("version") or "1.0.0")
+        fields = {
+            "name": str(submission.get("name") or sid),
+            "description": str(submission.get("description") or ""),
+            "category": str(submission.get("category") or "general"),
+            "tags": list(submission.get("tags") or []),
+            "download_url": str(submission.get("download_url") or ""),
+        }
+        # V 轮：随单可执行载荷快照透传（用户私库来源提交的 tool_sequence/permissions）
+        payload_cfg = submission.get("config") or {}
+        _carry = {k: payload_cfg[k] for k in ("tool_sequence", "permissions") if payload_cfg.get(k)}
+        existing = pub.get_skill_info(sid)
+        if existing is None:
+            pub.register_auto_skill(
+                sid,
+                name=fields["name"],
+                description=fields["description"],
+                version=version,
+                config={
+                    "category": fields["category"],
+                    "tags": fields["tags"],
+                    "download_url": fields["download_url"],
+                    **_carry,
+                },
+                manifest_source="community",
+                pool_type=_lib.POOL_PUBLIC,
+                owner_user_id="",
+            )
+        else:
+            cfg = dict((existing.get("manifest") or {}).get("config") or {})
+            cfg.update(
+                {
+                    "category": fields["category"],
+                    "tags": fields["tags"],
+                    "download_url": fields["download_url"],
+                    "submitted_by": str(submission.get("submitted_by") or ""),
+                    **_carry,
+                }
+            )
+            pub.update_auto_skill(
+                sid,
+                version=version,
+                config=cfg,
+                name=fields["name"],
+                description=fields["description"],
+            )
+            # Wave H-W4：公共升级 → 派生副本确认卡（需求 5，"用户确认升级后迭代"）
+            _broadcast_public_upgrade(sid, version, fields["name"])
+    except Exception:  # noqa: BLE001 - 物化失败不阻断审批主链
+        logger.warning("公共库物化失败（skill=%s）", submission.get("skill_id"), exc_info=True)
+
+
 def _notify_market_update(entry: Dict[str, Any], old_version: str) -> int:
     """版本变更站内通知: 优先所有注册用户, 兜底 default。
 
@@ -639,13 +821,65 @@ async def submit_market_skill(
         from neurova.skills.market_submissions import get_market_submission_store
 
         store = get_market_store()
-        if store.get(body.skill_id) is not None:
+        # Wave H-W3 升级提交单型：kind=update 对已上架技能提新版本（不再恒
+        # 409），版本号必须严格高于当前上架版；kind=create 撞库护栏不变。
+        kind = str(getattr(body, "kind", "create") or "create").strip().lower()
+        if kind not in ("create", "update"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"未知提交类型 kind={kind!r}（支持 create/update）",
+            )
+        existing_entry = store.get(body.skill_id)
+        if kind == "update":
+            if existing_entry is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Skill '{body.skill_id}' not found in marketplace（升级目标须已上架）",
+                )
+            from neurova.api.endpoints.skill_version_api import compare_versions
+
+            if compare_versions(
+                str(body.version or "1.0.0"), str(existing_entry.get("version") or "0.0.0")
+            ) <= 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"升级版本必须高于当前上架版 {existing_entry.get('version')}",
+                )
+        elif existing_entry is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Skill '{body.skill_id}' already exists in marketplace",
             )
 
-        # P2-1 提交证据门（OpenSpace upload_trust 本地化）：文本注入扫描 +
+        # V 轮：来源=本人用户私库条目 → 服务端快照可执行载荷（白名单键，
+        # 不信任前端回传；materialize 落公共库时透传，需求 3 全链保可执行）。
+        # 必须在证据门**之前**：名称/描述以库内条目为权威覆写，门扫最终文本。
+        snapshot_cfg: Dict[str, Any] = {}
+        pool_sid = str(getattr(body, "pool_skill_id", "") or "").strip()
+        if pool_sid:
+            from neurova.skills import library_service as _lib
+
+            acct = f"u:{current_user.get('user_id') or ''}"
+            try:
+                src = _lib.get_library(_lib.POOL_USER, acct).get_skill_info(pool_sid)
+            except ValueError as bad:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(bad))
+            if src is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"用户私库无此技能: {pool_sid}",
+                )
+            _src_cfg = (src.get("manifest") or {}).get("config") or {}
+            snapshot_cfg = {
+                k: _src_cfg[k]
+                for k in ("tool_sequence", "permissions")
+                if k in _src_cfg
+            }
+            body.name = str(src.get("name") or body.name)
+            body.description = str(src.get("description") or body.description)
+            body.version = str(src.get("version") or body.version)
+
+        # P2-1 提交证据门：文本注入扫描 +
         # 密钥脱敏 + 本地同源 provisional 拒上架。人工 admin 审批保留，二者
         # 叠加=机器拦底、人裁质量。
         from neurova.skills.skill_install_gate import evaluate_submission_gate
@@ -698,6 +932,10 @@ async def submit_market_skill(
                 "author": body.author or str(current_user.get("username", "")),
                 "submitted_by": str(current_user.get("user_id", "")),
                 "submitted_by_name": str(current_user.get("username", "")),
+                # Wave H-W3：升级提交单型随单存档（review 分流依据）
+                "kind": kind,
+                # V 轮：可执行载荷快照（无则空 dict，物化侧按键透传）
+                "config": snapshot_cfg,
             }
         )
 
@@ -775,24 +1013,41 @@ async def review_skill_submission(
         reviewed_by = str(admin.get("user_id", ""))
         if body.approve:
             market = get_market_store()
-            if market.get(submission["skill_id"]) is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Skill '{submission['skill_id']}' already exists in marketplace",
-                )
-            market.create(
-                {
-                    "skill_id": submission["skill_id"],
-                    "name": submission.get("name", ""),
-                    "description": submission.get("description", ""),
-                    "version": submission.get("version", "1.0.0"),
-                    "category": submission.get("category", "general"),
-                    "tags": submission.get("tags", []),
-                    "download_url": submission.get("download_url", ""),
-                    "author": submission.get("author", ""),
-                    "source": "community",
-                }
-            )
+            kind = str(submission.get("kind") or "create")
+            entry_payload = {
+                "skill_id": submission["skill_id"],
+                "name": submission.get("name", ""),
+                "description": submission.get("description", ""),
+                "version": submission.get("version", "1.0.0"),
+                "category": submission.get("category", "general"),
+                "tags": submission.get("tags", []),
+                "download_url": submission.get("download_url", ""),
+                "author": submission.get("author", ""),
+                "source": "community",
+                # 孤岛吸收 #归属：catalog 带提交者，公共库可回溯"这是谁上架的"
+                "owner_user_id": str(submission.get("submitted_by") or ""),
+            }
+            if kind == "update":
+                result = market.update(submission["skill_id"], entry_payload)
+                if result is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"Skill '{submission['skill_id']}' vanished before approval",
+                    )
+                if result.get("version_changed"):
+                    _notify_market_update(result["entry"], old_version=str(
+                        (submission.get("version") or "?")))
+            else:
+                if market.get(submission["skill_id"]) is not None:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=f"Skill '{submission['skill_id']}' already exists in marketplace",
+                    )
+                market.create(entry_payload)
+
+            # Wave H-W3 公共库物化：装配视图第三层的真实来源（update 走原地
+            # 合并保账本；create 登记）。失败不阻断审批（catalog 已是权威面）。
+            _materialize_public_entry(submission, kind)
 
         result = submissions.set_status(
             submission_id,

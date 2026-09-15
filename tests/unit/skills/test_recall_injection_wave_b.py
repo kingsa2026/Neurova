@@ -1,4 +1,4 @@
-"""Wave B 召回注入（OpenSpace 对比 P0-3/P2-2/P2-5）
+"""Wave B 召回注入
 
 三件套（互补，默认关闭/无 paths=零行为变化，满足增量原则）：
 - P0-3 render_skill_catalog 从死接线变成有消费方：orchestrator 单源
@@ -46,7 +46,7 @@ def test_catalog_description_capped_250():
     reg = _Registry({"a": _Skill("a", "x" * 600)})
     text = render_skill_catalog(reg, max_chars=8000)
     line = next(ln for ln in text.splitlines() if ln.startswith("- a"))
-    assert len(line) <= 10 + 250, "描述须截到 250 字符（OpenSpace MAX_LISTING_DESC_CHARS）"
+    assert len(line) <= 10 + 250, "描述须截到 250 字符（MAX_LISTING_DESC_CHARS）"
 
 
 def test_catalog_over_budget_compresses_to_names():
@@ -116,7 +116,7 @@ def test_score_prefers_keyword_overlap():
 
 
 def test_score_quality_micro_adjust():
-    """质量微调（OpenSpace +min(completions,5)*0.05 − min(fallbacks,5)*0.05 同源）。"""
+    """质量微调。"""
     a = _Skill("good", "deploy 部署")
     b = _Skill("bad", "deploy 部署")
     sa = score_skill_for_query(a, "deploy 部署", quality={"completions": 5, "fallbacks": 0})

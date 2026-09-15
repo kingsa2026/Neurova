@@ -3,7 +3,7 @@
 
 提供技能版本检测、通知管理和手动更新的 API 接口。
 
-P1-6（OpenSpace 对比 2026-09-15）：全端点换真实数据源——原
+P1-6：全端点换真实数据源——原
 _VERSIONS_STORE 硬编码假版本表/内存 dict 是演示残留（前端零消费方，
 留着就是下一个"页面按想象契约写"事故的种子）：
 
@@ -83,6 +83,11 @@ def _compare_versions(v1: str, v2: str) -> int:
         if a > b:
             return 1
     return len(parts1) - len(parts2)
+
+
+# Wave H-W3 公共名：升级提交单型的版本单调校验跨模块复用（勿再各自复制
+# 比较逻辑——孤岛时代多处散装版本比较是漂移源）。
+compare_versions = _compare_versions
 
 
 def _get_user_id_from_token(request) -> str:

@@ -1,4 +1,4 @@
-"""PromptOptimizer v2 测试（QP 对齐启发 #6，2026-09-12）。
+"""PromptOptimizer v2 测试。
 
 评测集驱动的提示词优化：声明式 PromptEvalCase 提供真值基准，
 变体打分（加权通过率）驱动迭代——替代 v1 的关键词启发打分（无基准噪声）。
