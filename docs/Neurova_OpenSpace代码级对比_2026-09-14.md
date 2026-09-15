@@ -46,18 +46,18 @@ openspace/
 └── benchmarks/terminal_bench  # frozen backbone cold/warm 实验
 ```
 
-### 与 Neurova 的映射
+### 与 Neurova 的映射（**2026-09-15 落地后刷新**，原始判定保留在各行括注）
 
-| OpenSpace | Neurova 对应 | 状态 |
+| OpenSpace | Neurova 对应 | 状态（09-15 刷新） |
 |---|---|---|
-| skill_engine/registry + store | skill_system.py(SkillRegistry) + skills/skill_service.py(manifest) + skill_pool_manager.py | ⚠️ 三套模型并存，靠 compat.unpack_skill 缝合 |
-| protocol.py（模型可见协议） | skills/skill_injection.py + orchestrator.build_tools_for_llm | ⚠️ render_skill_catalog **死接线**，目录不常驻 |
-| evidence/ + signals/ + decision/ | 无对应（最接近：evolution/skill_experience.py 记录 applied） | ❌ 缺 |
-| evolution/ 流水线 + 异步作业队列 | AutoSkillBuilder/AutoSkillImprover/skill_lifecycle/C10 评审闸 | ✅ 闭环存在，❌ 无行为验证、无队列化、无崩溃对账 |
-| trust_state | 无（enabled 一维 + C10 一次性） | ❌ 缺 |
-| version DAG + .skill_id | version 字段 + revisions 有界 5 条快照 | ⚠️ 演示级（skill_version_api.py:55 硬编码假数据） |
-| cloud/ 上传门 | marketplace submit + admin 人工审核 | ⚠️ 有权限门无证据门 |
-| grounding ToolRAG/lazy tools | tool_layers/tool_router.py + AdaptiveToolWeights | ⚠️ 有权重无预算化延迟加载 |
+| skill_engine/registry + store | skill_system.py(SkillRegistry) + skills/skill_service.py(manifest) + skill_pool_manager.py | ◐ 存储真源加固（manifest identity/漏斗/trust + 原子写）；**三套模型并存仍未归一**（重构级债，见 §8） |
+| protocol.py（模型可见协议） | skills/skill_injection.py + orchestrator.build_tools_for_llm | ✅ 目录常驻接线（P0-3，预算化+provisional 软标注）；三级披露中元数据档由关键词/语义阶梯承担，无独立 DiscoverSkills 工具（$mention 覆盖） |
+| evidence/ + signals/ + decision/ | 漏斗四计数+归因 / trust 观测一票 / source_evidence / 脱敏 / 作业队列 | ◐ 最小闭环在（P0-1/2+P1-2/3/4）；完整证据层（事件包/水位/detector 决策表）刻意不搬 |
+| evolution/ 流水线 + 异步作业队列 | AutoSkillBuilder/AutoSkillImprover/skill_lifecycle/C10 评审闸 | ✅ 队列(P1-4)+熔断(P0-3 Wave E)+行为回归 routing 档(P1-1)；replay 档=harness+真执行器（ab_library.make_agent_ab_executor），提交对账=原子写+失败回滚（P1-5） |
+| trust_state | usage 漏斗 + identity.trust 两态 | ✅ P0-2+Wave E：两态状态机+召回消费面（高 fallback/零完成熔断、目录 provisional 标注） |
+| version DAG + .skill_id | manifest identity + version_history 线性修订链 | ✅ P1-6（最小 DAG 口径：单父边；多父合成未建）；skill_version_api 假数据全清 |
+| cloud/ 上传门 | marketplace submit 证据门 + admin 人审 | ✅ P2-1（注入扫描+密钥 fail-closed+provisional 拒传） |
+| grounding ToolRAG/lazy tools | A6 tool_search（既有！BM25+目录+三控制工具，Wave E 收口开关）+ 技能侧阶梯+语义档 | ✅ 行判定当时已过时（A6 已在位）；Wave E 补语义档(bge ONNX)+熔断+tool_search 三级开关 |
 
 ---
 
@@ -308,3 +308,24 @@ checkpoint/信号/人工 → TriggerJob（SQLite 异步队列，claim/attempts/s
 2. `tests/unit/api/test_model_capability_endpoints.py::test_legacy_classname_strings_normalized` —— 他会话 llm/ 在途改动的中间态（本次运行已转绿）。
 
 **开关默认态沿革**：初版三开关默认关（增量保守）；同日用户拍板**默认全开**并收口 SettingPage 高级选项卡（「技能召回与进化」卡，见上节）。paths/trust/漏斗/脱敏为无开关加法键（现有消费面不受影响）。
+
+### 7.1 Wave E 补录（同日：召回闭环 + A/B 真接线，+23 测绿）
+
+侦查更正：**工具面预算化/延迟加载其实早已存在**——A6 `neurova/context/tool_search.py`（BM25 目录+`tool_search/tool_describe/tool_call` 三控制工具，候选>40 激活，orchestrator 已接线），§1 原行判定过时。Wave E 落地：
+
+- **语义检索档**：新模块 `skills/skill_semantics.py`（bge ONNX 经 `get_embedding_engine`，向量缓存**内容哈希为键**（反面教训=OpenSpace 缓存坑）、零向量不入库、引擎缺失静默降级关键词档）；`select_skills_for_turn` 融合 keyword+cosine（floor 0.15，弱语义不加分）；预算内语义只排序不淘汰（宁全不缺）；
+- **trust/质量召回熔断**：`quality_blocked` 单源判据（applications≥2 且（零完成或 fallback>0.5）→ 本轮不进工具面，**不受预算开关约束**——它是安全闸）；目录对 provisional 软标注 `(provisional)`；
+- **turn 级 skills_off**（`turn_context`）+ `make_agent_ab_executor`：cold 臂 schema+目录同源缺席，`run_cold_warm_ab` 可直挂真 Agent——P2-4 的 replay 接线闭环；
+- **开关面收口 SettingPage**：`tool_search_enabled`、`skill_semantic_recall_enabled` 两新键（卡内共五开关，默认全 True；env `NEUROVA_TOOL_SEARCH` 显式值仍最优先）。i18n 共 12 新键×11 语。
+
+回归：skills/evolution/context/security 3219 + core 1785（排除并行会话在途 sleep 中间态三文件）全绿；前端 62+vue-tsc 净。
+
+### 7.2 未偿清单（登记，非本轮范围）
+
+| 项 | 定性 | 说明 |
+|---|---|---|
+| 三套技能模型归一（Skill/SkillInfo/SkillMetadata + pool 双轨） | 核心重构 | 触面=注册表/兼容层/API 全链，"不动核心框架"约束下宜单独立项、契约测试先行 |
+| DiscoverSkills 独立元数据工具 | 可选增强 | 现由目录+$mention+阶梯承担发现职能，缺口不致命 |
+| replay 种子自动采集器 | 半接线 | `build_seed_from_successful_run` 白名单已就绪，缺"历史成功 run → 种子集"的持久化约定 |
+| embedding 档生产实测 | 待办 | 单测以替身引擎验证；真机首轮向量化待一次 live 走查 |
+| pool/API 双轨用户模型分裂（越权面） | 存量债 | 基线巡检发现（skill_pool_api 鉴权缺位），不属 OpenSpace 十项，另案处理 |

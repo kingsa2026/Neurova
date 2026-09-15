@@ -23,25 +23,6 @@ def _ds():
     )
 
 
-class _ScriptedJudge:
-    """判分器:变体文本里含 'OVERFIT' 则 A 类满分、B 类零分;否则反之。"""
-
-    def __init__(self):
-        self.seen = []
-
-    async def score(self, *, task_input, expected_behavior, output, skill_text, **kw):
-        from neurova.evolution.eval.fitness import FitnessScore
-
-        self.seen.append((task_input, skill_text))
-        is_overfit = "OVERFIT" in (output or "")
-        is_a = task_input.startswith("A")
-        if is_overfit:
-            c = 1.0 if is_a else 0.0
-        else:
-            c = 0.0 if is_a else 1.0
-        return FitnessScore(correctness=c, procedure_following=c, conciseness=c, feedback="")
-
-
 class _GenerationJudge:
     """把某个变体(A 类过拟合)判为原集最优,B 类留出集最差。"""
 
@@ -153,3 +134,29 @@ class TestRunnerHoldout:
         )
         assert result.rejected
         assert result.reject_reason == "empty_dataset"
+
+    @pytest.mark.asyncio
+    async def test_judge_feedback_flows_into_mutator(self):
+        """核验轮断点修复:judge 的 feedback 必须作为反射式变异的输入。
+
+        丢 feedback = 反射退化为盲改——这是 GEPA 的核心输入,不容断链。
+        """
+        cfg = EvolutionConfig(iterations=1, min_improvement=0.0)
+        received: list = []
+
+        async def judge_with_feedback(*, task_input, expected_behavior, output, skill_text, **kw):
+            from neurova.evolution.eval.fitness import FitnessScore
+            return FitnessScore(correctness=0.3, procedure_following=0.3, conciseness=0.3,
+                                feedback=f"漏掉了 {task_input} 的边界条件")
+
+        async def spy_mutate(*, artifact_text, artifact_type, failures):
+            received.extend(failures)
+            return artifact_text  # 不改进,只捕获输入
+
+        runner = SkillEvolutionRunner(
+            cfg, judge=judge_with_feedback, mutate=spy_mutate, agent=_Agent(),
+        )
+        await runner.run(baseline_text="BASE", artifact_type="skill", dataset=_ds())
+        assert received, "变异器必须被调用"
+        assert all(f.feedback for f in received), "每条失败必须携带 judge 反馈文本"
+        assert any("边界条件" in f.feedback for f in received)

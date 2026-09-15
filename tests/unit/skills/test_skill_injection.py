@@ -74,7 +74,9 @@ class TestRenderCatalog:
         reg = _FakeRegistry({
             f"skill_{i}": _FakeSkill(f"skill_{i}", "很长的描述" * 100) for i in range(50)
         })
-        text = render_skill_catalog(reg, max_chars=1000)
+        # max_lines=50 关掉行数上限，专测"超字符预算→别名压缩"这条独立路径
+        # （P0-3 新增的 max_lines 上限语义由 test_recall_injection_wave_b 覆盖）
+        text = render_skill_catalog(reg, max_chars=1000, max_lines=50)
         assert "skill_49" in text
         assert "很长的描述" not in text  # 别名压缩：描述丢弃
         assert len(text) <= 1000

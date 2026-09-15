@@ -32,6 +32,7 @@ __all__ = [
     "SeedLeakError",
     "sanitize_warm_seed",
     "build_seed_from_successful_run",
+    "make_agent_ab_executor",
     "run_cold_warm_ab",
 ]
 
