@@ -29,6 +29,47 @@ logger = get_logger(__name__)
 # 磁盘持久化，这里只避免每轮重建对象）
 _VECTOR_CACHES: dict = {}
 
+# 反思注入/渲染单源在 models（信封渲染层使用）。P3（2026-09-15）后反思不再
+# 截断直注 system 行——池/候选池均存全文，封顶只发生在信封块（injector）。
+
+
+def select_reflection_logs(growth_log_manager, total_limit: int = 3, validated_limit: int = 2) -> list:
+    """P3 注入分层（效力闭环 2026-09-15）：
+
+    - 资格：VALIDATED / APPLIED / PENDING（rejected/archived 排除——负反馈
+      与过期治理在此收口，脱离恒定注入但仍可被池语义召回）；
+    - 排序：已验证按置信 top2 优先；不足名额用待应用/待验证（最新优先）补足；
+    - 总量 ≤3 条，取代旧 validated(3)+pending(2) 的 5 条恒定噪声。
+    """
+    if not growth_log_manager:
+        return []
+    from neurova.cognitive_layers.meta_cognition_layer.growth_log import ReflectionLogStatus
+
+    entries = growth_log_manager.read_logs(limit=50)
+    validated = sorted(
+        [e for e in entries if e.status == ReflectionLogStatus.VALIDATED],
+        key=lambda e: e.confidence,
+        reverse=True,
+    )[:validated_limit]
+    others = [
+        e for e in entries if e.status in (ReflectionLogStatus.PENDING, ReflectionLogStatus.APPLIED)
+    ]  # read_logs 已按时间倒序
+    selected = list(validated)
+    selected.extend(others[: max(0, total_limit - len(selected))])
+    return selected
+
+
+async def mark_injected_logs(growth_log_manager, logs: list) -> None:
+    """P0a 注入即生效：pending→applied（幂等，已 applied 不重写），
+    本轮注入 id 痕迹挂 turn ContextVar 供落盘/效力裁决。"""
+    from neurova.cognitive_layers.meta_cognition_layer.growth_log import ReflectionLogStatus
+    from neurova.core.turn_context import set_turn_injected_reflections
+
+    for entry in logs:
+        if entry.status == ReflectionLogStatus.PENDING:
+            await growth_log_manager.mark_as_applied(entry.id)
+    set_turn_injected_reflections([e.id for e in logs])
+
 
 class ContextOrchestrator:
     """统一上下文构建模块
@@ -450,24 +491,26 @@ class ContextOrchestrator:
         # Phase 2.5: 分析用户输入的情感状态（并更新长期情感状态机）
         agent_emotion = self._analyze_user_emotion(user_input)
 
-        # Phase 2.8: 收集反思日志
+        # Phase 2.8: 收集反思日志（P0a/P3 效力闭环：分层选择 ≤3 条 + 注入即
+        # applied + 轮次痕迹。消费方式：经 context pool 无损归档，由语义召回
+        # 按相关性取回——不再作为截断 system 行恒定直注）
         reflection_logs: list = []
-        if self.growth_log_manager:
-            try:
-                validated = self.growth_log_manager.get_validated_logs(limit=3)
-                pending = self.growth_log_manager.get_pending_logs(limit=2)
-                # 根因修复: ReflectionLogEntry 的真实字段是 content/type（此前读
-                # l.lesson/l.reflection_type 不存在 → AttributeError 被吞 → 永远为空）
+        try:
+            selected = select_reflection_logs(self.growth_log_manager)
+            if selected:
                 reflection_logs = [
                     {
+                        "id": l.id,
                         "lesson": (l.insights[0] if l.insights else l.content) or l.title,
+                        "title": l.title,
                         "reflection_type": l.type.value,
                         "status": l.status.value,
                     }
-                    for l in validated + pending
+                    for l in selected
                 ]
-            except Exception as e:
-                logger.debug("反思日志获取跳过: %s", e)
+                await mark_injected_logs(self.growth_log_manager, selected)
+        except Exception as e:
+            logger.debug("反思日志获取跳过: %s", e)
 
         # Phase 3: 构建 ContextInput → ContextCollector → 候选池
         # session_context 包含完整的 user+assistant 历史（优先使用）
@@ -521,10 +564,13 @@ class ContextOrchestrator:
                     ContextInput(source=ContextSource.EXPERIENCE, content=f"{tag}{content}", priority=prio)
                 )
 
-            # 归档反思日志（持久教训，可被语义召回）
+            # 归档反思日志（持久教训，可被语义召回）。2026-09-15 P3：归档
+            # 全文教训+标题（无损池契约，受 draw 预算按相关性取回）；正文不再
+            # 截断、也不再作为 system 行恒定直注（旧直注在下方"本轮产物"块删除）。
             for log in reflection_logs:
+                full = f"{log.get('lesson', str(log))}（{log.get('title', '')}）"
                 self.context_pool.add_context(
-                    ContextInput(source=ContextSource.REFLECTION, content=log.get("lesson", str(log)), priority=60)
+                    ContextInput(source=ContextSource.REFLECTION, content=full, priority=60)
                 )
 
             # ════════════════════════════════════════════════════════
@@ -600,10 +646,6 @@ class ContextOrchestrator:
                 crystallized_content = f"[结晶经验] {content}"
                 injected_hashes.add(ContextInput.compute_hash(ContextSource.EXPERIENCE, crystallized_content))
                 context.append({"role": "system", "content": f"[经验] {crystallized_content}"})
-            for log in reflection_logs:
-                lesson = log.get("lesson", str(log))
-                injected_hashes.add(ContextInput.compute_hash(ContextSource.REFLECTION, lesson))
-                context.append({"role": "system", "content": f"[反思] {lesson}"})
             for question in self._collect_pending_questions():
                 context.append({"role": "system", "content": f"[待探索问题] {question['content']}"})
 
@@ -804,11 +846,15 @@ class ContextOrchestrator:
             except Exception as e:
                 logger.debug("语音上下文注入跳过: %s", e)
 
-        # 添加反思日志
+        # 添加反思日志（非池分支：候选池自有 token 预算裁决，存全文+标题，
+        # 与池归档同契约；截断只允许发生在信封渲染层）
         for log in reflection_logs:
             candidate_pool.append(
                 ContextInput(
-                    source=ContextSource.REFLECTION, content=log.get("lesson", str(log)), priority=60, metadata=log
+                    source=ContextSource.REFLECTION,
+                    content=f"{log.get('lesson', str(log))}（{log.get('title', '')}）",
+                    priority=60,
+                    metadata=log,
                 )
             )
 

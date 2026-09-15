@@ -17,6 +17,7 @@ Agent 是进程级单例（AppState.agents 共享池），轮次级状态原挂�
 
 from __future__ import annotations
 
+import threading
 from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
@@ -30,7 +31,29 @@ _tool_events_var: ContextVar = ContextVar("neurova_turn_tool_events", default=No
 _skill_funnel_var: ContextVar = ContextVar("neurova_turn_skill_funnel", default=None)
 _skill_view_var: ContextVar = ContextVar("neurova_turn_skill_view", default=None)
 _skills_off_var: ContextVar = ContextVar("neurova_turn_skills_off", default=False)
-_turn_count_var: ContextVar = ContextVar("neurova_turn_count", default=0)
+# 反思效力闭环（2026-09-15 P0a）：本轮被注入 prompt 的反思日志 id 痕迹。
+# build_context 选中注入时写入；post_chat 落盘读它挂进 assistant metadata，
+# /chat/feedback 与 Step 8.5 困惑降权据此裁决效力。
+_injected_reflections_var: ContextVar = ContextVar("neurova_turn_injected_reflections", default=None)
+
+
+def set_turn_injected_reflections(ids: Optional[list]) -> None:
+    _injected_reflections_var.set(list(ids) if ids else None)
+
+
+def get_turn_injected_reflections() -> Optional[list]:
+    return _injected_reflections_var.get()
+
+# 会话级轮次计数（2026-09-15 反思/成长链路排查根因修复）：
+# 原为 ContextVar——uvicorn 每请求在独立 task 上下文执行，set() 不跨请求
+# 传播 → increment 后恒 1，post_chat "每 10 轮强制反思"门控数学上永不成立。
+# 轮次号的语义是"会话内第几轮"，与会话身份 ContextVar（每请求绑定）不同，
+# 必须跨请求持久累积：改为模块级 {session_id: count} + RLock。
+# 消费方（任务号/幂等键 f"{session}#{count}"）语义不变且并发同会话的
+# 幂等键碰撞顺带根治（原每请求恒 1）。
+_session_turn_counts: Dict[str, int] = {}
+_turn_count_lock = threading.RLock()
+_MAX_TRACKED_SESSIONS = 4096
 
 
 def set_turn_identity(
@@ -95,7 +118,7 @@ def get_turn_tool_messages_snapshot() -> List[Dict[str, Any]]:
     return list(current) if current else []
 
 
-# ── 技能质量漏斗轮次账本（P0-1，OpenSpace 代码级对比 2026-09-14 落地）──
+# ── 技能质量漏斗轮次账本──
 # tool_executor.execute_skill_tool 每次技能派发记一条；PostChatPipeline
 # 回合收尾统一按"任务完成 + 兜底完成不计功"归因后写穿 SkillService manifest。
 # ContextVar 列表与 _tool_messages_var 同语义：跨 task 边界共享同一列表对象，
@@ -183,18 +206,26 @@ def get_turn_tool_events() -> List[Dict[str, Any]]:
 
 
 def increment_turn_count() -> int:
-    """轮次计数 +1，返回新值（请求上下文内单调）。"""
-    new_value = int(_turn_count_var.get() or 0) + 1
-    _turn_count_var.set(new_value)
+    """会话轮次计数 +1，返回新值（按会话跨请求单调）。"""
+    key = _session_id_var.get() or "default"
+    with _turn_count_lock:
+        if key not in _session_turn_counts and len(_session_turn_counts) >= _MAX_TRACKED_SESSIONS:
+            # 插入序淘汰最旧会话（dict 保序；防长进程无界增长）
+            for stale in list(_session_turn_counts)[: _MAX_TRACKED_SESSIONS // 2]:
+                _session_turn_counts.pop(stale, None)
+        new_value = int(_session_turn_counts.get(key, 0)) + 1
+        _session_turn_counts[key] = new_value
     return new_value
 
 
 def get_turn_count() -> int:
-    return int(_turn_count_var.get() or 0)
+    key = _session_id_var.get() or "default"
+    with _turn_count_lock:
+        return int(_session_turn_counts.get(key, 0))
 
 
 def clear_turn_state() -> None:
-    """teardown/测试用：清空全部轮次级状态。"""
+    """teardown/测试用：清空全部轮次级状态（含会话轮次计数）。"""
     for var in (
         _user_input_var,
         _session_id_var,
@@ -205,14 +236,14 @@ def clear_turn_state() -> None:
         _skill_funnel_var,
         _skill_view_var,
         _skills_off_var,
-        _turn_count_var,
+        _injected_reflections_var,
     ):
-        if var is _turn_count_var:
-            var.set(0)
-        elif var is _skills_off_var:
+        if var is _skills_off_var:
             var.set(False)
         else:
             var.set(None)
+    with _turn_count_lock:
+        _session_turn_counts.clear()
 
 
 __all__ = [
@@ -234,6 +265,8 @@ __all__ = [
     "set_turn_skills_off",
     "reset_turn_skills_off",
     "get_turn_skills_off",
+    "set_turn_injected_reflections",
+    "get_turn_injected_reflections",
     "append_turn_tool_event",
     "get_turn_tool_events",
     "increment_turn_count",

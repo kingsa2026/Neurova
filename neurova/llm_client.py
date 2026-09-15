@@ -9,7 +9,7 @@ from neurova.core.logger import get_logger
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, Iterator, List, Optional
+from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, Iterator, List, Optional
 
 # 声明式 provider 兼容开关（P0-2）：懒加载防循环导入（provider_compat 只依赖
 # 标准库，但 llm/ 包 __init__ 有重初始化链，保守走函数内导入）
@@ -19,6 +19,10 @@ def _default_compat():
     from neurova.llm.provider_compat import ProviderCompat
 
     return ProviderCompat()
+
+
+if TYPE_CHECKING:  # 仅类型检查期：运行期一律走 _default_compat() 函数内懒加载
+    from neurova.llm.provider_compat import ProviderCompat
 
 # OpenAI 库导入（可选）
 try:
@@ -68,7 +72,7 @@ class LLMConnectionError(LLMError):
 
 
 class LLMServiceUnavailableError(LLMError):
-    """服务端不可用（5xx，可重试——Dify 五类标准错误补全）"""
+    """服务端不可用"""
 
 
 class TokenLimitExceeded(LLMError):
@@ -116,7 +120,7 @@ class LLMConfig:
     preset_name: str = ""
     # 输入 token 预算闸门（None = 不限制）；请求前按消息+工具定义计数检查
     max_input_tokens: Optional[int] = None
-    # 声明式 provider 兼容开关（OpenClaw 启发 P0-2，provider_compat.ProviderCompat）。
+    # 声明式 provider 兼容开关。
     # 请求构造按开关表消费（如 include_stream_usage 决定是否携带 stream_options），
     # 不再按 provider 写 if 分支。
     compat: "ProviderCompat" = field(default_factory=lambda: _default_compat())
@@ -221,7 +225,7 @@ class LLMClient:
         if reasoning_effort:
             params["reasoning_effort"] = reasoning_effort
 
-        # B1-3 思考控制两级旋钮（QwenPaw #6302 对齐）：enable_thinking /
+        # B1-3 思考控制两级旋钮：enable_thinking /
         # thinking_budget 仅在 compat.supports_thinking_toggle 声明的网关注入；
         # budget 只在开关为真时随发（关思考带预算是矛盾请求）。
         thinking_enabled = kwargs.get("thinking_enabled")

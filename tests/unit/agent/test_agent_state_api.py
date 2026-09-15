@@ -52,7 +52,11 @@ class TestTurnLevelStateAPI:
 
     def test_turn_count_increment(self):
         from neurova.agent_core import Agent
+        from neurova.core.turn_context import clear_turn_state
 
+        # 2026-09-15 轮次计数改会话级进程字典（跨请求累积防回归）——
+        # 不再享有 ContextVar 的按上下文天然隔离，绝对值断言前必须清态
+        clear_turn_state()
         agent = Agent.__new__(Agent)
         assert agent.increment_turn_count() == 1
         assert agent.increment_turn_count() == 2

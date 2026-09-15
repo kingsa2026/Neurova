@@ -1,5 +1,5 @@
 /**
- * useSessionSync gap 检测测试（OpenOcta 启发 P0-1：WS 单调 seq + 前端 gap 检测）。
+ * useSessionSync gap 检测测试。
  *
  * 服务端 sync WS 每个事件帧携带 per-session 单调 seq（session_sync_manager
  * add_event 盖章）；连接建立时服务端先发 sync_hello{next_seq}（纪元探测），
@@ -226,7 +226,7 @@ describe('useSessionSync gap 检测', () => {
     expect(FakeWebSocket.instances).toHaveLength(1)
   })
 
-  it('gap 自愈（OpenClaw P0-7）：检测缺口立即重连，缺口起点整段重放回填', () => {
+  it('gap 自愈：检测缺口立即重连，缺口起点整段重放回填', () => {
     vi.useFakeTimers()
     try {
       const seen: number[] = []

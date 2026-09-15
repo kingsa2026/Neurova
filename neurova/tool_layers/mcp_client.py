@@ -582,24 +582,31 @@ class MCPToolClient:
             for tool_def in tools:
                 tool_name = f"mcp.{server_id}.{tool_def.get('name', '')}"
                 if not engine.get_tool(tool_name):
-                    # 创建一个闭包函数作为 MCP 工具的执行函数
-                    _server_id = server_id
-                    _tool_name = tool_def.get("name", "")
+                    def _make_mcp_executor(sid: str, tname: str):
+                        """工厂闭包按值绑定当前工具。
 
-                    # 使用 **kwargs 接收任意参数
-                    # ToolEngine 会自动从函数签名推断参数定义
-                    # 由于 MCP 工具的参数是动态的，我们使用 **kwargs 来接收所有参数
-                    async def _mcp_executor(**kwargs) -> typing.Any:
-                        # kwargs 包含 ToolEngine 准备的参数
-                        # 对于 MCP 工具，我们将所有参数传递给 execute_tool
-                        # 注意：如果 kwargs 为空，说明 ToolEngine 没有匹配到任何参数
-                        # 这种情况下，我们传递空字典给 execute_tool
-                        return await self.execute_tool(_server_id, _tool_name, kwargs)
+                        不能直接在循环里定义执行器再靠循环内赋值"绑定"——Python
+                        闭包是晚绑定，调用时才解析名字，同 server 的所有 MCP 工具
+                        会全部解析到循环末尾的最后一个工具（回归：
+                        tests/unit/tool_layers/test_mcp_tool_binding.py）。
+
+                        # 使用 **kwargs 接收任意参数
+                        # ToolEngine 会自动从函数签名推断参数定义
+                        # 由于 MCP 工具的参数是动态的，我们使用 **kwargs 来接收所有参数
+                        """
+                        async def _mcp_executor(**kwargs) -> typing.Any:
+                            # kwargs 包含 ToolEngine 准备的参数
+                            # 对于 MCP 工具，我们将所有参数传递给 execute_tool
+                            # 注意：如果 kwargs 为空，说明 ToolEngine 没有匹配到任何参数
+                            # 这种情况下，我们传递空字典给 execute_tool
+                            return await self.execute_tool(sid, tname, kwargs)
+
+                        return _mcp_executor
 
                     engine.register_tool(
                         tool_name=tool_name,
-                        tool_func=_mcp_executor,
-                        description=tool_def.get("description", f"MCP tool: {_tool_name}"),
+                        tool_func=_make_mcp_executor(server_id, tool_def.get("name", "")),
+                        description=tool_def.get("description", f"MCP tool: {tool_def.get('name', '')}"),
                         tags=["mcp", server_id],
                         status=ToolStatus.AVAILABLE,
                     )

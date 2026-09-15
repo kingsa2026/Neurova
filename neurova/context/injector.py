@@ -97,7 +97,13 @@ except (ImportError, ModuleNotFoundError):
     QuestionEntry = None
     QuestionStatus = None
 
-from .models import ContextBuildResult, ContextEntry, TokenBudget
+from .models import (
+    REFLECTION_ENVELOPE_LESSON_LIMIT,
+    ContextBuildResult,
+    ContextEntry,
+    TokenBudget,
+    clip_reflection_lesson,
+)
 
 if TYPE_CHECKING:
     from neurova.cognitive_layers.memory_layer.manager import MemoryManager
@@ -282,10 +288,10 @@ class UnifiedContextInjector(BaseModule):
         system_budget = max(int(self._token_budget.system_prompt * 0.8), 600)
 
         # 2. 记忆：按比例缩放，但设下限——
-        #    遗留①：小占比记忆（如 9 tokens vs 48000 历史）被比例缩水到
-        #    自身 token 以下，_build_memory_context 把记忆截成碎屑，截出
-        #    的量被历史预算吞掉（纯损毁零收益）。下限 = max(自身估算,
-        #    max_tokens/10)：小记忆保自身，大记忆保 10% 窗口。
+        # 遗留①：小占比记忆（如 9 tokens vs 48000 历史）被比例缩水到
+        # 自身 token 以下，_build_memory_context 把记忆截成碎屑，截出
+        # 的量被历史预算吞掉（纯损毁零收益）。下限 = max(自身估算,
+        # max_tokens/10)：小记忆保自身，大记忆保 10% 窗口。
         memory_own_estimate = memory_estimate if memory_estimate > 0 else self._token_budget.memories
         memory_budget = max(
             int(memory_own_estimate * compression_ratio),
@@ -344,7 +350,7 @@ class UnifiedContextInjector(BaseModule):
         if agent_emotion and self._show_empathy:
             emotion_content = self._format_emotion(agent_emotion)
 
-        # 批次 A（docs/04-plans/2026-09-07-提示词与工具面升级实施方案.md）：
+        # 批次 A：
         # 五段动态内容 + 分钟级时间不再拼进 system 消息，改为瞬态信封挂在末条
         # user 消息上——system 会话内字节级稳定（前缀缓存硬判据），且免疫句
         # 声明注入内容非用户话语、其中指令不执行。system 侧日期级时间由
@@ -475,7 +481,11 @@ class UnifiedContextInjector(BaseModule):
                 # 此前读 log.situation/log.lesson（不存在）→ AttributeError 被 except
                 # 吞掉，反思上下文永远是空字符串。
                 lesson = (log.insights[0] if log.insights else log.content) or log.title
-                parts.append(f"- [{status_mark}] {log.title[:50]} → {lesson[:60]}")
+                # 信封块教训行按单源预算截断（旧硬编码 60 腰斩一条真教训）
+                parts.append(
+                    f"- [{status_mark}] {log.title[:50]} → "
+                    f"{clip_reflection_lesson(lesson, REFLECTION_ENVELOPE_LESSON_LIMIT)}"
+                )
 
             return "\n".join(parts)
 
@@ -688,7 +698,8 @@ class UnifiedContextInjector(BaseModule):
             if not similar:
                 return ""
 
-            # F11 修复：不再自带 "## 相关经验" 段头——内容经信封 <experience> 块
+            # F11 修复：不再自带 "
+            # 相关经验" 段头——内容经信封 <experience> 块
             # 包装（旧实现段头+_build_system_prompt 段头叠加成双标题）
             parts = []
             for exp in similar[:3]:  # 最多显示3条
@@ -773,7 +784,7 @@ class UnifiedContextInjector(BaseModule):
     def _trim_history(self, history: List[Dict]) -> List[Dict]:
         """在 Token 预算内裁剪历史
 
-        OpenClaw 启发 P0-8：分割点不得切进工具块。assistant(tool_calls) 与
+分割点不得切进工具块。assistant(tool_calls) 与
         其紧随的 tool 结果段视为一个配对单元——预算装不下整个单元时整体
         舍弃（分割点移动到块边界之前继续装填），绝不产出孤儿 tool 结果/
         悬空调用。普通消息维持旧语义：装不下即终止（首条兜底保留）。
@@ -850,8 +861,8 @@ class UnifiedContextInjector(BaseModule):
                 )
 
             # 1) 历史确定性淘汰（最老轮先弃）：预算不足以容纳"信封+历史"时，
-            #    逐条弃最旧，直到预算容纳信封或历史耗尽（不变式：退出时
-            #    system+历史+信封+user ≤ max_total，或历史已空）
+            # 逐条弃最旧，直到预算容纳信封或历史耗尽（不变式：退出时
+            # system+历史+信封+user ≤ max_total，或历史已空）
             envelope_budget = _budget_after(history)
             if envelope_budget < self._count_tokens(envelope):
                 remaining = list(history)
