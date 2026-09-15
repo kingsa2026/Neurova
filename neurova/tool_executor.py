@@ -876,6 +876,17 @@ class ToolExecutor:
         if not self._skill_registry:
             return {"error": "Skill 注册表未初始化"}
 
+        # P0-1 质量漏斗（turn_context 轮次账本）：本函数是全部技能执行路径
+        # （chat 主链/审批重放/子代理）的唯一咽喉，三处记账：
+        #   查无此技能 → selection 无 application；进入 execute_skill → applied；
+        #   异常 → applied（执行确已尝试）ok=False。回合成败归因在
+        #   PostChatPipeline flush（兜底完成不计功），此处不判任务完成。
+        from neurova.core.turn_context import record_turn_skill_funnel
+
+        # 漏斗账本局部态：id 先取 skill_name（查无此技能/异常早于对象解析时
+        # 仍有可记账身份），applied 仅在确已进入执行作用域后置真
+        _funnel_id = skill_name
+        _funnel_applied = False
         try:
             # 获取 Skill——经 Protocol 只读视图（skill_system.SkillRegistryProtocol
             # 正典面）。原 get_skill() 不在接口内：对纯 Protocol 注册表拿到协程
@@ -884,7 +895,12 @@ class ToolExecutor:
             # 2026-09-13 根治，防回归=AsyncMock 契约测试必踩此面）。
             skill = self._skill_registry.skills.get(skill_name)
             if not skill:
+                record_turn_skill_funnel(skill_name, applied=False, ok=False)
                 return {"error": f"Skill {skill_name} 不存在"}
+
+            _funnel_id = str(
+                getattr(skill, "skill_id", "") or getattr(skill, "id", "") or skill_name
+            )
 
             # B3（工具面审计）：依赖前置声明（config.requires.bins）——声明的外部
             # 可执行文件缺失时快速失败并提示安装，而非运行时以晦涩的
@@ -913,6 +929,7 @@ class ToolExecutor:
             from neurova.skills.permissions import parse_permissions, skill_permission_scope
 
             _perm = parse_permissions(getattr(skill, "config", {}).get("permissions"))
+            _funnel_applied = True
             with skill_permission_scope(_perm):
                 # 沙箱根注入（2026-09-08 相对路径乱放根因修复）：file_operation
                 # 的相对路径必须落在 agent 工作区。在 execute_skill_tool 咽喉处
@@ -933,10 +950,14 @@ class ToolExecutor:
                 }
             if _deps_warning and isinstance(result, dict):
                 result.setdefault("deps_warning", _deps_warning)
+            record_turn_skill_funnel(
+                _funnel_id, applied=True, ok=self._result_is_success(result)
+            )
             return result
 
         except Exception as e:
             logger.error("Skill 执行失败: %s", e)
+            record_turn_skill_funnel(_funnel_id, applied=_funnel_applied, ok=False)
             return {"error": str(e)}
 
     async def execute_cli_tool(self, command: str, args: Optional[Dict] = None) -> Dict:
@@ -2451,12 +2472,11 @@ class ToolExecutor:
 
         P2-11 修复: urllib.request.urlopen 是阻塞调用（最长卡 timeout 秒），
         原实现直接在事件循环中执行，会卡死整个服务（所有并发会话/心跳全停摆）。
+        TLS 指纹走共享层 neurova.http_fetch（curl_cffi 浏览器指纹优先，urllib 兜底）。
         """
-        import urllib.request
+        from neurova import http_fetch
 
-        req = urllib.request.Request(url, headers={"User-Agent": user_agent})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read().decode("utf-8", errors="replace")
+        return http_fetch.fetch_text(url, user_agent, timeout)
 
     def _searxng_search(self, query: str, base_url: str) -> str:
         """searxng 自托管实例 JSON 检索（P1-2）。返回拼好的摘要文本。

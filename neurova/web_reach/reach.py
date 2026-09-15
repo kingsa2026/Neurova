@@ -16,12 +16,12 @@ import sys
 import tempfile
 import time
 import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import feedparser
 
+from neurova import http_fetch
 from neurova.core.logger import get_logger
 from neurova.web_reach.credentials import get_credential_store
 
@@ -67,14 +67,15 @@ def _assert_public_host(url: str) -> None:
 
 
 def _http_get_text(url: str, timeout: float) -> str:
-    """GET 请求并返回 UTF-8 文本（请求前做 SSRF 主机边界校验）"""
+    """GET 请求并返回 UTF-8 文本（请求前做 SSRF 主机边界校验）。
+
+    TLS 指纹走共享层 neurova.http_fetch（curl_cffi 浏览器指纹优先，urllib 兜底）。
+    """
     scheme_err = _check_scheme(url)
     if scheme_err:
         raise ValueError(scheme_err)
     _assert_public_host(url)
-    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read().decode("utf-8", errors="replace")
+    return http_fetch.fetch_text(url, _USER_AGENT, timeout)
 
 
 def _error(msg: str, **extra) -> Dict[str, Any]:
@@ -139,10 +140,12 @@ def rss_read(url: str, limit: int = 10, timeout: float = _DEFAULT_TIMEOUT) -> Di
     if not url or not url.strip():
         return _error("缺少 URL")
     try:
-        # feedparser 内部自建连接；SSRF 边界由前置解析校验兜底
+        # 经共享层抓取：feedparser 传 URL 会内建裸 urllib 连接（绕过 TLS 指纹层，
+        # 且连接错误被其 bozo 吞成空结果）。传原始字节保留其编码自动探测。
         _check_scheme(url)
         _assert_public_host(url)
-        parsed = feedparser.parse(url, request_headers={"User-Agent": _USER_AGENT})
+        raw = http_fetch.fetch_bytes(url, _USER_AGENT, timeout)
+        parsed = feedparser.parse(raw)
         if parsed.get("bozo") and not parsed.get("entries"):
             return _error(f"RSS 解析失败: {parsed.get('bozo_exception')}")
         data = [
