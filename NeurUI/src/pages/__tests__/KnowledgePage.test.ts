@@ -40,6 +40,15 @@ vi.mock('@/api/modules/knowledge', () => ({
   listKbCollections: vi.fn().mockResolvedValue({ data: { collections: [] } }),
   createKbCollection: vi.fn(),
   deleteKbCollection: vi.fn(),
+  // WeKnora 落地轮新增面：补 stub 防调用即崩
+  syncKbConfig: vi.fn().mockResolvedValue({ data: { upserted: 0, deleted: 0, failed: 0 } }),
+  listKnowledgeChunks: vi.fn().mockResolvedValue({ data: [] }),
+  updateKnowledgeChunk: vi.fn().mockResolvedValue({ data: { revision: 1 } }),
+  listKnowledgeChunkRevisions: vi.fn().mockResolvedValue({ data: [] }),
+  previewChunking: vi.fn().mockResolvedValue({ data: { children: [], parents: [], max_chars: 800 } }),
+  listIngressTasks: vi.fn().mockResolvedValue({ data: { tasks: [], stats: {} } }),
+  getIngressTask: vi.fn().mockResolvedValue({ data: { spans: [] } }),
+  cancelIngressTask: vi.fn().mockResolvedValue({ data: {} }),
 }))
 
 vi.mock('@/api', () => ({

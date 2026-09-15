@@ -68,16 +68,66 @@ def _chunk_hit(item: Dict[str, Any], chunk_index: int, score: float) -> Dict[str
 
 
 def parent_context_text(item: Dict[str, Any], parent_index: int) -> str:
-    """父块正文（P1#6）：优先存储副本，退回偏移切片。"""
-    for p in item.get("parents") or []:
-        if p.get("index") != parent_index:
-            continue
-        content = p.get("content") or ""
-        if content:
-            return str(content)
-        full = item.get("content") or ""
-        return full[p.get("char_start", 0) : p.get("char_end", 0)]
-    return ""
+    """父块上下文（P1#6 + 下批①rebuildParentContent lite）：原文为底 + 已编辑子块叠加。
+
+    - 只叠加 revision>0 的子块——未编辑子块原文天然含于父底，拼接反造成
+      子块 overlap 窗口的重复；
+    - 互叠的编辑区间并成冲突组：组内最高 revision 为 winner 区间替换生效，
+      loser 文本尾部追加（信息不静默丢，对齐 WeKnora latest-wins/loser-appended）；
+    - 无任何编辑 → 与旧版逐字节一致（零回归）。
+    """
+    parent = next(
+        (p for p in (item.get("parents") or []) if p.get("index") == parent_index), None
+    )
+    if parent is None:
+        return ""
+    full = item.get("content") or ""
+    base = str(parent.get("content") or "") or full[
+        parent.get("char_start", 0) : parent.get("char_end", 0)
+    ]
+    base_start = int(parent.get("char_start", 0))
+    edits = [
+        c
+        for c in (item.get("chunks") or [])
+        if c.get("parent_index") == parent_index
+        and int(c.get("revision", 0) or 0) > 0
+        and c.get("content")
+    ]
+    if not edits:
+        return base
+
+    ordered = sorted(
+        edits, key=lambda e: (int(e.get("char_start", 0)), -int(e.get("revision", 0) or 0))
+    )
+    out: List[str] = []
+    tails: List[str] = []
+    pos = base_start
+    i = 0
+    while i < len(ordered):
+        first = ordered[i]
+        group = [first]
+        g_end = int(first.get("char_end", 0))
+        j = i + 1
+        while j < len(ordered) and int(ordered[j].get("char_start", 0)) <= g_end:
+            group.append(ordered[j])
+            g_end = max(g_end, int(ordered[j].get("char_end", 0)))
+            j += 1
+        winner = max(group, key=lambda g: int(g.get("revision", 0) or 0))
+        ws = max(int(winner.get("char_start", 0)), pos)
+        if ws - pos > 0:
+            out.append(base[pos - base_start : ws - base_start])
+        out.append(str(winner.get("content") or ""))
+        for loser in sorted(group, key=lambda g: int(g.get("revision", 0) or 0)):
+            if loser is not winner:
+                tails.append(str(loser.get("content") or ""))
+        pos = g_end
+        i = j
+    if pos - base_start < len(base):
+        out.append(base[max(0, pos - base_start) :])
+    result = "".join(out)
+    if tails:
+        result += "\n" + "\n".join(tails)
+    return result
 
 
 def _substring_chunk_hits(item: Dict[str, Any], q_lower: str) -> List[Dict[str, Any]]:

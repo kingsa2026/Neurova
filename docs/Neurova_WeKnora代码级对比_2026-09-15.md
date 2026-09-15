@@ -90,3 +90,10 @@ Neurova = 单进程桌面个人智能体。结论：**只抄机制、不抄架�
 - **前端闭环**：`npm run build`（vue-tsc 全量 + vite 产物）通过；i18n 守卫+页面挂载 56 测绿（修复 fr/it 撇号转义、previewResult 类型收紧 2 处提交前 TS 错）。
 - **提交自洽核验**：从 HEAD 建干净 worktree 跑本轮全部核心套件 → **310 passed**（提交不含任何未提交依赖）。唯一收集错为**历史遗留断链**：HEAD 旧测试 `test_pending_memory.py` → `neurova.web_reach.credentials`——web_reach 为早前 Agent-Reach 会话的未跟踪目录（[[neurova-agent-reach-integration]] 记录「须一起提交」），主工作区有该目录故全绿，与本轮提交无关，登记待其会话入库。
 - **全量归属复核**：unit 主跑 governance 一次顺序 flake（单跑/复跑均绿）；api 目录 4-5 失败集中在 `test_my_skills_wave_v`/`test_transfers_wave_h4`（并行会话本会话内新建的在途测试）——零涉及本轮文件。**待拍板登记**：块编辑→父块叠加重建、ingress span 的前端可视化（当前 API 就绪）为下批候选。
+
+## 10.2 下批（同日深夜，commit 见 git log）：遗留两项落地
+
+- **父块叠加重建（rebuildParentContent lite）**：`repository.parent_context_text` 升级为"父原文为底 + 仅叠加 revision>0 子块"（未编辑子块的原文天然含于父底，全量拼接会重复子块 overlap 窗口）；互叠编辑并冲突组——组内最高 revision 区间替换、loser 文本尾部追加（信息不静默丢，对齐 WeKnora latest-wins/loser-appended）；无编辑时与旧版逐字节一致。检索链 context_passages 自动继承（单一消费点）。测试 `test_parent_overlay_rebuild.py`(6) 先红后绿，knowledge 套件 265→271 无回归。
+- **ingress span 前端可视化**：`knowledge.ts` 增 `listIngressTasks/getIngressTask/cancelIngressTask` + `IngressTask/IngressSpan/IngressStats` 类型；KnowledgePage header 新增"摄取任务"入口 → 模态：任务表（状态色 tag、stats 计数条、pending/processing 才可取消、取消后刷新+提示）、展开行经 `@expand` 懒加载详情接口取 spans（列表不带 spans）、span 行渲染 stage/状态/时间/error 四要素；i18n 15 键 ×11 语（ko 首版笔误已修）。测试：`KnowledgePage.ingressSpans.test.ts` SFC 源码契约 6 项（入口/tag 门/懒加载/四要素/路由字面一致/取消不静默）+ 既有页面测 mock 补齐新面；i18n 守卫+页面+新测 62 绿、vue-tsc 0 错、vite build 过、后端 325 绿。
+
+至此报告 §7/§8 全部借鉴项与遗留候选均已闭环。
