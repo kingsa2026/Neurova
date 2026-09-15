@@ -1,8 +1,8 @@
 {
   "name": "Neurova",
   "description": "",
-  "model": "qwen3.8-flash",
-  "provider": "bai",
+  "model": "DeepSeek-V4-Flash-Vision-Exp",
+  "provider": "amd",
   "temperature": 0.7,
   "personality": "",
   "constitution": "",
