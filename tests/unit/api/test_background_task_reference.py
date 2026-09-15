@@ -102,8 +102,9 @@ def test_collaboration_canvas_run_holds_task_reference(monkeypatch):
             return kwargs["instance"]
 
     class _FakeStore:
-        def get(self, canvas_id):
-            return {"id": canvas_id, "name": "c1"}
+        def get(self, canvas_id, **kw):
+            # B0 契约：run 端点带 requester_id/is_admin/project_ids 读取
+            return {"id": canvas_id, "name": "c1", "user_id": "u1"}
 
     fake_workflow = SimpleNamespace(id="wf-1", status=None)
 

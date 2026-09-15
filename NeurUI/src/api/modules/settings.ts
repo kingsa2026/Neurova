@@ -31,6 +31,20 @@ export interface AdvancedSettings {
   max_output_tokens: number
   /** 桌面运行权限档：full/sandbox/review/auto */
   desktop_runtime_mode: string
+  /** 桌面沙箱提供方：sandbox/rdp/空=未配置 */
+  desktop_provider?: string
+  /** 技能目录常驻系统提示（OpenSpace 召回三开关，默认全开） */
+  skill_catalog_enabled: boolean
+  /** 技能 function schema 预算化（超上限按关键词阶梯取 top-k） */
+  skill_schema_budget_enabled: boolean
+  /** schema 预算的技能数上限 */
+  skill_schema_max?: number
+  /** 进化提案持久作业队列（崩溃不丢/失败重试） */
+  evolution_queue_enabled: boolean
+  /** 技能语义检索档（bge ONNX 向量参与召回排序，引擎缺失自动降级关键词） */
+  skill_semantic_recall_enabled: boolean
+  /** A6 工具面延迟加载（大工具目录 BM25 检索+目录常驻，达阈值激活） */
+  tool_search_enabled: boolean
 }
 
 export interface AppSettings {

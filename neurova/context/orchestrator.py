@@ -25,6 +25,10 @@ from .recovery import assign_turn_ids
 
 logger = get_logger(__name__)
 
+# Wave E 语义档向量缓存（按 agent 隔离的进程内注册表；SkillVectorCache 自带
+# 磁盘持久化，这里只避免每轮重建对象）
+_VECTOR_CACHES: dict = {}
+
 
 class ContextOrchestrator:
     """统一上下文构建模块
@@ -429,6 +433,11 @@ class ContextOrchestrator:
         workspace_section = self._workspace_docs_section()
         if workspace_section:
             system_instructions.append(workspace_section)
+
+        # P0-3（OpenSpace 对齐）：可用技能目录段——同单源纪律，默认关=零注入
+        catalog_section = self._skill_catalog_section()
+        if catalog_section:
+            system_instructions.append(catalog_section)
 
         # 使用配置的行为规则
         developer_instructions = list(self.config.behavior_rules)
@@ -1279,6 +1288,74 @@ class ContextOrchestrator:
             logger.warning("工作区文档收集失败(跳过)", exc_info=True)
         return ""
 
+    def _resolve_recall_flag(self, config_attr: str, settings_key: str) -> bool:
+        """技能召回开关三态解析（2026-09-15 SettingPage 收口）。
+
+        agent 显式配置（AgentConfig 非 None）> app_settings advanced 段
+        （SettingPage 高级选项卡，默认开）> 存储故障回退 True。
+        """
+        explicit = getattr(self.config, config_attr, None)
+        if explicit is not None:
+            return bool(explicit)
+        try:
+            from neurova.core.app_settings import get_advanced_settings
+
+            return bool(get_advanced_settings().get(settings_key, True))
+        except Exception:  # noqa: BLE001 - 设置故障不关闭功能（inline 路径等价可用）
+            return True
+
+    def _skill_catalog_section(self) -> str:
+        """P0-3 可用技能目录段（OpenSpace 预算化目录；默认开，SettingPage 可关）。
+
+        单源 helper：build_context（实际调用路径）与 build_system_prompt 共用，
+        与 _workspace_docs_section 同纪律（防双路径漂移）。目录按**稳定模式**
+        渲染（不随轮次输入过滤 paths 技能）——尊重 build_context "system 会话
+        内字节稳定"设计；paths 条件激活在工具面 _build_tools_for_llm 按真实
+        输入执行。无注册表/无启用技能返回空串（零注入，system prompt 零变化）。
+
+        Wave E：turn skills_off（P2-4 cold 臂）整体压制；provisional 技能软标注
+        （信任账本的模型侧消费面，OpenSpace listing 同语义）。
+        """
+        try:
+            from neurova.core.turn_context import get_turn_skills_off
+
+            if get_turn_skills_off():
+                return ""
+        except Exception:  # noqa: BLE001
+            pass
+        if not self._resolve_recall_flag("skill_catalog_enabled", "skill_catalog_enabled") or (
+            self.skill_registry is None
+        ):
+            return ""
+        try:
+            from neurova.skills.skill_injection import render_skill_catalog
+
+            _trust = None
+            try:
+                from neurova.skills.skill_service import SkillService
+
+                _tmap = {}
+                for _sid, _info in SkillService(
+                    agent_id=str(getattr(self.config, "agent_id", "") or "default")
+                ).iter_skills():
+                    _st = ((_info.get("identity") or {}).get("trust") or {}).get("state")
+                    if _st:
+                        _tmap[_sid] = _st
+                if _tmap:
+                    _trust = _tmap.get
+            except Exception:  # noqa: BLE001 - 信任读数不可用不影响目录
+                _trust = None
+
+            budget = int(getattr(self.config, "skill_catalog_budget_chars", 8000) or 8000)
+            catalog = render_skill_catalog(
+                self.skill_registry, max_chars=budget, trust_lookup=_trust
+            )
+            if catalog:
+                return "## 可用技能目录\n" + catalog + "\n可用 $技能名 显式调用完整内容。"
+        except Exception:  # noqa: BLE001 - 目录渲染失败不阻断 system prompt
+            logger.warning("技能目录渲染失败(跳过)", exc_info=True)
+        return ""
+
     def build_system_prompt(self, tools_desc: str = "") -> str:
         """构建系统提示（Phase 6.5: 统一行为规则配置）。
 
@@ -1309,6 +1386,11 @@ class ContextOrchestrator:
         workspace_section = self._workspace_docs_section()
         if workspace_section:
             parts.append("\n\n" + workspace_section)
+
+        # P0-3（OpenSpace 对齐）：可用技能目录段——同单源 helper
+        catalog_section = self._skill_catalog_section()
+        if catalog_section:
+            parts.append("\n\n" + catalog_section)
 
         # 使用配置的行为规则
         if self.config.behavior_rules:
@@ -1514,8 +1596,11 @@ class ContextOrchestrator:
         import os as _os
 
         # P1-5（Codex Deferred+tool_search 对齐）：默认激活——隐藏候选达阈值
-        # 即压缩；NEUROVA_TOOL_SEARCH=0 显式关闭（保留退路）
-        if not tools or _os.environ.get("NEUROVA_TOOL_SEARCH", "1") == "0":
+        # 即压缩；Wave E 收口 SettingPage：env 显式值 > tool_search_enabled
+        # （app_settings，默认 True）> True
+        from neurova.context.tool_search import tool_search_enabled as _ts_on
+
+        if not tools or not _ts_on():
             return tools
         try:
             from neurova.context.tool_search import (
@@ -1745,12 +1830,124 @@ async def _build_tools_for_llm(self) -> Optional[List[Dict]]:
             logger.exception("从 ToolRouter 获取工具列表失败")
 
     # 2. Skill Registry 工具 — 用实际参数 schema 替换 ToolRouter 的占位符
-    if self.skill_registry:
+    # P2-4 cold 臂：turn 级 skills_off 上下文置真时本段整体缺席（与目录段同源，
+    # 评测双臂之间唯一变量=技能库可见性）
+    _skills_off = False
+    try:
+        from neurova.core.turn_context import get_turn_skills_off as _gso
+
+        _skills_off = bool(_gso())
+    except Exception:  # noqa: BLE001
+        pass
+    if self.skill_registry and not _skills_off:
         try:
             from neurova.skill_system.compat import unpack_skill  # H2 fix: 解包 class B 的 tuple
 
-            for skill_name, raw_skill in self.skill_registry.skills.items():
-                skill = unpack_skill(raw_skill)  # H2 fix: 类 B 返回 (Skill, Path) 元组，需解包
+            # P2-5 paths 条件激活 + P2-2 阶梯预算 + Wave E 召回闭环：
+            # 质量熔断（恒启用，预算开关与否都生效——它是安全闸不是优化）与
+            # 语义档（bge ONNX，引擎缺失/失败优雅降级纯关键词）。
+            from neurova.skills.skill_injection import match_skill_paths
+
+            _turn_input = ""
+            try:
+                from neurova.core.turn_context import get_turn_user_input
+
+                _turn_input = get_turn_user_input() or ""
+            except Exception:  # noqa: BLE001 - 非轮次上下文（评测/脚本）按空输入
+                pass
+            _agent_id = str(getattr(self.config, "agent_id", "") or "default")
+
+            # 质量读数（SkillService manifest 漏斗，无数据=不参熔断）
+            _quality_lookup = None
+            try:
+                from neurova.skills.skill_injection import QualityInfo as _QI
+                from neurova.skills.skill_service import SkillService as _Svc
+
+                _qmap = {}
+                for _sid, _info in _Svc(agent_id=_agent_id).iter_skills():
+                    _u = _info.get("usage") or {}
+                    _app = int(_u.get("applications", 0) or 0)
+                    if _app > 0:
+                        _qmap[_sid] = _QI(
+                            applications=_app,
+                            completions=int(_u.get("completions", 0) or 0),
+                            fallbacks=int(_u.get("fallbacks", 0) or 0),
+                        )
+                if _qmap:
+                    _quality_lookup = _qmap.get
+            except Exception:  # noqa: BLE001 - 质量面故障不影响注入
+                pass
+
+            _items = [
+                (n, unpack_skill(raw)) for n, raw in self.skill_registry.skills.items()
+            ]
+            # 质量熔断先行（quality_blocked 单源判据）
+            if _quality_lookup is not None:
+                from neurova.skills.skill_injection import quality_blocked as _qb
+
+                _items = [(n, s) for n, s in _items if not _qb(_quality_lookup(n))]
+
+            # 语义档（skill_semantic_recall_enabled 三态：agent > 设置中心 > True）
+            _semantic: dict = {}
+            _sem_cfg = getattr(self.config, "skill_semantic_recall_enabled", None)
+            if _sem_cfg is None:
+                try:
+                    from neurova.core.app_settings import get_advanced_settings
+
+                    _sem_on = bool(get_advanced_settings().get("skill_semantic_recall_enabled", True))
+                except Exception:  # noqa: BLE001
+                    _sem_on = True
+            else:
+                _sem_on = bool(_sem_cfg)
+            if _sem_on and _turn_input and _items:
+                try:
+                    from pathlib import Path as _P
+
+                    from neurova.skills.skill_semantics import (
+                        SkillVectorCache,
+                        semantic_scores_for,
+                    )
+
+                    _cache = _VECTOR_CACHES.get(_agent_id)
+                    if _cache is None:
+                        _cache = SkillVectorCache(
+                            cache_file=_P(f"data/agents/{_agent_id}/skills/embeddings.json")
+                        )
+                        _VECTOR_CACHES[_agent_id] = _cache
+                    _semantic = semantic_scores_for(_cache, _turn_input, dict(_items))
+                except Exception:  # noqa: BLE001 - 语义档故障回退关键词档
+                    _semantic = {}
+
+            # 开关解析内联（不新增 self 方法依赖，兼容既有 spec=[] 替身契约）：
+            # agent 显式配置（非 None）> app_settings advanced 段（默认开）
+            _budget_cfg = getattr(self.config, "skill_schema_budget_enabled", None)
+            if _budget_cfg is None:
+                try:
+                    from neurova.core.app_settings import get_advanced_settings
+
+                    _budget_on = bool(get_advanced_settings().get("skill_schema_budget_enabled", True))
+                except Exception:  # noqa: BLE001 - 设置故障保持功能开
+                    _budget_on = True
+            else:
+                _budget_on = bool(_budget_cfg)
+            if _budget_on:
+                from neurova.skills.skill_injection import select_skills_for_turn
+
+                _picked = set(
+                    select_skills_for_turn(
+                        dict(_items),
+                        _turn_input,
+                        max_skills=int(getattr(self.config, "skill_schema_max", 20) or 20),
+                        semantic_scores=_semantic or None,
+                    )
+                )
+                _items = [(n, s) for n, s in _items if n in _picked]
+
+            for skill_name, skill in _items:
+                # P2-5：paths 门（未设定恒通过；显式 $mention 路径不经此处，
+                # 用户意志优先于条件激活）
+                if not match_skill_paths(skill, _turn_input):
+                    continue
                 # B2（工具面审计）：config.model_invocable=False 的技能不进模型工具面
                 # （人肉/API 仍可调用——SkillRegistry 与执行路径不受影响）
                 if isinstance(getattr(skill, "config", None), dict) and skill.config.get("model_invocable") is False:

@@ -327,6 +327,24 @@ def _isolate_governance_settings(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_evolution_job_queue(tmp_path, monkeypatch):
+    """所有测试的进化作业队列落盘指向临时目录（含单例重建）。
+
+    EvolutionJobQueue（neurova/evolution/job_queue.py）默认落
+    data/evolution/jobs.db；进化队列开关默认开（2026-09-15 SettingPage 收口）
+    后，post_chat 每轮都会 enqueue/drain——不隔离即污染仓库 data/ 并让
+    测试互相看到作业。
+    """
+    monkeypatch.setenv("NEUROVA_EVOLUTION_JOBS_DB", str(tmp_path / "evolution_jobs.db"))
+    try:
+        from neurova.evolution.job_queue import reset_evolution_job_queue
+
+        reset_evolution_job_queue()
+    except Exception:  # pragma: no cover - 模块未就绪时跳过
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _isolate_meta_ledger(tmp_path, monkeypatch):
     """所有测试的元认知台账落盘指向临时目录。
 
