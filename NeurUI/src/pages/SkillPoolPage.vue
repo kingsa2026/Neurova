@@ -80,20 +80,15 @@
             >
               <div class="skill-body">
                 <div class="skill-meta">
-                  <a-tag :color="skill.shared ? 'green' : 'default'">
-                    {{ skill.shared ? t('skillPool.shared') : t('skillPool.private') }}
-                  </a-tag>
+                  <a-tag color="blue">{{ t('skillPool.private') }}</a-tag>
                   <span class="meta-text">v{{ skill.version ?? '1.0' }}</span>
                 </div>
                 <div class="skill-actions">
                   <GlassButton variant="ghost" size="sm" @click="editSkill(skill)">
                     {{ t('common.edit') }}
                   </GlassButton>
-                  <GlassButton variant="secondary" size="sm" @click="toggleShare(skill)">
-                    {{ skill.shared ? t('skillPool.unshare') : t('skillPool.share') }}
-                  </GlassButton>
-                  <GlassButton variant="secondary" size="sm" @click="pushToPool(skill)">
-                    {{ t('skillPool.pushToPool') }}
+                  <GlassButton variant="secondary" size="sm" @click="publishToPublic(skill)">
+                    {{ t('skillPool.publishToPublic') }}
                   </GlassButton>
                   <GlassButton variant="danger" size="sm" @click="deleteSkill(skill)">
                     {{ t('common.delete') }}
@@ -104,6 +99,34 @@
           </div>
           <a-pagination v-if="filteredPrivate.length > pageSize" v-model:current="privatePage" :pageSize="pageSize" :total="filteredPrivate.length" size="small" style="margin-top: 16px; text-align: center" />
           <a-empty v-else :description="t('skillPool.noPrivate')" />
+        </a-spin>
+      </a-tab-pane>
+
+      <!-- Wave H-W5 三层库流转确认队列（agent→user 推送 / 公共库升级，确认才落库） -->
+      <a-tab-pane key="transfers" :tab="t('skillPool.transferTab')">
+        <p class="tab-hint">{{ t('skillPool.transfersHint') }}</p>
+        <a-spin :spinning="transfersLoading">
+          <div v-if="transfers.length" class="skills-grid">
+            <GlassCard v-for="tr in transfers" :key="tr.transfer_id" :title="tr.name || tr.skill_id" :subtitle="`v${tr.version}`">
+              <div class="skill-body">
+                <div class="skill-meta">
+                  <a-tag :color="tr.kind === 'upgrade' ? 'orange' : 'green'">
+                    {{ tr.kind === 'upgrade' ? t('skillPool.transferKindUpgrade') : t('skillPool.transferKindInitial') }}
+                  </a-tag>
+                  <span class="meta-text">{{ t('skillPool.transferFrom') }} {{ tr.src_pool }}{{ tr.src_owner ? `/${tr.src_owner}` : '' }}</span>
+                </div>
+                <div style="display: flex; gap: 8px">
+                  <GlassButton variant="primary" size="sm" :loading="transferBusy === tr.transfer_id" @click="doAcceptTransfer(tr)">
+                    {{ t('skillPool.transferAccept') }}
+                  </GlassButton>
+                  <GlassButton variant="ghost" size="sm" :disabled="transferBusy === tr.transfer_id" @click="doRejectTransfer(tr)">
+                    {{ t('skillPool.transferReject') }}
+                  </GlassButton>
+                </div>
+              </div>
+            </GlassCard>
+          </div>
+          <a-empty v-else :description="t('skillPool.noTransfers')" />
         </a-spin>
       </a-tab-pane>
     </a-tabs>
@@ -187,7 +210,52 @@ interface PoolSkill {
 
 const { t } = useI18n()
 
-const activeTab = ref<'public' | 'private' | 'pending'>('public')
+const activeTab = ref<'public' | 'private' | 'pending' | 'transfers'>('public')
+
+// Wave H-W5 流转确认队列（三层库：agent→user 推送 / 公共库升级卡）
+const transfers = ref<skillPoolApi.SkillTransfer[]>([])
+const transfersLoading = ref(false)
+const transferBusy = ref('')
+
+async function fetchTransfers() {
+  transfersLoading.value = true
+  try {
+    const res = await skillPoolApi.listSkillTransfers('pending')
+    const data: any = res?.data
+    transfers.value = Array.isArray(data) ? data : data?.items ?? []
+  } catch {
+    transfers.value = []
+  } finally {
+    transfersLoading.value = false
+  }
+}
+
+async function doAcceptTransfer(tr: skillPoolApi.SkillTransfer) {
+  transferBusy.value = tr.transfer_id
+  try {
+    await skillPoolApi.acceptSkillTransfer(tr.transfer_id)
+    message.success(t('skillPool.transferAccepted'))
+    fetchTransfers()
+    fetchPrivate()
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || err?.message || t('skillPool.transferError'))
+  } finally {
+    transferBusy.value = ''
+  }
+}
+
+async function doRejectTransfer(tr: skillPoolApi.SkillTransfer) {
+  transferBusy.value = tr.transfer_id
+  try {
+    await skillPoolApi.rejectSkillTransfer(tr.transfer_id)
+    message.success(t('skillPool.transferRejected'))
+    fetchTransfers()
+  } catch (err: any) {
+    message.error(err?.response?.data?.detail || err?.message || t('skillPool.transferError'))
+  } finally {
+    transferBusy.value = ''
+  }
+}
 
 // C10 治理收紧：待审产物审批面
 const pendingLoading = ref(false)
@@ -287,7 +355,7 @@ async function handleZipFileChange(e: Event) {
   }
   message.loading({ content: t('skillPool.uploading'), key: 'zip-upload', duration: 0 })
   try {
-    await skillPoolApi.installSkillFromZip(file)
+    await skillPoolApi.installSkillFromZip(file, 'me')
     message.success({ content: t('skillPool.installSuccess'), key: 'zip-upload' })
     fetchPrivate()
   } catch (err: any) {
@@ -301,7 +369,7 @@ async function handleUrlInstall() {
   if (!url) return
   urlInstalling.value = true
   try {
-    await skillPoolApi.installSkillFromUrl(url)
+    await skillPoolApi.installSkillFromUrl(url, undefined, 'me')
     message.success(t('skillPool.installSuccess'))
     showUrlModal.value = false
     installUrl.value = ''
@@ -355,12 +423,19 @@ function editSkill(skill: PoolSkill) {
   modalVisible.value = true
 }
 
+// 三层库契约：GET 返回裸数组（拦截器已解包 body），主键字段是 skill_id——
+// 归一化为前端统一 id（旧实现读 res.data 恒 undefined → 两页签生产恒空）。
+function normLibraryRows(res: any): PoolSkill[] {
+  const data = res?.data ?? res
+  const arr = Array.isArray(data) ? data : data?.items ?? []
+  return arr.map((s: any) => ({ ...s, id: s.skill_id ?? s.id ?? '', _installing: false }))
+}
+
 async function fetchPublic() {
   publicLoading.value = true
   try {
-    const res = await skillPoolApi.getPublicSkills({ search: publicSearch.value || undefined })
-    const data = res?.data
-    publicSkills.value = (Array.isArray(data) ? data : data?.items ?? []).map((s: any) => ({ ...s, _installing: false }))
+    const res = await skillPoolApi.listPublicLibrarySkills()
+    publicSkills.value = normLibraryRows(res)
   } catch (err: any) {
     const msg = err?.response?.data?.error || err?.message || t('skillPool.loadError')
     message.error(msg)
@@ -372,9 +447,8 @@ async function fetchPublic() {
 async function fetchPrivate() {
   privateLoading.value = true
   try {
-    const res = await skillPoolApi.getPrivateSkills('_all')
-    const data = res?.data
-    privateSkills.value = (Array.isArray(data) ? data : data?.items ?? []).map((s: any) => ({ ...s, _installing: false }))
+    const res = await skillPoolApi.listMySkills()
+    privateSkills.value = normLibraryRows(res)
   } catch (err: any) {
     const msg = err?.response?.data?.error || err?.message || t('skillPool.loadError')
     message.error(msg)
@@ -387,16 +461,16 @@ async function saveSkill() {
   saving.value = true
   try {
     if (editingSkill.value) {
-      await skillPoolApi.updateSkill(editingSkill.value.id, { name: form.value.name, description: form.value.description, category: form.value.category })
+      await skillPoolApi.updateMySkill(editingSkill.value.id, { name: form.value.name, description: form.value.description, category: form.value.category })
       message.success(t('skillPool.updateSuccess'))
     } else {
-      await skillPoolApi.createSkill({ name: form.value.name, description: form.value.description, category: form.value.category })
+      await skillPoolApi.createMySkill({ name: form.value.name, description: form.value.description, category: form.value.category })
       message.success(t('skillPool.createSuccess'))
     }
     modalVisible.value = false
     fetchPrivate()
   } catch (err: any) {
-    const msg = err?.response?.data?.error || err?.message || t('skillPool.saveError')
+    const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || t('skillPool.saveError')
     message.error(msg)
   } finally {
     saving.value = false
@@ -406,39 +480,35 @@ async function saveSkill() {
 async function installPublic(skill: PoolSkill) {
   skill._installing = true
   try {
-    await skillPoolApi.installSkill(skill.id, '_current')
+    // 三层语义：公共库→我的私库自助安装（副本+血缘，公共升级广播可达）
+    await skillPoolApi.installPublicToMine(skill.id)
     skill.install_count = (skill.install_count ?? 0) + 1
     message.success(t('skillPool.installSuccess'))
+    fetchPrivate()
   } catch (err: any) {
-    const msg = err?.response?.data?.error || err?.message || t('skillPool.installError')
+    const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || t('skillPool.installError')
     message.error(msg)
   } finally {
     skill._installing = false
   }
 }
 
-async function toggleShare(skill: PoolSkill) {
+/** 发布到公共库（需求 3：用户私库技能→公共库，须管理员审批）——
+ *  复用既有 submissions 审批流；旧 share/push 双按钮（断链路由）退役。 */
+async function publishToPublic(skill: PoolSkill) {
   try {
-    if (skill.shared) {
-      // Unshare not directly supported by API, use update
-      await skillPoolApi.updateSkill(skill.id, { config: { shared: false } })
-    } else {
-      await skillPoolApi.shareSkill(skill.id)
-    }
-    skill.shared = !skill.shared
-    message.success(skill.shared ? t('skillPool.shareSuccess') : t('skillPool.unshareSuccess'))
+    await skillPoolApi.submitSkillForReview({
+      skill_id: skill.id,
+      name: skill.name,
+      description: skill.description ?? '',
+      version: skill.version ?? '1.0.0',
+      category: skill.category ?? 'general',
+      // 服务端从本人用户私库快照 tool_sequence 载荷（公共副本保持可执行）
+      pool_skill_id: skill.id,
+    })
+    message.success(t('skillPool.publishSubmitted'))
   } catch (err: any) {
-    const msg = err?.response?.data?.error || err?.message || t('skillPool.shareError')
-    message.error(msg)
-  }
-}
-
-async function pushToPool(skill: PoolSkill) {
-  try {
-    await skillPoolApi.pushSkill(skill.id)
-    message.success(t('skillPool.pushSuccess'))
-  } catch (err: any) {
-    const msg = err?.response?.data?.error || err?.message || t('skillPool.pushError')
+    const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || t('skillPool.publishError')
     message.error(msg)
   }
 }
@@ -451,11 +521,11 @@ function deleteSkill(skill: PoolSkill) {
     cancelText: t('common.cancel'),
     onOk: async () => {
       try {
-        await skillPoolApi.deleteSkill(skill.id)
+        await skillPoolApi.deleteMySkill(skill.id)
         privateSkills.value = privateSkills.value.filter((s) => s.id !== skill.id)
         message.success(t('skillPool.deleteSuccess'))
       } catch (err: any) {
-        const msg = err?.response?.data?.error || err?.message || t('skillPool.deleteError')
+        const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || t('skillPool.deleteError')
         message.error(msg)
       }
     },
@@ -465,6 +535,7 @@ function deleteSkill(skill: PoolSkill) {
 onMounted(() => {
   fetchPublic()
   fetchPrivate()
+  fetchTransfers()
 })
 </script>
 

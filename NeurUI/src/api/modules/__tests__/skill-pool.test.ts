@@ -33,9 +33,14 @@ describe('skill-pool API — 既有函数 URL 对齐', () => {
     })
   })
 
-  it('getPrivateSkills calls GET /skill-pool/private with agent_id param', async () => {
-    await skillPool.getPrivateSkills('agent-1')
-    expect(mockGet).toHaveBeenCalledWith('/skill-pool/private', { params: { agent_id: 'agent-1' } })
+  it('listPublicLibrarySkills calls GET /skill-pool/public（三层库公共库真源，Wave H3 真人化）', async () => {
+    await skillPool.listPublicLibrarySkills()
+    expect(mockGet).toHaveBeenCalledWith('/skill-pool/public')
+  })
+
+  it('listMySkills calls GET /skill-pool/me/skills（Wave V 用户私库页签）', async () => {
+    await skillPool.listMySkills()
+    expect(mockGet).toHaveBeenCalledWith('/skill-pool/me/skills')
   })
 
   it('installSkill calls POST /marketplace/skills/{skillId}/install (canonical; 2026-09-09 修复: 原 /skill-pool/{id}/install 路由不存在恒 404)', async () => {
@@ -113,11 +118,11 @@ describe('skill-pool API — 新增函数', () => {
     expect(mockGet).toHaveBeenCalledWith('/skill-pool/agent/agent-1/skills')
   })
 
-  // --- enableSkill ---
-  it('enableSkill calls PUT /skill-pool/private/{skillId} with config.enabled', async () => {
-    await skillPool.enableSkill('skill-1', true)
-    expect(mockPut).toHaveBeenCalledWith('/skill-pool/private/skill-1', {
-      config: { enabled: true },
+  // --- enableSkill（V5 行级真通道 + agent 定库）---
+  it('enableSkill calls PUT /skill-pool/private/{skillId} with agent_id + enabled 行级字段', async () => {
+    await skillPool.enableSkill('skill-1', true, 'agent-1')
+    expect(mockPut).toHaveBeenCalledWith('/skill-pool/private/skill-1', { enabled: true }, {
+      params: { agent_id: 'agent-1' },
     })
   })
 
@@ -128,6 +133,27 @@ describe('skill-pool API — 新增函数', () => {
       agent_id: 'agent-1',
       arguments: { query: 'hello' },
     })
+  })
+
+  // --- Wave V 用户私库 CRUD ---
+  it('createMySkill calls POST /skill-pool/me/skills', async () => {
+    await skillPool.createMySkill({ name: 'n', description: 'd' })
+    expect(mockPost).toHaveBeenCalledWith('/skill-pool/me/skills', { name: 'n', description: 'd' })
+  })
+
+  it('updateMySkill calls PUT /skill-pool/me/skills/{id}', async () => {
+    await skillPool.updateMySkill('m1', { name: 'n2' })
+    expect(mockPut).toHaveBeenCalledWith('/skill-pool/me/skills/m1', { name: 'n2' })
+  })
+
+  it('deleteMySkill calls DELETE /skill-pool/me/skills/{id}', async () => {
+    await skillPool.deleteMySkill('m1')
+    expect(mockDelete).toHaveBeenCalledWith('/skill-pool/me/skills/m1')
+  })
+
+  it('installPublicToMine calls POST /skill-pool/me/skills/{id}/from-public（公共→我的私库副本+血缘）', async () => {
+    await skillPool.installPublicToMine('p1')
+    expect(mockPost).toHaveBeenCalledWith('/skill-pool/me/skills/p1/from-public')
   })
 })
 

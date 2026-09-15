@@ -101,6 +101,7 @@ import { message } from 'ant-design-vue'
 import * as notifApi from '@/api/modules/notifications'
 import { reviewKnowledgePublic } from '@/api/modules/knowledge'
 import { reviewSkillSubmission } from '@/api/modules/skill-pool'
+import { acceptSkillTransfer, rejectSkillTransfer } from '@/api/modules/skill-pool'
 import { useAuthStore } from '@/stores/auth'
 import type { Notification } from '@/api/modules/notifications'
 
@@ -132,6 +133,8 @@ const typeColor = (type: string) => {
     // P1-11 审批状态机镜像（approval_manager 通知路由）
     approval_request: 'orange',
     approval_result: 'geekblue',
+    // 三层技能库流转确认（agent→user 推送 / 公共升级卡）
+    skill_transfer: 'purple',
   }
   return map[type] || 'default'
 }
@@ -195,17 +198,21 @@ const detailNotif = ref<Notification | null>(null)
 const reviewNote = ref('')
 const reviewing = ref(false)
 
-/** 审批类通知判定：数据里带审核目标 id（knowledge_id / submission_id） */
-const isReviewNotif = computed(() => {
-  const d = (detailNotif.value?.data ?? {}) as Record<string, unknown>
-  return !!(d.knowledge_id || d.submission_id)
-})
+/** 审批类通知判定：数据里带审核目标 id（knowledge_id / submission_id / transfer_id） */
+const detailData = computed(() => (detailNotif.value?.data ?? {}) as Record<string, unknown>)
+/** 三层技能库流转卡：确认人=收通知的用户本人（非 admin 专属），后端有归属闸 */
+const isTransferNotif = computed(() => !!detailData.value.transfer_id)
+const isReviewNotif = computed(() =>
+  !!(detailData.value.knowledge_id || detailData.value.submission_id),
+)
 
-const canReview = computed(() => isAdmin.value && isReviewNotif.value)
+const canReview = computed(
+  () => isTransferNotif.value || (isAdmin.value && isReviewNotif.value),
+)
 
 /** 详情负载数据的展示字段（按类型取关键 id，白名单避免内部字段裸奔） */
 const detailFields = computed(() => {
-  const d = (detailNotif.value?.data ?? {}) as Record<string, unknown>
+  const d = detailData.value
   const rows: { label: string; value: string }[] = []
   if (d.knowledge_id) rows.push({ label: t('notification.knowledgeId'), value: String(d.knowledge_id) })
   if (d.skill_id) rows.push({ label: t('notification.skillId'), value: String(d.skill_id) })
@@ -229,10 +236,13 @@ async function openDetail(notif: Notification) {
 }
 
 async function doReview(approve: boolean) {
-  const d = (detailNotif.value?.data ?? {}) as Record<string, unknown>
+  const d = detailData.value
   reviewing.value = true
   try {
-    if (d.knowledge_id) {
+    if (d.transfer_id) {
+      if (approve) await acceptSkillTransfer(String(d.transfer_id))
+      else await rejectSkillTransfer(String(d.transfer_id))
+    } else if (d.knowledge_id) {
       await reviewKnowledgePublic(String(d.knowledge_id), approve, reviewNote.value)
     } else if (d.submission_id) {
       await reviewSkillSubmission(String(d.submission_id), approve, reviewNote.value)
