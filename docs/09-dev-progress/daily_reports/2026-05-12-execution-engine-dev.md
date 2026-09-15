@@ -96,14 +96,14 @@
 
 ### 文档
 1. **创建模块设计文档**
-   - ✅ 创建 `docs/dev_progress/module_designs/execution_engine.md`
+ - ✅ 创建 ``
    - ✅ 包含完整的功能描述、架构设计、接口设计、实现细节、测试计划
    - ✅ 已记录所有子任务完成情况
    - ✅ 已添加变更记录
    - ✅ 已记录已知问题（LLM集成、HTTP传输类型、条件分支）
 
 2. **更新进度跟踪表**
-   - ✅ 更新 `docs/dev_progress/progress_tracker.md`
+ - ✅ 更新 ``
    - ✅ 更新任务5的状态为 90% 完成
    - ✅ 标记已完成的子任务
 
@@ -204,8 +204,6 @@
   - `neurova/skills/models.py`
   - `neurova/skills/manifest.py`
   - `neurova/skills/skill_packager.py`
-  - `docs/dev_progress/module_designs/execution_engine.md`
-  - `docs/dev_progress/progress_tracker.md`
 
 ### 测试统计
 - **单元测试用例**: 58 个（25 + 33）

@@ -1,6 +1,6 @@
 # Neurova 鸿蒙应用签名配置指南
 
-> 文档路径：`docs/HARMONYOS_SIGNING_GUIDE.md`
+> 文档路径：``
 > 适用范围：NeurovaHarmony 鸿蒙 App（HarmonyOS 6.1 / API 13）
 > 当前状态：`build-profile.json5` 中 `signingConfigs` 为空数组，需开发者按本指南完成配置后方可发布到华为应用市场。
 > 更新日期：2026-06-25

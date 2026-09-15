@@ -1539,7 +1539,7 @@ export const apiClient: ApiClient = {
 **参考文档**:
 
 - [FRONTEND_PLAN.md](neurova/vue_old_backup_20260510_033048/FRONTEND_PLAN.md)（Vue 蓝本）
-- [frontend_architecture_guide.md](docs/dev_progress/architecture/frontend_architecture_guide.md)
+- [frontend_architecture_guide.md]()
 - [React 官方文档](https://react.dev/)
 - [Vite 官方文档](https://vitejs.dev/)
 - [Ant Design 官方文档](https://ant.design/)

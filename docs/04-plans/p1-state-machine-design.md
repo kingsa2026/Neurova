@@ -21,7 +21,7 @@
 | event_emitter 已贯通到 SSE | console.py | 前端展示状态变化的通道 |
 | stop 端点占位 | console.py:432 | 阶段 3 的实装目标 |
 
-**与 OpenManus 最本质的差异**：OpenManus 是"每任务一个 Agent 实例"，`self.state` 挂实例没问题；Neurova 是"单 Agent 服务多请求"——**照搬实例状态机是并发 bug**。这是本方案的核心决策点。
+`self.state` 挂实例没问题；Neurova 是"单 Agent 服务多请求"——**照搬实例状态机是并发 bug**。这是本方案的核心决策点
 
 ## 三、目标设计
 
@@ -54,7 +54,7 @@ class PipelineRun:                # 挂 ctx（请求级），非 Agent
 
     def stage_context(self, stage) -> AsyncContextManager
     # 进入：state=RUNNING, stage=X, 记录转移
-    # 异常：state=ERROR + error 分类 + 广播 + 上抛（OpenManus state_context 语义）
+ # 异常：state=ERROR + error 分类 + 广播 + 上抛
     # 正常退出：恢复并进入下一 stage
 ```
 
@@ -67,7 +67,7 @@ PENDING → RUNNING ─┬→ FINISHED（正常）
      └→（repeat 请求到达同一 ctx？不存在——ctx 每请求新建）
 ```
 
-RUNNING 内 stage 切换不改变 state，只更新 stage + transition_log（区别于 OpenManus 的粗粒度状态，Neurova 的管线步骤天然提供更细的可观测性）。
+RUNNING 内 stage 切换不改变 state，只更新 stage + transition_log。
 
 ### 3.3 execute 的目标形态
 
@@ -123,6 +123,6 @@ console 的两处重复 except 收敛为信任 `ctx.result["error"]`（流式路
 
 ## 七、结论与建议
 
-P1 的价值在**结构收口**：把散落在 console/pipeline/loop 三层的异常兜底、降级决策、未来取消，统一到一张请求级状态转移图上。核心决策是**状态挂 ctx 不挂 Agent**（并发安全），这与 OpenManus 的差异是本质性的，也是不能照搬其实现的根本原因。
+P1 的价值在**结构收口**：把散落在 console/pipeline/loop 三层的异常兜底、降级决策、未来取消，统一到一张请求级状态转移图上。核心决策是**状态挂 ctx 不挂 Agent**（并发安全），也是不能照搬其实现的根本原因
 
 建议顺序：先做阶段 1（纯加法，零风险收口错误路径），阶段 2 顺手（前端可见收益明显），阶段 3 前先确认用户对 stop 的实际需求，阶段 4 单独立项。

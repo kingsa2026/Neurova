@@ -402,7 +402,7 @@ skills = orchestrator.select_skill_for_task("task description")
 | `neurova/cognitive.py` | 主模块实现 |
 | `neurova/skill/__init__.py` | 兼容性桥接层 |
 | `tests/test_cognition_orchestrator.py` | 单元测试（29个用例） |
-| `docs/dev_progress/module_designs/cognition_orchestrator.md` | 本设计文档 |
+| `` | 本设计文档 |
 
 ### 9.2 依赖模块
 

@@ -1,7 +1,7 @@
 # 文档重组计划（Document Reorganization Plan）
 
 > 配套脚本：`scripts/reorg_docs.py`（默认 dry-run，安全）。
-> 本计划是 `docs/INDEX.md` 的**执行细则**——单一事实源 = INDEX 导航 + 本计划的落地。
+> 本计划是 `` 的**执行细则**——单一事实源 = INDEX 导航 + 本计划的落地。
 
 ## 目标
 将 `docs/` 下 139 个扁平 `.md` 文件按主题归入已有子目录，消除"一层平铺"导致的可检索性崩溃，
@@ -43,4 +43,4 @@ ui/frontend→`web/`，comparison/对标→`research/`，report/总结→`report
 ## 完成判据
 - `docs/` 扁平 `.md` 文件数从 139 降至接近 0（仅剩 INDEX.md / REORG_PLAN.md 等导航文件）。
 - 每个子目录文件数在 INDEX 第 2.1 节登记。
-- 新人通过 `docs/INDEX.md` 可在 2 步内定位任意主题。
+- 新人通过 `` 可在 2 步内定位任意主题。

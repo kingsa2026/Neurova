@@ -1,6 +1,6 @@
 # 工具使用/创建 Bug 修复报告 v3
 
-> 第三轮 bug 排查，基于 `docs/bugfix-tool-use-create-bugs-v2.md` "未修复的架构观察" 清单。
+> 第三轮 bug 排查，基于 `` "未修复的架构观察" 清单。
 >
 > 方法论: TDD 红绿灯 vertical slice + bug-hunt 五阶段 + improve-codebase-architecture 深度模块视角
 >
@@ -252,7 +252,7 @@ Anthropic 要求:
 | 文件 | 内容 | 关联 Bug |
 |------|------|----------|
 | `tests/unit/test_tool_bugs_v3.py` | 9 个 TDD 测试（A-1/A-2/A-3/A-6） | 全部 |
-| `docs/bugfix-tool-use-create-bugs-v3.md` | 本报告 | 全部 |
+| `` | 本报告 | 全部 |
 
 ---
 

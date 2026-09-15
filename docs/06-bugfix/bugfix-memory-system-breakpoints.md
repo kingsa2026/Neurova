@@ -291,7 +291,7 @@ manager.remember(content, ..., **kwargs):
 ### L-3: test_storage_comprehensive.py 80 errors — 测试与实现设计方向背离
 
 **根因**(经 search subagent 深度调查):
-- 测试基于 `docs/architecture/LONG_TERM_PLAN.md` 描绘的 SQLite 增强版 storage 设计(整合 VectorSearch/MemorySecurityGuard/MemoryCache/BatchWriter)
+- 测试基于 `` 描绘的 SQLite 增强版 storage 设计(整合 VectorSearch/MemorySecurityGuard/MemoryCache/BatchWriter)
 - 但该设计从未落地 — **BatchWriter 类在整个代码库中零实现**(仅存在于计划文档)
 - 实际 `storage.py` 走了 JSON 简化版路线(`MemoryStorage(storage_dir)` 单参数构造)
 - SQLite 持久化由 `manager.py _init_persistence_db` 和 `cognitive_storage_engine.py` 独立实现

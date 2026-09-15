@@ -709,7 +709,7 @@ class ExecutionMonitor:
 - [x] 3.1.5 更新 `__init__.py` 导出新的数据类
 - [x] 3.1.6 创建单元测试（tests/test_execution_monitor.py）
 - [x] 3.1.7 创建模块设计文档（本文档）
-- [x] 3.1.8 更新进度跟踪表（docs/dev_progress/progress_tracker.md）
+- [x] 3.1.8 更新进度跟踪表
 - [x] 3.1.9 创建每日报告（docs/dev_progress/daily_reports/）
 
 ### 3.2 关键代码片段
@@ -956,7 +956,7 @@ def _save_execution_log(self, execution_id: str) -> None:
 | 2026-05-13 00:20 | 实现持久化方法 | 任务要求 | `execution_monitor.py` |
 | 2026-05-13 00:25 | 更新 `__init__.py` 导出 | 任务要求 | `execution_engine/__init__.py` |
 | 2026-05-13 00:30 | 创建单元测试 | 任务要求 | `tests/test_execution_monitor.py` |
-| 2026-05-13 00:35 | 创建设计文档 | 任务要求 | `docs/dev_progress/module_designs/execution_monitor.md` |
+| 2026-05-13 00:35 | 创建设计文档 | 任务要求 | `` |
 
 ---
 
@@ -971,7 +971,7 @@ def _save_execution_log(self, execution_id: str) -> None:
 - `neurova/execution_engine/execution_monitor.py` (新建/修改)
 - `neurova/execution_engine/__init__.py` (修改)
 - `tests/test_execution_monitor.py` (新建)
-- `docs/dev_progress/module_designs/execution_monitor.md` (新建)
+- `` (新建)
 
 ---
 

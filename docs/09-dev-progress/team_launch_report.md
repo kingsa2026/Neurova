@@ -75,7 +75,7 @@ Control页面 ─┘
 
 ### 2. 进度更新要求
 每个负责人必须：
-- 每天至少更新一次 `docs/dev_progress/progress_tracker.md`
+- 每天至少更新一次 ``
 - 每天结束前创建 `docs/dev_progress/daily_reports/YYYY-MM-DD-<dev-name>.md`
 - 遇到阻塞立即更新进度跟踪表中的"风险与阻塞"部分
 
@@ -160,8 +160,8 @@ Control页面 ─┘
 
 - **团队负责人**: team-lead
 - **团队 ID**: neurova-long-term-dev
-- **进度跟踪**: `docs/dev_progress/progress_tracker.md`
-- **开发计划**: `docs/dev_progress/long_term_development_plan.md`
+- **进度跟踪**: ``
+- **开发计划**: ``
 - **每日报告**: `docs/dev_progress/daily_reports/YYYY-MM-DD-<dev-name>.md`
 
 ---

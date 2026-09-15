@@ -226,7 +226,7 @@ def estimate_tokens(text: str, strategy: EstimationStrategy) -> int:
 ### 新建文件
 - `neurova/context/token_estimator.py` (~220行)
 - `test_token_fix.py` (临时测试脚本)
-- `docs/bug/bugfix-token-estimation.md` (本文档)
+- `` (本文档)
 
 ### 修改文件
 1. `neurova/context/injector.py`
@@ -236,4 +236,4 @@ def estimate_tokens(text: str, strategy: EstimationStrategy) -> int:
 
 ### 参考文件
 - `neurova/context/models.py` (TokenBudget定义)
-- `docs/token-estimation-inconsistency-analysis.md` (问题分析报告)
+- `` (问题分析报告)

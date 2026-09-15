@@ -1,7 +1,6 @@
-# CUA 能力台账（证据驱动）
 
-> R2-3（CUA 升级方案）：按"后端 × 投递路径 × 验证 oracle"登记能力边界。
-> 原则（Cua action-support ledger）：**delivered 必须有 fixture 拥有的状态变化证据；
+> R2-3：按"后端 × 投递路径 × 验证 oracle"登记能力边界。
+> 原则：**delivered 必须有 fixture 拥有的状态变化证据；
 > refused 必须是精确拒绝码；gap 只表示"未证明"，不代表不可能。**
 > 机械契约：`action_result.REFUSAL_CODES` / `ROUTES` 的每一项都必须以反引号登记在本文件（test_capability_ledger.py 强制）。
 
@@ -28,7 +27,7 @@
 | `background_unavailable` | 后台路径不可投递 | 桌面五级递降链全失败；ValuePattern 不可用且门控未开 |
 | `background_occluded` | 目标被遮挡（预留） | 后台点击命中遮挡（PSR 接入后启用） |
 | `permission_required` | 权限门控拒绝 | 治理 deny / 审批未通过 |
-| `unsupported_method` | 平台/后端不支持 | 非 Windows 调 UIA；scrapling 调 role 交互 |
+| `unsupported_method` | 平台/后端不支持 | 非 Windows 调 UIA
 | `not_initialized` | 后端未初始化 | 浏览器/桌面后端 launch 失败 |
 | `element_not_clickable` | 元素无可投递交互 | 元素无任何可用 pattern/矩形（预留） |
 | `missing_params` | 必要参数缺失 | 工具参数校验失败 |

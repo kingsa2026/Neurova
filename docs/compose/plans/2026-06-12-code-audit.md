@@ -13,13 +13,13 @@
 ## 文件结构
 
 审计过程中将创建以下文件：
-- `docs/compose/plans/2026-06-12-code-audit.md` - 本计划文件
-- `audit-reports/security-audit.md` - 安全审计报告
-- `audit-reports/quality-audit.md` - 代码质量审计报告  
-- `audit-reports/architecture-audit.md` - 架构审计报告
-- `audit-reports/performance-audit.md` - 性能审计报告
-- `audit-reports/testing-audit.md` - 测试审计报告
-- `audit-reports/final-report.md` - 最终综合报告
+- `` - 本计划文件
+- `` - 安全审计报告
+- `` - 代码质量审计报告 
+- `` - 架构审计报告
+- `` - 性能审计报告
+- `` - 测试审计报告
+- `` - 最终综合报告
 
 ## 任务分解
 
@@ -28,7 +28,7 @@
 **Covers:** 安全漏洞、OWASP Top 10、敏感数据处理、认证授权
 
 **Files:**
-- Create: `audit-reports/security-audit.md`
+- Create: ``
 - Analyze: `neurova/` (Python后端)
 - Analyze: `NeurUI/src/` (Vue前端)
 - Analyze: `config/` (配置文件)
@@ -103,7 +103,7 @@ safety check --json > audit-reports/safety-report.json
 **Covers:** 代码规范、可维护性、复杂度、重复代码、文档
 
 **Files:**
-- Create: `audit-reports/quality-audit.md`
+- Create: ``
 - Analyze: `neurova/` (Python后端)
 - Analyze: `NeurUI/src/` (Vue前端)
 
@@ -184,7 +184,7 @@ pylama --duplicates neurova/
 **Covers:** 系统架构、模块耦合、依赖关系、设计模式
 
 **Files:**
-- Create: `audit-reports/architecture-audit.md`
+- Create: ``
 - Analyze: `neurova/` (Python后端)
 - Analyze: `NeurUI/src/` (Vue前端)
 - Analyze: `CONTEXT.md` (架构文档)
@@ -241,7 +241,7 @@ pydeps neurova/ --cluster --max-bacon=2 > audit-reports/dependency-graph.svg
 **Covers:** 数据库查询、缓存、异步处理、内存使用
 
 **Files:**
-- Create: `audit-reports/performance-audit.md`
+- Create: ``
 - Analyze: `neurova/` (Python后端)
 - Analyze: `config/` (配置文件)
 
@@ -293,7 +293,7 @@ pydeps neurova/ --cluster --max-bacon=2 > audit-reports/dependency-graph.svg
 **Covers:** 测试覆盖率、测试质量、测试策略
 
 **Files:**
-- Create: `audit-reports/testing-audit.md`
+- Create: ``
 - Analyze: `tests/` (测试目录)
 - Analyze: `neurova/` (Python后端)
 - Analyze: `NeurUI/src/` (Vue前端)
@@ -350,7 +350,7 @@ cd NeurUI && npm run test:coverage
 **Covers:** 所有审计结果的整合
 
 **Files:**
-- Create: `audit-reports/final-report.md`
+- Create: ``
 - Modify: 所有审计报告
 
 - [ ] **Step 1: 创建最终报告框架**

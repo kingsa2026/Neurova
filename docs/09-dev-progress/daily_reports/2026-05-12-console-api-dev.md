@@ -19,7 +19,7 @@
 | 12.5 实现推送消息系统（WebSocket） | ✅ | 已完成（订阅、心跳、广播） |
 | 12.6 实现任务追踪器（TaskTracker） | ✅ | 已完成 |
 | 12.7 编写集成测试（目标：15+测试） | ✅ | 已完成 30 个测试 |
-| 12.8 更新 API 文档 | ✅ | 已完成 `docs/api/console_api.md` |
+| 12.8 更新 API 文档 | ✅ | 已完成 `` |
 | 12.9 代码审查 | ⏳ | 待 cognition-dev 完成后进行集成测试 |
 
 ---
@@ -116,7 +116,7 @@
 ---
 
 ### 5. API 文档
-**文件**: `docs/api/console_api.md`
+**文件**: ``
 
 **文档内容**:
 - 所有 API 端点的详细说明
@@ -185,7 +185,7 @@ CognitionOrchestrator 完整实现尚未完成（由 cognition-dev 负责）
 | `neurova/core/cognition_orchestrator.py` | ~200 行 | CognitionOrchestrator 接口定义（模拟） |
 | `neurova/api/endpoints/console.py` | ~450 行 | Web Console API 路由 |
 | `tests/test_console_api.py` | ~500 行 | 单元测试（30 个测试） |
-| `docs/api/console_api.md` | ~400 行 | API 文档 |
+| `` | ~400 行 | API 文档 |
 
 **总计**: ~1900 行代码和文档
 

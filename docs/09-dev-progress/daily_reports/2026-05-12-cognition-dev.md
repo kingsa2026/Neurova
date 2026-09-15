@@ -47,7 +47,7 @@
 
 ### 5. 文档
 
-创建了完整的模块设计文档 `docs/dev_progress/module_designs/cognition_orchestrator.md`，包括：
+创建了完整的模块设计文档 ``，包括：
 
 - 模块概述和功能定位
 - 架构设计（类结构、核心数据结构、认知状态机）
@@ -60,7 +60,7 @@
 
 ### 6. 进度跟踪
 
-更新了 `docs/dev_progress/progress_tracker.md`：
+更新了 ``：
 
 - 将 CognitionOrchestrator 任务标记为已完成（100%）
 - 更新总体完成度从 22% 提高到 26%

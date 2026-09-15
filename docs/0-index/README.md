@@ -50,7 +50,7 @@
 | 功能模块 | 状态 | 关键代码 | 关联文档 |
 |----------|------|----------|----------|
 | Skill 系统（注册表/版本/热插拔） | ✅ | `skills/` `skill_system/` | [05-skill-system](../01-architecture/05-skill-system.md) |
-| Skill 协议兼容（OpenClaw/Qwenpaw） | ✅ | `skills/adapters/` | [05-skill-system](../01-architecture/05-skill-system.md) |
+| Skill 协议兼容 | ✅ | `skills/adapters/` | [05-skill-system](../01-architecture/05-skill-system.md) |
 | 肌肉记忆（ToolMemory 三层） | 🟡 | `evolution/tool_weights.py` `tool_lifecycle.py`（L1/L2/L3 部分） | [tool-memory-muscle-analysis](../01-architecture/tool-memory-muscle-analysis.md) |
 | MCP 集成 | ✅ | `tool_layers/mcp_client.py` `mcp_config.py` | [25-mcp-governance](../01-architecture/25-mcp-governance.md) |
 | MCP 治理安全加固（P0 六项） | ✅ | `tool_layers/mcp_bootstrap.py` `security/url_guard.py` | [25-mcp-governance](../01-architecture/25-mcp-governance.md) |

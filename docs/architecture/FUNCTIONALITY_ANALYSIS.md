@@ -135,8 +135,6 @@
 | G5 | 搜索Skill | ✅ 已实现 | `neurova/skill.py` | WebSearchSkill |
 | G6 | 计算器Skill | ✅ 已实现 | `neurova/skill.py` | CalculatorSkill |
 | G7 | 文件操作Skill | ✅ 已实现 | `neurova/skill.py` | FileOperationSkill |
-| G8 | OpenClaw兼容层 | ✅ 已实现 | `neurova/skills/skill_importer.py` | 技能导入器 |
-| G9 | Qwenpaw兼容层 | ✅ 已实现 | `neurova/skills/market_importer.py` | 市场导入器 |
 | G10 | 链式Skill | ✅ 已实现 | `neurova/skill.py` | 链式执行 |
 | G11 | 并行Skill | ✅ 已实现 | `neurova/skill.py` | 并行执行 |
 | G12 | 公共技能库 | ✅ 已实现 | `neurova/skills/public_library.py` | 公共技能管理 |

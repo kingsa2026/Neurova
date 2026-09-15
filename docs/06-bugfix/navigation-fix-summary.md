@@ -84,8 +84,8 @@ nav: {
 2. **`NeurUI/src/i18n/locales/zh-CN.ts`** - 添加 `nav.trajectory` 翻译键
 
 ### 3.2 文档更新
-1. **`docs/navigation-audit-report.md`** - 更新修复状态和验证结果
-2. **`docs/navigation-fix-summary.md`** - 本总结文档
+1. **``** - 更新修复状态和验证结果
+2. **``** - 本总结文档
 
 ---
 

@@ -199,16 +199,16 @@
 
 ## 七、生成的报告文件
 
-1. **架构全景图**: `docs/voice_system_architecture_overview.md`
+1. **架构全景图**: ``
    - 系统关系地图、数据流映射、集成点详解
 
-2. **架构审查报告**: `docs/voice_system_architecture_review.html`
+2. **架构审查报告**: ``
    - 深度、接缝、杠杆分析，可视化报告
 
-3. **交叉验证报告**: `docs/voice_system_cross_validation_report.md`
+3. **交叉验证报告**: ``
    - 三视角交叉验证、潜在问题识别、改进建议
 
-4. **验证总结报告**: `docs/voice_system_validation_summary.md`
+4. **验证总结报告**: ``
    - 五个场景验证结果、闭环完整性验证
 
 ---

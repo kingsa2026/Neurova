@@ -264,7 +264,7 @@ Neurova v3.0 引入了**情感中枢引擎**，基于心理学的情感分类理
   - 积极情感 → 降低温度（记忆更稳定）
   - 消极情感 → 提高温度（记忆更不稳定）
 
- **详细设计文档**：`docs/01-architecture/15-emotion-resonance-engine.md`
+ **详细设计文档**：``
 
 ---
 
@@ -482,7 +482,7 @@ neurova update         # 检查版本更新（--auto 自动升级）
 
 #### Skill 生态 — 完善的技能系统
 
-Neurova 的 Skill 系统支持**动态注册**、**事件触发**、**权限控制**、**沙箱执行**，并兼容 **OpenClaw** 和 **Qwenpaw** 协议。
+Neurova 的 Skill 系统支持**动态注册**、**事件触发**、**权限控制**、**沙箱执行**
 
 **核心架构**：
 
@@ -495,8 +495,6 @@ Skill 系统
 │   └── GitHub 推送 (github_push) — Git 操作封装，支持直接推送到 main 分支
 │
 ├── 外部 Skill
-│   ├── OpenClaw 兼容 Skill
-│   ├── Qwenpaw 兼容 Skill
 │   └── 自定义 Skill
 │
 └── 复合 Skill
@@ -568,8 +566,6 @@ ToolMemory 记录成功经验 → 下次相似问题直接复用
 ```
 
 **协议兼容**：
-- OpenClaw 协议适配器（`OpenClawAdapter`）
-- Qwenpaw 协议适配器（`QwenpawAdapter`）
 - 统一的 Skill 接口抽象
 
 **沙箱执行**（可选）：
@@ -1461,7 +1457,7 @@ NeurUI/src/                     # 前端测试（42 个 Vitest 文件）
 └── **/*.test.ts / *.spec.ts    # 组件、Store、API 模块测试
 ```
 
-详细文档请查看 [docs/NEUTESTING.md](docs/NEUTESTING.md)
+详细文档请查看 [)
 
 ### 更新日志
 
@@ -1664,7 +1660,7 @@ Agent 星星可以连接到你使用的各种平台：
 
 ## v1.0.0 beta1 升级功能（历史）
 
-> 基于 CUA (Computer Use Agent) 架构启发的升级，核心特性已在前面章节完整覆盖，此处为 CLI 使用参考。
+核心特性已在前面章节完整覆盖，此处为 CLI 使用参考
 
 ### P0 - 生态级改进
 
@@ -1959,8 +1955,6 @@ Neurova
 
 Neurova 的 Skill 系统支持 **多协议兼容**：
 
-- **OpenClaw 兼容**：支持 OpenClaw Skill 协议
-- **Qwenpaw 兼容**：支持通千问 paw Skill 协议
 - **自定义 Skill**：开放的 Skill 定义规范
 
 #### Skill Registry 中央注册表
@@ -2094,7 +2088,7 @@ python start.py --chat
 python start.py --check
 ```
 
-> 启动前请将 `.env.example` 复制为 `.env` 并填入 LLM API Key。详细启动/运维说明见 [docs/cli_usage.md](docs/cli_usage.md)。
+> 启动前请将 `.env.example` 复制为 `.env` 并填入 LLM API Key。详细启动/运维说明见 [)。
 
 ---
 
@@ -2201,28 +2195,28 @@ Neurova/
 
 ## 文档导航
 
-完整架构设计文档请访问 [`docs/01-architecture/INDEX.md`](docs/01-architecture/INDEX.md)
+完整架构设计文档请访问 [``]()
 
 | 核心文档 | 内容 |
 |---------|------|
-| [CONTEXT.md](docs/CONTEXT.md) | 项目上下文文档（完整架构概览） |
-| [PRODUCT_GUIDE.md](docs/03-user-guide/PRODUCT_GUIDE.md) | 产品使用指南 |
-| [API_REFERENCE.md](docs/02-api/API_REFERENCE.md) | API 参考文档（82 端点模块） |
-| [02-memory-system.md](docs/01-architecture/02-memory-system.md) | 记忆系统完整设计 |
-| [12-memory-temperature-mechanism.md](docs/01-architecture/12-memory-temperature-mechanism.md) | 记忆温度机制 |
-| [13-memory-intelligence-enhancements.md](docs/01-architecture/13-memory-intelligence-enhancements.md) | 记忆智能增强（9大机制） |
-| [14-proactive-recall-mechanism.md](docs/01-architecture/14-proactive-recall-mechanism.md) | 主动回忆机制 |
-| [15-emotion-resonance-engine.md](docs/01-architecture/15-emotion-resonance-engine.md) | 情感共鸣引擎 |
-| [17-memory-compression-mechanism.md](docs/01-architecture/17-memory-compression-mechanism.md) | 记忆压缩机制 |
-| [living_context_pool_design.md](docs/01-architecture/living_context_pool_design.md) | 活水上下文池设计 |
-| [neurova-upgrade-p0-p1-implementation-steps.md](docs/04-plans/neurova-upgrade-p0-p1-implementation-steps.md) | 升级实施步骤（TDD） |
-| [SKILL_VERSION_MANAGEMENT.md](docs/01-architecture/SKILL_VERSION_MANAGEMENT.md) | Skill 版本管理 |
-| [CONTEXT_CACHE_COMPRESSION.md](docs/CONTEXT_CACHE_COMPRESSION.md) | 上下文缓存与压缩 |
-| [DOCS_ALIGNMENT_PLAN.md](docs/DOCS_ALIGNMENT_PLAN.md) | 文档对齐计划 |
-| [plugin-architecture-design.md](docs/plugin-architecture-design.md) | 插件架构设计 |
-| [cli_usage.md](docs/cli_usage.md) | CLI 使用指南 |
-| [BRAND_GUIDELINES.md](docs/BRAND_GUIDELINES.md) | 品牌指南 |
-| [心流知识库功能使用指南.md](docs/03-user-guide/心流知识库功能使用指南.md) | 心流知识库使用指南 |
+| [CONTEXT.md]() | 项目上下文文档（完整架构概览） |
+| [PRODUCT_GUIDE.md]() | 产品使用指南 |
+| [API_REFERENCE.md]() | API 参考文档（82 端点模块） |
+| [02-memory-system.md]() | 记忆系统完整设计 |
+| [12-memory-temperature-mechanism.md]() | 记忆温度机制 |
+| [13-memory-intelligence-enhancements.md]() | 记忆智能增强（9大机制） |
+| [14-proactive-recall-mechanism.md]() | 主动回忆机制 |
+| [15-emotion-resonance-engine.md]() | 情感共鸣引擎 |
+| [17-memory-compression-mechanism.md]() | 记忆压缩机制 |
+| [living_context_pool_design.md]() | 活水上下文池设计 |
+| [neurova-upgrade-p0-p1-implementation-steps.md]() | 升级实施步骤（TDD） |
+| [SKILL_VERSION_MANAGEMENT.md]() | Skill 版本管理 |
+| [CONTEXT_CACHE_COMPRESSION.md]() | 上下文缓存与压缩 |
+| [DOCS_ALIGNMENT_PLAN.md]() | 文档对齐计划 |
+| [plugin-architecture-design.md]() | 插件架构设计 |
+| [cli_usage.md]() | CLI 使用指南 |
+| [BRAND_GUIDELINES.md]() | 品牌指南 |
+| [心流知识库功能使用指南.md]() | 心流知识库使用指南 |
 
 ---
 

@@ -116,15 +116,15 @@
 
 ### 1. 核心文档
 - ✅ [README.md](../README.md) - 项目主页已更新为 Neurova
-- ✅ [docs/architecture/01-core-architecture.md](architecture/01-core-architecture.md) - 核心架构已更新
+- ✅ [) - 核心架构已更新
 
 ### 2. 新增品牌文档
-- ✅ [docs/NEUROVA_BRAND.md](NEUROVA_BRAND.md) - 完整品牌指南
-- ✅ [docs/NEUROVA_LAUNCH.md](NEUROVA_LAUNCH.md) - 本文档
+- ✅ [) - 完整品牌指南
+- ✅ [) - 本文档
 
 ### 3. 待更新文档
 以下文档需要在实现阶段逐步更新:
-- 🔄 docs/architecture/02-08.md - 其他架构文档
+- 🔄 - 其他架构文档
 - 🔄 代码示例中的模块引用
 - 🔄 CLI 命令示例
 

@@ -1,7 +1,7 @@
 # 开发者确认回复 - 团队重组公告
 
 **文档创建时间**: 2026-05-13 01:10  
-**对应公告**: `docs/dev_progress/team_restructure_announcement.md`  
+**对应公告**: `` 
 **截止时间**: 2026-05-13 03:00（公告发布后2小时内）
 
 ---
@@ -123,10 +123,10 @@
 
 ## 📎 参考文档
 
-- **团队重组公告**: `docs/dev_progress/team_restructure_announcement.md`
-- **团队重组计划**: `docs/dev_progress/team_restructure_plan.md`
-- **48小时冲刺计划**: `docs/dev_progress/sprint_plan_48hours.md`
-- **进度跟踪表**: `docs/dev_progress/progress_tracker.md`
+- **团队重组公告**: ``
+- **团队重组计划**: ``
+- **48小时冲刺计划**: ``
+- **进度跟踪表**: ``
 
 ---
 

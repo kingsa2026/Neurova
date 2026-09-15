@@ -58,15 +58,15 @@
 ## 文件清单
 
 ### 修改的文件
-1. `docs/architecture/21-recursive-self-improvement.md` - 主文档
-2. `docs/architecture/INDEX.md` - 索引文档
-3. `docs/DOCS_ALIGNMENT_PLAN.md` - 对齐计划
+1. `` - 主文档
+2. `` - 索引文档
+3. `` - 对齐计划
 
 ### 新增的文件
-1. `docs/architecture/21-recursive-self-improvement-v1.2-summary.md` - 更新总结
-2. `docs/architecture/RSI_INTEGRATION_COMPLETE.md` - 整合完成报告
-3. `docs/architecture/RSI_INTEGRATION_FINAL_REPORT.md` - 最终报告
-4. `docs/architecture/RSI_INTEGRATION_SUMMARY.md` - 本总结
+1. `` - 更新总结
+2. `` - 整合完成报告
+3. `` - 最终报告
+4. `` - 本总结
 5. `tests/unit/test_rsi_v1_2.py` - 测试文件
 
 ### 待实现的代码文件（设计阶段）

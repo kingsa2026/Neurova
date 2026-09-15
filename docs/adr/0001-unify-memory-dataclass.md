@@ -57,6 +57,6 @@ Neurova 记忆系统在历史演进中产生了 4 套 Memory dataclass，量纲�
 
 ## References
 
-- Tier 4A 重构计划：`.trae/documents/memory-system-tier3-4-rebuild-plan.md`
+- Tier 4A 重构计划：
 - 相关 ADR：[ADR 0002: 保留 UnifiedMemoryNode](./0002-retain-unified-memory-node.md)
 - 实现 commit：Tier 4A.1-4A.6（mem_core.py / storage.py / cognitive_storage_engine.py / 3 处导入替换）

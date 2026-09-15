@@ -13,8 +13,8 @@
 - **导入处理**: 解决了包和模块导入冲突
 
 ### 3. 文档和测试
-- **使用文档**: `docs/github_push_skill_usage.md`
-- **实现总结**: `docs/github_push_skill_summary.md`
+- **使用文档**: ``
+- **实现总结**: ``
 - **测试文件**: `tests/unit/skills/test_github_push_skill.py`
 - **演示脚本**: `examples/github_push_demo.py`
 
@@ -79,8 +79,8 @@ neurova/skills/builtin/github_push/
 
 ## 相关文档
 
-1. `docs/github_push_skill_usage.md` - 详细使用指南
-2. `docs/github_push_skill_summary.md` - 实现总结
+1. `` - 详细使用指南
+2. `` - 实现总结
 3. `README.md` - 项目说明（已更新）
 
 ## 后续使用

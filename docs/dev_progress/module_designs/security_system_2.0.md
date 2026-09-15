@@ -12,7 +12,7 @@
 
 ### 1.1 功能描述
 
-Neurova 安全体系 2.0 提供完整的安全防护，采用 QwenPaw 成熟的三层安全架构，结合 Neurova 的认知增强特性：
+Neurova 安全体系 2.0 提供完整的安全防护，结合 Neurova 的认知增强特性
 
 1. **工具守卫 (Tool Guard)** - 运行时安全检测，在 Agent 调用工具前实时检测危险模式
 2. **技能扫描器 (Skill Scanner)** - 技能安全预检，在技能启用前扫描安全威胁
@@ -23,7 +23,6 @@ Neurova 安全体系 2.0 提供完整的安全防护，采用 QwenPaw 成熟的�
 
 - **主要依据**: `NEUROVA_CogArch_2.0.md` 第 4 章（第 834-1282 行）
 - **参考实现**: `neurova/auth/` 目录下的现有认证系统
-- **QwenPaw 架构**: 借鉴 QwenPaw 的三层安全架构设计
 
 ### 1.3 与其他模块的关系
 
@@ -499,7 +498,6 @@ print(result.filtered_output)  # "Here is the command: [FILTERED]"
 
 - `NEUROVA_CogArch_2.0.md` 第 4 章（第 834-1282 行）
 - `neurova/auth/` 目录下的现有认证系统
-- QwenPaw 安全架构设计
 
 ### 8.2 相关文件
 

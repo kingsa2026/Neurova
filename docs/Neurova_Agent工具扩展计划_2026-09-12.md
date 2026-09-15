@@ -20,7 +20,6 @@
 | 分类 | 工具 | 数量 |
 |------|------|------|
 | 文件 | file_read / file_write / file_create / file_delete / file_edit / file_list / file_search | 7 |
-| 桌面 CUA | computer_screenshot / click / type / scroll / dom_snapshot / click_element / set_value / shell | 8 |
 | 浏览器 | browser_navigate / click / type / screenshot / extract_text / dom_snapshot / dom_read / click_role / fill_role / read | 10 |
 | 画布工作流 | canvas_create / read / add_node / connect / set_config / move_node / remove_node / layout / run / list_nodes | 10 |
 | 网络/垂直 | web_search / web_fetch / weather / youtube_transcript / bilibili_search / rss_read / social_search | 7 |
@@ -49,7 +48,6 @@
 | 项目 | star | 能力 | 对 Neurova 判定 |
 |------|------|------|----------------|
 | firecrawl/firecrawl | 179,238 | 搜索+爬取+结构化，API 服务 | **可升级**（重，不内置） |
-| D4Vinci/Scrapling | 80,319 | 自适应反爬框架（单请求→全站） | 可升级候选（web_fetch 后端） |
 | unclecode/crawl4ai | 82,188 | LLM 友好爬虫 | **已有结论不内置**（08-31 调研，browser_read 轻量版替代，见记忆 [[neurova-browser-read-tool]]） |
 | browser-use/browser-use | 114,261 | 浏览器 agent | 已对位：camofox + browser_* 10 工具 |
 | microsoft/playwright-mcp | 37,024 | 官方 Playwright MCP | **可接入**（补 browser_* 交互长尾，走 MCP 通道） |
@@ -96,7 +94,7 @@
 | e2b-dev/E2B | 13,758 | 云端沙箱执行环境 | 已有 run_code 本地沙箱，登记 |
 | mem0ai/mem0 | 65,141 | 外部记忆层 | **不引入**：自研 17 维记忆+09-05 暴增事故，外部记忆层是倒退（§6） |
 | getzep/graphiti | 30,821 | 实时知识图谱记忆 | 同上，登记观察 |
-| bytedance/UI-TARS-desktop | 38,935 | 多模态桌面 agent | 已对位：09-12 CUA 升级（desktop_uia+ActionResult） |
+| bytedance/UI-TARS-desktop | 38,935 | 多模态桌面 agent | 已对位
 | LibreTranslate/LibreTranslate | 16,350 | 自托管翻译 API | P2 可选 provider |
 | modelscope/FunASR | 20,282 | ASR 工具包 | **已用**（模型栈 1.4.13） |
 | bytebase/dbhub | 3,499 | token 友好数据库 MCP（90+ 库） | P1（结构化数据查询入口） |
@@ -105,7 +103,7 @@
 
 ## 4. 差距分析结论
 
-Neurova 工具面在**网页获取、浏览器/桌面 CUA、记忆、音视频、工作流画布**五域已达或接近头部水位；差距集中在三处：
+Neurova 工具面在**网页获取、记忆、音视频、工作流画布**五域已达或接近头部水位；差距集中在三处
 
 1. **文档理解**（markitdown 183k 品类 vs 本地 file_read 只会读文本）——用户把 PDF/Word 丢进对话，agent 现在只能看文件名；这是最高星、最易补、最贴主场景的一条。
 2. **代码协作**（github-mcp-server 33k / context7 62k 品类 vs 本地 git/GitHub 零工具）——编码场景是桌面 agent 主战场，NeurUI 已在 IDE 化，工具面却没接上。
@@ -136,14 +134,14 @@ Neurova 工具面在**网页获取、浏览器/桌面 CUA、记忆、音视频�
 
 ### P2（登记观察，不排期）
 
-办公邮件/日历（**无高星开源标杆**，最大者仅 ~320 star；等生态成熟或走整合平台，不裸写）、财经数据（dexter 模式）、LibreTranslate、chrome-devtools-mcp、UI-TARS 对标回访、ha-mcp、Scrapling（web_fetch 反爬升级候选）。
+办公邮件/日历（**无高星开源标杆**，最大者仅 ~320 star；等生态成熟或走整合平台，不裸写）、财经数据（dexter 模式）、LibreTranslate、chrome-devtools-mcp、UI-TARS 对标回访、ha-mcp
 
 ## 6. 明确不做（防镀金）
 
 1. **不引入外部记忆层**（mem0 65k / graphiti 31k / letta）：自研 17 维记忆体系 + 09-05 睡眠巩固暴增事故刚收口，外挂记忆层=口径分裂。
 2. **不内置 firecrawl/crawl4ai**：08-31 调研结论仍成立（crawl4ai 重依赖、自建服务运维成本>收益，browser_read 轻量版覆盖主场景）；firecrawl 同理。
 3. **不引入 n8n/activepieces**：平台级重叠 NeurFlow/canvas，违背"采纳只提升不下降、不影响核心框架"约束。
-4. **不抄 UI-TARS 模型方案**：09-12 CUA 升级（desktop_uia+ActionResult 契约）已对位。
+4. **不抄 UI-TARS 模型方案**
 5. **P0-2 白名单不是"全都接"**：每个 server 须过 mcp_config 安全拒绝表 + 工具层防火墙 + 身份注入三关，接不进的不接。
 
 ## 7. 实施顺序建议

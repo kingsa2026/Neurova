@@ -23,7 +23,7 @@ ToolEngine 是 Neurova CogArch 2.0 执行引擎（手脚）的核心组件之一
 ### 1.2 设计依据
 
 - **NEUROVA_CogArch_2.0.md 第3.3节**：执行引擎（手脚）设计
-- **QwenPaw 设计**：借鉴其工具管理、安全守卫设计
+借鉴其工具管理、安全守卫设计
 - **任务分配**：team-lead 分配的具体要求
 
 ### 1.3 与其他模块的关系
@@ -713,4 +713,4 @@ ToolEngine 是 Neurova CogArch 2.0 执行引擎的核心组件，负责任务的
 **完成状态**：✅ 已完成
 - 代码实现：`neurova/execution_engine/tool_engine.py`
 - 单元测试：`tests/test_tool_engine.py`（29+ 测试用例）
-- 模块设计文档：`docs/dev_progress/module_designs/tool_engine.md`
+- 模块设计文档：``

@@ -1,7 +1,7 @@
 # NV 补课升级自动长任务计划（2026-09-02）
 
 > **执行方式（用户已选）：批准后本会话连续自动执行**——按批次 0→5 顺序推进，每任务 TDD 跑绿 → commit → 下一任务，无人工检查点；仅遇危险操作（删 tracked 文件、不可恢复破坏）时停下记录。
-> **来源**：`docs/Neurova_QwenPaw全方位对比_v4_2026-09-01.md` §19 合并补课清单 + §24 三域补课要点；工程面 9 项细节沿用 `docs/04-plans/2026-09-02-noncore-cleanup-plan.md`（下称"细化计划"，含 Task 3 backup API 完整代码），本文不重复其代码，只给增量与接线结论。
+> **来源**： §19 合并补课清单 + §24 三域补课要点；工程面 9 项细节沿用 ``（下称"细化计划"，含 Task 3 backup API 完整代码），本文不重复其代码，只给增量与接线结论。
 > **纪律**：venv/Scripts/python.exe 跑 pytest；新测试文件 `git add -f`（.gitignore /tests/ 规则）；开工前 `git status` 确认相关文件无用户并行改动；Mimosa 可能拦 `.execute(`/`def execute(` 字面形态——别名或 Edit 工具绕过；临时探针文件即用即删。
 
 ## 总览（6 批次 23 任务）
@@ -52,7 +52,7 @@
 - [x] **5.1 conflict 去 mock+真写回**：endpoints/sleep.py 删 4 个 _generate_mock_*，sleep_manager 为 None 时返空列表（改 :552/:576 等兜底）；SleepConsolidation.resolve_conflict（sleep.py:667）扩展真写回——按 resolution(keep_longest/keep_newest/merge) 从 source_memories 删落选者/重写胜者；冲突记录在 merge_cluster 冲突分支（:330）以 resolved=False 落库。前端 sleep.ts/SleepSettingsPage 已对齐零改动。测试：resolve 三档写回 3 用例+mock 移除后端点返空 1 用例。
 - [x] **5.2 TKG 接线**：新建 neurova/agent/retriever_adapters.py 的 TKGRetrieverAdapter（Protocol:93-112——name="TKGRetriever"/priority=25/retrieve 调 tkg.query_current 转 dict/get_quality_score 抄 :75 模板）；构造链：memory_layer/__init__.py:57 的闲置实例真正实例化+TemporalFactExtractor.sync_memory_to_tkg 挂记忆归档后（post_chat 一步，失败仅 debug——TKG 本就可选）；MemoryRetrievalChain.add_retriever 注册（KnowledgeRetrieverAdapter 同款补充式合并）。测试：adapter 协议+转换 2 用例、注册进链 1 用例。
 - [x] **5.3 收敛第一批（仅安全项）**：①双冲突检测器——v2 留作包级 ConflictDetector（已是），v1 改名 ConflictDetectorV1 保留 channels/processor 兼容导入；②双遗忘——sleep.apply_sleep_decay 改为调 TemperatureEngine.on_decay 的批量包装（不另持曲线）。不动情感双引擎/双元认知（调用面大，独立立项）。测试：回归各 1 用例。
-- [x] **5.4 create_skill 注入扫描**：tool_executor.py:1068 _execute_create_skill 的 name/steps 过 PromptInjectionAnalyzer（skill_scanner 既有，抄 QP materialize_skill 安全扫描闸）；测试 1 用例。
+- [x] **5.4 create_skill 注入扫描**：tool_executor.py:1068 _execute_create_skill 的 name/steps 过 PromptInjectionAnalyzer；测试 1 用例。
 
 ## 执行与验收约定
 

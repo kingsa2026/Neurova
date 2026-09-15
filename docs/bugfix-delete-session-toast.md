@@ -218,7 +218,7 @@ Test Files  1 passed (1)
 ## References
 
 - ADR 0008: SessionRepository 统一会话存储接口
-- `docs/bugfix-history-load-bugs.md` §H-1: 前端/后端 session_id drift 问题
+- `` §H-1: 前端/后端 session_id drift 问题
 - bug-hunt skill: 5 阶段方法论 (Phase 0 复现 → Phase 1 层级表 → Phase 3 根因 → Phase 4 修复 → Phase 5 报告)
 - tdd skill: vertical slice (一测一实现, RED→GREEN)
 - zoom-out skill: 模块地图 (ChatPage → useChat → api/store/bus, 4 个 switchSession 调用点分类)

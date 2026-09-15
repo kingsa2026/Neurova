@@ -64,7 +64,7 @@ neurova/skills/builtin/github_push/
 ### 5. 文档
 
 #### 5.1 用户文档
-- `docs/github_push_skill_usage.md` - 详细使用指南
+- `` - 详细使用指南
 - `neurova/skills/builtin/github_push/README.md` - 技能说明
 
 #### 5.2 开发文档
@@ -130,8 +130,6 @@ git push origin <current-branch>:main
 5. `tests/unit/skills/test_github_push_skill.py`
 6. `test_github_skill.py`
 7. `examples/github_push_demo.py`
-8. `docs/github_push_skill_usage.md`
-9. `docs/github_push_skill_summary.md`
 
 ### 修改文件
 1. `neurova/skill_system.py` - 添加动态导入

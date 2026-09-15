@@ -209,11 +209,11 @@
 
 | 报告 | 文件 |
 |------|------|
-| 安全审计 | `audit-reports/security-audit.md` |
-| 代码质量审计 | `audit-reports/quality-audit.md` |
-| 架构审计 | `audit-reports/architecture-audit.md` |
-| 性能审计 | `audit-reports/performance-audit.md` |
-| 测试审计 | `audit-reports/testing-audit.md` |
+| 安全审计 | `` |
+| 代码质量审计 | `` |
+| 架构审计 | `` |
+| 性能审计 | `` |
+| 测试审计 | `` |
 | Bandit扫描 | `audit-reports/bandit-report.json` |
 | Pylint报告 | `audit-reports/pylint-report.json` |
 | Flak8报告 | `audit-reports/flake8-report.json` |

@@ -1,6 +1,6 @@
 # 贡献指南（CONTRIBUTING）
 
-感谢参与 Neurova（智星）。本文覆盖环境搭建、代码规约、测试纪律与提交流程。架构全貌见 [README](README.md) 与 [docs/0-index/README.md](docs/0-index/README.md)；开发上下文速查见 [AGENTS.md](AGENTS.md) 与 [docs/CONTEXT.md](docs/CONTEXT.md)。
+感谢参与 Neurova（智星）。本文覆盖环境搭建、代码规约、测试纪律与提交流程。架构全貌见 [README](README.md) 与 [)；开发上下文速查见 [AGENTS.md](AGENTS.md) 与 [)。
 
 ## 快速开始
 
@@ -49,5 +49,5 @@ python start.py --check
 
 ## 文档
 
-- 结构性文档进 `docs/` 编号分层目录（0-index 至 11-legacy，索引在 `docs/0-index/README.md`）。
+- 结构性文档进 `docs/` 编号分层目录（0-index 至 11-legacy，索引在 ``）。
 - 过程性分析/临时报告不进 docs 根目录（历史教训：根目录曾堆 40+ 散落文件）。

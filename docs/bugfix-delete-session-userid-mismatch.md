@@ -122,7 +122,6 @@ if target[0].get("user_id") != user_id:
 # 空 user_id (None 或 "") 视为"共享", 允许任何已认证用户删除.
 # 修复 "看得到删不掉" 死锁 — list 端点宽松过滤让空 user_id 的 session 对所有用户可见,
 # delete 端点必须一致地允许删除, 否则用户能在列表看到却无法删除.
-# 详见 docs/bugfix-delete-session-userid-mismatch.md
 target_user_id = target[0].get("user_id") or ""
 if target_user_id and user_id and target_user_id != user_id:
     raise HTTPException(status_code=403, detail="Forbidden")
@@ -586,7 +585,7 @@ $ python -m pytest tests/unit/core/test_session_manager.py \
 ## References
 
 - ADR 0008: SessionRepository 统一会话存储接口 (候选 #2 完整落地是本次架构深化方向)
-- `docs/bugfix-delete-session-toast.md`: 上一轮 `chat.loadHistoryFailed` 架构深化 (SwitchResult + notifySwitchFailure)
+- ``: 上一轮 `chat.loadHistoryFailed` 架构深化 (SwitchResult + notifySwitchFailure)
 - bug-hunt skill: 5 阶段方法论 (Phase 0 curl 复现 → Phase 1 层级表 → Phase 3 根因 → Phase 4 TDD 修复 → Phase 5 报告)
 - tdd skill: vertical slice (一测一实现, RED→GREEN)
 - zoom-out skill: 模块地图 (ChatPage → useChat → api/modules/console → DELETE 端点 → SessionRepository)

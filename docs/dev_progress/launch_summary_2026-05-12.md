@@ -9,21 +9,21 @@
 ## 一、已完成工作
 
 ### 1. ✅ 纠正命名（i18n → language）
-- 已更新 `docs/NEUROVA_CogArch_2.0.md` 文档
+- 已更新 `` 文档
 - 将 `I18nService` 改名为 `LanguageService`
 - 将 `i18n/` 目录引用改为 `language/`
 - 将前端 i18n 配置改为 language 配置
 
 ### 2. ✅ 规划长线任务
 创建了完整的开发计划文档：
-- `docs/dev_progress/long_term_development_plan.md` - 详细开发计划
+- `` - 详细开发计划
   - 21个开发任务
   - 6个并行工作组
   - 4周开发时间线
   - 风险管理和成功标准
 
 ### 3. ✅ 更新进度跟踪表
-- `docs/dev_progress/progress_tracker.md` 已更新
+- `` 已更新
 - 包含所有21个任务的详细分解
 - 明确负责人、优先级、预计完成时间
 
@@ -54,7 +54,7 @@
 13. **cli-dev** - CLI增强
 
 ### 6. ✅ 创建团队启动报告
-- `docs/dev_progress/team_launch_report.md` - 团队启动报告
+- `` - 团队启动报告
   - 任务分配情况
   - 任务依赖关系
   - 团队协作机制
@@ -132,7 +132,7 @@
 
 ### 进度更新要求
 每个负责人必须：
-- 每天至少更新一次 `docs/dev_progress/progress_tracker.md`
+- 每天至少更新一次 ``
 - 每天结束前创建 `docs/dev_progress/daily_reports/YYYY-MM-DD-<dev-name>.md`
 - 遇到阻塞立即在进度跟踪表中记录
 
@@ -192,12 +192,12 @@
 ## 七、重要文档位置
 
 ### 计划与跟踪
-- 长线开发计划：`docs/dev_progress/long_term_development_plan.md`
-- 进度跟踪表：`docs/dev_progress/progress_tracker.md`
-- 团队启动报告：`docs/dev_progress/team_launch_report.md`
+- 长线开发计划：``
+- 进度跟踪表：``
+- 团队启动报告：``
 
 ### 架构与参考
-- 架构文档：`docs/NEUROVA_CogArch_2.0.md`（已纠正 i18n → language）
+- 架构文档：``（已纠正 i18n → language）
 - 模块设计文档：`docs/dev_progress/module_designs/`
 
 ### 报告与日志

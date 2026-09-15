@@ -25,7 +25,7 @@
 | 模型能力缓存 | `neurova/llm/providers/capability_cache.py` | (410行) | ✅ 完成 |
 | 重试和速率限制 | `neurova/llm/providers/rate_limiter.py` | (482行) | ✅ 完成 |
 | Provider API | `neurova/api/endpoints/provider.py` | 16.01 KB (512行) | ✅ 完成 |
-| 模块设计文档 | `docs/dev_progress/module_designs/provider_enhanced.md` | 19.39 KB | ✅ 完成 |
+| 模块设计文档 | `` | 19.39 KB | ✅ 完成 |
 
 ### 1.2 功能实现详情
 
@@ -218,8 +218,7 @@ docs/
 
 ### 6.2 参考资料
 
-1. [QwenPaw Provider 设计](https://github.com/QwenLM/QwenPaw)
-2. [LangChain Provider 文档](https://python.langchain.com/docs/integrations/chat/)
+2. [LangChain Provider 文档](https://python.langchain.com/)
 3. [OpenAI API 参考](https://platform.openai.com/docs/api-reference)
 4. [Anthropic API 文档](https://docs.anthropic.com/)
 

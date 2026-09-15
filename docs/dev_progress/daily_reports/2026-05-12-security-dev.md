@@ -142,7 +142,6 @@
 2. **设计依据**:
    - 主要依据 `NEUROVA_CogArch_2.0.md` 第 4 章（第 834-1282 行）
    - 参考 `neurova/auth/` 目录下的现有认证系统
-   - 借鉴 QwenPaw 的三层安全架构设计
 
 3. **已知问题**（待修复）:
    - `auth_system.py` 中 `hash_password` 方法使用 `hashlib.sha256` 而不是 `PasswordHasher`（低优先级）

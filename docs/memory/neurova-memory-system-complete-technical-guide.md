@@ -762,15 +762,15 @@ class SystemMonitor:
 
 | 文档路径 | 说明 |
 |----------|------|
-| `docs/memory/memo-memory-model-design.md` | MeMo记忆模型设计 |
-| `docs/memory/memo-query-encoder.md` | 查询编码器设计 |
-| `docs/memory/memo-memory-retriever.md` | 记忆检索器设计 |
-| `docs/memory/memo-fusion-network.md` | 融合网络设计 |
-| `docs/memory/memo-training-strategy.md` | 训练策略设计 |
-| `docs/memory/auto-training-from-conversations.md` | 自动训练系统设计 |
-| `docs/memory/integrated-memory-upgrade-with-training.md` | 集成升级方案 |
-| `docs/memory/neRF-meMo-integration-analysis.md` | NeRF与MeMo结合分析 |
-| `docs/memory/neurova-memory-system-complete-technical-guide.md` | 本文档 |
+| `` | MeMo记忆模型设计 |
+| `` | 查询编码器设计 |
+| `` | 记忆检索器设计 |
+| `` | 融合网络设计 |
+| `` | 训练策略设计 |
+| `` | 自动训练系统设计 |
+| `` | 集成升级方案 |
+| `` | NeRF与MeMo结合分析 |
+| `` | 本文档 |
 
 ---
 
