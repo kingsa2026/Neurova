@@ -318,9 +318,15 @@ class PromptOptimizer:
         eval_set: PromptEvalSet,
         rounds: int = 2,
         optimization_type: str = OptimizationGoal.CLARITY,
+        judge: Optional[Any] = None,
         **kwargs,
     ) -> OptimizedPrompt:
-        """迭代优化：生成变体 → 评测集打分 → 保留最优；满分提前收敛。"""
+        """迭代优化：生成变体 → 评测集打分 → 保留最优；满分提前收敛。
+
+        判据 seam（核验轮 2026-09-13）：评测集含 rubric 用例时必须走
+        score_prompt_async(judge)，否则那些用例在同步路径被诚实记 0——
+        优化将在错误的标尺上选"最优"。
+        """
         if not isinstance(eval_set, PromptEvalSet) or not eval_set.cases:
             return OptimizedPrompt(
                 success=False,
@@ -328,7 +334,14 @@ class PromptOptimizer:
                 metadata={"error": "eval_set 为空——v2 优化必须有评测集基准"},
             )
 
-        score_before, _ = eval_set.score_prompt(prompt)
+        use_judge = any(c.wants_judge() for c in eval_set.cases)
+
+        async def _score(text: str) -> Tuple[float, List[Dict[str, Any]]]:
+            if use_judge:
+                return await eval_set.score_prompt_async(text, judge=judge)
+            return eval_set.score_prompt(text)
+
+        score_before, _ = await _score(prompt)
         best_prompt, best_score = prompt, score_before
         improvements: List[str] = []
         history: List[Dict[str, Any]] = [{"round": 0, "best": best_score, "source": "base"}]
@@ -341,7 +354,7 @@ class PromptOptimizer:
             ]
             if not candidates:
                 break
-            scored = [(name, text, eval_set.score_prompt(text)[0]) for name, text in candidates]
+            scored = [(name, text, (await _score(text))[0]) for name, text in candidates]
             round_best = max(scored, key=lambda x: x[2])
             history.append({"round": round_no, "best": round_best[2], "source": round_best[0]})
             if round_best[2] > best_score:

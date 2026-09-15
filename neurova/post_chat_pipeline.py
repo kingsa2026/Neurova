@@ -68,6 +68,48 @@ class StepResult:
     data: Dict[str, Any] = field(default_factory=dict)
 
 
+async def run_skill_evolution_pass(
+    *,
+    improver,
+    growth_log_manager,
+    skill_registry,
+    skill_service,
+    skill_text_loader,
+    reflection_type,
+):
+    """技能进化一轮：提案（含反射式文本改进）→ 应用回写 → 反思日志沉淀。
+
+    从 _step_rsi_iteration 抽出（P1-4 队列化改造）：队列关闭时 post_chat 直调，
+    队列开启时作为作业 handler 的 body——两条路径共用同一实现，无第二套。
+    返回已处理提案数。
+    """
+    proposals = await improver.propose_pending_improvements_async(skill_text_loader)
+    handled = 0
+    for proposal in proposals[:3]:
+        applied = False
+        if skill_registry is not None:
+            applied = improver.apply_improvement(
+                proposal, skill_registry, skill_service=skill_service
+            )
+        if applied:
+            logger.info("🔧 技能改进已应用: %s (%s)", proposal.skill_id, proposal.description or "")
+            handled += 1
+            continue
+        logger.info("🔧 技能改进提案: %s - %s", proposal.skill_id, (proposal.description or "")[:50])
+        if growth_log_manager:
+            try:
+                await growth_log_manager.generate_log(
+                    type=reflection_type.IMPROVEMENT,
+                    title=f"技能改进提案: {proposal.skill_id}",
+                    content=proposal.description or proposal.reason,
+                    insights=[proposal.reason] if proposal.reason else [],
+                    confidence=min(1.0, max(0.0, float(proposal.expected_impact or 0.5))),
+                )
+            except Exception as pe:
+                logger.debug("改进提案写入反思日志失败: %s", pe)
+    return handled
+
+
 class PostChatPipeline:
     """对话后处理管线
 
@@ -412,6 +454,13 @@ class PostChatPipeline:
         await self._safe_step(
             "record_workflow_experience",
             self._step_record_workflow_experience(user_input, reply, actual_session_id),
+        )
+
+        # 步骤 9.06: 技能质量漏斗回写（P0-1 OpenSpace 对齐）——把本轮
+        # tool_executor 记的技能派发账本按归因规则写穿 SkillService manifest；
+        # P0-2 信任观测同源（每回合一个独立 task 观测，session#turn 身份）
+        await self._safe_step(
+            "skill_funnel_flush", self._step_skill_funnel_flush(reply, actual_session_id)
         )
 
         # 步骤 9.1: Evocate 生成
@@ -1280,6 +1329,41 @@ class PostChatPipeline:
                 )
             )
 
+    async def _step_skill_funnel_flush(self, reply: str, actual_session_id: str = "") -> None:
+        """Step 9.06: 技能质量漏斗 + 信任观测回写（P0-1/P0-2，OpenSpace 对齐）。
+
+        读本轮 tool_executor 写入 turn_context 的技能派发账本，按
+        compute_skill_funnel_update 归因（兜底完成不计功）写穿 SkillService
+        manifest usage；再由 compute_trust_observations 派生每技能一个
+        独立任务观测（task 身份 = session#turn，服务层按 task_id 去重）
+        喂信任状态机。任务完成口径：post-chat 仅在回复成功生成后执行，
+        reply 非空即视为本轮任务完成（空回复=未产出，不记 completion）。
+        """
+        from neurova.core.turn_context import get_turn_count, get_turn_skill_funnel
+        from neurova.skills.skill_service import (
+            SkillService,
+            compute_skill_funnel_update,
+            compute_trust_observations,
+        )
+
+        entries = get_turn_skill_funnel()
+        if not entries:
+            return
+        task_completed = bool(reply and reply.strip())
+        updates = compute_skill_funnel_update(entries, task_completed=task_completed)
+        observations = compute_trust_observations(entries, task_completed)
+        if not updates and not observations:
+            return
+        agent_id = str(getattr(self._agent.config, "agent_id", "") or "")
+        if not agent_id:
+            return
+        service = SkillService(agent_id=agent_id)
+        for skill_id, delta in updates.items():
+            service.record_skill_funnel(skill_id, **delta)
+        task_id = f"{actual_session_id or 'anon'}#{get_turn_count()}"
+        for skill_id, outcome in observations.items():
+            service.record_trust_observation(skill_id, outcome, task_id=task_id)
+
     async def _step_evocate_generation(
         self,
         user_input: str,
@@ -1476,6 +1560,18 @@ class PostChatPipeline:
             skill_packer = self._get_dependency("skill_packer")
             if skill_packer and patterns:
                 templates = pattern_miner.to_skill_template_list()
+                # P1-3 反回声室：封装证据按"独立任务"记账——给本回合一个
+                # 回合级 source_key（session#turn），使同一模式在单回合内被
+                # 反复喂不再凑够出现数（须跨 ≥2 回合真复现才达阈值）
+                from neurova.core.turn_context import (
+                    get_turn_count as _gtc,
+                    get_turn_session_id as _gts,
+                )
+
+                try:
+                    _src = f"{_gts() or 'anon'}#{_gtc()}"
+                except Exception:  # noqa: BLE001 - 取不到回合身份则逐调用独立
+                    _src = f"pc-{id(templates)}"
                 for tmpl in templates:
                     # 修复 P0-6：observe 签名是 (tool_sequence, context, success, duration, metadata)
                     # 原错误签名 observe(tools=, support=, auto_registered=) 会抛 TypeError 被外层 except 吞没
@@ -1484,7 +1580,11 @@ class PostChatPipeline:
                         context="自动挖掘模式",
                         success=True,
                         duration=0.0,
-                        metadata={"support": tmpl.get("support", 0), "auto_registered": True},
+                        metadata={
+                            "support": tmpl.get("support", 0),
+                            "auto_registered": True,
+                            "source_key": _src,
+                        },
                     )
 
                 # 修复 P0-1：将封装的技能注册到 SkillRegistry
@@ -1995,6 +2095,9 @@ class PostChatPipeline:
         # 断点 #3 修复：提案先尝试 apply_improvement 回写技能本体（保守语义：
         # 仅追加 config.improvements 记录+版本递增，不改工具序列），已应用的
         # 提案不再重复刷反思日志；未应用的（registry 不可用等）保持原提案日志。
+        # P1-4（OpenSpace trigger_jobs 最小移植）：NEUROVA_EVOLUTION_QUEUE=1
+        # 时改道"入队 + 就地 drain"——作业持久化，崩溃/失败可重试（启动
+        # recover_stale 释放租约）；默认关=现状直跑，行为零变化。
         try:
             from neurova.evolution.skill_improver import get_skill_improver
             from neurova.cognitive_layers.meta_cognition_layer.growth_log import (
@@ -2004,13 +2107,13 @@ class PostChatPipeline:
             improver = get_skill_improver()
             growth_log_manager = self._get_dependency("growth_log_manager")
             skill_registry = getattr(self._agt, "_skill_registry", None)
+            agent_id = str(getattr(self._agt.config, "agent_id", "") or "default")
             # 改进落盘最后一米（复审残余点 C）：SkillService 传给 apply_improvement，
             # 应用后 config+version 同步磁盘 manifest——否则改进重启即失
             skill_service = None
             try:
                 from neurova.skills.skill_service import SkillService
 
-                agent_id = getattr(self._agt.config, "agent_id", "default")
                 skill_service = SkillService(agent_id=agent_id)
             except Exception as svc_err:
                 logger.debug("创建 SkillService 失败, 改进仅内存态: %s", svc_err)
@@ -2026,30 +2129,46 @@ class PostChatPipeline:
                         return text or None
                     except Exception:
                         return None
-            proposals = await improver.propose_pending_improvements_async(skill_text_loader)
-            for proposal in proposals[:3]:
-                applied = False
-                if skill_registry is not None:
-                    applied = improver.apply_improvement(
-                        proposal, skill_registry, skill_service=skill_service
-                    )
-                if applied:
-                    logger.info(
-                        "🔧 技能改进已应用: %s (%s)", proposal.skill_id, proposal.description or ""
-                    )
-                    continue
-                logger.info("🔧 技能改进提案: %s - %s", proposal.skill_id, (proposal.description or "")[:50])
-                if growth_log_manager:
+
+            from neurova.evolution.job_queue import queue_enabled
+
+            if not queue_enabled():
+                await run_skill_evolution_pass(
+                    improver=improver,
+                    growth_log_manager=growth_log_manager,
+                    skill_registry=skill_registry,
+                    skill_service=skill_service,
+                    skill_text_loader=skill_text_loader,
+                    reflection_type=_RealReflectionType,
+                )
+            else:
+                from neurova.core.turn_context import get_turn_count, get_turn_session_id
+                from neurova.evolution.job_queue import get_evolution_job_queue
+
+                queue = get_evolution_job_queue()
+                _idem = f"sev:{agent_id}:{get_turn_session_id() or 'anon'}#{get_turn_count()}"
+                queue.enqueue("skill_evolution_pass", {"agent_id": agent_id}, idempotency_key=_idem)
+                processed = 0
+                _tried: list = []
+                queue.recover_stale()
+                while processed < 3:
+                    job = queue.claim(f"postchat-{id(self)}", exclude_ids=tuple(_tried))
+                    if job is None:
+                        break
+                    _tried.append(job["id"])
+                    processed += 1
                     try:
-                        await growth_log_manager.generate_log(
-                            type=_RealReflectionType.IMPROVEMENT,
-                            title=f"技能改进提案: {proposal.skill_id}",
-                            content=proposal.description or proposal.reason,
-                            insights=[proposal.reason] if proposal.reason else [],
-                            confidence=min(1.0, max(0.0, float(proposal.expected_impact or 0.5))),
+                        await run_skill_evolution_pass(
+                            improver=improver,
+                            growth_log_manager=growth_log_manager,
+                            skill_registry=skill_registry,
+                            skill_service=skill_service,
+                            skill_text_loader=skill_text_loader,
+                            reflection_type=_RealReflectionType,
                         )
-                    except Exception as pe:
-                        logger.debug("改进提案写入反思日志失败: %s", pe)
+                        queue.complete(job["id"])
+                    except Exception as job_err:  # noqa: BLE001 - 单作业失败可重试
+                        queue.fail(job["id"], str(job_err))
         except Exception as e:
             logger.debug("技能改进提案扫描跳过: %s", e)
 

@@ -179,14 +179,20 @@ class AutoSkillImprover:
             metadata: 元数据
         """
         with self._lock:
+            # P1-2（OpenSpace evidence/redaction 同语义）：写入侧根治——
+            # input/output/error 摘要落库前密钥脱敏 + 字符预算。进化分析的
+            # 全部下游消费面（ReflectiveMutator 喂 LLM / 统计 / 审批 UI）
+            # 从此拿不到会话里的凭据，也不被超长 IO 灌爆上下文。
+            from neurova.skills.evolution_inputs_guard import bound_text, redact_secrets
+
             record = UsageRecord(
                 skill_id=skill_id,
                 variant_id=variant_id,
                 success=success,
                 duration=duration,
-                error_message=error_message,
-                input_summary=input_summary,
-                output_summary=output_summary,
+                error_message=bound_text(redact_secrets(error_message or "")),
+                input_summary=bound_text(redact_secrets(input_summary or "")),
+                output_summary=bound_text(redact_secrets(output_summary or "")),
                 metadata=metadata or {},
             )
 
@@ -591,15 +597,29 @@ class AutoSkillImprover:
             improvement.applied_at = datetime.datetime.now(datetime.timezone.utc)
             self._applied_signatures.add(signature)
 
-            # 改进落盘：config+version 同步到磁盘 manifest（失败不回滚内存态，
-            # 只记警告——内存态仍是本轮的最新正确状态）
+            # 改进落盘：config+version 同步到磁盘 manifest。P1-5（OpenSpace 原子
+            # commit）：update_auto_skill 返回 False（写盘失败）→ 整体回滚刚做的
+            # 内存改动（版本/修订/改进记录/签名/applied），不再"内存新版盘上旧版"
+            # 的 split-brain（原只 warning 不回滚 = 重启回旧版）。
             if skill_service is not None:
                 try:
-                    skill_service.update_auto_skill(
+                    saved = skill_service.update_auto_skill(
                         skill_id=skill_id, version=skill.version, config=skill.config
                     )
                 except Exception as svc_err:
-                    logger.warning("改进落盘失败 %s: %s", skill_id, svc_err)
+                    logger.warning("改进落盘异常 %s: %s", skill_id, svc_err)
+                    saved = False
+                if not saved:
+                    # 回滚 = 整体还原快照（与 revert_last_improvement 同一恢复
+                    # 语义）：config_before 在 improvements/revisions 追加之前深拷
+                    # 贝，还原它即抹掉本次全部改动
+                    skill.config = config_before
+                    skill.version = version_before
+                    improvement.applied = False
+                    improvement.applied_at = None
+                    self._applied_signatures.discard(signature)
+                    logger.warning("改进落盘失败，已回滚内存态: %s", skill_id)
+                    return False
 
             # 经验-定义分离（QP 对齐启发 #2）：改进内容同步落为 applied 经验
             # 记录并立即组合进技能描述——config.improvements 只是元数据，LLM
@@ -650,6 +670,11 @@ class AutoSkillImprover:
                 return False
             import copy as _copy
 
+            # P1-5：回滚前先快照改进后状态——落盘失败即整体还原（不做
+            # "盘上改进版/内存回滚版"的半回滚劈叉）
+            _state_after_apply = _copy.deepcopy(skill.config)
+            _version_after_apply = skill.version
+
             rev = config["revisions"].pop()
             expected = rev.get("revision_hash_before")
             if expected and skill.version != rev.get("version_after"):
@@ -660,14 +685,23 @@ class AutoSkillImprover:
             skill.config = rev.get("config_before") or {}
             skill.version = rev.get("version_before") or "1.0.0"
 
-            # 回滚落盘：磁盘 manifest 与内存态同步（否则重启后回到未回滚状态）
+            # 回滚落盘：磁盘 manifest 与内存态同步（否则重启后回到未回滚状态）。
+            # P1-5：落盘失败 → 还原改进后快照 + rev 回 revisions + 返回 False。
             if skill_service is not None:
                 try:
-                    skill_service.update_auto_skill(
+                    saved = skill_service.update_auto_skill(
                         skill_id=skill_id, version=skill.version, config=skill.config
                     )
                 except Exception as svc_err:
-                    logger.warning("回滚落盘失败 %s: %s", skill_id, svc_err)
+                    logger.warning("回滚落盘异常 %s: %s", skill_id, svc_err)
+                    saved = False
+                if not saved:
+                    # _state_after_apply 是回滚前 deepcopy（含完整 revisions），
+                    # 直接还原即恢复 rev，无需再 append
+                    skill.config = _state_after_apply
+                    skill.version = _version_after_apply
+                    logger.warning("回滚落盘失败，已还原改进态: %s", skill_id)
+                    return False
 
             logger.info("技能 %s 已回滚改进至 v%s", skill_id, skill.version)
             return True
