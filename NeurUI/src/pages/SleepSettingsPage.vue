@@ -183,9 +183,9 @@
               :addon-after="t('sleep.minutes')"
             />
           </a-form-item>
-          <a-form-item :label="`${t('sleep.deepPhase')} · ${t('sleep.phaseMax')}`">
+          <a-form-item :label="`${t('sleep.remPhase')} · ${t('sleep.phaseMax')}`">
             <a-input-number
-              v-model:value="settingsForm.phase_max_minutes_deep_sleep"
+              v-model:value="settingsForm.phase_max_minutes_rem"
               :min="0"
               :max="1440"
               :precision="0"
@@ -193,9 +193,9 @@
               :addon-after="t('sleep.minutes')"
             />
           </a-form-item>
-          <a-form-item :label="`${t('sleep.remPhase')} · ${t('sleep.phaseMax')}`">
+          <a-form-item :label="`${t('sleep.deepPhase')} · ${t('sleep.phaseMax')}`">
             <a-input-number
-              v-model:value="settingsForm.phase_max_minutes_rem"
+              v-model:value="settingsForm.phase_max_minutes_deep_sleep"
               :min="0"
               :max="1440"
               :precision="0"
@@ -255,36 +255,42 @@
                   </div>
                 </div>
               </div>
-              <div v-if="!conflict.resolved" class="conflict-actions">
+              <!-- 合法策略集 = 引擎 (keep_longest/keep_newest/merge)。
+                   此前 local/remote/自定义文本均为后端必拒的非法值（404）；
+                   引擎自动审计恒 resolved，动作区旧 v-if="!resolved" 永不可见 -->
+              <div class="conflict-actions">
                 <a-space>
                   <GlassButton
                     variant="ghost"
                     size="sm"
-                    :loading="resolvingId === conflict.id"
-                    @click="handleResolve(conflict.id, 'local')"
+                    :loading="resolvingId === conflict.id + ':keep_longest'"
+                    @click="handleResolveStrategy(conflict.id, 'keep_longest')"
                   >
-                    {{ t('sleep.keepLocal') }}
+                    {{ t('sleep.keepStrongest') }}
                   </GlassButton>
                   <GlassButton
                     variant="ghost"
                     size="sm"
-                    :loading="resolvingId === conflict.id"
-                    @click="handleResolve(conflict.id, 'remote')"
+                    :loading="resolvingId === conflict.id + ':keep_newest'"
+                    @click="handleResolveStrategy(conflict.id, 'keep_newest')"
                   >
-                    {{ t('sleep.keepRemote') }}
+                    {{ t('sleep.keepNewest') }}
                   </GlassButton>
                   <GlassButton
                     variant="ghost"
                     size="sm"
-                    :loading="resolvingId === conflict.id"
-                    @click="showCustomResolve(conflict)"
+                    :loading="resolvingId === conflict.id + ':merge'"
+                    @click="handleResolveStrategy(conflict.id, 'merge')"
                   >
-                    {{ t('sleep.customResolve') }}
+                    {{ t('sleep.mergeOption') }}
                   </GlassButton>
                 </a-space>
               </div>
+              <div class="conflict-store-toggle">
+                <a-checkbox v-model:checked="conflictApplyToStore">{{ t('sleep.applyToStore') }}</a-checkbox>
+              </div>
               <div v-if="conflict.resolution" class="conflict-resolution">
-                <a-tag color="green">{{ conflict.resolution }}</a-tag>
+                <a-tag color="green">{{ strategyLabel(conflict.resolution) }}</a-tag>
                 <span class="resolution-time">{{ formatTime(conflict.created_at) }}</span>
               </div>
             </div>
@@ -293,28 +299,6 @@
         </a-spin>
       </GlassCard>
     </a-spin>
-
-    <!-- Custom resolve modal -->
-    <a-modal
-      v-model:open="showResolveModal"
-      :title="t('sleep.customResolve')"
-      :confirm-loading="resolvingId !== null"
-      @ok="handleCustomResolve"
-      @cancel="customResolveValue = ''"
-    >
-      <p v-if="customResolveConflict" class="resolve-modal-info">
-        {{ t('sleep.conflictField') }}: <strong>{{ customResolveConflict.field }}</strong>
-      </p>
-      <a-form layout="vertical">
-        <a-form-item :label="t('sleep.resolutionValue')">
-          <a-textarea
-            v-model:value="customResolveValue"
-            :rows="3"
-            :placeholder="t('sleep.resolutionPlaceholder')"
-          />
-        </a-form-item>
-      </a-form>
-    </a-modal>
   </div>
 </template>
 
@@ -347,6 +331,7 @@ const sleepTabs = computed(() => [
 const loading = ref(false)
 const conflictsLoading = ref(false)
 const resolvingId = ref<string | null>(null)
+const conflictApplyToStore = ref(false)
 const conflicts = ref<MergeConflict[]>([])
 
 // --- API-backed settings form（键位与后端 sleep.py::SleepSettings 一致） ---
@@ -380,24 +365,19 @@ const settingsForm = reactive<{
   conflict_resolution_enabled: true,
   sleep_mode: 'temperature',
   temp_threshold_light_sleep: 30,
-  temp_threshold_deep_sleep: 25,
-  temp_threshold_rem: 20,
+  temp_threshold_rem: 25,
+  temp_threshold_deep_sleep: 20,
   temp_threshold_hibernate: 15,
   idle_threshold_light_sleep: 30,
-  idle_threshold_deep_sleep: 60,
-  idle_threshold_rem: 90,
+  idle_threshold_rem: 60,
+  idle_threshold_deep_sleep: 90,
   idle_threshold_hibernate: 120,
   monitor_interval_seconds: 60,
-  phase_max_minutes_light_sleep: 30,
-  phase_max_minutes_deep_sleep: 60,
-  phase_max_minutes_rem: 120,
-  phase_max_minutes_hibernate: 240,
+  phase_max_minutes_light_sleep: 120,
+  phase_max_minutes_rem: 60,
+  phase_max_minutes_deep_sleep: 180,
+  phase_max_minutes_hibernate: 120,
 })
-
-// --- Custom resolve modal ---
-const showResolveModal = ref(false)
-const customResolveValue = ref('')
-const customResolveConflict = ref<MergeConflict | null>(null)
 
 // --- Mutation for save ---
 const saveMutation = useMutation<Partial<SleepSettings>, SleepSettings>(
@@ -514,10 +494,13 @@ const handleSave = async () => {
   }
 }
 
-const handleResolve = async (conflictId: string, resolution: string) => {
-  resolvingId.value = conflictId
+// 合法策略集 = 后端引擎 (keep_longest/keep_newest/merge)。
+// 此前 handleResolve('local'/'remote') 与自定义文本 modal 发送的值必被 404 拒绝，
+// 且引擎审计恒 resolved → 旧动作区 v-if="!resolved" 永不可见，属双重假功能。
+const handleResolveStrategy = async (conflictId: string, strategy: string) => {
+  resolvingId.value = conflictId + ':' + strategy
   try {
-    await sleepApi.resolveConflict(agentId.value, conflictId, resolution)
+    await sleepApi.resolveConflict(agentId.value, conflictId, strategy, conflictApplyToStore.value)
     message.success(t('common.success'))
     await fetchConflicts()
   } catch (e: any) {
@@ -527,31 +510,13 @@ const handleResolve = async (conflictId: string, resolution: string) => {
   }
 }
 
-const showCustomResolve = (conflict: MergeConflict) => {
-  customResolveConflict.value = conflict
-  customResolveValue.value = ''
-  showResolveModal.value = true
-}
-
-const handleCustomResolve = async () => {
-  if (!customResolveValue.value.trim()) {
-    message.warning(t('sleep.resolutionRequired'))
-    return
+const strategyLabel = (resolution: string) => {
+  const map: Record<string, string> = {
+    keep_longest: t('sleep.keepStrongest'),
+    keep_newest: t('sleep.keepNewest'),
+    merge: t('sleep.mergeOption'),
   }
-  if (!customResolveConflict.value) return
-  resolvingId.value = customResolveConflict.value.id
-  try {
-    await sleepApi.resolveConflict(agentId.value, customResolveConflict.value.id, customResolveValue.value)
-    message.success(t('common.success'))
-    showResolveModal.value = false
-    customResolveValue.value = ''
-    customResolveConflict.value = null
-    await fetchConflicts()
-  } catch (e: any) {
-    message.error(e?.message || t('common.error'))
-  } finally {
-    resolvingId.value = null
-  }
+  return map[resolution] || resolution
 }
 
 onMounted(() => {

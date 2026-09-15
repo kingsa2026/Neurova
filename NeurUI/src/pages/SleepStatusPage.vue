@@ -94,14 +94,12 @@
                 <a-list-item>
                   <div class="dream-item">
                     <div class="dream-header">
-                      <a-tag :color="dreamTypeColor(item.type)" size="small">{{ formatDreamType(item.type) }}</a-tag>
-                      <span class="dream-time">{{ formatTime(item.created_at) }}</span>
+                      <a-tag :color="dreamTypeColor(item.dream_type)" size="small">{{ formatDreamType(item.dream_type) }}</a-tag>
+                      <span class="dream-time">{{ formatTime(item.timestamp) }}</span>
                     </div>
                     <p class="dream-content">{{ item.content }}</p>
-                    <div v-if="item.insights?.length" class="dream-insights">
-                      <a-tag v-for="(insight, idx) in item.insights" :key="idx" size="small" color="geekblue">
-                        {{ insight }}
-                      </a-tag>
+                    <div v-if="item.insights_generated" class="dream-insights">
+                      <a-tag size="small" color="geekblue">{{ t('sleep.insightsN', { n: item.insights_generated }) }}</a-tag>
                     </div>
                   </div>
                 </a-list-item>
@@ -119,21 +117,11 @@
                 <a-list-item>
                   <div class="insight-item">
                     <div class="insight-header">
-                      <a-tag :color="item.applied ? 'green' : 'blue'">
-                        {{ item.applied ? t('sleep.applied') : t('sleep.pending') }}
-                      </a-tag>
-                      <span class="insight-time">{{ formatTime(item.created_at) }}</span>
+                      <a-tag color="blue">{{ item.insight_type }}</a-tag>
+                      <a-tag v-if="item.confidence != null" color="geekblue" size="small">{{ Math.round(item.confidence * 100) }}%</a-tag>
+                      <span class="insight-time">{{ formatTime(item.timestamp) }}</span>
                     </div>
                     <p class="insight-content">{{ item.content }}</p>
-                    <GlassButton
-                      v-if="!item.applied"
-                      variant="ghost"
-                      size="sm"
-                      :loading="applyingInsightId === item.id"
-                      @click="handleApplyInsight(item.id)"
-                    >
-                      {{ t('sleep.applyInsight') }}
-                    </GlassButton>
                   </div>
                 </a-list-item>
               </template>
@@ -146,9 +134,24 @@
       <!-- Memory merges and conflicts -->
       <div class="two-col" style="margin-top: 16px">
         <GlassCard :title="t('sleep.merges')">
-          <a-list :data-source="[]" size="small">
-            <template #empty><a-empty :description="t('common.noData')" /></template>
-          </a-list>
+          <a-spin :spinning="mergesLoading">
+            <a-list v-if="merges.length > 0" :data-source="merges" size="small">
+              <template #renderItem="{ item }">
+                <a-list-item>
+                  <div class="merge-item">
+                    <div class="merge-header">
+                      <a-tag :color="item.success ? 'green' : 'red'" size="small">{{ item.merge_type }}</a-tag>
+                      <span class="merge-time">{{ formatTime(item.timestamp) }}</span>
+                    </div>
+                    <p class="merge-content">
+                      {{ t('sleep.mergedSources', { n: item.source_total ?? item.source_memories.length }) }} → {{ item.target_memory }}
+                    </p>
+                  </div>
+                </a-list-item>
+              </template>
+            </a-list>
+            <a-empty v-else :description="t('common.noData')" />
+          </a-spin>
         </GlassCard>
 
         <GlassCard :title="t('sleep.conflicts')">
@@ -162,23 +165,24 @@
                       <a-tag :color="item.resolved ? 'green' : 'red'" size="small">
                         {{ item.resolved ? t('sleep.resolved') : t('sleep.pending') }}
                       </a-tag>
+                      <a-tag v-if="item.resolution" color="blue" size="small">
+                        {{ t('sleep.currentStrategy') }}: {{ strategyLabel(item.resolution) }}
+                      </a-tag>
                     </div>
                     <div class="conflict-values">
                       <span class="conflict-local">{{ t('sleep.localValue') }}: {{ item.local_value }}</span>
                       <span class="conflict-remote">{{ t('sleep.remoteValue') }}: {{ item.remote_value }}</span>
                     </div>
-                    <div v-if="!item.resolved" class="conflict-actions">
+                    <!-- 引擎自动 keep_longest，动作区语义=改策略（此前 local/remote 是后端必拒的非法值） -->
+                    <div class="conflict-actions">
                       <a-space>
-                        <GlassButton variant="ghost" size="sm" @click="handleResolve(item.id, 'local')">
-                          {{ t('sleep.keepLocal') }}
-                        </GlassButton>
-                        <GlassButton variant="ghost" size="sm" @click="handleResolve(item.id, 'remote')">
-                          {{ t('sleep.keepRemote') }}
-                        </GlassButton>
+                        <GlassButton variant="ghost" size="sm" :loading="resolvingId === item.id + ':keep_longest'" @click="handleResolveStrategy(item.id, 'keep_longest')">{{ t('sleep.keepStrongest') }}</GlassButton>
+                        <GlassButton variant="ghost" size="sm" :loading="resolvingId === item.id + ':keep_newest'" @click="handleResolveStrategy(item.id, 'keep_newest')">{{ t('sleep.keepNewest') }}</GlassButton>
+                        <GlassButton variant="ghost" size="sm" :loading="resolvingId === item.id + ':merge'" @click="handleResolveStrategy(item.id, 'merge')">{{ t('sleep.mergeOption') }}</GlassButton>
                       </a-space>
                     </div>
-                    <div v-if="item.resolution" class="conflict-resolution">
-                      <a-tag color="green">{{ item.resolution }}</a-tag>
+                    <div class="conflict-store-toggle">
+                      <a-checkbox v-model:checked="conflictApplyToStore">{{ t('sleep.applyToStore') }}</a-checkbox>
                     </div>
                   </div>
                 </a-list-item>
@@ -203,7 +207,7 @@ import AgentPageTabs from '@/components/AgentPageTabs.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { usePolling } from '@/composables/usePolling'
 import * as sleepApi from '@/api/modules/sleep'
-import type { SleepStatus, Dream, SleepInsight, MergeConflict } from '@/api/modules/sleep'
+import type { SleepStatus, Dream, SleepInsight, MemoryMerge, MergeConflict } from '@/api/modules/sleep'
 
 const { t } = useI18n()
 const { agentId, currentAgent } = useAgentPage({
@@ -222,26 +226,29 @@ const initialLoading = ref(false)
 const actionLoading = ref(false)
 const dreamsLoading = ref(false)
 const insightsLoading = ref(false)
+const mergesLoading = ref(false)
 const conflictsLoading = ref(false)
-const applyingInsightId = ref<string | null>(null)
+const resolvingId = ref<string | null>(null)
+const conflictApplyToStore = ref(false)
 
 const sleepStatus = ref<SleepStatus | null>(null)
 const dreams = ref<Dream[]>([])
 const insights = ref<SleepInsight[]>([])
+const merges = ref<MemoryMerge[]>([])
 const conflicts = ref<MergeConflict[]>([])
 const dreamTypeFilter = ref<string | undefined>(undefined)
 
 // --- Sleep phases for visualization ---
-// 键值对齐后端统一阶段源：active|light_sleep|deep_sleep|rem|hibernate|awake
+// 链序：活跃→浅睡→REM→深睡→休眠（后端统一阶段源）
 const sleepPhases = computed(() => [
   { key: 'light_sleep', label: t('sleep.lightPhase') },
-  { key: 'deep_sleep', label: t('sleep.deepPhase') },
   { key: 'rem', label: t('sleep.remPhase') },
+  { key: 'deep_sleep', label: t('sleep.deepPhase') },
   { key: 'hibernate', label: t('sleep.hibernatePhase') },
 ])
 
 const isPhaseCompleted = (phaseKey: string) => {
-  const order = ['light_sleep', 'deep_sleep', 'rem', 'hibernate']
+  const order = ['light_sleep', 'rem', 'deep_sleep', 'hibernate']
   const currentIdx = order.indexOf(sleepStatus.value?.sleep_phase || '')
   const phaseIdx = order.indexOf(phaseKey)
   return phaseIdx < currentIdx
@@ -306,8 +313,19 @@ const formatDreamType = (type: string) => {
     consolidation: t('sleep.consolidation'),
     creative: t('sleep.creative'),
     problem_solving: t('sleep.problemSolving'),
+    replay: t('sleep.replay'),
   }
   return map[type] || type
+}
+
+// 冲突解决策略标签（合法集 = 引擎 keep_longest/keep_newest/merge）
+const strategyLabel = (resolution: string) => {
+  const map: Record<string, string> = {
+    keep_longest: t('sleep.keepStrongest'),
+    keep_newest: t('sleep.keepNewest'),
+    merge: t('sleep.mergeOption'),
+  }
+  return map[resolution] || resolution
 }
 
 const dreamTypeColor = (type: string) => {
@@ -323,7 +341,7 @@ const dreamTypeColor = (type: string) => {
 const fetchAll = async () => {
   initialLoading.value = true
   try {
-    await Promise.all([fetchStatus(), fetchDreams(), fetchInsights(), fetchConflicts()])
+    await Promise.all([fetchStatus(), fetchDreams(), fetchInsights(), fetchMerges(), fetchConflicts()])
   } finally {
     initialLoading.value = false
   }
@@ -342,17 +360,12 @@ const fetchStatus = async () => {
 const fetchDreams = async () => {
   dreamsLoading.value = true
   try {
-    const params: { page?: number; size?: number; type?: string } = { page: 1, size: 20 }
+    // 后端 /dreams 契约：limit/offset + type 过滤（此前发 page/size 被忽略）
+    const params: { limit?: number; offset?: number; type?: string } = { limit: 20, offset: 0 }
     if (dreamTypeFilter.value) params.type = dreamTypeFilter.value
     const res = await sleepApi.getDreams(agentId.value, params)
-    const data = sleepApi.unwrapSleep<Dream[] | { items: Dream[] }>(res)
-    if (data && typeof data === 'object' && 'items' in (data as object)) {
-      dreams.value = (data as any).items || []
-    } else if (Array.isArray(data)) {
-      dreams.value = data
-    } else {
-      dreams.value = []
-    }
+    const data = sleepApi.unwrapSleep<Dream[]>(res)
+    dreams.value = Array.isArray(data) ? data : []
   } catch {
     dreams.value = []
   } finally {
@@ -364,18 +377,26 @@ const fetchInsights = async () => {
   insightsLoading.value = true
   try {
     const res = await sleepApi.getSleepInsights(agentId.value, { limit: 20, offset: 0 })
-    const data = sleepApi.unwrapSleep<SleepInsight[] | { items: SleepInsight[] }>(res)
-    if (data && typeof data === 'object' && 'items' in (data as object)) {
-      insights.value = (data as any).items || []
-    } else if (Array.isArray(data)) {
-      insights.value = data
-    } else {
-      insights.value = []
-    }
+    const data = sleepApi.unwrapSleep<SleepInsight[]>(res)
+    insights.value = Array.isArray(data) ? data : []
   } catch {
     insights.value = []
   } finally {
     insightsLoading.value = false
+  }
+}
+
+// 补齐 A：合并卡此前 data-source 硬编码 [] 从不取数 —— /merges 有真实数据
+const fetchMerges = async () => {
+  mergesLoading.value = true
+  try {
+    const res = await sleepApi.getMemoryMerges(agentId.value, { limit: 20, offset: 0 })
+    const data = sleepApi.unwrapSleep<MemoryMerge[]>(res)
+    merges.value = Array.isArray(data) ? data : []
+  } catch {
+    merges.value = []
+  } finally {
+    mergesLoading.value = false
   }
 }
 
@@ -419,29 +440,18 @@ const goToSleep = async () => {
   }
 }
 
-const handleApplyInsight = async (insightId: string) => {
-  applyingInsightId.value = insightId
+// 冲突卡合法策略集 = 后端引擎 (keep_longest/keep_newest/merge)。
+// 此前发 local/remote 非法值必 404；applyToStore 勾选后按策略真写回记忆库。
+const handleResolveStrategy = async (conflictId: string, strategy: string) => {
+  resolvingId.value = conflictId + ':' + strategy
   try {
-    await sleepApi.applyInsight(agentId.value, insightId)
+    await sleepApi.resolveConflict(agentId.value, conflictId, strategy, conflictApplyToStore.value)
     message.success(t('common.success'))
-    // Update the insight locally
-    const insight = insights.value.find((i) => i.id === insightId)
-    if (insight) insight.applied = true
-  } catch (e: any) {
-    message.error(e?.message || t('common.error'))
-  } finally {
-    applyingInsightId.value = null
-  }
-}
-
-const handleResolve = async (conflictId: string, resolution: string) => {
-  try {
-    await sleepApi.resolveConflict(agentId.value, conflictId, resolution)
-    message.success(t('common.success'))
-    // Refresh conflicts
     await fetchConflicts()
   } catch (e: any) {
     message.error(e?.message || t('common.error'))
+  } finally {
+    resolvingId.value = null
   }
 }
 
@@ -450,7 +460,7 @@ const onDreamFilterChange = () => {
 }
 
 const manualRefresh = async () => {
-  await Promise.all([pollStatus(), fetchDreams(), fetchInsights(), fetchConflicts()])
+  await Promise.all([pollStatus(), fetchDreams(), fetchInsights(), fetchMerges(), fetchConflicts()])
 }
 
 onMounted(() => {

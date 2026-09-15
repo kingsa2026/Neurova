@@ -56,22 +56,22 @@ class SleepSettings(BaseModel):
     dream_replay_enabled: bool = True
     memory_consolidation_enabled: bool = True
     conflict_resolution_enabled: bool = True
-    # ── 阶段推进参数（默认值 = tracker 内置默认, 行为零漂移）──
+    # ── 阶段推进参数（链序：浅睡→REM→深睡→休眠；默认=引擎, 行为零漂移）──
     sleep_mode: str = "temperature"
     temp_threshold_light_sleep: float = 30.0
-    temp_threshold_deep_sleep: float = 25.0
-    temp_threshold_rem: float = 20.0
+    temp_threshold_rem: float = 25.0
+    temp_threshold_deep_sleep: float = 20.0
     temp_threshold_hibernate: float = 15.0
     idle_threshold_light_sleep: int = 30  # 分钟
-    idle_threshold_deep_sleep: int = 60
-    idle_threshold_rem: int = 90
+    idle_threshold_rem: int = 60
+    idle_threshold_deep_sleep: int = 90
     idle_threshold_hibernate: int = 120
     monitor_interval_seconds: int = 60
-    # ── 每阶段最长停留（分钟，dwell 超时强制向更深推进；最深超时=整觉完成→醒）──
-    phase_max_minutes_light_sleep: int = 30
-    phase_max_minutes_deep_sleep: int = 60
-    phase_max_minutes_rem: int = 120
-    phase_max_minutes_hibernate: int = 240
+    # ── 每阶段最长停留（分钟，dwell 超时沿链向下一阶段推进；休眠超时=整觉完成→醒）──
+    phase_max_minutes_light_sleep: int = 120
+    phase_max_minutes_rem: int = 60
+    phase_max_minutes_deep_sleep: int = 180
+    phase_max_minutes_hibernate: int = 120
 
 
 class SleepSettingsRequest(BaseModel):
@@ -157,9 +157,14 @@ class MergeConflictItem(BaseModel):
 
 
 class ResolveConflictRequest(BaseModel):
-    """冲突解决请求"""
+    """冲突解决请求。resolution 合法集 = 引擎 (keep_longest/keep_newest/merge)。
+
+    apply_to_store=True 时按策略真写回记忆库（软删落选者/重写胜者，
+    引擎自带诚实边界：无 manager/无来源时仅更新审计并回 applied_to_store=False）。
+    """
 
     resolution: str = "keep_longest"
+    apply_to_store: bool = False
 
 
 def _get_request_id(request: Request) -> str:
@@ -563,7 +568,7 @@ async def resolve_conflict(
     if not sleep_manager or not hasattr(sleep_manager, "resolve_conflict"):
         raise HTTPException(status_code=503, detail="Sleep manager not available")
 
-    updated = sleep_manager.resolve_conflict(resolution_id, body.resolution)
+    updated = sleep_manager.resolve_conflict(resolution_id, body.resolution, body.apply_to_store)
     if updated is None:
         raise HTTPException(status_code=404, detail=f"Conflict resolution '{resolution_id}' not found")
 
@@ -595,6 +600,16 @@ async def wake_agent(
             sleep_manager.wake()
         except Exception as e:
             logger.warning("Failed to wake agent: %s", e)
+
+    # 闭环修复：状态页按派生 isInSleep（tracker 阶段也算睡眠）显示唤醒按钮；
+    # 此前 /wake 只结束手动会话，自动阶段推进链不受影响 → 按钮点了阶段不回落，
+    # 15s 轮询后页面原样。唤醒语义 = 回到活动：tracker 复位活动时钟并回落阶段
+    tracker = getattr(agent, "idle_tracker", None)
+    if tracker is not None and hasattr(tracker, "record_activity"):
+        try:
+            tracker.record_activity()
+        except Exception as e:
+            logger.warning("Failed to reset idle tracker on wake: %s", e)
 
     return {
         "code": 0,

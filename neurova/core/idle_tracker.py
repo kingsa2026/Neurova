@@ -25,8 +25,8 @@ class SleepPhaseThresholds:
     idle_warning: float = 300.0  # 5分钟
     idle_drowsy: float = 600.0  # 10分钟
     idle_light_sleep: float = 1800.0  # 30分钟
-    idle_deep_sleep: float = 3600.0  # 60分钟
-    idle_rem: float = 5400.0  # 90分钟
+    idle_rem: float = 3600.0  # 60分钟（链序：浅睡→REM→深睡→休眠，REM 先于深睡）
+    idle_deep_sleep: float = 5400.0  # 90分钟
     idle_hibernate: float = 7200.0  # 120分钟
 
 
@@ -65,8 +65,11 @@ class IdleTimeTracker(BaseModule):
     MODULE_NAME = "Idle Time Tracker"
     MODULE_VERSION = "1.0.0"
 
-    # 睡眠阶段顺序
-    PHASE_ORDER = ["active", "light_sleep", "deep_sleep", "rem", "hibernate"]
+    # 睡眠阶段链序（用户定义）：活跃→浅睡→REM→深睡→休眠
+    PHASE_ORDER = ["active", "light_sleep", "rem", "deep_sleep", "hibernate"]
+    # 完整周期（跑到休眠=经历全链）后的自动入睡冷却（秒）。系统时间口径，
+    # 防一夜多轮深睡；被活动打断的不完整周期不打点、不受冷却限制。
+    FULL_CYCLE_COOLDOWN_SECONDS = 24 * 3600
     PHASE_DISPLAY_NAMES = {
         "active": "活跃",
         "light_sleep": "浅睡眠",
@@ -233,7 +236,7 @@ class IdleTimeTracker(BaseModule):
             self.log_warning("Cannot trigger consolidation: missing consolidation or memory manager")
             return
 
-        # P0-4 记忆晋升（OpenClaw Dreaming 启发）：巩固前置确定性晋升门——
+        # P0-4 记忆晋升：巩固前置确定性晋升门——
         # 召回/温度达标的 episodic 记忆晋升为重要记忆。晋升是本地确定性
         # 扫描（无 LLM、有界、节流），挂在空闲整理线程，永不阻塞回复路径。
         try:
@@ -401,11 +404,11 @@ class IdleTimeTracker(BaseModule):
                 return current_idle >= self._idle_threshold_for(target_phase)
             return False
 
-    # 各阶段温度阈值内置默认（设置快照缺省时回退）
+    # 各阶段温度阈值内置默认（设置快照缺省时回退；链序 浅睡→REM→深睡→休眠，递减）
     _DEFAULT_TEMP_THRESHOLDS = {
         "light_sleep": 30.0,
-        "deep_sleep": 25.0,
-        "rem": 20.0,
+        "rem": 25.0,
+        "deep_sleep": 20.0,
         "hibernate": 15.0,
     }
 
@@ -487,8 +490,14 @@ class IdleTimeTracker(BaseModule):
                 self.log_debug("auto_sleep_enabled=False, 跳过自动阶段迁移")
                 return None
 
-            # 每阶段最长停留可配: dwell 超时 → 强制向更深推进；
-            # hibernate（最深）超时 = 整觉完成 → 回 active（wake 记账走阶段回调链）
+            # 完整周期 24h 冷却：仅在 active（准备开始一轮睡眠）时拦截，
+            # 已进入睡眠链的推进不受影响。防一夜多轮深睡；不完整周期不打点故随时可进。
+            if self._current_phase == "active" and self._in_full_cycle_cooldown():
+                self.log_debug("完整周期 24h 冷却中, 暂不自动入睡")
+                return None
+
+            # 每阶段最长停留可配: dwell 超时 → 强制沿链推进（浅睡→REM→深睡→休眠）；
+            # hibernate（链尾）超时 = 整觉完成 → 回 active（wake 记账走阶段回调链）
             if self._current_phase != "active":
                 forced = self._dwell_forced_phase(settings)
                 if forced:
@@ -516,8 +525,8 @@ class IdleTimeTracker(BaseModule):
     def _dwell_forced_phase(self, settings: Dict[str, Any]) -> Optional[str]:
         """当前阶段停留超过 phase_max_minutes_{phase} → 返回强制推进的下一阶段。
 
-        PHASE_ORDER 递进：light_sleep→deep_sleep→rem→hibernate；
-        hibernate（最深）超时 = 整觉完成 → "active"（阶段回调链负责 wake 记账）。
+        PHASE_ORDER 递进：light_sleep→rem→deep_sleep→hibernate；
+        hibernate（链尾）超时 = 整觉完成 → "active"（阶段回调链负责 wake 记账）。
         未配置/0 = 该阶段不设上限（保持旧行为）。
         """
         phase = self._current_phase
@@ -550,8 +559,29 @@ class IdleTimeTracker(BaseModule):
         self._current_phase = new_phase
         self._phase_start_time = time.time()
         self.set_state_value("current_phase", new_phase)
+        # 进入休眠 = 已跑完 浅睡→REM→深睡→休眠 全链 → 打点启动 24h 冷却
+        if new_phase == "hibernate" and self._sleep_consolidation is not None:
+            try:
+                self._sleep_consolidation.mark_sleep_cycle_completed()
+            except Exception as e:  # noqa: BLE001 - 打点失败不影响阶段迁移
+                self.log_debug(f"mark_sleep_cycle_completed skipped: {e}")
         self._emit_phase_changed(old_phase, new_phase)
         self.log_info(f"Transitioned to phase: {new_phase}")
+
+    def _in_full_cycle_cooldown(self) -> bool:
+        """距上次完整周期（进入过休眠）是否仍在 24h 冷却窗口内（系统时间）"""
+        if self._sleep_consolidation is None:
+            return False
+        getter = getattr(self._sleep_consolidation, "get_sleep_cycle_completed_at", None)
+        if getter is None:
+            return False
+        try:
+            last = getter()
+        except Exception:  # noqa: BLE001
+            return False
+        if last is None:
+            return False
+        return (time.time() - last) < self.FULL_CYCLE_COOLDOWN_SECONDS
 
     def _emit_phase_changed(self, old_phase: str, new_phase: str) -> None:
         """发送阶段变更事件"""

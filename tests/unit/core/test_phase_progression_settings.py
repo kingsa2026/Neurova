@@ -41,15 +41,16 @@ def _tracker(consolidation: SleepConsolidation, settings: dict) -> IdleTimeTrack
 
 class TestDefaults:
     def test_new_settings_keys_match_hardcoded_defaults(self, consolidation):
+        """引擎默认须与 tracker 内置回退一致（链序 浅睡→REM→深睡→休眠）"""
         s = consolidation.get_settings()
         assert s["sleep_mode"] == "temperature"
         assert s["temp_threshold_light_sleep"] == 30.0
-        assert s["temp_threshold_deep_sleep"] == 25.0
-        assert s["temp_threshold_rem"] == 20.0
+        assert s["temp_threshold_rem"] == 25.0
+        assert s["temp_threshold_deep_sleep"] == 20.0
         assert s["temp_threshold_hibernate"] == 15.0
         assert s["idle_threshold_light_sleep"] == 30
-        assert s["idle_threshold_deep_sleep"] == 60
-        assert s["idle_threshold_rem"] == 90
+        assert s["idle_threshold_rem"] == 60
+        assert s["idle_threshold_deep_sleep"] == 90
         assert s["idle_threshold_hibernate"] == 120
         assert s["monitor_interval_seconds"] == 60
 
