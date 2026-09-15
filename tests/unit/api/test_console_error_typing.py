@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """P1-3 错误事件结构化分型（配额事件化）。
 
-Codex 对齐（docs/Neurova_Codex代码级对比_2026-09-14.md §2.5/P1-3）：
 - SSE error 事件携带 {error_kind, retryable}——分类走 model_error_policy 单源
   （既有可重试白名单：rate_limited/transient；配额/认证/参数不可重试）
 - 配额类（rate_limited）额外发独立 quota_limited 事件（配额横幅引导换模型）

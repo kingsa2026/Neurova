@@ -70,7 +70,7 @@ class ChannelManager:
         if ChannelManager._instance is not None:
             raise RuntimeError("Use get_channel_manager() instead of direct construction")
         self._adapters: Dict[str, ChannelAdapter] = {}
-        # agent 多实例全量表（2026-09-13 渠道 agent 隔离，QP 装配期绑定模型）
+        # agent 多实例全量表
         self._agent_adapters: Dict[tuple, ChannelAdapter] = {}
         self._message_handler: Optional[MessageHandler] = None
         # C-24: 构造期直接建表——原惰性 hasattr 建表存在竞态（并发 add 时
@@ -89,10 +89,10 @@ class ChannelManager:
     # ============================================================
 
     def register_adapter(self, adapter: ChannelAdapter, agent_id: str = "default"):
-        """注册渠道适配器（2026-09-13 agent 多实例，对齐 QwenPaw 装配期绑定）
+        """注册渠道适配器
 
         实例即路由：注册时绑定 agent_id 与事件回调，入站消息 metadata 携带来源
-        agent（QP "哪个 bot 收到 = 哪个 agent 处理"，无运行时查表）。
+ agent。
         `_adapters[type]` 保持 default agent 兼容视图（既有 get_adapter 调用零破坏）；
         `_agent_adapters[(agent_id, type)]` 为全量实例表（跨 agent 多实例）。
         """
@@ -320,7 +320,7 @@ class ChannelManager:
             except Exception as e:  # noqa: BLE001 - 预检故障不影响消息分发
                 logger.debug("语音预检跳过: %s", e)
 
-            # P0-5 入站持久化队列（OpenClaw 启发）：先持久化再分发，重启不
+            # P0-5 入站持久化队列：先持久化再分发，重启不
             # 丢消息。enqueue 成功 → 立即同步排水该消息（await，时序与旧
             # 直发路径一致，分发结果经 ack/nack 落账）；队列不可用（DB 故障）
             # → fail-open 旧直发路径。重启遗留消息由 start_drain 后台兜底。
@@ -563,7 +563,7 @@ class ChannelManager:
             logger.exception("Adapter %s connect error: %s", adapter.channel_type, e)
 
     # ============================================================
-    # B4-a 渠道管理能力面（QP config.py/manager.py 对齐）
+    # B4-a 渠道管理能力面
     # ============================================================
 
     async def restart_channel(self, channel_type: str) -> Dict[str, Any]:
@@ -606,7 +606,7 @@ class ChannelManager:
         return queue.clear(channel_type)
 
     def conflict_check(self) -> Dict[str, Any]:
-        """机器人身份冲突检测（QP config.py:379 对齐）。
+        """机器人身份冲突检测。
 
         两个渠道复用同一身份凭据（app_id/api_key 相同）时，平台的回调/事件
         会串渠道。按身份指纹分组，返回出现 ≥2 次的冲突项。
@@ -660,11 +660,10 @@ class ChannelManager:
         """群聊会话隔离键（单点裁决，供会话同步/处理器共用）。
 
         share_session_in_group=True（默认）→ chat_id（群内共享一个会话）；
-        False → ``chat_id:sender_id``（按发送者隔离，QwenPaw 隔离模式语义）。
+ False → ``chat_id:sender_id``。
         配置取适配器的 share_session_in_group 属性（bool/"true"/"false"），
         未声明的适配器默认共享——与既有行为等价，只提升不下降。
         agent 隔离（2026-09-13）：非 default agent 的实例前缀 ``agent:``
-        （等价 QP 群聊 session key 带 bot 后缀，同群多 agent 不互染）；
         default 保持旧键格式——既有会话历史零迁移。
         """
         agent = str(message.metadata.get("agent_id") or "default")

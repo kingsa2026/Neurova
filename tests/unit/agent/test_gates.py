@@ -1,5 +1,5 @@
 """
-P2-5 门控系统红测（对标 QP loop/gates 三态语义）
+P2-5 门控系统红测
 """
 
 import pytest

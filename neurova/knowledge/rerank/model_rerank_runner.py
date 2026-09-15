@@ -1,4 +1,4 @@
-"""模型重排（Dify RerankModelRunner 同型）。
+"""模型重排。
 
 rerank_provider(query, doc_texts) -> List[float]（与候选等长）。
 provider 为注入式扩展点（bge-reranker / cohere rerank / LLM 打分等由
@@ -19,8 +19,7 @@ class ModelRerankRunner:
     ):
         self._provider = rerank_provider
         self._fallback = WeightRerankRunner(fallback_weights) if fallback_weights else None
-        # provider 调用失败退化时记录原因（P0-3 Yuxi 对比：后端故障与
-        # "零结果"必须可区分）；成功时清空
+        # provider 调用失败退化时记录原因；成功时清空
         self.last_error: Optional[str] = None
 
     def rerank(self, query, docs):

@@ -1,5 +1,5 @@
 """
-高危安全审计修复回归测试（对应 audit-reports/security-audit.md）
+高危安全审计修复回归测试（对应）
 
 覆盖本次修复项:
 - H3: 工作流/数据转换 eval() 沙箱逃逸 → safe_expr AST 白名单

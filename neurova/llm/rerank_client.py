@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""rerank 模型通道客户端（Yuxi 对比 P0-3 接线）。
+"""rerank 模型通道客户端。
 
-根因修复：Dify 对标轮建好了 ModelRerankRunner/factory，但唯一生产装配点
+根因修复：但唯一生产装配点
 `semantic_search_api._resolve_rerank_provider` 恒返回 None——"声明未接线"。
 本模块补上真实链路：provider_manager 配置里带 `rerank` 能力的模型 →
 OpenAI 兼容 `POST {base_url}/rerank`（SiliconFlow/Jina/Cohere 系协议：
@@ -9,7 +9,7 @@ OpenAI 兼容 `POST {base_url}/rerank`（SiliconFlow/Jina/Cohere 系协议：
 relevance_score}]}），返回 `(query, texts)->scores` 的同步 callable，
 由端点层经 asyncio.to_thread 调用（不阻塞事件循环）。
 
-错误分型是硬要求（Yuxi 反面教材：aquery 吞错 return []，"零结果"与
+aquery 吞错 return []，"零结果"与
 "后端故障"不可区分）：
 - RerankConfigError：配置面问题（模型未配置/服务商禁用/无 base_url）
 - RerankBackendError(kind=network|http|contract)：调用面故障

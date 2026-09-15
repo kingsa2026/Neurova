@@ -1,5 +1,5 @@
 """
-统一治理策略中心 (对齐 QwenPaw Governance)。
+统一治理策略中心。
 
 将已有的工具护栏（ToolGuardEngine / ShellEvasionGuardian / FilePathGuardian）
 收敛为统一的四级裁决：allow / deny / ask / sandbox。
@@ -55,10 +55,8 @@ def is_policy_denial(result: Any) -> bool:
     """
     if not isinstance(result, dict):
         return False
-    # param_guard 键：工具参数守卫的拒绝（截断 JSON 无法配平等）同样是
-    # "决策"——OpenOcta 启发 P1-5，与治理 DENY 同源口径，不计工具故障。
-    # swarm_rejection 键：蜂群 spawn 数据层结构化拒绝（OpenOcta 启发 P2-10
-    # 三明治，硬限阀门）同为"决策"非"后端故障"。
+    # param_guard 键：与治理 DENY 同源口径，不计工具故障。
+    # swarm_rejection 键：蜂群 spawn 数据层结构化拒绝同为"决策"非"后端故障"
     return bool(
         result.get("governance")
         or result.get("pending_approval")
@@ -245,7 +243,7 @@ class GovernancePolicy:
 
         优先级: tool_overrides > 白名单 > 内容检测。
         """
-        # P0-1（QwenPaw #7472 同款）：分段/白名单/内容检测统一看 shell
+        # P0-1：分段/白名单/内容检测统一看 shell
         # 实际执行的形态（续行已移除），防止换行拆分绕过。
         command = normalize_posix_line_continuations(command)
 
@@ -257,7 +255,7 @@ class GovernancePolicy:
                 reasons=[f"工具 '{tool_name}' 命中策略覆盖: {override.value}"],
             )
 
-        # P0-6 分段审批（OpenClaw 启发）：多段命令全部段命中白名单才放行；
+        # P0-6 分段审批：多段命令全部段命中白名单才放行；
         # 任一段未命中 → 不再享受白名单免检，整条命令回落内容检测。
         # 内容检测（critical/high DENY/SANDBOX）恒先于分段 ASK——内容级
         # 危险信号不得被"白名单未命中→ASK"弱化；分段 ASK 只在内容检测

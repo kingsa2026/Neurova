@@ -1,4 +1,4 @@
-"""R0-2 DPI/多屏坐标链（CUA 升级方案 Phase 0）
+"""R0-2 DPI/多屏坐标链
 
 病根（修复前）：
 - ImageGrab.grab() 只截主屏、进程无 DPI awareness → 150% 缩放/多屏环境坐标必错

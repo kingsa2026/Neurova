@@ -1,10 +1,10 @@
-"""进化记忆会话快照冻结测试（OpenOcta 启发 P2 #11：SnapshotForSession）
+"""进化记忆会话快照冻结测试
 
 问题：记忆温度/结晶引擎/进化写入即时生效 → 长会话中途 soul.md 更新、
 性格调整、结晶经验落库会改变当前 system prompt，破坏可复现性
 （同会话内两次相同提问可能因 prompt 漂移得到不同回答）。
 
-OpenOcta 方案：会话开始时冻结注入 prompt 的记忆/人设快照，写入只在
+会话开始时冻结注入 prompt 的记忆/人设快照，写入只在
 **下次会话**生效。Neurova 等价实现：
 - Agent 快照缓存：ChatPipeline 每轮请求开始时取一次
   {soul, personality, constitution}——同一 session_id 的首轮缓存，
@@ -13,7 +13,7 @@ OpenOcta 方案：会话开始时冻结注入 prompt 的记忆/人设快照，�
 - 快照生命周期：会话切换自动换快照；进程生命周期内 LRU 上限防膨胀
 
 注意：结晶经验注入本就在"本轮检索产物"段（每轮变化属正常语义——
-OpenOcta 冻结的是 prompt 身份层，不是上下文检索层），无需冻结。
+不是上下文检索层），无需冻结
 """
 from __future__ import annotations
 

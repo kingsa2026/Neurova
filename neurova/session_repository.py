@@ -10,7 +10,7 @@ SessionRepository 统一接口（Deep Module）
 
 每个 adapter 实现此接口，调用方通过 get_session_repository() 获取实例。
 
-设计决策详见 ADR-0008: docs/adr/0008-session-repository.md
+设计决策详见 ADR-0008:
 """
 from __future__ import annotations
 

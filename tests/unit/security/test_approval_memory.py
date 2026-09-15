@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-P1-c 审批记忆 EXACT/SIMILAR 防回归网（对标 QP beta.5 审批记忆语义）
+P1-c 审批记忆 EXACT/SIMILAR 防回归网
 
 语义：
 - approve(remember="exact") → 整条命令持久记忆（跨 24h 窗口）

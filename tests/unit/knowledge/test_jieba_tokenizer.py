@@ -1,6 +1,6 @@
-"""P0-1 jieba 真分词（Utopia 对标落地清单）。
+"""P0-1 jieba 真分词。
 
-契约（docs/Neurova_Utopia代码级对比_2026-09-04.md §4 P0-1）：
+契约（§4 P0-1）：
 - knowledge.search.tokenize：安装 jieba 时用 jieba 词级切分（"量子计算" →
   ["量子","计算"]），未安装时回退旧 n-gram 规则（可选依赖纪律）；
 - 英文按空格/词切分，标点剥离，单字噪声不进 token；

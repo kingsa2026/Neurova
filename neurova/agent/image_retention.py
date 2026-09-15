@@ -1,15 +1,15 @@
-"""历史图片保留策略（CUA 升级方案 R2-4）
+"""历史图片保留策略
 
 Neurova 的图片 base64 只挂当轮请求（请求级 vision parts，2026-09-09 串台
 事故后历史只留中性标记）。本模块在请求装配最终出口做**防线式收口**：
 强制只保留最近 keep_last 条含图片消息的图片部件，更早的置为占位文本。
 
-设计取舍（相对 Cua ImageRetention 的适配）：
+设计取舍：
 - Neurova 历史无 computer_call/tool 配对结构 → "成对删除"适配为
   "图片部件置空占位"，消息骨架与文本说明保留（轮次语义不丢）
 - 不就地修改调用方列表（返回新列表，内部的 content 列表按需浅拷贝）
 
-参考：trycua/cua `callbacks/image_retention.py`（最近 N 张 + 相邻项成对删除）。
+参考
 """
 
 from typing import Any, Dict, List, Tuple

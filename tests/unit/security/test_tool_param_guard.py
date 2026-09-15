@@ -1,6 +1,5 @@
-"""工具参数守卫测试（OpenOcta 启发 P1-5：toolArgumentsGuard）
+"""工具参数守卫测试
 
-OpenOcta 把生产踩过的 LLM 坑做成中间件（tool_arguments_guard.go）：
 - 参数别名重映射：path/file/filename/filepath/filePath → file_path
 - 截断 JSON 检测：手写括号/引号配平计数，能修则修
 - 失败返回带修复建议的错误文案回灌模型，而不是让工具报错消耗迭代次数

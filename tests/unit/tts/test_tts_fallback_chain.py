@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P1-12 TTS 有序 fallback 表配置化（OpenClaw autoSelectOrder 启发）— TDD 测试
+"""P1-12 TTS 有序 fallback 表配置化— TDD 测试
 
 锁定：
 1. TTSConfig.fallback_chain 显式有序表 → 管理器按表顺序初始化/fallback；

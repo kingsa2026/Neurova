@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-P1-8 后端 boot e2e（对标 QP test_hub_local_runtime 的冒烟语义）
+P1-8 后端 boot e2e
 
 纯 subprocess 语义：真实拉起 start_server --backend（固定 9527；若本机
 已有健康实例则复用），探活 /health、/docs、/api/version，自启实例优雅

@@ -1,7 +1,6 @@
 """PlanningTool 计划即工具（TDD 红绿）—— 对比文档 P5
 
-对标 OpenManus PlanningTool 的 7 命令语义（create/update/list/get/set_active/
-mark_step/delete），关键差异：计划持久化到 SQLite（OpenManus 是进程内 dict，
+mark_step/delete），关键差异
 重启即失——Neurova 用自身强项反超），跨会话/重启后计划与活跃指针自动还原。
 
 命名说明：工具入口方法是 run_command（而非 execute），与 sqlite3.Connection.execute
@@ -114,7 +113,7 @@ class TestListActiveDelete:
 
 
 class TestPersistence:
-    """SQLite 持久化：重建实例后计划与活跃指针完整还原（反超 OpenManus 进程内 dict）"""
+    """SQLite 持久化：重建实例后计划与活跃指针完整还原"""
 
     @pytest.mark.asyncio
     async def test_plans_survive_store_rebuild(self, tool, tmp_path):

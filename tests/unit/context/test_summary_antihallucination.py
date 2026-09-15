@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-P1-b 摘要反幻觉硬校验防回归网（对标 QP beta.5 ContinuationSummary 校验语义）
+P1-b 摘要反幻觉硬校验防回归网
 
 三道闸：
 1. identifier 逐字闸：摘要中出现的高风险标识符（URL/路径/版本号/hash）

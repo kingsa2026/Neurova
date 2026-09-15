@@ -1,7 +1,7 @@
 """
 P1-2 切片 3 — handle_tool_calls 声明制并行红测
 
-语义（对标 QP ToolCoordinator 并行执行）：
+语义：
 - 同轮全部调用均声明并行安全（is_concurrency_safe）→ asyncio.gather 并行执行
 - 任一调用未声明 → 整轮保守串行（混合批次降级，避免排序/共享状态复杂度）
 - 结果按原 tool_call 顺序回装（tool_call_id 一一对应）；_tool_messages_list

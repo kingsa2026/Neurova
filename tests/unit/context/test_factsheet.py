@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-P3-a factsheet 轻量版防回归网（对标 QP beta.5 Visual Compact 的 factsheet 反幻觉带）
+P3-a factsheet 轻量版防回归网
 
 语义：折叠内容生成摘要后，从原始 chunk **确定性提取**高风险精确值
 （URL/路径/版本号/hex-hash），以原生文本带附加在摘要尾部——模型后续

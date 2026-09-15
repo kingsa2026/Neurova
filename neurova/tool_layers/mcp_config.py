@@ -1,7 +1,7 @@
 """
 MCP Server 配置严格 schema 验证
 
-参照 ZCode 配置模式：未知键显式拒绝（fail fast，不静默丢弃）、
+未知键显式拒绝（fail fast，不静默丢弃）
 transport 推断（command→stdio / url→http，显式声明优先）、缺必需字段拒绝并指名。
 
 字段集:

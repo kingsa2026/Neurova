@@ -1,4 +1,4 @@
-"""P1-7 双轨引擎收敛（TDD — Dify 对比报告 §3.1/§4 P1-7）。
+"""P1-7 双轨引擎收敛。
 
 背景：execution_engine/workflow_engine.py（CogArch 1.0 任务型线性链）
 与 collaboration/neurflow/（真 DAG 引擎）双轨并存。审计结论：旧引擎的

@@ -1,6 +1,6 @@
-"""CUA simulated 评测台 harness（CUA 升级方案 R2-2，cua-bench 简化版）。
+"""
 
-任务契约（cua-bench 四装饰器的简化翻译）：
+任务契约：
 - setup: 注入假桌面 HTML（fake_desktop.html 单页 + task 参数路由）
 - solve: 走生产 PlaywrightBackend 的观察后行动协议（dom_snapshot → click_role/fill_role）
 - evaluate: 读页面真实状态（window.* 标记）→ reward 0..1
@@ -45,7 +45,7 @@ class FakeDesktop:
         await self.page.set_content(await _read_html())
 
     async def load_task(self, task: str) -> None:
-        """按 task 名重新注入页面（等价 cua-bench 的 setup_task）"""
+        """按 task 名重新注入页面"""
         await self.page.goto(f"about:blank?task={task}")
         await self.page.set_content((await _read_html()).replace(
             'new URLSearchParams(location.search).get("task")',

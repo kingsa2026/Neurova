@@ -135,7 +135,7 @@ class BaseProvider(ABC):
             return self._extra_models
 
     async def check_model_connection(self, model_id: str) -> ConnectionResult:
-        """检查特定模型的连接状态（QwenPaw 对齐：真实网络验证）。
+        """检查特定模型的连接状态。
 
         默认实现拉取服务商模型列表验证连通性与模型存在性
         （verification=provider_only）；OpenAI 兼容子类覆盖为对该模型

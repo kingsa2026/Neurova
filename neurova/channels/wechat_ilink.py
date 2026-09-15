@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""微信个人号 iLink Bot 渠道适配器（端到端收发，QwenPaw wechat/channel.py 协议照搬）。
+"""微信个人号 iLink Bot 渠道适配器。
 
 NV 旧 wechat 适配器的 ilink 路径建立在虚构端点 ilink.wechat.bot 上（代码自注
-"假设的端点"），真实网络下永远不可用。本模块按 QwenPaw 真实协议重建：
+"假设的端点"），真实网络下永远不可用
 
 - 收：POST getupdates 长轮询后台任务（服务端挂 ~35s；连续失败指数退避熔断）；
 - 发：sendmessage 必带该用户最近一条入站的 context_token（平台限制每 token

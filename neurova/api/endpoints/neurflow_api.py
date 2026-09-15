@@ -266,7 +266,7 @@ async def refresh_store_token(store_id: str, current_user: Dict[str, Any] = Depe
 
 
 # ==================== Tier 2 OAuth（一键授权跳转） ====================
-# 依据 docs/neurflow-store-connection-design.md §2（2026-08-29 复核）：
+# 依据 §2（2026-08-29 复核）：
 # - 1688：auth.1688.com/oauth/authorize（已核实，路径经网关探测）
 # - 小红书：ark.xiaohongshu.com/ark/authorization（已核实）
 # - 淘宝/闲鱼：TOP oauth（oauth.taobao.com；闲鱼复用 TOP 生态）
@@ -824,7 +824,7 @@ async def stream_execution_events(
     after: int = Query(0, ge=0),
     current_user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
-    """执行事件 SSE 流（P0-1 run/stream 分离，Dify stream-events 对标）。
+    """执行事件 SSE 流。
 
     帧格式 data: {seq,type,workflow_id,execution_id,node_id,data,timestamp}；
     回放 seq>after 历史帧 + 实时推送，终态帧（workflow_completed/failed）后收尾；
@@ -2201,7 +2201,7 @@ async def rollback_workflow_api(
     }
 
 
-# ==================== Checkpoint API（Probe + Retry，借鉴 langflow） ====================
+# ==================== Checkpoint API ====================
 
 
 @router.get("/executions/{execution_id}/checkpoint")

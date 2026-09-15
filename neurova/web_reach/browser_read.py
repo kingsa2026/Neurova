@@ -9,7 +9,7 @@ browser_read 通过 Playwright 驱动真实浏览器，处理 SPA / 客户端渲
 - 浏览器无状态：每次调用独立 headless 实例，关闭即释放
 - 续读零网络：传 session_id 时从内存缓存切片，不开浏览器、不做 URL 校验
 
-续读游标（对标 Dokobot canContinue/sessionId）：
+续读游标：
 - 首读超过 chunk（默认 _MAX_TEXT=60k，与既有契约一致）→ 建 ReadSession，
   返回首片 + session_id + can_continue + next_offset，全文缓存在会话里
 - 续读：browser_read(session_id=..., offset=?) → 纯内存切片，可循环读完全文

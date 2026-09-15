@@ -1,5 +1,5 @@
 """
-内核级执行沙箱 (对齐 QwenPaw Sandbox)。
+内核级执行沙箱。
 
 提供跨平台进程隔离能力：
 - Linux: bubblewrap (bwrap) 文件系统/网络隔离
@@ -27,7 +27,7 @@ logger = get_logger(__name__)
 
 
 class SandboxSeverity(str, Enum):
-    """隔离强度等级（与 QwenPaw Governance 对齐）"""
+    """隔离强度等级"""
 
     NONE = "none"  # 不隔离（同进程）
     NETWORK_OFF = "network_off"  # 禁网络
@@ -301,10 +301,9 @@ def docker_available() -> bool:
 _DOCKER_AVAILABLE_CACHE: Optional[bool] = None
 
 
-# ── P1-4 沙箱拒绝归因（Codex violation/denial 启发式对齐）──────────────
-# 关键词判据与 codex sandboxing/src/denial.rs 同构：operation not permitted /
+# operation not permitted /
 # permission denied / read-only file system / seccomp / sandbox / landlock /
-# failed to write file，另补 Windows "access is denied"。
+# failed to write file，另补 Windows "access is denied"
 _SANDBOX_DENIAL_KEYWORDS = (
     "operation not permitted",
     "permission denied",
@@ -315,7 +314,7 @@ _SANDBOX_DENIAL_KEYWORDS = (
     "landlock",
     "failed to write file",
 )
-# shell 自身错误退出码（codex violation.rs 同构）：找不到命令/用法错等与沙箱无关
+# shell 自身错误退出码：找不到命令/用法错等与沙箱无关
 _SHELL_OWN_ERROR_CODES = frozenset({2, 126, 127})
 _SIGSYS_EXIT_CODE = 128 + 31  # Linux seccomp SIGSYS 终止 → 128+31
 

@@ -1,4 +1,4 @@
-"""R1-5 观察预算参数化（CUA 升级方案 Phase 1，OCU text_limit/tree budget 契约）
+"""R1-5 观察预算参数化
 
 验收：
 - _trim_snapshot_tree 纯函数：按节点行数/深度裁剪，truncated 如实标注

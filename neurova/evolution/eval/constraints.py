@@ -1,6 +1,5 @@
 """约束闸 — 进化产物必须全过的硬约束。
 
-对位 Hermes `hermes-agent-self-evolution/evolution/core/constraints.py`:
 变体违反任一闸即被丢弃,绝不进入部署。
 
 五类闸:
@@ -10,7 +9,7 @@
   4. skill_structure — SKILL.md frontmatter 含 name + description
   5. semantic_similarity — 与基线语义不漂移(防跑题)
 
-语义保持是 Hermes 有而 Neurova 原先完全缺的一环。实现优先用 embedding
+实现优先用 embedding
 余弦相似度;embedding 不可用时退回 token Jaccard,保证离线可跑(不因
 可选依赖缺失而失去这道闸)。
 """

@@ -1,12 +1,11 @@
 # -*- coding: utf-8 -*-
-"""密钥静态加密存储（P2-3，Codex keyring+回退链对齐）。
+"""密钥静态加密存储。
 
 - data/shared_config.json 中的 provider api_key 由明文 JSON 字段升级为
   Fernet 加密（"enc:v1:" 前缀标记），读侧解密、写侧加密——存量明文兼容
   （读侧原样透传，下次保存自动迁移为密文）
 - 密钥通道三级：env NEUROVA_SECRET_KEY → keyring（服务名 "Neurova"）→
   data/.secret_key 文件（自动生成；POSIX chmod 0600，Windows 无 POSIX 权限位，
-  目录 ACL 承担隔离——与 codex auth.json 0600 回退同构）
 - 任何加解密异常 fail-open 返回原值（不因加密层故障瘫痪配置读写）
 """
 from __future__ import annotations

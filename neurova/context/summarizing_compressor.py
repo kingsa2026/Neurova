@@ -1,5 +1,5 @@
 """
-真摘要压缩器（P1-1③，对标 QP scroll ContinuationSummary 语义）
+真摘要压缩器
 
 把被折叠的中段轮次交给 LLM 生成/增量更新摘要：
 - 注入式 llm_call（async callable(prompt) -> str）——零硬依赖

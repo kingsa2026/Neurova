@@ -1,6 +1,5 @@
 """PlanningTool —— 计划即工具（对比文档 P5 + 三层隔离 §3.3）
 
-对标 OpenManus PlanningTool 的 7 命令语义（create/update/list/get/set_active/
 mark_step/delete），关键差异：计划持久化到 SQLite 并带 (agent_id, user_id)
 归属隔离——plan_id 在归属内唯一，活跃指针按归属隔离，跨用户互不可见。
 
@@ -20,7 +19,7 @@ from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 计划步骤状态（对标 OpenManus PlanStepStatus）
+# 计划步骤状态
 STEP_STATUS_NOT_STARTED = "not_started"
 STEP_STATUS_IN_PROGRESS = "in_progress"
 STEP_STATUS_COMPLETED = "completed"

@@ -1,8 +1,8 @@
-"""Neurova MCP server 面（P1-5 — Dify `core/mcp/server` 对标）。
+"""Neurova MCP server 面。
 
 平台自身作为 MCP server 对外暴露能力：已发布工作流 + 技能聚合为
 MCP tools。协议无关核心（list_tools/call_tool），传输层（stdio/SSE
-SDK 适配器）另行包壳——Dify 同构：server 核心与传输分离。
+server 核心与传输分离
 
 复用既有契约，不另起炉灶：
 - 工作流工具：workflow_as_tool.build_workflow_tool_schema（P1-3，
@@ -20,7 +20,6 @@ logger = get_logger(__name__)
 
 _SKILL_PREFIX = "skill:"
 
-# R3-3 CUA 双层 MCP 导出（docs/Neurova_CUA_Phase3立项_2026-09-12.md §2）
 _CUA_EXPORT_ENV = "NEUROVA_CUA_MCP_EXPORT"
 _RUN_COMPUTER_TASK = "run_computer_task"
 
@@ -31,7 +30,7 @@ class NeurovaMCPServer:
     Args:
         storage: neurflow WorkflowStorage（工作流工具源；None=不暴露工作流）
         skill_registry: SkillRegistry（技能工具源；None=不暴露技能）
-        agent_ref: Agent（R3-3 CUA 导出源；None=不暴露 computer_*/run_computer_task）
+ agent_ref: Agent
     """
 
     def __init__(self, storage=None, skill_registry=None, agent_ref=None, agent_provider=None):
@@ -52,7 +51,6 @@ class NeurovaMCPServer:
                 return None
         return None
 
-    # ── R3-3 CUA 导出 ─────────────────────────────────────────
 
     @staticmethod
     def _computer_export_enabled() -> bool:
@@ -160,7 +158,6 @@ class NeurovaMCPServer:
                 skill_name = name[len(_SKILL_PREFIX):]
                 return await self._call_skill(skill_name, arguments)
 
-            # R3-3 CUA 导出面（工具面 computer_* + agent 面 run_computer_task）
             if name.startswith("computer_") or name == _RUN_COMPUTER_TASK:
                 return await self._call_computer(name, arguments)
 
@@ -174,7 +171,7 @@ class NeurovaMCPServer:
             return {"isError": True, "error": str(e)}
 
     async def _call_computer(self, name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        """R3-3 CUA 导出路由。默认关时按名调用也拒（导出面与清单同源开关）。
+        """默认关时按名调用也拒（导出面与清单同源开关）
 
         工具面：路由到 ToolExecutor._execute_single_tool（单一实现源，走同一
         governance 预检/桌面审计/ActionResult，与内部直调逐字段等价，不复制实现、

@@ -1,13 +1,13 @@
-"""P0-2 知识条目 revision 链 + tombstone 删除（Utopia 对标落地清单）。
+"""P0-2 知识条目 revision 链 + tombstone 删除。
 
-契约（docs/Neurova_Utopia代码级对比_2026-09-04.md §2.1/§2.7/§4 P0-2）：
+契约（§2.1/§2.7/§4 P0-2）：
 - update_knowledge：知识实体字段（title/content/category/tags/confidence/source）
   被覆盖前，旧值快照追加进条目 revisions 账本（append-only，不随 update 丢失）；
   引擎簿记字段（graph_node_ids）变化不产生 revision（防 graph_bridge 写入刷屏）；
 - list_revisions：按时间倒序返回 revision（最新在前）；
 - delete_knowledge：tombstone 软删（打 deleted_at，全部读路径不可见），数据可恢复；
 - purge_knowledge：物理删除（保留显式清除通道，如违规内容清理）；
-- restore_knowledge：tombstone 复活（Utopia 0022 删除是事件，可从名单读回）；
+- restore_knowledge：tombstone 复活；
 - list_deleted：墓碑清单（含 deleted_at/deleted_by）；
 - 重启（重新加载存储）后墓碑与 revision 账本均持久保留；
 - 墓碑不进检索索引（失败方向：漏过滤的错误表现是"检索不到"而非"脏数据混入"）。

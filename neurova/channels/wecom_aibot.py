@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """企业微信「智能机器人」渠道适配器（aibot WebSocket 长连接，端到端收发）。
 
-对齐 QwenPaw wecom/channel.py：使用官方 `wecom-aibot-python-sdk`（import aibot）
+使用官方 `wecom-aibot-python-sdk`（import aibot）
 的 WSClient 事件驱动模型——后台线程跑 SDK 的 asyncio 事件循环（connect +
 run_forever），收到 message 帧解析成 NV ChannelMessage 经主事件循环派发；回复
 用 reply_stream(frame, finish=True) 调度回 SDK 线程执行。

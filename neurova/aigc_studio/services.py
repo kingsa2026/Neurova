@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """创作专区业务编排（R3）：剧本→资产→分镜→批量首帧/视频→旁白→合并。
 
-对齐 huobao-drama 阶段模型（功能自研）；生成通道全部复用批次0/1 单源
+生成通道全部复用批次0/1 单源
 （llm.generators.protocols + runtime + task_ledger + recovery 循环）：
 - 图像：generate_image + @角色参考图注入 + 风格/画幅项目锁注入
 - 视频：submit_video 提交 → 账本 batch_key=episode 关联 → 恢复循环收口本地化
@@ -89,7 +89,7 @@ async def split_script(store, pid: str, novel_text: str,
 async def extract_assets(store, pid: str, eid: str,
                          llm: Optional[Callable[[str, str], Awaitable[str]]] = None,
                          ) -> Dict[str, Any]:
-    """剧本 → 角色/场景/道具抽取；同名人跳过（huobao 去重语义）。"""
+    """剧本 → 角色/场景/道具抽取；同名人跳过。"""
     llm = llm or call_llm
     ep = store.get_episode(eid) or {}
     run = store.add_run({"project_id": pid, "kind": "extract"})
@@ -259,7 +259,7 @@ def _hint_for_provider(kind: str, provider_id: str, model: str, fallback: str) -
 
 
 def _inject_style(prompt: str, project: Dict[str, Any]) -> str:
-    """火宝式项目锁：风格 + 画幅注入每镜提示词。"""
+    """风格 + 画幅注入每镜提示词"""
     parts = [prompt]
     style = str(project.get("style") or "").strip()
     if style:
@@ -437,7 +437,7 @@ async def generate_asset_images(store, pid: str, provider: str = "ark",
         try:
             creds = _resolve_creds(hint, model, provider_id)
             import zlib
-            # 稳定 seed：同一资产恒定（跨进程可复现），支撑 huobao 式定妆一致性
+            # 稳定 seed：同一资产恒定（跨进程可复现）
             seed = zlib.crc32(c["id"].encode("utf-8")) % (10 ** 8)
             result = await generate_image(creds, _inject_style(prompt, project),
                                           size="1024x1024", n=1, seed=seed)

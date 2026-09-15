@@ -1,4 +1,4 @@
-"""R2-1 type_text 语义化（CUA 升级方案 Phase 2，OCU 智能输入契约）
+"""R2-1 type_text 语义化
 
 病根（修复前）：computer_type = pyautogui.typewrite 盲打——焦点在哪打哪。
 

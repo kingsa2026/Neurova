@@ -1,6 +1,6 @@
 """P1-5 MCP server HTTP 面（TDD）——协议无关核心的 JSON-RPC 2.0 端点。
 
-契约（Dify core/mcp/server 对标；MCP streamable http 的最小协议面）：
+契约：
 - POST /mcp：JSON-RPC 2.0 单请求信封
   - initialize → {protocolVersion, capabilities: {tools:{}}, serverInfo}
   - tools/list → {tools: [...]}

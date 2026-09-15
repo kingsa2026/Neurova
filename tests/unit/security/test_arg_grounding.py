@@ -1,4 +1,4 @@
-"""T5 日期落地校验 — docs/Neurova_工具调用链升级计划_2026-09-13.md。
+"""T5 日期落地校验 —。
 
 契约：schema 标了 format=date/date-time 的 string 参数，年份须在可见文本
 有字面依据（Needle ungrounded 移植）。开关默认关；标记即生效开关。

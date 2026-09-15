@@ -36,7 +36,7 @@ class TestWhitelistMatching(unittest.TestCase):
     def test_prefix_match_bypasses_inspection(self):
         """命中前缀的单段命令 → 直接 ALLOW，即使内容含可疑模式。
 
-        2026-09-04 P0-6 分段审批语义修订（OpenClaw 启发，根因=链式注入
+根因=链式注入
         搭便车）：原断言允许 ``git status && echo $(whoami)`` 整串放行，
         白名单段携带注入段搭便车。新语义：多段命令须全部段命中才放行，
         本例第二段 ``echo $(whoami)``（含 inline 子命令）未在白名单 →

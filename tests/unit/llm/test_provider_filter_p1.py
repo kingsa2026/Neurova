@@ -3,7 +3,6 @@ P1 升级:OpenRouter 模型筛选(filter_models)+ is_free 判定 + 元数据残�
 
 TDD Red Phase:以下测试定义目标行为,当前实现应全部失败。
 
-对齐 QwenPaw 的四维筛选:系列(provider 前缀)/输入 modality/价格/仅免费。
 """
 
 from __future__ import annotations
@@ -99,7 +98,7 @@ class TestIsFreeDetection:
     def test_free_with_zero_prompt_but_paid_completion(
         self, provider: OpenRouterProvider
     ):
-        # 仅 prompt 为 0 不算免费(与 QwenPaw 全零判定一致)
+        # 仅 prompt 为 0 不算免费
         model = provider._parse_api_model(
             {
                 "id": "x/y",
@@ -157,7 +156,6 @@ class TestFilterModels:
 
 class TestMetadataPruning:
     def test_update_provider_prunes_metadata_of_removed_models(self):
-        """对 QwenPaw 的发现概念:删除模型时同步清理其元数据。"""
         cfg = ProviderConfig(
             id="openai",
             name="OpenAI",

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""P1-4 沙箱拒绝归因 + 升级审批链（Codex denial heuristics + escalation 对齐）。
+"""P1-4 沙箱拒绝归因 + 升级审批链。
 
 - 归因启发式：exit≠0 且输出含沙箱关键词（permission denied / read-only file
   system / seccomp / sandbox / landlock / access is denied…）→ 判沙箱拒绝；

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""B1-5 Prompt Cache 记账 + B3-2 usage agent_id 列（QwenPaw #7342/#7207 对齐）。
+"""B1-5 Prompt Cache 记账 + B3-2 usage agent_id 列。
 
 契约：
 1. usage_accounting.record 接受 cache_read_tokens/cache_write_tokens，

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """P1-9 防回归：整工作区 zip 打包不得阻塞事件循环。
 
-原缺陷（docs/资源型Bug扫描报告_2026-09-11.md RES-P1-9）：
+原缺陷（RES-P1-9）：
 ``GET /workspace/{agent}/files/zip`` 的 rglob 遍历 + ZIP_DEFLATE 压缩
 整段同步跑在事件循环线程上，大工作区（几百 MB）时全站请求/SSE/WS 卡顿
 数十秒；内存峰值 ≈ 原大小 + 压缩包大小（StreamingResponse 只是壳）。

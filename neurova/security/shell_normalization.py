@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """Shell 命令归一化（安全检查与执行共用）。
 
-移植自 QwenPaw ``src/qwenpaw/utils/shell_normalization.py``（P0-1，#7472
-同款漏洞修复）：POSIX shell 在分词前移除行尾 ``\\`` + 换行，安全检查若对
+POSIX shell 在分词前移除行尾 ``\\`` + 换行，安全检查若对
 "移除前"的拼写做正则，与 shell 实际执行的命令存在解析差分——敏感路径
 或逃逸特征被物理换行拆开后即可绕过。检查侧必须先归一化再看。
 

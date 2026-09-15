@@ -1,6 +1,6 @@
 """知识库分块 API 验收测试（P0-2）。
 
-验收标准（docs/Neurova_Dify代码级对比_2026-09-03.md §4 P0-2）：
+验收标准（§4 P0-2）：
 - 长文导入产出多块（chunk_count > 1）
 - 检索命中定位到块（chunk_hits 带 chunk_index + content）
 """

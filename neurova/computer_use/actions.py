@@ -1,4 +1,4 @@
-"""computer 动作实现层（CUA 升级方案 R1-2 伴生提取）
+"""computer 动作实现层
 
 把 tool_executor 中 computer_* 动作的实现体抽为可独立调用的纯函数：
 - 宿主侧 LLM 工具执行体（tool_executor）与本模块共用同一份实现

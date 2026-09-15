@@ -1,5 +1,4 @@
 """
-Scrapling Spider 测试
 
 测试爬虫编排功能
 """
@@ -16,10 +15,10 @@ from neurova.computer_use.browser_manager import ScraplingSpiderTool
 
 
 class TestScraplingSpiderToolInit:
-    """测试 ScraplingSpiderTool 初始化"""
+    """"""
     
     def test_spider_tool_initialization(self):
-        """测试 ScraplingSpiderTool 初始化"""
+        """"""
         spider_tool = ScraplingSpiderTool()
         
         # 应该有基本的属性
@@ -29,7 +28,7 @@ class TestScraplingSpiderToolInit:
         assert hasattr(spider_tool, 'obey_robots')
     
     def test_spider_tool_default_config(self):
-        """测试 ScraplingSpiderTool 默认配置"""
+        """"""
         spider_tool = ScraplingSpiderTool()
         
         # 默认配置
@@ -39,10 +38,10 @@ class TestScraplingSpiderToolInit:
 
 
 class TestScraplingSpiderToolMethods:
-    """测试 ScraplingSpiderTool 方法"""
+    """"""
     
     def test_spider_tool_has_create_spider_method(self):
-        """测试 ScraplingSpiderTool 有创建爬虫方法"""
+        """"""
         spider_tool = ScraplingSpiderTool()
         
         # 应该有创建爬虫方法
@@ -50,7 +49,7 @@ class TestScraplingSpiderToolMethods:
         assert callable(spider_tool.create_spider)
     
     def test_spider_tool_has_run_spider_method(self):
-        """测试 ScraplingSpiderTool 有运行爬虫方法"""
+        """"""
         spider_tool = ScraplingSpiderTool()
         
         # 应该有运行爬虫方法
@@ -58,7 +57,7 @@ class TestScraplingSpiderToolMethods:
         assert callable(spider_tool.run_spider)
     
     def test_spider_tool_has_stop_spider_method(self):
-        """测试 ScraplingSpiderTool 有停止爬虫方法"""
+        """"""
         spider_tool = ScraplingSpiderTool()
         
         # 应该有停止爬虫方法
@@ -67,7 +66,7 @@ class TestScraplingSpiderToolMethods:
 
 
 class TestScraplingSpiderToolCreateSpider:
-    """测试 ScraplingSpiderTool 创建爬虫"""
+    """"""
     
     @patch('neurova.computer_use.browser_manager.HAS_SCRAPELY', True)
     def test_create_spider_with_default_config(self):

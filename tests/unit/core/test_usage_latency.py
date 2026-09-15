@@ -1,6 +1,5 @@
-"""usage_history 延迟指标测试（OpenOcta 启发 P1-8：写读分离记账的延迟维度）
+"""usage_history 延迟指标测试
 
-OpenOcta 每条消息记录 durationMs / firstTokenMs / toolDurationMs，
 延迟报表（p95）由真实数据聚合。Neurova 的 usage_history SQLite 已有
 token 记账，本组测试锁定延迟维度增量：
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""模型错误分类单源（对齐 QwenPaw providers/model_error_policy.py）。
+"""模型错误分类单源。
 
 retry / 健康检查 / 跨模型回退共用一套分类。回退资格：仅 rate_limited /
 transient / model_not_found 允许切换下一模型——authentication（换模型同样

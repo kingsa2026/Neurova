@@ -1,6 +1,6 @@
-"""_invoke_error_mapping 五类标准错误（TDD — Dify 对标补课 §3.3）。
+"""_invoke_error_mapping 五类标准错误。
 
-契约（docs/Neurova_Dify代码级对比_2026-09-03.md §2.5 / §3.3）：
+契约：
 - 五类：connection_failed（连接失败）/ service_unavailable（服务不可用）/
   rate_limited（限频）/ auth_failed（鉴权）/ bad_request（坏请求）
 - 每类携带 retryable 标志（连接/不可用/限频可重试；鉴权/坏请求不可重试）

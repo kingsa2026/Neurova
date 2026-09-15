@@ -1,7 +1,6 @@
-"""P1-1 单节点 step-run（TDD — Dify 对标 §4 P1-1）。
+"""P1-1 单节点 step-run。
 
 契约（后端 DebugSession/断点/variables/mock 均已在位，本件补单节点
-试跑入口——Dify「单节点运行」画布 UX 的底座）：
 1. 引擎层 executor.step_run(workflow, node_id, upstream_outputs,
    user_id)：只跑指定节点——上下文注入上游输出（mock/真实混合调试），
    返回 {status, output, duration_ms, error?}

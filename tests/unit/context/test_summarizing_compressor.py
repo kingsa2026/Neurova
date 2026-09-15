@@ -1,7 +1,7 @@
 """
 P1-1③ 真摘要压缩器 — 红测
 
-SummarizingCompressor（对标 QP scroll ContinuationSummary 语义）：
+SummarizingCompressor：
 - 注入式 llm_call（async callable(prompt) -> str），无注入 → None（调用方保留旧摘要）
 - 60s 超时 / 异常 → 返回 previous_summary（失败保留旧摘要）
 - 成功 → 脱敏后返回新摘要

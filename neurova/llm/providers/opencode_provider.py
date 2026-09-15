@@ -1,7 +1,6 @@
 """
 OpenCode Provider — 免 key 免费网关(opencode.ai zen API)
 
-对齐 QwenPaw 的 OpenCodeProvider 语义:
 1. 模型免费标识:优先网关 isFree/is_free 字段,缺省以 ``-free`` 后缀判定。
 2. 网关列出但已停止服务的模型须剔除(硬编码封禁清单)。
 3. 免 API key 发现(免费层)。

@@ -1,12 +1,11 @@
 """技能遥测生命周期 — active → stale → archived 状态机(纯函数,零 LLM)。
 
-对位 Hermes `agent/curator.py:apply_automatic_transitions`。
 
-设计两段式(照搬 Hermes 的克制):
+设计两段式:
   - **本模块是确定性那段**:只依据活动时间戳做状态迁移,不调 LLM,不删除;
   - LLM 巩固(合并类级技能)是另一件事,默认关(见 Wave 5)。
 
-三条约保护语义(Hermes 踩过坑的,原样继承):
+三条约保护语义:
   1. `pinned` 技能全绕开——用户显式钉住的永不自动迁移;
   2. 只对 `created_by == "agent"` 的技能迁移——内置/hub/用户手写的不可动;
   3. **从未活跃的技能锚 `created_at`,不自归档**——`use_count == 0` 是
@@ -33,7 +32,7 @@ STATE_ACTIVE = "active"
 STATE_STALE = "stale"
 STATE_ARCHIVED = "archived"
 
-# 默认阈值(对齐 Hermes:14 天陈旧 / 30 天归档)
+# 默认阈值
 DEFAULT_STALE_AFTER_DAYS = 14
 DEFAULT_ARCHIVE_AFTER_DAYS = 30
 
@@ -106,7 +105,7 @@ def apply_transitions(
 ) -> dict[str, int]:
     """把所有 agent 创建技能按活动时间迁移状态;返回计数。
 
-    与 Hermes 一致:先 seed(首见无记录者锚 now 并延迟),再迁移。本实现把
+本实现把
     seed 语义交给 anchor_ms——从未活跃者锚 created_at;若连 created_at 都
     没有,视为首次见到,锚 now 并跳过本轮。
     """
@@ -152,7 +151,7 @@ def apply_transitions(
     return counts
 
 
-# ── 定期扫描触发(对位 Hermes .curator_state,无 cron 守护)──
+# ── 定期扫描触发──
 
 _DEFAULT_INTERVAL_HOURS = 24
 
@@ -191,7 +190,6 @@ def run_sweep_if_due(
 ) -> Optional[dict[str, int]]:
     """到期才扫并更新状态;未到期返回 None。
 
-    首次观察只 seed(记录 now 并跳过本轮)——与 Hermes curator 一致:
     全新安装的首个 tick 绝不动技能库。
     """
     now_ms = now_ms if now_ms is not None else int(time.time() * 1000)

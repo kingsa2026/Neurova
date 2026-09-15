@@ -1,4 +1,4 @@
-"""桌面 UIA 语义层（CUA 升级方案 R1-1，Windows 优先）
+"""桌面 UIA 语义层
 
 给桌面端补齐与浏览器侧对等的"观察后行动"契约：
 - snapshot：枚举前台（或指定标题）窗口的 UIA 控件树，带 index/runtime_id/generation
@@ -10,7 +10,7 @@
 - set_value：UIA ValuePattern 优先（可读回 → value_readback 证据）→ 门控键入兜底
 
 所有动作结果携带 ActionResult 封闭契约（action_result.py）；拒绝码 vocabulary
-与浏览器侧共用。参考实现：OCU apps/OpenComputerUseWindows/runtime.ps1（UIA+PostMessage）。
+与浏览器侧共用。参考实现
 """
 
 import os
@@ -223,7 +223,7 @@ class DesktopUIAManager:
                 "background_unavailable",
             )
 
-    # ── 语义文本输入（R2-1，OCU 智能输入契约）────────
+    # ── 语义文本输入────────
 
     def type_text_semantic(self, text: str) -> Optional[Dict[str, Any]]:
         """对 focused 可编辑控件直接追加写入（ValuePattern）。

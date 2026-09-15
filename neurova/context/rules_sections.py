@@ -1,6 +1,5 @@
-"""恒定规则段（批次 C，docs/04-plans/2026-09-07-提示词与工具面升级实施方案.md）
+"""恒定规则段（批次 C）
 
-三段恒定文本 + CUA 使用纪律段（R3-5）由 orchestrator 追加进 system（build_context 主链 +
 build_system_prompt 工具方法双路径一致）：
 - ## 工具使用规则：Manus <xxx_rules> 范式收编（信息优先级/原文验证/
   错误恢复/并行纪律/反注入/taskName 用法）
@@ -65,8 +64,8 @@ def build_env_section(workspace_path: str = "", platform_name: str = "") -> str:
 
 
 def build_memory_rules_section() -> str:
-    """记忆写入规则（恒定，适配 Neurova 待审管线——不照抄 Cursor"未明确
-    要求不写入"：本系统的闸门在待审层，episodic 自动记录是设计行为）。"""
+    """记忆写入规则（恒定，适配 Neurova 待审管线：闸门在待审层，
+    episodic 自动记录是设计行为）。"""
     return (
         "## 记忆写入规则\n"
         "- 用户明确纠正或反驳某条已存记忆时：先检索该记忆，提议更新或删除它，"

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
-"""AgentRun 持久化状态机（Yuxi 对比 P0-1/P0-2）。
+"""AgentRun 持久化状态机。
 
-契约（docs/Neurova_Yuxi代码级对比_2026-09-13.md §2.1，对位 Yuxi
+契约（§2.1
 run/attempt 状态机，按单进程+SQLite 形态裁剪——channel_ingress_queue 同型模式）：
 - intake：请求持久化（queued），FIFO 序按自增 id
 - claim_next：同 session 至多一个 running——由部分唯一索引在库层强制；
   队头晋升 running（带 owner + 租约），已有活跃 run 时返回 None
-- heartbeat/finish：owner 栅栏（陈旧 owner 拒绝，Yuxi _require_lease_owner 同语义）
+- heartbeat/finish：owner 栅栏
 - request_cancel：持久取消意图（cancel_requested 列），执行侧可轮询
 - reconcile_at_startup：崩溃遗留 running → failed(process_died)、
   queued → cancelled(server_restart)——重启不丢 run 事实、不留幽灵行

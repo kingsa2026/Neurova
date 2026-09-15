@@ -1781,7 +1781,7 @@ class MemoryManager:
     ) -> int:
         """运行记忆晋升周期 — 离线批量把达标记忆晋升为重要记忆
 
-        OpenClaw 启发 P0-4（Dreaming 晋升门）：整理离线做，回复路径永不
+整理离线做，回复路径永不
         因记忆阻塞。确定性门控复用 TemperatureEngine.should_upgrade_to_
         important（温度>=80 / 召回>=10 / 情感>=0.7 / 关联>=5 任一硬信号）；
         唯一查询数从 metadata.unique_queries 读取（缺省退化 access_count）。

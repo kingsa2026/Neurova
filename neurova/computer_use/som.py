@@ -1,4 +1,4 @@
-"""SOM（Set-of-Marks）视觉标注核心（CUA Phase 3 立项 R3-1）
+"""SOM（Set-of-Marks）视觉标注核心
 
 无 UIA 树桌面（自绘 UI/游戏/远程像素流）的语义中间档：把截图标注成编号可交互
 区域图 + id2xy 映射，VLM 看编号图说话，computer_click_mark 按编号解算坐标点击。

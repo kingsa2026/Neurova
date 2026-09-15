@@ -1,4 +1,4 @@
-"""R1-3 执行前归一化层（CUA 升级方案 Phase 1，Cua OperatorNormalizer 思想）
+"""R1-3 执行前归一化层
 
 病根（修复前）：LLM 产出的 computer/browser 工具参数直接分发到执行体——
 词表外的 button 值、字符串坐标、幻觉的未知键全部直通底层。

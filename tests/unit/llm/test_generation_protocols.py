@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""B2-a/b/c 生成协议/账本/端点测试（QwenPaw Creator 实测矩阵对齐）。
+"""B2-a/b/c 生成协议/账本/端点测试。
 
 锁定契约：
 1. URL 拼接规则（6 协议，禁止虚构端点）。
@@ -276,8 +276,8 @@ class TestDialogueSync:
 # POST {base}/videos multipart（prompt/model/seconds∈{4,8,12}/size/input_reference）
 # → GET {base}/videos/{id}（queued/in_progress/completed/failed + progress）
 # → GET {base}/videos/{id}/content 二进制下载（无公开产物 URL →
-#   轮询成功转 data URL 交 persist_media 落盘）。事实源：openai-python
-#   src/openai/resources/videos.py + types/video.py（sora-2/sora-2-pro）。
+# 轮询成功转 data URL 交 persist_media 落盘）。事实源：openai-python
+# src/openai/resources/videos.py + types/video.py（sora-2/sora-2-pro）。
 from neurova.llm.generators import protocols as proto
 
 

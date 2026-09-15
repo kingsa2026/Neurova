@@ -1,9 +1,9 @@
-"""R0-3 动作后自动回传刷新截图（CUA 升级方案 Phase 0）
+"""R0-3 动作后自动回传刷新截图
 
 病根（修复前）：computer_click/type/scroll 只回元数据，agent 想看结果必须
 再调一次 computer_screenshot（多一轮 LLM 往返，容易放弃观察直接盲操作）。
 
-验收（OCU 动作即观察契约，保持截图双通道——base64 只走 WS 旁路）：
+验收：
 - 成功动作后自动补拍并追加一条带 refreshed=True + screenshot 的事件
 - LLM 结果只带轻量标记 refreshed_screenshot=True，绝不携带 base64
 - 失败动作不触发刷新

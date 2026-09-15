@@ -1,6 +1,5 @@
 """统一模型契约 — 实体层（消息族 + 结果族 + 结构化输出）。
 
-Dify §2.5 六型统一契约的 Neurova 落地（消息/结果两族同名对齐）。
 全 dataclass + OpenAI dict 双向适配器（from/to_openai_dict）——
 管线现状是 OpenAI dict 通道，适配器是契约与通道间的桥，零破坏。
 """
@@ -309,7 +308,7 @@ class LLMResult:
 
 @dataclass
 class LLMResultChunkDelta:
-    """流式增量：content 片段；尾包携带 usage（Dify chunk/delta 两层形）"""
+    """流式增量：content 片段；尾包携带 usage"""
 
     index: int = 0
     content: str = ""

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""插件化自定义渠道注册表（B4-d，QwenPaw register_channel 对齐）。
+"""插件化自定义渠道注册表。
 
 外部/扩展代码可注册自定义渠道类型：
 - ``register_channel(spec)``：声明 channel_type + 动态表单 schema

@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Hooks 最小引擎（P2-1，Claude Code wire 格式兼容子集）。
+"""Hooks 最小引擎。
 
 - 事件：PreToolUse / PostToolUse / Stop（12 事件全集的子集，按需扩展）
 - 声明：data/hooks.json {"hooks": {"PreToolUse": [{"matcher": "computer_shell|run_code",
   "command": "...", "timeout": 60}]}}；matcher 为工具名正则，缺省匹配全部
 - wire：payload JSON 写 stdin（含 event/tool_name/params/result/session_id），
-  stdout JSON 决策——与 Claude Code hooks 契约同构，生态脚本零迁移
+生态脚本零迁移
 - 决策语义：PreToolUse {"decision":"block","reason"} → 拦截；PostToolUse/
   Stop 的 {"additionalContext"} 回灌；其余仅副作用
 - 开关：NEUROVA_HOOKS=0 全局关闭；配置文件缺失/损坏 = 无 hooks（fail-open）

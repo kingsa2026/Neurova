@@ -1,4 +1,4 @@
-"""R3-3 CUA 双层 MCP 导出（CUA Phase 3 立项 §2）
+"""
 
 红线：默认关（NEUROVA_CUA_MCP_EXPORT 未设 → 不导出、按名调用也拒）；导出即
 受治理（工具面路由到 ToolExecutor 单一实现，走同一 governance/审计/ActionResult，

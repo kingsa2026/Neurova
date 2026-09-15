@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""db_migration 版本域推广 + 防降级校验（Yuxi 对比 P0-4）。
+"""db_migration 版本域推广 + 防降级校验。
 
 根因：原 _MIGRATIONS 是**全局单链**——任何库注册 v2 都会套到所有库的
 user_version 上（记忆库 v2 = 别的库 v2），这是"每库版本域"的隐藏缺陷。
@@ -7,7 +7,6 @@ user_version 上（记忆库 v2 = 别的库 v2），这是"每库版本域"的�
 - 版本按 domain 隔离注册/应用
 - migrate(conn, domain) 域未注册 → ValueError（强制登记纪律，不静默）
 - user_version 高于该域已注册最大版本 → SchemaVersionError（防降级损坏，
-  对位 Yuxi require_current_schema / OpenClaw user_version 拒绝打开）
 - 存量迁移语义（顺序/独立事务/回滚上抛/脚本型）不下降
 """
 import sqlite3

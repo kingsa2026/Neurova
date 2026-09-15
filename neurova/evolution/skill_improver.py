@@ -179,7 +179,7 @@ class AutoSkillImprover:
             metadata: 元数据
         """
         with self._lock:
-            # P1-2（OpenSpace evidence/redaction 同语义）：写入侧根治——
+            # P1-2：写入侧根治——
             # input/output/error 摘要落库前密钥脱敏 + 字符预算。进化分析的
             # 全部下游消费面（ReflectiveMutator 喂 LLM / 统计 / 审批 UI）
             # 从此拿不到会话里的凭据，也不被超长 IO 灌爆上下文。
@@ -402,7 +402,7 @@ class AutoSkillImprover:
     async def propose_pending_improvements_async(
         self, skill_text_loader: Optional[Callable[[str], Optional[str]]] = None
     ) -> List[SkillImprovement]:
-        """异步版：在字典建议之上做**反射式文本改进**(Hermes GEPA 对齐)。
+        """异步版：在字典建议之上做**反射式文本改进**。
 
         判据升级(2026-09-13): _suggest_fix 的字典查表把 "timeout" 永远映射
         到 "增加超时时间",从不看真实失败内容。本方法在 NEUROVA_TEXT_EVOLUTION
@@ -597,8 +597,7 @@ class AutoSkillImprover:
             improvement.applied_at = datetime.datetime.now(datetime.timezone.utc)
             self._applied_signatures.add(signature)
 
-            # 改进落盘：config+version 同步到磁盘 manifest。P1-5（OpenSpace 原子
-            # commit）：update_auto_skill 返回 False（写盘失败）→ 整体回滚刚做的
+            # 改进落盘：config+version 同步到磁盘 manifest。P1-5：update_auto_skill 返回 False（写盘失败）→ 整体回滚刚做的
             # 内存改动（版本/修订/改进记录/签名/applied），不再"内存新版盘上旧版"
             # 的 split-brain（原只 warning 不回滚 = 重启回旧版）。
             if skill_service is not None:
@@ -621,7 +620,7 @@ class AutoSkillImprover:
                     logger.warning("改进落盘失败，已回滚内存态: %s", skill_id)
                     return False
 
-            # 经验-定义分离（QP 对齐启发 #2）：改进内容同步落为 applied 经验
+            # 经验-定义分离：改进内容同步落为 applied 经验
             # 记录并立即组合进技能描述——config.improvements 只是元数据，LLM
             # 永远看不到（"只改元数据不改行为"根因）；描述才是模型工具面。
             # 失败不影响改进本身（元数据通道已在上方完成）。

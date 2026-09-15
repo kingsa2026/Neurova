@@ -1,4 +1,4 @@
-"""R1-1 桌面 UIA 语义层（CUA 升级方案 Phase 1）
+"""R1-1 桌面 UIA 语义层
 
 契约（与浏览器侧对齐）：
 - snapshot: {generation, window, elements[{index, role, name, rect, enabled, value, focused,

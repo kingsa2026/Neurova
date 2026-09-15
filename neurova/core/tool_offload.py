@@ -10,14 +10,13 @@
   ③ 落盘失败            → fail-open：原样放行（消息完整性优先，宁可窗口大
                           也不丢结果）
 
-P0-4 契约变更（Codex head+tail 对齐，docs/Neurova_Codex代码级对比_2026-09-14.md
 §2.7）：原 ② 仅可重现工具溢出、③ 不可重现工具全文直进窗口——巨量输出挤占
 窗口后在折叠中整段丢失。现在统一"落盘保全 + head+tail + 显式标注"：模型
 永远知道被截了多少、去哪取回全文（recall_history 按指针直取）。落盘失败时
 fail-open 保留原保真方向。
 
 预览格式与 microcompact 视图占位统一寻址语法（tool/call/ts），模型经
-recall_history 按指针直取。Yuxi 同构先例：large_tool_results offload
+recall_history 按指针直取。large_tool_results offload
 （summary.py:591-626），差异在 NV 用 head+tail 双端预览。
 """
 from __future__ import annotations

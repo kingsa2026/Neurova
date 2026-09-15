@@ -1,4 +1,4 @@
-"""E2 工具事件隐私门控（docs/Neurova_OpenClaw工具技能专项对比 §5）。
+"""E2 工具事件隐私门控。
 
 AGENT_TOOL_RESULT 等工具事件会广播到 WS/聊天渠道预览。工具 params 里
 常见 password/token/secret/api_key 等敏感键——OC 的做法是 progress 事件

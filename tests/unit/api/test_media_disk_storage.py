@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """P1-2 防回归：媒体文件必须落盘，字节不得永久驻留内存。
 
-原缺陷（docs/资源型Bug扫描报告_2026-09-11.md RES-P1-2）：
+原缺陷（RES-P1-2）：
 1. ``_file_contents: Dict[str, bytes]`` 把所有上传媒体字节永久驻留内存
    （每文件 ≤50MB，从不落盘，100 次上传 ≈ 5GB 级增长直至 OOM）；
 2. ``content = await file.read()`` 在大小校验前执行，任意大请求全量读入；

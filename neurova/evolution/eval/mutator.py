@@ -1,8 +1,6 @@
 """反射式变异器 — 读失败原因,做定向修改。
 
-这是本波的价值核心,对位 GEPA(Genetic-Pareto Prompt Evolution)的
-"reads execution traces to understand WHY things fail (not just that they
-failed)"。
+这是本波的价值核心：读取执行轨迹、理解失败原因（而非仅知道失败），再做定向变异。
 
 对照现有 `neurova/skills/prompt_optimizer.generate_variants`:那个是"加角色段
 /加结构段"的**盲目变异**;本模块把上一轮在 val 集上得分最低用例的

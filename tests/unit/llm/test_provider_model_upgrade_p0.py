@@ -1,5 +1,4 @@
 """
-P0 升级:对齐 QwenPaw 服务商管理 — 模型元数据化 + 真实现替换占位。
 
 TDD Red Phase:以下测试定义目标行为,当前实现应全部失败。
 
@@ -176,7 +175,7 @@ class TestFetchProviderModels:
         with patch.object(manager, "_get_provider_instance", return_value=instance):
             models = asyncio.run(manager.fetch_provider_models("openrouter"))
 
-        # B1 契约（QwenPaw 对齐）：失败回退"上一批配置"静态视图
+        # B1 契约：失败回退"上一批配置"静态视图
         # （connectable=False），配置本体保持原样不被改写
         assert [m.id for m in models] == ["openai/gpt-4o"]
         assert all(m.metadata.get("connectable") is False for m in models)

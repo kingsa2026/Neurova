@@ -1,5 +1,5 @@
 """
-修2（2026-09-09）：对话窗口 token 预算 + 超限自动压缩（zcode 式）
+修2（2026-09-09）：对话窗口 token 预算 + 超限自动压缩
 
 根因：get_recent_context 是固定 20 条消息数窗口、build_context 的
 window_msgs 全量进视图——两者均无 token 预算。kai 3.5 万 token prompt

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """R3：aigc_studio（创作专区后端域）核心契约。
 
-功能规格对标 huobao-drama（CC BY-NC-SA：仅功能对齐，实现全部自研）：
+仅功能对齐，实现全部自研）
 - store：9 表 SQLite（WAL）+ 属主隔离（deny 与不存在同构 404 语义由 API 层做）；
 - llm.extract_json：LLM 输出的稳健 JSON 抽取（对象/数组、坏输出返回 None 不炸）；
 - services：分集拆解→资产抽取（去重）→分镜→批量首帧（@角色参考图 + 风格/画幅

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""渠道二维码授权处理器（对齐 QwenPaw qrcode_auth_handler，2026-09-13 照搬移植）。
+"""渠道二维码授权处理器。
 
 每个支持"扫码授权/扫码建号"的渠道实现一个具体 ``QRCodeAuthHandler`` 并注册进
 ``QRCODE_AUTH_HANDLERS``；channel_config.py 暴露两个通用端点按 ``{channel}`` 委派：
@@ -16,7 +16,7 @@
 qq 回填 app_id+client_secret+user_openid、wecom 回填 bot_id+secret、
 wechat 回填 bot_token+base_url），用户点保存即完成配置——替代"手抄开放平台参数"。
 
-真实官方协议端点（全部来自 QwenPaw v2.2.1 实现，非虚构）：
+真实官方协议端点：
 - feishu   : OAuth 2.0 Device Grant (RFC 8628) @ accounts.feishu.cn/accounts.larksuite.com
 - dingtalk : /app/registration init→begin→poll @ oapi.dingtalk.com
 - qq       : /lite/create_bind_task + poll_bind_result @ q.qq.com（AES-256-GCM 解 bot secret）
@@ -90,7 +90,6 @@ def generate_qrcode_image(scan_url: str) -> str:
 # WeChat (iLink) handler — 真实端点 ilinkai.weixin.qq.com
 # ---------------------------------------------------------------------------
 
-# 与 QwenPaw channels/wechat/client.py _DEFAULT_BASE_URL 同源
 ILINK_DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com"
 
 
@@ -291,7 +290,7 @@ _DINGTALK_FAILED_STATUSES = ("FAIL", "EXPIRED")
 def _clean_str(value: Any) -> str:
     """只对真正的字符串返回值；JSON null/其他类型视为缺省。
 
-    防止 ``client_id: null`` 变成字面量 "None" 误判成功（QwenPaw 同款根修）。
+ 防止 ``client_id: null`` 变成字面量 "None" 误判成功。
     """
     return value.strip() if isinstance(value, str) else ""
 
@@ -573,7 +572,6 @@ def encode_poll_token(task_id: str, aes_key: str) -> str:
     return base64.urlsafe_b64encode(payload.encode()).decode()
 
 
-# QwenPaw 原名下划线别名（同物）
 _encode_poll_token = encode_poll_token
 
 

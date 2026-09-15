@@ -1,6 +1,6 @@
-"""P0-5 OTel 兼容层（TDD — Dify 对标 §4 P0-5）。
+"""P0-5 OTel 兼容层。
 
-契约（docs/Neurova_Dify代码级对比_2026-09-03.md）：
+契约：
 - TrajectoryRecorder 的 span 模型 → OTel bridge：可选依赖（opentelemetry-api
   已装 / sdk 未装时降级记账-only，不崩不阻塞业务）
 - install_otel_bridge() 显式装配（增量约束：默认关）；uninstall_otel_bridge()

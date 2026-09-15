@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""工作区文档收集器（P0-1，Codex AGENTS.md 对齐）。
+"""工作区文档收集器。
 
-语义（docs/Neurova_Codex代码级对比_2026-09-14.md §2.3）：
-- 同目录优先级：AGENTS.override.md > AGENTS.md（override 语义同 Codex）
+语义：
+- 同目录优先级：AGENTS.override.md > AGENTS.md
 - 收集顺序：根 → 子目录层级（os.walk topdown，目录名排序，时序稳定）
-- 每段带相对路径标注（--- project-doc: <rel> ---，Codex project-doc 分隔同构）
+- 每段带相对路径标注
 - 总字节预算（默认 16KB）：装不下的文档整段丢弃并显式标注截断
 - 噪音目录跳过；无工作区/无文档 → 返回空串（调用方零注入，system prompt 不变）
 

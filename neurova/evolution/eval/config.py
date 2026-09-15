@@ -1,11 +1,9 @@
 """文本级进化配置与开关。
 
-对齐 Hermes self-evolution 的 constraints 默认值(技能 15KB / 工具描述 500
 字符 / 参数描述 200 字符 / 提示增长 ≤20%),这样两边对"膨胀"的判据同源。
 
 开关语义(NEUROVA_TEXT_EVOLUTION):
   - 默认关(opt-in)—— 对齐项目 C10 评审闸"改行为的进化产物默认待审"的哲学,
-    与 Hermes curator.consolidate 默认关一致;
   - 显式设 "1"/"true" 才开启;其余值(含未设置)均视为关闭。
 """
 
@@ -29,7 +27,7 @@ class EvolutionConfig:
     # 留出集提升低于该值视为"无真实增益",保留基线
     min_improvement: float = 0.0
 
-    # ── 约束闸(与 Hermes core/constraints.py 同源)──
+    # ── 约束闸──
     max_skill_size: int = 15_000
     max_tool_desc_size: int = 500
     max_param_desc_size: int = 200

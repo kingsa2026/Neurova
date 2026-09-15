@@ -1,11 +1,11 @@
-"""SessionEvent seq 契约测试（OpenOcta 启发 P0-1：WS 单调 seq + 前端 gap 检测）
+"""SessionEvent seq 契约测试
 
-背景（docs/Neurova_OpenOcta代码级对比_2026-09-04.md #1）：
-  OpenOcta 的 WS Hub 给每个事件帧分配服务端单调 seq，前端 onGap 检测缺口——
+背景：
+前端 onGap 检测缺口
   这是"断线重连 replay"可靠性的地基。Neurova 的 SessionEvent 此前完全无 seq。
 
-设计要点（与 OpenOcta 的关键差异）：
-  OpenOcta 是全局单事件流，全局 seq 即可；Neurova 的 sync WS 按 session 订阅
+设计要点：
+全局 seq 即可；Neurova 的 sync WS 按 session 订阅
   （/ws/{session_id}），客户端只看到本会话事件——若用全局发号器，其他会话的
   消耗会让本会话 seq 跳号，前端永远误报 gap。因此发号器必须 **per-session
   单调**：挂在 UnifiedSession.add_event（所有事件进历史/出站的唯一咽喉，

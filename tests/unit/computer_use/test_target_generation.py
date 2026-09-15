@@ -1,4 +1,4 @@
-"""Tab 级 target 代际管理测试（后续项之二，对标 ZCode browserGeneration）
+"""Tab 级 target 代际管理测试
 
 语义：
 - 每个 tab（target）持有自己的 generation，navigate 该 tab 时 +1

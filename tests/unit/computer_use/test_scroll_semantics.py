@@ -1,4 +1,4 @@
-"""R0-1 scroll 方向单源根修（CUA 升级方案 Phase 0）
+"""R0-1 scroll 方向单源根修
 
 病根（修复前）：
 - HTTP /v1/computer/scroll 用 abs(int(dy)) 丢弃符号 → dy=-3（向下）被翻转成向上

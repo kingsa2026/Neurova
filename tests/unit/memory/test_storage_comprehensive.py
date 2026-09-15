@@ -5,12 +5,12 @@
 覆盖 MemoryStorage 类的所有公共方法、边界情况和错误处理。
 
 L-3 OBSOLETE 标记(2026-07-03):
-本测试基于 docs/architecture/LONG_TERM_PLAN.md 描绘的 SQLite 增强版 storage 设计
+本测试基于 描绘的 SQLite 增强版 storage 设计
 (整合 VectorSearch/MemorySecurityGuard/MemoryCache/BatchWriter),但该设计从未落地
 ——BatchWriter 类在整个代码库中零实现。实际 storage.py 走了 JSON 简化版路线,
 且已有独立正确测试覆盖(tests/cognitive_layers/memory_layer/test_storage.py)。
 SQLite 持久化由 manager.py _init_persistence_db 和 cognitive_storage_engine.py
-独立实现。详见 docs/bugfix-memory-system-breakpoints.md L-3 调查报告。
+独立实现。 L-3 调查报告。
 """
 
 import pytest

@@ -503,7 +503,7 @@ async def exec_storyboard(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[s
     """分镜脚本执行器（批次4：LLM 真分镜，失败回退规则拆分——增强不替换）
 
     LLM 输出逐镜结构化：描述/画面提示词/旁白/景别/运镜/转场/时长；
-    风格与画幅项目锁注入每镜 visual_prompt（火宝式：每镜提示词携带统一风格）。
+ 风格与画幅项目锁注入每镜 visual_prompt。
     """
     script = config.get("script", "") or str(ctx.get("input") or ctx.get("inputs") or "")
     aspect_ratio = config.get("aspect_ratio", "9:16")
@@ -560,7 +560,7 @@ async def exec_storyboard(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[s
 
 
 def _style_inject(prompt: str, style: str, aspect: str) -> str:
-    """风格 + 画幅注入画面提示词（火宝式项目锁）。"""
+    """风格 + 画幅注入画面提示词。"""
     parts = [prompt]
     if style:
         parts.append(style)
@@ -702,7 +702,7 @@ async def _exec_scene_gen_batch(config: Dict[str, Any], shots: List[Any]) -> Dic
 async def exec_scene_gen(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
     """场景画面生成执行器（批次4：实测协议矩阵单源；comfyui 自建通道保留）
 
-    批次模式：config.shots 传入分镜数组时逐镜扇出生成（PRINTFILM 批量生成
+ 批次模式
     语义，供内置一键成片模板使用），单镜失败/无凭据诚实标注占位提示词。
     """
     shots = config.get("shots")

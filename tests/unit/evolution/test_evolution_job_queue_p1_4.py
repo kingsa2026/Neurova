@@ -1,4 +1,4 @@
-"""P1-4 进化异步作业队列（OpenSpace trigger_jobs 最小移植）
+"""P1-4 进化异步作业队列
 
 队列语义（不测 post_chat 行为改道，只测队列本体）：
 - enqueue 幂等（同 idempotency_key 不双行）；

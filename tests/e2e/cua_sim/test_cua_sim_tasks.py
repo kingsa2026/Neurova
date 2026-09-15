@@ -1,4 +1,4 @@
-"""CUA simulated 评测任务（R2-2）：三个行为级任务，reward 必须 = 1.0
+"""三个行为级任务，reward 必须 = 1.0
 
 - click-button：快照 → role 点击 → 页面状态验证（观察后行动全链）
 - form-fill：role 填写 + 提交 + 值回读

@@ -1,4 +1,4 @@
-"""T1 Schema 契约护栏 — docs/Neurova_工具调用链升级计划_2026-09-13.md。
+"""T1 Schema 契约护栏 —。
 
 钉三件事（Needle 对比结论：schema 单源↔执行体一致性从隐性约定变机器契约）：
 1. dispatch/schema 键对账（防"执行器能跑但模型看不见"/"模型能传但无人接"）；

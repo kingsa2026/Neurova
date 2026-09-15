@@ -1,4 +1,4 @@
-"""RDP 直连会话提供者（CUA Phase 3 扩展 RS-4，用户授权的既有机器）
+"""RDP 直连会话提供者
 
 把用户已授权、且已安装 neurova-guest-agent 的远程机器当作会话后端——**不造池、
 不 spawn**：agent 动作走该机器的 guest agent（控制面 HTTP），RDP 凭据只用于人工

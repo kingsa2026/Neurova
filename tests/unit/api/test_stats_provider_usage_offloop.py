@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """P1-5 防回归：/stats/provider-usage 的账单同步采集不得阻塞事件循环。
 
-原缺陷（docs/资源型Bug扫描报告_2026-09-11.md RES-P1-5）：
+原缺陷（RES-P1-5）：
 ``sync_provider_usage_for_user(current_user)`` 是同步函数（内部
 httpx.get(timeout=10)×N provider），在 async 端点内直调——事件循环阻塞
 最长 10s×N，全站请求/SSE/WS 卡顿。

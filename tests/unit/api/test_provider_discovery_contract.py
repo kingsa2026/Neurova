@@ -1,6 +1,6 @@
-"""模型发现链路对齐 QwenPaw — 契约测试（红绿灯 TDD）
+"""
 
-锁定契约（对齐 QwenPaw provider_discovery.DiscoveryModelsResponse）：
+锁定契约：
 1. discover 返回结构化元数据：success / models / discovered_count /
    last_synced_at / used_static_fallback / error_kind / message；
 2. 失败不再静默空列表：error_kind 分类 + used_static_fallback=True

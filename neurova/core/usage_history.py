@@ -91,7 +91,7 @@ class UsageHistoryStore:
                     conn.execute(_CREATE_TABLE)
                     for index_sql in _CREATE_INDEXES:
                         conn.execute(index_sql)
-                    # 存量库幂等迁移（OpenOcta 启发 P1-8 延迟维度）：
+                    # 存量库幂等迁移：
                     # 旧库无 first_token_ms/duration_ms 列时补列，旧数据默认 0
                     existing = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage)")}
                     for column, ddl in (
@@ -130,7 +130,7 @@ class UsageHistoryStore:
     ) -> None:
         """记一次 LLM 调用（一行）。任何失败都静默——仅为附加统计。
 
-        first_token_ms/duration_ms（OpenOcta 启发 P1-8）：流式调用由
+ first_token_ms/duration_ms：流式调用由
         multi_model_client 记录首块耗时与总耗时；缺省 0 = 旧调用方零改动，
         延迟报表只统计 >0 的行（诚实统计，不用 0 冒充超低延迟）。
         """
@@ -298,7 +298,7 @@ class UsageHistoryStore:
             return []
 
     def latency_stats(self, user_id: Optional[str] = None, min_calls: int = 1) -> List[Dict[str, Any]]:
-        """按模型聚合延迟 p50/p95/max（OpenOcta 启发 P1-8）。
+        """按模型聚合延迟 p50/p95/max。
 
         仅统计 duration_ms > 0 的行（旧调用方/缺延迟数据不进报表——诚实
         统计，不用 0 冒充超低延迟）。异常回退空列表。

@@ -1,5 +1,5 @@
 """
-Checkpoint/Probe/Resume 测试（借鉴 langflow lfx/graph/checkpoint）
+Checkpoint/Probe/Resume 测试
 
 契约：
 - execute(instance=..., resume=True)：续跑同一实例——

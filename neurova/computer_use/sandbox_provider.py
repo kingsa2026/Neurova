@@ -1,4 +1,4 @@
-"""Windows Sandbox 会话提供者（CUA Phase 3 扩展 RS-1，Windows 宿主一次性桌面）
+"""Windows Sandbox 会话提供者
 
 生成 .wsb 配置（挂载 guest agent 启动命令 + 共享目录），经 WindowsSandbox.Client
 拉起一次性隔离桌面，返回指向来宾 guest agent 的 DesktopSession。用完即毁（Sandbox

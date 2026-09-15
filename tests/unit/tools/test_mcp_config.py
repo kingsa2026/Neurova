@@ -1,7 +1,6 @@
 """
 MCP server 配置严格 schema 验证测试
 
-参照 ZCode 配置模式：
 - 未知键 → 显式拒绝（fail fast，不静默丢弃）
 - transport 推断：command→stdio，url→http，显式声明优先
 - 缺必需字段 → 拒绝并指名缺什么
@@ -83,7 +82,7 @@ class TestTransportInference:
 
 
 class TestStrictSchema:
-    """未知键显式拒绝（ZCode 模式：fail fast，不静默丢弃）"""
+    """未知键显式拒绝"""
 
     def test_unknown_key_rejected_with_name(self):
         with pytest.raises(ValueError, match="commnd"):

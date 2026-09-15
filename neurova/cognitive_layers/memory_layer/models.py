@@ -46,7 +46,7 @@ class LifecycleStage(Enum):
 
 
 class MemoryOrigin(Enum):
-    """记忆来源信任级（OpenClaw P1-9：写入时结构化定级，非内容级扫描）
+    """记忆来源信任级
 
     闭集四值，落 SQLite 列；检索侧按此加权——untrusted（外部网络抓取）
     降权，防止外部内容经记忆链路毒化上下文。模型无法用文字改写：

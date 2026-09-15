@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """P0-5 审批缓存 key 规范化（命令规范化 canonicalize）。
 
-Codex 对齐（docs/Neurova_Codex代码级对比_2026-09-14.md §2.6/P0-5）：
 - shell 包装（bash -lc/-c、sh -c、cmd /c、powershell -Command）剥离出内层命令
-- 可执行名去路径（/usr/bin/python3 → python3、C:\Python311\python.exe → python）
+- 可执行名去路径（/usr/bin/python3 → python3、C:\\Python311\\python.exe → python）
 - 空白折叠
 - EXACT 审批记忆按规范化 key 记与查：同一命令换包装/换绝对路径不重复审批
 - 危险命令语义不变：SIMILAR 泛化依旧豁免危险命令

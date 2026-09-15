@@ -1,4 +1,4 @@
-"""应用设置持久化（CUA 真机问题修复：最大输出 token 的全局默认）
+"""应用设置持久化
 
 背景：/v1/settings 此前是内存 stub（TODO 从数据库加载）——高级选项卡
 保存即丢、读取形状错位，max_tokens 于 09-10 被当"零消费死参数"移除；
@@ -34,7 +34,7 @@ ADVANCED_DEFAULTS: Dict[str, Any] = {
     # 沙箱会话提供方（sandbox/rdp），默认空=无池：sandbox/auto 档变更动作
     # fail-closed 拒绝（诚实降级，不误跑本机）。env NEUROVA_DESKTOP_PROVIDER 显式优先。
     "desktop_provider": "",
-    # ── 技能召回与进化三开关（OpenSpace 对比落地 2026-09-15，默认全开）──
+    # ── 技能召回与进化三开关──
     # 技能目录常驻系统提示（便宜的全量发现面：名字+描述，超预算别名压缩）
     "skill_catalog_enabled": True,
     # 技能 function schema 预算化（活跃技能 > skill_schema_max 时按关键词

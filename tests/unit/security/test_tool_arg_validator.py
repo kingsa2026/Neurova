@@ -1,4 +1,4 @@
-"""T2 执行前参数校验单测 — docs/Neurova_工具调用链升级计划_2026-09-13.md。"""
+"""T2 执行前参数校验单测 —。"""
 import asyncio
 from unittest.mock import MagicMock
 
