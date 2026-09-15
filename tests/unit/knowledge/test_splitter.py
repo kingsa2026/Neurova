@@ -1,6 +1,6 @@
 """分块器测试（P0-2 RAG 分块管线）。
 
-契约（docs/Neurova_Dify代码级对比_2026-09-03.md §4 P0-2）：
+契约（§4 P0-2）：
 - chunk_text(text, max_chars, overlap)：段落优先 → 超长段落按句切 → 兜底硬切；
   相邻块带 overlap 防语义截断；短文本单块直返。
 - 返回 [Chunk(index, text, char_start, char_end)]，块间原文无损（去分隔符外）。
@@ -81,7 +81,13 @@ class TestSplitWithMeta:
     def test_single_short_document(self):
         metas = split_with_meta("一句话知识。")
         assert metas == [
-            {"content": "一句话知识。", "index": 0, "char_start": 0, "char_end": 6}
+            {
+                "content": "一句话知识。",
+                "index": 0,
+                "char_start": 0,
+                "char_end": 6,
+                "context_header": "",
+            }
         ]
 
 

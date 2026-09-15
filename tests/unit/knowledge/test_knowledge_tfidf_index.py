@@ -125,12 +125,18 @@ class TestKnowledgeTfidfIndex:
         assert "公开知识" in titles
         assert "私密知识" not in titles
 
-    def test_index_rebuilt_on_mutation(self, repo):
-        """写入/变更后索引应重建（dirty 标记）"""
+    def test_index_updated_on_mutation(self, repo):
+        """写入走分片级增量操作：
+        索引未建立时 dirty 待全量重建；建立后写入只记 _pending_ops，
+        不再置脏触发全量重建。"""
         self._save_item(repo, {"title": "初始", "content": "NeurFlow 初版"})
-        assert repo._index_dirty is True
+        assert repo._index_dirty is True, "新仓库索引未建立，应待全量重建"
         repo._rebuild_vector_index_for_agent("default")
         assert repo._index_dirty is False
-        # 新增条目 → dirty 再次置位
-        self._save_item(repo, {"title": "新增", "content": "NeurFlow 新版"})
-        assert repo._index_dirty is True
+        # 新增条目 → 记录增量操作，不置脏
+        self._save_item(repo, {"title": "新增", "content": "Zephyr 新版"})
+        assert repo._index_dirty is False
+        assert repo._pending_ops and repo._pending_ops[-1][0] == "reindex"
+        # 检索时按序应用（队列清空）
+        repo.search_visible_items(user={"user_id": "1"}, query="Zephyr", scope="all", limit=5)
+        assert repo._pending_ops == []

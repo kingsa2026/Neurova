@@ -1,4 +1,4 @@
-"""记忆待确认队列接口（P1-2，Utopia pending_facts 裁剪版）。
+"""记忆待确认队列接口。
 
 契约：
 - GET    /v1/memory/pending                → 待审清单（登录用户看自己的提议；
@@ -117,9 +117,23 @@ async def confirm_pending_memory(
                 raise APIError(ErrorCodes.MEMORY_OPERATION_FAILED, "forget 提议缺少目标记忆 ID")
 
             def _do_forget(_content: str, _category: str, _memory_type: str) -> str:
+                # P1#11：遗忘前先读目标正文——删除成功后登记遗忘墓碑，
+                # 防再提炼/重复提议把用户删掉的事实复活
+                before = None
+                try:
+                    before = manager.get_memory(target, agent_wide=True)
+                except Exception:  # noqa: BLE001 - 读不到正文不阻断遗忘
+                    logger.debug("forget 墓碑前置读取正文失败: %s", target, exc_info=True)
                 deleted = manager.forget(target, soft=True)
                 if not deleted:
                     raise APIError(ErrorCodes.NOT_FOUND, "目标记忆不存在或已删除，请拒绝该提议")
+                if before and str(before.get("content") or "").strip():
+                    try:
+                        store.tombstone_content(
+                            str(before["content"]), by_user=uid, source="forget_proposal"
+                        )
+                    except Exception:  # noqa: BLE001 - 墓碑登记失败不回滚遗忘
+                        logger.warning("遗忘墓碑登记失败: %s", target, exc_info=True)
                 return target
 
             out = store.confirm(pending_id, _do_forget)
@@ -130,6 +144,16 @@ async def confirm_pending_memory(
             )
 
         def _do_remember(content: str, category: str, memory_type: str) -> str:
+            # P1#11②：同归一化键的旧活跃记忆先软遗忘
+            # （"同一事实的新说法"确定性接管，无 LLM）；覆盖失败不阻断入库。
+            try:
+                from neurova.memory.pending_memory import supersede_same_key
+
+                superseded = supersede_same_key(manager, content)
+                if superseded:
+                    logger.info("normalized_key 覆盖旧记忆 %s（新说法接管）", superseded)
+            except Exception:  # noqa: BLE001
+                logger.debug("normalized_key 覆盖跳过", exc_info=True)
             return manager.remember(
                 content=content,
                 category=category,

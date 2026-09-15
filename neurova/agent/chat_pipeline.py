@@ -154,6 +154,9 @@ class ChatContext:
     reasoning_trace_id: Optional[str] = None
     reply: Optional[str] = None
     caller_provided_history: bool = False
+    # P0#5：本轮引用句柄表（CitationRegistry）——本轮检索证据的
+    # 资格边界：注入时压缩 UUID→m/k 句柄，回复解码只认本轮注册的引用
+    citation_registry: Optional[Any] = None
     # P1-10 写入围栏: turn 开始时 claim 的写入权属凭证（FenceClaim），
     # 沉淀到 update_history/save_to_session 的写前断言；None = 未参与围栏
     writer_claim: Optional[Any] = None
@@ -501,6 +504,32 @@ class ChatPipeline:
             session_id=ctx.session_id,
             user_id=(ctx.metadata or {}).get("user_id"),
         )
+        # Wave H-W2 三层技能库：装配轮级可见视图（agent 私库 + 当前会话用户
+        # 私库 + 公共库，就近优先）。视图缺席（构建失败）时各消费点回退
+        # 现状 agent 视图——装配失败绝不放大为对话失败。
+        try:
+            from neurova.core import turn_context as _tc
+            from neurova.skills.skill_visibility import build_turn_view, resolve_user_key
+
+            _md = ctx.metadata or {}
+            _user_key = resolve_user_key(
+                user_id=_md.get("user_id"),
+                channel_user_id=_md.get("channel_user_id"),
+                channel=_md.get("channel"),
+            )
+            _tc.set_turn_skill_view(
+                build_turn_view(
+                    str(getattr(self._agent.config, "agent_id", "") or ""),
+                    _user_key,
+                    registry_skills=(
+                        dict(getattr(self._agent, "_skill_registry", None).skills)
+                        if getattr(self._agent, "_skill_registry", None) is not None
+                        else None
+                    ),
+                )
+            )
+        except Exception:
+            logger.debug("技能可见视图装配失败（回退现状 agent 视图）", exc_info=True)
         # [蜂群流式] event_emitter 允许经 metadata 透传（Agent.chat 未显式
         # 传参时）， SwarmManager 以 metadata 携带发射器，此处提取到 ctx
         if ctx.event_emitter is None and isinstance(ctx.metadata, dict):
@@ -517,7 +546,7 @@ class ChatPipeline:
         # 递增对话轮次（经 Agent 显式 API）
         self._agent.increment_turn_count()
 
-        # P2-11（OpenOcta 启发 SnapshotForSession）：会话身份快照冻结——
+        # P2-11：会话身份快照冻结——
         # 同会话首轮取 {soul, personality, constitution} 快照并缓存，之后
         # 轮次复用冻结值（身份文件/进化写入不漂移当前 prompt，下次会话
         # 生效）；build_context 消费 agent._frozen_identity_snapshot。
@@ -664,7 +693,7 @@ class ChatPipeline:
             logger.warning("/review 命令失败（回落 LLM 流程）: %s", e)
 
     async def _check_compact_command(self, ctx: ChatContext):
-        """/compact 手动压缩命令（对齐 zcode）：不调 LLM 正文轮，直接折叠
+        """/compact 手动压缩命令：不调 LLM 正文轮，直接折叠
         会话窗口老消息为摘要（经 ContextOrchestrator 的预算切分+摘要桥），
         报告折叠统计后经 B4 同款 command_dispatched 短路 LLM。
         异常不崩轮——回落正常 LLM 流程。
@@ -808,7 +837,7 @@ class ChatPipeline:
         tool_name = ctx.tool_memory_result.get("tool_name")
         confidence = ctx.tool_memory_result.get("confidence", 0)
 
-        # P-D 修复（docs/tool-memory-muscle-analysis.md）：移除原 0.7 硬门。
+        # P-D 修复：移除原 0.7 硬门。
         # 决策阈值已由 check_tool_memory 的 dynamic_threshold 单源裁定
         # （RSI 可调）；此处再设 0.7 会形成调参死区（RSI 把阈值调到 0.7
         # 以下时本门仍然拦截，闭环失效）。
@@ -950,12 +979,12 @@ class ChatPipeline:
             # Bug A-1 修复 [HIGH]: 原代码 `kw in s.name.lower() for kw in ctx.user_input.lower().split()`
             # 有两个问题:
             # 1. CJK tokenization: split() 对中文不分词，"搜索用户数据" 整段一个词，
-            #    "搜索用户数据" in "search_tool" 永远 False
+            # "搜索用户数据" in "search_tool" 永远 False
             # 2. 方向反了: 应检查 skill 的关键词是否在 user_input 中，而非反过来
-            #    （skill name 通常是英文如 "search_tool"，user_input 通常是中文如 "搜索用户数据"）
+            # （skill name 通常是英文如 "search_tool"，user_input 通常是中文如 "搜索用户数据"）
             # 修复: 双向匹配——英文 token 保留原方向（user_input 词在 skill 文本中），
-            #       CJK 关键词反向匹配（skill 文本中的中文词在 user_input 中），
-            #       与 N-10 修复方式一致（子串匹配）。
+            # CJK 关键词反向匹配（skill 文本中的中文词在 user_input 中），
+            # 与 N-10 修复方式一致（子串匹配）。
             # 注意: 用 `is not None` 而非真值检查——SkillRegistry 定义了 __len__，
             # 空注册表时 bool(registry)==False（与 N-1 同一根因）。
             if skill_registry is not None:
@@ -1042,7 +1071,7 @@ class ChatPipeline:
                 return True
 
         # 2. CJK 关键词双向子串匹配（与 N-10 修复方式一致）
-        #    从 skill_text 中找中文关键词，检查是否在 user_input 中
+        # 从 skill_text 中找中文关键词，检查是否在 user_input 中
         cjk_keywords = [
             "搜索", "查找", "查询", "读取", "写入", "处理", "分析",
             "生成", "获取", "创建", "下载", "转换", "文件", "数据",
@@ -1122,14 +1151,24 @@ class ChatPipeline:
 
         无 attachments 时零副作用；文件读取失败不抛异常（附件问题不拖垮聊天）。
         """
-        # P1-6（Codex skills 对齐）：$/@ 技能 mention 全文注入——命中技能的
+        # P1-6：$/@ 技能 mention 全文注入——命中技能的
         # SKILL.md 指令体随本轮 user_input 进入 LLM（随请求消亡，同附件语义）；
         # 无 mention/registry 时原样，任何失败不影响聊天
         try:
             from neurova.skills.skill_injection import inject_skill_mentions
 
             registry = getattr(self._agent, "_skill_registry", None)
-            _enriched = inject_skill_mentions(ctx.user_input or "", registry)
+            # Wave H-W2：view 在场则只允许可见集内技能注入（跨用户私库正文
+            # 泄露面的根治点）；无视图回退现状全量
+            _allowed = None
+            try:
+                from neurova.core.turn_context import get_turn_skill_view
+
+                _view = get_turn_skill_view()
+                _allowed = set(_view.skills) if _view is not None else None
+            except Exception:  # noqa: BLE001
+                _allowed = None
+            _enriched = inject_skill_mentions(ctx.user_input or "", registry, allowed_names=_allowed)
             if _enriched != ctx.user_input:
                 ctx.user_input = _enriched
                 logger.info("[技能注入] mention 指令体已注入本轮")
@@ -1361,6 +1400,19 @@ class ChatPipeline:
             ctx.user_input[:50],
         )
 
+        # P0#5：本轮注册表 = 本轮检索证据集。
+        # build_context 注入时把 memory_id/knowledge_id 换成 m1/k1 句柄；
+        # 回复解码只承认本轮句柄，历史回放/模型伪造的引用被剥离。
+        try:
+            from neurova.memory.citation import CitationRegistry
+
+            _cit_reg = CitationRegistry()
+            for _mem in ctx.relevant_memories or []:
+                _cit_reg.register(_mem)
+            ctx.citation_registry = _cit_reg
+        except Exception:  # noqa: BLE001 - citation 基建故障退回旧全 id 格式
+            ctx.citation_registry = None
+
         ctx.context = await self.context_orchestrator.build_context(
 
             user_input=ctx.user_input,
@@ -1372,9 +1424,10 @@ class ChatPipeline:
             crystallized_patterns=ctx.crystallized_patterns,
             session_context=ctx.session_context,
             voice_context=voice_context,
+            citation_registry=ctx.citation_registry,
         )
 
-        # P2-4（Codex WorldState diff 对齐）：环境指纹增量——会话内
+        # P2-4：环境指纹增量——会话内
         # workspace/model/平台变化时向当轮上下文追加一条增量提示；
         # 未变化零注入（环境全量仍由 system 段承载）
         try:
@@ -1822,7 +1875,7 @@ class ChatPipeline:
             logger.debug("EventType 导入失败，跳过事件广播")
 
         # P1-2：上一轮转后台的工具完成后，把结果提示注入本轮 LLM 上下文
-        # （QP offload 语义的闭环：超时转后台 → 完成落 pending hints → 此处消费）
+        # 
         try:
             _coordinator = getattr(self.tool_executor, "tool_coordinator", None)
             if _coordinator:
@@ -1872,6 +1925,18 @@ class ChatPipeline:
         # 解析并执行文本中的工具调用
         ctx.reply = await self.tool_executor.execute_text_tool_calls(ctx.reply, ctx.user_input)
 
+        # P0#5：定稿句柄解码——本轮注册过的 ref 句柄还原
+        # 真实 memory_id（落库/审计/UI 消费），本轮外句柄（模型从历史回放或
+        # 幻觉伪造）标记整体剥离。流式通道本轮仍为句柄原文（SSE 后缀缓冲
+        # 按计划后置，报告 §7 #5）。
+        try:
+            if ctx.citation_registry is not None and ctx.reply:
+                from neurova.memory.citation import decode_citation_handles
+
+                ctx.reply = decode_citation_handles(ctx.reply, ctx.citation_registry)
+        except Exception:  # noqa: BLE001 - 解码故障不阻断回复
+            logger.debug("citation 句柄解码跳过", exc_info=True)
+
         # 广播工具调用结果
         tool_messages = self._collect_tool_messages()
         if tool_messages:
@@ -1898,8 +1963,7 @@ class ChatPipeline:
         except Exception:
             logger.debug("视图已读确认跳过", exc_info=True)
 
-        # 视觉路由覆盖恢复：LLM 主调用与工具续调均已完成，覆盖使命结束
-        #（异常路径不经过此处——ContextVar 随请求任务消亡，无跨轮残留）
+        # 视觉路由覆盖恢复：LLM 主调用与工具续调均已完成，覆盖使命结束        #（异常路径不经过此处——ContextVar 随请求任务消亡，无跨轮残留）
         self._clear_vision_routing(ctx)
 
     async def _call_agent_loop(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:
@@ -1953,6 +2017,15 @@ class ChatPipeline:
             thinking_budget=self._thinking_budget_of(ctx),
         )
         emitter = ctx.event_emitter
+        # ④流式 citation 缓冲：仅本轮注册过句柄时启用——
+        # 用户可见流不跨分片露半截标记；reply_parts 仍存原文（定稿 decode 同源，
+        # 持久化/重放不受影响）。无句柄轮次逐字节走旧路径（零回归）。
+        cit_buf = None
+        _cit_reg = getattr(ctx, "citation_registry", None)
+        if emitter is not None and _cit_reg is not None and not _cit_reg.is_empty():
+            from neurova.memory.citation import StreamCitationBuffer
+
+            cit_buf = StreamCitationBuffer(_cit_reg)
         async for event in gen:
             if not isinstance(event, dict):
                 continue
@@ -1962,7 +2035,9 @@ class ChatPipeline:
                 # [蜂群流式] 转发 chunk 给事件发射器（如 SwarmManager）
                 if emitter is not None:
                     try:
-                        emitter("content", event.get("data", ""))
+                        _out = cit_buf.feed(event.get("data", "")) if cit_buf else event.get("data", "")
+                        if _out:
+                            emitter("content", _out)
                     except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
                         logger.debug("event_emitter 回调失败: %s", e)
             elif etype == "done":
@@ -1979,7 +2054,7 @@ class ChatPipeline:
                     except Exception as e:  # noqa: BLE001
                         logger.debug("event_emitter 回调失败: %s", e)
             elif etype == "retry_status":
-                # 429 重试/切换倒计时事件（ZCode 对齐 2026-09-11）：reset=
+                # 429 重试/切换倒计时事件：reset=
                 # 半截回复作废（清空 reply_parts，防重复拼接）；经 emitter
                 # 转发需 emit_status_events 门控（蜂群子 Agent 纯文本流不透传）
                 _retry_data = event.get("data") or {}
@@ -2016,10 +2091,17 @@ class ChatPipeline:
                     except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
                         logger.debug("event_emitter 转发 %s 失败: %s", etype, e)
             # reasoning 等其他元数据事件不入回复
-        # C1: 合并原生工具事件到 _tool_messages_list，供 _collect_tool_messages() 读取
+            # C1: 合并原生工具事件到 _tool_messages_list，供 _collect_tool_messages() 读取
         if native_tool_events:
             self._agent.append_tool_messages(native_tool_events)
             logger.debug("原生模式捕获 %d 个工具事件", len(native_tool_events))
+        if cit_buf is not None and emitter is not None:
+            try:
+                _tail = cit_buf.flush()
+                if _tail:
+                    emitter("content", _tail)
+            except Exception:  # noqa: BLE001
+                logger.debug("citation 缓冲结清失败", exc_info=True)
         return "".join(reply_parts)
 
     async def _call_loop_normal(self, ctx: ChatContext, tools_for_llm: Optional[List]) -> str:
@@ -2240,6 +2322,13 @@ class ChatPipeline:
         """
         reply_parts = []
         emitter = ctx.event_emitter
+        # ④ 流式 citation 缓冲（同 _call_loop_stream：仅本轮有句柄才启用）
+        cit_buf = None
+        _cit_reg = getattr(ctx, "citation_registry", None)
+        if emitter is not None and _cit_reg is not None and not _cit_reg.is_empty():
+            from neurova.memory.citation import StreamCitationBuffer
+
+            cit_buf = StreamCitationBuffer(_cit_reg)
         async for chunk in self.llm_client.chat_stream(ctx.context):
             if isinstance(chunk, dict):
                 if chunk.get("retry_status"):
@@ -2256,16 +2345,25 @@ class ChatPipeline:
                 reply_parts.append(content)
                 if emitter is not None:
                     try:
-                        emitter("content", content)
+                        _out = cit_buf.feed(content) if cit_buf else content
+                        if _out:
+                            emitter("content", _out)
                     except Exception as e:  # noqa: BLE001 - 转发失败不影响主流程
                         logger.debug("legacy 流式 emitter 转发失败: %s", e)
+        if cit_buf is not None and emitter is not None:
+            try:
+                _tail = cit_buf.flush()
+                if _tail:
+                    emitter("content", _tail)
+            except Exception:  # noqa: BLE001
+                logger.debug("citation 缓冲结清失败", exc_info=True)
         return "".join(reply_parts)
 
     @staticmethod
     def _raise_for_llm_error_dict(chunk: Dict) -> Exception:
         """错误 dict → 分类异常（供应商错误守卫据此不再 fallback 重撞坏模型）。
 
-        OpenClaw 启发 P0-1：error_type 五类标准键（multi_model_client 流内
+error_type 五类标准键（multi_model_client 流内
         编码生产端）优先；消息兜底兼容无类型历史 dict。
         """
         from neurova.llm_client import (

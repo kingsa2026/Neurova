@@ -118,6 +118,9 @@
               <GlassButton variant="ghost" size="sm" @click="openRevisions(record)">
                 {{ t('knowledge.revisionsBtn') }}
               </GlassButton>
+              <GlassButton variant="ghost" size="sm" @click="openChunks(record)">
+                {{ t('knowledge.chunksBtn') }}
+              </GlassButton>
               <GlassButton variant="danger" size="sm" @click="confirmDelete(record)">
                 {{ t('common.delete') }}
               </GlassButton>
@@ -278,6 +281,25 @@
         </a-form-item>
         <a-form-item :label="t('knowledge.itemContent')">
           <a-textarea v-model:value="form.content" :rows="10" :placeholder="t('knowledge.contentPlaceholder')" />
+          <!-- P1#7 切分 live-preview：与生产单源（split_with_meta/build_entry_chunks） -->
+          <div class="kb-preview-row">
+            <a-button type="link" size="small" :loading="previewLoading" @click="handlePreviewChunking">
+              {{ t('knowledge.previewBtn') }}
+            </a-button>
+            <span v-if="previewResult" class="kb-config-hint">
+              {{ t('knowledge.previewResult', {
+                children: previewResult.children.length,
+                parents: previewResult.parents.length,
+                maxChars: previewResult.max_chars,
+              }) }}
+            </span>
+          </div>
+          <div v-if="previewResult" class="kb-preview-list">
+            <div v-for="c in previewResult.children.slice(0, 8)" :key="c.index" class="kb-preview-item">
+              #{{ c.index }}<template v-if="c.context_header"> · HEAD</template>
+              : {{ String(c.content || '').slice(0, 60) }}…
+            </div>
+          </div>
         </a-form-item>
         <a-form-item :label="t('knowledge.itemTags')">
           <a-select
@@ -372,6 +394,10 @@
           <a-form-item :label="t('knowledge.configSpaceId')">
             <a-input v-model:value="configForm.space_id" :placeholder="t('knowledge.configSpaceIdPh')" />
           </a-form-item>
+          <a-form-item :label="t('knowledge.configSyncInterval')">
+            <a-input-number v-model:value="configForm.sync_interval_minutes" :min="0" :max="1440" style="width: 100%" />
+            <span class="kb-config-hint">{{ t('knowledge.configSyncIntervalHint') }}</span>
+          </a-form-item>
         </template>
 
         <!-- ima：base_url（本机 MCP）+ Token（加密通道）+ knowledge_base_id + allow_local -->
@@ -420,6 +446,15 @@
             <a-button type="link" size="small" @click="copyConfigId(record)">
               {{ t('knowledge.configCopyId') }}
             </a-button>
+            <a-button
+              v-if="record.source_type === 'feishu'"
+              type="link"
+              size="small"
+              :loading="syncingConfigId === record.id"
+              @click="handleSyncConfig(record)"
+            >
+              {{ t('knowledge.configSyncNow') }}
+            </a-button>
             <a-button type="link" danger size="small" @click="handleDeleteConfig(record)">
               {{ t('knowledge.configDelete') }}
             </a-button>
@@ -457,6 +492,38 @@
       </a-table>
     </a-modal>
 
+    <!-- P1#12（WeKnora）：块级查看与编辑（乐观锁 + 修订账本） -->
+    <a-modal v-model:open="chunksVisible" :title="t('knowledge.chunksTitle')" :footer="null" width="760px">
+      <a-spin :spinning="chunksLoading">
+        <a-empty v-if="!chunkRows.length" :description="t('common.noData')" />
+        <div v-for="ch in chunkRows" :key="ch.index" class="kb-chunk-row">
+          <div class="kb-chunk-meta">
+            #{{ ch.index }}
+            <a-tag v-if="ch.parent_index !== undefined">P{{ ch.parent_index }}</a-tag>
+            <a-tag v-if="ch.revision" color="blue">{{ t('knowledge.chunkRevision') }} {{ ch.revision }}</a-tag>
+            <a-button type="link" size="small" @click="showChunkHistory(ch.index)">
+              {{ t('knowledge.chunkHistory') }}
+            </a-button>
+          </div>
+          <a-textarea v-model:value="ch.content" :auto-size="{ minRows: 2, maxRows: 8 }" />
+          <div class="kb-chunk-actions">
+            <GlassButton variant="primary" size="sm" :loading="savingChunkIndex === ch.index" @click="handleSaveChunk(ch)">
+              {{ t('common.save') }}
+            </GlassButton>
+            <span class="kb-config-hint">{{ ch.index_status === 'pending' ? t('knowledge.chunkIndexPending') : '' }}</span>
+          </div>
+        </div>
+        <template v-if="chunkHistory.length">
+          <a-divider style="margin: 12px 0" />
+          <div class="kb-chunk-meta">{{ t('knowledge.chunkHistory') }}</div>
+          <div v-for="(r, i) in chunkHistory" :key="i" class="kb-chunk-rev">
+            <span>{{ r.at }} · {{ r.by || '-' }}</span>
+            <div class="kb-chunk-rev-body">{{ r.content }}</div>
+          </div>
+        </template>
+      </a-spin>
+    </a-modal>
+
     <!-- P2 标注闭环：精准回复命中表管理 -->
     <AnnotationDrawer v-model:open="annotationOpen" />
   </div>
@@ -489,11 +556,16 @@ import {
   listDeletedKnowledge,
   restoreKnowledgeNode,
   listKnowledgeRevisions,
+  syncKbConfig,
+  previewChunking,
+  listKnowledgeChunks,
+  updateKnowledgeChunk,
+  listKnowledgeChunkRevisions,
   listResolutionReviews,
   resolveResolutionReview,
   runEntityResolution,
 } from '@/api/modules/knowledge'
-import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope, KnowledgeConflict, DeletedKnowledge, GraphResolutionReview } from '@/api/modules/knowledge'
+import type { KbConfig, KbCollection, KnowledgeNode, KnowledgeScope, KnowledgeConflict, DeletedKnowledge, GraphResolutionReview, KnowledgeChunkRow } from '@/api/modules/knowledge'
 import { request } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
@@ -633,6 +705,8 @@ interface ConfigFormState {
   api_url: string
   knowledge_base_id: string
   allow_local: boolean
+  /** P1#12 飞书定时同步间隔（分钟，0=不定时） */
+  sync_interval_minutes: number
 }
 const configForm = ref<ConfigFormState>({
   name: '',
@@ -645,6 +719,7 @@ const configForm = ref<ConfigFormState>({
   api_url: '',
   knowledge_base_id: '',
   allow_local: false,
+  sync_interval_minutes: 0,
 })
 const configSourceOptions = [
   { label: 'iflow', value: 'iflow' },
@@ -657,7 +732,7 @@ const configColumns = [
   { title: t('knowledge.configSource'), key: 'source_type', dataIndex: 'source_type' },
   { title: t('knowledge.configHasKey'), key: 'has_api_key', dataIndex: 'has_api_key', width: 90 },
   { title: t('knowledge.configId'), key: 'id', dataIndex: 'id', ellipsis: true },
-  { title: '', key: 'actions', width: 130 },
+  { title: '', key: 'actions', width: 200 },
 ]
 
 function resetConfigForm(keepName = true) {
@@ -673,6 +748,108 @@ function resetConfigForm(keepName = true) {
     api_url: '',
     knowledge_base_id: '',
     allow_local: false,
+    sync_interval_minutes: 0,
+  }
+}
+
+// ── P1#12（WeKnora）：飞书同步 + 块级编辑 ──────────────────────────
+const syncingConfigId = ref<string | null>(null)
+
+const previewLoading = ref(false)
+const previewResult = ref<{
+  children: Array<{ index?: number; context_header?: string; content?: string }>
+  parents: Array<{ index?: number }>
+  max_chars: number
+} | null>(null)
+
+async function handlePreviewChunking() {
+  const content = String(form.value?.content || '')
+  if (!content.trim()) {
+    message.warning(t('knowledge.previewEmpty'))
+    return
+  }
+  previewLoading.value = true
+  try {
+    const res: any = await previewChunking({ content })
+    previewResult.value = res?.data || null
+  } catch (e: any) {
+    message.error(e?.message || String(e))
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+async function handleSyncConfig(record: KbConfig) {
+  syncingConfigId.value = record.id
+  try {
+    const res: any = await syncKbConfig(record.id)
+    const st = res?.data || {}
+    message.info(
+      t('knowledge.syncDone', {
+        upserted: st.upserted ?? 0,
+        deleted: st.deleted ?? 0,
+        failed: st.failed ?? 0,
+      }),
+    )
+  } catch (e: any) {
+    message.error(e?.response?.data?.detail || e?.message || String(e))
+  } finally {
+    syncingConfigId.value = null
+  }
+}
+
+const chunksVisible = ref(false)
+const chunksLoading = ref(false)
+const chunkRows = ref<KnowledgeChunkRow[]>([])
+const chunkKid = ref('')
+const savingChunkIndex = ref<number | null>(null)
+const chunkHistory = ref<Array<{ content: string; at: string; by: string }>>([])
+
+async function openChunks(record: KnowledgeNode) {
+  chunkKid.value = record.knowledge_id || record.id || ''
+  chunkHistory.value = []
+  chunksVisible.value = true
+  chunksLoading.value = true
+  try {
+    const res: any = await listKnowledgeChunks(chunkKid.value)
+    chunkRows.value = (res?.data || []).map((c: any) => ({ ...c }))
+  } catch (e: any) {
+    message.error(e?.message || String(e))
+    chunkRows.value = []
+  } finally {
+    chunksLoading.value = false
+  }
+}
+
+async function handleSaveChunk(ch: KnowledgeChunkRow) {
+  savingChunkIndex.value = ch.index
+  try {
+    const res: any = await updateKnowledgeChunk(chunkKid.value, ch.index, {
+      content: ch.content,
+      expected_revision: ch.revision ?? 0,
+    })
+    ch.revision = res?.data?.revision ?? ch.revision
+    message.success(t('knowledge.chunkSaved'))
+    const list: any = await listKnowledgeChunks(chunkKid.value)
+    chunkRows.value = (list?.data || []).map((c: any) => ({ ...c }))
+  } catch (e: any) {
+    if (e?.response?.status === 409) {
+      message.warning(t('knowledge.chunkConflict'))
+      await openChunks({ knowledge_id: chunkKid.value } as KnowledgeNode)
+    } else {
+      message.error(e?.message || String(e))
+    }
+  } finally {
+    savingChunkIndex.value = null
+  }
+}
+
+async function showChunkHistory(index: number) {
+  try {
+    const res: any = await listKnowledgeChunkRevisions(chunkKid.value, index)
+    chunkHistory.value = res?.data || []
+  } catch (e: any) {
+    message.error(e?.message || String(e))
   }
 }
 
@@ -1170,6 +1347,10 @@ async function handleCreateConfig() {
     if (f.api_url.trim()) settings.api_url = f.api_url.trim()
     if (f.knowledge_base_id.trim()) settings.knowledge_base_id = f.knowledge_base_id.trim()
     if (f.source_type === 'ima') settings.allow_local = f.allow_local
+    // P1#12：飞书定时同步间隔（分钟）>0 才写入 settings，供后台循环调度
+    if (f.source_type === 'feishu' && f.sync_interval_minutes > 0) {
+      settings.sync_interval_minutes = f.sync_interval_minutes
+    }
 
     await createKbConfig({
       name: f.name.trim(),
@@ -1275,6 +1456,27 @@ watch(agentId, () => {
   display: flex;
   align-items: flex-end;
   gap: 12px;
+}
+
+.kb-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kb-preview-list {
+  margin-top: 4px;
+  max-height: 160px;
+  overflow: auto;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.kb-preview-item {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .kb-config-hint {

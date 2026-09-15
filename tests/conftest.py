@@ -345,6 +345,74 @@ def _isolate_evolution_job_queue(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _disable_skill_semantic_in_tests(monkeypatch):
+    """语义档测试全局关：召回热路径的懒解析永不加载 ONNX 模型/不触下载器。
+
+    专属测试（wave E/F）用显式注入的 fake engine 绕过 env（SkillVectorCache
+    对显式 engine 不吃开关，见 _get_engine 注释）；生产默认行为不受影响。
+    """
+    monkeypatch.setenv("NEUROVA_SKILL_SEMANTIC", "0")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_turn_context():
+    """每测试清回合上下文（Wave H 测试卫生）。
+
+    生产安全前提：asyncio 每请求 task 的 context 拷贝隔离，
+    set_turn_skill_view 等不跨请求泄漏；但 pytest 同线程直调 chat_pipeline
+    全链测试会把 view/funnel 残留到后续测试（task_name_params 等被视图门
+    误拒的批跑失败根因，2026-09-15）。
+    """
+    try:
+        from neurova.core import turn_context
+
+        turn_context.clear_turn_state()
+    except Exception:  # pragma: no cover - 模块未就绪时跳过
+        pass
+    yield
+    try:
+        from neurova.core import turn_context
+
+        turn_context.clear_turn_state()
+    except Exception:  # pragma: no cover
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _isolate_neurflow_storage(tmp_path, monkeypatch):
+    """NeurflowStorage 默认路径隔离。
+
+    NeurflowStorage(db_path="neurflow.db") 是 cwd 相对路径 → 测试从仓库根
+    运行时读到开发者的真实 neurflow.db：其中"已发布"工作流经 workflow_as_tool
+    （P1-3）注入 LLM 工具面，使所有经 _build_tools_for_llm 的测试随本机数据
+    漂移（同 EKB 单例打真库事故根因）。默认构造重定向到每测试临时库；
+    显式传 db_path 的专属测试不受影响。同时清 neurflow_api._get_storage 的
+    函数属性缓存，防上一测试的临时库句柄泄漏到下一测试。
+    """
+    try:
+        import neurova.collaboration.neurflow.storage as _nstor
+    except Exception:  # pragma: no cover - 模块未就绪时跳过
+        return
+    real_cls = _nstor.NeurflowStorage
+    tmp_db = str(tmp_path / "neurflow.db")
+
+    class _IsolatedStorage(real_cls):
+        def __init__(self, db_path: str = "neurflow.db"):
+            super().__init__(tmp_db if db_path == "neurflow.db" else db_path)
+
+    monkeypatch.setattr(_nstor, "NeurflowStorage", _IsolatedStorage)
+    try:
+        import neurova.api.endpoints.neurflow_api as _napi
+
+        if hasattr(_napi._get_storage, "_instance"):
+            del _napi._get_storage._instance
+        # neurflow_api 模块顶层若已绑定旧类引用，一并替换
+        monkeypatch.setattr(_napi, "NeurflowStorage", _IsolatedStorage, raising=False)
+    except Exception:  # pragma: no cover
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _isolate_meta_ledger(tmp_path, monkeypatch):
     """所有测试的元认知台账落盘指向临时目录。
 
