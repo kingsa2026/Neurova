@@ -101,6 +101,14 @@
                 >
                   {{ t('skill.execute') }}
                 </GlassButton>
+                <GlassButton
+                  variant="ghost"
+                  size="sm"
+                  :loading="skill._pushing"
+                  @click="pushToMyLibrary(skill)"
+                >
+                  {{ t('skill.pushToMine') }}
+                </GlassButton>
               </div>
             </div>
           </div>
@@ -315,6 +323,7 @@ interface Skill {
   usage?: SkillUsage
   _toggling?: boolean
   _pinning?: boolean
+  _pushing?: boolean
 }
 
 interface MarketSkill {
@@ -408,7 +417,7 @@ async function fetchLifecycleUsage(): Promise<Record<string, SkillUsage>> {
 async function toggleSkill(skill: Skill, enabled: boolean) {
   skill._toggling = true
   try {
-    await skillPoolApi.enableSkill(skill.id, enabled)
+    await skillPoolApi.enableSkill(skill.id, enabled, props.agentId)
     skill.enabled = enabled
     message.success(enabled ? t('skill.enabledSuccess') : t('skill.disabledSuccess'))
   } catch (err: any) {
@@ -416,6 +425,25 @@ async function toggleSkill(skill: Skill, enabled: boolean) {
     message.error(msg)
   } finally {
     skill._toggling = false
+  }
+}
+
+/** 三层库需求 3：agent 私库技能→我的用户私库（经确认队列，非直接复制）。 */
+async function pushToMyLibrary(skill: Skill) {
+  skill._pushing = true
+  try {
+    await skillPoolApi.createSkillTransfer({
+      transfer_type: 'agent_to_user',
+      skill_id: skill.id,
+      src_pool: 'agent',
+      src_owner: props.agentId,
+    })
+    message.success(t('skill.pushSubmitted'))
+  } catch (err: any) {
+    const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message || t('skill.pushError')
+    message.error(msg)
+  } finally {
+    skill._pushing = false
   }
 }
 
