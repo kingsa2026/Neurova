@@ -97,3 +97,10 @@ Neurova = 单进程桌面个人智能体。结论：**只抄机制、不抄架�
 - **ingress span 前端可视化**：`knowledge.ts` 增 `listIngressTasks/getIngressTask/cancelIngressTask` + `IngressTask/IngressSpan/IngressStats` 类型；KnowledgePage header 新增"摄取任务"入口 → 模态：任务表（状态色 tag、stats 计数条、pending/processing 才可取消、取消后刷新+提示）、展开行经 `@expand` 懒加载详情接口取 spans（列表不带 spans）、span 行渲染 stage/状态/时间/error 四要素；i18n 15 键 ×11 语（ko 首版笔误已修）。测试：`KnowledgePage.ingressSpans.test.ts` SFC 源码契约 6 项（入口/tag 门/懒加载/四要素/路由字面一致/取消不静默）+ 既有页面测 mock 补齐新面；i18n 守卫+页面+新测 62 绿、vue-tsc 0 错、vite build 过、后端 325 绿。
 
 至此报告 §7/§8 全部借鉴项与遗留候选均已闭环。
+
+## 10.3 仓库自洽审计批（commit `2a5f79b8`）
+
+用户"无断点"要求的收口批：HEAD 干净 worktree **全量收集演练**（tests/unit+api，14860 项）发现 8 处收集错误，全部同根——`.gitignore:282` 的 `credentials*`（防密钥入库规则）**误杀凭据分桶存储模块源码** `neurova/web_reach/credentials.py`：其余 web_reach 四文件与全部消费测试早已入库，唯独它被吞，fresh clone 下 `skills/builtin` 包 import 即崩（test_pending_memory / web_reach 全链 / skills 执行器 / ssh_credentials 等 8 文件）。
+- 修复：内容扫描零密钥命中（凭据值走 SecretStore 加密落盘，本文件纯逻辑）后 `git add -f` 入库（tracked 后忽略规则失效）；主树受影响 4 套件 109 绿；**提交后快照复验：收集 14860 项零错误 + create_app HTTP 冒烟 11 端点全 401 零断点**。
+- `.gitignore` 根因豁免（`!neurova/web_reach/credentials.py`）登记待其 owner 会话处理——该文件工作树 diff 含并行在途修改（含删除 QwenPaw-main 等规则段），不代提交不捎带。
+- 误伤面复核：全仓 ignored 源文件仅此一例（其余命中皆为 .mimosa 缓存/审批 db/恢复目录，非源码）。
