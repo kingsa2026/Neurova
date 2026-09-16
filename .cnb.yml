@@ -1,22 +1,201 @@
-# 这里是一个示例 .cnb.yml
-  
-  # 匹配main分支
-  main:
-    # 触发事件为 push 事件
-    push:
-      # 这里是阶段任务示例，可配置任意多个阶段，这里以一个阶段为例
-      - name: "your first CNB building"
-        stages:
-          # 使用流水线输出你的构建配置数据
-          - name: echo your build data
-            script: echo ${CNB_BUILD_USER} 通过 ${CNB_BRANCH} 分支触发了 ${CNB_EVENT} 事件
-vscode:
-docker:
-image:
-name: docker.cnb.cool/fuliai/framepack_comfyui/framepacke:v1.2
-runner:
-cpus: 16
-memory: 32G
-tags: cnb:arch:amd64:gpu
-gpu: 2
-  # 更多资料见 https://docs.cnb.cool/build/quick-start.html
+# ============================================================================
+# Neurova CI — cnb.cool 云原生构建
+# ============================================================================
+# 与 .github/workflows/ci.yml 对齐的门禁：同源命令、同等严格度、同等放行标准。
+# 对齐关系由 tests/unit/test_ci_parity_guard.py 常驻校验（20 用例）：
+#   job↔pipeline 映射 / 核心命令逐字一致 / 非阻塞语义对齐 / 防样例空壳再生。
+# 改动任一侧配置必须同步另一侧并更新守卫的 EXPECTED_* 表。
+#
+# 分层（自内向外加固，与 GitHub 侧一致的 6 层 + 1 非阻塞）：
+#   1. static-gate           语法/未定义名巡检（pyflakes，成本极低）
+#   2. lint                  ruff E9+F821（规则集与豁免见 pyproject）
+#   3. import-and-regression 模块导入巡检 + 审计回归
+#   4. unit-tests            受保护子集（scripts/ci/protected_tests.txt）
+#                            + 覆盖率门禁 fail_under=60，py3.11/3.12 双跑
+#   5. e2e                   后端启动冒烟（health/docs/metrics/鉴权）
+#   6. frontend              vue-tsc 类型门禁 + vitest
+#   7. dependency-audit      pip-audit 锁定版本审计（allowFailure: true，非阻塞）
+#
+# 原则：只进当前确定全绿的测试；预存失败模块修复后逐个搬入 protected_tests.txt。
+#
+# 语法约定（见 https://docs.cnb.cool/zh/build/grammar.html）：
+#   - 分支 → 事件(push/pull_request) → 流水线数组；同一事件下的多条流水线并发执行，
+#     故 8 条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐（unit-tests 按
+#     py3.11/py3.12 拆为两条，对应 GitHub 的 matrix 两格）。
+#   - 单条流水线内的 stages 串行；任一 stage 失败即中止该流水线。
+#   - runner.cpus: N 对应内存 N×2GiB（本文件最大 4 → 8GiB）。
+#   - docker.volumes 为构建节点级缓存（copy-on-write 默认），跨节点不共享；
+#     同一流水线内不得声明存在包含关系的卷路径。
+#   - YAML 锚点仅在同文件内可用（跨文件 include 不支持锚点），
+#     故用 &pipelines / *pipelines 让 push 与 pull_request 共用同一份定义。
+#
+# 触发范围与 GitHub 侧一致：push 到 main；PR 目标为 main。
+# （GitHub 还监听 master，已核对本仓库远端仅 main 分支，故此处不声明。）
+#
+# 与 GitHub 侧的刻意差异（唯一一处，明确记录）：
+#   GitHub 的 e2e job 带 needs: static-gate（静态门禁过了才启动冒烟）；
+#   cnb 同一事件下的流水线相互并发、无跨流水线依赖原语，故 e2e 与 static-gate
+#   并行启动。放行标准不变（失败上报、阻塞合并）。
+# ============================================================================
+
+main:
+  # push 事件：流水线定义一次（锚点 &pipelines）
+  push: &pipelines
+    # ── 1. 静态门禁：语法 + 未定义名（无依赖安装，秒级反馈）──────────────
+    - name: static-gate
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.11
+        volumes:
+          - /root/.cache/pip
+      stages:
+        - name: install pyflakes
+          script: python -m pip install --upgrade pip pyflakes
+        - name: fast static gate (syntax + undefined names)
+          script: python scripts/ci_static_gate.py --skip-import
+          timeout: 10m
+
+    # ── 2. Lint：ruff E9 + F821 ──────────────────────────────────────────
+    - name: lint
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.12
+        volumes:
+          - /root/.cache/pip
+      stages:
+        - name: install ruff
+          script: python -m pip install --upgrade pip ruff
+        - name: ruff check
+          script: python -m ruff check neurova tests --no-cache
+          timeout: 15m
+
+    # ── 3. 导入巡检 + 审计回归 ───────────────────────────────────────────
+    - name: import-and-regression
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.11
+        volumes:
+          - /root/.cache/pip
+      stages:
+        - name: install core dependencies (lean set, no torch)
+          script: python -m pip install --upgrade pip -r requirements-ci.txt
+          timeout: 20m
+        - name: full static gate (incl. module import sweep)
+          script: python scripts/ci_static_gate.py
+          timeout: 20m
+        - name: audit regression tests
+          script: python -m pytest tests/unit/test_audit_regressions.py -q
+          timeout: 20m
+
+    # ── 4. 单元测试受保护子集 + 覆盖率门禁（py3.11 / py3.12 双跑）────────
+    - name: unit-tests-py311
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 4
+      docker:
+        image: python:3.11
+        volumes:
+          - /root/.cache/pip
+          - /root/.cache/uv
+      stages:
+        - name: install uv + locked dependencies
+          script: |
+            python -m pip install --upgrade pip uv
+            uv pip install --system -r requirements-ci.lock
+          timeout: 30m
+        - name: protected subset with coverage gate (fail_under=60)
+          script: |
+            TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
+            python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
+          timeout: 30m
+
+    - name: unit-tests-py312
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 4
+      docker:
+        image: python:3.12
+        volumes:
+          - /root/.cache/pip
+          - /root/.cache/uv
+      stages:
+        - name: install uv + locked dependencies
+          script: |
+            python -m pip install --upgrade pip uv
+            uv pip install --system -r requirements-ci.lock
+          timeout: 30m
+        - name: protected subset with coverage gate (fail_under=60)
+          script: |
+            TESTS=$(grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' ')
+            python -m pytest -q --cov --cov-report=term --cov-fail-under=60 $TESTS
+          timeout: 30m
+
+    # ── 5. E2E：后端启动冒烟 ─────────────────────────────────────────────
+    - name: e2e-backend-boot
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.12
+        volumes:
+          - /root/.cache/pip
+      stages:
+        # 冒烟只需最小 import 面（health/docs/metrics/鉴权拒绝），不装全量依赖
+        - name: install minimal runtime deps
+          script: |
+            python -m pip install --upgrade pip
+            python -m pip install -r requirements.txt --no-deps
+            python -m pip install fastapi uvicorn httpx pydantic pydantic-settings
+          timeout: 20m
+        - name: boot smoke (spawns real backend)
+          script: python -m pytest tests/e2e/test_backend_boot.py -q --timeout 240
+          timeout: 30m
+
+    # ── 6. 前端：类型门禁 + 单测 ─────────────────────────────────────────
+    - name: frontend
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 4
+      docker:
+        image: node:20
+        volumes:
+          - /root/.npm
+      env:
+        CI: "true"
+      stages:
+        - name: install dependencies
+          script: cd NeurUI && npm ci
+          timeout: 20m
+        - name: type check (vue-tsc)
+          script: cd NeurUI && npx vue-tsc --noEmit
+          timeout: 20m
+        - name: unit tests (vitest)
+          script: cd NeurUI && npx vitest run
+          timeout: 30m
+
+    # ── 7. 依赖审计（非阻塞，对齐 GitHub continue-on-error）──────────────
+    - name: dependency-audit
+      allowFailure: true
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.12
+        volumes:
+          - /root/.cache/pip
+      stages:
+        - name: install pip-audit
+          script: python -m pip install --upgrade pip pip-audit
+          timeout: 15m
+        - name: audit locked dependency set
+          script: python -m pip_audit -r requirements-ci.lock --progress-spinner off
+          timeout: 20m
+
+  # pull_request 事件：复用同一份流水线定义（锚点别名，单一事实来源）
+  pull_request: *pipelines
