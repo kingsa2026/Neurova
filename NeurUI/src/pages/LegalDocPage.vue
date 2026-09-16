@@ -1,8 +1,28 @@
 <template>
   <div class="nr-auth-page">
-    <StarBackground v-if="appStore.isDark" />
+    <Galaxy
+      v-if="appStore.isDark"
+      :hue-shift="140"
+      :rotation="[0.8660254, 0.5]"
+      :saturation="0.6"
+      :glow-intensity="0.4"
+      :twinkle-intensity="0.1"
+      :rotation-speed="0.1"
+      :density="0.6"
+      :star-speed="0.4"
+      :speed="0.9"
+      :repulsion-strength="1.9"
+    />
     <div class="nr-legal-container">
-      <GlassPanel variant="elevated" :radius="24" padding="36px 40px">
+      <!-- 与登录页同款 GlassSurface 液态玻璃（官方绝对值参数，见 LoginPage 注释） -->
+      <GlassSurface
+        width="100%"
+        height="auto"
+        :border-radius="27"
+        :background-opacity="0.12"
+        :displace="0.5"
+        padding="36px 40px"
+      >
         <div class="nr-auth-header">
           <BrandLogo size="lg" />
           <h2 class="nr-auth-title">{{ title }}</h2>
@@ -21,7 +41,7 @@
             {{ t('auth.login') }}
           </router-link>
         </div>
-      </GlassPanel>
+      </GlassSurface>
     </div>
   </div>
 </template>
@@ -30,9 +50,9 @@
 import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
-import StarBackground from '@/components/StarBackground.vue'
+import Galaxy from '@/components/Galaxy.vue'
 import BrandLogo from '@/components/BrandLogo.vue'
-import GlassPanel from '@/components/GlassPanel.vue'
+import GlassSurface from '@/components/GlassSurface.vue'
 
 const props = defineProps<{ type: 'terms' | 'privacy' }>()
 
@@ -82,7 +102,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--nr-bg-deep);
+  /* 深空蓝底色：Galaxy 为透明模式画布，星流叠加在本底色上（与登录页一致） */
+  background: #090020;
   overflow: hidden;
   overflow-y: auto;
 }
@@ -94,7 +115,8 @@ onMounted(() => {
   max-width: 720px;
   padding: 20px;
   margin: 40px auto;
-  animation: auth-enter 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* fill 禁用 forwards/both：残留 transform 破坏 GlassSurface backdrop 采样（同 LoginPage 契约） */
+  animation: auth-enter 0.6s cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 @keyframes auth-enter {

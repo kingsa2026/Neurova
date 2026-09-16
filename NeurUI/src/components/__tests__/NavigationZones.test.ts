@@ -28,7 +28,7 @@ vi.mock('vue-router', async (importOriginal) => {
   }
 })
 
-import { TOP_NAV_CATEGORIES } from '@/config/navigation'
+import { TOP_NAV_CATEGORIES, type TopNavItem } from '@/config/navigation'
 import GlassNavGroup from '../GlassNavGroup.vue'
 import AgentPageTabs from '../AgentPageTabs.vue'
 import router from '@/router'
@@ -79,6 +79,11 @@ function makeI18n() {
   })
 }
 
+// 二级菜单（2026-09-16 AIGC 收拢）引入 children 后，路由口径 = 叶子项 to 展平
+function leafRoutes(items: TopNavItem[]): string[] {
+  return items.flatMap(i => (i.children ? i.children.map(c => c.to!) : [i.to!]))
+}
+
 describe('顶部导航（系统配置区）', () => {
   it('收敛为固定 4 组', () => {
     expect(TOP_NAV_CATEGORIES.map(c => c.key)).toEqual([
@@ -87,20 +92,32 @@ describe('顶部导航（系统配置区）', () => {
   })
 
   it('组内路由引用零重复（/models 等双入口回归即红）', () => {
-    const all = TOP_NAV_CATEGORIES.flatMap(c => c.items.map(i => i.to))
+    const all = TOP_NAV_CATEGORIES.flatMap(c => leafRoutes(c.items))
     const dup = all.filter((to, i) => all.indexOf(to) !== i)
     expect(dup).toEqual([])
   })
 
   it('每个菜单目标都能命中真实路由', () => {
-    const all = TOP_NAV_CATEGORIES.flatMap(c => c.items.map(i => i.to))
+    const all = TOP_NAV_CATEGORIES.flatMap(c => leafRoutes(c.items))
     for (const to of all) {
       expect(router.resolve(to).matched.length, `路由不存在: ${to}`).toBeGreaterThan(0)
     }
   })
 
+  it('AIGC 五页收拢为「AIGC工具」二级菜单组（2026-09-16 用户决策）', () => {
+    const modelTools = TOP_NAV_CATEGORIES.find(c => c.key === 'modelTools')!
+    expect(modelTools.items.map(i => i.to ?? i.labelKey)).toEqual([
+      '/models', '/tool-layers', '/sandbox', 'nav.aigcTools',
+    ])
+    const group = modelTools.items.find(i => i.labelKey === 'nav.aigcTools')!
+    expect(group.to, '二级菜单组头自身不做导航').toBeUndefined()
+    expect(group.children?.map(c => c.to)).toEqual([
+      '/aigc/text', '/aigc/image', '/aigc/audio', '/aigc/video', '/aigc/studio',
+    ])
+  })
+
   it('用户级功能页（知识库/AIGC/协作）不得回流到系统配置区', () => {
-    const all = TOP_NAV_CATEGORIES.flatMap(c => c.items.map(i => i.to))
+    const all = TOP_NAV_CATEGORIES.flatMap(c => leafRoutes(c.items))
     for (const banned of ['/knowledge', '/aigc', '/collaboration/hub', '/neuron', '/skill-pool', '/chat', '/channels', '/notifications']) {
       expect(all, `${banned} 属用户区，不应出现在顶部`).not.toContain(banned)
     }

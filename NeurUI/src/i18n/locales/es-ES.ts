@@ -146,6 +146,7 @@ export default {
     aigcAudio: 'Generación de audio',
     aigcVideo: 'Generación de vídeo',
     aigcStudio: 'Estudio',
+    aigcTools: 'Herramientas AIGC',
     skillmarket: 'Mercado de habilidades',
     toolLayers: 'Capas de herramientas',
     toollayers: 'Capas de herramientas',

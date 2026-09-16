@@ -35,8 +35,8 @@ vi.mock('ant-design-vue', () => ({
   message: { success: vi.fn(), error: vi.fn() },
 }))
 
-vi.mock('@/components/StarBackground.vue', () => ({ default: { template: '<div />' } }))
-vi.mock('@/components/GlassPanel.vue', () => ({ default: { template: '<div><slot /></div>' } }))
+vi.mock('@/components/Galaxy.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('@/components/GlassSurface.vue', () => ({ default: { template: '<div><slot /></div>' } }))
 vi.mock('@/components/GlassButton.vue', () => ({
   default: {
     props: ['variant', 'size', 'loading', 'disabled'],

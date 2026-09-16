@@ -1,19 +1,20 @@
 <template>
   <div class="nr-glass-input" :class="{ 'is-focused': focused, 'has-error': error, 'is-disabled': disabled }">
-    <label v-if="label" class="nr-glass-input-label">{{ label }}</label>
+    <label v-if="label" :for="inputId" class="nr-glass-input-label">{{ label }}</label>
     <div class="nr-glass-input-wrap">
       <span v-if="$slots.prefix" class="nr-glass-input-prefix"><slot name="prefix" /></span>
       <input
         ref="inputRef"
+        :id="inputId"
         :type="type"
         :value="modelValue"
         :placeholder="placeholder"
         :disabled="disabled"
         :autocomplete="autocomplete"
         class="nr-glass-input-field"
-        @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)"
+        @input="onInput"
         @focus="focused = true"
-        @blur="focused = false"
+        @blur="onBlur"
       />
       <span v-if="$slots.suffix" class="nr-glass-input-suffix"><slot name="suffix" /></span>
     </div>
@@ -23,7 +24,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { Form } from 'ant-design-vue'
+
+// 根入口未导出该 hook（4.2.6 实测），官方模式：Form.useInjectFormItemContext
+const useInjectFormItemContext = Form.useInjectFormItemContext
 
 withDefaults(defineProps<{
   modelValue?: string
@@ -41,10 +46,26 @@ withDefaults(defineProps<{
   autocomplete: 'off',
 })
 
-defineEmits<{ 'update:modelValue': [value: string] }>()
+const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
+
+// Ant Design FormItem 契约接线（2026-09-16 根修，契约见 GlassInput.formItem.test.ts）：
+// 内置 a-input 把 FormItem 生成的 id 绑到 input 上，<label for> 由此命中；
+// 独立使用时（无 FormItem，id 为 undefined）自生成 uid 关联自带 label prop。
+const formItemContext = useInjectFormItemContext()
+const uid = `nr-glass-input-${Math.random().toString(36).slice(2, 8)}`
+const inputId = computed(() => formItemContext.id.value ?? uid)
 
 const inputRef = ref<HTMLInputElement | null>(null)
 const focused = ref(false)
+
+function onInput(e: Event): void {
+  emit('update:modelValue', (e.target as HTMLInputElement).value)
+  formItemContext.onFieldChange()
+}
+function onBlur(): void {
+  focused.value = false
+  formItemContext.onFieldBlur()
+}
 
 defineExpose({ focus: () => inputRef.value?.focus() })
 </script>

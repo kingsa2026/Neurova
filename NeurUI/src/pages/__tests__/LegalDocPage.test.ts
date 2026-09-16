@@ -14,8 +14,8 @@ vi.mock('@/stores/app', () => ({
   useAppStore: () => ({ isDark: false }),
 }))
 
-vi.mock('@/components/StarBackground.vue', () => ({ default: { template: '<div />' } }))
-vi.mock('@/components/GlassPanel.vue', () => ({ default: { template: '<div><slot /></div>' } }))
+vi.mock('@/components/Galaxy.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('@/components/GlassSurface.vue', () => ({ default: { template: '<div><slot /></div>' } }))
 
 import LegalDocPage from '@/pages/LegalDocPage.vue'
 
