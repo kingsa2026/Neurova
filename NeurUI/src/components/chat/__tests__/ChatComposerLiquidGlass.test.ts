@@ -141,8 +141,8 @@ describe('Composer 控件区不透明底防折射干扰', () => {
     expect(ruleBody('nr-composer-pill')).toMatch(/background:\s*var\(--nr-bg-surface\)/)
   })
 
-  it('文字输入区透明（可读性由 shell 磨砂承担；global.css 仍会刷 0.035 玻璃底，无碍）', () => {
+  it('文字输入区不透明面板底（2026-09-16 二次定案：回归 surface，!important 防 global.css 玻璃刷回灌）', () => {
     const body = ruleBody('nr-chat-textarea')
-    expect(body).toMatch(/background:\s*transparent/)
+    expect(body).toMatch(/background:\s*var\(--nr-bg-surface\)\s*!important/)
   })
 })
