@@ -36,10 +36,6 @@ PUBLIC_EXACT_PATHS: Set[str] = {
     "/metrics",
     "/api/v1/status",
     "/test",
-    # FastAPI 文档
-    "/docs",
-    "/redoc",
-    "/openapi.json",
     # 认证链路（/api/v1/auth/me 等不在内，仍需鉴权）
     "/api/v1/auth/login",
     "/api/v1/auth/refresh",

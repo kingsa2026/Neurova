@@ -100,73 +100,87 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
             return False
 
     async def _connect_stream(self) -> bool:
-        """Stream 模式: 通过 WebSocket 长连接接收事件"""
-        try:
-            import lark_oapi as lark
+        """Stream 模式: 通过 WebSocket 长连接接收事件
 
-            # 创建事件处理器
-            self._event_handler = lark.EventDispatcherHandler.builder(
-                self.config.encrypt_key,
-                self.config.verification_token,
-            )
+        启动慢根修（2026-09-16）：旧实现在协程体内 `import lark_oapi`（全套 protobuf
+        生成代码，热缓存实测 3.5s+/冷盘更久）并同步构造 handler/ws.Client——协程在
+        main loop 线程上没有让出点，把 /health 就绪饿死 6.7s（bootstrap 的"后台化"
+        只是 create_task，仍在同一 loop 上）。现在 import/构造/ws 循环全部搬进长连接
+        专属线程，connect 只在线程外 await 构造结果；构造失败仍如实返回 False，
+        错误语义不降级。
+        """
+        import threading
 
-            # 注册消息接收事件
-            self._event_handler.register_p2_im_message_receive_v1(self._handle_message_event)
-            # 注册"机器人被移出群"事件 → CHAT_BOT_REMOVED（会话归档，阶段4）
+        setup_done = threading.Event()
+        setup_ok: list = []
+        # 构造窗口（秒级）内 disconnect/restart 的取消位：旧实现构造同步完成、
+        # 无并发窗口；线程化后必须显式取消，否则 disconnect 置空 _ws_client 后
+        # 线程仍可能 start() 出无人引用的僵尸长连接。
+        cancel = self._setup_cancel = threading.Event()
+
+        def _stream_session():
+            # 历史教训（飞书收不到消息根因，保持）：lark_oapi.ws.client 在模块导入期
+            # 就把全局 `loop` 绑成 asyncio.get_event_loop()，若在 main loop 里先导入，
+            # client.start() 用 run_until_complete 落到已运行的主循环 → 线程秒崩。
+            # 本函数先建独立循环设为当前，lark 导入在本线程内发生；重绑保留，
+            # 防 lark 已被他人提前导入的情况。
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             try:
-                self._event_handler.register_p2_im_chat_member_bot_deleted_v1(
-                    self._handle_bot_removed_event)
-            except (AttributeError, Exception) as e:  # noqa: BLE001 - 老 SDK 无此注册器则跳过
-                logger.debug("飞书未支持 bot_deleted 事件注册: %s", e)
-
-            # 创建长连接客户端（domain 随 feishu/lark 切换——官方多站点要求）
-            self._ws_client = lark.ws.Client(
-                self.config.app_id,
-                self.config.app_secret,
-                event_handler=self._event_handler.build(),
-                log_level=lark.LogLevel.DEBUG,
-                domain=self.open_base,
-            )
-
-            # 启动长连接（非阻塞）。lark_oapi.ws.client 在**模块导入时**就把 `loop`
-            # 绑成全局 asyncio.get_event_loop()——NV 在主运行循环里首次 import lark，
-            # 该全局即主循环；client.start() 用 `loop.run_until_complete(_connect())`
-            # 落到主循环 → "This event loop is already running"，线程即崩、WS 永不建立
-            # （飞书收不到消息根因）。故线程内建独立循环，并把 lark 模块全局 loop 重绑
-            # 到它，start() 才会用本线程的循环。
-            import threading
-            import lark_oapi.ws.client as _lark_ws
-
-            def _run_ws():
-                _loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(_loop)
-                _lark_ws.loop = _loop  # 覆盖 lark 导入期捕获的主循环
                 try:
-                    self._ws_client.start()
-                except Exception as e:  # noqa: BLE001 - 线程内失败仅记日志
-                    logger.exception("Feishu ws thread failed: %s", e)
-                finally:
+                    import lark_oapi as lark
+                    import lark_oapi.ws.client as _lark_ws
+
+                    _lark_ws.loop = loop
+                    # 创建事件处理器
+                    self._event_handler = lark.EventDispatcherHandler.builder(
+                        self.config.encrypt_key,
+                        self.config.verification_token,
+                    )
+                    # 注册消息接收事件
+                    self._event_handler.register_p2_im_message_receive_v1(
+                        self._handle_message_event)
+                    # 注册"机器人被移出群"事件 → CHAT_BOT_REMOVED（会话归档，阶段4）
                     try:
-                        _loop.close()
-                    except Exception:
-                        pass
+                        self._event_handler.register_p2_im_chat_member_bot_deleted_v1(
+                            self._handle_bot_removed_event)
+                    except (AttributeError, Exception) as e:  # noqa: BLE001 - 老 SDK 无此注册器则跳过
+                        logger.debug("飞书未支持 bot_deleted 事件注册: %s", e)
+                    # 创建长连接客户端（domain 随 feishu/lark 切换——官方多站点要求）
+                    self._ws_client = lark.ws.Client(
+                        self.config.app_id,
+                        self.config.app_secret,
+                        event_handler=self._event_handler.build(),
+                        log_level=lark.LogLevel.DEBUG,
+                        domain=self.open_base,
+                    )
+                except ImportError:
+                    logger.error("lark-oapi not installed. Run: pip install lark-oapi")
+                except Exception as e:  # noqa: BLE001 - 构造失败 = 连接失败，如实上报
+                    logger.exception("Feishu Stream connect error: %s", e)
+                else:
+                    setup_ok.append(True)
+                    self._connected = True
+                    logger.info("Feishu Stream connected")
+            finally:
+                setup_done.set()
+            if cancel.is_set():  # 构造期间 disconnect/restart 已发生：本次构造作废
+                setup_ok.clear()
+                self._connected = False
+                return
+            try:
+                self._ws_client.start()  # 阻塞式跑 ws 循环（start 内部用本线程 loop）
+            except Exception as e:  # noqa: BLE001 - 线程内失败仅记日志
+                logger.exception("Feishu ws thread failed: %s", e)
 
-            self._ws_thread = threading.Thread(
-                target=_run_ws,
-                daemon=True,
-            )
-            self._ws_thread.start()
-
-            self._connected = True
-            logger.info("Feishu Stream connected")
-            return True
-
-        except ImportError:
-            logger.error("lark-oapi not installed. Run: pip install lark-oapi")
-            return False
-        except Exception as e:
-            logger.exception("Feishu Stream connect error: %s", e)
-            return False
+        self._ws_thread = threading.Thread(
+            target=_stream_session,
+            daemon=True,
+        )
+        self._ws_thread.start()
+        # 线程外等待构造结果：等待窗口内 main loop 空闲（/health 可正常服务）
+        await asyncio.to_thread(setup_done.wait, 30)
+        return bool(setup_ok)
 
     async def _connect_webhook(self) -> bool:
         """Webhook 模式: 需要公网 URL，在 FastAPI 中注册路由"""
@@ -389,6 +403,11 @@ class FeishuAdapter(AuthMixin, ChannelAdapter):
 
     async def disconnect(self):
         """断开飞书连接（幂等）"""
+        # 构造窗口内到达的 disconnect：先置取消位，让 _stream_session 线程
+        # 放弃 start()（防僵尸长连接），再走常规停连接路径
+        c = getattr(self, "_setup_cancel", None)
+        if c is not None:
+            c.set()
         # C-13: 真正关闭长连接——SDK 版本差异安全探测 stop/close
         # （当前 lark-oapi ws Client 无公开 stop API，探测到即调用，
         # awaitable 结果在主 loop 上等待）
