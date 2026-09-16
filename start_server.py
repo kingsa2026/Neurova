@@ -87,7 +87,6 @@ def main():
 
         print(f"App: {app.title}")
         print(f"Version: {app.version}")
-        print(f"Docs: http://localhost:9527/docs")
         print(f"Health: http://localhost:9527/health")
         print("=" * 60)
 

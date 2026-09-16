@@ -19,7 +19,7 @@ from scripts.config import (
     MIN_PYTHON_VERSION, BACKEND_PORT, FRONTEND_PORT,
     HEALTH_CHECK_TIMEOUT, HEALTH_CHECK_INTERVAL, LOG_FILE,
     get_venv_python, get_venv_pip, get_health_url, get_api_url,
-    get_docs_url, ensure_directories, get_backend_script,
+    ensure_directories, get_backend_script,
     get_frontend_package_json, is_frontend_available, is_venv_available,
     get_environment_info, print_environment_info
 )
@@ -171,18 +171,6 @@ class TestHelperFunctions:
     def test_get_api_url_custom_port(self):
         """测试获取自定义端口 API URL"""
         url = get_api_url(port=8080)
-        assert "8080" in url
-    
-    def test_get_docs_url_default(self):
-        """测试获取默认文档 URL"""
-        url = get_docs_url()
-        assert "localhost" in url
-        assert str(BACKEND_PORT) in url
-        assert "/docs" in url
-    
-    def test_get_docs_url_custom_port(self):
-        """测试获取自定义端口文档 URL"""
-        url = get_docs_url(port=8080)
         assert "8080" in url
     
     def test_get_backend_script(self):

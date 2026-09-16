@@ -25,7 +25,8 @@ FRONTEND_PORT = 8100
 
 # 健康检查配置
 HEALTH_CHECK_TIMEOUT = 90  # 秒（需 > sentence_transformers 模型加载超时 30s + 其他启动时间）
-HEALTH_CHECK_INTERVAL = 2  # 秒
+HEALTH_CHECK_INTERVAL = 1  # 秒（启动慢根修 2026-09-16：轮询是一次毫秒级 HTTP，
+                           # 旧值 2s 在 /health 就绪后平均多等约 1s，收紧无副作用）
 
 # 日志配置
 LOG_FILE = LOGS_DIR / "server.log"
@@ -83,20 +84,6 @@ def get_api_url(port: Optional[int] = None) -> str:
     """
     port = port or BACKEND_PORT
     return f"http://localhost:{port}"
-
-
-def get_docs_url(port: Optional[int] = None) -> str:
-    """
-    获取 API 文档 URL
-    
-    Args:
-        port: 端口号，默认使用配置的后端端口
-        
-    Returns:
-        str: API 文档 URL
-    """
-    port = port or BACKEND_PORT
-    return f"http://localhost:{port}/docs"
 
 
 def ensure_directories() -> None:
