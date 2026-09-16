@@ -393,3 +393,6 @@ agent_workspaces/kai/
 
 # 工具执行日志默认落根目录的运行时垃圾（tool_logger；测试/默认配置会生成）
 /tool_execution.jsonl
+
+# 编辑器/代理本地规则配置，不入库
+.clinerules/
