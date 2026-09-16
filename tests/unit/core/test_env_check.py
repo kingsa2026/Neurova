@@ -172,6 +172,12 @@ class TestTorchImportsOk:
 
 
 class TestPreflightOrchestration:
+    @pytest.fixture(autouse=True)
+    def _isolate_cache_marker(self, tmp_path, monkeypatch):
+        # 结果缓存（2026-09-16）上线后，真 Windows 机探测成功路径会写
+        # data/env_check_torch.json —— 隔离到每例 tmp，防污染真实数据与用例互踩
+        monkeypatch.setenv("NEUROVA_ENV_CHECK_MARKER", str(tmp_path / "torch_ok.json"))
+
     def test_healthy_noop(self, monkeypatch, caplog):
         # H1 新契约：子进程探测（torch_imports_ok）通过 → 主进程零 torch：
         # 不做诊断、不自愈
