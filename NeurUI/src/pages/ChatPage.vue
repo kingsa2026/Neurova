@@ -366,6 +366,20 @@
         </div>
       </div>
 
+      <!-- 跳至最新悬浮按钮：用户上翻离开底部时出现在输入区上方（纯 CSS 液态玻璃圆钮，
+           不用 GlassSurface——其位移滤镜按容器尺寸生成折射区，小圆会整体糊掉） -->
+      <transition name="jump-latest">
+        <button
+          v-if="isAwayFromBottom"
+          class="nr-jump-latest-btn"
+          :title="t('chat.jumpToLatest')"
+          :aria-label="t('chat.jumpToLatest')"
+          @click="jumpToLatest"
+        >
+          <UiIcon name="chevronsDown" :size="14" />
+        </button>
+      </transition>
+
       <!-- 输入区（Composer + 工具条 + 429/事件丢失横幅，2026-09-08 拆分） -->
       <ChatComposerArea
         ref="composerRef"
@@ -881,6 +895,9 @@ watch(
 )
 
 /** 上滚扩窗：滚动接近容器顶且窗口前还有未渲染消息 → 前扩 BUFFER 条。 */
+const JUMP_LATEST_THRESHOLD = 160
+const isAwayFromBottom = ref(false)
+
 function onMessagesScroll(): void {
   const el = messagesRef.value
   if (!el) return
@@ -891,6 +908,17 @@ function onMessagesScroll(): void {
   ) {
     renderStart.value = Math.max(0, renderStart.value - RENDER_BUFFER)
   }
+  // 上翻离开底部（含流式内容堆高导致的相对位移）→ 显示跳至最新悬浮钮
+  // 距底 = scrollHeight - scrollTop - clientHeight；阈值留容差防贴底抖动
+  const distToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+  isAwayFromBottom.value = distToBottom > JUMP_LATEST_THRESHOLD
+}
+
+/** 悬浮钮点击 → 回到最新。复用 scrollToBottomForHistory：窗口化渲染归位贴尾 +
+ *  双 rAF 连滚 + ResizeObserver 兜底（hljs/mermaid 异步膨胀不脱锚）。 */
+function jumpToLatest(): void {
+  scrollToBottomForHistory()
+  isAwayFromBottom.value = false
 }
 
 // 补课 A4：跨标签单发送者锁（同 session 多标签只有一个能发）
@@ -2656,6 +2684,65 @@ onBeforeUnmount(() => {
      （--nr-composer-h 由 ResizeObserver 动态写入，见 script） */
   margin-bottom: calc(var(--nr-composer-h, 0px) * -1);
   padding-bottom: calc(24px + var(--nr-composer-h, 0px));
+}
+
+/* 跳至最新悬浮圆钮：纯 CSS 液态玻璃（blur+saturate 背景折射 + 顶部高光
+   + 内描边 + 浮投影），紧邻输入框上缘水平居中（2026-09-16 定案直径
+   26px）。不用 GlassSurface：其 SVG 位移滤镜按容器尺寸生成折射区，小圆
+   整体落入圆角扭曲带、背景被搅成糊斑（实机预览确认；防回归见
+   ChatPage.jumpLatest.test.ts） */
+.nr-jump-latest-btn {
+  position: absolute;
+  /* 水平居中：left 半宽偏移（transform 已被 hover/进出场过渡占用，不能用） */
+  left: calc(50% - 13px);
+  bottom: calc(var(--nr-composer-h, 0px) + 6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--nr-glass-border);
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 92;
+  color: var(--nr-text-secondary);
+  background: rgba(var(--nr-glass-rgb), 0.08);
+  backdrop-filter: blur(var(--nr-glass-blur)) saturate(180%);
+  -webkit-backdrop-filter: blur(var(--nr-glass-blur)) saturate(180%);
+  box-shadow:
+    inset 0 1px 0 var(--nr-glass-specular-top),
+    inset 0 0 0 1px rgba(var(--nr-glass-rgb), 0.04),
+    0 2px 8px rgba(0, 0, 0, 0.24);
+  transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+.nr-jump-latest-btn:hover {
+  transform: translateY(-1px);
+  color: var(--nr-text-primary);
+  background: rgba(var(--nr-glass-rgb), 0.14);
+  border-color: var(--nr-glass-border-hover);
+}
+.nr-jump-latest-btn:active {
+  transform: translateY(0) scale(0.94);
+}
+/* 26px 视觉钮的命中区外扩（触达性）：透明 ::after 补齐到 44px 级最小
+   标准。侧/上外扩 9px（26+9×2=44）；下仅 6px——再大会吃掉 composer
+   上缘的点击。命中区不可见。 */
+.nr-jump-latest-btn::after {
+  content: '';
+  position: absolute;
+  inset: -9px -9px -6px;
+  border-radius: 50%;
+}
+/* 进出场：自 composer 上方浮现/沉没 */
+.jump-latest-enter-active,
+.jump-latest-leave-active {
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+.jump-latest-enter-from,
+.jump-latest-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.85);
 }
 
 .nr-chat-empty {
