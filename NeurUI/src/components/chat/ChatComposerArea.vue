@@ -780,7 +780,7 @@ defineExpose({ closeSlashPanel, autoResize })
   /* 通透磨砂（2026-09-16 用户定案）：不靠实底靠模糊，背后滚动文字被糊掉，
      玻璃边缘折射/内高光保留 */
   background: transparent;
-  backdrop-filter: blur(80px) saturate(1.3);
+  backdrop-filter: blur(32px) saturate(1.3);
   -webkit-backdrop-filter: blur(32px) saturate(1.3);
   padding: 12px 14px 10px;
   transition: border-color 0.25s, box-shadow 0.25s;
@@ -797,8 +797,9 @@ defineExpose({ closeSlashPanel, autoResize })
 .nr-chat-textarea {
   flex: 1;
   resize: none;
-  /* 透明底：可读性由 shell 磨砂（backdrop blur）承担（2026-09-16 定案） */
-  background: transparent;
+  /* 不透明面板底（2026-09-16 二次定案：透明底长文读感差，回归 surface；
+     !important 防 global.css 玻璃刷回灌） */
+  background: var(--nr-bg-surface) !important;
   border: none;
   border-radius: 14px;
   padding: 4px 10px 10px;
