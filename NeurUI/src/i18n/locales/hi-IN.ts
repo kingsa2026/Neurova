@@ -146,6 +146,7 @@ export default {
     aigcAudio: 'ऑडियो जनरेशन',
     aigcVideo: 'वीडियो जनरेशन',
     aigcStudio: 'स्टूडियो',
+    aigcTools: 'AIGC टूल्स',
     skillmarket: 'कौशल बाज़ार',
     toolLayers: 'उपकरण परतें',
     toollayers: 'उपकरण परतें',

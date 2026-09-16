@@ -48,7 +48,10 @@ describe('功能模块目录', () => {
   })
 
   it('顶部导航区模块与 TOP_NAV_CATEGORIES 逐项一致', () => {
-    const topFromNav = TOP_NAV_CATEGORIES.flatMap(c => c.items.map(i => i.to))
+    // 二级菜单组（children）展平为叶子路由后比对：权限清单始终平铺全部可达页
+    const topFromNav = TOP_NAV_CATEGORIES.flatMap(c =>
+      c.items.flatMap(i => (i.children ? i.children.map(ch => ch.to) : [i.to])),
+    )
     const topKeys = MODULE_SECTIONS.filter(s => s.zone === 'topNav').flatMap(s => s.items.map(i => i.key))
     expect(topKeys).toEqual(topFromNav)
   })

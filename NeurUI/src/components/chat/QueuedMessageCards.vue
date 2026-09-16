@@ -13,6 +13,7 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueue'
+import GlassSurface from '@/components/GlassSurface.vue'
 
 const props = defineProps<{
   editingQueuedId: string | null
@@ -50,9 +51,19 @@ function onDrop(targetId: string): void {
 
 <template>
   <div v-if="props.items.length > 0" class="nr-queue-cards" role="list">
-    <div
+    <!-- 每张顶入卡片 = 独立液态玻璃条（登录页 GlassSurface 定案参数，
+         契约见 __tests__/ChatComposerLiquidGlass.test.ts） -->
+    <GlassSurface
       v-for="qi in props.items"
       :key="qi.id"
+      width="100%"
+      height="auto"
+      :border-radius="27"
+      :background-opacity="0.12"
+      :displace="0.5"
+      padding="0"
+    >
+    <div
       class="nr-queue-card"
       :class="{
         'is-editing': props.editingQueuedId === qi.id,
@@ -99,6 +110,7 @@ function onDrop(targetId: string): void {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>
       </button>
     </div>
+    </GlassSurface>
   </div>
 </template>
 
@@ -115,9 +127,9 @@ function onDrop(targetId: string): void {
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border-radius: 10px;
+  border-radius: 27px;
   border: 1px solid var(--nr-glass-border);
-  background: var(--nr-bg-inset-deep, rgba(0, 0, 0, 0.22));
+  background: transparent;
   font-size: 13px;
 }
 

@@ -26,7 +26,7 @@
     />
 
     <!-- Main Chat Area -->
-    <main class="nr-chat-main">
+    <main ref="chatMainRef" class="nr-chat-main">
       <!-- Page Header (when inside MainLayout) -->
       <div v-if="isMainLayout" class="nr-chat-page-header">
         <div class="nr-chat-header-left">
@@ -368,6 +368,7 @@
 
       <!-- 输入区（Composer + 工具条 + 429/事件丢失横幅，2026-09-08 拆分） -->
       <ChatComposerArea
+        ref="composerRef"
         @send="sendMessage()"
         @stop="stopStreaming()"
         @send-queued-now="onSendQueuedNow"
@@ -542,6 +543,27 @@ const {
 
 const messagesRef = ref<HTMLElement | null>(null)
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
+
+// ── Composer 玻璃渗透量（2026-09-16）──────────────────────
+// 输入区高度动态（textarea 自增高/顶入卡/横幅），ResizeObserver 把实际高度
+// 写入 --nr-composer-h，供 .nr-chat-messages 负 margin 下渗透 + 等量 padding
+// 预留（消息文字滚动时穿过 composer 玻璃背后被折射）。
+const chatMainRef = ref<HTMLElement | null>(null)
+const composerRef = ref<InstanceType<typeof ChatComposerArea> | null>(null)
+let composerResizeObserver: ResizeObserver | null = null
+onMounted(() => {
+  const el = composerRef.value?.$el as HTMLElement | undefined
+  const main = chatMainRef.value
+  if (!el || !main) return
+  const apply = () => main.style.setProperty('--nr-composer-h', `${el.offsetHeight}px`)
+  apply()
+  composerResizeObserver = new ResizeObserver(apply)
+  composerResizeObserver.observe(el)
+})
+onBeforeUnmount(() => {
+  composerResizeObserver?.disconnect()
+  composerResizeObserver = null
+})
 
 // ── 右侧多标签 dock（收编历史/存档/电脑分屏 + 产物预览）─────────
 const rightDock = useRightDockStore()
@@ -2630,6 +2652,10 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  /* 下渗透进输入区玻璃背后，滚动消息文字被 composer 玻璃折射
+     （--nr-composer-h 由 ResizeObserver 动态写入，见 script） */
+  margin-bottom: calc(var(--nr-composer-h, 0px) * -1);
+  padding-bottom: calc(24px + var(--nr-composer-h, 0px));
 }
 
 .nr-chat-empty {

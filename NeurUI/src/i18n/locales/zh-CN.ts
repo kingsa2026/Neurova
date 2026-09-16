@@ -146,6 +146,7 @@ export default {
     aigcAudio: '音频生成',
     aigcVideo: '视频生成',
     aigcStudio: '创作专区',
+    aigcTools: 'AIGC工具',
     skillmarket: '技能市场',
     toolLayers: '工具层',
     toollayers: '工具层',

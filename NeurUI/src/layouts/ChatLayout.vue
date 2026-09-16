@@ -68,7 +68,7 @@
 
       <!-- Footer: collapse toggle + back to dashboard -->
       <template #footer>
-        <div class="nr-chat-sidebar-footer">
+        <div class="nr-chat-sidebar-footer" :class="{ 'is-collapsed': sidebarCollapsed }">
           <button class="nr-toggle-btn" @click="sidebarCollapsed = !sidebarCollapsed">
             <MenuUnfoldOutlined v-if="sidebarCollapsed" />
             <MenuFoldOutlined v-else />
@@ -177,6 +177,8 @@ function onAgentSelect(_agent: Agent) {
   gap: 10px;
   padding: 4px 0;
 }
+/* 折叠态只剩切换按钮：32 + 8×2 = 48 高，与品牌胶囊同径成圆并居中 */
+.nr-chat-sidebar-footer.is-collapsed { justify-content: center; padding: 8px 0; }
 
 .nr-toggle-btn {
   width: 32px;

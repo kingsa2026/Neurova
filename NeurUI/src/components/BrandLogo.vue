@@ -27,16 +27,21 @@ const appStore = useAppStore()
 .nr-brand { display: inline-flex; align-items: center; }
 
 .nr-brand-logo-img {
-  height: 30px;
+  height: 40px;
   width: auto;
-  max-width: 140px;
+  max-width: 170px;
   object-fit: contain;
   flex-shrink: 0;
   transition: all var(--nr-transition-fast);
 }
+/* 折叠态仅显示罗盘图形：原图 350×90 中图形占 x∈[0,94]（canvas 实测），
+   34×32 cover 盒左对齐裁出完整图形（可见宽 95.6px ≥ 94 含右缘横杆） */
 .nr-brand-logo-img.is-collapsed {
-  height: 26px;
-  max-width: 26px;
+  width: 34px;
+  height: 32px;
+  max-width: none;
+  object-fit: cover;
+  object-position: left center;
 }
 
 /* ─── lg 大标（认证页）：原版图片 logo 放大并居中 ─── */

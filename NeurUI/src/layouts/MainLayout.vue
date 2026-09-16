@@ -215,7 +215,7 @@
 
       <!-- Footer -->
       <template #footer>
-        <div class="nr-nav-user" v-if="authStore.currentUser">
+        <div class="nr-nav-user" :class="{ 'is-collapsed': appStore.sidebarCollapsed }" v-if="authStore.currentUser">
           <div class="nr-nav-avatar">{{ authStore.currentUser.username?.charAt(0)?.toUpperCase() || 'U' }}</div>
           <div v-if="!appStore.sidebarCollapsed" class="nr-nav-user-info">
             <span class="nr-nav-user-name">{{ authStore.currentUser.username }}</span>
@@ -557,6 +557,8 @@ const canAgent = (name: string) =>
 .nr-nav-user {
   display: flex; align-items: center; gap: 10px; padding: 8px 4px;
 }
+/* 折叠态只剩头像：在底部玻璃胶囊内居中（2026-09-16） */
+.nr-nav-user.is-collapsed { justify-content: center; padding: 8px 0; }
 .nr-nav-avatar {
   width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
