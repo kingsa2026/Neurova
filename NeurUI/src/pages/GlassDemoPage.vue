@@ -1,9 +1,9 @@
 <template>
   <div class="gd-page">
     <section class="gd-slot">
-      <p class="gd-label">A · 基准：官方 live 原值，360×100 胶囊</p>
+      <p class="gd-label">{{ t('glassDemo.caseAPill') }}</p>
       <div class="gd-stage gd-stage--pill">
-        <h2 class="gd-text">Has Built-In Fallback</h2>
+        <h2 class="gd-text">{{ t('glassDemo.fallbackText') }}</h2>
         <GlassSurface
           :width="360"
           :height="100"
@@ -15,9 +15,9 @@
     </section>
 
     <section class="gd-slot">
-      <p class="gd-label">C · 官方字面值 + 登录卡尺寸 365×508（= 登录页配置）</p>
+      <p class="gd-label">{{ t('glassDemo.caseCLoginCard') }}</p>
       <div class="gd-stage gd-stage--card">
-        <h2 class="gd-text">Has Built-In Fallback</h2>
+        <h2 class="gd-text">{{ t('glassDemo.fallbackText') }}</h2>
         <GlassSurface
           width="365px"
           height="508px"
@@ -29,9 +29,9 @@
     </section>
 
     <section class="gd-slot">
-      <p class="gd-label">D · GlassPanel 皮肤感知折射（html data-skin=ios 时启用 backdrop url()）</p>
+      <p class="gd-label">{{ t('glassDemo.caseDPanelSkin') }}</p>
       <div class="gd-stage gd-stage--panel">
-        <h2 class="gd-text">LIQUID GLASS</h2>
+        <h2 class="gd-text">{{ t('glassDemo.liquidGlassText') }}</h2>
         <GlassPanel :radius="28" style="width: 360px">
           <div style="height: 200px"></div>
         </GlassPanel>
@@ -44,8 +44,11 @@
 // 临时诊断页：GlassSurface 官方 demo 复刻，单变量对照找登录页无折射的根因。
 // A=官方胶囊基准；C=官方字面值+登录卡尺寸；D=GlassPanel 双皮肤折射对比。
 // 参数为绝对像素语义，禁止按尺寸比例放大（放大位移量会把文字扯成彩虹拱形，见 D 实验记录）。
+import { useI18n } from 'vue-i18n'
 import GlassSurface from '@/components/GlassSurface.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
+
+const { t } = useI18n()
 </script>
 
 <style scoped>

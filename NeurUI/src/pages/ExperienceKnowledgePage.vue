@@ -176,7 +176,7 @@
       </a-tab-pane>
 
       <!-- Recommendations Tab -->
-      <a-tab-pane key="recommendations" tab="Recommendations">
+      <a-tab-pane key="recommendations" :tab="t('experience.recommendations')">
         <div class="tab-toolbar">
           <a-input
             v-model:value="recommendationTaskType"

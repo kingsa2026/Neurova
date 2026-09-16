@@ -21,7 +21,7 @@
               </a-form-item>
             </a-col>
             <a-col :span="12">
-              <a-form-item label="Agent ID" :extra="isEditing ? t('agent.idReadonly') : t('agent.idHint')">
+              <a-form-item :label="t('agent.agentId')" :extra="isEditing ? t('agent.idReadonly') : t('agent.idHint')">
                 <a-input
                   v-model:value="formState.agent_id"
                   :placeholder="isEditing ? agentId : t('agent.idPlaceholder')"
@@ -271,16 +271,16 @@ interface VoiceOption {
 
 // moss 内置音色（本地引擎，跨引擎自动近似回落 edge；value=moss 内置名，后端 _EDGE_VOICE_ALIASES 反查）
 const mossVoiceOptions: VoiceOption[] = [
-  { value: 'Junhao', label: 'Junhao · 浩（中文男声）' },
-  { value: 'Zhiming', label: 'Zhiming · 志明（中文男声·胡同）' },
-  { value: 'Weiguo', label: 'Weiguo · 卫国（中文男声·说书）' },
-  { value: 'Xiaoyu', label: 'Xiaoyu · 羽（中文女声·明星）' },
-  { value: 'Yuewen', label: 'Yuewen · 悦文（中文女声·机车）' },
-  { value: 'Lingyu', label: 'Lingyu · 灵雨（中文女声·深夜电台）' },
-  { value: 'Trump', label: 'Trump（英文男声）' },
-  { value: 'Adam', label: 'Adam（英文男声·新闻）' },
-  { value: 'Ava', label: 'Ava（英文女声）' },
-  { value: 'Bella', label: 'Bella（英文女声）' },
+  { value: 'Junhao', label: t('agent.voiceJunhao') },
+  { value: 'Zhiming', label: t('agent.voiceZhiming') },
+  { value: 'Weiguo', label: t('agent.voiceWeiguo') },
+  { value: 'Xiaoyu', label: t('agent.voiceXiaoyu') },
+  { value: 'Yuewen', label: t('agent.voiceYuewen') },
+  { value: 'Lingyu', label: t('agent.voiceLingyu') },
+  { value: 'Trump', label: t('agent.voiceTrump') },
+  { value: 'Adam', label: t('agent.voiceAdam') },
+  { value: 'Ava', label: t('agent.voiceAva') },
+  { value: 'Bella', label: t('agent.voiceBella') },
 ]
 // edge-tts 在线音色（原四音色保留）
 const edgeVoiceOptions: VoiceOption[] = [
