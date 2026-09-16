@@ -396,3 +396,6 @@ agent_workspaces/kai/
 
 # 编辑器/代理本地规则配置，不入库
 .clinerules/
+
+# 研究参考仓库克隆（ulab-uiuc/Thought-Retriever，本地留档）：gitlink 无 .gitmodules 系误提交，干净检出即坏；目录整体不跟踪
+thought-retriever-src/
