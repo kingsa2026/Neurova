@@ -680,8 +680,12 @@ def _add_health_routes(app: FastAPI, app_state: AppState) -> None:
 
     @app.get("/health")
     async def health_check():
-        """简单的健康检查端点"""
-        return {"status": "ok", "timestamp": time.time()}
+        """简单的健康检查端点
+
+        version 为 API 版本上报面（2026-09-16 自 openapi.json 接管——文档面
+        移除后 e2e/桌面壳诊断以 /health 拿版本，app.version 单源）。
+        """
+        return {"status": "ok", "version": app.version, "timestamp": time.time()}
 
     @app.get("/health/detailed")
     async def detailed_health():
@@ -1174,9 +1178,12 @@ def create_app(
             title="Neurova API",
             description="Neurova - 智能 Agent 系统 API",
             version="1.0.0-beta1",
-            docs_url="/docs",
-            redoc_url="/redoc",
-            openapi_url="/openapi.json",
+            # API 文档面移除（2026-09-16）：Swagger/ReDoc/openapi 全链路零消费者
+            # （前端不链、桌面壳不链、无代码依赖），对终端用户是死面，且随后端
+            # 0.0.0.0 监听把完整 API 面暴露到局域网。API 版本上报归 /health。
+            docs_url=None,
+            redoc_url=None,
+            openapi_url=None,
         )
 
         # 设置中间件
