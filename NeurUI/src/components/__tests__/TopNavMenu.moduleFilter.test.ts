@@ -47,6 +47,8 @@ function makeI18n() {
           modelTools: '模型与工具', opsMonitor: '运维监控',
           platformAdmin: '平台管理', platformService: '平台服务',
           models: '模型服务', toolLayers: '工具层', sandbox: '沙箱',
+          aigcTools: 'AIGC工具', aigcText: '文本生成', aigcImage: '图片生成',
+          aigcAudio: '音频生成', aigcVideo: '视频生成', aigcStudio: '创作专区',
           monitor: '资源监控', health: '健康检查', logs: '日志', stats: '统计',
           settings: '系统设置', voiceTranscription: '语音转写', memorySettings: '记忆设置',
           enhancedusers: '增强用户', groups: '用户组', firewall: '防火墙', audit: '审计',
@@ -69,16 +71,21 @@ function mountMenu() {
   })
 }
 
+// 二级菜单组（children）展平为叶子路由；组头不是链接不参与比对
+const LEAF_ROUTES = TOP_NAV_CATEGORIES.flatMap(c =>
+  c.items.flatMap(i => (i.children ? i.children.map(ch => ch.to) : [i.to])),
+)
+
 describe('TopNavMenu 用户组过滤', () => {
   it('无限制用户：4 组全部渲染（快捷入口 + 16 个菜单项）', () => {
     mockUser = { username: 'u1', role: 'user', allowed_modules: [] }
     const wrapper = mountMenu()
     const links = wrapper.findAll('.topnav-link').map(a => a.attributes('data-to'))
-    const expected = TOP_NAV_CATEGORIES.flatMap(c => c.items.map(i => i.to)).concat(['/dashboard'])
+    const expected = LEAF_ROUTES.concat(['/dashboard'])
     expect(links.sort()).toEqual(expected.sort())
   })
 
-  it('受限用户：未授权项被过滤，空组隐藏', () => {
+  it('受限用户：未授权项被过滤，空组隐藏（AIGC 子项全拒时二级菜单组整体消失）', () => {
     mockUser = { username: 'u1', role: 'user', allowed_modules: ['/models', '/health'] }
     const wrapper = mountMenu()
     const links = wrapper.findAll('.topnav-link').map(a => a.attributes('data-to'))
@@ -87,13 +94,15 @@ describe('TopNavMenu 用户组过滤', () => {
     expect(links).not.toContain('/tool-layers')
     expect(links).not.toContain('/settings')
     expect(links).not.toContain('/benchmark')
+    expect(links).not.toContain('/aigc/text')
+    expect(wrapper.text(), 'AIGC 二级菜单组头应随子项全拒而隐藏').not.toContain('AIGC工具')
   })
 
   it('admin 恒全量', () => {
     mockUser = { username: 'root', role: 'admin', allowed_modules: [] }
     const wrapper = mountMenu()
     const links = wrapper.findAll('.topnav-link').map(a => a.attributes('data-to'))
-    const expected = TOP_NAV_CATEGORIES.flatMap(c => c.items.map(i => i.to)).concat(['/dashboard'])
+    const expected = LEAF_ROUTES.concat(['/dashboard'])
     expect(links.sort()).toEqual(expected.sort())
   })
 })

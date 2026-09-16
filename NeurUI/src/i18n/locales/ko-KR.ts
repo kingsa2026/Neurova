@@ -146,6 +146,7 @@ export default {
     aigcAudio: '오디오 생성',
     aigcVideo: '비디오 생성',
     aigcStudio: '스튜디오',
+    aigcTools: 'AIGC 도구',
     skillmarket: '스킬 마켓',
     toolLayers: '도구 레이어',
     toollayers: '도구 레이어',

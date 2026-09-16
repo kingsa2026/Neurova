@@ -31,7 +31,18 @@
       <span class="nr-retrieval-spinner"><UiIcon name="radar" :size="13" /></span>
       <span>{{ retrievalStatus }}</span>
     </div>
-    <!-- Composer 一体化外壳（参考图：textarea + 工具条同框，玻璃容器承载边框） -->
+    <!-- Composer 一体化外壳：液态玻璃表面（与登录页 GlassSurface 定案参数一致，
+         契约见 __tests__/ChatComposerLiquidGlass.test.ts），shell 本体背景透明；
+         nr-composer-glass 单独放开裁剪，模型级联/斜杠面板上浮不被玻璃切掉 -->
+    <GlassSurface
+      class="nr-composer-glass"
+      width="100%"
+      height="auto"
+      :border-radius="27"
+      :background-opacity="0.12"
+      :displace="0.5"
+      padding="0"
+    >
     <div class="nr-composer-shell" :class="{ 'is-focus': composerFocused, 'has-queue-cards': currentSessionQueued.length > 0, 'is-editing-queued': !!editingQueuedId }">
       <!-- 顶入卡片（DeepSeek 截图对齐）：composer 内嵌消息队列。
            审计③：只展示当前会话的排队项（全局 store 按会话过滤） -->
@@ -161,19 +172,23 @@
             <svg v-if="autoVoice" class="nr-ico" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
             <svg v-else class="nr-ico" viewBox="0 0 24 24"><path d="M11 5L6 9H2v6h4l5 4z"/><path d="M22 9l-6 6M16 9l6 6"/></svg>
           </button>
-          <div class="nr-model-menu-wrap">
+          <div ref="modelWrapRef" class="nr-model-menu-wrap">
             <button
               class="nr-composer-pill nr-composer-pill--model"
               :title="t('agent.model')"
-              @click="modelMenuOpen = !modelMenuOpen"
+              @click="toggleModelMenu"
             >
               <span class="nr-composer-pill-label">{{ selectedModelLabel }}</span>
               <span class="nr-composer-pill-arrow">▾</span>
             </button>
+            <!-- 级联菜单 Teleport 到 body：composer 玻璃 surface 的
+                 backdrop-filter 会成为 fixed 后代包含块且 overflow 裁剪上浮弹层，
+                 留在内部会被切掉/遮罩盖不住全屏（契约见 liquidGlass 测试） -->
+            <Teleport to="body">
             <template v-if="modelMenuOpen">
               <div class="nr-model-backdrop" @click="modelMenuOpen = false" />
               <!-- 二级级联：左=服务商（含自动路由），右=该服务商可联通模型，底=管理模型 -->
-              <div class="nr-model-cascade">
+              <div class="nr-model-cascade" :style="modelCascadeStyle">
                 <div class="nr-model-cascade-left">
                   <div
                     class="nr-model-provider"
@@ -223,6 +238,7 @@
                 </div>
               </div>
             </template>
+            </Teleport>
           </div>
           <button
             v-if="isStreaming && inputText.trim() && !editingQueuedId"
@@ -246,6 +262,7 @@
         </div>
       </div>
     </div>
+    </GlassSurface>
     <!-- 429 限流横幅（补课 A1）：一键切换备选模型 -->
     <div v-if="rateLimitBanner" class="nr-rate-limit-banner">
       <span class="nr-rate-limit-text">
@@ -304,6 +321,7 @@ import { useInputHistory } from '@/composables/useInputHistory'
 import { useIMEComposition } from '@/composables/useIMEComposition'
 import ContextUsageIndicator from '@/components/chat/ContextUsageIndicator.vue'
 import QueuedMessageCards from '@/components/chat/QueuedMessageCards.vue'
+import GlassSurface from '@/components/GlassSurface.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import { useSessionOps } from '@/composables/useSessionOps'
 import UiIcon from '@/components/UiIcon.vue'
@@ -381,6 +399,22 @@ const {
   gotoModelsManage,
   switchAfterRateLimit,
 } = useChatModels()
+
+// 模型级联菜单：打开时以触发按钮 rect 计算 fixed 坐标（Teleport 到 body 后
+// 不再继承 shell 定位上下文，需自行锚定）
+const modelWrapRef = ref<HTMLElement | null>(null)
+const modelCascadeStyle = ref<Record<string, string>>({ position: 'fixed' })
+function toggleModelMenu(): void {
+  if (!modelMenuOpen.value && modelWrapRef.value) {
+    const r = modelWrapRef.value.getBoundingClientRect()
+    modelCascadeStyle.value = {
+      position: 'fixed',
+      right: `${Math.round(window.innerWidth - r.right)}px`,
+      bottom: `${Math.round(window.innerHeight - r.top + 8)}px`,
+    }
+  }
+  modelMenuOpen.value = !modelMenuOpen.value
+}
 
 // ── 待传附件（共享单例）────────────────────────────────
 const { pendingFiles, removePendingFile, handleFileSelect, handlePaste } = usePendingFiles()
@@ -605,8 +639,13 @@ defineExpose({ closeSlashPanel, autoResize })
 .nr-glass-dropdown-divider { height: 1px; background: var(--nr-glass-border); margin: 4px 8px; }
 .nr-chat-input-area {
   position: relative;
+  /* 悬浮于消息文字之上：滚动消息穿过本区玻璃背后被折射（ChatPage 渗透布局） */
+  z-index: 2;
   padding: 12px 24px 20px;
 }
+/* GlassSurface 根节点默认 overflow:hidden（折射裁剪所需），
+   composer 实例内上浮弹层须逃出玻璃盒 → 仅此实例放开 */
+.nr-glass-surface.nr-composer-glass { overflow: visible; }
 .nr-pending-files {
   display: flex;
   gap: 8px;
@@ -737,8 +776,12 @@ defineExpose({ closeSlashPanel, autoResize })
 .nr-composer-shell {
   position: relative;
   border: 1px solid var(--nr-glass-border);
-  border-radius: 16px;
-  background: var(--nr-glass-bg);
+  border-radius: 27px;
+  /* 通透磨砂（2026-09-16 用户定案）：不靠实底靠模糊，背后滚动文字被糊掉，
+     玻璃边缘折射/内高光保留 */
+  background: transparent;
+  backdrop-filter: blur(80px) saturate(1.3);
+  -webkit-backdrop-filter: blur(32px) saturate(1.3);
   padding: 12px 14px 10px;
   transition: border-color 0.25s, box-shadow 0.25s;
 }
@@ -754,10 +797,11 @@ defineExpose({ closeSlashPanel, autoResize })
 .nr-chat-textarea {
   flex: 1;
   resize: none;
+  /* 透明底：可读性由 shell 磨砂（backdrop blur）承担（2026-09-16 定案） */
   background: transparent;
   border: none;
-  border-radius: 0;
-  padding: 4px 6px 10px;
+  border-radius: 14px;
+  padding: 4px 10px 10px;
   min-height: 60px;
   color: var(--nr-text-primary);
   font-size: 14px;
@@ -906,7 +950,8 @@ defineExpose({ closeSlashPanel, autoResize })
   padding: 0 10px;
   border-radius: 13px;
   border: 1px solid var(--nr-glass-border);
-  background: var(--nr-glass-bg);
+  /* 不透明面板底：玻璃折射滚动文字不干扰按钮/菜单文字识别（2026-09-16） */
+  background: var(--nr-bg-surface);
   color: var(--nr-text-secondary);
   font-size: 12px;
   line-height: 1;

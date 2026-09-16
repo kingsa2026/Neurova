@@ -11,6 +11,8 @@
  *   - 用户级功能页（知识库/协作/技能池）不得回流本区。
  *     例外（2026-09-14 用户决策）：AIGC 属「模型与工具」域，以 /aigc/* 五个
  *     二级页挂本区（旧单页 Tab 形态 /aigc 已废除）。
+ *   - 2026-09-16 用户决策：/aigc/* 五个二级页收拢为「AIGC工具」二级菜单组
+ *     （children 非空 = 二级菜单组，组头自身不做导航，to 缺省）。
  */
 import type { Component } from 'vue'
 import {
@@ -20,12 +22,16 @@ import {
   AlertOutlined, HistoryOutlined, ControlOutlined,
   ShopOutlined, DashboardOutlined,
   PictureOutlined, VideoCameraOutlined, PlaySquareOutlined,
+  RobotOutlined,
 } from '@ant-design/icons-vue'
 
 export interface TopNavItem {
-  to: string
+  /** 叶子项的路由；二级菜单组（children 非空）无 to */
+  to?: string
   labelKey: string
   icon: Component
+  /** 非空 = 二级菜单组，子项渲染于悬停面板内 */
+  children?: TopNavItem[]
 }
 
 export interface TopNavCategory {
@@ -44,11 +50,17 @@ export const TOP_NAV_CATEGORIES: TopNavCategory[] = [
       { to: '/models', labelKey: 'nav.models', icon: CloudServerOutlined },
       { to: '/tool-layers', labelKey: 'nav.toolLayers', icon: ToolOutlined },
       { to: '/sandbox', labelKey: 'nav.sandbox', icon: CodeOutlined },
-      { to: '/aigc/text', labelKey: 'nav.aigcText', icon: FileTextOutlined },
-      { to: '/aigc/image', labelKey: 'nav.aigcImage', icon: PictureOutlined },
-      { to: '/aigc/audio', labelKey: 'nav.aigcAudio', icon: AudioOutlined },
-      { to: '/aigc/video', labelKey: 'nav.aigcVideo', icon: VideoCameraOutlined },
-      { to: '/aigc/studio', labelKey: 'nav.aigcStudio', icon: PlaySquareOutlined },
+      {
+        labelKey: 'nav.aigcTools',
+        icon: RobotOutlined,
+        children: [
+          { to: '/aigc/text', labelKey: 'nav.aigcText', icon: FileTextOutlined },
+          { to: '/aigc/image', labelKey: 'nav.aigcImage', icon: PictureOutlined },
+          { to: '/aigc/audio', labelKey: 'nav.aigcAudio', icon: AudioOutlined },
+          { to: '/aigc/video', labelKey: 'nav.aigcVideo', icon: VideoCameraOutlined },
+          { to: '/aigc/studio', labelKey: 'nav.aigcStudio', icon: PlaySquareOutlined },
+        ],
+      },
     ],
   },
   {

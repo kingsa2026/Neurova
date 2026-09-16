@@ -108,7 +108,7 @@
   /* Layout */
   --nr-header-h: 56px;
   --nr-sidebar-w: 240px;
-  --nr-sidebar-collapsed-w: 64px;
+  --nr-sidebar-collapsed-w: 72px;
 
   /* Transitions */
   --nr-transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -263,7 +263,7 @@
   /* Layout */
   --nr-header-h: 52px;
   --nr-sidebar-w: 260px;
-  --nr-sidebar-collapsed-w: 68px;
+  --nr-sidebar-collapsed-w: 72px;
 
   /* Transitions（iOS 舒缓回弹曲线） */
   --nr-transition: 0.35s cubic-bezier(0.32, 0.72, 0, 1);
