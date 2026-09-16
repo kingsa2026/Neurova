@@ -159,7 +159,6 @@ def start_backend(port: int = BACKEND_PORT, log_file: str = None) -> tuple:
     """
     print(f"\n  {c('▸', Colors.CYAN)} {c('启动后端服务', Colors.BOLD)}")
     print(f"    地址: {c(f'http://localhost:{port}', Colors.SKY_BLUE_BRIGHT)}")
-    print(f"    API 文档: {c(f'http://localhost:{port}/docs', Colors.SKY_BLUE_BRIGHT)}")
     print(f"    健康检查: {c(f'http://localhost:{port}/health', Colors.SKY_BLUE_BRIGHT)}")
     print()
 
@@ -276,7 +275,6 @@ def start_prod() -> tuple:
     """
     print(f"\n  {c('▸', Colors.CYAN)} {c('启动 Neurova (生产模式)', Colors.BOLD)}")
     print(f"    地址: {c(f'http://localhost:{BACKEND_PORT}', Colors.SKY_BLUE_BRIGHT)}")
-    print(f"    API 文档: {c(f'http://localhost:{BACKEND_PORT}/docs', Colors.SKY_BLUE_BRIGHT)}")
     print()
 
     # 复制前端构建产物到后端静态目录
@@ -355,22 +353,25 @@ def restart_services(
     # 如果没有需要停止的服务，直接启动
     if not need_stop_backend and not need_stop_frontend:
         print(f"  {c('▸', Colors.CYAN)} 没有运行中的服务，直接启动...\n")
+        # 启动慢根修（2026-09-16）：前后端并行拉起，wait_for_server 不再挡在前端之前
+        backend_proc = log_fh = None
         if restart_backend:
             check_python_deps()
-            proc, log_fh = start_backend(backend_port, log_file="server.log")
-            if not wait_for_server(port=backend_port):
-                if proc.poll() is not None:
-                    print(f"  {c('✗', Colors.RED)} 后端进程已退出 (退出码: {proc.returncode})")
-                else:
-                    print(f"  {c('✗', Colors.RED)} 后端启动超时")
-                print(f"  请检查日志: logs/server.log")
-                return 1
-            processes.append(("Backend", proc, log_fh))
+            backend_proc, log_fh = start_backend(backend_port, log_file="server.log")
         if restart_frontend:
             check_node_deps()
             proc = start_frontend(frontend_port)
             if proc:
                 processes.append(("Frontend", proc, None))
+        if restart_backend:
+            if not wait_for_server(port=backend_port):
+                if backend_proc.poll() is not None:
+                    print(f"  {c('✗', Colors.RED)} 后端进程已退出 (退出码: {backend_proc.returncode})")
+                else:
+                    print(f"  {c('✗', Colors.RED)} 后端启动超时")
+                print(f"  请检查日志: logs/server.log")
+                return 1
+            processes.append(("Backend", backend_proc, log_fh))
         print(f"\n  {c('✓', Colors.GREEN)} 服务已启动")
         return 0
 
@@ -411,11 +412,18 @@ def restart_services(
         wait_for_port_free(frontend_port, timeout=10)
         print()
 
-    # 启动服务
+    # 启动服务（启动慢根修 2026-09-16：并行拉起；浏览器待后端就绪后再开，旧语义保持）
     if restart_backend:
         print(f"  {c('▸', Colors.CYAN)} {c('启动后端', Colors.BOLD)} (端口 {backend_port}) ...")
         check_python_deps()
         proc, log_fh = start_backend(backend_port, log_file="server.log")
+
+    if restart_frontend:
+        print(f"  {c('▸', Colors.CYAN)} {c('启动前端', Colors.BOLD)} (端口 {frontend_port}) ...")
+        check_node_deps()
+        fe_proc = start_frontend(frontend_port)
+
+    if restart_backend:
         # 等待后端就绪，同时检测进程是否存活
         if not wait_for_server(port=backend_port):
             # 进程可能已崩溃，检查是否还活着
@@ -428,18 +436,15 @@ def restart_services(
         print(f"  {c('✓', Colors.GREEN)} 后端已就绪\n")
 
     if restart_frontend:
-        print(f"  {c('▸', Colors.CYAN)} {c('启动前端', Colors.BOLD)} (端口 {frontend_port}) ...")
-        check_node_deps()
-        proc = start_frontend(frontend_port, open_browser=True)
-        if proc:
-            time.sleep(3)  # 给 Vite 一点时间
+        # _open_chat_browser 自带端口轮询（最多 60s），替代旧 sleep(3)+open_browser 内开
+        if fe_proc:
+            _open_chat_browser(frontend_port)
             print(f"  {c('✓', Colors.GREEN)} 前端已就绪\n")
 
     print(f"  {c('═' * 50, Colors.DIM)}")
     print(f"  {c('重启完成!', Colors.GREEN)}")
     print(f"  后端: http://localhost:{backend_port}")
     print(f"  前端: http://localhost:{frontend_port}")
-    print(f"  文档: http://localhost:{backend_port}/docs")
     print(f"  {c('═' * 50, Colors.DIM)}\n")
 
     return 0
@@ -737,7 +742,8 @@ def main():
             
             return start_cli()
 
-        # Chat 模式：前后端 + 自动打开浏览器
+        # Chat 模式：前后端 + 自动打开浏览器（2026-09-16 启动慢根修：并行拉起，
+        # 旧实现在 wait_for_server（~14s）之后才启动 vite，浏览器打开被整体拖后）
         elif args.chat:
             check_python_deps()
             
@@ -747,25 +753,28 @@ def main():
             else:
                 proc, log_fh = start_backend(args.backend_port, log_file="server.log")
                 processes.append(("Backend", proc, log_fh))
+
+            # 启动前端（不在此开浏览器——等后端就绪后统一 _open_chat_browser）
+            if check_port(args.frontend_port):
+                print(f"  {c('✓', Colors.GREEN)} 前端已在运行 (端口 {args.frontend_port})")
+            else:
+                check_node_deps()
+                proc = start_frontend(args.frontend_port)
+                if proc:
+                    processes.append(("Frontend", proc, None))
             
             # 等待后端就绪
             if not wait_for_server(port=args.backend_port):
                 print(f"\n  {c('✗', Colors.RED)} 后端启动失败")
                 return 1
 
-            # 启动前端并自动打开浏览器
-            if check_port(args.frontend_port):
-                print(f"  {c('✓', Colors.GREEN)} 前端已在运行 (端口 {args.frontend_port})")
-                _open_chat_browser(args.frontend_port)
-            else:
-                check_node_deps()
-                proc = start_frontend(args.frontend_port, open_browser=True)
-                if proc:
-                    processes.append(("Frontend", proc, None))
+            _open_chat_browser(args.frontend_port)
 
-        # 默认：同时启动前后端
+        # 默认：同时启动前后端（启动慢根修 2026-09-16：并行拉起，
+        # 浏览器打开仍保持"后端就绪后"旧语义）
         else:
             check_python_deps()
+            fe_started = False
             
             # 启动后端
             if check_port(args.backend_port):
@@ -773,20 +782,24 @@ def main():
             else:
                 proc, log_fh = start_backend(args.backend_port, log_file="server.log")
                 processes.append(("Backend", proc, log_fh))
+
+            # 前端不再排在 /health 等待之后（vite ≈2s，旧串行让用户首帧空等 16s）
+            if check_port(args.frontend_port):
+                print(f"  {c('✓', Colors.GREEN)} 前端已在运行 (端口 {args.frontend_port})")
+            else:
+                check_node_deps()
+                proc = start_frontend(args.frontend_port)
+                fe_started = proc is not None
+                if proc:
+                    processes.append(("Frontend", proc, None))
             
             # 等待后端就绪
             if not wait_for_server(port=args.backend_port):
                 print(f"\n  {c('✗', Colors.RED)} 后端启动失败")
                 return 1
 
-            # 启动前端
-            if check_port(args.frontend_port):
-                print(f"  {c('✓', Colors.GREEN)} 前端已在运行 (端口 {args.frontend_port})")
-            else:
-                check_node_deps()
-                proc = start_frontend(args.frontend_port, open_browser=True)
-                if proc:
-                    processes.append(("Frontend", proc, None))
+            if fe_started:
+                _open_chat_browser(args.frontend_port)
 
         if not processes:
             print(f"\n  {c('✓', Colors.GREEN)} 所有服务已在运行")

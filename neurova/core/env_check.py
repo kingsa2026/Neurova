@@ -220,6 +220,49 @@ def _cleanup(exe: Path) -> None:
         pass
 
 
+def _marker_path() -> Path:
+    """缓存文件位置（NEUROVA_ENV_CHECK_MARKER 覆盖供测试隔离，
+    对齐 NEUROVA_EMBEDDING_CACHE 先例）。"""
+    override = os.environ.get("NEUROVA_ENV_CHECK_MARKER", "").strip()
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parents[2] / "data" / "env_check_torch.json"
+
+
+def _torch_fingerprint() -> str:
+    """缓存键 = 解释器 + torch 安装件（路径+__init__.py mtime）。
+
+    find_spec 不执行模块，秒级内完成；torch 升级/重装或换解释器 → 指纹变化 →
+    自动重新探测。本探测只管 torch DLL/VC++，与模型下载检测（运行期文件存在性）
+    无关，缓存不会吞掉任何模型下载触发。
+    """
+    try:
+        import importlib.util
+
+        spec = importlib.util.find_spec("torch")
+        origin = spec.origin if spec else ""
+        mtime = int(os.path.getmtime(origin)) if origin else 0
+    except OSError:
+        origin, mtime = "", 0
+    return f"{sys.executable}|{sys.version}|{origin}|{mtime}"
+
+
+def _ok_marker_cached() -> bool:
+    try:
+        return _marker_path().read_text(encoding="utf-8").strip() == _torch_fingerprint()
+    except OSError:
+        return False
+
+
+def _write_ok_marker() -> None:
+    try:
+        path = _marker_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(_torch_fingerprint(), encoding="utf-8")
+    except OSError:
+        pass  # 写不进（只读盘等）退化为"每次探测"，不阻断启动
+
+
 def preflight_torch_runtime(auto_install: bool = True) -> None:
     """启动预检编排入口。永不抛异常——环境修复失败不阻断后端启动。
 
@@ -227,11 +270,18 @@ def preflight_torch_runtime(auto_install: bool = True) -> None:
     torch DLL 正常时主进程**不导入 torch**——H1 惰性化后运行时已无 torch
     消费方，预检自身成了 torch（+176MB）进场的唯一原因。仅当子进程探测
     判定 DLL 损坏时，才回主进程做精准诊断（winerror/dll 定位）+ 自动修复。
+
+    启动慢根修（2026-09-16）：探测成功 ≈1.2s 子进程 spawn，而 torch DLL/VC++
+    属机器级稳定状态——成功后按指纹缓存跳过；**失败绝不缓存**，每次启动照旧
+    重试自愈。
     """
     try:
         if not _IS_WINDOWS:
             return
+        if _ok_marker_cached():
+            return
         if torch_imports_ok():
+            _write_ok_marker()
             return  # 子进程探测通过：DLL 无损，主进程保持零 torch
         problem = detect_torch_dll_problem()
         if problem is None:
@@ -251,6 +301,7 @@ def preflight_torch_runtime(auto_install: bool = True) -> None:
             )
             return
         if torch_imports_ok():
+            _write_ok_marker()
             logger.info("VC++ 运行库安装完成，torch 已恢复可导入")
         else:
             logger.warning(

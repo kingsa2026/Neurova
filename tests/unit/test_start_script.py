@@ -125,11 +125,62 @@ class TestRestartConfirmSkip(unittest.TestCase):
                           return_value=(MagicMock(), MagicMock())), \
              patch.object(start_module, "wait_for_server", return_value=True), \
              patch.object(start_module, "start_frontend", return_value=MagicMock()), \
+             patch.object(start_module, "_open_chat_browser"), \
              patch("builtins.input", side_effect=fake_input):
             rc = start_module.restart_services(auto_yes=True)
 
         self.assertEqual(rc, 0)
         self.assertEqual(input_calls, [])
+
+
+class TestParallelBoot(unittest.TestCase):
+    """启动慢根修（2026-09-16）：默认模式前端不再排在后端 /health 就绪之后串行拉起。
+
+    实测后端 spawn→/health ≈14.5s，旧编排 wait_for_server 把 ~2s 的 vite 顶在最后，
+    首帧 16s 空白。契约：start_frontend 先于 wait_for_server；浏览器仍在后端就绪后打开。
+    """
+
+    def test_default_mode_starts_frontend_before_health_wait(self):
+        import start as start_module
+
+        order = []
+
+        def _record(name):
+            def _f(*a, **k):
+                order.append(name)
+                return True
+            return _f
+
+        def fake_backend(*a, **k):
+            order.append("backend")
+            proc = MagicMock()
+            proc.poll.return_value = 0  # 等待循环首轮见退出 → 走清场收尾
+            return proc, MagicMock()
+
+        def fake_frontend(*a, **k):
+            order.append("frontend")
+            proc = MagicMock()
+            proc.poll.return_value = 0
+            return proc
+
+        with patch.object(start_module, "check_python_deps", return_value=True), \
+             patch.object(start_module, "check_node_deps", return_value=True), \
+             patch.object(start_module, "check_port", return_value=False), \
+             patch.object(start_module, "start_backend", side_effect=fake_backend), \
+             patch.object(start_module, "start_frontend", side_effect=fake_frontend), \
+             patch.object(start_module, "wait_for_server", side_effect=_record("wait")), \
+             patch.object(start_module, "_open_chat_browser", side_effect=_record("browser")), \
+             patch.object(start_module, "kill_port", return_value=True), \
+             patch.object(sys, "argv", ["start.py", "--skip-install"]):
+            rc = start_module.main()
+
+        self.assertEqual(rc, 0)
+        self.assertLess(order.index("backend"), order.index("frontend"),
+                        "后端未先拉起（前端启动依赖后端进程在场，顺序须先 backend）")
+        self.assertLess(order.index("frontend"), order.index("wait"),
+                        "前端仍被串行排在 /health 等待之后（并行拉起未生效）")
+        self.assertLess(order.index("wait"), order.index("browser"),
+                        "浏览器须在后端就绪后才打开（旧语义保持）")
 
 
 if __name__ == "__main__":
