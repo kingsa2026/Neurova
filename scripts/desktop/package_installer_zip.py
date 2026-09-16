@@ -84,11 +84,12 @@ def build_shell(kernel: Path | None) -> Path:
     """编译 WPF 壳。kernel 传入 = 内嵌内核（单文件模式）。返回壳 exe 路径。"""
     if kernel is not None:
         log(f"编译 WPF 界面壳（内嵌内核 {kernel.stat().st_size / 1048576:.0f} MB，单文件模式）…")
-        if run(f'build.cmd "{kernel}" "{LOGO_SRC}"', shell=True, cwd=WPF_DIR) != 0:
+        # 显式 .\ 前缀：cmd 设 NoDefaultCurrentDirectoryInExePath=1 时不从 cwd 裸名解析
+        if run(f'.\\build.cmd "{kernel}" "{LOGO_SRC}"', shell=True, cwd=WPF_DIR) != 0:
             raise RuntimeError("WPF 壳编译失败（build.cmd）")
     else:
         log("编译 WPF 界面壳（sidecar 模式）…")
-        if run("build.cmd", shell=True, cwd=WPF_DIR) != 0:
+        if run(".\\build.cmd", shell=True, cwd=WPF_DIR) != 0:
             raise RuntimeError("WPF 壳编译失败（build.cmd）")
     shell = WPF_DIR / "bin" / SHELL_NAME
     if not shell.exists():

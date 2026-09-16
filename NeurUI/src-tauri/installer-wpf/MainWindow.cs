@@ -11,6 +11,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Effects;
 using System.Windows.Media.Imaging;
 using System.Windows.Shell;
@@ -39,7 +40,9 @@ namespace Neurova.Installer
         private TextBlock _customToggle, _customArrow;
         private StackPanel _pageWelcome, _pageAdmin, _pageProgress, _pageDone;
         private TextBlock _progressTitle, _progressDetail;
-        private ProgressBar _progressBar;
+        private Border _progressFill;
+        private const double BarWidth = 300;   // 进度条轨道宽（收窄）
+        private const double BarHeight = 6;    // 进度条高（两端圆弧半径=其半）
         private CheckBox _runNowCheck;
         private Border _customPanel;
         private TextBox _adminUser;
@@ -194,11 +197,15 @@ namespace Neurova.Installer
         {
             var canvas = new Canvas { ClipToBounds = true };
             var rnd = new Random(42);   // 固定种子：星点布局稳定
-            for (int i = 0; i < 70; i++)
+            // 逐星闪烁：opacity 在基准亮度与暗值间往复，随机周期+相位，
+            // 合成器驱动（BeginAnimation），无 Timer、不占 UI 线程——
+            // 对齐登录页 Galaxy 星流的“呼吸”观感（WPF 无 WebGL，取原生近似）。
+            for (int i = 0; i < 90; i++)
             {
                 double x = rnd.NextDouble() * 800;
                 double y = rnd.NextDouble() * 520;
-                double r = rnd.Next(1, 2);
+                bool glow = i % 9 == 0;   // 每 9 颗一颗亮星
+                double r = glow ? rnd.Next(2, 3) : rnd.Next(1, 2);
                 byte v = (byte)rnd.Next(60, 190);
                 var star = new System.Windows.Shapes.Ellipse
                 {
@@ -208,6 +215,18 @@ namespace Neurova.Installer
                 };
                 Canvas.SetLeft(star, x);
                 Canvas.SetTop(star, y);
+                double baseOp = glow ? 0.85 + rnd.NextDouble() * 0.15
+                                     : 0.35 + rnd.NextDouble() * 0.5;
+                star.Opacity = baseOp;
+                var twinkle = new DoubleAnimation(
+                    baseOp, baseOp * (0.12 + rnd.NextDouble() * 0.28),
+                    new Duration(TimeSpan.FromSeconds(1.4 + rnd.NextDouble() * 3.2)))
+                {
+                    AutoReverse = true,
+                    RepeatBehavior = RepeatBehavior.Forever,
+                };
+                twinkle.BeginTime = TimeSpan.FromSeconds(rnd.NextDouble() * 3.5);
+                star.BeginAnimation(UIElement.OpacityProperty, twinkle);
                 canvas.Children.Add(star);
             }
             return canvas;
@@ -285,17 +304,9 @@ namespace Neurova.Installer
             return b;
         }
 
-        // ---------- 第 1 页：欢迎 ----------
-        private StackPanel BuildWelcomePage()
+        // 品牌 Logo（内嵌资源，等比缩放）——欢迎页与进度页共用同款
+        private Image MakeLogo()
         {
-            var panel = new StackPanel
-            {
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 0, 24),   // 视觉重心略上提
-            };
-
-            // 品牌 Logo：等比缩放适配 350x90 设计位（Stretch.Uniform 不受源
-            // PNG DPI 元数据影响——Stretch.None 会按物理 DPI 放大导致右侧裁切）
             var logo = new Image
             {
                 MaxWidth = 350,
@@ -322,7 +333,21 @@ namespace Neurova.Installer
                 }
             }
             catch { }
-            panel.Children.Add(logo);
+            return logo;
+        }
+
+        // ---------- 第 1 页：欢迎 ----------
+        private StackPanel BuildWelcomePage()
+        {
+            var panel = new StackPanel
+            {
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 0, 24),   // 视觉重心略上提
+            };
+
+            // 品牌 Logo：等比缩放适配 350x90 设计位（Stretch.Uniform 不受源
+            // PNG DPI 元数据影响——Stretch.None 会按物理 DPI 放大导致右侧裁切）
+            panel.Children.Add(MakeLogo());
 
             var sub = Text("记忆 · 情感 · 自我进化的个人 AI 智能体", 12, FontWeights.Normal, TextSub, 10);
             panel.Children.Add(sub);
@@ -429,14 +454,19 @@ namespace Neurova.Installer
             panel.Children.Add(btnRow);
 
             // 玻璃背板（Border 才支持 Padding/圆角/投影；StackPanel 没有 Padding）
+            // 液态玻璃观感：竖向透光渐变（顶亮底暗，星点可透出）+ 高亮玻璃描边，
+            // 对齐登录页 GlassPanel（WPF 无 backdrop-filter，取原生近似）。
             var glass = new Border
             {
                 // 自适应宽度 = 内容期望值，夹在 [380, 520]——文本全部 Wrap，任何语言不裁切
                 MinWidth = 380,
                 MaxWidth = 520,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#B3141B2E")),
-                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#33FFFFFF")),
+                Background = new LinearGradientBrush(
+                    (Color)ColorConverter.ConvertFromString("#B32A3452"),
+                    (Color)ColorConverter.ConvertFromString("#9910162A"),
+                    new Point(0, 0), new Point(0, 1)),
+                BorderBrush = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#40FFFFFF")),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(16),
                 Padding = new Thickness(24, 18, 24, 18),
@@ -525,16 +555,73 @@ namespace Neurova.Installer
                 VerticalAlignment = VerticalAlignment.Center,
                 Visibility = Visibility.Collapsed,
             };
+            // 与欢迎页保持同款 LOGO
+            panel.Children.Add(MakeLogo());
+
             _progressTitle = Text("正在安装…", 16, FontWeights.Bold, TextMain, 0);
+            _progressTitle.Margin = new Thickness(0, 22, 0, 0);
             panel.Children.Add(_progressTitle);
-            _progressBar = new ProgressBar
+
+            // 收窄进度条：轨道半透明圆角胶囊 + 绿色填充（两端圆弧）+ 扫光
+            var track = new Border
             {
-                Height = 8, Minimum = 0, Maximum = 100, Margin = new Thickness(0, 20, 0, 0),
+                Width = BarWidth,
+                Height = BarHeight,
+                CornerRadius = new CornerRadius(BarHeight / 2),
+                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#22FFFFFF")),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 18, 0, 0),
             };
-            panel.Children.Add(_progressBar);
+            _progressFill = new Border
+            {
+                Height = BarHeight,
+                Width = 0,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                CornerRadius = new CornerRadius(BarHeight / 2),
+                Background = new LinearGradientBrush(
+                    (Color)ColorConverter.ConvertFromString("#34D399"),
+                    (Color)ColorConverter.ConvertFromString("#10B981"),
+                    new Point(0, 0), new Point(1, 0)),
+            };
+            // 扫光：一道白色高光在绿色填充内往复平移（被填充区裁剪）
+            var shine = new Border
+            {
+                Width = 70,
+                Height = BarHeight,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Background = new LinearGradientBrush(
+                    Color.FromArgb(0, 255, 255, 255),
+                    Color.FromArgb(90, 255, 255, 255),
+                    new Point(0, 0), new Point(1, 0)),
+            };
+            var shineShift = new TranslateTransform(-80, 0);
+            shine.RenderTransform = shineShift;
+            var sweep = new DoubleAnimation(-80, BarWidth, new Duration(TimeSpan.FromSeconds(1.6)))
+            {
+                RepeatBehavior = RepeatBehavior.Forever,
+            };
+            shineShift.BeginAnimation(TranslateTransform.XProperty, sweep);
+            _progressFill.Child = shine;
+            track.Child = _progressFill;
+            panel.Children.Add(track);
+
             _progressDetail = Text("准备中", 12, FontWeights.Normal, TextSub, 10);
+            _progressDetail.HorizontalAlignment = HorizontalAlignment.Center;
             panel.Children.Add(_progressDetail);
             return panel;
+        }
+
+        // 设置进度：按百分比映射填充宽度（0-100 → 0-BarWidth）
+        private void SetProgress(double pct)
+        {
+            if (_progressFill == null) return;
+            double clamped = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
+            _progressFill.Width = clamped / 100.0 * BarWidth;
+            // Border.ClipToBounds 只做矩形裁剪不裁圆角，扫光子元素会溢出填充
+            // 两端的胶囊弧线——用圆角矩形 Clip（随宽度更新）把扫光约束在绿色填充内
+            _progressFill.Clip = new RectangleGeometry(
+                new Rect(0, 0, _progressFill.Width, BarHeight),
+                BarHeight / 2, BarHeight / 2);
         }
 
         // ---------- 第 4 页：完成 ----------
@@ -822,7 +909,7 @@ namespace Neurova.Installer
                     {
                         Dispatcher.Invoke(delegate
                         {
-                            _progressBar.Value = pct * 15 / 100;
+                            SetProgress(pct * 15 / 100);
                             _progressDetail.Text = "正在准备安装程序 " + pct + "%";
                         });
                     });
@@ -837,7 +924,7 @@ namespace Neurova.Installer
                 Dispatcher.Invoke(delegate
                 {
                     _progressTitle.Text = "正在安装…";
-                    _progressBar.Value = 15;
+                    SetProgress(15);
                 });
 
                 // 阶段二：NSIS /S 静默安装（15-95% 按目录增长映射）
@@ -887,8 +974,8 @@ namespace Neurova.Installer
                     int pct = (int)Math.Min(95, 15 + bytes * 80 / 1900000000L);
                     Dispatcher.Invoke(delegate
                     {
-                        _progressBar.Value = pct;
-                        _progressDetail.Text = "已写入 " + (bytes / 1024 / 1024) + " MB";
+                        SetProgress(pct);
+                        _progressDetail.Text = "已安装 " + pct + "%";
                     });
                 }
             });
@@ -943,7 +1030,7 @@ namespace Neurova.Installer
         {
             if (exit == 0)
             {
-                _progressBar.Value = 100;
+                SetProgress(100);
                 WriteBootstrapAdminIni(targetDir, adminUser, adminPass);
                 _pageProgress.Visibility = Visibility.Collapsed;
                 _pageDone.Visibility = Visibility.Visible;
@@ -1013,10 +1100,28 @@ namespace Neurova.Installer
         {
             if (_runNowCheck.IsChecked == true)
             {
-                var exe = Path.Combine(_pathBox.Text, "Neurova.exe");
+                // 与 NSIS 内核安装后启动保持一致（installer.nsi: MAINBINARYNAME "app"
+                // + nsis_tauri_utils::RunAsUser "$INSTDIR\app.exe"）：
+                //  1) 主程序名是 app.exe，不是 Neurova.exe（后者是历史 7 字节占位残留，
+                //     File.Exists 会误判为真但启动非可执行存根必失败 → 旧版“无法启动”根因）；
+                //  2) 壳自身以管理员令牌运行，直接 Process.Start 会让应用继承提权令牌，
+                //     WebView2/用户数据目录在 admin 下异常。经 explorer.exe 转发启动可落回
+                //     普通用户令牌（medium IL），等价 NSIS 的 RunAsUser。
+                string dir = string.IsNullOrEmpty(_installTarget)
+                    ? _pathBox.Text.Trim().TrimEnd('\\')
+                    : _installTarget;
+                var exe = Path.Combine(dir, "app.exe");
                 if (File.Exists(exe))
                 {
-                    try { Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true }); }
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = "explorer.exe",
+                            Arguments = "\"" + exe + "\"",
+                            UseShellExecute = true,
+                        });
+                    }
                     catch { }
                 }
             }
