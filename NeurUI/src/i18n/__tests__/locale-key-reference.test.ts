@@ -42,9 +42,18 @@ function walk(dir: string): string[] {
   const out: string[] = []
   for (const f of readdirSync(dir)) {
     if (f === '__tests__' || f === 'node_modules') continue
+    // 隐藏目录（如 .mimosa 编辑器工具状态快照）是工具产物不是源码——
+    // 其内部示例片段会被误当 t() 引用导致守卫假红（2026-09-16 全量回归实锤）
+    if (f.startsWith('.')) continue
     const p = join(dir, f)
-    if (statSync(p).isDirectory()) out.push(...walk(p))
-    else if (/\.(vue|ts)$/.test(f)) out.push(p)
+    if (statSync(p).isDirectory()) {
+      out.push(...walk(p))
+    } else if (/\.(vue|ts)$/.test(f) && !/\.(test|spec)\.ts$/.test(f)) {
+      // 测试文件不是运行时源码：其内部的 t('key') 字面量（报错文案示例、
+      // mock 断言）会被误当源码引用——如 hardcoded-copy 守卫自身的提示文案
+      // 含 t('key') 曾致本守卫假红（2026-09-16 全量回归实锤）
+      out.push(p)
+    }
   }
   return out
 }

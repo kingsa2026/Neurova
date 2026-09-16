@@ -24,21 +24,21 @@
         <!-- 远程 Whisper -->
         <div class="mode-card">
           <div class="mode-header">
-            <span class="mode-name">Whisper (Remote)</span>
-            <a-tag color="cyan">API</a-tag>
+            <span class="mode-name">{{ t('voiceTranscription.whisperRemoteName') }}</span>
+            <a-tag color="cyan">{{ t('voiceTranscription.apiTag') }}</a-tag>
           </div>
           <p class="mode-desc">{{ t('voiceTranscription.remoteDesc') }}</p>
           <div class="mode-field">
-            <span class="field-label">Base URL</span>
-            <a-input v-model:value="remoteForm.baseUrl" :placeholder="'https://api.openai.com/v1'" size="small" />
+            <span class="field-label">{{ t('model.baseUrl') }}</span>
+            <a-input v-model:value="remoteForm.baseUrl" :placeholder="t('voiceTranscription.baseUrlPlaceholder')" size="small" />
           </div>
           <div class="mode-field">
-            <span class="field-label">API Key</span>
+            <span class="field-label">{{ t('model.apiKey') }}</span>
             <a-input-password v-model:value="remoteForm.apiKey" :placeholder="t('voiceTranscription.keyPlaceholder')" size="small" />
           </div>
           <div class="mode-field">
             <span class="field-label">Model</span>
-            <a-input v-model:value="remoteForm.model" placeholder="whisper-1" size="small" />
+            <a-input v-model:value="remoteForm.model" :placeholder="t('voiceTranscription.modelPlaceholder')" size="small" />
           </div>
         </div>
 

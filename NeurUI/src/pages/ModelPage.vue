@@ -102,11 +102,11 @@
               <!-- Details -->
               <div class="nr-pv-body">
                 <div class="nr-pv-row">
-                  <span class="nr-pv-label">Base URL</span>
+                  <span class="nr-pv-label">{{ t('model.baseUrl') }}</span>
                   <span class="nr-pv-val mono">{{ p.base_url || '—' }}</span>
                 </div>
                 <div class="nr-pv-row">
-                  <span class="nr-pv-label">API Key</span>
+                  <span class="nr-pv-label">{{ t('model.apiKey') }}</span>
                   <template v-if="p.api_key_configured">
                     <span class="nr-pv-val mono">{{ revealKey[p.id] ? (p.api_key || '') : maskApiKey(p.api_key) }}</span>
                     <button class="nr-icon-btn" @click="revealKey[p.id] = !revealKey[p.id]" :title="revealKey[p.id] ? 'Hide' : 'Show'">
@@ -160,7 +160,7 @@
           <div class="nr-modal-body">
             <div class="nr-field">
               <label>{{ t('model.displayName') }} <span class="req">*</span></label>
-              <input v-model="addForm.name" class="nr-input" placeholder="OpenAI, Google Gemini, My Provider" autocomplete="off" />
+              <input v-model="addForm.name" class="nr-input" :placeholder="t('model.providerPlaceholder')" autocomplete="off" />
             </div>
             <div class="nr-field">
               <label>{{ t('model.providerType') }} <span class="req">*</span></label>
@@ -200,7 +200,7 @@
           <div v-if="configureTarget" class="nr-modal-body">
             <!-- Base URL -->
             <div class="nr-field">
-              <label>Base URL <span class="req">*</span></label>
+              <label>{{ t('model.baseUrl') }} <span class="req">*</span></label>
               <input v-model="configForm.base_url" class="nr-input" />
               <span class="nr-hint">{{ t('model.selectRegion') }}</span>
             </div>
@@ -238,8 +238,8 @@
                     <span class="nr-link-btn" @click="addCustomHeader">{{ t('model.addHeader') }}</span>
                   </div>
                   <div v-for="(h, i) in configForm.headers" :key="i" class="nr-header-row">
-                    <input v-model="h.key" class="nr-input" placeholder="Header name" />
-                    <input v-model="h.value" class="nr-input" placeholder="Value" />
+                    <input v-model="h.key" class="nr-input" :placeholder="t('model.headerName')" />
+                    <input v-model="h.value" class="nr-input" :placeholder="t('model.headerValuePlaceholder')" />
                     <button class="nr-remove-btn" @click="configForm.headers.splice(i, 1)">&times;</button>
                   </div>
                 </div>
@@ -279,7 +279,7 @@
             <div class="nr-mm-search">
               <svg class="nr-mm-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
               <input v-model="modelSearch" :placeholder="t('model.searchModels')" class="nr-mm-search-input" autocomplete="off" @keydown="onModelSearchKeydown" />
-              <button v-if="modelSearch" class="nr-mm-search-clear" @click="clearModelSearch" title="Clear">&times;</button>
+              <button v-if="modelSearch" class="nr-mm-search-clear" @click="clearModelSearch" :title="t('common.clear')">&times;</button>
               <GlassButton variant="ghost" size="sm" @click="applyModelSearch">
                 {{ t('common.search') }}
               </GlassButton>
@@ -455,7 +455,7 @@
               <div v-else class="nr-mm-add-form">
                 <div class="nr-mm-add-fields">
                   <div class="nr-mm-add-field">
-                    <label>Model ID <span class="req">*</span></label>
+                    <label>{{ t('model.modelId') }} <span class="req">*</span></label>
                     <input v-model="newModelId" class="nr-input" :placeholder="t('ui.egModelId')" autocomplete="off" />
                   </div>
                   <div class="nr-mm-add-field">

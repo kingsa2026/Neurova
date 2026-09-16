@@ -290,8 +290,8 @@
             <a-select-option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</a-select-option>
           </a-select>
         </a-form-item>
-        <a-form-item label="Tags">
-          <a-select v-model:value="createForm.tags" mode="tags" :placeholder="'Add tags'" />
+        <a-form-item :label="t('memory.tags')">
+          <a-select v-model:value="createForm.tags" mode="tags" :placeholder="t('memory.addTags')" />
         </a-form-item>
       </a-form>
     </a-modal>
@@ -320,16 +320,16 @@
               </a-form-item>
             </a-col>
           </a-row>
-          <a-form-item v-if="selectedMemory.tags?.length" label="Tags">
+          <a-form-item v-if="selectedMemory.tags?.length" :label="t('memory.tags')">
             <a-tag v-for="tag in selectedMemory.tags" :key="tag" color="blue">{{ tag }}</a-tag>
           </a-form-item>
-          <a-form-item v-if="selectedMemory.metadata" label="Metadata">
+          <a-form-item v-if="selectedMemory.metadata" :label="t('memory.metadata')">
             <pre class="metadata-json">{{ JSON.stringify(selectedMemory.metadata, null, 2) }}</pre>
           </a-form-item>
           <a-form-item :label="t('common.createdAt')">
             {{ selectedMemory.created_at }}
           </a-form-item>
-          <a-form-item v-if="selectedMemory.expires_at" label="Expires">
+          <a-form-item v-if="selectedMemory.expires_at" :label="t('memory.expires')">
             {{ selectedMemory.expires_at }}
           </a-form-item>
         </a-form>

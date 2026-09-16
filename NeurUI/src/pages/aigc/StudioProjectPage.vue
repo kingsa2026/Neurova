@@ -164,7 +164,7 @@ async function breakStoryboards(force = false) {
 
 async function addManualShot() {
   if (!currentEid.value) return
-  await addStoryboardManually(currentEid.value, { description: '（新镜头，填写画面提示词）', image_prompt: '' })
+  await addStoryboardManually(currentEid.value, { description: t('aigc.newShotPlaceholder'), image_prompt: '' })
   await loadStoryboards()
 }
 
