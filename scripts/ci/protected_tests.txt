@@ -25,3 +25,5 @@ tests/unit/api/test_skill_pool_api_auth_consolidation.py
 tests/unit/evolution/test_skill_consolidation_structural_and_deadcode_p1p2.py
 # Issue #48 NPC 思考档位修正：model 禁带思考强度后缀 / thinkingLevel 必须字面量枚举
 tests/unit/test_ci_npc_config_guard.py
+# Issue #56 依赖安全收口：锁完整性守卫（声明↔锁漂移 / 缺 pin / 幽灵 root / 孤儿包）
+tests/unit/test_lock_integrity_guard.py
