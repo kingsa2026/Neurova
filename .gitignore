@@ -20,6 +20,8 @@ develop-eggs/
 .pytest_cache/
 .coverage
 htmlcov/
+# 前端 vitest --coverage 产物（HTML 报告，勿入库）
+NeurUI/coverage/
 
 # 调试和临时文件
 # 注意：勿用 *_check*.py 这类通配——会吞掉合法测试文件（如 test_health_checks_contract.py，
