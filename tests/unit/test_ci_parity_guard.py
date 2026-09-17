@@ -103,6 +103,19 @@ def _job_scripts(job: dict) -> str:
     return "\n".join(out)
 
 
+
+def _pipeline_array_for_pr(data):
+    """取 PR 事件流水线：优先 main.pull_request，其次 main.pull_request@<分支> 形态。"""
+    main = data.get("main") or {}
+    if isinstance(main, dict):
+        if isinstance(main.get("pull_request"), list):
+            return main["pull_request"]
+        for key, value in main.items():
+            if isinstance(key, str) and key.startswith("pull_request") and isinstance(value, list):
+                return value
+    return None
+
+
 class TestCoverage:
     def test_every_github_job_has_cnb_counterpart(self, cnb_pipelines, ghw_jobs):
         missing = []
@@ -217,7 +230,13 @@ class TestAntiRegression:
         """push 与 pull_request 必须共用同一份流水线（锚点别名，单一事实来源）。"""
         data = yaml.safe_load(io.open(CNB, encoding="utf-8").read())
         main = data["main"]
-        assert main["push"] == main.get("pull_request"), (
+        pr = main.get("pull_request")
+        # 常用形态是 YAML 锚点别名 `pull_request: *pipelines`（同一对象）。
+        # 若写成展开副本，也允许——但逐条流水线必须与 push 侧深比较相等，
+        # 否则 PR 门禁与 push 门禁分叉（历史上就是靠这一条抓到的）。
+        if pr is None:
+            pr = _pipeline_array_for_pr(data)
+        assert pr == main["push"], (
             "main.push 与 main.pull_request 定义不一致——PR 门禁与 push 门禁分叉"
         )
 
