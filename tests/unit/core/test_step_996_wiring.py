@@ -37,25 +37,32 @@ class TestStep996Wiring:
             "当前为死代码, 对话规则提取完全失效"
         )
 
-    def test_step_996_called_after_995_before_10(self):
-        """Step 9.96 必须在 9.95 之后、Step 10 之前调用"""
+    def test_step_996_called_after_995(self):
+        """Step 9.96 必须在 9.95 之后调用（依赖：快照先落，规则提取再消费）
+
+        P0-1 变更：9.95/9.96 属响应无关旁路，已移入后台串链
+        （_snapshot_then_rules），与响应路径的 Step 10（主动提问，结果随响应
+        返回）不再有先后约束——原"9.96 必须在 Step 10 之前"的前提随之消失。
+        此处只钉住真实存在的那条依赖：9.95 → 9.96。
+        """
         import inspect
 
         source = inspect.getsource(PostChatPipeline.process)
         idx_995 = source.find("_step_version_snapshot")
         idx_996 = source.find("_step_extract_conversation_rules")
-        idx_10 = source.find("_step_proactive_question")
 
         assert idx_995 != -1, "Step 9.95 (_step_version_snapshot) 未找到"
         assert idx_996 != -1, "Step 9.96 (_step_extract_conversation_rules) 未找到"
-        assert idx_10 != -1, "Step 10 (_step_proactive_question) 未找到"
-
-        assert idx_995 < idx_996, "Step 9.96 必须在 9.95 之后"
-        assert idx_996 < idx_10, "Step 9.96 必须在 Step 10 之前"
+        assert idx_995 < idx_996, "Step 9.96 必须在 9.95 之后（同一条后台串链）"
 
     @pytest.mark.asyncio
     async def test_step_996_executed_in_full_run(self):
-        """完整 process() 运行时, Step 9.96 必须被执行 (非跳过)"""
+        """完整 process() 运行时, Step 9.96 必须被执行 (非跳过)
+
+        P0-1 变更：9.96 随 9.95 移入后台串链。断言改为等旁路步骤收尾
+        （drain_background）后检查 _safe_step 实参——不再依赖"全部步骤同步
+        跑完"的旧时序。
+        """
         # 构造最小化 pipeline
         mock_agent = MagicMock()
         pipeline = PostChatPipeline(mock_agent)
@@ -83,6 +90,7 @@ class TestStep996Wiring:
             enable_tts=False,
             metadata={},
         )
+        await pipeline.drain_background(timeout=5)
 
         # 验证 _safe_step 被调用时包含 extract_conversation_rules
         call_names = [

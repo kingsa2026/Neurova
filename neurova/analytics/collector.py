@@ -1,11 +1,26 @@
-from __future__ import annotations
-
 """
 Neurova 数据分析模块 - 数据收集器
 负责收集和聚合系统指标数据
+
+⚠️ dev-only（Issue #55）：
+    ``MetricsCollector.collect_agent_metrics`` / ``collect_user_metrics`` **没有
+    真实数据源**——它们调 ``_generate_mock_*``，用 ``random`` 造请求数、成功率、
+    内存/CPU、token 与成本。全仓无生产调用方（仅供本模块与测试使用）。
+
+    风险：一旦被接线到仪表盘/报表，页面会显示**看起来合理但完全是编的**数字，
+    比"空"更有害（空值会被发现，假数不会）。
+
+    因此默认**禁止**产出：未显式设置 ``NEUROVA_ANALYTICS_ALLOW_MOCK=1`` 时，
+    ``_generate_mock_*`` 直接抛 ``MockMetricsDisabledError``；显式开启（本地
+    demo/前端联调）时产出的指标带 ``metadata["mock"]=True``，消费方可据此
+    打 dev-only 水印。真实指标请走 ``neurova.core.metrics``（prometheus 埋点）
+    与 ``/api/v1/analytics/*``（读真实 session/LLM 账本）。
 """
 
+from __future__ import annotations
+
 import asyncio
+import os
 import threading
 from neurova.core.logger import get_logger
 import time
@@ -33,6 +48,34 @@ from neurova.analytics.models import (
 from neurova.auth.user_model import User
 
 logger = get_logger(__name__)
+
+# 假指标开关（默认关）。仅本地 demo / 前端联调可开；生产开了就等于仪表盘造假。
+ALLOW_MOCK_METRICS_ENV = "NEUROVA_ANALYTICS_ALLOW_MOCK"
+
+
+class MockMetricsDisabledError(RuntimeError):
+    """未开启 dev-only 开关就请求假指标（防止假数进入仪表盘）。"""
+
+
+def mock_metrics_enabled() -> bool:
+    """假指标是否被显式允许（每次调用读环境变量，便于测试与灰度）。"""
+    raw = os.environ.get(ALLOW_MOCK_METRICS_ENV, "")
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _require_mock_metrics_allowed(kind: str) -> None:
+    """未显式放行时拒绝产出假指标。
+
+    刻意"响亮失败"而非返回零值：零值会被误读为"系统很闲"，
+    抛错才会把人引到真实指标源（core.metrics / analytics API）。
+    """
+    if mock_metrics_enabled():
+        return
+    raise MockMetricsDisabledError(
+        f"{kind} 没有真实数据源，本方法只会用 random 造数（dev-only）。"
+        f"如确需假数（本地 demo/前端联调），显式设置 {ALLOW_MOCK_METRICS_ENV}=1；"
+        "真实指标请用 neurova.core.metrics 的 prometheus 埋点。"
+    )
 
 
 class MetricsCollector:
@@ -111,16 +154,16 @@ class MetricsCollector:
                 raise
 
     def _generate_mock_agent_metrics(self, agent_id: str, agent_name: str) -> AgentMetrics:
-        """
-        生成模拟Agent指标
+        """生成模拟 Agent 指标（**dev-only，默认禁用**）。
 
-        Args:
-            agent_id: Agent ID
-            agent_name: Agent名称
+        没有真实数据源：全部字段由 ``random`` 生成，与系统实际运行状态无关。
+        未设 ``NEUROVA_ANALYTICS_ALLOW_MOCK=1`` 时抛 MockMetricsDisabledError，
+        避免假数被接线进仪表盘（详见模块 docstring）。
 
         Returns:
-            模拟的Agent指标
+            AgentMetrics，且 ``metadata["mock"] is True``（消费方据此打水印）。
         """
+        _require_mock_metrics_allowed("MetricsCollector._generate_mock_agent_metrics")
         import random
 
         # 模拟各种状态
@@ -147,7 +190,14 @@ class MetricsCollector:
             active_tasks=random.randint(0, 10),
             queued_tasks=random.randint(0, 5),
             last_active_at=time.time() - random.uniform(0, 300),  # 最近5分钟
-            metadata={"version": "1.0.0", "capabilities": ["chat", "tool_use", "memory"], "model": "gpt-4"},
+            metadata={
+                "version": "1.0.0",
+                "capabilities": ["chat", "tool_use", "memory"],
+                "model": "gpt-4",
+                # dev-only 水印：消费方必须能一眼看出这不是真实指标
+                "mock": True,
+                ALLOW_MOCK_METRICS_ENV: True,
+            },
         )
 
     async def get_all_agent_metrics(self) -> List[AgentMetrics]:
@@ -222,16 +272,15 @@ class MetricsCollector:
                 raise
 
     def _generate_mock_user_metrics(self, user_id: str, username: str) -> UserMetrics:
-        """
-        生成模拟用户指标
+        """生成模拟用户指标（**dev-only，默认禁用**）。
 
-        Args:
-            user_id: 用户ID
-            username: 用户名
+        同 ``_generate_mock_agent_metrics``：无真实数据源，全字段 ``random``。
+        未设 ``NEUROVA_ANALYTICS_ALLOW_MOCK=1`` 时抛 MockMetricsDisabledError。
 
         Returns:
-            模拟的用户指标
+            UserMetrics，且 ``metadata["mock"] is True``。
         """
+        _require_mock_metrics_allowed("MetricsCollector._generate_mock_user_metrics")
         import random
 
         total_sessions = random.randint(10, 100)
@@ -252,6 +301,9 @@ class MetricsCollector:
                 "subscription": random.choice(["free", "pro", "enterprise"]),
                 "preferred_model": random.choice(["gpt-4", "gpt-3.5-turbo", "claude-3"]),
                 "language": random.choice(["en", "zh", "ja"]),
+                # dev-only 水印：消费方必须能一眼看出这不是真实指标
+                "mock": True,
+                ALLOW_MOCK_METRICS_ENV: True,
             },
         )
 

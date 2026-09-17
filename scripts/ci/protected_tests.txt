@@ -23,3 +23,14 @@ tests/unit/evolution/test_skill_gate_and_unified_identity_p0p1.py
 tests/unit/api/test_skill_pool_api_auth_consolidation.py
 # Issue #48 NPC 思考档位修正：model 禁带思考强度后缀 / thinkingLevel 必须字面量枚举
 tests/unit/test_ci_npc_config_guard.py
+# Issue #55 性能/资源优化：PostChatPipeline 尾延迟 + 可观测性
+tests/unit/agent/test_post_chat_p0_latency_observability.py
+# Issue #55 P1：共享线程池复用（禁止热路径每次新建池）
+tests/unit/core/test_shared_thread_pool_reuse.py
+# Issue #55 P1：缓存收敛（删死代码 performance.py + 能力缓存单一事实源）
+tests/unit/core/test_dead_cache_module_removed.py
+tests/unit/llm/test_capability_cache_single_source.py
+# Issue #55 P2：假指标 dev-only 门控
+tests/unit/analytics/test_collector_mock_data_gated.py
+# Issue #55 P2：性能回归门禁常驻自检（双侧 CI 接线 + 门禁可通过）
+tests/performance/test_perf_gate_contract.py
