@@ -24,7 +24,6 @@ MemCore — 神经感知记忆核心模块
 """
 
 import asyncio
-import concurrent.futures
 import hashlib
 import json
 import time
@@ -197,7 +196,12 @@ def run_async_safely(coro):
     def _run_in_new_loop():
         return asyncio.run(coro)
 
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    # P1 性能修复：原每次调用新建 ThreadPoolExecutor(max_workers=1)（创建/销毁
+    # 线程是纯开销，且同步桥接会被高频调用）。改用共享具名池 "mem-async-bridge"
+    # ——1 worker 保证"专用事件循环不与他人混用"，但线程与池本身进程内复用。
+    from neurova.core.thread_pool import get_thread_pool
+
+    executor = get_thread_pool(max_workers=1, name="mem-async-bridge")
     try:
         return executor.submit(_run_in_new_loop).result()
     except BaseException:
@@ -205,7 +209,8 @@ def run_async_safely(coro):
         coro.close()
         raise
     finally:
-        executor.shutdown(wait=False)
+        # 共享池属进程，不在此 shutdown（原 per-call 池在此销毁）
+        pass
 
 
 # 注：mem_core.Memory dataclass 已删除（Tier 4A.2 统一 dataclass）。

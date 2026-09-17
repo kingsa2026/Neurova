@@ -6,6 +6,7 @@ generate_latest() 输出（替换手拼文本格式）。埋点 API：
 - Metrics.record_tool_execution(tool_name, success, duration_s)
 - Metrics.record_llm_call(provider, model, success, duration_s)
 - Metrics.record_memory_recall(source, latency_s)
+- Metrics.record_pipeline_step(step_name, status, duration_ms)  # 后处理管线
 - Metrics.observe_updater(state)  # gauges 快照
 """
 
@@ -92,6 +93,28 @@ class _Metrics:
             buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5),
         )
 
+        # ── 对话后处理管线（PostChatPipeline）──
+        # 尾延迟最大来源：20+ 步串行/后台步骤此前零埋点——无 histogram 无
+        # 失败计数，优化收益无法验证。status 取 executed/skipped/failed/
+        # degraded（StepStatus 值域），失败率与耗时分位均由此可得。
+        self.pipeline_steps_total = Counter(
+            "neurova_pipeline_steps_total",
+            "Post-chat pipeline step executions",
+            ["step_name", "status"],
+        )
+        self.pipeline_step_seconds = Histogram(
+            "neurova_pipeline_step_seconds",
+            "Post-chat pipeline step duration",
+            ["step_name"],
+            buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30),
+        )
+        self.pipeline_run_seconds = Histogram(
+            "neurova_pipeline_run_seconds",
+            "Post-chat pipeline end-to-end duration",
+            ["mode"],
+            buckets=(0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60),
+        )
+
     # ── 埋点 API ──
 
     def record_tool_execution(
@@ -130,6 +153,29 @@ class _Metrics:
             self.memory_recall_seconds.labels(source=source).observe(latency_s)
         except Exception:
             logger.debug("memory metrics record failed", exc_info=True)
+
+    def record_pipeline_step(
+        self, step_name: str, status: str, duration_ms: float
+    ) -> None:
+        """后处理管线单步埋点（step_name × status 计数 + 耗时 histogram）。"""
+        try:
+            self.pipeline_steps_total.labels(
+                step_name=step_name, status=str(status or "unknown")
+            ).inc()
+            self.pipeline_step_seconds.labels(step_name=step_name).observe(
+                max(0.0, float(duration_ms or 0.0)) / 1000.0
+            )
+        except Exception:
+            logger.debug("pipeline step metrics record failed", exc_info=True)
+
+    def record_pipeline_run(self, mode: str, duration_s: float) -> None:
+        """整轮管线耗时（mode=blocking/background，验证后台化收益）。"""
+        try:
+            self.pipeline_run_seconds.labels(mode=str(mode or "unknown")).observe(
+                max(0.0, float(duration_s or 0.0))
+            )
+        except Exception:
+            logger.debug("pipeline run metrics record failed", exc_info=True)
 
     def observe_state(self, state: Any) -> None:
         """运行态 gauge 快照（/metrics 请求时调用）。"""
