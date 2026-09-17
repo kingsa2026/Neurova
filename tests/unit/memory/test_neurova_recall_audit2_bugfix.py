@@ -488,8 +488,12 @@ class TestBug8AsCompletedMissingTimeout:
         engine = NeurovaRecallEngine(use_plugins=False, memory_manager=MagicMock())
         engine.timeout_seconds = 0.3  # 很短的超时
 
+        release_channel = threading.Event()
+        channel_started = threading.Event()
+
         def hang_forever(query, limit):
-            time.sleep(100)  # 远超 timeout
+            channel_started.set()
+            release_channel.wait()  # 保持阻塞直到断言完成，由 finally 释放
             return []
 
         # 用本地 executor 替换共享线程池, 避免污染其他测试
@@ -511,15 +515,20 @@ class TestBug8AsCompletedMissingTimeout:
             "neurova.core.thread_pool.get_thread_pool", return_value=local_executor
         ):
             t = threading.Thread(target=worker, daemon=True)
-            t.start()
-            t.join(timeout=5.0)  # 最多等 5 秒
-
-        # 清理: 取消所有 pending futures
-        local_executor.shutdown(wait=False)
-
-        assert not t.is_alive(), (
-            "_phase1_multichannel_recall 挂起超过 5 秒 — as_completed 缺少 timeout (bug 8)"
-        )
+            try:
+                t.start()
+                t.join(timeout=5.0)  # 最多等 5 秒，通道此时仍未释放
+                assert channel_started.is_set(), "测试必须实际进入阻塞通道"
+                assert not t.is_alive(), (
+                    "_phase1_multichannel_recall 挂起超过 5 秒 — as_completed 缺少 timeout (bug 8)"
+                )
+                assert "error" not in result_box, result_box.get("error")
+                assert "value" in result_box
+            finally:
+                # wait=False 不会取消已运行的任务，解释器退出仍会 join 它。
+                release_channel.set()
+                local_executor.shutdown(wait=True, cancel_futures=True)
+                t.join(timeout=5.0)
 
 
 # ═══════════════════════════════════════════════════════════════════

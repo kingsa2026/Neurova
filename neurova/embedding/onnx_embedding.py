@@ -336,7 +336,13 @@ class ONNXEmbeddingEngine:
                     inference_ms=round(inference_ms, 2),
                 )
 
-            # ONNX Runtime 后端
+            # 固定序列轴必须遵守模型契约；动态轴仅补齐批内最长文本，
+            # 避免短查询也计算 512 token（并发召回曾在真实 ONNX 推理中超时）。
+            model_inputs = self._ort_session.get_inputs()
+            sequence_size = next((inp.shape[1] for inp in model_inputs
+                                  if inp.name == "input_ids"), None)
+            fixed_size = sequence_size if isinstance(sequence_size, int) and sequence_size > 0 else None
+            token_limit = min(self._max_length, fixed_size or self._max_length)
             input_ids_list = []
             attention_mask_list = []
 
@@ -355,19 +361,24 @@ class ONNXEmbeddingEngine:
                     token_ids = self._tokenizer.encode(text, max_length=self._max_length)
 
                 # 截断
-                if len(token_ids) > self._max_length:
-                    token_ids = token_ids[: self._max_length]
+                if len(token_ids) > token_limit:
+                    token_ids = token_ids[:token_limit]
 
                 # 创建 attention mask
+                # 复制后再改写：tokenizers 返回的列表不得被原地补齐污染
+                token_ids = list(token_ids)
                 attention_mask = [1] * len(token_ids)
-
-                # Padding
-                pad_len = self._max_length - len(token_ids)
-                token_ids += [0] * pad_len
-                attention_mask += [0] * pad_len
 
                 input_ids_list.append(token_ids)
                 attention_mask_list.append(attention_mask)
+
+            # Padding：动态轴仅补齐批内最长序列；固定轴已并入 token_limit。
+            # 全空序列时保留 1 位占位（序列轴不得为 0）。
+            batch_longest = max((len(t) for t in input_ids_list), default=0) or 1
+            for token_ids in input_ids_list:
+                token_ids.extend([0] * (batch_longest - len(token_ids)))
+            for attention_mask in attention_mask_list:
+                attention_mask.extend([0] * (batch_longest - len(attention_mask)))
 
             # 转为 numpy
             input_ids = np.array(input_ids_list, dtype=np.int64)
@@ -381,7 +392,7 @@ class ONNXEmbeddingEngine:
 
             # 尝试添加 token_type_ids
             token_type_ids = np.zeros_like(input_ids, dtype=np.int64)
-            input_names = [inp.name for inp in self._ort_session.get_inputs()]
+            input_names = [inp.name for inp in model_inputs]
             if "token_type_ids" in input_names:
                 ort_inputs["token_type_ids"] = token_type_ids
 
