@@ -68,6 +68,13 @@ class StepResult:
     data: Dict[str, Any] = field(default_factory=dict)
 
 
+def _consolidation_plan_store(skills_dir):
+    """合并计划落盘仓（同一 agent 目录）。计划是**待审批件**，非技能库改动。"""
+    from neurova.evolution.skill_consolidator import ConsolidationPlanStore
+
+    return ConsolidationPlanStore(skills_dir)
+
+
 async def run_skill_evolution_pass(
     *,
     improver,
@@ -2294,6 +2301,22 @@ class PostChatPipeline:
                 )
         except Exception as mtn_err:
             logger.debug("技能经验维护跳过: %s", mtn_err)
+
+        # 重复技能合并计划（P1-2 接线）：前缀簇 + umbrella 质量选取，
+        # **只产计划**——执行走审批面（skill_pool_api /consolidation/*）。
+        # 绝不自动合并：合并是"改行为/改技能库结构"的产物，与评审闸同一哲学。
+        try:
+            from neurova.evolution.skill_consolidator import plan_from_service
+            from neurova.skills.skill_service import SkillService as _CSvc
+
+            _c_svc = _CSvc(agent_id=str(getattr(self._agt.config, "agent_id", "default") or "default"))
+            _c_plans = plan_from_service(_c_svc)
+            if _c_plans:
+                _store = _consolidation_plan_store(_c_svc.skills_dir)
+                _store.upsert([p.to_dict() for p in _c_plans])
+                logger.info("🧩 技能合并计划: %d 簇（待审批）", len(_c_plans))
+        except Exception as _ce:
+            logger.debug("技能合并计划生成跳过: %s", _ce)
 
         # 技能生命周期扫描：确定性、零 LLM，
         # active→stale(14d)→archived(30d)；首次 seed 不动库；间隔自持

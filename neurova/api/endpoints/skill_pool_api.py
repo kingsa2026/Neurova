@@ -560,8 +560,12 @@ async def install_public_skill_to_mine(skill_id: str, current_user: Dict[str, An
 async def list_pending_skills(agent_id: str):
     """C10 审批面：列出待审自动技能（评审闸开启时的配套生态）。
 
-    pending 数据在 Agent 的 skill_packer（AutoSkillBuilder）实例上；
-    Agent 未就绪返回空列表（闸关时恒空）。
+    pending 数据在 Agent 的 skill_packer（**AutoSkillBuilder**，非同名旧
+    SkillPacker）实例上；Agent 未就绪返回空列表（闸关时恒空）。
+
+    ⚠️ 可达性（2026-09-17 复核）：本面只在 Agent 单例**已初始化**时有值——
+    `_get_agent()` 返回 None 时恒空列（表现为"审批面永远没有待审件"）。
+    与 approve/reject 同因同治：Agent 未就绪时 approve 会 503 而非静默成功。
     """
     try:
         from neurova.api.endpoints.governance import _get_agent
@@ -655,6 +659,63 @@ async def reject_pending_experience(agent_id: str, record_id: str):
     if not ok:
         raise HTTPException(status_code=404, detail=f"待审经验不存在: {record_id}")
     return {"code": 0, "data": {"rejected": True, "record_id": record_id}}
+
+
+# ── P1-2 技能合并审批面（重复技能合并迭代的执行端）─────────────
+
+
+@router.get("/agent/{agent_id}/consolidation/plans")
+async def list_consolidation_plans(agent_id: str):
+    """列出待审合并计划（P1-2 接线：plan-only 模块接上审批面）。
+
+    计划由 RSI 步（_step_rsi_iteration）定期产出，落 data/agents/<id>/skills/
+    下；本端点只读，不改技能库。
+    """
+    try:
+        from neurova.evolution.skill_consolidator import ConsolidationPlanStore
+
+        service = _pool_service(agent_id)
+        store = ConsolidationPlanStore(service.skills_dir)
+        return store.load()
+    except Exception as e:  # noqa: BLE001 - 审批面故障返回空列而非 500
+        logger.exception("list_consolidation_plans failed for agent_id=%s: %s", agent_id, e)
+        return []
+
+
+@router.post("/agent/{agent_id}/consolidation/{umbrella}/approve")
+async def approve_consolidation(agent_id: str, umbrella: str):
+    """批准合并：吸收成员**归档不删除**（可恢复），umbrella 留作类级技能。"""
+    from neurova.evolution.skill_consolidator import (
+        ConsolidationApproval,
+        ConsolidationPlanStore,
+    )
+
+    service = _pool_service(agent_id)
+    store = ConsolidationPlanStore(service.skills_dir)
+    plan = next((p for p in store.load()
+                 if p.get("umbrella") == umbrella and p.get("status") == "pending"), None)
+    if plan is None:
+        raise HTTPException(status_code=404, detail=f"待审合并计划不存在: {umbrella}")
+    result = ConsolidationApproval(service, store).approve(umbrella, plan.get("absorbed") or [])
+    return {"code": 0, "data": result}
+
+
+@router.post("/agent/{agent_id}/consolidation/{umbrella}/reject")
+async def reject_consolidation(agent_id: str, umbrella: str):
+    """拒绝合并：只改计划状态，技能库零改动。"""
+    from neurova.evolution.skill_consolidator import (
+        ConsolidationApproval,
+        ConsolidationPlanStore,
+    )
+
+    service = _pool_service(agent_id)
+    store = ConsolidationPlanStore(service.skills_dir)
+    plan = next((p for p in store.load()
+                 if p.get("umbrella") == umbrella and p.get("status") == "pending"), None)
+    if plan is None:
+        raise HTTPException(status_code=404, detail=f"待审合并计划不存在: {umbrella}")
+    result = ConsolidationApproval(service, store).reject(umbrella, plan.get("absorbed") or [])
+    return {"code": 0, "data": result}
 
 
 @router.get("/agent/{agent_id}/skills", response_model=List[SkillInfo])

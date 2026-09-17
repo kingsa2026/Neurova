@@ -265,6 +265,9 @@ class SkillEvolutionService:
             while len(parts) < 3:
                 parts.append("0")
             parts[2] = str(int(parts[2]) + 1)
+            # 提案应用 = 人工批准终点（内容已过留出集/约束/bench 门），
+            # 豁免质量门避免"进化的门"与"维护的门"互相打架。这里直接按
+            # 老契约调用（测试替身/applied 探针依赖精确的调用形态）。
             return svc.update_auto_skill(
                 proposal["skill_id"], version=".".join(parts), config=config
             )
