@@ -1,7 +1,16 @@
 """
-模型能力缓存
+模型能力缓存（**离线探测工具链专用，非生产路径**）
 
-缓存模型能力探测结果，减少重复探测请求
+缓存模型能力探测结果，减少重复探测请求。与
+``neurova/llm/providers/capability_detector.py`` 组成一套**离线探测**栈。
+
+⚠️ 单一事实源说明（Issue #55 缓存收敛）：
+    生产路径的"模型能力"缓存只有一个 —— ``neurova/llm/model_capability_cache.py``
+    （ModelCapabilityCache，学习型：记录"试错发现的模型行为"，由
+    ``llm/provider_manager.py`` 读写）。本模块是早期探测栈的持久化缓存
+    （JSON + CachedCapability），**生产零消费方**，仅供离线探测与回归测试使用。
+    新代码请勿接入本模块；需要"能力缓存"时用 model_capability_cache。
+    本约束由 tests/unit/llm/test_capability_cache_single_source.py 常驻校验。
 """
 
 import datetime

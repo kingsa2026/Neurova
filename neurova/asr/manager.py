@@ -145,14 +145,17 @@ class ASRManager:
 
         # 首次下载（~140MB+torch 依赖检查）+ 重跑链可能耗时数分钟；
         # 本方法为同步入口（FastAPI def 端点在线程池运行），直接
-        # asyncio.run 新建事件循环执行——不与调用方 loop 交互
-        import concurrent.futures
+        # asyncio.run 新建事件循环执行——不与调用方 loop 交互。
+        # P1 性能修复：原每次调用新建 ThreadPoolExecutor(max_workers=1)
+        # （创建/销毁纯开销）。改用共享具名池 "asr-consent"——1 worker 保证
+        # 专用事件循环不与他人混用，池与线程进程内复用。
+        from neurova.core.thread_pool import get_thread_pool
 
         async def _rerun():
             return await self._initialize_with_fallback()
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, _rerun()).result(timeout=600)
+        pool = get_thread_pool(max_workers=1, name="asr-consent")
+        return pool.submit(asyncio.run, _rerun()).result(timeout=600)
 
     def get_consent_status(self) -> dict:
         """本地 whisper 同意门状态（前端设置页消费）。"""

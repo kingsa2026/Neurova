@@ -295,6 +295,8 @@ class TestPostChatPipelineEvocate:
             enable_tts=False,
             metadata={},
         )
+        # P0-1：Evocate 生成已后台化（响应无关），断言前等旁路步骤收尾
+        await pipeline.drain_background(timeout=5)
 
         # 验证
         assert "actual_session_id" in result
