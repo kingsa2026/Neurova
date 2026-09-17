@@ -81,14 +81,25 @@ class TestLegacyCompatibility(unittest.TestCase):
         self.assertEqual(len(report.warnings), 1)  # 步骤失败 → warning 不炸传
         self.assertIn("total_processing_time", report.to_dict())
 
-    def test_legacy_create_default_pipeline_registers_four_steps(self):
-        from neurova.agent.tool_pipeline import create_default_pipeline
+    def test_legacy_four_step_facade_is_deleted(self):
+        """P2（Issue #46）：零生产调用的旧四步门面**真删**，不是标注保留。
 
-        pipeline = create_default_pipeline(
-            tool_memory=Mock(), tool_lifecycle=Mock(),
-            skill_packer=Mock(), evolution=Mock(),
-        )
-        self.assertEqual(len(pipeline.steps), 4)
+        删除前的事实：`create_default_pipeline` 与四个旧 Step 类
+        （MemoryRecordingStep / LifecycleUpdateStep / SkillObservationStep /
+        EvolutionFeedbackStep）在 `neurova/` 内**无任何调用方**，只有本测试在
+        调它——保留只会让后来者以为"还有调用方"，并把 SkillPacker 时代的
+        无证据通道当成新增接线的模板。
+
+        生产链路的替代（唯一）：`creation_governance` 的 ContextVar 采集器
+        （begin_task / record_tool_execution / finish_task）——那条才有证据闸；
+        记忆/生命周期记录在 `ToolExecutor.on_tool_executed` 尾部承担。
+        """
+        import neurova.agent.tool_pipeline as tp
+
+        for symbol in ("create_default_pipeline", "MemoryRecordingStep",
+                       "LifecycleUpdateStep", "SkillObservationStep",
+                       "EvolutionFeedbackStep"):
+            self.assertFalse(hasattr(tp, symbol), f"{symbol} 是死代码，应已删除")
 
     def test_empty_pipeline_is_noop(self):
         """空流水线：无步骤、无守卫、无观察者 → 正常空报告（等价于未接入）。"""

@@ -1,14 +1,22 @@
-"""技能库巩固(umbrella)— 识别窄技能簇,产出合并**计划**(纯计划,零变更)。
+"""技能库巩固(umbrella)— 识别可合并技能簇,产出合并**计划**(纯计划,零变更)。
 
 哲学收窄为两段:
-  - **本模块是确定性计划段**(零 LLM):按前缀/领域词聚类,选出 umbrella,
-    产出 ConsolidationPlan 列表;**绝不直接改技能库**;
-  - 执行段走既有审批面(skill_review_gate / skill_pool_api pending 审批),
+  - **本模块是确定性计划段**(零 LLM):按**结构身份**聚类(工具序列/参数/
+    业务意图,见 `find_structural_clusters`),选出 umbrella,产出
+    ConsolidationPlan 列表;**绝不直接改技能库**;
+  - 执行段走既有审批面(skill_review_gate / skill_pool_api consolidation 审批),
     由人/审批流拍板后才真正合并归档。
 
   - 只归档不删除,可恢复;
   - "一个宽 umbrella + 标注小节"优于"N 个窄兄弟";
   - 包完整性:吸收 references/ 必须重新编目(执行段责任,计划里标注)。
+
+P1 收口(2026-09-17):**聚类口径从"名字前缀"换成"结构身份"**。
+旧实现只按名字前缀聚簇,于是"同一工具序列、名字形态不同"的一批
+(`skill_<fp16>` vs `genetic_<tools>` vs 裸参臂)——正是 P1-1 判定的
+"同一技能被封装成多条"——聚不到一起,合并能力天花板停在名字层。
+现在按身份聚类,basis 记录本簇依据哪一级身份(可审计),名字前缀只作为
+**无工具序列条目**(手工/用户技能)的兜底信号。
 """
 
 from __future__ import annotations
@@ -35,6 +43,21 @@ class ConsolidationPlan:
     needs_reference_rehoming: bool = False
     # P1-2：成员质量证据（成功观测/复用数/描述长度），决策可审计
     quality: dict = field(default_factory=dict)
+    # P1 收口（2026-09-17）：本簇依据哪一级身份聚出来的——审批人据此判断
+    # 合并的激进程度。见 `find_structural_clusters`：
+    #   "identity"    同一业务身份（工具序列+参数+意图全同）= 真重复，可直接合
+    #   "structure"   同一工具序列但意图不同 = 同族不同业务，合并即"跨意图收编"
+    #   "name_prefix" 无工具序列的存量条目兜底（名字前缀），旧口径
+    basis: str = "name_prefix"
+    # 结构身份（工具序列+参数，不含意图）；name_prefix 兜底簇为空串
+    structure: str = ""
+    # 簇内业务身份分布：{skill_id: 业务身份指纹}，供审批面看"收编了几个意图"
+    intents: dict = field(default_factory=dict)
+
+    @property
+    def cross_intent(self) -> bool:
+        """本簇是否跨业务意图（basis=="structure" 且含多个不同意图）。"""
+        return self.basis == "structure" and len(set(self.intents.values())) > 1
 
     def to_dict(self) -> dict:
         return {
@@ -43,12 +66,20 @@ class ConsolidationPlan:
             "reason": self.reason,
             "needs_reference_rehoming": self.needs_reference_rehoming,
             "quality": dict(self.quality),
+            "basis": self.basis,
+            "structure": self.structure,
+            "intents": dict(self.intents),
         }
 
 
 def find_prefix_clusters(names: list[str], min_size: int = _DEFAULT_MIN_CLUSTER) -> list[list[str]]:
-    """按首个域词(或首段)聚类;窄前缀簇是 umbrella 的首要信号。
+    """按首个域词(或首段)聚类——**仅作无结构身份条目的兜底信号**。
 
+    P1 收口(2026-09-17):本函数不再是首要聚簇口径。名字是**展示层**属性,
+    三条写入臂各有命名形态(`skill_<fp16>` / `genetic_<tools>` / `synth_*`),
+    同一工具序列换个名字就聚不到一起——合并能力天花板卡在名字层。首要口径
+    改为 `find_structural_clusters`(工具序列族);本函数只处理**没有工具
+    序列的存量条目**(手工创建/用户导入),那些条目本来就没有结构可依。
     """
     groups: dict[str, list[str]] = {}
     for name in names:
@@ -63,6 +94,97 @@ def find_prefix_clusters(names: list[str], min_size: int = _DEFAULT_MIN_CLUSTER)
     return clusters
 
 
+@dataclass
+class _Cluster:
+    """一个候选簇（结构身份聚合的中间产物，不外泄）。
+
+    basis/structure/intents 会原样带进 ConsolidationPlan——审批人需要知道
+    "这一簇是真重复，还是同序列不同业务"，两者的合并风险不同。
+    """
+
+    members: list[str] = field(default_factory=list)
+    basis: str = "name_prefix"
+    structure: str = ""
+    intents: dict = field(default_factory=dict)
+
+
+def sequence_family(steps) -> str:
+    """结构族键 = **工具名序列**(按顺序，忽略参数与意图)。
+
+    为什么族键忽略参数:`{"tool":"read","params":{"i":0}}` 与
+    `{"tool":"read","params":{"i":1}}` 是"同一序列的两个实例"——参数是调用
+    时的绑定，不是身份；把它们拆到两个簇，正是旧实现"同一技能堆成多条"
+    却合并不了的同一层失效。参数差异在业务身份里仍被吸收(见下方的
+    `intents`)，审批面据此看到"这一簇里绑了几个身份"。
+    """
+    from neurova.skills.creation_governance import normalize_steps
+
+    normalized = normalize_steps(steps)
+    if not normalized:
+        return ""
+    return " → ".join(step["tool"] for step in normalized)
+
+
+def find_structural_clusters(
+    facts: dict[str, dict], min_size: int = _DEFAULT_MIN_CLUSTER
+) -> list["_Cluster"]:
+    """按**结构身份**聚簇:先工具序列族，余下无序列条目走名字前缀兜底。
+
+    facts: {skill_id: {"tool_sequence": [...], "purpose": "...", "description": "..."}}
+
+    返回的每个簇记录 `basis`(本簇依据哪一级身份聚出)与 `intents`(成员业务
+    身份指纹)，两者随计划落库——审批人需要知道"这一簇是真重复，还是同族
+    不同业务"，两者的合并风险完全不同。
+    """
+    from neurova.skills.creation_governance import fingerprint
+
+    families: dict[str, list[str]] = {}
+    structural: set[str] = set()
+    for skill_id, fact in facts.items():
+        family = sequence_family(fact.get("tool_sequence"))
+        if not family:
+            continue
+        families.setdefault(family, []).append(skill_id)
+        structural.add(skill_id)
+
+    clusters: list[_Cluster] = []
+    for family, members in families.items():
+        if len(members) < min_size:
+            continue
+        members = sorted(members)
+        intents = {
+            sid: fingerprint(facts[sid].get("tool_sequence"),
+                             facts[sid].get("purpose") or facts[sid].get("description") or "")
+            or ""
+            for sid in members
+        }
+        basis = "identity" if len(set(intents.values())) == 1 else "structure"
+        clusters.append(_Cluster(members=members, basis=basis, structure=family, intents=intents))
+
+    # 兜底:无工具序列的存量条目(手工/用户导入)按名字前缀聚——它们没有
+    # 结构可依，前缀是唯一可用信号；basis 如实标 "name_prefix"。
+    leftovers = {sid: fact for sid, fact in facts.items() if sid not in structural}
+    for prefix_cluster in find_prefix_clusters(list(leftovers), min_size):
+        members = sorted(prefix_cluster)
+        clusters.append(
+            _Cluster(
+                members=members,
+                basis="name_prefix",
+                structure="",
+                intents={
+                    sid: fingerprint(leftovers[sid].get("tool_sequence"),
+                                     leftovers[sid].get("purpose")
+                                     or leftovers[sid].get("description") or "")
+                    or ""
+                    for sid in members
+                },
+            )
+        )
+    # 确定性排序：簇越大越靠前，同大小按首成员名——计划可复现
+    clusters.sort(key=lambda c: (-len(c.members), c.members[0]))
+    return clusters
+
+
 def _pick_umbrella(members: list[str], descriptions: dict[str, str]) -> str:
     """选 umbrella:正文最长的既有成员(内容最多者最可能承载类级规则)。
 
@@ -72,7 +194,19 @@ def _pick_umbrella(members: list[str], descriptions: dict[str, str]) -> str:
 
 
 class SkillConsolidator:
-    """技能库巩固计划器(plan-only)。"""
+    """技能库巩固计划器(plan-only)。
+
+    P1 收口(2026-09-17):**聚簇口径只有一个——结构身份**。
+    生产入口是 `plan_from_service`(读真实库 + 质量账本);本类的 `plan`
+    保留旧的 `{名字: 描述}` 入参,但它只能走名字前缀兜底(入参里没有工具
+    序列,结构身份无从算起)——故 `plan` 与 `plan_from_service` **不是两套
+    口径**,是同一套口径在"有/无结构信息"两种输入下的两级信号:
+
+      - 有工具序列(生产真实条目,三条写入臂产物都带) → `plan_from_structure`
+        按序列族聚,能认出"同序列、异名形态"的重复;
+      - 无工具序列(手工/用户条目) → 名字前缀兜底,plan 结果里 basis 如实
+        标 "name_prefix",不冒充结构判据。
+    """
 
     def __init__(self, min_cluster_size: int = _DEFAULT_MIN_CLUSTER):
         self.min_cluster_size = min_cluster_size
@@ -81,16 +215,31 @@ class SkillConsolidator:
         """skills: {skill_name: description/正文};返回合并计划列表。
 
         纯计划产出——调用方拿到计划后走审批面执行,本模块零副作用。
+        入参无工具序列 → 只能名字前缀兜底(见类 docstring);
+        需要结构身份聚类请走 `plan_from_service` / `plan_from_structure`。
         """
-        if not skills:
+        return self.plan_from_structure({sid: {"description": desc} for sid, desc in skills.items()})
+
+    def plan_from_structure(self, facts: dict[str, dict]) -> list[ConsolidationPlan]:
+        """按结构身份聚簇产计划。
+
+        facts: {skill_id: {"tool_sequence": [...], "purpose": "...", "description": "..."}}
+        有工具序列的走序列族;没有的自动落到名字前缀兜底——两条路径都带
+        basis 标注,审批面能分辨本簇是真重复还是兜底聚簇。
+        """
+        if not facts:
             return []
+        descriptions = {
+            sid: str(fact.get("description") or fact.get("purpose") or "")
+            for sid, fact in facts.items()
+        }
         plans: list[ConsolidationPlan] = []
         claimed: set[str] = set()
-        for cluster in find_prefix_clusters(list(skills), self.min_cluster_size):
-            members = [m for m in cluster if m not in claimed]
+        for cluster in find_structural_clusters(facts, self.min_cluster_size):
+            members = [m for m in cluster.members if m not in claimed]
             if len(members) < self.min_cluster_size:
                 continue
-            umbrella = _pick_umbrella(members, skills)
+            umbrella = _pick_umbrella(members, descriptions)
             absorbed = [m for m in members if m != umbrella]
             if not absorbed:
                 continue
@@ -99,12 +248,12 @@ class SkillConsolidator:
                 ConsolidationPlan(
                     umbrella=umbrella,
                     absorbed=absorbed,
-                    reason=(
-                        f"前缀簇 {len(members)} 个成员共享域词,合并为类级技能"
-                        f"「{umbrella}」提升可发现性(系统提示技能索引按描述路由,"
-                        f"窄技能越多路由越稀)"
-                    ),
+                    reason=_cluster_reason(cluster.basis, members, umbrella, cluster.structure),
                     needs_reference_rehoming=True,
+                    quality={m: _quality_of({"description": descriptions.get(m, "")}) for m in members},
+                    basis=cluster.basis,
+                    structure=cluster.structure,
+                    intents={m: cluster.intents.get(m, "") for m in members},
                 )
             )
         return plans
@@ -135,14 +284,41 @@ def _quality_of(stats: Optional[dict]) -> tuple:
     return (successes, reuse, len(str(stats.get("description") or "")))
 
 
+def _entry_fact(entry: dict, detail: dict) -> dict:
+    """从库条目抽结构身份三件套：工具序列 / 业务意图 / 描述。
+
+    工具序列藏在 manifest.config（三臂统一写这里）；意图优先取显式
+    task_purpose / context_template，缺省退回描述——与
+    `creation_governance.manifest_purpose` 同一口径，否则同一技能在
+    "封装署名"与"合并计身份"两处会算出不同身份。
+    """
+    manifest = (detail.get("manifest") or entry.get("manifest") or {})
+    config = manifest.get("config") if isinstance(manifest, dict) else None
+    config = config if isinstance(config, dict) else {}
+    return {
+        "tool_sequence": config.get("tool_sequence") or [],
+        "purpose": (config.get("task_purpose") or config.get("context_template")
+                    or detail.get("description") or entry.get("description") or ""),
+        "description": str(detail.get("description") or entry.get("description") or ""),
+    }
+
+
 def plan_from_service(service, min_cluster_size: int = _DEFAULT_MIN_CLUSTER) -> list[ConsolidationPlan]:
     """从 SkillService 读真实技能库与账本，产出合并计划。
 
+    P1 收口（2026-09-17）：**聚簇口径换成结构身份**（`find_structural_clusters`）。
+
+    旧实现的失效不在"选谁当 umbrella"，而在**聚谁**：只按名字前缀聚，于是
+    P1-1 已判定的"同一技能被封装成多条"（同序列、异名形态：
+    `skill_<fp16>` / `genetic_<tools>` / `synth_*`）**聚不到同一簇**——重复被
+    判出来了、却合并不了，能力天花板停在名字层。现在按工具序列族聚类，
+    并如实标注本簇是"同一业务身份的真重复"还是"同序列不同业务的跨意图收编"。
+
     与 `plan({name: description})` 的差别：umbrella 用**质量账本**选，而不是
-    描述长度；聚簇仍在名字前缀上（确定性），但成员质量来自 usage/funnel。
+    描述长度；成员质量来自 usage/funnel。
     """
     stats: dict[str, dict] = {}
-    descriptions: dict[str, str] = {}
+    facts: dict[str, dict] = {}
     try:
         entries = service.list_skills()
     except Exception as e:  # noqa: BLE001 - 库不可读即无计划（绝不猜）
@@ -152,7 +328,6 @@ def plan_from_service(service, min_cluster_size: int = _DEFAULT_MIN_CLUSTER) -> 
         skill_id = str(entry.get("id") or "")
         if not skill_id:
             continue
-        descriptions[skill_id] = str(entry.get("description") or "")
         detail = {}
         try:
             detail = service.get_skill_info(skill_id) or {}
@@ -171,11 +346,12 @@ def plan_from_service(service, min_cluster_size: int = _DEFAULT_MIN_CLUSTER) -> 
             funnel = usage.get("funnel") if isinstance(usage.get("funnel"), dict) else usage
         stats[skill_id] = {**merged, "usage": merged.get("usage") or {},
                            "funnel": funnel or {}}
+        facts[skill_id] = _entry_fact(entry, detail)
 
     plans: list[ConsolidationPlan] = []
     claimed: set[str] = set()
-    for cluster in find_prefix_clusters(list(stats), min_cluster_size):
-        members = [m for m in cluster if m not in claimed]
+    for cluster in find_structural_clusters(facts, min_cluster_size):
+        members = [m for m in cluster.members if m not in claimed]
         if len(members) < min_cluster_size:
             continue
         # 质量优先选 umbrella；同分时按名字确定性兜底（可解释、可复现）
@@ -188,15 +364,34 @@ def plan_from_service(service, min_cluster_size: int = _DEFAULT_MIN_CLUSTER) -> 
             ConsolidationPlan(
                 umbrella=umbrella,
                 absorbed=absorbed,
-                reason=(
-                    f"前缀簇 {len(members)} 个成员共享域词，合并为类级技能"
-                    f"「{umbrella}」（按成功观测/复用数选优，非描述长度）"
-                ),
+                reason=_cluster_reason(cluster.basis, members, umbrella, cluster.structure),
                 needs_reference_rehoming=True,
                 quality={m: _quality_of(stats.get(m)) for m in members},
+                basis=cluster.basis,
+                structure=cluster.structure,
+                intents={m: cluster.intents.get(m, "") for m in members},
             )
         )
     return plans
+
+
+def _cluster_reason(basis: str, members: list[str], umbrella: str, structure: str) -> str:
+    """计划理由：先说清**依据哪一级身份**聚的——审批人据此判风险。"""
+    if basis == "identity":
+        return (
+            f"业务身份重复：{len(members)} 个条目工具序列+意图全同，"
+            f"收敛为「{umbrella}」（真重复，可直接合并；按成功观测/复用数选优）"
+        )
+    if basis == "structure":
+        return (
+            f"结构同族：{len(members)} 个条目共享工具序列「{structure}」但业务意图不同，"
+            f"合并为「{umbrella}」= 跨意图收编（窄技能越多路由越稀；审批需确认"
+            f"「一个宽 umbrella 覆盖多意图」是否可接受）"
+        )
+    return (
+        f"名字前缀簇：{len(members)} 个成员无工具序列（手工/用户技能），"
+        f"按域词聚合并为「{umbrella}」（无结构身份可依，前缀是唯一可用信号）"
+    )
 
 
 class ConsolidationPlanStore:

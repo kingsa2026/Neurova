@@ -496,7 +496,8 @@ class ToolGeneticEngine:
         dict，genetic 技能重启即丢——演化史（generation/reuse_count）清零、
         前端技能页不可见、下轮重复合成。提供 skill_service 时经
         register_auto_skill 持久化到磁盘 manifest（与 _step_pattern_mining
-        的 skill_packer 注册路径对齐）；None 保持原行为向后兼容。
+        的 skill_packer 注册路径对齐——该属性挂的是 evolution.AutoSkillBuilder）；
+        None 保持原行为向后兼容。
 
         Args:
             registry: SkillRegistry 实例
