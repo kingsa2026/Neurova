@@ -208,14 +208,44 @@ main:
   pull_request: *pipelines
 
 # ============================================================================
-# 自定义 NPC —— DSCoder（DeepSeek 驱动）
+# 自定义 NPC —— DSCoder
 # ============================================================================
-# 角色定义见 .cnb/settings.yml；此处为 NPC 事件流水线，用于绑定模型等运行参数。
+# 角色定义见 .cnb/settings.yml；此处为 NPC 事件流水线，只管运行参数，不管人设。
 # 触发：Issue/PR 评论中 @kingsa2026/neurova(DSCoder)
 # 合并机制：本段覆盖同名事件，未声明的事件保留系统默认行为（故两个事件都声明）。
-# 说明：模型能力参数（maxTurns/contextWindow/maxTokens/thinkingLevel/supportImage）
-#   在指定自定义 model 后不再继承平台默认，故按 DeepSeek 常规能力显式给出兜底值。
+#
+# 为何不写 model：
+#   此前写死 model: deepseek-v4.1-flash-max，该模型 ID 平台并不存在，
+#   npc:go 又不校验 model 有效性（配置期不报错、流水线能启动），
+#   直到真正发请求才被 LLM 网关以 400 拒绝 —— 表现为「配置都对却秒挂」。
+#   故此处不指定 model，走平台默认模型，能力参数随之继承平台默认值。
+#   如需绑定特定模型，请填平台真实存在的 model ID（不带思考强度后缀）后再放开注释。
+#
+# 为何 max 后缀必须去掉：
+#   deepseek-v4.1-flash-{low,high,max} 只是「同一底座模型 + 不同思考强度」的
+#   三个变体名，合法的底座 model ID 只有 deepseek-v4.1-flash（或走平台默认模型）。
+#   直接把带后缀的名字传给 model，就是上一轮 400 的同款死法。
+#   故本题的解法是：model 只传底座 ID（或留空走默认），
+#   思考强度一律用 thinkingLevel 表达。
+#
+# 思考强度对照（deepseek-v4.1-flash 官方口径，三档同低思考档）：
+#   -low（最省）→ thinkingLevel: low
+#   无后缀      → thinkingLevel: off
+#   -high       → thinkingLevel: high
+#   -max        → thinkingLevel: xhigh   ← 本题落点（思辨档，最高）
+#
+# 为什么不把档位也做成 $变量：
+#   npc:go.options 走平台配置阶段的 Schema 校验，而校验发生在变量替换之前 ——
+#   thinkingLevel 的取值域是枚举（off/minimal/low/medium/high/xhigh/max），
+#   写成 $NPC_THINKING 会以「值不在枚举内」配置期直接红。所以档位必须写字面量。
+#
+# 装配方式（对齐官方《NPC - 按角色名配置》）：
+#   档位角色各自挂【角色名顶层 key】，同名事件覆盖 $ 下的定义，互不干扰；
+#   $ 只留中性档 DSCoder（不锁定档位，由平台默认配置决定）。
+#   新增档位 = settings.yml 建角色 + 这里加一个顶层 key，不要去改别的角色的 key。
 # ============================================================================
+# ── 中性档：@kingsa2026/neurova(DSCoder) ────────────────────────────────────
+# 不显式指定 thinkingLevel：走平台为默认模型配置的档位（本仓不锁死）。
 $:
   issue.comment@npc: &npc-pipeline
     - docker:
@@ -224,10 +254,63 @@ $:
         - name: DSCoder 执行任务
           type: npc:go
           options:
-            model: deepseek-v4.1-flash-max
+            # 不写 model = 走平台默认模型（与上一轮定稿一致，规避 400）；
+            # 想锁定底座模型时，填平台真实存在的 model ID（不带思考强度后缀）。
+            maxTurns: 500
+            contextWindow: 1m
+            maxTokens: 48k
+            # thinkingLevel 留空：沿用平台默认档位
+
+  pull_request.comment@npc: *npc-pipeline
+
+# ── 低档：@kingsa2026/neurova(DSCoder-low) ──────────────────────────────────
+DSCoder-low:
+  issue.comment@npc: &npc-level-low
+    - docker:
+        image: cnbcool/default-npc:latest
+      stages:
+        - name: "DSCoder-low 执行任务（thinkingLevel: low）"
+          type: npc:go
+          options:
+            maxTurns: 500
+            contextWindow: 1m
+            maxTokens: 48k
+            thinkingLevel: low
+
+  pull_request.comment@npc: *npc-level-low
+
+# ── 高档：@kingsa2026/neurova(DSCoder-high) ─────────────────────────────────
+DSCoder-high:
+  issue.comment@npc: &npc-level-high
+    - docker:
+        image: cnbcool/default-npc:latest
+      stages:
+        - name: "DSCoder-high 执行任务（thinkingLevel: high）"
+          type: npc:go
+          options:
             maxTurns: 500
             contextWindow: 1m
             maxTokens: 48k
             thinkingLevel: high
 
-  pull_request.comment@npc: *npc-pipeline
+  pull_request.comment@npc: *npc-level-high
+
+# ── 最高档（max 档）：@kingsa2026/neurova(DSCoder-max) ──────────────────────
+# 对应你给的映射：deepseek-v4.1-flash-max → 底座 deepseek-v4.1-flash + 最高思考档。
+# 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故此处落 xhigh。
+# 若后续平台开放 max 档，把本行改成 thinkingLevel: max 即可，其余不动。
+DSCoder-max:
+  issue.comment@npc: &npc-level-max
+    - docker:
+        image: cnbcool/default-npc:latest
+      stages:
+        - name: "DSCoder-max 执行任务（thinkingLevel: xhigh）"
+          type: npc:go
+          options:
+            maxTurns: 500
+            contextWindow: 1m
+            maxTokens: 48k
+            thinkingLevel: xhigh
+
+  pull_request.comment@npc: *npc-level-max
+
