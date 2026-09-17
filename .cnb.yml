@@ -208,13 +208,19 @@ main:
   pull_request: *pipelines
 
 # ============================================================================
-# 自定义 NPC —— DSCoder（DeepSeek 驱动）
+# 自定义 NPC —— DSCoder
 # ============================================================================
-# 角色定义见 .cnb/settings.yml；此处为 NPC 事件流水线，用于绑定模型等运行参数。
+# 角色定义见 .cnb/settings.yml；此处为 NPC 事件流水线。
 # 触发：Issue/PR 评论中 @kingsa2026/neurova(DSCoder)
 # 合并机制：本段覆盖同名事件，未声明的事件保留系统默认行为（故两个事件都声明）。
-# 说明：模型能力参数（maxTurns/contextWindow/maxTokens/thinkingLevel/supportImage）
-#   在指定自定义 model 后不再继承平台默认，故按 DeepSeek 常规能力显式给出兜底值。
+#
+# 为何不写 model：
+#   此前写死 model: deepseek-v4.1-flash-max，该模型 ID 平台并不存在，
+#   npc:go 又不校验 model 有效性（配置期不报错、流水线能启动），
+#   直到真正发请求才被 LLM 网关以 400 拒绝 —— 表现为「配置都对却秒挂」。
+#   故此处不指定 model，走平台默认模型；maxTurns/contextWindow/maxTokens/
+#   thinkingLevel 等能力参数随之继承平台默认值，避免与模型能力对不上。
+#   如需绑定特定模型，请填平台真实存在的 model ID 后再放开下方注释。
 # ============================================================================
 $:
   issue.comment@npc: &npc-pipeline
@@ -224,7 +230,7 @@ $:
         - name: DSCoder 执行任务
           type: npc:go
           options:
-            model: deepseek-v4.1-flash-max
+            # model: <平台真实存在的模型 ID>
             maxTurns: 500
             contextWindow: 1m
             maxTokens: 48k
