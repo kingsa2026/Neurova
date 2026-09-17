@@ -182,6 +182,23 @@ class TestNonBlockingParity:
             )
 
 
+# e2e 冒烟装依赖为 "requirements.txt --no-deps + 显式点名" 两段式：
+# --no-deps 不解析依赖树，conftest/被测 import 面用到的第三方包全靠显式点名带入。
+# 历史上 bcrypt 只经 requirements.txt 的 passlib[bcrypt] extra 隐式带入 → 点名行漏写它，
+# cnb/GitHub 双侧 e2e 同时 ModuleNotFoundError 挂掉（本守卫即为此立的常驻护栏）。
+# 注意：这些包不得进 scripts/ci_static_gate.py 的 KNOWN_OPTIONAL_DEPS——
+# 该表只收"缺席可优雅降级"项，它们缺席即 import 崩。
+E2E_REQUIRED_PACKAGES = (
+    "fastapi", "uvicorn", "httpx", "pydantic", "pydantic-settings", "pytest",
+    "pytest-timeout",  # `--timeout 240` 需要，缺席是 usage error 而非 import 失败
+    "bcrypt",  # neurova.auth.password_hasher 裸 import（conftest 必经）
+    "passlib",  # 同上，声明侧算法来源
+    "python-dotenv",  # 配置加载
+    "aiosqlite",  # sqlite 依赖
+    "prometheus_client",  # /metrics 暴露面
+)
+
+
 class TestAntiRegression:
     def test_cnb_not_echo_shell(self, cnb_pipelines):
         """防再生：任何流水线的 script 都不得只是 echo/占位（历史空壳形态）。"""
@@ -213,3 +230,39 @@ class TestAntiRegression:
             "NeurUI/package-lock.json",
         ):
             assert (PROJECT_ROOT / f).exists(), f"CI 配置引用的门禁构件缺失: {f}"
+
+    @pytest.mark.parametrize("side", ["cnb", "github"])
+    def test_e2e_smoke_deps_are_explicitly_pinned(self, side, cnb_pipelines, ghw_jobs):
+        """e2e 冒烟的显式点名集合必须覆盖 import 面（--no-deps 不解析依赖树）。
+
+        `requirements.txt --no-deps` + 显式点名是刻意的薄环境做法，代价是
+        点名行即唯一依赖来源：漏一个裸 import 包，双侧 e2e 一起 import 崩。
+        """
+        if side == "cnb":
+            scripts = _pipeline_scripts(cnb_pipelines["e2e-backend-boot"])
+        else:
+            scripts = _job_scripts(ghw_jobs["e2e"])
+        # 折行续行先归一，避免点名集合换行即假红
+        flat = scripts.replace("\\\n", " ")
+        for pkg in E2E_REQUIRED_PACKAGES:
+            assert pkg in flat, (
+                f"{side} 侧 e2e 显式点名缺包: {pkg}\n"
+                "--no-deps 下该包不会被依赖树带入，冒烟 import 面必崩。\n"
+                "改点名集合请同步 E2E_REQUIRED_PACKAGES 并说明 import 面变化。"
+            )
+
+    @pytest.mark.parametrize("side", ["cnb", "github"])
+    def test_e2e_smoke_keeps_no_deps_and_test_path(self, side, cnb_pipelines, ghw_jobs):
+        """e2e 冒烟的两段式安装语义不得被单侧改胖（全量装会让冒烟退化为慢门禁）。"""
+        if side == "cnb":
+            scripts = _pipeline_scripts(cnb_pipelines["e2e-backend-boot"])
+        else:
+            scripts = _job_scripts(ghw_jobs["e2e"])
+        flat = scripts.replace("\\\n", " ")
+        assert "requirements.txt --no-deps" in flat, (
+            f"{side} 侧 e2e 的 `requirements.txt --no-deps` 丢失——"
+            "冒烟会退化为全量依赖安装（慢且与 GitHub 侧语义分叉）"
+        )
+        assert "tests/e2e/test_backend_boot.py" in flat, (
+            f"{side} 侧 e2e 冒烟测试路径丢失"
+        )

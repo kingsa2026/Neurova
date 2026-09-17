@@ -147,11 +147,18 @@ main:
           - /root/.cache/pip
       stages:
         # 冒烟只需最小 import 面（health/docs/metrics/鉴权拒绝），不装全量依赖
+        # --no-deps 不解析依赖树，故 import 面用到的第三方包必须逐个显式点名：
+        #   bcrypt / passlib —— neurova.auth.password_hasher 用 bcrypt 原生 API 哈希
+        #                       （passlib 仅作声明侧的算法来源），缺席即 conftest 导入崩
+        #   python-dotenv / aiosqlite / prometheus_client —— 配置加载 / sqlite 依赖 /
+        #                       /metrics 暴露面（历史上曾随 passlib[bcrypt] 等 extras 隐式带入）
+        # 以上皆为"裸 import 无降级"，非已知可选依赖，不进 ci_static_gate.KNOWN_OPTIONAL_DEPS
         - name: install minimal runtime deps
           script: |
             python -m pip install --upgrade pip
             python -m pip install -r requirements.txt --no-deps
-            python -m pip install fastapi uvicorn httpx pydantic pydantic-settings pytest
+            python -m pip install fastapi uvicorn httpx pydantic pydantic-settings pytest \
+              pytest-timeout bcrypt passlib python-dotenv aiosqlite prometheus_client
           timeout: 20m
         - name: boot smoke (spawns real backend)
           script: python -m pytest tests/e2e/test_backend_boot.py -q --timeout 240
