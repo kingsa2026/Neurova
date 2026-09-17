@@ -133,6 +133,66 @@ def test_update_other_agent_404(env):
     assert client.put(f"{BASE}/private/{sid}?agent_id=attacker", json={"name": "x"}).status_code == 404
 
 
+# ── 2.5 P0 门控 × 编辑链：门默认开时编辑链必须照常落盘 ──────────
+# 根因（本轮修复的锚点）：`update_auto_skill` 是「进化提案链」与「编辑链」
+# 共用通道。门默认开（NEUROVA_SKILL_UPDATE_GATE=1）后，旧实现拿提案门槛
+# （名述自洽 / 生效正文非空）去咬编辑链，于是：
+#   - `PUT /private/{id}` 改 name/description → routing_sanity 拒 → 500
+#   - `share` 打标记（库存描述为空、只提交 config）→ content_non_empty 拒 → 500
+# 编辑链恒以 version=None 调用，不声称"更优"，这些闸对它无定义。
+
+
+def _plain_entry(tmp_path, agent_id, skill_id):
+    """读落盘条目（编辑链产物：无工具序列、描述空——真实存量形态）。"""
+    raw = json.loads((tmp_path / f"agent-{agent_id}" / "manifest.json").read_text(encoding="utf-8"))
+    return raw[skill_id]
+
+
+def test_editor_chain_field_edit_not_gated_by_routing_sanity(env):
+    """编辑链改描述（version=None）不得被"名述自洽"提案门槛咬。
+
+    用户私库备注文本（"nd"）与技能名天然无 token 交集——旧实现据此 500。
+    """
+    client, tmp_path = env
+    _authed(client)
+    sid = client.post(f"{BASE}/private?agent_id=a6", json={"name": "before"}).json()["skill_id"]
+    r = client.put(f"{BASE}/private/{sid}?agent_id=a6", json={"name": "after", "description": "nd"})
+    assert r.status_code == 200, r.text
+    entry = _plain_entry(tmp_path, "a6", sid)
+    assert entry["name"] == "after" and entry["description"] == "nd"
+
+
+def test_share_persists_flag_on_bare_entry(env):
+    """share 打标记（无工具序列、无描述的存量条目）不得被门拦。"""
+    client, tmp_path = env
+    _authed(client)
+    sid = client.post(f"{BASE}/private?agent_id=a7", json={"name": "sh2"}).json()["skill_id"]
+    r = client.post(f"{BASE}/private/{sid}/share?agent_id=a7", json={"target_user_id": "bob"})
+    assert r.status_code == 200, r.text
+    cfg = _plain_entry(tmp_path, "a7", sid)["manifest"]["config"]
+    assert cfg["shared"] is True and cfg["shared_with"] == ["bob"]
+
+
+def test_enabled_toggle_on_bare_entry(env):
+    """enabled 开关（编辑链最轻的字段改动）不得被门拦。"""
+    client, tmp_path = env
+    _authed(client)
+    sid = client.post(f"{BASE}/private?agent_id=a8", json={"name": "tog"}).json()["skill_id"]
+    r = client.put(f"{BASE}/private/{sid}?agent_id=a8", json={"enabled": False})
+    assert r.status_code == 200, r.text
+    assert _plain_entry(tmp_path, "a8", sid)["enabled"] is False
+
+
+def test_editor_chain_cannot_clear_existing_description(env):
+    """反向：编辑链也**不得把已有描述清空**（清空式改写不许从侧门绕过）。"""
+    client, tmp_path = env
+    _authed(client)
+    sid = client.post(f"{BASE}/private?agent_id=a9", json={"name": "keep", "description": "原有说明"}).json()["skill_id"]
+    r = client.put(f"{BASE}/private/{sid}?agent_id=a9", json={"description": ""})
+    assert r.status_code == 500, "清空描述必须被拒（旧洞不得从编辑链重开）"
+    assert _plain_entry(tmp_path, "a9", sid)["description"] == "原有说明"
+
+
 # ── 3. share / push 真实化 ─────────────────────────────────
 
 
