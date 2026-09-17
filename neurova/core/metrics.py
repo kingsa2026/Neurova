@@ -6,7 +6,9 @@ generate_latest() 输出（替换手拼文本格式）。埋点 API：
 - Metrics.record_tool_execution(tool_name, success, duration_s)
 - Metrics.record_llm_call(provider, model, success, duration_s)
 - Metrics.record_memory_recall(source, latency_s)
-- Metrics.observe_updater(state)  # gauges 快照
+- Metrics.observe_state(state)  # 运行态 gauges 快照（/metrics 抓取时）
+- Metrics.observe_pools()  # 连接池 / 共享线程池 gauges 快照
+- Metrics.record_db_connection_created/closed(db_path)  # 连接创建/销毁频率
 """
 
 from __future__ import annotations
@@ -46,6 +48,40 @@ class _Metrics:
         )
         self.channels_total = Gauge(
             "neurova_channels_total", "Total number of registered channels"
+        )
+
+        # ── 连接池（P0-2：池此前零指标，"连接创建/销毁频率""并发连接数"不可测）──
+        self.db_pool_connections = Gauge(
+            "neurova_db_pool_connections",
+            "SQLite pool connection count by state",
+            ["db", "state"],
+        )
+        self.db_connections_created_total = Counter(
+            "neurova_db_connections_created_total",
+            "SQLite connections created",
+            ["db"],
+        )
+        self.db_connections_closed_total = Counter(
+            "neurova_db_connections_closed_total",
+            "SQLite connections closed",
+            ["db"],
+        )
+
+        # ── 共享线程池（P0-2：线程数/队列深度此前不可测）──
+        self.thread_pool_threads = Gauge(
+            "neurova_thread_pool_threads",
+            "Live worker threads in shared thread pools",
+            ["pool"],
+        )
+        self.thread_pool_queue_depth = Gauge(
+            "neurova_thread_pool_queue_depth",
+            "Pending tasks queued in shared thread pools",
+            ["pool"],
+        )
+        self.thread_pool_max_workers = Gauge(
+            "neurova_thread_pool_max_workers",
+            "Configured max workers of shared thread pools",
+            ["pool"],
         )
 
         # ── 工具执行 ──
@@ -131,28 +167,116 @@ class _Metrics:
         except Exception:
             logger.debug("memory metrics record failed", exc_info=True)
 
-    def observe_state(self, state: Any) -> None:
-        """运行态 gauge 快照（/metrics 请求时调用）。"""
+    # ── 连接池 / 线程池（P0-2）──
+
+    def record_db_connection_created(self, db_path: str) -> None:
+        """连接创建计数（池内新建连接；启动后可算创建/销毁频率）。"""
         try:
-            self.uptime_seconds.set(state.get_uptime() if state else 0)
-            self.agents_total.set(len(state.agents) if state else 0)
-            self.voice_engines_total.set(len(state.voice_engines) if state else 0)
-            tts = state.voice_engines.get("tts") if state else None
-            self.voice_tts_available.set(
-                1 if tts and tts.is_available() else 0
-            )
-            asr = state.voice_engines.get("asr") if state else None
-            self.voice_asr_available.set(
-                1 if asr and asr.is_available() else 0
-            )
-            channels = (
+            self.db_connections_created_total.labels(db=str(db_path)).inc()
+        except Exception:
+            logger.debug("db connection created metric failed", exc_info=True)
+
+    def record_db_connection_closed(self, db_path: str) -> None:
+        """连接销毁计数。"""
+        try:
+            self.db_connections_closed_total.labels(db=str(db_path)).inc()
+        except Exception:
+            logger.debug("db connection closed metric failed", exc_info=True)
+
+    def observe_pools(self) -> None:
+        """连接池 / 共享线程池 gauge 快照（/metrics 请求时调用）。
+
+        数据源是运行态对象（连接池队列、线程池内部状态），故与
+        observe_state 一样走"抓取时快照"而非常驻埋点。
+        """
+        try:
+            from neurova.core.connection_pool import iter_pools
+
+            for db_path, pool in iter_pools():
+                try:
+                    self.db_pool_connections.labels(
+                        db=str(db_path), state="idle"
+                    ).set(pool.pool_size)
+                    self.db_pool_connections.labels(
+                        db=str(db_path), state="active"
+                    ).set(pool.active_count)
+                    self.db_pool_connections.labels(
+                        db=str(db_path), state="total"
+                    ).set(pool.total_count)
+                except Exception:  # noqa: BLE001 - 单个池异常不影响其它池
+                    logger.debug("db pool gauge failed: %s", db_path, exc_info=True)
+        except Exception:
+            logger.debug("db pool gauges update failed", exc_info=True)
+
+        try:
+            from neurova.core.thread_pool import iter_pools as _iter_thread_pools
+
+            for name, pool in _iter_thread_pools():
+                try:
+                    self.thread_pool_threads.labels(pool=str(name)).set(
+                        len(getattr(pool, "_threads", ()) or ())
+                    )
+                    queue = getattr(pool, "_work_queue", None)
+                    self.thread_pool_queue_depth.labels(pool=str(name)).set(
+                        queue.qsize() if queue is not None else 0
+                    )
+                    self.thread_pool_max_workers.labels(pool=str(name)).set(
+                        getattr(pool, "_max_workers", 0) or 0
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.debug("thread pool gauge failed: %s", name, exc_info=True)
+        except Exception:
+            logger.debug("thread pool gauges update failed", exc_info=True)
+
+    def observe_state(self, state: Any) -> None:
+        """运行态 gauge 快照（/metrics 请求时调用）。
+
+        逐项隔离异常：单个引擎/组件取值失败只让该 gauge 停在旧值，
+        不得连带清空其余指标（/metrics 是唯一事实源，整体静默失败
+        等于观测面塌陷）。
+        """
+        self._safe_set(
+            self.uptime_seconds, lambda: state.get_uptime() if state else 0, "uptime"
+        )
+        self._safe_set(
+            self.agents_total, lambda: len(state.agents) if state else 0, "agents"
+        )
+        self._safe_set(
+            self.voice_engines_total,
+            lambda: len(state.voice_engines) if state else 0,
+            "voice_engines",
+        )
+        self._safe_set(
+            self.voice_tts_available,
+            lambda: self._voice_available(state, "tts"),
+            "tts_available",
+        )
+        self._safe_set(
+            self.voice_asr_available,
+            lambda: self._voice_available(state, "asr"),
+            "asr_available",
+        )
+        self._safe_set(
+            self.channels_total,
+            lambda: (
                 len(state.channel_manager._adapters)
                 if state and state.channel_manager
                 else 0
-            )
-            self.channels_total.set(channels)
-        except Exception:
-            logger.debug("state gauges update failed", exc_info=True)
+            ),
+            "channels",
+        )
+
+    @staticmethod
+    def _voice_available(state: Any, kind: str) -> int:
+        engine = state.voice_engines.get(kind) if state else None
+        return 1 if engine and engine.is_available() else 0
+
+    @staticmethod
+    def _safe_set(gauge: Any, producer, label: str) -> None:
+        try:
+            gauge.set(producer())
+        except Exception:  # noqa: BLE001 - 单项失败不影响其它 gauge
+            logger.debug("gauge %s update failed", label, exc_info=True)
 
 
 _metrics: Optional[_Metrics] = None
@@ -164,6 +288,16 @@ def get_metrics() -> _Metrics:
     if _metrics is None:
         _metrics = _Metrics()
     return _metrics
+
+
+def record_db_connection_created(db_path: str) -> None:
+    """模块级便捷入口（连接池埋点，避免各模块持有 metrics 单例引用）。"""
+    get_metrics().record_db_connection_created(db_path)
+
+
+def record_db_connection_closed(db_path: str) -> None:
+    """模块级便捷入口（连接池埋点）。"""
+    get_metrics().record_db_connection_closed(db_path)
 
 
 def generate_metrics_text() -> str:

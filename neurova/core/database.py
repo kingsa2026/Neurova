@@ -64,9 +64,14 @@ def return_db_conn(conn: sqlite3.Connection) -> None:
 
 
 def _get_all_pools():
-    """获取所有连接池（内部方法）"""
-    from neurova.core.connection_pool import _pools
-    return _pools.values()
+    """获取所有连接池（内部方法）
+
+    返回快照列表：直接返回 _pools.values() 视图时，并发新建池会让迭代中
+    的 return_db_conn 撞 "dictionary changed size during iteration"。
+    """
+    from neurova.core.connection_pool import iter_pools
+
+    return [pool for _, pool in iter_pools()]
 
 
 @contextmanager

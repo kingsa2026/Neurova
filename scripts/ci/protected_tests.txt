@@ -25,3 +25,6 @@ tests/unit/api/test_skill_pool_api_auth_consolidation.py
 tests/unit/evolution/test_skill_consolidation_structural_and_deadcode_p1p2.py
 # Issue #48 NPC 思考档位修正：model 禁带思考强度后缀 / thinkingLevel 必须字面量枚举
 tests/unit/test_ci_npc_config_guard.py
+
+# Issue #57 P0-1/P0-2 观测底座收口：/metrics 单一事实源 + 连接池/线程池 gauge
+tests/unit/core/test_metrics_pool_observability_p0.py
