@@ -160,7 +160,7 @@ class ToolSequenceSkill(Skill):
 
         step_outputs: Dict[int, Any] = {}
         for idx, step in enumerate(sequence):
-            # 步进归一化：进化产物（genetic_engine/skill_packer/nl_synthesizer、
+            # 步进归一化：进化产物（genetic_engine/skill_encapsulation/nl_synthesizer、
             # 冷启动恢复）的 tool_sequence 是 List[str]；create_skill 产物是
             # dict。str 步在此统一为 {"tool": str}，否则自动技能注册成功但
             # 调用必败（"第 0 步格式错误"），闭环后段全是假失败数据。
