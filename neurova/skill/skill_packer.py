@@ -8,6 +8,18 @@ Pack prerequisites:
 1. skill library has no matching skill
 2. problem solution has more than 2 steps
 3. two or more successful executions of the same task type
+
+⚠️ 已被取代（2026-09-17 复核确认，保留待清理）：
+  - `get_skill_packer()` 生产零调用；`agent_core` 的 `skill_packer` 属性实为
+    `AutoSkillBuilder`（evolution 模块），注释已写明"替换旧的 SkillPacker"；
+  - 本模块的打包产物**不经过证据闸**（`creation_governance` 要求三次独立
+    真实成功任务），与新链路的安全基线冲突；
+  - 唯一仍在生产生效的是 `SkillPacker.observe`：经
+    `creation_governance.finish_task` 调用，但那是**同一 API 名的另一个类**
+    （AutoSkillBuilder），与本文件无关。
+  清理前置：确认 `tests/skill/*` 与 `tests/unit/evolution/test_skill_review_gate.py`
+  的引用可迁移后整体删除（本 PR 不做，避免"审计报告写着清掉了、其实只是
+  换了名字"的假收口）。
 """
 
 from __future__ import annotations
@@ -639,6 +651,7 @@ _DEFAULT_DIR = "./data/skill_packer"
 
 
 def get_skill_packer() -> SkillPacker:
+    """⚠️ 零生产调用：见模块头"已被取代"。新链路请用 AutoSkillBuilder。"""
     global _singleton
     with _singleton_lock:
         if _singleton is None:

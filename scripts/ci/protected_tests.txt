@@ -16,3 +16,5 @@ tests/unit/tools/test_mcp_router_integration.py
 tests/unit/tools/test_mcp_user_isolation.py
 tests/unit/tools/test_p0_5_dead_paths.py
 tests/integration/test_tool_engine_integration.py
+# Issue #46 RSI 闭环收口：P0 优秀门控/零增益放行 + P1 统一指纹/合并接线
+tests/unit/evolution/test_skill_gate_and_unified_identity_p0p1.py
