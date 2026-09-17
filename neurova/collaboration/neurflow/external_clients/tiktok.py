@@ -1,9 +1,12 @@
 """Platform client implementation; shared dependencies remain on the facade."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from .. import external_api as api
+
+if TYPE_CHECKING:  # annotations only - runtime import would cycle back through the facade
+    from ..store_connections import StoreCredentials
 
 
 class TikTokShopClient(api._OpenGatewayClientBase):
