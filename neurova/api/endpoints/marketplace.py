@@ -742,12 +742,14 @@ def _materialize_public_entry(submission: Dict[str, Any], kind: str) -> None:
                     **_carry,
                 }
             )
+            # 市场物化 = 系统级维护通道（内容来自已审核提交），豁免质量门。
             pub.update_auto_skill(
                 sid,
                 version=version,
                 config=cfg,
                 name=fields["name"],
                 description=fields["description"],
+                enforce_quality=False,
             )
             # Wave H-W4：公共升级 → 派生副本确认卡（需求 5，"用户确认升级后迭代"）
             _broadcast_public_upgrade(sid, version, fields["name"])

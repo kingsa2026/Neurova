@@ -47,6 +47,8 @@ class EvolutionRunResult:
     iterations_run: int = 0
     bench_gain: float = 0.0
     constraint_failures: list[str] = field(default_factory=list)
+    # P0：判分可用性（judge 全线失败/输出不可解析 → 任何"增益"都不可信）
+    judge_available: bool = True
 
     @property
     def improvement(self) -> float:
@@ -67,6 +69,7 @@ class EvolutionRunResult:
             "train_best": round(self.train_best, 4),
             "iterations_run": self.iterations_run,
             "bench_gain": round(self.bench_gain, 4),
+            "judge_available": self.judge_available,
             "changed": self.changed,
             "constraint_failures": list(self.constraint_failures),
         }
@@ -208,6 +211,14 @@ class SkillEvolutionRunner:
         if not tune:
             tune = holdout
 
+        # P0 判分可用性前置：judge 全线不可用时，"before/after 都是中性 0.5"
+        # 曾被当成"零增益通过"。先探针，不可用直接判 judge_unavailable。
+        if not await self._judge_available(baseline_text, holdout, artifact_type):
+            result.judge_available = False
+            result.rejected = True
+            result.reject_reason = "judge_unavailable"
+            return result
+
         result.holdout_before = await self._evaluate_avg(baseline_text, holdout, artifact_type)
         result.train_before = await self._evaluate_avg(baseline_text, tune, artifact_type)
 
@@ -245,6 +256,7 @@ class SkillEvolutionRunner:
             return result
 
         # ── 判定 2:无实质增益 → 保留基线 ──
+        # （min_improvement 默认已是正数 0.01：零增益不再因浮点相等而放行）
         if result.holdout_after <= result.holdout_before + self.config.min_improvement + _EPS:
             result.rejected = True
             result.reject_reason = "no_improvement"
@@ -271,3 +283,42 @@ class SkillEvolutionRunner:
                             artifact_type: str) -> float:
         avg, _ = await self._evaluate(skill_text, examples, artifact_type)
         return avg
+
+    async def _judge_available(self, skill_text: str, examples: list[EvalExample],
+                               artifact_type: str) -> bool:
+        """探针：这批用例上判分是否真实可用（P0 零增益放行堵漏）。
+
+        `FitnessScore.judge_available` 是**可选**契约（外部 judge 不实现也
+        合理），但缺省值时不能假设"可用"——那等于把老行为放回来。因此这里
+        按 best-effort 从两种判分器形态取真实产物：
+          - 实例带 `.score(...)`（LLMJudge / 测试脚本 judge）→ 直接看回值标注；
+          - 纯函数 judge → 无标注，视为可用（它没有"LLM 不可用"这个态）。
+        取不到任何产物（异常/None）一律判不可用：判分没跑起来就不是证据。
+        """
+        if not examples:
+            return True
+        scorer = getattr(self.judge, "score", None)
+        if scorer is None:
+            return True  # 纯函数判分器：不存在"判分基础设施不可用"
+        ex = examples[0]
+        try:
+            output = await self.agent.run(skill_text=skill_text, task_input=ex.task_input)
+            max_size = (
+                self.config.max_tool_desc_size
+                if artifact_type == "tool_description"
+                else self.config.max_skill_size
+            )
+            score = await self._call_judge(
+                task_input=ex.task_input,
+                expected_behavior=ex.expected_behavior,
+                output=output,
+                skill_text=skill_text,
+                artifact_size=len(skill_text),
+                max_size=max_size,
+            )
+        except Exception as e:  # noqa: BLE001 - 探针自身故障 = 判分不可用（保守拒绝）
+            logger.debug("judge 可用性探针失败: %s", e)
+            return False
+        if score is None:
+            return False
+        return bool(getattr(score, "judge_available", True))

@@ -204,16 +204,28 @@ class TestFirewallStatsEndpoint:
 
 
 class TestSyntaxErrorsFixed:
-    """缺陷：3 个文件存在语法错误，无法被任何工具解析或导入。"""
+    """缺陷：2026-08-28 审计确认的 3 个语法错误文件。
 
-    @pytest.mark.parametrize(
-        "path",
-        [
-            "scripts/verify_cli_commands.py",
-            "scripts/diagnose_post_issue.py",
-            "tests/runners/comprehensive_test_runner.py",
-        ],
+    原参数矩阵含 `scripts/verify_cli_commands.py` 与 `scripts/diagnose_post_issue.py`，
+    但这两个文件**从未入库**（`git log --all` 无任何新增记录）：审计当时它们只是
+    工作区里的临时验证脚本，被 `.gitignore` 的 `verify*.py` / `diagnose_post_issue.py`
+    规则挡住。在干净的 CI 克隆里它们不存在 → `read_text` 抛 `FileNotFoundError`，
+    门禁红的是"测试写死了本地专属路径"，不是代码里真有语法错误。
+
+    故此处只保留**已确认在库**的文件做解析断言；另加守卫断言历史路径不得回填，
+    防止有人把本地文件当基线重新塞回参数矩阵（复发即红）。
+    """
+
+    # 已入库、必须始终可被 ast 解析的文件
+    TRACKED_FILES = ("tests/runners/comprehensive_test_runner.py",)
+
+    # 审计期仅存在于本地工作区、从未入库的路径（不得出现在解析矩阵里）
+    NEVER_TRACKED_PATHS = (
+        "scripts/verify_cli_commands.py",
+        "scripts/diagnose_post_issue.py",
     )
+
+    @pytest.mark.parametrize("path", TRACKED_FILES)
     def test_file_parses(self, path):
         import ast
         import pathlib
@@ -221,3 +233,23 @@ class TestSyntaxErrorsFixed:
         root = pathlib.Path(__file__).resolve().parents[2]
         source = (root / path).read_text(encoding="utf-8")
         ast.parse(source, filename=path)
+
+    def test_local_only_audit_scripts_are_not_in_parse_matrix(self):
+        """从未入库的本地脚本不得作为 CI 断言目标（否则干净克隆必红）。"""
+        import inspect
+
+        src = inspect.getsource(TestSyntaxErrorsFixed)
+        matrix = src.split("TRACKED_FILES = (", 1)[1].split(")", 1)[0]
+        offenders = [p for p in self.NEVER_TRACKED_PATHS if p in matrix]
+        assert not offenders, (
+            f"解析矩阵回填了从未入库的本地脚本 {offenders} —— 干净克隆读不到该文件，"
+            "CI 会以 FileNotFoundError 假红。要断言它就先把文件真正入库。"
+        )
+
+    def test_parse_matrix_files_are_tracked(self):
+        """解析矩阵里的每个文件都必须真实存在于仓库（干净克隆可读）。"""
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[2]
+        missing = [p for p in self.TRACKED_FILES if not (root / p).exists()]
+        assert not missing, f"解析矩阵引用了仓库中不存在的文件：{missing}"

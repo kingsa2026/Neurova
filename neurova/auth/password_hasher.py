@@ -1,16 +1,36 @@
 """
 Neurova 密码加密工具
 
-使用 bcrypt 进行密码加密和验证
+优先使用 bcrypt 进行密码加密和验证；bcrypt 缺席时降级到 PBKDF2-SHA256
+（与 neurova/api/auth.py 的 hash_password 同一降级策略与同一哈希格式）。
+
+被降级的原因（CI 实测）：e2e job 按设计只装最小 import 面
+（requirements.txt --no-deps + fastapi/uvicorn/...），而 passlib[bcrypt] 的
+bcrypt extra 在 --no-deps 下不会被解析，bcrypt 必然缺席。此前本模块在
+模块级硬 `import bcrypt`，导致 tests/e2e/conftest.py 收集即 ImportError，
+boot 冒烟整条流水线在"还没启动后端"时就红（exit 4）。模块级硬导入与
+"CI 精简依赖"这一前提直接冲突，故改为模块级可选导入 + 调用点降级。
 """
 
 from neurova.core.logger import get_logger
+import base64
+import hashlib
 import secrets
 import typing
 
-import bcrypt
+try:  # bcrypt 为可选依赖：缺席时降级 PBKDF2，不阻断导入
+    import bcrypt
+
+    BCRYPT_AVAILABLE = True
+except ImportError:  # pragma: no cover - 精简 CI 环境走此分支
+    bcrypt = None  # type: ignore[assignment]
+    BCRYPT_AVAILABLE = False
 
 logger = get_logger(__name__)
+
+# PBKDF2 降级参数（与 neurova/api/auth.py 保持同格式同强度，可互认）
+PBKDF2_ITERATIONS = 260000
+PBKDF2_ALGO = "pbkdf2:sha256"
 
 
 class PasswordHasher:
@@ -27,7 +47,11 @@ class PasswordHasher:
             rounds: bcrypt 的轮数，值越大越安全但越慢（默认12）
         """
         self.rounds = rounds
-        logger.info("PasswordHasher initialized with rounds=%d", rounds)
+        logger.info(
+            "PasswordHasher initialized with rounds=%d, backend=%s",
+            rounds,
+            "bcrypt" if BCRYPT_AVAILABLE else "pbkdf2",
+        )
 
     def hash_password(self, password: str) -> str:
         """
@@ -45,15 +69,26 @@ class PasswordHasher:
         if not password:
             raise ValueError("Password cannot be empty")
 
-        try:
-            # 生成盐并哈希密码
-            salt = bcrypt.gensalt(rounds=self.rounds)
-            hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
-            return hashed.decode("utf-8")
+        if BCRYPT_AVAILABLE:
+            try:
+                # 生成盐并哈希密码
+                salt = bcrypt.gensalt(rounds=self.rounds)
+                hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
+                return hashed.decode("utf-8")
+            except Exception as e:
+                logger.error("Failed to hash password: %s", e)
+                raise
 
-        except Exception as e:
-            logger.error("Failed to hash password: %s", e)
-            raise
+        # bcrypt 缺席：降级 PBKDF2-SHA256（带随机盐，NIST 推荐 KDF）
+        logger.warning("bcrypt 不可用，降级使用 PBKDF2-SHA256 哈希密码")
+        salt = secrets.token_bytes(16)
+        dk = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), salt, iterations=PBKDF2_ITERATIONS
+        )
+        return (
+            f"{PBKDF2_ALGO}:{PBKDF2_ITERATIONS}:"
+            f"{base64.b64encode(salt).decode()}:{base64.b64encode(dk).decode()}"
+        )
 
     def verify_password(self, password: str, hashed_password: str) -> bool:
         """
@@ -72,13 +107,43 @@ class PasswordHasher:
         if not password or not hashed_password:
             raise ValueError("Password and hashed password cannot be empty")
 
-        try:
-            # 验证密码
-            return bcrypt.checkpw(password.encode("utf-8"), hashed_password.encode("utf-8"))
+        if BCRYPT_AVAILABLE:
+            try:
+                # 验证密码
+                return bcrypt.checkpw(password.encode("utf-8"), hashed_password.encode("utf-8"))
+            except ValueError:
+                # 不是 bcrypt 哈希格式（如 PBKDF2 产物）→ 落到下方统一校验
+                pass
+            except Exception as e:
+                logger.error("Failed to verify password: %s", e)
+                return False
 
-        except Exception as e:
-            logger.error("Failed to verify password: %s", e)
+        # bcrypt 缺席或哈希非 bcrypt 格式：走 PBKDF2-SHA256 校验
+        return self._verify_pbkdf2(password, hashed_password)
+
+    @staticmethod
+    def _verify_pbkdf2(password: str, hashed_password: str) -> bool:
+        """校验 PBKDF2-SHA256 哈希（格式 pbkdf2:sha256:<iters>:<salt_b64>:<dk_b64>）。
+
+        未知/无盐格式一律拒绝——不静默回退到弱哈希。
+        """
+        if not hashed_password.startswith(PBKDF2_ALGO + ":"):
             return False
+        parts = hashed_password.split(":")
+        if len(parts) != 5:
+            return False
+        _, _, iterations_b64, salt_b64, dk_b64 = parts
+        try:
+            iterations = int(iterations_b64)
+            salt = base64.b64decode(salt_b64)
+            expected = base64.b64decode(dk_b64)
+        except (ValueError, TypeError) as e:
+            logger.error("Failed to parse PBKDF2 hash: %s", e)
+            return False
+        dk = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), salt, iterations=iterations
+        )
+        return secrets.compare_digest(dk, expected)
 
     def generate_random_password(self, length: int = 16) -> str:
         """

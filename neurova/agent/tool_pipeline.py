@@ -192,7 +192,15 @@ class LifecycleUpdateStep(ToolExecutionStep):
 
 
 class SkillObservationStep(ToolExecutionStep):
-    """观察技能序列。"""
+    """观察技能序列。
+
+    ⚠️ 零生产调用（2026-09-17 复核确认）：生产链路的观察点是
+    `creation_governance` 的 ContextVar 采集器（begin_task /
+    record_tool_execution / finish_task），本 Step 与 `create_default_pipeline`
+    在 `neurova/` 内**无任何调用方**（仅测试引用），历史上是 SkillPacker 时代
+    的通道。保留是因为它仍可工作（测试在跑），但**不要**把它当作新增接线的
+    模板——新增观察需求请走 ContextVar 采集器，那条才有证据闸。
+    """
 
     def __init__(self, skill_packer):
         self.skill_packer = skill_packer
@@ -475,8 +483,11 @@ def create_default_pipeline(
     evolution=None,
     config: Optional[PipelineConfig] = None,
 ) -> ToolExecutionPipeline:
-    """
-    创建默认Pipeline（旧语义四步骤）。
+    """创建默认Pipeline（旧语义四步骤）。
+
+    ⚠️ 零生产调用（2026-09-17 复核确认）：生产装配走 `ToolExecutor` 的
+    result-observer 扩展点（`get_pipeline_observers`），本函数只在测试里被
+    调用。保留为兼容门面，新增接线请勿使用。
 
     Args:
         tool_memory: 工具记忆实例

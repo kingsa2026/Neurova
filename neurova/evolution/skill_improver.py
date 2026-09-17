@@ -602,8 +602,11 @@ class AutoSkillImprover:
             # 的 split-brain（原只 warning 不回滚 = 重启回旧版）。
             if skill_service is not None:
                 try:
+                    # P0 门控：改进是"提案方自证更优"的通道，必须过内容/版本/路由
+                    # 闸（enforce_quality=True）——不得依赖全局开关就默认放行。
                     saved = skill_service.update_auto_skill(
-                        skill_id=skill_id, version=skill.version, config=skill.config
+                        skill_id=skill_id, version=skill.version, config=skill.config,
+                        enforce_quality=True,
                     )
                 except Exception as svc_err:
                     logger.warning("改进落盘异常 %s: %s", skill_id, svc_err)
@@ -686,10 +689,13 @@ class AutoSkillImprover:
 
             # 回滚落盘：磁盘 manifest 与内存态同步（否则重启后回到未回滚状态）。
             # P1-5：落盘失败 → 还原改进后快照 + rev 回 revisions + 返回 False。
+            # P0 门控：回滚是**回归旧版**语义（版本刻意回退），显式豁免质量门，
+            # 否则"能回滚"这条安全绳会被"版本只升不降"闸亲手剪断。
             if skill_service is not None:
                 try:
                     saved = skill_service.update_auto_skill(
-                        skill_id=skill_id, version=skill.version, config=skill.config
+                        skill_id=skill_id, version=skill.version, config=skill.config,
+                        enforce_quality=False,
                     )
                 except Exception as svc_err:
                     logger.warning("回滚落盘异常 %s: %s", skill_id, svc_err)
