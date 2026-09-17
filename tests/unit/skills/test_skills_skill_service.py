@@ -9,6 +9,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 from neurova.skills.models import SkillInfo, SkillSource, ExperienceRecord
+from tests.unit.skills.creation_helpers import register_proven_skill
 from neurova.skills.skill_service import SkillService
 
 
@@ -55,17 +56,17 @@ class TestAutoSkill:
     """register_auto_skill / update_auto_skill（S3 P0 #2 桥接）"""
 
     def test_register_auto_skill(self, skill_service: SkillService):
-        ok = skill_service.register_auto_skill("auto1", "自动技能", description="d", config={"k": "v"})
+        ok = register_proven_skill(skill_service, "auto1", "自动技能", description="d", config={"k": "v"})
         assert ok is True
         skills = skill_service.list_skills()
         assert any(s["id"] == "auto1" for s in skills)
 
     def test_register_duplicate(self, skill_service: SkillService):
-        assert skill_service.register_auto_skill("dup", "n1") is True
-        assert skill_service.register_auto_skill("dup", "n2") is False
+        assert register_proven_skill(skill_service, "dup", "n1") is True
+        assert register_proven_skill(skill_service, "dup", "n2") is False
 
     def test_update_auto_skill(self, skill_service: SkillService):
-        skill_service.register_auto_skill("up1", "n")
+        register_proven_skill(skill_service, "up1", "n")
         ok = skill_service.update_auto_skill("up1", version="2.0.0")
         assert ok is True
         assert skill_service.get_skill_info("up1")["version"] == "2.0.0"

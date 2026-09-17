@@ -17,6 +17,9 @@ import { createI18n } from 'vue-i18n'
 
 vi.mock('@/api', () => ({
   request: { get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
+  // stores/agents（AgentPageTabs 依赖链）用命名导出 api.get('/agents')；
+  // 缺导出会在挂载时报 "No api export" 噪声（2026-09-16 全量回归清理）
+  api: { get: vi.fn().mockResolvedValue({ data: [] }), post: vi.fn(), put: vi.fn(), delete: vi.fn() },
 }))
 
 vi.mock('@/stores/auth', () => ({

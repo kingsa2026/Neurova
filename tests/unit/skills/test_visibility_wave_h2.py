@@ -31,15 +31,17 @@ def lib_base(tmp_path, monkeypatch):
 
 def _seed(pool, owner, skill_id, description="d", **kw):
     svc = lib.get_library(pool, owner)
-    assert svc.register_auto_skill(
+    from tests.unit.skills.creation_helpers import register_proven_skill
+    assert register_proven_skill(svc,
         skill_id,
         name=description or skill_id,
         description=description,
-        config={"tool_sequence": ["a", "b"], **kw.get("config", {})},
+        config={"tool_sequence": ["a", "b"], "task_purpose": skill_id, **kw.get("config", {})},
         manifest_source="auto",
         pool_type=pool,
         owner_user_id=owner,
     )
+    assert svc.enable_skill(skill_id)["success"]  # Visibility fixtures represent reviewed skills.
     return svc
 
 

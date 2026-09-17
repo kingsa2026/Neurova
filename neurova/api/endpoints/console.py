@@ -1860,155 +1860,24 @@ async def get_feedback_stats(
 # ── File endpoints ─────────────────────────────────────
 
 
-@router.post("/upload")
-async def post_console_upload(
-    request: Request,
-    file: UploadFile = File(...),
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """上传文件（BUG AUDIT S-08: 原零鉴权, 匿名可投递任意文件）"""
-    safe_name = _safe_filename(file.filename or "unnamed")
-    file_id = str(uuid.uuid4())[:8]
-    dest = _CONSOLE_UPLOAD_DIR / f"{file_id}_{safe_name}"
+from .console_files import (
+    router as _files_router,
+    post_console_upload, list_console_uploads, get_console_upload, delete_console_upload,
+)
 
-    content = await file.read()
-    dest.write_bytes(content)
-
-    file_info = {
-        "file_id": file_id,
-        "filename": safe_name,
-        "size": len(content),
-        "content_type": file.content_type or "application/octet-stream",
-        "path": str(dest),
-        "uploaded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    }
-    return {"code": 0, "message": "File uploaded", "data": file_info}
-
-
-@router.get("/uploads")
-async def list_console_uploads(
-    request: Request,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """列出已上传文件"""
-    files = []
-    for f in sorted(_CONSOLE_UPLOAD_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-        if f.is_file():
-            files.append(
-                {
-                    "filename": f.name,
-                    "size": f.stat().st_size,
-                    "modified": datetime.datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
-                }
-            )
-    return {"code": 0, "message": "success", "data": {"files": files, "total": len(files)}}
-
-
-@router.get("/uploads/{filename}")
-async def get_console_upload(
-    filename: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """下载文件"""
-    safe = _safe_filename(filename)
-    path = _CONSOLE_UPLOAD_DIR / safe
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(str(path), filename=safe)
-
-
-@router.delete("/uploads/{filename}")
-async def delete_console_upload(
-    filename: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """删除文件"""
-    safe = _safe_filename(filename)
-    path = _CONSOLE_UPLOAD_DIR / safe
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    path.unlink()
-    return {"code": 0, "message": "File deleted"}
+router.include_router(_files_router)
 
 
 # ── Debug endpoints ────────────────────────────────────
 
 
-@router.get("/debug/logs")
-async def get_backend_debug_logs(
-    lines: int = 100,
-    _admin: Dict[str, Any] = Depends(require_admin()),
-):
-    """查看后端日志"""
-    log_path = config.get("NEUROVA_LOG_FILE", "logs/neurova.log")
-    if os.path.exists(log_path):
-        content = _tail_text_file(log_path, lines)
-    else:
-        content = "Log file not found. Set NEUROVA_LOG_FILE environment variable."
-    return {"code": 0, "message": "success", "data": {"content": content, "lines": lines}}
+from .console_system import (
+    router as _debug_router, bind_command_endpoint as _bind_command_endpoint,
+    get_backend_debug_logs, get_system_status,
+)
 
-
-@router.get("/debug/status")
-async def get_system_status(
-    _admin: Dict[str, Any] = Depends(require_admin()),
-):
-    """系统状态"""
-    import psutil
-
-    try:
-        cpu = psutil.cpu_percent(interval=0.1)
-        mem = psutil.virtual_memory()
-        disk = psutil.disk_usage("/")
-        status = {
-            "cpu_percent": cpu,
-            "memory_percent": mem.percent,
-            "memory_used_mb": round(mem.used / 1048576),
-            "memory_total_mb": round(mem.total / 1048576),
-            "disk_percent": disk.percent,
-            "uptime_seconds": int(time.time() - psutil.boot_time()),
-        }
-    except Exception:
-        status = {
-            "note": "psutil not available, showing basic info",
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        }
-    return {"code": 0, "message": "success", "data": status}
-
-
-@router.post("/debug/command")
-async def post_debug_run_command(
-    body: CommandRequest, current_user: Dict[str, Any] = Depends(require_admin())
-,):
-    """运行调试命令（仅限管理员，避免任意命令执行 / 密钥泄露）"""
-    # 注意： deliberately 排除 `env` —— 它会泄露全部环境变量（含密钥/令牌），
-    # 属安全敏感命令，绝不允许通过 HTTP 调试接口执行（P1-#7）。
-    allowed = {"ls", "pwd", "whoami", "date", "python --version", "node --version"}
-    cmd = body.command.strip()
-    # 白名单精确匹配 + exec 数组执行（根因修复 2026-09-07：原 echo 前缀分支
-    # 配 shell=True 可被 `echo hi; <任意命令>` 绕过，白名单形同虚设）
-    if cmd not in allowed:
-        raise HTTPException(status_code=403, detail=f"Command '{cmd}' not allowed. Allowed: {sorted(allowed)}")
-
-    try:
-        import shlex as _shlex
-
-        proc = await asyncio.create_subprocess_exec(
-            *_shlex.split(cmd), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
-        return {
-            "code": 0,
-            "message": "success",
-            "data": {
-                "stdout": stdout.decode(errors="replace"),
-                "stderr": stderr.decode(errors="replace"),
-                "returncode": proc.returncode,
-            },
-        }
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=408, detail="Command timed out")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+post_debug_run_command = _bind_command_endpoint(CommandRequest)
+router.include_router(_debug_router)
 
 
 # ── WebSocket ──────────────────────────────────────────
@@ -2107,89 +1976,12 @@ async def post_push_message(
 # ══════════════════════════════════════════════════════════════
 
 
-class AnnotationCreateRequest(BaseModel):
-    question: str
-    answer: str
+from .console_annotations import (
+    router as _annotations_router, AnnotationCreateRequest, AnnotationUpdateRequest,
+    list_annotations, create_annotation, update_annotation, delete_annotation, export_training_set,
+)
 
-
-class AnnotationUpdateRequest(BaseModel):
-    answer: Optional[str] = None
-    enabled: Optional[bool] = None
-
-
-@router.get("/annotations")
-async def list_annotations(
-    request: Request,
-    q: str = Query(default="", description="按问题/答案子串过滤"),
-    limit: int = Query(default=100, ge=1, le=500),
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """精准回复命中表清单（管理页：按命中次数排序）。"""
-    from neurova.core.annotation_store import get_annotation_store
-
-    store = get_annotation_store()
-    items = store.list_annotations(limit=limit)
-    if q:
-        ql = q.lower()
-        items = [a for a in items if ql in (a.get("question") or "").lower() or ql in (a.get("answer") or "").lower()]
-    return {"code": 0, "message": "ok", "data": {"items": items, "total": store.count()}}
-
-
-@router.post("/annotations")
-async def create_annotation(
-    body: AnnotationCreateRequest,
-    request: Request,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """手工新增精准回复（不限于反馈链路沉淀）。"""
-    if not body.question.strip() or not body.answer.strip():
-        raise HTTPException(status_code=400, detail="question/answer 不能为空")
-    from neurova.core.annotation_store import get_annotation_store
-
-    ann_id = get_annotation_store().add(body.question.strip(), body.answer.strip(), source="manual")
-    return {"code": 0, "message": "ok", "data": {"id": ann_id}}
-
-
-@router.put("/annotations/{annotation_id}")
-async def update_annotation(
-    annotation_id: str,
-    body: AnnotationUpdateRequest,
-    request: Request,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """更新答案 / 启停用（停用即下线该精准回复）。"""
-    from neurova.core.annotation_store import get_annotation_store
-
-    store = get_annotation_store()
-    if store.get(annotation_id) is None:
-        raise HTTPException(status_code=404, detail="标注不存在")
-    if body.answer is not None:
-        store.update_answer(annotation_id, body.answer)
-    if body.enabled is not None:
-        store.set_enabled(annotation_id, body.enabled)
-    return {"code": 0, "message": "ok", "data": store.get(annotation_id)}
-
-
-@router.delete("/annotations/{annotation_id}")
-async def delete_annotation(
-    annotation_id: str,
-    request: Request,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    from neurova.core.annotation_store import get_annotation_store
-
-    if not get_annotation_store().delete(annotation_id):
-        raise HTTPException(status_code=404, detail="标注不存在")
-    return {"code": 0, "message": "ok"}
-
-
-@router.get("/annotations/export")
-async def export_training_set(request: Request, current_user: Dict[str, Any] = Depends(get_current_user)):
-    """重训练化集导出：JSONL（input/output 对）——供后续 SFT 微调集。"""
-    from neurova.core.annotation_store import get_annotation_store
-
-    lines = get_annotation_store().export_training_set()
-    return {"code": 0, "message": "ok", "data": {"jsonl": "\n".join(lines), "count": len(lines)}}
+router.include_router(_annotations_router)
 
 
 @router.get("/tasks")

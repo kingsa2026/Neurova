@@ -8,6 +8,8 @@
 import pytest
 
 from neurova.api.endpoints import knowledge as kb
+from neurova.api.endpoints import knowledge_core as kb_core
+from neurova.api.endpoints import knowledge_ingestion as kb_ingestion
 from neurova.knowledge.repository import KnowledgeRepository
 
 
@@ -25,7 +27,9 @@ class TestImportChunking:
     async def test_long_import_produces_multiple_chunks(self, monkeypatch, tmp_path):
         repo = KnowledgeRepository(str(tmp_path / "kb"))
         repo._items.clear()
-        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+        # 拆分后真身在叶子模块：写入走 ingestion，读取走 core（2026-09-16 模块化）
+        monkeypatch.setattr(kb_ingestion, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_core, "get_repository", lambda agent_id="default": repo)
 
         class FakeUpload:
             filename = "manual.txt"
@@ -50,7 +54,9 @@ class TestImportChunking:
     async def test_short_import_single_chunk(self, monkeypatch, tmp_path):
         repo = KnowledgeRepository(str(tmp_path / "kb"))
         repo._items.clear()
-        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+        # 拆分后真身在叶子模块：写入走 ingestion，读取走 core（2026-09-16 模块化）
+        monkeypatch.setattr(kb_ingestion, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_core, "get_repository", lambda agent_id="default": repo)
 
         class FakeUpload:
             filename = "note.txt"
@@ -68,7 +74,9 @@ class TestImportChunking:
     async def test_search_hits_locate_chunk(self, monkeypatch, tmp_path):
         repo = KnowledgeRepository(str(tmp_path / "kb"))
         repo._items.clear()
-        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+        # 拆分后真身在叶子模块：写入走 ingestion，读取走 core（2026-09-16 模块化）
+        monkeypatch.setattr(kb_ingestion, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_core, "get_repository", lambda agent_id="default": repo)
 
         class FakeUpload:
             filename = "manual.txt"

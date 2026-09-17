@@ -28,11 +28,19 @@ def test_clean_skill_passes_scan():
     registry = MagicMock()
     registry.register_skill.return_value = True
     ex._agent._skill_registry = registry
+    # 三独立成功任务证据前置：create_skill 走自动创建同契约（不豁免证据门）。
+    from neurova.skills.skill_service import SkillService
+
+    purpose = "按序调用部署工具完成发布"
+    steps = [{"tool": "shell", "params": {"command": "echo deploy"}}]
+    service = SkillService(agent_id="default")
+    for i in range(3):
+        service.creation_evidence.record(f"task-{i}", steps, purpose, True)
     result = _run(
         ex,
         {
             "name": "deploy_helper",
-            "description": "按序调用部署工具完成发布",
+            "description": purpose,
             "steps": [{"name": "shell", "params": {"command": "echo deploy"}}],
         },
     )

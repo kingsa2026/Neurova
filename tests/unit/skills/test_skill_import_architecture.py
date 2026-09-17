@@ -331,22 +331,18 @@ class TestSkillServiceRemoteUrlHandling:
     Path("https://github.com/...").exists() 必然 False，导致远程 URL 安装永远失败。
     """
 
-    def test_install_skill_with_url_does_not_return_path_not_found(self):
-        """传 URL 给 install_skill 不应返回 'path not found'。"""
+    def test_install_skill_with_url_does_not_return_path_not_found(self, tmp_path, monkeypatch):
+        """URL 必须委托下载分支；单元测试不连接公网。"""
+        from unittest.mock import Mock
         from neurova.skills.skill_service import SkillService
 
-        svc = SkillService.__new__(SkillService)
-        # 不调用 __init__，避免创建目录
-        svc.agent_id = "test"
-        svc.skills_dir = Path("/tmp/test_skills")
-        svc.manifest_path = svc.skills_dir / "manifest.json"
-        svc._skills = {}
-        from neurova.core.logger import get_logger
-        svc._logger = get_logger("test")
-
-        # 直接调用 install_skill with URL
+        svc = SkillService(agent_id="test", skills_dir=str(tmp_path / "skills"))
+        download = Mock(return_value={"success": False, "error": "download unavailable"})
+        monkeypatch.setattr(svc, "_install_from_url", download)
         url = "https://github.com/example/skill/archive/main.zip"
         result = svc.install_skill(skill_path=url, skill_id="test-skill")
+        download.assert_called_once_with(url, "test-skill")
+        assert result == download.return_value
         # 不应返回 path not found 错误
         assert not (isinstance(result, dict) and "path not found" in str(result.get("error", "")).lower()), (
             f"URL 安装不应返回 path not found 错误: {result}"
@@ -379,20 +375,15 @@ class TestActivatedModulesThreadSafety:
         import threading
         from neurova.skills.skill_service import SkillService
 
-        svc = SkillService.__new__(SkillService)
-        svc.agent_id = "test"
-        svc.skills_dir = Path("/tmp/test_skills")
-        svc.manifest_path = svc.skills_dir / "manifest.json"
-        svc._skills = {}
-        from neurova.core.logger import get_logger
-        svc._logger = get_logger("test")
-
-        # 调用 _init_lock（如果存在）或检查 __init__ 源码
-        source = inspect.getsource(SkillService.__init__)
-        assert "RLock" in source, (
-            "SkillService.__init__ 应初始化 self._lock = threading.RLock() — "
-            "对照 pool_service.py:70 / market_importer.py:100 / evolution_engine.py:99"
-        )
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            svc = SkillService("test", skills_dir=directory)
+            other = SkillService("test", skills_dir=directory)
+            assert isinstance(svc._lock, type(threading.RLock()))
+            assert svc._lock is other._lock
+            with svc._lock:
+                assert svc._lock.acquire(blocking=False)
+                svc._lock.release()
 
     def test_skill_service_lock_actually_used(self):
         """SkillService 应至少有一个方法用 `with self._lock:` 实际使用锁。"""

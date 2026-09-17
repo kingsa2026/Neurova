@@ -41,6 +41,20 @@ def _isolate_session_manager_singletons():
             pass
 
 
+@pytest.fixture(autouse=True)
+def _isolate_skill_service_storage(tmp_path, monkeypatch):
+    """Keep default skill-library writes out of user data during regressions."""
+    import hashlib
+    from neurova.skills.skill_service import SkillService
+    original = SkillService.__init__
+
+    def isolated(self, agent_id, skills_dir=None):
+        directory = tmp_path / "agent-skills" / hashlib.sha256(str(agent_id).encode()).hexdigest()
+        return original(self, agent_id, skills_dir if skills_dir is not None else str(directory))
+
+    monkeypatch.setattr(SkillService, "__init__", isolated)
+
+
 @pytest.fixture
 def mock_logger():
     """模拟日志记录器"""

@@ -17,6 +17,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tests.unit.skills.creation_helpers import register_proven_skill
 from neurova.skills.skill_service import SkillService
 
 
@@ -46,14 +47,14 @@ def test_install_creates_birth_revision(svc, tmp_path):
 
 
 def test_register_auto_skill_birth_revision(svc):
-    svc.register_auto_skill("a1", name="a1")
+    register_proven_skill(svc, "a1", name="a1")
     info = svc.get_skill_info("a1")
     assert info["identity"]["revision_id"] == "a1@1"
     assert info["identity"]["origin"] == "auto"
 
 
 def test_version_bump_appends_child_revision(svc):
-    svc.register_auto_skill("a1", name="a1")
+    register_proven_skill(svc, "a1", name="a1")
     svc.update_auto_skill("a1", version="1.0.1")
     info = svc.get_skill_info("a1")
     assert info["identity"]["revision_id"] == "a1@2"
@@ -63,7 +64,7 @@ def test_version_bump_appends_child_revision(svc):
 
 
 def test_config_only_update_no_new_revision(svc):
-    svc.register_auto_skill("a1", name="a1")
+    register_proven_skill(svc, "a1", name="a1")
     svc.update_auto_skill("a1", config={"x": 1})
     info = svc.get_skill_info("a1")
     assert len(info["version_history"]) == 1
@@ -71,7 +72,7 @@ def test_config_only_update_no_new_revision(svc):
 
 
 def test_revision_history_bounded(svc):
-    svc.register_auto_skill("a1", name="a1")
+    register_proven_skill(svc, "a1", name="a1")
     for i in range(30):
         svc.update_auto_skill("a1", version=f"1.0.{i + 1}")
     info = svc.get_skill_info("a1")

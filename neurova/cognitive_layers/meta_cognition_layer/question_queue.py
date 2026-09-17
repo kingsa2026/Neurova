@@ -167,6 +167,17 @@ class QuestionQueueManager:
             新创建的 QuestionEntry
         """
         with self._lock:
+            normalized = " ".join((content or "").split()).lower()
+            if normalized:
+                for existing in self._questions.values():
+                    if existing.status is not QuestionStatus.ANSWERED:
+                        continue
+                    if (" ".join(existing.content.split()).lower() == normalized
+                            and all(existing.metadata.get(k) == (metadata or {}).get(k)
+                                    for k in ("agent_id", "user_id"))):
+                        logger.info("Duplicate of answered question %s... not regenerated", existing.id[:8])
+                        return existing
+
             # 检查队列容量
             if len(self._questions) >= self._max_questions:
                 self._archive_oldest_pending_unlocked()
@@ -268,13 +279,24 @@ class QuestionQueueManager:
             logger.info("Question %s... marked as asked", question_id[:8])
             return True
 
-    def mark_answered(self, question_id: str, answer: str = "") -> bool:
+    def mark_answered(
+        self,
+        question_id: str,
+        answer: str = "",
+        lesson: Optional[Dict[str, Any]] = None,
+        require_durable: bool = False,
+        allow_correction: bool = True,
+    ) -> bool:
         """
         标记问题已被回答
 
         Args:
             question_id: 问题 ID
             answer: 用户给出的答案（存入 metadata）
+            lesson: 回答沉淀的教学内容（metadata["lesson"]，含 answerer_id/
+                publication 等），与答案同一条记录持久化
+            require_durable: True 时无 memory_manager 直接失败（HTTP 路径必须
+                持久；standalone 内存队列不受影响）
 
         Returns:
             是否成功标记
@@ -284,19 +306,53 @@ class QuestionQueueManager:
             if entry is None:
                 return False
 
-            old_status = entry.status
-            entry.status = QuestionStatus.ANSWERED
-            entry.answered_at = time.time()
-            if answer:
-                entry.metadata["answer"] = answer
+            if not answer.strip() or (require_durable and self._memory_manager is None):
+                return False
+            unchanged = entry.status is QuestionStatus.ANSWERED and entry.metadata.get("answer") == answer
+            if unchanged and (lesson is None or entry.metadata.get("lesson") == lesson):
+                return True
+            if entry.status is QuestionStatus.ANSWERED and not allow_correction:
+                return False
 
-            if question_id in self._status_index.get(old_status, []):
-                self._status_index[old_status].remove(question_id)
+            # Persist a candidate before mutating the live record or its indexes.
+            candidate = QuestionEntry.from_dict(json.loads(json.dumps(entry.to_dict())))
+            candidate.status = QuestionStatus.ANSWERED
+            candidate.answered_at = time.time()
+            candidate.metadata["answer"] = answer
+            candidate.metadata.pop("lesson", None)
+            if lesson is not None:
+                candidate.metadata["lesson"] = lesson
+            if not self._save_single_question(candidate):
+                return False
+            self._status_index[entry.status].remove(question_id)
+            entry.status = candidate.status
+            entry.answered_at = candidate.answered_at
+            entry.metadata = candidate.metadata
             self._status_index[QuestionStatus.ANSWERED].append(question_id)
-
-            self._save_single_question(entry)
-            logger.info("Question %s... marked as answered", question_id[:8])
             return True
+
+    @staticmethod
+    def visible_to(entry: QuestionEntry, agent_id: str, user_id: str) -> bool:
+        metadata = entry.metadata
+        lesson = metadata.get("lesson") or {}
+        return (metadata.get("agent_id", agent_id) == agent_id
+                and metadata.get("user_id", user_id) == user_id
+                and lesson.get("agent_id", agent_id) == agent_id
+                and lesson.get("answerer_id", user_id) == user_id)
+
+    def retrieve_lessons(self, kb, query: str, agent_id: str, user_id: str) -> List[Dict[str, Any]]:
+        """Replay the durable outbox before reading; never serve stale corrections."""
+        if not user_id or self._memory_manager is None:
+            return []
+        with self._lock:
+            current = {}
+            for entry in self._questions.values():
+                lesson = entry.metadata.get("lesson")
+                if entry.status is QuestionStatus.ANSWERED and lesson and self.visible_to(entry, agent_id, user_id):
+                    kb.publish_growth_lesson(lesson)
+                    current[entry.id] = lesson["revision"]
+            return [lesson for lesson in kb.find_growth_lessons(query, agent_id, user_id)
+                    if current.get(lesson["question_id"]) == lesson["revision"]]
 
     def archive_question(self, question_id: str) -> bool:
         """
@@ -428,21 +484,23 @@ class QuestionQueueManager:
         except Exception as e:
             logger.warning("Failed to save questions to memory: %s", e)
 
-    def _save_single_question(self, entry: QuestionEntry) -> None:
+    def _save_single_question(self, entry: QuestionEntry) -> bool:
         """保存单个问题到记忆
 
         P0-B 根因修复: 已有对应记忆时用 update_memory 原位更新 content（content
         即问题的完整 JSON），不再重复 remember。
+        2026-09-17: 如实向调用方返回落盘成败——此前异常吞成 debug 日志恒 True，
+        mark_answered 拿不到失败信号，用户答案可能静默丢失还报成功。
         """
         if self._memory_manager is None:
-            return
+            return True
 
         try:
             content_json = json.dumps(entry.to_dict(), ensure_ascii=False)
             memory_id = self._memory_ids.get(entry.id)
             if memory_id:
                 if self._memory_manager.update_memory(memory_id, content=content_json):
-                    return
+                    return True
                 # 记忆已被删除等场景 → 落空后重建
                 self._memory_ids.pop(entry.id, None)
 
@@ -452,9 +510,13 @@ class QuestionQueueManager:
                 importance=30.0,
                 metadata={"type": "question_queue", "question_id": entry.id},
             )
+            if not new_id:
+                return False
             self._memory_ids[entry.id] = new_id
+            return True
         except Exception as e:
-            logger.debug("Failed to save question %s...: %s", entry.id[:8], e)
+            logger.warning("Failed to save question %s...: %s", entry.id[:8], e)
+            return False
 
     def _archive_oldest_pending(self) -> None:
         """归档最旧的待处理问题（带锁）"""

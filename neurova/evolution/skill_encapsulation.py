@@ -65,6 +65,7 @@ class ToolPattern:
             "first_seen": self.first_seen.isoformat(),
             "last_seen": self.last_seen.isoformat(),
             "metadata": self.metadata,
+            "source_evidence": dict(self.source_evidence),
         }
 
 
@@ -132,7 +133,8 @@ class AutoSkillBuilder:
         min_success_rate: float = 0.7,
         max_patterns: int = 1000,
         similarity_threshold: float = 0.8,
-        min_independent_successes: int = 2,
+        min_independent_successes: int = 3,
+        evidence_store=None,
     ):
         """
         初始化技能构建器
@@ -150,8 +152,8 @@ class AutoSkillBuilder:
         self._min_success_rate = min_success_rate
         self._max_patterns = max_patterns
         self._similarity_threshold = similarity_threshold
-        self._min_independent_successes = max(1, int(min_independent_successes))
-        self._anon_seq = 0
+        self._min_independent_successes = max(3, int(min_independent_successes))
+        self.evidence_store = evidence_store
         # C10 技能评审闸（治理收紧 2026-09-12）：默认开——改行为的产物
         # （自动封装技能）强制审批，NEUROVA_SKILL_REVIEW_GATE=0 显式关闭。
         # 开启后产物 is_active=False 进 pending，经 skill API 的 approve 端点
@@ -172,6 +174,23 @@ class AutoSkillBuilder:
         # 观察记录
         self._observations: List[ObservationRecord] = []
         self._max_observations = 10000
+        self._skill_service = None
+        if evidence_store is not None:
+            from neurova.skills.skill_service import SkillService
+
+            self._skill_service = SkillService(agent_id=evidence_store.agent_id,
+                                              skills_dir=str(evidence_store.directory))
+            for entry in self._skill_service.list_skills():
+                detail = self._skill_service.get_skill_info(entry["id"])
+                config = (detail.get("manifest") or {}).get("config") or {}
+                if config.get("builder_pending") and not entry.get("enabled"):
+                    self._templates[entry["id"]] = SkillTemplate(
+                        template_id=entry["id"], name=entry["name"],
+                        description=entry.get("description", ""),
+                        tool_sequence=config["tool_sequence"],
+                        context_template=config.get("context_template", ""),
+                        parameter_hints=config.get("parameter_hints", {}),
+                        success_rate=config.get("success_rate", 0.0), is_active=False)
 
         logger.info("AutoSkillBuilder initialized")
 
@@ -194,14 +213,13 @@ class AutoSkillBuilder:
             metadata: 元数据
         """
         with self._lock:
-            # P1-3 独立证据源键：调用方给
-            # metadata.source_key（session#turn 类身份）则按源聚合；无标注
-            # 逐观测合成唯一键（存量调用方行为=原计数语义，不回退）。
             _meta = metadata or {}
             source_key = str(_meta.get("source_key") or "")
-            if not source_key:
-                self._anon_seq += 1
-                source_key = f"anon-{self._anon_seq}"
+            if not source_key or self.evidence_store is None:
+                return
+            sources = self.evidence_store.task_results(tool_sequence, context)
+            if source_key not in sources:
+                return
             record = ObservationRecord(
                 tool_sequence=tool_sequence,
                 context=context,
@@ -228,50 +246,20 @@ class AutoSkillBuilder:
         source_key: str = "",
     ):
         """更新模式"""
-        # 生成模式ID
-        content = ":".join(tool_sequence)
-        pattern_id = hashlib.md5(content.encode()).hexdigest()[:12]
+        from neurova.skills.creation_governance import fingerprint, normalize_steps
 
-        # 提取上下文关键词
-        keywords = self._extract_keywords(context)
-
-        if pattern_id in self._patterns:
-            # 更新现有模式
-            pattern = self._patterns[pattern_id]
-            pattern.total_uses += 1
-            pattern.last_seen = datetime.datetime.now(datetime.timezone.utc)
-
-            if success:
-                pattern.success_count += 1
-            else:
-                pattern.failure_count += 1
-
-            # P1-3 独立证据：每源一票，已成功过的源不被后续失败覆盖 # 
-            if source_key:
-                prev = pattern.source_evidence.get(source_key)
-                if success or prev is None:
-                    pattern.source_evidence[source_key] = "s" if success else "f"
-
-            # 更新平均时长
-            pattern.avg_duration = (pattern.avg_duration * (pattern.total_uses - 1) + duration) / pattern.total_uses
-
-            # 合并关键词
-            for kw in keywords:
-                if kw not in pattern.context_keywords:
-                    pattern.context_keywords.append(kw)
-        else:
-            # 创建新模式
-            pattern = ToolPattern(
-                pattern_id=pattern_id,
-                tool_sequence=tool_sequence,
-                context_keywords=keywords,
-                success_count=1 if success else 0,
-                failure_count=0 if success else 1,
-                total_uses=1,
-                avg_duration=duration,
-                source_evidence=({source_key: "s" if success else "f"} if source_key else {}),
-            )
-            self._patterns[pattern_id] = pattern
+        pattern_id = fingerprint(tool_sequence, context)
+        sources = self.evidence_store.task_results(tool_sequence, context)
+        if not pattern_id or source_key not in sources:
+            return
+        pattern = self._patterns.setdefault(pattern_id, ToolPattern(
+            pattern_id=pattern_id, tool_sequence=normalize_steps(tool_sequence),
+            context_keywords=self._extract_keywords(context), metadata={"task_purpose": context}))
+        pattern.source_evidence = {task: "s" if ok else "f" for task, ok in sources.items()}
+        pattern.total_uses = len(sources)
+        pattern.success_count = sum(bool(ok) for ok in sources.values())
+        pattern.failure_count = pattern.total_uses - pattern.success_count
+        pattern.last_seen = datetime.datetime.now(datetime.timezone.utc)
 
         # 检查是否应该封装
         self._check_encapsulation(pattern)
@@ -344,27 +332,22 @@ class AutoSkillBuilder:
                 )
                 return
 
-        # 检查是否已存在相似技能
-        for template in self._templates.values():
-            if self._pattern_skill_similarity(pattern, template) > self._similarity_threshold:
-                return
+        if not self.evidence_store or not self.evidence_store.eligible(
+            pattern.tool_sequence, pattern.metadata.get("task_purpose", "")
+        ):
+            return
+        if f"skill_{pattern.pattern_id}" in self._templates:
+            return
 
         # 封装为技能模板
         self._encapsulate_pattern(pattern)
 
     def _pattern_skill_similarity(self, pattern: ToolPattern, template: SkillTemplate) -> float:
         """计算模式与技能模板的相似度"""
-        # 工具序列相似度
-        seq1 = set(pattern.tool_sequence)
-        seq2 = set(template.tool_sequence)
+        from neurova.skills.creation_governance import fingerprint
 
-        if not seq1 or not seq2:
-            return 0.0
-
-        intersection = len(seq1 & seq2)
-        union = len(seq1 | seq2)
-
-        return intersection / union if union > 0 else 0.0
+        key = fingerprint(pattern.tool_sequence, pattern.metadata.get("task_purpose", ""))
+        return float(bool(key) and key == fingerprint(template.tool_sequence, template.context_template))
 
     def _encapsulate_pattern(self, pattern: ToolPattern):
         """将模式封装为技能模板"""
@@ -382,7 +365,7 @@ class AutoSkillBuilder:
             description=description,
             pattern=pattern,
             tool_sequence=pattern.tool_sequence,
-            context_template=" ".join(pattern.context_keywords[:5]),
+            context_template=pattern.metadata.get("task_purpose", ""),
             success_rate=pattern.success_rate,
             is_active=not self._review_gate,  # C10: 评审闸开启时产物先进 pending
         )
@@ -395,12 +378,13 @@ class AutoSkillBuilder:
         """生成技能名称"""
         # 使用前两个工具名
         if len(pattern.tool_sequence) >= 2:
-            return f"{pattern.tool_sequence[0]}_{pattern.tool_sequence[1]}_skill"
+            tools = [s["tool"] if isinstance(s, dict) else s for s in pattern.tool_sequence]
+            return f"{tools[0]}_{tools[1]}_skill_{pattern.pattern_id}"
         return f"skill_{pattern.pattern_id}"
 
     def _generate_skill_description(self, pattern: ToolPattern) -> str:
         """生成技能描述"""
-        tools = " → ".join(pattern.tool_sequence[:3])
+        tools = " → ".join(s["tool"] if isinstance(s, dict) else s for s in pattern.tool_sequence[:3])
         return f"自动封装的技能：执行 {tools}，成功率 {pattern.success_rate * 100:.0f}%%"
 
     def find_skills_for_context(self, context: str, tool_sequence: Optional[List[str]] = None) -> List[SkillTemplate]:
@@ -447,13 +431,11 @@ class AutoSkillBuilder:
 
         # 工具序列匹配
         if tool_sequence and template.tool_sequence:
-            seq1 = set(tool_sequence)
-            seq2 = set(template.tool_sequence)
-            if seq1 and seq2:
-                intersection = len(seq1 & seq2)
-                union = len(seq1 | seq2)
-                seq_score = intersection / union if union > 0 else 0
-                score += seq_score * 0.3
+            from neurova.skills.creation_governance import fingerprint
+
+            key = fingerprint(tool_sequence)
+            seq_score = float(bool(key) and key == fingerprint(template.tool_sequence))
+            score += seq_score * 0.3
 
         # 成功率加成
         score += template.success_rate * 0.2
@@ -529,6 +511,10 @@ class AutoSkillBuilder:
             if issues:
                 logger.warning("技能模板 %s 路由自检未通过，保持 pending: %s", template_id, issues)
                 return False
+            service = getattr(self, "_skill_service", None)
+            if service is not None and service.get_skill_info(template_id):
+                if not service.enable_skill(template_id).get("success"):
+                    return False
             t.is_active = True
             logger.info("技能模板 %s 已批准", template_id)
             return True
@@ -536,8 +522,13 @@ class AutoSkillBuilder:
     def reject_template(self, template_id: str) -> bool:
         """拒绝待审模板（删除）。"""
         with self._lock:
-            if self._templates.pop(template_id, None) is None:
+            if template_id not in self._templates:
                 return False
+            service = self._skill_service
+            if service is not None and service.get_skill_info(template_id):
+                if not service.uninstall_skill(template_id).get("success"):
+                    return False
+            del self._templates[template_id]
             logger.info("技能模板 %s 已拒绝", template_id)
             return True
 
@@ -562,8 +553,14 @@ class AutoSkillBuilder:
 
         registered_count = 0
         with self._lock:
+            self._skill_service = skill_service
             for template_id, template in self._templates.items():
                 if not template.is_active:
+                    if skill_service is not None:
+                        skill_service.create_automatic_skill(template_id, template.name, template.description,
+                            {"tool_sequence": template.tool_sequence, "context_template": template.context_template,
+                             "parameter_hints": template.parameter_hints, "success_rate": template.success_rate,
+                             "builder_pending": True})
                     continue
 
                 # 转换 SkillTemplate → Skill
@@ -583,32 +580,13 @@ class AutoSkillBuilder:
                     },
                 )
 
-                # 注册到 SkillRegistry（path 用占位符，自动技能无文件路径）
-                try:
-                    success = registry.register_skill(skill, None)
-                    if success:
-                        registered_count += 1
-                        logger.info("自动注册技能 %s 到 SkillRegistry", template_id)
-                except Exception as e:
-                    logger.warning("注册技能 %s 失败: %s", template_id, e)
+                if skill_service is None:
+                    continue
+                from neurova.skills.creation_governance import publish_automatic
 
-                # s3: 同步写入 SkillService 持久化 (如果提供)
-                if skill_service is not None:
-                    try:
-                        skill_service.register_auto_skill(
-                            skill_id=template_id,
-                            name=template.name,
-                            description=template.description,
-                            version="1.0.0",
-                            config={
-                                "tool_sequence": template.tool_sequence,
-                                "context_template": template.context_template,
-                                "success_rate": template.success_rate,
-                                "parameter_hints": template.parameter_hints,
-                            },
-                        )
-                    except Exception as e:
-                        logger.warning("持久化技能 %s 到 SkillService 失败: %s", template_id, e)
+                result = publish_automatic(skill_service, registry, skill)
+                if result.get("success") and not result.get("duplicate"):
+                    registered_count += 1
 
         return registered_count
 
@@ -649,6 +627,8 @@ class AutoSkillBuilder:
                 failure_count=pdata.get("failure_count", 0),
                 total_uses=pdata.get("total_uses", 0),
                 avg_duration=pdata.get("avg_duration", 0.0),
+                source_evidence=pdata.get("source_evidence", {}),
+                metadata=pdata.get("metadata", {}),
             )
             instance._patterns[pid] = pattern
 

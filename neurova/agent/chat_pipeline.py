@@ -153,6 +153,7 @@ class ChatContext:
     # 原轨迹无法正常结束。拆分为独立字段。
     reasoning_trace_id: Optional[str] = None
     reply: Optional[str] = None
+    execution_completed: bool = False  # Only a verified protocol terminal stop counts.
     caller_provided_history: bool = False
     # P0#5：本轮引用句柄表（CitationRegistry）——本轮检索证据的
     # 资格边界：注入时压缩 UUID→m/k 句柄，回复解码只认本轮注册的引用
@@ -375,6 +376,20 @@ class ChatPipeline:
     # ══════════════════════════════════════════════════════════════
 
     async def execute(self, ctx: ChatContext) -> Dict[str, Any]:
+        """执行完整管线；异常和取消也必须终结任务证据。"""
+        from neurova.skills.creation_governance import finish_task
+
+        completed = False
+        try:
+            result = await self._execute_steps(ctx)
+            completed = (ctx.execution_completed is True
+                         and bool(ctx.reply and ctx.reply.strip())
+                         and getattr(ctx, "tool_decision", "") != "cancelled")
+            return result
+        finally:
+            finish_task(self._agent, ctx.user_input, completed=completed)
+
+    async def _execute_steps(self, ctx: ChatContext) -> Dict[str, Any]:
         """执行完整的对话管线"""
         # 身份注入：把请求级 user_id 写入 ContextVar（对齐 memory/tool 三层隔离
         # 模式），深层模块（multi_model_client 的 usage_history 入账等）在同一
@@ -1121,30 +1136,13 @@ class ChatPipeline:
                 "synthesized": True,
             },
         )
-        # 合成工具无文件路径，用哨兵路径标记
-        sentinel_path = Path("<synthesized>") / manifest.id
-        if skill_registry.register_skill(manifest, sentinel_path):
-            logger.info(
-                "已注册合成工具到 skill_registry: %s", manifest.id
-            )
-            # 持久化到 agent 技能页 manifest(source=synthesized):
-            # /agent/{id}/skills 可见 + 冷启动 restore 恢复为可执行
-            try:
-                from neurova.skills.market_registry import persist_synthesized_skill
-                from neurova.skills.skill_service import SkillService
+        from neurova.skills.creation_governance import publish_automatic
+        from neurova.skills.skill_service import SkillService
 
-                persist_synthesized_skill(
-                    skill_id=manifest.id,
-                    name=manifest.name,
-                    description=manifest.description,
-                    version="1.0.0",
-                    tool_sequence=synthesized_tool.tool_sequence,
-                    service=SkillService(agent_id=self.config.agent_id),
-                )
-            except Exception:
-                logger.warning("合成技能持久化失败: %s", manifest.id, exc_info=True)
-        else:
-            logger.debug("合成工具 %s 已存在，跳过注册", manifest.id)
+        result = publish_automatic(SkillService(agent_id=self.config.agent_id), skill_registry, manifest)
+        if not result.get("success"):
+            logger.info("合成技能未发布 %s: %s", manifest.id, result.get("error"))
+        return result
 
     # ══════════════════════════════════════════════════════════════
     # Step 1.5 (R-3): 附件注入
@@ -1425,18 +1423,23 @@ class ChatPipeline:
             ctx.citation_registry = None
 
         ctx.context = await self.context_orchestrator.build_context(
-
             user_input=ctx.user_input,
             tool_memory_result=ctx.tool_memory_result,
             auto_execute_result=ctx.auto_execute_result,
             tool_decision=ctx.tool_decision,
-            experience_items=ctx.experience_items,
+            experience_items=[item for item in ctx.experience_items if item.get("source") != "growth_lesson"],
             relevant_memories=ctx.relevant_memories,
             crystallized_patterns=ctx.crystallized_patterns,
             session_context=ctx.session_context,
             voice_context=voice_context,
             citation_registry=ctx.citation_registry,
         )
+
+        # Private guidance is turn-local, never archived into the shared experience pool.
+        for item in ctx.experience_items:
+            if item.get("source") == "growth_lesson":
+                ctx.context.insert(max(0, len(ctx.context) - 1), {"role": "user", "content": item["content"]})
+                item["status"] = "injected"
 
         # P2-4：环境指纹增量——会话内
         # workspace/model/平台变化时向当轮上下文追加一条增量提示；
@@ -1743,8 +1746,22 @@ class ChatPipeline:
                 agent_id=str(getattr(self.config, "agent_id", "") or "") or None,
             )
             items = []
+            queue = getattr(self._agent, "question_queue_manager", None)
+            user_id = (ctx.metadata or {}).get("user_id") or (ctx.metadata or {}).get("neuser_id")
+            if queue is not None and user_id:
+                lessons = queue.retrieve_lessons(
+                    get_experience_knowledge_base(), ctx.user_input,
+                    str(getattr(self.config, "agent_id", "") or ""), user_id,
+                )
+                for lesson in lessons:
+                    items.append({
+                        "content": (f"[用户指导，未经执行验证] 来源: growth_question:{lesson['question_id']} "
+                                    f"revision:{lesson['revision']}\n问题: {lesson['question']}\n回答: {lesson['answer']}"),
+                        "source": "growth_lesson", "status": "retrieved",
+                        "question_id": lesson["question_id"], "revision": lesson["revision"],
+                    })
             for hit in hits or []:
-                if not isinstance(hit, dict):
+                if not isinstance(hit, dict) or hit.get("skill_name") == "growth_answer":
                     continue
                 hit_ctx = hit.get("context") or {}
                 user_side = (
@@ -2052,6 +2069,7 @@ class ChatPipeline:
                     except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
                         logger.debug("event_emitter 回调失败: %s", e)
             elif etype == "done":
+                ctx.execution_completed = event.get("finish_reason") in {"stop", "end_turn"}
                 # done 事件携带完整回复快照，仅在未累积到 content 时兜底
                 if not reply_parts and event.get("reply"):
                     reply_parts.append(event["reply"])
@@ -2266,6 +2284,7 @@ class ChatPipeline:
 
             reply += new_content
 
+        ctx.execution_completed = getattr(response, "finish_reason", None) in {"stop", "end_turn"}
         return reply
 
     def _build_continue_hint(self, user_input: str, reply: str) -> str:

@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 # 获取项目根目录
-project_root = Path(__file__).resolve().parent.parent
+project_root = Path(__file__).resolve().parents[2]
 
 # 确保项目根目录在 Python 路径中
 if str(project_root) not in sys.path:

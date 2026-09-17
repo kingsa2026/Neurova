@@ -1,32 +1,103 @@
-from __future__ import annotations
+"""成长系统接口 - Growth System Endpoint（聚合器）
 
-"""
-成长系统接口 - Growth System Endpoint
+2026-09-16 模块化拆分：本文件原 1078 行单文件多域端点，按域拆为
+  - personality_router.py   /personality /personality/traits /personality/evolve
+  - constitution_router.py  /constitution /constitution/rules[/{id}]
+  - personality_persistence.py / constitution_persistence.py（持久层叶子模块）
+  - growth_common.py        共享依赖（agent 解析 / request_id / envelope）
+拆分是纯结构迁移：全部路由路径与响应契约不变
+（envelope 契约见 test_growth_envelope_consistency.py，路由快照见
+test_growth_route_livability.py）。本文件挂载上述子 router 并保留
+reflection / questions / proactive / motivation / overview 端点。
 
 提供以下API:
-1. 反思日志 (GET/POST /api/v1/growth/reflection)
-2. 问题队列 (GET/POST /api/v1/growth/questions)
-3. 主动行为 (GET/POST /api/v1/growth/proactive)
-4. 动机水平 (GET/POST /api/v1/growth/motivation)
-5. 人格系统 (GET/PUT /api/v1/growth/personality)
-6. 宪法系统 (GET/PUT /api/v1/growth/constitution)
+1. 成长总览 (GET /api/v1/growth)
+2. 能力成长 (GET /api/v1/growth/capabilities)
+3. 反思日志 (GET/POST /api/v1/growth/reflection)
+4. 问题队列 (GET/POST /api/v1/growth/questions)
+5. 主动行为 (GET/POST /api/v1/growth/proactive)
+6. 动机水平 (GET/PUT /api/v1/growth/motivation)
+7. 人格系统 (GET/PUT /api/v1/growth/personality)  → personality_router
+8. 宪法系统 (GET/PUT /api/v1/growth/constitution) → constitution_router
 """
 
-from neurova.core.logger import get_logger
-import json
-import pathlib
+from __future__ import annotations
+
 import time
 import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from neurova.api.auth import get_current_user, Depends
-from neurova.api.endpoints._pydantic_compat import safe_model_dump
+from neurova.core.logger import get_logger
 from pydantic import BaseModel, Field
+
+from neurova.api.endpoints.constitution_router import router as _constitution_router
+from neurova.api.endpoints.growth_common import envelope, get_agent as _get_agent_impl, get_request_id as _get_request_id_impl
+from neurova.api.endpoints.personality_router import router as _personality_router
 
 logger = get_logger(__name__)
 
-router = APIRouter(dependencies=[Depends(get_current_user)],)
+router = APIRouter(dependencies=[Depends(get_current_user)])
+router.include_router(_personality_router)
+router.include_router(_constitution_router)
+
+# ---------------------------------------------------------------------------
+# 兼容 re-export（2026-09-16 拆分前这些名字定义在本文件；测试与潜在外部读者
+# 经 growth.<name> 引用。持久层真身在 personality_persistence /
+# constitution_persistence / growth_common，patch 持久层常量请打叶子模块）。
+# ---------------------------------------------------------------------------
+from neurova.api.endpoints.constitution_persistence import (  # noqa: E402,F401
+    CONSTITUTION_DIR as _CONSTITUTION_DIR,
+    ConstitutionRule,
+    ConstitutionRuleCreate,
+    ConstitutionRuleUpdate,
+    load_constitution_rules as _load_constitution_rules,
+    rule_to_model as _rule_to_model,
+    save_constitution_rules as _save_constitution_rules,
+)
+from neurova.api.endpoints.growth_common import (  # noqa: E402,F401
+    get_agent as _get_agent,
+    get_request_id as _get_request_id,
+)
+from neurova.api.endpoints.personality_persistence import (  # noqa: E402,F401
+    PERSONALITY_DIR as _PERSONALITY_DIR,
+    PersonalityUpdate,
+    load_personality_data as _load_personality_data,
+    save_personality_data as _save_personality_data,
+)
+
+
+def _get_request_id(request: Request) -> str:
+    """获取请求ID（本文件端点局部别名，转发 growth_common）"""
+    return _get_request_id_impl(request)
+
+
+def _get_agent(agent_id: str = "default"):
+    """获取 Agent 实例（本文件端点局部别名，转发 growth_common；测试 patch 此名）"""
+    return _get_agent_impl(agent_id)
+
+
+def _get_experience_knowledge_base():
+    """EKB 单例（局部别名便于测试替换；惰性导入避免模块加载期拉库）"""
+    from neurova.skills.experience_knowledge_base import get_experience_knowledge_base
+
+    return get_experience_knowledge_base()
+
+
+def _authorized_question_agent(agent_id, current_user):
+    from neurova.api.agent_access import can_access_agent, resolve_agent_owner
+
+    agent = _get_agent(agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    user_id = current_user.get("user_id") or current_user.get("neuser_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authenticated identity required")
+    if not can_access_agent(user_id, current_user.get("role", "user"),
+                            resolve_agent_owner(agent_id, state_agent=agent)):
+        raise HTTPException(status_code=403, detail="Agent access denied")
+    return agent, user_id
 
 
 class ReflectionLog(BaseModel):
@@ -101,104 +172,6 @@ class MotivationWeightsUpdate(BaseModel):
     """驱动权重更新（全量替换：未传键置 0，自动归一）"""
 
     drive_weights: Dict[str, float] = Field(default_factory=dict, description="{competence|autonomy|growth|purpose: 权重}")
-
-
-class Personality(BaseModel):
-    """人格信息"""
-
-    agent_id: str
-    timestamp: float
-    traits: Dict[str, float] = {}
-    values: List[str] = []
-    communication_style: str = "balanced"
-    decision_style: str = "analytical"
-
-
-class PersonalityUpdate(BaseModel):
-    """更新人格请求"""
-
-    traits: Optional[Dict[str, float]] = None
-    values: Optional[List[str]] = None
-    communication_style: Optional[str] = None
-    decision_style: Optional[str] = None
-
-
-class ConstitutionRule(BaseModel):
-    """宪法规则"""
-
-    rule_id: str
-    agent_id: str
-    timestamp: float
-    rule_type: str = "behavior"
-    content: str = ""
-    priority: int = 0
-    enabled: bool = True
-
-
-class ConstitutionRuleCreate(BaseModel):
-    """创建宪法规则请求"""
-
-    rule_type: str = Field(default="behavior", description="规则类型")
-    content: str = Field(..., description="规则内容")
-    priority: int = Field(default=0, ge=0, le=100, description="优先级")
-    # FE 启用/禁用开关（toggle）：None = 不改，缺省新建为 enabled True
-    enabled: Optional[bool] = Field(default=None, description="是否启用")
-
-
-class ConstitutionRuleUpdate(BaseModel):
-    """局部更新宪法规则请求（toggle 只传 enabled，不得覆写 content）"""
-
-    rule_type: Optional[str] = None
-    content: Optional[str] = None
-    priority: Optional[int] = Field(default=None, ge=0, le=100)
-    enabled: Optional[bool] = None
-
-
-def _get_request_id(request: Request) -> str:
-    """获取请求ID"""
-    return getattr(request.state, "request_id", str(uuid.uuid4()))
-
-
-def _get_agent(agent_id: str = "default"):
-    """获取 Agent 实例"""
-    from neurova.api.endpoints import get_agent_instance
-
-    return get_agent_instance(agent_id)
-
-
-# ---------------------------------------------------------------------------
-# 人格特质独立持久源（2026-09-12 空数据页面修复）
-#
-# 根因: Agent.personality 实为 personality.md 身份文本字符串，此前端点要求
-# isinstance(agent.personality, dict)（永假）→ traits 恒空、PUT 静默 no-op
-# 谎报成功、/growth 主页在非空 md 上 .get() 抛 AttributeError。
-# 特质/价值观/风格与身份 md 正交，独立落 data/personality/{agent_id}.json。
-# ---------------------------------------------------------------------------
-
-_PERSONALITY_DIR = "data/personality"
-
-
-def _personality_path(agent_id: str) -> "pathlib.Path":
-    safe = str(agent_id).replace("/", "_").replace("\\", "_")
-    return pathlib.Path(_PERSONALITY_DIR) / f"{safe}.json"
-
-
-def _load_personality_data(agent_id: str) -> Dict[str, Any]:
-    try:
-        with open(_personality_path(agent_id), "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-def _save_personality_data(agent_id: str, data: Dict[str, Any]) -> None:
-    p = _personality_path(agent_id)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    tmp.replace(p)
 
 
 def _reflection_entry_to_item(entry, agent_id: str) -> Dict[str, Any]:
@@ -288,13 +261,12 @@ def _capabilities_payload(agent) -> Optional[Dict[str, Any]]:
 async def get_agent_growth(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
+    current_user: dict = Depends(get_current_user),
 ):
     """获取 Agent 的成长数据（前端 GrowthPage.vue 调用）"""
     request_id = _get_request_id(request)
 
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    agent, user_id = _authorized_question_agent(agent_id, current_user)
 
     # 收集成长数据
     growth_data = {
@@ -322,7 +294,8 @@ async def get_agent_growth(
     if hasattr(agent, "question_queue_manager") and agent.question_queue_manager:
         try:
             growth_data["questions"] = [
-                _question_entry_to_item(q, agent_id) for q in _all_questions(agent.question_queue_manager)[:10]
+                _question_entry_to_item(q, agent_id) for q in [e for e in _all_questions(agent.question_queue_manager)
+                          if agent.question_queue_manager.visible_to(e, agent_id, user_id)][:10]
             ]
         except Exception as e:
             logger.warning("Failed to get questions: %s", e)
@@ -352,16 +325,10 @@ async def get_agent_growth(
         "decision_style": pdata.get("decision_style", "analytical"),
     }
 
-    # 获取宪法
-    if hasattr(agent, "constitution") and agent.constitution:
-        growth_data["constitution"] = agent.constitution
+    # 获取宪法（读独立持久源，与 constitution_router 同源）
+    growth_data["constitution"] = _load_constitution_rules(agent_id)
 
-    return {
-        "code": 0,
-        "message": "success",
-        "data": growth_data,
-        "request_id": request_id,
-    }
+    return envelope(request_id, growth_data)
 
 
 @router.get("/capabilities", response_model=Dict[str, Any])
@@ -376,22 +343,18 @@ async def get_growth_capabilities(
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-    return {
-        "code": 0,
-        "message": "success",
-        "data": _capabilities_payload(agent),
-        "request_id": request_id,
-    }
+    return envelope(request_id, _capabilities_payload(agent))
 
 
-@router.get("/reflection", response_model=List[ReflectionLog])
+@router.get("/reflection", response_model=Dict[str, Any])
 async def get_reflection_logs(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
     limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
     offset: int = Query(default=0, ge=0, description="偏移量"),
 ):
-    """获取反思日志列表"""
+    """获取反思日志列表（envelope.data 为列表，与 /questions /proactive 同族契约）"""
+    request_id = _get_request_id(request)
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
@@ -405,33 +368,19 @@ async def get_reflection_logs(
         except Exception as e:
             logger.warning("Failed to get reflection logs: %s", e)
 
-    # 仅在无管理器时回退模拟数据（与 sleep 端点契约一致：有真实数据源时不得造假）
-    if not logs and agent.growth_log_manager is None:
-        for i in range(min(limit, 5)):
-            logs.append(
-                ReflectionLog(
-                    log_id=str(uuid.uuid4()),
-                    agent_id=agent_id,
-                    timestamp=time.time() - (i * 3600),
-                    reflection_type="general",
-                    content=f"Reflection on conversation topic {i+1}",
-                    insights=[f"Insight {j+1}" for j in range(2)],
-                    confidence=0.7 - i * 0.1,
-                    related_memories=[f"memory_{j}" for j in range(2)],
-                )
-            )
-
-    return logs
+    # 2026-09-16 契约收口：删除无管理器时编造假反思的回退分支（与 /proactive
+    # 2026-09-12 诚实化同规），管理器缺位/无日志均如实返回空列表。
+    return envelope(request_id, logs)
 
 
-@router.post("/reflection", response_model=ReflectionLog)
+@router.post("/reflection", response_model=Dict[str, Any])
 async def create_reflection_log(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
     body: ReflectionLogCreate = ReflectionLogCreate(content=""),
 ):
-    """创建新的反思日志"""
-    _get_request_id(request)
+    """创建新的反思日志（envelope.data 为创建后的 ReflectionLog dict）"""
+    request_id = _get_request_id(request)
 
     agent = _get_agent(agent_id)
     if not agent:
@@ -459,19 +408,19 @@ async def create_reflection_log(
             logger.warning("Failed to create reflection log: %s", e)
 
     if created_entry is not None:
-        return ReflectionLog(**_reflection_entry_to_item(created_entry, agent_id))
+        return envelope(request_id, _reflection_entry_to_item(created_entry, agent_id))
 
     # 管理器缺失时返回请求回显（不落库，诚实响应）
-    return ReflectionLog(
-        log_id=str(uuid.uuid4()),
-        agent_id=agent_id,
-        timestamp=time.time(),
-        reflection_type=body.reflection_type,
-        content=body.content,
-        insights=body.insights,
-        confidence=body.confidence,
-        related_memories=body.related_memories,
-    )
+    return envelope(request_id, {
+        "log_id": str(uuid.uuid4()),
+        "agent_id": agent_id,
+        "timestamp": time.time(),
+        "reflection_type": body.reflection_type,
+        "content": body.content,
+        "insights": body.insights,
+        "confidence": body.confidence,
+        "related_memories": body.related_memories,
+    })
 
 
 @router.get("/reflection/stats")
@@ -480,6 +429,7 @@ async def get_reflection_stats(
     agent_id: str = Query(default="default", description="Agent ID"),
 ):
     """获取反思统计"""
+    request_id = _get_request_id(request)
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
@@ -498,14 +448,10 @@ async def get_reflection_stats(
         except Exception as e:
             logger.warning("Failed to get reflection stats: %s", e)
 
-    return {
-        "code": 0,
-        "message": "success",
-        "data": stats,
-    }
+    return envelope(request_id, stats)
 
 
-@router.get("/questions", response_model=List[QuestionItem])
+@router.get("/questions", response_model=Dict[str, Any])
 async def get_question_queue(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
@@ -513,11 +459,11 @@ async def get_question_queue(
     answered: Optional[bool] = Query(default=None, description="已回答过滤：true 仅已回答，false 含 pending/cooldown/asked"),
     limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
     offset: int = Query(default=0, ge=0, description="偏移量"),
+    current_user: dict = Depends(get_current_user),
 ):
     """获取问题队列（默认返回全部状态，含已提问 asked——主动提问闭环的终态）"""
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    request_id = _get_request_id(request)
+    agent, user_id = _authorized_question_agent(agent_id, current_user)
 
     questions = []
     if hasattr(agent, "question_queue_manager") and agent.question_queue_manager:
@@ -534,40 +480,26 @@ async def get_question_queue(
                 entries = _all_questions(qm)
             if answered is not None:
                 entries = [e for e in entries if (e.status == QuestionStatus.ANSWERED) == answered]
+            entries = [e for e in entries if qm.visible_to(e, agent_id, user_id)]
             questions = [_question_entry_to_item(e, agent_id) for e in entries[offset : offset + limit]]
         except Exception as e:
             logger.warning("Failed to get questions: %s", e)
 
-    # 仅在无管理器时回退模拟数据（与 reflection 端点契约一致）
-    if not questions and getattr(agent, "question_queue_manager", None) is None:
-        for i in range(min(limit, 3)):
-            questions.append(
-                QuestionItem(
-                    question_id=str(uuid.uuid4()),
-                    agent_id=agent_id,
-                    timestamp=time.time() - (i * 1800),
-                    question_type="curiosity",
-                    question=f"What is the meaning of concept {i+1}?",
-                    status="pending",
-                    priority=i,
-                )
-            )
-
-    return questions
+    # 2026-09-16 契约收口：删除无管理器时编造假问题的回退分支（同 /proactive 诚实化）
+    return envelope(request_id, questions)
 
 
-@router.post("/questions", response_model=QuestionItem)
+@router.post("/questions", response_model=Dict[str, Any])
 async def add_question(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
     body: QuestionCreate = QuestionCreate(question=""),
+    current_user: dict = Depends(get_current_user),
 ):
-    """添加新问题"""
-    _get_request_id(request)
+    """添加新问题（envelope.data 为创建后的 QuestionItem dict）"""
+    request_id = _get_request_id(request)
 
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    agent, user_id = _authorized_question_agent(agent_id, current_user)
 
     question_id = str(uuid.uuid4())
     timestamp = time.time()
@@ -582,52 +514,49 @@ async def add_question(
             created_question = agent.question_queue_manager.generate_question(
                 content=body.question,
                 priority=priority,
-                metadata={"question_type": body.question_type},
+                metadata={"question_type": body.question_type, "agent_id": agent_id, "user_id": user_id},
             )
             question_id = created_question.id
             timestamp = created_question.created_at
         except Exception as e:
             logger.warning("Failed to add question: %s", e)
 
-    return QuestionItem(
-        question_id=question_id,
-        agent_id=agent_id,
-        timestamp=timestamp,
-        question_type=body.question_type,
-        question=body.question,
-        status="pending",
-        priority=body.priority,
-    )
+    return envelope(request_id, {
+        "id": question_id,
+        "question_id": question_id,
+        "agent_id": agent_id,
+        "timestamp": timestamp,
+        "created_at": timestamp,
+        "question_type": body.question_type,
+        "question": body.question,
+        "status": "pending",
+        "answered": False,
+        "answer": None,
+        "priority": body.priority,
+    })
 
 
 @router.get("/questions/next")
 async def get_next_question(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
+    current_user: dict = Depends(get_current_user),
 ):
     """获取下一个待解答问题"""
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    request_id = _get_request_id(request)
+    agent, user_id = _authorized_question_agent(agent_id, current_user)
 
     if hasattr(agent, "question_queue_manager") and agent.question_queue_manager:
         try:
             # 根因修复: QuestionEntry dataclass 无法被 FastAPI 序列化 → 转 dict
-            question = agent.question_queue_manager.get_next_question()
+            question = next((q for q in agent.question_queue_manager.get_pending_questions()
+                             if agent.question_queue_manager.visible_to(q, agent_id, user_id)), None)
             if question:
-                return {
-                    "code": 0,
-                    "message": "success",
-                    "data": _question_entry_to_item(question, agent_id),
-                }
+                return envelope(request_id, _question_entry_to_item(question, agent_id))
         except Exception as e:
             logger.warning("Failed to get next question: %s", e)
 
-    return {
-        "code": 0,
-        "message": "No pending questions",
-        "data": None,
-    }
+    return envelope(request_id, None, message="No pending questions")
 
 
 @router.put("/questions/{question_id}/answer")
@@ -636,20 +565,42 @@ async def mark_question_answered(
     agent_id: str = Query(default="default", description="Agent ID"),
     question_id: str = Path(..., description="问题ID"),
     answer: str = Query(default="", description="答案"),
+    current_user: dict = Depends(get_current_user),
 ):
     """标记问题已回答"""
     request_id = _get_request_id(request)
 
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
+    agent, user_id = _authorized_question_agent(agent_id, current_user)
 
-    if hasattr(agent, "question_queue_manager") and agent.question_queue_manager:
+    queue = getattr(agent, "question_queue_manager", None)
+    if queue is None:
+        raise HTTPException(status_code=503, detail="Question queue unavailable")
+    entry = queue.get_question(question_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    if not answer.strip():
+        raise HTTPException(status_code=422, detail="Answer must not be empty")
+    with queue._lock:
+        if not queue.visible_to(entry, agent_id, user_id):
+            raise HTTPException(status_code=404, detail="Question not found")
+        previous = entry.metadata.get("lesson") or {}
+        lesson = previous if previous.get("answer") == answer else {
+            "question_id": question_id, "question": entry.content, "answer": answer,
+            "agent_id": agent_id, "answerer_id": user_id,
+            "neuser_id": current_user.get("neuser_id") or user_id,
+            "source": "growth_question", "revision": str(uuid.uuid4()),
+        }
+        if not queue.mark_answered(question_id, answer, lesson=lesson, require_durable=True):
+            raise HTTPException(status_code=503, detail={"answer_saved": False, "retryable": True})
         try:
-            if hasattr(agent.question_queue_manager, "mark_answered"):
-                agent.question_queue_manager.mark_answered(question_id, answer)
+            published = _get_experience_knowledge_base().publish_growth_lesson(lesson)
         except Exception as e:
-            logger.warning("Failed to mark question answered: %s", e)
+            logger.warning("Failed to publish saved growth answer: %s", e)
+            raise HTTPException(status_code=503, detail={"answer_saved": True, "publication": "pending", "retryable": True}) from e
+    if not published:
+        return envelope(request_id, {"question_id": question_id, "answer": answer,
+                                     "publication": "indexed", "revision": lesson["revision"]})
 
     # 2026-09-15 真实化回流：用户对主动提问的回答 → 主动行为标记已回应
     # + 使命感驱动观察（purpose 的真实信号源之一）
@@ -666,21 +617,18 @@ async def mark_question_answered(
         except Exception as e:
             logger.debug("动机 purpose 观察失败: %s", e)
 
-    return {
-        "code": 0,
-        "message": f"Question '{question_id}' marked as answered",
-        "data": {"question_id": question_id, "answer": answer},
-        "request_id": request_id,
-    }
+    return envelope(request_id, {"question_id": question_id, "answer": answer},
+                    message=f"Question '{question_id}' marked as answered")
 
 
-@router.get("/proactive", response_model=List[ProactiveAction])
+@router.get("/proactive", response_model=Dict[str, Any])
 async def get_proactive_actions(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
     limit: int = Query(default=20, ge=1, le=100, description="数量限制"),
 ):
-    """获取主动行为记录"""
+    """获取主动行为记录（envelope.data 为列表，与 /reflection /questions 同族契约）"""
+    request_id = _get_request_id(request)
     agent = _get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
@@ -696,17 +644,17 @@ async def get_proactive_actions(
     # 2026-09-12 诚实化：原实现在无数据时用 uuid 编造 3 条
     # "Proactive message about topic i" mock（活跃假数据违规）。
     # proactive_behavior_engine 全仓未实例化 → 如实返回空列表。
-    return actions
+    return envelope(request_id, actions)
 
 
-@router.post("/proactive", response_model=ProactiveAction)
+@router.post("/proactive", response_model=Dict[str, Any])
 async def trigger_proactive_action(
     request: Request,
     agent_id: str = Query(default="default", description="Agent ID"),
     body: ProactiveActionCreate = ProactiveActionCreate(content=""),
 ):
     """触发主动行为（真实落账本；未装配引擎诚实 400，不再回显假记录）"""
-    _get_request_id(request)
+    request_id = _get_request_id(request)
 
     agent = _get_agent(agent_id)
     if not agent:
@@ -721,16 +669,16 @@ async def trigger_proactive_action(
         trigger=body.trigger or "manual",
         content=body.content,
     )
-    return ProactiveAction(
-        action_id=action["action_id"],
-        agent_id=agent_id,
-        timestamp=action["timestamp"],
-        action_type=action["action_type"],
-        trigger=action["trigger"],
-        content=action["content"],
-        success=action["success"],
-        response_received=action["response_received"],
-    )
+    return envelope(request_id, {
+        "action_id": action["action_id"],
+        "agent_id": agent_id,
+        "timestamp": action["timestamp"],
+        "action_type": action["action_type"],
+        "trigger": action["trigger"],
+        "content": action["content"],
+        "success": action["success"],
+        "response_received": action["response_received"],
+    })
 
 
 @router.get("/motivation", response_model=Dict[str, Any])
@@ -745,12 +693,7 @@ async def get_motivation_level(
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
     ledger = getattr(agent, "intrinsic_motivation", None)
-    return {
-        "code": 0,
-        "message": "success",
-        "data": ledger.snapshot() if ledger else None,
-        "request_id": request_id,
-    }
+    return envelope(request_id, ledger.snapshot() if ledger else None)
 
 
 @router.put("/motivation", response_model=Dict[str, Any])
@@ -774,255 +717,3 @@ async def update_motivation_level(
         raise HTTPException(status_code=422, detail=str(e))
 
     return await get_motivation_level(request, agent_id)
-
-
-@router.get("/personality", response_model=Personality)
-async def get_personality(
-    request: Request,
-    agent_id: str = Query(default="default", description="Agent ID"),
-):
-    """获取人格信息（traits/values/风格读独立持久源，非 agent.personality md 文本）"""
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-
-    data = _load_personality_data(agent_id)
-    return Personality(
-        agent_id=agent_id,
-        timestamp=time.time(),
-        traits=data.get("traits", {}),
-        values=data.get("values", []),
-        communication_style=data.get("communication_style", "balanced"),
-        decision_style=data.get("decision_style", "analytical"),
-    )
-
-
-@router.put("/personality", response_model=Personality)
-async def update_personality(
-    request: Request,
-    agent_id: str = Query(default="default", description="Agent ID"),
-    body: PersonalityUpdate = PersonalityUpdate(),
-):
-    """更新人格信息（写独立持久源并回读）"""
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-
-    data = _load_personality_data(agent_id)
-    data.update(body.dict(exclude_unset=True))
-    _save_personality_data(agent_id, data)
-    return await get_personality(request, agent_id)
-
-
-@router.get("/personality/traits")
-async def get_personality_traits(
-    request: Request,
-    agent_id: str = Query(default="default", description="Agent ID"),
-):
-    """获取人格特质列表"""
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-
-    return {
-        "code": 0,
-        "message": "success",
-        "data": {"traits": _load_personality_data(agent_id).get("traits", {})},
-    }
-
-
-@router.post("/personality/evolve")
-async def evolve_personality(
-    request: Request,
-    agent_id: str = Query(default="default", description="Agent ID"),
-    learning_data: Dict[str, Any] = {},
-):
-    """根据学习数据进化人格
-
-    2026-09-12 诚实化：此前 TODO 未实现却直返成功壳（谎报 code 0）。
-    """
-    request_id = _get_request_id(request)
-
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-
-    raise HTTPException(
-        status_code=501,
-        detail="人格自动进化尚未实现（Personality evolution not implemented）",
-    )
-
-
-# 宪法规则独立持久源（2026-09-12 P1 台账清剿）：
-# 原读写 agent.constitution 内存属性（构造默认 ""，add 时 setattr 成 list）
-# → 无落盘重启即丢，且 FE growth.ts 路径 /constitution[/{id}] 与 BE
-# /constitution/rules[/{id}] 错位增删改恒 404。规则落
-# data/constitution/{agent_id}.json（与 personality 特质持久同源风格）。
-
-_CONSTITUTION_DIR = "data/constitution"
-
-
-def _constitution_path(agent_id: str) -> "pathlib.Path":
-    safe = str(agent_id).replace("/", "_").replace("\\", "_")
-    return pathlib.Path(_CONSTITUTION_DIR) / f"{safe}.json"
-
-
-def _load_constitution_rules(agent_id: str) -> List[Dict[str, Any]]:
-    try:
-        with open(_constitution_path(agent_id), "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else []
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
-
-
-def _save_constitution_rules(agent_id: str, rules: List[Dict[str, Any]]) -> None:
-    p = _constitution_path(agent_id)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_name(p.name + ".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(rules, f, ensure_ascii=False, indent=2)
-    tmp.replace(p)
-
-
-def _rule_to_model(agent_id: str, rule: Dict[str, Any]) -> ConstitutionRule:
-    return ConstitutionRule(
-        rule_id=rule.get("rule_id", ""),
-        agent_id=agent_id,
-        timestamp=rule.get("timestamp", 0.0),
-        rule_type=rule.get("rule_type", "behavior"),
-        content=rule.get("content", ""),
-        priority=rule.get("priority", 0),
-        enabled=rule.get("enabled", True),
-    )
-
-
-@router.get("/constitution")
-async def get_constitution(
-    request: Request,
-    agent_id: str = Query(default="default", description="Agent ID"),
-):
-    """获取宪法信息（overview，读持久源）"""
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-
-    return {
-        "code": 0,
-        "message": "success",
-        "data": {"constitution": _load_constitution_rules(agent_id)},
-    }
-
-
-@router.put("/constitution")
-async def update_constitution(
-    request: Request,
-    agent_id: str = Query(default="default", description="Agent ID"),
-    constitution: List[Dict[str, Any]] = [],
-):
-    """整表更新宪法（落盘）"""
-    request_id = _get_request_id(request)
-
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-
-    _save_constitution_rules(agent_id, constitution)
-    return {
-        "code": 0,
-        "message": "Constitution updated",
-        "data": {"constitution": constitution},
-        "request_id": request_id,
-    }
-
-
-@router.get("/constitution/rules", response_model=List[ConstitutionRule])
-async def get_constitution_rules(
-    request: Request,
-    agent_id: str = Query(default="default", description="Agent ID"),
-):
-    """获取宪法规则列表"""
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-
-    return [_rule_to_model(agent_id, r) for r in _load_constitution_rules(agent_id)]
-
-
-@router.post("/constitution/rules", response_model=ConstitutionRule)
-async def add_constitution_rule(
-    request: Request,
-    agent_id: str = Query(default="default", description="Agent ID"),
-    body: ConstitutionRuleCreate = ConstitutionRuleCreate(content=""),
-):
-    """添加宪法规则"""
-    _get_request_id(request)
-
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-
-    rule = {
-        "rule_id": str(uuid.uuid4()),
-        "timestamp": time.time(),
-        "rule_type": body.rule_type,
-        "content": body.content,
-        "priority": body.priority,
-        "enabled": body.enabled if body.enabled is not None else True,
-    }
-    rules = _load_constitution_rules(agent_id)
-    rules.append(rule)
-    _save_constitution_rules(agent_id, rules)
-
-    return _rule_to_model(agent_id, rule)
-
-
-@router.put("/constitution/rules/{rule_id}", response_model=ConstitutionRule)
-async def update_constitution_rule(
-    request: Request,
-    agent_id: str = Query(default="default", description="Agent ID"),
-    rule_id: str = Path(..., description="规则ID"),
-    body: ConstitutionRuleUpdate = ConstitutionRuleUpdate(),
-):
-    """更新宪法规则（局部：只改请求里出现的键）"""
-    _get_request_id(request)
-
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-
-    updates = {k: v for k, v in safe_model_dump(body).items() if v is not None}
-    rules = _load_constitution_rules(agent_id)
-    for rule in rules:
-        if rule.get("rule_id") == rule_id:
-            rule.update(updates)
-            _save_constitution_rules(agent_id, rules)
-            return _rule_to_model(agent_id, rule)
-
-    raise HTTPException(status_code=404, detail=f"Rule '{rule_id}' not found")
-
-
-@router.delete("/constitution/rules/{rule_id}")
-async def delete_constitution_rule(
-    request: Request,
-    agent_id: str = Query(default="default", description="Agent ID"),
-    rule_id: str = Path(..., description="规则ID"),
-):
-    """删除宪法规则"""
-    request_id = _get_request_id(request)
-
-    agent = _get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
-
-    rules = _load_constitution_rules(agent_id)
-    remaining = [r for r in rules if r.get("rule_id") != rule_id]
-    if len(remaining) == len(rules):
-        raise HTTPException(status_code=404, detail=f"Rule '{rule_id}' not found")
-    _save_constitution_rules(agent_id, remaining)
-    return {
-        "code": 0,
-        "message": f"Rule '{rule_id}' deleted",
-        "data": {"rule_id": rule_id},
-        "request_id": request_id,
-    }

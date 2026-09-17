@@ -14,7 +14,7 @@ curl_cffi>=0.7.0  # 静态抓取共享层（neurova.http_fetch）浏览器 TLS �
 aiosqlite>=0.19.0
 
 # Authentication
-python-jose[cryptography]>=3.3.0
+PyJWT>=2.8.0
 passlib[bcrypt]>=1.7.4
 python-multipart>=0.0.6
 

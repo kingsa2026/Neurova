@@ -4,34 +4,20 @@ from __future__ import annotations
 MemoryManager — 记忆管理器（CogArch 总线版）
 ===============================================
 
-⚠️ 架构现状 (基于实际代码, 非设计声明):
-  - 行数: ~1000 行 (非 docstring 之前声称的 ~500 行)
-  - 子模块: 仅加载 EmotionModule (非声称的 12 个独立模块)
-  - EventBus: 已创建但子模块未通过它注册
-  - 50+ 方法为 stub, 返回空值/默认值, 标注见各方法注释
+架构现状 (基于实际代码, 2026-09-16 标注诚实性审计后更新):
+  - 门面职责: 本类是对 modules/* 各子模块的委托门面 + 核心记忆 CRUD 本体
+  - 各功能区 (Emotion/Classification/SelfModel/Meta/EKI/TKG/WorkingMemory/
+    SelfCommands/Conflict/Relation/Sleep/Explainability/ForgettingRecovery)
+    均已委托到对应模块或真实实现——历史上标注的 "STUB" 区块已全部落地,
+    旧文件头声称的 "50+ 方法为 stub" 已不再成立
+  - 诚实透传 (有意设计, 非 stub): apply_emotion_to_temperature/apply_emotion_to_style/
+    get_emotion_history/reset_emotion_to_baseline 在 EmotionModule 中无对应能力
+    (模块不维护历史/风格/基线), 显式返回默认值; 若模块补齐能力应改真实委托
+  - 契约锁定: tests/unit/memory/test_manager_stub_annotations.py
+    (TestAnnotationHonesty 组) 守卫标注与实现不漂移
 
-已完整实现的功能:
-  - remember/recall/search_memories (核心记忆 CRUD)
-  - SQLite 持久化 (_init_persistence_db/_load_from_db/_persist_memory)
-  - 情感分析 (EmotionModule 代理: analyze_emotion/get_emotion_summary 等)
-  - 记忆温度 (update_memory_temperature/run_decay_cycle)
-  - 生命周期 (get_crystallized/get_hot_memories)
-
-Stub 方法 (返回空值, 未实现):
-  - Self Model: get_self_model/update_self_model/update_user_profile/get_user_profile
-  - Meta-cognition: meta_monitor/meta_reflect/meta_optimize/meta_evolve_skills 等
-  - EKI: eki_process_task/eki_recommend_reinforcement 等
-  - TKG: tkg_add_fact/tkg_query_current 等
-  - Working Memory: wm_add_turn 等
-  - Sleep: run_light_sleep_cycle/run_rem_sleep_cycle/run_deep_sleep_cycle/run_dormant_cycle
-  - Explainability: get_explanation_chain/visualize_chain (explain_memory 最小实现)
-
-已实现的方法:
-  - Forgetting Recovery: archive_memory/recover_from_archive/get_archived_memories 等
-    (真实操作 _memories.lifecycle_stage, 非委托 stub)
-
-调用方应通过 hasattr 或 try/except 检测 stub 方法,
-或直接使用对应的独立子模块 (如 cognitive_storage_engine, neurova_recall 等)。
+调用方无需 hasattr/try-except 防御: 各功能区方法均有真实行为,
+契约以 test_manager_full_delegation.py / test_manager_stub_annotations.py 为准。
 """
 
 import json
@@ -548,7 +534,10 @@ class MemoryManager:
     def _persist_memory(self, mem: Memory):
         """将单条记忆写入 SQLite 持久化（经常驻连接；批量入口见
         persist_memory_batch）"""
+        strict = (mem.metadata or {}).get("type") == "question_queue"
         if not getattr(self, "_persist_db_path", None):
+            if strict:
+                raise OSError("Question queue requires durable memory storage")
             return
         try:
             conn = getattr(self, "_persist_conn", None)
@@ -574,6 +563,8 @@ class MemoryManager:
                 logger.warning("Persist memory retry succeeded (id=%s)", mem.id)
             except Exception as e2:
                 logger.error("Persist memory retry failed (id=%s): %s", mem.id, e2)
+                if strict:
+                    raise OSError("Question queue persistence failed") from e2
 
     def _delete_persisted_memory(self, memory_id: str):
         """从 SQLite 删除持久化记忆
@@ -838,6 +829,8 @@ class MemoryManager:
                 neuser_id=self._eff_neuser_id(),
                 user_id=self._eff_user_id(),
             )
+            if final_metadata.get("type") == "question_queue":
+                self._persist_memory(mem)
             self._memories[mem_id] = mem
             # 审计 P1-D6：关键词倒排增量维护（替代 recall 每查询全量重建）
             try:
@@ -852,7 +845,8 @@ class MemoryManager:
             self._stats["total_memories"] = len(self._memories)
 
             # 持久化到 SQLite（跨重启保留）
-            self._persist_memory(mem)
+            if final_metadata.get("type") != "question_queue":
+                self._persist_memory(mem)
 
             # 自动情感标注（如果 content 包含情感关键词）
             if self._emotion_module and not emotion:
@@ -1174,6 +1168,10 @@ class MemoryManager:
             mem = self._memories.get(memory_id)
             if not mem:
                 return False
+            if (mem.metadata or {}).get("type") == "question_queue":
+                from copy import deepcopy
+
+                mem = deepcopy(mem)
             if "content" in kwargs:
                 mem.content = kwargs["content"]
             if "temperature" in kwargs:
@@ -1216,6 +1214,7 @@ class MemoryManager:
                     mem.lifecycle_stage = stage_val
             mem.updated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
             self._persist_memory(mem)  # 更新持久化
+            self._memories[memory_id] = mem
         # bus.emit 在锁外执行，避免持锁调用 handler 导致递归死锁
         self._bus.emit(
             MemoryEvent(
@@ -1443,7 +1442,7 @@ class MemoryManager:
         """获取完整统计"""
         return self.get_stats(agent_wide=agent_wide)
 
-    # ────── Emotion (analyze_emotion 真实实现, 其余 stub 抛出 NotImplementedError) ──────
+    # ────── Emotion (委托到 EmotionModule; 透传方法见文件头"诚实透传"说明) ──────
 
     def analyze_emotion(self, text: str) -> Dict[str, Any]:
         """分析文本情感（P-2 修复: 返回 {score, tags} 字典, 委托到 EmotionModule.analyze_text_emotion）
@@ -1585,7 +1584,7 @@ class MemoryManager:
         emotion = self._emotion_module.analyze_text_emotion(user_text)
         return emotion.to_dict()
 
-    # ────── Classification (STUB: 未实现, 抛出 NotImplementedError) ──────
+    # ────── Classification (委托到 modules/classifier_module.py) ──────
 
     def _ensure_classifier_module(self):
         """懒加载 ClassifierModule（首次调用时初始化）"""
@@ -2504,7 +2503,7 @@ class MemoryManager:
         module.shutdown()
         logger.info("AutoContextModule stopped")
 
-    # ────── Advanced Features (STUB: 未实现, 返回默认值) ──────
+    # ────── Advanced Features (情感检索/痕迹记忆等, 委托到对应模块) ──────
 
     def get_memories_by_emotion(self, emotion: str, limit: int = 10) -> List[Dict[str, Any]]:
         """获取带有特定情感的记忆"""

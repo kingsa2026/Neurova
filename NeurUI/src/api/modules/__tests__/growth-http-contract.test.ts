@@ -1,18 +1,21 @@
 /**
  * growth API 模块契约测试（2026-09-15 反思/成长链路排查修复）
  *
- * 钉死三处前后端错位根因：
+ * 钉死前后端错位根因：
  * 1. agent_id 必须走 query——BE 端点用 Query 声明，body 传法被静默忽略
  *    （createQuestion/createReflection 曾恒落 default agent）
  * 2. answerQuestion 是 PUT + query(answer)，原 POST+body 恒 405
  * 3. getQuestions 参数是 limit/offset/answered（原 page/size 被 BE 忽略）
+ * 4. 2026-09-16 envelope 契约收口：BE 全域 {code,message,data,request_id}，
+ *    模块函数统一 res.data 解包（原裸数组兜底 Array.isArray 已随 BE 收口拆除）
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const apiMock = vi.hoisted(() => ({
-  get: vi.fn().mockResolvedValue({ data: {} }),
-  post: vi.fn().mockResolvedValue({ data: {} }),
-  put: vi.fn().mockResolvedValue({ data: {} }),
+  get: vi.fn().mockResolvedValue({ code: 0, message: 'success', data: {} }),
+  post: vi.fn().mockResolvedValue({ code: 0, message: 'success', data: {} }),
+  put: vi.fn().mockResolvedValue({ code: 0, message: 'success', data: {} }),
+  delete: vi.fn().mockResolvedValue({ code: 0, message: 'success', data: null }),
 }))
 
 vi.mock('@/api', () => ({ default: apiMock }))
@@ -22,9 +25,10 @@ import * as growth from '../growth'
 describe('growth 模块 HTTP 契约', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    apiMock.get.mockResolvedValue({ data: {} })
-    apiMock.post.mockResolvedValue({ data: {} })
-    apiMock.put.mockResolvedValue({ data: {} })
+    apiMock.get.mockResolvedValue({ code: 0, message: 'success', data: {} })
+    apiMock.post.mockResolvedValue({ code: 0, message: 'success', data: {} })
+    apiMock.put.mockResolvedValue({ code: 0, message: 'success', data: {} })
+    apiMock.delete.mockResolvedValue({ code: 0, message: 'success', data: null })
   })
 
   it('getCapabilities GET /growth/capabilities?agent_id=', async () => {
@@ -32,7 +36,7 @@ describe('growth 模块 HTTP 契约', () => {
     expect(apiMock.get).toHaveBeenCalledWith('/growth/capabilities', { params: { agent_id: 'a1' } })
   })
 
-  it('getQuestions 使用 limit/offset/answered 查询参并返回裸数组', async () => {
+  it('getQuestions 使用 limit/offset/answered 查询参', async () => {
     await growth.getQuestions('a1', { limit: 50, offset: 10, answered: false })
     expect(apiMock.get).toHaveBeenCalledWith('/growth/questions', {
       params: { limit: 50, offset: 10, answered: false, agent_id: 'a1' },
@@ -75,14 +79,17 @@ describe('growth 模块 HTTP 契约', () => {
     )
   })
 
-  it('getReflections 归一 BE 裸数组条目（log_id/timestamp/reflection_type/confidence → id/created_at/category/quality）', async () => {
-    apiMock.get.mockResolvedValueOnce([
-      {
-        log_id: 'L1', agent_id: 'a1', timestamp: 1789409845.3,
-        reflection_type: 'performance', content: '正文', insights: ['洞察'], confidence: 0.8,
-        related_memories: [], status: 'pending',
-      },
-    ])
+  it('getReflections 解包 envelope.data 并归一 BE 条目（log_id/timestamp/reflection_type/confidence → id/created_at/category/quality）', async () => {
+    apiMock.get.mockResolvedValueOnce({
+      code: 0, message: 'success', request_id: 'r1',
+      data: [
+        {
+          log_id: 'L1', agent_id: 'a1', timestamp: 1789409845.3,
+          reflection_type: 'performance', content: '正文', insights: ['洞察'], confidence: 0.8,
+          related_memories: [], status: 'pending',
+        },
+      ],
+    })
     const list = await growth.getReflections('a1', { limit: 12, offset: 0 })
     expect(apiMock.get).toHaveBeenCalledWith('/growth/reflection', { params: { limit: 12, offset: 0, agent_id: 'a1' } })
     expect(list).toHaveLength(1)
@@ -92,10 +99,13 @@ describe('growth 模块 HTTP 契约', () => {
     expect(list[0].created_at).toContain('2026')
   })
 
-  it('getQuestions 直接返回 BE 裸数组（拦截器语义：Promise 值即 body）', async () => {
-    apiMock.get.mockResolvedValueOnce([
-      { id: 'q1', question_id: 'q1', agent_id: 'a1', question: '问题?', status: 'asked', answered: false, created_at: 1 },
-    ])
+  it('getQuestions 解包 envelope.data 列表', async () => {
+    apiMock.get.mockResolvedValueOnce({
+      code: 0, message: 'success', request_id: 'r2',
+      data: [
+        { id: 'q1', question_id: 'q1', agent_id: 'a1', question: '问题?', status: 'asked', answered: false, created_at: 1 },
+      ],
+    })
     const list = await growth.getQuestions('a1', { limit: 50 })
     expect(list).toHaveLength(1)
     expect(list[0].status).toBe('asked')

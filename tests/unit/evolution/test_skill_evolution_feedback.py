@@ -59,17 +59,6 @@ class _FakeRegistry:
         return list(self.skills.values())
 
 
-class _FakeSkillService:
-    """记录 register_auto_skill 调用，模拟磁盘持久化。"""
-
-    def __init__(self):
-        self.persisted = {}
-
-    def register_auto_skill(self, skill_id, name, description="", version="1.0.0", config=None):
-        self.persisted[skill_id] = {"config": config or {}}
-        return True
-
-
 class TestBreakpoint1ReuseFeedback(unittest.TestCase):
     """断点 #1：技能执行反馈 → record_reuse → fitness 提升。"""
 
@@ -141,35 +130,61 @@ class TestBreakpoint1ReuseFeedback(unittest.TestCase):
 
 
 class TestBreakpoint2GeneticPersistence(unittest.TestCase):
-    """断点 #2：genetic 注册支持 skill_service 持久化。"""
+    """断点 #2：genetic 注册支持 skill_service 持久化（真实服务+独立证据契约）。"""
 
-    def test_register_without_service_unchanged(self):
+    def setUp(self):
+        import tempfile
+        from neurova.skills.skill_service import SkillService
+
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        self.service = SkillService("genetic-persist", skills_dir=self._dir.name)
+
+    def seed(self, engine):
+        genotype = engine._population[0]
+        purpose = (f"遗传进化工具组合（适应度 {genotype.fitness:.2f}）: "
+                   f"{' → '.join(genotype.tool_sequence)}")
+        for i in range(3):
+            self.service.creation_evidence.record(str(i), genotype.tool_sequence, purpose, True)
+
+    def test_register_without_service_rejected(self):
         engine = ToolGeneticEngine(validation_threshold=0.8)
         engine.add_to_population(ToolGenotype(tool_sequence=["a", "b"], success_rate=0.9))
         registry = _FakeRegistry()
-        n = engine.register_to_skill_registry(registry)
-        self.assertEqual(n, 1)
-        self.assertEqual(len(registry.skills), 1)
+        self.assertEqual(engine.register_to_skill_registry(registry), 0)
+        self.assertEqual(registry.skills, {})
 
     def test_register_with_service_persists(self):
         engine = ToolGeneticEngine(validation_threshold=0.8)
         engine.add_to_population(ToolGenotype(tool_sequence=["a", "b"], success_rate=0.9))
         registry = _FakeRegistry()
-        service = _FakeSkillService()
-        engine.register_to_skill_registry(registry, skill_service=service)
-        self.assertEqual(len(service.persisted), 1)
-        (entry,) = service.persisted.values()
-        self.assertEqual(entry["config"]["tool_sequence"], ["a", "b"])
+        self.seed(engine)
+        self.assertEqual(engine.register_to_skill_registry(registry, self.service), 1)
+        entry = self.service.get_skill_info("genetic_a_b")
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry["manifest"]["config"]["tool_sequence"], ["a", "b"])
 
-    def test_registry_only_new_skills_persisted(self):
-        """已注册过的技能（has_skill 命中）不再重复持久化。"""
+    def test_register_without_evidence_rejected(self):
+        """无三独立成功证据的遗传候选不得注册（fitness≠证据）。"""
         engine = ToolGeneticEngine(validation_threshold=0.8)
         engine.add_to_population(ToolGenotype(tool_sequence=["a", "b"], success_rate=0.9))
         registry = _FakeRegistry()
-        registry.skills["genetic_a_b"] = _make_skill()
-        service = _FakeSkillService()
-        engine.register_to_skill_registry(registry, skill_service=service)
-        self.assertEqual(len(service.persisted), 0)
+        self.assertEqual(engine.register_to_skill_registry(registry, self.service), 0)
+        self.assertEqual(self.service.list_skills(), [])
+        self.assertEqual(registry.skills, {})
+
+    def test_registry_only_new_skills_persisted(self):
+        """磁盘为去重依据；重启 registry 后复用而非新增条目。"""
+        from neurova.skills.skill_service import SkillService
+        engine = ToolGeneticEngine(validation_threshold=0.8)
+        engine.add_to_population(ToolGenotype(tool_sequence=["a", "b"], success_rate=0.9))
+        self.seed(engine)
+        self.assertEqual(engine.register_to_skill_registry(_FakeRegistry(), self.service), 1)
+        restarted = SkillService("genetic-persist", skills_dir=self._dir.name)
+        registry = _FakeRegistry()
+        self.assertEqual(engine.register_to_skill_registry(registry, restarted), 0)
+        self.assertEqual(len(restarted.list_skills()), 1)
+        self.assertIn("genetic_a_b", registry.skills)
 
 
 class TestBreakpoint3ApplyImprovement(unittest.TestCase):

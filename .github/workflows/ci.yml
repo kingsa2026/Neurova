@@ -112,7 +112,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt --no-deps
-          python -m pip install fastapi uvicorn httpx pydantic pydantic-settings
+          python -m pip install fastapi uvicorn httpx pydantic pydantic-settings pytest
 
       - name: Boot smoke (spawns real backend, probes health/docs/metrics/auth)
         run: python -m pytest tests/e2e/test_backend_boot.py -q --timeout 240

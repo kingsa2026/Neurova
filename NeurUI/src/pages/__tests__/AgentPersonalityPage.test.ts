@@ -119,7 +119,11 @@ const findPane = (wrapper: ReturnType<typeof mount>, tab: string) =>
 describe('AgentPersonalityPage 人格双页签契约', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(request.get).mockResolvedValue({ data: {} } as any)
+    // 新契约（2026-09-16）：服务端已持久化 traits 才渲染特质列表（空态引导见 persistence.test.ts）
+    vi.mocked(request.get).mockResolvedValue({
+      code: 0, message: 'success',
+      data: { agent_id: 'agent-A', traits: { openness: 0.7, conscientiousness: 0.6, extraversion: 0.5, agreeableness: 0.8, neuroticism: 0.3, creativity: 0.65 }, values: [], communication_style: 'balanced', decision_style: 'analytical' },
+    } as any)
     vi.mocked(getEmotionSummary).mockResolvedValue({
       code: 0,
       data: { total_annotated: 3, emotion_distribution: { joy: 2, sadness: 1 } },

@@ -24,6 +24,7 @@ from neurova.evolution.skill_improver import (
     get_skill_improver,
     reset_skill_improver,
 )
+from tests.unit.skills.creation_helpers import register_proven_skill
 from neurova.skills.skill_service import SkillService
 
 
@@ -67,7 +68,7 @@ class TestUpdateAutoSkill:
         self.svc = SkillService(agent_id="t", skills_dir=self.tmp)
 
     def test_update_existing_skill_persists(self):
-        self.svc.register_auto_skill(
+        register_proven_skill(self.svc, 
             skill_id="genetic_a_b", name="genetic_a_b", config={"tool_sequence": ["a", "b"]}
         )
         ok = self.svc.update_auto_skill(
@@ -84,7 +85,7 @@ class TestUpdateAutoSkill:
         assert self.svc.update_auto_skill(skill_id="nope", version="1.0.1") is False
 
     def test_update_keeps_source_auto(self):
-        self.svc.register_auto_skill(skill_id="s1", name="s1", config={})
+        register_proven_skill(self.svc, skill_id="s1", name="s1", config={})
         self.svc.update_auto_skill(skill_id="s1", version="1.0.2", config={"x": 1})
         svc2 = SkillService(agent_id="t", skills_dir=self.tmp)
         info = svc2.get_skill_info("s1")
@@ -99,7 +100,7 @@ class TestApplyImprovementPersists:
         self.registry = _FakeRegistry()
         self.skill = _make_skill()
         self.registry.register_skill(self.skill)
-        self.svc.register_auto_skill(
+        register_proven_skill(self.svc, 
             skill_id=self.skill.name, name=self.skill.name, version="1.0.0",
             config={"tool_sequence": ["a", "b"]},
         )

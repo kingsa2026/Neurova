@@ -94,15 +94,16 @@ class V3ClosedLoopTest(unittest.TestCase):
         self.assertEqual(history[0]["trigger"], "e2e")
 
         stats = client.get(f"{base}/stats").json()["data"]
-        self.assertEqual(stats["total_entries"], 0)  # 洞察/反思不计入条目统计
+        # 新口径（2026-09-16）：洞察镜像为 thought 条目并计入条目统计——
+        # 否则条目列表/统计在生产环境恒空（唯一 thought 写入方曾只有手动创建）
+        self.assertGreaterEqual(stats["total_entries"], 1)
 
         created = client.post(
             base, json={"type": "strategy", "content": "改用 browser_read", "confidence": 0.7}
         ).json()["data"]
         self.assertEqual(created["type"], "strategy")
         stats2 = client.get(f"{base}/stats").json()["data"]
-        self.assertEqual(stats2["total_entries"], 1)
-        self.assertAlmostEqual(stats2["avg_confidence"], 0.7)
+        self.assertEqual(stats2["total_entries"], stats["total_entries"] + 1)
 
         # 6. 手动反思端点复用同一引擎
         reflect_res = client.post(f"{base}/reflect").json()["data"]

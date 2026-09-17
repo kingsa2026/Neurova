@@ -19,7 +19,7 @@
 - get_self_model_engine(agent_id) / reset_self_model_engine()
 - should_reflect()  间隔门控（默认 600s）
 - reflect(trigger)  跑五算子，教训落台账 meta_records(kind="lesson"/"reflection")，
-  同时返回报告 dict
+  并镜像 kind="thought" 条目供前端条目卡片消费；同时返回报告 dict
 - check_tool_advisory(tool_name)  调控门数据源：活跃 avoid_tool 教训或 None
 """
 
@@ -183,6 +183,10 @@ class SelfModelEngine:
                     confidence=lesson["confidence"],
                     metadata=lesson,
                 )
+                # 洞察镜像：同文案写一条 kind='thought'，让前端元认知页条目卡片
+                # 自动出现数据（条目列表/统计只读 thought——自然使用下若无镜像，
+                # 卡片恒空；2026-09-16 用户报告）。去重防周期反思同签名刷屏。
+                self._mirror_lesson_as_thought(lesson, trigger=trigger)
 
             summary = (
                 f"{len(lessons)} 条洞察: " + "; ".join(l["text"] for l in lessons[:3])
@@ -206,6 +210,60 @@ class SelfModelEngine:
             )
             self._last_reflect_at = time.time()
             return report
+
+    # ────── 洞察镜像 thought 条目 ──────
+
+    def _mirror_lesson_as_thought(self, lesson: Dict[str, Any], trigger: str = "") -> None:
+        """洞察镜像为 kind='thought' 条目（前端条目卡片的数据源契约）。
+
+        去重：同 (operator, subject) 签名的镜像条目在活跃期内（created_at 落
+        在教训 TTL 窗口内）已存在时不重复写，防周期反思把条目卡片刷成同文案
+        洪流；过期后重新镜像（活跃性窗口语义与 lesson TTL 对齐）。
+
+        失败仅降级镜像本身——教训主链路（lesson/reflection）不受影响。
+        """
+        try:
+            now = datetime.datetime.now(datetime.timezone.utc)
+            window_start = (now - datetime.timedelta(hours=_LESSON_TTL_HOURS)).isoformat()
+            operator = lesson.get("operator") or "unknown"
+            subject = lesson.get("subject") or "unknown"
+            existing = self.ledger.list_records(
+                agent_id=self._agent_id,
+                page=1,
+                size=1,
+                kind="thought",
+                record_type=f"insight:{operator}",
+            )
+            for it in existing.get("items") or []:
+                meta = it.get("metadata") or {}
+                if meta.get("lesson_subject") != subject:
+                    continue
+                if (it.get("created_at") or "") < window_start:
+                    continue  # 活跃窗口外：允许重新镜像
+                return  # 窗口内已有同签名镜像 → 去重
+            self.ledger.create_record(
+                agent_id=self._agent_id,
+                kind="thought",
+                type=f"insight:{operator}",
+                content=lesson.get("text") or "",
+                context=f"insight:{operator}",
+                confidence=lesson.get("confidence") or 0.5,
+                metadata={
+                    "lesson_subject": subject,
+                    "lesson_operator": operator,
+                    "reflection_trigger": trigger,
+                    # 溯源快照：前端条目卡"点击展开溯源"直接消费本条目，
+                    # 不回查 lesson（lesson 有 TTL 且被裁剪回收，条目须自含
+                    # 其生命周期内的全量事实——2026-09-16 可追溯化契约）。
+                    "condition": lesson.get("condition") or "",
+                    "finding": lesson.get("finding") or "",
+                    "recommendation": lesson.get("recommendation") or "",
+                    "evidence": lesson.get("evidence") or {},
+                },
+            )
+        except Exception as e:
+            # 镜像是展示层增强，教训主链路不受影响
+            logger.debug("洞察镜像 thought 跳过: %s", e)
 
     # ────── 调控门数据源 ──────
 

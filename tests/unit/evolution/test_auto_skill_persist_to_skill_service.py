@@ -32,11 +32,15 @@ class TestSkillServiceRegisterAutoSkill:
         service = SkillService(agent_id="test", skills_dir=str(tmp_path))
         assert hasattr(service, "register_auto_skill"), "SkillService 应有 register_auto_skill 方法"
 
-    def test_register_auto_skill_persists_metadata(self, tmp_path):
-        """s3.2 register_auto_skill 应持久化元数据到 manifest"""
+    @pytest.mark.parametrize("gate, enabled", [("1", False), ("0", True)])
+    def test_register_auto_skill_persists_metadata(self, tmp_path, monkeypatch, gate, enabled):
+        """自动技能的持久化启用状态必须遵守审批闸。"""
         from neurova.skills.skill_service import SkillService
+        monkeypatch.setenv("NEUROVA_SKILL_REVIEW_GATE", gate)
         service = SkillService(agent_id="test", skills_dir=str(tmp_path))
 
+        for i in range(3):
+            service.creation_evidence.record(str(i), ["tool_a", "tool_b"], "auto generated", True)
         ok = service.register_auto_skill(
             skill_id="auto-1",
             name="auto_skill_1",
@@ -51,7 +55,8 @@ class TestSkillServiceRegisterAutoSkill:
         assert any(s["id"] == "auto-1" for s in skills), "list_skills 应包含自动技能"
         target = next(s for s in skills if s["id"] == "auto-1")
         assert target["name"] == "auto_skill_1"
-        assert target["enabled"] is True
+        assert target["enabled"] is enabled
+        assert SkillService(agent_id="test", skills_dir=str(tmp_path)).get_skill_info("auto-1")["enabled"] is enabled
 
     def test_register_auto_skill_rejects_duplicate(self, tmp_path):
         """s3.3 register_auto_skill 重复注册同一 skill_id 应返回 False"""
@@ -67,7 +72,10 @@ class TestSkillServiceRegisterAutoSkill:
         from neurova.skills.skill_service import SkillService
 
         s1 = SkillService(agent_id="test", skills_dir=str(tmp_path))
-        s1.register_auto_skill(skill_id="persist-1", name="persisted")
+        for i in range(3):
+            s1.creation_evidence.record(str(i), ["read"], "persisted", True)
+        assert s1.register_auto_skill(skill_id="persist-1", name="persisted",
+                                     description="persisted", config={"tool_sequence": ["read"]})
 
         # 模拟重启: 重新实例化
         s2 = SkillService(agent_id="test", skills_dir=str(tmp_path))
@@ -99,12 +107,17 @@ class TestRegisterToSkillRegistryPersistsToSkillService:
 
         builder = AutoSkillBuilder(min_pattern_occurrences=2, min_success_rate=0.5)
         tool_seq = ["memory_search", "file_read"]
-        for _ in range(3):
+        service = SkillService(agent_id="test", skills_dir=str(tmp_path))
+        builder.evidence_store = service.creation_evidence
+        for i in range(3):
+            service.creation_evidence.record(str(i), tool_seq, "test", True)
+        for i in range(3):
             builder.observe(
                 tool_sequence=tool_seq,
                 context="test",
                 success=True,
                 duration=0.5,
+                metadata={"source_key": str(i)},
             )
         assert len(builder._templates) > 0, "前置: 应有封装的模板"
 

@@ -18,6 +18,7 @@ import json
 import pytest
 
 from neurova.skills import library_service as lib
+from tests.unit.skills.creation_helpers import register_proven_skill
 
 
 # ── 用户键命名空间 ─────────────────────────────────────────
@@ -70,8 +71,8 @@ def test_apply_transfer_rejects_no_lineage_same_name(lib_base):
     绝不静默覆盖本地实现（原实现 ex_from 为空短路直覆）。"""
     agent = lib.get_library("agent", "a1")
     user = lib.get_library("user", "u:7")
-    agent.register_auto_skill("deploy", name="Agent版", description="x", config={"x": 1})
-    user.register_auto_skill("deploy", name="本地版", description="mine", manifest_source="user")
+    register_proven_skill(agent, "deploy", name="Agent版", description="x", config={"x": 1})
+    register_proven_skill(user, "deploy", name="本地版", description="mine", manifest_source="user")
     r = lib.apply_transfer("user", "u:7", "agent", "a1", "deploy", actor="u:7")
     assert r["ok"] is False and r["action"] == "rejected"
     assert "本地" in r["error"]
@@ -82,7 +83,11 @@ def test_apply_transfer_same_source_upgrade_positive(lib_base):
     """V2 收紧不许误伤：同源再流转仍走原地升级。"""
     agent = lib.get_library("agent", "a1")
     user = lib.get_library("user", "u:7")
-    agent.register_auto_skill("s1", name="S", description="d", version="1.0.0")
+    register_proven_skill(agent, "s1", name="S", description="d", version="1.0.0")
+    cfg = agent.get_skill_info("s1")["manifest"]["config"]
+    # Independent target-library evidence; source evidence cannot cross owners.
+    for i in range(3):
+        user.creation_evidence.record(str(i), cfg["tool_sequence"], "d", True)
     assert lib.apply_transfer("user", "u:7", "agent", "a1", "s1")["action"] == "created"
     agent.update_auto_skill("s1", version="2.0.0")
     r = lib.apply_transfer("user", "u:7", "agent", "a1", "s1")
@@ -135,7 +140,7 @@ def test_agent_library_maps_to_skill_service_default(lib_base):
 
 def test_register_entries_carry_pool_and_owner(lib_base):
     svc = lib.get_library("user", "u:9")
-    assert svc.register_auto_skill(
+    assert register_proven_skill(svc, 
         "s1", name="n1", pool_type="user", owner_user_id="u:9"
     ) is True
     entry = json.loads((svc.skills_dir / "manifest.json").read_text(encoding="utf-8"))["s1"]
@@ -145,7 +150,7 @@ def test_register_entries_carry_pool_and_owner(lib_base):
 
 def test_register_defaults_agent(lib_base):
     svc = lib.get_library("agent", "a9")
-    svc.register_auto_skill("s2", name="n2")
+    register_proven_skill(svc, "s2", name="n2")
     entry = json.loads((svc.skills_dir / "manifest.json").read_text(encoding="utf-8"))["s2"]
     assert entry["pool_type"] == "agent"
     assert entry["owner_user_id"] == "a9"
@@ -184,9 +189,9 @@ async def test_flush_routes_per_library(lib_base, tmp_path, monkeypatch):
     from neurova.core import turn_context
 
     agent_lib = lib.get_library("agent", "rt1")
-    assert agent_lib.register_auto_skill("deploy", name="deploy") is True
+    assert register_proven_skill(agent_lib, "deploy", name="deploy") is True
     user_lib = lib.get_library("user", "u:5")
-    assert user_lib.register_auto_skill("deploy", name="deploy", pool_type="user", owner_user_id="u:5") is True
+    assert register_proven_skill(user_lib, "deploy", name="deploy", pool_type="user", owner_user_id="u:5") is True
 
     turn_context.reset_turn_tool_messages()
     # 同一轮里两条命中记录：一条来自 agent 副本、一条来自 user 副本（装配视图区分）

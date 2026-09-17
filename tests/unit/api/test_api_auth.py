@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
-from jose import jwt
+import jwt
 
 os.environ["NEUROVA_JWT_SECRET_KEY"] = "test_secret_key_1234567890123456789012345678901234567890"
 TEST_SECRET = os.environ["NEUROVA_JWT_SECRET_KEY"]

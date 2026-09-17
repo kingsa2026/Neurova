@@ -328,7 +328,7 @@ def restore_library_skills_for_turn(registry: Any, view: Any) -> int:
                 id=getattr(v, "skill_id", None) or str(name),
                 name=str(name),
                 description=getattr(v, "description", "") or "",
-                config={"tool_sequence": ts, "source": "library", **({"permissions": cfg["permissions"]} if cfg.get("permissions") is not None else {})},
+                config={**cfg, "source": "library"},
             )
             try:
                 if registry.register_skill(m):

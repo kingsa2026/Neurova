@@ -41,7 +41,17 @@ class TestCreateSkillSchema:
 
 class TestCreateSkillExecution:
     @pytest.mark.asyncio
-    async def test_skill_registered_and_returns_description(self):
+    async def test_skill_registered_and_returns_description(self, tmp_path, monkeypatch):
+        from neurova.skills.skill_service import SkillService
+        from neurova.skills.creation_governance import begin_task, record_tool_execution, flush_task
+
+        service = SkillService(agent_id="test", skills_dir=str(tmp_path))
+        monkeypatch.setattr("neurova.skills.skill_service.SkillService", lambda **kw: service)
+        for _ in range(3):
+            begin_task()
+            record_tool_execution("browser_extract_text", {"url": "https://example.com"}, True, {"text": "ok"})
+            record_tool_execution("file_write", {"file_path": "out.txt", "content": "{step_0.text}"}, True, {"success": True})
+            flush_task(service, "拉取 URL 内容并保存到文件", completed=True)
         exe, registry = make_executor()
         result = await exe._execute_builtin_tool(
             "create_skill",

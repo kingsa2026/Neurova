@@ -54,9 +54,11 @@ class TestPatternMiningUsesAgentRegistry:
 
         await pipeline._step_pattern_mining()
 
-        packer.register_to_skill_registry.assert_called_once()
-        registry_arg = packer.register_to_skill_registry.call_args.args[0]
-        assert registry_arg is agent._skill_registry
+        # Frequency replay is no longer a creation source; finish_task owns registration.
+        packer.observe.assert_not_called()
+        packer.register_to_skill_registry.assert_not_called()
+        pattern_miner.add_sequence.assert_called_once_with(["w1", "w2"])
+        pattern_miner.mine.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_no_agent_registry_still_persists_service_only(self):
@@ -83,9 +85,10 @@ class TestPatternMiningUsesAgentRegistry:
 
         with patch("neurova.skills.skill_service.SkillService") as svc_cls:
             await pipeline._step_pattern_mining()
-            svc_cls.assert_called_once()
-        packer.register_to_skill_registry.assert_called_once()
-        assert packer.register_to_skill_registry.call_args.args[0] is None
+            svc_cls.assert_not_called()
+        packer.observe.assert_not_called()
+        packer.register_to_skill_registry.assert_not_called()
+        pattern_miner.mine.assert_called_once()
 
 
 class TestWeightsPublicApiFeedback:

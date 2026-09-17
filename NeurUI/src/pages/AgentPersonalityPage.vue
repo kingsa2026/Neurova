@@ -91,12 +91,10 @@
                   <div class="trait-bar-value">{{ formatPercent(trait.value) }}</div>
                 </div>
               </div>
-              <div v-if="personalityProfile?.style || personalityProfile?.tone" class="personality-meta">
-                <a-tag v-if="personalityProfile?.style">{{ t('growth.personality') }}: {{ personalityProfile.style }}</a-tag>
-                <a-tag v-if="personalityProfile?.tone" color="purple">{{ t('emotion.title') }}: {{ personalityProfile.tone }}</a-tag>
-                <span v-if="personalityProfile?.updated_at" class="meta-timestamp">
-                  {{ t('common.updated') }}: {{ formatTime(personalityProfile.updated_at) }}
-                </span>
+              <div v-if="personalityProfile" class="personality-meta">
+                <a-tag v-if="personalityProfile.communication_style">{{ t('growth.personality') }}: {{ personalityProfile.communication_style }}</a-tag>
+                <a-tag v-if="personalityProfile.decision_style" color="purple">{{ personalityProfile.decision_style }}</a-tag>
+                <a-tag v-for="v in personalityProfile.values" :key="v" color="blue">{{ v }}</a-tag>
               </div>
             </div>
             <a-empty v-else-if="!loadingProfile" :description="t('common.noData')" />
@@ -141,15 +139,24 @@
 
             <!-- Traits list with sliders -->
             <GlassCard :title="t('growth.traits')">
-              <div class="traits-list">
-                <div v-for="trait in traitList" :key="trait.key" class="trait-row">
-                  <span class="trait-name">{{ t('personality.' + trait.key) }}</span>
-                  <a-slider v-model:value="trait.percent" :min="0" :max="100" :disabled="!editing" style="flex: 1" />
-                  <span class="trait-value">{{ trait.percent }}%</span>
+              <!-- 空态引导：服务端从未持久化 traits（2026-09-16）；旧实现用内置默认值冒充档案 -->
+              <div v-if="hasServerTraits === false" class="traits-empty-guide">
+                <p class="traits-empty-hint">{{ t('personality.emptyHint') }}</p>
+                <GlassButton variant="primary" size="sm" :loading="savingDefaults" @click="writeDefaultTraits">{{ t('personality.emptyAction') }}</GlassButton>
+              </div>
+              <div v-else>
+                <div class="traits-list">
+                  <div v-for="trait in traitList" :key="trait.key" class="trait-row">
+                    <span class="trait-name">{{ t('personality.' + trait.key) }}</span>
+                    <a-slider v-model:value="trait.percent" :min="0" :max="100" :disabled="!editing" style="flex: 1" />
+                    <span class="trait-value">{{ trait.percent }}%</span>
+                  </div>
                 </div>
+                <div v-if="verifyFailed" class="traits-verify-tip">{{ verifyFailed }}</div>
               </div>
               <template #footer>
-                <div class="traits-footer">
+                <div v-if="hasServerTraits === false" class="traits-footer traits-footer-empty"></div>
+                <div v-else class="traits-footer">
                   <GlassButton v-if="!editing" variant="secondary" size="sm" @click="editing = true">{{ t('common.edit') }}</GlassButton>
                   <template v-else>
                     <GlassButton variant="ghost" size="sm" @click="editing = false">{{ t('common.cancel') }}</GlassButton>
@@ -212,6 +219,11 @@ const loading = ref(false)
 const saving = ref(false)
 const evolving = ref(false)
 const editing = ref(false)
+// 保存回读校验：null=未校验/通过，字符串=回读不一致提示（2026-09-16）
+const verifyFailed = ref<string | null>(null)
+// 服务端是否已持久化 traits（null=未知/loading 中；false→空态引导）
+const hasServerTraits = ref<boolean | null>(null)
+const savingDefaults = ref(false)
 
 const traitList = ref<{ key: string; value: number; percent: number }[]>([
   { key: 'openness', value: 0.7, percent: 70 },
@@ -331,11 +343,13 @@ const fetchPersonality = async () => {
   loading.value = true
   try {
     const res: any = await request.get('/growth/personality', { params: { agent_id: agentId.value } })
-    const data = res?.data ?? res ?? {}
-    const traits = data.traits ?? data.profile ?? {}
-    if (typeof traits === 'object' && !Array.isArray(traits)) {
+    // envelope.data 是唯一事实源（2026-09-16 契约收口，见 personality-envelope-contract.test.ts）
+    const data = res?.data ?? {}
+    const traits = data.traits ?? {}
+    hasServerTraits.value = typeof traits === 'object' && !Array.isArray(traits) && Object.keys(traits).length > 0
+    if (hasServerTraits.value) {
       traitList.value = traitList.value.map(t => {
-        const val = traits[t.key] ?? t.value
+        const val = (traits as Record<string, number>)[t.key] ?? t.value
         return { ...t, value: val, percent: Math.round(val * 100) }
       })
     }
@@ -346,19 +360,77 @@ const fetchPersonality = async () => {
   }
 }
 
+/** PUT /personality 并用响应 envelope.data.traits 回读校验。
+ *  失败原因判别：missing = 服务端未回读 traits；mismatch = 回读与写入不一致（携带回读值供回刷）。 */
+type PersistResult =
+  | { ok: true; traits: Record<string, number> }
+  | { ok: false; reason: 'missing' }
+  | { ok: false; reason: 'mismatch'; traits: Record<string, number> }
+const persistTraits = async (traits: Record<string, number>): Promise<PersistResult> => {
+  const res: any = await request.put('/growth/personality', { traits }, { params: { agent_id: agentId.value } })
+  const readBack = res?.data?.traits
+  if (!readBack || typeof readBack !== 'object') return { ok: false, reason: 'missing' }
+  const mismatch = Object.entries(traits).some(([k, v]) => Math.abs((Number(readBack[k]) || 0) - v) > 1e-9)
+  return mismatch ? { ok: false, reason: 'mismatch', traits: readBack as Record<string, number> } : { ok: true, traits: readBack as Record<string, number> }
+}
+
+/** 用服务端 traits 回刷滑杆列表（回读为准） */
+const applyServerTraits = (traits: Record<string, number>) => {
+  traitList.value = traitList.value.map(t => {
+    if (traits[t.key] === undefined) return t
+    return { ...t, value: traits[t.key], percent: Math.round(traits[t.key] * 100) }
+  })
+  hasServerTraits.value = Object.keys(traits).length > 0
+}
+
 const savePersonality = async () => {
   saving.value = true
+  verifyFailed.value = null
   try {
     const traits: Record<string, number> = {}
     traitList.value.forEach(t => { traits[t.key] = t.percent / 100 })
-    await request.put('/growth/personality', { traits }, { params: { agent_id: agentId.value } })
-    message.success(t('common.success'))
+    const result = await persistTraits(traits)
+    if (!result.ok) {
+      // 回读缺失或不一致：如实报错，不谎报成功；不一致时服务端值仍为事实源，回刷列表
+      if (result.reason === 'mismatch') applyServerTraits(result.traits)
+      message.error(t('common.error'))
+      verifyFailed.value = result.reason === 'missing'
+        ? t('personality.verifyFailed')
+        : t('personality.verifyMismatch')
+      return
+    }
+    applyServerTraits(result.traits)
     editing.value = false
-    traitList.value = traitList.value.map(t => ({ ...t, value: t.percent / 100 }))
+    message.success(t('common.success'))
   } catch {
     message.error(t('common.error'))
   } finally {
     saving.value = false
+  }
+}
+
+/** 空态引导：写入六维中性默认值并按回读刷新（回读失败保持空态） */
+const writeDefaultTraits = async () => {
+  savingDefaults.value = true
+  verifyFailed.value = null
+  try {
+    const defaults: Record<string, number> = {}
+    traitList.value.forEach(t => { defaults[t.key] = 0.5 })
+    const result = await persistTraits(defaults)
+    if (!result.ok) {
+      if (result.reason === 'mismatch') applyServerTraits(result.traits)
+      message.error(t('common.error'))
+      verifyFailed.value = result.reason === 'missing'
+        ? t('personality.verifyFailed')
+        : t('personality.verifyMismatch')
+      return
+    }
+    applyServerTraits(result.traits)
+    message.success(t('common.success'))
+  } catch {
+    message.error(t('common.error'))
+  } finally {
+    savingDefaults.value = false
   }
 }
 
@@ -508,4 +580,17 @@ onMounted(refreshAll)
 .trait-name { width: 160px; font-size: 13px; font-weight: 500; color: var(--nr-text-primary); }
 .trait-value { width: 40px; font-family: var(--nr-font-mono); font-size: 12px; color: var(--nr-text-tertiary); text-align: right; }
 .traits-footer { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* 空态引导：服务端未建立档案 */
+.traits-empty-guide { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 36px 12px; }
+.traits-empty-hint { margin: 0; font-size: 13px; color: var(--nr-text-secondary); }
+.traits-verify-tip {
+  margin-top: 12px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
 </style>

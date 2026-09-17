@@ -103,8 +103,15 @@ describe('AgentPersonalityPage agent 切换联动', () => {
     vi.clearAllMocks()
     pageAgentId = undefined
     registeredOnAgentChange = undefined
-    vi.mocked(request.get).mockResolvedValue({ data: {} } as any)
-    vi.mocked(request.put).mockResolvedValue({ data: {} } as any)
+    // 新契约（2026-09-16）：服务端已持久化 traits 才渲染特质列表（空态引导见 persistence.test.ts）
+    vi.mocked(request.get).mockResolvedValue({
+      code: 0, message: 'success',
+      data: { agent_id: 'agent-A', traits: { openness: 0.7, conscientiousness: 0.6, extraversion: 0.5, agreeableness: 0.8, neuroticism: 0.3, creativity: 0.65 }, values: [], communication_style: 'balanced', decision_style: 'analytical' },
+    } as any)
+    vi.mocked(request.put).mockResolvedValue({
+      code: 0, message: 'success',
+      data: { agent_id: 'agent-A', traits: { openness: 0.7, conscientiousness: 0.6, extraversion: 0.5, agreeableness: 0.8, neuroticism: 0.3, creativity: 0.65 }, values: [], communication_style: 'balanced', decision_style: 'analytical' },
+    } as any)
     vi.mocked(request.post).mockResolvedValue({ data: {} } as any)
     vi.mocked(getEmotionSummary).mockResolvedValue({
       code: 0,

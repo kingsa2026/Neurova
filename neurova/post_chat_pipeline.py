@@ -1631,63 +1631,7 @@ class PostChatPipeline:
             if patterns:
                 logger.info("⛏️ PatternMiner 发现 %s 个频繁模式", len(patterns))
 
-            # 将模式反馈给 skill_packer
-            skill_packer = self._get_dependency("skill_packer")
-            if skill_packer and patterns:
-                templates = pattern_miner.to_skill_template_list()
-                # P1-3 反回声室：封装证据按"独立任务"记账——给本回合一个
-                # 回合级 source_key（session#turn），使同一模式在单回合内被
-                # 反复喂不再凑够出现数（须跨 ≥2 回合真复现才达阈值）
-                from neurova.core.turn_context import (
-                    get_turn_count as _gtc,
-                    get_turn_session_id as _gts,
-                )
-
-                try:
-                    _src = f"{_gts() or 'anon'}#{_gtc()}"
-                except Exception:  # noqa: BLE001 - 取不到回合身份则逐调用独立
-                    _src = f"pc-{id(templates)}"
-                for tmpl in templates:
-                    # 修复 P0-6：observe 签名是 (tool_sequence, context, success, duration, metadata)
-                    # 原错误签名 observe(tools=, support=, auto_registered=) 会抛 TypeError 被外层 except 吞没
-                    skill_packer.observe(
-                        tool_sequence=tmpl["tools"],
-                        context="自动挖掘模式",
-                        success=True,
-                        duration=0.0,
-                        metadata={
-                            "support": tmpl.get("support", 0),
-                            "auto_registered": True,
-                            "source_key": _src,
-                        },
-                    )
-
-                # 修复 P0-1：将封装的技能注册到 SkillRegistry
-                # 死实例修复（闭环审计 2026-09-04）：原代码 `SkillRegistry()` 新建
-                # 一次性对象注册即丢弃，运行时 LLM 永远看不到 pattern 封装技能；
-                # 必须注册进 agent 的真实 registry（与 genetic 路径对齐）。
-                # registry 不可用时传 None：packer 内部 register 失败会跳过，
-                # SkillService 持久化副作用保留（冷启动经 restore 恢复）。
-                try:
-                    skill_registry = getattr(self._agt, "_skill_registry", None)
-                    if hasattr(skill_packer, "register_to_skill_registry"):
-                        # s3 P0 #2: 同时持久化到 SkillService, 使前端 GET /private 可见
-                        skill_service = None
-                        try:
-                            from neurova.skills.skill_service import SkillService
-
-                            agent_id = getattr(self._agt.config, "agent_id", "default")
-                            skill_service = SkillService(agent_id=agent_id)
-                        except Exception as svc_err:
-                            logger.warning("创建 SkillService 失败, 自动技能仅写 registry: %s", svc_err)
-
-                        registered = skill_packer.register_to_skill_registry(
-                            skill_registry, skill_service=skill_service
-                        )
-                        if registered > 0:
-                            logger.info("📋 自动注册 %s 个技能到 SkillRegistry (并持久化到 SkillService)", registered)
-                except Exception as reg_err:
-                    logger.warning("自动技能注册失败: %s", reg_err)
+            # Historical frequency is not task success; only finish_task feeds skill evidence.
 
             self._step_results.append(
                 StepResult(

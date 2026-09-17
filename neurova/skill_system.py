@@ -472,6 +472,8 @@ class SkillRegistry:
         self._event_handlers: List[Callable] = []
         self._event_callbacks: Dict[str, List[Callable]] = {}
         self._runtime_manager = runtime_manager
+        import threading
+        self._registration_lock = threading.RLock()
         # 工具路由器注入: 恢复/注册 ToolSequenceSkill(自动技能)时需要
         # 执行体依靠此路由逐步骤执行工具; 未注入时合成技能"能看见不能调"
         self.tool_router: Any = None
@@ -490,9 +492,19 @@ class SkillRegistry:
         """
         from neurova.skills.skill_contract import canonicalize_skill_identity
 
-        canonicalize_skill_identity(skill, fallback=getattr(skill, "name", "") or "")
-        self._skills[skill.name] = skill
-        skill.add_event_handler(self._on_skill_event)
+        from neurova.skills.creation_governance import manifest_fingerprint
+
+        with self._registration_lock:
+            key = manifest_fingerprint({"config": getattr(skill, "config", {}),
+                                        "description": skill.description})
+            for existing in self._skills.values():
+                if key and manifest_fingerprint({"config": getattr(existing, "config", {}),
+                                                  "description": existing.description}) == key:
+                    return existing
+            canonicalize_skill_identity(skill, fallback=getattr(skill, "name", "") or "")
+            self._skills[skill.name] = skill
+            skill.add_event_handler(self._on_skill_event)
+            return skill
 
     @property
     def skills(self) -> Dict[str, Skill]:

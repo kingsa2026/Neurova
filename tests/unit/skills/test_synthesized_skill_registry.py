@@ -28,7 +28,12 @@ from neurova.skill_system import SkillRegistry
 
 @pytest.fixture
 def service(tmp_path):
-    return SkillService(agent_id="default", skills_dir=str(tmp_path / "skills"))
+    service = SkillService(agent_id="default", skills_dir=str(tmp_path / "skills"))
+    for steps, purpose in [([{"tool": "memory_search", "params": {"query": "笔记"}}], "汇总笔记"),
+                           ([{"tool": "memory_search", "params": {}}], "desc")]:
+        for i in range(3):
+            service.creation_evidence.record(str(i), steps, purpose, True)
+    return service
 
 
 class _FakeToolResult:
@@ -63,7 +68,34 @@ def test_synthesized_skill_visible_in_agent_skills(service):
     # 技能页契约字段
     entry = next(s for s in skills if s.get("id") == "summarize_notes")
     assert entry["name"] == "summarize_notes"
-    assert entry["enabled"] is True
+    assert entry["enabled"] is False  # Automatic creations remain pending review.
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_install_preserves_review_state_on_reload_and_replacement(service, tmp_path, monkeypatch, enabled):
+    import json
+    monkeypatch.setenv("NEUROVA_SKILL_REVIEW_GATE", "1")
+    source = tmp_path / "incoming"
+    source.mkdir()
+    steps = [{"tool": "memory_search", "params": {"query": "笔记"}}]
+    manifest = {"id": "reviewed", "name": "reviewed", "description": "汇总笔记",
+                "source": "synthesized", "config": {"tool_sequence": steps}}
+    (source / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert service.install_skill(str(source))["success"]
+    restart = lambda: SkillService(agent_id=service.agent_id, skills_dir=str(service.skills_dir))
+    assert restart().get_skill_info("reviewed")["enabled"] is False
+    if enabled:
+        assert service.enable_skill("reviewed")["success"]
+    assert restart().install_skill(str(source))["duplicate"]
+    assert restart().get_skill_info("reviewed")["enabled"] is enabled
+    # Different concrete parameters force the replacement path through _prev.get.
+    manifest["config"]["tool_sequence"][0]["params"]["query"] = "新笔记"
+    for index in range(3):
+        service.creation_evidence.record(f"replacement-{index}", manifest["config"]["tool_sequence"], "汇总笔记", True)
+    (source / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    result = restart().install_skill(str(source))
+    assert result["success"] and not result.get("duplicate")
+    assert restart().get_skill_info("reviewed")["enabled"] is enabled
 
 
 def test_synthesized_restored_executable_after_restart(service):
@@ -76,6 +108,7 @@ def test_synthesized_restored_executable_after_restart(service):
         tool_sequence=[{"tool": "memory_search", "params": {"query": "笔记"}}],
         service=service,
     )
+    assert service.enable_skill("summarize_notes")["success"]
     fresh = SkillRegistry()
     router = _FakeToolRouter()
     fresh.set_tool_router(router)
@@ -98,6 +131,7 @@ def test_synthesized_without_router_restores_as_shell(service):
         version="1.0.0", tool_sequence=[{"tool": "memory_search", "params": {}}],
         service=service,
     )
+    assert service.enable_skill("summarize_notes")["success"]
     fresh = SkillRegistry()  # 不 set_tool_router
     restore_market_skills_from_service(service, fresh)
     skill = fresh.get_skill("summarize_notes")

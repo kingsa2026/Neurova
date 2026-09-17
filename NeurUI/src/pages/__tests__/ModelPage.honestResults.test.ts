@@ -54,6 +54,7 @@ import ModelPage from '../ModelPage.vue'
 const messages = {
   common: { search: '搜索', cancel: '取消', save: '保存', success: '成功', error: '失败', confirm: '确认' },
   model: {
+    searchProviders: '搜索提供商…',
     modelManagement: '模型管理', models: '模型', discover: '发现模型',
     detectCaps: '检测能力', detectCapsTip: '检测',
     noNewModels: '没有发现新模型', modelsDiscovered: '发现 {n} 个新模型',
@@ -69,7 +70,8 @@ const messages = {
     testPermissionDenied: '权限不足', testModelNotFound: '模型不存在',
     testIncompatible: 'API 不兼容', testRateLimited: '限频', testTransient: '暂不可用',
   },
-  nav: {}, ui: {},
+  nav: {},
+  ui: { providerNsc: '国家超算互联网', providerSensetime: '商汤', providerXiaomi: '小米' },
 }
 
 const globalStubs = {

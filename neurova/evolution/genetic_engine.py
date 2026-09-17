@@ -505,9 +505,12 @@ class ToolGeneticEngine:
         Returns:
             int: 成功注册的技能数量
         """
-        from neurova.skills.models import Skill, SkillSource
+        from types import SimpleNamespace
+        from neurova.skills.creation_governance import publish_automatic
 
         registered_count = 0
+        if skill_service is None:
+            return 0
         for genotype in self._population:
             # 仅注册高适应度个体
             if genotype.fitness < self._validation_threshold:
@@ -522,25 +525,14 @@ class ToolGeneticEngine:
             # 构建稳定的 skill id（基于工具序列）
             tool_sequence = list(genotype.tool_sequence)
             skill_id = "genetic_" + "_".join(tool_sequence)
-
-            # 已存在则跳过（避免重复注册）
-            if registry.has_skill(skill_id):
-                logger.debug("进化工具 %s 已注册，跳过", skill_id)
-                continue
-
-            # 转换 ToolGenotype → Skill manifest
-            skill = Skill(
-                id=skill_id,
-                name=skill_id,
-                version="1.0.0",
-                description=(
+            manifest = {
+                "id": skill_id,
+                "name": skill_id,
+                "description": (
                     f"遗传进化工具组合（适应度 {genotype.fitness:.2f}）: "
                     f"{' → '.join(tool_sequence)}"
                 ),
-                author="genetic_engine",
-                source=SkillSource.LOCAL,
-                enabled=True,
-                config={
+                "config": {
                     "tool_sequence": tool_sequence,
                     "fitness": genotype.fitness,
                     "success_rate": genotype.success_rate,
@@ -548,45 +540,12 @@ class ToolGeneticEngine:
                     "reuse_count": genotype.reuse_count,
                     "generation": genotype.generation,
                 },
-            )
-
-            try:
-                success = registry.register_skill(skill, None)
-                if success:
-                    registered_count += 1
-                    logger.info(
-                        "注册进化工具 %s 到 SkillRegistry (fitness=%.3f)",
-                        skill_id,
-                        genotype.fitness,
-                    )
-                    # C10 治理收紧（2026-09-12）：评审闸开启时遗传产物注册即
-                    # 禁用（待审），经技能启停审批面激活——改行为的产物不再
-                    # 默认直接进入模型工具面
-                    from neurova.evolution.skill_review_gate import (
-                        skill_review_gate_enabled,
-                    )
-
-                    if skill_review_gate_enabled() and hasattr(registry, "set_skill_enabled"):
-                        registry.set_skill_enabled(skill_id, False)
-                        logger.info("进化工具 %s 进待审（评审闸开启，注册即禁用）", skill_id)
-                    # 断点 #2：可选持久化到 SkillService（磁盘 manifest）
-                    if skill_service is not None:
-                        try:
-                            skill_service.register_auto_skill(
-                                skill_id=skill_id,
-                                name=skill_id,
-                                description=skill.description,
-                                version="1.0.0",
-                                config=dict(skill.config),
-                            )
-                        except Exception as svc_err:
-                            logger.warning(
-                                "持久化进化技能 %s 到 SkillService 失败: %s",
-                                skill_id,
-                                svc_err,
-                            )
-            except Exception as e:
-                logger.warning("注册进化工具 %s 失败: %s", skill_id, e)
+            }
+            result = publish_automatic(skill_service, registry, SimpleNamespace(
+                id=manifest["id"], name=manifest["name"],
+                description=manifest["description"], config=manifest["config"]))
+            if result.get("success") and not result.get("duplicate"):
+                registered_count += 1
 
         return registered_count
 

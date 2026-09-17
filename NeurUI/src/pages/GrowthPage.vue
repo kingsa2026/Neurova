@@ -62,9 +62,9 @@
                 </div>
               </div>
               <a-empty v-else :description="t('common.noData')" />
-              <div v-if="personalityProfile?.style || personalityProfile?.tone" class="personality-meta">
-                <a-tag v-if="personalityProfile?.style">{{ personalityProfile.style }}</a-tag>
-                <a-tag v-if="personalityProfile?.tone" color="purple">{{ personalityProfile.tone }}</a-tag>
+              <div v-if="personalityProfile" class="personality-meta">
+                <a-tag v-if="personalityProfile.communication_style">{{ personalityProfile.communication_style }}</a-tag>
+                <a-tag v-if="personalityProfile.decision_style" color="purple">{{ personalityProfile.decision_style }}</a-tag>
               </div>
             </GlassCard>
           </div>
@@ -353,7 +353,8 @@ const fetchOverview = async () => {
       }))
     }
 
-    constitutionRules.value = Array.isArray(constitutionRes) ? constitutionRes : ((constitutionRes as any)?.data?.constitution ?? [])
+    // 2026-09-16 envelope 契约收口：getConstitution 返回 {code,message,data: 规则列表}
+    constitutionRules.value = constitutionRes?.data ?? []
   } catch (e: any) {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {

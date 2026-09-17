@@ -82,7 +82,7 @@ def _reset_singletons():
     reset_evolution_orchestrator()
 
 
-def test_closed_loop_exec_weight_pattern_skill_registry():
+def test_closed_loop_exec_weight_pattern_skill_registry(tmp_path):
     """闭环: 工具执行 → 权重更新 → 经验记录 → 模式挖掘 → 技能封装 → SkillRegistry.
 
     验证整条链路的数据流动, 而非各组件孤立测试.
@@ -126,46 +126,52 @@ def test_closed_loop_exec_weight_pattern_skill_registry():
     assert len(patterns) > 0, f"应有模式被挖掘, 实际 {len(patterns)}"
 
     # 6. 技能封装（闭环第四环: 模式 → 技能模板）
-    skill_builder = AutoSkillBuilder(min_pattern_occurrences=2, min_success_rate=0.0)
-    for p in patterns:
-        # pattern.support 表示该序列出现了多少次；封装需要观察到 min_occurrences 次
-        for _ in range(max(1, p.support)):
-            skill_builder.observe(
-                tool_sequence=p.tools,
-                context="自动挖掘",
-                success=True,
-                duration=0.0,
-            )
+    from neurova.skills.skill_service import SkillService
+    from neurova.skills.creation_governance import begin_task, record_tool_execution, flush_task
+    service = SkillService("ratchet", skills_dir=str(tmp_path))
+    skill_builder = AutoSkillBuilder(evidence_store=service.creation_evidence)
+    # Mining support is not evidence: collect three independently completed executions.
+    for _ in range(3):
+        begin_task()
+        for tool in tool_names:
+            record_tool_execution(tool, {"query": "report"}, True, {"ok": True})
+        record = flush_task(service, "report", True)
+        skill_builder.observe(record["steps"], context="report",
+                              metadata={"source_key": record["source_key"]})
     templates = skill_builder.get_all_templates()
     assert len(templates) > 0, f"应有技能被封装, 实际 {len(templates)}"
 
-    # C10 评审闸：产物默认 pending，注册前先批准全部待审模板
+    # C10 评审闸：产物默认 pending，注册前先批准全部待审模板（经真实服务落盘）
     for _t in skill_builder.list_pending_templates():
         assert skill_builder.approve_template(_t["template_id"])
 
     # 7. 注册到 SkillRegistry（闭环第五环: 技能入库, 供下次对话使用）
-    registry = SkillRegistry()
-    registered = skill_builder.register_to_skill_registry(registry)
+    registered = skill_builder.register_to_skill_registry(SkillRegistry(), skill_service=service)
     assert registered > 0, f"应成功注册技能, 实际 {registered}"
-    assert len(registry.list_skills()) > 0, "注册表应为非空"
+    assert len(service.list_skills()) > 0, "持久化清单应为非空"
 
 
-def test_genetic_engine_registers_to_skill_registry():
-    """遗传引擎的高适应度工具应能成功注册到 SkillRegistry."""
+def test_genetic_engine_registers_to_skill_registry(tmp_path):
+    """遗传引擎的候选必须有三独立成功证据才能注册到 SkillRegistry."""
     orch = get_evolution_orchestrator()
     from neurova.evolution.genetic_engine import ToolGenotype
+    from neurova.skills.skill_service import SkillService
 
     gen = orch.genetic_engine
-    gen.add_to_population(
-        ToolGenotype(
-            tool_sequence=["search_tool", "file_read_tool"],
-            success_rate=0.9,
-            reuse_count=10,
-        )
+    genotype = ToolGenotype(
+        tool_sequence=["search_tool", "file_read_tool"],
+        success_rate=0.9,
+        reuse_count=10,
     )
+    gen.add_to_population(genotype)
 
+    service = SkillService("genetic-ratchet", skills_dir=str(tmp_path))
+    purpose = (f"遗传进化工具组合（适应度 {genotype.fitness:.2f}）: "
+               f"{' → '.join(genotype.tool_sequence)}")
+    for i in range(3):
+        service.creation_evidence.record(str(i), genotype.tool_sequence, purpose, True)
     registry = SkillRegistry()
-    registered = gen.register_to_skill_registry(registry)
+    registered = gen.register_to_skill_registry(registry, service)
     assert registered > 0, f"高适应度工具应注册到 SkillRegistry, 实际 {registered}"
 
 
