@@ -252,34 +252,97 @@ def flush_task(service, purpose, completed):
                 "purpose": purpose, "success": success}
 
 
+def _manifest_config(manifest):
+    """manifest 可能是 dict / SimpleNamespace / Skill（三条臂各用一种）。
+
+    历史只按 dict 取值——`publish_automatic` 的调用方却传对象，于是
+    "统一命名"用对象 manifest 调进来会 AttributeError（本次一并修）。
+    """
+    if isinstance(manifest, dict):
+        config = manifest.get("config")
+    else:
+        config = getattr(manifest, "config", None)
+    return config if isinstance(config, dict) else {}
+
+
 def manifest_purpose(manifest):
     """manifest 的业务意图来源（显式声明优先，描述兜底）。"""
-    config = manifest.get("config") or {}
+    config = _manifest_config(manifest)
+    description = manifest.get("description", "") if isinstance(manifest, dict) \
+        else getattr(manifest, "description", "")
     return (config.get("task_purpose") or config.get("context_template")
-            or manifest.get("description", ""))
+            or description or "")
 
 
 def manifest_fingerprint(manifest):
     """业务身份：结构 + 意图（"同序列不同业务"必须是两条技能）。"""
-    config = manifest.get("config") or {}
-    return fingerprint(config.get("tool_sequence"), manifest_purpose(manifest))
+    return fingerprint(_manifest_config(manifest).get("tool_sequence"), manifest_purpose(manifest))
 
 
 def manifest_structure(manifest):
     """结构身份：只看工具序列（"同序列不可能被封装两次"的判重口径）。"""
-    return structure_key((manifest.get("config") or {}).get("tool_sequence"))
+    return structure_key(_manifest_config(manifest).get("tool_sequence"))
 
 
 def publish_automatic(service, registry, manifest, *, alias_id=""):
     """Disk first; restore the canonical identity without bypassing evidence.
 
+    **统一命名（P0 收口）**：本函数是三条写入臂（AutoSkillBuilder /
+    ToolGeneticEngine / NL 合成）唯一共用的落盘闸口，故 ID 归一化在这里做，
+    而不是在三个调用点各写一遍——各写一遍等于没统一（历史缺陷：三臂各自
+    `genetic_*` / `synth_*` / `skill_<md5>`，服务端按 ID 判重永不命中）。
+
+    归一规则：
+      - 有可推导的身份（工具序列非空）→ 落盘 ID = ``canonical_skill_id(...)``；
+        调用方原 ID **登记为别名**，既有 manifest / 账本 / 前端引用照旧可解析。
+      - 无身份（无工具序列的手工/用户技能）→ 保持调用方 ID 原样，
+        统一命名只约束「工具序列身份」这一类产物。
+
     alias_id：调用方沿用的旧 ID（保持既有 manifest/账本/前端引用不搬迁）。
-    重复判定同时覆盖 canonical ID 与 alias ID——两条命名方案指向同一
-    指纹时不再各写一条（见 P1 统一指纹）。
     """
     config = dict(manifest.config or {})
-    aliases = [str(alias_id)] if alias_id and str(alias_id) != str(manifest.id) else []
-    return _publish_automatic(service, registry, manifest, config, aliases)
+    original_id = str(manifest.id or "")
+    canonical = canonical_skill_id(
+        config.get("tool_sequence"), manifest_purpose(manifest),
+        prefix=_canonical_prefix(original_id),
+    )
+    aliases = {str(alias_id)} if alias_id and str(alias_id) != original_id else set()
+    if canonical and original_id and original_id != canonical:
+        # 原 ID 收敛为别名：库里只有规范 ID，调用方照旧能用原 ID 找到它。
+        aliases.add(original_id)
+    aliases.discard(canonical)
+    aliases.discard("")
+    if canonical:
+        manifest = _renamed(manifest, canonical)
+    return _publish_automatic(service, registry, manifest, config, sorted(aliases))
+
+
+def _canonical_prefix(original_id):
+    """按写入臂归属选前缀，使规范 ID 可读地标明产物来源（skill/genetic/synth）。
+
+    前缀**不参与身份**（身份是 fingerprint），只影响可读性与运维排查；
+    未知来源一律 ``skill``。
+    """
+    raw = str(original_id or "").strip().casefold()
+    for prefix in ("genetic", "synth"):
+        if raw.startswith(prefix + "_"):
+            return prefix
+    return "skill"
+
+
+def _renamed(manifest, new_id):
+    """产出一份 ID 已归一的 manifest（保持原类型：SimpleNamespace / Skill / dict）。"""
+    if isinstance(manifest, dict):
+        return {**manifest, "id": new_id}
+    from types import SimpleNamespace
+
+    fields = {"id": new_id, "name": getattr(manifest, "name", new_id),
+              "description": getattr(manifest, "description", ""),
+              "config": getattr(manifest, "config", {}) or {}}
+    for extra in ("version", "author", "source", "enabled"):
+        if hasattr(manifest, extra):
+            fields[extra] = getattr(manifest, extra)
+    return SimpleNamespace(**fields)
 
 
 def _publish_automatic(service, registry, manifest, config, aliases):
@@ -288,8 +351,13 @@ def _publish_automatic(service, registry, manifest, config, aliases):
         version=getattr(manifest, "version", "1.0.0"), alias_ids=aliases)
     if not result.get("success"):
         return result
+    # 别名登记：调用方沿用的 ID（含被归一掉的原 ID）都解析到落盘条目。
+    # 必须在**新建成功**时也登记——只在 duplicate 分支登记会让第一个写入臂
+    # 的原 ID 解析不到（"统一命名"后又制造了一个新的孤儿入口）。
+    for alias in aliases:
+        service.register_skill_alias(result["skill_id"], alias)
     if result.get("duplicate"):
-        # 身份已存在：登记别名（后续同序列任一命名方案都收敛到同一技能），
+        # 身份已存在：登记本臂 ID（后续同序列任一命名方案都收敛到同一技能），
         # 并**同步运行态**到已落盘条目的当前状态——内部平台（runspace）可能与
         # 磁盘不同步（重启后新实例才读到"已批准=enabled"），不同步会让运行态
         # 停在旧的待审/停用态（登记"批准过却仍不可用"）。

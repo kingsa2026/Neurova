@@ -289,3 +289,202 @@ class TestConsolidationWiring:
         assert "/agent/{agent_id}/consolidation/plans" in paths
         assert "/agent/{agent_id}/consolidation/{umbrella}/approve" in paths
         assert "/agent/{agent_id}/consolidation/{umbrella}/reject" in paths
+
+
+# ══════════════════════════════════════════════════════════════
+# P0 收口：统一命名**真正**实现（canonical_skill_id 接线）
+#
+# 旧实现的漏洞不是"没有 canonical_skill_id"，而是"有函数、零调用"：
+# 三条写入臂各写各的 ID（skill_<md5> / genetic_<tools> / synth_*），
+# 服务端按 ID 判重永不命中，"统一命名"名不副实。
+# ══════════════════════════════════════════════════════════════
+
+
+class _FakeRegistry:
+    """最小 SkillRegistry 替身：只关心注册名，不关心执行。"""
+
+    def __init__(self):
+        self.registered = {}
+
+    def register_skill(self, skill, _path=None):
+        self.registered[skill.name] = skill
+        return True
+
+    def set_skill_enabled(self, name, enabled):
+        self.enabled = getattr(self, "enabled", {})
+        self.enabled[name] = enabled
+
+
+def _arm_manifest(arm, sequence, purpose, steps=None):
+    """构造三条写入臂各自"历史上的"manifest（ID 命名方案各不同）。"""
+    from types import SimpleNamespace
+
+    steps = steps or [{"tool": t, "params": {}} for t in sequence]
+    if arm == "builder":
+        return SimpleNamespace(id="skill_pat_abc123", name="file_read_file_write_skill_abc123",
+                               description="自动封装的技能：执行 文件读写",
+                               config={"tool_sequence": steps, "context_template": purpose})
+    if arm == "genetic":
+        sid = "genetic_" + "_".join(sequence)
+        return SimpleNamespace(id=sid, name=sid,
+                               description="遗传进化工具组合", 
+                               config={"tool_sequence": steps, "task_purpose": purpose})
+    sid = "synth_deadbeef"
+    return SimpleNamespace(id=sid, name="synth_tool", description="NL 合成工具",
+                           config={"tool_sequence": steps, "task_purpose": purpose})
+
+
+class TestUnifiedNamingIsActuallyWired:
+    def test_canonical_skill_id_has_production_callers(self):
+        """canonical_skill_id 必须有生产调用方（旧实现只有定义 + 测试调用）。
+
+        这是"名不副实"的直接判据：函数存在不等于统一命名存在。
+        """
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[3] / "neurova"
+        hits = []
+        for path in root.rglob("*.py"):
+            text = path.read_text(encoding="utf-8")
+            if "canonical_skill_id" in text and path.name != "creation_governance.py":
+                hits.append(str(path.relative_to(root)))
+        assert hits, "canonical_skill_id 仍无生产调用方（统一命名未接线）"
+
+    def test_three_write_arms_land_on_the_same_skill_id(self, tmp_path):
+        """三条臂写同一工具序列 → 库里只有一条，且 ID 是规范 ID。"""
+        from neurova.skills.creation_governance import canonical_skill_id, publish_automatic
+
+        svc = _service(tmp_path, gate="0")
+        sequence = ["file_read", "file_write"]
+        steps = [{"tool": t, "params": {"path": t + ".txt"}} for t in sequence]
+        for i in range(3):
+            svc.creation_evidence.record(f"task-{i}", steps, "报告汇总", True)
+
+        expected = canonical_skill_id(steps, "报告汇总")
+        ids = []
+        for arm in ("builder", "genetic", "synth"):
+            result = publish_automatic(svc, _FakeRegistry(), _arm_manifest(arm, sequence, "报告汇总", steps))
+            assert result.get("success"), f"{arm} 臂发布失败: {result}"
+            ids.append(svc.resolve_skill_alias(result["skill_id"]))
+
+        assert len(set(ids)) == 1, f"三条臂落到了不同 ID: {ids}"
+        assert ids[0] == expected, f"落盘 ID 不是规范 ID: {ids[0]} != {expected}"
+        lib = [s["id"] for s in svc.list_skills()]
+        assert lib == [expected], f"同一序列只能有一条技能: {lib}"
+
+    def test_original_arm_ids_resolve_to_canonical(self, tmp_path):
+        """被归一掉的原 ID 必须登记为别名——否则统一命名制造新的孤儿入口。"""
+        from neurova.skills.creation_governance import publish_automatic
+
+        svc = _service(tmp_path, gate="0")
+        steps = [{"tool": "file_read", "params": {"path": "a.txt"}}]
+        for i in range(3):
+            svc.creation_evidence.record(f"t{i}", steps, "报告汇总", True)
+        manifest = _arm_manifest("genetic", ["file_read"], "报告汇总", steps)
+        result = publish_automatic(svc, _FakeRegistry(), manifest)
+        assert result.get("success")
+        canonical = svc.resolve_skill_alias(result["skill_id"])
+        assert canonical != manifest.id, "遗传臂的旧 ID 应当已被归一"
+        assert svc.get_skill_info(manifest.id) is not None, "旧 ID 必须仍可解析到技能"
+        assert svc.get_skill_info(manifest.id)["id"] == canonical
+
+    def test_prefix_reflects_arm_without_changing_identity(self, tmp_path):
+        """前缀标明来源臂（可读性），但身份仍是同一个 fingerprint。"""
+        from neurova.skills.creation_governance import canonical_skill_id, publish_automatic
+
+        svc = _service(tmp_path, gate="0")
+        steps = [{"tool": "file_read", "params": {"path": "a.txt"}}]
+        for i in range(3):
+            svc.creation_evidence.record(f"t{i}", steps, "报告汇总", True)
+        result = publish_automatic(svc, _FakeRegistry(),
+                                   _arm_manifest("genetic", ["file_read"], "报告汇总", steps))
+        expected = canonical_skill_id(steps, "报告汇总", prefix="genetic")
+        assert svc.resolve_skill_alias(result["skill_id"]) == expected
+
+    def test_no_sequence_keeps_caller_id(self, tmp_path):
+        """无工具序列（无身份可推导）不被改名——统一命名只约束身份产物。
+
+        这条用 `canonical_skill_id` 的直接语义断言：无序列 → 空规范 ID，
+        归一逻辑必须原样放行调用方 ID，而不是造一个 `skill_<空指纹>`。
+        """
+        from neurova.skills.creation_governance import canonical_skill_id
+
+        assert canonical_skill_id([], "手工技能") == ""
+        assert canonical_skill_id(None, "") == ""
+
+    def test_manifest_helpers_accept_object_manifests(self):
+        """三条臂传的是对象 manifest（SimpleNamespace/Skill），不是 dict。
+
+        旧实现 manifest_purpose/manifest_fingerprint 只按 dict 取值，
+        用对象 manifest 调 publish_automatic 会 AttributeError——"统一命名"
+        接上去的第一步就会崩，所以这条是接线的必要条件。
+        """
+        from types import SimpleNamespace
+
+        from neurova.skills.creation_governance import manifest_fingerprint, manifest_purpose
+
+        obj = SimpleNamespace(id="genetic_x", name="genetic_x", description="d",
+                              config={"tool_sequence": STEPS, "task_purpose": "报告汇总"})
+        assert manifest_purpose(obj) == "报告汇总"
+        assert manifest_fingerprint(obj) is not None
+        assert manifest_fingerprint(obj) == manifest_fingerprint(
+            {"id": "genetic_x", "description": "d",
+             "config": {"tool_sequence": STEPS, "task_purpose": "报告汇总"}})
+
+    def test_builder_template_id_is_canonical(self, tmp_path):
+        """AutoSkillBuilder 的内存模板 ID 必须是规范 ID。
+
+        旧实现模板自造 `skill_<pattern_id>`，而落盘已归一到规范 ID，
+        重启后按落盘 ID 恢复的 pending 模板与内存模板对不上（批准断链）。
+        """
+        import os as _os
+
+        from neurova.evolution.skill_encapsulation import AutoSkillBuilder
+        from neurova.skills.creation_governance import canonical_skill_id
+
+        _os.environ["NEUROVA_SKILL_REVIEW_GATE"] = "1"
+        svc = _service(tmp_path, gate="1")
+        builder = AutoSkillBuilder(evidence_store=svc.creation_evidence)
+        steps = [{"tool": "file_read", "params": {"path": "a.txt"}},
+                 {"tool": "file_write", "params": {"path": "b.txt"}}]
+        for i in range(3):
+            svc.creation_evidence.record(f"b-{i}", steps, "报告汇总", True)
+            builder.observe(steps, context="报告汇总", metadata={"source_key": f"b-{i}"},
+                            success=True)
+        templates = builder.get_all_templates()
+        assert templates, "三次独立成功应封装出模板"
+        template = templates[0]
+        expected = canonical_skill_id(steps, "报告汇总")
+        assert template.template_id == expected, (
+            f"模板 ID 未归一: {template.template_id} != {expected}")
+
+    def test_pending_branch_does_not_bypass_canonical_naming(self, tmp_path):
+        """待审分支（is_active=False）不得绕过 ID 归一。
+
+        旧实现在这里直接调 create_automatic_skill(template_id...)，
+        于是"待审期"库里是旧 ID、"批准后"库里变规范 ID，同一条技能两个 ID。
+        """
+        import os as _os
+
+        from neurova.evolution.skill_encapsulation import AutoSkillBuilder
+        from neurova.skills.creation_governance import canonical_skill_id
+
+        _os.environ["NEUROVA_SKILL_REVIEW_GATE"] = "1"
+        svc = _service(tmp_path, gate="1")
+        builder = AutoSkillBuilder(evidence_store=svc.creation_evidence)
+        steps = [{"tool": "file_read", "params": {"path": "a.txt"}},
+                 {"tool": "file_write", "params": {"path": "b.txt"}}]
+        for i in range(3):
+            svc.creation_evidence.record(f"p-{i}", steps, "报告汇总", True)
+            builder.observe(steps, context="报告汇总", metadata={"source_key": f"p-{i}"},
+                            success=True)
+        from neurova.skill_system import SkillRegistry
+
+        builder.register_to_skill_registry(SkillRegistry(), svc)
+        template = builder.get_all_templates()[0]
+        assert template.is_active is False, "评审闸开启时产物应先进 pending"
+        # 待审条目在库里的 ID 就是规范 ID（不是 template 的旧命名）
+        info = svc.get_skill_info(template.template_id)
+        assert info is not None, "待审条目必须可查"
+        assert info["id"] == canonical_skill_id(steps, "报告汇总")
+        assert info["enabled"] is False
