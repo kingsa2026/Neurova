@@ -350,8 +350,14 @@ class AutoSkillBuilder:
         return float(bool(key) and key == fingerprint(template.tool_sequence, template.context_template))
 
     def _encapsulate_pattern(self, pattern: ToolPattern):
-        """将模式封装为技能模板"""
-        template_id = f"skill_{pattern.pattern_id}"
+        """将模式封装为技能模板。
+
+        P0 统一命名：模板 ID 直接取 ``canonical_skill_id``——本模块是三条写入臂
+        之一，若继续自造 ``skill_<pattern_id>``，则内存态与落盘态（已由
+        publish_automatic 归一为规范 ID）会是两个 ID，重启后按落盘 ID 恢复的
+        pending 模板与内存模板对不上（批准/引用断链）。身份只有一处定义。
+        """
+        template_id = self._canonical_template_id(pattern)
 
         # 生成技能名称
         name = self._generate_skill_name(pattern)
@@ -371,8 +377,26 @@ class AutoSkillBuilder:
         )
 
         self._templates[template_id] = template
+        # 旧命名登记为别名：外部按 ``skill_<pattern_id>`` 的既有引用（manifest/
+        # 账本/前端）在改名后仍能解析到同一条技能。
+        legacy_id = f"skill_{pattern.pattern_id}"
+        if legacy_id != template_id and self._skill_service is not None:
+            try:
+                self._skill_service.register_skill_alias(template_id, legacy_id)
+            except Exception as alias_err:  # noqa: BLE001 - 别名失败不影响封装
+                logger.debug("模板别名登记跳过 %s: %s", legacy_id, alias_err)
 
         logger.info("Encapsulated pattern %s into skill %s", pattern.pattern_id, template_id)
+
+    def _canonical_template_id(self, pattern: ToolPattern) -> str:
+        """模板身份 = 与落盘同一套规范 ID（P0 统一命名）。"""
+        from neurova.skills.creation_governance import canonical_skill_id
+
+        steps = pattern.tool_sequence
+        purpose = pattern.metadata.get("task_purpose", "") if pattern.metadata else ""
+        canonical = canonical_skill_id(steps, purpose)
+        # 无工具序列（理论上不该发生）：退回旧命名，不制造空 ID。
+        return canonical or f"skill_{pattern.pattern_id}"
 
     def _generate_skill_name(self, pattern: ToolPattern) -> str:
         """生成技能名称"""
@@ -549,6 +573,7 @@ class AutoSkillBuilder:
         Returns:
             int: 成功注册到 SkillRegistry 的技能数量
         """
+        from neurova.skills.creation_governance import publish_automatic
         from neurova.skills.models import Skill, SkillSource
 
         registered_count = 0
@@ -556,11 +581,23 @@ class AutoSkillBuilder:
             self._skill_service = skill_service
             for template_id, template in self._templates.items():
                 if not template.is_active:
+                    # P0 统一命名：待审产物同样走 publish_automatic——此前这里直接
+                    # 调 create_automatic_skill，绕过了 ID 归一，于是"待审期"库里
+                    # 是 template_id、"批准后"库里是规范 ID，同一条技能两个 ID
+                    # （批准瞬间又插一条，或改名后引用断链）。
                     if skill_service is not None:
-                        skill_service.create_automatic_skill(template_id, template.name, template.description,
-                            {"tool_sequence": template.tool_sequence, "context_template": template.context_template,
-                             "parameter_hints": template.parameter_hints, "success_rate": template.success_rate,
-                             "builder_pending": True})
+                        from types import SimpleNamespace as _NS
+
+                        publish_automatic(
+                            skill_service, None,
+                            _NS(id=template_id, name=template.name, description=template.description,
+                                config={"tool_sequence": template.tool_sequence,
+                                        "context_template": template.context_template,
+                                        "parameter_hints": template.parameter_hints,
+                                        "success_rate": template.success_rate,
+                                        "builder_pending": True}),
+                            alias_id=template_id,
+                        )
                     continue
 
                 # 转换 SkillTemplate → Skill
@@ -582,8 +619,6 @@ class AutoSkillBuilder:
 
                 if skill_service is None:
                     continue
-                from neurova.skills.creation_governance import publish_automatic
-
                 result = publish_automatic(skill_service, registry, skill)
                 if result.get("success") and not result.get("duplicate"):
                     registered_count += 1
