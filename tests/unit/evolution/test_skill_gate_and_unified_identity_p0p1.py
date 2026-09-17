@@ -106,6 +106,119 @@ class TestUpdateQualityGate:
         assert svc.get_skill_info("sk6")["version"] == "1.0.0"
 
 
+class TestInPlaceUpgradeJudgement:
+    """P0 门控判据修正（2026-09-17 二审）：同版本原地升级不得被误杀。
+
+    旧判据 `order <= current` 把「同版本」一律判 version_not_ascending。
+    真路径里"同版本 + 内容确有变化"是**正常语义**：
+    - `library_service.apply_transfer` 同源再流转 eff_version 就是源版本；
+    - `skill_experience` 经验重建写回原版本号。
+    而这些路径此前**根本没经门**（门默认关），所以这个语义冲突在旧代码里
+    被"门不存在"掩盖着——门一开就被审计逮到（test_library_wave_h1 实测红）。
+    """
+
+    def test_same_version_with_content_change_is_allowed(self, tmp_path):
+        """同版本 + 工具序列确有变化 → 放行（原地升级的真实形态）。"""
+        svc = _service(tmp_path)
+        register_proven_skill(svc, "sk7", name="sk7", description="报告处理")
+        assert svc.update_auto_skill(
+            "sk7", version="1.0.0", config={"tool_sequence": STEPS}, enforce_quality=True
+        ) is True, "同版本原地改进不得被 version_not_ascending 误杀"
+
+    def test_same_version_without_change_is_rejected(self, tmp_path):
+        """同版本 + 内容零变化 = 空更新（重放噪声）→ 仍拦下。"""
+        svc = _service(tmp_path)
+        register_proven_skill(svc, "sk8", name="sk8", description="报告处理")
+        assert svc.update_auto_skill("sk8", version="1.0.0", enforce_quality=True) is False
+
+    def test_version_regression_still_rejected(self, tmp_path):
+        """显式降级仍拒（真回滚走 apply_maintenance_update 豁免）。"""
+        svc = _service(tmp_path)
+        register_proven_skill(svc, "sk9", name="sk9", description="报告处理")
+        assert svc.update_auto_skill("sk9", version="3.0.0", enforce_quality=True) is True
+        assert svc.update_auto_skill("sk9", version="2.0.0", enforce_quality=True) is False
+
+    def test_renaming_without_quality_name_is_gated(self, tmp_path):
+        """**改写名述**仍咬路由自检（门只放过"重复提交同一名述"）。"""
+        svc = _service(tmp_path)
+        register_proven_skill(svc, "sk10", name="pdf-converter", description="把扫描文档转成 PDF")
+        assert svc.update_auto_skill(
+            "sk10", name="pdf-converter", description="播放无损音乐合集", enforce_quality=True
+        ) is False
+
+    def test_same_name_and_description_resubmit_is_not_gated(self, tmp_path):
+        """名述与旧值逐字相同（库内流转把源侧现值回填）→ 不咬路由自检。
+
+        旧实现对任何非空 description 都跑 routing_sanity，把
+        `apply_transfer` 这类"原样回填源名述"的正常搬运判成名述脱钩而拒绝。
+        """
+        svc = _service(tmp_path)
+        register_proven_skill(svc, "sk11", name="s", description="d")
+        assert svc.update_auto_skill(
+            "sk11", version="1.0.0", config={"tool_sequence": STEPS},
+            name="s", description="d", enforce_quality=True,
+        ) is True, "重复提交同一名述不是名述提案，不该被路由自检咬"
+
+    def test_gate_defaults_on(self, tmp_path):
+        """门默认开：不设环境变量时未显式传参的写入也要过门。
+
+        旧默认关 = 门形同不存在（"批准一次 → 任意改写"的旧洞原样保留），
+        这是本门存在的意义所在。
+        """
+        import os
+
+        from neurova.skills.skill_service import SkillService
+
+        prev = os.environ.pop("NEUROVA_SKILL_UPDATE_GATE", None)
+        try:
+            assert SkillService._update_gate_enabled() is True
+            svc = SkillService(agent_id="gate-default", skills_dir=str(tmp_path / "s"))
+            register_proven_skill(svc, "sk12", name="sk12", description="报告处理")
+            assert svc.update_auto_skill("sk12", version="2.0.0") is True
+            assert svc.update_auto_skill("sk12", version="1.0.0") is False, "默认态必须真的在咬"
+        finally:
+            if prev is not None:
+                os.environ["NEUROVA_SKILL_UPDATE_GATE"] = prev
+
+
+class TestTransferPathCoexistence:
+    """库内同源流转与 P0 门控共存（门默认开后不得把真路径打红）。"""
+
+    def test_same_source_transfer_upgrades_in_place(self, tmp_path, monkeypatch):
+        from neurova.skills import library_service as lib
+
+        monkeypatch.setattr(lib, "_BASE_DIR", tmp_path)
+        lib.reset_libraries_for_tests()
+        agent = lib.get_library("agent", "a1")
+        user = lib.get_library("user", "u:7")
+        register_proven_skill(agent, "s1", name="S", description="d", version="1.0.0")
+        cfg = agent.get_skill_info("s1")["manifest"]["config"]
+        for i in range(3):
+            user.creation_evidence.record(str(i), cfg["tool_sequence"], "d", True)
+        assert lib.apply_transfer("user", "u:7", "agent", "a1", "s1")["action"] == "created"
+        agent.update_auto_skill("s1", version="2.0.0")
+        r = lib.apply_transfer("user", "u:7", "agent", "a1", "s1")
+        assert r["ok"] and r["action"] == "upgraded", r
+        assert user.get_skill_info("s1")["version"] == "2.0.0"
+
+    def test_repeat_transfer_same_version_is_noop_not_rejected(self, tmp_path, monkeypatch):
+        """无新内容可搬 → 幂等 noop（不再提交一次注定被门拒的空更新）。"""
+        from neurova.skills import library_service as lib
+
+        monkeypatch.setattr(lib, "_BASE_DIR", tmp_path)
+        lib.reset_libraries_for_tests()
+        agent = lib.get_library("agent", "a2")
+        user = lib.get_library("user", "u:8")
+        register_proven_skill(agent, "s2", name="S2", description="d2", version="1.0.0")
+        cfg = agent.get_skill_info("s2")["manifest"]["config"]
+        for i in range(3):
+            user.creation_evidence.record(str(i), cfg["tool_sequence"], "d2", True)
+        assert lib.apply_transfer("user", "u:8", "agent", "a2", "s2")["action"] == "created"
+        r = lib.apply_transfer("user", "u:8", "agent", "a2", "s2")
+        assert r["ok"] is True, r
+        assert r.get("noop") is True
+
+
 # ══════════════════════════════════════════════════════════════
 # P0-2：「零增益放行」与判分不可用
 # ══════════════════════════════════════════════════════════════

@@ -98,7 +98,8 @@ class _MiniService:
     def get_skill_info(self, skill_id):
         return self._skills.get(skill_id)
 
-    def update_auto_skill(self, skill_id, version=None, config=None, name=None, description=None):
+    def update_auto_skill(self, skill_id, version=None, config=None, name=None,
+                          description=None, *, enforce_quality=None, **kwargs):
         entry = self._skills.get(skill_id)
         if entry is None:
             return False

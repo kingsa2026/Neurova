@@ -1085,10 +1085,12 @@ class SkillService:
 
           1. content_non_empty  — 提交后的有效正文（name/description/正文配置/
              工具序列）不得为空，拒绝"清空式改写"；
-          2. version_monotonic  — 版本号不得回退/重复（提案方不能把旧版当新版
-             写回）；不可解析的版本串一律拒绝；
-          3. routing_sanity     — name+description 的路由自检（名述自洽/正负例
-             召回），与 AutoSkillBuilder.approve_template 同一判据；
+          2. version_monotonic  — 版本号不得**回退**；不可解析的版本串一律
+             拒绝；同版本仅当**内容确有变化**（name/description/config 任一
+             不同）时放行，否则视为空更新拦下——「同版本原地升级」是库内
+             同源流转/经验重建的真实语义，不能与「只升不降」互斥；
+          3. routing_sanity     — 提案方**同时提交 name+description** 时跑
+             名述自洽自检，与 AutoSkillBuilder.approve_template 同一判据；
           4. review_gate        — 评审闸开启且该技能 source∈{auto,synthesized,
              llm_created} 时，改写落盘即重新置回待审（enabled=False）：批准过
              一次不等于永久免疫。
@@ -1116,13 +1118,25 @@ class SkillService:
                 return "version_unparsable"
             current = entry.get("version")
             if current is not None and self._version_key(current) is not None:
-                if order <= self._version_key(current):
-                    return "version_not_ascending"
-        # 路由自检只在**提案方自带描述**时咬合：本通道历史上被"名字即描述"的
-        # 自动技能（genetic_* / synth_*）大量使用，拿空描述去判会把这些技能的
-        # 正常改进全部误杀。名述自洽是**新增/改写描述**的门，不是旧条目的存量罪。
+                if order < self._version_key(current):
+                    # 显式降级：提案方不能把旧版当新版写回（真回滚走
+                    # apply_maintenance_update 豁免通道）。
+                    return "version_regression"
+                if order == self._version_key(current):
+                    # 同版本 + 内容无变化 = 空更新（重放/自增噪声），拦下；
+                    # 同版本 + 内容确有变化 = **原地改进**（库内同源流转、经
+                    # 验重建等真实通道都会这样写），放行——否则「只升不降」
+                    # 会与「同版本原地升级」的流转语义互斥，把真路径误杀。
+                    if not self._content_changed(entry, name, description, config):
+                        return "version_not_ascending"
+        # 路由自检只在**名述内容侧确有变化**时咬合（同版本分支已算出）。
+        # 本通道的常规写入有两类都不该被它咬：①"名字即描述"的自动技能
+        # （genetic_* / synth_*）本就不自洽；②库内同源流转/经验重建会把
+        # **源侧现值原样回填**（name/description 与旧值逐字相同），拿这种
+        # 非提案方产出的名述去判，等于用存量罪误杀正常搬运。
+        # 名述自洽是"**新增/改写**名述"的门，不是"重复提交同一名述"的门。
         submitted_description = description if description is not None else None
-        if submitted_description is not None and str(submitted_description).strip():
+        if self._naming_changed(entry, name, description) and str(submitted_description or "").strip():
             try:
                 from neurova.skills.skill_injection import routing_sanity_check
 
@@ -1135,6 +1149,41 @@ class SkillService:
             if issues:
                 return "routing_sanity"
         return ""
+
+    @staticmethod
+    def _naming_changed(entry: Dict[str, Any], name, description) -> bool:
+        """提案方是否**真的改写了**名称或描述（零 LLM，纯值比较）。
+
+        全为 None（不带名述上下文）或与旧值逐字相同 → False：这类写入不是
+        "名述提案"，路由自检无从咬合，也不该咬合。
+        """
+        if name is not None and str(name) != str(entry.get("name") or ""):
+            return True
+        if description is not None and str(description) != str(entry.get("description") or ""):
+            return True
+        return False
+
+    @staticmethod
+    def _content_changed(entry: Dict[str, Any], name, description, config) -> bool:
+        """同版本原地升级是否带来**内容侧**实质变化（零 LLM，纯值比较）。
+
+        只比提案方显式提交的字段：name / description / config。全为 None
+        （纯重复落盘）或与旧值逐字相同 → False（属空更新，门拒绝）。
+        """
+        import json as _json
+
+        if SkillService._naming_changed(entry, name, description):
+            return True
+        if config is not None:
+            old_config = (entry.get("manifest") or {}).get("config") or {}
+            try:
+                if _json.dumps(dict(config), sort_keys=True, default=str) != _json.dumps(
+                    dict(old_config), sort_keys=True, default=str
+                ):
+                    return True
+            except (TypeError, ValueError):
+                return True
+        return False
 
     @staticmethod
     def _version_key(version) -> Optional[tuple]:
@@ -1181,7 +1230,7 @@ class SkillService:
             name: 新名称（None 保持不变）
             description: 新描述（None 保持不变）
             enforce_quality: 是否跑 P0 质量门（None=按 NEUROVA_SKILL_UPDATE_GATE
-                开关，默认关=旧语义；设 1/true 开启后所有走本通道的写入都过门）
+                开关，**默认开**；系统级维护通道显式传 False 豁免）
 
         Returns:
             bool: 更新并落盘成功
@@ -1233,8 +1282,8 @@ class SkillService:
 
         这些通道的共同点是**内容不由提案方自证**——重建内容来自已批准经验，
         回滚/迁移刻意回归旧版或跨库搬迁，拿"版本只升不降"去卡会把安全绳
-        自己剪断。旧的 3 参 `update_auto_skill` 实现（测试替身/外部注入）
-        同样兼容：签名带 enforce_quality 才传，否则按老契约调用。
+        自己剪断。签名带 enforce_quality 才传，否则按老契约调用（兼容
+        测试替身/外部注入的旧签名实现）。
         """
         import inspect
 
@@ -1248,16 +1297,19 @@ class SkillService:
 
     @staticmethod
     def _update_gate_enabled() -> bool:
-        """P0 质量门开关：NEUROVA_SKILL_UPDATE_GATE。
+        """P0 质量门开关：NEUROVA_SKILL_UPDATE_GATE（**默认开**）。
 
-        默认关=旧语义（历史调用方按 3 参签名调用，默认拒绝会静默破坏既有
-        通道与全部回归测试）。开启后**所有**走 update_auto_skill 的写入都
-        过门——生产/CI 建议置 1；系统级维护通道可显式传 enforce_quality。
+        默认开 = P0 门控真正生效，任何走 update_auto_skill 的写入都过四道闸。
+        这是本门存在的意义：默认关等于门不存在（"批准一次 → 任意改写"的旧洞
+        原样保留）。系统级维护通道（回滚/重建/迁移/搬运）显式传
+        enforce_quality=False 豁免，不靠"整体关掉"来放行。
+
+        置 0/false/no/off 可退回旧语义（仅供存量排查/兼容对照，生产不应使用）。
         """
         import os
 
-        return os.environ.get("NEUROVA_SKILL_UPDATE_GATE", "0").strip().lower() in {
-            "1", "true", "yes", "on",
+        return os.environ.get("NEUROVA_SKILL_UPDATE_GATE", "1").strip().lower() not in {
+            "0", "false", "no", "off",
         }
 
     def _append_revision(self, entry: Dict[str, Any], trigger: str = "", origin: str = "") -> Dict[str, Any]:

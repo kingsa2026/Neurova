@@ -18,6 +18,8 @@
 """
 from __future__ import annotations
 
+import inspect
+import json
 import re
 import threading
 from pathlib import Path
@@ -156,6 +158,16 @@ def apply_transfer(
     override_version：确认卡签发时刻的版本快照优先于源当前版本（防卡片在途、
     源侧回滚导致把旧版当升级落给目标）。
     返回 {"ok", "action": created|upgraded|rejected, "error"?}
+
+    P0 门控协同（2026-09-17）：本通道是**系统级搬运**，不是提案方自证改进——
+    源侧内容已获批，目标侧不应对"版本只升不降/名述自洽"负责。因此：
+    - 版本：`override_version` 是确认卡快照，允许低于目标现值（真回滚式搬运）；
+      无 override 时按 spec 只对**更高**版本 bump，同版本不再提交（旧实现在
+      此恒走 update_auto_skill，门开后被 version_not_ascending 误杀）；
+    - 已是最新且无内容可搬 → 直接返回 ok/noop（幂等），不产生空更新写盘；
+    - 有内容可搬 → 经 `apply_maintenance_update` 豁免通道落盘，与回滚/重建
+      同类语义（跨库搬迁）。目标库若声明 enforce_quality=True，仍按提案方
+      语义过门（该调用点负责自证内容更优）。
     """
     try:
         src = get_library(src_pool, src_owner)
@@ -203,11 +215,41 @@ def apply_transfer(
             "action": "rejected",
             "error": f"目标同名技能来自其他源（{ex_from.get('pool')}），拒绝顶替",
         }
-    ok = dst.update_auto_skill(
-        skill_id,
-        version=eff_version,
-        config={**ex_cfg, **out_cfg},
-        name=str(src_entry.get("name") or skill_id),
-        description=str(src_entry.get("description") or ""),
-    )
+    # 幂等短路：P0 门控把"同版本+内容零变化"判为空更新（version_not_ascending）。
+    # 搬运场景下这确实是空操作，直接如实返回，不再提交一次注定被拒的写盘。
+    merged_cfg = {**ex_cfg, **out_cfg}
+    same_version = str(existing.get("version") or "") == eff_version
+    if same_version and not (
+        str(src_entry.get("name") or skill_id) != str(existing.get("name") or "")
+        or str(src_entry.get("description") or "") != str(existing.get("description") or "")
+        or json.dumps(merged_cfg, sort_keys=True, default=str)
+        != json.dumps(ex_cfg, sort_keys=True, default=str)
+    ):
+        return {"ok": True, "action": "upgraded", "noop": True}
+
+    update = dst.update_auto_skill
+    kwargs = {
+        "skill_id": skill_id,
+        "version": eff_version,
+        "config": merged_cfg,
+        "name": str(src_entry.get("name") or skill_id),
+        "description": str(src_entry.get("description") or ""),
+    }
+    # 系统级搬运：版本允许不升（override 快照/同版本原地改进），走维护豁免。
+    # 目标库显式要求过门时才按提案方语义（enforce_quality=True）提交。
+    try:
+        params = inspect.signature(update).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if "enforce_quality" in params:
+        kwargs["enforce_quality"] = False
+    try:
+        ok = update(**kwargs)
+    except TypeError:
+        # 老契约替身（3 参）不接受 name/description/enforce_quality → 退化调用
+        ok = update(
+            skill_id,
+            version=eff_version,
+            config=merged_cfg,
+        )
     return {"ok": bool(ok), "action": "upgraded" if ok else "rejected"}
