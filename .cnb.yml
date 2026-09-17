@@ -228,83 +228,49 @@ main:
 #   故本题的解法是：model 只传底座 ID（或留空走默认），
 #   思考强度一律用 thinkingLevel 表达。
 #
-# 思考强度对照（deepseek-v4.1-flash 官方口径，三档同低思考档）：
-#   -low（最省）→ thinkingLevel: low
-#   无后缀      → thinkingLevel: off
-#   -high       → thinkingLevel: high
-#   -max        → thinkingLevel: xhigh   ← 本题落点（思辨档，最高）
-#
-# 为什么不把档位也做成 $变量：
+# 为何不把档位也做成 $变量：
 #   npc:go.options 走平台配置阶段的 Schema 校验，而校验发生在变量替换之前 ——
 #   thinkingLevel 的取值域是枚举（off/minimal/low/medium/high/xhigh/max），
 #   写成 $NPC_THINKING 会以「值不在枚举内」配置期直接红。所以档位必须写字面量。
 #
 # 装配方式（对齐官方《NPC - 按角色名配置》）：
-#   档位角色各自挂【角色名顶层 key】，同名事件覆盖 $ 下的定义，互不干扰；
-#   $ 只留中性档 DSCoder（不锁定档位，由平台默认配置决定）。
-#   新增档位 = settings.yml 建角色 + 这里加一个顶层 key，不要去改别的角色的 key。
+#   档位角色挂【角色名顶层 key】，同名事件覆盖 $ 下的定义，互不干扰；$ 为兜底。
+#
+# 档位收敛（2026-09-18 按用户口径）：
+#   DSCoder 只保留 max 模式，取消 low / high 两档（顶层 key 与 settings.yml
+#   角色定义同步删除，守卫同步收敛）。
+#   现在：@kingsa2026/neurova(DSCoder) 即 max 档；@...(DSCoder-max) 等价。
 # ============================================================================
-# ── 中性档：@kingsa2026/neurova(DSCoder) ────────────────────────────────────
-# 不显式指定 thinkingLevel：走平台为默认模型配置的档位（本仓不锁死）。
+# ── max 档（唯一档位）：@kingsa2026/neurova(DSCoder) / (DSCoder-max) ────────
+# $ 与 DSCoder-max 两个挂载点各写一份事件定义（均落 thinkingLevel: xhigh），
+# 避免「$ 中性档 + 不带后缀被 @ 时落到平台默认低档」的档位漂移；
+# 两份内容必须逐字一致，由 tests/unit/test_ci_npc_config_guard.py 常驻校验。
+_档位映射: &npc-level
+  DSCoder: xhigh
+  DSCoder-max: xhigh
+
 $:
-  issue.comment@npc: &npc-pipeline
+  issue.comment@npc: &npc-dscoder-issue
     - docker:
         image: cnbcool/default-npc:latest
       stages:
-        - name: DSCoder 执行任务
+        - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           type: npc:go
           options:
-            # 不写 model = 走平台默认模型（与上一轮定稿一致，规避 400）；
+            # 不写 model = 走平台默认模型（规避 400）；
             # 想锁定底座模型时，填平台真实存在的 model ID（不带思考强度后缀）。
             maxTurns: 500
             contextWindow: 1m
             maxTokens: 48k
-            # thinkingLevel 留空：沿用平台默认档位
+            # 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故落 xhigh。
+            # 若后续平台开放 max 档，把本行改成 thinkingLevel: max 即可，其余不动。
+            thinkingLevel: xhigh
 
-  pull_request.comment@npc: *npc-pipeline
-
-# ── 低档：@kingsa2026/neurova(DSCoder-low) ──────────────────────────────────
-DSCoder-low:
-  issue.comment@npc: &npc-level-low
+  pull_request.comment@npc: &npc-dscoder-pr
     - docker:
         image: cnbcool/default-npc:latest
       stages:
-        - name: "DSCoder-low 执行任务（thinkingLevel: low）"
-          type: npc:go
-          options:
-            maxTurns: 500
-            contextWindow: 1m
-            maxTokens: 48k
-            thinkingLevel: low
-
-  pull_request.comment@npc: *npc-level-low
-
-# ── 高档：@kingsa2026/neurova(DSCoder-high) ─────────────────────────────────
-DSCoder-high:
-  issue.comment@npc: &npc-level-high
-    - docker:
-        image: cnbcool/default-npc:latest
-      stages:
-        - name: "DSCoder-high 执行任务（thinkingLevel: high）"
-          type: npc:go
-          options:
-            maxTurns: 500
-            contextWindow: 1m
-            maxTokens: 48k
-            thinkingLevel: high
-
-  pull_request.comment@npc: *npc-level-high
-
-# ── 最高档（max 档）：@kingsa2026/neurova(DSCoder-max) ──────────────────────
-# 对应你给的映射：deepseek-v4.1-flash-max → 底座 deepseek-v4.1-flash + 最高思考档。
-# 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故此处落 xhigh。
-# 若后续平台开放 max 档，把本行改成 thinkingLevel: max 即可，其余不动。
-DSCoder-max:
-  issue.comment@npc: &npc-level-max
-    - docker:
-        image: cnbcool/default-npc:latest
-      stages:
-        - name: "DSCoder-max 执行任务（thinkingLevel: xhigh）"
+        - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           type: npc:go
           options:
             maxTurns: 500
@@ -312,5 +278,7 @@ DSCoder-max:
             maxTokens: 48k
             thinkingLevel: xhigh
 
-  pull_request.comment@npc: *npc-level-max
-
+# 同档位别名：@kingsa2026/neurova(DSCoder-max) 与 DSCoder 完全一致。
+DSCoder-max:
+  issue.comment@npc: *npc-dscoder-issue
+  pull_request.comment@npc: *npc-dscoder-pr
