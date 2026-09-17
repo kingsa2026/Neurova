@@ -329,7 +329,12 @@ class SkillExperienceStore(PersistedStateMixin):
         # 3) 落盘 manifest（改进持久化通道；失败不回滚内存态）
         if skill_service is not None:
             try:
-                skill_service.update_auto_skill(skill_id=skill_id, version=new_version, config=skill.config)
+                # 经验重建 = 系统级维护通道（内容由已批准经验合成），
+                # 显式豁免质量门：重建不是"提案方自证更优"的改进通道。
+                from neurova.skills.skill_service import SkillService
+
+                SkillService.apply_maintenance_update(
+                    skill_service, skill_id, version=new_version, config=skill.config)
             except Exception as svc_err:  # noqa: BLE001
                 logger.warning("重建落盘失败 %s: %s", skill_id, svc_err)
 
@@ -371,7 +376,11 @@ class SkillExperienceStore(PersistedStateMixin):
 
         if skill_service is not None:
             try:
-                skill_service.update_auto_skill(skill_id=skill_id, version=skill.version, config=skill.config)
+                # 回滚 = 回归归档旧版（版本刻意回退），豁免质量门。
+                from neurova.skills.skill_service import SkillService
+
+                SkillService.apply_maintenance_update(
+                    skill_service, skill_id, version=skill.version, config=skill.config)
             except Exception as svc_err:  # noqa: BLE001
                 logger.warning("回滚落盘失败 %s: %s", skill_id, svc_err)
 

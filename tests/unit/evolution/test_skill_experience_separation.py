@@ -81,7 +81,10 @@ class _FakeSkillService:
         self.updates = []
         self.disabled = []
 
-    def update_auto_skill(self, skill_id, version=None, config=None):
+    def update_auto_skill(self, skill_id, version=None, config=None, name=None,
+                          description=None, *, enforce_quality=None, **kwargs):
+        # 对齐 5 参 + keyword-only enforce_quality（旧 3 参替身不接受该参，
+        # 会让 P0 门控的 update_auto_skill 真实签名在注入后被 TypeErr 挡住）
         self.updates.append((skill_id, version))
         return True
 

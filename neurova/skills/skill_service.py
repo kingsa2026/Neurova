@@ -195,7 +195,66 @@ class SkillService:
             self._logger.error("Failed to save manifest: %s", e)
             return False
 
-    def _creation_decision(self, manifest, automatic=False, db=None):
+    # ── 别名登记（P1 统一指纹）：ID ⇒ 规范 ID 的落盘映射 ──
+
+    _ALIASES_KEY = "_skill_aliases"
+
+    def _aliases(self) -> Dict[str, str]:
+        raw = self._skills.get(self._ALIASES_KEY)
+        return dict(raw) if isinstance(raw, dict) else {}
+
+    def register_skill_alias(self, skill_id: str, alias: str, persist: bool = True) -> bool:
+        """把 alias 收敛到 canonical skill_id——重复封装漏洞的收口点。
+
+        三条写入臂各有命名方案（skill_<md5> / genetic_<tools> / synth_*）；
+        单靠指纹去重仍会因"先注册的那个 ID"造成同序列多入口。别名表让
+        任一命名方案都能解析到同一技能，且注册经此表即便指纹判定失手
+        （历史库）也不会再写第二条。
+        """
+        alias = str(alias or "")
+        skill_id = str(skill_id or "")
+        if not alias or not skill_id or alias == skill_id:
+            return False
+        with self._lock:
+            aliases = dict(self._aliases())
+            if aliases.get(alias) == skill_id:
+                return True
+            aliases[alias] = skill_id
+            self._skills[self._ALIASES_KEY] = aliases
+            if persist and not self._save_manifest():
+                aliases.pop(alias, None)
+                self._skills[self._ALIASES_KEY] = aliases
+                return False
+            return True
+
+    def _entry(self, skill_id: str) -> Optional[Dict[str, Any]]:
+        """按技能 ID 取条目（含别名解析）；别名表本身不是技能，一律视为不存在。"""
+        sid = str(skill_id or "")
+        if sid == self._ALIASES_KEY:
+            return None
+        if sid not in self._skills:
+            sid = self.resolve_skill_alias(sid)
+        if sid == self._ALIASES_KEY:
+            return None
+        entry = self._skills.get(sid)
+        return entry if isinstance(entry, dict) else None
+
+    def resolve_skill_alias(self, skill_id: str) -> str:
+        """别名解析到规范 ID；无别名时原样返回。"""
+        aliases = self._aliases()
+        seen = set()
+        current = str(skill_id or "")
+        while current in aliases and current not in seen:
+            seen.add(current)
+            current = str(aliases[current])
+        return current
+
+    def _creation_decision(self, manifest, automatic=False, db=None, alias_ids=(), exclude_ids=()):
+        """重复判定：ID / 别名命中，或**业务身份**（结构+意图）与既有条目相同。
+
+        exclude_ids：调用方声明"这些 ID 属更新语义"（同名重装/重报），不参与
+        指纹判重——否则覆盖式重装会被自己的旧条目判成重复而拒绝。
+        """
         from neurova.skills.creation_governance import manifest_fingerprint
 
         key = manifest_fingerprint(manifest)
@@ -205,21 +264,94 @@ class SkillService:
             or config.get("context_template") or manifest.get("description", ""), db
         ):
             return {"success": False, "error": "需要至少三个独立真实成功任务证据", "code": "insufficient_evidence"}
+        # 命名方案归一：请求 ID 与全部别名先解析到规范 ID，再判重。
+        requested = str(manifest.get("id") or "")
+        lookup_ids = {requested, self.resolve_skill_alias(requested)}
+        lookup_ids.update(self.resolve_skill_alias(str(a)) for a in alias_ids)
+        # exclude_ids：声明"这些 ID 属更新语义"（同名重装/重报）——既跳过 ID
+        # 循环（因为同名不是"另一个入口"），也跳过业务身份判重（整份 manifest
+        # 就是那条目的的升级版，判重等于自己拦自己）。
+        excluded = {str(x) for x in exclude_ids} | {requested}
         for skill_id, entry in self._skills.items():
-            existing = {**entry, **(entry.get("manifest") or {})}
-            if key and manifest_fingerprint(existing) == key:
+            if skill_id == self._ALIASES_KEY or skill_id in excluded or not isinstance(entry, dict):
+                continue
+            # 同名 ID 解析到既有条目：无论指纹是否一致都按重复处理——同名不同
+            # 序列是"ID 冲突"，由 create_automatic_skill 的 ID 兜底分支报错，
+            # 不能在这里悄悄放行成第二条（改名判重的核心入口）。
+            if skill_id in lookup_ids and skill_id not in excluded:
                 return {"success": True, "duplicate": True, "skill_id": skill_id}
+        # 判重只在「不同入口 ID」之间做（requested 已在上面查过，跳过它，
+        # 保持"传 ID 即认 ID"的既有语义不变；同名重装/重报是**更新**而非重复）。
+        if key:
+            for skill_id, entry in self._skills.items():
+                if skill_id == self._ALIASES_KEY or skill_id in excluded or not isinstance(entry, dict):
+                    continue
+                if skill_id == requested:
+                    continue
+                existing = {**entry, **(entry.get("manifest") or {})}
+                if manifest_fingerprint(existing) == key:
+                    return {"success": True, "duplicate": True, "skill_id": skill_id}
         return None
 
-    def create_automatic_skill(self, skill_id, name, description, config, version="1.0.0"):
+    def _duplicate_skill_id(self, manifest, exclude_ids=()):
+        """按**结构身份**在库内找重复条目，返回既有规范 ID 或 None（P1 统一指纹）。
+
+        结构身份不含业务意图——"同一工具序列不得被封装两次"是结构问题，
+        业务身份（fingerprint）留给 `_creation_decision` 判"同序列不同业务"，
+        两者各管一段：结构查重 → 收敛别名；业务判重 → 拦重复注册。
+        """
+        from neurova.skills.creation_governance import manifest_structure
+
+        structure = manifest_structure(manifest)
+        if not structure:
+            return None
+        exclude = {str(x) for x in exclude_ids} | {self._ALIASES_KEY}
+        for skill_id, entry in self._skills.items():
+            if skill_id in exclude or not isinstance(entry, dict):
+                continue
+            existing = {**entry, **(entry.get("manifest") or {})}
+            if manifest_structure(existing) == structure:
+                return skill_id
+        return None
+
+    def create_automatic_skill(self, skill_id, name, description, config, version="1.0.0",
+                               alias_ids=()):
+        aliases = tuple(str(a) for a in (alias_ids or ()) if str(a))
         manifest = {"id": skill_id, "name": name, "description": description, "config": config}
+        from neurova.skills.creation_governance import manifest_fingerprint
+
+        key = manifest_fingerprint(manifest)
         with self.creation_evidence.transaction() as db:
             self._load_skills()
-            decision = self._creation_decision(manifest, automatic=True, db=db)
+            # requested（含别名）属"更新语义"：同名重报由下方 ID 分支裁决
+            # （ID 冲突报错 / 同名同身份按重复返回），指纹判重只管别的入口 ID。
+            decision = self._creation_decision(
+                manifest, automatic=True, db=db, alias_ids=aliases,
+                exclude_ids=(str(skill_id), *aliases))
+            if decision is None:
+                canonical = self._duplicate_skill_id(manifest, exclude_ids=(str(skill_id), *aliases))
+                if canonical:
+                    # 结构身份已存在（换 ID / 换名字的重复封装）：收敛为一条，
+                    # 不再新写——这正是"同一技能被封装成两条"的堵漏点。
+                    decision = {"success": True, "duplicate": True, "skill_id": canonical}
+                    for alias in (str(skill_id), *aliases):
+                        self.register_skill_alias(canonical, alias)
             if decision:
+                if decision.get("duplicate"):
+                    for alias in (str(skill_id), *aliases):
+                        self.register_skill_alias(decision["skill_id"], alias)
                 return decision
             if skill_id in self._skills:
-                return {"success": False, "error": "Skill ID already exists with different steps"}
+                # 同名条目：指纹判重刻意跳过了 requested（更新语义），此处按
+                # "同身份=已存在（重复）／异身份=ID 冲突"如实裁决——否则同一条
+                # 技能反复上报会被报成 ID 冲突，调用方读不到"已存在"信号。
+                from neurova.skills.creation_governance import manifest_fingerprint
+
+                existing = {**self._skills[skill_id], **(self._skills[skill_id].get("manifest") or {})}
+                if key and manifest_fingerprint(existing) == key:
+                    return {"success": True, "duplicate": True, "skill_id": skill_id}
+                return {"success": False, "error": "Skill ID already exists with different steps",
+                        "code": "id_conflict"}
             ok = self._register_metadata(skill_id, name, description, version, config)
             return {"success": ok, "skill_id": skill_id, **({} if ok else {"error": "Persistence failed"})}
 
@@ -282,6 +414,10 @@ class SkillService:
                 # 确定技能ID
                 if skill_id is None:
                     skill_id = manifest.get("id") or manifest.get("name")
+                # 判重口径对齐：manifest 自报的 ID 与调用方传入的 ID 都算"同名"。
+                # （replacement 快路径用 manifest["id"] 回查 _prev；两者不一致时
+                # 指纹判重会把重装误判成"别的 ID 声明了同一身份"而拒绝。）
+                manifest_id = manifest.get("id") or manifest.get("name") or skill_id
 
                 if not skill_id:
                     return {"success": False, "error": "Skill ID not found in manifest"}
@@ -298,8 +434,34 @@ class SkillService:
                 # 复制技能到技能目录（加锁防止并发写）
                 with self.creation_evidence.transaction() as db:
                     self._load_skills()
+                    # 安装通道：同名即覆盖式重装（一等语义），指纹判重不适用——
+                    # 传 requested_id 让判重只认"别的 ID 声明了同一身份"（跳转），
+                    # 同名条目走下方 replacement 快路径保留账本与版本链。
                     decision = self._creation_decision(
-                        manifest, automatic=manifest.get("source") in {"auto", "synthesized", "llm_created"}, db=db)
+                        manifest, automatic=manifest.get("source") in {"auto", "synthesized", "llm_created"},
+                        db=db, exclude_ids=(str(skill_id), str(manifest_id)))
+                    if decision is None and str(skill_id) in self._skills:
+                        # 同名且**同一结构身份** → 同内容的重复安装：如实回报
+                        # duplicate（账本/版本链不动）。服务端判重口径是工具序列
+                        # 及其参数，版本/名称/描述变化都属同一技能（升级/更名），
+                        # 仍走下方覆盖式重装。
+                        from neurova.skills.creation_governance import manifest_structure
+
+                        _existing = {**self._skills[str(skill_id)],
+                                     **(self._skills[str(skill_id)].get("manifest") or {})}
+                        if (manifest_structure(manifest) or None) and (
+                                manifest_structure(manifest) == manifest_structure(_existing)):
+                            decision = {"success": True, "duplicate": True, "skill_id": str(skill_id)}
+                    if decision is None and str(skill_id) not in self._skills:
+                        # 结构身份已存在 → 同一工具序列**换名再装**，按重复收敛到
+                        # 既有条目（P1 统一指纹）。同名条目（覆盖式重装，一等语义）
+                        # 跳过此查：重装是升级不是重复。
+                        canonical = self._duplicate_skill_id(
+                            manifest, exclude_ids=(str(skill_id), str(manifest_id)))
+                        if canonical:
+                            decision = {"success": True, "duplicate": True, "skill_id": canonical}
+                            for alias in (str(skill_id), str(manifest_id)):
+                                self.register_skill_alias(canonical, alias)
                     if decision:
                         return decision
                     # P0-4 安装门收口：本地目录/zip/
@@ -329,7 +491,12 @@ class SkillService:
                     # usage/trust/修订链在重装瞬间清零（apply_transfer 当初
                     # 特意绕开本咽喉的"force 清零坑"，本体一直没修）。
                     from neurova.evolution.skill_review_gate import skill_review_gate_enabled
-                    _prev = self._skills.get(skill_id) or {}
+                    _prev = self._skills.get(skill_id) or self._skills.get(manifest_id) or {}
+                    # 覆盖式重装：条目一律落在调用方/清单声明的 ID 上，旧条目
+                    # （ID 与清单不一致时）随迁移移除，不留孤条双份。
+                    for _stale in (skill_id, manifest_id):
+                        if _stale != skill_id and _stale in self._skills:
+                            self._skills.pop(_stale, None)
                     self._skills[skill_id] = {
                         "id": skill_id,
                         "name": manifest.get("name", skill_id),
@@ -433,7 +600,8 @@ class SkillService:
         """
         try:
             with self._lock:
-                if skill_id not in self._skills:
+                skill_id = self.resolve_skill_alias(skill_id)
+                if self._entry(skill_id) is None:
                     return {"success": False, "error": f"Skill not found: {skill_id}"}
 
                 skill_info = self._skills[skill_id]
@@ -483,7 +651,8 @@ class SkillService:
         """
         try:
             with self._lock:
-                if skill_id not in self._skills:
+                skill_id = self.resolve_skill_alias(skill_id)
+                if self._entry(skill_id) is None:
                     return {"success": False, "error": f"Skill not found: {skill_id}"}
 
                 self._skills[skill_id]["enabled"] = True
@@ -508,7 +677,8 @@ class SkillService:
         """
         try:
             with self._lock:
-                if skill_id not in self._skills:
+                skill_id = self.resolve_skill_alias(skill_id)
+                if self._entry(skill_id) is None:
                     return {"success": False, "error": f"Skill not found: {skill_id}"}
 
                 self._skills[skill_id]["enabled"] = False
@@ -710,6 +880,8 @@ class SkillService:
         """遍历 (skill_id, info)。生命周期状态机的数据源。"""
         with self._lock:
             for skill_id, info in list(self._skills.items()):
+                if skill_id == self._ALIASES_KEY or not isinstance(info, dict):
+                    continue
                 yield skill_id, info
 
     def set_skill_lifecycle_state(self, skill_id: str, state: str) -> bool:
@@ -904,6 +1076,133 @@ class SkillService:
             self._logger.exception("Failed to register auto skill %s: %s", skill_id, e)
             return False
 
+    def _quality_gate(self, skill_id: str, entry: Dict[str, Any], version, config,
+                      name, description) -> str:
+        """P0 「比上一版本优秀」门控——返回拒绝原因，通过返回空串。
+
+        旧实现对本通道零内容校验：正文写空串也落盘成功、版本位由提案方自增、
+        「先批准一次 → 之后任意改写」全程无门。四道确定性闸（零 LLM）：
+
+          1. content_non_empty  — 提交后的有效正文（name/description/正文配置/
+             工具序列）不得为空，拒绝"清空式改写"；
+          2. version_monotonic  — 版本号不得**回退**；不可解析的版本串一律
+             拒绝；同版本仅当**内容确有变化**（name/description/config 任一
+             不同）时放行，否则视为空更新拦下——「同版本原地升级」是库内
+             同源流转/经验重建的真实语义，不能与「只升不降」互斥；
+          3. routing_sanity     — 提案方**同时提交 name+description** 时跑
+             名述自洽自检，与 AutoSkillBuilder.approve_template 同一判据；
+          4. review_gate        — 评审闸开启且该技能 source∈{auto,synthesized,
+             llm_created} 时，改写落盘即重新置回待审（enabled=False）：批准过
+             一次不等于永久免疫。
+        """
+        import copy as _copy
+
+        effective = _copy.deepcopy(entry)
+        if name is not None:
+            effective["name"] = str(name)
+        if description is not None:
+            effective["description"] = str(description)
+        if config is not None:
+            effective["manifest"] = {**effective.get("manifest", {}), "config": dict(config)}
+        eff_config = (effective.get("manifest") or {}).get("config") or {}
+        body = str(eff_config.get("context_template") or "").strip()
+        sequence = eff_config.get("tool_sequence") or []
+        # 有效正文 = 指令体 / 描述 / 工具序列，任一非空即算有内容——这样
+        # "把正文写成空串"被拦，而"只改 tool_sequence"的既有通道不受影响。
+        has_body = bool(body) or bool(str(effective.get("description") or "").strip()) or bool(sequence)
+        if not has_body:
+            return "content_non_empty"
+        if version is not None:
+            order = self._version_key(version)
+            if order is None:
+                return "version_unparsable"
+            current = entry.get("version")
+            if current is not None and self._version_key(current) is not None:
+                if order < self._version_key(current):
+                    # 显式降级：提案方不能把旧版当新版写回（真回滚走
+                    # apply_maintenance_update 豁免通道）。
+                    return "version_regression"
+                if order == self._version_key(current):
+                    # 同版本 + 内容无变化 = 空更新（重放/自增噪声），拦下；
+                    # 同版本 + 内容确有变化 = **原地改进**（库内同源流转、经
+                    # 验重建等真实通道都会这样写），放行——否则「只升不降」
+                    # 会与「同版本原地升级」的流转语义互斥，把真路径误杀。
+                    if not self._content_changed(entry, name, description, config):
+                        return "version_not_ascending"
+        # 路由自检只在**名述内容侧确有变化**时咬合（同版本分支已算出）。
+        # 本通道的常规写入有两类都不该被它咬：①"名字即描述"的自动技能
+        # （genetic_* / synth_*）本就不自洽；②库内同源流转/经验重建会把
+        # **源侧现值原样回填**（name/description 与旧值逐字相同），拿这种
+        # 非提案方产出的名述去判，等于用存量罪误杀正常搬运。
+        # 名述自洽是"**新增/改写**名述"的门，不是"重复提交同一名述"的门。
+        submitted_description = description if description is not None else None
+        if self._naming_changed(entry, name, description) and str(submitted_description or "").strip():
+            try:
+                from neurova.skills.skill_injection import routing_sanity_check
+
+                issues = routing_sanity_check(
+                    str(effective.get("name") or skill_id), str(submitted_description)
+                )
+            except Exception as e:  # noqa: BLE001 - 自检故障不阻断既有更新通道
+                self._logger.debug("routing_sanity_check 跳过: %s", e)
+                issues = []
+            if issues:
+                return "routing_sanity"
+        return ""
+
+    @staticmethod
+    def _naming_changed(entry: Dict[str, Any], name, description) -> bool:
+        """提案方是否**真的改写了**名称或描述（零 LLM，纯值比较）。
+
+        全为 None（不带名述上下文）或与旧值逐字相同 → False：这类写入不是
+        "名述提案"，路由自检无从咬合，也不该咬合。
+        """
+        if name is not None and str(name) != str(entry.get("name") or ""):
+            return True
+        if description is not None and str(description) != str(entry.get("description") or ""):
+            return True
+        return False
+
+    @staticmethod
+    def _content_changed(entry: Dict[str, Any], name, description, config) -> bool:
+        """同版本原地升级是否带来**内容侧**实质变化（零 LLM，纯值比较）。
+
+        只比提案方显式提交的字段：name / description / config。全为 None
+        （纯重复落盘）或与旧值逐字相同 → False（属空更新，门拒绝）。
+        """
+        import json as _json
+
+        if SkillService._naming_changed(entry, name, description):
+            return True
+        if config is not None:
+            old_config = (entry.get("manifest") or {}).get("config") or {}
+            try:
+                if _json.dumps(dict(config), sort_keys=True, default=str) != _json.dumps(
+                    dict(old_config), sort_keys=True, default=str
+                ):
+                    return True
+            except (TypeError, ValueError):
+                return True
+        return False
+
+    @staticmethod
+    def _version_key(version) -> Optional[tuple]:
+        """版本号可比较键（数字段逐位比较）；不可解析返回 None。"""
+        parts = str(version or "").strip().split(".")
+        if not parts or any(not part.isdigit() for part in parts):
+            return None
+        return tuple(int(part) for part in parts)
+
+    def _reenter_review_gate(self, entry: Dict[str, Any]) -> bool:
+        """改写落盘重走评审闸：auto 系产物回到待审（enabled=False）。"""
+        from neurova.evolution.skill_review_gate import skill_review_gate_enabled
+
+        source = str((entry.get("manifest") or {}).get("source") or "auto")
+        if source in {"auto", "synthesized", "llm_created"} and skill_review_gate_enabled():
+            entry["enabled"] = False
+            return True
+        return False
+
     def update_auto_skill(
         self,
         skill_id: str,
@@ -911,11 +1210,18 @@ class SkillService:
         config: Optional[Dict[str, Any]] = None,
         name: Optional[str] = None,
         description: Optional[str] = None,
+        *,
+        enforce_quality: Optional[bool] = None,
     ) -> bool:
         """更新已存在元数据技能的版本/配置/名称/描述并落盘（持久化通道）。
 
         仅允许更新已存在的技能；manifest.source 保持不变。不存在时返回 False。
         Wave F：name/description 参数支撑 skill_pool_api 的 private 编辑链。
+
+        P0 门控（2026-09-17）：本通道是「进化改进」的最后一米，此前对内容
+        零校验——先批准一次即可任意改写。现加四道确定性闸 + 改写重走评审闸
+        （见 _quality_gate）。系统级维护通道（迁移/回滚/经验重建）可显式传
+        enforce_quality=False 保持旧语义（需要写回旧版本/搬迁库时）。
 
         Args:
             skill_id: 技能 ID
@@ -923,14 +1229,17 @@ class SkillService:
             config: 新配置（None 保持不变；提供时整体替换 manifest.config）
             name: 新名称（None 保持不变）
             description: 新描述（None 保持不变）
+            enforce_quality: 是否跑 P0 质量门（None=按 NEUROVA_SKILL_UPDATE_GATE
+                开关，**默认开**；系统级维护通道显式传 False 豁免）
 
         Returns:
             bool: 更新并落盘成功
         """
         try:
             with self._lock:
+                skill_id = self.resolve_skill_alias(skill_id)
                 entry = self._skills.get(skill_id)
-                if entry is None:
+                if entry is None or skill_id == self._ALIASES_KEY:
                     self._logger.debug("update_auto_skill: skill_id=%s 不存在", skill_id)
                     return False
                 import copy as _copy
@@ -944,6 +1253,15 @@ class SkillService:
                     entry["version"] = str(version)
                 if config is not None:
                     entry["manifest"] = {**entry.get("manifest", {}), "config": dict(config)}
+                # P0 质量门：内容非空 / 版本只升不降 / 路由自检 / 重走评审闸
+                gate_on = self._update_gate_enabled() if enforce_quality is None else bool(enforce_quality)
+                if gate_on:
+                    reason = self._quality_gate(skill_id, _prev, version, config, name, description)
+                    if reason:
+                        self._skills[skill_id] = _prev
+                        self._logger.warning("update_auto_skill 被质量门拒绝(%s): %s", reason, skill_id)
+                        return False
+                    self._reenter_review_gate(entry)  # 改写落盘即回待审（批准一次 ≠ 永久免疫）
                 # P1-6 版本 DAG（线性 parent 边）：version 变化追加修订历史
                 if version is not None:
                     self._append_revision(entry, trigger="update")
@@ -957,6 +1275,42 @@ class SkillService:
         except Exception as e:
             self._logger.exception("Failed to update auto skill %s: %s", skill_id, e)
             return False
+
+    @staticmethod
+    def apply_maintenance_update(service, skill_id, version=None, config=None):
+        """系统级维护通道（重建/回滚/迁移）：绕过「比上一版本优秀」门。
+
+        这些通道的共同点是**内容不由提案方自证**——重建内容来自已批准经验，
+        回滚/迁移刻意回归旧版或跨库搬迁，拿"版本只升不降"去卡会把安全绳
+        自己剪断。签名带 enforce_quality 才传，否则按老契约调用（兼容
+        测试替身/外部注入的旧签名实现）。
+        """
+        import inspect
+
+        update = service.update_auto_skill
+        try:
+            if "enforce_quality" in inspect.signature(update).parameters:
+                return update(skill_id=skill_id, version=version, config=config, enforce_quality=False)
+        except (TypeError, ValueError):  # 签名不可内省 → 走老契约
+            pass
+        return update(skill_id=skill_id, version=version, config=config)
+
+    @staticmethod
+    def _update_gate_enabled() -> bool:
+        """P0 质量门开关：NEUROVA_SKILL_UPDATE_GATE（**默认开**）。
+
+        默认开 = P0 门控真正生效，任何走 update_auto_skill 的写入都过四道闸。
+        这是本门存在的意义：默认关等于门不存在（"批准一次 → 任意改写"的旧洞
+        原样保留）。系统级维护通道（回滚/重建/迁移/搬运）显式传
+        enforce_quality=False 豁免，不靠"整体关掉"来放行。
+
+        置 0/false/no/off 可退回旧语义（仅供存量排查/兼容对照，生产不应使用）。
+        """
+        import os
+
+        return os.environ.get("NEUROVA_SKILL_UPDATE_GATE", "1").strip().lower() not in {
+            "0", "false", "no", "off",
+        }
 
     def _append_revision(self, entry: Dict[str, Any], trigger: str = "", origin: str = "") -> Dict[str, Any]:
         """P1-6 身份 + 最小版本 DAG：version 变化时新建修订并挂 parent 边。
@@ -1011,6 +1365,9 @@ class SkillService:
             with self._lock:
                 skills = []
                 for skill_id, skill_info in self._skills.items():
+                    # 别名表是索引而非技能条目（P1 统一指纹），不进任何列表/详情面
+                    if skill_id == self._ALIASES_KEY or not isinstance(skill_info, dict):
+                        continue
                     if enabled_only and not skill_info.get("enabled", True):
                         continue
 
@@ -1045,9 +1402,15 @@ class SkillService:
         """
         try:
             with self._lock:
-                if skill_id not in self._skills:
+                if skill_id in self._skills and skill_id != self._ALIASES_KEY:
+                    resolved = skill_id
+                else:
+                    # 别名解析：任一命名方案（genetic_* / synth_* / skill_<md5>）
+                    # 都收敛到同一条目，调用方无需知道规范 ID。
+                    resolved = self.resolve_skill_alias(skill_id)
+                if resolved not in self._skills or resolved == self._ALIASES_KEY:
                     return None
-
+                skill_id = resolved
                 skill_info = self._skills[skill_id]
                 return {
                     "id": skill_id,
@@ -1083,7 +1446,8 @@ class SkillService:
         """
         try:
             with self._lock:
-                if skill_id not in self._skills:
+                skill_id = self.resolve_skill_alias(skill_id)
+                if self._entry(skill_id) is None:
                     return {"success": False, "error": f"Skill not found: {skill_id}"}
 
                 skill_info = self._skills[skill_id]
