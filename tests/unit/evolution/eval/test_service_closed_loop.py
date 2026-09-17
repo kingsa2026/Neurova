@@ -82,7 +82,8 @@ class TestEvolveFlow:
             def __init__(self, cfg):
                 self._cfg = cfg
 
-        def fake_update_auto_skill(skill_id, version=None, config=None):
+        def fake_update_auto_skill(skill_id, version=None, config=None, name=None,
+                                   description=None, *, enforce_quality=None, **kwargs):
             applied["config"] = config
             applied["version"] = version
             return True
@@ -102,7 +103,10 @@ class TestEvolveFlow:
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(ss_mod.SkillService, "get_skill_info", lambda self, sid: fake_info)
             mp.setattr(ss_mod.SkillService, "update_auto_skill",
-                       lambda self, sid, version=None, config=None: fake_update_auto_skill(sid, version, config))
+                       lambda self, sid, version=None, config=None, name=None,
+                       description=None, **kw: fake_update_auto_skill(
+                           sid, version, config, name, description,
+                           enforce_quality=kw.get("enforce_quality")))
             ok = svc.decide("evo_test", approve=True)
         assert ok
         assert applied["config"]["context_template"] == "BASE+IMPROVED"
