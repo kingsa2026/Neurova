@@ -617,6 +617,9 @@ def _register_metrics_endpoint(app: FastAPI) -> None:
 
     P2-4：指标定义收口到 neurova/core/metrics.py（Counter/Histogram 全量
     埋点），此处做运行态 gauge 快照 + generate_latest 输出。
+
+    单一事实源：本端点只负责"抓取时刷新 gauge + 输出 registry"，不得再手工
+    拼接 # HELP/# TYPE 文本（历史上残留过一套死代码，制造双事实源错觉）。
     """
     from neurova.core.metrics import get_metrics as _get_prom_metrics
     from neurova.core.metrics import generate_metrics_text as _generate_metrics_text
@@ -626,52 +629,8 @@ def _register_metrics_endpoint(app: FastAPI) -> None:
     @app.get("/metrics")
     async def get_metrics():
         _prom.observe_state(_app_state)
-        metrics = []
-        # 基础指标
-        metrics.append(f"# HELP neurova_uptime_seconds Neurova uptime in seconds")
-        metrics.append(f"# TYPE neurova_uptime_seconds gauge")
-        uptime = _app_state.get_uptime() if _app_state else 0
-        metrics.append(f"neurova_uptime_seconds {uptime}")
-
-        metrics.append(f"# HELP neurova_agents_total Total number of agents")
-        metrics.append(f"# TYPE neurova_agents_total gauge")
-        agent_count = len(_app_state.agents) if _app_state else 0
-        metrics.append(f"neurova_agents_total {agent_count}")
-
-        # P3: 语音性能指标
-        metrics.append(f"# HELP neurova_voice_engines_total Total number of voice engines")
-        metrics.append(f"# TYPE neurova_voice_engines_total gauge")
-        voice_count = len(_app_state.voice_engines) if _app_state else 0
-        metrics.append(f"neurova_voice_engines_total {voice_count}")
-
-        metrics.append(f"# HELP neurova_voice_tts_available TTS engine availability (1=available, 0=unavailable)")
-        metrics.append(f"# TYPE neurova_voice_tts_available gauge")
-        tts_available = 0
-        if _app_state and "tts" in _app_state.voice_engines:
-            try:
-                tts_available = 1 if _app_state.voice_engines["tts"].is_available() else 0
-            except Exception:
-                tts_available = 0
-        metrics.append(f"neurova_voice_tts_available {tts_available}")
-
-        metrics.append(f"# HELP neurova_voice_asr_available ASR engine availability (1=available, 0=unavailable)")
-        metrics.append(f"# TYPE neurova_voice_asr_available gauge")
-        asr_available = 0
-        if _app_state and "asr" in _app_state.voice_engines:
-            try:
-                asr_available = 1 if _app_state.voice_engines["asr"].is_available() else 0
-            except Exception:
-                asr_available = 0
-        metrics.append(f"neurova_voice_asr_available {asr_available}")
-
-        # 渠道指标
-        metrics.append(f"# HELP neurova_channels_total Total number of registered channels")
-        metrics.append(f"# TYPE neurova_channels_total gauge")
-        channel_count = 0
-        if _app_state and _app_state.channel_manager:
-            channel_count = len(_app_state.channel_manager._adapters)
-        metrics.append(f"neurova_channels_total {channel_count}")
-
+        # P0-2：连接池 / 共享线程池运行态快照（gauge 抓取时刷新）
+        _prom.observe_pools()
         return PlainTextResponse(_generate_metrics_text(), media_type="text/plain")
 
 
