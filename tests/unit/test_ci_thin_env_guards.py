@@ -11,9 +11,13 @@
 2. **静态门禁 ImportError 族捕获** —— check_imports 只捕
    ModuleNotFoundError 会漏掉 `from X import Y` 形态的可选包缺失
    （exc.name 指向 X），误报为失败。
-3. **硬依赖声明完整** —— feedparser/apscheduler/segno 为裸 import 无降级，
-   必须同时在 requirements-ci.txt 与 requirements-ci.lock 中声明；
-   也不得被误登记进 KNOWN_OPTIONAL_DEPS（该表仅收"缺失可优雅降级"项）。
+3. **硬依赖声明完整** —— feedparser/apscheduler/segno/prometheus_client 为裸
+   import 无降级，必须同时在 requirements-ci.txt 与 requirements-ci.lock 中
+   声明；也不得被误登记进 KNOWN_OPTIONAL_DEPS（该表仅收"缺失可优雅降级"项）。
+4. **CI 锁定集覆盖直接依赖** —— requirements-ci.txt 新增一行但漏跑
+   `uv pip compile` 重新生成 lock，CI 装的是 lock，声明的包根本没进环境
+   （2026-09-18 实锤：requirements-ci.txt 有 prometheus_client>=0.20，lock 无
+   对应 pin → unit-tests 两条流水线 ModuleNotFoundError 全红，本地却绿）。
 """
 
 import ast
@@ -167,7 +171,7 @@ class TestStaticGateCapture:
 
 class TestHardDepsDeclared:
     # 裸 import 无降级的硬依赖：任何一侧缺席，CI 薄环境导入巡检必红
-    HARD_DEPS = {"feedparser", "apscheduler", "segno"}
+    HARD_DEPS = {"feedparser", "apscheduler", "segno", "prometheus_client"}
 
     def test_declared_in_requirements_ci_txt(self):
         declared = _ci_top_packages()
@@ -190,6 +194,30 @@ class TestHardDepsDeclared:
         registered = set(re.findall(r'"([a-zA-Z_0-9]+)"', table))
         leaked = self.HARD_DEPS & registered
         assert not leaked, f"硬依赖被误登记为可选依赖: {sorted(leaked)}"
+
+
+class TestCILockCoversDirectDeps:
+    """requirements-ci.txt 的每个直接依赖都必须 lock 在 requirements-ci.lock。
+
+    CI unit-tests/perf-gate 两侧装的都是 lock（`uv pip install -r
+    requirements-ci.lock`），lock 缺 pin 时本地声明的包在 CI 环境根本不存在，
+    且两侧日志都只表现为 ModuleNotFoundError，根因指向漂移而非代码。
+    修法：改 requirements-ci.txt 后必须重跑
+    `uv pip compile --universal requirements-ci.txt -o requirements-ci.lock`。
+    """
+
+    def test_every_direct_dep_is_pinned_in_lock(self):
+        lock = _read("requirements-ci.lock")
+        pinned = {
+            m.group(1).lower().replace("-", "_")
+            for m in re.finditer(r"(?m)^([A-Za-z0-9_.-]+)==", lock)
+        }
+        missing = sorted(_ci_top_packages() - pinned)
+        assert not missing, (
+            "requirements-ci.lock 缺直接依赖 pin（CI 装 lock，这些包在 CI 环境缺席）: "
+            f"{missing}\n修法：uv pip compile --universal requirements-ci.txt "
+            "-o requirements-ci.lock"
+        )
 
 
 class TestRemovedPackagesStayRemoved:
