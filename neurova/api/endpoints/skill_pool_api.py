@@ -33,6 +33,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
 
+from neurova.api.agent_access import can_access_agent, resolve_agent_owner
 from neurova.api.deps import get_current_user, require_admin
 from neurova.skills.library_service import POOL_AGENT, POOL_PUBLIC, POOL_USER
 from neurova.skills.skill_service import SkillService
@@ -101,6 +102,45 @@ class SkillPush(BaseModel):
 # 端点真人化删除——公共库唯一事实源=library_service pool=public manifest。
 # s8: RLock 保留给模块内其余共享态防护（测试契约依赖其存在且可重入）。
 _lock = threading.RLock()
+
+
+def _agent_owner(agent_id: str) -> Optional[str]:
+    """解析 agent 属主：运行实例 config 优先，中枢登记（agents.json）回退。
+
+    P1 收口（Issue #46）：合并审批面此前只按 `_pool_service(agent_id)` 取库，
+    `agent_id` 是**路径参数**——任何登录用户传别人的 agent_id 就能批准/拒绝
+    他人 agent 的技能合并（合并会归档技能，是写操作）。归属判定复用
+    agent 写口同一单源（`api/agent_access.py`），不另起口径。
+    """
+    from neurova.api.endpoints.agent import get_agent_from_state
+
+    state_agent = None
+    try:
+        state_agent = get_agent_from_state(agent_id)
+    except Exception as e:  # noqa: BLE001 - 状态面不可用即按"无实例"走登记回退
+        logger.debug("agent 实例查询失败 %s: %s", agent_id, e)
+    registered_cfg = None
+    if state_agent is None:
+        try:
+            from neurova.api.endpoints.agent import get_agent_config_manager
+
+            registered_cfg = get_agent_config_manager().get_agent(agent_id)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("agent 登记查询失败 %s: %s", agent_id, e)
+    return resolve_agent_owner(agent_id, state_agent=state_agent, registered_cfg=registered_cfg)
+
+
+def _require_agent_access(agent_id: str, current_user: Dict[str, Any], action: str) -> None:
+    """合并审批面归属校验：admin 全量；非 admin 仅 owner；无主仅 admin。
+
+    与 agent 写口（PUT/DELETE /v1/agents/{id}）同一判据——合并会**归档技能**，
+    属改他人 agent 资产，不能只凭"登录 + 知道 agent_id"放行。
+    """
+    owner = _agent_owner(agent_id)
+    uid = str(current_user.get("user_id") or "")
+    role = str(current_user.get("role") or "user")
+    if not can_access_agent(uid, role, owner):
+        raise HTTPException(status_code=403, detail=f"无权{action}他人 Agent 的技能合并")
 
 
 def _pool_service(agent_id: str) -> SkillService:
@@ -560,8 +600,11 @@ async def install_public_skill_to_mine(skill_id: str, current_user: Dict[str, An
 async def list_pending_skills(agent_id: str):
     """C10 审批面：列出待审自动技能（评审闸开启时的配套生态）。
 
-    pending 数据在 Agent 的 skill_packer（**AutoSkillBuilder**，非同名旧
-    SkillPacker）实例上；Agent 未就绪返回空列表（闸关时恒空）。
+    pending 数据在 Agent 的 `skill_packer` 属性上——该属性挂的是
+    **`evolution.AutoSkillBuilder`**（agent_core 初始化时经 `from neurova.evolution
+    import AutoSkillBuilder` 赋值）。同名旧 `SkillPacker` 模块已随 P2 删除，
+    "skill_packer" 这个名字从此只指向 AutoSkillBuilder 一处，不再有歧义。
+    Agent 未就绪返回空列表（闸关时恒空）。
 
     ⚠️ 可达性（2026-09-17 复核）：本面只在 Agent 单例**已初始化**时有值——
     `_get_agent()` 返回 None 时恒空列（表现为"审批面永远没有待审件"）。
@@ -664,13 +707,32 @@ async def reject_pending_experience(agent_id: str, record_id: str):
 # ── P1-2 技能合并审批面（重复技能合并迭代的执行端）─────────────
 
 
+def _pending_consolidation_plan(agent_id: str, umbrella: str) -> dict:
+    """取待审计划；不存在则 404（approve/reject 共用，口径唯一）。"""
+    from neurova.evolution.skill_consolidator import ConsolidationPlanStore
+
+    service = _pool_service(agent_id)
+    store = ConsolidationPlanStore(service.skills_dir)
+    plan = next((p for p in store.load()
+                 if p.get("umbrella") == umbrella and p.get("status") == "pending"), None)
+    if plan is None:
+        raise HTTPException(status_code=404, detail=f"待审合并计划不存在: {umbrella}")
+    return plan
+
+
 @router.get("/agent/{agent_id}/consolidation/plans")
-async def list_consolidation_plans(agent_id: str):
+async def list_consolidation_plans(
+    agent_id: str, current_user: Dict[str, Any] = Depends(get_current_user)
+):
     """列出待审合并计划（P1-2 接线：plan-only 模块接上审批面）。
 
     计划由 RSI 步（_step_rsi_iteration）定期产出，落 data/agents/<id>/skills/
     下；本端点只读，不改技能库。
+
+    归属校验（P1 收口）：计划内容含 agent 的技能清单与用量，属他人 agent
+    资产，非 owner 不可见——读面与写面同判据，不放宽。
     """
+    _require_agent_access(agent_id, current_user, "查看")
     try:
         from neurova.evolution.skill_consolidator import ConsolidationPlanStore
 
@@ -683,37 +745,45 @@ async def list_consolidation_plans(agent_id: str):
 
 
 @router.post("/agent/{agent_id}/consolidation/{umbrella}/approve")
-async def approve_consolidation(agent_id: str, umbrella: str):
-    """批准合并：吸收成员**归档不删除**（可恢复），umbrella 留作类级技能。"""
+async def approve_consolidation(
+    agent_id: str, umbrella: str, current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """批准合并：吸收成员**归档不删除**（可恢复），umbrella 留作类级技能。
+
+    归属校验（P1 收口）：本端点是**写操作**（归档被吸收技能）。旧实现只按
+    路径参数 `agent_id` 取库，任何登录用户知道 id 就能批准任意 agent 的合并
+    ——现补 owner 校验（admin 全量 / 非 admin 仅 owner / 无主仅 admin）。
+    """
     from neurova.evolution.skill_consolidator import (
         ConsolidationApproval,
         ConsolidationPlanStore,
     )
 
+    _require_agent_access(agent_id, current_user, "批准")
+    plan = _pending_consolidation_plan(agent_id, umbrella)
     service = _pool_service(agent_id)
     store = ConsolidationPlanStore(service.skills_dir)
-    plan = next((p for p in store.load()
-                 if p.get("umbrella") == umbrella and p.get("status") == "pending"), None)
-    if plan is None:
-        raise HTTPException(status_code=404, detail=f"待审合并计划不存在: {umbrella}")
     result = ConsolidationApproval(service, store).approve(umbrella, plan.get("absorbed") or [])
     return {"code": 0, "data": result}
 
 
 @router.post("/agent/{agent_id}/consolidation/{umbrella}/reject")
-async def reject_consolidation(agent_id: str, umbrella: str):
-    """拒绝合并：只改计划状态，技能库零改动。"""
+async def reject_consolidation(
+    agent_id: str, umbrella: str, current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """拒绝合并：只改计划状态，技能库零改动。
+
+    归属校验同 approve：拒绝会改写计划状态（并关闭该簇后续提交），仍是写操作。
+    """
     from neurova.evolution.skill_consolidator import (
         ConsolidationApproval,
         ConsolidationPlanStore,
     )
 
+    _require_agent_access(agent_id, current_user, "拒绝")
+    plan = _pending_consolidation_plan(agent_id, umbrella)
     service = _pool_service(agent_id)
     store = ConsolidationPlanStore(service.skills_dir)
-    plan = next((p for p in store.load()
-                 if p.get("umbrella") == umbrella and p.get("status") == "pending"), None)
-    if plan is None:
-        raise HTTPException(status_code=404, detail=f"待审合并计划不存在: {umbrella}")
     result = ConsolidationApproval(service, store).reject(umbrella, plan.get("absorbed") or [])
     return {"code": 0, "data": result}
 

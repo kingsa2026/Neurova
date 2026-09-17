@@ -20,6 +20,9 @@
           <GlassButton variant="secondary" size="sm" @click="openProposals">
             {{ t('skillEvo.proposals') }}
           </GlassButton>
+          <GlassButton variant="secondary" size="sm" @click="openConsolidation">
+            {{ t('skillEvo.consolidation') }}
+          </GlassButton>
           <GlassButton variant="secondary" size="sm" @click="openSettings">
             {{ t('skillEvo.settings') }}
           </GlassButton>
@@ -256,6 +259,54 @@
           </div>
         </div>
         <a-empty v-else :description="t('skillEvo.noProposals')" />
+      </a-spin>
+    </a-modal>
+
+    <!-- 待审技能合并计划 Modal（P1-2：重复技能收敛为类级 umbrella） -->
+    <a-modal
+      v-model:open="consolidationVisible"
+      :title="t('skillEvo.consolidation')"
+      :footer="null"
+      width="720px"
+    >
+      <p class="evo-hint">{{ t('skillEvo.consolidationHint') }}</p>
+      <a-spin :spinning="consolidationLoading">
+        <div v-if="consolidationPlans.length" class="proposal-list">
+          <div v-for="p in consolidationPlans" :key="p.umbrella" class="proposal-row">
+            <div class="consolidation-info">
+              <div class="proposal-skill">{{ p.umbrella }}</div>
+              <div class="skill-tags">
+                <a-tag :color="basisColor(p.basis)">{{ basisLabel(p.basis) }}</a-tag>
+                <a-tag color="purple">
+                  {{ t('skillEvo.consolidationAbsorbed') }}: {{ (p.absorbed ?? []).length }}
+                </a-tag>
+              </div>
+              <div class="proposal-metric">{{ p.reason }}</div>
+              <div class="proposal-metric consolidation-members">
+                {{ (p.absorbed ?? []).join('、') }}
+              </div>
+            </div>
+            <div class="proposal-actions">
+              <GlassButton
+                variant="primary"
+                size="sm"
+                :loading="consolidationBusy === p.umbrella"
+                @click="decideConsolidation(p, true)"
+              >
+                {{ t('skillEvo.consolidationApprove') }}
+              </GlassButton>
+              <GlassButton
+                variant="secondary"
+                size="sm"
+                :disabled="consolidationBusy === p.umbrella"
+                @click="decideConsolidation(p, false)"
+              >
+                {{ t('skillEvo.reject') }}
+              </GlassButton>
+            </div>
+          </div>
+        </div>
+        <a-empty v-else :description="t('skillEvo.consolidationEmpty')" />
       </a-spin>
     </a-modal>
 
@@ -676,6 +727,68 @@ async function decideProposal(proposalId: string, approve: boolean) {
   }
 }
 
+// ── 技能合并审批面（P1-2：RSI 产计划、本处批准/拒绝执行）──
+
+const consolidationVisible = ref(false)
+const consolidationLoading = ref(false)
+const consolidationBusy = ref('')
+const consolidationPlans = ref<skillPoolApi.ConsolidationPlan[]>([])
+
+function basisLabel(basis?: string): string {
+  const map: Record<string, string> = {
+    identity: t('skillEvo.consolidationBasisIdentity'),
+    structure: t('skillEvo.consolidationBasisStructure'),
+    name_prefix: t('skillEvo.consolidationBasisNamePrefix'),
+  }
+  return (basis && map[basis]) || basis || ''
+}
+
+function basisColor(basis?: string): string {
+  return basis === 'identity' ? 'green' : basis === 'structure' ? 'orange' : 'default'
+}
+
+async function openConsolidation() {
+  consolidationVisible.value = true
+  await refreshConsolidation()
+}
+
+async function refreshConsolidation() {
+  consolidationLoading.value = true
+  try {
+    const res = await skillPoolApi.listConsolidationPlans(props.agentId)
+    const data: any = (res as any)?.data ?? res
+    // 只展示待审件（后端落盘仓含已批/已拒的历史条目）
+    consolidationPlans.value = (Array.isArray(data) ? data : []).filter(
+      (p: any) => !p?.status || p.status === 'pending',
+    )
+  } catch (err: any) {
+    const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message
+      || t('skillEvo.consolidationError')
+    message.error(msg)
+  } finally {
+    consolidationLoading.value = false
+  }
+}
+
+async function decideConsolidation(p: skillPoolApi.ConsolidationPlan, approve: boolean) {
+  consolidationBusy.value = p.umbrella
+  try {
+    if (approve) await skillPoolApi.approveConsolidation(props.agentId, p.umbrella)
+    else await skillPoolApi.rejectConsolidation(props.agentId, p.umbrella)
+    message.success(
+      approve ? t('skillEvo.consolidationApproved') : t('skillEvo.consolidationRejected'),
+    )
+    await refreshConsolidation()
+    await refreshSkills()
+  } catch (err: any) {
+    const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message
+      || t('skillEvo.consolidationError')
+    message.error(msg)
+  } finally {
+    consolidationBusy.value = ''
+  }
+}
+
 onMounted(refreshSkills)
 
 async function openMarketImportModal() {
@@ -806,6 +919,18 @@ async function installFromMarket(skill: MarketSkill) {
 .proposal-metric {
   font-size: 12px;
   color: var(--nr-text-secondary);
+}
+
+.consolidation-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.consolidation-members {
+  word-break: break-all;
 }
 
 .proposal-actions {
