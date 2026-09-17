@@ -30,7 +30,7 @@ Neurova 的工具调用有四条独立路径，肌肉记忆位于**最前端**�
    └─ 路径D: 蜂群 SwarmManager
    │
    ▼ 每次执行后（反馈回流）
-   ToolExecutionManager 的 MemoryRecordingStep（tool_pipeline:115-140）
+   ToolExecutor.on_tool_executed 尾部（tool_executor.py）
    → tool_memory.record_tool_usage() → muscle_memory.record_usage()
 ```
 
@@ -81,7 +81,7 @@ score = 0.6 × (指纹精确匹配)         # 或 0.4 × 关键词重叠率
 ## 三、闭环生命周期（设计意图）
 
 ```
-形成：工具执行 → MemoryRecordingStep → record_tool_usage
+形成：工具执行 → ToolExecutor.on_tool_executed → record_tool_usage
       → record_usage(query=用户输入) → 指纹命中已有条目则更新，否则新建 L3
 固化：连续成功 ≥2 → 升级 L3→L2→L1（响应速度逐级提升）
 消费：下一次相似输入 → match_by_query → auto_execute 直接执行（跳过 LLM 工具决策）
