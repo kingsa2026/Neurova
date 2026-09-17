@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """NPC 配置守卫（.cnb.yml / .cnb/settings.yml）。
 
-锁定三件已实锤踩过的事故，防同源复发：
+锁定四件已实锤踩过的事故，防同源复发：
 
 1. **model 不得带思考强度后缀** —— `deepseek-v4.1-flash-{low,high,max}` 是
    "同一底座模型 + 不同思考强度"的变体名，合法 model ID 只有
@@ -11,13 +11,16 @@
 2. **thinkingLevel 必须是字面量枚举值** —— `npc:go.options` 走平台
    配置阶段的 Schema 校验，而校验发生在变量替换之前，写成 `$VAR`
    会以"值不在枚举内"配置期直接红（本仓实测 100 条 Schema 报错）。
-3. **档位角色与流水线一一对齐** —— 每个声明的档位角色名（如
-   DSCoder-max）必须在 `.cnb.yml` 有对应 NPC 事件流水线，
-   且其 thinkingLevel 与角色名后缀语义一致；否则角色被 @ 时静默回落默认档，
-   用户以为切了档、其实没切。
+3. **档位角色与流水线一一对齐** —— 每个声明的档位角色名（含同档别名
+   DSCoder-max，以及 `$` 兜底挂载点）必须在 `.cnb.yml` 有对应 NPC 事件
+   流水线，且其 thinkingLevel 与本仓档位表一致；否则角色被 @ 时静默回落
+   平台默认档，用户以为切了档、其实没切。
+4. **档位收敛不倒退** —— 本仓只保留 max 一档。`-low` / `-high` 两档与
+   非 max 的 thinkingLevel 若重新出现（顶层 key、settings.yml 角色、
+   或流水线里的档位值），守卫直接拦下：要么是有意恢复分档（需同步改
+   档位表与本文档），要么是回归，两者都必须显式改测而非悄悄放过。
 """
 import io
-import re
 from pathlib import Path
 
 import pytest
@@ -34,8 +37,13 @@ THINKING_LEVELS = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 # 已知的思考强度后缀变体名（不是合法 model ID）
 SUFFIX_VARIANTS = ("-low", "-high", "-max")
 
-# 档位角色名后缀 → 期望的 thinkingLevel（本仓口径）
-LEVEL_BY_SUFFIX = {"-low": "low", "-high": "high", "-max": "xhigh"}
+# 本仓只保留 max 一档（2026-09-18 收敛）：
+# 档位角色名 → 期望的 thinkingLevel
+LEVEL_BY_ROLE = {"DSCoder-max": "xhigh"}
+# NPC 挂载点（$ 兜底 / 角色名顶层 key）→ 期望的 thinkingLevel
+LEVEL_BY_MOUNT = {"$": "xhigh", "DSCoder-max": "xhigh"}
+# 已取消的档位后缀：一旦重新出现在 .cnb.yml 顶层 key 或 settings.yml 角色名里即报错
+RETIRED_SUFFIXES = ("-low", "-high")
 
 
 def _load(path: Path):
@@ -140,42 +148,70 @@ class TestThinkingLevelLiteral:
 
 
 class TestRolePipelineAlignment:
-    def test_level_roles_have_pipeline_with_matching_level(self, cnb_doc, settings_doc):
-        """档位角色 → 必须挂到同名顶层 key，且 level 与后缀语义一致。"""
-        roles = {r.get("name") for r in (settings_doc.get("npc") or {}).get("roles") or []}
-        level_roles = {r for r in roles if isinstance(r, str) and r.endswith(SUFFIX_VARIANTS)}
-        assert level_roles, ".cnb/settings.yml 未定义任何档位角色（-low/-high/-max）"
-
-        # 档位角色通过角色名顶层 key 挂载（同名事件覆盖 $），
-        # 事件值必须是流水线数组（与 $ 下同构）。
-        missing = sorted(r for r in level_roles if r not in cnb_doc)
-        assert not missing, (
-            f"档位角色缺 .cnb.yml 顶层 key（被 @ 时会静默回落 $ 下的默认档）: {missing}"
-        )
-
-        mismatched = []
-        for role in sorted(level_roles):
-            suffix = next(s for s in SUFFIX_VARIANTS if role.endswith(s))
-            pipeline = cnb_doc[role]
-            assert isinstance(pipeline, dict), (
-                f"{role} 顶层值应为事件映射（如 issue.comment@npc），实际 {type(pipeline).__name__}"
-            )
-            # 同一角色下 issue / PR 两个事件的档位必须一致
-            levels = set()
+    def test_mount_points_have_pipeline_at_expected_level(self, cnb_doc):
+        """每个 NPC 挂载点都要有两个事件，且档位与本仓库位表一致。"""
+        problems = []
+        for mount, expected in sorted(LEVEL_BY_MOUNT.items()):
+            body = cnb_doc.get(mount)
+            if not isinstance(body, dict):
+                problems.append(f"{mount}: .cnb.yml 缺该挂载点（应为事件映射）")
+                continue
             for event_key in ("issue.comment@npc", "pull_request.comment@npc"):
-                if event_key not in pipeline:
-                    mismatched.append(f"{role} 缺事件 {event_key}")
+                if event_key not in body:
+                    problems.append(f"{mount} 缺事件 {event_key}")
                     continue
-                for _, opt in _iter_npc_go_options({event_key: pipeline[event_key]}):
-                    levels.add(opt.get("thinkingLevel"))
-            expected = {LEVEL_BY_SUFFIX[suffix]}
-            if levels != expected:
-                mismatched.append(
-                    f"{role}: thinkingLevel={sorted(levels)} 期望 {sorted(expected)}"
-                )
-        assert not mismatched, (
-            "档位角色与 thinkingLevel 不一致:\n  " + "\n  ".join(mismatched)
+                levels = {
+                    opt.get("thinkingLevel")
+                    for _, opt in _iter_npc_go_options({event_key: body[event_key]})
+                }
+                if levels != {expected}:
+                    problems.append(
+                        f"{mount}.{event_key}: thinkingLevel={sorted(levels)} 期望 {expected!r}"
+                    )
+        assert not problems, (
+            "NPC 挂载点档位与档位表不一致（被 @ 时会静默回落默认档）:\n  "
+            + "\n  ".join(problems)
         )
+
+    def test_no_retired_level_roles_in_settings(self, settings_doc):
+        """已取消的 -low / -high 档位角色不得重新出现（收敛不倒退）。"""
+        roles = [
+            (r or {}).get("name")
+            for r in ((settings_doc.get("npc") or {}).get("roles") or [])
+        ]
+        bad = sorted(
+            r for r in roles
+            if isinstance(r, str) and r.endswith(RETIRED_SUFFIXES)
+        )
+        assert not bad, (
+            f".cnb/settings.yml 出现了已取消的档位角色: {bad}\n"
+            "本仓只保留 max 一档（DSCoder / DSCoder-max）。"
+            "若确要恢复分档，请同步更新守卫的 LEVEL_BY_ROLE / LEVEL_BY_MOUNT 与文档说明。"
+        )
+
+    def test_settings_level_roles_match_declared_table(self, settings_doc):
+        """带档位后缀的角色名必须在本仓档位表内（防新增角色漏挂顶层 key）。"""
+        roles = [
+            (r or {}).get("name")
+            for r in ((settings_doc.get("npc") or {}).get("roles") or [])
+        ]
+        level_roles = {
+            r for r in roles
+            if isinstance(r, str) and r.endswith(SUFFIX_VARIANTS)
+        }
+        unknown = sorted(level_roles - set(LEVEL_BY_ROLE))
+        assert not unknown, (
+            f"档位角色未在守卫档位表登记: {unknown}\n"
+            "新增档位需同时改 .cnb.yml 挂载点、settings.yml 角色与守卫档位表。"
+        )
+
+    def test_no_retired_level_mounts_in_cnb(self, cnb_doc):
+        """已取消的档位挂载点不得重新出现在 .cnb.yml 顶层 key。"""
+        bad = sorted(
+            k for k in cnb_doc
+            if isinstance(k, str) and k.endswith(RETIRED_SUFFIXES)
+        )
+        assert not bad, f".cnb.yml 出现已取消的档位挂载点: {bad}（本仓只保留 max 档）"
 
     def test_npc_events_declared_and_aliased(self, cnb_doc):
         """每个 NPC 挂载点下 issue / PR 两个事件都要声明，且共用同一份流水线。"""
