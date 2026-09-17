@@ -64,6 +64,7 @@ except ImportError:
 
 # P5: 对话管线（从 chat() 提取）
 from neurova.agent.chat_pipeline import ChatContext, ChatPipeline
+from neurova.agent.turn_state import TurnState  # Phase 1：轮次状态门面（无反向依赖）
 
 # LoopManager 深度模块
 from neurova.agent.loop_manager import LoopManager
@@ -1997,8 +1998,7 @@ class Agent:
         return has_repeated_patterns(contents)
 
     def _collect_tool_messages(self) -> List[Dict[str, Any]]:
-        """
-        收集工具调用和执行的消息（用于前端展示）
+        """收集工具调用和执行的消息（转发 TurnState；历史私有名保留兼容）
 
         返回:
             工具消息列表，每个消息包含:
@@ -2007,17 +2007,24 @@ class Agent:
             - params/result: 参数/结果
             - timestamp: 时间戳
         """
-        if hasattr(self, "_tool_messages_list") and self._tool_messages_list:
-            return list(self._tool_messages_list)
-        return []
+        return self.turn_state.collect_tool_messages()
 
     # ══════════════════════════════════════════════════════════════
     # 轮次级请求状态显式 API（P3-c agent_ref 代理收窄）
-    # chat_pipeline / loops / tool_executor 等深度模块经此读写轮次级
-    # 状态，不再直改 _current_* / _tool_messages_list / _turn_count /
-    # _tool_events 私有属性。存储位置不变：旧 getattr 读取路径保留为
-    # 过渡兼容（渐进收窄，不做一次性翻转）。
+    # Phase 1 拆分（方案 Phase 1）：实现已迁 neurova/agent/turn_state.py
+    # （TurnState 门面，实存 neurova.core.turn_context 的 ContextVar）。
+    # 这里保留同名转发——deep modules（chat_pipeline / tool_executor /
+    # loops / post_chat_pipeline）与 getattr 旧契约名的访问点零变化。
     # ══════════════════════════════════════════════════════════════
+
+    @property
+    def turn_state(self) -> "TurnState":
+        """轮次状态门面（懒建：__new__ 直构的测试路径同样可用）。"""
+        ts = self.__dict__.get("_turn_state")
+        if ts is None:
+            ts = TurnState()
+            self._turn_state = ts
+        return ts
 
     def set_request_identity(
         self,
@@ -2025,29 +2032,19 @@ class Agent:
         session_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> None:
-        """记录本轮请求级身份（工具层三层隔离/蜂群事件广播依赖）。
-
-        审计 P0-B1：轮次级状态迁 ContextVar——Agent 是单例，实例属性存储
-        在并发请求下互踩（请求 B 覆盖请求 A 的身份/工具消息）。
-        user_id 缺省落 "default"（与原 chat_pipeline 写入语义一致）。
-        """
-        from neurova.core.turn_context import set_turn_identity
-
-        set_turn_identity(user_input, session_id, user_id)
+        """记录本轮请求级身份（转发 TurnState；见 turn_state.set_request_identity）。"""
+        self.turn_state.set_request_identity(user_input, session_id, user_id)
 
     @property
     def _current_user_input(self) -> Optional[str]:
-        """轮次级用户输入（A-04 根因修复）。
+        """轮次级用户输入（A-04 根因修复；Phase 1 起转发 TurnState）。
 
-        轮次状态迁 ContextVar（P0-B1）后原实例属性成死状态：init_conversation
-        的置 None 写不进 ContextVar，_on_skill_post_execute 等读取方恒拿
-        None/占位串。现做成 property 与 current_user_input 绑定同一
-        ContextVar——getter 读，setter 写（含置 None 重置语义），
-        tool_executor 等经 getattr 读取的旧消费方无需改动即恢复。
+        历史私有名保留为 property：tool_executor 经
+        ``getattr(agent, "_current_user_input", "")`` 读取、tests 经
+        ``agent._current_user_input = x`` 写入（A-04 契约）。getter 读，
+        setter 写（含置 None 重置语义），与 current_user_input 同存储。
         """
-        from neurova.core.turn_context import get_turn_user_input
-
-        return get_turn_user_input()
+        return self.turn_state.current_user_input
 
     @_current_user_input.setter
     def _current_user_input(self, value: Optional[str]) -> None:
@@ -2057,84 +2054,58 @@ class Agent:
 
     @property
     def current_user_input(self) -> Optional[str]:
-        from neurova.core.turn_context import get_turn_user_input
-
-        return get_turn_user_input()
+        return self.turn_state.current_user_input
 
     @property
     def current_session_id(self) -> Optional[str]:
-        from neurova.core.turn_context import get_turn_session_id
-
-        return get_turn_session_id()
+        return self.turn_state.current_session_id
 
     @property
     def current_user_id(self) -> Optional[str]:
-        from neurova.core.turn_context import get_turn_user_id
-
-        return get_turn_user_id()
+        return self.turn_state.current_user_id
 
     @property
     def current_reasoning(self) -> Optional[str]:
-        from neurova.core.turn_context import get_turn_reasoning
-
-        return get_turn_reasoning()
+        return self.turn_state.current_reasoning
 
     def set_current_reasoning(self, reasoning: Optional[str]) -> None:
-        """记录本轮思考过程（流式聚合 / 非流式单值共用；P0-B1 迁 ContextVar）"""
-        from neurova.core.turn_context import set_turn_reasoning
-
-        set_turn_reasoning(reasoning)
+        """记录本轮思考过程（流式聚合 / 非流式单值共用；转发 TurnState）"""
+        self.turn_state.set_current_reasoning(reasoning)
 
     def reset_tool_messages(self) -> None:
-        """清空本轮工具展示记录（轮次开始时调用；P0-B1 迁 ContextVar）"""
-        from neurova.core.turn_context import reset_turn_tool_messages
-
-        reset_turn_tool_messages()
+        """清空本轮工具展示记录（轮次开始时调用；转发 TurnState）"""
+        self.turn_state.reset_tool_messages()
 
     def append_tool_messages(self, records: List[Dict[str, Any]]) -> None:
-        """追加工具调用/结果展示记录（原生事件合并 + 并行回装共用入口；P0-B1 迁 ContextVar）"""
-        from neurova.core.turn_context import append_turn_tool_messages
-
-        append_turn_tool_messages(records)
+        """追加工具调用/结果展示记录（转发 TurnState）"""
+        self.turn_state.append_tool_messages(records)
 
     def get_tool_messages_snapshot(self) -> List[Dict[str, Any]]:
-        """工具展示记录快照（副本，外部改动不回写）——公有形态"""
-        from neurova.core.turn_context import get_turn_tool_messages_snapshot
-
-        return get_turn_tool_messages_snapshot()
+        """工具展示记录快照（副本；转发 TurnState）"""
+        return self.turn_state.get_tool_messages_snapshot()
 
     def append_tool_event(self, event: Dict[str, Any]) -> None:
-        """追加工具降级/异常事件（openai_loop 降级路径）；损坏态自愈为列表（P0-B1 迁 ContextVar）"""
-        from neurova.core.turn_context import append_turn_tool_event
-
-        append_turn_tool_event(event)
+        """追加工具降级/异常事件（转发 TurnState）"""
+        self.turn_state.append_tool_event(event)
 
     @property
     def tool_events(self) -> List[Dict[str, Any]]:
-        """工具降级/异常事件只读视图（P0-B1 迁 ContextVar 后的对偶读 API）"""
-        from neurova.core.turn_context import get_turn_tool_events
-
-        return get_turn_tool_events()
+        """工具降级/异常事件只读视图（转发 TurnState）"""
+        return self.turn_state.tool_events
 
     def increment_turn_count(self) -> int:
-        """轮次计数 +1，返回新值（P0-B1 迁 ContextVar）"""
-        from neurova.core.turn_context import increment_turn_count
-
-        return increment_turn_count()
+        """轮次计数 +1，返回新值（转发 TurnState）"""
+        return self.turn_state.increment_turn_count()
 
     @property
     def turn_count(self) -> int:
-        """当前轮次（读取方 getattr(agent,"turn_count") 的契约名；P0-2 失配修复）"""
-        from neurova.core.turn_context import get_turn_count
-
-        return get_turn_count()
+        """当前轮次（读取方 getattr(agent,"turn_count") 的契约名；转发 TurnState）"""
+        return self.turn_state.turn_count
 
     @property
     def session_id(self) -> str:
-        """当前会话 id（EKB 溯源等读取方契约名；P0-B1 迁 ContextVar）"""
-        from neurova.core.turn_context import get_turn_session_id
-
-        return str(get_turn_session_id() or "")
+        """当前会话 id（读取方契约名；转发 TurnState）"""
+        return self.turn_state.session_id
 
     async def record_tool_failure_lesson(
         self, tool_name: str, user_input: str, error_msg: str
@@ -2171,8 +2142,14 @@ class Agent:
         return reply
 
     def _set_reasoning(self, reasoning: str):
-        """设置当前思考过程（由 LLM 客户端调用）"""
-        self._current_reasoning = reasoning
+        """设置当前思考过程（由 LLM 客户端调用；转发 TurnState）。
+
+        根因修复（Phase 1 分叉清理）：原实现直写实例属性
+        ``self._current_reasoning``——P0-B1 轮次状态迁 ContextVar 后该属性
+        成死存储，所有读取方（current_reasoning property → channels/
+        post_chat_pipeline 的 getattr）恒拿 None。现写入与读取同一存储。
+        """
+        self.set_current_reasoning(reasoning)
 
     async def shutdown(self) -> None:
         """Agent 关闭时的清理操作（委托给 agent_shutdown 模块）"""

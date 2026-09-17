@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "note": "尺寸棘轮：只降不升。每完成一个 Phase 追加一条 history 条目（metric 只许变小；仅方法数可带 waiver 说明上调）。守卫测试见 test_agent_core_size_ratchet.py",
+  "goal": {
+    "agent_core_lines": 900,
+    "agent_class_lines": 400
+  },
+  "history": [
+    {
+      "phase": "Phase 0 baseline",
+      "date": "2026-09-16",
+      "description": "拆分方案立项基线（回涨后的实测值）",
+      "agent_core_lines": 2182,
+      "subsystem_container_lines": 584,
+      "subsystem_container_methods": 16,
+      "agent_class_lines": 1146,
+      "agent_class_methods": 56,
+      "agent_class_property_accessors": 16,
+      "agent_class_non_property_methods": 40
+    },
+    {
+      "phase": "Phase 1",
+      "date": "2026-09-17",
+      "description": "轮次状态 17 API 实现迁 neurova/agent/turn_state.py（TurnState 门面）；\nAgent 保留同名转发 + turn_state property；\n净变化：迁出约 55 行实现，转发层 +26 行，含 _collect_tool_messages 死列表读与 _set_reasoning 死存储写两处分叉根治（各 +3/+8 行说明注释）",
+      "agent_core_lines": 2159,
+      "subsystem_container_lines": 584,
+      "subsystem_container_methods": 16,
+      "agent_class_lines": 1122,
+      "agent_class_methods": 57,
+      "agent_class_property_accessors": 17,
+      "agent_class_non_property_methods": 40,
+      "waiver": "methods 56→57、property 16→17：新增 turn_state property（门面访问点）；\n原 _current_user_input property 保留——净 +1 方法/property 为转发面，非逻辑回填"
+    }
+  ]
+}
