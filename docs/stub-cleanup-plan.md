@@ -108,7 +108,8 @@
 - `skills/security_scanner.py`
 - `skills/market_searcher.py`
 - `skills/market_adapt.py`
-- `skill/skill_packer.py`
+- ~~`skill/skill_packer.py`~~ —— 已删除（2026-09-17 P2 收口，Issue #46）：零生产调用，
+  且产物不经过证据闸；专用测试 `tests/skill/*` 同步移除
 
 ### 2.11 其他 STUB_CHAIN
 - `shared_core/plan_orchestrator.py`
