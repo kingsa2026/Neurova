@@ -231,3 +231,29 @@ $:
             thinkingLevel: high
 
   pull_request.comment@npc: *npc-pipeline
+
+# ============================================================================
+# 自定义 NPC —— GLMCoder（GLM 驱动）
+# ============================================================================
+# 角色定义见 .cnb/settings.yml；此处按【角色名】挂载 NPC 事件流水线，
+# 使 GLMCoder 与 $ 下的 DSCoder 各跑各的、互不影响（模型不同）。
+# 触发：Issue/PR 评论中 @kingsa2026/neurova(GLMCoder)
+# 合并机制：按事件独立合并，未声明的事件保留默认行为（故两个事件都声明）。
+# 说明：模型能力参数（maxTurns/contextWindow/maxTokens/thinkingLevel/supportImage）
+#   在指定自定义 model 后不再继承平台默认，故按 GLM 常规能力显式给出兜底值。
+# ============================================================================
+GLMCoder:
+  issue.comment@npc: &glm-npc-pipeline
+    - docker:
+        image: cnbcool/default-npc:latest
+      stages:
+        - name: GLMCoder 执行任务
+          type: npc:go
+          options:
+            model: glm-5.3-flash
+            maxTurns: 500
+            contextWindow: 1m
+            maxTokens: 48k
+            thinkingLevel: high
+
+  pull_request.comment@npc: *glm-npc-pipeline
