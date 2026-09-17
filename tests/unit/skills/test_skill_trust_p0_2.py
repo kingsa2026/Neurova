@@ -11,6 +11,7 @@ import json
 
 import pytest
 
+from tests.unit.skills.creation_helpers import register_proven_skill
 from neurova.core import turn_context
 from neurova.skills.skill_service import (
     SkillService,
@@ -87,7 +88,7 @@ def svc(tmp_path):
 
 def test_auto_skill_born_provisional(svc):
     service, _ = svc
-    service.register_auto_skill("auto1", name="auto1")
+    register_proven_skill(service, "auto1", name="auto1")
     assert service.get_skill_usage("auto1")["trust_state"] == "provisional"
 
 
@@ -106,7 +107,7 @@ def test_imported_skill_defaults_trusted(svc):
 
 def test_promotion_after_two_independent_successes(svc):
     service, _ = svc
-    service.register_auto_skill("auto1", name="auto1")
+    register_proven_skill(service, "auto1", name="auto1")
     service.record_trust_observation("auto1", "success", task_id="t1")
     assert service.get_skill_usage("auto1")["trust_state"] == "provisional"
     ok = service.record_trust_observation("auto1", "success", task_id="t2")
@@ -119,7 +120,7 @@ def test_promotion_after_two_independent_successes(svc):
 def test_same_task_observation_deduped(svc):
     """一票制：同一 task_id 重复上报不得重复计数晋升"""
     service, _ = svc
-    service.register_auto_skill("auto1", name="auto1")
+    register_proven_skill(service, "auto1", name="auto1")
     service.record_trust_observation("auto1", "success", task_id="t1")
     service.record_trust_observation("auto1", "success", task_id="t1")
     assert service.get_skill_usage("auto1")["trust_state"] == "provisional"
@@ -127,7 +128,7 @@ def test_same_task_observation_deduped(svc):
 
 def test_failure_demotes_and_resets(svc):
     service, _ = svc
-    service.register_auto_skill("auto1", name="auto1")
+    register_proven_skill(service, "auto1", name="auto1")
     service.record_trust_observation("auto1", "success", task_id="t1")
     service.record_trust_observation("auto1", "success", task_id="t2")
     assert service.get_skill_usage("auto1")["trust_state"] == "trusted"
@@ -142,7 +143,7 @@ def test_failure_demotes_and_resets(svc):
 
 def test_trust_persisted_to_manifest(svc):
     service, manifest = svc
-    service.register_auto_skill("auto1", name="auto1")
+    register_proven_skill(service, "auto1", name="auto1")
     service.record_trust_observation("auto1", "success", task_id="t1")
     raw = json.loads(manifest.read_text(encoding="utf-8"))
     assert raw["auto1"]["identity"]["trust"]["state"] == "provisional"
@@ -156,7 +157,7 @@ def test_record_trust_unknown_skill(svc):
 
 def test_observed_task_ids_bounded(svc):
     service, _ = svc
-    service.register_auto_skill("auto1", name="auto1")
+    register_proven_skill(service, "auto1", name="auto1")
     for i in range(30):
         service.record_trust_observation("auto1", "failure", task_id=f"t{i}")
     info = service.get_skill_info("auto1")
@@ -181,7 +182,7 @@ async def test_flush_records_trust_with_task_identity(tmp_path, monkeypatch):
             super().__init__(agent_id=agent_id, skills_dir=str(tmp_path / "skills"))
 
     monkeypatch.setattr(ss_mod, "SkillService", _TmpService)
-    _TmpService(agent_id="flush-t").register_auto_skill("auto1", name="auto1")
+    register_proven_skill(_TmpService(agent_id="flush-t"), "auto1", name="auto1")
 
     agent = MagicMock()
     agent.config.agent_id = "flush-t"

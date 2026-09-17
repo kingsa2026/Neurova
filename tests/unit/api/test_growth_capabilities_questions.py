@@ -125,7 +125,7 @@ class GrowthQuestionsStatusContractTest(unittest.TestCase):
         """生产闭环下问题终态是 asked——列表必须可见（修复前只返回 pending+cooldown 恒空）"""
         resp = self.client.get("/api/v1/growth/questions", params={"agent_id": "test_agent"})
         self.assertEqual(resp.status_code, 200)
-        questions = resp.json()
+        questions = resp.json()["data"]  # 2026-09-16 envelope 契约
         ids = {q["question_id"] for q in questions}
         self.assertIn(self.q_asked.id, ids, "asked 态问题必须返回")
         self.assertIn(self.q_pending.id, ids)
@@ -133,19 +133,19 @@ class GrowthQuestionsStatusContractTest(unittest.TestCase):
 
     def test_items_carry_frontend_contract_fields(self):
         resp = self.client.get("/api/v1/growth/questions", params={"agent_id": "test_agent"})
-        item = resp.json()[0]
+        item = resp.json()["data"][0]  # 2026-09-16 envelope 契约
         for key in ("id", "question_id", "question", "status", "answered", "answer", "created_at", "priority"):
             self.assertIn(key, item, f"前端 GrowthQuestion 契约缺字段 {key}")
         self.assertEqual(item["id"], item["question_id"])
 
     def test_answered_filter(self):
         resp = self.client.get("/api/v1/growth/questions", params={"agent_id": "test_agent", "answered": True})
-        answered = resp.json()
+        answered = resp.json()["data"]  # 2026-09-16 envelope 契约
         self.assertTrue(all(q["answered"] for q in answered))
         self.assertEqual({q["question_id"] for q in answered}, {self.q_answered.id})
 
         resp2 = self.client.get("/api/v1/growth/questions", params={"agent_id": "test_agent", "answered": False})
-        unanswered = {q["question_id"] for q in resp2.json()}
+        unanswered = {q["question_id"] for q in resp2.json()["data"]}
         self.assertEqual(unanswered, {self.q_pending.id, self.q_asked.id})
 
     def test_overview_questions_visible_when_all_asked(self):

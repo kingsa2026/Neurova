@@ -42,9 +42,10 @@ class TestToolExecutor:
         assert executor.tool_lifecycle is None
 
     def test_on_tool_executed_dispatches_to_all_three(self):
-        """_on_tool_executed 同时调度 memory + lifecycle + packer"""
+        """on_tool_executed 调度 memory + lifecycle；packer 观察迁移到
+        finish_task（历史裸 observe 会把单工具当任务成功，已移除）。"""
         from neurova.tool_executor import ToolExecutor
-        
+
         mock_agent = Mock()
         mock_agent.tool_memory = Mock()
         mock_agent.tool_memory.record_tool_usage = Mock()
@@ -52,7 +53,7 @@ class TestToolExecutor:
         mock_agent.tool_lifecycle.touch = Mock()
         mock_agent.skill_packer = Mock()
         mock_agent.skill_packer.observe = Mock()
-        
+
         executor = ToolExecutor(mock_agent)
         executor.on_tool_executed(
             tool_name="test_tool",
@@ -62,11 +63,52 @@ class TestToolExecutor:
             tool_source="skill_system",
             execution_time=1.5,
         )
-        
-        # 验证三个钩子都被调用
+
+        # 验证即时钩子都被调用
         mock_agent.tool_memory.record_tool_usage.assert_called_once()
         mock_agent.tool_lifecycle.touch.assert_called_once_with("test_tool", True)
-        mock_agent.skill_packer.observe.assert_called_once()
+        # 裸工具事件不再立即喂 packer——只有 finish_task 的整任务证据才计数
+        mock_agent.skill_packer.observe.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_tool_execution_collected_and_flushed_to_packer(self):
+        """真实执行入口采集，任务终结才落证据并分发 packer。"""
+        from types import SimpleNamespace
+        from neurova.tool_executor import ToolExecutor
+        from neurova.agent.tool_coordinator import ToolCoordinator
+        from neurova.skills import creation_governance as cg
+        from neurova.skills.skill_service import SkillService
+
+        agent = SimpleNamespace(
+            config=SimpleNamespace(agent_id="pytest-collector", user_id="test", name="test"),
+            _current_user_id="test", _current_user_input="help me",
+            tool_memory=Mock(), tool_lifecycle=Mock(), skill_packer=Mock(),
+            _skill_registry=None, context_orchestrator=None, skill_registry=None,
+        )
+        executor = ToolExecutor(agent)
+        executor.tool_coordinator = ToolCoordinator()
+        executor._execute_tool_core = AsyncMock(return_value=({"success": True}, True, "builtin"))
+        steps = [{"tool": "memory_search", "params": {"query": "test notes"}}]
+        service = SkillService(agent_id="pytest-collector")
+        cg.begin_task()
+        try:
+            result = await executor._execute_single_tool("memory_search", steps[0]["params"], skip_governance=True)
+            assert result == {"success": True}
+            agent.tool_memory.record_tool_usage.assert_called_once()
+            agent.tool_lifecycle.touch.assert_called_once_with("memory_search", True)
+            agent.skill_packer.observe.assert_not_called()
+            assert service.creation_evidence.task_results(steps, "help me") == {}
+            cg.finish_task(agent, "help me", completed=True)
+            votes = SkillService(agent_id="pytest-collector").creation_evidence.task_results(steps, "help me")
+            assert len(votes) == 1 and list(votes.values()) == [1]
+            agent.skill_packer.observe.assert_called_once_with(
+                steps, context="help me", success=True, metadata={"source_key": next(iter(votes))})
+            agent.skill_packer.register_to_skill_registry.assert_called_once()
+            assert not service.creation_evidence.eligible(steps, "help me")
+            cg.finish_task(agent, "help me", completed=True)
+            assert agent.skill_packer.observe.call_count == 1
+        finally:
+            cg.flush_task(service, "help me", completed=False)
 
     def test_on_tool_executed_graceful_when_components_none(self):
         """所有组件为 None 时不应崩溃"""

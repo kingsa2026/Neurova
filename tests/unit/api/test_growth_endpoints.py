@@ -89,7 +89,7 @@ class GrowthReflectionEndpointsTest(unittest.TestCase):
     def test_get_reflection_logs_returns_real_data(self):
         resp = self.client.get("/api/v1/growth/reflection")
         self.assertEqual(resp.status_code, 200)
-        logs = resp.json()
+        logs = resp.json()["data"]  # 2026-09-16 envelope 契约
         self.assertEqual(len(logs), 1, "应返回真实的 1 条反思日志，而非 5 条 mock")
         self.assertEqual(logs[0]["content"], "反思正文B")
         self.assertEqual(logs[0]["log_id"], logs[0]["log_id"])
@@ -104,7 +104,7 @@ class GrowthReflectionEndpointsTest(unittest.TestCase):
         with patch.object(self.growth_api, "_get_agent", return_value=agent):
             resp = self.client.get("/api/v1/growth/reflection")
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json(), [])
+        self.assertEqual(resp.json()["data"], [])  # 2026-09-16 envelope 契约
 
     def test_create_reflection_log_persists(self):
         resp = self.client.post(
@@ -113,7 +113,7 @@ class GrowthReflectionEndpointsTest(unittest.TestCase):
             json={"reflection_type": "improvement", "content": "新建反思X", "insights": ["洞察Y"], "confidence": 0.6},
         )
         self.assertEqual(resp.status_code, 200)
-        created = resp.json()
+        created = resp.json()["data"]  # 2026-09-16 envelope 契约
         self.assertEqual(created["content"], "新建反思X")
         # 真实落库（read_logs 可读回）
         contents = [e.content for e in self.glm.read_logs(limit=10)]
@@ -170,16 +170,16 @@ class GrowthQuestionEndpointsTest(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 200)
 
-        resp2 = self.client.get("/api/v1/growth/questions")
+        resp2 = self.client.get("/api/v1/growth/questions", params={"agent_id": "test_agent"})
         self.assertEqual(resp2.status_code, 200)
-        questions = resp2.json()
+        questions = resp2.json()["data"]  # 2026-09-16 envelope 契约
         self.assertEqual(len(questions), 1, "应返回真实问题，而非 3 条 mock")
         self.assertEqual(questions[0]["question"], "为什么天空是蓝色的?")
 
     def test_questions_empty_without_mock(self):
         resp = self.client.get("/api/v1/growth/questions")
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json(), [], "管理器存在但无数据时应返回空列表")
+        self.assertEqual(resp.json()["data"], [], "管理器存在但无数据时应返回空列表")
 
     def test_next_question_returns_pending(self):
         self.qqm.generate_question("下一个问题?")

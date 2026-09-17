@@ -1,0 +1,522 @@
+[
+  {
+    "method": "GET",
+    "path": "/stores",
+    "name": "list_stores",
+    "decorator": "router.get('/stores')",
+    "signature": "platform: Optional[str]=Query(None, description='按平台过滤'), current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
+    "doc": "店铺列表（密钥脱敏；按归属用户隔离）"
+  },
+  {
+    "method": "POST",
+    "path": "/stores",
+    "name": "create_store",
+    "decorator": "router.post('/stores')",
+    "signature": "data: Dict[str, Any]=Body(...), current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
+    "doc": "连接店铺：注册表 + 凭据入库（Tier 1 手工录入）"
+  },
+  {
+    "method": "GET",
+    "path": "/stores/{store_id}",
+    "name": "get_store",
+    "decorator": "router.get('/stores/{store_id}')",
+    "signature": "store_id: str, current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
+    "doc": "店铺详情（脱敏；仅限归属用户）"
+  },
+  {
+    "method": "PUT",
+    "path": "/stores/{store_id}",
+    "name": "update_store",
+    "decorator": "router.put('/stores/{store_id}')",
+    "signature": "store_id: str, data: Dict[str, Any]=Body(...), current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
+    "doc": "更新店铺（名称/站点参数/凭据轮换；仅限归属用户）"
+  },
+  {
+    "method": "DELETE",
+    "path": "/stores/{store_id}",
+    "name": "delete_store",
+    "decorator": "router.delete('/stores/{store_id}')",
+    "signature": "store_id: str, current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
+    "doc": "删除店铺（含 SecretStore 密钥清理；仅限归属用户）"
+  },
+  {
+    "method": "POST",
+    "path": "/stores/{store_id}/test",
+    "name": "test_store_connection",
+    "decorator": "router.post('/stores/{store_id}/test')",
+    "signature": "store_id: str, current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
+    "doc": "连接测试（只读探针；仅限归属用户）"
+  },
+  {
+    "method": "POST",
+    "path": "/stores/{store_id}/refresh",
+    "name": "refresh_store_token",
+    "decorator": "router.post('/stores/{store_id}/refresh')",
+    "signature": "store_id: str, current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
+    "doc": "强制刷新令牌（仅限归属用户）"
+  },
+  {
+    "method": "GET",
+    "path": "/stores/oauth/authorize",
+    "name": "oauth_authorize",
+    "decorator": "router.get('/stores/oauth/authorize')",
+    "signature": "request: Request, platform: str=Query(...), app_key: str=Query(''), app_secret: str=Query(''), store_name: str=Query(''), current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
+    "doc": "构造平台授权 URL 并 302 跳转（Tier 2）；先落 pending 店铺与应用凭据"
+  },
+  {
+    "method": "GET",
+    "path": "/stores/oauth/callback",
+    "name": "oauth_callback",
+    "decorator": "router.get('/stores/oauth/callback')",
+    "signature": "request: Request, code: str=Query(''), state: str=Query('')",
+    "doc": "平台授权回调：校验 state（一次性/防 CSRF）→ 换 token → 更新店铺 → 302 回前端"
+  },
+  {
+    "method": "GET",
+    "path": "/workflows",
+    "name": "list_workflows",
+    "decorator": "router.get('/workflows')",
+    "signature": "category: Optional[str]=Query(None, description='按分类过滤'), status: Optional[str]=Query(None, description='按状态过滤'), limit: int=Query(100, ge=1, le=1000), offset: int=Query(0, ge=0), view: Optional[str]=Query(None, pattern='^(personal|project|agent)$', description='B1 三视图：personal|project|agent'), project_id: Optional[str]=Query(None, description='视图细化：指定项目'), agent_id: Optional[str]=Query(None, description='视图细化：指定 agent'), current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "列出工作流（P0-1 属主隔离：自己的 + public + B1 项目成员行；admin 全量）"
+  },
+  {
+    "method": "POST",
+    "path": "/workflows",
+    "name": "create_workflow",
+    "decorator": "router.post('/workflows')",
+    "signature": "data: Dict[str, Any]=Body(...), current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "创建工作流（P0-1：属主=当前登录用户；B1：归属列校验）"
+  },
+  {
+    "method": "GET",
+    "path": "/workflows/{workflow_id}",
+    "name": "get_workflow",
+    "decorator": "router.get('/workflows/{workflow_id}')",
+    "signature": "workflow_id: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "获取工作流详情"
+  },
+  {
+    "method": "PUT",
+    "path": "/workflows/{workflow_id}",
+    "name": "update_workflow",
+    "decorator": "router.put('/workflows/{workflow_id}')",
+    "signature": "workflow_id: str, data: Dict[str, Any]=Body(...), current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "更新工作流（P0-1：属主保留既有行；B1：归属列 payload 缺失时以存量为准——\n旧前端全量 PUT 不得抹除 project_id/agent_id/origin）"
+  },
+  {
+    "method": "DELETE",
+    "path": "/workflows/{workflow_id}",
+    "name": "delete_workflow",
+    "decorator": "router.delete('/workflows/{workflow_id}')",
+    "signature": "workflow_id: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "删除工作流（B1：先写校验 → subflow 引用守卫 → 删除）"
+  },
+  {
+    "method": "GET",
+    "path": "/workflows/search/{query}",
+    "name": "search_workflows",
+    "decorator": "router.get('/workflows/search/{query}')",
+    "signature": "query: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "搜索工作流（P0-1 属主过滤 + B1 项目成员行）"
+  },
+  {
+    "method": "POST",
+    "path": "/workflows/{workflow_id}/validate",
+    "name": "validate_workflow",
+    "decorator": "router.post('/workflows/{workflow_id}/validate')",
+    "signature": "workflow_id: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "验证工作流"
+  },
+  {
+    "method": "POST",
+    "path": "/workflows/{workflow_id}/execute",
+    "name": "execute_workflow",
+    "decorator": "router.post('/workflows/{workflow_id}/execute')",
+    "signature": "workflow_id: str, inputs: Dict[str, Any]=Body(default={}), user_id: Optional[str]=Body(default=None), agent_id: Optional[str]=Body(default=None), wait: bool=Body(default=True), current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
+    "doc": "执行工作流\n\n用户隔离：执行实例的 user_id 取 JWT 实名（未认证回退 default），\n不再信任请求体——知识库节点引用用户级远程配置（默认私有）时按此校验属主。\n\nwait=false（P0-1 run/stream 分离）：立即返回 runId/events_url，\n后台执行并落库；默认 wait=true 同步返回终态实例（行为不变）。"
+  },
+  {
+    "method": "GET",
+    "path": "/executions",
+    "name": "list_executions",
+    "decorator": "router.get('/executions')",
+    "signature": "workflow_id: Optional[str]=Query(None), status: Optional[str]=Query(None), limit: int=Query(100, ge=1, le=1000), offset: int=Query(0, ge=0)",
+    "doc": "列出执行记录"
+  },
+  {
+    "method": "GET",
+    "path": "/executions/{execution_id}",
+    "name": "get_execution",
+    "decorator": "router.get('/executions/{execution_id}')",
+    "signature": "execution_id: str",
+    "doc": "获取执行详情"
+  },
+  {
+    "method": "GET",
+    "path": "/executions/{execution_id}/events",
+    "name": "stream_execution_events",
+    "decorator": "router.get('/executions/{execution_id}/events')",
+    "signature": "execution_id: str, after: int=Query(0, ge=0), current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
+    "doc": "执行事件 SSE 流。\n\n帧格式 data: {seq,type,workflow_id,execution_id,node_id,data,timestamp}；\n回放 seq>after 历史帧 + 实时推送，终态帧（workflow_completed/failed）后收尾；\nkeep-alive 注释行防代理超时。用户隔离：仅属主（或未认证 default）可订阅。"
+  },
+  {
+    "method": "GET",
+    "path": "/nodes",
+    "name": "list_nodes",
+    "decorator": "router.get('/nodes')",
+    "signature": "category: Optional[str]=Query(None), source: Optional[str]=Query(None)",
+    "doc": "列出所有已注册节点"
+  },
+  {
+    "method": "POST",
+    "path": "/nodes/custom",
+    "name": "create_custom_node",
+    "decorator": "router.post('/nodes/custom', status_code=201)",
+    "signature": "data: Dict[str, Any]=Body(...), current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "注册自定义节点类型（spec：type/label/tier/executor_body/form_schema/inputs/outputs）"
+  },
+  {
+    "method": "GET",
+    "path": "/nodes/custom",
+    "name": "list_custom_nodes",
+    "decorator": "router.get('/nodes/custom')",
+    "signature": "current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "列出自定义节点类型（含属主 created_by）。"
+  },
+  {
+    "method": "PUT",
+    "path": "/nodes/custom/{node_type:path}",
+    "name": "update_custom_node",
+    "decorator": "router.put('/nodes/custom/{node_type:path}')",
+    "signature": "node_type: str, data: Dict[str, Any]=Body(...), current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "更新自定义节点类型（属主/admin；更新自动快照旧版本，版本号 patch +1）"
+  },
+  {
+    "method": "DELETE",
+    "path": "/nodes/custom/{node_type:path}",
+    "name": "delete_custom_node",
+    "decorator": "router.delete('/nodes/custom/{node_type:path}')",
+    "signature": "node_type: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "删除自定义节点类型（仅 custom 且属主/admin；builtin 守卫 400）"
+  },
+  {
+    "method": "GET",
+    "path": "/nodes/search/{query}",
+    "name": "search_nodes",
+    "decorator": "router.get('/nodes/search/{query}')",
+    "signature": "query: str",
+    "doc": "搜索节点"
+  },
+  {
+    "method": "POST",
+    "path": "/nodes/sync",
+    "name": "sync_nodes",
+    "decorator": "router.post('/nodes/sync')",
+    "signature": "",
+    "doc": "同步所有节点（工具/技能/MCP）"
+  },
+  {
+    "method": "GET",
+    "path": "/nodes/stats",
+    "name": "get_node_stats",
+    "decorator": "router.get('/nodes/stats')",
+    "signature": "",
+    "doc": "获取节点统计"
+  },
+  {
+    "method": "GET",
+    "path": "/nodes/{node_type:path}",
+    "name": "get_node",
+    "decorator": "router.get('/nodes/{node_type:path}')",
+    "signature": "node_type: str",
+    "doc": "获取节点定义"
+  },
+  {
+    "method": "POST",
+    "path": "/workflows/{workflow_id}/duplicate",
+    "name": "duplicate_workflow",
+    "decorator": "router.post('/workflows/{workflow_id}/duplicate')",
+    "signature": "workflow_id: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "复制工作流（P0-1：源须可读；副本属主=当前用户）"
+  },
+  {
+    "method": "GET",
+    "path": "/workflows/{workflow_id}/definition",
+    "name": "get_workflow_definition",
+    "decorator": "router.get('/workflows/{workflow_id}/definition')",
+    "signature": "workflow_id: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "获取工作流定义"
+  },
+  {
+    "method": "PUT",
+    "path": "/workflows/{workflow_id}/definition",
+    "name": "update_workflow_definition",
+    "decorator": "router.put('/workflows/{workflow_id}/definition')",
+    "signature": "workflow_id: str, data: Dict[str, Any]=Body(...), base_version: Optional[int]=Query(None, description='B2 乐观锁基版本（画布编辑器回写携带）'), current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "更新工作流定义（节点/边/变量/名称/描述）。\n\n局部更新语义：未提供的字段不动——variables/status 等编辑面之外的字段\n永不被画布回写抹除（B2 \"往返不丢字段\"由此端点保证，画布快照不再重建定义）。\nbase_version：与当前内容版本号不一致 → 409（detail 含 current_version）。"
+  },
+  {
+    "method": "PUT",
+    "path": "/workflows/{workflow_id}/viewport",
+    "name": "save_workflow_viewport",
+    "decorator": "router.put('/workflows/{workflow_id}/viewport')",
+    "signature": "workflow_id: str, data: Dict[str, Any]=Body(...), current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "保存工作流视口状态"
+  },
+  {
+    "method": "POST",
+    "path": "/workflows/{workflow_id}/publish",
+    "name": "publish_workflow",
+    "decorator": "router.post('/workflows/{workflow_id}/publish')",
+    "signature": "workflow_id: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "发布工作流（P2：编译 AgentManifest 并落 agents 记录，chat 页可直接选用）"
+  },
+  {
+    "method": "POST",
+    "path": "/executions/{execution_id}/cancel",
+    "name": "cancel_execution",
+    "decorator": "router.post('/executions/{execution_id}/cancel')",
+    "signature": "execution_id: str",
+    "doc": "取消执行"
+  },
+  {
+    "method": "POST",
+    "path": "/executions/{execution_id}/resume",
+    "name": "resume_execution",
+    "decorator": "router.post('/executions/{execution_id}/resume')",
+    "signature": "execution_id: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "恢复执行（人工审批后）"
+  },
+  {
+    "method": "GET",
+    "path": "/agents",
+    "name": "list_agents",
+    "decorator": "router.get('/agents')",
+    "signature": "flow_id: Optional[str]=Query(None, description='按工作流过滤'), include_archived: bool=Query(False, description='是否包含已归档')",
+    "doc": "列出团队 Agent"
+  },
+  {
+    "method": "POST",
+    "path": "/agents",
+    "name": "create_agent",
+    "decorator": "router.post('/agents')",
+    "signature": "data: Dict[str, Any]=Body(...)",
+    "doc": "创建临时团队 Agent"
+  },
+  {
+    "method": "POST",
+    "path": "/agents/{agent_id}/archive",
+    "name": "archive_agent",
+    "decorator": "router.post('/agents/{agent_id}/archive')",
+    "signature": "agent_id: str",
+    "doc": "归档 Agent"
+  },
+  {
+    "method": "POST",
+    "path": "/agents/{agent_id}/restore",
+    "name": "restore_agent",
+    "decorator": "router.post('/agents/{agent_id}/restore')",
+    "signature": "agent_id: str",
+    "doc": "恢复 Agent"
+  },
+  {
+    "method": "GET",
+    "path": "/templates",
+    "name": "list_templates",
+    "decorator": "router.get('/templates')",
+    "signature": "category: Optional[str]=Query(None, description='按分类过滤'), current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "列出工作流模板（P0-1：登录用户可读）"
+  },
+  {
+    "method": "POST",
+    "path": "/templates",
+    "name": "create_template",
+    "decorator": "router.post('/templates')",
+    "signature": "data: Dict[str, Any]=Body(...), current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "创建工作流模板（P0-1：源工作流须可写；模板属主=创建者）"
+  },
+  {
+    "method": "POST",
+    "path": "/templates/{template_id}/instantiate",
+    "name": "instantiate_template",
+    "decorator": "router.post('/templates/{template_id}/instantiate')",
+    "signature": "template_id: str, data: Dict[str, Any]=Body(...), current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "从模板创建工作流（P0-1：实例属主=实例化人）"
+  },
+  {
+    "method": "GET",
+    "path": "/stats",
+    "name": "get_stats",
+    "decorator": "router.get('/stats')",
+    "signature": "",
+    "doc": "获取 Neurflow 统计信息"
+  },
+  {
+    "method": "GET",
+    "path": "/comfyui/status",
+    "name": "get_comfyui_status",
+    "decorator": "router.get('/comfyui/status')",
+    "signature": "",
+    "doc": "检查 ComfyUI 服务可用性"
+  },
+  {
+    "method": "POST",
+    "path": "/comfyui/execute",
+    "name": "execute_comfyui_node_endpoint",
+    "decorator": "router.post('/comfyui/execute')",
+    "signature": "request: ComfyUIExecuteRequest",
+    "doc": "直接执行单个 ComfyUI 节点（提交 prompt 到 ComfyUI /prompt）"
+  },
+  {
+    "method": "POST",
+    "path": "/executions/{execution_id}/breakpoint",
+    "name": "set_breakpoints",
+    "decorator": "router.post('/executions/{execution_id}/breakpoint')",
+    "signature": "execution_id: str, body: BreakpointRequest, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "为指定 execution 设置/追加断点集合。"
+  },
+  {
+    "method": "POST",
+    "path": "/executions/{execution_id}/debug/resume",
+    "name": "resume_debug_execution",
+    "decorator": "router.post('/executions/{execution_id}/debug/resume')",
+    "signature": "execution_id: str, body: ResumeRequest, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "恢复调试暂停中的执行；可选 step 模式（in/over/out）。\n\n路径区分于 /executions/{id}/resume（人工审批恢复）——两者同名会导致\nFastAPI 路由遮蔽（先注册者独占，调试恢复成死代码）。"
+  },
+  {
+    "method": "GET",
+    "path": "/executions/{execution_id}/variables",
+    "name": "get_execution_variables",
+    "decorator": "router.get('/executions/{execution_id}/variables')",
+    "signature": "execution_id: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "获取当前执行实例的所有变量（含 inputs/variables/node_results）。"
+  },
+  {
+    "method": "PUT",
+    "path": "/nodes/{node_id}/mock",
+    "name": "set_node_mock",
+    "decorator": "router.put('/nodes/{node_id}/mock')",
+    "signature": "node_id: str, body: MockNodeRequest, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "为节点设置 mock 输出；clear=true 时清空（恢复真实执行）。"
+  },
+  {
+    "method": "POST",
+    "path": "/workflows/{workflow_id}/step-run",
+    "name": "step_run_node",
+    "decorator": "router.post('/workflows/{workflow_id}/step-run')",
+    "signature": "workflow_id: str, body: StepRunRequest, current_user: Dict[str, Any]=Depends(get_current_user_or_default)",
+    "doc": "单节点试跑：只执行指定节点（mock 优先），上游输出经\nupstream_outputs 注入（画布右键面板/变量检查的数据源）。"
+  },
+  {
+    "method": "POST",
+    "path": "/triggers/webhook/{trigger_id}/receive",
+    "name": "receive_webhook_trigger",
+    "decorator": "router.post('/triggers/webhook/{trigger_id}/receive')",
+    "signature": "trigger_id: str, request: Request",
+    "doc": "外部系统入站触发工作流（HMAC 验签 + 重放防护 + 限流 + 派发；逻辑在 webhook_ingress）。\n\n投递审计：无论成败均落 webhook_deliveries（P1 Step 7 表）。"
+  },
+  {
+    "method": "GET",
+    "path": "/workflows/{workflow_id}/triggers",
+    "name": "list_workflow_triggers",
+    "decorator": "router.get('/workflows/{workflow_id}/triggers')",
+    "signature": "workflow_id: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "列出某工作流的全部触发器（secret 字段不回显）。"
+  },
+  {
+    "method": "POST",
+    "path": "/workflows/{workflow_id}/triggers",
+    "name": "create_workflow_trigger",
+    "decorator": "router.post('/workflows/{workflow_id}/triggers')",
+    "signature": "workflow_id: str, body: TriggerCreateRequest, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "创建触发器。\n\nwebhook：自动生成 secret —— 明文仅本次响应返回一次，\n库中存 AES-GCM 密文（验签用）+ sha256 hash（审计用）。\ncron：校验 cron 表达式可解析。"
+  },
+  {
+    "method": "DELETE",
+    "path": "/triggers/{trigger_id}",
+    "name": "delete_workflow_trigger",
+    "decorator": "router.delete('/triggers/{trigger_id}')",
+    "signature": "trigger_id: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "删除触发器；同步移除 cron job。"
+  },
+  {
+    "method": "POST",
+    "path": "/triggers/{trigger_id}/fire",
+    "name": "fire_trigger",
+    "decorator": "router.post('/triggers/{trigger_id}/fire')",
+    "signature": "trigger_id: str, body: Dict[str, Any]=Body(default={}), current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "手动触发（manual/测试用）：按触发器绑定的 workflow 直接派发。"
+  },
+  {
+    "method": "GET",
+    "path": "/triggers/{trigger_id}/deliveries",
+    "name": "list_trigger_deliveries",
+    "decorator": "router.get('/triggers/{trigger_id}/deliveries')",
+    "signature": "trigger_id: str, limit: int=50, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "查询 webhook 入站投递记录（调试面板用）。"
+  },
+  {
+    "method": "GET",
+    "path": "/workflows/{workflow_id}/versions",
+    "name": "list_workflow_versions_api",
+    "decorator": "router.get('/workflows/{workflow_id}/versions')",
+    "signature": "workflow_id: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "工作流版本历史（倒序；内容指纹快照）。"
+  },
+  {
+    "method": "POST",
+    "path": "/workflows/{workflow_id}/versions/{version}/rollback",
+    "name": "rollback_workflow_api",
+    "decorator": "router.post('/workflows/{workflow_id}/versions/{version}/rollback')",
+    "signature": "workflow_id: str, version: int, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "回滚到指定版本（状态保持当前值；回滚本身产生新版本）。"
+  },
+  {
+    "method": "GET",
+    "path": "/executions/{execution_id}/checkpoint",
+    "name": "get_execution_checkpoint",
+    "decorator": "router.get('/executions/{execution_id}/checkpoint')",
+    "signature": "execution_id: str, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "Probe：执行检查点摘要（completed/failed/pending/变量快照/错误）。"
+  },
+  {
+    "method": "POST",
+    "path": "/executions/{execution_id}/retry",
+    "name": "retry_from_checkpoint",
+    "decorator": "router.post('/executions/{execution_id}/retry')",
+    "signature": "execution_id: str, body: Dict[str, Any]=Body(default={}), current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "Resume：从检查点续跑（跳过已完成节点，保留变量）。\n\n要求工作流定义在 DB（发布型）；画布内存型工作流（DRAFT→内存\nPUBLISHED 不落库）无法恢复定义——返回 400 明确说明。"
+  },
+  {
+    "method": "GET",
+    "path": "/otel/status",
+    "name": "otel_status",
+    "decorator": "router.get('/otel/status')",
+    "signature": "",
+    "doc": "P0-5 OTel 桥状态（可选依赖探测 + 投影账目）。"
+  },
+  {
+    "method": "GET",
+    "path": "/trigger/deliveries/failed",
+    "name": "list_failed_deliveries",
+    "decorator": "router.get('/trigger/deliveries/failed')",
+    "signature": "limit: int=Query(default=50, ge=1, le=200), current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "失败投递队列（重试管理页数据源）。"
+  },
+  {
+    "method": "POST",
+    "path": "/trigger/deliveries/{delivery_id}/retry",
+    "name": "retry_delivery",
+    "decorator": "router.post('/trigger/deliveries/{delivery_id}/retry')",
+    "signature": "delivery_id: int, current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "手动重试单条失败投递（重新走 webhook 入站验签+执行链路）。"
+  },
+  {
+    "method": "POST",
+    "path": "/trigger/deliveries/retry-due",
+    "name": "retry_due_deliveries",
+    "decorator": "router.post('/trigger/deliveries/retry-due')",
+    "signature": "current_user: Dict[str, Any]=Depends(get_current_user)",
+    "doc": "到期批量重试（后台调度亦可调用此入口）。"
+  }
+]

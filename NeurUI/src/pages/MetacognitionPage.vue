@@ -146,12 +146,23 @@
             <a-select-option value="strategy">{{ t('metacognition.strategy') }}</a-select-option>
             <a-select-option value="monitoring">{{ t('metacognition.monitoring') }}</a-select-option>
             <a-select-option value="planning">{{ t('metacognition.planning') }}</a-select-option>
+            <a-select-option value="insight:drift">{{ t('metacognition.insightDrift') }}</a-select-option>
+            <a-select-option value="insight:sequence">{{ t('metacognition.insightSequence') }}</a-select-option>
+            <a-select-option value="insight:contrast">{{ t('metacognition.insightContrast') }}</a-select-option>
+            <a-select-option value="insight:calibration">{{ t('metacognition.insightCalibration') }}</a-select-option>
+            <a-select-option value="insight:budget">{{ t('metacognition.insightBudget') }}</a-select-option>
           </a-select>
         </template>
 
         <a-spin :spinning="entriesLoading">
           <div v-if="entryItems.length > 0" class="entries-list">
-            <div v-for="entry in entryItems" :key="entry.id" class="entry-card">
+            <div
+              v-for="entry in entryItems"
+              :key="entry.id"
+              class="entry-card"
+              :class="{ 'is-traceable': isTraceable(entry), 'is-expanded': expandedTraceIds.has(entry.id) }"
+              @click="toggleTrace(entry)"
+            >
               <div class="entry-header">
                 <a-tag :color="typeColorMap[entry.type] || 'default'">{{ formatType(entry.type) }}</a-tag>
                 <span class="entry-date">{{ formatTime(entry.created_at) }}</span>
@@ -169,6 +180,37 @@
                     :stroke-color="entry.confidence >= 0.7 ? '#10b981' : entry.confidence >= 0.4 ? '#6366f1' : '#f59e0b'"
                     style="width: 100px"
                   />
+                </div>
+              </div>
+              <!-- 溯源面板：洞察镜像条目自含原始教训快照（点击展开/收起） -->
+              <div
+                v-if="isTraceable(entry) && expandedTraceIds.has(entry.id)"
+                class="entry-trace"
+                @click.stop
+              >
+                <div class="trace-row">
+                  <span class="trace-label">{{ t('metacognition.traceOperator') }}:</span>
+                  <span class="trace-value">{{ traceOf(entry).operator }}</span>
+                </div>
+                <div class="trace-row">
+                  <span class="trace-label">{{ t('metacognition.traceCondition') }}:</span>
+                  <code class="trace-value">{{ traceOf(entry).condition }}</code>
+                </div>
+                <div class="trace-row">
+                  <span class="trace-label">{{ t('metacognition.traceFinding') }}:</span>
+                  <code class="trace-value">{{ traceOf(entry).finding }}</code>
+                </div>
+                <div class="trace-row">
+                  <span class="trace-label">{{ t('metacognition.traceRecommendation') }}:</span>
+                  <span class="trace-value">{{ traceOf(entry).recommendation }}</span>
+                </div>
+                <div class="trace-row">
+                  <span class="trace-label">{{ t('metacognition.traceTrigger') }}:</span>
+                  <span class="trace-value">{{ traceOf(entry).trigger }}</span>
+                </div>
+                <div v-if="Object.keys(traceOf(entry).evidence).length" class="trace-row">
+                  <span class="trace-label">{{ t('metacognition.traceEvidence') }}:</span>
+                  <code class="trace-value trace-evidence">{{ JSON.stringify(traceOf(entry).evidence) }}</code>
                 </div>
               </div>
             </div>
@@ -283,6 +325,40 @@ const typeColorMap: Record<string, string> = {
   strategy: 'purple',
   monitoring: 'green',
   planning: 'orange',
+  // 洞察镜像条目（SelfModelEngine 反思产出，按算子分色）
+  'insight:drift': 'red',
+  'insight:sequence': 'volcano',
+  'insight:contrast': 'gold',
+  'insight:calibration': 'cyan',
+  'insight:budget': 'magenta',
+}
+
+// 溯源面板：洞察镜像条目自含原始教训快照（后端 _mirror_lesson_as_thought 写入）
+const expandedTraceIds = ref(new Set<string>())
+
+const isTraceable = (entry: MetacognitionEntry) => {
+  const meta = entry.metadata as Record<string, unknown> | undefined
+  return !!(meta && (meta.lesson_operator || meta.lesson_subject))
+}
+
+const traceOf = (entry: MetacognitionEntry) => {
+  const meta = (entry.metadata || {}) as Record<string, any>
+  return {
+    operator: (meta.lesson_operator as string) || '-',
+    condition: (meta.condition as string) || '-',
+    finding: (meta.finding as string) || '-',
+    recommendation: (meta.recommendation as string) || '-',
+    trigger: (meta.reflection_trigger as string) || '-',
+    evidence: (meta.evidence as Record<string, unknown>) || {},
+  }
+}
+
+const toggleTrace = (entry: MetacognitionEntry) => {
+  if (!isTraceable(entry)) return
+  const next = new Set(expandedTraceIds.value)
+  if (next.has(entry.id)) next.delete(entry.id)
+  else next.add(entry.id)
+  expandedTraceIds.value = next
 }
 
 const formatPercent = (val: number | undefined | null) =>
@@ -294,6 +370,12 @@ const formatType = (type: string) => {
     strategy: t('metacognition.strategy'),
     monitoring: t('metacognition.monitoring'),
     planning: t('metacognition.planning'),
+    // 洞察镜像条目标签（与下拉选项一致）
+    'insight:drift': t('metacognition.insightDrift'),
+    'insight:sequence': t('metacognition.insightSequence'),
+    'insight:contrast': t('metacognition.insightContrast'),
+    'insight:calibration': t('metacognition.insightCalibration'),
+    'insight:budget': t('metacognition.insightBudget'),
   }
   return map[type] || type
 }
@@ -656,6 +738,58 @@ onMounted(() => {
 
 .entry-card:hover {
   border-color: var(--nr-border-hover, rgba(99, 102, 241, 0.3));
+}
+
+/* 可追溯洞察条目：悬停提示可展开；展开态左侧高亮 */
+.entry-card.is-traceable {
+  cursor: pointer;
+}
+
+.entry-card.is-traceable:hover {
+  border-color: rgba(99, 102, 241, 0.45);
+}
+
+.entry-card.is-expanded {
+  border-color: rgba(99, 102, 241, 0.5);
+  background: var(--nr-bg-elevated, rgba(99, 102, 241, 0.04));
+}
+
+/* 溯源面板 */
+.entry-trace {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px dashed var(--nr-border-secondary, rgba(99, 102, 241, 0.25));
+  border-radius: 6px;
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.trace-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.trace-label {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--nr-text-tertiary);
+  min-width: 56px;
+}
+
+.trace-value {
+  font-size: 12px;
+  color: var(--nr-text-primary);
+  font-family: var(--nr-font-mono);
+  word-break: break-all;
+  min-width: 0;
+}
+
+.trace-evidence {
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .entry-header {

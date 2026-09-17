@@ -11,6 +11,7 @@ import json
 import pytest
 
 from neurova.evolution.skill_lifecycle import apply_transitions
+from tests.unit.skills.creation_helpers import register_proven_skill
 from neurova.skills.skill_service import SkillService
 
 
@@ -21,7 +22,7 @@ def svc(tmp_path):
 
 class TestUsageSeedsLifecycleFields:
     def test_record_usage_seeds_fields(self, svc):
-        svc.register_auto_skill("s1", "Skill One", description="d")
+        register_proven_skill(svc, "s1", "Skill One", description="d")
         assert svc.record_skill_usage("s1")
         usage = svc._skills["s1"]["usage"]
         assert usage["state"] == "active"
@@ -38,7 +39,7 @@ class TestUsageSeedsLifecycleFields:
         assert not svc.record_skill_usage("nope")
 
     def test_fields_persisted_to_manifest(self, svc, tmp_path):
-        svc.register_auto_skill("s1", "Skill One", description="d")
+        register_proven_skill(svc, "s1", "Skill One", description="d")
         svc.record_skill_usage("s1")
         manifest = json.loads(
             (tmp_path / "skills" / "manifest.json").read_text(encoding="utf-8")
@@ -48,7 +49,7 @@ class TestUsageSeedsLifecycleFields:
 
 class TestLifecycleInterfaces:
     def test_iter_and_set_state(self, svc):
-        svc.register_auto_skill("s1", "Skill One", description="d")
+        register_proven_skill(svc, "s1", "Skill One", description="d")
         svc.record_skill_usage("s1")
         ids = [sid for sid, _ in svc.iter_skills()]
         assert "s1" in ids
@@ -88,7 +89,7 @@ class TestArchive:
 
     def test_archive_metadata_only_skill(self, svc):
         """无磁盘目录的 auto 技能:只改状态,不搬文件。"""
-        svc.register_auto_skill("s1", "Skill One", description="d")
+        register_proven_skill(svc, "s1", "Skill One", description="d")
         result = svc.archive_skill("s1")
         assert result["success"] and not result["moved"]
         assert svc._skills["s1"]["usage"]["state"] == "archived"
@@ -100,7 +101,7 @@ class TestArchive:
 class TestSeedOnFirstSight:
     def test_seed_persists_created_at_anchor(self, svc):
         """首见播种落盘 created_at_ms(时钟从此开始),否则永不活跃技能不进老化通道。"""
-        svc.register_auto_skill("s1", "Skill One", description="d")
+        register_proven_skill(svc, "s1", "Skill One", description="d")
         assert "usage" not in svc._skills["s1"]
         assert svc.seed_skill_usage("s1")
         usage = svc._skills["s1"]["usage"]
@@ -120,7 +121,7 @@ class TestSeedOnFirstSight:
 
         from neurova.evolution.skill_lifecycle import apply_transitions
 
-        svc.register_auto_skill("s1", "Skill One", description="d")
+        register_proven_skill(svc, "s1", "Skill One", description="d")
         now = int(time.time() * 1000)
         counts1 = apply_transitions(svc, now_ms=now)
         assert counts1["seeded"] == 1
@@ -139,7 +140,7 @@ class TestEndToEndWithLifecycle:
         """老化的 agent 技能经 apply_transitions 走到 archived(真库接线)。"""
         import time
 
-        svc.register_auto_skill("old-skill", "Old", description="d")
+        register_proven_skill(svc, "old-skill", "Old", description="d")
         svc.record_skill_usage("old-skill")
         # 把活动锚拨回 40 天前
         usage = svc._skills["old-skill"]["usage"]

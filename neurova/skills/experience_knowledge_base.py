@@ -156,7 +156,41 @@ class ExperienceKnowledgeBase:
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_exp_success ON experience_records(success)"
             )
+            cur.execute("""CREATE TABLE IF NOT EXISTS growth_lessons (
+                agent_id TEXT NOT NULL, answerer_id TEXT NOT NULL, question_id TEXT NOT NULL,
+                lesson TEXT NOT NULL, PRIMARY KEY (agent_id, answerer_id, question_id))""")
             self._conn.commit()
+
+    def publish_growth_lesson(self, lesson: Dict[str, Any]) -> bool:
+        """Idempotent scoped index, separate from execution records and success metrics."""
+        key = tuple(lesson[k] for k in ("agent_id", "answerer_id", "question_id"))
+        payload = json.dumps(lesson, ensure_ascii=False, sort_keys=True)
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT lesson FROM growth_lessons WHERE agent_id=? AND answerer_id=? AND question_id=?", key
+            ).fetchone()
+            if row and row[0] == payload:
+                return False
+            self._conn.execute("INSERT OR REPLACE INTO growth_lessons VALUES (?, ?, ?, ?)", (*key, payload))
+            return True
+
+    def find_growth_lessons(self, query: str, agent_id: str, answerer_id: str, limit: int = 3) -> List[Dict[str, Any]]:
+        """Private user guidance; callers must reconcile the durable queue before reading."""
+        if not agent_id or not answerer_id:
+            return []
+        tokens = set(_tokenize_for_match(query))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT lesson FROM growth_lessons WHERE agent_id=? AND answerer_id=?", (agent_id, answerer_id)
+            ).fetchall()
+        scored = []
+        for row in rows:
+            lesson = json.loads(row[0])
+            score = len(tokens & set(_tokenize_for_match(lesson["question"])))
+            if score:
+                scored.append((score, lesson))
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [lesson for _, lesson in scored[:limit]]
 
     @staticmethod
     def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:

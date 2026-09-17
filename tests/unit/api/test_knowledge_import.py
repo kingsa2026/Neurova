@@ -15,6 +15,8 @@ import pytest
 from unittest.mock import patch
 
 from neurova.api.endpoints import knowledge as kb
+from neurova.api.endpoints import knowledge_core as kb_core
+from neurova.api.endpoints import knowledge_ingestion as kb_ingestion
 
 
 def _make_docx_bytes():
@@ -36,7 +38,9 @@ class TestImportFile:
 
         repo = KnowledgeRepository(str(tmp_path / "kb"))
         repo._items.clear()
-        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+        # 拆分后真身在叶子模块（2026-09-16 模块化）：写入走 ingestion，读取走 core
+        monkeypatch.setattr(kb_ingestion, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_core, "get_repository", lambda agent_id="default": repo)
 
         class FakeUpload:
             filename = "note.txt"
@@ -59,7 +63,9 @@ class TestImportFile:
 
         repo = KnowledgeRepository(str(tmp_path / "kb"))
         repo._items.clear()
-        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+        # 拆分后真身在叶子模块（2026-09-16 模块化）：写入走 ingestion，读取走 core
+        monkeypatch.setattr(kb_ingestion, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_core, "get_repository", lambda agent_id="default": repo)
 
         class FakeUpload:
             filename = "report.docx"
@@ -83,7 +89,9 @@ class TestImportFile:
 
         repo = KnowledgeRepository(str(tmp_path / "kb"))
         repo._items.clear()
-        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+        # 拆分后真身在叶子模块（2026-09-16 模块化）：写入走 ingestion，读取走 core
+        monkeypatch.setattr(kb_ingestion, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_core, "get_repository", lambda agent_id="default": repo)
 
         class FakeUpload:
             filename = "archive.zip"
@@ -107,7 +115,9 @@ class TestImportFile:
 
         repo = KnowledgeRepository(str(tmp_path / "kb"))
         repo._items.clear()
-        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+        # 拆分后真身在叶子模块（2026-09-16 模块化）：写入走 ingestion，读取走 core
+        monkeypatch.setattr(kb_ingestion, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_core, "get_repository", lambda agent_id="default": repo)
 
         class FakeUpload:
             filename = "legacy.ppt"
@@ -132,7 +142,9 @@ class TestImportFile:
 
         repo = KnowledgeRepository(str(tmp_path / "kb"))
         repo._items.clear()
-        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+        # 拆分后真身在叶子模块（2026-09-16 模块化）：写入走 ingestion，读取走 core
+        monkeypatch.setattr(kb_ingestion, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_core, "get_repository", lambda agent_id="default": repo)
 
         prs = Presentation()
         slide = prs.slides.add_slide(prs.slide_layouts[1])
@@ -164,7 +176,9 @@ class TestImportFile:
 
         repo = KnowledgeRepository(str(tmp_path / "kb"))
         repo._items.clear()
-        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+        # 拆分后真身在叶子模块（2026-09-16 模块化）：写入走 ingestion，读取走 core
+        monkeypatch.setattr(kb_ingestion, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_core, "get_repository", lambda agent_id="default": repo)
 
         class FakeUpload:
             filename = "big.md"
@@ -186,7 +200,9 @@ class TestImportFile:
 
         repo = KnowledgeRepository(str(tmp_path / "kb"))
         repo._items.clear()
-        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+        # 拆分后真身在叶子模块（2026-09-16 模块化）：写入走 ingestion，读取走 core
+        monkeypatch.setattr(kb_ingestion, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_core, "get_repository", lambda agent_id="default": repo)
 
         for filename, payload in [
             ("doc.rtf", b"{\\rtf1\\ansi RTF body text here.}"),
@@ -240,7 +256,9 @@ class TestImportUrl:
 
         repo = KnowledgeRepository(str(tmp_path / "kb"))
         repo._items.clear()
-        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+        # 拆分后真身在叶子模块（2026-09-16 模块化）：写入走 ingestion，读取走 core
+        monkeypatch.setattr(kb_ingestion, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_core, "get_repository", lambda agent_id="default": repo)
         monkeypatch.setattr(
             socket,
             "getaddrinfo",
@@ -248,7 +266,7 @@ class TestImportUrl:
         )
 
         html = b"<html><body><h1>Remote Title</h1><p>Remote body content</p></body></html>"
-        monkeypatch.setattr(kb, "_fetch_url", lambda url: html)
+        monkeypatch.setattr(kb_ingestion, "_fetch_url", lambda url: html)
 
         items, status = kb._import_file_data(html, "example.com/article.html", "default", {"user_id": "u1"})
         assert status == "html"
@@ -273,7 +291,9 @@ class TestListPaginationContract:
                 agent_id="default", title=f"item-{i}", content="c",
                 owner_user_id="1", detect_conflict=False,
             )
-        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+        # 拆分后真身在叶子模块（2026-09-16 模块化）：写入走 ingestion，读取走 core
+        monkeypatch.setattr(kb_ingestion, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_core, "get_repository", lambda agent_id="default": repo)
 
         class FakeRequest:
             app = None
@@ -301,7 +321,9 @@ class TestListPaginationContract:
                 agent_id="default", title=f"old-{i}", content="c",
                 owner_user_id="1", detect_conflict=False,
             )
-        monkeypatch.setattr(kb, "_get_repository", lambda agent_id="default": repo)
+        # 拆分后真身在叶子模块（2026-09-16 模块化）：写入走 ingestion，读取走 core
+        monkeypatch.setattr(kb_ingestion, "get_repository", lambda agent_id="default": repo)
+        monkeypatch.setattr(kb_core, "get_repository", lambda agent_id="default": repo)
 
         class FakeRequest:
             app = None

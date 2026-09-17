@@ -26,7 +26,9 @@ class MotivationProactiveEndpointsTest(unittest.TestCase):
         self.tmpdir = tempfile.mkdtemp()
         self.ledger = MotivationLedger(agent_id="t1", persistence_path=os.path.join(self.tmpdir, "motivation.json"))
         self.engine = ProactiveBehaviorEngine(agent_id="t1", persistence_path=os.path.join(self.tmpdir, "actions.json"))
-        self.qqm = QuestionQueueManager(memory_manager=None, default_cooldown=0.0)
+        from tests.unit.cognitive.test_growth_answer_learning import DiskMemory
+
+        self.qqm = QuestionQueueManager(memory_manager=DiskMemory(os.path.join(self.tmpdir, "questions.db")), default_cooldown=0.0)
         agent = types.SimpleNamespace(
             intrinsic_motivation=self.ledger,
             proactive_behavior_engine=self.engine,
@@ -104,7 +106,7 @@ class MotivationProactiveEndpointsTest(unittest.TestCase):
         self.engine.record_action(action_type="communication", trigger="proactive_question:q-api-1", content="主动提问内容")
         resp = self.client.get("/api/v1/growth/proactive", params={"agent_id": "t1"})
         self.assertEqual(resp.status_code, 200)
-        actions = resp.json()
+        actions = resp.json()["data"]  # 2026-09-16 envelope 契约
         self.assertEqual(len(actions), 1)
         self.assertEqual(actions[0]["action_type"], "communication")
         self.assertEqual(actions[0]["content"], "主动提问内容")

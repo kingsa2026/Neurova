@@ -21,6 +21,12 @@ vi.mock('@/api/modules/settings', () => ({
   updateGovernanceSettings: vi.fn().mockResolvedValue({ data: {} }),
   getAgentLimits: vi.fn(),
   updateAgentLimits: vi.fn().mockResolvedValue({ data: {} }),
+  // SettingPage fetchToolOffload/saveToolOffload 消费；缺导出会在每次挂载时
+  // 报 "No export defined on mock" 测试噪声（2026-09-16 全量回归清理）
+  getToolOffloadSettings: vi.fn().mockRejectedValue(new Error('skip')),
+  updateToolOffloadSettings: vi.fn().mockResolvedValue({ data: {} }),
+  getLlmRetrySettings: vi.fn().mockRejectedValue(new Error('skip')),
+  updateLlmRetrySettings: vi.fn().mockResolvedValue({ data: {} }),
 }))
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ user: { username: 'admin', role: 'admin' } }),

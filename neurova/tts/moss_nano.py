@@ -8,6 +8,10 @@ MOSS Nano TTS - MOSS-TTS-Nano ONNX 推理引擎
 - 自动从 HuggingFace 下载模型
 """
 
+# numpy 为可选依赖（见下方 try/except 降级 np=None）：np.ndarray 出现在模块级
+# 注解中，无 future import 时导入期即求值并 AttributeError（CI 薄环境实锤）。
+from __future__ import annotations
+
 import asyncio
 import io
 import json

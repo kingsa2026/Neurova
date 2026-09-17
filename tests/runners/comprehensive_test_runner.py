@@ -179,7 +179,7 @@ def generate_report(results: Dict[str, Any], output_file: str = "tests/COMPREHEN
         "",
         "## 使用说明",
         "",
-        "运行完整测试: `python tests/comprehensive_test_runner.py`",
+        "运行完整测试: `python tests/runners/comprehensive_test_runner.py`",
         "",
         "运行特定模块测试: `python -m unittest tests/unit/core/`",
     ])

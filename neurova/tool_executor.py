@@ -1314,6 +1314,9 @@ class ToolExecutor:
             # H5: 所有路径统一触发 on_tool_executed（成功/失败均触发）
             elapsed = time.time() - start
             try:
+                from neurova.skills.creation_governance import record_tool_execution
+
+                record_tool_execution(tool_name, params, success, result)
                 self.on_tool_executed(
                     tool_name=tool_name,
                     params=params,
@@ -2179,36 +2182,13 @@ class ToolExecutor:
         registry = getattr(self._agent, "_skill_registry", None)
         if registry is None:
             return {"error": "当前 Agent 尚未初始化 SkillRegistry"}
-        if not registry.register_skill(manifest):
-            return {"error": f"注册技能 {name} 失败"}
-        # 持久化到 agent 技能页 manifest(source=synthesized):
-        # /agent/{id}/skills 可见 + 冷启动 restore 恢复为可执行
-        try:
-            from neurova.skills.market_registry import persist_synthesized_skill
-            from neurova.skills.skill_service import SkillService
+        from neurova.skills.creation_governance import publish_automatic
+        from neurova.skills.skill_service import SkillService
 
-            persist_synthesized_skill(
-                skill_id=name,
-                name=name,
-                description=description,
-                version="1.0.0",
-                tool_sequence=tool_sequence,
-                service=SkillService(
-                    agent_id=getattr(self._agent.config, "agent_id", "") or "default"
-                ),
-                permissions=permissions,
-            )
-        except Exception:
-            logger.warning("create_skill 持久化失败: %s", name, exc_info=True)
-        return {
-            "success": True,
-            "skill_name": name,
-            "step_count": len(tool_sequence),
-            "message": (
-                f"技能 {name} 已创建并在 SkillRegistry 中注册，"
-                f"下轮对话起 LLM 即可在工具列表中直接调用"
-            ),
-        }
+        result = publish_automatic(SkillService(
+            agent_id=getattr(self._agent.config, "agent_id", "") or "default"
+        ), registry, manifest)
+        return {**result, "step_count": len(tool_sequence)}
 
     # ── 画布工具（CanvasOpService 语义操作层的薄封装） ───────────
     # 所有写操作经 canvas_ops（与 HTTP 端点 /canvas/{id}/ops 共用同一层，
@@ -5059,21 +5039,6 @@ class ToolExecutor:
                 self.tool_lifecycle.touch(tool_name, success)
             except Exception:
                 logger.exception("工具生命周期更新失败: %s", tool_name)
-
-        # P2-1③ 增强①（闭环补线）：skill_packer.observe 观察工具序列——
-        # 历史版本（391420c 时代）在旧路径存在，模块迁移后调用点丢失。
-        # 打包器自身有降噪逻辑，此处只透传本轮工具名序列。
-        skill_packer = self.skill_packer
-        if skill_packer is not None and hasattr(skill_packer, "observe"):
-            try:
-                skill_packer.observe(
-                    tool_sequence=[tool_name],
-                    context="tool_executor",
-                    success=success,
-                    duration=execution_time or 0.0,
-                )
-            except Exception:
-                logger.debug("skill_packer.observe 失败（忽略）", exc_info=True)
 
         # 五段流水线 result 观察者门面（neurova/agent/tool_pipeline）：
         # 默认无观察者注册时 no-op，行为与未接入完全一致（零回归面）。

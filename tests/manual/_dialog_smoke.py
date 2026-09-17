@@ -3,7 +3,7 @@ import asyncio
 import logging
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 logging.disable(logging.CRITICAL)
 
 from neurova.agent_core import Agent, AgentConfig

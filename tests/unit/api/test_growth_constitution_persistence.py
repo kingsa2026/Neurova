@@ -34,7 +34,8 @@ class _FakeAgent:
 
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
-    monkeypatch.setattr(growth, "_CONSTITUTION_DIR", str(tmp_path / "constitution"))
+    # 2026-09-16 拆分后持久层常量住叶子模块（import 时值绑定，须 patch 真身）
+    monkeypatch.setattr("neurova.api.endpoints.constitution_persistence.CONSTITUTION_DIR", str(tmp_path / "constitution"))
 
     monkeypatch.setattr("neurova.api.endpoints.get_agent_instance",
                         lambda agent_id="default", *a, **k: _FakeAgent())
@@ -54,21 +55,23 @@ class TestRulesPersistence:
         r = c.post("/api/v1/growth/constitution/rules", params={"agent_id": "a1"},
                    json={"content": "不得虚构事实", "priority": 1})
         assert r.status_code == 200, r.text
-        rule = r.json()
+        rule = r.json()["data"]  # 2026-09-16 envelope 契约
         assert rule["content"] == "不得虚构事实"
         f = tmp / "constitution" / "a1.json"
         assert f.exists(), "宪法未落盘"
         assert json.loads(f.read_text(encoding="utf-8"))[0]["rule_id"] == rule["rule_id"]
-        got = c.get("/api/v1/growth/constitution/rules", params={"agent_id": "a1"}).json()
+        got = c.get("/api/v1/growth/constitution/rules", params={"agent_id": "a1"}).json()["data"]
         assert [x["content"] for x in got] == ["不得虚构事实"]
 
     def test_update_and_delete_persist(self, store):
         c, tmp = store
         rid = c.post("/api/v1/growth/constitution/rules", params={"agent_id": "a1"},
-                     json={"content": "v1"}).json()["rule_id"]
+                     json={"content": "v1"}).json()["data"]["rule_id"]
         r = c.put(f"/api/v1/growth/constitution/rules/{rid}", params={"agent_id": "a1"},
                   json={"content": "v2", "priority": 5})
         assert r.status_code == 200
+        rule = r.json()["data"]
+        assert rule["content"] == "v2" and rule["priority"] == 5
         # 新进程视角（直读盘）
         on_disk = json.loads((tmp / "constitution" / "a1.json").read_text(encoding="utf-8"))
         assert on_disk[0]["content"] == "v2" and on_disk[0]["priority"] == 5
@@ -95,13 +98,14 @@ class TestRulesPersistence:
         """FE toggle 只传 {enabled}：局部更新，content/priority 原样保留。"""
         c, tmp = store
         rid = c.post("/api/v1/growth/constitution/rules", params={"agent_id": "a1"},
-                     json={"content": "保持原文", "priority": 7}).json()["rule_id"]
+                     json={"content": "保持原文", "priority": 7}).json()["data"]["rule_id"]
         r = c.put(f"/api/v1/growth/constitution/rules/{rid}",
                   params={"agent_id": "a1"}, json={"enabled": False})
         assert r.status_code == 200, r.text
-        assert r.json()["enabled"] is False
-        assert r.json()["content"] == "保持原文"
-        assert r.json()["priority"] == 7
+        body = r.json()["data"]
+        assert body["enabled"] is False
+        assert body["content"] == "保持原文"
+        assert body["priority"] == 7
 
 
 class TestHonestUnimplemented:

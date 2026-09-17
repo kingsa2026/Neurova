@@ -50,6 +50,10 @@ const i18n = createI18n({
         activeTasks: '活跃任务', errorRate: '错误率', responseTime: '响应耗时', updatedAt: '更新时间',
         loadFactors: '负荷四因子构成', factorTasks: '任务密度', factorMemory: '记忆规模',
         factorResponse: '响应耗时', factorError: '错误负荷',
+        insightDrift: '漂移洞察', insightSequence: '序列洞察', insightContrast: '对比洞察',
+        insightCalibration: '校准洞察', insightBudget: '预算洞察',
+        traceOperator: '算子', traceCondition: '触发条件', traceFinding: '发现',
+        traceRecommendation: '建议', traceEvidence: '证据', traceTrigger: '触发来源',
       },
     },
   },
@@ -172,6 +176,88 @@ describe('MetacognitionPage V3 真数据契约', () => {
     const wrapper = await mountPage()
     expect(wrapper.text()).toContain('评估内容')
     expect(wrapper.text()).toContain('自我评估')
+  })
+
+  it('洞察镜像条目（insight:* 类型）显示中文标签且不破坏列表（2026-09-16 镜像契约）', async () => {
+    apiMocks.getMetacognitionEntries.mockResolvedValue({
+      code: 0,
+      data: {
+        items: [
+          {
+            id: 'm1',
+            type: 'insight:drift',
+            content: '工具 web_search 成功率从 90% 滑落至 0%',
+            context: 'insight:drift',
+            confidence: 0.9,
+            created_at: '2026-09-16T00:00:00Z',
+          },
+        ],
+        total: 1,
+      },
+    })
+    const wrapper = await mountPage()
+    const text = wrapper.text()
+    // formatType 映射 insight:* → i18n 中文标签；配色走专属色，均不得崩
+    expect(text).toContain('漂移洞察')
+    expect(text).toContain('工具 web_search 成功率从 90% 滑落至 0%')
+  })
+
+  it('条目类型下拉含 insight 洞察类型选项（镜像条目可筛选）', async () => {
+    const wrapper = await mountPage()
+    const options = wrapper.findAll('a-select-option').map((o) => o.text())
+    expect(options).toContain('漂移洞察')
+    expect(options).toContain('序列洞察')
+    expect(options).toContain('对比洞察')
+    expect(options).toContain('校准洞察')
+    expect(options).toContain('预算洞察')
+  })
+
+  it('洞察条目可追溯展开：点击显示原始教训的算子/发现/建议/证据（溯源快照自含）', async () => {
+    apiMocks.getMetacognitionEntries.mockResolvedValue({
+      code: 0,
+      data: {
+        items: [
+          {
+            id: 'm1',
+            type: 'insight:drift',
+            content: '工具 web_search 成功率从 90% 滑落至 0%',
+            context: 'insight:drift',
+            confidence: 0.9,
+            created_at: '2026-09-16T00:00:00Z',
+            metadata: {
+              lesson_subject: 'web_search',
+              lesson_operator: 'drift',
+              reflection_trigger: 'periodic_turn',
+              condition: 'tool=web_search',
+              finding: 'success_rate 90% -> 0%',
+              recommendation: 'avoid_tool',
+              evidence: { baseline: 0.9, window_rate: 0, window_n: 10 },
+            },
+          },
+        ],
+        total: 1,
+      },
+    })
+    const wrapper = await mountPage()
+    // 收起态：溯源详情不可见
+    expect(wrapper.text()).not.toContain('success_rate 90% -> 0%')
+    // 点击卡片展开溯源面板
+    await wrapper.find('.entry-card').trigger('click')
+    const text = wrapper.text()
+    expect(text).toContain('success_rate 90% -> 0%')
+    expect(text).toContain('tool=web_search')
+    expect(text).toContain('avoid_tool')
+    expect(text).toContain('drift')
+    expect(text).toContain('periodic_turn')
+    // 再点收起
+    await wrapper.find('.entry-card').trigger('click')
+    expect(wrapper.text()).not.toContain('success_rate 90% -> 0%')
+  })
+
+  it('普通手动条目（无溯源 metadata）点击不展开溯源面板', async () => {
+    const wrapper = await mountPage()
+    await wrapper.find('.entry-card').trigger('click')
+    expect(wrapper.find('.entry-trace').exists()).toBe(false)
   })
 
   it('反思性内容已迁出：触发反思/结构化洞察/反思时间线不再出现（已迁往反思页）', async () => {

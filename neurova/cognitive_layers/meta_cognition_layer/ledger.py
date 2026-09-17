@@ -246,7 +246,8 @@ class MetaLedger:
     def record_stats(self, agent_id: str) -> dict:
         """统计投影 — 字段与前端 TS 契约逐字对齐：
         total_entries / by_type[{type,count}] / avg_confidence / recent_trend[{date,count}]
-        只统计 kind='thought'（洞察/反思记录不计入条目统计）。"""
+        只统计 kind='thought'（反思报告不计入条目统计；洞察经
+        SelfModelEngine._mirror_lesson_as_thought 镜像为 thought 后计入）。"""
         with self._lock:
             total = self._conn.execute(
                 "SELECT COUNT(*) FROM meta_records WHERE agent_id=? AND kind='thought'", (agent_id,)

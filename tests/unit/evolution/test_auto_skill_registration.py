@@ -20,7 +20,7 @@ from unittest.mock import Mock, MagicMock, patch
 class TestAutoSkillBuilderRegistration:
     """测试 AutoSkillBuilder 封装技能后是否注册到 SkillRegistry"""
 
-    def test_encapsulated_skill_registers_to_skill_registry(self):
+    def test_encapsulated_skill_registers_to_skill_registry(self, tmp_path):
         """AutoSkillBuilder 封装技能后应注册到 SkillRegistry
 
         场景：同一工具序列成功执行多次（超过 min_pattern_occurrences）
@@ -30,16 +30,21 @@ class TestAutoSkillBuilderRegistration:
         from neurova.evolution.skill_encapsulation import AutoSkillBuilder
         from neurova.skills.registry import SkillRegistry
 
-        builder = AutoSkillBuilder(min_pattern_occurrences=3, min_success_rate=0.7)
+        from neurova.skills.skill_service import SkillService
 
-        # 同一工具序列成功执行 5 次（超过 min_pattern_occurrences=3）
+        service = SkillService(agent_id="registration-test", skills_dir=str(tmp_path))
+        builder = AutoSkillBuilder(min_pattern_occurrences=3, min_success_rate=0.7,
+                                   evidence_store=service.creation_evidence)
+
         tool_seq = ["memory_search", "file_read", "file_write"]
-        for _ in range(5):
+        for i in range(5):
+            service.creation_evidence.record(str(i), tool_seq, "测试上下文", True)
             builder.observe(
                 tool_sequence=tool_seq,
                 context="测试上下文",
                 success=True,
                 duration=0.5,
+                metadata={"source_key": str(i)},
             )
 
         # 断言 1：AutoSkillBuilder 内部确实封装了技能模板
@@ -58,7 +63,7 @@ class TestAutoSkillBuilderRegistration:
             assert builder.approve_template(_t["template_id"])
 
         # 触发注册（当前代码缺失此步骤）
-        builder.register_to_skill_registry(registry)
+        builder.register_to_skill_registry(registry, skill_service=service)
 
         assert len(registry.skills) > 0, (
             "AutoSkillBuilder 封装技能后应调用 SkillRegistry.register_skill 注册，"
@@ -69,7 +74,7 @@ class TestAutoSkillBuilderRegistration:
 class TestPostChatPipelineObserveSignature:
     """测试 PostChatPipeline 调用 skill_packer.observe 的签名是否正确"""
 
-    def test_observe_called_with_correct_signature(self):
+    def test_observe_called_with_correct_signature(self, tmp_path):
         """PostChatPipeline 应以正确签名调用 skill_packer.observe
 
         场景：_step_pattern_mining 发现模式后调用 skill_packer.observe
@@ -97,11 +102,17 @@ class TestPostChatPipelineObserveSignature:
             f"observe 用错误签名调用应抛 TypeError，实际: {exc_info.value}"
         )
 
+        from neurova.skills.skill_service import SkillService
+
+        service = SkillService(agent_id="signature-test", skills_dir=str(tmp_path))
+        builder.evidence_store = service.creation_evidence
+        service.creation_evidence.record("task-1", tmpl["tools"], "测试", True)
         # 验证正确签名能工作
         builder.observe(
             tool_sequence=tmpl["tools"],
             context="测试",
             success=True,
             duration=0.3,
+            metadata={"source_key": "task-1"},
         )
         assert len(builder._observations) > 0, "正确签名调用后应有观察记录"

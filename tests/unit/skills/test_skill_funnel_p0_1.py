@@ -16,6 +16,7 @@ import json
 
 import pytest
 
+from tests.unit.skills.creation_helpers import register_proven_skill
 from neurova.core import turn_context
 from neurova.skills.skill_service import SkillService, compute_skill_funnel_update
 
@@ -87,7 +88,7 @@ def test_funnel_empty_entries():
 def svc(tmp_path):
     skills_dir = tmp_path / "skills"
     service = SkillService(agent_id="t", skills_dir=str(skills_dir))
-    service.register_auto_skill("deploy_helper", name="deploy_helper", description="d")
+    register_proven_skill(service, "deploy_helper", name="deploy_helper", description="d")
     return service, skills_dir
 
 
@@ -318,7 +319,7 @@ async def test_post_chat_flush_writes_funnel_to_manifest(tmp_path, monkeypatch):
             super().__init__(agent_id=agent_id, skills_dir=str(tmp_path / "skills"))
 
     monkeypatch.setattr(skill_service_mod, "SkillService", _TmpService)
-    _TmpService(agent_id="funnel-agent").register_auto_skill(
+    register_proven_skill(_TmpService(agent_id="funnel-agent"),
         "deploy_helper", name="deploy_helper", description="d"
     )
 
@@ -354,7 +355,7 @@ async def test_post_chat_flush_empty_reply_no_completion(tmp_path, monkeypatch):
             super().__init__(agent_id=agent_id, skills_dir=str(tmp_path / "skills"))
 
     monkeypatch.setattr(skill_service_mod, "SkillService", _TmpService)
-    _TmpService(agent_id="funnel-agent").register_auto_skill(
+    register_proven_skill(_TmpService(agent_id="funnel-agent"),
         "deploy_helper", name="deploy_helper", description="d"
     )
 

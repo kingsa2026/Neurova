@@ -14,6 +14,8 @@ from fastapi.testclient import TestClient
 def client_factory():
     from neurova.api.endpoints import knowledge_graph_api
 
+    made = []
+
     def _make(manager):
         app = FastAPI()
         app.include_router(knowledge_graph_api.router, prefix="/api/v1/agents")
@@ -23,9 +25,14 @@ def client_factory():
         mp.setattr(kg_mod, "_get_kg_manager", lambda agent_id="default": manager)
         client = TestClient(app)
         client._mp = mp  # type: ignore[attr-defined]
+        made.append(mp)
         return client
 
-    return _make
+    # MonkeyPatch 必须 undo：否则 _get_kg_manager 桩泄漏出本文件，
+    # 跨文件污染 test_knowledge_graph_agent_isolation 的 per-agent 回退用例
+    yield _make
+    for mp in made:
+        mp.undo()
 
 
 def _seeded_manager():

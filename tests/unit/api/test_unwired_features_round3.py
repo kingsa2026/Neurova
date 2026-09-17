@@ -111,6 +111,6 @@ class TestProactiveNoFabrication:
     def test_proactive_without_engine_returns_empty(self, client):
         r = client.get("/api/v1/growth/proactive", params={"agent_id": "a1"})
         assert r.status_code == 200
-        items = r.json()  # 端点直返列表
+        items = r.json()["data"]  # 2026-09-16 envelope 契约：诚实空值语义等价迁移
         # 旧行为：编造 3 条 uuid mock（"Proactive message about topic i"）
         assert isinstance(items, list) and items == [], f"无引擎时必须如实返回空，实际: {str(items)[:200]}"

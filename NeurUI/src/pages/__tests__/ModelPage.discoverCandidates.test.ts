@@ -56,6 +56,7 @@ import ModelPage from '../ModelPage.vue'
 const messages = {
   common: { search: '搜索', cancel: '取消', save: '保存', success: '成功', error: '失败', confirm: '确认' },
   model: {
+    searchProviders: '搜索提供商…',
     modelManagement: '模型管理', models: '模型', discover: '发现模型',
     detectCaps: '检测能力', detectCapsTip: '检测',
     noNewModels: '没有发现新模型', modelsDiscovered: '发现 {n} 个新模型',
@@ -65,7 +66,8 @@ const messages = {
     settings: '设置', testConnectionTip: '测试', probeMultimodalTip: '探测',
     userAdded: '手动', freeModels: '免费', builtin: '内置', save: '保存',
   },
-  nav: {}, ui: {},
+  nav: {},
+  ui: { providerNsc: '国家超算互联网', providerSensetime: '商汤', providerXiaomi: '小米' },
 }
 
 const globalStubs = {
