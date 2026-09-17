@@ -24,8 +24,12 @@ class EvolutionConfig:
 
     # ── 优化参数 ──
     iterations: int = 10
-    # 留出集提升低于该值视为"无真实增益",保留基线
-    min_improvement: float = 0.0
+    # 留出集提升低于该值视为"无真实增益",保留基线。
+    # P0 堵漏（2026-09-17）：原默认 0.0 + 判据 `after <= before + min + eps`，
+    # judge 不可用时前后同为中性 0.5 → 浮点相等使 `<=` 为假 → **零增益被放行**。
+    # 现在默认 0.01（要求可测量的真实提升），且"判分不可用"单独判拒绝
+    # （judge_unavailable），不再依赖 0.0/0.5 这种边界相等。
+    min_improvement: float = 0.01
 
     # ── 约束闸──
     max_skill_size: int = 15_000

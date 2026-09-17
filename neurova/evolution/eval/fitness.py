@@ -39,6 +39,11 @@ class FitnessScore:
     conciseness: float = 0.0
     length_penalty: float = 0.0
     feedback: str = ""  # 供反射式变异消费的文本反馈
+    # 判分是否**真实可用**：judge 调用失败 / 输出不可解析时为 False。
+    # P0 堵漏：这两个失败态此前返回中性 0.5，与"真实中等水平"不可区分——
+    # 基线/变体双 0.5 会被判成"零增益通过"（零增益放行漏洞的行为侧）。
+    # 独立标注后，runner 可直接判 judge_unavailable 拒绝，而不是拿 0.5 当分。
+    judge_available: bool = True
 
     @property
     def composite(self) -> float:
@@ -130,6 +135,7 @@ class LLMJudge:
                 conciseness=_NEUTRAL,
                 length_penalty=penalty,
                 feedback="judge 调用失败,退回中性分",
+                judge_available=False,
             )
         parsed = _extract_json(result.get("response") or "")
         if parsed is None:
@@ -139,6 +145,7 @@ class LLMJudge:
                 conciseness=_NEUTRAL,
                 length_penalty=penalty,
                 feedback="judge 输出不可解析,退回中性分",
+                judge_available=False,
             )
         return FitnessScore(
             correctness=parse_score(parsed.get("correctness")),
