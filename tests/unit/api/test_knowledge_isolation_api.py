@@ -19,6 +19,8 @@ from fastapi.testclient import TestClient
 
 from neurova.api import auth as knowledge_auth
 from neurova.api.endpoints import knowledge as knowledge_module
+from neurova.api.endpoints import knowledge_ingestion as knowledge_ingestion_module
+from neurova.api.endpoints import knowledge_sharing as knowledge_sharing_module
 from neurova.knowledge.repository import KnowledgeRepository
 
 ALICE = {"user_id": "1", "username": "alice", "role": "user", "neuser_id": "1"}
@@ -71,8 +73,9 @@ class TestAuthRequired:
     def test_anonymous_gets_401(self, api, monkeypatch, method, path, body):
         client, _holder, app = api
         app.dependency_overrides.clear()
+        # 拆分后真身在叶子模块（2026-09-16 模块化），patch 聚合器无效
         monkeypatch.setattr(
-            knowledge_module, "_fetch_url", lambda url: b"<html>ok</html>"
+            knowledge_ingestion_module, "_fetch_url", lambda url: b"<html>ok</html>"
         )
         kwargs = {"json": body} if body is not None else {}
         if path.endswith("import-url"):
@@ -149,7 +152,7 @@ class TestModifyGuards:
         client, holder, _app = api
         item = _create(client, "shared-doc")
         monkeypatch.setattr(
-            knowledge_module, "_resolve_usernames", lambda names: {"bob": "2"}
+            knowledge_sharing_module, "resolve_usernames", lambda names: {"bob": "2"}
         )
         resp = client.post(PREFIX + "/%s/share" % item["knowledge_id"], json={"usernames": ["bob"]})
         assert resp.status_code == 200
@@ -170,8 +173,8 @@ class TestModifyGuards:
         client, _holder, _app = api
         item = _create(client, "doc")
         monkeypatch.setattr(
-            knowledge_module,
-            "_resolve_usernames",
+            knowledge_sharing_module,
+            "resolve_usernames",
             lambda names: (_ for _ in ()).throw(ValueError("unknown user: ghost")),
         )
         resp = client.post(PREFIX + "/%s/share" % item["knowledge_id"], json={"usernames": ["ghost"]})
@@ -181,7 +184,7 @@ class TestModifyGuards:
         client, holder, _app = api
         item = _create(client, "mine")
         monkeypatch.setattr(
-            knowledge_module, "_resolve_usernames", lambda names: {"bob": "2"}
+            knowledge_sharing_module, "resolve_usernames", lambda names: {"bob": "2"}
         )
         holder["user"] = dict(BOB)
         resp = client.post(PREFIX + "/%s/share" % item["knowledge_id"], json={"usernames": ["bob"]})

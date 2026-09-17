@@ -97,3 +97,22 @@ class TestEkbRetrievalFillsDeadField:
         pipeline._retrieve_ekb_experience(ctx)
 
         assert ctx.experience_items == [{"content": "池内经验", "source": "pool"}]
+
+    def test_legacy_unbound_growth_record_is_not_injected(self, monkeypatch):
+        """Legacy growth records lack authenticated answerers and are not trusted guidance."""
+        long_answer = "导入前必须先核对账期是否已经结转，然后再决定要不要重跑导出任务" + "细" * 120
+        record = {
+            "skill_name": "growth_answer",
+            "id": 42,
+            "context": {"user_input": "导出报表需要什么？", "source": "growth_question"},
+            "result": {"answer": long_answer},
+            "success": 1,
+            "tags": ["growth_answer", "question:q-1"],
+        }
+        _patch_ekb(monkeypatch, lambda **kwargs: [record])
+        pipeline = _bare_pipeline()
+        ctx = ChatContext(user_input="导出报表需要什么？")
+
+        pipeline._retrieve_ekb_experience(ctx)
+
+        assert ctx.experience_items == []

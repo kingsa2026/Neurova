@@ -211,7 +211,7 @@ class TestSyntaxErrorsFixed:
         [
             "scripts/verify_cli_commands.py",
             "scripts/diagnose_post_issue.py",
-            "tests/comprehensive_test_runner.py",
+            "tests/runners/comprehensive_test_runner.py",
         ],
     )
     def test_file_parses(self, path):

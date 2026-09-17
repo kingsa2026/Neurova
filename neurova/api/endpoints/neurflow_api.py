@@ -110,7 +110,9 @@ def _sub_block_to_dict(b) -> Dict[str, Any]:
 def _get_storage() -> NeurflowStorage:
     """获取存储实例（延迟初始化）"""
     if not hasattr(_get_storage, "_instance"):
-        _get_storage._instance = NeurflowStorage()
+        from neurova.collaboration.neurflow import storage
+
+        _get_storage._instance = storage.NeurflowStorage()
     return _get_storage._instance
 
 
@@ -147,278 +149,27 @@ def _check_ownership_fields(workflow: "WorkflowDefinition", current_user: Dict[s
             raise HTTPException(status_code=400, detail=f"无权归属到 agent: {workflow.agent_id}")
 
 
-# ==================== 店铺连接（/stores） ====================
-
-_STORE_FIELD_KEYS = (
-    "store_name",
-    "seller_id",
-    "marketplace_id",
-    "region",
-    "extra",
-    "status",
-    "token_expires_at",
-    "credentials",
+from .neurflow_stores import (  # noqa: F401,E402 — compatibility exports
+    _STORE_FIELD_KEYS,
+    _get_store_manager,
+    list_stores,
+    create_store,
+    get_store,
+    update_store,
+    delete_store,
+    test_store_connection,
+    refresh_store_token,
+    _OAUTH_SUPPORTED,
+    _OAUTH_STATE_TTL_SECONDS,
+    _oauth_callback_uri,
+    _oauth_authorize_url,
+    _oauth_exchange_token,
+    oauth_authorize,
+    oauth_callback,
+    router as _stores_router,
 )
 
-
-def _get_store_manager():
-    from neurova.collaboration.neurflow.store_connections import get_store_connection_manager
-
-    return get_store_connection_manager()
-
-
-@router.get("/stores")
-async def list_stores(
-    platform: Optional[str] = Query(None, description="按平台过滤"),
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
-):
-    """店铺列表（密钥脱敏；按归属用户隔离）"""
-    manager = _get_store_manager()
-    user_id = str(current_user.get("user_id") or "")
-    stores = manager.list_stores(platform or "", user_id=user_id)
-    return {"stores": [manager.mask(s) for s in stores], "total": len(stores)}
-
-
-@router.post("/stores")
-async def create_store(
-    data: Dict[str, Any] = Body(...),
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
-):
-    """连接店铺：注册表 + 凭据入库（Tier 1 手工录入）"""
-    manager = _get_store_manager()
-    user_id = str(current_user.get("user_id") or "")
-    platform = str(data.get("platform") or "").strip()
-    store_name = str(data.get("store_name") or "").strip()
-    if not platform or not store_name:
-        raise HTTPException(status_code=400, detail="platform 与 store_name 必填")
-    if platform not in ("amazon", "taobao", "jd", "pdd", "douyin-ecom", "tiktok", "ali1688", "xiaohongshu", "xianyu"):
-        raise HTTPException(status_code=400, detail=f"不支持的平台: {platform}")
-    fields = {k: v for k, v in data.items() if k in _STORE_FIELD_KEYS and k != "store_name"}
-    try:
-        conn = manager.create_store(
-            platform, store_name, credentials=fields.pop("credentials", None) or None, user_id=user_id, **fields
-        )
-        return {"store": manager.mask(conn), "message": "店铺连接成功"}
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"创建店铺失败: {str(exc)}")
-
-
-@router.get("/stores/{store_id}")
-async def get_store(store_id: str, current_user: Dict[str, Any] = Depends(get_current_user_or_default)):
-    """店铺详情（脱敏；仅限归属用户）"""
-    manager = _get_store_manager()
-    user_id = str(current_user.get("user_id") or "")
-    store = manager.get_store(store_id, user_id=user_id)
-    if store is None:
-        raise HTTPException(status_code=404, detail=f"店铺不存在: {store_id}")
-    return {"store": manager.mask(store)}
-
-
-@router.put("/stores/{store_id}")
-async def update_store(
-    store_id: str,
-    data: Dict[str, Any] = Body(...),
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
-):
-    """更新店铺（名称/站点参数/凭据轮换；仅限归属用户）"""
-    manager = _get_store_manager()
-    user_id = str(current_user.get("user_id") or "")
-    fields = {k: v for k, v in data.items() if k in _STORE_FIELD_KEYS}
-    try:
-        conn = manager.update_store(store_id, credentials=fields.pop("credentials", None) or None, user_id=user_id, **fields)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"更新店铺失败: {str(exc)}")
-    if conn is None:
-        raise HTTPException(status_code=404, detail=f"店铺不存在: {store_id}")
-    return {"store": manager.mask(conn), "message": "店铺已更新"}
-
-
-@router.delete("/stores/{store_id}")
-async def delete_store(store_id: str, current_user: Dict[str, Any] = Depends(get_current_user_or_default)):
-    """删除店铺（含 SecretStore 密钥清理；仅限归属用户）"""
-    manager = _get_store_manager()
-    user_id = str(current_user.get("user_id") or "")
-    if not manager.delete_store(store_id, user_id=user_id):
-        raise HTTPException(status_code=404, detail=f"店铺不存在: {store_id}")
-    return {"message": "店铺已删除"}
-
-
-@router.post("/stores/{store_id}/test")
-async def test_store_connection(store_id: str, current_user: Dict[str, Any] = Depends(get_current_user_or_default)):
-    """连接测试（只读探针；仅限归属用户）"""
-    manager = _get_store_manager()
-    user_id = str(current_user.get("user_id") or "")
-    if manager.get_store(store_id, user_id=user_id) is None:
-        raise HTTPException(status_code=404, detail=f"店铺不存在: {store_id}")
-    result = await manager.test_connection(store_id, user_id=user_id)
-    return {"result": result}
-
-
-@router.post("/stores/{store_id}/refresh")
-async def refresh_store_token(store_id: str, current_user: Dict[str, Any] = Depends(get_current_user_or_default)):
-    """强制刷新令牌（仅限归属用户）"""
-    manager = _get_store_manager()
-    user_id = str(current_user.get("user_id") or "")
-    if manager.get_store(store_id, user_id=user_id) is None:
-        raise HTTPException(status_code=404, detail=f"店铺不存在: {store_id}")
-    result = await manager.refresh_token(store_id, user_id=user_id)
-    return {"result": result}
-
-
-# ==================== Tier 2 OAuth（一键授权跳转） ====================
-# 依据 §2（2026-08-29 复核）：
-# - 1688：auth.1688.com/oauth/authorize（已核实，路径经网关探测）
-# - 小红书：ark.xiaohongshu.com/ark/authorization（已核实）
-# - 淘宝/闲鱼：TOP oauth（oauth.taobao.com；闲鱼复用 TOP 生态）
-# - 京东/拼多多/抖店/TikTok：各平台 OAuth 授权跳转（URL 形态按公开文档，实施以平台后台核对为准）
-# 亚马逊为卖家中心自授权（无跳转），不支持 Tier 2。
-
-_OAUTH_SUPPORTED = ("taobao", "xianyu", "jd", "pdd", "douyin-ecom", "tiktok", "ali1688", "xiaohongshu")
-_OAUTH_STATE_TTL_SECONDS = 30 * 60
-
-
-def _oauth_callback_uri(request: Request) -> str:
-    return str(request.base_url) + "api/v1/neurflow/stores/oauth/callback"
-
-
-def _oauth_authorize_url(platform: str, app_key: str, redirect_uri: str, state: str) -> str:
-    from urllib.parse import quote
-
-    enc_uri = quote(redirect_uri, safe="")
-    if platform in ("taobao", "xianyu"):
-        return f"https://oauth.taobao.com/authorize?response_type=code&client_id={app_key}&redirect_uri={enc_uri}&state={state}"
-    if platform == "jd":
-        return f"https://open-oauth.jd.com/oauth2/authorize?app_key={app_key}&redirect_uri={enc_uri}&state={state}"
-    if platform == "pdd":
-        return f"https://open-api.pinduoduo.com/oauth/authorize?client_id={app_key}&redirect_uri={enc_uri}&state={state}"
-    if platform == "douyin-ecom":
-        return f"https://op.jinritemai.com/authorize?service_id={app_key}&redirect_uri={enc_uri}&state={state}"
-    if platform == "tiktok":
-        return f"https://services.tiktokshop.com/open/authorize?app_key={app_key}&redirect_uri={enc_uri}&state={state}"
-    if platform == "ali1688":
-        return f"https://auth.1688.com/oauth/authorize?client_id={app_key}&site=1688&redirect_uri={enc_uri}&state={state}"
-    if platform == "xiaohongshu":
-        return f"https://ark.xiaohongshu.com/ark/authorization?appId={app_key}&redirectUri={enc_uri}&state={state}"
-    return ""
-
-
-async def _oauth_exchange_token(platform: str, app_key: str, app_secret: str, code: str, redirect_uri: str) -> Dict[str, Any]:
-    """按平台换 token：返回 {access_token, refresh_token?, expires_in?}"""
-    from neurova.collaboration.neurflow.external_api import _http_post
-
-    if platform == "ali1688":
-        from neurova.collaboration.neurflow.external_api import get_alibaba1688_client
-
-        token = await get_alibaba1688_client().fetch_token(
-            app_key=app_key, app_secret=app_secret, code=code, redirect_uri=redirect_uri
-        )
-        return {"access_token": token}
-    if platform == "xiaohongshu":
-        from neurova.collaboration.neurflow.external_api import get_xiaohongshu_client
-
-        token = await get_xiaohongshu_client().get_access_token(app_key=app_key, app_secret=app_secret, code=code)
-        return {"access_token": token}
-
-    urls = {
-        "taobao": "https://oauth.taobao.com/token",
-        "xianyu": "https://oauth.taobao.com/token",
-        "jd": "https://open-oauth.jd.com/oauth2/token",
-        "pdd": "https://open-api.pinduoduo.com/oauth/token",
-        "douyin-ecom": "https://openapi-fxg.jinritemai.com/oauth2/access_token",
-        "tiktok": "https://open-api.tiktokglobalshop.com/api/v2/token/get",
-    }
-    params = {"grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri}
-    if platform == "tiktok":
-        params = {"grant_type": "authorized_code", "auth_code": code}
-    if platform in ("taobao", "xianyu", "pdd"):
-        params.update({"client_id": app_key, "client_secret": app_secret})
-    elif platform == "jd":
-        params.update({"app_key": app_key, "app_secret": app_secret})
-    elif platform in ("douyin-ecom", "tiktok"):
-        params.update({"app_key": app_key, "app_secret": app_secret})
-    data = await _http_post(urls[platform], data=params)
-    payload = data if isinstance(data, dict) else {}
-    inner = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-    token = payload.get("access_token") or inner.get("access_token") or inner.get("accessToken")
-    if not token:
-        raise HTTPException(status_code=400, detail=f"令牌交换失败: {data}")
-    out: Dict[str, Any] = {"access_token": str(token)}
-    refresh = payload.get("refresh_token") or inner.get("refresh_token") or inner.get("refreshToken")
-    if refresh:
-        out["refresh_token"] = str(refresh)
-    if payload.get("expires_in") or inner.get("expires_in"):
-        out["expires_in"] = payload.get("expires_in") or inner.get("expires_in")
-    return out
-
-
-@router.get("/stores/oauth/authorize")
-async def oauth_authorize(
-    request: Request,
-    platform: str = Query(...),
-    app_key: str = Query(""),
-    app_secret: str = Query(""),
-    store_name: str = Query(""),
-    current_user: Dict[str, Any] = Depends(get_current_user_or_default),
-):
-    """构造平台授权 URL 并 302 跳转（Tier 2）；先落 pending 店铺与应用凭据"""
-    manager = _get_store_manager()
-    user_id = str(current_user.get("user_id") or "")
-    platform = str(platform or "").strip().lower()
-    if platform not in _OAUTH_SUPPORTED:
-        raise HTTPException(status_code=400, detail=f"平台 {platform} 不支持 OAuth 直连（亚马逊为自授权，请走 Tier 1 录入 refresh_token）")
-    if not (app_key and app_secret):
-        raise HTTPException(status_code=400, detail="app_key / app_secret 必填")
-    conn = manager.create_store(
-        platform,
-        str(store_name or "").strip() or f"{platform} OAuth 店铺",
-        credentials={"app_key": app_key, "app_secret": app_secret},
-        user_id=user_id,
-        status="pending",
-    )
-    state = str(uuid.uuid4().hex)
-    manager.oauth_state_set(
-        state,
-        {"platform": platform, "store_id": conn.store_id, "user_id": user_id, "created_at": time.time()},
-    )
-    url = _oauth_authorize_url(platform, app_key, _oauth_callback_uri(request), state)
-    return RedirectResponse(url, status_code=302)
-
-
-@router.get("/stores/oauth/callback")
-async def oauth_callback(
-    request: Request,
-    code: str = Query(""),
-    state: str = Query(""),
-):
-    """平台授权回调：校验 state（一次性/防 CSRF）→ 换 token → 更新店铺 → 302 回前端"""
-    manager = _get_store_manager()
-    meta = manager.oauth_state_pop(state)
-    if not meta:
-        raise HTTPException(status_code=400, detail="无效的 state（缺失或已使用）")
-    if time.time() - float(meta.get("created_at") or 0) > _OAUTH_STATE_TTL_SECONDS:
-        raise HTTPException(status_code=400, detail="state 已过期，请重新发起授权")
-    platform = str(meta.get("platform") or "")
-    store_id = str(meta.get("store_id") or "")
-    user_id = str(meta.get("user_id") or "")
-    if not code:
-        raise HTTPException(status_code=400, detail="缺少授权码 code")
-    try:
-        creds = manager.resolve_credentials(platform, store_id, user_id)
-        token_data = await _oauth_exchange_token(platform, creds.app_key, creds.app_secret, code, _oauth_callback_uri(request))
-        update = {"access_token": token_data.get("access_token") or "", "status": "active", "last_error": ""}
-        if token_data.get("refresh_token"):
-            update["refresh_token"] = token_data.get("refresh_token")
-        expires = token_data.get("expires_in")
-        fields: Dict[str, Any] = {"status": "active", "last_error": ""}
-        if expires:
-            fields["token_expires_at"] = time.time() + int(expires)
-        manager.update_store(store_id, user_id=user_id, credentials=update, **fields)
-    except HTTPException:
-        raise
-    except Exception as exc:  # noqa: BLE001
-        manager.update_store(store_id, user_id=user_id, status="error", last_error=str(exc))
-        return RedirectResponse("/collaboration/canvas?store_oauth=error", status_code=302)
-    return RedirectResponse("/collaboration/canvas?store_oauth=ok", status_code=302)
+router.include_router(_stores_router)
 
 
 # ==================== 工作流 CRUD ====================
@@ -1829,60 +1580,27 @@ async def step_run_node(
     return {"code": 0, "message": "ok", "data": result}
 
 
-# ==================== P1 Step 4b — Webhook 入站触发（薄壳） ====================
-
-
-from fastapi import Request  # noqa: E402
-from neurova.collaboration.neurflow import webhook_ingress  # noqa: E402
-from neurova.core.trigger_rate_limiter import TriggerRateLimiter  # noqa: E402
-
-# 每 trigger_id 缓存的限流桶（跨请求共享；rate_limiter_for 消费）
-_WEBHOOK_RATE_LIMITERS: Dict[str, TriggerRateLimiter] = {}
-
-
-def _webhook_ingress_deps() -> Dict[str, Any]:
-    """装配 webhook_ingress 默认 deps（trigger/workflow 加载 + 解密 + 执行）。
-
-    安全语义：仅 PUBLISHED 状态的工作流可被 webhook 派发。
-    """
-    from neurova.core.trigger_rate_limiter import TriggerRateLimiter
-    from neurova.llm.providers.secret_store import decrypt_api_key
-    from neurova.collaboration.neurflow.models import WorkflowStatus
-
-    def load_trigger(tid: str):
-        return _get_storage().get_trigger(tid)
-
-    def load_published_workflow(ref: str):
-        storage = _get_storage()
-        wf = storage.get_workflow(ref)
-        if wf is not None and wf.status == WorkflowStatus.PUBLISHED:
-            return wf
-        return None
-
-    async def run_workflow(workflow, inputs, user_id=None):
-        # P0-1：匿名 HMAC 入口按 workflow 属主执行/记账（trigger→workflow 反查）
-        effective = user_id or getattr(workflow, "user_id", None) or None
-        return await get_workflow_executor().execute(
-            workflow=workflow, inputs=inputs, user_id=effective
-        )
-
-    def rate_limiter_for(trigger):
-        """按 trigger_id 缓存 limiter（跨请求共享桶，限流才生效）。"""
-        tid = getattr(trigger, "id", "")
-        limiter = _WEBHOOK_RATE_LIMITERS.get(tid)
-        if limiter is None:
-            limiter = TriggerRateLimiter(getattr(trigger, "rate_limit_per_minute", None))
-            _WEBHOOK_RATE_LIMITERS[tid] = limiter
-        return limiter
-
-    return {
-        "load_trigger": load_trigger,
-        "load_published_workflow": load_published_workflow,
-        "decrypt_secret": decrypt_api_key,
-        "run_workflow": run_workflow,
-        "rate_limiter_for": rate_limiter_for,
-    }
-
+from .neurflow_triggers import (  # noqa: F401,E402 — compatibility exports
+    _WEBHOOK_RATE_LIMITERS,
+    _webhook_ingress_deps,
+    _WEBHOOK_MAX_BODY_BYTES,
+    receive_webhook_trigger,
+    TriggerCreateRequest,
+    list_workflow_triggers,
+    create_workflow_trigger,
+    delete_workflow_trigger,
+    fire_trigger,
+    list_trigger_deliveries,
+    handle_webhook_ingress_simple,
+    _get_retry_service,
+    list_failed_deliveries,
+    retry_delivery,
+    retry_due_deliveries,
+    webhook_ingress,
+    TriggerRateLimiter,
+    router as _triggers_router,
+    deliveries_router as _deliveries_router,
+)
 
 webhook_ingress.set_deps_provider(_webhook_ingress_deps)
 
@@ -1927,246 +1645,7 @@ from neurova.agent.workflow_agent import set_workflow_agent_deps as _set_wa_deps
 _set_wa_deps(get_workflow_agent_deps)
 
 
-# P0-7/N4：入站 body 上限（1MB）——限流在验签后，但超大 body 会先于一切
-# 消耗内存与带宽，必须在读 body 前按 Content-Length 硬拒
-_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024
-
-
-@router.post("/triggers/webhook/{trigger_id}/receive")
-async def receive_webhook_trigger(trigger_id: str, request: Request):
-    """外部系统入站触发工作流（HMAC 验签 + 重放防护 + 限流 + 派发；逻辑在 webhook_ingress）。
-
-    投递审计：无论成败均落 webhook_deliveries（P1 Step 7 表）。
-    """
-    declared = request.headers.get("content-length")
-    try:
-        if declared and int(declared) > _WEBHOOK_MAX_BODY_BYTES:
-            raise HTTPException(status_code=413, detail="PAYLOAD_TOO_LARGE")
-    except ValueError:
-        pass
-
-    payload = await request.body()
-    if len(payload) > _WEBHOOK_MAX_BODY_BYTES:
-        raise HTTPException(status_code=413, detail="PAYLOAD_TOO_LARGE")
-
-    header_sig = request.headers.get("X-Hub-Signature-256")
-    header_ts = request.headers.get("X-Neurova-Timestamp")
-    try:
-        result = await webhook_ingress.handle_webhook_ingress(
-            trigger_id, payload, header_sig, timestamp_header=header_ts
-        )
-    except webhook_ingress.IngressRejected as e:
-        sig_valid = e.reason not in ("INVALID_SIGNATURE", "TRIGGER_NOT_FOUND")
-        try:
-            _get_storage().save_delivery(
-                trigger_id=trigger_id,
-                signature_valid=sig_valid,
-                execution_id=None,
-                status_code=e.status_code,
-            )
-        except Exception:
-            logger.warning("delivery record failed (rejected path): %s", trigger_id)
-        raise HTTPException(status_code=e.status_code, detail=e.reason)
-
-    try:
-        _get_storage().save_delivery(
-            trigger_id=trigger_id,
-            signature_valid=True,
-            execution_id=(result.get("data") or {}).get("execution_id"),
-            status_code=200,
-        )
-    except Exception:
-        logger.warning("delivery record failed (success path): %s", trigger_id)
-    return result
-
-
-# ==================== P1 Step 6 — 触发器 CRUD API ====================
-
-
-class TriggerCreateRequest(BaseModel):
-    """创建触发器请求体"""
-
-    type: str  # "webhook" | "cron" | "manual"
-    config: Dict[str, Any] = {}
-    rate_limit_per_minute: Optional[int] = None
-
-
-@router.get("/workflows/{workflow_id}/triggers")
-async def list_workflow_triggers(
-    workflow_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """列出某工作流的全部触发器（secret 字段不回显）。"""
-    storage = _get_storage()
-    items = storage.list_triggers_by_workflow(workflow_id)
-    return {
-        "code": 0,
-        "data": [
-            {
-                "id": t.id,
-                "workflow_id": t.workflow_id,
-                "type": t.type.value,
-                "enabled": t.enabled,
-                "config": t.config,
-                "rate_limit_per_minute": t.rate_limit_per_minute,
-                "created_at": t.created_at,
-            }
-            for t in items
-        ],
-    }
-
-
-@router.post("/workflows/{workflow_id}/triggers")
-async def create_workflow_trigger(
-    workflow_id: str,
-    body: TriggerCreateRequest,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """创建触发器。
-
-    webhook：自动生成 secret —— 明文仅本次响应返回一次，
-    库中存 AES-GCM 密文（验签用）+ sha256 hash（审计用）。
-    cron：校验 cron 表达式可解析。
-    """
-    import secrets as _secrets
-
-    from neurova.llm.providers.secret_store import encrypt_api_key
-
-    storage = _get_storage()
-    if not _owned_workflow_or_404(storage, workflow_id, current_user):
-        raise HTTPException(status_code=404, detail="工作流不存在")
-
-    try:
-        trigger_type = TriggerType(body.type)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="type 必须为 webhook/cron/manual")
-
-    trigger_id = f"trg_{uuid.uuid4().hex[:12]}"
-    now = time.time()
-    secret_plain = None
-    secret_encrypted = None
-    secret_hash = None
-
-    if trigger_type == TriggerType.WEBHOOK:
-        secret_plain = _secrets.token_urlsafe(32)
-        secret_encrypted = encrypt_api_key(secret_plain)
-        secret_hash = NeurflowStorage.hash_trigger_secret(secret_plain)
-    elif trigger_type == TriggerType.CRON:
-        cron_expr = (body.config or {}).get("cron")
-        if not cron_expr:
-            raise HTTPException(status_code=400, detail="cron 触发器需要 config.cron 表达式")
-        try:
-            from apscheduler.triggers.cron import CronTrigger
-
-            CronTrigger.from_crontab(cron_expr)
-        except Exception:
-            raise HTTPException(status_code=400, detail="cron 表达式无法解析")
-
-    trigger = WorkflowTrigger(
-        id=trigger_id,
-        workflow_id=workflow_id,
-        type=trigger_type,
-        enabled=True,
-        config=body.config or {},
-        secret_hash=secret_hash,
-        secret_encrypted=secret_encrypted,
-        rate_limit_per_minute=body.rate_limit_per_minute,
-        created_at=now,
-        updated_at=now,
-    )
-    storage.save_trigger(trigger)
-
-    # cron 触发器尝试即时注册（scheduler 未配置则跳过，启动恢复时补齐）
-    if trigger_type == TriggerType.CRON:
-        try:
-            from neurova.collaboration.neurflow.triggers import get_trigger_manager
-
-            await get_trigger_manager().register_cron(trigger)
-        except Exception as e:
-            logger.warning("cron trigger register deferred: %s", e)
-
-    resp: Dict[str, Any] = {
-        "code": 0,
-        "data": {
-            "trigger": {
-                "id": trigger.id,
-                "workflow_id": trigger.workflow_id,
-                "type": trigger.type.value,
-                "enabled": trigger.enabled,
-                "config": trigger.config,
-                "rate_limit_per_minute": trigger.rate_limit_per_minute,
-                "secret_encrypted": None,
-                "created_at": trigger.created_at,
-            }
-        },
-    }
-    if secret_plain is not None:
-        resp["data"]["secret"] = secret_plain
-    return resp
-
-
-@router.delete("/triggers/{trigger_id}")
-async def delete_workflow_trigger(
-    trigger_id: str,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """删除触发器；同步移除 cron job。"""
-    storage = _get_storage()
-    if not storage.get_trigger(trigger_id):
-        raise HTTPException(status_code=404, detail="触发器不存在")
-    storage.delete_trigger(trigger_id)
-    try:
-        from neurova.collaboration.neurflow.triggers import get_trigger_manager
-
-        await get_trigger_manager().unregister(trigger_id)
-    except Exception:
-        pass
-    return {"code": 0, "message": "deleted"}
-
-
-@router.post("/triggers/{trigger_id}/fire")
-async def fire_trigger(
-    trigger_id: str,
-    body: Dict[str, Any] = Body(default={}),
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """手动触发（manual/测试用）：按触发器绑定的 workflow 直接派发。"""
-    storage = _get_storage()
-    trigger = storage.get_trigger(trigger_id)
-    if not trigger:
-        raise HTTPException(status_code=404, detail="触发器不存在")
-
-    from neurova.collaboration.neurflow.models import WorkflowStatus
-
-    wf = storage.get_workflow(trigger.workflow_id)
-    if wf is None or wf.status != WorkflowStatus.PUBLISHED:
-        raise HTTPException(status_code=404, detail="工作流未发布")
-
-    async def _run(workflow, inputs):
-        return await get_workflow_executor().execute(workflow=workflow, inputs=inputs)
-
-    from neurova.agent.scheduler import WorkflowTaskExecutor
-
-    executor = WorkflowTaskExecutor(
-        workflow_loader=lambda ref: wf if ref == trigger.workflow_id else None,
-        workflow_runner_callable=_run,
-    )
-    result = await executor.dispatch_neurflow(trigger.workflow_id, body or {})
-    return {"code": 0, "data": result}
-
-
-# ==================== P1 Step 7 — 投递记录查询 ====================
-
-
-@router.get("/triggers/{trigger_id}/deliveries")
-async def list_trigger_deliveries(
-    trigger_id: str,
-    limit: int = 50,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """查询 webhook 入站投递记录（调试面板用）。"""
-    storage = _get_storage()
-    return {"code": 0, "data": storage.list_deliveries(trigger_id, limit=limit)}
+router.include_router(_triggers_router)
 
 
 # ==================== P2 遗留② — 版本 REST API ====================
@@ -2289,91 +1768,4 @@ def otel_status():
         return {"code": 0, "message": "ok", "data": {"installed": False, "enabled": False, "error": str(e)}}
 
 
-# ══════════════════════════════════════════════════════════════
-# P2 trigger 统一契约 — 投递重试管理 API
-# ══════════════════════════════════════════════════════════════
-
-
-async def handle_webhook_ingress_simple(trigger_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """按 trigger_id 重投（重试链路的重放壳）。
-
-    直接调 handle_webhook_ingress（完整验签/限流/派发语义）；宽松模式
-    trigger 空负载即可重放；严格模式 trigger 无原始签名头——重试链路
-    以 INGRESS 侧结果为准（4xx 视为不可重投失败，由账目标 dead/pending）。
-    """
-    import json as _json
-
-    from neurova.collaboration.neurflow import webhook_ingress as _ingress
-
-    try:
-        outcome = await _ingress.handle_webhook_ingress(
-            trigger_id, _json.dumps(payload or {}).encode("utf-8"),
-            signature_header=None, timestamp_header=None,
-        )
-        return {"success": True, "execution_id": (outcome or {}).get("execution_id"),
-                "raw": outcome}
-    except _ingress.IngressRejected as e:
-        return {"success": False, "error": f"{e.status_code} {e.reason}"}
-
-
-def _get_retry_service() -> "Any":
-    from neurova.collaboration.neurflow.trigger_retry import TriggerRetryService
-
-    return TriggerRetryService(_get_storage())
-
-
-@router.get("/trigger/deliveries/failed")
-async def list_failed_deliveries(
-    limit: int = Query(default=50, ge=1, le=200),
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """失败投递队列（重试管理页数据源）。"""
-    svc = _get_retry_service()
-    return {"code": 0, "message": "ok", "data": {"items": svc.list_failed(limit=limit)}}
-
-
-@router.post("/trigger/deliveries/{delivery_id}/retry")
-async def retry_delivery(
-    delivery_id: int,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """手动重试单条失败投递（重新走 webhook 入站验签+执行链路）。"""
-    async def _redeliver(trigger_id: str, attempt: int) -> Dict[str, Any]:
-        from neurova.api.endpoints import neurflow_api as _self
-
-        deps = _self._webhook_ingress_deps()
-        try:
-            trigger = deps["load_trigger"](trigger_id)
-            if trigger is None:
-                return {"ok": False, "error": "trigger 不存在"}
-            # 重新投递：空 payload 重放（签名按 trigger secret 重新计算语义
-            # 由 handle_webhook_ingress 的宽松/严格模式处理）
-            outcome = await _self.handle_webhook_ingress_simple(trigger_id, {})
-            return {"ok": bool(outcome.get("success") or outcome.get("execution_id")),
-                    "execution_id": outcome.get("execution_id")}
-        except Exception as e:  # noqa: BLE001
-            return {"ok": False, "error": str(e)}
-
-    svc = _get_retry_service()
-    outcome = await svc.retry_delivery(delivery_id, redeliver=_redeliver)
-    return {"code": 0, "message": "ok", "data": outcome}
-
-
-@router.post("/trigger/deliveries/retry-due")
-async def retry_due_deliveries(
-    current_user: Dict[str, Any] = Depends(get_current_user),
-):
-    """到期批量重试（后台调度亦可调用此入口）。"""
-    async def _redeliver(trigger_id: str, attempt: int) -> Dict[str, Any]:
-        try:
-            from neurova.api.endpoints import neurflow_api as _self
-
-            outcome = await _self.handle_webhook_ingress_simple(trigger_id, {})
-            return {"ok": bool(outcome.get("success") or outcome.get("execution_id")),
-                    "execution_id": outcome.get("execution_id")}
-        except Exception as e:  # noqa: BLE001
-            return {"ok": False, "error": str(e)}
-
-    svc = _get_retry_service()
-    processed = await svc.retry_due(redeliver=_redeliver)
-    return {"code": 0, "message": "ok", "data": {"processed": processed, "count": len(processed)}}
+router.include_router(_deliveries_router)

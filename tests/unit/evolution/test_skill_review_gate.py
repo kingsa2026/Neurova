@@ -93,6 +93,20 @@ class SkillPackerGateTest(unittest.TestCase):
 
 
 class GeneticGateTest(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        from neurova.skills.skill_service import SkillService
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.service = SkillService("genetic-gate", skills_dir=self.directory.name)
+
+    def seed(self, gen):
+        genotype = gen._population[0]
+        purpose = (f"遗传进化工具组合（适应度 {genotype.fitness:.2f}）: "
+                   f"{' → '.join(genotype.tool_sequence)}")
+        for i in range(3):
+            self.service.creation_evidence.record(str(i), genotype.tool_sequence, purpose, True)
+
     def test_genetic_registers_disabled_when_gated(self):
         from neurova.evolution.genetic_engine import ToolGeneticEngine, ToolGenotype
         from neurova.skill_system import SkillRegistry
@@ -106,7 +120,8 @@ class GeneticGateTest(unittest.TestCase):
             "neurova.evolution.skill_review_gate.skill_review_gate_enabled",
             return_value=True,
         ):
-            registered = gen.register_to_skill_registry(registry)
+            self.seed(gen)
+            registered = gen.register_to_skill_registry(registry, self.service)
         self.assertEqual(registered, 1)
         self.assertFalse(registry.set_skill_enabled.__self__ is None)  # registry 完好
         skill = registry.get_skill("genetic_search_tool_file_tool")
@@ -128,11 +143,43 @@ class GeneticGateTest(unittest.TestCase):
             "neurova.evolution.skill_review_gate.skill_review_gate_enabled",
             return_value=False,
         ):
-            gen.register_to_skill_registry(registry)
+            self.seed(gen)
+            self.assertEqual(gen.register_to_skill_registry(registry, self.service), 1)
         skill = registry.get_skill("genetic_search_tool_file_tool")
         from neurova.skill_system_module_standalone import SkillStatus
 
         self.assertEqual(skill.status, SkillStatus.ACTIVE)
+
+    def test_genetic_rejected_without_three_success_evidences(self):
+        """无三独立真实成功任务证据：注册被拒，SkillService 不落清单。"""
+        from neurova.evolution.genetic_engine import ToolGeneticEngine, ToolGenotype
+        from neurova.skill_system import SkillRegistry
+
+        registry = SkillRegistry()
+        gen = ToolGeneticEngine()
+        gen.add_to_population(
+            ToolGenotype(tool_sequence=["search_tool", "file_tool"], success_rate=0.9, reuse_count=10)
+        )
+        with patch(
+            "neurova.evolution.skill_review_gate.skill_review_gate_enabled",
+            return_value=False,
+        ):
+            # 零证据：直接拒绝
+            self.assertEqual(gen.register_to_skill_registry(registry, self.service), 0)
+            # 仅两条成功证据（第三条为失败，失败粘滞不凑数）仍不足
+            steps = gen._population[0].tool_sequence
+            purpose = self._purpose(gen)
+            self.service.creation_evidence.record("t1", steps, purpose, True)
+            self.service.creation_evidence.record("t2", steps, purpose, True)
+            self.service.creation_evidence.record("t3", steps, purpose, False)
+            self.assertEqual(gen.register_to_skill_registry(registry, self.service), 0)
+        self.assertIsNone(registry.get_skill("genetic_search_tool_file_tool"))
+        self.assertEqual(list(self.service._skills), [])  # 磁盘 manifest 不落技能
+
+    def _purpose(self, gen):
+        genotype = gen._population[0]
+        return (f"遗传进化工具组合（适应度 {genotype.fitness:.2f}）: "
+                f"{' → '.join(genotype.tool_sequence)}")
 
 
 class ExperiencePendingGateTest(unittest.TestCase):

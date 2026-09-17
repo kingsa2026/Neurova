@@ -1,0 +1,383 @@
+{
+  "exports": [
+    "ALIBABA1688_GATEWAY_URL",
+    "ALIBABA1688_KEY_NAMES",
+    "AMAZON_ADS_KEY_NAMES",
+    "AMAZON_ADS_METRIC_COLUMNS",
+    "AMAZON_ADS_REGIONS",
+    "AMAZON_LWA_TOKEN_URL",
+    "AMAZON_SP_KEY_NAMES",
+    "AMAZON_SP_MARKETPLACES",
+    "AMAZON_SP_REGIONS",
+    "AMAZON_SP_REPORT_TYPES",
+    "Alibaba1688Client",
+    "AmazonAdsClient",
+    "AmazonSPAPIClient",
+    "Any",
+    "CN_AD_PLATFORM_HINTS",
+    "COMMERCE_KEY_NAMES",
+    "COMMERCE_PLATFORMS",
+    "CommercePlatformClient",
+    "DOUYIN_ECOM_GATEWAY_URL",
+    "DOUYIN_ECOM_KEY_NAMES",
+    "DOUYIN_ECOM_OAUTH_REFRESH_URL",
+    "Dict",
+    "DouyinEcomClient",
+    "ExternalAPIError",
+    "IMAGE_KEY_NAMES",
+    "IMAGE_PROVIDERS",
+    "ImageGenClient",
+    "JD_GATEWAY_URL",
+    "JD_KEY_NAMES",
+    "JD_OAUTH_TOKEN_URL",
+    "JdOpenClient",
+    "List",
+    "Optional",
+    "PDD_GATEWAY_URL",
+    "PDD_KEY_NAMES",
+    "PDD_OAUTH_TOKEN_URL",
+    "PUBLISH_KEY_NAMES",
+    "PUBLISH_PLATFORMS",
+    "PddOpenClient",
+    "PublishPlatformClient",
+    "TAOBAO_GATEWAY_URL",
+    "TAOBAO_KEY_NAMES",
+    "TAOBAO_OAUTH_TOKEN_URL",
+    "TIKTOK_SHOP_GATEWAY_URL",
+    "TIKTOK_SHOP_KEY_NAMES",
+    "TIKTOK_SHOP_TOKEN_REFRESH_PATH",
+    "TYPE_CHECKING",
+    "TaobaoTopClient",
+    "TikTokShopClient",
+    "VIDEO_KEY_NAMES",
+    "VIDEO_PROVIDERS",
+    "VideoGenClient",
+    "XHS_GATEWAY_URL",
+    "XHS_KEY_NAMES",
+    "XHS_VERSION",
+    "XIANYU_KEY_NAMES",
+    "XianyuClient",
+    "XiaohongshuClient",
+    "_DEFAULT_BASES",
+    "_HTTPX_AVAILABLE",
+    "_OpenGatewayClientBase",
+    "_alibaba1688_sign",
+    "_amazon_ads_instance",
+    "_amazon_sp_instance",
+    "_base_url",
+    "_cn_client_instances",
+    "_comfyui_host",
+    "_commerce_instance",
+    "_date_to_unix",
+    "_deep_extract",
+    "_douyin_sign_md5",
+    "_extract",
+    "_fail",
+    "_fen_to_yuan",
+    "_first_float",
+    "_first_int",
+    "_http_client",
+    "_http_get",
+    "_http_get_text",
+    "_http_post",
+    "_image_gen_instance",
+    "_ok",
+    "_parse_size",
+    "_period_to_date_range",
+    "_period_to_iso_range",
+    "_publish_instance",
+    "_router_sign_md5",
+    "_sleep",
+    "_stringify_param",
+    "_tiktok_sign_sha256",
+    "_video_gen_instance",
+    "_xiaohongshu_sign",
+    "annotations",
+    "get_alibaba1688_client",
+    "get_amazon_ads_client",
+    "get_amazon_sp_client",
+    "get_api_key",
+    "get_comfyui_client",
+    "get_commerce_platform_client",
+    "get_douyin_ecom_client",
+    "get_image_gen_client",
+    "get_jd_open_client",
+    "get_logger",
+    "get_pdd_open_client",
+    "get_publish_platform_client",
+    "get_secret_store",
+    "get_taobao_top_client",
+    "get_tiktok_shop_client",
+    "get_video_gen_client",
+    "get_xianyu_client",
+    "get_xiaohongshu_client",
+    "hashlib",
+    "hmac",
+    "httpx",
+    "json",
+    "logger",
+    "logging",
+    "reset_amazon_ads_client",
+    "reset_amazon_sp_client",
+    "reset_cn_platform_clients",
+    "reset_commerce_platform_client",
+    "reset_image_gen_client",
+    "reset_publish_platform_client",
+    "reset_video_gen_client",
+    "resolve_api_key",
+    "time"
+  ],
+  "functions": {
+    "_http_client": "(timeout: 'float')",
+    "_http_post": "(url: 'str', headers: 'Optional[Dict[str, str]]' = None, json: 'Optional[Dict[str, Any]]' = None, data: 'Any' = None, params: 'Optional[Dict[str, Any]]' = None, timeout: 'float' = 30.0) -> 'Dict[str, Any]'",
+    "_http_get": "(url: 'str', headers: 'Optional[Dict[str, str]]' = None, params: 'Optional[Dict[str, Any]]' = None, timeout: 'float' = 30.0) -> 'Dict[str, Any]'",
+    "_http_get_text": "(url: 'str', headers: 'Optional[Dict[str, str]]' = None, timeout: 'float' = 60.0) -> 'str'",
+    "_period_to_iso_range": "(period: 'str') -> 'tuple'",
+    "_period_to_date_range": "(period: 'str') -> 'tuple'",
+    "_date_to_unix": "(date_str: 'str', end_of_day: 'bool' = False) -> 'int'",
+    "_stringify_param": "(value: 'Any') -> 'str'",
+    "_fen_to_yuan": "(value: 'Any') -> 'Optional[float]'",
+    "_router_sign_md5": "(secret: 'str', params: 'Dict[str, Any]') -> 'str'",
+    "_douyin_sign_md5": "(secret: 'str', params: 'Dict[str, Any]') -> 'str'",
+    "_tiktok_sign_sha256": "(secret: 'str', params: 'Dict[str, Any]') -> 'str'",
+    "get_secret_store": "()",
+    "get_api_key": "(key_name: 'str') -> 'Optional[str]'",
+    "resolve_api_key": "(key_names: 'List[str]', explicit: 'str' = '') -> 'Optional[str]'",
+    "_comfyui_host": "() -> 'Optional[str]'",
+    "_base_url": "(service: 'str', base_url: 'str' = '') -> 'str'",
+    "_ok": "(output: 'Dict[str, Any]', provider: 'str' = '') -> 'Dict[str, Any]'",
+    "_fail": "(error: 'str', provider: 'str' = '') -> 'Dict[str, Any]'",
+    "_extract": "(data: 'Any', keys: 'List[str]', default: 'Any' = None) -> 'Any'",
+    "_deep_extract": "(data: 'Any', keys: 'List[str]', default: 'Any' = None) -> 'Any'",
+    "_first_float": "(obj: 'Any', keys: 'tuple', default: 'Optional[float]' = None) -> 'Optional[float]'",
+    "_first_int": "(obj: 'Any', keys: 'tuple', default: 'int' = 0) -> 'int'",
+    "get_comfyui_client": "()",
+    "_parse_size": "(size: 'str')",
+    "get_image_gen_client": "() -> 'ImageGenClient'",
+    "reset_image_gen_client": "() -> 'None'",
+    "_sleep": "(seconds: 'float') -> 'None'",
+    "get_video_gen_client": "() -> 'VideoGenClient'",
+    "reset_video_gen_client": "() -> 'None'",
+    "get_amazon_sp_client": "() -> 'AmazonSPAPIClient'",
+    "reset_amazon_sp_client": "() -> 'None'",
+    "get_amazon_ads_client": "() -> 'AmazonAdsClient'",
+    "reset_amazon_ads_client": "() -> 'None'",
+    "_alibaba1688_sign": "(secret: 'str', path: 'str', params: 'Dict[str, Any]') -> 'str'",
+    "_xiaohongshu_sign": "(method: 'str', app_id: 'str', app_secret: 'str', version: 'str', timestamp: 'int') -> 'str'",
+    "get_alibaba1688_client": "() -> 'Alibaba1688Client'",
+    "get_xiaohongshu_client": "() -> 'XiaohongshuClient'",
+    "get_xianyu_client": "() -> 'XianyuClient'",
+    "get_taobao_top_client": "() -> 'TaobaoTopClient'",
+    "get_jd_open_client": "() -> 'JdOpenClient'",
+    "get_pdd_open_client": "() -> 'PddOpenClient'",
+    "get_douyin_ecom_client": "() -> 'DouyinEcomClient'",
+    "get_tiktok_shop_client": "() -> 'TikTokShopClient'",
+    "reset_cn_platform_clients": "() -> 'None'",
+    "get_commerce_platform_client": "() -> 'CommercePlatformClient'",
+    "reset_commerce_platform_client": "() -> 'None'",
+    "get_publish_platform_client": "() -> 'PublishPlatformClient'",
+    "reset_publish_platform_client": "() -> 'None'"
+  },
+  "classes": {
+    "ExternalAPIError": {
+      "bases": [
+        "Exception"
+      ],
+      "methods": {}
+    },
+    "ImageGenClient": {
+      "bases": [
+        "object"
+      ],
+      "methods": {
+        "is_available": "(self, provider: 'str', api_key: 'str' = '') -> 'bool'",
+        "generate": "(self, provider: 'str', prompt: 'str', api_key: 'str' = '', size: 'str' = '1024x1024', base_url: 'str' = '', timeout: 'float' = 120.0) -> 'Dict[str, Any]'",
+        "_generate_comfyui": "(self, prompt: 'str', size: 'str') -> 'Dict[str, Any]'"
+      }
+    },
+    "VideoGenClient": {
+      "bases": [
+        "object"
+      ],
+      "methods": {
+        "__init__": "(self, poll_interval: 'float' = 2.0) -> 'None'",
+        "is_available": "(self, provider: 'str', api_key: 'str' = '') -> 'bool'",
+        "generate": "(self, provider: 'str', prompt: 'str', api_key: 'str' = '', first_frame_url: 'str' = '', duration: 'int' = 5, base_url: 'str' = '', timeout: 'float' = 180.0, max_polls: 'int' = 10) -> 'Dict[str, Any]'",
+        "_fail_not_impl": "(self, message: 'str', provider: 'str') -> 'Dict[str, Any]'"
+      }
+    },
+    "AmazonSPAPIClient": {
+      "bases": [
+        "object"
+      ],
+      "methods": {
+        "__init__": "(self) -> 'None'",
+        "_resolve_credentials": "(self, refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'tuple'",
+        "is_available": "(self, refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'bool'",
+        "get_access_token": "(self, refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '') -> 'str'",
+        "_access_token": "(self, refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'str'",
+        "_sp_headers": "(self, access_token: 'str') -> 'Dict[str, str]'",
+        "_region_base": "(self, region: 'str') -> 'str'",
+        "resolve_marketplace_id": "(self, marketplace_id: 'str') -> 'str'",
+        "_extract_offer_price": "(item: 'Dict[str, Any]') -> 'Dict[str, Any]'",
+        "fetch_prices": "(self, asins: 'List[str]', marketplace_id: 'str' = '', region: 'str' = 'na', refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '') -> 'Dict[str, Any]'",
+        "fetch_competitive_prices": "(self, asins: 'List[str]', marketplace_id: 'str' = '', region: 'str' = 'na', refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '') -> 'Dict[str, Any]'",
+        "fetch_inventory": "(self, skus: 'List[str]', marketplace_id: 'str' = '', region: 'str' = 'na', seller_id: 'str' = '', refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '') -> 'Dict[str, Any]'",
+        "fetch_review_topics": "(self, asin: 'str', marketplace_id: 'str' = '', region: 'str' = 'na', sort_by: 'str' = 'MENTIONS', refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '') -> 'Dict[str, Any]'",
+        "create_report": "(self, report_type: 'str', marketplace_ids: 'List[str]', data_start_time: 'str' = '', data_end_time: 'str' = '', region: 'str' = 'na', refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '') -> 'Dict[str, Any]'",
+        "get_report": "(self, report_id: 'str', region: 'str' = 'na', refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '') -> 'Dict[str, Any]'",
+        "get_report_document": "(self, report_document_id: 'str', region: 'str' = 'na', refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '') -> 'Dict[str, Any]'",
+        "fetch_sales_report": "(self, report_type: 'str', marketplace_ids: 'List[str]', data_start_time: 'str' = '', data_end_time: 'str' = '', region: 'str' = 'na', refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '', max_polls: 'int' = 10, poll_interval: 'float' = 5.0) -> 'Dict[str, Any]'"
+      }
+    },
+    "AmazonAdsClient": {
+      "bases": [
+        "object"
+      ],
+      "methods": {
+        "__init__": "(self) -> 'None'",
+        "_resolve_credentials": "(self, client_id: 'str' = '', client_secret: 'str' = '') -> 'tuple'",
+        "is_available": "(self, client_id: 'str' = '', client_secret: 'str' = '') -> 'bool'",
+        "get_access_token": "(self, client_id: 'str' = '', client_secret: 'str' = '') -> 'str'",
+        "_ads_headers": "(self, token: 'str', client_id: 'str', profile_id: 'str') -> 'Dict[str, str]'",
+        "_region_base": "(self, region: 'str') -> 'str'",
+        "fetch_campaign_metrics": "(self, campaign_ids: 'List[str]', metrics: 'List[str]', start_date: 'str', end_date: 'str', profile_id: 'str', region: 'str' = 'na', client_id: 'str' = '', client_secret: 'str' = '', max_polls: 'int' = 10, poll_interval: 'float' = 3.0) -> 'Dict[str, Any]'",
+        "_download_rows": "(self, url: 'str') -> 'List[Dict[str, Any]]'",
+        "_aggregate_rows": "(rows: 'List[Dict[str, Any]]') -> 'List[Dict[str, Any]]'"
+      }
+    },
+    "_OpenGatewayClientBase": {
+      "bases": [
+        "object"
+      ],
+      "methods": {
+        "__init__": "(self) -> 'None'",
+        "_resolve_credentials": "(self, app_key: 'str' = '', app_secret: 'str' = '', access_token: 'str' = '', refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'tuple'",
+        "is_available": "(self, app_key: 'str' = '', app_secret: 'str' = '', access_token: 'str' = '', refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'bool'",
+        "get_access_token": "(self, app_key: 'str' = '', app_secret: 'str' = '', refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '') -> 'str'",
+        "_access_token": "(self, app_key: 'str' = '', app_secret: 'str' = '', access_token: 'str' = '', refresh_token: 'str' = '', client_id: 'str' = '', client_secret: 'str' = '', store_id: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'str'"
+      }
+    },
+    "TaobaoTopClient": {
+      "bases": [
+        "_OpenGatewayClientBase"
+      ],
+      "methods": {
+        "call": "(self, method: 'str', biz_params: 'Optional[Dict[str, Any]]' = None, app_key: 'str' = '', app_secret: 'str' = '', access_token: 'str' = '', refresh_token: 'str' = '', store_id: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'Dict[str, Any]'",
+        "fetch_prices": "(self, num_iids: 'List[str]', **creds) -> 'Dict[str, Any]'",
+        "fetch_inventory": "(self, num_iids: 'List[str]', **creds) -> 'Dict[str, Any]'",
+        "fetch_sold_trades": "(self, start_created: 'str' = '', end_created: 'str' = '', **creds) -> 'Dict[str, Any]'",
+        "fetch_rates": "(self, num_iid: 'str', **creds) -> 'Dict[str, Any]'"
+      }
+    },
+    "JdOpenClient": {
+      "bases": [
+        "_OpenGatewayClientBase"
+      ],
+      "methods": {
+        "call": "(self, method: 'str', biz_params: 'Optional[Dict[str, Any]]' = None, app_key: 'str' = '', app_secret: 'str' = '', access_token: 'str' = '', refresh_token: 'str' = '', store_id: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'Dict[str, Any]'",
+        "fetch_orders": "(self, start_date: 'str' = '', end_date: 'str' = '', **creds) -> 'Dict[str, Any]'",
+        "fetch_skus": "(self, page: 'str' = '1', page_size: 'str' = '100', **creds) -> 'Dict[str, Any]'",
+        "fetch_prices": "(self, sku_ids: 'Optional[List[str]]' = None, **creds) -> 'Dict[str, Any]'",
+        "fetch_inventory": "(self, sku_ids: 'Optional[List[str]]' = None, **creds) -> 'Dict[str, Any]'"
+      }
+    },
+    "PddOpenClient": {
+      "bases": [
+        "_OpenGatewayClientBase"
+      ],
+      "methods": {
+        "call": "(self, api_type: 'str', biz_params: 'Optional[Dict[str, Any]]' = None, client_id: 'str' = '', client_secret: 'str' = '', access_token: 'str' = '', refresh_token: 'str' = '', store_id: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'Dict[str, Any]'",
+        "fetch_orders": "(self, start_updated_at: 'int' = 0, end_updated_at: 'int' = 0, **creds) -> 'Dict[str, Any]'",
+        "fetch_goods": "(self, goods_ids: 'List[str]', **creds) -> 'Dict[str, Any]'",
+        "fetch_prices": "(self, goods_ids: 'Optional[List[str]]' = None, **creds) -> 'Dict[str, Any]'",
+        "fetch_inventory": "(self, goods_ids: 'Optional[List[str]]' = None, **creds) -> 'Dict[str, Any]'"
+      }
+    },
+    "DouyinEcomClient": {
+      "bases": [
+        "_OpenGatewayClientBase"
+      ],
+      "methods": {
+        "call": "(self, method: 'str', biz_params: 'Optional[Dict[str, Any]]' = None, app_key: 'str' = '', app_secret: 'str' = '', access_token: 'str' = '', refresh_token: 'str' = '', store_id: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'Dict[str, Any]'",
+        "fetch_orders": "(self, create_time_start: 'int' = 0, create_time_end: 'int' = 0, **creds) -> 'Dict[str, Any]'",
+        "fetch_products": "(self, page: 'int' = 0, size: 'int' = 100, **creds) -> 'Dict[str, Any]'",
+        "fetch_prices": "(self, product_ids: 'Optional[List[str]]' = None, **creds) -> 'Dict[str, Any]'",
+        "fetch_inventory": "(self, product_ids: 'Optional[List[str]]' = None, **creds) -> 'Dict[str, Any]'"
+      }
+    },
+    "TikTokShopClient": {
+      "bases": [
+        "_OpenGatewayClientBase"
+      ],
+      "methods": {
+        "_request": "(self, http_method: 'str', path: 'str', query: 'Optional[Dict[str, Any]]' = None, body: 'Optional[Dict[str, Any]]' = None, app_key: 'str' = '', app_secret: 'str' = '', access_token: 'str' = '', refresh_token: 'str' = '', store_id: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'Dict[str, Any]'",
+        "fetch_shop_cipher": "(self, **creds) -> 'Dict[str, Any]'",
+        "fetch_products": "(self, page_size: 'int' = 100, **creds) -> 'Dict[str, Any]'",
+        "search_orders": "(self, create_time_ge: 'int' = 0, create_time_lt: 'int' = 0, **creds) -> 'Dict[str, Any]'",
+        "fetch_prices": "(self, product_ids: 'Optional[List[str]]' = None, **creds) -> 'Dict[str, Any]'",
+        "fetch_inventory": "(self, product_ids: 'Optional[List[str]]' = None, **creds) -> 'Dict[str, Any]'"
+      }
+    },
+    "Alibaba1688Client": {
+      "bases": [
+        "object"
+      ],
+      "methods": {
+        "__init__": "(self) -> 'None'",
+        "_resolve": "(self, app_key: 'str' = '', app_secret: 'str' = '', access_token: 'str' = '', refresh_token: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'tuple'",
+        "is_available": "(self, app_key: 'str' = '', app_secret: 'str' = '', access_token: 'str' = '', refresh_token: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'bool'",
+        "_access_token": "(self, app_key: 'str' = '', app_secret: 'str' = '', access_token: 'str' = '', refresh_token: 'str' = '', store_id: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'str'",
+        "fetch_token": "(self, app_key: 'str' = '', app_secret: 'str' = '', refresh_token: 'str' = '', code: 'str' = '', redirect_uri: 'str' = '') -> 'str'",
+        "call": "(self, namespace: 'str', api_name: 'str', biz_params: 'Optional[Dict[str, Any]]' = None, version: 'str' = '1', app_key: 'str' = '', app_secret: 'str' = '', access_token: 'str' = '', refresh_token: 'str' = '', store_id: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'Dict[str, Any]'",
+        "fetch_prices": "(self, product_ids: 'Optional[List[str]]' = None, **creds) -> 'Dict[str, Any]'",
+        "fetch_inventory": "(self, product_ids: 'Optional[List[str]]' = None, **creds) -> 'Dict[str, Any]'"
+      }
+    },
+    "XiaohongshuClient": {
+      "bases": [
+        "_OpenGatewayClientBase"
+      ],
+      "methods": {
+        "get_access_token": "(self, app_key: 'str' = '', app_secret: 'str' = '', refresh_token: 'str' = '', code: 'str' = '') -> 'str'",
+        "call": "(self, method: 'str', biz_params: 'Optional[Dict[str, Any]]' = None, app_key: 'str' = '', app_secret: 'str' = '', access_token: 'str' = '', refresh_token: 'str' = '', store_id: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'Dict[str, Any]'",
+        "fetch_prices": "(self, product_ids: 'Optional[List[str]]' = None, **creds) -> 'Dict[str, Any]'",
+        "fetch_inventory": "(self, product_ids: 'Optional[List[str]]' = None, **creds) -> 'Dict[str, Any]'",
+        "fetch_orders": "(self, start_time: 'int' = 0, end_time: 'int' = 0, **creds) -> 'Dict[str, Any]'"
+      }
+    },
+    "XianyuClient": {
+      "bases": [
+        "TaobaoTopClient"
+      ],
+      "methods": {
+        "fetch_prices": "(self, product_ids: 'Optional[List[str]]' = None, **creds) -> 'Dict[str, Any]'"
+      }
+    },
+    "CommercePlatformClient": {
+      "bases": [
+        "object"
+      ],
+      "methods": {
+        "is_available": "(self, platform: 'str', api_key: 'str' = '') -> 'bool'",
+        "_headers": "(self, platform: 'str', api_key: 'str') -> 'Dict[str, str]'",
+        "_amazon_creds": "(store_creds: \"Optional['StoreCredentials']\") -> 'Dict[str, str]'",
+        "fetch_prices": "(self, platform: 'str', product_ids: 'List[str]', api_key: 'str' = '', base_url: 'str' = '', marketplace_id: 'str' = '', region: 'str' = 'na', store_id: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'Dict[str, Any]'",
+        "fetch_inventory": "(self, platform: 'str', skus: 'List[str]', api_key: 'str' = '', base_url: 'str' = '', marketplace_id: 'str' = '', region: 'str' = 'na', seller_id: 'str' = '', store_id: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'Dict[str, Any]'",
+        "fetch_reviews": "(self, platform: 'str', product_id: 'str', api_key: 'str' = '', base_url: 'str' = '', marketplace_id: 'str' = '', region: 'str' = 'na', store_id: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'Dict[str, Any]'",
+        "fetch_sales_report": "(self, platform: 'str', period: 'str' = '', api_key: 'str' = '', base_url: 'str' = '', report_type: 'str' = '', marketplace_id: 'str' = '', region: 'str' = 'na', store_id: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'Dict[str, Any]'",
+        "fetch_competitors": "(self, platform: 'str', keyword: 'str', api_key: 'str' = '', base_url: 'str' = '', marketplace_id: 'str' = '', region: 'str' = 'na', store_id: 'str' = '', store_creds: \"Optional['StoreCredentials']\" = None) -> 'Dict[str, Any]'",
+        "fetch_ad_metrics": "(self, platform: 'str', ad_ids: 'List[str]', metrics: 'List[str]', api_key: 'str' = '', base_url: 'str' = '', profile_id: 'str' = '', region: 'str' = 'na') -> 'Dict[str, Any]'"
+      }
+    },
+    "PublishPlatformClient": {
+      "bases": [
+        "object"
+      ],
+      "methods": {
+        "is_available": "(self, platform: 'str', access_token: 'str' = '') -> 'bool'",
+        "publish": "(self, platform: 'str', video_url: 'str', title: 'str', tags: 'Optional[List[str]]' = None, access_token: 'str' = '', cover_url: 'str' = '', description: 'str' = '', base_url: 'str' = '') -> 'Dict[str, Any]'"
+      }
+    }
+  }
+}

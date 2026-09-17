@@ -1607,9 +1607,9 @@ class Agent:
         if self.config.enable_skill_packer:
             try:
                 from neurova.evolution import AutoSkillBuilder
-
+                from neurova.skills.skill_service import SkillService
                 self.skill_packer = AutoSkillBuilder(
-                    min_pattern_occurrences=3,  # 修复 P0-8: 参数名 min_occurrences → min_pattern_occurrences（对齐 skill_encapsulation.py 签名）
+                    evidence_store=SkillService(agent_id=self.config.agent_id).creation_evidence,
                     min_success_rate=0.7,
                 )
                 logger.info("Agent %s: AutoSkillBuilder 已初始化", self.config.name)

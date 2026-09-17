@@ -25,6 +25,8 @@ vi.mock('@/api/modules/experience', () => ({
   getExperienceStats: vi.fn().mockResolvedValue({ data: { total_experiences: 0, success_rate: 0, avg_proficiency: 0, top_categories: [] } }),
   createExperience: vi.fn(),
   deleteExperience: vi.fn(),
+  // 页面排行区消费（items/total 信封）；缺导出会报 "No export defined on mock" 噪声
+  getExperienceRanking: vi.fn().mockResolvedValue({ data: { items: [], total: 0 } }),
 }))
 
 vi.mock('@/composables/useAgentPage', async () => {

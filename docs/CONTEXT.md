@@ -21,10 +21,20 @@ Neurova 是一个功能完整的 AI Agent 框架，核心特点是为每个 Agen
 
 ### Agent 核心 (`neurova/agent_core.py`)
 
-Agent 类是系统的心脏，通过深度模块化模式逐步拆分：
+Agent 类是系统的心脏，通过深度模块化模式逐步拆分。
+
+> ⚠️ **尺寸反弹警示（2026-09-16 实测）**：本轮重构曾把文件做到 1621 行，
+> 但因无棘轮守卫，新功能持续回填至 2182 行（超拆分前体量）。
+> 已立项分阶段拆分（见 `docs/04-plans/agent-core-decomposition-plan.md`），
+> Phase 0（尺寸棘轮 + 公开契约快照守卫，常驻 CI）与 Phase 1（轮次状态
+> 门面 `neurova/agent/turn_state.py`）已完成；目标 ≤900 行/类 ≤400 行。
+
+当前实测：**agent_core.py 2159 行；Agent 类 1122 行 / 57 方法**
+（棘轮基线 `tests/unit/agent/agent_core_size_baseline.json` 只降不升）。
 
 ```
-Agent (1621 行, 37 方法)
+Agent (2159 行文件, 类 1122 行/57 方法，拆分中)
+├── TurnState (agent/turn_state.py)    — 轮次级状态门面 (Phase 1)
 ├── MemCore (mem_core.py)              — 记忆检索/保存/温度管理
 ├── ContextOrchestrator                — 上下文构建/系统提示/工具描述
 ├── ToolExecutor (tool_executor.py)    — 工具调用解析/执行/后处理钩子
@@ -184,7 +194,25 @@ Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue，82 个页面组件：
 
 ## 当前重构状态
 
-### 已完成
+### 进行中：agent_core 分阶段拆分（2026-09-16 立项）
+
+方案与逐阶段验收记录：`docs/04-plans/agent-core-decomposition-plan.md`。
+
+- [x] Phase 0 — 尺寸棘轮 + 公开契约快照守卫（`test_agent_core_size_ratchet.py`
+      17 用例已入 CI 受保护子集；契约守卫 30 用例）
+- [x] Phase 1 — 轮次状态门面 `neurova/agent/turn_state.py`（17 API 实现迁出；
+      顺手根治 `_collect_tool_messages` 死列表读、`_set_reasoning` 死存储写两处缺陷）
+- [ ] Phase 2 — 模型/循环切换 → `agent/model_switch.py`
+- [ ] Phase 3 — 技能门面 → `agent/skill_facade.py` (~150 行)
+- [ ] Phase 4 — 记忆装配残部并入 SubSystemContainer (~173 行)
+- [ ] Phase 5 — 循环检测转发层 (~12 行)
+- [ ] Phase 6 — 对话入口收敛 → `agent/chat_runtime.py` (~300 行，最高风险)
+- [ ] Phase 7 — 收尾 (identity/router/subagent 等 ~110 行)
+
+> 已知教训：拆分若无棘轮守卫，成果会被后续功能回填吃掉（1621→2182 反弹实证）。
+> Phase 0 的棘轮已堵住这条路。
+
+### 已完成（拆分前置历史）
 - [x] MemCore 提取 (记忆核心)
 - [x] ContextOrchestrator 提取 (上下文构建)
 - [x] ToolExecutor 提取 (工具执行)
@@ -192,7 +220,7 @@ Vue 3 + TypeScript + Vite + Pinia + Ant Design Vue，82 个页面组件：
 - [x] ChatPipeline 提取 (对话管线, 6步)
 - [x] 循环导入修复 (延迟导入)
 - [x] debug_log 清理
-- [x] Agent 类深度模块化重构 (2180→1621 行)
+- [x] Agent 类深度模块化重构 (2180→1621 行；后回涨至 2182，已由棘轮接管)
 - [x] 浏览器自动化集成 (browser-skill)
 - [x] 文档对齐 (README.md 更新)
 - [x] 安全增强 (P2 安全问题修复)

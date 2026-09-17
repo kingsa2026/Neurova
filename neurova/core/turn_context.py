@@ -101,6 +101,8 @@ def reset_turn_tool_messages() -> None:
     """
     _tool_messages_var.set(None)
     _skill_funnel_var.set(None)
+    from neurova.skills.creation_governance import begin_task
+    begin_task()
 
 
 def append_turn_tool_messages(records: List[Dict[str, Any]]) -> None:

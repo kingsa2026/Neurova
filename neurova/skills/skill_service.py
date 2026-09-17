@@ -132,7 +132,10 @@ class SkillService:
         # AGENTS.md 规定：threading.RLock 用于共享状态
         # 保护 _skills / _save_manifest 在并发安装/卸载下的原子性
         # 对照：pool_service.py:70, market_importer.py:100, evolution_engine.py:99
-        self._lock = threading.RLock()
+        from neurova.skills.creation_governance import EvidenceStore
+
+        self.creation_evidence = EvidenceStore(self.skills_dir, agent_id)
+        self._lock = self.creation_evidence.lock
 
         # 确保目录存在
         self.skills_dir.mkdir(parents=True, exist_ok=True)
@@ -191,6 +194,34 @@ class SkillService:
         except Exception as e:
             self._logger.error("Failed to save manifest: %s", e)
             return False
+
+    def _creation_decision(self, manifest, automatic=False, db=None):
+        from neurova.skills.creation_governance import manifest_fingerprint
+
+        key = manifest_fingerprint(manifest)
+        config = manifest.get("config") or {}
+        if automatic and not self.creation_evidence.eligible(
+            config.get("tool_sequence"), config.get("task_purpose")
+            or config.get("context_template") or manifest.get("description", ""), db
+        ):
+            return {"success": False, "error": "需要至少三个独立真实成功任务证据", "code": "insufficient_evidence"}
+        for skill_id, entry in self._skills.items():
+            existing = {**entry, **(entry.get("manifest") or {})}
+            if key and manifest_fingerprint(existing) == key:
+                return {"success": True, "duplicate": True, "skill_id": skill_id}
+        return None
+
+    def create_automatic_skill(self, skill_id, name, description, config, version="1.0.0"):
+        manifest = {"id": skill_id, "name": name, "description": description, "config": config}
+        with self.creation_evidence.transaction() as db:
+            self._load_skills()
+            decision = self._creation_decision(manifest, automatic=True, db=db)
+            if decision:
+                return decision
+            if skill_id in self._skills:
+                return {"success": False, "error": "Skill ID already exists with different steps"}
+            ok = self._register_metadata(skill_id, name, description, version, config)
+            return {"success": ok, "skill_id": skill_id, **({} if ok else {"error": "Persistence failed"})}
 
     def install_skill(
         self,
@@ -265,7 +296,12 @@ class SkillService:
                     }
 
                 # 复制技能到技能目录（加锁防止并发写）
-                with self._lock:
+                with self.creation_evidence.transaction() as db:
+                    self._load_skills()
+                    decision = self._creation_decision(
+                        manifest, automatic=manifest.get("source") in {"auto", "synthesized", "llm_created"}, db=db)
+                    if decision:
+                        return decision
                     # P0-4 安装门收口：本地目录/zip/
                     # /skill-pool/install-from-zip 全部汇聚到本咽喉——先复制到
                     # .incoming 暂存再扫描，被拦即删暂存、旧版本原地保留。
@@ -292,13 +328,16 @@ class SkillService:
                     # V 轮根治：既有账本字段必须保留——旧实现整条替换，
                     # usage/trust/修订链在重装瞬间清零（apply_transfer 当初
                     # 特意绕开本咽喉的"force 清零坑"，本体一直没修）。
+                    from neurova.evolution.skill_review_gate import skill_review_gate_enabled
                     _prev = self._skills.get(skill_id) or {}
                     self._skills[skill_id] = {
                         "id": skill_id,
                         "name": manifest.get("name", skill_id),
                         "version": manifest.get("version", "1.0.0"),
                         "description": manifest.get("description", ""),
-                        "enabled": bool(_prev.get("enabled", True)),
+                        "enabled": bool(_prev.get("enabled", not (
+                            manifest.get("source") in {"auto", "synthesized", "llm_created"}
+                            and skill_review_gate_enabled()))),
                         "installed_at": datetime.datetime.now().isoformat(),
                         "path": str(target_dir),
                         # Wave H-W1 归属坐标（安装目标库由实例目录决定；
@@ -768,6 +807,20 @@ class SkillService:
             return {"success": False, "error": str(e)}
 
     def register_auto_skill(
+        self, skill_id, name, description="", version="1.0.0", config=None,
+        manifest_source="auto", pool_type="agent", owner_user_id="",
+    ) -> bool:
+        with self.creation_evidence.transaction() as db:
+            self._load_skills()
+            manifest = {"description": description, "config": config or {}}
+            decision = self._creation_decision(manifest, automatic=manifest_source in
+                                               {"auto", "synthesized", "llm_created"}, db=db)
+            if decision:
+                return False  # Legacy bool API: duplicate is not a new registration.
+            return self._register_metadata(skill_id, name, description, version, config,
+                                           manifest_source, pool_type, owner_user_id)
+
+    def _register_metadata(
         self,
         skill_id: str,
         name: str,
@@ -813,12 +866,15 @@ class SkillService:
                     self._logger.warning("register_auto_skill: skill_id=%s 已存在, 跳过", skill_id)
                     return False
 
+                from neurova.evolution.skill_review_gate import skill_review_gate_enabled
+
                 self._skills[skill_id] = {
                     "id": skill_id,
                     "name": name,
                     "version": version,
                     "description": description,
-                    "enabled": True,
+                    "enabled": not (manifest_source in {"auto", "synthesized", "llm_created"}
+                                    and skill_review_gate_enabled()),
                     "installed_at": datetime.datetime.now().isoformat(),
                     "path": "",  # 自动技能无文件路径
                     "pool_type": str(pool_type or "agent"),
@@ -839,7 +895,9 @@ class SkillService:
                     "successes_since_failure": 0,
                     "observed_task_ids": [],
                 }
-                self._save_manifest()
+                if not self._save_manifest():
+                    self._skills.pop(skill_id, None)
+                    return False
                 self._logger.info("Registered auto skill: %s", skill_id)
                 return True
         except Exception as e:

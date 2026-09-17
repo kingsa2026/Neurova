@@ -47,12 +47,16 @@ export interface ProactiveAction {
   response_received: boolean
 }
 
+/** BE GET/PUT /growth/personality envelope.data 真实契约（2026-09-16 契约收口）。
+ * 曾含幻影字段 style/tone——BE 从不返回（真实字段是 communication_style/decision_style），
+ * 页面标签恒空。 */
 export interface PersonalityProfile {
   agent_id: string
+  timestamp?: number
   traits: Record<string, number>
-  style?: string
-  tone?: string
-  updated_at?: string
+  values: string[]
+  communication_style: string
+  decision_style: string
 }
 
 /** MotivationLedger 真实快照（GET /growth/motivation envelope.data） */
@@ -96,16 +100,15 @@ function normalizeReflection(r: any): GrowthReflection {
   }
 }
 
-/** Get growth reflections for an agent（limit/offset 对齐 BE Query；返回归一数组）。 */
+/** Get growth reflections for an agent（limit/offset 对齐 BE Query；envelope.data 归一数组，2026-09-16 契约收口）。 */
 export async function getReflections(agentId: string, params?: { limit?: number; offset?: number }): Promise<GrowthReflection[]> {
-  const raw: any = await api.get(`${BASE}/reflection`, { params: { ...params, agent_id: agentId } })
-  const list = Array.isArray(raw) ? raw : (Array.isArray(raw?.items) ? raw.items : [])
-  return list.map(normalizeReflection)
+  const res: any = await api.get(`${BASE}/reflection`, { params: { ...params, agent_id: agentId } })
+  return ((res?.data ?? []) as any[]).map(normalizeReflection)
 }
 
-/** Create a reflection. 契约对齐 2026-09-15：agent_id 走 query；insights/confidence 真实入库。 */
+/** Create a reflection. 契约对齐：agent_id 走 query；insights/confidence 真实入库；envelope.data 为创建后条目。 */
 export function createReflection(agentId: string, content: string, category?: string, insights?: string[], confidence?: number) {
-  return api.post<GrowthReflection>(`${BASE}/reflection`, {
+  return api.post<ApiResponse<GrowthReflection>>(`${BASE}/reflection`, {
     content,
     reflection_type: category ?? 'general',
     insights: insights ?? [],
@@ -118,15 +121,15 @@ export function getCapabilities(agentId: string) {
   return api.get<ApiResponse<GrowthCapabilities | null>>(`${BASE}/capabilities`, { params: { agent_id: agentId } })
 }
 
-/** Get growth questions. 契约对齐 2026-09-15：BE 用 limit/offset/answered 查询参，返回裸数组（含 asked 终态）。 */
+/** Get growth questions. 契约对齐：BE 用 limit/offset/answered 查询参；envelope.data 列表含 asked 终态。 */
 export async function getQuestions(agentId: string, params?: { limit?: number; offset?: number; answered?: boolean }): Promise<GrowthQuestion[]> {
-  const raw: any = await api.get(`${BASE}/questions`, { params: { ...params, agent_id: agentId } })
-  return Array.isArray(raw) ? raw : []
+  const res: any = await api.get(`${BASE}/questions`, { params: { ...params, agent_id: agentId } })
+  return (res?.data ?? []) as GrowthQuestion[]
 }
 
-/** Create a growth question (agent_id 走 query——BE Query 参数，原 body 传法会被忽略落 default)。 */
+/** Create a growth question (agent_id 走 query——BE Query 参数，原 body 传法会被忽略落 default；envelope.data 为创建后条目)。 */
 export function createQuestion(agentId: string, question: string, questionType = 'curiosity') {
-  return api.post<GrowthQuestion>(`${BASE}/questions`, { question, question_type: questionType }, { params: { agent_id: agentId } })
+  return api.post<ApiResponse<GrowthQuestion>>(`${BASE}/questions`, { question, question_type: questionType }, { params: { agent_id: agentId } })
 }
 
 /** Answer a question. 契约对齐 2026-09-15：BE 是 PUT + query(answer)，原 POST+body 恒 405/参数丢失。 */
@@ -134,10 +137,10 @@ export function answerQuestion(agentId: string, questionId: string, answer: stri
   return api.put<unknown>(`${BASE}/questions/${questionId}/answer`, null, { params: { agent_id: agentId, answer } })
 }
 
-/** Get proactive actions（BE 裸数组；引擎未接线时如实返回空）。 */
+/** Get proactive actions（envelope.data 列表；引擎未接线时如实为空）。 */
 export async function getProactiveActions(agentId: string, params?: { status?: string }): Promise<ProactiveAction[]> {
-  const raw: any = await api.get(`${BASE}/proactive`, { params: { ...params, agent_id: agentId } })
-  return Array.isArray(raw) ? raw : []
+  const res: any = await api.get(`${BASE}/proactive`, { params: { ...params, agent_id: agentId } })
+  return (res?.data ?? []) as ProactiveAction[]
 }
 
 /** Get motivation state. */
@@ -155,19 +158,19 @@ export function updatePersonality(agentId: string, data: Partial<PersonalityProf
   return api.put<ApiResponse<PersonalityProfile>>(`${BASE}/personality`, data, { params: { agent_id: agentId } })
 }
 
-/** Get constitution rules. */
+/** Get constitution rules（envelope.data 列表）。 */
 export function getConstitution(agentId: string) {
-  return api.get<ConstitutionRule[]>(`${BASE}/constitution/rules`, { params: { agent_id: agentId } })
+  return api.get<ApiResponse<ConstitutionRule[]>>(`${BASE}/constitution/rules`, { params: { agent_id: agentId } })
 }
 
-/** Add a constitution rule. */
+/** Add a constitution rule（envelope.data 为创建后规则）。 */
 export function addConstitutionRule(agentId: string, rule: string, priority?: number) {
-  return api.post<ConstitutionRule>(`${BASE}/constitution/rules`, { content: rule, priority }, { params: { agent_id: agentId } })
+  return api.post<ApiResponse<ConstitutionRule>>(`${BASE}/constitution/rules`, { content: rule, priority }, { params: { agent_id: agentId } })
 }
 
-/** Update a constitution rule (partial: content/priority/enabled). */
+/** Update a constitution rule (partial: content/priority/enabled；envelope.data 为更新后规则)。 */
 export function updateConstitutionRule(agentId: string, ruleId: string, data: Partial<ConstitutionRule>) {
-  return api.put<ConstitutionRule>(`${BASE}/constitution/rules/${ruleId}`, data, { params: { agent_id: agentId } })
+  return api.put<ApiResponse<ConstitutionRule>>(`${BASE}/constitution/rules/${ruleId}`, data, { params: { agent_id: agentId } })
 }
 
 /** Delete a constitution rule. */

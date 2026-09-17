@@ -166,12 +166,14 @@ def check_imports() -> tuple[bool, int, int, list[str]]:
         try:
             with redirect_stdout(sink), redirect_stderr(sink):
                 importlib.import_module(mod)
-        except ModuleNotFoundError as exc:
+        except ImportError as exc:
+            # ImportError 族含 from-import 形态（"from X import Y" 失败时 exc.name 指向 X），
+            # 仅捕获 ModuleNotFoundError 会漏掉可选包的该形态，误报为失败
             missing = (exc.name or "").split(".")[0]
             if missing in KNOWN_OPTIONAL_DEPS:
                 optional_skipped += 1
             else:
-                failed.append(f"{mod}  (ModuleNotFoundError: {exc.name})")
+                failed.append(f"{mod}  (ImportError: {exc.name})")
         except BaseException as exc:  # noqa: BLE001 - 巡检需捕获一切导入期异常
             failed.append(f"{mod}  ({type(exc).__name__}: {exc})")
 

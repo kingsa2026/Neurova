@@ -30,7 +30,8 @@ class _FakeAgent:
 
 @pytest.fixture()
 def store(tmp_path, monkeypatch):
-    monkeypatch.setattr(growth, "_PERSONALITY_DIR", str(tmp_path / "personality"))
+    # 2026-09-16 拆分后持久层常量住叶子模块（import 时值绑定，须 patch 真身）
+    monkeypatch.setattr("neurova.api.endpoints.personality_persistence.PERSONALITY_DIR", str(tmp_path / "personality"))
 
     def _fake(agent_id="default", *a, **k):
         return _FakeAgent()
@@ -51,13 +52,27 @@ def _path(tmp_path, agent_id="a1"):
 
 
 class TestPersonalityRoundTrip:
+    """FE 读链契约（2026-09-16 个性档案空数据修复）：
+    GET/PUT 响应统一 envelope {code, message, data:{...}}——与 /growth/capabilities、
+    /growth/motivation 同族；FE growth.ts 按 res.data 取 traits。裸对象返回曾致
+    FE 拦截器拿到 body 后 .data 恒 undefined → 个性档案恒空。"""
+
+    def test_get_envelope_shape(self, store):
+        client, _ = store
+        d = client.get("/api/v1/growth/personality", params={"agent_id": "a1"}).json()
+        assert d["code"] == 0
+        assert isinstance(d["data"], dict), "响应必须是 {code,message,data} envelope，data 含 traits/values/风格"
+        assert set(d["data"].keys()) >= {"traits", "values", "communication_style", "decision_style"}
+
     def test_put_traits_persist_and_read_back(self, store):
         client, tmp = store
         traits = {"openness": 0.8, "agreeableness": 0.65, "extraversion": 0.2}
         r = client.put("/api/v1/growth/personality", params={"agent_id": "a1"},
                        json={"traits": traits})
         assert r.status_code == 200, r.text
-        assert r.json()["traits"] == traits
+        body = r.json()
+        assert body["code"] == 0
+        assert body["data"]["traits"] == traits
         f = _path(tmp)
         assert f.exists(), "personality JSON 未落盘"
         assert json.loads(f.read_text(encoding="utf-8"))["traits"] == traits
@@ -67,7 +82,7 @@ class TestPersonalityRoundTrip:
         client.put("/api/v1/growth/personality", params={"agent_id": "a1"},
                    json={"traits": {"curiosity": 0.9}})
         d = client.get("/api/v1/growth/personality", params={"agent_id": "a1"}).json()
-        assert d["traits"] == {"curiosity": 0.9}
+        assert d["data"]["traits"] == {"curiosity": 0.9}
 
     def test_survives_restart(self, store):
         """独立文件即持久源：重发 GET（模拟新进程读盘）值仍在。"""
@@ -75,8 +90,8 @@ class TestPersonalityRoundTrip:
         client.put("/api/v1/growth/personality", params={"agent_id": "a1"},
                    json={"traits": {"discipline": 0.4}, "communication_style": "direct"})
         d = client.get("/api/v1/growth/personality", params={"agent_id": "a1"}).json()
-        assert d["traits"] == {"discipline": 0.4}
-        assert d["communication_style"] == "direct"
+        assert d["data"]["traits"] == {"discipline": 0.4}
+        assert d["data"]["communication_style"] == "direct"
 
     def test_partial_update_merges(self, store):
         client, _ = store
@@ -85,8 +100,8 @@ class TestPersonalityRoundTrip:
         client.put("/api/v1/growth/personality", params={"agent_id": "a1"},
                    json={"traits": {"a": 0.2}})
         d = client.get("/api/v1/growth/personality", params={"agent_id": "a1"}).json()
-        assert d["traits"] == {"a": 0.2}
-        assert d["values"] == ["诚实"]
+        assert d["data"]["traits"] == {"a": 0.2}
+        assert d["data"]["values"] == ["诚实"]
 
     def test_missing_agent_404(self, store, monkeypatch):
         client, _ = store

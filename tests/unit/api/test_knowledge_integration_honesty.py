@@ -43,12 +43,14 @@ def test_sync_kb_config_endpoint_guards(monkeypatch):
     from fastapi import HTTPException
 
     from neurova.api.endpoints import knowledge as kmod
+    from neurova.api.endpoints import knowledge_remote as kb_remote
 
     storage = MagicMock()
     storage.get_config_by_id.return_value = {
         "id": "kbc1", "user_id": "u9", "source_type": "custom", "settings": {},
     }
-    monkeypatch.setattr(kmod, "_get_kb_storage", lambda: storage)
+    # 拆分后真身在 knowledge_remote（2026-09-16 模块化），patch 聚合器无效
+    monkeypatch.setattr(kb_remote, "_get_kb_storage", lambda: storage)
     req = MagicMock()
     req.query_params = {}
     try:

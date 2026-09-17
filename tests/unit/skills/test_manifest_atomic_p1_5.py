@@ -16,6 +16,7 @@ from neurova.evolution.skill_improver import (
     get_skill_improver,
     reset_skill_improver,
 )
+from tests.unit.skills.creation_helpers import register_proven_skill
 from neurova.skills.skill_service import SkillService
 
 
@@ -57,7 +58,7 @@ def env(tmp_path):
     registry = _FakeRegistry()
     skill = _make_skill()
     registry.register_skill(skill)
-    svc.register_auto_skill("gen_skill", name="gen_skill", config={"tool_sequence": ["a", "b"]})
+    register_proven_skill(svc, "gen_skill", name="gen_skill", config={"tool_sequence": ["a", "b"]})
     return svc, registry, skill
 
 
@@ -68,7 +69,7 @@ def test_save_manifest_atomic_via_tmp_replace(tmp_path, monkeypatch):
     import os as _os
 
     svc = SkillService(agent_id="aw", skills_dir=str(tmp_path / "s"))
-    svc.register_auto_skill("x1", name="x1")
+    register_proven_skill(svc, "x1", name="x1")
     calls = []
     real_replace = _os.replace
     monkeypatch.setattr(_os, "replace", lambda a, b: (calls.append(a), real_replace(a, b))[1])
@@ -85,7 +86,7 @@ def test_save_manifest_failure_keeps_old_content_intact(tmp_path, monkeypatch):
     import os as _os
 
     svc = SkillService(agent_id="aw2", skills_dir=str(tmp_path / "s"))
-    svc.register_auto_skill("x1", name="x1")
+    register_proven_skill(svc, "x1", name="x1")
     manifest = tmp_path / "s" / "manifest.json"
     before = manifest.read_text(encoding="utf-8")
 

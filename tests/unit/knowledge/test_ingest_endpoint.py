@@ -81,10 +81,11 @@ def test_import_async_returns_task_and_stages_file(env):
 def test_import_sync_default_unchanged(env, monkeypatch):
     """sync 缺省=现行为（只提升不下降）：仍走 _import_file_data 返回 items。"""
     client, queue, _ = env
-    from neurova.api.endpoints import knowledge as kn
+    from neurova.api.endpoints import knowledge_ingestion as kn_ingestion
 
+    # 拆分后真身在 knowledge_ingestion（2026-09-16 模块化），patch 聚合器无效
     monkeypatch.setattr(
-        kn, "_import_file_data",
+        kn_ingestion, "_import_file_data",
         lambda data, fn, ag, user: ([{"knowledge_id": "k1", "content": "x"}], "ok"),
     )
     r = client.post("/api/v1/knowledge/import?agent_id=ag", files={"file": ("a.txt", b"x", "text/plain")})

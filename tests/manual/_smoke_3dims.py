@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from neurova.context_pool_registry import ContextPoolRegistry
 from neurova.context.pool_models import ContextInput, ContextSource

@@ -36,8 +36,8 @@ except ImportError:
     REQUESTS_AVAILABLE = False
 
 try:
-    from ecdsa import SigningKey as _Ed25519SigningKey
-    from ecdsa.curves import Ed25519 as _Ed25519Curve
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey as _Ed25519SigningKey
+    # 注：cryptography 为硬依赖，此 try 块恒成功；保留形态与降级标志以最小化改动面
 
     ED25519_AVAILABLE = True
 except ImportError:
@@ -496,7 +496,7 @@ class QQAdapter(ChannelAdapter):
         while len(seed) < 32:
             seed = seed * 2
         seed = seed[:32]
-        return _Ed25519SigningKey.from_string(seed.encode("utf-8"), curve=_Ed25519Curve)
+        return _Ed25519SigningKey.from_private_bytes(seed.encode("utf-8"))
 
     def verify_webhook_signature(self, headers: Dict[str, str], body: str) -> bool:
         """验证 QQ 平台 Webhook 推送签名（官方 Ed25519 方案）
@@ -506,7 +506,7 @@ class QQAdapter(ChannelAdapter):
         - 验签密钥: 由 Bot Secret 派生的公钥（平台侧持有同一 Secret，可派生相同密钥对）
         """
         if not self.secret or not ED25519_AVAILABLE:
-            logging.error("QQ Webhook 验签不可用: 缺少 secret 或 ecdsa 库（pip install ecdsa）")
+            logging.error("QQ Webhook 验签不可用: 缺少 secret 或 Ed25519 支持（cryptography）")
             return False
 
         signature_hex = (headers.get("X-Signature-Ed25519") or "").strip()
@@ -532,7 +532,9 @@ class QQAdapter(ChannelAdapter):
 
         message = timestamp.encode("utf-8") + body.encode("utf-8")
         try:
-            return signing_key.get_verifying_key().verify(signature, message)
+            # cryptography 的 verify() 成功返回 None（旧 ecdsa 返回 bool），需显式归一
+            signing_key.public_key().verify(signature, message)
+            return True
         except Exception:
             logging.warning("QQ Webhook 验签失败: 签名不匹配")
             return False
@@ -545,7 +547,7 @@ class QQAdapter(ChannelAdapter):
         """
         signing_key = self._derive_webhook_signing_key()
         if signing_key is None:
-            raise RuntimeError("Ed25519 签名不可用: 缺少 secret 或 ecdsa 库（pip install ecdsa）")
+            raise RuntimeError("Ed25519 签名不可用: 缺少 secret 或 Ed25519 支持（cryptography）")
 
         message = event_ts.encode("utf-8") + plain_token.encode("utf-8")
         signature = signing_key.sign(message)

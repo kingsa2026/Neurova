@@ -27,8 +27,7 @@ import types
 
 import pytest
 
-from ecdsa import SigningKey
-from ecdsa.curves import Ed25519
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey as SigningKey
 
 # 测试专用假值（非真实凭据）
 _FAKE_QQ_TOKEN = "unittest-fake-qq-token"
@@ -417,7 +416,7 @@ class TestQQWebhookEd25519:
         seed = self.SECRET
         while len(seed) < 32:
             seed = seed * 2
-        return SigningKey.from_string(seed[:32].encode("utf-8"), curve=Ed25519)
+        return SigningKey.from_private_bytes(seed[:32].encode("utf-8"))
 
     def _headers(self, sig, ts=None):
         return {"X-Signature-Ed25519": sig, "X-Signature-Timestamp": ts or self.TS}
@@ -465,8 +464,10 @@ class TestQQWebhookEd25519:
         resp = adapter.build_webhook_validation_response(plain_token, event_ts)
 
         assert resp["plain_token"] == plain_token
-        vk = self._derived_key().get_verifying_key()
-        assert vk.verify(bytes.fromhex(resp["signature"]), (event_ts + plain_token).encode("utf-8"))
+        # cryptography: verify 成功返回 None，失败抛 InvalidSignature（即测试失败）
+        self._derived_key().public_key().verify(
+            bytes.fromhex(resp["signature"]), (event_ts + plain_token).encode("utf-8")
+        )
 
 
 # ============================================================

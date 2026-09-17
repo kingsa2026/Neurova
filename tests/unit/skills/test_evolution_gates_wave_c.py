@@ -140,28 +140,37 @@ def test_same_source_observations_not_independent():
     assert not b._templates, "单源重复不得触发封装"
 
 
-def test_two_independent_sources_trigger():
+def test_three_independent_sources_trigger(tmp_path):
+    from neurova.skills.skill_service import SkillService
     b = _mk_builder()
-    for i, src in enumerate(["task-A", "task-B", "task-A"]):
-        b.observe(["file_read", "file_write"], success=True, metadata={"source_key": src})
-    assert b._templates, "两个独立来源成功应可封装"
+    b.evidence_store = SkillService("wave-c", skills_dir=str(tmp_path)).creation_evidence
+    steps = ["file_read", "file_write"]
+    for src in ["task-A", "task-B", "task-A"]:
+        b.evidence_store.record(src, steps, "report", True)
+        b.observe(steps, context="report", metadata={"source_key": src})
+    assert not b._templates
+    b.evidence_store.record("task-C", steps, "report", True)
+    b.observe(steps, context="report", metadata={"source_key": "task-C"})
+    assert b._templates
 
 
-def test_legacy_callers_without_source_compat():
-    """存量兼容：无 source_key 的调用方逐观测独立（原计数语义不回退）。"""
+def test_legacy_callers_without_source_rejected():
+    """匿名观察不是独立任务证据。"""
     b = _mk_builder()
     for _ in range(3):
         b.observe(["a", "b"], success=True)
-    assert b._templates
+    assert not b._templates
 
 
-def test_independent_gate_configurable():
+def test_independent_gate_cannot_lower_persistent_threshold(tmp_path):
+    from neurova.skills.skill_service import SkillService
     b = _mk_builder()
+    b.evidence_store = SkillService("wave-c", skills_dir=str(tmp_path)).creation_evidence
+    b.evidence_store.record("t1", ["x", "y"], "report", True)
     b._min_independent_successes = 1
-    b.observe(["x", "y"], success=True, metadata={"source_key": "t1"})
-    b.observe(["x", "y"], success=True, metadata={"source_key": "t1"})
-    b.observe(["x", "y"], success=True, metadata={"source_key": "t1"})
-    assert b._templates
+    for _ in range(3):
+        b.observe(["x", "y"], context="report", metadata={"source_key": "t1"})
+    assert not b._templates
 
 
 # ── P2-1 提交证据门 ────────────────────────────────────────

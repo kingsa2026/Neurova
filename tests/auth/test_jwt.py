@@ -3,7 +3,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from jose import jwt
+import jwt
 from datetime import datetime, timedelta, timezone
 
 SECRET_KEY = "test-secret"

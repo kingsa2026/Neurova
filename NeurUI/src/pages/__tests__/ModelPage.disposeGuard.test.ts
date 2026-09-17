@@ -58,13 +58,15 @@ import { message } from 'ant-design-vue'
 const messages = {
   common: { search: '搜索', cancel: '取消', save: '保存', success: '成功', error: '失败', close: '关闭', confirm: '确认', add: '添加', delete: '删除', edit: '编辑' },
   model: {
+    searchProviders: '搜索提供商…',
     title: '模型管理', providers: '服务商', models: '模型', settings: '设置', testConnection: '测试连接',
     connectionOk: '连接成功 {ms}', connectionFailed: '连接失败',
     modelManagement: '模型管理', discover: '发现模型', detectCaps: '检测能力', detectCapsTip: '检测',
     baseUrl: 'Base URL', apiKey: 'API Key', authMethod: '鉴权方式', genParams: '生成参数', genParamsDesc: 'JSON',
     advanced: '高级', headers: '请求头', addModel: '添加模型',
   },
-  nav: {}, ui: {},
+  nav: {},
+  ui: { providerNsc: '国家超算互联网', providerSensetime: '商汤', providerXiaomi: '小米' },
 }
 
 const globalStubs = {
