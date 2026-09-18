@@ -21,6 +21,7 @@ TDD 红灯测试: 工具层断点 zoom-out 根因修复
   H11 静默 except: pass
   H12 空 registry falsy 检查
 """
+
 import asyncio
 import importlib
 import threading
@@ -28,6 +29,8 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tests.repo_paths import REPO_ROOT, repo_str
+
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -468,10 +471,11 @@ class TestDeadCodeRemoved:
     def test_tool_pipeline_not_imported_in_production(self):
         """生产代码不应 import ToolExecutionPipeline。"""
         import subprocess
+        import sys
         # grep 生产代码（排除 tests/）确认无 import
         try:
             result = subprocess.run(
-                ["python", "-c", """
+                [sys.executable, "-c", """
 import ast, os, sys
 prod_files = []
 for root, dirs, files in os.walk('neurova'):
@@ -497,7 +501,7 @@ for pf in prod_files:
 if violations:
     print(','.join(violations))
 """],
-                capture_output=True, text=True, cwd="e:/项目/Neurova",
+                capture_output=True, text=True, cwd=str(REPO_ROOT),
                 timeout=30
             )
             violations = result.stdout.strip()
@@ -513,7 +517,7 @@ class TestFalsyRegistryCheckFixed:
 
     def test_router_uses_is_not_none(self):
         """router.py 的 `if skill_registry:` 应改为 `if skill_registry is not None:`。"""
-        with open("e:/项目/Neurova/neurova/router.py", "r", encoding="utf-8") as f:
+        with open(repo_str("neurova/router.py"), "r", encoding="utf-8") as f:
             content = f.read()
         # 查找 `if skill_registry:` 模式（非 is not None）
         import re
@@ -541,7 +545,7 @@ class TestSilentExceptFixed:
 
     def test_no_bare_pass_in_tool_router(self):
         """tool_router.py 不应有 `except Exception: pass` 模式。"""
-        with open("e:/项目/Neurova/neurova/tool_layers/tool_router.py", "r", encoding="utf-8") as f:
+        with open(repo_str("neurova/tool_layers/tool_router.py"), "r", encoding="utf-8") as f:
             content = f.read()
 
         lines = content.split('\n')

@@ -1,5 +1,7 @@
 import sys
-sys.path.insert(0, r"E:\项目\Neurova")
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 # Test if the original context_legacy.py can import
 try:

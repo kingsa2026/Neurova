@@ -53,6 +53,12 @@ sentence-transformers>=2.2.0
 transformers>=4.20.0
 tokenizers>=0.13.0
 
+# MCP SDK（运行时必需：tool_layers/mcp_client.py 裸 import）
+# 缺席时**不崩**——连接一律返回 False 并把 last_error 记成"SDK 未安装"，
+# 于是真实失败原因被掩盖、线上 MCP 全断而 CI 全绿（Issue #62 偏差）。
+# 因此本行是 MCP 可用性的唯一声明源，删改前先读 mcp_client._SDK_AVAILABLE。
+mcp>=1.2.0
+
 # Testing (dev)
 pytest>=7.4.0
 pytest-asyncio>=0.21.0

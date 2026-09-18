@@ -1,3 +1,11 @@
+# 依赖单一事实源 = requirements.txt（生产安装路径：Dockerfile / install.py 都装它，
+# 锁文件 requirements-full.lock 由它编译）。本文件**刻意不设** [project].dependencies——
+# 两处声明必然漂移，而漂移的代价不对称：requirements-ci.txt 里有、运行时没有的包
+# （Issue #62 的 mcp>=1.2.0）会让 CI 全绿而线上静默降级。
+# CI 薄环境清单见 requirements-ci.txt / requirements-ci.lock；
+# 不变量由 tests/unit/test_dev_path_and_runtime_dep_guards.py 与
+# tests/unit/test_lock_integrity_guard.py 常驻校验。
+
 [tool.black]
 line-length = 120
 target-version = ['py310']

@@ -23,7 +23,7 @@ TDD RED-GREEN: pycryptodome 依赖的显式 fail-fast 机制
     6. test_provider_manager_logs_error_on_decrypt_failure: 验证 provider_manager 解密失败时用 ERROR 级别
 
 运行:
-    cd e:\\项目\\Neurova
+    cd <repo-root>
     python -m unittest tests.unit.llm.test_pycryptodome_failfast -v
 """
 
