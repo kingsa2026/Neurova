@@ -23,10 +23,14 @@ import httpx
 
 from neurova.core.config import get as env_get, get_int as env_int, get_bool as env_bool
 from neurova.core.logger import get_logger
+from neurova.tool_layers.npx_runtime_registry import pinned_npx_args
 
 logger = get_logger(__name__)
 
-DEFAULT_COMMAND = ["npx", "-y", "@askjo/camofox-browser"]
+# npx 不带版本号 = 每次解析 latest（不可复现 + 不在任何审计覆盖面内）。
+# 版本由 neurova/tool_layers/npx_runtime_registry.py 单点登记，
+# 该清单同时生成 tools/npx-runtime/package-lock.json 供 OSV 审计。
+DEFAULT_COMMAND = ["npx", *pinned_npx_args("@askjo/camofox-browser")]
 DEFAULT_URL = "http://localhost:9377"
 DEFAULT_STARTUP_TIMEOUT = 90
 DEFAULT_IDLE_TIMEOUT = 300
