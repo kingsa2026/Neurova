@@ -331,7 +331,8 @@ class TestBug6GetStatsLockAcquisition:
 
 class TestBug7RunAsyncSafelyCoroLeak:
     """BUG 7: run_async_safely(moe.retrieve(...)) 在传入前已创建协程,
-    若 ThreadPoolExecutor 失败, 协程未被 await 也未 close() → 泄漏。"""
+    若线程池提交失败, 协程未被 await 也未 close() → 泄漏。
+    （P1 起桥接层改用 core.thread_pool 共享具名池，泄漏语义不变。）"""
 
     def test_coro_closed_on_executor_submit_failure(self):
         """当调度协程失败(如事件循环关闭/BrokenExecutor)时, 协程必须被 close()"""
@@ -341,12 +342,13 @@ class TestBug7RunAsyncSafelyCoroLeak:
         coro = sample_coro()
 
         async def runner():
-            # 真实实现走 ThreadPoolExecutor.submit(_run_in_new_loop)（P2-#17 专用循环）。
+            # 真实实现走共享具名池 "mem-async-bridge" 的 submit(_run_in_new_loop)
+            # （P2-#17 专用循环；P1 起改用 core.thread_pool 复用池）。
             # mock 提交边界本身抛异常, 模拟"提交失败"——此时协程尚未被消费, 必须关闭。
             mock_executor = MagicMock()
             mock_executor.submit.side_effect = RuntimeError("BrokenExecutor")
             with patch(
-                "neurova.mem_core.concurrent.futures.ThreadPoolExecutor",
+                "neurova.core.thread_pool.get_thread_pool",
                 return_value=mock_executor,
             ):
                 with pytest.raises(RuntimeError):
@@ -373,7 +375,7 @@ class TestBug7RunAsyncSafelyCoroLeak:
             mock_future.result.side_effect = RuntimeError("result failed")
             mock_executor.submit.return_value = mock_future
             with patch(
-                "neurova.mem_core.concurrent.futures.ThreadPoolExecutor",
+                "neurova.core.thread_pool.get_thread_pool",
                 return_value=mock_executor,
             ):
                 with pytest.raises(RuntimeError):

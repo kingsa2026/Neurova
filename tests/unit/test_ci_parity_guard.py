@@ -29,6 +29,7 @@ CNB = PROJECT_ROOT / ".cnb.yml"
 GHW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 
 # job 名（GitHub）→ 流水线名列表（cnb）；unit-tests matrix 两格拆两条
+# perf-gate（Issue #55 新增）：两侧同跑 scripts/ci/perf_gate.py，阻断语义一致
 EXPECTED_MAP = {
     "static-gate": ["static-gate"],
     "lint": ["lint"],
@@ -36,6 +37,7 @@ EXPECTED_MAP = {
     "unit-tests": ["unit-tests-py311", "unit-tests-py312"],
     "e2e": ["e2e-backend-boot"],
     "frontend": ["frontend"],
+    "perf-gate": ["perf-gate"],
     "dependency-audit": ["dependency-audit"],
 }
 
@@ -61,6 +63,7 @@ EXPECTED_CORE_COMMANDS = {
     ],
     "e2e": ["python -m pytest tests/e2e/test_backend_boot.py -q --timeout 240"],
     "frontend": ["npm audit --audit-level=high", "npx vue-tsc --noEmit", "npx vitest run"],
+    "perf-gate": ["python scripts/ci/perf_gate.py"],
     "dependency-audit": [
         "python -m pip_audit -r requirements-ci.lock",
         # 生产全量依赖锁（requirements-full.lock）：CI 精简锁覆盖不到
@@ -71,6 +74,7 @@ EXPECTED_CORE_COMMANDS = {
         # npm audit 都看不到它们，此前完全无人审计。
         "python scripts/ci/osv_audit.py",
     ],
+
 }
 
 
@@ -272,7 +276,7 @@ class TestAntiRegression:
             "scripts/ci/osv_audit.py", "scripts/ci/osv-allowlist.toml",
             "scripts/ci_static_gate.py", "scripts/ci/protected_tests.txt",
             "tests/e2e/test_backend_boot.py", "tests/unit/test_audit_regressions.py",
-            "NeurUI/package-lock.json",
+            "NeurUI/package-lock.json", "scripts/ci/perf_gate.py",
         ):
             assert (PROJECT_ROOT / f).exists(), f"CI 配置引用的门禁构件缺失: {f}"
 

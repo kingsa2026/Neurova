@@ -16,12 +16,14 @@
 #   6. frontend              npm audit --audit-level=high（阻塞）+ vue-tsc + vitest
 #   7. dependency-audit      pip-audit 阻塞审计：CI 精简锁 + 生产全量锁（requirements-full.lock）
 #                            + OSV 扫非 pip 依赖树（Cargo.lock / npx 运行时包锁）
+#   8. perf-gate             import 时长预算 + 关键路径微基准（阻断，
+#                            见 scripts/ci/perf_gate.py）
 #
 # 原则：只进当前确定全绿的测试；预存失败模块修复后逐个搬入 protected_tests.txt。
 #
 # 语法约定（见 https://docs.cnb.cool/zh/build/grammar.html）：
 #   - 分支 → 事件(push/pull_request) → 流水线数组；同一事件下的多条流水线并发执行，
-#     故 8 条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐（unit-tests 按
+#     故 9 条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐（unit-tests 按
 #     py3.11/py3.12 拆为两条，对应 GitHub 的 matrix 两格）。
 #   - 单条流水线内的 stages 串行；任一 stage 失败即中止该流水线。
 #   - runner.cpus: N 对应内存 N×2GiB（本文件最大 4 → 8GiB）。
@@ -189,6 +191,26 @@ main:
         - name: unit tests (vitest)
           script: cd NeurUI && npx vitest run
           timeout: 30m
+
+    # ── 8. 性能门禁：import 时长 + 关键路径微基准（阻断）────────────────
+    # 原状：.cnb.yml 无任何 perf/benchmark 任务，尾延迟回归只能人肉发现。
+    # 门禁只抓"数量级退化"（预算带充裕裕量），不做精确 benchmark——
+    # 精确 benchmark 在共享 runner 上必然 flaky，最终会被绕过。
+    - name: perf-gate
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.11
+        volumes:
+          - /root/.cache/pip
+      stages:
+        - name: install minimal deps
+          script: python -m pip install --upgrade pip -r requirements-ci.txt
+          timeout: 20m
+        - name: perf regression gate
+          script: python scripts/ci/perf_gate.py
+          timeout: 15m
 
     # ── 7. 依赖审计（阻塞，对齐 GitHub 已转阻塞的 dependency-audit）────────
     - name: dependency-audit

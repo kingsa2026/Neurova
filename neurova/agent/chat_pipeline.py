@@ -2538,6 +2538,12 @@ error_type 五类标准键（multi_model_client 流内
             "reasoning": self._agent.current_reasoning,
             "tool_messages": self._collect_tool_messages(),
             "proactive_question": post_result.get("proactive_question"),
+            # RSI 摘要（真接线）：不是整个迭代 dict，而是
+            # {status, applied_count, gain, phase_advanced, turn, stale}——
+            # 字段名对齐 RSIOrchestrator.run_iteration 真实输出，由
+            # neurova.evolution.rsi.result_summary 裁剪。RSI 步骤已后台化，
+            # 这里给的是该会话最近一次已完成迭代（从未跑过则 None）。
+            "rsi": post_result.get("rsi"),
         }
 
         # 结束轨迹
@@ -2578,6 +2584,8 @@ error_type 五类标准键（multi_model_client 流内
                     "audio_data": response.metadata.get("audio_data"),
                     "cognitive_score": response.cognitive_score,
                     "proactive_question": response.metadata.get("proactive_question"),
+                    # 同样透传 RSI 摘要（PipelineResponse.metadata 携带）
+                    "rsi": response.metadata.get("rsi"),
                 }
             except Exception as e:
                 logger.warning("PipelineExecutor 执行失败，fallback 到 post_chat_pipeline: %s", e)

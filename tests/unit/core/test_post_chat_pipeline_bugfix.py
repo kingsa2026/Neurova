@@ -424,13 +424,18 @@ class TestBug6StepResultsIsolation:
 
     @pytest.mark.asyncio
     async def test_step_results_not_shared_between_sequential_calls(self, pipeline):
-        """两次 process() 调用的 _step_results 应为不同列表对象"""
+        """两次 process() 调用的 _step_results 应为不同列表对象
+
+        P0-1 起响应无关步骤改为后台 asyncio task：断言前先 drain_background()
+        等旁路步骤写完成，否则比的是"后台还没跑"的中间态而非隔离性。
+        """
         pipeline._agt._save_to_session = MagicMock(return_value="s1")
 
         await pipeline.process(
             user_input="call1", reply="reply1", session_id="s1",
             save_memory=True, enable_tts=False, metadata={},
         )
+        await pipeline.drain_background(timeout=5)
         first_results = pipeline._step_results
         first_count = len(first_results)
 
@@ -438,6 +443,7 @@ class TestBug6StepResultsIsolation:
             user_input="call2", reply="reply2", session_id="s2",
             save_memory=True, enable_tts=False, metadata={},
         )
+        await pipeline.drain_background(timeout=5)
 
         # 第一次调用的结果列表不应被第二次调用清空（不同对象）
         assert len(first_results) == first_count, (

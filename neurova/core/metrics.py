@@ -6,6 +6,8 @@ generate_latest() 输出（替换手拼文本格式）。埋点 API：
 - Metrics.record_tool_execution(tool_name, success, duration_s)
 - Metrics.record_llm_call(provider, model, success, duration_s)
 - Metrics.record_memory_recall(source, latency_s)
+- Metrics.record_pipeline_step(step_name, status, duration_ms)  # 后处理管线
+- Metrics.record_pipeline_run(mode, duration_s)  # 整轮管线耗时（blocking/background）
 - Metrics.observe_state(state)  # 运行态 gauges 快照（/metrics 抓取时）
 - Metrics.observe_pools()  # 连接池 / 共享线程池 gauges 快照
 - Metrics.record_db_connection_created/closed(db_path)  # 连接创建/销毁频率
@@ -182,6 +184,28 @@ class _Metrics:
             buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5),
         )
 
+        # ── 对话后处理管线（PostChatPipeline）──
+        # 尾延迟最大来源：20+ 步串行/后台步骤此前零埋点——无 histogram 无
+        # 失败计数，优化收益无法验证。status 取 executed/skipped/failed/
+        # degraded（StepStatus 值域），失败率与耗时分位均由此可得。
+        self.pipeline_steps_total = Counter(
+            "neurova_pipeline_steps_total",
+            "Post-chat pipeline step executions",
+            ["step_name", "status"],
+        )
+        self.pipeline_step_seconds = Histogram(
+            "neurova_pipeline_step_seconds",
+            "Post-chat pipeline step duration",
+            ["step_name"],
+            buckets=(0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30),
+        )
+        self.pipeline_run_seconds = Histogram(
+            "neurova_pipeline_run_seconds",
+            "Post-chat pipeline end-to-end duration",
+            ["mode"],
+            buckets=(0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60),
+        )
+
     # ── 埋点 API ──
 
     def record_tool_execution(
@@ -220,6 +244,31 @@ class _Metrics:
             self.memory_recall_seconds.labels(source=source).observe(latency_s)
         except Exception:
             logger.debug("memory metrics record failed", exc_info=True)
+
+    # ── 后处理管线（Issue #55 P0）──
+
+    def record_pipeline_step(
+        self, step_name: str, status: str, duration_ms: float
+    ) -> None:
+        """后处理管线单步埋点（step_name × status 计数 + 耗时 histogram）。"""
+        try:
+            self.pipeline_steps_total.labels(
+                step_name=step_name, status=str(status or "unknown")
+            ).inc()
+            self.pipeline_step_seconds.labels(step_name=step_name).observe(
+                max(0.0, float(duration_ms or 0.0)) / 1000.0
+            )
+        except Exception:
+            logger.debug("pipeline step metrics record failed", exc_info=True)
+
+    def record_pipeline_run(self, mode: str, duration_s: float) -> None:
+        """整轮管线耗时（mode=blocking/background，验证后台化收益）。"""
+        try:
+            self.pipeline_run_seconds.labels(mode=str(mode or "unknown")).observe(
+                max(0.0, float(duration_s or 0.0))
+            )
+        except Exception:
+            logger.debug("pipeline run metrics record failed", exc_info=True)
 
     # ── 连接池 / 线程池（P0-2）──
 
@@ -338,18 +387,24 @@ class _Metrics:
             logger.debug("db pool gauges update failed", exc_info=True)
 
         try:
-            from neurova.core.thread_pool import iter_pools as _iter_thread_pools
+            from neurova.core.thread_pool import (
+                DEFAULT_POOL_NAME,
+                iter_pools as _iter_thread_pools,
+            )
 
             for name, pool in _iter_thread_pools():
                 try:
-                    self.thread_pool_threads.labels(pool=str(name)).set(
+                    # 默认池沿用旧 label "shared"（抓取配置/告警按它写过，
+                    # 改名会让面板静默失联）；具名池才用真实池名。
+                    label = "shared" if str(name) == DEFAULT_POOL_NAME else str(name)
+                    self.thread_pool_threads.labels(pool=label).set(
                         len(getattr(pool, "_threads", ()) or ())
                     )
                     queue = getattr(pool, "_work_queue", None)
-                    self.thread_pool_queue_depth.labels(pool=str(name)).set(
+                    self.thread_pool_queue_depth.labels(pool=label).set(
                         queue.qsize() if queue is not None else 0
                     )
-                    self.thread_pool_max_workers.labels(pool=str(name)).set(
+                    self.thread_pool_max_workers.labels(pool=label).set(
                         getattr(pool, "_max_workers", 0) or 0
                     )
                 except Exception:  # noqa: BLE001
