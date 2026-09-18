@@ -10,6 +10,7 @@ generate_latest() 输出（替换手拼文本格式）。埋点 API：
 - Metrics.record_pipeline_run(mode, duration_s)  # 整轮管线耗时（blocking/background）
 - Metrics.observe_state(state)  # 运行态 gauges 快照（/metrics 抓取时）
 - Metrics.observe_pools()  # 连接池 / 共享线程池 gauges 快照
+- Metrics.observe_context_pools()  # 上下文池常驻/回收 gauges 快照
 - Metrics.record_db_connection_created/closed(db_path)  # 连接创建/销毁频率
 - Metrics.record_index_snapshot(db, count, duration_ms)  # 索引快照（P0-3）
 - Metrics.record_hot_query_plan(db, query_id, indexed, duration_ms)  # 热点查询计划
@@ -184,6 +185,29 @@ class _Metrics:
             buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5),
         )
 
+        # ── 上下文池（Issue #65：池是永久归档只增不减，此前"常驻规模/回收
+        # 计数/读路径耗时"在观测面上完全空白——内存随会话时长单调累积无人可见）──
+        # gauge 是运行态快照（/metrics 抓取时经 observe_context_pools() 刷新）；
+        # 读路径直方图是常驻埋点（在 ContextPool.query 内 observe）。
+        self.context_pool_entries = Gauge(
+            "neurova_context_pool_entries",
+            "Resident entries of live context pools (scrape-time snapshot)",
+            ["pool"],
+        )
+        self.context_pool_evicted_total = Gauge(
+            "neurova_context_pool_evicted_total",
+            "Entries archived out of resident set by capacity/TTL",
+            ["pool", "reason"],
+        )
+        self.context_pool_query_seconds = Histogram(
+            "neurova_context_pool_query_seconds",
+            "ContextPool.query() duration by phase",
+            ["phase"],
+            buckets=(0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5),
+        )
+        # 热点路径 child 句柄缓存（惰性构造，见 observe_context_pool_query）
+        self._context_pool_query_children = None
+
         # ── 对话后处理管线（PostChatPipeline）──
         # 尾延迟最大来源：20+ 步串行/后台步骤此前零埋点——无 histogram 无
         # 失败计数，优化收益无法验证。status 取 executed/skipped/failed/
@@ -207,6 +231,28 @@ class _Metrics:
         )
 
     # ── 埋点 API ──
+
+    def observe_context_pool_query(
+        self, partition_s: float = 0.0, ttl_s: float = 0.0, keyword_s: float = 0.0
+    ) -> None:
+        """ContextPool.query() 阶段耗时（Issue #65）。
+
+        热点路径，故 child 句柄惰性缓存：实测 ``labels().observe()`` 每次
+        ~1.8µs，缓存后 ~0.7µs——三次打点从 ~5.4µs 降到 ~2µs。
+        """
+        try:
+            children = self._context_pool_query_children
+            if children is None:
+                children = {
+                    phase: self.context_pool_query_seconds.labels(phase=phase)
+                    for phase in ("partition", "ttl", "keyword")
+                }
+                self._context_pool_query_children = children
+            children["partition"].observe(max(0.0, float(partition_s)))
+            children["ttl"].observe(max(0.0, float(ttl_s)))
+            children["keyword"].observe(max(0.0, float(keyword_s)))
+        except Exception:  # noqa: BLE001 - 观测失败不得影响取数
+            logger.debug("context pool query metric failed", exc_info=True)
 
     def record_tool_execution(
         self, tool_name: str, source: str, success: bool, duration_s: float
@@ -411,6 +457,41 @@ class _Metrics:
                     logger.debug("thread pool gauge failed: %s", name, exc_info=True)
         except Exception:
             logger.debug("thread pool gauges update failed", exc_info=True)
+
+    def observe_context_pools(self) -> None:
+        """上下文池运行态 gauge 快照（/metrics 抓取时调用）。
+
+        只读"已创建的"池实例（与 observe_caches 同原则：抓指标绝不懒建池）。
+        标签用池隔离键（user:agent:session）——池是永久归档、条数不再受
+        max_size 约束，唯一能反映"内存是否无界增长"的就是这个 gauge。
+        """
+        try:
+            from neurova.context_pool import iter_live_pools
+        except Exception:  # pragma: no cover - 模块不可用时指标保持空
+            logger.debug("context pool gauges skipped (import failed)", exc_info=True)
+            return
+
+        seen = set()
+        for pool in iter_live_pools():
+            try:
+                key = str(getattr(pool, "isolation_key", None) or id(pool))
+                seen.add(key)
+                self.context_pool_entries.labels(pool=key).set(
+                    int(pool.resident_count())
+                )
+                stats = pool.get_retention_stats()
+                for reason, value in (stats.get("archived_by_reason") or {}).items():
+                    self.context_pool_evicted_total.labels(pool=key, reason=str(reason)).set(int(value))
+            except Exception:  # noqa: BLE001 - 单个池异常不影响其它池
+                logger.debug("context pool gauge failed", exc_info=True)
+
+        # 池销毁后不留陈旧时间线（只增的 gauge 系列会误导容量判断）
+        try:
+            for label_set in list(self.context_pool_entries._metrics.keys()):  # noqa: SLF001
+                if str(label_set) not in seen:
+                    self.context_pool_entries.remove(label_set)
+        except Exception:  # noqa: BLE001
+            logger.debug("context pool gauge cleanup failed", exc_info=True)
 
     def observe_state(self, state: Any) -> None:
         """运行态 gauge 快照（/metrics 请求时调用）。
