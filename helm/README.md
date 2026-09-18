@@ -81,7 +81,7 @@ backend:
   replicaCount: 1          # 副本数
   image:
     repository: neurova/backend
-    tag: latest
+    tag: ""                # 空 = 跟随 Chart.appVersion（不要写死 latest）
   service:
     type: ClusterIP
     port: 9527
@@ -100,10 +100,13 @@ database:
     size: 10Gi
     storageClass: standard
 
-# LLM 配置
+# 鉴权配置（生产多副本必须显式提供 ≥32 字节强随机密钥）
+auth:
+  jwtSecret: ""            # python -c "import secrets; print(secrets.token_hex(32))"
+
+# LLM 配置（模型/服务商走应用内持久化配置，不在此处设）
 llm:
   apiKeySecret: neurova-llm-secret
-  defaultModel: gpt-4
 
 # Ingress 配置
 ingress:
@@ -219,7 +222,25 @@ ingress:
         - neurova.example.com
 ```
 
-### 3. 配置持久化存储
+### 3. 配置鉴权密钥
+
+```yaml
+auth:
+  # 生产：未提供时（requireJwtSecret=true）helm 渲染期直接失败
+  requireJwtSecret: true
+  jwtSecret: "<32+ 字节强随机值>"
+```
+
+未提供时，每个副本会各自随机生成密钥：多副本间 token 互不认可、重启即全员掉线。
+生成方式：`python -c "import secrets; print(secrets.token_hex(32))"`。
+生产建议显式传参，避免把密钥写进 values 文件：
+
+```bash
+helm upgrade --install neurova helm/neurova -f helm/neurova/values-production.yaml \
+  --set auth.jwtSecret="$(python -c 'import secrets; print(secrets.token_hex(32))')"
+```
+
+### 4. 配置持久化存储
 
 ```yaml
 database:
@@ -230,7 +251,7 @@ database:
     accessMode: ReadWriteOnce
 ```
 
-### 4. 配置密钥
+### 5. 配置 LLM 密钥
 
 ```bash
 # 创建 LLM API 密钥 Secret
@@ -239,7 +260,7 @@ kubectl create secret generic neurova-llm-secret \
   -n neurova
 ```
 
-### 5. 监控和日志
+### 6. 监控和日志
 
 ```yaml
 monitoring:
@@ -251,7 +272,7 @@ monitoring:
 
 logging:
   level: INFO
-  format: json
+  json: true
 ```
 
 ## 文件结构

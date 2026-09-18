@@ -10,24 +10,21 @@ data:
   NEUROVA_HOST: "0.0.0.0"
   NEUROVA_ENV: "production"
   PYTHONUNBUFFERED: "1"
-  
+
   # 日志配置
-  LOG_LEVEL: {{ .Values.logging.level | quote }}
-  LOG_FORMAT: {{ .Values.logging.format | quote }}
-  LOG_FILE: {{ .Values.logging.file | quote }}
-  
-  # 数据库配置
-  DATABASE_PATH: {{ .Values.database.dbPath | quote }}
-  
-  # LLM 配置
-  DEFAULT_MODEL: {{ .Values.llm.defaultModel | quote }}
-  DEFAULT_PROVIDER: {{ .Values.llm.defaultProvider | quote }}
-  
-  # CORS 配置
-  CORS_ORIGINS: '*'
-  
-  # 应用元数据
-  APP_NAME: "Neurova"
-  APP_VERSION: {{ .Chart.AppVersion | quote }}
-  CHART_NAME: {{ .Chart.Name | quote }}
-  CHART_VERSION: {{ .Chart.Version | quote }}
+  # 键名必须是应用真读的：NEUROVA_LOG_LEVEL（start_server.py 读取）、
+  # NEUROVA_LOG_JSON（neurova/core/logger.py 读取）、NEUROVA_LOG_FILE
+  # （neurova/api/endpoints/console_system.py 读取）。
+  # 此前的 LOG_LEVEL / LOG_FORMAT / LOG_FILE 三个键在应用侧零读取方 = 死配置
+  # （值看起来设了、实际日志级别从未被改过）。由
+  # scripts/ci/deploy_config_consistency_check.py（R5）常驻把关。
+  NEUROVA_LOG_LEVEL: {{ .Values.logging.level | quote }}
+  NEUROVA_LOG_JSON: {{ ternary "1" "0" .Values.logging.json | quote }}
+  NEUROVA_LOG_FILE: {{ .Values.logging.file | quote }}
+
+  # 数据库配置（读取键是 NEUROVA_DB_PATH，见 neurova/core/db_indexes.py）
+  NEUROVA_DB_PATH: {{ .Values.database.dbPath | quote }}
+
+  # CORS 配置（读取键是 NEUROVA_CORS_ORIGINS，见 neurova/api/middleware.py；
+  # 留空则回落到应用内 config/cors.json 与内置默认来源）
+  NEUROVA_CORS_ORIGINS: {{ join "," .Values.cors.origins | quote }}

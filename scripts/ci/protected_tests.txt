@@ -49,6 +49,9 @@ tests/unit/api/test_metrics_http_and_exposure_p1_6_p2_7.py
 # Issue #57 P1-4：manager.py DELETE 连接卫生（M-15 契约更新为池化后的强断言）
 tests/unit/cognitive_layers/memory_layer/test_m15_delete_persisted_conn_hygiene.py
 
+# Issue #61 部署配置一致性：门禁自检（R1~R9 不变量 + 周级 crontab 巡检接线）
+tests/unit/test_deploy_config_guard.py
+
 # Issue #62 工具层守卫真接线：这五个文件此前未进子集，且把开发机绝对路径
 # 写死进 open()/cwd= → Linux/CI 上 FileNotFoundError（守卫静默不跑）。
 # 修法：路径统一走 tests/repo_paths.py；同时搬进子集，让"绿"等于"真跑过"。

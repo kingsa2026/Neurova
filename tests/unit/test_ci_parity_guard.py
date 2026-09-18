@@ -33,6 +33,9 @@ GHW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
 EXPECTED_MAP = {
     "static-gate": ["static-gate"],
     "lint": ["lint"],
+    # deploy-config（Issue #61 新增）：部署配置一致性（Dockerfile / compose /
+    # Helm / requirements 跨文件不变量），两侧同跑同一脚本、同为阻断。
+    "deploy-config": ["deploy-config"],
     "import-and-regression": ["import-and-regression"],
     "unit-tests": ["unit-tests-py311", "unit-tests-py312"],
     "e2e": ["e2e-backend-boot"],
@@ -52,6 +55,7 @@ EXPECTED_NON_BLOCKING = set()
 EXPECTED_CORE_COMMANDS = {
     "static-gate": ["python scripts/ci_static_gate.py --skip-import"],
     "lint": ["python -m ruff check neurova tests --no-cache"],
+    "deploy-config": ["python scripts/ci/deploy_config_consistency_check.py"],
     "import-and-regression": [
         "python scripts/ci_static_gate.py",
         "python -m pytest tests/unit/test_audit_regressions.py -q",
