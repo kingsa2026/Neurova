@@ -26,7 +26,7 @@ TDD 流程:
 - GREEN: 修复 multi_model_client.py 后应全部通过
 
 运行方式:
-    cd e:\\项目\\Neurova
+    cd <repo-root>
     python -m unittest tests.unit.llm.test_llm_provider_fallback -v
 """
 

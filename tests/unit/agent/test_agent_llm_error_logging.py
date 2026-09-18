@@ -21,7 +21,7 @@ TDD 测试: AgentLLMClient.chat() 错误包装层透明化
     - neurova/llm/multi_model_client.py:380-387 (Exception 路径 — 含 model/provider)
 
 运行:
-    cd e:\\项目\\Neurova
+    cd <repo-root>
     python -m unittest tests.unit.agent.test_agent_llm_error_logging -v
 
 注意:

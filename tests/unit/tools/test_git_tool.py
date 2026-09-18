@@ -11,12 +11,38 @@ P0-3 git 工具族（TDD 先红后绿）。
   default ALLOW。治理是裁决的根因位置，执行体内零策略守卫。
 """
 
+import os
 import shutil
 from unittest.mock import Mock
 
 import pytest
 
 needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git 不在 PATH")
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_git_env(monkeypatch):
+    """隔离宿主 git 全局配置（Issue #62 根因之一）。
+
+    `_execute_git` 以 `{**os.environ}` 起环境（刻意继承——真实凭据/代理是
+    运行时依赖），于是**宿主全局配置会漏进被测执行体**：开发机/CI runner 上
+    `commit.gpgsign=true` 时，测试内的 `git commit` 一律
+    `error: gpg failed to sign the data` → 断言拿到 returncode 128，
+    红得像工具缺陷，实际是环境耦合（同一份代码在不同机器上结论相反）。
+
+    这里把 GIT_CONFIG_GLOBAL/SYSTEM 指向 os.devnull（读作空配置），
+    让被测仓库只吃命令行 `-c` 显式传入的身份——被测对象是工具执行体的
+    输入域契约，不是宿主 git 配置。
+    """
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_SYSTEM", os.devnull)
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "0")
+
+
+def _no_ambient_config_env() -> dict:
+    """子进程用的洁净环境（与上面的 fixture 同口径，Windows 亦可用）。"""
+    return {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
+            "GIT_TERMINAL_PROMPT": "0"}
 
 
 def _make_executor(tmp_path):
@@ -45,8 +71,7 @@ def _init_repo(tmp_path):
         return subprocess.run(
             ["git", *args],
             cwd=str(tmp_path), capture_output=True, text=True, timeout=30,
-            env={**shutil.os.environ, "GIT_CONFIG_GLOBAL": "NUL",
-                 "GIT_CONFIG_SYSTEM": "NUL", "GIT_TERMINAL_PROMPT": "0"},
+            env=_no_ambient_config_env(),
         )
 
     _git("init", "-b", "main")

@@ -32,7 +32,7 @@ LLM Provider Manager reset 链路测试 (RED→GREEN)
 
 运行
 ====
-    cd e:/项目/Neurova
+    cd <repo>
     python -m unittest tests.unit.llm.test_provider_manager_reset -v
 
 或直接:
