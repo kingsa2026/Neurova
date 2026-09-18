@@ -239,6 +239,7 @@
 ### 10-configuration 配置
 
 - [CHANNELS_CONFIG_TEMPLATE.md](../10-configuration/CHANNELS_CONFIG_TEMPLATE.md) — 渠道配置模板
+- [DEPLOYMENT_CONFIG.md](../10-configuration/DEPLOYMENT_CONFIG.md) — 部署配置契约（Dockerfile / docker-compose / Helm 跨文件不变量 + 门禁）
 
 ### 11-legacy 归档
 
