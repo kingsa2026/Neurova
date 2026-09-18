@@ -438,6 +438,44 @@ class MemoryCache:
 
 
 # ============================================================
+# 缓存注册表（P1-6：命中率导出用）
+# ============================================================
+
+# name -> MemoryCache。只登记"已创建"的实例，iter_caches() 绝不懒建——
+# /metrics 抓取不得成为缓存实例的创建者（与 connection_pool.iter_pools 同一原则）。
+_cache_registry: Dict[str, MemoryCache] = {}
+_registry_lock = threading.Lock()
+
+
+def register_cache(name: str, cache: MemoryCache) -> None:
+    """登记缓存实例供 /metrics 导出命中率（同名覆盖）。"""
+    with _registry_lock:
+        _cache_registry[name] = cache
+
+
+def unregister_cache(name: str) -> None:
+    """注销缓存实例（关闭/测试重置时调用）。"""
+    with _registry_lock:
+        _cache_registry.pop(name, None)
+
+
+def iter_caches() -> List[Tuple[str, Dict[str, Any]]]:
+    """已注册缓存的 (name, stats) 快照。
+
+    单个缓存取统计失败（已被 shutdown 等）只跳过它，不影响其余。
+    """
+    with _registry_lock:
+        items = list(_cache_registry.items())
+    snapshot: List[Tuple[str, Dict[str, Any]]] = []
+    for name, cache in items:
+        try:
+            snapshot.append((name, cache.get_stats()))
+        except Exception:  # noqa: BLE001 - 观测不得因单缓存异常中断
+            continue
+    return snapshot
+
+
+# ============================================================
 # 全局缓存实例
 # ============================================================
 
@@ -466,6 +504,7 @@ def get_global_cache(
                 capacity=capacity,
                 default_ttl=default_ttl,
             )
+            register_cache("memory_global", _global_cache)
         return _global_cache
 
 
@@ -476,6 +515,7 @@ def reset_global_cache():
         if _global_cache:
             _global_cache.shutdown()
         _global_cache = None
+        unregister_cache("memory_global")
 
 
 # ============================================================

@@ -113,10 +113,13 @@ def create_database_check():
 
     def check_database():
         try:
-            from neurova.core.database import _get_db_conn
+            # 用上下文管理器：旧写法调 deprecated 旧接口取连接后从不归还，
+            # 每次健康检查漏一条池连接 —— 漏满 max_connections 后
+            # get_connection 会阻塞至 timeout（历史"健康检查卡 30s"根因）。
+            from neurova.core.database import database_connection
 
-            conn = _get_db_conn()
-            conn.execute("SELECT 1")
+            with database_connection() as conn:
+                conn.execute("SELECT 1")
             return True, "Database OK"
         except Exception as e:
             return False, str(e)

@@ -617,60 +617,40 @@ def _register_metrics_endpoint(app: FastAPI) -> None:
 
     P2-4：指标定义收口到 neurova/core/metrics.py（Counter/Histogram 全量
     埋点），此处做运行态 gauge 快照 + generate_latest 输出。
+
+    单一事实源：本端点只负责"抓取时刷新 gauge + 输出 registry"，不得再手工
+    拼接 # HELP/# TYPE 文本（历史上残留过一套死代码，制造双事实源错觉）。
+
+    P2-7：暴露策略由 `neurova.api.metrics_access` 决定（public/local/token，
+    默认 public 保持向后兼容）。本端点仍在 global_auth 的公共白名单内 ——
+    全局鉴权放行"未登录"，本端点再按抓取策略判来源/令牌，是两层不同的门。
     """
     from neurova.core.metrics import get_metrics as _get_prom_metrics
     from neurova.core.metrics import generate_metrics_text as _generate_metrics_text
+    from neurova.api.metrics_access import check_metrics_access
 
     _prom = _get_prom_metrics()
 
     @app.get("/metrics")
-    async def get_metrics():
+    async def get_metrics(request: Request):
+        # 抓取时刷新运行态快照（gauge 非常驻埋点）
         _prom.observe_state(_app_state)
-        metrics = []
-        # 基础指标
-        metrics.append(f"# HELP neurova_uptime_seconds Neurova uptime in seconds")
-        metrics.append(f"# TYPE neurova_uptime_seconds gauge")
-        uptime = _app_state.get_uptime() if _app_state else 0
-        metrics.append(f"neurova_uptime_seconds {uptime}")
+        # P0-2：连接池 / 共享线程池运行态快照
+        _prom.observe_pools()
+        # P1-6：缓存命中率快照（只读已创建实例，不懒建）
+        _prom.observe_caches()
 
-        metrics.append(f"# HELP neurova_agents_total Total number of agents")
-        metrics.append(f"# TYPE neurova_agents_total gauge")
-        agent_count = len(_app_state.agents) if _app_state else 0
-        metrics.append(f"neurova_agents_total {agent_count}")
-
-        # P3: 语音性能指标
-        metrics.append(f"# HELP neurova_voice_engines_total Total number of voice engines")
-        metrics.append(f"# TYPE neurova_voice_engines_total gauge")
-        voice_count = len(_app_state.voice_engines) if _app_state else 0
-        metrics.append(f"neurova_voice_engines_total {voice_count}")
-
-        metrics.append(f"# HELP neurova_voice_tts_available TTS engine availability (1=available, 0=unavailable)")
-        metrics.append(f"# TYPE neurova_voice_tts_available gauge")
-        tts_available = 0
-        if _app_state and "tts" in _app_state.voice_engines:
-            try:
-                tts_available = 1 if _app_state.voice_engines["tts"].is_available() else 0
-            except Exception:
-                tts_available = 0
-        metrics.append(f"neurova_voice_tts_available {tts_available}")
-
-        metrics.append(f"# HELP neurova_voice_asr_available ASR engine availability (1=available, 0=unavailable)")
-        metrics.append(f"# TYPE neurova_voice_asr_available gauge")
-        asr_available = 0
-        if _app_state and "asr" in _app_state.voice_engines:
-            try:
-                asr_available = 1 if _app_state.voice_engines["asr"].is_available() else 0
-            except Exception:
-                asr_available = 0
-        metrics.append(f"neurova_voice_asr_available {asr_available}")
-
-        # 渠道指标
-        metrics.append(f"# HELP neurova_channels_total Total number of registered channels")
-        metrics.append(f"# TYPE neurova_channels_total gauge")
-        channel_count = 0
-        if _app_state and _app_state.channel_manager:
-            channel_count = len(_app_state.channel_manager._adapters)
-        metrics.append(f"neurova_channels_total {channel_count}")
+        headers = {k: v for k, v in request.headers.items()}
+        allowed, reason = check_metrics_access(
+            request.client.host if request.client else None, headers
+        )
+        if not allowed:
+            logger.warning(
+                "拒绝 /metrics 抓取: %s (client=%s)",
+                reason,
+                request.client.host if request.client else "?",
+            )
+            return PlainTextResponse("forbidden", status_code=403)
 
         return PlainTextResponse(_generate_metrics_text(), media_type="text/plain")
 
@@ -822,6 +802,15 @@ async def _on_startup(app_state: AppState) -> None:
             logger.info("飞书 KB 定时同步循环已启动")
         except Exception as _kbsync_err:  # noqa: BLE001
             logger.warning("飞书 KB 定时同步循环启动失败（忽略）: %s", _kbsync_err)
+
+    # P0-3：索引可观测启动采集（index_list/index_info 聚合 + 热点 EQP 白名单）。
+    # fail-open：可观测不得成为启动依赖（库损坏/权限不足时仅无数据）
+    try:
+        from neurova.core.db_indexes import bootstrap_index_observability
+
+        await asyncio.to_thread(bootstrap_index_observability)
+    except Exception as _idx_err:  # noqa: BLE001
+        logger.debug("索引可观测启动采集失败（忽略）: %s", _idx_err)
 
     # 初始化 TTS 引擎
     if hasattr(app_state, "tts_manager") and app_state.tts_manager:

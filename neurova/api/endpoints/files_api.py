@@ -104,10 +104,9 @@ def persist_file(file_id: str, info: Dict[str, Any], db_path: Optional[str] = No
     """写穿单条文件元数据到 files 表（失败仅告警，不影响主流程）。"""
     try:
         Path(_files_db_path(db_path)).parent.mkdir(parents=True, exist_ok=True)
-        import sqlite3
+        from neurova.core.database import short_transaction
 
-        conn = sqlite3.connect(_files_db_path(db_path))
-        try:
+        with short_transaction(_files_db_path(db_path)) as conn:
             conn.execute(_FILES_DDL)
             conn.execute(
                 "INSERT OR REPLACE INTO files VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -126,9 +125,6 @@ def persist_file(file_id: str, info: Dict[str, Any], db_path: Optional[str] = No
                     info.get("updated_at", 0),
                 ),
             )
-            conn.commit()
-        finally:
-            conn.close()
     except Exception as e:  # noqa: BLE001 - 持久化失败降级为内存态
         logger.warning("files 元数据写穿失败（降级内存态）: %s", e)
 
@@ -136,14 +132,10 @@ def persist_file(file_id: str, info: Dict[str, Any], db_path: Optional[str] = No
 def delete_file_record(file_id: str, db_path: Optional[str] = None) -> None:
     """从 files 表删除单条元数据（失败仅告警）。"""
     try:
-        import sqlite3
+        from neurova.core.database import short_transaction
 
-        conn = sqlite3.connect(_files_db_path(db_path))
-        try:
+        with short_transaction(_files_db_path(db_path)) as conn:
             conn.execute("DELETE FROM files WHERE file_id = ?", (file_id,))
-            conn.commit()
-        finally:
-            conn.close()
     except Exception as e:  # noqa: BLE001
         logger.warning("files 元数据删除失败: %s", e)
 
@@ -158,11 +150,10 @@ def hydrate_files_store(db_path: Optional[str] = None) -> Dict[str, Dict[str, An
     if not Path(db).exists():
         return loaded
     try:
-        import sqlite3
+        from neurova.core.database import short_transaction
 
-        conn = sqlite3.connect(db)
-        try:
-            conn.row_factory = sqlite3.Row
+        # 连接从池借出：池连接 row_factory 已为 sqlite3.Row，无需重复设置
+        with short_transaction(db) as conn:
             rows = conn.execute("SELECT * FROM files").fetchall()
             for row in rows:
                 rec = dict(row)
@@ -172,9 +163,6 @@ def hydrate_files_store(db_path: Optional[str] = None) -> Dict[str, Dict[str, An
                     continue
                 loaded[rec["file_id"]] = rec
                 _files_store[rec["file_id"]] = rec
-            conn.commit()
-        finally:
-            conn.close()
     except Exception as e:  # noqa: BLE001 - 坏库不阻塞启动
         logger.warning("files 元数据水合失败（空库降级）: %s", e)
         return {}

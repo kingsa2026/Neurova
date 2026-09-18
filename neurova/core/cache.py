@@ -8,7 +8,13 @@
 from neurova.core.logger import get_logger
 from typing import Optional
 
-from neurova.memory.core.cache import CacheEntry, CacheStats, MemoryCache
+from neurova.memory.core.cache import (
+    CacheEntry,
+    CacheStats,
+    MemoryCache,
+    register_cache,
+    unregister_cache,
+)
 
 logger = get_logger(__name__)
 
@@ -36,6 +42,9 @@ def get_global_cache(
             capacity=capacity,
             default_ttl=default_ttl,
         )
+        # P1-6：同一注册表登记，命中率才能被 /metrics 导出（不登记 = 该实例
+        # 的 hit_rate 永远观测不到，与 memory/core/cache 的全局实例分列两条）
+        register_cache("core_global", _global_cache)
         logger.info("全局缓存已初始化: capacity=%d", capacity)
     return _global_cache
 
@@ -70,4 +79,6 @@ __all__ = [
     "cache_set",
     "cache_delete",
     "cache_clear",
+    "register_cache",
+    "unregister_cache",
 ]
