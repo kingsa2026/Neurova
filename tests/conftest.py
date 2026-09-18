@@ -42,6 +42,30 @@ def _isolate_session_manager_singletons():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_execution_engine_singleton():
+    """ExecutionEngine 单例跨测试隔离（Issue #65）。
+
+    ExecutionEngine 是**类级单例**（``_instance`` 挂在类上），此前
+    ``reset_execution_engine()`` 只清模块级缓存 → 重置后取回同一对象、
+    ``_executions`` 里上一测试的执行记录原样存活（实测 e2 is e1 → True）。
+    依赖它做隔离的测试会拿到脏状态，且该函数在全仓没有任何调用方——
+    "重置"契约从未被验证。
+
+    这里每测试后调用修复后的 ``reset_execution_engine()``（三层清：模块缓存
+    + 类级 _instance + 执行记录），把契约钉在真实调用点上。
+    """
+    yield
+    try:
+        from neurova.shared_core.execution_engine import reset_execution_engine
+    except Exception:  # pragma: no cover - 模块不可用时跳过
+        return
+    try:
+        reset_execution_engine()
+    except Exception:  # pragma: no cover - 重置失败不得连带测试失败
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _isolate_skill_service_storage(tmp_path, monkeypatch):
     """Keep default skill-library writes out of user data during regressions."""
     import hashlib

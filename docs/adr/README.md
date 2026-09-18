@@ -20,6 +20,7 @@
 | [0012](./0012-activate-skill-hub-client-and-service.md) | 激活技能仓库客户端与技能服务 | Accepted | 2026-07-14 |
 | [0013](./0013-unify-skill-market-endpoints.md) | 统一技能市场端点（4 套→1 套） | Accepted | 2026-07-14 |
 | [0014](./0014-connection-pool-short-lived-only.md) | 连接池只管短连接（常驻连接不进池） | Accepted | 2026-09-18 |
+| [0015](./0015-context-pool-retention-contract.md) | ContextPool 回收契约（归档无损 + 显式常驻上限 + 读路径索引） | Accepted | 2026-09-18 |
 
 ## 主题分类
 
@@ -46,6 +47,9 @@
 
 ### 存储层
 - [ADR 0014: 连接池只管短连接](./0014-connection-pool-short-lived-only.md) — 常驻连接（写放大优化）不进池
+
+### 上下文处理
+- [ADR 0015: ContextPool 回收契约](./0015-context-pool-retention-contract.md) — 归档无损 / 显式常驻上限 / 读路径分区索引
 
 ## ADR 编写规范
 
