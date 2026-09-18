@@ -14,6 +14,12 @@
    走 `_SDK_AVAILABLE=False` 分支：**不抛异常**，只把
    `last_error` 记成"mcp SDK 未安装"——真实连接失败原因被掩盖，MCP 全断
    而 CI 全绿。本类钉住运行时安装路径（requirements.txt + 全量锁）必须声明。
+
+3. **守卫依赖 CI 镜像里没有的外部二进制** —— 同一"守卫静默不跑"根因的另一形态：
+   `tests/unit/test_tool_call_breakpoints_v3.py` 用 `subprocess.run(["rg", ...])`
+   做死代码扫描，而 python:3.11/3.12 镜像里没有 ripgrep → `FileNotFoundError`
+   直接炸，文件其余断言全废。扫描类守卫必须用纯 Python（`Path.rglob` +
+   字符串/`ast`），不得依赖 `rg` / `grep` 等宿主工具。
 """
 
 import io
@@ -147,4 +153,113 @@ class TestMcpSdkDeclaredForRuntime:
         assert "mcp" not in registered, (
             "mcp 被登记为可优雅降级的可选依赖——它的缺席会让全部 MCP 服务器"
             "连接失败而 last_error 只说'SDK 未安装'，属于必须显式声明的运行时依赖。"
+        )
+
+
+class TestProtectedGuardsUseNoExternalBinaries:
+    """受保护子集里的守卫不得依赖 CI 镜像未提供的外部二进制。
+
+    实锤（Issue #62 收口后的首次 PR CI）：`test_tool_call_breakpoints_v3.py`
+    的 `test_no_callers_of_build_tools_from_skills` 调 `subprocess.run(["rg", ...])`，
+    python:* 镜像没有 ripgrep → `FileNotFoundError`。这类崩溃比"断言失败"更坏：
+    守卫**根本没执行**，同文件的真实断言也一起被跳过。
+
+    规则：扫描/搜索类守卫一律走纯 Python（`Path.rglob` + `ast` / 字符串匹配）。
+    """
+
+    # 允许的外部命令：仅"当前环境断言存在"的可执行文件（用 shutil.which 跳过）。
+    # 例：git 在 CI 镜像里存在，且测试用 needs_git 标记守卫。
+    ALLOWED = {"git"}
+
+    def _protected_test_files(self):
+        listed = []
+        for raw in io.open(
+            PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt", encoding="utf-8"
+        ).read().splitlines():
+            line = raw.split("#", 1)[0].strip()
+            if line:
+                listed.append(line)
+        return listed
+
+    def test_no_bare_external_command_in_subprocess(self):
+        import ast
+
+        offenders = []
+        for rel in self._protected_test_files():
+            path = PROJECT_ROOT / rel
+            tree = ast.parse(io.open(path, encoding="utf-8").read())
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                attr = getattr(func, "attr", None)
+                if attr not in {"run", "check_output", "Popen", "call", "check_call"}:
+                    continue
+                if "subprocess" not in ast.dump(getattr(func, "value", ast.Constant(None))):
+                    continue
+                if not node.args:
+                    continue
+                first = node.args[0]
+                # 只查字面量命令名；sys.executable / 变量不在本守卫范围
+                if isinstance(first, ast.List) and first.elts:
+                    head = first.elts[0]
+                elif isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    head = first
+                else:
+                    continue
+                if not (isinstance(head, ast.Constant) and isinstance(head.value, str)):
+                    continue
+                if head.value in self.ALLOWED:
+                    continue
+                offenders.append(f"{rel}:{node.lineno}: 直接执行外部命令 {head.value!r}")
+        assert not offenders, (
+            "受保护子集里的守卫依赖外部二进制——CI 镜像没有它时不是断言失败而是 "
+            "FileNotFoundError，整个守卫（含同文件其他断言）静默不跑：\n  "
+            + "\n  ".join(offenders)
+            + "\n修复：扫描类守卫改用纯 Python（Path.rglob / ast），"
+            "或把命令加进 ALLOWED 并说明镜像内确实存在。"
+        )
+
+    def test_no_shell_out_to_ripgrep(self):
+        """`rg` 是本次实锤的缺席二进制——全 tests/ 都不该硬依赖它。
+
+        与上一条同口径：只看 AST 里真实的 `subprocess.[...](["rg", ...])`
+        调用，不匹配文档/注释里的文字（否则守卫自己就成了违规样本）。
+        """
+        import ast
+
+        offenders = []
+        for path in sorted((PROJECT_ROOT / "tests").rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            try:
+                tree = ast.parse(io.open(path, encoding="utf-8").read())
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                func = node.func
+                if getattr(func, "attr", None) not in {
+                    "run", "check_output", "Popen", "call", "check_call"
+                }:
+                    continue
+                if "subprocess" not in ast.dump(getattr(func, "value", ast.Constant(None))):
+                    continue
+                if not node.args:
+                    continue
+                first = node.args[0]
+                head = None
+                if isinstance(first, ast.List) and first.elts:
+                    head = first.elts[0]
+                elif isinstance(first, ast.Constant):
+                    head = first
+                if isinstance(head, ast.Constant) and head.value == "rg":
+                    offenders.append(
+                        f"{path.relative_to(PROJECT_ROOT).as_posix()}:{node.lineno}"
+                    )
+        assert not offenders, (
+            "测试硬依赖 ripgrep（python:* CI 镜像里没有 rg，会 FileNotFoundError）：\n  "
+            + "\n  ".join(offenders)
+            + "\n修复：改用纯 Python 扫描（Path.rglob + ast / 字符串匹配）。"
         )
