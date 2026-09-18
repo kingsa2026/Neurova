@@ -25,11 +25,13 @@ tests/unit/api/test_skill_pool_api_auth_consolidation.py
 tests/unit/evolution/test_skill_consolidation_structural_and_deadcode_p1p2.py
 # Issue #48 NPC 思考档位修正：model 禁带思考强度后缀 / thinkingLevel 必须字面量枚举
 tests/unit/test_ci_npc_config_guard.py
-# Issue #56 依赖安全收口：锁完整性守卫（声明↔锁漂移 / 缺 pin / 幽灵 root / 孤儿包）
-tests/unit/test_lock_integrity_guard.py
-# Issue #56 残留边界：非 pip 依赖树审计门禁（Cargo/OSV 契约 + 允许清单纪律）
-tests/unit/test_osv_audit_gate.py
-# Issue #56 残留边界：运行时 npx 包钉版本（npx latest 漂移 + 审计覆盖面）
-tests/unit/tools/test_npx_runtime_pinning.py
-# Issue #56 残留边界：模型产物完整性（运行时拉取权重的 sha256 校验）
-tests/unit/tts/test_model_integrity_manifest.py
+
+# Issue #57 P0-1/P0-2 观测底座收口：/metrics 单一事实源 + 连接池/线程池 gauge
+tests/unit/core/test_metrics_pool_observability_p0.py
+
+# Issue #57 P0-3/P1-4/P1-6/P2-7 收口 + ADR 0014「池只管短连接」
+tests/unit/core/test_index_observability_p0_3.py
+tests/unit/core/test_connection_pool_scope_adr0014.py
+tests/unit/api/test_metrics_http_and_exposure_p1_6_p2_7.py
+# Issue #57 P1-4：manager.py DELETE 连接卫生（M-15 契约更新为池化后的强断言）
+tests/unit/cognitive_layers/memory_layer/test_m15_delete_persisted_conn_hygiene.py
