@@ -176,7 +176,8 @@ kubectl get ingress -l app.kubernetes.io/name=neurova
 
 - `/app/data`: SQLite 数据库存储
 - `/app/logs`: 应用日志
-- `/app/config`: 配置文件挂载点
+- `/app/config`: 运行时配置资产（`config/cors.json` / `config/llm_presets/`），**由镜像自带**；
+  Chart 不挂 ConfigMap 到此路径（会遮蔽镜像内资产，见门禁 R12）
 
 ## 生产环境建议
 
