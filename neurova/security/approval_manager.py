@@ -237,70 +237,71 @@ class ApprovalManager:
     def _init_sqlite_store(self):
         """初始化审批 SQLite 库（幂等）。失败降级为纯 JSON 路径，不阻断初始化。"""
         try:
-            import sqlite3
+            from neurova.core.database import short_transaction
 
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
-            conn = sqlite3.connect(str(self._db_path))
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS approval_requests (
-                    request_id TEXT PRIMARY KEY,
-                    agent_id TEXT DEFAULT '',
-                    user_id TEXT DEFAULT '',
-                    command TEXT NOT NULL,
-                    description TEXT DEFAULT '',
-                    danger_reason TEXT DEFAULT '',
-                    status TEXT NOT NULL DEFAULT 'pending',
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    expires_at TEXT,
-                    approved_by TEXT,
-                    approval_note TEXT,
-                    metadata TEXT DEFAULT '{}'
-                )
-            """)
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_apr_status ON approval_requests(status)"
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_apr_agent ON approval_requests(agent_id)"
-            )
-            conn.commit()
-            conn.close()
+            with short_transaction(str(self._db_path)) as conn:
+                self._create_schema(conn)
         except Exception as e:
             logger.warning("审批 SQLite 初始化失败, 降级纯 JSON 存储: %s", e)
             self._db_path = None
+
+    @staticmethod
+    def _create_schema(conn) -> None:
+        """建表 + 索引（幂等）。"""
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS approval_requests (
+                request_id TEXT PRIMARY KEY,
+                agent_id TEXT DEFAULT '',
+                user_id TEXT DEFAULT '',
+                command TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                danger_reason TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT,
+                approved_by TEXT,
+                approval_note TEXT,
+                metadata TEXT DEFAULT '{}'
+            )
+            """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_apr_status ON approval_requests(status)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_apr_agent ON approval_requests(agent_id)"
+        )
 
     def _upsert_request_sqlite(self, request: ApprovalRequest) -> None:
         """单条 upsert 到 SQLite（每写一 commit，量级低无需批量）。"""
         if not getattr(self, "_db_path", None):
             return
         try:
-            import sqlite3
+            from neurova.core.database import short_transaction
 
-            conn = sqlite3.connect(str(self._db_path))
-            conn.execute(
-                """INSERT OR REPLACE INTO approval_requests
+            with short_transaction(str(self._db_path)) as conn:
+                conn.execute(
+                    """INSERT OR REPLACE INTO approval_requests
                    (request_id, agent_id, user_id, command, description, danger_reason,
                     status, created_at, updated_at, expires_at, approved_by, approval_note, metadata)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    request.request_id,
-                    request.agent_id,
-                    request.user_id,
-                    request.command,
-                    request.description,
-                    request.danger_reason,
-                    request.status.value,
-                    request.created_at.isoformat(),
-                    request.updated_at.isoformat(),
-                    request.expires_at.isoformat() if request.expires_at else None,
-                    request.approved_by,
-                    request.approval_note,
-                    json.dumps(request.metadata, ensure_ascii=False),
-                ),
-            )
-            conn.commit()
-            conn.close()
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        request.request_id,
+                        request.agent_id,
+                        request.user_id,
+                        request.command,
+                        request.description,
+                        request.danger_reason,
+                        request.status.value,
+                        request.created_at.isoformat(),
+                        request.updated_at.isoformat(),
+                        request.expires_at.isoformat() if request.expires_at else None,
+                        request.approved_by,
+                        request.approval_note,
+                        json.dumps(request.metadata, ensure_ascii=False),
+                    ),
+                )
         except Exception as e:
             logger.debug("审批 SQLite upsert 失败（JSON 快照仍可用）: %s", e)
 
@@ -309,12 +310,10 @@ class ApprovalManager:
         if not getattr(self, "_db_path", None):
             return
         try:
-            import sqlite3
+            from neurova.core.database import short_connection
 
-            conn = sqlite3.connect(str(self._db_path))
-            conn.row_factory = sqlite3.Row
-            rows = conn.execute("SELECT * FROM approval_requests").fetchall()
-            conn.close()
+            with short_connection(str(self._db_path)) as conn:
+                rows = conn.execute("SELECT * FROM approval_requests").fetchall()
             loaded = 0
             for row in rows:
                 try:

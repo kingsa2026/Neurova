@@ -2,6 +2,9 @@
 线程池管理器
 
 提供全局线程池实例，避免每次操作都创建新的 ThreadPoolExecutor。
+
+P0-2：暴露线程数 / 队列深度 / max_workers 快照（iter_pools），
+供 core/metrics.py 的 observe_pools() 转成 prometheus gauge。
 """
 
 from neurova.core.logger import get_logger
@@ -65,6 +68,11 @@ class ThreadPoolManager:
                     self._pool = self._create_pool()
         return self._pool
     
+    @property
+    def pool_name(self) -> str:
+        """池标识（指标 label 用）"""
+        return "shared"
+
     def shutdown(self, wait: bool = True):
         """关闭线程池"""
         if self._pool is not None:
@@ -112,6 +120,36 @@ def get_thread_pool(max_workers: Optional[int] = None) -> ThreadPoolExecutor:
     """
     manager = get_thread_pool_manager(max_workers)
     return manager.pool
+
+
+def iter_pools():
+    """遍历当前已创建的线程池（metrics 快照用）。
+
+    返回 (name, pool) 列表；未创建即"未使用"，**不触发懒加载**——不应因
+    抓指标而建池。
+
+    形状兼容两种实现（本分支单池 / 具名多池改造后的 dict 形态）：两者都存在
+    过，观测面不该因内部结构变化而丢指标，故按"先看有无多池注册表，再回落单池"
+    取值，而不是硬绑定某一种内部字段。
+    """
+    manager = _manager
+    if manager is None:
+        return []
+
+    named = getattr(manager, "_pools", None)
+    if isinstance(named, dict) and named:
+        snapshot = list(named.items())
+        out = []
+        for name, entry in snapshot:
+            # 具名多池形态为 name -> (pool, max_workers)；防御性地也接受裸 pool
+            pool = entry[0] if isinstance(entry, tuple) else entry
+            if pool is not None:
+                out.append((str(name), pool))
+        return out
+
+    if getattr(manager, "_pool", None) is None:
+        return []
+    return [(manager.pool_name, manager._pool)]
 
 
 def shutdown_thread_pool(wait: bool = True):
