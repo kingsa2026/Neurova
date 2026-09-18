@@ -23,7 +23,12 @@ def client(tmp_path, monkeypatch):
     import neurova.tts.model_downloader as md
 
     # 隔离：tmp 模型目录 + tmp 选择文件 + tmp 下载状态
-    monkeypatch.setattr(model_api, "_downloader", ModelDownloader(base_dir=str(tmp_path)))
+    # verify_integrity=False：桩引擎写的占位内容必然与上游 sha256 不符；
+    # 本测试关心的是 API 契约，不是产物校验（校验有专门的集成验证）。
+    monkeypatch.setattr(
+        model_api, "_downloader",
+        ModelDownloader(base_dir=str(tmp_path), verify_integrity=False),
+    )
     service = ds.ModelDownloadService(downloader=model_api._downloader)
     monkeypatch.setattr(model_api, "_service", service)
     monkeypatch.setattr(

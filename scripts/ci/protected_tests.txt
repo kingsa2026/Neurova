@@ -27,3 +27,9 @@ tests/unit/evolution/test_skill_consolidation_structural_and_deadcode_p1p2.py
 tests/unit/test_ci_npc_config_guard.py
 # Issue #56 依赖安全收口：锁完整性守卫（声明↔锁漂移 / 缺 pin / 幽灵 root / 孤儿包）
 tests/unit/test_lock_integrity_guard.py
+# Issue #56 残留边界：非 pip 依赖树审计门禁（Cargo/OSV 契约 + 允许清单纪律）
+tests/unit/test_osv_audit_gate.py
+# Issue #56 残留边界：运行时 npx 包钉版本（npx latest 漂移 + 审计覆盖面）
+tests/unit/tools/test_npx_runtime_pinning.py
+# Issue #56 残留边界：模型产物完整性（运行时拉取权重的 sha256 校验）
+tests/unit/tts/test_model_integrity_manifest.py
