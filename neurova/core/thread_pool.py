@@ -14,6 +14,9 @@
 但同一 name 的调用方共享同一个池实例与同一组线程——这才是"共享单例"
 的意义。max_workers 在该 name 首次注册时确定，后续同 name 传入不同值
 只记 debug 日志并复用（避免两个调用方互相改对方池的大小）。
+
+P0-2：暴露线程数 / 队列深度 / max_workers 快照（iter_pools），
+供 core/metrics.py 的 observe_pools() 转成 prometheus gauge。
 """
 
 from neurova.core.logger import get_logger
@@ -105,6 +108,11 @@ class ThreadPoolManager:
         """默认共享池（向后兼容旧调用）。"""
         return self.get_pool()
 
+    @property
+    def pool_name(self) -> str:
+        """默认池标识（指标 label 用，向后兼容旧调用）。"""
+        return DEFAULT_POOL_NAME
+
     def shutdown(self, wait: bool = True) -> None:
         """关闭全部共享池。"""
         with self._pool_lock:
@@ -158,6 +166,34 @@ def get_thread_pool(
     """
     manager = get_thread_pool_manager(max_workers)
     return manager.get_pool(name=name, max_workers=max_workers)
+
+
+def iter_pools():
+    """遍历当前已创建的线程池（metrics 快照用）。
+
+    返回 (name, pool) 列表；未创建即"未使用"，**不触发懒加载**——不应因
+    抓指标而建池。
+
+    具名多池形态为 name -> (pool, max_workers)；防御性地也接受裸 pool 条目，
+    使观测面不因内部结构微调而丢指标。
+    """
+    manager = _manager
+    if manager is None:
+        return []
+
+    named = getattr(manager, "_pools", None)
+    if isinstance(named, dict) and named:
+        snapshot = list(named.items())
+        out = []
+        for name, entry in snapshot:
+            # 具名多池形态为 name -> (pool, max_workers)；防御性地也接受裸 pool
+            pool = entry[0] if isinstance(entry, tuple) else entry
+            if pool is not None:
+                out.append((str(name), pool))
+        return out
+
+    # 具名多池已是唯一实现，缺 _pools 视为未创建
+    return []
 
 
 def shutdown_thread_pool(wait: bool = True) -> None:

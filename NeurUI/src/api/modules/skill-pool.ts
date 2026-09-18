@@ -282,6 +282,48 @@ export function rejectPendingExperience(agentId: string, recordId: string) {
 }
 
 // ---------------------------------------------------------------------------
+// P1-2 技能合并审批面（重复技能收敛为类级 umbrella）
+// 后端三端点在 skill_pool_api：GET  /agent/{id}/consolidation/plans
+//                              POST /agent/{id}/consolidation/{umbrella}/approve|reject
+// 计划由 RSI 步定期产出（只产计划、自动不动库），本组是执行端。
+// ---------------------------------------------------------------------------
+
+/** 一条待审合并计划（后端 ConsolidationPlan.to_dict() 契约）。 */
+export interface ConsolidationPlan {
+  umbrella: string
+  absorbed: string[]
+  reason?: string
+  needs_reference_rehoming?: boolean
+  quality?: Record<string, unknown>
+  /** 聚簇依据：identity=业务身份全同(真重复) / structure=同序列异意图(跨意图收编) / name_prefix=无序列兜底 */
+  basis?: 'identity' | 'structure' | 'name_prefix' | string
+  structure?: string
+  intents?: Record<string, string>
+  status?: string
+}
+
+/** 待审合并计划列表（只读；后端故障时返回空列而非 500）。 */
+export function listConsolidationPlans(agentId: string) {
+  return api.get<ApiResponse<ConsolidationPlan[]>>(
+    `${BASE}/agent/${agentId}/consolidation/plans`,
+  )
+}
+
+/** 批准合并：被吸收成员归档不删除（可恢复），umbrella 留作类级技能。 */
+export function approveConsolidation(agentId: string, umbrella: string) {
+  return api.post<ApiResponse<{ umbrella: string; archived: string[]; failed: string[] }>>(
+    `${BASE}/agent/${agentId}/consolidation/${encodeURIComponent(umbrella)}/approve`,
+  )
+}
+
+/** 拒绝合并：只改计划状态，技能库零改动。 */
+export function rejectConsolidation(agentId: string, umbrella: string) {
+  return api.post<ApiResponse<{ umbrella: string; rejected: string[] }>>(
+    `${BASE}/agent/${agentId}/consolidation/${encodeURIComponent(umbrella)}/reject`,
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Wave H-W4 三层技能库流转（agent→user 推送 / 公共库升级，均需确认）
 // ---------------------------------------------------------------------------
 

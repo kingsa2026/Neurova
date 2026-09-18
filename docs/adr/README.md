@@ -17,6 +17,9 @@
 | [0009](./0009-unify-execution-status.md) | 统一 ExecutionStatus 枚举 | Accepted | 2026-07-09 |
 | [0010](./0010-unify-tool-execution-context.md) | 统一 ToolExecutionContext dataclass | Accepted | 2026-07-09 |
 | [0011](./0011-unify-skill-registry.md) | 统一 SkillRegistry | Accepted | 2026-07-09 |
+| [0012](./0012-activate-skill-hub-client-and-service.md) | 激活技能仓库客户端与技能服务 | Accepted | 2026-07-14 |
+| [0013](./0013-unify-skill-market-endpoints.md) | 统一技能市场端点（4 套→1 套） | Accepted | 2026-07-14 |
+| [0014](./0014-connection-pool-short-lived-only.md) | 连接池只管短连接（常驻连接不进池） | Accepted | 2026-09-18 |
 
 ## 主题分类
 
@@ -40,6 +43,9 @@
 - [ADR 0009: 统一 ExecutionStatus](./0009-unify-execution-status.md) — 4 个不兼容枚举收敛到 tool_layers/types.py
 - [ADR 0010: 统一 ToolExecutionContext](./0010-unify-tool-execution-context.md) — 2 个不兼容 dataclass 收敛 + 删除死代码
 - [ADR 0011: 统一 SkillRegistry](./0011-unify-skill-registry.md) — class A 为规范，class B re-export
+
+### 存储层
+- [ADR 0014: 连接池只管短连接](./0014-connection-pool-short-lived-only.md) — 常驻连接（写放大优化）不进池
 
 ## ADR 编写规范
 

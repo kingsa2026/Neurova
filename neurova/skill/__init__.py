@@ -3,6 +3,12 @@ Skill模块兼容性层
 
 提供 neurova.skill 命名空间，实际实现在 neurova.skills 和 neurova.skill_system 中。
 这是为了兼容现有测试代码中的导入语句。
+
+P2（Issue #46）：本包原先还挂着一个 `skill_packer` 子模块（旧的
+SkillPacker 打包器）——生产零调用（agent_core 的 `skill_packer` 属性实为
+`evolution.AutoSkillBuilder`），且其产物不经过证据闸，与新链路安全基线
+冲突。已连同其专用测试（`tests/skill/*`）一并删除；本包只保留
+`ExperienceRecord` / `Skill` 两个向后兼容别名。
 """
 
 import importlib
