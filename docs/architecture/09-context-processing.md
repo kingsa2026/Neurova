@@ -1486,6 +1486,30 @@ class ContextMetrics:
         }
 ```
 
+### 10.2 ContextPool 运行态指标（Issue #65）
+
+上面的 `ContextMetrics` 是**类内自计数**，不导出、也不覆盖"归档池"这一侧。
+ContextPool 是**永久归档**（只增不减，见 ADR 0015）：`max_size` 已失效，常驻
+占用严格线性 0.76 KB/条 —— 若不导出，内存随会话时长单调累积在观测面上完全空白。
+
+`/metrics`（`Metrics.observe_context_pools()`）现已暴露：
+
+| 指标 | 类型 | 含义 |
+|------|------|------|
+| `neurova_context_pool_entries{pool}` | Gauge | 各池常驻条数（标签 = 隔离键 `user:agent:session`，抓取时快照） |
+| `neurova_context_pool_evicted_total{pool,reason}` | Gauge | 各原因回收计数（`capacity` / `ttl` / `replaced`） |
+| `neurova_context_pool_query_seconds{phase}` | Histogram | `query()` 分阶段耗时（`partition` / `ttl` / `keyword`，常驻埋点） |
+
+两种取数口径的差别是刻意的：
+
+- **Gauge = 抓取时快照**。数据源是运行态对象（池的常驻列表、回收计数器）；
+  池经**弱引用**登记表枚举，抓指标既不懒建池、也不延长池生命周期。
+- **Histogram = 常驻埋点**。读路径在每次 `query()` 里 observe（每阶段 child 句柄
+  惰性缓存，实测 ~0.7µs/次）；埋点异常一律吞掉，观测面故障绝不影响取数。
+
+配合 `ContextPool.get_retention_stats()`（常驻条数 / `max_size_effective=False` /
+`resident_limit` / 分原因回收计数 / 读索引规模）即可完整刻画"回收契约是否被遵守"。
+
 ## 11. 测试用例
 
 ### 11.1 单元测试
