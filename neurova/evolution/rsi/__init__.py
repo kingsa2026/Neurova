@@ -54,6 +54,19 @@ try:
 except ImportError as _e:
     _logger.debug("rsi.orchestrator 未可用: %s", _e)
 
+# 迭代结果摘要（响应面/推送面的单一事实源；仅依赖标准库，导入零成本）
+try:
+    from .result_summary import (
+        RSI_SUMMARY_FIELDS,
+        clear_rsi_summaries,
+        convergence_status,
+        get_latest_rsi_summary,
+        record_rsi_summary,
+        summarize_rsi_result,
+    )
+except Exception as _e:
+    _logger.debug("rsi.result_summary 未可用: %s", _e)
+
 __all__ = [
     "RecursiveRatchetPruner",
     "EnhancedRatchetPruner",
@@ -76,4 +89,10 @@ __all__ = [
     "create_rsi_dashboard",
     "RSIOrchestrator",
     "create_rsi_orchestrator",
+    "RSI_SUMMARY_FIELDS",
+    "summarize_rsi_result",
+    "convergence_status",
+    "record_rsi_summary",
+    "get_latest_rsi_summary",
+    "clear_rsi_summaries",
 ]

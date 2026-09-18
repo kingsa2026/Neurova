@@ -338,43 +338,68 @@ class NegativeScreenPusher:
         rsi_result: Dict[str, Any],
     ) -> PushResult:
         """
-        推送 RSI 结果到负一屏
+        推送 RSI 摘要到负一屏
+
+        入参口径 = ``neurova.evolution.rsi.result_summary.summarize_rsi_result``
+        的输出（即对话响应里的 ``ctx.result["rsi"]``）：
+        ``{status, applied_count, gain, phase_advanced, turn?, stale?}``。
+
+        历史实现读 ``iteration/improvements/convergence_score/status`` —— 与
+        RSIOrchestrator.run_iteration 的真实输出（convergence/applied_count/
+        gain/phase_advanced）名字全不匹配，且 ``convergence`` 是 dict，
+        ``convergence_score * 100`` 一旦拿到真实结果就 TypeError。真接线前
+        这里只会静默显示全默认值，接线后直接报错，故同一并收口。
+
+        两个输入形态都接受（摘要 / 原始 run_iteration 返回值），字段名一律
+        按真实契约取——由摘要模块统一裁剪，避免第二套字段解释。
 
         Args:
             config: 用户配置
-            rsi_result: RSI 迭代结果
+            rsi_result: RSI 摘要（或原始迭代结果 dict）
 
         Returns:
             推送结果
         """
-        # 格式化 RSI 结果
-        iteration = rsi_result.get("iteration", 0)
-        improvements = rsi_result.get("improvements", 0)
-        convergence_score = rsi_result.get("convergence_score", 0.0)
-        status = rsi_result.get("status", "unknown")
+        from neurova.evolution.rsi.result_summary import summarize_rsi_result
 
-        task_name = f"RSI 迭代 #{iteration}"
+        raw = rsi_result if isinstance(rsi_result, dict) else {}
+        # 优先按摘要口径裁剪；形态不符时退回对原始 dict 的摘要化（含非标准键）
+        summary = summarize_rsi_result(raw) or {
+            "status": "unknown",
+            "applied_count": 0,
+            "gain": 0.0,
+            "phase_advanced": False,
+        }
+
+        status = str(summary.get("status") or "unknown")
+        applied_count = summary.get("applied_count") or 0
+        gain = summary.get("gain") or 0.0
+        phase_advanced = bool(summary.get("phase_advanced"))
+        turn = raw.get("turn")
+
+        iteration_label = f"#{turn}" if turn is not None else ""
+        task_name = f"RSI 迭代{iteration_label}".rstrip()
         task_content = f"""## RSI 自我优化报告
 
 ### 迭代信息
-- **迭代次数**: {iteration}
-- **优化数量**: {improvements}
-- **收敛分数**: {convergence_score * 100:.2f}%%
-- **状态**: {status}
+- **收敛状态**: {status}
+- **应用优化数**: {applied_count}
+- **实测增益**: {gain:+.4f}
+- **部署阶段推进**: {"是" if phase_advanced else "否"}
 
-### 详细结果
+### 迭代结果
 ```json
-{json.dumps(rsi_result, indent=2, ensure_ascii=False)}
+{json.dumps(raw, indent=2, ensure_ascii=False, default=str)}
 ```
 """
-        task_result = f"RSI 迭代 {iteration} 完成，{improvements} 项优化，收敛分数 {convergence_score * 100:.2f}%%"
+        task_result = f"RSI 迭代{iteration_label} 完成，状态 {status}，应用 {applied_count} 项优化，增益 {gain:+.4f}"
 
         return await self.push_task(
             config=config,
             task_name=task_name,
             task_content=task_content,
             task_result=task_result,
-            task_id=f"rsi_{iteration}_{uuid.uuid4().hex[:8]}",
+            task_id=f"rsi_{turn if turn is not None else 'latest'}_{uuid.uuid4().hex[:8]}",
         )
 
     def _build_push_data(
