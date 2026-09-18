@@ -24,6 +24,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -151,13 +152,48 @@ class AuditLogger:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
 
     def _get_conn(self) -> sqlite3.Connection:
-        """获取数据库连接"""
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        """借出一条池化短连接（P1-4 / ADR 0014）。
+
+        审计写是"每事件一次"的高频短连接（实测裸连接 5.22ms → 池 2.06ms），
+        是本轮收益最大的迁移点。
+
+        **优先用 `_connection()` 上下文**：裸连接时代，异常路径漏 close 只是
+        "迟早被 GC 回收"；池化后漏归还 = `_created_count` 只增不减，漏满
+        max_connections 后取连接会阻塞到 timeout（P0-2 里"健康检查卡 30s"
+        就是同一形状）。故保留成对的 get/close 入口以兼容旧调用，但新增与
+        修改的调用点一律走上下文。
+
+        非默认路径（测试注入 tmp_path）同样进池：池按 db_path 注册，路径隔离
+        即池隔离，不会串库。
+        """
+        from neurova.core.database import get_short_connection
+
+        return get_short_connection(self._db_path)
+
+    def _close_conn(self, conn: sqlite3.Connection) -> None:
+        """归还短连接到池（幂等；失败降级为关闭，不抛给调用方）。"""
+        from neurova.core.database import release_short_connection
+
+        try:
+            release_short_connection(conn)
+        except Exception:  # noqa: BLE001 - 归还失败不改变调用方语义
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    @contextmanager
+    def _connection(self):
+        """借出/归还池化短连接（异常路径也归还）。"""
+        conn = self._get_conn()
+        try:
+            yield conn
+        finally:
+            self._close_conn(conn)
 
     def _init_db(self):
         """初始化数据库表"""
+        conn = None
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
@@ -187,13 +223,15 @@ class AuditLogger:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_severity ON audit_logs(severity)")
 
             conn.commit()
-            conn.close()
 
             logger.info("Audit database initialized")
 
         except Exception as e:
             logger.error("Failed to initialize audit database: %s", e)
             raise
+        finally:
+            if conn is not None:
+                self._close_conn(conn)
 
     def log(self, entry: AuditLogEntry) -> bool:
         """
@@ -205,6 +243,7 @@ class AuditLogger:
         Returns:
             bool: 是否成功
         """
+        conn = None
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
@@ -233,7 +272,6 @@ class AuditLogger:
             )
 
             conn.commit()
-            conn.close()
 
             logger.debug("Audit log recorded: %s - %s", entry.event_type.value, entry.action)
             return True
@@ -241,6 +279,9 @@ class AuditLogger:
         except Exception as e:
             logger.error("Failed to record audit log: %s", e)
             return False
+        finally:
+            if conn is not None:
+                self._close_conn(conn)
 
     def log_auth_login(self, user_id: str, ip_address: str = "", user_agent: str = "", success: bool = True) -> bool:
         """记录登录事件"""
@@ -346,6 +387,7 @@ class AuditLogger:
         Returns:
             List[AuditLogEntry]: 审计日志列表
         """
+        conn = None
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
@@ -378,7 +420,6 @@ class AuditLogger:
 
             cursor.execute(query, params)
             results = cursor.fetchall()
-            conn.close()
 
             entries = []
             for row in results:
@@ -402,16 +443,19 @@ class AuditLogger:
         except Exception as e:
             logger.error("Failed to query audit logs: %s", e)
             return []
+        finally:
+            if conn is not None:
+                self._close_conn(conn)
 
     def get_by_id(self, log_id: int) -> Optional[AuditLogEntry]:
         """根据ID获取审计日志"""
+        conn = None
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
 
             cursor.execute("SELECT * FROM audit_logs WHERE id = ?", (log_id,))
             row = cursor.fetchone()
-            conn.close()
 
             if not row:
                 return None
@@ -433,6 +477,9 @@ class AuditLogger:
         except Exception as e:
             logger.error("Failed to get audit log by ID: %s", e)
             return None
+        finally:
+            if conn is not None:
+                self._close_conn(conn)
 
     def get_statistics(self, start_time: Optional[float] = None, end_time: Optional[float] = None) -> Dict[str, Any]:
         """
@@ -445,6 +492,7 @@ class AuditLogger:
         Returns:
             Dict: 统计信息
         """
+        conn = None
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
@@ -494,8 +542,6 @@ class AuditLogger:
             cursor.execute(query, params3)
             by_severity = {row["severity"]: row["count"] for row in cursor.fetchall()}
 
-            conn.close()
-
             return {
                 "total": total,
                 "by_event_type": by_event_type,
@@ -506,6 +552,9 @@ class AuditLogger:
         except Exception as e:
             logger.error("Failed to get audit statistics: %s", e)
             return {}
+        finally:
+            if conn is not None:
+                self._close_conn(conn)
 
     def export_csv(self, file_path: str, **kwargs) -> bool:
         """
@@ -608,6 +657,7 @@ class AuditLogger:
         Returns:
             int: 归档的日志数量
         """
+        conn = None
         try:
             cutoff_time = time.time() - (days_old * 24 * 60 * 60)
 
@@ -622,7 +672,6 @@ class AuditLogger:
             cursor.execute("DELETE FROM audit_logs WHERE timestamp < ?", (cutoff_time,))
 
             conn.commit()
-            conn.close()
 
             logger.info("Archived %s audit logs older than %s days", count, days_old)
             return count
@@ -630,6 +679,9 @@ class AuditLogger:
         except Exception as e:
             logger.error("Failed to archive old audit logs: %s", e)
             return 0
+        finally:
+            if conn is not None:
+                self._close_conn(conn)
 
     def cleanup(self) -> bool:
         """
@@ -638,6 +690,7 @@ class AuditLogger:
         Returns:
             bool: 是否成功
         """
+        conn = None
         try:
             conn = self._get_conn()
             cursor = conn.cursor()
@@ -648,14 +701,15 @@ class AuditLogger:
             # 重新索引
             cursor.execute("REINDEX")
 
-            conn.close()
-
             logger.info("Audit database cleaned up")
             return True
 
         except Exception as e:
             logger.error("Failed to cleanup audit database: %s", e)
             return False
+        finally:
+            if conn is not None:
+                self._close_conn(conn)
 
 
 # 全局实例

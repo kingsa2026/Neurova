@@ -81,11 +81,16 @@ class UserModel:
             os.makedirs(db_dir, exist_ok=True)
             logger.debug("Created database directory: %s", db_dir)
 
-    def _get_conn(self) -> sqlite3.Connection:
-        """获取数据库连接"""
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _get_conn(self):
+        """借出池化短连接句柄（P1-4 / ADR 0014）。
+
+        返回 `PooledConnection` 委托句柄：`conn.close()` 被重定向为"归还池"
+        （不是真关闭）。这样本文件散落的 19 处 close 与数十个早退/异常分支
+        全部自动变成正确归还 —— 池化只改这一行，不改各方法的控制流。
+        """
+        from neurova.core.pooled_connection import PooledConnection
+
+        return PooledConnection(self.db_path)
 
     def _init_db(self) -> None:
         """初始化数据库表"""
