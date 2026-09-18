@@ -616,9 +616,18 @@ class PostChatPipeline:
             "audio_data": Optional[bytes],
             "cognitive_score": Optional[float],
             "proactive_question": Optional[str],
-            "rsi_result": Optional[Dict],   # 后台化后恒为 None（结果不进响应）
+            "rsi_result": Optional[Dict],   # 后台化后恒为 None（原始迭代快照不进响应）
+            "rsi": Optional[Dict],          # RSI 摘要（最近一次已完成迭代；见下）
             "duration_ms": float,           # 响应路径耗时（可观测）
         }
+
+        关于 "rsi"：RSI 步骤已后台化，本轮结果赶不上响应组装，故这里给的是
+        **该会话最近一次已完成**的迭代摘要——字段
+        ``{status, applied_count, gain, phase_advanced, turn, stale}``
+        （前四个对齐 RSIOrchestrator.run_iteration 的真实输出，由
+        neurova.evolution.rsi.result_summary 统一裁剪，不再各自猜字段名）。
+        从未跑过 RSI 时为 None。stale=True 表示摘要不是本轮的（后台仍在跑
+        或本轮被 should_continue() 跳过）——宁可标注来源，也不虚报成本轮产物。
 
         执行分两层（P0 尾延迟优化）：
         - 响应路径（await）：save_session / 记忆温度衰减 / 认知分析 / 主动提问
@@ -770,7 +779,8 @@ class PostChatPipeline:
             self.background_enabled(),
         )
 
-        # rsi_result 恒为 None：RSI 已后台化，结果不进响应（旧字段保留兼容）
+        # rsi_result 恒为 None：RSI 已后台化，原始迭代快照不进响应（旧字段保留兼容）；
+        # 观测面走 "rsi" 摘要（字段名对齐 run_iteration，取最近一次已完成迭代）。
         return {
             "actual_session_id": actual_session_id,
             "audio_path": audio_path,
@@ -778,8 +788,22 @@ class PostChatPipeline:
             "cognitive_score": cognitive_score,
             "proactive_question": proactive_question,
             "rsi_result": None,
+            "rsi": self._latest_rsi_summary(),
             "duration_ms": duration_s * 1000.0,
         }
+
+    def _latest_rsi_summary(self) -> Optional[Dict[str, Any]]:
+        """最近一次已完成 RSI 迭代的摘要（无法取到时返回 None，绝不阻断响应）。"""
+        try:
+            from neurova.core.turn_context import get_turn_count, get_turn_session_id
+            from neurova.evolution.rsi.result_summary import get_latest_rsi_summary
+
+            agent_id = getattr(getattr(self._agent, "config", None), "agent_id", None)
+            session_id = get_turn_session_id() or getattr(self._agent, "session_id", None)
+            return get_latest_rsi_summary(agent_id, session_id, current_turn=get_turn_count())
+        except Exception as e:  # noqa: BLE001 - 观测字段不得拖垮响应
+            logger.debug("RSI 摘要读取跳过: %s", e)
+            return None
 
     def _format_slowest_steps(self, top: int = 5) -> str:
         """最慢的 top-N 步骤（"step=ms"），供日志快速定位尾延迟来源。"""
@@ -2707,14 +2731,36 @@ class PostChatPipeline:
                 # 直接在事件循环内调用会卡死所有并发请求——移到工作线程。
                 # to_thread 原样透传返回值与异常，外层 try/except 语义不变。
                 result = await asyncio.to_thread(rsi.run_iteration)
-                logger.info("RSI 迭代完成: %s", result.get('convergence', {}).get('status', 'unknown'))
+                # convergence 是 dict；历史写法 result.get("convergence", {}).get("status")
+                # 在 convergence 非 dict 时会炸，统一走摘要模块的取值口径。
+                from neurova.evolution.rsi.result_summary import (
+                    convergence_status,
+                    record_rsi_summary,
+                )
+
+                status = convergence_status(result)
+                logger.info("RSI 迭代完成: %s", status)
+                # 真接线（Issue #55 后续）：把这次迭代压成响应面摘要落库——
+                # 本步骤在后台 task 里跑，结果赶不上本轮响应组装，故由
+                # process() 取"最近一次已完成摘要"随 ctx.result["rsi"] 返回。
+                try:
+                    from neurova.core.turn_context import get_turn_count, get_turn_session_id
+
+                    record_rsi_summary(
+                        getattr(getattr(self._agt, "config", None), "agent_id", None),
+                        get_turn_session_id() or getattr(self._agt, "session_id", None),
+                        result,
+                        turn=get_turn_count(),
+                    )
+                except Exception as _sum_err:  # noqa: BLE001 - 摘要落库失败不影响迭代本身
+                    logger.debug("RSI 摘要记录跳过: %s", _sum_err)
                 self._step_results.append(
                     StepResult(
                         step_name=step_name,
                         status=StepStatus.EXECUTED,
-                        message=f"RSI iteration completed: {result.get('convergence', {}).get('status', 'unknown')}",
+                        message=f"RSI iteration completed: {status}",
                         duration_ms=(time.time() - start_time) * 1000,
-                        data={"convergence_status": result.get("convergence", {}).get("status")},
+                        data={"convergence_status": status},
                     )
                 )
                 return result
