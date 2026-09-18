@@ -209,7 +209,9 @@ def check_server_logs():
     try:
         # 尝试读取最新的日志文件
         import glob
-        log_files = glob.glob("E:/项目/Neurova/logs/*.log")
+        from pathlib import Path
+
+        log_files = glob.glob(str(Path(__file__).resolve().parents[2] / "logs" / "*.log"))
         if log_files:
             latest_log = max(log_files)
             print(f"最新日志文件: {latest_log}")

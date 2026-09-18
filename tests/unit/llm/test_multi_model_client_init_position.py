@@ -20,7 +20,7 @@ TDD 流程:
 - GREEN: 修复后测试通过
 
 运行方式:
-    cd e:\\项目\\Neurova
+    cd <repo-root>
     python -m unittest tests.unit.llm.test_multi_model_client_init_position -v
 """
 

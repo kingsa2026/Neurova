@@ -2908,10 +2908,43 @@ class ToolExecutor:
             value = int(value)  # 4.0 → 4，便于阅读
         return {"expression": expression, "result": value}
 
-    async def _execute_get_datetime(self, params: Dict) -> Dict:
-        """获取当前日期时间或换算时间戳（支持 IANA 时区名与 ±HH:MM 偏移）"""
+    # 零偏移时区名（UTC 等义名）——按定义恒 +00:00，不查系统 tzdata。
+    # 根因（Issue #62）：容器/宿主 tzdata 包损坏时（如 /usr/share/zoneinfo/Etc/UTC
+    # 被覆盖成 CST-8 内容），ZoneInfo("UTC") 会安静返回 +08:00，时间戳换算
+    # 结果错得毫无痕迹。契约层面"UTC"不需要查 tzdata——它是规范定义的零偏移。
+    _ZERO_OFFSET_TIMEZONE_NAMES = frozenset({
+        "utc", "gmt", "z", "zulu", "universal", "etc/utc", "etc/gmt", "etc/zulu",
+        "etc/universal", "gmt0", "etc/gmt0", "utc0", "etc/utc0",
+    })
+
+    def _resolve_timezone(self, tz_param: str):
+        """解析时区参数 → tzinfo；无法解析返回 None。
+
+        优先级：零偏移等义名（内置 timezone.utc）→ IANA 名称（ZoneInfo）
+        → ±HH:MM / GMT+H 偏移字面量。
+        """
         import re
         from datetime import timedelta, timezone as dt_timezone
+
+        if tz_param.strip().casefold() in self._ZERO_OFFSET_TIMEZONE_NAMES:
+            return dt_timezone.utc
+        try:
+            from zoneinfo import ZoneInfo
+
+            return ZoneInfo(tz_param)
+        except Exception:
+            # IANA 名称解析失败时，尝试 ±HH:MM / GMT+H 风格的偏移
+            m = re.fullmatch(r"(?:GMT|UTC)?\s*([+-])(\d{1,2})(?::?(\d{2}))?", tz_param)
+            if m:
+                sign = 1 if m.group(1) == "+" else -1
+                hours, minutes = int(m.group(2)), int(m.group(3) or 0)
+                if hours <= 23 and minutes <= 59:
+                    return dt_timezone(sign * timedelta(hours=hours, minutes=minutes))
+        return None
+
+    async def _execute_get_datetime(self, params: Dict) -> Dict:
+        """获取当前日期时间或换算时间戳（支持 IANA 时区名与 ±HH:MM 偏移）"""
+        from datetime import timezone as dt_timezone
 
         tz_param = (params.get("timezone") or params.get("tz") or "").strip()
         ts_param = params.get("timestamp")
@@ -2925,19 +2958,7 @@ class ToolExecutor:
             return {"error": f"无效的时间戳: {ts_param}（{e}）"}
 
         if tz_param:
-            tz = None
-            try:
-                from zoneinfo import ZoneInfo
-
-                tz = ZoneInfo(tz_param)
-            except Exception:
-                # IANA 名称解析失败时，尝试 ±HH:MM / GMT+H 风格的偏移
-                m = re.fullmatch(r"(?:GMT|UTC)?\s*([+-])(\d{1,2})(?::?(\d{2}))?", tz_param)
-                if m:
-                    sign = 1 if m.group(1) == "+" else -1
-                    hours, minutes = int(m.group(2)), int(m.group(3) or 0)
-                    if hours <= 23 and minutes <= 59:
-                        tz = dt_timezone(sign * timedelta(hours=hours, minutes=minutes))
+            tz = self._resolve_timezone(tz_param)
             if tz is None:
                 return {
                     "error": f"无法解析时区: {tz_param}（支持 Asia/Shanghai 等 IANA 名称或 +08:00 偏移）"

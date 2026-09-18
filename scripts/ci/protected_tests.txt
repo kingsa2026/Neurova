@@ -51,7 +51,17 @@ tests/unit/cognitive_layers/memory_layer/test_m15_delete_persisted_conn_hygiene.
 
 # Issue #61 部署配置一致性：门禁自检（R1~R9 不变量 + 周级 crontab 巡检接线）
 tests/unit/test_deploy_config_guard.py
-
+# Issue #62 工具层守卫真接线：这五个文件此前未进子集，且把开发机绝对路径
+# 写死进 open()/cwd= → Linux/CI 上 FileNotFoundError（守卫静默不跑）。
+# 修法：路径统一走 tests/repo_paths.py；同时搬进子集，让"绿"等于"真跑过"。
+# 常驻不变量见 tests/unit/test_dev_path_and_runtime_dep_guards.py。
+tests/unit/tools/test_tool_layer_breakpoints_zoom_out.py
+tests/unit/test_arch_deepening_candidates.py
+tests/unit/test_tool_call_breakpoints.py
+tests/unit/test_tool_call_breakpoints_v2.py
+tests/unit/test_tool_call_breakpoints_v3.py
+# Issue #62 收口守卫：开发机路径零写死 + MCP SDK 运行时声明
+tests/unit/test_dev_path_and_runtime_dep_guards.py
 # Issue #65 上下文池读路径/回收契约/单例重置：分区索引等价性 + Unicode 快路径
 # 安全网 + 常驻上限无损回收 + ExecutionEngine 三层重置 + 压测守卫补强
 tests/unit/context/test_context_pool_query_index.py

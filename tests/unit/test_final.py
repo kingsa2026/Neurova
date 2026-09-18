@@ -1,10 +1,14 @@
-import requests
 import os
+
+import requests
+
+from tests.repo_paths import REPO_ROOT as _CODE_ROOT
+
 
 BASE = "http://localhost:9527/api/v1"
 
 # 找一个存在的 agent
-agent_dir = r"e:\项目\Neurova\neurova\data"
+agent_dir = str(_CODE_ROOT / "neurova" / "data")
 agents = []
 if os.path.exists(agent_dir):
     agents = [d for d in os.listdir(agent_dir) if os.path.isdir(os.path.join(agent_dir, d))]
