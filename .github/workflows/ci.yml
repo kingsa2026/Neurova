@@ -16,6 +16,9 @@ on:
 #   5. frontend             npm audit --audit-level=high（阻塞）+ vue-tsc + vitest
 #   6. dependency-audit     pip-audit 阻塞审计：CI 精简锁 + 生产全量锁（requirements-full.lock）
 #                           + OSV 扫非 pip 依赖树（Cargo.lock / npx 运行时包锁）
+#   7. perf-gate            import 时长预算 + 关键路径微基准（阻断，
+#                           见 scripts/ci/perf_gate.py）
+
 # 原则：只进当前确定全绿的测试；预存失败模块修复后逐个搬入 protected_tests.txt。
 # 依赖审计为阻塞门禁：扫出漏洞即红灯（allow-list 走 requirements*.lock 版本收敛，
 # 不在 CI 里静默放行）。
@@ -153,6 +156,24 @@ jobs:
 
       - name: Unit tests (vitest)
         run: npx vitest run
+
+  perf-gate:
+    name: Performance regression gate (import budget + microbench)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install minimal deps
+        run: python -m pip install --upgrade pip -r requirements-ci.txt
+
+      - name: Perf regression gate
+        run: python scripts/ci/perf_gate.py
 
   dependency-audit:
     name: Dependency audit (pip-audit, blocking)

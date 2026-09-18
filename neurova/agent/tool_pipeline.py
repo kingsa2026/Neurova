@@ -30,11 +30,12 @@ from __future__ import annotations
 import copy
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.thread_pool import get_thread_pool
 from neurova.security.monotonic_guard import GuardVerdict
 from neurova.tool_layers.types import ToolExecutionContext as _CanonicalContext
 
@@ -347,14 +348,20 @@ class ToolExecutionPipeline:
                 dependent_steps.append(step)
 
         if self._config.parallel_independent_steps and len(independent_steps) > 1:
-            with ThreadPoolExecutor(max_workers=self._config.max_workers) as executor:
-                futures = {}
-                for step in independent_steps:
-                    step_start = time.time()
-                    futures[executor.submit(step.execute, context, report)] = (step, step_start)
-                for future in as_completed(futures):
-                    step, step_start = futures[future]
-                    self._record_step_outcome(future, step, report, time.time() - step_start)
+            # P1 性能修复：原 `with ThreadPoolExecutor(...)` 每次 pipeline 执行
+            # 都创建/销毁线程池（纯开销，热路径上每轮对话都付）。改用共享
+            # 具名池——"tool-pipeline" 与其它用途隔离，池本身进程内复用。
+            # 不 shutdown 共享池（它属进程，非本次调用）。
+            executor = get_thread_pool(
+                max_workers=self._config.max_workers, name="tool-pipeline"
+            )
+            futures = {}
+            for step in independent_steps:
+                step_start = time.time()
+                futures[executor.submit(step.execute, context, report)] = (step, step_start)
+            for future in as_completed(futures):
+                step, step_start = futures[future]
+                self._record_step_outcome(future, step, report, time.time() - step_start)
         else:
             for step in independent_steps + dependent_steps:
                 step_start = time.time()
