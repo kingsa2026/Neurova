@@ -7,13 +7,22 @@
   段供扩展场景（沙箱语境改写、自定义策略）插桩，与治理中心共享同一 Guard 协议。
 - execute：主执行体由调用方传入（ToolExecutor 负责真实执行与超时），
   经 execute_wrapper（middleware）环绕——超时/重试/指标可在此插桩。
-- post：记忆 / 生命周期 / 技能 / 进化四类步骤（旧语义保留，含并行段）。
+- post：调用方注册的后置步骤（`add_step` / `add_post_step`），含并行段。
 - result：观察者收到**独立深拷贝快照**（不可变语义：观察者改动不污染报告），
+  经 `get_pipeline_observers` / `notify_tool_result` 门面接入
+  `ToolExecutor.on_tool_executed`（默认空注册表 = 零行为变化）。
 
 历史：C2/ADR 0010 曾将本模块标记为死代码（生产路径不调用，仅测试引用）。
-本次升级后：post 段四步仍由 ToolExecutor.on_tool_executed 承担（未迁移，防回归），
-本组件为组件化流水线 + result 观察者扩展点，经 get_pipeline_observers /
-notify_tool_result 门面接入 on_tool_executed（默认空注册表 = 零行为变化）。
+本次升级后：本组件为组件化流水线 + result 观察者扩展点——**这条是活的**
+（生产消费方：`neurova/security/tool_circuit_breaker.py` 经
+`get_pipeline_observers().add_result_observer(...)` 挂熔断观察者）。
+
+P2（Issue #46）：上述"记忆/生命周期/技能/进化四类旧步骤"
+（`SkillObservationStep` 等四个 Step 类）与装配它们的 `create_default_pipeline`
+在 `neurova/` 内**零生产调用**（只有测试引用），已真删——它们的职责在生产上
+由 `ToolExecutor.on_tool_executed` 尾部承担；技能观察的唯一正确通道是
+`creation_governance` 的 ContextVar 采集器（那条才有证据闸）。保留旧 Step
+类只会让后来者把无证据通道当接线模板。
 """
 
 from __future__ import annotations
@@ -73,7 +82,10 @@ class ToolExecutionReport:
     execution_time: float
     timestamp: float = field(default_factory=time.time)
 
-    # 各步骤执行状态
+    # 各步骤执行状态——**旧四步门面的产物，生产者已随 P2 删除**（见下方
+    # `is_fully_successful` 的注记）。字段保留是因为观察者拿到的是本报告的
+    # 冻结快照（`frozen()` / `to_dict()`），形状属对外契约；但默认值恒 False，
+    # 不要再把它们当成"这一步跑过了吗"的判据。
     memory_recorded: bool = False
     lifecycle_updated: bool = False
     skill_observed: bool = False
@@ -96,7 +108,13 @@ class ToolExecutionReport:
 
     @property
     def is_fully_successful(self) -> bool:
-        """是否所有步骤都成功"""
+        """是否所有后置步骤都成功。
+
+        ⚠️ P2（Issue #46）：本判据的四个来源都是**旧四步门面**的产物，而
+        那个门面（`create_default_pipeline` + 四个 Step 类）零生产调用，已
+        真删——故本属性在生产上恒 False。保留只为兼容既有测试/观察者签名，
+        **不要**据此判断执行是否成功（看 `errors` / `success` / `rejected`）。
+        """
         return (self.memory_recorded
                 and self.lifecycle_updated
                 and self.skill_observed
@@ -146,117 +164,19 @@ class ToolExecutionStep:
         """执行步骤（子类实现）。"""
 
 
-class MemoryRecordingStep(ToolExecutionStep):
-    """记录工具使用到肌肉记忆。"""
+class PipelineConfig:
+    """管线配置。
 
-    def __init__(self, tool_memory):
-        self.tool_memory = tool_memory
-
-    @property
-    def name(self) -> str:
-        return "memory_recording"
-
-    @property
-    def error_level(self) -> str:
-        return "warning"
-
-    def execute(self, context, report):
-        self.tool_memory.record_tool_usage(
-            tool_name=report.tool_name,
-            success=report.success,
-            execution_time=report.execution_time,
-            problem_text=getattr(context, "user_input", ""),
-            tool_params=getattr(context, "params", {}),
-            tool_source=getattr(context, "metadata", {}).get("tool_source", ""),
-            result=report.result,
-        )
-        report.memory_recorded = True
-
-
-class LifecycleUpdateStep(ToolExecutionStep):
-    """更新工具生命周期。"""
-
-    def __init__(self, tool_lifecycle):
-        self.tool_lifecycle = tool_lifecycle
-
-    @property
-    def name(self) -> str:
-        return "lifecycle_update"
-
-    @property
-    def error_level(self) -> str:
-        return "warning"
-
-    def execute(self, context, report):
-        self.tool_lifecycle.touch(report.tool_name, report.success)
-        report.lifecycle_updated = True
-
-
-class SkillObservationStep(ToolExecutionStep):
-    """观察技能序列。
-
-    ⚠️ 零生产调用（2026-09-17 复核确认）：生产链路的观察点是
-    `creation_governance` 的 ContextVar 采集器（begin_task /
-    record_tool_execution / finish_task），本 Step 与 `create_default_pipeline`
-    在 `neurova/` 内**无任何调用方**（仅测试引用），历史上是 SkillPacker 时代
-    的通道。保留是因为它仍可工作（测试在跑），但**不要**把它当作新增接线的
-    模板——新增观察需求请走 ContextVar 采集器，那条才有证据闸。
+    P2（Issue #46）：原配置里另有 6 个**从未被读取**的开关
+    （enable_memory_recording / enable_lifecycle_update /
+    enable_skill_observation / enable_evolution_feedback / continue_on_error /
+    log_level）——它们对应的四个 Step 类零生产调用，已一并删除。留着这些
+    开关等于给读者一份"可以关掉某一步"的假能力（实际没有任何代码读它），
+    是一条静默的谎——故真删，而不是标注保留。
+    只剩两个**有真实消费方**的字段（`_run_post_steps` 读它们）。
     """
 
-    def __init__(self, skill_packer):
-        self.skill_packer = skill_packer
-
-    @property
-    def name(self) -> str:
-        return "skill_observation"
-
-    @property
-    def error_level(self) -> str:
-        return "warning"
-
-    def execute(self, context, report):
-        self.skill_packer.observe(
-            tool_sequence=[report.tool_name],
-            context="tool_pipeline",
-            success=report.success,
-            duration=report.execution_time or 0.0,
-        )
-        report.skill_observed = True
-
-
-class EvolutionFeedbackStep(ToolExecutionStep):
-    """进化系统反馈。"""
-
-    def __init__(self, evolution):
-        self.evolution = evolution
-
-    @property
-    def name(self) -> str:
-        return "evolution_feedback"
-
-    @property
-    def error_level(self) -> str:
-        return "warning"
-
-    def execute(self, context, report):
-        self.evolution.record_feedback(
-            tool_name=report.tool_name,
-            success=report.success,
-            tool_params=getattr(context, "params", {}),
-        )
-        report.evolution_notified = True
-
-
-class PipelineConfig:
-    """管线配置。"""
-
-    enable_memory_recording: bool = True
-    enable_lifecycle_update: bool = True
-    enable_skill_observation: bool = True
-    enable_evolution_feedback: bool = True
     parallel_independent_steps: bool = True
-    continue_on_error: bool = True
-    log_level: str = "warning"
     max_workers: int = 2
 
 
@@ -483,46 +403,6 @@ def _compose_wrappers(wrappers: List[Callable], main: Callable) -> Callable:
     return composed
 
 
-def create_default_pipeline(
-    tool_memory=None,
-    tool_lifecycle=None,
-    skill_packer=None,
-    evolution=None,
-    config: Optional[PipelineConfig] = None,
-) -> ToolExecutionPipeline:
-    """创建默认Pipeline（旧语义四步骤）。
-
-    ⚠️ 零生产调用（2026-09-17 复核确认）：生产装配走 `ToolExecutor` 的
-    result-observer 扩展点（`get_pipeline_observers`），本函数只在测试里被
-    调用。保留为兼容门面，新增接线请勿使用。
-
-    Args:
-        tool_memory: 工具记忆实例
-        tool_lifecycle: 工具生命周期实例
-        skill_packer: 技能打包器实例
-        evolution: 进化系统实例
-        config: Pipeline配置
-
-    Returns:
-        ToolExecutionPipeline: 配置好的Pipeline
-    """
-    pipeline = ToolExecutionPipeline(config)
-
-    if tool_memory:
-        pipeline.add_step(MemoryRecordingStep(tool_memory))
-
-    if tool_lifecycle:
-        pipeline.add_step(LifecycleUpdateStep(tool_lifecycle))
-
-    if skill_packer:
-        pipeline.add_step(SkillObservationStep(skill_packer))
-
-    if evolution:
-        pipeline.add_step(EvolutionFeedbackStep(evolution))
-
-    return pipeline
-
-
 # ── 结果观察者门面（ToolExecutor.on_tool_executed 尾部挂载点） ────
 
 class PipelineObserversRegistry:
@@ -615,11 +495,6 @@ __all__ = [
     "ToolExecutionPipeline",
     "ToolExecutionReport",
     "ToolExecutionStep",
-    "EvolutionFeedbackStep",
-    "LifecycleUpdateStep",
-    "MemoryRecordingStep",
-    "SkillObservationStep",
-    "create_default_pipeline",
     "get_pipeline_observers",
     "notify_tool_result",
     "reset_pipeline_observers",
