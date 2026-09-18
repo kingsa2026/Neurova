@@ -18,6 +18,11 @@ on:
 #                           + OSV 扫非 pip 依赖树（Cargo.lock / npx 运行时包锁）
 #   7. perf-gate            import 时长预算 + 关键路径微基准（阻断，
 #                           见 scripts/ci/perf_gate.py）
+#   8. deploy-config        部署配置一致性（Dockerfile / docker-compose / Helm /
+#                           requirements 跨文件不变量，阻断，
+#                           见 scripts/ci/deploy_config_consistency_check.py）
+#                           注：GitHub 侧无定时触发，同门禁的"时间维度"兜底由
+#                           cnb 的周级 crontab 流水线承担（.cnb.yml）。
 
 # 原则：只进当前确定全绿的测试；预存失败模块修复后逐个搬入 protected_tests.txt。
 # 依赖审计为阻塞门禁：扫出漏洞即红灯（allow-list 走 requirements*.lock 版本收敛，
@@ -55,6 +60,22 @@ jobs:
 
       - name: Ruff (规则集与 per-file 豁免见 pyproject)
         run: python -m ruff check neurova tests --no-cache
+
+  deploy-config:
+    name: Deploy config consistency (Dockerfile / compose / Helm)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pyyaml
+        run: python -m pip install --upgrade pip pyyaml
+
+      - name: Deploy config consistency gate
+        run: python scripts/ci/deploy_config_consistency_check.py
 
   import-and-regression:
     name: Import sweep + audit regression tests

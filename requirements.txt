@@ -53,10 +53,25 @@ sentence-transformers>=2.2.0
 transformers>=4.20.0
 tokenizers>=0.13.0
 
-# MCP SDK（运行时必需：tool_layers/mcp_client.py 裸 import）
-# 缺席时**不崩**——连接一律返回 False 并把 last_error 记成"SDK 未安装"，
-# 于是真实失败原因被掩盖、线上 MCP 全断而 CI 全绿（Issue #62 偏差）。
-# 因此本行是 MCP 可用性的唯一声明源，删改前先读 mcp_client._SDK_AVAILABLE。
+# 硬依赖补齐（2026-09-18 部署配置一致性门禁 R8 实测）：
+# 下列包在代码里是"裸 import 无降级"，此前只在 requirements-ci.txt 声明，
+# 生产镜像（Dockerfile 只装本文件）装上后对应功能路径 import 即崩：
+#   APScheduler —— neurova/agent/scheduler.py:25-31 模块级 import，定时/工作流
+#                  触发器的唯一调度底座，缺席即 cron 触发器整链不可用
+#   feedparser  —— neurova/web_reach/reach.py:22 模块级 import（RSS 读取），
+#                  且经 skills.builtin 进入技能执行面
+#   pycryptodome —— neurova/llm/providers/secret_store.py 的 AES-GCM 唯一实现，
+#                   此前只经 lark-oapi 传递带入（隐式依赖，上游一改即崩）;
+#                   缺席时 API Key 解密静默失败（provider 缓存空 key）
+APScheduler>=3.10
+feedparser>=6.0
+pycryptodome>=3.20
+# MCP 工具层 SDK（neurova/tool_layers/mcp_client.py）
+# 本节两件事实不可混谈：
+#   1) 依赖声明只此一行，requirements-ci.txt 不再重复声明（单一声明源）；
+#   2) 缺席语义是**功能全断**，不是"优雅降级"——连接一律返回 False 并把
+#      last_error 记成"SDK 未安装"，真实失败原因被掩盖、线上 MCP 全断而 CI 全绿
+#      （Issue #62 偏差）。删改前先读 mcp_client._SDK_AVAILABLE。
 mcp>=1.2.0
 
 # Testing (dev)
