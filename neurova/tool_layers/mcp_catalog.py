@@ -19,6 +19,8 @@ web_fetch 重叠，按「不镀金 / 白名单不是全都接」剔除，首批�
 
 import typing
 
+from neurova.tool_layers.npx_runtime_registry import pinned_npx_args
+
 # 每个条目：id / name / description / transport / command / args 模板 /
 # requires（依赖探针，供 UI 门控）/ required_secrets（[{key, required, into, prompt}]）
 _CATALOG: typing.List[typing.Dict[str, typing.Any]] = [
@@ -48,7 +50,9 @@ _CATALOG: typing.List[typing.Dict[str, typing.Any]] = [
         "transport": "stdio",
         "requires": "node",
         "command": "npx",
-        "args": ["-y", "@upstash/context7-mcp"],
+        # npx 不钉版本 = 每次拉 latest（不可复现、无审计覆盖）；
+        # 版本单点登记在 npx_runtime_registry，锁文件进 OSV 审计
+        "args": pinned_npx_args("@upstash/context7-mcp"),
         "required_secrets": [
             {"key": "CONTEXT7_API_KEY", "required": False, "into": "env",
              "prompt": "Context7 API Key（可选，提升限额）"},
@@ -66,7 +70,7 @@ _CATALOG: typing.List[typing.Dict[str, typing.Any]] = [
         "transport": "stdio",
         "requires": "node",
         "command": "npx",
-        "args": ["-y", "@bytebase/dbhub"],
+        "args": pinned_npx_args("@bytebase/dbhub"),
         # dbhub 无 env 通道，DSN 只能经 --dsn 命令行参数传入
         "dsn_arg": ["--dsn"],
         "required_secrets": [

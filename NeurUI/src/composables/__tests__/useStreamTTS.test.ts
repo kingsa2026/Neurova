@@ -6,13 +6,14 @@
  * - extractSentences：句末标点切分 + 短句滞留 + force 收尾
  * - Runner：保序串行合成、过滤空句、abort 保留已合成 url、onDone 定稿
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import {
   StreamTTSRunner,
   audioSourceFor,
   extractSentences,
   requireNonEmptyAudioBlob,
   sanitizeForSpeech,
+  type StreamTTSHooks,
 } from '@/composables/useStreamTTS'
 
 describe('audioSourceFor（回放 src 选取）', () => {
@@ -105,10 +106,12 @@ describe('extractSentences', () => {
 })
 
 describe('StreamTTSRunner', () => {
+  // vitest 4 起 vi.fn(impl) 不再从实现推导签名（Mock<Procedure>），
+  // 须显式按 StreamTTSHooks 的字段签名标注，否则传入 Runner 类型不兼容。
   let hooks: {
-    synthesize: ReturnType<typeof vi.fn>
-    onChunkReady: ReturnType<typeof vi.fn>
-    onDone: ReturnType<typeof vi.fn>
+    synthesize: Mock<StreamTTSHooks['synthesize']>
+    onChunkReady: Mock<StreamTTSHooks['onChunkReady']>
+    onDone: Mock<StreamTTSHooks['onDone']>
   }
 
   beforeEach(() => {
