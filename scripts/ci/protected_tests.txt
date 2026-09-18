@@ -34,3 +34,5 @@ tests/unit/llm/test_capability_cache_single_source.py
 tests/unit/analytics/test_collector_mock_data_gated.py
 # Issue #55 P2：性能回归门禁常驻自检（双侧 CI 接线 + 门禁可通过）
 tests/performance/test_perf_gate_contract.py
+# Issue #55 后续：RSI 结果真接线（ctx.result['rsi'] 摘要 + 推送字段名对齐真实输出）
+tests/unit/evolution/test_rsi_result_summary_wiring.py

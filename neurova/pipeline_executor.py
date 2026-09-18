@@ -35,6 +35,15 @@ class PipelineResponse:
     cognitive_score: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def rsi(self) -> Optional[Dict[str, Any]]:
+        """RSI 摘要（metadata 内的观测字段；从未跑过 RSI 时为 None）。
+
+        单独开属性而非新建 dataclass 字段：字段是位置参数，加字段会改变
+        既有位置构造的语义（本仓多处按位置传参）。
+        """
+        return self.metadata.get("rsi")
+
 
 class PipelineExecutor:
     """对话后处理管线执行器
@@ -83,7 +92,14 @@ class PipelineExecutor:
                 text=request.reply,
                 audio_url=result.get("audio_path"),
                 cognitive_score=result.get("cognitive_score", 0.0),
-                metadata={"audio_data": result.get("audio_data"), "original_metadata": request.metadata},
+                metadata={
+                    "audio_data": result.get("audio_data"),
+                    "original_metadata": request.metadata,
+                    # RSI 摘要随行：不映射就等于在 PipelineExecutor 这一层
+                    # 把 process() 刚接上的观测面又丢掉（此前 cognitive_score
+                    # 之外的字段都是这样消失的）。
+                    "rsi": result.get("rsi"),
+                },
             )
 
             return response
@@ -96,7 +112,7 @@ class PipelineExecutor:
                 text=request.reply,
                 audio_url=None,
                 cognitive_score=0.0,
-                metadata={"error": str(e)},
+                metadata={"error": str(e), "rsi": None},
             )
 
     async def execute_simple(
