@@ -22,8 +22,15 @@ except Exception:
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # 配置日志
+# 日志级别读 NEUROVA_LOG_LEVEL（ConfigMap/env 注入面）：此前写死 INFO，
+# 于是 Helm/compose 里设的日志级别（且键名还写成 LOG_LEVEL）完全无效。
+_LOG_LEVEL_NAME = os.environ.get("NEUROVA_LOG_LEVEL", "INFO").strip().upper()
+_LOG_LEVEL = getattr(logging, _LOG_LEVEL_NAME, None)
+if not isinstance(_LOG_LEVEL, int):
+    _LOG_LEVEL = logging.INFO
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=_LOG_LEVEL,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 
@@ -87,15 +94,20 @@ def main():
 
         print(f"App: {app.title}")
         print(f"Version: {app.version}")
-        print(f"Health: http://localhost:9527/health")
-        print("=" * 60)
 
         # 启动服务器
+        # host/port 读环境变量（默认 0.0.0.0:9527，与 Dockerfile EXPOSE /
+        # compose 映射 / Helm service 同源；跨文件一致性见
+        # scripts/ci/deploy_config_consistency_check.py 的 R1）。
+        host = os.environ.get("NEUROVA_HOST", "0.0.0.0")
+        port = int(os.environ.get("NEUROVA_PORT", "9527"))
+        print(f"Health: http://{host}:{port}/health")
+        print("=" * 60)
         uvicorn.run(
             app,
-            host="0.0.0.0",
-            port=9527,
-            log_level="info",
+            host=host,
+            port=port,
+            log_level=_LOG_LEVEL_NAME.lower(),
         )
 
     except KeyboardInterrupt:
