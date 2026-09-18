@@ -1,7 +1,10 @@
 """最终检查：验证后端是否正常启动并响应请求"""
 import sys
 import time
-sys.path.insert(0, r"e:\项目\Neurova")
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
 
 print("=== 1. 检查 NEUTokenManager 方法 ===")
 try:

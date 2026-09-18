@@ -11,16 +11,19 @@ V2-8 (LOW): base.py _build_tools_from_skills 是死代码(无调用点),
 
 TDD 垂直切片: 一次一个测试 → 一次一个实现。
 """
+
 import importlib.util
 from unittest.mock import MagicMock
 
 import pytest
+from tests.repo_paths import repo_str
+
 
 
 # 加载被 neurova.skill_system 包遮蔽的 neurova/skill_system.py 单文件
 _SPEC = importlib.util.spec_from_file_location(
     "neurova_skill_system_standalone_for_test_v3",
-    "e:/项目/Neurova/neurova/skill_system.py",
+    repo_str("neurova/skill_system.py"),
 )
 _MOD = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MOD)
@@ -118,7 +121,7 @@ class TestBuildToolsFromSkillsDeadCodeRemoved:
         import subprocess
         # 用 ripgrep 搜索调用点(排除方法定义本身和测试文件)
         result = subprocess.run(
-            ["rg", "_build_tools_from_skills", "e:/项目/Neurova/neurova"],
+            ["rg", "_build_tools_from_skills", repo_str("neurova")],
             capture_output=True, text=True, shell=False,
         )
         # 修复后,neurova 目录下不应有任何匹配(包括方法定义)
