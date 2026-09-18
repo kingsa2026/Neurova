@@ -41,8 +41,11 @@ EXPECTED_MAP = {
     "dependency-audit": ["dependency-audit"],
 }
 
-# 非阻塞（允许失败）的 job：两侧行为必须一致
-EXPECTED_NON_BLOCKING = {"dependency-audit"}
+# 非阻塞（允许失败）的 job：两侧行为必须一致。
+# 2026-09-18 起 dependency-audit 转阻塞（Issue #56）：pip-audit 曾 continue-on-error，
+# 扫出漏洞不拦合并 = 门禁形同虚设。现双侧一致阻塞，本集合为空是刻意契约，
+# 由 test_no_non_blocking_jobs 明文锁定（防被重新放宽而无人察觉）。
+EXPECTED_NON_BLOCKING = set()
 
 # 每对 job/pipeline 的核心门禁命令（"存在于该侧全部脚本中"断言）。
 # 命令改动若属两例试图不同步，这里会红。
@@ -59,9 +62,19 @@ EXPECTED_CORE_COMMANDS = {
         "requirements-ci.lock",
     ],
     "e2e": ["python -m pytest tests/e2e/test_backend_boot.py -q --timeout 240"],
-    "frontend": ["npx vue-tsc --noEmit", "npx vitest run"],
+    "frontend": ["npm audit --audit-level=high", "npx vue-tsc --noEmit", "npx vitest run"],
     "perf-gate": ["python scripts/ci/perf_gate.py"],
-    "dependency-audit": ["python -m pip_audit -r requirements-ci.lock"],
+    "dependency-audit": [
+        "python -m pip_audit -r requirements-ci.lock",
+        # 生产全量依赖锁（requirements-full.lock）：CI 精简锁覆盖不到
+        # curl_cffi/onnxruntime/transformers/playwright/paramiko 等运行时包
+        "python -m pip_audit -r requirements-full.lock",
+        # 非 pip 依赖树（Issue #56 残留边界）：Tauri Cargo.lock（Rust crates）
+        # + tools/npx-runtime 锁（运行时 `npx -y` 现拉的包）。pip-audit 与
+        # npm audit 都看不到它们，此前完全无人审计。
+        "python scripts/ci/osv_audit.py",
+    ],
+
 }
 
 
@@ -229,6 +242,17 @@ class TestAntiRegression:
         ]
         assert not shells, f"cnb 流水线退化为样例空壳: {shells}"
 
+    def test_no_non_blocking_jobs(self):
+        """依赖审计不得退回非阻塞（Issue #56 收口：扫出漏洞必须拦合并）。
+
+        放宽此契约须同时改 .cnb.yml / ci.yml / 本文件，并说明为何放行。
+        """
+        assert EXPECTED_NON_BLOCKING == set(), (
+            "存在非阻塞门禁: "
+            f"{sorted(EXPECTED_NON_BLOCKING)}——依赖审计类门禁必须阻塞，"
+            "否则扫出漏洞也拦不住合并（Issue #56 的原始缺口）。"
+        )
+
     def test_push_and_pr_share_same_pipeline_definition(self, cnb_pipelines):
         """push 与 pull_request 必须共用同一份流水线（锚点别名，单一事实来源）。"""
         data = yaml.safe_load(io.open(CNB, encoding="utf-8").read())
@@ -246,7 +270,10 @@ class TestAntiRegression:
     def test_referenced_files_exist(self):
         """两份配置引用的门禁构件必须真实存在（缺一个 = 该门禁上线即红）。"""
         for f in (
-            "requirements-ci.txt", "requirements-ci.lock",
+            "requirements-ci.txt", "requirements-ci.lock", "requirements-full.lock",
+            # Issue #56 残留边界：非 pip 依赖树审计的输入与允许清单
+            "NeurUI/src-tauri/Cargo.lock", "tools/npx-runtime/package-lock.json",
+            "scripts/ci/osv_audit.py", "scripts/ci/osv-allowlist.toml",
             "scripts/ci_static_gate.py", "scripts/ci/protected_tests.txt",
             "tests/e2e/test_backend_boot.py", "tests/unit/test_audit_regressions.py",
             "NeurUI/package-lock.json", "scripts/ci/perf_gate.py",

@@ -20,7 +20,8 @@ from neurova.tts.model_downloader import ModelDownloader
 @pytest.fixture()
 def service(tmp_path):
     """干净 tmp 模型目录 + 打桩下载器（成功引擎）。"""
-    dl = ModelDownloader(base_dir=str(tmp_path))
+    # 桩引擎落盘占位内容，关闭产物校验（本组测的是下载状态机，非哈希）
+    dl = ModelDownloader(base_dir=str(tmp_path), verify_integrity=False)
 
     def fake_engine(registry, model_dir, cb=None):
         time.sleep(0.05)  # 模拟下载耗时
@@ -119,7 +120,8 @@ class TestSkipChoice:
 
 class TestFailure:
     def test_failed_state_carries_error(self, tmp_path):
-        dl = ModelDownloader(base_dir=str(tmp_path))
+        # 桩引擎落盘占位内容，关闭产物校验（本组测的是下载状态机，非哈希）
+        dl = ModelDownloader(base_dir=str(tmp_path), verify_integrity=False)
 
         def broken_engine(registry, model_dir, cb=None):
             raise RuntimeError("network down")
