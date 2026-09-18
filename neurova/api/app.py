@@ -620,17 +620,38 @@ def _register_metrics_endpoint(app: FastAPI) -> None:
 
     单一事实源：本端点只负责"抓取时刷新 gauge + 输出 registry"，不得再手工
     拼接 # HELP/# TYPE 文本（历史上残留过一套死代码，制造双事实源错觉）。
+
+    P2-7：暴露策略由 `neurova.api.metrics_access` 决定（public/local/token，
+    默认 public 保持向后兼容）。本端点仍在 global_auth 的公共白名单内 ——
+    全局鉴权放行"未登录"，本端点再按抓取策略判来源/令牌，是两层不同的门。
     """
     from neurova.core.metrics import get_metrics as _get_prom_metrics
     from neurova.core.metrics import generate_metrics_text as _generate_metrics_text
+    from neurova.api.metrics_access import check_metrics_access
 
     _prom = _get_prom_metrics()
 
     @app.get("/metrics")
-    async def get_metrics():
+    async def get_metrics(request: Request):
+        # 抓取时刷新运行态快照（gauge 非常驻埋点）
         _prom.observe_state(_app_state)
-        # P0-2：连接池 / 共享线程池运行态快照（gauge 抓取时刷新）
+        # P0-2：连接池 / 共享线程池运行态快照
         _prom.observe_pools()
+        # P1-6：缓存命中率快照（只读已创建实例，不懒建）
+        _prom.observe_caches()
+
+        headers = {k: v for k, v in request.headers.items()}
+        allowed, reason = check_metrics_access(
+            request.client.host if request.client else None, headers
+        )
+        if not allowed:
+            logger.warning(
+                "拒绝 /metrics 抓取: %s (client=%s)",
+                reason,
+                request.client.host if request.client else "?",
+            )
+            return PlainTextResponse("forbidden", status_code=403)
+
         return PlainTextResponse(_generate_metrics_text(), media_type="text/plain")
 
 
@@ -781,6 +802,15 @@ async def _on_startup(app_state: AppState) -> None:
             logger.info("飞书 KB 定时同步循环已启动")
         except Exception as _kbsync_err:  # noqa: BLE001
             logger.warning("飞书 KB 定时同步循环启动失败（忽略）: %s", _kbsync_err)
+
+    # P0-3：索引可观测启动采集（index_list/index_info 聚合 + 热点 EQP 白名单）。
+    # fail-open：可观测不得成为启动依赖（库损坏/权限不足时仅无数据）
+    try:
+        from neurova.core.db_indexes import bootstrap_index_observability
+
+        await asyncio.to_thread(bootstrap_index_observability)
+    except Exception as _idx_err:  # noqa: BLE001
+        logger.debug("索引可观测启动采集失败（忽略）: %s", _idx_err)
 
     # 初始化 TTS 引擎
     if hasattr(app_state, "tts_manager") and app_state.tts_manager:
