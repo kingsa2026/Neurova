@@ -184,10 +184,16 @@ class RBACManager:
     def _ensure_db_dir(self):
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
 
-    def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _get_conn(self):
+        """借出池化短连接句柄（P1-4 / ADR 0014）。
+
+        返回 `PooledConnection` 委托句柄：`conn.close()` 被重定向为"归还池"
+        （不是真关闭）。这样本文件散落的 14 处 close 与数十个早退/异常分支
+        全部自动变成正确归还 —— 池化只改这一行，不改各方法的控制流。
+        """
+        from neurova.core.pooled_connection import PooledConnection
+
+        return PooledConnection(self._db_path)
 
     def _init_db(self):
         conn = self._get_conn()
