@@ -66,6 +66,10 @@ EXPECTED_CORE_COMMANDS = {
         # 生产全量依赖锁（requirements-full.lock）：CI 精简锁覆盖不到
         # curl_cffi/onnxruntime/transformers/playwright/paramiko 等运行时包
         "python -m pip_audit -r requirements-full.lock",
+        # 非 pip 依赖树（Issue #56 残留边界）：Tauri Cargo.lock（Rust crates）
+        # + tools/npx-runtime 锁（运行时 `npx -y` 现拉的包）。pip-audit 与
+        # npm audit 都看不到它们，此前完全无人审计。
+        "python scripts/ci/osv_audit.py",
     ],
 }
 
@@ -263,6 +267,9 @@ class TestAntiRegression:
         """两份配置引用的门禁构件必须真实存在（缺一个 = 该门禁上线即红）。"""
         for f in (
             "requirements-ci.txt", "requirements-ci.lock", "requirements-full.lock",
+            # Issue #56 残留边界：非 pip 依赖树审计的输入与允许清单
+            "NeurUI/src-tauri/Cargo.lock", "tools/npx-runtime/package-lock.json",
+            "scripts/ci/osv_audit.py", "scripts/ci/osv-allowlist.toml",
             "scripts/ci_static_gate.py", "scripts/ci/protected_tests.txt",
             "tests/e2e/test_backend_boot.py", "tests/unit/test_audit_regressions.py",
             "NeurUI/package-lock.json",

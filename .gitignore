@@ -79,6 +79,13 @@ package-lock.json
 yarn.lock
 pnpm-lock.yaml
 
+# 例外：依赖审计覆盖面所需的锁文件必须入库（Issue #56）
+#   全局忽略 package-lock.json 是为了不把"本地随手 npm i"的产物带进仓库；
+#   但下面这份是**门禁的输入**（scripts/ci/osv_audit.py 扫它），
+#   不入库则运行时 npx 包的漏洞永远无人可见——这正是 #56 要收的口。
+!NeurUI/package-lock.json
+!tools/npx-runtime/package-lock.json
+
 # IDE 和编辑器
 .vscode/
 .idea/
