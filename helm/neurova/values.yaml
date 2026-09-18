@@ -56,8 +56,6 @@ backend:
     - name: PYTHONUNBUFFERED
       value: "1"
   
-  # 配置挂载
-  configMountPath: /app/config
   
   # 健康检查
   # 与 Dockerfile HEALTHCHECK / docker-compose healthcheck 同源（30s 周期、5s 超时、
@@ -70,6 +68,14 @@ backend:
     periodSeconds: 30
     timeoutSeconds: 5
     failureThreshold: 3
+    # readiness 与 liveness 刻意分离：就绪判定要比存活更灵敏（更短周期、更早探测），
+    # 所以这里**允许**与上面对齐 Dockerfile 的那组值不同。但必须走 values ——
+    # 硬编码在模板里就等于"两处同源 + 一处隐形口径"，门禁也看不见（R2 只比 values）。
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
   
   # 节点选择
   nodeSelector: {}
@@ -98,7 +104,8 @@ frontend:
   # 镜像配置
   image:
     repository: neurova/frontend
-    tag: "latest"
+    # 与 backend 同理：写死 "latest" 让同一份 values 在不同时刻拉到不同镜像。
+    tag: ""
     pullPolicy: IfNotPresent
   
   # 副本数

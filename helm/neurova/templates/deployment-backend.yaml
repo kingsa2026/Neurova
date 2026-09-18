@@ -63,10 +63,10 @@ spec:
             httpGet:
               path: {{ .Values.backend.healthCheck.path }}
               port: http
-            initialDelaySeconds: 10
-            periodSeconds: 5
-            timeoutSeconds: 3
-            failureThreshold: 3
+            initialDelaySeconds: {{ .Values.backend.healthCheck.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.backend.healthCheck.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.backend.healthCheck.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.backend.healthCheck.readiness.failureThreshold }}
           {{- end }}
           envFrom:
             - configMapRef:
@@ -114,9 +114,12 @@ spec:
             {{- end }}
             - name: logs
               mountPath: /app/logs
-            - name: config
-              mountPath: {{ .Values.backend.configMountPath }}
-              readOnly: true
+            # 这里**刻意不挂** ConfigMap 卷到 /app/config：
+            # ConfigMap 的键全是环境变量，已由上方 envFrom 注入；把它当卷挂到
+            # /app/config 会整体遮蔽**镜像内 config/ 目录**（config/cors.json 与
+            # config/llm_presets/defaults.json 都读不到），与 .dockerignore 挡掉
+            # cors.json 属同一类故障的另一种形态（构建/启动都正常，运行时静默
+            # 回落内置默认值）。守卫见 scripts/ci/deploy_config_consistency_check.py 的 R12。
           resources:
             {{- toYaml .Values.backend.resources | nindent 12 }}
       volumes:
@@ -136,9 +139,6 @@ spec:
         {{- end }}
         - name: logs
           emptyDir: {}
-        - name: config
-          configMap:
-            name: {{ include "neurova.fullname" . }}-config
       {{- with .Values.backend.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
