@@ -34,6 +34,8 @@ R10 镜像内配置资产 应用运行时从 config/ 读的文件必须真被打
                    不得把它们排除掉，否则容器里静默走内置默认值）
 R11 Helm values 引用 模板引用的每个 .Values 路径必须在 values.yaml 定义（否则渲染成
                    <no value>，配置静默失效且 Helm 不报错）
+R12 镜像内 config 遮蔽 Helm 不得用 ConfigMap 卷挂到 /app/config（会整体盖掉镜像内
+                   config/cors.json 与 config/llm_presets/，与 R10 同类故障）
 
 用法：
     python scripts/ci/deploy_config_consistency_check.py          # 人读报告
@@ -381,6 +383,24 @@ def _check_health(docker: Dict[str, Any], compose: Dict[str, Any], helm: Dict[st
                         f"Dockerfile/compose 的 {dv} 不一致（同一镜像两套探活口径）",
                     )
                 )
+    # readiness 探针参数必须走 values（可以刻意与 liveness 不同，但不能硬编码在
+    # 模板里）：模板写死即"两处同源 + 一处隐形口径"，本规则只比 values 于是完全看不见。
+    template = helm["deployment"]
+    for probe in ("readinessProbe", "livenessProbe"):
+        block = re.search(rf"{probe}:\n((?:\s+.*\n?)+)", template)
+        if not block:
+            continue
+        for key in ("initialDelaySeconds", "periodSeconds", "timeoutSeconds", "failureThreshold"):
+            m = re.search(rf"^\s+{key}:\s*(\S+)\s*$", block.group(1), re.M)
+            if m and not m.group(1).startswith("{{"):
+                out.append(
+                    Finding(
+                        "error",
+                        "R2-healthcheck",
+                        f"deployment-backend.yaml 的 {probe}.{key} 硬编码为 {m.group(1)}"
+                        "（不走 values → 跨环境/跨形态无法对齐，门禁也看不见）",
+                    )
+                )
     path = (dhc.get("path") or "").split("?")[0]
     if path and hhc.get("path") != path:
         out.append(
@@ -485,16 +505,19 @@ def _check_images(docker: Dict[str, Any], helm: Dict[str, Any]) -> List[Finding]
             )
         )
     for env_name in ("base", "development", "production"):
-        tag = (((helm[env_name].get("backend") or {}).get("image") or {}).get("tag"))
-        if tag in ("latest", ":latest"):
-            out.append(
-                Finding(
-                    "error",
-                    "R4-images",
-                    f"Helm values({env_name}) 写死 backend.image.tag=latest —— 部署不可复现，"
-                    "请留空以跟随 Chart appVersion",
+        # frontend 一并查：只钉 backend 等于留了同一形态的后门（前端的 "latest"
+        # 同样让同一份 values 在不同时刻拉到不同镜像）。
+        for component in ("backend", "frontend"):
+            tag = (((helm[env_name].get(component) or {}).get("image") or {}).get("tag"))
+            if tag in ("latest", ":latest"):
+                out.append(
+                    Finding(
+                        "error",
+                        "R4-images",
+                        f"Helm values({env_name}) 写死 {component}.image.tag=latest —— 部署不可复现，"
+                        "请留空以跟随 Chart appVersion",
+                    )
                 )
-            )
     return out
 
 
@@ -734,6 +757,43 @@ def _check_helm_values_refs() -> List[Finding]:
     return out
 
 
+def _check_helm_config_shadow() -> List[Finding]:
+    """R12：Helm 不得用卷挂载遮蔽镜像内的运行时 config 资产。
+
+    R10 管的是"资产进没进镜像"（.dockerignore），本条管"进了镜像会不会被挂载遮蔽"：
+    ConfigMap 卷挂在 /app/config 会把镜像内的 config/cors.json 与
+    config/llm_presets/defaults.json 整体盖掉，而这些键在 ConfigMap 里根本没有
+    （ConfigMap 装的是环境变量，已由 envFrom 注入）——于是运行时静默回落到内置
+    默认值，与 R10 的故障表现完全一致，只是成因换到了 Helm 侧。
+    """
+    out: List[Finding] = []
+    template = _read("helm", "neurova", "templates", "deployment-backend.yaml")
+    # 收集模板里是 configMap 类型的卷名
+    cm_volumes = set(re.findall(r"^\s*-\s*name:\s*(\S+)\s*$\n\s*configMap:", template, re.M))
+    bodies = re.findall(r"volumeMounts:\n((?:\s+-.*\n(?:\s+.*\n?)*)+)", template)
+    mount_paths = []
+    for body in bodies:
+        for m in re.finditer(
+            r"-\s*name:\s*(\S+)\s*\n\s*mountPath:\s*([^\s]+)", body
+        ):
+            if m.group(1) in cm_volumes:
+                mount_paths.append(m.group(2).strip())
+    for mount_path in mount_paths:
+        for asset in RUNTIME_CONFIG_ASSETS:
+            # 资产在容器的位置是 /app/<asset>
+            if asset.startswith("config/") and mount_path.rstrip("/") == "/app/config":
+                out.append(
+                    Finding(
+                        "error",
+                        "R12-config-shadow",
+                        f"deployment-backend.yaml 把 ConfigMap 卷挂到 {mount_path}，"
+                        f"整体遮蔽镜像内 {asset}（ConfigMap 里只有环境变量键）——"
+                        "运行时静默回落内置默认值",
+                    )
+                )
+    return out
+
+
 def _check_ci_wiring() -> List[Finding]:
     out: List[Finding] = []
     cnb = _load_yaml(".cnb.yml") or {}
@@ -789,6 +849,7 @@ def run_checks() -> List[Finding]:
     findings += _check_auth_secret(helm)
     findings += _check_hard_deps(parse_requirements())
     findings += _check_config_assets()
+    findings += _check_helm_config_shadow()
     findings += _check_helm_values_refs()
     findings += _check_ci_wiring()
     return findings
