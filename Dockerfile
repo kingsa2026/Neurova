@@ -2,7 +2,11 @@
 # 生产模式：后端服务静态文件
 
 # 多阶段构建
-FROM python:3.10-slim as builder
+#
+# 基础镜像版本必须落在 CI 实测矩阵内（.github/workflows/ci.yml 与 .cnb.yml 的
+# unit-tests 跑 3.11/3.12）：此前是 3.10-slim，等于生产解释器从未过 CI 门禁。
+# 同时须 ≥ scripts/config.py 的 MIN_PYTHON_VERSION(3,10)。
+FROM python:3.12-slim as builder
 
 # 设置工作目录
 WORKDIR /app
@@ -20,7 +24,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 # 生产阶段
-FROM python:3.10-slim as production
+FROM python:3.12-slim as production
 
 # 设置工作目录
 WORKDIR /app

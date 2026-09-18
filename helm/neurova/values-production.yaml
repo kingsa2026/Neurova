@@ -1,7 +1,14 @@
 # Neurova 生产环境配置
 
+# 鉴权配置（生产 fail-closed：未提供 jwtSecret 时 helm 渲染期直接失败）
+auth:
+  requireJwtSecret: true
+
 # 后端配置
 backend:
+  # 注意：当前默认持久化为嵌入式 SQLite + ReadWriteOnce 卷，多副本无法共享
+  # （多进程同写会损坏库）。replicaCount>1 时请改用外部数据库，或改走
+  # 单副本 + 垂直扩容；本值保留 2 是为了 HPA 面演示，勿直接用于生产数据面。
   replicaCount: 2
   
   resources:
@@ -16,7 +23,7 @@ backend:
     enabled: true
     path: /health
     initialDelaySeconds: 30
-    periodSeconds: 10
+    periodSeconds: 30
     timeoutSeconds: 5
     failureThreshold: 3
 
@@ -69,8 +76,8 @@ monitoring:
     namespace: monitoring
     interval: 30s
 
-# 日志配置
+# 日志配置（键名对齐 values.yaml：level / json / file）
 logging:
   level: "INFO"
-  format: "json"
+  json: true
   file: "/app/logs/neurova.log"
