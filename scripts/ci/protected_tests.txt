@@ -28,3 +28,10 @@ tests/unit/test_ci_npc_config_guard.py
 
 # Issue #57 P0-1/P0-2 观测底座收口：/metrics 单一事实源 + 连接池/线程池 gauge
 tests/unit/core/test_metrics_pool_observability_p0.py
+
+# Issue #57 P0-3/P1-4/P1-6/P2-7 收口 + ADR 0014「池只管短连接」
+tests/unit/core/test_index_observability_p0_3.py
+tests/unit/core/test_connection_pool_scope_adr0014.py
+tests/unit/api/test_metrics_http_and_exposure_p1_6_p2_7.py
+# Issue #57 P1-4：manager.py DELETE 连接卫生（M-15 契约更新为池化后的强断言）
+tests/unit/cognitive_layers/memory_layer/test_m15_delete_persisted_conn_hygiene.py

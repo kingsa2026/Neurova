@@ -9,6 +9,10 @@ generate_latest() 输出（替换手拼文本格式）。埋点 API：
 - Metrics.observe_state(state)  # 运行态 gauges 快照（/metrics 抓取时）
 - Metrics.observe_pools()  # 连接池 / 共享线程池 gauges 快照
 - Metrics.record_db_connection_created/closed(db_path)  # 连接创建/销毁频率
+- Metrics.record_index_snapshot(db, count, duration_ms)  # 索引快照（P0-3）
+- Metrics.record_hot_query_plan(db, query_id, indexed, duration_ms)  # 热点查询计划
+- Metrics.observe_caches()  # 缓存命中率 gauges 快照（P1-6）
+- Metrics.record_http_request(method, route, status, duration_s)  # HTTP 时长（P1-6）
 """
 
 from __future__ import annotations
@@ -82,6 +86,56 @@ class _Metrics:
             "neurova_thread_pool_max_workers",
             "Configured max workers of shared thread pools",
             ["pool"],
+        )
+
+        # ── 索引可观测（P0-3：此前"索引命中"物理上不可测）──
+        # snapshot 类 gauge 是"启动期采集结果"（每库一个值），不是"抓取时快照"：
+        # 采集要跑 PRAGMA index_list/index_info + EXPLAIN QUERY PLAN，不适合挂在
+        # /metrics 请求路径上（抓取频率无关地白烧）。
+        self.db_indexes_total = Gauge(
+            "neurova_db_indexes_total",
+            "Indexes present in a database (startup snapshot)",
+            ["db"],
+        )
+        self.db_index_snapshot_ms = Gauge(
+            "neurova_db_index_snapshot_milliseconds",
+            "Cost of collecting the index snapshot for a database",
+            ["db"],
+        )
+        self.hot_query_indexed = Gauge(
+            "neurova_hot_query_indexed",
+            "Whether a whitelisted hot query uses an index (1/0)",
+            ["db", "query_id"],
+        )
+        self.hot_query_explain_ms = Gauge(
+            "neurova_hot_query_explain_milliseconds",
+            "EXPLAIN QUERY PLAN cost per whitelisted hot query",
+            ["db", "query_id"],
+        )
+
+        # ── HTTP 请求时长（P1-6：旧审计 §7 的 p50/p99 基线此前完全空白）──
+        self.http_requests_total = Counter(
+            "neurova_http_requests_total",
+            "HTTP requests by method/route/status",
+            ["method", "route", "status"],
+        )
+        self.http_request_seconds = Histogram(
+            "neurova_http_request_seconds",
+            "HTTP time to response headers in seconds",
+            ["method", "route", "status"],
+            buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60),
+        )
+
+        # ── 缓存命中率（P1-6：MemoryCache 有 hit_rate 但从未导出）──
+        self.cache_hit_rate = Gauge(
+            "neurova_cache_hit_rate",
+            "Cache hit rate of registered in-process caches",
+            ["cache"],
+        )
+        self.cache_entries = Gauge(
+            "neurova_cache_entries",
+            "Current entry count of registered in-process caches",
+            ["cache"],
         )
 
         # ── 工具执行 ──
@@ -182,6 +236,81 @@ class _Metrics:
             self.db_connections_closed_total.labels(db=str(db_path)).inc()
         except Exception:
             logger.debug("db connection closed metric failed", exc_info=True)
+
+    # ── 索引可观测（P0-3）──
+
+    def record_index_snapshot(self, db_path: str, index_count: int, duration_ms: float) -> None:
+        """索引快照采集结果（dbx 维度）。"""
+        try:
+            self.db_indexes_total.labels(db=str(db_path)).set(int(index_count))
+            self.db_index_snapshot_ms.labels(db=str(db_path)).set(float(duration_ms))
+        except Exception:
+            logger.debug("index snapshot metric failed", exc_info=True)
+
+    def record_hot_query_plan(
+        self, db_path: str, query_id: str, indexed: bool, duration_ms: float,
+        available: bool = True,
+    ) -> None:
+        """热点查询走索引判定。available=False（表不存在等）时不写值——
+        不把"测不出来"混成"没走索引"（那会让告警常年误报）。
+        """
+        if not available:
+            return
+        try:
+            self.hot_query_indexed.labels(
+                db=str(db_path), query_id=str(query_id)
+            ).set(1 if indexed else 0)
+            self.hot_query_explain_ms.labels(
+                db=str(db_path), query_id=str(query_id)
+            ).set(float(duration_ms))
+        except Exception:
+            logger.debug("hot query plan metric failed", exc_info=True)
+
+    # ── HTTP 请求时长（P1-6）──
+
+    def record_http_request(
+        self, method: str, route: str, status: int, duration_s: float
+    ) -> None:
+        """HTTP 请求埋点。duration 为"响应头就绪"耗时（TTFB）：
+
+        按"整个响应写完"计时会把 SSE/流式对话的流存活时间算成服务延迟
+        （chat 流可挂数分钟），p99 直接被流长污染、失去诊断意义。
+        """
+        try:
+            labels = {
+                "method": str(method or "?"),
+                "route": str(route or "__unmatched__"),
+                "status": str(int(status)),
+            }
+            self.http_requests_total.labels(**labels).inc()
+            self.http_request_seconds.labels(**labels).observe(max(0.0, float(duration_s or 0.0)))
+        except Exception:
+            logger.debug("http request metric failed", exc_info=True)
+
+    # ── 缓存命中率（P1-6）──
+
+    def observe_caches(self) -> None:
+        """缓存命中率快照（/metrics 抓取时调用）。
+
+        只读"已创建的"缓存实例——抓指标绝不懒建缓存（与 iter_pools 同一原则）。
+        """
+        try:
+            # 单一注册表：memory/core/cache.py 持有，core/cache.py 的全局实例
+            # 也登记进同一张表（两个生产者各自迭代会重复计数）
+            from neurova.memory.core.cache import iter_caches
+
+            for name, stats in iter_caches():
+                try:
+                    self.cache_hit_rate.labels(cache=str(name)).set(
+                        float(stats.get("hit_rate", 0.0))
+                    )
+                    self.cache_entries.labels(cache=str(name)).set(
+                        int(stats.get("size", 0))
+                    )
+                except Exception:  # noqa: BLE001 - 单缓存异常不影响其余
+                    logger.debug("cache gauge failed: %s", name, exc_info=True)
+        except Exception:
+            logger.debug("cache gauges update failed", exc_info=True)
 
     def observe_pools(self) -> None:
         """连接池 / 共享线程池 gauge 快照（/metrics 请求时调用）。
@@ -298,6 +427,18 @@ def record_db_connection_created(db_path: str) -> None:
 def record_db_connection_closed(db_path: str) -> None:
     """模块级便捷入口（连接池埋点）。"""
     get_metrics().record_db_connection_closed(db_path)
+
+
+def record_index_snapshot(db_path: str, index_count: int, duration_ms: float) -> None:
+    """模块级便捷入口（索引快照埋点）。"""
+    get_metrics().record_index_snapshot(db_path, index_count, duration_ms)
+
+
+def record_hot_query_plan(
+    db_path: str, query_id: str, indexed: bool, duration_ms: float, available: bool = True
+) -> None:
+    """模块级便捷入口（热点查询计划埋点）。"""
+    get_metrics().record_hot_query_plan(db_path, query_id, indexed, duration_ms, available)
 
 
 def generate_metrics_text() -> str:

@@ -58,13 +58,35 @@ class TestMetricsSingleSource:
 
     def test_endpoint_returns_registry_output_only(self):
         src = _metrics_endpoint_source()
-        # 唯一输出通路：generate_metrics_text()
-        assert "generate_metrics_text()" in src
-        assert src.count("PlainTextResponse(") == 1
+        # 唯一**指标**输出通路：generate_metrics_text()
+        assert src.count("generate_metrics_text()") == 1, (
+            "指标文本输出通路应唯一（多处输出 = 双事实源风险回归）"
+        )
+        # 另一条 PlainTextResponse 是 P2-7 的拒绝分支，只输出固定串、不带指标，
+        # 故断言"指标文本只被一个 return 送出"而非"只有一个 PlainTextResponse"。
+        assert src.count("PlainTextResponse(_generate_metrics_text(), media_type=") == 1
+        for line in src.splitlines():
+            if "PlainTextResponse(" in line and "generate_metrics_text" not in line:
+                assert '"forbidden"' in line or "'forbidden'" in line, (
+                    f"非指标输出分支只允许策略拒绝，实际: {line.strip()}"
+                )
 
     def test_endpoint_refreshes_pool_gauges(self):
         src = _metrics_endpoint_source()
         assert "observe_pools()" in src, "/metrics 未刷新池 gauge"
+
+    def test_endpoint_refreshes_cache_gauges(self):
+        """P1-6：缓存命中率与池一样走抓取时快照，别只挂 claim 不刷新。"""
+        src = _metrics_endpoint_source()
+        assert "observe_caches()" in src, "/metrics 未刷新缓存 gauge"
+
+    def test_endpoint_delegates_exposure_policy(self):
+        """P2-7：暴露策略不得在端点里内联判断（策略要可单测、可热切换）。"""
+        src = _metrics_endpoint_source()
+        assert "check_metrics_access(" in src
+        # 端点自己不解析环境变量、不比对 token
+        assert "os.environ" not in src
+        assert "NEUROVA_METRICS" not in src
 
 
 class TestConnectionPoolRollback:
