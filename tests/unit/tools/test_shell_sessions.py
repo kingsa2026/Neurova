@@ -6,6 +6,8 @@
 - 输出按 token 预算 head+tail 截断，带 original_chars/truncated 元数据
 - 进程数上限 64；僵尸会话按 TTL 回收；kill_all 兜底清理
 """
+import os
+import shlex
 import subprocess
 import sys
 
@@ -20,8 +22,17 @@ def manager():
 
 
 def _py(code: str) -> str:
-    # list2cmdline 产出 cmd.exe/POSIX 双兼容的双引号包裹（单引号在 cmd.exe 会被当字面量）
-    return subprocess.list2cmdline([sys.executable, "-c", code])
+    """把 `python -c <code>` 拼成命令字符串。
+
+    ShellSessionManager 用 shell=True（要保留管道/重定向等 shell 语义），
+    故引用规则必须跟随**目标平台的 shell**：
+      - Windows：cmd.exe —— list2cmdline 的双引号包裹（单引号是字面量）
+      - 其他（POSIX /bin/sh）：shlex.quote —— list2cmdline 的双引号在 POSIX
+        下不保护括号，`print('x')` 会被 shell 判成语法错误（exit 2）
+    """
+    if os.name == "nt":
+        return subprocess.list2cmdline([sys.executable, "-c", code])
+    return " ".join(shlex.quote(a) for a in (sys.executable, "-c", code))
 
 
 class TestShellSessions:

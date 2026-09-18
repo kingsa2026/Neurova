@@ -15,19 +15,22 @@ TDD 测试:工具调用链路遗漏断点修复(第二批)
 - 断点 V2-6 (MID): chat_pipeline.py:890 流式分支 `gen = self.loop.predict_step(...)`
   缺 await,对 coroutine 迭代会抛 TypeError。
 """
+
 import importlib.util
 import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from tests.repo_paths import repo_str
+
 
 
 # 加载被 neurova.skill_system 包遮蔽的 neurova/skill_system.py 单文件
 # (与 skill_system/__init__.py 的 _get_skill_module 加载方式一致)
 _SPEC = importlib.util.spec_from_file_location(
     "neurova_skill_system_standalone_for_test",
-    "e:/项目/Neurova/neurova/skill_system.py",
+    repo_str("neurova/skill_system.py"),
 )
 _MOD = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_MOD)
@@ -132,7 +135,7 @@ class TestChatEndpointNotForceEmptyHistory:
         """chat.py 不应出现 `{"history": []}` 强制注入(非注释代码)。"""
         import re
         src = open(
-            "e:/项目/Neurova/neurova/api/endpoints/chat.py",
+            repo_str("neurova/api/endpoints/chat.py"),
             encoding="utf-8",
         ).read()
         # 去除注释后再检查,避免修复说明注释中的字符串触发假阳性
@@ -159,7 +162,7 @@ class TestConsoleWebSocketNotForceEmptyHistory:
         """console.py WebSocket 不应传 metadata={"history": []}(非注释代码)。"""
         import re
         src = open(
-            "e:/项目/Neurova/neurova/api/endpoints/console.py",
+            repo_str("neurova/api/endpoints/console.py"),
             encoding="utf-8",
         ).read()
         # 去除注释后再检查,避免修复说明注释中的字符串触发假阳性
@@ -226,7 +229,7 @@ class TestChatPipelineStreamAwait:
         """
         import re
         src = open(
-            "e:/项目/Neurova/neurova/agent/chat_pipeline.py",
+            repo_str("neurova/agent/chat_pipeline.py"),
             encoding="utf-8",
         ).read()
         # 流式分支必须是 `gen = await ...predict_step(...stream=True)`

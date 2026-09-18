@@ -11,10 +11,13 @@ TDD 测试:工具调用断点修复
  - 断点 #10 (MID): openai_loop.py _tools_supported 一次性 400 后永久 False,
    后续所有工具调用静默失效,需要重启 agent 才恢复。
 """
+
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from tests.repo_paths import repo_str
+
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -155,7 +158,7 @@ class TestConsoleHistoryNotForceEmpty:
     def test_console_no_history_in_metadata(self):
         """console.py 不应在 metadata 中传 history=[]。"""
         src = open(
-            "e:/项目/Neurova/neurova/api/endpoints/console.py",
+            repo_str("neurova/api/endpoints/console.py"),
             encoding="utf-8",
         ).read()
         # 查找 history_for_agent = [] 这行
@@ -186,7 +189,7 @@ class TestToolsSupportedNotPermanent:
     def test_tools_supported_resets_per_request(self):
         """_tools_supported 应在每个 predict_step 开始时重置为 True。"""
         src = open(
-            "e:/项目/Neurova/neurova/agent/loops/openai_loop.py",
+            repo_str("neurova/agent/loops/openai_loop.py"),
             encoding="utf-8",
         ).read()
         # 查找 predict_step 方法中是否重置 _tools_supported

@@ -63,11 +63,15 @@ tokenizers>=0.13.0
 #   pycryptodome —— neurova/llm/providers/secret_store.py 的 AES-GCM 唯一实现，
 #                   此前只经 lark-oapi 传递带入（隐式依赖，上游一改即崩）;
 #                   缺席时 API Key 解密静默失败（provider 缓存空 key）
-#   mcp         —— MCP 工具层 SDK（neurova/tool_layers/mcp_client.py）；
-#                  代码有 try/except 降级，但缺席即 MCP 功能整体不可用
 APScheduler>=3.10
 feedparser>=6.0
 pycryptodome>=3.20
+# MCP 工具层 SDK（neurova/tool_layers/mcp_client.py）
+# 本节两件事实不可混谈：
+#   1) 依赖声明只此一行，requirements-ci.txt 不再重复声明（单一声明源）；
+#   2) 缺席语义是**功能全断**，不是"优雅降级"——连接一律返回 False 并把
+#      last_error 记成"SDK 未安装"，真实失败原因被掩盖、线上 MCP 全断而 CI 全绿
+#      （Issue #62 偏差）。删改前先读 mcp_client._SDK_AVAILABLE。
 mcp>=1.2.0
 
 # Testing (dev)
