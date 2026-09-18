@@ -221,7 +221,7 @@ main:
     # ── 9. 部署配置一致性（阻塞）─────────────────────────────────────────
     # 三种交付形态（Dockerfile / docker-compose / Helm）此前各写各的、零自动化
     # 对齐检查：端口、健康检查、资源限制、环境变量名、持久化、硬依赖声明全靠
-    # 人肉记忆。本门禁把这些跨文件不变量钉成 R1~R11（详见脚本 docstring），
+    # 人肉记忆。本门禁把这些跨文件不变量钉成 R1~R12（详见脚本 docstring），
     # 另由 tests/unit/test_deploy_config_guard.py 锁死门禁自身与周级巡检的接线。
     - name: deploy-config
       runner:

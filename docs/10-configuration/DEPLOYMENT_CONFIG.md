@@ -49,8 +49,9 @@ python scripts/ci/deploy_config_consistency_check.py        # 人读报告
 python scripts/ci/deploy_config_consistency_check.py --json # 机器可读
 ```
 
-R1~R11 覆盖端口 / 健康检查 / 资源 / 镜像与版本 / 环境变量可读性 / 持久化 /
-鉴权密钥 / 硬依赖声明 / 门禁接线 / 镜像内配置资产 / Helm values 引用完整性。
+R1~R12 覆盖端口 / 健康检查 / 资源 / 镜像与版本 / 环境变量可读性 / 持久化 /
+鉴权密钥 / 硬依赖声明 / 门禁接线 / 镜像内配置资产 / Helm values 引用完整性 /
+Helm 侧 config 资产遮蔽（R12）。
 
 接线：
 
@@ -71,3 +72,9 @@ R1~R11 覆盖端口 / 健康检查 / 资源 / 镜像与版本 / 环境变量可�
 `config/cors.json` 是运行时读取的资产，**必须**在 `.dockerignore` 里显式放行
 （`!config/cors.json`）：被排除时构建与启动都正常，只是 CORS 来源静默回落到
 内置默认值（生产浏览器请求被拒且日志无线索）。门禁 R10 会拦住这种形态。
+
+**Helm 侧还有同一类故障的第二种成因**（R12）：`config/` 目录由镜像自带，
+Chart **不得**再用 ConfigMap 卷覆盖 `/app/config` —— ConfigMap 里装的全是
+环境变量（已由 `envFrom` 注入），把它当卷挂上去会整体遮蔽镜像内的
+`config/cors.json` 与 `config/llm_presets/defaults.json`，表现与 R10 完全一致
+（静默回落内置默认值）。
