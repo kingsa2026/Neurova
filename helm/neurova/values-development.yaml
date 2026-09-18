@@ -12,12 +12,14 @@ backend:
       cpu: 1000m
       memory: 2Gi
   
+  # 与 values.yaml 同源（30/30/5/3，对齐 Dockerfile HEALTHCHECK）：
+  # 探活口径跨环境保持一致，避免"开发能起来、生产探针早于应用就绪"。
   healthCheck:
     enabled: true
     path: /health
-    initialDelaySeconds: 10
-    periodSeconds: 5
-    timeoutSeconds: 3
+    initialDelaySeconds: 30
+    periodSeconds: 30
+    timeoutSeconds: 5
     failureThreshold: 3
 
 # 前端配置（开发模式）
@@ -52,8 +54,8 @@ ingress:
 hpa:
   enabled: false
 
-# 日志配置
+# 日志配置（键名对齐 values.yaml：level / json / file）
 logging:
   level: "DEBUG"
-  format: "text"
+  json: false
   file: "/app/logs/neurova.log"
