@@ -341,11 +341,17 @@ class MemoryManager:
         """
         if not getattr(self, "_persist_db_path", None):
             return
+        conn = None
+        released = False
         try:
-            # P1-D1：常驻连接读取
+            # P1-D1：常驻连接读取（自持连接，不得归还——ADR 0014）
             conn = getattr(self, "_persist_conn", None)
             if conn is None:
-                conn = sqlite3.connect(self._persist_db_path)
+                # 常驻连接缺席时的兜底：池化短连接（借出即用完归还）
+                from neurova.core.database import get_short_connection
+
+                conn = get_short_connection(self._persist_db_path)
+                released = True
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT * FROM memories WHERE agent_id = ? "
@@ -425,13 +431,15 @@ class MemoryManager:
             except Exception as e:
                 logger.debug("Seed counter from persist DB failed: %s", e)
 
-            # P1-D1：常驻连接不关（降级临时连接由下文统一处理）
-            if getattr(self, "_persist_conn", None) is None:
-                conn.close()
-
+            # P1-D1：常驻连接不关；兜底池连接在 finally 统一归还（ADR 0014）
             logger.info("Loaded %s memories from persistence DB", len(self._memories))
         except Exception as e:
             logger.warning("Failed to load memories from DB: %s", e)
+        finally:
+            if released and conn is not None:
+                from neurova.core.database import release_short_connection
+
+                release_short_connection(conn)
 
     # M-25: id 为全表主键, 原 INSERT OR REPLACE 按 id 覆盖 —— A 作用域自定义 id
     # 会被 B 作用域同 id 的写入直接覆盖（重启丢数据）。改为作用域三元组匹配的
@@ -521,13 +529,13 @@ class MemoryManager:
                         self._persist_upsert(conn, m)
                     conn.commit()
             else:
-                # 常驻连接不可用时降级：一次连接批量写（仍优于逐条）
-                conn = sqlite3.connect(self._persist_db_path, timeout=5.0)
-                conn.execute("PRAGMA busy_timeout=4000")
-                for m in mems:
-                    self._persist_upsert(conn, m)
-                conn.commit()
-                conn.close()
+                # 常驻连接不可用时降级：走池化短连接（ADR 0014：这是"兜底短连接"，
+                # 不是常驻连接；池化后连接无需每个调用点自己 close 到真关闭）
+                from neurova.core.database import short_transaction
+
+                with short_transaction(self._persist_db_path) as conn:
+                    for m in mems:
+                        self._persist_upsert(conn, m)
         except Exception as e:
             logger.warning("Persist memory batch failed (%d mems): %s", len(mems), e)
 
@@ -546,20 +554,19 @@ class MemoryManager:
                     self._persist_upsert(conn, mem)
                     conn.commit()
                 return
-            conn = sqlite3.connect(self._persist_db_path)
-            self._persist_upsert(conn, mem)
-            conn.commit()
-            conn.close()
+            from neurova.core.database import short_transaction
+
+            with short_transaction(self._persist_db_path) as conn:
+                self._persist_upsert(conn, mem)
         except Exception as e:
             # 2026-09-07 修复（audit SUB-P2-18）：原 DEBUG 级吞掉 = 重启静默
             # 丢记忆且无从排查；升级 WARNING 并重试一次（写竞争场景）
             logger.warning("Persist memory failed (id=%s): %s", mem.id, e)
             try:
-                conn = sqlite3.connect(self._persist_db_path, timeout=5.0)
-                conn.execute("PRAGMA busy_timeout=4000")
-                self._persist_upsert(conn, mem)
-                conn.commit()
-                conn.close()
+                from neurova.core.database import short_transaction
+
+                with short_transaction(self._persist_db_path) as conn:
+                    self._persist_upsert(conn, mem)
                 logger.warning("Persist memory retry succeeded (id=%s)", mem.id)
             except Exception as e2:
                 logger.error("Persist memory retry failed (id=%s): %s", mem.id, e2)
@@ -571,30 +578,33 @@ class MemoryManager:
 
         审计修复 (P1-6): 原 DELETE 仅按 id, 知道对方 memory_id 即可越权删除
         任何作用域的持久化行。现强制附带生效三元组, 跨作用域删不掉。
-        M-15: 连接补 busy_timeout（对齐同文件先例）, close() 收口到 finally
-        （原 execute 抛错即泄漏连接）。
+        M-15: 连接必被归还，execute 抛错也不例外（原 execute 抛错即泄漏连接）。
+        busy_timeout 不再在此逐条设置：走池后由池的 PRAGMA 基线统一提供
+        （ADR 0014），且借用者本地改动会在归还时被复原。
         M-25: 自定义 id 跨作用域冲突时持久化为作用域限定行, 删除需同时命中。
         """
         if not getattr(self, "_persist_db_path", None):
             return
-        conn = None
+        from neurova.core.database import short_transaction
+
         try:
-            conn = sqlite3.connect(self._persist_db_path, timeout=5.0)
-            conn.execute("PRAGMA busy_timeout=4000")
-            scoped_id = "\x1f".join(
-                (self._agent_id, self._eff_neuser_id(), self._eff_user_id(), memory_id)
-            )
-            conn.execute(
-                "DELETE FROM memories WHERE id IN (?, ?) "
-                "AND agent_id = ? AND neuser_id = ? AND user_id = ?",
-                (memory_id, scoped_id, self._agent_id, self._eff_neuser_id(), self._eff_user_id()),
-            )
-            conn.commit()
+            with short_transaction(self._persist_db_path) as conn:
+                scoped_id = "\x1f".join(
+                    (self._agent_id, self._eff_neuser_id(), self._eff_user_id(), memory_id)
+                )
+                conn.execute(
+                    "DELETE FROM memories WHERE id IN (?, ?) "
+                    "AND agent_id = ? AND neuser_id = ? AND user_id = ?",
+                    (
+                        memory_id,
+                        scoped_id,
+                        self._agent_id,
+                        self._eff_neuser_id(),
+                        self._eff_user_id(),
+                    ),
+                )
         except Exception as e:
             logger.debug("Delete persisted memory failed: %s", e)
-        finally:
-            if conn is not None:
-                conn.close()
 
     # ────── Properties ──────
 
@@ -1317,21 +1327,21 @@ class MemoryManager:
         排序——温度通道每查询全库扫描的根因）。"""
         if not getattr(self, "_persist_db_path", None):
             return []
+        conn = None
+        released = False
         try:
             conn = getattr(self, "_persist_conn", None)
-            owned = False
             if conn is None:
-                conn = sqlite3.connect(self._persist_db_path)
-                owned = True
+                # 兜底短连接走池（ADR 0014）；常驻连接在场时不得归还
+                from neurova.core.database import get_short_connection
+
+                conn = get_short_connection(self._persist_db_path)
+                released = True
             conn.row_factory = sqlite3.Row
-            try:
-                rows = conn.execute(
-                    "SELECT * FROM memories ORDER BY temperature DESC LIMIT ?",
-                    (int(limit),),
-                ).fetchall()
-            finally:
-                if owned:
-                    conn.close()
+            rows = conn.execute(
+                "SELECT * FROM memories ORDER BY temperature DESC LIMIT ?",
+                (int(limit),),
+            ).fetchall()
             results = []
             for row in rows:
                 try:
@@ -1352,6 +1362,11 @@ class MemoryManager:
         except Exception as e:
             logger.warning("get_top_memories_by_temperature failed: %s", e)
             return []
+        finally:
+            if released and conn is not None:
+                from neurova.core.database import release_short_connection
+
+                release_short_connection(conn)
 
     def get_all_memories(self) -> List[Dict[str, Any]]:
         """获取所有记忆（用于睡眠整合）"""

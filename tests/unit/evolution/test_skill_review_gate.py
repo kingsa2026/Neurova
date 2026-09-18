@@ -43,53 +43,16 @@ class AutoSkillBuilderGateTest(unittest.TestCase):
             self.assertFalse(builder._review_gate)
 
 
-class SkillPackerGateTest(unittest.TestCase):
-    def _packer(self, gate_env=None):
-        import tempfile
-
-        from neurova.skill.skill_packer import SkillPacker
-
-        env = {"NEUROVA_SKILL_REVIEW_GATE": gate_env} if gate_env is not None else {}
-        env = {k: v for k, v in env.items() if v is not None}
-        with patch.dict("os.environ", env, clear=False):
-            import os as _os
-
-            _os.environ.pop("NEUROVA_SKILL_REVIEW_GATE", None) if gate_env is None else None
-            return SkillPacker(storage_dir=tempfile.mkdtemp())
-
-    def test_pack_goes_pending_by_default(self):
-        packer = self._packer()  # 默认闸开
-        packer._write_to_toolmemory = MagicMock()
-        packer._record_experience = MagicMock()
-        sid = packer.pack_skill(name="gated_skill", description="d")
-        self.assertTrue(packer._skills[sid].metadata.get("review_pending"))
-        packer._write_to_toolmemory.assert_not_called()
-        self.assertEqual(len(packer.list_pending_skills()), 1)
-
-    def test_approve_activates(self):
-        packer = self._packer()
-        packer._write_to_toolmemory = MagicMock()
-        packer._record_experience = MagicMock()
-        sid = packer.pack_skill(name="gated_skill", description="d")
-        self.assertTrue(packer.approve_skill(sid))
-        packer._write_to_toolmemory.assert_called_once()
-        packer._record_experience.assert_called_once()
-        self.assertEqual(packer.list_pending_skills(), [])
-        self.assertFalse(packer._skills[sid].metadata.get("review_pending"))
-
-    def test_reject_removes(self):
-        packer = self._packer()
-        sid = packer.pack_skill(name="gated_skill", description="d")
-        self.assertTrue(packer.reject_skill(sid))
-        self.assertNotIn(sid, packer._skills)
-
-    def test_gate_off_direct_activate(self):
-        packer = self._packer(gate_env="0")
-        packer._write_to_toolmemory = MagicMock()
-        packer._record_experience = MagicMock()
-        sid = packer.pack_skill(name="direct_skill", description="d")
-        packer._write_to_toolmemory.assert_called_once()
-        self.assertEqual(packer.list_pending_skills(), [])
+# P2（Issue #46）：原 `SkillPackerGateTest` 随 `neurova/skill/skill_packer.py`
+# 一并删除——那个 SkillPacker 是零生产调用的旧打包器（agent_core 的
+# `skill_packer` 属性实为 evolution.AutoSkillBuilder），它自己的闸语义测试
+# 也随模块消失。
+# **闸语义本身没有被删掉覆盖**：
+#   - 自动封装产物 → `AutoSkillBuilderGateTest`（本文件上方，is_active=False
+#     pending + approve 激活）；
+#   - 遗传产物 → `GeneticGateTest`（注册即 INACTIVE，闸关才 ACTIVE）；
+#   - 经验产物 → `ExperiencePendingGateTest`（自动来源进 pending）。
+# 三条活写入臂各有闸测试，删掉的只是死臂那一份。
 
 
 class GeneticGateTest(unittest.TestCase):
