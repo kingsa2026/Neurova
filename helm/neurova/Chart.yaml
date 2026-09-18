@@ -3,7 +3,10 @@ name: neurova
 description: Neurova AI Agent 框架 Helm Chart
 type: application
 version: 0.1.0
-appVersion: "4.0.0"
+# appVersion 必须等于 neurova/__init__.py::__version__（图像 tag 默认跟随此值；
+# 守卫见 scripts/ci/deploy_config_consistency_check.py 的 R4）。
+# 此前是 4.0.0，与代码版本 1.0.0-beta1 各说各话。
+appVersion: "1.0.0-beta1"
 keywords:
   - ai
   - agent

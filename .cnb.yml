@@ -6,7 +6,7 @@
 #   job↔pipeline 映射 / 核心命令逐字一致 / 非阻塞语义对齐 / 防样例空壳再生。
 # 改动任一侧配置必须同步另一侧并更新守卫的 EXPECTED_* 表。
 #
-# 分层（自内向外加固，与 GitHub 侧一致的 6 层 + 1 非阻塞）：
+# 分层（自内向外加固，与 GitHub 侧一致；全部为阻断门禁，无 continue-on-error）：
 #   1. static-gate           语法/未定义名巡检（pyflakes，成本极低）
 #   2. lint                  ruff E9+F821（规则集与豁免见 pyproject）
 #   3. import-and-regression 模块导入巡检 + 审计回归
@@ -18,13 +18,19 @@
 #                            + OSV 扫非 pip 依赖树（Cargo.lock / npx 运行时包锁）
 #   8. perf-gate             import 时长预算 + 关键路径微基准（阻断，
 #                            见 scripts/ci/perf_gate.py）
+#   9. deploy-config         部署配置一致性（Dockerfile / docker-compose /
+#                            Helm / requirements 跨文件不变量，阻断，
+#                            见 scripts/ci/deploy_config_consistency_check.py）
 #
 # 原则：只进当前确定全绿的测试；预存失败模块修复后逐个搬入 protected_tests.txt。
 #
 # 语法约定（见 https://docs.cnb.cool/zh/build/grammar.html）：
 #   - 分支 → 事件(push/pull_request) → 流水线数组；同一事件下的多条流水线并发执行，
-#     故 9 条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐（unit-tests 按
+#     故 10 条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐（unit-tests 按
 #     py3.11/py3.12 拆为两条，对应 GitHub 的 matrix 两格）。
+#   - 定时任务用第 3 类顶层 key：`"crontab: <5 段 POSIX cron>"`（分支下一级），
+#     平台最小调度间隔 5 分钟，周级用第 5 段（星期）表达；本文件另有 1 条周级
+#     巡检流水线（deploy-config 的时间维度兜底），不计入上面 10 条 push 流水线。
 #   - 单条流水线内的 stages 串行；任一 stage 失败即中止该流水线。
 #   - runner.cpus: N 对应内存 N×2GiB（本文件最大 4 → 8GiB）。
 #   - docker.volumes 为构建节点级缓存（copy-on-write 默认），跨节点不共享；
@@ -212,6 +218,27 @@ main:
           script: python scripts/ci/perf_gate.py
           timeout: 15m
 
+    # ── 9. 部署配置一致性（阻塞）─────────────────────────────────────────
+    # 三种交付形态（Dockerfile / docker-compose / Helm）此前各写各的、零自动化
+    # 对齐检查：端口、健康检查、资源限制、环境变量名、持久化、硬依赖声明全靠
+    # 人肉记忆。本门禁把这些跨文件不变量钉成 R1~R11（详见脚本 docstring），
+    # 另由 tests/unit/test_deploy_config_guard.py 锁死门禁自身与周级巡检的接线。
+    - name: deploy-config
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.12
+        volumes:
+          - /root/.cache/pip
+      stages:
+        - name: install pyyaml
+          script: python -m pip install --upgrade pip pyyaml
+          timeout: 10m
+        - name: deploy config consistency gate
+          script: python scripts/ci/deploy_config_consistency_check.py
+          timeout: 10m
+
     # ── 7. 依赖审计（阻塞，对齐 GitHub 已转阻塞的 dependency-audit）────────
     - name: dependency-audit
       runner:
@@ -243,6 +270,34 @@ main:
 
   # pull_request 事件：复用同一份流水线定义（锚点别名，单一事实来源）
   pull_request: *pipelines
+
+  # ── 周级巡检：部署配置漂移（crontab）─────────────────────────────────────
+  # 为什么独立成 crontab 而不只放 push/PR：漂移的主要来源**不在本仓的提交里**——
+  # 基础镜像上游发版、Helm/K8s API 演进、依赖上游 CVE，都会让"上次对齐过"的
+  # 配置在无人改仓库的情况下失效。周级巡检负责抓这类时间维度漂移。
+  #
+  # 为什么不用 push 兜底：push 门禁只在有人提交时跑，沉寂期等于没有巡检。
+  #
+  # 周级为什么能写：平台 crontab 支持标准 5 段 POSIX cron（最小调度间隔 5 分钟），
+  # 周级 cadence 用第 5 段（星期）表达即 `30 3 * * 1`（每周一 03:30，Asia/Shanghai）。
+  # 注意：不要试图用"间隔 N 天"的语义——平台只认 cron 表达式，没有 interval 单位，
+  # 也不存在"任务最长存活 3 天"的限制；配置错误的形态只会在解析期报错。
+  "crontab: 30 3 * * 1":
+    - name: weekly-deploy-config-audit
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.12
+        volumes:
+          - /root/.cache/pip
+      stages:
+        - name: install pyyaml
+          script: python -m pip install --upgrade pip pyyaml
+          timeout: 10m
+        - name: weekly deploy config consistency audit
+          script: python scripts/ci/deploy_config_consistency_check.py
+          timeout: 10m
 
 # ============================================================================
 # 自定义 NPC —— DSCoder
