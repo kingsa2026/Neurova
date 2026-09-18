@@ -1,0 +1,13 @@
+{
+  "name": "neurova-npx-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "description": "运行时经 npx 拉取的 Node 包——仅用于解析依赖树并纳入 OSV 审计（不被 npm 安装执行）",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@askjo/camofox-browser": "1.16.0",
+    "@bytebase/dbhub": "1.2.5",
+    "@modelcontextprotocol/server-filesystem": "2026.8.31",
+    "@upstash/context7-mcp": "4.1.1"
+  }
+}

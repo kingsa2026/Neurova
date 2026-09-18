@@ -57,6 +57,59 @@ updates:
       # 让 Dependabot 直接改传递依赖版本会与 overrides 打架。
       - dependency-name: "undici"
         update-types: ["version-update:semver-major"]
+  # ── 运行时 npx 包（tools/npx-runtime）──────────────────────────────────
+  # 这些包由 `npx -y pkg@ver` 在用户机器上现拉现跑，版本单点登记在
+  # neurova/tool_layers/npx_runtime_registry.py。Dependabot 在这里提的 PR
+  # 必须同时改登记表与锁文件（守卫 tests/unit/tools/test_npx_runtime_pinning.py
+  # 会校验三者一致），故单独成组、不混入主仓 PR。
+  - package-ecosystem: npm
+    directory: "/tools/npx-runtime"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - npx-runtime
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      npx-runtime-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      npx-runtime-security:
+        applies-to: security-updates
+        patterns: ["*"]
+  # ── Rust：Tauri 桌面壳（NeurUI/src-tauri/Cargo.lock）────────────────────
+  # Issue #56 残留边界：该依赖树此前从不被任何工具看过（pip-audit 与
+  # npm audit 都覆盖不到 Rust）。Cargo 更新由 dependabot 每周提单。
+  # 注意：glib / unic-* 两条被上游钉死（见 scripts/ci/osv-allowlist.toml），
+  # 强行升它们会在 Windows 打断打包——升级 PR 需逐个人工评估。
+  - package-ecosystem: cargo
+    directory: "/NeurUI/src-tauri"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:00"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+      - tauri
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      cargo-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      cargo-security:
+        applies-to: security-updates
+        patterns: ["*"]
   # ── CI 自身（GitHub Actions 版本）────────────────────────────────────────
   - package-ecosystem: github-actions
     directory: "/"

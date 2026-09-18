@@ -15,6 +15,7 @@
 #   5. e2e                   后端启动冒烟（health/docs/metrics/鉴权）
 #   6. frontend              npm audit --audit-level=high（阻塞）+ vue-tsc + vitest
 #   7. dependency-audit      pip-audit 阻塞审计：CI 精简锁 + 生产全量锁（requirements-full.lock）
+#                            + OSV 扫非 pip 依赖树（Cargo.lock / npx 运行时包锁）
 #
 # 原则：只进当前确定全绿的测试；预存失败模块修复后逐个搬入 protected_tests.txt。
 #
@@ -209,6 +210,13 @@ main:
           # CI 锁只覆盖精简子集，生产全量依赖（curl_cffi/onnxruntime/transformers/
           # playwright/paramiko/pycryptodome ...）此前完全无人扫——本步补齐该缺口。
           script: python -m pip_audit -r requirements-full.lock --progress-spinner off
+          timeout: 20m
+        - name: audit non-pip trees (Rust crates + runtime npx packages)
+          # pip-audit / npm audit 之外的两片依赖面（Issue #56 残留边界）：
+          #   * NeurUI/src-tauri/Cargo.lock —— Tauri 桌面壳 crate 树
+          #   * tools/npx-runtime/package-lock.json —— 运行时 `npx -y` 现拉的包
+          # 统一走 OSV-Scanner；允许清单见 scripts/ci/osv-allowlist.toml。
+          script: python scripts/ci/osv_audit.py
           timeout: 20m
 
   # pull_request 事件：复用同一份流水线定义（锚点别名，单一事实来源）

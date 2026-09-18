@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.tool_layers.npx_runtime_registry import pinned_npx_args
 
 logger = get_logger(__name__)
 
@@ -144,7 +145,10 @@ class SharedConfigManager:
                     "id": "filesystem",
                     "name": "文件系统",
                     "command": "npx",
-                    "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+                    # 版本单点登记在 npx_runtime_registry（锁定 latest 漂移）
+                    "args": pinned_npx_args(
+                        "@modelcontextprotocol/server-filesystem", "/tmp"
+                    ),
                     "enabled": True,
                     "description": "文件系统访问",
                 }
