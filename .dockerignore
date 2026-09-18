@@ -63,8 +63,16 @@ deploy/
 scripts/
 
 # 配置文件（保留 config/ 目录）
+# 注意：config/*.json 会连运行时**必须**读的 config/cors.json 一起挡掉——
+# Dockerfile 的 `COPY config/ ./config/` 于是拷了个空目录，应用静默回落到内置
+# 默认 CORS 来源（生产浏览器请求被拒，日志无线索）。
+# 判据：被代码在运行时读取的资产必须显式放行（apps 读取方见
+# neurova/api/middleware.py / neurova/llm/presets.py）。
+# 守卫：scripts/ci/deploy_config_consistency_check.py 的 R10。
 config/*.json
+!config/cors.json
 !config/llm_presets/
+!config/llm_presets/**
 
 # 开发文件
 .dockerignore
