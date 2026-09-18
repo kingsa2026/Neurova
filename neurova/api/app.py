@@ -639,6 +639,9 @@ def _register_metrics_endpoint(app: FastAPI) -> None:
         _prom.observe_pools()
         # P1-6：缓存命中率快照（只读已创建实例，不懒建）
         _prom.observe_caches()
+        # Issue #65：上下文池常驻/回收快照（池是永久归档，只增不减——
+        # 此前"常驻规模"在观测面上完全空白）
+        _prom.observe_context_pools()
 
         headers = {k: v for k, v in request.headers.items()}
         allowed, reason = check_metrics_access(

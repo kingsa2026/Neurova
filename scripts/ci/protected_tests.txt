@@ -51,3 +51,9 @@ tests/unit/cognitive_layers/memory_layer/test_m15_delete_persisted_conn_hygiene.
 
 # Issue #61 部署配置一致性：门禁自检（R1~R9 不变量 + 周级 crontab 巡检接线）
 tests/unit/test_deploy_config_guard.py
+
+# Issue #65 上下文池读路径/回收契约/单例重置：分区索引等价性 + Unicode 快路径
+# 安全网 + 常驻上限无损回收 + ExecutionEngine 三层重置 + 压测守卫补强
+tests/unit/context/test_context_pool_query_index.py
+tests/unit/context/test_context_pool_retention_contract.py
+tests/unit/execution/test_execution_engine_reset.py
