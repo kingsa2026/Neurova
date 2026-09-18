@@ -453,6 +453,37 @@ def get_execution_engine() -> ExecutionEngine:
 
 
 def reset_execution_engine() -> None:
-    """重置执行引擎（用于测试）"""
+    """重置执行引擎（用于测试隔离）。
+
+    此前只把模块级 ``_execution_engine`` 置 None，而 ``ExecutionEngine`` 是
+    **类级单例**（``_instance`` 在类上）：重置后再取回的是同一个对象，
+    ``_executions`` 里上一测试的执行记录原样存活，``_initialized`` 仍为 True
+    （Issue #65 实测：``get_execution_engine() is e1 → True``）。任何依赖它
+    做隔离的测试都会拿到脏状态。
+
+    现三层一起清：
+
+    1. 模块级缓存 ``_execution_engine``；
+    2. 类级单例 ``ExecutionEngine._instance``（置 None，下次 ``__new__``
+       重建 → ``_initialized=False`` → ``__init__`` 重新装配组件）；
+    3. 旧实例的 ``_executions``（执行历史）——即便有外部引用持有旧对象，
+       也不再把状态带进后续测试。
+
+    调用方：``tests/conftest.py`` 的 autouse 隔离 fixture（此前本函数全仓
+    零调用方，"重置"契约从未被验证）。
+    """
     global _execution_engine
-    _execution_engine = None
+    engine = _execution_engine if _execution_engine is not None else ExecutionEngine._instance
+    if engine is not None:
+        executions = getattr(engine, "_executions", None)
+        if isinstance(executions, dict):
+            with getattr(engine, "_lock", _execution_engine_lock):
+                executions.clear()
+        # 刻意**不**翻旧实例的 _initialized：复位后 _instance 已是 None，下次
+        # __new__ 会造全新对象，旧标记无从被读；而"就地失效"会让并发里已经
+        # 拿到旧引用的调用方观察到自相矛盾的状态（返回对象自称未初始化）。
+        # 隔离所需的是"状态不再外泄"，清 _executions 已足够。
+    with _execution_engine_lock:
+        _execution_engine = None
+        ExecutionEngine._instance = None
+    logger.debug("ExecutionEngine 单例已重置（模块缓存 + 类级 _instance + 执行记录）")
