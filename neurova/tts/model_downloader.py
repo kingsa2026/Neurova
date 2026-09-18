@@ -7,6 +7,7 @@ Model Downloader - 模型自动下载器
 import logging
 
 from neurova.core.logger import get_logger
+from neurova.tts.model_integrity import find_altered_files, verify_model
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -96,14 +97,23 @@ class ModelDownloader:
     支持断点续传，下载失败自动重试。
     """
 
-    def __init__(self, base_dir: str = "."):
+    def __init__(self, base_dir: str = ".", verify_integrity: bool = True):
         """
         初始化下载器
 
         Args:
             base_dir: 模型存储的基础目录
+            verify_integrity: 下载后是否校验产物 sha256（Issue #56 残留边界）。
+                默认开启。**测试可用桩引擎写假文件时须显式关掉**——否则桩产出的
+                占位内容必然哈希不匹配（那是测试夹具的问题，不是校验逻辑的问题）。
+                生产侧关闭需环境变量 NEUROVA_MODEL_INTEGRITY=off：仅用于
+                「自建镜像站合法重打包权重」这类哈希本就与上游不同的场景，
+                且会记 warning 留痕。
         """
         self._base_dir = Path(base_dir)
+        self._verify_integrity = bool(verify_integrity) and os.environ.get(
+            "NEUROVA_MODEL_INTEGRITY", ""
+        ).strip().lower() not in ("off", "0", "false", "no")
         self._progress_callback: Optional[Callable[[DownloadProgress], None]] = None
         self._logger = logging.getLogger("ModelDownloader")
 
@@ -193,12 +203,26 @@ class ModelDownloader:
         if not self.is_model_available(model_name):
             raise RuntimeError(f"模型下载不完整: 缺少必要文件 {registry['required_files']}")
 
-        self._logger.info("模型下载完成: %s -> %s", model_name, model_dir)
-        return model_dir
-
-        # 完整性校验（引擎已负责下载与进度；此处统一验证 required_files）
-        if not self.is_model_available(model_name):
-            raise RuntimeError(f"模型下载不完整: 缺少必要文件 {registry['required_files']}")
+        # 产物完整性校验（Issue #56 残留边界）：存在且非空 ≠ 内容正确。
+        # 镜像站投毒 / 传输截断 / 磁盘静默损坏都会产出"看起来下载成功"的坏权重，
+        # 直到推理时才有异常表现。校验失败即清理坏文件，让下次重下自愈生效。
+        if not self._verify_integrity:
+            self._logger.warning(
+                "模型产物完整性校验已关闭（NEUROVA_MODEL_INTEGRITY=off 或桩环境）: %s",
+                model_name,
+            )
+        altered = find_altered_files(model_name, model_dir) if self._verify_integrity else []
+        if altered:
+            bad = [n for n, _, _ in altered]
+            for name in bad:
+                try:
+                    (model_dir / name).unlink(missing_ok=True)
+                except OSError as e:  # noqa: BLE001 - 清理失败不掩盖校验失败
+                    self._logger.warning("清理损坏模型文件失败: %s - %s", name, e)
+            self._logger.error(
+                "模型产物哈希不匹配（已清理待重下）: %s -> %s", model_name, bad
+            )
+            verify_model(model_name, model_dir)  # 抛出含双方哈希的 RuntimeError
 
         self._logger.info("模型下载完成: %s -> %s", model_name, model_dir)
         return model_dir
