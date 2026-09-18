@@ -83,7 +83,7 @@ class TestGateScriptExists:
 class TestRuleSetNotShrunk:
     RULES = ("R1-ports", "R2-healthcheck", "R3-resources", "R4-images", "R5-env",
              "R6-persistence", "R7-auth", "R8-deps", "R9-wiring", "R10-config-assets",
-             "R11-helm-values")
+             "R11-helm-values", "R12-config-shadow")
 
     def test_all_rules_implemented(self):
         source = io.open(GATE, encoding="utf-8").read()
@@ -98,7 +98,7 @@ class TestRuleSetNotShrunk:
         for fn in ("_check_ports", "_check_health", "_check_resources", "_check_images",
                    "_check_env_keys", "_check_persistence", "_check_auth_secret",
                    "_check_hard_deps", "_check_config_assets", "_check_helm_values_refs",
-                   "_check_ci_wiring"):
+                   "_check_helm_config_shadow", "_check_ci_wiring"):
             assert f"def {fn}(" in source, f"门禁检查函数缺失: {fn}"
 
     def test_units_normalized_documented(self):
@@ -254,10 +254,14 @@ class TestNegativeControls:
         )
 
     def test_detects_undefined_values_ref(self, tmp_path):
+        """模板引用了 values 里不存在的键 → 渲染成 <no value> 且 Helm 不报错。"""
+
         def mutate(root: Path):
             path = root / "helm" / "neurova" / "values.yaml"
-            text = io.open(path, encoding="utf-8").read().replace(
-                'configMountPath: /app/config', "# configMountPath removed")
+            text = io.open(path, encoding="utf-8").read()
+            # 摘掉一个确实被模板引用的键（_helpers.tpl 用 .Values.nameOverride）——
+            # 换掉原来的 configMountPath：该键已不再被任何模板引用（见本次 R12 修复）。
+            text = text.replace('nameOverride: ""', "# nameOverride removed", 1)
             io.open(path, "w", encoding="utf-8").write(text)
 
         payload = self._run_on_copy(tmp_path, mutate)
@@ -274,6 +278,61 @@ class TestNegativeControls:
         payload = self._run_on_copy(tmp_path, mutate)
         assert any(e["rule"] == "R10-config-assets" for e in payload["errors"]), (
             "运行时必需的 config/cors.json 被 .dockerignore 挡掉却未被抓住"
+        )
+
+    def test_detects_hardcoded_probe_params(self, tmp_path):
+        """探针参数写死在模板里（不走 values）必须被抓。"""
+
+        def mutate(root: Path):
+            path = root / "helm" / "neurova" / "templates" / "deployment-backend.yaml"
+            text = io.open(path, encoding="utf-8").read().replace(
+                "initialDelaySeconds: {{ .Values.backend.healthCheck.readiness.initialDelaySeconds }}",
+                "initialDelaySeconds: 10",
+            )
+            io.open(path, "w", encoding="utf-8").write(text)
+
+        payload = self._run_on_copy(tmp_path, mutate)
+        assert any(e["rule"] == "R2-healthcheck" for e in payload["errors"]), (
+            "readinessProbe 参数被硬编码回模板却未被抓住（门禁只比 values，等于隐形口径）"
+        )
+
+    def test_detects_frontend_latest_tag(self, tmp_path):
+        """前端镜像 tag 写死 latest 也必须被抓（原实现只查 backend）。"""
+
+        def mutate(root: Path):
+            path = root / "helm" / "neurova" / "values.yaml"
+            text = io.open(path, encoding="utf-8").read().replace(
+                '    repository: neurova/frontend\n    # 与 backend 同理：写死 "latest" 让同一份 values 在不同时刻拉到不同镜像。\n    tag: ""',
+                '    repository: neurova/frontend\n    tag: "latest"',
+            )
+            io.open(path, "w", encoding="utf-8").write(text)
+
+        payload = self._run_on_copy(tmp_path, mutate)
+        assert any(e["rule"] == "R4-images" for e in payload["errors"]), (
+            "frontend.image.tag=latest 未被抓住（只钉 backend 等于留同一形态的后门）"
+        )
+
+    def test_detects_configmap_shadowing_config(self, tmp_path):
+        """ConfigMap 卷挂到 /app/config 遮蔽镜像内 config 资产必须被抓。"""
+
+        def mutate(root: Path):
+            path = root / "helm" / "neurova" / "templates" / "deployment-backend.yaml"
+            text = io.open(path, encoding="utf-8").read().replace(
+                "            - name: logs\n              mountPath: /app/logs",
+                "            - name: logs\n              mountPath: /app/logs\n"
+                "            - name: config\n              mountPath: /app/config\n"
+                "              readOnly: true",
+            ).replace(
+                "        - name: logs\n          emptyDir: {}",
+                "        - name: logs\n          emptyDir: {}\n"
+                "        - name: config\n          configMap:\n"
+                '            name: {{ include "neurova.fullname" . }}-config',
+            )
+            io.open(path, "w", encoding="utf-8").write(text)
+
+        payload = self._run_on_copy(tmp_path, mutate)
+        assert any(e["rule"] == "R12-config-shadow" for e in payload["errors"]), (
+            "ConfigMap 卷重新遮蔽 /app/config → 镜像内 cors.json/llm_presets 读不到，未被抓住"
         )
 
     def test_detects_missing_weekly_audit(self, tmp_path):
