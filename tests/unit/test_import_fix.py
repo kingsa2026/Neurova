@@ -4,8 +4,8 @@
 """
 
 import pytest
-import sys
-from pathlib import Path
+
+from tests.repo_paths import REPO_ROOT as _REPO_ROOT
 
 
 class TestImportFix:
@@ -46,7 +46,7 @@ class TestImportFix:
 
     def test_project_structure(self):
         """测试项目结构完整性"""
-        project_root = Path("e:/项目/neurova")
+        project_root = _REPO_ROOT
         assert project_root.exists()
 
         # 检查neurova目录
