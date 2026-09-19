@@ -2275,6 +2275,12 @@ export default {
     inProgress: 'In Bearbeitung',
     done: 'Erledigt',
   },
+  motivation: {
+    competence: 'Kompetenz',
+    autonomy: 'Autonomie',
+    growth: 'Wachstum',
+    purpose: 'Sinn',
+  },
   personality: {
     title: 'Persönlichkeit',
     openness: 'Offenheit',

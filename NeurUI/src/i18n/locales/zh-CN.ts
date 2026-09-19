@@ -2299,6 +2299,12 @@ export default {
     inProgress: '进行中',
     done: '已完成',
   },
+  motivation: {
+    competence: '能力感',
+    autonomy: '自主性',
+    growth: '成长感',
+    purpose: '使命感',
+  },
   personality: {
     title: '人格特征',
     openness: '开放性',

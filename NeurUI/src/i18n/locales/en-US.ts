@@ -2289,6 +2289,12 @@ export default {
     inProgress: 'In Progress',
     done: 'Done',
   },
+  motivation: {
+    competence: 'Competence',
+    autonomy: 'Autonomy',
+    growth: 'Growth',
+    purpose: 'Purpose',
+  },
   personality: {
     title: 'Personality',
     openness: 'Openness',

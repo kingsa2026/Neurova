@@ -2275,6 +2275,12 @@ export default {
     inProgress: '진행 중',
     done: '완료',
   },
+  motivation: {
+    competence: '유능감',
+    autonomy: '자율성',
+    growth: '성장감',
+    purpose: '목적감',
+  },
   personality: {
     title: '성격 특성',
     openness: '개방성',
