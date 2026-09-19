@@ -202,6 +202,40 @@ async def create_knowledge(
     return item_response(item)
 
 
+@router.get("/evaluation/baseline")
+async def get_evaluation_baseline(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """检索评测基线读数（只读）。未冻结基线时回 unevidenced，不回 0。"""
+    import json as _json
+
+    from neurova.knowledge.evaluation import get_retrieval_benchmark
+
+    bench = get_retrieval_benchmark()
+    baseline = bench.baseline()
+    if baseline is None:
+        return {
+            "measure_state": "unevidenced",
+            "missing_reason": "尚未冻结基线：先跑 RetrievalBenchmark.seedFromRepository + run + freezeBaseline",
+            "case_count": bench.caseCount(),
+            "readings": None,
+        }
+    return {
+        "measure_state": baseline.get("measure_state"),
+        "run_id": baseline.get("run_id"),
+        "frozen_at": baseline.get("frozen_at"),
+        "case_count": baseline.get("case_count"),
+        "top_k": baseline.get("top_k"),
+        "context": _json.loads(baseline.get("context_json") or "{}"),
+        "readings": {
+            "recall_at_k": baseline.get("recall_at_k"),
+            "mrr": baseline.get("mrr"),
+            "unhit_rate": baseline.get("unhit_rate"),
+        },
+    }
+
+
 @router.get("/{knowledge_id}/revisions")
 async def list_knowledge_revisions(
     request: Request,
