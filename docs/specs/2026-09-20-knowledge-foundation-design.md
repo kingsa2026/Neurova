@@ -154,10 +154,14 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 - 规模：小。阶段 E2。
 
 ### G11 置信度语义未定义
-- 现状：`create_knowledge` 默认 0.7（`repository.py:484-504` 默认值路径），§1.2 实测 126/130 = 0.7 ⇒ 字段为常量。
+- 现状（**2026-09-20 实施期复核修正**，原写"create_knowledge 默认 0.7"是错的归因）：
+  0.7 来自**文件/URL 导入路径的硬编码** `api/endpoints/knowledge_ingestion.py:208 confidence=0.7`；
+  `create_knowledge` 与 API 请求模型的默认其实是 0.5（`repository.py:491` 区段、`knowledge_common.py:34,55`）。
+  §1.2 实测 126/130 = 0.7 之所以是那个值，正因为这 130 条几乎全部来自 `source: import:*` 的导入路径
+  ——一个常量决定了全库"置信度"。
 - 目标态：`confidence` 只能由事实层按断言聚合得出（§6.1 定义式），条目与叙述层不得自带数值置信。
-- 判据：全库 `confidence` 值种数显著多于 1，且每条非默认值都能回溯到至少一条断言；`create_knowledge` 不再接受调用方传入的裸 confidence。
-- 规模：小（删默认值）。阶段 E1。
+- 判据：全库 `confidence` 值种数显著多于 1，且每条非默认值都能回溯到至少一条断言；导入路径不再写死常量。
+- 规模：小（删硬编码 + 换聚合口径）。阶段 E1 立聚合、019 换条目侧。
 
 ### G12 三套图谱/事实/经验存储无共同身份层
 - 现状：`graph_bridge.py` 唯一写入方是知识导入链；`knowledge/` 与 `cognitive_layers/knowledge_graph/` 无交叉；EKB 与 KB 之间只有关联簿记（`knowledge_integration.py` 的 `memory_links.json`，`:43` 注释自陈原实现谎报 Synced），无条目通路。
@@ -208,7 +212,7 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 `subject_key` PK、`canonical_label`、`type_term_id`→`ontology_terms`、`aliases_json`、`first_seen_at`、`merged_into`（自指链，收敛后禁止悬空）、`status`。吸收 `manager.py:66` 的 `aliases` 语义。
 
 **事实层 `knowledge_facts`**
-以 `temporal_knowledge_graph.py:181-196` 形状为骨架：`fact_id`、`subject_key`、`predicate_term_id`、`object_term`、`relation_kind`（literal / entity）、`qualifier_json`、`confidence`、`evidence_state`、`status`、`supersedes_fact_id`、`contradicted_by_json`、`valid_from`、`valid_until`、`recorded_at`、`retracted_at`；沿用 EKB 词汇：`assertions_json`、`source_turn_id`、`injected_count`、`last_injected_at`、`adoption_outcome`、`contradicted_at`；新增 `assertion_count`、`latest_adoption_outcome`。
+以 `temporal_knowledge_graph.py:181-196` 形状为骨架：`fact_id`、`subject_key`、`predicate_term_id`、`object_term`、`relation_kind`（literal / entity）、`qualifier_json`、`confidence`、`evidence_state`、`status`、`supersedes_fact_id`、`contradicted_by_json`、`valid_from`、`valid_until`、`recorded_at`、`retracted_at`；沿用 EKB 词汇：`assertions_json`、`source_turn_id`、`injected_count`、`last_injected_at`、`adoption_outcome`；新增 `assertion_count`、`latest_adoption_outcome`。（实施复核：`contradicted_at` 未建列——矛盾时刻由 `knowledge_conflicts.detected_at` 承载，不重复存一份。）
 
 **两列三值的分工（工单 008 实施中定清，原工单文本把两件事混写了）**：
 `evidence_state` 是 `NOT NULL DEFAULT 'unevidenced'` 的显式三值（evidenced / unevidenced / failed），
