@@ -25,6 +25,7 @@ vi.mock('@/composables/useAgentPage', () => ({
 
 vi.mock('@/api/modules/memory', () => ({
   getEmotionSummary: vi.fn(),
+  getEmotionTimeline: vi.fn(),
 }))
 
 vi.mock('@/api/modules/growth', () => ({
@@ -50,7 +51,8 @@ vi.mock('ant-design-vue', async () => {
 })
 
 import AgentPersonalityPage from '@/pages/AgentPersonalityPage.vue'
-import { getEmotionSummary } from '@/api/modules/memory'
+import { getEmotionSummary, getEmotionTimeline } from '@/api/modules/memory'
+import { getMotivation, getPersonality } from '@/api/modules/growth'
 import { request } from '@/api'
 
 const zhMessages = {
@@ -64,8 +66,12 @@ const zhMessages = {
     neutral: '中性',
     joy: '开心', sadness: '难过', anger: '生气', fear: '害怕', surprise: '惊讶',
     disgust: '厌恶', trust: '信任', anticipation: '期待',
+    timelineTitle: '情绪变化时间轴',
+    timelineAxisHint: '正值=积极情绪，负值=消极情绪',
+    range24h: '24 小时', range7d: '7 天', range30d: '30 天', range90d: '90 天',
   },
   growth: { motivation: '动力状态', personality: '个性档案', traits: '特质', evolve: '进化' },
+  motivation: { competence: '能力感', autonomy: '自主性', growth: '成长感', purpose: '使命感' },
   personality: {
     title: '人格特征',
     openness: '开放性',
@@ -82,6 +88,7 @@ const enMessages = {
   common: { refresh: 'Refresh', edit: 'Edit', cancel: 'Cancel', save: 'Save', success: 'Success', error: 'Error', noData: 'No data', updated: 'Updated' },
   emotion: { title: 'Emotion', analysis: 'Emotion Analysis', share: 'Share ', entries: 'entries', neutral: 'Neutral' },
   growth: { motivation: 'Motivation', personality: 'Personality Profile', traits: 'Traits', evolve: 'Evolve' },
+  motivation: { competence: 'Competence', autonomy: 'Autonomy', growth: 'Growth', purpose: 'Purpose' },
   personality: {
     title: 'Personality',
     openness: 'Openness',
@@ -106,6 +113,13 @@ const globalStubs = {
   'a-progress': { props: ['percent'], template: '<div class="a-progress"></div>' },
   'a-tag': { props: ['color'], template: '<span class="a-tag"><slot/></span>' },
   'a-slider': { props: ['value'], template: '<div class="slider-stub"/>' },
+  'a-radio-group': { props: ['value', 'size'], template: '<div class="a-radio-group"><slot/></div>' },
+  'a-radio-button': {
+    props: ['value'],
+    template:
+      '<button class="a-radio-button" :data-value="value" @click="$parent.$emit(\'update:value\', value)"><slot/></button>',
+  },
+  VChart: { props: ['option'], template: '<div class="vchart-stub" :data-has-option="option ? 1 : 0" />' },
 }
 
 function mountPage(locale = 'zh-CN', messages: Record<string, any> = zhMessages) {
@@ -214,5 +228,128 @@ describe('AgentPersonalityPage 人格双页签契约', () => {
     const rule = sfc.match(/\.personality-grid\s*\{[^}]*\}/)
     expect(rule).toBeTruthy()
     expect(rule![0]).toContain('grid-template-columns')
+  })
+})
+
+/**
+ * 情绪页签不再承载成长域数据（2026-09-19）
+ *
+ * 「动机水平」「个性档案」与成长管理页（GrowthPage 概览）是同一份
+ * /growth/motivation、/growth/personality 数据的重复渲染。
+ * 收敛为：成长域两张卡只在 GrowthPage 出现，本页情绪页签只留情绪本身 + 情绪变化时间轴。
+ * 项名 i18n 契约随数据卡迁到 GrowthPage（见 GrowthPage.test.ts）。
+ */
+describe('AgentPersonalityPage 情绪页签不重复成长域卡片', () => {
+  beforeEach(() => {
+    // 模块级 mock 在全文件共享，先清空才能断言"零调用"
+    vi.clearAllMocks()
+    vi.mocked(request.get).mockResolvedValue({ code: 0, data: { traits: {} } } as any)
+    vi.mocked(getEmotionSummary).mockResolvedValue({
+      code: 0,
+      data: { total_annotated: 1, emotion_distribution: { joy: 1 } },
+      message: 'ok',
+    } as any)
+    // 两张卡的数据接口给满值：若页面仍在渲染，下面的断言才会亮
+    vi.mocked(getMotivation).mockResolvedValue({
+      code: 0,
+      data: { level: 0.53, factors: [{ name: 'competence', impact: 0.79 }], updated_at: 1 },
+    } as any)
+    vi.mocked(getPersonality).mockResolvedValue({
+      code: 0,
+      data: { traits: { Openness: 1 }, communication_style: 'balanced', decision_style: 'analytical' },
+    } as any)
+  })
+
+  it('情绪页签不再渲染动机因子与个性档案特质条', async () => {
+    const wrapper = await mountPage()
+    await flushPromises()
+    const pane = findPane(wrapper, '情绪')!
+    expect(pane.find('.motivation-section').exists()).toBe(false)
+    expect(pane.find('.factor-card').exists()).toBe(false)
+    expect(pane.find('.trait-bar-row').exists()).toBe(false)
+  })
+
+  it('不再为这两张卡拉取 growth 动机/个性接口（不留死请求）', async () => {
+    await mountPage()
+    await flushPromises()
+    expect(getMotivation).not.toHaveBeenCalled()
+    expect(getPersonality).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * 情绪变化时间轴（2026-09-19）
+ *
+ * 契约：默认 7 天窗口拉取；4 档窗口切换按新 range 重拉；
+ * Y 轴固定 [-1,1]，空桶保留 null 且 connectNulls=false（画断点，不画成"中性 0"）；
+ * 悬停 tooltip = 时间 · 情绪项名(i18n) · 效价 · 触发该次情绪变化的记忆摘要。
+ */
+describe('AgentPersonalityPage 情绪变化时间轴', () => {
+  const points = [
+    { ts: 1760000000, label: '09-13', valence: null, count: 0, peak_emotion: null, peak_intensity: null, excerpt: '' },
+    { ts: 1760086400, label: '09-14', valence: -0.4, count: 2, peak_emotion: 'anger', peak_intensity: 0.8, excerpt: '网页搜索连续失败' },
+    { ts: 1760172800, label: '09-15', valence: 0.65, count: 3, peak_emotion: 'joy', peak_intensity: 0.9, excerpt: '用户点赞了回复' },
+  ]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(request.get).mockResolvedValue({ code: 0, data: { traits: {} } } as any)
+    vi.mocked(getEmotionSummary).mockResolvedValue({
+      code: 0,
+      data: { total_annotated: 1, emotion_distribution: { joy: 1 } },
+      message: 'ok',
+    } as any)
+    vi.mocked(getEmotionTimeline).mockResolvedValue({
+      code: 0,
+      data: { range: '7d', bucket: 'day', points },
+    } as any)
+  })
+
+  it('挂载即按默认 7 天窗口拉取', async () => {
+    await mountPage()
+    await flushPromises()
+    expect(getEmotionTimeline).toHaveBeenCalledWith('default', '7d')
+  })
+
+  it('切换窗口按新 range 重拉', async () => {
+    const wrapper = await mountPage()
+    await flushPromises()
+    const btn24 = wrapper.findAll('.a-radio-button').find((b) => b.attributes('data-value') === '24h')
+    expect(btn24, '4 档窗口按钮齐备').toBeTruthy()
+    await btn24!.trigger('click')
+    await flushPromises()
+    expect(getEmotionTimeline).toHaveBeenLastCalledWith('default', '24h')
+  })
+
+  it('Y 轴固定 -1..1，空桶保留 null 且不连线', async () => {
+    const wrapper = await mountPage()
+    await flushPromises()
+    const option = (wrapper.vm as any).emotionTimelineOption
+    expect(option.yAxis.min).toBe(-1)
+    expect(option.yAxis.max).toBe(1)
+    expect(option.series[0].connectNulls).toBe(false)
+    expect(option.series[0].data).toEqual([null, -0.4, 0.65])
+    expect(option.xAxis.data).toEqual(['09-13', '09-14', '09-15'])
+  })
+
+  it('悬停显示时间·情绪项名·效价·触发记忆摘要', async () => {
+    const wrapper = await mountPage()
+    await flushPromises()
+    const text = (wrapper.vm as any).emotionTimelineOption.tooltip.formatter([{ dataIndex: 1 }])
+    expect(text).toContain('09-14')
+    expect(text).toContain('生气') // emotion.anger 的中文项名
+    expect(text).toContain('-0.40')
+    expect(text).toContain('网页搜索连续失败')
+  })
+
+  it('全空窗口不报错且保留断点', async () => {
+    vi.mocked(getEmotionTimeline).mockResolvedValue({
+      code: 0,
+      data: { range: '7d', bucket: 'day', points: points.map((p) => ({ ...p, valence: null, count: 0 })) },
+    } as any)
+    const wrapper = await mountPage()
+    await flushPromises()
+    const data = (wrapper.vm as any).emotionTimelineOption.series[0].data
+    expect(data).toEqual([null, null, null])
   })
 })

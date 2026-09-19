@@ -1673,6 +1673,12 @@ export default {
     resolutionRequired: '해결 방법을 선택하세요',
   },
   emotion: {
+    timelineTitle: '감정 변화 타임라인',
+    timelineAxisHint: '양수=긍정, 음수=부정',
+    range24h: '24시간',
+    range7d: '7일',
+    range30d: '30일',
+    range90d: '90일',
     title: '감정 관리',
     analysis: '감정 분석',
     personality: '성격 관리',

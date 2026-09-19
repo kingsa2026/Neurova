@@ -1677,6 +1677,12 @@ export default {
     resolutionRequired: 'Please select resolution',
   },
   emotion: {
+    timelineTitle: 'Emotion Change Timeline',
+    timelineAxisHint: 'Positive = pleasant, negative = unpleasant',
+    range24h: '24h',
+    range7d: '7d',
+    range30d: '30d',
+    range90d: '90d',
     title: 'Emotion Management',
     analysis: 'Emotion Analysis',
     personality: 'Personality Management',

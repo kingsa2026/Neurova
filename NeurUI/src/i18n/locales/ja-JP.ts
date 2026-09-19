@@ -1673,6 +1673,12 @@ export default {
     resolutionRequired: '解決方法を選択してください',
   },
   emotion: {
+    timelineTitle: '感情変化タイムライン',
+    timelineAxisHint: '正＝ポジティブ、負＝ネガティブ',
+    range24h: '24時間',
+    range7d: '7日',
+    range30d: '30日',
+    range90d: '90日',
     title: '感情管理',
     analysis: '感情分析',
     personality: 'パーソナリティ管理',
