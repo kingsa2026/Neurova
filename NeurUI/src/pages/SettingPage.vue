@@ -76,6 +76,34 @@
         </GlassCard>
       </a-tab-pane>
 
+      <!-- LLM 路由设置（actionability 门控等路由期决策，默认关 opt-in） -->
+      <a-tab-pane key="routing" :tab="t('settings.llmRoutingTab')">
+        <GlassCard :title="t('settings.llmRoutingTab')">
+          <p class="governance-hint">{{ t('settings.actionabilityGateHint') }}</p>
+          <a-form layout="vertical">
+            <a-form-item :label="t('settings.actionabilityGateLabel')">
+              <a-switch v-model:checked="routing.actionability_enabled" />
+            </a-form-item>
+            <a-form-item :label="t('settings.actionabilityLookbackLabel')">
+              <a-input-number v-model:value="routing.actionability_lookback" :min="1" :max="200" :step="1" style="width: 100%" />
+              <p class="governance-hint">{{ t('settings.actionabilityLookbackHint') }}</p>
+            </a-form-item>
+            <a-divider style="margin: 8px 0" />
+            <a-form-item :label="t('settings.groupLeadershipLabel')">
+              <a-switch v-model:checked="routing.group_leadership_enabled" />
+              <p class="governance-hint">{{ t('settings.groupLeadershipHint') }}</p>
+            </a-form-item>
+            <a-form-item :label="t('settings.groupLeaseTtlLabel')">
+              <a-input-number v-model:value="routing.group_lease_ttl_seconds" :min="5" :max="3600" :step="5" style="width: 100%" />
+              <p class="governance-hint">{{ t('settings.groupLeaseTtlHint') }}</p>
+            </a-form-item>
+          </a-form>
+          <template #footer>
+            <GlassButton variant="primary" size="sm" :loading="saving" @click="saveSection('routing')">{{ t('common.save') }}</GlassButton>
+          </template>
+        </GlassCard>
+      </a-tab-pane>
+
       <!-- Storage -->
       <a-tab-pane key="storage" :tab="t('settings.storage')">
         <GlassCard :title="t('settings.storageSettings')">
@@ -333,6 +361,9 @@ const storage = ref({ media_path: '/data/media', max_upload_mb: 50, cache_ttl_mi
 const advanced = ref({ debug_mode: false, log_level: 'info', telemetry: false, max_output_tokens: 131072, desktop_runtime_mode: 'full', desktop_provider: '', skill_catalog_enabled: true, skill_schema_budget_enabled: true, evolution_queue_enabled: true, skill_semantic_recall_enabled: true, tool_search_enabled: true })
 const savingRecall = ref(false)
 
+/** LLM 路由设置：actionability 门控 + 群领导选举（均默认关，仅机器源/群聊生效） */
+const routing = ref({ actionability_enabled: false, actionability_lookback: 20, group_leadership_enabled: false, group_lease_ttl_seconds: 90 })
+
 // 进化治理设置（独立于扁平 settings 的治理面）
 const governance = ref({ conversation_rules_enabled: false, rsi_phase: 0 })
 const savingGovernance = ref(false)
@@ -498,6 +529,7 @@ const fetchSettings = async () => {
     if (data?.security) security.value = { ...security.value, ...data.security }
     if (data?.storage) storage.value = { ...storage.value, ...data.storage }
     if (data?.advanced) advanced.value = { ...advanced.value, ...data.advanced }
+    if (data?.routing) routing.value = { ...routing.value, ...data.routing }
   } catch {
     message.error(t('common.error'))
   }
@@ -506,7 +538,7 @@ const fetchSettings = async () => {
 const saveSection = async (section: string) => {
   saving.value = true
   try {
-    const sectionMap: Record<string, any> = { general: general.value, security: security.value, storage: storage.value, advanced: advanced.value }
+    const sectionMap: Record<string, any> = { general: general.value, security: security.value, storage: storage.value, advanced: advanced.value, routing: routing.value }
     await updateSettings(section, sectionMap[section])
 
     if (section === 'general' && general.value.language !== locale.value) {
