@@ -30,6 +30,9 @@ DEFAULT_FACT_DB = "./data/knowledge/knowledge_facts.db"
 # ADR 0016 三态纪律：这三值是穷举，"没证据"（unevidenced）不等于"通过"（evidenced）。
 EVIDENCE_STATES = ("evidenced", "failed", "unevidenced")
 
+# 采纳侧三值：与形成侧的 evidence_state 正交；列上的 NULL 另占一义 = "从未回写"
+ADOPTION_OUTCOMES = ("success", "failure", "unevidenced")
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS knowledge_subjects (
     subject_key TEXT PRIMARY KEY,
@@ -455,6 +458,71 @@ class KnowledgeFactStore:
             )
         self._refreshConfidence(factId)
 
+    # ── 使用与采纳回流（工单 010 / G07、B06）──────────────────
+
+    def recordInjection(self, factIds: List[str]) -> int:
+        """检索命中即计数。先全量校验再写，避免"记了一半"的现场。"""
+        ids = [str(f) for f in factIds if f]
+        if not ids:
+            return 0
+        for factId in ids:
+            self._requireFact(factId)
+        stamp = _now()
+        with self._lock, self._conn:
+            for factId in ids:
+                # UPDATE 自增在持锁事务内完成，不读改写——那会丢并发计数
+                self._conn.execute(
+                    "UPDATE knowledge_facts SET injected_count = injected_count + 1,"
+                    " last_injected_at = ? WHERE fact_id = ?",
+                    (stamp, factId),
+                )
+        return len(ids)
+
+    def recordAdoption(self, factId: str, outcome: str) -> None:
+        """采纳结局回写。NULL 专用于"从未发生过回写"，`unevidenced` 是"回写过但无依据"。"""
+        if outcome not in ADOPTION_OUTCOMES:
+            raise ValueError("未知 adoption_outcome: %r（有效值: %s）"
+                             % (outcome, " / ".join(ADOPTION_OUTCOMES)))
+        with self._lock, self._conn:
+            self._requireFact(factId)
+            self._conn.execute(
+                "UPDATE knowledge_facts SET adoption_outcome = ?, latest_adoption_outcome = ?"
+                " WHERE fact_id = ?",
+                (outcome, outcome, factId),
+            )
+
+    def usageMetrics(self) -> Dict[str, Any]:
+        """零使用占比 / 回写盲区 / 三态分布——治理面的读数，不是排序依据。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) AS total,"
+                " SUM(CASE WHEN injected_count = 0 THEN 1 ELSE 0 END) AS never_injected,"
+                " SUM(CASE WHEN adoption_outcome IS NULL THEN 1 ELSE 0 END) AS never_written,"
+                " SUM(CASE WHEN adoption_outcome = 'success' THEN 1 ELSE 0 END) AS ok,"
+                " SUM(CASE WHEN adoption_outcome = 'failure' THEN 1 ELSE 0 END) AS bad,"
+                " SUM(CASE WHEN adoption_outcome = 'unevidenced' THEN 1 ELSE 0 END) AS blind"
+                " FROM knowledge_facts"
+            ).fetchone()
+        total = int(row["total"] or 0)
+        if not total:
+            return {
+                "measure_state": "unevidenced", "fact_count": 0, "never_injected_count": 0,
+                "never_injected_share": None, "outcome_written": 0, "outcome_never_written": 0,
+                "outcome_success": 0, "outcome_failure": 0, "outcome_unevidenced": 0,
+                "missing_reason": "底座还没有任何事实，使用度量无依据可依",
+            }
+        return {
+            "measure_state": "measured",
+            "fact_count": total,
+            "never_injected_count": int(row["never_injected"] or 0),
+            "never_injected_share": round(int(row["never_injected"] or 0) / total, 4),
+            "outcome_written": total - int(row["never_written"] or 0),
+            "outcome_never_written": int(row["never_written"] or 0),
+            "outcome_success": int(row["ok"] or 0),
+            "outcome_failure": int(row["bad"] or 0),
+            "outcome_unevidenced": int(row["blind"] or 0),
+        }
+
     def factCount(self) -> int:
         with self._lock:
             return int(self._conn.execute("SELECT COUNT(*) FROM knowledge_facts").fetchone()[0])
@@ -690,12 +758,19 @@ class KnowledgeFactStore:
     # 否则会出现"两处判定不一致"的第二真源。到期靠显式调用推进，不起后台线程。
 
     def _requireFact(self, factId: str) -> Dict[str, Any]:
-        row = self._conn.execute(
-            "SELECT status FROM knowledge_facts WHERE fact_id = ?", (factId,)
-        ).fetchone()
+        """读整行并回传，且必须持锁。
+
+        不持锁就是绕过 `threading.RLock` 直接摸共享连接：并发下游标互相踩，
+        存在的事实会被读成"不存在"（工单 010 的并发计数用例实测到）。
+        只回 status 一列则会让调用方以为拿得到整行——`markContradicted` 的合并曾被它静默架空。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM knowledge_facts WHERE fact_id = ?", (factId,)
+            ).fetchone()
         if row is None:
             raise LookupError("事实不存在: %s" % factId)
-        return dict(row)
+        return self._hydrate(row)
 
     def supersede(self, newFactId: str, oldFactId: str, reason: str = "") -> None:
         """新说法接管：旧事实出检索候选，但仍留在账上可溯源。"""

@@ -236,6 +236,17 @@ async def get_evaluation_baseline(
     }
 
 
+@router.get("/foundation/usage")
+async def get_foundation_usage(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """底座使用与采纳回流度量（只读）。空库回 unevidenced，不回 0% 无视。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+
+    return get_knowledge_fact_store().usageMetrics()
+
+
 @router.get("/{knowledge_id}/revisions")
 async def list_knowledge_revisions(
     request: Request,
