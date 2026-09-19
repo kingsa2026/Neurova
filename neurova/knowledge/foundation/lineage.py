@@ -10,7 +10,7 @@ import hashlib
 from typing import Any, Dict, List, Optional
 
 ACTIVITY_KINDS: tuple = (
-    "normalize", "extract", "resolve", "adjudicate", "import", "derive", "retract",
+    "admit", "normalize", "extract", "resolve", "adjudicate", "import", "derive", "retract",
 )
 ACTOR_TYPES: tuple = ("agent", "user", "pipeline", "importer")
 
