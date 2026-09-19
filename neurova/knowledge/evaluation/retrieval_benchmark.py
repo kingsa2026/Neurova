@@ -260,6 +260,7 @@ class RetrievalBenchmark:
         agentId: Optional[str] = None,
         topK: int = 5,
         note: str = "",
+        searchFn: Optional[Any] = None,
     ) -> Dict[str, Any]:
         started = _now()
         run_id = "evr_%s" % uuid.uuid4().hex[:12]
@@ -285,7 +286,7 @@ class RetrievalBenchmark:
         with self._lock, self._conn:
             for case in cases:
                 expected = set(json.loads(case["expected_ids"] or "[]"))
-                hits = hybrid_search_knowledge(repo, user or {}, case["query"], limit=topK, agent_id=agentId)
+                hits = (searchFn or self._defaultSearch(repo, user, agentId, topK))(case["query"])
                 hitIds = [str(h.get("knowledge_id", "")) for h in hits][:topK]
                 rr = 0.0
                 for rank, hid in enumerate(hitIds, start=1):
@@ -343,6 +344,11 @@ class RetrievalBenchmark:
             "unhit_rate": metrics.get("unhit_rate"),
             "started_at": started,
         }
+
+    def _defaultSearch(self, repo, user, agentId, topK):
+        def _search(query: str) -> List[Dict[str, Any]]:
+            return hybrid_search_knowledge(repo, user or {}, query, limit=topK, agent_id=agentId)
+        return _search
 
     # ── 基线 ──────────────────────────────────────────────────
 
