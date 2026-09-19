@@ -1,9 +1,4 @@
 <template>
-  <!--
-    CollaborationHubPage.vue — 协作模块中心枢纽
-    职责：聚合展示协作域所有子模块的概览 + 统一快捷入口
-    设计：深模块，单一职责（导航枢纽，不承载业务逻辑）
-  -->
   <div class="collab-hub">
     <div class="hub-header">
       <h2>{{ t('collab.title') }}</h2>
