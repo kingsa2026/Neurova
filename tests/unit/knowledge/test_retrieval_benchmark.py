@@ -189,3 +189,58 @@ class TestSeedFromRealData:
 
         with pytest.raises(ValueError, match="条目不足"):
             RetrievalBenchmark(str(tmp_path / "eval.db")).seedFromRepository(src, minCases=30)
+
+
+class TestBaselinePortability:
+    """评测库与语料库都在 .gitignore 的 /data/ 下。case 集不入库，011 的"对比冻结基线"换人就跑不通。"""
+
+    def test_exportThenLoadIntoFreshBenchIsIdentical(self, tmp_path):
+        src = RetrievalBenchmark(str(tmp_path / "src.db"))
+        src.addCase("蜂群 限流", ["k1"], domain="swarm", labelingMethod="title_literal")
+        src.addCase("时序事实", ["k2", "k3"], labelingMethod="tag")
+        snapshot = tmp_path / "cases.json"
+
+        assert src.exportCases(str(snapshot)) == 2
+        fresh = RetrievalBenchmark(str(tmp_path / "fresh.db"))
+        loaded = fresh.loadCases(str(snapshot))
+
+        assert loaded == 2
+        assert [(c["query"], json.loads(c["expected_ids"])) for c in fresh.cases()] == [
+            ("蜂群 限流", ["k1"]), ("时序事实", ["k2", "k3"]),
+        ]
+
+    def test_reloadIsIdempotent(self, tmp_path):
+        src = RetrievalBenchmark(str(tmp_path / "src.db"))
+        src.addCase("同一条", ["k1"], labelingMethod="tag")
+        snapshot = tmp_path / "cases.json"
+        src.exportCases(str(snapshot))
+        fresh = RetrievalBenchmark(str(tmp_path / "fresh.db"))
+
+        fresh.loadCases(str(snapshot)); second = fresh.loadCases(str(snapshot))
+
+        assert second == 0 and fresh.caseCount() == 1
+
+    def test_schemaVersionMismatchIsRejected(self, tmp_path):
+        bad = tmp_path / "bad.json"
+        bad.write_text(json.dumps({"schema": "other/v9", "cases": []}), encoding="utf-8")
+
+        with pytest.raises(ValueError, match="版本不符"):
+            RetrievalBenchmark(str(tmp_path / "x.db")).loadCases(str(bad))
+
+    def test_baselineSnapshotCarriesIdentityAndMisses(self, bench, kb):
+        bench.addCase("多模态路由", [_idOf(kb, "多模态路由")])
+        report = bench.run(kb, user=_USER, topK=5)
+        bench.freezeBaseline(report)
+
+        snapshot = bench.baselineSnapshot()
+
+        assert snapshot["run_id"] == report["run_id"]
+        assert snapshot["context"]["user"] == {"user_id": _OWNER}, "快照必须带身份，否则数字不可比"
+        assert snapshot["readings"]["mrr"] == 1.0
+        assert snapshot["unhit_queries"] == []
+
+    def test_snapshotWithoutBaselineIsUnevidencedNotZero(self, bench):
+        snapshot = bench.baselineSnapshot()
+
+        assert snapshot["measure_state"] == "unevidenced"
+        assert "readings" not in snapshot
