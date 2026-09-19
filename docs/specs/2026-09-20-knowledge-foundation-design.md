@@ -297,6 +297,14 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 - 不接受调用方传入的裸 `confidence`（G11）。
 - 咽喉是唯一写入口，`repository.py:514` 处的旁路调用在 E2 收编，E3 删除。
 
+**第四条（019a 期间由真数据取证补上）：咽喉还必须是唯一的"装配点"。**
+造门若散在各调用点各写一遍 kwargs，就会各差一段——实测 backfill 少接 `resolver`
+（身份消解退回精确名，130 行回填多出 1 个未合并主体），reconcile 少接 `lineage`
+（回放绕过"无主知识拒写"，于是 005 的守卫在这条路径上空转）。两处都报自己自洽，
+所以这不是"少一条对账判据"，是咽喉被拆成了两个。修法：`admission.productionAdmissionGate(store, toolVersion=…)`
+成为唯一造门入口，未接通的段由 `pendingSegments()` 如实报出而不是靠少传参数制造假接通；
+常驻判据见 `tests/unit/knowledge/test_gate_wiring_parity.py`。
+
 ---
 
 ## 6. 本体与推理（自研，零新增依赖）
@@ -462,16 +470,18 @@ E2 出口判据要求：**要么该用例修好，要么给出可控的超时口
 | 008 事实生命周期 | 完成 | 41 用例；supersede/expire/retract，只加行为不改表 |
 | 009 置信聚合 | 完成 | 断言数/异质度/可重放/矛盾惩罚四因子；无断言为 NULL 不是 0 |
 | 010 使用与采纳回流 | 完成 | 17 用例；注入/采纳两本账，`success/failure/unevidenced` 三态 |
-| 015 双写对账 | 完成 | 真数据 130 行 → 预测 92 = 实跑 92、主体 87 = 87、差异空 |
+| 015 双写对账 | 完成（019a 期间补判据并重做） | 真数据 130 行 → 预测 92 = 实跑 92 = backfill 92；主体 87 三方同数（原先 backfill 88，根因是造门各自装配） |
 | 011 读路径切底座 | **实施后判负，留在关闸态** | 开闸 recall@5 0.7604 / MRR 0.8111 / 未命中 0.167，劣于基线；见 §8.0 |
 | 019a 叙述层入库 | 完成 | 19 用例 + 真数据对等（读数三位相同，见 §8.1 口径）；默认关闸 |
 | 012 / 013 / 014 / 016 / 017 / 018 / 019b / E4 | 未开工 | 011 否证后落点改变，见工单索引"进度" |
 
-`tests/unit/knowledge/` 479 passed（起点基线 265）。
+`tests/unit/knowledge/` 485 passed（起点基线 265）。
 新增常驻守卫 2 条：生产库写入围栏用例、pytest 收集卫生守卫
 （`test_pytest_collection_hygiene.py`——实施期三次把用例写成 `def testXxx` 导致整份文件静默不跑）。
 迁移链守卫 `test_everyTableExistsAfterMigrationChain` 随 v4 一并抬到 `user_version == 4`，
-并把 `knowledge_narratives` 纳入必查表集。
+并把 `knowledge_narratives` 纳入必查表集。新增 §5 第四条硬约束（咽喉必须是唯一装配点）与
+常驻判据 `test_gate_wiring_parity.py`（6 例）。生产回填产物已在统一装配下重跑并留档
+`.pre-20260920-gateparity`；`data/knowledge/knowledge.json` 哈希 `e0ea2a4524e7` 全程未变。
 
 ---
 

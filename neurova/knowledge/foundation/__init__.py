@@ -6,6 +6,7 @@ from .admission import (
     AdmissionSegmentMissing,
     KnowledgeAdmissionGate,
     SEGMENTS,
+    productionAdmissionGate,
 )
 from .knowledge_facts import (
     ADOPTION_OUTCOMES,
@@ -23,6 +24,7 @@ from .redundancy import RedundancyAudit
 
 __all__ = [
     "AdmissionReceipt",
+    "productionAdmissionGate",
     "AdmissionRequest",
     "AdmissionSegmentMissing",
     "DEFAULT_FACT_DB",

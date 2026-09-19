@@ -14,11 +14,38 @@ from typing import Any, Dict, List
 
 from neurova.core.content_identity import normalized_key
 
-from .admission import AdmissionRequest, KnowledgeAdmissionGate
+from .admission import AdmissionRequest, productionAdmissionGate
 from .knowledge_facts import KnowledgeFactStore
 from ..identity.subject_resolver import SubjectResolver
 
 REPLAY_PREDICATE_FALLBACK = "described_as"
+
+_IMPORTER_PREFIXES = ("import:", "url:", "datasource:", "kb_builder")
+
+
+def _assertionFor(agentId: str, item: Dict[str, Any]) -> Dict[str, Any]:
+    """按旧行已有字段如实合成断言（来源串 + 属主 + 标题）。
+
+    咽喉在写入前就要求"不能有主不明的知识"，所以映射必须自带断言——
+    缺了它，回放根本进不去血缘段，也就测不到生产写入的真实形状。
+    不为回填行编造置信度：那是 G11 要灭的病，不能由对账器重新犯。
+    """
+    source = str(item.get("source", "") or "").strip()
+    owner = str(item.get("owner_user_id", "") or "").strip()
+    lowered = source.lower()
+    if lowered.startswith(_IMPORTER_PREFIXES):
+        actorType = "importer"
+    elif owner:
+        actorType = "user"
+    else:
+        actorType = "pipeline"
+    return {
+        "actorType": actorType,
+        "actorId": owner or "legacy-unknown",
+        "mediumRef": source or "legacy:knowledge.json",
+        "statementText": str(item.get("title", "") or "").strip() or "(untitled legacy entry)",
+        "verification_state": "unverified",
+    }
 
 
 def _requestsFromRepository(repo: Any) -> List[AdmissionRequest]:
@@ -33,6 +60,8 @@ def _requestsFromRepository(repo: Any) -> List[AdmissionRequest]:
                 predicateTermId=str(item.get("category", "")).strip() or REPLAY_PREDICATE_FALLBACK,
                 objectTerm=knowledgeId,
                 content=str(item.get("content", "") or ""),
+                assertions=[_assertionFor(agentId, item)],
+                sourceTurnId="legacy:%s" % knowledgeId,
             ))
     return requests
 
@@ -104,7 +133,7 @@ class FoundationReconciler:
         predicted = FoundationReconciler.plan(repo)
         store = KnowledgeFactStore(replayDbPath)
         try:
-            gate = KnowledgeAdmissionGate(store, resolver=SubjectResolver())
+            gate = productionAdmissionGate(store, toolVersion='reconcile-replay')
             for request in _requestsFromRepository(repo):
                 gate.admit(request, allowPendingSegments=True)
             actual = {
