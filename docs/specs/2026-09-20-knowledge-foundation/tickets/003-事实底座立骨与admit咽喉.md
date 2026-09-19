@@ -22,3 +22,24 @@
 - 生产装配路径**不得**再出现无参构造导致 `:memory:` 的形态（对照 B01 的成因）。
 - 未实现段调用即抛，测试里不允许用"跳过该段"来变绿。
 - 幂等：同库重复初始化不报错、不重复建表。
+
+## 完成状态（2026-09-20，16 用例全绿）
+
+落位：`neurova/knowledge/foundation/knowledge_facts.py`（`KnowledgeFactStore`）、
+`admission.py`（`KnowledgeAdmissionGate` / `AdmissionRequest` / `AdmissionReceipt` /
+`AdmissionSegmentMissing`），migration 版本域 `knowledge_foundation`。
+
+对设计做的三处收口（均为减少后续返工，不扩大范围）：
+1. **两表一次建全目标列**（溯源/生命周期/使用回写列先占位、值为 NULL/默认），
+   004–010 只加行为不再 ALTER 同一张表——这是扩展-收缩里"扩展"的前置。
+2. `KnowledgeFactStore(db_path=None)` 直接 `ValueError`，**不留默认值**：
+   B01 的成因就是无参构造悄悄落 `:memory:`，这里从签名上堵死（测试须显式传 `":memory:"`）。
+3. 缺段策略：`admit()` 默认抛 `AdmissionSegmentMissing` 并逐名列出缺段；
+   只有显式 `allowPendingSegments=True` 才放行，且回执带 `pendingSegments` 供下游识别。
+   七段中 `identity_resolution` 当前只有精确名+别名（006 补相似度与聚类），
+   `segmentsApplied` 里写明 `(base exact/alias)`，不冒充全链已通。
+
+**踩到并修的坑（值得记住）**：用例名写成 `def testXxx`（漏下划线）时 pytest **既不收集也不报错**，
+整份文件静默不跑——本次 13 个用例 collected 0 items 才发现。已加常驻守卫
+`tests/unit/core/test_pytest_collection_hygiene.py`（全仓扫 `def test[A-Z]`，当前 0 残留）。
+
