@@ -1751,18 +1751,34 @@ def dedupe_experience_sources(experiences, crystallized_patterns):
 
     此前两条注入管线（EKB 经验 / PatternCrystallizer 产物）互不感知，
     同一条经验会以 70/80 两个优先级重复进池。key = 内容去空白前 100 字符。
+
+    工单 007：普通经验的优先级改由 006 的采纳后证据决定，不再无条件 70——
+    "上次照这条做砸了"与"上次照这条做成了"不得在 prompt 里同权争位。
+    证据缺席（NULL / 其他生产者给的裸条目）回落基线 70：没测到既不是加分项
+    也不是扣分项（D1）。结晶产物的 80 基准不动，其生命周期归 017。
     Returns: List[(tag, content, priority)]
     """
     import re as _re
 
+    _ADOPTION_PRIORITY = {
+        "success": 78,
+        "unevidenced": 65,
+        "failure": 55,
+    }
+    _EXPERIENCE_BASELINE = 70
+
     def _key(c: str) -> str:
         return _re.sub(r"[\s]+", "", str(c))[:100]
+
+    def _prio(item) -> int:
+        outcome = item.get("adoption_outcome") if isinstance(item, dict) else None
+        return _ADOPTION_PRIORITY.get(outcome, _EXPERIENCE_BASELINE)
 
     seen = set()
     out = []
     # 结晶产物先入（同内容时按优先级保留结晶副本）
     pairs = [(("[结晶经验] ", p, 80)) for p in (crystallized_patterns or [])] + [
-        (("", e, 70)) for e in (experiences or [])
+        (("", e, _prio(e))) for e in (experiences or [])
     ]
     for tag, item, prio in pairs:
         content = item.get("content", str(item)) if isinstance(item, dict) else str(item)

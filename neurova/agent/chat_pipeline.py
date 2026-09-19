@@ -1085,6 +1085,20 @@ class ChatPipeline:
                 )
                 # Bug T-2 修复: ToolSynthesisResult 无 stage/tool/confidence 字段，
                 # 它们在 synthesized_tool 上；且 SynthesisStage.COMPLETED.value == "completed"（小写）
+                # 工单 014：调用方判据同步收紧。产物存在但未真正通过（低置信落
+                # PENDING_REVIEW，或 success 与 stage 自相矛盾）一律不注册且必须留痕
+                # ——原实现只看两个字段就静默跳过，看不出"门拦了"还是"根本没门"。
+                from neurova.evolution.nl_synthesizer import SynthesisStage
+
+                _tool = getattr(synth_result, "synthesized_tool", None) if synth_result else None
+                if _tool is not None and not (
+                    synth_result.success and _tool.stage is SynthesisStage.COMPLETED
+                ):
+                    logger.info(
+                        "NL 合成产物未过闸，不注册: %s stage=%s confidence=%.2f",
+                        getattr(_tool, "name", ""), _tool.stage.value, _tool.confidence,
+                    )
+                    return
                 if synth_result and synth_result.success and synth_result.synthesized_tool:
                     tool = synth_result.synthesized_tool
                     if tool.stage.value == "completed":
@@ -1794,8 +1808,15 @@ class ChatPipeline:
         查 data/experience_knowledge.db 中与当前输入相似的历史经验（≤3 条），
         填充 ctx.experience_items——orchestrator 池路径据此归档 + 以
         `[经验]` 注入。查询失败不阻断主流程。
+
+        工单 006：每条 EKB 条目带行 id，并把本轮注入的 id 集立进 turn_context，
+        回合末据此回写采纳结果；任何一条路径走完都必须重立该集（含清空），
+        否则会沿用上一轮的身份集把账记到错误的行上。
         """
+        from neurova.core.turn_context import set_turn_injected_experiences
+
         if ctx.experience_items or not ctx.user_input:
+            set_turn_injected_experiences([])
             return
         try:
             from neurova.skills.experience_knowledge_base import (
@@ -1849,12 +1870,22 @@ class ChatPipeline:
                         "content": f"{mark} {user_side[:80]} → {reply_side[:80]}",
                         "source": "ekb",
                         "success": bool(hit.get("success")),
+                        # 工单 006：回写身份。growth_lesson 条目住在另一张表，
+                        # 刻意不带 id，避免把账记到错误的行上
+                        "id": hit.get("id"),
+                        # 工单 007：注入优先级按采纳证据算，证据必须随条目带到消费方
+                        "adoption_outcome": hit.get("adoption_outcome"),
+                        "similarity_score": hit.get("similarity_score"),
                     }
                 )
+            set_turn_injected_experiences(
+                [i["id"] for i in items if i.get("source") == "ekb" and i.get("id") is not None]
+            )
             if items:
                 ctx.experience_items = items
                 logger.debug("EKB 经验检索命中 %s 条", len(items))
         except Exception as e:  # noqa: BLE001 - 经验检索失败不阻断主流程
+            set_turn_injected_experiences([])
             logger.debug("EKB 经验检索跳过: %s", e)
 
     # ══════════════════════════════════════════════════════════════

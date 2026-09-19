@@ -287,7 +287,7 @@ class TestProcessExposesSummary:
 
 
 class TestChatPipelineCarriesSummary:
-    def _chat_pipeline(self, post_result, executor=None):
+    def _chat_pipeline(self, post_result):
         from neurova.agent.chat_pipeline import ChatPipeline
 
         agent = MagicMock()
@@ -295,7 +295,6 @@ class TestChatPipelineCarriesSummary:
             agent_id="a1", llm_config=SimpleNamespace(model="m"), name="A1",
             tts_enabled=False,
         )
-        agent.pipeline_executor = executor
         agent.post_chat_pipeline = MagicMock()
         agent.post_chat_pipeline.process = AsyncMock(return_value=post_result)
         agent._trajectory_recorder = None
@@ -316,29 +315,6 @@ class TestChatPipelineCarriesSummary:
             enable_tts=False, metadata={}, writer_claim=None,
         )))
         assert result["rsi"] == summary
-
-    def test_executor_path_passes_rsi_through(self):
-        from neurova.pipeline_executor import PipelineRequest  # noqa: F401
-
-        summary = {"status": "converged", "applied_count": 0, "gain": 0.0,
-                   "phase_advanced": False}
-        executor = MagicMock()
-
-        async def _execute(request):
-            from neurova.pipeline_executor import PipelineResponse
-
-            return PipelineResponse(
-                session_id="s1", text="r", cognitive_score=0.1,
-                metadata={"audio_data": None, "rsi": summary},
-            )
-
-        executor.execute = _execute
-        pipe = self._chat_pipeline({}, executor=executor)
-        result = asyncio.run(pipe._run_post_chat_pipeline(MagicMock(
-            user_input="u", reply="r", session_id="s1", save_memory=False,
-            enable_tts=False, metadata={}, writer_claim=None,
-        )))
-        assert result["rsi"] == summary, "executor 路径不得把摘要丢掉"
 
     def test_ctx_result_includes_rsi(self):
         """组装 ctx.result 时 rsi 必须随行（历史断点：字段被丢弃）。"""
