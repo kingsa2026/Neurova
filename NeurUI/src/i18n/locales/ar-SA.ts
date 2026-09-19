@@ -2275,6 +2275,12 @@ export default {
     inProgress: 'قيد التنفيذ',
     done: 'منجز',
   },
+  motivation: {
+    competence: 'الكفاءة',
+    autonomy: 'الاستقلالية',
+    growth: 'النمو',
+    purpose: 'الهدف',
+  },
   personality: {
     title: 'سمات الشخصية',
     openness: 'الانفتاح',

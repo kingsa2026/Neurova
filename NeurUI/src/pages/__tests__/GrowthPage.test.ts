@@ -47,6 +47,11 @@ const i18n = createI18n({
         createdAt: '时间', status: '状态', actions: '操作', search: '搜索', noData: '暂无',
         success: '成功', error: '失败', delete: '删除', filter: '筛选', all: '全部',
       },
+      motivation: { competence: '能力感', autonomy: '自主性', growth: '成长感', purpose: '使命感' },
+      personality: {
+        openness: '开放性', conscientiousness: '尽责性', extraversion: '外向性',
+        agreeableness: '宜人性', neuroticism: '神经质', creativity: '创造力',
+      },
     },
   },
 })
@@ -153,5 +158,56 @@ describe('GrowthPage 反思日志 tab 迁出契约', () => {
     const vm = wrapper.vm as any
     expect(vm.actions).toHaveLength(1)
     expect(vm.actions[0].action_id).toBe('act-1')
+  })
+})
+
+/**
+ * 概览两卡项名多语言（2026-09-19）
+ *
+ * 与人格页同源契约：/growth/motivation 的 factors[].name（后端 DriveType）与
+ * /growth/personality 的 traits 键，原实现直接渲染后端原文 →
+ * 中文界面出现 Competence / Openness 等英文项名。
+ * 已知枚举名走 i18n，未收录值（自定义人格模板特质）回退后端原文。
+ */
+describe('GrowthPage 概览枚举名多语言', () => {
+  const mountPage = async () => {
+    const wrapper = mount(GrowthPage, { global: { plugins: [i18n], stubs: globalStubs } })
+    await flushPromises()
+    return wrapper
+  }
+
+  beforeEach(() => {
+    contractMocks()
+    growthMocks.getMotivation.mockResolvedValue({
+      code: 0,
+      data: {
+        level: 0.53,
+        factors: [
+          { name: 'Competence', impact: 0.79 },
+          { name: 'autonomy', impact: 0.58 },
+          { name: 'GROWTH', impact: 0.51 },
+          { name: 'purpose', impact: 0.24 },
+        ],
+      },
+    })
+    growthMocks.getPersonality.mockResolvedValue({
+      code: 0,
+      data: { traits: { Openness: 1, Conscientiousness: 1, curiosity: 0.7 } },
+    })
+  })
+
+  it('动机因子名走 i18n：大小写变体均解析为中文项名', async () => {
+    const wrapper = await mountPage()
+    const names = wrapper.findAll('.factor-name').map((n) => n.text())
+    expect(names).toEqual(['能力感', '自主性', '成长感', '使命感'])
+  })
+
+  it('个性档案特质名走 i18n，未知特质回退后端原文', async () => {
+    const wrapper = await mountPage()
+    const names = wrapper.findAll('.trait-name').map((n) => n.text())
+    expect(names).toContain('开放性')
+    expect(names).toContain('尽责性')
+    expect(names).toContain('curiosity')
+    expect(names.join(',')).not.toContain('personality.')
   })
 })
