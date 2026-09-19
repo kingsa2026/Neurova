@@ -26,9 +26,9 @@ def _fact(store, obj, *, recordedAt=None, evidence="evidenced", confidence=None,
     key = store.upsertSubject("a", "神经瓦")
     fid = store.upsertFact("a", key, "version", obj, "正文 " + obj,
                            confidence=confidence, recordedAt=recordedAt)
-    store.setEvidenceState(fid, evidence)
     for i in range(assertions):
         store.insertAssertion(fid, "user", "u%d" % i, "manual:%d" % i, "陈述" + obj, "h%d" % i)
+    store.setEvidenceState(fid, evidence)
     return fid
 
 

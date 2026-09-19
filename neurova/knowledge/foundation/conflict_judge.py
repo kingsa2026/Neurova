@@ -85,7 +85,11 @@ class KnowledgeConflictJudge:
     # ── 策略与依据 ────────────────────────────────────────────
 
     def decide(self, members: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """返回 (policy, basis, winner)。basis 为空即不得自动裁决。"""
+        """返回 (policy, basis, winner)。basis 为空即不得自动裁决。
+
+        阶梯顺序刻意如此：confidence 自 009 起是断言聚合出来的**派生值**，
+        再拿它排在原始支持数之前就是循环论证，故排在 credibility_weighted 之后。
+        """
         blind = [m for m in members if m.get("evidence_state") != "evidenced"]
         if blind:
             names = ", ".join(
@@ -101,19 +105,19 @@ class KnowledgeConflictJudge:
                     "basis": "按新近裁决：%s（recorded_at=%s）晚于其余成员"
                              % (winner["fact_id"], winner.get("recorded_at"))}
 
-        confidences = {m.get("confidence") for m in members}
-        if None not in confidences and len(confidences) > 1:
-            winner = max(members, key=lambda m: (float(m["confidence"]), m["fact_id"]))
-            return {"policy": "highest_confidence", "winner": winner["fact_id"],
-                    "basis": "按置信裁决：%s（confidence=%s）高于其余成员"
-                             % (winner["fact_id"], winner.get("confidence"))}
-
         supports = {int(m.get("assertion_count") or 0) for m in members}
         if len(supports) > 1:
             winner = max(members, key=lambda m: (int(m.get("assertion_count") or 0), m["fact_id"]))
             detail = ", ".join("%s=%s" % (m["fact_id"], m.get("assertion_count")) for m in members)
             return {"policy": "credibility_weighted", "winner": winner["fact_id"],
                     "basis": "断言支持数分胜负（assertion_count %s）" % detail}
+
+        confidences = {m.get("confidence") for m in members}
+        if None not in confidences and len(confidences) > 1:
+            winner = max(members, key=lambda m: (float(m["confidence"]), m["fact_id"]))
+            return {"policy": "highest_confidence", "winner": winner["fact_id"],
+                    "basis": "按置信裁决：%s（confidence=%s）高于其余成员"
+                             % (winner["fact_id"], winner.get("confidence"))}
 
         return {"policy": "manual", "winner": None,
                 "basis": "新近、置信、断言支持三项均无差异，无区分依据可依"}
@@ -140,12 +144,18 @@ class KnowledgeConflictJudge:
                 continue
             if decision["winner"]:
                 self._applySupersede(conflict["member_fact_ids"], decision["winner"])
+            self._markMutuallyContradicted(conflict["member_fact_ids"])
             conflict.update({
                 "conflict_id": conflictId, "status": status,
                 "recommended_policy": decision["policy"], "policy_basis": decision["basis"],
             })
             recorded.append(conflict)
         return recorded
+
+    def _markMutuallyContradicted(self, memberFactIds: List[str]) -> None:
+        """冲突双方互写 contradicted_by——只记账不回写，读侧就看不见矛盾。"""
+        for factId in memberFactIds:
+            self._store.markContradicted(factId, [m for m in memberFactIds if m != factId])
 
     def _applySupersede(self, memberFactIds: List[str], winnerId: str) -> None:
         for loser in memberFactIds:

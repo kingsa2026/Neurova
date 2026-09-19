@@ -73,6 +73,7 @@ class KnowledgeAdmissionGate:
         conflictJudge: Any = None,
         lineageLedger: Any = None,
         termRegistry: Any = None,
+        credibility: Any = None,
     ) -> None:
         self._store = store
         self._collaborators = {
@@ -80,14 +81,14 @@ class KnowledgeAdmissionGate:
             "conflict_judgement": conflictJudge,
             "lineage": lineageLedger,
             "ontology_adjudication": termRegistry,
+            "credibility_record": credibility,
         }
 
     def pendingSegments(self) -> List[str]:
         """段1（内容归一）已在 004 接通；其余缺段按协作者是否注入如实报出。"""
         missing = [name for name, dep in self._collaborators.items() if dep is None]
-        for always_pending in ("credibility_record", "indexing"):
-            if always_pending not in missing:
-                missing.append(always_pending)
+        if "indexing" not in missing:
+            missing.append("indexing")
         return [name for name in SEGMENTS if name in missing]
 
     def admit(self, request: AdmissionRequest, allowPendingSegments: bool = False) -> AdmissionReceipt:
@@ -119,6 +120,7 @@ class KnowledgeAdmissionGate:
                 self._attachLineage(lineage, dupe["fact_id"], request, deduped=True)
                 applied.append("lineage")
             applied += self._judgeConflicts(request)
+            applied += self._applyCredibility(dupe["fact_id"])
             return AdmissionReceipt(
                 factId=dupe["fact_id"],
                 subjectKey=dupe["subject_key"],
@@ -144,6 +146,7 @@ class KnowledgeAdmissionGate:
         if lineage is not None:
             self._attachLineage(lineage, factId, request, deduped=False)
         applied += self._judgeConflicts(request)
+        applied += self._applyCredibility(factId)
         return AdmissionReceipt(
             factId=factId,
             subjectKey=subjectKey,
@@ -153,6 +156,14 @@ class KnowledgeAdmissionGate:
             needsHumanReview=needsReview,
             lineageApplied=lineage is not None,
         )
+
+    def _applyCredibility(self, factId: str) -> List[str]:
+        """段5：置信度由断言聚合回写，读实况而非增量累加。"""
+        credibility = self._collaborators.get("credibility_record")
+        if credibility is None:
+            return []
+        credibility.apply(factId)
+        return ["credibility_record"]
 
     def _judgeConflicts(self, request: AdmissionRequest) -> List[str]:
         """段4：同 (主体, 谓词) 上的新旧分歧升成一等对象。
