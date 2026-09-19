@@ -1673,6 +1673,12 @@ export default {
     resolutionRequired: 'Bitte wählen Sie eine Lösungsmethode',
   },
   emotion: {
+    timelineTitle: 'Emotionsverlauf',
+    timelineAxisHint: 'Positiv = angenehm, negativ = unangenehm',
+    range24h: '24 Std.',
+    range7d: '7 Tage',
+    range30d: '30 Tage',
+    range90d: '90 Tage',
     title: 'Emotionsverwaltung',
     analysis: 'Emotionsanalyse',
     personality: 'Persönlichkeitsverwaltung',

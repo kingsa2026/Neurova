@@ -115,6 +115,30 @@ export interface EmotionDistribution {
   [emotion: string]: number
 }
 
+/** 情绪时间轴窗口；分桶粒度由窗口推导（24h→小时、7d/30d→天、90d→周）。 */
+export type EmotionTimelineRange = '24h' | '7d' | '30d' | '90d'
+
+export interface EmotionTimelinePoint {
+  /** 桶起点（epoch 秒） */
+  ts: number
+  /** 后端给定的 X 轴标签：小时 "HH:00"、日/周 "MM-DD" */
+  label: string
+  /** intensity 加权的带符号效价（正=积极）；无情绪事件的桶为 null */
+  valence: number | null
+  count: number
+  /** 桶内 |valence|×intensity 最大那条记忆的情绪与强度 */
+  peak_emotion: string | null
+  peak_intensity: number | null
+  /** 触发该次情绪变化的记忆内容摘要 */
+  excerpt: string
+}
+
+export interface EmotionTimeline {
+  range: EmotionTimelineRange
+  bucket: 'hour' | 'day' | 'week'
+  points: EmotionTimelinePoint[]
+}
+
 export interface EmotionAnalysisResult {
   score: number
   tags: string[]
@@ -503,6 +527,11 @@ export function getEmotionSummary(agentId: string) {
 /** Get emotion distribution. */
 export function getEmotionDistribution(agentId: string) {
   return api.get<ApiResponse<EmotionDistribution>>(`${EMOTION_BASE}/distribution`, { params: { agent_id: agentId } })
+}
+
+/** 情绪变化时间轴：按窗口分桶的带符号效价序列。 */
+export function getEmotionTimeline(agentId: string, range: EmotionTimelineRange) {
+  return api.get<ApiResponse<EmotionTimeline>>(`${EMOTION_BASE}/timeline`, { params: { agent_id: agentId, range } })
 }
 
 /** Analyze text emotion. */

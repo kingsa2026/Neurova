@@ -32,6 +32,22 @@ class EmotionType(str, Enum):
     NEUTRAL = "neutral"
 
 
+#: 9 类持久化情绪的带符号效价 [-1, 1]（唯一真源）。
+#: 写链（语义分类 / 规则兜底 / manager 情感状态更新）与读链（情绪时间轴）共用此表；
+#: 曾有两份手抄副本且都缺 trust/anticipation，被 .get(primary, 0.0) 静默折成中性。
+EMOTION_VALENCE: Dict[str, float] = {
+    "joy": 0.8,
+    "trust": 0.6,
+    "anticipation": 0.4,
+    "surprise": 0.3,
+    "neutral": 0.0,
+    "fear": -0.5,
+    "sadness": -0.6,
+    "anger": -0.7,
+    "disgust": -0.9,
+}
+
+
 @dataclass
 class EmotionState:
     """情感状态"""
@@ -270,11 +286,8 @@ class EmotionModule:
                 logger.warning("语义情感分类失败，降级规则引擎: %s", e)
         return self._analyze_text_emotion_rules(text)
 
-    # 效价/唤醒度表（语义与规则共用，中性不参与标注写入）
-    _VALENCE_MAP = {
-        "joy": 0.8, "sadness": -0.6, "anger": -0.7, "fear": -0.5,
-        "surprise": 0.3, "disgust": -0.9, "neutral": 0.0,
-    }
+    # 效价表引用模块级唯一真源（EMOTION_VALENCE）；唤醒度表仍为类内定义
+    _VALENCE_MAP = EMOTION_VALENCE
     _AROUSAL_MAP = {
         "joy": 0.6, "sadness": 0.3, "anger": 0.8, "fear": 0.7,
         "surprise": 0.9, "disgust": 0.8, "neutral": 0.2,

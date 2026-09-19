@@ -1488,6 +1488,128 @@ class MemoryManager:
         """获取情感分布（委托到 EmotionModule.get_stats）"""
         return self._emotion_module.get_stats().get("emotion_distribution", {})
 
+    # ── 情绪变化时间轴（读侧聚合）────────────────────────────────────
+
+    #: range → (桶粒度, 桶数)
+    _TIMELINE_RANGES: Dict[str, Tuple[str, int]] = {
+        "24h": ("hour", 24),
+        "7d": ("day", 7),
+        "30d": ("day", 30),
+        "90d": ("week", 13),
+    }
+    _TIMELINE_DEFAULT_RANGE = "7d"
+    _TIMELINE_EXCERPT_LIMIT = 80
+
+    def get_emotion_timeline(self, range_key: str = _TIMELINE_DEFAULT_RANGE) -> Dict[str, Any]:
+        """情绪变化时间轴：按时间桶聚合带符号效价（正=积极情绪，负=消极情绪）。
+
+        时间源取 memories.created_at —— 情感标注与记忆写入由同一条链产生，
+        写入时刻即情绪事件时刻，因此不必给 memory_emotions 补时间列。
+        只有 emotion_module 的标注行才算情绪事件：memories.emotion 列的 DDL 默认值
+        就是 'neutral'，"没分析过"与"判为中性"不可区分，计入会让未标注记忆把曲线拽向 0。
+        无事件的桶 valence=None：把"没发生情绪"画成 0 会被读成"中性"。
+        """
+        resolved = range_key if range_key in self._TIMELINE_RANGES else self._TIMELINE_DEFAULT_RANGE
+        unit, bucket_count = self._TIMELINE_RANGES[resolved]
+
+        starts = self._timeline_bucket_starts(unit, bucket_count)
+        index_by_bucket = {
+            self._timeline_bucket_key(start, unit): i for i, start in enumerate(starts)
+        }
+        points: List[Dict[str, Any]] = [
+            {
+                "ts": int(start.timestamp()),
+                "label": self._timeline_label(start, unit),
+                "valence": None,
+                "count": 0,
+                "peak_emotion": None,
+                "peak_intensity": None,
+                "excerpt": "",
+            }
+            for start in starts
+        ]
+        weighted = [0.0] * bucket_count
+        weights = [0.0] * bucket_count
+        peak_strength = [-1.0] * bucket_count
+
+        for mem in self._memories.values():
+            index = index_by_bucket.get(
+                self._timeline_bucket_key(self._to_local_time(mem.created_at), unit)
+            )
+            if index is None:
+                continue  # 窗口外
+            sample = self._timeline_sample(mem)
+            if sample is None:
+                continue  # 无情绪标注 → 不是情绪事件
+            valence, intensity, emotion_value = sample
+            weighted[index] += valence * intensity
+            weights[index] += intensity
+            points[index]["count"] += 1
+            strength = abs(valence) * intensity
+            if strength > peak_strength[index]:
+                peak_strength[index] = strength
+                points[index]["peak_emotion"] = emotion_value
+                points[index]["peak_intensity"] = intensity
+                points[index]["excerpt"] = self._timeline_excerpt(mem.content)
+
+        for i, point in enumerate(points):
+            if point["count"]:
+                point["valence"] = (
+                    round(weighted[i] / weights[i], 4) if weights[i] > 0 else 0.0
+                )
+
+        return {"range": resolved, "bucket": unit, "points": points}
+
+    def _timeline_sample(self, mem) -> Optional[Tuple[float, float, str]]:
+        """该记忆的情绪样本 (效价, 强度, 情绪值)；无标注行返回 None。"""
+        state = self._emotion_module.get_emotion(mem.id) if self._emotion_module else None
+        if state is None:
+            return None
+        return float(state.valence), float(state.intensity), state.primary_emotion.value
+
+    @staticmethod
+    def _to_local_time(moment: datetime.datetime) -> datetime.datetime:
+        """aware（UTC 存量）→ 本地 naive；无 tzinfo 的存量按本地看待。"""
+        if moment.tzinfo is not None:
+            return moment.astimezone().replace(tzinfo=None)
+        return moment
+
+    def _timeline_bucket_starts(self, unit: str, count: int) -> List[datetime.datetime]:
+        now = datetime.datetime.now().replace(tzinfo=None)
+        if unit == "hour":
+            base = now.replace(minute=0, second=0, microsecond=0)
+            step = datetime.timedelta(hours=1)
+        elif unit == "week":
+            base = (now - datetime.timedelta(days=now.weekday())).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            step = datetime.timedelta(days=7)
+        else:
+            base = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            step = datetime.timedelta(days=1)
+        return [base - step * (count - 1 - i) for i in range(count)]
+
+    @staticmethod
+    def _timeline_bucket_key(
+        moment: datetime.datetime, unit: str
+    ) -> datetime.datetime:
+        if unit == "hour":
+            return moment.replace(minute=0, second=0, microsecond=0)
+        day = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+        if unit == "week":
+            return day - datetime.timedelta(days=day.weekday())
+        return day
+
+    @staticmethod
+    def _timeline_label(start: datetime.datetime, unit: str) -> str:
+        return start.strftime("%H:00") if unit == "hour" else start.strftime("%m-%d")
+
+    def _timeline_excerpt(self, content: str) -> str:
+        text = " ".join((content or "").split())
+        if len(text) <= self._TIMELINE_EXCERPT_LIMIT:
+            return text
+        return text[: self._TIMELINE_EXCERPT_LIMIT] + "…"
+
     def update_emotional_state(self, state) -> Dict[str, Any]:
         """更新情感状态（P-2 修复: 接受 dict 或 str）
 
@@ -1503,18 +1625,12 @@ class MemoryManager:
             # dict 模式: 合并情感状态到 emotion_module
             try:
                 from neurova.cognitive_layers.memory_layer.modules.emotion_module import (
+                    EMOTION_VALENCE,
                     EmotionState,
                     EmotionType,
                 )
                 # 找出最高强度的情感作为 primary
-                emotion_map = {
-                    "joy": EmotionType.JOY,
-                    "sadness": EmotionType.SADNESS,
-                    "anger": EmotionType.ANGER,
-                    "fear": EmotionType.FEAR,
-                    "surprise": EmotionType.SURPRISE,
-                    "neutral": EmotionType.NEUTRAL,
-                }
+                emotion_map = {e.value: e for e in EmotionType}
                 primary = EmotionType.NEUTRAL
                 max_intensity = 0.0
                 for key, value in state.items():
@@ -1528,17 +1644,12 @@ class MemoryManager:
                     arousal = 0.2
                 else:
                     intensity = min(1.0, max_intensity)
-                    valence_map = {
-                        EmotionType.JOY: 0.8, EmotionType.SADNESS: -0.6,
-                        EmotionType.ANGER: -0.7, EmotionType.FEAR: -0.5,
-                        EmotionType.SURPRISE: 0.3, EmotionType.NEUTRAL: 0.0,
-                    }
                     arousal_map = {
                         EmotionType.JOY: 0.6, EmotionType.SADNESS: 0.3,
                         EmotionType.ANGER: 0.8, EmotionType.FEAR: 0.7,
                         EmotionType.SURPRISE: 0.9, EmotionType.NEUTRAL: 0.2,
                     }
-                    valence = valence_map.get(primary, 0.0)
+                    valence = EMOTION_VALENCE.get(primary.value, 0.0)
                     arousal = arousal_map.get(primary, 0.5)
                 emotion = EmotionState(
                     primary_emotion=primary,
