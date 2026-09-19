@@ -363,7 +363,6 @@ class TestBug5NonePostChatPipelineCheck:
     def _make_chat_pipeline_with_none_post_chat(self):
         """创建 post_chat_pipeline=None 的 ChatPipeline"""
         agent = MagicMock()
-        agent.pipeline_executor = None  # 不走 PipelineExecutor 路径
         agent.post_chat_pipeline = None  # post_chat_pipeline 未初始化
         agent.memory_agent = MagicMock()
         agent.config = MagicMock()
@@ -710,7 +709,6 @@ class TestBug11ExtractFallbackHelper:
     async def test_run_post_chat_pipeline_checks_none(self):
         """_run_post_chat_pipeline 应检查 post_chat_pipeline 是否为 None"""
         agent = MagicMock()
-        agent.pipeline_executor = None
         agent.post_chat_pipeline = None
         agent.memory_agent = MagicMock()
         agent.config = MagicMock()
@@ -733,7 +731,6 @@ class TestBug11ExtractFallbackHelper:
     async def test_run_post_chat_pipeline_calls_process(self):
         """_run_post_chat_pipeline 应调用 post_chat_pipeline.process()"""
         agent = MagicMock()
-        agent.pipeline_executor = None
         mock_post_chat = MagicMock()
         mock_post_chat.process = AsyncMock(return_value={
             "actual_session_id": "s1",

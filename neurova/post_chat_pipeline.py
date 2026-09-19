@@ -1614,8 +1614,12 @@ class PostChatPipeline:
             if hasattr(evolution, "on_experience_recorded"):
                 from neurova.evolution.evolution_facade import EvolutionFacade
                 facade = EvolutionFacade(evolution)
-                # P-5: success 基于工具实际成败,而非"是否调用了工具"
-                tool_success = any(tm.get("success", True) for tm in tool_messages) if tool_messages else True
+                # P-5 → 工单 002：客观成败只由 tool_result 携带（`tool_call` 记录没有
+                # success 键），旧写法 `.get("success", True)` + `any()` 于是恒真。
+                # 三态：True / False / None（None = 这轮没有客观回执，不是"成功"）。
+                from neurova.agent.turn_state import resolve_tool_outcome
+
+                tool_success = resolve_tool_outcome(tool_messages)
                 # agent 级隔离: 显式传本 agent 的结晶器。单例上的
                 # evolution.crystallizer 会被多 agent 初始化 last-writer-wins
                 # 覆盖,不传会把 A agent 的经验结晶进 B agent 的库
@@ -1631,6 +1635,7 @@ class PostChatPipeline:
                 # EKB 写入闭环：同步沉淀到经验知识库（注入侧
                 # context/injector._build_experience_context 的数据源）。
                 # 此前 EKB 只读不写，"相关经验"注入永远查不到对话沉淀。
+                adoption_writeback = 0
                 try:
                     from neurova.skills.experience_knowledge_base import (
                         ExperienceKnowledgeBase,
@@ -1651,13 +1656,24 @@ class PostChatPipeline:
                             skill_name=skill_tag,
                             context={"user_input": user_input},
                             result={"reply_excerpt": reply[:200]},
-                            success=tool_success,
+                            success=bool(tool_success),
                             feedback=user_input[:100],
                         ),
                         # A-03 同根因命中点：Agent.agent_id 不存在（在 config 上），
                         # 原写法恒 None，EKB 沉淀记录永远归属不了 agent
                         agent_id=str(getattr(self._agent.config, "agent_id", "") or "") or None,
                         session_id=str(getattr(self._agent, "session_id", "") or "") or None,
+                        # 工单 002→008：形成侧第三态走一等列 evidence_state
+                        # （evidence=None ⇒ 'unevidenced'），不再挤在 tags 字符串里
+                        evidence=tool_success,
+                    )
+                    # 工单 006：按本轮注入身份集回写采纳结果，成败取 002 之后的
+                    # 真实三态（None 记 unevidenced，不是"成功"也不是"失败"）。
+                    # 未注入 ⇒ record_injection_adoption 直接返回 0，不写任何行。
+                    from neurova.core.turn_context import get_turn_injected_experiences
+
+                    adoption_writeback = ekb.record_injection_adoption(
+                        get_turn_injected_experiences(), tool_success
                     )
                 except Exception as ekb_error:  # noqa: BLE001 - 沉淀失败不阻断主流程
                     logger.debug("经验知识库写入失败（不阻断）: %s", ekb_error)
@@ -1667,7 +1683,12 @@ class PostChatPipeline:
                         status=StepStatus.EXECUTED,
                         message=f"Experience recorded with {len(tools_used)} tools",
                         duration_ms=(time.time() - start_time) * 1000,
-                        data={"tools_used": tools_used},
+                        data={
+                            "tools_used": tools_used,
+                            # 回写行数进观测面：008 的质量指标要能区分"没注入"与
+                            # "注入了但回写通路断了"
+                            "adoption_writeback": adoption_writeback,
+                        },
                     )
                 )
             else:
@@ -2174,7 +2195,14 @@ class PostChatPipeline:
             )
 
     async def _step_conflict_detection(self, user_input: str, reply: str):
-        """Step 9.9: 新记忆写入后自动检测冲突"""
+        """Step 9.9: 记忆冲突**纯观测**——只记录，不阻断、不回滚（工单 012 裁决）。
+
+        本步跑在 `save_memory` 之后，且检测器只给矛盾分，判不出"两条里哪条是
+        错的"；据此否决会随机丢真实记忆（回滚本身有 Step 9.95 版本快照兜底，缺
+        的是"以哪条为准"的判据）。故显式定性为观测：结论里 `blocking=False`
+        与 message 一同自陈"不阻断"，不得再留"检出了冲突"这种读起来像已处置的表述。
+        要升级为可否决，需要先有裁决证据（哪条为准 + 出处），那是独立一张工单。
+        """
         step_name = "conflict_detection"
         start_time = time.time()
 
@@ -2236,20 +2264,24 @@ class PostChatPipeline:
                     StepResult(
                         step_name=step_name,
                         status=StepStatus.EXECUTED,
-                        message=f"Detected {len(conflicts)} conflicts",
+                        message=f"检测到 {len(conflicts)} 处记忆冲突（纯观测，不阻断写入）",
                         duration_ms=(time.time() - start_time) * 1000,
-                        data={"conflicts_count": len(conflicts), "conflicts": conflicts},
+                        data={
+                            "conflicts_count": len(conflicts),
+                            "blocking": False,
+                            "conflicts": conflicts,
+                        },
                     )
                 )
             else:
-                logger.debug("记忆冲突检测通过，无冲突")
+                logger.debug("记忆冲突纯观测：未检出冲突")
                 self._step_results.append(
                     StepResult(
                         step_name=step_name,
                         status=StepStatus.EXECUTED,
-                        message="No conflicts detected",
+                        message="未检出记忆冲突（纯观测，不阻断写入）",
                         duration_ms=(time.time() - start_time) * 1000,
-                        data={"conflicts_count": 0},
+                        data={"conflicts_count": 0, "blocking": False},
                     )
                 )
         except Exception as e:
@@ -2662,6 +2694,24 @@ class PostChatPipeline:
         except Exception as _ce:
             logger.debug("结晶候选裁决失败（候选留队）: %s", _ce)
 
+        # 工单 017：结晶模式冷处理（闲置超期 ⇒ 降温 ⇒ 退出注入池）。与候选裁决同通道
+        # 低频跑（每 50 轮一次），不逐轮扫库；淘汰路径必须有写入方，否则只是文档。
+        try:
+            _crystallizer = getattr(self._agt, "crystallizer", None)
+            _turns = getattr(self._agt, "turn_count", 0)
+            if (
+                _crystallizer is not None
+                and hasattr(_crystallizer, "reap_stale_patterns")
+                and isinstance(_turns, int)
+                and _turns > 0
+                and _turns % 50 == 0
+            ):
+                _reaped = _crystallizer.reap_stale_patterns()
+                if _reaped.get("decayed"):
+                    logger.info("🧊 结晶模式冷处理: 降温 %s 条", _reaped["decayed"])
+        except Exception as _reap_error:
+            logger.debug("结晶模式冷处理失败（不阻断）: %s", _reap_error)
+
         # 根因修复: MetaCognition 认知负荷模块此前零调用——每轮用真实轮次指标
         # （工具步数/错误率/耗时/记忆规模）更新认知状态；低负荷且到达轮次间隔时
         # 触发记忆巩固（认知负荷 → 睡眠整理 闭环；高负荷不整合是模块自身契约）
@@ -3053,12 +3103,19 @@ class PostChatPipeline:
             
             # 3. 更新经验记忆融合器
             fusion = self._get_dependency("experience_fusion")
-            if fusion and tool_names:
+            # 工单 002 同根因命中点：这里曾无条件写 `"success": True`，
+            # 等于给融合器与知识图谱投确证成功票。无客观回执时不投（宁缺毋伪）。
+            from neurova.agent.turn_state import resolve_tool_outcome
+
+            turn_outcome = resolve_tool_outcome(tools_used)
+            if fusion and tool_names and turn_outcome is None:
+                logger.debug("本轮无工具结果回执，跳过经验融合写入（不投成功票）")
+            elif fusion and tool_names:
                 for tool_name in tool_names:
                     fusion.fuse(
                         tool_result={
                             "tool_name": tool_name,
-                            "success": True,
+                            "success": turn_outcome,
                             "problem_text": user_input[:100],
                         },
                         graph_context={
