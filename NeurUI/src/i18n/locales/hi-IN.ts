@@ -2275,6 +2275,12 @@ export default {
     inProgress: 'प्रगति में',
     done: 'पूर्ण',
   },
+  motivation: {
+    competence: 'सक्षमता',
+    autonomy: 'स्वतंत्रता',
+    growth: 'विकास',
+    purpose: 'उद्देश्य',
+  },
   personality: {
     title: 'व्यक्तित्व गुण',
     openness: 'खुलापन',

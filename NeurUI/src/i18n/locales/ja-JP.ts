@@ -2275,6 +2275,12 @@ export default {
     inProgress: '進行中',
     done: '完了',
   },
+  motivation: {
+    competence: '有能感',
+    autonomy: '自律性',
+    growth: '成長感',
+    purpose: '目的感',
+  },
   personality: {
     title: 'パーソナリティ特性',
     openness: '開放性',
