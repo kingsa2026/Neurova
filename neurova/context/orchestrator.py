@@ -382,6 +382,10 @@ class ContextOrchestrator:
         # 创建统一上下文注入器（如果记忆模块可用）
         unified_injector = None
         if self.memory_manager:
+            # 教训注入的开关就是这个身份：不传则 _build_metacog_lessons 恒不执行，
+            # 自模型每 10 轮落的教训只进台账、不改下一轮行为。身份取不到真串时
+            # 维持不注入（MagicMock 测试替身不得被当成真实 agent_id 建台账连接）。
+            _metacog_id = getattr(self._agent.config, "agent_id", None)
             unified_injector = UnifiedContextInjector(
                 memory_manager=self.memory_manager,
                 growth_log_manager=self.growth_log_manager,
@@ -390,6 +394,7 @@ class ContextOrchestrator:
                 enable_cache=True,
                 enable_compression=True,
                 show_empathy=getattr(self._agent.config, "show_empathy", True),
+                metacog_agent_id=_metacog_id if isinstance(_metacog_id, str) and _metacog_id else None,
             )
             logger.info("Agent %s: UnifiedContextInjector 已启用 (16K tokens)", self.config.name)
 

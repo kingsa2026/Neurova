@@ -432,10 +432,12 @@ async def update_llm_retry_settings(body: LlmRetrySettingsUpdate, admin=Depends(
 
 
 class GovernanceSettingsUpdate(BaseModel):
-    """治理设置更新（rsi_phase: 0..4；conversation_rules_enabled: LLM 成本门控）"""
+    """治理设置更新（rsi_phase: 0..4；conversation_rules_enabled: LLM 成本门控；
+    metacog_gate_enabled: V3 调控门，命中教训的工具执行前拦截）"""
 
     conversation_rules_enabled: Optional[bool] = None
     rsi_phase: Optional[int] = Field(None, ge=0, le=4)
+    metacog_gate_enabled: Optional[bool] = None
 
 
 @router.put("/settings")

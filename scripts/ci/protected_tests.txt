@@ -77,3 +77,10 @@ tests/unit/evolution/rsi/test_eval_evidence_denominator.py
 tests/unit/evolution/rsi/test_convergence_evidence.py
 tests/unit/evolution/rsi/test_rsi_loop_baseline.py
 tests/unit/agent/test_rsi_dispatch_cadence.py
+
+# 反思反哺闭环审计 2026-09-19：链B 教训注入的生产构造点接线 + 调控门纳入治理配置
+# （原有用例在测试内手工传 metacog_agent_id / 手工设 env，绿灯覆盖了契约却漏掉布线）
+tests/unit/context/test_metacog_production_wiring.py
+tests/unit/context/test_metacog_lessons_injection.py
+tests/unit/cognitive/test_regulation_gate.py
+tests/unit/api/test_governance_settings.py

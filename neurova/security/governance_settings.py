@@ -4,6 +4,9 @@ Step9.96 对话规则提取的 LLM 成本门控此前只有 env 开关（NEUROVA
 生产无管理面；RSI 部署阶段同样只能靠 env。本模块提供独立于 /v1/settings 扁平 kv 的
 治理设置：JSON 文件持久化 + 管理端读写（require_admin 在端点层）。
 
+V3 调控门（NEUROVA_METACOG_GATE）同病同治：裸 env 开关在生产无写入方，导致教训的
+硬拦截臂恒关，故一并纳入本设置面（metacog_gate_enabled）。
+
 优先级约定：env 显式设 0 强制关 > 治理设置值 > env 默认 > 内置默认。
 """
 
@@ -22,6 +25,7 @@ _LOCK = threading.Lock()
 DEFAULTS: Dict[str, Any] = {
     "conversation_rules_enabled": False,  # Step9.96 LLM 成本门控，默认关
     "rsi_phase": 0,  # RSI 部署阶段 0..4（0=观察）
+    "metacog_gate_enabled": False,  # V3 调控门（教训拦截工具），默认关
 }
 
 
