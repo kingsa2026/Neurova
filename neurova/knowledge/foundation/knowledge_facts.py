@@ -22,6 +22,9 @@ logger = get_logger(__name__)
 
 DEFAULT_FACT_DB = "./data/knowledge/knowledge_facts.db"
 
+# ADR 0016 三态纪律：这三值是穷举，"没证据"（unevidenced）不等于"通过"（evidenced）。
+EVIDENCE_STATES = ("evidenced", "failed", "unevidenced")
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS knowledge_subjects (
     subject_key TEXT PRIMARY KEY,
@@ -75,6 +78,19 @@ register_migration(1, _SCHEMA, domain="knowledge_foundation")
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def _instant(value) -> str:
+    """时效判定比的是瞬时不是字面：混着 Z / +08:00 / 无时区写入时，
+    文本序会把"已到期"读成"未到期"，所以进出都归一成 UTC ISO。naive 按 UTC 解读。
+    """
+    if isinstance(value, datetime.datetime):
+        stamp = value
+    else:
+        stamp = datetime.datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=datetime.timezone.utc)
+    return stamp.astimezone(datetime.timezone.utc).isoformat()
 
 
 def normalizeLabel(label: str) -> str:
@@ -215,6 +231,20 @@ class KnowledgeFactStore:
         d["aliases"] = json.loads(d.pop("aliases_json", "[]") or "[]")
         return d
 
+    def listSubjects(self, agentId: str, includeMerged: bool = False) -> List[Dict[str, Any]]:
+        """某 agent 下的主体清单——消解段要拿全量做候选，不能只看精确名。"""
+        sql = "SELECT * FROM knowledge_subjects WHERE agent_id = ?"
+        if not includeMerged:
+            sql += " AND status != 'merged'"
+        with self._lock:
+            rows = self._conn.execute(sql + " ORDER BY canonical_label, subject_key", (agentId,)).fetchall()
+        out = []
+        for row in rows:
+            d = dict(row)
+            d["aliases"] = json.loads(d.pop("aliases_json", "[]") or "[]")
+            out.append(d)
+        return out
+
     def subjectCount(self) -> int:
         with self._lock:
             return int(self._conn.execute("SELECT COUNT(*) FROM knowledge_subjects").fetchone()[0])
@@ -315,6 +345,83 @@ class KnowledgeFactStore:
                 (agentId, contentKey),
             ).fetchone()
         return self._hydrate(row) if row else None
+
+    # ── 生命周期（工单 008 / G06）─────────────────────────────
+    # 状态是生命周期的唯一权威：读侧只看 status，不再各自拿 valid_until 比时钟，
+    # 否则会出现"两处判定不一致"的第二真源。到期靠显式调用推进，不起后台线程。
+
+    def _requireFact(self, factId: str) -> Dict[str, Any]:
+        row = self._conn.execute(
+            "SELECT status FROM knowledge_facts WHERE fact_id = ?", (factId,)
+        ).fetchone()
+        if row is None:
+            raise LookupError("事实不存在: %s" % factId)
+        return dict(row)
+
+    def supersede(self, newFactId: str, oldFactId: str, reason: str = "") -> None:
+        """新说法接管：旧事实出检索候选，但仍留在账上可溯源。"""
+        if newFactId == oldFactId:
+            raise ValueError("不能取代自身: %s" % newFactId)
+        with self._lock, self._conn:
+            newStatus = self._requireFact(newFactId)["status"]
+            oldStatus = self._requireFact(oldFactId)["status"]
+            for factId, status in ((newFactId, newStatus), (oldFactId, oldStatus)):
+                if status != "active":
+                    raise ValueError(
+                        "取代只发生在 active 事实上（%s 当前为 %r）" % (factId, status)
+                    )
+            self._conn.execute(
+                "UPDATE knowledge_facts SET supersedes_fact_id = ? WHERE fact_id = ?",
+                (oldFactId, newFactId),
+            )
+            self._conn.execute(
+                "UPDATE knowledge_facts SET status = 'superseded' WHERE fact_id = ?",
+                (oldFactId,),
+            )
+        logger.info("事实取代 %s ← %s（%s）", newFactId, oldFactId, reason)
+
+    def setValidUntil(self, factId: str, validUntil: Optional[str]) -> None:
+        stored = None if validUntil is None else _instant(validUntil)
+        with self._lock, self._conn:
+            self._requireFact(factId)
+            self._conn.execute(
+                "UPDATE knowledge_facts SET valid_until = ? WHERE fact_id = ?",
+                (stored, factId),
+            )
+
+    def expireDueFacts(self, now: Optional[str] = None) -> int:
+        instant = _instant(now) if now is not None else _now()
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE knowledge_facts SET status = 'expired'"
+                " WHERE status = 'active' AND valid_until IS NOT NULL AND valid_until < ?",
+                (instant,),
+            )
+            return int(cur.rowcount)
+
+    def retract(self, factId: str, reason: str = "") -> None:
+        """可撤销不可遗忘：行不删，只出候选，溯源查询永远读得到。"""
+        with self._lock, self._conn:
+            self._requireFact(factId)
+            self._conn.execute(
+                "UPDATE knowledge_facts SET status = 'retracted', retracted_at = ?"
+                " WHERE fact_id = ?",
+                (_now(), factId),
+            )
+        logger.info("事实撤回 %s（%s）", factId, reason)
+
+    def setEvidenceState(self, factId: str, evidenceState: str) -> None:
+        """本列 NOT NULL：NULL 在这里没有位置，"从未回写"由 adoption_outcome 的 NULL 承载（G07）。"""
+        if evidenceState not in EVIDENCE_STATES:
+            raise ValueError(
+                "非法 evidence_state: %r（有效值: %s）" % (evidenceState, "/".join(EVIDENCE_STATES))
+            )
+        with self._lock, self._conn:
+            self._requireFact(factId)
+            self._conn.execute(
+                "UPDATE knowledge_facts SET evidence_state = ? WHERE fact_id = ?",
+                (evidenceState, factId),
+            )
 
 
 _store_singleton: Optional[KnowledgeFactStore] = None

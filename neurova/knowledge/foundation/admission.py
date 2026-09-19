@@ -49,6 +49,7 @@ class AdmissionReceipt:
     pendingSegments: List[str]
     segmentsApplied: List[str]
     dedupedByContent: Optional[str] = None
+    needsHumanReview: bool = False
 
 
 class AdmissionSegmentMissing(RuntimeError):
@@ -111,9 +112,7 @@ class KnowledgeAdmissionGate:
                 dedupedByContent=dupe["fact_id"],
             )
 
-        subjectKey = self._store.upsertSubject(
-            request.agentId, request.subjectLabel, aliases=request.aliases,
-        )
+        subjectKey, needsReview, applied = self._resolveSubject(request)
         factId = self._store.upsertFact(
             agentId=request.agentId,
             subjectKey=subjectKey,
@@ -130,5 +129,26 @@ class KnowledgeAdmissionGate:
             factId=factId,
             subjectKey=subjectKey,
             pendingSegments=pending,
-            segmentsApplied=["content_identity", "identity_resolution(base exact/alias)"],
+            segmentsApplied=["content_identity"] + applied,
+            needsHumanReview=needsReview,
         )
+
+    def _resolveSubject(self, request: AdmissionRequest):
+        """段2 身份消解：注入了 resolver 走确定性相似度，否则退回精确名+别名。
+
+        退回时如实报告"相似度层未生效"，不冒充跑过了多因子合并。
+        """
+        resolver = self._collaborators.get("identity_resolution")
+        if resolver is None:
+            return (self._store.upsertSubject(
+                request.agentId, request.subjectLabel, aliases=request.aliases,
+            ), False, ["identity_resolution(base exact/alias)"])
+        outcome = resolver.resolve(
+            request.subjectLabel,
+            self._store.listSubjects(request.agentId),
+            aliases=request.aliases,
+        )
+        subjectKey = outcome.subjectKey or self._store.upsertSubject(
+            request.agentId, request.subjectLabel, aliases=request.aliases,
+        )
+        return (subjectKey, outcome.needsHumanReview, ["identity_resolution"])

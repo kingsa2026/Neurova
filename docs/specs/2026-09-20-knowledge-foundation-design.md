@@ -210,6 +210,11 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 **事实层 `knowledge_facts`**
 以 `temporal_knowledge_graph.py:181-196` 形状为骨架：`fact_id`、`subject_key`、`predicate_term_id`、`object_term`、`relation_kind`（literal / entity）、`qualifier_json`、`confidence`、`evidence_state`、`status`、`supersedes_fact_id`、`contradicted_by_json`、`valid_from`、`valid_until`、`recorded_at`、`retracted_at`；沿用 EKB 词汇：`assertions_json`、`source_turn_id`、`injected_count`、`last_injected_at`、`adoption_outcome`、`contradicted_at`；新增 `assertion_count`、`latest_adoption_outcome`。
 
+**两列三值的分工（工单 008 实施中定清，原工单文本把两件事混写了）**：
+`evidence_state` 是 `NOT NULL DEFAULT 'unevidenced'` 的显式三值（evidenced / unevidenced / failed），
+承载"**形成侧**有没有证据"；"从未回写"这个第四态由 `adoption_outcome` / `latest_adoption_outcome` 的
+**NULL** 承载，承载"**采纳侧**有没有结果"。两个问题正交，不能用同一列表达。
+
 **溯源层四表**
 - `knowledge_assertions`：`assertion_id`、`fact_id`、`actor_type`（agent / user / pipeline / importer）、`actor_id`、`activity_id`、`medium_ref`（`ingest_queue` 的 `source` 列值 / URL / session id）、`statement_text`、`asserted_at`、`weight`、`verification_state`。
 - `knowledge_activities`：`activity_id`、`activity_kind`（normalize / extract / resolve / adjudicate / import / derive / retract）、`started_at`、`finished_at`、`inputs_json`、`outputs_json`、`basis`、`tool_version`。
