@@ -267,6 +267,9 @@ const emotionTimelineOption = computed(() => {
     grid: { left: 44, right: 16, top: 20, bottom: 28 },
     tooltip: {
       trigger: 'axis',
+      // 浮层挂 body：图表在 GlassPanel 的 overflow:hidden 里，挂在容器内会被裁切
+      appendToBody: true,
+      extraCssText: 'max-width: 320px; white-space: normal;',
       formatter: (items: any[]) => {
         const point = points[items?.[0]?.dataIndex ?? -1]
         if (!point || point.valence === null) return ''
