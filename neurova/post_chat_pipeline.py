@@ -680,7 +680,7 @@ class PostChatPipeline:
         _memory_result, tts_result = await asyncio.gather(
             self._safe_step(
                 "save_memory",
-                self._step_save_memory(user_input, reply, actual_session_id, save_memory),
+                self._step_save_memory(user_input, reply, actual_session_id, save_memory, metadata),
             ),
             self._safe_step(
                 "generate_tts",
@@ -1010,6 +1010,7 @@ class PostChatPipeline:
         reply: str,
         session_id: str,
         save_memory: bool = False,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         """保存对话记忆到记忆数据库"""
         step_name = "save_memory"
@@ -1061,18 +1062,23 @@ class PostChatPipeline:
 
             # 使用记忆管理器
             if memory_manager:
+                # 会话作用域打标：协作群轮 → room:<id>；其余 → direct（基线，跨会话共享）。
+                from neurova.collaboration.memory_scope import scope_tag_for_turn
+
+                _collab = isinstance(metadata, dict) and metadata.get("turn_origin") == "collaboration"
+                _scope = scope_tag_for_turn(collab=_collab, room_id=session_id if _collab else "")
                 # 保存用户消息记忆
                 user_memory_id = memory_manager.remember(
                     content=f"用户: {user_input}",
                     memory_type="episodic",
-                    metadata={"sender_type": "user", "session_id": session_id or "default"},
+                    metadata={"sender_type": "user", "session_id": session_id or "default", "chat_scope": _scope},
                     origin="owner",
                 )
                 # 保存助手回复记忆
                 agent_memory_id = memory_manager.remember(
                     content=f"助手: {reply}",
                     memory_type="episodic",
-                    metadata={"sender_type": "agent", "session_id": session_id or "default"},
+                    metadata={"sender_type": "agent", "session_id": session_id or "default", "chat_scope": _scope},
                     origin="agent",
                 )
                 logger.debug("对话已直接写入记忆数据库")

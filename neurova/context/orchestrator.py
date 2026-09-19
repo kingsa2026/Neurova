@@ -420,6 +420,8 @@ class ContextOrchestrator:
         crystallized_patterns: Optional[list] = None,
         voice_context: Optional[Dict] = None,
         citation_registry: Optional[Any] = None,
+        chat_collab: bool = False,
+        chat_room_id: str = "",
     ) -> List[Dict]:
         """构建完整的 LLM 上下文（Phase 2-5）
 
@@ -670,6 +672,16 @@ class ContextOrchestrator:
             except Exception as e:  # noqa: BLE001 - 预算联动失败不阻断召回
                 logger.debug("draw 预算联动跳过: %s", e)
             drawn_contexts = self.context_pool.draw(need=user_input)
+            # 会话作用域隔离：旁路"历史回忆"召回同样过滤——单聊/非协作仅见 direct（仍跨普通
+            # 会话召回），排除任何房间归档；群轮见 direct + 本群。chunk 归属由 metadata.session_id
+            # 的 project_ 前缀判定（与长期记忆同规则）。
+            from neurova.collaboration.memory_scope import filter_by_scope
+            drawn_contexts = filter_by_scope(
+                drawn_contexts,
+                lambda c: getattr(c, "metadata", None) or {},
+                collab=chat_collab,
+                room_id=chat_room_id,
+            )
             logger.debug("ContextPool.draw() 调取 %s 条归档", len(drawn_contexts))
             for ctx in drawn_contexts:
                 if ctx.hash and ctx.hash in injected_hashes:
