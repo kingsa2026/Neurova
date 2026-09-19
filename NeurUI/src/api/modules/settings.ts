@@ -47,11 +47,24 @@ export interface AdvancedSettings {
   tool_search_enabled: boolean
 }
 
+/** LLM 路由设置（actionability 门控等路由期决策） */
+export interface RoutingSettings {
+  /** 可行动性门控开关（默认关，opt-in） */
+  actionability_enabled: boolean
+  /** 判定“近期是否有人类介入”回看的会话消息条数 */
+  actionability_lookback: number
+  /** 群领导选举：多我方 agent 同群仅 leader 应答（默认关） */
+  group_leadership_enabled: boolean
+  /** leader 租约时长（秒），静默超时后候选接管 */
+  group_lease_ttl_seconds: number
+}
+
 export interface AppSettings {
   general: GeneralSettings
   security: SecuritySettings
   storage: StorageSettings
   advanced: AdvancedSettings
+  routing?: RoutingSettings
   providers?: string[]
 }
 
