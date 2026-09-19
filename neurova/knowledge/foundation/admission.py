@@ -118,6 +118,7 @@ class KnowledgeAdmissionGate:
             if lineage is not None:
                 self._attachLineage(lineage, dupe["fact_id"], request, deduped=True)
                 applied.append("lineage")
+            applied += self._judgeConflicts(request)
             return AdmissionReceipt(
                 factId=dupe["fact_id"],
                 subjectKey=dupe["subject_key"],
@@ -142,6 +143,7 @@ class KnowledgeAdmissionGate:
         )
         if lineage is not None:
             self._attachLineage(lineage, factId, request, deduped=False)
+        applied += self._judgeConflicts(request)
         return AdmissionReceipt(
             factId=factId,
             subjectKey=subjectKey,
@@ -151,6 +153,17 @@ class KnowledgeAdmissionGate:
             needsHumanReview=needsReview,
             lineageApplied=lineage is not None,
         )
+
+    def _judgeConflicts(self, request: AdmissionRequest) -> List[str]:
+        """段4：同 (主体, 谓词) 上的新旧分歧升成一等对象。
+
+        未注入判定器就不假装判过——冲突漏报是"账本永远是空的"那种病。
+        """
+        judge = self._collaborators.get("conflict_judgement")
+        if judge is None:
+            return []
+        judge.record(request.subjectLabel, request.predicateTermId)
+        return ["conflict_judgement"]
 
     def _attachLineage(self, lineage, factId: str, request: AdmissionRequest, deduped: bool) -> None:
         """咽喉自己开一条活动记录。

@@ -107,6 +107,31 @@ CREATE INDEX IF NOT EXISTS idx_assertion_fact ON knowledge_assertions(fact_id);
 """
 register_migration(1, _SCHEMA, domain="knowledge_foundation")
 
+_SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS knowledge_conflicts (
+    conflict_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    subject_key TEXT NOT NULL,
+    predicate_term_id TEXT NOT NULL,
+    member_fact_ids_json TEXT NOT NULL DEFAULT '[]',
+    member_signature TEXT NOT NULL DEFAULT '',
+    severity REAL NOT NULL DEFAULT 0.5,
+    recommended_policy TEXT NOT NULL DEFAULT 'manual',
+    policy_basis TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    detected_at TEXT NOT NULL,
+    resolved_at TEXT,
+    resolution TEXT,
+    resolved_by TEXT NOT NULL DEFAULT '',
+    winner_fact_id TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_conflict_members ON knowledge_conflicts(member_signature);
+CREATE INDEX IF NOT EXISTS idx_conflict_status ON knowledge_conflicts(status, detected_at);
+"""
+register_migration(2, _SCHEMA_V2, domain="knowledge_foundation")
+
+MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
+
 
 def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -295,6 +320,7 @@ class KnowledgeFactStore:
         sourceTurnId: str = "",
         confidence: Optional[float] = None,
         contentKey: Optional[str] = None,
+        recordedAt: Optional[str] = None,
     ) -> str:
         """同 (主体, 谓词, 客体, 限定) 或同 content_key 重放返回同一 fact_id。
 
@@ -333,7 +359,7 @@ class KnowledgeFactStore:
                     " confidence, source_turn_id, recorded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (factId, agentId, subjectKey, predicateTermId, objectTerm, relationKind, content,
                      contentKey, qualifierHash, json.dumps(qualifier, ensure_ascii=False), confidence,
-                     sourceTurnId, _now()),
+                     sourceTurnId, _instant(recordedAt) if recordedAt else _now()),
                 )
             except sqlite3.IntegrityError:
                 # 唯一索引挡住竞态双写：改读先到的那一行，而不是让写入方看到崩
@@ -494,6 +520,118 @@ class KnowledgeFactStore:
             d["activity_inputs"] = json.loads(d.get("activity_inputs") or "{}")
             out.append(d)
         return out
+
+    # ── 治理层：冲突一等对象（工单 007 / G03、G04）────────────
+
+    def insertConflict(
+        self, kind: str, subjectKey: str, predicateTermId: str, memberFactIds: List[str],
+        severity: float, recommendedPolicy: str, policyBasis: str, status: str = "pending",
+        winnerFactId: Optional[str] = None,
+    ) -> Optional[str]:
+        """写一条冲突账；同组成员重复检测不再另开。
+
+        auto_resolved 无依据即在落库处被拒——调用方忘传 basis 是常态，库不能放过。
+        """
+        if status == "auto_resolved" and not str(policyBasis or "").strip():
+            raise ValueError("auto_resolved 必须带 policy_basis，无依据即不得自动关闭冲突")
+        members = sorted({str(m) for m in memberFactIds if m})
+        if len(members) < 2:
+            raise ValueError("冲突至少需要 2 个成员事实，收到 %d 个" % len(members))
+        conflictId = "cnf_%s" % uuid.uuid4().hex[:12]
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "INSERT OR IGNORE INTO knowledge_conflicts (conflict_id, kind, subject_key,"
+                " predicate_term_id, member_fact_ids_json, member_signature, severity,"
+                " recommended_policy, policy_basis, status, detected_at, winner_fact_id)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (conflictId, kind, subjectKey, predicateTermId,
+                 json.dumps(members, ensure_ascii=False), "|".join(members), float(severity),
+                 recommendedPolicy, policyBasis, status, _now(), winnerFactId),
+            )
+        return conflictId if cur.rowcount else None
+
+    def conflicts(self, status: str = "pending") -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM knowledge_conflicts WHERE status = ?"
+                " ORDER BY severity DESC, detected_at DESC",
+                (status,),
+            ).fetchall()
+        return [self._hydrateConflict(r) for r in rows]
+
+    def pendingConflictCount(self) -> int:
+        with self._lock:
+            return int(self._conn.execute(
+                "SELECT COUNT(*) FROM knowledge_conflicts WHERE status = 'pending'"
+            ).fetchone()[0])
+
+    def conflictMembers(self, conflictId: str) -> List[Dict[str, Any]]:
+        conflict = self._conflictRow(conflictId)
+        return self.factsByIds(conflict["member_fact_ids"])
+
+    def factsByIds(self, factIds: List[str]) -> List[Dict[str, Any]]:
+        if not factIds:
+            return []
+        placeholders = ",".join("?" * len(factIds))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT f.*, s.agent_id AS agent_id FROM knowledge_facts f"
+                " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
+                " WHERE f.fact_id IN (%s) ORDER BY f.recorded_at, f.fact_id" % placeholders,
+                list(factIds),
+            ).fetchall()
+        return [self._hydrate(r) for r in rows]
+
+    def conflictWinner(self, conflictId: str) -> Optional[str]:
+        return self._conflictRow(conflictId).get("winner_fact_id")
+
+    def resolveConflict(self, conflictId: str, resolution: str, resolvedBy: str = "") -> bool:
+        if resolution not in MANUAL_RESOLUTIONS:
+            raise ValueError("未知裁决: %r（有效值: %s）" % (resolution, " / ".join(MANUAL_RESOLUTIONS)))
+        with self._lock, self._conn:
+            row = self._conn.execute(
+                "SELECT status FROM knowledge_conflicts WHERE conflict_id = ?", (conflictId,)
+            ).fetchone()
+            if row is None or row["status"] != "pending":
+                return False
+            self._conn.execute(
+                "UPDATE knowledge_conflicts SET status = 'resolved', resolution = ?,"
+                " resolved_by = ?, resolved_at = ? WHERE conflict_id = ?",
+                (resolution, str(resolvedBy or ""), _now(), conflictId),
+            )
+        return True
+
+    def _conflictRow(self, conflictId: str) -> Dict[str, Any]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM knowledge_conflicts WHERE conflict_id = ?", (conflictId,)
+            ).fetchone()
+        if row is None:
+            raise LookupError("冲突不存在: %s" % conflictId)
+        return self._hydrateConflict(row)
+
+    @staticmethod
+    def _hydrateConflict(row) -> Dict[str, Any]:
+        d = dict(row)
+        d["member_fact_ids"] = json.loads(d.pop("member_fact_ids_json", "[]") or "[]")
+        return d
+
+    def candidateFactsForConflict(self, subjectLabel: str, predicateTermId: str) -> List[Dict[str, Any]]:
+        """按归一化标签跨 agent 取候选。
+
+        旧实现只在同 agent 桶内比对（`repository.py:1119`），跨库分歧因此永远不成账。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT f.*, s.agent_id AS subject_agent_id, s.canonical_label,"
+                " s.normalized_label FROM knowledge_facts f"
+                " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
+                " WHERE s.normalized_label = ? AND f.predicate_term_id = ?"
+                " AND s.merged_into IS NULL AND f.status != 'retracted'"
+                " ORDER BY f.recorded_at, f.fact_id",
+                (normalizeLabel(subjectLabel), predicateTermId),
+            ).fetchall()
+        return [self._hydrate(r) for r in rows]
 
     # ── 生命周期（工单 008 / G06）─────────────────────────────
     # 状态是生命周期的唯一权威：读侧只看 status，不再各自拿 valid_until 比时钟，
