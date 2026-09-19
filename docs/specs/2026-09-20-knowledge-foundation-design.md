@@ -217,7 +217,7 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 
 **溯源层四表**
 - `knowledge_assertions`：`assertion_id`、`fact_id`、`actor_type`（agent / user / pipeline / importer）、`actor_id`、`activity_id`、`medium_ref`（`ingest_queue` 的 `source` 列值 / URL / session id）、`statement_text`、`asserted_at`、`weight`、`verification_state`。
-- `knowledge_activities`：`activity_id`、`activity_kind`（normalize / extract / resolve / adjudicate / import / derive / retract）、`started_at`、`finished_at`、`inputs_json`、`outputs_json`、`basis`、`tool_version`。
+- `knowledge_activities`：`activity_id`、`activity_kind`（admit / normalize / extract / resolve / adjudicate / import / derive / retract）、`started_at`、`finished_at`、`inputs_json`、`outputs_json`、`basis`、`tool_version`。`admit` 为实施期补：咽喉若不建活动，"经哪条管线进来"这一维对直写路径恒空。
 - `knowledge_derivation_edges`：`derived_fact_id`、`premise_fact_id`、`derivation_id`、`rule_id`、`derivation_kind`。
 - `knowledge_lineage_heads`：`head_id`、`scope`（entry / activity / global）、`last_seq`、`last_digest`、`updated_at`。
 
@@ -226,7 +226,9 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 
 **叙述层**：`knowledge_narratives`（承 `knowledge.json` 条目字段：`knowledge_id`、`title`、`category`、`tags`、`visibility`、`owner_user_id`、`shared_with`、`submission`、`revision` 快照；**新增 `content_key`**——条目层此前无内容身份列，这是 B03 的根因位）、`knowledge_chunks`（`chunk_id`、`knowledge_id`、`parent_id`、`seq`、`text`、`revision`、`embedding_ref`）。**不含 `confidence`、不含 `source`**（G11、G01）。
 
-**本体层 / 评测层**：见 §6、§8。
+**本体层**：见 §6。**评测层单独建库** `data/knowledge/knowledge_evaluation.db`（迁移域
+`knowledge_evaluation`），不并入底座 13 表——评测器不该与被测对象共用存储：底座一旦写坏，
+读数会跟着一起坏，就失去"用独立尺子发现底座问题"的能力。§4.2 的表清单据此理解。
 
 ### 4.3 新增模块落位
 
@@ -237,9 +239,11 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 | `neurova/knowledge/foundation/lineage.py` | `KnowledgeLineageLedger` |
 | `neurova/knowledge/foundation/digest_chain.py` | `ActivityDigestChain` |
 | `neurova/knowledge/foundation/conflict_judge.py` | `KnowledgeConflictJudge` |
+| `neurova/knowledge/foundation/redundancy.py` | `RedundancyAudit`（只读冗余审计，004） |
 | `neurova/knowledge/identity/entity_blocking.py` | `EntityBlockingResolver` |
 | `neurova/knowledge/identity/similarity_fusion.py` | `SimilarityFusion` |
 | `neurova/knowledge/identity/identity_merger.py` | `IdentityMerger` |
+| `neurova/knowledge/identity/subject_resolver.py` | `SubjectResolver`（auto/review 双阈值决策） |
 | `neurova/knowledge/ontology/term_registry.py` | `OntologyTermRegistry` |
 | `neurova/knowledge/ontology/rule_engine.py` | `ForwardChainingEngine` |
 | `neurova/knowledge/ontology/derivation_ledger.py` | `DerivationLedger` |

@@ -116,7 +116,7 @@ class KnowledgeAdmissionGate:
         if dupe:
             applied = ["content_identity"]
             if lineage is not None:
-                lineage.attach(dupe["fact_id"], request.assertions)
+                self._attachLineage(lineage, dupe["fact_id"], request, deduped=True)
                 applied.append("lineage")
             return AdmissionReceipt(
                 factId=dupe["fact_id"],
@@ -141,7 +141,7 @@ class KnowledgeAdmissionGate:
             # confidence 留 None：G11 规定它只能由断言聚合得出，咽喉不代填
         )
         if lineage is not None:
-            lineage.attach(factId, request.assertions)
+            self._attachLineage(lineage, factId, request, deduped=False)
         return AdmissionReceipt(
             factId=factId,
             subjectKey=subjectKey,
@@ -151,6 +151,26 @@ class KnowledgeAdmissionGate:
             needsHumanReview=needsReview,
             lineageApplied=lineage is not None,
         )
+
+    def _attachLineage(self, lineage, factId: str, request: AdmissionRequest, deduped: bool) -> None:
+        """咽喉自己开一条活动记录。
+
+        不建活动，溯源四问里的"经哪条管线进来"就恒空——2026-09-20 端到端冒烟实测到这一点。
+        调用方自带 activityId 的断言仍优先，这里是给"没有上层管线"的直写路径兜出可见的一跳。
+        """
+        activityId = lineage.openActivity(
+            "admit",
+            inputs={
+                "agent_id": request.agentId,
+                "subject_label": request.subjectLabel,
+                "predicate_term_id": request.predicateTermId,
+                "object_term": request.objectTerm,
+                "source_turn_id": request.sourceTurnId,
+            },
+            basis="KnowledgeAdmissionGate.admit",
+        )
+        lineage.attach(factId, request.assertions, activityId=activityId)
+        lineage.closeActivity(activityId, outputs={"fact_id": factId, "content_deduped": deduped})
 
     def _resolutionLabel(self) -> List[str]:
         resolver = self._collaborators.get("identity_resolution")

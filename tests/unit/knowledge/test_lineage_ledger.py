@@ -159,3 +159,34 @@ class TestAdmissionEnforcesProvenance:
         receipt = gate.admit(_request(sourceTurnId="turn-42"), allowPendingSegments=True)
 
         assert store.fact(receipt.factId)["source_turn_id"] == "turn-42"
+
+
+class TestAdmitCreatesItsOwnActivity:
+    def test_admitActivityCarriesPipelineKind(self, store, ledger):
+        """溯源四问含"经哪条管线"——咽喉不建活动，这一维就恒空（2026-09-20 冒烟实测）。"""
+        gate = KnowledgeAdmissionGate(store, lineageLedger=ledger)
+
+        receipt = gate.admit(_request(), allowPendingSegments=True)
+
+        hops = ledger.traceLineage(receipt.factId)
+        assert hops and hops[0]["activity_kind"], "断言必须挂在一条活动上，否则链是断的"
+        assert hops[0]["activity_inputs"], "活动要留下当时输入，事后无法复原"
+
+    def test_contentKeyIsStructurallyUnique(self, store, tmp_path):
+        """内容去重不能只靠"先查后插"——两个并发写同一内容会各插一行。"""
+        import sqlite3
+
+        conn = sqlite3.connect(store._db_path)
+        try:
+            indexes = conn.execute("PRAGMA index_list(knowledge_facts)").fetchall()
+            unique = [row[1] for row in indexes if row[2]]
+            cols = {
+                name: [r[2] for r in conn.execute("PRAGMA index_info(%s)" % name)]
+                for name in unique
+            }
+        finally:
+            conn.close()
+
+        assert any(
+            set(c) >= {"agent_id", "content_key"} for c in cols.values()
+        ), "缺 (agent_id, content_key) 唯一索引，内容去重存在竞态窗口"
