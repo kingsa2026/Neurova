@@ -123,3 +123,22 @@ class TestGateSegmentFive:
         judge.record(subjectLabel="神经瓦", predicateTermId="version")
 
         assert store.fact(a)["contradicted_by"] and store.fact(b)["contradicted_by"]
+
+
+class TestContradictionMerge:
+    def test_markContradictedMergesInsteadOfOverwriting(self, store):
+        """多次标记要累加。曾经 `_requireFact` 只回 status 列，把这里静默变成每次都覆盖。"""
+        fid = _factWithAssertions(store, "1.0", [("user", "u1")])
+
+        store.markContradicted(fid, ["fact_a"])
+        store.markContradicted(fid, ["fact_b"])
+
+        assert store.fact(fid)["contradicted_by"] == ["fact_a", "fact_b"]
+
+    def test_repeatedSameCounterpartyIsIdempotent(self, store):
+        fid = _factWithAssertions(store, "2.0", [("user", "u1")])
+
+        store.markContradicted(fid, ["fact_a"])
+        store.markContradicted(fid, ["fact_a"])
+
+        assert store.fact(fid)["contradicted_by"] == ["fact_a"]
