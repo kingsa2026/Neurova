@@ -301,6 +301,27 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 - 三态纪律（ADR 0016）：读数取不到即 `unevidenced`，绝不按 `passed` 处理。
 - 治理指标（溯源覆盖率、重复率、零使用条目占比、TKG 命中率从 0 到有）为辅证，不单独作为"变好了"的结论。
 
+### 8.1 E1 前冻结的真实基线（工单 002，2026-09-20 实测）
+
+台架：`neurova/knowledge/evaluation/retrieval_benchmark.py`，库 `data/knowledge/knowledge_evaluation.db`，
+30 例（title_literal 24 / tag 3 / category 3），top_k=5，走 `hybrid_search_knowledge` 真检索路
+（本地 ONNX `bge-small-zh-v1.5` 512 维在位，四路齐活）。
+
+| 视角 | recall@5 | MRR | 未命中率 |
+|---|---|---|---|
+| **admin 全语料**（基线，run `evr_3a1abc27c977`） | **0.8555** | **0.8300** | 0.1000 |
+| owner=u1 私库视角（对照） | 0.7013 | 0.7111 | 0.2667 |
+
+三条必须一起读的结论：
+
+1. **读数绑身份**：同一份标注仅因可见性上下文不同就差 15 个点，故 `evaluation_runs.context_json`
+   是读数的组成部分，不是备注。E2 对比必须在同一 context 下比。
+2. **自动标注偏管路**：现库 category/tag 取值太少，去重后 30 例里只有 6 例非标题口径。
+   这批数说明"检索管路基本通"，**不足以**证明语义质量好——语义判据需人工标注追加，
+   已登记为后续票（002 后置：人工标注 ≥30 例语义 query）。
+3. 3 例未命中全是泛化词（`architecture` / `general` / `big_verify`），属预期：期望集是"该类全部条目"，
+   top-5 装不下一整类。它们的处置见 E2 的时效/置信排序项票。
+
 ---
 
 ## 9. 阶段划分与出口判据

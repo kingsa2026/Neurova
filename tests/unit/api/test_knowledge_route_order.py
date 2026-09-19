@@ -1,7 +1,7 @@
 """knowledge 路由有序快照基线（2026-09-16 模块化拆分守护）。
 
 knowledge.py 由单文件拆为聚合器 + 子路由模块，本文件钉死：
-1. 全部 34 条路由路径-方法逐一保持（拆分不得丢路由）；
+1. 全部 35 条路由路径-方法逐一保持（拆分不得丢路由）；
 2. FastAPI 按注册顺序匹配：GET /{knowledge_id} 参数路由会遮蔽其后注册的
    字面 GET 路由（/configs /collections 等）——原文件靠物理行序保证字面
    GET 先注册，拆分后 include 顺序必须维持同序，此测试用「参数路由前的
@@ -13,7 +13,7 @@ os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_kb_order_01
 
 from neurova.api.endpoints import knowledge as kb
 
-# 拆分前 knowledge.py 的 34 条路由快照（按注册顺序）
+# 拆分前 knowledge.py 的 34 条路由快照（按注册顺序）+ 工单 002 新增的评测基线只读路由
 _KB_ROUTES = [
     ("", "GET"),
     ("/search", "POST"),
@@ -22,6 +22,7 @@ _KB_ROUTES = [
     ("/public-submissions", "GET"),
     ("/conflicts", "GET"),
     ("/conflicts/{conflict_id}/resolve", "POST"),
+    ("/evaluation/baseline", "GET"),
     ("/deleted", "GET"),
     ("/{knowledge_id}/restore", "POST"),
     ("/{knowledge_id}/revisions", "GET"),
@@ -51,8 +52,8 @@ def _router_routes(router):
             for r in router.routes if getattr(r, "methods", None)]
 
 
-def test_all_34_routes_present_after_split():
-    """拆分后 34 条路由路径-方法逐一保持（多重集相等，不锁注册顺序）。
+def test_all_35_routes_present_after_split():
+    """拆分后 35 条路由路径-方法逐一保持（多重集相等，不锁注册顺序）。
 
     除遮蔽顺序契约外（见下一测试），FastAPI 对同一路由集合的注册顺序
     不产生行为差异——锁全序是过度规约，会迫使子模块间虚假耦合。
