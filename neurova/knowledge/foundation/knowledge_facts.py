@@ -72,6 +72,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_triple
     ON knowledge_facts(agent_id, subject_key, predicate_term_id, object_term, qualifier_hash);
 CREATE INDEX IF NOT EXISTS idx_fact_subject ON knowledge_facts(subject_key, status);
 CREATE INDEX IF NOT EXISTS idx_fact_content ON knowledge_facts(agent_id, content_key);
+-- 内容去重必须是结构约束而不是"先查后插"：两个并发写同一内容会各插一行。
+-- 空 content_key（无内容身份）不入索引，避免空写入互撞。
+CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_agent_content
+    ON knowledge_facts(agent_id, content_key) WHERE content_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS knowledge_activities (
     activity_id TEXT PRIMARY KEY,
@@ -322,14 +326,26 @@ class KnowledgeFactStore:
                     )
                 return row["fact_id"]
             factId = "fact_%s" % uuid.uuid4().hex[:12]
-            self._conn.execute(
-                "INSERT INTO knowledge_facts (fact_id, agent_id, subject_key, predicate_term_id,"
-                " object_term, relation_kind, content, content_key, qualifier_hash, qualifier_json,"
-                " confidence, source_turn_id, recorded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (factId, agentId, subjectKey, predicateTermId, objectTerm, relationKind, content,
-                 contentKey, qualifierHash, json.dumps(qualifier, ensure_ascii=False), confidence,
-                 sourceTurnId, _now()),
-            )
+            try:
+                self._conn.execute(
+                    "INSERT INTO knowledge_facts (fact_id, agent_id, subject_key, predicate_term_id,"
+                    " object_term, relation_kind, content, content_key, qualifier_hash, qualifier_json,"
+                    " confidence, source_turn_id, recorded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (factId, agentId, subjectKey, predicateTermId, objectTerm, relationKind, content,
+                     contentKey, qualifierHash, json.dumps(qualifier, ensure_ascii=False), confidence,
+                     sourceTurnId, _now()),
+                )
+            except sqlite3.IntegrityError:
+                # 唯一索引挡住竞态双写：改读先到的那一行，而不是让写入方看到崩
+                if not contentKey:
+                    raise
+                winner = self._conn.execute(
+                    "SELECT fact_id FROM knowledge_facts WHERE agent_id = ? AND content_key = ?",
+                    (agentId, contentKey),
+                ).fetchone()
+                if winner is None:
+                    raise
+                return winner["fact_id"]
             return factId
 
     def fact(self, factId: str) -> Optional[Dict[str, Any]]:
