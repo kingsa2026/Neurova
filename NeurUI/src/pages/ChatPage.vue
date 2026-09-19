@@ -100,90 +100,16 @@
               <span class="nr-retry-notice-label">{{ retryNoticeText(msg) }}</span>
             </div>
 
-            <!-- 步骤化时间轴（三需求②）：推理/工具按到达顺序成段，独立折叠 -->
-            <div v-if="msg.steps && msg.steps.length > 0" class="nr-steps-timeline">
-              <div
-                v-for="step in msg.steps"
-                :key="step.id"
-                class="nr-step-item"
-                :class="[`nr-step--${step.kind}`, { 'is-active': step.active, 'is-open': step.open }]"
-              >
-                <div class="nr-step-header" @click="toggleStep(msg.steps!, step.id)">
-                  <span class="nr-step-icon"><UiIcon :name="step.kind === 'reasoning' ? 'brain' : step.kind === 'plan' ? 'check' : variantIcon(toolCardVariant(step.name))" :size="14" /></span>
-                  <span class="nr-step-title">{{ step.kind === 'reasoning' ? t('chat.stepThinking') : step.kind === 'plan' ? t('chat.stepPlan') : (step.taskName || step.name) }}</span>
-                  <span v-if="step.active" class="nr-step-badge is-running">{{ t('chat.stepRunning') }}</span>
-                  <span v-else-if="step.kind === 'tool'" class="nr-step-badge" :class="!step.result || isToolFailureResult(step.result) ? 'is-error' : 'is-done'">
-                    {{ !step.result ? t('chat.stepNoResult') : isToolFailureResult(step.result) ? t('chat.toolFailed') : t('chat.toolDone') }}
-                  </span>
-                  <span v-if="stepDurationText(step)" class="nr-step-duration">{{ stepDurationText(step) }}</span>
-                  <span class="nr-step-toggle">{{ step.open ? '▾' : '▸' }}</span>
-                </div>
-                <div v-show="step.open" class="nr-step-body">
-                  <template v-if="step.kind !== 'tool'">
-                    <div class="nr-step-reasoning" @scroll="onReasoningScroll">{{ step.text }}</div>
-                  </template>
-                  <template v-else>
-                    <pre class="nr-tool-args">{{ formatJSON(step.arguments) }}</pre>
-                    <div v-if="isBackgroundResult(step.result)" class="nr-tool-background">
-                      {{ t('chat.toolBackgroundHint') }}
-                    </div>
-                    <div v-if="step.result" class="nr-tool-result">
-                      <div class="nr-tool-result-header">
-                        {{ t('chat.toolResult') }}
-                        <button
-                          class="nr-tool-result-preview-btn"
-                          :title="t('chat.openInPreview')"
-                          @click.stop="openToolResultArtifacts(step.result)"
-                        ><UiIcon name="eye" :size="12" /></button>
-                      </div>
-                      <pre class="nr-tool-result-content">{{ step.result }}</pre>
-                    </div>
-                  </template>
-                </div>
-              </div>
-            </div>
+            <!-- 过程渲染（步骤时间轴 + legacy 推理/工具兜底）统一抽至 MessageSteps 组件 -->
+            <MessageSteps
+              v-if="(msg.steps && msg.steps.length > 0) || (!msg.steps?.length && msg.reasoning) || (!msg.steps?.length && legacyToolList(msg).length > 0)"
+              :steps="msg.steps"
+              :reasoning="msg.reasoning"
+              :legacy-tools="legacyToolList(msg)"
+              @open-tool-artifacts="onOpenToolArtifacts"
+            />
 
-            <!-- Legacy reasoning block（旧消息无 steps 时兜底） -->
-            <div v-if="!msg.steps?.length && msg.reasoning" class="nr-msg-reasoning">
-              <div class="nr-reasoning-header" @click="msg.reasoningOpen = !msg.reasoningOpen">
-                <span>💭 {{ t('chat.reasoning') }}</span>
-                <span class="nr-reasoning-toggle">{{ msg.reasoningOpen ? '▾' : '▸' }}</span>
-              </div>
-              <div v-show="msg.reasoningOpen" class="nr-reasoning-content">
-                {{ msg.reasoning }}
-              </div>
-            </div>
-
-            <!-- Legacy tool call blocks（旧消息无 steps 时兜底，含历史兼容单工具） -->
-            <template v-if="!msg.steps?.length && legacyToolList(msg).length > 0">
-              <div v-for="(tc, tcIdx) in legacyToolList(msg)" :key="tcIdx" class="nr-msg-tool-call">
-                <div class="nr-tool-header" @click="msg.toolOpen = !msg.toolOpen">
-                  <span class="nr-tool-icon"><UiIcon :name="variantIcon(toolCardVariant(tc.name))" :size="14" /></span>
-                  <span class="nr-tool-name">{{ tc.name }}</span>
-                  <a-tag :color="isBackgroundResult(tc.result) ? 'warning' : isToolFailureResult(tc.result) ? 'error' : tc.result ? 'success' : 'processing'">
-                    {{ isBackgroundResult(tc.result) ? t('chat.toolBackground') : isToolFailureResult(tc.result) ? t('chat.toolFailed') : tc.result ? t('chat.toolDone') : t('chat.toolCalling') }}
-                  </a-tag>
-                  <span class="nr-tool-toggle">{{ msg.toolOpen ? '▾' : '▸' }}</span>
-                </div>
-                <div v-show="msg.toolOpen">
-                  <pre class="nr-tool-args">{{ formatJSON(tc.arguments) }}</pre>
-                  <div v-if="isBackgroundResult(tc.result)" class="nr-tool-background">
-                    {{ t('chat.toolBackgroundHint') }}
-                  </div>
-                  <div v-if="tc.result" class="nr-tool-result">
-                    <div class="nr-tool-result-header">
-                      {{ t('chat.toolResult') }}
-                      <button
-                        class="nr-tool-result-preview-btn"
-                        :title="t('chat.openInPreview')"
-                        @click.stop="openToolResultArtifacts(tc.result)"
-                      ><UiIcon name="eye" :size="12" /></button>
-                    </div>
-                    <pre class="nr-tool-result-content">{{ tc.result }}</pre>
-                  </div>
-                </div>
-              </div>
-            </template>
+            <!-- Legacy 推理/工具兜底已并入上方 MessageSteps 组件 -->
 
             <!-- Edit mode（编辑最后一条用户消息）：内联编辑框替换消息内容 -->
             <div v-if="isEditingMessage(absIdx(idx))" class="nr-msg-edit">
@@ -208,12 +134,12 @@
               </div>
             </div>
 
-            <!-- Message Content (Rich Media Rendering) -->
-            <div
+            <!-- Message Content (Rich Media Rendering)：抽至 MessageContent 共享组件 -->
+            <MessageContent
               v-else-if="msg.content"
-              class="nr-msg-content"
-              v-html="renderRichContent(msg.content)"
-              @click="handleContentClick"
+              :content="msg.content"
+              @open-code="onOpenCode"
+              @open-image="onOpenImage"
             />
 
             <!-- File Attachments (Enhanced) -->
@@ -470,6 +396,8 @@ import { renderMarkdown } from '@/utils/markdown'
 import { revokeMessageBlobUrls } from '@/utils/blobUrls'
 import { openArtifactTab, openCodeBlockTab, openFileTab, openImageTab, openToolResultArtifacts, artifactFromEvent, artifactsFromToolResult, mergeMessageArtifacts, openMessageArtifact, type ArtifactEventPayload, type MessageArtifact } from '@/utils/artifacts'
 import ArtifactCard from '@/components/chat/ArtifactCard.vue'
+import MessageContent from '@/components/chat/MessageContent.vue'
+import MessageSteps from '@/components/chat/MessageSteps.vue'
 import { uiMessage } from '@/utils/message'
 import { resolveI18nMessage } from '@/utils/i18n'
 import GlassButton from '@/components/GlassButton.vue'
@@ -2109,50 +2037,19 @@ const copyResetTimers: number[] = []
  * 现统一走 src/utils/markdown.ts 的 marked (GFM+breaks) + 语法高亮 +
  * DOMPurify 白名单兜底 (渲染与安全细节见该模块, 纯函数便于测试)。
  */
-function renderRichContent(text: string): string {
-  return renderMarkdown(text, t('common.copy'))
+/** MessageContent emit：代码块预览 → dock。 */
+function onOpenCode(lang: string, code: string): void {
+  openCodeBlockTab(code, lang)
 }
 
-/** Handle clicks within rendered content (code copy/preview + image → dock). */
-function handleContentClick(e: MouseEvent) {
-  const target = e.target as HTMLElement
+/** MessageContent emit：内联图片放大 → dock。 */
+function onOpenImage(src: string, alt: string): void {
+  openImageTab(src, alt)
+}
 
-  // 事件委托处理代码块复制按钮; 代码内容直接从 DOM textContent 读取,
-  // 不依赖 data-code 属性 (旧链路 encodeURIComponent+decodeURIComponent 脆弱)
-  const copyBtn = target.closest('.nr-code-copy-btn') as HTMLButtonElement | null
-  if (copyBtn) {
-    const codeEl = copyBtn.closest('.nr-code-wrap')?.querySelector('code')
-    const code = codeEl ? codeEl.textContent || '' : ''
-    navigator.clipboard.writeText(code).then(() => {
-      copyBtn.textContent = '✓'
-      copyResetTimers.push(window.setTimeout(() => {
-        copyBtn.textContent = t('common.copy')
-      }, 1500))
-    }).catch(() => {
-      copyBtn.textContent = '✗'
-      copyResetTimers.push(window.setTimeout(() => {
-        copyBtn.textContent = t('common.copy')
-      }, 1500))
-    })
-    return
-  }
-
-  // 代码块预览按钮（产物预览 2026-09-08）：md/html/svg 分派到对应 dock 面板
-  const previewBtn = target.closest('.nr-code-preview-btn') as HTMLElement | null
-  if (previewBtn) {
-    const wrap = previewBtn.closest('.nr-code-wrap')
-    const codeEl = wrap?.querySelector('code')
-    const langEl = wrap?.querySelector('.nr-code-lang')
-    const lang = (langEl?.textContent || '').trim().toLowerCase()
-    if (codeEl) openCodeBlockTab(codeEl.textContent || '', lang === 'code' ? '' : lang)
-    return
-  }
-
-  // 消息内联图片 → dock 图片预览（lightbox 模态已收编入 dock）
-  if (target.tagName === 'IMG' && target.closest('.nr-inline-image')) {
-    const img = target as HTMLImageElement
-    openImageTab(img.src, img.alt || 'image')
-  }
+/** MessageSteps emit：工具结果打开产物预览。 */
+function onOpenToolArtifacts(result?: string): void {
+  if (result) openToolResultArtifacts(result)
 }
 
 /** 消息附件缩略图点击：图片 → dock 图片预览；其余类型带 fileId → 文档预览 */
@@ -2817,158 +2714,7 @@ onBeforeUnmount(() => {
   align-items: flex-end;
 }
 
-.nr-msg-content {
-  padding: 12px 16px;
-  border-radius: 14px;
-  font-size: 14px;
-  line-height: 1.6;
-  word-break: break-word;
-}
-
-.nr-msg--user .nr-msg-content {
-  background: var(--nr-bubble-user);
-  border: 1px solid var(--nr-bubble-user-border);
-  color: var(--nr-text-primary);
-}
-
-.nr-msg--assistant .nr-msg-content {
-  background: var(--nr-glass-bg);
-  border: 1px solid var(--nr-glass-border);
-  color: var(--nr-text-primary);
-}
-
-/* Reasoning Block */
-.nr-msg-reasoning {
-  background: var(--nr-glass-bg);
-  border: 1px solid var(--nr-glass-border);
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.nr-reasoning-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--nr-text-secondary);
-  font-weight: 500;
-  transition: background 0.2s;
-}
-
-.nr-reasoning-header:hover {
-  background: var(--nr-glass-bg-hover);
-}
-
-.nr-reasoning-toggle {
-  font-size: 14px;
-  color: var(--nr-text-muted);
-}
-
-.nr-reasoning-content {
-  padding: 8px 12px 12px;
-  font-size: 13px;
-  color: var(--nr-text-tertiary);
-  line-height: 1.5;
-  white-space: pre-wrap;
-  border-top: 1px solid var(--nr-border-light);
-}
-
-/* Tool Call Block */
-.nr-msg-tool-call {
-  background: rgba(245, 158, 11, 0.06);
-  border: 1px solid rgba(245, 158, 11, 0.15);
-  border-radius: 10px;
-  padding: 10px 14px;
-}
-
-.nr-tool-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.nr-tool-header:hover {
-  opacity: 0.8;
-}
-
-.nr-tool-toggle {
-  margin-left: auto;
-  font-size: 14px;
-  color: var(--nr-text-muted);
-}
-
-.nr-tool-icon {
-  font-size: 16px;
-}
-
-.nr-tool-name {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--nr-text-primary);
-}
-
-.nr-tool-args {
-  font-size: 12px;
-  color: var(--nr-text-secondary);
-  background: var(--nr-bg-inset);
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin: 0;
-  overflow-x: auto;
-  font-family: var(--nr-font-mono);
-  max-height: 120px;
-}
-
-/* Governance approval modal 样式已随组件迁移（GovernanceApprovalModal.vue） */
-
-.nr-tool-result {
-  margin-top: 8px;
-  border-top: 1px solid var(--nr-glass-border);
-  padding-top: 8px;
-}
-
-.nr-tool-result-header {
-  font-size: 11px;
-  color: var(--nr-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 4px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.nr-tool-result-preview-btn {
-  border: none;
-  background: transparent;
-  color: var(--nr-text-muted);
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 1;
-  padding: 1px 4px;
-  border-radius: 4px;
-}
-
-.nr-tool-result-preview-btn:hover {
-  color: var(--nr-text-primary);
-  background: var(--nr-bg-secondary);
-}
-
-.nr-tool-result-content {
-  font-size: 12px;
-  color: var(--nr-text-secondary);
-  background: var(--nr-bg-inset);
-  border-radius: 6px;
-  padding: 8px 10px;
-  margin: 0;
-  overflow-x: auto;
-  font-family: var(--nr-font-mono);
-  max-height: 120px;
-}
+/* 消息正文 / 推理 / 工具调用样式已抽至 @/styles/messageRender.css（单一来源） */
 
 /* Enhanced Attachments */
 .nr-msg-attachments {
@@ -3341,116 +3087,7 @@ onBeforeUnmount(() => {
 }
 
 /* ── 步骤化时间轴（三需求②）：推理/工具按到达顺序，独立折叠 ─────────── */
-.nr-steps-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 4px 0 8px;
-  position: relative;
-}
-
-.nr-step-item {
-  border: 1px solid var(--nr-border, rgba(128, 128, 128, 0.2));
-  border-radius: 10px;
-  background: var(--nr-bg-tertiary, rgba(120, 120, 140, 0.06));
-  overflow: hidden;
-}
-
-.nr-step-header {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 10px;
-  cursor: pointer;
-  user-select: none;
-  min-width: 0;
-}
-
-.nr-step-header:hover {
-  background: rgba(120, 170, 255, 0.07);
-}
-
-.nr-step-icon {
-  font-size: 13px;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.nr-step-title {
-  font-size: 12px;
-  color: var(--nr-text-secondary, #9aa0ac);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 活跃段标题扫光：文字渐变高光横扫（进行中语义，结束即灭） */
-.nr-step-item.is-active .nr-step-title {
-  background: linear-gradient(90deg, var(--nr-text-secondary, #9aa0ac) 35%, #cfe1ff 50%, var(--nr-text-secondary, #9aa0ac) 65%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: nr-step-shimmer 1.6s linear infinite;
-}
-
-@keyframes nr-step-shimmer {
-  0% { background-position: 100% 0; }
-  100% { background-position: -100% 0; }
-}
-
-.nr-step-badge {
-  font-size: 10px;
-  line-height: 1;
-  padding: 2px 7px;
-  border-radius: 999px;
-  flex-shrink: 0;
-  color: var(--nr-text-tertiary, #8a8f99);
-  background: rgba(128, 128, 140, 0.14);
-}
-
-.nr-step-badge.is-running {
-  color: #6aa5ff;
-  background: rgba(106, 165, 255, 0.14);
-}
-
-.nr-step-badge.is-done {
-  color: #67c23a;
-  background: rgba(103, 194, 58, 0.13);
-}
-
-.nr-step-badge.is-error {
-  color: #e6a23c;
-  background: rgba(230, 162, 60, 0.13);
-}
-
-.nr-step-duration {
-  font-size: 10px;
-  color: var(--nr-text-tertiary, #7a7f8a);
-  flex-shrink: 0;
-}
-
-.nr-step-toggle {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--nr-text-tertiary, #7a7f8a);
-  flex-shrink: 0;
-}
-
-.nr-step-body {
-  padding: 4px 10px 8px;
-  border-top: 1px dashed var(--nr-border, rgba(128, 128, 128, 0.15));
-}
-
-.nr-step-reasoning {
-  font-size: 12px;
-  line-height: 1.7;
-  color: var(--nr-text-secondary, #9aa0ac);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 320px;
-  overflow-y: auto;
-}
+/* 步骤时间轴样式已抽至 @/styles/messageRender.css（单一来源） */
 
 @keyframes typing {
   0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
@@ -3460,273 +3097,9 @@ onBeforeUnmount(() => {
 /* Input Area */
 /* ASR Recording Bar */
 /* Composer 一体化外壳（参考图：textarea+工具条同框，边框聚焦态由外壳承载） */
-/* Rich Content: Code Blocks */
-:deep(.nr-code-wrap) {
-  margin: 10px 0;
-  border-radius: 10px;
-  overflow: hidden;
-  background: var(--nr-bg-inset-deep);
-  border: 1px solid var(--nr-glass-border);
-}
+/* 正文代码块/图片/链接/Markdown 块级/hljs 配色均已抽至 @/styles/messageRender.css（单一来源） */
 
-:deep(.nr-code-header) {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 14px;
-  background: var(--nr-glass-bg);
-  border-bottom: 1px solid var(--nr-glass-border);
-}
-
-:deep(.nr-code-lang) {
-  font-size: 11px;
-  color: var(--nr-primary-light);
-  font-family: var(--nr-font-mono);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-:deep(.nr-code-copy-btn) {
-  background: var(--nr-glass-bg-hover);
-  border: 1px solid var(--nr-glass-border);
-  border-radius: 4px;
-  padding: 1px 8px;
-  font-size: 11px;
-  color: var(--nr-text-muted);
-  cursor: pointer;
-  transition: background 0.2s, color 0.2s;
-}
-
-:deep(.nr-code-copy-btn:hover) {
-  background: var(--nr-glass-bg-active);
-  color: var(--nr-text-primary);
-}
-
-:deep(.nr-code-block) {
-  background: transparent;
-  border: none;
-  border-radius: 0;
-  padding: 10px 14px;
-  overflow-x: auto;
-  font-family: var(--nr-font-mono);
-  font-size: 12px;
-  line-height: 1.6;
-  margin: 0;
-}
-
-:deep(.nr-code-inline) {
-  background: var(--nr-bg-inset);
-  border-radius: 4px;
-  padding: 1px 5px;
-  font-family: var(--nr-font-mono);
-  font-size: 0.9em;
-  color: var(--nr-accent-secondary);
-}
-
-/* Rich Content: Inline Images */
-:deep(.nr-inline-image) {
-  margin: 10px 0;
-  display: inline-block;
-  max-width: 100%;
-  cursor: pointer;
-  border-radius: 10px;
-  overflow: hidden;
-  border: 1px solid var(--nr-glass-border);
-  transition: border-color 0.2s;
-}
-
-:deep(.nr-inline-image:hover) {
-  border-color: color-mix(in srgb, var(--nr-primary) 30%, transparent);
-}
-
-:deep(.nr-inline-image img) {
-  display: block;
-  max-width: 100%;
-  max-height: 400px;
-  object-fit: contain;
-}
-
-:deep(.nr-img-caption) {
-  display: block;
-  padding: 6px 12px;
-  font-size: 11px;
-  color: var(--nr-text-muted);
-  background: var(--nr-bg-inset);
-  text-align: center;
-}
-
-/* Message Links */
-:deep(.nr-msg-link) {
-  color: var(--nr-primary-light);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-:deep(.nr-msg-link:hover) {
-  color: var(--nr-accent);
-}
-
-/* Rich Content: Markdown 块级元素 (标题/列表/引用/表格) */
-:deep(.nr-msg-content) {
-  line-height: 1.65;
-}
-
-:deep(.nr-msg-content h1),
-:deep(.nr-msg-content h2),
-:deep(.nr-msg-content h3),
-:deep(.nr-msg-content h4),
-:deep(.nr-msg-content h5),
-:deep(.nr-msg-content h6) {
-  margin: 0.9em 0 0.45em;
-  font-weight: 600;
-  color: var(--nr-text-primary);
-  line-height: 1.35;
-}
-
-:deep(.nr-msg-content h1) {
-  font-size: 1.35em;
-  border-bottom: 1px solid var(--nr-glass-border);
-  padding-bottom: 0.25em;
-}
-
-:deep(.nr-msg-content h2) {
-  font-size: 1.2em;
-}
-
-:deep(.nr-msg-content h3) {
-  font-size: 1.1em;
-}
-
-:deep(.nr-msg-content h4),
-:deep(.nr-msg-content h5),
-:deep(.nr-msg-content h6) {
-  font-size: 1em;
-}
-
-:deep(.nr-msg-content ul),
-:deep(.nr-msg-content ol) {
-  margin: 0.4em 0 0.8em;
-  padding-left: 1.5em;
-}
-
-:deep(.nr-msg-content ul) {
-  list-style: disc;
-}
-
-:deep(.nr-msg-content ol) {
-  list-style: decimal;
-}
-
-:deep(.nr-msg-content li) {
-  margin: 0.2em 0;
-}
-
-:deep(.nr-msg-content blockquote) {
-  margin: 0.6em 0;
-  padding: 0.3em 0.9em;
-  border-left: 3px solid var(--nr-primary);
-  background: var(--nr-bg-inset);
-  border-radius: 0 6px 6px 0;
-  color: var(--nr-text-secondary);
-}
-
-:deep(.nr-msg-content table) {
-  border-collapse: collapse;
-  margin: 0.6em 0;
-  max-width: 100%;
-  display: block;
-  overflow-x: auto;
-  font-size: 0.92em;
-}
-
-:deep(.nr-msg-content th),
-:deep(.nr-msg-content td) {
-  border: 1px solid var(--nr-glass-border);
-  padding: 5px 10px;
-}
-
-:deep(.nr-msg-content th) {
-  background: var(--nr-glass-bg);
-  font-weight: 600;
-}
-
-:deep(.nr-msg-content p) {
-  margin: 0.35em 0;
-}
-
-:deep(.nr-msg-content :not(pre) > code) {
-  background: var(--nr-bg-inset);
-  border-radius: 4px;
-  padding: 1px 5px;
-  font-family: var(--nr-font-mono);
-  font-size: 0.9em;
-  color: var(--nr-accent-secondary);
-}
-
-:deep(.nr-msg-content hr) {
-  border: none;
-  border-top: 1px solid var(--nr-glass-border);
-  margin: 0.9em 0;
-}
-
-/* Rich Content: highlight.js token 配色 (玻璃暗色系) */
-:deep(.nr-code-block .hljs-comment),
-:deep(.nr-code-block .hljs-quote) {
-  color: #6b7280;
-  font-style: italic;
-}
-
-:deep(.nr-code-block .hljs-keyword),
-:deep(.nr-code-block .hljs-selector-tag),
-:deep(.nr-code-block .hljs-meta) {
-  color: #c792ea;
-}
-
-:deep(.nr-code-block .hljs-string),
-:deep(.nr-code-block .hljs-regexp),
-:deep(.nr-code-block .hljs-symbol) {
-  color: #7ec699;
-}
-
-:deep(.nr-code-block .hljs-number),
-:deep(.nr-code-block .hljs-literal) {
-  color: #f78c6c;
-}
-
-:deep(.nr-code-block .hljs-title),
-:deep(.nr-code-block .hljs-title.class_),
-:deep(.nr-code-block .hljs-title.function_),
-:deep(.nr-code-block .hljs-section) {
-  color: #82aaff;
-}
-
-:deep(.nr-code-block .hljs-built_in),
-:deep(.nr-code-block .hljs-attr),
-:deep(.nr-code-block .hljs-attribute),
-:deep(.nr-code-block .hljs-variable),
-:deep(.nr-code-block .hljs-template-variable) {
-  color: #ffcb6b;
-}
-
-:deep(.nr-code-block .hljs-tag),
-:deep(.nr-code-block .hljs-name),
-:deep(.nr-code-block .hljs-selector-tag) {
-  color: #f07178;
-}
-
-:deep(.nr-code-block .hljs-params),
-:deep(.nr-code-block .hljs-type) {
-  color: #eeffff;
-}
-
-:deep(.nr-code-block .hljs-function) {
-  color: #82aaff;
-}
-
-:deep(.nr-code-block .hljs-punctuation),
-:deep(.nr-code-block .hljs-operator) {
-  color: #89ddff;
-}
+/* 正文 Markdown 块级元素与 hljs token 配色已抽至 @/styles/messageRender.css（单一来源） */
 
 /* Lightbox */
 /* Transitions */
