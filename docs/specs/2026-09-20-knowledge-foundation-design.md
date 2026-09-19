@@ -314,6 +314,11 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 - 三态纪律（ADR 0016）：读数取不到即 `unevidenced`，绝不按 `passed` 处理。
 - 治理指标（溯源覆盖率、重复率、零使用条目占比、TKG 命中率从 0 到有）为辅证，不单独作为"变好了"的结论。
 
+### 8.0 011 否证结果（2026-09-20）
+读面开闸在同语料同尺子下 recall@5 0.855489 → **0.760371**、未命中率 0.100 → 0.167：
+两池秩交织让短事实凭 BM25 优势顶掉强叙述命中。**011 不启用**，E2 读路径改走 019 先行
+（事实成权威源后不存在两池）。关闸态与基线逐位一致，旧行为未受影响。
+
 ### 8.1 E1 前冻结的真实基线（工单 002，2026-09-20 实测）
 
 台架：`neurova/knowledge/evaluation/retrieval_benchmark.py`，库 `data/knowledge/knowledge_evaluation.db`，
@@ -395,6 +400,14 @@ case 集与基线摘要已导出入库：`tests/fixtures/knowledge_eval_cases.js
 归因方法：把本批写入围栏用补丁摘掉后同样 15 失败 ⇒ 与本批无关；日志显示失败面在 `skill_service`
 （"No manifest found, starting with empty skills"）与文件库，属技能/文件域，且这些测试文件本身 tracked 未改。
 处置：登记不修（越界），E2 出口判据要求这 15 个不新增失败。
+
+2026-09-20 011 实施期又登记 1 个，同样非本批引起：
+`tests/unit/core/test_agent_skill_packer_init.py::test_has_correct_param_name` 断言
+`agent_core.py` 源码含 `min_pattern_occurrences=`，而 `neurova/agent_core.py` 与
+`neurova/skills/experience_knowledge_base.py` 此刻都在他人的未提交改动里。
+本批未触碰这两个文件（提交面只有 `neurova/knowledge/`、`neurova/agent/knowledge_retriever_adapter.py`、
+`neurova/api/endpoints/knowledge_core.py`、`tests/`、`docs/`）。全量口径：`tests/unit` +
+`tests/api` + `tests/core` 2369 passed / 1 failed（即上述这个）。
 
 另有 `tests/benchmarks/test_multi_agent_coordination.py:413` 未导入 `Optional` 导致全仓收集中断——
 该目录未入库（`??`），属他人在途件，本批不触碰，跑套件时需 `--ignore=tests/benchmarks`。

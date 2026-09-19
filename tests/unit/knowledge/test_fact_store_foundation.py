@@ -152,3 +152,25 @@ class TestAdmissionSkeleton:
 
         assert first.factId == second.factId
         assert store.factCount() == 1
+
+
+class TestMigrationVersions:
+    def test_everyTableExistsAfterMigrationChain(self, store):
+        """v1 发布后新增的结构必须走新版本号，否则老库永远拿不到它（工单 011 真数据回填炸过）。"""
+        names = {r[0] for r in store._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+
+        assert {'knowledge_subjects', 'knowledge_facts', 'knowledge_activities',
+                'knowledge_assertions', 'knowledge_conflicts'} <= names
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 3
+
+    def test_reopeningAnExistingDbStillUpgrades(self, tmp_path):
+        first = KnowledgeFactStore(str(tmp_path / 'reopen.db'))
+        first.close()
+
+        second = KnowledgeFactStore(str(tmp_path / 'reopen.db'))
+        names = {r[0] for r in second._conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        second.close()
+
+        assert 'knowledge_assertions' in names
