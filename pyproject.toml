@@ -108,6 +108,16 @@ addopts = "-v --tb=short --import-mode=importlib"
 # pytest-timeout 全局挂死保护（Windows 自动用 thread 方法，Linux 用 signal）；
 # 慢测试用 @pytest.mark.timeout(N) 单独放宽，CLI --timeout 可临时覆盖
 timeout = 30
+# 精准屏蔽第三方 SDK 生命周期噪声：lark_oapi 的 lark.Client 内部 ExpiringCache 会起后台
+# asyncio cron，测试事件循环关闭后才被 GC，__del__→cancel() 抛 "Event loop is closed"（经
+# PytestUnraisableExceptionWarning）。非本仓代码缺陷、非测试失败，且无法在不改 vendored SDK
+# 前提下根治。仅屏蔽该 ExpiringCache.__del__ 一条，其余 unraisable 照常暴露。
+filterwarnings = [
+    "ignore:Exception ignored in.*ExpiringCache.*__del__:pytest.PytestUnraisableExceptionWarning",
+]
+markers = [
+    "slow: 全库扫描等耗时测试（node guard 扫 953 文件），默认仍随 pytest 运行，可用 -m 'not slow' 跳过",
+]
 
 [tool.coverage.run]
 # P0-6：CI 覆盖率门禁的度量范围 = 受保护子集实际 exercising 的模块。

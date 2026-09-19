@@ -411,3 +411,6 @@ agent_workspaces/kai/
 
 # 研究参考仓库克隆（ulab-uiuc/Thought-Retriever，本地留档）：gitlink 无 .gitmodules 系误提交，干净检出即坏；目录整体不跟踪
 thought-retriever-src/
+
+# 第三方产品参考克隆（本地留档）：与 thought-retriever-src 同策略，目录整体不入库
+cumora/
