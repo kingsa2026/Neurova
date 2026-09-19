@@ -380,6 +380,31 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 另有 `tests/benchmarks/test_multi_agent_coordination.py:413` 未导入 `Optional` 导致全仓收集中断——
 该目录未入库（`??`），属他人在途件，本批不触碰，跑套件时需 `--ignore=tests/benchmarks`。
 
+**跑全仓套件的第二个阻断点（2026-09-20 实施期实测）**：
+`tests/unit/neurflow/test_approval_reply_mechanism.py:48` 的 `asyncio.run(exec_approval(...))`
+挂满 30s 触发 pytest-timeout，而本仓 timeout 方法为 `thread`（Windows），超时即**杀掉整个会话进程**，
+输出只剩一段栈回溯——表现为"跑不出结果"而不是"有一个失败"。
+判据：`pytest tests/unit tests/api --ignore=tests/benchmarks` 无法产出 passed/failed 汇总；
+加 `--ignore=tests/unit/neurflow` 后可跑完。归因未做（属 neurflow 在途面），
+E2 出口判据要求：**要么该用例修好，要么给出可控的超时口径**，否则任何全仓验证都是假绿。
+
+### 11.6 实施进度快照（E0 完成、E1 进行中）
+
+| 工单 | 状态 | 证据 |
+|---|---|---|
+| 001 写入围栏 | 完成 | 5 用例；生产库哈希跑测前后不变 |
+| 002 评测台架 | 完成 | 13 用例；基线 recall@5 0.8555 / MRR 0.8300 已冻结 |
+| 003 底座立骨 | 完成 | 16 用例；两表全列 + admit 骨架 + 缺段显式抛 |
+| 004 内容归一段 | 完成 | 12 用例；审计复现 130/92/38/19 组 |
+| 005 溯源段 | 完成 | 15 用例；匿名断言写入前即拒 |
+| 006 确定性消解 | 完成 | 25+5 用例；零 LLM 静态守卫、候选对 < 600（全对 19900） |
+| 008 事实生命周期 | 完成 | 41 用例；supersede/expire/retract，只加行为不改表 |
+| 007 / 009 / 010 / 015 | 未开工 | 007 依赖已就绪（006 完成），是当前前沿 |
+
+`tests/unit/knowledge/` + 相关 api 用例：395 passed（起点基线 265）。
+新增常驻守卫 2 条：生产库写入围栏用例、pytest 收集卫生守卫
+（`test_pytest_collection_hygiene.py`——实施期三次把用例写成 `def testXxx` 导致整份文件静默不跑）。
+
 ---
 
 ## 12. 遵循的既有约束与下一步
