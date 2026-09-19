@@ -21,6 +21,7 @@
 | [0013](./0013-unify-skill-market-endpoints.md) | 统一技能市场端点（4 套→1 套） | Accepted | 2026-07-14 |
 | [0014](./0014-connection-pool-short-lived-only.md) | 连接池只管短连接（常驻连接不进池） | Accepted | 2026-09-18 |
 | [0015](./0015-context-pool-retention-contract.md) | ContextPool 回收契约（归档无损 + 显式常驻上限 + 读路径索引） | Accepted | 2026-09-18 |
+| [0016](./0016-rsi-parameter-source-of-truth.md) | RSI 可优化参数的事实源（四类角色各自唯一 + 边界全登记） | Accepted | 2026-09-19 |
 
 ## 主题分类
 
@@ -50,6 +51,9 @@
 
 ### 上下文处理
 - [ADR 0015: ContextPool 回收契约](./0015-context-pool-retention-contract.md) — 归档无损 / 显式常驻上限 / 读路径分区索引
+
+### 进化系统（RSI）
+- [ADR 0016: RSI 可优化参数的事实源](./0016-rsi-parameter-source-of-truth.md) — 清单/目标/边界/起点四类各唯一；"起点≠目标"是设计意图
 
 ## ADR 编写规范
 

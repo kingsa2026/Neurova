@@ -196,12 +196,19 @@ class TestPostChatPipelineRSI(unittest.TestCase):
         self.assertIsNone(result)
     
     def test_step_rsi_iteration_with_orchestrator(self):
-        """有 RSI 编排器时应该执行迭代"""
+        """有 RSI 编排器且节奏为 run 时应执行迭代。
+
+        工单 008：派发依据从 `should_continue()` 二态开关换成 `iteration_cadence()`。
+        这里同时锁"should_continue 不再参与派发"——它一旦又被调用，
+        说明"收敛即永久停止"的老路径回来了（本单要修的就是这个）。
+        """
+        from neurova.evolution.rsi.orchestrator import IterationCadence
         from neurova.post_chat_pipeline import PostChatPipeline
         
         agent = MagicMock()
         mock_orchestrator = MagicMock()
-        mock_orchestrator.should_continue.return_value = True
+        mock_orchestrator.iteration_cadence.return_value = IterationCadence(
+            mode="run", basis="converging", evidence="窗口 20 轮内有效测量 3 轮")
         mock_orchestrator.run_iteration.return_value = {
             'feedback_signals': {},
             'convergence': {'status': 'insufficient_data'},
@@ -215,25 +222,37 @@ class TestPostChatPipelineRSI(unittest.TestCase):
         result = asyncio.run(pipeline._step_rsi_iteration())
         
         self.assertIsNotNone(result)
-        mock_orchestrator.should_continue.assert_called_once()
+        mock_orchestrator.iteration_cadence.assert_called_once()
         mock_orchestrator.run_iteration.assert_called_once()
+        mock_orchestrator.should_continue.assert_not_called()
     
-    def test_step_rsi_iteration_should_not_continue(self):
-        """RSI 不应该继续时不应该执行迭代"""
-        from neurova.post_chat_pipeline import PostChatPipeline
+    def test_step_rsi_iteration_backoff_outside_patrol_window(self):
+        """降频档 + 不在巡检窗口 → 本轮不跑，且 SKIPPED 要带得出判据。
+
+        取代原 `should_continue()==False 即永不迭代` 的语义：backoff 是"少跑"，
+        窗口内仍会跑（见 tests/unit/agent/test_rsi_dispatch_cadence.py）。
+        """
+        from neurova.core.turn_context import increment_turn_count, set_turn_identity
+        from neurova.evolution.rsi.orchestrator import IterationCadence
+        from neurova.post_chat_pipeline import PostChatPipeline, StepStatus
         
         agent = MagicMock()
         mock_orchestrator = MagicMock()
-        mock_orchestrator.should_continue.return_value = False
+        mock_orchestrator.iteration_cadence.return_value = IterationCadence(
+            mode="backoff", basis="converged", evidence="窗口 20 轮内有效测量 20 轮")
         agent.rsi_orchestrator = mock_orchestrator
         
         pipeline = PostChatPipeline(agent)
+        set_turn_identity("hi", "s-rsi-backoff-off-window")
+        increment_turn_count()  # 第 1 轮：不在每 20 轮的巡检窗口上
         
         result = asyncio.run(pipeline._step_rsi_iteration())
         
         self.assertIsNone(result)
-        mock_orchestrator.should_continue.assert_called_once()
         mock_orchestrator.run_iteration.assert_not_called()
+        skipped = [r for r in pipeline._step_results if r.status == StepStatus.SKIPPED]
+        self.assertTrue(skipped, "本轮不跑必须留下 SKIPPED 痕迹")
+        self.assertIn("converged", skipped[-1].message)
 
 
 class TestRSIOptimizableParameters(unittest.TestCase):

@@ -71,10 +71,15 @@ def main():
             print(f"Warning: 进化权重恢复失败（忽略）: {_persist_err}")
 
         # C12：RSI 优化回执路径（显式注入，保单例零 IO 默认）
+        # 工单 004：回滚时间线（回滚历史 + 装配时刻）同款注入 ——
+        # 它是 phase 1→2"7 天无回滚"判据的唯一真实数据来源，
+        # 不设则该起算点每次重启归零，晋升条件在真实部署里永不可满足。
+        # 必须在 agent 构造 RSIOrchestrator 之前注入。
         try:
             import os as _os
 
             _os.environ.setdefault("NEUROVA_RSI_RECEIPTS", "data/evolution/rsi_receipts.jsonl")
+            _os.environ.setdefault("NEUROVA_EVOLUTION_ROLLBACK", "data/evolution/rsi_rollback.json")
         except Exception as _receipt_err:  # noqa: BLE001
             print(f"Warning: 回执路径注入失败（忽略）: {_receipt_err}")
 

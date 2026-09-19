@@ -30,7 +30,12 @@ logger = get_logger(__name__)
 
 
 def _param(live_params: Dict[str, Dict[str, Any]], system: str, name: str) -> Tuple[Any, bool]:
-    """读活参数值；系统未暴露（None）时回退 setpoint（返回值, 是否回退）。"""
+    """读活参数值；系统未暴露（None）时回退 setpoint（返回值, 是否回退）。
+
+    工单 006/007：回退标志现在真的被消费 —— 用例据此自报"我量的是真实参数
+    还是抄来的目标值"。此前它只被拼进 detail 字符串，
+    `overall` 的分母照单全收，于是"系统没暴露参数"表现为满分。
+    """
     from .system_performance import get_setpoint
 
     value = (live_params or {}).get(system, {}).get(name)
@@ -42,7 +47,7 @@ def _param(live_params: Dict[str, Dict[str, Any]], system: str, name: str) -> Tu
 # ────── tool_memory 族 ──────
 
 
-def _case_tm_multiplier_differentiation(live_params) -> Tuple[float, str]:
+def _case_tm_multiplier_differentiation(live_params) -> Tuple[float, str, bool]:
     """奖惩分化：近期同为 50% 成功率的两个工具，最近回暖者必须权重更高。
 
     敏感性：success_bonus→0（好工具不涨）或 failure_penalty→0（坏工具不跌）
@@ -52,7 +57,7 @@ def _case_tm_multiplier_differentiation(live_params) -> Tuple[float, str]:
 
     bonus, fb1 = _param(live_params, "tool_memory", "success_bonus")
     penalty, fb2 = _param(live_params, "tool_memory", "failure_penalty")
-    decay, _ = _param(live_params, "tool_memory", "decay_rate")
+    decay, fb3 = _param(live_params, "tool_memory", "decay_rate")
     weights = AdaptiveToolWeights(
         success_bonus=float(bonus), failure_penalty=float(penalty), decay_rate=float(decay)
     )
@@ -66,11 +71,11 @@ def _case_tm_multiplier_differentiation(live_params) -> Tuple[float, str]:
     # 满分线 0.05：与设计默认 failure_penalty=0.05 对齐（该默认下
     # 好坏分化 margin≈0.06 应得满分；margin→0 的失活漂移仍被捕获）
     score = 1.0 if margin >= 0.05 else (0.5 if margin > 0 else 0.0)
-    fallback = "（含 setpoint 回退）" if fb1 or fb2 else ""
-    return score, f"乘数差 {margin:.3f}{fallback}"
+    evidenced = not (fb1 or fb2 or fb3)
+    return score, f"乘数差 {margin:.3f}" + ("" if evidenced else "（含 setpoint 回退）"), evidenced
 
 
-def _case_tm_decay_forgetting_band(live_params) -> Tuple[float, str]:
+def _case_tm_decay_forgetting_band(live_params) -> Tuple[float, str, bool]:
     """遗忘带宽：闲置 2 小时的工具乘数必须下降但不许击穿下限。
 
     敏感性：decay_rate→0（永不遗忘，乘数原样）或 →1.0（瞬间清零击穿下限）
@@ -80,9 +85,9 @@ def _case_tm_decay_forgetting_band(live_params) -> Tuple[float, str]:
 
     from neurova.evolution.closed_loop import AdaptiveToolWeights
 
-    bonus, _ = _param(live_params, "tool_memory", "success_bonus")
-    penalty, _ = _param(live_params, "tool_memory", "failure_penalty")
-    decay, fb = _param(live_params, "tool_memory", "decay_rate")
+    bonus, fb1 = _param(live_params, "tool_memory", "success_bonus")
+    penalty, fb2 = _param(live_params, "tool_memory", "failure_penalty")
+    decay, fb3 = _param(live_params, "tool_memory", "decay_rate")
     weights = AdaptiveToolWeights(
         success_bonus=float(bonus), failure_penalty=float(penalty), decay_rate=float(decay)
     )
@@ -94,32 +99,42 @@ def _case_tm_decay_forgetting_band(live_params) -> Tuple[float, str]:
     weight.last_used = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=2)
     decayed = weights.get_effective_multiplier("tool_x")
     score = 1.0 if weights.min_multiplier < decayed < pre else 0.0
-    return score, f"乘数 {pre:.3f} → 闲置后 {decayed:.3f}（下限 {weights.min_multiplier}）{ '（setpoint 回退）' if fb else ''}"
+    evidenced = not (fb1 or fb2 or fb3)
+    return score, (
+        f"乘数 {pre:.3f} → 闲置后 {decayed:.3f}（下限 {weights.min_multiplier}）"
+        + ("" if evidenced else "（含 setpoint 回退）")
+    ), evidenced
 
 
-def _case_tm_threshold_band(live_params) -> Tuple[float, str]:
+def _case_tm_threshold_band(live_params) -> Tuple[float, str, bool]:
     """肌肉记忆阈值语义域：置信度类阈值必须落在 (0, 1]（越界即行为死亡）。"""
     value, fb = _param(live_params, "tool_memory", "muscle_memory_threshold")
     try:
         value_f = float(value)
     except (TypeError, ValueError):
-        return 0.0, f"阈值非法: {value!r}"
+        # 坏值由真实系统给出 —— 这是有证据的失分，不是量不出来
+        return 0.0, f"阈值非法: {value!r}", not fb
     score = 1.0 if 0.0 < value_f <= 1.0 else 0.0
-    return score, f"muscle_memory_threshold={value_f}{ '（setpoint 回退）' if fb else ''}"
+    return score, (
+        f"muscle_memory_threshold={value_f}" + ("" if not fb else "（setpoint 回退）")
+    ), not fb
 
 
 # ────── sleep 族 ──────
 
 
-def _sleep_fixture(live_params):
+def _sleep_fixture(live_params) -> Tuple[Any, bool]:
+    """构造睡眠整合引擎夹具；第二项为"两个参数是否都来自真实暴露值"。"""
     from neurova.cognitive_layers.memory_layer.sleep import SleepConsolidation
 
-    sim_thr, _ = _param(live_params, "sleep", "similarity_threshold")
-    decay, _ = _param(live_params, "sleep", "base_decay_rate")
-    return SleepConsolidation(similarity_threshold=float(sim_thr), decay_rate=float(decay))
+    sim_thr, fb1 = _param(live_params, "sleep", "similarity_threshold")
+    decay, fb2 = _param(live_params, "sleep", "base_decay_rate")
+    return SleepConsolidation(
+        similarity_threshold=float(sim_thr), decay_rate=float(decay)
+    ), not (fb1 or fb2)
 
 
-def _case_sl_dedup_band(live_params) -> Tuple[float, str]:
+def _case_sl_dedup_band(live_params) -> Tuple[float, str, bool]:
     """相似合并带宽：近似重复对必须合并，不相关记忆必须幸存。
 
     敏感性：merge_threshold→1.0（欠合并：0.99 相似对也不再合并）或
@@ -127,7 +142,7 @@ def _case_sl_dedup_band(live_params) -> Tuple[float, str]:
     """
     from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord
 
-    sleep = _sleep_fixture(live_params)
+    sleep, evidenced = _sleep_fixture(live_params)
     dup_a = MemoryRecord(id="dup_a", content="dup a", embedding=[1.0, 0.0])
     dup_b = MemoryRecord(id="dup_b", content="dup b", embedding=[0.99, 0.141])  # cos≈0.99
     other = MemoryRecord(id="other", content="other", embedding=[0.2, 0.98])  # cos≈0.2
@@ -140,19 +155,20 @@ def _case_sl_dedup_band(live_params) -> Tuple[float, str]:
         m.id == "other" and not m.merged_from for m in merged_memories
     )
     score = 1.0 if (did_merge and other_survived) else 0.0
-    return score, f"3 条记忆整合后 {len(merged_memories)} 条（期望 2）, 无关记忆幸存={other_survived}"
+    return score, (
+        f"3 条记忆整合后 {len(merged_memories)} 条（期望 2）, 无关记忆幸存={other_survived}"
+        + ("" if evidenced else "（含 setpoint 回退）")
+    ), evidenced
 
 
-def _case_sl_decay_band(live_params) -> Tuple[float, str]:
+def _case_sl_decay_band(live_params) -> Tuple[float, str, bool]:
     """睡眠衰减带宽：闲置记忆温度必须下降但不许击穿归档线。
 
     敏感性：base_decay_rate→0（温度原样）或 →1.0（直接归档）→ 扣分。
     """
-    import time as _time
-
     from neurova.cognitive_layers.memory_layer.sleep import MemoryRecord
 
-    sleep = _sleep_fixture(live_params)
+    sleep, evidenced = _sleep_fixture(live_params)
     # 温度必须 <80：高温记忆被引擎视为固化不衰减（守卫分支）
     memory = MemoryRecord(
         id="m1",
@@ -164,7 +180,10 @@ def _case_sl_decay_band(live_params) -> Tuple[float, str]:
     )
     sleep.apply_sleep_decay([memory])
     score = 1.0 if sleep.archive_threshold < memory.temperature < 60.0 else 0.0
-    return score, f"温度 60.0 → {memory.temperature:.1f}（归档线 {sleep.archive_threshold}）"
+    return score, (
+        f"温度 60.0 → {memory.temperature:.1f}（归档线 {sleep.archive_threshold}）"
+        + ("" if evidenced else "（含 setpoint 回退）")
+    ), evidenced
 
 
 # ────── emotion 族 ──────
@@ -172,26 +191,26 @@ def _case_sl_decay_band(live_params) -> Tuple[float, str]:
 # 情感保护的实际消费方）；factor ≤1 = 保护，>1 = 惩罚（方向性违反）。
 
 
-def _emotion_fixture(live_params):
+def _emotion_fixture(live_params) -> Tuple[Any, bool]:
     from neurova.cognitive_layers.memory_layer.temperature import TemperatureEngine
 
-    threshold, _ = _param(live_params, "emotion", "emotional_protection_threshold")
-    factor, _ = _param(live_params, "emotion", "emotional_protection_factor")
+    threshold, fb1 = _param(live_params, "emotion", "emotional_protection_threshold")
+    factor, fb2 = _param(live_params, "emotion", "emotional_protection_factor")
     return TemperatureEngine(
         base_decay_rate=0.1,
         emotional_protection_threshold=float(threshold),
         emotional_protection_factor=float(factor),
-    )
+    ), not (fb1 or fb2)
 
 
-def _case_em_protection_direction(live_params) -> Tuple[float, str]:
+def _case_em_protection_direction(live_params) -> Tuple[float, str, bool]:
     """保护方向（严格）：情感记忆（0.9）必须比中性记忆（0.1）衰减得更慢。
 
     setpoint factor=0.3（保护开启）下严格成立；factor→1.0（保护失活，
     两者同速）或 >1.0（情感记忆被加速遗忘）均失分——保护特性必须可观测。
     threshold 漂移出 [0,1] 语义域使 0.9 分记忆失去保护 → 同样失分。
     """
-    engine = _emotion_fixture(live_params)
+    engine, evidenced = _emotion_fixture(live_params)
     last3 = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=3)).isoformat()
     # 温度 60：高温(≥80)记忆被引擎视为固化不衰减
     r_emotional = engine.on_decay(60.0, last_accessed=last3, importance=0.5, emotion_score=0.9)
@@ -199,18 +218,24 @@ def _case_em_protection_direction(live_params) -> Tuple[float, str]:
     t_e = float(r_emotional["new_temp"])
     t_n = float(r_neutral["new_temp"])
     score = 1.0 if t_e > t_n else 0.0
-    return score, f"情感记忆 {t_e:.1f} vs 中性 {t_n:.1f}（须严格更慢）"
+    return score, (
+        f"情感记忆 {t_e:.1f} vs 中性 {t_n:.1f}（须严格更慢）"
+        + ("" if evidenced else "（含 setpoint 回退）")
+    ), evidenced
 
 
-def _case_em_threshold_band(live_params) -> Tuple[float, str]:
+def _case_em_threshold_band(live_params) -> Tuple[float, str, bool]:
     """保护阈值语义域：情感分数归一于 [0,1]，阈值越界即保护永久失活。"""
     value, fb = _param(live_params, "emotion", "emotional_protection_threshold")
     try:
         value_f = float(value)
     except (TypeError, ValueError):
-        return 0.0, f"阈值非法: {value!r}"
+        return 0.0, f"阈值非法: {value!r}", not fb
     score = 1.0 if 0.0 < value_f <= 1.0 else 0.0
-    return score, f"emotional_protection_threshold={value_f}{ '（setpoint 回退）' if fb else ''}"
+    return score, (
+        f"emotional_protection_threshold={value_f}"
+        + ("" if not fb else "（setpoint 回退）")
+    ), not fb
 
 
 # ────── experience 族 ──────
@@ -240,13 +265,13 @@ def _crystallized_count(min_obs, min_rate, successes: int, failures: int) -> int
     return int(fb.get_feedback()["crystallized_patterns"])
 
 
-def _case_ex_crystallization_band(live_params) -> Tuple[float, str]:
+def _case_ex_crystallization_band(live_params) -> Tuple[float, str, bool]:
     """结晶门槛带宽（三个子断言）：
     4 观察 75% 必须结晶（欠严查）/ 2 观察 90% 不得结晶（门槛过松）/
     6 观察 33% 不得结晶（成功率门槛失守）。
     """
-    min_obs, _ = _param(live_params, "experience", "crystallize_min_observations")
-    min_rate, _ = _param(live_params, "experience", "crystallize_min_success_rate")
+    min_obs, fb1 = _param(live_params, "experience", "crystallize_min_observations")
+    min_rate, fb2 = _param(live_params, "experience", "crystallize_min_success_rate")
     sub_qualified = (
         _crystallized_count(min_obs, min_rate, successes=3, failures=1) == 1
     )
@@ -257,20 +282,24 @@ def _case_ex_crystallization_band(live_params) -> Tuple[float, str]:
         _crystallized_count(min_obs, min_rate, successes=2, failures=4) == 0
     )
     score = (sub_qualified + sub_under_qualified + sub_low_quality) / 3.0
-    return score, f"合格结晶={sub_qualified}, 欠观察不结晶={sub_under_qualified}, 低质不结晶={sub_low_quality}"
+    evidenced = not (fb1 or fb2)
+    return score, (
+        f"合格结晶={sub_qualified}, 欠观察不结晶={sub_under_qualified}, "
+        f"低质不结晶={sub_low_quality}" + ("" if evidenced else "（含 setpoint 回退）")
+    ), evidenced
 
 
-def _case_ex_pattern_support_band(live_params) -> Tuple[float, str]:
+def _case_ex_pattern_support_band(live_params) -> Tuple[float, str, bool]:
     """模式支持度带宽（桥接链路实测：属性 setter → PatternMiner.min_support）：
     3 次出现的序列必须被挖掘（过严查）/ 1 次出现的不得被挖掘（过松查）。
     """
     from neurova.evolution.closed_loop import PatternMiner
 
-    support, _ = _param(live_params, "experience", "pattern_min_support")
-    fb = ExperienceFeedback()
+    support, fb = _param(live_params, "experience", "pattern_min_support")
+    fb_obj = ExperienceFeedback()
     miner = PatternMiner()
-    fb.attach_pattern_miner(miner)
-    fb.pattern_min_support = support
+    fb_obj.attach_pattern_miner(miner)
+    fb_obj.pattern_min_support = support
 
     for _ in range(3):
         miner.add_sequence(["tool_alpha", "tool_beta"])
@@ -280,7 +309,10 @@ def _case_ex_pattern_support_band(live_params) -> Tuple[float, str]:
     frequent_mined = ("tool_alpha", "tool_beta") in patterns
     rare_excluded = ("tool_gamma", "tool_delta") not in patterns
     score = (frequent_mined + rare_excluded) / 2.0
-    return score, f"min_support={miner.min_support}, 高频挖掘={frequent_mined}, 低频排除={rare_excluded}"
+    return score, (
+        f"min_support={miner.min_support}, 高频挖掘={frequent_mined}, "
+        f"低频排除={rare_excluded}" + ("" if not fb else "（setpoint 回退）")
+    ), not fb
 
 
 # ────── 主类 ──────
@@ -299,21 +331,52 @@ EVAL_CASES = [
 
 
 class RSIEvalHarness:
-    """端到端评测集：四族参数 × 8 用例，输出 0..1 统一分数。
+    """端到端评测集：四族参数 × 9 用例，输出 0..1 统一分数。
 
     run() 完全确定性、零 LLM、零磁盘 IO、毫秒级——可在每次棘轮
     应用前后各跑一次作为 gain 度量。
+
+    工单 007：分数只由**有证据的用例**算出。系统未暴露某参数时该用例回退到
+    setpoint，等于"拿目标值验证是否达到目标值"，计入分母会把"没在测量"
+    伪装成满分。全部用例都无证据时返回 `state="measurement_blind"` 且
+    `score=None` —— 编排器据此区分"参数确实没改善"与"参数改了但量不出来"。
     """
+
+    STATE_MEASURED = "measured"
+    STATE_BLIND = "measurement_blind"
 
     def run(self, live_params: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         cases: List[Dict[str, Any]] = []
         for case_id, family, fn in EVAL_CASES:
             try:
-                score, detail = fn(live_params)
+                score, detail, evidenced = fn(live_params)
             except Exception as e:  # noqa: BLE001 - 坏参数可致子系统抛异常：该用例 0 分，评测不炸
-                score, detail = 0.0, f"case error: {e}"
+                # 抛异常说明真实参数把子系统打崩了 —— 这是**有证据的失分**，
+                # 不能归入"量不出来"，否则危害直接从分母里消失，比满分更糟。
+                score, detail, evidenced = 0.0, f"case error: {e}", True
             cases.append(
-                {"id": case_id, "family": family, "score": round(float(score), 4), "detail": detail}
+                {
+                    "id": case_id,
+                    "family": family,
+                    "score": round(float(score), 4),
+                    "evidenced": bool(evidenced),
+                    "detail": detail,
+                }
             )
-        overall = sum(c["score"] for c in cases) / len(cases) if cases else 0.0
-        return {"score": round(overall, 6), "cases": cases}
+
+        evidenced_scores = [c["score"] for c in cases if c["evidenced"]]
+        if not evidenced_scores:
+            return {
+                "score": None,
+                "state": self.STATE_BLIND,
+                "evidenced_cases": 0,
+                "blind_cases": len(cases),
+                "cases": cases,
+            }
+        return {
+            "score": round(sum(evidenced_scores) / len(evidenced_scores), 6),
+            "state": self.STATE_MEASURED,
+            "evidenced_cases": len(evidenced_scores),
+            "blind_cases": len(cases) - len(evidenced_scores),
+            "cases": cases,
+        }

@@ -67,3 +67,13 @@ tests/unit/test_dev_path_and_runtime_dep_guards.py
 tests/unit/context/test_context_pool_query_index.py
 tests/unit/context/test_context_pool_retention_contract.py
 tests/unit/execution/test_execution_engine_reset.py
+# RSI 进化闭环修复批 001-008 + 018（判据可证伪化）：三态判据、回滚留痕与天数起算、
+# roi 真值、评测分母与度量失明、降频巡检派发、参数事实源守卫、两条闭环基线
+tests/unit/evolution/rsi/test_gate_verdict.py
+tests/unit/evolution/rsi/test_parameter_source_of_truth.py
+tests/unit/evolution/rsi/test_rsi_rollback_evidence.py
+tests/unit/evolution/rsi/test_rsi_roi_truth.py
+tests/unit/evolution/rsi/test_eval_evidence_denominator.py
+tests/unit/evolution/rsi/test_convergence_evidence.py
+tests/unit/evolution/rsi/test_rsi_loop_baseline.py
+tests/unit/agent/test_rsi_dispatch_cadence.py
