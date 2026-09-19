@@ -132,6 +132,71 @@ class RetrievalBenchmark:
             ).fetchall()
         return {r["labeling_method"]: int(r["n"]) for r in rows}
 
+    # ── 基线快照的可移植面 ────────────────────────────────────
+    # 评测库与语料库都在 .gitignore 的 /data/ 下，只活在本机。基线要能被复查，
+    # 至少 case 集必须入库；否则"对比冻结基线"这句话换个人就跑不通。
+
+    def exportCases(self, path: str) -> int:
+        cases = self.cases()
+        payload = {
+            "schema": "neurova.knowledge.evaluation.cases/v1",
+            "case_count": len(cases),
+            "labeling_breakdown": self.labelingBreakdown(),
+            "cases": [
+                {
+                    "query": c["query"], "expected_ids": json.loads(c["expected_ids"] or "[]"),
+                    "domain": c["domain"], "labeling_method": c["labeling_method"],
+                    "created_by": c["created_by"],
+                }
+                for c in cases
+            ],
+        }
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return len(cases)
+
+    def loadCases(self, path: str) -> int:
+        """按 (口径, query) 幂等导入——已有即跳过，不重复堆案例。"""
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        if payload.get("schema") != "neurova.knowledge.evaluation.cases/v1":
+            raise ValueError("评测案例快照版本不符: %r" % payload.get("schema"))
+        existing = {(c["labeling_method"], c["query"]) for c in self.cases()}
+        loaded = 0
+        for case in payload["cases"]:
+            key = (case["labeling_method"], case["query"])
+            if key in existing:
+                continue
+            self.addCase(case["query"], case["expected_ids"], domain=case.get("domain", ""),
+                         createdBy=case.get("created_by", ""),
+                         labelingMethod=case["labeling_method"])
+            existing.add(key)
+            loaded += 1
+        return loaded
+
+    def baselineSnapshot(self) -> Dict[str, Any]:
+        """可入库的基线摘要，供复查与 011 前后对比引用。"""
+        baseline = self.baseline()
+        if baseline is None:
+            return {"measure_state": "unevidenced",
+                    "missing_reason": "尚未冻结基线", "case_count": self.caseCount()}
+        return {
+            "measure_state": baseline.get("measure_state"),
+            "run_id": baseline.get("run_id"),
+            "frozen_at": baseline.get("frozen_at"),
+            "case_count": baseline.get("case_count"),
+            "top_k": baseline.get("top_k"),
+            "context": json.loads(baseline.get("context_json") or "{}"),
+            "readings": {
+                "recall_at_k": baseline.get("recall_at_k"),
+                "mrr": baseline.get("mrr"),
+                "unhit_rate": baseline.get("unhit_rate"),
+            },
+            "labeling_breakdown": self.labelingBreakdown(),
+            "unhit_queries": [
+                f["query"] for f in self.findings(baseline["run_id"]) if f["unhit"]
+            ],
+        }
+
     def seedFromRepository(self, repo: Any, minCases: int = 30) -> int:
         """从真实条目自动标注：口径混合，不靠标题直取充数。
 

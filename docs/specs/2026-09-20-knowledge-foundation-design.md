@@ -335,6 +335,17 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 3. 3 例未命中全是泛化词（`architecture` / `general` / `big_verify`），属预期：期望集是"该类全部条目"，
    top-5 装不下一整类。它们的处置见 E2 的时效/置信排序项票。
 
+**基线可复查性（011 启动前复核，2026-09-20）**：重放同语境跑出 `0.855489 / 0.83 / 0.1`
+与冻结值**逐位一致**，未命中仍是同样 3 例，基线行未被覆盖（`is_baseline=1` 仍 1 条，runs 追加）。
+case 集与基线摘要已导出入库：`tests/fixtures/knowledge_eval_cases.json`（30 例，含口径标注）、
+`tests/fixtures/knowledge_eval_baseline.json`（读数 + 身份上下文 + 未命中清单）。
+
+**边界必须说清，别把"可移植"说过头**：case 集入库只防住"query 被悄悄改掉"这一种漂移；
+`expected_ids` 是本机 `data/knowledge/knowledge.json` 的 knowledge_id，而 `/data/` 在 .gitignore 内。
+因此基线**仍与本机语料绑定**——换机器跑会得到 0 命中而不是 0.8555，那不代表检索变差。
+011 的对比必须在同一份语料上做；要跨机器可比，需把期望集改用 content_key 表达（已登记为后置项，
+不混进 011 的判据里）。
+
 ---
 
 ## 9. 阶段划分与出口判据
