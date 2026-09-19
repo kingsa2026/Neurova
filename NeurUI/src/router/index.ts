@@ -227,7 +227,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'collaboration',
         name: 'Collaboration',
-        component: () => import('@/pages/CollaborationPage.vue'),
+        redirect: '/collaboration/hub',
       },
       {
         path: 'collaboration/hub',
@@ -240,6 +240,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/CollaborationPage.vue'),
       },
       {
+        path: 'collaboration/sessions/:roomId',
+        name: 'CollaborationRoom',
+        component: () => import('@/pages/CollaborationRoomPage.vue'),
+      },
+      {
         path: 'collaboration/templates',
         name: 'CollaborationTemplates',
         component: () => import('@/pages/CollaborationTemplatePage.vue'),
@@ -247,7 +252,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'collaboration/history',
         name: 'CollaborationHistory',
-        component: () => import('@/pages/CollaborationHistoryPage.vue'),
+        redirect: { path: '/collaboration/sessions', query: { view: 'history' } },
       },
       {
         path: 'collaboration/workflows',
