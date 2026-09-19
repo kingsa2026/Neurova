@@ -20,12 +20,66 @@ export interface CollabSession {
   completedAt?: string
 }
 
+/** 后端原始会话记录（字段命名/时间格式与前端类型不一致，经 toSession 归一）。 */
+export interface RawSession {
+  id: string
+  name: string
+  description?: string
+  status: string
+  members?: string[]
+  participants?: string[]
+  created_at?: number
+  createdAt?: string
+  completed_at?: number
+}
+
+/** epoch 秒 → `YYYY-MM-DD HH:mm`（本地）；无效 → `—`。 */
+function fmtEpoch(sec?: number): string {
+  if (sec == null || !Number.isFinite(sec)) return '—'
+  const d = new Date(sec * 1000)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/** 把后端原始会话归一为前端 CollabSession（修复创建时间空列 / 成员字段错配）。 */
+export function toSession(raw: RawSession): CollabSession {
+  return {
+    id: raw.id,
+    name: raw.name,
+    description: raw.description ?? '',
+    status: raw.status,
+    participants: raw.members ?? raw.participants ?? [],
+    createdAt: raw.created_at != null ? fmtEpoch(raw.created_at) : raw.createdAt || '—',
+  }
+}
+
 export interface CollabTemplate {
   id: string
   name: string
   description: string
   type: string
   participants?: string[]
+}
+
+/** 后端原始协作模板（snake_case `template_id`、无 `type`；经 toTemplate 归一）。 */
+export interface RawTemplate {
+  template_id?: string
+  id?: string
+  name: string
+  description?: string
+  type?: string
+  participants?: string[]
+}
+
+/** 把后端原始协作模板归一为前端 CollabTemplate（修复向导模板选择因 tpl.id 缺失而失效）。 */
+export function toTemplate(raw: RawTemplate): CollabTemplate {
+  return {
+    id: raw.template_id ?? raw.id ?? '',
+    name: raw.name,
+    description: raw.description ?? '',
+    type: raw.type ?? '',
+    participants: raw.participants ?? [],
+  }
 }
 
 export interface CreateTemplatePayload {
@@ -144,9 +198,15 @@ export function deleteTemplate(id: string) {
   return api.delete<ApiResponse<{ success: boolean }>>(`${BASE}/templates/${id}`)
 }
 
-/** Start a new collaboration session from a template. */
+/** Start a new collaboration session from a template.
+ *  后端 CollaborationStart 契约是 snake_case `template_id` + `participants` + `context`，
+ *  且无 camelCase alias、`extra='ignore'`：故必须在此边界映射，否则模板/名称会被静默丢弃。 */
 export function startSession(payload: StartSessionPayload) {
-  return api.post<ApiResponse<CollabSession>>(`${BASE}/start`, payload)
+  return api.post<ApiResponse<CollabSession>>(`${BASE}/start`, {
+    template_id: payload.templateId,
+    participants: payload.participants,
+    context: { name: payload.name, description: payload.description },
+  })
 }
 
 /** Get collaboration overview stats. */
