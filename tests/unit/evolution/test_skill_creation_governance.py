@@ -159,7 +159,10 @@ def test_agent_router_initialization_restores_pending(monkeypatch):
     agent = SimpleNamespace(
         config=SimpleNamespace(agent_id="restart-agent", name="restart-agent",
                                enable_active_skill_acquisition=False, enable_skill_packer=True),
-        _skill_registry=Mock(), memory_manager=None, tool_memory=None)
+        _skill_registry=Mock(), memory_manager=None, tool_memory=None,
+        # init_router 经 wire_skill_evolution_recording 注册采集回调（工单 013），
+        # 替身必须满足该接口；本用例断言的是待审模板恢复，与此无关。
+        _on_skill_post_execute=lambda *a, **k: None)
     monkeypatch.setattr("neurova.router.create_default_router", Mock())
     Agent.init_router(agent)
     assert agent.skill_packer.list_pending_templates() == [expected]

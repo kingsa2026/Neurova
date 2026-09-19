@@ -18,6 +18,9 @@ scripts/ci/deploy_config_consistency_check.py 后，本套件负责钉住：
    资源不齐 / 数据卷无 PVC）注入临时副本时应被抓住，防门禁退化成"永远绿"。
 6. **漂移实体不回潮** —— 本次修的 6 处实锤漂移逐个钉死（DEAD_ENV_KEYS /
    探针常量 / 资源对 / Chart 版本），避免被并行改动覆盖回去。
+7. **负向控制的副本只含门禁输入** —— 复制范围若退回"排除清单"，本套件耗时会
+   随开发机上碰巧存在的目录（.venv / data / NeurUI/src-tauri）增长而撞穿用例超时；
+   见 `TestCopyDiscipline`。
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ import importlib.util
 import io
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -39,6 +43,51 @@ GATE = PROJECT_ROOT / "scripts" / "ci" / "deploy_config_consistency_check.py"
 CHECK_CMD = "scripts/ci/deploy_config_consistency_check.py"
 CNB = PROJECT_ROOT / ".cnb.yml"
 GHW = PROJECT_ROOT / ".github" / "workflows" / "ci.yml"
+
+# ── 负向控制的复制范围 = 门禁的输入面（不是"工作树减去几个已知大目录"）──────
+# 逐项对应 scripts/ci/deploy_config_consistency_check.py 的读取点：
+#   根文件       → _read("Dockerfile") / _load_yaml("docker-compose.yml") / …
+#   整目录        → helm/**（模板与 values）、config/**（R10 镜像内资产）
+#   按后缀扫的树   → parse_app_read_env_keys() 的 neurova/**.py、scripts/**.py、
+#                   NeurUI/src/**.{ts,js,vue,mjs}（少一种后缀就会误报"环境变量无读取方"）
+GATE_ROOT_FILES = (
+    "Dockerfile", "docker-compose.yml", ".cnb.yml", ".dockerignore",
+    "start_server.py", "start.py", "cli.py", "install.py",
+    "requirements.txt", "requirements-ci.txt", ".github/workflows/ci.yml",
+)
+GATE_WHOLE_DIRS = ("helm", "config")
+GATE_SCANNED_TREES = {
+    "neurova": (".py",),
+    "scripts": (".py",),
+    "NeurUI/src": (".ts", ".js", ".vue", ".mjs"),
+}
+
+
+def _gate_input_paths(source_root: Path) -> list[str]:
+    """门禁会读到的全部文件（工作树相对路径，posix 分隔）。"""
+    paths = [rel for rel in GATE_ROOT_FILES if (source_root / rel).is_file()]
+    for rel in GATE_WHOLE_DIRS:
+        base = source_root / rel
+        if base.is_dir():
+            paths += [str(p.relative_to(source_root)).replace("\\", "/")
+                      for p in base.rglob("*") if p.is_file()]
+    for rel, suffixes in GATE_SCANNED_TREES.items():
+        base = source_root / rel
+        if not base.is_dir():
+            continue
+        paths += [str(p.relative_to(source_root)).replace("\\", "/") for p in base.rglob("*")
+                  if p.is_file() and p.suffix in suffixes and "__pycache__" not in p.parts]
+    return paths
+
+
+def _copy_gate_inputs(source_root: Path, dest_root: Path) -> int:
+    """按输入清单建副本，返回复制的文件数。"""
+    paths = _gate_input_paths(source_root)
+    for rel in paths:
+        target = dest_root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_root / rel, target)
+    return len(paths)
 
 
 def _load_gate_module():
@@ -170,24 +219,67 @@ class TestCiWiring:
         )
 
 
+class TestCopyDiscipline:
+    """负向控制的复制范围：只复制门禁真正会读的东西。
+
+    原实现是"排除清单"（.git/node_modules/models/dist/…），于是本套件的耗时
+    取决于开发机上碰巧有什么：`data/`（SQLite）、`.venv/`、`NeurUI/src-tauri/`
+    先后长出来之后，单份副本涨到 21.6 万个文件，直接撞穿 pyproject 的全局
+    `timeout = 30`。排除清单永远追不上工作树的生长，改成按门禁输入的正向清单。
+    """
+
+    # 复制范围里绝不该出现的本地态目录（出现即说明清单又被写成排除式了）
+    FORBIDDEN_ROOTS = (".venv", "data", "logs", "tests", ".git", "NeurUI/src-tauri",
+                       "NeurUI/node_modules", "tools", ".pytest_tmp")
+
+    def test_copy_plan_is_scoped_to_gate_inputs(self):
+        paths = _gate_input_paths(PROJECT_ROOT)
+
+        assert paths, "门禁输入清单为空——负向控制会在一份空副本上假装通过"
+        for rel in paths:
+            assert not any(
+                rel == forbidden or rel.startswith(f"{forbidden}/")
+                for forbidden in self.FORBIDDEN_ROOTS
+            ), f"本地态目录被复制进来了：{rel}"
+        assert len(paths) < 4000, (
+            f"复制清单膨胀到 {len(paths)} 项，负向控制会重新退化成整树复制")
+
+    def test_gate_passes_on_unmutated_minimal_copy(self, tmp_path):
+        """完整性锁：清单少登记一个输入，门禁在这份副本上就会报错。
+
+        没有这条，缩小复制范围等于让 12 条负向控制在"缺文件"的副本上跑——
+        它们仍可能因为抓到预期错误码而绿，实际测的已经不是真配置。
+        """
+        root = tmp_path / "repo"
+        _copy_gate_inputs(PROJECT_ROOT, root)
+
+        proc = subprocess.run(
+            [sys.executable, str(root / CHECK_CMD), "--json"],
+            capture_output=True, text=True, cwd=str(root), timeout=180,
+        )
+        payload = json.loads(proc.stdout or "{}")
+        assert proc.returncode == 0 and payload.get("ok") is True, (
+            f"最小副本上门禁不通过，说明输入清单漏登记：\n"
+            + "\n".join(f"  ❌ [{e['rule']}] {e['message']}" for e in payload.get("errors", []))
+            + (f"\nstderr: {proc.stderr[-400:]}" if proc.returncode else "")
+        )
+
+
 class TestNegativeControls:
-    """负向控制：已知漂移形态必须被抓住（防门禁退化为永远绿）。"""
+    """负向控制：已知漂移形态必须被抓住（防门禁退化为永远绿）。
+
+    每例都要起一次门禁子进程做全量扫描（本机实测 ~14s），故显式放宽本类的
+    用例级超时——复制范围收小后剩下的就是这份固有成本，不是回归。
+    """
+
+    pytestmark = pytest.mark.timeout(180)
 
     def _run_on_copy(self, tmp_path: Path, mutate) -> dict:
-        import shutil
-
         root = tmp_path / "repo"
-        shutil.copytree(
-            PROJECT_ROOT, root,
-            ignore=shutil.ignore_patterns(
-                ".git", "node_modules", "embedding", "models", "dist", "__pycache__",
-                "audit-reports", "trajectories", "sessions",
-            ),
-            dirs_exist_ok=True,
-        )
+        _copy_gate_inputs(PROJECT_ROOT, root)
         mutate(root)
         proc = subprocess.run(
-            [sys.executable, str(root / "scripts" / "ci" / "deploy_config_consistency_check.py"), "--json"],
+            [sys.executable, str(root / CHECK_CMD), "--json"],
             capture_output=True, text=True, cwd=str(root), timeout=180,
         )
         return json.loads(proc.stdout or "{}")

@@ -128,6 +128,45 @@ Agent (2159 行文件, 类 1122 行/57 方法，拆分中)
 - ToolLifecycleManager — 工具生命周期管理
 - NLToolSynthesizer — 自然语言工具合成
 - EvolutionOrchestrator — 统一进化引擎
+- RSIOrchestrator (`evolution/rsi/`) — 递归自我进化编排：收集四闭环系统反馈 →
+  生成候选 → 棘轮剪枝 → 应用 → 实测增益 → 有害则回滚
+
+#### RSI 判据术语（ADR 0016 / 工单 003）
+
+进化系统的一切"要不要继续 / 要不要晋升"结论都必须落进三态，二态表达视为缺陷：
+
+| 术语 | 含义 | 允许的后果 |
+|---|---|---|
+| `passed` | 有证据且判据满足 | 可晋升、可停止 |
+| `failed` | 有证据且证据否决 | 不晋升，继续观察 |
+| `unevidenced` | 判据所需读数取不到（缺键、分析器自报 `insufficient_data`） | **绝不**按 passed 处理；必须出现在观测面并写明缺哪样 |
+| `measurement_blind` | `unevidenced` 的特例：评测用例因参数回退到 setpoint 而失去区分力 | 同上；与 `insufficient_data`（"样本没攒够"）是两件事——前者再多样本也量不出来，该修测量 |
+
+- 载体：`evolution/rsi/gate_verdict.py::GateVerdict`。`bool(verdict)` 只在 `passed`
+  时为真 —— 调用方写 `if verdict:` 即天然安全，无需在各调用点补判空。
+- **可证伪（falsifiable）**：指上述三态可区分"确证通过"与"无据可依"；
+  与 `unevidenced` 不可混用。
+- **必需性按阶段声明**（工单 008，`deployment_controller._REQUIRED_EVIDENCE`）：
+  某读数"此阶段必须有"才谈得上缺席即 `unevidenced`；硬否决（发散、负 roi、天数未达标、
+  不可晋升的收敛读数）与必需性无关，只要读数存在就生效。
+  晋升判据用**白名单**（`_PROMOTABLE_CONVERGENCE`）：未被列举为"可晋升"的结论一律不得放行。
+- 收敛结论六态（`convergence_analyzer.CONVERGENCE_STATES`）：
+  `converged` / `converging` / `oscillating` / `diverging` / `insufficient_data` /
+  `measurement_blind`。新增第七态必须同时改晋升判据，否则落进"不认识即放行"。
+- **降频巡检 ≠ 停止**（工单 008，`orchestrator.IterationCadence`）：
+  `mode` 只有 `run`/`backoff` 两档，且必须带 `basis`（卡在哪个判据）与
+  `evidence`（依据什么读数）。`should_continue()` 的旧契约（收敛即 False）不动，
+  但**不再是派发依据**——把它当"本进程内永不再跑"就是缺陷。
+- **度量证据状态**（响应面，`result_summary` 的 `measure_state`）：
+  `measured` / `measurement_blind` / `not_attempted`（本轮没做前后测量）。
+  与收敛六态正交：前者说"这个数字有没有依据"，后者说"系统在往哪走"。
+- 参数事实源四类角色，各须唯一：参数清单 `OPTIMIZABLE_PARAMETERS` /
+  优化目标 `SYSTEM_SETPOINTS` / 硬边界 `PARAMETER_BOUNDS` / 装配起点（真实子系统默认）。
+  "起点 ≠ 目标"是设计意图（目标是收敛方向），不是不一致。
+- 缺席闭环系统的占位替身（`agent_core._NullSystem`）标 `rsi_placeholder = True`：
+  **只供中性反馈信号，不供参数面**（工单 018）。其反馈带 `verdict` = `unevidenced`，
+  一切读数与判据按 `_carries_no_evidence()` 排除它 —— 兜底性能均值、人工升级通道都不许
+  对着不存在的系统算分或提案；缺席名单经 `placeholder_systems` 一路走到摘要与推送面。
 
 ### 多通道通信 (`neurova/channels/`)
 

@@ -40,6 +40,7 @@ from neurova.evolution.rsi.result_summary import (
     record_rsi_summary,
     summarize_rsi_result,
 )
+from neurova.evolution.rsi.orchestrator import IterationCadence
 from neurova.post_chat_pipeline import PostChatPipeline
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -79,6 +80,11 @@ class TestSummarizeRsiResult:
             "applied_count": 2,
             "gain": 0.125,
             "phase_advanced": True,
+            # eval.after 为 None = 本轮没做前后测量（不是"测了 0 例"）
+            "measure_state": "not_attempted",
+            "evidenced_cases": None,
+            # 快照没带缺席信息 ≠ "一个都没缺席"（未知不得读成正常）
+            "placeholder_systems": None,
         }
 
     def test_convergence_is_dict_not_number(self):
@@ -245,6 +251,10 @@ class TestProcessExposesSummary:
             def should_continue(self):
                 return True
 
+            def iteration_cadence(self):  # 工单 008：派发层改读节奏，不再读二态开关
+                return IterationCadence(mode="run", basis="converging",
+                                        evidence="窗口 20 轮内有效测量 1 轮")
+
             def run_iteration(self):
                 return REAL_ITERATION_RESULT
 
@@ -380,6 +390,29 @@ class TestNegativeScreenPushFields:
 
         assert "RSI 迭代#7" in mp.call_args.kwargs["task_name"]
 
+    def test_push_surfaces_stall_cause(self):
+        """停滞原因要上推送面：光有 gain=0 分不清"没改善空间"和"量不出来"（工单 008 项 5）。
+
+        两者处置相反（前者降频巡检、后者去修测量），所以度量证据状态必须有出口，
+        否则摘要里加了字段而用户侧仍看不见 —— 那就是断点。
+        """
+        pusher, config = self._pusher()
+        blind = dict(
+            REAL_ITERATION_RESULT,
+            gain=0.0,
+            applied_count=0,
+            eval={"before": None, "after": {
+                "score": None, "state": "measurement_blind",
+                "evidenced_cases": 0, "blind_cases": 9, "cases": [],
+            }},
+        )
+        with patch.object(pusher, "push_task", new=AsyncMock(return_value=MagicMock(success=True))) as mp:
+            asyncio.run(pusher.push_rsi_result(config, blind))
+
+        content = mp.call_args.kwargs["task_content"]
+        assert "measurement_blind" in content, "度量证据状态未进推送面"
+        assert "0/9" in content or "有证据用例" in content, "证据分母未进推送面"
+
     def test_legacy_shape_does_not_crash(self):
         """历史字段形态（iteration/improvements/convergence_score）不炸。"""
         pusher, config = self._pusher()
@@ -387,6 +420,24 @@ class TestNegativeScreenPushFields:
         with patch.object(pusher, "push_task", new=AsyncMock(return_value=MagicMock(success=True))) as mp:
             asyncio.run(pusher.push_rsi_result(config, legacy))
         assert "completed" in mp.call_args.kwargs["task_content"]
+
+    def test_push_names_absent_closed_loop_systems(self):
+        """缺席的闭环系统要在推送面点名列出（工单 018 第 4 项的出口）。
+
+        只显示"应用优化数 0"会被读成"进化跑过了但没找到改进空间"，
+        而真实原因是那套系统根本没装配 —— 两者的处置完全不同。
+        """
+        pusher, config = self._pusher()
+        absent = dict(REAL_ITERATION_RESULT, applied_count=0, gain=0.0,
+                      placeholder_systems=["sleep", "emotion"])
+        with patch.object(pusher, "push_task", new=AsyncMock(return_value=MagicMock(success=True))) as mp:
+            asyncio.run(pusher.push_rsi_result(config, absent))
+
+        content = mp.call_args.kwargs["task_content"]
+        # 只断言标签：名字本身在末尾的 raw JSON 里必然出现，断它等于没断
+        assert "缺席闭环系统" in content, "缺席名单未成行展示"
+        assert content.index("缺席闭环系统") < content.index("### 迭代结果"), (
+            "缺席名单要进「迭代信息」区，不是只躺在 raw JSON 里")
 
     def test_empty_input_does_not_crash(self):
         pusher, config = self._pusher()

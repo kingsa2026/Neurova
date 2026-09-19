@@ -342,7 +342,8 @@ class NegativeScreenPusher:
 
         入参口径 = ``neurova.evolution.rsi.result_summary.summarize_rsi_result``
         的输出（即对话响应里的 ``ctx.result["rsi"]``）：
-        ``{status, applied_count, gain, phase_advanced, turn?, stale?}``。
+        ``{status, applied_count, gain, phase_advanced, measure_state,
+        evidenced_cases, placeholder_systems, turn?, stale?}``。
 
         历史实现读 ``iteration/improvements/convergence_score/status`` —— 与
         RSIOrchestrator.run_iteration 的真实输出（convergence/applied_count/
@@ -363,18 +364,27 @@ class NegativeScreenPusher:
         from neurova.evolution.rsi.result_summary import summarize_rsi_result
 
         raw = rsi_result if isinstance(rsi_result, dict) else {}
-        # 优先按摘要口径裁剪；形态不符时退回对原始 dict 的摘要化（含非标准键）
-        summary = summarize_rsi_result(raw) or {
-            "status": "unknown",
-            "applied_count": 0,
-            "gain": 0.0,
-            "phase_advanced": False,
-        }
+        # 摘要口径统一由 result_summary 决定；形态不符时按"全默认值"渲染，
+        # 但不再自带一份字段清单（那是第二套字段解释，会与摘要契约漂移）
+        summary = summarize_rsi_result(raw) or {}
 
         status = str(summary.get("status") or "unknown")
         applied_count = summary.get("applied_count") or 0
         gain = summary.get("gain") or 0.0
         phase_advanced = bool(summary.get("phase_advanced"))
+        # 增益为 0 有两种相反的成因：确实没有改善空间，或根本量不出来（工单 008）。
+        # 前者降频巡检即可，后者要去修测量——所以停滞原因必须上推送面。
+        measure_state = str(summary.get("measure_state") or "unknown")
+        evidenced_cases = summary.get("evidenced_cases")
+        evidence_label = (
+            f"有证据用例 {evidenced_cases} 例"
+            if isinstance(evidenced_cases, int)
+            else "本轮未做前后测量"
+        )
+        # 缺席名单要成行展示，不能只躺在末尾的 raw JSON 里：
+        # "应用优化数 0"有两种相反的成因（没改善空间 / 根本没装配系统）
+        absent = summary.get("placeholder_systems")
+        absent_line = f"- **缺席闭环系统**: {', '.join(absent)}\n" if absent else ""
         turn = raw.get("turn")
 
         iteration_label = f"#{turn}" if turn is not None else ""
@@ -385,6 +395,7 @@ class NegativeScreenPusher:
 - **收敛状态**: {status}
 - **应用优化数**: {applied_count}
 - **实测增益**: {gain:+.4f}
+{absent_line}- **度量证据**: {measure_state}（{evidence_label}）
 - **部署阶段推进**: {"是" if phase_advanced else "否"}
 
 ### 迭代结果
