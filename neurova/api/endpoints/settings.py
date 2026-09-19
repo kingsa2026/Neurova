@@ -47,7 +47,7 @@ _default_settings = {
 
 # 结构化 section（真持久化，data/app_settings.json——替换内存 stub：
 # 此前高级选项卡保存即丢、读取形状错位，整页为装饰性）
-_SETTINGS_SECTIONS = ("general", "security", "storage", "advanced")
+_SETTINGS_SECTIONS = ("general", "security", "storage", "advanced", "routing")
 
 # CORS 配置文件路径
 _CORS_CONFIG_FILE = FilePath(__file__).parent.parent.parent.parent / "config" / "cors.json"

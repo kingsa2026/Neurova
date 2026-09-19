@@ -824,6 +824,27 @@ class SessionManager(SessionRepository):
             return all_messages
         return all_messages[-max_messages:] if len(all_messages) > max_messages else all_messages
 
+    def get_recent_origins(self, agent_id: str, session_id: str, max_messages: Optional[int] = 20) -> List[Optional[str]]:
+        """返回最近若干条 user 轮的来源标记（message.metadata.turn_origin）。
+
+        供 actionability 门控回看"近期是否有人类介入"。与 get_recent_context 分离：
+        后者为喂模型只留 {role,content}，这里只读发起方来源（user 轮），
+        不回灌大 content 与工具/审计行。缺 origin 的历史消息以 None 计。
+        """
+        sessions = self._get_session_data_list(agent_id, session_id)
+        if not sessions:
+            return []
+        sessions.sort(key=lambda x: x.get("session_date", ""), reverse=True)
+        origins: List[Optional[str]] = []
+        for session in sessions:
+            for msg in session.get("messages", []):
+                if isinstance(msg, dict) and msg.get("role") == "user":
+                    meta = msg.get("metadata") or {}
+                    origins.append(meta.get("turn_origin"))
+        if max_messages is not None:
+            origins = origins[-max_messages:]
+        return origins
+
     # ══════════════════════════════════════════════════════════════
     # SessionRepository 接口实现（补全方法）
     # ══════════════════════════════════════════════════════════════
