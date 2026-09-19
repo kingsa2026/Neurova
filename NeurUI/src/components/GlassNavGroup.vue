@@ -33,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { secureStorage } from '@/utils/security'
@@ -48,11 +48,14 @@ const props = withDefaults(defineProps<{
   collapsed?: boolean
   /** 第一个子项路由（折叠态图标直达目标） */
   firstItemTo?: string
+  /** 子路由公共前缀：当前路径以此开头即视为本子项激活（用于分组头高亮 + 自动展开） */
+  activePathPrefix?: string
   /** 子项数（折叠徽标展示） */
   count?: number
 }>(), {
   collapsed: false,
   firstItemTo: '',
+  activePathPrefix: '',
   count: 0,
 })
 
@@ -70,10 +73,26 @@ function toggle() {
 }
 
 function isActiveRoute(to: string): boolean {
+  if (!to) return false
   return route.path === to || route.path.startsWith(to + '/')
 }
 
-const anyChildActive = computed(() => isActiveRoute(props.firstItemTo))
+const anyChildActive = computed(
+  () => (!!props.activePathPrefix && route.path.startsWith(props.activePathPrefix))
+    || isActiveRoute(props.firstItemTo),
+)
+
+// 深链进入任一子路由 → 自动展开分组（避免折叠态下子项不可见、分组头不高亮）
+watch(
+  anyChildActive,
+  (active) => {
+    if (active && !open.value) {
+      open.value = true
+      secureStorage.setObject(STORAGE_PREFIX + props.storageKey, true)
+    }
+  },
+  { immediate: true },
+)
 </script>
 
 <style scoped>
