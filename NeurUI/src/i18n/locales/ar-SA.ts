@@ -1673,6 +1673,12 @@ export default {
     resolutionRequired: 'يرجى اختيار طريقة الحل',
   },
   emotion: {
+    timelineTitle: 'المخطط الزمني للمشاعر',
+    timelineAxisHint: 'الموجب = سار، السالب = غير سار',
+    range24h: '24 ساعة',
+    range7d: '7 أيام',
+    range30d: '30 يومًا',
+    range90d: '90 يومًا',
     title: 'إدارة العواطف',
     analysis: 'تحليل العواطف',
     personality: 'إدارة الشخصية',

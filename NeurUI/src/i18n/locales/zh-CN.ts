@@ -1687,6 +1687,12 @@ export default {
     resolutionRequired: '请选择解决方式',
   },
   emotion: {
+    timelineTitle: '情绪变化时间轴',
+    timelineAxisHint: '正值=积极情绪，负值=消极情绪',
+    range24h: '24 小时',
+    range7d: '7 天',
+    range30d: '30 天',
+    range90d: '90 天',
     title: '情绪管理',
     analysis: '情绪分析',
     personality: '个性管理',

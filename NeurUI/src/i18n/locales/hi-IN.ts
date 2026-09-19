@@ -1673,6 +1673,12 @@ export default {
     resolutionRequired: 'कृपया समाधान विधि चुनें',
   },
   emotion: {
+    timelineTitle: 'भावना परिवर्तन टाइमलाइन',
+    timelineAxisHint: 'धनात्मक=सुखद, ऋणात्मक=दुखद',
+    range24h: '24 घंटे',
+    range7d: '7 दिन',
+    range30d: '30 दिन',
+    range90d: '90 दिन',
     title: 'भावना प्रबंधन',
     analysis: 'भावना विश्लेषण',
     personality: 'व्यक्तित्व प्रबंधन',

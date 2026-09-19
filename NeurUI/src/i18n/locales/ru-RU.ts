@@ -1673,6 +1673,12 @@ export default {
     resolutionRequired: 'Выберите способ разрешения',
   },
   emotion: {
+    timelineTitle: 'Хронология эмоций',
+    timelineAxisHint: 'Положительное = приятное, отрицательное = неприятное',
+    range24h: '24 ч',
+    range7d: '7 дн.',
+    range30d: '30 дн.',
+    range90d: '90 дн.',
     title: 'Управление эмоциями',
     analysis: 'Анализ эмоций',
     personality: 'Управление личностью',

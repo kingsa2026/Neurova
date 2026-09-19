@@ -1673,6 +1673,12 @@ export default {
     resolutionRequired: 'Selecciona un método de resolución',
   },
   emotion: {
+    timelineTitle: 'Cronología de emociones',
+    timelineAxisHint: 'Positivo = agradable, negativo = desagradable',
+    range24h: '24 h',
+    range7d: '7 d',
+    range30d: '30 d',
+    range90d: '90 d',
     title: 'Gestión de emociones',
     analysis: 'Análisis de emociones',
     personality: 'Gestión de personalidad',
