@@ -1489,6 +1489,8 @@ class ChatPipeline:
             session_context=ctx.session_context,
             voice_context=voice_context,
             citation_registry=ctx.citation_registry,
+            chat_collab=(ctx.metadata or {}).get("turn_origin") == "collaboration",
+            chat_room_id=(ctx.session_id or "") if (ctx.metadata or {}).get("turn_origin") == "collaboration" else "",
         )
 
         # Private guidance is turn-local, never archived into the shared experience pool.
@@ -1555,8 +1557,13 @@ class ChatPipeline:
         if _active_memory_enabled():
             result = await self._active_memory_escalation(ctx, result, user_id)
 
-        # 提取记忆内容
-        ctx.relevant_memories = result.memories
+        # 提取记忆内容（按会话作用域隔离：单聊只见 direct；群聊见 direct + 本群，群群互不可见）
+        from neurova.collaboration.memory_scope import filter_memories_by_scope
+
+        _collab = (ctx.metadata or {}).get("turn_origin") == "collaboration"
+        ctx.relevant_memories = filter_memories_by_scope(
+            result.memories, collab=_collab, room_id=(ctx.session_id or "") if _collab else ""
+        )
 
         # 记录检索统计
         logger.info(
@@ -2646,45 +2653,13 @@ error_type 五类标准键（multi_model_client 流内
             self._trajectory_recorder.end_trace(ctx.trace_id)
 
     async def _run_post_chat_pipeline(self, ctx: ChatContext) -> Dict[str, Any]:
-        """Bug #5+11: 提取的 post_chat_pipeline 调用辅助方法
+        """执行对话后处理管线（委托 PostChatPipeline.process）。
 
-        优先使用 PipelineExecutor，失败时 fallback 到 post_chat_pipeline。
         Bug #5: 检查 post_chat_pipeline 是否为 None，避免 AttributeError。
-        Bug #11: 消除 fallback 代码重复。
         """
-        pipeline_executor = getattr(self._agent, "pipeline_executor", None)
-        if pipeline_executor:
-            try:
-                from neurova.pipeline_executor import PipelineRequest
-
-                request = PipelineRequest(
-                    user_input=ctx.user_input,
-                    reply=ctx.reply,
-                    session_id=ctx.session_id,
-                    save_memory=ctx.save_memory,
-                    enable_tts=ctx.enable_tts,
-                    metadata=ctx.metadata or {},
-                    writer_claim=ctx.writer_claim,
-                )
-                response = await pipeline_executor.execute(request)
-                # 转换为旧格式以保持兼容性
-                return {
-                    "actual_session_id": response.session_id,
-                    "audio_path": response.audio_url,
-                    "audio_data": response.metadata.get("audio_data"),
-                    "cognitive_score": response.cognitive_score,
-                    "proactive_question": response.metadata.get("proactive_question"),
-                    # 同样透传 RSI 摘要（PipelineResponse.metadata 携带）
-                    "rsi": response.metadata.get("rsi"),
-                }
-            except Exception as e:
-                logger.warning("PipelineExecutor 执行失败，fallback 到 post_chat_pipeline: %s", e)
-
-        # Bug #5: 检查 post_chat_pipeline 是否为 None，避免 AttributeError
         if self.post_chat_pipeline is None:
             raise RuntimeError(
-                "post_chat_pipeline is not initialized — cannot execute post-chat processing. "
-                "Either initialize Agent.post_chat_pipeline or configure pipeline_executor."
+                "post_chat_pipeline is not initialized — cannot execute post-chat processing."
             )
 
         return await self.post_chat_pipeline.process(

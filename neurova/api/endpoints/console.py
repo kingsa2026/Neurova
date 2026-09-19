@@ -1219,6 +1219,12 @@ async def get_chat_sessions(
     user_id = _get_user_id(request, current_user)
     repo = get_session_repository()
     sessions = repo.list_sessions(agent_id=agent_id, user_id=user_id)
+    # 区分群聊与单聊：过滤掉协作房间会话（session_id 以 project_ 前缀），
+    # 群记录只在协作房间页按 room_id 读取，不混入单聊侧栏。
+    sessions = [
+        s for s in sessions
+        if not str(s.get("session_id") or s.get("id", "")).startswith("project_")
+    ]
     # 只返回摘要信息，不返回完整消息列表
     summaries = [
         {

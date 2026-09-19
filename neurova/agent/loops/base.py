@@ -290,7 +290,13 @@ class BaseAgentLoop(ABC):
                         )
                         logger.info("Tool executed via ToolRouter: %s", _tc_function_name)
                     else:
-                        err = router_result.error if router_result else "ToolRouter 执行返回空"
+                        # 忠实透出真实错误：ToolResult.__bool__ 即 success，失败结果为假值；
+                        # 旧写法 `router_result.error if router_result` 会把失败结果的真实 error
+                        # 抹平为笼统“执行返回空”，掩盖根因、诱导模型反复重试同一失败工具。
+                        if router_result is None:
+                            err = f"ToolRouter 未返回结果: {_tc_function_name}"
+                        else:
+                            err = getattr(router_result, "error", None) or f"工具执行失败: {_tc_function_name}"
                         exec_result = SimpleNamespace(success=False, data=None, error=err, metadata={})
                 except Exception as e:
                     logger.warning("ToolRouter fallback 失败: %s, %s", _tc_function_name, e)
