@@ -220,3 +220,25 @@ class KnowledgeAdmissionGate:
             request.agentId, request.subjectLabel, aliases=request.aliases,
         )
         return (subjectKey, outcome.needsHumanReview, ["identity_resolution"])
+
+
+def productionAdmissionGate(store: Any, toolVersion: str = "foundation-gate") -> KnowledgeAdmissionGate:
+    """真写入口的唯一装配口径。
+
+    造门散在各调用点各写一遍，就会各差一段：回填漏接 resolver 时身份消解退回精确名，
+    对账漏接血缘时回放不像生产。同一个"唯一咽喉"被各自装配，就再也不是一个咽喉。
+    缺的段（本体裁决、入索引）不硬凑——`pendingSegments()` 会如实报出它们还没接通。
+    """
+    from neurova.knowledge.identity.subject_resolver import SubjectResolver
+
+    from .credibility import ConfidenceAggregator
+    from .conflict_judge import KnowledgeConflictJudge
+    from .lineage import KnowledgeLineageLedger
+
+    return KnowledgeAdmissionGate(
+        store,
+        resolver=SubjectResolver(),
+        conflictJudge=KnowledgeConflictJudge(store),
+        lineageLedger=KnowledgeLineageLedger(store, toolVersion=toolVersion),
+        credibility=ConfidenceAggregator(store),
+    )
