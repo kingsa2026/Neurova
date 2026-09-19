@@ -65,10 +65,6 @@ def mock_agent():
     agent.skill_manager = None
     agent.tool_synthesizer = None
     agent.unified_retriever = None
-    # 修复: getattr(agent, "pipeline_executor") 在 MagicMock 上会返回新 MagicMock
-    # （truthy）→ 走 executor 分支 await MagicMock.execute → fallback。
-    # 显式 None 走 post_chat_pipeline 测试路径（与 integration_tdd fixture 一致）。
-    agent.pipeline_executor = None
     agent.crystallizer = None
     agent.trace_manager = None
     agent.neuHebb_manager = None
