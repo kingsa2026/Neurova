@@ -342,6 +342,15 @@ describe('AgentPersonalityPage 情绪变化时间轴', () => {
     expect(text).toContain('网页搜索连续失败')
   })
 
+  it('tooltip 挂到 body 且限宽换行，不被玻璃容器 overflow:hidden 裁切', async () => {
+    const wrapper = await mountPage()
+    await flushPromises()
+    const tip = (wrapper.vm as any).emotionTimelineOption.tooltip
+    expect(tip.appendToBody).toBe(true)
+    expect(tip.extraCssText).toContain('max-width')
+    expect(tip.extraCssText).toContain('white-space: normal')
+  })
+
   it('全空窗口不报错且保留断点', async () => {
     vi.mocked(getEmotionTimeline).mockResolvedValue({
       code: 0,
