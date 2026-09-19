@@ -72,6 +72,34 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_triple
     ON knowledge_facts(agent_id, subject_key, predicate_term_id, object_term, qualifier_hash);
 CREATE INDEX IF NOT EXISTS idx_fact_subject ON knowledge_facts(subject_key, status);
 CREATE INDEX IF NOT EXISTS idx_fact_content ON knowledge_facts(agent_id, content_key);
+
+CREATE TABLE IF NOT EXISTS knowledge_activities (
+    activity_id TEXT PRIMARY KEY,
+    activity_kind TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT NOT NULL DEFAULT '',
+    inputs_json TEXT NOT NULL DEFAULT '{}',
+    outputs_json TEXT NOT NULL DEFAULT '{}',
+    basis TEXT NOT NULL DEFAULT '',
+    tool_version TEXT NOT NULL DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS knowledge_assertions (
+    assertion_id TEXT PRIMARY KEY,
+    fact_id TEXT NOT NULL,
+    actor_type TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    activity_id TEXT,
+    medium_ref TEXT NOT NULL DEFAULT '',
+    statement_text TEXT NOT NULL DEFAULT '',
+    statement_hash TEXT NOT NULL DEFAULT '',
+    asserted_at TEXT NOT NULL,
+    weight REAL NOT NULL DEFAULT 1.0,
+    verification_state TEXT NOT NULL DEFAULT 'unverified'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_assertion_identity
+    ON knowledge_assertions(fact_id, actor_type, actor_id, medium_ref, statement_hash);
+CREATE INDEX IF NOT EXISTS idx_assertion_fact ON knowledge_assertions(fact_id);
 """
 register_migration(1, _SCHEMA, domain="knowledge_foundation")
 
@@ -345,6 +373,111 @@ class KnowledgeFactStore:
                 (agentId, contentKey),
             ).fetchone()
         return self._hydrate(row) if row else None
+
+    # ── 溯源层 ────────────────────────────────────────────────
+
+    def insertActivity(
+        self, kind: str, inputs: Optional[Dict[str, Any]] = None,
+        basis: str = "", toolVersion: str = "",
+    ) -> str:
+        activityId = "act_%s" % uuid.uuid4().hex[:12]
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO knowledge_activities (activity_id, activity_kind, started_at,"
+                " inputs_json, basis, tool_version) VALUES (?,?,?,?,?,?)",
+                (activityId, kind, _now(),
+                 json.dumps(inputs or {}, ensure_ascii=False, sort_keys=True), basis, toolVersion),
+            )
+        return activityId
+
+    def finishActivity(self, activityId: str, outputs: Optional[Dict[str, Any]] = None) -> None:
+        with self._lock, self._conn:
+            self._requireActivity(activityId)
+            self._conn.execute(
+                "UPDATE knowledge_activities SET finished_at = ?, outputs_json = ?"
+                " WHERE activity_id = ?",
+                (_now(), json.dumps(outputs or {}, ensure_ascii=False, sort_keys=True), activityId),
+            )
+
+    def activity(self, activityId: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM knowledge_activities WHERE activity_id = ?", (activityId,)
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["inputs"] = json.loads(d.pop("inputs_json", "{}") or "{}")
+        d["outputs"] = json.loads(d.pop("outputs_json", "{}") or "{}")
+        return d
+
+    def _requireActivity(self, activityId: str) -> Dict[str, Any]:
+        row = self._conn.execute(
+            "SELECT * FROM knowledge_activities WHERE activity_id = ?", (activityId,)
+        ).fetchone()
+        if row is None:
+            raise LookupError("活动不存在: %s" % activityId)
+        return dict(row)
+
+    def insertAssertion(
+        self, factId: str, actorType: str, actorId: str, mediumRef: str,
+        statementText: str, statementHash: str, activityId: Optional[str] = None,
+        weight: float = 1.0,
+    ) -> Optional[str]:
+        """幂等插断言；已存在返回 None（同主体同来源同陈述不重复计一次）。"""
+        self._requireFact(factId)
+        assertionId = "asrt_%s" % uuid.uuid4().hex[:12]
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "INSERT OR IGNORE INTO knowledge_assertions (assertion_id, fact_id, actor_type,"
+                " actor_id, activity_id, medium_ref, statement_text, statement_hash, asserted_at,"
+                " weight) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (assertionId, factId, actorType, actorId, activityId, mediumRef,
+                 statementText, statementHash, _now(), weight),
+            )
+            if not cur.rowcount:
+                return None
+            self._conn.execute(
+                "UPDATE knowledge_facts SET assertion_count = assertion_count + 1 WHERE fact_id = ?",
+                (factId,),
+            )
+        return assertionId
+
+    def assertions(self, factId: str) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM knowledge_assertions WHERE fact_id = ?"
+                " ORDER BY asserted_at, assertion_id",
+                (factId,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def setAssertionCount(self, factId: str, count: int) -> None:
+        with self._lock, self._conn:
+            self._requireFact(factId)
+            self._conn.execute(
+                "UPDATE knowledge_facts SET assertion_count = ? WHERE fact_id = ?",
+                (int(count), factId),
+            )
+
+    def lineageRows(self, factId: str) -> List[Dict[str, Any]]:
+        """断言 + 其所属活动，一跳取齐（溯源链的多跳展开在 ledger 里做）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT a.*, k.activity_kind, k.started_at AS activity_started_at,"
+                " k.finished_at AS activity_finished_at, k.basis AS activity_basis,"
+                " k.inputs_json AS activity_inputs"
+                " FROM knowledge_assertions a"
+                " LEFT JOIN knowledge_activities k ON k.activity_id = a.activity_id"
+                " WHERE a.fact_id = ? ORDER BY a.asserted_at, a.assertion_id",
+                (factId,),
+            ).fetchall()
+        out = []
+        for row in rows:
+            d = dict(row)
+            d["activity_inputs"] = json.loads(d.get("activity_inputs") or "{}")
+            out.append(d)
+        return out
 
     # ── 生命周期（工单 008 / G06）─────────────────────────────
     # 状态是生命周期的唯一权威：读侧只看 status，不再各自拿 valid_until 比时钟，
