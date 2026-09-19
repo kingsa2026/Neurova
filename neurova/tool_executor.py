@@ -404,14 +404,27 @@ class ToolExecutor:
     def _metacog_gate_check(self, tool_name: str) -> Optional[Dict[str, Any]]:
         """V3 调控门：查询该工具是否命中活跃 avoid_tool 教训。
 
-        env NEUROVA_METACOG_GATE=="1" 才启用（新扩展点默认关）；返回教训
-        metadata（含 text/recommendation/evidence），无教训或门关时返回 None。
-        故障一律放行（fail-open）——调控建议不得阻断主链路。
+        开关优先级与 Step9.96 成本门控同口径：env 显式设 0 强制关 > env 显式设 1 >
+        治理设置 metacog_gate_enabled > 内置默认关。收口原因：裸 env 开关在生产无写入
+        方，硬拦截臂恒关。返回教训 metadata（含 text/recommendation/evidence），无教训
+        或门关时返回 None。故障一律放行（fail-open）——调控建议不得阻断主链路。
         """
         import os as _os
 
-        if _os.environ.get("NEUROVA_METACOG_GATE") != "1":
+        _gate_env = _os.environ.get("NEUROVA_METACOG_GATE")
+        if _gate_env == "0":
             return None
+        if _gate_env != "1":
+            try:
+                from neurova.security.governance_settings import (
+                    load_governance_settings,
+                )
+
+                if not load_governance_settings().get("metacog_gate_enabled"):
+                    return None
+            except Exception:  # noqa: BLE001 - 设置不可用维持默认关
+                logger.debug("治理设置读取失败，调控门维持默认关", exc_info=True)
+                return None
         try:
             from neurova.cognitive_layers.meta_cognition_layer.self_model import get_self_model_engine
 
@@ -1268,8 +1281,9 @@ class ToolExecutor:
                 result = precheck
                 return result
 
-            # V3 调控门（治理预检后、执行前）：env NEUROVA_METACOG_GATE=="1" 时，
-            # 命中活跃 avoid_tool 教训的工具返回结构化拦截建议（fail-open，默认关）。
+            # V3 调控门（治理预检后、执行前）：开关开时（治理设置 metacog_gate_enabled
+            # 或 env，见 _metacog_gate_check），命中活跃 avoid_tool 教训的工具返回结构化
+            # 拦截建议（fail-open，默认关）。
             advisory = self._metacog_gate_check(tool_name)
             if advisory is not None:
                 return {
