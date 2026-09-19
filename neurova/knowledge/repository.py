@@ -26,10 +26,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.knowledge.foundation.narratives import FOUNDATION_DB_NAME, NarrativeStore
 
 logger = get_logger(__name__)
 
 DEFAULT_STORAGE_DIR = "./data/knowledge"
+# 工单 019a：叙述层权威从 knowledge.json 换到底座库。默认关——关闸态必须逐位等于旧行为。
+NARRATIVE_STORE_ENV = "NEUROVA_KB_NARRATIVE_STORE"
 VISIBILITY_PUBLIC = "public"
 VISIBILITY_PRIVATE = "private"
 _SUBMISSION_PENDING = "pending"
@@ -48,6 +51,12 @@ _INCREMENTAL_OPS_LIMIT = 200
 def _norm_title(title: str) -> str:
     """冲突检测的 subject 归一化：大小写/首尾空白不敏感。"""
     return (title or "").strip().lower()
+
+
+def _narrativeStoreEnabled() -> bool:
+    """叙述层是否以底座库为权威（工单 019a 开关，默认关=旧 JSON 行为）。"""
+    return (os.environ.get(NARRATIVE_STORE_ENV) or "").strip().lower() in (
+        "1", "true", "on", "yes", "sqlite")
 
 
 def _chunk_hit(item: Dict[str, Any], chunk_index: int, score: float) -> Dict[str, Any]:
@@ -157,7 +166,11 @@ class ChunkRevisionConflict(Exception):
 
 
 class KnowledgeRepository:
-    """按 agent_id 分组的 JSON 知识条目仓库。"""
+    """按 agent_id 分组的条目仓库：权威默认在 knowledge.json，闸开则移到底座库叙述表。
+
+    `self._items` 是唯一的内存权威——分片索引、检索、冲突检测全部只读它，
+    所以换后端只需要换 `_load` / `_save` 两个边界。
+    """
 
     def __init__(self, storage_dir: str) -> None:
         self._dir = Path(storage_dir)
@@ -165,6 +178,10 @@ class KnowledgeRepository:
         self._path = self._dir / "knowledge.json"
         self._tombstones_path = self._dir / "knowledge_tombstones.json"
         self._conflicts_path = self._dir / "knowledge_conflicts.json"
+        self._narrative_db_path = str(self._dir / FOUNDATION_DB_NAME)
+        self._narratives: Optional[NarrativeStore] = None
+        if _narrativeStoreEnabled():
+            self._narratives = NarrativeStore(self._narrative_db_path)
         self._lock = threading.RLock()
         self._items: Dict[str, List[Dict[str, Any]]] = {}  # agent_id -> items
         # P0-2 tombstone：knowledge_id -> {item, deleted_at, deleted_by, superseded_by}
@@ -384,7 +401,9 @@ class KnowledgeRepository:
         self._ensure_indexes(agent_id)
 
     def _load(self) -> None:
-        if self._path.exists():
+        if self._narratives is not None:
+            self._items = self._itemsFromNarratives()
+        elif self._path.exists():
             try:
                 data = json.loads(self._path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
@@ -402,6 +421,14 @@ class KnowledgeRepository:
                 logger.error(
                     "知识库主文件损坏已隔离: %s → %s (%s)", self._path, quarantined, e
                 )
+        elif NarrativeStore.findArchivedJson(str(self._dir)):
+            raise RuntimeError(
+                "叙述层已搬进 %s（旧文件归档于 %s），此处回退成只读 JSON 会静默开一个空库。"
+                "要保持新后端请设 %s=on；要回退请把归档文件改回 knowledge.json "
+                "并清空底座库里的 knowledge_narratives 表。"
+                % (self._narrative_db_path, NarrativeStore.findArchivedJson(str(self._dir))[0],
+                   NARRATIVE_STORE_ENV)
+            )
         if self._tombstones_path.exists():
             try:
                 data = json.loads(self._tombstones_path.read_text(encoding="utf-8"))
@@ -420,6 +447,27 @@ class KnowledgeRepository:
                     }
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to load knowledge conflicts %s: %s", self._conflicts_path, e)
+
+    def _itemsFromNarratives(self) -> Dict[str, List[Dict[str, Any]]]:
+        """闸内读条目：权威是底座库，但首次要把旧 JSON 搬进来再归档。
+
+        搬家不写脚本而挂在读路径上，是因为闸一开就必须立即可用——缺这一步等于
+        "开了开关却换到一本空库"。归档则保证它只发生一次：搬完旧文件不再被读到，
+        删空后重启不会拿快照把已删条目复活。
+        """
+        if self._narratives.count() == 0 and self._path.exists():
+            report = self._narratives.importFromJson(str(self._path))
+            archived = self._narratives.archiveImportedJson(str(self._path))
+            logger.info(
+                "叙述层一次性搬入 %s：导入 %s 行，已把旧主文件归档为 %s",
+                self._narrative_db_path, report["imported"], archived,
+            )
+        data = self._narratives.loadAll()
+        return {
+            agent_id: [self._migrate_entry(i) for i in items if isinstance(i, dict)]
+            for agent_id, items in data.items()
+            if isinstance(items, list)
+        }
 
     def _save_tombstones(self) -> None:
         self._assertNotWritingProductionUnderPytest()
@@ -471,6 +519,11 @@ class KnowledgeRepository:
 
     def _save(self) -> None:
         self._assertNotWritingProductionUnderPytest()
+        if self._narratives is not None:
+            # 闸内不吞异常：写失败若只留一条日志，内存与库就分叉了，
+            # 下一次成功写入会把分叉期间的编辑抹平。
+            self._narratives.replaceAll(self._items)
+            return
         try:
             from neurova.core.atomic_io import atomic_write_text
 

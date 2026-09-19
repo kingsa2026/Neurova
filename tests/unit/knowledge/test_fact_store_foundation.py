@@ -161,8 +161,9 @@ class TestMigrationVersions:
             "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
 
         assert {'knowledge_subjects', 'knowledge_facts', 'knowledge_activities',
-                'knowledge_assertions', 'knowledge_conflicts'} <= names
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 3
+                'knowledge_assertions', 'knowledge_conflicts',
+                'knowledge_narratives'} <= names
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 4
 
     def test_reopeningAnExistingDbStillUpgrades(self, tmp_path):
         first = KnowledgeFactStore(str(tmp_path / 'reopen.db'))

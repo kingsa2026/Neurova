@@ -230,6 +230,17 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 
 **叙述层**：`knowledge_narratives`（承 `knowledge.json` 条目字段：`knowledge_id`、`title`、`category`、`tags`、`visibility`、`owner_user_id`、`shared_with`、`submission`、`revision` 快照；**新增 `content_key`**——条目层此前无内容身份列，这是 B03 的根因位）、`knowledge_chunks`（`chunk_id`、`knowledge_id`、`parent_id`、`seq`、`text`、`revision`、`embedding_ref`）。**不含 `confidence`、不含 `source`**（G11、G01）。
 
+> **019a 实施复核（两处偏离，均为主动收窄而非遗漏）**
+> 1. **分块不立表**。分块随条目整篇读写，`_item_index_docs` / `_chunk_hit` / `parent_context_text`
+>    都只从 `item["chunks"]` 取；把它拆成独立表就是给同一段文字建第二个权威，
+>    正是本底座要消灭的东西。列式分块表只在"按块独立检索/独立修订"成为需求时才成立，
+>    届时应扩 `knowledge_facts` 而非另立叙述副本。
+> 2. **`content_key` 推迟到 019b**。内容身份是在 `admit()` 的第一段算出来的，而条目的写路径
+>    要到 019b 才转调咽喉；现在就加列只能得到一列恒空，反而掩盖"这条目没经咽喉"这个事实。
+>    019a 的 `knowledge_narratives` 因此只有：`knowledge_id` PK、`agent_id`、`owner_user_id`、
+>    `visibility`、`shared_with_json`、`category`、`title`、`payload_json`、`updated_at`——
+>    成列的字段全是"要按它查询"的，正文与子结构走 `payload_json`。
+
 **本体层**：见 §6。**评测层单独建库** `data/knowledge/knowledge_evaluation.db`（迁移域
 `knowledge_evaluation`），不并入底座 13 表——评测器不该与被测对象共用存储：底座一旦写坏，
 读数会跟着一起坏，就失去"用独立尺子发现底座问题"的能力。§4.2 的表清单据此理解。
@@ -244,6 +255,7 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 | `neurova/knowledge/foundation/digest_chain.py` | `ActivityDigestChain` |
 | `neurova/knowledge/foundation/conflict_judge.py` | `KnowledgeConflictJudge` |
 | `neurova/knowledge/foundation/redundancy.py` | `RedundancyAudit`（只读冗余审计，004） |
+| `neurova/knowledge/foundation/narratives.py` | `NarrativeStore`（叙述层入库，019a） |
 | `neurova/knowledge/identity/entity_blocking.py` | `EntityBlockingResolver` |
 | `neurova/knowledge/identity/similarity_fusion.py` | `SimilarityFusion` |
 | `neurova/knowledge/identity/identity_merger.py` | `IdentityMerger` |
@@ -255,6 +267,16 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 | `neurova/knowledge/evaluation/retrieval_benchmark.py` | `RetrievalBenchmark` |
 
 既有约束不变：深度模块经 `agent_ref` 访问 Agent；`get_*()` / `reset_*()` 成对工厂；`threading.RLock` 保护共享态；可选依赖惰性 import；LLM 调用必须走 `track_llm_call` 与 `LLMRouter`。
+
+**开关台账**（全部默认关＝旧行为；开哪一个都是可逆动作）
+
+| 环境变量 | 作用 | 默认 | 现状 |
+|---|---|---|---|
+| `NEUROVA_KB_FACT_SURFACE` | 011：检索时并入底座事实池（时效/置信排序项） | 关 | **判负保持关**（§8.0） |
+| `NEUROVA_KB_NARRATIVE_STORE` | 019a：条目权威从 `knowledge.json` 换到底座库 `knowledge_narratives` | 关 | 已交付未开闸；开闸即一次性搬家并归档旧主文件 |
+
+两个开关共用同一底座库 `data/knowledge/knowledge_facts.db`（迁移域 `knowledge_foundation`，
+当前链尾 v4）。评测层单独建库，不与被测对象共用存储。
 
 ---
 
@@ -409,6 +431,12 @@ case 集与基线摘要已导出入库：`tests/fixtures/knowledge_eval_cases.js
 `neurova/api/endpoints/knowledge_core.py`、`tests/`、`docs/`）。全量口径：`tests/unit` +
 `tests/api` + `tests/core` 2369 passed / 1 failed（即上述这个）。
 
+2026-09-20 019a 实施期再登记 1 个**收集期阻断**：
+`tests/unit/evolution/experience/test_objective_tickets.py:148` 是一条被截断的中文断言字符串，
+`ast.parse` 直接 SyntaxError。该文件 untracked（他人正在写的在途件，本批从未触及 evolution/experience 面），
+但收集错误会 `Interrupted` 整轮会话——全量口径必须再加一条 `--ignore=tests/unit/evolution/experience`。
+不代修：改了会把别人的半成品断言按我的猜测定形。
+
 另有 `tests/benchmarks/test_multi_agent_coordination.py:413` 未导入 `Optional` 导致全仓收集中断——
 该目录未入库（`??`），属他人在途件，本批不触碰，跑套件时需 `--ignore=tests/benchmarks`。
 
@@ -420,22 +448,30 @@ case 集与基线摘要已导出入库：`tests/fixtures/knowledge_eval_cases.js
 加 `--ignore=tests/unit/neurflow` 后可跑完。归因未做（属 neurflow 在途面），
 E2 出口判据要求：**要么该用例修好，要么给出可控的超时口径**，否则任何全仓验证都是假绿。
 
-### 11.6 实施进度快照（E0 完成、E1 进行中）
+### 11.6 实施进度快照（E0/E1 完成、E2 判据改序、E3 提前落刀）
 
 | 工单 | 状态 | 证据 |
 |---|---|---|
 | 001 写入围栏 | 完成 | 5 用例；生产库哈希跑测前后不变 |
-| 002 评测台架 | 完成 | 13 用例；基线 recall@5 0.8555 / MRR 0.8300 已冻结 |
-| 003 底座立骨 | 完成 | 16 用例；两表全列 + admit 骨架 + 缺段显式抛 |
+| 002 评测台架 | 完成 | 18 用例；基线 recall@5 0.8555 / MRR 0.8300 已冻结 |
+| 003 底座立骨 | 完成 | 16 用例 + 2 迁移版本用例；两表全列 + admit 骨架 + 缺段显式抛 |
 | 004 内容归一段 | 完成 | 12 用例；审计复现 130/92/38/19 组 |
-| 005 溯源段 | 完成 | 15 用例；匿名断言写入前即拒 |
+| 005 溯源段 | 完成 | 17 用例；匿名断言写入前即拒 |
 | 006 确定性消解 | 完成 | 25+5 用例；零 LLM 静态守卫、候选对 < 600（全对 19900） |
+| 007 冲突一等对象化 | 完成 | 9+7 用例；kind 全覆盖、`policy_basis` 缺失即拒、无证据不许自动裁决 |
 | 008 事实生命周期 | 完成 | 41 用例；supersede/expire/retract，只加行为不改表 |
-| 007 / 009 / 010 / 015 | 未开工 | 007 依赖已就绪（006 完成），是当前前沿 |
+| 009 置信聚合 | 完成 | 断言数/异质度/可重放/矛盾惩罚四因子；无断言为 NULL 不是 0 |
+| 010 使用与采纳回流 | 完成 | 17 用例；注入/采纳两本账，`success/failure/unevidenced` 三态 |
+| 015 双写对账 | 完成 | 真数据 130 行 → 预测 92 = 实跑 92、主体 87 = 87、差异空 |
+| 011 读路径切底座 | **实施后判负，留在关闸态** | 开闸 recall@5 0.7604 / MRR 0.8111 / 未命中 0.167，劣于基线；见 §8.0 |
+| 019a 叙述层入库 | 完成 | 19 用例 + 真数据对等（读数三位相同，见 §8.1 口径）；默认关闸 |
+| 012 / 013 / 014 / 016 / 017 / 018 / 019b / E4 | 未开工 | 011 否证后落点改变，见工单索引"进度" |
 
-`tests/unit/knowledge/` + 相关 api 用例：395 passed（起点基线 265）。
+`tests/unit/knowledge/` 479 passed（起点基线 265）。
 新增常驻守卫 2 条：生产库写入围栏用例、pytest 收集卫生守卫
 （`test_pytest_collection_hygiene.py`——实施期三次把用例写成 `def testXxx` 导致整份文件静默不跑）。
+迁移链守卫 `test_everyTableExistsAfterMigrationChain` 随 v4 一并抬到 `user_version == 4`，
+并把 `knowledge_narratives` 纳入必查表集。
 
 ---
 
