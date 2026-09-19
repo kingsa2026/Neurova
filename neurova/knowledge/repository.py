@@ -19,6 +19,7 @@ tags/source/confidence/created_at/updated_at），重启保留。
 import datetime
 import difflib
 import json
+import os
 import threading
 import uuid
 from pathlib import Path
@@ -421,6 +422,7 @@ class KnowledgeRepository:
                 logger.warning("Failed to load knowledge conflicts %s: %s", self._conflicts_path, e)
 
     def _save_tombstones(self) -> None:
+        self._assertNotWritingProductionUnderPytest()
         try:
             self._tombstones_path.write_text(
                 json.dumps(self._tombstones, ensure_ascii=False, indent=2),
@@ -430,6 +432,7 @@ class KnowledgeRepository:
             logger.error("Failed to save knowledge tombstones %s: %s", self._tombstones_path, e)
 
     def _save_conflicts(self) -> None:
+        self._assertNotWritingProductionUnderPytest()
         try:
             self._conflicts_path.write_text(
                 json.dumps(self._conflicts, ensure_ascii=False, indent=2),
@@ -451,7 +454,23 @@ class KnowledgeRepository:
             item["graph_node_ids"] = []
         return item
 
+    def _assertNotWritingProductionUnderPytest(self) -> None:
+        """测试会话内禁止落盘到生产目录。
+
+        真实 knowledge.json 已证实被历史非隔离运行写入过（38 行纯冗余，见
+        docs/specs/2026-09-20-knowledge-foundation-design.md §1.2）。围栏放在
+        _save 的 try 之外——try 里 raise 会被下面的 except Exception 吞成一条日志。
+        """
+        if not (os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("PYTEST_VERSION")):
+            return
+        if self._dir.resolve() == Path(DEFAULT_STORAGE_DIR).resolve():
+            raise RuntimeError(
+                "测试会话禁止写生产知识库 %s；用 tmp_path 构造 KnowledgeRepository，"
+                "或 monkeypatch 门面 get_repository 注入隔离实例。" % self._path
+            )
+
     def _save(self) -> None:
+        self._assertNotWritingProductionUnderPytest()
         try:
             from neurova.core.atomic_io import atomic_write_text
 
