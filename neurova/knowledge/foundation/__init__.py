@@ -8,6 +8,7 @@ from .admission import (
     SEGMENTS,
 )
 from .knowledge_facts import (
+    ADOPTION_OUTCOMES,
     DEFAULT_FACT_DB,
     KnowledgeFactStore,
     get_knowledge_fact_store,
