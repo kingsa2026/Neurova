@@ -14,6 +14,7 @@ from .knowledge_facts import (
     normalizeLabel,
     reset_knowledge_fact_store,
 )
+from .redundancy import RedundancyAudit
 
 __all__ = [
     "AdmissionReceipt",
@@ -22,6 +23,7 @@ __all__ = [
     "DEFAULT_FACT_DB",
     "KnowledgeAdmissionGate",
     "KnowledgeFactStore",
+    "RedundancyAudit",
     "SEGMENTS",
     "get_knowledge_fact_store",
     "normalizeLabel",

@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from neurova.core.content_identity import normalized_key as normalizedKey
+
 SEGMENTS: tuple = (
     "content_identity",     # 004
     "identity_resolution",  # 006
@@ -46,6 +48,7 @@ class AdmissionReceipt:
     subjectKey: str
     pendingSegments: List[str]
     segmentsApplied: List[str]
+    dedupedByContent: Optional[str] = None
 
 
 class AdmissionSegmentMissing(RuntimeError):
@@ -77,9 +80,9 @@ class KnowledgeAdmissionGate:
         }
 
     def pendingSegments(self) -> List[str]:
-        """骨架期由段1（内容归一）与段5/7（记账、索引）自身尚未落地报缺。"""
+        """段1（内容归一）已在 004 接通；其余缺段按协作者是否注入如实报出。"""
         missing = [name for name, dep in self._collaborators.items() if dep is None]
-        for always_pending in ("content_identity", "credibility_record", "indexing"):
+        for always_pending in ("credibility_record", "indexing"):
             if always_pending not in missing:
                 missing.append(always_pending)
         return [name for name in SEGMENTS if name in missing]
@@ -95,6 +98,19 @@ class KnowledgeAdmissionGate:
         if pending and not allowPendingSegments:
             raise AdmissionSegmentMissing(pending)
 
+        # 段1 内容归一：口径是抽取后内容，不是原始字节/URL 串。
+        # 空键 = 没有内容身份（纯标点/空白），不参与去重，否则空写入会互相吞没。
+        contentKey = normalizedKey(request.content) or None
+        dupe = self._store.findFactByContentKey(request.agentId, contentKey) if contentKey else None
+        if dupe:
+            return AdmissionReceipt(
+                factId=dupe["fact_id"],
+                subjectKey=dupe["subject_key"],
+                pendingSegments=pending,
+                segmentsApplied=["content_identity", "identity_resolution(base exact/alias)"],
+                dedupedByContent=dupe["fact_id"],
+            )
+
         subjectKey = self._store.upsertSubject(
             request.agentId, request.subjectLabel, aliases=request.aliases,
         )
@@ -107,11 +123,12 @@ class KnowledgeAdmissionGate:
             relationKind=request.relationKind,
             qualifier=request.qualifier,
             sourceTurnId=request.sourceTurnId,
+            contentKey=contentKey,
             # confidence 留 None：G11 规定它只能由断言聚合得出，咽喉不代填
         )
         return AdmissionReceipt(
             factId=factId,
             subjectKey=subjectKey,
             pendingSegments=pending,
-            segmentsApplied=["identity_resolution(base exact/alias)"],
+            segmentsApplied=["content_identity", "identity_resolution(base exact/alias)"],
         )

@@ -232,8 +232,17 @@ class KnowledgeFactStore:
         qualifier: Optional[Dict[str, Any]] = None,
         sourceTurnId: str = "",
         confidence: Optional[float] = None,
+        contentKey: Optional[str] = None,
     ) -> str:
-        """同 (主体, 谓词, 客体, 限定) 重放返回同一 fact_id——底座不重复开行。"""
+        """同 (主体, 谓词, 客体, 限定) 或同 content_key 重放返回同一 fact_id。
+
+        content_key 先查：B03 的 38 行纯冗余正是"三元组不同但内容相同"各开一行，
+        口径必须是内容而不是三元组。空 key（无内容身份）不参与去重。
+        """
+        if contentKey:
+            existing = self.findFactByContentKey(agentId, contentKey)
+            if existing:
+                return existing["fact_id"]
         qualifier = qualifier or {}
         qualifierHash = hashlib.sha256(
             json.dumps(qualifier, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -245,14 +254,22 @@ class KnowledgeFactStore:
                 (agentId, subjectKey, predicateTermId, objectTerm, qualifierHash),
             ).fetchone()
             if row:
+                if contentKey:
+                    # 存量行可能还没有内容身份键（019 迁移前后都会出现）：
+                    # 不补就会有一条永远绕过去重的行。
+                    self._conn.execute(
+                        "UPDATE knowledge_facts SET content_key = COALESCE(content_key, ?)"
+                        " WHERE fact_id = ?",
+                        (contentKey, row["fact_id"]),
+                    )
                 return row["fact_id"]
             factId = "fact_%s" % uuid.uuid4().hex[:12]
             self._conn.execute(
                 "INSERT INTO knowledge_facts (fact_id, agent_id, subject_key, predicate_term_id,"
-                " object_term, relation_kind, content, qualifier_hash, qualifier_json,"
-                " confidence, source_turn_id, recorded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " object_term, relation_kind, content, content_key, qualifier_hash, qualifier_json,"
+                " confidence, source_turn_id, recorded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (factId, agentId, subjectKey, predicateTermId, objectTerm, relationKind, content,
-                 qualifierHash, json.dumps(qualifier, ensure_ascii=False), confidence,
+                 contentKey, qualifierHash, json.dumps(qualifier, ensure_ascii=False), confidence,
                  sourceTurnId, _now()),
             )
             return factId
