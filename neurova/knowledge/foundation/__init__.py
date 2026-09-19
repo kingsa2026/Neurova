@@ -17,6 +17,7 @@ from .knowledge_facts import (
 )
 from .conflict_judge import CONFLICT_KINDS, RESOLUTION_POLICIES, KnowledgeConflictJudge
 from .lineage import ACTIVITY_KINDS, ACTOR_TYPES, KnowledgeLineageLedger
+from .reconcile import FoundationReconciler
 from .redundancy import RedundancyAudit
 
 __all__ = [
@@ -32,6 +33,7 @@ __all__ = [
     "KnowledgeLineageLedger",
     "ACTIVITY_KINDS",
     "ACTOR_TYPES",
+    "FoundationReconciler",
     "RedundancyAudit",
     "SEGMENTS",
     "get_knowledge_fact_store",
