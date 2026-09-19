@@ -61,10 +61,6 @@ class NarrativeStore:
             raise ValueError("NarrativeStore 需显式传入 db_path，不给默认值")
         self._db_path = db_path
 
-    @property
-    def dbPath(self) -> str:
-        return self._db_path
-
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
         if self._db_path != ":memory:":
