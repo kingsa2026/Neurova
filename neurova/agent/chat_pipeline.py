@@ -32,6 +32,8 @@ from neurova.agent.retriever_adapters import (
 from neurova.agent.knowledge_retriever_adapter import KnowledgeRetrieverAdapter
 from neurova.agent.tkg_retriever_adapter import TKGRetrieverAdapter
 from neurova.agent.tool_execution_manager import ExecutionStatus, TimeoutStrategy, ToolExecutionManager
+from neurova.agent.actionability import evaluate_actionability, get_actionability_config
+from neurova.agent.turn_origin import is_machine_origin, is_machine_origin_value, resolve_turn_origin
 
 logger = get_logger(__name__)
 
@@ -401,6 +403,20 @@ class ChatPipeline:
         except Exception:
             logger.debug("get_model_context_window 失败（上下文窗口预算按缺省值）", exc_info=True)
 
+        # 成本记账归属：把本轮 agent/session/turn 写入 ContextVar，
+        # 深层 LLMClient 在同步/流式同任务上下文内直接读取，无需逐层透传。
+        try:
+            from neurova.models.cost_tracking import set_llm_cost_context
+
+            set_llm_cost_context(
+                agent_id=getattr(self.config, "agent_id", None)
+                or getattr(self._agent, "id", None),
+                session_id=ctx.session_id,
+                turn_id=ctx.trace_id,
+            )
+        except Exception:
+            logger.debug("成本记账上下文注入失败（忽略）", exc_info=True)
+
         self._init_agent_state(ctx)
 
         # Step 0: 记录活动 + 轨迹
@@ -655,13 +671,53 @@ class ChatPipeline:
     # ══════════════════════════════════════════════════════════════
 
     async def _step_pre_llm_checks(self, ctx: ChatContext):
-        """命令分发（B4）、/compact 压缩命令、/review 评审命令、ToolMemory 检查、技能获取、NL 合成"""
+        """命令分发（B4）、/compact 压缩命令、/review 评审命令、ToolMemory 检查、技能获取、NL 合成、可行动性门控"""
         await self._check_compact_command(ctx)
         await self._check_review_command(ctx)
         await self._check_command_dispatch(ctx)
         await self._check_tool_memory(ctx)
         await self._check_skill_acquisition(ctx)
         await self._check_nl_synthesis(ctx)
+        await self._check_actionability(ctx)
+
+    async def _check_actionability(self, ctx: ChatContext):
+        """任务2 可行动性门控：仅当"门控开启 + 明确机器源 + 近期无人类"时置不可行标记，
+        由 _step_llm_call 据此早退（不调 LLM）。默认关、fail-open；人类/存疑轮永不抑制。"""
+        try:
+            enabled, lookback = get_actionability_config()
+            if not enabled:
+                return
+            origin = resolve_turn_origin(ctx.metadata)
+            human_recent = self._recent_human_involved(ctx, lookback)
+            actionable, reason = evaluate_actionability(enabled, origin, human_recent)
+            if not actionable:
+                ctx.metadata = dict(ctx.metadata or {})
+                ctx.metadata["actionable"] = False
+                ctx.metadata["actionable_reason"] = reason
+                ctx.metadata["actionable_origin"] = origin.value
+                logger.info(
+                    "actionability 门控：origin=%s 近期无人类介入，本轮标记不可行", origin.value
+                )
+        except Exception:  # noqa: BLE001 - 门控异常一律放行，不阻断对话
+            logger.debug("actionability 门控检查失败（放行）", exc_info=True)
+
+    def _recent_human_involved(self, ctx: ChatContext, lookback: int) -> bool:
+        """近窗内是否有人类介入：取不到/空/含任何非机器源（含 None/unknown）→ True（放行）；
+        仅当整窗均为已确认机器源才 False（方可抑制）。缺 origin 一律按人类计，绝不误吞。"""
+        try:
+            origins = self.session_manager.get_recent_origins(
+                agent_id=getattr(getattr(self, "config", None), "agent_id", None),
+                session_id=ctx.session_id,
+                max_messages=lookback,
+            )
+        except Exception:  # noqa: BLE001 - 历史不可用 → 保守放行
+            return True
+        if not origins:
+            return True
+        for o in origins:
+            if not is_machine_origin_value(o):
+                return True
+        return False
 
     async def _check_review_command(self, ctx: ChatContext):
         """/review 受限评审子会话命令（P1-8 命令面，交互契约与 /compact 同构）。
@@ -1823,12 +1879,37 @@ class ChatPipeline:
     # Step 3: LLM 调用（含自动续写）
     # ══════════════════════════════════════════════════════════════
 
+    def _resolve_auto_effort(self, ctx: ChatContext):
+        """G2 per-turn 自动定档：调用方未显式选档时，按查询难度保守推断并回写
+        metadata["thinking_effort"]（与指令注入/reasoning_effort 两路共用单一真源）。
+
+        安全边界：显式档位绝不覆盖；歧义不改现状；kill-switch=NEUROVA_AUTO_EFFORT=off；
+        无 LLM/IO，fail-open——任何异常不阻断对话。
+        """
+        try:
+            from neurova.agent.effort_inference import auto_effort_enabled, infer_query_effort
+
+            if not auto_effort_enabled():
+                return
+            current = ""
+            if isinstance(ctx.metadata, dict):
+                current = str(ctx.metadata.get("thinking_effort") or "").strip().lower()
+            if current:  # 尊重调用方显式档位（含 standard），绝不改写
+                return
+            inferred = infer_query_effort(ctx.user_input or "")
+            if inferred:
+                ctx.metadata = dict(ctx.metadata or {})
+                ctx.metadata["thinking_effort"] = inferred
+        except Exception:  # noqa: BLE001 - 自动定档失败回落现状，不阻断对话
+            logger.debug("自动定档解析失败（忽略）", exc_info=True)
+
     def _apply_thinking_effort(self, ctx: ChatContext):
         """按 metadata.thinking_effort（light/standard/deep）注入回答深度指令。
 
         采用提示词方式而非原生 reasoning 参数：对所有模型通用，
         且避免不支持的 API 因未知参数报 400。
         """
+        self._resolve_auto_effort(ctx)
         effort = ""
         if isinstance(ctx.metadata, dict):
             effort = str(ctx.metadata.get("thinking_effort") or "").lower()
@@ -1862,6 +1943,15 @@ class ChatPipeline:
             # 可能在本轮已激活请求级 override（ContextVar 随请求任务存活，不会
             # 因提前返回消亡），漏清会让同任务后续 LLM 调用串到视觉模型。
             self._clear_vision_routing(ctx)
+            return
+        # 任务2：actionability 门控判定不可行 → 跳过 LLM（结构化标记，交上层裁决）
+        if isinstance(ctx.metadata, dict) and ctx.metadata.get("actionable") is False:
+            logger.info(
+                "actionability 门控判定不可行（origin=%s reason=%s），本轮跳过 LLM 调用",
+                ctx.metadata.get("actionable_origin"),
+                ctx.metadata.get("actionable_reason"),
+            )
+            ctx.reply = ""
             return
         self._apply_thinking_effort(ctx)
         tools_for_llm = await self.context_orchestrator.build_tools_for_llm()

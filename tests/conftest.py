@@ -42,6 +42,24 @@ def _isolate_session_manager_singletons():
 
 
 @pytest.fixture(autouse=True)
+def _isolate_connection_pools():
+    """跨测试释放连接池持有的 idle SQLite 连接。
+
+    `connection_pool` 按路径持有连接且不随测试结束关闭；当测试把工作库建在
+    TemporaryDirectory 内时，Windows 下临时目录清理会因残留池连接报 WinError 32
+    （standalone 尤其明显）。每测试后 close_all_pools() 归还/关闭，池会在下次
+    get_connection_pool 时惰性重建。
+    """
+    yield
+    try:
+        from neurova.core.connection_pool import close_all_pools
+
+        close_all_pools()
+    except Exception:  # pragma: no cover - 池模块不可用时跳过
+        pass
+
+
+@pytest.fixture(autouse=True)
 def _isolate_execution_engine_singleton():
     """ExecutionEngine 单例跨测试隔离（Issue #65）。
 

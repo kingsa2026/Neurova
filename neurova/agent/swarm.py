@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
 import uuid
@@ -41,6 +42,7 @@ class SubAgentRun:
     agent_id: str = ""
     agent_name: str = ""
     task: str = ""
+    model: str = ""  # 派生目标模型名（解析失败为 ""）——预算/并发/冷却治理据此判定
     origin: str = "chat"  # chat | workflow
     session_id: Optional[str] = None  # 事件广播目标（发起者的聊天会话）
     # P2-9：member 会话键。
@@ -56,6 +58,8 @@ class SubAgentRun:
     finished_at: float = 0.0
     node_id: Optional[str] = None  # workflow 来源时的节点 id
     execution_id: Optional[str] = None  # workflow 来源时的执行 id
+    # 运行时状态：预留的模型并发槽（None=未占用）；_execute 的 finally 据此释放
+    slot_model: Optional[str] = field(default=None, repr=False)
 
     @property
     def duration(self) -> float:
@@ -69,6 +73,7 @@ class SubAgentRun:
             "agent_id": self.agent_id,
             "agent_name": self.agent_name,
             "task": self.task,
+            "model": self.model,
             "origin": self.origin,
             "session_id": self.session_id,
             "member_session_id": self.member_session_id,
@@ -109,9 +114,17 @@ class SwarmManager:
     # 单个 task 长度上限（防 LLM 把整段对话历史塞进 task 拖垮子 Agent）
     MAX_TASK_CHARS = 8000
 
+    # ── fan-out 治理（吸收进 spawn 三明治，防成本/限流踩踏；0=关闭保持既有突发语义）──
+    # 同一模型的并发子 Agent 上限（"大模型并发帽"）
+    MAX_CONCURRENT_PER_MODEL = int(os.environ.get("NEUROVA_SWARM_MAX_CONCURRENT_PER_MODEL", "0") or 0)
+    # 连续两次派生的最小间隔（毫秒，确定性错峰防惊群）
+    MIN_SPAWN_INTERVAL_MS = int(os.environ.get("NEUROVA_SWARM_MIN_SPAWN_INTERVAL_MS", "0") or 0)
+
     def __init__(self):
         self._runs: Dict[str, SubAgentRun] = {}
         self._tasks: Dict[str, asyncio.Task] = {}
+        self._model_active: Dict[str, int] = {}  # 每模型并发子 Agent 计数（自持，不与共享限流器双计）
+        self._last_dispatch_ts: float = 0.0       # 上次通过治理闸的派生时刻（monotonic，错峰用）
         self._lock = threading.RLock()
 
     # ── 公共接口 ──────────────────────────────────────────────
@@ -168,17 +181,60 @@ class SwarmManager:
         if agent is None:
             return {"error": f"未找到可用的子 Agent（请求: {agent_id or 'default'}）"}
 
+        model = self._resolve_model_name(agent)
+        cap = self.MAX_CONCURRENT_PER_MODEL
+
+        # ── fan-out 治理闸（预算/冷却/并发/间隔；全部 fail-open，可 kill-switch）──
+        if self._governance_enabled():
+            if self._over_budget(resolved_id, model):
+                return self._rejection(
+                    "BUDGET_EXCEEDED",
+                    f"agent {resolved_id} 预算已超支——暂缓派生子 Agent，等待配额重置或提升预算",
+                )
+            cooldown = self._model_cooldown_remaining(model)
+            if cooldown > 0:
+                return self._rejection(
+                    "MODEL_COOLDOWN",
+                    f"模型 {model} 正处 429 退避冷却（剩余 {cooldown:.1f}s）——暂缓派生以避开上游限流",
+                    retry_after_ms=int(cooldown * 1000),
+                )
+
+        if cap and cap > 0 and model:
+            with self._lock:
+                if self._model_active.get(model, 0) >= cap:
+                    return self._rejection(
+                        "MODEL_CONCURRENCY",
+                        f"模型 {model} 并发子 Agent 已达上限 {cap}——错峰派生，等待现有同类子任务完成",
+                    )
+
+        interval = self.MIN_SPAWN_INTERVAL_MS
+        if interval and interval > 0:
+            with self._lock:
+                elapsed_ms = (time.monotonic() - self._last_dispatch_ts) * 1000.0
+                if elapsed_ms < interval:
+                    return self._rejection(
+                        "SPAWN_TOO_FAST",
+                        f"派生过快（距上次 {elapsed_ms:.0f}ms < {interval}ms）——确定性错峰防惊群",
+                        retry_after_ms=int(interval - elapsed_ms),
+                    )
+
         run = SubAgentRun(
             agent_id=resolved_id,
             agent_name=getattr(agent.config, "name", resolved_id) if hasattr(agent, "config") else resolved_id,
             task=task,
+            model=model or "",
             origin=origin,
             session_id=session_id,
             member_session_id=f"swarm_{uuid.uuid4().hex[:12]}",
             node_id=node_id,
             execution_id=execution_id,
         )
+        # 通过全部治理闸 → 预留模型并发槽 + 打派生时间戳（错峰）
         with self._lock:
+            self._last_dispatch_ts = time.monotonic()
+            if cap and cap > 0 and model:
+                self._model_active[model] = self._model_active.get(model, 0) + 1
+                run.slot_model = model
             self._runs[run.subagent_id] = run
             self._evict_finished_runs()
 
@@ -261,12 +317,13 @@ class SwarmManager:
         }
 
     def _rejection(
-        self, code: str, message: str, active_children: Optional[int] = None
+        self, code: str, message: str, active_children: Optional[int] = None,
+        retry_after_ms: Optional[int] = None,
     ) -> Dict[str, Any]:
         """数据层结构化拒绝（SpawnRejectReason 对应物）。
 
         swarm_rejection 标记键使 is_policy_denial 归类为"决策"而非
-        "后端故障"——熔断器/失败统计不计数。
+        "后端故障"——熔断器/失败统计不计数。retry_after_ms 供冷却/间隔类拒绝提示重试窗口。
         """
         payload: Dict[str, Any] = {
             "rejected": True,
@@ -277,7 +334,72 @@ class SwarmManager:
         }
         if active_children is not None:
             payload["active_children"] = active_children
+        if retry_after_ms is not None:
+            payload["retry_after_ms"] = int(retry_after_ms)
         return payload
+
+    # ── fan-out 治理闸（预算/冷却/并发/间隔）──────────────────
+
+    @staticmethod
+    def _governance_enabled() -> bool:
+        """治理总开关（kill-switch）：NEUROVA_SWARM_GOVERNANCE=off 关预算/冷却闸。"""
+        return (os.environ.get("NEUROVA_SWARM_GOVERNANCE") or "on").strip().lower() != "off"
+
+    @staticmethod
+    def _resolve_model_name(agent: Any) -> Optional[str]:
+        """尽力解析子 Agent 实际调用的模型名；非字符串/auto/缺失 → None（治理据此优雅跳过）。"""
+        candidates = []
+        for getter in (
+            lambda: agent.llm_client.config.model,
+            lambda: agent.model,
+            lambda: agent.config.llm_config.model,
+        ):
+            try:
+                candidates.append(getter())
+            except Exception:  # noqa: BLE001 - 属性形态多样，取到即用
+                continue
+        for v in candidates:
+            if isinstance(v, str) and v.strip() and v.strip().lower() != "auto":
+                return v.strip()
+        return None
+
+    def _model_cooldown_remaining(self, model: Optional[str]) -> float:
+        """只读探测模型 429 退避剩余秒数（复用共享限流器；不 acquire，避免双重计数）。"""
+        if not model:
+            return 0.0
+        try:
+            from neurova.llm.model_rate_limiter import get_shared_limiter
+
+            return max(0.0, get_shared_limiter().pause_remaining(model))
+        except Exception:  # noqa: BLE001 - 限流器不可用 → fail-open
+            return 0.0
+
+    def _over_budget(self, agent_id: str, model: Optional[str]) -> bool:
+        """预算是否超支（读 record_llm_cost 写的同一单源；无预算 fail-open False）。"""
+        try:
+            from neurova.models.cost_budget import BudgetScope, get_budget_service
+
+            mgr = get_budget_service().manager
+            if agent_id and mgr.is_over_budget(BudgetScope.HOURLY, agent_id):
+                return True
+            if model and mgr.is_over_budget(BudgetScope.MODEL, model):
+                return True
+        except Exception:  # noqa: BLE001 - 预算不可用不阻断派生
+            return False
+        return False
+
+    def _release_slot(self, run: SubAgentRun) -> None:
+        """子 Agent 结束（成功/失败均）释放预留的模型并发槽，杜绝计数泄漏。"""
+        model = getattr(run, "slot_model", None)
+        if not model:
+            return
+        with self._lock:
+            cur = self._model_active.get(model, 0)
+            if cur <= 1:
+                self._model_active.pop(model, None)
+            else:
+                self._model_active[model] = cur - 1
+        run.slot_model = None
 
     def _forget_task(self, subagent_id: str) -> None:
         """移除已完成后台任务的引用（done 回调）"""
@@ -332,6 +454,19 @@ class SwarmManager:
         return None, agent_id or "default", True
 
     async def _execute(
+        self,
+        run: SubAgentRun,
+        agent: Any,
+        initiator_agent: Optional[Any],
+        stream: bool,
+    ) -> None:
+        """执行子 Agent：无论成功/失败，finally 释放其预留的模型并发槽（防泄漏）。"""
+        try:
+            await self._run_member(run, agent, initiator_agent, stream)
+        finally:
+            self._release_slot(run)
+
+    async def _run_member(
         self,
         run: SubAgentRun,
         agent: Any,

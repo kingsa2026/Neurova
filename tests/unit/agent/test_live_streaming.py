@@ -86,7 +86,9 @@ class TestApplyThinkingEffort:
         p._apply_thinking_effort(ctx)
         assert ctx.context == before
 
-        ctx2 = ChatContext(user_input="hi", metadata=None)
+        ctx2 = ChatContext(user_input="帮我看看这个项目", metadata=None)
+        # 用歧义文本代表"缺省无信号→不注入"；寒暄/长文等强信号→light/deep 的
+        # 自动定档属 G2 有意增强，另由 tests/unit/agent/test_effort_inference.py 覆盖。
         ctx2.context = [{"role": "system", "content": "S"}]
         p._apply_thinking_effort(ctx2)
         assert ctx2.context[0]["content"] == "S"
