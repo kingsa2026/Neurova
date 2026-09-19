@@ -24,16 +24,32 @@ class KnowledgeRetrieverAdapter:
     即优先保证记忆与 MoE 路由，知识库作为补充知识源。
     """
 
-    def __init__(self, repo, user: Optional[Dict[str, Any]] = None):
+    def __init__(self, repo, user: Optional[Dict[str, Any]] = None, factSurface=None):
         """
         参数:
             repo: 知识库 Repository 实例（需有 search_visible_items 方法）
             user: 当前用户字典（可后续透传覆盖）
+            factSurface: 底座读面；不传则按环境开关惰性取得——装配段因此无需改动
         """
         self._repo = repo
         self._user = user
+        self._factSurface = factSurface
         self._name = "KnowledgeRetriever"
         self._priority = 25  # 中等偏下优先级（记忆 >> 知识）
+
+    def _surface(self):
+        """返回已启用的读面，关闸即 None（判一次，之后所有分支不再各自猜开关状态）。"""
+        from neurova.knowledge.foundation.read_surface import FactSurface, FactSurfaceConfig
+
+        surface = self._factSurface
+        if surface is None:
+            if not FactSurfaceConfig.fromEnv().enabled:
+                return None
+            from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
+
+            surface = FactSurface(get_knowledge_fact_store())
+            self._factSurface = surface
+        return surface if surface.enabled else None
 
     @property
     def name(self) -> str:
@@ -42,6 +58,20 @@ class KnowledgeRetrieverAdapter:
     @property
     def priority(self) -> int:
         return self._priority
+
+    def _factHits(self, context, agent_id):
+        """底座读面命中（含使用回流）。关闸即空池，旧行为一字不变。"""
+        surface = self._surface()
+        if surface is None:
+            return [], []
+        hits = surface.rankHits(surface.search(context.query, limit=context.limit, agentId=agent_id))
+        if not hits:
+            return [], []
+        from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
+        from neurova.knowledge.foundation.read_surface import recordHitsAsInjection
+
+        recordHitsAsInjection(get_knowledge_fact_store(), hits)
+        return hits, [h["knowledge_id"] for h in hits]
 
     async def retrieve(self, context) -> Any:
         """执行知识库检索（走用户可见性过滤）"""
@@ -75,6 +105,12 @@ class KnowledgeRetrieverAdapter:
                 agent_id=agent_id,
             )
 
+            factHits, lineageIds = self._factHits(context, agent_id)
+            if factHits:
+                from neurova.knowledge.foundation.read_surface import mergeIntoLegacy
+
+                knowledge_items = mergeIntoLegacy(knowledge_items, factHits, limit=context.limit)
+
             elapsed = time.monotonic() - start_time
 
             if not knowledge_items:
@@ -99,7 +135,11 @@ class KnowledgeRetrieverAdapter:
                 quality=quality,
                 quality_level=quality_level,
                 retrieval_time=elapsed,
-                metadata={"retriever_type": "knowledge", "hits": len(memories)},
+                metadata={
+                    "retriever_type": "knowledge",
+                    "hits": len(memories),
+                    "lineage_ids": lineageIds,
+                },
             )
 
         except Exception as e:

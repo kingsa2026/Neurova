@@ -80,11 +80,35 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_triple
     ON knowledge_facts(agent_id, subject_key, predicate_term_id, object_term, qualifier_hash);
 CREATE INDEX IF NOT EXISTS idx_fact_subject ON knowledge_facts(subject_key, status);
 CREATE INDEX IF NOT EXISTS idx_fact_content ON knowledge_facts(agent_id, content_key);
--- 内容去重必须是结构约束而不是"先查后插"：两个并发写同一内容会各插一行。
--- 空 content_key（无内容身份）不入索引，避免空写入互撞。
-CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_agent_content
-    ON knowledge_facts(agent_id, content_key) WHERE content_key IS NOT NULL;
+"""
+register_migration(1, _SCHEMA, domain="knowledge_foundation")
 
+_SCHEMA_V2 = """
+CREATE TABLE IF NOT EXISTS knowledge_conflicts (
+    conflict_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    subject_key TEXT NOT NULL,
+    predicate_term_id TEXT NOT NULL,
+    member_fact_ids_json TEXT NOT NULL DEFAULT '[]',
+    member_signature TEXT NOT NULL DEFAULT '',
+    severity REAL NOT NULL DEFAULT 0.5,
+    recommended_policy TEXT NOT NULL DEFAULT 'manual',
+    policy_basis TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    detected_at TEXT NOT NULL,
+    resolved_at TEXT,
+    resolution TEXT,
+    resolved_by TEXT NOT NULL DEFAULT '',
+    winner_fact_id TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_conflict_members ON knowledge_conflicts(member_signature);
+CREATE INDEX IF NOT EXISTS idx_conflict_status ON knowledge_conflicts(status, detected_at);
+"""
+register_migration(2, _SCHEMA_V2, domain="knowledge_foundation")
+
+# v1 发布之后补的结构必须另起版本：已存在的库 user_version 已经是 1，
+# 再往 _SCHEMA 里加东西永远不会被重放（工单 011 首次真数据回填就是这样炸的）。
+_SCHEMA_V3 = """
 CREATE TABLE IF NOT EXISTS knowledge_activities (
     activity_id TEXT PRIMARY KEY,
     activity_kind TEXT NOT NULL,
@@ -112,31 +136,13 @@ CREATE TABLE IF NOT EXISTS knowledge_assertions (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_assertion_identity
     ON knowledge_assertions(fact_id, actor_type, actor_id, medium_ref, statement_hash);
 CREATE INDEX IF NOT EXISTS idx_assertion_fact ON knowledge_assertions(fact_id);
-"""
-register_migration(1, _SCHEMA, domain="knowledge_foundation")
 
-_SCHEMA_V2 = """
-CREATE TABLE IF NOT EXISTS knowledge_conflicts (
-    conflict_id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL,
-    subject_key TEXT NOT NULL,
-    predicate_term_id TEXT NOT NULL,
-    member_fact_ids_json TEXT NOT NULL DEFAULT '[]',
-    member_signature TEXT NOT NULL DEFAULT '',
-    severity REAL NOT NULL DEFAULT 0.5,
-    recommended_policy TEXT NOT NULL DEFAULT 'manual',
-    policy_basis TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'pending',
-    detected_at TEXT NOT NULL,
-    resolved_at TEXT,
-    resolution TEXT,
-    resolved_by TEXT NOT NULL DEFAULT '',
-    winner_fact_id TEXT
-);
-CREATE UNIQUE INDEX IF NOT EXISTS ux_conflict_members ON knowledge_conflicts(member_signature);
-CREATE INDEX IF NOT EXISTS idx_conflict_status ON knowledge_conflicts(status, detected_at);
+-- 内容去重是结构约束而不是"先查后插"：并发写同一内容会各插一行。
+-- 空 content_key（无内容身份）不入索引，避免空写入互撞。
+CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_agent_content
+    ON knowledge_facts(agent_id, content_key) WHERE content_key IS NOT NULL;
 """
-register_migration(2, _SCHEMA_V2, domain="knowledge_foundation")
+register_migration(3, _SCHEMA_V3, domain="knowledge_foundation")
 
 MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
 
@@ -522,6 +528,25 @@ class KnowledgeFactStore:
             "outcome_failure": int(row["bad"] or 0),
             "outcome_unevidenced": int(row["blind"] or 0),
         }
+
+    def searchableFacts(self, agentId: Optional[str] = None) -> List[Dict[str, Any]]:
+        """读面候选：仅 active 且未过期的事实，带主体规范名。
+
+        时效权威仍是 `status`（工单 008 定的唯一真源），这里只额外挡掉已到期但尚未
+        被 `expireDueFacts()` 推进的行——否则读面会跑在巡检前头。
+        """
+        sql = ("SELECT f.*, s.canonical_label FROM knowledge_facts f"
+               " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
+               " WHERE f.status = 'active' AND s.status != 'merged'"
+               " AND (f.valid_until IS NULL OR f.valid_until > ?)")
+        params: List[Any] = [_now()]
+        if agentId:
+            sql += " AND f.agent_id = ?"
+            params.append(agentId)
+        sql += " ORDER BY f.recorded_at DESC, f.fact_id"
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [self._hydrate(r) for r in rows]
 
     def factCount(self) -> int:
         with self._lock:
