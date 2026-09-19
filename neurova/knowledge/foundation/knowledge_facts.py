@@ -18,7 +18,12 @@ from typing import Any, Dict, List, Optional
 from neurova.core.db_migration import migrate as apply_migrations, register_migration
 from neurova.core.logger import get_logger
 
+from .credibility import ConfidenceAggregator
+
 logger = get_logger(__name__)
+
+# 置信度聚合只有一处算法源；store 在输入变化处回算，避免派生列腐烂
+_AGGREGATOR = ConfidenceAggregator()
 
 DEFAULT_FACT_DB = "./data/knowledge/knowledge_facts.db"
 
@@ -404,6 +409,52 @@ class KnowledgeFactStore:
                 (contentKey, factId),
             )
 
+    def setConfidence(self, factId: str, confidence: Optional[float],
+                      evidenceState: Optional[str] = None) -> None:
+        with self._lock, self._conn:
+            self._requireFact(factId)
+            if evidenceState is not None and evidenceState not in EVIDENCE_STATES:
+                raise ValueError("未知 evidence_state: %r（有效值: %s）"
+                                 % (evidenceState, " / ".join(EVIDENCE_STATES)))
+            if confidence is not None and not 0.0 <= float(confidence) <= 1.0:
+                raise ValueError("confidence 必须落在 [0,1] 或 None，收到 %r" % (confidence,))
+            if evidenceState is None:
+                self._conn.execute(
+                    "UPDATE knowledge_facts SET confidence = ? WHERE fact_id = ?",
+                    (confidence, factId),
+                )
+            else:
+                self._conn.execute(
+                    "UPDATE knowledge_facts SET confidence = ?, evidence_state = ?"
+                    " WHERE fact_id = ?",
+                    (confidence, evidenceState, factId),
+                )
+
+    def _refreshConfidence(self, factId: str) -> None:
+        """派生列会在输入变化处腐烂——断言增删、矛盾标记都必须就地重算。
+
+        算法只有一份，在 `ConfidenceAggregator`；这里不重复实现第二套口径。
+        证据态只做单向升级（unevidenced → evidenced）：人为标记的 failed/unevidenced
+        是判定结论，不能被"后来多了一条断言"这种输入变化抹掉。
+        """
+        fact = self.fact(factId)
+        verdict = _AGGREGATOR.aggregate(fact, self.assertions(factId))
+        evidenceState = verdict["evidence_state"] if fact.get("evidence_state") == "unevidenced" \
+            else None
+        self.setConfidence(factId, verdict["confidence"], evidenceState)
+
+    def markContradicted(self, factId: str, counterpartIds: List[str]) -> None:
+        """记下与哪些事实相对立。读侧看不到矛盾，就等于矛盾从未发生。"""
+        row = self._requireFact(factId)
+        merged = sorted({*(row.get("contradicted_by") or []),
+                         *(str(c) for c in counterpartIds if c and c != factId)})
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE knowledge_facts SET contradicted_by_json = ? WHERE fact_id = ?",
+                (json.dumps(merged, ensure_ascii=False), factId),
+            )
+        self._refreshConfidence(factId)
+
     def factCount(self) -> int:
         with self._lock:
             return int(self._conn.execute("SELECT COUNT(*) FROM knowledge_facts").fetchone()[0])
@@ -483,6 +534,7 @@ class KnowledgeFactStore:
                 "UPDATE knowledge_facts SET assertion_count = assertion_count + 1 WHERE fact_id = ?",
                 (factId,),
             )
+        self._refreshConfidence(factId)
         return assertionId
 
     def assertions(self, factId: str) -> List[Dict[str, Any]]:
