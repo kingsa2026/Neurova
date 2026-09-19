@@ -445,6 +445,27 @@ case 集与基线摘要已导出入库：`tests/fixtures/knowledge_eval_cases.js
 但收集错误会 `Interrupted` 整轮会话——全量口径必须再加一条 `--ignore=tests/unit/evolution/experience`。
 不代修：改了会把别人的半成品断言按我的猜测定形。
 
+2026-09-20 019a 期间按 `tests/unit tests/api tests/core -v` 全量口径再登记一批失败，
+同样非本批引起（该轮跑到 89% 被 neurflow 那类 30s 超时杀掉会话，所以清单不保证穷尽）：
+`tests/unit/cognitive/test_pattern_crystallizer.py`(7)、
+`tests/unit/cognitive/test_cognitive_graph_integration.py`(4)、
+`tests/unit/test_crystallized_simple.py`(1)、
+`tests/unit/security/test_p1_6_skill_guard.py`(1)、`tests/unit/models/test_cost_tracking.py`(2)、
+`tests/integration/test_knowledge_evolution_loop.py`(3)、
+`tests/integration/test_crystallized_experience_integration.py`(2)。
+判据：失败断言全在"结晶是否落库/是否通知进化"这一族（`assert engine.store.call_count == 1` 实得 0），
+而被断言的 `neurova/cognitive_layers/memory_layer/pattern_crystallizer.py` 此刻正处在他人未提交改动里
+（+181 行），且该文件对 `neurova.knowledge` 的 import 数为 0 —— 本批改动集
+（`neurova/knowledge/**`、`tests/unit/knowledge/**`、`docs/`）与它无交集。
+同日工作树里新出现的 `docs/specs/2026-09-19-experience-quality-gate*` 也指向同一族在途改造。
+处置：登记不修，归因留给该批负责人。
+
+**仅在全量排序下才失败、单独跑通过的 2 例**（交叉污染，不是本批引入）：
+`tests/unit/knowledge/test_rerank_refine_weknora.py::TestAPIWiring` 的
+`test_default_off_preserves_contract` 与 `test_top_k_applied`——
+单独跑该文件 24 passed。要查得从别的模块对 `semantic_search_api` / rerank 配置的污染入手，
+别改这两个用例本身。
+
 另有 `tests/benchmarks/test_multi_agent_coordination.py:413` 未导入 `Optional` 导致全仓收集中断——
 该目录未入库（`??`），属他人在途件，本批不触碰，跑套件时需 `--ignore=tests/benchmarks`。
 
