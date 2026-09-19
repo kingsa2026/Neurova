@@ -1,0 +1,424 @@
+{
+  "schema": "neurova.knowledge.evaluation.cases/v1",
+  "case_count": 30,
+  "labeling_breakdown": {
+    "category": 3,
+    "tag": 3,
+    "title_literal": 24
+  },
+  "cases": [
+    {
+      "query": "note",
+      "expected_ids": [
+        "6c8c272d-9ac9-4f07-8328-25f6795da34e",
+        "d9df0755-6c6f-419b-b460-f7539c469935",
+        "769d64dd-9ebf-4697-99ee-65899e6b6fde",
+        "68f101c4-cca2-403f-83c0-f35e85e4cebe",
+        "f66e19d0-ec30-42d3-b9a6-e3352289f1bb",
+        "a5c449bd-018b-4861-ae53-2bd2b5a70842",
+        "2bbfa33b-31ef-4989-ba04-c283d3101455",
+        "44ec89b0-4592-4576-90da-925add819b39"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "import",
+      "expected_ids": [
+        "6c8c272d-9ac9-4f07-8328-25f6795da34e",
+        "1e5c446a-34ed-4901-b35f-16c6e83e81dd",
+        "837e26d1-9486-46ab-bd75-3dc14b7cc382",
+        "f9a4c251-cc4b-44d2-8b89-35b9b2ed815c",
+        "8bba7abf-f36a-43ea-a4d6-494e1f46b94a",
+        "2c82b45d-59a5-4880-9953-a85b86324c41",
+        "2370d3d4-85de-46d7-ba30-a846978cf9d7",
+        "e0197c88-d9bd-4370-8254-ef5cc0e9b854",
+        "3ffb7d55-bb79-4b08-92a5-414ca7403605",
+        "d7c7e139-bb39-49a9-bffc-938836b65feb",
+        "ac7d8673-e6af-4e20-a44f-52ae081c247f",
+        "d8aaec56-482d-4dd3-974a-9ca6138cadbe",
+        "5d050562-5536-48de-a0b7-b2287434f806",
+        "c2486b85-2371-4238-97c8-4736139c66eb",
+        "77226e73-472e-4cc3-9639-ace286c28076",
+        "f3f08b58-028a-403e-96e5-aa30eaae8dc6",
+        "beacd389-e841-4104-b2f3-171aefc86614",
+        "455f2a3d-0194-4e29-865d-4bd4469ab921",
+        "05f18765-0549-4c9b-bafa-002b4240b12f",
+        "501cf713-3251-4554-a664-e4eae9335053",
+        "0006edcd-c29b-44d1-b559-198bb2373596",
+        "91428048-88a4-4cd6-beae-609bdba07357",
+        "83a9cf79-6812-4467-8971-1755234ac206",
+        "95934dd8-2039-4e2f-9c63-00d193aa7415",
+        "65ae274d-0251-4961-9d65-adf9a4934ca5",
+        "20a90ae5-7670-4298-9e17-015967083ad7",
+        "2eea182d-7a6f-4940-a215-379994cef40c",
+        "8a0662b7-cbcb-4719-bbc6-33d1e29e7b27",
+        "5134e35c-9235-4e2f-9a77-5400edbd2f05",
+        "21deb69a-4f4b-4217-ba20-90201a698b0d",
+        "360a209d-3e37-4bb2-87f4-814d3c6b447a",
+        "e2af9782-da9c-409d-90cf-307e334ae4c5",
+        "35d50499-7ecd-492e-a10f-d63b86ae8cb3",
+        "6d5db093-43d9-48ac-bb02-feb7d9f0fddf",
+        "0a536470-a443-41e2-8ed3-bae37d9f4334",
+        "26ea3f9d-5568-4572-9a2e-fdf48f981b99",
+        "c1732e60-10c9-457c-a500-63ea7cb2af10",
+        "24d21d05-5fa8-4e24-a840-52408af81aa5",
+        "64cbc4a6-8e84-4f2c-a68c-48bb1ed00327",
+        "05be94ef-9ea1-4102-9494-3f43c70e8198",
+        "339fccce-aa0e-42c4-8948-23d0c3b69761",
+        "1ef59557-0f91-4648-887a-d20be232a353",
+        "93239ea2-d777-4e6d-bb52-d3fd162487ca",
+        "30766088-fd36-4c16-a590-78f68e521a1f",
+        "00f1e236-718e-4efd-9f1f-637aae8f0238",
+        "3a4dacbe-1bd1-4a1d-94ba-2fa24e58f019",
+        "d209bd64-412e-4592-a192-8cf657a8b042",
+        "b6ebffac-5ca8-4d0f-9980-1d28dadeaa59",
+        "7454e19c-3188-4bf7-b85a-b4c5a5ef9914",
+        "7be48986-a893-4d03-81c2-5dac3f914dee",
+        "99f12d89-26eb-4ea7-aa0f-b027ec7bcbe1",
+        "14f26405-f850-43d3-8571-03c8de5f930e",
+        "034da484-80b5-4b95-b8b9-c333e3c0ffbf",
+        "cfb7adb7-282c-4706-97b2-20f7d924d9f1",
+        "b47ed857-8148-40b8-903f-35c2527d2cda",
+        "337dc94b-d16f-4d5b-b093-cbee622a6290",
+        "2629fed9-2a3b-4a12-924c-9d9aacecb930",
+        "c43d8770-1df8-4795-8231-7155b8352f8b",
+        "b2e190c2-40b5-4f6b-a5d9-25aeffcac3ab",
+        "9011326e-0e3e-4456-9054-9b9c7a575188",
+        "9ea899e0-1d36-48d5-9614-04a785cf8669",
+        "98f21c0e-fe08-4eca-8b4d-ddc3b44ba6db",
+        "099863c7-567e-44ba-9afe-e4c448043432",
+        "f0c2d818-1305-4a17-885b-efb201b5e2b0",
+        "d9df0755-6c6f-419b-b460-f7539c469935",
+        "ef87a879-fd86-47da-8993-fe3e02fb99d0",
+        "769d64dd-9ebf-4697-99ee-65899e6b6fde",
+        "d53c220c-c028-4442-92b0-20063d226a1c",
+        "de27974e-69f0-461c-9f10-88d2f956ce47",
+        "384d3892-f6c5-41b3-9acf-1d5abada102b",
+        "3076f3e2-be4a-4d88-94b1-6e36167c7efd",
+        "c2e1cff9-830a-4eb7-af4b-a9103e234169",
+        "7c9b9914-a844-4376-a9fa-0aac7028aaf4",
+        "6c5208e5-f740-49e0-99ac-70615c062a29",
+        "68f101c4-cca2-403f-83c0-f35e85e4cebe",
+        "e0366086-a4de-46ab-9571-f157d12e6f77",
+        "f66e19d0-ec30-42d3-b9a6-e3352289f1bb",
+        "5a0def4d-f4b2-482a-abd9-91dfb14f7708",
+        "b0399689-09d9-4380-a202-60de2dff9628",
+        "93c29c7c-aaca-4cc2-b008-8a545c8f6f45",
+        "d45655b7-80a8-4827-8017-580b14e3de37",
+        "c0984c5d-fa32-4d2c-9fc0-2e9c2a2a617f",
+        "83e805f3-abbc-4f03-86af-c4eeae495238",
+        "eccb8264-18e4-4297-bbdf-5106dd1a6558",
+        "a5c449bd-018b-4861-ae53-2bd2b5a70842",
+        "f0f9fac0-84f0-435d-87f3-877352fbcdf5",
+        "2bbfa33b-31ef-4989-ba04-c283d3101455",
+        "3f1872ed-6698-4f7b-b18b-84f5c79bd955",
+        "d4546a04-bb82-48e2-a6f9-e3d66602e0e5",
+        "b5f00f36-d92a-4360-a0df-86e41d309fb4",
+        "73bf284b-48c4-414b-a1ce-831ca223a463",
+        "dffe3327-240a-4e8c-aa0a-745761fb8a54",
+        "ecc2108b-29ea-4855-8ff6-cba104f61dbb",
+        "44ec89b0-4592-4576-90da-925add819b39",
+        "89257a69-96bc-4e40-9eb6-cc002a016c56",
+        "64643228-9a69-4f26-aa7b-6c7e4e6085e6",
+        "a72ec2cb-c9ad-4eb0-a5fd-b7abf2818d34",
+        "9a7c7569-0db4-4644-a42f-445653ded61f",
+        "8c856ecc-8243-45dc-ba89-16923363ec40",
+        "abaafd55-114d-4388-b0bc-b6ef8ea5fc4d",
+        "51434757-a6ff-4303-b46b-cc921379f2ab",
+        "ad80c3d0-e5da-4419-baea-024bb39f7333",
+        "be395f18-fb7a-4e47-b14c-8dfb690b94cd",
+        "2b1a9b38-8b0a-44b0-8829-592a94e24627",
+        "e527b3f8-0b0c-4398-a19c-7ee69e173552",
+        "a26e58f3-3de6-4454-a32d-a1bc445381c9",
+        "39eb34e1-6e22-4993-9214-add2e2415aaa",
+        "ed36a162-3a4f-4a6b-8d36-3511fe000e4a",
+        "d8aeace5-9a99-466a-98d4-962284827ad1",
+        "143d9750-8168-4a67-b4af-34762c1832dc",
+        "4fe7f7c8-479e-4b4a-9319-607e64494245",
+        "55cff96c-0cbb-4a18-9adc-0ef730f11c74",
+        "99b4b149-8010-4997-b23c-07c4e79019ac",
+        "5b4c2a16-003c-4f3e-9b52-b7a4f91b02e8",
+        "139a9b18-0fa9-4a2e-9de1-3efe879dc991",
+        "02c57796-26ba-4d1a-8f16-3b2c1091af49",
+        "7a44b2fc-8209-4299-a78c-f5154dae00b0",
+        "1f7264f8-9592-4a65-a5bd-4d869c304dcf",
+        "029c6e1e-d970-4709-ac4f-95c978ebf0d4",
+        "1e496590-f886-4ebf-a1e7-c2139bd14fd8",
+        "d1da0e4b-a7f6-4a1a-a974-955be9da79e8",
+        "a80e1ebe-5cda-43b3-826c-b2d070cd2475",
+        "f94dba01-3d3c-4c00-867e-4672e24a6d4a",
+        "136c11cc-708a-4486-aee7-f2f6599b5b22",
+        "3563c72d-cf15-4aac-9553-a6153f3b9a81",
+        "675775dc-63b7-47a4-bfc0-47b99925a5e0"
+      ],
+      "domain": "import",
+      "labeling_method": "category",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "kbtest",
+      "expected_ids": [
+        "1e5c446a-34ed-4901-b35f-16c6e83e81dd"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "agent-memory-cutting-edge-research-2026",
+      "expected_ids": [
+        "837e26d1-9486-46ab-bd75-3dc14b7cc382"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "六大领域最新数据研究报告",
+      "expected_ids": [
+        "f9a4c251-cc4b-44d2-8b89-35b9b2ed815c"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "AI时代大学生职业生涯规划专题报告（优化版）",
+      "expected_ids": [
+        "8bba7abf-f36a-43ea-a4d6-494e1f46b94a"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "NeurFlow 工作流引擎",
+      "expected_ids": [
+        "029f0123-6f20-4d5c-be39-f1010394c60e",
+        "31bc1866-93cd-48df-b2e0-ba2df613fe17"
+      ],
+      "domain": "architecture",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "neurflow test",
+      "expected_ids": [
+        "029f0123-6f20-4d5c-be39-f1010394c60e"
+      ],
+      "domain": "architecture",
+      "labeling_method": "tag",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "architecture",
+      "expected_ids": [
+        "029f0123-6f20-4d5c-be39-f1010394c60e",
+        "dc50c609-de7a-494a-9836-2308f280a877",
+        "31bc1866-93cd-48df-b2e0-ba2df613fe17"
+      ],
+      "domain": "architecture",
+      "labeling_method": "category",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "MCP 治理与安全加固",
+      "expected_ids": [
+        "dc50c609-de7a-494a-9836-2308f280a877"
+      ],
+      "domain": "architecture",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "mcp test",
+      "expected_ids": [
+        "dc50c609-de7a-494a-9836-2308f280a877"
+      ],
+      "domain": "architecture",
+      "labeling_method": "tag",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "neurflow",
+      "expected_ids": [
+        "31bc1866-93cd-48df-b2e0-ba2df613fe17"
+      ],
+      "domain": "architecture",
+      "labeling_method": "tag",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "KG chain test",
+      "expected_ids": [
+        "0badf5c6-3543-4d70-81b0-553b99839642"
+      ],
+      "domain": "general",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "general",
+      "expected_ids": [
+        "0badf5c6-3543-4d70-81b0-553b99839642"
+      ],
+      "domain": "general",
+      "labeling_method": "category",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "kg_import",
+      "expected_ids": [
+        "2c82b45d-59a5-4880-9953-a85b86324c41"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "tmp_kb_test",
+      "expected_ids": [
+        "2370d3d4-85de-46d7-ba30-a846978cf9d7",
+        "e0197c88-d9bd-4370-8254-ef5cc0e9b854",
+        "3ffb7d55-bb79-4b08-92a5-414ca7403605"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "final_verify_71c136",
+      "expected_ids": [
+        "d7c7e139-bb39-49a9-bffc-938836b65feb"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "big_verify",
+      "expected_ids": [
+        "ac7d8673-e6af-4e20-a44f-52ae081c247f",
+        "0006edcd-c29b-44d1-b559-198bb2373596"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "doc_verify",
+      "expected_ids": [
+        "d8aaec56-482d-4dd3-974a-9ca6138cadbe",
+        "5d050562-5536-48de-a0b7-b2287434f806",
+        "91428048-88a4-4cd6-beae-609bdba07357",
+        "83a9cf79-6812-4467-8971-1755234ac206"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "sheet_verify",
+      "expected_ids": [
+        "c2486b85-2371-4238-97c8-4736139c66eb",
+        "95934dd8-2039-4e2f-9c63-00d193aa7415"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "cfg_verify",
+      "expected_ids": [
+        "77226e73-472e-4cc3-9639-ace286c28076",
+        "65ae274d-0251-4961-9d65-adf9a4934ca5"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "b1_0dcda0",
+      "expected_ids": [
+        "f3f08b58-028a-403e-96e5-aa30eaae8dc6"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "b2_0dcda0",
+      "expected_ids": [
+        "beacd389-e841-4104-b2f3-171aefc86614"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "b3_0dcda0",
+      "expected_ids": [
+        "455f2a3d-0194-4e29-865d-4bd4469ab921"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "d1_f0a3f6",
+      "expected_ids": [
+        "05f18765-0549-4c9b-bafa-002b4240b12f"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "d2_f0a3f6",
+      "expected_ids": [
+        "501cf713-3251-4554-a664-e4eae9335053"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "b1_1086df",
+      "expected_ids": [
+        "20a90ae5-7670-4298-9e17-015967083ad7"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "b2_1086df",
+      "expected_ids": [
+        "2eea182d-7a6f-4940-a215-379994cef40c"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "b3_1086df",
+      "expected_ids": [
+        "8a0662b7-cbcb-4719-bbc6-33d1e29e7b27"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    },
+    {
+      "query": "docs/.architecture-review-tmp",
+      "expected_ids": [
+        "5134e35c-9235-4e2f-9a77-5400edbd2f05"
+      ],
+      "domain": "import",
+      "labeling_method": "title_literal",
+      "created_by": "seedFromRepository"
+    }
+  ]
+}
