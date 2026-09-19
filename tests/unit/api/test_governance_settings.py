@@ -152,6 +152,20 @@ class TestGovernanceSettingsEndpoint:
         data = resp.json()["data"]
         assert data["conversation_rules_enabled"] is False
         assert data["rsi_phase"] == 0
+        assert data["metacog_gate_enabled"] is False
+
+    def test_put_metacog_gate_persists(self, tmp_path):
+        """调控门开关必须能从管理面写入——否则"纳入治理配置"只是名义。"""
+        client, tmp = self._client(tmp_path)
+        import neurova.security.governance_settings as gs
+
+        with patch.object(gs, "settings_path", return_value=Path(tmp) / "governance_settings.json"):
+            resp = client.put("/api/v1/governance/settings", json={"metacog_gate_enabled": True})
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["data"]["metacog_gate_enabled"] is True
+        assert json.loads((Path(tmp) / "governance_settings.json").read_text(encoding="utf-8"))[
+            "metacog_gate_enabled"
+        ] is True
 
     def test_put_persists_to_disk(self, tmp_path):
         client, tmp = self._client(tmp_path)
