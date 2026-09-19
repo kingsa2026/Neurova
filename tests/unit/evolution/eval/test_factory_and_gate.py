@@ -62,6 +62,20 @@ class TestEvalHarnessGate:
             gate("a", "b")
         assert state["good"] is True
 
+    def test_blind_measurement_is_neutral_and_announced(self, caplog):
+        """评测集量不出来时（工单 007 让 score 可为 None）门不得 float(None) 崩掉，
+        也不得把"没量出来"当成一次有证据的中性通过。
+
+        返回 0.0 与"测得 0 增益"数值相同，所以必须另留可审计的痕迹（日志），
+        否则这道门在失明时与在咬合时看起来一模一样。
+        """
+        gate = make_eval_harness_gate(
+            live_params_provider=lambda: {}, apply_fn=lambda text: (lambda: None)
+        )
+        with caplog.at_level("WARNING"):
+            assert gate("a", "b") == pytest.approx(0.0)
+        assert "度量失明" in caplog.text, "中性判定必须可审计，不许自称量过"
+
     def test_provider_failure_degrades_to_empty_params(self):
         def bad_provider():
             raise RuntimeError("boom")

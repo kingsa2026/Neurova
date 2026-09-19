@@ -375,7 +375,10 @@ class _NullSystem:
 
     P0-A2 修复：提供中性默认反馈信号（performance_score=0.5），
     使 RSI 在缺失真实系统时仍能运行（虽效果有限），而非收到空 dict 导致空转。
+    工单 018：`rsi_placeholder` 声明"只供信号、不供参数"（见集成器同名判定）。
     """
+
+    rsi_placeholder = True
 
     # 提供可优化参数的默认值（与 RSIIntegrationManager.OPTIMIZABLE_PARAMETERS 对齐）
     base_decay_rate = 0.1
@@ -1578,13 +1581,10 @@ class Agent:
         else:
             logger.info("Agent %s: SkillRegistry 已存在，跳过重复初始化", self.config.name)
 
-        # 注册 ToolMemory 回调：Skill 成功执行后记录到 ToolMemory
-        if self.tool_memory and self._skill_registry:
-            self._skill_registry.register_event_callback(
-                SkillEvent.POST_EXECUTE,
-                self._on_skill_post_execute,
-            )
-            logger.info("Agent %s: ToolMemory 回调已注册（Skill成功执行时记录）", self.config.name)
+        # 技能进化采集装配（工单 013：注册门不再绑 tool_memory；根因见该模块文档串）
+        from neurova.evolution.skill_recording import wire_skill_evolution_recording
+
+        wire_skill_evolution_recording(self)
 
         # 创建 Router 并注入所有依赖
         self._router = create_default_router(

@@ -61,6 +61,11 @@ except ImportError:
 
 logger = get_logger(__name__)
 
+# RSI 降频巡检窗口（工单 008）：收敛或度量失明时，每 N 轮仍跑一次。
+# 取 20 与收敛窗口（convergence_analyzer.window_size 默认 20）同量级 ——
+# 一个窗口的证据过期之后就重新量一次，而不是永久停机。
+_RSI_BACKOFF_EVERY_TURNS = 20
+
 
 class StepStatus(str, Enum):
     """步骤执行状态"""
@@ -2726,7 +2731,18 @@ class PostChatPipeline:
             return None
 
         try:
-            if rsi.should_continue():
+            # 工单 008：派发层不再把 should_continue()==False 当作"本进程内永不进化"。
+            # 原实现在此直接 SKIPPED，而收敛结论只对其依据的那份证据有效 ——
+            # 参数会漂、代码会变，永久跳过等于进化一次性终止。
+            # 现在按 cadence 决定频率：run 每轮跑；backoff（已收敛 / 评测集度量失明）
+            # 降频巡检 —— 度量失明尤其不能停，它意味着测量坏了，需要持续被暴露。
+            from neurova.core.turn_context import get_turn_count as _turn_count
+
+            cadence = rsi.iteration_cadence()
+            turn = _turn_count()
+            due = cadence.mode != "backoff" or turn % _RSI_BACKOFF_EVERY_TURNS == 0
+
+            if due:
                 # A-13: run_iteration 含 SQLite 读写/参数寻优（同步重活），
                 # 直接在事件循环内调用会卡死所有并发请求——移到工作线程。
                 # to_thread 原样透传返回值与异常，外层 try/except 语义不变。
@@ -2765,12 +2781,19 @@ class PostChatPipeline:
                 )
                 return result
             else:
+                # SKIPPED 不是"不再进化"，是本轮不跑：必须说清依据哪个判据、什么读数
                 self._step_results.append(
                     StepResult(
                         step_name=step_name,
                         status=StepStatus.SKIPPED,
-                        message="RSI should_continue returned False",
+                        message=(
+                            f"RSI 降频巡检（判据 {cadence.basis}：{cadence.evidence}；"
+                            f"每 {_RSI_BACKOFF_EVERY_TURNS} 轮跑一次，当前轮次 {turn} 不在窗口）"
+                        ),
                         duration_ms=(time.time() - start_time) * 1000,
+                        data={"cadence": cadence.mode, "basis": cadence.basis,
+                              "evidence": cadence.evidence, "turn": turn,
+                              "backoff_every": _RSI_BACKOFF_EVERY_TURNS},
                     )
                 )
         except Exception as e:

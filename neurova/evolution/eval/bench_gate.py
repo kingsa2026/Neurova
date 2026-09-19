@@ -10,7 +10,9 @@
   - 门咬合的接线点在 apply_fn:调用方提供"应用候选 → 度量 → 恢复"的
     通道(如把进化产物暂挂到系统参数/注册表),门即获得
     "先量基线 → 应用候选 → 再量 → 恢复 → 回传 gain"的完整语义;
-  - harness.run() 真实执行(确定性、零 LLM、毫秒级),不是假调用。
+  - harness.run() 真实执行(确定性、零 LLM、毫秒级),不是假调用;
+  - run() 自报度量失明时 score 为 None(全族用例回退到 setpoint),门按中性
+    判定并留 WARNING 痕迹——"没量出来"与"测得 0 增益"数值相同但含义相反。
 """
 
 from __future__ import annotations
@@ -78,23 +80,41 @@ def make_eval_harness_gate(
                 return {}
         return {}
 
+    def _readout(outcome: Any) -> Optional[float]:
+        """评测集读数 → float 或 None。
+
+        工单 007 起 `run()["score"]` 可以是 None（全族用例回退 setpoint = 度量失明）。
+        None 不是 0 分：`float(None)` 会崩，把 None 兜成 0.0 又等于把"没量出来"
+        冒充成"测得零增益"——两者对候选的结论相反。
+        """
+        score = outcome.get("score") if isinstance(outcome, dict) else None
+        return None if score is None else float(score)
+
     def gate(baseline_text: str, candidate_text: str) -> float:
-        before = float(harness.run(_live_params())["score"])
+        before = _readout(harness.run(_live_params()))
         if apply_fn is None:
             # 纯文本候选不触及参数族——**中性**（非"测得 0"）。基线度量确实
             # 跑了一遍，但那不是"候选的增益"。理由随函数外挂供审计取证。
-            logger.debug("bench gate(无 apply_fn): before=%.4f, 纯文本候选中性通过", before)
+            logger.debug("bench gate(无 apply_fn): before=%s, 纯文本候选中性通过", before)
             return NEUTRAL_GAIN
         restore: Any = None
         try:
             restore = apply_fn(candidate_text)
-            after = float(harness.run(_live_params())["score"])
+            after = _readout(harness.run(_live_params()))
         finally:
             if restore is not None:
                 try:
                     restore()
                 except Exception as e:  # noqa: BLE001 - 恢复失败必须暴露,不能吞
                     logger.error("bench gate 恢复系统状态失败: %s", e)
+        if before is None or after is None:
+            # 读数不存在就没有"回退"可言：按中性放行，但必须留下可审计的痕迹，
+            # 否则这道门在失明时与在咬合时对外长得一模一样。
+            logger.warning(
+                "bench gate 度量失明(before=%s after=%s)：按中性判定，不构成通过证据",
+                before, after,
+            )
+            return NEUTRAL_GAIN
         gain = after - before
         logger.debug("bench gate: before=%.4f after=%.4f gain=%.4f", before, after, gain)
         return gain

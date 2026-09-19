@@ -17,7 +17,8 @@
 
 本模块只做两件事，字段名一律对齐 orchestrator 真实输出：
 
-1. :func:`summarize_rsi_result` —— raw dict → 响应面摘要（四个字段）。
+1. :func:`summarize_rsi_result` —— raw dict → 响应面摘要（七个字段，
+   含度量证据状态、有证据用例数与缺席闭环系统名单）。
 2. :func:`record_rsi_summary` / :func:`get_latest_rsi_summary` —— 按
    (agent, session) 记录**最近一次已完成**的迭代摘要。
 
@@ -34,12 +35,25 @@ from __future__ import annotations
 import threading
 from collections import OrderedDict
 from collections.abc import Mapping
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # 响应面摘要的字段集合（唯一契约，测试与推送面都引用它）
-RSI_SUMMARY_FIELDS: Tuple[str, ...] = ("status", "applied_count", "gain", "phase_advanced")
+RSI_SUMMARY_FIELDS: Tuple[str, ...] = (
+    "status", "applied_count", "gain", "phase_advanced",
+    "measure_state", "evidenced_cases", "placeholder_systems",
+)
 
 _UNKNOWN_STATUS = "unknown"
+
+# 度量证据状态（工单 008 交付项 5）：与收敛结论正交，说的是"这个数字有没有依据"。
+MEASURE_STATE_MEASURED = "measured"
+MEASURE_STATE_BLIND = "measurement_blind"
+MEASURE_STATE_NOT_ATTEMPTED = "not_attempted"
+MEASURE_STATE_UNKNOWN = "unknown"
+MEASURE_STATES: Tuple[str, ...] = (
+    MEASURE_STATE_MEASURED, MEASURE_STATE_BLIND,
+    MEASURE_STATE_NOT_ATTEMPTED, MEASURE_STATE_UNKNOWN,
+)
 
 # 会话级摘要表的有界上限：只保最近 N 个 (agent, session)，防长进程无界增长
 _MAX_TRACKED_SESSIONS = 1024
@@ -76,6 +90,39 @@ def convergence_status(result: Mapping[str, Any]) -> str:
     return str(status) if status else _UNKNOWN_STATUS
 
 
+def measurement_evidence(result: Mapping[str, Any]) -> Dict[str, Any]:
+    """本轮测量到底有没有依据（工单 008 交付项 5）。
+
+    只有 gain 时"没有改善空间"和"量不出来"是同一个数字，而两者的处置相反：
+    前者降频巡检即可，后者要去修测量。所以响应面必须带出评测集自报的分母。
+
+    没有前后测量结果 = 本轮根本没跑自动执行（观察期/手动期），
+    此时报 `not_attempted` 而不是"0 例"——后者会把"没测"冒充成"测了且全blind"。
+    """
+    outcomes = result.get("eval")
+    after = outcomes.get("after") if isinstance(outcomes, Mapping) else None
+    if not isinstance(after, Mapping):
+        return {"measure_state": MEASURE_STATE_NOT_ATTEMPTED, "evidenced_cases": None}
+    state = after.get("state")
+    cases = after.get("evidenced_cases")
+    return {
+        "measure_state": str(state) if state else MEASURE_STATE_UNKNOWN,
+        "evidenced_cases": cases if isinstance(cases, int) else None,
+    }
+
+
+def _placeholder_systems(result: Mapping[str, Any]) -> Optional[List[str]]:
+    """缺席闭环系统的名单（工单 018 第 4 项）。
+
+    `None` 表示这份快照没带该信息，**不等于**"一个都没缺席"——
+    把未知读成"一切正常"正是本批要消灭的那类兜底。
+    """
+    names = result.get("placeholder_systems")
+    if not isinstance(names, (list, tuple)):
+        return None
+    return sorted(str(name) for name in names)
+
+
 def summarize_rsi_result(result: Any) -> Optional[Dict[str, Any]]:
     """把 RSI 迭代结果压成响应面摘要（字段名对齐 orchestrator 真实输出）。
 
@@ -84,12 +131,15 @@ def summarize_rsi_result(result: Any) -> Optional[Dict[str, Any]]:
     """
     if not isinstance(result, Mapping) or not result:
         return None
-    return {
+    summary = {
         "status": convergence_status(result),
         "applied_count": _as_int(result.get("applied_count", 0)),
         "gain": _as_float(result.get("gain", 0.0)),
         "phase_advanced": bool(result.get("phase_advanced", False)),
     }
+    summary.update(measurement_evidence(result))
+    summary["placeholder_systems"] = _placeholder_systems(result)
+    return summary
 
 
 def _key(agent_id: Any, session_id: Any) -> Tuple[str, str]:
@@ -154,7 +204,9 @@ def clear_rsi_summaries() -> None:
 
 __all__ = [
     "RSI_SUMMARY_FIELDS",
+    "MEASURE_STATES",
     "convergence_status",
+    "measurement_evidence",
     "summarize_rsi_result",
     "record_rsi_summary",
     "get_latest_rsi_summary",

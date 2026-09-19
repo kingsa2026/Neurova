@@ -32,10 +32,17 @@ def _mock_system(name, feedback, params):
     return m
 
 
-def _build_orchestrator(sleep, emotion, experience, tool_memory, initial_phase=0):
-    orch = RSIOrchestrator(sleep, emotion, experience, tool_memory)
-    orch.deployment_controller._current_phase = initial_phase
-    return orch
+def _build_orchestrator(probe_factory, sleep, emotion, experience, tool_memory, initial_phase=0):
+    """经治理设置装配编排器（工单 001：取代私赋 ``_current_phase``）。"""
+    return probe_factory(
+        rsi_phase=initial_phase,
+        systems={
+            "sleep": sleep,
+            "emotion": emotion,
+            "experience": experience,
+            "tool_memory": tool_memory,
+        },
+    ).orchestrator
 
 
 # ============ 1. 四系统均能被注入可优化性能信号 ============
@@ -73,7 +80,7 @@ def test_performance_depends_on_parameters():
 
 # ============ 3. 端到端：偏离 setpoint 的参数被实测改善并保留 ============
 
-def test_rsi_improves_off_setpoint_parameter_end_to_end():
+def test_rsi_improves_off_setpoint_parameter_end_to_end(rsi_probe_factory):
     """sleep.base_decay_rate 初始远离 setpoint(0.1)，RSI 应朝 setpoint 调整，
     且至少一次迭代产生正增益（改善被保留而非回滚）。"""
     sleep = _mock_system(
@@ -94,7 +101,7 @@ def test_rsi_improves_off_setpoint_parameter_end_to_end():
         {"success_bonus": 0.1, "failure_penalty": 0.2, "decay_rate": 0.05, "muscle_memory_threshold": 0.8},
     )
 
-    orch = _build_orchestrator(sleep, emotion, experience, tool_memory, initial_phase=2)
+    orch = _build_orchestrator(rsi_probe_factory, sleep, emotion, experience, tool_memory, initial_phase=2)
     initial_decay = sleep.base_decay_rate
 
     gains = []
@@ -114,7 +121,7 @@ def test_rsi_improves_off_setpoint_parameter_end_to_end():
 
 # ============ 4. 有害/无效调整被回滚（真棘轮） ============
 
-def test_harmful_adjustment_is_reverted():
+def test_harmful_adjustment_is_reverted(rsi_probe_factory):
     """当所有参数已在 setpoint（任何移动都降低性能）时，应用后的实测增益≤0，
     RSI 必须把参数回滚到原值——否则棘轮会劣化系统（这正是"失控漂移"的本质）。"""
     # 治理对齐（2026-09-12）：mock 值 = 新 setpoint 表（merge_threshold 幻影
@@ -131,7 +138,7 @@ def test_harmful_adjustment_is_reverted():
     experience = _mock_system("experience", {"crystallized_patterns": 2, "success_rate": 0.7}, params_all_at_setpoint["experience"])
     tool_memory = _mock_system("tool_memory", {"total_usages": 5, "success_rate": 0.7, "muscle_memory_hits": 1}, params_all_at_setpoint["tool_memory"])
 
-    orch = _build_orchestrator(sleep, emotion, experience, tool_memory, initial_phase=2)
+    orch = _build_orchestrator(rsi_probe_factory, sleep, emotion, experience, tool_memory, initial_phase=2)
     before = {
         "sleep.base_decay_rate": sleep.base_decay_rate,
         "emotion.emotional_protection_factor": emotion.emotional_protection_factor,

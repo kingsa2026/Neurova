@@ -13,7 +13,7 @@ rollback_manager.get_rollback_history() 的时间戳。
 import asyncio
 import json
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -21,6 +21,23 @@ import pytest
 
 
 class TestDaysWithoutRollbackRealSource:
+    """工单 004 推翻并重建了本类前三条用例，理由记在此处（教义第 3 条：
+    不得靠删除或放宽断言让红色消失）。
+
+    被推翻的旧断言 `test_no_rollback_history_returns_zero` 把
+    "空回滚历史 → 0 天" 写成了期望值，其文档串称"从首次运行起算的语义由
+    metrics 记录承接" —— 而 metrics 里那个键从没人写过，
+    `orchestrator._started_at` 因此成了零消费方死字段。
+    后果：phase 1→2 要求 ≥7 天无回滚，而该读数恒 0 → 自动执行通道三角死锁。
+
+    新契约：回滚历史与装配时刻由 `RSIRollbackManager` 唯一持有并可持久化；
+    无历史时从装配时刻起算；两者都取不到时返回 None，由编排器把该键从判据里
+    摘掉（落 `unevidenced`），而不是伪装成 0。
+
+    另外，旧实现用 `MagicMock` 喂一段**有内容**的回滚历史，
+    于是"历史从不被写入"这一根因在测试里不可见 —— 本类改用真实 manager 实例。
+    """
+
     def _orch(self):
         from neurova.evolution.rsi.orchestrator import RSIOrchestrator
 
@@ -31,24 +48,46 @@ class TestDaysWithoutRollbackRealSource:
             tool_memory_system=MagicMock(),
         )
 
-    def test_computes_days_from_rollback_history(self):
-        """最近一次回滚 3 天前 → days_without_rollback = 3"""
-        orch = self._orch()
-        three_days_ago = (datetime.now() - timedelta(days=3)).isoformat()
-        orch.rollback_manager = MagicMock()
-        orch.rollback_manager.get_rollback_history.return_value = [
-            {"snapshot_id": "s1", "timestamp": three_days_ago}
-        ]
-        days = orch._compute_days_without_rollback()
-        assert abs(days - 3) < 1e-6
+    def _manager_with_history(self, *, days_ago: float):
+        from datetime import timedelta
 
-    def test_no_rollback_history_returns_zero(self):
-        """无回滚记录 → 0（phase 0→1 无要求；1→2 的 7 天从首次运行起算的
-        语义由 metrics 记录承接，此处为安全缺省）"""
-        orch = self._orch()
-        orch.rollback_manager = MagicMock()
-        orch.rollback_manager.get_rollback_history.return_value = []
-        assert orch._compute_days_without_rollback() == 0
+        from neurova.evolution.rsi.rollback_manager import RSIRollbackManager
+
+        manager = RSIRollbackManager()
+        snapshot_id = manager.create_snapshot({"p": {"system": "sleep", "value": 0.7}})
+        assert manager.execute_rollback(snapshot_id) is True
+        manager._rollback_history[-1]["timestamp"] = (
+            datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+        return manager
+
+    def test_computes_days_from_rollback_history(self):
+        """最近一次回滚 3 天前 → days_since_last_rollback = 3"""
+        days = self._manager_with_history(days_ago=3).days_since_last_rollback()
+
+        assert days == pytest.approx(3, abs=0.2)
+
+    def test_no_rollback_history_counts_from_install(self):
+        """无回滚记录 → 距装配时刻的天数（工单 004 推翻旧的"恒 0"）。
+
+        恒 0 意味着 phase 1→2 的 7 天永不可满足；
+        从装配时刻起算才是它文档串里承诺的那个语义。
+        """
+        from neurova.evolution.rsi.rollback_manager import RSIRollbackManager
+
+        manager = RSIRollbackManager()
+        manager.installed_at = datetime.now(timezone.utc) - timedelta(days=9)
+
+        assert manager.days_since_last_rollback() == pytest.approx(9, abs=0.2)
+        assert manager.get_rollback_history() == [], "起算点修复不得伪造回滚记录"
+
+    def test_days_is_none_without_any_anchor(self):
+        """既无历史又无起算点 → None（无证据），不得编造 0。"""
+        from neurova.evolution.rsi.rollback_manager import RSIRollbackManager
+
+        manager = RSIRollbackManager()
+        manager.installed_at = None
+
+        assert manager.days_since_last_rollback() is None
 
     def test_run_iteration_feeds_real_days_to_phase_eval(self):
         """run_iteration 把真实回滚天数喂给 evaluate_phase_transition"""
@@ -56,10 +95,7 @@ class TestDaysWithoutRollbackRealSource:
         orch.deployment_controller = MagicMock()
         orch.deployment_controller.can_auto_execute.return_value = False
         orch.deployment_controller.evaluate_phase_transition.return_value = False
-        orch.rollback_manager = MagicMock()
-        orch.rollback_manager.get_rollback_history.return_value = [
-            {"snapshot_id": "s1", "timestamp": (datetime.now() - timedelta(days=8)).isoformat()}
-        ]
+        orch.rollback_manager = self._manager_with_history(days_ago=8)
         orch.collect_feedback_signals = MagicMock(return_value={})
         orch.convergence_analyzer = MagicMock()
         orch.convergence_analyzer.analyze_convergence.return_value = {
@@ -70,7 +106,30 @@ class TestDaysWithoutRollbackRealSource:
         orch.run_iteration()
 
         metrics_arg = orch.deployment_controller.evaluate_phase_transition.call_args.args[0]
-        assert abs(metrics_arg["days_without_rollback"] - 8) < 1e-6
+        assert metrics_arg["days_without_rollback"] == pytest.approx(8, abs=0.2)
+
+    def test_run_iteration_omits_days_key_when_no_anchor(self):
+        """取不到起算点时该键必须缺席 —— 缺席才会被控制器判成 unevidenced。"""
+        from neurova.evolution.rsi.rollback_manager import RSIRollbackManager
+
+        orch = self._orch()
+        orch.deployment_controller = MagicMock()
+        orch.deployment_controller.can_auto_execute.return_value = False
+        orch.deployment_controller.evaluate_phase_transition.return_value = False
+        manager = RSIRollbackManager()
+        manager.installed_at = None
+        orch.rollback_manager = manager
+        orch.collect_feedback_signals = MagicMock(return_value={})
+        orch.convergence_analyzer = MagicMock()
+        orch.convergence_analyzer.analyze_convergence.return_value = {
+            "status": "converging", "metrics": {},
+        }
+        orch.generate_optimizations = MagicMock(return_value=[])
+
+        orch.run_iteration()
+
+        metrics_arg = orch.deployment_controller.evaluate_phase_transition.call_args.args[0]
+        assert "days_without_rollback" not in metrics_arg
 
 
 class TestGovernanceSettingsEndpoint:

@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from neurova.evolution.rsi.orchestrator import IterationCadence
 from neurova.post_chat_pipeline import PostChatPipeline, StepStatus
 
 
@@ -137,6 +138,9 @@ def test_a13_rsi_run_iteration_runs_off_event_loop(monkeypatch):
         def should_continue(self):
             return True
 
+        def iteration_cadence(self):  # 工单 008：派发层改读 cadence
+            return IterationCadence(mode="run", basis="converging", evidence="窗口 20 轮内有效测量 1 轮")
+
         def run_iteration(self):
             used_threads.append(threading.get_ident())
             return {"convergence": {"status": "converged"}}
@@ -161,6 +165,9 @@ def test_a13_rsi_iteration_exception_semantics_preserved(monkeypatch):
     class BrokenRSI:
         def should_continue(self):
             return True
+
+        def iteration_cadence(self):  # 工单 008：派发层改读 cadence
+            return IterationCadence(mode="run", basis="converging", evidence="窗口 20 轮内有效测量 1 轮")
 
         def run_iteration(self):
             raise ValueError("iteration exploded")

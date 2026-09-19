@@ -27,20 +27,52 @@ class TestPhaseAutoTransition:
         return create_deployment_controller(initial_phase=0)
 
     def test_transition_then_advance(self):
-        """判据通过 → advance_phase 真正推进（判据/推进分离是原设计）"""
+        """判据通过 → advance_phase 真正推进（判据/推进分离是原设计）
+
+        工单 003：返回值由 bool 改为 GateVerdict。断言等价改写并加严一层 ——
+        原来只能表达"放行"，现在还要区分"放行"与"因缺证据而未知"。
+        """
         c = self._controller()
-        assert c.evaluate_phase_transition({"convergence_status": "converging", "roi": 0.1}) is True
+        verdict = c.evaluate_phase_transition({"convergence_status": "converging", "roi": 0.1})
+        assert bool(verdict) is True and verdict.state == "passed", verdict.reason
         assert c.advance_phase() == 1
         assert c.get_current_phase() == 1
 
     def test_diverging_blocks_transition(self):
+        """发散是"有证据的否决"，不得与"取不到证据"混成同一个 False。"""
         c = self._controller()
-        assert c.evaluate_phase_transition({"convergence_status": "diverging", "roi": 0.1}) is False
+        verdict = c.evaluate_phase_transition({"convergence_status": "diverging", "roi": 0.1})
+        assert bool(verdict) is False
+        assert verdict.state == "failed", f"发散应判 failed，实际 {verdict.state}"
         assert c.get_current_phase() == 0
 
     def test_negative_roi_blocks_transition(self):
-        c = self._controller()
-        assert c.evaluate_phase_transition({"convergence_status": "converging", "roi": -0.5}) is False
+        verdict = self._controller().evaluate_phase_transition(
+            {"convergence_status": "converging", "roi": -0.5})
+        assert bool(verdict) is False
+        assert verdict.state == "failed", f"负 ROI 应判 failed，实际 {verdict.state}"
+
+    def test_missing_evidence_is_unevidenced_not_passed(self):
+        """工单 003 新增：读数缺失时不得放行，且要写清缺的是哪一项。
+
+        取 phase 1 而非 phase 0：008 把"必需性"改成按阶段声明——phase 0 是观察期，
+        `roi`/回滚读数在结构上还不可能存在（自动执行要求先晋升到 phase 2），
+        在那里要求它们等于把晋升链锁成循环依赖，所以空读数判 passed
+        （由 `test_phase_zero_requires_no_execution_evidence` 反向钉住这条裁决）。
+        三份读数的全量缺项断言见 tests/unit/evolution/rsi/test_gate_verdict.py。
+        """
+        verdict = RSIDeploymentController(initial_phase=1).evaluate_phase_transition({})
+
+        assert bool(verdict) is False
+        assert verdict.state == "unevidenced"
+        assert "days_without_rollback" in verdict.reason, verdict.reason
+
+    def test_phase_zero_requires_no_execution_evidence(self):
+        """观察期放行空读数：这是"无从产生证据"，不是"证据表明可以晋升"。"""
+        verdict = self._controller().evaluate_phase_transition({})
+
+        assert bool(verdict) is True
+        assert "phase 0" in verdict.reason, verdict.reason
 
     def test_run_iteration_calls_transition_and_advance(self):
         """run_iteration 尾部必须触发判据+推进（断点 B 接线）"""
