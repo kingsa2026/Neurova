@@ -14,6 +14,7 @@ from .knowledge_facts import (
     normalizeLabel,
     reset_knowledge_fact_store,
 )
+from .conflict_judge import CONFLICT_KINDS, RESOLUTION_POLICIES, KnowledgeConflictJudge
 from .lineage import ACTIVITY_KINDS, ACTOR_TYPES, KnowledgeLineageLedger
 from .redundancy import RedundancyAudit
 
@@ -23,7 +24,10 @@ __all__ = [
     "AdmissionSegmentMissing",
     "DEFAULT_FACT_DB",
     "KnowledgeAdmissionGate",
+    "KnowledgeConflictJudge",
     "KnowledgeFactStore",
+    "CONFLICT_KINDS",
+    "RESOLUTION_POLICIES",
     "KnowledgeLineageLedger",
     "ACTIVITY_KINDS",
     "ACTOR_TYPES",
