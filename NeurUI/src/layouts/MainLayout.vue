@@ -209,6 +209,9 @@
       <GlassNavItem to="/analytics" :label="t('nav.analytics')" :collapsed="appStore.sidebarCollapsed" v-if="can('/analytics')">
         <template #icon><BarChartOutlined /></template>
       </GlassNavItem>
+      <GlassNavItem to="/cost" :label="t('nav.cost')" :collapsed="appStore.sidebarCollapsed" v-if="can('/cost')">
+        <template #icon><BarChartOutlined /></template>
+      </GlassNavItem>
       <GlassNavItem to="/memory/search-settings" :label="t('nav.searchSettings')" :collapsed="appStore.sidebarCollapsed" v-if="can('/memory/search-settings')">
         <template #icon><ControlOutlined /></template>
       </GlassNavItem>
