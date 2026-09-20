@@ -21,12 +21,17 @@ from ..identity.subject_resolver import SubjectResolver
 _IMPORTER_PREFIXES = ("import:", "url:", "datasource:", "kb_builder")
 
 
-def _assertionFor(agentId: str, item: Dict[str, Any]) -> Dict[str, Any]:
+def _assertionFor(agentId: str, item: Dict[str, Any],
+                  mediumFallback: str = "legacy:knowledge.json") -> Dict[str, Any]:
     """按旧行已有字段如实合成断言（来源串 + 属主 + 标题）。
 
     咽喉在写入前就要求"不能有主不明的知识"，所以映射必须自带断言——
     缺了它，回放根本进不去血缘段，也就测不到生产写入的真实形状。
     不为回填行编造置信度：那是 G11 要灭的病，不能由对账器重新犯。
+
+    `mediumFallback` 是唯一按来源分叉的参数：搬家进来的旧行确实来自那个 JSON 文件，
+    而实时写入的条目没有来源串时，诚实的说法是"来源就是这条条目本身"（entry:<kid>），
+    不是把一个历史文件名安到它头上。
     """
     source = str(item.get("source", "") or "").strip()
     owner = str(item.get("owner_user_id", "") or "").strip()
@@ -40,7 +45,7 @@ def _assertionFor(agentId: str, item: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "actorType": actorType,
         "actorId": owner or "legacy-unknown",
-        "mediumRef": source or "legacy:knowledge.json",
+        "mediumRef": source or mediumFallback,
         "statementText": str(item.get("title", "") or "").strip() or "(untitled legacy entry)",
         "verification_state": "unverified",
     }

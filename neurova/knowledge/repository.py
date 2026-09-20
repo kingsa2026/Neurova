@@ -461,7 +461,14 @@ class KnowledgeRepository:
                     }
             except Exception as e:  # noqa: BLE001
                 logger.warning("Failed to load knowledge tombstones %s: %s", self._tombstones_path, e)
-        if self._conflicts_path.exists():
+        if self._narratives is not None:
+            if self._narratives.conflictCount() == 0 and self._conflicts_path.exists():
+                report = self._narratives.importConflictsFromJson(str(self._conflicts_path))
+                archived = self._narratives.archiveSidecar(str(self._conflicts_path))
+                logger.info("冲突旁账一次性搬入底座：导入 %s 条，旧文件归档为 %s",
+                            report["imported"], archived)
+            self._conflicts = self._narratives.loadConflicts()
+        elif self._conflicts_path.exists():
             try:
                 data = json.loads(self._conflicts_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
@@ -508,6 +515,9 @@ class KnowledgeRepository:
 
     def _save_conflicts(self) -> None:
         self._assertNotWritingProductionUnderPytest()
+        if self._narratives is not None:
+            self._narratives.replaceAllConflicts(self._conflicts)
+            return
         try:
             self._conflicts_path.write_text(
                 json.dumps(self._conflicts, ensure_ascii=False, indent=2),
@@ -584,12 +594,18 @@ class KnowledgeRepository:
         with self._entryLedger() as ledger:
             report = ledger.syncFromEntries(self._items)
         confidences = report["confidences"]
+        mediums = report.get("mediums", {})
         for items in self._items.values():
             for item in items:
-                derived = confidences.get(str(item.get("knowledge_id", "")))
+                kid = str(item.get("knowledge_id", ""))
+                derived = confidences.get(kid)
                 if derived is not None:
                     # G11：条目上那个数从此是聚合出来的，不是调用方传进来的
                     item["confidence"] = derived
+                medium = mediums.get(kid)
+                if medium:
+                    # G01：来源改成从断言 medium_ref 派生（审计读的是那张账，不是这个字段）
+                    item["source"] = medium
 
     # ── CRUD ──────────────────────────────────────────────────
 

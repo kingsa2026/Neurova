@@ -133,6 +133,63 @@ class NarrativeStore:
         return {"imported": imported,
                 "skipped_existing": len(raw) - imported, "rows_in_store": self.tombstoneCount()}
 
+    def conflictCount(self) -> int:
+        with self._conn() as conn:
+            return int(conn.execute(
+                "SELECT COUNT(*) FROM knowledge_entry_conflicts").fetchone()[0])
+
+    def loadConflicts(self) -> Dict[str, Dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT conflict_id, payload_json FROM knowledge_entry_conflicts ORDER BY rowid"
+            ).fetchall()
+        return {str(r["conflict_id"]): json.loads(r["payload_json"]) for r in rows}
+
+    def replaceAllConflicts(self, conflicts: Dict[str, Dict[str, Any]]) -> int:
+        stamp = _now()
+        with self._conn() as conn:
+            conn.execute("DELETE FROM knowledge_entry_conflicts")
+            for conflictId, rec in conflicts.items():
+                conn.execute(
+                    "INSERT INTO knowledge_entry_conflicts (conflict_id, old_id, new_id, title,"
+                    " similarity, status, resolved_by, detected_at, payload_json, updated_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (str(conflictId), str(rec.get("old_id", "") or ""),
+                     str(rec.get("new_id", "") or ""), str(rec.get("title", "") or ""),
+                     float(rec.get("similarity", 0) or 0), str(rec.get("status", "pending") or ""),
+                     str(rec.get("resolved_by", "") or ""), float(rec.get("detected_at", 0) or 0),
+                     json.dumps(rec, ensure_ascii=False, sort_keys=True), stamp),
+                )
+        return len(conflicts)
+
+    def importConflictsFromJson(self, jsonPath: str) -> Dict[str, Any]:
+        path = Path(jsonPath)
+        if not path.exists():
+            return {"imported": 0, "skipped_existing": 0}
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("冲突账本顶层必须是 {conflict_id: 记录}，收到 %r" % type(raw).__name__)
+        stamp = _now()
+        imported = 0
+        with self._conn() as conn:
+            for conflictId, rec in raw.items():
+                if not isinstance(rec, dict):
+                    raise ValueError("冲突记录形状不对: %r" % conflictId)
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO knowledge_entry_conflicts (conflict_id, old_id,"
+                    " new_id, title, similarity, status, resolved_by, detected_at,"
+                    " payload_json, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (str(conflictId), str(rec.get("old_id", "") or ""),
+                     str(rec.get("new_id", "") or ""), str(rec.get("title", "") or ""),
+                     float(rec.get("similarity", 0) or 0),
+                     str(rec.get("status", "pending") or ""),
+                     str(rec.get("resolved_by", "") or ""),
+                     float(rec.get("detected_at", 0) or 0),
+                     json.dumps(rec, ensure_ascii=False, sort_keys=True), stamp),
+                )
+                imported += 1 if cur.rowcount else 0
+        return {"imported": imported, "skipped_existing": len(raw) - imported}
+
     def archiveSidecar(self, jsonPath: str) -> Optional[str]:
         """搬完让旁账文件退出读路径；留档可回退，与条目搬家同一纪律。"""
         return self.archiveImportedJson(jsonPath)
@@ -258,4 +315,26 @@ CREATE TABLE IF NOT EXISTS knowledge_tombstones (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tombstone_agent ON knowledge_tombstones(agent_id, knowledge_id);
+"""
+
+
+# ── 条目级冲突账本（工单 019b-4）────────────────────────────
+# 刻意不复用 007 的 knowledge_conflicts：那张表成员是事实行、要求 policy_basis 与严重度，
+# 这里记的是"两个条目标题一致、内容相异"。硬塞要么丢相似度、要么靠 fact↔entry 来回翻译。
+# 真正的合一在 017（事实层成为条目唯一权威源之后）。
+_SCHEMA_V7 = """
+CREATE TABLE IF NOT EXISTS knowledge_entry_conflicts (
+    conflict_id TEXT PRIMARY KEY,
+    old_id TEXT NOT NULL DEFAULT '',
+    new_id TEXT NOT NULL DEFAULT '',
+    title TEXT NOT NULL DEFAULT '',
+    similarity REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    resolved_by TEXT NOT NULL DEFAULT '',
+    detected_at REAL NOT NULL DEFAULT 0,
+    payload_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_entry_conflict_status
+    ON knowledge_entry_conflicts(status, conflict_id);
 """
