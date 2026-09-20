@@ -22,6 +22,8 @@ from neurova.memory_ingest.bundle.records import TranscriptRecord
 from neurova.memory_ingest.bundle.turns import to_turn_messages
 from neurova.memory_ingest.probe import probe_store
 
+DOCX = b"PK" + bytes([0x03, 0x04]) + b"docx-payload"
+
 
 def _jsonl(path: Path, *lines: Dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -118,7 +120,7 @@ def test_broken_lines_and_unknown_blocks_are_declared(tmp_path: Path):
     src.write_text(json.dumps(_dialog_line("user", [{"type": "text", "text": "甲"}],
                                            "2026-04-08 10:00:00"), ensure_ascii=False)
                    + "\n{oops\n"
-                   + json.dumps(_dialog_line("assistant", [{"type": "image", "url": "x"}],
+                   + json.dumps(_dialog_line("assistant", [{"type": "audio", "url": "x"}],
                                              "2026-04-08 10:01:00"), ensure_ascii=False) + "\n",
                    encoding="utf-8")
     out = tmp_path / "bundle"
@@ -127,7 +129,7 @@ def test_broken_lines_and_unknown_blocks_are_declared(tmp_path: Path):
     fields = {entry["field"]: entry["count"] for entry in manifest.dropped}
 
     assert fields["坏行"] == 1
-    assert fields["blocks:image"] == 1
+    assert fields["blocks:audio"] == 1
     assert validate_bundle(out) == []
 
 
@@ -252,16 +254,56 @@ def test_rows_sharing_a_source_id_do_not_collide(tmp_path: Path):
     assert {r["extra"]["source_id"] for r in rows} == {"msg_shared"}
 
 
-def test_file_blocks_are_declared_until_media_lands(tmp_path: Path):
-    src = _jsonl(tmp_path / "dialog" / "2026-04-11.jsonl",
+def test_path_form_media_is_copied_from_the_source_tree(tmp_path: Path):
+    """源里的绝对路径属于另一台机器：在源目录树 media/ 下按同名找到就搬进包。"""
+    (tmp_path / "workspace" / "media").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "workspace" / "media" / "plan.docx").write_bytes(DOCX)
+    src = _jsonl(tmp_path / "workspace" / "dialog" / "2026-04-11.jsonl",
                  _dialog_line("user", [{"type": "text", "text": "看方案"},
-                                       {"type": "file", "source": "/media/a.docx",
-                                        "filename": "a.docx"}], "2026-04-11 09:00:00"))
+                                       {"type": "file", "source": "/agents/Kai/workspace/media/plan.docx",
+                                        "filename": "plan.docx"}], "2026-04-11 09:00:00"))
+
+    manifest = convert_dialog(src, tmp_path / "bundle", agent_name="imported")
+    block = _rows(tmp_path / "bundle")[0]["content_blocks"][1]
+
+    assert manifest.dropped == ()
+    assert (tmp_path / "bundle" / block["media"]).read_bytes() == DOCX
+    assert block["name"] == "plan.docx"
+
+
+def test_image_block_lands_in_bundle_media(tmp_path: Path):
+    """图片不再是"申报了事"：块落进包内 media/，记录里只留内容寻址引用。"""
+    import base64
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4"
+                           "2mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+    src = _jsonl(tmp_path / "dialog" / "2026-04-12.jsonl",
+                 _dialog_line("user", [{"type": "text", "text": "看图"},
+                                       {"type": "image",
+                                        "source": {"type": "base64",
+                                                   "data": base64.b64encode(png).decode()}}],
+                              "2026-04-12 09:00:00"))
+
+    manifest = convert_dialog(src, tmp_path / "bundle", agent_name="imported")
+    rows = _rows(tmp_path / "bundle")
+
+    blocks = rows[0]["content_blocks"]
+    assert blocks[0]["text"] == "看图"
+    assert blocks[1]["type"] == "image" and blocks[1]["mime"] == "image/png"
+    assert (tmp_path / "bundle" / blocks[1]["media"]).read_bytes() == png
+    assert not any(entry["field"].startswith("blocks:image") for entry in manifest.dropped)
+
+
+def test_unreachable_file_block_is_declared(tmp_path: Path):
+    """源里的绝对路径属于另一台机器：只在源树 media/ 下按同名找，找不到就申报。"""
+    src = _jsonl(tmp_path / "workspace" / "dialog" / "2026-04-13.jsonl",
+                 _dialog_line("user", [{"type": "file",
+                                        "source": "/agents/Kai/workspace/media/没了.docx",
+                                        "filename": "没了.docx"}], "2026-04-13 09:00:00"))
 
     manifest = convert_dialog(src, tmp_path / "bundle", agent_name="imported")
     fields = {entry["field"]: entry["count"] for entry in manifest.dropped}
 
-    assert fields["blocks:file"] == 1 and manifest.counts["transcripts"] == 1
+    assert fields["media:不可达"] == 1 and manifest.counts["transcripts"] == 0
 
 
 def _rows(out: Path) -> List[Dict[str, Any]]:
