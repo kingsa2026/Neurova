@@ -3585,15 +3585,25 @@ class ToolExecutor:
                     m for m in matches
                     if self._path_within(os.path.abspath(m), base_abs)
                 ]
-            limit = 500
-            truncated = len(matches) > limit
-            matches = matches[:limit]
-            return {
-                "files": matches,
-                "count": len(matches),
-                "truncated": truncated,
+            # 上限 2000：响应体积仍需有界（glob 结果本就全量物化在内存里）
+            try:
+                max_results = max(1, min(2000, int(params.get("max_results", 500))))
+            except (TypeError, ValueError):
+                max_results = 500
+            try:
+                offset = max(0, int(params.get("offset", 0)))
+            except (TypeError, ValueError):
+                offset = 0
+            page = matches[offset : offset + max_results]
+            payload = {
+                "files": page,
+                "count": len(page),
+                "truncated": len(matches) > offset + len(page),
                 "pattern": pattern,
             }
+            if payload["truncated"]:
+                payload["next_offset"] = offset + len(page)
+            return payload
         except Exception as e:
             return {"error": f"文件枚举失败: {e}"}
 
@@ -3615,9 +3625,14 @@ class ToolExecutor:
             return {"error": "缺少 path 参数"}
         include = params.get("include") or None
         try:
-            max_results = int(params.get("max_results", 50))
+            # 下限 1：max_results=0 会让 next_offset 恒等于 offset，调用方翻页死循环
+            max_results = max(1, int(params.get("max_results", 50)))
         except (TypeError, ValueError):
             max_results = 50
+        try:
+            offset = max(0, int(params.get("offset", 0)))
+        except (TypeError, ValueError):
+            offset = 0
 
         # 相对基准目录同样锚定 agent 工作区（与文件读写同一解析口径）
         if not os.path.isabs(path):
@@ -3652,6 +3667,8 @@ class ToolExecutor:
                     break
 
         matches = []
+        skipped = 0
+        probe_limit = max_results + 1  # 多取一条探测"还有下一页"，避免为计数重扫整棵树
         for candidate in candidates:
             try:
                 with open(candidate, "r", encoding="utf-8", errors="replace") as f:
@@ -3659,27 +3676,36 @@ class ToolExecutor:
                         continue  # 跳过二进制文件
                     f.seek(0)
                     for lineno, line in enumerate(f, 1):
-                        if regex.search(line):
-                            matches.append(
-                                {
-                                    "file": candidate,
-                                    "line": lineno,
-                                    "text": line.strip()[:200],
-                                }
-                            )
-                            if len(matches) >= max_results:
-                                break
+                        if not regex.search(line):
+                            continue
+                        if skipped < offset:
+                            skipped += 1
+                            continue
+                        matches.append(
+                            {
+                                "file": candidate,
+                                "line": lineno,
+                                "text": line.strip()[:200],
+                            }
+                        )
+                        if len(matches) >= probe_limit:
+                            break
             except (OSError, UnicodeDecodeError):
                 continue
-            if len(matches) >= max_results:
+            if len(matches) >= probe_limit:
                 break
 
-        return {
+        has_more = len(matches) >= probe_limit
+        matches = matches[:max_results]
+        payload = {
             "matches": matches,
             "count": len(matches),
-            "truncated": len(matches) >= max_results,
+            "truncated": has_more,
             "pattern": pattern,
         }
+        if has_more:
+            payload["next_offset"] = offset + len(matches)
+        return payload
 
     async def _execute_computer_screenshot(self, params: Dict) -> Dict:
         """执行屏幕截图

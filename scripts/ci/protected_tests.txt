@@ -124,3 +124,7 @@ tests/unit/skills/test_ekb_operator_disposition.py
 tests/unit/api/test_experience_disposition_api.py
 # 016 经验质量读数进 RSI 阶段晋升判据（无据⇒unevidenced 不推进不否决、质差硬否决、阈值活旋钮）
 tests/unit/evolution/rsi/test_experience_quality_promotion.py
+
+# 原生工具翻页契约：file_search/file_list 的截断可续拉（offset/next_offset）
+# —— 不挂 Desktop Commander，把它唯一强于原生的"分页深搜"补进原生工具面
+tests/unit/tools/test_builtin_tools_expansion.py

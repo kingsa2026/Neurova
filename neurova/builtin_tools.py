@@ -637,19 +637,29 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
     # ── 常规 Agent 工具（2026-08 扩充，run_code ↔ DeepSeek code_interpreter
     # （run_code 执行体早已存在于 tool_executor
     "file_list": {
-        "description": "【文件枚举】按 glob 模式列出文件（如 *.py、docs/**/*.md），支持递归子目录。用于查看某目录下存在哪些文件。找到文件后可用 file_read 读取内容，或用 file_search 按内容关键词搜索。",
+        "description": "【文件枚举】按 glob 模式列出文件（如 *.py、docs/**/*.md），支持递归子目录。用于查看某目录下存在哪些文件。找到文件后可用 file_read 读取内容，或用 file_search 按内容关键词搜索。结果被截断时响应带 truncated=true 与 next_offset，用 offset=next_offset 续拉下一页。",
         "parameters": {
             "type": "object",
             "properties": {
                 "pattern": {"type": "string", "description": "glob 匹配模式，如 *.py、*.json"},
                 "path": {"type": "string", "description": "搜索的根目录（默认当前工作目录）"},
                 "recursive": {"type": "boolean", "description": "是否递归子目录（默认 true）"},
+                "max_results": {
+                    "type": "integer",
+                    "description": "本页返回的最大条目数（默认 500，上限 2000）",
+                    "default": 500,
+                },
+                "offset": {
+                    "type": "integer",
+                    "description": "跳过前 N 条后再返回（翻页用，配合响应的 next_offset）",
+                    "default": 0,
+                },
             },
             "required": ["pattern"],
         },
     },
     "file_search": {
-        "description": "【文件内容搜索】按关键词或正则在文件内容中搜索（类似 grep），返回匹配的文件、行号和行内容。可搜索单个文件或整个目录。用于定位某段代码/配置/文本出现在哪些文件的哪一行。",
+        "description": "【文件内容搜索】按关键词或正则在文件内容中搜索（类似 grep），返回匹配的文件、行号和行内容。可搜索单个文件或整个目录。用于定位某段代码/配置/文本出现在哪些文件的哪一行。匹配数被截断时响应带 truncated=true 与 next_offset，用 offset=next_offset 续拉下一页，不要靠改写 pattern 去猜剩余结果。",
         "parameters": {
             "type": "object",
             "properties": {
@@ -657,6 +667,11 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
                 "path": {"type": "string", "description": "要搜索的文件或目录路径"},
                 "include": {"type": "string", "description": "搜索目录时的文件名过滤，如 *.py（可选）"},
                 "max_results": {"type": "integer", "description": "返回的最大匹配条数", "default": 50},
+                "offset": {
+                    "type": "integer",
+                    "description": "跳过前 N 条匹配后再返回（翻页用，配合响应的 next_offset）",
+                    "default": 0,
+                },
             },
             "required": ["pattern", "path"],
         },
