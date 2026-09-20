@@ -156,7 +156,25 @@ class TestRepositorySwitch:
         before = copy.deepcopy(seeded._items)
         monkeypatch.setenv(ENV_FLAG, "on")
         reopened = KnowledgeRepository(str(tmp_path / "kb"))
-        assert reopened._items == before
+        # 唯一被有意改掉的是 confidence：开闸即建治理行，条目上那个数从此是断言聚合值
+        # （019b-2 的回写），旧库里 126/130 恒 0.7 的硬编码在开闸那一刻就被归正。
+        # 除它以外逐字段等于 JSON 时代——这条判据的范围因此收窄，不是放宽。
+        assert _stripConfidence(reopened._items) == _stripConfidence(before)
+        pairs = list(zip(_flatItems(reopened), _flatItemsFromDict(before)))
+        assert any(i["confidence"] != b["confidence"] for i, b in pairs),             "开闸不回填置信度，这条豁免就只是给旧行为开后门"
+        assert all(i["confidence"] in (0.45, 0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85)
+                   for i, _ in pairs), "置信度必须落在聚合格点上，不是任意小数"
+
+
+def _stripConfidence(itemsByAgent):
+    out = {}
+    for agentId, items in itemsByAgent.items():
+        out[agentId] = [{k: v for k, v in item.items() if k != "confidence"} for item in items]
+    return out
+
+
+def _flatItemsFromDict(itemsByAgent):
+    return [it for items in itemsByAgent.values() for it in items]
 
     def test_gateOnWritesGoToDatabase(self, tmp_path, seeded, monkeypatch):
         monkeypatch.setenv(ENV_FLAG, "on")
@@ -242,7 +260,9 @@ class TestWriteSurfaceUnderGate:
         restored = again.get_item("default", kid)
         assert restored["title"] == "改过的标题"
         assert restored["visibility"] == "public"
-        assert restored["confidence"] == 0.9
+        # 闸内 confidence 是聚合出来的（1 源 + 可回放现场 = 0.5），调用方传的 0.9 不再落账；
+        # 关闸态仍然原样存 0.9——见 test_gateOffWritesOnlyJson 那条口径。
+        assert restored["confidence"] == pytest.approx(0.5)
         assert "u9" in restored["shared_with"]
         assert restored["submission"]["status"] == "approved"
         assert restored["chunks"][0]["content"] == "块正文被改写了"
