@@ -158,3 +158,57 @@ class TestStreamCitationBuffer:
 
         buf = StreamCitationBuffer(None)
         assert buf.feed("a<memory_citation memory_id=\"x\"/>b") == "a<memory_citation memory_id=\"x\"/>b"
+
+
+class TestFactHandlesInKnowledgeDomain:
+    """工单 024：句柄机制从记忆域扩到知识域——底座事实用 f 前缀，解开写 fact_id。
+
+    事实若继续冒充 memory_id，答案就指不回那条事实的血缘：两种 id 的查看面不同，
+    混在一个字段里等于把"可回指"这条链在出口处断掉。
+    """
+
+    def test_fact_id_gets_its_own_handle_prefix(self):
+        from neurova.memory.citation import CitationRegistry
+
+        reg = CitationRegistry()
+        handle = reg.register({"fact_id": "fact_1a2b3c", "content": "甲 part_of 乙"})
+
+        assert handle == "f1"
+        assert reg.resolve("f1") == "fact_1a2b3c"
+
+    def test_fact_wins_over_id_when_a_payload_carries_both(self):
+        from neurova.memory.citation import CitationRegistry
+
+        reg = CitationRegistry()
+        handle = reg.register({"fact_id": "fact_x", "id": "legacy-row-9"})
+
+        assert handle == "f1" and reg.attrFor(handle) == "fact_id"
+
+    def test_extract_returns_fact_id_not_memory_id(self):
+        from neurova.memory.citation import CitationRegistry, extract_citations
+
+        reg = CitationRegistry()
+        reg.register({"fact_id": "fact_x", "content": "c"})
+
+        found = extract_citations('依据 <memory_citation ref="f1"/>。', registry=reg)
+
+        assert found == [{"fact_id": "fact_x"}]
+
+    def test_decode_writes_fact_id_into_the_persisted_marker(self):
+        from neurova.memory.citation import CitationRegistry, decode_citation_handles
+
+        reg = CitationRegistry()
+        reg.register({"fact_id": "fact_x"})
+
+        decoded = decode_citation_handles('结论 <memory_citation ref="f1"/>', reg)
+
+        assert decoded == '结论 <memory_citation fact_id="fact_x"/>'
+
+    def test_memory_handles_keep_the_old_attr(self):
+        from neurova.memory.citation import CitationRegistry, decode_citation_handles
+
+        reg = CitationRegistry()
+        reg.register({"memory_id": "mem_1"})
+
+        assert reg.attrFor("m1") == "memory_id"
+        assert 'memory_id="mem_1"' in decode_citation_handles('<memory_citation ref="m1"/>', reg)
