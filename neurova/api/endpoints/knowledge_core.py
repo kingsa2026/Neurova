@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user_or_service
@@ -261,6 +262,43 @@ async def get_foundation_integrity(
     from neurova.knowledge.foundation.digest_chain import ActivityDigestChain
 
     return ActivityDigestChain(get_knowledge_fact_store()).verify()
+
+
+@router.get("/facts/{fact_id}/lineage")
+async def get_fact_lineage(
+    request: Request,
+    fact_id: str = Path(..., description="事实底座 fact_id"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """一条事实的逐跳血缘（只读，工单 024 / G01）。
+
+    `missing` 是显式的缺维清单：没有断言、断言没挂活动、活动没记介质各占一条。
+    回一条空链会被读成"溯过源、没来源"，那是假的确定性。
+    """
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.foundation.lineage_view import FactLineageView
+
+    view = FactLineageView(get_knowledge_fact_store()).trace(fact_id)
+    if view is None:
+        raise HTTPException(status_code=404, detail="事实不存在: %s" % fact_id)
+    return view
+
+
+@router.get("/facts/{fact_id}/turtle", response_class=PlainTextResponse)
+async def get_fact_turtle(
+    request: Request,
+    fact_id: str = Path(..., description="事实底座 fact_id"),
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """血缘的 RDF/Turtle 导出（自拼文本，零新增依赖）。"""
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.ontology.turtle import serializeFact
+
+    try:
+        return PlainTextResponse(
+            serializeFact(get_knowledge_fact_store(), fact_id), media_type="text/turtle")
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.get("/{knowledge_id}/revisions")

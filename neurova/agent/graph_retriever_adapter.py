@@ -64,6 +64,7 @@ class GraphRetrieverAdapter:
         """内容带完整路径：只给终点三元组，读的人无法知道它是**沿着谁**推出来的。"""
         return {
             "id": hop["id"],
+            "fact_id": hop["id"],   # 引用点落在终点事实上，其路径由 content 承载
             "content": hop["path"],
             "type": "graph_fact",
             "hops": hop["hop"],

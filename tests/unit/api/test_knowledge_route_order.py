@@ -25,6 +25,8 @@ _KB_ROUTES = [
     ("/evaluation/baseline", "GET"),
     ("/foundation/usage", "GET"),
     ("/foundation/integrity", "GET"),
+    ("/facts/{fact_id}/lineage", "GET"),
+    ("/facts/{fact_id}/turtle", "GET"),
     ("/deleted", "GET"),
     ("/{knowledge_id}/restore", "POST"),
     ("/{knowledge_id}/revisions", "GET"),

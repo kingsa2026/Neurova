@@ -590,7 +590,7 @@ _open_chat_browser → webbrowser.open`（该函数在别的用例里被 patch �
 | 020 / 021 / 022 | 完成 | 类型系统进表 + 五条入库校验接咽喉段3（12 例）；Datalog 片段前向链、推导经咽喉写入（10 例）；推导账本与精确撤销、链尾 v10（11 例） |
 | 018 | 完成 | `TemporalKGMemoryBridge` 整类删除（-218 行，grep 零调用方）；图谱类型收编进 `ontology_terms`，枚举退读兼容层，节点复用以 006 消解段为准（15 例） |
 | 023 | 完成 | 链尾 v11：断言按活动上链（`seq`+`digest`+滚动 `head_digest`），六种断裂各有其名且指位；巡检端点 `/foundation/integrity`；生产 92 条断言副本先验后补链，链上 92 / 断裂 0（13 + 4 例） |
-| 024 | 未开工 | 见工单索引"进度" |
+| 024 | 完成 | 血缘视图 + Turtle 自解析往返 + `/facts/{id}/lineage|turtle` 两端点；citation 句柄扩到知识域（`fact_id → f1`）；前端血缘抽屉接进冲突队列（后端 23 例 + 前端 8 例，22 键 × 11 locale） |
 
 `tests/unit/knowledge/` 543 passed（起点基线 265）。019b-4b 的爆炸半径口径：
 条目 / 向量 / 评测 / api 消费方一起跑 488 passed、46 skipped、0 failed。
