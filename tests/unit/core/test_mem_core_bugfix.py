@@ -108,29 +108,9 @@ class TestBug1FlushToLongTermMemory:
         assert len(flush_calls) == 1, "BUG 1 未修复: 满缓冲时 flush() 未被调用"
 
 
-# ============================================================
-# BUG 2 (MEDIUM): memory_agent.py 空壳文件
-# ============================================================
-
-class TestBug2MemoryAgentCompatImport:
-    """BUG 2: memory_agent.py 仅有 docstring 无 import, 导致
-    `from neurova.memory_agent import MemoryAgent` 抛 ImportError。"""
-
-    def test_import_memory_agent_succeeds(self):
-        """from neurova.memory_agent import MemoryAgent 必须成功"""
-        from neurova.memory_agent import MemoryAgent
-        assert MemoryAgent is not None
-
-    def test_memory_agent_is_mem_core(self):
-        """MemoryAgent 应为 MemCore 的别名(向后兼容)"""
-        from neurova.memory_agent import MemoryAgent
-        assert MemoryAgent is MemCore
-
-    def test_memory_agent_all_exported(self):
-        """__all__ 应导出 MemoryAgent"""
-        import neurova.memory_agent as ma
-        assert hasattr(ma, "__all__")
-        assert "MemoryAgent" in ma.__all__
+# BUG 2（memory_agent.py 空壳）段随该壳退役一并移除。真路径是 agent.memory_agent 属性
+# → mem_core.MemCore；反向不变量（旧导入路径不得再被引用）改由
+# tests/unit/core/test_memory_agent_shell_retired.py 钉住。
 
 
 # ============================================================
