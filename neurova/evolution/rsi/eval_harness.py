@@ -258,10 +258,13 @@ def _crystallized_count(min_obs, min_rate, successes: int, failures: int) -> int
         "crystallize_min_success_rate": min_rate,
     }})
     tool = "tool_probe"
+    # 成败显式给出（工单 010）：本夹具的语义是"给结晶门槛喂客观成败读数"。
+    # 关键词粗分自 010 起只作洞察标签、不计入 success_rate，靠"成功完成"四个字
+    # 喂票等于用被测门槛正要拒绝的东西去测这道门槛。
     for _ in range(successes):
-        fb.process_experience(f"使用 {tool} 成功完成", task_type="probe")
+        fb.process_experience(f"使用 {tool} 完成任务", task_type="probe", outcome="success")
     for _ in range(failures):
-        fb.process_experience(f"{tool} 失败", task_type="probe")
+        fb.process_experience(f"{tool} 未完成任务", task_type="probe", outcome="failure")
     return int(fb.get_feedback()["crystallized_patterns"])
 
 
@@ -302,6 +305,8 @@ def _case_ex_pattern_support_band(live_params) -> Tuple[float, str, bool]:
     fb_obj.pattern_min_support = support
 
     for _ in range(3):
+        # 工单 013 口径：本用例量的是支持度带宽，合成序列没有服务端票据，
+        # 结果位照默认传 None（无据），不得在这里给门槛自投成功票。
         miner.add_sequence(["tool_alpha", "tool_beta"])
     miner.add_sequence(["tool_gamma", "tool_delta"])
     patterns = {tuple(p.tools) for p in miner.mine()}

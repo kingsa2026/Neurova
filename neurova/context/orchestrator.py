@@ -1756,6 +1756,10 @@ def dedupe_experience_sources(experiences, crystallized_patterns):
     "上次照这条做砸了"与"上次照这条做成了"不得在 prompt 里同权争位。
     证据缺席（NULL / 其他生产者给的裸条目）回落基线 70：没测到既不是加分项
     也不是扣分项（D1）。结晶产物的 80 基准不动，其生命周期归 017。
+
+    工单 015：人工降权接进同一张表，压在全部证据档之下（`demoted 45`）。
+    `endorsed` **不占档**——人说过"可以用"不等于这条被执行成功过，让它冒领 78
+    就是把判断洗成证据；`suppressed` 也不在这里处理，隐藏已在检索侧出局。
     Returns: List[(tag, content, priority)]
     """
     import re as _re
@@ -1766,11 +1770,14 @@ def dedupe_experience_sources(experiences, crystallized_patterns):
         "failure": 55,
     }
     _EXPERIENCE_BASELINE = 70
+    _DEMOTED_PRIORITY = 45
 
     def _key(c: str) -> str:
         return _re.sub(r"[\s]+", "", str(c))[:100]
 
     def _prio(item) -> int:
+        if isinstance(item, dict) and item.get("operator_disposition") == "demoted":
+            return _DEMOTED_PRIORITY
         outcome = item.get("adoption_outcome") if isinstance(item, dict) else None
         return _ADOPTION_PRIORITY.get(outcome, _EXPERIENCE_BASELINE)
 

@@ -106,6 +106,10 @@ class ExperienceFeedback(PersistedStateMixin):
         self._insights: List[ToolInsight] = []
 
         # RSI 可优化参数
+        # 桥（工单 004）：这两个参数此前只被 `get_feedback()` 报表消费，
+        # 真正的入库闸在 PatternCrystallizer 里读字面量 —— 调参改不动闸。
+        # 与 pattern_min_support 同形态：setter 保持 setattr 语义并推进挂接的结晶器。
+        self._crystallizer: Optional[Any] = None
         self.crystallize_min_observations: int = 3
         self.crystallize_min_success_rate: float = 0.6
         # 模式最小支持度（经 attach_pattern_miner 桥同步到 PatternMiner.min_support；
@@ -136,14 +140,11 @@ class ExperienceFeedback(PersistedStateMixin):
 
         return list(set(matches))  # 去重
 
-    def classify_outcome(self, text: str) -> str:
-        """分类经验结果。
+    def classify_outcome(self, text: str) -> Optional[str]:
+        """按关键词粗分成败；**无命中时返回 None（无证据），不投成功票**。
 
-        Args:
-            text: 经验文本
-
-        Returns:
-            结果分类：success, failure, partial
+        原实现在关键词零命中时 `return "success"`，于是"没测到"被读成"没出问题"，
+        而 `success_rate` 是结晶入库门槛的唯一输入 —— 门槛因此退化成盖章机（工单 003）。
         """
         text_lower = text.lower()
 
@@ -161,7 +162,7 @@ class ExperienceFeedback(PersistedStateMixin):
         elif failure_score > 0:
             return "failure"
         else:
-            return "success"  # 默认为成功
+            return None  # 无关键词命中 = 没有可依据的成败信号
 
     def create_tool_insight(
         self,
@@ -202,6 +203,7 @@ class ExperienceFeedback(PersistedStateMixin):
         tool_name: str,
         outcome: str,
         confidence: float = 0.8,
+        objective: bool = True,
     ) -> TaskToolAssociation:
         """创建或更新任务-工具关联。
 
@@ -210,6 +212,11 @@ class ExperienceFeedback(PersistedStateMixin):
             tool_name: 工具名
             outcome: 结果
             confidence: 置信度
+            objective: 该成败结论是否来自**回执**（服务端票据或工具执行结果）。
+                False = 只有关键词粗分可依，那么这次只记一次尝试（`total_count`
+                仍进分母，工单 003 的"无回执不得从分母消失"不变），但**不投
+                任何一票**（工单 010：自述买不动 `success_rate`，门槛才不会
+                被"任务执行成功"四个字喂成盖章机）。
 
         Returns:
             任务-工具关联
@@ -227,10 +234,11 @@ class ExperienceFeedback(PersistedStateMixin):
 
         # 更新计数
         assoc.total_count += 1
-        if outcome == "success":
-            assoc.success_count += 1
-        elif outcome == "failure":
-            assoc.failure_count += 1
+        if objective:
+            if outcome == "success":
+                assoc.success_count += 1
+            elif outcome == "failure":
+                assoc.failure_count += 1
 
         # 更新平均置信度
         assoc.avg_confidence = (assoc.avg_confidence * (assoc.total_count - 1) + confidence) / assoc.total_count
@@ -244,12 +252,17 @@ class ExperienceFeedback(PersistedStateMixin):
         self,
         experience_text: str,
         task_type: str = "general",
+        outcome: Optional[str] = None,
     ) -> Dict[str, Any]:
         """处理一条经验。
 
         Args:
             experience_text: 经验文本
             task_type: 任务类型
+            outcome: 客观成败（`success` / `failure` / `partial`）。
+                **传入即优先采用**；None 时才退回关键词粗分（工单 003）——
+                关键词只是粗分信号，不配覆盖工具回执，工单 010 进一步把它
+                赶到最后一格：粗分出来的结论只作洞察标签，不进成败票。
 
         Returns:
             处理结果
@@ -257,8 +270,10 @@ class ExperienceFeedback(PersistedStateMixin):
         # 提取工具提及
         tools = self.extract_tool_mentions(experience_text)
 
-        # 分类结果
-        outcome = self.classify_outcome(experience_text)
+        # 分类结果：显式成败优先，关键词只作兜底
+        objective = outcome is not None
+        if outcome is None:
+            outcome = self.classify_outcome(experience_text)
 
         # 为每个工具创建洞察和关联
         insights = []
@@ -276,6 +291,7 @@ class ExperienceFeedback(PersistedStateMixin):
                 task_type=task_type,
                 tool_name=tool_name,
                 outcome=outcome,
+                objective=objective,
             )
             associations.append(assoc)
 
@@ -293,6 +309,35 @@ class ExperienceFeedback(PersistedStateMixin):
     # ── pattern_min_support 桥（RSI 活表参数）──
     # 跟随 ToolMemoryIntegration 的 property 模式：setter 保持 setattr 语义，
     # 同时把值推进挂接的 PatternMiner.min_support——此前该参数定义后零消费。
+
+    # ── 结晶门槛桥（工单 004）：调登记表必须改得动入库闸 ──
+
+    @property
+    def crystallize_min_observations(self) -> int:
+        return self._crystallize_min_observations
+
+    @crystallize_min_observations.setter
+    def crystallize_min_observations(self, value: int) -> None:
+        self._crystallize_min_observations = max(1, int(value))
+        if self._crystallizer is not None:
+            self._crystallizer.min_observations = self._crystallize_min_observations
+
+    @property
+    def crystallize_min_success_rate(self) -> float:
+        return self._crystallize_min_success_rate
+
+    @crystallize_min_success_rate.setter
+    def crystallize_min_success_rate(self, value: float) -> None:
+        self._crystallize_min_success_rate = float(value)
+        if self._crystallizer is not None:
+            self._crystallizer.min_success_rate = self._crystallize_min_success_rate
+
+    def attach_crystallizer(self, crystallizer: Optional[Any]) -> None:
+        """挂接结晶器并推进当前门槛（EvolutionOrchestrator 装配；None 安全）。"""
+        self._crystallizer = crystallizer
+        if crystallizer is not None:
+            crystallizer.min_observations = self._crystallize_min_observations
+            crystallizer.min_success_rate = self._crystallize_min_success_rate
 
     @property
     def pattern_min_support(self) -> float:

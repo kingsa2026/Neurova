@@ -279,6 +279,7 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.negative_screen_settings", "/v1/negative-screen", "Negative Screen Settings API"),
         ("neurova.api.endpoints.memory_settings_api", "/v1/memory-settings", "Memory Settings API"),
         ("neurova.api.endpoints.neuron", "", "NEURON System API"),
+        ("neurova.api.endpoints.coordination_api", "/coordination", "Multi-Agent Coordination API"),
     ]
 
     registered = 0

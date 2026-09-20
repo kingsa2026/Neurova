@@ -2,8 +2,8 @@
 # Neurova CI — cnb.cool 云原生构建
 # ============================================================================
 # 与 .github/workflows/ci.yml 对齐的门禁：同源命令、同等严格度、同等放行标准。
-# 对齐关系由 tests/unit/test_ci_parity_guard.py 常驻校验（20 用例）：
-#   job↔pipeline 映射 / 核心命令逐字一致 / 非阻塞语义对齐 / 防样例空壳再生。
+# 对齐关系由 tests/unit/test_ci_parity_guard.py 常驻校验（四组断言：
+#   job↔pipeline 映射 / 核心命令逐字一致 / 非阻塞语义对齐 / 防样例空壳再生）。
 # 改动任一侧配置必须同步另一侧并更新守卫的 EXPECTED_* 表。
 #
 # 分层（自内向外加固，与 GitHub 侧一致；全部为阻断门禁，无 continue-on-error）：
@@ -21,16 +21,19 @@
 #   9. deploy-config         部署配置一致性（Dockerfile / docker-compose /
 #                            Helm / requirements 跨文件不变量，阻断，
 #                            见 scripts/ci/deploy_config_consistency_check.py）
+#   10. experience-quality   经验质量基准（工单 009，阻断）：冻结真实语料的
+#                            门槛收紧前后 A/B 读数 + 低质探针自证，
+#                            见 scripts/ci/experience_quality_gate.py
 #
 # 原则：只进当前确定全绿的测试；预存失败模块修复后逐个搬入 protected_tests.txt。
 #
 # 语法约定（见 https://docs.cnb.cool/zh/build/grammar.html）：
 #   - 分支 → 事件(push/pull_request) → 流水线数组；同一事件下的多条流水线并发执行，
-#     故 10 条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐（unit-tests 按
+#     故 11 条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐（unit-tests 按
 #     py3.11/py3.12 拆为两条，对应 GitHub 的 matrix 两格）。
 #   - 定时任务用第 3 类顶层 key：`"crontab: <5 段 POSIX cron>"`（分支下一级），
 #     平台最小调度间隔 5 分钟，周级用第 5 段（星期）表达；本文件另有 1 条周级
-#     巡检流水线（deploy-config 的时间维度兜底），不计入上面 10 条 push 流水线。
+#     巡检流水线（deploy-config 的时间维度兜底），不计入上面 11 条 push 流水线。
 #   - 单条流水线内的 stages 串行；任一 stage 失败即中止该流水线。
 #   - runner.cpus: N 对应内存 N×2GiB（本文件最大 4 → 8GiB）。
 #   - docker.volumes 为构建节点级缓存（copy-on-write 默认），跨节点不共享；
@@ -267,6 +270,28 @@ main:
           # 统一走 OSV-Scanner；允许清单见 scripts/ci/osv-allowlist.toml。
           script: python scripts/ci/osv_audit.py
           timeout: 20m
+
+    # ── 10. 经验质量基准（工单 009，阻塞）──────────────────────────────────
+    # 收紧了一整轮经验形成链之后，"变好了"必须有一个可比读数回答：冻结的真实语料
+    # 跑门槛收紧前/后两臂 A/B，读数取 EKB.quality_snapshot()（008 的唯一算式），
+    # 判据阈值取同一张 ALERT_THRESHOLDS。每次运行先自证低质探针会被判红——
+    # 探针不红说明判据坏了，那种"绿"比红危险，按 exit 2 出声。
+    # 语料是 --freeze-corpus 从生产库只读投影出来的仓内夹具，CI 上不碰 data/ 活库。
+    - name: experience-quality
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.11
+        volumes:
+          - /root/.cache/pip
+      stages:
+        - name: install minimal deps
+          script: python -m pip install --upgrade pip -r requirements-ci.txt
+          timeout: 20m
+        - name: experience quality gate
+          script: python scripts/ci/experience_quality_gate.py
+          timeout: 10m
 
   # pull_request 事件：复用同一份流水线定义（锚点别名，单一事实来源）
   pull_request: *pipelines

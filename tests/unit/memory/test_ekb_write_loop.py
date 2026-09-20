@@ -18,7 +18,9 @@ def _make_pipeline(tools_used=("web_search",), success=True):
 
     agent = MagicMock()
     agent._collect_tool_messages.return_value = [
-        {"tool_name": tools_used[0], "success": success}
+        # 带 `success` 的记录在生产里必是 `tool_result`（`loops/base.py:333-341`）；
+        # 缺 `type` 会被工单 002 的三态判据读成"无回执"
+        {"type": "tool_result", "tool_name": tools_used[0], "success": success}
     ]
     pipeline = PostChatPipeline(agent)
 

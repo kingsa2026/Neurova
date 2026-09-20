@@ -25,12 +25,20 @@ class _FakeEngine:
         return []
 
 
-def _make_crystallizer(tmp_dir, llm_gate="1"):
-    with patch.dict(os.environ, {"NEUROVA_CRYSTALLIZATION_LLM_GATE": llm_gate}):
-        engine = _FakeEngine()
-        state = os.path.join(tmp_dir, "cryst_state.json")
-        c = PatternCrystallizer(engine=engine, state_path=state)
-    return c, engine
+def _make_crystallizer(case, tmp_dir, llm_gate="1"):
+    """构造一个指定闸态的结晶器。
+
+    工单 015 改写：闸不再在 `__init__` 读一次，而是每次裁决时读（否则治理设置
+    改了要重启才认）。因此 env patch 必须覆盖到 `observe()` 所在的决策点——
+    原来"只在构造那一行套住 env"的写法不再描述现实，它会让关闸用例假绿。
+    patcher 交给 TestCase 的 addCleanup 收尾。
+    """
+    patcher = patch.dict(os.environ, {"NEUROVA_CRYSTALLIZATION_LLM_GATE": llm_gate})
+    patcher.start()
+    case.addCleanup(patcher.stop)
+    engine = _FakeEngine()
+    state = os.path.join(tmp_dir, "cryst_state.json")
+    return PatternCrystallizer(engine=engine, state_path=state), engine
 
 
 def _observe_three(c, key_ctx="搜索 资料 天气", tool="web_search"):
@@ -44,22 +52,26 @@ class CrystallizationLLMGateTest(unittest.TestCase):
 
     import tempfile
 
-    def test_no_judge_direct_write_zero_llm_semantics(self):
-        """judge 未注入 = 零 LLM 语义：规则通过即直写（现有行为不变）。"""
-        c, engine = _make_crystallizer(self.tmp)
+    def test_no_judge_keeps_candidate_pending_no_direct_write(self):
+        """judge 未注入 ⇒ 候选留队不直写（工单 005 / 决策 D3 改写了原"零 LLM 直写"语义）。
+
+        原语义"没有 LLM 就直接入库"等于"裁决缺席即放行"，首批候选永远绕过裁决。
+        显式关闸仍直写，那是操作者用 NEUROVA_CRYSTALLIZATION_LLM_GATE=0 明示的选择。
+        """
+        c, engine = _make_crystallizer(self, self.tmp)
         _observe_three(c)
-        self.assertEqual(len(engine.stored), 1, "无 judge 时应直写")
-        self.assertEqual(c.list_pending(), [])
+        self.assertEqual(len(engine.stored), 0, "无 judge 不得直写入库")
+        self.assertEqual(len(c.list_pending()), 1, "候选必须留在队里等裁决")
 
     def test_judge_injected_routes_to_pending(self):
-        c, engine = _make_crystallizer(self.tmp)
+        c, engine = _make_crystallizer(self, self.tmp)
         c.set_llm_judge(MagicMock())
         _observe_three(c)
         self.assertEqual(len(engine.stored), 0, "judge 在位时不得直写")
         self.assertEqual(len(c.list_pending()), 1)
 
     def test_confirm_pending_approve_writes_store(self):
-        c, engine = _make_crystallizer(self.tmp)
+        c, engine = _make_crystallizer(self, self.tmp)
         c.set_llm_judge(MagicMock())
         _observe_three(c)
         pending = c.list_pending()
@@ -72,7 +84,7 @@ class CrystallizationLLMGateTest(unittest.TestCase):
         self.assertEqual(c.list_pending(), [])
 
     def test_confirm_pending_reject_drops(self):
-        c, engine = _make_crystallizer(self.tmp)
+        c, engine = _make_crystallizer(self, self.tmp)
         c.set_llm_judge(MagicMock())
         _observe_three(c)
         pending = c.list_pending()
@@ -85,7 +97,7 @@ class CrystallizationLLMGateTest(unittest.TestCase):
 
     def test_unreviewed_candidates_kept(self):
         """LLM 漏判的候选留队等下轮（不丢数据）。"""
-        c, _ = _make_crystallizer(self.tmp)
+        c, _ = _make_crystallizer(self, self.tmp)
         c.set_llm_judge(MagicMock())
         _observe_three(c)
         result = c.confirm_pending([])  # LLM 返回空裁决
@@ -95,7 +107,7 @@ class CrystallizationLLMGateTest(unittest.TestCase):
     def test_review_pending_with_llm_end_to_end(self):
         import asyncio
 
-        c, engine = _make_crystallizer(self.tmp)
+        c, engine = _make_crystallizer(self, self.tmp)
         c.set_llm_judge(MagicMock())
         _observe_three(c)
 
@@ -111,7 +123,7 @@ class CrystallizationLLMGateTest(unittest.TestCase):
         self.assertIn("可复用", llm.prompt)
 
     def test_gate_off_direct_write_even_with_judge(self):
-        c, engine = _make_crystallizer(self.tmp, llm_gate="0")
+        c, engine = _make_crystallizer(self, self.tmp, llm_gate="0")
         c.set_llm_judge(MagicMock())
         _observe_three(c)
         self.assertEqual(len(engine.stored), 1, "闸显式关闭=回退直写")

@@ -33,7 +33,10 @@ class TestRecordExperienceNoDuplicate:
             "success": True,
         })
         agent._collect_tool_messages = MagicMock(return_value=[
-            {"tool_name": "test_tool", "success": True}
+            # 形态必须与生产一致：携带 `success` 的是 `tool_result` 记录
+            # （`agent/loops/base.py:333-341`）；`tool_call` 记录没有该键（:196-204）。
+            # 少写 `type` 会让工单 002 的三态判据在测试里被读成"无回执"。
+            {"type": "tool_result", "tool_name": "test_tool", "success": True}
         ])
         return agent
 

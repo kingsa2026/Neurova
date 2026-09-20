@@ -8,7 +8,8 @@
 3. str(MagicMock) 直接落库 agent_id 列（~93 行 "<MagicMock ...>" 垃圾值）。
 
 锁定契约：
-- add_experience_record 对完全相同 (agent_id, skill_name, context, result) 去重；
+- add_experience_record 按内容门去重：身份 = (agent_id, skill_name, success, 归一化输入键)
+  （工单 011 起 result 退出身份键，见 tests/unit/skills/test_ekb_content_gate.py）；
 - agent_id 非法值（Mock repr / 含空白尖括号）归一为 None，不落库；
 - DB 路径支持 NEUROVA_EKB_DB 环境变量覆盖（conftest autouse 隔离挂点）；
 - conftest autouse fixture 生效：测试内 EKB 单例不指向项目 data/ 目录。
@@ -51,8 +52,14 @@ class TestDedupGate:
         assert n == 1, f"重复经验应被去重门禁拦截，实际 {n} 行"
         assert rid1 == rid2, "重复写入应返回既有记录 id"
 
-    def test_different_reply_not_deduped(self, ekb):
-        """同问不同答是不同经验（reply 不同），不误杀。"""
+    def test_different_reply_same_input_merges(self, ekb):
+        """同问不同答**合并成一行**——工单 011 改写的旧契约。
+
+        原断言"不同 result 应各自成行"正是 7 倍重复的入口：result 里装的是
+        `reply_excerpt`（每轮都是新的 LLM 输出），把它算进身份键等于宣布
+        "同一句永不重复"。身份改为 (agent, skill, success, 归一化输入)，
+        回复文本退为证据内容，命中时 last-write-wins + seen_count 计数。
+        """
         from neurova.skills.experience_knowledge_base import ExperienceRecord
 
         base = {"user_input": "Hello"}
@@ -66,10 +73,12 @@ class TestDedupGate:
             ExperienceRecord(skill_name="chat", context=base, result={"reply_excerpt": "v2"}, success=True),
             agent_id="a1",
         )
-        n = sqlite3.connect(ekb._db_path).execute(
-            "SELECT COUNT(*) FROM experience_records"
-        ).fetchone()[0]
-        assert n == 2, "不同 result 应各自成行"
+        rows = sqlite3.connect(ekb._db_path).execute(
+            "SELECT result, seen_count FROM experience_records"
+        ).fetchall()
+        assert len(rows) == 1, "同问不同答应合并为一行（回复只是证据，不是身份）"
+        assert rows[0][1] == 2
+        assert "v2" in rows[0][0], "合并保留最新一次回复"
 
     def test_dedup_scoped_by_agent(self, ekb):
         """去重按 agent 隔离：A agent 的经验不影响 B agent 写入。"""

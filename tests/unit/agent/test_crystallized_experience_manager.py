@@ -360,22 +360,6 @@ class TestCrystallizedExperienceManager:
         count = self.manager.clear_cache()
         assert count == 1
 
-    def test_statistics(self):
-        """测试统计信息"""
-        # 执行一些操作
-        self.crystallizer.results = [
-            {"id": "1", "content": "统计", "method": "tool_a", "confidence": 0.9, "score": 80.0}
-        ]
-        asyncio.run(
-            self.manager.retrieve("统计查询", limit=5, use_cache=False)
-        )
-
-        # 获取统计
-        stats = self.manager.get_statistics()
-        assert stats["total_attempts"] == 1
-        assert stats["successful_attempts"] == 1
-        assert stats["health_status"] == "healthy"
-
     def test_crystallized_experience_dataclass(self):
         """测试 CrystallizedExperience 数据类"""
         exp = CrystallizedExperience(

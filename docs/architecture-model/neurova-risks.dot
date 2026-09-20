@@ -1,0 +1,116 @@
+// Neurova — 架构风险网络视图
+// 技能来源: risk-quality-reviewer + graphviz
+// 视图状态: current　每条风险均带可解析证据，无一条为推测
+// 严重度定义: S=阻断正确性 / A=导致静默失效 / B=拖慢安全变更 / C=卫生问题
+// 生成日期: 2026-09-19
+
+digraph NeurovaRisks {
+    rankdir=TB;
+    nodesep=0.4; ranksep=0.7;
+    fontname="Sans"; fontsize=13;
+    labelloc=t; fontsize=19;
+    label="Neurova 架构风险网络（13 条，全部证据接地）\n判据：把报错恢复原状后，根因处不修则故障必然复现 → 才计入本图";
+
+    node [shape=box, style="rounded,filled", fontsize=11, margin="0.16,0.09"];
+    edge [fontsize=10];
+
+    // ============ S 级：阻断正确性 ============
+    subgraph cluster_S {
+        label="S 级 — 已在源码中证实的正确性缺陷";
+        style="rounded"; color="#c92a2a"; fontsize=13; labeljust=l;
+
+        R1 [label="R1  包/模块同名遮蔽（根因）\nneurova/skill_system.py 32KB 规范实现\n被同名目录 neurova/skill_system/ 永久遮蔽\nimport 只会命中包（实测已验证）\n→ 靠 __getattr__ + spec_from_file_location\n  + sys.modules 别名 + 占位类 四层兜底\n[neurova/skill_system/__init__.py:190-223,264]\n[neurova/skill_system.py:43]", fillcolor="#ffc9c9"];
+
+        R1b [label="R1-衍生  幽灵模块名\nneurova.skill_system_module_standalone\n磁盘上不存在（已 find 确证）\n顶层 import 它 [:264] 只因为\n同文件 :239 先触发 __getattr__ 注入别名\n→ 加载顺序耦合，重排即 ImportError", fillcolor="#ffc9c9"];
+
+        R10 [label="R10  大小写导入地雷\nmigration_api.py:11 导入小写\nneurova.storage.*，git 记录为大写 Storage/\n→ Windows 可跑，Linux/镜像必 ImportError\n本地无法复现（大小写不敏感 FS）", fillcolor="#ffc9c9"];
+
+        R12 [label="R12  文档所述机制在代码中为 pass\nzero_downtime_migration 的\n_enable_dual_write / _insert_into_new_schema\n/ _switch_readers / _schedule_cleanup\n/ _should_stop_migration 全为 pass\nrollback 恒 False、verify 恒 True\n但 MIGRATION_SYSTEM_GUIDE.md 描述了完整表切换\n[neurova/Storage/zero_downtime_migration.py:195-329,367-382]", fillcolor="#ffc9c9"];
+
+        R1 -> R1b [color="#c92a2a", label="同一根因"];
+    }
+
+    // ============ A 级：静默失效 ============
+    subgraph cluster_A {
+        label="A 级 — 静默失效：故障不报错，只给出错误结果";
+        style="rounded"; color="#e8590c"; fontsize=13; labeljust=l;
+
+        R2 [label="R2  路由注册静默降级\nendpoints/__init__.py:182-301 字符串白名单\n＋ importlib 动态导入\n＋ except ImportError: logger.debug [:296-297]\n→ 漏注册在启动期完全不可见\n且动态注册不可静态分析（IDE/类型/依赖图全盲）", fillcolor="#ffe8cc"];
+
+        R3 [label="R3  预算系统是只读报表，不是拦截器\n记账只 record 不抛错 [:510]\nis_over_budget [:276] / throttle_if_needed [:282]\n仅报表路径读取；LLM 主路径零调用\n（grep check_budget|budget_exceeded = 0）\n⇒ 超支后主路径无任何拦停动作", fillcolor="#ffe8cc"];
+
+        R3b [label="R3-衍生  装饰器静默 no-op\nllm_client.py:22-30 ImportError 时\n把 track_llm_call 降级为空操作\n覆盖率 2/12（10 处不记账）", fillcolor="#ffe8cc"];
+
+        R7 [label="R7  前后端前缀契约断裂\n前端 baseURL=/api/v1 [api/index.ts:77]\nbudget/cost_rollup 只挂 /api\n[app.py:560,563-564] 缺 /v1\n→ CostDashboard 全量 404\n被 .catch(()=>null) 吞掉 [:171-173]\napi/computer.ts 更用裸 axios 绕开鉴权与信封\n[:1,5,12] 且指向未注册路由", fillcolor="#ffe8cc"];
+
+        R2 -> R7 [color="#e8590c", label="未注册端点 → 前端必 404"];
+        R3 -> R3b [color="#e8590c", label="同一目标两处断裂"];
+        R3b -> R7 [color="#e8590c", style=dotted];
+    }
+
+    // ============ B 级：阻断安全变更 ============
+    subgraph cluster_B {
+        label="B 级 — 使 AI agent / 人类无法安全修改代码";
+        style="rounded"; color="#1864ab"; fontsize=13; labeljust=l;
+
+        R4 [label="R4  同域概念并行定义\nneurova/ 下顶层类名重复 2+ 次者 129 个\nSkillInfo×6 MemoryType×4 NodeType×4\nWorkflowDefinition×4 Message×3\nMemoryManager×3 CognitiveState×3\n→ 改一处定义不知其余命中点\n放大视角时无法确定收敛目标", fillcolor="#d0ebff"];
+
+        R4b [label="R4-机制成因（根因层）\nADR 0001/0008/0009/0010/0011/0013 六份\n决策主题均为「N 套收敛到 1」\n5 个月内重复 6 次\n→ 重复是持续生成的，不是历史遗留\n收敛只处理 129 中的 6 例", fillcolor="#a5d8ff"];
+
+        R5 [label="R5  巨型文件无守卫\n行数棘轮只压在 agent_core.py(2159)\n而 tool_executor.py 5159 / memory_layer\n/manager.py 3266 / post_chat_pipeline.py 3068\n/ chat_pipeline.py 2626 / neurflow/builtin.py 2455\nprovider_manager 2161 / orchestrator 2122\n全部无守卫 → 只守住 1 个，放过 8 个更大的", fillcolor="#d0ebff"];
+
+        R8 [label="R8  未接线孤岛（断点）\nturn_coordinator 未接入 chat_pipeline\n[:324 零调用方] → 协调层未闭环\ncoordination_decorators.py 0 引用\ncrdt/ Python 0 消费者、前端引用已注释\ncomputer_manager 仅服务未注册端点\nmodel_selector 仅 e2e 引用\nllm/{adapters,registry,interfaces,sandbox} 孤岛", fillcolor="#d0ebff"];
+
+        R11 [label="R11  核心子系统整片不在版本控制\ndb/ models/ crdt/ llm/adapters|registry\n|sandbox|interfaces/ experiments/\ncollaboration/ 7 文件、api/endpoints/ 7 端点\nStorage/zero_downtime_migration.py\n全部未跟踪 → 主线架构有一部分不可复现", fillcolor="#d0ebff"];
+
+        R11b [label="R11-衍生  CI 依赖未跟踪文件\ncost-guards.yml 与 CODEOWNERS 均未跟踪\n→ 当前 CI 与 CODEOWNERS 是纸面存在\n且 cost-guards 用 node:18\n而 compose 用 node:20", fillcolor="#d0ebff"];
+
+        R4 -> R4b [color="#1864ab", label="表象 → 成因"];
+        R8 -> R11 [color="#1864ab", style=dotted, label="多数孤岛恰在未提交区"];
+    }
+
+    // ============ C 级：卫生与漂移 ============
+    subgraph cluster_C {
+        label="C 级 — 文档漂移与仓库卫生（影响可信度，不阻断运行）";
+        style="rounded"; color="#5f3dc4"; fontsize=13; labeljust=l;
+
+        R6 [label="R6  规模与事实漂移（实测对账）\nCONTEXT.md:13 记 550+ py 文件 → git 跟踪 2573\nREADME.md:1413 记 846 测试文件 → 实 1535\nAGENTS.md:44 记 ChatPipeline 6 步 → 实 8 步\nCONTEXT.md:26 称 17 维分类 → 代码无「17」常量\n实为 auto_classifier 三枚举并集 7+6+4\nagent/README.md 描述 4 个不存在的文件\nREADME.md:1428 命令路径已失效", fillcolor="#e5dbff"];
+
+        R9 [label="R9  架构文档目录分叉\ndocs/01-architecture/(99 跟踪) 与\ndocs/architecture/(44) 同名文件 md5 已不同\ndocs/adr/(16) 与 01-architecture/adr/(14) 并存\n同一依赖图存在 -v2/-v3/-v4/-v5 四份\n→ 无单一可信入口", fillcolor="#e5dbff"];
+
+        R9b [label="R9-衍生  可视化不可重生成\n全仓 .dot/.dsl/.puml/.mmd 命中数 = 0\ndocs/ 下 25 张手写 HTML 图\n→ 历次可视化均为一次性产物，无法 diff", fillcolor="#e5dbff"];
+
+        R13 [label="R13  版本与入口多事实源\npyproject.toml 无 requires-python\n（约束散在 4 处脚本 + CI matrix）\ncheck_and_start.py 为第二套同端口启动器\nbootstrap_evolution_persistence 在\nstart_server.py:67 与 app.py:774 各调一次\n.cnb.yml 镜像 ci.yml", fillcolor="#e5dbff"];
+
+        R6 -> R9 [color="#5f3dc4", style=dotted];
+        R9 -> R9b [color="#5f3dc4", label="同一失因：无源模型"];
+    }
+
+    // ============ 修复优先级链 ============
+    subgraph cluster_Fix {
+        label="建议修复次序（按依赖，非按严重度）";
+        style="rounded"; color="#2b8a3e"; fontsize=13; labeljust=l;
+
+        F1 [label="F1  先止血静默失效\n路由注册 ImportError 升级为启动失败\n或加路由快照断言进 CI\n（否则 F2/F3 无法验证）", fillcolor="#d3f9d8"];
+        F2 [label="F2  消除 R1 根因\nskill_system.py 改名或把包内规范实现上提\n删除 __getattr__ 四层兜底与幽灵模块名\n判据：直接 import 即可拿到 SkillRegistry", fillcolor="#d3f9d8"];
+        F3 [label="F3  闭合成本链路\n把 throttle_if_needed 接入 LLM 调用主路径并使其拦停\n装饰器 ImportError 改为快速失败\n补齐 10 处未覆盖调用点", fillcolor="#d3f9d8"];
+        F4 [label="F4  对齐前后端前缀契约\n统一到 /api/v1，去掉 .catch 静默\napi/computer.ts 回归单一 axios 实例", fillcolor="#d3f9d8"];
+        F5 [label="F5  把 R11 未跟踪核心纳入版本控制\n否则后续所有守卫与图都不可复现", fillcolor="#d3f9d8"];
+        F6 [label="F6  棘轮从 1 个文件扩到 top-10\n并为 129 个重复类名建立收敛台账", fillcolor="#d3f9d8"];
+        F7 [label="F7  文档单一入口 + 本目录文本源\n取代 25 张手写 HTML", fillcolor="#d3f9d8"];
+
+        F1 -> F2 -> F3 -> F4 -> F5 -> F6 -> F7;
+    }
+
+    R2 -> F1 [color="#2b8a3e", style=dashed];
+    R1 -> F2 [color="#2b8a3e", style=dashed];
+    R3 -> F3 [color="#2b8a3e", style=dashed];
+    R7 -> F4 [color="#2b8a3e", style=dashed];
+    R11 -> F5 [color="#2b8a3e", style=dashed];
+    R5 -> F6 [color="#2b8a3e", style=dashed];
+    R4 -> F6 [color="#2b8a3e", style=dashed];
+    R6 -> F7 [color="#2b8a3e", style=dashed];
+    R9 -> F7 [color="#2b8a3e", style=dashed];
+    R12 -> F5 [color="#2b8a3e", style=dashed, label="先入库再谈实现"];
+    R10 -> F5 [color="#2b8a3e", style=dashed];
+}
