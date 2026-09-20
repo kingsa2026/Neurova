@@ -390,9 +390,9 @@ NeurUI/src-tauri/installer-wpf/bin/installer-shell.exe
 .jwt_secret
 .agents/
 
-/scripts/import_kai_to_neurova.py
-/tests/unit/migration/
-# 记忆迁移操作产物（本地工具，不入库）
+# 一次性迁移工具的操作产物（渲染核对截图，可再生，不入库）
+# 工具本体 scripts/import_kai_to_neurova.py 与它的回归 tests/unit/migration/ 已入库：
+# 私有方言来源（记忆库/快照/笔记）只有它管，产品入口是 scripts/ingest_memory.py。
 /docs/05-reports/kai-import-render-verify-*.png
 agent_workspaces/kai/
 
