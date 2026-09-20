@@ -575,6 +575,44 @@ class KnowledgeFactStore:
             ).fetchone()
         return self._hydrate(row) if row else None
 
+    def activeNarrativeFact(
+        self, agentId: str, knowledgeId: str, contentKey: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """条目 → 当前治理行。内容键与客体一起认，两种立身方式都能查到。
+
+        传内容键时只认内容键/客体——同内容即同一知识，两条正文相同的条目共享一行；
+        不传时按"这个条目当前主张的是什么"回退，客体或溯源前缀（`entry:` 与回填的
+        `legacy:`）任一命中都算。两种口径分开，是为了让投影分得清"已对齐"与"待改写"。
+        """
+        clauses = ["agent_id = ?", "record_kind = 'narrative'", "status = 'active'"]
+        params: List[Any] = [agentId]
+        if contentKey:
+            # 给了内容键就必须按内容键认：旧说法也带着同一个条目的 source_turn_id，
+            # 允许它靠溯源回退命中，投影就会把"还没改写"当成"已经对齐"。
+            clauses.append("(content_key = ? OR object_term = ?)")
+            params += [contentKey, contentKey]
+        else:
+            clauses.append("(object_term = ? OR source_turn_id IN ('entry:' || ?, 'legacy:' || ?))")
+            params += [knowledgeId, knowledgeId, knowledgeId]
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM knowledge_facts WHERE %s ORDER BY recorded_at, fact_id LIMIT 1"
+                % " AND ".join(clauses), params,
+            ).fetchone()
+        return self._hydrate(row) if row else None
+
+    def activeNarrativeFacts(self, agentId: Optional[str] = None) -> List[Dict[str, Any]]:
+        sql = ("SELECT * FROM knowledge_facts WHERE record_kind = 'narrative'"
+               " AND status = 'active'")
+        params: List[Any] = []
+        if agentId:
+            sql += " AND agent_id = ?"
+            params.append(agentId)
+        sql += " ORDER BY recorded_at, fact_id"
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [self._hydrate(r) for r in rows]
+
     # ── 溯源层 ────────────────────────────────────────────────
 
     def insertActivity(

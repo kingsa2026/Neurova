@@ -85,8 +85,16 @@ class TestNarrativeRecordShape:
         assert fact["content_key"] == normalized_key(_BODY)
         assert fact["predicate_term_id"] == NARRATIVE_PREDICATE
         assert fact["relation_kind"] == "document"
-        assert fact["object_term"] == "k-1"
+        # 有内容身份的叙述行以内容键立身：条目 id 编辑前后不变，拿它当客体
+        # 就会让每次正文改写被三元组唯一索引吞回同一行，旧说法永不退场。
+        assert fact["object_term"] == normalized_key(_BODY)
         assert fact["record_kind"] == "narrative"
+
+    def test_EntryWithoutContentIdentityKeepsItsOwnKey(self, store, gate):
+        """纯标点正文没有内容身份——这种条目仍以 knowledge_id 立身，否则客体为空。"""
+        receipt = gate.admit(_narrative("k-punct", content="!!!"), allowPendingSegments=True)
+        assert store.fact(receipt.factId)["object_term"] == "k-punct"
+        assert store.fact(receipt.factId)["content_key"] is None
 
     def test_PredicateIsNotCallersToInvent(self, store, gate):
         """叙述记录的谓词由咽喉固定；调用方自带一个就是拿治理身份当自由文本。"""
