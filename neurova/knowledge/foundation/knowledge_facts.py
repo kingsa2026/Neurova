@@ -195,8 +195,10 @@ class KnowledgeFactStore:
         self._lock = threading.RLock()
         self._ensureSchema()
         from ..ontology.derivation_ledger import DerivationLedger
+        from .digest_chain import ActivityDigestChain
 
         self._derivationLedger = DerivationLedger(self)
+        self._digestChain = ActivityDigestChain(self)
 
     def _ensureSchema(self) -> None:
         with self._lock:
@@ -705,15 +707,26 @@ class KnowledgeFactStore:
         self._requireFact(factId)
         assertionId = "asrt_%s" % uuid.uuid4().hex[:12]
         with self._lock, self._conn:
+            slot = self._digestChain.nextSlot(self._conn, activityId)
+            item = {"assertion_id": assertionId, "fact_id": factId,
+                    "actor_type": actorType, "actor_id": actorId,
+                    "activity_id": activityId or "", "medium_ref": mediumRef,
+                    "statement_hash": statementHash,
+                    "seq": (slot or {}).get("seq", 0),
+                    "prev_digest": (slot or {}).get("prevDigest", "")}
+            digest = "" if slot is None else self._digestChain.digestFor(item)
             cur = self._conn.execute(
                 "INSERT OR IGNORE INTO knowledge_assertions (assertion_id, fact_id, actor_type,"
                 " actor_id, activity_id, medium_ref, statement_text, statement_hash, asserted_at,"
-                " weight) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                " weight, seq, digest, prev_digest) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (assertionId, factId, actorType, actorId, activityId, mediumRef,
-                 statementText, statementHash, _now(), weight),
+                 statementText, statementHash, _now(), weight,
+                 item["seq"], digest, item["prev_digest"]),
             )
             if not cur.rowcount:
                 return None
+            if slot is not None:
+                self._digestChain.commit(self._conn, str(activityId), slot["seq"], digest)
             self._conn.execute(
                 "UPDATE knowledge_facts SET assertion_count = assertion_count + 1 WHERE fact_id = ?",
                 (factId,),

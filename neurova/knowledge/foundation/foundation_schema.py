@@ -21,6 +21,7 @@ from .knowledge_facts import (
     _SCHEMA_V3,
     _SCHEMA_V5,
 )
+from .digest_chain import _SCHEMA_V11
 from ..ontology.derivation_ledger import _SCHEMA_V10
 from ..ontology.rule_engine import _SCHEMA_V9
 from ..ontology.term_registry import _SCHEMA_V8
@@ -37,6 +38,7 @@ _STEPS: List[tuple] = [
     (8, _SCHEMA_V8),
     (9, _SCHEMA_V9),
     (10, _SCHEMA_V10),
+    (11, _SCHEMA_V11),
 ]
 
 _registered = False
