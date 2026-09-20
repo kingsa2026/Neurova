@@ -23,10 +23,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.knowledge.foundation.storage_fence import (
+    PRODUCTION_STORAGE_DIR,
+    assertNotUnderProductionStorage,
+)
 
 logger = get_logger(__name__)
 
-DEFAULT_STORAGE_DIR = "./data/knowledge"
+# 生产目录只有 storage_fence 一处定义；向量缓存与条目库同目录，测试同样不许写真文件。
+DEFAULT_STORAGE_DIR = PRODUCTION_STORAGE_DIR
 _SENTINEL_DEFAULT = "__default__"
 
 
@@ -68,6 +73,7 @@ class KnowledgeVectorIndex:
     """按用户分文件的持久化向量索引（visible_items 视图镜像）。"""
 
     def __init__(self, storage_dir: str, engine: Any = _SENTINEL_DEFAULT) -> None:
+        assertNotUnderProductionStorage(storage_dir, "知识向量缓存")
         self.storage_dir = str(storage_dir)
         self._dir = Path(storage_dir)
         self._dir.mkdir(parents=True, exist_ok=True)

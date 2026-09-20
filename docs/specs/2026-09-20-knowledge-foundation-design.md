@@ -257,6 +257,8 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 | `neurova/knowledge/foundation/redundancy.py` | `RedundancyAudit`（只读冗余审计，004） |
 | `neurova/knowledge/foundation/narratives.py` | `NarrativeStore`（叙述层入库，019a） |
 | `neurova/knowledge/foundation/foundation_schema.py` | 本域迁移链单主（版本域=库文件=一条注册序） |
+| `neurova/knowledge/foundation/entry_ledger.py` | `EntryLedger`（条目↔治理层投影账本，019b-2） |
+| `neurova/knowledge/foundation/storage_fence.py` | 生产目录单主 + pytest 会话围栏（001 立，019b-4b 收全四个写入面） |
 | `neurova/knowledge/identity/entity_blocking.py` | `EntityBlockingResolver` |
 | `neurova/knowledge/identity/similarity_fusion.py` | `SimilarityFusion` |
 | `neurova/knowledge/identity/identity_merger.py` | `IdentityMerger` |
@@ -269,12 +271,19 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 
 既有约束不变：深度模块经 `agent_ref` 访问 Agent；`get_*()` / `reset_*()` 成对工厂；`threading.RLock` 保护共享态；可选依赖惰性 import；LLM 调用必须走 `track_llm_call` 与 `LLMRouter`。
 
-**开关台账**（全部默认关＝旧行为；开哪一个都是可逆动作）
+**开关台账**（开闸即搬家、关闸即回退；除标注外默认关＝旧行为）
 
 | 环境变量 | 作用 | 默认 | 现状 |
 |---|---|---|---|
 | `NEUROVA_KB_FACT_SURFACE` | 011：检索时并入底座事实池（时效/置信排序项） | 关 | **判负保持关**（§8.0） |
-| `NEUROVA_KB_NARRATIVE_STORE` | 019a/019b-2：条目权威换到底座库，且装载即把治理层对齐 | 关 | 开闸即一次性搬家、归档旧主文件、补投叙述事实并归正 confidence |
+| `NEUROVA_KB_NARRATIVE_STORE` | 019a/019b-2：条目权威换到底座库，且装载即把治理层对齐 | **开**（019b-4b 翻向） | 默认即底座库；只有显式 `off/0/false/no/json` 才回 JSON 旧路。回退前先按下方"搬家是单向可逆"的步骤走 |
+
+**搬家是单向可逆的**：开闸首次装载会把 `knowledge.json` 导入 `knowledge_narratives` 并把旧主文件
+改名归档（`.pre-narrative-store-<UTC>`），归档保证只搬一次——删空条目后重启不会拿旧快照把已删项复活。
+因此关闸（`off`）在搬家之后**不会**静默回到 JSON 权威，而是 `RuntimeError` 指名两条路：
+要么保持新后端，要么把归档文件改回 `knowledge.json` 并清空叙述面三张表。
+归档动作挂在**构造**上（`KnowledgeRepository.__init__` → `_load`），不是挂在首次写上面——
+这决定了测试围栏必须守构造而不是只守 `_save`，见 §11.5 的 019b-4b 事故登记。
 
 两个开关共用同一底座库 `data/knowledge/knowledge_facts.db`（迁移域 `knowledge_foundation`，
 当前链尾 v7）。评测层单独建库，不与被测对象共用存储。
@@ -288,7 +297,7 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 1. **归一化** `normalize()`：复用 `neurova/core/content_identity.py` 的 `normalized_key:27` / `normalized_payload_key:50`（CJK 2-gram + NFKC），产出**抽取后内容**的身份键并写入 `content_key`。口径从"原始字节 / URL 串"换成内容，直接补掉 B03 的根因位：同一文档换格式重传、同一 URL 带不同 query 串、同一内容经不同入口进来，一律命中同一键。
 2. **身份消解** `resolve()`：`EntityBlockingResolver`（G05，确定性、零 LLM）→ 得 `subject_key`；置信不足落人工队列（复用 `resolution.py:247` 的 `list_human_reviews` / `resolve_human` 通路）。
 3. **类型与规则裁决** `adjudicate()`：先 `OntologyValidationReport` 校验，再 `ForwardChainingEngine` 求值；推导事实在本段落库，因此后续冲突检测能看到推导结果（不后置于冲突，否则冲突永不涉及推导事实）。
-4. **冲突判定** `conflict()`：在同一 `subject_key + predicate_term_id` 上聚合新旧事实判三值——`duplicate` / `contradicts` / `novel`。第 1 段拦住可判定的重复，本段负责把漏网的重复与真分歧**显式成账**：`duplicate` 不再被"不算冲突"打发（`repository.py:1132`），而是产出可计量的账目并进 §8 的重复率读数。
+4. **冲突判定** `conflict()`：在同一 `subject_key + predicate_term_id` 上聚合新旧事实判三值——`duplicate` / `contradicts` / `novel`。第 1 段拦住可判定的重复，本段负责把漏网的重复与真分歧**显式成账**：`duplicate` 不再被"不算冲突"打发（`repository.py:1132`），而是产出可计量的账目并进 §8 的重复率读数。**叙述记录另按条目划范围**（019b-4b 由真数据取证补上）：分歧的前提是"两条说法在说同一件事"，条目正文的那件事是这一条条目，不是它的标题——`documented_as` 基数不限，三条同名条目是三份文档。按三元组口径裁决会把活着条目的治理行判成 superseded（实测 5 行 / 10 条目投影永不收敛）。同一条目改正文仍走本段，新说法取代旧说法。
 5. **可信度与使用记账** `record()`：`confidence` 由断言聚合得出——`assertion_count` 同值互证计数、`source_turn_id` 时间戳、`contradicted_by_json` 矛盾标记；`policy_basis` 缺失即记 `unevidenced`，禁止写自动裁决。**本定义不等于真值度量**，它只回答"该来源历史采纳后的结果分布"。
 6. **血缘与链式记账** `digest()`：写断言、活动、链头（G01、G02）。
 7. **入索引**：narrative/chunks/facts 三路进各自索引，图谱投影只作派生视图，不作权威源。
@@ -422,7 +431,7 @@ case 集与基线摘要已导出入库：`tests/fixtures/knowledge_eval_cases.js
 
 | 阶段 | 内容 | 出口判据 |
 |---|---|---|
-| **E0 前置** | ~~修测试隔离~~ 已由 001 改判：无活跃污染源，改为在 `repository.py` 立**测试会话写入围栏**（防未来污染）+ 登记 §11.5 预存失败；冻结 §8 基线 | 全仓测试跑完后 `data/knowledge/knowledge.json` 哈希不变（001 实测已成立）；围栏守卫测试可红可绿；评测基线落库 |
+| **E0 前置** | ~~修测试隔离~~ 已由 001 改判：无活跃污染源，改为在 `repository.py` 立**测试会话写入围栏**（防未来污染）+ 登记 §11.5 预存失败；冻结 §8 基线 | 全仓测试跑完后生产目录读数不变（001 实测时该读数就是 `knowledge.json` 哈希；019b-4b 默认翻向后改为**底座库叙述面 + 归档件**两者不变，围栏必须守构造而非只守 `_save`）；围栏守卫测试可红可绿；评测基线落库 |
 | **E1 立骨** | 底座表分票落地（身份/事实/溯源/治理 + 评测层独立库）；`admit()` 咽喉接通段 1/2/4/5/6；条目库暂未降级（双写面见下） | **已达成（015 实测）**：旧库 130 行 → 预测 92 事实 = 实跑 92，主体 87 = 87，差异为空；38 行纯冗余 / 19 组 / 3 个 agent 域 |
 | **E2 切读** | 检索链逐 retriever 从旧库改指底座；§7 排序项与图检索器接入；G07 回写通路；G04 策略账 | §8 读数相对基线不降；关闸后与基线逐条一致；B01/B04/B05 转绿 |
 | **E3 收缩** | 删除三套冲突实现中的两份、`repository.py` 旁挂账本与旁路写、`extract_facts_from_memory`/`sync_memory_to_tkg` 死码；`NodeType/RelationType` Enum 退役为初始条目 | 净 LOC 显著下降；无残留调用方（grep 证明） |
@@ -440,7 +449,7 @@ case 集与基线摘要已导出入库：`tests/fixtures/knowledge_eval_cases.js
 | R2 | 与 `agent_core` 拆分抢同一段装配代码 | §9 串行约束；E2 前确认 Phase 2–4 落地状态 |
 | R3 | E1 backfill 把 38 行纯冗余显式化，冲突/重复待审队列骤增 | 属预期；队列增长写进 E1 验收读数，不当故障处理 |
 | R4 | 自动抽取引 LLM 成本 | 抽取只在异步 worker（`ingest_worker.py:21`）跑，不阻塞对话轮；必须经 `track_llm_call` + `LLMRouter` |
-| R5 | 测试夹具持续污染生产库，使评测基线漂移 | E0 为硬前置，不修不开工 |
+| R5 | 测试夹具持续污染生产库，使评测基线漂移 | E0 为硬前置，不修不开工。019b-4b 后污染面变大（构造即搬家），围栏相应上移到构造函数；代价是"测试里只读生产目录"也不再可行，这是有意的 |
 | R6 | 完全自研本体与推理造成大块新代码，违背"简单优先" | 明确不做清单：SPARQL 文本查询、OWL DL 完整语义、外部服务后端、双写多模存储；规则形状固定为 Datalog 单形态 |
 
 ---
@@ -530,6 +539,14 @@ api 域只认"已登记的 15 例不新增"，那族在途文件不计入本批�
 加 `--ignore=tests/unit/neurflow` 后可跑完。归因未做（属 neurflow 在途面），
 E2 出口判据要求：**要么该用例修好，要么给出可控的超时口径**，否则任何全仓验证都是假绿。
 
+**019b-4b 期间再登记两个全仓阻断点（本批未触碰这两处代码，归因未做）**：
+`tests/unit/embedding/test_onnx_onnx_path_thread_safety.py::test_concurrent_encode_batch_updates_stats_atomically_onnx_backend`
+单独跑 2.67s 通过，全仓跑挂到超时并杀会话；
+`tests/unit/test_start_script*.py` 一族里有一条真的走到 `start.py:restart_services →
+_open_chat_browser → webbrowser.open`（该函数在别的用例里被 patch 掉，这条没有），
+在 Windows 上卡在 `shutil.which` 的枚举里直到超时。两者都属"跑不出汇总"而不是"有一个失败"，
+所以全仓口径必须逐条 `--deselect` 或 `--ignore`；本批因此以窄口径为准（见本节末与 §11.6）。
+
 ### 11.6 实施进度快照（E0/E1 完成、E2 判据改序、E3 提前落刀）
 
 | 工单 | 状态 | 证据 |
@@ -552,9 +569,11 @@ E2 出口判据要求：**要么该用例修好，要么给出可控的超时口
 | 019b-2c 墓碑收编进底座库 | 完成 | 9 用例；v6 建 knowledge_tombstones；两个边界换后端，12 个调用点零改动 |
 | 019b-3 读面合一为富化 | 完成 | 6 用例；排序零改动接上治理字段与注入回流；代际方案试过并撤回 |
 | 019b-1 记录种类进咽喉 | 完成 | 14 用例 + 真数据三方同数（92/87 一字未动）；底座库 6.26MB→4.24MB |
-| 019b-2/3 条目写路径转调与读面合一 | 未开工 || 012 / 013 / 014 / 016 / 017 / 018 / E4 | 未开工 | 011 否证后落点改变，见工单索引"进度" |
+| 019b-4b JSON 条目路径退役 | 完成（生产已搬家） | 默认翻向底座库；围栏守构造并收全四个写入面（`storage_fence`）；叙述冲突按条目划范围；生产 130/92/87 分叉 0，基线两侧同 0.855489/0.83/0.1 |
+| 012 / 013 / 014 / 016 / 017 / 018 / E4 | 未开工 | 011 否证后落点改变，见工单索引"进度" |
 
-`tests/unit/knowledge/` 530 passed（起点基线 265）。
+`tests/unit/knowledge/` 543 passed（起点基线 265）。019b-4b 的爆炸半径口径：
+条目 / 向量 / 评测 / api 消费方一起跑 488 passed、46 skipped、0 failed。
 副作用已量过：`tests/unit` 在放宽前后收集到同样 15678 条用例（差集为空），
 所以 `python_functions` 加 `test[A-Z]*` 不改变任何现有用例的运行与否，只是防未来再踩。
 
@@ -564,6 +583,41 @@ E2 出口判据要求：**要么该用例修好，要么给出可控的超时口
 并把 `knowledge_narratives` 纳入必查表集。新增 §5 第四条硬约束（咽喉必须是唯一装配点）与
 常驻判据 `test_gate_wiring_parity.py`（6 例）。生产回填产物已在统一装配下重跑并留档
 `.pre-20260920-gateparity`；`data/knowledge/knowledge.json` 哈希 `e0ea2a4524e7` 全程未变。
+
+### 11.7 本批自伤事故登记（019b-4b，2026-09-20 晚，本批引起）
+
+**事实**：`tests/unit/knowledge/test_default_storage_write_fence.py::test_fenceIsWhatStopsTheWrite`
+为证明"围栏是唯一拦阻者"，把 `PYTEST_CURRENT_TEST` / `PYTEST_VERSION` 清掉后指向**真生产目录**。
+默认值一翻向底座库（同一切片内），这条用例就在测试会话里跑了真的一次性搬家。
+
+**证据链**（不是推测）：
+- 归档时刻与用例窗口重合：`knowledge.json.pre-narrative-store-2026-09-20T095630001368+0000`、
+  `knowledge_conflicts.json.pre-narrative-store-2026-09-20T095630564987+0000`；
+- 隔离库 `knowledge_facts.db.polluted-20260920T1005` 的 `knowledge_narratives` 是 **131 行** =
+  130 行真数据（`default` 104 / `kai` 24 / `ag` 2）+ 1 行
+  `agent_id='guard-probe', knowledge_id='k1', title='t'`，与那条用例 `_withItem()` 探针逐字同名；
+- 治理面同步长成 93 事实 / 88 主体，比 015 基线 92 / 87 各多 1，多的正是探针那一行。
+
+**处置**：污染库改名留证未删；`knowledge.json` 与 `knowledge_conflicts.json` 从归档改回，
+哈希回到登记值 `e0ea2a4524e7`（130 条）；生产库删除后按设计重放一次搬家；
+用例改成指向 `tmp_path` 下的假生产目录，证明力不减。
+
+**根因不在"忘了加守卫"，在守卫的边界与权威的位置不再重合**：围栏是 pytest-only 的，
+它挡不住"用例自己把标记摘掉"的用法；而 019b-4b 之后**读路径本身就是写路径**（构造即搬家），
+所以"摘掉标记去证明拦阻者"这个动作在 JSON 时代无害、在底座库时代就是真写。
+修法因此是两条：围栏上移到构造（§4 开关台账），以及把"清标记的用例只准指向假生产目录"
+钉成该测试文件的抬头铁律 + 一条专名反向判据（`test_readPathCutoverIsRealAndUnfencedOutsidePytest`）。
+
+同一次翻向顺带挖出两处根因，细节与判据都在 `tickets/019b4b-JSON路径退役默认翻向.md`：
+
+- **围栏只守对象、路径却抄了四份**：`data/knowledge` 在条目仓库 / 事实底座 / 评测账本 /
+  向量索引各抄一份，于是守住仓库之后 `get_knowledge_fact_store()` 的默认路径照样在
+  生产目录里建出底座库。修法是新建 `foundation/storage_fence.py` 同时拥有"生产目录是谁"
+  与"pytest 内不许碰它"，四个模块一律派生，判据扩成"目录本身或其中任何文件"，
+  并留一条"路径只准有一份"的常驻判据防第五份被抄出来。
+- **条目正文之间按三元组口径互相取代**：见 §5 段4 补的"叙述记录按条目划范围"。
+  真数据读数：搬家后 5 行叙述被裁决成 superseded、10 条条目投影分叉且不收敛；
+  修完 92 行全 active、分叉 0，plan/reconcile/backfill 仍三方同数 92 / 87。
 
 ---
 

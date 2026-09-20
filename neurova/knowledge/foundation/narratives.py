@@ -23,6 +23,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
+from .storage_fence import assertNotUnderProductionStorage
+
 
 NARRATIVE_DOMAIN = "knowledge_foundation"
 FOUNDATION_DB_NAME = "knowledge_facts.db"
@@ -59,6 +61,9 @@ class NarrativeStore:
     def __init__(self, db_path: str) -> None:
         if not db_path:
             raise ValueError("NarrativeStore 需显式传入 db_path，不给默认值")
+        # 本类是惰性的（首次 _conn 才落文件），围栏仍放在构造处：路径是这一刻定下的，
+        # 等到写盘才拦就等于让调用方以为拿到了一个可用的库。
+        assertNotUnderProductionStorage(db_path, "叙述层底座库")
         self._db_path = db_path
 
     @contextmanager
