@@ -7,9 +7,25 @@ Pytest 配置和共享 fixtures
 import pytest
 import sys
 import os
+import tempfile
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# MoE 索引状态目录——会话级兜底。per-test fixture 用 monkeypatch 指向 tmp_path，
+# 但那一刻之后仍有写盘：daemon 索引线程可能拖到 monkeypatch 撤销后才落盘，
+# 起子进程的测试也不一定带上这个变量。实测（2026-09-19）全量 tests/unit 期间
+# 4 个真实 workspace 键就被写回仓库 data/。这里在导入期把默认值钉进会话临时
+# 目录，两种迟到写都落在临时区，且随子进程 env 继承下去。
+MOE_STATE_SESSION_DIR = Path(tempfile.mkdtemp(prefix="neurovaMoeState-"))
+os.environ.setdefault("NEUROVA_MOE_INDEX_STATE_DIR", str(MOE_STATE_SESSION_DIR))
+
+
+@pytest.fixture(scope="session")
+def moe_state_session_dir() -> Path:
+    """会话级 MoE 状态目录（供断言兜底层生效）"""
+    return MOE_STATE_SESSION_DIR
 
 
 @pytest.fixture(autouse=True)
@@ -95,6 +111,18 @@ def _isolate_skill_service_storage(tmp_path, monkeypatch):
         return original(self, agent_id, skills_dir if skills_dir is not None else str(directory))
 
     monkeypatch.setattr(SkillService, "__init__", isolated)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_moe_index_state_dir(tmp_path, monkeypatch):
+    """MoE 索引状态目录隔离（防仓库 data/ 泄漏）。
+
+    状态文件名是 md5(agent_id:persist_db_path)，测试的 tmp_path 工作区每用例给
+    一个新键、每次 pytest 运行再换一层基目录，落到仓库 data/ 就是不可回收的
+    一次性文件。指向 tmp_path 后随测试临时目录一并清理。
+    """
+    monkeypatch.setenv("NEUROVA_MOE_INDEX_STATE_DIR", str(tmp_path / "moeIndexState"))
+
 
 
 @pytest.fixture
