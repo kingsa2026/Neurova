@@ -40,7 +40,11 @@ def test_zero_window_records_and_analyzes_normally():
     assert result["metrics"]["mean_gain"] == 0.01
 
 
-def test_invalid_window_is_worth_continuing_safe():
+def test_invalid_window_analyze_convergence_safe():
     analyzer = ConvergenceAnalyzer(window_size=0)
-    # 空历史下不崩（旧代码 ZeroDivisionError 路径的同源消费方）
-    assert analyzer.is_worth_continuing() is False
+    # 空历史下不崩（旧代码 ZeroDivisionError 路径的同源消费方）。
+    # 工单 017 B 项删掉了零生产调用方的 `is_worth_continuing`，
+    # 这条守护因此改钉在活着的消费方 `analyze_convergence` 上 —— 属性未放宽，
+    # 只是从"没人调的那道门"挪到"每轮真的会走的那道门"。
+    result = analyzer.analyze_convergence()
+    assert result["status"] in ("insufficient_data", "measurement_blind"), result

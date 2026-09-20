@@ -126,8 +126,8 @@ def test_apply_optimization_refuses_placeholder_system(rsi_probe_factory, null_s
     applied = manager.apply_optimization("sleep.similarity_threshold", 0.5)
 
     assert applied is False, "占位系统上的参数写入不得回执成功"
-    assert manager._systems["sleep"].similarity_threshold == 0.8, (
-        "被拒的写入不得改动占位对象的状态")
+    assert not hasattr(manager._systems["sleep"], "similarity_threshold"), (
+        "被拒的写入不得改动占位对象的状态（工单 017 A 后占位镜像已删，写入被拒即属性不被创造）")
 
 
 def test_real_system_still_optimizable_beside_a_placeholder(rsi_probe_factory,
@@ -222,11 +222,15 @@ def test_placeholder_system_is_absent_from_the_escalation_channel(rsi_probe_fact
                   "verdict": GateVerdict.unevidenced("sleep 是占位替身").to_dict()},
     }
 
-    proposals = probe.orchestrator._escalate_to_proposer_if_needed(
+    # 工单 009 把返回形态从裸 List[str]  widening 成 {verdict, proposals, skipped}：
+    # 断言不减，另加严一条——被挡下的替身系统必须点名，不得静默
+    outcome = probe.orchestrator._escalate_to_proposer_if_needed(
         {"status": "diverging", "metrics": {"trend_slope": -0.1}}, signals
     )
 
-    assert proposals == [], f"替身系统被升级成人工提案了：{proposals}"
+    assert outcome["proposals"] == [], f"替身系统被升级成人工提案了：{outcome}"
+    assert [s["system"] for s in outcome["skipped"]] == ["sleep"], outcome
+    assert "占位替身" in outcome["skipped"][0]["reason"], outcome
 
 
 def test_placeholder_marker_requires_explicit_true(rsi_probe_factory):

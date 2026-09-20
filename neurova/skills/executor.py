@@ -94,12 +94,11 @@ class ExecutorBackedSkill:
     设计要点（规避项目内的模块遮蔽 bug）：
     - neurova/skill_system 同时存在「包」与「文件」两份定义，import 解析到
       包 __init__.py，而该 __init__ 在 from skill_pool_manager import Skill
-      失败后会回退为一个**占位 Skill**（仅有 name/description，缺少
-      add_event_handler / execute），导致继承该占位类的适配器在
-      SkillRegistry.register() 调用 skill.add_event_handler() 时抛 AttributeError。
+      失败后会回退为一个**占位 Skill**（仅有 name/description，缺少 execute），
+      继承该占位类的适配器因此在 register()/execute 上抛 AttributeError。
     - 因此本适配器**不继承**被遮蔽的占位 Skill，而是自包含实现
-      SkillRegistry 实际依赖的接口：name、add_event_handler、get_info、
-      异步 execute。这样无论 Skill 基类如何被遮蔽都能正常注册与执行。
+      SkillRegistry 实际依赖的接口：name、get_info、异步 execute。
+      这样无论 Skill 基类如何被遮蔽都能正常注册与执行。
 
     - execute() 在线程池中运行同步 executor，避免阻塞事件循环；
     - 将 executor.SkillResult(output=...) 转换为 _SkillResult(data=...)。
@@ -110,10 +109,6 @@ class ExecutorBackedSkill:
         self.name = executor.skill_id
         self.description = executor.skill_name
         self.status = "active"
-        self._event_handlers: List[Callable] = []
-
-    def add_event_handler(self, handler: Callable) -> None:
-        self._event_handlers.append(handler)
 
     def get_info(self) -> _SkillInfo:
         return _SkillInfo(

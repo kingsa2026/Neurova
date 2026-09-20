@@ -322,7 +322,13 @@ async def test_pipeline_interruption_records_failure(tmp_path, monkeypatch, stag
         cg.flush_task(service, "report", False)
 
 
-def test_parameter_identity_and_unknown_sequence_matching(tmp_path):
+def test_parameter_identity_drives_name_and_similarity(tmp_path):
+    """参数进出结构身份：换序/换参都要产不同名字、不同相似度。
+
+    本用例原有第三行断言 `_calculate_match_score(...) == 0`（未知序列得分 0）。
+    那套关键词打分只服务 `find_skills_for_context`，而它生产零调用方、
+    已随工单 017 B 项删除，故连带删掉这一行断言，用例改名为它真正守护的东西。
+    """
     from neurova.evolution.skill_encapsulation import AutoSkillBuilder, ToolPattern, SkillTemplate
     builder = AutoSkillBuilder()
     first = ToolPattern(pattern_id="one", tool_sequence=STEPS)
@@ -334,7 +340,6 @@ def test_parameter_identity_and_unknown_sequence_matching(tmp_path):
     template = SkillTemplate(tool_sequence=STEPS)
     assert builder._pattern_skill_similarity(first, template) == 1
     assert builder._pattern_skill_similarity(changed, template) == 0
-    assert builder._calculate_match_score(SkillTemplate(tool_sequence=["a", "b"]), [], ["x", "y"]) == 0
 
 
 def test_review_state_survives_restart_and_duplicate_publish(tmp_path, monkeypatch):

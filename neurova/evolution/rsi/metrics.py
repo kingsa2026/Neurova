@@ -66,22 +66,13 @@ class RSIMetrics:
     }
 
     def __init__(self):
-        """初始化 RSI 监控指标管理器"""
-        self._metrics: Dict[str, float] = {}
+        """初始化 RSI 监控指标管理器
 
-        # 初始化所有指标为 0
-        self._metrics[self.RSI_CYCLES_TOTAL] = 0
-        self._metrics[self.RSI_IMPROVEMENT_RATE] = 0
-        self._metrics[self.RSI_CONVERGENCE_ROI] = 0
-        self._metrics[self.RSI_ROLLBACK_COUNT] = 0
-        self._metrics[self.RSI_CANDIDATES_GENERATED] = 0
-        self._metrics[self.RSI_CANDIDATES_PRUNED] = 0
-        self._metrics[self.RSI_GATE_FAILURES] = 0
-        self._metrics[self.EXPERIENCE_ROWS] = 0
-        self._metrics[self.EXPERIENCE_UNEVIDENCED_RATIO] = 0.0
-        self._metrics[self.EXPERIENCE_HIT_RATE] = 0.0
-        self._metrics[self.EXPERIENCE_ADOPTION_SUCCESS_RATE] = 0.0
-        self._metrics[self.EXPERIENCE_ADOPTION_DECISIONS] = 0
+        刻意**不**预置任何键为 0：缺席与"读数为 0"是两件事（工单 012 立的禁止令，
+        工单 017 把 `__init__` 里剩下的那份预置也删掉）。读侧要区分二者，
+        用 `get_metric()` 返回 None 即可。
+        """
+        self._metrics: Dict[str, float] = {}
 
         logger.info("RSIMetrics initialized")
 

@@ -73,16 +73,25 @@ def test_no_literal_gate_remains_in_the_crystallizer():
     assert not offenders, f"结晶路径仍写字面量门槛: {offenders}"
 
 
-def test_placeholder_mirror_agrees_with_the_setpoint():
-    """值冲突收口：`agent_core.py:390` 曾写 0.7，而 setpoint 是 0.6。
+def test_placeholder_carries_no_parameter_mirror():
+    """占位替身不得再携带任何参数镜像值（工单 017 A 项）。
 
-    占位替身不供参数面（工单 018），但镜像值不一致会被读成"另有真相"。
+    原用例 `test_placeholder_mirror_agrees_with_the_setpoint` 钉的是"镜像值要和
+    setpoint 一致"——那等于承认可以有第四份定义，只是要求它别漂。
+    工单 018 已让占位系统在源头返回空参数列表（`_NullSystem` 的镜像属性自此零读取方），
+    所以断言升成更强的那条：**根本不允许有镜像**。多一处拷贝就多一次漂移机会，
+    而"一致"永远需要人（或测试）去追。
     """
     from neurova.agent_core import _NullSystem
-    from neurova.evolution.rsi.system_performance import SYSTEM_SETPOINTS
+    from neurova.evolution.rsi.integration_manager import RSIIntegrationManager
 
-    setpoint = SYSTEM_SETPOINTS["experience"]["crystallize_min_success_rate"]
-
-    assert _NullSystem.crystallize_min_success_rate == setpoint, (
-        f"占位镜像 0.7 与 setpoint {setpoint} 不一致")
-    assert _NullSystem.crystallize_min_observations == 3
+    mirrored = {
+        name
+        for params in RSIIntegrationManager.OPTIMIZABLE_PARAMETERS.values()
+        for name in (p["name"] for p in params)
+        if name in vars(_NullSystem)
+    }
+    assert not mirrored, f"占位替身仍携带参数镜像：{sorted(mirrored)}"
+    # 中性信号桩是它唯一还供的东西（缺席系统只服务 get_feedback/get_status）
+    assert _NullSystem.rsi_placeholder is True
+    assert {"get_feedback", "get_status"} <= set(vars(_NullSystem))
