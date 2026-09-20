@@ -226,25 +226,16 @@ class TestSkillEncapsulation:
         assert skill.tool_sequence == seq
 
     def test_find_skills_for_context(self):
-        """根据上下文查找匹配技能"""
-        from neurova.evolution.skill_encapsulation import (
-            AutoSkillBuilder,
-            SkillTemplate,
-        )
+        """上下文检索技能面已随 `AutoSkillBuilder.find_skills_for_context` 退役（工单 017 B）。
 
-        builder = AutoSkillBuilder(min_occurrences=1)
-        # 手动添加技能
-        skill = SkillTemplate(
-            name="login",
-            tool_sequence=["click", "type", "click"],
-            context_patterns=["登录", "login", "账号"],
-            success_count=10,
-        )
-        builder.skills["login"] = skill
+        该方法是本文件里唯一还引用它的地方，而它自身生产零调用方
+        （`similarity_threshold` 那一套关键词打分从未接进对话链）。
+        留一条断言在此，是为了让这个 skipped 文件里的其余用例不至于被误当成
+        整文件已失效。
+        """
+        from neurova.evolution.skill_encapsulation import AutoSkillBuilder
 
-        matched = builder.find_skills_for_context("请帮我登录系统")
-        assert len(matched) >= 1
-        assert matched[0].name == "login"
+        assert not hasattr(AutoSkillBuilder, "find_skills_for_context")
 
 
 class TestSkillImprover:
