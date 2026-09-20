@@ -128,11 +128,19 @@ class TestRsiApprovalEndpoints:
         import tempfile
         from pathlib import Path
 
+        from neurova.evolution.rsi.deployment_controller import RSIDeploymentController
+        from neurova.evolution.rsi.rollback_manager import RSIRollbackManager
         from neurova.evolution.rsi.self_improvement_proposer import SelfImprovementProposer
 
         # proposer 磁盘持久化（.agents/proposals）——隔离到 tmp 防跨测试泄漏
+        # 工单 005：控制器与回滚管理器必须由调用方注入，proposer 不再自建
         tmp = tempfile.mkdtemp()
-        proposer = SelfImprovementProposer(agents_dir=Path(tmp))
+        proposer = SelfImprovementProposer(
+            agent_id="test-agent",
+            proposals_dir=Path(tmp) / "proposals",
+            deployment_controller=RSIDeploymentController(initial_phase=0),
+            rollback_manager=RSIRollbackManager(),
+        )
         proposal = proposer.propose_skill_manifest(
             skill_id="rsi_escalation_tool_memory_3",
             manifest_yaml="name: fix\n",
@@ -154,10 +162,30 @@ class TestRsiApprovalEndpoints:
         for client in self._client_with_proposer(proposer):
             resp = client.post(
                 f"/api/v1/governance/rsi/proposals/{proposal.proposal_id}/approve",
+                # 工单 010：manifest 里没有可执行内容时，批准人要在请求里补交
+                # tool_sequence —— 否则这条提案按 not_supported 拒绝（409）
+                json={
+                    "approved_by": "admin",
+                    "tool_sequence": ["read_memory", "write_memory"],
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            data = resp.json()["data"]
+            assert data["applied"] is True
+            assert data["applied_skill_id"] == "rsi_escalation_tool_memory_3"
+            assert data["registry_hit"] is True, "端点报生效但注册表没命中"
+
+    def test_approve_without_executable_content_is_rejected(self):
+        """not_supported 必须走 409，不能被端点咽成"批准成功"（工单 010）。"""
+        proposer, proposal = self._make_proposer_with_pending()
+        for client in self._client_with_proposer(proposer):
+            resp = client.post(
+                f"/api/v1/governance/rsi/proposals/{proposal.proposal_id}/approve",
                 json={"approved_by": "admin"},
             )
-            assert resp.status_code == 200
-            assert resp.json()["data"]["applied"] is True
+            assert resp.status_code == 409, resp.text
+            assert "not_supported" in resp.json()["detail"], resp.text
+            assert proposer.list_pending_proposals(), "被拒绝的提案不该从待审队列消失"
 
     def test_reject_proposal(self):
         proposer, proposal = self._make_proposer_with_pending()
@@ -179,7 +207,12 @@ class TestRsiApprovalEndpoints:
             )
             assert resp.status_code == 404
 
-    def test_rsi_not_initialized_returns_empty(self):
+    def test_rsi_not_initialized_returns_503(self):
+        """工单 011 改写本用例：`available:false` 的静默 200 把"没装配"读成"一切正常"。
+
+        原断言是 200 + 空列表 + `available:false`；现在"没装配"必须是 503 + 原因，
+        因为运维对这两种情形的处置完全相反（去装配 / 去看为什么没产出）。
+        """
         from unittest.mock import patch
 
         from fastapi import FastAPI
@@ -194,5 +227,5 @@ class TestRsiApprovalEndpoints:
         with patch("neurova.api.endpoints.governance._get_rsi_orchestrator", return_value=None):
             client = TestClient(app)
             resp = client.get("/api/v1/governance/rsi/proposals/pending")
-            assert resp.status_code == 200
-            assert resp.json()["data"]["proposals"] == []
+            assert resp.status_code == 503, resp.text
+            assert resp.json()["detail"], "503 必须带原因"
