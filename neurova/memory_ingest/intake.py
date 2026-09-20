@@ -47,11 +47,41 @@ class IngestReport:
     messages_skipped: int = 0
     sessions_touched: int = 0
     dropped: Tuple[Dict[str, Any], ...] = ()
+    staged_media: Tuple[str, ...] = ()
 
     def undo(self, *, manager, sessions) -> Tuple[int, int]:
         """返回 (撤销记忆条数, 撤销消息条数)；只删本批，不碰运行期数据。"""
-        return (manager.delete_ingested_memories(self.run_id),
-                sessions.delete_ingested_messages(self.agent_id, self.run_id))
+        return undo_run(self.agent_id, self.run_id, manager=manager, sessions=sessions)
+
+
+def undo_run(agent_id: str, run_id: str, *, manager, sessions) -> Tuple[int, int]:
+    """撤销一条批次——报告在不在手都走这条路，媒体清理不留第二条口径。
+
+    媒体按"这批引用过、删完已无人引用"来清：内容寻址允许共享，所以不能直接删；
+    但撤销完还留在盘上就是垃圾（工作区里已经栽过一次几百文件的跟头）。
+    """
+    names = _media_names_for_run(agent_id, run_id, sessions)
+    removed = (manager.delete_ingested_memories(run_id),
+               sessions.delete_ingested_messages(agent_id, run_id))
+    _prune_media(agent_id, names, sessions)
+    return removed
+
+
+def _media_names_for_run(agent_id: str, run_id: str, sessions) -> Tuple[str, ...]:
+    names = set()
+    for path in sessions.iter_session_files(agent_id):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        for message in data.get("messages") or []:
+            metadata = message.get("metadata") or {}
+            if metadata.get("ingest_run_id") != run_id:
+                continue
+            for artifact in metadata.get("artifacts") or []:
+                if isinstance(artifact, dict) and artifact.get("name"):
+                    names.add(str(artifact["name"]))
+    return tuple(sorted(names))
 
 
 def plan_bundle(root: Path) -> IngestPlan:
@@ -91,7 +121,7 @@ def _write_sessions(report: IngestReport, transcripts: Sequence[TranscriptRecord
     for session_id, records in _group(transcripts):
         by_date: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for message in to_turn_messages(records):
-            _stage_media(bundle_root, message, report.agent_id)
+            _stage_media(bundle_root, message, report)
             by_date[str(message["timestamp"])[:10]].append(message)
         for date, batch in sorted(by_date.items()):
             added, skipped = sessions.import_session_messages(
@@ -101,16 +131,17 @@ def _write_sessions(report: IngestReport, transcripts: Sequence[TranscriptRecord
             report.sessions_touched += 1
 
 
-def workspace_media_dir(agent_id: str) -> Path:
+def workspace_media_dir(agent_id: str, *, create: bool = True) -> Path:
     """导入媒体的落点：agent 工作区下的 media/（文件名即内容摘要）。"""
     from neurova.core.agent_workspaces import get_agent_workspace_dir
 
     target = get_agent_workspace_dir(agent_id) / MEDIA_DIRNAME
-    target.mkdir(parents=True, exist_ok=True)
+    if create:
+        target.mkdir(parents=True, exist_ok=True)
     return target
 
 
-def _stage_media(bundle_root: Path, message: Dict[str, Any], agent_id: str) -> None:
+def _stage_media(bundle_root: Path, message: Dict[str, Any], report: "IngestReport") -> None:
     """包内引用 → 工作区文件 + 运行期同形的 artifact 条目。
 
     artifact_id 用与 artifacts 注册处同一算法（对定形后路径取 sha1 前 16 位），所以任何
@@ -119,15 +150,35 @@ def _stage_media(bundle_root: Path, message: Dict[str, Any], agent_id: str) -> N
     media = (message.get("metadata") or {}).pop("media", None)
     if not media:
         return
-    destination = workspace_media_dir(agent_id)
-    artifacts = (message["metadata"]).setdefault("artifacts", [])
+    destination = workspace_media_dir(report.agent_id)
+    artifacts = message["metadata"].setdefault("artifacts", [])
+    staged = set(report.staged_media)
     for ref in media:
         rel = str(ref.get("media") or "")
-        name = Path(rel).name
-        target = destination / name
+        target = destination / Path(rel).name
         if not target.exists():
             shutil.copyfile(bundle_root / rel, target)
-        artifacts.append(_artifact_info(target, agent_id, ref))
+        artifacts.append(_artifact_info(target, report.agent_id, ref))
+        staged.add(target.name)
+    report.staged_media = tuple(sorted(staged))
+
+
+def _prune_media(agent_id: str, names: Sequence[str], sessions) -> int:
+    """删掉这批碰过、且已无人引用的媒体；仍被别处引用的留着（内容寻址本就共享）。"""
+    if not names:
+        return 0
+    directory = workspace_media_dir(agent_id, create=False)
+    referenced = "".join(path.read_text(encoding="utf-8", errors="replace")
+                         for path in sessions.iter_session_files(agent_id))
+    removed = 0
+    for name in names:
+        if name in referenced:
+            continue
+        path = directory / name
+        if path.is_file():
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
 
 
 def _artifact_info(path: Path, agent_id: str, ref: Dict[str, Any]) -> Dict[str, Any]:

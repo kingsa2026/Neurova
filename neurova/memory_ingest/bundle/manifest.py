@@ -19,6 +19,10 @@ class BundleError(Exception):
     """包不合规：版本不符、缺文件、坏行、越界值。调用方必须整包拒绝。"""
 
 
+class UnrecognizedSourceError(BundleError):
+    """源认不出：未识别或多指纹冲突。语义要与"包不合规"分开退出码——一个是换源，一个是修包。"""
+
+
 @dataclass(frozen=True)
 class BundleManifest:
     schema_version: int

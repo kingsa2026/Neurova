@@ -216,7 +216,51 @@ def test_apply_refuses_bundle_with_dangling_media_reference(manager, sessions, t
     assert manager._memories == {}
 
 
-def test_hostile_agent_id_is_refused_before_any_write(manager, sessions, bundle, tmp_path):
+def test_undo_removes_media_no_longer_referenced(tmp_path: Path, manager, sessions):
+    """撤销不能把媒体文件留在盘上：这次导入落的，没人引用了就该一起走。"""
+    import base64
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+    from neurova.memory_ingest.bundle.media import MediaSink
+
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+                           "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+    bundle_dir = tmp_path / "bundle"
+    ref = dict(MediaSink(bundle_dir, name_hint="shot.png").put(png), type="image")
+    root = _write_bundle(tmp_path, [dict(_ROWS[0], content_blocks=[
+        {"type": "text", "text": "看图"}, ref])])
+
+    report = apply_bundle(root, agent_id="media-agent", manager=manager, sessions=sessions)
+    staged = get_agent_workspace_dir("media-agent") / "media"
+    assert len(report.staged_media) == 1 and list(staged.glob("*"))
+
+    removed = report.undo(manager=manager, sessions=sessions)
+
+    assert removed[1] == 1 and list(staged.glob("*")) == []
+
+
+def test_undo_keeps_media_still_referenced_by_other_runs(tmp_path: Path, manager, sessions):
+    """同一份内容被两批导入共用时，撤销一批不能把另一批还引用的文件删掉。"""
+    import base64
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+    from neurova.memory_ingest.bundle.media import MediaSink
+
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+                           "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+    bundle_dir = tmp_path / "bundle"
+    ref = dict(MediaSink(bundle_dir, name_hint="shot.png").put(png), type="image")
+    root = _write_bundle(tmp_path, [dict(_ROWS[0], content_blocks=[
+        {"type": "text", "text": "看图"}, ref])])
+    first = apply_bundle(root, agent_id="media-agent", manager=manager, sessions=sessions,
+                         run_id="run-a")
+    second = apply_bundle(root, agent_id="media-agent", manager=manager, sessions=sessions,
+                          run_id="run-b")
+    staged = get_agent_workspace_dir("media-agent") / "media"
+
+    # 第二批因 identity_key 重复被跳过：文件仍是第一批的引用目标，撤销第一批才该删
+    assert second.messages_skipped == 1 and len(first.staged_media) == 1
+    first.undo(manager=manager, sessions=sessions)
+
+    assert list(staged.glob("*")) == []            # 两条都被删了，文件自然无人引用(manager, sessions, bundle, tmp_path):
     with pytest.raises(BundleError, match="agent_id"):
         apply_bundle(bundle, agent_id="../escape", manager=manager, sessions=sessions)
 

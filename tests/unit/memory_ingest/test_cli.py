@@ -19,6 +19,13 @@ from neurova.memory_ingest.probe import Handprint, _HANDPRINTS
 from neurova.session_manager import SessionManager
 from scripts.ingest_memory import main
 
+
+def _jsonl(path, *lines):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = "\n".join(json.dumps(line, ensure_ascii=False) for line in lines)
+    path.write_text(body + "\n", encoding="utf-8")
+    return path
+
 COLS = ["seq", "session_id", "agent_id", "kind", "role", "name", "content", "tool_call_id",
         "tool_input", "tool_state", "headline", "blocks", "metadata", "created_at", "dedup_key"]
 
@@ -78,6 +85,9 @@ def test_unrecognized_store_exits_2(tmp_path: Path, capsys):
 
     assert main(["detect", str(tmp_path / "other.db")]) == EXIT_UNRECOGNIZED
 
+    assert main(["apply", str(tmp_path / "other.db"), "--agent-id", "kai-import", "--yes"]) \
+        == EXIT_UNRECOGNIZED
+
     assert "未识别" in capsys.readouterr().out
 
 
@@ -99,6 +109,42 @@ def test_directory_source_reports_per_store(tmp_path: Path, capsys):
     assert main(["detect", str(tmp_path)]) == EXIT_OK
 
     assert capsys.readouterr().out.count("唯一命中") == 2
+
+
+def test_directory_apply_imports_recognized_stores_and_reports_the_rest(
+        tmp_path: Path, manager, sessions, capsys):
+    """整目录源里混着认不出的文件：认得出的照常导，认不出的照实报并以非零码收尾。
+
+    这不是放宽"不猜"——认不出的那支一个字节都不写，只是不再让一个无关文件
+    把整目录的导入判死。
+    """
+    _db(tmp_path / "hist" / "history.db", _rows(seq=1, dedup_key="a"))
+    (tmp_path / "junk").mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(tmp_path / "junk" / "unrelated.db")
+    conn.execute("CREATE TABLE unrelated (id TEXT)")
+    conn.commit()
+    conn.close()
+
+    code = main(["apply", str(tmp_path), "--agent-id", "mixed-import", "--yes",
+                 "--run-id", "run-mixed"], manager=manager, sessions=sessions)
+
+    printed = capsys.readouterr()
+    assert code == EXIT_UNRECOGNIZED
+    assert "已写入" in printed.out and "未识别" in printed.out
+    assert list((tmp_path / "sessions" / "mixed-import").glob("session_*.json"))
+    assert manager._memories == {}
+
+
+def test_directory_undo_cleans_every_recognized_store(tmp_path: Path, manager, sessions):
+    _db(tmp_path / "hist" / "history.db", _rows(seq=1, dedup_key="a"))
+    main(["apply", str(tmp_path / "hist"), "--agent-id", "mixed-import", "--yes",
+          "--run-id", "run-mixed-2"], manager=manager, sessions=sessions)
+    assert list((tmp_path / "sessions" / "mixed-import").glob("session_*.json"))
+
+    assert main(["undo", "--agent-id", "mixed-import", "--run-id", "run-mixed-2"],
+                manager=manager, sessions=sessions) == EXIT_OK
+
+    assert not list((tmp_path / "sessions" / "mixed-import").glob("session_*.json"))
 
 
 def test_convert_writes_a_validatable_bundle(tmp_path: Path):

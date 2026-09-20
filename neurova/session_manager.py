@@ -247,6 +247,11 @@ class SessionManager(SessionRepository):
                 return legacy
         return target
 
+    def iter_session_files(self, agent_id: str) -> List[Path]:
+        """该 agent 的全部会话文件（存档除外）——给需要全文扫描的调用方用的公有入口。"""
+        agent_dir = self._get_session_dir(agent_id)
+        return sorted(agent_dir.glob("session_*.json"))
+
     @staticmethod
     def _find_session_files(agent_dir: Path, session_id: str) -> List[Path]:
         """按会话号取全部日期文件——字面匹配，不走 glob 模式。

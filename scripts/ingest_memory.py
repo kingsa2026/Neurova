@@ -20,10 +20,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from neurova.memory_ingest.cli_errors import (  # noqa: E402
     EXIT_INVALID_BUNDLE, EXIT_OK, EXIT_REPORT_ONLY, EXIT_UNRECOGNIZED)
-from neurova.memory_ingest.bundle.manifest import BundleError  # noqa: E402
+from neurova.memory_ingest.bundle.manifest import BundleError, UnrecognizedSourceError  # noqa: E402
 from neurova.memory_ingest.bundle.validate import validate_bundle  # noqa: E402
 from neurova.memory_ingest.converters import CONVERTERS  # noqa: E402
-from neurova.memory_ingest.intake import apply_bundle, plan_bundle  # noqa: E402
+from neurova.memory_ingest.intake import apply_bundle, plan_bundle, undo_run  # noqa: E402
 from neurova.memory_ingest.probe import probe_store  # noqa: E402
 
 _VERDICT_LABEL = {"unique": "唯一命中", "conflict": "多指纹冲突", "unknown": "未识别"}
@@ -39,6 +39,9 @@ def main(argv: Sequence[str], *, manager=None, sessions=None) -> int:
         if args.cmd == "apply":
             return _apply(args, manager=manager, sessions=sessions)
         return _undo(args, manager=manager, sessions=sessions)
+    except UnrecognizedSourceError as exc:
+        print(f"拒收：{exc}", file=sys.stderr)
+        return EXIT_UNRECOGNIZED
     except BundleError as exc:
         print(f"拒绝：{exc}", file=sys.stderr)
         return EXIT_INVALID_BUNDLE
@@ -88,35 +91,50 @@ def _detect(findings: Sequence[Any]) -> int:
     return EXIT_UNRECOGNIZED
 
 
-def _bundles(source: Path, staging: Path, agent_name: str) -> List[Tuple[Any, Path]]:
+def _bundles(source: Path, staging: Path, agent_name: str) -> Tuple[List[Tuple[Any, Path]], List[Tuple[str, str]]]:
+    """逐 store 出结论：认得出的转，认不出的照实回报。
+
+    单源不猜——指到哪一支就该是哪一支；整目录则不因一个无关文件判死整批，
+    但被跳过的每一支都要报出来，并以非零码收尾，脚本才不会当成成功。
+    """
     findings = _scan(source)
-    if _detect(findings) != EXIT_OK:
-        raise BundleError("存在未识别或指纹冲突的 store，整次导入取消")
-    bundles = []
+    if _detect(findings) != EXIT_OK and not source.is_dir():
+        raise UnrecognizedSourceError("源未识别或指纹冲突，拒绝猜测")
+    usable, blocked = [], []
+    for finding in findings:
+        if finding.verdict != "unique":
+            blocked.append((finding.path, _VERDICT_LABEL[finding.verdict]))
+        elif finding.hits[0] not in CONVERTERS:
+            blocked.append((finding.path, "有指纹无转换器"))
+        else:
+            usable.append(finding)
     single = len(findings) == 1
-    for index, finding in enumerate(findings):
-        # 单源时包就落在给定目录（manifest.json 直接在下面），多源才按 store 建子目录
+    bundles = []
+    for index, finding in enumerate(usable):
         out_dir = staging if single else staging / f"{index:02d}-{Path(finding.path).name}"
         CONVERTERS[finding.hits[0]](Path(finding.path), out_dir, agent_name=agent_name)
         bundles.append((finding, out_dir))
-    return bundles
+    for path, reason in blocked:
+        print(f"[跳过] {path} —— {reason}，一个字节都没写")
+    return bundles, blocked
 
 
 def _convert(source: Path, out: Path, agent_name: str) -> int:
     staging = Path(out)
     staging.mkdir(parents=True, exist_ok=True)
-    for finding, bundle in _bundles(source, staging, agent_name):
+    bundles, blocked = _bundles(source, staging, agent_name)
+    for finding, bundle in bundles:
         errors = validate_bundle(bundle)
         print(f"{bundle} 指纹={finding.hits[0]} "
               f"{'校验通过' if not errors else '校验失败：' + '；'.join(errors)}")
         if errors:
             raise BundleError(f"{bundle} 校验未通过")
-    return EXIT_OK
+    return EXIT_UNRECOGNIZED if blocked else EXIT_OK
 
 
 def _apply(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
     with tempfile.TemporaryDirectory(prefix="neurova-ingest-") as staging:
-        bundles = _bundles(Path(args.source), Path(staging), args.agent_name)
+        bundles, blocked = _bundles(Path(args.source), Path(staging), args.agent_name)
         for finding, bundle in bundles:
             plan = plan_bundle(bundle)
             print(f"{finding.path}：事件 {plan.counts['transcripts']} 条 → 装配后消息 "
@@ -145,15 +163,18 @@ def _apply(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
                   f"记忆 +{report.memories_added}/跳过 {report.memories_skipped}")
             print(f"  撤销：python scripts/ingest_memory.py undo --agent-id {args.agent_id} "
                   f"--run-id {report.run_id}")
+        if blocked:
+            code = EXIT_UNRECOGNIZED
         return code
 
 
 def _undo(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
     manager = manager or _memory_manager(args.agent_id)
     sessions = sessions or _session_manager(args.sessions_dir)
-    memories, messages = manager.delete_ingested_memories(args.run_id), \
-        sessions.delete_ingested_messages(args.agent_id, args.run_id)
-    print(f"已撤销 run_id={args.run_id}：记忆 {memories} 条、消息 {messages} 条")
+    memories, messages = undo_run(args.agent_id, args.run_id, manager=manager,
+                                  sessions=sessions)
+    print(f"已撤销 run_id={args.run_id}：记忆 {memories} 条、消息 {messages} 条"
+          f"（这批引用过且已无人用的媒体文件一并清掉）")
     return EXIT_OK
 
 
