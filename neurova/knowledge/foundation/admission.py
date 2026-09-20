@@ -159,6 +159,12 @@ class KnowledgeAdmissionGate:
         # 空键 = 没有内容身份（纯标点/空白），不参与去重，否则空写入会互相吞没。
         contentKey = normalizedKey(request.content) or None
         request = _normalizedRecord(request)
+        if request.recordKind == "narrative":
+            # 叙述记录的身份必须是"这条说法的内容"，不是条目 id：条目 id 在编辑前后不变，
+            # 若拿它当客体，(主体, 谓词, 客体) 三元组就条条相同，upsertFact 会把每一次
+            # 正文改写吞回同一行——旧说法永远不被取代，编辑在治理层完全隐身（019b-2 实测）。
+            # 无内容身份的条目仍按 id 立身，那条说法没有"改一次算一次"可言。
+            request = replace(request, objectTerm=contentKey or request.objectTerm)
         dupe = self._store.findFactByContentKey(request.agentId, contentKey) if contentKey else None
         if dupe:
             applied = ["content_identity"]

@@ -16,6 +16,7 @@ tags/source/confidence/created_at/updated_at），重启保留。
 - 无条目时返回空列表（禁止假数据）
 """
 
+import contextlib
 import datetime
 import difflib
 import json
@@ -23,9 +24,11 @@ import os
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.knowledge.foundation.entry_ledger import EntryLedger
+from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 from neurova.knowledge.foundation.narratives import FOUNDATION_DB_NAME, NarrativeStore
 
 logger = get_logger(__name__)
@@ -180,6 +183,9 @@ class KnowledgeRepository:
         self._conflicts_path = self._dir / "knowledge_conflicts.json"
         self._narrative_db_path = str(self._dir / FOUNDATION_DB_NAME)
         self._narratives: Optional[NarrativeStore] = None
+        # 治理投影只在闸内发生（工单 019b-2）；闸外三个写动词与旧行为逐字相同。
+        # 账本与事实库句柄都是短命的：长持有会让 Windows 清不掉 tmp 目录。
+        self._projectionDrift: List[str] = []
         if _narrativeStoreEnabled():
             self._narratives = NarrativeStore(self._narrative_db_path)
         self._lock = threading.RLock()
@@ -403,6 +409,16 @@ class KnowledgeRepository:
     def _load(self) -> None:
         if self._narratives is not None:
             self._items = self._itemsFromNarratives()
+            # 装载即对齐：开闸后不必再手工跑回填，缺的治理行按同一口径补投
+            # （admit 幂等，同内容即同一知识）。只报不修等于留一道人工断点。
+            self._syncEntryGovernance()
+            with self._entryLedger() as ledger:
+                self._projectionDrift = ledger.verifyProjection(self._items)
+            if self._projectionDrift:
+                logger.error(
+                    "条目与治理层仍分叉 %d 处（前 5 条：%s）——补投没能收敛，"
+                    "先别把这份库当可信读数用", len(self._projectionDrift),
+                    "; ".join(self._projectionDrift[:5]))
         elif self._path.exists():
             try:
                 data = json.loads(self._path.read_text(encoding="utf-8"))
@@ -534,6 +550,36 @@ class KnowledgeRepository:
         except Exception as e:  # noqa: BLE001
             logger.error("Failed to save knowledge repo %s: %s", self._path, e)
 
+    # ── 治理投影（工单 019b-2，闸内）───────────────────────────
+
+    @contextlib.contextmanager
+    def _entryLedger(self) -> Iterator[EntryLedger]:
+        store = KnowledgeFactStore(self._narrative_db_path)
+        try:
+            yield EntryLedger(store)
+        finally:
+            store.close()
+
+    def _syncEntryGovernance(self) -> None:
+        """把当前 `_items` 投影到治理层，并把聚合出的置信度回写到条目上。
+
+        闸外直接返回——旧行为一字不改。闸内**不捕异常**：投影失败却让条目写成功，
+        就是"知识入库而无人知道它是谁说的"，正是这套底座要灭的病。
+
+        只投影、不校验：校验在 `_load` 里做（见 `_projectionDrift`）。
+        """
+        if self._narratives is None:
+            return
+        with self._entryLedger() as ledger:
+            report = ledger.syncFromEntries(self._items)
+        confidences = report["confidences"]
+        for items in self._items.values():
+            for item in items:
+                derived = confidences.get(str(item.get("knowledge_id", "")))
+                if derived is not None:
+                    # G11：条目上那个数从此是聚合出来的，不是调用方传进来的
+                    item["confidence"] = derived
+
     # ── CRUD ──────────────────────────────────────────────────
 
     def create_knowledge(
@@ -576,6 +622,7 @@ class KnowledgeRepository:
         }
         with self._lock:
             self._items.setdefault(agent_id, []).append(item)
+            self._syncEntryGovernance()
             self._save()
             # P0#1：索引已建立时走分片级增量；dirty 时空操作（重建覆盖）
             self._record_index_op("reindex", item["knowledge_id"])
@@ -1009,6 +1056,7 @@ class KnowledgeRepository:
                         except Exception as e:  # noqa: BLE001
                             logger.warning("知识条目内容更新重切分块失败（保留旧块）: %s", e)
                     item["updated_at"] = datetime.datetime.now(datetime.timezone.utc).timestamp()
+                    self._syncEntryGovernance()
                     self._save()
                     # 索引文本只含 title+chunks(+header)：graph_node_ids 等回写
                     # （graph_bridge）不再触发任何索引操作
@@ -1036,6 +1084,7 @@ class KnowledgeRepository:
                         "deleted_by": str(deleted_by or ""),
                         "superseded_by": None,
                     }
+                    self._syncEntryGovernance()
                     self._save()
                     self._save_tombstones()
                     self._record_index_op("remove", knowledge_id)
