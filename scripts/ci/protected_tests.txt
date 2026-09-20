@@ -128,3 +128,9 @@ tests/unit/evolution/rsi/test_experience_quality_promotion.py
 # 原生工具翻页契约：file_search/file_list 的截断可续拉（offset/next_offset）
 # —— 不挂 Desktop Commander，把它唯一强于原生的"分页深搜"补进原生工具面
 tests/unit/tools/test_builtin_tools_expansion.py
+
+# 文档导出子系统（write_pdf）工单 001-007：中间树/两路解析/PDF 出口/工具契约/产物 kind 跨端一致
+tests/unit/document/test_document_sources.py
+tests/unit/document/test_document_pdf.py
+tests/unit/tools/test_write_pdf.py
+tests/unit/api/test_artifact_kind_parity.py
