@@ -46,11 +46,6 @@ except ImportError as _e:
     _logger.debug("rsi.deployment_controller 未可用: %s", _e)
 
 try:
-    from .dashboard import RSIDashboard, create_rsi_dashboard
-except ImportError as _e:
-    _logger.debug("rsi.dashboard 未可用: %s", _e)
-
-try:
     from .orchestrator import RSIOrchestrator, create_rsi_orchestrator
 except ImportError as _e:
     _logger.debug("rsi.orchestrator 未可用: %s", _e)
@@ -92,8 +87,6 @@ __all__ = [
     "create_rollback_manager",
     "RSIDeploymentController",
     "create_deployment_controller",
-    "RSIDashboard",
-    "create_rsi_dashboard",
     "RSIOrchestrator",
     "create_rsi_orchestrator",
     "GateVerdict",
