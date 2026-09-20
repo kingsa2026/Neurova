@@ -16,6 +16,7 @@ class NodeKind(str, Enum):
     LIST = "list"
     TABLE = "table"
     IMAGE = "image"
+    DIVIDER = "divider"
 
 
 @dataclass(frozen=True)

@@ -219,7 +219,7 @@ def _image(block: Block, body, available: float, warnings: typing.List[str]):
 
 
 def _story(blocks, *, headings, body, item, cells, base_font, available, warnings):
-    from reportlab.platypus import Paragraph
+    from reportlab.platypus import HRFlowable, Paragraph
 
     story = []
     for block in blocks:
@@ -233,6 +233,8 @@ def _story(blocks, *, headings, body, item, cells, base_font, available, warning
             story.append(_table(block, cells, base_font, available, warnings))
         elif block.kind == NodeKind.IMAGE:
             story.append(_image(block, body, available, warnings))
+        elif block.kind == NodeKind.DIVIDER:
+            story.append(HRFlowable(width="100%", thickness=0.6, color="#B4B4B4", spaceBefore=6, spaceAfter=8))
         else:
             story.append(Paragraph(runs_to_markup(block.runs), body))
     return story

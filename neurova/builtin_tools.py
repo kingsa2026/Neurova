@@ -683,11 +683,15 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "Markdown 正文（子集：# 标题、段落、- 与 1. 列表、**粗体**、*斜体*、`行内码`、| 表格 |、![说明](图片路径或 http(s) 链接)）",
+                    "description": "Markdown 正文（子集：# 标题、段落、- 与 1. 列表、**粗体**、*斜体*、`行内码`、| 表格 |、![说明](图片路径或 http(s) 链接)、--- 分隔线）。与 content_html 二选一",
+                },
+                "content_html": {
+                    "type": "string",
+                    "description": "HTML 正文（子集：h1-h6/p/ul/ol/li/table/tr/th/td/img/b/strong/i/em/code/pre/hr/br）。script/style/link/iframe 会被丢弃并在 warnings 点名，href 不进 PDF。与 content 二选一",
                 },
                 "title": {"type": "string", "description": "文档标题（进 PDF 元数据与页眉；不参与文件名）"},
             },
-            "required": ["content"],
+            "required": [],
         },
     },
     "git": {
