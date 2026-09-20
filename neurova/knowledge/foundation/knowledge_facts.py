@@ -15,7 +15,6 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from neurova.core.db_migration import migrate as apply_migrations, register_migration
 from neurova.core.logger import get_logger
 
 from .credibility import ConfidenceAggregator
@@ -81,7 +80,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_triple
 CREATE INDEX IF NOT EXISTS idx_fact_subject ON knowledge_facts(subject_key, status);
 CREATE INDEX IF NOT EXISTS idx_fact_content ON knowledge_facts(agent_id, content_key);
 """
-register_migration(1, _SCHEMA, domain="knowledge_foundation")
 
 _SCHEMA_V2 = """
 CREATE TABLE IF NOT EXISTS knowledge_conflicts (
@@ -104,7 +102,6 @@ CREATE TABLE IF NOT EXISTS knowledge_conflicts (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_conflict_members ON knowledge_conflicts(member_signature);
 CREATE INDEX IF NOT EXISTS idx_conflict_status ON knowledge_conflicts(status, detected_at);
 """
-register_migration(2, _SCHEMA_V2, domain="knowledge_foundation")
 
 # v1 发布之后补的结构必须另起版本：已存在的库 user_version 已经是 1，
 # 再往 _SCHEMA 里加东西永远不会被重放（工单 011 首次真数据回填就是这样炸的）。
@@ -142,7 +139,13 @@ CREATE INDEX IF NOT EXISTS idx_assertion_fact ON knowledge_assertions(fact_id);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_fact_agent_content
     ON knowledge_facts(agent_id, content_key) WHERE content_key IS NOT NULL;
 """
-register_migration(3, _SCHEMA_V3, domain="knowledge_foundation")
+
+# 工单 019b-1：条目（叙述记录）也经咽喉，但正文只有一份、留在叙述层，
+# 事实行因此需要种类标记。默认 'triple' 让既有行与既有调用方一字不改。
+# 版本号 5 与注册顺序由 foundation_schema 统一持有。
+_SCHEMA_V5 = """
+ALTER TABLE knowledge_facts ADD COLUMN record_kind TEXT NOT NULL DEFAULT 'triple';
+"""
 
 MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
 
@@ -189,7 +192,9 @@ class KnowledgeFactStore:
 
     def _ensureSchema(self) -> None:
         with self._lock:
-            apply_migrations(self._conn, "knowledge_foundation")
+            from .foundation_schema import applyTo  # 惰性：链的单主注册处反过来依赖本模块
+
+            applyTo(self._conn)
 
     def close(self) -> None:
         with self._lock:
@@ -335,6 +340,7 @@ class KnowledgeFactStore:
         confidence: Optional[float] = None,
         contentKey: Optional[str] = None,
         recordedAt: Optional[str] = None,
+        recordKind: str = "triple",
     ) -> str:
         """同 (主体, 谓词, 客体, 限定) 或同 content_key 重放返回同一 fact_id。
 
@@ -370,10 +376,11 @@ class KnowledgeFactStore:
                 self._conn.execute(
                     "INSERT INTO knowledge_facts (fact_id, agent_id, subject_key, predicate_term_id,"
                     " object_term, relation_kind, content, content_key, qualifier_hash, qualifier_json,"
-                    " confidence, source_turn_id, recorded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " confidence, source_turn_id, recorded_at, record_kind)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (factId, agentId, subjectKey, predicateTermId, objectTerm, relationKind, content,
                      contentKey, qualifierHash, json.dumps(qualifier, ensure_ascii=False), confidence,
-                     sourceTurnId, _instant(recordedAt) if recordedAt else _now()),
+                     sourceTurnId, _instant(recordedAt) if recordedAt else _now(), recordKind),
                 )
             except sqlite3.IntegrityError:
                 # 唯一索引挡住竞态双写：改读先到的那一行，而不是让写入方看到崩
@@ -529,17 +536,25 @@ class KnowledgeFactStore:
             "outcome_unevidenced": int(row["blind"] or 0),
         }
 
-    def searchableFacts(self, agentId: Optional[str] = None) -> List[Dict[str, Any]]:
+    def searchableFacts(
+        self, agentId: Optional[str] = None, includeNarratives: bool = False
+    ) -> List[Dict[str, Any]]:
         """读面候选：仅 active 且未过期的事实，带主体规范名。
 
         时效权威仍是 `status`（工单 008 定的唯一真源），这里只额外挡掉已到期但尚未
         被 `expireDueFacts()` 推进的行——否则读面会跑在巡检前头。
+
+        叙述记录默认不进池：它的事实行**有意**不存正文（正文唯一副本在
+        `knowledge_narratives`），混进来就是一池空文本。等读路径接上按 knowledge_id
+        回查正文的那一刀（019b-3）再放开，而不是先放进来让排序对着空内容打分。
         """
         sql = ("SELECT f.*, s.canonical_label FROM knowledge_facts f"
                " JOIN knowledge_subjects s ON s.subject_key = f.subject_key"
                " WHERE f.status = 'active' AND s.status != 'merged'"
                " AND (f.valid_until IS NULL OR f.valid_until > ?)")
         params: List[Any] = [_now()]
+        if not includeNarratives:
+            sql += " AND f.record_kind != 'narrative'"
         if agentId:
             sql += " AND f.agent_id = ?"
             params.append(agentId)

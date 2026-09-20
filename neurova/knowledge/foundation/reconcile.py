@@ -18,8 +18,6 @@ from .admission import AdmissionRequest, productionAdmissionGate
 from .knowledge_facts import KnowledgeFactStore
 from ..identity.subject_resolver import SubjectResolver
 
-REPLAY_PREDICATE_FALLBACK = "described_as"
-
 _IMPORTER_PREFIXES = ("import:", "url:", "datasource:", "kb_builder")
 
 
@@ -49,7 +47,13 @@ def _assertionFor(agentId: str, item: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _requestsFromRepository(repo: Any) -> List[AdmissionRequest]:
-    """旧条目 → 咽喉入参的唯一映射，两条路径共用，避免各写一套映射造成假对账。"""
+    """旧条目 → 咽喉入参的唯一映射，两条路径共用，避免各写一套映射造成假对账。
+
+    条目本来就是文档，所以按 `record_kind='narrative'` 发：谓词由咽喉固定，
+    客体是 knowledge_id。以前这里把 category 塞进谓词、把条目伪造成三元组，
+    读起来像"标题 described_as 某分类"，实际谁也不这么问——表示法不对，
+    冲突判定与图投影都只能跟着歪。
+    """
     requests: List[AdmissionRequest] = []
     for agentId, items in getattr(repo, "_items", {}).items():
         for item in items:
@@ -57,7 +61,7 @@ def _requestsFromRepository(repo: Any) -> List[AdmissionRequest]:
             requests.append(AdmissionRequest(
                 agentId=agentId,
                 subjectLabel=str(item.get("title", "")).strip() or ("untitled-" + knowledgeId),
-                predicateTermId=str(item.get("category", "")).strip() or REPLAY_PREDICATE_FALLBACK,
+                recordKind="narrative",
                 objectTerm=knowledgeId,
                 content=str(item.get("content", "") or ""),
                 assertions=[_assertionFor(agentId, item)],
