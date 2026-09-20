@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
+from .admission import NARRATIVE_RECORD_KIND
+
 CONFLICT_KINDS: tuple = ("value", "qualifier", "type", "temporal", "cardinality")
 RESOLUTION_POLICIES: tuple = (
     "most_recent", "highest_confidence", "credibility_weighted", "keep_both", "manual",
@@ -29,10 +31,18 @@ class KnowledgeConflictJudge:
     # ── 分类 ──────────────────────────────────────────────────
 
     def detect(self, subjectLabel: str, predicateTermId: str) -> List[Dict[str, Any]]:
-        facts = self._store.candidateFactsForConflict(subjectLabel, predicateTermId)
-        groups: Dict[str, List[Dict[str, Any]]] = {}
-        for fact in facts:
-            groups.setdefault(_qualifierKey(fact), []).append(fact)
+        """在同一 (主体, 谓词) 上找分歧；叙述记录（条目正文）另按条目划范围。
+
+        分歧的前提是"两条说法在说同一件事"。三元组里"同一件事"就是消解后的主体；
+        条目正文不是——`documented_as` 基数天然不限，三条都叫 `note` 的条目是三份文档，
+        不是同一说法的三个值。把它们当 value 冲突裁决，等于拿"最新的那份"把活着条目
+        的治理行判成 superseded：真数据实测 130 条里 5 行被这样裁决掉、10 条条目永远
+        查不到 active 行，装载即报投影分叉且不收敛（admit 按内容键折回的还是那条非活动行）。
+        同一条目改了正文仍走这里——新说法取代旧说法，账上留痕（019b-2 判据）。
+        """
+        groups: Dict[Any, List[Dict[str, Any]]] = {}
+        for fact in self._store.candidateFactsForConflict(subjectLabel, predicateTermId):
+            groups.setdefault((_qualifierKey(fact), _entryScopeOf(fact)), []).append(fact)
 
         conflicts: List[Dict[str, Any]] = []
         for members in groups.values():
@@ -168,6 +178,22 @@ class KnowledgeConflictJudge:
 
 def _qualifierKey(fact: Dict[str, Any]) -> str:
     return json.dumps(fact.get("qualifier") or {}, ensure_ascii=False, sort_keys=True)
+
+
+def _entryScopeOf(fact: Dict[str, Any]) -> str:
+    """叙述行的分歧范围＝它所属的那一条条目；三元组恒为同一标记，分组行为与从前逐字相同。
+
+    条目 id 只有一个落点 `source_turn_id`，前缀却有两种（回填 `legacy:`、账本 `entry:`），
+    同一条目不能因前缀不同就各判各的——所以取前缀后的 id。溯源为空的叙述行没有归属，
+    退回自己的客体自锁成一组：它不与任何行打架，也不会被顶掉。
+    """
+    if fact.get("record_kind") != NARRATIVE_RECORD_KIND:
+        return "n/a"
+    turn = str(fact.get("source_turn_id", "") or "")
+    for prefix in ("entry:", "legacy:"):
+        if turn.startswith(prefix):
+            return turn[len(prefix):]
+    return turn or str(fact.get("object_term", ""))
 
 
 def _hasClosedWindow(fact: Dict[str, Any]) -> bool:

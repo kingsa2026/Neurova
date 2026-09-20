@@ -17,6 +17,10 @@ from typing import Any, Dict, List, Optional
 from neurova.core.db_migration import migrate as apply_migrations, register_migration
 from neurova.core.logger import get_logger
 
+from neurova.knowledge.foundation.storage_fence import (
+    PRODUCTION_STORAGE_DIR,
+    assertNotUnderProductionStorage,
+)
 from neurova.knowledge.hybrid import hybrid_search_knowledge
 
 logger = get_logger(__name__)
@@ -67,13 +71,15 @@ def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-DEFAULT_EVAL_DB = "./data/knowledge/knowledge_evaluation.db"
+# 生产路径只有 storage_fence 一处定义；评测账本与底座库同目录但分库，互不共用存储。
+DEFAULT_EVAL_DB = str(Path(PRODUCTION_STORAGE_DIR) / "knowledge_evaluation.db")
 
 
 class RetrievalBenchmark:
     """标注案例 → 真检索路 → recall@k / MRR / 未命中率，读数落库可对比。"""
 
     def __init__(self, db_path: str) -> None:
+        assertNotUnderProductionStorage(db_path, "评测账本")
         self._db_path = db_path
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)

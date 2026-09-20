@@ -27,8 +27,10 @@ _REQUIRED_FIELDS = ("subjectLabel", "predicateTermId", "objectTerm", "content")
 # 记录种类（工单 019b-1）。triple 是"主体-谓词-客体"；narrative 是"一条知识文档"——
 # 它要的是内容身份、消解后的主体、断言与置信，**不是**被伪造成三元组。
 RECORD_KINDS: tuple = ("triple", "narrative")
-# 叙述记录的事实行统一挂在这个谓词下，客体就是条目的 knowledge_id。
-# 由咽喉固定而不是让调用方自由填：治理身份不能是自由文本。
+NARRATIVE_RECORD_KIND = "narrative"
+# 叙述记录的事实行统一挂在这个谓词下，客体是正文的内容键（无内容身份才退回条目 id）。
+# 条目 id 记在 source_turn_id 上（`entry:<kid>`）——它编辑前后不变，当客体就把"改写"
+# 吞成同一行了。谓词与客体形状都由咽喉固定，不让调用方自由填：治理身份不是自由文本。
 NARRATIVE_PREDICATE = "documented_as"
 _NARRATIVE_REQUIRED_FIELDS = ("subjectLabel", "objectTerm", "content")
 
@@ -84,7 +86,7 @@ def _normalizedRecord(request: AdmissionRequest) -> AdmissionRequest:
 
     复制而不是就地改：调用方拿着同一个请求体重试时，不该看到字段被人动过。
     """
-    if request.recordKind != "narrative":
+    if request.recordKind != NARRATIVE_RECORD_KIND:
         return request
     return replace(request, predicateTermId=NARRATIVE_PREDICATE,
                    relationKind="document", content="")
@@ -159,7 +161,7 @@ class KnowledgeAdmissionGate:
         # 空键 = 没有内容身份（纯标点/空白），不参与去重，否则空写入会互相吞没。
         contentKey = normalizedKey(request.content) or None
         request = _normalizedRecord(request)
-        if request.recordKind == "narrative":
+        if request.recordKind == NARRATIVE_RECORD_KIND:
             # 叙述记录的身份必须是"这条说法的内容"，不是条目 id：条目 id 在编辑前后不变，
             # 若拿它当客体，(主体, 谓词, 客体) 三元组就条条相同，upsertFact 会把每一次
             # 正文改写吞回同一行——旧说法永远不被取代，编辑在治理层完全隐身（019b-2 实测）。

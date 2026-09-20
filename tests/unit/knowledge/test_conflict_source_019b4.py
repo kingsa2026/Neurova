@@ -83,7 +83,7 @@ class TestConflictTable:
         assert rec["resolution"] == "keep_both"
 
     def test_gateOffKeepsSidecar(self, tmp_path, monkeypatch):
-        monkeypatch.delenv(ENV_FLAG, raising=False)
+        monkeypatch.setenv(ENV_FLAG, "off")
         repo = _conflictRepo(tmp_path)
         assert len(repo.list_conflicts()) == 1
         assert _sidecar(tmp_path).exists()
@@ -91,7 +91,7 @@ class TestConflictTable:
         assert list(rec)[0] == repo.list_conflicts()[0]["conflict_id"]
 
     def test_existingSidecarMovesOnceAndIsArchived(self, tmp_path, monkeypatch):
-        monkeypatch.delenv(ENV_FLAG, raising=False)
+        monkeypatch.setenv(ENV_FLAG, "off")
         cid = _conflictRepo(tmp_path).list_conflicts()[0]["conflict_id"]
 
         monkeypatch.setenv(ENV_FLAG, "on")
@@ -135,7 +135,7 @@ class TestSourceComesFromAssertions:
 
     def test_legacyFallbackStaysForBackfillRows(self, tmp_path, monkeypatch):
         """回填行的 medium 仍是 legacy:knowledge.json——搬家不是重写历史。"""
-        monkeypatch.delenv(ENV_FLAG, raising=False)
+        monkeypatch.setenv(ENV_FLAG, "off")
         repo = KnowledgeRepository(str(tmp_path / "kb"))
         item = repo.create_knowledge("default", "旧库条目", _BODY_A, owner_user_id="u1",
                                      source="")

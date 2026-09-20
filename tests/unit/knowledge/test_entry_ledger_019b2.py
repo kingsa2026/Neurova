@@ -138,7 +138,7 @@ class TestDeleteRetracts:
 
 class TestGateOffStaysOld:
     def test_NoFoundationFileIsCreated(self, tmp_path, monkeypatch):
-        monkeypatch.delenv(ENV_FLAG, raising=False)
+        monkeypatch.setenv(ENV_FLAG, "off")
         repo = KnowledgeRepository(str(tmp_path / "kb"))
         item = repo.create_knowledge("default", "闸外条目", _BODY_A, owner_user_id="u1",
                                      confidence=0.7)

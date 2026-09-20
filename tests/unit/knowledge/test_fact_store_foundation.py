@@ -71,7 +71,13 @@ class TestStoreLifecycle:
 
         reset_knowledge_fact_store()
 
-        assert get_knowledge_fact_store() is not first
+        # 复位后再取必须重新建实例，而且要带自己的路径：无参工厂的兜底是生产库，
+        # 围栏现在会当场拒（见 test_default_storage_write_fence 的"每个写入面都被守"）
+        second = get_knowledge_fact_store(db_path=str(tmp_path / "s2.db"))
+        assert second is not first
+        # 自己造的实例自己收：留着句柄会让 Windows 清不掉临时目录，
+        # 也会把单例留在已删目录上给后面的用例挖坑
+        reset_knowledge_fact_store()
 
 
 class TestIdentityLayer:

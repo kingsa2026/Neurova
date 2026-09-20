@@ -53,6 +53,11 @@ class TestContentDedupeIsNotAnOrderFunction:
     实测代价：回放里某行被自动取代之后，同内容不再折叠而是另开一行，
     静态预测与实跑当场分叉（130 行：预测 92、实跑 102），也就是把去重做成了裁决顺序的函数。
     代际语义要立，得先让预测侧看得懂它，或者让"哪条生效"离开唯一索引。已登记为开洞。
+
+    同一个洞在条目面的另一张嘴（019b-4b 记下）：两条正文相同的条目共享一行，
+    其中一条改了正文就会把那条共享行判成 superseded，另一条因此查不到 active 行、
+    投影报分叉且不收敛（`_load` 的 ERROR 会点名它）。修法不在这里补一次取代，
+    也不是让空出来的行被别条认领——那要等代际语义与预测侧一起立起来。
     """
 
     def test_supersededRowStillAbsorbsIdenticalContent(self, store):

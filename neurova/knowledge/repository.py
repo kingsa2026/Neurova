@@ -30,10 +30,14 @@ from neurova.core.logger import get_logger
 from neurova.knowledge.foundation.entry_ledger import EntryLedger
 from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 from neurova.knowledge.foundation.narratives import FOUNDATION_DB_NAME, NarrativeStore
+from neurova.knowledge.foundation.storage_fence import (
+    PRODUCTION_STORAGE_DIR,
+    assertNotUnderProductionStorage,
+)
 
 logger = get_logger(__name__)
 
-DEFAULT_STORAGE_DIR = "./data/knowledge"
+DEFAULT_STORAGE_DIR = PRODUCTION_STORAGE_DIR
 # 工单 019a–019b-4b：条目权威已从 knowledge.json 换到底座库，**默认开**。
 # 留一个显式回退值（off/json）而不是删掉这条路：搬家是可逆动作，回退步骤见
 # docs/specs/2026-09-20-knowledge-foundation-design.md 的开关台账。
@@ -175,7 +179,7 @@ class ChunkRevisionConflict(Exception):
 
 
 class KnowledgeRepository:
-    """按 agent_id 分组的条目仓库：权威默认在 knowledge.json，闸开则移到底座库叙述表。
+    """按 agent_id 分组的条目仓库：权威默认在底座库叙述表，显式关闸才回 knowledge.json。
 
     `self._items` 是唯一的内存权威——分片索引、检索、冲突检测全部只读它，
     所以换后端只需要换 `_load` / `_save` 两个边界。
@@ -188,6 +192,9 @@ class KnowledgeRepository:
         self._tombstones_path = self._dir / "knowledge_tombstones.json"
         self._conflicts_path = self._dir / "knowledge_conflicts.json"
         self._narrative_db_path = str(self._dir / FOUNDATION_DB_NAME)
+        # 围栏必须在建库之前：默认翻向底座库之后，构造本身就会落文件（迁移建表），
+        # 只守 _save 等于守不住——测试会话会在 data/knowledge/ 里造出真库。
+        self._assertNotWritingProductionUnderPytest()
         self._narratives: Optional[NarrativeStore] = None
         # 治理投影只在闸内发生（工单 019b-2）；闸外三个写动词与旧行为逐字相同。
         # 账本与事实库句柄都是短命的：长持有会让 Windows 清不掉 tmp 目录。
@@ -547,19 +554,13 @@ class KnowledgeRepository:
         return item
 
     def _assertNotWritingProductionUnderPytest(self) -> None:
-        """测试会话内禁止落盘到生产目录。
+        """测试会话内禁止落盘到生产目录（判据与路径都在 `storage_fence`，此处只留调用位）。
 
         真实 knowledge.json 已证实被历史非隔离运行写入过（38 行纯冗余，见
         docs/specs/2026-09-20-knowledge-foundation-design.md §1.2）。围栏放在
         _save 的 try 之外——try 里 raise 会被下面的 except Exception 吞成一条日志。
         """
-        if not (os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("PYTEST_VERSION")):
-            return
-        if self._dir.resolve() == Path(DEFAULT_STORAGE_DIR).resolve():
-            raise RuntimeError(
-                "测试会话禁止写生产知识库 %s；用 tmp_path 构造 KnowledgeRepository，"
-                "或 monkeypatch 门面 get_repository 注入隔离实例。" % self._path
-            )
+        assertNotUnderProductionStorage(self._dir, "条目仓库 %s" % self._path)
 
     def _save(self) -> None:
         self._assertNotWritingProductionUnderPytest()
