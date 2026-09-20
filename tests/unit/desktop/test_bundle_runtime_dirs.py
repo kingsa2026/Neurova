@@ -51,12 +51,7 @@ class TestBundleCreatesWorkspaces:
         mod = _load_bundle_module()
         called = []
         monkeypatch.setattr(mod, "ensure_runtime_dirs", lambda stage: called.append(stage))
-        # main 的其他步骤依赖真实 venv，直接 stub 全部重活
-        fake_sp = tmp_path / "fake_sp"
-        fake_sp.mkdir()
-        monkeypatch.setattr(mod, "VENV_SP", fake_sp, raising=False)
-        monkeypatch.setattr(mod, "ensure_standalone_python", lambda p: None)
-        monkeypatch.setattr(mod, "copy_venv_site_packages", lambda p, m: None)
+        # main 的其他步骤依赖真实仓库树，直接 stub 全部重活
         monkeypatch.setattr(mod, "copy_tree_light", lambda *a, **k: None)
         monkeypatch.setattr(mod, "STAGE", tmp_path / "stage", raising=False)
         monkeypatch.setattr(mod, "MANIFEST", tmp_path / "stage" / "MANIFEST.json", raising=False)
@@ -65,3 +60,23 @@ class TestBundleCreatesWorkspaces:
         assert rc == 0
         assert len(called) == 1
         assert called[0] == tmp_path / "stage"
+
+    def test_route_b_never_packages_python_runtime(self):
+        """路线 B 契约：bundle_backend.py 不得再打包 Python/Node 运行时
+        （体积红线由 package_installer_zip.validate_lean_backend 兜底）。"""
+        src = _BUNDLE.read_text(encoding="utf-8")
+        for dead in ("ensure_standalone_python", "copy_venv_site_packages"):
+            assert dead not in src, f"{dead} 应随路线 B 删除"
+
+    def test_main_purges_stale_python_stage(self, tmp_path, monkeypatch):
+        """main() 必须清理暂存区残留 python/（上一轮路线 A 的遗留）。"""
+        mod = _load_bundle_module()
+        monkeypatch.setattr(mod, "copy_tree_light", lambda *a, **k: None)
+        monkeypatch.setattr(mod, "ensure_runtime_dirs", lambda stage: None)
+        monkeypatch.setattr(mod, "STAGE", tmp_path / "stage", raising=False)
+        monkeypatch.setattr(mod, "MANIFEST", tmp_path / "stage" / "MANIFEST.json", raising=False)
+        monkeypatch.setattr("sys.argv", ["bundle_backend.py"])
+        (tmp_path / "stage" / "python" / "python.exe").parent.mkdir(parents=True)
+        (tmp_path / "stage" / "python" / "python.exe").write_bytes(b"x")
+        assert mod.main() == 0
+        assert not (tmp_path / "stage" / "python").exists()

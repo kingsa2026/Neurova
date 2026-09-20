@@ -3,16 +3,18 @@ fn main() {
   inject_boot_icon_env();
 }
 
-/// boot 页品牌字标：编译期读取并 base64 注入环境变量（boot 页必须零外部
-/// 资产依赖，dist 缺文件时 boot 窗白屏——白屏回归的根因）。优先取纯文字
-/// 白标 NEUROVA-WORDMARK-white.png（2026-09-11 用户要求启动页不用图标+文字
-/// 构图），缺失回退 neurova-icon.png / 打包 icons/128x128.png。
+/// boot 页品牌 LOGO：编译期读取并 base64 注入环境变量（boot 页必须零外部
+/// 资产依赖，dist 缺文件时 boot 窗白屏——白屏回归的根因）。取安装器同款
+/// 白色 LOGO NEUROVA-LOGO350white.png（2026-09-21 用户要求 boot 页与安装器
+/// 共用「我提供给你的白色 LOGO」；09-11 曾误用纯文字字标 WORDMARK——无图标，
+/// 与欢迎页/进度页/侧边栏三处构图不一致），回退 NEUROVA-white.png / 打包
+/// icons/128x128.png。
 fn inject_boot_icon_env() {
   use std::path::PathBuf;
 
   let candidates = [
-    PathBuf::from("../public/img/NEUROVA-WORDMARK-white.png"),
-    PathBuf::from("../public/img/neurova-icon.png"),
+    PathBuf::from("../public/img/NEUROVA-LOGO350white.png"),
+    PathBuf::from("../public/img/NEUROVA-white.png"),
     PathBuf::from("icons/128x128.png"),
   ];
   let icon = candidates
