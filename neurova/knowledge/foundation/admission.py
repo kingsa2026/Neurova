@@ -99,7 +99,7 @@ class KnowledgeAdmissionGate:
         resolver: Any = None,
         conflictJudge: Any = None,
         lineageLedger: Any = None,
-        termRegistry: Any = None,
+        ontology: Any = None,
         credibility: Any = None,
     ) -> None:
         self._store = store
@@ -107,7 +107,7 @@ class KnowledgeAdmissionGate:
             "identity_resolution": resolver,
             "conflict_judgement": conflictJudge,
             "lineage": lineageLedger,
-            "ontology_adjudication": termRegistry,
+            "ontology_adjudication": ontology,
             "credibility_record": credibility,
         }
 
@@ -190,6 +190,13 @@ class KnowledgeAdmissionGate:
             )
 
         subjectKey, needsReview, applied = self._resolveSubject(request)
+        # 段3 前半：本体校验。放在消解之后、写入之前——校验要看的是"这条说法挂在谁身上"，
+        # 而主体还没定就校验等于校验一个还不存在的落点。违规即拒（G08 的硬判据）。
+        ontology = self._collaborators.get("ontology_adjudication")
+        if ontology is not None:
+            violations = ontology.violations(request, subjectKey)
+            if violations:
+                raise ValueError("本体校验未过：%s" % ontology.summarize(violations))
         factId = self._store.upsertFact(
             agentId=request.agentId,
             subjectKey=subjectKey,
@@ -291,14 +298,19 @@ def productionAdmissionGate(store: Any, toolVersion: str = "foundation-gate") ->
     """
     from neurova.knowledge.identity.subject_resolver import SubjectResolver
 
+    from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
+    from neurova.knowledge.ontology.validation import OntologyValidationReport
+
     from .credibility import ConfidenceAggregator
     from .conflict_judge import KnowledgeConflictJudge
     from .lineage import KnowledgeLineageLedger
 
+    registry = OntologyTermRegistry(store)
     return KnowledgeAdmissionGate(
         store,
         resolver=SubjectResolver(),
         conflictJudge=KnowledgeConflictJudge(store),
         lineageLedger=KnowledgeLineageLedger(store, toolVersion=toolVersion),
         credibility=ConfidenceAggregator(store),
+        ontology=OntologyValidationReport(registry),
     )

@@ -56,9 +56,10 @@ class TestGateFactoryIsSingleSource:
         store = KnowledgeFactStore(str(tmp_path / "g.db"))
         try:
             pending = productionAdmissionGate(store, toolVersion="unit").pendingSegments()
-            assert pending == ["ontology_adjudication", "indexing"], (
-                "本体注册表与索引段属 E4/012，其余段装配齐了就该如实报已接通；"
-                "若这里冒出 identity_resolution 或 lineage，说明工厂又被各自装配绕过了")
+            assert pending == ["indexing"], (
+                "020 起本体裁决已接进工厂，只剩索引段没接通（属 021/022 之后）；"
+                "若这里冒出 identity_resolution / lineage / ontology_adjudication，"
+                "说明工厂又被各自装配绕过了")
         finally:
             store.close()
 
