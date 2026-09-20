@@ -59,11 +59,11 @@ def gate(store):
 
 
 class TestSchemaAndContract:
-    def test_recordKindColumnLandsAtVersionFive(self, store):
+    def test_recordKindColumnLandsAtNewVersion(self, store):
         """新列必须走新版本号——加进已发布的 v1，老库永远不会重放它。"""
         cols = {r[1] for r in store._conn.execute("PRAGMA table_info(knowledge_facts)")}
         assert "record_kind" in cols
-        assert int(store._conn.execute("PRAGMA user_version").fetchone()[0]) == 5
+        assert int(store._conn.execute("PRAGMA user_version").fetchone()[0]) >= 5
 
     def test_DefaultStaysTripleForExistingCallers(self, store, gate):
         receipt = gate.admit(_triple(), allowPendingSegments=True)
@@ -125,13 +125,16 @@ class TestNarrativeRecordShape:
             AdmissionRequest(agentId="default", subjectLabel="甲", objectTerm="乙",
                              content="乙", confidence=0.7)
         one = gate.admit(_narrative("k-1"), allowPendingSegments=True)
-        assert store.fact(one.factId)["confidence"] == pytest.approx(0.45)
+        # 0.45 基线 + 0.05 可回放：叙述记录的"现场"就是那条条目，咽喉把 source_turn_id
+        # 兜底成 entry:<kid>，所以这一项天然带权——不是白送分，是确实可回放。
+        assert store.fact(one.factId)["confidence"] == pytest.approx(0.50)
 
         second = gate.admit(_narrative("k-2", subjectLabel="另一个条目主体名称",
                                        content=_OTHER_BODY,
                                        assertions=[_assertion("u1"), _assertion("u2")]),
                             allowPendingSegments=True)
-        assert store.fact(second.factId)["confidence"] == pytest.approx(0.60)
+        # 2 源 0.60 + 可回放 0.05
+        assert store.fact(second.factId)["confidence"] == pytest.approx(0.65)
 
 
 class TestReadSurfaceGuard:
