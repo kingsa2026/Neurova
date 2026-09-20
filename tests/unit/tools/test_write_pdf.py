@@ -58,11 +58,23 @@ async def test_cjk_title_does_not_leak_into_file_name(out_dir):
 
 
 @pytest.mark.asyncio
-async def test_missing_content_is_refused(out_dir):
-    """001 只有 Markdown 入口；`content_html` 与二选一规则在工单 004 同批加入
-    （schema 与执行体必须同步长参数，否则撞 test_tool_schema_contract 的漂移契约）。"""
-    result = await _make_executor()._execute_write_pdf({"title": "只有标题"})
-    assert "error" in result
+async def test_both_or_neither_input_is_refused(out_dir):
+    """两条入口必须恰好走一条——同给时不猜优先级，都不给时不出件。"""
+    exe = _make_executor()
+    both = await exe._execute_write_pdf({"content": "甲", "content_html": "<p>乙</p>"})
+    neither = await exe._execute_write_pdf({"title": "只有标题"})
+    assert "error" in both and "二选一" in both["error"]
+    assert "error" in neither
+
+
+@pytest.mark.asyncio
+async def test_html_entry_renders_and_reports_dropped_tags(out_dir):
+    result = await _make_executor()._execute_write_pdf(
+        {"content_html": "<h1>标题</h1><p>正文</p><script>alert(1)</script>"}
+    )
+    assert "error" not in result, result
+    assert result["pages"] >= 1
+    assert any("script" in w for w in result["warnings"])
 
 
 @pytest.mark.asyncio

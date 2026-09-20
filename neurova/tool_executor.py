@@ -26,7 +26,7 @@ from neurova.collaboration.neurflow.execution_engine import get_workflow_executo
 from neurova.core.logger import get_logger
 from neurova.document_model import DocSettings
 from neurova.document_pdf import RenderUnavailable, render_document
-from neurova.document_sources import parse_markdown
+from neurova.document_sources import parse_html, parse_markdown
 import re
 import shlex
 import threading
@@ -3789,14 +3789,19 @@ class ToolExecutor:
         """Markdown → PDF 出件，落产物目录并回鉴权下载口（工单 001）。
 
         产物命名复用 persist_bytes：与图片/音频产物同一套白名单与属主口径，
-        所以中文标题只能进 PDF 元数据，不进文件名。HTML 入口属工单 004，
-        模板与 path 分支分别属 005/006——本切片只读 schema 已声明的参数。
+        所以中文标题只能进 PDF 元数据，不进文件名。`content`（Markdown）与
+        `content_html`（HTML 子集）二选一，两条入口归一到同一棵中间树；
+        模板与 path 分支分别属工单 005/006。
         """
-        content = params.get("content")
-        if not str(content or "").strip():
+        content, content_html = params.get("content"), params.get("content_html")
+        if bool(content) == bool(content_html):
+            return {"error": "content 与 content_html 只能二选一，且其一必填"}
+        if content_html:
+            parsed = parse_html(str(content_html))
+        else:
+            parsed = parse_markdown(str(content))
+        if not str(content or content_html or "").strip():
             return {"error": "content 为空，未出件"}
-
-        parsed = parse_markdown(str(content))
         if not parsed.blocks:
             return {"error": "content 未解析出任何可渲染内容，未出件"}
 
