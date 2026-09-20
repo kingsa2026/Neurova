@@ -441,14 +441,32 @@ class TestTKGDelegation:
         result = manager.tkg_get_history(subject="Alice")
         assert isinstance(result, list)
 
-    def test_tkg_detect_conflicts_no_longer_raises(self, manager):
+    def test_tkg_detect_conflicts_no_longer_raises(self, manager, tmp_path, monkeypatch):
+        """017：判定委托到底座咽喉，所以这条委托链的落点是事实库而不是模块私表。"""
+        from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
+
+        store = KnowledgeFactStore(str(tmp_path / "knowledge_facts.db"))
+        monkeypatch.setattr(
+            "neurova.knowledge.foundation.knowledge_facts.get_knowledge_fact_store",
+            lambda *a, **k: store)
         try:
             manager.tkg_detect_conflicts(subject="Alice", predicate="knows", obj="Bob")
         except NotImplementedError:
             pytest.fail("tkg_detect_conflicts should delegate to TKGModule")
+        finally:
+            store.close()
 
-    def test_tkg_detect_conflicts_returns_list(self, manager):
-        result = manager.tkg_detect_conflicts(subject="Alice", predicate="knows", obj="Bob")
+    def test_tkg_detect_conflicts_returns_list(self, manager, tmp_path, monkeypatch):
+        from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
+
+        store = KnowledgeFactStore(str(tmp_path / "knowledge_facts.db"))
+        monkeypatch.setattr(
+            "neurova.knowledge.foundation.knowledge_facts.get_knowledge_fact_store",
+            lambda *a, **k: store)
+        try:
+            result = manager.tkg_detect_conflicts(subject="Alice", predicate="knows", obj="Bob")
+        finally:
+            store.close()
         assert isinstance(result, list)
 
     def test_tkg_get_stats_no_longer_raises(self, manager):

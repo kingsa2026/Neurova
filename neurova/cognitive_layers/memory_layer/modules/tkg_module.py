@@ -231,19 +231,26 @@ class TKGModule:
         predicate: str,
         obj: str,
     ) -> List[Dict[str, Any]]:
-        """检测冲突"""
-        with self._lock:
-            conflicts = []
+        """与这个说法矛盾的活动事实。判定只有一处实现：底座咽喉的 `KnowledgeConflictJudge`。
 
-            for fact in self._facts.values():
-                if fact["status"] != "active":
-                    continue
+        本模块原本自己扫 `_facts` 字典（第三套口径：同主同谓不同宾就算冲突，无依据、
+        无严重度、无账本）。工单 017 把它改成读权威——查询语义不变（"和 obj 打架的是谁"），
+        判定规则、分类与严重度不再各写一份。
+        """
+        from neurova.knowledge.foundation.conflict_judge import KnowledgeConflictJudge
+        from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
 
-                # 检查是否存在矛盾
-                if fact["subject"] == subject and fact["predicate"] == predicate and fact["object"] != obj:
-                    conflicts.append(fact)
-
-            return conflicts
+        store = get_knowledge_fact_store()
+        judge = KnowledgeConflictJudge(store)
+        contested = {
+            member
+            for conflict in judge.detect(subjectLabel=subject, predicateTermId=predicate)
+            for member in conflict["member_fact_ids"]
+        }
+        return [
+            fact for fact in store.candidateFactsForConflict(subject, predicate)
+            if fact["fact_id"] in contested and fact["object_term"] != obj
+        ]
 
     def get_entities(self, limit: int = 100) -> List[str]:
         """获取所有实体"""
