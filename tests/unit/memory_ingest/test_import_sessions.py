@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from neurova.memory_ingest.bundle.records import TranscriptRecord
-from neurova.session_manager import SessionManager
+from neurova.session_manager import SessionManager, normalize_store_key
 
 _RUN = "nvimp-sess-1"
 
@@ -133,3 +133,55 @@ def test_import_requires_run_id(sessions):
     with pytest.raises(ValueError, match="ingest_run_id"):
         sessions.import_session_messages("default", "sA", "2026-05-01", _messages(),
                                          ingest_run_id="")
+
+
+# --- 外部标识符进咽喉前必须归一：实测 Windows 下名字里的冒号被 NTFS 当数据流分隔符，
+#     文件写得出去、glob 看不见（基名 0 字节），斜杠则能越出 agent 目录
+
+
+def test_hostile_session_id_stays_inside_agent_dir(sessions, tmp_path: Path):
+    sessions.import_session_messages("default", "evil/../../../../outside/x", "2026-05-01",
+                                     _messages(), ingest_run_id=_RUN)
+
+    assert not (tmp_path / "outside").exists()
+    files = list((tmp_path / "sessions" / "default").glob("session_*.json"))
+    assert len(files) == 1
+
+
+def test_colon_bearing_id_writes_a_plain_filename(sessions, tmp_path: Path):
+    """导入的会话必须被 session_*.json 的 glob 看得见，否则历史在列表里根本不存在。"""
+    sessions.import_session_messages("default", "wechat:o9cq8@im.wechat", "2026-05-01",
+                                     _messages(), ingest_run_id=_RUN)
+
+    files = list((tmp_path / "sessions" / "default").glob("session_*.json"))
+    assert len(files) == 1 and ":" not in files[0].name
+
+
+def test_normalized_id_is_deterministic_and_safe_ids_are_untouched():
+    """同一源 id 两次导入必须落到同一文件；已合规的运行期 id 不得改名。"""
+    assert normalize_store_key("wechat:o9cq8@im.wechat") == \
+        normalize_store_key("wechat:o9cq8@im.wechat")
+    assert ":" not in normalize_store_key("wechat:o9cq8@im.wechat")
+    assert normalize_store_key("auto-5e868087690a") == "auto-5e868087690a"
+    assert normalize_store_key("sA") == "sA"
+
+
+def test_source_session_id_is_recorded_and_session_is_readable(sessions):
+    """改名不能改丢出处：原 id 留在 metadata，按归一 id 仍要读得回整段会话。"""
+    raw = "wechat:o9cq8@im.wechat"
+    sessions.import_session_messages("default", raw, "2026-05-01", _messages(),
+                                     ingest_run_id=_RUN)
+    key = normalize_store_key(raw)
+
+    stored = _stored(sessions, "default", key, "2026-05-01")
+    record = sessions.get_session("default", key, "2026-05-01")
+
+    assert [m["metadata"]["ingest"]["source_session_id"] for m in stored[:1]] == [raw]
+    assert stored[0]["metadata"]["ingest"]["session_id"] == key
+    assert len(record.messages) == 4
+
+
+def test_empty_session_id_is_rejected(sessions):
+    with pytest.raises(ValueError, match="session_id"):
+        sessions.import_session_messages("default", "  ", "2026-05-01", _messages(),
+                                         ingest_run_id=_RUN)
