@@ -68,6 +68,9 @@ class EntryLedger:
                     allowPendingSegments=True,
                 )
                 admitted += 1
+                # 条目被恢复时，admit 会按内容键折叠回那条 retracted 行——认领它就得让它
+                # 重新生效，否则条目活着而治理行是收回状态，投影永远不收敛。
+                self._store.reviveRetracted(receipt.factId, reason="条目恢复，重新主张同一说法")
                 claims.add(receipt.factId)
                 confidences[kid] = self._confidenceOf(receipt.factId)
 
