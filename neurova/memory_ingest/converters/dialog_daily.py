@@ -32,13 +32,19 @@ def _envelope(parsed: Dict[str, Any], lineno: int) -> Tuple[Optional[Dict[str, A
             "metadata": parsed.get("metadata")}, None
 
 
+def _row_key(parsed: Dict[str, Any], lineno: int) -> str:
+    """幂等键按行号：实测同一场对话里多条行共用一个 id（调用行与它的 system 结果行同 id），
+    用源 id 当键会整包撞重被拒；源 id 仍在 extra.source_id 里可回查。"""
+    return f"L{lineno}"
+
+
 FAMILY = JsonlChatFamily(
     name=CONVERTER_NAME, version=CONVERTER_VERSION,
     required_keys=("role", "content", "timestamp"),
     session_id=lambda path: f"dialog-{path.stem}",
     naive_zone=_SOURCE_ZONE,
     envelope=_envelope,
-    row_key=lambda parsed, lineno: str(parsed.get("id") or f"L{lineno}"),
+    row_key=_row_key,
     covered_keys=COVERED_KEYS,
     role_kinds=ROLE_KINDS,
 )
