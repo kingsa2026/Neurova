@@ -38,7 +38,7 @@ _CATEGORY_TOOLS: Dict[str, Set[str]] = {
     },
     "file": {
         "file_read", "file_write", "file_create", "file_delete",
-        "file_edit", "file_list", "file_search",
+        "file_edit", "file_list", "file_search", "write_pdf",
     },
     "system": {
         "computer_shell", "computer_screenshot", "computer_click",

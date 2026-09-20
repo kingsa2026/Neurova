@@ -33,6 +33,9 @@ pypdf>=4.0.0
 striprtf>=0.0.26
 odfpy>=1.4.1
 
+# 文档出件（write_pdf：Markdown/HTML → PDF，document_pdf.py 是唯一 import 处）
+reportlab>=4.0
+
 # Utilities
 python-dotenv>=1.0.0
 psutil>=5.9.0
