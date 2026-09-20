@@ -232,6 +232,26 @@ def test_legacy_tool_result_rows_become_tool_results(tmp_path: Path):
     assert rows[1]["content_blocks"][0]["text"] == "# SOUL.md"
 
 
+def test_rows_sharing_a_source_id_do_not_collide(tmp_path: Path):
+    """实测 19/40 个每日对话文件里调用行与它的 system 结果行共用一个 id：
+    拿源 id 当幂等键会整包判重被拒，一个都导不进来。"""
+    src = _jsonl(tmp_path / "dialog" / "2026-04-19.jsonl",
+                 _dialog_line("assistant", [{"type": "tool_use", "id": "tc1", "name": "t",
+                                             "input": {}}], "2026-04-19 09:00:00",
+                              id="msg_shared"),
+                 _dialog_line("system", [{"type": "tool_result", "id": "tc1", "name": "t",
+                                          "output": [{"type": "text", "text": "结果"}]}],
+                              "2026-04-19 09:00:01", id="msg_shared"))
+
+    manifest = convert_dialog(src, tmp_path / "bundle", agent_name="imported")
+
+    assert validate_bundle(tmp_path / "bundle") == []
+    assert manifest.counts["transcripts"] == 2
+    rows = _rows(tmp_path / "bundle")
+    assert len({r["identity_key"] for r in rows}) == 2
+    assert {r["extra"]["source_id"] for r in rows} == {"msg_shared"}
+
+
 def test_file_blocks_are_declared_until_media_lands(tmp_path: Path):
     src = _jsonl(tmp_path / "dialog" / "2026-04-11.jsonl",
                  _dialog_line("user", [{"type": "text", "text": "看方案"},
