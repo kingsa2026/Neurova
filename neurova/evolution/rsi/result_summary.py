@@ -8,17 +8,17 @@
   体积大、且不适合进对话响应。
 - PostChatPipeline 的 RSI 步骤已后台化（Issue #55 P0 尾延迟），原始 dict
   不再随响应回传。
-- 但"上一轮 RSI 迭代到底做了什么"仍是调用方要的观测面（负一屏推送、
-  运营面板）。此前 ``process()["rsi_result"]`` 恒为 None，而
-  ``NegativeScreenPusher.push_rsi_result`` 读的是
+- 但"上一轮 RSI 迭代到底做了什么"仍是调用方要的观测面（响应面、运营面板）。
+  此前 ``process()["rsi_result"]`` 恒为 None，而 ``NegativeScreenPusher.push_rsi_result`` 读的是
   ``iteration/improvements/convergence_score/status``——与 orchestrator 真实
   输出（``convergence/applied_count/gain/phase_advanced``）名字全不匹配，
   且 ``convergence`` 是 dict（``dict * 100`` 直接 TypeError）：一旦接线即报错。
+  （该推送口因生产零调用方已于工单 012 删除；本模块的字段口径是它留下的教训。）
 
 本模块只做两件事，字段名一律对齐 orchestrator 真实输出：
 
-1. :func:`summarize_rsi_result` —— raw dict → 响应面摘要（八个字段，
-   含度量证据状态、有证据用例数、缺席闭环系统名单与晋升判据结论）。
+1. :func:`summarize_rsi_result` —— raw dict → 响应面摘要（九个字段，
+   含度量证据状态、有证据用例数、缺席闭环系统名单、晋升判据结论与落盘状态）。
 2. :func:`record_rsi_summary` / :func:`get_latest_rsi_summary` —— 按
    (agent, session) 记录**最近一次已完成**的迭代摘要。
 
@@ -39,7 +39,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # 响应面摘要的字段集合（唯一契约，测试与推送面都引用它）
 RSI_SUMMARY_FIELDS: Tuple[str, ...] = (
-    "status", "applied_count", "gain", "phase_advanced",
+    "status", "applied_count", "gain", "phase_advanced", "phase_persisted",
     "measure_state", "evidenced_cases", "placeholder_systems", "phase_verdict",
 )
 
@@ -152,6 +152,8 @@ def summarize_rsi_result(result: Any) -> Optional[Dict[str, Any]]:
         "applied_count": _as_int(result.get("applied_count", 0)),
         "gain": _as_float(result.get("gain", 0.0)),
         "phase_advanced": bool(result.get("phase_advanced", False)),
+        # 工单 005：只报 `phase_advanced` 会把"内存已晋升、盘上没晋升"读成已存活
+        "phase_persisted": bool(result.get("phase_persisted", False)),
     }
     summary.update(measurement_evidence(result))
     summary["placeholder_systems"] = _placeholder_systems(result)

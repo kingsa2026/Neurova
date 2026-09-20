@@ -293,6 +293,15 @@ for _ in range(60): orch.run_iteration()
 这会掩盖死锁 —— 复现臂一问题须先临时置 0，或按故事 8 让判据自证。
 治理设置是**进程级单文件**，多 agent 共享一个 phase，这也是 PR-6 之外要留意的既有约束。
 
+**工单 005 落地后该约束多了第二个写入方**（2026-09-20 追记）：`rsi_phase` 原先只由管理端
+`save_governance_settings` 写，现在 `RSIOrchestrator._persist_rsi_phase` 会在自动晋升后回写。
+多 agent 场景下每个编排器各持一个部署控制器，**谁最后晋升谁的阶段留在盘上**（后写者胜）；
+按 agent 隔离仍属 §6"明确不做"。当前阶段的唯一真相是这个 JSON 文件，不是任一进程里的内存值
+—— 后者每次启动按文件重建。口径已就地写进 `neurova/security/governance_settings.py`
+的模块文档串。同单复核结论：本节原先"须复核"的 `self_improvement_proposer.py:372/373`
+已实测为真（`deployment_controller or RSIDeploymentController(initial_phase=0)` 与
+`rollback_manager or RSIRollbackManager()` 两行），并随 005 删除。
+
 **审计已排除的误判**（避免 implement 时又被提出）：
 `get_evolution_orchestrator()` 默认不注入 rsi_orchestrator，
 但生产在 `agent_core.py:854-855` 补了注入，因此"单例 rsi_orchestrator 恒 None"这条**不成立**。
