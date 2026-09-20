@@ -480,17 +480,23 @@ case 集与基线摘要已导出入库：`tests/fixtures/knowledge_eval_cases.js
 单独跑该文件 24 passed。要查得从别的模块对 `semantic_search_api` / rerank 配置的污染入手，
 别改这两个用例本身。
 
-**`tests/unit/api/` 的失败面本身不稳定，别拿它当基线**（2026-09-20 晚实测）：
-同一目录同一份代码，间隔几分钟两次跑分别是 15 failed 与 25 failed；
-与 `tests/unit/core/` 并跑时升到 37 failed + 2 errors。新增的一族集中在
-artifacts / console events / agent package / workspace zip / load saved agents
-（`test_console_artifact_events.py` 11、`test_load_saved_agents_missing_dir.py` 4、
-`test_artifacts_registry.py` 4、`test_agent_package_api.py` 2、`test_workspace_zip_offloop.py` 2 error）。
-判据：**把本批的 `tests/unit/knowledge/` 与守卫全部摘掉，只跑 `api + core` 仍是 37 failed**，
-而 `knowledge + core` 是 1 failed（即已登记的那条）。这族与既有登记
-"app 级测试写真实 agent_workspaces"同源——它们争同一份磁盘状态，于是失败随顺序与会话并发变化。
-本批口径因此固定为：`tests/unit/knowledge/` 与 `knowledge + core` 两个窄口径读数为准，
-api 域只认"已登记的 15 例不新增"，不追那族顺序性失败。
+**`tests/unit/api/` 的失败面正在被人实时改写，别拿它当基线**（2026-09-20 晚实测）：
+同一目录、同一份本批代码，间隔十几分钟两次跑出 25 failed 与 15 failed；与 `tests/unit/core/`
+并跑时 37 failed + 2 errors。波动的一族是 artifacts / console events / agent package /
+workspace zip / load saved agents（`test_console_artifact_events.py` 11、
+`test_load_saved_agents_missing_dir.py` 4、`test_artifacts_registry.py` 4、
+`test_agent_package_api.py` 2、`test_workspace_zip_offloop.py` 2 error）。
+
+归因先摆证据：这些文件与被测模块**此刻正在另一个代理手里改**——`neurova/core/agent_workspaces.py`
+mtime 09:02、`test_console_artifact_events.py` 09:20、`test_agent_package_api.py` 与
+`test_artifacts_registry.py` 09:21，而我的两次跑分别在 09:12 与 09:24。
+本段先前写的"失败随顺序与会话并发变化（争同一份磁盘状态）"是**未经核实的假设**，在此改口：
+数字变动来自别人在改那批文件，不是测试顺序。
+
+与本批无关的判据仍然成立：**把 `tests/unit/knowledge/` 与两个守卫全部摘掉，只跑 `api + core`
+仍是 37 failed**，而 `knowledge + core` 只有 1 例（已登记的 `test_agent_skill_packer_init`）。
+本批口径因此固定为：以 `tests/unit/knowledge/` 与 `knowledge + core` 两个窄口径为准，
+api 域只认"已登记的 15 例不新增"，那族在途文件不计入本批信号。
 
 另有 `tests/benchmarks/test_multi_agent_coordination.py:413` 未导入 `Optional` 导致全仓收集中断——
 该目录未入库（`??`），属他人在途件，本批不触碰，跑套件时需 `--ignore=tests/benchmarks`。
