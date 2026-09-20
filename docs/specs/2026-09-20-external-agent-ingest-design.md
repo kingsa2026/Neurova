@@ -133,7 +133,18 @@ v1 的记录类型边界（避免接口悬空）
 
 - 分片/策展型记忆条目的归属：chunk（path+start_line+end_line+text+embedding）与"一条记忆"
   （content+category+importance+origin）不同构，需要先定映射规则，再谈第二家真实来源。
-- 私有方言的记忆导入：本机 `qwenpaw_memory*` 一族无公开格式可依，历史 Kai 记忆已由退役脚本一次性导入。
-- 身份/人格文件导入（`import_identity`）：归人格装配面。
+- 私有方言的记忆导入：本机 `qwenpaw_memory*` 一族无公开格式可依；包契约里 `memories.jsonl`
+  与 `MemoryManager.import_memories` 已就位，但**还没有任何转换器产出记忆**——三源转换器
+  只产会话。历史 Kai 记忆仍由本地一次性脚本导入（该脚本未退役，它同时管着快照与笔记两类
+  私有来源）。
+- 身份/人格文件导入（`import_identity`）：归人格装配面，已定不并入。
 - 记忆图边落图（`relations.jsonl`）：v1 只登记。
 - 运行期记忆写入无统一事件总线：`refresh_moe_index` 至今零调用方，本设计不依赖它。
+- 导入媒体在**运行中的服务**里看不见：intake 把字节落进 `agent_workspaces/<agent>/media/`
+  并按注册处同一算法给出 `metadata.artifacts` 条目，但产物注册表是 API 进程内的字典
+  （`artifacts_api._artifacts_store`），跨进程不共享。要让导入的图片在 UI 里打开，需要的是
+  注册表持久化（预存缺口，见 `tests/unit/api/test_files_store_persistence.py` 的红），
+  不是再往导入侧加一遍写入。
+- 通道侧会话号仍带冒号（`discord:{channel}:{user}` 等）：路径装配处已统一归一并在读侧保留
+  源名兜底，POSIX 老库不受影响；但**新写入**会落在归一名下，若老库里同日已有源名文件则
+  续写老文件——彻底收敛需要一次带备份的重命名，另开批次做。
