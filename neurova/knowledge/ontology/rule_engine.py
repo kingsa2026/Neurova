@@ -52,6 +52,14 @@ class RuleError(ValueError):
     pass
 
 
+def _premiseIds(pairsRaw: Optional[str]) -> List[str]:
+    """`GROUP_CONCAT` 出来的 `a+b,a+c` 还原成前提 id 列表（保序去重）。"""
+    out: List[str] = []
+    for token in str(pairsRaw or "").split(","):
+        out.extend(p for p in token.split("+") if p and p not in out)
+    return out
+
+
 class ForwardChainingEngine:
     """规则的登记与求值。推导出的事实**经咽喉入库**，不直插 SQL。
 
@@ -108,7 +116,8 @@ class ForwardChainingEngine:
         stamp = _now()
         with self._store._lock, self._store._conn:
             existing = self._store._conn.execute(
-                "SELECT created_at FROM ontology_rules WHERE rule_id = ?", (ruleId,)).fetchone()
+                "SELECT created_at, version FROM ontology_rules WHERE rule_id = ?",
+                (ruleId,)).fetchone()
             self._store._conn.execute(
                 "INSERT OR REPLACE INTO ontology_rules (rule_id, head_predicate, head_subject_var,"
                 " body_json, negated_predicates, stratification_level, enabled, version,"
@@ -122,6 +131,9 @@ class ForwardChainingEngine:
                 self._dropRule(ruleId)
         if cycles:
             raise RuleError("规则 %s 经由否定形成循环，分层无解：%s" % (ruleId, " → ".join(cycles)))
+        if existing and existing["version"] != version:
+            # 改版即旧版结论作废：留着就是两版规则各推一套、同时对外检索。
+            self._store._derivationLedger.retractRuleVersion(ruleId, keepVersion=version)
         return self.rule(ruleId) or {}
 
     def _dropRule(self, ruleId: str) -> None:
@@ -155,8 +167,11 @@ class ForwardChainingEngine:
         producers.setdefault(headPredicate, []).append(ruleId)
 
         levelOf = self._levels(producers)
-        if headPredicate in levelOf and levelOf[headPredicate] < 0:
-            return 0, [headPredicate, headPredicate]
+        if levelOf.get(headPredicate, 0) < 0:
+            # 层号算不出＝谓词在正边上成环。正环不是分层无解：传递闭包本来就是
+            # 自己定义自己的正环，收敛方式是求不动点。只有这一条规则自己还带否定
+            # 时，环才真的无解（绕经否定的环会推出 A 且 非 A）。
+            return 0, ([headPredicate, headPredicate] if negated else [])
         level = levelOf.get(headPredicate, 0)
         for target in negated:
             targetLevel = levelOf.get(target)
@@ -269,14 +284,15 @@ class ForwardChainingEngine:
         aLive, bLive = "a." + live.replace(" AND ", " AND a."), "b." + live.replace(" AND ", " AND b.")
         if second is None:
             scope = " AND agent_id = ?" if agentId else ""
-            sql = ("SELECT subject_key, object_term FROM knowledge_facts"
+            sql = ("SELECT subject_key, object_term, fact_id AS pair FROM knowledge_facts"
                    " WHERE predicate_term_id = ? AND %s%s" % (live, scope))
             params = [first["predicate"]] + ([agentId] if agentId else [])
         else:
             # 中项靠"上一跳的客体 = 下一跳主体的规范标签"接上。没被登记成主体的客体接不上，
             # 那是消解段（006）的活，不在推理层偷偷做字符串相似。
             scope = " AND a.agent_id = ?" if agentId else ""
-            sql = ("SELECT a.subject_key AS subject_key, b.object_term AS object_term"
+            sql = ("SELECT a.subject_key AS subject_key, b.object_term AS object_term,"
+                   " a.fact_id || '+' || b.fact_id AS pair"
                    " FROM knowledge_facts a"
                    " JOIN knowledge_subjects s2 ON s2.agent_id = a.agent_id"
                    "  AND s2.normalized_label = lower(trim(a.object_term)) AND s2.status = 'active'"
@@ -285,7 +301,8 @@ class ForwardChainingEngine:
                    " WHERE a.predicate_term_id = ? AND b.predicate_term_id = ?"
                    "  AND %s AND %s%s" % (aLive, bLive, scope))
             params = [first["predicate"], second["predicate"]] + ([agentId] if agentId else [])
-        sql = ("SELECT t.subject_key, t.object_term, MIN(s.canonical_label) AS label"
+        sql = ("SELECT t.subject_key, t.object_term, MIN(s.canonical_label) AS label,"
+               " GROUP_CONCAT(DISTINCT t.pair) AS pairs"
                " FROM (%s) t JOIN knowledge_subjects s ON s.subject_key = t.subject_key"
                " GROUP BY t.subject_key, t.object_term"
                " ORDER BY t.subject_key, t.object_term" % sql)
@@ -298,7 +315,8 @@ class ForwardChainingEngine:
             subjectKey, objectTerm, label = row["subject_key"], row["object_term"], row["label"]
             if self._negatedHolds(agentId, negated, subjectKey, objectTerm):
                 continue
-            factId = self._admitDerivedFact(rule, agentId, label, head, objectTerm, subjectKey)
+            factId = self._admitDerivedFact(rule, agentId, label, head, objectTerm,
+                                            subjectKey, _premiseIds(row["pairs"]))
             if factId:
                 written.append(factId)
         return written
@@ -319,7 +337,8 @@ class ForwardChainingEngine:
         return False
 
     def _admitDerivedFact(self, rule: Dict[str, Any], agentId: Optional[str], label: str,
-                          predicate: str, objectTerm: str, subjectKey: str) -> Optional[str]:
+                          predicate: str, objectTerm: str, subjectKey: str,
+                          premiseIds: List[str]) -> Optional[str]:
         gate = self._gateFactory(self._store) if self._gateFactory else None
         if gate is None:
             raise RuleError("推理未接咽喉写入口——推导事实不许绕过 admit 直插 SQL")
@@ -338,10 +357,26 @@ class ForwardChainingEngine:
             ), allowPendingSegments=True)
         except ValueError:
             return None            # 本体/基数拒绝推导结果：与原始写入同一口径，不开例外
+        ledger = self._store._derivationLedger
         if receipt.dedupedByContent:
-            # 折回已有行不算"新推导"——不动点判据靠这个终止，否则每轮都"产出"同一批事实
-            return None
+            return self._renewDerived(rule, ledger, receipt.factId, premiseIds)
+        ledger.recordDerivation(receipt.factId, premiseIds, rule)
+        ledger.recordFire(rule, [receipt.factId])
         return receipt.factId
+
+    def _renewDerived(self, rule: Dict[str, Any], ledger: Any, factId: str,
+                      premiseIds: List[str]) -> Optional[str]:
+        """折回已有行：active 的不算新推导（不动点靠这条终止）；已退档的重新主张。
+
+        内容键刻意不看 status，所以被级联退掉的结论再推一次会撞回同一行。不复活它，
+        一次撤回就把这条结论永久打死——那等于撤销比故障更持久。
+        """
+        if (self._store.fact(factId) or {}).get("status") != "retracted":
+            return None
+        self._store.reviveRetracted(factId, reason="推导前提重新齐备")
+        ledger.recordDerivation(factId, premiseIds, rule)
+        ledger.recordFire(rule, [factId])
+        return factId
 
     def transitiveClosure(self, agentId: str, predicate: str) -> List[Tuple[str, str]]:
         """传递闭包交给递归 CTE：一次查询算完，不在 Python 里迭代到不动点。

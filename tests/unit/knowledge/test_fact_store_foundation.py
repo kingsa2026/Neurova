@@ -170,8 +170,9 @@ class TestMigrationVersions:
                 'knowledge_assertions', 'knowledge_conflicts',
                 'knowledge_narratives', 'knowledge_tombstones',
                 'knowledge_entry_conflicts', 'ontology_terms',
-                'ontology_rules'} <= names
-        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 9
+                'ontology_rules', 'knowledge_derivation_edges',
+                'ontology_rule_fires'} <= names
+        assert int(store._conn.execute('PRAGMA user_version').fetchone()[0]) == 10
 
     def test_reopeningAnExistingDbStillUpgrades(self, tmp_path):
         first = KnowledgeFactStore(str(tmp_path / 'reopen.db'))

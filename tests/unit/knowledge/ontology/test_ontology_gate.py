@@ -45,7 +45,8 @@ def _request(subject, predicate, obj, content="正文", **kw):
 
 class TestRegistryIsData:
     def test_v8LandsAndSeedsTheNarrativePredicate(self, store, registry):
-        assert int(store._conn.execute("PRAGMA user_version").fetchone()[0]) == 8
+        # v9（规则表）之后链尾还在往前走，这里只验"至少到 v8、且 v8 建的表在"
+        assert int(store._conn.execute("PRAGMA user_version").fetchone()[0]) >= 8
         term = registry.term("documented_as")
         assert term and term["kind"] == "relation"
         assert registry.maxCardinality("documented_as") is None, "同一主体可以有很多份文档"
