@@ -42,7 +42,11 @@ def test_load_manifest_rejects_missing_counts(tmp_path: Path):
 
 
 def test_transcript_to_session_message_keeps_roles_and_identity():
-    """工具调用与结果必须各自成行（各家无一家内嵌，设计 §2 取证 1）。"""
+    """工具调用与结果必须各自成行（各家无一家内嵌，设计 §2 取证 1）。
+
+    工具字段还要落进 metadata.ingest：读取模型 SessionMessage 只带 4 个字段，
+    只写顶层会落盘成功但读不出来。
+    """
     rec = TranscriptRecord(
         session_id="s1", seq=3, kind="tool_result", ts="2026-05-01T10:00:00+00:00",
         identity_key="ik3", role="tool", tool_call_id="tc1", tool_name="fs_read",
@@ -53,7 +57,9 @@ def test_transcript_to_session_message_keeps_roles_and_identity():
 
     assert msg["role"] == "tool" and msg["tool_call_id"] == "tc1" and msg["tool_state"] == "ok"
     assert msg["content"] == "结果正文"
-    assert msg["metadata"]["ingest"]["identity_key"] == "ik3"
+    ingest = msg["metadata"]["ingest"]
+    assert ingest["identity_key"] == "ik3" and ingest["tool_call_id"] == "tc1"
+    assert ingest["tool_name"] == "fs_read" and ingest["tool_state"] == "ok"
 
 
 def test_transcript_rejects_unknown_kind():

@@ -48,13 +48,21 @@ class TranscriptRecord:
         )
 
     def to_session_message(self) -> Dict[str, Any]:
-        """转成 sessions 文件里的消息形态：一条记录一条消息，不合并、不压平。"""
+        """转成 sessions 文件里的消息形态：一条记录一条消息，不合并、不压平。
+
+        工具关联字段同时写在顶层与 metadata.ingest 两处不是冗余：读取模型
+        SessionMessage 只带 role/content/timestamp/metadata 四个字段，只写顶层的
+        tool_call_id 会落盘成功但读不出来（get_session 与 API 响应都看不见）。
+        """
         metadata: Dict[str, Any] = {
             "ingest": {
                 "identity_key": self.identity_key,
                 "seq": self.seq,
                 "kind": self.kind,
                 "reasoning_state": self.reasoning_state,
+                "tool_call_id": self.tool_call_id,
+                "tool_name": self.tool_name,
+                "tool_state": self.tool_state,
                 "extra": dict(self.extra),
             },
         }
