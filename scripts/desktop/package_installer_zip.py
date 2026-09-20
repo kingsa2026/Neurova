@@ -97,6 +97,20 @@ def build_shell(kernel: Path | None) -> Path:
     return shell
 
 
+def validate_lean_backend() -> None:
+    """路线 B 体积红线守卫：resources/backend/ 下不应出现 python/、node/。"""
+    backend = REPO / "NeurUI" / "src-tauri" / "resources" / "backend"
+    offenders = []
+    for name in ("python", "node"):
+        if (backend / name).exists():
+            offenders.append(name)
+    if offenders:
+        raise RuntimeError(
+            f"安装包体积红线：backend/ 下发现运行时目录 {offenders}，"
+            "请确认 bundle_backend.py 已切换路线 B（首次启动自动下载）。"
+        )
+
+
 def version_of(kernel: Path) -> str:
     stem = kernel.name[len(KERNEL_PREFIX):-len(KERNEL_SUFFIX)]
     return stem.split("_")[0]
@@ -112,6 +126,8 @@ def package(skip_tauri: bool, legacy_zip: bool, open_dir: bool) -> int:
     else:
         kernel = build_tauri()
     log(f"NSIS 内核：{kernel.name}（{kernel.stat().st_size / 1048576:.0f} MB）")
+
+    validate_lean_backend()
 
     ver = version_of(kernel)
     stamp = datetime.now().strftime("%Y%m%d")
