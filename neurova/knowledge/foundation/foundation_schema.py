@@ -21,6 +21,7 @@ from .knowledge_facts import (
     _SCHEMA_V3,
     _SCHEMA_V5,
 )
+from ..ontology.term_registry import _SCHEMA_V8
 from .narratives import NARRATIVE_DOMAIN, _SCHEMA_V4, _SCHEMA_V6, _SCHEMA_V7
 
 _STEPS: List[tuple] = [
@@ -31,6 +32,7 @@ _STEPS: List[tuple] = [
     (5, _SCHEMA_V5),
     (6, _SCHEMA_V6),
     (7, _SCHEMA_V7),
+    (8, _SCHEMA_V8),
 ]
 
 _registered = False
