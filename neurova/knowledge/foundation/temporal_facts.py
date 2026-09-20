@@ -25,6 +25,39 @@ _UTC = datetime.timezone.utc
 _MIN_LABEL_CHARS = 2
 
 
+def subjectsMentionedIn(store: Any, query: str,
+                        agentId: Optional[str] = None) -> List[str]:
+    """"这条查询在问谁"的唯一判据：主体名或别名被查询文本包含。
+
+    时效读面与多跳走查共用它——两条分支对"问的是谁"给出不同答案，
+    就等于同一句话在一轮里被当成两件事。大小写不敏感；短于 2 字的标签不算
+    （否则一个"的"字就能把整张图拽进上下文）。
+    """
+    haystack = (query or "").casefold()
+    if not haystack:
+        return []
+    where = ["status = 'active'"]
+    params: List[Any] = []
+    if agentId:
+        where.append("agent_id = ?")
+        params.append(agentId)
+    with store._lock:
+        rows = store._conn.execute(
+            "SELECT subject_key, canonical_label, aliases_json FROM knowledge_subjects"
+            " WHERE %s" % " AND ".join(where), params).fetchall()
+    keys: List[str] = []
+    for row in rows:
+        labels = [str(row["canonical_label"] or "")]
+        try:
+            labels += [str(a) for a in json.loads(row["aliases_json"] or "[]")]
+        except (ValueError, TypeError):
+            pass
+        if any(len(label.strip()) >= _MIN_LABEL_CHARS and label.casefold() in haystack
+               for label in labels):
+            keys.append(row["subject_key"])
+    return keys
+
+
 class TemporalFactReader:
     """底座时效视图：`query_tkg_for_context` 的返回形状与旧桥逐字相同（检索链契约不破）。"""
 
@@ -48,37 +81,13 @@ class TemporalFactReader:
             return []
         moment = (now or datetime.datetime.now(_UTC)).astimezone(_UTC)
         windowStart = moment - datetime.timedelta(days=max(int(windowDays or 0), 0))
-        keys = self._subjectsMentionedIn(text)
+        keys = subjectsMentionedIn(self._store, text, self._agentId)
         if not keys:
             return []
         rows = self._effectiveFacts(keys, windowStart, moment, maxFacts)
         return [self._asFactDict(row) for row in rows]
 
     # ── 内部 ──────────────────────────────────────────────────
-
-    def _subjectsMentionedIn(self, text: str) -> List[str]:
-        """主体名或别名被查询文本包含 ⇒ 这条查询在问它。大小写不敏感，短名不算。"""
-        haystack = text.casefold()
-        sql = "SELECT subject_key, canonical_label, aliases_json FROM knowledge_subjects"
-        params: List[Any] = []
-        where: List[str] = ["status = 'active'"]
-        if self._agentId:
-            where.append("agent_id = ?")
-            params.append(self._agentId)
-        with self._store._lock:
-            rows = self._store._conn.execute(
-                "%s WHERE %s" % (sql, " AND ".join(where)), params).fetchall()
-        keys: List[str] = []
-        for row in rows:
-            labels = [str(row["canonical_label"] or "")]
-            try:
-                labels += [str(a) for a in json.loads(row["aliases_json"] or "[]")]
-            except (ValueError, TypeError):
-                pass
-            if any(len(label.strip()) >= _MIN_LABEL_CHARS and label.casefold() in haystack
-                   for label in labels):
-                keys.append(row["subject_key"])
-        return keys
 
     def _effectiveFacts(self, keys: List[str], windowStart: datetime.datetime,
                         now: datetime.datetime, limit: int) -> List[Any]:

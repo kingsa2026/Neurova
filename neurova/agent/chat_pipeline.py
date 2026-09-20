@@ -261,6 +261,33 @@ class ChatPipeline:
             # 缺席必须是可见的：B01 能活这么久，就是因为这类失败只留一条 warning。
             logger.error("时效事实分支接入失败（本轮对话没有时效事实可读，不是没有相关事实）: %s", e)
 
+        # 3.6 多跳图检索（priority 27）——读底座的递归 CTE，不读 JSON 属性图
+        # （工单 013，灭 B04：图有覆盖率但答题时从不被用）。读面与时效分支同源，
+        # 所以不会出现"图上说一套、事实库里说一套"。可关闸，但缺席必须是 ERROR 级读数。
+        try:
+            from neurova.agent.graph_retriever_adapter import GraphRetrieverAdapter
+            from neurova.knowledge.foundation.graph_walk import (
+                GRAPH_RETRIEVER_ENV,
+                GraphFactWalker,
+                GraphWalkConfig,
+            )
+            from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
+
+            if GraphWalkConfig.fromEnv().enabled:
+                walker = getattr(self._agent, "_graphFactWalker", None)
+                if walker is None:
+                    walker = GraphFactWalker(get_knowledge_fact_store())
+                    try:
+                        self._agent._graphFactWalker = walker
+                    except Exception:
+                        logger.debug("图走查器无法挂到 agent 上（每轮重建）", exc_info=True)
+                self._memory_retrieval_chain.add_retriever(GraphRetrieverAdapter(walker))
+                logger.debug("Added GraphRetrieverAdapter to retrieval chain")
+            else:
+                logger.info("图检索分支按 %s 关闸跳过（有意的回退，不是故障）", GRAPH_RETRIEVER_ENV)
+        except Exception as e:
+            logger.error("图检索分支接入失败（本轮对话没有多跳事实可读，不是没有相关事实）: %s", e)
+
         # 4. CacheRetriever（低优先级）
         cache_adapter = CacheRetrieverAdapter()
         self._memory_retrieval_chain.add_retriever(cache_adapter)
