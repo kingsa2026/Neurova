@@ -902,6 +902,23 @@ class KnowledgeFactStore:
             )
         logger.info("事实撤回 %s（%s）", factId, reason)
 
+    def reviveRetracted(self, factId: str, reason: str = "") -> bool:
+        """撤回过的内容被重新主张 ⇒ 同一行回到 active，历史留在活动与断言账上。
+
+        只处理 `retracted`：那是"这条说法被收回了"，如今又有了活条目来认领它。
+        `superseded` 不在此列——那意味着存在更新的说法，谁该生效是
+        "改回原样"的时间语义问题（A→B→A），另立一片处理，这里不猜。
+        """
+        with self._lock, self._conn:
+            fact = self._requireFact(factId)
+            if fact["status"] != "retracted":
+                return False
+            self._conn.execute(
+                "UPDATE knowledge_facts SET status = 'active', retracted_at = NULL"
+                " WHERE fact_id = ?", (factId,))
+        logger.info("事实复活 %s（%s）", factId, reason)
+        return True
+
     def setEvidenceState(self, factId: str, evidenceState: str) -> None:
         """本列 NOT NULL：NULL 在这里没有位置，"从未回写"由 adoption_outcome 的 NULL 承载（G07）。"""
         if evidenceState not in EVIDENCE_STATES:
