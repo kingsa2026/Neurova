@@ -17,8 +17,8 @@
 
 本模块只做两件事，字段名一律对齐 orchestrator 真实输出：
 
-1. :func:`summarize_rsi_result` —— raw dict → 响应面摘要（七个字段，
-   含度量证据状态、有证据用例数与缺席闭环系统名单）。
+1. :func:`summarize_rsi_result` —— raw dict → 响应面摘要（八个字段，
+   含度量证据状态、有证据用例数、缺席闭环系统名单与晋升判据结论）。
 2. :func:`record_rsi_summary` / :func:`get_latest_rsi_summary` —— 按
    (agent, session) 记录**最近一次已完成**的迭代摘要。
 
@@ -40,7 +40,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # 响应面摘要的字段集合（唯一契约，测试与推送面都引用它）
 RSI_SUMMARY_FIELDS: Tuple[str, ...] = (
     "status", "applied_count", "gain", "phase_advanced",
-    "measure_state", "evidenced_cases", "placeholder_systems",
+    "measure_state", "evidenced_cases", "placeholder_systems", "phase_verdict",
 )
 
 _UNKNOWN_STATUS = "unknown"
@@ -123,6 +123,22 @@ def _placeholder_systems(result: Mapping[str, Any]) -> Optional[List[str]]:
     return sorted(str(name) for name in names)
 
 
+def phase_verdict_evidence(result: Mapping[str, Any]) -> Optional[Dict[str, str]]:
+    """本轮晋升判据的结论与依据（工单 016 把它接到响应面）。
+
+    为什么必须有出口：`phase_advanced=False` 有两种相反的成因——"缺证据所以不敢推进"
+    （去把证据跑出来）与"有证据且证据否决"（停下来查质量）。只报布尔值就是把两者
+    压成同一个数字，与工单 008 在 gain=0 上拆掉的那个假象同形。三态契约
+    （`docs/CONTEXT.md`）要求 `unevidenced` 出现在观测面，不能只活在日志里。
+
+    `None` 表示这份快照没带判据（历史形态/第三方编排器），**不等于**"判据通过"。
+    """
+    verdict = result.get("phase_verdict")
+    if not isinstance(verdict, Mapping) or not verdict.get("state"):
+        return None
+    return {"state": str(verdict["state"]), "reason": str(verdict.get("reason") or "")}
+
+
 def summarize_rsi_result(result: Any) -> Optional[Dict[str, Any]]:
     """把 RSI 迭代结果压成响应面摘要（字段名对齐 orchestrator 真实输出）。
 
@@ -139,6 +155,7 @@ def summarize_rsi_result(result: Any) -> Optional[Dict[str, Any]]:
     }
     summary.update(measurement_evidence(result))
     summary["placeholder_systems"] = _placeholder_systems(result)
+    summary["phase_verdict"] = phase_verdict_evidence(result)
     return summary
 
 
@@ -207,6 +224,7 @@ __all__ = [
     "MEASURE_STATES",
     "convergence_status",
     "measurement_evidence",
+    "phase_verdict_evidence",
     "summarize_rsi_result",
     "record_rsi_summary",
     "get_latest_rsi_summary",

@@ -437,6 +437,10 @@ class CognitiveStorageEngine:
                     return True
                 elif key == "category" and node.category != val:
                     return True
+                # 工单 017：冷档过滤。淘汰必须可观测——只把温度调小而读侧照样返回，
+                # 等于没有淘汰路径（这一格是给结晶模式用的，调用方自己带阈值）
+                elif key == "min_temperature" and node.temperature < float(val):
+                    return True
         return False
 
     def retrieve(self, query: str, limit: int = 10, filters: Dict = None) -> List[UnifiedMemoryNode]:
@@ -507,7 +511,31 @@ class CognitiveStorageEngine:
 
         # 3. 排序（温度优先）
         deduped.sort(key=lambda n: n.temperature, reverse=True)
-        return deduped[:limit]
+        top = deduped[:limit]
+        self._credit_access(top)
+        return top
+
+    def _credit_access(self, nodes: List[UnifiedMemoryNode]) -> None:
+        """检索命中即记账（工单 006）：内存 touch + 落盘。
+
+        原实现 `retrieve()` 从不调 `touch()`，全仓 touch 的调用方都在记忆侧
+        `manager.py` —— 结晶条目的 `access_count` 因此永远停在写入值 0，
+        使用度、按质量降权（007）、冷热度淘汰（017）都没有数据源。
+        计数走 DB 侧自增（`access_count + 1`）而非回写内存值，与
+        `update_temperature` 同一取向：避免读-改-写把并发 increment 覆盖掉。
+        L0 尚未 flush 的节点本轮更新 0 行，其内存值随 flush 落盘。
+        """
+        if not nodes:
+            return
+        for node in nodes:
+            node.touch()
+        with self._db_lock:
+            self._db.executemany(
+                "UPDATE memories SET access_count = access_count + 1, "
+                "temperature = MIN(100.0, temperature + 10.0), updated_at = ? WHERE id = ?",
+                [(node.updated_at.isoformat(), node.id) for node in nodes],
+            )
+            self._db.commit()
 
     def _row_to_node(self, row: tuple) -> UnifiedMemoryNode:
         """SQLite 行转 UnifiedMemoryNode"""
@@ -525,6 +553,24 @@ class CognitiveStorageEngine:
             access_count=row[10],
             trace_id=row[11],
         )
+
+    def iter_nodes(self, filters: Dict = None, limit: int = 500) -> List[UnifiedMemoryNode]:
+        """只读列举 L1 节点，**不做访问记账**。
+
+        巡检类调用方（结晶模式冷处理 017）需要遍历节点，但不能把"我在巡检"
+        记成"这条被用了一次"——走 retrieve() 会 touch + 刷新 updated_at，
+        于是闲置判定永远不成立，冷档也永远进不来。
+        """
+        with self._db_lock:
+            rows = self._db.execute(
+                """SELECT id, content, memory_type, category,
+                          temperature, layer, metadata, embedding,
+                          created_at, updated_at, access_count, trace_id
+                   FROM memories ORDER BY updated_at LIMIT ?""",
+                (int(limit),),
+            ).fetchall()
+        nodes = [self._row_to_node(row) for row in rows]
+        return [n for n in nodes if not self._apply_filters(n, filters)]
 
     def update_temperature(self, node_id: str, delta: float) -> None:
         """更新温度"""

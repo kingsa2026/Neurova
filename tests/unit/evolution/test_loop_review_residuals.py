@@ -26,7 +26,12 @@ class TestCrystallizerCallbackPassesSelf:
         return PatternCrystallizer(engine=engine, evolution_orchestrator=evolution)
 
     def test_crystallize_callback_passes_self(self):
-        """结晶成功回调必须显式传 crystallizer=self（agent 级隔离不因回调复活）"""
+        """结晶通报走本实例自己的 evolution，且不得再投任何成败票。
+
+        原实现靠 `record_experience(..., crystallizer=self)` 防"回落到单例导致跨 agent
+        串写"；工单 005 把这条回灌整个换掉——通报走 `self.evolution`（本实例构造时
+        绑定的编排器），结构上就不存在回落单例的路径，同时不再给自己投成功票。
+        """
         mock_engine = MagicMock()
         mock_engine.retrieve.return_value = []
         orch = EvolutionOrchestrator()
@@ -34,20 +39,28 @@ class TestCrystallizerCallbackPassesSelf:
 
         captured = {}
 
-        def fake_record(text, task, tools, success, crystallizer=None):
-            captured["crystallizer"] = crystallizer
-            return {"success": True}
+        def fake_notify(**kwargs):
+            captured.update(kwargs)
+            return {"notified": True}
 
+        # 注意：`_store_candidate` 的通报块吞异常，所以"不得回灌成经验票"必须
+        # 用 mock 的 call_count 断言，不能靠抛异常（抛了也只是被 logger.warning 吃掉）
         with patch(
+            "neurova.evolution.evolution_facade.EvolutionFacade.notify_pattern_crystallized",
+            side_effect=fake_notify,
+        ), patch(
             "neurova.evolution.evolution_facade.EvolutionFacade.record_experience",
-            side_effect=fake_record,
-        ):
+        ) as record_spy:
             for _ in range(3):
                 cryst.observe(tool_name="w1", context="重复任务模式", success=True)
+            cryst.confirm_pending([
+                {"key": c["key"], "approved": True, "reason": "测试"}
+                for c in cryst.list_pending()
+            ])
 
-        assert captured.get("crystallizer") is cryst, (
-            "结晶回调必须传 crystallizer=self，否则回退到单例上可能换主的实例"
-        )
+        assert record_spy.call_count == 0, "结晶又回灌成一条经验票（自喂成功票回潮）"
+        assert captured.get("pattern_key"), "入库通报没有发出（进化侧看不见新模式）"
+        assert mock_engine.store.called
 
 
 class TestEkbSingletonUsage:

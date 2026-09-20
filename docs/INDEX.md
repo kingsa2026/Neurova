@@ -17,6 +17,7 @@
 | 领域 | 权威文档 | 说明 |
 |------|----------|------|
 | 整体架构 | `/CONTEXT.md`+ `` | 系统级事实源 |
+| **架构模型（可视化）** | `docs/architecture-model/` | **证据接地的 C4/DOT 文本源与风险图，`CONTEXT.md` 的图文配套层**；图中每条结论带 `文件:行号`，与 CONTEXT.md 冲突时以本目录的实测证据提 issue 回修 CONTEXT.md |
 | 架构决策(ADR) | `docs/adr/` | 已编号的决策记录，不可覆盖 |
 | API 规范 | `docs/api/` + `` | 接口事实源 |
 | 记忆系统 | `docs/memory/` | 记忆层事实源 |

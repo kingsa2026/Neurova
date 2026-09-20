@@ -1,0 +1,10 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ComputerView stats > snapshot of stats output shape 1`] = `
+{
+  "byoa": 1,
+  "cloud": 0,
+  "online": 1,
+  "total": 1,
+}
+`;

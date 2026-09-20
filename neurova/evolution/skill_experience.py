@@ -11,7 +11,7 @@ evolutions.json 分离模型：
   可回滚）。重建语义是"持久化压缩"而非行为变更——重建前后有效文本
   一致（合并进定义的记录不再重复注入）。
 - **淘汰**：min_uses + 成功率上限双门槛圈出候选；自动禁用默认关
-  （NEUROVA_SKILL_AUTO_RETIRE=1 才生效），默认只上报候选（日志）。
+  （治理设置 skill_auto_retire_enabled 打开才执行），默认只上报候选（日志）。
 
 持久化：复用 PersistedStateMixin（data/evolution/skill_experiences.json，
 env NEUROVA_EVOLUTION_SKILL_EXPERIENCE 覆盖）；由 bootstrap_evolution_persistence
@@ -20,7 +20,6 @@ env NEUROVA_EVOLUTION_SKILL_EXPERIENCE 覆盖）；由 bootstrap_evolution_persi
 
 from __future__ import annotations
 
-import os
 import threading
 import time
 import uuid
@@ -511,7 +510,7 @@ def run_skill_experience_maintenance(
     具体技能并写入经验库（applied 立即生效）——归因在重建之前执行，
     归因写入计入 pending，可触发重建。ledger 缺席时归因跳过（向后兼容）。
 
-    淘汰自动禁用默认关（NEUROVA_SKILL_AUTO_RETIRE=1 才执行
+    淘汰自动禁用默认关（治理设置 skill_auto_retire_enabled 打开才执行
     registry.set_skill_enabled(False) + skill_service.disable_skill），
     默认只上报候选——淘汰依据可见，执行有人工闸门。
     """
@@ -542,11 +541,11 @@ def run_skill_experience_maintenance(
                 except Exception as e:  # noqa: BLE001 - 单技能失败不拖垮其余
                     logger.warning("技能 %s 重建失败: %s", skill_id, e)
 
-    # 2) 淘汰：候选圈定（可见）；自动禁用走 env 闸门
+    # 2) 淘汰：候选圈定（可见）；自动禁用走治理开关
     candidates = store.get_retirement_candidates()
     result["retire_candidates"] = candidates
     if candidates:
-        if os.environ.get("NEUROVA_SKILL_AUTO_RETIRE") == "1" and registry is not None:
+        if _auto_retire_enabled() and registry is not None:
             for skill_id in candidates:
                 disabled = False
                 try:
@@ -562,8 +561,19 @@ def run_skill_experience_maintenance(
                 result["retired"].append(skill_id)
                 logger.info("🔴 技能 %s 已按使用统计自动淘汰（%s）", skill_id, "disabled" if disabled else "disabled-failed")
         else:
-            logger.info("🟡 技能淘汰候选（NEUROVA_SKILL_AUTO_RETIRE=1 启用自动禁用）: %s", candidates)
+            logger.info("🟡 技能淘汰候选（治理设置 skill_auto_retire_enabled 启用自动禁用）: %s", candidates)
     return result
+
+
+def _auto_retire_enabled() -> bool:
+    """技能自动淘汰是否执行禁用（工单 015 从裸 env 收进治理设置）。
+
+    优先级 env 显式 0 > env 显式 1 > 治理设置 > 默认关；默认关沿用的是收口前
+    "只上报候选"的现网口径，收口本身不改默认。
+    """
+    from neurova.security.governance_settings import resolve_flag
+
+    return resolve_flag("skill_auto_retire_enabled", "NEUROVA_SKILL_AUTO_RETIRE")
 
 
 # ────── 单例管理 ──────

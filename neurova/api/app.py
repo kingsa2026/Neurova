@@ -522,6 +522,9 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
         router,
         set_app_state,
     )
+    
+    # Budget management API
+    from neurova.api.endpoints.budget_api import router as budget_router
 
     # 全局业务异常处理：APIError → 标准 JSON 信封（未注册时会变成纯文本 500）
     from neurova.api.error_handlers import register_error_handlers
@@ -554,6 +557,13 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
     app.include_router(acp_router, prefix="/api/acp", tags=["ACP"])
     app.include_router(evolution_router, prefix="/api/evolution", tags=["Evolution"])
     app.include_router(rag_router, prefix="/api/rag", tags=["RAG"])
+    
+    # 注册预算管理系统 API
+    app.include_router(budget_router, prefix="/api")
+    
+    # Cost rollup API (performance optimization)
+    from neurova.api.endpoints.cost_rollup_api import router as cost_rollup_router
+    app.include_router(cost_rollup_router, prefix="/api")
     
     # 注册 NEURON 系统路由
     from neurova.api.endpoints.neuron import router as neuron_router
@@ -816,6 +826,20 @@ async def _on_startup(app_state: AppState) -> None:
         await asyncio.to_thread(bootstrap_index_observability)
     except Exception as _idx_err:  # noqa: BLE001
         logger.debug("索引可观测启动采集失败（忽略）: %s", _idx_err)
+
+    # LLM 成本账本装配：装配后 @track_llm_call 与流式记账才真正落盘 SQLite，
+    # 并启动小时聚合后台任务。默认开，NEUROVA_COST_TRACKING=off 显式停用；
+    # 账本路径由 NEUROVA_LLM_COST_DB 覆盖（缺省 data/llm_cost.db）。fail-open 不阻断启动。
+    if (os.environ.get("NEUROVA_COST_TRACKING") or "on").strip().lower() != "off":
+        try:
+            from neurova.models.cost_rollup import get_rollup_manager
+            from neurova.models.cost_store import install_llm_cost_store
+
+            install_llm_cost_store()
+            get_rollup_manager().start_background_job()
+            logger.info("LLM 成本账本已装配，小时聚合后台任务已启动")
+        except Exception as _cost_err:  # noqa: BLE001
+            logger.warning("LLM 成本账本装配失败（忽略）: %s", _cost_err)
 
     # 初始化 TTS 引擎
     if hasattr(app_state, "tts_manager") and app_state.tts_manager:

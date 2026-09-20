@@ -1,0 +1,7 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`CostDashboard data logic > snapshot of token calculation result 1`] = `
+{
+  "totalTokens": 1500,
+}
+`;

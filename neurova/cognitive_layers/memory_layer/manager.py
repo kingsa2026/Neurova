@@ -22,6 +22,7 @@ MemoryManager — 记忆管理器（CogArch 总线版）
 
 import json
 import datetime
+from neurova.core.content_identity import normalized_key
 from neurova.core.logger import get_logger
 import os
 import sqlite3
@@ -173,6 +174,9 @@ class MemoryManager:
 
         # 内部存储（简易实现，子模块可覆盖）
         self._memories: Dict[str, Memory] = {}
+        # 内容门索引（011）：作用域三元组 + 归一化内容键 → 既有记忆 id
+        self._content_index: Dict[Tuple[str, str, str, str], str] = {}
+        self._content_index_ready = False
         self._counter = 0
         self._lock = threading.RLock()
         self._last_decay_at: Optional[float] = None   # 节流：上次 run_decay_cycle 的 monotonic 时间戳
@@ -259,6 +263,8 @@ class MemoryManager:
             "total_memories": len(self._memories),
             "recall_count": 0,
             "remember_count": 0,
+            # 工单 012：未知类型写入的可见计数（0 才是正常态）
+            "unknown_memory_type_count": 0,
         }
 
         logger.info(
@@ -289,6 +295,15 @@ class MemoryManager:
     def _init_persistence_db(self):
         """初始化 SQLite 持久化数据库"""
         try:
+            if str(self._db_path).startswith(":memory:"):
+                # 工单 011 顺带修根因：`db_path=":memory:"` 曾被"取同目录"规则
+                # 落到仓库根的共享 neurova_memories_persist.db（实测攒进 7 万余行
+                # 测试数据），于是"内存库"测试跨运行、跨用例互相读到对方的行。
+                # 声明为内存库就不该落盘：持久层整条关闭，_persist_memory 静默跳过。
+                self._persist_db_path = None
+                self._persist_conn = None
+                logger.debug("MemoryManager(db_path=':memory:') 不落盘持久库")
+                return
             # 使用与 db_path 同目录的持久化文件
             db_dir = os.path.dirname(self._db_path) or "."
             self._persist_db_path = os.path.join(db_dir, "neurova_memories_persist.db")
@@ -716,6 +731,99 @@ class MemoryManager:
 
     # ────── Core Memory Operations ──────
 
+    # 内容门只对"仍在服务"的记忆生效：已遗忘/归档的旧行不充当拦截目标，
+    # 否则重新学到同一句会被改道回一条死行（链 B 的 supersede 语义依赖这点）。
+    _CONTENT_GATE_STAGES = (
+        LifecycleStage.ACTIVE,
+        LifecycleStage.CONSOLIDATED,
+        LifecycleStage.CRYSTALLIZED,
+    )
+
+    def _content_gate_key(self, mem: Memory) -> Optional[Tuple[str, ...]]:
+        """既有记忆的内容门键；已出服务期或无内容身份时返回 None。"""
+        if mem.lifecycle_stage not in self._CONTENT_GATE_STAGES:
+            return None
+        return self._gate_key(
+            mem.agent_id,
+            mem.neuser_id,
+            mem.user_id,
+            mem.content,
+            mem.category,
+            mem.memory_type,
+            mem.perspective,
+            mem.origin,
+        )
+
+    def _gate_key(
+        self,
+        agent_id: str,
+        neuser_id: str,
+        user_id: str,
+        content: str,
+        category: Any,
+        memory_type: Any,
+        perspective: Any,
+        origin: Any,
+    ) -> Optional[Tuple[str, ...]]:
+        """门键 = 作用域三元组 + 归一化内容 + 读取侧据以区分行的分类维度。
+
+        分类维度必须进键：同文本但 origin/类型/分类/视角不同是两条语义不同的
+        记忆（检索按 origin 降权、按 category/memory_type 过滤），合并等于丢
+        一条。生命周期阶段与温度/重要度/情感是"同一事实的可变状态"，不进键。
+        归一后为空（纯空白/纯标点）不携带内容身份 ⇒ 返回 None，不拦截。
+        """
+        text = normalized_key(content)
+        if not text:
+            return None
+        return (
+            agent_id,
+            neuser_id,
+            user_id,
+            text,
+            *(str(getattr(v, "value", v)) for v in (category, memory_type, perspective, origin)),
+        )
+
+    def _ensure_content_index(self) -> None:
+        """首次写入前按当前快照建索引（含从持久层载入的行，故门跨重启生效）。"""
+        if self._content_index_ready:
+            return
+        self._content_index = {}
+        for mem in self._memories.values():
+            key = self._content_gate_key(mem)
+            if key is not None:
+                self._content_index.setdefault(key, mem.id)
+        self._content_index_ready = True
+
+    def _content_gate_lookup(self, key: Optional[Tuple[str, ...]]) -> Optional[str]:
+        """命中既有同内容活跃记忆的 id；无内容身份（key=None）时返回 None。"""
+        if key is None:
+            return None
+        hit = self._content_index.get(key)
+        if hit is None:
+            return None
+        mem = self._memories.get(hit)
+        if mem is not None and self._content_gate_key(mem) == key:
+            return hit
+        # 自愈：目标行已被删除/遗忘/归档，键重新开放
+        del self._content_index[key]
+        return None
+
+    def _sync_content_index(
+        self, mem: Memory, old_key: Optional[Tuple[str, ...]]
+    ) -> None:
+        """行内容/阶段变更后跟随索引：撤掉旧键、登记新键。
+
+        旧键由调用方在改动**前**取好（O(1) 归一化），避免为找旧键扫全索引——
+        睡眠整合会成批改写内容。只做跟随不做合并：把某行改成与另一行同键时，
+        不得顺手删掉任何一行（那是把"改一条记忆"放大成"丢一条记忆"）。
+        """
+        self._ensure_content_index()
+        if old_key is not None and self._content_index.get(old_key) == mem.id:
+            del self._content_index[old_key]
+        key = self._content_gate_key(mem)
+        if key is not None:
+            self._content_index[key] = mem.id
+
     def remember(
         self,
         content: str,
@@ -735,7 +843,13 @@ class MemoryManager:
         # 控制参数(留 kwargs): auto_analyze_emotion / auto_classify / classification_context
         **kwargs,
     ) -> str:
-        """存储一条记忆"""
+        """存储一条记忆
+
+        内容门语义（工单 011，择一写明）：同一作用域内归一化后相同的表述**只保
+        首条** —— 后到的同键写入返回既有 id、刷新 `updated_at`（再确认），不新增
+        行也不另记计数。计数版语义落在 EKB `add_experience_record`（`seen_count`），
+        两处口径不同是因为记忆行的温度/权重由衰减器持有，重复计数在此无消费方。
+        """
         # 配置化默认值（memory-settings 配置页）: manager.new_memory_temperature /
         # new_memory_importance。默认 65（温度死锁修复：原 100 ≥ 高温不衰减
         # 阈值 80，新记忆从未真正参与衰减）；
@@ -752,6 +866,7 @@ class MemoryManager:
                 importance = float(_cfg.get("manager.new_memory_importance", 50.0))
 
         with self._lock:
+            self._ensure_content_index()
             self._counter += 1
             mem_id = kwargs.get("id", f"mem_{self._counter:06d}")
 
@@ -764,12 +879,16 @@ class MemoryManager:
                     emotion_val = EmotionType.NEUTRAL
 
             # 安全解析 memory_type（防御无效枚举值）
+            # 工单 012：回落 SEMANTIC 不再静默——原声明进 metadata、计数进 _stats，
+            # 行照存（按 D1"标无证据不砍量"：拒绝会把用户内容丢成一次 500）。
+            _declared_memory_type: Optional[str] = None
             if isinstance(memory_type, str):
                 try:
                     parsed_memory_type = MemoryType(memory_type)
                 except (ValueError, KeyError):
                     logger.warning("Invalid memory_type '%s', falling back to SEMANTIC", memory_type)
                     parsed_memory_type = MemoryType.SEMANTIC
+                    _declared_memory_type = memory_type
             elif memory_type is None:
                 # None 直通会导致 _persist_memory 的 .value 炸掉（API 传 null 时触发）
                 parsed_memory_type = MemoryType.SEMANTIC
@@ -803,6 +922,11 @@ class MemoryManager:
             # P-3 修复: 非法枚举 category 字符串保留到 metadata, 供 recall 按原始标签过滤
             if isinstance(category, str) and parsed_category == MemoryCategory.GENERAL and category != "general":
                 final_metadata["_original_category"] = category
+
+            # 工单 012：未知 memory_type 的原始声明留痕 + 计数可见（不静默换类型）
+            if _declared_memory_type is not None:
+                final_metadata["_declared_memory_type"] = _declared_memory_type
+                self._stats["unknown_memory_type_count"] += 1
 
             # P1-9 来源信任分级: 只认显式 origin 形参, metadata 不可改写（结构门控）。
             # 非法值 fail-safe 降级为 untrusted（绝不静默升权）。
@@ -841,6 +965,26 @@ class MemoryManager:
             else:
                 final_lifecycle_stage = LifecycleStage.ACTIVE
 
+            # 内容门（011）：作用域 + 归一化内容 + 分类维度同键 ⇒ 命中既有活跃
+            # 记忆，返回其 id 并刷新 updated_at（再确认），不新增行。
+            # 显式 id 是身份寻址写入（M-25 自定义 id / 恢复路径），不得被改道。
+            if "id" not in kwargs:
+                gate_key = self._gate_key(
+                    self._agent_id,
+                    self._eff_neuser_id(),
+                    self._eff_user_id(),
+                    content,
+                    parsed_category,
+                    parsed_memory_type,
+                    parsed_perspective,
+                    parsed_origin,
+                )
+                hit = self._content_gate_lookup(gate_key)
+                if hit is not None:
+                    self._memories[hit].updated_at = datetime.datetime.now(datetime.timezone.utc)
+                    self._persist_memory(self._memories[hit])
+                    return hit
+
             mem = Memory(
                 id=mem_id,
                 content=content,
@@ -860,6 +1004,9 @@ class MemoryManager:
             if final_metadata.get("type") == "question_queue":
                 self._persist_memory(mem)
             self._memories[mem_id] = mem
+            gated_key = self._content_gate_key(mem)
+            if gated_key is not None:
+                self._content_index[gated_key] = mem_id
             # 审计 P1-D6：关键词倒排增量维护（替代 recall 每查询全量重建）
             try:
                 from neurova.cognitive_layers.memory_layer.semantic_search import (
@@ -1320,6 +1467,10 @@ class MemoryManager:
             mem = self._memories.get(memory_id)
             if not mem:
                 return False
+            # 内容门索引跟随（011）：门键只由内容 + 阶段决定，故只在这两类字段
+            # 被改写时同步，并在改动发生**前**取旧键。
+            gate_follows = "content" in kwargs or "lifecycle_stage" in kwargs
+            gate_old_key = self._content_gate_key(mem) if gate_follows else None
             if (mem.metadata or {}).get("type") == "question_queue":
                 from copy import deepcopy
 
@@ -1367,6 +1518,8 @@ class MemoryManager:
             mem.updated_at = __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
             self._persist_memory(mem)  # 更新持久化
             self._memories[memory_id] = mem
+            if gate_follows:
+                self._sync_content_index(mem, gate_old_key)
         # bus.emit 在锁外执行，避免持锁调用 handler 导致递归死锁
         self._bus.emit(
             MemoryEvent(

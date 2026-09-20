@@ -187,11 +187,12 @@ def test_max_phase_reports_failed_without_needing_evidence():
 def test_verdict_reasons_are_collected_not_first_wins_only():
     """多判据同时缺证据时，reason 要一次列全，否则修一个又冒一个。
 
-    取 phase 3：三道读数（收敛结论、roi、无回滚天数）在该阶段全部必需，
-    于是空 metrics 应一次把三项都写进 reason —— 这也顺带锁住了必需表本身。
+    取 phase 3：四道读数（收敛结论、roi、无回滚天数、经验质量）在该阶段全部必需，
+    于是空 metrics 应一次把四项都写进 reason —— 这也顺带锁住了必需表本身
+    （工单 016 把 `experience_quality` 加进这张表，因而也加进这里）。
     """
     verdict = _controller(3).evaluate_phase_transition({})
 
     assert verdict.state == "unevidenced"
-    for key in ("convergence_status", "roi", "days_without_rollback"):
+    for key in ("convergence_status", "roi", "days_without_rollback", "experience_quality"):
         assert key in verdict.reason, f"reason 未列出 {key}：{verdict.reason}"

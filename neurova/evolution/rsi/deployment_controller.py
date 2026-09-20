@@ -8,6 +8,7 @@ from neurova.core.logger import get_logger
 from typing import Any, Dict, List
 
 from .gate_verdict import GateVerdict
+from .metrics import RSIMetrics
 
 logger = get_logger(__name__)
 
@@ -88,7 +89,7 @@ class RSIDeploymentController:
     # 有读数且结论为否：无论本阶段是否"要求"该读数，一律硬否决
     _VETOING_CONVERGENCE = ("diverging", "measurement_blind")
 
-    # 各阶段**必须具备**的读数（工单 008）。缺席即 `unevidenced`。
+    # 各阶段**必须具备**的读数（工单 008，工单 016 加入经验质量一项）。缺席即 `unevidenced`。
     #
     # 这张表按"走到这一步之前，系统有没有可能已经产生过该读数"来填，
     # 而不是每个阶段一律要三份 —— 后者会把晋升链锁成循环依赖（工单 006 移交本单的裁决）：
@@ -97,13 +98,69 @@ class RSIDeploymentController:
     # - phase 0 → 1：观察期只收数据，无风险可证，不要求；
     # - phase 1 → 2：本阶段仍未自动执行过任何东西，只有"装配以来的无回滚天数"可查，即卡口；
     # - phase 2 → 3：低风险自动执行已跑过，成本收益与收敛结论都应在盘上，转为必需；
+    #   经验质量也从这里开始必需 —— phase 0/1 不自动执行任何东西，但"照经验做"
+    #   （检索→注入）从第一次对话起就在发生；把自主权从"低风险自动执行"扩到
+    #   "中风险自动执行"之前，必须拿得出"照经验做确实在帮忙"的证据（工单 016）。
     # - phase 3 → 4：同上，另需 30 天无回滚。
     _REQUIRED_EVIDENCE = {
         0: frozenset(),
         1: frozenset({"days_without_rollback"}),
-        2: frozenset({"days_without_rollback", "roi", "convergence_status"}),
-        3: frozenset({"days_without_rollback", "roi", "convergence_status"}),
+        2: frozenset({
+            "days_without_rollback", "roi", "convergence_status", "experience_quality",
+        }),
+        3: frozenset({
+            "days_without_rollback", "roi", "convergence_status", "experience_quality",
+        }),
     }
+
+    def _experience_quality_guard(
+        self, metrics: Dict[str, Any], required: bool, unevidenced: List[str]
+    ) -> GateVerdict:
+        """经验质量这一道证据：有读数且为否 ⇒ 硬否决；没有读数 ⇒ 无据（工单 016）。
+
+        读数来自 `RSIMetrics.experience_quality_readout()`（唯一算式在
+        `EKB.quality_snapshot()`），本方法**不重算任何数**，阈值也不另立一份：
+        与 008 的告警共用 `ALERT_THRESHOLDS`，且在决策时刻读——
+        两处各算/各配一份，漂移之后就没有人能信读数。
+
+        Args:
+            metrics: 阶段判据入参
+            required: 本阶段是否**必须**有这份读数（缺席才落 unevidenced）
+            unevidenced: 无据项收集器（多判据一次列全，修一个又冒一个是最坏的体验）
+
+        Returns:
+            GateVerdict: 否决时返回 `failed`；否则返回 `passed`（哨兵，调用方按
+            `bool()` 判定），并把无据项写进 `unevidenced`。
+        """
+        quality = metrics.get("experience_quality")
+        quality = quality if isinstance(quality, dict) else {}
+        rate = quality.get("adoption_success_rate")
+        floor = RSIMetrics.ALERT_THRESHOLDS["experience_adoption_success_rate_warning"]
+
+        if isinstance(rate, (int, float)) and rate < floor:
+            # 有采纳证据且证据为否：不因"此阶段不要求该读数"而豁免（硬否决与必需性无关）
+            logger.warning("Experience adoption quality vetoes promotion: rate=%s", rate)
+            return GateVerdict.failed(
+                f"经验采纳后成功率 {rate:.2f} 低于晋升门槛 {floor:.2f}，"
+                f"照经验做在帮倒忙（采纳决策 {quality.get('adoption_decisions')} 次）",
+                rate,
+            )
+
+        if required:
+            rows = quality.get("rows")
+            if not isinstance(rows, (int, float)) or rows <= 0:
+                # 空库的 unevidenced_ratio=0.0 是"没数据可判"，读成"质量完美"就是
+                # 本批一路在拆的那个形态的镜像
+                unevidenced.append(
+                    "experience_quality 缺失：经验库没有条目，质量读数无从判断"
+                    "（空库读数为 0 不等于质量完美）"
+                )
+            elif rate is None:
+                unevidenced.append(
+                    f"experience_quality 缺失：{int(rows)} 条经验的采纳决策仅 "
+                    f"{quality.get('adoption_decisions')} 次，样本不足以下质量结论"
+                )
+        return GateVerdict.passed()
 
     def evaluate_phase_transition(self, metrics: Dict[str, Any]) -> GateVerdict:
         """评估是否应该进入下一阶段（三态判据，工单 003/008）。
@@ -114,7 +171,7 @@ class RSIDeploymentController:
 
         两类判据分开处理：
         - **硬否决**（有读数且结论为否）：发散、度量失明、不可晋升的收敛读数、
-          负 ROI、无回滚天数未达标
+          负 ROI、无回滚天数未达标、经验采纳后成功率低于门槛
           —— 只要读数存在就生效，不因"此阶段不要求"而豁免；
         - **必需性**（该阶段必须有读数）：缺席才判 `unevidenced`。
 
@@ -170,6 +227,12 @@ class RSIDeploymentController:
                     f"要求的 {required_days} 天",
                     days,
                 )
+
+        quality_verdict = self._experience_quality_guard(
+            metrics, "experience_quality" in required, unevidenced
+        )
+        if not quality_verdict:
+            return quality_verdict
 
         if unevidenced:
             return GateVerdict.unevidenced("；".join(unevidenced), dict(metrics))

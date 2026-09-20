@@ -44,6 +44,9 @@ class RSIDashboard:
 
         return {
             "metrics": metrics_data["metrics"],
+            # 工单 008：经验族视图（形成条数 / 无证据占比 / 命中率 / 采纳后成功率）。
+            # 只有指标没有视图 = 读数没人看，与本批一路在治的"写了没人读"同形。
+            "experience": metrics_data.get("experience", {}),
             "alerts": metrics_data["alerts"],
             "summary": metrics_data["summary"],
             "convergence": convergence_data,

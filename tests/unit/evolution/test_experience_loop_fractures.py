@@ -249,6 +249,13 @@ class TestExperienceLoopEndToEndFlow:
                 success=True,
             )
 
+        # 工单 005：规则预筛通过 ≠ 入库，候选还要过 LLM 可复用性裁决。
+        # 本用例测"观察 → 结晶 → 检索"整条流，裁决在这里按"可复用"落定。
+        crystallizer.confirm_pending([
+            {"key": c["key"], "approved": True, "reason": "流程用例"}
+            for c in crystallizer.list_pending()
+        ])
+
         # 验证结晶发生（engine.store 被调用）
         mock_engine.store.assert_called()
 
@@ -322,6 +329,12 @@ class TestExperienceLoopEndToEndFlow:
         # 5. 模拟 2 次更多观察触发结晶
         for _ in range(2):
             crystallizer.observe(tool_name="search", context="搜索信息", success=True)
+
+        # 工单 005：预筛过的候选要过裁决才入库（本用例测整条闭环流）
+        crystallizer.confirm_pending([
+            {"key": c["key"], "approved": True, "reason": "流程用例"}
+            for c in crystallizer.list_pending()
+        ])
 
         # 验证结晶发生
         mock_engine.store.assert_called()

@@ -34,8 +34,11 @@ from neurova.knowledge.foundation.narratives import FOUNDATION_DB_NAME, Narrativ
 logger = get_logger(__name__)
 
 DEFAULT_STORAGE_DIR = "./data/knowledge"
-# 工单 019a：叙述层权威从 knowledge.json 换到底座库。默认关——关闸态必须逐位等于旧行为。
+# 工单 019a–019b-4b：条目权威已从 knowledge.json 换到底座库，**默认开**。
+# 留一个显式回退值（off/json）而不是删掉这条路：搬家是可逆动作，回退步骤见
+# docs/specs/2026-09-20-knowledge-foundation-design.md 的开关台账。
 NARRATIVE_STORE_ENV = "NEUROVA_KB_NARRATIVE_STORE"
+_JSON_BACKEND_VALUES = ("0", "false", "off", "no", "json")
 VISIBILITY_PUBLIC = "public"
 VISIBILITY_PRIVATE = "private"
 _SUBMISSION_PENDING = "pending"
@@ -57,9 +60,12 @@ def _norm_title(title: str) -> str:
 
 
 def _narrativeStoreEnabled() -> bool:
-    """叙述层是否以底座库为权威（工单 019a 开关，默认关=旧 JSON 行为）。"""
-    return (os.environ.get(NARRATIVE_STORE_ENV) or "").strip().lower() in (
-        "1", "true", "on", "yes", "sqlite")
+    """叙述层权威在不在底座库。默认在——只有显式写 off/json 才退回旧行为。
+
+    默认值翻向 SQLite 之后，"没设过环境变量"和"设成 off"是两件不同的事：
+    前者是新常态，后者是一次有意的回退，日志与报错都按后者措辞。
+    """
+    return (os.environ.get(NARRATIVE_STORE_ENV) or "").strip().lower() not in _JSON_BACKEND_VALUES
 
 
 def _chunk_hit(item: Dict[str, Any], chunk_index: int, score: float) -> Dict[str, Any]:
@@ -440,8 +446,9 @@ class KnowledgeRepository:
         elif NarrativeStore.findArchivedJson(str(self._dir)):
             raise RuntimeError(
                 "叙述层已搬进 %s（旧文件归档于 %s），此处回退成只读 JSON 会静默开一个空库。"
-                "要保持新后端请设 %s=on；要回退请把归档文件改回 knowledge.json "
-                "并清空底座库里的 knowledge_narratives 表。"
+                "要保持新后端就别设 %s=off；要回退请把归档文件改回 knowledge.json "
+                "并清空底座库里的 knowledge_narratives / knowledge_tombstones /"
+                " knowledge_entry_conflicts 三张表。"
                 % (self._narrative_db_path, NarrativeStore.findArchivedJson(str(self._dir))[0],
                    NARRATIVE_STORE_ENV)
             )

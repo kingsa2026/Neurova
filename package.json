@@ -1,0 +1,23 @@
+{
+  "name": "neurova",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Neurova LLM Cost Control Guards",
+  
+  "scripts": {
+    "guard:big-brain": "node scripts/guard-big-brain.cjs",
+    "guard:llm-tracked": "node scripts/guard-llm-tracked.cjs",
+    "guard:all": "npm run guard:big-brain && npm run guard:llm-tracked",
+    "cost:analyze": "python scripts/cost_analyzer.py",
+    "cost:rollup": "python scripts/cost_rollup.py"
+  },
+  
+  "devDependencies": {
+    "@types/node": "^20.10.0"
+  },
+  
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

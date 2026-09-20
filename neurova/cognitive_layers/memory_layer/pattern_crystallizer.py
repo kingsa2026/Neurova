@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from neurova.core.logger import get_logger
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from .cognitive_storage_engine import CognitiveStorageEngine, MemoryType, UnifiedMemoryNode
@@ -41,6 +41,10 @@ _STOP_WORDS = frozenset({
 
 # 关键词提取正则: 匹配连续中文或英文单词
 _TOKEN_RE = re.compile(r"[\u4e00-\u9fff]+|[a-zA-Z][a-zA-Z0-9_]*")
+
+# 结晶模式的冷档线（工单 017）：温度低于此值即退出注入池。
+# 与 reap_stale_patterns() 配对构成淘汰路径——只衰减不屏蔽是假淘汰。
+COLD_PATTERN_TEMPERATURE = 20.0
 
 
 def _tokenize(context: str) -> List[str]:
@@ -95,23 +99,38 @@ class PatternCrystallizer:
                 此前 _buffer 纯内存，重启丢计数，低频场景"≥3 次结晶"
                 永远凑不齐。提供时按模式键持久化聚合计数，重启恢复）
         """
-        import os as _os
-
         self.engine = engine
         self.evolution = evolution_orchestrator
         self._state_path = state_path
+        # 入库门槛（工单 004）：默认值即历史上的字面量 3 / 0.6；
+        # 值由 ExperienceFeedback 经 attach_crystallizer 桥推进（RSI 可调参数面）
+        self.min_observations = 3
+        self.min_success_rate = 0.6
         self._buffer: Dict[str, List[Dict[str, Any]]] = {}
         # 混合信号层：规则预筛（≥3 次 & 成功率≥60%）通过后，
         # 候选不再直写存储引擎，进入 _pending 队列等待 LLM 可复用性裁决
-        # （低频批量，由 post_chat 复盘通道触发）。默认开；LLM 不可用时
-        # 超龄候选自动放行（零 LLM 环境行为退化为原直写，不丢数据）。
-        # NEUROVA_CRYSTALLIZATION_LLM_GATE=0 显式关闭（回退直写）。
-        self._llm_gate = _os.environ.get("NEUROVA_CRYSTALLIZATION_LLM_GATE", "1") != "0"
+        # （低频批量，由 post_chat 复盘通道触发）。闸状态见 `_llm_gate`——
+        # 它由治理设置在**裁决时刻**决定，不在构造期缓存（工单 015）。
         self._llm_judge = None  # 复盘通道注入的 LLM client；None = 零 LLM 语义（直写）
         self._pending: List[Dict[str, Any]] = []
+        # 待裁决队列的有界上限与"已丢弃多少"计数（工单 005：静默丢候选 = 观察面失明）
+        self._max_pending = 20
+        self.pending_dropped = 0
         self._load_buffer_state()
 
         logger.info("PatternCrystallizer 初始化完成 (llm_gate=%s)", self._llm_gate)
+
+    @property
+    def _llm_gate(self) -> bool:
+        """结晶 LLM 裁决闸开关（工单 015 收进治理设置）。
+
+        刻意做成属性而非构造期赋值：治理设置是运行时可改的，构造期读一次
+        等于"设置页改了要重启才认"——那和收口前那个没人能写的裸 env 是同一种
+        幻影旋钮。优先级：env 显式 0 > env 显式 1 > 治理设置 > 默认开。
+        """
+        from neurova.security.governance_settings import resolve_flag
+
+        return resolve_flag("crystallization_llm_gate_enabled", "NEUROVA_CRYSTALLIZATION_LLM_GATE")
 
     def _load_buffer_state(self) -> None:
         """从 state 文件恢复观察聚合计数（C9；缺文件/损坏静默跳过）。"""
@@ -133,11 +152,16 @@ class PatternCrystallizer:
                     continue  # 待裁决队列单独恢复
                 n = int(agg.get("observations", 0))
                 succ = int(agg.get("successes", 0))
-                if n <= 0 or n >= 3:
-                    continue  # 满 3 的缓冲即时结晶后已清空，不恢复
+                # 无证据观察的个数也要跨重启保真：`evidenced` 键缺席说明是旧状态文件
+                # （那时无证据会被算成失败票），按"全部有证据"恢复，行为与升级前一致
+                evid = int(agg.get("evidenced", n))
+                if n <= 0 or n >= self.min_observations:
+                    continue  # 满门槛的缓冲即时结晶后已清空，不恢复
                 ctx = str(agg.get("last_context", ""))[:200]
                 self._buffer[key] = [
-                    {"tool": agg.get("tool", key), "success": i < succ, "context": ctx}
+                    {"tool": agg.get("tool", key),
+                     "success": True if i < succ else (False if i < evid else None),
+                     "context": ctx}
                     for i in range(n)
                 ]
             # 待裁决队列恢复（混合信号层；重启不丢候选）
@@ -159,9 +183,12 @@ class PatternCrystallizer:
             for key, entries in self._buffer.items():
                 if not entries:
                     continue
+                evidenced = [e for e in entries if e.get("success") is not None]
                 data[key] = {
                     "observations": len(entries),
-                    "successes": sum(1 for e in entries if e.get("success")),
+                    "successes": sum(1 for e in evidenced if e["success"]),
+                    # 无证据观察单独计数：否则重启后它们会被恢复成失败票
+                    "evidenced": len(evidenced),
                     "tool": entries[0].get("tool", ""),
                     "last_context": entries[-1].get("context", ""),
                 }
@@ -177,7 +204,7 @@ class PatternCrystallizer:
         self,
         tool_name: str,
         context: str,
-        success: bool,
+        success: Optional[bool],
         result: Any = None,
     ) -> None:
         """
@@ -186,7 +213,9 @@ class PatternCrystallizer:
         Args:
             tool_name: 工具名称
             context: 使用上下文
-            success: 是否成功
+            success: 客观成败三态（工单 003）：True/False 是回执，
+                **None 是"这轮没有回执"** —— 进缓冲但不参与成功率分子分母，
+                既不投成功票也不投失败票。
             result: 工具结果（可选）
         """
         key = self._extract_pattern_key(context)
@@ -206,8 +235,8 @@ class PatternCrystallizer:
         logger.debug("观察到工具使用: %s, 模式键: %s", tool_name, key)
         self._save_buffer_state()
 
-        # 当同一模式观察3次时尝试结晶
-        if len(self._buffer[key]) >= 3:
+        # 同一模式观察够次数才尝试结晶（门槛来自登记表，工单 004）
+        if len(self._buffer[key]) >= self.min_observations:
             self._try_crystallize(key)
             self._save_buffer_state()
 
@@ -222,13 +251,22 @@ class PatternCrystallizer:
         if not entries:
             return
 
-        # 计算成功率
-        success_count = sum(1 for e in entries if e["success"])
-        rate = success_count / len(entries)
+        # 工单 003：成功率只按**有客观回执**的观察算。`success is None` 表示
+        # "这轮没测到成败"，既不是成功票也不是失败票 —— 旧写法
+        # `sum(1 for e in entries if e["success"])` 把它算成失败，于是三次纯对话
+        # 观察会被判成失败模式；若反过来当成成功，就是被废弃的那张恒真票。
+        evidenced = [e for e in entries if e.get("success") is not None]
+        if not evidenced:
+            logger.debug("模式 '%s' 观察全部无客观回执，暂不裁决（缓冲保留）", key)
+            return
 
-        # 成功率低于60%不结晶
-        if rate < 0.6:
-            logger.debug("模式 '%s' 成功率 %.0f%% < 60%%，不结晶", key, rate * 100)
+        success_count = sum(1 for e in evidenced if e["success"])
+        rate = success_count / len(evidenced)
+
+        # 成功率未达门槛不结晶
+        if rate < self.min_success_rate:
+            logger.debug("模式 '%s' 成功率 %.0f%% < %.0f%%，不结晶",
+                         key, rate * 100, self.min_success_rate * 100)
             self._buffer.pop(key, None)
             return
 
@@ -258,18 +296,40 @@ class PatternCrystallizer:
             "queued_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        # 混合信号层：规则预筛通过 ≠ 直接写库——闸开启且 LLM judge 在位时
-        # 先进待裁决队列，由 post_chat 复盘通道低频批量裁决（过滤词面匹配
-        # 伪模式）。judge 未注入 = 零 LLM 语义，保持原直写行为。
-        if self._llm_gate and self._llm_judge is not None:
-            self._pending.append(candidate)
-            del self._pending[:-20]  # 有界：最多 20 条待裁决
+        # 混合信号层：规则预筛通过 ≠ 直接写库 —— 闸开启时一律先进待裁决队列，
+        # 由 post_chat 复盘通道低频批量裁决（过滤词面匹配伪模式）。
+        # 工单 005 改掉的是"judge 未注入 ⇒ 直写"：那等于裁决缺席即放行，
+        # 首批候选永远绕过裁决。现在 judge 不在位就留在队里等，不直写。
+        if self._llm_gate:
+            self._enqueue_candidate(candidate)
             self._save_buffer_state()
             logger.info("结晶候选进入 LLM 待裁决队列: '%s' (待审 %d 条)", key, len(self._pending))
             return
 
+        # 显式关闸（治理设置 crystallization_llm_gate_enabled=false）仍按操作者
+        # 选择直写——闸是"要不要送裁决"，不是"要不要入库"
         self._store_candidate(candidate)
         self._save_buffer_state()
+
+    def _enqueue_candidate(self, candidate: Dict[str, Any]) -> None:
+        """候选入待裁决队列；有界，且溢出丢弃必须可数（工单 005）。"""
+        self._pending.append(candidate)
+        self._enforce_pending_bound()
+
+    def _enforce_pending_bound(self) -> int:
+        """按 FIFO 收缩到上限，返回被丢弃条数（静默丢 = 观察面看不见任何丢失）。"""
+        overflow = len(self._pending) - self._max_pending
+        if overflow <= 0:
+            return 0
+        dropped = self._pending[:overflow]
+        self._pending = self._pending[overflow:]
+        self.pending_dropped += len(dropped)
+        logger.warning(
+            "结晶待裁决队列超上界 %d，丢弃最旧 %d 条（累计丢弃 %d）：keys=%s",
+            self._max_pending, len(dropped), self.pending_dropped,
+            [c.get("key") for c in dropped],
+        )
+        return len(dropped)
 
     def _store_candidate(self, candidate: Dict[str, Any]) -> None:
         """按候选构造 PATTERN 节点写入存储引擎并通知进化编排器。"""
@@ -284,7 +344,13 @@ class PatternCrystallizer:
             ),
             memory_type=MemoryType.PATTERN,
             category="crystallized",
-            temperature=rate * 100.0,  # 成功率即温度（0-100）
+            # 工单 017：自述成功率不得换来永久豁免。旧写法 `rate * 100` 让
+            # rate≥0.8 的节点落进温度策略的「>=80 不衰减」豁免区——一次好读数
+            # 就永久固化，而 PATTERN 节点本来没有任何淘汰分支。现在满分为 75，
+            # 排序信息保留（高成功率仍更热），衰减路径对所有结晶模式生效。
+            # 真正的永久豁免只有一条来路：管理页/API 的人工升格
+            # （lifecycle_stage=crystallized → on_decay(is_crystallized=True)）。
+            temperature=rate * 75.0,  # 成功率即温度，但封顶在免衰减豁免区之下
             metadata={
                 "pattern_key": key,
                 "primary_tool": primary_tool,
@@ -302,12 +368,14 @@ class PatternCrystallizer:
             try:
                 from neurova.evolution.evolution_facade import EvolutionFacade
                 facade = EvolutionFacade(self.evolution)
-                facade.record_experience(
-                    node.content,
-                    key,
-                    [primary_tool],
-                    True,
-                    crystallizer=self,  # 自喂回调锚定本实例（否则回退单例，跨 agent 串写复活）
+                # 工单 005：不再回灌 record_experience(..., True, ...) —— 那等于门槛
+                # 给自己投一张任务成功票，结晶越多 success_rate 越好看（自喂递归的
+                # 另一条路）。只通报"有新模式入库"，成败票一张都不投。
+                facade.notify_pattern_crystallized(
+                    pattern_key=key,
+                    primary_tool=primary_tool,
+                    success_rate=rate,
+                    sample_count=candidate.get("sample_count", 0),
                 )
             except Exception as e:
                 logger.warning("通知 EvolutionOrchestrator 失败: %s", e)
@@ -322,21 +390,38 @@ class PatternCrystallizer:
         """待 LLM 裁决的结晶候选（只读快照）。"""
         return [dict(c) for c in self._pending]
 
-    def _candidate_age_hours(self, candidate: Dict[str, Any]) -> float:
+    def _candidate_age_hours(self, candidate: Dict[str, Any]) -> Optional[float]:
+        """候选年龄（小时）；时间戳不可解析时返回 None（= 不可判龄，按超龄处理）。
+
+        旧实现返回 0.0：该候选既永不超龄被处理，也没人再裁决它 —— 僵尸候选。
+        """
         try:
             queued = datetime.fromisoformat(candidate.get("queued_at"))
-            return (datetime.now(timezone.utc) - queued).total_seconds() / 3600.0
         except (ValueError, TypeError):
-            return 0.0
+            return None
+        if queued.tzinfo is None:
+            queued = queued.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - queued).total_seconds() / 3600.0
 
     def _prune_expired_pending(self, max_age_hours: float = 48.0) -> int:
-        """超龄候选自动放行（LLM 长期不可用时的兜底——零 LLM 环境不丢数据）。"""
-        expired = [c for c in self._pending if self._candidate_age_hours(c) >= max_age_hours]
-        for c in expired:
-            self._store_candidate(c)
-            logger.info("结晶候选超龄自动放行: '%s'", c["key"])
+        """超龄候选丢弃并计数（工单 005）。
+
+        旧行为是"超龄自动放行入库"：那是给绕过裁决留的 48 小时后门 ——
+        只过了统计预筛的候选本来就缺可复用性判断，拖得越久越该被怀疑，
+        而不是越该被放行。不可判龄的候选一并丢弃，不留在队里当僵尸。
+        """
+        def _expired(candidate: Dict[str, Any]) -> bool:
+            age = self._candidate_age_hours(candidate)
+            return age is None or age >= max_age_hours
+
+        expired = [c for c in self._pending if _expired(c)]
         if expired:
-            self._pending = [c for c in self._pending if self._candidate_age_hours(c) < max_age_hours]
+            self.pending_dropped += len(expired)
+            logger.warning(
+                "结晶候选超龄/不可判龄丢弃 %d 条（累计 %d）：keys=%s",
+                len(expired), self.pending_dropped, [c.get("key") for c in expired],
+            )
+            self._pending = [c for c in self._pending if not _expired(c)]
             self._save_buffer_state()
         return len(expired)
 
@@ -423,6 +508,33 @@ class PatternCrystallizer:
         return {"reviewed": len(by_key), "approved": approved, "rejected": rejected, "skipped": len(kept)}
 
 
+    def reap_stale_patterns(
+        self, idle_days: float = 30.0, decay_step: float = 15.0, limit: int = 500
+    ) -> Dict[str, int]:
+        """给闲置的结晶模式降温（工单 017 的淘汰写入方）。
+
+        017 之前 PATTERN 节点没有任何衰减/淘汰分支：`update_temperature()` 零调用方，
+        而入库温度又由自述成功率写成 `rate*100` ⇒ 一次好读数即进「>=80 不衰减」豁免区，
+        越好的门固化越多。现在入库封顶在豁免区之下，闲置超期的按 `decay_step` 降温，
+        冷到 `COLD_PATTERN_TEMPERATURE` 以下即被 `retrieve()` 的读侧过滤挡在注入池外。
+
+        刚被取用的模式不在此列：006 的检索记账会刷新 `updated_at`（并 +10 温度），
+        所以"持续被用"本身就是免于被扫掉的证据。
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(days=idle_days)
+        stale = []
+        for node in self.engine.iter_nodes(filters={"memory_type": "pattern"}, limit=limit):
+            touched = node.updated_at
+            if touched.tzinfo is None:
+                touched = touched.replace(tzinfo=timezone.utc)
+            if touched < cutoff:
+                stale.append(node.id)
+        for node_id in stale:
+            self.engine.update_temperature(node_id, -decay_step)
+        if stale:
+            logger.info("结晶模式冷处理: %s 条闲置超 %s 天被降温", len(stale), idle_days)
+        return {"decayed": len(stale)}
+
     def retrieve(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """
         检索结晶经验
@@ -437,7 +549,9 @@ class PatternCrystallizer:
         nodes = self.engine.retrieve(
             query,
             limit=limit,
-            filters={"memory_type": "pattern"},
+            # 工单 017：冷档以下的结晶模式不再进注入池。与 reap_stale_patterns 配对
+            # ——一边衰减、一边看不见，才构成真实的淘汰路径
+            filters={"memory_type": "pattern", "min_temperature": COLD_PATTERN_TEMPERATURE},
         )
 
         return [

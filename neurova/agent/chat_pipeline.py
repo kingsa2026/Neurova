@@ -1875,6 +1875,8 @@ class ChatPipeline:
                         "id": hit.get("id"),
                         # 工单 007：注入优先级按采纳证据算，证据必须随条目带到消费方
                         "adoption_outcome": hit.get("adoption_outcome"),
+                        # 工单 015：人工处置态同理——没带到消费方，降权就永远读不出来
+                        "operator_disposition": hit.get("operator_disposition"),
                         "similarity_score": hit.get("similarity_score"),
                     }
                 )

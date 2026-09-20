@@ -84,3 +84,43 @@ tests/unit/context/test_metacog_production_wiring.py
 tests/unit/context/test_metacog_lessons_injection.py
 tests/unit/cognitive/test_regulation_gate.py
 tests/unit/api/test_governance_settings.py
+
+# 经验知识形成质量门控修复批 001-017（工单 009 门禁全绿后整批搬入，2026-09-20 逐文件
+# 单跑验证）。登记范围＝本批新增的测试文件；门禁脚本自身按 000-索引 纪律 7 不进清单。
+# 001 成败信号基线 / 002 三态 / 003 真实成败不被覆盖 / 004 结晶闸归位 / 005 候选生命周期
+tests/unit/evolution/experience/test_success_signal_baseline.py
+tests/unit/evolution/experience/test_outcome_propagation.py
+tests/unit/evolution/experience/test_crystallization_gate.py
+tests/unit/evolution/experience/test_crystallization_votes.py
+tests/unit/evolution/experience/test_candidate_lifecycle.py
+# 006 注入身份与采纳回写 / 006 检索命中记账
+tests/unit/evolution/experience/test_adoption_writeback.py
+tests/unit/memory/test_cse_retrieve_touch.py
+# 007 检索质量门与注入优先级
+tests/unit/skills/test_ekb_retrieval_quality_gate.py
+tests/unit/context/test_experience_injection_priority.py
+# 008 经验族指标与告警 / 010 三条臂吃客观票据
+tests/unit/evolution/rsi/test_experience_quality_metrics.py
+tests/unit/evolution/experience/test_objective_tickets.py
+# 011 两个写入面的内容门 / 012 类型语义与冲突检测定性
+tests/unit/skills/test_ekb_content_gate.py
+tests/unit/cognitive_layers/memory_layer/test_content_gate.py
+tests/unit/cognitive_layers/memory_layer/test_memory_type_semantics.py
+tests/unit/agent/test_conflict_detection_observation_only.py
+# 013 遗传臂真实成功率 / 014 NL 合成置信闸咬合
+tests/unit/evolution/test_genetic_seed_evidence.py
+tests/unit/evolution/test_nl_confidence_gate.py
+# 017 通过门控不等于永久固化（温度封顶 + 衰减 + 冷档屏蔽）
+tests/unit/evolution/experience/test_pattern_lifecycle.py
+tests/unit/evolution/experience/test_pattern_reaping.py
+# 009 真实语料基准 + CI 门禁（低质注入必红、正常语料全绿、旋钮反向锁）
+tests/unit/test_experience_quality_gate.py
+# 015 治理开关收口（两个裸 env 进 governance_settings，优先级三方向 + 裁决时刻读取）
+tests/unit/security/test_governance_flag_resolver.py
+tests/unit/memory/test_crystallization_gate_governance.py
+tests/unit/evolution/test_skill_auto_retire_governance.py
+# 015 经验条目人工处置通路（降权/隐藏真的改检索排序与注入优先级；审核不洗证据）
+tests/unit/skills/test_ekb_operator_disposition.py
+tests/unit/api/test_experience_disposition_api.py
+# 016 经验质量读数进 RSI 阶段晋升判据（无据⇒unevidenced 不推进不否决、质差硬否决、阈值活旋钮）
+tests/unit/evolution/rsi/test_experience_quality_promotion.py

@@ -226,12 +226,34 @@ class EvolutionFacade:
             logger.warning("记录经验失败: %s", e)
             return {"success": False, "error": str(e)}
     
+    def notify_pattern_crystallized(
+        self,
+        pattern_key: str,
+        primary_tool: str,
+        success_rate: float,
+        sample_count: int,
+    ) -> Dict[str, Any]:
+        """结晶入库通报转发（工单 005：只通报，不投成败票）。"""
+        if not self._orchestrator:
+            return {"success": False, "error": "Orchestrator not available"}
+        try:
+            return self._orchestrator.on_pattern_crystallized(
+                pattern_key=pattern_key,
+                primary_tool=primary_tool,
+                success_rate=success_rate,
+                sample_count=sample_count,
+            )
+        except Exception as e:  # noqa: BLE001 - 通报失败不影响已入库的节点
+            logger.warning("结晶入库通报失败: %s", e)
+            return {"success": False, "error": str(e)}
+
     # ============ 模式挖掘 ============
     
     def add_tool_sequence(
         self, 
         tools: List[str], 
         context: str = "",
+        success: Optional[bool] = None,
     ):
         """
         添加工具序列（用于模式挖掘）
@@ -239,12 +261,15 @@ class EvolutionFacade:
         Args:
             tools: 工具名称列表
             context: 上下文描述
+            success: 本条序列的客观结果位（工单 013，取 010 的 `TicketEvidence.ticket`）；
+                None = 无票据，遗传臂与技能模板据此不投票
         """
         if not self._orchestrator or not hasattr(self._orchestrator, 'pattern_miner'):
             return
         
         try:
-            self._orchestrator.pattern_miner.add_sequence(tools, context=context)
+            self._orchestrator.pattern_miner.add_sequence(
+                tools, context=context, success=success)
         except Exception as e:
             logger.warning("添加工具序列失败: %s", e)
     
@@ -255,7 +280,7 @@ class EvolutionFacade:
         C4 断链修复（工具侧审计）：此前调用不存在的
         pattern_miner.get_frequent_patterns（实际方法名 get_top_patterns），
         异常被吞静默返回 []。现透传并映射为 dict 契约
-        （{"tools", "support", "context"}），与 to_skill_template_list 对齐。
+        （{"tools", "support", "context", "success_rate"}），与 to_skill_template_list 对齐。
 
         Args:
             top_n: 返回前N个模式
@@ -273,6 +298,7 @@ class EvolutionFacade:
                     "tools": list(p.tools),
                     "support": int(p.support),
                     "context": p.context or "",
+                    "success_rate": p.success_rate,
                 }
                 for p in patterns
                 if p is not None
