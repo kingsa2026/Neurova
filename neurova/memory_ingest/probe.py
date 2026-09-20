@@ -59,31 +59,52 @@ def source_columns(path: Path, table: str) -> List[str]:
         conn.close()
 
 
-def _first_json_line_keys(path: Path) -> List[str]:
-    with path.open(encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            if line.strip():
-                try:
-                    return sorted(json.loads(line).keys())
-                except json.JSONDecodeError:
-                    return []
+def jsonl_first_keys(path: Path) -> List[str]:
+    """首行键集合（报告用：未识别时要打印可核实的结构事实）。"""
+    for keys in jsonl_head_key_sets(path, limit=1):
+        return keys
     return []
 
 
-def _sqlite_has_columns(table: str, required: Tuple[str, ...]) -> Callable[[Path], bool]:
+def jsonl_head_key_sets(path: Path, limit: int = 32) -> List[List[str]]:
+    """前 limit 个非空行的键集合。
+
+    实测真实日志可能以表头记录开头（一文件一场会话的那族，31/31 个文件首行是
+    {cwd,id,timestamp,type,version}），只看首行的指纹会永远认不出它。
+    """
+    sets: List[List[str]] = []
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                return sets
+            if isinstance(parsed, dict):
+                sets.append(sorted(parsed.keys()))
+            if len(sets) >= limit:
+                break
+    return sets
+
+
+def sqlite_has_columns(table: str, required: Tuple[str, ...]) -> Callable[[Path], bool]:
     def _matches(path: Path) -> bool:
         return table in _sqlite_tables(path) and set(required) <= set(source_columns(path, table))
     return _matches
 
 
+def jsonl_has_keys(required: Tuple[str, ...]) -> Callable[[Path], bool]:
+    """前若干行里任一行含齐必需键即命中（表头开头是这一类日志的正常形态）。"""
+    def _matches(path: Path) -> bool:
+        return any(set(required) <= set(keys) for keys in jsonl_head_key_sets(path))
+    return _matches
+
+
+# 只留"有指纹、暂无转换器"的一家；各家转换器的指纹由 converters/ 模块自己 register，
+# 识别面与适配面同名同处，不会出现在 A 处认得出、B 处无路可走的两张皮。
 _HANDPRINTS: List[Handprint] = [
-    Handprint("qwenpaw_history", "sqlite", _sqlite_has_columns(
-        "conversation_history",
-        ("seq", "session_id", "kind", "role", "content", "tool_call_id",
-         "created_at", "dedup_key"))),
-    Handprint("dsh_session", "jsonl",
-              lambda path: {"type", "version", "id", "createdAt"}
-              <= set(_first_json_line_keys(path))),
+    Handprint("dsh_session", "jsonl", jsonl_has_keys(("type", "version", "id", "createdAt"))),
 ]
 
 
@@ -115,7 +136,7 @@ def _structure(path: Path, kind: str) -> Dict[str, object]:
         except Exception as exc:                      # 打不开也要回话，不能空着
             return {"error": str(exc)}
     if kind == "jsonl":
-        return {"first_line_keys": _first_json_line_keys(path)}
+        return {"first_line_keys": jsonl_first_keys(path)}
     return {}
 
 

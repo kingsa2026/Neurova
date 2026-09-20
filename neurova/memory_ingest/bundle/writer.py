@@ -1,0 +1,85 @@
+# -*- coding: utf-8 -*-
+"""转换器共用的落包机制：源事件 → 带会话内 seq 的记录 → 包目录。
+
+三家转换器各自要写的只有"源方言 → 事件"这一段；编号、幂等键、manifest 落盘是同一套规则，
+各写一份就会从第二家开始漂移（包内 seq 是否连续、一行多事件时 identity_key 怎么追加）。
+"""
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Sequence, Tuple
+
+from neurova.memory_ingest.bundle.manifest import BundleManifest, dump_manifest
+from neurova.memory_ingest.bundle.records import VALID_ROLE_KINDS, TranscriptRecord
+
+
+@dataclass(frozen=True)
+class SourceEvent:
+    """一条待落包事件：kind 用包内规范词，字段与 TranscriptRecord 对齐。"""
+    kind: str
+    ts: str
+    role: str = ""
+    text: str = ""
+    tool_call_id: str = ""
+    tool_name: str = ""
+    tool_state: str = ""
+    reasoning: str = ""
+    extra: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.kind not in VALID_ROLE_KINDS:
+            raise ValueError(f"未知事件 kind: {self.kind!r}")
+
+
+def materialize(groups: Sequence[Tuple[str, Sequence[Tuple[str, Sequence[SourceEvent]]]]]
+                ) -> List[TranscriptRecord]:
+    """[(会话, [(该源行的幂等前缀, [事件])])] → 会话内 1..n 编号的记录列表。"""
+    records: List[TranscriptRecord] = []
+    for session_id, rows in groups:
+        seq = 0
+        for base_key, events in rows:
+            for index, event in enumerate(events):
+                seq += 1
+                suffix = "" if len(events) == 1 else f"#{index}"
+                records.append(_record(session_id, seq, f"{base_key}{suffix}", event))
+    return records
+
+
+def write_bundle(out_dir: Path, records: Sequence[TranscriptRecord], *, agent_name: str,
+                 source: Dict[str, Any], dropped: Sequence[Dict[str, Any]],
+                 stores: Sequence[Dict[str, Any]]) -> BundleManifest:
+    """只写包：transcripts/memories/manifest 三件套，返回同一份 manifest。"""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with (out_dir / "transcripts.jsonl").open("w", encoding="utf-8") as fh:
+        for record in records:
+            fh.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
+    (out_dir / "memories.jsonl").write_text("", encoding="utf-8")
+
+    manifest = BundleManifest(
+        schema_version=1,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        agent_name=agent_name,
+        source=dict(source),
+        counts={"transcripts": len(records), "memories": 0, "relations": 0},
+        dropped=tuple(dropped),
+        stores=tuple(stores),
+    )
+    dump_manifest(manifest, out_dir / "manifest.json")
+    return manifest
+
+
+def _record(session_id: str, seq: int, identity_key: str, event: SourceEvent) -> TranscriptRecord:
+    return TranscriptRecord(
+        session_id=session_id, seq=seq, kind=event.kind, ts=event.ts,
+        identity_key=identity_key, role=event.role,
+        content_blocks=({"type": "text", "text": event.text},) if event.text else (),
+        tool_call_id=event.tool_call_id, tool_name=event.tool_name,
+        tool_state=event.tool_state,
+        reasoning_state="text" if event.reasoning else "absent",
+        reasoning_text=event.reasoning,
+        extra={key: value for key, value in event.extra.items() if value is not None},
+    )
