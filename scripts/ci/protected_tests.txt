@@ -124,6 +124,22 @@ tests/unit/skills/test_ekb_operator_disposition.py
 tests/unit/api/test_experience_disposition_api.py
 # 016 经验质量读数进 RSI 阶段晋升判据（无据⇒unevidenced 不推进不否决、质差硬否决、阈值活旋钮）
 tests/unit/evolution/rsi/test_experience_quality_promotion.py
+# 005 单一控制器与阶段回写（proposer 不得自建第二个控制器、自动晋升必须回写 rsi_phase 且落盘失败可读）
+tests/unit/evolution/rsi/test_rsi_single_controller_phase_writeback.py
+# 012 观测面收口（规范指标全部有写入方、临时键删净、dashboard/推送口拆除、GET /rsi/status 接电）
+tests/unit/evolution/rsi/test_rsi_observation_surface.py
+# 009 升级通道可达性（度量失明/真ROI 触发、GateVerdict 三态、每个跳过点名、状态面可见）
+tests/unit/evolution/rsi/test_rsi_escalation_reachability.py
+# 010 批准即生效（人类授权装库+回灌注册表才算 APPLIED；无生效通道的类型显式 not_supported；台账按 agent 分域）
+tests/unit/evolution/rsi/test_rsi_proposal_activation.py
+# 011 审批 UI 读对实例（端点按 agent_id 定位、无编排器 503 不再静默 200、全状态提案列表）
+tests/unit/api/test_rsi_agent_scoped_endpoints.py
+# 014 身份键统一（name 与身份域归一为注册表内一次查找；字典直取由 AST 锁清零）
+tests/unit/skills/test_skill_identity_key_domain.py
+# 015 封装去重键收敛（命中判定与建键共用同一身份；批准态不得被下一轮观察撤销；skill_ 拼接单点）
+tests/unit/evolution/test_skill_encapsulation_identity.py
+# 016 改进生效与跨重启（溢出不静默、写了没人读的键删净、改进史与批准态跨重启存活、归因按真实 agent）
+tests/unit/evolution/test_improvement_effective_and_durable.py
 
 # 原生工具翻页契约：file_search/file_list 的截断可续拉（offset/next_offset）
 # —— 不挂 Desktop Commander，把它唯一强于原生的"分页深搜"补进原生工具面
