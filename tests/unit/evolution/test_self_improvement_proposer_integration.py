@@ -12,7 +12,8 @@ TDD RED：暴露 SelfImprovementProposer 966 行代码完全孤立问题（P0-A3
         完整实现三种渐进路径（skill_manifest/action_definition/pr_patch）+
         三层安全防御 + 状态机守卫 + 线程安全，但：
     - 全文件唯一引用自身，无任何生产代码调用
-    - get_self_improvement_proposer() 工厂存在但无调用方
+    - get_self_improvement_proposer() 工厂存在但无调用方（工单 005 已删除：
+      零参工厂必然自带第二个部署控制器，与"当前阶段只有一个答案"冲突）
     - RSIOrchestrator 检测到发散后只能"立即停止"，无升级路径
 
 设计意图（来源：self_improvement_proposer.py 文件头注释）：
