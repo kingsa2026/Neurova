@@ -3723,6 +3723,68 @@ class ToolExecutor:
             payload["next_offset"] = offset + len(matches)
         return payload
 
+    _PDF_MAX_IMAGES = 20
+    _PDF_MAX_IMAGE_BYTES = 20 * 1024 * 1024
+
+    async def _resolve_pdf_images(self, blocks: List, slug: str) -> tuple:
+        """图片引用 → 本地可读路径（工单 003）。
+
+        三路来源：工作区内路径、产物目录内文件名、http(s)。远程一律经 persist_media，
+        它带全局出网 SSRF 校验——不在别处再开第二条下载路（两条路的校验强度会漂移）。
+        解析不到的图降级成一行文字并报告：少一张图的报告仍然有用，但要说清少了。
+        """
+        import os as _os
+        from pathlib import Path
+
+        from neurova.document_model import Block, InlineRun, NodeKind
+        from neurova.llm.generators.runtime import GENERATION_OUTPUT_DIR, persist_media
+
+        kept: List = []
+        warnings: List[str] = []
+        seen = 0
+        for block in blocks:
+            if block.kind != NodeKind.IMAGE:
+                kept.append(block)
+                continue
+            if seen >= self._PDF_MAX_IMAGES:
+                seen += 1
+                warnings.append(
+                    f"图片数量上限 {self._PDF_MAX_IMAGES} 张，第 {seen} 张起已跳过（含：{block.alt or block.src}）"
+                )
+                continue
+            seen += 1
+            src = (block.src or "").strip()
+            label = block.alt or src
+
+            if src.startswith(("http://", "https://")):
+                try:
+                    block.src = await persist_media(src, "image", slug, seen)
+                    kept.append(block)
+                except Exception as e:  # noqa: BLE001 - 远程图失败不该带走整份文档
+                    warnings.append(f"图片已跳过（远程取回失败：{type(e).__name__}）：{label}")
+                    if block.alt:
+                        kept.append(Block(NodeKind.PARAGRAPH, runs=[InlineRun(f"[图：{block.alt}]")]))
+                continue
+
+            candidates = (
+                [Path(src)]
+                if _os.path.isabs(src)
+                else [Path(self._workspace_base()) / src, GENERATION_OUTPUT_DIR / src]
+            )
+            hit = next((c for c in candidates if c.is_file()), None)
+            if hit is None:
+                warnings.append(f"图片已跳过（解析不到本地文件）：{label}")
+                if block.alt:
+                    kept.append(Block(NodeKind.PARAGRAPH, runs=[InlineRun(f"[图：{block.alt}]")]))
+                continue
+            if hit.stat().st_size > self._PDF_MAX_IMAGE_BYTES:
+                warnings.append(f"图片已跳过（超过 {self._PDF_MAX_IMAGE_BYTES // (1024 * 1024)}MB）：{label}")
+                continue
+
+            block.src = str(hit)
+            kept.append(block)
+        return kept, warnings
+
     async def _execute_write_pdf(self, params: Dict) -> Dict:
         """Markdown → PDF 出件，落产物目录并回鉴权下载口（工单 001）。
 
@@ -3734,11 +3796,13 @@ class ToolExecutor:
         if not str(content or "").strip():
             return {"error": "content 为空，未出件"}
 
-        blocks = parse_markdown(str(content))
-        if not blocks:
+        parsed = parse_markdown(str(content))
+        if not parsed.blocks:
             return {"error": "content 未解析出任何可渲染内容，未出件"}
 
         title = str(params.get("title") or "")
+        slug = _ascii_slug(title or "document")
+        blocks, image_warnings = await self._resolve_pdf_images(parsed.blocks, slug)
         try:
             rendered = render_document(blocks, DocSettings(title=title))
         except RenderUnavailable as e:
@@ -3749,7 +3813,7 @@ class ToolExecutor:
         import hashlib
 
         pdf = rendered["pdf"]
-        stem = f"{_ascii_slug(title or 'document')}-{hashlib.sha256(pdf).hexdigest()[:8]}"
+        stem = f"{slug}-{hashlib.sha256(pdf).hexdigest()[:8]}"
         from pathlib import Path
 
         from neurova.llm.generators.runtime import persist_bytes
@@ -3763,7 +3827,7 @@ class ToolExecutor:
             "bytes": len(pdf),
             "pages": rendered["pages"],
             "font": rendered["font"],
-            "warnings": rendered["warnings"],
+            "warnings": list(parsed.warnings) + image_warnings + list(rendered["warnings"]),
         }
 
     async def _execute_computer_screenshot(self, params: Dict) -> Dict:
