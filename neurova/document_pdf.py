@@ -29,6 +29,88 @@ _HEADING_SIZES = {1: 18.0, 2: 15.0, 3: 13.0, 4: 12.0, 5: 11.5, 6: 11.0}
 # reportlab ParagraphStyle.alignment：0 左 / 1 中 / 2 右
 _ALIGNMENT = {"left": 0, "center": 1, "right": 2}
 
+# 内置模板预设。"title"/"date" 是取值来源而非字面量，由 resolve_decor 展开。
+_TEMPLATE_PRESETS = {
+    "blank": {"header": None, "footer": None, "page_number": False, "cover": False},
+    "report": {"header": "title", "footer": "date", "page_number": True, "cover": False},
+    "cover": {"header": "title", "footer": "date", "page_number": True, "cover": True},
+}
+_FALLBACK_PRESET = "report"
+
+
+def _or_preset(value: typing.Optional[str], settings: DocSettings) -> typing.Optional[str]:
+    if value == "title":
+        return settings.title or None
+    if value == "date":
+        import datetime
+
+        return datetime.date.today().isoformat()
+    return value
+
+
+def resolve_decor(settings: DocSettings, warnings: typing.List[str]) -> typing.Dict[str, typing.Any]:
+    """模板预设 + 逐次覆盖 → 实际要画的东西。
+
+    None 表示"没表态"（回落预设），空串表示"要关掉"（不回落）——这两态若被折叠成
+    一个，显式关闭页脚的调用方就再也关不掉它。
+    """
+    preset = _TEMPLATE_PRESETS.get(settings.template)
+    if preset is None:
+        warnings.append(f"未知模板 {settings.template}，已按 {_FALLBACK_PRESET} 渲染")
+        preset = _TEMPLATE_PRESETS[_FALLBACK_PRESET]
+
+    def pick(override, default):
+        return default if override is None else (override or None)
+
+    return {
+        "header": pick(settings.header_text, _or_preset(preset["header"], settings)),
+        "footer": pick(settings.footer_text, _or_preset(preset["footer"], settings)),
+        "page_number": settings.page_number if settings.page_number is not None else preset["page_number"],
+        "cover": preset["cover"],
+        "margin_mm": float(settings.margin_mm),
+    }
+
+
+def _page_drawer(decor: typing.Dict[str, typing.Any], base_font: str, margin: float, page_size):
+    """每页页眉/页脚/页码。页码用 canvas 自己的页号，封面也算第 1 页。"""
+    width, height = page_size
+
+    def draw(canvas, _doc):
+        canvas.saveState()
+        canvas.setFont(base_font, 9)
+        if decor["header"]:
+            canvas.drawString(margin, height - margin * 0.55, decor["header"])
+            canvas.setLineWidth(0.4)
+            canvas.line(margin, height - margin * 0.75, width - margin, height - margin * 0.75)
+        if decor["footer"]:
+            canvas.drawString(margin, margin * 0.45, decor["footer"])
+        if decor["page_number"]:
+            canvas.drawRightString(width - margin, margin * 0.45, f"{canvas.getPageNumber()}")
+        canvas.restoreState()
+
+    return draw
+
+
+def _cover_flowables(settings: DocSettings, body, headings):
+    """封面页：标题 + 日期，然后硬分页。"""
+    import datetime
+
+    from reportlab.platypus import PageBreak, Paragraph, Spacer
+    from reportlab.lib.styles import ParagraphStyle
+
+    big = ParagraphStyle(
+        "neurovaCover", parent=headings[1], fontSize=26, leading=34, alignment=1, spaceBefore=0, spaceAfter=0
+    )
+    date = ParagraphStyle("neurovaCoverDate", parent=body, fontSize=11, alignment=1)
+    title = settings.title or "未命名文档"
+    return [
+        Spacer(1, 220),
+        Paragraph(escape(title), big),
+        Spacer(1, 18),
+        Paragraph(datetime.date.today().isoformat(), date),
+        PageBreak(),
+    ]
+
 
 class RenderUnavailable(RuntimeError):
     """渲染库缺席：由调用方（工具层）转成结构化错误，不把 ImportError 抛给主链路。"""
@@ -260,9 +342,11 @@ def render_document(
     resolved = resolve_cjk_font(font)
     base_font = _register_font(resolved)
     body, headings, item, cells = _styles(base_font)
+    warnings = [] if resolved["mode"] != "cid" else [CID_FALLBACK_WARNING]
+    decor = resolve_decor(settings, warnings)
 
     buffer = io.BytesIO()
-    margin = float(settings.margin_mm) * mm
+    margin = decor["margin_mm"] * mm
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
@@ -273,17 +357,18 @@ def render_document(
         title=settings.title or None,
         author="Neurova",
     )
-    warnings = [CID_FALLBACK_WARNING] if resolved["mode"] == "cid" else []
-    doc.build(
-        _story(
-            blocks,
-            headings=headings,
-            body=body,
-            item=item,
-            cells=cells,
-            base_font=base_font,
-            available=A4[0] - 2 * margin,
-            warnings=warnings,
-        )
+    story = _story(
+        blocks,
+        headings=headings,
+        body=body,
+        item=item,
+        cells=cells,
+        base_font=base_font,
+        available=A4[0] - 2 * margin,
+        warnings=warnings,
     )
-    return {"pdf": buffer.getvalue(), "pages": doc.page, "font": resolved, "warnings": warnings}
+    if decor["cover"]:
+        story = _cover_flowables(settings, body, headings) + story
+    drawer = _page_drawer(decor, base_font, margin, A4)
+    doc.build(story, onFirstPage=drawer, onLaterPages=drawer)
+    return {"pdf": buffer.getvalue(), "pages": doc.page, "font": resolved, "decor": decor, "warnings": warnings}
