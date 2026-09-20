@@ -165,6 +165,9 @@ class MemoryManager:
 
         # 子模块引用（延迟初始化）
         self._storage = None
+        # 运行期增量维护的向量库（MoE 路由器自建的那个，见
+        # register_runtime_vector_store）；未起 MoE 时为 None
+        self._runtime_vector_store = None
         self._emotion_analyzer = None
         self._auto_classifier = None
         self._conversation_buffer = None  # 受 enable_buffer 控制,下方按需初始化
@@ -851,6 +854,7 @@ class MemoryManager:
                 get_semantic_search().upsert_memory_index(mem.to_dict())
             except Exception:  # noqa: BLE001 - 索引维护失败不阻断记忆写入
                 logger.debug("关键词索引增量维护失败: %s", mem_id, exc_info=True)
+            self._sync_runtime_vector_store(mem)
             self._stats["remember_count"] += 1
             self._stats["total_memories"] = len(self._memories)
 
@@ -1051,6 +1055,32 @@ class MemoryManager:
             while len(self._vector_stores) > 20:
                 self._vector_stores.pop(next(iter(self._vector_stores)), None)
         return store
+
+    def register_runtime_vector_store(self, store) -> None:
+        """登记一个需要在运行期增量维护的向量库（由 MemCore 装配 MoE 时调用）。
+
+        MoE 路由器持有的是 init_moe_router 自建的 UnifiedVectorStore，与本类
+        按隔离键缓存的召回 store 不是同一对象；此前它只在启动扫描时被灌满，
+        运行期新增/遗忘的记忆要到下次重启才进得了 MoE 检索。
+
+        只同步"新增"与"硬删除"，与既有语义索引钩子同处、同语义：
+        index_memories(incremental=True) 按 id 去重跳过（不更新既有 id 的内容），
+        软遗忘（lifecycle_stage=FORGOTTEN）也不摘除——启动扫描按该谓词过滤。
+        """
+        self._runtime_vector_store = store
+
+    def _sync_runtime_vector_store(self, mem: "Memory" = None, memory_id: str = "") -> None:
+        """把单条记忆的写入/删除镜像到运行期向量库（未登记则直接返回）"""
+        store = self._runtime_vector_store
+        if store is None:
+            return
+        try:
+            if memory_id:
+                store.remove_documents(lambda indexed_id: indexed_id == memory_id)
+            else:
+                store.index_memories([mem.to_dict()], incremental=True)
+        except Exception as e:
+            logger.warning("运行期向量库同步失败: %s", e)
 
     def _semantic_recall(
         self, query: str, memories: list, limit: int, agent_wide: bool = False
@@ -1272,6 +1302,7 @@ class MemoryManager:
                     get_semantic_search().remove_memory_index(memory_id)
                 except Exception:  # noqa: BLE001
                     logger.debug("关键词索引增量摘除失败: %s", memory_id, exc_info=True)
+                self._sync_runtime_vector_store(memory_id=memory_id)
                 self._delete_persisted_memory(memory_id)  # 删除持久化
             self._stats["total_memories"] = len(self._memories)
         # bus.emit 在锁外执行，避免持锁调用 handler 导致递归死锁
