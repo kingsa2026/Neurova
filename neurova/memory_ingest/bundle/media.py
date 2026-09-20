@@ -139,8 +139,10 @@ def _from_block(block: Dict[str, Any], store: Path) -> Optional[Tuple[bytes, str
     if isinstance(source, dict):
         if str(source.get("type") or "") == "base64":
             return _decode_base64(source.get("data"), name)
-        return _from_uri(str(source.get("url") or ""), store,
-                         name or _name_of_url(source.get("url")))
+        return _from_uri(str(source.get("url") or ""), store, name or _name_of_url(source.get("url")))
+    if isinstance(source, str) and source.split(":", 1)[0].lower() in ("data", "file"):
+        # 有的平台把 URI 直接放在 source/url 字段里（opencode 的 file 块是 data:）。# http 不在这里取：导入过程不联网拉外部内容。
+        return _from_uri(source, store, name)
     return _from_path(str(source or ""), store, name)
 
 
