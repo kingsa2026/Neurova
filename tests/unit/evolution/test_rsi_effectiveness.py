@@ -1,18 +1,16 @@
 """
-TDD RED-1：暴露 RSI 棘轮剪枝进化机制无效问题
+RSI 编排器"真的产出进化效果"三条端到端断言（RED-1 时代的三条，覆盖面照旧）
 
-验证 RSIOrchestrator.run_iteration() 在收到非空反馈信号时：
-1. 应产生非空优化建议列表（当前 _generate_optimization_for_param 永远 return None）
-2. 应调用 convergence_analyzer.record_iteration() 喂入收敛数据
-   （当前从未调用，导致 analyze_convergence 永远返回 insufficient_data）
+`run_iteration()` 收到非空反馈信号时必须：
+1. 产出非空优化建议列表；
+2. 调用 convergence_analyzer.record_iteration() 喂入收敛数据；
+3. 跑满窗口后收敛状态离开 insufficient_data。
 
-根因（P0-2 + P0-3）：
-    neurova/evolution/rsi/orchestrator.py:162
-        def _generate_optimization_for_param(...):
-            return None   # 永远不产生优化
-    neurova/evolution/rsi/orchestrator.py:72-108
-        run_iteration() 从未调用 convergence_analyzer.record_iteration()
-        → gain_history 永远为空 → analyze_convergence 永远 insufficient_data
+工单 017 C 项把旧棘轮实现（`_generate_optimization_for_param` /
+`_compute_ratchet_adjustment*`）整块删掉后，本文件的**用例一条未删**：
+它们断言的是上面三个结果，不是那套实现。原文里"当前 … 永远 return None"
+那类句子描述的是 2026-09 之前的实现，已随之改写为中性表述；
+候选现由 `_generate_candidates_for_param`（setpoint 步进版）产出。
 """
 
 import pytest
@@ -81,7 +79,6 @@ class TestRSIOrchestratorEffectiveness:
 
         场景：四大闭环系统提供非空反馈信号（performance_score=0.82 等）
         期望：run_iteration 返回的 optimizations 列表非空
-        当前：_generate_optimization_for_param 永远 return None → optimizations 永远空
         """
         orchestrator = _create_real_orchestrator_with_signals()
 
@@ -91,17 +88,14 @@ class TestRSIOrchestratorEffectiveness:
         optimizations = result.get("optimizations", [])
         assert len(optimizations) > 0, (
             f"有反馈信号时 run_iteration 应产生非空优化建议，"
-            f"实际 optimizations 为空（_generate_optimization_for_param 永远 return None）。"
-            f"反馈信号: {result.get('feedback_signals')}"
+            f"实际 optimizations 为空。反馈信号: {result.get('feedback_signals')}"
         )
 
     def test_run_iteration_records_convergence_data(self):
-        """run_iteration 应调用 convergence_analyzer.record_iteration() 喂入收敛数据
+        """run_iteration 应调用 record_iteration() 喂入收敛数据
 
         场景：run_iteration 执行一次迭代
         期望：convergence_analyzer.gain_history 非空（至少 1 个数据点）
-        当前：run_iteration 从未调用 record_iteration → gain_history 永远空
-              → analyze_convergence 永远返回 insufficient_data
         """
         orchestrator = _create_real_orchestrator_with_signals()
 
@@ -110,7 +104,7 @@ class TestRSIOrchestratorEffectiveness:
         gain_history = orchestrator.convergence_analyzer.gain_history
         assert len(gain_history) > 0, (
             "run_iteration 应调用 record_iteration 喂入增益数据，"
-            "实际 gain_history 为空（analyze_convergence 永远返回 insufficient_data）"
+            "实际 gain_history 为空（analyze_convergence 只能返回 insufficient_data）"
         )
 
     def test_convergence_status_not_always_insufficient_data(self):
@@ -118,7 +112,6 @@ class TestRSIOrchestratorEffectiveness:
 
         场景：运行 window_size+1 次迭代
         期望：convergence status 不再是 insufficient_data
-        当前：因 record_iteration 未被调用，永远 insufficient_data
         """
         orchestrator = _create_real_orchestrator_with_signals()
 

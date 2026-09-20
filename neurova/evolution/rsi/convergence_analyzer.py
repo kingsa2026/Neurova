@@ -224,81 +224,11 @@ class ConvergenceAnalyzer:
 
         return total_gain / total_cost
 
-    def predict_convergence_point(self) -> Optional[int]:
-        """
-        预测收敛点
-
-        Returns:
-            Optional[int]: 预测的收敛迭代次数，如果无法预测返回 None
-        """
-        if len(self.gain_history) < self.window_size:
-            return None
-
-        recent_gains = self.gain_history[-self.window_size :]
-
-        # 计算趋势斜率
-        n = len(recent_gains)
-        x_mean = (n - 1) / 2
-        y_mean = sum(recent_gains) / n
-
-        numerator = sum((i - x_mean) * (g - y_mean) for i, g in enumerate(recent_gains))
-        denominator = sum((i - x_mean) ** 2 for i in range(n))
-
-        if denominator == 0:
-            return None
-
-        slope = numerator / denominator
-
-        # 如果斜率接近零，已经收敛
-        if abs(slope) < 0.0001:
-            return len(self.gain_history)
-
-        # 预测收敛点：当前增益 / 斜率
-        current_gain = recent_gains[-1]
-        if slope >= 0:
-            return None  # 不收敛
-
-        iterations_to_convergence = int(current_gain / abs(slope))
-
-        return len(self.gain_history) + iterations_to_convergence
-
-    def is_worth_continuing(self) -> bool:
-        """
-        判断是否值得继续进化
-
-        Returns:
-            bool: 如果 ROI > 1 且未发散，返回 True
-        """
-        # 检查 ROI（ROI > 1 表示收益大于成本）
-        roi = self.compute_roi()
-        if roi <= 1.0:
-            return False
-
-        # 检查是否发散
-        if len(self.gain_history) >= self.window_size:
-            recent_gains = self.gain_history[-self.window_size :]
-            mean_gain = sum(recent_gains) / len(recent_gains)
-
-            if mean_gain < self.divergence_threshold:
-                return False
-
-        return True
-
 
 def create_convergence_analyzer(
     window_size: int = 20, convergence_threshold: float = 0.01, divergence_threshold: float = -0.05
 ) -> ConvergenceAnalyzer:
-    """
-    创建收敛性分析器实例
-
-    Args:
-        window_size: 滑动窗口大小
-        convergence_threshold: 收敛阈值
-        divergence_threshold: 发散阈值
-
-    Returns:
-        ConvergenceAnalyzer: 收敛性分析器实例
-    """
+    """创建收敛性分析器实例（RSI 编排器的装配入口）。"""
     return ConvergenceAnalyzer(
         window_size=window_size,
         convergence_threshold=convergence_threshold,
