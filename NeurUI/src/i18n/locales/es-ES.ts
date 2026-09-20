@@ -733,6 +733,26 @@ export default {
     expires: 'Caduca',
     metadata: 'Metadatos',
   },
+  conflictAxis: {
+    entry: 'Entrada duplicada',
+    fact: 'Conflicto de gobernanza',
+  },
+  conflictKind: {
+    value: 'Valor',
+    qualifier: 'Cualificador',
+    type: 'Tipo',
+    temporal: 'Temporal',
+    cardinality: 'Cardinalidad',
+  },
+  conflictPolicyKind: {
+    mostRecent: 'Más reciente',
+    highestConfidence: 'Mayor confianza',
+    credibilityWeighted: 'Ponderado por afirmaciones',
+    keepBoth: 'Conservar ambas',
+    manual: 'Requiere humano',
+  },
+
+
   knowledge: {
     scopeAll: 'Todo lo visible',
     scopePublic: 'Público',
@@ -765,6 +785,12 @@ export default {
     conflictSimilarity: 'Similitud {score}%',
     conflictKeepBoth: 'Mantener ambos',
     conflictSupersede: 'Reemplazar el antiguo',
+    conflictDismiss: 'No es conflicto',
+    conflictPickWinner: 'Elige la versión ganadora',
+    conflictMembers: 'Versiones en desacuerdo: {members}',
+    conflictSeverity: 'Severidad {score}%',
+    conflictPolicy: 'Política recomendada: {policy}',
+    conflictNoBasis: 'Sin base · una persona debe elegir la versión',
     conflictResolved: 'Resuelto',
     tombstones: 'Tumbas de conocimiento',
     tombstoneEmpty: 'No hay entradas eliminadas',

@@ -174,7 +174,7 @@
       </a-list>
     </GlassPanel>
 
-    <!-- P0-3 同值冲突队列（admin）：新条目疑似"同一事实的新说法" -->
+    <!-- 冲突队列（admin）：条目侧同值 + 治理层分歧，两条轴一个队列（工单 016） -->
     <GlassPanel v-if="isAdmin" class="kb-conflicts">
       <div class="kb-review-header">
         <h3 class="kb-review-title">{{ t('knowledge.conflictQueue') }}</h3>
@@ -184,16 +184,58 @@
         <template #renderItem="{ item }">
           <a-list-item>
             <a-list-item-meta
-              :title="item.title"
-              :description="t('knowledge.conflictSimilarity', { score: (item.similarity * 100).toFixed(0) })"
+              :title="conflictTitle(item)"
+              :description="conflictDescription(item)"
             />
+            <div class="kb-conflict-meta">
+              <a-tag data-testid="conflict-axis">{{ t(`conflictAxis.${item.axis}`) }}</a-tag>
+              <template v-if="item.axis === 'fact'">
+                <a-tag data-testid="conflict-kind">{{ enumLabel('conflictKind', item.kind) }}</a-tag>
+                <a-tag :color="item.severity >= 0.7 ? 'red' : 'orange'">
+                  {{ t('knowledge.conflictSeverity', { score: Math.round(item.severity * 100) }) }}
+                </a-tag>
+                <a-tag color="blue">
+                  {{ t('knowledge.conflictPolicy', { policy: conflictPolicyLabel(item.recommended_policy) }) }}
+                </a-tag>
+                <a-tag v-if="!item.policy_basis" color="red" data-testid="conflict-no-basis">
+                  {{ t('knowledge.conflictNoBasis') }}
+                </a-tag>
+                <p v-if="item.policy_basis" class="kb-conflict-basis">{{ item.policy_basis }}</p>
+              </template>
+            </div>
             <template #actions>
               <a-button size="small" @click="handleResolveConflict(item, 'keep_both')">
                 {{ t('knowledge.conflictKeepBoth') }}
               </a-button>
-              <a-button type="primary" size="small" @click="handleResolveConflict(item, 'supersede_old')">
+              <a-button
+                v-if="item.axis === 'entry'"
+                type="primary"
+                size="small"
+                @click="handleResolveConflict(item, 'supersede_old')"
+              >
                 {{ t('knowledge.conflictSupersede') }}
               </a-button>
+              <template v-else>
+                <!-- 事实侧没有"自动裁决"这条路：胜方必须有人指明，无依据也不给一键关闭 -->
+                <a-select
+                  v-model:value="conflictWinner[item.conflict_id]"
+                  size="small"
+                  :placeholder="t('knowledge.conflictPickWinner')"
+                  style="width: 190px"
+                  :options="conflictMemberOptions(item)"
+                />
+                <a-button
+                  type="primary"
+                  size="small"
+                  :disabled="!conflictWinner[item.conflict_id]"
+                  @click="handleResolveConflict(item, 'supersede_old')"
+                >
+                  {{ t('knowledge.conflictSupersede') }}
+                </a-button>
+                <a-button size="small" @click="handleResolveConflict(item, 'dismiss')">
+                  {{ t('knowledge.conflictDismiss') }}
+                </a-button>
+              </template>
             </template>
           </a-list-item>
         </template>
@@ -589,6 +631,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useEnumLabel } from '@/composables/useEnumLabel'
 import { message, Modal } from 'ant-design-vue'
 import type { UploadFile } from 'ant-design-vue'
 import {
@@ -610,6 +653,7 @@ import {
   deleteKbCollection,
   listKnowledgeConflicts,
   resolveKnowledgeConflict,
+  type ConflictResolution,
   listDeletedKnowledge,
   restoreKnowledgeNode,
   listKnowledgeRevisions,
@@ -651,7 +695,8 @@ interface KnowledgeItem {
   chunk_hits?: { chunk_index: number; content: string; score?: number }[]
 }
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+const { enumLabel } = useEnumLabel()
 
 const { agentId } = useAgentPage({
   onAgentChange: () => {
@@ -1223,7 +1268,7 @@ async function handleReview(item: KnowledgeItem, approve: boolean) {
 async function fetchConflicts() {
   if (!isAdmin.value) return
   try {
-    const res: any = await listKnowledgeConflicts('pending')
+    const res: any = await listKnowledgeConflicts('pending', 'all')
     const data = res?.data ?? res
     conflicts.value = Array.isArray(data) ? data : data?.items ?? []
   } catch {
@@ -1231,9 +1276,52 @@ async function fetchConflicts() {
   }
 }
 
-async function handleResolveConflict(item: KnowledgeConflict, resolution: 'keep_both' | 'supersede_old') {
+/** 事实侧的胜方由人指明：没有"自动裁决"按钮，也没有默认胜方。 */
+const conflictWinner = ref<Record<string, string>>({})
+
+/** 建议策略的枚举值是蛇形，而 i18n 守卫要求键段驼峰——中间这一步映射就是翻译表本身。 */
+const CONFLICT_POLICY_KEYS: Record<string, string> = {
+  most_recent: 'mostRecent',
+  highest_confidence: 'highestConfidence',
+  credibility_weighted: 'credibilityWeighted',
+  keep_both: 'keepBoth',
+  manual: 'manual',
+}
+
+function conflictPolicyLabel(name?: string): string {
+  if (!name) return ''
+  const key = `conflictPolicyKind.${CONFLICT_POLICY_KEYS[name] ?? name}`
+  return te(key) ? t(key) : name
+}
+
+function conflictTitle(item: KnowledgeConflict): string {
+  return item.axis === 'entry' ? item.title : `${item.subject_label || item.subject_key} · ${item.predicate_term_id}`
+}
+
+function conflictDescription(item: KnowledgeConflict): string {
+  if (item.axis === 'entry') {
+    return t('knowledge.conflictSimilarity', { score: (item.similarity * 100).toFixed(0) })
+  }
+  return t('knowledge.conflictMembers', { members: item.members_summary.join(' ｜ ') })
+}
+
+function conflictMemberOptions(item: KnowledgeConflict) {
+  if (item.axis !== 'fact') return []
+  return item.member_fact_ids.map((id, i) => ({
+    value: id,
+    label: item.members_summary[i] ?? id,
+  }))
+}
+
+async function handleResolveConflict(item: KnowledgeConflict, resolution: ConflictResolution) {
   try {
-    await resolveKnowledgeConflict(item.conflict_id, resolution)
+    await resolveKnowledgeConflict(
+      item.conflict_id,
+      resolution,
+      resolution === 'supersede_old' && item.axis === 'fact'
+        ? conflictWinner.value[item.conflict_id]
+        : undefined,
+    )
     message.success(t('knowledge.conflictResolved'))
     await fetchConflicts()
     fetchKnowledge()

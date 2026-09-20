@@ -733,6 +733,26 @@ export default {
     expires: 'ينتهي في',
     metadata: 'البيانات الوصفية',
   },
+  conflictAxis: {
+    entry: 'مدخل مكرر',
+    fact: 'تعارض حوكمي',
+  },
+  conflictKind: {
+    value: 'قيمة',
+    qualifier: 'محدد',
+    type: 'نوع',
+    temporal: 'زمني',
+    cardinality: 'عددية',
+  },
+  conflictPolicyKind: {
+    mostRecent: 'الأحدث',
+    highestConfidence: 'الأعلى ثقة',
+    credibilityWeighted: 'مرجح بالروايات',
+    keepBoth: 'إبقاء الاثنين',
+    manual: 'يحتاج قرارًا بشريًا',
+  },
+
+
   knowledge: {
     scopeAll: 'كل ما هو مرئي',
     scopePublic: 'المكتبة العامة',
@@ -765,6 +785,12 @@ export default {
     conflictSimilarity: 'التشابه {score}%',
     conflictKeepBoth: 'الإبقاء على كليهما',
     conflictSupersede: 'استبدال القديم',
+    conflictDismiss: 'ليس تعارضًا',
+    conflictPickWinner: 'اختر الرواية الفائزة',
+    conflictMembers: 'روايات متعارضة: {members}',
+    conflictSeverity: 'الخطورة {score}%',
+    conflictPolicy: 'السياسة المقترحة: {policy}',
+    conflictNoBasis: 'بلا أساس · يجب أن يختار إنسان',
     conflictResolved: 'تم الحسم',
     tombstones: 'شواهد المعرفة',
     tombstoneEmpty: 'لا توجد مدخلات محذوفة',

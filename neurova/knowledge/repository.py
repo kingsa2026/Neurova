@@ -1327,6 +1327,11 @@ class KnowledgeRepository:
         recs.sort(key=lambda r: r.get("detected_at", 0), reverse=True)
         return recs
 
+    def has_conflict(self, conflict_id: str) -> bool:
+        """这条 id 是不是条目侧账本的——队列端点要靠它分派，不能猜 id 长相。"""
+        with self._lock:
+            return conflict_id in self._conflicts
+
     def resolve_conflict(
         self, conflict_id: str, resolution: str, resolved_by: str = ""
     ) -> bool:
