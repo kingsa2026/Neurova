@@ -15,7 +15,7 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 _DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")
 
@@ -94,11 +94,40 @@ def sqlite_has_columns(table: str, required: Tuple[str, ...]) -> Callable[[Path]
     return _matches
 
 
+def jsonl_head_rows(path: Path, limit: int = 32) -> List[Dict[str, Any]]:
+    """前 limit 个非空行的解析结果（坏行到此为止，不当没看见）。"""
+    rows: List[Dict[str, Any]] = []
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                break
+            if isinstance(parsed, dict):
+                rows.append(parsed)
+            if len(rows) >= limit:
+                break
+    return rows
+
+
 def jsonl_has_keys(required: Tuple[str, ...]) -> Callable[[Path], bool]:
     """前若干行里任一行含齐必需键即命中（表头开头是这一类日志的正常形态）。"""
     def _matches(path: Path) -> bool:
-        return any(set(required) <= set(keys) for keys in jsonl_head_key_sets(path))
+        return any(set(required) <= set(row) for row in _head_rows_as_keys(path))
     return _matches
+
+
+def jsonl_head_has_row(test: Callable[[Dict[str, Any]], bool]) -> Callable[[Path], bool]:
+    """按键与值一起认的 JSONL 指纹：有的平台没有版本字段，只能靠记录类型头自证。"""
+    def _matches(path: Path) -> bool:
+        return any(test(row) for row in jsonl_head_rows(path))
+    return _matches
+
+
+def _head_rows_as_keys(path: Path) -> List[List[str]]:
+    return [sorted(row) for row in jsonl_head_rows(path)]
 
 
 # 只留"有指纹、暂无转换器"的一家；各家转换器的指纹由 converters/ 模块自己 register，

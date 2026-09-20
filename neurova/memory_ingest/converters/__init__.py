@@ -8,12 +8,14 @@ from __future__ import annotations
 
 from typing import Callable, Dict
 
-from neurova.memory_ingest.converters import (dialog_daily, legacy_session,
-                                    opencode_session, qwenpaw_history)
+from neurova.memory_ingest.converters import (codex_rollout, dialog_daily,
+                                    legacy_session, opencode_session,
+                                    qwenpaw_history)
 
 CONVERTERS: Dict[str, Callable] = {
     qwenpaw_history.CONVERTER_NAME: qwenpaw_history.convert,
     dialog_daily.CONVERTER_NAME: dialog_daily.convert,
     legacy_session.CONVERTER_NAME: legacy_session.convert,
     opencode_session.CONVERTER_NAME: opencode_session.convert,
+    codex_rollout.CONVERTER_NAME: codex_rollout.convert,
 }
