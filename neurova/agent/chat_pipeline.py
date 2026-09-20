@@ -239,30 +239,27 @@ class ChatPipeline:
         except Exception as e:
             logger.warning("KnowledgeRetrieverAdapter 接入失败（知识库检索降级跳过）: %s", e)
 
-        # 3.5 TKGRetriever（时效知识图谱事实，priority 26——补课 5.2 接线）
-        # TKG 构造失败/为空时跳过（可选增强，不阻断链装配）
+        # 3.5 时效事实分支（priority 26）——权威在底座库（工单 012，灭 B01）
+        # 旧装配是 `TemporalKGMemoryBridge(TemporalKnowledgeGraph())`：无参构造的 db_path
+        # 默认 ":memory:"，这条分支每轮扫自己那张空表（命中恒 0），还可能每轮重造实例。
+        # 现在读底座，形状契约不变（TKGRetrieverAdapter 只调 query_tkg_for_context）。
         try:
-            from neurova.cognitive_layers.memory_layer.temporal_knowledge_graph import (
-                TemporalKGMemoryBridge,
-                TemporalKnowledgeGraph,
-            )
+            from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
+            from neurova.knowledge.foundation.temporal_facts import TemporalFactReader
 
-            tkg = getattr(self._agent, "_tkg_instance", None)
-            if tkg is None:
-                # 适配器调用 query_tkg_for_context（Bridge 方法，关键词抽取+
-                # 时效窗口+置信度排序），裸 TemporalKnowledgeGraph 没有该方法
-                # （实测缺陷：每次检索 TKG 分支必 AttributeError 空转）。
-                tkg = TemporalKGMemoryBridge(TemporalKnowledgeGraph())
+            reader = getattr(self._agent, "_temporalFactsReader", None)
+            if reader is None:
+                reader = TemporalFactReader(get_knowledge_fact_store())
                 try:
-                    self._agent._tkg_instance = tkg
+                    self._agent._temporalFactsReader = reader
                 except Exception:
-                    logger.debug("set_request_user_id 注入失败（身份归属可能退化为 default）", exc_info=True)
-            if tkg is not None:
-                tkg_adapter = TKGRetrieverAdapter(tkg)
-                self._memory_retrieval_chain.add_retriever(tkg_adapter)
-                logger.debug("Added TKGRetrieverAdapter to retrieval chain")
+                    # 挂不上就每轮重造一个 reader：只多一次构造，不再退化成空表
+                    logger.debug("时效事实读面无法挂到 agent 上（每轮重建）", exc_info=True)
+            self._memory_retrieval_chain.add_retriever(TKGRetrieverAdapter(reader))
+            logger.debug("Added TKGRetrieverAdapter to retrieval chain")
         except Exception as e:
-            logger.warning("TKGRetrieverAdapter 接入失败（TKG 检索降级跳过）: %s", e)
+            # 缺席必须是可见的：B01 能活这么久，就是因为这类失败只留一条 warning。
+            logger.error("时效事实分支接入失败（本轮对话没有时效事实可读，不是没有相关事实）: %s", e)
 
         # 4. CacheRetriever（低优先级）
         cache_adapter = CacheRetrieverAdapter()
