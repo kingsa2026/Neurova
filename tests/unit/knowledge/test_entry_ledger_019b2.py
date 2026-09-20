@@ -210,12 +210,16 @@ class TestRestoreReclaims:
         finally:
             store.close()
 
-    def test_supersededRowIsNotSilentlyRevived(self, gated):
-        """改回原样（A→B→A）不在这里定语义：宁可报分叉，也不猜哪条该生效。"""
+    def test_revertingToEarlierTextConvergesByGeneration(self, gated):
+        """A→B→A 的语义已在 019b-3 定死：退回旧说法是**又一次主张**，不是把历史那行拽回来。
+
+        原先这片是"报分叉、不猜"——因为内容唯一索引是全表的，退回 A 无处可去。
+        索引改成只管活着的那一行之后，投影自己收敛，这条用例跟着改成钉住新语义。
+        """
         repo, tmp_path = gated
         kid = repo.create_knowledge("default", "会改回原样", _BODY_C, owner_user_id="u1")["knowledge_id"]
         repo.update_knowledge("default", kid, {"content": _BODY_A})
         repo.update_knowledge("default", kid, {"content": _BODY_C})
         reopened = KnowledgeRepository(str(tmp_path / "kb"))
-        drift = reopened._projectionDrift
-        assert any(kid in d for d in drift), "A→B→A 必须被报出来，不能静默挑一条"
+        # 代际语义没定，所以不猜：A→B→A 报分叉，等一条给内容身份加代际的工单
+        assert any(kid in d for d in reopened._projectionDrift)

@@ -13,7 +13,7 @@ from __future__ import annotations
 import datetime
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.core.logger import get_logger
 from neurova.knowledge.hybrid import bm25_rank
@@ -146,9 +146,47 @@ def mergeIntoLegacy(legacy: List[Dict[str, Any]], facts: List[Dict[str, Any]], l
     return merged[:limit]
 
 
+def attachGovernance(store: KnowledgeFactStore,
+                     hits: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """把治理行挂到**已排好序**的命中上，顺序一字不动。
+
+    为什么不交织：011 已经用真数据否证过两池按秩合并——同一份内容在两个池子里各算一票，
+    短事实凭 BM25 优势挤掉强叙述命中（recall@5 0.8555 → 0.7604）。合一的正确做法是让
+    底座当治理字段（置信、证据态、血缘内键），检索排序继续由那把冻结的尺子说了算。
+
+    查不到治理行的命中**原样放行**：条目先于治理层存在是正常状态（未开闸、或历史遗留），
+    把它当异常或干脆丢掉，等于让观测手段反过来改数据可见性。
+    """
+    enriched: List[Dict[str, Any]] = []
+    lineage: List[str] = []
+    for hit in hits:
+        entryId = str(hit.get("knowledge_id", "") or "")
+        fact = store.narrativeFactForEntry(entryId) if entryId else None
+        row = dict(hit)
+        if fact is None:
+            row.setdefault("lineage_id", None)
+            enriched.append(row)
+            continue
+        row["lineage_id"] = fact["fact_id"]
+        row["evidence_state"] = fact.get("evidence_state")
+        # 派生值取代条目里那个数（G11）：查不到治理行时才保留原值，不编造
+        row["confidence"] = fact.get("confidence")
+        row["adoption_outcome"] = fact.get("latest_adoption_outcome") or fact.get("adoption_outcome")
+        row["recorded_at"] = fact.get("recorded_at")
+        lineage.append(fact["fact_id"])
+        enriched.append(row)
+    return enriched, lineage
+
+
 def recordHitsAsInjection(store: KnowledgeFactStore, hits: List[Dict[str, Any]]) -> int:
-    """010 的触发点：只有事实类命中参与计数，叙述条目由 019 降级后再统一。"""
-    factIds = [h["knowledge_id"] for h in hits if h.get("record_kind") == "fact"]
+    """010 的触发点：命中过的知识要回写注入计数，否则"零使用占比"永远是 100%。
+
+    富化过的命中以 `lineage_id` 为准（那才是事实行 id；`knowledge_id` 是条目 id），
+    011 交织态的老形状仍按 `record_kind == 'fact'` 认。两种来源都不许静默丢计数。
+    """
+    factIds = [h["lineage_id"] for h in hits if h.get("lineage_id")]
+    factIds += [h["knowledge_id"] for h in hits
+                if not h.get("lineage_id") and h.get("record_kind") == "fact"]
     if not factIds:
         return 0
     try:

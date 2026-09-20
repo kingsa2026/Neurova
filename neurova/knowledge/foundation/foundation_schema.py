@@ -15,7 +15,12 @@ from typing import List
 
 from neurova.core.db_migration import migrate as applyMigrations, register_migration
 
-from .knowledge_facts import _SCHEMA, _SCHEMA_V2, _SCHEMA_V3, _SCHEMA_V5
+from .knowledge_facts import (
+    _SCHEMA,
+    _SCHEMA_V2,
+    _SCHEMA_V3,
+    _SCHEMA_V5,
+)
 from .narratives import NARRATIVE_DOMAIN, _SCHEMA_V4
 
 _STEPS: List[tuple] = [
