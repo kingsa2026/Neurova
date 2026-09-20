@@ -41,7 +41,7 @@ def read_only_connect(path: Path) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
 
 
-def _sqlite_tables(path: Path) -> List[str]:
+def sqlite_tables(path: Path) -> List[str]:
     conn = read_only_connect(path)
     try:
         return [row[0] for row in conn.execute(
@@ -90,7 +90,7 @@ def jsonl_head_key_sets(path: Path, limit: int = 32) -> List[List[str]]:
 
 def sqlite_has_columns(table: str, required: Tuple[str, ...]) -> Callable[[Path], bool]:
     def _matches(path: Path) -> bool:
-        return table in _sqlite_tables(path) and set(required) <= set(source_columns(path, table))
+        return table in sqlite_tables(path) and set(required) <= set(source_columns(path, table))
     return _matches
 
 
@@ -132,7 +132,7 @@ def _kind_of(path: Path) -> Optional[str]:
 def _structure(path: Path, kind: str) -> Dict[str, object]:
     if kind == "sqlite":
         try:
-            return {"tables": _sqlite_tables(path)}
+            return {"tables": sqlite_tables(path)}
         except Exception as exc:                      # 打不开也要回话，不能空着
             return {"error": str(exc)}
     if kind == "jsonl":
