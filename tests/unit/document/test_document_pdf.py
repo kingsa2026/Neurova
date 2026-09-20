@@ -12,7 +12,7 @@ from neurova.document_sources import parse_markdown
 
 
 def _blocks(md: str = "# 标题\n\n正文一段\n\n- 甲\n- 乙"):
-    return parse_markdown(md)
+    return parse_markdown(md).blocks
 
 
 class TestFontDecision:
@@ -79,11 +79,66 @@ class TestRender:
         """runs → Paragraph 标记：先转义再上样式（正文里的 `<b>` 不得变成真标记）。"""
         from neurova.document_pdf import runs_to_markup
 
-        runs = parse_markdown("甲 <b> & **粗**")[0].runs
+        runs = parse_markdown("甲 <b> & **粗**").blocks[0].runs
         assert runs_to_markup(runs) == "甲 &lt;b&gt; &amp; <b>粗</b>"
 
     def test_code_run_uses_monospace_face(self):
         from neurova.document_pdf import runs_to_markup
 
-        runs = parse_markdown("`x=1`")[0].runs
+        runs = parse_markdown("`x=1`").blocks[0].runs
         assert runs_to_markup(runs) == '<font face="Courier">x=1</font>'
+
+
+class TestTable:
+    """表格断言一律用 ASCII 内容：无中文字体的环境（CI）走 CID 路径，
+    那里抽取不可靠，用它当判据会造出假绿或假红。"""
+
+    @staticmethod
+    def _extract_pages(pdf: bytes):
+        import io
+
+        from pypdf import PdfReader
+
+        return [(p.extract_text() or "").replace(" ", "") for p in PdfReader(io.BytesIO(pdf)).pages]
+
+    def test_header_repeats_on_every_page(self):
+        md = "| ITEM | QTY |\n|---|---|\n" + "".join(f"| row{i} | {i} |\n" for i in range(60))
+        out = render_document(_blocks(md), DocSettings())
+        pages = self._extract_pages(out["pdf"])
+        assert len(pages) >= 2, "60 行表应当跨页"
+        assert all("ITEM" in page and "QTY" in page for page in pages), "跨页必须重复表头"
+
+    def test_unbreakable_overlong_cell_is_truncated_and_reported(self):
+        giant = "x" * 200
+        out = render_document(_blocks(f"| A | B |\n|---|---|\n| {giant} | 短 |"), DocSettings())
+        assert out["pages"] >= 1
+        assert any("第 1 列" in w for w in out["warnings"]), "截断必须点名到列"
+
+    def test_wide_but_wrappable_table_warns_nothing(self):
+        md = "| alpha | beta | gamma | delta |\n|---|---|---|---|\n" + "| 一 | 二 | 三 | 四 |\n"
+        out = render_document(_blocks(md), DocSettings())
+        assert not any("列" in w for w in out["warnings"]), "能折行的宽表不该报截断"
+
+
+PNG_1PX = bytes.fromhex(
+    "89504e470d0a1a0a0000000d494844520000000100000001080600000"
+    "01f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"
+)
+
+
+class TestImage:
+    def _doc(self, src):
+        return _blocks(f"![图一]({src})")
+
+    def test_local_image_is_embedded(self, tmp_path):
+        pic = tmp_path / "a.png"
+        pic.write_bytes(PNG_1PX)
+        out = render_document(self._doc(str(pic)), DocSettings())
+        assert out["pages"] >= 1
+        assert not any("图" in w for w in out["warnings"])
+
+    def test_missing_image_skips_with_warning_and_still_renders(self, tmp_path):
+        """渲染层也要能自守：文件在解析后被人删掉时，出件不得整体失败。"""
+        out = render_document(self._doc(str(tmp_path / "gone.png")), DocSettings())
+        assert out["pages"] >= 1
+        assert any("跳过" in w for w in out["warnings"])

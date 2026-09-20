@@ -35,6 +35,8 @@ _CATEGORY_TOOLS: Dict[str, Set[str]] = {
         "browser_navigate", "browser_click", "browser_type", "browser_screenshot",
         "browser_extract_text", "browser_dom_snapshot", "browser_dom_read",
         "browser_click_role", "browser_fill_role",
+        # write_pdf 可内嵌远程图（经 persist_media 出网），与 file 同属其归类面
+        "write_pdf",
     },
     "file": {
         "file_read", "file_write", "file_create", "file_delete",
@@ -52,6 +54,18 @@ _TOOL_TO_CATEGORY: Dict[str, str] = {
     tool: cat for cat, tools in _CATEGORY_TOOLS.items() for tool in tools
 }
 
+# 多归属工具（write_pdf 既写文件又可能出网）在上面的单值表里会被集合遍历顺序
+# 静默覆盖——归类结果随顺序漂移，权限判定跟着漂。因此把它从单值表剔除，
+# 主类由下表显式声明，完整归属见 _TOOL_TO_CATEGORIES。
+_MULTI_CATEGORY_PRIMARY: Dict[str, str] = {"write_pdf": "file"}
+
+_TOOL_TO_CATEGORIES: Dict[str, Set[str]] = {}
+for _cat, _tools in _CATEGORY_TOOLS.items():
+    for _tool in _tools:
+        _TOOL_TO_CATEGORIES.setdefault(_tool, set()).add(_cat)
+for _tool in _MULTI_CATEGORY_PRIMARY:
+    _TOOL_TO_CATEGORY.pop(_tool, None)
+
 # 文件面只读子集（file.read_only=True 时放行）
 _FILE_READ_TOOLS = {"file_read", "file_list", "file_search"}
 
@@ -59,11 +73,23 @@ _FILE_READ_TOOLS = {"file_read", "file_list", "file_search"}
 KNOWN_CAPABILITY_KEYS = {"tools", "network", "file", "model", "system", "node", "storage"}
 
 
+def tool_categories(tool_name: str) -> Set[str]:
+    """工具的全部能力归属；多归属工具的授权判定取 AND（每一类都要声明）。"""
+    if (tool_name or "").startswith("mcp."):
+        return {"network"}
+    return set(_TOOL_TO_CATEGORIES.get(tool_name or "", set()))
+
+
 def tool_category(tool_name: str) -> Optional[str]:
-    """工具 → 能力分类；未分类（平台能力）返回 None。"""
+    """工具 → 能力分类主标签；未分类（平台能力）返回 None。
+
+    单归属工具即其类别；多归属工具用显式声明的主类，不靠集合遍历顺序猜。
+    """
     if (tool_name or "").startswith("mcp."):
         return "network"
-    return _TOOL_TO_CATEGORY.get(tool_name)
+    if tool_name in _TOOL_TO_CATEGORY:
+        return _TOOL_TO_CATEGORY[tool_name]
+    return _MULTI_CATEGORY_PRIMARY.get(tool_name or "")
 
 
 def tools_for_categories(*categories: str) -> Set[str]:
@@ -155,23 +181,31 @@ class SkillPermissions:
     # ── 仲裁 ─────────────────────────────────────────────────
 
     def allows_tool(self, tool_name: str) -> bool:
-        """白名单优先；分类工具需对应能力声明；未分类平台工具不受约束。"""
+        """白名单优先；分类工具需对应能力声明；未分类平台工具不受约束。
+
+        多归属工具取 AND：write_pdf 需要 file 与 network 同时授权——只声明文件面的
+        技能不该顺带拿到出网能力，反之亦然。
+        """
         if self.tools is not None and tool_name in self.tools:
             return True
-        cat = tool_category(tool_name)
-        if cat is None:
+        categories = tool_categories(tool_name)
+        if not categories:
             return True
-        if cat == "network":
+        return all(self._allows_category(cat, tool_name) for cat in sorted(categories))
+
+    def _allows_category(self, category: str, tool_name: str) -> bool:
+        """单一归类面下的授权判定（供 allows_tool 逐类求 AND）。"""
+        if category == "network":
             return self.network
-        if cat == "file":
+        if category == "file":
             if self.file:
                 return True
             return self.file_read_only and tool_name in _FILE_READ_TOOLS
-        if cat == "model":
+        if category == "model":
             return self.model
-        if cat == "system":
+        if category == "system":
             return self.system
-        if cat == "node":
+        if category == "node":
             return self.node
         return False
 
@@ -217,7 +251,7 @@ def check_tool_permission(permissions_raw: Any, tool_name: str) -> Optional[str]
     perms = permissions_raw if isinstance(permissions_raw, SkillPermissions) else SkillPermissions.from_dict(permissions_raw)
     if perms.allows_tool(tool_name):
         return None
-    cat = tool_category(tool_name) or "platform"
+    cat = "/".join(sorted(tool_categories(tool_name))) or "platform"
     return f"工具 {tool_name} 未在技能权限声明中授权（分类={cat}）"
 
 

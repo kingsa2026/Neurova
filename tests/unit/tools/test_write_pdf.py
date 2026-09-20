@@ -11,14 +11,20 @@ import pytest
 from neurova.document_pdf import RenderUnavailable
 
 
-def _make_executor():
+def _make_executor(workspace=None):
     from unittest.mock import Mock
 
     from neurova.tool_executor import ToolExecutor
 
     agent = Mock()
-    agent.workspace_path = None
+    agent.workspace_path = str(workspace) if workspace else None
     return ToolExecutor(agent)
+
+
+PNG_1PX = bytes.fromhex(
+    "89504e470d0a1a0a0000000d494844520000000100000001080600000"
+    "01f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082"
+)
 
 
 @pytest.fixture
@@ -97,3 +103,53 @@ def test_tool_is_registered_everywhere_a_tool_must_be():
     assert get_builtin_tool_params("write_pdf") is not None
     assert ToolExecutor._builtin_dispatch["write_pdf"] == "_execute_write_pdf"
     assert "write_pdf" in _CATEGORY_TOOLS["file"]
+
+
+# ── 图片内嵌（工单 003）────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_workspace_relative_image_embeds_cleanly(out_dir, tmp_path):
+    (tmp_path / "pic.png").write_bytes(PNG_1PX)
+    result = await _make_executor(tmp_path)._execute_write_pdf(
+        {"content": "# 报告\n\n![图一](pic.png)"}
+    )
+    assert "error" not in result, result
+    assert result["warnings"] == [] or not any("图" in w for w in result["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_remote_image_goes_through_the_one_egress_channel(out_dir, tmp_path, monkeypatch):
+    """远程图必须走 persist_media（它带全局出网 SSRF 校验），不在别处再开一条下载路。"""
+    import neurova.llm.generators.runtime as runtime
+
+    calls = []
+
+    async def fake_persist(url_or_data, kind, task_id, index, out_dir=None):
+        calls.append(url_or_data)
+        target = tmp_path / f"remote{index}.png"
+        target.write_bytes(PNG_1PX)
+        return str(target)
+
+    monkeypatch.setattr(runtime, "persist_media", fake_persist)
+    result = await _make_executor(tmp_path)._execute_write_pdf(
+        {"content": "![远端](https://example.invalid/a.png)"}
+    )
+    assert calls == ["https://example.invalid/a.png"]
+    assert not any("跳过" in w for w in result["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_unresolvable_image_degrades_to_alt_text(out_dir, tmp_path):
+    result = await _make_executor(tmp_path)._execute_write_pdf({"content": "![缺失的图](nope.png)"})
+    assert "error" not in result, "图丢了不是整件失败的理由"
+    assert any("缺失的图" in w for w in result["warnings"])
+
+
+@pytest.mark.asyncio
+async def test_image_count_is_bounded(out_dir, tmp_path):
+    for i in range(21):
+        (tmp_path / f"p{i}.png").write_bytes(PNG_1PX)
+    content = "".join(f"![图{i}](p{i}.png)\n\n" for i in range(21))
+    result = await _make_executor(tmp_path)._execute_write_pdf({"content": content})
+    assert any("上限" in w or "20" in w for w in result["warnings"]), "超限必须报告，不得静默丢图"

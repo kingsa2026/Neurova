@@ -14,6 +14,8 @@ class NodeKind(str, Enum):
     HEADING = "heading"
     PARAGRAPH = "paragraph"
     LIST = "list"
+    TABLE = "table"
+    IMAGE = "image"
 
 
 @dataclass(frozen=True)
@@ -29,13 +31,19 @@ class InlineRun:
 @dataclass
 class Block:
     """块级节点。标题用 level，列表用 items（每项是一个 PARAGRAPH Block），
-    段落与标题用 runs。"""
+    段落与标题用 runs；表格用 header/rows（单元格同为 PARAGRAPH Block），
+    align 是每列的水平对齐（left/center/right）。"""
 
     kind: NodeKind
     runs: typing.List[InlineRun] = field(default_factory=list)
     level: int = 1
     ordered: bool = False
     items: typing.List["Block"] = field(default_factory=list)
+    header: typing.List["Block"] = field(default_factory=list)
+    rows: typing.List[typing.List["Block"]] = field(default_factory=list)
+    align: typing.List[str] = field(default_factory=list)
+    src: str = ""
+    alt: str = ""
 
     @property
     def text(self) -> str:
