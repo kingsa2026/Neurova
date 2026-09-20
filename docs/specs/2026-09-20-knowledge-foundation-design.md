@@ -553,6 +553,9 @@ E2 出口判据要求：**要么该用例修好，要么给出可控的超时口
 | 019b-2/3 条目写路径转调与读面合一 | 未开工 || 012 / 013 / 014 / 016 / 017 / 018 / 019b-2c / E4 | 未开工 | 011 否证后落点改变，见工单索引"进度" |
 
 `tests/unit/knowledge/` 512 passed（起点基线 265）。
+副作用已量过：`tests/unit` 在放宽前后收集到同样 15678 条用例（差集为空），
+所以 `python_functions` 加 `test[A-Z]*` 不改变任何现有用例的运行与否，只是防未来再踩。
+
 新增常驻守卫 2 条：生产库写入围栏用例、pytest 收集卫生守卫
 （`test_pytest_collection_hygiene.py`——实施期三次把用例写成 `def testXxx` 导致整份文件静默不跑）。
 迁移链守卫 `test_everyTableExistsAfterMigrationChain` 随 v4 一并抬到 `user_version == 4`，
