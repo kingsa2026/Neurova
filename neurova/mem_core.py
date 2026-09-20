@@ -1006,15 +1006,6 @@ class MemCore:
             logger.warning("记忆检索失败: %s", e)
             return []
 
-    def unified_experience_recall(self, query: str, limit: int = 5) -> List[Dict]:
-        """统一经验召回
-
-        检索与用户输入相关的历史经验记忆。经验以记忆形式统一存储，
-        因此复用 MemCore.recall 的检索通道（自动刷新缓冲区并优先使用
-        recall_engine / MoE 路由器）。
-        """
-        return self.recall(query, limit)
-
     def get_memories(self, limit: int = 100, offset: int = 0) -> List[Dict]:
         """获取记忆列表（用于 API 端点）
 
