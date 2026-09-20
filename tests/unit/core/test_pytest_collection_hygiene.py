@@ -29,7 +29,7 @@ def _offenders() -> list:
         # 配置里的 python_functions 加了 test[A-Z]*（项目命名用驼峰，pytest 默认只认 test_*，
         # 两边一撞就是整份文件静默不跑），所以这里反过来禁止本文件用驼峰名。
         found += ["%s → 守卫自身用例不得用驼峰名 %s" % (path.relative_to(_TESTS_DIR), m.group(1))
-                  for m in re.finditer(r"^\s*def test[A-Z]\w*\(", text, re.M)]
+                  for m in re.finditer(r"^\s*(def test[A-Z]\w*\()", text, re.M)]
     return found
 
 
