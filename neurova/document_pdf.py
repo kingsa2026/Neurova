@@ -26,6 +26,8 @@ CID_FALLBACK_WARNING = (
 )
 
 _HEADING_SIZES = {1: 18.0, 2: 15.0, 3: 13.0, 4: 12.0, 5: 11.5, 6: 11.0}
+# reportlab ParagraphStyle.alignment：0 左 / 1 中 / 2 右
+_ALIGNMENT = {"left": 0, "center": 1, "right": 2}
 
 
 class RenderUnavailable(RuntimeError):
@@ -106,21 +108,131 @@ def _styles(base_font: str):
         for level, size in _HEADING_SIZES.items()
     }
     item = ParagraphStyle("neurovaItem", parent=body, leftIndent=14, spaceAfter=2)
-    return body, headings, item
+    cells = {
+        align: ParagraphStyle(
+            f"neurovaCell{align}", parent=body, fontSize=10, leading=13, spaceAfter=0,
+            wordWrap="CJK", alignment=_ALIGNMENT[align],
+        )
+        for align in _ALIGNMENT
+    }
+    return body, headings, item, cells
 
 
-def _story(blocks: typing.Sequence[Block], body, headings, item):
+def _cell_texts(block: Block) -> typing.List[typing.List[str]]:
+    return [[cell.text for cell in row] for row in ([block.header] + block.rows) if row]
+
+
+def _column_widths(texts: typing.List[typing.List[str]], available: float) -> typing.List[float]:
+    """列宽按各列最长内容成比例分配，保底 24pt。
+
+    中文不需要按词断行（`wordWrap="CJK"` 已能逐字折行），所以宽表的首选取舍是
+    折行而不是缩字号——缩字号会把整张表压成看不清的小字，那是为排版牺牲内容可读性。
+    """
+    cols = max((len(row) for row in texts), default=1)
+    longest = [1] * cols
+    for row in texts:
+        for index, cell in enumerate(row[:cols]):
+            longest[index] = max(longest[index], min(len(cell), 60))
+    total = float(sum(longest))
+    return [max(24.0, available * weight / total) for weight in longest]
+
+
+def _fit_cell(cell: str, width: float, font_name: str, size: float) -> typing.Tuple[str, bool]:
+    """单元格内不可断行的长串（URL / 连续符号）超列宽时截断并报告。
+
+    能折行的交给 Paragraph 处理；只有折不动的才走到这一步。
+    """
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    longest_token = max(cell.split() or [""], key=len)
+    if stringWidth(longest_token, font_name, size) <= width - 8:
+        return cell, False
+
+    budget = max(1.0, width - 8.0)
+    kept = ""
+    for char in cell:
+        if stringWidth(kept + char, font_name, size) > budget:
+            break
+        kept += char
+    return (kept + "…") if kept else "…", True
+
+
+def _table(block: Block, cells, base_font: str, available: float, warnings: typing.List[str]):
+    from reportlab.lib import colors
+    from reportlab.platypus import Paragraph, Table, TableStyle
+
+    texts = _cell_texts(block)
+    widths = _column_widths(texts, available)
+    aligns = list(block.align) or ["left"] * len(texts[0])
+
+    data, truncated_cols = [], set()
+    for row_index, row in enumerate(texts):
+        styled = []
+        for col_index, cell in enumerate(row):
+            width = widths[col_index] if col_index < len(widths) else available
+            fitted, was_cut = _fit_cell(cell, width, base_font, 10.0)
+            if was_cut:
+                truncated_cols.add(col_index + 1)
+            align = aligns[col_index] if col_index < len(aligns) else "left"
+            styled.append(Paragraph(fitted, cells.get(align, cells["left"])))
+        data.append(styled)
+
+    table = Table(data, colWidths=widths, repeatRows=1 if block.header else 0)
+    table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#8A8A8A")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F0F0F0")) if block.header else ("TOPPADDING", (0, 0), (0, 0), 2),
+            ]
+        )
+    )
+    for column in sorted(truncated_cols):
+        warnings.append(f"第 {column} 列存在折不动的超长内容，已按列宽截断（可读性优先于缩字号）")
+    return table
+
+
+def _image(block: Block, body, available: float, warnings: typing.List[str]):
+    """图片块。src 已由工具层解析成本地路径（远程图先过 persist_media）。
+
+    读不到就退回到一行文字线索而不是整件失败——一份少了一张图的报告仍然有用，
+    但少图这件事必须写进 warnings。
+    """
+    from pathlib import Path
+
+    from reportlab.lib.utils import ImageReader
+    from reportlab.platypus import Image, Paragraph
+
+    def _skip(reason: str):
+        warnings.append(f"图片已跳过（{reason}）：{block.alt or block.src}")
+        return Paragraph(f"[图：{block.alt}]" if block.alt else "[图片已跳过]", body)
+
+    try:
+        if not Path(block.src).is_file():
+            return _skip("文件不存在")
+        width, height = ImageReader(block.src).getSize()
+    except Exception as e:  # noqa: BLE001 - 任何图片格式/读取问题都不该带走整份文档
+        return _skip(f"无法读取：{type(e).__name__}")
+
+    scale = min(1.0, available / float(width)) if width else 1.0
+    return Image(block.src, width=width * scale, height=height * scale)
+
+
+def _story(blocks, *, headings, body, item, cells, base_font, available, warnings):
     from reportlab.platypus import Paragraph
 
     story = []
     for block in blocks:
         if block.kind == NodeKind.HEADING:
-            style = headings.get(block.level, headings[6])
-            story.append(Paragraph(runs_to_markup(block.runs), style))
+            story.append(Paragraph(runs_to_markup(block.runs), headings.get(block.level, headings[6])))
         elif block.kind == NodeKind.LIST:
             for index, entry in enumerate(block.items, 1):
                 bullet = f"{index}. " if block.ordered else "• "
                 story.append(Paragraph(bullet + runs_to_markup(entry.runs), item))
+        elif block.kind == NodeKind.TABLE:
+            story.append(_table(block, cells, base_font, available, warnings))
+        elif block.kind == NodeKind.IMAGE:
+            story.append(_image(block, body, available, warnings))
         else:
             story.append(Paragraph(runs_to_markup(block.runs), body))
     return story
@@ -145,7 +257,7 @@ def render_document(
     settings = settings or DocSettings()
     resolved = resolve_cjk_font(font)
     base_font = _register_font(resolved)
-    body, headings, item = _styles(base_font)
+    body, headings, item, cells = _styles(base_font)
 
     buffer = io.BytesIO()
     margin = float(settings.margin_mm) * mm
@@ -159,7 +271,17 @@ def render_document(
         title=settings.title or None,
         author="Neurova",
     )
-    doc.build(_story(blocks, headings=headings, body=body, item=item))
-
     warnings = [CID_FALLBACK_WARNING] if resolved["mode"] == "cid" else []
+    doc.build(
+        _story(
+            blocks,
+            headings=headings,
+            body=body,
+            item=item,
+            cells=cells,
+            base_font=base_font,
+            available=A4[0] - 2 * margin,
+            warnings=warnings,
+        )
+    )
     return {"pdf": buffer.getvalue(), "pages": doc.page, "font": resolved, "warnings": warnings}
