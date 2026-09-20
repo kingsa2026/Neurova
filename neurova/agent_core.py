@@ -380,20 +380,6 @@ class _NullSystem:
 
     rsi_placeholder = True
 
-    # 提供可优化参数的默认值（与 RSIIntegrationManager.OPTIMIZABLE_PARAMETERS 对齐）
-    base_decay_rate = 0.1
-    similarity_threshold = 0.8
-    merge_threshold = 0.9
-    emotional_protection_threshold = 0.5
-    emotional_protection_factor = 1.0
-    crystallize_min_observations = 3
-    crystallize_min_success_rate = 0.6
-    pattern_min_support = 2
-    success_bonus = 0.1
-    failure_penalty = 0.1
-    decay_rate = 0.05
-    muscle_memory_threshold = 0.85
-
     def get_feedback(self):
         # 返回中性性能指标（0.5 = 既不差也不好），RSI 据此生成保守优化
         return {"performance_score": 0.5, "status": "null_fallback"}
@@ -1540,8 +1526,7 @@ class Agent:
                     sleep_system=sleep_system or _NullSystem(),
                     emotion_system=emotion_system or _NullSystem(),
                     experience_system=experience_system or _NullSystem(),
-                    tool_memory_system=tool_memory_system or _NullSystem(),
-                )
+                    tool_memory_system=tool_memory_system or _NullSystem(), agent_id=str(self.config.agent_id))
                 logger.info("Agent %s: RSI 编排器已初始化 (%s/4 闭环系统可用)", self.config.name, len(available_systems))
             else:
                 logger.info("Agent %s: RSI 未初始化（无可用闭环系统）", self.config.name)

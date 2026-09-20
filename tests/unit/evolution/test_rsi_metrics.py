@@ -20,16 +20,20 @@ class TestRSIMetrics(unittest.TestCase):
         
         self.metrics = RSIMetrics()
     
-    def test_initialization(self):
-        """测试初始化"""
-        # 验证所有指标初始化为 0
-        self.assertEqual(self.metrics.get_metric(RSIMetrics.RSI_CYCLES_TOTAL), 0)
-        self.assertEqual(self.metrics.get_metric(RSIMetrics.RSI_IMPROVEMENT_RATE), 0)
-        self.assertEqual(self.metrics.get_metric(RSIMetrics.RSI_CONVERGENCE_ROI), 0)
-        self.assertEqual(self.metrics.get_metric(RSIMetrics.RSI_ROLLBACK_COUNT), 0)
-        self.assertEqual(self.metrics.get_metric(RSIMetrics.RSI_CANDIDATES_GENERATED), 0)
-        self.assertEqual(self.metrics.get_metric(RSIMetrics.RSI_CANDIDATES_PRUNED), 0)
-        self.assertEqual(self.metrics.get_metric(RSIMetrics.RSI_GATE_FAILURES), 0)
+    def test_initialization_reports_absence(self):
+        """新实例一切指标缺席（None），不得预置为 0。
+
+        本用例原断言"所有指标初始化为 0"，钉的是工单 017 C 项删掉的那份
+        `__init__` 预置：未测即报 0，读侧就无法区分"改进率 0%"与"还没测过"
+        —— 与工单 012 的禁止令同源，故契约翻面而非放宽。
+        """
+        for name in (
+            RSIMetrics.RSI_CYCLES_TOTAL, RSIMetrics.RSI_IMPROVEMENT_RATE,
+            RSIMetrics.RSI_CONVERGENCE_ROI, RSIMetrics.RSI_ROLLBACK_COUNT,
+            RSIMetrics.RSI_CANDIDATES_GENERATED, RSIMetrics.RSI_CANDIDATES_PRUNED,
+            RSIMetrics.RSI_GATE_FAILURES,
+        ):
+            self.assertIsNone(self.metrics.get_metric(name), f"{name} 未测即有值")
     
     def test_record_metric(self):
         """测试记录指标"""
