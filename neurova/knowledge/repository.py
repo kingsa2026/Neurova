@@ -445,7 +445,14 @@ class KnowledgeRepository:
                 % (self._narrative_db_path, NarrativeStore.findArchivedJson(str(self._dir))[0],
                    NARRATIVE_STORE_ENV)
             )
-        if self._tombstones_path.exists():
+        if self._narratives is not None:
+            if self._narratives.tombstoneCount() == 0 and self._tombstones_path.exists():
+                report = self._narratives.importTombstonesFromJson(str(self._tombstones_path))
+                archived = self._narratives.archiveSidecar(str(self._tombstones_path))
+                logger.info("墓碑账本一次性搬入底座：导入 %s 条，旧文件归档为 %s",
+                            report["imported"], archived)
+            self._tombstones = self._narratives.loadTombstones()
+        elif self._tombstones_path.exists():
             try:
                 data = json.loads(self._tombstones_path.read_text(encoding="utf-8"))
                 if isinstance(data, dict):
@@ -487,6 +494,10 @@ class KnowledgeRepository:
 
     def _save_tombstones(self) -> None:
         self._assertNotWritingProductionUnderPytest()
+        if self._narratives is not None:
+            # 与条目同理：吞掉写失败会让内存与库分叉，下一次成功写入抹平分叉期间的账
+            self._narratives.replaceAllTombstones(self._tombstones)
+            return
         try:
             self._tombstones_path.write_text(
                 json.dumps(self._tombstones, ensure_ascii=False, indent=2),
@@ -1099,6 +1110,8 @@ class KnowledgeRepository:
                 if item.get("knowledge_id") == knowledge_id:
                     del items[idx]
                     self._tombstones.pop(knowledge_id, None)
+                    # 条目与墓碑都没了，治理行必须跟着退场——否则它成为"活着却无人认领"
+                    self._syncEntryGovernance()
                     self._save()
                     self._save_tombstones()
                     self._record_index_op("remove", knowledge_id)
