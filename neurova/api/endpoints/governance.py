@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 import typing
@@ -239,16 +239,47 @@ async def reject_approval(request: Request, request_id: str,
 # 永远滞留。此处委托 RSI 单例（agent_core 注入 evolution 单例）暴露审批面。
 
 
-def _get_rsi_orchestrator():
-    from neurova.evolution.closed_loop import get_evolution_orchestrator
+_RSI_NOT_READY = "RSI 编排器未初始化：本轮没有可报的进化状态（不是进化一切正常）"
 
-    return getattr(get_evolution_orchestrator(), "rsi_orchestrator", None)
+
+def _rsi_not_ready(agent_id: str) -> "HTTPException":
+    return HTTPException(
+        status_code=503,
+        detail=f"agent {agent_id!r} 上没有 RSI 编排器：{_RSI_NOT_READY}",
+    )
+
+
+def _get_rsi_orchestrator(agent_id: Optional[str] = None):
+    """按 agent 定位 RSI 编排器 —— 与 `_get_agent()` 同源，不读进程级单例属性。
+
+    历史实现是 `getattr(get_evolution_orchestrator(), "rsi_orchestrator", None)`：
+    每个 agent 构造编排器时都往那**一个**属性上写，后构造者覆盖前者，于是
+    "待审列表 / 批准 / 拒绝"永远作用在最后那个 agent 上（工单 011 证据）。
+    指名了 agent 而它不在池中时返回 None 而**不回落**：回落到默认 agent 等于把
+    批准动作装进别人的技能库，是本单要拆的缺陷而不是可接受的兜底。
+    """
+    state = None
+    from neurova.api.endpoints import get_app_state
+
+    state = get_app_state()
+    if not state:
+        return None
+    try:
+        agent = state.get_agent(agent_id) if agent_id else state.get_agent()
+    except Exception:  # noqa: BLE001 - 与 _get_agent() 的既有容错同形
+        agent = None
+    return getattr(agent, "rsi_orchestrator", None) if agent is not None else None
 
 
 class RsiApproveRequest(BaseModel):
     """RSI 提案批准"""
 
     approved_by: str = Field(..., min_length=1, description="批准者（人类评审 gate）")
+    tool_sequence: Optional[List[str]] = Field(
+        default=None,
+        description="批准人补交的可执行工具序列；manifest 缺 tool_sequence 时必须在此补上，"
+        "否则该提案按 not_supported 拒绝（工单 010）",
+    )
 
 
 class RsiRejectRequest(BaseModel):
@@ -257,25 +288,74 @@ class RsiRejectRequest(BaseModel):
     reason: str = ""
 
 
-@router.get("/rsi/proposals/pending")
-async def list_pending_rsi_proposals(_admin: Any = Depends(_governance_admin_dep)):
-    """列出 RSI 升级提案（PENDING 状态）"""
-    rsi = _get_rsi_orchestrator()
+@router.get("/rsi/status")
+async def get_rsi_status(
+    agent_id: Optional[str] = None, _admin: Any = Depends(_governance_admin_dep)
+):
+    """RSI 状态只读面（工单 012）：阶段、最近一轮晋升判据三态、候选统计、回滚留痕、告警。
+
+    这里**不**提供 `available:false` 的静默 200：`orchestrator.get_status()` 此前
+    生产零调用方，而"RSI 根本没装配"与"RSI 跑了一轮什么都没改"在观测上是两件
+    相反的事，压成同一个 200 就是把前者读成后者（工单 011 同一条证据）。
+    """
+    rsi = _get_rsi_orchestrator(agent_id)
     if rsi is None:
-        return {"code": 0, "data": {"proposals": [], "available": False}}
+        raise _rsi_not_ready(agent_id)
+    return {"code": 0, "data": rsi.get_status()}
+
+
+@router.get("/rsi/proposals/pending")
+async def list_pending_rsi_proposals(
+    agent_id: Optional[str] = None, _admin: Any = Depends(_governance_admin_dep)
+):
+    """列出 RSI 升级提案（PENDING 状态）"""
+    rsi = _get_rsi_orchestrator(agent_id)
+    if rsi is None:
+        raise _rsi_not_ready(agent_id)
     proposer = rsi.self_improvement_proposer
     proposals = [p.to_dict() for p in proposer.list_pending_proposals()]
-    return {"code": 0, "data": {"proposals": proposals, "available": True}}
+    return {"code": 0, "data": {"proposals": proposals, "agent_id": rsi.agent_id}}
+
+
+@router.get("/rsi/proposals")
+async def list_rsi_proposals(
+    state: Literal["all", "pending", "applied", "rejected", "rolled_back"] = "all",
+    agent_id: Optional[str] = None,
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """全状态提案列表。只有 PENDING 可见时，"批准过什么、结果如何"永久消失，
+    回滚与事后审计都无从下手（工单 011，读的是工单 010 的 `list_all_proposals()`）。"""
+    rsi = _get_rsi_orchestrator(agent_id)
+    if rsi is None:
+        raise _rsi_not_ready(agent_id)
+    proposer = rsi.self_improvement_proposer
+    proposals = (
+        proposer.list_all_proposals() if state == "all"
+        else [p for p in proposer.list_all_proposals() if p.status.value == state]
+    )
+    return {
+        "code": 0,
+        "data": {
+            "proposals": [p.to_dict() for p in proposals],
+            "state": state,
+            "agent_id": rsi.agent_id,
+        },
+    }
 
 
 @router.post("/rsi/proposals/{proposal_id}/approve")
-async def approve_rsi_proposal(proposal_id: str, body: RsiApproveRequest, _admin: Any = Depends(_governance_admin_dep)):
+async def approve_rsi_proposal(
+    proposal_id: str,
+    body: RsiApproveRequest,
+    agent_id: Optional[str] = None,
+    _admin: Any = Depends(_governance_admin_dep),
+):
     """人工批准并应用 RSI 升级提案（状态机守卫：仅 PENDING）"""
-    rsi = _get_rsi_orchestrator()
+    rsi = _get_rsi_orchestrator(agent_id)
     if rsi is None:
-        raise HTTPException(status_code=503, detail="RSI 编排器未初始化")
+        raise _rsi_not_ready(agent_id)
     result = rsi.self_improvement_proposer.approve_and_apply(
-        proposal_id, approver=body.approved_by
+        proposal_id, approver=body.approved_by, tool_sequence=body.tool_sequence
     )
     if result is None or not getattr(result, "success", False):
         error = getattr(result, "error", "") or "批准失败"
@@ -283,15 +363,30 @@ async def approve_rsi_proposal(proposal_id: str, body: RsiApproveRequest, _admin
             raise HTTPException(status_code=404, detail=error)
         raise HTTPException(status_code=409, detail=error)
     logger.info("RSI 提案 %s 已批准并应用（by %s）", proposal_id, body.approved_by)
-    return {"code": 0, "data": {"applied": True, "result": getattr(result, "to_dict", lambda: {})()}}
+    # 生效证据（工单 010）：装了哪个技能、回灌后注册表是否真取得到。
+    # 只回 "applied: true" 就是本单拆掉的那个假象本身。
+    return {
+        "code": 0,
+        "data": {
+            "applied": True,
+            "applied_skill_id": getattr(result, "applied_skill_id", ""),
+            "registry_hit": bool(getattr(result, "registry_hit", False)),
+            "result": getattr(result, "to_dict", lambda: {})(),
+        },
+    }
 
 
 @router.post("/rsi/proposals/{proposal_id}/reject")
-async def reject_rsi_proposal(proposal_id: str, body: RsiRejectRequest, _admin: Any = Depends(_governance_admin_dep)):
+async def reject_rsi_proposal(
+    proposal_id: str,
+    body: RsiRejectRequest,
+    agent_id: Optional[str] = None,
+    _admin: Any = Depends(_governance_admin_dep),
+):
     """拒绝 RSI 升级提案（状态机守卫：仅 PENDING）"""
-    rsi = _get_rsi_orchestrator()
+    rsi = _get_rsi_orchestrator(agent_id)
     if rsi is None:
-        raise HTTPException(status_code=503, detail="RSI 编排器未初始化")
+        raise _rsi_not_ready(agent_id)
     if not rsi.self_improvement_proposer.reject_proposal(proposal_id, reason=body.reason):
         raise HTTPException(
             status_code=404,
