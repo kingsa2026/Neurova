@@ -50,12 +50,12 @@ PROVENANCE_TABLE = "memory_index_chunk_provenance"
 RECALL_TABLE = "memory_index_chunk_recall_metadata"
 # 源列闭集两值 → 包内 (memory_type, category)；表外值不猜映射
 SOURCE_FAMILIES = {"memory": ("semantic", "knowledge"), "sessions": ("episodic", "conversation")}
-# 出处四值与本系统 MemoryOrigin 同词，逐字透传；缺出处即跳过（信任级不猜）
+# 出处四值与本系统 MemoryOrigin 同词，逐字透传；缺出处落 untrusted 并申报（不整条丢，也不抬信任）
 ORIGIN_CLASSES = ("owner", "agent", "untrusted", "system")
 DEFAULT_IMPORTANCE = 50.0        # 源里没打重要度时用本系统默认档，不臆造分数
 IMPORTANCE_SCALE = 10.0          # 源是 1-10，包内是 0-100
 MEMORY_REASONS = {
-    "memory:无出处": "源里没记信任级（origin_class），origin 是信任级不能猜，整条未导",
+    "memory:无出处": "源里没记 origin_class（或记的是词表外的值）：按 untrusted 最低信任导入",
     "memory:来源未知": "source 列出现已知两值之外的取值，不猜记忆类型映射，整条未导",
     "memory:空正文": "该索引项没有正文，包内 content 必填，未导",
     "memory:派生索引": "向量/内容哈希/嵌入模型属源侧派生索引，包内不搬（本系统自算）",
@@ -143,7 +143,7 @@ def _memory_sql(tables: set) -> str:
     recall_join = (f"LEFT JOIN {RECALL_TABLE} AS m ON m.chunk_id = c.id"
                    if RECALL_TABLE in tables else "")
     recall_cols = "m.importance, m.triggers, m.project_key" if recall_join else "NULL, NULL, NULL"
-    return (f"SELECT c.id, c.source, c.text, c.path, c.start_line, c.end_line,"
+    return (f"SELECT c.id, c.source, c.text, c.path, c.start_line, c.end_line, c.updated_at,"
             f" {prov_cols}, {recall_cols} FROM {MEMORY_TABLE} AS c"
             f" {prov_join} {recall_join} ORDER BY c.id")
 
@@ -154,9 +154,13 @@ def _memory_record(row: sqlite3.Row, declared: Dict[str, List[Any]]) -> Optional
         _declare(declared, "memory:来源未知")
         return None
     origin = str(row["origin_class"] or "")
-    if origin not in ORIGIN_CLASSES:
+    if origin in ORIGIN_CLASSES:
+        observed_at = row["observed_at"]
+    else:
+        # 没出处按最低信任导（源侧自己的回填也是 untrusted）：整条丢掉是丢内容，
+        # 悄悄抬成 owner 是投毒；两者都不可取，就落最低档并把条数报出来。
+        origin, observed_at = "untrusted", row["updated_at"]
         _declare(declared, "memory:无出处")
-        return None
     text = str(row["text"] or "").strip()
     if not text:
         _declare(declared, "memory:空正文")
@@ -167,7 +171,7 @@ def _memory_record(row: sqlite3.Row, declared: Dict[str, List[Any]]) -> Optional
         identity_key=str(row["id"]), content=text, memory_type=family[0], category=family[1],
         origin=origin, importance=DEFAULT_IMPORTANCE if importance is None
         else float(importance) * IMPORTANCE_SCALE,
-        ts=_from_ms(row["observed_at"]),
+        ts=_from_ms(observed_at),
         tags=tuple(_memory_tags(row)), source_ref=f"{row['path']}#L{row['start_line']}"
                                                   f"-L{row['end_line']}",
         supersedes=str(row["supersedes_key"] or ""))
