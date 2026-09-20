@@ -42,6 +42,11 @@ class KnowledgeConflictJudge:
         """
         groups: Dict[Any, List[Dict[str, Any]]] = {}
         for fact in self._store.candidateFactsForConflict(subjectLabel, predicateTermId):
+            if _derivedBy(fact):
+                # 推导结论不是"同一 slot 的竞争主张"，而是同一条规则对同一主体给出的
+                # 多条后件实例。让它们互相取代，传递闭包会自己裁掉自己：甲→丁 顶掉
+                # 甲→丙，而甲→丁 的依据恰恰是甲→丙。生退归推导账本管（022），不归裁决管。
+                continue
             groups.setdefault((_qualifierKey(fact), _entryScopeOf(fact)), []).append(fact)
 
         conflicts: List[Dict[str, Any]] = []
@@ -174,6 +179,11 @@ class KnowledgeConflictJudge:
             row = self._store.fact(loser)
             if row and row.get("status") == "active":
                 self._store.supersede(winnerId, loser, reason="conflict auto_resolved")
+
+
+def _derivedBy(fact: Dict[str, Any]) -> str:
+    """这条行是推导来的还是被主张的——推导结论不参与取值裁决（见 detect）。"""
+    return str((fact.get("qualifier") or {}).get("derived_by") or "")
 
 
 def _qualifierKey(fact: Dict[str, Any]) -> str:

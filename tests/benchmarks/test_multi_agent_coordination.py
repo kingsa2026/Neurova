@@ -7,7 +7,7 @@ Multi-agent 协作性能基准测试
 import asyncio
 import time
 import statistics
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 import json
