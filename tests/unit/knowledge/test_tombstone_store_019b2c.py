@@ -41,14 +41,14 @@ def _seed(repo) -> str:
 
 
 class TestMigrationAndShape:
-    def test_tombstoneTableLandsAtVersionSix(self, tmp_path):
+    def test_tombstoneTableLandsInMigrationChain(self, tmp_path):
         NarrativeStore(str(tmp_path / FOUNDATION_DB_NAME))
         probe = NarrativeStore(str(tmp_path / FOUNDATION_DB_NAME))
         with probe._conn() as conn:
             names = {r[0] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'")}
             assert "knowledge_tombstones" in names
-            assert int(conn.execute("PRAGMA user_version").fetchone()[0]) == 6
+            assert int(conn.execute("PRAGMA user_version").fetchone()[0]) >= 6
 
     def test_recShapeSurvivesRoundTrip(self, gated):
         repo, tmp_path = gated
@@ -129,10 +129,10 @@ class TestCutoverAndRollback:
         reopened = KnowledgeRepository(str(tmp_path / "kb"))
         assert [r["knowledge_id"] for r in reopened.list_deleted()] == [kid]
         assert not (tmp_path / "kb" / "knowledge_tombstones.json").exists()
-        archived = NarrativeStore.findArchivedJson(str(tmp_path / "kb"))
-        assert len(archived) == 2, "条目与墓碑各自归档，才认得出哪份是哪份"
-        assert any("knowledge.json.pre-narrative-store-" in a for a in archived)
-        assert any("knowledge_tombstones.json.pre-narrative-store-" in a for a in archived)
+        archived = " ".join(NarrativeStore.findArchivedJson(str(tmp_path / "kb")))
+        # 三份旁账各自留名归档：共用前缀会让事后认不出哪份是哪份（实测撞过）
+        for name in ("knowledge.json", "knowledge_tombstones.json", "knowledge_conflicts.json"):
+            assert name + ".pre-narrative-store-" in archived, name
 
     def test_purgedTombstonesDoNotComeBack(self, tmp_path, monkeypatch):
         """墓碑清空后重启不能拿快照把删除史灌回来（与条目同一纪律）。"""

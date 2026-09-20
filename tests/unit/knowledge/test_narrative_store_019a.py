@@ -156,20 +156,23 @@ class TestRepositorySwitch:
         before = copy.deepcopy(seeded._items)
         monkeypatch.setenv(ENV_FLAG, "on")
         reopened = KnowledgeRepository(str(tmp_path / "kb"))
-        # 唯一被有意改掉的是 confidence：开闸即建治理行，条目上那个数从此是断言聚合值
-        # （019b-2 的回写），旧库里 126/130 恒 0.7 的硬编码在开闸那一刻就被归正。
-        # 除它以外逐字段等于 JSON 时代——这条判据的范围因此收窄，不是放宽。
-        assert _stripConfidence(reopened._items) == _stripConfidence(before)
+        # 被有意改掉的只有 confidence 与 source：开闸即建治理行，条目上那两个数从此是
+        # 派生值（019b-2 聚合置信、019b-4 从断言 medium_ref 派生来源），
+        # 旧库里 126/130 恒 0.7 的硬编码在开闸那一刻就被归正。
+        # 除此之外逐字段等于 JSON 时代——这条判据的范围因此收窄，不是放宽。
+        assert _stripDerivedFields(reopened._items) == _stripDerivedFields(before)
         pairs = list(zip(_flatItems(reopened), _flatItemsFromDict(before)))
         assert any(i["confidence"] != b["confidence"] for i, b in pairs),             "开闸不回填置信度，这条豁免就只是给旧行为开后门"
+        assert all("source" in i and i["source"] for i, _ in pairs),             "source 派生后必须仍非空，否则豁免变成藏缺陷"
         assert all(i["confidence"] in (0.45, 0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85)
                    for i, _ in pairs), "置信度必须落在聚合格点上，不是任意小数"
 
 
-def _stripConfidence(itemsByAgent):
+def _stripDerivedFields(itemsByAgent):
     out = {}
     for agentId, items in itemsByAgent.items():
-        out[agentId] = [{k: v for k, v in item.items() if k != "confidence"} for item in items]
+        out[agentId] = [{k: v for k, v in item.items() if k not in ("confidence", "source")}
+                        for item in items]
     return out
 
 

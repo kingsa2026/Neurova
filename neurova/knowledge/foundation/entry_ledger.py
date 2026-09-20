@@ -45,6 +45,7 @@ class EntryLedger:
         """把治理层对齐到条目集合。返回本轮动作与每条目的当前置信度。"""
         claims: set = set()
         confidences: Dict[str, Optional[float]] = {}
+        mediums: Dict[str, str] = {}
         admitted = 0
 
         for agentId, items in itemsByAgent.items():
@@ -56,13 +57,15 @@ class EntryLedger:
                 if held:
                     claims.add(held["fact_id"])
                     confidences[kid] = held.get("confidence")
+                    mediums[kid] = self._mediumOf(held["fact_id"])
                     continue
                 receipt = self._gate.admit(
                     AdmissionRequest(
                         agentId=agentId, subjectLabel=_subjectLabel(item, kid),
                         recordKind="narrative", objectTerm=kid,
                         content=str(item.get("content") or ""),
-                        assertions=[_assertionFor(agentId, item)],
+                        assertions=[_assertionFor(agentId, item,
+                                                  mediumFallback="entry:%s" % kid)],
                         sourceTurnId="entry:%s" % kid,
                     ),
                     allowPendingSegments=True,
@@ -73,9 +76,11 @@ class EntryLedger:
                 self._store.reviveRetracted(receipt.factId, reason="条目恢复，重新主张同一说法")
                 claims.add(receipt.factId)
                 confidences[kid] = self._confidenceOf(receipt.factId)
+                mediums[kid] = self._mediumOf(receipt.factId)
 
         retracted = self._retractUnclaimed(claims)
-        return {"admitted": admitted, "retracted": retracted, "confidences": confidences}
+        return {"admitted": admitted, "retracted": retracted,
+                "confidences": confidences, "mediums": mediums}
 
     def verifyProjection(self, itemsByAgent: Dict[str, List[Dict[str, Any]]]) -> List[str]:
         """条目在、治理行不在 ⇒ 分叉清单。只报不改——补投的语义还没定（见工单注记）。"""
@@ -97,6 +102,15 @@ class EntryLedger:
     def _confidenceOf(self, factId: str) -> Optional[float]:
         fact = self._store.fact(factId)
         return fact.get("confidence") if fact else None
+
+    def _mediumOf(self, factId: str) -> str:
+        """条目的来源以断言的 medium_ref 为准——那才是审计读得到的东西。
+
+        多条断言时取最近一条：`source` 是条目上的单个展示字段，最近的来源比最早的有用，
+        而完整来源史在断言账上，不因这个字段被覆盖而丢失。
+        """
+        rows = self._store.assertions(factId)
+        return str(rows[-1].get("medium_ref", "") or "") if rows else ""
 
     def _retractUnclaimed(self, claims: Iterable[str]) -> int:
         claimed = set(claims)
