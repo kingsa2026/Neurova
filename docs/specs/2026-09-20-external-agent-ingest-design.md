@@ -157,7 +157,8 @@ v1 的记录类型边界（避免接口悬空）
   sessions→episodic/conversation）、`origin_class` 逐字透传（与本系统 `MemoryOrigin` 同词）、
   importance 按 1-10→0-100 定标且缺档用本系统默认 50、path+行号成 `source_ref`、
   `supersedes_key` 成 `supersedes`；向量/内容哈希/嵌入模型属源侧派生索引一律不搬（申报条数）。
-  **没记出处的 chunk 整条不导**——origin 是信任级，猜高会经记忆链路毒化上下文。
+  **没记出处的条目按 `untrusted` 最低信任导入并申报条数**（源侧自己的回填也是 untrusted）：整条丢掉
+  是丢内容、悄悄抬信任是投毒，落最低档 + 报数两头都保住；时间用该条自己的 `updated_at`，不用导入时刻。
 - 私有方言的记忆导入：本机 `qwenpaw_memory*` 一族无公开格式可依；`memories.jsonl` 与
   `MemoryManager.import_memories` 已就位，产出记忆的第一家是公开族 `openclaw_transcript`
   （会话+记忆同属一支 store，一支包两样都装）；其余各族目前仍只导会话。私有来源（记忆库、

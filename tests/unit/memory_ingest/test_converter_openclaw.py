@@ -318,16 +318,23 @@ def test_session_sourced_chunks_map_to_episodic(tmp_path: Path):
     assert row["origin"] == "agent" and row["supersedes"] == "ck1"
 
 
-def test_chunk_without_provenance_is_declared_not_guessed(tmp_path: Path):
-    """origin 是信任级：源里没记出处就不导，宁可少一条也不给它抬信任。"""
-    memory = {"chunks": [_chunk("ck3", "无出处条目")]}
+def test_chunk_without_provenance_is_imported_as_untrusted(tmp_path: Path):
+    """源里没记出处：按最低信任导（与源侧自己的回填同向），时间用该条的 updated_at。
+
+    不导会把内容丢掉；导了又不报就是给未知来源抬信任——所以既落库也申报条数。
+    session_kind 不补 "unknown"：那是源侧回填的口径，包里没有出处就说没有。
+    """
+    memory = {"chunks": [_chunk("ck3", "无出处条目", at=1787791388521)]}
 
     manifest = convert(_db(tmp_path, memory=memory), tmp_path / "bundle", agent_name="x")
+    row = _memories(tmp_path / "bundle")[0]
 
-    assert _memories(tmp_path / "bundle") == []
-    assert manifest.counts["memories"] == 0
+    assert validate_bundle(tmp_path / "bundle") == []
+    assert row["origin"] == "untrusted" and row["memory_type"] == "semantic"
+    assert row["ts"] == "2026-08-27T00:43:08.521000+00:00"          # 不是导入时刻
+    assert row["tags"] == []
     entry = next(e for e in manifest.dropped if e["field"] == "memory:无出处")
-    assert entry["count"] == 1 and "信任" in entry["reason"]
+    assert entry["count"] == 1 and "untrusted" in entry["reason"]
 
 
 def test_missing_importance_uses_the_store_default(tmp_path: Path):
