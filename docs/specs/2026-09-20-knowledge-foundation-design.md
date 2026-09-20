@@ -277,6 +277,8 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 |---|---|---|---|
 | `NEUROVA_KB_FACT_SURFACE` | 011：检索时并入底座事实池（时效/置信排序项） | 关 | **判负保持关**（§8.0） |
 | `NEUROVA_KB_NARRATIVE_STORE` | 019a/019b-2：条目权威换到底座库，且装载即把治理层对齐 | **开**（019b-4b 翻向） | 默认即底座库；只有显式 `off/0/false/no/json` 才回 JSON 旧路。回退前先按下方"搬家是单向可逆"的步骤走 |
+| `NEUROVA_KB_GRAPH_RETRIEVER` | 013：多跳图检索进对话链（读底座递归 CTE，priority 27） | **开**（013 翻向） | B04 是断点不是新能力；关掉只是回退位。命中仍为 0 直到有三元组进表（见 B02） |
+| `NEUROVA_KB_MAIN_RERANK` | 014：RRF 融合之后的主路末端精排段 | **开**（014，量过才翻） | 关闸态在冻结锚点上逐位等于基线（0.855489/0.83/0.1）；开闸态 0.855489/**0.831667**/0.1——召回与未命中率一字未动、MRR 略升。方法 `NEUROVA_KB_MAIN_RERANK_METHOD=weight|model`，池上限 `..._POOL=<倍数>`；主路在事件循环内**不跑模型通道**（同步 HTTP 会卡服务），退化时 `rerank_method` 如实标成 weight |
 
 **搬家是单向可逆的**：开闸首次装载会把 `knowledge.json` 导入 `knowledge_narratives` 并把旧主文件
 改名归档（`.pre-narrative-store-<UTC>`），归档保证只搬一次——删空条目后重启不会拿旧快照把已删项复活。

@@ -100,7 +100,10 @@ def _stub_vector_index(hits):
 
 
 class TestHybridSearchKnowledge:
-    def test_four_routes_breakdown(self, repo):
+    def test_four_routes_breakdown(self, repo, monkeypatch):
+        """本例测的是 RRF 融合段本身，因此把末端精排列在合同之外（014 的主路精排
+        有自己的判据文件 test_main_path_rerank.py）。"""
+        monkeypatch.setenv("NEUROVA_KB_MAIN_RERANK", "off")
         # 向量路命中"工作流引擎"：词法两路它屈居"向量文档"之后，        # vector 第一秩 + 0.25 权重把综合分抬到第一 → 证明向量路真实参与排序
         kid_wflow = repo._items["default"][0]["knowledge_id"]
         vec = _stub_vector_index([{"id": kid_wflow, "score": 0.8}])
@@ -113,9 +116,24 @@ class TestHybridSearchKnowledge:
         assert top["score"] > 0
         # "工作流引擎" 同时命中 tfidf+bm25(+fts) → 排最前
         assert top["title"] == "工作流引擎"
-        # 向量独中的"向量文档"也应进入结果（vector 路贡献）
+        # "向量文档" 也应进入结果（vector 路贡献）
         titles = [r["title"] for r in results]
         assert "向量文档" in titles
+
+    def test_mainPathRerankRunsOnTopOfRrf(self, repo, monkeypatch):
+        """默认态下融合之上还有一段精排：结果必须带着实际生效的方法与分数。"""
+        monkeypatch.delenv("NEUROVA_KB_MAIN_RERANK", raising=False)
+        kid_wflow = repo._items["default"][0]["knowledge_id"]
+        vec = _stub_vector_index([{"id": kid_wflow, "score": 0.8}])
+
+        results = hybrid.hybrid_search_knowledge(
+            repo, {"user_id": "1"}, "工作流 向量检索", limit=5, vector_index=vec
+        )
+
+        assert results and all(r.get("rerank_method") == "weight" for r in results)
+        scores = [r["rerank_score"] for r in results]
+        assert scores == sorted(scores, reverse=True), "最终序必须是精排序"
+        assert all("rrf_score" in r for r in results), "精排不抹掉融合分，两级读数都要在"
 
     def test_vector_route_absent_degrades(self, repo):
         vec = _stub_vector_index([])

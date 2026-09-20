@@ -33,6 +33,7 @@ from neurova.cognitive_layers.memory_layer.manager import get_memory_manager
 from neurova.cognitive_layers.memory_layer.semantic_search import get_semantic_search
 from neurova.knowledge import hybrid as _knowledge_hybrid
 from neurova.knowledge.rerank import refine
+from neurova.knowledge.rerank.rerank_factory import buildRunner as _build_rerank_runner
 from neurova.knowledge.search import RetrievalMethod, full_text_search as _kb_full_text_search
 from neurova.knowledge.search import tokenize as _kb_tokenize
 
@@ -254,31 +255,6 @@ def _vector_search_knowledge(query: str, current_user: Dict[str, Any], top_k: in
     idx = get_knowledge_vector_index()
     hits = idx.search(query, current_user, top_k=top_k, repo=get_knowledge_repository())
     return [(str(h["id"]), float(h["score"])) for h in hits]
-
-
-def _build_rerank_runner(config: dict):
-    """按请求配置装配 rerank runner。
-
-    返回 (runner, method_label, note)：note=None 表示正常；method="model"
-    但模型通道不可用时退化为加权融合，note 必须携带原因（
-    （milvus.py aquery 吞错 return []，零结果与后端故障不可分），
-    note 随响应体 rerank_note 字段如实透出。
-    """
-    from neurova.knowledge.rerank import ModelRerankRunner, WeightRerankRunner
-    from neurova.llm import rerank_client as rc
-
-    method = (config.get("method") or "weight").strip().lower()
-    weights = config.get("weights") or None
-
-    if method == "model":
-        provider_name = str(config.get("rerank_provider") or "").strip()
-        try:
-            provider = rc.build_rerank_provider(provider_name)
-        except rc.RerankConfigError as e:
-            logger.info("rerank: 模型通道不可用，退化加权融合: %s", e)
-            return WeightRerankRunner(weights), "weight", {"requested": "model", "reason": e.reason}
-        return ModelRerankRunner(provider, fallback_weights=weights), "model", None
-    return WeightRerankRunner(weights), "weight", None
 
 
 def _single_channel_results(scored, corpus, channel: str) -> List[Dict[str, Any]]:
