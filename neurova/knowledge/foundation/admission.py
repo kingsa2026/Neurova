@@ -65,6 +65,11 @@ class AdmissionReceipt:
     lineageApplied: bool = False
 
 
+import threading
+
+_deriveState = threading.local()
+
+
 class AdmissionSegmentMissing(RuntimeError):
     """咽喉依赖未齐——缺哪段就点名哪段，禁止半链冒充全链。"""
 
@@ -101,6 +106,7 @@ class KnowledgeAdmissionGate:
         lineageLedger: Any = None,
         ontology: Any = None,
         credibility: Any = None,
+        reasoning: Any = None,
     ) -> None:
         self._store = store
         self._collaborators = {
@@ -109,6 +115,9 @@ class KnowledgeAdmissionGate:
             "lineage": lineageLedger,
             "ontology_adjudication": ontology,
             "credibility_record": credibility,
+            # 推导属段3（类型与规则裁决）的后半，不另立一段：段序是设计定的，
+            # 多一格就把"校验与推导是一件事的两面"拆成了两段。
+            "forward_chaining": reasoning,
         }
 
     def pendingSegments(self) -> List[str]:
@@ -214,6 +223,7 @@ class KnowledgeAdmissionGate:
             self._attachLineage(lineage, factId, request, deduped=False)
         applied += self._judgeConflicts(request)
         applied += self._applyCredibility(factId)
+        applied += self._derive(request, subjectKey)
         return AdmissionReceipt(
             factId=factId,
             subjectKey=subjectKey,
@@ -223,6 +233,19 @@ class KnowledgeAdmissionGate:
             needsHumanReview=needsReview,
             lineageApplied=lineage is not None,
         )
+
+    def _derive(self, request: AdmissionRequest, subjectKey: str) -> List[str]:
+        """段3 后半：按规则推导。嵌套写不再点燃规则——推导事实又触发推导，
+        等于给自己造一个没有终点的循环（分层只管结论正确，不管重入）。"""
+        reasoning = self._collaborators.get("forward_chaining")
+        if reasoning is None or getattr(_deriveState, "inside", False):
+            return []
+        _deriveState.inside = True
+        try:
+            reasoning.fireFor(request.agentId, request.predicateTermId)
+        finally:
+            _deriveState.inside = False
+        return ["forward_chaining"]
 
     def _applyCredibility(self, factId: str) -> List[str]:
         """段5：置信度由断言聚合回写，读实况而非增量累加。"""
@@ -305,7 +328,11 @@ def productionAdmissionGate(store: Any, toolVersion: str = "foundation-gate") ->
     from .conflict_judge import KnowledgeConflictJudge
     from .lineage import KnowledgeLineageLedger
 
+    from neurova.knowledge.ontology.rule_engine import ForwardChainingEngine
+
     registry = OntologyTermRegistry(store)
+    engine = ForwardChainingEngine(store, gateFactory=lambda st: productionAdmissionGate(
+        st, toolVersion=toolVersion))
     return KnowledgeAdmissionGate(
         store,
         resolver=SubjectResolver(),
@@ -313,4 +340,5 @@ def productionAdmissionGate(store: Any, toolVersion: str = "foundation-gate") ->
         lineageLedger=KnowledgeLineageLedger(store, toolVersion=toolVersion),
         credibility=ConfidenceAggregator(store),
         ontology=OntologyValidationReport(registry),
+        reasoning=engine,
     )
