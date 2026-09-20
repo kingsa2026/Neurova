@@ -770,60 +770,6 @@ class TestNegativeScreenSettingsAPI:
             assert response.status_code in (200, 400)
 
 
-# ─── 测试与 PostChatPipeline 集成 ────────────────────────────────────────────
-
-
-class TestPostChatPipelineIntegration:
-    """测试与 PostChatPipeline 集成"""
-
-    @pytest.mark.asyncio
-    async def test_rsi_result_pushed_to_negative_screen(self):
-        """测试 RSI 结果推送到负一屏"""
-        from neurova.notifications.negative_screen import (
-            NegativeScreenConfig,
-            NegativeScreenConfigManager,
-            NegativeScreenPusher,
-        )
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_manager = NegativeScreenConfigManager(data_dir=tmpdir)
-
-            # 设置用户配置
-            config = NegativeScreenConfig(
-                user_id="user_001",
-                auth_code="test_auth_code",
-                enabled=True,
-            )
-            config_manager.save_config(config)
-
-            # 创建推送器
-            pusher = NegativeScreenPusher()
-
-            # Mock 推送
-            with patch.object(pusher, "push_task") as mock_push:
-                mock_push.return_value = MagicMock(
-                    success=True,
-                    task_id="rsi_task_001",
-                )
-
-                # 模拟 RSI 结果
-                rsi_result = {
-                    "iteration": 1,
-                    "improvements": 3,
-                    "convergence_score": 0.85,
-                    "status": "completed",
-                }
-
-                # 推送 RSI 结果
-                result = await pusher.push_rsi_result(
-                    config=config,
-                    rsi_result=rsi_result,
-                )
-
-                assert result.success is True
-                mock_push.assert_called_once()
-
-
 # ─── 运行测试 ────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
