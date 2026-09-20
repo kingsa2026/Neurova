@@ -35,6 +35,8 @@ logger = get_logger(__name__)
 DEFAULT_REBUILD_THRESHOLD = 5
 # 注入/合并进描述的指引上限（最近 N 条，防描述膨胀）
 INJECTION_MAX_RECORDS = 5
+# 待审经验队列上限（工单 016：溢出留痕的口径就锚在这里）
+PENDING_QUEUE_BOUND = 50
 # 每技能保留的归档份数（可回滚窗口）
 ARCHIVE_KEEP = 3
 # 淘汰双门槛：使用次数下限 / 成功率上限
@@ -75,6 +77,10 @@ class SkillExperienceStore(PersistedStateMixin):
         # 待审批记录（C10 治理收紧：improver/attribution 等自动化来源在评审闸
         # 开启时先进待审——批准后移入 _records 生效，计入重建阈值）
         self._pending_records: List[SkillExperienceRecord] = []
+        # 因队列有界被丢弃的累计条数（工单 016：溢出必须可观测，不许静默丢）
+        self._pending_dropped: int = 0
+        # 进过待审队列的累计条数（判据用它区分"没压力"与"没测过"）
+        self._pending_offered: int = 0
         # skill_id -> {times_presented, times_used, positive, negative}
         self._usage: Dict[str, Dict[str, Any]] = {}
         # skill_id -> 归档列表（重建/回滚前的定义快照，有界）
@@ -129,7 +135,18 @@ class SkillExperienceStore(PersistedStateMixin):
                 if any(r.content == content for r in self._pending_records):
                     return None
                 self._pending_records.append(record)
-                del self._pending_records[:-50]  # 有界
+                self._pending_offered += 1
+                # 有界，但**丢了多少必须留痕**：静默截断等于把"改进没回流"这件事
+                # 一起抹掉（工单 016）。计数进状态面，判据走 GateVerdict。
+                overflow = len(self._pending_records) - PENDING_QUEUE_BOUND
+                if overflow > 0:
+                    del self._pending_records[:overflow]
+                    self._pending_dropped += overflow
+                    logger.warning(
+                        "待审经验队列溢出（上限 %d），累计丢弃 %d 条",
+                        PENDING_QUEUE_BOUND,
+                        self._pending_dropped,
+                    )
             self._maybe_persist()
             logger.info("经验记录进待审队列: %s (%s)", skill_id, content[:40])
             return record
@@ -256,6 +273,37 @@ class SkillExperienceStore(PersistedStateMixin):
         """未合并 applied 记录数。"""
         with self._lock:
             return sum(1 for r in self._records.get(skill_id, []) if not r.merged)
+
+    @property
+    def pending_dropped(self) -> int:
+        """累计因队列有界被丢弃的待审条数。"""
+        with self._lock:
+            return self._pending_dropped
+
+    def pending_pressure_verdict(self) -> "GateVerdict":
+        """待审通道压力判据（工单 016：改进能否回流必须可判，且判据是三态不是布尔）。
+
+        - `unevidenced`：从未有条目进过待审队列 ⇒ 通道有没有压力无从判断，
+          不得报"无压力"（无据不按通过处理）；
+        - `failed`：累计丢弃 > 0 ⇒ 改进正在被丢掉；
+        - `passed`：进过队且一次没丢。
+        """
+        from neurova.evolution.rsi.gate_verdict import GateVerdict
+
+        with self._lock:
+            offered, dropped = self._pending_offered, self._pending_dropped
+        if offered == 0:
+            return GateVerdict.unevidenced("未有经验记录进过待审队列，通道压力无从判断")
+        evidence = {"offered": offered, "dropped": dropped, "bound": PENDING_QUEUE_BOUND}
+        if dropped:
+            return GateVerdict.failed(
+                f"待审队列溢出，累计丢弃 {dropped} 条改进经验（上限 {PENDING_QUEUE_BOUND}）",
+                evidence=evidence,
+            )
+        return GateVerdict.passed(
+            f"待审队列未溢出（累计 {offered} 条进队，上限 {PENDING_QUEUE_BOUND}）",
+            evidence=evidence,
+        )
 
     def get_archives(self, skill_id: str) -> List[Dict[str, Any]]:
         with self._lock:
@@ -425,12 +473,6 @@ class SkillExperienceStore(PersistedStateMixin):
         self._maybe_persist()
         return True
 
-    def is_retired(self, skill_id: str) -> bool:
-        with self._lock:
-            return skill_id in self._retired
-
-    # ────── 持久化钩子 ──────
-
     def _snapshot_payload(self) -> Dict[str, Any]:
         with self._lock:
             return {
@@ -443,6 +485,8 @@ class SkillExperienceStore(PersistedStateMixin):
                 "archives": {k: [dict(a) for a in v] for k, v in self._archives.items()},
                 "retired": {k: dict(v) for k, v in self._retired.items()},
                 "pending_records": [asdict(r) for r in self._pending_records],
+                "pending_offered": self._pending_offered,
+                "pending_dropped": self._pending_dropped,
             }
 
     def _restore_payload(self, data: Dict[str, Any]) -> None:
@@ -492,6 +536,14 @@ class SkillExperienceStore(PersistedStateMixin):
                 for raw in pending_raw
                 if isinstance(raw, dict)
             ]
+            # 两条计数是单调累加量：与其余字段的"覆盖语义"不同，取 max 才不会被
+            # 一份更旧的文件抹掉已发生的丢失（丢失数归零 = 把故障读成正常）。
+            self._pending_offered = max(
+                self._pending_offered, int(data.get("pending_offered") or 0)
+            )
+            self._pending_dropped = max(
+                self._pending_dropped, int(data.get("pending_dropped") or 0)
+            )
 
 
 # ────── 维护入口（post_chat RSI 步每轮调用）──────
