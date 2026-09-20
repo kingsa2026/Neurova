@@ -135,8 +135,10 @@ v1 的记录类型边界（避免接口悬空）
   （content+category+importance+origin）不同构，需要先定映射规则，再谈第二家真实来源。
 - 私有方言的记忆导入：本机 `qwenpaw_memory*` 一族无公开格式可依；包契约里 `memories.jsonl`
   与 `MemoryManager.import_memories` 已就位，但**还没有任何转换器产出记忆**——三源转换器
-  只产会话。历史 Kai 记忆仍由本地一次性脚本导入（该脚本未退役，它同时管着快照与笔记两类
-  私有来源）。
+  只产会话。私有来源（记忆库、session_contexts 快照、reme 笔记、身份文件）由
+  `scripts/import_kai_to_neurova.py` 继续管：它已从"本地不入库"改为随仓入库并标注
+  **不再是产品入口**（回归在 `tests/unit/migration/`，15 条）。新格式一律进
+  `scripts/ingest_memory.py`，不往那个脚本加方言。
 - 身份/人格文件导入（`import_identity`）：归人格装配面，已定不并入。
 - 记忆图边落图（`relations.jsonl`）：v1 只登记。
 - 运行期记忆写入无统一事件总线：`refresh_moe_index` 至今零调用方，本设计不依赖它。
