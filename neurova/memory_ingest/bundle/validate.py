@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
@@ -53,6 +54,7 @@ def validate_bundle(root: Path) -> List[str]:
         errors += _count_errors(name, rows, claimed)
         if name == "transcripts.jsonl":
             errors += _seq_errors(rows)
+            errors += _ts_errors(rows)
             errors += verify_media(root)          # 引用型包的最后一道闸：路径与摘要
         else:
             errors += _origin_errors(rows)
@@ -94,6 +96,22 @@ def _count_errors(name: str, rows: List[dict], claimed: int) -> List[str]:
     if claimed != len(rows):
         return [f"{name} 计数不符: manifest={claimed} 实际={len(rows)}"]
     return []
+
+
+def _ts_errors(rows: List[dict]) -> List[str]:
+    """ts 必须能定出时刻并带显式偏移：日期分桶与读侧解析都靠它。"""
+    errors = []
+    for row in rows:
+        ts = str(row.get("ts") or "")
+        probe_ts = ts[:-1] + "+00:00" if ts.endswith("Z") else ts
+        try:
+            parsed = datetime.fromisoformat(probe_ts)
+        except ValueError:
+            errors.append(f"transcripts.jsonl ts 解不开: {ts!r}（identity_key={row.get('identity_key')!r}）")
+            continue
+        if parsed.tzinfo is None:
+            errors.append(f"transcripts.jsonl ts 缺时区: {ts!r}（identity_key={row.get('identity_key')!r}）")
+    return errors
 
 
 def _seq_errors(rows: List[dict]) -> List[str]:
