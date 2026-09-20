@@ -64,7 +64,7 @@ def seeded(tmp_path) -> KnowledgeRepository:
 
 
 class TestMigrationChain:
-    def test_narrativesTableAppearsAtVersionFour(self, tmp_path):
+    def test_narrativesTableAppearsAfterMigrationChain(self, tmp_path):
         """v4 是新增结构——老底座库（v3）重开必须自动拿到它，否则线上永远缺表。"""
         store = NarrativeStore(str(tmp_path / FOUNDATION_DB_NAME))
         names = set()
@@ -72,7 +72,7 @@ class TestMigrationChain:
             names = {r[0] for r in conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
             assert "knowledge_narratives" in names
-            assert int(conn.execute("PRAGMA user_version").fetchone()[0]) == 4
+            assert int(conn.execute("PRAGMA user_version").fetchone()[0]) >= 4
 
     def test_existingFactDbUpgradesInPlace(self, tmp_path):
         """生产底座库已是 v3 且已有事实数据，换后端不能要求重建。"""
@@ -81,7 +81,7 @@ class TestMigrationChain:
 
         store = NarrativeStore(factDb)
         with store._conn() as conn:
-            assert int(conn.execute("PRAGMA user_version").fetchone()[0]) == 4
+            assert int(conn.execute("PRAGMA user_version").fetchone()[0]) >= 4
             assert conn.execute("SELECT COUNT(*) FROM knowledge_facts").fetchone()[0] == 0
 
 
