@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user
+from neurova.core.agent_workspaces import get_agent_workspace_dir
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -341,7 +342,7 @@ async def _rollback_imported_agent(agent_id: str, agent: Any = None) -> None:
     import shutil
     import time as _time
 
-    for candidate in (Path("agent_workspaces") / agent_id, Path("data") / agent_id):
+    for candidate in (get_agent_workspace_dir(agent_id), Path("data") / agent_id):
         for attempt in range(3):
             if not candidate.is_dir():
                 break
@@ -393,7 +394,7 @@ async def import_agent_package(
         from neurova.api.endpoints.agent import _save_agent_config
         from neurova.agent_core import Agent, AgentConfig
 
-        workspace_path = str(Path("agent_workspaces") / agent_id)
+        workspace_path = str(get_agent_workspace_dir(agent_id))
         Path(workspace_path).mkdir(parents=True, exist_ok=True)
         config = AgentConfig(
             name=str(agent_face.get("name") or agent_id),

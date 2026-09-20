@@ -51,7 +51,10 @@ MANIFEST_V1 = {
 
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
-    """隔离环境：CWD 切 tmp（agent_workspaces/data 均为 CWD 相对）。"""
+    """隔离环境：agent 工作区根经 env 注入 tmp，data 面靠 CWD（chdir tmp）。"""
+    monkeypatch.setenv(
+        "NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "agent_workspaces")
+    )
     monkeypatch.chdir(tmp_path)
     from neurova.agent_config import reset_config_manager
     from neurova.api.endpoints import set_app_state

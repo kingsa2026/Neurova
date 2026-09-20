@@ -26,10 +26,17 @@ def _call_factory(*args, **kwargs):
 
 
 def test_default_db_path_points_to_agent_workspace(monkeypatch):
-    """无参工厂默认落到 agent_workspaces/default/memory/memory.db（与 AgentConfig 一致）。"""
+    """无参工厂默认落到 default agent 工作区的 memory/memory.db（与 AgentConfig 一致）。
+
+    锚点用解析器本身而非字面仓库路径：工作区根已可注入（测试期在 tmp），
+    写死 agent_workspaces/default 会随注入点失效。
+    """
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+
+    expected = get_agent_workspace_dir("default") / "memory" / "memory.db"
     mgr = _call_factory()
     p = Path(mgr._db_path)
-    assert p.as_posix().endswith("agent_workspaces/default/memory/memory.db"), p
+    assert p == expected, p
     # 目录必须已创建（persist DB 与 db_path 同目录）
     assert p.parent.is_dir(), p.parent
 

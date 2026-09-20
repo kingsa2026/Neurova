@@ -226,11 +226,13 @@ def _agent_config_from_saved(cfg: dict, agent_id: str, workspace_path: str):
     )
 
 
-def _load_saved_agents(app_state: AppState, default_workspace: str) -> None:
+def _load_saved_agents(app_state: AppState) -> None:
     """从 workspace 目录加载已持久化的 agent 配置"""
     import json as _json
 
-    workspaces_dir = os.path.dirname(default_workspace)  # agent_workspaces/
+    from neurova.core.agent_workspaces import get_agent_workspaces_root
+
+    workspaces_dir = str(get_agent_workspaces_root())  # 根由单源解析器给，不反推 default 的父目录
     # 全新安装（打包版）该数据目录天然不存在；加载路径不得因缺目录崩溃，
     # 补建空目录以对齐"安装即有默认工作区"的不变量（bundle 同步预创建）。
     try:
@@ -380,10 +382,10 @@ def _initialize_components(app_state: AppState) -> None:
     except Exception as e:
         logger.warning("NEUTokenManager init failed: %s", e)
 
-    # 计算默认工作目录（在 try 块外，供 _load_saved_agents 使用）
-    default_workspace = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "..", "agent_workspaces", "default"
-    )
+    # 默认 Agent 工作区（根由 neurova.core.agent_workspaces 单源给出）
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+
+    default_workspace = str(get_agent_workspace_dir("default"))
 
     # 初始化默认 Agent
     try:
@@ -434,7 +436,7 @@ def _initialize_components(app_state: AppState) -> None:
         logger.warning("Default Agent init failed: %s", e)
 
     # 加载已持久化的 agent（独立于默认 Agent 初始化，确保即使默认 Agent 失败也能加载已有 agent）
-    _load_saved_agents(app_state, default_workspace)
+    _load_saved_agents(app_state)
 
     # 初始化 TTS Manager
     try:
