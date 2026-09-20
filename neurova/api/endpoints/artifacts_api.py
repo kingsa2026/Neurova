@@ -65,6 +65,10 @@ _KIND_BY_EXT = {
     ".webm": "video",
     ".mov": "video",
     ".mkv": "video",
+    # 工单 007（文档导出）：PDF 此前不在任一分派表，产物卡点开会掉进 text
+    # 面板按文本渲染二进制。与前端 KIND_BY_EXT 同批改，两份表分叉由
+    # tests/unit/api/test_artifact_kind_parity.py 锁住。
+    ".pdf": "pdf",
 }
 
 _artifacts_store: Dict[str, Dict[str, Any]] = {}

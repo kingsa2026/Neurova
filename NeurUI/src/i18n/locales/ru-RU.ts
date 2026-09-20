@@ -3511,6 +3511,7 @@ export default {
     kindImage: 'Изображение',
     kindAudio: 'Аудио',
     kindVideo: 'Видео',
+    kindPdf: 'PDF',
     kindText: 'Текст',
   },
 
