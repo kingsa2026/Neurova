@@ -862,6 +862,10 @@ class MemCore:
                     get_memory_settings().get("threshold.default", 0.3)
                 ),
             )
+            # 把 MoE 自建向量库登记进记忆写入链路：否则运行期新增/遗忘的记忆
+            # 只在下次启动重扫时才进 MoE（refresh_moe_index 无调用方）。
+            if self.memory_manager:
+                self.memory_manager.register_runtime_vector_store(vector_store)
 
             # 后台渐进语义索引：突破初始 500 条覆盖局限，按温度降序
             # 分批把全库记忆灌入 MoE 向量索引，直到 moe_index_limit 或全库完成。
