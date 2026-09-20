@@ -1670,6 +1670,32 @@ Task 8 的两项后来按"先可逆、再收口"做完（2026-09-20 第三轮）
 未做（要人拍板或另开批次）：本地一次性脚本退役、`tests/unit/migration/` 解忽略、通道侧带备份的
 重命名收敛、artifact 注册表持久化、产出记忆的第二家真实来源。细节见 spec §9。
 
+## 第四轮补做（同日，扩平台）
+
+私有方言那一路不再管（那是自建平台，不是公开格式），本轮把公开族补齐：新增 `openclaw_transcript`
+与 `hermes_state` 两支转换器，并复核 `qwenpaw_history`。名册见 spec §5.1。
+
+1. **块词表收敛一处**（`converters/blocks.py`）：调用块四形（`toolCall`/`toolUse`/`tool_use`/
+   `functionCall`）、结果块三形（`tool_result`/`toolResult`/`*_tool_result`）、关联键五形、正文键
+   三形在此收一次，三家共用；新增 `redacted_thinking` → `reasoning_state=opaque`、结果块内嵌媒体
+   落包、`is_error` → `tool_state=error`。规则集中在第二家、第三家各抄一遍是本批次的起点问题。
+2. **openclaw**：per-agent 库的 `transcript_events` + `session_windows`，事件信封按 `type=="message"`
+   取可见正文；非 message 事件、认不出的角色、事件级/消息级无落点键全部按条数申报。跳号的源 seq
+   重编 1..n 并留 `extra.source_seq`。活体验证：用在盘上游整份建表 SQL 建库跑通往返（3 事件、
+   调用与结果跨行按 `tu1` 接上、零申报）；本机真实 agent 库不存在（网关库无 `transcript_events`，
+   detect 正确地把它判为未识别）。
+3. **hermes**：单库 `messages`(26 列) + `sessions` + `schema_version`，正文列的块数组按
+   `"\x00json:"` 哨兵还原，一次调用一条 `tool_calls` 元素，结果另起一行；`_compressed_summary`
+   行成 `compact_summary`；三个结构化推理列只标 opaque 不搬密文并按条数申报；版本比已知上限新时
+   照转但申报。活体验证：用上游 `SCHEMA_SQL` 原文建库跑通往返（26 列逐列相符、3 事件、零申报）。
+4. **qwenpaw 复核**：公开源码建表列集与转换器 `COLUMN_LANDINGS` 逐列相符，之前的真库数字（242 行
+   → 508 事件 → 63 轮；平列 21 调用 → 按块展开 179 调用）无需修正。
+5. **展示层不接外来角色**：包内 `role` 只写运行期认得的名字，源角色名（`toolResult`/
+   `compactionSummary`）留 `extra.source_role`——装配处与落盘对空 role 各自兜规范值。
+
+未做：`dsh_session` 仍是指纹无转换器（无样本无在盘源码）；Hermes/OpenClaw 两家的真库往返要等
+本机出现真实导出或装过这两家的机器。
+
 ---
 
 ## Self-Review 结论

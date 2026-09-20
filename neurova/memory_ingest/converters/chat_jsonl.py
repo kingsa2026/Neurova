@@ -120,8 +120,9 @@ def _build(events, message: Dict[str, Any], moment: datetime,
             kind=kind, ts=ts, role=role, text=event.text,
             tool_call_id=event.tool_call_id or str(message.get("tool_call_id") or ""),
             tool_name=event.tool_name or str(message.get("tool_name") or ""),
-            blocks=event.blocks,
+            tool_state=event.tool_state, blocks=event.blocks,
             reasoning=event.reasoning if kind == "assistant_message" else "",
+            reasoning_state=event.reasoning_state if kind == "assistant_message" else "",
             extra={**extra, "tool_input": event.tool_input or None}))
     return built
 

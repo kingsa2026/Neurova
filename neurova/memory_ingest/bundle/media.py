@@ -143,7 +143,17 @@ def _from_block(block: Dict[str, Any], store: Path) -> Optional[Tuple[bytes, str
     if isinstance(source, str) and source.split(":", 1)[0].lower() in ("data", "file"):
         # 有的平台把 URI 直接放在 source/url 字段里（opencode 的 file 块是 data:）。# http 不在这里取：导入过程不联网拉外部内容。
         return _from_uri(source, store, name)
+    if source is None and isinstance(block.get("data"), str):
+        # 也有的把 base64 正文直接挂在块上（配 mimeType/media_type 说明类型），不套一层 source
+        return _decode_base64(block["data"], name or _name_of_mime(block))
     return _from_path(str(source or ""), store, name)
+
+
+def _name_of_mime(block: Dict[str, Any]) -> str:
+    """块只声明了 MIME 时按它补一个后缀，让包内文件名与 mime 字段都定得下来。"""
+    mime = str(block.get("mimeType") or block.get("media_type") or "")
+    ext = mimetypes.guess_extension(mime.split(";")[0].strip()) or ""
+    return f"media{ext}" if ext else ""
 
 
 def _from_uri(uri: str, store: Path, fallback_name: str) -> Optional[Tuple[bytes, str]]:

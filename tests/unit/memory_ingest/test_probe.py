@@ -84,8 +84,8 @@ def test_directory_yields_one_finding_per_store(tmp_path: Path):
     assert sorted(f.hits[0] for f in findings) == ["dsh_session", "qwenpaw_history"]
 
 
-def test_five_families_never_cross_match(tmp_path: Path):
-    """五家方言里三家是 JSONL：每家都必须只被自己那支认出。
+def test_every_family_matches_only_its_own_store(tmp_path: Path):
+    """四家 JSONL + 四家 SQLite（含只有指纹的一家）：每家都必须只被自己那支认出。
 
     这是 detect 的命门——互相误认会静默走错转换器，比认不出更糟。
     """
@@ -109,10 +109,27 @@ def test_five_families_never_cross_match(tmp_path: Path):
     conn.execute("CREATE TABLE part (id TEXT, message_id TEXT, data TEXT)")
     conn.commit()
     conn.close()
+    conn = __import__("sqlite3").connect(tmp_path / "agent.db")
+    conn.execute("CREATE TABLE transcript_events (session_id TEXT NOT NULL,"
+                 " seq INTEGER NOT NULL, event_json TEXT NOT NULL, created_at INTEGER NOT NULL,"
+                 " PRIMARY KEY (session_id, seq))")
+    conn.execute("CREATE TABLE session_windows (session_id TEXT NOT NULL PRIMARY KEY,"
+                 " session_key TEXT NOT NULL)")
+    conn.commit()
+    conn.close()
+    conn = __import__("sqlite3").connect(tmp_path / "state.db")
+    conn.execute("CREATE TABLE schema_version (version INTEGER NOT NULL)")
+    conn.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT NOT NULL)")
+    conn.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT,"
+                 " content TEXT, tool_call_id TEXT, tool_calls TEXT, tool_name TEXT,"
+                 " timestamp REAL)")
+    conn.commit()
+    conn.close()
 
     expected = {"history.db": "qwenpaw_history", "dialog.jsonl": "dialog_daily",
                 "legacy.jsonl": "legacy_session", "rollout.jsonl": "codex_rollout",
-                "dsh.jsonl": "dsh_session", "opencode.db": "opencode_session"}
+                "dsh.jsonl": "dsh_session", "opencode.db": "opencode_session",
+                "agent.db": "openclaw_transcript", "state.db": "hermes_state"}
 
     for name, family in expected.items():
         finding = probe_store(tmp_path / name)
