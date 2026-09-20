@@ -4,6 +4,7 @@
 """
 
 import json
+import hashlib
 import re
 from collections import OrderedDict
 from neurova.core.logger import get_logger
@@ -36,6 +37,26 @@ def _derive_imported_title(messages) -> str:
         if msg.get("role") == "user" and str(msg.get("content") or "").strip():
             return str(msg["content"]).strip()[:50]
     return "新对话"
+
+
+_STORE_KEY_SAFE = re.compile(r"^[0-9A-Za-z._@-]+$")
+
+
+def normalize_store_key(raw: str) -> str:
+    """外部会话标识归一：可安全落盘、且能被 session_*.json 的 glob 读回来。
+
+    实测 Windows 下名字里的冒号被 NTFS 当成数据流分隔符——文件写得出去、glob 看不见，
+    目录里只留一个 0 字节基名；斜杠与 ".." 能越出 agent 目录，方括号与星号破坏按 id
+    拼的 fnmatch 式查找。已合规的 id 原样返回，免得把运行期既有会话改到读不回来。
+    """
+    text = str(raw or "").strip()
+    if not text:
+        raise ValueError("session_id 不能为空")
+    if _STORE_KEY_SAFE.match(text) and ".." not in text:
+        return text
+    slug = re.sub(r"[^0-9A-Za-z._@-]+", "-", text).strip("-.")
+    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+    return f"{(slug or 'session')[:60]}-{digest}"
 
 
 def _json_safe(value: Any) -> Any:
@@ -598,17 +619,18 @@ class SessionManager(SessionRepository):
         """
         if not ingest_run_id:
             raise ValueError("ingest_run_id 必填（撤销按它精确删除）")
+        store_key = normalize_store_key(session_id)
         messages = list(messages)
         if not messages:
             return 0, 0
 
-        file_path = self._get_session_file(agent_id, session_id, date)
+        file_path = self._get_session_file(agent_id, store_key, date)
         with self._get_file_lock(file_path):
             session_data = self._read_session_file(file_path)
             if session_data is None:
                 session_data = {
                     "agent_id": agent_id,
-                    "session_id": session_id,
+                    "session_id": store_key,
                     "session_date": date,
                     "messages": [],
                     "created_at": messages[0].get("timestamp", ""),
@@ -627,6 +649,10 @@ class SessionManager(SessionRepository):
                     continue
                 metadata = msg.setdefault("metadata", {})
                 metadata["ingest_run_id"] = ingest_run_id
+                ingest = metadata.setdefault("ingest", {})
+                ingest["session_id"] = store_key
+                if store_key != str(session_id):
+                    ingest["source_session_id"] = str(session_id)
                 existing.append(msg)
                 seen.add(key)
                 added += 1
