@@ -194,12 +194,23 @@ class KnowledgeFactStore:
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.RLock()
         self._ensureSchema()
+        from ..ontology.derivation_ledger import DerivationLedger
+
+        self._derivationLedger = DerivationLedger(self)
 
     def _ensureSchema(self) -> None:
         with self._lock:
             from .foundation_schema import applyTo  # 惰性：链的单主注册处反过来依赖本模块
 
             applyTo(self._conn)
+
+    def _retireDerived(self, factId: str, reason: str) -> int:
+        """让前提离开 active 的每一条路径都必须在事务外叫它一次。
+
+        级联算法只准有账本一处；这里只负责在正确的时机叫，且在锁外叫——
+        在 `with self._conn` 里回调会把外层事务提前提交掉。
+        """
+        return self._derivationLedger.retractAllDerivedFrom(factId, reason)
 
     def close(self) -> None:
         with self._lock:
@@ -919,6 +930,7 @@ class KnowledgeFactStore:
                 (oldFactId,),
             )
         logger.info("事实取代 %s ← %s（%s）", newFactId, oldFactId, reason)
+        self._retireDerived(oldFactId, reason or "推导前提已被取代")
 
     def setValidUntil(self, factId: str, validUntil: Optional[str]) -> None:
         stored = None if validUntil is None else _instant(validUntil)
@@ -932,12 +944,18 @@ class KnowledgeFactStore:
     def expireDueFacts(self, now: Optional[str] = None) -> int:
         instant = _instant(now) if now is not None else _now()
         with self._lock, self._conn:
+            due = [r["fact_id"] for r in self._conn.execute(
+                "SELECT fact_id FROM knowledge_facts"
+                " WHERE status = 'active' AND valid_until IS NOT NULL AND valid_until < ?",
+                (instant,)).fetchall()]
             cur = self._conn.execute(
                 "UPDATE knowledge_facts SET status = 'expired'"
                 " WHERE status = 'active' AND valid_until IS NOT NULL AND valid_until < ?",
                 (instant,),
             )
-            return int(cur.rowcount)
+        for factId in due:
+            self._retireDerived(factId, "推导前提已到期")
+        return int(cur.rowcount)
 
     def retract(self, factId: str, reason: str = "") -> None:
         """可撤销不可遗忘：行不删，只出候选，溯源查询永远读得到。"""
@@ -949,6 +967,7 @@ class KnowledgeFactStore:
                 (_now(), factId),
             )
         logger.info("事实撤回 %s（%s）", factId, reason)
+        self._retireDerived(factId, reason or "推导前提已撤回")
 
     def reviveRetracted(self, factId: str, reason: str = "") -> bool:
         """撤回过的内容被重新主张 ⇒ 同一行回到 active，历史留在活动与断言账上。

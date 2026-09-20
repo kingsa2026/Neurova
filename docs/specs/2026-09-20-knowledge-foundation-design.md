@@ -549,6 +549,20 @@ _open_chat_browser → webbrowser.open`（该函数在别的用例里被 patch �
 在 Windows 上卡在 `shutil.which` 的枚举里直到超时。两者都属"跑不出汇总"而不是"有一个失败"，
 所以全仓口径必须逐条 `--deselect` 或 `--ignore`；本批因此以窄口径为准（见本节末与 §11.6）。
 
+**022 期间登记的顺序依赖失败族（非本批引起，单独跑全绿）**：
+`tests/unit/memory/core/test_temperature.py::TestTemperatureOnDecay::test_ebbinghaus_curve`
+在 `tests/unit/knowledge + agent + memory` 合跑时报 `9.375 > 9.375`，单跑该文件 35 例全绿；
+该用例自己的注释记着同一签名（"大合批曾现 9.375 > 9.375"，2026-09-13 残留处理），
+属"用当前时钟算衰减、合跑时两次取值落进同一分段"的时间精度漂移，不是温度逻辑坏了。
+`tests/unit/agent/test_shared_core_wrapper_degrade_contract.py::test_wrapper_still_degrades_after_real_first_call_and_reset`
+在 `agent + memory` 合跑时报 `assert 0 >= 1`，单跑 `tests/unit/agent/` 1162 例全绿；
+归因未做（属 shared_core 单例跨目录合跑时的重置顺序），登记不代修。
+
+**收集口径更新**：`tests/benchmarks/test_multi_agent_coordination.py` 的
+`NameError: name 'Optional' is not defined`（模块级注解用到的 `Optional` 没进第 10 行的 typing 导入）
+已在本批补上该导入——它自 `626e2e88` 起入库即坏，与 §11.5 早期"未跟踪的在途件"登记是同一处。
+现在全量收集只需 `--ignore=tests/unit/neurflow`：`pytest tests/ --collect-only` 17616 项 / 0 错。
+
 ### 11.6 实施进度快照（E0/E1 完成、E2 判据改序、E3 提前落刀）
 
 | 工单 | 状态 | 证据 |
@@ -572,7 +586,9 @@ _open_chat_browser → webbrowser.open`（该函数在别的用例里被 patch �
 | 019b-3 读面合一为富化 | 完成 | 6 用例；排序零改动接上治理字段与注入回流；代际方案试过并撤回 |
 | 019b-1 记录种类进咽喉 | 完成 | 14 用例 + 真数据三方同数（92/87 一字未动）；底座库 6.26MB→4.24MB |
 | 019b-4b JSON 条目路径退役 | 完成（生产已搬家） | 默认翻向底座库；围栏守构造并收全四个写入面（`storage_fence`）；叙述冲突按条目划范围；生产 130/92/87 分叉 0，基线两侧同 0.855489/0.83/0.1 |
-| 012 / 013 / 014 / 016 / 017 / 018 / E4 | 未开工 | 011 否证后落点改变，见工单索引"进度" |
+| 012 / 013 / 014 / 016 / 017 | 完成 | TKG 分支读底座（13 例）、图检索器进链 priority 27（12 例）、主路末端精排可关闸（13 例，量过才翻）、冲突队列接新表 + 三套实现合一（6 例 + 前端 5 例） |
+| 020 / 021 / 022 | 完成 | 类型系统进表 + 五条入库校验接咽喉段3（12 例）；Datalog 片段前向链、推导经咽喉写入（10 例）；推导账本与精确撤销、链尾 v10（11 例） |
+| 018 / 023 / 024 | 未开工 | 见工单索引"进度" |
 
 `tests/unit/knowledge/` 543 passed（起点基线 265）。019b-4b 的爆炸半径口径：
 条目 / 向量 / 评测 / api 消费方一起跑 488 passed、46 skipped、0 failed。
