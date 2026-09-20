@@ -155,6 +155,15 @@ def test_convert_declares_unknown_kind_rows(tmp_path: Path, src: Path):
     assert validate_bundle(out) == []
 
 
+def test_convert_stamps_explicit_offset_on_naive_source_time(tmp_path: Path, src: Path):
+    """源里是本地墙钟裸时间：包内必须带上偏移，否则读侧连 fromisoformat 都过不去。"""
+    out = tmp_path / 'bundle'
+
+    convert(src, out, agent_name='imported')
+
+    assert _records(out)['sA:1']['ts'] == '2026-05-01T10:00:01+08:00'
+
+
 def test_convert_is_read_only_on_source(tmp_path: Path, src: Path):
     before = src.read_bytes()
 

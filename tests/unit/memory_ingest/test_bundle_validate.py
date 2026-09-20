@@ -97,3 +97,36 @@ def test_broken_json_line_reported_with_lineno(tmp_path: Path):
     errors = validate_bundle(root)
 
     assert any("transcripts.jsonl:2" in e for e in errors)
+
+
+def test_ts_without_offset_is_rejected(tmp_path: Path):
+    """ts 是包内唯一可靠的排序与分桶依据：裸时间一律整包拒绝，不猜时区。"""
+    root = tmp_path / 'bundle'
+    root.mkdir()
+    (root / 'manifest.json').write_text(json.dumps({
+        'schema_version': 1, 'generated_at': '2026-09-20T00:00:00+00:00',
+        'agent_name': 'x', 'source': {}, 'counts': {'transcripts': 1, 'memories': 0,
+        'relations': 0}}), encoding='utf-8')
+    (root / 'transcripts.jsonl').write_text(json.dumps({
+        'session_id': 'sA', 'seq': 1, 'kind': 'user_message', 'ts': '2026-05-01T10:00:00',
+        'identity_key': 'sA#1'}), encoding='utf-8')
+    (root / 'memories.jsonl').write_text('', encoding='utf-8')
+
+    errors = validate_bundle(root)
+
+    assert any('缺时区' in e for e in errors)
+
+
+def test_ts_with_z_suffix_is_accepted(tmp_path: Path):
+    root = tmp_path / 'bundle2'
+    root.mkdir()
+    (root / 'manifest.json').write_text(json.dumps({
+        'schema_version': 1, 'generated_at': '2026-09-20T00:00:00+00:00',
+        'agent_name': 'x', 'source': {}, 'counts': {'transcripts': 1, 'memories': 0,
+        'relations': 0}}), encoding='utf-8')
+    (root / 'transcripts.jsonl').write_text(json.dumps({
+        'session_id': 'sA', 'seq': 1, 'kind': 'user_message', 'ts': '2026-05-01T10:00:00Z',
+        'identity_key': 'sA#1'}), encoding='utf-8')
+    (root / 'memories.jsonl').write_text('', encoding='utf-8')
+
+    assert validate_bundle(root) == []
