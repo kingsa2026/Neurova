@@ -1708,12 +1708,12 @@ Task 8 的两项后来按"先可逆、再收口"做完（2026-09-20 第三轮）
    正文取 `memory_index_chunks.text`，`source` 两值映射 memory_type/category，`origin_class` 逐字
    透传（与 `MemoryOrigin` 同词），importance 1-10 定标到 0-100、缺档用本系统默认 50，
    path+行号成 `source_ref`、`supersedes_key` 成 `supersedes`；向量/哈希/嵌入模型按"源侧派生索引、
-   本系统自算"申报条数。**没记出处的 chunk 整条不导并申报**——origin 是信任级，抬高了会经记忆
-   链路毒化上下文，宁缺不错。
+   本系统自算"申报条数。**没记出处的条目按 `untrusted` 最低信任导并申报**（人拍板：与源侧自己的
+   回填同向；整条丢是丢内容，悄悄抬信任是投毒），时间取该条 `updated_at` 不取导入时刻。
 3. **闭环证据**：`test_converted_memories_apply_and_undo` 从源库直转直落，验的是翻译对了没有
    （origin 的词、importance 的尺度、ts 的格式在转换器里都不会报错，只有落库时才暴露），撤销
-   后一条不剩。活体验证用上游 schema 原文建库（STRICT 表 + CHECK 约束）：1 事件 + 2 记忆、
-   无出处那条如期被申报掉。
+   后一条不剩。活体验证用上游 schema 原文建库（STRICT 表 + CHECK 约束）：1 事件 + 3 记忆，
+   其中无出处那条落成 untrusted 且申报条数。
 
 未做：其余六族仍只导会话；只有记忆索引、没有会话事件表的库 detect 认不出（指纹按会话表立），
 无样本暂不立指纹。
