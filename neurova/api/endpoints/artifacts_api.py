@@ -33,9 +33,9 @@ from neurova.core.logger import get_logger
 logger = get_logger(__name__)
 router = APIRouter()
 
-# 注册白名单根：agent 工作区（项目根 agent_workspaces/）+ TTS 临时目录。
-# 测试通过 mock.patch.object(artifacts_api, "_WORKSPACE_ROOT", ...) 注入。
-_WORKSPACE_ROOT = Path("agent_workspaces")
+# 注册白名单根：agent 工作区 + TTS 临时目录。根经 neurova.core.agent_workspaces
+# 单源解析（原 CWD 相对常量与服务端 agent 加载口径分裂），测试用
+# NEUROVA_AGENT_WORKSPACES_DIR 注入。
 
 # TTS 工具落盘目录（tool_executor._execute_tts_synthesize 的 out_dir）
 _TTS_TEMP_DIRNAME = "neurova_tts"
@@ -87,7 +87,9 @@ def _artifact_kind(name: str) -> str:
 
 
 def _allowed_roots() -> List[Path]:
-    roots = [_WORKSPACE_ROOT.resolve()]
+    from neurova.core.agent_workspaces import get_agent_workspaces_root
+
+    roots = [get_agent_workspaces_root().resolve()]
     tts_dir = Path(tempfile.gettempdir()) / _TTS_TEMP_DIRNAME
     try:
         roots.append(tts_dir.resolve())

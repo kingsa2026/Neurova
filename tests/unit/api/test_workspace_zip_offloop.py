@@ -27,7 +27,7 @@ def ws_env(tmp_path, monkeypatch):
     """工作区根锚定 tmp_path（防污染真实 agent_workspaces）。"""
     root = tmp_path / "agent_workspaces"
     root.mkdir()
-    monkeypatch.setattr(wf, "_WORKSPACES_ROOT", root)
+    monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(root))
     return root
 
 

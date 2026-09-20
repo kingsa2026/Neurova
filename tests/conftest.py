@@ -124,6 +124,18 @@ def _isolate_moe_index_state_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("NEUROVA_MOE_INDEX_STATE_DIR", str(tmp_path / "moeIndexState"))
 
 
+@pytest.fixture(autouse=True)
+def _isolate_agent_workspaces_root(tmp_path, monkeypatch):
+    """agent 工作区根隔离到 tmp_path（防污染真实记忆库）。
+
+    app.py 用这个根建默认 Agent 并枚举已持久化 agent；测试里用 TestClient 起
+    真 app 就会打开 agent_workspaces/<id>/memory/ 并往里写记忆行（实测某轮跑测
+    期间 default 库从 301 行涨到 306 行）。生产默认仍是仓库 agent_workspaces/。
+    """
+    monkeypatch.setenv(
+        "NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "agentWorkspaces")
+    )
+
 
 @pytest.fixture
 def mock_logger():
