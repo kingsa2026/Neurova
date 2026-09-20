@@ -21,6 +21,7 @@ from .knowledge_facts import (
     _SCHEMA_V3,
     _SCHEMA_V5,
 )
+from ..ontology.rule_engine import _SCHEMA_V9
 from ..ontology.term_registry import _SCHEMA_V8
 from .narratives import NARRATIVE_DOMAIN, _SCHEMA_V4, _SCHEMA_V6, _SCHEMA_V7
 
@@ -33,6 +34,7 @@ _STEPS: List[tuple] = [
     (6, _SCHEMA_V6),
     (7, _SCHEMA_V7),
     (8, _SCHEMA_V8),
+    (9, _SCHEMA_V9),
 ]
 
 _registered = False
