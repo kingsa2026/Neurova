@@ -1,6 +1,6 @@
 # 文档导出子系统（write_pdf）设计 2026-09-21
 
-状态：设计已对齐，待拆工单。本文是目标态与边界的唯一事实源；实现按 §9 切片推进。
+状态：001-008 全部落地（偏离与验证见 §12/§13）。未做项以 §11 为准，不是"待办遗漏"而是已决定的边界。
 
 ## 1. 起因
 
@@ -168,3 +168,36 @@ warnings[] }`。`download_url` 形态 `/api/v1/generation/files/<name>`。
 用户可编辑模板的存储与管理面；HTML 全保真（浏览器打印路线）；pdf.js 自建渲染与
 缩略图；页脚页码之外的复杂母版；DOCX/EPUB 等其它出件格式；聊天消息/知识库/记忆页
 的导出入口；`data/generations` 的保留策略调整（现默认关，属另一题）。
+
+## 12. 交付实况（实施期对设计的偏离，逐条如实记）
+
+| 偏离 | 原因 |
+|---|---|
+| §9 片 4 的阻塞从"001"改为"001+002+003" | HTML 子集含 table 与 img，不同批具备渲染就会再长一条出口 |
+| §9 片 7（权限多归属）并入片 3 | 远程图首次出网时归类必须同步；事后补归类留一段"权限面不认识该工具"的窗口 |
+| 表格超宽的取舍从"缩字号一次再截断"改为"折行优先，仅折不动的长串截断" | `wordWrap="CJK"` 已能逐字折行；整表压成小字是为排版牺牲可读性 |
+| 产物文件名由 `persist_bytes` 决定，形态 `<slug>-<hash8>_0.pdf` | 复用既有产物落盘口（同一套白名单与属主口径）比自造命名更硬，`_0` 段是该接口既有形态 |
+| schema `required` 收空 | JSON Schema 的 `required` 表达不了"二选一"，异或由执行体校验承担 |
+| `permissions.py` 新增 `_TOOL_TO_CATEGORIES` 多值表 + `allows_tool` 取 AND | 原 `_TOOL_TO_CATEGORY` 由 dict 推导，工具进两个集合会被遍历顺序静默覆盖 |
+| `dock.kindPdf` 一个键 × 11 份 locale | PDF 在 11 种语言同形无需译文；i18n 同键守卫的缺失清单未因此增长 |
+| pdf 的 dock 图标暂复用 `fileText` | `UiIcon` 现无 pdf 图形；引新图标属另一件事 |
+| 工具执行体读的参数一律经 schema 声明 | `test_executor_reads_only_declared_params` 抓到过一次"执行体读未声明参数"（模型无法供给） |
+
+## 13. 验证记录
+
+- 后端：`scripts/ci/protected_tests.txt` 全量子集 1351 passed / 1 skipped（本批 4 个新文件
+  逐文件单跑全绿后登记）。
+- 前端：`vue-tsc --noEmit` 干净；`vitest run` 216 files passed / 5 files failed（23 tests）。
+  失败面：`locale-consistency`（他人 34 个 `collab.*` 在途键）、`i18n-hardcoded-copy`
+  （他人 `pages/CostDashboardPage.vue` 27 处硬编码）、`messageQueue`/`QueuedMessageCards`/
+  `collaboration`/`ChatPage.reasoningFollow`/`useAPI`（他人未提交的 stores 在途改动）。
+  数量与本批动手前的基线（5 files 预存红）一致，未增长；本批自己的 `dockPdfPanel`、
+  `dockPanels.revoke`、`rightDock`、`utils`、`locale-key-reference` 全绿。
+- 未做的活验证：PDF 在真实浏览器里的内嵌显示（`<embed>`）未人工走查——本轮验证到
+  jsdom 层与类型层为止，D5 那条"Firefox/Linux 变下载"的代价未实测。
+- 提交纪律：本仓为共享工作树，`neurova/tool_executor.py` 有他人 `get_skill`（工单 014）
+  在途 hunk，`NeurUI/src/i18n/locales/*` 有他人 `rsiGovernance`/`collab.*` 在途块；
+  逐文件按 hunk 分类暂存，locale 从 `HEAD` 版本单独长我那一行，7 次提交均未夹带他人内容。
+- 仓库卫生：一条新用例漏了产物目录注入，曾把 1 个 PDF 写进真实 `data/generations/`，
+  已补注入并把该文件隔离出仓（未直接删除）。
+
