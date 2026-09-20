@@ -15,7 +15,7 @@ from datetime import datetime
 import os
 from pathlib import Path
 from threading import Lock, RLock
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import fcntl  # type: ignore[import-not-found]  # Unix only
@@ -28,6 +28,14 @@ logger = get_logger(__name__)
 
 # 净化时标记"应丢弃"的哨兵值（与 None 区分——None 是合法 JSON 值）
 _JSON_DROP = object()
+
+
+def _derive_imported_title(messages) -> str:
+    """导入会话的标题取首条用户消息（运行期占位是"新对话"，导入不该都长那样）。"""
+    for msg in messages:
+        if msg.get("role") == "user" and str(msg.get("content") or "").strip():
+            return str(msg["content"]).strip()[:50]
+    return "新对话"
 
 
 def _json_safe(value: Any) -> Any:
@@ -566,6 +574,97 @@ class SessionManager(SessionRepository):
             )
 
         return f"{agent_id}_{session_id}"
+
+    def import_session_messages(
+        self,
+        agent_id: str,
+        session_id: str,
+        date: str,
+        messages,
+        *,
+        ingest_run_id: str,
+    ) -> Tuple[int, int]:
+        """导入专用写入口：一条历史事件一行消息，保留工具调用/结果的分行结构。
+
+        与 add_message 的分工：后者表达运行期"一问一答"的一个轮次；外部历史里一轮可以
+        含多个调用与多个结果、也可以是纯 assistant/纯 tool 行，压成成对消息就会丢结构
+        （市面互导实现的通病）。幂等靠 metadata.ingest.identity_key。
+
+        不写 user_id：对齐 pipeline 原生落盘口径（add_message 缺省为空串），写死具体用户
+        反而会被按用户过滤拦掉，使导入的历史在会话列表里不可见。
+
+        Returns:
+            (新增条数, 因 identity_key 已存在而跳过的条数)
+        """
+        if not ingest_run_id:
+            raise ValueError("ingest_run_id 必填（撤销按它精确删除）")
+        messages = list(messages)
+        if not messages:
+            return 0, 0
+
+        file_path = self._get_session_file(agent_id, session_id, date)
+        with self._get_file_lock(file_path):
+            session_data = self._read_session_file(file_path)
+            if session_data is None:
+                session_data = {
+                    "agent_id": agent_id,
+                    "session_id": session_id,
+                    "session_date": date,
+                    "messages": [],
+                    "created_at": messages[0].get("timestamp", ""),
+                    "title": _derive_imported_title(messages),
+                }
+            existing = session_data.setdefault("messages", [])
+            seen = {
+                (msg.get("metadata") or {}).get("ingest", {}).get("identity_key")
+                for msg in existing
+            }
+            added = skipped = 0
+            for msg in [_json_safe(m) for m in messages]:
+                key = (msg.get("metadata") or {}).get("ingest", {}).get("identity_key")
+                if key in seen:
+                    skipped += 1
+                    continue
+                metadata = msg.setdefault("metadata", {})
+                metadata["ingest_run_id"] = ingest_run_id
+                existing.append(msg)
+                seen.add(key)
+                added += 1
+            session_data["total_messages"] = len(existing)
+            session_data["updated_at"] = datetime.now().isoformat()
+            # 持锁内只调无锁写入版（S4 约束：_write_session_file 会再取同一 file_lock）
+            if not self._write_session_file_unlocked(file_path, session_data):
+                raise IOError(f"导入会话写入失败: {file_path}")
+        return added, skipped
+
+    def delete_ingested_messages(self, agent_id: str, ingest_run_id: str) -> int:
+        """按导入批次撤销某 agent 的会话消息；消息被清空的会话文件直接删除。"""
+        removed = 0
+        agent_dir = self._get_session_dir(agent_id)
+        for file_path in sorted(agent_dir.glob("session_*.json")):
+            with self._get_file_lock(file_path):
+                session_data = self._read_session_file(file_path)
+                if not session_data:
+                    continue
+                messages = session_data.get("messages") or []
+                kept = [
+                    msg for msg in messages
+                    if (msg.get("metadata") or {}).get("ingest_run_id") != ingest_run_id
+                ]
+                dropped = len(messages) - len(kept)
+                if not dropped:
+                    continue
+                if not kept:
+                    file_path.unlink(missing_ok=True)
+                    removed += dropped
+                    continue
+                session_data["messages"] = kept
+                session_data["total_messages"] = len(kept)
+                session_data["updated_at"] = datetime.now().isoformat()
+                if not self._write_session_file_unlocked(file_path, session_data):
+                    logger.error("撤销导入时写回失败: %s", file_path)
+                removed += dropped
+        return removed
 
     def get_session(self, agent_id: str, session_id: str, date: str = None) -> SessionRecord:
         """获取session记录"""
