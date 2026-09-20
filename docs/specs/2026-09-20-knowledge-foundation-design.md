@@ -480,6 +480,18 @@ case 集与基线摘要已导出入库：`tests/fixtures/knowledge_eval_cases.js
 单独跑该文件 24 passed。要查得从别的模块对 `semantic_search_api` / rerank 配置的污染入手，
 别改这两个用例本身。
 
+**`tests/unit/api/` 的失败面本身不稳定，别拿它当基线**（2026-09-20 晚实测）：
+同一目录同一份代码，间隔几分钟两次跑分别是 15 failed 与 25 failed；
+与 `tests/unit/core/` 并跑时升到 37 failed + 2 errors。新增的一族集中在
+artifacts / console events / agent package / workspace zip / load saved agents
+（`test_console_artifact_events.py` 11、`test_load_saved_agents_missing_dir.py` 4、
+`test_artifacts_registry.py` 4、`test_agent_package_api.py` 2、`test_workspace_zip_offloop.py` 2 error）。
+判据：**把本批的 `tests/unit/knowledge/` 与守卫全部摘掉，只跑 `api + core` 仍是 37 failed**，
+而 `knowledge + core` 是 1 failed（即已登记的那条）。这族与既有登记
+"app 级测试写真实 agent_workspaces"同源——它们争同一份磁盘状态，于是失败随顺序与会话并发变化。
+本批口径因此固定为：`tests/unit/knowledge/` 与 `knowledge + core` 两个窄口径读数为准，
+api 域只认"已登记的 15 例不新增"，不追那族顺序性失败。
+
 另有 `tests/benchmarks/test_multi_agent_coordination.py:413` 未导入 `Optional` 导致全仓收集中断——
 该目录未入库（`??`），属他人在途件，本批不触碰，跑套件时需 `--ignore=tests/benchmarks`。
 
