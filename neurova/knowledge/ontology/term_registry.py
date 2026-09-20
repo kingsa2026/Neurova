@@ -241,12 +241,28 @@ class OntologyTermRegistry:
                 [agentId] + list(termIds)).fetchall()
         return [r["subject_key"] for r in rows]
 
-    def termCount(self) -> int:
-        with self._store._lock:
-            return self._store._conn.execute(
-                "SELECT COUNT(*) FROM ontology_terms").fetchone()[0]
+
+def legacyGraphTerms() -> List[Dict[str, Any]]:
+    """图谱那两个 Enum 的值一次性收编成表里的行（工单 018）。
+
+    收编之后枚举退成**读兼容层**：加一种类型是往表里 INSERT 一行，不是改 Python 发一版。
+    两个枚举都有 `custom`，而术语 id 是全表唯一的——它是"认不出的兜底标记"，不是一种类型，
+    所以两边都不进表：进表就等于让一个 concept 和一个 relation 抢同一个 id。
+    惰性导入是刻意的——知识层不在 import 期拽住认知层，且这里只读值不读行为。
+    """
+    from neurova.cognitive_layers.knowledge_graph.manager import NodeType, RelationType
+
+    def _values(enumCls):
+        return [t.value for t in enumCls if t.value != "custom"]
+
+    return ([{"termId": v, "kind": "concept", "label": v} for v in _values(NodeType)]
+            + [{"termId": v, "kind": "relation", "label": v} for v in _values(RelationType)])
 
 
 def seedBuiltinTerms(registry: "OntologyTermRegistry") -> int:
-    """登记咽喉自己固定的谓词（幂等：registerMany 是 INSERT OR REPLACE）。"""
-    return registry.registerMany(_SEED_TERMS)
+    """登记咽喉固定的谓词与图谱遗留类型（幂等：registerMany 是 INSERT OR REPLACE）。
+
+    顺序是"先 legacy 后显式种子"：`is_a` 两边都有，种子那份带着中文 label 与基数，
+    不能被枚举里那个裸值盖掉。
+    """
+    return registry.registerMany(legacyGraphTerms() + _SEED_TERMS)

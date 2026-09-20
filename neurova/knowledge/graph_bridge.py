@@ -7,8 +7,9 @@ LLM 从条目标题+正文抽取实体与关系，建立图谱节点/边，
 
 设计要点：
 - llm_call(prompt) -> str 可注入（测试零网络/零 LLM）；None 表示未配置，跳过
-- 类型对齐 manager 的 NodeType/RelationType 枚举，越界一律落 custom
-- 按 (label, type) 去重：search_nodes 精确匹配既有节点，命中即复用
+- 类型合法集合来自 `ontology_terms`（工单 020 的注册表），越界一律落 custom；
+  加一种类型是往表里登记一行，不改本文件（工单 018 收编）
+- 节点复用走 006 的身份消解段：同一实体不因类型词不同就开两个节点
 - 任何异常不向上传播（导入链路的钩子调用，失败不阻断导入）
 """
 
@@ -49,15 +50,62 @@ def _parse_llm_json(text: str) -> Optional[Dict[str, Any]]:
     return data if isinstance(data, dict) else None
 
 
-def _find_existing_node(graph, label: str, node_type):
-    """按 (label, type) 精确查找既有节点；命中则复用（去重）。"""
+def registeredTypes(registry: Any, kind: str) -> List[str]:
+    """注册表里某一类（concept/relation）的合法术语 id。"""
+    return [str(t.get("term_id", "")) for t in (registry.terms(kind) if registry else [])]
+
+
+def registeredRelationTypes(registry: Any) -> List[str]:
+    return registeredTypes(registry, "relation")
+
+
+def registeredNodeTypes(registry: Any) -> List[str]:
+    return registeredTypes(registry, "concept")
+
+
+def _allowedTypes(termRegistry: Any, kind: str, legacyEnum: Any) -> set:
+    """合法类型集合：注册表优先，拿不到时退回枚举读兼容层。
+
+    这里是导入链路上的尽力而为钩子（异常不外抛、失败不阻断导入），所以底座不可用时
+    必须还有一条能走的路，而不是让整个抽取静默死掉。退回枚举只意味着"新登记的类型
+    这一轮认不出来"，落 custom 仍是有据可依的保守侧。
+    """
+    if termRegistry is not None:
+        return set(registeredTypes(termRegistry, kind))
+    from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
+    from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
+
     try:
-        for node in graph.search_nodes(label, node_type=node_type, limit=20):
-            if node.label == label and node.node_type == node_type:
-                return node
-    except Exception:  # noqa: BLE001
-        pass
-    return None
+        return set(registeredTypes(OntologyTermRegistry(get_knowledge_fact_store()), kind))
+    except Exception as exc:  # noqa: BLE001 - 底座不可用不是抽取失败的理由
+        logger.warning("graph_bridge: 本体注册表不可用（%s），%s 合法集退回枚举读兼容层",
+                       exc, kind)
+        return {t.value for t in legacyEnum if t.value != "custom"}
+
+
+def _resolveNodeId(graph: Any, label: str, resolver: Any) -> Optional[str]:
+    """节点身份只由消解段决定。
+
+    旧口径按 `(label, type)` 精确匹配，等于把类型当身份的一部分：同一个"青海湖"
+    被叫成 concept 又被叫成 location 就开两个节点，图越写越碎。
+    """
+    try:
+        candidates = [
+            {"subject_key": node.node_id, "canonical_label": node.label,
+             "aliases": list(node.aliases or [])}
+            for node in graph.search_nodes(label, limit=50)
+        ]
+    except Exception:  # noqa: BLE001 - 图谱读面异常不当成身份判定
+        return None
+    if not candidates:
+        return None
+    resolution = resolver.resolve(label, candidates)
+    if resolution.createdNew:
+        if resolution.needsHumanReview and resolution.nearest:
+            logger.info("graph_bridge: %r 与 %s 相似 %.2f，置信不足，另开节点待人工并",
+                        label, resolution.nearest[0], resolution.nearest[1])
+        return None
+    return resolution.subjectKey
 
 
 def extract_knowledge_to_graph(
@@ -65,6 +113,7 @@ def extract_knowledge_to_graph(
     repo: Any = None,
     llm_call: Optional[Callable[[str], str]] = None,
     graph_manager: Any = None,
+    termRegistry: Any = None,
 ) -> List[str]:
     """抽取一条知识条目的实体/关系写入图谱，返回回写后的 graph_node_ids。
 
@@ -73,6 +122,7 @@ def extract_knowledge_to_graph(
         repo: KnowledgeRepository（回写 graph_node_ids；None 则跳过回写）
         llm_call: prompt -> 文本 的调用器；None/异常/畸形输出 → 跳过（返回 []）
         graph_manager: KnowledgeGraphManager；None 时用全局单例
+        termRegistry: OntologyTermRegistry；None 时接生产底座的注册表
 
     Returns:
         条目关联的图谱节点 id 列表（失败为 []）
@@ -103,18 +153,20 @@ def extract_knowledge_to_graph(
 
         graph_manager = get_knowledge_graph_manager()
 
-    from neurova.cognitive_layers.knowledge_graph.manager import (
-        NodeType,
-        RelationType,
-    )
+    from neurova.cognitive_layers.knowledge_graph.manager import NodeType, RelationType
+    from neurova.knowledge.identity.subject_resolver import SubjectResolver
 
-    def _norm_type(value, enum_cls, default):
-        try:
-            return enum_cls(str(value))
-        except Exception:  # noqa: BLE001 - 越界类型落 custom
-            return default
+    allowedNodeTypes = _allowedTypes(termRegistry, "concept", NodeType)
+    allowedRelationTypes = _allowedTypes(termRegistry, "relation", RelationType)
 
-    # 建实体节点（label+type 去重）
+    def _typeFromRegistry(value, allowed: set, default):
+        """注册表里登记过才算一种类型；越界落 custom，不猜。"""
+        text = str(value or "").strip()
+        return text if text in allowed else default
+
+    resolver = SubjectResolver()
+
+    # 建实体节点（身份由 006 消解段判，类型只是节点的属性）
     node_ids: List[str] = []
     label_to_id: Dict[str, str] = {}
     for ent in data.get("entities") or []:
@@ -123,11 +175,11 @@ def extract_knowledge_to_graph(
         label = str(ent.get("label", "")).strip()
         if not label:
             continue
-        node_type = _norm_type(ent.get("type"), NodeType, NodeType.CUSTOM)
-        existing = _find_existing_node(graph_manager, label, node_type)
-        if existing is not None:
-            node_ids.append(existing.node_id)
-            label_to_id.setdefault(label, existing.node_id)
+        node_type = _typeFromRegistry(ent.get("type"), allowedNodeTypes, NodeType.CUSTOM.value)
+        existingId = _resolveNodeId(graph_manager, label, resolver)
+        if existingId is not None:
+            node_ids.append(existingId)
+            label_to_id.setdefault(label, existingId)
             continue
         try:
             node = graph_manager.add_node(
@@ -149,7 +201,8 @@ def extract_knowledge_to_graph(
         target_id = label_to_id.get(str(rel.get("target", "")).strip())
         if not source_id or not target_id or source_id == target_id:
             continue
-        relation = _norm_type(rel.get("type"), RelationType, RelationType.CUSTOM)
+        relation = _typeFromRegistry(rel.get("type"), allowedRelationTypes,
+                                     RelationType.CUSTOM.value)
         try:
             graph_manager.add_edge(
                 source_id=source_id, target_id=target_id, relation_type=relation

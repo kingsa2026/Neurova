@@ -84,8 +84,10 @@ class TestRegistryIsData:
             registry.register("r", "relation", parentTermId="person")
         with pytest.raises(ValueError, match="类型未登记"):
             registry.assignSubjectType("subj_x", "ghost")
-        assert registry.termCount() == 3, \
-            "被拒的登记不许留下半行（3 = 内置 documented_as / is_a + 上面合法登记的 person）"
+        assert [registry.term(bad) for bad in ("x", "y", "z", "r")] == [None] * 4, \
+            "被拒的登记不许留下半行"
+        for kept in ("person", "documented_as", "is_a"):
+            assert registry.term(kept) is not None, "%s 该在表里" % kept
 
     def test_unregisteredTermsAreReportedNotRejected(self, registry, report):
         """把"没登记"当"不合法"，注册表覆盖率一变写入可用性就跟着抖。"""
