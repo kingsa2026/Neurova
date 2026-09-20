@@ -147,6 +147,7 @@ _SCHEMA_V5 = """
 ALTER TABLE knowledge_facts ADD COLUMN record_kind TEXT NOT NULL DEFAULT 'triple';
 """
 
+
 MANUAL_RESOLUTIONS: tuple = ("keep_both", "supersede_old", "dismiss")
 
 
@@ -568,10 +569,32 @@ class KnowledgeFactStore:
             return int(self._conn.execute("SELECT COUNT(*) FROM knowledge_facts").fetchone()[0])
 
     def findFactByContentKey(self, agentId: str, contentKey: str) -> Optional[Dict[str, Any]]:
+        """按内容键找该行（含已被取代的）。
+
+        刻意不过滤 status：一旦只看 active，"折叠"就变成裁决顺序的函数——回放里某行被
+        自动取代后，同内容会另开一行，静态预测与实跑当场对不上（实测 92 vs 102）。
+        """
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM knowledge_facts WHERE agent_id = ? AND content_key = ? LIMIT 1",
                 (agentId, contentKey),
+            ).fetchone()
+        return self._hydrate(row) if row else None
+
+    def narrativeFactForEntry(self, knowledgeId: str) -> Optional[Dict[str, Any]]:
+        """条目 id → 当前治理行（跨 agent）。
+
+        条目 id 现在只是溯源串（`entry:` / `legacy:` 前缀）与无内容身份时的客体；
+        取最新一代，因为"改回原样"会开新行。不按 agent 收窄与 `find_item` 同口径——
+        knowledge_id 本来就是全局 uuid。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM knowledge_facts WHERE record_kind = 'narrative'"
+                " AND status = 'active' AND (object_term = ?"
+                " OR source_turn_id IN ('entry:' || ?, 'legacy:' || ?))"
+                " ORDER BY recorded_at DESC, fact_id LIMIT 1",
+                (knowledgeId, knowledgeId, knowledgeId),
             ).fetchone()
         return self._hydrate(row) if row else None
 

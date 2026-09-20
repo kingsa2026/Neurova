@@ -59,19 +59,28 @@ class KnowledgeRetrieverAdapter:
     def priority(self) -> int:
         return self._priority
 
-    def _factHits(self, context, agent_id):
-        """底座读面命中（含使用回流）。关闸即空池，旧行为一字不变。"""
-        surface = self._surface()
-        if surface is None:
-            return [], []
-        hits = surface.rankHits(surface.search(context.query, limit=context.limit, agentId=agent_id))
-        if not hits:
-            return [], []
-        from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
-        from neurova.knowledge.foundation.read_surface import recordHitsAsInjection
+    def _enrich(self, knowledge_items):
+        """把治理字段挂到已排好序的命中上，并回写注入计数。
 
-        recordHitsAsInjection(get_knowledge_fact_store(), hits)
-        return hits, [h["knowledge_id"] for h in hits]
+        011 试过"两池按秩交织"并被真数据否证（同一份内容在两池各算一票，
+        短事实凭 BM25 优势顶掉强叙述命中）。所以接入底座的方式改成富化：
+        排序仍由那把冻结的尺子说了算，底座只补充置信/证据态/血缘内键。
+        关闸即原样返回、零回流副作用。
+        """
+        surface = self._surface()
+        if surface is None or not knowledge_items:
+            return knowledge_items, []
+        from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
+        from neurova.knowledge.foundation.read_surface import (
+            attachGovernance,
+            recordHitsAsInjection,
+        )
+
+        store = get_knowledge_fact_store()
+        hits, lineageIds = attachGovernance(store, knowledge_items)
+        if lineageIds:
+            recordHitsAsInjection(store, hits)
+        return hits, lineageIds
 
     async def retrieve(self, context) -> Any:
         """执行知识库检索（走用户可见性过滤）"""
@@ -105,11 +114,7 @@ class KnowledgeRetrieverAdapter:
                 agent_id=agent_id,
             )
 
-            factHits, lineageIds = self._factHits(context, agent_id)
-            if factHits:
-                from neurova.knowledge.foundation.read_surface import mergeIntoLegacy
-
-                knowledge_items = mergeIntoLegacy(knowledge_items, factHits, limit=context.limit)
+            knowledge_items, lineageIds = self._enrich(knowledge_items)
 
             elapsed = time.monotonic() - start_time
 

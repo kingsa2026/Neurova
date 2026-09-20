@@ -164,6 +164,11 @@ class KnowledgeAdmissionGate:
             # 若拿它当客体，(主体, 谓词, 客体) 三元组就条条相同，upsertFact 会把每一次
             # 正文改写吞回同一行——旧说法永远不被取代，编辑在治理层完全隐身（019b-2 实测）。
             # 无内容身份的条目仍按 id 立身，那条说法没有"改一次算一次"可言。
+            entryId = request.objectTerm
+            if not str(request.sourceTurnId or "").strip():
+                # 客体换成内容键之后，"这是哪条条目"只剩 source_turn_id 一个落点；
+                # 让它由咽喉兜底而不是要求每个调用方自觉，否则条目再也找不回自己的治理行。
+                request = replace(request, sourceTurnId="entry:%s" % entryId)
             request = replace(request, objectTerm=contentKey or request.objectTerm)
         dupe = self._store.findFactByContentKey(request.agentId, contentKey) if contentKey else None
         if dupe:
