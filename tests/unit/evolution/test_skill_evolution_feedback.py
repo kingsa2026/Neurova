@@ -215,8 +215,8 @@ class TestBreakpoint3ApplyImprovement(unittest.TestCase):
         applied = improver.apply_improvement(self._improvement(), registry)
         self.assertTrue(applied)
         skill = registry.skills["genetic_a_b"]
-        self.assertEqual(len(skill.config.get("improvements", [])), 1)
-        rec = skill.config["improvements"][0]
+        self.assertEqual(len(skill.config.get("revisions", [])), 1)
+        rec = skill.config["revisions"][0]
         self.assertEqual(rec["type"], "performance")
         self.assertEqual(rec["changes"], {"suggested_fix": "延长超时并添加重试"})
         self.assertIn("applied_at", rec)

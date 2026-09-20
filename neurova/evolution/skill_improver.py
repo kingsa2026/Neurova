@@ -19,9 +19,11 @@ import datetime
 from neurova.core.logger import get_logger
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
+
+from neurova.evolution.persistence import PersistedStateMixin
 
 logger = get_logger(__name__)
 
@@ -116,11 +118,45 @@ class FailureAnalysis:
 # ────── 主类 ──────
 
 
-class AutoSkillImprover:
+def _rebuild(cls, raw: Dict[str, Any], **enums):
+    """按字段名回填 dataclass（改进史读回用）。
+
+    时间列还原成 datetime、Enum 列按值还原、未识别的值退回 dataclass 默认。
+    逐字段手写回填的失败方式是"加了新字段忘了写一行"——那样新字段会在每次
+    重启时静默丢数据，所以这里遍历 `fields(cls)`，新字段自动被覆盖到。
+    """
+    kwargs: Dict[str, Any] = {}
+    for f in fields(cls):
+        if f.name not in raw:
+            continue
+        value = raw[f.name]
+        enum = enums.get(f.name)
+        if enum is not None:
+            try:
+                value = enum(value)
+            except ValueError:
+                continue
+        elif f.name.endswith("_at") or f.name == "timestamp":
+            if not value:
+                continue
+            try:
+                value = datetime.datetime.fromisoformat(str(value))
+            except ValueError:
+                continue
+        kwargs[f.name] = value
+    return cls(**kwargs)
+
+
+class AutoSkillImprover(PersistedStateMixin):
     """
     技能自动改进器
 
     基于使用反馈自动分析失败模式、生成改进建议、创建变体并进行 A/B 测试。
+
+    持久化（工单 016 断点 c）：使用记录 / 改进史 / 变体 / 同签名去重集四件全部
+    落盘。此前纯内存 ⇒ 重启归零，于是每轮扫描的失败率分母从 0 重新开始
+    （`propose_improvements` 的 min_records 门槛永不触发），且同一条改进会在
+    每次重启后再被应用一次（版本号每重启涨一位）。
     """
 
     def __init__(
@@ -138,6 +174,7 @@ class AutoSkillImprover:
         self._failure_threshold = failure_threshold
         self._max_variants = max_variants_per_skill
         self._lock = threading.RLock()
+        self._init_state_persistence()
 
         # 使用记录
         self._usage_records: Dict[str, List[UsageRecord]] = {}  # skill_id -> records
@@ -203,6 +240,7 @@ class AutoSkillImprover:
             # 更新变体统计
             if variant_id:
                 self._update_variant_stats(variant_id, success, duration)
+        self._maybe_persist()
 
     def _update_variant_stats(self, variant_id: str, success: bool, duration: float):
         """更新变体统计"""
@@ -371,8 +409,9 @@ class AutoSkillImprover:
 
             self._variants.setdefault(skill_id, []).append(variant)
 
-            logger.info("Created variant %s for skill %s", variant.variant_id, skill_id)
-            return variant
+        logger.info("Created variant %s for skill %s", variant.variant_id, skill_id)
+        self._maybe_persist()
+        return variant
 
     def get_improvement_history(self, skill_id: str) -> List[SkillImprovement]:
         """获取改进历史"""
@@ -450,51 +489,13 @@ class AutoSkillImprover:
                 logger.debug("技能 %s 反射式改进失败,保留字典提案: %s", proposal.skill_id, e)
         return proposals
 
-    def get_skill_stats(self, skill_id: str) -> Dict[str, Any]:
-        """获取技能统计信息"""
-        with self._lock:
-            records = self._usage_records.get(skill_id, [])
-            if not records:
-                return {"skill_id": skill_id, "total_uses": 0}
-
-            total = len(records)
-            successes = sum(1 for r in records if r.success)
-            failures = total - successes
-            avg_duration = sum(r.duration for r in records) / total
-
-            # 变体统计
-            variants = self._variants.get(skill_id, [])
-            variant_stats = []
-            for v in variants:
-                variant_stats.append(
-                    {
-                        "variant_id": v.variant_id,
-                        "name": v.name,
-                        "success_rate": v.success_count / max(1, v.total_uses),
-                        "total_uses": v.total_uses,
-                        "avg_duration": v.avg_duration,
-                    }
-                )
-
-            return {
-                "skill_id": skill_id,
-                "total_uses": total,
-                "success_count": successes,
-                "failure_count": failures,
-                "success_rate": successes / total,
-                "avg_duration": round(avg_duration, 3),
-                "improvements_proposed": len(self._improvements.get(skill_id, [])),
-                "variants": len(variants),
-                "variant_details": variant_stats,
-            }
-
     def apply_improvement(self, improvement: SkillImprovement, registry, skill_service=None) -> bool:
         """把改进提案应用到 skill 本体（断点 #3 修复：提案不再只进反思日志）。
 
         应用语义（保守、可审计）：
-        - 改进记录追加进 skill.config["improvements"]（type/changes/applied_at），
-          不改写技能的工具序列——结构性变更（extend/reorder）必须走人工评审，
-          与 RSI propose_skill_manifest 的分层一致；
+        - 改进内容落 `skill.config["revisions"]`（一条修订 = 回滚快照 + 本次改进的
+          type/changes/reason/applied_at 留痕），不改写技能的工具序列——结构性变更
+          （extend/reorder）必须走人工评审，与 RSI propose_skill_manifest 的分层一致；
         - 版本号 patch 位递增（1.0.0 → 1.0.1），可观测"该技能已被改进过"；
         - applied 标记 + applied_at 落在提案对象上，pending 消费即消失；
         - 同签名（skill_id+type+changes）提案只应用一次，防止每轮扫描反复应用
@@ -558,8 +559,12 @@ class AutoSkillImprover:
                 _json.dumps(config_before, sort_keys=True, default=str).encode("utf-8")
             ).hexdigest()[:16]
 
-            improvements = config.setdefault("improvements", [])
-            improvements.append(
+            # 工单 016 断点 b：改进记录只落 `revisions` 一份。此前另有一份
+            # `config["improvements"]`，全仓零读取方（"写了没人读"第三态）；
+            # 行为面由经验库组合进技能描述承载，审计面就在这里 —— 每条修订既是
+            # 回滚快照，也是这次改进"改了什么、为什么改"的留痕。
+            revisions = config.setdefault("revisions", [])
+            revisions.append(
                 {
                     "improvement_id": improvement.improvement_id,
                     "type": getattr(improvement.improvement_type, "value", str(improvement.improvement_type)),
@@ -567,13 +572,6 @@ class AutoSkillImprover:
                     "reason": improvement.reason,
                     "expected_impact": improvement.expected_impact,
                     "applied_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                    "revision_hash_before": revision_hash_before,
-                }
-            )
-            revisions = config.setdefault("revisions", [])
-            revisions.append(
-                {
-                    "improvement_id": improvement.improvement_id,
                     "version_before": version_before,
                     "config_before": config_before,
                     "revision_hash_before": revision_hash_before,
@@ -645,13 +643,15 @@ class AutoSkillImprover:
             except Exception as exp_err:
                 logger.debug("applied 经验记录写入失败 %s: %s", skill_id, exp_err)
 
-            logger.info(
-                "技能改进已应用: %s (%s) → v%s",
-                skill_id,
-                improvement.improvement_type.value,
-                skill.version,
-            )
-            return True
+        # 落盘在锁外（C-15 约定：磁盘 IO 期间不得把改进史读路径串行挡住）
+        logger.info(
+            "技能改进已应用: %s (%s) → v%s",
+            skill_id,
+            improvement.improvement_type.value,
+            skill.version,
+        )
+        self._maybe_persist()
+        return True
 
     def revert_last_improvement(self, skill_id: str, registry, skill_service=None) -> bool:
         """回滚技能最近一次已应用的改进（C13：恢复 config 快照与版本号）。
@@ -708,8 +708,9 @@ class AutoSkillImprover:
                     logger.warning("回滚落盘失败，已还原改进态: %s", skill_id)
                     return False
 
-            logger.info("技能 %s 已回滚改进至 v%s", skill_id, skill.version)
-            return True
+        logger.info("技能 %s 已回滚改进至 v%s", skill_id, skill.version)
+        self._maybe_persist()
+        return True
 
     def get_variant_comparison(self, skill_id: str) -> Dict[str, Any]:
         """
@@ -748,6 +749,75 @@ class AutoSkillImprover:
                 "skill_id": skill_id,
                 "original": original_stats,
                 "variants": variant_stats,
+            }
+
+    # ────── 持久化钩子（工单 016 断点 c）──────
+
+    def _snapshot_payload(self) -> Dict[str, Any]:
+        def _ts(value) -> Any:
+            return value.isoformat() if isinstance(value, datetime.datetime) else value
+
+        with self._lock:
+            return {
+                "version": 1,
+                "usage_records": {
+                    skill_id: [
+                        {**asdict(r), "timestamp": _ts(r.timestamp)}
+                        for r in records
+                    ]
+                    for skill_id, records in self._usage_records.items()
+                },
+                "improvements": {
+                    skill_id: [
+                        {
+                            **asdict(i),
+                            "improvement_type": i.improvement_type.value,
+                            "created_at": _ts(i.created_at),
+                            "applied_at": _ts(i.applied_at),
+                        }
+                        for i in imps
+                    ]
+                    for skill_id, imps in self._improvements.items()
+                },
+                "variants": {
+                    skill_id: [
+                        {
+                            **asdict(v),
+                            "created_at": _ts(v.created_at),
+                            "last_used": _ts(v.last_used),
+                        }
+                        for v in variants
+                    ]
+                    for skill_id, variants in self._variants.items()
+                },
+                "applied_signatures": [list(sig) for sig in sorted(self._applied_signatures)],
+            }
+
+    def _restore_payload(self, data: Dict[str, Any]) -> None:
+        usage = {
+            str(sid): [_rebuild(UsageRecord, raw) for raw in raws if isinstance(raw, dict)]
+            for sid, raws in (data.get("usage_records") or {}).items()
+        }
+        improvements = {
+            str(sid): [
+                _rebuild(SkillImprovement, raw, improvement_type=ImprovementType)
+                for raw in raws
+                if isinstance(raw, dict)
+            ]
+            for sid, raws in (data.get("improvements") or {}).items()
+        }
+        variants = {
+            str(sid): [_rebuild(SkillVariant, raw) for raw in raws if isinstance(raw, dict)]
+            for sid, raws in (data.get("variants") or {}).items()
+        }
+        with self._lock:
+            self._usage_records = {k: v for k, v in usage.items() if v}
+            self._improvements = {k: v for k, v in improvements.items() if v}
+            self._variants = {k: v for k, v in variants.items() if v}
+            # 去重集取并集而非覆盖：一份更旧的文件不该把"这条已应用过"的记忆抹掉，
+            # 抹掉即等价于把同一条改进再应用一次。
+            self._applied_signatures |= {
+                tuple(sig) for sig in (data.get("applied_signatures") or []) if isinstance(sig, list)
             }
 
     def to_dict(self) -> Dict[str, Any]:

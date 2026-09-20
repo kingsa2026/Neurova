@@ -756,14 +756,22 @@ def default_evolution_skill_experience_path() -> Path:
     return Path("data") / "evolution" / "skill_experiences.json"
 
 
+def default_evolution_improvements_path() -> Path:
+    """默认技能改进史持久化路径（环境变量可覆盖，测试隔离用）。"""
+    env_path = os.environ.get("NEUROVA_EVOLUTION_IMPROVEMENTS")
+    if env_path:
+        return Path(env_path)
+    return Path("data") / "evolution" / "skill_improvements.json"
+
+
 def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
     """显式挂载进化状态持久化并恢复（幂等；启动时调用一次）。
 
     与 get_evolution_orchestrator 分离：单例保持零 IO 副作用，
     测试/嵌入场景不会污染 data/；生产由 start_server 显式装配。
-    装配五件：工具权重 + 模式序列 + 工具生命周期 + 经验成败计数 + 技能经验库
-    （后四件此前纯内存，重启进化史清零）。
-    返回是否从既有文件恢复了权重（后四件恢复结果只记日志，失败不阻断启动）。
+    装配六件：工具权重 + 模式序列 + 工具生命周期 + 经验成败计数 + 技能经验库
+    + 技能改进史（工单 016 补最后一件；此前纯内存的组件重启即归零）。
+    返回是否从既有文件恢复了权重（其余件恢复结果只记日志，失败不阻断启动）。
     """
     orchestrator = get_evolution_orchestrator()
     persist_path = path or default_evolution_weights_path()
@@ -800,6 +808,19 @@ def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
     except Exception:  # noqa: BLE001 - 单件装配失败不拖垮其余组件
         logger.warning("技能经验库持久化装配失败", exc_info=True)
 
+    # 技能改进史（工单 016 断点 c）：使用记录 / 改进史 / 变体 / 同签名去重集。
+    # 此前纯内存 ⇒ 重启归零，失败率分母每轮从 0 重算、同一条改进被重复应用。
+    try:
+        from neurova.evolution.skill_improver import get_skill_improver
+
+        improver = get_skill_improver()
+        im_path = default_evolution_improvements_path()
+        improver.attach_persistence(im_path)
+        if improver.load(im_path):
+            logger.info("技能改进史已从 %s 恢复", im_path)
+    except Exception:  # noqa: BLE001 - 单件装配失败不拖垮其余组件
+        logger.warning("技能改进史持久化装配失败", exc_info=True)
+
     # P1-4 进化作业队列崩溃恢复（默认关时不建单例、零副作用）：把上一进程
     # 遗留的 running 租约超时作业释放回可重试池，供下一次 post_chat drain。
     try:
@@ -815,7 +836,7 @@ def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
 
 
 def flush_evolution_persistence() -> Dict[str, bool]:
-    """关停时强制落盘五件进化状态（绕过节流）。
+    """关停时强制落盘六件进化状态（绕过节流）。
 
     节流落盘（默认 10s）意味着关停前最后窗口期内的变更只在内存——
     优雅关停必须 flush 一次，否则每次短会话重启都会丢尾部变更。
@@ -841,6 +862,15 @@ def flush_evolution_persistence() -> Dict[str, bool]:
     except Exception:  # noqa: BLE001
         logger.warning("技能经验库关停落盘失败", exc_info=True)
         result["skill_experience_store"] = False
+
+    # 技能改进史（工单 016 断点 c，同批 flush）
+    try:
+        from neurova.evolution.skill_improver import get_skill_improver
+
+        result["skill_improver"] = get_skill_improver().save()
+    except Exception:  # noqa: BLE001
+        logger.warning("技能改进史关停落盘失败", exc_info=True)
+        result["skill_improver"] = False
     return result
 
 

@@ -129,7 +129,7 @@ def test_apply_failure_rolls_back_memory_and_revisions(env, monkeypatch):
     assert improver.apply_improvement(_proposal(), registry, skill_service=svc) is False
     # 内存态回到改进前：版本、config、revisions 全部还原
     assert skill.version == "1.0.0"
-    assert not skill.config.get("improvements")
+    # 改进留痕与回滚快照同在 revisions（工单 016 断点 b：不再另写 improvements 键）
     assert not skill.config.get("revisions")
 
 
@@ -138,7 +138,7 @@ def test_apply_success_path_unaffected(env):
     improver = get_skill_improver()
     assert improver.apply_improvement(_proposal(), registry, skill_service=svc) is True
     assert skill.version == "1.0.1"
-    assert svc.get_skill_info("gen_skill")["manifest"]["config"].get("improvements")
+    assert svc.get_skill_info("gen_skill")["manifest"]["config"].get("revisions")
 
 
 def test_revert_failure_rolls_back(env, monkeypatch):

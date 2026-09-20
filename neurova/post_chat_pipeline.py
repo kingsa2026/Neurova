@@ -2543,11 +2543,14 @@ class PostChatPipeline:
         """
         step_name = "rsi_iteration"
         start_time = time.time()
+        # 本步内三个消费方（改进落盘的 SkillService、MetaLedger、归因台账）必须用
+        # 同一个 agent_id —— 台账按 agent 分库，各算各的会把归因查成 "default"。
+        agent_id = str(getattr(getattr(self._agent, "config", None), "agent_id", "") or "default")
 
         # 根因修复: AutoSkillImprover 此前零调用——每轮批量扫描技能使用数据，
         # 对失败率超阈值的技能提出改进提案，并沉淀为反思日志回流上下文。
         # 断点 #3 修复：提案先尝试 apply_improvement 回写技能本体（保守语义：
-        # 仅追加 config.improvements 记录+版本递增，不改工具序列），已应用的
+        # 修订留痕进 config.revisions + 版本递增，不改工具序列），已应用的
         # 提案不再重复刷反思日志；未应用的（registry 不可用等）保持原提案日志。
         # P1-4：NEUROVA_EVOLUTION_QUEUE=1
         # 时改道"入队 + 就地 drain"——作业持久化，崩溃/失败可重试（启动
@@ -2561,7 +2564,6 @@ class PostChatPipeline:
             improver = get_skill_improver()
             growth_log_manager = self._get_dependency("growth_log_manager")
             skill_registry = getattr(self._agt, "_skill_registry", None)
-            agent_id = str(getattr(self._agt.config, "agent_id", "") or "default")
             # 改进落盘最后一米（复审残余点 C）：SkillService 传给 apply_improvement，
             # 应用后 config+version 同步磁盘 manifest——否则改进重启即失
             skill_service = None
@@ -2637,14 +2639,13 @@ class PostChatPipeline:
             try:
                 from neurova.cognitive_layers.meta_cognition_layer.ledger import get_meta_ledger
 
-                _meta_ledger = get_meta_ledger(
-                    str(getattr(getattr(self._agent, "config", None), "agent_id", "default") or "default")
-                )
+                _meta_ledger = get_meta_ledger(agent_id)
             except Exception as ledger_err:
                 logger.debug("MetaLedger 获取失败，归因跳过: %s", ledger_err)
 
             _mtn = run_skill_experience_maintenance(
-                registry=skill_registry, skill_service=skill_service, ledger=_meta_ledger
+                registry=skill_registry, skill_service=skill_service,
+                ledger=_meta_ledger, agent_id=agent_id,
             )
             if _mtn.get("attributed") or _mtn.get("rebuilt") or _mtn.get("retired") or _mtn.get("retire_candidates"):
                 logger.info(

@@ -7,7 +7,7 @@
 2. 形成侧第三态从 `tags=["unevidenced"]` 的字符串 hack 升成一等列
    `evidence_state`（002 留的前瞻，到这里才落地）；
 3. 指标必须有**写入方**（`RSIOrchestrator` 每轮刷新）与被**读取方**
-   （`RSIDashboard` 经验视图），定义了没人写 = 缺陷，写了没人读也是；
+   （工单 012 后是 `orchestrator.get_status()`，此前是 `RSIDashboard`），定义了没人写 = 缺陷，写了没人读也是；
 4. 空库不得被读成"100% 无证据"，无采纳决策不得被读成"成功率 0"——
    这两条反向锁正是本轮一路在防的"把没测到读成没出问题"的反向形态。
 """
@@ -135,16 +135,20 @@ class TestWriterAndReaderExist:
         finally:
             db.close()
 
-    def test_dashboard_shows_experience_view(self, tmp_path):
-        from neurova.evolution.rsi.convergence_analyzer import ConvergenceAnalyzer
-        from neurova.evolution.rsi.dashboard import RSIDashboard
+    def test_status_surface_shows_experience_view(self, rsi_probe_factory):
+        """经验族视图必须有读点（工单 012 删除 dashboard 后，读点 = `get_status()`）。
 
-        m = RSIMetrics()
+        原用例经 `RSIDashboard.get_overview()` 读，那条路径生产零实例化——
+        断言换成从编排器的状态面读，断言强度不减（rows/unevidenced_ratio 照旧）。
+        """
+        probe = rsi_probe_factory(rsi_phase=2)
+        m = probe.orchestrator.metrics
         m.record_metric(RSIMetrics.EXPERIENCE_ROWS, 2)
         m.record_metric(RSIMetrics.EXPERIENCE_UNEVIDENCED_RATIO, 0.5)
         m.record_metric(RSIMetrics.EXPERIENCE_HIT_RATE, 0.0)
         m.record_metric(RSIMetrics.EXPERIENCE_ADOPTION_SUCCESS_RATE, 0.0)
-        view = RSIDashboard(m, ConvergenceAnalyzer()).get_overview()
-        assert view["experience"]["rows"] == 2
-        assert view["experience"]["unevidenced_ratio"] == 0.5
-        assert "alerts" in view
+
+        view = probe.orchestrator.get_status()
+        assert view["metrics"]["experience"]["rows"] == 2
+        assert view["metrics"]["experience"]["unevidenced_ratio"] == 0.5
+        assert "alerts" in view["metrics"]

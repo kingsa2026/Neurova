@@ -414,26 +414,18 @@ class TestObservationSurface:
         assert summary["phase_verdict"]["state"] == "unevidenced", summary
         assert "experience_quality" in summary["phase_verdict"]["reason"], summary
 
-    def test_negative_screen_shows_why_promotion_is_blocked(self, rsi_probe_factory):
-        """被经验质量卡住要能在推送面读出来，否则运维只看见「停在 2 且没人知道为什么」。"""
-        from neurova.evolution.rsi.result_summary import summarize_rsi_result
-        from neurova.notifications.negative_screen import (
-            NegativeScreenConfig,
-            NegativeScreenPusher,
-        )
+    def test_status_surface_shows_why_promotion_is_blocked(self, rsi_probe_factory):
+        """被经验质量卡住要能在状态面读出来，否则运维只看见「停在 2 且没人知道为什么」。
 
+        工单 012 把读点从 `push_rsi_result`（生产零调用方，已删）换成
+        `orchestrator.get_status()` —— 断言强度不减：仍是"受阻原因必须可达人"。
+        """
         probe = rsi_probe_factory(rsi_phase=2)
         _age_the_install(probe)
-        summary = summarize_rsi_result(probe.orchestrator.run_iteration())
+        probe.orchestrator.run_iteration()
 
-        pusher = NegativeScreenPusher()
-        config = NegativeScreenConfig(user_id="u1", auth_code="code", enabled=True)
-        with patch.object(
-            pusher, "push_task", new=AsyncMock(return_value=MagicMock(success=True))
-        ) as push:
-            asyncio.run(pusher.push_rsi_result(config, summary))
+        verdict = probe.orchestrator.get_status()["phase_verdict"]
 
-        content = push.call_args.kwargs["task_content"]
-        assert "experience_quality" in content, "晋升受阻原因未进推送面"
-        assert content.index("experience_quality") < content.index("### 迭代结果"), (
-            "判据结论要进「迭代信息」区，不是只躺在末尾的 raw JSON 里")
+        assert verdict["state"] == "unevidenced", verdict
+        assert "experience_quality" in verdict["reason"], (
+            f"晋升受阻原因未进状态面：{verdict['reason']!r}")
