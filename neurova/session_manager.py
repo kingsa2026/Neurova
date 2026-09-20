@@ -229,12 +229,42 @@ class SessionManager(SessionRepository):
         return agent_dir
 
     def _get_session_file(self, agent_id: str, session_id: str, date: str = None) -> Path:
-        """获取session文件路径"""
+        """获取session文件路径（外部 id 先归一，老库源名兜底）。
+
+        归一在写侧只算一次；读侧（``_find_session_files``）再看源名，因为冒号在 POSIX
+        本是合法文件名，升级后若只认新名，频道历史就读丢了。
+        """
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
 
         agent_dir = self._get_session_dir(agent_id)
-        return agent_dir / f"session_{session_id}_{date}.json"
+        raw = str(session_id)
+        key = normalize_store_key(raw)
+        target = agent_dir / f"session_{key}_{date}.json"
+        if key != raw:
+            legacy = agent_dir / f"session_{raw}_{date}.json"
+            if legacy.exists() and not target.exists():
+                return legacy
+        return target
+
+    @staticmethod
+    def _find_session_files(agent_dir: Path, session_id: str) -> List[Path]:
+        """按会话号取全部日期文件——字面匹配，不走 glob 模式。
+
+        源 id 可能带 [ ] * ? 这些 fnmatch 元字符（按 id 拼模式会误配也漏配），而冒号在
+        Windows 根本不成其为文件名。归一名与源名都找，谁有结果用谁。
+        """
+        candidates = [normalize_store_key(str(session_id)), str(session_id)]
+        seen: List[Path] = []
+        by_name = {}
+        for path in sorted(agent_dir.glob("session_*.json")):
+            by_name.setdefault(path.name, path)
+        for candidate in dict.fromkeys(candidates):
+            prefix = f"session_{candidate}_"
+            for name, path in by_name.items():
+                if name.startswith(prefix) and path not in seen:
+                    seen.append(path)
+        return seen
 
     def _get_archived_dir(self, agent_id: str) -> Path:
         """获取agent的存档目录（sessions/{agent_id}/archived/）。
@@ -318,7 +348,7 @@ class SessionManager(SessionRepository):
         archived_dir = self._get_archived_dir(agent_id)
 
         moved = 0
-        for file_path in agent_dir.glob(f"session_{session_id}_*.json"):
+        for file_path in self._find_session_files(agent_dir, session_id):
             try:
                 file_lock = self._get_file_lock(file_path)
                 with file_lock:
@@ -343,7 +373,7 @@ class SessionManager(SessionRepository):
         archived_dir = self._get_archived_dir(agent_id)
 
         moved = 0
-        for file_path in archived_dir.glob(f"session_{session_id}_*.json"):
+        for file_path in self._find_session_files(archived_dir, session_id):
             try:
                 file_lock = self._get_file_lock(file_path)
                 with file_lock:
@@ -751,13 +781,13 @@ class SessionManager(SessionRepository):
     def get_sessions_by_id(self, agent_id: str, session_id: str) -> List[str]:
         """获取指定session_id的所有日期文件路径"""
         agent_dir = self._get_session_dir(agent_id)
-        return [str(fp) for fp in agent_dir.glob(f"session_{session_id}_*.json")]
+        return [str(fp) for fp in self._find_session_files(agent_dir, session_id)]
 
     def _get_session_data_list(self, agent_id: str, session_id: str) -> List[Dict[str, Any]]:
         """获取指定session_id的所有日期文件数据"""
         agent_dir = self._get_session_dir(agent_id)
         sessions = []
-        for file_path in agent_dir.glob(f"session_{session_id}_*.json"):
+        for file_path in self._find_session_files(agent_dir, session_id):
             session_data = self._read_session_file(file_path)
             if session_data:
                 sessions.append(session_data)
@@ -850,7 +880,7 @@ class SessionManager(SessionRepository):
         else:
             # 删除所有日期的文件
             deleted_count = 0
-            for file_path in agent_dir.glob(f"session_{session_id}_*.json"):
+            for file_path in self._find_session_files(agent_dir, session_id):
                 try:
                     file_lock = self._get_file_lock(file_path)
                     with file_lock:
@@ -1139,7 +1169,7 @@ class SessionManager(SessionRepository):
             for agent_dir in self._sessions_dir.iterdir():
                 if not agent_dir.is_dir():
                     continue
-                matches = sorted(agent_dir.glob(f"session_{session_id}_*.json"))
+                matches = self._find_session_files(agent_dir, session_id)
                 if not matches:
                     continue
                 # 最新日期文件为代表（与 _collect_summaries 口径一致）
@@ -1430,7 +1460,7 @@ class SessionManager(SessionRepository):
         指纹失配 → 读路径回退重建。零 JSON 解析，仅 stat。
         """
         total = 0
-        for fp in agent_dir.glob(f"session_{session_id}_*.json"):
+        for fp in self._find_session_files(agent_dir, session_id):
             try:
                 st = fp.stat()
             except OSError:
@@ -1488,7 +1518,7 @@ class SessionManager(SessionRepository):
         like = 0
         dislike = 0
         items: List[Dict[str, Any]] = []
-        for fp in sorted(agent_dir.glob(f"session_{session_id}_*.json")):
+        for fp in self._find_session_files(agent_dir, session_id):
             data = self._read_session_file(fp) if quarantine else self._read_json_plain(fp)
             if not data:
                 continue
@@ -1681,7 +1711,7 @@ class SessionManager(SessionRepository):
     def set_session_pinned(self, agent_id: str, session_id: str, pinned: bool) -> bool:
         """置顶/取消置顶 session（写入所有日期文件的 pinned 字段）。"""
         agent_dir = self._get_session_dir(agent_id)
-        file_paths = list(agent_dir.glob(f"session_{session_id}_*.json"))
+        file_paths = self._find_session_files(agent_dir, session_id)
         if not file_paths:
             logger.warning("set_session_pinned: 未找到 session_id=%s 的文件", session_id)
             return False
@@ -1747,7 +1777,7 @@ class SessionManager(SessionRepository):
     def rename_session(self, agent_id: str, session_id: str, title: str) -> bool:
         """重命名 session（写入所有日期文件的 title 字段）。"""
         agent_dir = self._get_session_dir(agent_id)
-        file_paths = list(agent_dir.glob(f"session_{session_id}_*.json"))
+        file_paths = self._find_session_files(agent_dir, session_id)
         if not file_paths:
             logger.warning("rename_session: 未找到 session_id=%s 的文件", session_id)
             return False
@@ -1802,7 +1832,7 @@ class SessionManager(SessionRepository):
     def _iter_session_files(self, agent_id: str, session_id: str) -> List[Path]:
         """按日期升序返回该 session 的所有文件（旧→新，跨日轮次定位需要）。"""
         agent_dir = self._get_session_dir(agent_id)
-        return sorted(agent_dir.glob(f"session_{session_id}_*.json"))
+        return self._find_session_files(agent_dir, session_id)
 
     def delete_round(self, agent_id: str, session_id: str, timestamp: str) -> List[Dict[str, Any]]:
         """删除一轮对话（user 消息 + 其后相邻的 assistant 回复）。
