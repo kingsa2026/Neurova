@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
@@ -37,9 +37,14 @@ router = APIRouter()
 
 
 class ConflictResolutionRequest(BaseModel):
-    """同值冲突裁决请求（仅管理员）"""
+    """冲突裁决请求（仅管理员）。两条轴的词汇不同：
+    条目侧 keep_both / supersede_old；事实侧另可 dismiss，且 supersede_old 必须带 winner_fact_id。
+    """
 
-    resolution: str = Field(..., description="keep_both=保留双条目 / supersede_old=新说法接管（旧条目入墓碑）")
+    resolution: str = Field(..., description="keep_both / supersede_old / dismiss")
+    winner_fact_id: Optional[str] = Field(
+        default=None,
+        description="事实侧 supersede_old 的胜方事实 id（必须是该冲突的成员）；条目侧忽略")
 
 
 @router.get("/public-submissions")
@@ -58,13 +63,63 @@ async def list_public_submissions(
 async def list_conflicts(
     request: Request,
     status: str = Query(default="pending", description="pending 待审 / resolved 裁决历史"),
+    axis: str = Query(default="entry", pattern="^(all|entry|fact)$",
+                      description="entry=同值条目（默认，与 016 之前的响应逐字相同）"
+                      " / fact=治理层分歧 / all=两条都要"),
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """同值冲突清单（仅管理员）：新条目与旧条目疑似「同一事实的新说法」"""
+    """冲突队列（仅管理员）。两条轴、一个队列，靠 `axis` 判别而不是混成一种形状。
+
+    默认只回 `entry`：旧调用方拿到的东西一字不改，要两侧就显式 `axis=all`。
+
+    - `entry`：新条目疑似"同一事实的新说法"（旧契约字段一字不改）。
+    - `fact`：治理层同一 (主体, 谓词) 上的分歧，带 kind / severity /
+      recommended_policy / **policy_basis** / members。
+    两条轴是两个对象（条目 vs 事实行），硬并成一张表要么丢信息要么来回翻译——
+    语义合一的口径见工单 017 的"完成状态"。
+    """
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="仅管理员可查看冲突队列")
     repo = get_repository()
-    return repo.list_conflicts(status=status)
+    rows: List[Dict[str, Any]] = []
+    if axis in ("all", "entry"):
+        rows = [dict(rec, axis="entry") for rec in repo.list_conflicts(status=status)]
+    if axis in ("all", "fact"):
+        rows += [_factConflictResponse(rec) for rec in _factStore().conflicts(status=status)]
+    return rows
+
+
+def _factStore():
+    """治理层事实库句柄（生产即权威底座库）。"""
+    from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
+
+    return get_knowledge_fact_store()
+
+
+_FACT_CONFLICT_FIELDS = ("conflict_id", "kind", "subject_key", "predicate_term_id",
+                         "member_fact_ids", "severity", "recommended_policy", "policy_basis",
+                         "status", "detected_at", "winner_fact_id")
+
+
+def _factConflictResponse(rec: Dict[str, Any]) -> Dict[str, Any]:
+    """事实侧响应：治理层字段原名透出，另加两条只为"看得懂"的派生读数。
+
+    `subject_label` 与 `members_summary` 是给治理者的，不是新权威——主体键与事实 id
+    仍然原样在响应里， UI 要用哪个都能拿到。
+    """
+    store = _factStore()
+    row = {key: rec.get(key) for key in _FACT_CONFLICT_FIELDS}
+    row["axis"] = "fact"
+    for key in ("resolution", "resolved_by", "resolved_at"):
+        if key in rec:
+            row[key] = rec.get(key)
+    subject = store.subjectFor(str(rec.get("subject_key", ""))) or {}
+    row["subject_label"] = str(subject.get("canonical_label", "") or "")
+    row["members_summary"] = [
+        "%s → %s" % (f.get("predicate_term_id", ""), f.get("object_term", ""))
+        for f in store.factsByIds(list(rec.get("member_fact_ids") or []))
+    ]
+    return row
 
 
 @router.post("/conflicts/{conflict_id}/resolve")
@@ -74,25 +129,36 @@ async def resolve_conflict(
     body: ConflictResolutionRequest = ...,
     current_user: Dict[str, Any] = Depends(get_current_user_or_service),
 ):
-    """裁决同值冲突（仅管理员）。supersede_old 会把旧条目移入墓碑（可复活）。"""
+    """裁决冲突（仅管理员）。按账本归属分派：条目侧 supersede_old 会把旧条目移入墓碑（可复活），
+    事实侧走 `KnowledgeFactStore.resolveConflict`（词汇含 dismiss）。响应如实回报分派到哪条轴。
+    """
     get_request_id(request)
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="仅管理员可裁决冲突")
     repo = get_repository()
-    try:
-        ok = repo.resolve_conflict(
-            conflict_id, body.resolution, resolved_by=str(current_user.get("user_id", ""))
-        )
-    except ValueError as e:
-        raise guard(e)
-    except LookupError as e:
-        raise guard(e)
+    actor = str(current_user.get("user_id", ""))
+    if repo.has_conflict(conflict_id):
+        try:
+            ok = repo.resolve_conflict(conflict_id, body.resolution, resolved_by=actor)
+        except ValueError as e:
+            raise guard(e)
+        except LookupError as e:
+            raise guard(e)
+        axis = "entry"
+    else:
+        try:
+            ok = _factStore().resolveConflict(conflict_id, body.resolution,
+                                             resolvedBy=actor,
+                                             winnerFactId=body.winner_fact_id)
+        except ValueError as e:
+            raise guard(e)
+        axis = "fact"
     if not ok:
         raise HTTPException(status_code=404, detail="Conflict '%s' not found or already resolved" % conflict_id)
     return {
         "code": 0,
         "message": "Conflict resolved (%s)" % body.resolution,
-        "data": {"conflict_id": conflict_id, "resolution": body.resolution},
+        "data": {"conflict_id": conflict_id, "resolution": body.resolution, "axis": axis},
     }
 
 

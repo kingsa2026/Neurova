@@ -733,6 +733,26 @@ export default {
     expires: '有効期限',
     metadata: 'メタデータ',
   },
+  conflictAxis: {
+    entry: '重複エントリ',
+    fact: 'ガバナンス上の対立',
+  },
+  conflictKind: {
+    value: '値',
+    qualifier: '修飾',
+    type: '型',
+    temporal: '時効',
+    cardinality: '基数',
+  },
+  conflictPolicyKind: {
+    mostRecent: '最新優先',
+    highestConfidence: '最高信頼',
+    credibilityWeighted: '主張数重視',
+    keepBoth: '双方維持',
+    manual: '人間判断',
+  },
+
+
   knowledge: {
     scopeAll: 'すべて',
     scopePublic: '公開ライブラリ',
@@ -765,6 +785,12 @@ export default {
     conflictSimilarity: '類似度 {score}%',
     conflictKeepBoth: '両方保持',
     conflictSupersede: '新説で置換',
+    conflictDismiss: '衝突でない',
+    conflictPickWinner: '優位な説明を選ぶ',
+    conflictMembers: '対立する説明：{members}',
+    conflictSeverity: '深刻度 {score}%',
+    conflictPolicy: '推奨方針：{policy}',
+    conflictNoBasis: '根拠なし · 人が勝者を選ぶ必要があります',
     conflictResolved: '裁决済み',
     tombstones: 'ナレッジ墓碑',
     tombstoneEmpty: '削除された項目はありません',

@@ -745,6 +745,24 @@ export default {
     expires: '过期时间',
     metadata: '元数据',
   },
+  conflictAxis: {
+    entry: '同值条目',
+    fact: '治理层分歧',
+  },
+  conflictKind: {
+    value: '取值分歧',
+    qualifier: '限定分歧',
+    type: '类型分歧',
+    temporal: '时效分歧',
+    cardinality: '基数分歧',
+  },
+  conflictPolicyKind: {
+    mostRecent: '按新近',
+    highestConfidence: '按置信',
+    credibilityWeighted: '按断言支持',
+    keepBoth: '保留双方',
+    manual: '转人工',
+  },
   knowledge: {
     scopeAll: '全部可见',
     scopePublic: '公共库',
@@ -777,6 +795,13 @@ export default {
     conflictSimilarity: '相似度 {score}%',
     conflictKeepBoth: '保留双条',
     conflictSupersede: '新说法接管',
+    conflictDismiss: '判为不冲突',
+    conflictPickWinner: '选择胜方说法',
+    conflictMembers: '分歧说法：{members}',
+    conflictSeverity: '严重度 {score}%',
+    conflictPolicy: '建议策略：{policy}',
+    conflictNoBasis: '无依据 · 须人工指明胜方',
+
     conflictResolved: '已裁决',
     tombstones: '知识墓碑',
     tombstoneEmpty: '没有被删除的条目',

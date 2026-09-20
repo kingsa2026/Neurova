@@ -733,6 +733,26 @@ export default {
     expires: 'समाप्ति',
     metadata: 'मेटाडेटा',
   },
+  conflictAxis: {
+    entry: 'डुप्लिकेट प्रविष्टि',
+    fact: 'गवर्नेंस संघर्ष',
+  },
+  conflictKind: {
+    value: 'मान',
+    qualifier: 'क्वालिफायर',
+    type: 'प्रकार',
+    temporal: 'समय',
+    cardinality: 'कार्डिनलिटी',
+  },
+  conflictPolicyKind: {
+    mostRecent: 'नवीनतम',
+    highestConfidence: 'उच्चतम विश्वास',
+    credibilityWeighted: 'कथन भारित',
+    keepBoth: 'दोनों रखें',
+    manual: 'मानव निर्णय',
+  },
+
+
   knowledge: {
     scopeAll: 'सभी दृश्यमान',
     scopePublic: 'सार्वजनिक',
@@ -765,6 +785,12 @@ export default {
     conflictSimilarity: 'समानता {score}%',
     conflictKeepBoth: 'दोनों रखें',
     conflictSupersede: 'पुराने को बदलें',
+    conflictDismiss: 'संघर्ष नहीं',
+    conflictPickWinner: 'विजेता वक्तव्य चुनें',
+    conflictMembers: 'परस्परविरोधी वक्तव्य: {members}',
+    conflictSeverity: 'गंभीरता {score}%',
+    conflictPolicy: 'अनुशंसित नीति: {policy}',
+    conflictNoBasis: 'आधारहीन · मानव को चुनना होगा',
     conflictResolved: 'निर्णीत',
     tombstones: 'ज्ञान समाधि',
     tombstoneEmpty: 'कोई हटाई गई प्रविष्टि नहीं',

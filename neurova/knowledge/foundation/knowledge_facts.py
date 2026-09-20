@@ -810,20 +810,41 @@ class KnowledgeFactStore:
     def conflictWinner(self, conflictId: str) -> Optional[str]:
         return self._conflictRow(conflictId).get("winner_fact_id")
 
-    def resolveConflict(self, conflictId: str, resolution: str, resolvedBy: str = "") -> bool:
+    def resolveConflict(self, conflictId: str, resolution: str, resolvedBy: str = "",
+                        winnerFactId: Optional[str] = None) -> bool:
+        """人工裁决一条治理层分歧。
+
+        `supersede_old` 不只是记一笔：它必须真把败方退出活动集——否则队列清空了而两条
+        矛盾事实还在同时进上下文，那是假干净。因此这种裁决要求显式指明胜方，
+        且胜方必须是本条冲突的成员事实。
+        """
         if resolution not in MANUAL_RESOLUTIONS:
             raise ValueError("未知裁决: %r（有效值: %s）" % (resolution, " / ".join(MANUAL_RESOLUTIONS)))
+        winner = str(winnerFactId or "").strip()
+        if resolution == "supersede_old" and not winner:
+            raise ValueError("supersede_old 需要 winner_fact_id：得有人指明哪条说法胜出")
         with self._lock, self._conn:
             row = self._conn.execute(
-                "SELECT status FROM knowledge_conflicts WHERE conflict_id = ?", (conflictId,)
+                "SELECT status, member_fact_ids_json FROM knowledge_conflicts"
+                " WHERE conflict_id = ?", (conflictId,)
             ).fetchone()
             if row is None or row["status"] != "pending":
                 return False
+            members = json.loads(row["member_fact_ids_json"] or "[]")
+            if resolution == "supersede_old" and winner not in members:
+                raise ValueError("winner_fact_id 必须是本冲突的成员事实之一: %r" % winner)
             self._conn.execute(
                 "UPDATE knowledge_conflicts SET status = 'resolved', resolution = ?,"
-                " resolved_by = ?, resolved_at = ? WHERE conflict_id = ?",
-                (resolution, str(resolvedBy or ""), _now(), conflictId),
+                " resolved_by = ?, resolved_at = ?, winner_fact_id = COALESCE(?, winner_fact_id)"
+                " WHERE conflict_id = ?",
+                (resolution, str(resolvedBy or ""), _now(), winner or None, conflictId),
             )
+            for member in members:
+                if resolution != "supersede_old" or member == winner:
+                    continue
+                fact = self.fact(member)
+                if fact and fact.get("status") == "active":
+                    self.supersede(winner, member, reason="conflict manual_resolved")
         return True
 
     def _conflictRow(self, conflictId: str) -> Dict[str, Any]:
