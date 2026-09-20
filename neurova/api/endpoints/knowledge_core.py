@@ -247,6 +247,22 @@ async def get_foundation_usage(
     return get_knowledge_fact_store().usageMetrics()
 
 
+@router.get("/foundation/integrity")
+async def get_foundation_integrity(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user_or_service),
+):
+    """溯源链完整性巡检（只读，工单 023 / G02）。
+
+    只报实况不动数据：改写任何一条断言都会在这里露出来，并指到具体活动与第几跳；
+    `unlinked` 是"上链之前写的行"这一维没依据，不等于被篡改。
+    """
+    from neurova.knowledge.foundation import get_knowledge_fact_store
+    from neurova.knowledge.foundation.digest_chain import ActivityDigestChain
+
+    return ActivityDigestChain(get_knowledge_fact_store()).verify()
+
+
 @router.get("/{knowledge_id}/revisions")
 async def list_knowledge_revisions(
     request: Request,

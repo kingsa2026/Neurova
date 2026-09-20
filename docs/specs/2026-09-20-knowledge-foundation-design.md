@@ -223,7 +223,7 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 - `knowledge_assertions`：`assertion_id`、`fact_id`、`actor_type`（agent / user / pipeline / importer）、`actor_id`、`activity_id`、`medium_ref`（`ingest_queue` 的 `source` 列值 / URL / session id）、`statement_text`、`asserted_at`、`weight`、`verification_state`。
 - `knowledge_activities`：`activity_id`、`activity_kind`（admit / normalize / extract / resolve / adjudicate / import / derive / retract）、`started_at`、`finished_at`、`inputs_json`、`outputs_json`、`basis`、`tool_version`。`admit` 为实施期补：咽喉若不建活动，"经哪条管线进来"这一维对直写路径恒空。
 - `knowledge_derivation_edges`：`derived_fact_id`、`premise_fact_id`、`derivation_id`、`rule_id`、`derivation_kind`。
-- `knowledge_lineage_heads`：`head_id`、`scope`（entry / activity / global）、`last_seq`、`last_digest`、`updated_at`。
+- `knowledge_lineage_heads`：`head_id`、`scope`（entry / activity / global）、`last_seq`、`last_digest`、`updated_at`。（023 实施复核：另存滚动 `head_digest` 一列——只有 `last_digest` 的话，删掉尾巴再改 `last_seq` 就自洽了，滚动折叠才拦得住"截链"；`knowledge_assertions` 相应加 `seq` / `digest` / `prev_digest`，链在 `insertAssertion` 内与插入同事务落。）
 
 **治理层 `knowledge_conflicts`**
 `conflict_id`、`kind`、`subject_key`、`predicate_term_id`、`member_fact_ids_json`、`severity`、`recommended_policy`、`policy_basis`、`status`（pending / auto_resolved / resolved / dismissed）、`detected_at`、`resolved_at`、`resolution`、`resolved_by`。
@@ -589,7 +589,8 @@ _open_chat_browser → webbrowser.open`（该函数在别的用例里被 patch �
 | 012 / 013 / 014 / 016 / 017 | 完成 | TKG 分支读底座（13 例）、图检索器进链 priority 27（12 例）、主路末端精排可关闸（13 例，量过才翻）、冲突队列接新表 + 三套实现合一（6 例 + 前端 5 例） |
 | 020 / 021 / 022 | 完成 | 类型系统进表 + 五条入库校验接咽喉段3（12 例）；Datalog 片段前向链、推导经咽喉写入（10 例）；推导账本与精确撤销、链尾 v10（11 例） |
 | 018 | 完成 | `TemporalKGMemoryBridge` 整类删除（-218 行，grep 零调用方）；图谱类型收编进 `ontology_terms`，枚举退读兼容层，节点复用以 006 消解段为准（15 例） |
-| 023 / 024 | 未开工 | 见工单索引"进度" |
+| 023 | 完成 | 链尾 v11：断言按活动上链（`seq`+`digest`+滚动 `head_digest`），六种断裂各有其名且指位；巡检端点 `/foundation/integrity`；生产 92 条断言副本先验后补链，链上 92 / 断裂 0（13 + 4 例） |
+| 024 | 未开工 | 见工单索引"进度" |
 
 `tests/unit/knowledge/` 543 passed（起点基线 265）。019b-4b 的爆炸半径口径：
 条目 / 向量 / 评测 / api 消费方一起跑 488 passed、46 skipped、0 failed。
