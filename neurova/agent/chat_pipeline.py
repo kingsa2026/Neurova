@@ -870,7 +870,7 @@ class ChatPipeline:
             registry = getattr(self._agent, "_skill_registry", None)
             if registry is None or not getattr(registry, "has_skill", lambda _n: False)(skill_name):
                 return
-            raw = registry.skills.get(skill_name)
+            raw = registry.get_skill(skill_name)
             if raw is None:
                 return
             from neurova.skill_system.compat import unpack_skill

@@ -939,12 +939,11 @@ class ToolExecutor:
         _funnel_id = skill_name
         _funnel_applied = False
         try:
-            # 获取 Skill——经 Protocol 只读视图（skill_system.SkillRegistryProtocol
-            # 正典面）。原 get_skill() 不在接口内：对纯 Protocol 注册表拿到协程
-            # 对象恒真绕过存在检查、`.execute` 于协程上 AttributeError 被吞、
-            # 且绕开 execute_skill 丢失 before/after 生命周期事件（残留处理
-            # 2026-09-13 根治，防回归=AsyncMock 契约测试必踩此面）。
-            skill = self._skill_registry.skills.get(skill_name)
+            # 获取 Skill——经协议声明的唯一取键口 get_skill（工单 014）。
+            # 此处曾直接 `skills.get(skill_name)`：只认 name 的第二套键域，
+            # 进化侧按身份键（skill_id）点名时恒判"不存在"。类 B 退役后
+            # "get_skill 可能是协程"的歧义不再存在（残留处理 2026-09-13）。
+            skill = self._skill_registry.get_skill(skill_name)
             if not skill:
                 _p, _o = _prov(skill_name)
                 record_turn_skill_funnel(skill_name, applied=False, ok=False, pool=_p, owner_key=_o)
