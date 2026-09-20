@@ -1696,6 +1696,28 @@ Task 8 的两项后来按"先可逆、再收口"做完（2026-09-20 第三轮）
 未做：`dsh_session` 仍是指纹无转换器（无样本无在盘源码）；Hermes/OpenClaw 两家的真库往返要等
 本机出现真实导出或装过这两家的机器。
 
+## 第五轮补做（同日，记忆面从 0 到 1）
+
+前四轮里 `memories.jsonl` 一直是空文件——`write_bundle` 把它硬写成 `""`、`counts.memories` 恒为 0，
+所以 `MemoryManager.import_memories` 这条咽喉修好了却没人喂。本轮把这一段接上：
+
+1. **落包机制**（`bundle/writer.py`）：`write_bundle(..., memories=())` 才有的那半支族终于能写；
+   计数按实给。`MemoryRecord.tags` 补上与 `TranscriptRecord.content_blocks` 同一条归一规则
+   （包内读回是 list、内存构造是 tuple，不归一幂等比对就漏判重复导入）。
+2. **openclaw 记忆索引**（同一支 store 的第二族记录，不另立指纹——另立会让一个库两族互判"冲突"）：
+   正文取 `memory_index_chunks.text`，`source` 两值映射 memory_type/category，`origin_class` 逐字
+   透传（与 `MemoryOrigin` 同词），importance 1-10 定标到 0-100、缺档用本系统默认 50，
+   path+行号成 `source_ref`、`supersedes_key` 成 `supersedes`；向量/哈希/嵌入模型按"源侧派生索引、
+   本系统自算"申报条数。**没记出处的 chunk 整条不导并申报**——origin 是信任级，抬高了会经记忆
+   链路毒化上下文，宁缺不错。
+3. **闭环证据**：`test_converted_memories_apply_and_undo` 从源库直转直落，验的是翻译对了没有
+   （origin 的词、importance 的尺度、ts 的格式在转换器里都不会报错，只有落库时才暴露），撤销
+   后一条不剩。活体验证用上游 schema 原文建库（STRICT 表 + CHECK 约束）：1 事件 + 2 记忆、
+   无出处那条如期被申报掉。
+
+未做：其余六族仍只导会话；只有记忆索引、没有会话事件表的库 detect 认不出（指纹按会话表立），
+无样本暂不立指纹。
+
 ---
 
 ## Self-Review 结论
