@@ -61,7 +61,6 @@ from neurova.agent_core import Agent, AgentConfig
 memory_agent = MemoryAgent(agent_ref)
 memory_agent.init_memory_modules(neuser_id, user_id)
 memories = memory_agent.retrieve_memories(user_input)
-experience = memory_agent.unified_experience_recall(user_input)
 memory_agent.update_history(user_input, reply)
 memory_agent.save_conversation_memory(user_input, reply)
 ```

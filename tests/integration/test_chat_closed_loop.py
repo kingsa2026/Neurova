@@ -231,7 +231,6 @@ class TestClosedLoopIntegration:
             'update_memory_temperature',
             'get_memory_stats',
             'retrieve_memories',
-            'unified_experience_recall',
         ]
 
         mock_agent = Mock()
