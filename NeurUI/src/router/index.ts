@@ -454,6 +454,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/pages/SettingPage.vue'),
       },
       {
+        path: 'rsi-governance',
+        name: 'RsiGovernance',
+        component: () => import('@/pages/RsiGovernancePage.vue'),
+      },
+      {
         path: 'my-credentials',
         name: 'MyCredentials',
         component: () => import('@/pages/MyCredentialsPage.vue'),
