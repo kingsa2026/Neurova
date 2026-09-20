@@ -212,7 +212,7 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 `subject_key` PK、`canonical_label`、`type_term_id`→`ontology_terms`、`aliases_json`、`first_seen_at`、`merged_into`（自指链，收敛后禁止悬空）、`status`。吸收 `manager.py:66` 的 `aliases` 语义。
 
 **事实层 `knowledge_facts`**
-以 `temporal_knowledge_graph.py:181-196` 形状为骨架：`fact_id`、`subject_key`、`predicate_term_id`、`object_term`、`relation_kind`（literal / entity）、`qualifier_json`、`confidence`、`evidence_state`、`status`、`supersedes_fact_id`、`contradicted_by_json`、`valid_from`、`valid_until`、`recorded_at`、`retracted_at`；沿用 EKB 词汇：`assertions_json`、`source_turn_id`、`injected_count`、`last_injected_at`、`adoption_outcome`；新增 `assertion_count`、`latest_adoption_outcome`。（实施复核：`contradicted_at` 未建列——矛盾时刻由 `knowledge_conflicts.detected_at` 承载，不重复存一份。）
+以 `temporal_knowledge_graph.py:181-196` 形状为骨架：`fact_id`、`subject_key`、`predicate_term_id`、`object_term`、`relation_kind`（literal / entity）、`qualifier_json`、`confidence`、`evidence_state`、`status`、`supersedes_fact_id`、`contradicted_by_json`、`valid_from`、`valid_until`、`recorded_at`、`retracted_at`；沿用 EKB 词汇：`assertions_json`、`source_turn_id`、`injected_count`、`last_injected_at`、`adoption_outcome`；新增 `assertion_count`、`latest_adoption_outcome`。（019b-1 又加 `record_kind`：`triple` / `narrative`，默认 `triple` 让既有行零改写。）（实施复核：`contradicted_at` 未建列——矛盾时刻由 `knowledge_conflicts.detected_at` 承载，不重复存一份。）
 
 **两列三值的分工（工单 008 实施中定清，原工单文本把两件事混写了）**：
 `evidence_state` 是 `NOT NULL DEFAULT 'unevidenced'` 的显式三值（evidenced / unevidenced / failed），
@@ -256,6 +256,7 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 | `neurova/knowledge/foundation/conflict_judge.py` | `KnowledgeConflictJudge` |
 | `neurova/knowledge/foundation/redundancy.py` | `RedundancyAudit`（只读冗余审计，004） |
 | `neurova/knowledge/foundation/narratives.py` | `NarrativeStore`（叙述层入库，019a） |
+| `neurova/knowledge/foundation/foundation_schema.py` | 本域迁移链单主（版本域=库文件=一条注册序） |
 | `neurova/knowledge/identity/entity_blocking.py` | `EntityBlockingResolver` |
 | `neurova/knowledge/identity/similarity_fusion.py` | `SimilarityFusion` |
 | `neurova/knowledge/identity/identity_merger.py` | `IdentityMerger` |
@@ -304,6 +305,19 @@ B06 与已完成的经验库修复同型：EKB 侧的对应列已在 `experience
 所以这不是"少一条对账判据"，是咽喉被拆成了两个。修法：`admission.productionAdmissionGate(store, toolVersion=…)`
 成为唯一造门入口，未接通的段由 `pendingSegments()` 如实报出而不是靠少传参数制造假接通；
 常驻判据见 `tests/unit/knowledge/test_gate_wiring_parity.py`。
+
+**记录种类（工单 019b-1 补）**：咽喉认两种记录——`triple`（主体-谓词-客体）与
+`narrative`（一条知识文档）。条目走咽喉不是为了被伪造成三元组，是为了拿到它以前没有的
+四件东西：内容身份、消解后的主体、断言与活动、由断言聚合的置信度。因此叙述记录的谓词由
+咽喉固定（`documented_as`）、客体就是条目的 `knowledge_id`、**事实行有意不存正文**
+（正文唯一副本在 `knowledge_narratives.payload_json`，事实行只带指纹与治理字段）。
+代价是一个刻意的中间态：`searchableFacts()` 默认不收叙述行（收进来就是一池空文本），
+两池真正合成一池要等 019b-3 把"按 `object_term` 回查正文"接上。
+
+**迁移链单主（实施期立的结构约束）**：一个 SQLite 文件只有一个 `user_version`，
+⇒ 一个库 = 一个版本域 = 一条注册序。本域的表分散在多个模块，注册必须由
+`foundation/foundation_schema.py` 单主集中完成（SQL 仍由各模块持有），否则后注册的
+低版本会在导入期被判"版本必须严格递增"直接抛错。往本域加迁移只改那一个文件。
 
 ---
 
@@ -494,9 +508,10 @@ E2 出口判据要求：**要么该用例修好，要么给出可控的超时口
 | 015 双写对账 | 完成（019a 期间补判据并重做） | 真数据 130 行 → 预测 92 = 实跑 92 = backfill 92；主体 87 三方同数（原先 backfill 88，根因是造门各自装配） |
 | 011 读路径切底座 | **实施后判负，留在关闸态** | 开闸 recall@5 0.7604 / MRR 0.8111 / 未命中 0.167，劣于基线；见 §8.0 |
 | 019a 叙述层入库 | 完成 | 19 用例 + 真数据对等（读数三位相同，见 §8.1 口径）；默认关闸 |
-| 012 / 013 / 014 / 016 / 017 / 018 / 019b / E4 | 未开工 | 011 否证后落点改变，见工单索引"进度" |
+| 019b-1 记录种类进咽喉 | 完成 | 14 用例 + 真数据三方同数（92/87 一字未动）；底座库 6.26MB→4.24MB |
+| 019b-2/3 条目写路径转调与读面合一 | 未开工 || 012 / 013 / 014 / 016 / 017 / 018 / 019b / E4 | 未开工 | 011 否证后落点改变，见工单索引"进度" |
 
-`tests/unit/knowledge/` 485 passed（起点基线 265）。
+`tests/unit/knowledge/` 486 passed（起点基线 265）。
 新增常驻守卫 2 条：生产库写入围栏用例、pytest 收集卫生守卫
 （`test_pytest_collection_hygiene.py`——实施期三次把用例写成 `def testXxx` 导致整份文件静默不跑）。
 迁移链守卫 `test_everyTableExistsAfterMigrationChain` 随 v4 一并抬到 `user_version == 4`，

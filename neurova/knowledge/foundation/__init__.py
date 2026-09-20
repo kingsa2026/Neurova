@@ -1,6 +1,13 @@
-"""知识底座（foundation）：唯一权威事实源与唯一写咽喉。"""
+"""知识底座（foundation）：唯一权威事实源与唯一写咽喉。
 
+迁移链由 `foundation_schema` 单主注册（同一版本域内 `register_migration` 要求严格递增，
+分散在多个模块注册会在导入期互撞）。
+"""
+
+from .narratives import FOUNDATION_DB_NAME, NarrativeStore
 from .admission import (
+    NARRATIVE_PREDICATE,
+    RECORD_KINDS,
     AdmissionReceipt,
     AdmissionRequest,
     AdmissionSegmentMissing,
@@ -18,12 +25,13 @@ from .knowledge_facts import (
 )
 from .conflict_judge import CONFLICT_KINDS, RESOLUTION_POLICIES, KnowledgeConflictJudge
 from .lineage import ACTIVITY_KINDS, ACTOR_TYPES, KnowledgeLineageLedger
-from .narratives import FOUNDATION_DB_NAME, NarrativeStore
 from .reconcile import FoundationReconciler
 from .redundancy import RedundancyAudit
 
 __all__ = [
     "AdmissionReceipt",
+    "NARRATIVE_PREDICATE",
+    "RECORD_KINDS",
     "productionAdmissionGate",
     "AdmissionRequest",
     "AdmissionSegmentMissing",

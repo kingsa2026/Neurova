@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, List, Optional
 
 from neurova.core.content_identity import normalized_key as normalizedKey
@@ -24,6 +24,14 @@ SEGMENTS: tuple = (
 
 _REQUIRED_FIELDS = ("subjectLabel", "predicateTermId", "objectTerm", "content")
 
+# 记录种类（工单 019b-1）。triple 是"主体-谓词-客体"；narrative 是"一条知识文档"——
+# 它要的是内容身份、消解后的主体、断言与置信，**不是**被伪造成三元组。
+RECORD_KINDS: tuple = ("triple", "narrative")
+# 叙述记录的事实行统一挂在这个谓词下，客体就是条目的 knowledge_id。
+# 由咽喉固定而不是让调用方自由填：治理身份不能是自由文本。
+NARRATIVE_PREDICATE = "documented_as"
+_NARRATIVE_REQUIRED_FIELDS = ("subjectLabel", "objectTerm", "content")
+
 
 @dataclass
 class AdmissionRequest:
@@ -31,9 +39,10 @@ class AdmissionRequest:
 
     agentId: str
     subjectLabel: str
-    predicateTermId: str
-    objectTerm: str
-    content: str
+    predicateTermId: str = ""
+    objectTerm: str = ""
+    content: str = ""
+    recordKind: str = "triple"
     relationKind: str = "literal"
     qualifier: Dict[str, Any] = field(default_factory=dict)
     sourceTurnId: str = ""
@@ -65,6 +74,22 @@ class AdmissionSegmentMissing(RuntimeError):
         self.segments = segments
 
 
+def _normalizedRecord(request: AdmissionRequest) -> AdmissionRequest:
+    """叙述记录的治理身份由咽喉固定，且事实行不留正文副本。
+
+    - 谓词与关系种类由咽喉赋值：治理身份不能是调用方的自由文本；
+    - `content` 清空：条目的正文唯一副本在 `knowledge_narratives.payload_json`，
+      内容身份已经在上游算成 `content_key` 带下来了。在同一个库里再抄一份正文，
+      就是这次改造要消灭的那个病。
+
+    复制而不是就地改：调用方拿着同一个请求体重试时，不该看到字段被人动过。
+    """
+    if request.recordKind != "narrative":
+        return request
+    return replace(request, predicateTermId=NARRATIVE_PREDICATE,
+                   relationKind="document", content="")
+
+
 class KnowledgeAdmissionGate:
     def __init__(
         self,
@@ -91,12 +116,32 @@ class KnowledgeAdmissionGate:
             missing.append("indexing")
         return [name for name in SEGMENTS if name in missing]
 
-    def admit(self, request: AdmissionRequest, allowPendingSegments: bool = False) -> AdmissionReceipt:
-        for name in _REQUIRED_FIELDS:
-            if not str(getattr(request, name, "") or "").strip():
-                raise ValueError("admit 缺必填字段: %s" % name)
+    @staticmethod
+    def _validate(request: AdmissionRequest) -> None:
+        """必填项按记录种类判。
+
+        三元组要谓词；叙述记录不要（谓词由咽喉固定），但它必须说清自己挂在哪条
+        条目上——`object_term` 就是那个 knowledge_id。
+        """
+        kind = request.recordKind or "triple"
+        if kind not in RECORD_KINDS:
+            raise ValueError(
+                "admit 不认记录种类 record_kind=%r（可选：%s）"
+                % (kind, " / ".join(RECORD_KINDS)))
         if not str(request.agentId or "").strip():
             raise ValueError("admit 缺必填字段: agentId")
+        required = _NARRATIVE_REQUIRED_FIELDS if kind == "narrative" else _REQUIRED_FIELDS
+        for name in required:
+            if not str(getattr(request, name, "") or "").strip():
+                raise ValueError("admit 缺必填字段: %s（record_kind=%s）" % (name, kind))
+        if kind == "narrative" and request.predicateTermId \
+                and request.predicateTermId != NARRATIVE_PREDICATE:
+            raise ValueError(
+                "叙述记录的谓词由咽喉固定为 %r，不接受调用方传 %r——治理身份不是自由文本"
+                % (NARRATIVE_PREDICATE, request.predicateTermId))
+
+    def admit(self, request: AdmissionRequest, allowPendingSegments: bool = False) -> AdmissionReceipt:
+        self._validate(request)
 
         pending = self.pendingSegments()
         if pending and not allowPendingSegments:
@@ -113,6 +158,7 @@ class KnowledgeAdmissionGate:
         # 段1 内容归一：口径是抽取后内容，不是原始字节/URL 串。
         # 空键 = 没有内容身份（纯标点/空白），不参与去重，否则空写入会互相吞没。
         contentKey = normalizedKey(request.content) or None
+        request = _normalizedRecord(request)
         dupe = self._store.findFactByContentKey(request.agentId, contentKey) if contentKey else None
         if dupe:
             applied = ["content_identity"]
@@ -141,6 +187,7 @@ class KnowledgeAdmissionGate:
             qualifier=request.qualifier,
             sourceTurnId=request.sourceTurnId,
             contentKey=contentKey,
+            recordKind=request.recordKind,
             # confidence 留 None：G11 规定它只能由断言聚合得出，咽喉不代填
         )
         if lineage is not None:

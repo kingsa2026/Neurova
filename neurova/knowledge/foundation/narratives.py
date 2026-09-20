@@ -22,7 +22,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional
 
-from neurova.core.db_migration import migrate as apply_migrations, register_migration
 
 NARRATIVE_DOMAIN = "knowledge_foundation"
 FOUNDATION_DB_NAME = "knowledge_facts.db"
@@ -42,7 +41,6 @@ CREATE TABLE IF NOT EXISTS knowledge_narratives (
 CREATE INDEX IF NOT EXISTS idx_narrative_agent ON knowledge_narratives(agent_id, knowledge_id);
 CREATE INDEX IF NOT EXISTS idx_narrative_owner ON knowledge_narratives(owner_user_id, visibility);
 """
-register_migration(4, _SCHEMA_V4, domain=NARRATIVE_DOMAIN)
 
 # 一次性搬家的归档后缀：搬完的 JSON 留在原地但不复权，
 # 否则"删空后重启"会拿快照把已删条目复活。
@@ -68,7 +66,9 @@ class NarrativeStore:
         conn = sqlite3.connect(self._db_path)
         try:
             conn.row_factory = sqlite3.Row
-            apply_migrations(conn, NARRATIVE_DOMAIN)
+            from .foundation_schema import applyTo  # 惰性：链的单主注册处依赖本模块
+
+            applyTo(conn)
             yield conn
             conn.commit()
         except Exception:
