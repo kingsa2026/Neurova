@@ -191,3 +191,31 @@ class TestProjectionInvariant:
                            normalized_key(_BODY_B)) is not None
         finally:
             store2.close()
+
+
+class TestRestoreReclaims:
+    def test_restoredEntryRevivesItsGovernanceRow(self, gated):
+        """删除→恢复不能留永久分叉：条目活着而治理行停在"已收回"，投影就再不收敛。"""
+        repo, tmp_path = gated
+        item = repo.create_knowledge("default", "删了又恢复", _BODY_C, owner_user_id="u1")
+        repo.delete_knowledge("default", item["knowledge_id"], deleted_by="root")
+        assert repo.restore_knowledge(item["knowledge_id"])
+
+        store = _facts(tmp_path)
+        try:
+            fact = _active(store, "default", item["knowledge_id"], normalized_key(_BODY_C))
+            assert fact is not None, "恢复必须把那条 retracted 治理行带回 active"
+            assert store.assertions(fact["fact_id"]), "重新主张要再记一次断言"
+            assert EntryLedger(store).verifyProjection(repo._items) == []
+        finally:
+            store.close()
+
+    def test_supersededRowIsNotSilentlyRevived(self, gated):
+        """改回原样（A→B→A）不在这里定语义：宁可报分叉，也不猜哪条该生效。"""
+        repo, tmp_path = gated
+        kid = repo.create_knowledge("default", "会改回原样", _BODY_C, owner_user_id="u1")["knowledge_id"]
+        repo.update_knowledge("default", kid, {"content": _BODY_A})
+        repo.update_knowledge("default", kid, {"content": _BODY_C})
+        reopened = KnowledgeRepository(str(tmp_path / "kb"))
+        drift = reopened._projectionDrift
+        assert any(kid in d for d in drift), "A→B→A 必须被报出来，不能静默挑一条"

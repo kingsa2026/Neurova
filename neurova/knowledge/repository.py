@@ -1119,6 +1119,8 @@ class KnowledgeRepository:
             agent_id = rec.get("agent_id") or "default"
             self._items.setdefault(agent_id, []).append(rec["item"])
             del self._tombstones[knowledge_id]
+            # 恢复 = 这条说法又有人认领了，治理行必须同步回到 active（闸内）
+            self._syncEntryGovernance()
             self._save()
             self._save_tombstones()
             self._record_index_op("reindex", knowledge_id)
