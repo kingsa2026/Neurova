@@ -22,6 +22,7 @@
 | [0014](./0014-connection-pool-short-lived-only.md) | 连接池只管短连接（常驻连接不进池） | Accepted | 2026-09-18 |
 | [0015](./0015-context-pool-retention-contract.md) | ContextPool 回收契约（归档无损 + 显式常驻上限 + 读路径索引） | Accepted | 2026-09-18 |
 | [0016](./0016-rsi-parameter-source-of-truth.md) | RSI 可优化参数的事实源（四类角色各自唯一 + 边界全登记） | Accepted | 2026-09-19 |
+| [0017](./0017-skill-registry-key-domain.md) | 技能注册表键值域统一（name 与身份域归一为一次查找） | Accepted | 2026-09-20 |
 
 ## 主题分类
 
@@ -45,6 +46,7 @@
 - [ADR 0009: 统一 ExecutionStatus](./0009-unify-execution-status.md) — 4 个不兼容枚举收敛到 tool_layers/types.py
 - [ADR 0010: 统一 ToolExecutionContext](./0010-unify-tool-execution-context.md) — 2 个不兼容 dataclass 收敛 + 删除死代码
 - [ADR 0011: 统一 SkillRegistry](./0011-unify-skill-registry.md) — class A 为规范，class B re-export
+- [ADR 0017: 技能注册表键值域统一](./0017-skill-registry-key-domain.md) — name 与身份域归一为注册表内一次查找，取键口进 Protocol
 
 ### 存储层
 - [ADR 0014: 连接池只管短连接](./0014-connection-pool-short-lived-only.md) — 常驻连接（写放大优化）不进池
