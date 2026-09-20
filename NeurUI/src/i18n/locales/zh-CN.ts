@@ -3469,6 +3469,7 @@ export default {
     kindImage: '图片',
     kindAudio: '音频',
     kindVideo: '视频',
+    kindPdf: 'PDF',
     kindText: '文本',
   },
 
