@@ -20,11 +20,12 @@ import sqlite3
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.memory_ingest import probe
 from neurova.memory_ingest.bundle.manifest import BundleError, BundleManifest
 from neurova.memory_ingest.bundle.media import MediaSink
+from neurova.memory_ingest.bundle.records import MemoryRecord
 from neurova.memory_ingest.bundle.writer import (SourceEvent, ensure_offset, materialize,
                                                  write_bundle)
 from neurova.memory_ingest.converters.blocks import split_content
@@ -43,6 +44,23 @@ ROLE_KINDS = {"user": "user_message", "assistant": "assistant_message",
 RUNTIME_ROLES = ("user", "assistant", "system", "tool")
 REQUIRED_EVENT_COLUMNS = ("session_id", "seq", "event_json", "created_at")
 
+# 记忆索引三表（同一支 agent 库）：正文在 chunks，出处与召回各一张附表
+MEMORY_TABLE = "memory_index_chunks"
+PROVENANCE_TABLE = "memory_index_chunk_provenance"
+RECALL_TABLE = "memory_index_chunk_recall_metadata"
+# 源列闭集两值 → 包内 (memory_type, category)；表外值不猜映射
+SOURCE_FAMILIES = {"memory": ("semantic", "knowledge"), "sessions": ("episodic", "conversation")}
+# 出处四值与本系统 MemoryOrigin 同词，逐字透传；缺出处即跳过（信任级不猜）
+ORIGIN_CLASSES = ("owner", "agent", "untrusted", "system")
+DEFAULT_IMPORTANCE = 50.0        # 源里没打重要度时用本系统默认档，不臆造分数
+IMPORTANCE_SCALE = 10.0          # 源是 1-10，包内是 0-100
+MEMORY_REASONS = {
+    "memory:无出处": "源里没记信任级（origin_class），origin 是信任级不能猜，整条未导",
+    "memory:来源未知": "source 列出现已知两值之外的取值，不猜记忆类型映射，整条未导",
+    "memory:空正文": "该索引项没有正文，包内 content 必填，未导",
+    "memory:派生索引": "向量/内容哈希/嵌入模型属源侧派生索引，包内不搬（本系统自算）",
+}
+
 # 事件级与消息级字段的落点：表外的键一律按条数申报，不做"看起来不重要就略过"
 EVENT_LANDINGS = ("id", "type", "message", "parentId", "timestamp")
 MESSAGE_LANDINGS = ("role", "content", "summary", "timestamp", "idempotencyKey", "isError")
@@ -59,13 +77,14 @@ REASONS = {
 
 
 def convert(store: Path, out_dir: Path, *, agent_name: str) -> BundleManifest:
-    """一支 OpenClaw agent 库 → Ingest Bundle（库里多场会话落进同一支包）。"""
+    """一支 OpenClaw agent 库 → Ingest Bundle（会话与记忆索引同属这一支 store）。"""
     store, out_dir = Path(store), Path(out_dir)
     if not probe.matches_handprint(CONVERTER_NAME, store):
         raise BundleError(f"源不符合 {CONVERTER_NAME} 指纹，拒绝按这支转换器硬转：{store}")
 
     sink = MediaSink(out_dir, store=store)
     declared: Counter = Counter()
+    memory_declared: Dict[str, List[Any]] = {}
     conn = probe.read_only_connect(store)
     conn.row_factory = sqlite3.Row
     try:
@@ -79,6 +98,8 @@ def convert(store: Path, out_dir: Path, *, agent_name: str) -> BundleManifest:
             if not events:
                 continue
             by_session.setdefault(session_id, []).extend(events)
+        memories = _memory_records(conn, memory_declared)
+        tables = _table_names(conn)
     finally:
         conn.close()
 
@@ -86,11 +107,87 @@ def convert(store: Path, out_dir: Path, *, agent_name: str) -> BundleManifest:
     return write_bundle(
         out_dir, materialize(groups), agent_name=agent_name,
         source={"converter": CONVERTER_NAME, "version": CONVERTER_VERSION,
-                "verified_against": "upstream schema + transcript reader"},
-        dropped=_dropped_entries(declared),
+                "verified_against": "upstream schema + transcript reader + memory index"},
+        dropped=_dropped_entries(declared) + _declarations(memory_declared),
         stores=[{"path": str(store), "handprint": CONVERTER_NAME,
-                 "sessions": len(groups)}],
+                 "sessions": len(groups), "memory_index": MEMORY_TABLE in tables}],
+        memories=memories,
     )
+
+
+def _table_names(conn: sqlite3.Connection) -> List[str]:
+    return [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+
+
+def _memory_records(conn: sqlite3.Connection,
+                    declared: Dict[str, List[Any]]) -> List[MemoryRecord]:
+    """记忆索引 → MemoryRecord：出处决定信任，来源决定类型，两者都缺就申报不猜。"""
+    tables = set(_table_names(conn))
+    if MEMORY_TABLE not in tables:
+        return []
+    sql = _memory_sql(tables)
+    records = []
+    for row in conn.execute(sql):
+        record = _memory_record(row, declared)
+        if record is not None:
+            records.append(record)
+    return records
+
+
+def _memory_sql(tables: set) -> str:
+    """附表可以没建（老库）：缺的表按 NULL 读，"没出处"由上层申报而不是 SQL 报错。"""
+    prov_join = (f"LEFT JOIN {PROVENANCE_TABLE} AS p ON p.chunk_id = c.id"
+                 if PROVENANCE_TABLE in tables else "")
+    prov_cols = ("p.origin_class, p.session_kind, p.observed_at, p.supersedes_key"
+                 if prov_join else "NULL, NULL, NULL, NULL")
+    recall_join = (f"LEFT JOIN {RECALL_TABLE} AS m ON m.chunk_id = c.id"
+                   if RECALL_TABLE in tables else "")
+    recall_cols = "m.importance, m.triggers, m.project_key" if recall_join else "NULL, NULL, NULL"
+    return (f"SELECT c.id, c.source, c.text, c.path, c.start_line, c.end_line,"
+            f" {prov_cols}, {recall_cols} FROM {MEMORY_TABLE} AS c"
+            f" {prov_join} {recall_join} ORDER BY c.id")
+
+
+def _memory_record(row: sqlite3.Row, declared: Dict[str, List[Any]]) -> Optional[MemoryRecord]:
+    family = SOURCE_FAMILIES.get(str(row["source"] or ""))
+    if family is None:
+        _declare(declared, "memory:来源未知")
+        return None
+    origin = str(row["origin_class"] or "")
+    if origin not in ORIGIN_CLASSES:
+        _declare(declared, "memory:无出处")
+        return None
+    text = str(row["text"] or "").strip()
+    if not text:
+        _declare(declared, "memory:空正文")
+        return None
+    _declare(declared, "memory:派生索引")
+    importance = row["importance"]
+    return MemoryRecord(
+        identity_key=str(row["id"]), content=text, memory_type=family[0], category=family[1],
+        origin=origin, importance=DEFAULT_IMPORTANCE if importance is None
+        else float(importance) * IMPORTANCE_SCALE,
+        ts=_from_ms(row["observed_at"]),
+        tags=tuple(_memory_tags(row)), source_ref=f"{row['path']}#L{row['start_line']}"
+                                                  f"-L{row['end_line']}",
+        supersedes=str(row["supersedes_key"] or ""))
+
+
+def _memory_tags(row: sqlite3.Row) -> List[str]:
+    kinds = [("session_kind:" + str(row["session_kind"])) if row["session_kind"] else "",
+             ("project:" + str(row["project_key"])) if row["project_key"] else "",
+             ("trigger:" + str(row["triggers"])) if row["triggers"] else ""]
+    return [tag for tag in kinds if tag]
+
+
+def _declare(declared: Dict[str, List[Any]], field: str) -> None:
+    bucket = declared.setdefault(field, [0, MEMORY_REASONS[field]])
+    bucket[0] += 1
+
+
+def _declarations(declared: Dict[str, List[Any]]) -> List[Dict[str, Any]]:
+    return [{"field": field, "count": value[0], "reason": value[1]}
+            for field, value in sorted(declared.items()) if value[0] > 0]
 
 
 def matches_store(path: Path) -> bool:

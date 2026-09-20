@@ -38,7 +38,8 @@ def _event(event_id: str, etype: str, message: Dict[str, Any] = None,
     return json.dumps(body, ensure_ascii=False)
 
 
-def _db(tmp_path: Path, name: str = "agent.db", events=None, windows=True) -> Path:
+def _db(tmp_path: Path, name: str = "agent.db", events=None, windows=True,
+        memory=None) -> Path:
     path = tmp_path / name
     conn = sqlite3.connect(path)
     conn.execute("CREATE TABLE transcript_events (session_id TEXT NOT NULL, seq INTEGER NOT NULL,"
@@ -57,9 +58,37 @@ def _db(tmp_path: Path, name: str = "agent.db", events=None, windows=True) -> Pa
                                               "content": [{"type": "text", "text": "跑一下"}]}),
                           1787791388521),
                      ])
+    _memory_tables(conn, memory)
     conn.commit()
     conn.close()
     return path
+
+
+def _memory_tables(conn, memory) -> None:
+    """按上游建表语句的列集建记忆索引三表（chunks 是正文，出处与召回各一张附表）。"""
+    if memory is None:
+        return
+    conn.execute("CREATE TABLE memory_index_chunks (id TEXT PRIMARY KEY, path TEXT NOT NULL,"
+                 " source TEXT NOT NULL DEFAULT 'memory', start_line INTEGER NOT NULL,"
+                 " end_line INTEGER NOT NULL, hash TEXT NOT NULL, model TEXT NOT NULL,"
+                 " text TEXT NOT NULL, embedding TEXT NOT NULL, updated_at INTEGER NOT NULL)")
+    conn.execute("CREATE TABLE memory_index_chunk_provenance (chunk_id TEXT PRIMARY KEY,"
+                 " origin_class TEXT NOT NULL, session_kind TEXT NOT NULL,"
+                 " observed_at INTEGER NOT NULL, supersedes_key TEXT)")
+    conn.execute("CREATE TABLE memory_index_chunk_recall_metadata (chunk_id TEXT PRIMARY KEY,"
+                 " importance INTEGER, triggers TEXT, project_key TEXT)")
+    conn.executemany("INSERT INTO memory_index_chunks VALUES (?,?,?,?,?,?,?,?,?,?)",
+                     memory.get("chunks", []))
+    conn.executemany("INSERT INTO memory_index_chunk_provenance VALUES (?,?,?,?,?)",
+                     memory.get("provenance", []))
+    conn.executemany("INSERT INTO memory_index_chunk_recall_metadata VALUES (?,?,?,?)",
+                     memory.get("recall", []))
+
+
+def _chunk(chunk_id: str, text: str, *, source: str = "memory", path: str = "memory/笔记.md",
+           lines=(3, 9), at: int = 1787791388521) -> tuple:
+    return (chunk_id, path, source, lines[0], lines[1], "hash-" + chunk_id, "embed-model",
+            text, "W1sxdGlu", at)
 
 
 def _rows(out: Path) -> Dict[str, Dict[str, Any]]:
@@ -252,3 +281,120 @@ def test_refuses_foreign_store(tmp_path: Path):
 
 def test_is_routable_by_handprint_name():
     assert CONVERTERS[CONVERTER_NAME] is convert
+
+
+def _memories(out: Path):
+    return [json.loads(x) for x in (out / "memories.jsonl").read_text(
+        encoding="utf-8").splitlines() if x.strip()]
+
+
+def test_memory_index_chunks_land_as_memories(tmp_path: Path):
+    """同属一支 store 的两族记录：会话从事件表来，记忆从索引表来，一支包两样都装。"""
+    memory = {"chunks": [_chunk("ck1", "用户偏好中文回复")],
+              "provenance": [("ck1", "owner", "interactive", 1787791388521, None)],
+              "recall": [("ck1", 8, "回复语言", "proj-a")]}
+
+    manifest = convert(_db(tmp_path, memory=memory), tmp_path / "bundle", agent_name="x")
+    row = _memories(tmp_path / "bundle")[0]
+
+    assert validate_bundle(tmp_path / "bundle") == []
+    assert manifest.counts["memories"] == 1 and manifest.counts["transcripts"] == 1
+    assert row["identity_key"] == "ck1" and row["content"] == "用户偏好中文回复"
+    assert row["origin"] == "owner" and row["importance"] == 80.0
+    assert row["memory_type"] == "semantic" and row["category"] == "knowledge"
+    assert row["source_ref"] == "memory/笔记.md#L3-L9"
+    assert row["ts"].endswith("+00:00")
+    assert "session_kind:interactive" in row["tags"] and "project:proj-a" in row["tags"]
+
+
+def test_session_sourced_chunks_map_to_episodic(tmp_path: Path):
+    memory = {"chunks": [_chunk("ck2", "那次发布前夜", source="sessions")],
+              "provenance": [("ck2", "agent", "subagent", 1787791388521, "ck1")]}
+
+    convert(_db(tmp_path, memory=memory), tmp_path / "bundle", agent_name="x")
+    row = _memories(tmp_path / "bundle")[0]
+
+    assert (row["memory_type"], row["category"]) == ("episodic", "conversation")
+    assert row["origin"] == "agent" and row["supersedes"] == "ck1"
+
+
+def test_chunk_without_provenance_is_declared_not_guessed(tmp_path: Path):
+    """origin 是信任级：源里没记出处就不导，宁可少一条也不给它抬信任。"""
+    memory = {"chunks": [_chunk("ck3", "无出处条目")]}
+
+    manifest = convert(_db(tmp_path, memory=memory), tmp_path / "bundle", agent_name="x")
+
+    assert _memories(tmp_path / "bundle") == []
+    assert manifest.counts["memories"] == 0
+    entry = next(e for e in manifest.dropped if e["field"] == "memory:无出处")
+    assert entry["count"] == 1 and "信任" in entry["reason"]
+
+
+def test_missing_importance_uses_the_store_default(tmp_path: Path):
+    memory = {"chunks": [_chunk("ck4", "没打重要度")],
+              "provenance": [("ck4", "system", "cron", 1787791388521, None)]}
+
+    convert(_db(tmp_path, memory=memory), tmp_path / "bundle", agent_name="x")
+
+    assert _memories(tmp_path / "bundle")[0]["importance"] == 50.0
+
+
+def test_derived_index_columns_are_declared_once(tmp_path: Path):
+    """向量与内容哈希是派生索引，本系统自算：不搬，但条数要申报。"""
+    memory = {"chunks": [_chunk("ck5", "甲"), _chunk("ck6", "乙")],
+              "provenance": [("ck5", "owner", "interactive", 1, None),
+                             ("ck6", "owner", "interactive", 1, None)]}
+
+    manifest = convert(_db(tmp_path, memory=memory), tmp_path / "bundle", agent_name="x")
+    entry = next(e for e in manifest.dropped if e["field"] == "memory:派生索引")
+
+    assert entry["count"] == 2
+
+
+def test_store_without_memory_tables_is_untouched(tmp_path: Path):
+    """没建记忆索引的库不是"丢了记忆"：不产行也不申报。"""
+    manifest = convert(_db(tmp_path), tmp_path / "bundle", agent_name="x")
+
+    assert manifest.counts["memories"] == 0 and manifest.dropped == ()
+
+
+@pytest.fixture()
+def manager(tmp_path: Path):
+    from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+    return MemoryManager(db_path=str(tmp_path / "memory" / "memory.db"))
+
+
+@pytest.fixture()
+def sessions(tmp_path: Path, monkeypatch):
+    from neurova.session_manager import SessionManager
+    monkeypatch.setenv("NEUROVA_SESSIONS_DIR", str(tmp_path / "sessions"))
+    SessionManager._instance = None
+    yield SessionManager()
+    SessionManager._instance = None
+
+
+def test_converted_memories_apply_and_undo(tmp_path: Path, manager, sessions):
+    """整链闭环：转换器产出的记忆行要真能进咽喉，撤销后一条不剩。
+
+    这一条查的是"字段翻译对了没"——origin 的词、importance 的尺度、ts 的格式在源侧
+    对不上时，转换器自己不会报错，落库时才会。
+    """
+    from neurova.cognitive_layers.memory_layer.models import MemoryOrigin
+    from neurova.memory_ingest.intake import apply_bundle
+
+    memory = {"chunks": [_chunk("ck9", "用户偏好中文回复")],
+              "provenance": [("ck9", "owner", "interactive", 1787791388521, None)],
+              "recall": [("ck9", 8, None, None)]}
+    out = tmp_path / "bundle"
+    convert(_db(tmp_path, memory=memory), out, agent_name="imported")
+
+    report = apply_bundle(out, agent_id="default", manager=manager, sessions=sessions)
+    stored = next(m for m in manager._memories.values() if m.content == "用户偏好中文回复")
+
+    assert report.memories_added == 1
+    assert stored.origin is MemoryOrigin.OWNER and stored.importance == 80.0
+    assert (stored.metadata.get("ingest") or {})["identity_key"] == "ck9"
+
+    removed = report.undo(manager=manager, sessions=sessions)
+
+    assert removed[0] == 1 and manager._memories == {}

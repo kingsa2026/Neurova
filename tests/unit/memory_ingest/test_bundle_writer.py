@@ -10,8 +10,18 @@ from pathlib import Path
 
 import pytest
 
-from neurova.memory_ingest.bundle.records import TranscriptRecord
+from neurova.memory_ingest.bundle.records import MemoryRecord, TranscriptRecord
 from neurova.memory_ingest.bundle.writer import SourceEvent, materialize, write_bundle
+
+
+def _memory(**kw):
+    return MemoryRecord(identity_key=kw.pop("identity_key", "mem#1"),
+                        content=kw.pop("content", "事实正文"),
+                        memory_type=kw.pop("memory_type", "semantic"),
+                        category=kw.pop("category", "knowledge"),
+                        origin=kw.pop("origin", "owner"),
+                        importance=kw.pop("importance", 70.0),
+                        ts=kw.pop("ts", "2026-05-01T10:00:00+00:00"), **kw)
 
 
 def _event(kind="assistant_message", seq_ts="2026-05-01T10:00:00+00:00", **kw):
@@ -116,6 +126,32 @@ def test_records_round_trip_through_the_dataclass(tmp_path: Path):
         encoding="utf-8").splitlines()[0])
 
     assert TranscriptRecord(**row) == records[0]
+
+
+def test_write_bundle_lands_memory_rows_and_counts_them(tmp_path: Path):
+    """会话与记忆是两支族：转换器给了记忆行，包里就不能仍是空的。"""
+    out = tmp_path / "b"
+
+    manifest = write_bundle(out, [], agent_name="a", source={}, dropped=[], stores=[],
+                            memories=[_memory(), _memory(identity_key="mem#2", origin="agent")])
+
+    assert manifest.counts == {"transcripts": 0, "memories": 2, "relations": 0}
+    rows = [json.loads(x) for x in
+            (out / "memories.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [r["identity_key"] for r in rows] == ["mem#1", "mem#2"]
+    assert rows[1]["origin"] == "agent"
+
+
+def test_memory_rows_round_trip_through_the_dataclass(tmp_path: Path):
+    """intake 用 MemoryRecord(**row) 读回：list 与 tuple 不归一，幂等比对就会打架。"""
+    out = tmp_path / "b"
+    record = _memory(tags=("偏好", "长期"), supersedes="mem#0", temperature=60.0,
+                     source_ref="memory/notes.md#L3-L9")
+
+    write_bundle(out, [], agent_name="a", source={}, dropped=[], stores=[], memories=[record])
+
+    row = json.loads((out / "memories.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    assert MemoryRecord(**row) == record
 
 
 if __name__ == "__main__":  # pragma: no cover

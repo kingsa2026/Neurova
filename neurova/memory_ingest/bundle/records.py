@@ -94,3 +94,8 @@ class MemoryRecord:
     tags: Tuple[str, ...] = ()
     source_ref: str = ""
     supersedes: str = ""
+
+    def __post_init__(self) -> None:
+        # 与 TranscriptRecord 同一条规矩：包内读回是 list、内存构造是 tuple，
+        # 不归一则"同一条记录"无从相等，幂等比对会漏判重复导入。
+        object.__setattr__(self, "tags", tuple(self.tags))

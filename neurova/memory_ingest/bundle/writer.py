@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from neurova.memory_ingest.bundle.manifest import BundleManifest, dump_manifest
-from neurova.memory_ingest.bundle.records import VALID_ROLE_KINDS, TranscriptRecord
+from neurova.memory_ingest.bundle.records import (VALID_ROLE_KINDS, MemoryRecord,
+                                                  TranscriptRecord)
 
 
 @dataclass(frozen=True)
@@ -71,26 +72,35 @@ def materialize(groups: Sequence[Tuple[str, Sequence[Tuple[str, Sequence[SourceE
 
 def write_bundle(out_dir: Path, records: Sequence[TranscriptRecord], *, agent_name: str,
                  source: Dict[str, Any], dropped: Sequence[Dict[str, Any]],
-                 stores: Sequence[Dict[str, Any]]) -> BundleManifest:
-    """只写包：transcripts/memories/manifest 三件套，返回同一份 manifest。"""
+                 stores: Sequence[Dict[str, Any]],
+                 memories: Sequence[MemoryRecord] = ()) -> BundleManifest:
+    """只写包：transcripts/memories/manifest 三件套，返回同一份 manifest。
+
+    会话与记忆是两支族但同属一个 store（一家源库里两张表都有的情况真实存在），所以一支包
+    可以两者都有；给了几条就记几条，计数与落盘条数不符就是校验器要拦的半包。
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    with (out_dir / "transcripts.jsonl").open("w", encoding="utf-8") as fh:
-        for record in records:
-            fh.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
-    (out_dir / "memories.jsonl").write_text("", encoding="utf-8")
+    _write_jsonl(out_dir / "transcripts.jsonl", records)
+    _write_jsonl(out_dir / "memories.jsonl", memories)
 
     manifest = BundleManifest(
         schema_version=1,
         generated_at=datetime.now(timezone.utc).isoformat(),
         agent_name=agent_name,
         source=dict(source),
-        counts={"transcripts": len(records), "memories": 0, "relations": 0},
+        counts={"transcripts": len(records), "memories": len(memories), "relations": 0},
         dropped=tuple(dropped),
         stores=tuple(stores),
     )
     dump_manifest(manifest, out_dir / "manifest.json")
     return manifest
+
+
+def _write_jsonl(path: Path, records: Sequence[Any]) -> None:
+    with path.open("w", encoding="utf-8") as fh:
+        for record in records:
+            fh.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
 
 
 def _blocks(event: SourceEvent) -> Tuple[Dict[str, Any], ...]:
