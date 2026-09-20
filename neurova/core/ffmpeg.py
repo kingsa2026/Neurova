@@ -222,8 +222,17 @@ def _cjk_font_candidates() -> List[Path]:
     return hits
 
 
+def find_cjk_font():
+    """第一个真实存在的中文字体路径，没有则 None。
+
+    公开口：字幕烧录与 PDF 出件共用同一探测口径——两处踩的是同一个坑
+    （没有中文字体时照常出件，得到的是方框"假成功"）。
+    """
+    return next((p for p in _cjk_font_candidates() if p.is_file()), None)
+
+
 def has_cjk_font() -> bool:
-    return any(p.is_file() for p in _cjk_font_candidates())
+    return find_cjk_font() is not None
 
 
 def burn_subtitles(ffmpeg: str, in_path, srt_path, out_path,

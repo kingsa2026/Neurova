@@ -1,0 +1,54 @@
+"""中间文档树（Canonical Document Tree）
+
+文档导出的中立表示：Markdown 与 HTML 两个入口都归一到这棵树，渲染器（PDF 等）
+只消费它。因此本模块刻意保持三件事之外的一无所有——纯数据 + 归一化，
+不 import 任何渲染库，不碰 I/O。
+"""
+
+import typing
+from dataclasses import dataclass, field
+from enum import Enum
+
+
+class NodeKind(str, Enum):
+    HEADING = "heading"
+    PARAGRAPH = "paragraph"
+    LIST = "list"
+
+
+@dataclass(frozen=True)
+class InlineRun:
+    """一段同风格的行内文本。样式是标志位而非标记语言，渲染器自行决定如何表达。"""
+
+    text: str
+    bold: bool = False
+    italic: bool = False
+    code: bool = False
+
+
+@dataclass
+class Block:
+    """块级节点。标题用 level，列表用 items（每项是一个 PARAGRAPH Block），
+    段落与标题用 runs。"""
+
+    kind: NodeKind
+    runs: typing.List[InlineRun] = field(default_factory=list)
+    level: int = 1
+    ordered: bool = False
+    items: typing.List["Block"] = field(default_factory=list)
+
+    @property
+    def text(self) -> str:
+        return "".join(r.text for r in self.runs)
+
+
+@dataclass(frozen=True)
+class DocSettings:
+    """渲染设置。缺省值即 `report` 模板的形态，逐次参数覆盖优先于预设（spec §5）。"""
+
+    template: str = "report"
+    title: str = ""
+    header_text: typing.Optional[str] = None
+    footer_text: typing.Optional[str] = None
+    page_number: bool = True
+    margin_mm: float = 18.0
