@@ -96,6 +96,17 @@ def test_broken_base64_is_reported_as_missing(store: Path):
                             "source": {"type": "base64", "data": "@@@"}}, store) is None
 
 
+def test_inline_base64_block_without_source_key(store: Path):
+    """有的落盘把正文直接挂在块的 data 上（配 mimeType），不套一层 source——不能判成不可达。"""
+    block = {"type": "image", "data": base64.b64encode(PNG).decode(), "mimeType": "image/png"}
+
+    resolved = resolve_payload(block, store)
+    ref = MediaSink(store.parent.parent / "bundle").put(resolved[0], name=resolved[1])
+
+    assert resolved is not None and resolved[0] == PNG
+    assert ref["media"] == f"media/{_digest(PNG)}.png" and ref["mime"] == "image/png"
+
+
 def test_verify_media_accepts_a_consistent_bundle(tmp_path: Path):
     out = tmp_path / "bundle"
     ref = MediaSink(out, name_hint="shot.png").put(PNG)

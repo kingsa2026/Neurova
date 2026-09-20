@@ -90,20 +90,27 @@ scripts/ingest_memory.py   薄 CLI：detect / convert / apply / undo
 - 单位是 **store 不是目录**：一个源目录可同时含多族多个 store，`detect` 输出逐 store 清单。
 - 三态：唯一高置信 / 多命中冲突 / 零命中。后两态一律不写库；零命中打印结构摘要
   （表名与列集、JSONL 首行键集）供新增转换器。
-- 漂移守卫：无 schema 版本的两族（Claude/Codex）必需列缺失即整 store 拒绝，绝不半导。
+- 漂移守卫：必需列缺失即整 store 拒绝，绝不半导。只有带版本号的族额外申报"版本比已知的新"，
+  无版本号的族（Claude/Codex/OpenClaw）只能靠列面与指纹兜底。
 - 允许 `--source <converter>` 人工指定，跳过猜测（仍走同一校验器）。
 
-### 5.1 平台落地名册（每加一家就更新这里，交叉误认由 `test_five_families_never_cross_match` 钉住）
+### 5.1 平台落地名册（每加一家就更新这里，交叉误认由 `test_every_family_matches_only_its_own_store` 钉住）
 
 | 指纹名 | 源形态 | 状态 | 证据来源 |
 |--------|--------|------|----------|
-| `qwenpaw_history` | SQLite `conversation_history` | 已实现 + 真库往返 | 本机源库 242 行实测 |
+| `qwenpaw_history` | SQLite `conversation_history` | 已实现 + 真库往返 | 本机源库 242 行实测；公开源码建表列集逐列相符 |
 | `dialog_daily` | 每日一个 JSONL（一文件一场会话） | 已实现 + 真库往返 | 本机 40 个文件实测 |
 | `legacy_session` | 1.x 工作区 JSONL（带表头记录） | 已实现 + 真库往返 | 本机 31 个文件实测 |
 | `opencode_session` | SQLite `message` + `part`（JSON data 列） | 已实现 + 真库往返 | 本机 4 会话 / 845 消息 / 4423 块实测 |
 | `codex_rollout` | `rollout-<ts>-<id>.jsonl`，线形 `{type, payload}` | 已实现（合成夹具）；**无本机真库可跑** | 该平台上游写入侧源码 |
+| `openclaw_transcript` | per-agent SQLite `transcript_events` + `session_windows` | 已实现 + 上游整份 schema 建库往返 | 在盘上游源码：建表 SQL + 事件信封读取侧 |
+| `hermes_state` | 单库 `messages`(26 列) + `sessions` + `schema_version` | 已实现 + 上游 SCHEMA_SQL 原文建库往返 | 该平台上游建表语句与写入侧行构造（其版本 30） |
 | `dsh_session` | per-session JSONL，首行带 `version` | **只有指纹、暂无转换器**：detect 会认出并明确报"有指纹无转换器"，不写一个字节 | 本机无会话数据可取证字段 |
 | （未命名） | 按项目目录分片的 JSONL（无版本字段） | 不做：既无本机样本也无在盘源码，凭记忆写字段就是猜 | — |
+
+真库缺位的两家（`codex_rollout`/`hermes_state`）只算"可转换"，不算"经真库验证"；两者都按上游
+建表语句原文建库跑过一遍往返（列面不是手抄的），落笔处逐列标了落点，未知列按条数申报。
+`hermes_state` 还额外读它的 `schema_version`：版本比已知上限新时照常转，但报告里必须看得见。
 
 ## 6. 失败与撤销
 
