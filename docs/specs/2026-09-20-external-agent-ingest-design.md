@@ -111,6 +111,7 @@ scripts/ingest_memory.py   薄 CLI：detect / convert / apply / undo
 真库缺位的两家（`codex_rollout`/`hermes_state`）只算"可转换"，不算"经真库验证"；两者都按上游
 建表语句原文建库跑过一遍往返（列面不是手抄的），落笔处逐列标了落点，未知列按条数申报。
 `hermes_state` 还额外读它的 `schema_version`：版本比已知上限新时照常转，但报告里必须看得见。
+产出记忆面的目前只有 `openclaw_transcript`（映射规则与理由见 §9 第一条），其余族只导会话。
 
 ## 6. 失败与撤销
 
@@ -151,13 +152,20 @@ v1 的记录类型边界（避免接口悬空）
 ## 9. 已知缺口（登记，不在本设计内解决）
 
 - 分片/策展型记忆条目的归属：chunk（path+start_line+end_line+text+embedding）与"一条记忆"
-  （content+category+importance+origin）不同构，需要先定映射规则，再谈第二家真实来源。
-- 私有方言的记忆导入：本机 `qwenpaw_memory*` 一族无公开格式可依；包契约里 `memories.jsonl`
-  与 `MemoryManager.import_memories` 已就位，但**还没有任何转换器产出记忆**——三源转换器
-  只产会话。私有来源（记忆库、session_contexts 快照、reme 笔记、身份文件）由
-  `scripts/import_kai_to_neurova.py` 继续管：它已从"本地不入库"改为随仓入库并标注
-  **不再是产品入口**（回归在 `tests/unit/migration/`，15 条）。新格式一律进
-  `scripts/ingest_memory.py`，不往那个脚本加方言。
+  （content+category+importance+origin）**不同构**，映射规则已在 `openclaw_transcript` 定下并被测试
+  钉住：正文取 chunk 文本、`source` 列两值映射 memory_type/category（memory→semantic/knowledge、
+  sessions→episodic/conversation）、`origin_class` 逐字透传（与本系统 `MemoryOrigin` 同词）、
+  importance 按 1-10→0-100 定标且缺档用本系统默认 50、path+行号成 `source_ref`、
+  `supersedes_key` 成 `supersedes`；向量/内容哈希/嵌入模型属源侧派生索引一律不搬（申报条数）。
+  **没记出处的 chunk 整条不导**——origin 是信任级，猜高会经记忆链路毒化上下文。
+- 私有方言的记忆导入：本机 `qwenpaw_memory*` 一族无公开格式可依；`memories.jsonl` 与
+  `MemoryManager.import_memories` 已就位，产出记忆的第一家是公开族 `openclaw_transcript`
+  （会话+记忆同属一支 store，一支包两样都装）；其余各族目前仍只导会话。私有来源（记忆库、
+  session_contexts 快照、reme 笔记、身份文件）由 `scripts/import_kai_to_neurova.py` 继续管：它已从
+  "本地不入库"改为随仓入库并标注**不再是产品入口**（回归在 `tests/unit/migration/`，15 条）。
+  新格式一律进 `scripts/ingest_memory.py`，不往那个脚本加方言。
+- 只有记忆索引、没有会话事件表的库导不了：detect 认不出（指纹按会话表立），这种库要导记忆得先
+  给它一条独立指纹——目前没有样本，暂不立。
 - 身份/人格文件导入（`import_identity`）：归人格装配面，已定不并入。
 - 记忆图边落图（`relations.jsonl`）：v1 只登记。
 - 运行期记忆写入无统一事件总线：`refresh_moe_index` 至今零调用方，本设计不依赖它。
