@@ -423,6 +423,39 @@ def _isolate_governance_settings(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_rsi_proposal_ledger(tmp_path, monkeypatch):
+    """RSI 提案台账（SelfImprovementProposer 的 proposals 根目录）指向临时目录。
+
+    工单 010 之前它硬编码仓库根同名目录，且构造即 mkdir —— 于是每个构造编排器的
+    用例都在往工作树里写提案，实测一次八目录套件留下 873 个 JSON
+    （`sleep` 429 / `emotion` 175 / `tool_memory` 157 / `experience` 112）。
+    台账按 agent 分域之后，根路径仍可注入；这里统一注入到每测试临时目录。
+    """
+    monkeypatch.setenv("NEUROVA_PROPOSALS_ROOT", str(tmp_path / "rsi-proposal-ledger"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_evolution_state_paths(tmp_path, monkeypatch):
+    """进化状态持久化各件统一指向每测试临时目录。
+
+    `bootstrap_evolution_persistence` 按 env 解析默认路径；调用方只覆盖其中
+    四件时，第五件（技能经验库）就写进仓库 `data/evolution/skill_experiences.json`
+    —— 实测 `test_evolution_state_persistence.py` 单跑一次即改写该生产文件。
+    工单 016 给 `AutoSkillImprover` 挂持久化，泄漏面会再多一处，故先在根 conftest
+    收口（默认值也注入，测试自己不再需要逐个补 env）。
+    """
+    state_dir = tmp_path / "evolution"
+    for key, name in (
+        ("NEUROVA_EVOLUTION_WEIGHTS", "tool_weights.json"),
+        ("NEUROVA_EVOLUTION_PATTERNS", "pattern_sequences.json"),
+        ("NEUROVA_EVOLUTION_LIFECYCLE", "tool_lifecycle.json"),
+        ("NEUROVA_EVOLUTION_EXPERIENCE", "experience_feedback.json"),
+        ("NEUROVA_EVOLUTION_SKILL_EXPERIENCE", "skill_experiences.json"),
+    ):
+        monkeypatch.setenv(key, str(state_dir / name))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_evolution_job_queue(tmp_path, monkeypatch):
     """所有测试的进化作业队列落盘指向临时目录（含单例重建）。
 

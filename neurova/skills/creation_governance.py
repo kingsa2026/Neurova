@@ -284,7 +284,7 @@ def manifest_structure(manifest):
     return structure_key(_manifest_config(manifest).get("tool_sequence"))
 
 
-def publish_automatic(service, registry, manifest, *, alias_id=""):
+def publish_automatic(service, registry, manifest, *, alias_id="", human_approved=False):
     """Disk first; restore the canonical identity without bypassing evidence.
 
     **统一命名（P0 收口）**：本函数是三条写入臂（AutoSkillBuilder /
@@ -314,7 +314,8 @@ def publish_automatic(service, registry, manifest, *, alias_id=""):
     aliases.discard("")
     if canonical:
         manifest = _renamed(manifest, canonical)
-    return _publish_automatic(service, registry, manifest, config, sorted(aliases))
+    return _publish_automatic(service, registry, manifest, config, sorted(aliases),
+                              human_approved=human_approved)
 
 
 def _canonical_prefix(original_id):
@@ -345,10 +346,11 @@ def _renamed(manifest, new_id):
     return SimpleNamespace(**fields)
 
 
-def _publish_automatic(service, registry, manifest, config, aliases):
+def _publish_automatic(service, registry, manifest, config, aliases, human_approved=False):
     result = service.create_automatic_skill(
         manifest.id, manifest.name, manifest.description, config,
-        version=getattr(manifest, "version", "1.0.0"), alias_ids=aliases)
+        version=getattr(manifest, "version", "1.0.0"), alias_ids=aliases,
+        human_approved=human_approved)
     if not result.get("success"):
         return result
     # 别名登记：调用方沿用的 ID（含被归一掉的原 ID）都解析到落盘条目。
