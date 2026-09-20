@@ -40,7 +40,6 @@ Agent (2159 行文件, 类 1122 行/57 方法，拆分中)
 ├── ToolExecutor (tool_executor.py)    — 工具调用解析/执行/后处理钩子
 ├── ChatPipeline (chat_pipeline.py)    — 对话流程管线 (6步)
 ├── PostChatPipeline                   — 后处理管线 (10+ 步骤)
-├── MemoryAgent (memory_agent.py)      — 记忆管理深度模块
 └── LLMRouter (llm/llm_router.py)     — 多模态自适应路由
 ```
 

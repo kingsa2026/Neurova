@@ -13,7 +13,6 @@ neurova/tool_executor.py @Neurova/agent-core
 
 # === 记忆系统核心 ===
 neurova/mem_core.py @Neurova/memory-team
-neurova/memory_agent.py @Neurova/memory-team
 neurova/cognitive_layers/memory_layer/ @Neurova/memory-team
 
 # === 认知层 ===
