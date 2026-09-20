@@ -22,6 +22,7 @@ export type DockTabKind =
   | 'image'
   | 'audio'
   | 'video'
+  | 'pdf'
   | 'text'
   | 'history'
   | 'archive'
@@ -100,6 +101,7 @@ function defaultTitle(kind: DockTabKind): string {
     image: 'dock.kindImage',
     audio: 'dock.kindAudio',
     video: 'dock.kindVideo',
+    pdf: 'dock.kindPdf',
     text: 'dock.kindText',
     history: 'chat.history',
     archive: 'chat.archivedSessions',

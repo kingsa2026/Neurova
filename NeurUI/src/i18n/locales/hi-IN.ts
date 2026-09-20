@@ -3511,6 +3511,7 @@ export default {
     kindImage: 'छवि',
     kindAudio: 'ऑडियो',
     kindVideo: 'वीडियो',
+    kindPdf: 'PDF',
     kindText: 'टेक्स्ट',
   },
 
