@@ -24,6 +24,9 @@ from neurova.collaboration.canvas_ops import (
 )
 from neurova.collaboration.neurflow.execution_engine import get_workflow_executor
 from neurova.core.logger import get_logger
+from neurova.document_model import DocSettings
+from neurova.document_pdf import RenderUnavailable, render_document
+from neurova.document_sources import parse_markdown
 import re
 import shlex
 import threading
@@ -32,6 +35,18 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 logger = get_logger(__name__)
+
+_SLUG_RE = re.compile(r"[^A-Za-z0-9]+")
+
+
+def _ascii_slug(text: str, max_len: int = 40) -> str:
+    """产物文件名用的 ASCII slug。
+
+    产物路由 `GET /generation/files/{name}` 有 `[A-Za-z0-9._-]+` 白名单，
+    中文名会被拒在鉴权路由之外——标题进 PDF 元数据，不进文件名。
+    """
+    return (_SLUG_RE.sub("-", text or "").strip("-").lower()[:max_len]) or "document"
+
 
 # ToolEngine 延迟导入（避免循环依赖）
 _TOOL_ENGINE_AVAILABLE = False
@@ -248,6 +263,7 @@ class ToolExecutor:
         "file_edit": "_execute_file_edit",
         "file_list": "_execute_file_list",
         "file_search": "_execute_file_search",
+        "write_pdf": "_execute_write_pdf",
         "web_fetch": "_execute_web_fetch",
         "deep_research": "_execute_deep_research",
         "calculator": "_execute_calculator",
@@ -3706,6 +3722,49 @@ class ToolExecutor:
         if has_more:
             payload["next_offset"] = offset + len(matches)
         return payload
+
+    async def _execute_write_pdf(self, params: Dict) -> Dict:
+        """Markdown → PDF 出件，落产物目录并回鉴权下载口（工单 001）。
+
+        产物命名复用 persist_bytes：与图片/音频产物同一套白名单与属主口径，
+        所以中文标题只能进 PDF 元数据，不进文件名。HTML 入口属工单 004，
+        模板与 path 分支分别属 005/006——本切片只读 schema 已声明的参数。
+        """
+        content = params.get("content")
+        if not str(content or "").strip():
+            return {"error": "content 为空，未出件"}
+
+        blocks = parse_markdown(str(content))
+        if not blocks:
+            return {"error": "content 未解析出任何可渲染内容，未出件"}
+
+        title = str(params.get("title") or "")
+        try:
+            rendered = render_document(blocks, DocSettings(title=title))
+        except RenderUnavailable as e:
+            return {"error": str(e)}
+        except (ValueError, FileNotFoundError) as e:
+            return {"error": f"未出件：{e}"}
+
+        import hashlib
+
+        pdf = rendered["pdf"]
+        stem = f"{_ascii_slug(title or 'document')}-{hashlib.sha256(pdf).hexdigest()[:8]}"
+        from pathlib import Path
+
+        from neurova.llm.generators.runtime import persist_bytes
+
+        path = await persist_bytes(pdf, "pdf", stem)
+        name = Path(path).name
+        return {
+            "file_name": name,
+            "file_path": path,
+            "download_url": f"/api/v1/generation/files/{name}",
+            "bytes": len(pdf),
+            "pages": rendered["pages"],
+            "font": rendered["font"],
+            "warnings": rendered["warnings"],
+        }
 
     async def _execute_computer_screenshot(self, params: Dict) -> Dict:
         """执行屏幕截图

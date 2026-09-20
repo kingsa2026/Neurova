@@ -676,6 +676,20 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": ["pattern", "path"],
         },
     },
+    "write_pdf": {
+        "description": "【PDF 出件】把 Markdown 正文渲染为 PDF 产物，返回文件名、产物目录路径与鉴权下载地址。用于「要一份可分发文件」的场景（报告、长文归档、交付清单）。【何时不用】只想读文件用 file_read；只想写文本用 file_write；网页另存走 browser_*。响应 warnings 非空时（如无中文字体已降级为阅读器侧字体）必须如实转达，不得报告为完全成功。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "Markdown 正文（子集：# 标题、段落、- 与 1. 列表、**粗体**、*斜体*、`行内码`）",
+                },
+                "title": {"type": "string", "description": "文档标题（进 PDF 元数据与页眉；不参与文件名）"},
+            },
+            "required": ["content"],
+        },
+    },
     "git": {
         "description": "【Git 仓库操作】在指定仓库执行 git 命令。command 为完整命令行（含 git 前缀），如 'git status --short'；仓库目录由 path 锚定（相对锚定工作区，默认工作区根，禁止 --git-dir/-C/--work-tree 等逃逸选项）。读操作（status/diff/log/show/blame/ls-files）直接执行；写操作（add/commit/push/checkout/reset…）触发人工确认。【何时不用】GitHub PR/issue/CI 等远程托管操作用 github MCP 工具；不要用本工具跑 shell 通用命令（用 run_code/computer_shell）；不要用 curl 代替 git fetch。",
         "parameters": {
