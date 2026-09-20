@@ -85,7 +85,6 @@ class Skill:
         self.name = name
         self.description = description
         self.status = SkillStatus.ACTIVE
-        self._event_handlers: List[Callable] = []
 
     async def execute(self, params: Dict[str, Any], context: Optional[Dict] = None) -> SkillResult:
         """
@@ -107,19 +106,6 @@ class Skill:
             description=self.description,
             status=self.status,
         )
-
-    def add_event_handler(self, handler: Callable):
-        """添加事件处理器"""
-        self._event_handlers.append(handler)
-
-    def _emit_event(self, event_type: str, data: Any = None):
-        """触发事件"""
-        event = SkillEvent(event_type, self.name, data)
-        for handler in self._event_handlers:
-            try:
-                handler(event)
-            except Exception as e:
-                get_logger(__name__).error(f"事件处理失败: {e}")
 
 
 class ToolSequenceSkill(Skill):
@@ -434,6 +420,7 @@ class SkillRegistryProtocol(Protocol):
 
     Interface(seam):
         - skills: Dict[str, Skill] — 已注册 Skill 字典(类 B 实现需解包元组)
+        - get_skill(name) -> Skill | None — 定位单个 Skill 的唯一取键口
         - register(skill: Skill) -> None — 注册单个 Skill
         - register_skill(manifest, path=None) -> bool — 兼容 API,接受 manifest
         - list_skills() -> List[Any] — 列出所有 Skill 信息
@@ -443,6 +430,16 @@ class SkillRegistryProtocol(Protocol):
     @property
     def skills(self) -> Dict[str, "Skill"]:
         """已注册的 Skill 字典。"""
+        ...
+
+    def get_skill(self, skill_name: str) -> Optional["Skill"]:
+        """定位单个 Skill——name 与身份域两个形态都归一到同一个对象。
+
+        工单 014 把它补进协议面：此前协议没有"定位"这一口，调用方只能
+        `skills.get(name)` 字典直取，那是只认 name 的第二套键域，与进化侧
+        身份域（skill_id）在 id != name 时分叉。类 B 已退役（ADR 0011），
+        "get_skill 可能是协程"的歧义不复存在。
+        """
         ...
 
     def register(self, skill: "Skill") -> None:
@@ -469,6 +466,11 @@ class SkillRegistry:
 
     def __init__(self, runtime_manager=None):
         self._skills: Dict[str, Skill] = {}
+        # 身份域索引（工单 014）：skill_id/id → 同一个 Skill 对象。
+        # 主字典按 skill.name 建键（name 是执行与展示域：工具清单、LLM 调用都用它），
+        # 而进化侧取键拿的是 resolve_skill_identity()（skill_id 优先）—— 两者在
+        # id != name 时不是同一个串，于是改进/启停/执行全在静默取空。
+        self._identity_index: Dict[str, Skill] = {}
         self._event_handlers: List[Callable] = []
         self._event_callbacks: Dict[str, List[Callable]] = {}
         self._runtime_manager = runtime_manager
@@ -501,9 +503,11 @@ class SkillRegistry:
                 if key and manifest_fingerprint({"config": getattr(existing, "config", {}),
                                                   "description": existing.description}) == key:
                     return existing
-            canonicalize_skill_identity(skill, fallback=getattr(skill, "name", "") or "")
+            # canonicalize 已经算出最终身份，直接用它登记，不再二次解析
+            identity = canonicalize_skill_identity(skill, fallback=getattr(skill, "name", "") or "")
             self._skills[skill.name] = skill
-            skill.add_event_handler(self._on_skill_event)
+            if identity:
+                self._identity_index[identity] = skill
             return skill
 
     @property
@@ -586,13 +590,24 @@ class SkillRegistry:
         except Exception:  # noqa: BLE001 - 只读对象降级，register() 仍按 name 归一
             pass
 
+    def _lookup(self, key: str) -> Optional[Skill]:
+        """注册表唯一的取键口：name 与身份域都归一到同一个对象（工单 014）。
+
+        归一只做在这里，不在 8 个调用方各写一次 resolve —— 那会长出第 9 处口径，
+        而两处口径迟早漂移（本批一路在拆的就是这个）。
+        """
+        skill = self._skills.get(key)
+        if skill is not None:
+            return skill
+        return self._identity_index.get(key)
+
     def set_skill_enabled(self, skill_name: str, enabled: bool) -> bool:
         """启用/禁用技能（2026-09-07 C1 闭环：skill 端点 enable/disable 的真实实现）。
 
         Returns:
             True 表示状态已变更；技能不存在返回 False。
         """
-        skill = self.skills.get(skill_name)
+        skill = self._lookup(skill_name)
         if skill is None:
             return False
         from neurova.skill_system_module_standalone import SkillStatus
@@ -601,17 +616,22 @@ class SkillRegistry:
         return True
 
     def unregister(self, skill_name: str):
-        """注销 Skill"""
-        if skill_name in self._skills:
-            del self._skills[skill_name]
+        """注销 Skill（任一历史形态的键都要能注销干净）"""
+        skill = self._lookup(skill_name)
+        if skill is None:
+            return
+        self._skills.pop(getattr(skill, "name", skill_name), None)
+        for identity, target in list(self._identity_index.items()):
+            if target is skill:
+                self._identity_index.pop(identity, None)
 
     def get_skill(self, skill_name: str) -> Optional[Skill]:
-        """获取 Skill"""
-        return self._skills.get(skill_name)
+        """获取 Skill（name / skill_id 皆可）"""
+        return self._lookup(skill_name)
 
     def has_skill(self, skill_name: str) -> bool:
-        """检查 Skill 是否存在"""
-        return skill_name in self._skills
+        """检查 Skill 是否存在（与 get_skill 同一口径，不许两套判定）"""
+        return self._lookup(skill_name) is not None
 
     def list_skills(self) -> List[SkillInfo]:
         """列出所有 Skill"""
@@ -624,6 +644,7 @@ class SkillRegistry:
     def clear(self) -> None:
         """清空所有已注册技能（主要用于测试与重置）。"""
         self._skills.clear()
+        self._identity_index.clear()
 
     async def execute_skill(
         self, skill_name: str, params: Dict[str, Any], context: Optional[Dict] = None
@@ -749,14 +770,6 @@ class SkillRegistry:
         """添加事件处理器"""
         self._event_handlers.append(handler)
 
-    def _on_skill_event(self, event: SkillEvent):
-        """处理 Skill 事件"""
-        for handler in self._event_handlers:
-            try:
-                handler(event)
-            except Exception as e:
-                get_logger(__name__).error(f"事件处理失败: {e}")
-
     def register_event_callback(self, event_type: str, handler: Callable):
         """按事件类型注册回调。
 
@@ -775,7 +788,7 @@ class SkillRegistry:
             except Exception as e:
                 get_logger(__name__).error(f"事件处理失败: {e}")
         # 按事件类型分发给 register_event_callback 注册的回调（传 skill + data）
-        skill = self._skills.get(skill_name)
+        skill = self._lookup(skill_name)
         for handler in self._event_callbacks.get(event_type, []):
             try:
                 handler(skill, data)

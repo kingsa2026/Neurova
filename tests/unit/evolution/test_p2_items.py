@@ -104,7 +104,10 @@ class TestB4CommandDispatch(unittest.TestCase):
         skill = MagicMock()
         skill.config = skill_cfg
         registry.has_skill.return_value = True
-        registry.skills = {"deploy": (skill, None)}
+        # 定位走注册表唯一取键口（工单 014）：替身必须显式钉 get_skill，
+        # 否则 MagicMock 自动返回真值影子，"取不到技能"与"config 形态"两类
+        # 断言都会静默失真。
+        registry.get_skill.return_value = skill
         agent._skill_registry = registry
         agent._current_user_input = user_input
         p._agent = agent
@@ -129,10 +132,10 @@ class TestB4CommandDispatch(unittest.TestCase):
             {"command_dispatch": {"tool": "computer_shell", "params": {"cwd": "/x"}}},
             "/deploy prod",
         )
-        # registry skills 键用 / 后的技能名
-        p._agent._skill_registry.skills = {"deploy": p._agent._skill_registry.skills["deploy"]}
         with patch.dict(os.environ, {"NEUROVA_SKILL_COMMAND_DISPATCH": "1"}):
             asyncio.run(p._check_command_dispatch(ctx))
+        # 分发定位的是斜杠命令后那个技能名
+        p._agent._skill_registry.get_skill.assert_called_with("deploy")
         p.tool_executor.execute.assert_called_once()
         args = p.tool_executor.execute.call_args
         self.assertEqual(args[0][0], "computer_shell")
@@ -143,7 +146,6 @@ class TestB4CommandDispatch(unittest.TestCase):
 
     def test_skill_without_dispatch_falls_through(self):
         p, ctx = self._pipeline({}, "/deploy prod")
-        p._agent._skill_registry.skills = {"deploy": p._agent._skill_registry.skills["deploy"]}
         with patch.dict(os.environ, {"NEUROVA_SKILL_COMMAND_DISPATCH": "1"}):
             asyncio.run(p._check_command_dispatch(ctx))
         p.tool_executor.execute.assert_not_called()
