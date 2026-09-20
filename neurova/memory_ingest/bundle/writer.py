@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, tzinfo
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from neurova.memory_ingest.bundle.manifest import BundleManifest, dump_manifest
 from neurova.memory_ingest.bundle.records import VALID_ROLE_KINDS, TranscriptRecord
@@ -27,12 +27,32 @@ class SourceEvent:
     tool_name: str = ""
     tool_state: str = ""
     reasoning: str = ""
+    reasoning_state: str = ""       # 源里推理正文是密文时显式标 opaque，不用空串冒充 absent
     blocks: Tuple[Dict[str, Any], ...] = ()   # 内容寻址媒体引用（排在正文之后）
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.kind not in VALID_ROLE_KINDS:
             raise ValueError(f"未知事件 kind: {self.kind!r}")
+
+
+def ensure_offset(ts: str, zone: Optional[tzinfo] = None) -> str:
+    """把源里的时间字符串定标成带显式偏移的 ISO。
+
+    契约要求 ts 带时区：包内靠它做日期分桶，读侧要能 fromisoformat（3.10 连 "Z" 都不认）。
+    源里没写偏移时才用 zone（各家口径见转换器注释），缺省按 UTC。
+    """
+    text = str(ts or "").strip().replace(" ", "T")
+    if not text:
+        return datetime.now(timezone.utc).isoformat()
+    try:
+        parsed = (datetime.fromisoformat(text[:-1]).replace(tzinfo=timezone.utc)
+                  if text.endswith("Z") else datetime.fromisoformat(text))
+    except ValueError:
+        return str(ts)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=zone or timezone.utc)
+    return parsed.isoformat()
 
 
 def materialize(groups: Sequence[Tuple[str, Sequence[Tuple[str, Sequence[SourceEvent]]]]]
@@ -85,7 +105,7 @@ def _record(session_id: str, seq: int, identity_key: str, event: SourceEvent) ->
         content_blocks=_blocks(event),
         tool_call_id=event.tool_call_id, tool_name=event.tool_name,
         tool_state=event.tool_state,
-        reasoning_state="text" if event.reasoning else "absent",
+        reasoning_state=event.reasoning_state or ("text" if event.reasoning else "absent"),
         reasoning_text=event.reasoning,
         extra={key: value for key, value in event.extra.items() if value is not None},
     )

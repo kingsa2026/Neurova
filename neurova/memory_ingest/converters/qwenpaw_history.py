@@ -17,19 +17,20 @@ import json
 import sqlite3
 from collections import Counter
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 from neurova.memory_ingest import probe
 from neurova.memory_ingest.bundle.manifest import BundleError, BundleManifest
 from neurova.memory_ingest.bundle.media import MEDIA_BLOCK_TYPES, MediaSink
-from neurova.memory_ingest.bundle.writer import SourceEvent, materialize, write_bundle
+from neurova.memory_ingest.bundle.writer import SourceEvent, ensure_offset, materialize, write_bundle
 from neurova.memory_ingest.probe import Handprint, register_handprint
 
 CONVERTER_NAME = "qwenpaw_history"
 CONVERTER_VERSION = "1"
 SOURCE_TABLE = "conversation_history"
+_SOURCE_ZONE = timezone(timedelta(hours=8))
 
 # 必需列：缺任何一列就是漂移，宁可判"未识别"也不半导
 REQUIRED_COLUMNS = ("seq", "session_id", "kind", "role", "content", "tool_call_id",
@@ -324,7 +325,8 @@ def _int(value: Any) -> int:
 
 
 def _ts(value: Any) -> str:
-    return _text(value) or datetime.now(timezone.utc).isoformat()
+    """源里是本地墙钟裸时间（实测 2026-08-20T21:20:52.669271）：按 +08:00 定标。"""
+    return ensure_offset(_text(value), _SOURCE_ZONE)
 
 
 register_handprint(Handprint(CONVERTER_NAME, "sqlite",
