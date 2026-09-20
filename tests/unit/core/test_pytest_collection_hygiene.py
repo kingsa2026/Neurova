@@ -23,6 +23,13 @@ def _offenders() -> list:
                                                       match.group(1)[4].lower() + match.group(1)[5:]))
         found += ["%s → 类名 %r 不是 Test* 形态" % (path.relative_to(_TESTS_DIR), m.group(1))
                   for m in _CLASS_PLACEHOLDER.finditer(text)]
+        if path.name == Path(__file__).name:
+            continue
+        # 本守卫自己就是"改了收集规则之后必须还守得住"的那条线：
+        # 配置里的 python_functions 加了 test[A-Z]*（项目命名用驼峰，pytest 默认只认 test_*，
+        # 两边一撞就是整份文件静默不跑），所以这里反过来禁止本文件用驼峰名。
+        found += ["%s → 守卫自身用例不得用驼峰名 %s" % (path.relative_to(_TESTS_DIR), m.group(1))
+                  for m in re.finditer(r"^\s*def test[A-Z]\w*\(", text, re.M)]
     return found
 
 
