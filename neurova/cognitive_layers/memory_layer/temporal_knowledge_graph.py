@@ -152,20 +152,6 @@ class TemporalFact:
         )
 
 
-@dataclass
-class FactConflict:
-    """事实冲突"""
-
-    fact1_id: str
-    fact2_id: str
-    conflict_type: str
-    description: str
-    severity: float
-    detected_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    resolved: bool = False
-    resolution: str = ""
-
-
 # ────── 主类 ──────
 
 
@@ -202,17 +188,6 @@ class TemporalKnowledgeGraph:
         CREATE INDEX IF NOT EXISTS idx_tkg_valid_from ON temporal_facts(valid_from);
         CREATE INDEX IF NOT EXISTS idx_tkg_valid_until ON temporal_facts(valid_until);
 
-        CREATE TABLE IF NOT EXISTS fact_conflicts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            fact1_id TEXT NOT NULL,
-            fact2_id TEXT NOT NULL,
-            conflict_type TEXT NOT NULL,
-            description TEXT,
-            severity REAL DEFAULT 0.5,
-            detected_at TEXT NOT NULL,
-            resolved BOOLEAN DEFAULT 0,
-            resolution TEXT
-        );
     """
 
     def __init__(self, db_path: Optional[str] = None, auto_expire: bool = True):
@@ -372,14 +347,10 @@ class TemporalKnowledgeGraph:
                 self._update_fact_in_db(old_fact)
                 logger.info("Superseded fact %s with %s", old_fact.id, new_fact.id)
 
-    def add_fact(self, fact: TemporalFact, check_conflicts: bool = True) -> Tuple[bool, List[FactConflict]]:
+    def add_fact(self, fact: TemporalFact) -> bool:
+        """只写事实。分歧判定与"要不要因此拒写"都在咽喉段4（工单 017）：
+        这里再判一遍就是同一对行被裁决两遍，两边的依据还各差一段。"""
         with self._lock:
-            conflicts: List[FactConflict] = []
-            if check_conflicts:
-                conflicts = self.detect_conflicts(fact)
-                if any(c.severity > 0.7 for c in conflicts):
-                    logger.warning("High severity conflicts detected for %s", fact.id)
-                    return False, conflicts
             existing = self._facts_cache.get(fact.id)
             if existing:
                 self._update_fact_in_db(fact)
@@ -392,7 +363,7 @@ class TemporalKnowledgeGraph:
             self._facts_cache[fact.id] = fact
             if self._auto_expire:
                 self._expire_older_facts(fact)
-            return True, conflicts
+            return True
 
     def query_current(
         self,
@@ -436,72 +407,6 @@ class TemporalKnowledgeGraph:
             results.sort(key=lambda x: x.valid_from, reverse=True)
             return results[:limit]
 
-    def detect_conflicts(self, new_fact: TemporalFact) -> List[FactConflict]:
-        conflicts: List[FactConflict] = []
-        with self._lock:
-            for existing in self.query_current(subject=new_fact.subject):
-                if existing.id == new_fact.id:
-                    continue
-                if self._is_contradiction(existing, new_fact):
-                    conflicts.append(
-                        FactConflict(
-                            existing.id,
-                            new_fact.id,
-                            "contradiction",
-                            f"矛盾事实: {existing.object} vs {new_fact.object}",
-                            0.8,
-                        )
-                    )
-                if self._is_relation_mutually_exclusive(existing, new_fact):
-                    conflicts.append(
-                        FactConflict(
-                            existing.id,
-                            new_fact.id,
-                            "mutual_exclusion",
-                            f"互斥关系: {existing.predicate} vs {new_fact.predicate}",
-                            0.6,
-                        )
-                    )
-                if self._has_temporal_overlap(existing, new_fact):
-                    conflicts.append(FactConflict(existing.id, new_fact.id, "temporal_overlap", "时间范围重叠", 0.4))
-            for c in conflicts:
-                self._store_conflict(c)
-        return conflicts
-
-    def _is_contradiction(self, f1: TemporalFact, f2: TemporalFact) -> bool:
-        if f1.subject == f2.subject and f1.predicate == f2.predicate and f1.object != f2.object:
-            return f1.predicate in {"is_married_to", "works_at", "lives_in", "is_president_of"}
-        return False
-
-    def _is_relation_mutually_exclusive(self, f1: TemporalFact, f2: TemporalFact) -> bool:
-        pairs = {(RelationType.IS_A, RelationType.PART_OF), (RelationType.CAUSES, RelationType.RELATED_TO)}
-        pair = (f1.relation_type, f2.relation_type)
-        return pair in pairs or (pair[1], pair[0]) in pairs
-
-    def _has_temporal_overlap(self, f1: TemporalFact, f2: TemporalFact) -> bool:
-        if f1.valid_until is None or f2.valid_until is None:
-            return True
-        return f1.valid_from < f2.valid_until and f2.valid_from < f1.valid_until
-
-    def _store_conflict(self, conflict: FactConflict):
-        conn = self._get_connection()
-        conn.execute(
-            """INSERT INTO fact_conflicts
-            (fact1_id,fact2_id,conflict_type,description,severity,detected_at,resolved,resolution)
-            VALUES (?,?,?,?,?,?,?,?)""",
-            (
-                conflict.fact1_id,
-                conflict.fact2_id,
-                conflict.conflict_type,
-                conflict.description,
-                conflict.severity,
-                conflict.detected_at.isoformat(),
-                conflict.resolved,
-                conflict.resolution,
-            ),
-        )
-        conn.commit()
-
     def get_fact_by_id(self, fact_id: str) -> Optional[TemporalFact]:
         return self._facts_cache.get(fact_id)
 
@@ -520,14 +425,10 @@ class TemporalKnowledgeGraph:
             for f in self._facts_cache.values():
                 status_counts[f.status.value] = status_counts.get(f.status.value, 0) + 1
                 relation_counts[f.relation_type.value] = relation_counts.get(f.relation_type.value, 0) + 1
-            conn = self._get_connection()
-            total_conflicts = conn.execute("SELECT COUNT(*) FROM fact_conflicts").fetchone()[0]
-            resolved = conn.execute("SELECT COUNT(*) FROM fact_conflicts WHERE resolved=1").fetchone()[0]
             return {
                 "total_facts": len(self._facts_cache),
                 "by_status": status_counts,
                 "by_relation_type": relation_counts,
-                "conflicts": {"total": total_conflicts, "resolved": resolved, "unresolved": total_conflicts - resolved},
             }
 
     def clear_cache(self):
@@ -730,13 +631,7 @@ class TemporalKGMemoryBridge:
         self, memory_id: str, content: str, timestamp: Optional[datetime] = None
     ) -> List[TemporalFact]:
         facts = self.extract_facts_from_memory(memory_id, content, timestamp)
-        added = []
-        for fact in facts:
-            success, conflicts = self._tkg.add_fact(fact)
-            if success:
-                added.append(fact)
-                if conflicts:
-                    logger.warning("Conflicts for fact %s: %s", fact.id, len(conflicts))
+        added = [fact for fact in facts if self._tkg.add_fact(fact)]
         logger.info("Synced %s facts from memory %s", len(added), memory_id)
         return added
 
