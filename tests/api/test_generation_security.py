@@ -65,6 +65,7 @@ async def test_persist_media_rejects_private_outbound(tmp_path, monkeypatch):
 def ref_roots(tmp_path, monkeypatch):
     monkeypatch.setattr(gen, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(gen, "GENERATION_OUTPUT_DIR", tmp_path / "data" / "generations")
+    monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "agent_workspaces"))
     (tmp_path / "agent_workspaces" / "a1").mkdir(parents=True)
     (tmp_path / "data" / "generations").mkdir(parents=True)
     return tmp_path

@@ -1129,8 +1129,10 @@ _LEGACY_LAYOUT_FILES = ("nodes.json", "edges.json", "merges.json")
 
 
 def _agent_graph_root() -> str:
-    """per-agent 图谱根目录（agent_workspaces，与 memory.db 同基座）。"""
-    return str(Path(__file__).resolve().parents[3] / "agent_workspaces")
+    """per-agent 图谱根目录（agent 工作区根，与 memory.db 同源）。"""
+    from neurova.core.agent_workspaces import get_agent_workspaces_root
+
+    return str(get_agent_workspaces_root())
 
 
 def _migrate_legacy_graph_layout(legacy_dir: str, target_dir: Path) -> bool:

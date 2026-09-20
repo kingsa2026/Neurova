@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from neurova.core.agent_workspaces import get_agent_workspace_dir
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -33,9 +34,6 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 _AGENT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
-
-# P1-8：工作区根以仓库为基准（原 CWD 相对路径与服务端 agent 加载口径分裂）
-_WORKSPACES_ROOT = Path(__file__).resolve().parents[3] / "agent_workspaces"
 
 # P0-4：Content-Disposition 文件名字符白名单（subdir 可达此处，防 header 注入）
 _ZIP_NAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -70,7 +68,7 @@ def _ensure_workspace_owner(root: Path, agent_id: str, current_user: Dict[str, A
 def _workspace_root(agent_id: str, current_user: Dict[str, Any]) -> Path:
     if not _AGENT_ID_PATTERN.match(agent_id or ""):
         raise HTTPException(status_code=400, detail=f"Invalid agent_id: '{agent_id}'")
-    root = _WORKSPACES_ROOT / agent_id
+    root = get_agent_workspace_dir(agent_id)
     root.mkdir(parents=True, exist_ok=True)
     root = root.resolve()
     _ensure_workspace_owner(root, agent_id, current_user)

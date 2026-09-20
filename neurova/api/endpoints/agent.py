@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 from neurova.api.auth import get_current_user
 # Wave H-W0 属主治理：访问/管理判定单源（与 chat 执行门同源，见 agent_access）
 from neurova.api.agent_access import can_access_agent, resolve_agent_owner
+from neurova.core.agent_workspaces import get_agent_workspace_dir
 
 logger = get_logger(__name__)
 
@@ -417,9 +418,7 @@ async def create_agent(
         if existing:
             raise HTTPException(status_code=409, detail=f"Agent '{agent_id}' already exists.")
 
-        workspace_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "agent_workspaces", agent_id
-        )
+        workspace_path = str(get_agent_workspace_dir(agent_id))
         os.makedirs(workspace_path, exist_ok=True)
         tts_fields = _tts_fields_from_body_config(body.config)
         temperature = _temperature_from_body_config(body.config)
@@ -635,11 +634,7 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...), curre
         workspace_attr = getattr(getattr(agent, "config", None), "workspace_path", "") or ""
         if workspace_attr:
             workspace_candidates.append(Path(workspace_attr))
-        workspace_candidates.append(
-            Path(os.path.dirname(os.path.abspath(__file__))).parent.parent.parent
-            / "agent_workspaces"
-            / agent_id
-        )
+        workspace_candidates.append(get_agent_workspace_dir(agent_id))
         for workspace in workspace_candidates:
             if not workspace.is_dir():
                 continue
