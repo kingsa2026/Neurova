@@ -1150,6 +1150,38 @@ git commit -m "feat(ingest): QwenPaw 会话族转换器（补回被丢字段、�
 
 ---
 
+#### Task 5 落地时的实测修正（源 E:/项目/Kai/history.db，242 行，只读跑通）
+
+1. **一轮多调用是主流形态，不是边角**：`model_turn` 的 `blocks` 里最多含 6 个 `tool_call`
+   （另有 40+ 调用的极端轮），而平列 `tool_call_id`/`tool_input`/`name` 只留最后一个。
+   按平列转换只能拿到 21 个调用，按块展开拿到 179 个——与 179 条 `tool_result` 行的
+   `tool_call_id` 全配上（未匹配 0）。现脚本走的正是平列读法，所以它的工具链是断的。
+2. **`content` 等于各 `text` 块以换行拼接**（实测 seq 2/12/43 的差异只在拼接换行处），
+   所以 model_turn 行按块展开不会丢正文；`blocks` 为空或只有 thinking 的旧式行退回平列读法。
+3. **源 `seq` 是全局流水号**（242 行 242 个值，单会话可从 127 起），而校验器要求会话内 1..n，
+   因此转换器必须按会话重编号，源 seq 留在 `extra.source_seq`。
+4. **真实源只剩一处丢失**：`blocks:data` 1 条（base64 图块）。包内 media 内容寻址存储未落地，
+   按"未知即申报"写进 `manifest.dropped`，不塞进会话文件也不静默扔。
+5. **对 Task 6 的硬约束**：bundle 是扁平事件流，而运行期 `_step_save_session` 写的是
+   **一条 assistant 消息带 `metadata.tool_calls` 列表**（`post_chat_pipeline.py:890`），
+   前端步骤卡也按这个形状读（`collaborationRoom.ts:112` → `normalizeToolMessages`）。
+   把 508 条扁平事件一行一条写进会话文件，形状就和运行期产物不一致，工具轨迹在 UI 上看不见。
+   所以 intake 写会话前必须加一层轮形装配。
+
+- [ ] **Step 6: 补轮形装配（原计划漏项，依上述第 5 条）**
+
+**Files:**
+- Create: `neurova/memory_ingest/bundle/turns.py`
+- Test: `tests/unit/memory_ingest/test_bundle_turns.py`
+
+**Interfaces:**
+- Consumes: `TranscriptRecord`
+- Produces: `to_turn_messages(records: Sequence[TranscriptRecord]) -> List[Dict[str, Any]]`
+  —— 连续的 `assistant_message`/`tool_call`/`tool_result` 合成一条轮形消息，`user_message`/
+  `system`/`compact_summary` 各自一条；输出形状对齐 `_collect_tool_messages()` 的条目键
+  （`type`/`tool_name`/`params`/`result`/`timestamp`），并带 `metadata.ingest`（`identity_key`
+  取该轮首条事件的 key，幂等据此跳过）。
+
 ### Task 6: intake 编排（plan / apply / undo）
 
 **Files:**

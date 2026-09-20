@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """QwenPaw 会话族转换器：只产包、不写库。
 
-现脚本对 conversation_history 是字段级有损的（14 列只取 9 列），本转换器的验收标准是
-把 headline / tool_state / agent_id / tool_input / metadata 补回；凡是契约与 extra 都
-接不住的东西（未知列、未知 kind）必须进 manifest.dropped 申报——静默降级是市面互导
-实现共同的病灶。
+现脚本对 conversation_history 是字段级有损的（实测 15 列只 SELECT 9 列），本转换器的验收
+标准是把 headline / tool_state / agent_id / tool_input / metadata 补回；凡是契约与 extra
+都接不住的东西（未知列、未知 kind、未知块型）必须进 manifest.dropped 申报——静默降级是
+市面互导实现共同的病灶。
 """
 import json
 import sqlite3
@@ -12,8 +12,10 @@ from pathlib import Path
 
 import pytest
 
+from neurova.memory_ingest.bundle.manifest import BundleError
 from neurova.memory_ingest.bundle.validate import validate_bundle
-from neurova.memory_ingest.converters.qwenpaw_history import convert
+from neurova.memory_ingest.converters import CONVERTERS
+from neurova.memory_ingest.converters.qwenpaw_history import CONVERTER_NAME, convert
 
 COLS = ["seq", "session_id", "agent_id", "kind", "role", "name", "content", "tool_call_id",
         "tool_input", "tool_state", "headline", "blocks", "metadata", "created_at", "dedup_key"]
@@ -159,3 +161,128 @@ def test_convert_is_read_only_on_source(tmp_path: Path, src: Path):
     convert(src, tmp_path / "bundle", agent_name="imported")
 
     assert src.read_bytes() == before
+
+
+def test_convert_rejects_store_that_does_not_match_its_fingerprint(tmp_path: Path):
+    """转换器必须自证来源：指纹不符就拒，不靠调用方保证路由正确。"""
+    conn = sqlite3.connect(tmp_path / "other.db")
+    conn.execute("CREATE TABLE unrelated (id TEXT)")
+    conn.commit()
+    conn.close()
+
+    with pytest.raises(BundleError):
+        convert(tmp_path / "other.db", tmp_path / "bundle", agent_name="imported")
+
+
+def test_convert_declares_block_types_the_contract_cannot_carry(tmp_path: Path, src: Path):
+    """reasoning_text 只装得下思考；其它块型接不住就必须申报，不能默默扔掉。"""
+    conn = sqlite3.connect(src)
+    conn.execute(
+        "UPDATE conversation_history SET blocks = ? WHERE seq = 2",
+        (json.dumps([{"type": "thinking", "thinking": "想一想"},
+                     {"type": "image", "url": "file:///tmp/a.png"}]),))
+    conn.commit()
+    conn.close()
+    out = tmp_path / "bundle"
+
+    manifest = convert(src, out, agent_name="imported")
+
+    assert any(entry["field"] == "blocks:image" and entry["count"] == 1
+               and entry["reason"] for entry in manifest.dropped)
+    assert _records(out)["sA:2"]["reasoning_text"] == "想一想"
+
+
+def test_converter_is_routable_by_its_own_handprint_name():
+    """指纹名必须查到转换器，否则 detect 报"唯一命中"而 apply 无路可走。"""
+    assert CONVERTERS[CONVERTER_NAME] is convert
+
+
+# --- 一轮多调用：实测源里 model_turn 的 blocks 最多含 6 个 tool_call，
+#     平列 tool_call_id/tool_input 只留最后一个（现脚本因此只导回 21/179 个调用）
+
+
+def _convert(tmp_path: Path, name: str, rows):
+    db = tmp_path / name
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE conversation_history ("
+                 + ", ".join(f"{c} TEXT" for c in COLS) + ")")
+    conn.executemany(
+        f"INSERT INTO conversation_history VALUES ({','.join('?' * len(COLS))})", rows)
+    conn.commit()
+    conn.close()
+    out = tmp_path / f"bundle-{name}"
+    return convert(db, out, agent_name="imported"), out
+
+
+def _call(call_id, tool_name, args, state="finished"):
+    return {"type": "tool_call", "id": call_id, "name": tool_name, "state": state,
+            "input": json.dumps(args, ensure_ascii=False)}
+
+
+def test_convert_expands_every_tool_call_block(tmp_path: Path):
+    """一轮里的每个调用都要成一条记录：平列只有一份，按平列转就丢调用。"""
+    blocks = [{"type": "thinking", "thinking": "先看看"},
+              {"type": "text", "text": "我来读两个文件"},
+              _call("tc1", "read_file", {"file_path": "A.md"}),
+              _call("tc2", "glob_search", {"pattern": "*.md"})]
+    rows = [_row(seq=1, session_id="sX", kind="model_turn", role="assistant", name="glob_search",
+                 content="我来读两个文件", tool_call_id="tc2",
+                 tool_input=json.dumps({"pattern": "*.md"}, ensure_ascii=False),
+                 blocks=json.dumps(blocks, ensure_ascii=False),
+                 created_at="2026-05-01T10:00:00", dedup_key="kx")]
+
+    manifest, out = _convert(tmp_path, "multi.db", rows)
+    records = list(_records(out).values())
+
+    assert manifest.counts["transcripts"] == 3
+    calls = [r for r in records if r["kind"] == "tool_call"]
+    assert [c["tool_call_id"] for c in calls] == ["tc1", "tc2"]
+    assert [c["tool_name"] for c in calls] == ["read_file", "glob_search"]
+    assert [c["tool_state"] for c in calls] == ["finished", "finished"]
+    assert json.loads(calls[0]["extra"]["tool_input"]) == {"file_path": "A.md"}
+
+
+def test_convert_keeps_text_and_call_order(tmp_path: Path):
+    """正文与调用的先后顺序是轮内语义，展开后仍按源块序排。"""
+    blocks = [{"type": "text", "text": "先说话"}, _call("tc1", "t", {}),
+              {"type": "text", "text": "后说话"}]
+    rows = [_row(seq=1, session_id="sX", kind="model_turn", role="assistant",
+                 content="先说话后说话", blocks=json.dumps(blocks, ensure_ascii=False),
+                 created_at="2026-05-01T10:00:00", dedup_key="kx")]
+
+    _, out = _convert(tmp_path, "order.db", rows)
+    by_key = _records(out)
+
+    assert [by_key[f"sX:{n}"]["kind"] for n in (1, 2, 3)] == [
+        "assistant_message", "tool_call", "assistant_message"]
+    assert by_key["sX:1"]["content_blocks"][0]["text"] == "先说话"
+    assert by_key["sX:3"]["content_blocks"][0]["text"] == "后说话"
+
+
+def test_identity_keys_stay_unique_within_one_source_row(tmp_path: Path):
+    """identity_key 是幂等键：一行展开成多条时必须各自可寻址，否则二次导入互相吞。"""
+    blocks = [_call("tc1", "t", {}), _call("tc2", "t", {})]
+    rows = [_row(seq=1, session_id="sX", kind="model_turn", role="assistant",
+                 blocks=json.dumps(blocks), created_at="2026-05-01T10:00:00",
+                 dedup_key="kx")]
+
+    _, out = _convert(tmp_path, "idem.db", rows)
+    keys = [r["identity_key"] for r in _records(out).values()]
+
+    assert len(keys) == 2 and len(set(keys)) == 2
+    assert validate_bundle(out) == []
+
+
+def test_convert_declares_binary_blocks(tmp_path: Path):
+    """图片块的正文是 base64，包内 media 存储未落地前必须申报，不能塞进会话文件。"""
+    rows = [_row(seq=1, session_id="sX", kind="context_msg", role="user", content="看图",
+                 blocks=json.dumps([{"type": "text", "text": "看图"},
+                                    {"type": "data", "name": "shot.png",
+                                     "source": {"type": "base64", "data": "iVBORw0KGgo"}}]),
+                 created_at="2026-05-01T10:00:00", dedup_key="kx")]
+
+    manifest, out = _convert(tmp_path, "binary.db", rows)
+
+    assert any(entry["field"] == "blocks:data" and entry["count"] == 1
+               and "media" in entry["reason"] for entry in manifest.dropped)
+    assert manifest.counts["transcripts"] == 1

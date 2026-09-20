@@ -55,3 +55,19 @@ def load_manifest(path: Path) -> BundleManifest:
         dropped=tuple(raw.get("dropped", ())),
         stores=tuple(raw.get("stores", ())),
     )
+
+
+def dump_manifest(manifest: BundleManifest, path: Path) -> Path:
+    """与 load_manifest 对称：键名只在此处出现一次，转换器不各写一份。"""
+    path = Path(path)
+    payload = {
+        "schema_version": manifest.schema_version,
+        "generated_at": manifest.generated_at,
+        "agent_name": manifest.agent_name,
+        "source": manifest.source,
+        "counts": manifest.counts,
+        "dropped": [dict(entry) for entry in manifest.dropped],
+        "stores": [dict(entry) for entry in manifest.stores],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
