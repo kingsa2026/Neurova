@@ -733,6 +733,26 @@ export default {
     expires: '만료 시간',
     metadata: '메타데이터',
   },
+  conflictAxis: {
+    entry: '중복 항목',
+    fact: '거버넌스 충돌',
+  },
+  conflictKind: {
+    value: '값',
+    qualifier: '수식',
+    type: '유형',
+    temporal: '시한',
+    cardinality: '기수',
+  },
+  conflictPolicyKind: {
+    mostRecent: '최신 우선',
+    highestConfidence: '최고 신뢰',
+    credibilityWeighted: '주장 가중',
+    keepBoth: '양쪽 유지',
+    manual: '사람 판단',
+  },
+
+
   knowledge: {
     scopeAll: '전체',
     scopePublic: '공개 라이브러리',
@@ -765,6 +785,12 @@ export default {
     conflictSimilarity: '유사도 {score}%',
     conflictKeepBoth: '둘 다 유지',
     conflictSupersede: '새 설명으로 대체',
+    conflictDismiss: '충돌 아님',
+    conflictPickWinner: '우세한 설명 선택',
+    conflictMembers: '대립하는 설명: {members}',
+    conflictSeverity: '심각도 {score}%',
+    conflictPolicy: '권장 정책: {policy}',
+    conflictNoBasis: '근거 없음 · 사람이 승자를 지정해야 합니다',
     conflictResolved: '처리됨',
     tombstones: '지식 묘비',
     tombstoneEmpty: '삭제된 항목이 없습니다',

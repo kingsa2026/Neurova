@@ -733,6 +733,26 @@ export default {
     expires: 'Expire le',
     metadata: 'Métadonnées',
   },
+  conflictAxis: {
+    entry: 'Doublon',
+    fact: 'Conflit de gouvernance',
+  },
+  conflictKind: {
+    value: 'Valeur',
+    qualifier: 'Qualificatif',
+    type: 'Type',
+    temporal: 'Temporel',
+    cardinality: 'Cardinalité',
+  },
+  conflictPolicyKind: {
+    mostRecent: 'Le plus récent',
+    highestConfidence: 'Confiance la plus élevée',
+    credibilityWeighted: 'Pondéré par assertions',
+    keepBoth: 'Garder les deux',
+    manual: 'Appel humain',
+  },
+
+
   knowledge: {
     scopeAll: 'Tout le visible',
     scopePublic: 'Public',
@@ -765,6 +785,12 @@ export default {
     conflictSimilarity: 'Similarité {score}%',
     conflictKeepBoth: 'Garder les deux',
     conflictSupersede: 'Remplacer l’ancien',
+    conflictDismiss: 'Pas de conflit',
+    conflictPickWinner: 'Choisir la version retenue',
+    conflictMembers: 'Versions en désaccord : {members}',
+    conflictSeverity: 'Gravité {score}%',
+    conflictPolicy: 'Politique recommandée : {policy}',
+    conflictNoBasis: 'Sans fondement · un humain doit trancher',
     conflictResolved: 'Tranché',
     tombstones: 'Pierres tombales de connaissances',
     tombstoneEmpty: 'Aucune entrée supprimée',

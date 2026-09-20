@@ -733,6 +733,26 @@ export default {
     expires: 'Scadenza',
     metadata: 'Metadati',
   },
+  conflictAxis: {
+    entry: 'Voce duplicata',
+    fact: 'Conflitto di governance',
+  },
+  conflictKind: {
+    value: 'Valore',
+    qualifier: 'Qualificatore',
+    type: 'Tipo',
+    temporal: 'Temporale',
+    cardinality: 'Cardinalità',
+  },
+  conflictPolicyKind: {
+    mostRecent: 'Più recente',
+    highestConfidence: 'Confidenza massima',
+    credibilityWeighted: 'Ponderata per asserzioni',
+    keepBoth: 'Mantieni entrambe',
+    manual: 'Serve un umano',
+  },
+
+
   knowledge: {
     scopeAll: 'Tutto il visibile',
     scopePublic: 'Pubblico',
@@ -765,6 +785,12 @@ export default {
     conflictSimilarity: 'Similarità {score}%',
     conflictKeepBoth: 'Mantieni entrambi',
     conflictSupersede: 'Sostituisci il vecchio',
+    conflictDismiss: 'Non è un conflitto',
+    conflictPickWinner: 'Scegli la versione vincente',
+    conflictMembers: 'Versioni in disaccordo: {members}',
+    conflictSeverity: 'Gravità {score}%',
+    conflictPolicy: 'Policy consigliata: {policy}',
+    conflictNoBasis: 'Senza base · serve una decisione umana',
     conflictResolved: 'Deciso',
     tombstones: 'Lapidi della conoscenza',
     tombstoneEmpty: 'Nessuna voce eliminata',

@@ -733,6 +733,26 @@ export default {
     expires: 'Истекает',
     metadata: 'Метаданные',
   },
+  conflictAxis: {
+    entry: 'Дубликат записи',
+    fact: 'Конфликт управления',
+  },
+  conflictKind: {
+    value: 'Значение',
+    qualifier: 'Квалификатор',
+    type: 'Тип',
+    temporal: 'Временной',
+    cardinality: 'Кардинальность',
+  },
+  conflictPolicyKind: {
+    mostRecent: 'Самая свежая',
+    highestConfidence: 'Наибольшая уверенность',
+    credibilityWeighted: 'Взвешено по утверждениям',
+    keepBoth: 'Оставить обе',
+    manual: 'Нужен человек',
+  },
+
+
   knowledge: {
     scopeAll: 'Всё видимое',
     scopePublic: 'Публичные',
@@ -765,6 +785,12 @@ export default {
     conflictSimilarity: 'Сходство {score}%',
     conflictKeepBoth: 'Оставить обе',
     conflictSupersede: 'Заменить старое',
+    conflictDismiss: 'Не конфликт',
+    conflictPickWinner: 'Выберите победившую формулировку',
+    conflictMembers: 'Расходящиеся формулировки: {members}',
+    conflictSeverity: 'Серьёзность {score}%',
+    conflictPolicy: 'Рекомендуемая стратегия: {policy}',
+    conflictNoBasis: 'Нет основания · решение должно быть ручным',
     conflictResolved: 'Решено',
     tombstones: 'Могильники знаний',
     tombstoneEmpty: 'Нет удалённых записей',

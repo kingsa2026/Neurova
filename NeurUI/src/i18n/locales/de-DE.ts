@@ -733,6 +733,26 @@ export default {
     expires: 'Läuft ab',
     metadata: 'Metadaten',
   },
+  conflictAxis: {
+    entry: 'Doppeleintrag',
+    fact: 'Governance-Konflikt',
+  },
+  conflictKind: {
+    value: 'Wert',
+    qualifier: 'Qualifikator',
+    type: 'Typ',
+    temporal: 'Zeitlich',
+    cardinality: 'Kardinalität',
+  },
+  conflictPolicyKind: {
+    mostRecent: 'Neueste',
+    highestConfidence: 'Höchstes Vertrauen',
+    credibilityWeighted: 'Aussagen-gewichtet',
+    keepBoth: 'Beide behalten',
+    manual: 'Braucht Mensch',
+  },
+
+
   knowledge: {
     scopeAll: 'Alle sichtbaren',
     scopePublic: 'Öffentlich',
@@ -765,6 +785,12 @@ export default {
     conflictSimilarity: 'Ähnlichkeit {score}%',
     conflictKeepBoth: 'Beide behalten',
     conflictSupersede: 'Altes ersetzen',
+    conflictDismiss: 'Kein Konflikt',
+    conflictPickWinner: 'Siegreiche Aussage wählen',
+    conflictMembers: 'Widersprüchliche Aussagen: {members}',
+    conflictSeverity: 'Schweregrad {score}%',
+    conflictPolicy: 'Empfohlene Richtlinie: {policy}',
+    conflictNoBasis: 'Ohne Grundlage · ein Mensch muss entscheiden',
     conflictResolved: 'Entschieden',
     tombstones: 'Wissens-Grabsteine',
     tombstoneEmpty: 'Keine gelöschten Einträge',

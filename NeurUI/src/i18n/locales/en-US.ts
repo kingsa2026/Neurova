@@ -736,6 +736,24 @@ export default {
     expires: 'Expires',
     metadata: 'Metadata',
   },
+  conflictAxis: {
+    entry: 'Duplicate entry',
+    fact: 'Governance conflict',
+  },
+  conflictKind: {
+    value: 'Value',
+    qualifier: 'Qualifier',
+    type: 'Type',
+    temporal: 'Temporal',
+    cardinality: 'Cardinality',
+  },
+  conflictPolicyKind: {
+    mostRecent: 'Most recent',
+    highestConfidence: 'Highest confidence',
+    credibilityWeighted: 'Assertion weighted',
+    keepBoth: 'Keep both',
+    manual: 'Needs a human',
+  },
   knowledge: {
     scopeAll: 'All visible',
     scopePublic: 'Public',
@@ -768,6 +786,13 @@ export default {
     conflictSimilarity: 'Similarity {score}%',
     conflictKeepBoth: 'Keep both',
     conflictSupersede: 'Supersede old',
+    conflictDismiss: 'Not a conflict',
+    conflictPickWinner: 'Pick the winning statement',
+    conflictMembers: 'Statements in disagreement: {members}',
+    conflictSeverity: 'Severity {score}%',
+    conflictPolicy: 'Recommended policy: {policy}',
+    conflictNoBasis: 'No basis · a human must pick the winner',
+
     conflictResolved: 'Resolved',
     tombstones: 'Knowledge Tombstones',
     tombstoneEmpty: 'No deleted entries',
