@@ -379,6 +379,22 @@ class EvolutionOrchestrator:
 
         logger.info("EvolutionOrchestrator initialized")
 
+    @property
+    def crystallizer(self) -> Optional[Any]:
+        return self._crystallizer
+
+    @crystallizer.setter
+    def crystallizer(self, value: Optional[Any]) -> None:
+        """注入结晶器时同步挂上门槛桥（工单 004）。
+
+        `agent_core.py` 是在构造之后才把 agent 自己的结晶器赋进来，
+        所以桥必须挂在 setter 上：否则 RSI 调 `crystallize_min_*` 只改报表，
+        入库闸仍读结晶器里的默认值。
+        """
+        self._crystallizer = value
+        if value is not None:
+            self.experience_feedback.attach_crystallizer(value)
+
     def register_tools(self, tool_names: List[str]) -> None:
         """注册工具列表（同时注册到权重和生命周期管理器）"""
         self._registered_tools = tool_names.copy()
@@ -479,6 +495,31 @@ class EvolutionOrchestrator:
 
         logger.debug("Tool execution recorded: %s, success=%s", tool_name, success)
 
+    def on_pattern_crystallized(
+        self,
+        *,
+        pattern_key: str,
+        primary_tool: str,
+        success_rate: float,
+        sample_count: int,
+    ) -> Dict[str, Any]:
+        """结晶入库通报 —— 触发进化节流路径，但**不投任何成败票**（工单 005）。
+
+        原路径走 `record_experience(..., True, ...)`：把"我刚存了一条模式"当成一次
+        任务成功经验写进关联计数，等于门槛给自己加分（还会再触发一轮结晶）。
+        入库这件事的证据已经在候选的样本计数里，不需要再造一张票。
+        """
+        logger.info(
+            "结晶模式入库: key='%s' tool=%s rate=%.2f samples=%s",
+            pattern_key, primary_tool, success_rate, sample_count,
+        )
+        rsi_state = self._maybe_trigger_rsi(force=False)
+        return {
+            "notified": True,
+            "rsi": rsi_state if rsi_state is not None
+            else {"triggered": False, "reason": "throttled_or_no_rsi"},
+        }
+
     def on_experience_recorded(
         self,
         text: str,
@@ -502,11 +543,14 @@ class EvolutionOrchestrator:
         Returns:
             包含洞察信息的字典
         """
-        # 使用 ExperienceFeedback 处理经验
-        outcome = "success" if success else "failure"
+        # 使用 ExperienceFeedback 处理经验 —— 三态贯通（工单 003）：
+        # 原实现算出 outcome 却没传下去，被 :261 的关键词粗分覆盖，
+        # 于是客观失败与"无回执"都被洗成成功票。
+        objective = None if success is None else ("success" if success else "failure")
         result = self.experience_feedback.process_experience(
             experience_text=text,
             task_type=task,
+            outcome=objective,
         )
 
         # 更新权重
@@ -515,12 +559,15 @@ class EvolutionOrchestrator:
                 self.tool_weights.update_weight(tool, success)
 
         # 更新模式挖掘器
+        # 工单 013：`success` 原样进序列台账（装配点已按 010 做成票据优先的三态）。
+        # 这里不再判空也不默认 True —— 无票就是 None，模式即"无证据"，不投票。
         if tools:
-            self.pattern_miner.add_sequence(tools, context=task)
+            self.pattern_miner.add_sequence(tools, context=task, success=success)
 
         # 触发经验结晶
-        # 入口放宽：纯对话轮（无工具）以 "chat" 伪工具名观察，与 EKB 的
-        # skill_name="chat" 约定一致——否则无工具轮永不进入结晶缓冲
+        # 入口：纯对话轮（无工具）以 "chat" 伪工具名观察，与 EKB 的 skill_name="chat"
+        # 约定一致；`success` 三态原样传给结晶器，由它把 None 记成"无证据观察"
+        # （既不投成功票也不投失败票，工单 003/004）
         cryst = crystallizer or self.crystallizer
         if cryst:
             observe_targets = tools if tools else ["chat"]
@@ -544,7 +591,7 @@ class EvolutionOrchestrator:
         return {
             "insights_count": result.get("insights_created", 0),
             "tools_mentioned": result.get("tools_mentioned", []),
-            "outcome": result.get("outcome", outcome),
+            "outcome": result.get("outcome", objective),
             "task": task,
             "success": success,
             "association": result.get("associations_updated", 0),

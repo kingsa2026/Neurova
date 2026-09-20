@@ -21,6 +21,10 @@ class MemoryType(Enum):
     PATTERN = "pattern"  # 模式记忆（行为模式）
     EMOTIONAL = "emotional"  # 情感记忆
     WORKING = "working"  # 工作记忆
+    # 工作流经验：多步工具链的可复用打法。写入方一直在传这个值
+    # （post_chat_pipeline._step_record_workflow_experience），枚举缺项时
+    # 被静默降级成 SEMANTIC —— 类型区分在写入瞬间就丢了（工单 012）。
+    WORKFLOW_EXPERIENCE = "workflow_experience"
 
 
 class MemoryCategory(Enum):

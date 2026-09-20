@@ -31,7 +31,7 @@ from .base import (
 async def search_memories(
     query: str = Query(default="", min_length=0, description="搜索关键词"),
     category: Optional[str] = Query(default=None, description="按分类过滤"),
-    memory_type: Optional[str] = Query(default=None, description="按记忆类型过滤，逗号分隔多值 (semantic/episodic/procedural/pattern/emotional/working)"),
+    memory_type: Optional[str] = Query(default=None, description="按记忆类型过滤，逗号分隔多值 (semantic/episodic/procedural/pattern/emotional/working/workflow_experience)"),
     limit: int = Query(default=10, ge=1, le=100, description="返回条数"),
     agent_id: Optional[str] = Query(default=None, description="Agent ID"),
     user: Dict[str, Any] = Depends(get_current_user_or_default),

@@ -44,6 +44,20 @@ def set_turn_injected_reflections(ids: Optional[list]) -> None:
 def get_turn_injected_reflections() -> Optional[list]:
     return _injected_reflections_var.get()
 
+# 工单 006（经验回写通路）：本轮被注入 prompt 的 EKB 经验行 id。
+# 检索侧（chat_pipeline._retrieve_ekb_experience）写入，回合末
+# （post_chat._step_record_experience）按本轮客观成败回写 injected_count /
+# adoption_outcome。没有这份身份集，"经验到底帮没帮上忙"就无处落账。
+_injected_experiences_var: ContextVar = ContextVar("neurova_turn_injected_experiences", default=None)
+
+
+def set_turn_injected_experiences(ids: Optional[list]) -> None:
+    _injected_experiences_var.set(list(ids) if ids else [])
+
+
+def get_turn_injected_experiences() -> Optional[list]:
+    return _injected_experiences_var.get()
+
 # 会话级轮次计数（2026-09-15 反思/成长链路排查根因修复）：
 # 原为 ContextVar——uvicorn 每请求在独立 task 上下文执行，set() 不跨请求
 # 传播 → increment 后恒 1，post_chat "每 10 轮强制反思"门控数学上永不成立。

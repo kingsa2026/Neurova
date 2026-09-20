@@ -70,7 +70,7 @@ class AddMemoryRequest(BaseModel):
     """添加记忆请求"""
 
     content: str = Field(..., min_length=1, max_length=50000, description="记忆内容")
-    memory_type: Optional[str] = Field(default=None, description="记忆类型 (semantic/episodic/procedural/pattern/emotional/working，为空则默认 semantic)")
+    memory_type: Optional[str] = Field(default=None, description="记忆类型 (semantic/episodic/procedural/pattern/emotional/working/workflow_experience，为空则默认 semantic)")
     category: Optional[str] = Field(default=None, description="记忆分类 (为空则自动推断)")
     is_important: Optional[bool] = Field(default=None, description="是否重要 (为空则自动判断)")
     is_crystallized: Optional[bool] = Field(default=None, description="是否固化 (为空则自动判断)")

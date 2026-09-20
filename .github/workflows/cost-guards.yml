@@ -1,0 +1,69 @@
+name: LLM Cost Control Guards
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+
+jobs:
+  cost-guards:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run Big-brain Model Guard
+        run: npm run guard:big-brain
+        id: big-brain
+      
+      - name: Run Tracking Guard (when implemented)
+        run: npm run guard:llm-tracked
+        id: tracking
+        continue-on-error: true
+      
+      - name: Report Results
+        run: |
+          echo "## Cost Control Guard Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Big-brain Guard" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.big-brain.outcome }}" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.tracking.outcome }}" != "skipped" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Tracking Guard" >> $GITHUB_STEP_SUMMARY
+            echo "${{ steps.tracking.outcome }}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Optional: Run in merge queue for main branch
+  enforce-on-main:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run all guards
+        run: npm run guard:all
+      
+      - name: Fail if violations found
+        if: failure()
+        run: |
+          echo "::error::LLM cost control violations detected! Please fix before merging."
+          exit 1

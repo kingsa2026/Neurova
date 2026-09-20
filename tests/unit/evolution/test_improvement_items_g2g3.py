@@ -138,7 +138,10 @@ class TestC9CrystallizerPersistence(unittest.TestCase):
             stored = []
             engine.store.side_effect = lambda node: stored.append(node)
             c2.observe("web_search", "搜索天气", success=True)
-            self.assertGreaterEqual(len(stored), 1, "恢复计数后第三次 observe 应触发结晶")
+            # 工单 005 之后"规则预筛通过"不再等于入库：候选先排队等 LLM 裁决。
+            # 本用例测的是跨重启计数恢复，所以判据取"越过了预筛"这个输出面。
+            self.assertTrue(stored or c2.list_pending(),
+                            "恢复计数后第三次 observe 应触发结晶（入库或进待裁决队列）")
 
 
 class TestC10SkillReviewGate(unittest.TestCase):

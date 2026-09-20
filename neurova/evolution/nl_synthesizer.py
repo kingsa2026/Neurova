@@ -41,6 +41,7 @@ class SynthesisStage(Enum):
     SEQUENCE_SUGGESTION = "sequence_suggestion"  # 序列建议
     CONFIDENCE_ESTIMATION = "confidence_estimation"  # 置信度估算
     COMPLETED = "completed"  # 完成
+    PENDING_REVIEW = "pending_review"  # 置信闸拦下：待人工复核，不得进注册路径
     FAILED = "failed"  # 失败
 
 
@@ -135,7 +136,7 @@ class NLToolSynthesizer:
 
     def __init__(
         self,
-        min_confidence: float = 0.3,
+        min_confidence: float = 0.5,
         max_sequence_length: int = 5,
         enable_pattern_mining: bool = True,
         pattern_miner: typing.Any = None,
@@ -144,7 +145,13 @@ class NLToolSynthesizer:
         初始化合成器
 
         参数:
-            min_confidence: 最小置信度阈值
+            min_confidence: 最小置信度阈值（工单 014 从 0.3 抬到 0.5）。
+                抬阈值不是收紧口径，是让门**可达**：`estimate_confidence` 对任何
+                非空描述都有 ≈0.45 的下界（分类为 general 也给 5 分、序列只要非空
+                就满 25 分），配 0.3 时低置信分支永远不触发——门做实了却仍不存在。
+                实测样本：0.45（"帮我 zzzz"）/0.5/0.65（"帮我搜索文件"）/0.7。
+                估器本身"有序列即满分"的虚高是同批次的另一处待修（属质量度量面），
+                本处不靠改打分公式交差，避免把注册率一次性打没。
             max_sequence_length: 最大序列长度
             enable_pattern_mining: 是否启用模式挖掘
             pattern_miner: 可选的 PatternMiner 实例（P0-B3 修复：
@@ -156,6 +163,8 @@ class NLToolSynthesizer:
         self._enable_pattern_mining = enable_pattern_mining
         # P0-B3: 保留 pattern_miner 引用供合成流程使用（可选）
         self._pattern_miner = pattern_miner
+        # 置信闸拦下计数（工单 014）：008 指标面就绪前的可观测落点
+        self.low_confidence_rejections = 0
 
         # 内置工具模式库
         self._tool_patterns = self._load_tool_patterns()
@@ -247,15 +256,32 @@ class NLToolSynthesizer:
             tool.description = description
             tool.tool_id = f"synth_{uuid.uuid4().hex[:8]}"
 
-            # 检查置信度
+            # 置信闸（工单 014）：低置信是闸，不是提示。
+            # 原实现在这里只 warnings.append 一条，随后无条件 COMPLETED + success=True，
+            # 调用方只看这两个字段 ⇒ 门不存在。拦下时产物仍挂在 synthesized_tool 上
+            # 供人工复核（拦 ≠ 丢），warnings 保留为信息位但不再是唯一处置。
             if confidence < self._min_confidence:
                 result.warnings.append(f"低置信度: {confidence:.2f} < {self._min_confidence}")
+                self.low_confidence_rejections += 1
+                tool.stage = SynthesisStage.PENDING_REVIEW
+                result.stages_completed.append(SynthesisStage.PENDING_REVIEW)
+                result.success = False
+                result.error_message = (
+                    f"置信度 {confidence:.2f} 低于阈值 {self._min_confidence}，转人工复核"
+                )
+                result.synthesized_tool = tool
+                # 指标面（工单 008）就绪前先落日志，计数同步落在
+                # `low_confidence_rejections` 上，便于后续接进质量读数。
+                logger.warning(
+                    "NL 合成被置信闸拦下: %s (confidence=%.2f < %.2f)",
+                    tool.name, confidence, self._min_confidence,
+                )
+            else:
+                tool.stage = SynthesisStage.COMPLETED
+                result.stages_completed.append(SynthesisStage.COMPLETED)
 
-            tool.stage = SynthesisStage.COMPLETED
-            result.stages_completed.append(SynthesisStage.COMPLETED)
-
-            result.success = True
-            result.synthesized_tool = tool
+                result.success = True
+                result.synthesized_tool = tool
 
         except Exception as e:
             logger.error("Synthesis failed: %s", e)

@@ -118,6 +118,8 @@
         <a-tab-pane key="long_term" :tab="t('memory.longTerm')" />
         <a-tab-pane key="episodic" :tab="t('memory.categoryEpisodic')" />
         <a-tab-pane key="semantic" :tab="t('memory.categorySemantic')" />
+        <!-- 工作流经验：012 已进后端枚举，此前界面没有页签所以库里能存筛不出 -->
+        <a-tab-pane key="workflow_experience" :tab="t('memory.typeWorkflowExperience')" />
         <a-tab-pane key="hot" :tab="t('memory.hot')" />
         <a-tab-pane key="crystallized" :tab="t('memory.crystallized')" />
       </a-tabs>
@@ -270,12 +272,9 @@
           <a-col :span="12">
             <a-form-item :label="t('common.type')">
               <a-select v-model:value="createForm.type" style="width: 100%">
-                <a-select-option value="semantic">{{ t('memory.categorySemantic') }}</a-select-option>
-                <a-select-option value="episodic">{{ t('memory.categoryEpisodic') }}</a-select-option>
-                <a-select-option value="working">{{ t('memory.typeWorking') }}</a-select-option>
-                <a-select-option value="procedural">{{ t('memory.typeProcedural') }}</a-select-option>
-                <a-select-option value="pattern">{{ t('memory.typePattern') }}</a-select-option>
-                <a-select-option value="emotional">{{ t('memory.typeEmotional') }}</a-select-option>
+                <a-select-option v-for="mt in MEMORY_TYPES" :key="mt.value" :value="mt.value">
+                  {{ t(mt.labelKey) }}
+                </a-select-option>
               </a-select>
             </a-form-item>
           </a-col>
@@ -411,6 +410,10 @@ import { useAuthStore } from '@/stores/auth'
 import * as memoryApi from '@/api/modules/memory'
 import type { MemoryEntry, MemorySearchResult, MemoryStats } from '@/api/modules/memory'
 
+// 模板里直接读模块命名空间（memoryApi.X）会让渲染代理去 unref 命名空间对象，
+// 测试里被部分 mock 的模块会因此炸在 __v_isRef 上；在脚本里取一次即可。
+const MEMORY_TYPES = memoryApi.MEMORY_TYPES
+
 const { t } = useI18n()
 const authStore = useAuthStore()
 const isAdmin = computed(() => authStore.user?.role === 'admin')
@@ -522,14 +525,10 @@ const createForm = ref({
   tags: [] as string[],
 })
 
-const typeColor = (type: string) => {
-  // key = 后端 MemoryType 枚举值（页签契约对齐 2026-09-08）
-  const map: Record<string, string> = {
-    working: '#6366f1', episodic: '#f59e0b', semantic: '#8b5cf6',
-    procedural: '#10b981', pattern: '#0ea5e9', emotional: '#f43f5e',
-  }
-  return map[type] || '#6366f1'
-}
+const typeColor = (type: string) =>
+  // 色板与 MEMORY_TYPES 同源（工单 015）：此前这里另有一份 map，新增枚举值时
+  // 页签/下拉/色板三处各自漂移，workflow_experience 就是这么漏掉的
+  memoryApi.MEMORY_TYPE_COLOR[type] || '#6366f1'
 
 // NeRF channel color map for visualization
 const channelColorMap: Record<string, string> = {

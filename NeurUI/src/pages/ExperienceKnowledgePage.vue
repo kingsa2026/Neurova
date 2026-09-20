@@ -148,6 +148,18 @@
                     {{ record.outcome || 'unknown' }}
                   </a-tag>
                 </template>
+                <template v-else-if="column.key === 'adoption_outcome'">
+                  <a-tag v-if="record.adoption_outcome" :color="adoptionColor(record.adoption_outcome)">
+                    {{ record.adoption_outcome }}
+                  </a-tag>
+                  <span v-else>-</span>
+                </template>
+                <template v-else-if="column.key === 'operator_state'">
+                  <a-tag v-if="record.operator_disposition" :color="dispositionColor(record.operator_disposition)">
+                    {{ record.operator_disposition }}
+                  </a-tag>
+                  <span v-else>{{ t('experience.unaddressed') }}</span>
+                </template>
                 <template v-else-if="column.key === 'lessons'">
                   <span v-if="record.lessons?.length" class="lessons-count">{{ record.lessons.length }}</span>
                   <span v-else>-</span>
@@ -156,6 +168,23 @@
                   <div class="row-actions">
                     <GlassButton size="sm" variant="ghost" @click="findSimilar(record)">
                       {{ t('experience.similarExperiences') || 'Similar' }}
+                    </GlassButton>
+                    <GlassButton size="sm" variant="ghost" @click="setDisposition(record, 'endorsed')">
+                      {{ t('experience.approve') }}
+                    </GlassButton>
+                    <GlassButton size="sm" variant="ghost" @click="setDisposition(record, 'demoted')">
+                      {{ t('experience.demote') }}
+                    </GlassButton>
+                    <GlassButton size="sm" variant="ghost" @click="setDisposition(record, 'suppressed')">
+                      {{ t('experience.suppress') }}
+                    </GlassButton>
+                    <GlassButton
+                      v-if="record.operator_disposition"
+                      size="sm"
+                      variant="secondary"
+                      @click="setDisposition(record, null)"
+                    >
+                      {{ t('experience.restore') }}
                     </GlassButton>
                     <a-popconfirm
                       :title="t('common.delete') + '?'"
@@ -283,7 +312,7 @@ import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 import * as experienceApi from '@/api/modules/experience'
-import type { ExperienceRecord, ExperienceStats } from '@/api/modules/experience'
+import type { ExperienceDisposition, ExperienceRecord, ExperienceStats } from '@/api/modules/experience'
 
 const { t } = useI18n()
 const { agentId, currentAgent } = useAgentPage({
@@ -356,11 +385,21 @@ const rankingColumns = computed(() => [
 const recordColumns = computed(() => [
   { title: t('common.type'), key: 'task_type', width: 140 },
   { title: t('common.description'), dataIndex: 'context', key: 'context', ellipsis: true },
-  { title: t('experience.outcome'), key: 'outcome', width: 120 },
+  { title: t('experience.outcome'), key: 'outcome', width: 100 },
+  // 采纳证据（006 回写）与处置态（015）必须同屏：没有它们，"降过权的条目"
+  // 和"没动过的条目"在列表里长得一模一样
+  { title: t('experience.adoptionEvidence'), key: 'adoption_outcome', width: 110 },
+  { title: t('experience.operatorState'), key: 'operator_state', width: 110 },
   { title: t('growth.lesson') + 's', key: 'lessons', width: 90, align: 'center' as const },
   { title: t('common.createdAt'), dataIndex: 'created_at', width: 180 },
-  { title: t('common.actions'), key: 'actions', width: 200 },
+  { title: t('common.actions'), key: 'actions', width: 380 },
 ])
+
+const adoptionColor = (outcome: string) =>
+  outcome === 'success' ? 'green' : outcome === 'failure' ? 'red' : 'orange'
+
+const dispositionColor = (state: ExperienceDisposition) =>
+  state === 'endorsed' ? 'blue' : state === 'demoted' ? 'orange' : 'volcano'
 
 const filteredRecords = computed(() => {
   if (!searchQuery.value) return records.value
@@ -517,6 +556,17 @@ const deleteExperience = async (id: string) => {
     message.success(t('common.success'))
     await fetchExperiences()
     await fetchStats()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+  }
+}
+
+/** 人工处置（工单 015）：可逆、不删数据；disposition=null 即恢复未处置态。 */
+const setDisposition = async (record: ExperienceRecord, disposition: ExperienceDisposition | null) => {
+  try {
+    await experienceApi.setExperienceDisposition(record.id, disposition)
+    message.success(t('common.success'))
+    await fetchExperiences()
   } catch (e: any) {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   }

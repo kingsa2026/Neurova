@@ -47,6 +47,21 @@ from neurova.core.turn_context import (
 )
 
 
+def resolve_tool_outcome(records: List[Dict[str, Any]]) -> Optional[bool]:
+    """本轮的客观成败，三态：True / False / None（None = 没有客观回执）。
+
+    成败只由 ``tool_result`` 记录携带；``tool_call`` 记录刻意**没有** ``success`` 键
+    （``agent/loops/base.py:196-204``）。旧写法 ``any(tm.get("success", True) ...)``
+    于是恒真 —— 任一工具失败也记成功，经验库的 ``success`` 位从此不携带信息。
+    无工具结果轮返回 None 而不是 True：「确实没问题」与「这轮没测量」是两件事。
+    """
+    results = [r for r in (records or [])
+               if isinstance(r, dict) and r.get("type") == "tool_result"]
+    if not results:
+        return None
+    return all(r.get("success") is True for r in results)
+
+
 class TurnState:
     """一轮请求的状态门面（无实例字段；实存于 turn_context 的 ContextVar）。"""
 

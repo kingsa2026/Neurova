@@ -42,6 +42,8 @@ EXPECTED_MAP = {
     "frontend": ["frontend"],
     "perf-gate": ["perf-gate"],
     "dependency-audit": ["dependency-audit"],
+    # 经验质量基准（工单 009 新增）：真实语料 A/B 读数 + 低质探针自证，双侧同命令。
+    "experience-quality": ["experience-quality"],
 }
 
 # 非阻塞（允许失败）的 job：两侧行为必须一致。
@@ -78,6 +80,9 @@ EXPECTED_CORE_COMMANDS = {
         # npm audit 都看不到它们，此前完全无人审计。
         "python scripts/ci/osv_audit.py",
     ],
+    # 经验质量基准（工单 009）：读数取自 EKB.quality_snapshot，语料冻结在仓内，
+    # 每次运行先自证低质探针会被判红（详见 scripts/ci/experience_quality_gate.py）。
+    "experience-quality": ["python scripts/ci/experience_quality_gate.py"],
 
 }
 
@@ -281,6 +286,11 @@ class TestAntiRegression:
             "scripts/ci_static_gate.py", "scripts/ci/protected_tests.txt",
             "tests/e2e/test_backend_boot.py", "tests/unit/test_audit_regressions.py",
             "NeurUI/package-lock.json", "scripts/ci/perf_gate.py",
+            # 工单 009：经验质量基准的脚本与两份语料（真实冻结语料 + 低质探针）。
+            # 少一份 = 门禁上线即红（探针缺失时无法自证不空转）。
+            "scripts/ci/experience_quality_gate.py",
+            "tests/fixtures/experience_quality_corpus.json",
+            "tests/fixtures/experience_quality_corpus_low_signal.json",
         ):
             assert (PROJECT_ROOT / f).exists(), f"CI 配置引用的门禁构件缺失: {f}"
 

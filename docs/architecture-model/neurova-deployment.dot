@@ -1,0 +1,149 @@
+// Neurova — 运行时与部署拓扑视图
+// 技能来源: deployment-topology-analyzer + graphviz
+// 视图状态: current。本图无运行时遥测支撑，全部为脚本/配置静态推导（见 u4）
+// 证据: [文件:行号]；生成日期 2026-09-19
+
+digraph NeurovaDeployment {
+    rankdir=TB;
+    nodesep=0.45; ranksep=0.75;
+    fontname="Sans"; fontsize=13;
+    labelloc=t; fontsize=19;
+    label="Neurova 部署与运行拓扑\n核心结论：本机与 Compose 均为单/双进程，唯一真实多服务拓扑是 Helm\n红框＝已在源码中证实的失败路径";
+
+    node [shape=box, style="rounded,filled", fillcolor="#f8f9fa", color="#495057", fontsize=11, margin="0.15,0.08"];
+    edge [fontsize=10];
+
+    // ================= 本机开发拓扑 =================
+    subgraph cluster_local {
+        label="① 本机开发拓扑（唯一有脚本证据的运行形态）";
+        style="rounded"; color="#08427b"; fontsize=13; labeljust=l;
+
+        launcher [label="start.py（编排者）\nBACKEND :9527 / FRONTEND :8100 常量 [start.py:7-8]\n[scripts/config.py:23-24]  前端目录=NeurUI [config.py:15]"];
+        modeBackend [label="--backend  只起后端 + wait_for_server\n[start.py:710-719]"];
+        modeChat [label="--chat  并行起前后端，就绪后 webbrowser.open\n60s IPv4/IPv6 轮询 [start.py:747-771,235-266]"];
+        modeCheck [label="--check  仅打印状态即退出\n[start.py:680-682]"];
+        modeCli [label="--cli  拉 cli.py 子进程\n[start.py:504-520]"];
+        modeProd [label="--prod  把 NeurUI/dist 拷进 neurova/static\n→ 仅后端托管，前端进程消失 [start.py:281-291]"];
+
+        beproc [label="后端进程\nvenv python 起 start_server.py 子进程\nstdout 追加 logs/server.log\nWindows 加 CREATE_NO_WINDOW\n[start.py:165-193]\nuvicorn 监听 NEUROVA_HOST(0.0.0.0)\n/ NEUROVA_PORT(9527) [start_server.py:102-111]"];
+        feproc [label="前端进程  Vite dev server\nnpm run dev -- --port 8100, strictPort\nshell=True [start.py:216-226]"];
+        logs [label="日志轮转 20MB×3 + launcher.log tee\n[start.py:72-133]", shape=cylinder];
+
+        launcher -> modeBackend;
+        launcher -> modeChat;
+        launcher -> modeCheck;
+        launcher -> modeCli;
+        launcher -> modeProd;
+        modeBackend -> beproc [label="spawn"];
+        modeChat -> beproc [label="spawn"];
+        modeChat -> feproc [label="spawn"];
+        beproc -> logs [label="写"];
+
+        dupe [label="check_and_start.py（第二套启动器）\n同端口、并行存在、未接入 start.py\n[check_and_start.py:23-24,137,193]", fillcolor="#ffe3e3"];
+        hc [label="scripts/health_check.py\n/health 探测\n[health_check.py:21-41,429]"];
+        launcher -> hc [label="就绪判定"];
+        dupe -> beproc [label="竞争同一 :9527", color="#c92a2a", style=dashed];
+    }
+
+    shell [label="平台入口差异\nstart.bat: --restart 走 UAC 提权 + pause 驻留 [start.bat:10-29]\nstart.sh: 探测 3.10+ 后 exec start.py [start.sh:24-54]", shape=note, fillcolor="#fff3bf"];
+    shell -> launcher;
+
+    // ================= 容器拓扑 =================
+    subgraph cluster_docker {
+        label="② Docker —— 默认 compose up 实际只有 1 个容器";
+        style="rounded"; color="#2b8a3e"; fontsize=13; labeljust=l;
+
+        img [label="Dockerfile 双阶段构建 python:3.12-slim\n[:9,:27]，创建非 root 用户 [:38]\n只 COPY neurova/ start_server.py\nrequirements.txt config/ [:44-49]\n→ 无前端构建、无 data 层\nEXPOSE 9527 [:64]\nHEALTHCHECK curl /health 30s/5s/3/3 [:67-68]\nCMD python start_server.py [:71]"];
+        cbe [label="service backend\n9527:9527，4 个 named volume + ./config:ro\nrequests 0.5CPU/1Gi · limits 2CPU/4Gi\nrestart unless-stopped\n[docker-compose.yml:13-64]"];
+        cfe [label="service frontend\nnode:20-alpine, 8100:8100\ndepends_on backend\n但 profiles: development\n→ 默认 compose up 不拉起\n[docker-compose.yml:67-85]", fillcolor="#ffe3e3"];
+        note [label="compose :30-32 明确记录\nDATABASE_PATH 曾是死配置", shape=note];
+
+        img -> cbe [label="build"];
+        cbe -> cfe [style=dashed, color="#2b8a3e", label="仅 dev profile"];
+        note -> cbe [style=invis];
+    }
+
+    // ================= K8s =================
+    subgraph cluster_k8s {
+        label="③ Helm —— 唯一真实的多服务逻辑拓扑（但副本数仍为 1）";
+        style="rounded"; color="#862e9c"; fontsize=13; labeljust=l;
+
+        charts [label="helm/neurova/templates  12 个模板\nbackend/frontend Deployment+Service\nhpa / ingress / pvc / secret\n/ configmap / serviceaccount"];
+        vals [label="values.yaml\nreplicaCount 均 =1 [:31,:112]\n副本>1 且缺 jwtSecret → 渲染期失败 [:150]\ningress host neurova.local [:193]", fillcolor="#f3d9fa"];
+        seenote [label="未见 imageRegistry/digest 等\n真实部署产物证据 → unknown", style="rounded,filled,dashed", fillcolor="#f1f3f5"];
+
+        charts -> vals;
+        vals -> seenote [style=dotted];
+    }
+
+    cbe -> charts [label="镜像来源推断（未证实）", style=dotted, color="#868e96"];
+
+    // ================= 存储 =================
+    subgraph cluster_storage {
+        label="④ 数据与存储落点（128 个 .db；路径常量无单一属主）";
+        style="rounded"; color="#44682e"; fontsize=13; labeljust=l;
+
+        dbroot [label="仓库根 .db\nneurova_memory.db 45KB\nneurova_memories_persist.db 28.7MB\nneurflow.db 4.8MB"];
+        dbdata [label="data/ 一层 24 个 .db 共 1.2GB\n活跃 WAL：agent_runs.db-wal 4.1MB\nchannel_ingress.db-wal 420KB"];
+        dbbak [label="data/backups/prefreeze-2026-09-01/\nneurova_memories_persist.db 793MB\n← 全仓最大单文件"];
+        paths [label="DB 路径常量三处各自为政\ncore/database.py:19 DEFAULT_DB_PATH\ncore/db_indexes.py:234-241 NEUROVA_DB_PATH+兜底\nmodels/cost_store.py:29 data/llm_cost.db\n＋ 47 个文件直接 sqlite3.connect", fillcolor="#ffe3e3"];
+        fs [label="文件态目录\nsessions/ 2408 文件 16MB（按 agent 分目录）\nagent_workspaces/ 610 文件 51MB\n  └ 每 agent: memory/memory.db\n    + neurova_memories_persist.db\n    + .approval/approvals.db\ntrajectories/ 2780 文件 7.6MB + index.json\nstorage/users 38 文件 11MB\nuploads/console 73 文件 1.5GB\nmemory_storage/ 0 文件（空）"];
+
+        dbroot -> paths [style=invis];
+        dbdata -> dbbak [label="备份复制"];
+    }
+
+    beproc -> dbroot [label="SQL / RLock"];
+    beproc -> fs [label="读写"];
+    cbe -> fs [label="named volume"];
+    charts -> dbdata [label="pvc", style=dotted];
+
+    // ================= 迁移链路（桩） =================
+    subgraph cluster_migration {
+        label="⑤ 零停机迁移 —— 文档所述机制在代码中为 pass";
+        style="rounded"; color="#c92a2a"; fontsize=13; labeljust=l;
+
+        mig [label="neurova/Storage/zero_downtime_migration.py（未跟踪）\n7 阶段状态机 [:22-31]，四阶段执行 [:163-182]\nbatch=1000 / 延迟 0.1s [:89-91]\n短事务 timeout=1.0 + LIMIT/OFFSET + sleep 避锁", fillcolor="#ffe3e3"];
+        stubs [label="关键阶段全为空实现\n_enable_dual_write   [:195-199]  pass\n_insert_into_new_schema [:292-301]  pass\n_switch_readers       [:303-307]  pass\n_schedule_cleanup     [:309-313]  pass\n_should_stop_migration[:326-329]  pass\nrollback [:367-375] 恒 False\nverify   [:377-382] 恒 True\nDB 路径硬编码 [:99-100]", fillcolor="#ffc9c9"];
+        caseb [label="migration_api.py:11 导入小写 neurova.storage.*\ngit 记录为大写 neurova/Storage/\n→ Windows 可跑，Linux/镜像内 ImportError", fillcolor="#ffc9c9"];
+        mmd [label="MIGRATION_SYSTEM_GUIDE.md\n描述了并未实现的表切换策略", shape=note, fillcolor="#fff9db"];
+
+        mig -> stubs [label="实为", color="#c92a2a", penwidth=2.5];
+        mmd -> stubs [label="与代码不符", color="#c92a2a", style=dashed];
+        caseb -> dbdata [label="本应迁移", style=dashed, color="#c92a2a"];
+    }
+
+    // ================= CI =================
+    subgraph cluster_ci {
+        label="⑥ CI/CD —— 真实门禁 vs 纸面门禁";
+        style="rounded"; color="#1864ab"; fontsize=13; labeljust=l;
+
+        ci [label="ci.yml 226 行 / 9 job（push main+PR+dispatch）\nstatic-gate · lint(ruff E9/F821) · deploy-config\n(把 Dockerfile/compose/Helm 端口与资源钉住)\nimport-and-regression · unit-tests(3.11/3.12 matrix\n只跑 scripts/ci/protected_tests.txt 受保护子集+覆盖率门)\ne2e boot smoke · frontend(vue-tsc+vitest)\n· perf-gate · dependency-audit(pip-audit+osv)"];
+        codeql [label="codeql.yml  cron 23 4 * * 1，仅 python，不阻塞"];
+        costci [label="cost-guards.yml（未跟踪）\nnode:18 + 根 npm ci + guard:big-brain\n依赖的 package.json 与 scripts/guard-*.cjs 均未跟踪\nguard:llm-tracked 标 continue-on-error: true [:32]\n第二 job 仅 push main 触发", fillcolor="#ffe3e3"];
+        cnb [label=".cnb.yml 19KB 镜像同一管线\n→ 双 CI 事实源"];
+        own [label=".github/CODEOWNERS（未跟踪，故未生效）\n* @Neurova/core-team + 7 个模块路由", fillcolor="#f1f3f5"];
+
+        ci -> codeql [style=invis];
+    }
+
+    beproc -> ci [label="受保护子集覆盖", color="#868e96", style=dotted];
+    costci -> paths [style=invis];
+
+    // ================= 旁支 =================
+    subgraph cluster_side {
+        label="⑦ 旁支产物（不在 Python 主线，勿计入架构基线）";
+        style="rounded"; color="#868e96"; fontsize=12; labeljust=l;
+
+        tauri [label="Tauri 桌面壳 NeurUI/src-tauri\n(Cargo.toml / tauri.conf.json / installer-wpf / nsis)\ndesktop/ 仅剩一张 selfsigned.pfx"];
+        harmony [label="NeurovaHarmony/  HarmonyOS ArkTS 客户端\nbuild-profile.json5 / hvigorfile.ts / oh-package.json5"];
+        legacy [label="web/ + deploy/  PHP+nginx+xray 遗留运维\ndeploy/test_db*.php 约 30 个", fillcolor="#dee2e6"];
+        misc [label="归属待确认：.freebuff/ .zcode/ .zcode-head-check/\n.stash-recovery-20260910/ other/ flow-kb-sdk/\ncumora/(已定性：第三方参考克隆，.gitignore 不入库)"];
+
+        tauri -> feproc [label="打包同源"];
+        harmony -> beproc [label="同一 API", style=dotted];
+    }
+
+    version [label="Python 版本无打包级强制\npyproject.toml 缺 requires-python\n仅 [tool.black] target-version py310 [:11]\n约束散在 scripts/config.py:20 / start.py:556-567\n/ start.sh:24-34 / Dockerfile:8 注释 / CI matrix 3.11·3.12", shape=note, fillcolor="#fff3bf"];
+    img -> version [style=dotted];
+}

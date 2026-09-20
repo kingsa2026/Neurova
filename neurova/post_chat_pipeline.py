@@ -1614,12 +1614,16 @@ class PostChatPipeline:
             if hasattr(evolution, "on_experience_recorded"):
                 from neurova.evolution.evolution_facade import EvolutionFacade
                 facade = EvolutionFacade(evolution)
-                # P-5 → 工单 002：客观成败只由 tool_result 携带（`tool_call` 记录没有
-                # success 键），旧写法 `.get("success", True)` + `any()` 于是恒真。
-                # 三态：True / False / None（None = 这轮没有客观回执，不是"成功"）。
-                from neurova.agent.turn_state import resolve_tool_outcome
+                # P-5 → 工单 002 → 工单 010：成败来源改为服务端票据优先。
+                # 002 让 `success` 位开始携带信息（只读 `tool_result`，无回执即
+                # None），但它读的是本轮工具执行自己的回执；010 把它降为**旁路
+                # 证据**：`creation_governance` 的票据口径更严（还要求结果非空、
+                # 非策略拒绝、按独立任务算失败粘性），有结论即覆盖本轮回执。
+                # 无票据 ⇒ 记录聚合继续决定成败位，但落库标 `unevidenced`（D1）。
+                from neurova.evolution.objective_evidence import resolve_ticket_evidence
 
-                tool_success = resolve_tool_outcome(tool_messages)
+                ticket = resolve_ticket_evidence(self._agent, tool_messages)
+                tool_success = ticket.outcome
                 # agent 级隔离: 显式传本 agent 的结晶器。单例上的
                 # evolution.crystallizer 会被多 agent 初始化 last-writer-wins
                 # 覆盖,不传会把 A agent 的经验结晶进 B agent 的库
@@ -1630,7 +1634,7 @@ class PostChatPipeline:
                     success=tool_success,
                     crystallizer=getattr(self._agent, "crystallizer", None),
                 )
-                logger.info("📚 对话经验已记录 (工具: %s)", tools_used)
+                logger.info("📚 对话经验已记录 (工具: %s, 票据: %s)", tools_used, ticket.lookup)
 
                 # EKB 写入闭环：同步沉淀到经验知识库（注入侧
                 # context/injector._build_experience_context 的数据源）。
@@ -1663,12 +1667,13 @@ class PostChatPipeline:
                         # 原写法恒 None，EKB 沉淀记录永远归属不了 agent
                         agent_id=str(getattr(self._agent.config, "agent_id", "") or "") or None,
                         session_id=str(getattr(self._agent, "session_id", "") or "") or None,
-                        # 工单 002→008：形成侧第三态走一等列 evidence_state
-                        # （evidence=None ⇒ 'unevidenced'），不再挤在 tags 字符串里
-                        evidence=tool_success,
+                        # 工单 002→008→010：形成侧第三态走一等列 evidence_state。
+                        # 等级只认服务端票据（`ticket.evidence`）——002 的记录聚合
+                        # 在无票据时仍是成败位的来源，但它不再是"有证据"。
+                        evidence=ticket.evidence,
                     )
-                    # 工单 006：按本轮注入身份集回写采纳结果，成败取 002 之后的
-                    # 真实三态（None 记 unevidenced，不是"成功"也不是"失败"）。
+                    # 工单 006：按本轮注入身份集回写采纳结果，成败取票据优先的
+                    # 三态（None 记 unevidenced，不是"成功"也不是"失败"）。
                     # 未注入 ⇒ record_injection_adoption 直接返回 0，不写任何行。
                     from neurova.core.turn_context import get_turn_injected_experiences
 
@@ -1688,6 +1693,11 @@ class PostChatPipeline:
                             # 回写行数进观测面：008 的质量指标要能区分"没注入"与
                             # "注入了但回写通路断了"
                             "adoption_writeback": adoption_writeback,
+                            # 工单 010：取证过程本身必须可观测——"查不到票"与
+                            # "查不了票"在库里都是 unevidenced，只有在观测面分得开
+                            # 才不会被误读成"这个 agent 从来没有客观回执"
+                            "ticket_state": ticket.lookup,
+                            "ticket_reason": ticket.verdict.reason,
                         },
                     )
                 )
@@ -1951,7 +1961,12 @@ class PostChatPipeline:
                 sequence.append(tm.get("tool_name", "unknown"))
 
             # 添加序列并挖掘
-            pattern_miner.add_sequence(sequence)
+            # 工单 013：台账只记服务端票据的三态（010 的 `TicketEvidence.ticket`）。
+            # 本轮回执不是票据，无票就传 None —— 在这里判空兜底等于给模式自投成功票。
+            from neurova.evolution.objective_evidence import resolve_ticket_evidence
+
+            pattern_miner.add_sequence(
+                sequence, success=resolve_ticket_evidence(self._agent, tool_messages).ticket)
             patterns = pattern_miner.mine()
 
             if patterns:
@@ -2026,21 +2041,27 @@ class PostChatPipeline:
             # 从模式构建基因型种子
             from neurova.evolution.genetic_engine import ToolGenotype
 
+            # 工单 013：成功率来自序列台账（010 的服务端票据），删掉 `or 0.5` 兜底。
+            # 兜底把"没有证据"洗成"中性票"，而 0.5 在阈值 0.8 下的实际效果是永不注册
+            # —— 于是遗传臂的静默被误读成"模式质量差"，看不见真正缺的是证据。
+            # 无据一律不播种（无据不投票，与 002/005 同口径）。
+            seeded = skipped_unevidenced = 0
             for pattern in top_patterns:
-                # 用真实成功率替换硬编码 0.5：
-                # 否则 fitness 恒 ≤ 0.5×1 + 0 = 0.5，永远达不到注册阈值 0.8，
-                # 遗传进化产物永远无法注册为可复用技能（闭环断裂根因之一）
                 if isinstance(pattern, dict):
                     seq = pattern.get("tools") or []
-                    p_success = pattern.get("success_rate") or 0.5
+                    p_success = pattern.get("success_rate")
                 else:
                     seq = getattr(pattern, "tools", [])
-                    p_success = getattr(pattern, "success_rate", None) or 0.5
+                    p_success = getattr(pattern, "success_rate", None)
+                if p_success is None:
+                    skipped_unevidenced += 1
+                    continue
                 genotype = ToolGenotype(
                     tool_sequence=seq,
                     success_rate=float(p_success),
                 )
                 genetic_engine.add_to_population(genotype)
+                seeded += 1
 
             # 执行进化
             new_gen = genetic_engine.evolve()
@@ -2097,6 +2118,10 @@ class PostChatPipeline:
                         "population_size": len(genetic_engine.population),
                         "new_individuals": len(new_gen),
                         "registered_to_skill_registry": registered_to_registry,
+                        # 工单 013：无据不播种必须可观测 —— 否则"遗传臂没动静"与
+                        # "这一轮根本没有客观证据"在观测面上分不开
+                        "seeded": seeded,
+                        "skipped_unevidenced": skipped_unevidenced,
                     },
                 )
             )
@@ -2603,7 +2628,7 @@ class PostChatPipeline:
 
         # 经验-定义分离维护：未合并 applied 记录攒够阈值
         # → 定期重建技能定义（先归档可回滚）；使用统计圈淘汰候选（自动禁用
-        # 默认关，NEUROVA_SKILL_AUTO_RETIRE=1 才执行）。
+        # 默认关，治理设置 skill_auto_retire_enabled 打开才执行）。
         try:
             from neurova.evolution.skill_experience import run_skill_experience_maintenance
 
@@ -3125,9 +3150,15 @@ class PostChatPipeline:
                     )
             
             # 4. 更新模式挖掘器
+            # 工单 013：同上，只记服务端票据的三态（本步骤的 `turn_outcome` 是给
+            # 融合器的旁路证据，不得在这里升格成模式的客观成功票）。
             pattern_miner = self._get_dependency("pattern_miner")
             if pattern_miner and len(tool_names) > 1:
-                pattern_miner.add_sequence(tool_names)
+                from neurova.evolution.objective_evidence import resolve_ticket_evidence
+
+                pattern_miner.add_sequence(
+                    tool_names,
+                    success=resolve_ticket_evidence(self._agent, tools_used).ticket)
             
             self._step_results.append(
                 StepResult(

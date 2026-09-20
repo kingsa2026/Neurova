@@ -387,7 +387,7 @@ class _NullSystem:
     emotional_protection_threshold = 0.5
     emotional_protection_factor = 1.0
     crystallize_min_observations = 3
-    crystallize_min_success_rate = 0.7
+    crystallize_min_success_rate = 0.6
     pattern_min_support = 2
     success_bonus = 0.1
     failure_penalty = 0.1

@@ -6,7 +6,36 @@ import type { ApiResponse, PaginatedData } from '@/types/response'
 // ---------------------------------------------------------------------------
 
 /** 记忆类型 = 后端 MemoryType 枚举值（页签过滤键 / 列表 type 列数据源） */
-export type MemoryTypeValue = 'semantic' | 'episodic' | 'procedural' | 'pattern' | 'emotional' | 'working'
+export type MemoryTypeValue =
+  | 'semantic'
+  | 'episodic'
+  | 'procedural'
+  | 'pattern'
+  | 'emotional'
+  | 'working'
+  | 'workflow_experience'
+
+/**
+ * 记忆类型词表（工单 015 收拢）：类型值 + 标签键 + 色板一处登记。
+ *
+ * 收拢前同一个枚举在 MemoryPage 的页签、新建下拉、typeColor 里各抄了一份，
+ * 后端 012 补上的 `workflow_experience` 因此在库里能存能检、界面上筛不出来。
+ * 新增类型只改这里，界面三处自动跟上。
+ */
+export const MEMORY_TYPES: ReadonlyArray<{ value: MemoryTypeValue; labelKey: string; color: string }> = [
+  { value: 'semantic', labelKey: 'memory.categorySemantic', color: '#8b5cf6' },
+  { value: 'episodic', labelKey: 'memory.categoryEpisodic', color: '#f59e0b' },
+  { value: 'working', labelKey: 'memory.typeWorking', color: '#6366f1' },
+  { value: 'procedural', labelKey: 'memory.typeProcedural', color: '#10b981' },
+  { value: 'pattern', labelKey: 'memory.typePattern', color: '#0ea5e9' },
+  { value: 'emotional', labelKey: 'memory.typeEmotional', color: '#f43f5e' },
+  { value: 'workflow_experience', labelKey: 'memory.typeWorkflowExperience', color: '#14b8a6' },
+]
+
+/** 类型值 → 色板（与 MEMORY_TYPES 同源，不再第二份 map） */
+export const MEMORY_TYPE_COLOR: Record<string, string> = Object.fromEntries(
+  MEMORY_TYPES.map((m) => [m.value, m.color]),
+)
 
 export interface MemoryEntry {
   id: string
@@ -34,15 +63,16 @@ export interface MemoryEntry {
  * - all → 不传（全量）
  * - hot / crystallized → 走各自专用端点，不走此映射
  * - working → 工作记忆页签
- * - long_term → 排除 working 的五类显式列表（后端逗号多值）
- * - episodic / semantic → 同名类型
+ * - long_term → 排除 working 的全部长期类型（后端逗号多值）
+ * - episodic / semantic / workflow_experience → 同名类型
  */
 export const MEMORY_TYPE_BY_TAB: Record<string, string | undefined> = {
   all: undefined,
   short_term: 'working',
-  long_term: 'semantic,episodic,procedural,pattern,emotional',
+  long_term: 'semantic,episodic,procedural,pattern,emotional,workflow_experience',
   episodic: 'episodic',
   semantic: 'semantic',
+  workflow_experience: 'workflow_experience',
 }
 
 export interface MemoryCreatePayload {

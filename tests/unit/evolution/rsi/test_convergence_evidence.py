@@ -175,16 +175,37 @@ def test_phase_one_to_two_still_requires_rollback_days():
 
 
 def test_phase_three_to_four_requires_roi_evidence():
-    """到"中风险自动执行"这一档，成本收益读数变成必需项（此时它已可能存在于盘上）。"""
+    """到"中风险自动执行"这一档，成本收益读数变成必需项（此时它已可能存在于盘上）。
+
+    工单 016 改写本用例的理由：phase 3 的必需证据集从三份涨到四份（新增
+    `experience_quality`），于是"只补 roi 就该判通过"这个前提不再成立——
+    入参必须带上第四份读数，roi 才是唯一变量。**断言集一条未减也未放宽**
+    （`without_roi` 仍须因 roi 缺项落 unevidenced，`with_roi` 仍须为真）。
+    第四份读数经 016 的唯一供值口造，不在测试里手写它的形态。
+    """
     controller = RSIDeploymentController(initial_phase=3)
+    quality = _good_experience_quality()
 
     without_roi = controller.evaluate_phase_transition(
-        {"days_without_rollback": 40, "convergence_status": "converging"})
+        {"days_without_rollback": 40, "convergence_status": "converging",
+         "experience_quality": quality})
     with_roi = controller.evaluate_phase_transition(
-        {"days_without_rollback": 40, "convergence_status": "converging", "roi": 0.2})
+        {"days_without_rollback": 40, "convergence_status": "converging", "roi": 0.2,
+         "experience_quality": quality})
 
     assert without_roi.state == "unevidenced" and "roi" in without_roi.reason
     assert bool(with_roi) is True
+
+
+def _good_experience_quality() -> dict:
+    """一份"质量有证据且为正面"的读数（经 RSIMetrics 供值口，不手写形态）。"""
+    from neurova.evolution.rsi.metrics import RSIMetrics
+
+    metrics = RSIMetrics()
+    metrics.record_metric(RSIMetrics.EXPERIENCE_ROWS, 9)
+    metrics.record_metric(RSIMetrics.EXPERIENCE_ADOPTION_DECISIONS, 5)
+    metrics.record_metric(RSIMetrics.EXPERIENCE_ADOPTION_SUCCESS_RATE, 0.9)
+    return metrics.experience_quality_readout()
 
 
 def test_diverging_vetoes_every_transition():

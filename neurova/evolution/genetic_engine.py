@@ -25,6 +25,8 @@ class ToolGenotype:
     """工具基因型：编码工具序列为可变异/交叉的基因。"""
 
     tool_sequence: List[str]
+    # 默认 0.5 只是"未指定"的中性值：种子必须由调用方显式带真实成功率（工单 013），
+    # 靠默认值进种群等于把无证据个体当半成功票。
     success_rate: float = 0.5
     execution_time_ms: float = 0.0
     reuse_count: int = 0
@@ -37,7 +39,20 @@ class ToolGenotype:
 
     @property
     def fitness(self) -> float:
-        """适应度计算：综合成功率、执行时间和复用次数。"""
+        """适应度 = `success_rate × time_penalty + log1p(reuse_count) × 0.1`，夹在 0..1。
+
+        注册可达性（阈值 `validation_threshold=0.8`，判据在
+        `register_to_skill_registry`）是一元一次比较，可直接读出来。缺省
+        `execution_time_ms=0` ⇒ time_penalty=1.0，于是
+        `fitness = success_rate + 0.1·ln(1+reuse_count)`：
+
+        - 真实成功率 ≥ 0.8 的个体**零复用即可注册**（工单 013 选的可达分支）；
+        - 成功率 0.5 需 `ln(1+n) ≥ 3` ⇒ reuse ≥ 20 才够 —— 这正是种子被兜底成
+          0.5 的年代「新挖模式当轮必被跳过」的算术；
+        - 成功率 0.2 需 `ln(1+n) ≥ 6` ⇒ reuse ≈ 403，现实量级内不可达。
+
+        对数项加 1.0 封顶的含义：复用只能放行本来就有证据的个体，刷不过低质门槛。
+        """
         # 基础适应度基于成功率
         base_fitness = self.success_rate
 
@@ -513,7 +528,8 @@ class ToolGeneticEngine:
         if skill_service is None:
             return 0
         for genotype in self._population:
-            # 仅注册高适应度个体
+            # 仅注册高适应度个体。可达性算术见 `ToolGenotype.fitness`：真实成功率
+            # ≥ 阈值的个体零复用即过，无证据（种子侧为 None）的个体根本不进种群。
             if genotype.fitness < self._validation_threshold:
                 logger.debug(
                     "跳过低适应度基因型 (fitness=%.3f < threshold=%.3f): %s",

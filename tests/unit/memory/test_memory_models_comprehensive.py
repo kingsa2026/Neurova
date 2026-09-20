@@ -30,8 +30,12 @@ from neurova.cognitive_layers.memory_layer.models import (
 
 class TestMemoryTypeEnum:
     def test_values(self):
+        # 工单 012 扩枚举：workflow_experience 之前只是被写入方（post_chat_pipeline
+        # ._step_record_workflow_experience）口头使用，枚举缺项 ⇒ 每条工作流经验
+        # 被静默降级成 semantic，类型区分在写入瞬间就丢了。
         assert {e.value for e in MemoryType} == {
             "semantic", "episodic", "procedural", "pattern", "emotional", "working",
+            "workflow_experience",
         }
 
     def test_from_string(self):

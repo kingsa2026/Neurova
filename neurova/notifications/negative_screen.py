@@ -343,7 +343,7 @@ class NegativeScreenPusher:
         入参口径 = ``neurova.evolution.rsi.result_summary.summarize_rsi_result``
         的输出（即对话响应里的 ``ctx.result["rsi"]``）：
         ``{status, applied_count, gain, phase_advanced, measure_state,
-        evidenced_cases, placeholder_systems, turn?, stale?}``。
+        evidenced_cases, placeholder_systems, phase_verdict, turn?, stale?}``。
 
         历史实现读 ``iteration/improvements/convergence_score/status`` —— 与
         RSIOrchestrator.run_iteration 的真实输出（convergence/applied_count/
@@ -385,6 +385,13 @@ class NegativeScreenPusher:
         # "应用优化数 0"有两种相反的成因（没改善空间 / 根本没装配系统）
         absent = summary.get("placeholder_systems")
         absent_line = f"- **缺席闭环系统**: {', '.join(absent)}\n" if absent else ""
+        # 晋升判据同样必须成行：`部署阶段推进: 否` 也有两种相反的成因——
+        # 缺证据（去把证据跑出来）与有证据且否决（停下来查质量），处置相反（工单 016）。
+        verdict = summary.get("phase_verdict") or {}
+        verdict_line = (
+            f"- **晋升判据**: {verdict.get('state') or '未随快照提供'}"
+            f"（{verdict.get('reason') or '无'}）\n"
+        )
         turn = raw.get("turn")
 
         iteration_label = f"#{turn}" if turn is not None else ""
@@ -397,7 +404,7 @@ class NegativeScreenPusher:
 - **实测增益**: {gain:+.4f}
 {absent_line}- **度量证据**: {measure_state}（{evidence_label}）
 - **部署阶段推进**: {"是" if phase_advanced else "否"}
-
+{verdict_line}
 ### 迭代结果
 ```json
 {json.dumps(raw, indent=2, ensure_ascii=False, default=str)}

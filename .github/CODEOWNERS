@@ -1,0 +1,49 @@
+# Neurova 核心模块所有者路由
+# 格式：pattern @owner
+# 变更匹配模式时，对应 owner 会被自动通知审查
+# 参考：https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# === 全局默认 ===
+* @Neurova/core-team
+
+# === Agent 编排核心 ===
+neurova/agent_core.py @Neurova/agent-core
+neurova/agent/ @Neurova/agent-core
+neurova/tool_executor.py @Neurova/agent-core
+
+# === 记忆系统核心 ===
+neurova/mem_core.py @Neurova/memory-team
+neurova/memory_agent.py @Neurova/memory-team
+neurova/cognitive_layers/memory_layer/ @Neurova/memory-team
+
+# === 认知层 ===
+neurova/cognitive_layers/ @Neurova/cognitive-team
+
+# === LLM 路由与多模型客户端 ===
+neurova/llm_client.py @Neurova/llm-team
+neurova/llm/ @Neurova/llm-team
+
+# === API 入口与核心端点 ===
+neurova/api/app.py @Neurova/platform-team
+neurova/api/endpoints/ @Neurova/platform-team
+
+# === 安全治理 ===
+neurova/security/ @Neurova/security-team
+
+# === 进化引擎 ===
+neurova/evolution/ @Neurova/agent-core
+
+# === 前端核心 ===
+NeurUI/src/ @Neurova/frontend-team
+NeurUI/src-tauri/ @Neurova/frontend-team
+
+# === 基础设施 ===
+deploy/ @Neurova/platform-team
+scripts/ @Neurova/platform-team
+config/ @Neurova/platform-team
+Dockerfile @Neurova/platform-team
+docker-compose.yml @Neurova/platform-team
+
+# === 测试基础设施 ===
+tests/ @Neurova/core-team
+tests/conftest.py @Neurova/core-team

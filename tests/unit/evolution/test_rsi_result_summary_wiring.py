@@ -72,7 +72,14 @@ def _clean_summaries():
 
 class TestSummarizeRsiResult:
     def test_fields_match_orchestrator_output(self):
-        """摘要字段必须对齐 run_iteration 真实输出，不是历史臆造名。"""
+        """摘要字段必须对齐 run_iteration 真实输出，不是历史臆造名。
+
+        工单 016 改写本用例的理由：契约的字段集合从 7 项增到 8 项（新增
+        `phase_verdict`——"没晋升"的成因必须与布尔值一起送达，否则三态里的
+        `unevidenced` 只活在日志里）。这里的期望值随之多一条，而
+        `REAL_ITERATION_RESULT` 是历史形态、没带判据 ⇒ 期望值为 None，
+        **不是** "passed"（未知不得读成判据通过）。断言一条未减。
+        """
         summary = summarize_rsi_result(REAL_ITERATION_RESULT)
         assert set(summary) == set(RSI_SUMMARY_FIELDS)
         assert summary == {
@@ -85,6 +92,8 @@ class TestSummarizeRsiResult:
             "evidenced_cases": None,
             # 快照没带缺席信息 ≠ "一个都没缺席"（未知不得读成正常）
             "placeholder_systems": None,
+            # 快照没带晋升判据 ≠ "判据通过"（同上，工单 016）
+            "phase_verdict": None,
         }
 
     def test_convergence_is_dict_not_number(self):

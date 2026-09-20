@@ -348,6 +348,7 @@ class RSIOrchestrator:
             self.metrics.record_metric(RSIMetrics.RSI_CONVERGENCE_ROI, float(roi_readout))
         if isinstance(eval_after, dict) and "score" in eval_after:
             self.metrics.record_metric("eval_score", eval_after["score"])
+        self._refresh_experience_metrics()
 
         # 7. P0-A3 修复：检测到发散/振荡时，升级给 SelfImprovementProposer
         escalation_proposals = self._escalate_to_proposer_if_needed(convergence, feedback_signals)
@@ -371,6 +372,10 @@ class RSIOrchestrator:
             days_without_rollback = self._compute_days_without_rollback()
             if days_without_rollback is not None:
                 phase_metrics["days_without_rollback"] = days_without_rollback
+            # 经验质量读数（工单 016）：只搬运本轮已刷新的规范指标，判据面不另算一套。
+            # 与上面两条不同，这里不摘键——空库与"有库但没人采纳过"要能被区分出来，
+            # 读数的 None 字段本身就是证据（第 6 步 `_refresh_experience_metrics()` 已写入）。
+            phase_metrics["experience_quality"] = self.metrics.experience_quality_readout()
 
             verdict = self.deployment_controller.evaluate_phase_transition(phase_metrics)
             if not isinstance(verdict, GateVerdict):
@@ -405,6 +410,41 @@ class RSIOrchestrator:
             "phase_verdict": phase_verdict,
             "metrics": self.metrics.get_dashboard_data(),
         }
+
+    def _refresh_experience_metrics(self) -> None:
+        """把经验族质量读数写进规范指标（工单 008 的写入方）。
+
+        算式只有一份，在 `EKB.quality_snapshot()`；这里只做搬运，绝不就地重算
+        ——两处算同一个数必然漂移，漂移了就没有人能相信读数。
+        库不可用（未初始化/文件被占）时下"本轮没有读数"的结论，而不是留旧值：
+        旧值会被读成"质量没变化"，那正是本轮一路在拆的那类假象。
+        """
+        try:
+            from neurova.skills.experience_knowledge_base import (
+                get_experience_knowledge_base,
+            )
+
+            snap = get_experience_knowledge_base().quality_snapshot()
+        except Exception as e:  # noqa: BLE001 - 观测面故障不阻断迭代
+            logger.warning("经验质量读数刷新失败（本轮指标记 0）: %s", e)
+            snap = {
+                "rows": 0,
+                "unevidenced_ratio": 0.0,
+                "hit_rate": 0.0,
+                "adoption_decisions": 0,
+                "adoption_success_rate": None,
+            }
+
+        self.metrics.record_metric(RSIMetrics.EXPERIENCE_ROWS, snap["rows"])
+        self.metrics.record_metric(RSIMetrics.EXPERIENCE_UNEVIDENCED_RATIO, snap["unevidenced_ratio"])
+        self.metrics.record_metric(RSIMetrics.EXPERIENCE_HIT_RATE, snap["hit_rate"])
+        self.metrics.record_metric(RSIMetrics.EXPERIENCE_ADOPTION_DECISIONS, snap["adoption_decisions"])
+        # 无采纳决策 ⇒ 成功率不可得：记 0 并由 decisions 让告警保持沉默
+        # （告警带最小决策数门槛，正是为了不把"没测到"读成"全失败"）
+        self.metrics.record_metric(
+            RSIMetrics.EXPERIENCE_ADOPTION_SUCCESS_RATE,
+            0.0 if snap["adoption_success_rate"] is None else snap["adoption_success_rate"],
+        )
 
     def _escalate_to_proposer_if_needed(
         self, convergence: Dict[str, Any], feedback_signals: Dict[str, Any]

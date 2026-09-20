@@ -21,6 +21,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from neurova.core.content_identity import normalized_key
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -131,28 +132,9 @@ def _fingerprint(content: str) -> str:
     return hashlib.sha256(content.strip().lower().encode("utf-8")).hexdigest()
 
 
-# ── P1#11② NormalizedKey──────────
-# 折叠口径刻意保守：大小写/全半角/标点/空白 + 说话人前缀。key 相同 ≈
-# "同一事实的新说法"；语义级判断（话题归并/矛盾检测）不做——那是 LLM 的
-# 职责（KB 冲突账本/巩固簇合并），写路径保持零模型调用、确定性可复现。
-
-_SPEAKER_PREFIXES = (
-    "助手：", "助手:", "用户：", "用户:", "assistant:", "user:",
-    "助手", "用户",
-)
-
-
-def normalized_key(content: str) -> str:
-    """确定性归一化键：NFKC + 小写 + 去说话人前缀 + 剔除标点/空白。"""
-    import re
-    import unicodedata
-
-    text = unicodedata.normalize("NFKC", str(content or "")).strip().lower()
-    for p in _SPEAKER_PREFIXES:
-        if text.startswith(p):
-            text = text[len(p):].strip()
-            break
-    return re.sub(r"[\W_]+", "", text, flags=re.UNICODE)
+# ── P1#11② NormalizedKey ──────────
+# 折叠口径的事实源在 neurova.core.content_identity（EKB 写入面与记忆写入面
+# 共用同一把键，此处仅按本模块语义消费）。
 
 
 def find_supersede_ids(memories: Any, content: str) -> List[str]:
