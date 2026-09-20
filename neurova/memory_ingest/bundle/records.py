@@ -38,6 +38,8 @@ class TranscriptRecord:
     def __post_init__(self) -> None:
         if self.kind not in VALID_KINDS:
             raise ValueError(f"未知 kind: {self.kind!r}")
+        # 包内读回是 list、内存构造是 tuple；归一后同一条记录才谈得上相等（幂等比对靠这个）
+        object.__setattr__(self, "content_blocks", tuple(self.content_blocks))
         if self.reasoning_state not in VALID_REASONING_STATES:
             raise ValueError(f"未知 reasoning_state: {self.reasoning_state!r}")
 
