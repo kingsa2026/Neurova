@@ -179,6 +179,43 @@ def test_session_write_failure_tells_how_to_undo(manager, sessions, bundle, monk
     assert any(m.content == "历史记忆" for m in manager._memories.values())
 
 
+def test_apply_stages_media_into_the_agent_workspace(manager, sessions, tmp_path: Path):
+    """媒体不能停在临时暂存目录里：apply 要把它落到工作区，消息里给可寻址的引用。"""
+    import base64
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+    from neurova.memory_ingest.bundle.media import MediaSink
+
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+                           "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+    bundle_dir = tmp_path / "bundle"
+    ref = dict(MediaSink(bundle_dir, name_hint="shot.png").put(png), type="image")
+    root = _write_bundle(tmp_path, [dict(_ROWS[0], content_blocks=[
+        {"type": "text", "text": "看图"}, ref])])
+
+    apply_bundle(root, agent_id="media-agent", manager=manager, sessions=sessions)
+
+    staged = get_agent_workspace_dir("media-agent") / "media"
+    files = sorted(p.name for p in staged.glob("*"))
+    assert len(files) == 1 and files[0].endswith(".png")
+    assert (staged / files[0]).read_bytes() == png
+    turn = _stored_messages(sessions, "media-agent", "sA")
+    entry = turn[0]["metadata"]["artifacts"][0]
+    assert entry["name"] == files[0] and entry["size"] == len(png)
+    assert entry["artifact_id"] and entry["mime_type"] == "image/png"
+    assert "media" not in turn[0]["metadata"]
+
+
+def test_apply_refuses_bundle_with_dangling_media_reference(manager, sessions, tmp_path: Path):
+    """引用指向包外或不存在的文件时整包拒绝——摘要引用不做成任意文件读。"""
+    root = _write_bundle(tmp_path, [dict(_ROWS[0], content_blocks=[
+        {"type": "text", "text": "看图"},
+        {"type": "image", "media": "../../outside.png", "digest": "x" * 32, "bytes": 4}])])
+
+    with pytest.raises(BundleError, match="越出包外"):
+        apply_bundle(root, agent_id="media-agent", manager=manager, sessions=sessions)
+    assert manager._memories == {}
+
+
 def test_hostile_agent_id_is_refused_before_any_write(manager, sessions, bundle, tmp_path):
     with pytest.raises(BundleError, match="agent_id"):
         apply_bundle(bundle, agent_id="../escape", manager=manager, sessions=sessions)

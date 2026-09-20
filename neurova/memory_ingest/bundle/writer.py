@@ -27,6 +27,7 @@ class SourceEvent:
     tool_name: str = ""
     tool_state: str = ""
     reasoning: str = ""
+    blocks: Tuple[Dict[str, Any], ...] = ()   # 内容寻址媒体引用（排在正文之后）
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -72,11 +73,16 @@ def write_bundle(out_dir: Path, records: Sequence[TranscriptRecord], *, agent_na
     return manifest
 
 
+def _blocks(event: SourceEvent) -> Tuple[Dict[str, Any], ...]:
+    text = ({"type": "text", "text": event.text},) if event.text else ()
+    return text + tuple(event.blocks)
+
+
 def _record(session_id: str, seq: int, identity_key: str, event: SourceEvent) -> TranscriptRecord:
     return TranscriptRecord(
         session_id=session_id, seq=seq, kind=event.kind, ts=event.ts,
         identity_key=identity_key, role=event.role,
-        content_blocks=({"type": "text", "text": event.text},) if event.text else (),
+        content_blocks=_blocks(event),
         tool_call_id=event.tool_call_id, tool_name=event.tool_name,
         tool_state=event.tool_state,
         reasoning_state="text" if event.reasoning else "absent",

@@ -18,6 +18,21 @@ _ROLES = {"user_message": "user", "assistant_message": "assistant",
           "compact_summary": "assistant"}
 
 
+def test_turn_collects_media_refs_in_order():
+    """轮形装配把各行的 media 引用汇总成一条列表，intake 据此落工作区。"""
+    ref = {"type": "image", "media": "media/a.png", "digest": "a", "bytes": 2,
+           "name": "a.png", "mime": "image/png"}
+    other = {"type": "file", "media": "media/b.bin", "digest": "b", "bytes": 3,
+             "name": "b.bin", "mime": "application/octet-stream"}
+    messages = to_turn_messages([
+        _rec(1, "assistant_message", text="看"),
+        _rec(2, "tool_result", text="结果", blocks=(other,)),
+        _rec(3, "assistant_message", text="图", blocks=(ref,)),
+    ])
+
+    assert messages[0]["metadata"]["media"] == [other, ref]
+
+
 def _rec(seq: int, kind: str, **kw: Any) -> TranscriptRecord:
     text = kw.get("text", "")
     extra: Dict[str, Any] = {}
@@ -26,11 +41,12 @@ def _rec(seq: int, kind: str, **kw: Any) -> TranscriptRecord:
     return TranscriptRecord(
         session_id=kw.get("session_id", "sA"), seq=seq, kind=kind,
         ts=f"2026-05-01T10:00:{seq:02d}", identity_key=f"sA#{seq}", role=_ROLES[kind],
-        content_blocks=({"type": "text", "text": text},) if text else (),
         tool_call_id=kw.get("tool_call_id", ""), tool_name=kw.get("tool_name", ""),
         tool_state=kw.get("tool_state", ""),
         reasoning_state="text" if kw.get("reasoning") else "absent",
         reasoning_text=kw.get("reasoning", ""), extra=extra,
+        content_blocks=tuple(
+            ([{"type": "text", "text": text}] if text else []) + list(kw.get("blocks", ()))),
     )
 
 

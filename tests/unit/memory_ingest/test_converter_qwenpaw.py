@@ -175,21 +175,44 @@ def test_convert_rejects_store_that_does_not_match_its_fingerprint(tmp_path: Pat
 
 
 def test_convert_declares_block_types_the_contract_cannot_carry(tmp_path: Path, src: Path):
-    """reasoning_text 只装得下思考；其它块型接不住就必须申报，不能默默扔掉。"""
+    """reasoning_text 只装得下思考；audio 这类块型接不住就必须申报，不能默默扔掉。"""
     conn = sqlite3.connect(src)
     conn.execute(
         "UPDATE conversation_history SET blocks = ? WHERE seq = 2",
         (json.dumps([{"type": "thinking", "thinking": "想一想"},
-                     {"type": "image", "url": "file:///tmp/a.png"}]),))
+                     {"type": "audio", "url": "file:///tmp/a.mp3"}]),))
     conn.commit()
     conn.close()
     out = tmp_path / "bundle"
 
     manifest = convert(src, out, agent_name="imported")
 
-    assert any(entry["field"] == "blocks:image" and entry["count"] == 1
+    assert any(entry["field"] == "blocks:audio" and entry["count"] == 1
                and entry["reason"] for entry in manifest.dropped)
     assert _records(out)["sA:2"]["reasoning_text"] == "想一想"
+
+
+def test_convert_carries_base64_block_as_media(tmp_path: Path, src: Path):
+    """贴图块的正文是 base64：落进包内 media/，不再只是申报一条丢失。"""
+    import base64
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+                           "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+    conn = sqlite3.connect(src)
+    conn.execute("UPDATE conversation_history SET blocks = ? WHERE seq = 2",
+                 (json.dumps([{"type": "thinking", "thinking": "想一想"},
+                              {"type": "data", "name": "shot.png",
+                               "source": {"type": "base64",
+                                          "data": base64.b64encode(png).decode()}}]),))
+    conn.commit()
+    conn.close()
+    out = tmp_path / "bundle"
+
+    manifest = convert(src, out, agent_name="imported")
+
+    assert manifest.dropped == ()
+    blocks = _records(out)["sA:2"]["content_blocks"]
+    assert blocks[1]["type"] == "image" and blocks[1]["mime"] == "image/png"
+    assert (out / blocks[1]["media"]).read_bytes() == png
 
 
 def test_converter_is_routable_by_its_own_handprint_name():
@@ -274,7 +297,7 @@ def test_identity_keys_stay_unique_within_one_source_row(tmp_path: Path):
 
 
 def test_convert_declares_binary_blocks(tmp_path: Path):
-    """图片块的正文是 base64，包内 media 存储未落地前必须申报，不能塞进会话文件。"""
+    """解不出字节的媒体块必须申报，不能塞进会话文件也不能默默扔。"""
     rows = [_row(seq=1, session_id="sX", kind="context_msg", role="user", content="看图",
                  blocks=json.dumps([{"type": "text", "text": "看图"},
                                     {"type": "data", "name": "shot.png",
@@ -283,6 +306,6 @@ def test_convert_declares_binary_blocks(tmp_path: Path):
 
     manifest, out = _convert(tmp_path, "binary.db", rows)
 
-    assert any(entry["field"] == "blocks:data" and entry["count"] == 1
+    assert any(entry["field"] == "media:不可达" and entry["count"] == 1
                and "media" in entry["reason"] for entry in manifest.dropped)
     assert manifest.counts["transcripts"] == 1

@@ -6,8 +6,11 @@
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import mimetypes
 import re
+import shutil
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
@@ -15,12 +18,14 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from neurova.memory_ingest.bundle.manifest import BundleError, BundleManifest, load_manifest
+from neurova.memory_ingest.bundle.media import MEDIA_DIRNAME
 from neurova.memory_ingest.bundle.records import MemoryRecord, TranscriptRecord
 from neurova.memory_ingest.bundle.turns import to_turn_messages
 from neurova.memory_ingest.bundle.validate import validate_bundle
 
 MAX_RECORDS = 200_000          # 误指大目录的兜底闸
 _AGENT_ID = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._@-]*$")
+_TEXT_SUFFIXES = frozenset({".md", ".txt", ".json", ".csv", ".log", ".py", ".ts"})
 
 
 @dataclass(frozen=True)
@@ -71,7 +76,7 @@ def apply_bundle(root: Path, *, agent_id: str, manager, sessions,
         memories, ingest_run_id=report.run_id)
 
     try:
-        _write_sessions(report, transcripts, sessions)
+        _write_sessions(report, transcripts, sessions, Path(root))
     except BundleError:
         raise
     except Exception as exc:                       # 半途失败必须给出去路，不能留悬批
@@ -82,10 +87,11 @@ def apply_bundle(root: Path, *, agent_id: str, manager, sessions,
 
 
 def _write_sessions(report: IngestReport, transcripts: Sequence[TranscriptRecord],
-                    sessions) -> None:
+                    sessions, bundle_root: Path) -> None:
     for session_id, records in _group(transcripts):
         by_date: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         for message in to_turn_messages(records):
+            _stage_media(bundle_root, message, report.agent_id)
             by_date[str(message["timestamp"])[:10]].append(message)
         for date, batch in sorted(by_date.items()):
             added, skipped = sessions.import_session_messages(
@@ -93,6 +99,58 @@ def _write_sessions(report: IngestReport, transcripts: Sequence[TranscriptRecord
             report.messages_added += added
             report.messages_skipped += skipped
             report.sessions_touched += 1
+
+
+def workspace_media_dir(agent_id: str) -> Path:
+    """导入媒体的落点：agent 工作区下的 media/（文件名即内容摘要）。"""
+    from neurova.core.agent_workspaces import get_agent_workspace_dir
+
+    target = get_agent_workspace_dir(agent_id) / MEDIA_DIRNAME
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _stage_media(bundle_root: Path, message: Dict[str, Any], agent_id: str) -> None:
+    """包内引用 → 工作区文件 + 运行期同形的 artifact 条目。
+
+    artifact_id 用与 artifacts 注册处同一算法（对定形后路径取 sha1 前 16 位），所以任何
+    一侧登记都指向同一条目；不直接 import 注册函数是为了不把数据层挂到 API 层上。
+    """
+    media = (message.get("metadata") or {}).pop("media", None)
+    if not media:
+        return
+    destination = workspace_media_dir(agent_id)
+    artifacts = (message["metadata"]).setdefault("artifacts", [])
+    for ref in media:
+        rel = str(ref.get("media") or "")
+        name = Path(rel).name
+        target = destination / name
+        if not target.exists():
+            shutil.copyfile(bundle_root / rel, target)
+        artifacts.append(_artifact_info(target, agent_id, ref))
+
+
+def _artifact_info(path: Path, agent_id: str, ref: Dict[str, Any]) -> Dict[str, Any]:
+    mime = str(ref.get("mime") or mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+    return {
+        "artifact_id": hashlib.sha1(str(path.resolve()).encode("utf-8", errors="replace"))
+        .hexdigest()[:16],
+        "kind": _artifact_kind(path.name, mime),
+        "name": path.name,
+        "size": path.stat().st_size,
+        "mime_type": mime,
+        "agent_id": agent_id,
+        "path": str(path.resolve()),
+        "source": "ingest",
+    }
+
+
+def _artifact_kind(name: str, mime: str) -> str:
+    if mime.startswith("image/"):
+        return "image"
+    if mime.startswith("audio/") or mime.startswith("video/"):
+        return "media"
+    return "text" if Path(name).suffix.lower() in _TEXT_SUFFIXES else "file"
 
 
 def _group(transcripts: Sequence[TranscriptRecord]):
