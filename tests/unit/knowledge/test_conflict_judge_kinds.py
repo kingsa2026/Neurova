@@ -120,3 +120,105 @@ class TestConflictPersistence:
 
         with pytest.raises(ValueError, match="未知裁决"):
             store.resolveConflict(conflict["conflict_id"], "delete_everything")
+
+
+def _doc(store, agent, label, kid, obj=None, predicate="documented_as"):
+    """条目库搬进来的形状：叙述记录，谓词固定 documented_as，客体是内容键，条目 id 在溯源上。
+
+    直插 SQL 不走咽喉，所以要手工补 `evidence_state`——真叙述行带着断言进来，
+    不会停在列默认值 `unevidenced`（那会被裁决判成"无据可依，不许自动取代"）。
+    """
+    key = store.upsertSubject(agent, label)
+    factId = store.upsertFact(agent, key, predicate, obj or ("key-" + kid), "正文 %s" % kid,
+                              relationKind="document", recordKind="narrative",
+                              sourceTurnId="entry:%s" % kid)
+    store.setEvidenceState(factId, "evidenced")
+    return factId
+
+
+class TestNarrativeConflictScope:
+    """叙述行的分歧范围是"同一条目的先后说法"，不是"同一个标题下的所有正文"。
+
+    真数据取证（019b-4b）：生产 130 条搬进底座后，5 行叙述被"最新正文"裁决成
+    superseded，10 条条目因此永远查不到 active 治理行——装载即报投影分叉且永不收敛，
+    因为 admit 按内容键折回的还是那条非活动行。三条都叫 `note` 的条目是三份文档，
+    不是同一说法的三个值；而条目改正文必须留下被取代的旧说法（019b-2 判据，不能松）。
+    """
+
+    def test_distinctBodiesUnderOneTitleAreNotAConflict(self, store, judge):
+        older = _doc(store, "default", "note", "k1")
+        _doc(store, "default", "note", "k2")
+
+        assert judge.detect(subjectLabel="note", predicateTermId="documented_as") == []
+        assert judge.record(subjectLabel="note", predicateTermId="documented_as") == []
+        assert store.fact(older)["status"] == "active"
+        assert store.pendingConflictCount() == 0
+
+    def test_editOfTheSameEntryIsJudgedAndOldRowSuperseded(self, store, judge):
+        """同一条目的两版正文才是分歧：新说法胜出，旧说法留痕。"""
+        old = _doc(store, "default", "反思反哺链", "k9", obj="key-v1")
+        new = _doc(store, "default", "反思反哺链", "k9", obj="key-v2")
+
+        conflicts = judge.detect(subjectLabel="反思反哺链", predicateTermId="documented_as")
+
+        assert [c["kind"] for c in conflicts] == ["value"]
+        assert set(conflicts[0]["member_fact_ids"]) == {old, new}
+        judge.record(subjectLabel="反思反哺链", predicateTermId="documented_as")
+        assert store.fact(old)["status"] == "superseded"
+        assert store.fact(new)["status"] == "active"
+
+    def test_scopeIsTheEntryIdNotTheProvenancePrefix(self, store, judge):
+        """回填写 `legacy:<kid>`、账本写 `entry:<kid>`，同一条目不能因前缀不同分家。"""
+        key = store.upsertSubject("default", "带前缀的条目")
+        backfilled = store.upsertFact("default", key, "documented_as", "key-v1", "正文一",
+                                      relationKind="document", recordKind="narrative",
+                                      sourceTurnId="legacy:k7")
+        edited = store.upsertFact("default", key, "documented_as", "key-v2", "正文二",
+                                  relationKind="document", recordKind="narrative",
+                                  sourceTurnId="entry:k7")
+
+        conflicts = judge.detect(subjectLabel="带前缀的条目", predicateTermId="documented_as")
+
+        assert set(conflicts[0]["member_fact_ids"]) == {backfilled, edited}
+
+    def test_triplesAreNotAffectedByTheNarrativeScope(self, store, judge):
+        """过滤认的是记录身份，不是 relation_kind 那个字面：三元组即便自称 document 照旧判。"""
+        key = store.upsertSubject("a", "神经瓦")
+        store.upsertFact("a", key, "version", "1.0", "正文一", relationKind="document")
+        store.upsertFact("a", key, "version", "2.0", "正文二", relationKind="document")
+
+        conflicts = judge.detect(subjectLabel="神经瓦", predicateTermId="version")
+
+        assert [c["kind"] for c in conflicts] == ["value"]
+
+    def test_narrativeIsNotCarriedIntoATripleConflict(self, store, judge):
+        """同一 (主体, 谓词) 上若混进叙述行，它既不当成员也不被牵连取代。
+
+        生产不会出现这种混群（叙述只走 documented_as），但规则要写成"按条目划范围"，
+        而不是"整组放行"或"整组送进取代"。
+        """
+        key = store.upsertSubject("a", "神经瓦")
+        docId = store.upsertFact("a", key, "documented_as", "k1", "正文一",
+                                 relationKind="document", recordKind="narrative",
+                                 sourceTurnId="entry:k1")
+        _fact(store, "a", "神经瓦", "documented_as", "k2")
+        _fact(store, "a", "神经瓦", "documented_as", "k3")
+
+        conflicts = judge.detect(subjectLabel="神经瓦", predicateTermId="documented_as")
+
+        assert [c["kind"] for c in conflicts] == ["value"]
+        members = conflicts[0]["member_fact_ids"]
+        assert docId not in members and len(members) == 2
+        judge.record(subjectLabel="神经瓦", predicateTermId="documented_as")
+        assert store.fact(docId)["status"] == "active", "裁决不许顺手把条目正文取代掉"
+
+    def test_narrativeWithoutProvenanceCannotConflictWithAnything(self, store, judge):
+        """溯源为空的叙述行没有条目归属——按客体自锁，不并进来也不被顶掉。"""
+        key = store.upsertSubject("a", "无溯源条目")
+        first = store.upsertFact("a", key, "documented_as", "o1", "正文一",
+                                 relationKind="document", recordKind="narrative")
+        second = store.upsertFact("a", key, "documented_as", "o2", "正文二",
+                                  relationKind="document", recordKind="narrative")
+
+        assert judge.detect(subjectLabel="无溯源条目", predicateTermId="documented_as") == []
+        assert store.fact(first)["status"] == "active" and store.fact(second)["status"] == "active"

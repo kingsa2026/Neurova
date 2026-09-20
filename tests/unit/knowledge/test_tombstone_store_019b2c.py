@@ -119,7 +119,7 @@ class TestWritePath:
 
 class TestCutoverAndRollback:
     def test_existingJsonTombstonesMoveOnce(self, tmp_path, monkeypatch):
-        monkeypatch.delenv(ENV_FLAG, raising=False)
+        monkeypatch.setenv(ENV_FLAG, "off")
         seed = KnowledgeRepository(str(tmp_path / "kb"))
         kid = _seed(seed)
         seed.delete_knowledge("default", kid, deleted_by="root")
@@ -136,7 +136,7 @@ class TestCutoverAndRollback:
 
     def test_purgedTombstonesDoNotComeBack(self, tmp_path, monkeypatch):
         """墓碑清空后重启不能拿快照把删除史灌回来（与条目同一纪律）。"""
-        monkeypatch.delenv(ENV_FLAG, raising=False)
+        monkeypatch.setenv(ENV_FLAG, "off")
         seed = KnowledgeRepository(str(tmp_path / "kb"))
         kid = _seed(seed)
         seed.delete_knowledge("default", kid, deleted_by="root")
@@ -150,7 +150,7 @@ class TestCutoverAndRollback:
         assert KnowledgeRepository(str(tmp_path / "kb")).list_deleted() == []
 
     def test_gateOffKeepsJsonBehaviour(self, tmp_path, monkeypatch):
-        monkeypatch.delenv(ENV_FLAG, raising=False)
+        monkeypatch.setenv(ENV_FLAG, "off")
         repo = KnowledgeRepository(str(tmp_path / "kb"))
         kid = _seed(repo)
         repo.delete_knowledge("default", kid, deleted_by="root")

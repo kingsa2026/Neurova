@@ -18,13 +18,16 @@ from typing import Any, Dict, List, Optional
 from neurova.core.logger import get_logger
 
 from .credibility import ConfidenceAggregator
+from .narratives import FOUNDATION_DB_NAME
+from .storage_fence import PRODUCTION_STORAGE_DIR, assertNotUnderProductionStorage
 
 logger = get_logger(__name__)
 
 # 置信度聚合只有一处算法源；store 在输入变化处回算，避免派生列腐烂
 _AGGREGATOR = ConfidenceAggregator()
 
-DEFAULT_FACT_DB = "./data/knowledge/knowledge_facts.db"
+# 生产路径只有 storage_fence 一处定义；这里派生，不再抄第二份字面量。
+DEFAULT_FACT_DB = str(Path(PRODUCTION_STORAGE_DIR) / FOUNDATION_DB_NAME)
 
 # ADR 0016 三态纪律：这三值是穷举，"没证据"（unevidenced）不等于"通过"（evidenced）。
 EVIDENCE_STATES = ("evidenced", "failed", "unevidenced")
@@ -183,6 +186,7 @@ class KnowledgeFactStore:
                 "KnowledgeFactStore 需显式传入 db_path（生产用 %r，测试用 ':memory:'）；"
                 "不给默认是为了不再复现『检索分支对着空表跑』。" % DEFAULT_FACT_DB
             )
+        assertNotUnderProductionStorage(db_path, "事实底座库")
         self._db_path = db_path
         if db_path != ":memory:":
             Path(db_path).parent.mkdir(parents=True, exist_ok=True)

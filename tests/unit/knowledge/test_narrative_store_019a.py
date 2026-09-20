@@ -37,8 +37,13 @@ def _flatStore(store: NarrativeStore) -> List[Dict[str, Any]]:
     return [it for items in store.loadAll().values() for it in items]
 
 
-def _seedJsonRepo(storageDir) -> KnowledgeRepository:
-    """关闸态建库：写出 knowledge.json，含分块/父块/图节点/提交/修订各类子结构。"""
+def _seedJsonRepo(storageDir, monkeypatch) -> KnowledgeRepository:
+    """关闸态建库：写出 knowledge.json，含分块/父块/图节点/提交/修订各类子结构。
+
+    019b-4b 把默认后端翻向底座库，"要一份 JSON 时代的快照"从此必须显式关闸，
+    不能再指望默认值——本文件测的正是从那份快照搬进搬出不失真。
+    """
+    monkeypatch.setenv(ENV_FLAG, "off")
     repo = KnowledgeRepository(str(storageDir))
     first = repo.create_knowledge(
         "default", "蜂群并发成本护栏", _LONG, category="architecture",
@@ -59,8 +64,8 @@ def _seedJsonRepo(storageDir) -> KnowledgeRepository:
 
 
 @pytest.fixture
-def seeded(tmp_path) -> KnowledgeRepository:
-    return _seedJsonRepo(tmp_path / "kb")
+def seeded(tmp_path, monkeypatch) -> KnowledgeRepository:
+    return _seedJsonRepo(tmp_path / "kb", monkeypatch)
 
 
 class TestMigrationChain:
@@ -146,13 +151,29 @@ class TestStoreFidelity:
 
 
 class TestRepositorySwitch:
-    def test_gateOffWritesOnlyJson(self, tmp_path, monkeypatch):
+    def test_defaultIsTheStoreAfterRetirement(self, tmp_path, monkeypatch):
+        """019b-4b：默认值就是权威所在——不设任何环境变量也必须落在底座库里。
+
+        这条是"退役"的正面判据：默认态下 JSON 主文件根本不会被创建，
+        再要 JSON 得显式关闸，而关闸态在搬家后会被拒（见下方回退用例）。
+        """
         monkeypatch.delenv(ENV_FLAG, raising=False)
-        _seedJsonRepo(tmp_path / "kb")
+
+        repo = KnowledgeRepository(str(tmp_path / "kb"))
+
+        assert repo._narratives is not None
+        assert (tmp_path / "kb" / FOUNDATION_DB_NAME).exists()
+        assert not (tmp_path / "kb" / "knowledge.json").exists()
+
+    def test_gateOffWritesOnlyJson(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(ENV_FLAG, "off")
+        _seedJsonRepo(tmp_path / "kb", monkeypatch)
         assert (tmp_path / "kb" / "knowledge.json").exists()
         assert not (tmp_path / "kb" / FOUNDATION_DB_NAME).exists()
 
-    def test_gateOnLoadsJsonEraItemsFieldByField(self, tmp_path, seeded, monkeypatch):
+    def test_gateOnLoadsJsonEraItemsFieldByField(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(ENV_FLAG, "off")
+        seeded = _seedJsonRepo(tmp_path / "kb", monkeypatch)
         before = copy.deepcopy(seeded._items)
         monkeypatch.setenv(ENV_FLAG, "on")
         reopened = KnowledgeRepository(str(tmp_path / "kb"))

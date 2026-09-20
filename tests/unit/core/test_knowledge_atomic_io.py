@@ -23,7 +23,12 @@ def test_atomic_write_no_partial_file(tmp_path):
 
 
 def test_corrupt_file_is_quarantined_not_overwritten(tmp_path, monkeypatch, caplog):
-    """主文件半截 JSON → 隔离保留现场，内存态为空但原文件不留在原地。"""
+    """主文件半截 JSON → 隔离保留现场，内存态为空但原文件不留在原地。
+
+    显式 `off`：损坏隔离是 JSON 回退态的行为，默认权威已在底座库（那里由迁移与
+    SQLite 自己的错误处理负责，见 019a 的 test_corruptDatabaseFailsLoud…）。
+    """
+    monkeypatch.setenv("NEUROVA_KB_NARRATIVE_STORE", "off")
     repo_dir = tmp_path / "kb"
     repo_dir.mkdir()
     corrupt = repo_dir / "knowledge.json"

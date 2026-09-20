@@ -86,7 +86,10 @@ class TestKnowledgeRepository:
         assert got is not None
         assert got["title"] == "持久化"
 
-    def test_file_is_valid_json(self, tmp_path):
+    def test_file_is_valid_json(self, tmp_path, monkeypatch):
+        # 显式回退态：这条专测 knowledge.json 的文件形状。默认权威已在底座库，
+        # 那里由 SQLite 自己保证结构，不存在"文件是不是合法 JSON"这个问题。
+        monkeypatch.setenv("NEUROVA_KB_NARRATIVE_STORE", "off")
         repo = KnowledgeRepository(tmp_path)
         repo.create_knowledge("default", title="t", content="c")
         f = tmp_path / "knowledge.json"
