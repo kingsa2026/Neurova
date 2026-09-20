@@ -53,11 +53,12 @@ class Block:
 
 @dataclass(frozen=True)
 class DocSettings:
-    """渲染设置。缺省值即 `report` 模板的形态，逐次参数覆盖优先于预设（spec §5）。"""
+    """渲染设置。三态要分清：None 是"没表态，用模板默认"，空串是"我要关掉它"。
+    把空串也当没填，调用方就永远关不掉页脚。"""
 
     template: str = "report"
     title: str = ""
     header_text: typing.Optional[str] = None
     footer_text: typing.Optional[str] = None
-    page_number: bool = True
+    page_number: typing.Optional[bool] = None
     margin_mm: float = 18.0
