@@ -354,6 +354,71 @@ export function resolveKnowledgeConflict(
 }
 
 // ---------------------------------------------------------------------------
+// 工单 024：事实血缘与 Turtle 导出（G01 的用户可见面）
+// ---------------------------------------------------------------------------
+
+/** 血缘的一跳：断言跳给"谁在什么介质上说了什么"，推导跳给"由哪条规则、从哪些前提"。 */
+export interface LineageAssertionHop {
+  kind: 'assertion'
+  assertion_id: string
+  actor_type: string
+  actor_id: string
+  medium_ref: string
+  statement_text: string
+  asserted_at: string
+  activity_id: string
+  activity_kind: string
+  activity_basis: string
+  seq: number
+  digest: string
+}
+
+export interface LineagePremise {
+  fact_id: string
+  subject_label: string
+  predicate: string
+  object_term: string
+  statement_texts: string[]
+}
+
+export interface LineageDerivationHop {
+  kind: 'derivation'
+  rule: { rule_id: string; version: string; head_predicate: string } | null
+  rule_ids: string[]
+  premises: LineagePremise[]
+}
+
+export type LineageHop = LineageAssertionHop | LineageDerivationHop
+
+export interface FactLineage {
+  fact_id: string
+  subject_key: string
+  subject_label: string
+  predicate: string
+  object_term: string
+  record_kind: string
+  status: string
+  recorded_at?: string | null
+  qualifier: Record<string, unknown>
+  confidence: number | null
+  hops: LineageHop[]
+  derivation: { rule_id: string; rule_version: string; stratum: number } | null
+  /** 显式缺维：没有断言 / 断言没挂活动 / 活动没记介质。空数组才是"都齐"。 */
+  missing: string[]
+  provenance_state: 'evidenced' | 'unevidenced'
+}
+
+/** 一条事实的逐跳血缘。 */
+export function getFactLineage(factId: string) {
+  return api.get<FactLineage>(`${BASE}/facts/${factId}/lineage`)
+}
+
+/** 同一份血缘的 RDF/Turtle 文本（后端自拼，前端只下载不重排）。 */
+export function getFactTurtle(factId: string) {
+  return api.get<string>(`${BASE}/facts/${factId}/turtle`, { responseType: 'text' })
+}
+
+// ---------------------------------------------------------------------------
 // P1-1 图谱实体消解（灰区对人工队列 + 攒批裁决）
 // ---------------------------------------------------------------------------
 

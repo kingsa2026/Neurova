@@ -235,6 +235,10 @@
                 <a-button size="small" @click="handleResolveConflict(item, 'dismiss')">
                   {{ t('knowledge.conflictDismiss') }}
                 </a-button>
+                <!-- 裁决前先看清每条说法的来源：血缘抽屉吃 member_fact_id，选中的成员优先 -->
+                <a-button size="small" @click="openLineage(conflictLineageTarget(item))">
+                  {{ t('knowledge.conflictViewLineage') }}
+                </a-button>
               </template>
             </template>
           </a-list-item>
@@ -625,6 +629,13 @@
 
     <!-- P2 标注闭环：精准回复命中表管理 -->
     <AnnotationDrawer v-model:open="annotationOpen" />
+
+    <!-- 工单 024：事实血缘抽屉（也可从推导跳里的前提继续往回走） -->
+    <KnowledgeLineageDrawer
+      v-model:open="lineageOpen"
+      :fact-id="lineageFactId"
+      @open-fact="openLineage"
+    />
   </div>
 </template>
 
@@ -674,6 +685,7 @@ import { request } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import GlassPanel from '@/components/GlassPanel.vue'
 import AnnotationDrawer from '@/modules/collaboration/AnnotationDrawer.vue'
+import KnowledgeLineageDrawer from '@/components/KnowledgeLineageDrawer.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { useAgentPage } from '@/composables/useAgentPage'
 
@@ -1278,6 +1290,21 @@ async function fetchConflicts() {
 
 /** 事实侧的胜方由人指明：没有"自动裁决"按钮，也没有默认胜方。 */
 const conflictWinner = ref<Record<string, string>>({})
+
+// 血缘抽屉：一次只开一条事实；从推导跳点前提时替换当前事实（不叠抽屉）
+const lineageOpen = ref(false)
+const lineageFactId = ref('')
+
+function openLineage(factId: string) {
+  if (!factId) return
+  lineageFactId.value = factId
+  lineageOpen.value = true
+}
+
+function conflictLineageTarget(item: KnowledgeConflict): string {
+  if (item.axis !== 'fact') return ''
+  return conflictWinner.value[item.conflict_id] || item.member_fact_ids[0] || ''
+}
 
 /** 建议策略的枚举值是蛇形，而 i18n 守卫要求键段驼峰——中间这一步映射就是翻译表本身。 */
 const CONFLICT_POLICY_KEYS: Record<string, string> = {
