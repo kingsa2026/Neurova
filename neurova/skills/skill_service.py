@@ -315,7 +315,7 @@ class SkillService:
         return None
 
     def create_automatic_skill(self, skill_id, name, description, config, version="1.0.0",
-                               alias_ids=()):
+                               alias_ids=(), human_approved: bool = False):
         aliases = tuple(str(a) for a in (alias_ids or ()) if str(a))
         manifest = {"id": skill_id, "name": name, "description": description, "config": config}
         from neurova.skills.creation_governance import manifest_fingerprint
@@ -352,7 +352,8 @@ class SkillService:
                     return {"success": True, "duplicate": True, "skill_id": skill_id}
                 return {"success": False, "error": "Skill ID already exists with different steps",
                         "code": "id_conflict"}
-            ok = self._register_metadata(skill_id, name, description, version, config)
+            ok = self._register_metadata(skill_id, name, description, version, config,
+                                         human_approved=human_approved)
             return {"success": ok, "skill_id": skill_id, **({} if ok else {"error": "Persistence failed"})}
 
     def install_skill(
@@ -361,6 +362,7 @@ class SkillService:
         skill_id: str = None,
         pool_type: str = "agent",
         owner_user_id: str = "",
+        human_approved: bool = False,
     ) -> Dict[str, Any]:
         """
         安装技能
@@ -368,6 +370,10 @@ class SkillService:
         Args:
             skill_path: 技能路径（本地目录/zip 路径，或远程 http(s):// URL）
             skill_id: 技能ID（可选，默认从技能清单中读取）
+            human_approved: 该次安装由人显式批准（工单 010）。`source` 为
+                auto/synthesized/llm_created 时默认按"自动行为"要求三个独立真实
+                成功证据；人类刚批准的提案不是自动行为，若不区分则人工通道
+                按构造走不通。判重、路径穿越与安全扫描不受此参数影响。
 
         Returns:
             安装结果
@@ -438,7 +444,8 @@ class SkillService:
                     # 传 requested_id 让判重只认"别的 ID 声明了同一身份"（跳转），
                     # 同名条目走下方 replacement 快路径保留账本与版本链。
                     decision = self._creation_decision(
-                        manifest, automatic=manifest.get("source") in {"auto", "synthesized", "llm_created"},
+                        manifest, automatic=manifest.get("source") in {"auto", "synthesized", "llm_created"}
+                        and not human_approved,
                         db=db, exclude_ids=(str(skill_id), str(manifest_id)))
                     if decision is None and str(skill_id) in self._skills:
                         # 同名且**同一结构身份** → 同内容的重复安装：如实回报
@@ -1002,6 +1009,7 @@ class SkillService:
         manifest_source: str = "auto",
         pool_type: str = "agent",
         owner_user_id: str = "",
+        human_approved: bool = False,
     ) -> bool:
         """
         注册元数据技能 (无文件路径, 仅 manifest 持久化)
@@ -1040,13 +1048,19 @@ class SkillService:
 
                 from neurova.evolution.skill_review_gate import skill_review_gate_enabled
 
+                # 工单 016：自动产物默认进"注册即禁用"待审，但**人已经批准过的**
+                # （builder 模板过审批面后才走到这里落盘）不得再被这道门按回停用 ——
+                # 否则"批准"停在内存态，重启/下一轮对话读磁盘即不可用。
                 self._skills[skill_id] = {
                     "id": skill_id,
                     "name": name,
                     "version": version,
                     "description": description,
-                    "enabled": not (manifest_source in {"auto", "synthesized", "llm_created"}
-                                    and skill_review_gate_enabled()),
+                    "enabled": not (
+                        manifest_source in {"auto", "synthesized", "llm_created"}
+                        and skill_review_gate_enabled()
+                        and not human_approved
+                    ),
                     "installed_at": datetime.datetime.now().isoformat(),
                     "path": "",  # 自动技能无文件路径
                     "pool_type": str(pool_type or "agent"),

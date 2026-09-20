@@ -132,6 +132,7 @@ def persist_synthesized_skill(
     tool_sequence: list,
     service: Any,
     permissions: Optional[dict] = None,
+    human_approved: bool = False,
 ) -> bool:
     """agent 自主分装（合成）技能持久化到 agent 技能页 manifest。
 
@@ -146,6 +147,7 @@ def persist_synthesized_skill(
         service, skill_id, name, description, version,
         source="synthesized",
         extra_config=extra,
+        human_approved=human_approved,
     )
 
 
@@ -157,6 +159,7 @@ def _write_agent_manifest(
     version: str,
     source: str = "marketplace",
     extra_config: Optional[dict] = None,
+    human_approved: bool = False,
 ) -> bool:
     """以 staging 目录挂 manifest.json，走 SkillService.install_skill 公开 API"""
     manifest = {
@@ -177,7 +180,9 @@ def _write_agent_manifest(
                 json.dumps(manifest, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            result = service.install_skill(str(stage), skill_id=skill_id)
+            result = service.install_skill(
+                str(stage), skill_id=skill_id, human_approved=human_approved
+            )
             return bool(result and result.get("success", True)) and service.get_skill_info(skill_id) is not None
     except Exception as e:  # noqa: BLE001 — 技能页可见性失败不阻断安装主链路
         logger.error("market skill %s -> agent manifest failed: %s", skill_id, e)

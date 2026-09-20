@@ -6,21 +6,22 @@ SelfImprovementProposer - 自我改进提议器
 设计哲学（来源：用户需求 "Self-improving: 从进化工具到改进代码/UI"）：
 1. Agent 不直接修改生产代码 —— 所有改进以"提案"形式提交
 2. 三种渐进路径：
-   - skill_manifest (低风险): 写新 skill manifest 到 .agents/skills/
-   - action_definition (中风险): 动态注册新 action 到 .agents/actions/
-   - pr_patch (高风险): PR patch 提案到 .agents/patches/
+   - skill_manifest (低风险): 批准即装入本 agent 技能库并回灌注册表（工单 010）
+   - action_definition (中风险): 尚无生效通道 → 批准时返回 not_supported
+   - pr_patch (高风险): 尚无生效通道 → 批准时返回 not_supported
 3. 必须经过人类评审 gate（approve_and_apply / reject_proposal）
 4. 集成现有 RSI 基础设施：
    - RSIDeploymentController: 风险 gate (low=phase2, medium=phase3, high=phase4)
    - RSIRollbackManager: 应用前后创建快照，可回滚
-5. 安全沙箱：提案写入 .agents/proposals/ 隔离目录；应用时仅写入 .agents/ 子目录
+5. 安全沙箱：提案台账按 agent 分域持久化；批准动作只经 SkillService 公开 API 落盘，
+   不再由本模块自己往仓库里写文件（工单 010 拆掉了那条"写了就等于生效"的假链路）
 
 安全模型（三层防御 + 状态机守卫 + 线程安全）：
     Layer 1 沙箱校验 (validate_proposal)：
         - 拒绝 target 含 ".." / 绝对路径（/ 或 \\ 开头）
         - 拒绝 target 匹配系统文件前缀（/etc/ /sys/ c:/windows/ 等，统一正斜杠比较）
         - skill_id / action_name 强制为简单名称（^[a-zA-Z][a-zA-Z0-9_-]*$）
-          防止用作目录名/文件名时逃逸 .agents/ 沙箱
+          防止用作目录名/文件名时越出技能库边界
         - action handler 黑名单扫描（os.system / subprocess / eval / exec / __import__ 等）
         - PR patch target 必须是项目内相对路径（neurova/ tests/ NeurUI/ scripts/ config/）
 
@@ -51,23 +52,23 @@ SelfImprovementProposer - 自我改进提议器
           均在 with self._lock: 块内执行
         - 单例层 _proposer_lock 独立保护单例创建
 
-目录结构：
-    .agents/
-    ├── proposals/                # 待评审提案（JSON 持久化）
-    │   └── <proposal_id>.json
-    ├── skills/                   # 已应用的 skill manifest
-    │   └── <skill_id>/manifest.yaml
-    ├── actions/                  # 已应用的 action definition
-    │   └── <action_name>.py
-    └── patches/                  # 已应用的 PR patch（不直接修改生产代码）
-        └── <proposal_id>_<safe_name>.patch
+台账与生效路径（工单 010）：
+    提案台账   <NEUROVA_PROPOSALS_ROOT 或 data/agents>/<agent_id>/proposals/<proposal_id>.json
+    批准生效   SkillService(source=synthesized, human_approved=True) 装库
+               → restore_market_skills_from_service 回灌注册表 → 下一轮对话可用
+    回滚       SkillService.uninstall_skill + registry.unregister（撤不下就不改状态）
 
-构造契约：
+    历史上这里写的是仓库根下的同名目录树（proposals/skills/actions/patches 四类文件），
+    技能加载链从不读它 —— 目录与格式双双不符，"APPLIED"只是一次文件写入。
+    该路径已整体作废，不保留兼容读取；旧目录由运维自行清理。
+
+构造契约（三个协作者一律由调用方注入，不默认新建）：
     proposer = SelfImprovementProposer(
-        proposals_dir=Path(".agents/proposals"),
-        agents_dir=Path(".agents"),
-        deployment_controller=RSIDeploymentController(initial_phase=0),
-        rollback_manager=RSIRollbackManager(),
+        agent_id="kai",
+        deployment_controller=orchestrator.deployment_controller,
+        rollback_manager=orchestrator.rollback_manager,
+        skill_service=SkillService("kai"),        # 缺省时按 agent_id 懒构造
+        skill_registry=get_skill_registry(),      # 缺省时取进程内唯一注册表
     )
 
 使用流程：
@@ -98,6 +99,7 @@ SelfImprovementProposer - 自我改进提议器
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 import uuid
@@ -110,8 +112,16 @@ from typing import Any, Dict, List, Optional
 from neurova.core.logger import get_logger
 from neurova.evolution.rsi.deployment_controller import RSIDeploymentController
 from neurova.evolution.rsi.rollback_manager import RSIRollbackManager
+from neurova.skills.market_registry import (
+    persist_synthesized_skill,
+    restore_market_skills_from_service,
+)
 
 logger = get_logger(__name__)
+
+# 「这条提案今天没有生效通道」的统一前缀 —— 端点与用例都按它判定，
+# 避免各处各写一套"失败但看起来像成功"的措辞（工单 010）
+_NOT_SUPPORTED = "not_supported"
 
 
 # ────── Enums ──────
@@ -212,6 +222,9 @@ class ImprovementProposal:
     """
 
     proposal_id: str = ""
+    # 工单 010：提案必须知道自己属于哪个 agent —— 无归属时多 agent 的台账混成
+    # 一堆不可溯源的记录，人工批准的动作也无从落到正确那个 agent 的技能库上
+    agent_id: str = ""
     proposal_type: ProposalType = ProposalType.SKILL_MANIFEST
     target: str = ""
     content: str = ""
@@ -239,6 +252,7 @@ class ImprovementProposal:
     def to_dict(self) -> Dict[str, Any]:
         return {
             "proposal_id": self.proposal_id,
+            "agent_id": self.agent_id,
             "proposal_type": self.proposal_type.value,
             "target": self.target,
             "content": self.content,
@@ -257,6 +271,7 @@ class ImprovementProposal:
     def from_dict(cls, data: Dict[str, Any]) -> "ImprovementProposal":
         return cls(
             proposal_id=data.get("proposal_id", ""),
+            agent_id=data.get("agent_id", ""),
             proposal_type=ProposalType(data.get("proposal_type", "skill_manifest")),
             target=data.get("target", ""),
             content=data.get("content", ""),
@@ -302,6 +317,9 @@ class ApplyResult:
     proposal: Optional[ImprovementProposal] = None
     snapshot_id: Optional[str] = None
     error: str = ""
+    # 工单 010 的"生效证据"：装进了哪个技能、回灌后注册表是否真取得到
+    applied_skill_id: str = ""
+    registry_hit: bool = False
 
 
 @dataclass
@@ -337,40 +355,48 @@ class SelfImprovementProposer:
 
     def __init__(
         self,
+        *,
+        agent_id: str,
+        deployment_controller: RSIDeploymentController,
+        rollback_manager: RSIRollbackManager,
         proposals_dir: Optional[Path] = None,
-        agents_dir: Optional[Path] = None,
-        deployment_controller: Optional[RSIDeploymentController] = None,
-        rollback_manager: Optional[RSIRollbackManager] = None,
+        skill_service: Any = None,
+        skill_registry: Any = None,
     ) -> None:
         """初始化自我改进提议器
 
         Args:
-            proposals_dir: 提案持久化目录（默认 .agents/proposals/）
-            agents_dir: 已应用提案的根目录（默认 .agents/）
-            deployment_controller: 部署控制器（默认新建 phase=0）
-            rollback_manager: 回滚管理器（默认新建）
+            agent_id: 本提议器服务的 agent（必填）。提案台账与批准后的技能都落在
+                这个 agent 名下 —— 工单 010 前提案不带 agent 归属，多 agent 的
+                队列混成一堆且批准动作无处可落。
+            deployment_controller: 部署控制器（必填，由调用方注入）
+            rollback_manager: 回滚管理器（必填，由调用方注入）
+            proposals_dir: 提案台账目录；默认
+                ``$NEUROVA_PROPOSALS_ROOT/<agent_id>/proposals``，未设 env 时
+                根为 ``data/agents``（与 SkillService 的落盘约定同一套目录）。
+                可注入是为了让测试与多实例部署不往仓库里写。
+            skill_service: 技能库门面（默认按 agent_id 构造真实 SkillService）
+            skill_registry: 技能注册表（默认取进程内唯一注册表）
+
+        三个协作者都不接受"悄悄自建"：工单 005 拆掉的正是 proposer 自带第二个
+        部署控制器这条路，技能链同理 —— 自建的注册表与运行中 agent 用的那份
+        不是同一个对象时，"批准即生效"仍是一句空话。
         """
-        # 默认目录
-        if agents_dir is None:
-            agents_dir = Path(".agents")
+        if not str(agent_id or "").strip():
+            raise ValueError("agent_id 不能为空：提案台账必须按 agent 分域")
+        self._agent_id = str(agent_id)
+
         if proposals_dir is None:
-            proposals_dir = agents_dir / "proposals"
-
-        self._agents_dir = Path(agents_dir)
+            root = Path(os.environ.get("NEUROVA_PROPOSALS_ROOT") or Path("data") / "agents")
+            proposals_dir = root / self._agent_id / "proposals"
         self._proposals_dir = Path(proposals_dir)
-        self._skills_dir = self._agents_dir / "skills"
-        self._actions_dir = self._agents_dir / "actions"
-        self._patches_dir = self._agents_dir / "patches"
-
-        # 创建目录
         self._proposals_dir.mkdir(parents=True, exist_ok=True)
-        self._skills_dir.mkdir(parents=True, exist_ok=True)
-        self._actions_dir.mkdir(parents=True, exist_ok=True)
-        self._patches_dir.mkdir(parents=True, exist_ok=True)
 
-        # 集成现有基础设施
-        self.deployment_controller = deployment_controller or RSIDeploymentController(initial_phase=0)
-        self.rollback_manager = rollback_manager or RSIRollbackManager()
+        # 集成现有基础设施（注入优先，缺省按 agent 取真实门面）
+        self.deployment_controller = deployment_controller
+        self.rollback_manager = rollback_manager
+        self._skill_service = skill_service
+        self._skill_registry = skill_registry
 
         # proposal_id → ImprovementProposal 的内存缓存（从磁盘加载）
         # 共享可变状态，所有读写必须持有 self._lock（AGENTS.md 线程安全规则）
@@ -379,9 +405,9 @@ class SelfImprovementProposer:
         self._load_proposals_from_disk()
 
         logger.info(
-            "SelfImprovementProposer initialized: proposals_dir=%s, agents_dir=%s, phase=%s",
+            "SelfImprovementProposer initialized: agent=%s, proposals_dir=%s, phase=%s",
+            self._agent_id,
             self._proposals_dir,
-            self._agents_dir,
             self.deployment_controller.get_current_phase(),
         )
 
@@ -394,8 +420,26 @@ class SelfImprovementProposer:
         return self._proposals_dir
 
     @property
-    def agents_dir(self) -> Path:
-        return self._agents_dir
+    def agent_id(self) -> str:
+        return self._agent_id
+
+    @property
+    def skill_service(self) -> Any:
+        """技能库门面：按 agent 懒构造真实 SkillService（工单 010 的落点）。"""
+        if self._skill_service is None:
+            from neurova.skills.skill_service import SkillService
+
+            self._skill_service = SkillService(self._agent_id)
+        return self._skill_service
+
+    @property
+    def skill_registry(self) -> Any:
+        """运行中进程的技能注册表 —— 回灌它才算"下一轮对话能用"。"""
+        if self._skill_registry is None:
+            from neurova.skill_system import get_skill_registry
+
+            self._skill_registry = get_skill_registry()
+        return self._skill_registry
 
     # ------------------------------------------------------------------
     # 提案创建 API（3 种渐进路径）
@@ -518,7 +562,7 @@ class SelfImprovementProposer:
             errors.append(f"path traversal 检测：target 含 '..' ({target})")
         if target.startswith("/") or target.startswith("\\"):
             errors.append(f"path traversal 检测：target 为绝对路径 ({target})")
-        # 统一系统文件前缀检查（适用所有提案类型，防止 .agents/ 沙箱逃逸）
+        # 统一系统文件前缀检查（适用所有提案类型，防止 target 指向系统文件）
         for forbidden in _FORBIDDEN_TARGET_PREFIXES:
             if target_normalized.startswith(forbidden.lower()):
                 errors.append(f"target 为系统文件: {target} (禁止前缀 {forbidden})")
@@ -563,7 +607,7 @@ class SelfImprovementProposer:
     # ------------------------------------------------------------------
 
     def submit_proposal(self, proposal: ImprovementProposal) -> str:
-        """提交提案到 .agents/proposals/ 等待人工评审
+        """提交提案到本 agent 的台账目录，等待人工评审
 
         Args:
             proposal: 待提交的提案
@@ -574,6 +618,10 @@ class SelfImprovementProposer:
         Raises:
             ValueError: 提案校验失败
         """
+        # 归属盖章：台账按 agent 分域，批准动作才知道该往哪个技能库装
+        if not proposal.agent_id:
+            proposal.agent_id = self._agent_id
+
         # 安全校验（只读，无需持锁）
         validation = self.validate_proposal(proposal)
         if not validation.is_valid:
@@ -593,6 +641,12 @@ class SelfImprovementProposer:
         )
         return proposal.proposal_id
 
+    def list_all_proposals(self) -> List[ImprovementProposal]:
+        """列出全部提案（含已审）。工单 010 加：只有 PENDING 可见时，
+        "批准过什么、结果如何"在人工通道上永久消失，回滚与审计都无从进行。"""
+        with self._lock:
+            return list(self._proposals_cache.values())
+
     def list_pending_proposals(self) -> List[ImprovementProposal]:
         """列出所有 PENDING 状态的提案
 
@@ -608,7 +662,12 @@ class SelfImprovementProposer:
     # 人类评审 gate
     # ------------------------------------------------------------------
 
-    def approve_and_apply(self, proposal_id: str, approver: str) -> ApplyResult:
+    def approve_and_apply(
+        self,
+        proposal_id: str,
+        approver: str,
+        tool_sequence: Optional[List[str]] = None,
+    ) -> ApplyResult:
         """人工批准并应用提案
 
         流程：
@@ -616,9 +675,14 @@ class SelfImprovementProposer:
         2. 检查提案状态 == PENDING（状态机守卫）
         3. 检查 approver 非空（人类评审 gate）
         4. 检查部署阶段 gate（风险级别 vs 当前阶段）
-        5. 创建回滚快照
-        6. 应用提案（写入 .agents/ 子目录）
+        5. 判"今天能不能生效"（判不下来就拒绝，连快照都不建）
+        6. 应用 = 装进本 agent 技能库 + 回灌注册表（两步都成才算生效）
         7. 更新提案状态为 APPLIED
+
+        Args:
+            tool_sequence: 批准人补交的可执行序列。manifest 里没有 tool_sequence 时
+                本条提案按 `not_supported` 拒绝 —— 人工通道的意义正是"人把缺的
+                东西补上再批准"，而不是把没有内容的东西记成已生效（工单 010）。
 
         双 gate 语义（设计决策，由测试契约固化）：
         - 人类评审 gate（主 gate）：所有应用必须指定非空 approver
@@ -677,23 +741,29 @@ class SelfImprovementProposer:
                     ),
                 )
 
-            # 5. 创建回滚快照（记录应用前的状态）
+            # 5. 先判"这条提案今天能不能生效"——判不下来就直接拒绝，
+            #    连快照都不该建（没有动作发生就不该留下动作的痕迹）
+            plan = self._plan_activation(proposal, tool_sequence)
+            if isinstance(plan, str):
+                logger.info("提案 %s 不予激活：%s", proposal_id, plan)
+                return ApplyResult(success=False, proposal=proposal, error=plan)
+
+            # 6. 创建回滚快照（记录应用前的状态）
             pre_apply_state = self._capture_pre_apply_state(proposal)
             snapshot_id = self.rollback_manager.create_snapshot(pre_apply_state)
 
-            # 6. 应用提案
-            try:
-                self._apply_proposal_to_disk(proposal)
-            except Exception as e:
-                logger.error("应用提案失败 %s: %s", proposal_id, e)
+            # 7. 应用 = 装进技能库 + 回灌注册表；任一失败都不记 APPLIED
+            outcome = self._activate_skill_manifest(plan)
+            if not outcome["ok"]:
+                logger.error("应用提案失败 %s: %s", proposal_id, outcome["error"])
                 return ApplyResult(
                     success=False,
                     proposal=proposal,
                     snapshot_id=snapshot_id,
-                    error=f"应用失败: {e}",
+                    error=f"应用失败: {outcome['error']}",
                 )
 
-            # 7. 更新提案状态（直接到 APPLIED，不经过瞬态 APPROVED）
+            # 8. 更新提案状态（直接到 APPLIED，不经过瞬态 APPROVED）
             now = datetime.now(timezone.utc).isoformat()
             proposal.approved_by = approver
             proposal.approved_at = now
@@ -705,15 +775,18 @@ class SelfImprovementProposer:
             self._save_proposal_to_disk(proposal)
 
             logger.info(
-                "Applied proposal %s (approver=%s, snapshot=%s)",
+                "Applied proposal %s (approver=%s, snapshot=%s, skill=%s)",
                 proposal_id,
                 approver,
                 snapshot_id,
+                plan["skill_id"],
             )
             return ApplyResult(
                 success=True,
                 proposal=proposal,
                 snapshot_id=snapshot_id,
+                applied_skill_id=plan["skill_id"],
+                registry_hit=outcome["registry_hit"],
             )
 
     def reject_proposal(self, proposal_id: str, reason: str = "") -> bool:
@@ -802,16 +875,15 @@ class SelfImprovementProposer:
                     error=f"snapshot not found or rollback failed: {snapshot_id}",
                 )
 
-            # 4. 删除应用时创建的文件
-            # 文件删除失败应阻止状态更新，避免状态与磁盘不一致
-            try:
-                self._remove_applied_files(proposal)
-            except Exception as e:
-                logger.error("回滚时删除文件失败（保持 APPLIED 状态）: %s", e)
+            # 4. 撤销生效：从技能库与注册表都撤下（工单 010）。
+            #    撤不下就保持 APPLIED —— 状态必须跟着事实走，不能先改账再补动作
+            problem = self._deactivate_skill_manifest(proposal)
+            if problem:
+                logger.error("回滚提案 %s 失败（保持 APPLIED 状态）: %s", proposal_id, problem)
                 return RollbackResult(
                     success=False,
                     proposal_id=proposal_id,
-                    error=f"回滚时删除文件失败，保持 APPLIED 状态: {e}",
+                    error=f"撤销生效失败，保持 APPLIED 状态: {problem}",
                 )
 
             # 5. 更新提案状态
@@ -843,124 +915,124 @@ class SelfImprovementProposer:
             encoding="utf-8",
         )
 
-    def _capture_pre_apply_state(self, proposal: ImprovementProposal) -> Dict[str, Any]:
-        """捕获应用前的状态（用于回滚）
+    def _capture_pre_apply_state(
+        self, proposal: ImprovementProposal
+    ) -> Dict[str, Any]:
+        """捕获应用前状态（回滚快照）。
 
-        记录将被创建/修改的文件路径，以便回滚时删除。
+        工单 010 之后"应用"不再是在 `.agents/` 下写文件，而是往 agent 技能库装一个
+        技能，所以快照记的是**技能层的事实**：装之前库里有没有同名条目。
         """
-        target_path = self._get_apply_target_path(proposal)
+        skill_id = proposal.target
+        try:
+            preexisting = self.skill_service.get_skill_info(skill_id) is not None
+        except Exception as e:  # noqa: BLE001 - 库不可读时如实记 unknown，不伪装成 False
+            logger.warning("读取技能库现状失败（快照记为 unknown）: %s", e)
+            preexisting = None
         return {
             "proposal_id": proposal.proposal_id,
             "proposal_type": proposal.proposal_type.value,
-            "target": proposal.target,
-            "target_path": str(target_path) if target_path else None,
-            "target_path_existed_before": (
-                target_path.exists() if target_path else False
-            ),
+            "agent_id": self._agent_id,
+            "target": skill_id,
+            "skill_preexisted": preexisting,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    def _get_apply_target_path(self, proposal: ImprovementProposal) -> Optional[Path]:
-        """获取提案应用时的目标文件路径"""
-        if proposal.proposal_type == ProposalType.SKILL_MANIFEST:
-            return self._skills_dir / proposal.target / "manifest.yaml"
-        elif proposal.proposal_type == ProposalType.ACTION_DEFINITION:
-            return self._actions_dir / f"{proposal.target}.py"
-        elif proposal.proposal_type == ProposalType.PR_PATCH:
-            # PR patch 写入 patches 目录（不直接修改生产代码）
-            safe_name = proposal.target.replace("/", "_").replace("\\", "_")
-            return self._patches_dir / f"{proposal.proposal_id}_{safe_name}.patch"
-        return None
+    @staticmethod
+    def _parse_manifest(content: str) -> Dict[str, Any]:
+        """解析 skill manifest（YAML）。解析不出来时返回空字典，由调用方判 not_supported。"""
+        try:
+            import yaml
 
-    def _apply_proposal_to_disk(self, proposal: ImprovementProposal) -> None:
-        """将提案内容写入磁盘（仅写入 .agents/ 子目录）"""
-        target_path = self._get_apply_target_path(proposal)
-        if target_path is None:
-            raise ValueError(f"未知提案类型: {proposal.proposal_type}")
+            loaded = yaml.safe_load(content or "")
+        except Exception as e:  # noqa: BLE001 - 坏 YAML 不是崩溃理由，是拒绝批准的依据
+            logger.warning("manifest YAML 解析失败: %s", e)
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
 
-        # 确保父目录存在
-        target_path.parent.mkdir(parents=True, exist_ok=True)
+    def _plan_activation(
+        self, proposal: ImprovementProposal, tool_sequence: Optional[List[str]]
+    ) -> Any:
+        """把提案翻成"要装什么"；不可激活时返回 `not_supported` 错误串。
 
-        # 写入内容
-        target_path.write_text(proposal.content, encoding="utf-8")
+        返回 dict（激活计划）或 str（拒绝理由）。拒绝**必须**显式：
+        把"装不上"记成 APPLIED 就是本单禁止的伪报成功。
+        """
+        if proposal.proposal_type is not ProposalType.SKILL_MANIFEST:
+            return (
+                f"{_NOT_SUPPORTED}: 提案类型 {proposal.proposal_type.value} 目前没有生效通道，"
+                "批准它只会留下一次文件写入；不如实说「不生效」就不算批准"
+            )
+        parsed = self._parse_manifest(proposal.content)
+        sequence = tool_sequence or parsed.get("tool_sequence") or []
+        if not isinstance(sequence, list) or not sequence:
+            return (
+                f"{_NOT_SUPPORTED}: manifest 缺 tool_sequence，没有可执行内容可装；"
+                "批准人可在请求里补交 tool_sequence"
+            )
+        return {
+            "skill_id": proposal.target,
+            "name": str(parsed.get("name") or proposal.target),
+            "description": str(parsed.get("description") or proposal.description or ""),
+            "version": str(parsed.get("version") or "1.0.0"),
+            "tool_sequence": [str(step) for step in sequence],
+        }
 
-        logger.debug("Applied proposal %s to %s", proposal.proposal_id, target_path)
+    def _activate_skill_manifest(self, plan: Dict[str, Any]) -> Dict[str, Any]:
+        """装进 agent 技能库并回灌注册表 —— 两步都成才算生效（工单 010）。
 
-    def _remove_applied_files(self, proposal: ImprovementProposal) -> None:
-        """回滚时删除应用创建的文件"""
-        target_path = self._get_apply_target_path(proposal)
-        if target_path is None or not target_path.exists():
-            return
+        `human_approved=True`：本次安装由人显式批准，不该再被"自动行为需三个独立
+        真实成功证据"那道门挡住（`SkillService` 按 source 判自动，而 RSI 提案的
+        source 正是 synthesized）。判重、路径穿越与安全扫描不受该参数影响。
+        """
+        service = self.skill_service
+        registry = self.skill_registry
+        installed = persist_synthesized_skill(
+            skill_id=plan["skill_id"],
+            name=plan["name"],
+            description=plan["description"],
+            version=plan["version"],
+            tool_sequence=plan["tool_sequence"],
+            service=service,
+            human_approved=True,
+        )
+        if not installed:
+            return {"ok": False, "error": "SkillService 安装未成功（见 skill_service 日志）",
+                    "registry_hit": False}
 
-        # 删除文件
-        target_path.unlink()
+        try:
+            restored = restore_market_skills_from_service(service, registry)
+        except Exception as e:  # noqa: BLE001 - 回灌失败必须阻止 APPLIED
+            return {"ok": False, "error": f"回灌注册表异常: {e}", "registry_hit": False}
 
-        # 如果是 skill manifest，删除空的 skill 目录
-        if proposal.proposal_type == ProposalType.SKILL_MANIFEST:
-            skill_dir = self._skills_dir / proposal.target
-            if skill_dir.exists() and not any(skill_dir.iterdir()):
-                skill_dir.rmdir()
+        hit = (
+            registry.get_skill(plan["name"]) is not None
+            or registry.get_skill(plan["skill_id"]) is not None
+        )
+        if not hit:
+            return {
+                "ok": False,
+                "error": (
+                    f"已装入技能库但注册表取不到（restored={restored}）⇒ 下一轮对话"
+                    "仍看不见它，不按 APPLIED 记账"
+                ),
+                "registry_hit": False,
+            }
+        return {"ok": True, "error": "", "registry_hit": True}
 
-        logger.debug("Removed applied files for proposal %s", proposal.proposal_id)
+    def _deactivate_skill_manifest(self, proposal: ImprovementProposal) -> str:
+        """回滚 = 把装进去的技能从库与注册表撤下。返回空串表示成功。"""
+        skill_id = proposal.target
+        name = self._parse_manifest(proposal.content).get("name") or skill_id
+        problems: List[str] = []
+        try:
+            self.skill_service.uninstall_skill(skill_id)
+        except Exception as e:  # noqa: BLE001
+            problems.append(f"技能库卸载失败: {e}")
+        try:
+            self.skill_registry.unregister(str(name))
+            self.skill_registry.unregister(str(skill_id))
+        except Exception as e:  # noqa: BLE001
+            problems.append(f"注册表注销失败: {e}")
+        return "；".join(problems)
 
-
-# ────── 工厂函数（遵循现有 create_* 模式） ──────
-
-
-def create_self_improvement_proposer(
-    proposals_dir: Optional[Path] = None,
-    agents_dir: Optional[Path] = None,
-    deployment_controller: Optional[RSIDeploymentController] = None,
-    rollback_manager: Optional[RSIRollbackManager] = None,
-) -> SelfImprovementProposer:
-    """创建自我改进提议器实例
-
-    Args:
-        proposals_dir: 提案持久化目录
-        agents_dir: 已应用提案的根目录
-        deployment_controller: 部署控制器
-        rollback_manager: 回滚管理器
-
-    Returns:
-        SelfImprovementProposer: 提议器实例
-    """
-    return SelfImprovementProposer(
-        proposals_dir=proposals_dir,
-        agents_dir=agents_dir,
-        deployment_controller=deployment_controller,
-        rollback_manager=rollback_manager,
-    )
-
-
-# ────── 全局单例（遵循现有 get_* 模式） ──────
-
-_proposer_instance: Optional[SelfImprovementProposer] = None
-_proposer_lock = None
-
-
-def get_self_improvement_proposer() -> SelfImprovementProposer:
-    """获取全局自我改进提议器单例
-
-    Returns:
-        SelfImprovementProposer: 全局单例
-    """
-    global _proposer_instance, _proposer_lock
-    if _proposer_lock is None:
-        import threading
-
-        _proposer_lock = threading.Lock()
-    if _proposer_instance is None:
-        with _proposer_lock:
-            if _proposer_instance is None:
-                _proposer_instance = SelfImprovementProposer()
-    return _proposer_instance
-
-
-def reset_self_improvement_proposer() -> None:
-    """重置全局自我改进提议器单例（用于测试）"""
-    global _proposer_instance
-    if _proposer_lock is not None:
-        with _proposer_lock:
-            _proposer_instance = None
-    else:
-        _proposer_instance = None
