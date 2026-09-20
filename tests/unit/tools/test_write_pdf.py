@@ -165,3 +165,62 @@ async def test_image_count_is_bounded(out_dir, tmp_path):
     content = "".join(f"![图{i}](p{i}.png)\n\n" for i in range(21))
     result = await _make_executor(tmp_path)._execute_write_pdf({"content": content})
     assert any("上限" in w or "20" in w for w in result["warnings"]), "超限必须报告，不得静默丢图"
+
+
+# ── 模板与 path（工单 005 / 006）───────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_template_and_overrides_reach_the_response(out_dir):
+    result = await _make_executor()._execute_write_pdf(
+        {"content": "正文", "title": "T", "template": "cover", "footer_text": "", "margin_mm": 30}
+    )
+    assert result["decor"]["cover"] is True
+    assert result["decor"]["footer"] is None
+    assert result["decor"]["margin_mm"] == 30.0
+
+
+@pytest.mark.asyncio
+async def test_default_template_is_report(out_dir):
+    result = await _make_executor()._execute_write_pdf({"content": "正文", "title": "月报"})
+    assert result["decor"]["header"] == "月报" and result["decor"]["page_number"] is True
+
+
+@pytest.mark.asyncio
+async def test_relative_path_lands_in_workspace(out_dir, tmp_path):
+    """给 path 就落工作区，且不再冒充产物（不给 download_url）。"""
+    result = await _make_executor(tmp_path)._execute_write_pdf(
+        {"content": "正文", "path": "reports/monthly.pdf"}
+    )
+    assert "error" not in result, result
+    assert result["file_path"] == str(tmp_path / "reports" / "monthly.pdf")
+    assert (tmp_path / "reports" / "monthly.pdf").read_bytes()[:5] == b"%PDF-"
+    assert "download_url" not in result
+
+
+@pytest.mark.asyncio
+async def test_path_traversal_is_refused(out_dir, tmp_path):
+    exe = _make_executor(tmp_path)
+    escaped = await exe._execute_write_pdf({"content": "正文", "path": "../../evil.pdf"})
+    assert "error" in escaped
+    assert not (tmp_path.parent.parent / "evil.pdf").exists()
+
+
+@pytest.mark.asyncio
+async def test_absolute_path_outside_workspace_is_refused(out_dir, tmp_path, monkeypatch):
+    outside = tmp_path.parent / "outside.pdf"
+    result = await _make_executor(tmp_path)._execute_write_pdf(
+        {"content": "正文", "path": str(outside)}
+    )
+    assert "error" in result and not outside.exists()
+
+
+@pytest.mark.asyncio
+async def test_write_failure_reports_error_not_half_success(out_dir, tmp_path):
+    """落盘失败必须报错，不能回一份"出了件但文件不在"的响应。"""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("我是文件不是目录", encoding="utf-8")
+    result = await _make_executor(tmp_path)._execute_write_pdf(
+        {"content": "正文", "path": "blocker/x.pdf"}
+    )
+    assert "error" in result and "写入失败" in result["error"]

@@ -142,3 +142,47 @@ class TestImage:
         out = render_document(self._doc(str(tmp_path / "gone.png")), DocSettings())
         assert out["pages"] >= 1
         assert any("跳过" in w for w in out["warnings"])
+
+
+class TestTemplates:
+    """模板断言读 render 回传的 decor（实际画了什么），不靠 pypdf 抽页眉页脚文字——
+    无中文字体的环境走 CID 路径抽不准，用它当判据会随环境变色。"""
+
+    def test_blank_template_draws_no_head_or_foot(self):
+        out = render_document(_blocks("正文"), DocSettings(template="blank", title="T"))
+        assert out["decor"]["header"] is None
+        assert out["decor"]["footer"] is None
+        assert out["decor"]["page_number"] is False
+
+    def test_report_template_uses_title_as_header_and_keeps_page_number(self):
+        out = render_document(_blocks("# A\n\n正文"), DocSettings(template="report", title="月报"))
+        assert out["decor"]["header"] == "月报"
+        assert out["decor"]["page_number"] is True
+        assert out["decor"]["footer"], "report 模板默认带页脚"
+
+    def test_explicit_header_beats_title(self):
+        out = render_document(
+            _blocks("正文"), DocSettings(template="report", title="月报", header_text="对外版本")
+        )
+        assert out["decor"]["header"] == "对外版本"
+
+    def test_explicit_empty_footer_means_off_not_fallback(self):
+        """空串是"我要关掉它"，不是"没填"——回落成模板默认会违背调用方的明示。"""
+        out = render_document(_blocks("正文"), DocSettings(template="report", footer_text=""))
+        assert out["decor"]["footer"] is None
+
+    def test_cover_template_adds_a_first_page(self):
+        body = _blocks("# A\n\n正文")
+        plain = render_document(body, DocSettings(template="report", title="T"))
+        covered = render_document(body, DocSettings(template="cover", title="T"))
+        assert covered["pages"] == plain["pages"] + 1
+        assert covered["decor"]["cover"] is True
+
+    def test_unknown_template_is_report_with_warning(self):
+        out = render_document(_blocks("正文"), DocSettings(template="banana", title="T"))
+        assert out["decor"]["header"] == "T"
+        assert any("banana" in w for w in out["warnings"])
+
+    def test_margin_reaches_layout(self):
+        out = render_document(_blocks("正文"), DocSettings(template="blank", margin_mm=35))
+        assert out["decor"]["margin_mm"] == 35.0

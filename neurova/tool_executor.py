@@ -3806,34 +3806,75 @@ class ToolExecutor:
             return {"error": "content 未解析出任何可渲染内容，未出件"}
 
         title = str(params.get("title") or "")
+        try:
+            margin = float(params.get("margin_mm") or 18.0)
+        except (TypeError, ValueError):
+            return {"error": "margin_mm 必须是数字（毫米）"}
+        settings = DocSettings(
+            template=str(params.get("template") or "report"),
+            title=title,
+            header_text=params.get("header_text"),
+            footer_text=params.get("footer_text"),
+            page_number=params.get("page_number"),
+            margin_mm=margin,
+        )
         slug = _ascii_slug(title or "document")
         blocks, image_warnings = await self._resolve_pdf_images(parsed.blocks, slug)
         try:
-            rendered = render_document(blocks, DocSettings(title=title))
+            rendered = render_document(blocks, settings)
         except RenderUnavailable as e:
             return {"error": str(e)}
         except (ValueError, FileNotFoundError) as e:
             return {"error": f"未出件：{e}"}
 
+        pdf = rendered["pdf"]
+        warnings = list(parsed.warnings) + image_warnings + list(rendered["warnings"])
+        base = {
+            "bytes": len(pdf),
+            "pages": rendered["pages"],
+            "font": rendered["font"],
+            "decor": rendered["decor"],
+            "warnings": warnings,
+        }
+
+        target = str(params.get("path") or "").strip()
+        if target:
+            resolved, err = self._resolve_pdf_target_path(target)
+            if err:
+                return {"error": err}
+            try:
+                resolved.parent.mkdir(parents=True, exist_ok=True)
+                resolved.write_bytes(pdf)
+            except OSError as e:
+                return {"error": f"出件已渲染但写入失败：{e}"}
+            return {**base, "file_path": str(resolved), "file_name": resolved.name}
+
         import hashlib
 
-        pdf = rendered["pdf"]
-        stem = f"{slug}-{hashlib.sha256(pdf).hexdigest()[:8]}"
         from pathlib import Path
 
         from neurova.llm.generators.runtime import persist_bytes
 
+        stem = f"{slug}-{hashlib.sha256(pdf).hexdigest()[:8]}"
         path = await persist_bytes(pdf, "pdf", stem)
         name = Path(path).name
-        return {
-            "file_name": name,
-            "file_path": path,
-            "download_url": f"/api/v1/generation/files/{name}",
-            "bytes": len(pdf),
-            "pages": rendered["pages"],
-            "font": rendered["font"],
-            "warnings": list(parsed.warnings) + image_warnings + list(rendered["warnings"]),
-        }
+        return {**base, "file_name": name, "file_path": path, "download_url": f"/api/v1/generation/files/{name}"}
+
+    def _resolve_pdf_target_path(self, target: str):
+        """`path` 落在工作区内（与 file_write 同锚定口径），越界一律拒。"""
+        import os as _os
+        from pathlib import Path
+
+        base = Path(self._workspace_base()).resolve()
+        candidate = Path(target)
+        if not candidate.is_absolute():
+            candidate = base / candidate
+        candidate = candidate.resolve()
+        if candidate != base and not str(candidate).startswith(str(base) + _os.sep):
+            return None, f"path 越出工作区（{base}），已拒绝：{target}"
+        if candidate.suffix.lower() != ".pdf":
+            return None, "path 必须以 .pdf 结尾"
+        return candidate, None
 
     async def _execute_computer_screenshot(self, params: Dict) -> Dict:
         """执行屏幕截图
