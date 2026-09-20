@@ -82,3 +82,39 @@ def test_directory_yields_one_finding_per_store(tmp_path: Path):
 
     assert isinstance(findings, list) and len(findings) == 2
     assert sorted(f.hits[0] for f in findings) == ["dsh_session", "qwenpaw_history"]
+
+
+def test_five_families_never_cross_match(tmp_path: Path):
+    """五家方言里三家是 JSONL：每家都必须只被自己那支认出。
+
+    这是 detect 的命门——互相误认会静默走错转换器，比认不出更糟。
+    """
+    _db(tmp_path / "history.db", QWENPAW_COLS)
+    (tmp_path / "dialog.jsonl").write_text(json.dumps(
+        {"role": "user", "name": "u", "content": [{"type": "text", "text": "甲"}],
+         "timestamp": "2026-04-07 10:00:00", "id": "m1", "metadata": None}) + chr(10),
+        encoding="utf-8")
+    (tmp_path / "legacy.jsonl").write_text(json.dumps(
+        {"type": "message", "message": {"role": "user", "content": "甲"},
+         "timestamp": "2026-04-06T18:00:00Z", "id": "m1", "parentId": None}) + chr(10),
+        encoding="utf-8")
+    (tmp_path / "rollout.jsonl").write_text(json.dumps(
+        {"type": "session_meta", "payload": {"id": "t1", "timestamp": "2026-05-01T10:00:00Z",
+         "cwd": "/w"}}) + chr(10), encoding="utf-8")
+    (tmp_path / "dsh.jsonl").write_text(json.dumps(
+        {"type": "session", "version": 3, "id": "s1", "createdAt": 1}) + chr(10),
+        encoding="utf-8")
+    conn = __import__("sqlite3").connect(tmp_path / "opencode.db")
+    conn.execute("CREATE TABLE message (id TEXT, session_id TEXT, data TEXT)")
+    conn.execute("CREATE TABLE part (id TEXT, message_id TEXT, data TEXT)")
+    conn.commit()
+    conn.close()
+
+    expected = {"history.db": "qwenpaw_history", "dialog.jsonl": "dialog_daily",
+                "legacy.jsonl": "legacy_session", "rollout.jsonl": "codex_rollout",
+                "dsh.jsonl": "dsh_session", "opencode.db": "opencode_session"}
+
+    for name, family in expected.items():
+        finding = probe_store(tmp_path / name)
+        assert finding.verdict == "unique", (name, finding.hits)
+        assert finding.hits == (family,), (name, finding.hits)
