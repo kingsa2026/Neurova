@@ -36,13 +36,13 @@ class StoreFinding:
     structure: Dict[str, object] = field(default_factory=dict)
 
 
-def _ro_connect(path: Path) -> sqlite3.Connection:
-    """外部库一律只读打开：识别阶段不允许改动源。"""
+def read_only_connect(path: Path) -> sqlite3.Connection:
+    """外部库一律只读打开：识别与转换阶段都不允许改动源。"""
     return sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
 
 
 def _sqlite_tables(path: Path) -> List[str]:
-    conn = _ro_connect(path)
+    conn = read_only_connect(path)
     try:
         return [row[0] for row in conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'")]
@@ -50,8 +50,9 @@ def _sqlite_tables(path: Path) -> List[str]:
         conn.close()
 
 
-def _columns(path: Path, table: str) -> List[str]:
-    conn = _ro_connect(path)
+def source_columns(path: Path, table: str) -> List[str]:
+    """表的实际列清单：转换器据此发现源里多出的列，而不是按写死的列名猜。"""
+    conn = read_only_connect(path)
     try:
         return [row[1] for row in conn.execute(f"PRAGMA table_info({table})")]
     finally:
@@ -71,7 +72,7 @@ def _first_json_line_keys(path: Path) -> List[str]:
 
 def _sqlite_has_columns(table: str, required: Tuple[str, ...]) -> Callable[[Path], bool]:
     def _matches(path: Path) -> bool:
-        return table in _sqlite_tables(path) and set(required) <= set(_columns(path, table))
+        return table in _sqlite_tables(path) and set(required) <= set(source_columns(path, table))
     return _matches
 
 
@@ -89,6 +90,14 @@ _HANDPRINTS: List[Handprint] = [
 def register_handprint(handprint: Handprint) -> None:
     """新家在此登记指纹（与转换器同名，避免两处各写一份）。"""
     _HANDPRINTS.append(handprint)
+
+
+def matches_handprint(name: str, path: Path) -> bool:
+    """转换器自证入口：只对已登记的具名指纹求值，列清单不在两处各写一份。"""
+    handprint = next((h for h in _HANDPRINTS if h.name == name), None)
+    if handprint is None:
+        raise KeyError(f"指纹未登记，无从判定来源: {name!r}")
+    return _safe_match(handprint, Path(path))
 
 
 def _kind_of(path: Path) -> Optional[str]:
