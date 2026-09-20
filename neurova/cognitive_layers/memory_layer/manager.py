@@ -118,6 +118,22 @@ def _is_valid_category(category: str) -> bool:
         return False
 
 
+def _ingest_memory_id(identity_key: str) -> str:
+    """导入行的确定性主键：同一 identity_key 反复导入命中同一行（幂等靠它）。"""
+    import hashlib
+
+    return "ing-" + hashlib.sha256(str(identity_key).encode("utf-8")).hexdigest()[:16]
+
+
+def _parse_import_ts(value: str) -> datetime.datetime:
+    """历史时间戳照原样落库；解析不了的退到 now 并留警，不静默造一个假时间。"""
+    try:
+        return datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        logger.warning("导入记录时间戳无法解析 (%r)，按当前时间落库", value)
+        return datetime.datetime.now(datetime.timezone.utc)
+
+
 def _filter_by_category(mems: List[Memory], category: str) -> List[Memory]:
     """按 category 过滤记忆列表
 
@@ -1080,6 +1096,103 @@ class MemoryManager:
                 store.index_memories([mem.to_dict()], incremental=True)
         except Exception as e:
             logger.warning("运行期向量库同步失败: %s", e)
+
+    def import_memories(self, records, *, ingest_run_id: str) -> Tuple[int, int]:
+        """导入专用写入口：批量单事务、保留历史时间戳、不触发运行期副作用。
+
+        与 remember() 的分工（docs/specs/2026-09-20-external-agent-ingest-design.md §4）：
+        这里不跑内容门、不喂关键词倒排、不同步 MoE 向量库、不计 remember_count——回填的
+        历史不是"刚发生的经验"，重新定温或参与再确认会篡改它的时序语义。可见性不受影响：
+        行同时进内存表与持久层（persist_memory_batch 单事务）。
+
+        Returns:
+            (新增条数, 因 identity_key 已存在而跳过的条数)
+        """
+        if not ingest_run_id:
+            raise ValueError("ingest_run_id 必填（撤销按它精确删除）")
+        existing_keys = {
+            (mem.metadata or {}).get("ingest", {}).get("identity_key")
+            for mem in self._memories.values()
+        }
+        imported: List[Memory] = []
+        skipped = 0
+        with self._lock:
+            for rec in records:
+                if rec.identity_key in existing_keys:
+                    skipped += 1
+                    continue
+                mem = self._build_imported_memory(rec, ingest_run_id)
+                self._memories[mem.id] = mem
+                existing_keys.add(rec.identity_key)
+                imported.append(mem)
+            if imported:
+                self.persist_memory_batch(imported)
+            self._stats["total_memories"] = len(self._memories)
+        return len(imported), skipped
+
+    def _build_imported_memory(self, rec, ingest_run_id: str) -> "Memory":
+        """把 MemoryRecord 翻成 Memory：枚举与时间戳解析口径与 remember 一致。"""
+        memory_type = MemoryType.SEMANTIC
+        declared_type = None
+        try:
+            memory_type = MemoryType(rec.memory_type)
+        except (ValueError, KeyError):
+            declared_type = rec.memory_type          # 工单 012 口径：未知类型留痕不静默换
+            self._stats["unknown_memory_type_count"] = (
+                self._stats.get("unknown_memory_type_count", 0) + 1)
+        category = MemoryCategory.GENERAL
+        original_category = None
+        try:
+            category = MemoryCategory(rec.category)
+        except (ValueError, KeyError):
+            original_category = rec.category
+        try:
+            origin = MemoryOrigin(rec.origin)
+        except (ValueError, KeyError):
+            logger.warning("导入记忆 origin 非法 '%s'，fail-safe 降为 UNTRUSTED", rec.origin)
+            origin = MemoryOrigin.UNTRUSTED
+        created_at = _parse_import_ts(rec.ts)
+        metadata: Dict[str, Any] = {
+            "ingest_run_id": ingest_run_id,
+            "ingest": {"identity_key": rec.identity_key, "source_ref": rec.source_ref},
+        }
+        if rec.tags:
+            metadata["tags"] = list(rec.tags)
+        if declared_type is not None:
+            metadata["_declared_memory_type"] = declared_type
+        if original_category is not None:
+            metadata["_original_category"] = original_category
+        if rec.supersedes:
+            metadata["supersedes"] = rec.supersedes
+        return Memory(
+            id=_ingest_memory_id(rec.identity_key),
+            content=rec.content,
+            memory_type=memory_type,
+            category=category,
+            temperature=float(rec.temperature),
+            importance=float(rec.importance),
+            origin=origin,
+            lifecycle_stage=LifecycleStage.ACTIVE,
+            metadata=metadata,
+            agent_id=self._agent_id,
+            neuser_id=self._eff_neuser_id(),
+            user_id=self._eff_user_id(),
+            created_at=created_at,
+            updated_at=created_at,
+        )
+
+    def delete_ingested_memories(self, ingest_run_id: str) -> int:
+        """按导入批次精确撤销（设计 §6：回滚靠标签，不靠快照）。"""
+        removed = 0
+        with self._lock:
+            for mem_id, mem in list(self._memories.items()):
+                if (mem.metadata or {}).get("ingest_run_id") != ingest_run_id:
+                    continue
+                del self._memories[mem_id]
+                self._delete_persisted_memory(mem_id)
+                removed += 1
+            self._stats["total_memories"] = len(self._memories)
+        return removed
 
     def _semantic_recall(
         self, query: str, memories: list, limit: int, agent_wide: bool = False
