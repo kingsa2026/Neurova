@@ -4,12 +4,12 @@
 三条硬规矩，都是本模块存在的理由：
 
 1. 无损是承诺不是口号。每一列都必须在 COLUMN_LANDINGS 里有落点；源里冒出的新列、认不出的
-   kind、契约装不下的块型一律写进 manifest.dropped 申报条数（实测源里确有 base64 图块）。
+   kind、契约装不下的块型一律写进 manifest.dropped 申报条数。
 2. 一轮多调用按 blocks 展开。实测 model_turn 的 blocks 最多含 6 个 tool_call，而平列
    tool_call_id/tool_input 只留最后一个——按平列转就会把 179 个调用砍成 21 个（现脚本正是如此）。
    content 列等于各 text 块以换行拼接，所以 text 块是更细的同一份数据，不重复入包。
 3. 编号与幂等键走 bundle.writer 的统一规则（源 seq 是全局流水号，包内按会话重编 1..n，
-   源值留 extra.source_seq）。
+   源值留 extra.source_seq）；媒体块按 bundle.media 的内容寻址落进包里。
 """
 from __future__ import annotations
 
@@ -23,8 +23,9 @@ from typing import Any, Dict, List, Tuple
 
 from neurova.memory_ingest import probe
 from neurova.memory_ingest.bundle.manifest import BundleError, BundleManifest
-from neurova.memory_ingest.probe import Handprint, register_handprint
+from neurova.memory_ingest.bundle.media import MEDIA_BLOCK_TYPES, MediaSink
 from neurova.memory_ingest.bundle.writer import SourceEvent, materialize, write_bundle
+from neurova.memory_ingest.probe import Handprint, register_handprint
 
 CONVERTER_NAME = "qwenpaw_history"
 CONVERTER_VERSION = "1"
@@ -47,7 +48,7 @@ COLUMN_LANDINGS: Dict[str, str] = {
     "tool_input": "extra.tool_input",
     "tool_state": "tool_state",
     "headline": "extra.headline",
-    "blocks": "展开为事件（text/tool_call/thinking）",
+    "blocks": "展开为事件（text/tool_call/thinking/媒体）",
     "metadata": "extra.source_metadata",
     "created_at": "ts",
     "dedup_key": "identity_key",
@@ -62,8 +63,17 @@ SOURCE_KINDS: Dict[str, str] = {
     "compact_summary": "compact_summary",
 }
 
+TURN_BLOCK_TYPES = frozenset({"text", "tool_call", "thinking"}) | frozenset(MEDIA_BLOCK_TYPES)
 # 平列已表达过的块型：非 model_turn 行按平列取，这些块不算丢失
-FLAT_REPRESENTED_BLOCKS = frozenset({"text", "tool_result", "thinking"})
+FLAT_REPRESENTED_BLOCKS = (frozenset({"text", "tool_result", "thinking"})
+                           | frozenset(MEDIA_BLOCK_TYPES))
+
+REASONS: Dict[str, str] = {
+    "kind": "认不出的 kind 不猜映射，整行未入包",
+    "blocks": "该块型在包内契约无落点，未携带",
+    "media": "源里的媒体载体取不到字节（路径不在源目录树的 media/ 下，或 base64 不可解）",
+    "column": "源列在包内契约与 extra 都无落点，未携带",
+}
 
 
 def convert(store: Path, out_dir: Path, *, agent_name: str) -> BundleManifest:
@@ -73,17 +83,13 @@ def convert(store: Path, out_dir: Path, *, agent_name: str) -> BundleManifest:
         raise BundleError(f"源不符合 {CONVERTER_NAME} 指纹，拒绝按这支转换器硬转：{store}")
 
     rows = _read_rows(store)
-    groups, skipped_kinds, stray_blocks = _groups(rows)
+    groups, declared = _groups(rows, MediaSink(out_dir, store=store))
+    declared.update(_column_decls(store, rows))
     records = materialize(groups)
-    dropped = (_unmapped_column_drops(store, rows)
-               + _declaration_entries("kind", skipped_kinds, "认不出的 kind 不猜映射，整行未入包")
-               + _declaration_entries("blocks", stray_blocks,
-                                      "该块型在包内契约无落点，未携带"
-                                      "（图片/文件类需包内 media 内容寻址存储，本层未落地）"))
     return write_bundle(
         out_dir, records, agent_name=agent_name,
         source={"converter": CONVERTER_NAME, "version": CONVERTER_VERSION},
-        dropped=dropped,
+        dropped=_dropped_entries(declared),
         stores=[{"path": str(store), "handprint": CONVERTER_NAME,
                  "source_table": SOURCE_TABLE, "source_rows": len(rows)}],
     )
@@ -98,52 +104,57 @@ def _read_rows(store: Path) -> List[Dict[str, Any]]:
         conn.close()
 
 
-def _groups(rows: List[Dict[str, Any]]):
-    """[(会话, [(幂等前缀, 事件)])]；会话按源 seq 升序，源 seq 全局唯一所以顺序确定。"""
+def _groups(rows: List[Dict[str, Any]], sink: MediaSink):
+    """[(会话, [(幂等前缀, 事件)])] + 申报计数；会话按源 seq 升序（实测全局唯一且单调）。"""
     by_session: Dict[str, List[Tuple[str, List[SourceEvent]]]] = {}
-    skipped_kinds: Counter = Counter()
-    stray_blocks: Counter = Counter()
+    declared: Counter = Counter()
     for row in sorted(rows, key=_source_order):
-        events, strays = _events_for_row(row)
+        events = _events_for_row(row, sink, declared)
         if events is None:
-            skipped_kinds[_text(row.get("kind")) or "<空>"] += 1
             continue
-        stray_blocks.update(strays)
         session_id = _text(row.get("session_id"))
         base_key = f"{session_id}#{_text(row.get('dedup_key')) or _int(row.get('seq'))}"
         by_session.setdefault(session_id, []).append((base_key, events))
-    return list(by_session.items()), skipped_kinds, stray_blocks
+    return list(by_session.items()), declared
 
 
 def _source_order(row: Dict[str, Any]) -> Tuple[str, int]:
-    """同一轮内各行共享 created_at，只有 seq 可信（实测全局唯一且单调）。"""
+    """同一轮内各行共享 created_at，只有 seq 可信。"""
     return _text(row.get("session_id")), _int(row.get("seq"))
 
 
-def _events_for_row(row: Dict[str, Any]) -> Tuple[Any, Counter]:
-    """源行 → 事件列表；kind 认不出时返回 (None, ...) 交由申报处理。"""
+def _events_for_row(row: Dict[str, Any], sink: MediaSink, declared: Counter):
+    """源行 → 事件列表；kind 认不出时申报后返回 None。"""
     kind = SOURCE_KINDS.get(_text(row.get("kind")))
     blocks = _json_list(row.get("blocks"))
     if kind is None:
-        return None, Counter()
+        declared[f"kind:{_text(row.get('kind')) or '<空>'}"] += 1
+        return None
     if kind == "assistant_message":
-        return _expand_turn(row, blocks)
-    return [_flat_event(row, kind, blocks)], _stray_blocks(blocks, FLAT_REPRESENTED_BLOCKS)
+        events = _expand_turn(row, blocks, sink)
+    else:
+        events = [_flat_event(row, kind, blocks, sink)]
+    declared.update(_stray_blocks(blocks, sink, TURN_BLOCK_TYPES if kind == "assistant_message"
+                                  else FLAT_REPRESENTED_BLOCKS))
+    return events
 
 
-def _expand_turn(row: Dict[str, Any], blocks: List[Any]) -> Tuple[List[SourceEvent], Counter]:
-    """model_turn 按块序展开：正文成段、每个调用独立成条，思考并入其后第一条。"""
-    strays = _stray_blocks(blocks, frozenset({"text", "tool_call", "thinking"}))
+def _expand_turn(row: Dict[str, Any], blocks: List[Any], sink: MediaSink) -> List[SourceEvent]:
+    """model_turn 按块序展开：正文成段、每个调用独立成条，思考与媒体并入其后第一条。"""
     interesting = [block for block in blocks if isinstance(block, dict)]
-    if not any(block.get("type") in ("text", "tool_call") for block in interesting):
-        # 旧式行（无 blocks）或只有思考的行：平列才是正文的唯一载体
+    carriers = [block for block in interesting
+                if block.get("type") in ("text", "tool_call")]
+    media = _media_refs(interesting, sink)
+    if not carriers:
+        # 旧式行（无 blocks）或只有思考/媒体的行：平列才是正文的唯一载体
         thinking = "".join(_text(block.get("thinking")) for block in interesting
                            if block.get("type") == "thinking")
-        return _fallback_events(row, thinking), strays
+        return _fallback_events(row, thinking, media)
 
     events: List[SourceEvent] = []
     run: List[str] = []
     pending: List[str] = []
+    awaiting = list(media)                       # 媒体按块序挂到它之后的第一条事件上
     for block in interesting:
         btype = block.get("type")
         if btype == "thinking":
@@ -151,39 +162,44 @@ def _expand_turn(row: Dict[str, Any], blocks: List[Any]) -> Tuple[List[SourceEve
         elif btype == "text":
             run.append(str(block.get("text") or ""))
         elif btype == "tool_call":
-            _flush_run(events, row, run, pending)
+            _flush_run(events, row, run, pending, awaiting)
+            awaiting = []
             events.append(_event(row, kind="tool_call", tool_call_id=_text(block.get("id")),
                                  tool_name=_text(block.get("name")),
                                  tool_state=_text(block.get("state")),
                                  tool_input=str(block.get("input") or ""),
                                  reasoning=_drain(pending)))
-    _flush_run(events, row, run, pending)
-    if pending and events:
-        events[-1] = _with_reasoning(events[-1], _drain(pending))
+    _flush_run(events, row, run, pending, awaiting)
+    _tail(events, pending, awaiting)
     flat_call = _text(row.get("tool_call_id"))
     if flat_call and flat_call not in {event.tool_call_id for event in events}:
         events.append(_flat_tool_event(row))
-    return [_tag_row_columns(row, index, event) for index, event in enumerate(events)], strays
+    return [_tag_row_columns(row, index, event) for index, event in enumerate(events)]
 
 
-def _fallback_events(row: Dict[str, Any], reasoning: str) -> List[SourceEvent]:
+def _fallback_events(row: Dict[str, Any], reasoning: str,
+                     media: List[Dict[str, Any]]) -> List[SourceEvent]:
     """blocks 为空的旧式行：退回平列表达（正文 + 至多一个调用）。"""
     events: List[SourceEvent] = []
-    if _text(row.get("content")) or reasoning:
-        events.append(_event(row, text=_text(row.get("content")), reasoning=reasoning))
+    if _text(row.get("content")) or reasoning or media:
+        events.append(_event(row, text=_text(row.get("content")), reasoning=reasoning,
+                             blocks=tuple(media)))
     if _text(row.get("tool_call_id")) or _text(row.get("tool_input")):
         events.append(_flat_tool_event(row))
     return [_tag_row_columns(row, index, event) for index, event in enumerate(events)]
 
 
-def _flat_event(row: Dict[str, Any], kind: str, blocks: List[Any]) -> SourceEvent:
-    thinking = "".join(_text(block.get("thinking")) for block in blocks
-                       if isinstance(block, dict) and block.get("type") == "thinking")
+def _flat_event(row: Dict[str, Any], kind: str, blocks: List[Any],
+                sink: MediaSink) -> SourceEvent:
+    interesting = [block for block in blocks if isinstance(block, dict)]
+    thinking = "".join(_text(block.get("thinking")) for block in interesting
+                       if block.get("type") == "thinking")
     is_tool = kind in ("tool_call", "tool_result")
     event = _event(row, kind=kind, text=_text(row.get("content")),
                    tool_call_id=_text(row.get("tool_call_id")),
                    tool_name=_text(row.get("name")) if is_tool else "",
-                   tool_state=_text(row.get("tool_state")), reasoning=thinking)
+                   tool_state=_text(row.get("tool_state")), reasoning=thinking,
+                   blocks=tuple(_media_refs(interesting, sink)))
     if not is_tool:
         event = _with_extra(event, actor_name=_text(row.get("name")) or None)
     return _tag_row_columns(row, 0, event)
@@ -196,14 +212,29 @@ def _flat_tool_event(row: Dict[str, Any]) -> SourceEvent:
 
 
 def _flush_run(events: List[SourceEvent], row: Dict[str, Any], run: List[str],
-               pending: List[str]) -> None:
+               pending: List[str], awaiting: List[Dict[str, Any]]) -> None:
     text = "".join(run)
     del run[:]
-    if text:
-        events.append(_event(row, text=text, reasoning=_drain(pending)))
+    if text or (pending and not events) or (awaiting and not events):
+        events.append(_event(row, text=text, reasoning=_drain(pending),
+                             blocks=tuple(awaiting)))
+        del awaiting[:]
 
 
-def _event(row: Dict[str, Any], *, kind: str = "assistant_message", **fields: Any) -> SourceEvent:
+def _tail(events: List[SourceEvent], pending: List[str],
+          awaiting: List[Dict[str, Any]]) -> None:
+    """轮尾剩下的思考/媒体并入最后一条：没有后继可挂靠时也不丢。"""
+    if not events:
+        return
+    reasoning, blocks = _drain(pending), list(awaiting)
+    if reasoning or blocks:
+        events[-1] = replace(events[-1], reasoning=events[-1].reasoning + reasoning,
+                             blocks=events[-1].blocks + tuple(blocks))
+        del awaiting[:]
+
+
+def _event(row: Dict[str, Any], *, kind: str = "assistant_message",
+           **fields: Any) -> SourceEvent:
     """行级公共字段（ts/role + 契约无落点的列）统一在此挂上。"""
     extra = {"source_seq": _int(row.get("seq")), "agent_id": row.get("agent_id"),
              "tool_input": fields.pop("tool_input", None)}
@@ -222,31 +253,49 @@ def _with_extra(event: SourceEvent, **items: Any) -> SourceEvent:
     return replace(event, extra={**event.extra, **items})
 
 
-def _with_reasoning(event: SourceEvent, extra: str) -> SourceEvent:
-    """轮尾的思考并入最后一条事件：思考没有后继可挂靠时不丢。"""
-    return replace(event, reasoning=event.reasoning + extra)
+def _media_refs(blocks: List[Any], sink: MediaSink) -> List[Dict[str, Any]]:
+    refs = []
+    for block in blocks:
+        if block.get("type") not in MEDIA_BLOCK_TYPES:
+            continue
+        ref = sink.resolve(block)
+        if ref:
+            refs.append(dict(ref, type="image" if block.get("type") == "data"
+                             else block.get("type")))
+    return refs
 
 
-def _stray_blocks(blocks: List[Any], represented: frozenset) -> Counter:
-    return Counter(str(block.get("type")) if isinstance(block, dict) else "<非对象>"
-                   for block in blocks
-                   if not isinstance(block, dict) or block.get("type") not in represented)
+def _stray_blocks(blocks: List[Any], sink: MediaSink, represented: frozenset) -> Counter:
+    """这一行装不下的东西：未知块型与解不出字节的媒体，各自计数。"""
+    strays: Counter = Counter()
+    for block in blocks:
+        btype = block.get("type") if isinstance(block, dict) else None
+        if isinstance(block, dict) and btype in MEDIA_BLOCK_TYPES:
+            if not sink.resolve(block):
+                strays["media:不可达"] += 1
+            continue
+        if btype not in represented:
+            strays[f"blocks:{btype or '<非对象>'}"] += 1
+    return strays
 
 
-def _unmapped_column_drops(store: Path, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _column_decls(store: Path, rows: List[Dict[str, Any]]) -> Counter:
     """源表比转换器已知列多出来的部分——按非空值计条数，让丢失量可核对。"""
     unknown = [col for col in probe.source_columns(store, SOURCE_TABLE)
                if col not in COLUMN_LANDINGS]
-    return [{"field": col,
-             "count": sum(1 for row in rows if _text(row.get(col))),
-             "reason": "源列在包内契约与 extra 都无落点，未携带"}
-            for col in unknown
-            if any(_text(row.get(col)) for row in rows)]
+    return Counter({f"column:{col}": sum(1 for row in rows if _text(row.get(col)))
+                    for col in unknown})
 
 
-def _declaration_entries(prefix: str, counter: Counter, reason: str) -> List[Dict[str, Any]]:
-    return [{"field": f"{prefix}:{value}", "count": count, "reason": reason}
-            for value, count in sorted(counter.items())]
+def _dropped_entries(declared: Counter) -> List[Dict[str, Any]]:
+    entries = []
+    for field, count in sorted(declared.items()):
+        if count <= 0:
+            continue
+        prefix, _, name = field.partition(":")
+        entries.append({"field": name if prefix == "column" else field,
+                        "count": count, "reason": REASONS.get(prefix, REASONS["blocks"])})
+    return entries
 
 
 def _json_list(raw: Any) -> List[Any]:

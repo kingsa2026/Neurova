@@ -42,7 +42,7 @@ def to_turn_messages(records: Sequence[TranscriptRecord]) -> List[Dict[str, Any]
 
 def _open_turn(record: TranscriptRecord) -> Dict[str, Any]:
     return {"first": record, "last": record, "texts": [], "reasonings": [],
-            "entries": [], "keys": []}
+            "entries": [], "keys": [], "media": []}
 
 
 def _extend_turn(turn: Dict[str, Any], record: TranscriptRecord) -> None:
@@ -55,10 +55,16 @@ def _extend_turn(turn: Dict[str, Any], record: TranscriptRecord) -> None:
         turn["entries"].append(_tool_entry(record))
     if record.reasoning_text:
         turn["reasonings"].append(record.reasoning_text)
+    turn["media"].extend(_media_of(record))
+
+
+def _media_of(record: TranscriptRecord) -> List[Dict[str, Any]]:
+    return [block for block in record.content_blocks
+            if isinstance(block, dict) and block.get("media")]
 
 
 def _finalize_turn(turn: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    if not turn or not (turn["texts"] or turn["entries"] or turn["reasonings"]):
+    if not turn or not (turn["texts"] or turn["entries"] or turn["reasonings"] or turn["media"]):
         return None
     first, last = turn["first"], turn["last"]
     metadata: Dict[str, Any] = {
@@ -70,6 +76,8 @@ def _finalize_turn(turn: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         metadata["reasoning_content"] = "\n".join(turn["reasonings"])
     if turn["entries"]:
         metadata["tool_calls"] = turn["entries"]
+    if turn["media"]:
+        metadata["media"] = list(turn["media"])
     return {"role": "assistant", "content": "\n".join(turn["texts"]),
             "timestamp": first.ts, "metadata": metadata}
 
@@ -81,6 +89,9 @@ def _standalone_message(record: TranscriptRecord) -> Dict[str, Any]:
     }
     if record.reasoning_text:
         metadata["reasoning_content"] = record.reasoning_text
+    media = _media_of(record)
+    if media:
+        metadata["media"] = media
     return {"role": record.role or VALID_ROLE_KINDS[record.kind],
             "content": record.text(), "timestamp": record.ts, "metadata": metadata}
 

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from neurova.memory_ingest.bundle.manifest import SUPPORTED_SCHEMA_VERSION
+from neurova.memory_ingest.bundle.media import verify_media
 from neurova.memory_ingest.models import VALID_ORIGINS
 
 _REQUIRED = {
@@ -52,6 +53,7 @@ def validate_bundle(root: Path) -> List[str]:
         errors += _count_errors(name, rows, claimed)
         if name == "transcripts.jsonl":
             errors += _seq_errors(rows)
+            errors += verify_media(root)          # 引用型包的最后一道闸：路径与摘要
         else:
             errors += _origin_errors(rows)
     return errors

@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from neurova.memory_ingest import probe
 from neurova.memory_ingest.bundle.manifest import BundleError, BundleManifest
 from neurova.memory_ingest.bundle.writer import SourceEvent, materialize, write_bundle
+from neurova.memory_ingest.bundle.media import MediaSink
 from neurova.memory_ingest.converters.blocks import split_content
 
 # 申报字段前缀 → 人读原因（报告要说清"少了什么、为什么少"）
@@ -26,7 +27,8 @@ REASONS: Dict[str, str] = {
     "timestamp": "时间戳解不开就无法定序（包内顺序靠 seq，不能猜位置）",
     "role": "该角色在本族无对应 kind，不猜映射",
     "type": "该记录类型不是消息行，本族不表达",
-    "blocks": "该块型在包内契约无落点，未携带（图片/文件类需包内 media 内容寻址存储）",
+    "blocks": "该块型在包内契约无落点，未携带",
+    "media": "源里的媒体载体取不到字节（路径不在源目录树的 media/ 下，或 base64 不可解）",
     "extra": "源字段在包内契约与 extra 都无落点，未携带",
 }
 
@@ -53,6 +55,7 @@ def convert_store(family: JsonlChatFamily, store: Path, out_dir: Path, *,
         raise BundleError(f"源不符合 {family.name} 指纹，拒绝按这支转换器硬转：{store}")
 
     session_id = family.session_id(store)
+    sink = MediaSink(out_dir, store=store)
     declared: Counter = Counter()
     rows: List[Tuple[datetime, str, List[SourceEvent]]] = []
     for lineno, raw in enumerate(_lines(store), start=1):
@@ -62,7 +65,7 @@ def convert_store(family: JsonlChatFamily, store: Path, out_dir: Path, *,
         if parsed is None:
             declared["坏行"] += 1
             continue
-        moment, events = _row_events(family, parsed, lineno, declared)
+        moment, events = _row_events(family, parsed, lineno, declared, sink)
         if moment is None or not events:
             continue
         rows.append((moment, f"{session_id}#{family.row_key(parsed, lineno)}", events))
@@ -79,7 +82,7 @@ def convert_store(family: JsonlChatFamily, store: Path, out_dir: Path, *,
 
 
 def _row_events(family: JsonlChatFamily, parsed: Dict[str, Any], lineno: int,
-                declared: Counter) -> Tuple[Optional[datetime], List[SourceEvent]]:
+                declared: Counter, sink: MediaSink) -> Tuple[Optional[datetime], List[SourceEvent]]:
     message, skip_field = family.envelope(parsed, lineno)
     if message is None:
         declared[skip_field or "type:<未知>"] += 1
@@ -89,8 +92,8 @@ def _row_events(family: JsonlChatFamily, parsed: Dict[str, Any], lineno: int,
         declared["timestamp"] += 1
         return None, []
     declared.update(f"extra:{key}" for key in _uncovered_keys(parsed, family))
-    events, strays = split_content(message["content"])
-    declared.update(f"blocks:{name}" for name in strays.elements())
+    events, strays = split_content(message["content"], sink=sink)
+    declared.update(strays)
     built = _build(events, message, moment, family)
     if not built:
         declared["空正文"] += 1
@@ -117,6 +120,7 @@ def _build(events, message: Dict[str, Any], moment: datetime,
             kind=kind, ts=ts, role=role, text=event.text,
             tool_call_id=event.tool_call_id or str(message.get("tool_call_id") or ""),
             tool_name=event.tool_name or str(message.get("tool_name") or ""),
+            blocks=event.blocks,
             reasoning=event.reasoning if kind == "assistant_message" else "",
             extra={**extra, "tool_input": event.tool_input or None}))
     return built

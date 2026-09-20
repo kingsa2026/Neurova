@@ -56,6 +56,27 @@ def test_materialize_carries_role_verbatim():
     assert records[1].role == "user"
 
 
+def test_materialize_attaches_media_blocks_after_the_text():
+    """正文在前、媒体引用在后：顺序就是源块顺序，包内不做重排。"""
+    ref = {"type": "image", "media": "media/abc.png", "digest": "abc", "bytes": 3,
+           "name": "a.png", "mime": "image/png"}
+    records = materialize([("sA", [("sA#1", [_event(text="看图", blocks=(ref,))])])])
+
+    blocks = records[0].content_blocks
+    assert [b["type"] for b in blocks] == ["text", "image"]
+    assert blocks[1]["media"] == "media/abc.png"
+
+
+def test_materialize_keeps_media_only_row():
+    records = materialize([("sA", [("sA#1", [SourceEvent(
+        kind="user_message", ts="2026-05-01T10:00:00+00:00", role="user",
+        blocks=({"type": "file", "media": "media/x.bin", "digest": "x", "bytes": 1,
+                 "name": "x.bin", "mime": "application/octet-stream"},))])])])
+
+    assert records[0].text() == ""
+    assert records[0].content_blocks[0]["type"] == "file"
+
+
 def test_write_bundle_persists_manifest_records_and_declaration(tmp_path: Path):
     records = materialize([("sA", [("sA#1", [_event(text="正文", reasoning="在想")])])])
     out = tmp_path / "bundle"
