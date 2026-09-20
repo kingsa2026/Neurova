@@ -10,7 +10,8 @@
 连接策略：每次操作开一条短连接，不长期持有。仓库实例满天飞且测试跑在 tmp_path 上，
 句子攥在手里会让 Windows 清不掉临时目录。
 
-墓碑与冲突两本旁账仍留 JSON，与条目权威无关，统一在 019b 收编。
+墓碑（019b-2c）与条目同进同出：它记的是"这条知识被谁在什么时候收回了"，本来就是治理层的事。
+形状纪律一致——`self._tombstones` 的 dict 一字不改，换的只有 `_load` / `_save_tombstones` 两个边界。
 """
 
 from __future__ import annotations
@@ -43,8 +44,9 @@ CREATE INDEX IF NOT EXISTS idx_narrative_owner ON knowledge_narratives(owner_use
 """
 
 # 一次性搬家的归档后缀：搬完的 JSON 留在原地但不复权，
-# 否则"删空后重启"会拿快照把已删条目复活。
-ARCHIVE_PREFIX = "knowledge.json.pre-narrative-store-"
+# 否则"删空后重启"会拿快照把已删条目（或删除史）复活。
+# 前缀挂在**原文件名之后**，条目与墓碑各自留名，否则两份归档互相顶替、事后认不出谁是谁。
+ARCHIVE_PREFIX = ".pre-narrative-store-"
 
 
 def _now() -> str:
@@ -78,6 +80,62 @@ class NarrativeStore:
             conn.close()
 
     # ── 读 ────────────────────────────────────────────────────
+
+    def tombstoneCount(self) -> int:
+        with self._conn() as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM knowledge_tombstones").fetchone()[0])
+
+    def loadTombstones(self) -> Dict[str, Dict[str, Any]]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT knowledge_id, payload_json FROM knowledge_tombstones ORDER BY rowid"
+            ).fetchall()
+        return {str(r["knowledge_id"]): json.loads(r["payload_json"]) for r in rows}
+
+    def replaceAllTombstones(self, tombstones: Dict[str, Dict[str, Any]]) -> int:
+        stamp = _now()
+        with self._conn() as conn:
+            conn.execute("DELETE FROM knowledge_tombstones")
+            for knowledgeId, rec in tombstones.items():
+                conn.execute(
+                    "INSERT INTO knowledge_tombstones (knowledge_id, agent_id, deleted_at,"
+                    " deleted_by, superseded_by, payload_json, updated_at) VALUES (?,?,?,?,?,?,?)",
+                    (str(knowledgeId), str(rec.get("agent_id", "") or ""),
+                     float(rec.get("deleted_at", 0) or 0), str(rec.get("deleted_by", "") or ""),
+                     rec.get("superseded_by"),
+                     json.dumps(rec, ensure_ascii=False, sort_keys=True), stamp),
+                )
+        return len(tombstones)
+
+    def importTombstonesFromJson(self, jsonPath: str) -> Dict[str, Any]:
+        path = Path(jsonPath)
+        if not path.exists():
+            return {"imported": 0, "skipped_existing": 0}
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise ValueError("墓碑账本顶层必须是 {knowledge_id: 记录}，收到 %r" % type(raw).__name__)
+        stamp = _now()
+        imported = 0
+        with self._conn() as conn:
+            for knowledgeId, rec in raw.items():
+                if not isinstance(rec, dict):
+                    raise ValueError("墓碑记录形状不对: %r" % knowledgeId)
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO knowledge_tombstones (knowledge_id, agent_id,"
+                    " deleted_at, deleted_by, superseded_by, payload_json, updated_at)"
+                    " VALUES (?,?,?,?,?,?,?)",
+                    (str(knowledgeId), str(rec.get("agent_id", "") or ""),
+                     float(rec.get("deleted_at", 0) or 0), str(rec.get("deleted_by", "") or ""),
+                     rec.get("superseded_by"),
+                     json.dumps(rec, ensure_ascii=False, sort_keys=True), stamp),
+                )
+                imported += 1 if cur.rowcount else 0
+        return {"imported": imported,
+                "skipped_existing": len(raw) - imported, "rows_in_store": self.tombstoneCount()}
+
+    def archiveSidecar(self, jsonPath: str) -> Optional[str]:
+        """搬完让旁账文件退出读路径；留档可回退，与条目搬家同一纪律。"""
+        return self.archiveImportedJson(jsonPath)
 
     def loadAll(self) -> Dict[str, List[Dict[str, Any]]]:
         """按 agent_id 分组回 `self._items` 形状；成序按写入序（rowid），与 JSON 时代一致。"""
@@ -154,13 +212,13 @@ class NarrativeStore:
         path = Path(jsonPath)
         if not path.exists():
             return None
-        archived = path.with_name(ARCHIVE_PREFIX + _now().replace(":", "").replace(".", ""))
+        archived = path.with_name(path.name + ARCHIVE_PREFIX + _now().replace(":", "").replace(".", ""))
         path.rename(archived)
         return str(archived)
 
     @staticmethod
     def findArchivedJson(storageDir: str) -> List[str]:
-        return sorted(str(p) for p in Path(storageDir).glob(ARCHIVE_PREFIX + "*"))
+        return sorted(str(p) for p in Path(storageDir).glob("*" + ARCHIVE_PREFIX + "*"))
 
 
 def _projectRows(itemsByAgent: Dict[str, List[Dict[str, Any]]]) -> List[tuple]:
@@ -185,3 +243,19 @@ def _projectRows(itemsByAgent: Dict[str, List[Dict[str, Any]]]) -> List[tuple]:
                 json.dumps(item, ensure_ascii=False, sort_keys=True),
             ))
     return rows
+
+
+# ── 墓碑（工单 019b-2c）───────────────────────────────────────
+# 整份条目快照随墓碑留存：restore 要把条目原样放回去，只存 id 就回不了。
+_SCHEMA_V6 = """
+CREATE TABLE IF NOT EXISTS knowledge_tombstones (
+    knowledge_id TEXT PRIMARY KEY,
+    agent_id TEXT NOT NULL DEFAULT '',
+    deleted_at REAL NOT NULL DEFAULT 0,
+    deleted_by TEXT NOT NULL DEFAULT '',
+    superseded_by TEXT,
+    payload_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tombstone_agent ON knowledge_tombstones(agent_id, knowledge_id);
+"""

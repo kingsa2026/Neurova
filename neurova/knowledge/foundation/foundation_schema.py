@@ -21,7 +21,7 @@ from .knowledge_facts import (
     _SCHEMA_V3,
     _SCHEMA_V5,
 )
-from .narratives import NARRATIVE_DOMAIN, _SCHEMA_V4
+from .narratives import NARRATIVE_DOMAIN, _SCHEMA_V4, _SCHEMA_V6
 
 _STEPS: List[tuple] = [
     (1, _SCHEMA),
@@ -29,6 +29,7 @@ _STEPS: List[tuple] = [
     (3, _SCHEMA_V3),
     (4, _SCHEMA_V4),
     (5, _SCHEMA_V5),
+    (6, _SCHEMA_V6),
 ]
 
 _registered = False
