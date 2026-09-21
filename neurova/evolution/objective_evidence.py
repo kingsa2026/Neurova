@@ -59,6 +59,9 @@ def parse_turn_steps(records: Optional[List[Dict[str, Any]]]
     一律进 `unreadable`，由调用方判「票据不可读」—— 这里绝不静默丢步骤，
     丢出来的半截结构可能错配到另一条序列的票据上。
     """
+    from neurova.agent.turn_state import warn_shape_violations
+
+    warn_shape_violations(records, "objective_evidence.parse_turn_steps")
     steps: List[Dict[str, Any]] = []
     unreadable: List[str] = []
     for record in records or []:

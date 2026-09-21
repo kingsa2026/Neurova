@@ -4,8 +4,11 @@
 定稿（对比报告 §5.6）：会话 metadata.tool_calls 即全文台账，条目必须携带
 硬地址之 call_id + 落盘时生效的 reproducible 证据（防工具改标/删除后
 语义漂移）+ 溢出时的 offload_path。经 LoopBase.handle_tool_calls 真实
-执行路径测试（records 经 agent.append_tool_messages 捕获，同
-test_handle_tool_calls_parallel harness 姿势）。
+执行路径测试（records 经 agent.append_tool_messages 捕获）。
+
+工单 003 之后原生链走执行咽喉：工具必须真是"该 agent 注册过的技能"，
+故此处注册一条声明 `reproducible` 的 stub 技能，让咽喉一路走到技能执行体
+（替身放在技能执行体这一层，不冒充执行链）。
 """
 import json
 from types import SimpleNamespace
@@ -13,16 +16,51 @@ from types import SimpleNamespace
 import pytest
 
 from neurova.agent.loops.openai_loop import OpenAILoop
+from neurova.tool_executor import ToolExecutor
 
 pytestmark = pytest.mark.asyncio
 
 
+class _StubSkill:
+    """技能替身：只承载 `config.reproducible` 与描述（取件契约为 `get_skill`）。"""
+
+    def __init__(self, name, reproducible):
+        self.name = name
+        self.description = "offload 探针技能"
+        self.config = {"reproducible": reproducible}
+
+
+class _StubRegistry:
+    """技能注册表替身：`get_skill` / `has_skill` / `execute_skill` 三契约。"""
+
+    def __init__(self, name, reproducible, execute):
+        self._skill = _StubSkill(name, reproducible)
+        self.skills = {name: self._skill}
+        self._execute = execute
+
+    def get_skill(self, skill_name):
+        return self._skill if skill_name == self._skill.name else None
+
+    def has_skill(self, skill_name):
+        return skill_name == self._skill.name
+
+    def list_skills(self):
+        return []
+
+    async def execute_skill(self, skill_name, params, context=None):
+        return await self._execute()
+
+
 class _CapturingAgent:
-    def __init__(self, router_execute, workspace_path):
+    def __init__(self, tool_name, reproducible, execute, workspace_path):
         self._records = []
         self.skill_registry = None
-        self.config = SimpleNamespace(user_id="u1", agent_id="a1")
-        self.tool_router = SimpleNamespace(execute=router_execute)
+        self._skill_registry = _StubRegistry(tool_name, reproducible, execute)
+        self.tool_memory = None
+        self.tool_lifecycle = None
+        self.skill_packer = None
+        self.config = SimpleNamespace(name="probe", user_id="u1", agent_id="a1")
+        self.tool_router = None
         self.workspace_path = str(workspace_path)
         self._current_user_id = "u1"
 
@@ -34,8 +72,10 @@ class _CapturingAgent:
         return self._records
 
 
-def _make_loop(router_execute, tmp_path):
-    agent = _CapturingAgent(router_execute, tmp_path)
+def _make_loop(tool_name, reproducible, execute, tmp_path):
+    agent = _CapturingAgent(tool_name, reproducible, execute, tmp_path)
+    # 原生链经执行咽喉（工单 003）：真执行器 + 技能执行体替身
+    agent.tool_executor = ToolExecutor(agent)
     loop = OpenAILoop.__new__(OpenAILoop)
     loop.agent = agent
     loop.llm_client = None
@@ -48,12 +88,12 @@ async def test_record_carries_call_id_reproducible_and_offload(tmp_path, monkeyp
     monkeypatch.setenv("NEUROVA_TOOL_OFFLOAD_THRESHOLD_KB", "8")
     big = "x" * 40000  # 40KB > 8KB 阈值
 
-    async def _execute(tool_name, params, agent_id=None, user_id=None):
-        return SimpleNamespace(success=True, result={"content": big}, error=None)
+    async def _execute():
+        return {"content": big}
 
-    loop, agent = _make_loop(_execute, tmp_path)
+    loop, agent = _make_loop("big_reader", True, _execute, tmp_path)
     tool_msgs = await loop.handle_tool_calls(
-        [{"id": "tc-123", "function": {"name": "file_read", "arguments": "{}"}}], []
+        [{"id": "tc-123", "function": {"name": "big_reader", "arguments": "{}"}}], []
     )
     rec = next(r for r in agent.tool_messages if r.get("type") == "tool_result")
     assert rec["tool_call_id"] == "tc-123"
@@ -82,12 +122,12 @@ async def test_record_non_reproducible_offloads_with_head_tail(tmp_path, monkeyp
     monkeypatch.setenv("NEUROVA_TOOL_OFFLOAD_THRESHOLD_KB", "8")
     big = "y" * 40000
 
-    async def _execute(tool_name, params, agent_id=None, user_id=None):
-        return SimpleNamespace(success=True, result={"stdout": big}, error=None)
+    async def _execute():
+        return {"stdout": big}
 
-    loop, agent = _make_loop(_execute, tmp_path)
+    loop, agent = _make_loop("code_runner", False, _execute, tmp_path)
     tool_msgs = await loop.handle_tool_calls(
-        [{"id": "tc-888", "function": {"name": "run_code", "arguments": "{}"}}], []
+        [{"id": "tc-888", "function": {"name": "code_runner", "arguments": "{}"}}], []
     )
     rec = next(r for r in agent.tool_messages if r.get("type") == "tool_result")
     assert rec["reproducible"] is False
@@ -106,12 +146,12 @@ async def test_record_non_reproducible_offloads_with_head_tail(tmp_path, monkeyp
 async def test_small_result_no_offload(tmp_path, monkeypatch):
     monkeypatch.setenv("NEUROVA_TOOL_OFFLOAD_THRESHOLD_KB", "64")
 
-    async def _execute(tool_name, params, agent_id=None, user_id=None):
-        return SimpleNamespace(success=True, result={"ok": True}, error=None)
+    async def _execute():
+        return {"ok": True}
 
-    loop, agent = _make_loop(_execute, tmp_path)
+    loop, agent = _make_loop("small_reader", True, _execute, tmp_path)
     await loop.handle_tool_calls(
-        [{"id": "tc-s", "function": {"name": "calculator", "arguments": "{}"}}], []
+        [{"id": "tc-s", "function": {"name": "small_reader", "arguments": "{}"}}], []
     )
     rec = next(r for r in agent.tool_messages if r.get("type") == "tool_result")
     assert rec["reproducible"] is True

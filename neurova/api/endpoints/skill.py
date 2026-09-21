@@ -403,25 +403,34 @@ async def execute_skill(
         logger.warning("get_skill_registry failed: %s", e)
 
     agent = _get_agent()
-    if agent and hasattr(agent, "execute_skill"):
+    if agent is not None and getattr(agent, "tool_executor", None) is not None:
+        # 执行一律经咽喉（`tool_executor.execute_skill_tool`）：这条路才同时拿到
+        # 票据、`on_tool_executed`、治理预检与 Pre/PostToolUse hooks；直调
+        # registry 是 002 判死的旁路。端点不再各自实现一份成败判定。
         try:
-            result = await agent.execute_skill(
-                skill_id=skill_id,
-                parameters=body.parameters,
-                context=body.context,
-                timeout=body.timeout,
+            executor = agent.tool_executor
+            payload = await executor.execute_skill_tool(
+                skill_id, dict(body.parameters or {}), body.context
             )
+            if not executor._result_is_success(payload):
+                return SkillExecuteResponse(
+                    success=False,
+                    error=str((payload or {}).get("error") or "技能执行失败"),
+                    execution_time=time.time() - start_time,
+                    skill_id=skill_id,
+                )
             return SkillExecuteResponse(
                 success=True,
-                result=result,
+                result=payload,
                 execution_time=time.time() - start_time,
                 skill_id=skill_id,
             )
         except Exception as e:
-            logger.error(f"Agent execute_skill error: {e}", exc_info=True)
+            logger.error("技能经咽喉执行异常: %s", e, exc_info=True)
 
     if registry is not None and hasattr(registry, "execute_skill"):
         try:
+            # 降级分支：无 Agent/执行器（评测、脚本、独立注册表）时直调 registry
             call_result = registry.execute_skill(skill_id, body.parameters or {}, body.context)
             # 兼容同步 SkillResult 与 async（测试 AsyncMock）两种执行器
             if asyncio.iscoroutine(call_result):

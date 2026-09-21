@@ -96,6 +96,13 @@ def reset_experience_kb() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _outcome_word(success: Any) -> str:
+    """成败三态 → 契约词汇（True / False / None 各归各位，不折叠）。"""
+    if success is None:
+        return "unevidenced"
+    return "success" if success else "failure"
+
+
 def _to_contract(row: Dict[str, Any], experience_count: int) -> Dict[str, Any]:
     """EKB 行 → 前端 ExperienceRecord 契约（工单 015 起不再自造读数）。
 
@@ -119,7 +126,10 @@ def _to_contract(row: Dict[str, Any], experience_count: int) -> Dict[str, Any]:
         "task_type": row.get("skill_name", ""),
         "skill_name": row.get("skill_name", ""),
         "context": ctx_text,
-        "outcome": "success" if row.get("success") else "failure",
+        # 工单 004：三态不许在半路裂开——NULL 输出 `unevidenced`（与
+        # `evidence_state` 同一词汇表），旧写法 `if row.get("success")` 把
+        # "没测到"演成"失败"。
+        "outcome": _outcome_word(row.get("success")),
         "success_rate": rating,
         "proficiency": rating,
         "experience_count": experience_count,
@@ -167,7 +177,9 @@ async def add_experience_record(body: AddExperienceRecordRequest):
         skill_name=body.task_type,
         context={"user_input": body.context, "task_type": body.task_type},
         result=body.metadata or {},
-        success=body.outcome != "failure",
+        # 工单 004：`outcome == "failure"` 的补集把 `unevidenced` 洗成成功。
+        # 三态各自成值，未测量不冒充成功（同列 106-110 注释的禁则）。
+        success=None if body.outcome == "unevidenced" else (body.outcome != "failure"),
         timestamp="",
         feedback="\n".join(body.lessons or []),
     )
@@ -176,7 +188,9 @@ async def add_experience_record(body: AddExperienceRecordRequest):
             skill_name=body.task_type,
             exp=exp,
             agent_id=body.agent_id,
-            confidence_score=1.0 if exp.success else 0.0,
+            # 置信度不得由 success 二值折算（上一批工单 015 的行契约）：
+            # 未测量 ⇒ 不写（NULL），真成功/真失败才给端点值。
+            confidence_score=None if exp.success is None else (1.0 if exp.success else 0.0),
             tags=list((body.metadata or {}).get("tags", [])) or None,
         )
     except Exception as e:
@@ -227,11 +241,18 @@ async def get_experience_stats(agent_id: str = Query(default="")):
         kb = get_experience_kb()
         records = kb.get_experience_records(agent_id=agent_id or None)
         total = len(records)
+        # 工单 004：success 列的三态是 1 / 0 / NULL——NULL（未测量）在这里天然是
+        # 假值，进不了成功分子；分母保持全部条目（真失败也在分母里，否则成功率
+        # 会被未测量条目稀释成假高）。三态的可分辨性落在上面的 `outcome` 字段。
         successes = sum(1 for r in records if r.get("success"))
         proficiency_values = [
             float(r.get("confidence_score") or 0) for r in records if r.get("confidence_score") is not None
         ]
-        avg_proficiency = round(sum(proficiency_values) / len(proficiency_values), 4) if proficiency_values else 0.0
+        # 全空必须给 None（"没测到"≠"零分"），由调用方决定怎么显示
+        avg_proficiency = (
+            round(sum(proficiency_values) / len(proficiency_values), 4)
+            if proficiency_values else None
+        )
         counts: Dict[str, int] = {}
         for r in records:
             key = r.get("skill_name") or "unknown"

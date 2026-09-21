@@ -128,31 +128,19 @@ class TestExperienceKnowledgeBase(unittest.TestCase):
         self.assertGreater(len(similar), 0)
         self.assertIn("similarity_score", similar[0])
     
-    def test_get_experience_stats(self):
-        """测试获取经验统计"""
+    def test_skill_records_are_the_stats_source(self):
+        """统计读数取自真实记录集（工单 010 删掉孤岛方法后的唯一事实源）。"""
         # 添加记录
         self.ekb.add_experience_record(self.skill_name, self.exp)
-        
-        # 获取单个技能统计
-        stats = self.ekb.get_experience_stats(self.skill_name)
-        
-        self.assertEqual(stats["skill_name"], self.skill_name)
-        self.assertEqual(stats["total_experiences"], 1)
-        self.assertEqual(stats["success_count"], 1)
-        
-        # 获取全局统计
-        global_stats = self.ekb.get_experience_stats()
-        
-        self.assertIn("total_skills", global_stats)
-        self.assertIn("total_records", global_stats)
-    
-    def test_empty_skill_stats(self):
-        """测试空技能的统计"""
-        stats = self.ekb.get_experience_stats("non-existent-skill")
-        
-        self.assertEqual(stats["total_experiences"], 0)
-        # success_rate 字段在空技能时不存在，检查其他字段
-        self.assertIn("skill_name", stats)
+
+        records = self.ekb.get_experience_records(skill_name=self.skill_name)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["skill_name"], self.skill_name)
+        self.assertEqual(records[0]["success"], 1)
+
+        # 空技能：同一取数口的空结果（无记录即无统计）
+        empty = self.ekb.get_experience_records(skill_name="non-existent-skill")
+        self.assertEqual(empty, [])
 
 
 class TestExperienceRecord(unittest.TestCase):
