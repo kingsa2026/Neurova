@@ -476,6 +476,8 @@ class SkillRegistry:
         self._runtime_manager = runtime_manager
         import threading
         self._registration_lock = threading.RLock()
+        # 同名覆盖计数（工单 006 的可观测读数，供运维复算存量库的冲突规模）
+        self._name_collision_count = 0
         # 工具路由器注入: 恢复/注册 ToolSequenceSkill(自动技能)时需要
         # 执行体依靠此路由逐步骤执行工具; 未注入时合成技能"能看见不能调"
         self.tool_router: Any = None
@@ -505,10 +507,33 @@ class SkillRegistry:
                     return existing
             # canonicalize 已经算出最终身份，直接用它登记，不再二次解析
             identity = canonicalize_skill_identity(skill, fallback=getattr(skill, "name", "") or "")
+            # 同名覆盖告警（工单 006 / 审计 L-06b）：注册表按 `skill.name` 建键，
+            # 而身份是 `skill_id`——`name ≠ skill_id` 的自动技能（历史生成器遗留）
+            # 会**静默**顶掉先到的同名条目，工具面永远看不到少了一个。此处只出声
+            # 不硬拒（存量库当场硬拒会让装配失败），迁移方案另票。
+            self._warn_on_name_collision(skill)
             self._skills[skill.name] = skill
             if identity:
                 self._identity_index[identity] = skill
             return skill
+
+    def _warn_on_name_collision(self, skill: "Skill") -> None:
+        """同名不同身份的覆盖出声（计数可观测，不硬拒）。"""
+        existing = self._skills.get(skill.name)
+        if existing is None or existing is skill:
+            return
+        from neurova.skills.skill_contract import resolve_skill_identity
+
+        incoming = resolve_skill_identity(skill, fallback=getattr(skill, "name", ""))
+        resident = resolve_skill_identity(existing, fallback=getattr(existing, "name", ""))
+        if incoming and resident and incoming == resident:
+            return
+        self._name_collision_count = getattr(self, "_name_collision_count", 0) + 1
+        logger.warning(
+            "技能同名覆盖（name=%s）：%s 顶替 %s；注册表按 name 建键，两者身份不同则"
+            "先到者在工具面上静默消失（累计 %d 次）",
+            skill.name, incoming or "?", resident or "?", self._name_collision_count,
+        )
 
     @property
     def skills(self) -> Dict[str, Skill]:

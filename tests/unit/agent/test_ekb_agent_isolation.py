@@ -55,11 +55,16 @@ def test_write_with_agent_id_is_row_visible_to_same_agent_only(ekb):
 
 
 def test_stats_scoped_by_agent(ekb):
+    """统计面走 `/stats` 端点的真实数据源（`get_experience_records` 重算）。
+
+    工单 010：`EKB.get_experience_stats` 顶层 `neurova/` 零生产调用方（`/stats`
+    端点自己重算），已删；本用例随之改走同一条真实通路。
+    """
     _add(ekb, "t1", agent_id="agent-a")
-    stats_a = ekb.get_experience_stats(agent_id="agent-a")
-    stats_b = ekb.get_experience_stats(agent_id="agent-b")
-    assert stats_a.get("total", stats_a.get("total_records", 1)) >= 1
-    assert stats_b.get("total", stats_b.get("total_records", 0)) == 0
+    rows_a = ekb.get_experience_records(agent_id="agent-a")
+    rows_b = ekb.get_experience_records(agent_id="agent-b")
+    assert len(rows_a) >= 1
+    assert len(rows_b) == 0
 
 
 def test_pipeline_writers_pass_agent_identity(tmp_path, monkeypatch):

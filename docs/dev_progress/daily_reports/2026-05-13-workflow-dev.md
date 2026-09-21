@@ -10,7 +10,7 @@
 ## 一、今日完成工作
 
 ### 1.1 设计文档创建
-- ✅ 完成 ``
+- ✅ 完成 `docs/dev_progress/module_designs/workflow_engine_enhanced.md`
 - 参考 `provider_enhanced.md` 格式
 - 包含完整的模块设计、架构设计、详细设计、API 设计、测试计划等
 

@@ -2201,8 +2201,6 @@ class ChatPipeline:
         （不入回复文本）不变。
         """
         reply_parts = []
-        # C1: 捕获原生 function-calling 的工具事件，循环后合并到 _tool_messages_list
-        native_tool_events: List[Dict] = []
         # Bug V2-6 修复:predict_step 是 async def,返回 coroutine。
         # 原代码 `gen = self.loop.predict_step(...)` 缺 await,对 coroutine
         # 迭代会抛 TypeError: 'coroutine' object is not async iterable。
@@ -2267,8 +2265,11 @@ class ChatPipeline:
                     except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
                         logger.debug("event_emitter 转发 retry 失败: %s", e)
             elif etype in ("tool_call", "tool_result"):
-                # C1: 原生 function-calling 元数据，接入工具消息列表
-                native_tool_events.append(event)
+                # 工具事件的取证记录由执行链自己落（`loops/base.py` 的
+                # `handle_tool_calls` 经 `append_tool_messages` 写入扁平记录）。
+                # 这里只做传输：转发 SSE / 蜂群流。曾经此处把事件原样并入取证源，
+                # 导致同一列表里出现 `{type, data}` 包装条目——`turn_state` 读不到
+                # `tool_name`、`post_chat` 读出 `unknown`，成败与工具名一起失真。
                 # [真流式] 仅当调用方显式开启 emit_tool_events（console SSE 桥接）
                 # 时才转发工具事件；默认关闭——该通道同时服务蜂群子 Agent
                 # 逐 token 流，需保持纯文本契约（见 test_chat_stream_events）
@@ -2288,10 +2289,6 @@ class ChatPipeline:
                     except Exception as e:  # noqa: BLE001 - 发射失败不影响主流程
                         logger.debug("event_emitter 转发 %s 失败: %s", etype, e)
             # reasoning 等其他元数据事件不入回复
-            # C1: 合并原生工具事件到 _tool_messages_list，供 _collect_tool_messages() 读取
-        if native_tool_events:
-            self._agent.append_tool_messages(native_tool_events)
-            logger.debug("原生模式捕获 %d 个工具事件", len(native_tool_events))
         if cit_buf is not None and emitter is not None:
             try:
                 _tail = cit_buf.flush()

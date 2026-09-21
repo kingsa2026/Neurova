@@ -13,8 +13,8 @@
 只做只读扫描，不改任何文件；供登记台账生成与常驻守卫共用同一份判据
 （避免「台账一份口径、守门另一份口径」的双源）。
 
-文件名沿用 `scripts/` 目录既有的下划线风格（同目录另有 `scan_docs_links.py`），
-函数与变量按仓库命名规约用 camelCase。
+本文件是**引用扫描与判定的唯一事实源**：台账与守卫都从这里取数，
+不在别处复制一套判据。函数与变量按仓库命名规约用 camelCase。
 """
 from __future__ import annotations
 
@@ -30,12 +30,19 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # Markdown 链接 / 反引号路径引用 / 空标签
 LINK_PATTERN = re.compile(r"!?\[([^\]]*)\]\(([^)\s]*)\)")
 CODE_PATH_PATTERN = re.compile(r"`([^`\s]+)`")
-EMPTY_CODE_PATTERN = re.compile(r"`{2}(?!`)")
-FENCE_PATTERN = re.compile(r"^\s*(```|~~~)")
+FENCE_PATTERN = re.compile(r"```|~~~")
 # 视为「路径引用」的文件后缀（避免把 `foo.bar()` 这类代码片段当路径）
 PATH_SUFFIXES = ("py", "md", "yml", "yaml", "json", "toml", "sh", "bat", "js", "ts", "vue", "html", "css")
 # 通配/占位形态（`bugfix-*.md`、`HARMONYOS_*.md`）不是具体路径，单独归类
 PLACEHOLDER_PATTERN = re.compile(r"[*<>{}\[\]]")
+
+# 台账类文档把"被清空的引用"作为**数据**逐条列出（表格里的形态样例），
+# 扫描时排除：否则台账每生成一次就把自己举的样例当成新命中点，
+# "生成 → 计数变化 → 再生成"永远收敛不了（自引用死循环）。
+LEDGER_DOCUMENTS = frozenset({
+    "docs/06-bugfix/历史悬空引用登记台账_2026-09-21.md",
+    "docs/06-bugfix/文档空链登记台账_2026-09-21.md",
+})
 
 VERDICT_REACHABLE = "可达"
 VERDICT_MOVED = "迁移可达"
@@ -69,7 +76,7 @@ def resolveTarget(ref: str, source: Path, byBasename: dict) -> tuple:
         candidate = base / literal
         if candidate.exists():
             # 字面可达 —— 引用本身没坏，不进台账
-            return VERDICT_REACHABLE, str(candidate.relative_to(PROJECT_ROOT)).replace("\\", "/")
+            return VERDICT_REACHABLE, displayPath(candidate.resolve())
     # 2. 按「同后缀完整路径」找唯一命中
     basename = literal.split("/")[-1]
     candidates = byBasename.get(basename, [])
@@ -83,6 +90,59 @@ def resolveTarget(ref: str, source: Path, byBasename: dict) -> tuple:
     if candidates:
         return VERDICT_AMBIGUOUS, ", ".join(candidates[:3])
     return VERDICT_DELETED, "—"
+
+
+def emptyCodeSpans(line: str) -> list:
+    """返回该行中"被清空的引用"位置（反引号 run 的起始下标）。
+
+    判据：**孤立的反引号 run**——它在整行里找不到同长度的配对 run。
+    这条判据同时挡住两类相反的错误：
+
+    - 假阳性：`\`\` `行内码` \`\`` 是"内容里含反引号"的合法写法（CommonMark 用双
+      反引号定界），代码审计与规范类文档里大量出现。它的首尾 run 会彼此配对，
+      故被正确跳过。若简单地把任意两个反引号读成"空引用"，这些会成批误报——
+      假阳性比漏报更坏，它会训练人忽略这道门禁。
+    - 假阴性：真正被删空的引用就是一个孤立的 `\`\``，没有任何配对 run，
+      必须照样报出来（漏报等于门禁失效）。
+    """
+    runs = []
+    index = 0
+    length = len(line)
+    while index < length:
+        if line[index] != "`":
+            index += 1
+            continue
+        runEnd = index
+        while runEnd < length and line[runEnd] == "`":
+            runEnd += 1
+        runs.append((index, runEnd - index))
+        index = runEnd
+
+    paired = set()
+    for position, (start, runLength) in enumerate(runs):
+        if runLength != 2 or position in paired:
+            continue
+        for other in range(position + 1, len(runs)):
+            if other in paired:
+                continue
+            if runs[other][1] == runLength:
+                paired.add(position)
+                paired.add(other)
+                break
+    return [start for position, (start, runLength) in enumerate(runs)
+            if runLength == 2 and position not in paired]
+
+
+def _isFenceLine(line: str) -> bool:
+    """行首（可带引用前缀 `> `）的围栏定界符。
+
+    引用块里嵌的代码围栏（`> ```python`）与顶格围栏同样是**被测代码**；
+    不认它会把它读成"被清空的引用"。
+    """
+    stripped = line.lstrip()
+    while stripped.startswith(">"):
+        stripped = stripped[1:].lstrip()
+    return bool(FENCE_PATTERN.match(stripped))
 
 
 def displayPath(path: Path) -> str:
@@ -100,7 +160,7 @@ def scanFile(path: Path, byBasename: dict) -> list:
     found = []
     inFence = False
     for lineNo, line in enumerate(text.splitlines(), 1):
-        if FENCE_PATTERN.match(line):
+        if _isFenceLine(line):
             inFence = not inFence
             continue
         if inFence:
@@ -109,7 +169,7 @@ def scanFile(path: Path, byBasename: dict) -> list:
             label, target = match.group(1).strip(), match.group(2).strip()
             if not label or not target:
                 found.append(_entry(relative, lineNo, match.group(0), VERDICT_EMPTY, "—"))
-        for _ in EMPTY_CODE_PATTERN.finditer(line):
+        for _ in emptyCodeSpans(line):
             found.append(_entry(relative, lineNo, "``", VERDICT_EMPTY, "—"))
         for match in CODE_PATH_PATTERN.finditer(line):
             ref = match.group(1)
@@ -135,6 +195,8 @@ def scanDirectory(targetDir: Path) -> list:
     byBasename = indexByBasename(trackedFiles())
     entries, seen = [], set()
     for path in sorted(targetDir.rglob("*.md")):
+        if displayPath(path) in LEDGER_DOCUMENTS:
+            continue
         for item in scanFile(path, byBasename):
             key = (item["file"], item["line"], item["ref"])
             if key in seen:

@@ -296,7 +296,8 @@ async def backfill_graph_from_knowledge(
     for entry in pending:
         try:
             ids = extract_knowledge_to_graph(
-                entry, repo=repo, llm_call=llm_call, graph_manager=graph
+                entry, repo=repo, llm_call=llm_call, graph_manager=graph,
+                agentId=agent_id or "",
             )
             if ids:
                 extracted_nodes += len(ids)

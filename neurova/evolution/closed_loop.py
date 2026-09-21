@@ -179,13 +179,19 @@ class AdaptiveToolWeights:
         with self._lock:
             return self._weights.get(tool_name)
 
-    def update_weight(self, tool_name: str, success: bool, latency: float = 0.0) -> None:
-        """更新工具权重
+    def update_weight(self, tool_name: str, success, latency: float = 0.0) -> None:
+        """更新工具权重（三态：True 记成功票 / False 记失败票 / None **不投票**）。
 
         multiplier：成功走加法递减收益（A 版思想：bonus/(1+0.1*success_count)），
         失败走乘法惩罚；两者共用 [min_multiplier, max_multiplier] 夹紧。
         同时维护滑动窗口（A 版思想①），供 get_effective_weight 的近期成功率消费。
+
+        `success=None` 表示"这轮没有客观回执"（工单 002/004 的三态语义）。旧写法
+        `if success: … else: 记失败` 把"未测量"折成失败票，与同文件 pattern_miner /
+        pattern_crystallizer 的"不投票"契约相悖，也和 004 的三态口径分叉。
         """
+        if success is None:
+            return
         with self._lock:
             if tool_name not in self._weights:
                 self._weights[tool_name] = ToolWeight(tool_name=tool_name)

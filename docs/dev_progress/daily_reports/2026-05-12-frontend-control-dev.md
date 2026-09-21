@@ -94,7 +94,7 @@
 - 目标：将测试覆盖率提高到 80% 以上
 
 ### 4. 创建模块设计文档
-- 创建 ``
+- 创建 `docs/dev_progress/module_designs/control_page.md`
 - 记录架构设计、组件层次、API 接口
 
 ### 5. E2E 测试（可选）
