@@ -8,8 +8,9 @@ async delete_agent 内同步调用 ``_remove_tree_with_retry``（shutil.rmtree
 修复：两处调用改 ``await asyncio.to_thread(...)``。本测试以线程身份断言
 删除函数运行在事件循环线程之外，且删除结果/响应契约不变（目录真实删除）。
 
-隔离纪律：CWD 切 tmp_path（data/{agent_id} 为 CWD 相对路径），
-app_state 用后重置，绝不触碰真实 data/ 与真实工作区。
+隔离纪律：数据根与工作区根都注入到 tmp_path（认知图谱目录已改按
+`NEUROVA_DATA_DIR` 推导绝对路径，只 chdir 拦不住），app_state 用后重置，
+绝不触碰真实 data/ 与真实工作区。
 """
 
 import asyncio
@@ -28,6 +29,8 @@ from neurova.api.endpoints import set_app_state
 @pytest.fixture()
 def isolated_env(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "agent_workspaces"))
     reset_config_manager()
     set_app_state(None)
     yield tmp_path

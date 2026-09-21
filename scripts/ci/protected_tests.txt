@@ -202,7 +202,6 @@ tests/unit/api/test_skill_rollback_governance.py
 # （阶跃边界 = 既有红灯 test_ebbinghaus_curve 的根因）+ 其余 5 组成建制死码退役锁定
 tests/unit/cognitive_layers/memory_layer/test_temperature_single_source.py
 
-
 # Issue #72 写面与读面收口：抽取产物落被读的底座（不再只有 JSON 投影）+ 本体硬拒真咬合
 tests/unit/knowledge/test_extraction_lands_in_read_graph.py
 # Issue #72 附带根因：构造期播种只补缺，不覆盖已登记的 domain/range/cardinality
@@ -235,3 +234,44 @@ tests/unit/core/test_chain_integrity_observability.py
 tests/unit/agent/test_tool_experience_loop_offline_probe.py
 tests/unit/skills/test_skill_name_collision_recount.py
 tests/unit/test_script_index_registration.py
+
+# Issue #75 残余项 A：历史污染清空（正证据判据 + 先归档再删 + 幂等 + 工作区目标拒删）
+tests/unit/memory/test_memory_pollution_purge.py
+# Issue #75 残余项 B：默认落点收成单一事实源（数据根），CWD 不再决定库在哪
+tests/unit/core/test_data_root_single_source.py
+# Issue #75 残余项 C：入索引段报出**归属**（delegated + owner），不再挂在"还没做"
+tests/unit/knowledge/test_index_segment_ownership.py
+# Issue #75 残余项 D：存量断言归正入口（补链位后必须转 verified；无依据的行保持 unverified）
+tests/unit/knowledge/test_assertion_regrade_entry.py
+# Issue #75 残余项 E：仓库里不许再有被跟踪的运行期残留（sessions/ / trajectories/）
+tests/unit/memory/test_tracked_run_residue_guard.py
+
+# Issue #81 F-04/F-18：导入会话属主（归属落盘后只读）+ 两条导入路同一幂等域
+#   + 导入咽喉（唯一写入口）的既有回归（逐文件单跑确定全绿，已核）
+tests/unit/memory_ingest/test_import_interop.py
+tests/unit/memory_ingest/test_import_sessions.py
+tests/unit/memory_ingest/test_cli.py
+tests/unit/memory_ingest/test_intake.py
+tests/unit/migration/test_kai_import.py
+
+# Issue #68 下一层：同名多份（回潮副本）逐条裁定 + 棘轮。
+# 根因 = 目录重排 fd7ea92c 之后，3b5d7e80 又把 306 个 docs 旧路径还原回来，
+# 同一篇文档在编号分层与旧路径各留一份，归档引用失去唯一裁定。本单收口为一份。
+tests/unit/test_docs_name_collision_guard.py
+
+# Issue #72 第二轮：投影与权威的双向差集可读、可修、只动本域（含端点接线）
+tests/unit/knowledge/test_projection_derived_from_authority.py
+# Issue #72 第二轮：存量补抽的待办判据问权威（投影有 id 不算抽过）
+tests/unit/knowledge/test_backfill_heals_authority_less_entries.py
+
+# 上下文持久层批（Issue #90）B4 工单 001：归档跨重启为真（A1）
+#   （根因 P1-3：写穿点挂在生产不可达的驱逐路径上 → 台账恒空）
+tests/unit/context/test_context_persistence_restart.py
+# 同上批：回收契约的落盘判据已重定向（落盘在入池、回收只管常驻），
+#   原文件已在上册，无需重复登记
+
+# Issue #96 收尾：退役平铺目录的引用可达性。删副本必须同批改引用——否则报错从
+#   「两个候选」变成「零个候选」，洞只是换了个位置（活跃层链接 + INDEX 权威表两处）
+tests/unit/test_docs_retired_tree_refs_guard.py
+# Issue #97：install.py 供给契约（依赖声明/模型单源/真下载器/前端同判据）
+tests/unit/desktop/test_install_supply_contract.py

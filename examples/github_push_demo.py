@@ -129,7 +129,7 @@ async def demo_github_push_skill():
     print("   3. 支持自定义仓库路径和分支")
     print("   4. 详细的错误处理和状态报告")
     print()
-    print("📚 更多信息请查看: docs/github_push_skill_usage.md")
+    print("📚 更多信息请查看: docs/09-dev-progress/github_push_skill_usage.md")
 
 
 async def demo_practical_usage():

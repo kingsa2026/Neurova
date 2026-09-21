@@ -8,11 +8,16 @@
    Agent 资源（SQLite/引擎句柄）从不释放；
 2. 随后 shutil.rmtree(..., ignore_errors=True) 在 Windows 上对被锁文件静默失败，
    工作目录只剩一半；
-3. agent_core._init_cognitive_graph 在 data/{agent_id} 创建的认知图谱目录
-   （memory.db）从不被清理。
+3. agent_core._init_cognitive_graph 在认知图谱数据目录（memory.db）从不被清理。
 
 本测试固定三条行为：协程必须真正执行；工作目录必须删干净（含重试）；
-data/{agent_id} 必须一并清理（但共享目录 data/agents 受保护）。
+认知图谱数据目录必须一并清理（但共享目录 data/agents 受保护）。
+
+隔离纪律（2026-09-21 起）：认知图谱目录不再是 CWD 相对的 `data/{agent_id}`，
+而是由 `core/data_root` 从 `NEUROVA_DATA_DIR` 推导的绝对目录。写入端
+（`agent_core._init_cognitive_graph`）与删除端（本端点）取同一处推导，
+所以测试也必须从**同一个注入口**给根，不能靠 chdir 假装它是相对的——
+那样测的是旧契约，而旧契约正是"写在这儿、删在那儿"的成因。
 """
 
 import asyncio
@@ -51,9 +56,14 @@ class FakeAgent:
 
 @pytest.fixture()
 def isolated_env(tmp_path, monkeypatch):
-    """CWD 切到临时目录：生产代码中 data/{agent_id} 与 data/agents 均为 CWD 相对路径，
-    测试据此把副作用隔离在 tmp_path，绝不触碰真实 data/。"""
+    """数据根与工作区根都注入到 tmp_path：副作用隔离在临时目录，绝不触碰真实 data/。
+
+    两个根都必须显式注入——生产代码已改按数据根/工作区根推导绝对路径，
+    只 chdir 已经拦不住任何东西。
+    """
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "agent_workspaces"))
     reset_config_manager()
     set_app_state(None)
     yield tmp_path
@@ -62,7 +72,7 @@ def isolated_env(tmp_path, monkeypatch):
 
 
 def _make_ghost(isolated_env: Path, agent_id: str) -> tuple[FakeAgent, Path, Path]:
-    """构造一个带完整落盘痕迹的 agent：workspace（含 memory 子树）+ data/{id} 认知图谱目录"""
+    """构造一个带完整落盘痕迹的 agent：workspace（含 memory 子树）+ 认知图谱目录"""
     tmp = isolated_env
     workspace = tmp / "agent_workspaces" / agent_id
     (workspace / "memory" / "attachments").mkdir(parents=True)
@@ -110,7 +120,7 @@ def test_delete_agent_removes_workspace_completely(isolated_env):
 
 
 def test_delete_agent_removes_cognitive_data_dir(isolated_env):
-    """data/{agent_id}（认知图谱 memory.db）必须一并清理。"""
+    """认知图谱数据目录（memory.db）必须一并清理。"""
     _make_ghost(isolated_env, "ghost3")
     _call_delete("ghost3")
     assert not (isolated_env / "data" / "ghost3").exists()
