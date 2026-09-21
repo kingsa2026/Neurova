@@ -139,6 +139,46 @@ class TestRetiredTreeLinksAreRebased:
         )
 
 
+#: 点名到具体文件（带扩展名、无 `<>`/`*` 占位）的退役目录引用
+SPECIFIC_REF = re.compile(r"(docs/([A-Za-z0-9][\w\-]*)/[^\s`|()]*\.[A-Za-z0-9]{1,6})")
+
+
+class TestNamedRetiredFilesAreRebased:
+    """规则 1b：点名到**具体文件**的退役目录引用，若目标在编号分层唯一可解，必须改指。
+
+    与规则 1 的区别：规则 1 管 Markdown 链接（可点击），本条管正文里的行内路径
+    （`docs/dev_progress/x.md` 这类）。它们不会渲染成链接，但同样把人指向已删目录，
+    且同样只需一次改名即可到位——属于同批删除漏改的同一根因。
+
+    只锁「编号分层有唯一同名」的那部分：目标确实还在，改指是确定动作。
+    占位符（`YYYY-MM-DD-<dev-name>.md`）是流程模板、不是引用，不参与判定；
+    已彻底不存在且无唯一命中的历史文件名保持登记状态，不在此处扩范围。
+    """
+
+    def testSpecificTargetsWithUniqueRebaseAreFixed(self, files):
+        retired = retiredTrees(files)
+        offenders = []
+        for path in activeDocs(files) + [f for f in files
+                                         if f.endswith((".json", ".dot", ".dsl"))
+                                         and not f.startswith(ARCHIVE_PREFIXES)]:
+            text = io.open(PROJECT_ROOT / path, encoding="utf-8", errors="ignore").read()
+            for number, line in enumerate(text.splitlines(), 1):
+                for match in SPECIFIC_REF.finditer(line):
+                    target, tree = match.group(1), match.group(2)
+                    if tree not in retired or "<" in target or "*" in target:
+                        continue
+                    if target in files:
+                        continue
+                    suffix = "/" + target.split("/", 2)[-1]
+                    matches = [f for f in files if f.endswith(suffix)]
+                    if len(matches) == 1:
+                        offenders.append(f"{path}:{number} `{target}` → {matches[0]}")
+        assert not offenders, (
+            "点名的退役目录文件在编号分层唯一可解，却没改指（同批删除漏改的同一根因）:\n  "
+            + "\n  ".join(offenders)
+        )
+
+
 class TestIndexAuthorityTableResolves:
     """规则 2：`docs/INDEX.md` 第 1 节权威文档表必须全部可达。"""
 
