@@ -11,6 +11,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { CollabSession, CollabTemplate, CanvasSnapshot } from '@/api/modules/collaboration'
+import * as collabApi from '@/api/modules/collaboration'
 import {
   listSessions, listTemplates, listHistory, startSession,
   createTemplate, updateTemplate, deleteTemplate,
@@ -24,6 +25,37 @@ import { handleStoreError, logStoreOperation } from './utils'
 // Mock types for now
 type CRDTDocument = any
 type TextOperation = any
+
+/**
+ * 归一化兜底：生产 store（collaboration.ts）在 api 模块里导出 toSession/toTemplate，
+ * 但本 store 的测试与集成方常整份 mock 掉 `@/api/modules/collaboration`，
+ * 此时静态导入会拿到 undefined。这里保留同名可覆盖入口（如 api 模块提供了实现则优先用），
+ * 否则退回本地等价实现——保证「原始载荷一定经归一」这条契约永不落空。
+ */
+function normalizeSession(raw: any): CollabSession {
+  const fn = (collabApi as any)?.toSession
+  if (typeof fn === 'function') return fn(raw)
+  return {
+    id: raw?.id,
+    name: raw?.name,
+    description: raw?.description ?? '',
+    status: raw?.status,
+    participants: raw?.members ?? raw?.participants ?? [],
+    createdAt: raw?.createdAt ?? '—',
+  } as CollabSession
+}
+
+function normalizeTemplate(raw: any): CollabTemplate {
+  const fn = (collabApi as any)?.toTemplate
+  if (typeof fn === 'function') return fn(raw)
+  return {
+    id: raw?.template_id ?? raw?.id ?? '',
+    name: raw?.name,
+    description: raw?.description ?? '',
+    type: raw?.type ?? '',
+    participants: raw?.participants ?? [],
+  } as CollabTemplate
+}
 
 export const useCollaborationStore = defineStore('collaboration', () => {
   // ===========================================================================
@@ -99,7 +131,11 @@ export const useCollaborationStore = defineStore('collaboration', () => {
       try {
         const res = await listSessions()
         const data = (res as any)?.data ?? res
-        sessions.value = Array.isArray(data) ? data : data?.sessions ?? []
+        // 与 collaboration.ts（唯一生产 store）同口径：原始记录必须经 toSession 归一。
+        // 直接赋值会把 snake_case / epoch 秒的原始载荷当领域模型用——
+        // 后端返回 { items: [...] } 包裹时更是整份落空（页面表现为列表恒空）。
+        const raw = Array.isArray(data) ? data : data?.sessions ?? data?.items ?? []
+        sessions.value = raw.map(normalizeSession)
         
         logStoreOperation('collaboration', 'fetchSessions', sessions.value.length)
       } catch (e) {
@@ -138,7 +174,10 @@ export const useCollaborationStore = defineStore('collaboration', () => {
       try {
         const res = await listTemplates()
         const data = (res as any)?.data ?? res
-        templates.value = Array.isArray(data) ? data : data?.templates ?? []
+        // 同 fetchSessions：模板同样经 toTemplate 归一（补 id/type/description 默认值），
+        // 并兼容 { items: [...] } 包裹。生产 store 用的是同一对归一函数。
+        const raw = Array.isArray(data) ? data : data?.templates ?? data?.items ?? []
+        templates.value = raw.map(normalizeTemplate)
         
         logStoreOperation('collaboration', 'fetchTemplates', templates.value.length)
       } catch (e) {

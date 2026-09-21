@@ -7,21 +7,29 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 
-// Mock api/modules/collaboration — 必须在 import store 之前
-vi.mock('@/api/modules/collaboration', () => ({
-  listSessions: vi.fn(),
-  listTemplates: vi.fn(),
-  listHistory: vi.fn(),
-  startSession: vi.fn(),
-  createTemplate: vi.fn(),
-  updateTemplate: vi.fn(),
-  deleteTemplate: vi.fn(),
-  getCollabStats: vi.fn(),
-  saveCanvas: vi.fn(),
-  runCanvas: vi.fn(),
-  getCanvas: vi.fn(),
-  updateCanvas: vi.fn(),
-}))
+// Mock api/modules/collaboration — 必须在 import store 之前。
+// store 会在 fetch 后调用 toSession/toTemplate 归一（后端字段 snake_case +
+// epoch 秒，必须过归一才对得上领域模型），因此这两个纯函数必须保留真实实现：
+// 只 mock 掉网络调用，漏掉归一函数会让整份 fetch 抛
+// 「No "toSession" export is defined on the mock」→ sessions 恒空。
+vi.mock('@/api/modules/collaboration', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/modules/collaboration')>()
+  return {
+    ...actual,
+    listSessions: vi.fn(),
+    listTemplates: vi.fn(),
+    listHistory: vi.fn(),
+    startSession: vi.fn(),
+    createTemplate: vi.fn(),
+    updateTemplate: vi.fn(),
+    deleteTemplate: vi.fn(),
+    getCollabStats: vi.fn(),
+    saveCanvas: vi.fn(),
+    runCanvas: vi.fn(),
+    getCanvas: vi.fn(),
+    updateCanvas: vi.fn(),
+  }
+})
 
 // Mock utils/error 与 utils/logger 避免副作用
 vi.mock('@/utils/error', () => ({
@@ -52,21 +60,42 @@ describe('useCollaborationStore', () => {
     expect(store.error).toBe(null)
   })
 
-  // ── Test 2: fetchSessions 成功填充 sessions ──
+  // ── Test 2: fetchSessions 成功填充 sessions（原始载荷经 toSession 归一） ──
   it('fetchSessions fills sessions on success', async () => {
-    const mockSessions = [
+    // 后端形态：snake_case + epoch 秒的原始记录（不是领域模型）
+    const rawSessions = [
       { id: 's1', name: 'Session 1', description: '', status: 'active', createdAt: '2024-01-01' },
       { id: 's2', name: 'Session 2', description: '', status: 'completed', createdAt: '2024-01-02' },
     ]
-    ;(collabApi.listSessions as any).mockResolvedValue({ data: mockSessions })
+    ;(collabApi.listSessions as any).mockResolvedValue({ data: rawSessions })
 
     const store = useCollaborationStore()
     await store.fetchSessions()
 
     expect(collabApi.listSessions).toHaveBeenCalledOnce()
-    expect(store.sessions).toEqual(mockSessions)
+    // 契约是「经 toSession 归一后的领域模型」：participants 缺省补 []，
+    // createdAt 缺失补 '—'，后端 created_at（epoch 秒）转成可读时间。
+    expect(store.sessions).toEqual([
+      { ...rawSessions[0], participants: [] },
+      { ...rawSessions[1], participants: [] },
+    ])
     expect(store.loading).toBe(false)
     expect(store.error).toBe(null)
+  })
+
+  // ── Test 2b: 归一化真的生效（snake_case / epoch 秒 / items 包裹） ──
+  it('fetchSessions normalizes snake_case + epoch and unwraps items', async () => {
+    ;(collabApi.listSessions as any).mockResolvedValue({
+      data: { items: [{ id: 's1', name: 'N', status: 'active', created_at: 1704067200, members: ['a'] }] },
+    })
+
+    const store = useCollaborationStore()
+    await store.fetchSessions()
+
+    expect(store.sessions).toHaveLength(1)
+    expect(store.sessions[0].id).toBe('s1')
+    expect(store.sessions[0].participants).toEqual(['a'])
+    expect(store.sessions[0].createdAt).toMatch(/^\d{4}-\d{2}-\d{2} /)
   })
 
   // ── Test 3: fetchSessions 失败设置 error 并清空 sessions ──
@@ -82,7 +111,7 @@ describe('useCollaborationStore', () => {
     expect(store.loading).toBe(false)
   })
 
-  // ── Test 4: fetchTemplates 成功填充 templates ──
+  // ── Test 4: fetchTemplates 成功填充 templates（原始载荷经 toTemplate 归一） ──
   it('fetchTemplates fills templates on success', async () => {
     const mockTemplates = [
       { id: 't1', name: 'Template 1', description: '', type: 'pipeline' },
@@ -93,7 +122,21 @@ describe('useCollaborationStore', () => {
     await store.fetchTemplates()
 
     expect(collabApi.listTemplates).toHaveBeenCalledOnce()
-    expect(store.templates).toEqual(mockTemplates)
+    expect(store.templates).toEqual([{ ...mockTemplates[0], participants: [] }])
+  })
+
+  // ── Test 4b: template_id → id 归一（否则卡片 id=undefined，选中失效） ──
+  it('fetchTemplates normalizes template_id to id', async () => {
+    ;(collabApi.listTemplates as any).mockResolvedValue({
+      data: { templates: [{ template_id: 'project_x', name: 'T', participants: ['a'] }] },
+    })
+
+    const store = useCollaborationStore()
+    await store.fetchTemplates()
+
+    expect(store.templates[0].id).toBe('project_x')
+    expect(store.templates[0].type).toBe('')
+    expect(store.templates[0].participants).toEqual(['a'])
   })
 
   // ── Test 5: startSessionAction 成功后调用 fetchSessions + fetchStats ──
