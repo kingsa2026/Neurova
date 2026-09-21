@@ -53,10 +53,15 @@ class ContextPool:
        「无损归档」改造后**已失效**（保留参数仅为向后兼容），超过它不再驱逐，
        首次越界会 warning 一次以免误导。``max_tokens`` 只约束视图层预算。
     2. **常驻上限（可选）**：``resident_limit``（默认 None=不限制，零行为变化）。
-       显式启用后，常驻条目超出上限即把最旧条目**落盘**到驱逐台账
-       （``ledger_db``，SQLite WAL+FTS5）再从常驻列表移除，``recall_evicted()``
-       仍可召回全文 —— 无损性由持久台账承载。
+       显式启用后，常驻条目超出上限即把最旧条目移出常驻列表（全文早已在持久
+       台账里，见下条），``recall_evicted()`` 仍可召回 —— 无损性由持久台账承载。
        ⚠️ 未注入 ``ledger_db`` 时自动禁用（内存台账仅有界 500 条，会静默丢全文）。
+    2b. **持久化（``ledger_db``，SQLite WAL+FTS5）**：写入咽喉 ``add_context``
+       落常驻即写穿台账——**不**依赖驱逐（生产构造面下 ``resident_limit=None``
+       且 ``ttl_seconds=0``，驱逐路径根本不可达）。这样"归档跨重启为真"才成立：
+       进程退出后，新进程同库 ``recall_evicted()`` 取回原文。
+       写失败不阻断内存归档，但经 ``get_retention_stats()["ledger_persistence"]``
+       显式上报（计数 + 点名原因），不静默。
     3. **TTL**：``ttl_seconds>0`` 时过期条目经 ``cleanup_expired()`` / 查询过滤
        剔除（先归档再剔除）；``0`` = 永不过期（生产 orchestrator 走此档）。
     4. **视图预算**：``draw()`` / Drawer 决定"这次取多少"，与常驻规模解耦。
@@ -92,8 +97,9 @@ class ContextPool:
                 上限请用 ``resident_limit``。
             ttl_seconds: 上下文过期时间（秒，默认3600）；0=永不过期
             resident_limit: 常驻条数上限（默认 None=不限制）。显式启用且注入了
-                ``ledger_db`` 时，超限的最旧条目先落盘再从常驻列表移除
-                （无损归档语义由持久台账承载）；未注入台账时自动禁用。
+                ``ledger_db`` 时，超限的最旧条目从常驻列表移除
+                （无损归档语义由持久台账承载，全文随入池即已落库）；未注入台账时
+                自动禁用。
 
         Raises:
             ValueError: 如果 user_id 或 agent_id 未提供
@@ -177,7 +183,10 @@ class ContextPool:
         # P1-1③：驱逐台账持久层 + 摘要压缩器（可选注入；None=保持内存行为）
         self._ledger_db = ledger_db
         self._summarizer = summarizer
-        self._ledger_gc_counter = 0
+        # B4/001：写穿计数——写失败必须显式可见（get_retention_stats 上报 + 点名原因）
+        self._ledger_written = 0
+        self._ledger_write_failed = 0
+        self._ledger_last_error: Optional[str] = None
 
         # Issue #65：常驻回收契约显式化——resident_limit 只接受"有持久台账"
         # 的组合，否则回收会把全文静默丢进仅 500 条的内存台账（等于破坏
@@ -243,6 +252,10 @@ class ContextPool:
             self._turn_index_add(context)
             self._read_index.add(context)
             self._cache_version += 1
+            # B4/001：落常驻即写穿持久台账——这是池的**唯一写入咽喉**，
+            # 驱逐路径不可达（生产构造面下 resident_limit=None、ttl_seconds=0），
+            # 归档"永不丢失"必须靠本条通路跨重启为真。
+            self._persist_archived(context)
 
             if (
                 not self._max_size_warned
@@ -265,7 +278,8 @@ class ContextPool:
         仅当显式启用 ``resident_limit`` **且**注入了持久台账时可达（构造期
         已把无台账的组合降级为 None）。语义：
 
-        - 最旧（_contexts 头部，插入序）条目先落盘台账再移出常驻列表；
+        - 最旧（_contexts 头部，插入序）条目移出常驻列表（全文已在持久台账，
+          见 ``_persist_archived``；回收不参与落盘判定）；
         - 索引（hash/turn/read）同步摘除；
         - 容量上限收敛为「总量 - resident_limit」，一次调用即达标（批量
           append 后不会残留超限状态）。
@@ -275,7 +289,7 @@ class ContextPool:
             return
         victims = list(self._collector._contexts[:overflow])
         for entry in victims:
-            self._archive_evicted(entry)  # 先落盘（无损），失败也只 warning
+            self._archive_evicted(entry)  # 进内存台账（全文已随入池写穿持久台账）
         del self._collector._contexts[:overflow]
         for entry in victims:
             if entry.hash:
@@ -316,6 +330,12 @@ class ContextPool:
                 "total": self._evicted_total,
             },
             "read_index": self._read_index.stats(),
+            "ledger_persistence": {
+                "enabled": self._ledger_db is not None,
+                "written": self._ledger_written,
+                "failed": self._ledger_write_failed,
+                "last_error": self._ledger_last_error,
+            },
         }
 
     @staticmethod
@@ -542,11 +562,40 @@ class ContextPool:
 
     # ── Scroll Context: 被驱逐轮次台账与召回（方案 P1-2.2） ──────
 
+    def _persist_archived(self, item) -> None:
+        """归档条目落常驻后写穿持久台账（B4/001 判据 A1 的唯一写入口）。
+
+        写失败不阻断归档主流程（本条仍驻内存、本进程内照常可召回），但**不静默**：
+        计数与点名原因经 ``get_retention_stats()["ledger_persistence"]`` 上报。
+        """
+        if self._ledger_db is None:
+            return
+        md = getattr(item, "metadata", None) or {}
+        try:
+            self._ledger_db.record(
+                content=str(getattr(item, "content", "")),
+                turn_id=md.get("turn_id"),
+                session_id=md.get("session_id") or self.session_id,
+                source=getattr(getattr(item, "source", None), "value", None),
+                metadata=getattr(item, "metadata", None),
+            )
+        except Exception as exc:  # noqa: BLE001 - 归档主流程不可被台账故障打断，但必须可见
+            self._ledger_write_failed += 1
+            self._ledger_last_error = f"{type(exc).__name__}: {exc}"
+            logger.warning(
+                "归档写穿持久台账失败（本条仅驻内存，重启后不可召回）：%s",
+                self._ledger_last_error, exc_info=True,
+            )
+            return
+        self._ledger_written += 1
+
     def _archive_evicted(self, item) -> None:
         """把被驱逐条目归档进有界台账；台账满时淘汰最旧记录。
 
-        P1-1③：同时写穿持久化台账（SQLite WAL+FTS5）——重启后经
-        recall_evicted 仍可召回（内存台账重启即丢）。
+        B4/001：持久台账的写穿点在 ``add_context``（落常驻即落库），本方法
+        **不再**写库——驱逐的条目必然先经 `add_context` 落过常驻，重复写会让
+        同一条内容在台账里出现两行（同内容双份，破坏去重语义）。
+        本方法只维护内存台账（本进程内更快的一等公民）与 GC 节流。
         """
         self._eviction_ledger.append(item)
         self._evicted_total += 1
@@ -554,21 +603,14 @@ class ContextPool:
         if overflow > 0:
             del self._eviction_ledger[:overflow]
         if self._ledger_db is not None:
-            try:
-                self._ledger_db.record(
-                    content=str(getattr(item, "content", "")),
-                    turn_id=(item.metadata or {}).get("turn_id"),
-                    session_id=self.session_id,
-                    source=getattr(item.source, "value", None),
-                    metadata=getattr(item, "metadata", None),
-                )
-                # P1-1③ 增强②：GC piggyback（每 _LEDGER_GC_EVERY 次驱逐触发，
-                # 按保留天数清理过期台账；异常不破坏归档主流程）
-                self._ledger_gc_counter += 1
-                if self._ledger_gc_counter % _LEDGER_GC_EVERY == 0:
+            # P1-1③ 增强②：GC piggyback（每 _LEDGER_GC_EVERY 次驱逐触发，
+            # 按保留天数清理过期台账；异常不破坏归档主流程）
+            self._ledger_gc_counter += 1
+            if self._ledger_gc_counter % _LEDGER_GC_EVERY == 0:
+                try:
                     self._ledger_db.gc_stale()
-            except Exception:
-                logger.warning("驱逐台账持久化失败（不影响内存归档）", exc_info=True)
+                except Exception:
+                    logger.warning("驱逐台账 GC 失败（不影响归档）", exc_info=True)
 
     def recall_evicted(self, query: str = None, limit: int = 20) -> List:
         """
