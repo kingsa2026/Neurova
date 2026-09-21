@@ -1,6 +1,6 @@
 # 贡献指南（CONTRIBUTING）
 
-感谢参与 Neurova（智星）。本文覆盖环境搭建、代码规约、测试纪律与提交流程。架构全貌见 [README](README.md) 与 [)；开发上下文速查见 [AGENTS.md](AGENTS.md) 与 [)。
+感谢参与 Neurova（智星）。本文覆盖环境搭建、代码规约、测试纪律与提交流程。**协作红线以 [docs/0-index/DEVELOPMENT_RULES.md](docs/0-index/DEVELOPMENT_RULES.md) 为准**（中文交流 / TDD 红绿灯 / 根因修复 / 闭环 / 原创性 / Neurova 命名法）。架构全貌见 [README](README.md) 与 [docs/CONTEXT.md](docs/CONTEXT.md)；文档总索引见 [docs/0-index/README.md](docs/0-index/README.md)。
 
 ## 快速开始
 

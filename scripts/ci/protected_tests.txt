@@ -25,6 +25,8 @@ tests/unit/api/test_skill_pool_api_auth_consolidation.py
 tests/unit/evolution/test_skill_consolidation_structural_and_deadcode_p1p2.py
 # Issue #48 NPC 思考档位修正：model 禁带思考强度后缀 / thinkingLevel 必须字面量枚举
 tests/unit/test_ci_npc_config_guard.py
+# 开发准则配置（docs/0-index/DEVELOPMENT_RULES.md ↔ .cnb/settings.yml 人设同步、唯一测试根 + 模块分子目录、入口文档无悬空引用）
+tests/unit/test_devRulesConfigGuard.py
 # Issue #55 性能/资源优化：PostChatPipeline 尾延迟 + 可观测性
 tests/unit/agent/test_post_chat_p0_latency_observability.py
 # Issue #55 P1：共享线程池复用（禁止热路径每次新建池）
