@@ -41,12 +41,29 @@ CREATE INDEX IF NOT EXISTS idx_ontology_parent ON ontology_terms(parent_term_id)
 CREATE INDEX IF NOT EXISTS idx_ontology_kind ON ontology_terms(kind);
 """
 
-# 条目叙述的谓词由咽喉固定（`documented_as`），基数天然不限：同一主体可以有很多份文档。
-# 不登记它就等于让第一个走咽喉的谓词处在"未登记"态，读数说不清是漏检还是免检。
+# v12：值域可以按**类别**声明（`range_kinds`），于是"客体必须是已登记的 concept"这类
+# 约束随类型表增长自动跟随。v8 已发布、其 SQL 文本永不改写（零停机迁移纪律），
+# 所以新列另起一版，由 ALTER 补上。
+_SCHEMA_V12 = """
+ALTER TABLE ontology_terms ADD COLUMN range_kinds TEXT NOT NULL DEFAULT '[]';
+"""
+
+# 两个由结构层固定的谓词：
+# - `documented_as`：条目叙述（019b-1），基数天然不限——同一主体可以有很多份文档；
+# - `is_a`：类型断言（工单 020），客体是**已登记的 concept 术语**。
+# `is_a` 的值域不写死在注册表里，而是由 `_declaredKinds` 声明为 `concept` 这一类：
+# 类型是数据，值域也是数据；写死一串概念 id，加一种类型就得多改一次表。
+#
+# 不登记它们就等于让走咽喉的谓词处在"未登记"态，读数说不清是漏检还是免检。
 _SEED_TERMS: List[Dict[str, Any]] = [
     {"termId": "documented_as", "kind": "relation", "label": "被记载为", "cardinality": None},
-    {"termId": IS_A_PREDICATE, "kind": "relation", "label": "是一个", "cardinality": None},
+    {"termId": IS_A_PREDICATE, "kind": "relation", "label": "是一个", "cardinality": None,
+     "rangeKinds": ["concept"]},
 ]
+
+# 值域可以按**类别**声明：`range_kinds` 里的每一类都展开成"当前表里该类的全部术语"。
+# 于是 `is_a` 的客体合法性随类型表增长自动跟随，不需要人再同步一次。
+_RANGE_KINDS = ("concept", "relation", "property")
 
 
 def _now() -> str:
@@ -76,16 +93,25 @@ class OntologyTermRegistry:
 
     def register(self, termId: str, kind: str, *, label: str = "",
                  parentTermId: Optional[str] = None, domain: Optional[List[str]] = None,
-                 rangeTerms: Optional[List[str]] = None, cardinality: Optional[int] = None,
+                 rangeTerms: Optional[List[str]] = None, rangeKinds: Optional[List[str]] = None,
+                 cardinality: Optional[int] = None,
                  disjointWith: Optional[List[str]] = None,
                  requiredProps: Optional[List[str]] = None,
                  version: str = "v1") -> Dict[str, Any]:
-        """登记/更新一个术语。非法结构在**写入处**就拒，不留到查询时才炸。"""
+        """登记/更新一个术语。非法结构在**写入处**就拒，不留到查询时才炸。
+
+        `rangeKinds` 按类别声明值域（如 `["concept"]` = 客体必须是已登记的概念术语）；
+        `rangeTerms` 逐个点名。两者并存时取并集——它们说的是同一件事的两种粒度。
+        """
         termId = str(termId or "").strip()
         if not termId:
             raise ValueError("term_id 不能为空")
         if kind not in _TERM_KINDS:
             raise ValueError("未知术语类别 %r（有效值: %s）" % (kind, "/".join(_TERM_KINDS)))
+        for declared in rangeKinds or []:
+            if declared not in _RANGE_KINDS:
+                raise ValueError(
+                    "未知值域类别 %r（有效值: %s）" % (declared, "/".join(_RANGE_KINDS)))
         if parentTermId == termId:
             raise ValueError("术语不能是自己的父类: %s" % termId)
         if cardinality is not None and int(cardinality) < 1:
@@ -100,11 +126,12 @@ class OntologyTermRegistry:
                 "SELECT created_at FROM ontology_terms WHERE term_id = ?", (termId,)).fetchone()
             self._store._conn.execute(
                 "INSERT OR REPLACE INTO ontology_terms (term_id, kind, label, parent_term_id,"
-                " domain_terms, range_terms, cardinality, disjoint_with, required_props,"
-                " version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " domain_terms, range_terms, range_kinds, cardinality, disjoint_with, required_props,"
+                " version, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (termId, kind, label or termId, parentTermId,
                  json.dumps(list(domain or []), ensure_ascii=False),
                  json.dumps(list(rangeTerms or []), ensure_ascii=False),
+                 json.dumps(sorted({str(k) for k in (rangeKinds or [])}), ensure_ascii=False),
                  cardinality,
                  json.dumps(sorted({str(d) for d in (disjointWith or [])}), ensure_ascii=False),
                  json.dumps(list(requiredProps or []), ensure_ascii=False),
@@ -119,6 +146,7 @@ class OntologyTermRegistry:
                 spec.get("termId") or spec.get("term_id"), spec["kind"],
                 label=spec.get("label", ""), parentTermId=spec.get("parentTermId"),
                 domain=spec.get("domain"), rangeTerms=spec.get("rangeTerms"),
+                rangeKinds=spec.get("rangeKinds"),
                 cardinality=spec.get("cardinality"), disjointWith=spec.get("disjointWith"),
                 requiredProps=spec.get("requiredProps"), version=spec.get("version", "v1"),
             )
@@ -146,7 +174,7 @@ class OntologyTermRegistry:
         if row is None:
             return None
         d = dict(row)
-        for key in ("domain_terms", "range_terms", "disjoint_with", "required_props"):
+        for key in ("domain_terms", "range_terms", "range_kinds", "disjoint_with", "required_props"):
             d[key] = json.loads(d[key] or "[]")
         return d
 
@@ -186,8 +214,16 @@ class OntologyTermRegistry:
         return list(term.get("domain_terms") or [])
 
     def rangeOf(self, termId: str) -> List[str]:
+        """谓词的值域：点名的那几个 + 按类别展开出来的那一批。
+
+        `is_a` 只声明 `rangeKinds: ["concept"]`，于是加一种概念类型不需要动 `is_a` 一行；
+        展开在读取时做，表里那一行保持声明形状。
+        """
         term = self.term(termId) or {}
-        return list(term.get("range_terms") or [])
+        declared = list(term.get("range_terms") or [])
+        for kind in term.get("range_kinds") or []:
+            declared.extend(t["term_id"] for t in self.terms(kind))
+        return sorted(set(declared))
 
     def disjointWith(self, termId: str) -> List[str]:
         term = self.term(termId) or {}
