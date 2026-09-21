@@ -408,5 +408,5 @@ python -m pylint neurova/collaboration/neurflow/
 
 - [Neurflow 开发规范](neurflow-dev-spec.md)
 - [Neurova 架构文档](../CONTEXT.md)
-- [API 设计指南]()
+- [Neurflow 外部 API 设计](neurflow-external-api-design.md)（前像指向 `api-design-guide.md`，该文件全历史从未入库，故改指现有设计文档）
 - [前端组件规范](frontend-component-spec.md)

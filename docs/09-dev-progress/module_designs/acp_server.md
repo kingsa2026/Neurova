@@ -622,7 +622,7 @@ data: {"error": "错误信息"}
 ### 4.2 进行中的子任务
 
 - [ ] 注册 ACP 路由到 `neurova/api/app.py`
-- [ ] 更新 ``
+- [ ] 更新 `docs/dev_progress/progress_tracker.md`
 
 ### 4.3 待完成的子任务
 
@@ -737,7 +737,7 @@ async def chat_stream(...) -> AsyncGenerator[str, None]:
 
 ### 8.1 参考资料
 
-- `` 第2593-2630行：8.5.2 ACP 说明
+- `docs/NEUROVA_CogArch_2.0.md` 第2593-2630行：8.5.2 ACP 说明
 - [Server-Sent Events (SSE) 规范](https://html.spec.whatwg.org/multipage/server-sent-events.html)
 
 ### 8.2 相关文件
@@ -745,7 +745,7 @@ async def chat_stream(...) -> AsyncGenerator[str, None]:
 - `neurova/core/acp_server.py`：ACP Server 实现
 - `tests/test_acp_server.py`：单元测试
 - `neurova/api/app.py`：需要注册 ACP 路由（待修改）
-- ``：需要更新进度（待修改）
+- `docs/dev_progress/progress_tracker.md`：需要更新进度（待修改）
 
 ---
 
