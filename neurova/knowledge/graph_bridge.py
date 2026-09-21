@@ -15,8 +15,12 @@
 - llm_call(prompt) -> str 可注入（测试零网络/零 LLM）；None 表示未配置，跳过
 - 类型合法集合来自 `ontology_terms`（工单 020 的注册表），越界一律落 custom；
   加一种类型是往表里登记一行，不改本文件（工单 018 收编）
+- **候选类型清单也从注册表取**：prompt 里那份枚举此前是硬编字符串，新登记的术语
+  对抽取不可见（B-10）
+- 实体类型同时落成 `is_a` 三元组并把 `type_term_id` 挂到主体上——本体人口的两半
 - 节点复用走 006 的身份消解段：同一实体不因类型词不同就开两个节点
-- 任何异常不向上传播（导入链路的钩子调用，失败不阻断导入）
+- 任何异常不向上传播（导入链路的钩子调用，失败不阻断导入）；但底座写入失败按
+  ERROR 级点名原因暴露，不做静默降级
 """
 
 from __future__ import annotations
@@ -30,8 +34,8 @@ from neurova.core.logger import get_logger
 logger = get_logger(__name__)
 
 _PROMPT_TEMPLATE = """从下面的知识条目中抽取实体与关系，输出严格的 JSON（不要解释）：
-{{"entities": [{{"label": "...", "type": "concept|entity|event|memory|skill|tool|person|location|time|custom"}}], "relations": [{{"source": "实体标签", "target": "实体标签", "type": "is_a|has_a|part_of|related_to|causes|similar_to|opposite_of|temporal|spatial|causal|depends_on|used_by|contains|custom"}}]}}
-约束：type 必须从给定枚举中选；实体 2-6 个；关系基于实体标签。
+{{"entities": [{{"label": "...", "type": "{nodeTypes}"}}], "relations": [{{"source": "实体标签", "target": "实体标签", "type": "{relationTypes}"}}]}}
+约束：type 必须从给定候选里选；实体 2-6 个；关系基于实体标签。
 
 标题：{title}
 正文：{content}"""
@@ -59,6 +63,33 @@ def _parse_llm_json(text: str) -> Optional[Dict[str, Any]]:
 def registeredTypes(registry: Any, kind: str) -> List[str]:
     """注册表里某一类（concept/relation）的合法术语 id。"""
     return [str(t.get("term_id", "")) for t in (registry.terms(kind) if registry else [])]
+
+
+def _readCompatCandidates(kind: str) -> List[str]:
+    """注册表缺席时，候选清单退回枚举读兼容层。
+
+    它只兜底 prompt 候选文案，不是合法性判据——判据唯一在注册表（`_registeredTypeIds`）。
+    """
+    from neurova.cognitive_layers.knowledge_graph.manager import NodeType, RelationType
+
+    enum = NodeType if kind == "concept" else RelationType
+    return [t.value for t in enum if t.value != "custom"]
+
+
+def extractionPrompt(registry: Any, *, title: str, content: str) -> str:
+    """抽取提示词：候选类型清单取自注册表，不再硬编。
+
+    硬编的清单与注册表是两份类型事实源，新登记的术语抽不出来——"加类型不改 .py"
+    于是只在校验侧成立。注册表不可用时退回枚举读兼容层的那批值，只影响 prompt 文案：
+    合法性判定照样以注册表为准，越界一律落 `custom`。
+    """
+    nodeTypes = registeredNodeTypes(registry) if registry is not None else []
+    relationTypes = registeredRelationTypes(registry) if registry is not None else []
+    return _PROMPT_TEMPLATE.format(
+        title=title, content=content[:4000],
+        nodeTypes="|".join(nodeTypes) or "|".join(_readCompatCandidates("concept")),
+        relationTypes="|".join(relationTypes) or "|".join(_readCompatCandidates("relation")),
+    )
 
 
 def registeredRelationTypes(registry: Any) -> List[str]:
@@ -198,6 +229,10 @@ def admitExtractedFacts(
         if not source or not target or source == target:
             continue
         relation = _typeFromRegistry(termRegistry, rel.get("type"))
+        # 底座侧只收登记过的关系：`custom` 是兜底标记不是一种类型，拿它当谓词
+        # 只会造出一批读不出来源的无义事实（实体类型那条 `is_a` 路由上面专管）。
+        if relation == "custom":
+            continue
         factId = _admitOne(source, relation, target)
         if factId:
             factIds.append(factId)
@@ -292,7 +327,7 @@ def extract_knowledge_to_graph(
         return []
 
     try:
-        raw = llm_call(_PROMPT_TEMPLATE.format(title=title, content=content[:4000]))
+        raw = llm_call(extractionPrompt(termRegistry, title=title, content=content))
         data = _parse_llm_json(raw)
     except Exception as exc:  # noqa: BLE001 - LLM 不可用不阻断调用方
         logger.warning("graph_bridge: LLM 抽取失败: %s", exc)
@@ -365,8 +400,10 @@ def extract_knowledge_to_graph(
     for rel in data.get("relations") or []:
         if not isinstance(rel, dict):
             continue
-        source_id = label_to_id.get(str(rel.get("source", "")).strip())
-        target_id = label_to_id.get(str(rel.get("target", "")).strip())
+        sourceLabel = str(rel.get("source", "")).strip()
+        targetLabel = str(rel.get("target", "")).strip()
+        source_id = label_to_id.get(sourceLabel)
+        target_id = label_to_id.get(targetLabel)
         if not source_id or not target_id or source_id == target_id:
             continue
         relation = _typeFromRegistry(termRegistry, rel.get("type"))

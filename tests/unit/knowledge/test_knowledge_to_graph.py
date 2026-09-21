@@ -94,10 +94,13 @@ class TestExtractToGraph:
 
         # 抽取的产物必须同时是底座里的三元组（被检索链读的那张图），
         # 否则"可视化有、答题没有"就是 Issue #72 的原始病灶。
-        # 谓词用的是"注册表判过之后"的类型：depends_on 登记过就用它，
-        # uses_x 未登记落 custom——两处（底座与投影）判的是同一套类型。
+        # 谓词用"注册表判过之后"的类型：depends_on 登记过就用它；uses_x 未登记落
+        # custom——`custom` 是兜底标记不是一种类型（术语表里没有它），所以投影侧
+        # 保留它（可视化要看得出"这个词没登记"），底座侧**不写**它：拿它当谓词只会
+        # 造出一批读不出来源的无义事实。
         predicates = {f["predicate_term_id"] for f in store.searchableFacts(agentId="agent-a")}
-        assert {"depends_on", "custom", "is_a"} <= predicates
+        assert {"depends_on", "is_a"} <= predicates
+        assert "custom" not in predicates, "custom 是兜底标记，不许当谓词入库"
 
     def test_invalid_types_fall_back_to_custom(self, repo, graph, registry, store):
         item = _item(repo)

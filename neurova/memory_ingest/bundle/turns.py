@@ -42,7 +42,7 @@ def to_turn_messages(records: Sequence[TranscriptRecord]) -> List[Dict[str, Any]
 
 def _open_turn(record: TranscriptRecord) -> Dict[str, Any]:
     return {"first": record, "last": record, "texts": [], "reasonings": [],
-            "entries": [], "keys": [], "media": []}
+            "states": [], "entries": [], "keys": [], "media": [], "extras": {}}
 
 
 def _extend_turn(turn: Dict[str, Any], record: TranscriptRecord) -> None:
@@ -53,8 +53,12 @@ def _extend_turn(turn: Dict[str, Any], record: TranscriptRecord) -> None:
             turn["texts"].append(record.text())
     else:
         turn["entries"].append(_tool_entry(record))
+    if record.reasoning_state != "absent":
+        turn["states"].append(record.reasoning_state)
     if record.reasoning_text:
         turn["reasonings"].append(record.reasoning_text)
+    for key, value in (record.extra or {}).items():
+        turn["extras"].setdefault(key, value)          # 一轮多事件：行级事实以首见为准
     turn["media"].extend(_media_of(record))
 
 
@@ -64,14 +68,20 @@ def _media_of(record: TranscriptRecord) -> List[Dict[str, Any]]:
 
 
 def _finalize_turn(turn: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    if not turn or not (turn["texts"] or turn["entries"] or turn["reasonings"] or turn["media"]):
+    if not turn:
         return None
+    if not (turn["texts"] or turn["entries"] or turn["reasonings"] or turn["media"]
+            or turn["states"]):
+        return None                                    # 真的一点东西都没有，才允许不成轮
     first, last = turn["first"], turn["last"]
-    metadata: Dict[str, Any] = {
-        "ingest": {"identity_key": first.identity_key, "kind": "turn",
-                   "seq_from": first.seq, "seq_to": last.seq,
-                   "event_keys": list(turn["keys"])},
-    }
+    ingest: Dict[str, Any] = {"identity_key": first.identity_key, "kind": "turn",
+                              "seq_from": first.seq, "seq_to": last.seq,
+                              "event_keys": list(turn["keys"])}
+    if turn["states"]:
+        ingest["reasoning_state"] = turn["states"][0]
+    if turn["extras"]:
+        ingest["extra"] = dict(turn["extras"])
+    metadata: Dict[str, Any] = {"ingest": ingest}
     if turn["reasonings"]:
         metadata["reasoning_content"] = "\n".join(turn["reasonings"])
     if turn["entries"]:
@@ -83,10 +93,13 @@ def _finalize_turn(turn: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
 
 
 def _standalone_message(record: TranscriptRecord) -> Dict[str, Any]:
-    metadata: Dict[str, Any] = {
-        "ingest": {"identity_key": record.identity_key, "kind": record.kind,
-                   "seq": record.seq},
-    }
+    ingest: Dict[str, Any] = {"identity_key": record.identity_key, "kind": record.kind,
+                              "seq": record.seq}
+    if record.reasoning_state != "absent":
+        ingest["reasoning_state"] = record.reasoning_state
+    if record.extra:
+        ingest["extra"] = dict(record.extra)
+    metadata: Dict[str, Any] = {"ingest": ingest}
     if record.reasoning_text:
         metadata["reasoning_content"] = record.reasoning_text
     media = _media_of(record)
