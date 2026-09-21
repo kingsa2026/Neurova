@@ -49,9 +49,26 @@ segno>=1.6
 mcp>=1.2.0
 
 # Testing & Lint (dev)
-pytest>=7.4.0
+#
+# pytest 必须锁 <9：9.x 的收集缓存按「节点对象身份」去重，而同一个目录会被
+# `Session.collect()`（按 initial path 逐层下钻）与 `Package.collect()`（扫子目录）
+# 各建一个 Dir 对象；两个对象 nodeid 相同但 `is not`，于是 `node in _collection_cache`
+# 落空、同一路径被收集两次，conftest 里的 fixture 便绑到了「没人用的那棵子树」上。
+# 实测最小触发集（9.1.1 报 fixture not found，8.3.5/8.4.2 正常）：
+#   tests/unit/evolution/test_skill_consolidation_structural_and_deadcode_p1p2.py
+#   tests/unit/test_ci_npc_config_guard.py
+#   tests/unit/evolution/rsi/test_parameter_source_of_truth.py
+# 波及面 = 所有依赖 tests/unit/evolution{,/experience}/conftest.py 的套件
+# （受保护子集里 65 个 error）。回归见 tests/unit/evolution/rsi/test_parameter_source_of_truth.py
+# 与 tests/unit/evolution/experience/test_pattern_lifecycle.py 的运行方式守卫。
+pytest>=7.4.0,<9
 pytest-asyncio>=0.21.0
 pytest-cov>=4.1.0
 pytest-timeout>=2.3
 pyflakes>=3.0.0
 prometheus_client>=0.20
+
+# 文档出件（write_pdf：中间树 → PDF）——`neurova/document_pdf.py:335` 是唯一 import 处。
+# 受保护子集里 tests/unit/document/test_document_pdf.py 与 tests/unit/tools/test_write_pdf.py
+# 走真实渲染路径（不做 try 降级断言），缺席 reportlab 即 26 个失败。
+reportlab>=4.0
