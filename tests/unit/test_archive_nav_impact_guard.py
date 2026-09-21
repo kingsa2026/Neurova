@@ -267,10 +267,11 @@ class TestExemptionsAreAccountedFor:
 class TestMachineBlocksHaveAGenerator:
     """台账机器区必须有**生成入口**，且入口与守卫同源。
 
-    根因（不是形状）：台账的五个机器区块此前**只有读者、没有写者**——
-    `test_legacy_ref_ledger_guard` / 本守卫逐块重算比对，但 `--markdown` 只打印
-    第三节表格。于是守卫报错信息里写的「重跑 python scripts/scan_docs_refs.py --markdown」
-    对第四节、第七节、第八节**根本不成立**：那些区块只能手贴。上游文档一合并
+    根因（不是形状）：台账里被守卫逐块比对的机器区此前**只有读者、没有写者**——
+    `test_legacy_ref_ledger_guard` / `test_docs_name_collision_guard` / 本守卫各自
+    重算比对，但 `--markdown` 只打印第三节（`docs/11-legacy` 总表）。于是守卫报错
+    信息里写的「重跑 python scripts/scan_docs_refs.py --markdown」对第六节裁定表
+    与第八节导航筛选**根本不成立**：那两个区块只能手贴。上游文档一合并
     （如 `docs/05-reports/` 追加审计台账），可达文档的悬空引用条数就变，
     台账随即与事实脱节，而没有任何命令能把它们拉回来——这正是「报错信息指向
     一个做不到的动作」的形态（教义第 2 条：不许用假动作代替修复）。
