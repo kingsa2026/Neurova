@@ -153,15 +153,25 @@ export const useMessageQueueStore = defineStore('messageQueue', () => {
     return map
   })
   
-  /** Messages sorted by priority and enqueue time */
+  /**
+   * Pending 消息的出队视图：先按 priority 降序，同级保持 `items` 的数组顺序。
+   *
+   * 同级**不再**按 enqueuedAt 重排：数组本身就是出队次序的事实源
+   * （enqueue push 到尾部；reorder/moveToTop 直接改写数组）。
+   * 旧实现同级按 enqueuedAt 排序，会让 moveToTop 插队失效——
+   * 被移到队首的项时间戳不变，下一次排序又把它按时间戳排回原位；
+   * 而 enqueuedAt 为毫秒精度，相邻两次 enqueue 落在同一毫秒时该 sort
+   * 退化成"无操作"，于是同一处逻辑时对时错（CI 里表现为偶发红）。
+   * sort 契约自 ES2019 起稳定，同级返回 0 即保留输入顺序。
+   */
   const prioritizedQueue = computed(() => {
     return [...items.value].sort((a, b) => {
       // Higher priority first
       if ((b.priority || 0) !== (a.priority || 0)) {
         return (b.priority || 0) - (a.priority || 0)
       }
-      // Earlier enqueue time first
-      return new Date(a.enqueuedAt).getTime() - new Date(b.enqueuedAt).getTime()
+      // Equal priority: keep queue (array) order — stable, does not fight moveToTop
+      return 0
     })
   })
   
@@ -228,18 +238,22 @@ export const useMessageQueueStore = defineStore('messageQueue', () => {
       return item
     },
     
-    /** Get next message to process (respects session filter) */
+    /**
+     * Get next message to process (respects session filter).
+     *
+     * 取队首 = priority 最高；同级取数组中最靠前的一项（见 prioritizedQueue 注释）。
+     * 同级**禁止**再按 enqueuedAt 排序，否则 moveToTop/reorder 的插队顺序会被抹掉。
+     */
     next(sessionId?: string): QueuedMessage | undefined {
       const filtered = items.value.filter(
         (i) => i.status === 'pending' && (!sessionId || i.sessionId === sessionId)
       )
       
-      // Sort by priority and enqueue time
       return filtered.sort((a, b) => {
         if ((b.priority || 0) !== (a.priority || 0)) {
           return (b.priority || 0) - (a.priority || 0)
         }
-        return new Date(a.enqueuedAt).getTime() - new Date(b.enqueuedAt).getTime()
+        return 0
       })[0]
     },
     

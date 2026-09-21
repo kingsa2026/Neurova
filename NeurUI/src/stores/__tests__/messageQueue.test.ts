@@ -215,6 +215,28 @@ describe('MessageQueueStore', () => {
       expect(next?.id).toBe(msg2.id)
     })
     
+    // 回归：moveToTop 是「改写数组次序」，不能被出队排序按 enqueuedAt 抹掉。
+    // enqueuedAt 为毫秒精度，上面那条用例只在两次 enqueue 恰好落在同一毫秒时通过
+    // （同一毫秒时旧实现的 sort 稳定退化为无操作），跨毫秒就红——CI 里表现为偶发。
+    // 这里强制两条目落在不同毫秒，把「排序不得覆盖插队」固化成确定性断言。
+    it('should keep moved message on top across differing enqueue timestamps', () => {
+      vi.useFakeTimers()
+      try {
+        vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+        const msg1 = store.enqueue('First')
+        vi.setSystemTime(new Date('2026-01-01T00:00:00.500Z'))
+        const msg2 = store.enqueue('Second')
+        expect(msg1.enqueuedAt).not.toBe(msg2.enqueuedAt)
+        
+        store.moveToTop(msg2.id)
+        
+        expect(store.next()?.id).toBe(msg2.id)
+        expect(store.prioritizedQueue[0]?.id).toBe(msg2.id)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+    
     it('should not move sending message to top', () => {
       const msg = store.enqueue('Test')
       store.markSending(msg.id)
