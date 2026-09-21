@@ -1,7 +1,7 @@
 # Neurova
 
 <div align="center">
-  <img src="../../NEUROVA-ICO.png" alt="Neurova Logo" width="120" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+  <img src="../../../NEUROVA-ICO.png" alt="Neurova Logo" width="120" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
   <h1 style="margin-top: 16px;">🌟 وكيل ذكاء اصطناعي دافئ 🌟</h1>
   <p><i>كل وكيل هو نجمة طيبة، وأنت حارس النجوم</i></p>
 </div>
@@ -273,7 +273,7 @@ npm run dev
 
 ## الترخيص
 
-مرخص هذا المشروع بموجب **MIT License**، راجع ملف [LICENSE](../../LICENSE) للتفاصيل.
+مرخص هذا المشروع بموجب **MIT License**، راجع ملف بيان الترخيص في قسم «الترخيص» بملف [README.md](../../../README.md) في جذر المستودع.
 
 ---
 
