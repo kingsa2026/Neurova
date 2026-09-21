@@ -17,6 +17,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from neurova.core.data_root import callerPath
 from neurova.core.logger import get_logger
 from neurova.llm.providers.secret_store_clean import SecretStore
 
@@ -47,15 +48,19 @@ PLATFORM_REQUIRED_KEYS = {
 
 
 def user_config_path(user_id: str, base_dir: str = "") -> Path:
-    """用户桶内的 agent-reach config.yaml 路径（Config(config_path=...) 用）"""
-    return Path(base_dir) / (user_id or "default") / "config.yaml"
+    """用户桶内的 agent-reach config.yaml 路径（Config(config_path=...) 用）
+
+    缺省经数据根推导：裸 `Path("")` 会把凭据桶目录钉在进程 CWD 上。
+    """
+    return callerPath(base_dir, "web_reach_credentials") / (user_id or "default") / "config.yaml"
 
 
 class UserCredentialStore:
     """按用户分桶的凭据存储（加密落盘，跨重启稳定）"""
 
     def __init__(self, base_dir: str = "", encryption_key: Optional[str] = None):
-        self.base_dir = Path(base_dir)
+        # 空串默认值经数据根推导；裸 `Path("")` 会把加密 keyfile 与凭据桶建在 CWD。
+        self.base_dir = callerPath(base_dir, "web_reach_credentials")
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._cipher_key = encryption_key or self._load_or_create_keyfile()

@@ -28,6 +28,7 @@ from neurova.backup.trust import (
     sign_backup,
     verify_backup,
 )
+from neurova.core.data_root import callerPath
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -42,7 +43,8 @@ class BackupOrchestrator:
 
     def __init__(self, key: SigningKey, work_dir: Union[str, Path] = ""):
         self.key = key
-        self.work_dir = Path(work_dir)
+        # 空串默认值经数据根推导（裸 `Path("")` 就是 CWD，备份会落在任意工作目录）。
+        self.work_dir = callerPath(work_dir, "backups")
         self.work_dir.mkdir(parents=True, exist_ok=True)
 
     # ── create ──

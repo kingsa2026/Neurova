@@ -21,9 +21,13 @@ import types
 import urllib.request
 import urllib.error
 from pathlib import Path
-from neurova.core.data_root import resolveDataPath
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# 仓库根须先于 `import neurova` 进 sys.path（脚本以文件路径执行）。
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from neurova.core.data_root import resolveDataPath  # noqa: E402
 
 PROBE_ID = "__live_verify_probe__"
 BASE = f"http://127.0.0.1:9528/api/v1/growth"

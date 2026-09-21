@@ -18,9 +18,13 @@ import json
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from neurova.core.data_root import get_data_root
 
 ROOT = Path(__file__).resolve().parents[2]
+# 仓库根须先于 `import neurova` 进 sys.path（脚本以文件路径执行）。
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from neurova.core.data_root import get_data_root  # noqa: E402
 
 # 别名表键不是技能条目，扫描时排除（`SkillService._ALIASES_KEY`）
 _ALIASES_KEY = "_skill_aliases"
