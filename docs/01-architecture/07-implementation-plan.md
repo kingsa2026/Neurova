@@ -29,7 +29,7 @@ neurova/
 │   │   ├── chat_pipeline.py      # 对话管线 (6步)
 │   │   └── loops/                # Agent Loop 系统
 │   ├── cognitive_layers/         # 认知层
-│   │   ├── memory_layer/         # 记忆层核心 (17维分类)
+│   │   ├── memory_layer/         # 记忆层核心 (多维分类, 见 ADR 0018)
 │   │   ├── emotion_context_layer/ # 情感上下文注入
 │   │   ├── growth_layer/         # 成长分析
 │   │   ├── meta_cognition_layer/ # 元认知
