@@ -92,14 +92,20 @@ class TemporalFactReader:
     def _effectiveFacts(self, keys: List[str], windowStart: datetime.datetime,
                         now: datetime.datetime, limit: int) -> List[Any]:
         placeholders = ",".join("?" * len(keys))
+        # 生效时刻既要有下界也要有上界：只判"不早于窗口起点"的话，一条还没到生效
+        # 时刻的说法照样此刻进上下文——`valid_from` 此前恒 NULL 所以这条上界一直空转，
+        # 与"写入端不落库"是同一个断点的两端。
+        effective = "COALESCE(NULLIF(valid_from, ''), recorded_at)"
         clauses = [
             "subject_key IN (%s)" % placeholders,
             "status = 'active'",
             "record_kind = 'triple'",
-            "COALESCE(NULLIF(valid_from, ''), recorded_at) >= ?",
+            "%s >= ?" % effective,
+            "%s <= ?" % effective,
             "(valid_until IS NULL OR valid_until = '' OR valid_until > ?)",
         ]
-        params: List[Any] = list(keys) + [windowStart.isoformat(), now.isoformat()]
+        params: List[Any] = list(keys) + [windowStart.isoformat(), now.isoformat(),
+                                          now.isoformat()]
         if self._agentId:
             clauses.insert(0, "agent_id = ?")
             params = [self._agentId] + params
