@@ -92,7 +92,8 @@ class TestTop2ToolResultClearing:
     def _tool_window(self, n_results=6, big=False):
         """构造含 n 个工具结果的窗口（role=tool 与 assistant(tool_calls) 配对）。"""
         msgs = [{"role": "system", "content": "sys"}]
-        filler = "结果数据" * (600 if big else 5)  # big: 每条约 2400 字 ≈ 1600 token
+        # big: 每条约 1400 token（o200k 精确计数）；6 条 = 8400 + 协议开销 > 8k 门槛
+        filler = "结果数据" * (700 if big else 5)
         for i in range(n_results):
             msgs.append({
                 "role": "assistant",
@@ -158,13 +159,15 @@ class TestTop3ProgressiveFold:
             return f"摘要v{calls['n']}"
 
         # 尾部巨消息 + 头部小消息：ratio=0.5 时 keep_min 保底窗口超预算，
-        # 递进扩大比例后把巨消息也折进去，最终装下
+        # 递进扩大比例后把巨消息也折进去，最终装下。
+        # 预算按新尺实算：8×20 + 2×400 + 10×4 开销 ≈ 1080 token 真值，
+        # 取 900 保证首折装不下、递进后能装下。
         msgs = [
             {"role": "user", "content": f"小消息{i}: " + "测" * 20} for i in range(8)
         ] + [
             {"role": "user", "content": f"巨消息{i}: " + "测" * 400} for i in range(2)
         ]
-        budget = 1200
+        budget = 900
         result = await compact_window(msgs, budget, summarize=summarize, target_ratio=0.5)
         assert result is not None
         assert result.tokens_after < result.tokens_before, "折叠必须净减"
@@ -179,7 +182,7 @@ class TestTop3ProgressiveFold:
             calls["n"] += 1
             return "摘要"
 
-        # 6 条消息每条 ~670 token = keep_min 下限 4000+ > 预算 2000 → 物理无解
+        # 6 条消息每条 ~500 token = keep_min 下限 3000 > 预算 2000 → 物理无解
         msgs = [{"role": "user", "content": f"巨消息{i}: " + "测" * 500} for i in range(6)]
         result = await compact_window(msgs, 2000, summarize=summarize, target_ratio=0.5)
         assert result is not None, "无解时也应返回尽力结果"
