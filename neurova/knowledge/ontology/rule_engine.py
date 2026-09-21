@@ -24,6 +24,8 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from .term_registry import IS_A_PREDICATE
+
 _SCHEMA_V9 = """
 CREATE TABLE IF NOT EXISTS ontology_rules (
     rule_id TEXT PRIMARY KEY,
@@ -50,6 +52,43 @@ def _now() -> str:
 
 class RuleError(ValueError):
     pass
+
+
+# 随装配一起落地的种子规则。存在的理由（Issue #73）：`ontology_rules` 此前 0 行，
+# 前向链每轮空转——021 把引擎建齐了，却没有任何生产调用方登记过一条规则。
+#
+# 为什么是 `is_a` 传递而不是别的：类型断言是全库唯一由结构层固定的关系写法
+# （`term_registry.IS_A_PREDICATE`），"路由器是设备、设备是硬件 ⇒ 路由器是硬件"
+# 是本体最基础的一条蕴含，且它推出来的结论正好是 `validation.py` 判定义域要读的东西
+# （`isSubtypeOf` 沿父类链走，`assertedTypesOf` 读 `is_a` 断言集）。
+_SEED_RULES: List[Dict[str, Any]] = [
+    {
+        "ruleId": "is_a_transitive",
+        "headPredicate": IS_A_PREDICATE,
+        "body": [{"atom": IS_A_PREDICATE, "subject": "X", "object": "Y"},
+                 {"atom": IS_A_PREDICATE, "subject": "Y", "object": "Z"}],
+    },
+]
+
+
+def seedBuiltinRules(engine: "ForwardChainingEngine") -> int:
+    """把种子规则登记进引擎。幂等：同 id 同版本已在表里就跳过，不重写。
+
+    只在**生产装配点**被调用（`admission.productionAdmissionGate`）。裸造引擎仍是空规则表——
+    "种子只有一个 owner"这条判据由测试钉着，两处各落一次就成了两套规则事实源。
+    """
+    planted = 0
+    for spec in _SEED_RULES:
+        existing = engine.rule(spec["ruleId"])
+        if existing and existing.get("version") == spec.get("version", "v1"):
+            continue
+        engine.registerRule(
+            spec["ruleId"], spec["headPredicate"], spec["body"],
+            headSubjectVar=spec.get("headSubjectVar", "X"),
+            version=spec.get("version", "v1"),
+        )
+        planted += 1
+    return planted
 
 
 def _premiseIds(pairsRaw: Optional[str]) -> List[str]:
