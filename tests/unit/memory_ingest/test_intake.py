@@ -266,3 +266,47 @@ def test_undo_keeps_media_still_referenced_by_other_runs(tmp_path: Path, manager
 
     assert manager._memories == {}
     assert not list(tmp_path.glob("**/session_*.json"))
+
+
+class _Recorder:
+    """替身只记调用，不碰任何 store：本用例要证的就是"根本没被叫到"。"""
+
+    def __init__(self):
+        self.calls = []
+
+    def import_memories(self, records, *, ingest_run_id):
+        self.calls.append(("memories", len(records)))
+        return len(records), 0
+
+    def import_session_messages(self, agent_id, session_id, date, batch, *, ingest_run_id):
+        self.calls.append(("messages", len(batch)))
+        return len(batch), 0
+
+    def iter_session_files(self, agent_id):
+        return []
+
+
+def _bundle_with_one_record(root: Path, kind: str) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": 1, "generated_at": "2026-09-21T00:00:00+00:00",
+        "agent_name": "audit", "source": {"converter": "audit", "version": "1"},
+        "counts": {"transcripts": 1, "memories": 0, "relations": 0},
+        "dropped": [], "stores": []}), encoding="utf-8")
+    (root / "transcripts.jsonl").write_text(json.dumps({
+        "session_id": "sA", "seq": 1, "kind": kind, "role": "user",
+        "ts": "2026-05-01T10:00:00+00:00", "identity_key": "sA#1",
+        "content_blocks": [{"type": "text", "text": "hi"}]}, ensure_ascii=False) + "\n",
+        encoding="utf-8")
+    return root
+
+
+def test_unknown_kind_is_rejected_before_any_write(tmp_path: Path):
+    """包里有非法 kind：既要以 BundleError 拒绝，也不能留下"记忆已写、会话没写"的半批。"""
+    recorder = _Recorder()
+    root = _bundle_with_one_record(tmp_path / "bundle", "totally_unknown_kind")
+
+    with pytest.raises(BundleError):
+        apply_bundle(root, agent_id="audit", manager=recorder, sessions=recorder)
+
+    assert recorder.calls == []

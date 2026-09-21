@@ -3,6 +3,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from neurova.memory_ingest.bundle.validate import validate_bundle
 
 MANIFEST = {
@@ -130,3 +132,34 @@ def test_ts_with_z_suffix_is_accepted(tmp_path: Path):
     (root / 'memories.jsonl').write_text('', encoding='utf-8')
 
     assert validate_bundle(root) == []
+
+
+def test_unknown_kind_rejected_by_validator(tmp_path):
+    """kind 的取值域必须在包侧拦住：落库时才知道，就已经写了一半。"""
+    errors = validate_bundle(_bundle(
+        tmp_path, transcripts=[T1, dict(T2, kind="redacted_thinking")], memories=[M1]))
+
+    assert any("kind 越界" in e for e in errors)
+
+
+def test_unknown_reasoning_state_rejected_by_validator(tmp_path):
+    errors = validate_bundle(_bundle(
+        tmp_path, transcripts=[T1, dict(T2, reasoning_state="hidden")], memories=[M1]))
+
+    assert any("reasoning_state 越界" in e for e in errors)
+
+
+@pytest.mark.parametrize("value", ["很高", -1, 101, True, None])
+def test_importance_must_be_a_number_in_domain(tmp_path, value):
+    errors = validate_bundle(_bundle(
+        tmp_path, transcripts=[T1, T2], memories=[dict(M1, importance=value)]))
+
+    assert any("importance 必须是" in e for e in errors)
+
+
+def test_temperature_is_optional_but_domain_checked(tmp_path):
+    assert validate_bundle(_bundle(
+        tmp_path, transcripts=[T1, T2], memories=[M1])) == []            # 不给 = 走契约默认
+    errors = validate_bundle(_bundle(
+        tmp_path, transcripts=[T1, T2], memories=[dict(M1, temperature=180)]))
+    assert any("temperature 必须是" in e for e in errors)
