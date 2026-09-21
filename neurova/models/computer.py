@@ -3,7 +3,6 @@ Computer Model - 计算资源抽象
 """
 
 import uuid
-import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -178,22 +177,8 @@ class Computer:
         byoa_tag = " [BYOA]" if self.is_byoa() else ""
         return f"<Computer {self.name} {status_icon}{byoa_tag}>"
 
-# Global instance management
-_computer_manager_instance: Optional["ComputerManager"] = None
-_computer_manager_lock = threading.Lock()
-
-def get_computer_manager() -> "ComputerManager":
-    """获取全局 ComputerManager 实例 (Singleton)"""
-    global _computer_manager_instance
-
-    if _computer_manager_instance is None:
-        with _computer_manager_lock:
-            if _computer_manager_instance is None:
-                _computer_manager_instance = ComputerManager()
-
-    return _computer_manager_instance
-
-def reset_computer_manager() -> None:
-    """重置 ComputerManager 实例 (用于测试)"""
-    global _computer_manager_instance
-    _computer_manager_instance = None
+# 注：Singleton 由 neurova/collaboration/computer_manager.py 提供
+# （get_computer_manager_singleton / reset_computer_manager_singleton），
+# 本模块只承载 Computer 数据模型，不再自带一份重复且引用未定义
+# ComputerManager 的实例管理（该 ComputerManager 属于 collaboration 域，
+# 放在这里会构成 models -> collaboration 反向依赖）。
