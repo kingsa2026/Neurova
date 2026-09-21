@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, List, Optional
 from .agent_manager import get_agent_manager
 from .models import NodeDefinition
 
+from neurova.context.token_estimator import estimate_tokens as estimate_text_tokens
 from neurova.security.safe_expr import SafeExprError, safe_eval
 
 logger = get_logger(__name__)
@@ -1434,7 +1435,7 @@ async def exec_context(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str,
             result = []
             total_tokens = 0
             for ctx_item in filtered:
-                item_tokens = ctx_item.tokens or len(ctx_item.content) // 4
+                item_tokens = ctx_item.tokens or estimate_text_tokens(str(ctx_item.content))
                 if total_tokens + item_tokens > token_budget:
                     break
                 result.append(
