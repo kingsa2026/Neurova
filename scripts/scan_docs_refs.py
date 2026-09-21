@@ -36,6 +36,12 @@ PATH_SUFFIXES = ("py", "md", "yml", "yaml", "json", "toml", "sh", "bat", "js", "
 # 通配/占位形态（`bugfix-*.md`、`HARMONYOS_*.md`）不是具体路径，单独归类
 PLACEHOLDER_PATTERN = re.compile(r"[*<>{}\[\]]")
 
+# 编号分层（docs/<NN-领域>/…）——文档重排后的唯一留存层
+NUMBERED_LAYERS = frozenset({
+    "0-index", "01-architecture", "02-api", "03-user-guide", "04-plans", "05-reports",
+    "06-bugfix", "08-research", "09-dev-progress", "10-configuration", "11-legacy",
+})
+
 # 台账类文档把"被清空的引用"作为**数据**逐条列出（表格里的形态样例），
 # 扫描时排除：否则台账每生成一次就把自己举的样例当成新命中点，
 # "生成 → 计数变化 → 再生成"永远收敛不了（自引用死循环）。
@@ -186,6 +192,161 @@ def scanFile(path: Path, byBasename: dict) -> list:
     return found
 
 
+# ---------------------------------------------------------------------------
+# 同名多份（回潮副本）判定
+# ---------------------------------------------------------------------------
+# 判据（与台账同源，只此一份）：同一个 basename 同时存在于「编号分层」
+# （docs/0-index … docs/11-legacy）与「非编号层」（docs/ 根、docs/<旧目录>/）
+# 时，后者是**同一篇文档的第二份**。根因是一次目录重排把文档移入编号分层后，
+# 另一批次又把旧路径批量还原回来，于是顶层与分层各留一份、同名不同内容。
+#
+# 排除项是**具体路径**，不是 basename——`README.md` 这类名字各层都会合法持有，
+# 按 basename 一刀切会把 `docs/09-dev-progress/README.md`（与 `docs/09-dev-progress/`
+# 那份逐字节相同的真副本）也放过。排除项要能逐条说出理由：
+#
+# - `docs/README.md`：内容自述为 Neutesting 测试框架说明，是仓库 `docs/` 的目录说明，
+#   与 `docs/0-index/README.md`（文档总索引）不是同一篇；
+# - `docs/INDEX.md`：现行文档体系唯一导航事实源，被 `AGENTS.md`/`CONTRIBUTING.md`
+#   与守卫引用；`docs/11-legacy/INDEX.md` 是归档层入口，正文自述为历史归档版；
+# - `docs/01-architecture/adr/README.md`、`docs/architecture-model/README.md`：
+#   各自目录的索引，从不与别层同名同文。
+#
+# 这三类都不是"同一篇文档的第二份"，故不参与回潮副本判定。
+LAYER_OWNED_PATHS = frozenset({
+    "docs/README.md",
+    "docs/INDEX.md",
+    "docs/01-architecture/adr/README.md",
+    "docs/architecture-model/README.md",
+})
+
+
+def numberedLayer(path: str) -> bool:
+    """是否位于编号分层（docs/<NN-领域>/…）。"""
+    parts = path.split("/")
+    return len(parts) > 2 and parts[0] == "docs" and parts[1] in NUMBERED_LAYERS
+
+
+def residueDuplicates() -> list:
+    """返回「非编号层与编号分层同名」的回潮副本。
+
+    每项为 (副本路径, [编号分层候选路径])，按路径排序。
+    """
+    docs = [path for path in trackedFiles() if path.startswith("docs/")]
+    byBasename = {}
+    for path in docs:
+        byBasename.setdefault(path.split("/")[-1], []).append(path)
+    found = []
+    for basename, paths in sorted(byBasename.items()):
+        canonical = sorted(p for p in paths if numberedLayer(p))
+        residue = sorted(p for p in paths if not numberedLayer(p) and p not in LAYER_OWNED_PATHS)
+        if canonical and residue:
+            found.append((residue, canonical))
+    return found
+
+
+# ---------------------------------------------------------------------------
+# 同名歧义裁定（与台账、守卫同源）
+# ---------------------------------------------------------------------------
+# 裁定口径：**编号分层是文档重排后的留存层**，非编号层（docs/ 根与 docs/<旧目录>/）
+# 里的同 basename 文件是重排后又被批量还原回来的**回潮副本**。故每条同名歧义的
+# 裁定目标 = 该 basename 在编号分层的唯一命中。
+#
+# 该口径可由仓库现状直接算出，不依赖人工另写一份对照表——台账与守卫都从这里取，
+# 避免"台账一份裁定、守门另一份裁定"的双源。
+
+# 代码同名引用（`sleep.py` / `__init__.py` 这类）无法用"编号分层唯一命中"裁定——
+# 同 basename 的模块在代码树里天然多份。这 11 条按归档文档的**上下文**逐条裁定，
+# 判据写在这里（唯一一份），台账与守卫都从这里取。
+CODE_REFERENCE_RULINGS = {
+    ("docs/11-legacy/NEURON_MEME_EVALUATION.md", "104"):
+        ("neurova/cognitive_layers/memory_layer/sleep.py", "2.5 节「睡眠整合」行，指记忆层睡眠巩固模块"),
+    ("docs/11-legacy/NEURON_MEME_EVALUATION.md", "118"):
+        ("neurova/cognitive_layers/memory_layer/storage.py", "3.1 节「文件存储」行，指记忆层 JSON 后端存储"),
+    ("docs/11-legacy/TOOL_LAYER_MAP.md", "136"):
+        ("tests/unit/execution/test_tool_engine.py", "「单元测试」行指 ToolEngine 单测现行归档位置"),
+    ("docs/11-legacy/audit-skeleton-and-spec-compliance.md", "124"):
+        ("neurova/cognitive_layers/memory_layer/bayesian_eki/__init__.py", "1.5 节正文即 bayesian_eki 目录"),
+    ("docs/11-legacy/audit-skeleton-and-spec-compliance.md", "159"):
+        ("neurova/cognitive_layers/memory_layer/bayesian_eki/__init__.py", "同 1.5 节评估段"),
+    ("docs/11-legacy/audit-skeleton-and-spec-compliance.md", "162"):
+        ("neurova/cognitive_layers/memory_layer/bayesian_eki/__init__.py", "同 1.5 节建议段"),
+    ("docs/11-legacy/audit-skeleton-and-spec-compliance.md", "304"):
+        ("neurova/cognitive_layers/memory_layer/bayesian_eki/__init__.py", "P3 第 7 项 bayesian_eki 诚实标注"),
+    ("docs/11-legacy/最终UI开发方案.md", "277"):
+        ("", "前端已无 `api/chat.ts`：对话 API 现由 `NeurUI/src/api/modules/console.ts` 承载"),
+    ("docs/11-legacy/最终UI开发方案.md", "278"):
+        ("NeurUI/src/api/modules/collaboration.ts", "5.3 节「API 模块」行指 API 模块而非 store"),
+    ("docs/11-legacy/源码图谱.md", "1588"):
+        ("", "知识层节点列举的 `neurova/knowledge/integration/` 全史未入库"),
+    ("docs/11-legacy/源码图谱.md", "1598"):
+        ("tests/integration/test_closed_loop.py", "33-测试层节点指端到端闭环测试"),
+}
+
+RULING_SETTLED = "已裁定"
+RULING_NO_TARGET = "未决·编号分层无候选"
+RULING_TARGET_MISSING = "未决·裁定目标缺失"
+# 归档文档引用了一个从未入库的路径——裁定为「源已删除」，以显式文本交代去处
+RULING_DELETED_SOURCE = "源已删除（已交代去处）"
+
+
+def adjudicatedRows() -> list:
+    """逐条裁定基线里的同名歧义，返回带裁定结果的记录。
+
+    基线的身份是（文件, 行号, 引用）；裁定目标由当前文件树解析。
+    """
+    if not AMBIGUITY_BASELINE.is_file():
+        return []
+    byBasename = indexByBasename(trackedFiles())
+    rows = []
+    for line in io.open(AMBIGUITY_BASELINE, encoding="utf-8").read().splitlines():
+        parts = line.split("|")
+        if len(parts) != 3:
+            continue
+        path, lineNo, ref = parts[0], parts[1], parts[2]
+        candidates = byBasename.get(ref.split("/")[-1], [])
+        ruling = CODE_REFERENCE_RULINGS.get((path, lineNo))
+        if ruling is not None:
+            target = ruling[0]
+            status = RULING_SETTLED if target else RULING_DELETED_SOURCE
+        else:
+            canonical = sorted(c for c in candidates if numberedLayer(c))
+            if len(canonical) == 1:
+                target, status = canonical[0], RULING_SETTLED
+            elif canonical:
+                target, status = "—", RULING_NO_TARGET
+            else:
+                target, status = "—", RULING_TARGET_MISSING
+        rows.append({"file": path, "line": lineNo, "ref": ref,
+                     "target": target, "status": status,
+                     "candidates": sorted(candidates)})
+    return rows
+
+
+def renderAdjudication(rows: list) -> str:
+    """渲染逐条裁定表。
+
+    裁定表与「悬空引用总表」的判定不是一回事：总表的 `同名歧义` 是**检测信号**
+    （扫到多个同名候选）；本表是**决定**（该指哪一份，或源已删除 + 去处）。
+    代码同名引用（`sleep.py` 等）在总表里永远是歧义形态，但在本表有明确裁定——
+    两者并存不是矛盾，是本表存在的意义。
+    """
+    lines = [
+        ADJUDICATION_BEGIN,
+        "| 文件 | 行 | 引用 | 候选数 | 裁定目标 | 状态 |",
+        "|------|----|------|-------|----------|------|",
+    ]
+    for row in sorted(rows, key=lambda r: (r["file"], int(r["line"]), r["ref"])):
+        state = row["status"]
+        target = row["target"]
+        rendered = _code(target) if target and target != "—" else "—"
+        lines.append(
+            f"| `{row['file']}` | {row['line']} | {_code(row['ref'])} "
+            f"| {len(row['candidates'])} | {rendered} | {state} |"
+        )
+    lines.append(ADJUDICATION_END)
+    return "\n".join(lines)
+
+
 def _entry(file: str, line: int, ref: str, verdict: str, hit: str) -> dict:
     return {"file": file, "line": line, "ref": ref, "verdict": verdict, "hit": hit}
 
@@ -209,6 +370,11 @@ def scanDirectory(targetDir: Path) -> list:
 # 台账机器生成区的边界标记：守卫据此定位并比对，人工说明写在标记之外
 TABLE_BEGIN = "<!-- LEDGER:TABLE:BEGIN -->"
 TABLE_END = "<!-- LEDGER:TABLE:END -->"
+ADJUDICATION_BEGIN = "<!-- ADJUDICATION:TABLE:BEGIN -->"
+ADJUDICATION_END = "<!-- ADJUDICATION:TABLE:END -->"
+
+AMBIGUITY_BASELINE = PROJECT_ROOT / "tests" / "unit" / "docsAmbiguityBaseline.txt"
+
 SUMMARY_BEGIN = "<!-- LEDGER:SUMMARY:BEGIN -->"
 SUMMARY_END = "<!-- LEDGER:SUMMARY:END -->"
 
