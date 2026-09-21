@@ -48,8 +48,18 @@ segno>=1.6
 # MCP SDK（P0-6：MCP 受保护测试子集在 CI 运行必需）
 mcp>=1.2.0
 
+# 文档导出（PDF 出口）：受保护子集含 tests/unit/document/test_document_pdf.py
+# 与 tests/unit/tools/test_write_pdf.py，二者是"唯一 import reportlab"链路的
+# 真跑测试。声明缺失时 CI 环境没有该库，27 个用例全红（本地却绿）。
+reportlab>=4.0
+pypdf>=4.0.0  # 测试侧读取渲染产物校验正文/页数（生产不依赖）
+
 # Testing & Lint (dev)
-pytest>=7.4.0
+# pytest 9.1.x 的收集器回归：把「包根下的文件」与「子包内文件」交错作为参数传入时，
+# 后者的父包会被重复收集并 fork 出新的子包 collector，导致子包 conftest 的
+# fixture 全部不可见（受保护子集里 65 个用例报 fixture not found）。
+# 上游 issue：pytest-dev/pytest#14997、#15071（均 open）。锁到 9.1 之前。
+pytest>=7.4.0,<9.1
 pytest-asyncio>=0.21.0
 pytest-cov>=4.1.0
 pytest-timeout>=2.3

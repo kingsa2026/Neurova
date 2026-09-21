@@ -1,14 +1,14 @@
 <template>
   <div class="cost-page">
     <div class="page-header">
-      <h2 class="page-title">LLM 成本看板</h2>
+      <h2 class="page-title">{{ t('costDashboard.title') }}</h2>
       <div class="header-actions">
-        <a-tag v-if="status && !status.store_ready" color="orange">成本账本未装配</a-tag>
+        <a-tag v-if="status && !status.store_ready" color="orange">{{ t('costDashboard.storeNotReady') }}</a-tag>
         <a-tag v-else-if="status" :color="status.running ? 'green' : 'default'">
-          聚合{{ status.running ? '运行中' : '未运行' }}
+          {{ status.running ? t('costDashboard.rollupRunning') : t('costDashboard.rollupIdle') }}
         </a-tag>
-        <a-button size="small" :loading="rolling" @click="onRollupNow">立即聚合</a-button>
-        <a-button size="small" @click="fetchAll">刷新</a-button>
+        <a-button size="small" :loading="rolling" @click="onRollupNow">{{ t('costDashboard.rollupNow') }}</a-button>
+        <a-button size="small" @click="fetchAll">{{ t('costDashboard.refresh') }}</a-button>
       </div>
     </div>
 
@@ -16,23 +16,23 @@
       v-if="storeUnavailable"
       type="warning"
       show-icon
-      message="成本账本尚未装配或暂无数据"
-      description="推送对话产生 LLM 调用后，成本会自动落盘；也可在部署中确认 NEUROVA_COST_TRACKING 未被关闭。"
+      :message="t('costDashboard.storeUnavailableMessage')"
+      :description="t('costDashboard.storeUnavailableDescription')"
     />
 
     <a-spin :spinning="loading">
       <!-- 实时指标 -->
       <div class="stats-grid">
-        <GlassStatCard label="当前小时成本" :value="formatUsd(metrics.current_hour?.cost ?? 0)" emoji="💰" />
-        <GlassStatCard label="输入 Tokens" :value="formatInt(metrics.current_hour?.input_tokens ?? 0)" emoji="📥" />
-        <GlassStatCard label="输出 Tokens" :value="formatInt(metrics.current_hour?.output_tokens ?? 0)" emoji="📤" />
-        <GlassStatCard label="活跃 Agent" :value="metrics.current_hour?.active_agents ?? 0" emoji="🤖" />
+        <GlassStatCard :label="t('costDashboard.currentHourCost')" :value="formatUsd(metrics.current_hour?.cost ?? 0)" emoji="💰" />
+        <GlassStatCard :label="t('costDashboard.inputTokens')" :value="formatInt(metrics.current_hour?.input_tokens ?? 0)" emoji="📥" />
+        <GlassStatCard :label="t('costDashboard.outputTokens')" :value="formatInt(metrics.current_hour?.output_tokens ?? 0)" emoji="📤" />
+        <GlassStatCard :label="t('costDashboard.activeAgents')" :value="metrics.current_hour?.active_agents ?? 0" emoji="🤖" />
       </div>
 
       <a-tabs v-model:activeKey="activeTab" style="margin-top: 8px">
         <!-- 趋势 -->
-        <a-tab-pane key="trend" tab="成本趋势">
-          <GlassCard title="近 24 小时成本">
+        <a-tab-pane key="trend" :tab="t('costDashboard.trendTab')">
+          <GlassCard :title="t('costDashboard.last24hCost')">
             <div class="chart-placeholder">
               <div v-for="(p, i) in hourlyBars" :key="i" class="chart-bar-wrapper">
                 <div class="chart-bar" :style="{ height: `${p.heightPct}%` }" :title="p.cost" />
@@ -42,7 +42,7 @@
             </div>
           </GlassCard>
 
-          <GlassCard title="近 7 天每日成本" style="margin-top: 20px">
+          <GlassCard :title="t('costDashboard.last7dDailyCost')" style="margin-top: 20px">
             <div class="chart-placeholder">
               <div v-for="(p, i) in dailyBars" :key="i" class="chart-bar-wrapper">
                 <div class="chart-bar" :style="{ height: `${p.heightPct}%` }" :title="p.cost" />
@@ -54,8 +54,8 @@
         </a-tab-pane>
 
         <!-- 预算 -->
-        <a-tab-pane key="budget" tab="预算">
-          <GlassCard title="预算使用情况">
+        <a-tab-pane key="budget" :tab="t('costDashboard.budgetTab')">
+          <GlassCard :title="t('costDashboard.budgetUsage')">
             <a-table
               :columns="budgetColumns"
               :data-source="budgets"
@@ -74,7 +74,7 @@
                 </template>
                 <template v-else-if="column.key === 'state'">
                   <a-tag :color="record.is_over_budget ? 'red' : record.percentage >= 75 ? 'orange' : 'green'">
-                    {{ record.is_over_budget ? '超支' : record.percentage >= 75 ? '接近上限' : '正常' }}
+                    {{ record.is_over_budget ? t('costDashboard.stateOverBudget') : record.percentage >= 75 ? t('costDashboard.stateNearLimit') : t('costDashboard.stateNormal') }}
                   </a-tag>
                 </template>
               </template>
@@ -84,8 +84,8 @@
         </a-tab-pane>
 
         <!-- 历史明细 -->
-        <a-tab-pane key="history" tab="每日明细">
-          <GlassCard title="每日成本明细">
+        <a-tab-pane key="history" :tab="t('costDashboard.historyTab')">
+          <GlassCard :title="t('costDashboard.dailyCostDetail')">
             <a-table
               :columns="dailyColumns"
               :data-source="metrics.last_7_days ?? []"
@@ -149,19 +149,19 @@ function toBars(rows: any[], timeKey: string) {
 }
 
 const budgetColumns = computed(() => [
-  { title: '范围', dataIndex: 'scope', key: 'scope' },
-  { title: '标识', dataIndex: 'identifier', key: 'identifier' },
-  { title: '用量 / 预算', key: 'usage' },
-  { title: '使用率', key: 'percentage', width: 180 },
-  { title: '状态', key: 'state', width: 100 },
+  { title: t('costDashboard.colScope'), dataIndex: 'scope', key: 'scope' },
+  { title: t('costDashboard.colIdentifier'), dataIndex: 'identifier', key: 'identifier' },
+  { title: t('costDashboard.colUsageBudget'), key: 'usage' },
+  { title: t('costDashboard.colPercentage'), key: 'percentage', width: 180 },
+  { title: t('costDashboard.colState'), key: 'state', width: 100 },
 ])
 
 const dailyColumns = computed(() => [
-  { title: '日期', dataIndex: 'date', key: 'date' },
-  { title: '成本', key: 'total_cost', dataIndex: 'total_cost' },
-  { title: '输入 Tokens', key: 'total_input', dataIndex: 'total_input' },
-  { title: '输出 Tokens', key: 'total_output', dataIndex: 'total_output' },
-  { title: '调用次数', dataIndex: 'call_count', key: 'call_count' },
+  { title: t('costDashboard.colDate'), dataIndex: 'date', key: 'date' },
+  { title: t('costDashboard.colCost'), key: 'total_cost', dataIndex: 'total_cost' },
+  { title: t('costDashboard.inputTokens'), key: 'total_input', dataIndex: 'total_input' },
+  { title: t('costDashboard.outputTokens'), key: 'total_output', dataIndex: 'total_output' },
+  { title: t('costDashboard.colCallCount'), dataIndex: 'call_count', key: 'call_count' },
 ])
 
 async function fetchAll() {

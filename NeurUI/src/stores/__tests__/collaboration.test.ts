@@ -7,21 +7,31 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 
-// Mock api/modules/collaboration — 必须在 import store 之前
-vi.mock('@/api/modules/collaboration', () => ({
-  listSessions: vi.fn(),
-  listTemplates: vi.fn(),
-  listHistory: vi.fn(),
-  startSession: vi.fn(),
-  createTemplate: vi.fn(),
-  updateTemplate: vi.fn(),
-  deleteTemplate: vi.fn(),
-  getCollabStats: vi.fn(),
-  saveCanvas: vi.fn(),
-  runCanvas: vi.fn(),
-  getCanvas: vi.fn(),
-  updateCanvas: vi.fn(),
-}))
+// Mock api/modules/collaboration — 必须在 import store 之前。
+// 只替掉网络函数，其余**保留真实实现**（toSession/toTemplate 等归一化导出）：
+// 手写整份替身会漏掉 store 真正依赖的导出，测试变成在测替身而非测代码
+// （实锤：旧替身缺 toSession/toTemplate，fetchSessions 里 .map(toSession) 抛
+// TypeError 被 catch 吞成空数组，两个断言长期红）。
+vi.mock('@/api/modules/collaboration', async () => {
+  const actual = await vi.importActual<typeof import('@/api/modules/collaboration')>(
+    '@/api/modules/collaboration',
+  )
+  return {
+    ...actual,
+    listSessions: vi.fn(),
+    listTemplates: vi.fn(),
+    listHistory: vi.fn(),
+    startSession: vi.fn(),
+    createTemplate: vi.fn(),
+    updateTemplate: vi.fn(),
+    deleteTemplate: vi.fn(),
+    getCollabStats: vi.fn(),
+    saveCanvas: vi.fn(),
+    runCanvas: vi.fn(),
+    getCanvas: vi.fn(),
+    updateCanvas: vi.fn(),
+  }
+})
 
 // Mock utils/error 与 utils/logger 避免副作用
 vi.mock('@/utils/error', () => ({
@@ -64,7 +74,8 @@ describe('useCollaborationStore', () => {
     await store.fetchSessions()
 
     expect(collabApi.listSessions).toHaveBeenCalledOnce()
-    expect(store.sessions).toEqual(mockSessions)
+    // 断言归一化后的产物（toSession 契约：补齐 participants），不是后端原始形态
+    expect(store.sessions).toEqual([{ ...mockSessions[0], participants: [] }, { ...mockSessions[1], participants: [] }])
     expect(store.loading).toBe(false)
     expect(store.error).toBe(null)
   })
@@ -93,7 +104,8 @@ describe('useCollaborationStore', () => {
     await store.fetchTemplates()
 
     expect(collabApi.listTemplates).toHaveBeenCalledOnce()
-    expect(store.templates).toEqual(mockTemplates)
+    // 断言归一化后的产物（toTemplate 契约：补齐 participants）
+    expect(store.templates).toEqual([{ ...mockTemplates[0], participants: [] }])
   })
 
   // ── Test 5: startSessionAction 成功后调用 fetchSessions + fetchStats ──
