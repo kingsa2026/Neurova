@@ -1384,6 +1384,12 @@ class MemoryManager:
             user_id=self._eff_user_id(),
             created_at=created_at,
             updated_at=created_at,
+            # 事件时刻与获知时刻是两个时刻：created_at 记源侧历史时刻（照原样保留），
+            # last_accessed_at 记系统获知时刻（本次导入）。缺了它，衰减周期会把
+            # "刚导入"读成"闲置了半年"——days_idle 取 last_accessed_at or created_at，
+            # 半年回填的历史会被直接判成 ARCHIVED/FORGOTTEN。在产生该状态的这一侧定标，
+            # 不去改衰减消费方（消费方按"距今多久没被访问"算，语义本就正确）。
+            last_accessed_at=datetime.datetime.now(datetime.timezone.utc),
         )
 
     def delete_ingested_memories(self, ingest_run_id: str) -> int:
