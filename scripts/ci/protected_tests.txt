@@ -150,3 +150,9 @@ tests/unit/document/test_document_sources.py
 tests/unit/document/test_document_pdf.py
 tests/unit/tools/test_write_pdf.py
 tests/unit/api/test_artifact_kind_parity.py
+
+# Issue #68 分类闭环收口：分类词汇表唯一（枚举身份断言）+ ClassifierModule 值域收敛
+# + remember(auto_classify=True) 真落分类且留痕 + classify_memory 契约
+tests/unit/cognitive_layers/memory_layer/test_classification_closed_loop.py
+# Issue #68：/memory/classify 与 /memory/classify-and-remember 不再恒 500（端到端真落库）
+tests/unit/api/test_memory_classify_endpoint.py

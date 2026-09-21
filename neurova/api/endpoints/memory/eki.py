@@ -31,7 +31,7 @@ class ClassifyMemoryRequest(BaseModel):
 
 
 class ClassifyMemoryResponse(BaseModel):
-    """分类结果响应"""
+    """分类结果响应（Issue #68：与 MemoryManager.classify_memory 返回逐字段对齐）"""
 
     category: str
     category_confidence: float
@@ -43,6 +43,10 @@ class ClassifyMemoryResponse(BaseModel):
     is_crystallized: bool
     confidence: float
     reasoning: str
+    #: 多标签候选（命中多个关键词桶时全部返回，含最佳）
+    categories: List[str] = Field(default_factory=list)
+    #: 抽取出的标签
+    tags: List[str] = Field(default_factory=list)
 
 
 class ProcessTaskRequest(BaseModel):
@@ -95,7 +99,19 @@ async def classify_memory_content(
     """
     对记忆内容进行分类推断
 
-    返回分类结果但不会创建记忆
+    返回分类结果但不会创建记忆。
+
+    Issue #68 根因：本端点曾以 `classify_memory(content, context)` 两参调用
+    `manager.classify_memory(content)`（一参签名）⇒ TypeError；随后又按
+    `result["category"][0]` 取值（把返回值当成 `(枚举, 置信度)` 元组），而真实
+    返回是 `{"memory_id","categories","tags"}` ⇒ KeyError。两处叠加使本端点
+    **恒 500**，且因为测试从未覆盖它，坏了一年没人发现。
+
+    现在 `MemoryManager.classify_memory(content, context)` 的返回契约与
+    `ClassifyMemoryResponse` 逐字段对齐（分类值 = 字符串，置信度单列），本端点
+    只做透传 + 补多标签 `categories`/`tags`。契约由
+    tests/unit/cognitive_layers/memory_layer/test_classification_closed_loop.py
+    与 tests/unit/api/test_memory_classify_endpoint.py 双侧锁定。
     """
     try:
         manager = get_memory_manager(agent_id, user)
@@ -103,16 +119,18 @@ async def classify_memory_content(
 
         return success_response(
             data={
-                "category": result["category"][0],
-                "category_confidence": result["category"][1],
-                "type": result["type"][0],
-                "type_confidence": result["type"][1],
-                "perspective": result["perspective"][0],
-                "perspective_confidence": result["perspective"][1],
+                "category": result["category"],
+                "category_confidence": result["category_confidence"],
+                "type": result["type"],
+                "type_confidence": result["type_confidence"],
+                "perspective": result["perspective"],
+                "perspective_confidence": result["perspective_confidence"],
                 "is_important": result["is_important"],
                 "is_crystallized": result["is_crystallized"],
                 "confidence": result["confidence"],
                 "reasoning": result["reasoning"],
+                "categories": result["categories"],
+                "tags": result["tags"],
             },
             message="分类完成",
             request_id=_get_request_id(None),
@@ -137,18 +155,25 @@ async def classify_and_remember(
     try:
         manager = get_memory_manager(agent_id, user)
 
-        # 分类结果作为 tags 并入记忆（classify_and_remember 内部先分类再 remember）
+        # Issue #68：分类结果不再只塞 tags（remember 不接收 tags，等于丢掉）。
+        # classify_and_remember 内部先分类、再把分类维度真正落到记忆行。
         memory_id = manager.classify_and_remember(
             content=request.content,
             metadata={"context": request.context} if request.context else None,
         )
 
-        result = manager.classify_memory(request.content)
+        result = manager.classify_memory(request.content, request.context)
 
         return success_response(
             data={
                 "memory_id": memory_id,
                 "classification": {
+                    "category": result["category"],
+                    "category_confidence": result["category_confidence"],
+                    "type": result["type"],
+                    "type_confidence": result["type_confidence"],
+                    "perspective": result["perspective"],
+                    "perspective_confidence": result["perspective_confidence"],
                     "categories": result["categories"],
                     "tags": result["tags"],
                 },
