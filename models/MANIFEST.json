@@ -1,0 +1,41 @@
+{
+  "built_at": "2026-09-21T00:00:00",
+  "runtime": {
+    "python": "3.12.14",
+    "node": "24.16.0"
+  },
+  "models": [
+    {
+      "id": "bge-small-zh-v1.5",
+      "path": "models/embedding/bge-small-zh-v1.5/",
+      "required": true,
+      "source": "huggingface",
+      "repo_id": "BAAI/bge-small-zh-v1.5",
+      "size_mb": 274
+    },
+    {
+      "id": "moss-nano",
+      "path": "models/tts/moss-nano/",
+      "required": false,
+      "source": "modelscope",
+      "repo_id": "iic/moss-tts-mixed",
+      "size_mb": 642
+    },
+    {
+      "id": "moss-tokenizer",
+      "path": "models/tts/moss-tokenizer/",
+      "required": false,
+      "source": "modelscope",
+      "repo_id": "iic/moss-tts-mixed",
+      "size_mb": 5
+    },
+    {
+      "id": "whisper-base",
+      "path": "models/asr/whisper/",
+      "required": false,
+      "source": "openai-whisper",
+      "model_size": "base",
+      "size_mb": 140
+    }
+  ]
+}
