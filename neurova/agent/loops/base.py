@@ -203,190 +203,67 @@ class BaseAgentLoop(ABC):
             _call_record["task_name"] = _task_name_active
         records.append(_call_record)
 
-        try:
-            # [TOOLBUG] 诊断日志：检查 SkillRegistry 和 ToolRouter 的初始化状态
-            _sr = self.agent.skill_registry
-            _tr = getattr(self.agent, "tool_router", None)
-            logger.info(
-                "[TOOLBUG] skill_registry=%s (type=%s), tool_router=%s (type=%s), tool_name=%s",
-                _sr is not None, type(_sr).__name__ if _sr else "None",
-                _tr is not None, type(_tr).__name__ if _tr else "None",
-                _tc_function_name,
-            )
+        # 执行工具：一律经执行咽喉（ToolExecutor._execute_single_tool_inner）。
+        # 原生链此前各自调用 SkillRegistry / ToolRouter，既拿不到客观票据与
+        # on_tool_executed，又与文本链对同一失败工具给出不同的 success 值
+        # （见 neurova/agent/native_tool_dispatch.py 的模块说明）。
+        from neurova.agent.native_tool_dispatch import execute_native_tool
 
-            # 执行工具：优先 SkillRegistry → 失败/异常则 fallback ToolRouter
-            exec_result = None
+        outcome = await execute_native_tool(self.agent, _tc_function_name, dict(_tc_arguments))
+        exec_result = SimpleNamespace(
+            success=outcome["success"],
+            data=outcome["result"],
+            error=outcome["error"],
+            metadata={},
+        )
 
-            # Wave H-W2 可见门（第二执行链）：轮级视图在场时视图外技能直接
-            # 跳过 skill_registry 尝试（ToolRouter/内置照常）。不在此链入账
-            # （该链现状本就不经漏斗咽喉，见对比文档 §7.1 备注）。
-            try:
-                from neurova.core.turn_context import get_turn_skill_view
+        # 构建 tool_result message
+        if exec_result.success:
+            content = _safe_json_dumps(exec_result.data) if exec_result.data is not None else "Success"
+        else:
+            content = _safe_json_dumps({"error": exec_result.error})
 
-                _skill_view = get_turn_skill_view()
-            except Exception:  # noqa: BLE001
-                _skill_view = None
+        # P1-#6（§5.6）：溢出分层——可重现大结果全文落工作区文件、
+        # 消息体换预览+指针；不可重现（含 MCP/自创未声明）豁免原文直进。
+        from neurova.core.tool_offload import apply_offload_policy, resolve_tool_reproducible
 
-            # 1. 尝试 SkillRegistry（异常时 fallback 到 ToolRouter，不直接报错）
-            if self.agent.skill_registry and not (
-                _skill_view is not None and not _skill_view.invocable(_tc_function_name)
-            ):
-                try:
-                    # 隔离注入：身份并入 params（kb_builder 等据此归属知识条目），
-                    # 同时以 context 透传；服务端赋值优先，防 LLM 参数伪造
-                    # B-5 契约注释：身份读取序必须与 tool_executor._agent_identity
-                    # 一致——先读 _current_user_id（请求级显式身份，无 public 别名的
-                    # Agent/测试替身走此名），再回退 public 别名。反序会让真值影子
-                    # （如 MagicMock auto-attr current_user_id）遮蔽显式身份。
-                    _caller_id = str(
-                        getattr(self.agent, "_current_user_id", None)
-                        or getattr(self.agent, "current_user_id", None)
-                        or ""
-                    )
-                    _caller_ctx = {"user_id": _caller_id}
-                    _caller_args = {**(_tc_arguments or {}), "_caller_user_id": _caller_id}
-                    # 沙箱根注入（2026-09-08 相对路径乱放根因修复）：file_operation
-                    # 的相对路径锚定 agent 工作区；服务端赋值覆盖 LLM 伪造同名参数
-                    if _tc_function_name == "file_operation":
-                        _ws = getattr(self.agent, "workspace_path", "")
-                        _caller_args["_base_dir"] = str(_ws) if _ws else "."
-                    skill_result = await self.agent.skill_registry.execute_skill(_tc_function_name, _caller_args, _caller_ctx)
-                    # SkillRegistry 找不到该 skill 时返回 None；找到但执行失败返回 success=False
-                    if skill_result is not None and getattr(skill_result, "success", False):
-                        exec_result = SimpleNamespace(
-                            success=True,
-                            data=getattr(skill_result, "data", None),
-                            error=None,
-                            metadata={},
-                        )
-                        logger.info("Tool executed via SkillRegistry: %s", _tc_function_name)
-                except Exception as skill_err:
-                    # Bug B-4 修复: SkillRegistry 异常时 fallback 到 ToolRouter,不直接报错
-                    logger.warning(
-                        "SkillRegistry 执行 %s 抛异常,尝试 ToolRouter fallback: %s",
-                        _tc_function_name, skill_err,
-                    )
+        _reproducible = resolve_tool_reproducible(self.agent, _tc_function_name)
+        _offload = apply_offload_policy(
+            tool_name=_tc_function_name,
+            call_id=_tc_id,
+            content=content,
+            reproducible=_reproducible,
+            workspace_root=getattr(self.agent, "workspace_path", None) or None,
+        )
+        content = _offload.content
 
-            # 2. Fallback: ToolRouter（内置工具 + MCP 工具）
-            if exec_result is None and hasattr(self.agent, "tool_router") and self.agent.tool_router:
-                try:
-                    user_id = getattr(self.agent.config, "user_id", "default")
-                    # [TOOLROBUST] 兼容同步/异步 execute：
-                    # 真实 ToolRouter 通常为 async，但测试/部分适配器可能同步返回结果。
-                    # 只有返回 coroutine 时才 await，否则直接用同步结果。
-                    _router_rv = self.agent.tool_router.execute(
-                        tool_name=_tc_function_name,
-                        params=_tc_arguments,
-                        agent_id=getattr(self.agent.config, "agent_id", None),
-                        user_id=user_id,
-                    )
-                    router_result = await _router_rv if asyncio.iscoroutine(_router_rv) else _router_rv
-                    if router_result and router_result.success:
-                        exec_result = SimpleNamespace(
-                            success=True,
-                            data=router_result.result,
-                            error=None,
-                            metadata={},
-                        )
-                        logger.info("Tool executed via ToolRouter: %s", _tc_function_name)
-                    else:
-                        # 忠实透出真实错误：ToolResult.__bool__ 即 success，失败结果为假值；
-                        # 旧写法 `router_result.error if router_result` 会把失败结果的真实 error
-                        # 抹平为笼统“执行返回空”，掩盖根因、诱导模型反复重试同一失败工具。
-                        if router_result is None:
-                            err = f"ToolRouter 未返回结果: {_tc_function_name}"
-                        else:
-                            err = getattr(router_result, "error", None) or f"工具执行失败: {_tc_function_name}"
-                        exec_result = SimpleNamespace(success=False, data=None, error=err, metadata={})
-                except Exception as e:
-                    logger.warning("ToolRouter fallback 失败: %s, %s", _tc_function_name, e)
+        tool_msg = {
+            "role": "tool",
+            "tool_call_id": _tc_id,
+            "name": _tc_function_name,
+            "content": content,
+        }
 
-            if exec_result:
-                # 构建 tool_result message
-                if exec_result.success:
-                    content = _safe_json_dumps(exec_result.data) if exec_result.data is not None else "Success"
-                else:
-                    content = _safe_json_dumps({"error": exec_result.error})
+        # 记录工具执行结果（用于前端展示）
+        # 完整保留 content（不预截断）：SSE 去重 key 基于完整内容 hash，
+        # 截断会让"前缀相同正文不同"的结果（如同计划 create/mark_step）
+        # 被误判为重复；展示层截断由 console._build_tool_events 的 [:500] 处理
+        # P1-#6 条目增强：call_id 硬地址 + reproducible 落盘证据（防工具
+        # 改标/删除后历史语义漂移）+ offload_path（溢出时全文真相指针）
+        _result_record = {
+            "type": "tool_result",
+            "tool_name": _tc_function_name,
+            "tool_call_id": _tc_id,
+            "result": content if content else "执行完成",
+            "success": exec_result.success,
+            "timestamp": datetime.now().isoformat(),
+            "reproducible": _reproducible,
+            "offload_path": _offload.offload_path,
+        }
+        if _task_name_complete:
+            _result_record["task_name"] = _task_name_complete
+        records.append(_result_record)
 
-                # P1-#6（§5.6）：溢出分层——可重现大结果全文落工作区文件、
-                # 消息体换预览+指针；不可重现（含 MCP/自创未声明）豁免原文直进。
-                from neurova.core.tool_offload import apply_offload_policy, resolve_tool_reproducible
-
-                _reproducible = resolve_tool_reproducible(self.agent, _tc_function_name)
-                _offload = apply_offload_policy(
-                    tool_name=_tc_function_name,
-                    call_id=_tc_id,
-                    content=content,
-                    reproducible=_reproducible,
-                    workspace_root=getattr(self.agent, "workspace_path", None) or None,
-                )
-                content = _offload.content
-
-                tool_msg = {
-                    "role": "tool",
-                    "tool_call_id": _tc_id,
-                    "name": _tc_function_name,
-                    "content": content,
-                }
-
-                # 记录工具执行结果（用于前端展示）
-                # 完整保留 content（不预截断）：SSE 去重 key 基于完整内容 hash，
-                # 截断会让"前缀相同正文不同"的结果（如同计划 create/mark_step）
-                # 被误判为重复；展示层截断由 console._build_tool_events 的 [:500] 处理
-                # P1-#6 条目增强：call_id 硬地址 + reproducible 落盘证据（防工具
-                # 改标/删除后历史语义漂移）+ offload_path（溢出时全文真相指针）
-                _result_record = {
-                    "type": "tool_result",
-                    "tool_name": _tc_function_name,
-                    "tool_call_id": _tc_id,
-                    "result": content if content else "执行完成",
-                    "success": exec_result.success,
-                    "timestamp": datetime.now().isoformat(),
-                    "reproducible": _reproducible,
-                    "offload_path": _offload.offload_path,
-                }
-                if _task_name_complete:
-                    _result_record["task_name"] = _task_name_complete
-                records.append(_result_record)
-
-                logger.info("Tool executed: %s, success=%s", _tc_function_name, exec_result.success)
-                return tool_msg, records
-
-            logger.warning("工具执行失败（SkillRegistry+ToolRouter 均未能处理）: %s", _tc_function_name)
-            err = f"工具 {_tc_function_name} 执行失败：SkillRegistry 和 ToolRouter 均未找到该工具"
-            unknown_msg = {
-                "role": "tool",
-                "tool_call_id": _tc_id,
-                "name": _tc_function_name,
-                "content": json.dumps({"error": err}),
-            }
-            records.append(
-                {
-                    "type": "tool_result",
-                    "tool_name": _tc_function_name,
-                    "result": err,
-                    "success": False,
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )
-            return unknown_msg, records
-
-        except Exception as e:
-            logger.error(f"Error executing tool {_tc_function_name}: {e}", exc_info=True)
-            error_msg = {
-                "role": "tool",
-                "tool_call_id": _tc_id,
-                "name": _tc_function_name,
-                "content": json.dumps({"error": str(e)}),
-            }
-            records.append(
-                {
-                    "type": "tool_result",
-                    "tool_name": _tc_function_name,
-                    "result": f"执行出错: {str(e)}",
-                    "success": False,
-                    "timestamp": datetime.now().isoformat(),
-                }
-            )
-            return error_msg, records
+        logger.info("Tool executed: %s, success=%s", _tc_function_name, exec_result.success)
+        return tool_msg, records
 

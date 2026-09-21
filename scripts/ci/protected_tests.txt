@@ -186,6 +186,17 @@ tests/unit/memory/test_memory_storage_fence.py
 # 前像回收 + 不得记成已修复），守卫与生成器 scripts/scan_docs_refs.py 同一口径
 tests/unit/test_legacy_ref_ledger_guard.py
 
+# 工具↔经验↔再调用三环路修复批（Issue #80）：三链路探针基座 + 形状单源 + 咽喉收编
+#   + 成败三态 + 采集可观测 + 肌肉记忆止血/终态 + 视图键域收口 + 入口迁移
+tests/unit/agent/test_tool_loop_funnel_probes.py
+tests/unit/evolution/experience/test_success_three_state.py
+tests/unit/evolution/experience/test_ticket_context_observability.py
+tests/unit/evolution/experience/test_muscle_memory_param_shape.py
+tests/unit/evolution/experience/test_muscle_memory_recall.py
+tests/unit/skills/test_skill_view_key_domain.py
+tests/unit/skills/test_skill_entry_choke_migration.py
+
 # Issue #74 温度衰减双实现收敛：单一事实源（第二套实现不得回加）+ 连续衰减曲线
 # （阶跃边界 = 既有红灯 test_ebbinghaus_curve 的根因）+ 其余 5 组成建制死码退役锁定
 tests/unit/cognitive_layers/memory_layer/test_temperature_single_source.py
+

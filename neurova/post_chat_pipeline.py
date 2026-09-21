@@ -1571,6 +1571,23 @@ class PostChatPipeline:
 
         return "未知触发"
 
+    @staticmethod
+    def _turn_structure_key(ticket) -> str:
+        """本轮的工具序列结构指纹——与咽喉票据的 `structure_key` 同函数产出。
+
+        单源在同名函数 `creation_governance.structure_key`（票据写入侧也用它），
+        这里只是把已解析出的 steps 再喂一次，**不另写第二份指纹算法**。
+        """
+        if not ticket.steps:
+            return ""
+        try:
+            from neurova.skills.creation_governance import structure_key
+
+            return structure_key([dict(step) for step in ticket.steps]) or ""
+        except Exception:  # noqa: BLE001 - 指纹算不出就不落该键（不阻断沉淀）
+            logger.debug("结构指纹计算跳过", exc_info=True)
+            return ""
+
     async def _step_record_experience(
         self,
         user_input: str,
@@ -1654,19 +1671,38 @@ class PostChatPipeline:
                     )
 
                     ekb = get_experience_knowledge_base()
+                    # 工单 009：置信度取四态语义（未测量 ⇒ NULL，不得由 success
+                    # 二值折算）；耗时取咽喉累加的轮级聚合。两者此前在生产写侧
+                    # 都无人写入（库实测 nonNULL 0/103）。
+                    from neurova.core.turn_context import get_turn_tool_elapsed
+
                     ekb.add_experience_record(
                         skill_name=skill_tag,
                         exp=ExperienceRecord(
                             skill_name=skill_tag,
-                            context={"user_input": user_input},
+                            context={
+                                "user_input": user_input,
+                                # 结构身份（工具序列 + 参数形状的指纹，**只存
+                                # 指纹不存参数明文**）：让"这串工具该怎么传参"
+                                # 成为可查询的事实，同时不落敏感参数内容。
+                                "structure_key": self._turn_structure_key(ticket),
+                            },
                             result={"reply_excerpt": reply[:200]},
-                            success=bool(tool_success),
+                            # 工单 004：`bool(None)` 把"本轮没有客观回执"折成失败，
+                            # 于是库里三分变两分。三态原样落库（NULL=未测量）。
+                            success=tool_success,
                             feedback=user_input[:100],
                         ),
                         # A-03 同根因命中点：Agent.agent_id 不存在（在 config 上），
                         # 原写法恒 None，EKB 沉淀记录永远归属不了 agent
                         agent_id=str(getattr(self._agent.config, "agent_id", "") or "") or None,
                         session_id=str(getattr(self._agent, "session_id", "") or "") or None,
+                        execution_time=get_turn_tool_elapsed() or None,
+                        # 置信度是"这条经验值多少"的读数：只有服务端票据带结论时
+                        # 才有值，未测量保持 NULL（不写 0.5 之类占位）。
+                        confidence_score=(
+                            None if ticket.ticket is None else (1.0 if ticket.ticket else 0.0)
+                        ),
                         # 工单 002→008→010：形成侧第三态走一等列 evidence_state。
                         # 等级只认服务端票据（`ticket.evidence`）——002 的记录聚合
                         # 在无票据时仍是成败位的来源，但它不再是"有证据"。
