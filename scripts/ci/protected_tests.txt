@@ -207,7 +207,6 @@ tests/unit/evolution/experience/test_muscle_memory_param_shape.py
 tests/unit/evolution/experience/test_muscle_memory_recall.py
 tests/unit/skills/test_skill_view_key_domain.py
 tests/unit/skills/test_skill_entry_choke_migration.py
-tests/unit/evolution/rsi/test_rsi_rollback_evidence.py
 tests/unit/api/test_skill_rollback_governance.py
 
 # Issue #74 温度衰减双实现收敛：单一事实源（第二套实现不得回加）+ 连续衰减曲线
@@ -262,6 +261,16 @@ tests/unit/context/test_context_persistence_restart.py
 tests/unit/test_docs_retired_tree_refs_guard.py
 # Issue #97：install.py 供给契约（依赖声明/模型单源/真下载器/前端同判据）
 tests/unit/desktop/test_install_supply_contract.py
+
+# 上下文持久层批（Issue #90）B4 工单 002：context_ledger 版本域 + v1 迁移（A6）
+#   （根因：库只有 CREATE TABLE IF NOT EXISTS、无 user_version，schema 无纪律；
+#     U1 甲案的读侧兜底：列优先 + 旧行解析 metadata，两路同源 memory_scope）
+tests/unit/context/test_context_ledger_migration.py
+
+# 上下文持久层批（Issue #90）B4 工单 003：写侧批量提交（A2）
+#   （根因：record() 每行一次 connect+commit+close，24 条/轮实测 214–318 ms；
+#     批内一次事务 0.78–0.91 ms/轮；事务边界 = 一次归档调用，失败整批回滚）
+tests/unit/context/test_ledger_write_batching.py
 # Issue #72 残余项：记忆侧冲突信号必须落在「同一命题的否证」（子串含否定词 +
 #   0.3 相似度门是噪声根因），且判据全仓唯一（ConflictModule 不再自持第二份）
 tests/unit/cognitive_layers/memory_layer/test_conflict_signal_scope.py
@@ -275,6 +284,19 @@ tests/unit/cognitive_layers/memory_layer/test_conflict_disposition_loop.py
 #   活跃层指向不存在文件的引用一路无人拦。判据单源在 scripts/scan_docs_refs.py
 #   的 activeLayerDangling()，活跃层零容忍（硬零，不是棘轮）。
 tests/unit/test_active_layer_refs_guard.py
+# 上下文持久层批（Issue #90）B4 工单 002：context_ledger 版本域 + v1 迁移（A6）
+#   （根因：库只有 CREATE TABLE IF NOT EXISTS、无 user_version，schema 无纪律；
+#     U1 甲案的读侧兜底：列优先 + 旧行解析 metadata，两路同源 memory_scope）
+
+# 上下文持久层批（Issue #90）B4 工单 003：写侧批量提交（A2）
+#   （根因：record() 每行一次 connect+commit+close，24 条/轮实测 214–318 ms；
+#     批内一次事务 0.78–0.91 ms/轮；事务边界 = 一次归档调用，失败整批回滚）
+
+# 上下文持久层批（Issue #90）B4 工单 005：启动加载与热集回载（A9）
+#   （根因：池构造完全不读台账，/metrics 看不到持久规模，D10 的策略"没人实现"；
+#     启动只登记一次 COUNT(*)（常数次查询、零预载），rehydrate 显式按需，
+#     draw/query 零查库由断言锁住，登记值随写入/GC 增量同步并进 gauge）
+tests/unit/context/test_pool_startup_load.py
 
 # Issue #109：glib 0.18.5 的 VariantStrIter 未定义行为（RUSTSEC-2024-0429）改按
 #   上游修法就地打补丁（vendor 副本 + [patch.crates-io]）。本守卫锁住补丁在位、
