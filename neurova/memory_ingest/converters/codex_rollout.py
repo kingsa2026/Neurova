@@ -27,7 +27,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from neurova.memory_ingest import probe
 from neurova.memory_ingest.bundle.manifest import BundleError, BundleManifest
 from neurova.memory_ingest.bundle.media import MediaSink
-from neurova.memory_ingest.bundle.writer import SourceEvent, ensure_offset, materialize, write_bundle
+from neurova.memory_ingest.bundle.writer import (SourceEvent, dropped_entries,
+                                                 ensure_offset, materialize, write_bundle)
 from neurova.memory_ingest.probe import Handprint, register_handprint
 
 CONVERTER_NAME = "codex_rollout"
@@ -71,8 +72,7 @@ def convert(store: Path, out_dir: Path, *, agent_name: str) -> BundleManifest:
         events = _row_events(row, session_id, number, fallback_ts, sink, declared)
         if not events:
             continue
-        if rows or True:
-            events = _attach_meta(events, meta, carried=bool(rows))
+        events = _attach_meta(events, meta, carried=bool(rows))
         rows.append((f"{session_id}#L{number}", events))
     records = materialize([(session_id, rows)])
     return write_bundle(
@@ -247,14 +247,7 @@ def _first(mapping: Dict[str, Any], *keys: str) -> Optional[Any]:
 
 
 def _dropped_entries(declared: Counter) -> List[Dict[str, Any]]:
-    entries = []
-    for field, count in sorted(declared.items()):
-        if count <= 0:
-            continue
-        prefix = field.split(":")[0]
-        entries.append({"field": field, "count": count,
-                        "reason": REASONS.get(field) or REASONS.get(prefix) or REASONS["payload"]})
-    return entries
+    return dropped_entries(declared, dict(REASONS, __fallback__=REASONS["payload"]))
 
 
 register_handprint(Handprint(CONVERTER_NAME, "jsonl", matches_store))

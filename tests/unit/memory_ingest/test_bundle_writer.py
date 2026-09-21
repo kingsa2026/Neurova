@@ -6,12 +6,13 @@
 追加序号的方式等等）。
 """
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
 
 from neurova.memory_ingest.bundle.records import MemoryRecord, TranscriptRecord
-from neurova.memory_ingest.bundle.writer import (SourceEvent, ensure_offset,
+from neurova.memory_ingest.bundle.writer import (SourceEvent, dropped_entries, ensure_offset,
                                                  materialize, write_bundle)
 
 
@@ -34,6 +35,16 @@ def test_ensure_offset_never_invents_now():
     assert ensure_offset("") == ""
     assert ensure_offset("不是时间") == ""
     assert ensure_offset("2026-05-01T10:00:00") == "2026-05-01T10:00:00+00:00"
+
+
+def test_dropped_entries_single_shape():
+    """申报只有一种形状：字段名原样带出，原因按整名/前缀查，查不到用本族兜底文案。"""
+    entries = dropped_entries(Counter({"role:developer": 2, "media:不可达": 1}),
+                              {"role": "该角色无对应 kind", "media": "取不到字节",
+                               "__fallback__": "无落点"})
+
+    assert entries == [{"field": "media:不可达", "count": 1, "reason": "取不到字节"},
+                       {"field": "role:developer", "count": 2, "reason": "该角色无对应 kind"}]
 
 
 def test_materialize_numbers_each_session_from_one():

@@ -134,6 +134,16 @@ def test_ts_with_z_suffix_is_accepted(tmp_path: Path):
     assert validate_bundle(root) == []
 
 
+def test_relations_file_must_be_registered(tmp_path):
+    """v1 不消费记忆图边，但包里有就必须看得见——不登记就是静默丢。"""
+    root = _bundle(tmp_path, transcripts=[T1, T2], memories=[M1])
+    (root / "relations.jsonl").write_text('{"identity_key":"r1"}\n', encoding="utf-8")
+
+    errors = validate_bundle(root)
+
+    assert any("relations" in e for e in errors)
+
+
 def test_unknown_kind_rejected_by_validator(tmp_path):
     """kind 的取值域必须在包侧拦住：落库时才知道，就已经写了一半。"""
     errors = validate_bundle(_bundle(
