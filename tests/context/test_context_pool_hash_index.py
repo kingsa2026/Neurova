@@ -96,27 +96,35 @@ class TestOrchestratorCacheTrim:
         orch._window_compaction_cache = {}
         return orch
 
-    def test_set_session_id_keeps_only_current_session(self):
-        orch = self._make_orch()
-        orch._window_compaction_cache = {
-            "s1": {"summary": "a", "covered": set()},
-            "s2": {"summary": "b", "covered": set()},
-            "s3": {"summary": "c", "covered": set()},
-        }
-        orch.set_session_id("s2")
-        assert set(orch._window_compaction_cache) == {"s2"}
-        assert orch._window_compaction_cache["s2"]["summary"] == "b"
+    def test_cache_slots_are_bounded_by_class_limit(self):
+        """D2：裁剪职责已从 set_session_id 收口到槽位上限（旧出口零生产调用点）。
 
-    def test_set_session_id_preserves_current_entry(self):
+        原用例锁定"切换 session 时只保留当前槽"——那是缓存无界增长的唯一出口，
+        但 `set_session_id` 在全 neurova/ 内零调用点，等于闸口不存在。现在改锁
+        `_window_cache_slot` 的**上限**语义：这才是真正能生效的那道闸。
+        """
+        orch = self._make_orch()
+        for i in range(orch._WINDOW_CACHE_SLOTS + 4):
+            orch._window_cache_slot(f"room{i}")
+        assert len(orch._window_compaction_cache) == orch._WINDOW_CACHE_SLOTS
+        # 最近插入的槽必须在（淘汰的是最老插入的）
+        assert f"room{orch._WINDOW_CACHE_SLOTS + 3}" in orch._window_compaction_cache
+
+    def test_set_session_id_only_assigns(self):
+        """set_session_id 只赋值，不再承担缓存治理（D2 职责收口）。"""
         orch = self._make_orch()
         orch._window_compaction_cache = {"s1": {"summary": "keep", "covered": set()}}
-        orch.set_session_id("s1")
-        assert orch._window_compaction_cache["s1"]["summary"] == "keep"
-
-    def test_empty_cache_no_error(self):
-        orch = self._make_orch()
         orch.set_session_id("s9")
-        assert orch._window_compaction_cache == {}
+        assert orch._session_id == "s9"
+        assert orch._window_compaction_cache == {"s1": {"summary": "keep", "covered": set()}}
+
+    def test_slot_creation_is_idempotent(self):
+        orch = self._make_orch()
+        orch._window_compaction_cache = {}
+        a = orch._window_cache_slot("s1")
+        a["summary"] = "kept"
+        b = orch._window_cache_slot("s1")
+        assert b is a and b["summary"] == "kept"
 
 
 class TestTurnIndex:
