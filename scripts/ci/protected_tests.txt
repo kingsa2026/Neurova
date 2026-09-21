@@ -204,6 +204,10 @@ tests/unit/api/test_skill_rollback_governance.py
 tests/unit/cognitive_layers/memory_layer/test_temperature_single_source.py
 
 
+# Issue #68 下一层：同名多份（回潮副本）逐条裁定 + 棘轮。
+# 根因 = 目录重排 fd7ea92c 之后，3b5d7e80 又把 306 个 docs 旧路径还原回来，
+# 同一篇文档在编号分层与旧路径各留一份，归档引用失去唯一裁定。本单收口为一份。
+tests/unit/test_docs_name_collision_guard.py
 # Issue #72 写面与读面收口：抽取产物落被读的底座（不再只有 JSON 投影）+ 本体硬拒真咬合
 tests/unit/knowledge/test_extraction_lands_in_read_graph.py
 # Issue #72 附带根因：构造期播种只补缺，不覆盖已登记的 domain/range/cardinality
