@@ -702,95 +702,76 @@ class TestToolLifecycleConcurrentStress:
         )
 
 
-class TestNativeToolResultEndToEnd:
-    """WARN-4 补全: 端到端验证原生 tool_result 事件到达 _tool_messages_list。"""
+class TestNativeToolEventTransport:
+    """流式工具事件是**传输壳**，不进取证源（工单 002 形状单源）。
 
-    def test_stream_captures_native_tool_events_into_tool_messages_list(self):
-        """_call_loop_stream 应将 tool_call/tool_result 事件合并到 _tool_messages_list。"""
+    曾经 `_call_loop_stream` 把这些 `{type, data}` 包装事件原样并入
+    `_tool_messages_list`，与执行链自己落的扁平记录挤在同一列表：`turn_state`
+    读不到 `success`、`post_chat` 读出 `unknown` 工具名。收口后传输与取证分家——
+    转发照旧（SSE / 蜂群流），取证源只收执行链的扁平记录。
+    """
+
+    def _run_stream(self, agent, events):
         from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
 
-        # 构造 mock agent，具备 _tool_messages_list 和 loop
+        pipeline = ChatPipeline.__new__(ChatPipeline)
+        pipeline._agent = agent
+
+        async def fake_predict_step(messages, tools, stream, **kwargs):
+            async def aiter():
+                for event in events:
+                    yield event
+
+            return aiter()
+
+        fake_loop = MagicMock()
+        fake_loop.predict_step = fake_predict_step
+        agent.loop = fake_loop
+        ctx = ChatContext(user_input="测试", context=[], metadata={"emit_tool_events": True})
+        emitted = []
+        ctx.event_emitter = lambda etype, data: emitted.append((etype, data))
+        reply = asyncio.run(pipeline._call_loop_stream(ctx, tools_for_llm=[]))
+        return reply, emitted
+
+    def test_wrapper_events_go_to_transport_not_record_source(self):
         agent = MagicMock()
         agent._tool_messages_list = []
         agent._current_reasoning = None
         agent._current_user_input = "测试原生工具调用"
-
-        pipeline = ChatPipeline.__new__(ChatPipeline)
-        pipeline._agent = agent
-
-        # mock loop.predict_step: async def 返回 async iterable（await 后迭代）
-        async def fake_predict_step(messages, tools, stream, **kwargs):  # ebe8e737 thinking_effort 透传（残留处理契约同步）
-            events = [
-                {"type": "tool_call", "data": {"name": "weather", "args": {"city": "北京"}}},
-                {"type": "tool_result", "data": {"name": "weather", "result": {"temp": 25}}},
-                {"type": "content", "data": "北京今天 25 度"},
-            ]
-
-            async def aiter():
-                for e in events:
-                    yield e
-
-            return aiter()
-
-        fake_loop = MagicMock()
-        fake_loop.predict_step = fake_predict_step
-        agent.loop = fake_loop
-
-        ctx = ChatContext(user_input="测试", context=[])
-
-        reply = asyncio.run(pipeline._call_loop_stream(ctx, tools_for_llm=[]))
-
-        # 回复文本不应包含工具事件
-        assert reply == "北京今天 25 度", f"回复文本应仅含 content 数据，实际: {reply!r}"
-
-        # 原生工具事件应经 append_tool_messages 公有 API 捕获（P0-B1 契约，
-        # 残留处理 2026-09-13：原断言直读 _tool_messages_list 属迁移前存储位）
-        captured = [
-            ev
-            for call in agent.append_tool_messages.call_args_list
-            for ev in call.args[0]
+        events = [
+            {"type": "tool_call", "data": {"name": "weather", "args": {"city": "北京"}}},
+            {"type": "tool_result", "data": {"name": "weather", "result": {"temp": 25}}},
+            {"type": "content", "data": "北京今天 25 度"},
         ]
-        assert [c.get("type") for c in captured] == ["tool_call", "tool_result"], captured
 
-    def test_stream_creates_tool_messages_list_when_missing(self):
-        """agent._tool_messages_list 不存在时应自动创建并填充。"""
-        from neurova.agent.chat_pipeline import ChatPipeline, ChatContext
+        reply, emitted = self._run_stream(agent, events)
 
-        # 用真实对象而非 MagicMock，避免自动属性遮蔽 getattr(..., None) 的 None 判定
-        class FakeAgent:
-            pass
+        assert reply == "北京今天 25 度", f"回复文本应仅含 content 数据，实际: {reply!r}"
+        tool_events = [etype for etype, _ in emitted if etype in ("tool_call", "tool_result")]
+        assert tool_events == ["tool_call", "tool_result"], (
+            f"工具事件必须仍被转发给发射器：{emitted}"
+        )
+        agent.append_tool_messages.assert_not_called()
 
-        agent = FakeAgent()
+    def test_flat_records_from_execution_chain_are_the_only_source(self):
+        """取证源只接受扁平记录——由执行链落，不由传输层落。"""
+        from neurova.agent.turn_state import find_shape_violations
+
+        agent = MagicMock()
         agent._current_reasoning = None
-        # 故意不预设 _tool_messages_list（模拟 _init_agent_state 未运行场景）；
-        # 捕获面=append_tool_messages 公有 API（P0-B1 契约，残留处理 2026-09-13）
-        agent._captured: list = []
-        agent.append_tool_messages = lambda records: agent._captured.extend(records)
+        records = [
+            {"type": "tool_call", "tool_name": "calc", "params": {}},
+            {"type": "tool_result", "tool_name": "calc", "success": True, "result": "ok"},
+        ]
+        agent.append_tool_messages = lambda rows: agent._tool_messages_list.extend(rows)
+        agent._tool_messages_list = []
 
-        pipeline = ChatPipeline.__new__(ChatPipeline)
-        pipeline._agent = agent
+        asyncio.run(_drain_flat_records(agent, records))
 
-        async def fake_predict_step(messages, tools, stream, **kwargs):  # ebe8e737 thinking_effort 透传（残留处理契约同步）
-            events = [
-                {"type": "tool_call", "data": {"name": "calc"}},
-                {"type": "content", "data": "done"},
-            ]
+        assert find_shape_violations(agent._tool_messages_list) == []
 
-            async def aiter():
-                for e in events:
-                    yield e
 
-            return aiter()
-
-        fake_loop = MagicMock()
-        fake_loop.predict_step = fake_predict_step
-        agent.loop = fake_loop
-
-        ctx = ChatContext(user_input="测试", context=[])
-
-        asyncio.run(pipeline._call_loop_stream(ctx, tools_for_llm=[]))
-
-        # tool_call 事件应被公有 API 捕获（不依赖列表预存在）
-        assert len(agent._captured) == 1
-        assert agent._captured[0]["type"] == "tool_call"
+async def _drain_flat_records(agent, records):
+    """执行链接口的公有回装（`append_tool_messages`），不是管线私有写入。"""
+    agent.append_tool_messages(records)
 

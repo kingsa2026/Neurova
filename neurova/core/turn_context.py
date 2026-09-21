@@ -30,6 +30,11 @@ _tool_messages_var: ContextVar = ContextVar("neurova_turn_tool_messages", defaul
 _tool_events_var: ContextVar = ContextVar("neurova_turn_tool_events", default=None)
 _skill_funnel_var: ContextVar = ContextVar("neurova_turn_skill_funnel", default=None)
 _skill_view_var: ContextVar = ContextVar("neurova_turn_skill_view", default=None)
+# 工单 009：本轮工具执行耗时合计（秒）。唯一写入方是执行咽喉
+# （`ToolExecutor._execute_single_tool_inner` 的 finally），读方是 post-chat 的
+# 经验落库。此前 `execution_time` 列在生产写侧**根本没有来源**（库实测
+# nonNULL 0/103），因为咽喉算出的 elapsed 只喂了钩子、没人往轮级聚合。
+_tool_elapsed_var: ContextVar = ContextVar("neurova_turn_tool_elapsed", default=0.0)
 _skills_off_var: ContextVar = ContextVar("neurova_turn_skills_off", default=False)
 # 反思效力闭环（2026-09-15 P0a）：本轮被注入 prompt 的反思日志 id 痕迹。
 # build_context 选中注入时写入；post_chat 落盘读它挂进 assistant metadata，
@@ -49,6 +54,26 @@ def get_turn_injected_reflections() -> Optional[list]:
 # （post_chat._step_record_experience）按本轮客观成败回写 injected_count /
 # adoption_outcome。没有这份身份集，"经验到底帮没帮上忙"就无处落账。
 _injected_experiences_var: ContextVar = ContextVar("neurova_turn_injected_experiences", default=None)
+
+
+def add_turn_tool_elapsed(seconds: float) -> None:
+    """累加本轮工具执行耗时（执行咽喉唯一写入方）。"""
+    try:
+        _tool_elapsed_var.set(float(_tool_elapsed_var.get() or 0.0) + float(seconds or 0.0))
+    except (TypeError, ValueError):
+        pass
+
+
+def get_turn_tool_elapsed() -> float:
+    """本轮工具执行耗时合计（秒）；没有工具执行时为 0.0。"""
+    try:
+        return float(_tool_elapsed_var.get() or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def reset_turn_tool_elapsed() -> None:
+    _tool_elapsed_var.set(0.0)
 
 
 def set_turn_injected_experiences(ids: Optional[list]) -> None:
@@ -115,6 +140,7 @@ def reset_turn_tool_messages() -> None:
     """
     _tool_messages_var.set(None)
     _skill_funnel_var.set(None)
+    _tool_elapsed_var.set(0.0)
     from neurova.skills.creation_governance import begin_task
     begin_task()
 
@@ -253,11 +279,13 @@ def clear_turn_state() -> None:
         _skill_view_var,
         _skills_off_var,
         _injected_reflections_var,
+        _injected_experiences_var,
     ):
         if var is _skills_off_var:
             var.set(False)
         else:
             var.set(None)
+    _tool_elapsed_var.set(0.0)
     with _turn_count_lock:
         _session_turn_counts.clear()
 
@@ -281,6 +309,9 @@ __all__ = [
     "set_turn_skills_off",
     "reset_turn_skills_off",
     "get_turn_skills_off",
+    "add_turn_tool_elapsed",
+    "get_turn_tool_elapsed",
+    "reset_turn_tool_elapsed",
     "set_turn_injected_reflections",
     "get_turn_injected_reflections",
     "append_turn_tool_event",

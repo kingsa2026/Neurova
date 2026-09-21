@@ -30,6 +30,7 @@ getattr 旧契约（P0-B1 时代读取路径，由 Agent property 转发保障�
 # 渲染出真实注解（与迁移前 Agent API 及契约快照逐字一致，方案硬约束 1）。
 from typing import Any, Dict, List, Optional
 
+from neurova.core.logger import get_logger
 from neurova.core.turn_context import (
     append_turn_tool_event,
     append_turn_tool_messages,
@@ -46,6 +47,8 @@ from neurova.core.turn_context import (
     set_turn_user_input,
 )
 
+logger = get_logger(__name__)
+
 
 def resolve_tool_outcome(records: List[Dict[str, Any]]) -> Optional[bool]:
     """本轮的客观成败，三态：True / False / None（None = 没有客观回执）。
@@ -60,6 +63,38 @@ def resolve_tool_outcome(records: List[Dict[str, Any]]) -> Optional[bool]:
     if not results:
         return None
     return all(r.get("success") is True for r in results)
+
+
+def find_shape_violations(records) -> List[str]:
+    """点名不符合记录形状契约的条目（工具链取证的唯一形状）。
+
+    原生 function-calling 链曾经把 `{type, data}` 包装事件与原生的扁平记录写进
+    同一个列表，于是这里的成败聚合读不到 `success`、下游读出 `unknown` 工具名。
+    契约收口后仍必须能发现"又有生产者写歪"，故这里出声而不是静默过滤：
+    静默过滤会把形状劣化掩盖成"这一轮没有异常"。
+    """
+    violations: List[str] = []
+    for index, record in enumerate(records or []):
+        if not isinstance(record, dict):
+            violations.append(f"[{index}] 记录不是对象：{type(record).__name__}")
+            continue
+        record_type = record.get("type")
+        if record_type == "tool_call" and not str(record.get("tool_name") or "").strip():
+            violations.append(f"[{index}] tool_call 缺 tool_name")
+        elif record_type == "tool_result" and "success" not in record:
+            violations.append(f"[{index}] tool_result 缺顶层 success")
+    return violations
+
+
+def warn_shape_violations(records, source: str) -> List[str]:
+    """形状违规出声（谁写歪、几条、哪几条），返回违规清单供调用方判处置。"""
+    violations = find_shape_violations(records)
+    if violations:
+        logger.warning(
+            "工具记录形状违规 %d 条（来源 %s）：%s",
+            len(violations), source, "；".join(violations[:5]),
+        )
+    return violations
 
 
 class TurnState:

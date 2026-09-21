@@ -45,6 +45,32 @@ def _get_engine():
         return None
 
 
+def _lexical_coverage(item_fingerprint: str, query_fingerprint: str) -> float:
+    """字符覆盖度：查询的字符/词被条目覆盖的比例（短边为分母）。
+
+    嵌入引擎缺席时用它替代"MD5 等值"那一步——MD5 只在逐字相同时给分，对近似
+    问法毫无分辨率。CJK 取 1-gram（字符）多集：一处实体替换只损失 1/9 覆盖度；
+    纯拉丁输入无 1-gram，回落整 token 多集。
+    """
+    from collections import Counter
+
+    def _split(value: str) -> List[str]:
+        return [t for t in (value or "").split(",") if t]
+
+    item_tokens = _split(item_fingerprint)
+    query_tokens = _split(query_fingerprint)
+    item_chars = Counter(t for t in item_tokens if len(t) == 1)
+    query_chars = Counter(t for t in query_tokens if len(t) == 1)
+    if item_chars and query_chars:
+        overlap = sum((item_chars & query_chars).values())
+        return overlap / min(sum(item_chars.values()), sum(query_chars.values()))
+    item_all, query_all = Counter(item_tokens), Counter(query_tokens)
+    if not item_all or not query_all:
+        return 0.0
+    overlap = sum((item_all & query_all).values())
+    return overlap / min(sum(item_all.values()), sum(query_all.values()))
+
+
 def _semantic_vector(text: str) -> Optional[List[float]]:
     """计算语义向量；失败/关闭返回 None（调用方回落 MD5 分支）。"""
     if not text or not _semantic_enabled():
@@ -335,17 +361,28 @@ class MuscleMemory:
         if item.query_fingerprint == fingerprint:
             score += 0.6
         else:
-            # 部分匹配（过滤空字符串避免 "".split(",") 产生 [""]）
-            item_kws = {k for k in item.query_fingerprint.split(",") if k}
-            query_kws = {k for k in fingerprint.split(",") if k}
-            if not item_kws or not query_kws:
-                return 0.0
-            overlap = len(item_kws & query_kws)
-            total = max(len(item_kws), len(query_kws))
-            if total > 0:
-                score += 0.4 * (overlap / total)
+            # 部分匹配：**多集包含度**（以短边 token 总数为分母）。
+            # 旧实现用集合交叠 / max 分母，两个方向都会把近似问法稀释：集合去重
+            # 丢掉了"许昌"这类重复成分的权重，max 分母则让"只改一处实体"按
+            # 长度摊薄（实测 0.343 / 0.400，落在门槛下方的断层里）。
+            from collections import Counter
 
-        # 向量分量：语义余弦优先，缺失逐位回落 MD5 等值
+            item_counts = Counter(k for k in item.query_fingerprint.split(",") if k)
+            query_counts = Counter(k for k in fingerprint.split(",") if k)
+            if not item_counts or not query_counts:
+                return 0.0
+            overlap = sum((item_counts & query_counts).values())
+            total = sum(item_counts.values()) + sum(query_counts.values())
+            # 相似度用 F1（双侧归一）而非短边包含度：包含度会让"天气"这种两字
+            # 问句对长条目拿到满分（短边全被覆盖），F1 按长度对称惩罚，
+            # 既保住"只改一处实体"的高分，也挡住极短串的虚高。
+            if total > 0:
+                score += 0.6 * (2.0 * overlap / total)
+
+        # 向量分量：语义余弦优先；嵌入缺席时回落**字符覆盖度**，最后才退到
+        # MD5 等值。MD5 等值是零信息量的判据（除"逐字相同"外恒为 0），近似问法
+        # 在它下面永远拿不到分——这正是"断层"的第二半。字符覆盖度衡量问法骨架
+        # 是否一致，与上面按 token（含 2-gram）的多集包含度互补而不重复。
         item_emb = item.metadata.get("query_embedding") if _semantic_enabled() else None
         if query_emb and item_emb:
             sim = _cosine(query_emb, item_emb)
@@ -355,6 +392,8 @@ class MuscleMemory:
                 score += 0.3 if (vector_fp and item.vector_fingerprint == vector_fp) else 0.0
         elif vector_fp and item.vector_fingerprint == vector_fp:
             score += 0.3
+        else:
+            score += 0.3 * _lexical_coverage(item.query_fingerprint, fingerprint)
 
         # 成功率加成
         total_uses = item.success_count + item.failure_count
@@ -363,6 +402,29 @@ class MuscleMemory:
             score += 0.1 * success_rate
 
         return min(score, 1.0)
+
+    @staticmethod
+    def _canonical_params(tool_name: str, parameters: Any) -> Dict[str, Any]:
+        """写侧参数归一：降级形状 `{"_raw": …}` 还原成规范 dict。
+
+        审计 L-07 的第一跳：文本模式的非 JSON 参数被降级成 `{"_raw": "k=v, k=v"}`，
+        再被肌肉记忆原样存下——命中后必然被参数校验拒，然后给结构身份粘一张永久
+        失败票。写侧就该存规范形状，而 key=value 解析器仓库里**已有一份**
+        （`tool_executor.ToolExecutor._parse_params`），此处复用同一份，不另写第二套。
+        """
+        if not isinstance(parameters, dict):
+            return {}
+        raw = parameters.get("_raw")
+        if not isinstance(raw, str) or not raw.strip():
+            return dict(parameters)
+        try:
+            from neurova.tool_executor import ToolExecutor
+
+            parsed = ToolExecutor._parse_params(raw)
+        except Exception:  # noqa: BLE001 - 解析器不可用时保持原样（fail-soft）
+            logger.debug("降级参数解析跳过: %s", tool_name, exc_info=True)
+            return dict(parameters)
+        return parsed if isinstance(parsed, dict) and parsed else dict(parameters)
 
     def record_usage(
         self,
@@ -393,6 +455,7 @@ class MuscleMemory:
         if metadata is None:
             metadata = {}
         metadata.update(kwargs)
+        parameters = self._canonical_params(tool_name, parameters)
         fingerprint = self._extract_keywords(query)
         vector_fp = self._text_to_embedding_hash(query)
         # T4：语义向量随条目入库（旧条目无该键 → _compute_confidence 逐位回落，
@@ -543,15 +606,51 @@ class MuscleMemory:
             self._l3[item.id] = item
             logger.debug("Demoted %s... L2 -> L3", item.id[:8])
 
+    # 拉丁侧停用词（CJK 侧不适用：中文虚词以字符参与 n-gram 才有意义）
+    _STOPWORDS = frozenset({"the", "a", "an", "is", "are", "to", "of", "and", "or"})
+    # 指纹 token 上限。旧值 20 是"拉丁词数"的量级；改成字符 n-gram 后同一句
+    # 会切出更多 token，按 20 截断会让长句的后半段完全失去区分度。
+    _MAX_FINGERPRINT_TOKENS = 96
+
     def _extract_keywords(self, text: str) -> str:
-        """提取关键词指纹"""
-        # 移除标点和特殊字符，分词
-        cleaned = re.sub(r"[^\w\s]", " ", text.lower())
-        words = cleaned.split()
-        # 移除停用词
-        stopwords = {"的", "了", "是", "在", "有", "和", "与", "the", "a", "an", "is", "are", "to"}
-        keywords = sorted(set(w for w in words if w not in stopwords and len(w) > 1))
-        return ",".join(keywords[:20])
+        """提取查询指纹（自研字符 n-gram 口径，零新增第三方依赖）。
+
+        旧实现用 `[^\w\s]` + `split()`：中文整句在 `\w` 下是**一个** token，
+        于是"指纹相等"退化成"整串相等"，近似问法（今天↔明天、换实体）恒不命中，
+        打分在 0.6 / 0.343 处断层。改为：拉丁词按词、CJK 连续段按 2-gram 保序切分，
+        实词片段可精确重叠——与知识库批次的分词口径同源（`_tokenize_for_match`），
+        不引入分词/向量依赖。
+        """
+        cleaned = re.sub(r"[^\w\s]", " ", (text or "").lower())
+
+        def _segment(buffer: List[str], cjk: bool) -> List[str]:
+            run = "".join(buffer)
+            if not run:
+                return []
+            if cjk:
+                # CJK 段同时切 1-gram 与 2-gram：2-gram 保序区分"天气/气天"这类
+                # 换序，1-gram 让"只改一处实体"的近似问法仍保有大部分重叠。
+                # 只留 2-gram 时该场景的重叠率只有 6/8，达不到自动执行档位。
+                return list(run) + [run[i:i + 2] for i in range(len(run) - 1)]
+            return [run] if len(run) > 1 and run not in self._STOPWORDS else []
+
+        tokens: List[str] = []
+        buffer: List[str] = []
+        in_cjk = False
+        for ch in cleaned:
+            char_is_cjk = "\u4e00" <= ch <= "\u9fff"
+            if ch.isspace() or char_is_cjk != in_cjk:
+                tokens.extend(_segment(buffer, in_cjk))
+                buffer = []
+                in_cjk = char_is_cjk
+            if not ch.isspace():
+                buffer.append(ch)
+        tokens.extend(_segment(buffer, in_cjk))
+        if not tokens:
+            # 纯标点/单字符输入：退回整串原样，保持"空指纹不产生虚假匹配"契约
+            stripped = (text or "").strip()
+            return stripped if len(stripped) > 1 else ""
+        return ",".join(sorted(set(tokens))[: self._MAX_FINGERPRINT_TOKENS])
 
     def _text_to_embedding_hash(self, text: str) -> str:
         """生成文本的哈希指纹"""

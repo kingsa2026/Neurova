@@ -289,6 +289,27 @@ class ToolMemoryIntegration:
             "muscle_memory_hits": muscle_memory_hits,
         }
 
+    @staticmethod
+    def params_executable(tool_name: str, params: Any) -> bool:
+        """参数形状是否可执行：走与执行咽喉同一份参数校验（单源，不另写判据）。
+
+        审计 L-07 的病灶是"降级参数被原样存下、命中后原样送执行"——每一次都必然
+        被参数校验拒掉，然后往结构身份上粘一张永久失败票。判定必须落在**参数形状
+        本身**（能不能通过 required 校验），而不是落在"这条工具叫什么名字"。
+
+        校验器不可用时按"可执行"放行（fail-soft）：本判据只做收紧，不允许因为
+        依赖缺席把整条肌肉记忆臂关掉。
+        """
+        if not isinstance(params, dict):
+            return False
+        try:
+            from neurova.security.tool_arg_validator import validate_tool_args
+
+            _, errors = validate_tool_args(tool_name, params)
+        except Exception:  # noqa: BLE001 - 校验器不可用时不收紧
+            return True
+        return not errors
+
     def check_tool_memory(self, user_input: str) -> tuple:
         """
         检查工具记忆，返回 (tool_memory_result, tool_decision)
@@ -345,6 +366,19 @@ class ToolMemoryIntegration:
                                 },
                             )
                         )
+
+                    # 参数形状门（工单 007 止血）：形状不可执行的条目**封顶在
+                    # `suggest`**，降级为文字提示注入（context/orchestrator 的
+                    # `[工具记忆]` 通道），不进自动执行分支。命中记账照旧（命中
+                    # 就是命中），只改裁定档位。
+                    # 不删条目、不改指纹口径——终态解在 008（写侧改存规范 dict）。
+                    if not self.params_executable(tool_name, best_item.parameters):
+                        logger.info(
+                            "肌肉记忆命中 %s 但参数形状不可执行，降级为提示（不自动执行）",
+                            tool_name,
+                        )
+                        result["param_shape_blocked"] = True
+                        return result, "suggest"
 
                     if confidence >= dynamic_threshold:
                         return result, "auto_execute"
