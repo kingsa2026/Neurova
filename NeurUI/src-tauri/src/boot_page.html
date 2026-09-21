@@ -123,7 +123,7 @@ let dlRunning = false
 async function checkReady() {
   if (!invoke) return
   try {
-    const r = await invoke('check_runtime_ready', { root: await getRoot() })
+    const r = await invoke('check_runtime_ready')
     if (r.ready) {
       enterBoot()
     } else {
@@ -132,16 +132,6 @@ async function checkReady() {
     }
   } catch (e) {
     appendDlLog('检查运行环境失败: ' + e, true)
-  }
-}
-
-async function getRoot() {
-  // 开发态：仓库根；打包态：resource_dir/backend
-  try {
-    const r = await invoke('tauri', { __tauriModule: 'path', cmd: 'resolveResource', path: 'backend' })
-    return r
-  } catch (e) {
-    return '.'
   }
 }
 
@@ -189,7 +179,7 @@ async function dlAll() {
   while (waited < 120) {
     await sleep(2000)
     try {
-      const r = await invoke('check_runtime_ready', { root: await getRoot() })
+      const r = await invoke('check_runtime_ready')
       if (r.ready) {
         enterBoot()
         return
@@ -214,7 +204,7 @@ async function dlOne(id) {
   if (st) { st.className = 'status wait'; st.textContent = '下载中...' }
   
   try {
-    await invoke('start_download', { root: await getRoot(), what: id })
+    await invoke('start_download', { what: id })
     // 启动后台下载后，状态由轮询更新
   } catch (e) {
     if (st) { st.className = 'status fail'; st.textContent = '失败' }
@@ -269,10 +259,8 @@ function enterBoot() {
   
   // 通知 Rust 启动后端
   if (invoke) {
-    getRoot().then(root => {
-      invoke('trigger_backend_start', { root }).catch(e => {
-        appendLog('[boot] 启动后端失败: ' + e, true)
-      })
+    invoke('trigger_backend_start').catch(e => {
+      appendLog('[boot] 启动后端失败: ' + e, true)
     })
   }
   
@@ -289,6 +277,7 @@ let progress = 6
 let stageIdx = -1
 let done = false
 let failCount = 0
+let logOffset = 0
 
 const STAGES = [
   [20, '正在初始化数据库',    /Database tables initialized|sqlite|SQLite/i],
@@ -338,7 +327,8 @@ async function tick() {
     return
   }
   try {
-    const p = await invoke('boot_tail', { logOffset: 0 })
+    const p = await invoke('boot_tail', { logOffset })
+    if (typeof p.offset === 'number') logOffset = p.offset
     failCount = 0
     for (const line of p.lines || []) {
       appendLog(line)
@@ -348,7 +338,7 @@ async function tick() {
     }
     const backend = String(p.backend || '')
     if (backend.startsWith('exited')) {
-      bootDone(false, '后端进程已退出，详见安装目录 backend\\backend.log')
+      bootDone(false, '后端进程已退出，详见日志：' + (p.logPath || 'logs/ 目录'))
     } else if (backend === 'running') {
       progress = Math.max(progress, 12)
       fillEl.style.width = progress + '%'
