@@ -115,7 +115,7 @@ const dlAllBtn = document.getElementById('dl-all-btn')
 const dlRetryBtn = document.getElementById('dl-retry-btn')
 
 let appPhase = 'check' // check | download | boot
-let missingItems = []
+const doneIds = new Set()
 let dlRunning = false
 
 // ---- 运行时检查 ----
@@ -127,8 +127,7 @@ async function checkReady() {
     if (r.ready) {
       enterBoot()
     } else {
-      missingItems = r.missing || []
-      enterDownload(missingItems)
+      enterDownload(r.missing || [])
     }
   } catch (e) {
     appendDlLog('检查运行环境失败: ' + e, true)
@@ -136,6 +135,22 @@ async function checkReady() {
 }
 
 // ---- 下载界面 ----
+
+const LABELS = { python: 'Python 运行环境', node: 'Node.js', models: 'AI 模型文件', deps: 'Python 依赖' }
+
+function addRow(id) {
+  if (document.getElementById('dl-row-' + id)) return
+  const row = document.createElement('div')
+  row.className = 'dl-row'
+  row.id = 'dl-row-' + id
+  row.innerHTML = `
+    <span class="name">${LABELS[id] || id}</span>
+    <span class="pct" id="dl-pct-${id}">0%</span>
+    <span class="status wait" id="dl-st-${id}">等待中</span>
+    <button class="dl-btn" id="dl-btn-${id}" onclick="dlOne('${id}')">下载</button>
+  `
+  dlList.appendChild(row)
+}
 
 function enterDownload(missing) {
   appPhase = 'download'
@@ -146,20 +161,8 @@ function enterDownload(missing) {
   dlAllBtn.style.display = 'inline-block'
   dlAllBtn.disabled = false
   dlRetryBtn.style.display = 'none'
-  
-  const labels = { python: 'Python 运行环境', node: 'Node.js', models: 'AI 模型文件' }
-  for (const id of missing) {
-    const row = document.createElement('div')
-    row.className = 'dl-row'
-    row.id = 'dl-row-' + id
-    row.innerHTML = `
-      <span class="name">${labels[id] || id}</span>
-      <span class="pct" id="dl-pct-${id}">0%</span>
-      <span class="status wait" id="dl-st-${id}">等待中</span>
-      <button class="dl-btn" id="dl-btn-${id}" onclick="dlOne('${id}')">下载</button>
-    `
-    dlList.appendChild(row)
-  }
+
+  missing.forEach(addRow)
   // 自动开始下载
   setTimeout(dlAll, 600)
 }
@@ -169,29 +172,37 @@ async function dlAll() {
   dlRunning = true
   dlAllBtn.disabled = true
   dlRetryBtn.style.display = 'none'
-  
-  for (const id of missingItems) {
-    await dlOne(id)
-  }
-  
-  // 等待就绪
-  let waited = 0
-  while (waited < 120) {
-    await sleep(2000)
+
+  // missing 会随安装推进而变：deps 只有在 Python 落地后才成为缺失项，
+  // 照首帧快照逐项安装永远轮不到它。每轮重取清单，跳过已完成的组件。
+  for (let round = 0; round < 6; round++) {
+    let r
     try {
-      const r = await invoke('check_runtime_ready')
-      if (r.ready) {
-        enterBoot()
-        return
-      }
-      // 更新进度
-      if (r.download && r.download.phase !== 'idle') {
-        updateDlProgress(r.download)
-      }
+      r = await invoke('check_runtime_ready')
     } catch (e) {
-      // 忽略轮询错误
+      appendDlLog('检查运行环境失败: ' + e, true)
+      break
     }
-    waited += 2
+    if (r.ready) break
+    const pending = (r.missing || []).filter(id => !doneIds.has(id))
+    if (!pending.length) break
+    pending.forEach(addRow)
+    dlStage.textContent = `正在准备 ${pending.length} 个组件`
+    for (const id of pending) {
+      await dlOne(id)
+      doneIds.add(id)
+    }
+  }
+
+  try {
+    const fin = await invoke('check_runtime_ready')
+    if (fin.ready) {
+      dlRunning = false
+      enterBoot()
+      return
+    }
+  } catch (e) {
+    // 交给下面的重试入口
   }
   dlRetryBtn.style.display = 'inline-block'
   dlRunning = false
@@ -201,14 +212,28 @@ async function dlOne(id) {
   const btn = document.getElementById('dl-btn-' + id)
   if (btn) btn.disabled = true
   const st = document.getElementById('dl-st-' + id)
-  if (st) { st.className = 'status wait'; st.textContent = '下载中...' }
-  
+  if (st) { st.className = 'status wait'; st.textContent = id === 'deps' ? '安装中...' : '下载中...' }
+
+  // start_download 只是把活儿丢给后台线程就返回，必须等这一件从 missing 里消失
+  // 再起下一件：deps 排在 python 之后，并发跑就会在没有解释器时执行 pip。
+  const budget = id === 'deps' ? 1800 : 600
   try {
     await invoke('start_download', { what: id })
-    // 启动后台下载后，状态由轮询更新
+    for (let waited = 0; waited < budget; waited += 2) {
+      await sleep(2000)
+      const r = await invoke('check_runtime_ready')
+      if (!(r.missing || []).includes(id)) {
+        if (st) { st.className = 'status ok'; st.textContent = '完成' }
+        return
+      }
+      const d = r.download || {}
+      if (d.phase === id) updateDlProgress(d)
+      if (d.phase === 'error') throw (d.error || d.message || '安装失败')
+    }
+    throw '超时'
   } catch (e) {
     if (st) { st.className = 'status fail'; st.textContent = '失败' }
-    appendDlLog(`${id} 下载启动失败: ${e}`, true)
+    appendDlLog(`${id} 失败: ${e}`, true)
   }
 }
 

@@ -34,6 +34,10 @@
 11. 失败提示里的日志路径只能来自 BOOT_LOG_PATH，且 boot 页拉日志要推进 offset——
     写死的 backend\\backend.log 让用户照着找不到文件，固定 logOffset: 0 则每
     700ms 重读整份日志。
+12. 依赖供给与运行时下载同构：清单文件必须随包发运，pip 索引候选写在
+    models/MANIFEST.json 的 runtime.pip（镜像在前、官方兜底），就绪判据是
+    「探针导得动」而不是「解释器在场」；boot 页必须串行安装——pip 抢在
+    解释器落地前跑就是白装。
 """
 import json
 import re
@@ -275,6 +279,128 @@ class TestPythonArchiveExtraction:
             "tar 失败时未取 stderr，真因会被抹成「文件不完整」"
         )
         assert not re.search(r'let _ = Command::new\("tar"\)', body), "tar 的调用结果被 let _ = 丢弃"
+
+
+class TestDependencySupplyIsShipped:
+    """首启 pip 装依赖的前提：清单文件得真的在包里，且它只声明运行时所需。
+
+    真机取证：下载来的裸 CPython 起后端即 ModuleNotFoundError: uvicorn。要修它，
+    先得让 requirements.txt 进包——它此前既不在 bundle_backend 的拷贝清单里，
+    也不在 tauri.conf.json 的 resources 里，目标机上根本没有这份文件。
+    """
+
+    def test_requirements_file_ships_in_the_package(self):
+        conf = json.loads(
+            (_REPO / "NeurUI" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8")
+        )
+        targets = set((conf.get("bundle", {}).get("resources") or {}).values())
+        assert "backend/requirements.txt" in targets, (
+            f"requirements.txt 未随包发运，首启 pip 没有可装的清单。resources 现有: {sorted(targets)}"
+        )
+
+    def test_bundle_stages_requirements(self):
+        src = (_REPO / "scripts" / "desktop" / "bundle_backend.py").read_text(encoding="utf-8")
+        assert "requirements.txt" in src, "bundle_backend.py 没把 requirements.txt 拷进暂存区"
+
+    def test_runtime_profile_excludes_test_only_packages(self):
+        """pytest 三件在 requirements-ci.txt 已声明，运行时清单里再抄一份是重复声明。"""
+        declared = set()
+        for line in (_REPO / "requirements.txt").read_text(encoding="utf-8").splitlines():
+            line = line.split("#")[0].strip()
+            if line:
+                declared.add(re.split(r"[<>=!\[]", line)[0].strip().lower())
+        offenders = declared & {"pytest", "pytest-asyncio", "pytest-cov"}
+        assert not offenders, (
+            f"开发件混进运行时清单（会被装进用户机器）: {sorted(offenders)}"
+        )
+        ci = (_REPO / "requirements-ci.txt").read_text(encoding="utf-8")
+        assert "pytest" in ci, "requirements-ci.txt 不再声明 pytest，CI 会被抽掉测试框架"
+
+
+class TestFirstRunInstallsDependencies:
+    """首启必须把后端依赖装上，且判据是「后端导得动」而不是「文件存在」。
+
+    真机取证：runtime 下载与落地全通，后端仍死在 ModuleNotFoundError: uvicorn——
+    就绪判定只看 python.exe/node.exe/模型目录，于是「装好了」与「起得来」被混为
+    一谈。本切片把依赖安装接进同一条候选源回退链路，并把就绪判据换成导入探针。
+    """
+
+    def _pip(self) -> dict:
+        return (_manifest().get("runtime") or {}).get("pip") or {}
+
+    def test_manifest_declares_pip_supply(self):
+        pip = self._pip()
+        assert pip.get("requirements") == "requirements.txt", (
+            f"清单未声明要装什么: {pip}"
+        )
+        urls = pip.get("indexUrls") or []
+        assert len(urls) >= 2, f"pip 索引至少要一个镜像 + 官方兜底: {urls}"
+        assert "pypi.org/simple" in urls[-1], f"末位必须是官方 PyPI 兜底: {urls[-1]}"
+        assert "pypi.org/simple" not in urls[0], f"首位应是国内镜像: {urls[0]}"
+        for u in urls:
+            assert u.startswith("https://") and u.endswith("/simple/"), f"索引 URL 形状不对: {u}"
+        # 就绪探针要一个可执行的判据，且与 CI 的「最小 import 面」保持同一批模块
+        probe = pip.get("probe") or []
+        assert {"fastapi", "uvicorn"} <= set(probe), (
+            f"探针 import 面至少覆盖后端入口的硬依赖: {probe}"
+        )
+
+    def test_lib_rs_has_no_hardcoded_index_url(self):
+        offenders = re.findall(r'"(https://[^"]*pypi[^"]*)"', _code_only(_SRC))
+        assert not offenders, f"lib.rs 内仍硬编码 pip 索引，版本/源又要变两份抄本: {offenders}"
+
+    def test_readiness_probes_importability_not_file_presence(self):
+        """就绪判据必须包含依赖探针导入，否则「就绪」只意味着解释器在场。"""
+        body = re.search(r"fn is_runtime_ready\(.*?\n\}", _SRC, re.S)
+        assert body, "lib.rs 找不到 is_runtime_ready"
+        assert "deps_ready" in body.group(0), "is_runtime_ready 未纳入依赖就绪探针"
+        missing = re.search(r"fn get_missing\(.*?\n\}", _SRC, re.S)
+        assert missing, "lib.rs 找不到 get_missing"
+        assert '"deps"' in missing.group(0), "get_missing 未上报 deps 项"
+
+    def test_download_dispatch_supports_deps(self):
+        dispatch = re.search(r"fn start_download\(.*?\n\}\n", _SRC, re.S)
+        assert dispatch, "lib.rs 找不到 start_download"
+        body = dispatch.group(0)
+        assert '"deps"' in body, "start_download 未派发 deps 目标"
+        assert "install_python_dependencies" in body, "deps 目标没接到安装函数"
+
+    def test_boot_page_labels_the_deps_component(self):
+        assert "deps" in _BOOT_SRC, "boot 页没有 deps 组件行，用户看不到这一阶段"
+
+
+    def test_components_install_in_dependency_order(self):
+        """start_download 立刻返回，前端必须等本组件落地再起下一件。
+
+        deps 依赖 python 解释器在场；并发发起时 pip 会在裸解释器上跑，
+        装完也是白装（这正是本切片要消灭的失败）。
+        """
+        m = re.search(r"async function dlOne\(.*?\n\}\n", _BOOT_SRC, re.S)
+        assert m, "boot 页找不到 dlOne"
+        body = m.group(0)
+        assert "includes(id)" in body, "dlOne 未等待本组件从 missing 中消失，deps 会与 python 并发跑"
+        assert "budget" in body, "deps 安装需要比下载更长的等待预算"
+
+
+    def test_missing_list_is_re_read_as_install_progresses(self):
+        """deps 只有在解释器落地后才成为缺失项，首帧快照里没有它。
+
+        真机取证：python/node 装完后状态文件停在那儿九分钟不动——boot 页按
+        首帧 missing 逐项安装，永远不会轮到尚未出现的 deps。安装循环必须每轮
+        重取清单，并跳过已完成的组件。
+        """
+        m = re.search(r"async function dlAll\(.*?\n\}\n", _BOOT_SRC, re.S)
+        assert m, "boot 页找不到 dlAll"
+        body = m.group(0)
+        assert body.count("check_runtime_ready") >= 2, (
+            "dlAll 未在安装推进中重取 missing 清单，后出现的组件永远不被派发"
+        )
+        assert "doneIds" in body, "重取清单后需要跳过已完成组件，否则循环不会收敛"
+
+    def test_rows_are_added_for_late_components(self):
+        m = re.search(r"function addRow\(.*?\n\}\n", _BOOT_SRC, re.S)
+        assert m, "boot 页没有 addRow：安装中途新出现的组件没有对应的行"
+        assert "appendChild" in m.group(0)
 
 
 class TestBackendFailureIsVisible:
