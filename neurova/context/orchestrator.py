@@ -88,6 +88,10 @@ class ContextOrchestrator:
     # P0-2：自动压缩默认开启（类级默认兜底 __new__ 直构路径；__init__ 按 env 覆盖）
     auto_compact_enabled: bool = True
 
+    # D2：折叠摘要缓存槽上限。声明为类级常量——`__new__` 直构路径（测试/工具）
+    # 不跑 __init__ 也要能取到，否则一次实例化方式差异就让缓存失去上限。
+    _WINDOW_CACHE_SLOTS: int = 8
+
     def __init__(
         self,
         agent_ref,
@@ -108,7 +112,14 @@ class ContextOrchestrator:
         # _window_compaction_cache: session_id -> {"summary", "covered_hashes"}
         # （已摘要覆盖的消息 hash，跨轮增量摘要不重复调 LLM）
         self._window_summarizer = None
+        # 折叠摘要缓存：按**轮次作用域**分槽（`chat_room_id or session_id`），
+        # 每槽 {"summary", "covered", "last_count"}。
+        # P1-1：旧实现按 `self.session_id or "_"` 记账，而 session_id 恒 None
+        # → 整个 Agent 生命周期内所有会话共用一条摘要（B 会话视图注入 A 会话摘要）。
         self._window_compaction_cache: dict = {}
+        # 本轮协作语境（_resolve_turn_scope 的输入；build_context 每轮刷新）
+        self._turn_collab: bool = False
+        self._turn_room_id: str = ""
         # 增量防抖阈值（类级常量语义）：距上次摘要新追加消息数 ≤ 此值时复用缓存摘要
         self._DELTA_RESUMMARY_MSGS = 4
         # 本轮刚折叠消息的 hash 集（当轮 draw 防召回；下轮起正常参与语义召回）
@@ -183,27 +194,49 @@ class ContextOrchestrator:
             self.context_pool = None
 
     def set_session_id(self, session_id: str) -> None:
-        """根因 C 修复: 运行时切换 session_id（用于跨 session 调取）
+        """显式设置实例级 session 归属。
 
-        RES-P2-4：切换时裁剪 _window_compaction_cache——该缓存按 session_id
-        记账（每会话一条摘要+hash 集合）且此前永不清理，Agent 长期服务多
-        会话时随历史会话数无界增长。摘要可随时按未覆盖消息重建（零丢失），
-        只保留当前会话条目即可。
+        D2（三链路审计裁决）：原实现里"切换时裁剪 _window_compaction_cache"
+        是缓存无界增长的唯一出口，但该出口从未被生产调用（零调用点）。
+        裁剪职责已收口到 `_window_cache_slot()` 的槽位上限，本方法只保留
+        赋值语义 —— 不再承担缓存治理。
         """
         self._session_id = session_id
         if self.context_pool is not None:
             self.context_pool.session_id = session_id
-        cache = self._window_compaction_cache
-        if len(cache) > 1:
-            keep_key = session_id or "_"
-            kept = cache.pop(keep_key, None)
-            cache.clear()
-            if kept is not None:
-                cache[keep_key] = kept
 
     @property
     def session_id(self) -> Optional[str]:
         return self._session_id
+
+    def _resolve_turn_scope(self) -> str:
+        """本轮作用域（单源）：协作群轮 = `room:<房间 id>`，其余 = `direct`。
+
+        委托 `collaboration.memory_scope.scope_tag_for_turn`——池的写入咽喉、
+        折叠摘要缓存键、读侧过滤全用同一个判据，不给第二份归一留口子。
+        """
+        from neurova.collaboration.memory_scope import scope_tag_for_turn
+
+        room_id = getattr(self, "_turn_room_id", "") or ""
+        return scope_tag_for_turn(collab=bool(getattr(self, "_turn_collab", False)), room_id=room_id)
+
+    def _window_cache_slot(self, key: str) -> dict:
+        """取（或建）折叠摘要缓存槽，并把槽数钳在上限内（LRU 近似的插入序淘汰）。
+
+        P1-1/D2：键必须是真作用域（旧实现恒 `"_"`，跨会话串台）；槽数必须有
+        上限（旧实现的唯一出口是已退役的 `set_session_id` 裁剪）。
+        """
+        cache = self._window_compaction_cache
+        slot = cache.get(key)
+        if slot is None:
+            slot = {"summary": "", "covered": set(), "last_count": 0}
+            cache[key] = slot
+            while len(cache) > self._WINDOW_CACHE_SLOTS:
+                oldest = next(iter(cache))
+                if oldest == key:
+                    break
+                cache.pop(oldest, None)
+        return slot
 
     # ---- 属性代理（方便内部访问） ----
     @property
@@ -553,11 +586,27 @@ class ContextOrchestrator:
             # 目标：① 省 token（无关归档不进视图）② 永不丢失 ③ 缓存命中
             # ════════════════════════════════════════════════════════
 
+            # P0-2：本轮作用域——归档那一刻就要随内容落进 metadata。
+            # 读侧 `filter_by_scope` 的唯一判据是 `metadata["chat_scope"]`（缺失则
+            # 退到 session_id 前缀，再缺则恒判 direct）→ 写入侧不打标，闸口形同虚设。
+            # 与记忆侧共用 `scope_tag_for_turn`（单源），群轮 = room:<房间 id>。
+            from neurova.collaboration.memory_scope import scope_tag_for_turn
+
+            self._turn_collab = bool(chat_collab)
+            self._turn_room_id = chat_room_id or (self._session_id or "")
+            turn_scope = scope_tag_for_turn(collab=self._turn_collab, room_id=self._turn_room_id)
+            turn_session = chat_room_id or self._session_id or None
+
+            # 池的唯一写入咽喉据此给**全部**写入方打作用域（含 swarm/voice/
+            # 摘要回写等旁路）——写入侧单点接线，读侧闸口才有据可判。
+            self.context_pool.turn_scope = turn_scope
+            self.context_pool.session_id = turn_session
+
             # 归档对话轮次（老轮次可被后续语义召回 → 对话永不丢失）
             # P1-1①：写入侧打标 + tool 结果以 TOOL_CALL 源归档（带 pairs_with）
             self._archive_conversation_to_pool(conversation_context)
 
-            # 归档记忆
+            # 归档记忆（作用域由池的写入咽喉统一打标，见 pool.turn_scope）
             for memory in relevant_memories or []:
                 if isinstance(memory, dict):
                     content = memory.get("content", str(memory))
@@ -603,7 +652,9 @@ class ContextOrchestrator:
             window_budget = self._compute_window_budget(
                 system_instructions, developer_instructions, tools_desc
             )
-            window_msgs = await self._apply_window_budget(conversation_context, window_budget)
+            window_msgs = await self._apply_window_budget(
+                conversation_context, window_budget, cache_key=turn_scope
+            )
             # microcompact（Anthropic context editing 对齐，2026-09-10）：
             # 保留最近 3 个工具结果原文，更早的替换为占位指针（池归档无损、
             # 可凭 [历史回忆] 召回）。工具输出通常占窗口大头，先清它比折叠
@@ -1129,6 +1180,7 @@ class ContextOrchestrator:
         self,
         conversation_context: list,
         budget_tokens: int,
+        cache_key: Optional[str] = None,
     ) -> list:
         """窗口预算裁剪：未超预算原样返回；超预算折叠老消息为摘要行 + 尾部窗口。
 
@@ -1166,9 +1218,7 @@ class ContextOrchestrator:
                 if isinstance(m, dict) and (m or {}).get("content")
             ]
 
-        cache = self._window_compaction_cache.setdefault(
-            self.session_id or "_", {"summary": "", "covered": set()}
-        )
+        cache = self._window_cache_slot(cache_key or self._resolve_turn_scope())
         # 增量防抖：距上次成功摘要新追加的消息数 ≤ 阈值时复用缓存摘要
         # （省一轮摘要 LLM——实测摘要链路 30s+，每轮重调不可接受）。
         # 未覆盖的消息仍归档在池中，零丢失。
@@ -1264,9 +1314,7 @@ class ContextOrchestrator:
         # 与 auto 路径同源（_resolve_window_token_budget → _window_token_budget
         # 覆盖生效），保证测试/运维显式预算下两路结论一致
         budget = max(1500, self._resolve_window_token_budget() // 2)
-        cache = self._window_compaction_cache.setdefault(
-            self.session_id or "_", {"summary": "", "covered": set()}
-        )
+        cache = self._window_cache_slot(self._resolve_turn_scope())
 
         compaction = await compact_window(
             msgs,

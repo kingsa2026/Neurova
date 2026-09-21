@@ -203,3 +203,7 @@ tests/unit/cognitive_layers/memory_layer/test_temperature_single_source.py
 #   （P0-1 根因：BALANCED 对英文/JSON/无空格长串低估 20 倍量级 → 折叠永不触发）
 tests/unit/context/test_token_estimator_calibration.py
 tests/unit/context/test_token_estimation_inconsistency.py
+# 上下文三链路修复批（Issue #90）B2 隔离写入口：归档即带作用域（群聊不泄入单聊）
+#   + 折叠摘要缓存按真作用域分槽（P1-1 跨会话串台）+ D2 缓存槽上限收口
+tests/unit/context/test_pool_scope_wiring.py
+tests/context/test_context_pool_hash_index.py
