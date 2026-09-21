@@ -357,17 +357,6 @@ main:
 #   DSCoder 只保留 max 模式，取消 low / high 两档（顶层 key 与 settings.yml
 #   角色定义同步删除，守卫同步收敛）。
 #   现在：@kingsa2026/neurova(DSCoder) 即 max 档；@...(DSCoder-max) 等价。
-#
-# 为何必须显式禁止 sleep 轮询（2026-09-21，本仓实测事故）：
-#   构建 cnb-f1c-1k31garu5（Issue #76 上报）在 2h 硬上限处被平台掐断，
-#   报错文案是「构建环境异常终止，或流水线超过最大运行时长（2h）」，
-#   真实原因是 Agent 自己把时间睡完了——日志里连续出现
-#     `sleep 300` / `sleep 420` / `sleep 480` 串起等待，
-#   叠加一次 20 分 39 秒的全量 pytest，251 轮就吃满 7262s。
-#   这不是平台故障，是 Agent 行为缺陷：平台已有构建后唤回的 NPC 机制
-#   （见 cnb-pipeline skill「修后不轮询」），Agent 无需自己等 CI。
-#   故在三处 NPC 人设文件（.cnb/settings.yml、.cnb/skills/*/SKILL.md）之外，
-#   流水线侧再写一次硬禁令：任何 ≥60s 的等待都必须换成「推送后结束」。
 # ============================================================================
 # ── max 档（唯一档位）：@kingsa2026/neurova(DSCoder) / (DSCoder-max) ────────
 # $ 与 DSCoder-max 两个挂载点各写一份事件定义（均落 thinkingLevel: xhigh），
@@ -387,15 +376,17 @@ $:
           options:
             # 不写 model = 走平台默认模型（规避 400）；
             # 想锁定底座模型时，填平台真实存在的 model ID（不带思考强度后缀）。
-            # maxTurns 收敛：500 是「单轮任务足够宽裕」的直觉值，但它同时是
-            # **单次构建的最坏耗时上限** —— Agent 每轮 = 一次 LLM 调用 + 若干
-            # 容器命令，实测命中 2h（7200s）平台硬上限时只跑到第 251 轮，
-            # 即每轮均摊约 29s。500 轮 × 29s ≈ 4h，远超 2h 上限：一旦任务
-            # 期间出现长命令（全量 pytest 一轮就 20 分钟），构建必定在
-            # maxTurns 之前被平台掐断，用户只看到「环境异常终止」。
-            # 故压到 120 轮（均摊约 58 分钟），给长命令留出余量，让 Agent
-            # 有机会在超时前自己收尾并给出结论。
-            maxTurns: 120
+            #
+            # 为何不再压 maxTurns（2026-09-21 复盘）：
+            #   本 PR 初版曾把本值压到 120（≈58 分钟），理由是「maxTurns 同时
+            #   是单次构建的最坏耗时上限：500 轮 × 29s/轮 ≈ 4h，必然先被平台
+            #   2h 上限掐断」。维护者在 main 上显式把 $ 段调到 1000，方向相反：
+            #   轮数配额按「任务够用」给。因为实测 251 轮 / 7262s 证明「被掐断」
+            #   的根因不是轮数给多了，而是 (a) Agent 自己 sleep 轮询
+            #   （300s/420s/480s 串起等待）、(b) 单轮一次全量 pytest 就 20 分 39 秒。
+            #   修掉这两件事，时间预算才不会漏；硬压轮数只会让正常长任务死在半路。
+            #   故本值保持 1000，真正的硬禁令由下方「禁止 sleep 轮询」承担。
+            maxTurns: 1000
             contextWindow: 1m
             maxTokens: 48k
             # 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故落 xhigh。
@@ -409,9 +400,15 @@ $:
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           type: npc:go
           options:
-            maxTurns: 120
+            # 不写 model = 走平台默认模型（规避 400）；
+            # 想锁定底座模型时，填平台真实存在的 model ID（不带思考强度后缀）。
+            # maxTurns 取值理由见上方「为何不再压 maxTurns」；
+            # 两份事件定义必须逐字一致（test_ci_npc_config_guard.py 常驻校验）。
+            maxTurns: 1000
             contextWindow: 1m
             maxTokens: 48k
+            # 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故落 xhigh。
+            # 若后续平台开放 max 档，把本行改成 thinkingLevel: max 即可，其余不动。
             thinkingLevel: xhigh
 
 # 同档位别名：@kingsa2026/neurova(DSCoder-max) 与 DSCoder 完全一致。
