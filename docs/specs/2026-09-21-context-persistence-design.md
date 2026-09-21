@@ -312,7 +312,7 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 | A6 | 迁移幂等 + 防降级：v0 库迁到 v2 后重跑 migrate 返回空；伪造高版本库被拒 | `migrate()` 返回值 + `SchemaVersionError` |
 | A7 | 零停机：迁移窗口内并发写不停且不被长事务阻塞 | 并发写线程 + 记录停等 p95 上界 |
 | A8 | 隔离：群聊归档在单聊轮召回不可见，跨房间互不可见 | 走 `filter_by_scope` 同源判据 |
-| A9 | 启动代价：只登记不预载，启动对 DB 的读次数为常数 | 计数连接/查询次数或断言耗时上界 |
+| A9 | 启动代价：只登记不预载，启动对 DB 的读次数为常数 | 计数连接/查询次数或断言耗时上界；另观测：登记值随写入/GC 同步、登记失败可见、`draw`/`query` 零查库、`recall_evicted` 为唯一读路径（005） |
 
 **全部判据走先红后绿**（AGENTS.md 修复教义第 3 条）：先写断言现状缺陷的失败测试并实证它
 真的红，再最小实现转绿。红灯文件在转绿前不得进 `scripts/ci/protected_tests.txt`。
@@ -352,8 +352,24 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 | 工单 | 状态 | 交付物 | 证据 |
 |---|---|---|---|
 | 001 跨重启召回示踪弹 | ✅ 已交付 | `neurova/context_pool.py`（写穿点前移到 `add_context`）+ `tests/unit/context/test_context_persistence_restart.py` | 红灯 7 failed → 绿灯 7 passed；live-verify 真跨进程 `tests/manual/context_persistence_restart_90.py` |
+| 005 启动加载与热集回载 | ✅ 已交付 | `neurova/context_pool.py`（启动只登记 + `rehydrate`）+ `neurova/context/eviction_ledger_db.py`（`recentRows`）+ `neurova/core/metrics.py`（`ledger_rows` gauge） | 红灯 8 failed → 绿灯 12 passed；live-verify 稳态启动查询次数 2/2/2（库 0/200/5000 条）`tests/manual/context_pool_startup_load_90.py` |
 | 003 写侧批量提交 | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（常驻连接 + 批量事务）+ `neurova/context_pool.py`（`archiveBatch()` 事务边界）+ `neurova/context/orchestrator.py`（本轮归档收进一个批） | 红灯 10 failed → 绿灯 12 passed；live-verify 24 条/轮 233→1.03 ms（220–233×）`tests/manual/context_ledger_batching_90.py` |
 | 002 版本域与 v1 迁移 | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（`context_ledger` 版本域 + v1 迁移）+ `neurova/context_pool.py`（召回路径回填作用域/归档时刻）+ `tests/unit/context/test_context_ledger_migration.py` | 红灯 15 failed → 绿灯 17 passed；live-verify 真 v0 库经生产构造面迁移 `tests/manual/context_ledger_migration_90.py` |
+
+**005 对 D10 的偏离记录**：
+
+- **登记值不是"启动快照"而是增量读数**：D10 说启动只读一次 `COUNT(*)` 供
+  `get_retention_stats` / `/metrics`。若读数停在启动那一刻，对调用方就是一份**会过期**
+  的账（写了几千条仍显示启动值）。故登记一次 + 由本进程写入/GC 增量维护；
+  增量的判据是"这一行**是否真的插入了**"——`record()` 因此返回布尔值
+  （同内容去重命中为 False），不靠"自己数调用次数"糊一份可能与库不符的账。
+- **登记失败不静默降级**：`count()` 失败时池照常构造（内存归档不受影响），
+  但 `ledger.registered_at_startup` 变 False 并点名 `last_error`——读不出来的持久规模
+  必须以"不可用"形态暴露，不许看起来像一个正常的 0。
+- **指标接线是 A9 的必达路径**：登记值若无人读走就是"只写不读"的断点，
+  故新增 gauge `neurova_context_pool_ledger_rows` 并由 `observe_context_pools()` 填充。
+- **稳态 vs 首次启动分开读数**：旧库首次启动另付 002 的一次性迁移开销，
+  live-verify 把两个读数分别打印；把迁移混进"启动代价"就是拿一次性成本当常态。
 
 **003 对 D8 的偏离记录**：
 
