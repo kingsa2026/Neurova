@@ -18,6 +18,7 @@ import pathlib
 import pytest
 
 from neurova.knowledge.foundation.admission import (
+    SEGMENT_OWNERS,
     SEGMENT_STATUS,
     SEGMENTS,
     AdmissionRequest,
@@ -45,19 +46,21 @@ def _request():
     )
 
 
-class TestPlannedIsNotPending:
+class TestDelegatedIsNotPending:
     def test_factoryReportsNoPendingSegment(self, store):
         gate = productionAdmissionGate(store, toolVersion="unit")
 
         assert gate.pendingSegments() == [], (
-            "装配齐全的工厂不该再报缺段——报了就说明它报的是尚未建成的段，"
+            "装配齐全的工厂不该再报缺段——报了就说明它报的是别处负责或还没建的段，"
             "而那不是这次装配的缺口")
-        assert gate.plannedSegments() == ["indexing"]
+        assert gate.delegatedSegments() == ["indexing"], "另有归属的段如实另报"
+        assert gate.plannedSegments() == [], "入索引不是欠账，不许挂在 planned 栏"
 
-    def test_plannedSegmentIsNamedOnTheReceipt(self, store):
+    def test_delegatedSegmentIsNamedOnTheReceipt(self, store):
         receipt = productionAdmissionGate(store).admit(_request())
 
-        assert receipt.plannedSegments == ["indexing"]
+        assert receipt.delegatedSegments == ["indexing"]
+        assert receipt.plannedSegments == []
         assert receipt.pendingSegments == []
 
     def test_genuineGapIsStillNamedAndStillRefused(self, store):
@@ -76,7 +79,10 @@ class TestPlannedIsNotPending:
     def test_everySegmentHasADeclaredStatus(self):
         """段名册必须穷举 SEGMENTS：漏登记一段，它就会在两份读数里都消失。"""
         assert set(SEGMENT_STATUS) == set(SEGMENTS)
-        assert set(SEGMENT_STATUS.values()) <= {"wired", "planned"}
+        assert set(SEGMENT_STATUS.values()) <= {"wired", "delegated", "planned"}
+        # `delegated` 与 `planned` 不许互相冒充：前者必须点名归属，后者不许有归属。
+        assert set(SEGMENT_OWNERS) == {name for name, state in SEGMENT_STATUS.items()
+                                      if state == "delegated"}
 
 
 class TestRealCallSitesNoLongerNeedTheEscapeHatch:

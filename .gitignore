@@ -398,6 +398,14 @@ NeurUI/src-tauri/installer-wpf/bin/installer-shell.exe
 .jwt_secret
 .agents/
 
+# 污染清空 / 断言归正的一次性归档（`.pre-purge-*` / `.pre-regrade-*`）：
+# 库本体被 *.db 挡住，归档副本名挂库名之后就不在规则里了——单独补一条，
+# 否则每次运维动作都会在 git status 里留下一堆 68MB 的归档。
+*.db.pre-purge-*
+*.db.pre-regrade-*
+*.db-wal.pre-purge-*
+*.db-shm.pre-purge-*
+
 # 一次性迁移工具的操作产物（渲染核对截图，可再生，不入库）
 # 工具本体 scripts/import_kai_to_neurova.py 与它的回归 tests/unit/migration/ 已入库：
 # 私有方言来源（记忆库/快照/笔记）只有它管，产品入口是 scripts/ingest_memory.py。

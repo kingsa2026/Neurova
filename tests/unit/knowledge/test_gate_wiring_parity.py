@@ -59,8 +59,10 @@ class TestGateFactoryIsSingleSource:
             assert gate.pendingSegments() == [], (
                 "工厂必须把已实现的段全部接齐；这里冒出任何名字，"
                 "说明工厂又被各自装配绕过了")
-            assert gate.plannedSegments() == ["indexing"], (
-                "尚未建成的段另立一栏，不进拒写判据")
+            assert gate.delegatedSegments() == ["indexing"], (
+                "另有归属的段另立一栏（归属见 SEGMENT_OWNERS），不进拒写判据")
+            assert gate.plannedSegments() == [], (
+                "入索引不是欠账：把它报成 planned 就分不清欠账与分工了")
         finally:
             store.close()
 

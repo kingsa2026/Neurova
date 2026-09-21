@@ -12,11 +12,20 @@ from typing import Optional
 from contextlib import contextmanager
 
 from neurova.core.connection_pool import get_connection_pool, get_db_connection, close_all_pools
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
-# 默认数据库路径
-DEFAULT_DB_PATH = "neurova_memory.db"
+
+def defaultDbPath() -> str:
+    """默认库路径：由数据根推导的**绝对**路径。
+
+    原值 `neurova_memory.db` 是裸文件名，落点随进程 CWD 走（审计 2026-09-21 §7）。
+    保留 `DEFAULT_DB_PATH` 这个名字给旧调用方，但它现在是个按调用时解析的函数——
+    模块级常量会在导入期把根钉死，注入 `NEUROVA_DATA_DIR` 就晚了。
+    """
+    return str(get_data_root() / "neurova_memory.db")
+
 
 
 def get_db_conn(db_path: Optional[str] = None) -> sqlite3.Connection:
@@ -31,7 +40,7 @@ def get_db_conn(db_path: Optional[str] = None) -> sqlite3.Connection:
     Returns:
         sqlite3.Connection: 数据库连接
     """
-    path = db_path or DEFAULT_DB_PATH
+    path = db_path or defaultDbPath()
     pool = get_connection_pool(path)
     return pool.get_connection()
 
@@ -76,7 +85,7 @@ def get_short_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
     `:memory:` / 空路径不进池：池化对内存库无意义（池里那条连接持有的是
     另一个空库，借出者看到的是空 schema）。
     """
-    path = db_path or DEFAULT_DB_PATH
+    path = db_path or defaultDbPath()
     if not path or str(path).startswith(":memory:"):
         return _bare_connection(path)
     pool = get_connection_pool(str(path))
@@ -163,7 +172,7 @@ def database_connection(db_path: Optional[str] = None):
     Args:
         db_path: 数据库文件路径
     """
-    path = db_path or DEFAULT_DB_PATH
+    path = db_path or defaultDbPath()
     with get_db_connection(path) as conn:
         yield conn
 
