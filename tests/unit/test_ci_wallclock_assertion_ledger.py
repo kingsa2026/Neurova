@@ -71,16 +71,95 @@ def _derivesFromClock(node: ast.AST) -> bool:
     return False
 
 
+def _readsElapsed(node: ast.AST, elapsedNames: frozenset) -> bool:
+    """表达式是否读到已认定的耗时量（派生：`budget = elapsed * 3`）。"""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name) and sub.id in elapsedNames:
+            return True
+    return False
+
+
+def _isClockReading(node: ast.AST, instantNames: frozenset) -> bool:
+    """表达式是否给出一个**时刻**：裸时钟调用，或读到已认定的时刻量。"""
+    if _derivesFromClock(node):
+        return True
+    return isinstance(node, ast.Name) and node.id in instantNames
+
+
+def _isClockDifference(node: ast.AST, instantNames: frozenset) -> bool:
+    """表达式是否是「时钟差」——算一段用时，而不是把一个时刻做平移。
+
+    - `perf_counter() - t0`（减掉一个已记下的时刻）**是**用时；
+    - `time.time() - 31 * 86400`（减一个常量）**不是**用时，是"31 天前那个时刻"；
+    - `time.time() + 3600` 同理是过期时间戳。
+
+    三者都是"含时钟调用的运算"，只看有没有时钟调用会把后两者算成耗时——
+    假阳性会训练人忽略门禁（本仓早已写明这条理由）。
+    """
+    if not isinstance(node, ast.BinOp) or not isinstance(node.op, ast.Sub):
+        return False
+    left, right = node.left, node.right
+    if not _derivesFromClock(left):
+        left, right = right, left
+    if not _derivesFromClock(left) or isinstance(right, ast.Constant):
+        return False
+    return _isClockReading(right, instantNames)
+
+
 def _clockNames(tree: ast.AST) -> frozenset:
-    """模块里"由时钟函数算出"的局部变量名（`elapsed = t1 - t0` 这类）。"""
-    names = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and node.value is not None:
-            if _derivesFromClock(node.value):
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        names.add(target.id)
-    return frozenset(names)
+    """模块里"一份用时"的局部变量名（`elapsed = t1 - t0` 这类）。
+
+    传染式求不动点，覆盖三种**绕一手**的写法——判据还是同一条契约，只是多转了一手，
+    漏掉它们等于"改一处写法就能从门禁下溜过"：
+
+    - 差值：`elapsed = perf_counter() - t0`；
+    - 派生：`avg_time = elapsed / 5`（用时的变换仍是用时）；
+    - 收集：`samples.append(perf_counter() - t0)` 后 `median(samples) < 0.2`
+      （样本先入容器再取中位，"各 N 轮取中位"这类读数正是这么写的）。
+
+    报错面：**时刻**不是用时——`before = time.time()` / `expires_at = time.time() + 3600`
+    既不算用时，也不向下游传染（否则 `assert before <= s._last_activity <= after`
+    这类时刻区间断言会被误判成墙钟上界）。
+    """
+    instants: set = set()
+    elapsed: set = set()
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            targets: List[ast.Name] = []
+            if isinstance(node, ast.Assign) and node.value is not None:
+                value = node.value
+                if _isClockDifference(value, frozenset(instants)) or _readsElapsed(
+                    value, frozenset(elapsed)
+                ):
+                    bucket = elapsed
+                elif _derivesFromClock(value):
+                    bucket = instants
+                else:
+                    continue
+                targets = [t for t in node.targets if isinstance(t, ast.Name)]
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+            ):
+                # 用时样本入容器：容器名同样算用时（`median(samples)` 量的是用时）
+                if not any(
+                    _isClockDifference(arg, frozenset(instants))
+                    or _readsElapsed(arg, frozenset(elapsed))
+                    for arg in node.args
+                ):
+                    continue
+                bucket = elapsed
+                targets = [node.func.value]
+            else:
+                continue
+            for target in targets:
+                if target.id not in bucket:
+                    bucket.add(target.id)
+                    changed = True
+    return frozenset(elapsed)
 
 
 def _measureName(node: ast.AST) -> str:
@@ -102,8 +181,15 @@ def _isWallclockMeasure(node: ast.AST, clockNames: frozenset) -> bool:
     断言里的写法，没有任何"耗时变量名"可抓——漏了它，改一处写法就能从门禁
     下溜过去（门槛空过等于没有门槛）。
     """
-    if _derivesFromClock(node):
+    if _readsElapsed(node, clockNames):
         return True
+    # 就地写时钟：`assert perf_counter() - t0 < 0.5`（减常量才是时刻平移，不算耗时）
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Sub):
+        for side in (node.left, node.right):
+            if _derivesFromClock(side) and not isinstance(
+                node.right if side is node.left else node.left, ast.Constant
+            ):
+                return True
     name = _measureName(node)
     if not name:
         return False
@@ -146,9 +232,20 @@ def wallclockBounds(source: str) -> List[Tuple[int, str, str]]:
 #: 值 = (命中数, 结论)。命中数变了说明该用例的判据结构变了，必须重新逐条给结论
 #: ——不许靠"文件在集合里"整体放行（那等于其余命中点不写理由）。
 #:
-#: 当前为空：本批把受保护子集里全部 4 处墙钟上界断言改为结构不变量，见
-#: `CONVERTED_TO_INVARIANT`。留空不是"没有政策"，而是"此处不允许留墙钟"。
-WALLCLOCK_LEDGER: Dict[str, Tuple[int, str]] = {}
+#: 台账为空是默认政策（此处不允许留墙钟）；确需留墙钟的命中点必须逐条写明理由，
+#: 且**同一契约的结构面必须另有用例钉住**——只留比值等于把契约交给机器速度。
+WALLCLOCK_LEDGER: Dict[str, Tuple[int, str]] = {
+    "tests/unit/context/test_ledger_write_batching.py"
+    "::test_batch_round_is_far_below_per_row_shape": (
+        1,
+        "A2 的倍数本身是机时契约（同机同存量 A/B 比值），墙钟不可替代；"
+        "其结构面另由 test_round_uses_one_connection_and_one_transaction 钉住"
+        "（一轮 0 次新建连接 + 1 次 BEGIN + 1 次 COMMIT）。"
+        "原写法把「首次 token 估算器的冷加载」算进分子（实测 ~250ms），"
+        "分子恒为现状形状的 1.2 倍 ⇒ 在 CI 上必然判红，与本条契约无关；"
+        "已改为两侧预热后取 3 轮中位，实测 135–427×，对阈值 3× 有 45× 以上裕量",
+    ),
+}
 
 
 #: 已从"墙钟上界"改为"结构不变量"的命中点：键 = "<相对路径>::<用例名>"，值 = 理由。
@@ -248,21 +345,20 @@ class TestConvertedSitesStayStructural:
 #: 受保护子集**之外**的墙钟上界：CI 不跑它们，故不阻塞本批；但按教义第 5 条
 #: （放大视角）不得静默遗留——逐条登记，写明为何本轮不动。
 #:
-#: 本批只修"会让 CI 偶发红"的那批（即受保护子集内的 4 处，已全部改为结构不变量）。
+#: 本批只修"会让 CI 偶发红"的那批（受保护子集内已改结构不变量的 4 处 + 逐条登记的 1 处）。
 #: 子集外这些要么本意就是量真实机时（性能/超时类基准），要么被测对象是墙上时钟本身，
 #: 改动它们属于另一票的范围；此处登记以免"没人知道还有多少处"。
 OUTSIDE_SUBSET_LEDGER: Dict[str, int] = {
     "tests/api/test_channel_config_blocking_regression.py": 2,
     "tests/auth/test_security_integration.py": 3,
-    "tests/e2e/test_phase4_integration.py": 1,
+    "tests/e2e/test_phase4_integration.py": 2,
     "tests/integration/test_multi_agent_coordination.py": 1,
     "tests/performance/test_context_pool_load.py": 1,
-    "tests/unit/agent/test_b7_worker_occupancy.py": 1,
+    "tests/unit/agent/test_b7_worker_occupancy.py": 2,
     "tests/unit/agent/test_handle_tool_calls_parallel.py": 1,
     "tests/unit/agent/test_post_chat_pipeline_tdd.py": 1,
     "tests/unit/api/test_security_p0_audit_fixes.py": 1,
     "tests/unit/channels/test_wechat_ilink_qrcode.py": 1,
-    "tests/unit/computer_use/test_camofox_supervisor.py": 1,
     "tests/unit/context/test_context_pool_agent_core_integration.py": 1,
     "tests/unit/memory/test_moe_routing.py": 2,
     "tests/unit/neurflow/test_parallel_execution.py": 1,
@@ -349,6 +445,35 @@ class TestDetectorIsNotVacuous:
                 assert _maybeContainsWallclock(text), (
                     f"{rel} 含真命中却被预筛滤掉——本守卫会对它空转"
                 )
+
+    def test_detector_follows_clock_through_collected_samples(self):
+        """时钟样本先收进列表、再取中位：量的是墙钟，不得漏检。
+
+        `samples.append(perf_counter() - t0)` 之后 `median(samples) < 0.2` 与
+        教科书形态是同一个契约，只是多绕了一手；漏检等于"改一处写法即可绕过门禁"。
+        """
+        sample = (
+            "import time, statistics\n"
+            "def test_x():\n"
+            "    samples = []\n"
+            "    for _ in range(3):\n"
+            "        t0 = time.perf_counter()\n"
+            "        samples.append(time.perf_counter() - t0)\n"
+            "    assert statistics.median(samples) < 0.2\n"
+        )
+        assert wallclockBounds(sample), "时钟样本经列表收集后取中位的墙钟上界漏检"
+
+    def test_detector_follows_clock_through_derived_variable(self):
+        """时钟先落到一个变量，再由它派生第二个变量：派生量同样是耗时量。"""
+        sample = (
+            "import time\n"
+            "def test_x():\n"
+            "    t0 = time.perf_counter()\n"
+            "    elapsed = time.perf_counter() - t0\n"
+            "    budget = elapsed * 3\n"
+            "    assert budget < 0.5\n"
+        )
+        assert wallclockBounds(sample), "由耗时量派生的变量的上界断言漏检"
 
     def test_detector_ignores_lower_bound(self):
         sample = (
