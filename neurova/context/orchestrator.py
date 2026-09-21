@@ -209,16 +209,15 @@ class ContextOrchestrator:
     def session_id(self) -> Optional[str]:
         return self._session_id
 
-    def _resolve_turn_scope(self) -> str:
-        """本轮作用域（单源）：协作群轮 = `room:<房间 id>`，其余 = `direct`。
+    def _resolve_window_cache_key(self) -> str:
+        """折叠摘要缓存的键：**真实会话身份**（房间 id 优先，其次会话 id）。
 
-        委托 `collaboration.memory_scope.scope_tag_for_turn`——池的写入咽喉、
-        折叠摘要缓存键、读侧过滤全用同一个判据，不给第二份归一留口子。
+        注意与"记忆作用域"的分工：作用域是**隔离策略**（单聊恒 `direct`，
+        用于判定"能不能看见"），而缓存键是**身份**——两个不同的单聊会话
+        作用域都是 `direct`，但摘要绝不能互相串。旧实现用 `self.session_id or "_"`
+        记账，session_id 恒 None → 所有会话共用一条（P1-1 跨会话串台）。
         """
-        from neurova.collaboration.memory_scope import scope_tag_for_turn
-
-        room_id = getattr(self, "_turn_room_id", "") or ""
-        return scope_tag_for_turn(collab=bool(getattr(self, "_turn_collab", False)), room_id=room_id)
+        return getattr(self, "_turn_room_id", "") or self._session_id or "direct"
 
     def _window_cache_slot(self, key: str) -> dict:
         """取（或建）折叠摘要缓存槽，并把槽数钳在上限内（LRU 近似的插入序淘汰）。
@@ -653,7 +652,7 @@ class ContextOrchestrator:
                 system_instructions, developer_instructions, tools_desc
             )
             window_msgs = await self._apply_window_budget(
-                conversation_context, window_budget, cache_key=turn_scope
+                conversation_context, window_budget, cache_key=self._resolve_window_cache_key()
             )
             # microcompact（Anthropic context editing 对齐，2026-09-10）：
             # 保留最近 3 个工具结果原文，更早的替换为占位指针（池归档无损、
@@ -1218,7 +1217,7 @@ class ContextOrchestrator:
                 if isinstance(m, dict) and (m or {}).get("content")
             ]
 
-        cache = self._window_cache_slot(cache_key or self._resolve_turn_scope())
+        cache = self._window_cache_slot(cache_key or self._resolve_window_cache_key())
         # 增量防抖：距上次成功摘要新追加的消息数 ≤ 阈值时复用缓存摘要
         # （省一轮摘要 LLM——实测摘要链路 30s+，每轮重调不可接受）。
         # 未覆盖的消息仍归档在池中，零丢失。
@@ -1248,8 +1247,14 @@ class ContextOrchestrator:
             if m.get("content", "") not in kept_contents
         }
 
-        # 更新跨轮缓存（摘要失败时保留旧摘要，下次重试增量）
-        if compaction.summary:
+        # 更新跨轮缓存（摘要失败时保留旧摘要，下次重试增量）。
+        #
+        # P1-2：只有**新**摘要才能推进覆盖记账。摘要失败时 summarize 会沿用
+        # previous_summary（对池侧是幂等 no-op），返回值仍非空；旧实现据此把
+        # last_count 前移、把新增消息记为"已覆盖"——而那份摘要在诞生时它们
+        # 还在窗口里，等于在摘要层做假账（防抖期内不再重摘要，视图只剩一个
+        # 与内容无关的旧标题）。
+        if compaction.summary and compaction.summary_is_fresh:
             cache["summary"] = compaction.summary
             cache["last_count"] = len(msgs)
             from neurova.context_pool import ContextInput, ContextSource
@@ -1314,7 +1319,7 @@ class ContextOrchestrator:
         # 与 auto 路径同源（_resolve_window_token_budget → _window_token_budget
         # 覆盖生效），保证测试/运维显式预算下两路结论一致
         budget = max(1500, self._resolve_window_token_budget() // 2)
-        cache = self._window_cache_slot(self._resolve_turn_scope())
+        cache = self._window_cache_slot(self._resolve_window_cache_key())
 
         compaction = await compact_window(
             msgs,
