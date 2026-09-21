@@ -59,7 +59,6 @@ async def test_imports():
     modules_to_test = [
         ("neurova.agent", "Agent核心"),
         ("neurova.router", "消息路由"),
-        ("neurova.memory_rw_manager", "记忆读写"),
         ("neurova.context", "上下文管理"),
         ("neurova.context_compressor", "上下文压缩"),
         ("neurova.tool_layers.tool_router", "工具路由"),

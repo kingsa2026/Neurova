@@ -3,7 +3,6 @@ NeRF 记忆系统升级测试
 
 覆盖：
 - Phase 1: 位置编码器 (temporal, emotion, importance)
-- Phase 2: 记忆场神经网络 (MemoryField) — 可选，需 torch
 - Phase 3: 体渲染器 (VolumeRenderer)
 
 纯 Python 实现，不依赖 numpy/torch。

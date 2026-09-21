@@ -249,7 +249,10 @@ class ChatPipeline:
 
             reader = getattr(self._agent, "_temporalFactsReader", None)
             if reader is None:
-                reader = TemporalFactReader(get_knowledge_fact_store())
+                # 必须带本 agent 的域：读面的锚点查询（"这句在问谁"）是守卫式过滤，
+                # agentId 为空即不过滤 ⇒ 从别人的库里挑出起点再往下答。
+                reader = TemporalFactReader(get_knowledge_fact_store(),
+                                            agentId=self._factDomain())
                 try:
                     self._agent._temporalFactsReader = reader
                 except Exception:
@@ -276,7 +279,8 @@ class ChatPipeline:
             if GraphWalkConfig.fromEnv().enabled:
                 walker = getattr(self._agent, "_graphFactWalker", None)
                 if walker is None:
-                    walker = GraphFactWalker(get_knowledge_fact_store())
+                    walker = GraphFactWalker(get_knowledge_fact_store(),
+                                             agentId=self._factDomain())
                     try:
                         self._agent._graphFactWalker = walker
                     except Exception:
@@ -302,6 +306,16 @@ class ChatPipeline:
         logger.info(
             f"MemoryRetrievalChain initialized with {len(self._memory_retrieval_chain.get_retrievers())} retrievers"
         )
+
+    def _factDomain(self) -> str:
+        """底座读面的 agent 域。
+
+        与检索链其余各路取 agent_id 的口径一致（`getattr(config, "agent_id", ...)`）。
+        取不到时落到 `"default"` 而**不是** `None`：`None` 在时效与多跳两条读面里是
+        "不过滤锚点"，那正好是本次要灭的跨 agent 读口——默认到某个具体域不会越权读。
+        """
+        config = getattr(self._agent, "config", None)
+        return str(getattr(config, "agent_id", "") or "default")
 
     # ---- 属性代理 ----
     @property

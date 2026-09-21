@@ -7,7 +7,7 @@ C-1: conversation_buffer.py:351 日志格式化 TypeError
     影响：logging 内部捕获 TypeError，日志静默丢失
 
 C-5: buffer_module.py 类型契约不一致
-    根本原因：_write_queue 初始化为 List，但 memory_layer.py:197 注入 MemoryWriteQueue
+    根本原因：_write_queue 初始化为 List，但历史上下文栈曾注入 MemoryWriteQueue
     MemoryWriteQueue 无 __len__/clear/append，但 BufferModule.clear/get_stats/add_to_write_queue 假设 List 接口
     崩溃路径：clear() → TypeError + AttributeError
 """
@@ -134,7 +134,7 @@ class TestC5BufferModuleTypeContractInconsistency:
         from neurova.cognitive_layers.memory_layer.modules.buffer_module import BufferModule
 
         bm = BufferModule()
-        # 注入 MemoryWriteQueue（模拟 memory_layer.py:197 的行为）
+        # 注入 MemoryWriteQueue（模拟历史上下文栈的行为）
         bm._write_queue = MemoryWriteQueue()
 
         # bug 存在时抛 AttributeError: 'MemoryWriteQueue' object has no attribute 'clear'
