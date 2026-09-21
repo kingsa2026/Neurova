@@ -153,7 +153,9 @@ pyjwt==2.14.0
     # via
     #   -r requirements-ci.txt
     #   mcp
-pytest==8.4.2
+pypdf==6.19.0
+    # via -r requirements-ci.txt
+pytest==9.0.3
     # via
     #   -r requirements-ci.txt
     #   pytest-asyncio

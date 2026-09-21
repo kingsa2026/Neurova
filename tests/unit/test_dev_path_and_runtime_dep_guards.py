@@ -271,21 +271,18 @@ class TestCiTestRunnerAndFixtureDepsAreReal:
     这两条都是"CI 报错与代码无关"的事故，且都在**同一个 job**里同时发作，
     因此合在一个类里钉住。
 
-    4. **pytest 必须锁 <9（收集缓存按节点对象身份去重）** ——
-       9.x 里同一个目录会被两条路径各建一个 `Dir` 对象：
-         - `Session.collect()` 按每个 initial path 逐层下钻（`path_cache` 只在
-           单次 `collect()` 内共享）；
-         - `Package.collect()`（`_pytest/python.py`）扫自己的子目录时又建一个。
-       两个 `Dir` 的 `nodeid` 相同，但 `Node.__eq__` 是身份比较（`__hash__`
-       才用 nodeid），于是 `node in self._collection_cache` 落空、同一路径被
-       收集两次；`FixtureManager._matchfactories` 用 `fixturedef.node in
-       parent_nodes` 判定可见性，conftest 的 fixture 便绑到了"tests 实际不在
-       其下"的那棵子树 → 大批 `fixture 'xxx' not found`（实测 9.1.1 下受保护
-       子集 65 个 error，8.3.5/8.4.2 全绿）。
-       最小触发集（三条命令行参数即可复现）：
-         `pytest tests/unit/evolution/test_skill_consolidation_structural_and_deadcode_p1p2.py`
-         `tests/unit/test_ci_npc_config_guard.py`
-         `tests/unit/evolution/rsi/test_parameter_source_of_truth.py`
+    4. **pytest 必须在安全下限之上（>=9.0.3），收集竞争的兜底不在版本号上** ——
+       这里的口径在 2026-09-21 被 CVE-2025-71176 推翻过一次，记录完整推导：
+         - 原先的"锁 <9"是为了绕开收集缓存按节点对象身份去重导致的
+           `fixture 'xxx' not found`（收集竞争机制与最小触发集见
+           `tests/unit/test_pytest_runner_guards.py` 的模块 docstring）；
+         - 但 `<9` 全部落在 CVE-2025-71176 / PYSEC-2026-1845（fixed 9.0.3，
+           扫全版本区间）里，`dependency-audit`（pip-audit）对 8.4.2 直接报红
+           —— 两条约束撞在同一条依赖上，不能再拿"回避版本"换绿。
+         - 正面修法是 `tests/unit/evolution/rsi/conftest.py`：在子包自己的
+           conftest 里按名重导出父包 fixture，让可见性判据不再跨 collector
+           身份求值。回归守卫用最小触发集实跑钉住（不靠版本回避）。
+       本类只钉"声明与锁都在安全下限之上"。
 
     5. **受保护子集里"真跑渲染路径"的依赖必须在 CI 清单声明** ——
        `tests/unit/document/test_document_pdf.py` 与 `tests/unit/tools/test_write_pdf.py`
@@ -294,30 +291,36 @@ class TestCiTestRunnerAndFixtureDepsAreReal:
        声明、不在 CI 清单声明，CI 薄环境就永远红。
     """
 
-    def test_pytest_is_pinned_below_major_nine(self):
-        """requirements-ci.txt 必须把 pytest 锁在 <9（收集身份去重回归）。"""
+    def test_pytest_declared_at_or_above_security_floor(self):
+        """requirements-ci.txt 的 pytest 下限必须 >=9.0.3（CVE-2025-71176）。"""
         text = io.open(PROJECT_ROOT / "requirements-ci.txt", encoding="utf-8").read()
         decls = [
             l.strip() for l in text.splitlines()
             if re.match(r"^\s*pytest\s*[><=!~]", l.strip())
         ]
         assert decls, "requirements-ci.txt 缺 pytest 声明"
-        assert any("<9" in d.replace(" ", "") for d in decls), (
-            "requirements-ci.txt 未把 pytest 锁在 <9。pytest 9.x 的收集缓存按节点\n"
-            "对象身份去重，同一目录会被 Session.collect() 与 Package.collect() 各建\n"
-            "一个 Dir 对象，导致 conftest fixture 绑到没人用的子树 → 受保护子集\n"
-            "大批 'fixture not found'（65 个 error）。当前声明："
+        assert any(">=9.0.3" in d.replace(" ", "") for d in decls), (
+            "requirements-ci.txt 未把 pytest 下限钉在 >=9.0.3。低于 9.0.3 落在\n"
+            "CVE-2025-71176 / PYSEC-2026-1845（GHSA-6w46-j5rx-g56g，扫全版本区间）\n"
+            "内，dependency-audit（pip-audit）必红——2026-09-21 把 8.4.2 锁进 CI 后\n"
+            "实测 2 条漏洞。收集缓存的身份去重问题改由\n"
+            "tests/unit/evolution/rsi/conftest.py 兜底，不再用版本回避。当前声明："
             f"{decls}"
         )
+        assert not any("<9" in d.replace(" ", "") for d in decls), (
+            "requirements-ci.txt 仍把 pytest 锁在 <9——该区间内有 CVE-2025-71176，"
+            f"dependency-audit 必红。当前声明：{decls}"
+        )
 
-    def test_ci_lock_pins_pytest_below_major_nine(self):
+    def test_ci_lock_pins_pytest_at_or_above_security_floor(self):
         """锁文件必须与声明一致（CI 装的是锁，不是声明）。"""
         lock = io.open(PROJECT_ROOT / "requirements-ci.lock", encoding="utf-8").read()
-        m = re.search(r"(?m)^pytest==(\d+)\.", lock)
+        m = re.search(r"(?m)^pytest==(\d+)\.(\d+)\.(\d+)", lock)
         assert m, "requirements-ci.lock 缺 pytest pin"
-        assert int(m.group(1)) < 9, (
+        version = tuple(int(g) for g in m.groups())
+        assert version >= (9, 0, 3), (
             f"requirements-ci.lock 把 pytest 锁在 {m.group(0)}——CI 装的是锁文件，"
-            "不锁 <9 则声明形同虚设。\n"
+            "低于 9.0.3 即落在 CVE-2025-71176 区间，dependency-audit 必红。\n"
             "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
         )
 
@@ -349,6 +352,9 @@ class TestCiTestRunnerAndFixtureDepsAreReal:
             "tests/unit/evolution/experience/test_pattern_lifecycle.py",
             "tests/unit/document/test_document_pdf.py",
             "tests/unit/tools/test_write_pdf.py",
+            # 收集竞争兜底靶点：rsi 子包 conftest 重导出父包 fixture，
+            # 少了本条目则守卫退化成空壳（见 test_pytest_runner_guards.py）。
+            "tests/unit/test_pytest_runner_guards.py",
         ):
             assert rel in listed, (
                 f"{rel} 不在受保护子集——它是 pytest<9 / reportlab 两条回归的靶点，"

@@ -159,3 +159,8 @@ tests/unit/api/test_memory_classify_endpoint.py
 # 路线 B 首启下载契约：模型清单必须入库（lib.rs 读它是硬失败）、运行时版本以清单为
 # 单源（抄本漂移即 404）、下载状态属运行态不得落仓库根、清单字段须与 ModelEntry 对齐
 tests/unit/desktop/test_route_b_runtime_download.py
+
+# pytest 运行器守卫：受保护子集的多路径收集下，tests/unit/evolution 的 conftest
+# fixture 必须仍可解析（收集缓存按节点身份去重 + 同名 collector 双身份导致的
+# 65 error 回归），且不得回退到"钉 pytest<9"来回避（那条落在 CVE-2025-71176 里）
+tests/unit/test_pytest_runner_guards.py
