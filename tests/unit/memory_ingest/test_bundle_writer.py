@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 
 from neurova.memory_ingest.bundle.records import MemoryRecord, TranscriptRecord
-from neurova.memory_ingest.bundle.writer import SourceEvent, materialize, write_bundle
+from neurova.memory_ingest.bundle.writer import (SourceEvent, ensure_offset,
+                                                 materialize, write_bundle)
 
 
 def _memory(**kw):
@@ -26,6 +27,13 @@ def _memory(**kw):
 
 def _event(kind="assistant_message", seq_ts="2026-05-01T10:00:00+00:00", **kw):
     return SourceEvent(kind=kind, ts=kw.pop("ts", seq_ts), **kw)
+
+
+def test_ensure_offset_never_invents_now():
+    """空与解不开都必须回空串：造一个 now() 会把六个月前的事写进今天的会话文件。"""
+    assert ensure_offset("") == ""
+    assert ensure_offset("不是时间") == ""
+    assert ensure_offset("2026-05-01T10:00:00") == "2026-05-01T10:00:00+00:00"
 
 
 def test_materialize_numbers_each_session_from_one():

@@ -59,6 +59,7 @@ MEMORY_REASONS = {
     "memory:来源未知": "source 列出现已知两值之外的取值，不猜记忆类型映射，整条未导",
     "memory:空正文": "该索引项没有正文，包内 content 必填，未导",
     "memory:派生索引": "向量/内容哈希/嵌入模型属源侧派生索引，包内不搬（本系统自算）",
+    "memory:无时间": "该条既不是 epoch 毫秒也不是可定标时间，整条未导（不写导入时刻）",
 }
 
 # 事件级与消息级字段的落点：表外的键一律按条数申报，不做"看起来不重要就略过"
@@ -73,6 +74,7 @@ REASONS = {
     "media": "源里的媒体载体取不到字节，未携带",
     "空正文": "该事件没有可携带正文，未入包",
     "blocks": "该块型在包内契约无落点，未携带",
+    "timestamp": "事件与列都没给出可定标的时间，整行未入包（不猜时刻）",
 }
 
 
@@ -168,12 +170,16 @@ def _memory_record(row: sqlite3.Row, declared: Dict[str, List[Any]]) -> Optional
         _declare(declared, "memory:空正文")
         return None
     _declare(declared, "memory:派生索引")
+    moment = _from_ms(observed_at)
+    if not moment:
+        _declare(declared, "memory:无时间")
+        return None
     importance = row["importance"]
     return MemoryRecord(
         identity_key=str(row["id"]), content=text, memory_type=family[0], category=family[1],
         origin=origin, importance=DEFAULT_IMPORTANCE if importance is None
         else float(importance) * IMPORTANCE_SCALE,
-        ts=_from_ms(observed_at),
+        ts=moment,
         tags=tuple(_memory_tags(row)), source_ref=f"{row['path']}#L{row['start_line']}"
                                                   f"-L{row['end_line']}",
         supersedes=str(row["supersedes_key"] or ""))
@@ -210,6 +216,9 @@ def matches_store(path: Path) -> bool:
 def _event_records(row: sqlite3.Row, window: Dict[str, Any], sink: MediaSink,
                    declared: Counter) -> List[Tuple[str, List[SourceEvent]]]:
     body = _json(row["event_json"])
+    if not _ts(body.get("timestamp"), row["created_at"]):
+        declared["timestamp"] += 1
+        return []
     event_id = str(body.get("id") or "").strip()
     declared.update(f"event键:{key}" for key in _strays(body, EVENT_LANDINGS))
     if not event_id:
@@ -286,10 +295,11 @@ def _ts(raw: Any, created_at: Any) -> str:
 
 
 def _from_ms(value: Any) -> str:
+    """epoch 毫秒 → 带偏移 ISO；也给字符串一次机会（老库有写 ISO 的），仍定不出回空串。"""
     try:
         return datetime.fromtimestamp(int(value) / 1000, timezone.utc).isoformat()
     except (TypeError, ValueError, OSError):
-        return datetime.now(timezone.utc).isoformat()
+        return ensure_offset(str(value or ""))
 
 
 def _dropped_entries(declared: Counter) -> List[Dict[str, Any]]:
