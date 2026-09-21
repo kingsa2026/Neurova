@@ -112,3 +112,56 @@
 - `admission.pendingSegments()` 因 `indexing` 恒缺（`admission.py:123-128`）而永远非空，于是「缺段即拒」的纪律在每个真实调用点都被 `allowPendingSegments=True` 绕过（`entry_ledger.py:62`、`backfill.py:41`、`reconcile.py:147`、`rule_engine.py:349`），回执里的 `pending_segments` 因此不再区分「真缺段」与「设计上缺段」。
 - 隔离侧：`TemporalFactReader`/`GraphFactWalker` 以 `agentId=None` 装配（`chat_pipeline.py:249,265`）留下跨 agent 锚点读口。
 - 记忆库完全没有 `storage_fence` 的对等物，仓库根 `neurova_memories_persist.db` 里 71,831 行（其中 `agent_id LIKE 'engine_it_%'` 数万个、`metadata` 全 `{}`、`origin` 全 `agent`，真实用户数据仅 `agent_workspaces/*` 下 324+988 行）就是这条缺口留下的物证。
+
+---
+
+## 6. §5.5 五条缺口的处置（2026-09-21 修复批次）
+
+批次的判据是"纪律重新咬合"，不是"报错消失"。逐条对应本报告与
+`docs/specs/2026-09-21-memory-knowledge-foundation-audit.md` 的读数。
+
+### 6.1 段可见性：分清「这次装配漏接」与「尚未建成」
+
+`admission.py` 新增 `SEGMENT_STATUS` 名册（每段 `wired` / `planned`，必须穷举 `SEGMENTS`）。
+`pendingSegments()` 只报 `wired` 段里协作者缺席的，`plannedSegments()` 另立一栏；
+`AdmissionReceipt` 相应分列 `pendingSegments` / `plannedSegments` / `activityId`。
+
+后果：装配齐全的 `productionAdmissionGate` 报**空**缺段，四个真实调用点
+（`entry_ledger` / `backfill` / `reconcile` / `rule_engine`）的 `allowPendingSegments=True`
+被删干净——「缺段即拒」在真实链路上重新咬合，逃生开关只剩测试搭裸门时用。
+
+### 6.2 活动归属：来路由调用方自陈
+
+`AdmissionRequest` 增加 `activityKind` / `activityBasis` / `activityId`；
+`_attachLineage` 优先复用调用方已开的活动，未声明时兜底开 `admit` 且 basis 自陈是兜底。
+条目投影 → `import`，回填 → `import`，对账回放 → `import`（basis 区分两条路径）。
+"92/92 条活动都等于咽喉自己"在真实链路上不再复现。
+
+### 6.3 校验闭环：结论回写而不是只报
+
+`ActivityDigestChain.attest()` 逐条裁决并**回写** `verification_state`
+（正文与哈希 / 摘要与内容 / 链位三样都成立才 `verified`），`unverified` 从此只剩
+"还没验过"一义；`setAssertionVerification` 在库层收口值域，`assertionVerificationCounts()`
+给出三态分布，`verify()` 与巡检端点一并带出。调用点是条目投影与历史回填两条真实写入链。
+
+### 6.4 有效期窗口：收了就落库，落了就咬合
+
+`upsertFact` 接 `validFrom` / `validUntil` 并落两列，按内容键折回旧行时走
+`fillValidityWindow` 只补 NULL。读面 `temporal_facts` 补上"不晚于此刻"的上界——
+`valid_from` 此前恒 NULL，这条上界一直空转。至此两列有了写入方、读取方与过滤效果。
+
+### 6.5 读面域与记忆围栏
+
+- `chat_pipeline._factDomain()` 单点解析 agent 域，两条读面（时效 / 多跳）都带上它；
+  取不到时落 `"default"` 而**不是** `None`（`None` 正是"不过滤锚点"）。
+- `storage_fence` 增 `productionMemoryDir()` / `underProductionMemory()` /
+  `assertNotUnderProductionMemory()`；`MemoryManager` 默认路径改为按 agent 工作区推导
+  （空串与"没给"分开承载），主库与 persist 库两个写面都在构造处过围栏。
+
+### 6.6 未在本批处置（继续登记，不静默遗留）
+
+- 段7（入索引）仍是 `planned`：本批**如实报出**，不假装接通。
+- 生产库既有的 92 条 `unverified` 旧行：`attest()` 已具备重放能力，但存量回写属于运维动作，
+  未在本批执行——读数上它们仍如实显示为 `unverified`。
+- 仓库根 `neurova_memories_persist.db`（71,831 行历史污染）：围栏已堵住新增，
+  删库需人工确认，见 `docs/specs/2026-09-19-experience-quality-gate/tickets/011-记忆写入内容门.md`。
