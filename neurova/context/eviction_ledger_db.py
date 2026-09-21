@@ -333,8 +333,12 @@ class EvictionLedgerDB:
         metadata: Optional[Dict[str, Any]] = None,
         chat_scope: Optional[str] = None,
         created_at: Optional[str] = None,
-    ) -> None:
+    ) -> bool:
         """记录一次归档；content 同时写入 FTS 表。
+
+        Returns:
+            本行是否真的落库（同内容去重命中时返回 False）——调用方据此维护库内
+            条数读数，不靠"自己数调用次数"糊一份可能与库不符的账。
 
         `chat_scope` / `created_at` 落独立列（U1/U3 定案），读侧另有对旧行的
         兜底（见 `resolveArchivedScope` / `resolveArchivedCreatedAt`）。未显式传入
@@ -356,25 +360,26 @@ class EvictionLedgerDB:
                 # 批量内：不提交，失败时把原因记在批次上——由 commitBatch 统一上抛
                 # 并整批回滚（一次归档调用 = 一个事务，规格 D8）。
                 try:
-                    self._insert(conn, content=content, turn_id=turn_id, session_id=session_id,
-                                 source=source, metadata=metadata, evicted_at=now,
-                                 scope=scope, created_at=created_at or now)
+                    return self._insert(conn, content=content, turn_id=turn_id,
+                                        session_id=session_id, source=source, metadata=metadata,
+                                        evicted_at=now, scope=scope, created_at=created_at or now)
                 except Exception as exc:
                     if self._batchError is None:
                         self._batchError = exc
                     raise
-                return
             conn.execute("BEGIN")
             try:
-                self._insert(conn, content=content, turn_id=turn_id, session_id=session_id,
-                             source=source, metadata=metadata, evicted_at=now,
-                             scope=scope, created_at=created_at or now)
+                inserted = self._insert(conn, content=content, turn_id=turn_id,
+                                        session_id=session_id, source=source, metadata=metadata,
+                                        evicted_at=now, scope=scope, created_at=created_at or now)
                 conn.execute("COMMIT")
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
+            return inserted
+
     def _insert(self, conn, *, content, turn_id, session_id, source, metadata,
-                evicted_at, scope, created_at) -> None:
+                evicted_at, scope, created_at) -> bool:
         """单条落库（内容表 + FTS 影子表）；事务边界由调用方决定。"""
         cur = conn.execute(
             "INSERT INTO evicted_chunks"
@@ -398,11 +403,26 @@ class EvictionLedgerDB:
             },
         )
         if cur.rowcount == 0:
-            return
+            return False
         conn.execute(
             "INSERT INTO evicted_fts(rowid, content) VALUES (:rowid, :content)",
             {"rowid": cur.lastrowid, "content": content},
         )
+        return True
+
+    def recentRows(self, limit: int) -> List[sqlite3.Row]:
+        """按 `id DESC` 取最近 N 行（热集回载的唯一读入口，顺序稳定）。
+
+        常驻集是视图层唯一来源（规格 §4 非目标：`draw` 不查 DB），本方法只服务
+        调用方**显式**发起的回载（规格 D10）。
+        """
+        with self._lock:
+            return self._requireConn().execute(
+                "SELECT * FROM evicted_chunks"
+                " WHERE user_id = :user_id AND agent_id = :agent_id"
+                " ORDER BY id DESC LIMIT :limit",
+                {"user_id": self.user_id, "agent_id": self.agent_id, "limit": int(limit)},
+            ).fetchall()
 
     def search(
         self,
