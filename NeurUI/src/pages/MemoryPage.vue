@@ -561,6 +561,11 @@ const statsCards = computed(() => [
     label: t('common.type') + 's',
     value: memoryStats.value?.by_type?.length ?? 0,
   },
+  {
+    // 冲突账读数：检测链落账、读侧可见（unresolved 即尚待处置的部分）。
+    label: t('memory.conflicts'),
+    value: memoryStats.value?.conflicts?.total ?? 0,
+  },
 ])
 
 const tableColumns = computed(() => [
