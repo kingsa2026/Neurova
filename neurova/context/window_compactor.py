@@ -73,6 +73,11 @@ class WindowCompaction:
     compacted_count: int  # 被折叠的消息条数
     tokens_before: int
     tokens_after: int
+    # P1-2：本轮的 summary 是否为**新**产出。摘要器失败时会沿用 previous_summary
+    # （对池侧是幂等 no-op），返回值仍非空——调用方若据此推进"已覆盖"记账，
+    # 就是把新增消息谎报为已被摘要覆盖。判据取"与上一轮摘要不同"这一可观察事实，
+    # 因此对任何 summarize 实现（含调用方自注入的桥）都成立。
+    summary_is_fresh: bool = False
 
 
 async def compact_window(
@@ -156,6 +161,8 @@ async def compact_window(
             compacted_count=len(dropped),
             tokens_before=estimate_window_tokens(msgs),
             tokens_after=estimate_window_tokens(window),
+            summary_is_fresh=bool(round_summary)
+            and (not previous_summary or round_summary != previous_summary),
         )
         summary = round_summary or summary
 

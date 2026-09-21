@@ -339,15 +339,13 @@ class SmallBrainRouter:
         return result
 
     def _estimate_tokens(self, context: RoutingContext) -> int:
-        """估算 token 数量"""
-        # Simple heuristic: 4 chars per token
-        query_chars = len(context.user_query)
-        history_chars = sum(len(str(h)) for h in context.conversation_history)
+        """估算 token 数量（走全仓唯一尺子，成本闸门与上下文预算同口径）。"""
+        from neurova.context.token_estimator import estimate_tokens as estimate_text_tokens
 
-        total_chars = query_chars + history_chars
-        estimated_tokens = max(total_chars // 4, 100)  # Minimum 100 tokens
+        total = estimate_text_tokens(context.user_query or "")
+        total += sum(estimate_text_tokens(str(h)) for h in context.conversation_history)
 
-        return estimated_tokens
+        return max(total, 100)  # 下限 100 token（路由成本下限）
 
     def _update_stats(self, decision: RoutingDecision) -> None:
         """更新路由统计"""

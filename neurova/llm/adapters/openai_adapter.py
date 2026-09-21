@@ -151,9 +151,11 @@ class OpenAIAdapter(LLMAbstractProvider):
         )
     
     def _estimate_message_tokens(self, messages: List[Message]) -> int:
-        """Rough token estimation (4 chars per token)"""
-        total_chars = sum(len(msg.content) for msg in messages)
-        return max(1, total_chars // 4)
+        """估算消息 token 数：走全仓唯一尺子。"""
+        from neurova.context.token_estimator import estimate_tokens
+
+        total = sum(estimate_tokens(str(msg.content)) for msg in messages)
+        return max(1, total)
 
 
 # Factory function for creating adapters
