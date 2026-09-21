@@ -28,6 +28,8 @@ import os
 import sqlite3
 import threading
 import time
+
+from neurova.knowledge.foundation.storage_fence import assertNotUnderProductionMemory
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Dict, List, Optional, Tuple
@@ -149,21 +151,32 @@ def _filter_by_category(mems: List[Memory], category: str) -> List[Memory]:
     return [m for m in mems if m.metadata.get("_original_category") == category]
 
 
+# "调用方没给路径"的哨兵：与 `db_path=""`（显式非法）区分开。
+# 用裸文件名当默认值是本轮要灭的根因，用 `""` 当默认值又会让既有校验把
+# "没给"误判成"给错了"，所以另立一个不可能与真实路径相撞的值。
+_DEFAULT_DB_SENTINEL = "\x00__agent_workspace__"
+
+
 class MemoryManager:
     """记忆管理器 Facade — 通过 EventBus 路由到各子模块"""
 
     def __init__(
         self,
-        db_path: str = "neurova_memory.db",
+        db_path: str = _DEFAULT_DB_SENTINEL,
         agent_id: str = "default",
         neuser_id: str = "default",
         user_id: str = "default",
         enable_buffer: bool = True,
     ):
-        # P-4 修复: 空路径校验, 测试期望 MemoryManager(db_path="") 抛 ValueError
+        # 空路径仍是显式的非法输入（P-4 的判据不变），"没给"另由哨兵承载。
         if not db_path:
             raise ValueError("db_path must not be empty")
-
+        # 裸文件名 `neurova_memory.db` 曾当默认值，persist 库随之随 CWD 散落五处
+        # （仓库根那份攒了 71,831 行测试数据）。默认落点改为按 agent 工作区推导，
+        # 与 `get_memory_manager` 同源——同一件事不允许有两套推导。
+        if db_path == _DEFAULT_DB_SENTINEL:
+            db_path = _default_db_path_for(agent_id)
+        assertNotUnderProductionMemory(db_path, "主记忆库")
         self._db_path = db_path
         self._agent_id = agent_id
         self._neuser_id = neuser_id
@@ -314,6 +327,9 @@ class MemoryManager:
             # 使用与 db_path 同目录的持久化文件
             db_dir = os.path.dirname(self._db_path) or "."
             self._persist_db_path = os.path.join(db_dir, "neurova_memories_persist.db")
+            # 主库被围栏守住之后，persist 库是同一目录下的第二个写面：
+            # 只守一个等于留了侧门。
+            assertNotUnderProductionMemory(self._persist_db_path, "持久记忆库")
             # 审计 P1-D1：常驻连接 + WAL + synchronous=NORMAL——原每条记忆一次
             # connect->INSERT->commit->close（DELETE journal 每次 commit fsync），
             # 写放大是数量级瓶颈；同项目 dependency_graph 等库早已 WAL。
