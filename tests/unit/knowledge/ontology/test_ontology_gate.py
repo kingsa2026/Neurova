@@ -193,6 +193,7 @@ class TestGateIntegration:
         gate = productionAdmissionGate(store, toolVersion="unit")
 
         assert "ontology_adjudication" not in gate.pendingSegments()
-        assert "indexing" in gate.pendingSegments()
+        assert gate.pendingSegments() == [], "已实现的段接齐即无缺段"
+        assert "indexing" in gate.plannedSegments(), "尚未建成的段如实另报"
         assert SEGMENTS.index("ontology_adjudication") < SEGMENTS.index("conflict_judgement"), \
             "段序是设计定的：本体裁决在冲突判定之前"

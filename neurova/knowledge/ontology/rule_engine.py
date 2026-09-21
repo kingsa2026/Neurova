@@ -354,7 +354,7 @@ class ForwardChainingEngine:
                 assertions=[{"actorType": "pipeline", "actorId": "rule:%s" % rule["rule_id"],
                              "mediumRef": "rule:%s" % rule["rule_id"],
                              "statementText": content}],
-            ), allowPendingSegments=True)
+            ))
         except ValueError:
             return None            # 本体/基数拒绝推导结果：与原始写入同一口径，不开例外
         ledger = self._store._derivationLedger
