@@ -54,6 +54,43 @@ def _msgs(records: List[TranscriptRecord]) -> List[Dict[str, Any]]:
     return to_turn_messages(records)
 
 
+def _direct(seq, kind, **over):
+    base = dict(session_id="sA", seq=seq, kind=kind,
+                ts=f"2026-05-01T10:00:{seq:02d}+00:00", identity_key=f"ik{seq}")
+    base.update(over)
+    return TranscriptRecord(**base)
+
+
+def test_turn_with_only_opaque_reasoning_is_kept():
+    """密文推理是"有推理读不出"，不是"这条没东西"：轮不能被静默吞掉。"""
+    messages = to_turn_messages([_direct(1, "assistant_message", reasoning_state="opaque")])
+
+    assert len(messages) == 1
+    assert messages[0]["metadata"]["ingest"]["reasoning_state"] == "opaque"
+
+
+def test_turn_keeps_extra_from_first_record():
+    messages = to_turn_messages([
+        _direct(1, "assistant_message", role="assistant",
+                content_blocks=({"type": "text", "text": "我读"},),
+                extra={"event_type": "message", "model": "gpt-x"}),
+        _direct(2, "tool_call", tool_call_id="tc1", tool_name="read",
+                extra={"tool_input": '{"p":"A.md"}', "source_seq": 7})])
+
+    ingest = messages[0]["metadata"]["ingest"]
+    assert ingest["extra"]["model"] == "gpt-x"
+    assert ingest["extra"]["event_type"] == "message"
+
+
+def test_standalone_compact_summary_keeps_extra_payload():
+    """压缩摘要的正文在 extra 里（Codex compacted 就是这个形状），只留 role/content 就是丢它。"""
+    messages = to_turn_messages([
+        _direct(1, "compact_summary", role="assistant",
+                extra={"replacement_history": [{"a": 1}]})])
+
+    assert messages[0]["metadata"]["ingest"]["extra"]["replacement_history"] == [{"a": 1}]
+
+
 def test_user_message_stands_alone():
     messages = _msgs([_rec(1, "user_message", text="问题")])
 

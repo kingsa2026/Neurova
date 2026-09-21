@@ -396,6 +396,120 @@ async def reject_rsi_proposal(
     return {"code": 0, "data": {"rejected": True}}
 
 
+# ── 技能归档读面 + 回滚写面（工单 011）────────────────────────
+
+
+class SkillRollbackRequest(BaseModel):
+    """技能回滚动作"""
+
+    operator: str = Field(..., min_length=1, description="操作者（回滚留痕要记是谁按的）")
+    agent_id: Optional[str] = Field(default=None, description="目标 agent；留空取默认 agent")
+
+
+def _skill_rollback_context(agent_id: Optional[str] = None):
+    """按 agent 定位回滚面所需的 (存档库, 注册表, 技能服务)。
+
+    三者必须**同源同一 agent**：存档库里的 skill_id 只能经该 agent 的注册表
+    取到执行体，写盘也只能写回该 agent 的技能库。取不到就返回 None ——
+    调用方据此返 503，而不是回落到默认 agent（那会把回滚装进别人的技能库）。
+    """
+    state = None
+    from neurova.api.endpoints import get_app_state
+
+    state = get_app_state()
+    if not state:
+        return None
+    try:
+        agent = state.get_agent(agent_id) if agent_id else state.get_agent()
+    except Exception:  # noqa: BLE001 - 与 _get_agent() 的既有容错同形
+        agent = None
+    if agent is None:
+        return None
+    registry = getattr(agent, "skill_registry", None) or getattr(agent, "_skill_registry", None)
+    if registry is None:
+        return None
+    resolved_id = str(getattr(getattr(agent, "config", None), "agent_id", "") or agent_id or "default")
+    from neurova.evolution.skill_experience import get_skill_experience_store
+    from neurova.skills import library_service as _lib
+
+    try:
+        service = _lib.get_library(_lib.POOL_AGENT, resolved_id)
+    except ValueError as bad_key:
+        logger.warning("技能库路由非法（agent_id=%s）：%s", resolved_id, bad_key)
+        return None
+    return get_skill_experience_store(), registry, service
+
+
+def _skill_surface_not_ready(agent_id: Optional[str]) -> "HTTPException":
+    return HTTPException(
+        status_code=503,
+        detail=(
+            f"agent {agent_id!r} 上没有可用的技能回滚面（注册表或技能库未装配）："
+            "无法区分'没有归档'与'没装配'，故不返回空列表"
+        ),
+    )
+
+
+@router.get("/skills/{skill_id}/archives")
+async def list_skill_archives(
+    skill_id: str,
+    agent_id: Optional[str] = None,
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """归档读面：该技能保留的可回滚快照（由重建与回滚有界写入）。
+
+    `get_archives` 此前在顶层 `neurova/` 零生产调用方 —— 归档只写不读，
+    等于没有回滚窗口（人无从知道能退回哪一版）。
+    """
+    context = _skill_rollback_context(agent_id)
+    if context is None:
+        raise _skill_surface_not_ready(agent_id)
+    store, _registry, _service = context
+    return {
+        "code": 0,
+        "data": {"skill_id": skill_id, "archives": store.get_archives(skill_id)},
+    }
+
+
+@router.post("/skills/{skill_id}/rollback")
+async def rollback_skill_to_archive(
+    skill_id: str,
+    body: SkillRollbackRequest,
+    _admin: Any = Depends(_governance_admin_dep),
+):
+    """回滚到最近一次归档的定义（写面：留痕可选审计）。
+
+    归档为空时显式 409 拒绝：静默成功会让"按钮点了没反应"变成"看起来回滚了"
+    ——那正是本单要消灭的形态。回滚后工具面随之变化，依赖 006 的停用生效判据。
+    """
+    context = _skill_rollback_context(body.agent_id)
+    if context is None:
+        raise _skill_surface_not_ready(body.agent_id)
+    store, registry, service = context
+    if not store.get_archives(skill_id):
+        raise HTTPException(
+            status_code=409,
+            detail=f"技能 {skill_id} 没有可回滚的归档（空归档不得静默成功）",
+        )
+    if not store.rollback_skill(
+        skill_id, registry, skill_service=service, operator=body.operator
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"技能 {skill_id} 回滚未生效（注册表里取不到该技能或落盘失败）",
+        )
+    logger.info("技能 %s 已回滚至最近归档（操作者 %s）", skill_id, body.operator)
+    return {
+        "code": 0,
+        "data": {
+            "rolled_back": True,
+            "skill_id": skill_id,
+            "operator": body.operator,
+            "archives_left": len(store.get_archives(skill_id)),
+        },
+    }
+
+
 # ── 治理设置（治理遗留收口 2026-09-05） ────────────────────────
 # 独立于 /v1/settings 扁平 kv 的治理设置面：Step9.96 LLM 成本门控与
 # RSI 部署阶段的管理入口，require_admin + JSON 持久化。
