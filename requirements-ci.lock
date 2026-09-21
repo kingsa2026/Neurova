@@ -41,7 +41,9 @@ certifi==2026.7.22
 cffi==2.1.1 ; platform_python_implementation != 'PyPy'
     # via cryptography
 charset-normalizer==3.5.1
-    # via requests
+    # via
+    #   reportlab
+    #   requests
 click==8.5.0
     # via uvicorn
 colorama==0.4.6 ; sys_platform == 'win32'
@@ -115,6 +117,8 @@ packaging==26.3
     # via pytest
 passlib==1.7.4
     # via -r requirements-ci.txt
+pillow==12.3.0
+    # via reportlab
 pluggy==1.6.0
     # via
     #   pytest
@@ -149,7 +153,9 @@ pyjwt==2.14.0
     # via
     #   -r requirements-ci.txt
     #   mcp
-pytest==9.1.1
+pypdf==6.19.0
+    # via -r requirements-ci.txt
+pytest==9.0.3
     # via
     #   -r requirements-ci.txt
     #   pytest-asyncio
@@ -179,6 +185,8 @@ referencing==0.37.0
     #   jsonschema-specifications
 regex==2026.9.10
     # via tiktoken
+reportlab==5.0.1
+    # via -r requirements-ci.txt
 requests==2.34.2
     # via tiktoken
 rpds-py==2026.6.3
@@ -206,21 +214,15 @@ truststore==0.10.4 ; sys_platform != 'emscripten'
     #   httpx2
 typing-extensions==4.16.0
     # via
-    #   aiohttp
-    #   aiosignal
     #   anthropic
     #   anyio
     #   fastapi
-    #   httpx2
     #   mcp
     #   mcp-types
     #   openai
     #   opentelemetry-api
     #   pydantic
     #   pydantic-core
-    #   pytest-asyncio
-    #   referencing
-    #   starlette
     #   typing-inspection
 typing-inspection==0.4.4
     # via

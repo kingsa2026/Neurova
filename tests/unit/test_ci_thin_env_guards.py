@@ -220,6 +220,45 @@ class TestCILockCoversDirectDeps:
         )
 
 
+class TestPytestBelowCollectionRegression:
+    """pytest 9.1.x 的收集器回归必须被挡在依赖声明里（上游 issue 未修复期间）。
+
+    实锤（2026-09-21）：受保护子集以"包根下的文件 + 子包内文件"交错作为参数
+    传给 pytest（`grep -v '^#' scripts/ci/protected_tests.txt | tr '\n' ' '`）
+    时，9.1.x 会重复收集子包的父包并 fork 出新的子包 collector，导致子包
+    conftest 的 fixture 对后续 item 不可见 —— 65 个用例报
+    `fixture 'rsi_probe_factory' not found`，单元测试两条流水线全红。
+    上游：pytest-dev/pytest#14997、#15071（均 open）。
+
+    约束形式与守卫理由：**声明的上界**（不是锁里的版本）才是防回归的那一道 ——
+    重编锁会按声明解析，锁里写什么由声明决定；只锁文件会被下一次 `uv pip
+    compile` 悄悄越过。
+    """
+
+    def test_ci_requirements_cap_pytest_below_91(self):
+        declared = _read("requirements-ci.txt")
+        caps = [
+            line for line in declared.splitlines()
+            if line.strip().startswith("pytest") and "<9.1" in line
+        ]
+        assert caps, (
+            "requirements-ci.txt 未把 pytest 上界压在 9.1 以下。\n"
+            "9.1.x 存在收集器回归（上游 #14997 / #15071）：交错传入包根文件与\n"
+            "子包文件时子包 conftest fixture 全部不可见。上游修好前不得放开。"
+        )
+
+    def test_ci_lock_resolves_below_91(self):
+        lock = _read("requirements-ci.lock")
+        m = re.search(r"(?m)^pytest==([0-9.]+)$", lock)
+        assert m, "requirements-ci.lock 缺 pytest pin"
+        version = tuple(int(x) for x in m.group(1).split("."))
+        assert version < (9, 1), (
+            f"requirements-ci.lock 的 pytest=={m.group(1)} 落在回归区间（>=9.1）。\n"
+            "修法：改 requirements-ci.txt 的声明上界后重跑\n"
+            "  uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+        )
+
+
 class TestRemovedPackagesStayRemoved:
     """已摘除包不得回归（CVE-2024-23342 根除处置，台账见 docs/05-reports/dependency-cve-ledger.md）。"""
 
