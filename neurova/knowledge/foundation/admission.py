@@ -22,13 +22,20 @@ SEGMENTS: tuple = (
     "indexing",             # 011
 )
 
-# 段名册：每段的当前状态只有两种取值，且必须在 SEGMENTS 里穷举。
-# `wired` = 已接通的协作者，缺它说明**这次造门漏接了一段**（必须拒写）；
-# `planned` = 尚未建成的段，缺它是常态（写数据仍要能写）。
+# 段名册：每段的当前状态只有三种取值，且必须在 SEGMENTS 里穷举。
+# `wired`     = 已接通的协作者，缺它说明**这次造门漏接了一段**（必须拒写）；
+# `delegated` = **另有归属**的段：它由本模块之外的实现负责，且必须点名是谁（见
+#               `SEGMENT_OWNERS`）。归在别的段名下不等于没人做，也不等于欠账；
+# `planned`   = 还没人做的段，缺它是常态（写数据仍要能写）。
 #
-# 这两种故障此前共用一个 `pending_segments` 字段（旧实现把 `indexing` 硬编码成永远缺），
+# 这三种故障此前共用一个 `pending_segments` 字段（旧实现把 `indexing` 硬编码成永远缺），
 # 后果是每个真实调用点都只能传 `allowPendingSegments=True` 绕开纪律——
 # 「缺段即拒」在真实链路上等于不存在。分开之后，逃生开关在真实写入链上被删干净。
+#
+# 为什么还要有 `delegated`（Issue #75 的残余项）：上一批把 `indexing` 归进 `planned`
+# 如实报出，但 `planned` 是个双义格子——它同时装着"还没人做"和"由别处负责"。回执上每条
+# 写入都挂着 `plannedSegments=['indexing']`，读的人分不清欠账还是设计，欠账因此永远
+# 没人认领。归属一旦写清（谁负责、在哪个文件里跑），这一格就不再是垃圾桶。
 SEGMENT_STATUS: dict = {
     "content_identity": "wired",       # 段1 在 admit() 内联实现
     "identity_resolution": "wired",
@@ -36,10 +43,25 @@ SEGMENT_STATUS: dict = {
     "conflict_judgement": "wired",
     "credibility_record": "wired",
     "lineage": "wired",
-    # 段7 尚未建成：事实池由读面在查询时对库内行实时打分（`read_surface.searchableFacts`
-    # → `bm25_rank`），叙述/分块两路另有条目侧索引，因此这一格不接也不缺读面能力，
-    # 但它**不是**"这次装配漏了一段"，不许混进拒写判据。
-    "indexing": "planned",
+    # 段7「入索引」不是欠账，是**分工**：本段在写入时不做索引，索引由两条既有实现拥有——
+    #   * 条目/分块两路：`knowledge/repository.py` 的 `_rebuild_indexes` /
+    #     `_apply_pending_ops`，挂在 `search_visible_items` 检索入口上按需维护，
+    #     向量路落 `UnifiedVectorStore.index_memories`；
+    #   * 事实路：查询时对库内行实时打分，`foundation/read_surface.py` 的
+    #     `searchableFacts` → `bm25_rank`。
+    # 归属写在 `SEGMENT_OWNERS` 里而不是注释里：注释不会红，`test_index_segment_ownership`
+    # 会去这两个文件里查 owner 是否还在、还在不在检索路上。
+    "indexing": "delegated",
+}
+
+# `delegated` 段的归属名册：必须写出**真实存在且可达**的实现点位。
+# 键必须全部落在 `delegated` 段上（守卫反向锁：`planned` 段挂归属 = 假装接线）。
+SEGMENT_OWNERS: dict = {
+    "indexing": (
+        "knowledge/repository.py::_rebuild_indexes",
+        "knowledge/repository.py::_apply_pending_ops",
+        "knowledge/foundation/read_surface.py::bm25_rank",
+    ),
 }
 
 _REQUIRED_FIELDS = ("subjectLabel", "predicateTermId", "objectTerm", "content")
@@ -93,6 +115,9 @@ class AdmissionReceipt:
     # 尚未建成的段另立一栏：`pendingSegments` 只报"这次装配漏接"，
     # 两者混报就等于回执不再指认故障。
     plannedSegments: List[str] = field(default_factory=list)
+    # 另有归属的段再立一栏：既不是"这次漏接"，也不是"没人做"，混进任何一栏
+    # 都会让读的人判错性质（Issue #75：`indexing` 长期被读成欠账）。
+    delegatedSegments: List[str] = field(default_factory=list)
     # 本条事实挂在哪条活动上：调用方要顺着自己的账往下记，得拿得到这个 id。
     activityId: str = ""
 
@@ -164,8 +189,19 @@ class KnowledgeAdmissionGate:
 
     @staticmethod
     def plannedSegments() -> List[str]:
-        """尚未建成的段。与 `pendingSegments()` 正交，回执两栏分列。"""
+        """还没人做的段。与 `pendingSegments()` 正交，回执分栏报出。"""
         return [name for name in SEGMENTS if SEGMENT_STATUS.get(name) == "planned"]
+
+    @staticmethod
+    def delegatedSegments() -> List[str]:
+        """另有归属的段（归属见 `SEGMENT_OWNERS`）。与上面两栏正交。"""
+        return [name for name in SEGMENTS if SEGMENT_STATUS.get(name) == "delegated"]
+
+    @staticmethod
+    def segmentOwners() -> Dict[str, Any]:
+        """`delegated` 段的归属点位——读回执的人据此找到真正负责的实现。"""
+        return {name: list(SEGMENT_OWNERS.get(name, ()))
+                for name in SEGMENTS if SEGMENT_STATUS.get(name) == "delegated"}
 
     @staticmethod
     def _validate(request: AdmissionRequest) -> None:
@@ -198,6 +234,7 @@ class KnowledgeAdmissionGate:
 
         pending = self.pendingSegments()
         planned = self.plannedSegments()
+        delegated = self.delegatedSegments()
         if pending and not allowPendingSegments:
             raise AdmissionSegmentMissing(pending)
 
@@ -243,6 +280,7 @@ class KnowledgeAdmissionGate:
                 dedupedByContent=dupe["fact_id"],
                 lineageApplied=lineage is not None,
                 plannedSegments=planned,
+                delegatedSegments=delegated,
                 activityId=activityId,
             )
 
@@ -285,6 +323,7 @@ class KnowledgeAdmissionGate:
             needsHumanReview=needsReview,
             lineageApplied=lineage is not None,
             plannedSegments=planned,
+            delegatedSegments=delegated,
             activityId=activityId,
         )
 

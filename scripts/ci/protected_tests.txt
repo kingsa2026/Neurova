@@ -182,6 +182,17 @@ tests/unit/knowledge/test_read_surface_agent_scope.py
 # Issue #75：记忆库写入围栏 + 默认路径不再随 CWD 散落（仓库根 71,831 行的来路）
 tests/unit/memory/test_memory_storage_fence.py
 
+# Issue #75 残余项 A：历史污染清空（正证据判据 + 先归档再删 + 幂等 + 工作区目标拒删）
+tests/unit/memory/test_memory_pollution_purge.py
+# Issue #75 残余项 B：默认落点收成单一事实源（数据根），CWD 不再决定库在哪
+tests/unit/core/test_data_root_single_source.py
+# Issue #75 残余项 C：入索引段报出**归属**（delegated + owner），不再挂在"还没做"
+tests/unit/knowledge/test_index_segment_ownership.py
+# Issue #75 残余项 D：存量断言归正入口（补链位后必须转 verified；无依据的行保持 unverified）
+tests/unit/knowledge/test_assertion_regrade_entry.py
+# Issue #75 残余项 E：仓库里不许再有被跟踪的运行期残留（sessions/ / trajectories/）
+tests/unit/memory/test_tracked_run_residue_guard.py
+
 # Issue #68 收口后下一层：docs/11-legacy 归档层悬空引用登记台账（逐条可达性判定 +
 # 前像回收 + 不得记成已修复），守卫与生成器 scripts/scan_docs_refs.py 同一口径
 tests/unit/test_legacy_ref_ledger_guard.py

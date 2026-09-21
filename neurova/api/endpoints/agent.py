@@ -645,9 +645,12 @@ async def delete_agent(request: Request, agent_id: str = FastAPIPath(...), curre
             else:
                 cleanup_report["workspace_removed"] = False
 
-        # 2) 认知图谱数据目录 data/{agent_id}（agent_core._init_cognitive_graph 创建，CWD 相对）
+        # 2) 认知图谱数据目录（agent_core._init_cognitive_graph 创建）：
+        #    与写入端同取 `get_agent_data_dir`——两处各拼一次路径，迟早各拼出不同地方。
         if agent_id not in _RESERVED_DATA_DIR_NAMES:
-            agent_data_dir = Path("data") / agent_id
+            from neurova.core.data_root import get_agent_data_dir
+
+            agent_data_dir = get_agent_data_dir(agent_id)
             if agent_data_dir.is_dir() and not await asyncio.to_thread(
                 _remove_tree_with_retry, agent_data_dir
             ):
