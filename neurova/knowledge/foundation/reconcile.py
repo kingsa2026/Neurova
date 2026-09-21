@@ -28,6 +28,8 @@ def _assertionFor(agentId: str, item: Dict[str, Any],
     咽喉在写入前就要求"不能有主不明的知识"，所以映射必须自带断言——
     缺了它，回放根本进不去血缘段，也就测不到生产写入的真实形状。
     不为回填行编造置信度：那是 G11 要灭的病，不能由对账器重新犯。
+    也不自填 `verification_state`：那一列由校验器（`ActivityDigestChain.attest()`）
+    回写，调用方写进去的值从来没有人读——写出无人读的字段本身就是断点。
 
     `mediumFallback` 是唯一按来源分叉的参数：搬家进来的旧行确实来自那个 JSON 文件，
     而实时写入的条目没有来源串时，诚实的说法是"来源就是这条条目本身"（entry:<kid>），
@@ -47,11 +49,14 @@ def _assertionFor(agentId: str, item: Dict[str, Any],
         "actorId": owner or "legacy-unknown",
         "mediumRef": source or mediumFallback,
         "statementText": str(item.get("title", "") or "").strip() or "(untitled legacy entry)",
-        "verification_state": "unverified",
     }
 
 
-def _requestsFromRepository(repo: Any) -> List[AdmissionRequest]:
+# 两条路径共用的映射，但**来路各自由调用方声明**：回填是一次真实导入，
+# 对账回放是一次重演。不给它们各写一套映射，也不让它们都落进咽喉兜底——
+# 兜底一律记为"直写"，那四种来路在活动账上就再也分不开了。
+def _requestsFromRepository(repo: Any, *, activityKind: str, activityBasis: str,
+                           ) -> List[AdmissionRequest]:
     """旧条目 → 咽喉入参的唯一映射，两条路径共用，避免各写一套映射造成假对账。
 
     条目本来就是文档，所以按 `record_kind='narrative'` 发：谓词由咽喉固定，
@@ -71,6 +76,8 @@ def _requestsFromRepository(repo: Any) -> List[AdmissionRequest]:
                 content=str(item.get("content", "") or ""),
                 assertions=[_assertionFor(agentId, item)],
                 sourceTurnId="legacy:%s" % knowledgeId,
+                activityKind=activityKind,
+                activityBasis=activityBasis,
             ))
     return requests
 
@@ -79,7 +86,8 @@ class FoundationReconciler:
     @staticmethod
     def plan(repo: Any) -> Dict[str, Any]:
         """静态解析旧库：按咽喉同一口径预测折叠结果，并给出可执行分组。"""
-        requests = _requestsFromRepository(repo)
+        requests = _requestsFromRepository(repo, activityKind="import",
+                                           activityBasis="FoundationReconciler.plan（静态解析，未落库）")
         keyed: Dict[Any, List[str]] = {}
         unkeyed: List[str] = []
         domains: set = set()
@@ -143,8 +151,10 @@ class FoundationReconciler:
         store = KnowledgeFactStore(replayDbPath)
         try:
             gate = productionAdmissionGate(store, toolVersion='reconcile-replay')
-            for request in _requestsFromRepository(repo):
-                gate.admit(request, allowPendingSegments=True)
+            for request in _requestsFromRepository(
+                    repo, activityKind="import",
+                    activityBasis="FoundationReconciler.reconcile（回放旧库，一次性底座）"):
+                gate.admit(request)
             actual = {
                 "facts": store.factCount(),
                 "subjects": store.subjectCount(),

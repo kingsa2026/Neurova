@@ -195,18 +195,69 @@ class ActivityDigestChain:
 
     # ── 巡检 ──────────────────────────────────────────────────
 
+    # ── 校验闭环（工单 023 的落点）──────────────────────────
+
+    def attest(self, activityId: Optional[str] = None) -> Dict[str, Any]:
+        """逐条裁决并**回写** `verification_state`——只报不改就等于从不闭环。
+
+        一条断言的裁决吃三样：正文与其哈希是否相符、摘要是否与内容相符、
+        链位（seq / prev_digest）是否与前一跳接得上。任一样不成立即 `failed`；
+        三样都成立才是 `verified`。`unverified` 从此只有一个含义：**还没验过**。
+
+        回写而不是返回一张临时表：读面（血缘视图、巡检端点）读的是库里的列，
+        结论不落回那一列，下一个读的人拿到的还是"没人验过"。
+        """
+        entries = self._gradeAll(activityId)
+        with self._store._lock, self._store._conn:
+            for entry in entries:
+                self._store._conn.execute(
+                    "UPDATE knowledge_assertions SET verification_state = ?"
+                    " WHERE assertion_id = ?", (entry["state"], entry["assertion_id"]))
+        counts = self._store.assertionVerificationCounts()
+        failed = counts.get("failed", 0)
+        return {"ok": failed == 0, "graded": len(entries), "failed": failed,
+                "verified": counts.get("verified", 0), "unverified": counts.get("unverified", 0),
+                "verification": counts,
+                "failures": [e for e in entries if e["state"] == "failed"][:5]}
+
+    def _gradeAll(self, activityId: Optional[str]) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for one in self._activityIds(activityId):
+            items = self.items(one)
+            prev = ""
+            index = 0
+            for item in items:
+                if not str(item.get(_UNLINKED_FIELD) or ""):
+                    # 上链之前的行：这一维没依据，保持 unverified，不假装验过
+                    out.append({"assertion_id": item["assertion_id"], "state": "unverified",
+                                "reason": "未上链"})
+                    continue
+                index += 1
+                reason = self._breakReason(item, index, prev)
+                if reason is None and itemDigest(item) != str(item["digest"]):
+                    reason = "摘要与内容不符"
+                out.append({"assertion_id": item["assertion_id"],
+                            "state": "failed" if reason else "verified",
+                            "reason": reason or ""})
+                prev = str(item["digest"])
+        return out
+
+    def _activityIds(self, activityId: Optional[str]) -> List[str]:
+        with self._store._lock:
+            rows = self._store._conn.execute(
+                "SELECT DISTINCT activity_id FROM knowledge_assertions"
+                " WHERE activity_id IS NOT NULL AND activity_id <> ''"
+                + (" AND activity_id = ?" if activityId else "") + " ORDER BY activity_id",
+                (activityId,) if activityId else ()).fetchall()
+        return [r["activity_id"] for r in rows]
+
     def verify(self, activityId: Optional[str] = None) -> Dict[str, Any]:
         """重算每条链并与链头对账，返回首个断裂点。
 
         上链之前的行（`digest` 为空）算 `unlinked` 不算断裂：那是一维没依据，
         不是有人改过数据——把没测过的事报成故障，巡检就没人信了。
         """
-        with self._store._lock:
-            ids = [r["activity_id"] for r in self._store._conn.execute(
-                "SELECT DISTINCT activity_id FROM knowledge_assertions"
-                " WHERE activity_id IS NOT NULL AND activity_id <> ''"
-                + (" AND activity_id = ?" if activityId else "") + " ORDER BY activity_id",
-                (activityId,) if activityId else ()).fetchall()]
+        ids = self._activityIds(activityId)
         checked = unlinked = 0
         firstBreak: Optional[Dict[str, Any]] = None
         for one in ids:
@@ -216,7 +267,9 @@ class ActivityDigestChain:
             if firstBreak is None and result["break"]:
                 firstBreak = result["break"]
         return {"ok": firstBreak is None, "chains": len(ids), "rows": checked,
-                "unlinked": unlinked, "break": firstBreak}
+                "unlinked": unlinked, "break": firstBreak,
+                # 分布一并给出：巡检只报"有没有断"的话，读的人看不到"多少条还没验过"
+                "verification": self._store.assertionVerificationCounts()}
 
     def _verifyChain(self, activityId: str) -> Dict[str, Any]:
         items = self.items(activityId)

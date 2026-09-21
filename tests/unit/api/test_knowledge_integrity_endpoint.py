@@ -78,7 +78,10 @@ def test_tamperedAssertionSurfacesWithItsPosition(isolatedStore):
 def test_emptyStoreIsReportedAsNothingCheckedNotBroken(isolatedStore):
     body = _client().get("/api/v1/knowledge/foundation/integrity").json()
 
-    assert body == {"ok": True, "chains": 0, "rows": 0, "unlinked": 0, "break": None}
+    assert body == {"ok": True, "chains": 0, "rows": 0, "unlinked": 0, "break": None,
+                    # 三态分布一并给出：巡检只报"有没有断"的话，
+                    # 读的人看不到"多少条还没验过"，闭环就没有读数
+                    "verification": {"unverified": 0, "verified": 0, "failed": 0}}
 
 
 def test_endpointUsesTheSameReadingAsTheLedgerItself(isolatedStore):
