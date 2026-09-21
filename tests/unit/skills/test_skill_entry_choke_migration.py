@@ -114,3 +114,148 @@ class TestSchedulerContextVisibility:
             "新事件循环里读不到轮级上下文——scheduler 那条入口会静默零票"
         )
         tc.clear_turn_state()
+
+
+class TestToolEngineReadEntries:
+    """005 残留：把 `ToolEngine` 当**入口**用的两处读取面，行为是"静默零"。
+
+    `collaboration/neurflow/{adapters,node_registry}.py` 都写
+    `from neurova.execution_engine.tool_engine import get_tool_engine` —— 该模块
+    **没有**这个函数，所以 `adapters._get_tool_engine()` 恒 None（`sync_tools`
+    恒 0），`node_registry._sync_tools_from_engine` 恒 `return 0`。工具节点目录
+    因此永远空着，而调用方读到的 0 与"这台机器真的没有工具"分不开。
+
+    即使导入修好，两处还按 dict 取字段（`tool['name']` / `tool_def.get("name")`），
+    而 `ToolEngine.list_tools()` 返回的是 `ToolDefinition` 数据类 —— 仍会炸。
+    """
+
+    def test_engine_lookup_shares_one_source_with_mcp_registration(self):
+        """引擎读取必须取到 MCP 注册所落的那个单例（同一个事实源）。"""
+        from neurova.api.endpoints import tool_layers as api
+        from neurova.collaboration.neurflow import adapters
+
+        assert adapters._get_tool_engine() is api.get_tool_engine(), (
+            "_get_tool_engine() 取到的不是进程里的工具引擎单例"
+            "（导入的 get_tool_engine 在该模块根本不存在，恒 None）"
+        )
+
+    def test_sync_tools_syncs_real_tool_definitions(self):
+        """真实 `ToolDefinition` 列表必须能同步成节点（不是只认 dict）。"""
+        from unittest.mock import MagicMock
+
+        from neurova.api.endpoints import tool_layers as api
+        from neurova.collaboration.neurflow import adapters
+
+        engine = api.get_tool_engine()
+        added = not engine.get_tool("__sync_probe__")
+        if added:
+            engine.register_tool("__sync_probe__", lambda: None, description="探针")
+        try:
+            registry = MagicMock()
+            assert adapters.sync_tools(registry) >= 1, "工具节点同步恒 0（引擎取不到）"
+            node = registry.register.call_args[0][0]
+            assert node.type.startswith("tool:__sync_probe__") or node.source == "tool"
+            assert node.label == "__sync_probe__", f"节点名取错：{node.label!r}"
+        finally:
+            if added:
+                engine.unregister_tool("__sync_probe__")
+
+    def test_node_registry_sync_reads_real_tool_definitions(self):
+        """`node_registry._sync_tools_from_engine` 同样必须认数据类定义。"""
+        from unittest.mock import MagicMock
+
+        from neurova.api.endpoints import tool_layers as api
+        from neurova.collaboration.neurflow import node_registry as nr
+
+        engine = api.get_tool_engine()
+        added = not engine.get_tool("__sync_probe__")
+        if added:
+            engine.register_tool("__sync_probe__", lambda: None, description="探针")
+        try:
+            registry = MagicMock()
+            count = nr._sync_tools_from_engine(registry)
+            assert count >= 1, "同步恒 0（导入的 get_tool_engine 不存在 → 静默 return 0）"
+        finally:
+            if added:
+                engine.unregister_tool("__sync_probe__")
+
+
+class TestToolExecuteEndpointGoesThroughChoke:
+    """005 残留：`/tool-layers/tools/execute` 不能再把 `ToolEngine` 当入口。
+
+    `ToolEngine` 是咽喉**内层**（`tool_executor._execute_tool_core` 调它）。
+    端点直接调它，就绕过了票据、`on_tool_executed`、治理预检与 hooks ——
+    与 003 收编前的原生链同型。有 agent/执行器时必须走咽喉；引擎只在
+    "无 agent 的评测/脚本" 那条降级分支里用。
+    """
+
+    @pytest.mark.asyncio
+    async def test_agent_executor_is_preferred_over_raw_engine(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from neurova.api.endpoints import tool_layers
+        from neurova.api.endpoints.tool_layers import ToolExecuteRequest, execute_tool
+
+        engine = MagicMock()
+        engine.execute_with_safeguards = AsyncMock(return_value={"raw": "bypass"})
+
+        executor = MagicMock()
+        executor.execute = AsyncMock(return_value={"ok": "through-choke"})
+        executor._result_is_success = lambda payload: bool(payload.get("ok"))
+        agent = MagicMock()
+        agent.tool_executor = executor
+
+        with patch.object(tool_layers, "get_tool_engine", return_value=engine), \
+             patch("neurova.api.endpoints.get_agent_instance", return_value=agent):
+            response = await execute_tool(
+                ToolExecuteRequest(tool_name="calculator", arguments={"expr": "1+1"}, timeout=5)
+            )
+
+        assert executor.execute.await_count == 1, "端点没走咽喉（agent.tool_executor）"
+        assert engine.execute_with_safeguards.await_count == 0, (
+            "端点仍把 ToolEngine 当入口用（绕过票据/钩子/治理）"
+        )
+        assert response["code"] == 0
+
+    @pytest.mark.asyncio
+    async def test_engine_still_used_when_no_agent(self):
+        """反向锁：无 agent 的评测/脚本路径仍可用引擎（不是一刀切禁掉）。"""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from neurova.api.endpoints import tool_layers
+        from neurova.api.endpoints.tool_layers import ToolExecuteRequest, execute_tool
+
+        engine = MagicMock()
+        engine.execute_with_safeguards = AsyncMock(return_value={"ok": True})
+
+        with patch.object(tool_layers, "get_tool_engine", return_value=engine), \
+             patch("neurova.api.endpoints.get_agent_instance", return_value=None):
+            response = await execute_tool(
+                ToolExecuteRequest(tool_name="calculator", arguments={}, timeout=5)
+            )
+
+        assert engine.execute_with_safeguards.await_count == 1
+        assert response["code"] == 0
+
+
+class TestToolEngineEntryGuard:
+    """守卫：`ToolEngine` 的取用只有一个源，且不得被当成执行入口。
+
+    `grep -rn "from neurova.execution_engine.tool_engine import" neurova/` 的
+    结果必须只剩"取类/取枚举"这条合法用法——取 `get_tool_engine` 会 ImportError
+    （该模块没有这个函数），再被吞成静默 0/None。
+    """
+
+    def test_no_phantom_get_tool_engine_import(self):
+        offenders: List[str] = []
+        for path in NEUROVA.rglob("*.py"):
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            for lineno, line in enumerate(
+                path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1
+            ):
+                if "execution_engine.tool_engine import" in line and "get_tool_engine" in line:
+                    offenders.append(f"{rel}:{lineno}")
+        assert offenders == [], (
+            "`neurova.execution_engine.tool_engine` 没有 get_tool_engine，"
+            f"这行会 ImportError 并被吞成静默零（改用 api.endpoints.tool_layers）：{offenders}"
+        )

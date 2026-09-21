@@ -258,7 +258,10 @@ class ContextMemoryBridge:
         }
 
     def _count_tokens(self, text: str) -> int:
-        return len(text) // 4
+        """token 估算：走全仓唯一尺子。"""
+        from neurova.context.token_estimator import estimate_tokens
+
+        return estimate_tokens(text)
 
 
 # ────── MemoryCoordinator ──────

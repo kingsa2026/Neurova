@@ -10,7 +10,7 @@ from neurova.core.logger import get_logger
 from typing import List
 
 from neurova.context.pool_models import ContextInput, ContextSource
-from neurova.context.token_estimator import EstimationStrategy, TokenEstimator
+from neurova.context.token_estimator import estimate_tokens as estimate_text_tokens
 
 logger = get_logger(__name__)
 
@@ -20,8 +20,7 @@ class ContextPoolUtils:
 
     @staticmethod
     def estimate_tokens(text: str) -> int:
-        estimator = TokenEstimator(EstimationStrategy.BALANCED)
-        return estimator.estimate(text)
+        return estimate_text_tokens(text)
 
     @staticmethod
     def merge_contexts(*context_lists: List[ContextInput]) -> List[ContextInput]:

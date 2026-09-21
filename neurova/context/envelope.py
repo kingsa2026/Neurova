@@ -37,8 +37,14 @@ _COMPRESS_DROP_ORDER = ("emotion", "reflection", "experience", "lessons", "time"
 
 
 def _count_default(text: str) -> int:
-    """无估算器时的粗略 token 计数（与 injector._truncate_text 同 1.5 比率）。"""
-    return int(len(text or "") / 1.5) + 1
+    """默认 token 计数：走全仓唯一尺子（`context.token_estimator`）。
+
+    信封淘汰序列的判据必须与窗口折叠同口径，否则"信封装不装得下"和
+    "窗口超没超"会各说各话。
+    """
+    from neurova.context.token_estimator import estimate_tokens
+
+    return estimate_tokens(text)
 
 
 def build_time_block() -> str:
