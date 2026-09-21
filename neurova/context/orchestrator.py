@@ -601,32 +601,36 @@ class ContextOrchestrator:
             self.context_pool.turn_scope = turn_scope
             self.context_pool.session_id = turn_session
 
-            # 归档对话轮次（老轮次可被后续语义召回 → 对话永不丢失）
-            # P1-1①：写入侧打标 + tool 结果以 TOOL_CALL 源归档（带 pairs_with）
-            self._archive_conversation_to_pool(conversation_context)
+            # B4/003：本轮全部归档收进**一次事务**（判据 A2，规格 D8）。
+            # 事务边界就是"本轮归档调用"——批内条目在批结束时一次提交，不做
+            # 异步/后台缓冲刷盘（那会把崩溃窗口内的内容连同"已归档"的承诺一起丢）。
+            with self.context_pool.archiveBatch():
+                # 归档对话轮次（老轮次可被后续语义召回 → 对话永不丢失）
+                # P1-1①：写入侧打标 + tool 结果以 TOOL_CALL 源归档（带 pairs_with）
+                self._archive_conversation_to_pool(conversation_context)
 
-            # 归档记忆（作用域由池的写入咽喉统一打标，见 pool.turn_scope）
-            for memory in relevant_memories or []:
-                if isinstance(memory, dict):
-                    content = memory.get("content", str(memory))
-                else:
-                    content = str(memory)
-                self.context_pool.add_context(ContextInput(source=ContextSource.MEMORY, content=content, priority=70))
+                # 归档记忆（作用域由池的写入咽喉统一打标，见 pool.turn_scope）
+                for memory in relevant_memories or []:
+                    if isinstance(memory, dict):
+                        content = memory.get("content", str(memory))
+                    else:
+                        content = str(memory)
+                    self.context_pool.add_context(ContextInput(source=ContextSource.MEMORY, content=content, priority=70))
 
-            # 归档经验（D1 收敛：与结晶产物按内容键去重，结晶优先）
-            for tag, content, prio in dedupe_experience_sources(experience_items, crystallized_patterns):
-                self.context_pool.add_context(
-                    ContextInput(source=ContextSource.EXPERIENCE, content=f"{tag}{content}", priority=prio)
-                )
+                # 归档经验（D1 收敛：与结晶产物按内容键去重，结晶优先）
+                for tag, content, prio in dedupe_experience_sources(experience_items, crystallized_patterns):
+                    self.context_pool.add_context(
+                        ContextInput(source=ContextSource.EXPERIENCE, content=f"{tag}{content}", priority=prio)
+                    )
 
-            # 归档反思日志（持久教训，可被语义召回）。2026-09-15 P3：归档
-            # 全文教训+标题（无损池契约，受 draw 预算按相关性取回）；正文不再
-            # 截断、也不再作为 system 行恒定直注（旧直注在下方"本轮产物"块删除）。
-            for log in reflection_logs:
-                full = f"{log.get('lesson', str(log))}（{log.get('title', '')}）"
-                self.context_pool.add_context(
-                    ContextInput(source=ContextSource.REFLECTION, content=full, priority=60)
-                )
+                # 归档反思日志（持久教训，可被语义召回）。2026-09-15 P3：归档
+                # 全文教训+标题（无损池契约，受 draw 预算按相关性取回）；正文不再
+                # 截断、也不再作为 system 行恒定直注（旧直注在下方"本轮产物"块删除）。
+                for log in reflection_logs:
+                    full = f"{log.get('lesson', str(log))}（{log.get('title', '')}）"
+                    self.context_pool.add_context(
+                        ContextInput(source=ContextSource.REFLECTION, content=full, priority=60)
+                    )
 
             # ════════════════════════════════════════════════════════
             # 视图层（按需调取 + 稳定前缀）
