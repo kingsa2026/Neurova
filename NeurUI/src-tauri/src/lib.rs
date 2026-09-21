@@ -21,7 +21,6 @@ struct RuntimeLayout {
     root: std::path::PathBuf,
     python: std::path::PathBuf,
     node: std::path::PathBuf,
-    models: std::path::PathBuf,
 }
 
 // ---- 子进程托管（Python + Node）----
@@ -34,6 +33,12 @@ struct ManagedChildren {
 // ---- 下载状态文件 ----
 
 const DOWNLOAD_STATUS_FILE: &str = ".download_status.json";
+
+/// 下载状态是运行态，只能落在 runtime/ 下：开发态的后端根就是仓库根，
+/// 拼在根上等于每次启动往仓库里写一个未跟踪文件。
+fn download_status_path(root: &std::path::Path) -> std::path::PathBuf {
+    root.join("runtime").join(DOWNLOAD_STATUS_FILE)
+}
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct DownloadStatus {
@@ -50,8 +55,7 @@ impl DownloadStatus {
 }
 
 fn read_download_status(root: &std::path::Path) -> DownloadStatus {
-    let path = root.join(DOWNLOAD_STATUS_FILE);
-    let text = match std::fs::read_to_string(&path) {
+    let text = match std::fs::read_to_string(download_status_path(root)) {
         Ok(t) => t,
         Err(_) => return DownloadStatus::idle(),
     };
@@ -62,7 +66,10 @@ fn read_download_status(root: &std::path::Path) -> DownloadStatus {
 }
 
 fn write_download_status(root: &std::path::Path, status: &DownloadStatus) {
-    let path = root.join(DOWNLOAD_STATUS_FILE);
+    let path = download_status_path(root);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
     let _ = std::fs::write(&path, serde_json::to_string_pretty(status).unwrap_or_default());
 }
 
@@ -70,7 +77,33 @@ fn write_download_status(root: &std::path::Path, status: &DownloadStatus) {
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct ModelManifest {
+    runtime: RuntimeSources,
     models: Vec<ModelEntry>,
+}
+
+/// 运行时供给清单：版本与候选下载源同源，lib.rs 不再抄第二份。
+/// urls 是有序候选——国内镜像在前、官方源兜底。
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct RuntimeSources {
+    python: RuntimeSpec,
+    node: RuntimeSpec,
+    pip: PipSpec,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct RuntimeSpec {
+    version: String,
+    urls: Vec<String>,
+}
+
+/// 依赖供给声明：装哪份清单、按什么顺序试索引源、用什么 import 面判「装好了」。
+/// probe 与 CI 的「后端入口最小 import 面」保持同一批模块。
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PipSpec {
+    requirements: String,
+    index_urls: Vec<String>,
+    probe: Vec<String>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -79,24 +112,41 @@ struct ModelEntry {
     path: String,
     required: bool,
     source: String,
-    url: String,
     size_mb: u64,
+    repo_id: Option<String>,
+    model_size: Option<String>,
 }
 
-fn read_model_manifest(root: &std::path::Path) -> Option<ModelManifest> {
-    let text = std::fs::read_to_string(root.join("models/MANIFEST.json")).ok()?;
-    serde_json::from_str(&text).ok()
+fn read_model_manifest(root: &std::path::Path) -> Result<ModelManifest, String> {
+    let path = root.join("models/MANIFEST.json");
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("读 {} 失败: {}", path.display(), e))?;
+    // 解析失败必须与「文件不存在」区分报出：字段对不上时表现也是「清单不存在」，
+    // 排查会被引向文件缺失而非契约错位。
+    serde_json::from_str(&text)
+        .map_err(|e| format!("models/MANIFEST.json 解析失败: {}", e))
 }
 
+/// 清单里的 path 自带 models/ 前缀，一律相对后端根拼（相对 layout.models 拼
+/// 会成 root/models/models/... 永不命中）。必需项缺席即未就绪，可选项不阻塞启动。
 fn is_model_ready(layout: &RuntimeLayout) -> bool {
     let manifest = match read_model_manifest(&layout.root) {
-        Some(m) => m,
-        None => return false,
+        Ok(m) => m,
+        Err(e) => {
+            log::warn!("{}", e);
+            return false;
+        }
     };
-    manifest.models.iter().all(|m| {
-        let model_path = layout.models.join(&m.path);
-        model_path.exists() && model_path.read_dir().map(|mut d| d.next().is_some()).unwrap_or(false)
-    })
+    manifest
+        .models
+        .iter()
+        .filter(|m| m.required)
+        .all(|m| model_present(layout, m))
+}
+
+fn model_present(layout: &RuntimeLayout, entry: &ModelEntry) -> bool {
+    let dir = layout.root.join(&entry.path);
+    dir.exists() && dir.read_dir().map(|mut d| d.next().is_some()).unwrap_or(false)
 }
 
 // ---- 路径解析 ----
@@ -139,14 +189,21 @@ fn resolve_backend_root(app: &tauri::AppHandle) -> std::path::PathBuf {
     normalize_windows_path(repo_root())
 }
 
-/// 运行时布局解析（runtime/ 子目录 + models/）。
+/// 运行时布局解析（runtime/ 子目录）。模型位置由清单 path 自带 models/ 前缀，
+/// 一律相对 root 拼，不在这里再挂一个 models 目录。
 fn resolve_runtime(root: &std::path::Path) -> RuntimeLayout {
     RuntimeLayout {
         root: root.to_path_buf(),
         python: root.join("runtime/python/python.exe"),
         node: root.join("runtime/node/node.exe"),
-        models: root.join("models"),
     }
+}
+
+/// 后端根的唯一解析入口。命令侧一律经此取布局，不把 root 作为参数暴露给前端：
+/// 前端一旦能传 root，就可能传出一个与 resource_dir/backend 不同层的目录，
+/// 表现为「清单读不到 + 下载落错地方」这种极难归因的失败。
+fn resolve_layout(app: &tauri::AppHandle) -> RuntimeLayout {
+    resolve_runtime(&resolve_backend_root(app))
 }
 
 /// 当天日期戳（本地时区 YYYYMMDD），backend 日志按天分文件用。
@@ -170,9 +227,55 @@ fn day_stamp() -> String {
     format!("{:04}{:02}{:02}", y, m, d)
 }
 
+// ---- 归档落地（Python / Node 共用一种形状）----
+
+/// 在解压目录里找「含可执行文件的那一层」。归档有两种布局：exe 直接在该层，
+/// 或多一层 install/（python-build-standalone 的部分变体）。
+fn find_payload_root(extract_dir: &std::path::Path, exe_name: &str) -> Option<std::path::PathBuf> {
+    for entry in std::fs::read_dir(extract_dir).ok()? {
+        let dir = entry.ok()?.path();
+        if dir.join(exe_name).exists() {
+            return Some(dir);
+        }
+        let nested = dir.join("install");
+        if nested.join(exe_name).exists() {
+            return Some(nested);
+        }
+    }
+    None
+}
+
+/// 把 payload 层原子改名成运行时目录。目标必须先不存在：rename 与 PowerShell
+/// Move-Item 在目标为已存在目录时都是「移入其内」，多出一层即永不命中。
+fn relocate_payload(
+    extract_dir: &std::path::Path,
+    dst: &std::path::Path,
+    exe_name: &str,
+) -> Result<(), String> {
+    let payload = find_payload_root(extract_dir, exe_name).ok_or_else(|| {
+        format!(
+            "解压产物里找不到 {exe_name}（{} 下内容不完整或格式不符）",
+            extract_dir.display()
+        )
+    })?;
+    if dst.exists() {
+        std::fs::remove_dir_all(dst)
+            .map_err(|e| format!("清理旧运行时目录 {} 失败: {e}", dst.display()))?;
+    }
+    if let Some(parent) = dst.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建 {} 失败: {e}", parent.display()))?;
+    }
+    std::fs::rename(&payload, dst)
+        .map_err(|e| format!("落地 {} → {} 失败: {e}", payload.display(), dst.display()))
+}
+
 // ---- 运行时下载（ureq 同步下载 + 系统工具解压）----
 
-fn download_file(url: &str, dest: &std::path::Path, on_progress: impl Fn(u8)) -> Result<(), String> {
+fn download_file(
+    url: &str,
+    dest: &std::path::Path,
+    on_progress: &mut dyn FnMut(u8),
+) -> Result<(), String> {
     use std::io::Write;
     let resp = ureq::get(url)
         .call()
@@ -195,8 +298,30 @@ fn download_file(url: &str, dest: &std::path::Path, on_progress: impl Fn(u8)) ->
     Ok(())
 }
 
+/// 按候选顺序逐个尝试下载，全败才报错，且错误里点名试过的每一个源。
+/// 只说「下载失败」而不说换过源，排查会被引向本机网络而不是某个源的 404。
+fn download_with_fallback(
+    urls: &[String],
+    dest: &std::path::Path,
+    mut on_progress: impl FnMut(u8),
+) -> Result<(), String> {
+    let mut failures: Vec<String> = Vec::new();
+    for url in urls {
+        match download_file(url, dest, &mut on_progress) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                log::warn!("候选源失败 {url}: {e}");
+                failures.push(format!("{url} → {e}"));
+            }
+        }
+    }
+    Err(format!("{} 个候选源全部失败：{}", failures.len(), failures.join(" | ")))
+}
+
 fn download_python_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Result<(), String> {
-    let url = "https://github.com/astral-sh/python-build-standalone/releases/latest/download/cpython-3.12.5+20250916-x86_64-pc-windows-msvc-install_only.tar.gz";
+    // 候选源来自 models/MANIFEST.json 的 runtime.python.urls：镜像在前、官方兜底，
+    // 版本与 URL 同源（守卫 tests/unit/desktop/test_route_b_runtime_download.py）。
+    let urls = read_model_manifest(&layout.root)?.runtime.python.urls;
     let dest = layout.root.join("runtime/_python.tar.gz");
     let extract_dir = layout.root.join("runtime/_python_extract");
 
@@ -208,7 +333,7 @@ fn download_python_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Re
     });
     let _ = app.emit("runtime-status", "python:downloading");
 
-    download_file(url, &dest, |p| {
+    download_with_fallback(&urls, &dest, |p| {
         let _ = write_download_status(&layout.root, &DownloadStatus {
             phase: "python".into(),
             progress: p,
@@ -224,59 +349,43 @@ fn download_python_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Re
         error: None,
     });
 
-    // 解压
+    // 解压：Windows 10 1803+ 自带 bsdtar。tar 不可用或失败时把原因原样交出，
+    // 不再兜一层结构上解不开 tar.gz 的 PowerShell 回退。
     let _ = std::fs::remove_dir_all(&extract_dir);
     std::fs::create_dir_all(&extract_dir).map_err(|e| e.to_string())?;
-    let tar_output = Command::new("tar")
+    let extracted = Command::new("tar")
         .args(["-xzf", &dest.display().to_string()])
         .current_dir(&extract_dir)
-        .output();
-    
-    // Windows 10 可能没有 tar，回退到 PowerShell
-    let tar_ok = tar_output.as_ref().map(|o| o.status.success()).unwrap_or(false);
-    if !tar_ok {
-        let ps_script = format!(
-            r#"Expand-Archive -Path "{}" -DestinationPath "{}" -Force"#,
-            dest.display(), extract_dir.display()
+        .output()
+        .map_or_else(
+            |e| Err(format!("调用 tar 失败: {e}")),
+            |out| {
+                if out.status.success() {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "tar 解压失败: {}",
+                        String::from_utf8_lossy(&out.stderr).trim()
+                    ))
+                }
+            },
         );
-        let _ = Command::new("powershell")
-            .args(["-Command", &ps_script])
-            .output();
-    }
-
-    // 找到解出的 python/ 目录并移动到 runtime/python/
+    // 归档解开是 python/ 一层，与 Node 共用同一落地形状
     let python_dst = layout.root.join("runtime/python");
-    let _ = std::fs::remove_dir_all(&python_dst);
-    let mut found = false;
-    if let Ok(entries) = std::fs::read_dir(&extract_dir) {
-        for entry in entries.flatten() {
-            let p = entry.path().join("python.exe");
-            if p.exists() {
-                let _ = std::fs::rename(entry.path(), &python_dst);
-                found = true;
-                break;
-            }
-            let p = entry.path().join("install").join("python.exe");
-            if p.exists() {
-                let _ = std::fs::rename(entry.path().join("install"), &python_dst);
-                found = true;
-                break;
-            }
-        }
-    }
+    let landed = extracted.and_then(|()| relocate_payload(&extract_dir, &python_dst, "python.exe"));
 
     // 清理临时文件
     let _ = std::fs::remove_file(&dest);
     let _ = std::fs::remove_dir_all(&extract_dir);
 
-    if !found || !python_dst.join("python.exe").exists() {
+    if let Err(e) = landed {
         write_download_status(&layout.root, &DownloadStatus {
             phase: "python".into(),
             progress: 0,
             message: "".into(),
-            error: Some("Python 解压失败，文件不完整".into()),
+            error: Some(e.clone()),
         });
-        return Err("Python 解压失败".into());
+        return Err(e);
     }
 
     write_download_status(&layout.root, &DownloadStatus {
@@ -289,7 +398,7 @@ fn download_python_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Re
 }
 
 fn download_node_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Result<(), String> {
-    let url = "https://nodejs.org/dist/v24.16.0/node-v24.16.0-win-x64.zip";
+    let urls = read_model_manifest(&layout.root)?.runtime.node.urls;
     let dest = layout.root.join("runtime/_node.zip");
     let extract_dir = layout.root.join("runtime/_node_extract");
 
@@ -301,7 +410,7 @@ fn download_node_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Resu
     });
     let _ = app.emit("runtime-status", "node:downloading");
 
-    download_file(url, &dest, |p| {
+    download_with_fallback(&urls, &dest, |p| {
         let _ = write_download_status(&layout.root, &DownloadStatus {
             phase: "node".into(),
             progress: p,
@@ -317,33 +426,39 @@ fn download_node_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Resu
         error: None,
     });
 
-    // 用 PowerShell Expand-Archive 解压
+    // 解压只把归档摊平到临时目录，落地与 Python 走同一条 relocate_payload。
+    // 曾经的 Move-Item 形态：目标 runtime/node 已被 create_dir_all 建出来，
+    // PowerShell 语义变成「移入其内」，node.exe 落到多一层目录里，就绪判定恒不命中。
     let node_dst = layout.root.join("runtime/node");
-    let _ = std::fs::remove_dir_all(&node_dst);
-    std::fs::create_dir_all(&node_dst).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&extract_dir).map_err(|e| e.to_string())?;
     let ps_script = format!(
-        r#"Expand-Archive -Path "{}" -DestinationPath "{}" -Force; Move-Item "{}" "{}" -Force"#,
+        r#"Expand-Archive -Path "{}" -DestinationPath "{}" -Force"#,
         dest.display(),
-        extract_dir.display(),
-        extract_dir.join("node-v24.16.0-win-x64").display(),
-        node_dst.display()
+        extract_dir.display()
     );
     let output = Command::new("powershell")
         .args(["-Command", &ps_script])
         .output()
         .map_err(|e| e.to_string())?;
+    let ps_stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let landed = relocate_payload(&extract_dir, &node_dst, "node.exe");
 
     let _ = std::fs::remove_file(&dest);
     let _ = std::fs::remove_dir_all(&extract_dir);
 
-    if !output.status.success() || !node_dst.join("node.exe").exists() {
+    let failure = match (output.status.success(), landed) {
+        (true, Ok(())) => None,
+        (false, _) => Some(format!("Node.js 解压失败: {ps_stderr}")),
+        (_, Err(e)) => Some(e),
+    };
+    if let Some(error) = failure {
         write_download_status(&layout.root, &DownloadStatus {
             phase: "node".into(),
             progress: 0,
             message: "".into(),
-            error: Some("Node.js 解压失败".into()),
+            error: Some(error.clone()),
         });
-        return Err("Node.js 解压失败".into());
+        return Err(error);
     }
 
     write_download_status(&layout.root, &DownloadStatus {
@@ -355,9 +470,183 @@ fn download_node_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Resu
     Ok(())
 }
 
+// ---- 依赖安装（首启 pip，索引源按候选回退）----
+
+static DEPS_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static DEPS_INSTALLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 就绪 = 探针通过 且 没有安装在进行中。pip 逐包写入 site-packages，
+/// 装到 fastapi 时探针就已通过，此时起后端等于在半装环境里跑。
+fn deps_ready_now(probe_passed: bool, installing: bool) -> bool {
+    probe_passed && !installing
+}
+
+/// pip 命令行形状在此一处固定；索引 URL 只能来自清单。
+fn pip_install_args(index_url: &str, requirements: &str) -> Vec<String> {
+    vec![
+        "-m".into(),
+        "pip".into(),
+        "install".into(),
+        "--no-input".into(),
+        "--disable-pip-version-check".into(),
+        "--index-url".into(),
+        index_url.to_string(),
+        "-r".into(),
+        requirements.to_string(),
+    ]
+}
+
+/// 跑一轮 pip 安装：stdout 行转成状态消息（节流写盘），stderr 单独收拢，
+/// 失败时把两端末尾原文一起交出。两路管道分别有人读，不会互相写满死锁。
+fn run_pip_install(layout: &RuntimeLayout, index_url: &str, requirements: &str) -> Result<(), String> {
+    use std::io::{BufRead, Read};
+    let mut cmd = Command::new(&layout.python);
+    cmd.args(pip_install_args(index_url, requirements))
+        .current_dir(&layout.root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("启动 pip 失败: {e}"))?;
+
+    let mut err_pipe = child.stderr.take().ok_or("pip stderr 未接上")?;
+    let err_collector = std::thread::spawn(move || {
+        let mut buf = String::new();
+        let _ = err_pipe.read_to_string(&mut buf);
+        buf
+    });
+
+    let mut tail: Vec<String> = Vec::new();
+    let mut seen = 0u32;
+    let out = child.stdout.take().ok_or("pip stdout 未接上")?;
+    for line in std::io::BufReader::new(out).lines() {
+        let Ok(line) = line else { break };
+        if line.trim().is_empty() {
+            continue;
+        }
+        seen += 1;
+        if tail.len() >= 40 {
+            tail.remove(0);
+        }
+        tail.push(line);
+        if seen % 10 == 1 {
+            write_download_status(&layout.root, &DownloadStatus {
+                phase: "deps".into(),
+                progress: 0,
+                message: tail.last().map(|s| s.chars().take(160).collect()).unwrap_or_default(),
+                error: None,
+            });
+        }
+    }
+    let status = child.wait().map_err(|e| format!("等待 pip 退出失败: {e}"))?;
+    let stderr = err_collector.join().unwrap_or_default();
+    if !status.success() {
+        let why = if stderr.trim().is_empty() { tail.join("\n") } else { stderr };
+        return Err(format!("pip 安装失败: {}", why.lines().rev().take(30).collect::<Vec<_>>().join("\n")));
+    }
+    Ok(())
+}
+
+/// 安装中标记：任何退出路径都要撤掉，否则就绪判定会被永久锁死。
+struct InstallingGuard;
+
+impl InstallingGuard {
+    fn new() -> Self {
+        DEPS_INSTALLING.store(true, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for InstallingGuard {
+    fn drop(&mut self) {
+        DEPS_INSTALLING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn install_python_dependencies(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Result<(), String> {
+    let spec = read_model_manifest(&layout.root)?.runtime.pip;
+    let req_path = layout.root.join(&spec.requirements);
+    if !req_path.exists() {
+        return Err(format!("依赖清单缺失: {}", req_path.display()));
+    }
+    write_download_status(&layout.root, &DownloadStatus {
+        phase: "deps".into(),
+        progress: 0,
+        message: "正在安装 Python 依赖…".into(),
+        error: None,
+    });
+    let _ = app.emit("runtime-status", "deps:installing");
+    let _guard = InstallingGuard::new();
+
+    let mut failures: Vec<String> = Vec::new();
+    for index in &spec.index_urls {
+        match run_pip_install(layout, index, &spec.requirements) {
+            Ok(()) => {
+                DEPS_READY.store(true, std::sync::atomic::Ordering::SeqCst);
+                return Ok(());
+            }
+            Err(e) => {
+                log::warn!("pip 索引源失败 {index}: {e}");
+                failures.push(format!(
+                    "{index} → {}",
+                    e.lines().last().unwrap_or("").trim()
+                ));
+            }
+        }
+    }
+    Err(format!("{} 个 pip 索引源全部失败：{}", failures.len(), failures.join(" | ")))
+}
+
+/// 依赖是否就绪：按清单声明的 import 面做一次探针导入，而不是猜文件在不在。
+/// 结果缓存，免得 boot 页每两秒起一次解释器。
+fn deps_ready(layout: &RuntimeLayout) -> bool {
+    use std::sync::atomic::Ordering;
+    if DEPS_READY.load(Ordering::SeqCst) {
+        return true;
+    }
+    if DEPS_INSTALLING.load(Ordering::SeqCst) {
+        return false;
+    }
+    let probe = match read_model_manifest(&layout.root) {
+        Ok(m) => m.runtime.pip.probe,
+        Err(e) => {
+            log::warn!("{}", e);
+            return false;
+        }
+    };
+    if probe.is_empty() {
+        return false;
+    }
+    let stmt = format!("import {}", probe.join(", "));
+    let mut cmd = Command::new(&layout.python);
+    cmd.args(["-c", &stmt])
+        .current_dir(&layout.root)
+        .env("PYTHONPATH", std::env::join_paths([layout.root.clone()]).unwrap())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let ok = cmd
+        .spawn()
+        .and_then(|mut c| c.wait())
+        .map(|s| s.success())
+        .unwrap_or(false);
+    let ready = deps_ready_now(ok, DEPS_INSTALLING.load(Ordering::SeqCst));
+    if ready {
+        DEPS_READY.store(true, Ordering::SeqCst);
+    }
+    ready
+}
+
 fn download_models(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Result<(), String> {
-    let manifest = read_model_manifest(&layout.root).ok_or("models/MANIFEST.json 不存在")?;
-    
+    let manifest = read_model_manifest(&layout.root)?;
+
     write_download_status(&layout.root, &DownloadStatus {
         phase: "models".into(),
         progress: 0,
@@ -366,44 +655,27 @@ fn download_models(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Result<(),
     });
     let _ = app.emit("runtime-status", "models:checking");
 
-    let total_models = manifest.models.len() as u8;
-    for (idx, model) in manifest.models.iter().enumerate() {
-        let model_path = layout.models.join(&model.path);
-        if model_path.exists() && model_path.read_dir().map(|mut d| d.next().is_some()).unwrap_or(false) {
-            continue; // 已存在，跳过
-        }
-
-        let pct = ((idx as u8) * 100) / total_models.max(1);
-        write_download_status(&layout.root, &DownloadStatus {
-            phase: "models".into(),
-            progress: pct,
-            message: format!("正在下载模型 {}...", model.id),
-            error: None,
-        });
-
-        std::fs::create_dir_all(&model_path).map_err(|e| e.to_string())?;
-        // 尝试从 URL 下载（可能是目录索引页或直接文件）
-        let dest = model_path.join(format!("{}.bin", model.id));
-        if let Err(e) = download_file(&model.url, &dest, |_| {}) {
-            // 单个模型失败不阻断（非必需模型）
-            log::warn!("模型 {} 下载失败: {}", model.id, e);
-        }
+    // 清单声明的是仓库级来源（repo_id / model_size），单次 download_file 拿不下
+    // 一个仓库，也不再伪造 <id>.bin 单文件产物——缺席的按名点名交出。
+    let blocking: Vec<String> = manifest
+        .models
+        .iter()
+        .filter(|m| m.required && !model_present(layout, m))
+        .map(|m| format!("{}（来源 {}）", m.id, m.source))
+        .collect();
+    if !blocking.is_empty() {
+        return Err(format!("必需模型未就绪，仓库级拉取通道未接通: {}", blocking.join(", ")));
     }
-
-    write_download_status(&layout.root, &DownloadStatus {
-        phase: "models".into(),
-        progress: 100,
-        message: "模型检查完成".into(),
-        error: None,
-    });
     Ok(())
 }
 
-/// 判断运行时是否完整。
+/// 判断运行时是否完整。deps 排在最后：装依赖得先有解释器在场，
+/// boot 页按 missing 的顺序串行安装，此处的次序即安装次序。
 fn is_runtime_ready(layout: &RuntimeLayout) -> bool {
     layout.python.exists()
         && layout.node.exists()
         && is_model_ready(layout)
+        && deps_ready(layout)
 }
 
 /// 获取缺失组件列表。
@@ -412,6 +684,7 @@ fn get_missing(layout: &RuntimeLayout) -> Vec<String> {
     if !layout.python.exists() { missing.push("python".into()); }
     if !layout.node.exists() { missing.push("node".into()); }
     if !is_model_ready(layout) { missing.push("models".into()); }
+    if layout.python.exists() && !deps_ready(layout) { missing.push("deps".into()); }
     missing
 }
 
@@ -509,11 +782,22 @@ fn spawn_node(layout: &RuntimeLayout) -> Option<Child> {
     cmd.spawn().ok()
 }
 
-/// 轮询 /health 直到就绪。
-fn wait_backend_ready(timeout: Duration) -> bool {
+/// 轮询 /health 直到就绪。后端进程中途退出即判失败——只看端口会把
+/// 「解释器起来就崩」这种情况等满整个超时，首启要白等两分钟。
+fn wait_backend_ready(children: &ManagedChildren, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     let agent = ureq::AgentBuilder::new().timeout(Duration::from_secs(2)).build();
     while Instant::now() < deadline {
+        let exited = children
+            .python
+            .lock()
+            .unwrap()
+            .as_mut()
+            .map(|c| matches!(c.try_wait(), Ok(Some(_))))
+            .unwrap_or(true);
+        if exited {
+            return false;
+        }
         if let Ok(resp) = agent.get("http://127.0.0.1:9527/health").call() {
             if resp.status() == 200 {
                 return true;
@@ -559,11 +843,23 @@ fn boot_tail(state: tauri::State<ManagedChildren>, log_offset: u64) -> serde_jso
             None => "not started".into(),
         }
     };
-    serde_json::json!({ "lines": lines, "offset": next_offset, "backend": backend })
+    serde_json::json!({ "lines": lines, "offset": next_offset, "backend": backend, "logPath": backend_root.as_ref().map(|p| p.display().to_string()).unwrap_or_default() })
 }
 
 /// backend.log 绝对路径（spawn 成功后登记，boot_tail 拉取用）
 static BOOT_LOG_PATH: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
+
+/// 提示里给出的日志落点：以 BOOT_LOG_PATH 为唯一事实源，不再写死文件名。
+/// 曾经写的是「安装目录 backend\backend.log」，而实际日志在 logs/backend-<日期>.log，
+/// 用户照提示找不到任何文件。
+fn backend_log_hint() -> String {
+    BOOT_LOG_PATH
+        .lock()
+        .unwrap()
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "logs/ 目录".to_string())
+}
 
 /// 就绪/失败后收尾：亮主窗。
 fn finish_boot(handle: &tauri::AppHandle, ok: bool, msg: &str) {
@@ -612,10 +908,10 @@ fn backend_status(state: tauri::State<ManagedChildren>) -> String {
 
 /// 检查运行时完整性（供 boot 页轮询）。
 #[tauri::command]
-fn check_runtime_ready(root: &std::path::Path) -> serde_json::Value {
-    let layout = resolve_runtime(root);
+fn check_runtime_ready(app: tauri::AppHandle) -> serde_json::Value {
+    let layout = resolve_layout(&app);
     let missing = get_missing(&layout);
-    let download = read_download_status(root);
+    let download = read_download_status(&layout.root);
     serde_json::json!({
         "ready": missing.is_empty(),
         "missing": missing,
@@ -625,9 +921,9 @@ fn check_runtime_ready(root: &std::path::Path) -> serde_json::Value {
 
 /// 触发后端启动（boot 页在运行时就绪后调用）。
 #[tauri::command]
-fn trigger_backend_start(app: tauri::AppHandle, root: std::path::PathBuf) -> Result<(), String> {
+fn trigger_backend_start(app: tauri::AppHandle) -> Result<(), String> {
+    let layout = resolve_layout(&app);
     std::thread::spawn(move || {
-        let layout = resolve_runtime(&root);
         let log_path = layout.root.join("logs").join(format!("backend-{}.log", day_stamp()));
         
         // 同时拉起 Node（静默，不占窗口）
@@ -641,7 +937,7 @@ fn trigger_backend_start(app: tauri::AppHandle, root: std::path::PathBuf) -> Res
                     python: Mutex::new(Some(child)),
                     node: Mutex::new(_node_child),
                 });
-                let ready = wait_backend_ready(Duration::from_secs(120));
+                let ready = wait_backend_ready(app.state::<ManagedChildren>().inner(), Duration::from_secs(120));
                 log::info!("backend pid={pid} ready={ready} root={}", layout.root.display());
                 let _ = app.emit(
                     "backend-status",
@@ -650,7 +946,7 @@ fn trigger_backend_start(app: tauri::AppHandle, root: std::path::PathBuf) -> Res
                 if ready {
                     finish_boot(&app, true, "启动完成，即将进入…");
                 } else {
-                    finish_boot(&app, false, "后端启动超时，详见安装目录 backend\\backend.log");
+                    finish_boot(&app, false, &format!("后端未就绪，详见日志：{}", backend_log_hint()));
                 }
             }
             Err(e) => {
@@ -665,13 +961,14 @@ fn trigger_backend_start(app: tauri::AppHandle, root: std::path::PathBuf) -> Res
 
 /// 后台下载运行时（Python / Node / 模型）。前端调用后立即返回，后台线程执行。
 #[tauri::command]
-fn start_download(app: tauri::AppHandle, root: std::path::PathBuf, what: String) -> Result<(), String> {
+fn start_download(app: tauri::AppHandle, what: String) -> Result<(), String> {
+    let layout = resolve_layout(&app);
     std::thread::spawn(move || {
-        let layout = resolve_runtime(&root);
         let result = match what.as_str() {
             "python" => download_python_runtime(&layout, &app),
             "node" => download_node_runtime(&layout, &app),
             "models" => download_models(&layout, &app),
+            "deps" => install_python_dependencies(&layout, &app),
             _ => Err(format!("未知下载目标: {}", what)),
         };
         
@@ -734,8 +1031,7 @@ pub fn run() {
             // 2. 若 runtime 不完整 → boot 页显示下载 UI → 前端调用 start_download
             // 3. 运行时就绪 → spawn Python + Node → 轮询 /health → 亮主窗
             std::thread::spawn(move || {
-                let root = resolve_backend_root(&handle);
-                let layout = resolve_runtime(&root);
+                let layout = resolve_layout(&handle);
                 let _ = create_boot_window(&handle);
 
                 if !is_runtime_ready(&layout) {
@@ -760,7 +1056,7 @@ pub fn run() {
                             python: Mutex::new(Some(child)),
                             node: Mutex::new(_node_child),
                         });
-                        let ready = wait_backend_ready(Duration::from_secs(120));
+                        let ready = wait_backend_ready(handle.state::<ManagedChildren>().inner(), Duration::from_secs(120));
                         log::info!("backend pid={pid} ready={ready} root={}", layout.root.display());
                         let _ = handle.emit(
                             "backend-status",
@@ -769,7 +1065,7 @@ pub fn run() {
                         if ready {
                             finish_boot(&handle, true, "启动完成，即将进入…");
                         } else {
-                            finish_boot(&handle, false, "后端启动超时，详见安装目录 backend\\backend.log");
+                            finish_boot(&handle, false, &format!("后端未就绪，详见日志：{}", backend_log_hint()));
                         }
                     }
                     Err(e) => {
@@ -807,4 +1103,170 @@ pub fn run() {
         .register_uri_scheme_protocol("boot", |_ctx, _request| boot_page_response())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod runtime_extract_tests {
+    use super::*;
+
+    /// 用例独占临时目录（进程内唯一）。E 盘 TEMP 有被残留填满的前科，
+    /// 用例结束时必须自己收干净。
+    fn temp_case(tag: &str) -> std::path::PathBuf {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let dir = std::env::temp_dir()
+            .join(format!("neurova-extract-{}-{}-{}", tag, std::process::id(), SEQ.fetch_add(1, Ordering::SeqCst)));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Node 归档解开是「一层目录里放 node.exe」，落地后 node.exe 必须在
+    /// runtime/node/ 根下——多一层就永远判不就绪（PowerShell Move-Item 目标
+    /// 为已存在目录时是「移入其内」，正是多一层的来源）。
+    #[test]
+    fn payload_one_level_down_lands_exe_at_runtime_root() {
+        let case = temp_case("node");
+        let extract = case.join("runtime/_node_extract");
+        let payload = extract.join("node-v24.16.0-win-x64");
+        std::fs::create_dir_all(&payload).unwrap();
+        std::fs::write(payload.join("node.exe"), b"x").unwrap();
+
+        let dst = case.join("runtime/node");
+        std::fs::create_dir_all(&dst).unwrap();
+
+        relocate_payload(&extract, &dst, "node.exe").expect("落地失败");
+
+        assert!(dst.join("node.exe").exists(), "node.exe 未落在 dst 根下");
+        let _ = std::fs::remove_dir_all(&case);
+    }
+
+    /// python-build-standalone 的部分构建把解释器藏在多一层 install/ 下，
+    /// 落地时必须认得这种布局（原实现有此容错，收敛后由本用例锁住）。
+    #[test]
+    fn payload_nested_under_install_dir_is_recognised() {
+        let case = temp_case("pbs");
+        let extract = case.join("runtime/_python_extract");
+        let payload = extract.join("cpython-3.12.14+20260901").join("install");
+        std::fs::create_dir_all(&payload).unwrap();
+        std::fs::write(payload.join("python.exe"), b"x").unwrap();
+
+        let dst = case.join("runtime/python");
+        relocate_payload(&extract, &dst, "python.exe").expect("落地失败");
+
+        assert!(dst.join("python.exe").exists(), "python.exe 未落在 dst 根下");
+        let _ = std::fs::remove_dir_all(&case);
+    }
+
+    /// 候选源全部失败时，错误必须点名每一个源——否则用户与排查者都不知道
+    /// 换过源、也不知道最后一个坏在哪。
+    #[test]
+    fn exhausted_candidates_name_every_source() {
+        let case = temp_case("fallback");
+        let urls = vec![
+            "http://127.0.0.1:9/first.tar.gz".to_string(),
+            "http://127.0.0.1:8/second.tar.gz".to_string(),
+        ];
+        let err = download_with_fallback(&urls, &case.join("payload"), |_| {}).unwrap_err();
+        let _ = std::fs::remove_dir_all(&case);
+
+        assert!(err.contains("127.0.0.1:9") && err.contains("127.0.0.1:8"), "未点名两个源: {err}");
+        assert!(err.starts_with("2 个候选源全部失败"), "计数不对: {err}");
+    }
+
+    /// 后端进程已经退出时，就绪轮询必须立刻返回 false。真机取证：下载来的裸
+    /// CPython 缺 uvicorn，start_server.py 秒退，而轮询只看 /health，于是首启
+    /// 白等满 120 秒才把失败摆出来。
+    #[test]
+    fn dead_backend_child_ends_the_readiness_wait() {
+        let mut cmd = Command::new("cmd");
+        cmd.args(["/c", "exit 3"]);
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        let mut child = cmd.spawn().expect("探针子进程启动失败");
+        // 先收尸再断言：让「子进程已退」在第一次轮询就命中，用例与 9527 上是否
+        // 恰好有别的服务在听无关（否则本用例会随环境时好时坏）。
+        let _ = child.wait().expect("探针子进程等待失败");
+        let state = ManagedChildren {
+            python: Mutex::new(Some(child)),
+            node: Mutex::new(None),
+        };
+
+        let started = Instant::now();
+        let ready = wait_backend_ready(&state, Duration::from_secs(30));
+
+        assert!(!ready, "子进程都退了，不该报就绪");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "未提前结束等待，耗时 {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// 归档解开后 dst 已有旧运行时（重试下载的情形）：必须先清再改名，
+    /// 否则 rename 到已存在目录会失败——这正是 Move-Item 那次的同一前提。
+    #[test]
+    fn stale_runtime_dir_is_replaced_not_merged() {
+        let case = temp_case("stale");
+        let extract = case.join("runtime/_node_extract");
+        let payload = extract.join("node-v24.16.0-win-x64");
+        std::fs::create_dir_all(&payload).unwrap();
+        std::fs::write(payload.join("node.exe"), b"x").unwrap();
+
+        let dst = case.join("runtime/node");
+        std::fs::create_dir_all(&dst).unwrap();
+        std::fs::write(dst.join("leftover.txt"), b"old").unwrap();
+
+        relocate_payload(&extract, &dst, "node.exe").expect("落地失败");
+
+        assert!(dst.join("node.exe").exists());
+        assert!(!dst.join("leftover.txt").exists(), "旧运行时残留，说明是合并而非替换");
+        let _ = std::fs::remove_dir_all(&case);
+    }
+
+    /// 探针导得动 ≠ 装完了：pip 是逐包写入 site-packages 的，装到 fastapi 时
+    /// 探针就已通过，而 mcp 之类的靠后包还没落地。真机表现是后端在半装环境里
+    /// 起来并打出「mcp SDK 未安装」。安装进行中一律不认就绪。
+    #[test]
+    fn probe_passing_while_pip_runs_is_not_readiness() {
+        assert!(deps_ready_now(true, false), "pip 已退出且探针通过才算就绪");
+        assert!(!deps_ready_now(true, true), "安装仍在进行，探针通过也不许报就绪");
+        assert!(!deps_ready_now(false, false), "探针没通过更不该就绪");
+        assert!(!deps_ready_now(false, true));
+    }
+
+    /// pip 命令行形状固定在一处：索引 URL 与清单文件都由参数带入，
+    /// 且不许出现 --extra-index-url 之类会让候选次序失效的写法。
+    #[test]
+    fn pip_args_carry_index_and_requirements_in_order() {
+        let args = pip_install_args("https://mirrors.example/simple/", "requirements.txt");
+        let joined = args.join("\u{1}");
+        assert!(joined.contains("\u{1}pip\u{1}install\u{1}"), "未走 python -m pip install: {args:?}");
+        assert!(args.windows(2).any(|w| w[0] == "--index-url" && w[1] == "https://mirrors.example/simple/"),
+            "索引 URL 未作为 --index-url 的值传入: {args:?}");
+        assert!(args.windows(2).any(|w| w[0] == "-r" && w[1] == "requirements.txt"),
+            "清单文件未作为 -r 的值传入: {args:?}");
+        assert!(!joined.contains("extra-index"), "候选次序由 Rust 侧循环负责，不交给 pip");
+    }
+}
+
+#[cfg(test)]
+mod manifest_contract_tests {
+    use super::*;
+
+    /// 直读真清单验一次反序列化。清单字段与 ModelEntry 错位时，运行期表现是
+    /// 「models/MANIFEST.json 不存在」，静态检查只能证明字段名对得上，证明不了
+    /// 类型也对——所以这里编译期取文件、跑期解析，才算把契约钉住。
+    #[test]
+    fn real_manifest_matches_model_entry_contract() {
+        const REAL: &str = include_str!("../../../models/MANIFEST.json");
+        let manifest: ModelManifest =
+            serde_json::from_str(REAL).expect("models/MANIFEST.json 与 ModelEntry 契约不一致");
+        assert!(manifest.models.iter().any(|m| m.required));
+        assert!(manifest.models.iter().all(|m| m.path.starts_with("models/")),
+            "清单 path 必须自带 models/ 前缀（is_model_ready 按 root 拼）");
+    }
 }
