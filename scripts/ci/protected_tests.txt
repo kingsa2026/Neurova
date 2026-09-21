@@ -181,3 +181,8 @@ tests/unit/knowledge/test_validity_window_segment.py
 tests/unit/knowledge/test_read_surface_agent_scope.py
 # Issue #75：记忆库写入围栏 + 默认路径不再随 CWD 散落（仓库根 71,831 行的来路）
 tests/unit/memory/test_memory_storage_fence.py
+
+# Issue #68 收口后下一层：docs/11-legacy 归档层悬空引用登记台账（逐条可达性判定 +
+# 前像回收 + 不得记成已修复），守卫与生成器 scripts/scan_docs_refs.py 同一口径
+tests/unit/test_legacy_ref_ledger_guard.py
+
