@@ -95,6 +95,47 @@ HTTP 层 200；事实落进程内 `_facts` 字典；`POST /memory/tkg/query` 调
   条目要补抽需重跑 `/knowledge-graph/backfill`（已有端点，现在会同时落权威），
   属运维动作，本批不执行。
 
+## 5b. 上述三条的收口（Issue #72 第二轮）
+
+第二轮只做"登记了但没动"的那几条，逐条按"在产生非法状态的上游修"处理。
+
+**① 投影不再是只写不读的第二份真相（原 §5 第 3 条）**
+
+`graph_bridge` 新增三个函数与两条端点，形成 写入→读取→反馈→再写入 的闭环：
+
+- `projectionDrift(agentId, graph, store)`：算出权威（底座三元组里两端都是主体的那些）
+  与投影（JSON 属性图的两端都在节点表里的边）的**双向差集**——`missing_relations`
+  是"权威有、投影无"，`orphan_relations` 是"投影有、权威无"。**只报不修**：顺手修掉
+  就等于把报出与处置混成一件事，读的人再也看不到曾经分叉过。
+- `rebuildProjectionFromAuthority(agentId, graph, store)`：按权威派生重建本域投影，
+  节点类型取自主体的 `type_term_id`（不自己猜），幂等（跑几次结论一样）、只动本域。
+- `GET /{agent}/knowledge-graph/authority-drift`（读数）与
+  `POST /{agent}/knowledge-graph/projection/rebuild`（处置）：两条端点是这两个函数的
+  生产消费点——只加函数不接线就是新断点。
+
+**② 存量补抽的待办判据问权威，不再问投影（原 §5 第 4 条）**
+
+这条不是纯运维动作，上游有一处判据要修：`/knowledge-graph/backfill` 此前按
+"条目 `graph_node_ids` 为空"筛待办，而抽取收口**之前**抽过的条目两个字段都有值
+（旧实现只落投影也照样回写）。于是最需要补抽的那批存量——"投影有、权威无"——
+恰好被待办判据全部跳过：端点报表写 `entries=0`（"没有待补的"），实际是
+"待补的认不出来"。修法：新增 `graph_bridge.extractionPending(item, store, agentId)`，
+判据落在权威侧有没有指向本条目的抽取事实（按 `source_turn_id` 前缀与断言
+`medium_ref` 两处认，只认一处会把另一条真实写入链的产物当成"没抽过"）。
+
+**③ 本体播种不再抹掉已登记的行（本轮唯一从本分支带过来的修法）**
+
+`seedBuiltinTerms` 走 `registerMany`（`INSERT OR REPLACE`），于是**每造一次注册表**
+就把写入方登记过的 `domain_terms` / `range_terms` / `range_kinds` / `cardinality`
+覆盖回默认裸值——给谓词登记了定义域，重新构造一次注册表，域就没了，本体硬拒随之
+永远无依据可判。修法：新增 `seedMissing`（只补缺、已存在一行不动），播种改走它；
+显式种子优先于枚举收编值（同一个 `term_id` 不同时出现在两份清单里，否则"谁定这一行"
+取决于拼接顺序，而只补缺的语义是"先登记的为准"）。
+
+**与 main 已合入的 #89 的重叠部分**：抽取落底座（`_ExtractionSink` / `is_a` /
+主体 `type_term_id`）与 `rangeKinds` 已由 #89 落在 main，本分支的同型实现
+（`admitExtractedFacts`）在合并时**删除**，不保留第二份实现（教义第 6 条）。
+
 ## 6. 判据与实测
 
 红灯（实现前，逐条实测）：

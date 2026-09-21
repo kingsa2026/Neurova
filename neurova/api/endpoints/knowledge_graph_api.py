@@ -268,7 +268,7 @@ async def backfill_graph_from_knowledge(
     """
     from neurova.api.endpoints.knowledge import _default_llm_call
     from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
-    from neurova.knowledge.graph_bridge import extract_knowledge_to_graph
+    from neurova.knowledge.graph_bridge import extract_knowledge_to_graph, extractionPending
     from neurova.knowledge.repository import get_knowledge_repository
 
     llm_call = _default_llm_call(request, prefer_agent_id=agent_id)
@@ -287,11 +287,14 @@ async def backfill_graph_from_knowledge(
     repo = get_knowledge_repository()
     graph = _get_kg_manager(agent_id)
     # 补建同样要落权威：只补 JSON 投影等于把"两面分裂"复制到存量条目上。
+    # 待办判据问的也是**权威**，不是投影：抽取收口之前抽过的条目 `graph_node_ids`
+    # 早有值（旧实现只落投影也照样回写），而权威侧一条都没有。按投影筛，最需要
+    # 补抽的那批存量会被全部跳过，端点报表写 `entries=0`（Issue #72 §5）。
     authority = get_knowledge_fact_store()
     pending = [
         it
         for it in repo.list_knowledge(agent_id, limit=limit)
-        if not (it.get("graph_node_ids") or [])
+        if extractionPending(it, authority, agent_id)
     ]
 
     extracted_nodes = 0
@@ -319,3 +322,43 @@ async def backfill_graph_from_knowledge(
             "failed": failed,
         },
     }
+
+
+@router.get("/{agent_id}/knowledge-graph/authority-drift")
+async def graph_authority_drift(
+    agent_id: str,
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """读面与权威（底座事实）的差集读数（Issue #72 收口后仍留的那道口子）。
+
+    JSON 属性图是派生投影，但它是独立文件、权威侧此后还会变（补抽/裁决取代/
+    推导结论/存量回填），所以两边可能分叉。这里**只报不修**：修要走
+    `projection/rebuild`，而"报出"与"顺手修掉"混成一件事，读的人就再也看不到
+    曾经分叉过。孤儿边也算：那是可视化在展示无据可依的关系。
+    """
+    from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
+    from neurova.knowledge.graph_bridge import projectionDrift
+
+    graph = _get_kg_manager(agent_id)
+    drift = projectionDrift(agent_id, graph, get_knowledge_fact_store())
+    return {"code": 0, "message": "success", "data": drift}
+
+
+@router.post("/{agent_id}/knowledge-graph/projection/rebuild")
+async def rebuild_graph_projection(
+    agent_id: str,
+    request: Request,
+    current_user: Dict = Depends(get_current_user_or_service),
+):
+    """按权威重建本域的 JSON 投影（幂等）。
+
+    投影是派生品，重建即整体按权威换新：节点取自主体（类型取自主类型列），
+    边取自底座三元组。重建只动本域——跨域同标签的节点别的域还要用。
+    """
+    from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
+    from neurova.knowledge.graph_bridge import rebuildProjectionFromAuthority
+
+    graph = _get_kg_manager(agent_id)
+    outcome = rebuildProjectionFromAuthority(agent_id, graph, get_knowledge_fact_store())
+    return {"code": 0, "message": "success", "data": outcome}

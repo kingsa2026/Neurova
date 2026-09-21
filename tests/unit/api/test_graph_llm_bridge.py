@@ -182,7 +182,6 @@ def _isolationFactStore(tmp_path):
     return KnowledgeFactStore(str(tmp_path / "knowledge_facts.db"))
 
 
-
 def test_backfill_extracts_only_pending_entries(registry, monkeypatch, tmp_path):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -245,12 +244,26 @@ def test_backfill_extracts_only_pending_entries(registry, monkeypatch, tmp_path)
     monkeypatch.setattr(
         "neurova.knowledge.repository.get_knowledge_repository", lambda: fake_repo
     )
-    # 补建落的是同一份权威：不注入隔离底座，补给的就是"只有投影"的假成功。
+    # 补建落的是同一份权威，且待办判据现在问的也是**权威**（投影有 id 不等于抽过），
+    # 端点因此必定读底座库——不注入隔离实例就会碰到生产目录，由 storage_fence 当场拦下。
     isolation_store = _isolationFactStore(tmp_path)
     monkeypatch.setattr(
         "neurova.knowledge.foundation.knowledge_facts.get_knowledge_fact_store",
         lambda *_a, **_k: isolation_store,
     )
+    # k2 是"真抽过"的条目：它在权威侧留下一条带溯源的事实。仅凭投影 id 有值不算
+    # 抽过——那正是本端点此前把存量漏掉的原因（Issue #72 §5）。
+    from neurova.knowledge.foundation.admission import (
+        AdmissionRequest, productionAdmissionGate,
+    )
+
+    productionAdmissionGate(isolation_store, toolVersion="unit").admit(AdmissionRequest(
+        agentId="default", subjectLabel="T2", predicateTermId="related_to",
+        objectTerm="T1", content="T2 related_to T1", sourceTurnId="entry:k2",
+        assertions=[{"actorType": "pipeline", "actorId": "unit",
+                     "mediumRef": "entry:k2", "statementText": "T2 related_to T1"}],
+        activityKind="extract",
+    ))
 
     app = FastAPI()
     app.include_router(kg.router, prefix="/api/v1/knowledge-graph")
@@ -264,7 +277,7 @@ def test_backfill_extracts_only_pending_entries(registry, monkeypatch, tmp_path)
     assert resp.status_code == 200, resp.text
 
     data = resp.json()["data"]
-    assert data["entries"] == 1, "只补抽 graph_node_ids 为空的条目"
+    assert data["entries"] == 1, "只补抽权威侧还没有事实的条目（k2 已抽过，跳过）"
     assert data["extracted_nodes"] == 2
     assert data["failed"] == 0
     assert fake_repo.updated == ("default", "k1"), "抽取结果必须回写条目"
