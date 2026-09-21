@@ -19,11 +19,12 @@
    非 max 的 thinkingLevel 若重新出现（顶层 key、settings.yml 角色、
    或流水线里的档位值），守卫直接拦下：要么是有意恢复分档（需同步改
    档位表与本文档），要么是回归，两者都必须显式改测而非悄悄放过。
-5. **maxTurns 必须留出时间余量** —— `maxTurns` 不只是「任务够不够用」，
-   它同时是单次构建的最坏耗时上限：Agent 每轮 = 一次 LLM 调用 + 若干
-   容器命令。构建 `cnb-f1c-1k31garu5` 实测 251 轮吃满平台 2h 硬上限（7262s，
-   均摊 ≈29s/轮），配置里的 `maxTurns: 500` 对应最坏 ≈4h，必然先被平台
-   掐断再谈轮数。故设 120 轮上限并同步在 .cnb.yml 标注原因。
+5. **maxTurns 必须声明为字面量整数，且两侧事件同步** —— `maxTurns` 的
+   字面量要求同第 2 条（Schema 校验先于变量替换）；上限取 1000，与
+   main 上维护者的显式决定保持一致。构建 `cnb-f1c-1k31garu5` 实测 251 轮
+   吃满平台 2h 硬上限（7262s，均摊 ≈29s/轮），说明「被掐断」的根因不是
+   轮数给多了，而是 Agent 自己 `sleep` 轮询叠加单轮 20 分钟的全量 pytest ——
+   故轮数放宽，时间预算改由「禁止 sleep 轮询」的硬禁令守住。
 """
 import io
 from pathlib import Path
@@ -51,11 +52,12 @@ LEVEL_BY_MOUNT = {"$": "xhigh", "DSCoder-max": "xhigh"}
 RETIRED_SUFFIXES = ("-low", "-high")
 
 # npc:go 的 maxTurns 上限。
-# 依据：构建 cnb-f1c-1k31garu5 实测 251 轮 / 7262s（平台 2h 硬上限被吃满，
-# 均摊 ≈29s/轮）；500 轮对应最坏 ≈4h，远超上限，等于「轮数还没用完、
-# 构建先被掐断」。120 轮 ≈58 分钟，给长命令（全量 pytest 一轮 20 分钟）
-# 留出余量，也逼 Agent 尽早收尾。
-MAX_TURNS_LIMIT = 120
+# 依据：维护者在 main（commit「修改超时限制」）把 $ 段显式调到 1000，
+# 即「轮数配额按任务够用来给，不压到 120」。构建 cnb-f1c-1k31garu5 实测
+# 251 轮 / 7262s（平台 2h 硬上限被吃满，均摊 ≈29s/轮）证明轮数不是死因，
+# 死因是 Agent 自己 sleep 轮询 + 单轮 20 分钟的全量 pytest。
+# 故上限放回 1000，真正的硬禁令改由「禁止 sleep 轮询」承担。
+MAX_TURNS_LIMIT = 1000
 
 
 def _load(path: Path):
@@ -174,9 +176,10 @@ class TestTurnBudget:
                 problems.append(f"{path}: maxTurns={turns} > 上限 {MAX_TURNS_LIMIT}")
         assert not problems, (
             "npc:go 的 maxTurns 缺失或超出耗时上界:\n  " + "\n  ".join(problems) +
-            f"\n上限 {MAX_TURNS_LIMIT} 来自实测：251 轮就吃满平台 2h 硬上限"
-            "（均摊 ≈29s/轮），轮数给再多也只是让构建更早被掐断。"
-            "确需调高：先确认任务确实是短命令轮次型，再同步改守卫与 .cnb.yml 注释。"
+            f"\n上限 {MAX_TURNS_LIMIT} 为维护者在 main 上的显式决定（「修改超时限制」）。"
+            "构建 cnb-f1c-1k31garu5 实测 251 轮吃满平台 2h 硬上限（均摊 ≈29s/轮），"
+            "根因是 sleep 轮询 + 单轮 20 分钟的全量 pytest，不是轮数配额；"
+            "确需调低/调高：请同步改守卫、.cnb.yml 注释与 issue/PR 两份事件定义。"
         )
 
     def test_max_turns_is_literal_int(self, npc_options):
