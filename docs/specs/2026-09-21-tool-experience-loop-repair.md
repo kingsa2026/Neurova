@@ -205,3 +205,18 @@ live-verify（真 Agent + 真 ToolExecutor + 真 SkillService）：端点经咽�
   与 `tests/unit/skills/` 下的复算用例（按审计记载的存量形状重建 manifest，
   断言计数口径 = 不同身份的额外条目数），并在 §9 说明本检出环境**没有** `data/` 下的
   真 manifest 文件，故该数字的生产态仍待在有生产库的机器上复跑。
+
+
+### 8.10 第三轮后的 CI 红：改指面漏了「代码里的路径拼接」
+
+第二轮之后 `docs/adr/` 整目录被删净（改为编号分层 `docs/01-architecture/adr/`），
+本批新增用例里仍按旧路径拼 ADR 0016 的位置 ⇒ `unit-tests-py311` / `unit-tests-py12`
+双跑同时红在 `FileNotFoundError`。已修并补判据：
+
+- `tests/unit/evolution/experience/test_muscle_memory_rearchive_safety.py` 改指
+  `docs/01-architecture/adr/0016-rsi-parameter-source-of-truth.md`（唯一解，仓库里就一份）；
+- 退役目录守卫补两条口径：**规则 1c** 管源码里的路径拼接形态
+  （`REPO_ROOT / "docs" / "adr" / "…"`），**规则 1b′** 管通配形态
+  （旧目录下的通配 ADR 引用在唯一可解时必须改指）。此前两条只看得见 Markdown，
+  这类引用因此从门禁下溜过去；
+- 同批扫荡另有三处通配引用指向已退役目录，一并改指。
