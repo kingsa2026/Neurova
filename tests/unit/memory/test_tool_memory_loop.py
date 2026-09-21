@@ -88,11 +88,15 @@ class TestCheckToolMemoryWithMuscleMemory:
         muscle_memory.match_by_query.assert_called_once()
 
     def test_auto_execute_when_above_threshold(self):
-        """置信度超过阈值时自动执行"""
+        """置信度超过阈值时自动执行。
+
+        参数必须是**形状可执行**的（工单 007 的形状门会挡住缺必填键的条目）——
+        空 dict 对 `file_read` 缺 `file_path`，本来就跑不起来。
+        """
         muscle_memory = Mock()
         mock_item = MagicMock()
         mock_item.tool_name = "file_read"
-        mock_item.parameters = {}
+        mock_item.parameters = {"file_path": "/tmp/x.txt"}
         mock_item.metadata = {"tool_source": "skill_system"}
         mock_item.level = MagicMock()
         mock_item.level.value = "l1"

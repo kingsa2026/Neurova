@@ -355,7 +355,9 @@ class ExperienceRecord:
     skill_name: str = ""
     context: Dict[str, Any] = field(default_factory=dict)
     result: Optional[Dict[str, Any]] = None
-    success: bool = False
+    # 三态：True 成功 / False 失败 / None 未测量（本轮没有客观回执）。
+    # 工单 004 之前是 `bool`，`bool(None)` 的折叠让"没测到"永久等于"失败"。
+    success: Optional[bool] = None
     timestamp: str = ""
     feedback: str = ""
 
