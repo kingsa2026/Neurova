@@ -34,6 +34,11 @@ class _FakeLedgerDB:
 
     def gc_stale(self):
         self.gc_calls += 1
+        return 0
+
+    def count(self):
+        """B4/005：启动登记读一次库内条数（替身同样承载契约，不是可选方法）。"""
+        return len(self.rows)
 
 
 def _pool(**kwargs):
