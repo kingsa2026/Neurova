@@ -11,6 +11,8 @@ from neurova.models.computer import (
     Computer,
     ComputerKind,
     ComputerEngine,
+)
+from neurova.collaboration.computer_manager import (
     get_computer_manager_singleton,
 )
 from neurova.models.cost_tracking import (

@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.evolution.persistence import PersistedStateMixin
+from neurova.evolution.rsi.gate_verdict import GateVerdict
 
 logger = get_logger(__name__)
 
@@ -280,7 +281,7 @@ class SkillExperienceStore(PersistedStateMixin):
         with self._lock:
             return self._pending_dropped
 
-    def pending_pressure_verdict(self) -> "GateVerdict":
+    def pending_pressure_verdict(self) -> GateVerdict:
         """待审通道压力判据（工单 016：改进能否回流必须可判，且判据是三态不是布尔）。
 
         - `unevidenced`：从未有条目进过待审队列 ⇒ 通道有没有压力无从判断，
@@ -288,8 +289,6 @@ class SkillExperienceStore(PersistedStateMixin):
         - `failed`：累计丢弃 > 0 ⇒ 改进正在被丢掉；
         - `passed`：进过队且一次没丢。
         """
-        from neurova.evolution.rsi.gate_verdict import GateVerdict
-
         with self._lock:
             offered, dropped = self._pending_offered, self._pending_dropped
         if offered == 0:

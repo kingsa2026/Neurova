@@ -5,6 +5,8 @@ tests/unit/test_audit_regressions.py
 tests/unit/auth/test_password_hasher.py
 tests/unit/test_ci_parity_guard.py
 tests/unit/test_ci_thin_env_guards.py
+# Issue #68 收口：协作域路由可达性（影子导入/FastAPI 注册期断言/漏 await 三形态）
+tests/unit/api/test_coordination_router_reachability.py
 tests/unit/agent/test_agent_core_size_ratchet.py
 tests/unit/security/test_governance_mcp.py
 tests/unit/security/test_url_guard.py

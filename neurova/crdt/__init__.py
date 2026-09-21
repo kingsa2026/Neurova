@@ -3,7 +3,7 @@ Neurova CRDT Module
 CRDT-based real-time collaboration system
 """
 
-from neurova.cdt.core import (
+from neurova.crdt.core import (
     GSetCRDT,
     PNCounterCRDT,
     LWWRegisterCRDT,
@@ -11,14 +11,14 @@ from neurova.cdt.core import (
     UniqueID,
 )
 
-from neurova.cdt.rga import (
+from neurova.crdt.rga import (
     RGACRDT,
     TextOperation,
     Position,
     Character,
 )
 
-from neurova.cdt.document import (
+from neurova.crdt.document import (
     CRDTDocument,
     DocumentMetadata,
     get_document,
