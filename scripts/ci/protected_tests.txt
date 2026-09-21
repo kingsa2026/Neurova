@@ -169,3 +169,6 @@ tests/unit/desktop/test_route_b_runtime_download.py
 # fixture 必须仍可解析（收集缓存按节点身份去重 + 同名 collector 双身份导致的
 # 65 error 回归），且不得回退到"钉 pytest<9"来回避（那条落在 CVE-2025-71176 里）
 tests/unit/test_pytest_runner_guards.py
+# Issue #68 收口后下一层：docs/11-legacy 归档层悬空引用登记台账（逐条可达性判定 +
+# 前像回收 + 不得记成已修复），守卫与生成器 scripts/scan_docs_refs.py 同一口径
+tests/unit/test_legacy_ref_ledger_guard.py
