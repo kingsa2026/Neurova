@@ -196,6 +196,11 @@ def _apply(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
             print(f"已写入 {label} run_id={report.run_id}：消息 +{report.messages_added}"
                   f"/跳过 {report.messages_skipped}，会话文件 {report.sessions_touched} 个，"
                   f"记忆 +{report.memories_added}/跳过 {report.memories_skipped}")
+            if report.memories_superseded or report.supersede_unresolved:
+                # 声明取代的落地读数：让位的旧行 + 找不到目标的声明，都得摆在台面上
+                print(f"  取代：让位 {len(report.memories_superseded)} 条，"
+                      f"声明无目标 {len(report.supersede_unresolved)} 条"
+                      f"{'（' + '、'.join(report.supersede_unresolved) + '）' if report.supersede_unresolved else ''}")
             if report.memories_added:
                 # 记忆面与运行中的后端各持一份内存表（后端只在构造时读一次盘），会话面才是
                 # 读盘即见。不把这点说出来，报告写着"已写入"而界面上一条看不见，是第三种假成功。

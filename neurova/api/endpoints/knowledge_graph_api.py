@@ -267,6 +267,7 @@ async def backfill_graph_from_knowledge(
     _default_llm_call 根因修复）——存量条目需要一次性补建入口。
     """
     from neurova.api.endpoints.knowledge import _default_llm_call
+    from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
     from neurova.knowledge.graph_bridge import extract_knowledge_to_graph
     from neurova.knowledge.repository import get_knowledge_repository
 
@@ -285,6 +286,8 @@ async def backfill_graph_from_knowledge(
 
     repo = get_knowledge_repository()
     graph = _get_kg_manager(agent_id)
+    # 补建同样要落权威：只补 JSON 投影等于把"两面分裂"复制到存量条目上。
+    authority = get_knowledge_fact_store()
     pending = [
         it
         for it in repo.list_knowledge(agent_id, limit=limit)
@@ -297,7 +300,7 @@ async def backfill_graph_from_knowledge(
         try:
             ids = extract_knowledge_to_graph(
                 entry, repo=repo, llm_call=llm_call, graph_manager=graph,
-                agentId=agent_id or "",
+                factStore=authority, agentId=agent_id,
             )
             if ids:
                 extracted_nodes += len(ids)
