@@ -156,3 +156,6 @@ tests/unit/api/test_artifact_kind_parity.py
 tests/unit/cognitive_layers/memory_layer/test_classification_closed_loop.py
 # Issue #68：/memory/classify 与 /memory/classify-and-remember 不再恒 500（端到端真落库）
 tests/unit/api/test_memory_classify_endpoint.py
+# 路线 B 首启下载契约：模型清单必须入库（lib.rs 读它是硬失败）、运行时版本以清单为
+# 单源（抄本漂移即 404）、下载状态属运行态不得落仓库根、清单字段须与 ModelEntry 对齐
+tests/unit/desktop/test_route_b_runtime_download.py

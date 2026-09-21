@@ -77,10 +77,10 @@ pycryptodome>=3.20
 #      （Issue #62 偏差）。删改前先读 mcp_client._SDK_AVAILABLE。
 mcp>=1.2.0
 
-# Testing (dev)
-pytest>=7.4.0
-pytest-asyncio>=0.21.0
-pytest-cov>=4.1.0
+# 运行时功能面依赖。此前误挂在 "Testing (dev)" 标题下，逐件核实过 neurova/ 内均有
+# 真实 import（Pillow 截图与图片解析、cryptography 密钥存储、jsonschema 工具层、
+# playwright/curl_cffi 抓取、pyautogui/paramiko/prometheus-client）；测试框架不在
+# 这里声明——pytest 三件由 requirements-ci.txt 单源持有，重复声明会被装进用户机器。
 Pillow>=11.0
 prometheus-client
 pyautogui>=0.9.54
