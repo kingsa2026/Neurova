@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user
 from neurova.core.agent_workspaces import get_agent_workspace_dir
+from neurova.core.data_root import get_agent_data_dir
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -342,7 +343,8 @@ async def _rollback_imported_agent(agent_id: str, agent: Any = None) -> None:
     import shutil
     import time as _time
 
-    for candidate in (get_agent_workspace_dir(agent_id), Path("data") / agent_id):
+    for candidate in (get_agent_workspace_dir(agent_id),
+                      get_agent_data_dir(agent_id)):
         for attempt in range(3):
             if not candidate.is_dir():
                 break
