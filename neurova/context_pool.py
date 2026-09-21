@@ -784,12 +784,37 @@ class ContextPool:
                 except Exception:
                     logger.warning("驱逐台账 GC 失败（不影响归档）", exc_info=True)
 
+    def _allowedRecallItems(self, items: List) -> List:
+        """召回作用域闸口：本进程允许看到的作用域集（B4/008 判据 A8）。
+
+        与视图路径**同源**：调 `collaboration.memory_scope.filter_by_scope`，
+        判据取自各条 `metadata`。单聊/非协作轮只见 `direct`，群轮见
+        `direct + 本群`——本方法不重写任何阈值或前缀规则（第二份规则就是第二份事实源）。
+
+        本群/本房间的判定取 `self.turn_scope`（池的轮次作用域，由 orchestrator 每轮
+        写入）：它是**写入侧打标与读侧放行的同一个值**，故不存在"写 room:A 读 room:B"
+        的错配。`turn_scope` 缺失时按 `session_id` 的 `project_` 前缀回溯，
+        与 `scope_from_metadata` 同规则（由该函数自身承担，不在此复刻）。
+        """
+        from neurova.collaboration.memory_scope import filter_by_scope
+
+        turnScope = self.turn_scope or ""
+        collab = turnScope.startswith("room:")
+        roomId = turnScope.split(":", 1)[1] if collab else ""
+        return filter_by_scope(
+            items, lambda c: (getattr(c, "metadata", None) or {}), collab=collab, room_id=roomId
+        )
+
     def recall_evicted(self, query: str = None, limit: int = 20) -> List:
         """
         按需召回被驱逐的上下文轮次。
 
         P1-1③：内存台账（重启即丢）+ 持久台账（SQLite FTS，重启后可召回）
         双源合并去重（按内容 hash），持久源覆盖重启前历史。
+
+        B4/008：持久层是**第二条读路径**，与视图路径同样过作用域闸口
+        （`_allowedRecallItems`，判据单源 `filter_by_scope`）。改前这条路径
+        按 session 精确等值过滤——单聊池恒空、无会话池全放行，两个方向都不对。
 
         Args:
             query: 内容子串过滤（不区分大小写）；None 返回最近驱逐的条目
@@ -814,7 +839,10 @@ class ContextPool:
                         resolveArchivedScope,
                     )
 
-                    for row in self._ledger_db.search(query, session_id=self.session_id, limit=limit):
+                    # B4/008：不再按 session 精确等值过滤。D1 要的是"跨重启跨会话
+                    # 取得到"，精确等值会把单聊池的召回变成恒空（改前实测 0 条）；
+                    # 可见性由作用域闸口判定，不由 session 等值判定。
+                    for row in self._ledger_db.search(query, session_id=None, limit=limit):
                         row = dict(row)  # sqlite3.Row 无 .get
                         h = ContextInput.compute_hash(ContextSource.CONVERSATION, row["content"])
                         if h in seen_hashes:
@@ -851,7 +879,9 @@ class ContextPool:
                 results.append(c)
                 if len(results) >= limit:
                     break
-            return results[:limit]
+            # 闸口在两条源合并**之后**：只挡持久源等于半个闸口
+            # （内存台账里的房间内容照样泄出）。
+            return self._allowedRecallItems(results)[:limit]
 
     async def rollup_overflow_digest(self, folded_chunks, previous_summary: str = "") -> None:
         """P1-1③：对被折叠 chunk 生成/增量更新摘要并回写池（SUMMARY 源）。
