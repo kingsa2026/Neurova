@@ -12,6 +12,7 @@ from typing import Any, Dict, List
 from neurova.core.logger import get_logger
 
 from .admission import productionAdmissionGate
+from .digest_chain import ActivityDigestChain
 from .knowledge_facts import KnowledgeFactStore
 from .reconcile import _requestsFromRepository
 
@@ -21,7 +22,9 @@ logger = get_logger(__name__)
 class LegacyFactBackfill:
     @staticmethod
     def run(repo: Any, store: KnowledgeFactStore, dryRun: bool = False) -> Dict[str, Any]:
-        requests = _requestsFromRepository(repo)
+        requests = _requestsFromRepository(
+            repo, activityKind="import",
+            activityBasis="LegacyFactBackfill.run（历史条目回填）")
 
         if dryRun:
             keys = set()
@@ -38,7 +41,7 @@ class LegacyFactBackfill:
         failures: List[str] = []
         for request in requests:
             try:
-                receipt = gate.admit(request, allowPendingSegments=True)
+                receipt = gate.admit(request)
             except ValueError as exc:
                 failures.append("%s: %s" % (request.objectTerm, exc))
                 continue
@@ -48,6 +51,9 @@ class LegacyFactBackfill:
             else:
                 created.append(receipt.factId)
         factsAfter = store.factCount()
+        # 回填同样要把校验跑完：断言写完是 `unverified`，不回写结论就又是"从不闭环"。
+        # 放大视角：这是与条目投影并列的第二条真实写入链，两条都要收口。
+        attestation = ActivityDigestChain(store).attest()
         logger.info("历史回填完成：旧库 %d 行 → 底座 %d 事实（折叠 %d 行，失败 %d 行）",
                     len(requests), factsAfter, folded, len(failures))
         return {
@@ -60,6 +66,7 @@ class LegacyFactBackfill:
             "facts_after": factsAfter,
             "subjects": store.subjectCount(),
             "pending_conflicts": store.pendingConflictCount(),
+            "attestation": attestation,
             # 旧 id → 新 fact_id：没有这张表，开闸态的 recall 会因为 id 空间换掉而假跌
             "id_map": idMap,
         }

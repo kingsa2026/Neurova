@@ -35,6 +35,10 @@ EVIDENCE_STATES = ("evidenced", "failed", "unevidenced")
 # 采纳侧三值：与形成侧的 evidence_state 正交；列上的 NULL 另占一义 = "从未回写"
 ADOPTION_OUTCOMES = ("success", "failure", "unevidenced")
 
+# 断言的校验侧三值（工单 023 的闭环）：`unverified` 是"还没验过"，
+# `failed` 是"验过、没通过"。两者混成一个值，读数就把"没测过"报成"测过没问题"。
+ASSERTION_VERIFICATIONS = ("unverified", "verified", "failed")
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS knowledge_subjects (
     subject_key TEXT PRIMARY KEY,
@@ -158,10 +162,15 @@ def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-def _instant(value) -> str:
+def _instant(value) -> Optional[str]:
     """时效判定比的是瞬时不是字面：混着 Z / +08:00 / 无时区写入时，
     文本序会把"已到期"读成"未到期"，所以进出都归一成 UTC ISO。naive 按 UTC 解读。
+
+    「没声明时刻」一律落 `None`（空串与缺省同义），调用方不必各自再判一次空——
+    判空散进各写入路径，就等于同一语义有了多份实现。
     """
+    if not value:
+        return None
     if isinstance(value, datetime.datetime):
         stamp = value
     else:
@@ -359,15 +368,25 @@ class KnowledgeFactStore:
         contentKey: Optional[str] = None,
         recordedAt: Optional[str] = None,
         recordKind: str = "triple",
+        validFrom: Optional[str] = None,
+        validUntil: Optional[str] = None,
     ) -> str:
         """同 (主体, 谓词, 客体, 限定) 或同 content_key 重放返回同一 fact_id。
 
         content_key 先查：B03 的 38 行纯冗余正是"三元组不同但内容相同"各开一行，
         口径必须是内容而不是三元组。空 key（无内容身份）不参与去重。
+
+        时效窗口在这里落库：`admission` 的入参契约早就带着 `validFrom` / `validUntil`，
+        底座表也早有这两列，中间那一跳却没收参数——于是两列永远是 NULL，
+        `conflict_judge` 的 temporal 分类与 `expireDueFacts()` 双双没有输入。
+        调用方声明过窗口就补进已存在的行（只补 NULL，不覆盖既有窗口）。
         """
+        windowFrom = _instant(validFrom)
+        windowUntil = _instant(validUntil)
         if contentKey:
             existing = self.findFactByContentKey(agentId, contentKey)
             if existing:
+                self.fillValidityWindow(existing["fact_id"], windowFrom, windowUntil)
                 return existing["fact_id"]
         qualifier = qualifier or {}
         qualifierHash = hashlib.sha256(
@@ -388,17 +407,19 @@ class KnowledgeFactStore:
                         " WHERE fact_id = ?",
                         (contentKey, row["fact_id"]),
                     )
+                self.fillValidityWindow(row["fact_id"], windowFrom, windowUntil)
                 return row["fact_id"]
             factId = "fact_%s" % uuid.uuid4().hex[:12]
             try:
                 self._conn.execute(
                     "INSERT INTO knowledge_facts (fact_id, agent_id, subject_key, predicate_term_id,"
                     " object_term, relation_kind, content, content_key, qualifier_hash, qualifier_json,"
-                    " confidence, source_turn_id, recorded_at, record_kind)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " confidence, source_turn_id, recorded_at, record_kind, valid_from, valid_until)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (factId, agentId, subjectKey, predicateTermId, objectTerm, relationKind, content,
                      contentKey, qualifierHash, json.dumps(qualifier, ensure_ascii=False), confidence,
-                     sourceTurnId, _instant(recordedAt) if recordedAt else _now(), recordKind),
+                     sourceTurnId, _instant(recordedAt) if recordedAt else _now(), recordKind,
+                     windowFrom, windowUntil),
                 )
             except sqlite3.IntegrityError:
                 # 唯一索引挡住竞态双写：改读先到的那一行，而不是让写入方看到崩
@@ -743,6 +764,31 @@ class KnowledgeFactStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def setAssertionVerification(self, assertionId: str, state: str) -> None:
+        """回写一条断言的校验结论。校验器是唯一写入者，列上的值域在这里收口。"""
+        if state not in ASSERTION_VERIFICATIONS:
+            raise ValueError(
+                "未知 verification_state: %r（有效值: %s）"
+                % (state, " / ".join(ASSERTION_VERIFICATIONS))
+            )
+        with self._lock, self._conn:
+            cur = self._conn.execute(
+                "UPDATE knowledge_assertions SET verification_state = ?"
+                " WHERE assertion_id = ?", (state, assertionId))
+        if not cur.rowcount:
+            raise LookupError("断言不存在: %s" % assertionId)
+
+    def assertionVerificationCounts(self) -> Dict[str, int]:
+        """三态分布读数：巡检与读面都吃它，不各写一套统计。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT verification_state, COUNT(*) AS n FROM knowledge_assertions"
+                " GROUP BY verification_state").fetchall()
+        counts = {state: 0 for state in ASSERTION_VERIFICATIONS}
+        for row in rows:
+            counts[str(row["verification_state"])] = int(row["n"])
+        return counts
+
     def setAssertionCount(self, factId: str, count: int) -> None:
         with self._lock, self._conn:
             self._requireFact(factId)
@@ -945,8 +991,34 @@ class KnowledgeFactStore:
         logger.info("事实取代 %s ← %s（%s）", newFactId, oldFactId, reason)
         self._retireDerived(oldFactId, reason or "推导前提已被取代")
 
+    def fillValidityWindow(self, factId: str, validFrom: Optional[str],
+                           validUntil: Optional[str]) -> None:
+        """补窗口只填 NULL——既有窗口是已成立的时效声明，重放不得把它改写掉。
+
+        咽喉的两条路径都调它：新建行走 `upsertFact`，按内容键折回旧行时走这里。
+        同一个方法，不各写一套"只补空"的判据。
+
+        窗口→瞬时的转换只走 `_instant`，与新建路径同一实现：库列上的比较是文本序，
+        而同一个瞬时有无穷多种合法写法，混着落库就会出现「`20:00+08:00` 与
+        `12:00+00:00` 是同一瞬时、却不是同一串」——读面按文本序判真假，会把"已到期"
+        读成"未到期"。此前折回路径把调用方原样字符串直接落库、只有新建路径归一，
+        于是同一句事实的窗口随"哪条路径先写"而变。
+        """
+        windowFrom = _instant(validFrom)
+        windowUntil = _instant(validUntil)
+        if windowFrom is None and windowUntil is None:
+            return
+        with self._lock, self._conn:
+            self._conn.execute(
+                "UPDATE knowledge_facts SET"
+                " valid_from = COALESCE(valid_from, ?),"
+                " valid_until = COALESCE(valid_until, ?)"
+                " WHERE fact_id = ?",
+                (windowFrom, windowUntil, factId),
+            )
+
     def setValidUntil(self, factId: str, validUntil: Optional[str]) -> None:
-        stored = None if validUntil is None else _instant(validUntil)
+        stored = _instant(validUntil)
         with self._lock, self._conn:
             self._requireFact(factId)
             self._conn.execute(

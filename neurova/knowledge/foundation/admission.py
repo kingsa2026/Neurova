@@ -22,6 +22,26 @@ SEGMENTS: tuple = (
     "indexing",             # 011
 )
 
+# 段名册：每段的当前状态只有两种取值，且必须在 SEGMENTS 里穷举。
+# `wired` = 已接通的协作者，缺它说明**这次造门漏接了一段**（必须拒写）；
+# `planned` = 尚未建成的段，缺它是常态（写数据仍要能写）。
+#
+# 这两种故障此前共用一个 `pending_segments` 字段（旧实现把 `indexing` 硬编码成永远缺），
+# 后果是每个真实调用点都只能传 `allowPendingSegments=True` 绕开纪律——
+# 「缺段即拒」在真实链路上等于不存在。分开之后，逃生开关在真实写入链上被删干净。
+SEGMENT_STATUS: dict = {
+    "content_identity": "wired",       # 段1 在 admit() 内联实现
+    "identity_resolution": "wired",
+    "ontology_adjudication": "wired",
+    "conflict_judgement": "wired",
+    "credibility_record": "wired",
+    "lineage": "wired",
+    # 段7 尚未建成：事实池由读面在查询时对库内行实时打分（`read_surface.searchableFacts`
+    # → `bm25_rank`），叙述/分块两路另有条目侧索引，因此这一格不接也不缺读面能力，
+    # 但它**不是**"这次装配漏了一段"，不许混进拒写判据。
+    "indexing": "planned",
+}
+
 _REQUIRED_FIELDS = ("subjectLabel", "predicateTermId", "objectTerm", "content")
 
 # 记录种类（工单 019b-1）。triple 是"主体-谓词-客体"；narrative 是"一条知识文档"——
@@ -52,6 +72,13 @@ class AdmissionRequest:
     assertions: List[Dict[str, Any]] = field(default_factory=list)
     validFrom: Optional[str] = None
     validUntil: Optional[str] = None
+    # 来路声明（工单 005 的"经哪条管线进来"）：调用方自陈它的活动种类与依据。
+    # 不声明时由咽喉兜底开一条 `admit`，但 basis 会写明是兜底——生产读数里
+    # 92/92 条活动都等于咽喉自己，正是因为这一栏此前不存在。
+    activityKind: str = ""
+    activityBasis: str = ""
+    # 调用方已经开好活动时直接接上，咽喉不再另开一条同义活动。
+    activityId: str = ""
 
 
 @dataclass
@@ -63,6 +90,11 @@ class AdmissionReceipt:
     dedupedByContent: Optional[str] = None
     needsHumanReview: bool = False
     lineageApplied: bool = False
+    # 尚未建成的段另立一栏：`pendingSegments` 只报"这次装配漏接"，
+    # 两者混报就等于回执不再指认故障。
+    plannedSegments: List[str] = field(default_factory=list)
+    # 本条事实挂在哪条活动上：调用方要顺着自己的账往下记，得拿得到这个 id。
+    activityId: str = ""
 
 
 import threading
@@ -71,12 +103,16 @@ _deriveState = threading.local()
 
 
 class AdmissionSegmentMissing(RuntimeError):
-    """咽喉依赖未齐——缺哪段就点名哪段，禁止半链冒充全链。"""
+    """咽喉依赖未齐——缺哪段就点名哪段，禁止半链冒充全链。
+
+    只报**这次造门漏接**的段。尚未建成的段（见 `SEGMENT_STATUS`）不在此列：
+    把"还没做"报成"做漏了"，拒写判据就永远响着，纪律也就没人再看。
+    """
 
     def __init__(self, segments: List[str]):
         super().__init__(
-            "admit() 缺段未接通: %s；确需先落数据可传 allowPendingSegments=True，"
-            "回执会带上 pending_segments 供下游识别" % ", ".join(segments)
+            "admit() 缺段未接通: %s；这属于装配漏段，必须补齐协作者——"
+            "尚未建成的段不在此列（见 admission.SEGMENT_STATUS）" % ", ".join(segments)
         )
         self.segments = segments
 
@@ -121,11 +157,15 @@ class KnowledgeAdmissionGate:
         }
 
     def pendingSegments(self) -> List[str]:
-        """段1（内容归一）已在 004 接通；其余缺段按协作者是否注入如实报出。"""
+        """只报本次装配漏接的段：协作者已注入的段按注入实况，`planned` 段一律不报。"""
         missing = [name for name, dep in self._collaborators.items() if dep is None]
-        if "indexing" not in missing:
-            missing.append("indexing")
-        return [name for name in SEGMENTS if name in missing]
+        return [name for name in SEGMENTS
+                if name in missing and SEGMENT_STATUS.get(name) == "wired"]
+
+    @staticmethod
+    def plannedSegments() -> List[str]:
+        """尚未建成的段。与 `pendingSegments()` 正交，回执两栏分列。"""
+        return [name for name in SEGMENTS if SEGMENT_STATUS.get(name) == "planned"]
 
     @staticmethod
     def _validate(request: AdmissionRequest) -> None:
@@ -152,9 +192,12 @@ class KnowledgeAdmissionGate:
                 % (NARRATIVE_PREDICATE, request.predicateTermId))
 
     def admit(self, request: AdmissionRequest, allowPendingSegments: bool = False) -> AdmissionReceipt:
+        """写入。`allowPendingSegments` 只在测试里搭裸门时用——真实写入链的装配
+        已经齐全（见 `SEGMENT_STATUS`），四个生产调用点一律不带它。"""
         self._validate(request)
 
         pending = self.pendingSegments()
+        planned = self.plannedSegments()
         if pending and not allowPendingSegments:
             raise AdmissionSegmentMissing(pending)
 
@@ -183,9 +226,12 @@ class KnowledgeAdmissionGate:
             request = replace(request, objectTerm=contentKey or request.objectTerm)
         dupe = self._store.findFactByContentKey(request.agentId, contentKey) if contentKey else None
         if dupe:
+            # 折回旧行也要补窗口：同一句话第一次带窗口、第二次不带，行为不该随调用顺序漂移
+            self._store.fillValidityWindow(dupe["fact_id"], request.validFrom, request.validUntil)
             applied = ["content_identity"]
+            activityId = ""
             if lineage is not None:
-                self._attachLineage(lineage, dupe["fact_id"], request, deduped=True)
+                activityId = self._attachLineage(lineage, dupe["fact_id"], request, deduped=True)
                 applied.append("lineage")
             applied += self._judgeConflicts(request)
             applied += self._applyCredibility(dupe["fact_id"])
@@ -196,6 +242,8 @@ class KnowledgeAdmissionGate:
                 segmentsApplied=applied + self._resolutionLabel(),
                 dedupedByContent=dupe["fact_id"],
                 lineageApplied=lineage is not None,
+                plannedSegments=planned,
+                activityId=activityId,
             )
 
         subjectKey, needsReview, applied = self._resolveSubject(request)
@@ -217,10 +265,14 @@ class KnowledgeAdmissionGate:
             sourceTurnId=request.sourceTurnId,
             contentKey=contentKey,
             recordKind=request.recordKind,
+            # 时效窗口是调用方声明的，咽喉原样落到两列上——收了不落库等于断点
+            validFrom=request.validFrom,
+            validUntil=request.validUntil,
             # confidence 留 None：G11 规定它只能由断言聚合得出，咽喉不代填
         )
+        activityId = ""
         if lineage is not None:
-            self._attachLineage(lineage, factId, request, deduped=False)
+            activityId = self._attachLineage(lineage, factId, request, deduped=False)
         applied += self._judgeConflicts(request)
         applied += self._applyCredibility(factId)
         applied += self._derive(request, subjectKey)
@@ -232,6 +284,8 @@ class KnowledgeAdmissionGate:
                             + (["lineage"] if lineage is not None else []),
             needsHumanReview=needsReview,
             lineageApplied=lineage is not None,
+            plannedSegments=planned,
+            activityId=activityId,
         )
 
     def _derive(self, request: AdmissionRequest, subjectKey: str) -> List[str]:
@@ -266,14 +320,29 @@ class KnowledgeAdmissionGate:
         judge.record(request.subjectLabel, request.predicateTermId)
         return ["conflict_judgement"]
 
-    def _attachLineage(self, lineage, factId: str, request: AdmissionRequest, deduped: bool) -> None:
-        """咽喉自己开一条活动记录。
+    def _attachLineage(self, lineage, factId: str, request: AdmissionRequest,
+                       deduped: bool) -> str:
+        """把事实挂到一条活动上，返回该活动 id。
 
-        不建活动，溯源四问里的"经哪条管线进来"就恒空——2026-09-20 端到端冒烟实测到这一点。
-        调用方自带 activityId 的断言仍优先，这里是给"没有上层管线"的直写路径兜出可见的一跳。
+        「经哪条管线进来」这一问只有调用方答得出来（导入 / 抽取 / 对账回放 / 推导各是
+        一条）。所以活动的种类与依据由 `request.activityKind` / `activityBasis` 声明，
+        调用方已开好的活动（`request.activityId`）优先复用。
+
+        只有**没有上层管线**的直写才由咽喉兜底开一条 `admit`，且 basis 上自陈是兜底——
+        生产库里 92/92 条活动都记着 `KnowledgeAdmissionGate.admit`，就是这一栏缺席的物证：
+        四种来路长得一模一样，溯源读数失去区分力。
         """
+        deferred = str(request.activityId or "").strip()
+        if deferred:
+            lineage.attach(factId, request.assertions, activityId=deferred)
+            lineage.closeActivity(deferred, outputs={"fact_id": factId,
+                                                    "content_deduped": deduped})
+            return deferred
+        kind = str(request.activityKind or "").strip() or "admit"
+        declared = str(request.activityBasis or "").strip()
+        basis = declared or "KnowledgeAdmissionGate.admit（直写兜底：调用方未声明来路）"
         activityId = lineage.openActivity(
-            "admit",
+            kind,
             inputs={
                 "agent_id": request.agentId,
                 "subject_label": request.subjectLabel,
@@ -281,10 +350,11 @@ class KnowledgeAdmissionGate:
                 "object_term": request.objectTerm,
                 "source_turn_id": request.sourceTurnId,
             },
-            basis="KnowledgeAdmissionGate.admit",
+            basis=basis,
         )
         lineage.attach(factId, request.assertions, activityId=activityId)
         lineage.closeActivity(activityId, outputs={"fact_id": factId, "content_deduped": deduped})
+        return activityId
 
     def _resolutionLabel(self) -> List[str]:
         resolver = self._collaborators.get("identity_resolution")
