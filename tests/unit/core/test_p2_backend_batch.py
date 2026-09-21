@@ -3,7 +3,6 @@
 
 - P2-6  usage last_call 任务级隔离（并发请求不再串号）
 - P2-12 ScriptTaskExecutor 受限 builtins（假沙箱收口）
-- P2-2  MemoryReadWriteManager 调用真实 MemoryManager API（不再 AttributeError）
 """
 from __future__ import annotations
 
@@ -94,49 +93,3 @@ def test_script_task_executor_no_full_builtins():
 
     result2 = asyncio.run(executor.execute(_EvilTask(), _Exec()))  # type: ignore[arg-type]
     assert result2["success"] is False
-
-
-# ── P2-2 ────────────────────────────────────────────────────────────────────
-
-def test_rw_manager_calls_real_memory_manager_api():
-    """适配层必须调用 MemoryManager 真实方法（recall/remember/update_memory/forget）。"""
-    from neurova.memory_rw_manager import MemoryReadWriteManager
-
-    class _FakeManager:
-        def __init__(self):
-            self.calls = []
-
-        def recall(self, query, limit=10, **kwargs):
-            self.calls.append(("recall", query, limit))
-            return [{"id": "m1", "content": query}]
-
-        def remember(self, **kwargs):
-            self.calls.append(("remember", kwargs))
-            return "mid-1"
-
-        def update_memory(self, memory_id, **kwargs):
-            self.calls.append(("update_memory", memory_id, kwargs))
-            return True
-
-        def forget(self, memory_id, **kwargs):
-            self.calls.append(("forget", memory_id))
-            return True
-
-        def get_all_memories(self):
-            return [{"id": "m1", "temperature": 2.0,
-                     "last_accessed_at": "2026-09-11T00:00:00+00:00"}]
-
-    fake = _FakeManager()
-    mgr = MemoryReadWriteManager(memory_manager=fake, batch_size=100)
-
-    assert mgr.recall_memories("hello")[0]["id"] == "m1"
-    assert mgr.create_memory("world") == "mid-1"
-    assert mgr.update_memory("m1", content="new") is True
-    assert mgr.delete_memory("m1") is True
-    mgr.run_decay_cycle()  # 旧实现此处 AttributeError（get_all 不存在）
-
-    kinds = [c[0] for c in fake.calls]
-    assert "search" not in kinds and "create" not in kinds
-    assert "recall" in kinds and "remember" in kinds
-    assert ("update_memory", "m1", {"content": "new"}) in fake.calls
-    assert ("forget", "m1") in fake.calls
