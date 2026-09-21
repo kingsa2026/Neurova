@@ -214,11 +214,15 @@ logs/
 /*_AUDIT*.md
 /*_SUMMARY*.md
 
-# 根目录临时md文件（排除README.md）
+# 根目录临时md文件（排除项目入口文档）
 /*.md
 !README.md
 !CONTRIBUTING.md
 !SECURITY.md
+# AGENTS.md：AI 指令文件 + 修复教义事实源，被全仓 90+ 处编号引用，
+# 曾被本规则吞掉导致"引用遍地、文件不在库"（克隆/CI 上纪律凭空消失）。
+# 守卫：tests/unit/test_repair_discipline_guard.py
+!AGENTS.md
 
 # 敏感信息
 .neurova_token.json
