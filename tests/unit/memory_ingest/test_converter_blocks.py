@@ -71,6 +71,14 @@ def test_redacted_thinking_is_opaque_not_absent():
     assert events[0].text == "我答"
 
 
+def test_redacted_thinking_only_row_still_yields_one_event():
+    """契约说 reasoning 三态不许用空串冒充 absent：只有密文时也必须产出一条。"""
+    events, strays = split_content([{"type": "redacted_thinking", "data": "gAAAA..."}])
+
+    assert len(events) == 1 and events[0].reasoning_state == "opaque"
+    assert strays == Counter()
+
+
 def test_plain_thinking_stays_readable_text():
     events, _ = split_content([{"type": "thinking", "thinking": "先看"},
                                {"type": "text", "text": "我答"}])
