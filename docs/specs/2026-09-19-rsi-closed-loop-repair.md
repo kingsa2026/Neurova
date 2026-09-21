@@ -206,7 +206,7 @@ PR-2 是其余的承重墙：晋升判据不真，臂二臂三都只是在给一
 |---|---|---|
 | D1 | 三臂全修，按 PR-1→5 分阶段落 | 三臂互为兜底：自动通道不开时人工通道必须可用，人工通道无人看时技能臂是唯一在跑的 |
 | D2 | **保留**渐进晋升，但判据改为可证伪（三态） | 既不粉饰能力，也不因噎废食取消自升级 |
-| D3 | 参数事实源先立 ADR 0016 逐参数钉死 —— **已落**（`docs/adr/0016-rsi-parameter-source-of-truth.md`） | 6 参数多源冲突，拍错方向代价高于多一轮论证 |
+| D3 | 参数事实源先立 ADR 0016 逐参数钉死 —— **已落**（`docs/01-architecture/adr/0016-rsi-parameter-source-of-truth.md`） | 6 参数多源冲突，拍错方向代价高于多一轮论证 |
 | D4 | 修根因，禁止 consumer-only guard | 项目修复教义第 1 条；PR-4 第 16 条即反例的正修（解耦门而非在下游补 None 检查） |
 | D5 | gain<0 的回滚走 `rollback_manager`，不再自行改内存 | 单一事实源；判据数据与执行动作不得两分 |
 | D6 | 提案生效走 `persist_synthesized_skill`，`.agents` 作废 | 该函数已贯通 SkillService 落盘 + registry 回灌，无需新通道 |

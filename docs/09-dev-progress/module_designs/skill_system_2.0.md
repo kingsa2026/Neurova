@@ -429,7 +429,7 @@ class SkillPackager:
 
 ### 8.1 参考资料
 
-- `docs/NEUROVA_CogArch_2.0.md` 第3章：技能系统2.0设计
+- `docs/01-architecture/NEUROVA_CogArch_2.0.md` 第3章：技能系统2.0设计
 Plugin 架构设计
 - Python dataclasses 官方文档
 
