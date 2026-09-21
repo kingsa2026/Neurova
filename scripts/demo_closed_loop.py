@@ -13,7 +13,7 @@ Neurova 记忆系统闭环演示脚本
 import time
 import logging
 import sys
-from pathlib import Path
+from neurova.core.data_root import resolveDataPath
 
 # 设置日志
 logging.basicConfig(
@@ -257,7 +257,7 @@ def main():
     """)
     
     # 创建数据目录
-    Path("data/demo_闭环").mkdir(parents=True, exist_ok=True)
+    resolveDataPath("demo_closed_loop").mkdir(parents=True, exist_ok=True)
     
     try:
         # 演示完整闭环

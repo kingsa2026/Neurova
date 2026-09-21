@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -116,7 +117,7 @@ class BoardStats(BaseModel):
 # JSON 落盘存储（进程内 dict + 写操作即时落盘）
 # ---------------------------------------------------------------------------
 
-_STORE_FILE = os.environ.get("NEUROVA_TASKS_PATH", "data/tasks_api.json")
+_STORE_FILE = os.environ.get("NEUROVA_TASKS_PATH") or dataPath("tasks_api.json")
 
 _boards_store: Dict[str, Dict[str, Any]] = {}
 _tasks_store: Dict[str, Dict[str, Any]] = {}
@@ -149,7 +150,7 @@ def _reboot_load() -> None:
     _boards_store.clear()
     _tasks_store.clear()
     global _STORE_FILE
-    _STORE_FILE = os.environ.get("NEUROVA_TASKS_PATH", "data/tasks_api.json")
+    _STORE_FILE = os.environ.get("NEUROVA_TASKS_PATH") or dataPath("tasks_api.json")
     _load_store()
 
 

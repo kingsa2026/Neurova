@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import resolveDataPath
 
 logger = get_logger(__name__)
 
@@ -44,7 +45,7 @@ def settings_path() -> Path:
     custom = os.environ.get("NEUROVA_LLM_RETRY_SETTINGS")
     if custom:
         return Path(custom)
-    return Path("data") / "llm_retry_settings.json"
+    return resolveDataPath("llm_retry_settings.json")
 
 
 def load_llm_retry_settings(path: Optional[Path] = None) -> Dict[str, Any]:

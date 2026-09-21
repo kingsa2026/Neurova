@@ -46,7 +46,7 @@ PLATFORM_REQUIRED_KEYS = {
 }
 
 
-def user_config_path(user_id: str, base_dir: str = "data/web_reach_credentials") -> Path:
+def user_config_path(user_id: str, base_dir: str = "") -> Path:
     """用户桶内的 agent-reach config.yaml 路径（Config(config_path=...) 用）"""
     return Path(base_dir) / (user_id or "default") / "config.yaml"
 
@@ -54,7 +54,7 @@ def user_config_path(user_id: str, base_dir: str = "data/web_reach_credentials")
 class UserCredentialStore:
     """按用户分桶的凭据存储（加密落盘，跨重启稳定）"""
 
-    def __init__(self, base_dir: str = "data/web_reach_credentials", encryption_key: Optional[str] = None):
+    def __init__(self, base_dir: str = "", encryption_key: Optional[str] = None):
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
@@ -210,7 +210,7 @@ _credential_store_instance: Optional[UserCredentialStore] = None
 _credential_store_lock = threading.Lock()
 
 
-def get_credential_store(base_dir: str = "data/web_reach_credentials") -> UserCredentialStore:
+def get_credential_store(base_dir: str = "") -> UserCredentialStore:
     global _credential_store_instance
     if _credential_store_instance is None:
         with _credential_store_lock:

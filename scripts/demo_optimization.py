@@ -12,7 +12,7 @@ Neurova 优化功能演示脚本
 import time
 import logging
 import sys
-from pathlib import Path
+from neurova.core.data_root import resolveDataPath
 
 # 设置日志
 logging.basicConfig(
@@ -287,7 +287,7 @@ def main():
     """)
     
     # 创建数据目录
-    Path("data/demo").mkdir(parents=True, exist_ok=True)
+    resolveDataPath("demo").mkdir(parents=True, exist_ok=True)
     
     # 演示各功能
     demo_task_scheduler()

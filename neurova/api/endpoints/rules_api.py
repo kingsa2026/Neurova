@@ -34,6 +34,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -104,7 +105,7 @@ class RuleLog(BaseModel):
 # JSON 落盘存储
 # ---------------------------------------------------------------------------
 
-_STORE_FILE = os.environ.get("NEUROVA_RULES_PATH", "data/rules_api.json")
+_STORE_FILE = os.environ.get("NEUROVA_RULES_PATH") or dataPath("rules_api.json")
 
 _rules_store: Dict[str, Dict[str, Any]] = {}
 _rule_logs: List[Dict[str, Any]] = []
@@ -138,7 +139,7 @@ def _reboot_load() -> None:
     _rules_store.clear()
     _rule_logs.clear()
     global _STORE_FILE
-    _STORE_FILE = os.environ.get("NEUROVA_RULES_PATH", "data/rules_api.json")
+    _STORE_FILE = os.environ.get("NEUROVA_RULES_PATH") or dataPath("rules_api.json")
     _load_store()
 
 

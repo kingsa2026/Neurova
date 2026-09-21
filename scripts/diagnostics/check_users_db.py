@@ -3,8 +3,10 @@
 
 import sqlite3
 import os
+from neurova.core.data_root import resolveDataPath
 
-db_path = "data/users.db"
+
+db_path = str(resolveDataPath("users.db"))
 if not os.path.exists(db_path):
     print(f"数据库不存在: {db_path}")
     exit(1)
