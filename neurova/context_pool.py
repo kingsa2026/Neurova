@@ -14,6 +14,7 @@ from __future__ import annotations
 import threading
 import time
 import weakref
+from contextlib import contextmanager
 
 from neurova.core.logger import get_logger
 from datetime import datetime, timedelta
@@ -187,6 +188,10 @@ class ContextPool:
         self._ledger_written = 0
         self._ledger_write_failed = 0
         self._ledger_last_error: Optional[str] = None
+        # B4/003：批量归档——批内条目先在内存攒着，批结束时**一次事务**写库；
+        # 批内任一条失败即整批回滚，本批条数整批计入 failed（不谎报 written）。
+        self._ledger_batch: Optional[List[Any]] = None
+        self._ledger_batches = 0
 
         # Issue #65：常驻回收契约显式化——resident_limit 只接受"有持久台账"
         # 的组合，否则回收会把全文静默丢进仅 500 条的内存台账（等于破坏
@@ -334,6 +339,8 @@ class ContextPool:
                 "enabled": self._ledger_db is not None,
                 "written": self._ledger_written,
                 "failed": self._ledger_write_failed,
+                "batches": self._ledger_batches,
+                "pending": len(self._ledger_batch) if self._ledger_batch is not None else 0,
                 "last_error": self._ledger_last_error,
             },
         }
@@ -562,28 +569,94 @@ class ContextPool:
 
     # ── Scroll Context: 被驱逐轮次台账与召回（方案 P1-2.2） ──────
 
+    @contextmanager
+    def archiveBatch(self):
+        """把一次归档调用收进**一个事务**（B4/003 判据 A2，规格 D8）。
+
+        事务边界只能到"写调用返回"为止：批内条目在批结束前不落库、批结束时一次
+        提交——不做异步/后台缓冲刷盘（那会把崩溃窗口内的内容连同"已归档"的承诺
+        一起丢掉）。批内任一条失败 → 整批回滚，本批条数**整批**计入 `failed`
+        并点名原因（不部分提交，也不谎报 `written`）。
+        """
+        if self._ledger_db is None:
+            yield
+            return
+        with self._lock:
+            self._ledger_batch = []
+        try:
+            yield
+        finally:
+            with self._lock:
+                pending = self._ledger_batch
+                self._ledger_batch = None
+                self._ledger_batches += 1
+            if pending:
+                self._flushBatch(pending)
+
+    def close(self) -> None:
+        """释放池持有的持久层连接（幂等）；进程关闭时由 agent_shutdown 调用。
+
+        常驻连接（B4/003）不释放会在 Windows 上让数据目录删除撞句柄占用。
+        """
+        ledger = self._ledger_db
+        closer = getattr(ledger, "close", None)
+        if closer is None:
+            return
+        try:
+            closer()
+        except Exception:  # noqa: BLE001 - 关闭失败不阻断 shutdown 其余步骤
+            logger.warning("归档台账连接关闭失败", exc_info=True)
+
+    def _flushBatch(self, pending: List[Any]) -> None:
+        """把批内条目用一个事务写穿台账（失败整批回滚 + 整批计数）。"""
+        try:
+            self._ledger_db.beginBatch()
+        except Exception as exc:  # noqa: BLE001 - 开批失败同"整批写失败"处理
+            self._record_batch_failure(pending, exc)
+            return
+        try:
+            for item in pending:
+                self._writeArchived(item)
+        except Exception as exc:  # noqa: BLE001 - 归档主流程不可被台账故障打断，但必须可见
+            try:
+                self._ledger_db.rollbackBatch()
+            except Exception:  # noqa: BLE001 - 回滚失败另行上报，不掩盖原始失败
+                logger.warning("批量回滚失败（原始失败见下条）", exc_info=True)
+            self._record_batch_failure(pending, exc)
+            return
+        try:
+            self._ledger_db.commitBatch()
+        except Exception as exc:  # noqa: BLE001
+            self._record_batch_failure(pending, exc)
+            return
+        self._ledger_written += len(pending)
+
+    def _record_batch_failure(self, pending: List[Any], exc: BaseException) -> None:
+        self._ledger_write_failed += len(pending)
+        self._ledger_last_error = f"{type(exc).__name__}: {exc}"
+        logger.warning(
+            "归档批量写穿持久台账失败（整批 %d 条已回滚，仅驻内存，重启后不可召回）：%s",
+            len(pending), self._ledger_last_error, exc_info=True,
+        )
+
     def _persist_archived(self, item) -> None:
         """归档条目落常驻后写穿持久台账（B4/001 判据 A1 的唯一写入口）。
+
+        批量上下文（``archiveBatch``）内只入批不落库，批结束时一次事务提交；
+        批外单条立即提交（A1 的跨重启语义依赖"写完即可见"）。
 
         写失败不阻断归档主流程（本条仍驻内存、本进程内照常可召回），但**不静默**：
         计数与点名原因经 ``get_retention_stats()["ledger_persistence"]`` 上报。
         """
         if self._ledger_db is None:
             return
-        md = getattr(item, "metadata", None) or {}
-        archived_at = getattr(item, "created_at", None)
+        if self._ledger_batch is not None:
+            # 批内**不写库**：一次归档调用共用一个事务（A2）。库里还没写，
+            # 所以这里也不得先记 written——计数在批结算时一次落定。
+            self._ledger_batch.append(item)
+            return
         try:
-            self._ledger_db.record(
-                content=str(getattr(item, "content", "")),
-                turn_id=md.get("turn_id"),
-                session_id=md.get("session_id") or self.session_id,
-                source=getattr(getattr(item, "source", None), "value", None),
-                metadata=getattr(item, "metadata", None),
-                # B4/002：作用域与归档时刻落独立列（U1/U3 定案）。作用域取写入
-                # 咽喉已打好的 metadata，不在这里另算一份判定。
-                chat_scope=md.get("chat_scope"),
-                created_at=archived_at.isoformat() if archived_at else None,
-            )
+            self._writeArchived(item)
         except Exception as exc:  # noqa: BLE001 - 归档主流程不可被台账故障打断，但必须可见
             self._ledger_write_failed += 1
             self._ledger_last_error = f"{type(exc).__name__}: {exc}"
@@ -593,6 +666,22 @@ class ContextPool:
             )
             return
         self._ledger_written += 1
+
+    def _writeArchived(self, item) -> None:
+        """单条写库调用（事务边界由调用方决定：批内不提交、批外立即提交）。"""
+        md = getattr(item, "metadata", None) or {}
+        archived_at = getattr(item, "created_at", None)
+        self._ledger_db.record(
+            content=str(getattr(item, "content", "")),
+            turn_id=md.get("turn_id"),
+            session_id=md.get("session_id") or self.session_id,
+            source=getattr(getattr(item, "source", None), "value", None),
+            metadata=getattr(item, "metadata", None),
+            # B4/002：作用域与归档时刻落独立列（U1/U3 定案）。作用域取写入
+            # 咽喉已打好的 metadata，不在这里另算一份判定。
+            chat_scope=md.get("chat_scope"),
+            created_at=archived_at.isoformat() if archived_at else None,
+        )
 
     def _archive_evicted(self, item) -> None:
         """把被驱逐条目归档进有界台账；台账满时淘汰最旧记录。

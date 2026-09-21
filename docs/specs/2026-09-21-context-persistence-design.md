@@ -305,7 +305,7 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 | # | 判据 | 观测方式 |
 |---|---|---|
 | A1 | **跨重启为真**：写 → 销毁实例 → 新实例同库 → `recall_evicted` 取回原文 | 新进程/新实例断言条数与内容逐字相等；写失败面走 `get_retention_stats()["ledger_persistence"]`（`failed`/`last_error` 点名原因） |
-| A2 | 写放大：24 条/轮的归档耗时 ≤ 现状形状的 **1/3**（实测两种形状差 260–420×，1/3 是极宽松的上界） | 同一台机、同一存量库规模下 A/B，各 20 轮取中位 |
+| A2 | 写放大：24 条/轮的归档耗时 ≤ 现状形状的 **1/3**（实测两种形状差 260–420×，1/3 是极宽松的上界） | 同一台机、同一存量库规模下 A/B，各 20 轮取中位；事务语义另观测：批内失败整批回滚、批外不可见、提交后跨连接可见、`batches` 可读（003） |
 | A3 | 中文预筛命中：`上下文压缩` 的 MATCH 命中数 == LIKE 真值 | 对拍断言（两路结果集相等） |
 | A4 | <3 长度查询走 LIKE，且 `%`/`_` 不越权 | 构造含 `%` `_` 的库内文本，断言命中集合与真值相等 |
 | A5 | GC 生效：超 `keep_count`/`keep_days` 的行被清理，FTS 同步 | 写入超限后断言两表行数一致 |
@@ -352,7 +352,23 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 | 工单 | 状态 | 交付物 | 证据 |
 |---|---|---|---|
 | 001 跨重启召回示踪弹 | ✅ 已交付 | `neurova/context_pool.py`（写穿点前移到 `add_context`）+ `tests/unit/context/test_context_persistence_restart.py` | 红灯 7 failed → 绿灯 7 passed；live-verify 真跨进程 `tests/manual/context_persistence_restart_90.py` |
+| 003 写侧批量提交 | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（常驻连接 + 批量事务）+ `neurova/context_pool.py`（`archiveBatch()` 事务边界）+ `neurova/context/orchestrator.py`（本轮归档收进一个批） | 红灯 10 failed → 绿灯 12 passed；live-verify 24 条/轮 233→1.03 ms（220–233×）`tests/manual/context_ledger_batching_90.py` |
 | 002 版本域与 v1 迁移 | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（`context_ledger` 版本域 + v1 迁移）+ `neurova/context_pool.py`（召回路径回填作用域/归档时刻）+ `tests/unit/context/test_context_ledger_migration.py` | 红灯 15 failed → 绿灯 17 passed；live-verify 真 v0 库经生产构造面迁移 `tests/manual/context_ledger_migration_90.py` |
+
+**003 对 D8 的偏离记录**：
+
+- **事务边界落在池侧而非台账侧**：D8 说"事务边界 = 一次归档调用（`add_context` 的
+  批量调用方）"。实施把该边界显式化为池的 `archiveBatch()` 上下文管理器，并由
+  `orchestrator.build_context` 的归档段整体包住（对话轮/记忆/经验/反思四类写入方
+  共用一批）——台账侧只提供 `beginBatch/commitBatch` 原语，不自作判断"哪几条算一批"。
+- **批内失败定死为整批回滚**（D8 未指定二选一）：本批条数整批计入 `failed` 并点名原因，
+  不部分提交、不谎报 `written`；内存归档不受影响。
+- **读路径一并改走常驻连接**：D8 只要求写入口，但常驻连接若只给写用，读仍每次
+  connect/close 会让 `recall_evicted` 在长会话下重复付连接成本。故 `search` / `count` /
+  `gc` 同批收敛（实例内 `RLock` 串行——sqlite3 连接对象不可并发使用）。
+- **`gc` 由隐式事务改为显式事务**：改前 `gc` 的删除 + FTS 对齐靠 sqlite3 隐式事务 +
+  末尾 commit；关掉 `isolation_level` 后必须显式包事务，否则语义从"全或全无"退化成
+  逐条自动提交（该退化属于"没人会发现"的那一类，故在此显式登记）。
 
 **002 对 D12 的偏离记录**：
 
