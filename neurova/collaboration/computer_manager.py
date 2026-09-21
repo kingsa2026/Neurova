@@ -15,7 +15,6 @@ from neurova.models.computer import (
     ComputerKind,
     ComputerEngine,
     ComputerStatus,
-    get_computer_manager,
 )
 
 logger = get_logger(__name__)
