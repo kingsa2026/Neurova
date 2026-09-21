@@ -1,7 +1,7 @@
 # 上下文池持久层设计（B4 · P1-3 + D1）
 
 - 日期：2026-09-21
-- 状态：**待实施**（本文件是规格，不动生产代码）
+- 状态：**实施中**（001 已交付，见 §8 收口记录；本文件是规格与决定的事实源）
 - 上游：`docs/05-reports/上下文三链路审计_2026-09-21.md` §3 P1-3、§10 批次表 B4 行、决策项 **D1**
 - 前置批次：B1/B2/B3 已完成（`docs/05-reports/上下文三链路修复台账_2026-09-21.md`）
 - 基线取证：`tests/manual/context_persistence_baseline_90.py`（本规格全部读数由它一次跑出；
@@ -222,6 +222,10 @@ B2 修好的是**视图路径**的隔离（`orchestrator` 的 `filter_by_scope`�
   `recall_evicted` 从库里构造 `ContextInput` 时只回填 `turn_id/session_id/evicted_at/
   recalled_from`，**丢掉** `chat_scope`——放行之后闸口也无据可判。故 metadata 的
   `chat_scope` 需提升为独立列（工单 002 的 v1 迁移一并加），或保证读侧能解出等价判据。
+  **收口（U1，2026-09-21 拍板）**：取"独立列为主 + 读侧解析 metadata 作兼容兜底"——
+  v1 迁移加 `chat_scope` 列（读路径高频且可加索引）；旧行（列值为 NULL 或无该列）由
+  读侧解析 metadata 的等价判据补齐，两路判据同源（`collaboration/memory_scope`），
+  不新写第二份规则。
 - 召回是**跨会话**的（这正是 D1 要的"跨重启取得到"），因此过滤只能按作用域，不能按
   session 精确等值。现状"单聊池恒空"的根因就是拿 session 做了等值过滤——**改成
   "session 优先 + 跨 session 兜底 + 作用域闸口"**。
@@ -300,7 +304,7 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 
 | # | 判据 | 观测方式 |
 |---|---|---|
-| A1 | **跨重启为真**：写 → 销毁实例 → 新实例同库 → `recall_evicted` 取回原文 | 新进程/新实例断言条数与内容逐字相等 |
+| A1 | **跨重启为真**：写 → 销毁实例 → 新实例同库 → `recall_evicted` 取回原文 | 新进程/新实例断言条数与内容逐字相等；写失败面走 `get_retention_stats()["ledger_persistence"]`（`failed`/`last_error` 点名原因） |
 | A2 | 写放大：24 条/轮的归档耗时 ≤ 现状形状的 **1/3**（实测两种形状差 260–420×，1/3 是极宽松的上界） | 同一台机、同一存量库规模下 A/B，各 20 轮取中位 |
 | A3 | 中文预筛命中：`上下文压缩` 的 MATCH 命中数 == LIKE 真值 | 对拍断言（两路结果集相等） |
 | A4 | <3 长度查询走 LIKE，且 `%`/`_` 不越权 | 构造含 `%` `_` 的库内文本，断言命中集合与真值相等 |
@@ -331,14 +335,33 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 
 ---
 
-## 8. 未决事项（实施前需拍板）
+## 8. 未决事项（已拍板，见下表「定案」列）
 
-| # | 问题 | 备选 | 建议 |
+**拍板结果（2026-09-21，负责人）：四项一律「按建议」。** 下表保留原"备选/建议"作为决策依据，
+实施按最后一列执行。
+
+| # | 问题 | 备选 | 建议 | 定案 |
+|---|---|---|---|---|
+| U1 | 作用域判据落"独立列"还是"读侧解析 metadata" | 列更硬但有迁移成本；解析零迁移但每行要 `json.loads` | 建议独立列（读路径高频，且列可加索引）；解析作兼容兜底 | **甲案**：v1 加 `chat_scope` 列；读侧对无该列/列值为 NULL 的旧行解析 metadata 等价判据（两路同源 `collaboration/memory_scope`）。工单 002 的 v1 内容按此定稿 |
+| U2 | 候选集上限阈值初值 | 500 / 2000 / 5000 | 用真实语料在实施期校准，本规格只定"必须有上限 + 超限降级行为" | **按建议**：初值 2000，实施期（工单 004）以真实语料校准并回填读数 |
+| U3 | 归档条目是否需要 `created_at` 落库 | 现状只有 `evicted_at` | 建议加：`freshness` 打分与排序都要它，缺了只能拿 `evicted_at` 顶替 | **按建议**：v1 一并加 `created_at` 列（工单 002） |
+| U4 | 是否把 `evicted_chunks` 的 `session_id` 索引补上 | 现状只有 `(user_id, agent_id)`；可选 `(user_id, agent_id, session_id)` | 建议**不按该顺序建**：实测 `(user_id,agent_id,session_id)` 对热集查询是负优化（35.5 ms vs 0.95 ms），改用 `(user_id, agent_id, id)`（0.91 ms）。若确需按 session 过滤，另建 `(user_id, agent_id, session_id, id)` 并在实施期复测 | **按建议**：不建 `(user_id, agent_id, session_id)`；v1 建 `(user_id, agent_id, id)`。确需按 session 过滤时另建四列索引并在实施期复测 |
+
+### 8.1 实施记录（回填，不另起口径）
+
+| 工单 | 状态 | 交付物 | 证据 |
 |---|---|---|---|
-| U1 | 作用域判据落"独立列"还是"读侧解析 metadata" | 列更硬但有迁移成本；解析零迁移但每行要 `json.loads` | 建议独立列（读路径高频，且列可加索引）；解析作兼容兜底 |
-| U2 | 候选集上限阈值初值 | 500 / 2000 / 5000 | 用真实语料在实施期校准，本规格只定"必须有上限 + 超限降级行为" |
-| U3 | 归档条目是否需要 `created_at` 落库 | 现状只有 `evicted_at` | 建议加：`freshness` 打分与排序都要它，缺了只能拿 `evicted_at` 顶替 |
-| U4 | 是否把 `evicted_chunks` 的 `session_id` 索引补上 | 现状只有 `(user_id, agent_id)`；可选 `(user_id, agent_id, session_id)` | 建议**不按该顺序建**：实测 `(user_id,agent_id,session_id)` 对热集查询是负优化（35.5 ms vs 0.95 ms），改用 `(user_id, agent_id, id)`（0.91 ms）。若确需按 session 过滤，另建 `(user_id, agent_id, session_id, id)` 并在实施期复测 |
+| 001 跨重启召回示踪弹 | ✅ 已交付 | `neurova/context_pool.py`（写穿点前移到 `add_context`）+ `tests/unit/context/test_context_persistence_restart.py` | 红灯 7 failed → 绿灯 7 passed；live-verify 真跨进程 `tests/manual/context_persistence_restart_90.py` |
+| 002 版本域与 v1 迁移 | 待实施（U1 定案已就绪：v1 = `content_digest` + `created_at` + `chat_scope` + `uniq_digest` + `idx_scope_id`） | — | — |
+
+**001 对 D8/D11 的偏离记录**：
+
+- **D8 未变**：001 不改事务边界（逐条提交仍在），批量提交是 003。001 只把写穿点从"驱逐时"
+  前移到"入池时"——这是 D1 成立的必要条件（驱逐路径在生产构造面不可达），不是对 D8 的偏离。
+- **D11 提前部分落地**：001 把 GC 节流点从"驱逐时写库"解耦出来（现挂驱逐计数的 `gc_stale()`
+  调用保留，异常不再阻断归档），但"随批量提交同批执行 + 保留策略默认生效"仍归 007。
+- **新增判据（进入 §6）**：`get_retention_stats()["ledger_persistence"]` 上报
+  `enabled/written/failed/last_error` —— 写失败可见性的机器可读落点，A1 的可观测面。
 
 ---
 
