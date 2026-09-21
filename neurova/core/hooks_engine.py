@@ -20,11 +20,12 @@ import threading
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
 KNOWN_EVENTS = ("PreToolUse", "PostToolUse", "Stop")
-_DEFAULT_HOOKS_FILE = "data/hooks.json"
+_DEFAULT_HOOKS_FILE = dataPath("hooks.json")
 _DEFAULT_TIMEOUT = 60
 _MAX_TIMEOUT = 600
 _MAX_CONTEXT_CHARS = 4000

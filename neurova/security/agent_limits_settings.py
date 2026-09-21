@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import resolveDataPath
 
 logger = get_logger(__name__)
 
@@ -38,7 +39,7 @@ def settings_path() -> Path:
     custom = os.environ.get("NEUROVA_AGENT_LIMITS_SETTINGS")
     if custom:
         return Path(custom)
-    return Path("data") / "agent_limits_settings.json"
+    return resolveDataPath("agent_limits_settings.json")
 
 
 def load_agent_limits(path: Optional[Path] = None) -> Dict[str, Any]:

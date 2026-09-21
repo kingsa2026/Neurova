@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from neurova.api.deps import require_admin
 from neurova.core.agent_workspaces import get_agent_workspaces_root
 from neurova.core.logger import get_logger
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -55,9 +56,9 @@ def get_backup_orchestrator():
                 )
                 _orchestrator = BackupOrchestrator(
                     key=SigningKey(
-                        os.environ.get("NEUROVA_BACKUP_KEY_PATH", "data/backup_signing.key")
+                        os.environ.get("NEUROVA_BACKUP_KEY_PATH") or dataPath("backup_signing.key")
                     ),
-                    work_dir=os.environ.get("NEUROVA_BACKUP_WORK_DIR", "data/backups"),
+                    work_dir=os.environ.get("NEUROVA_BACKUP_WORK_DIR") or dataPath("backups"),
                 )
                 _orchestrator.default_sources = sources  # type: ignore[attr-defined]
     return _orchestrator

@@ -23,10 +23,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
-DEFAULT_DB_PATH = Path("data") / "llm_cost.db"
+def defaultDbPath() -> Path:
+    """默认库落点：数据根下的绝对路径（原值 `Path("data")` 随 CWD 漂移）。"""
+    return get_data_root() / "llm_cost.db"
 
 # llm_calls：每笔 LLM 调用记账（明细账）
 _CREATE_CALLS = """
@@ -80,7 +83,7 @@ class LlmCostStore:
         self._db_path = (
             db_path
             or os.environ.get("NEUROVA_LLM_COST_DB")
-            or str(DEFAULT_DB_PATH)
+            or str(defaultDbPath())
         )
         self._lock = threading.RLock()
         self._init_db()

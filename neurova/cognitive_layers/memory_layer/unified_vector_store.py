@@ -1,4 +1,3 @@
-from neurova.core.data_root import get_data_root
 """
 UnifiedVectorStore — 三合一向量索引
 
@@ -25,6 +24,7 @@ from array import array
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 

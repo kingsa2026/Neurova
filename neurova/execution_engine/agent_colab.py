@@ -11,6 +11,7 @@ import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -219,7 +220,7 @@ class AgentCollaborationService:
 
 _singleton: Optional[AgentCollaborationService] = None
 _singleton_lock = threading.Lock()
-_DEFAULT_DIR = "./data/agent_colab"
+_DEFAULT_DIR = dataPath("agent_colab")
 
 
 def get_agent_collaboration_service() -> AgentCollaborationService:

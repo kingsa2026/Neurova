@@ -27,11 +27,12 @@ from pathlib import Path
 from typing import List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-MANAGED_DIR = PROJECT_ROOT / "data" / "tools" / "ffmpeg"
+MANAGED_DIR = get_data_root() / "tools" / "ffmpeg"
 
 BINARY_NAME = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
 

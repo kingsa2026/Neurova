@@ -232,9 +232,33 @@ live-verify：在任意 CWD 用各默认值取连接 / 建存储引擎，CWD 下
 规格说明文档不受影响）。同族的 `agent_workspaces/kai/.../muscle_l2.json`（2 条降级参数脏条目）按 008 的
 既定口径归档重攒。
 
-### 7.6 仍在册（不静默遗留）
+### 7.6 剩余落点全量收口（2026-09-21 第三批，Issue #75 用户点名）
 
-- `CognitiveStorageEngine` 之外仍按 CWD 拼 `data/<sub>` 的零散面（如 `agent.py` 里另有若干
-  `data/<name>` 子目录，多为单个服务自己的配置/状态目录）未逐个纳入数据根；本批只收**与记忆/知识
-  写入面直接相关**的那一族。新增面若再拼相对路径，`test_data_root_single_source` 的
-  "字面量只在解析器里"那条会先红。
+§7.6 原登记为"仍在册"的零散面，本批**全量**处置——不再按"与记忆/知识写入面是否相关"分族，
+因为"换个工作目录就换个库"与那件事无关。
+
+判据扩成两条，都由 `tests/unit/core/test_data_root_no_cwd_landing.py` 常驻锁住（扫描面含
+`scripts/`）：
+
+- **CWD 相对落点为零**：`"data/x"` / `Path("data")` / `os.environ.get(..., "data/x")` /
+  函数默认参数 `db_path="data/x.db"` / f-string 前缀 `f"data/agents/{id}/..."` 一律不得出现；
+- **同一根只准一处定义**：`PROJECT_ROOT / "data"`、`Path(__file__).parents[N] / "data"`、
+  `os.path.join(dirname(__file__), "..", "..", "data")` 这类"另推一份根"同样不得出现。
+
+起始实测红灯 **156 处**（126 个文件），收口后 **0 处**。数据根模块自身补两件：
+
+- `resolveDataPath()`：**默认值**口径——相对名落数据根，绝对路径原样放行；
+- `callerPath(value, *defaultParts)`：**显式入参**口径——调用方给了就用它的（相对/绝对/注入的
+  临时目录一字不改），没给才按数据根拼默认名。两者必须分开：把显式入参折进
+  `resolveDataPath(x or "y")` 会把测试隔离目录与部署指定落点当场改写（本批实际踩到，
+  两条真回归 `test_list_computers` / `test_run_audit_persisted` 即由此而来，已当场修）。
+
+同批把 `test_agent_package_api` 的隔离方式从 `monkeypatch.chdir(tmp_path)` 改为注入
+`NEUROVA_DATA_DIR`——"靠 CWD 隔离"本身就是这条纪律要灭的形态。
+
+### 7.7 仍不在本批范围内（如实登记）
+
+- `neurova/api/auth.py` 的 `.jwt_secret`、`core/trace_recorder.py` 的 `trajectories/`、
+  `core/file_utils.py` 与 `files_api.py` 的 `storage/`：**属另一根族**（运行期数据 vs `data/`
+  配置状态面），改名会让既有令牌/轨迹失联，本批未动，登记在此。
+- 预存失败口径见 §7.4 与 Issue #80 批次，本批未改。

@@ -32,7 +32,7 @@ class DLQConfig:
     retry_backoff: float = 2.0  # 退避指数
     cleanup_interval: int = 3600  # 清理间隔（秒）
     max_age_hours: int = 24  # 最大保留时间（小时）
-    storage_path: str = "data/dlq"  # 存储路径
+    storage_path: str = ""  # 存储路径：空串 = 数据根下的 dlq（resolveDataPath 归一）
     enable_auto_retry: bool = True  # 是否自动重试
     enable_alert: bool = True  # 是否启用告警
 

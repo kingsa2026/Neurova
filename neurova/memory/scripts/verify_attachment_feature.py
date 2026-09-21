@@ -5,6 +5,7 @@
 import os
 import sys
 from pathlib import Path
+from neurova.core.data_root import resolveDataPath
 
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -27,7 +28,7 @@ def test_attachment_functionality():
         attachment = Attachment(
             id="test-uuid-123",
             original_name="test.pdf",
-            file_path="data/attachments/test.pdf",
+            file_path=str(resolveDataPath("attachments/test.pdf")),
             file_size=1024,
             mime_type="application/pdf",
         )
@@ -63,8 +64,8 @@ def test_attachment_functionality():
         from memory.core.storage import MemoryStorage
 
         # 创建临时测试数据库
-        test_db = "data/test_attachment.db"
-        os.makedirs("data", exist_ok=True)
+        test_db = str(resolveDataPath("test_attachment.db"))
+        os.makedirs(os.path.dirname(test_db), exist_ok=True)
 
         # 初始化存储
         storage = MemoryStorage(db_path=test_db)
@@ -108,8 +109,9 @@ def test_attachment_functionality():
     try:
         from memory.core.attachment_manager import AttachmentManager
 
-        test_db = "data/test_attachment.db"
-        manager = AttachmentManager(storage_dir="data/test_attachments", db_path=test_db)
+        test_db = str(resolveDataPath("test_attachment.db"))
+        test_dir = resolveDataPath("test_attachments")
+        manager = AttachmentManager(storage_dir=str(test_dir), db_path=test_db)
 
         # 保存测试附件
         test_data = b"Test file content"
@@ -136,8 +138,8 @@ def test_attachment_functionality():
         # 清理测试文件
         import shutil
 
-        if os.path.exists("data/test_attachments"):
-            shutil.rmtree("data/test_attachments")
+        if os.path.exists(test_dir):
+            shutil.rmtree(test_dir)
         if os.path.exists(test_db):
             os.remove(test_db)
 

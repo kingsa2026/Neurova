@@ -1,8 +1,10 @@
 """检查：列出主要 SQLite 数据库文件及其表名。"""
 import sqlite3
 import os
+from neurova.core.data_root import get_data_root
 
-db_files = ['neurova_memory.db', 'neurflow.db', 'data/neurova_memory.db']
+
+db_files = [str(get_data_root() / name) for name in ('neurova_memory.db', 'neurflow.db')]
 
 for db in db_files:
     if os.path.exists(db):

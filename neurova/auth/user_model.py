@@ -17,6 +17,7 @@ from neurova.core.logger import get_logger
 import os
 import sqlite3
 from typing import Any, Dict, Optional
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -62,14 +63,14 @@ class UserModel:
     管理用户数据的增删改查操作
     """
 
-    def __init__(self, db_path: str = "data/users.db"):
+    def __init__(self, db_path: str = ""):
         """
         初始化用户模型管理器
 
         Args:
             db_path: 数据库文件路径
         """
-        self.db_path = db_path
+        self.db_path = str(callerPath(db_path, "users.db"))
         self._ensure_db_dir()
         self._init_db()
         logger.info("UserModel initialized with db_path=%s", db_path)

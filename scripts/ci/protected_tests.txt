@@ -186,6 +186,8 @@ tests/unit/memory/test_memory_storage_fence.py
 tests/unit/memory/test_memory_pollution_purge.py
 # Issue #75 残余项 B：默认落点收成单一事实源（数据根），CWD 不再决定库在哪
 tests/unit/core/test_data_root_single_source.py
+# Issue #75 残余项：CWD 相对与第二份数据根的落点必须为零（含 scripts/）
+tests/unit/core/test_data_root_no_cwd_landing.py
 # Issue #75 残余项 C：入索引段报出**归属**（delegated + owner），不再挂在"还没做"
 tests/unit/knowledge/test_index_segment_ownership.py
 # Issue #75 残余项 D：存量断言归正入口（补链位后必须转 verified；无依据的行保持 unverified）
