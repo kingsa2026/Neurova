@@ -209,3 +209,39 @@ def test_undo_removes_the_batch(tmp_path: Path, manager, sessions):
                 manager=manager, sessions=sessions) == EXIT_OK
 
     assert _session_files(tmp_path) == []
+
+
+def test_apply_accepts_a_previously_converted_bundle(tmp_path: Path, manager, sessions):
+    """convert 的产物必须能直接 apply——否则"先看包再导"这条路是断的。"""
+    db = _db(tmp_path / "history.db")
+    bundle = tmp_path / "bundle"
+    assert main(["convert", str(db), "--out", str(bundle),
+                 "--agent-name", "kai-import"]) == EXIT_OK
+
+    code = main(["apply", str(bundle), "--agent-id", "kai-import", "--yes",
+                 "--run-id", "run-bundle-1"], manager=manager, sessions=sessions)
+
+    assert code == EXIT_OK
+    assert list((tmp_path / "sessions" / "kai-import").glob("session_*.json"))
+
+
+def test_apply_on_directory_without_stores_is_not_success(tmp_path: Path, manager, sessions):
+    """指错目录（一个可探的 store 都没有）不能退 0：那和"导完了"无法区分。"""
+    empty = tmp_path / "nothing"
+    empty.mkdir()
+    (empty / "readme.txt").write_text("不是会话", encoding="utf-8")
+
+    assert main(["apply", str(empty), "--agent-id", "kai-import", "--yes"],
+                manager=manager, sessions=sessions) == EXIT_UNRECOGNIZED
+
+
+def test_detect_on_a_converted_bundle_still_reports_nothing_to_import(
+        tmp_path: Path, capsys):
+    """包不是源：detect 指到包上要说清"这是包"，不是逐文件报未识别。"""
+    db = _db(tmp_path / "history.db")
+    bundle = tmp_path / "bundle"
+    main(["convert", str(db), "--out", str(bundle), "--agent-name", "kai-import"])
+
+    assert main(["detect", str(bundle)]) == EXIT_OK
+
+    assert "包" in capsys.readouterr().out
