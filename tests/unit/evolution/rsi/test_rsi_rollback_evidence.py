@@ -324,3 +324,65 @@ def _build_bare_orchestrator():
     stubs = {name: _SignalOnlySystem() for name in
              ("sleep", "emotion", "experience", "tool_memory")}
     return RSIOrchestrator(**{f"{name}_system": system for name, system in stubs.items()})
+
+
+# ── 3. 回滚判据单一事实源（工单 011）───────────────────────────
+
+
+def test_should_rollback_is_the_single_decision_source(rsi_probe_factory, monkeypatch):
+    """棘轮回滚必须问 `should_rollback`，不得在编排器里内联第二套判据。
+
+    此前 `orchestrator.run_iteration` 自己写 `if gain < 0:` —— 与
+    `RSIRollbackManager.should_rollback`（看 convergence / roi）判据不同。两套
+    口径并存的后果是"系统认为该回滚"与"实际回滚了"会分叉：人在治理面看到
+    `should_rollback` 说不用回滚，而棘轮已经悄悄把参数还原了。
+    """
+    probe = rsi_probe_factory(rsi_phase=2)
+    readings = iter([1.0, 0.2])  # 应用后暴跌 ⇒ 有害调整
+    monkeypatch.setattr(probe.orchestrator, "_measure_performance", lambda: next(readings))
+
+    seen: list = []
+    original = probe.orchestrator.rollback_manager.should_rollback
+
+    def _spy(metrics):
+        seen.append(dict(metrics))
+        return original(metrics)
+
+    monkeypatch.setattr(probe.orchestrator.rollback_manager, "should_rollback", _spy)
+
+    probe.orchestrator.run_iteration()
+
+    assert seen, (
+        "编排器没有问 should_rollback —— 回滚判据是内联的第二套实现"
+    )
+    assert any("gain" in m or "roi" in m or "convergence_status" in m for m in seen), (
+        f"喂给判据的读数里没有任何回滚依据：{seen}"
+    )
+
+
+def test_no_inline_second_rollback_decision(rsi_probe_factory):
+    """守卫：`gain < 0` 这类回滚决策不得在 `should_rollback` 之外出现第二处。"""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[4] / "neurova"
+    allowed = {"neurova/evolution/rsi/rollback_manager.py"}
+    offenders: list = []
+    for path in root.rglob("*.py"):
+        rel = path.relative_to(root.parent).as_posix()
+        if rel in allowed:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Compare):
+                continue
+            if not isinstance(node.left, ast.Name) or node.left.id != "gain":
+                continue
+            for op, comparator in zip(node.ops, node.comparators):
+                if isinstance(op, (ast.Lt, ast.LtE)) and (
+                    isinstance(comparator, ast.Constant) and comparator.value == 0
+                ):
+                    offenders.append(f"{rel}:{node.lineno}")
+    assert offenders == [], (
+        f"回滚判据出现第二处实现（应统一到 should_rollback）：{offenders}"
+    )

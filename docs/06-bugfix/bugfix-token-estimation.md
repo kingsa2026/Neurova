@@ -1,4 +1,18 @@
-# Bug Fix: Token 估算不一致问题
+# Bug 修复：Token 估算不一致
+
+> **2026-09-21 更正（Issue #90 / 三链路审计 P0-1）**：本文档此前标注"已完成/单一事实源"，
+> 但实测该修复只统一了**入口**，没有修**口径**——`BALANCED` 在 word-splitting 分支把
+> 英文/代码/JSON 按"空白分词数 × 0.25"计价，`other_char_ratio` 不参与，对无空格长串
+> 直接坍缩为 1 token（`estimate_tokens("x" * 9000) == 1`，o200k 真值 1125）。判据侧
+> （窗口折叠/microcompact/抽屉额度）全部用它，导致折叠对英文/JSON/长串形态**永不触发**。
+> 文末"英文差异 1.00x ✓"一栏的样本数字自相矛盾（低估 4.3× 被记为通过）。
+>
+> 现状（已修）：判据与展示统一走 `EXACT`（tiktoken o200k）；`BALANCED` 降为无 tokenizer
+> 时的回退档，按 o200k 实测上确界逐类计价（宁可高估不可低估）；`LEGACY_*`/`CONSERVATIVE`/
+> `AGGRESSIVE` 等 6 种第二口径已删除。回归见
+> `tests/unit/context/test_token_estimator_calibration.py`（已进受保护子集）。
+> 下文"策略模式支持多种算法""保留7种策略""LEGACY_* 保持向后兼容"等表述为**历史记录**，
+> 与当前实现不再一致。
 
 **Bug ID:** token-estimation-inconsistency  
 **修复日期:** 2026-06-10  

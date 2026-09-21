@@ -7,6 +7,8 @@ from __future__ import annotations
 """
 
 import hashlib
+from dataclasses import replace
+
 from neurova.core.logger import get_logger
 import math
 import re
@@ -147,16 +149,24 @@ class SemanticMatchDrawer:
             elif drop_tokens > self.max_tokens and self.max_tokens > 200:
                 # 审验闭环（2026-09-10）：单条超预算的大归档截断召回（尾部省略注记），
                 # 不再整条跳过——否则长消息被窗口折叠后永远无法召回（对话连续性断裂）。
-                # 截断只影响本次视图，池内原文仍无损。
-                from neurova.context.token_estimator import estimate_tokens as _est
-
+                #
+                # P0-3：截断**只能产出视图副本**。collect() 返回的是归档列表里的同一批
+                # 对象引用，旧实现在这里直接 `drop.content = truncated` 就地改写归档
+                # 实体——被截掉的部分没有任何其他副本（违反"永不丢失"），且 hash（来源域
+                # + 原文指纹）不重算 → 索引与内容失配 → 后续归档原文会被去重当作
+                # "已存在"跳过，丢失不可挽回。改用 dataclasses.replace 产副本，
+                # 副本显式标注 truncated_from=原文 hash（可追溯、可重调取）。
                 content = str(drop.content or "")
-                keep_chars = max(200, self.max_tokens * 2)  # 保守 2 char/token 逆推
+                keep_chars = self._chars_for_token_budget(content, self.max_tokens)
                 truncated = content[:keep_chars] + "…[召回截断，全文见会话记录]"
-                drop.content = truncated
-                drop.tokens = _est(truncated)
-                selected.append(drop)
-                total_tokens += drop.tokens
+                view_copy = replace(
+                    drop,
+                    content=truncated,
+                    tokens=self._estimate_tokens(truncated),
+                    metadata={**(drop.metadata or {}), "truncated_from": drop.hash},
+                )
+                selected.append(view_copy)
+                total_tokens += view_copy.tokens
             # 其余超预算：整条跳过并继续尝试更小的条目（不截断内容、不中断选取）
 
         # [缓存稳定] 最终顺序按 created_at 稳定排序：
@@ -245,6 +255,19 @@ class SemanticMatchDrawer:
 
     @staticmethod
     def _estimate_tokens(text: str) -> int:
-        from neurova.context.token_estimator import EstimationStrategy, TokenEstimator
-        estimator = TokenEstimator(EstimationStrategy.BALANCED)
-        return estimator.estimate(text)
+        from neurova.context.token_estimator import estimate_tokens
+
+        return estimate_tokens(text)
+
+    @classmethod
+    def _chars_for_token_budget(cls, text: str, budget_tokens: int) -> int:
+        """按同一把尺子反解"budget_tokens 能装多少字符"（不许用固定 char/token 常数）。
+
+        固定逆推常数（曾为 2 char/token）对中文等于放进约 3 倍名义额度的内容：
+        同一仓库对中文的口径是 ~1 token/字。改为按估算器实测密度反解，
+        中文/英文/代码三种形态各自得到自己的字符上限。
+        """
+        total_tokens = cls._estimate_tokens(text)
+        if total_tokens <= 0:
+            return len(text)
+        return max(200, int(len(text) * budget_tokens / total_tokens))
