@@ -22,6 +22,7 @@ Issue #68 追加要求：项目配置中必须写明
 - `CONTRIBUTING.md` 测试纪律节（人类贡献者入口）
 """
 import io
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -155,4 +156,110 @@ class TestContributingCarriesDiscipline:
         text = _read(CONTRIBUTING)
         assert "红绿灯" in text, (
             "CONTRIBUTING.md 测试纪律节未写 TDD 红绿灯——贡献者入口看不到这条要求。"
+        )
+
+
+# ============================================================================
+# 并发收口（Issue #68 双 PR 冲突）—— 纪律只允许一个事实源，且该源必须可达
+# ============================================================================
+# 背景：另一会话的 PR #70 另造了 docs/0-index/DEVELOPMENT_RULES.md 作为"唯一"
+# 事实源，并把被 97 处引用的 /AGENTS.md 判为"已移除"、只清掉入口 2 处引用。
+# 结果是第二套纪律体系与 95 处悬空引用共存——正是本次要收口的东西。
+# 本节锁：单一事实源 + 被引用文件可达 + 索引入口可解析。
+DR_FULES = PROJECT_ROOT / "docs" / "0-index" / "DEVELOPMENT_RULES.md"
+INDEX = PROJECT_ROOT / "docs" / "INDEX.md"
+
+# Issue #68 明列的八项要求 → 判定关键词（每个事实源必须全覆盖）
+ISSUE_68_REQUIREMENTS = {
+    "中文交流": ("中文交流", "一律使用中文", "使用中文"),
+    "TDD 红绿灯": ("红绿灯",),
+    "修根因/放大视角": ("放大视角",),
+    "禁抹除表面报错": ("抹除",),
+    "闭环": ("闭环",),
+    "禁引用第三方/原创": ("第三方", "原创"),
+    "camelCase 命名": ("camelCase",),
+    "PascalCase 命名": ("PascalCase",),
+    "规则文档归 docs": ("docs/",),
+    "测试归唯一测试根": ("tests/",),
+}
+
+
+class TestDisciplineHasExactlyOneSource:
+    """两套纪律事实源必须收口为一份——这也是 Issue #68 要收的口。"""
+
+    def test_no_parallel_rules_document(self):
+        assert not DR_FULES.exists(), (
+            "docs/0-index/DEVELOPMENT_RULES.md 与 /AGENTS.md 构成第二套纪律事实源。\n"
+            "纪律只允许一处定义（修复教义第 6 条·单一事实源）：保留被全仓 97 处引用、\n"
+            "且被工作区文档收集器读取的 /AGENTS.md，把其独有条款并入该文件。"
+        )
+
+    def test_agents_md_covers_all_issue_68_requirements(self):
+        """唯一事实源必须覆盖 Issue #68 的全部要求，否则并入即丢条款。"""
+        text = _read(AGENTS)
+        missing = [
+            name for name, keys in ISSUE_68_REQUIREMENTS.items()
+            if not any(k in text for k in keys)
+        ]
+        assert not missing, (
+            f"/AGENTS.md 未覆盖 Issue #68 要求: {missing}\n"
+            "收口为单一事实源后，条款一处不能少。"
+        )
+
+
+class TestIndexEntryIsResolvable:
+    """docs/INDEX.md 自称"唯一权威入口"，其阅读顺序指向的文件必须真实可达。"""
+
+    @staticmethod
+    def _reading_order_paths() -> list:
+        """抓取阅读顺序里以 `/` 引用的根级文档相对路径。"""
+        text = _read(INDEX)
+        section = text.split("## 0. 阅读顺序", 1)[1].split("## 1.", 1)[0]
+        return re.findall(r"`/([^`]+\.md)`", section)
+
+    def test_reading_order_root_docs_exist(self):
+        paths = self._reading_order_paths()
+        assert paths, "阅读顺序未解析出任何根级文档引用（索引结构已变，请同步本守卫）"
+        missing = [
+            p for p in paths
+            if not (PROJECT_ROOT / p).is_file()
+            and not (PROJECT_ROOT / "docs" / p).is_file()
+        ]
+        assert not missing, (
+            f"docs/INDEX.md 阅读顺序指向的文件不可达: {missing}\n"
+            "索引自称文档体系唯一导航事实源，入口不可解析即纪律没有事实源。"
+        )
+
+    def test_index_has_no_empty_links(self):
+        text = _read(INDEX)
+        problems = []
+        # 空标签 `` 或空目标 []() / []( ) 都是悬空形态
+        for m in re.finditer(r"`{2}|\[[^\]]*\]\(\s*\)", text):
+            line = text[: m.start()].count("\n") + 1
+            problems.append(f"L{line}: {m.group(0)!r}")
+        assert not problems, (
+            "docs/INDEX.md 存在悬空链接（空标签/空目标）:\n  " + "\n  ".join(problems)
+            + "\n请指向实际路径，不要用清空目标代替修复。"
+        )
+
+
+class TestEntryDocsHaveNoEmptyLinks:
+    """入口文档不得用"清空链接目标"代替修复——与修复教义第 2 条同型（禁表面抹除）。"""
+
+    ENTRY_DOCS = ("README.md", "CONTRIBUTING.md", "docs/INDEX.md")
+
+    def test_no_empty_link_targets(self):
+        problems = []
+        for rel in self.ENTRY_DOCS:
+            path = PROJECT_ROOT / rel
+            if not path.is_file():
+                continue
+            text = _read(path)
+            for m in re.finditer(r"\[[^\]]*\]\(\s*\)", text):
+                line = text[: m.start()].count("\n") + 1
+                problems.append(f"{rel}:L{line} {m.group(0)!r}")
+        assert not problems, (
+            "入口文档存在空目标链接 `[文字]()`（抹除目标而非修复）:\n  "
+            + "\n  ".join(problems)
+            + "\n请指向实际可达路径。"
         )
