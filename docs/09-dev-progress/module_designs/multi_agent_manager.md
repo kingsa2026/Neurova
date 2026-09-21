@@ -593,7 +593,7 @@ async def execute_with_shared_cerebellum(
 
 ### 8.1 参考资料
 
-- `` 第2章：多 Agent 架构设计
+- `docs/NEUROVA_CogArch_2.0.md` 第2章：多 Agent 架构设计
 MultiAgentManager 设计
 
 ### 8.2 相关文件

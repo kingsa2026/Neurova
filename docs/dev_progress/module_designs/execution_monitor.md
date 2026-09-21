@@ -956,7 +956,7 @@ def _save_execution_log(self, execution_id: str) -> None:
 | 2026-05-13 00:20 | 实现持久化方法 | 任务要求 | `execution_monitor.py` |
 | 2026-05-13 00:25 | 更新 `__init__.py` 导出 | 任务要求 | `execution_engine/__init__.py` |
 | 2026-05-13 00:30 | 创建单元测试 | 任务要求 | `tests/test_execution_monitor.py` |
-| 2026-05-13 00:35 | 创建设计文档 | 任务要求 | `` |
+| 2026-05-13 00:35 | 创建设计文档 | 任务要求 | `docs/dev_progress/module_designs/execution_monitor.md` |
 
 ---
 
@@ -971,7 +971,7 @@ def _save_execution_log(self, execution_id: str) -> None:
 - `neurova/execution_engine/execution_monitor.py` (新建/修改)
 - `neurova/execution_engine/__init__.py` (修改)
 - `tests/test_execution_monitor.py` (新建)
-- `` (新建)
+- `docs/dev_progress/module_designs/execution_monitor.md` (新建)
 
 ---
 
