@@ -91,3 +91,117 @@
 live-verify（真 Agent + 真 ToolExecutor + 真 SkillService）：端点经咽喉执行产票、
 停用/归档后工具面各少一项、重建→归档→回滚留痕带操作者、`improvements` 键未复活、
 空归档回滚返回 False。
+
+
+---
+
+## 8. 第三轮补做：9 条尾巴（逐条先红后绿）
+
+第二轮把主干补齐后仍有 9 处未兑现的尾巴，逐条按「先红后绿」修掉。每条先落一条
+必红用例并实证它红，再改实现转绿；红→绿实测输出见 PR 描述与各测试文件的模块说明。
+
+### 8.1 003 残留：`ToolRouter` 复判（假成功票的第二处生产点）
+
+票面点名「`tool_router.py` 的 `ToolResult(success=True, result={...})` **必须复判**」。
+前一轮只把咽喉内层改对了，路由器仍对任何不抛异常的结果报成功，于是同一次失败在两条
+消费链上分叉：经咽喉的调用判失败（正确），经 `ToolSequenceSkill.execute` 的自动技能
+恒真 ⇒ 自动技能产出假成功票（审计 L-02）。
+
+- 收口：`ToolRouter` 的成败判据改为委托咽喉的 `ToolExecutor._result_is_success`
+  （**单源**，路由器内不写第二份内容判据），失败时把 `error` 一并带出。
+- 红灯：`tests/unit/tools/test_tool_router_success_verdict.py` 改前 3 failed
+  （error 载荷判成功 / `route()` 不抛 / 自动技能产成功票），改后 5 passed。
+
+### 8.2 004 残留：三态在四个面各自可分辨
+
+票面要求「三种输入在**四个面**（EKB 行、权重表、结晶器、API 展示）各自独立可分辨；
+用一张对照表贴进票末，缺一格不算完」，并要求「把 `success=NULL` 手工写成 0 ⇒
+至少一条用例必须红」。前一轮只有 EKB 列与权重表两格，结晶器面与 API 展示面零用例。
+
+| 输入 | EKB `success` | 权重表 | 结晶器 | API `outcome` |
+|---|---|---|---|---|
+| 真成功 | `1` | `success_count+1` | 进分子分母 | `success` |
+| 真失败 | `0` | `failure_count+1` | 进分子分母 | `failure` |
+| 无票无回执 | `NULL` | 不投票 | 不进分子分母 | `unevidenced` |
+
+- 落点：`tests/unit/evolution/experience/test_three_state_four_faces.py`（8 条）。
+  写入走 `ExperienceKnowledgeBase.add_experience_record`，读数走 `/ranking` 契约的
+  唯一产出点 `_outcome_word`；反向锁把 `NULL` 手工 UPDATE 成 `0` 后断言 API 面
+  必然转成 `failure`（证明断言真的在区分，而不是复述一遍 NULL）。
+
+### 8.3 009 残留：结构身份 = 工具序列 + 参数
+
+票面定义「结构身份（工具序列 + **参数形状指纹**）」。前一轮把指纹接到了 EKB
+`context`，但**同一份"结构"算法有两个实现**：`fingerprint`（结构 + 意图）与
+`structure_key`（结构）各自复写归一与序列化。
+
+- 收口：抽 `structural_identity()`（归一）+ `_hash_identity()`（序列化哈希），
+  两个键都经它们出哈希，差异只在有没有把意图并进载荷。AST 守卫钉住单源。
+- 覆盖：`tests/unit/evolution/experience/test_structure_identity_param_shape.py`（9 条），
+  含端到端负向（换参数的两次调用必须落两个 `structure_key`）与隐私锁（不落明文）。
+- 实测澄清：复核发现 `structure_key` 在 `1e1341b0` 上**已**吃参数（`{"city":"x"}` 与
+  `{"city":"y"}` 本就不同哈希），上一轮"参数塌成同一身份"的读数有误。本条的净改动是
+  **消除第二份实现**，不是"补上参数"——报告原文与订正一并留在 PR 描述里。
+
+### 8.4 007 的连带代价（票面明令「必须写进票末」）
+
+`tool_memory.muscle_memory_threshold` 是 ADR 0016 判死方向后 RSI 参数寻优臂唯一还有
+位移的旋钮（起点 0.85 / 目标 0.8）。007 收紧裁定档位会让那条臂**近乎空转**：
+
+- 这是**有意**的临时状态，由 008 终态解；
+- **不得**为"让 RSI 有活干"而回退 007 的收紧；
+- 008 必须重验 ADR 0016 的梯度账，不得默认它仍成立。
+
+守卫：`tests/unit/evolution/experience/test_rsi_idle_cost_recorded.py`。
+
+### 8.5 008 三项附带要求
+
+- **身份显式化**：`MuscleMemory.__init__` 原用 `**kwargs` 静默吞掉 `agent_id`
+  （实测 `hasattr(m, "_agent_id") == False`）⇒ 收口为显式参数并落成可读属性
+  `memory.agent_id`，未知 kwarg 直接 `TypeError`，不再静默吞。
+- **现网脏条目作废重攒**：`agent_workspaces/kai/.../muscle_l2.json` 的 2 条 `_raw`
+  条目已归档重攒。**归档落点同时修正**：原实现把副本写在源文件旁边，而
+  `agent_workspaces/` 被 `.gitignore` 整目录忽略——一次 `git clean -xfd` 或换机器，
+  "可回退"就没了。现落 `docs/05-reports/muscle-memory-ledger/`（仓内、随提交入库）。
+- **阈值可达性重算 + ADR 0016 梯度账重验**：新增可复算入口
+  `scripts/diagnostics/muscle_memory_threshold_attainability.py`。实测 8 条相关配对里，
+  阈值 0.85 与 0.8 的裁定**完全相同**，落在开区间 `(0.8, 0.85)` 的真输入为 **0 条**。
+  ⇒ "唯一还有真实梯度的参数"须订正为"**可动参数一颗、梯度带为空**"，ADR 0016 已回写。
+
+### 8.6 010 / 006 残留：只写不读的计数接线
+
+`missing_context_count()` 在 `neurova/` 内**零生产消费方**，`_name_collision_count`
+只见于日志——"写出了读数、没人读"正是协作红线点名的断点形态。
+
+- 收口：`core/metrics.py` 新增两个 gauge（`neurova_ticket_context_missing` /
+  `neurova_skill_name_collisions`）与抓取时快照 `observe_chain_integrity()`，
+  接进既有 `/metrics` 端点（**不新开端点**）。
+- 数值取自计数器本体（单一事实源）；取注册表读数经
+  `skill_system.registered_collision_count()` 只读口，**抓指标绝不懒建注册表**。
+- 守卫：`tests/unit/core/test_chain_integrity_observability.py`（5 条）。
+
+### 8.7 001 残留：只读取证脚本落库
+
+票面点名的 `scripts/diagnostics/_tool_experience_loop_probe.py` 已落库：一条命令输出
+三读数 + `ticket_lookup` / `ticket_reason` 的 JSON，库落临时目录（**不指向 `data/`**），
+模型边界只放一个回预置 tool_call 的替身，不触网。守卫
+`tests/unit/agent/test_tool_experience_loop_offline_probe.py` 钉住"可独立重跑"与
+"绝不打开生产库"两条。
+
+### 8.8 005 残留：迁移清单逐条有结论
+
+票面要求「清单逐条有结论：**迁移 / 不迁移（写明风险与不修理由，回审计文档 §2 新开登记项）**，
+无一条含糊」。守卫
+`tests/unit/skills/test_skill_entry_choke_migration.py::TestMigratedEntriesCallTheChoke`
+原来用一个 `allowed` 文件集整体放行，等于"清单上其余入口一律不写理由"。现改为
+**行号级清单**：每个保留点必须携带理由，新增的未登记命中点直接判红（见 §9 台账）。
+
+### 8.9 杂项
+
+- `scripts/ci/protected_tests.txt` 里 `test_rsi_rollback_evidence.py` 重复登记两行 ⇒ 去重。
+- 两个诊断脚本（`skill_name_collisions.py` / `muscle_memory_rearchive.py`）未登记
+  `scripts/diagnostics/INDEX.md` ⇒ 补登记。
+- 006 的同名冲突"预期计数 = 8"改为可复算：新增 `tests/unit/evolution/experience/`
+  与 `tests/unit/skills/` 下的复算用例（按审计记载的存量形状重建 manifest，
+  断言计数口径 = 不同身份的额外条目数），并在 §9 说明本检出环境**没有** `data/` 下的
+  真 manifest 文件，故该数字的生产态仍待在有生产库的机器上复跑。

@@ -60,41 +60,81 @@ class TestSandboxRootSingleSource:
             "沙箱根注入出现第二处实现（必须收口到 skills/sandbox_root.py）：" f"{offenders}"
         )
 
-    def test_migrated_entries_call_the_choke(self):
-        """迁移清单逐条核对：入口改指咽喉，不再直调 `registry.execute_skill`。
+    # 迁移清单的**逐条结论**（票据 005 要求「迁移 / 不迁移（写明风险与不修理由）」，
+    # 无一条含糊）。键 = 文件相对路径，值 = (命中行数, 结论)。
+    # 命中行数由命令重跑生成并在此比对：行数变了说明清单结构变了，必须重新逐条给结论，
+    # 不许靠"文件在集合里"整体放行（原先的写法正是整文件放行，等于其余入口不写理由）。
+    ENTRY_LEDGER = {
+        "neurova/tool_executor.py": (
+            1, "咽喉自身实现（`execute_skill_tool` 是唯一执行缝），保留",
+        ),
+        "neurova/skill_system.py": (
+            3, "注册表实现本体 + 隔离执行的两条降级回退（RuntimeManager 缺席/隔离执行异常），保留",
+        ),
+        "neurova/tool_layers/tool_router.py": (
+            1, "路由器就是咽喉内层的一档（被 `_execute_tool_core` 调用），保留",
+        ),
+        "neurova/skills/executor.py": (
+            1, "`SkillExecutor` 协议 docstring 里的方法名（非调用点），保留",
+        ),
+        "neurova/router.py": (
+            1, "`_agent.tool_executor` 缺席时的降级直调：真机上恒不走到（Agent 恒装配执行器），"
+               "保留以保住独立注册表台架（评测/脚本）可用",
+        ),
+        "neurova/api/endpoints/skill.py": (
+            1, "无 registry 装配的降级直调（评测台架），迁进治理面风险大于收益，登记不迁移",
+        ),
+    }
 
-        清单由命令重跑生成（票面口径），本用例把它钉成可复算的守卫：
-        ```
-        grep -rn "\\.execute_skill(" --include=*.py neurova/ | grep -v "src-tauri\\|/tests/\\|def execute"
-        ```
-        """
-        # 允许保留的位置（各有明确理由，逐条登记）：
-        # - `tool_executor.py`：咽喉自身的实现；
-        # - `skill_system.py`：注册表实现（`SkillRegistry.execute_skill`）；
-        # - `tool_layers/tool_router.py`：它**就是**咽喉内层的一档，被咽喉调用；
-        # - `skills/executor.py`：`SkillExecutor` 协议注释，不是调用点；
-        # - `router.py` / `api/endpoints/skill.py`：无 Agent/执行器时的降级分支
-        #   （评测、脚本、独立注册表场景——真机上这两条分支恒不走到）。
-        allowed = {
-            "neurova/tool_executor.py",
-            "neurova/skill_system.py",
-            "neurova/tool_layers/tool_router.py",
-            "neurova/skills/executor.py",
-            "neurova/router.py",
-            "neurova/api/endpoints/skill.py",
-        }
-        # 登记"不迁移"的入口：`api/endpoints/skill.py:425` 的降级直调——它只在
-        # 真 agent 或其执行器缺席时可达（评测/脚本路径），迁移它会把评测台架
-        # 也拖进治理面，风险大于收益。
-        offenders: List[str] = []
+    def _scan(self) -> Dict[str, int]:
+        hits: Dict[str, int] = {}
         for path in NEUROVA.rglob("*.py"):
             rel = path.relative_to(REPO_ROOT).as_posix()
-            if rel in allowed:
-                continue
-            for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
+            for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
                 if ".execute_skill(" in line and "def execute_skill" not in line:
-                    offenders.append(f"{rel}:{lineno}")
-        assert offenders == [], f"仍有入口直调 registry.execute_skill（应改走咽喉）：{offenders}"
+                    hits[rel] = hits.get(rel, 0) + 1
+        return hits
+
+    def test_migrated_entries_call_the_choke(self):
+        """清单逐条有结论：未登记的命中点判红，登记过的必须逐条写明理由。
+
+        清单由命令重跑生成（票面口径）：
+
+            grep -rn '\\.execute_skill(' --include=*.py neurova/ |
+                grep -v 'src-tauri|/tests/|def execute'
+        """
+        hits = self._scan()
+        unregistered = sorted(set(hits) - set(self.ENTRY_LEDGER))
+        assert unregistered == [], (
+            f"出现未登记的直调入口（必须逐条给结论，不许整体放行）："
+            f"{ {k: hits[k] for k in unregistered} }"
+        )
+
+    def test_ledger_reasons_are_concrete_and_counted(self):
+        """每条结论必须带具体理由（不是"允许保留"这类空话）且命中数与实测一致。"""
+        hits = self._scan()
+        for rel, (expected, reason) in self.ENTRY_LEDGER.items():
+            assert len(reason) >= 12, f"{rel} 的结论太笼统，等于没写理由：{reason!r}"
+            assert hits.get(rel, 0) == expected, (
+                f"{rel} 的命中数从 {expected} 变成了 {hits.get(rel, 0)}，"
+                "清单结构变了：必须重新逐条给结论"
+            )
+
+    def test_ledger_is_written_down_for_humans(self):
+        """台账必须同时是人类可读文档（票面要求登记，不只在测试里）。"""
+        ledger = (REPO_ROOT / "docs" / "specs" / "2026-09-21-tool-experience-loop"
+                  / "入口迁移台账.md")
+        assert ledger.exists(), "迁移台账没人可读的落点"
+        text = ledger.read_text(encoding="utf-8")
+        for rel in self.ENTRY_LEDGER:
+            assert rel in text, f"台账缺少 {rel} 的逐条结论"
+        assert "不迁移" in text and "风险" in text
+
+    def test_ledger_has_no_stale_entries(self):
+        """登记项必须仍然存在：删掉的入口不能留在台账里充数。"""
+        hits = self._scan()
+        stale = sorted(set(self.ENTRY_LEDGER) - set(hits))
+        assert stale == [], f"台账里的入口在代码里已不存在：{stale}"
 
 
 class TestSchedulerContextVisibility:
