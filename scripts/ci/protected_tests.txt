@@ -256,3 +256,9 @@ tests/unit/context/test_summary_failure_not_reported_success.py
 tests/unit/context/test_context_persistence_restart.py
 # 同上批：回收契约的落盘判据已重定向（落盘在入池、回收只管常驻），
 #   原文件已在上册，无需重复登记
+
+# Issue #96 收尾：退役平铺目录的引用可达性。删副本必须同批改引用——否则报错从
+#   「两个候选」变成「零个候选」，洞只是换了个位置（活跃层链接 + INDEX 权威表两处）
+tests/unit/test_docs_retired_tree_refs_guard.py
+# Issue #97：install.py 供给契约（依赖声明/模型单源/真下载器/前端同判据）
+tests/unit/desktop/test_install_supply_contract.py
