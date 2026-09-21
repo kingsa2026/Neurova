@@ -18,7 +18,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from neurova.core.logger import get_logger
 from neurova.skills import library_service as lib
@@ -29,6 +29,14 @@ logger = get_logger(__name__)
 __all__ = ["VisibleSkill", "SkillView", "resolve_user_key", "build_turn_view"]
 
 _SYSTEM_IDENTITIES = frozenset({"", "default", "system", "anonymous", "unknown"})
+
+# registry 运行时的停用态（`SkillStatus` 的取值 + 库条目里出现过的同义写法）。
+# 判停采白名单：新状态默认可见，改状态机时不会被静默拦掉。
+_DISABLED_RUNTIME_STATUS = frozenset({"inactive", "disabled", "disabled_pending_review"})
+
+# 生命周期终态（`SkillService.archive_skill` 写 `usage["state"]`）。
+# `stale` 只是闲置标记，调得动，故不入表 —— 判停只认真归档。
+_ARCHIVED_LIFECYCLE_STATES = frozenset({"archived"})
 
 
 @dataclass
@@ -52,16 +60,23 @@ class VisibleSkill:
 
     @property
     def enabled(self) -> bool:
-        """可调性 = manifest 的 `enabled` 且 registry 运行时状态不是停用。
+        """可调性 = manifest `enabled` 且运行时 `status` 不停用、生命周期未归档。
 
-        `enabled=False` 是运营面/评审闸的停用落点；`status` 是
-        `SkillRegistry` 运行时状态机（`set_skill_enabled` 写的就是它）。两者任一
-        判停即不可调——此前 schema 段只看得到①条目的硬编码 True，两处判据都形同虚设。
+        三处判停落点各管一件事，任一判停即不可调：
+
+        - `enabled`：运营面/评审闸的停用（`SkillService.enable_skill` 写它）；
+        - `status`：`SkillRegistry` 运行时状态机（`set_skill_enabled` 写它）——
+          此前 schema 段只看得到①条目的硬编码 True，这条判据形同虚设；
+        - `usage.state`：生命周期扫描的归档态（`SkillService.archive_skill` 写它）。
+          归档是最大破坏动作，工具面还留着它等于给 LLM 一个必然失败的工具。
         """
         if not bool(self.entry.get("enabled", True)):
             return False
         status = str(self.entry.get("status") or "").strip().lower()
-        return status not in ("disabled", "disabled_pending_review", "archived")
+        if status in _DISABLED_RUNTIME_STATUS:
+            return False
+        lifecycle = str((self.entry.get("usage") or {}).get("state") or "").strip().lower()
+        return lifecycle not in _ARCHIVED_LIFECYCLE_STATES
 
 
 class SkillView:
@@ -146,6 +161,19 @@ def resolve_user_key(
         return None
 
 
+def _runtime_status(skill: Any) -> str:
+    """registry 运行时状态 → 视图判据用的字符串（枚举取 `value`）。
+
+    `SkillRegistry.set_skill_enabled` 写的是 `skill.status`
+    （`SkillStatus.ACTIVE/INACTIVE`），不经 manifest。底座条目必须把这份状态
+    带上，否则"运行时停用一条手工技能"在工具面上看不出任何变化。
+    """
+    status = getattr(skill, "status", None)
+    if status is None:
+        return ""
+    return str(getattr(status, "value", status) or "")
+
+
 def build_turn_view(agent_id: str, user_key: Optional[str], registry_skills: Optional[dict] = None) -> SkillView:
     """三库合并视图（public → user → agent 逐层写入，同名后层遮蔽前层）。
 
@@ -167,6 +195,7 @@ def build_turn_view(agent_id: str, user_key: Optional[str], registry_skills: Opt
             "id": key,
             "name": key,
             "description": str(getattr(skill, "description", "") or ""),
+            "status": _runtime_status(skill),
             "manifest": {"config": getattr(skill, "config", {}) if isinstance(getattr(skill, "config", None), dict) else {}},
         }
         registry_entries[key] = entry

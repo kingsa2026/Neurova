@@ -54,13 +54,14 @@ def _llm(entities, relations=None):
     return _call
 
 
-def _bridge(graph, registry, entities, relations=None):
+def _bridge(graph, registry, store, entities, relations=None):
     return graph_bridge.extract_knowledge_to_graph(
         {"knowledge_id": "k1", "title": "青海湖", "content": "青海湖是高原湖泊。"},
         repo=None,
         llm_call=_llm(entities, relations),
         graph_manager=graph,
         termRegistry=registry,
+        factStore=store,
     )
 
 
@@ -94,37 +95,38 @@ class TestTypesAreData:
         """两个枚举都有 custom，而术语 id 全表唯一：它是兜底标记，不是一种类型。"""
         assert registry.term("custom") is None
 
-    def test_newTypeNeedsNoPythonChange(self, graph, registry):
+    def test_newTypeNeedsNoPythonChange(self, graph, registry, store):
         registry.register("vessel", "concept", label="舰船")
 
-        nodeIds = _bridge(graph, registry, [{"label": "东风号", "type": "vessel"}])
+        nodeIds = _bridge(graph, registry, store, [{"label": "东风号", "type": "vessel"}])
 
         assert len(nodeIds) == 1
         assert graph._nodes[nodeIds[0]].nodeTypeValue == "vessel", "新类型不许被抹成 custom"
 
-    def test_unregisteredTypeFallsToCustom(self, graph, registry):
-        nodeIds = _bridge(graph, registry, [{"label": "某物", "type": "definitely_not_a_type"}])
+    def test_unregisteredTypeFallsToCustom(self, graph, registry, store):
+        nodeIds = _bridge(graph, registry, store, [{"label": "某物", "type": "definitely_not_a_type"}])
 
         assert graph._nodes[nodeIds[0]].nodeTypeValue == NodeType.CUSTOM.value
 
-    def test_missingRegistryDegradesToTheReadCompatLayer(self, graph, monkeypatch):
-        """底座拿不到时抽取不能整条死掉：这是导入链上的尽力而为钩子。
+    def test_missingRegistryDegradesToTheReadCompatLayer(self, graph, tmp_path):
+        """注册表缺席时抽取消不掉，但类型判据退回枚举读兼容层。
 
-        退回枚举读兼容层意味着"这一轮认不出新登记的类型"，不是"节点不写了"。
+        退回枚举意味着"这一轮认不出新登记的类型"，不是"抽取不写了"——类型词
+        `concept` 进了合法集，节点照建，底座落点也照写。
         """
-        from neurova.knowledge.foundation import knowledge_facts as kf
+        store = KnowledgeFactStore(str(tmp_path / "knowledge_facts.db"))
+        try:
+            nodeIds = graph_bridge.extract_knowledge_to_graph(
+                {"knowledge_id": "k1", "title": "T", "content": "C"},
+                repo=None, llm_call=_llm([{"label": "甲", "type": "concept"}]),
+                graph_manager=graph, termRegistry=None, factStore=store,
+                agentId="agent-a")
 
-        def boom(*_a, **_kw):
-            raise RuntimeError("底座不可用")
-
-        monkeypatch.setattr(kf, "get_knowledge_fact_store", boom)
-        nodeIds = graph_bridge.extract_knowledge_to_graph(
-            {"knowledge_id": "k1", "title": "T", "content": "C"},
-            repo=None, llm_call=_llm([{"label": "甲", "type": "concept"}]),
-            graph_manager=graph, termRegistry=None)
-
-        assert len(nodeIds) == 1
-        assert graph._nodes[nodeIds[0]].nodeTypeValue == "concept"
+            assert len(nodeIds) == 1
+            assert graph._nodes[nodeIds[0]].nodeTypeValue == "concept"
+            assert "concept" in {n.nodeTypeValue for n in graph._nodes.values()}
+        finally:
+            store.close()
 
     def test_bridgeNoLongerBranchesOnTheEnum(self, registry):
         """枚举退成读兼容层：写入侧的合法集合来自表，不来自 enum 成员。"""
@@ -168,18 +170,18 @@ class TestGraphStoreCarriesAnyType:
 
 
 class TestIdentitySegmentReplacesLabelTypeKey:
-    def test_sameLabelDifferentTypeReusesTheNode(self, graph, registry):
+    def test_sameLabelDifferentTypeReusesTheNode(self, graph, registry, store):
         existing = graph.add_node(label="青海湖", node_type=NodeType.CONCEPT)
 
-        nodeIds = _bridge(graph, registry, [{"label": "青海湖", "type": "location"}])
+        nodeIds = _bridge(graph, registry, store, [{"label": "青海湖", "type": "location"}])
 
         assert nodeIds == [existing.node_id], "类型不是身份的一部分，同一湖泊只能有一个节点"
         assert len(graph._nodes) == 1
 
-    def test_differentLabelStillGetsItsOwnNode(self, graph, registry):
+    def test_differentLabelStillGetsItsOwnNode(self, graph, registry, store):
         graph.add_node(label="青海", node_type=NodeType.CONCEPT)
 
-        nodeIds = _bridge(graph, registry, [{"label": "茶卡盐湖", "type": "location"}])
+        nodeIds = _bridge(graph, registry, store, [{"label": "茶卡盐湖", "type": "location"}])
 
         assert len(nodeIds) == 1
         assert len(graph._nodes) == 2

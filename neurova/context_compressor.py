@@ -14,7 +14,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
-from neurova.context.token_estimator import EstimationStrategy, TokenEstimator
+from neurova.context.token_estimator import estimate_tokens
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -62,9 +62,8 @@ class Message:
         if self.token_count is not None:
             return self.token_count
 
-        # 使用统一的 Token 估算器
-        estimator = TokenEstimator(EstimationStrategy.BALANCED)
-        return estimator.estimate(self.content)
+        # 使用统一的 Token 估算器（全仓唯一尺子）
+        return estimate_tokens(self.content)
 
     def to_dict(self) -> Dict[str, Any]:
         """转换为字典"""
@@ -254,9 +253,8 @@ class SmartContextCompressor:
         # 计算系统提示的token数
         system_tokens = 0
         if system_prompt:
-            # 使用统一的 Token 估算器
-            estimator = TokenEstimator(EstimationStrategy.BALANCED)
-            system_tokens = estimator.estimate(system_prompt)
+            # 使用统一的 Token 估算器（全仓唯一尺子）
+            system_tokens = estimate_tokens(system_prompt)
 
         available_tokens = budget_tokens - system_tokens
 
@@ -568,9 +566,8 @@ class SmartContextCompressor:
 
         # 系统提示
         if system_prompt:
-            # 使用统一的 Token 估算器
-            estimator = TokenEstimator(EstimationStrategy.BALANCED)
-            total += estimator.estimate(system_prompt)
+            # 使用统一的 Token 估算器（全仓唯一尺子）
+            total += estimate_tokens(system_prompt)
 
         # 消息
         for msg in messages:
@@ -592,9 +589,8 @@ class SmartContextCompressor:
 
         for item in context:
             content = item.get("content", "")
-            # 使用统一的 Token 估算器
-            estimator = TokenEstimator(EstimationStrategy.BALANCED)
-            total += estimator.estimate(content)
+            # 使用统一的 Token 估算器（全仓唯一尺子）
+            total += estimate_tokens(content)
 
         return total
 

@@ -388,11 +388,16 @@ class SkillExperienceStore(PersistedStateMixin):
         logger.info("技能 %s 已重建 → v%s（归档 %d 份）", skill_id, new_version, len(archives))
         return True
 
-    def rollback_skill(self, skill_id: str, registry: Any, skill_service: Optional[Any] = None) -> bool:
+    def rollback_skill(self, skill_id: str, registry: Any, skill_service: Optional[Any] = None,
+                       operator: str = "") -> bool:
         """回滚到最近一次归档的定义。
 
         回滚的重建所合并的记录保持 merged=True（留在台账供审计，但不再
         注入、也不会被自动重建再次合并——自动重建尊重人工回滚决定）。
+
+        `operator` 记进 `config["revisions"]` 的留痕条目：回滚是最大破坏动作，
+        "谁在什么时候把技能退回了哪一版"必须可查。留痕**只落 revisions 一处**
+        （工单 016 已把无人读取的 `config["improvements"]` 删净，不许加回来）。
         """
         with self._lock:
             archives = self._archives.get(skill_id, [])
@@ -414,11 +419,29 @@ class SkillExperienceStore(PersistedStateMixin):
         if not isinstance(config, dict):
             config = {}
             skill.config = config
+        _version_before = str(getattr(skill, "version", "") or "")
         # 基线在重建中从未被改动，回滚不覆盖它（归档的 description 可能
         # 已含经验组合文本——写回会污染纯净基线）。仅基线从未捕获时补记。
         config.setdefault("base_description", archive["description"])
         skill.description = archive["description"]
         skill.version = archive["version"]
+        # 回滚留痕（工单 011）：归档条目本身是"退回目标"，revisions 是"谁退回的"。
+        # 键名与 skill_improver 的 applied 留痕同族，便于同一读面顺次呈现。
+        import datetime as _datetime
+
+        revisions = config.setdefault("revisions", [])
+        revisions.append(
+            {
+                "trigger": "rollback",
+                "operator": str(operator or ""),
+                "rolled_back_at": _datetime.datetime.now(_datetime.timezone.utc).isoformat(),
+                "version_before": _version_before,
+                "version_after": skill.version,
+                "archived_at": archive.get("archived_at"),
+                "reason": archive.get("reason", ""),
+            }
+        )
+        del revisions[:-5]  # 有界：与改进留痕同窗口
 
         if skill_service is not None:
             try:

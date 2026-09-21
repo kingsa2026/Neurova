@@ -165,7 +165,10 @@ class GeminiNativeClient:
                 yield chunk
 
     def count_tokens(self, text: str) -> int:
-        return max(1, len(text or "") // 4)
+        """估算 token 数（走全仓唯一尺子）。"""
+        from neurova.context.token_estimator import estimate_tokens
+
+        return max(1, estimate_tokens(text))
 
     def count_message_tokens(self, messages, tools=None) -> int:
         total = 0

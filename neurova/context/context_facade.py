@@ -211,9 +211,10 @@ class ContextFacade:
         if not context:
             return context
         
-        # 估算Token数（简化：1个token ≈ 4个字符）
-        total_chars = sum(len(str(m.get("content", ""))) for m in context)
-        estimated_tokens = total_chars // 4
+        # 估算 Token 数（走全仓唯一尺子）
+        from neurova.context.token_estimator import estimate_tokens
+
+        estimated_tokens = sum(estimate_tokens(str(m.get("content", ""))) for m in context)
         
         if estimated_tokens <= target_tokens:
             return context
