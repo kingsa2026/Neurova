@@ -129,6 +129,13 @@ export interface MemoryStats {
   by_type: { type: string; count: number }[]
   avg_importance: number
   storage_used: number
+  /** 记忆侧冲突账读数（检测链落账，读侧可见；unresolved 尚待处置）。 */
+  conflicts?: {
+    total: number
+    resolved: number
+    unresolved: number
+    by_type: Record<string, number>
+  }
 }
 
 // ---------------------------------------------------------------------------

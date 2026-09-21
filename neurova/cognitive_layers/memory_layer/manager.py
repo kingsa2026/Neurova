@@ -1910,7 +1910,23 @@ class MemoryManager:
                 ],
                 "unknown_memory_type_count": self._stats["unknown_memory_type_count"],
                 "unknown_category_count": self._stats["unknown_category_count"],
+                # Issue #72：冲突是记忆侧的一条真实产出，读数必须与检测链同源。
+                # 此前 `get_conflict_summary()` 全仓零调用方，检出了什么在读取侧看不见。
+                "conflicts": self._conflictReading(),
             }
+
+    def _conflictReading(self) -> Dict[str, Any]:
+        """冲突账读数（/memory/stats 与 get_conflict_summary 同源）。"""
+        module = self._conflict_module
+        if module is None:
+            return {"total": 0, "resolved": 0, "unresolved": 0, "by_type": {}}
+        stats = module.get_stats()
+        return {
+            "total": stats.get("total_conflicts", 0),
+            "resolved": stats.get("resolved", 0),
+            "unresolved": stats.get("unresolved", 0),
+            "by_type": dict(stats.get("by_type", {})),
+        }
 
     def get_full_stats(self, agent_wide: bool = False) -> Dict[str, Any]:
         """获取完整统计"""
@@ -3340,16 +3356,53 @@ class MemoryManager:
     def get_traces_by_trigger(
         self, trigger: Optional[str] = None, limit: int = 10, **kwargs
     ) -> List[Dict[str, Any]]:
-        """按触发器获取追踪（P-1 修复: 接受 trigger 位置参数 + limit）
+        """按来源获取冲突账（P-1 修复: 接受 trigger 位置参数 + limit）。
 
-        Args:
-            trigger: 触发器名称（如 'remember'/'recall'）; 当前 ConflictModule 未按触发器过滤, 返回全部
-            limit: 返回上限
+        `trigger` 此前**无任何过滤效果**（注释自陈"返回全部"）——按来源取账是
+        冲突账唯一的读取口径（谁检出的、哪条链检出的），故把它接到
+        `ConflictModule.record(source=...)` 写下的 `source` 上。
         """
         module = self._ensure_conflict_module()
-        conflicts = module.get_conflicts()
+        conflicts = module.get_conflicts(source=trigger or None)
         traces = [c.to_dict() for c in conflicts]
         return traces[:limit]
+
+    def record_conflicts(self, conflicts: List[Dict[str, Any]], *, source: str = "") -> int:
+        """把检测到的冲突落进记忆侧的账，返回真正入账的条数。
+
+        检测链（`post_chat_pipeline._step_conflict_detection`）的写入收口：
+        检出多少不等于账上留下多少——依据缺失的按 `ConflictModule.record` 的
+        诚实边界拒绝入账，这里的返回值如实反映差额。
+        """
+        from neurova.cognitive_layers.memory_layer.modules.conflict_module import (
+            ConflictType,
+        )
+
+        # 只认唯一判据产出的两种类型：来源不明的载荷不入账（宁可不记，
+        # 也不记一条自己都说不清属于哪类的账）。
+        _knownKinds = {"negation_conflict", "semantic_contradiction"}
+        module = self._ensure_conflict_module()
+        recorded = 0
+        for item in conflicts or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("type") or "") not in _knownKinds:
+                continue
+            basis = str(item.get("basis") or item.get("description") or "").strip()
+            if not basis:
+                continue
+            kind = ConflictType.CONTRADICTION
+            stored = module.record(
+                str(item.get("memory1_id") or ""),
+                str(item.get("memory2_id") or ""),
+                kind,
+                basis,
+                confidence=float(item.get("contradiction_score") or 0.0) or 0.7,
+                source=source,
+            )
+            if stored is not None:
+                recorded += 1
+        return recorded
 
     def detect_conflict(self, **kwargs) -> List[Dict[str, Any]]:
         """检测冲突（委托到 ConflictModule.detect_conflict）"""
