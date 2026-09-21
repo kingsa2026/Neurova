@@ -466,7 +466,7 @@ case 集与基线摘要已导出入库：`tests/fixtures/knowledge_eval_cases.js
    不是活的测试缺陷。防回归改为常驻写入围栏（`repository.py` 的
    `_assertNotWritingProductionUnderPytest`，测试 5 用例）。
 2. `data/knowledge.db`（仓内存在）归属——代码未见引用。
-3. 文档 `docs/01-architecture/24-knowledge-isolation-rag.md`、`docs/09-dev-progress/module_designs/knowledge_base.md`、`docs/数据库图谱.md` 与代码的一致性（本次未通读比对）。
+3. 文档 `docs/01-architecture/24-knowledge-isolation-rag.md`、`docs/09-dev-progress/module_designs/knowledge_base.md`、`docs/11-legacy/数据库图谱.md` 与代码的一致性（本次未通读比对）。
 4. `graph_node_ids` 覆盖 26% 是否有对应的运行时补写通路（未见，但不排除由远程 KB 侧写入）。
 
 ### 11.5 预存失败登记（2026-09-20 工单 001 期间实测，非本批引起）
