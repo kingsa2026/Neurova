@@ -192,6 +192,14 @@ class ContextPool:
         # 批内任一条失败即整批回滚，本批条数整批计入 failed（不谎报 written）。
         self._ledger_batch: Optional[List[Any]] = None
         self._ledger_batches = 0
+        # B4/005（规格 D10）：启动**只登记一次**库内归档条数（`COUNT(*)`，常数次查询、
+        # 零常驻内存），**不预载**——D1 要的是"取得到"，不是"开局全在内存"。
+        # 登记后由本进程的写入/清理增量维护；重启时重新登记即自愈。
+        self._ledger_rows = 0
+        self._ledger_registered = False
+        self._ledger_register_error: Optional[str] = None
+        if ledger_db is not None:
+            self._registerLedgerRows()
 
         # Issue #65：常驻回收契约显式化——resident_limit 只接受"有持久台账"
         # 的组合，否则回收会把全文静默丢进仅 500 条的内存台账（等于破坏
@@ -335,6 +343,14 @@ class ContextPool:
                 "total": self._evicted_total,
             },
             "read_index": self._read_index.stats(),
+            # B4/005（A9）：持久库规模读数。启动只登记一次（常数次查询、零预载），
+            # 之后由本进程写入/清理增量维护；重启重新登记即自愈。
+            "ledger": {
+                "enabled": self._ledger_db is not None,
+                "rows": self._ledger_rows,
+                "registered_at_startup": self._ledger_registered,
+                "last_error": self._ledger_register_error,
+            },
             "ledger_persistence": {
                 "enabled": self._ledger_db is not None,
                 "written": self._ledger_written,
@@ -593,6 +609,57 @@ class ContextPool:
             if pending:
                 self._flushBatch(pending)
 
+    def rehydrate(self, limit: int = 500) -> List:
+        """显式把最近 `limit` 条归档回载进常驻（规格 D10：**默认不调用**）。
+
+        启动不预载（D1 要的是"取得到"）；需要预热时由调用方显式发起。
+        顺序取 `id DESC`（`recentRows`，前缀缓存契约要求稳定），
+        重复回载同内容由 `add_context` 的去重挡掉——不产生第二份常驻条目，
+        也不会在持久台账里多落一行。
+        """
+        if self._ledger_db is None or limit <= 0:
+            return []
+        from neurova.context.eviction_ledger_db import (
+            resolveArchivedCreatedAt,
+            resolveArchivedScope,
+        )
+
+        loaded: List = []
+        for row in self._ledger_db.recentRows(limit):
+            row = dict(row)
+            item = ContextInput(
+                source=ContextSource.CONVERSATION,
+                content=row["content"],
+                created_at=resolveArchivedCreatedAt(row),
+                metadata={
+                    "turn_id": row.get("turn_id"),
+                    "session_id": row.get("session_id"),
+                    "evicted_at": row.get("evicted_at"),
+                    "chat_scope": resolveArchivedScope(row),
+                    "recalled_from": "ledger_db",
+                },
+            )
+            self.add_context(item)
+            loaded.append(item)
+        logger.info("热集回载完成：请求 %d 条，取回 %d 条（默认路径不调用本方法）", limit, len(loaded))
+        return loaded
+
+    def _registerLedgerRows(self) -> None:
+        """启动登记：读一次库内归档条数（B4/005 判据 A9）。
+
+        登记失败不阻断池构造（内存归档照常），但**不静默**：`get_retention_stats()`
+        的 `ledger.registered_at_startup` 变为 False 并点名 `last_error`——
+        "持久规模读不出来"必须是可见状态，不是看起来正常的 0。
+        """
+        try:
+            self._ledger_rows = int(self._ledger_db.count())
+            self._ledger_registered = True
+            logger.debug("归档台账启动登记：本库已有 %d 条归档（仅登记，不预载）", self._ledger_rows)
+        except Exception as exc:  # noqa: BLE001 - 登记失败不阻断池构造，但必须可见
+            self._ledger_registered = False
+            self._ledger_register_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("归档台账启动登记失败（持久规模读数不可用）：%s", self._ledger_register_error)
+
     def close(self) -> None:
         """释放池持有的持久层连接（幂等）；进程关闭时由 agent_shutdown 调用。
 
@@ -614,9 +681,11 @@ class ContextPool:
         except Exception as exc:  # noqa: BLE001 - 开批失败同"整批写失败"处理
             self._record_batch_failure(pending, exc)
             return
+        inserted = 0
         try:
             for item in pending:
-                self._writeArchived(item)
+                if self._writeArchived(item):
+                    inserted += 1
         except Exception as exc:  # noqa: BLE001 - 归档主流程不可被台账故障打断，但必须可见
             try:
                 self._ledger_db.rollbackBatch()
@@ -630,6 +699,7 @@ class ContextPool:
             self._record_batch_failure(pending, exc)
             return
         self._ledger_written += len(pending)
+        self._ledger_rows += inserted
 
     def _record_batch_failure(self, pending: List[Any], exc: BaseException) -> None:
         self._ledger_write_failed += len(pending)
@@ -656,7 +726,7 @@ class ContextPool:
             self._ledger_batch.append(item)
             return
         try:
-            self._writeArchived(item)
+            inserted = self._writeArchived(item)
         except Exception as exc:  # noqa: BLE001 - 归档主流程不可被台账故障打断，但必须可见
             self._ledger_write_failed += 1
             self._ledger_last_error = f"{type(exc).__name__}: {exc}"
@@ -666,12 +736,18 @@ class ContextPool:
             )
             return
         self._ledger_written += 1
+        if inserted:
+            self._ledger_rows += 1
 
-    def _writeArchived(self, item) -> None:
-        """单条写库调用（事务边界由调用方决定：批内不提交、批外立即提交）。"""
+    def _writeArchived(self, item) -> bool:
+        """单条写库调用（事务边界由调用方决定：批内不提交、批外立即提交）。
+
+        Returns:
+            本行是否真的落库（同内容已被归档时 False——登记值不重复计数）。
+        """
         md = getattr(item, "metadata", None) or {}
         archived_at = getattr(item, "created_at", None)
-        self._ledger_db.record(
+        return self._ledger_db.record(
             content=str(getattr(item, "content", "")),
             turn_id=md.get("turn_id"),
             session_id=md.get("session_id") or self.session_id,
@@ -702,7 +778,9 @@ class ContextPool:
             self._ledger_gc_counter += 1
             if self._ledger_gc_counter % _LEDGER_GC_EVERY == 0:
                 try:
-                    self._ledger_db.gc_stale()
+                    removed = self._ledger_db.gc_stale()
+                    if removed:
+                        self._ledger_rows = max(0, self._ledger_rows - int(removed))
                 except Exception:
                     logger.warning("驱逐台账 GC 失败（不影响归档）", exc_info=True)
 
