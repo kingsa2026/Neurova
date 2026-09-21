@@ -185,7 +185,7 @@ class TestPointerEntriesAreProjectInitiated:
                         scanner.NAV_IMPACT_SUMMARY_END)
         assert actual.strip() == expected.strip(), (
             "台账的筛选摘要与扫描器输出不一致。台账是生成物，不要手改；\n"
-            "重跑：python scripts/scan_docs_refs.py --markdown"
+            "重跑：python scripts/scan_docs_refs.py --update-ledger"
         )
 
     def test_impact_table_matches_scanner(self):
@@ -263,3 +263,59 @@ class TestExemptionsAreAccountedFor:
         assert counters[scanner.EXEMPT_UNREACHABLE] > total * 0.3, (
             "「无当下读者」占比过低，疑似导航图判定出了问题（把整个 docs/ 都算可达了）。"
         )
+
+class TestMachineBlocksHaveAGenerator:
+    """台账机器区必须有**生成入口**，且入口与守卫同源。
+
+    根因（不是形状）：台账的五个机器区块此前**只有读者、没有写者**——
+    `test_legacy_ref_ledger_guard` / 本守卫逐块重算比对，但 `--markdown` 只打印
+    第三节表格。于是守卫报错信息里写的「重跑 python scripts/scan_docs_refs.py --markdown」
+    对第四节、第七节、第八节**根本不成立**：那些区块只能手贴。上游文档一合并
+    （如 `docs/05-reports/` 追加审计台账），可达文档的悬空引用条数就变，
+    台账随即与事实脱节，而没有任何命令能把它们拉回来——这正是「报错信息指向
+    一个做不到的动作」的形态（教义第 2 条：不许用假动作代替修复）。
+
+    故本类锁三件事：入口存在、入口能复现它负责的每个区块、入口幂等（不空转）。
+    """
+
+    def test_scanner_exposes_a_ledger_writer(self):
+        assert hasattr(scanner, "LEDGER_PATH"), "扫描器未声明台账路径（生成目标缺位）"
+        assert hasattr(scanner, "ledgerBlocks"), (
+            "扫描器未提供 ledgerBlocks()：机器区没有生成入口，守卫的「重跑」提示无法兑现。"
+        )
+        assert hasattr(scanner, "applyLedgerBlocks"), (
+            "扫描器未提供 applyLedgerBlocks()：无法把生成结果写回台账正文。"
+        )
+
+    def test_ledger_writer_covers_every_block_that_guards_compare(self):
+        """生成入口必须覆盖全部被守卫比对的区块——漏一个就还是手贴。"""
+        covered = set(scanner.ledgerBlocks())
+        expected = {scanner.TABLE_BEGIN, scanner.SUMMARY_BEGIN,
+                    scanner.ADJUDICATION_BEGIN,
+                    scanner.NAV_IMPACT_BEGIN, scanner.NAV_IMPACT_SUMMARY_BEGIN}
+        assert expected <= covered, (
+            f"生成入口未覆盖这些被守卫比对的区块: {sorted(expected - covered)}"
+        )
+
+    def test_writer_is_idempotent_on_the_shipped_ledger(self):
+        """已同步的台账再跑一次必须逐字节不变（生成器不得空转重写）。"""
+        original = _ledger_text()
+        assert scanner.applyLedgerBlocks(original) == original, (
+            "台账与生成器已不同步：把生成结果写回后正文仍会变。\n"
+            "修法：python scripts/scan_docs_refs.py --update-ledger"
+        )
+
+    def test_writer_restores_a_drifted_block(self):
+        """负向控制：注入漂移 → 生成器必须把它拉回扫描器输出（门禁不空转）。"""
+        original = _ledger_text()
+        expected = scanner.renderNavigationImpactSummary(scanner.navigationImpactRefs())
+        drifted = original.replace(
+            scanner.NAV_IMPACT_SUMMARY_BEGIN, scanner.NAV_IMPACT_SUMMARY_BEGIN + "\n陈旧数字 **1** 条"
+        )
+        assert drifted != original, "注入漂移失败"
+        restored = scanner.applyLedgerBlocks(drifted)
+        block = restored[restored.find(scanner.NAV_IMPACT_SUMMARY_BEGIN):
+                         restored.find(scanner.NAV_IMPACT_SUMMARY_END)
+                         + len(scanner.NAV_IMPACT_SUMMARY_END)]
+        assert block.strip() == expected.strip(), "生成器未能把漂移区块拉回扫描器输出"
+        assert "陈旧数字" not in restored, "生成器留下了旧内容（替换不彻底）"
