@@ -256,9 +256,11 @@ describe('MessageQueueStore', () => {
     it('should count pending messages', () => {
       store.enqueue('Pending 1')
       store.enqueue('Pending 2')
+      // 第三条也必须保持 pending：pendingCount 数的是收集态，
+      // 入队即变 sending/sent 会与 enqueue 契约（只入队、不代发）冲突。
       store.enqueue('Sent', undefined, {})
       
-      expect(store.pendingCount).toBe(2)
+      expect(store.pendingCount).toBe(3)
     })
     
     it('should count failed messages', () => {
@@ -328,8 +330,10 @@ describe('MessageQueueStore', () => {
       expect(stats.totalEnqueued).toBe(2)
       expect(stats.totalSent).toBe(1)
       expect(stats.totalRetried).toBe(1)
+      // retry 后回到 pending（尚未再失败），故 failed 计数为 0；
+      // failedCount 是「当前失败态」读数，不是历史失败次数（后者在 totalFailed）。
       expect(stats.current.pending).toBe(1)
-      expect(stats.current.failed).toBe(1)
+      expect(stats.current.failed).toBe(0)
     })
   })
   

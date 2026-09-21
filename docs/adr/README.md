@@ -23,11 +23,13 @@
 | [0015](./0015-context-pool-retention-contract.md) | ContextPool 回收契约（归档无损 + 显式常驻上限 + 读路径索引） | Accepted | 2026-09-18 |
 | [0016](./0016-rsi-parameter-source-of-truth.md) | RSI 可优化参数的事实源（四类角色各自唯一 + 边界全登记） | Accepted | 2026-09-19 |
 | [0017](./0017-skill-registry-key-domain.md) | 技能注册表键值域统一（name 与身份域归一为一次查找） | Accepted | 2026-09-20 |
+| [0018](./0018-memory-classification-vocabulary.md) | 记忆分类词汇表唯一事实源（分类引擎只有一套枚举） | Accepted | 2026-09-21 |
 
 ## 主题分类
 
 ### 记忆系统
 - [ADR 0003: 记忆系统架构](./0003-memory-system-architecture.md) — 总体分层 + 深度模块
+- [ADR 0018: 记忆分类词汇表唯一事实源](./0018-memory-classification-vocabulary.md) — 分类枚举只有 models.py 一处；「17 维」口径废止
 - [ADR 0001: 统一 Memory dataclass](./0001-unify-memory-dataclass.md) — 3+1 套 dataclass 量纲统一
 - [ADR 0002: 保留 UnifiedMemoryNode](./0002-retain-unified-memory-node.md) — LSM-Tree 独立数据模型
 

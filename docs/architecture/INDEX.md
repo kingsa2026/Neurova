@@ -18,7 +18,7 @@
 | # | 文档 | 核心内容 | 建议阅读时间 |
 |---|------|----------|-------------|
 | 1 | [01-core-architecture.md](01-core-architecture.md) | 整体架构、分层设计、核心组件 | 30 分钟 |
-| 2 | [02-memory-system.md](02-memory-system.md) | 记忆系统、17维分类、LSM-Tree存储 | 40 分钟 |
+| 2 | [02-memory-system.md](02-memory-system.md) | 记忆系统、多维度分类、LSM-Tree存储 | 40 分钟 |
 | 3 | [03-message-routing.md](03-message-routing.md) | 消息路由、14种渠道适配、事件总线 | 40 分钟 |
 | 4 | [04-multi-agent-collaboration.md](04-multi-agent-collaboration.md) | 多 Agent 协作、任务分配、工作流 | 45 分钟 |
 | 5 | [05-skill-system.md](05-skill-system.md) | Skill 系统、协议兼容、沙箱执行 | 35 分钟 |
@@ -57,7 +57,7 @@
 
 ### 架构师/技术负责人
 1. [01-core-architecture.md](01-core-architecture.md) - 整体架构
-2. [02-memory-system.md](02-memory-system.md) - 记忆架构（17维分类）
+2. [02-memory-system.md](02-memory-system.md) - 记忆架构（多维度分类）
 3. [03-message-routing.md](03-message-routing.md) - 通信架构（14种渠道）
 4. [08-project-structure.md](08-project-structure.md) - 项目结构
 
@@ -126,7 +126,7 @@
 ### 想了解整体架构？
 👉 [01-core-architecture.md](01-core-architecture.md)
 
-### 想了解记忆系统（17维分类）？
+### 想了解记忆系统（多维度分类）？
 👉 [02-memory-system.md](02-memory-system.md) 或 👉 [12-memory-temperature-mechanism.md](12-memory-temperature-mechanism.md)
 
 ### 想了解消息路由（14种渠道）？
