@@ -297,6 +297,14 @@ class TestMemoryImport:
 
 
 class TestChatImport:
+    """聊天落盘走产品链（F-18）：会话号与行幂等键由 `neurova/memory_ingest/` 一处定义。
+
+    本类的用例同时是"两条导入路共享同一幂等域"的回归——老脚本自己那套
+    `kai-{源}-{名}` 会话号与 `(kai_import.source, ts, 内容哈希)` 行键已删除；
+    再补一份派生规则就是第二份事实源，同一段历史会在盘上留两份。
+    跨路幂等另有 `tests/unit/memory_ingest/test_import_interop.py` 钉住。
+    """
+
     def test_history_db_imported_chronologically(self, kai_src):
         from scripts.import_kai_to_neurova import import_chats
 
@@ -306,12 +314,12 @@ class TestChatImport:
         assert stats["history_db_sessions"] == 2
 
         # 08-20 文件只有第一条 user 消息
-        f20 = out_dir / "kai" / "session_kai-history-1787232051795-s4mc9k4_2026-08-20.json"
+        f20 = out_dir / "kai" / "session_1787232051795-s4mc9k4_2026-08-20.json"
         d20 = json.loads(f20.read_text(encoding="utf-8"))
         assert [m["role"] for m in d20["messages"]] == ["user"]
 
-        # 08-21 文件：tool_result 折叠为前一条 assistant 的 tool_calls，时间严格递增
-        f21 = out_dir / "kai" / "session_kai-history-1787232051795-s4mc9k4_2026-08-21.json"
+        # 08-21 文件：tool_result 与它的 call 同轮，时间严格递增
+        f21 = out_dir / "kai" / "session_1787232051795-s4mc9k4_2026-08-21.json"
         d21 = json.loads(f21.read_text(encoding="utf-8"))
         msgs = d21["messages"]
         assert [m["role"] for m in msgs] == ["assistant", "user", "assistant"]
@@ -324,17 +332,17 @@ class TestChatImport:
         md = msgs[0]["metadata"]
         assert md["reasoning_content"] == "先看看记忆文件"
         tc = md["tool_calls"]
-        assert tc[0] == {"type": "tool_call", "tool_name": "read_file",
-                         "params": {"file_path": "MEMORY.md"},
-                         "timestamp": "2026-08-21T01:21:08.772486+08:00"}
-        assert tc[1]["type"] == "tool_result"
-        assert tc[1]["tool_name"] == "read_file"
+        assert [(e["type"], e["tool_name"]) for e in tc] == \
+            [("tool_call", "read_file"), ("tool_result", "read_file")]
+        assert tc[0]["params"] == {"file_path": "MEMORY.md"}
+        assert tc[0]["tool_call_id"] == "call_a"
         assert tc[1]["result"] == "文件内容"
+        assert tc[1]["tool_call_id"] == "call_a"
         # 无工具的 assistant 轮不携带 tool_calls
         assert "tool_calls" not in msgs[2]["metadata"]
 
-        # session_id 带冒号 → 文件名净化
-        fx = out_dir / "kai" / "session_kai-history-xiaoyi-9f594753_2026-08-22.json"
+        # session_id 带冒号 → 文件名按归一规则净化（原名仍在 metadata.ingest 里可回查）
+        fx = out_dir / "kai" / "session_xiaoyi-9f594753-a03d1136_2026-08-22.json"
         assert fx.exists()
 
     def test_dialog_jsonl_imported_with_local_time(self, kai_src):
@@ -344,7 +352,7 @@ class TestChatImport:
         out_dir = nv / "sessions"
         import_chats(kai_root=kai, sessions_dir=out_dir, agent_id="kai")
 
-        f = out_dir / "kai" / "session_kai-dialog-20260406_2026-04-06.json"
+        f = out_dir / "kai" / "session_dialog-2026-04-06_2026-04-06.json"
         assert f.exists()
         data = json.loads(f.read_text(encoding="utf-8"))
         msgs = data["messages"]
@@ -362,12 +370,12 @@ class TestChatImport:
         import_chats(kai_root=kai, sessions_dir=out_dir, agent_id="kai")
 
         # Z 后缀 UTC → +08:00 本地（同一时刻），日期跨到 04-07
-        f = out_dir / "kai" / "session_kai-legacy-a0b1c2d3-test_2026-04-07.json"
+        f = out_dir / "kai" / "session_a0b1c2d3-test_2026-04-07.json"
         assert f.exists()
         data = json.loads(f.read_text(encoding="utf-8"))
         msgs = data["messages"]
-        # toolCall 块 → metadata.tool_calls；纯工具轮保留为空正文消息
-        assert [m["role"] for m in msgs] == ["user", "assistant", "user", "assistant", "assistant"]
+        # 一轮一条 assistant 消息：纯工具轮不再单独成条，它的调用与结果留在该轮
+        assert [m["role"] for m in msgs] == ["user", "assistant", "user", "assistant"]
         ts = [m["timestamp"] for m in msgs]
         assert ts == sorted(ts)
         assert msgs[0]["timestamp"] == "2026-04-07T02:06:20.520000+08:00"
@@ -376,12 +384,10 @@ class TestChatImport:
         md = msgs[1]["metadata"]
         assert md["reasoning_content"] == "先读灵魂文件"
         assert msgs[1]["content"] == "执行完毕"
-        assert md["tool_calls"][0] == {"type": "tool_call", "tool_name": "read",
-                                       "params": {"file_path": "SOUL.md"},
-                                       "timestamp": "2026-04-07T02:06:28.223000+08:00"}
-        # 纯工具轮：空正文 + tool_calls
-        assert msgs[4]["content"] == ""
-        assert msgs[4]["metadata"]["tool_calls"][0]["tool_name"] == "write"
+        assert md["tool_calls"][0]["tool_name"] == "read"
+        assert md["tool_calls"][0]["params"] == {"file_path": "SOUL.md"}
+        # 最后一轮的纯工具调用：调用随轮落盘、没有丢（正文空是这一轮的源形状）
+        assert msgs[3]["metadata"]["tool_calls"][0]["tool_name"] == "write"
 
     def test_import_chats_is_idempotent(self, kai_src):
         from scripts.import_kai_to_neurova import import_chats
@@ -405,17 +411,46 @@ class TestChatImport:
         kai, nv = kai_src
         out_dir = nv / "sessions"
         import_chats(kai_root=kai, sessions_dir=out_dir, agent_id="kai")
-        for fp in (out_dir / "kai").glob("session_kai-*.json"):
+        for fp in (out_dir / "kai").glob("session_*.json"):
             data = json.loads(fp.read_text(encoding="utf-8"))
             assert "user_id" not in data or not data.get("user_id"), fp
 
-    def test_tool_result_truncated(self):
-        from scripts.import_kai_to_neurova import MAX_TOOL_RESULT, _truncate_result
+    def test_tool_results_are_not_truncated(self, kai_src):
+        """产品链是无损优先：工具结果照原样落盘，不再按 8000 字截断。
 
-        long_text = "x" * (MAX_TOOL_RESULT + 100)
-        out = _truncate_result(long_text)
-        assert len(out) <= MAX_TOOL_RESULT + 20
-        assert out.endswith("…[截断]")
+        老脚本的截断是它自己那条链的保真取舍；走产品链后这个取舍没有了，
+        一并删掉不留死码——留在盘上的结果要么是全文，要么在申报里看得见。
+        """
+        long_result = "x" * 9000
+        (kai_src[0] / "history.db").unlink()
+        conn = sqlite3.connect(kai_src[0] / "history.db")
+        conn.execute(
+            "CREATE TABLE conversation_history ("
+            "seq INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,"
+            " agent_id TEXT, kind TEXT NOT NULL, role TEXT, name TEXT, content TEXT,"
+            " tool_call_id TEXT, tool_input TEXT, tool_state TEXT, headline TEXT,"
+            " blocks TEXT, metadata TEXT, created_at TEXT, dedup_key TEXT)")
+        conn.execute(
+            "INSERT INTO conversation_history (session_id, agent_id, kind, role, name,"
+            " content, created_at, dedup_key) VALUES ('sL','kai','context_msg','user',"
+            " NULL,'问题','2026-05-01T10:00:01','k1')")
+        conn.execute(
+            "INSERT INTO conversation_history (session_id, agent_id, kind, role, name,"
+            " content, tool_call_id, created_at, dedup_key) VALUES ('sL','kai',"
+            " 'tool_result','assistant','read_file',?,'c1','2026-05-01T10:00:02','k2')",
+            (long_result,))
+        conn.commit()
+        conn.close()
+
+        from scripts.import_kai_to_neurova import import_chats
+
+        import_chats(kai_root=kai_src[0], sessions_dir=kai_src[1] / "sessions",
+                     agent_id="kai")
+        path = kai_src[1] / "sessions" / "kai" / "session_sL_2026-05-01.json"
+        results = [e["result"] for m in json.loads(path.read_text(encoding="utf-8"))["messages"]
+                   for e in (m.get("metadata") or {}).get("tool_calls") or []
+                   if e["type"] == "tool_result"]
+        assert results == [long_result]
 
     def test_session_title_derived_from_first_user_message(self, kai_src):
         """标题 = 首条用户消息前缀（剥 untrusted metadata 包装），非千篇一律。"""
@@ -424,20 +459,31 @@ class TestChatImport:
         kai, nv = kai_src
         out_dir = nv / "sessions"
         import_chats(kai_root=kai, sessions_dir=out_dir, agent_id="kai")
-        fp = out_dir / "kai" / "session_kai-dialog-20260406_2026-04-06.json"
+        fp = out_dir / "kai" / "session_dialog-2026-04-06_2026-04-06.json"
         data = json.loads(fp.read_text(encoding="utf-8"))
         assert data["title"] == "早上好"
 
     def test_no_message_lost(self, kai_src):
-        """所有实体消息（user/assistant 轮，含纯工具轮）一条都不能丢。"""
+        """所有实体消息一条都不能丢：条数按轮形装配后的产品形状数。
+
+        老脚本的 13 是"平铺消息"口径（1.x 的纯工具轮自占一条）；产品链按运行期形状
+        装配成轮，纯工具轮的调用并入该轮，故少 1 条——这是形状变化，不是丢数据：
+        每个调用与结果都在上面各条断言里可见。
+        """
         from scripts.import_kai_to_neurova import import_chats
 
         kai, nv = kai_src
         out_dir = nv / "sessions"
         stats = import_chats(kai_root=kai, sessions_dir=out_dir, agent_id="kai")
-        # history 6 条实体（2 user + 2 assistant console + 2 xiaoyi）
-        # + dialog 2 + jsonl 5（含 1 条纯工具轮）
-        assert stats["messages_written"] == 13
+
+        assert stats["messages_written"] == 12
+        stored = [json.loads(p.read_text(encoding="utf-8"))
+                  for p in (out_dir / "kai").glob("session_*.json")]
+        calls = [e for data in stored for m in data["messages"]
+                 for e in (m.get("metadata") or {}).get("tool_calls") or []
+                 if e["type"] == "tool_call"]
+        # 三源的调用一条不少（1.x 两个、会话表一个、每日对话无调用）
+        assert sorted(e["tool_name"] for e in calls) == ["read", "read_file", "write"]
 
 
 # ---------------------------------------------------------------------------

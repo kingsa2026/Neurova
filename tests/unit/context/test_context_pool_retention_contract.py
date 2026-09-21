@@ -10,8 +10,8 @@
 
 1. ``max_size`` 失效必须**可见**：统计里显式上报 ``max_size_effective=False``，
    首次越界有一次 WARNING（"设了没生效"不再只能靠压测发现）；
-2. ``resident_limit`` 是**显式**常驻上限：超限最旧条目先落盘台账再移出常驻，
-   ``recall_evicted()`` 仍可召回全文（无损性由持久台账承载）；
+2. ``resident_limit`` 是**显式**常驻上限：超限最旧条目移出常驻（全文随入池即已
+   写穿持久台账，落盘不由回收触发，见 B4/001），``recall_evicted()`` 仍可召回全文；
 3. 无持久台账时 ``resident_limit`` 自动禁用并告警——绝不静默丢全文；
 4. TTL 回收有计数（常驻规模的另一条出口此前无观测）。
 """
@@ -26,11 +26,19 @@ class _FakeLedgerDB:
         self.rows = []
         self.gc_calls = 0
 
-    def record(self, *, content, turn_id=None, session_id=None, source=None, metadata=None):
+    def record(
+        self, *, content, turn_id=None, session_id=None, source=None, metadata=None,
+        chat_scope=None, created_at=None,
+    ):
         self.rows.append({"content": content, "turn_id": turn_id, "source": source})
 
     def gc_stale(self):
         self.gc_calls += 1
+        return 0
+
+    def count(self):
+        """B4/005：启动登记读一次库内条数（替身同样承载契约，不是可选方法）。"""
+        return len(self.rows)
 
 
 def _pool(**kwargs):
@@ -110,12 +118,17 @@ class TestResidentLimitContract:
         assert stats["archived_total"] == 15
 
     def test_recycled_entries_are_persisted_not_lost(self):
-        """回收 = 落盘 + 移出常驻：台账里必须有被回收条目全文。"""
+        """回收 = 移出常驻，全文已在台账（B4/001：写穿点在入池，不在驱逐）。
+
+        判据从"台账里只有被回收的条目"改为"**全部**条目都在台账"——B4/001 把
+        写穿点前移到 `add_context`（驱逐路径在生产构造面不可达），所以持久台账
+        是"入池即落库"的超集，回收只影响常驻集。无丢失语义一字未减。
+        """
         ledger = _FakeLedgerDB()
         pool = _pool(resident_limit=5, ledger_db=ledger)
         _fill(pool, 12)
 
-        assert [r["content"] for r in ledger.rows] == [f"m{i}" for i in range(7)]
+        assert [r["content"] for r in ledger.rows] == [f"m{i}" for i in range(12)]
         # 常驻保留的是最新 5 条
         assert {c.content for c in pool.get_contexts()} == {f"m{i}" for i in range(7, 12)}
 
@@ -147,12 +160,14 @@ class TestResidentLimitContract:
         assert [c.content for c in hit] == ["needle 3", "needle 4", "needle 5"]
 
     def test_resident_limit_within_bounds_is_noop(self):
+        """未超限 = 不发生回收（常驻不缩、回收计数为 0）；与"是否落盘"无关——
+        落盘是入池动作（B4/001），不再由回收触发。"""
         ledger = _FakeLedgerDB()
         pool = _pool(resident_limit=100, ledger_db=ledger)
         _fill(pool, 40)
         assert pool.resident_count() == 40
-        assert ledger.rows == []
         assert pool.get_retention_stats()["archived_by_reason"]["capacity"] == 0
+        assert [r["content"] for r in ledger.rows] == [f"m{i}" for i in range(40)]
 
     def test_zero_or_negative_limit_means_unbounded(self):
         ledger = _FakeLedgerDB()

@@ -961,4 +961,4 @@ class ModelParallelTrainer:
 
 ---
 
-**下一步**：[集成方案详细设计](./memo-integration-design.md)
+**下一步**：[集成方案详细设计](./integrated-memory-upgrade-with-training.md)（原 `memo-integration-design.md` 全历史未入库）
