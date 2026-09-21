@@ -352,7 +352,27 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 | 工单 | 状态 | 交付物 | 证据 |
 |---|---|---|---|
 | 001 跨重启召回示踪弹 | ✅ 已交付 | `neurova/context_pool.py`（写穿点前移到 `add_context`）+ `tests/unit/context/test_context_persistence_restart.py` | 红灯 7 failed → 绿灯 7 passed；live-verify 真跨进程 `tests/manual/context_persistence_restart_90.py` |
-| 002 版本域与 v1 迁移 | 待实施（U1 定案已就绪：v1 = `content_digest` + `created_at` + `chat_scope` + `uniq_digest` + `idx_scope_id`） | — | — |
+| 002 版本域与 v1 迁移 | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（`context_ledger` 版本域 + v1 迁移）+ `neurova/context_pool.py`（召回路径回填作用域/归档时刻）+ `tests/unit/context/test_context_ledger_migration.py` | 红灯 15 failed → 绿灯 17 passed；live-verify 真 v0 库经生产构造面迁移 `tests/manual/context_ledger_migration_90.py` |
+
+**002 对 D12 的偏离记录**：
+
+- **迁移耗时读数高于规格基线**：规格 D12 表的 v1「0.18–0.20 s」来自基线脚本
+  （其 `content_digest` 回填是常量 `'legacy-'||id`），而实施按**真内容指纹**逐行
+  回填。5 万行真库实测（三次连跑）：**0.48–0.49 s**；分阶段读数
+  加列 0.022 s / 回填 0.25 s / 合并重复行 0.09 s / 两个索引 0.09 s。
+  这仍是秒级、且在单条独立事务内，量级与"零停机"结论不冲突；回填已改
+  `executemany`（单条 round-trip 版本实测 0.52–0.56 s）。**读数以本节为准**，
+  D12 表的区间仅作形状比较。
+- **新增 v1 迁移步骤：合并同内容重复行**。规格未列该步，但唯一索引
+  `uniq_digest` 在旧库带重复行时会让迁移直接失败——合并（保留最早一条、
+  同批清掉对应 FTS 影子行、点名条数）是承载 D12「回滚场景允许旧代码写入」的
+  必要前置。
+- **回滚场景下的同内容双行由读侧去重兜住**：旧代码写的新行 `content_digest` 为
+  NULL，唯一索引对 NULL 不冲突（规格 D12 已实测）。此时"同内容只出一条"的对外
+  契约由召回路径按内容指纹去重承担，**不**把旧代码写入改成报错。
+- **`created_at` 与 `chat_scope` 的兜底落点**：两路兜底函数落在台账模块
+  （`resolveArchivedScope` / `resolveArchivedCreatedAt`），召回路径调用它们。
+  作用域判定仍只经 `memory_scope.scope_from_metadata` 一份规则，池侧不复制。
 
 **001 对 D8/D11 的偏离记录**：
 
