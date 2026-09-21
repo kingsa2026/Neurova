@@ -48,6 +48,7 @@ import os
 import re
 import sqlite3
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -55,6 +56,10 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from neurova.core.agent_workspaces import AGENT_WORKSPACES_ENV  # noqa: E402
+from neurova.memory_ingest.converters import CONVERTERS  # noqa: E402
+from neurova.memory_ingest.intake import (  # noqa: E402
+    apply_bundle, session_manager_for)
+from neurova.memory_ingest.probe import probe_store  # noqa: E402
 
 CN_TZ = timezone(timedelta(hours=8))  # 源本地时区 Asia/Shanghai
 UTC = timezone.utc
@@ -101,18 +106,6 @@ def _utc_to_cn(ts: str) -> str:
 def _safe_name(s: str) -> str:
     """会话 ID → 文件名安全段。"""
     return re.sub(r"[^A-Za-z0-9_-]+", "-", s).strip("-") or "unnamed"
-
-
-# 工具结果落盘截断阈值（字符）：Neurova 原生会话也不保全文，
-# 保真优先保对话流；全量结果仍留在 Kai 源可回查
-MAX_TOOL_RESULT = 8000
-_TRUNC_SUFFIX = "…[截断]"
-
-
-def _truncate_result(text: str) -> str:
-    if len(text) <= MAX_TOOL_RESULT:
-        return text
-    return text[:MAX_TOOL_RESULT] + _TRUNC_SUFFIX
 
 
 def _mk_msg(role: str, content: str, ts: str, source: str, src_ts: str,
@@ -448,388 +441,104 @@ def import_neural_memory_delta(src_db: Path, persist_db: Path,
     return {"imported": imported, "skipped_dup": len(rows) - imported}
 
 
-# ══════════════════════════════════════════════════════════════════
-# 聊天导入
-# ══════════════════════════════════════════════════════════════════
+class _ChatStoreWriter:
+    """会话落盘：把源 store 交给产品链的转换器与写入口（F-18）。
 
-# 每个源的会话命名前缀（防跨源 session_id 冲突）
-SRC_PREFIX = {"legacy": "kai-legacy", "dialog": "kai-dialog", "history": "kai-history"}
-
-
-def _dedup_key(m: Dict[str, Any]) -> Tuple[str, str, str]:
-    """会话消息幂等键：(源, 源时间戳, 角色+正文摘要哈希)。
-
-    2.x 轮内各行共享 created_at，纯 ts 键在多 model_turn 同 ts 时会误吞消息，
-    追加角色+正文哈希兜底。
+    这里**不**定义会话号、也不定义行幂等键——那两样一旦在本脚本再写一份，同一支源
+    经两条路就会在盘上留下两套身份（实测：老脚本 `kai-dialog-20260501`、ingest
+    `dialog-2026-05-01`，互不认对方，两边重跑各自都当新数据）。会话号与幂等键只在
+    `neurova/memory_ingest/` 的转换器里定义一处，两条路因此天然共享同一个幂等域。
     """
-    ki = m.get("metadata", {}).get("kai_import", {})
-    digest = hashlib.sha1(
-        f"{m.get('role')}|{m.get('content', '')}".encode("utf-8")
-    ).hexdigest()[:10]
-    return (ki.get("source", ""), ki.get("ts", ""), digest)
 
-
-def _derive_title(msgs: List[Dict[str, Any]]) -> str:
-    """从首条用户消息派生可读标题；剥掉 untrusted metadata 包装块。"""
-    for m in msgs:
-        if m.get("role") != "user":
-            continue
-        text = m.get("content", "")
-        if text.startswith("[cron:"):
-            inner = text.split("]", 1)[0].replace("[cron:", "").strip()
-            inner = re.sub(r"^[0-9a-f-]{36}\s*", "", inner)
-            return ("[自进化] " + (inner or "定时任务"))[:40]
-        skip_wrap = False
-        for ln in text.splitlines():
-            s = ln.strip()
-            if s.startswith("```json"):
-                skip_wrap = True
-                continue
-            if skip_wrap:
-                if s == "```":
-                    skip_wrap = False
-                continue
-            if not s or s.startswith(("Conversation info", "Sender (", "System (")):
-                continue
-            return s[:40]
-    return "凯（导入）"
-
-
-class _SessionWriter:
-    """按日期分文件写 sessions/{agent}/session_{sid}_{date}.json，幂等。"""
-
-    def __init__(self, agent_dir: Path, agent_id: str):
-        self.agent_dir = agent_dir
+    def __init__(self, agent_id: str):
         self.agent_id = agent_id
-        self.agent_dir.mkdir(parents=True, exist_ok=True)
-        self._cache: Dict[str, Dict[str, Any]] = {}  # file_path → session_data
-        self._existing_keys: Dict[str, set] = {}     # file_path → {(source, ts)}
 
-    def _load(self, fp: Path) -> Optional[Dict[str, Any]]:
-        if fp in self._cache:
-            return self._cache[fp]
-        if fp.exists():
-            try:
-                data = json.loads(fp.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                return None
-            self._cache[fp] = data
-            return data
-        return None
+    def append(self, handprint: str, source: Path) -> Tuple[int, List[str]]:
+        """只读源、产包、按批次写入产品链咽喉；返回 (新增条数, 会话号列表)。
 
-    def append(self, session_id: str, msgs: List[Dict[str, Any]]) -> int:
-        """把已按时间排序的消息按日期分桶落盘；返回实际新增条数。"""
-        by_date: Dict[str, List[Dict[str, Any]]] = {}
-        for m in msgs:
-            by_date.setdefault(_msg_date(m["timestamp"]), []).append(m)
-        written = 0
-        for date, day_msgs in sorted(by_date.items()):
-            fp = self.agent_dir / f"session_{session_id}_{date}.json"
-            data = self._load(fp)
-            if data is None:
-                data = {
-                    "agent_id": self.agent_id, "session_id": session_id,
-                    "session_date": date, "messages": [],
-                    "created_at": day_msgs[0]["timestamp"],
-                    "total_messages": 0,
-                }
-                # 不写 user_id 字段：对齐 pipeline 原生落盘口径（mem_core.save_to_session
-                # → add_message 不带 user_id），空值在 _collect_summaries 不过滤，
-                # 任意登录用户均可见；写死 "anonymous"/"1" 反而会被按用户过滤拦掉。
-                if day_msgs[0].get("metadata", {}).get("kai_import"):
-                    data["title"] = _derive_title(
-                        [m for m in msgs if _msg_date(m["timestamp"]) == date]
-                        or day_msgs
-                    )
-            seen = self._existing_keys.setdefault(
-                str(fp), {_dedup_key(m) for m in data.get("messages", [])}
-            )
-            for m in day_msgs:
-                k = _dedup_key(m)
-                if k in seen:
-                    continue
-                data["messages"].append(m)
-                seen.add(k)
-                written += 1
-            if written and data["messages"]:
-                data["messages"].sort(key=lambda x: x["timestamp"])
-                data["updated_at"] = data["messages"][-1]["timestamp"]
-                data["total_messages"] = len(data["messages"])
-                fp.write_text(json.dumps(data, ensure_ascii=False, indent=1),
-                              encoding="utf-8")
-                self._cache[str(fp)] = data
-        return written
+        指纹认不出或该族无转换器时返回 (0, [])、一字节不写（不猜最像的那一家）。
+        会话号从产出的包按 session_id 去重数出：一支 SQLite store 里可以住着多场会话
+        （会话表族就是如此），按 store 计数会把"几场会话"报成"几支库"。
+        """
+        source = Path(source)
+        if not source.is_file():
+            return 0, []
+        convert = CONVERTERS.get(handprint)
+        if convert is None:
+            return 0, []
+        with tempfile.TemporaryDirectory(prefix="neurova-kai-") as staging:
+            bundle = Path(staging) / "bundle"
+            convert(source, bundle, agent_name=self.agent_id)
+            # manager=None：这批只有会话行，记忆面不参与（包里真有记忆行时 intake 会响亮拒绝）
+            report = apply_bundle(bundle, agent_id=self.agent_id, manager=None,
+                                  sessions=session_manager_for())
+            return report.messages_added, _bundle_session_ids(bundle)
 
 
-def _extract_text(content: Any) -> str:
-    """兼容入口：只要正文（旧调用方）。"""
-    return _split_blocks(content)[0]
-
-
-def _iter_legacy_sessions(sessions_dir: Path) -> Iterable[Tuple[str, List[Dict[str, Any]]]]:
-    """源库 1.x workspace/sessions/*.jsonl → (会话名, 消息列表[已排序])。
-
-    thinking 块 → metadata.reasoning_content；toolCall 块 → metadata.tool_calls
-    （1.x 日志无工具结果，call-only）；纯工具轮保留为空正文消息。
-    """
-    if not sessions_dir.exists():
-        return
-    for fp in sorted(sessions_dir.glob("*.jsonl")):
-        if ".deleted." in fp.name:
+def _bundle_session_ids(bundle: Path) -> List[str]:
+    """包内 transcripts.jsonl 的 session_id 去重（保持首次出现序）。"""
+    seen: List[str] = []
+    for line in (Path(bundle) / "transcripts.jsonl").read_text(
+            encoding="utf-8").splitlines():
+        if not line.strip():
             continue
-        msgs: List[Dict[str, Any]] = []
-        for line in fp.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                d = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if d.get("type") != "message":
-                continue
-            inner = d.get("message") or {}
-            role = inner.get("role")
-            if role not in ("user", "assistant"):
-                continue
-            ts = _utc_to_cn(d["timestamp"])  # Z=UTC → +08:00
-            if role == "assistant":
-                text, reasoning, calls = _split_blocks(inner.get("content"))
-                for c in calls:
-                    c["timestamp"] = ts
-                if not (text.strip() or reasoning.strip() or calls):
-                    continue
-                msgs.append(_mk_msg(role, text, ts, "legacy", d["timestamp"],
-                                    reasoning=reasoning, tool_calls=calls))
-            else:
-                text = _extract_text(inner.get("content"))
-                if not text.strip():
-                    continue
-                msgs.append(_mk_msg(role, text, ts, "legacy", d["timestamp"]))
-        msgs.sort(key=lambda x: x["timestamp"])
-        yield fp.stem, msgs
+        session_id = json.loads(line).get("session_id")
+        if session_id and session_id not in seen:
+            seen.append(str(session_id))
+    return seen
 
 
-def _iter_dialog_files(dialog_dir: Path) -> Iterable[Tuple[str, List[Dict[str, Any]]]]:
-    """每日对话 jsonl（workspace/dialog）→ (会话名, 消息列表)。
+def _chat_stores(kai_root: Path) -> List[Tuple[str, Path]]:
+    """三源会话 store 清单：归属按产品链的指纹判定，不由本脚本另立一份"哪族在哪"。
 
-    thinking 块 → metadata.reasoning_content（dialog 源无工具块）。
+    私有来源（neural_memory / session_contexts / reme）无公开格式可依，不在产品链
+    指纹表内，也不在这里——它们由记忆侧入口单独管。
     """
-    if not dialog_dir.exists():
-        return
-    for fp in sorted(dialog_dir.glob("*.jsonl")):
-        day = fp.stem  # 2026-04-06
-        msgs: List[Dict[str, Any]] = []
-        for line in fp.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                d = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            role = d.get("role")
-            if role not in ("user", "assistant"):
-                continue
-            raw_ts = d.get("timestamp") or f"{day} 00:00:00"
-            ts = _norm_ts(raw_ts, CN_TZ)  # 本地时间 → 显式 +08:00
-            if role == "assistant":
-                text, reasoning, calls = _split_blocks(d.get("content"))
-                if not (text.strip() or reasoning.strip() or calls):
-                    continue
-                msgs.append(_mk_msg(role, text, ts, "dialog", raw_ts,
-                                    name=d.get("name") or "",
-                                    reasoning=reasoning, tool_calls=calls))
-            else:
-                text = _extract_text(d.get("content"))
-                if not text.strip():
-                    continue
-                msgs.append(_mk_msg(role, text, ts, "dialog", raw_ts,
-                                    name=d.get("name") or ""))
-        msgs.sort(key=lambda x: x["timestamp"])
-        yield day.replace("-", ""), msgs
-
-
-def _parse_blocks_thinking(blocks_raw: Optional[str]) -> str:
-    """2.x model_turn blocks JSON → thinking 全文。"""
-    if not blocks_raw:
-        return ""
-    try:
-        arr = json.loads(blocks_raw)
-    except (json.JSONDecodeError, TypeError):
-        return ""
-    parts = [b.get("thinking", "") for b in arr
-             if isinstance(b, dict) and b.get("type") == "thinking" and b.get("thinking")]
-    return "\n".join(parts)
-
-
-def _parse_tool_input(tool_input: Optional[str]) -> Dict[str, Any]:
-    """2.x tool_input JSON 字符串 → params dict；解析失败保底为 raw。"""
-    if not tool_input:
-        return {}
-    try:
-        v = json.loads(tool_input)
-        return v if isinstance(v, dict) else {"raw": v}
-    except (json.JSONDecodeError, TypeError):
-        return {"raw": tool_input}
-
-
-def _iter_history_db(db_path: Path) -> Iterable[Tuple[str, List[Dict[str, Any]]]]:
-    """源库 2.x history.db → 按会话输出消息。
-
-    契约（2026-09-09 升级）：
-    - context_msg/user → user 消息
-    - model_turn（有正文）→ assistant 消息；blocks thinking → reasoning_content；
-      tool_call_id+tool_input+name → tool_call 条目（真实参数）
-    - tool_result 行 → tool_result 条目，追加到本轮 assistant 消息的 tool_calls：
-      tool_call_id 与某个 call 匹配则配对（result 紧随其 call，满足前端
-      「result 挂到最近 call」语义），无匹配 call 的结果补一条 params={} 的
-      占位 call（2.x 只记结果不记参数，避免前端连续 result 相互覆盖丢数据）
-    - 空正文纯工具 model_turn（仅 21 行有此形态）的 call 顺延挂到下一条
-      assistant 正文消息
-    - 轮内各行共享 created_at，seq 为轮内唯一顺序
-    """
-    if not db_path.exists():
-        return
-    conn = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
-    conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        "SELECT session_id, kind, role, name, content, tool_call_id, tool_input,"
-        " blocks, created_at FROM conversation_history ORDER BY created_at, seq"
-    ).fetchall()
-    conn.close()
-
-    by_session: Dict[str, List[Dict[str, Any]]] = {}
-    for r in rows:
-        by_session.setdefault(r["session_id"], []).append(r)
-
-    for sid, srows in by_session.items():
-        msgs: List[Dict[str, Any]] = []
-        pending_calls: List[Dict[str, Any]] = []   # 空正文轮顺延的 call 条目
-        current: Optional[Dict[str, Any]] = None   # 待落地的 assistant 消息
-
-        def _flush() -> None:
-            if current is None:
-                return
-            md = current["metadata"]
-            if not md.get("tool_calls"):
-                md.pop("tool_calls", None)
-            msgs.append(current)
-            # 不清 current：置 None 由调用方在同作用域直接赋值
-
-        def _attach_result(entry: Dict[str, Any]) -> None:
-            """把 tool_result 条目接到 current（或 pending）的调用序列。"""
-            # 纯正文轮（无 call）后紧跟结果时 metadata 还没有 tool_calls 键——
-            # 按契约补占位 call 的路径在下面，这里必须先取到可写列表而非假定存在
-            calls = (pending_calls if current is None
-                     else current["metadata"].setdefault("tool_calls", []))
-            for i in range(len(calls) - 1, -1, -1):
-                c = calls[i]
-                if c.get("type") == "tool_call" and not c.get("_matched"):
-                    cid = c.get("_id")
-                    rid = entry.get("_rid")
-                    if cid is None or rid is None or cid == rid:
-                        c["_matched"] = True
-                        calls.append(entry)
-                        return
-            # 无可配对 call → 占位 call（2.x 结果行不带参数）
-            placeholder = {"type": "tool_call", "tool_name": entry.get("tool_name", ""),
-                           "params": {}, "_matched": True}
-            calls.append(placeholder)
-            calls.append(entry)
-
-        for r in srows:
-            kind = r["kind"]
-            ts = _norm_ts(r["created_at"], CN_TZ)
-            if kind == "context_msg":
-                _flush()
-                current = None
-                if (r["role"] or "").strip() == "user":
-                    text = (r["content"] or "").strip()
-                    if text:
-                        msgs.append(_mk_msg("user", text, ts, "history",
-                                            r["created_at"]))
-                continue
-            if kind == "model_turn":
-                text = (r["content"] or "").strip()
-                reasoning = _parse_blocks_thinking(r["blocks"])
-                own_call = None
-                if r["tool_call_id"]:
-                    own_call = {"type": "tool_call", "tool_name": r["name"] or "",
-                                "params": _parse_tool_input(r["tool_input"]),
-                                "timestamp": ts, "_id": r["tool_call_id"]}
-                if text:
-                    _flush()
-                    calls = pending_calls + ([own_call] if own_call else [])
-                    md: Dict[str, Any] = {"kai_import": {"source": "history",
-                                                         "ts": r["created_at"]}}
-                    if reasoning:
-                        md["reasoning_content"] = reasoning
-                    if calls:
-                        md["tool_calls"] = calls
-                    current = {"role": "assistant", "content": text,
-                               "timestamp": ts, "metadata": md}
-                    pending_calls = []
-                elif own_call:
-                    pending_calls.append(own_call)
-                continue
-            if kind == "tool_result":
-                text = r["content"] or ""
-                if not text.strip():
-                    continue
-                _attach_result({"type": "tool_result", "tool_name": r["name"] or "",
-                                "result": _truncate_result(text),
-                                "timestamp": ts, "_rid": r["tool_call_id"]})
-
-        _flush()
-        for m in msgs:
-            for c in m.get("metadata", {}).get("tool_calls", []):
-                c.pop("_id", None)
-                c.pop("_rid", None)
-                c.pop("_matched", None)
-        yield sid, msgs
+    stores: List[Tuple[str, Path]] = []
+    for root in (kai_root / "history.db", kai_root / "workspace" / "dialog",
+                 kai_root / "workspace" / "sessions"):
+        if not root.exists():
+            continue
+        findings = probe_store(root)
+        findings = findings if isinstance(findings, list) else [findings]
+        for finding in findings:
+            if finding.verdict == "unique" and finding.hits[0] in CONVERTERS:
+                stores.append((finding.hits[0], Path(finding.path)))
+    return stores
 
 
 def import_chats(kai_root: Path, sessions_dir: Path, agent_id: str = "kai") -> Dict[str, int]:
-    """三源聊天导入主入口。返回统计。"""
-    agent_dir = sessions_dir / agent_id
-    writer = _SessionWriter(agent_dir, agent_id)
+    """三源聊天导入：逐 store 委派产品链（会话号与幂等键在那里定义一处）。
+
+    老脚本只负责"私有来源抽取 + 记忆与身份装配"；公开方言的会话抽取、会话号、行幂等键、
+    轮形装配与批次标签全部走 `neurova/memory_ingest/`。两条路因此共享同一个幂等域——
+    老脚本写过的行，产品链认得出来，反之亦然（互不感知会让同一段历史在盘上留两份）。
+
+    返回口径不变：三族各自的会话数与写入条数照实报，代理到产品链的报告。
+    """
     kai_root = Path(kai_root)
+    sessions_dir = Path(sessions_dir)
+    # 会话库根目录必须在构造之前定：类级单例只认首次构造
+    session_manager_for(sessions_dir)
+    writer = _ChatStoreWriter(agent_id)
 
     total = 0
-    sessions_seen = set()
-    legacy_n = dialog_n = hist_n = 0
+    seen: set = set()
+    per_family: Dict[str, int] = {}
 
-    for name, msgs in _iter_legacy_sessions(kai_root / "workspace" / "sessions"):
-        sid = f"{SRC_PREFIX['legacy']}-{_safe_name(name)}"
-        n = writer.append(sid, msgs)
-        total += n
-        if n:
-            legacy_n += 1
-        sessions_seen.add(sid)
-
-    for name, msgs in _iter_dialog_files(kai_root / "workspace" / "dialog"):
-        sid = f"{SRC_PREFIX['dialog']}-{name}"
-        n = writer.append(sid, msgs)
-        total += n
-        if n:
-            dialog_n += 1
-        sessions_seen.add(sid)
-
-    for sid_raw, msgs in _iter_history_db(kai_root / "history.db"):
-        sid = f"{SRC_PREFIX['history']}-{_safe_name(sid_raw)}"
-        n = writer.append(sid, msgs)
-        total += n
-        if n:
-            hist_n += 1
-        sessions_seen.add(sid)
+    for family, store in _chat_stores(kai_root):
+        added, session_ids = writer.append(family, store)
+        if added:
+            per_family[family] = per_family.get(family, 0) + len(session_ids)
+            seen.update(session_ids)
+        total += added
 
     return {
         "messages_written": total,
-        "legacy_sessions": legacy_n,
-        "dialog_sessions": dialog_n,
-        "history_db_sessions": hist_n,
-        "total_sessions": len(sessions_seen),
+        "legacy_sessions": per_family.get("legacy_session", 0),
+        "dialog_sessions": per_family.get("dialog_daily", 0),
+        "history_db_sessions": per_family.get("qwenpaw_history", 0),
+        "total_sessions": len(seen),
     }
 
 
