@@ -106,6 +106,7 @@ def debug_log(msg: str) -> None:
     logger.debug(msg)
 
 
+from neurova.core.data_root import ensure_agent_data_dir
 from neurova.core.trace_recorder import get_trajectory_recorder
 from neurova.session_manager import get_session_manager
 from neurova.agent_loop_detection import calculate_similarity, detect_content_loop, has_repeated_patterns
@@ -1429,9 +1430,8 @@ class Agent:
 
     def _init_cognitive_graph(self):
         """初始化认知图谱存储架构"""
-        # 创建数据目录
-        data_dir = Path(f"data/{self.config.agent_id}")
-        data_dir.mkdir(parents=True, exist_ok=True)
+        # 创建数据目录：与删除端点取同一处推导，CWD 不再决定它是哪儿
+        data_dir = ensure_agent_data_dir(self.config.agent_id)
 
         # 1. 初始化 CognitiveStorageEngine
         self.cognitive_engine = CognitiveStorageEngine(

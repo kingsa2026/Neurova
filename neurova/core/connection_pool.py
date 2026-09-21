@@ -19,6 +19,7 @@ import threading
 from neurova.core.logger import get_logger
 from typing import Optional
 from contextlib import contextmanager
+from pathlib import Path
 from queue import Queue, Empty, Full
 
 logger = get_logger(__name__)
@@ -313,20 +314,36 @@ _pools: dict = {}
 _pools_lock = threading.Lock()
 
 
+def _defaultPoolPath() -> str:
+    """默认池库路径：数据根下的绝对路径（延迟到调用时解析，注入才生效）。"""
+    from neurova.core.data_root import get_data_root
+
+    return str(get_data_root() / "neurova_memory.db")
+
+
 def get_connection_pool(
-    db_path: str = "neurova_memory.db",
+    db_path: str = "",
     max_connections: int = 5,
 ) -> SQLiteConnectionPool:
-    """
-    获取或创建数据库连接池
-    
+    """获取或创建数据库连接池。
+
+    `db_path` 缺省（空串）时由数据根推导——原默认值 `"neurova_memory.db"` 是裸文件名，
+    落点随进程 CWD 走（审计 2026-09-21 §7：仓库根那份 71,831 行的散落库）。
+    这里不 import `core.database`（它会反过来 import 本模块，成环），
+    直接取数据根——落点的事实源本来就是它。
+
     Args:
-        db_path: 数据库文件路径
+        db_path: 数据库文件路径（空 = 用数据根下的默认库）
         max_connections: 最大连接数
         
     Returns:
         SQLiteConnectionPool: 连接池实例
     """
+    db_path = str(db_path or "") or _defaultPoolPath()
+    if db_path and not db_path.startswith(":memory:"):
+        # 默认落点在数据根下，首次运行该目录还不存在；sqlite3 不会替调用方建目录，
+        # 不补这一句就是 "unable to open database file"。
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with _pools_lock:
         if db_path not in _pools:
             _pools[db_path] = SQLiteConnectionPool(
@@ -364,7 +381,7 @@ def close_all_pools() -> None:
 
 
 @contextmanager
-def get_db_connection(db_path: str = "neurova_memory.db"):
+def get_db_connection(db_path: str = ""):
     """
     获取数据库连接的便捷函数
     

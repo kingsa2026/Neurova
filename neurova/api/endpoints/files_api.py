@@ -83,7 +83,18 @@ _files_store_lock = threading.Lock()
 # （不阻塞启动，元数据丢失可接受——上传件本体在 storage/ 仍有目录可扫）。
 # ---------------------------------------------------------------------------
 
-_FILES_DB_PATH = "data/users.db"
+def _defaultFilesDbPath() -> str:
+    """文件元数据库默认落点：数据根下的 `users.db`（绝对路径）。
+
+    原值 `"data/users.db"` 是 CWD 相对路径：换个工作目录，文件元数据就写到
+    另一个库里，界面上的"文件还在、元数据没了"由它而来。
+    """
+    from neurova.core.data_root import get_data_root
+
+    return str(get_data_root() / "users.db")
+
+
+_FILES_DB_PATH = _defaultFilesDbPath()
 
 _FILES_DDL = """
 CREATE TABLE IF NOT EXISTS files (
