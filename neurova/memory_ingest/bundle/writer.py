@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone, tzinfo
 from pathlib import Path
@@ -38,19 +39,22 @@ class SourceEvent:
 
 
 def ensure_offset(ts: str, zone: Optional[tzinfo] = None) -> str:
-    """把源里的时间字符串定标成带显式偏移的 ISO。
+    """把源里的时间字符串定标成带显式偏移的 ISO；**定不出来返回空串**。
 
     契约要求 ts 带时区：包内靠它做日期分桶，读侧要能 fromisoformat（3.10 连 "Z" 都不认）。
     源里没写偏移时才用 zone（各家口径见转换器注释），缺省按 UTC。
+
+    空串是"这条没有可靠时刻"的唯一表达，调用方据此申报并跳过该行。造一个当前时刻会把
+    回填的历史写进今天的会话文件（分桶按 ts 的日期），包内还看不出区别——宁可拒绝也不猜。
     """
     text = str(ts or "").strip().replace(" ", "T")
     if not text:
-        return datetime.now(timezone.utc).isoformat()
+        return ""
     try:
         parsed = (datetime.fromisoformat(text[:-1]).replace(tzinfo=timezone.utc)
                   if text.endswith("Z") else datetime.fromisoformat(text))
     except ValueError:
-        return str(ts)
+        return ""
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=zone or timezone.utc)
     return parsed.isoformat()
@@ -83,18 +87,42 @@ def write_bundle(out_dir: Path, records: Sequence[TranscriptRecord], *, agent_na
     out_dir.mkdir(parents=True, exist_ok=True)
     _write_jsonl(out_dir / "transcripts.jsonl", records)
     _write_jsonl(out_dir / "memories.jsonl", memories)
+    relations = _line_count(out_dir / "relations.jsonl")   # 转换器暂不产它，但第三方包可能带
 
     manifest = BundleManifest(
         schema_version=1,
         generated_at=datetime.now(timezone.utc).isoformat(),
         agent_name=agent_name,
         source=dict(source),
-        counts={"transcripts": len(records), "memories": len(memories), "relations": 0},
+        counts={"transcripts": len(records), "memories": len(memories), "relations": relations},
         dropped=tuple(dropped),
         stores=tuple(stores),
     )
     dump_manifest(manifest, out_dir / "manifest.json")
     return manifest
+
+
+def _line_count(path: Path) -> int:
+    """非空行数：登记用的计数，与校验器核的是同一口径。"""
+    if not path.exists():
+        return 0
+    return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
+def dropped_entries(declared: Counter, reasons: Dict[str, str]) -> List[Dict[str, Any]]:
+    """申报的唯一口径：字段名原样带出，原因先按整名后按前缀查，都查不到用本族的兜底文案。
+
+    六族各写一份时，同一个未预期键会被说成不同的原因（"type"/"payload"/"event"/"part"…），
+    报告就不可比较了；reasons 必须带 "__fallback__" 键。
+    """
+    entries = []
+    for field, count in sorted(declared.items()):
+        if count <= 0:
+            continue
+        entries.append({"field": field, "count": count,
+                        "reason": reasons.get(field) or reasons.get(field.split(":")[0])
+                                  or reasons["__fallback__"]})
+    return entries
 
 
 def _write_jsonl(path: Path, records: Sequence[Any]) -> None:

@@ -224,6 +224,18 @@ def test_convert_carries_base64_block_as_media(tmp_path: Path, src: Path):
     assert (out / blocks[1]["media"]).read_bytes() == png
 
 
+def test_row_without_any_carriable_content_is_declared(tmp_path: Path):
+    """块里只有空正文、平列也是空：这行确实没东西，但必须报出来而不是当它不存在。"""
+    rows = [_row(seq=1, session_id="sA", kind="model_turn", role="assistant",
+                 blocks=json.dumps([{"type": "text", "text": ""}]),
+                 created_at="2026-05-01T10:00:00", dedup_key="k1")]
+
+    manifest, _ = _convert(tmp_path, "empty.db", rows)
+
+    assert manifest.counts["transcripts"] == 0
+    assert any(e["field"] == "空正文" and e["count"] == 1 for e in manifest.dropped)
+
+
 def test_converter_is_routable_by_its_own_handprint_name():
     """指纹名必须查到转换器，否则 detect 报"唯一命中"而 apply 无路可走。"""
     assert CONVERTERS[CONVERTER_NAME] is convert

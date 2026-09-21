@@ -6,12 +6,15 @@
 追加序号的方式等等）。
 """
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
 
 from neurova.memory_ingest.bundle.records import MemoryRecord, TranscriptRecord
-from neurova.memory_ingest.bundle.writer import SourceEvent, materialize, write_bundle
+from neurova.memory_ingest.bundle.turns import to_turn_messages
+from neurova.memory_ingest.bundle.writer import (SourceEvent, dropped_entries, ensure_offset,
+                                                 materialize, write_bundle)
 
 
 def _memory(**kw):
@@ -26,6 +29,23 @@ def _memory(**kw):
 
 def _event(kind="assistant_message", seq_ts="2026-05-01T10:00:00+00:00", **kw):
     return SourceEvent(kind=kind, ts=kw.pop("ts", seq_ts), **kw)
+
+
+def test_ensure_offset_never_invents_now():
+    """空与解不开都必须回空串：造一个 now() 会把六个月前的事写进今天的会话文件。"""
+    assert ensure_offset("") == ""
+    assert ensure_offset("不是时间") == ""
+    assert ensure_offset("2026-05-01T10:00:00") == "2026-05-01T10:00:00+00:00"
+
+
+def test_dropped_entries_single_shape():
+    """申报只有一种形状：字段名原样带出，原因按整名/前缀查，查不到用本族兜底文案。"""
+    entries = dropped_entries(Counter({"role:developer": 2, "media:不可达": 1}),
+                              {"role": "该角色无对应 kind", "media": "取不到字节",
+                               "__fallback__": "无落点"})
+
+    assert entries == [{"field": "media:不可达", "count": 1, "reason": "取不到字节"},
+                       {"field": "role:developer", "count": 2, "reason": "该角色无对应 kind"}]
 
 
 def test_materialize_numbers_each_session_from_one():
@@ -62,7 +82,7 @@ def test_materialize_carries_role_verbatim():
     assert records[0].extra == {"tool_input": '{"a": 1}'}
     assert records[0].reasoning_state == "absent"
     assert records[0].role == ""
-    assert records[0].to_session_message()["role"] == "assistant"     # 消息层回落
+    assert to_turn_messages(records)[0]["role"] == "assistant"        # 消息层回落
     assert records[1].role == "user"
 
 

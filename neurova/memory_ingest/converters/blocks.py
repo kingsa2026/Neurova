@@ -161,7 +161,8 @@ def _flush(events: List[ContentEvent], run: List[str], pending: List[str],
            media: List[Dict[str, Any]], opaque: List[bool]) -> None:
     text = "".join(run)
     del run[:]
-    if text or pending or media:
+    # 密文思考也是"有推理、读不出"：只在正文/调用/媒体上判空，这一行就整条消失
+    if text or pending or media or opaque[0]:
         events.append(ContentEvent("assistant_message", text=text, reasoning=_drain(pending),
                                    reasoning_state=_drain_state(opaque), blocks=tuple(media)))
         del media[:]

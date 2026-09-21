@@ -26,8 +26,8 @@ from neurova.memory_ingest import probe
 from neurova.memory_ingest.bundle.manifest import BundleError, BundleManifest
 from neurova.memory_ingest.bundle.media import MediaSink
 from neurova.memory_ingest.bundle.records import MemoryRecord
-from neurova.memory_ingest.bundle.writer import (SourceEvent, ensure_offset, materialize,
-                                                 write_bundle)
+from neurova.memory_ingest.bundle.writer import (SourceEvent, dropped_entries, ensure_offset,
+                                                 materialize, write_bundle)
 from neurova.memory_ingest.converters.blocks import split_content
 from neurova.memory_ingest.probe import Handprint, register_handprint
 
@@ -59,6 +59,7 @@ MEMORY_REASONS = {
     "memory:来源未知": "source 列出现已知两值之外的取值，不猜记忆类型映射，整条未导",
     "memory:空正文": "该索引项没有正文，包内 content 必填，未导",
     "memory:派生索引": "向量/内容哈希/嵌入模型属源侧派生索引，包内不搬（本系统自算）",
+    "memory:无时间": "该条既不是 epoch 毫秒也不是可定标时间，整条未导（不写导入时刻）",
 }
 
 # 事件级与消息级字段的落点：表外的键一律按条数申报，不做"看起来不重要就略过"
@@ -67,12 +68,15 @@ MESSAGE_LANDINGS = ("role", "content", "summary", "timestamp", "idempotencyKey",
 
 REASONS = {
     "event": "该事件类型不是可见正文（type != message），不猜映射",
+    "事件id": "同一会话内 event id 被多行复用：幂等键立在行主键 (session_id, seq) 上，"
+              "该 id 只作 extra 里的来源标识留档",
     "event键": "该事件级字段在包内契约与 extra 都无落点，未携带",
     "消息键": "该消息级字段在包内契约与 extra 都无落点，未携带",
     "role": "该角色在包内无对应 kind，不猜映射",
     "media": "源里的媒体载体取不到字节，未携带",
     "空正文": "该事件没有可携带正文，未入包",
     "blocks": "该块型在包内契约无落点，未携带",
+    "timestamp": "事件与列都没给出可定标的时间，整行未入包（不猜时刻）",
 }
 
 
@@ -91,10 +95,12 @@ def convert(store: Path, out_dir: Path, *, agent_name: str) -> BundleManifest:
         windows = {row["session_id"]: dict(row) for row in conn.execute(
             f"SELECT * FROM {WINDOW_TABLE}")}
         by_session: Dict[str, List[Tuple[str, List[SourceEvent]]]] = {}
+        seen_event_ids: Dict[str, set] = {}
         for row in conn.execute(f"SELECT session_id, seq, event_json, created_at"
                                 f" FROM {EVENT_TABLE} ORDER BY session_id, seq"):
             session_id = str(row["session_id"])
-            events = _event_records(row, windows.get(session_id, {}), sink, declared)
+            events = _event_records(row, windows.get(session_id, {}), sink, declared,
+                                    seen_event_ids.setdefault(session_id, set()))
             if not events:
                 continue
             by_session.setdefault(session_id, []).extend(events)
@@ -139,10 +145,12 @@ def _memory_sql(tables: set) -> str:
     prov_join = (f"LEFT JOIN {PROVENANCE_TABLE} AS p ON p.chunk_id = c.id"
                  if PROVENANCE_TABLE in tables else "")
     prov_cols = ("p.origin_class, p.session_kind, p.observed_at, p.supersedes_key"
-                 if prov_join else "NULL, NULL, NULL, NULL")
+                 if prov_join else "NULL AS origin_class, NULL AS session_kind,"
+                                   " NULL AS observed_at, NULL AS supersedes_key")
     recall_join = (f"LEFT JOIN {RECALL_TABLE} AS m ON m.chunk_id = c.id"
                    if RECALL_TABLE in tables else "")
-    recall_cols = "m.importance, m.triggers, m.project_key" if recall_join else "NULL, NULL, NULL"
+    recall_cols = ("m.importance, m.triggers, m.project_key" if recall_join
+                   else "NULL AS importance, NULL AS triggers, NULL AS project_key")
     return (f"SELECT c.id, c.source, c.text, c.path, c.start_line, c.end_line, c.updated_at,"
             f" {prov_cols}, {recall_cols} FROM {MEMORY_TABLE} AS c"
             f" {prov_join} {recall_join} ORDER BY c.id")
@@ -166,12 +174,16 @@ def _memory_record(row: sqlite3.Row, declared: Dict[str, List[Any]]) -> Optional
         _declare(declared, "memory:空正文")
         return None
     _declare(declared, "memory:派生索引")
+    moment = _from_ms(observed_at)
+    if not moment:
+        _declare(declared, "memory:无时间")
+        return None
     importance = row["importance"]
     return MemoryRecord(
         identity_key=str(row["id"]), content=text, memory_type=family[0], category=family[1],
         origin=origin, importance=DEFAULT_IMPORTANCE if importance is None
         else float(importance) * IMPORTANCE_SCALE,
-        ts=_from_ms(observed_at),
+        ts=moment,
         tags=tuple(_memory_tags(row)), source_ref=f"{row['path']}#L{row['start_line']}"
                                                   f"-L{row['end_line']}",
         supersedes=str(row["supersedes_key"] or ""))
@@ -206,13 +218,26 @@ def matches_store(path: Path) -> bool:
 
 
 def _event_records(row: sqlite3.Row, window: Dict[str, Any], sink: MediaSink,
-                   declared: Counter) -> List[Tuple[str, List[SourceEvent]]]:
+                   declared: Counter, seen_ids: set) -> List[Tuple[str, List[SourceEvent]]]:
+    """一行源记录 → 幂等前缀 + 事件列表。
+
+    幂等键立在**行自己的主键** ``(session_id, seq)`` 上，不立在信封的 event id 上：
+    指纹只要求 transcript_events 与 session_windows 两张表，而 event id 的唯一性由上游第三张表
+    transcript_event_identities 承担；老库没有那张表，且上游复制既往事件时会把同一条事件按新
+    seq 再落一份（只修 parentId），因此"同 id 不同 seq"是合法形状。把它当幂等键，重复即整支
+    store 被校验器判死；把它当可选标识，缺 id 的正文行又会被整行丢掉。两者都是把源侧不确定的
+    东西当成我们的不变量。
+    """
     body = _json(row["event_json"])
+    if not _ts(body.get("timestamp"), row["created_at"]):
+        declared["timestamp"] += 1
+        return []
     event_id = str(body.get("id") or "").strip()
     declared.update(f"event键:{key}" for key in _strays(body, EVENT_LANDINGS))
-    if not event_id:
-        declared["event:<无id>"] += 1
-        return []
+    if event_id:
+        if event_id in seen_ids:
+            declared["事件id:复用"] += 1
+        seen_ids.add(event_id)
     etype = str(body.get("type") or "<无类型>")
     if etype != "message":
         declared[f"event:{etype}"] += 1
@@ -237,6 +262,7 @@ def _event_records(row: sqlite3.Row, window: Dict[str, Any], sink: MediaSink,
                          reasoning=event.reasoning, reasoning_state=event.reasoning_state,
                          blocks=event.blocks,
                          extra={"source_seq": int(row["seq"] or 0), "event_type": etype,
+                                "source_event_id": event_id or None,
                                 "source_role": role or None,
                                 "parent_event_id": body.get("parentId") or None,
                                 "message_idempotency_key": message.get("idempotencyKey") or None,
@@ -251,7 +277,7 @@ def _event_records(row: sqlite3.Row, window: Dict[str, Any], sink: MediaSink,
     if not built:
         declared["空正文"] += 1
         return []
-    return [(f"{row['session_id']}#{event_id}", built)]
+    return [(f"{row['session_id']}#{int(row['seq'] or 0)}", built)]
 
 
 def _strays(body: Dict[str, Any], landings: Tuple[str, ...]) -> List[str]:
@@ -284,21 +310,15 @@ def _ts(raw: Any, created_at: Any) -> str:
 
 
 def _from_ms(value: Any) -> str:
+    """epoch 毫秒 → 带偏移 ISO；也给字符串一次机会（老库有写 ISO 的），仍定不出回空串。"""
     try:
         return datetime.fromtimestamp(int(value) / 1000, timezone.utc).isoformat()
     except (TypeError, ValueError, OSError):
-        return datetime.now(timezone.utc).isoformat()
+        return ensure_offset(str(value or ""))
 
 
 def _dropped_entries(declared: Counter) -> List[Dict[str, Any]]:
-    entries = []
-    for field, count in sorted(declared.items()):
-        if count <= 0:
-            continue
-        prefix = field.split(":")[0]
-        entries.append({"field": field, "count": count,
-                        "reason": REASONS.get(prefix, REASONS["event"])})
-    return entries
+    return dropped_entries(declared, dict(REASONS, __fallback__=REASONS["event"]))
 
 
 register_handprint(Handprint(CONVERTER_NAME, "sqlite", matches_store))

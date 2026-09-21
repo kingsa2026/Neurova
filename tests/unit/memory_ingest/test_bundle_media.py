@@ -153,6 +153,50 @@ def test_validate_bundle_also_guards_media_references(tmp_path: Path):
     assert errors and any("越出包外" in error for error in errors)
 
 
+def _bundle_refs(out: Path, *refs: dict) -> Path:
+    """同一条消息上挂多个媒体引用——命名闸只在多引用时才可能露馅。"""
+    out.mkdir(parents=True, exist_ok=True)
+    _write_bundle_with_ref(out, refs[0])
+    (out / "transcripts.jsonl").write_text(json.dumps({
+        "session_id": "sA", "seq": 1, "kind": "user_message",
+        "ts": "2026-05-01T10:00:00+08:00", "identity_key": "sA#1", "role": "user",
+        "content_blocks": [{"type": "text", "text": "看图"}, *refs]},
+        ensure_ascii=False) + "\n", encoding="utf-8")
+    return out
+
+
+def test_media_reference_must_follow_content_addressed_naming(tmp_path: Path):
+    """文件名即摘要：允许 media/a/pic.png 与 media/b/pic.png 并存，落盘就会被拍平成一份。"""
+    out = _bundle_refs(tmp_path / "bundle",
+                       {"type": "image", "media": "media/a/pic.png", "digest": "0" * 32},
+                       {"type": "image", "media": "media/b/pic.png", "digest": "1" * 32})
+    (out / "media" / "a").mkdir(parents=True)
+    (out / "media" / "b").mkdir(parents=True)
+    (out / "media" / "a" / "pic.png").write_bytes(b"PNG-A")
+    (out / "media" / "b" / "pic.png").write_bytes(b"PNG-B")
+
+    assert any("命名不符内容寻址约定" in e for e in validate_bundle(out))
+
+
+def test_media_reference_without_digest_is_rejected(tmp_path: Path):
+    """没声明摘要就无法证明"引用与字节是一对"——第三方可拿它塞任意文件。"""
+    digest = _digest(PNG)
+    out = _bundle_refs(tmp_path / "bundle",
+                       {"type": "image", "media": f"media/{digest}.png"})
+    (out / "media").mkdir(parents=True, exist_ok=True)
+    (out / "media" / f"{digest}.png").write_bytes(PNG)
+
+    assert any("摘要必须声明" in e for e in validate_bundle(out))
+
+
+def test_sink_produced_reference_still_passes(tmp_path: Path):
+    """自家 MediaSink 的产物必须在新闸下依然合法——否则闸写错了。"""
+    out = tmp_path / "bundle"
+    ref = MediaSink(out, name_hint="shot.png").put(PNG)
+
+    assert validate_bundle(_bundle_refs(out, ref)) == []
+
+
 def _write_bundle_with_ref(out: Path, ref: dict) -> None:
     out.mkdir(parents=True, exist_ok=True)
     (out / "transcripts.jsonl").write_text(json.dumps({
