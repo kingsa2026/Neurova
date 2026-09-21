@@ -283,6 +283,58 @@ def test_is_routable_by_handprint_name():
     assert CONVERTERS[CONVERTER_NAME] is convert
 
 
+def _db_chunks_only(tmp_path: Path, chunks, *, recall=None) -> Path:
+    """老版本 OpenClaw：有正文表与可选召回表，出处表还没建。"""
+    path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE transcript_events (session_id TEXT NOT NULL, seq INTEGER NOT NULL,"
+                 " event_json TEXT NOT NULL, created_at INTEGER NOT NULL,"
+                 " PRIMARY KEY (session_id, seq))")
+    conn.execute("CREATE TABLE session_windows (session_id TEXT NOT NULL PRIMARY KEY,"
+                 " session_key TEXT NOT NULL, model TEXT, model_provider TEXT, channel TEXT,"
+                 " chat_type TEXT, created_at INTEGER NOT NULL, parent_session_key TEXT)")
+    conn.execute("CREATE TABLE memory_index_chunks (id TEXT PRIMARY KEY, path TEXT NOT NULL,"
+                 " source TEXT NOT NULL DEFAULT 'memory', start_line INTEGER NOT NULL,"
+                 " end_line INTEGER NOT NULL, hash TEXT NOT NULL, model TEXT NOT NULL,"
+                 " text TEXT NOT NULL, embedding TEXT NOT NULL, updated_at INTEGER NOT NULL)")
+    if recall is not None:
+        conn.execute("CREATE TABLE memory_index_chunk_recall_metadata (chunk_id TEXT PRIMARY KEY,"
+                     " importance INTEGER, triggers TEXT, project_key TEXT)")
+        conn.executemany("INSERT INTO memory_index_chunk_recall_metadata VALUES (?,?,?,?)", recall)
+    conn.executemany("INSERT INTO memory_index_chunks VALUES (?,?,?,?,?,?,?,?,?,?)", chunks)
+    conn.commit()
+    conn.close()
+    return path
+
+
+def test_missing_provenance_table_still_converts(tmp_path: Path):
+    """附表缺失要按"没出处"落到 untrusted 并申报，不是让整支库转不出来。"""
+    out = tmp_path / "bundle"
+
+    manifest = convert(_db_chunks_only(tmp_path, [_chunk("c1", "一条历史事实")]),
+                       out, agent_name="imported")
+
+    assert validate_bundle(out) == []
+    assert manifest.counts["memories"] == 1
+    record = _memories(out)[0]
+    assert record["origin"] == "untrusted"
+    assert record["ts"].endswith("+00:00")
+    assert any(e["field"] == "memory:无出处" and e["count"] == 1 for e in manifest.dropped)
+
+
+def test_only_recall_table_present_still_scales_importance(tmp_path: Path):
+    """只有召回表、没有出处表：重要度定标照旧生效，出处仍落 untrusted。"""
+    out = tmp_path / "bundle"
+
+    manifest = convert(_db_chunks_only(tmp_path, [_chunk("c2", "有重要度没出处")],
+                                       recall=[("c2", 8, None, None)]),
+                       out, agent_name="imported")
+
+    record = _memories(out)[0]
+    assert validate_bundle(out) == []
+    assert record["importance"] == 80.0 and record["origin"] == "untrusted"
+
+
 def _memories(out: Path):
     return [json.loads(x) for x in (out / "memories.jsonl").read_text(
         encoding="utf-8").splitlines() if x.strip()]
