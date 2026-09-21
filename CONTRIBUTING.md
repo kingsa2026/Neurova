@@ -1,6 +1,6 @@
 # 贡献指南（CONTRIBUTING）
 
-感谢参与 Neurova（智星）。本文覆盖环境搭建、代码规约、测试纪律与提交流程。**协作红线以 [docs/0-index/DEVELOPMENT_RULES.md](docs/0-index/DEVELOPMENT_RULES.md) 为准**（中文交流 / TDD 红绿灯 / 根因修复 / 闭环 / 原创性 / Neurova 命名法）。架构全貌见 [README](README.md) 与 [docs/CONTEXT.md](docs/CONTEXT.md)；文档总索引见 [docs/0-index/README.md](docs/0-index/README.md)。
+感谢参与 Neurova（智星）。本文覆盖环境搭建、代码规约、测试纪律与提交流程。架构全貌见 [README](README.md) 与 [文档总索引](docs/INDEX.md)；**纪律与约定的事实源见 [AGENTS.md](AGENTS.md)**（修复教义/代码规约/测试纪律/提交纪律），项目上下文见 [docs/CONTEXT.md](docs/CONTEXT.md)。
 
 ## 快速开始
 
@@ -20,8 +20,21 @@ python start.py --check
 
 环境要求：Python >= 3.10（`scripts/config.py` 强制）、Node.js 18+、`.env` 从 `.env.example` 复制。
 
+## 修复纪律（最高优先级）
+
+完整条款见 [AGENTS.md](AGENTS.md) 第 1 节「修复教义」。四条硬纪律，写码与修 bug 一律适用：
+
+1. **TDD 红绿灯**：先写断言缺陷/期望行为的失败测试并**跑出红灯**，再最小实现转绿，最后重构。
+   提交说明附红→绿实测输出。红灯文件转绿前不得进 `scripts/ci/protected_tests.txt`。
+2. **修根因**：在产生非法状态的上游修（解耦门/契约归一/事实源唯一），严禁 consumer-only guard ——
+   不许在报错处加判空、加兜底默认来消错。判据：把报错恢复原状后，根因处不修则故障必然复现。
+3. **放大视角**：一个断链被点名后，grep 同契约的**全部**消费方/生产方一并修；修不了的要登记台账。
+4. **禁止抹除或规避表面报错**：不得删报错信息、吞异常、降级断言、把失败改写成 warning，
+   也不得用「跑不起来就算过」短路门禁。报错要么被根修，要么以诚实形态暴露（显式 4xx/5xx、`not_supported`、点名原因）。
+
 ## 测试纪律（重要）
 
+- **红绿灯 TDD**：新增功能与缺陷修复先红灯后绿灯（见上节第 1 条），不接受「实现写完再补绿灯测试」。
 - 新增测试**必须** `git add -f`：`.gitignore` 含 `/tests/` 规则，普通 add 会被忽略。
 - 正式测试放 `tests/unit|integration|e2e|performance/` 对应层级；临时验证脚本即用即删，不留仓库。
 - 跑测试用项目解释器 `.venv/Scripts/python.exe -m pytest`（系统 Python 与项目依赖不一致）。
@@ -49,5 +62,5 @@ python start.py --check
 
 ## 文档
 
-- 结构性文档进 `docs/` 编号分层目录（0-index 至 11-legacy，索引在 ``）。
+- 结构性文档进 `docs/` 编号分层目录（0-index 至 11-legacy，索引在 [docs/INDEX.md](docs/INDEX.md)）。
 - 过程性分析/临时报告不进 docs 根目录（历史教训：根目录曾堆 40+ 散落文件）。

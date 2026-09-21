@@ -201,6 +201,21 @@ def escape_subtitles_path(p) -> str:
     return s.replace(":", "\\:")
 
 
+# 判据是"含汉字字形"的明确限定词，不是字体家族名。`notosans` 只是家族名：
+# 纯拉丁的 NotoSans[wght].ttf 在全新 Debian/Ubuntu 镜像里预装，按家族名命中
+# 会把它当"有中文字体"，渲染出方框——正是本模块最忌讳的"假成功"。
+# 故只认 CJK 变体名（NotoSansCJK… / NotoSansSC… 、SourceHan…）与
+# 明确的中文字体族（文泉驿 wqy / wenquanyi）。
+_CJK_NAME_MARKERS = ("cjk", "wenquanyi", "wqy", "sourcehan", "source-han",
+                     "notosanssc", "notosanstc", "notosansjp", "notosanskr",
+                     "notoserifsc", "notoseriftc", "notoserifcjk")
+
+
+def _is_cjk_font_name(name: str) -> bool:
+    """文件名是否指向含汉字字形的字体（按明确限定词判定，不用家族名）。"""
+    return any(marker in name for marker in _CJK_NAME_MARKERS)
+
+
 def _cjk_font_candidates() -> List[Path]:
     """各平台常见中文字体路径（纯文件探测，不依赖 fc-list——pf1 教训：
     无中文字体时烧录只会得到方框假成功，必须先探测再决定烧或不烧）。"""
@@ -216,8 +231,7 @@ def _cjk_font_candidates() -> List[Path]:
             continue
         for f in Path(root).rglob("*"):
             name = f.name.lower()
-            if f.suffix in (".ttc", ".ttf", ".otf") and any(
-                    k in name for k in ("cjk", "wenquanyi", "wqy", "sourcehan", "notosans")):
+            if f.suffix in (".ttc", ".ttf", ".otf") and _is_cjk_font_name(name):
                 hits.append(f)
     return hits
 
