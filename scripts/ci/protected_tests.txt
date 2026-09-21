@@ -4,6 +4,8 @@
 tests/unit/test_audit_regressions.py
 tests/unit/auth/test_password_hasher.py
 tests/unit/test_ci_parity_guard.py
+# 受保护子集里的墙钟上界断言逐条有结论（CI 偶发红的根因：结构契约被编码成墙钟阈值）
+tests/unit/test_ci_wallclock_assertion_ledger.py
 tests/unit/test_ci_thin_env_guards.py
 # Issue #68 收口：协作域路由可达性（影子导入/FastAPI 注册期断言/漏 await 三形态）
 tests/unit/api/test_coordination_router_reachability.py
