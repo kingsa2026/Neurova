@@ -107,6 +107,13 @@
                 <GlassButton
                   variant="ghost"
                   size="sm"
+                  @click="openArchive(skill.id)"
+                >
+                  {{ t('skillEvo.archive') }}
+                </GlassButton>
+                <GlassButton
+                  variant="ghost"
+                  size="sm"
                   :loading="skill._pushing"
                   @click="pushToMyLibrary(skill)"
                 >
@@ -310,6 +317,50 @@
       </a-spin>
     </a-modal>
 
+    <!-- 归档与回滚 Modal（工单 011：归档读面 + 回滚写面） -->
+    <a-modal
+      v-model:open="archiveVisible"
+      :title="`${t('skillEvo.archiveTitle')}: ${archiveSkillId}`"
+      :footer="null"
+      width="640px"
+    >
+      <a-spin :spinning="archiveLoading">
+        <div v-if="archiveEntries.length" class="proposal-list">
+          <div v-for="entry in archiveEntries" :key="entry.version" class="proposal-row">
+            <div class="consolidation-info">
+              <div class="proposal-skill">
+                {{ t('skillEvo.archiveVersion') }} {{ entry.version }}
+              </div>
+              <div class="proposal-metric">{{ entry.description }}</div>
+              <div class="proposal-metric">
+                {{ t('skillEvo.archiveArchivedAt') }}: {{ formatArchivedAt(entry.archived_at) }}
+              </div>
+            </div>
+            <div class="proposal-actions">
+              <a-popconfirm
+                :title="t('skillEvo.rollbackConfirm')"
+                :ok-text="t('skillEvo.rollback')"
+                :cancel-text="t('common.cancel')"
+                :disabled="rollingBack"
+                @confirm="confirmRollback"
+              >
+                <GlassButton
+                  variant="secondary"
+                  size="sm"
+                  :loading="rollingBack"
+                  :disabled="rollingBack"
+                >
+                  {{ t('skillEvo.rollback') }}
+                </GlassButton>
+              </a-popconfirm>
+            </div>
+          </div>
+        </div>
+        <a-empty v-else :description="t('skillEvo.archiveEmpty')" />
+      </a-spin>
+      <a-alert v-if="archiveResult" type="success" :message="archiveResult" show-icon />
+    </a-modal>
+
     <!-- 提案详情 Modal（改进前后对照） -->
     <a-modal
       v-model:open="detailVisible"
@@ -351,6 +402,7 @@ import { useI18n } from 'vue-i18n'
 import { message } from 'ant-design-vue'
 import * as skillPoolApi from '@/api/modules/skill-pool'
 import * as evolutionApi from '@/api/modules/text-evolution'
+import * as governanceApi from '@/api/modules/governance'
 import type { EvolutionSettings, ProposalSummary, EvolutionProposal } from '@/api/modules/text-evolution'
 import GlassPanel from '@/components/GlassPanel.vue'
 import GlassCard from '@/components/GlassCard.vue'
@@ -787,6 +839,80 @@ async function decideConsolidation(p: skillPoolApi.ConsolidationPlan, approve: b
   } finally {
     consolidationBusy.value = ''
   }
+}
+
+// ── 归档与回滚（工单 011：读面在 governance，写面同样）──
+
+const archiveVisible = ref(false)
+const archiveLoading = ref(false)
+const rollingBack = ref(false)
+const archiveSkillId = ref('')
+const archiveEntries = ref<governanceApi.SkillArchiveEntry[]>([])
+const archiveResult = ref('')
+
+function formatArchivedAt(stamp?: number): string {
+  if (!stamp) return '-'
+  return new Date(stamp * 1000).toLocaleString()
+}
+
+async function openArchive(skillId: string) {
+  archiveSkillId.value = skillId
+  archiveVisible.value = true
+  archiveResult.value = ''
+  await refreshArchives()
+}
+
+async function refreshArchives() {
+  archiveLoading.value = true
+  try {
+    const res = await governanceApi.getSkillArchives(archiveSkillId.value, props.agentId)
+    const payload: any = (res as any)?.data ?? res
+    const entries = payload?.archives ?? payload?.data?.archives ?? []
+    archiveEntries.value = Array.isArray(entries) ? entries : []
+  } catch (err: any) {
+    archiveEntries.value = []
+    const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message
+      || t('skillEvo.archiveLoadError')
+    message.error(msg)
+  } finally {
+    archiveLoading.value = false
+  }
+}
+
+async function confirmRollback() {
+  rollingBack.value = true
+  try {
+    const res = await governanceApi.rollbackSkill(
+      archiveSkillId.value, currentOperator(), props.agentId,
+    )
+    const payload: any = (res as any)?.data ?? res
+    const left = payload?.archives_left ?? 0
+    archiveResult.value = t('skillEvo.rollbackDone', { left })
+    message.success(archiveResult.value)
+    await refreshArchives()
+    await refreshSkills()
+  } catch (err: any) {
+    const msg = err?.response?.data?.detail || err?.response?.data?.error || err?.message
+      || t('skillEvo.rollbackError')
+    message.error(msg)
+  } finally {
+    rollingBack.value = false
+  }
+}
+
+/** 回滚留痕要记"谁按的"：取当前登录身份，取不到给稳定占位而不是空串。 */
+function currentOperator(): string {
+  try {
+    const raw = localStorage.getItem('auth_user') || localStorage.getItem('user')
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      const name = parsed?.username || parsed?.user_id || parsed?.id
+      if (name) return String(name)
+    }
+  } catch {
+    // 非浏览器/脏值：落到占位
+  }
+  return 'operator'
 }
 
 onMounted(refreshSkills)

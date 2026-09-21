@@ -867,8 +867,11 @@ class LLMClient:
                 return len(tokenizer.encode(text))
             except Exception:  # noqa: BLE001 - 单条编码失败回退估算
                 pass
-        # 回退估算：每个字符约 1.5 tokens
-        return int(len(text) * 1.5)
+        # 回退估算：走全仓唯一尺子（上界口径），不再就地 len*1.5——
+        # 该近似对 ASCII 密集内容低估 5 倍量级，会让输入预算闸门漏放。
+        from neurova.context.token_estimator import estimate_tokens
+
+        return estimate_tokens(text)
 
     # 每条消息的固定结构开销（role/name 等字段，OpenAI 经验值近似）
     _PER_MESSAGE_OVERHEAD = 4

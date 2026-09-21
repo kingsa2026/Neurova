@@ -148,16 +148,17 @@ class _ShellSession:
 
 
 def _rough_tokens(text: str) -> int:
-    """粗 token 估算（CJK≈1:1、其余≈4:1 字符）。
+    """token 估算：走全仓唯一尺子（`context.token_estimator`）。
 
-    不用统一估算器 estimate_tokens：它是词级启发式，对无空格长文本
-    （连续重复字符/压缩串）坍缩为 ~1 token，会把截断预算完全放大失效。
+    此处曾就地实现 CJK≈1:1、其余≈4:1 的近似，理由是"统一估算器对无空格长文本
+    坍缩为 ~1 token"。该前提已随尺子修好而消失（现在按 o200k 精确计数），
+    保留就地近似只会让截断预算与窗口预算各说各话。
     """
     if not text:
         return 0
-    cjk = sum(1 for ch in text if ord(ch) > 0x2E80)
-    other = len(text) - cjk
-    return cjk + other // 4 + 1
+    from neurova.context.token_estimator import estimate_tokens
+
+    return estimate_tokens(text)
 
 
 def _clip_to_token_budget(text: str, max_output_tokens: int) -> tuple:

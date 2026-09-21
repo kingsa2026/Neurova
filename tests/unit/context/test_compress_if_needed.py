@@ -51,9 +51,10 @@ class TestCompressIfNeeded:
         system_msg = {"role": "system", "content": "你是一个AI助手"}
         user_msg = {"role": "user", "content": "最后的问题"}
 
-        # 生成大量历史消息（每条约 500 tokens）
+        # 生成大量历史消息（每条约 100 token，o200k 精确计数），
+        # 100 条 ≈ 10000 token < MAX_CONTEXT_TOKENS(16000) → 需再放大条数
         history = []
-        for i in range(100):
+        for i in range(200):
             history.append({
                 "role": "user" if i % 2 == 0 else "assistant",
                 "content": f"这是第{i}轮对话，" + "测试内容" * 50
