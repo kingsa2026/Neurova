@@ -1,7 +1,7 @@
 # Neurova
 
 <div align="center">
-  <img src="../../NEUROVA-ICO.png" alt="Neurova Logo" width="120" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+  <img src="../../../NEUROVA-ICO.png" alt="Neurova Logo" width="120" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
   <h1 style="margin-top: 16px;">🌟 Agent IA Chaleureux 🌟</h1>
   <p><i>Chaque agent est une étoile bienveillante, et vous êtes le gardien des étoiles</i></p>
 </div>
@@ -273,7 +273,7 @@ npm run dev
 
 ## Licence
 
-Ce projet est sous **MIT License**, voir le fichier [LICENSE](../../LICENSE) pour les détails.
+Ce projet est sous **MIT License**, voir le la déclaration de licence dans la section « Licence » du [README.md](../../../README.md) à la racine du dépôt.
 
 ---
 

@@ -60,8 +60,8 @@
 | LLM Provider 管理（元数据/智能路由） | ✅ | `llm/provider_manager.py` `multi_model_client.py` | [23-llm-provider-management](../01-architecture/23-llm-provider-management.md) |
 | LLM Router（多模态选择） | ✅ | `llm/llm_router.py` | [23-llm-provider-management](../01-architecture/23-llm-provider-management.md) |
 | Computer Use（视觉理解） | ✅ | `computer_use/`（vision.py + vision_lite） | [01-core-architecture](../01-architecture/01-core-architecture.md) |
-| 浏览器自动化（Camofox） | ✅ | `computer_use/browser_manager.py` | [agent-reach-integration](../01-architecture/agent-reach-integration.md) |
-| web_reach 网络工具 | ✅ | `web_reach/`（reach.py + 5 工具） | [agent-reach-integration](../01-architecture/agent-reach-integration.md) |
+| 浏览器自动化（Camofox） | ✅ | `computer_use/browser_manager.py` | [CUA 能力台账](../CUA能力台账.md)（投递路径与拒绝码登记） |
+| web_reach 网络工具 | ✅ | `web_reach/`（reach.py + 5 工具） | `agent-reach-integration.md` 已随第三方痕迹清除波（`663faa5d`）退役 |
 | 插件系统 | ✅ | `plugins/` | [06-plugin-cli-system](../01-architecture/06-plugin-cli-system.md) |
 | 工具编排（Tool Orchestrator） | ✅ | `tool_layers/tool_orchestrator.py` | [07-implementation-plan](../01-architecture/07-implementation-plan.md) |
 
@@ -123,7 +123,7 @@
 | 文档 | 主题 |
 |------|------|
 | [living_context_pool_design.md](../01-architecture/living_context_pool_design.md) | 活水上下文池设计（五大活水特性） |
-| [agent-reach-integration.md](../01-architecture/agent-reach-integration.md) | Agent-Reach 整合（web_reach 5 工具） |
+| `agent-reach-integration.md`（已退役） | Agent-Reach 整合——该文档随 `663faa5d` 退役，现行能力登记见 [CUA 能力台账](../CUA能力台账.md) |
 | [agent-swarm-orchestration.md](../01-architecture/agent-swarm-orchestration.md) | Agent 集群编排 |
 | [cross-channel-session-sync-design.md](../01-architecture/cross-channel-session-sync-design.md) | 跨渠道会话同步 |
 | [channels.md](../01-architecture/channels.md) | 渠道适配说明 |

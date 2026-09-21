@@ -347,6 +347,140 @@ def renderAdjudication(rows: list) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# 活跃层引用可达性（第三类形态：指向不存在的具体文件）
+# ---------------------------------------------------------------------------
+# 根因：文档目录重排 `fd7ea92c` / `5f94b93d` 把文档 `git mv` 进编号分层，之后
+# `3b5d7e80` 又把旧路径还原回来；`663faa5d` 退役 43 篇文档时只删文件。三次都
+# **没有同批改指引用方**，于是在**活跃层**留下了指向不存在文件的引用。
+#
+# 与已收口的两类形态的分界（判据只此一份，守卫从这里取数）：
+#
+# - `docs/11-legacy/` 归档层的悬空引用 → 登记台账（`test_legacy_ref_ledger_guard.py`）；
+# - 活跃层指向「已退役目录」的引用 → `test_docs_retired_tree_refs_guard.py`；
+# - **活跃层指向「不存在的具体文件」的引用 → 本函数**。
+#
+# 归档层不在本判据内：`05-reports` / `06-bugfix` / `09-dev-progress` 陈述的是**当时**
+# 的代码结构与路径，改成今天的形态反而让历史记录与历史事实不符（与台账口径一致）。
+# 随仓库分发的第三方文档（`embedding/`、`models/`）不属本仓文档体系，同样排除。
+
+#: 活跃层（当下可读面）：编号分层 + 仍在使用的非编号目录 + 仓库入口文档
+ACTIVE_LAYERS = frozenset({
+    "docs/0-index/", "docs/01-architecture/", "docs/02-api/", "docs/03-user-guide/",
+    "docs/04-plans/", "docs/08-research/", "docs/10-configuration/", "docs/architecture/",
+    "docs/architecture-model/", "docs/security/", "docs/specs/", "docs/superpowers/",
+})
+
+#: 仓库入口文档（不在 docs/ 子目录，但同属活跃层）
+ENTRY_DOCUMENTS = frozenset({
+    "README.md", "AGENTS.md", "CONTRIBUTING.md", "SECURITY.md",
+    "docs/INDEX.md", "docs/CONTEXT.md", "docs/README.md",
+})
+
+#: 历史层：只登记、不就地改写（引用陈述的是当时结构）
+HISTORICAL_LAYERS = frozenset({
+    "docs/05-reports/", "docs/06-bugfix/", "docs/09-dev-progress/", "docs/11-legacy/",
+})
+
+#: 随仓库分发的第三方文档，不属本仓文档体系
+VENDORED_PREFIXES = ("embedding/", "models/")
+
+#: HTML 里的本地资源引用（`<img src>` / `<a href>`）——只扫 Markdown 链接会留盲区
+HTML_REF_PATTERN = re.compile(
+    r"""<(?P<tag>img|a|iframe|link|source)\b[^>]*?\b(?:src|href)\s*=\s*["'](?P<target>[^"']+)["']""",
+    re.IGNORECASE,
+)
+
+#: 非仓库内路径（外链 / 锚点 / 邮件 / 协议）
+EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "tel:", "data:", "javascript:", "file:")
+
+
+def activeLayerDocuments() -> list:
+    """活跃层文档清单（编号分层 + 入口文档 + docs/ 根下的编号文档）。"""
+    documents = []
+    for path in trackedFiles():
+        if not path.endswith(".md") or path.startswith(VENDORED_PREFIXES):
+            continue
+        if path in ENTRY_DOCUMENTS or path.startswith(tuple(ACTIVE_LAYERS)):
+            documents.append(path)
+        elif numberedLayer(path) is False and path.startswith("docs/") and path.count("/") == 1:
+            # docs/<编号文档>.md：编号分层之外但仍在活跃使用（如 CUA能力台账.md）
+            documents.append(path)
+    return documents
+
+
+def _codeSpanRanges(line: str) -> list:
+    """成对反引号 run 覆盖的区间——其中的示例语法不是可点击引用。"""
+    runs, index, length = [], 0, len(line)
+    while index < length:
+        if line[index] != "`":
+            index += 1
+            continue
+        runEnd = index
+        while runEnd < length and line[runEnd] == "`":
+            runEnd += 1
+        runs.append((index, runEnd - index))
+        index = runEnd
+    paired, ranges = set(), []
+    for position, (start, runLength) in enumerate(runs):
+        if position in paired:
+            continue
+        for other in range(position + 1, len(runs)):
+            if other in paired or runs[other][1] != runLength:
+                continue
+            paired.add(position)
+            paired.add(other)
+            ranges.append((start, runs[other][0] + runLength))
+            break
+    return ranges
+
+
+def scanDocumentLinks(path: Path, byBasename: dict) -> list:
+    """扫描单个文档里的**仓库内**引用，返回不可达条目（可达的引用不返回）。
+
+    覆盖三种书写形态：Markdown 链接 `[文字](目标)`、图片 `![alt](目标)`、
+    HTML 的 `<img src>` / `<a href>`。围栏代码块与行内代码里的示例语法不算引用
+    （它们是**被测内容**，不是可点击目标）。
+    """
+    text = io.open(path, encoding="utf-8", errors="replace").read()
+    relative = displayPath(path)
+    found, inFence = [], False
+    for lineNo, line in enumerate(text.splitlines(), 1):
+        if _isFenceLine(line):
+            inFence = not inFence
+            continue
+        if inFence:
+            continue
+        skip = _codeSpanRanges(line)
+        candidates = [(m.start(), m.group(1).strip(), m.group(2).strip())
+                      for m in LINK_PATTERN.finditer(line)]
+        candidates += [(m.start(), m.group("target").strip(), m.group("target").strip())
+                       for m in HTML_REF_PATTERN.finditer(line)]
+        for position, label, target in sorted(candidates):
+            if any(start <= position < stop for start, stop in skip):
+                continue
+            literal = target.split("#")[0].strip()
+            if not literal or literal.startswith(EXTERNAL_PREFIXES):
+                continue
+            if PLACEHOLDER_PATTERN.search(literal):
+                continue
+            verdict, hit = resolveTarget(literal, path, byBasename)
+            if verdict == VERDICT_REACHABLE:
+                continue
+            found.append({"file": relative, "line": lineNo, "label": label,
+                          "ref": literal, "verdict": verdict, "hit": hit})
+    return found
+
+
+def activeLayerDangling() -> list:
+    """活跃层全部不可达引用（按文件、行号排序）。"""
+    byBasename = indexByBasename(trackedFiles())
+    found = []
+    for relative in sorted(activeLayerDocuments()):
+        found.extend(scanDocumentLinks(PROJECT_ROOT / relative, byBasename))
+    return sorted(found, key=lambda item: (item["file"], item["line"], item["ref"]))
+
+
 def _entry(file: str, line: int, ref: str, verdict: str, hit: str) -> dict:
     return {"file": file, "line": line, "ref": ref, "verdict": verdict, "hit": hit}
 

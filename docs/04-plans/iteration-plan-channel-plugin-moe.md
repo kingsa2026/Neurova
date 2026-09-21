@@ -877,7 +877,7 @@ Phase 3 (统一结果处理)
 
 ## 10. 参考资料
 
-- [MoE 记忆路由器实现](../neurova/cognitive_layers/memory_layer/moe_router.py)
-- [统一检索器实现](../neurova/cognitive_layers/memory_layer/unified_retriever.py)
-- [意图感知检索实现](../neurova/cognitive_layers/memory_layer/neurova_recall.py)
-- [代码简化原则](../../.agents/skills/code-simplifier/SKILL.md)
+- [MoE 记忆路由器实现](../../neurova/cognitive_layers/memory_layer/moe_router.py)（基础 `MoEMemoryRouter`；通道侧路由见 `neurova/cognitive_layers/memory_layer/channels/moe_router.py` 的 `ChannelMoERouter`）
+- [统一检索器实现](../../neurova/cognitive_layers/memory_layer/unified_retriever.py)
+- [意图感知检索实现](../../neurova/cognitive_layers/memory_layer/neurova_recall.py)
+- 代码简化原则：原指向 `.agents/skills/code-simplifier/SKILL.md`（本机工作区技能目录，不入库），已退役；跨仓通用约定见 [AGENTS.md](../../AGENTS.md)

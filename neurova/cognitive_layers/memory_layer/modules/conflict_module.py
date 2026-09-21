@@ -1,7 +1,14 @@
 """
 ConflictModule — 冲突检测模块
 
-检测和处理记忆之间的冲突
+检测和处理记忆之间的冲突。
+
+**判据不在这里**：记忆侧冲突的唯一判据是
+`memory_layer.conflict.judgeClauseConflict`（同一命题的否证 / 同一对象的矛盾取值）。
+本模块此前自持一套"否定词子串包含 + 词重叠 < 0.3 算不一致"的判法，是同一根因的
+第二份实现——中文没有词界，`split()` 让每个子句各成一个词元，任意两句都算"不一致"，
+于是"正常/故障"被报成 inconsistency 而与"天气不错/天气很好"同级噪声。
+一个根因两处实现，修一处等于没修，故收口为一处。
 """
 
 from __future__ import annotations
@@ -46,6 +53,10 @@ class Conflict:
     confidence: float  # 冲突置信度 [0, 1]
     resolution: Optional[ConflictResolution] = None
     resolved: bool = False
+    # 依据：凭哪两句、哪条规则认定的。为空即不得自动裁决（与底座侧
+    # KnowledgeConflictJudge 的 policy_basis 同一条纪律）。
+    basis: str = ""
+    source: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -57,6 +68,8 @@ class Conflict:
             "confidence": self.confidence,
             "resolution": self.resolution.value if self.resolution else None,
             "resolved": self.resolved,
+            "basis": self.basis,
+            "source": self.source,
         }
 
 
@@ -119,31 +132,20 @@ class ConflictModule:
         Returns:
             冲突记录，无冲突返回 None
         """
-        # 简单的冲突检测逻辑
-        conflict_type = None
-        description = ""
-        confidence = 0.0
+        # 判据收口到记忆侧唯一实现（同一命题的否证 / 同一对象的矛盾取值）
+        from neurova.cognitive_layers.memory_layer.conflict import judgeClauseConflict
 
-        # 检查是否重复
         if content_1.strip() == content_2.strip():
             conflict_type = ConflictType.DUPLICATE
-            description = "完全重复的内容"
+            basis = "完全重复的内容"
             confidence = 1.0
-
-        # 检查是否矛盾（简单的否定词检测）
-        elif self._has_negation(content_1, content_2):
+        else:
+            hit = judgeClauseConflict(content_1, content_2)
+            if hit is None:
+                return None
+            kind, _left, _right, basis = hit
             conflict_type = ConflictType.CONTRADICTION
-            description = "内容可能存在矛盾"
-            confidence = 0.7
-
-        # 检查是否不一致（关键词不匹配）
-        elif self._has_inconsistency(content_1, content_2):
-            conflict_type = ConflictType.INCONSISTENCY
-            description = "内容存在不一致"
-            confidence = 0.5
-
-        if conflict_type is None:
-            return None
+            confidence = 0.7 if kind == "negation_conflict" else 0.5
 
         # 创建冲突记录
         conflict_id = f"conflict_{memory_id_1}_{memory_id_2}"
@@ -152,8 +154,9 @@ class ConflictModule:
             memory_id_1=memory_id_1,
             memory_id_2=memory_id_2,
             conflict_type=conflict_type,
-            description=description,
+            description=basis,
             confidence=confidence,
+            basis=basis,
         )
 
         # 存储冲突
@@ -173,6 +176,47 @@ class ConflictModule:
             self._auto_resolve_conflict(conflict)
 
         logger.info("Detected conflict: %s (%s)", conflict_id, conflict_type.value)
+        return conflict
+
+    def record(
+        self,
+        memory_id_1: str,
+        memory_id_2: str,
+        conflict_type: ConflictType,
+        basis: str,
+        *,
+        confidence: float = 0.7,
+        source: str = "",
+    ) -> Optional[Conflict]:
+        """把**已认定**的冲突落账；依据为空不收。
+
+        依据是冲突账的唯一价值：没有"凭哪两句、哪条规则认定的"，这条账就只是
+        "发生了点什么"，下游既判不出哪条为准、也无从复核。故 basis 空即拒绝落账
+        （诚实边界：宁可不记，也不记一条读不懂的账）。
+        """
+        basis = str(basis or "").strip()
+        if not basis:
+            return None
+        conflict_id = f"conflict_{memory_id_1}_{memory_id_2}"
+        with self._lock:
+            existing = self._conflicts.get(conflict_id)
+            if existing is not None:
+                existing.basis = basis
+                existing.source = source or existing.source
+                return existing
+            conflict = Conflict(
+                conflict_id=conflict_id,
+                memory_id_1=memory_id_1,
+                memory_id_2=memory_id_2,
+                conflict_type=conflict_type,
+                description=basis,
+                confidence=confidence,
+                basis=basis,
+                source=source,
+            )
+            self._conflicts[conflict_id] = conflict
+            for mid in (memory_id_1, memory_id_2):
+                self._memory_conflicts.setdefault(mid, []).append(conflict_id)
         return conflict
 
     def resolve_conflict(
@@ -206,6 +250,7 @@ class ConflictModule:
         memory_id: Optional[str] = None,
         conflict_type: Optional[ConflictType] = None,
         resolved: Optional[bool] = None,
+        source: Optional[str] = None,
     ) -> List[Conflict]:
         """获取冲突列表"""
         with self._lock:
@@ -220,6 +265,9 @@ class ConflictModule:
 
         if resolved is not None:
             conflicts = [c for c in conflicts if c.resolved == resolved]
+
+        if source:
+            conflicts = [c for c in conflicts if c.source == source]
 
         return conflicts
 
@@ -272,32 +320,6 @@ class ConflictModule:
                 "by_type": type_counts,
                 "memories_with_conflicts": len(self._memory_conflicts),
             }
-
-    def _has_negation(self, text1: str, text2: str) -> bool:
-        """检测是否有否定关系"""
-        negation_words = ["不", "没有", "不是", "不能", "不会", "不要", "no", "not", "never", "don't"]
-
-        has_negation_1 = any(w in text1.lower() for w in negation_words)
-        has_negation_2 = any(w in text2.lower() for w in negation_words)
-
-        # 如果一个有否定词一个没有，可能是矛盾
-        return has_negation_1 != has_negation_2
-
-    def _has_inconsistency(self, text1: str, text2: str) -> bool:
-        """检测是否有不一致"""
-        # 简单实现：检查关键实体是否一致
-        words1 = set(text1.split())
-        words2 = set(text2.split())
-
-        # 如果有大量不重叠的词，可能存在不一致
-        overlap = words1 & words2
-        total = words1 | words2
-
-        if len(total) == 0:
-            return False
-
-        overlap_ratio = len(overlap) / len(total)
-        return overlap_ratio < 0.3
 
     def _auto_resolve_conflict(self, conflict: Conflict) -> None:
         """自动解决冲突"""
