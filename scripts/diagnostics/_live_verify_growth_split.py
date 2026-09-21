@@ -21,13 +21,14 @@ import types
 import urllib.request
 import urllib.error
 from pathlib import Path
+from neurova.core.data_root import resolveDataPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 PROBE_ID = "__live_verify_probe__"
 BASE = f"http://127.0.0.1:9528/api/v1/growth"
-PERSONALITY_FILE = Path("data/personality") / f"{PROBE_ID}.json"
-CONSTITUTION_FILE = Path("data/constitution") / f"{PROBE_ID}.json"
+PERSONALITY_FILE = resolveDataPath("personality") / f"{PROBE_ID}.json"
+CONSTITUTION_FILE = resolveDataPath("constitution") / f"{PROBE_ID}.json"
 
 failures = []
 
@@ -64,7 +65,7 @@ def main() -> int:
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    os.environ.setdefault("NEUROVA_RSI_RECEIPTS", "data/evolution/rsi_receipts.jsonl")
+    os.environ.setdefault("NEUROVA_RSI_RECEIPTS", str(resolveDataPath("evolution/rsi_receipts.jsonl")))
 
     from neurova.api.app import create_app
     from neurova.api.auth import create_access_token

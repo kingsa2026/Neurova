@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import resolveDataPath
 
 logger = get_logger(__name__)
 
@@ -33,7 +34,7 @@ def settings_path() -> Path:
     custom = os.environ.get("NEUROVA_TOOL_OFFLOAD_SETTINGS")
     if custom:
         return Path(custom)
-    return Path("data") / "tool_offload_settings.json"
+    return resolveDataPath("tool_offload_settings.json")
 
 
 def _clamp(v: Any) -> int:

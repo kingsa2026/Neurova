@@ -68,3 +68,30 @@ def ensure_agent_data_dir(agent_id: str = "") -> Path:
 def dataPath(*parts: str) -> str:
     """数据根下的路径（字符串形态，供仍是字符串契约的调用方用）。"""
     return str(get_data_root().joinpath(*parts))
+
+
+def callerPath(value: "str | os.PathLike[str] | None", *defaultParts: str) -> Path:
+    """调用方显式指定的落点原样承载；未指定时落数据根下的 `defaultParts`。
+
+    与 `resolveDataPath` 的分工：后者是**默认值**口径（相对名一律落数据根），
+    本函数管"调用方给了就用它的"——显式值（相对、绝对、注入的临时目录）
+    一字不改。把两者混成一个表达式（`resolveDataPath(x or "y")`）会让显式
+    入参被当成默认名改写，测试隔离目录与部署指定的落点都会当场漂移。
+    """
+    if value:
+        return Path(value).expanduser()
+    return get_data_root().joinpath(*defaultParts)
+
+
+def resolveDataPath(value: str | os.PathLike[str]) -> Path:
+    """把落点归一到数据根。
+
+    - **绝对路径原样放行**：调用方注入与测试隔离的显式落点不受影响。
+    - **相对名按数据根解析**：`"webhooks.json"` / `"storage/runs.db"` 都落数据根内。
+
+    各模块的默认值一律走这里，不要在本地再拼 `data/`——那正是"换个工作目录就换个库"的入口。
+    """
+    candidate = Path(value).expanduser()
+    if candidate.is_absolute():
+        return candidate
+    return get_data_root() / candidate

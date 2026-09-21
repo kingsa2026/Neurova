@@ -22,6 +22,7 @@ from .builder import ContextBuilder
 from .injector import UnifiedContextInjector
 from .models import TokenBudget
 from .recovery import assign_turn_ids
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -152,7 +153,7 @@ class ContextOrchestrator:
 
                 _agent_id = getattr(agent_ref, "agent_id", "default")
                 _ledger_db = EvictionLedgerDB(
-                    db_path=f"data/context_ledger/{_agent_id}.db",
+                    db_path=dataPath("context_ledger", f"{_agent_id}.db"),
                     user_id=getattr(agent_ref, "user_id", "default"),
                     agent_id=_agent_id,
                 )
@@ -2091,7 +2092,7 @@ async def _build_tools_for_llm(self) -> Optional[List[Dict]]:
                     _cache = _VECTOR_CACHES.get(_agent_id)
                     if _cache is None:
                         _cache = SkillVectorCache(
-                            cache_file=_P(f"data/agents/{_agent_id}/skills/embeddings.json")
+                            cache_file=_P(dataPath("agents", str(_agent_id), "skills", "embeddings.json"))
                         )
                         _VECTOR_CACHES[_agent_id] = _cache
                     _semantic = semantic_scores_for(_cache, _turn_input, dict(_items))

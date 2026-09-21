@@ -48,9 +48,9 @@ def retention_days() -> int:
 
 def collect_referenced_paths(db_path: Optional[str] = None) -> Optional[Set[str]]:
     """Studio 全库产物引用集合；读取失败返回 None（触发整轮放弃）。"""
-    from neurova.aigc_studio.store import DEFAULT_DB_PATH
+    from neurova.aigc_studio.store import defaultDbPath
 
-    path = db_path or str(DEFAULT_DB_PATH)
+    path = db_path or str(defaultDbPath())
     if not Path(path).is_file():
         # 从未建过 Studio 库 = 无引用；但区分"不存在"与"损坏"：
         # 文件不存在可安全视为无引用

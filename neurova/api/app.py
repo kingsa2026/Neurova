@@ -29,6 +29,7 @@ from typing import Any, Dict, Optional
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -365,11 +366,9 @@ def _initialize_components(app_state: AppState) -> None:
 
     # 初始化 Admin Service
     try:
-        import os as _os
-
         from neurova.admin.admin_service import AdminService
 
-        admin_storage = _os.path.join(_os.getcwd(), "data", "admin")
+        admin_storage = dataPath("admin")
         app_state.admin_service = AdminService(storage_dir=admin_storage)
     except Exception as e:
         logger.warning("AdminService init failed: %s", e)

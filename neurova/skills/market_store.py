@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -201,7 +202,7 @@ def get_market_store(catalog_path: Optional[Path] = None) -> MarketStore:
                     import os
 
                     catalog_path = Path(
-                        os.environ.get("NEUROVA_MARKET_CATALOG", "data/marketplace/catalog.json")
+                        os.environ.get("NEUROVA_MARKET_CATALOG") or dataPath("marketplace/catalog.json")
                     )
                 _market_store = MarketStore(catalog_path=catalog_path)
     return _market_store

@@ -6,11 +6,11 @@ import json
 import hashlib
 import threading
 import time
-from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple, Any
 from dataclasses import dataclass, field
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -96,7 +96,7 @@ class SeenCursorManager:
         if self._initialized:
             return
 
-        self.data_dir = Path(data_dir) if data_dir else Path("data/seen-cursors")
+        self.data_dir = callerPath(data_dir, "seen-cursors")
 
         # Thread safety
         self._lock = threading.RLock()

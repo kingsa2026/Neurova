@@ -40,7 +40,7 @@ class TrustRequiredError(Exception):
 class BackupOrchestrator:
     """备份编排（create/restore/import，信任门内建）。"""
 
-    def __init__(self, key: SigningKey, work_dir: Union[str, Path] = "data/backups"):
+    def __init__(self, key: SigningKey, work_dir: Union[str, Path] = ""):
         self.key = key
         self.work_dir = Path(work_dir)
         self.work_dir.mkdir(parents=True, exist_ok=True)

@@ -44,6 +44,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
+from neurova.core.data_root import get_data_root
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # 门禁脚本由 CI 以 `python scripts/ci/experience_quality_gate.py` 直接跑
@@ -58,7 +59,7 @@ REAL_SOURCE_KIND = "productionDbReadonlyProjection"
 PROBE_SOURCE_KIND = "adversarialLowSignalProbe"
 DEFAULT_CORPUS = PROJECT_ROOT / "tests" / "fixtures" / "experience_quality_corpus.json"
 LOW_SIGNAL_PROBE = PROJECT_ROOT / "tests" / "fixtures" / "experience_quality_corpus_low_signal.json"
-PRODUCTION_DB = PROJECT_ROOT / "data" / "experience_knowledge.db"
+PRODUCTION_DB = get_data_root() / "experience_knowledge.db"
 
 # 票面点名的禁地：`rsi/eval_harness.py:255-265` 当场合成的
 # `f"使用 {tool} 成功完成"`。这种句子没有真实重复分布，测出来的只是门槛算术。

@@ -64,7 +64,7 @@ class NeuHebbConfig:
     neurova_hebbs_limit: int = 15
     pre_query_count: int = 5
     verification_enabled: bool = True
-    persistence_path: str = "data/neurova_hebbs/"
+    persistence_path: str = ""  # 空串 = 数据根下的 neurova_hebbs/
     max_neurova_hebbs_per_document: int = 100
     embedding_model: str = "facebook/contriever"
     embedding_dimension: int = 768

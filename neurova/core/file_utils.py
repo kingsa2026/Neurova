@@ -12,10 +12,12 @@ import re
 import typing
 import uuid
 from pathlib import Path
+from neurova.core.data_root import get_data_root
+
 
 # 配置常量
 STORAGE_ROOT = Path("storage")
-DATA_DIR = Path("data")
+DATA_DIR = get_data_root()
 FILES_DB = DATA_DIR / "files.json"
 
 logger = get_logger(__name__)

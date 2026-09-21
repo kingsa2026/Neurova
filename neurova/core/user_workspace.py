@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import resolveDataPath
 
 logger = get_logger(__name__)
 
@@ -415,7 +416,7 @@ def get_workspace_manager(base_path: Path = None, config: Dict[str, Any] = None)
         with _manager_lock:
             if _workspace_manager is None:
                 if base_path is None:
-                    base_path = Path("data/workspaces")
+                    base_path = resolveDataPath("workspaces")
                 _workspace_manager = UserWorkspaceManager(base_path, config)
     return _workspace_manager
 

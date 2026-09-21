@@ -29,7 +29,7 @@ class CheckpointService:
     def __init__(
         self,
         agent_id: str,
-        base_dir: str = "data/checkpoints",
+        base_dir: str = "",
         debounce_seconds: float = 300.0,
     ):
         self.agent_id = agent_id

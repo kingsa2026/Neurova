@@ -11,6 +11,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional
 
 from .models import FlowContext, ScheduledTask
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -46,7 +47,7 @@ class AgentScheduler:
         # 任务持久化: 重启不丢(内存态是遗留缺陷)
         import os
         self.storage_path = str(
-            storage_path or os.environ.get("NEUROVA_SCHEDULER_STORE") or "data/scheduler_tasks.json"
+            storage_path or os.environ.get("NEUROVA_SCHEDULER_STORE") or dataPath("scheduler_tasks.json")
         )
         self._load_from_storage()
 
