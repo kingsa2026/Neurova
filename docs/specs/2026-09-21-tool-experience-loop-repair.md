@@ -291,3 +291,47 @@ live-verify（真 Agent + 真 ToolExecutor + 真 SkillService）：端点经咽�
 - `ruff check neurova tests` 全过；`ci_static_gate.py --skip-import` 全过。
 
 **净 LOC**：生产代码 `neurova/` **0 行**——改动全在测试判据（结构性判据替换墙钟判据）。
+
+### 8.12 墙钟守卫与 A2 判据口径：合入 main 后的 CI 红
+
+合入 main（上下文持久化批次 #108/#113/#115）后，`unit-tests-py311` / `unit-tests-py312`
+双跑红在同一处：`test_ci_wallclock_assertion_ledger.py::test_no_unledgered_wallclock_upper_bound`
+点名 `tests/unit/context/test_ledger_write_batching.py::test_batch_round_is_far_below_per_row_shape`。
+该文件在 main 侧进受保护子集、在本分支侧还没有，合并才把它们凑到一起。
+
+**根因（不是"阈值太小"）：A2 的比值读数把一次性冷加载算进了分子。**
+被点名的用例其实**本机必红**（`227.6 ms > 194.0/3 ms`），与 CI 负载无关：
+批量形状的首次归档会懒加载 token 估算器（tiktoken `o200k_base`，实测 227–331 ms），
+而现状形状那一侧不带这项成本 ⇒ 分子恒为分母的 1.2 倍。也就是说，
+"批量提交让写侧快 200 倍"的契约读数，被一次性的进程级冷加载盖住了。
+
+**改动点**
+
+1. `TestWriteAmplification`：两侧各预热一轮，再取 3 轮中位。实测现状 194–253 ms/轮 vs
+   批量 0.42–1.57 ms/轮，倍数 **135–427×**（阈值只要 3×，裕量 45× 以上）。断言逐字未放宽。
+2. 同契约补**结构面**判据 `TestRoundHasOneTransactionBoundary`：一轮归档内
+   **新建连接 0 次 / `BEGIN` 1 次 / `COMMIT` 1 次**（用 `set_trace_callback` 数真语句）。
+   与机器速度无关；反向验证（实现退回逐条提交）当场判红 `一轮归档开了 24 个事务（应共用一个）`。
+3. 守卫台账逐条登记这 1 处（`WALLCLOCK_LEDGER`）：A2 的倍数本身是机时契约，墙钟不可替代，
+   但**同一契约的结构面必须另有用例钉住**——只留比值等于把契约交给机器速度。
+4. **守卫检出器的两个洞一并补上**（教义第 5 条：同一根因全命中点扫荡）：
+   - 「用时经容器收集后取中位」（`samples.append(perf_counter() - t0)` → `median(samples) < 0.2`）
+     与「用时派生量」（`budget = elapsed * 3`）此前**整片漏检**；
+   - 同时把**时刻**（`before = time.time()`、`expires_at = time.time() + 3600`）
+     从耗时量里摘出去——否则区间/过期断言会被误判（假阳性会训练人忽略门禁）。
+
+**红→绿实测**
+
+- 红灯（修复前，本机）：守卫 `1 failed / 12 passed`，点名上述 1 处；
+  该用例**单独跑也红**：`批量形状 252.7 ms/轮 > 现状形状 221.8 ms/轮 的 1/3`。
+- 绿灯：`test_ledger_write_batching.py` 13 passed；守卫 15 passed。
+- 检出器新增的红灯（先红后绿）：`test_detector_follows_clock_through_collected_samples`、
+  `test_detector_follows_clock_through_derived_variable` —— 补口径前两条均 `assert []` 判红，
+  补后转绿。
+- 反向验证：① 实现退回逐条提交 → 结构面用例判红（24 个事务）；
+  ② 用例退回"不预热 + 单轮读数" → 原样判红（227.56 vs 194.00/3）。
+- 子集外台账同步复核（检出器收紧的后果）：`test_phase4_integration.py` 1→2、
+  `test_b7_worker_occupancy.py` 1→2、`test_camofox_supervisor.py` 1→0（时刻区间断言不算墙钟上界）。
+- `ruff check neurova tests --no-cache` 全过。
+
+**净 LOC**：生产代码 `neurova/` **0 行**——改动全在测试判据与文档。
