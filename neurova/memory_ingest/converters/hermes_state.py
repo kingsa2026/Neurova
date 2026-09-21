@@ -153,7 +153,8 @@ def _row_events(row: Dict[str, Any], session: Dict[str, Any], sink: MediaSink,
     blocks, strays = split_content(_decode_content(row.get("content")), sink=sink)
     declared.update(strays)
     reasoning, opaque = _reasoning(row)
-    if opaque and not reasoning:
+    if opaque:
+        # 有明文摘要不等于结构化列没被丢：密文项照条数申报，两份来源都得看得见
         declared["reasoning:结构化"] += 1
     base = _extra(row, session)
     events = _content_events(row, kind, blocks, base, reasoning, opaque)
