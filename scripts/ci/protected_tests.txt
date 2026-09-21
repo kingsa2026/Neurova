@@ -262,3 +262,10 @@ tests/unit/context/test_context_persistence_restart.py
 tests/unit/test_docs_retired_tree_refs_guard.py
 # Issue #97：install.py 供给契约（依赖声明/模型单源/真下载器/前端同判据）
 tests/unit/desktop/test_install_supply_contract.py
+
+# Issue #96 收尾·第三轮（Ref: #68）：活跃层指向「不存在的具体文件」的引用。
+#   根因同 #96——三次搬家/退役（fd7ea92c / 5f94b93d / 3b5d7e80 / 663faa5d）
+#   都只改文件、不同批改引用方。前两轮只覆盖「归档层」与「退役目录」两类形态，
+#   活跃层指向不存在文件的引用一路无人拦。判据单源在 scripts/scan_docs_refs.py
+#   的 activeLayerDangling()，活跃层零容忍（硬零，不是棘轮）。
+tests/unit/test_active_layer_refs_guard.py

@@ -1,7 +1,7 @@
 # Neurova
 
 <div align="center">
-  <img src="../../NEUROVA-ICO.png" alt="Neurova Logo" width="120" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+  <img src="../../../NEUROVA-ICO.png" alt="Neurova Logo" width="120" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
   <h1 style="margin-top: 16px;">🌟 Тёплый ИИ-агент 🌟</h1>
   <p><i>Каждый агент — добрая звезда, а вы — хранитель звёзд</i></p>
 </div>
@@ -273,7 +273,7 @@ npm run dev
 
 ## Лицензия
 
-Этот проект лицензирован по **MIT License**, подробности см. в файле [LICENSE](../../LICENSE).
+Этот проект лицензирован по **MIT License**, подробности см. в разделе «Лицензия» файла [README.md](../../../README.md) в корне репозитория.
 
 ---
 
