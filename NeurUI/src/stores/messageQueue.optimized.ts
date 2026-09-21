@@ -216,15 +216,14 @@ export const useMessageQueueStore = defineStore('messageQueue', () => {
       items.value.push(item)
       stats.value.totalEnqueued++
       
+      // 收集时刻必须保持 pending（契约：enqueue 只入队，不代发）。
+      // 旧实现入队即调 processQueue() → markSending 把形态改成 sending，
+      // 调用方拿到的返回值与 store 内状态都对不上（且异步挂起 100ms 后才出队）。
+      // 立即出队是消费方职责（next → markSending → markSent），本 store 一律不自动发送。
       logStoreOperation('messageQueue', 'enqueue', `${seq}: ${text.length} chars`)
       
       // Persist to storage
       saveQueueToStorage(items.value)
-      
-      // Auto-process if online and not paused
-      if (online.value && !paused.value) {
-        processQueue()
-      }
       
       return item
     },

@@ -70,15 +70,15 @@ class AddMemoryRequest(BaseModel):
     """添加记忆请求"""
 
     content: str = Field(..., min_length=1, max_length=50000, description="记忆内容")
-    memory_type: Optional[str] = Field(default=None, description="记忆类型 (semantic/episodic/procedural/pattern/emotional/working/workflow_experience，为空则默认 semantic)")
-    category: Optional[str] = Field(default=None, description="记忆分类 (为空则自动推断)")
+    memory_type: Optional[str] = Field(default=None, description="记忆类型 (semantic/episodic/procedural/pattern/emotional/working/workflow_experience，未声明且 auto_classify 时由分类引擎推断，否则 semantic)")
+    category: Optional[str] = Field(default=None, description="记忆分类 (general/conversation/knowledge/experience/tool_usage/reflection/user_preference，未声明且 auto_classify 时由分类引擎推断，否则 general)")
     is_important: Optional[bool] = Field(default=None, description="是否重要 (为空则自动判断)")
     is_crystallized: Optional[bool] = Field(default=None, description="是否固化 (为空则自动判断)")
     emotion_score: float = Field(default=0.0, ge=-1.0, le=1.0, description="情感分数")
-    perspective: Optional[str] = Field(default=None, description="记忆视角 (为空则自动推断)")
+    perspective: Optional[str] = Field(default=None, description="记忆视角 (first_person/second_person/third_person/system，未声明且 auto_classify 时由分类引擎推断)")
     metadata: Optional[dict] = Field(default=None, description="额外元数据")
-    auto_classify: bool = Field(default=True, description="是否自动分类推断 (默认开启)")
-    classification_context: Optional[dict] = Field(default=None, description="分类上下文")
+    auto_classify: bool = Field(default=True, description="是否自动分类推断 (默认开启；只补未声明的 category/memory_type/perspective，证据落 metadata._auto_classified)")
+    classification_context: Optional[dict] = Field(default=None, description="分类上下文 (透传分类引擎，如 {\"emotion\": \"joy\"} 触发情感亲和增强)")
     auto_analyze_emotion: bool = Field(default=True, description="是否自动分析情绪 (默认开启)")
 
 
