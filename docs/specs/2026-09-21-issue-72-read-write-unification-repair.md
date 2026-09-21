@@ -86,6 +86,7 @@ HTTP 层 200；事实落进程内 `_facts` 字典；`POST /memory/tkg/query` 调
   是有意设计（工单 012 裁决）。要升级为可否决，前提是"两条里哪条为准 + 出处"的证据，
   与底座侧 `KnowledgeConflictJudge.decide()` 的 `policy_basis` 是同一条判据；
   收编它属独立工单，本批不动。
+  **（第三轮处置见 §5c）**：信号判据与账的读写闭环已收口；"不阻断"语义按裁决保留。
 - **记忆内容门"保首条"语义保留**：同作用域同归一内容仍是"首条为准 + 刷 `updated_at`"。
   取代的入口是"声明取代"（本批接通）与底座侧冲突裁决（既有），不把内容门改成裁决器——
   那会让内容去重变成裁决顺序的函数（019b-3 已由真数据否证过同型方案）。
@@ -94,6 +95,143 @@ HTTP 层 200；事实落进程内 `_facts` 字典；`POST /memory/tkg/query` 调
 - **生产存量数据未回填**：12 条 triple 是逻辑通路打通后的新产物；存量 92 条 narrative
   条目要补抽需重跑 `/knowledge-graph/backfill`（已有端点，现在会同时落权威），
   属运维动作，本批不执行。
+
+## 5b. 上述三条的收口（Issue #72 第二轮）
+
+第二轮只做"登记了但没动"的那几条，逐条按"在产生非法状态的上游修"处理。
+
+**① 投影不再是只写不读的第二份真相（原 §5 第 3 条）**
+
+`graph_bridge` 新增三个函数与两条端点，形成 写入→读取→反馈→再写入 的闭环：
+
+- `projectionDrift(agentId, graph, store)`：算出权威（底座三元组里两端都是主体的那些）
+  与投影（JSON 属性图的两端都在节点表里的边）的**双向差集**——`missing_relations`
+  是"权威有、投影无"，`orphan_relations` 是"投影有、权威无"。**只报不修**：顺手修掉
+  就等于把报出与处置混成一件事，读的人再也看不到曾经分叉过。
+- `rebuildProjectionFromAuthority(agentId, graph, store)`：按权威派生重建本域投影，
+  节点类型取自主体的 `type_term_id`（不自己猜），幂等（跑几次结论一样）、只动本域。
+- `GET /{agent}/knowledge-graph/authority-drift`（读数）与
+  `POST /{agent}/knowledge-graph/projection/rebuild`（处置）：两条端点是这两个函数的
+  生产消费点——只加函数不接线就是新断点。
+
+**② 存量补抽的待办判据问权威，不再问投影（原 §5 第 4 条）**
+
+这条不是纯运维动作，上游有一处判据要修：`/knowledge-graph/backfill` 此前按
+"条目 `graph_node_ids` 为空"筛待办，而抽取收口**之前**抽过的条目两个字段都有值
+（旧实现只落投影也照样回写）。于是最需要补抽的那批存量——"投影有、权威无"——
+恰好被待办判据全部跳过：端点报表写 `entries=0`（"没有待补的"），实际是
+"待补的认不出来"。修法：新增 `graph_bridge.extractionPending(item, store, agentId)`，
+判据落在权威侧有没有指向本条目的抽取事实（按 `source_turn_id` 前缀与断言
+`medium_ref` 两处认，只认一处会把另一条真实写入链的产物当成"没抽过"）。
+
+**③ 本体播种不再抹掉已登记的行（本轮唯一从本分支带过来的修法）**
+
+`seedBuiltinTerms` 走 `registerMany`（`INSERT OR REPLACE`），于是**每造一次注册表**
+就把写入方登记过的 `domain_terms` / `range_terms` / `range_kinds` / `cardinality`
+覆盖回默认裸值——给谓词登记了定义域，重新构造一次注册表，域就没了，本体硬拒随之
+永远无依据可判。修法：新增 `seedMissing`（只补缺、已存在一行不动），播种改走它；
+显式种子优先于枚举收编值（同一个 `term_id` 不同时出现在两份清单里，否则"谁定这一行"
+取决于拼接顺序，而只补缺的语义是"先登记的为准"）。
+
+## 5c. 记忆侧冲突链的收口（Issue #72 第三轮）
+
+第二轮登记里剩下的最后一条是"对话后处理那条冲突链仍是纯观测"。这条当初被判为
+**有意设计**（工单 012 裁决：检测器只给矛盾分，判不出哪条为准，据此否决会随机
+丢真实记忆），本轮不动它的"不阻断"语义，只收口它真正的病灶——**它不是判不出，
+是没有可分辨的信号**。
+
+**① 信号判据重建：冲突必须落在"同一命题的否证"上**
+
+规则模式此前的判据是"子串含否定词 + 字符重叠 ≥ 0.3"。实测产出的正是噪声：
+
+- 「今天天气不错」里的"不"被当成否定词 ⇒ 与「今天天气很好」构成
+  `negation_conflict`（相似度 0.429）；
+- 同一轮的复述（`"用户: 今天天气不错"` 与其加长版）相似度 0.643，也报冲突；
+- 真矛盾（「系统运行正常」vs「系统出故障了」）相似度只有 0.2。
+
+真信号与噪声混在同一批 `negation_conflict` 里，下游据此判不出哪条为准——**这条链
+之所以只能纯观测，根因在这里，不在"缺少裁决工单"**。
+
+新判据只有两条，都要求两句在说同一件事：
+
+- **同一命题的否证**：折掉否定标记后两个命题同源（同串，或尾串同源且长度相当），
+  且只有一方带否定标记（`我喜欢咖啡` / `我不喜欢咖啡`）。
+- **同一对象的矛盾取值**：落在矛盾词对上，且两侧共享内容词
+  （`性能提升了` / `性能下降了` 是；`成本增加了` / `效率减少了` 不是——两个不同
+  对象各自变化）。
+
+比较在**子句**层做：一轮对话是两个说话人的两段话，矛盾住在子句里，
+`"用户: X\n助手: Y"` 必须能与其子句逐条对上。判据唯一定义在
+`memory_layer.conflict.judgeClauseConflict`，报出的冲突在 `basis` 里逐字带出被
+比较的两个子句。
+
+**② 判据收口：一个根因两处实现，修一处等于没修**
+
+`ConflictModule` 自持一套"否定词子串包含 + 词重叠 < 0.3 算不一致"的判法，是同一
+根因的第二份实现。中文没有词界，`split()` 让每个子句各成一个词元 ⇒ 任意两句都算
+"不一致"，于是「正常/故障」被报成 `inconsistency`，与「天气不错/天气很好」同级。
+本模块改为消费唯一判据，两份误报根因一起消失。
+
+**③ 闭环：检出带依据落账，账可读**
+
+`post_chat_pipeline._step_conflict_detection` 此前检出后只写日志，不写账；而
+`manager.get_conflict_summary()` 全仓**零调用方**——检出了什么在读取侧看不见，
+这既是 no-op，也是一处写入→读取断点。本轮的落点：
+
+- `ConflictModule.record(...)` 落账，**依据为空即拒绝**（宁可不记，也不记一条读不懂
+  的账；与底座侧 `KnowledgeConflictJudge` 的 `policy_basis` 同一条纪律）；
+- `MemoryManager.record_conflicts(conflicts, source=...)` 是检测链的写入收口，
+  返回值如实反映"检出 vs 入账"的差额；
+- 读面三处同源：`get_conflict_summary()`、`/memory/stats` 的 `conflicts` 栏、
+  `get_traces_by_trigger(trigger=...)`（该参数此前无任何过滤效果，现接到 `source` 上）；
+- 前端 `MemoryPage` 统计卡把该读数显示出来（只加字段不接线就是新断点）。
+
+**纯观测语义不变**：`blocking=False`、message 明写"不阻断写入"、不回滚不新增行
+（工单 012 裁决原样保留，`tests/unit/agent/test_conflict_detection_observation_only.py`
+继续锁定）。
+
+**仍然登记、本批不动**：升级为"可否决"仍缺"哪条为准 + 出处"的裁决证据。
+本轮把**依据**这一半补齐（账上每条冲突都自带依据），但"由谁按什么策略判定胜者"
+与底座侧冲突裁决的合并仍属独立一张票。
+
+**与 main 已合入的 #89 的重叠部分**：抽取落底座（`_ExtractionSink` / `is_a` /
+主体 `type_term_id`）与 `rangeKinds` 已由 #89 落在 main，本分支的同型实现
+（`admitExtractedFacts`）在合并时**删除**，不保留第二份实现（教义第 6 条）。
+
+### 5c 的判据与实测（第三轮）
+
+红灯（实现前实测）：
+
+- `test_conflict_signal_scope.py`：`assert {'type': 'negation_conflict', 'similarity': 0.428...} is None`
+  （「今天天气不错」vs「今天天气很好」被判成否证冲突）；复述用例同为 0.643 误报；
+  `basis` 缺失。
+- `test_conflict_disposition_loop.py` 8 例：`get_conflict_summary()` 恒 0（检出 1 处而账上 0 条）、
+  `Conflict._basis` 不存在、`ConflictModule` 把「正常/故障」报成 `inconsistency`。
+
+绿灯（实现后）：
+
+| 判据 | 结果 |
+|---|---|
+| 信号落在同一命题（误报 4 例不再报、真否证/真矛盾 6 例仍报） | 7 例绿 |
+| 检出带依据落账 + 读数可见（summary / stats / 按来源）+ 依据缺失不入账 | 8 例绿 |
+| 既有冲突相关套件 | `test_audit_regressions`、`test_conflict_detection_observation_only`、`test_memory_guards_wiring`、`test_p2_pipeline_fixes`、`test_manager_full_delegation`、`test_conflict_single_implementation`、`test_conflict_policy_basis` 等 251 例全绿 |
+| 爆炸半径 | `tests/unit/{agent,cognitive_layers/memory_layer,cognitive,memory,memory_ingest,knowledge}` A/B 自证：修复前后失败集合逐行相同（24 项预存环境失败，无新增） |
+
+live-verify（真检测器 + 真 MemoryManager + 真 post_chat 步骤）：
+
+```
+[判据] ('今天天气不错','今天天气很好') -> None
+[判据] ('我喜欢咖啡','我不喜欢咖啡') -> ('negation_conflict', ..., 同一命题的否证：...)
+[判据] ('系统运行正常','系统出故障了') -> ('semantic_contradiction', ..., 同一对象的取值互斥：...)
+[判据] ('成本增加了','效率减少了') -> None
+[链1] 步骤读数: conflicts_count=1 recorded=1 blocking=False
+[链1] message: 检测到 1 处记忆冲突（纯观测，不阻断写入；入账 1 条）
+[链2] get_conflict_summary: {'total_conflicts': 1, 'unresolved': 1, 'by_type': {'contradiction': 1}, ...}
+[链2] /memory/stats 冲突栏: {'total': 1, 'resolved': 0, 'unresolved': 1, 'by_type': {'contradiction': 1}}
+[链3] 按来源读账: ["同一对象的取值互斥：'系统出故障了' 与 '系统运行正常'"]
+[链4] 无依据不入账: recorded=0 | 账 total=0
+[链5] ConflictModule: 天气不错/很好 -> None | 正常/故障 -> 同一对象的取值互斥：...
+```
 
 ## 6. 判据与实测
 

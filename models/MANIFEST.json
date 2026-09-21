@@ -23,7 +23,30 @@
         "https://mirrors.aliyun.com/pypi/simple/",
         "https://pypi.org/simple/"
       ],
-      "probe": ["fastapi", "uvicorn"]
+      "probe": [
+        "fastapi",
+        "uvicorn"
+      ]
+    },
+    "asr": {
+      "enginePackages": [
+        {
+          "spec": "funasr>=1.2.0",
+          "import": "funasr",
+          "reason": "ASRManager 链首引擎；中文 Paraformer 非自回归，CPU 上比 whisper 快一个量级"
+        },
+        {
+          "spec": "torchaudio",
+          "import": "torchaudio",
+          "reason": "FunASR fbank 特征提取依赖（实测缺失报 torchaudio is not installed）"
+        },
+        {
+          "spec": "openai-whisper>=20231117",
+          "import": "whisper",
+          "reason": "本地 whisper 引擎（whisper-base 权重由本清单 models 一并供给）"
+        }
+      ],
+      "note": "可选能力：安装体积大（torch CPU 版约 200MB），install.py 仅在 --with-local-asr 时安装"
     }
   },
   "models": [
@@ -33,23 +56,23 @@
       "required": true,
       "source": "huggingface",
       "repo_id": "BAAI/bge-small-zh-v1.5",
-      "size_mb": 274
+      "size_mb": 183
     },
     {
-      "id": "moss-nano",
+      "id": "moss-tts-nano",
       "path": "models/tts/moss-nano/",
       "required": false,
       "source": "modelscope",
-      "repo_id": "iic/moss-tts-mixed",
+      "repo_id": "OpenMOSS-Team/MOSS-TTS-Nano-100M-ONNX",
       "size_mb": 642
     },
     {
-      "id": "moss-tokenizer",
+      "id": "moss-audio-tokenizer",
       "path": "models/tts/moss-tokenizer/",
       "required": false,
       "source": "modelscope",
-      "repo_id": "iic/moss-tts-mixed",
-      "size_mb": 5
+      "repo_id": "OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX",
+      "size_mb": 87
     },
     {
       "id": "whisper-base",
@@ -57,7 +80,8 @@
       "required": false,
       "source": "openai-whisper",
       "model_size": "base",
-      "size_mb": 140
+      "size_mb": 140,
+      "engineImport": "whisper"
     }
   ]
 }

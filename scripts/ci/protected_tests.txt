@@ -209,13 +209,20 @@ tests/unit/evolution/experience/test_muscle_memory_param_shape.py
 tests/unit/evolution/experience/test_muscle_memory_recall.py
 tests/unit/skills/test_skill_view_key_domain.py
 tests/unit/skills/test_skill_entry_choke_migration.py
-tests/unit/evolution/rsi/test_rsi_rollback_evidence.py
 tests/unit/api/test_skill_rollback_governance.py
 
 # Issue #74 温度衰减双实现收敛：单一事实源（第二套实现不得回加）+ 连续衰减曲线
 # （阶跃边界 = 既有红灯 test_ebbinghaus_curve 的根因）+ 其余 5 组成建制死码退役锁定
 tests/unit/cognitive_layers/memory_layer/test_temperature_single_source.py
 
+
+# Issue #81 F-04/F-18：导入会话属主（归属落盘后只读）+ 两条导入路同一幂等域
+#   + 导入咽喉（唯一写入口）的既有回归（逐文件单跑确定全绿，已核）
+tests/unit/memory_ingest/test_import_interop.py
+tests/unit/memory_ingest/test_import_sessions.py
+tests/unit/memory_ingest/test_cli.py
+tests/unit/memory_ingest/test_intake.py
+tests/unit/migration/test_kai_import.py
 
 # Issue #68 下一层：同名多份（回潮副本）逐条裁定 + 棘轮。
 # 根因 = 目录重排 fd7ea92c 之后，3b5d7e80 又把 306 个 docs 旧路径还原回来，
@@ -229,6 +236,10 @@ tests/unit/knowledge/ontology/test_term_seed_does_not_clobber.py
 tests/unit/api/test_tkg_endpoint_single_source.py
 # Issue #72：记忆侧声明的取代真的生效（旧证据让位），找不到目标如实申报
 tests/unit/memory_ingest/test_imported_supersede_replaces_old.py
+# Issue #72 第二轮：投影与权威的双向差集可读、可修、只动本域（含端点接线）
+tests/unit/knowledge/test_projection_derived_from_authority.py
+# Issue #72 第二轮：存量补抽的待办判据问权威（投影有 id 不算抽过）
+tests/unit/knowledge/test_backfill_heals_authority_less_entries.py
 # 上下文三链路修复批（Issue #90）B1 尺子：token 估算单一事实源 + 判据侧不得低估
 #   （P0-1 根因：BALANCED 对英文/JSON/无空格长串低估 20 倍量级 → 折叠永不触发）
 tests/unit/context/test_token_estimator_calibration.py
@@ -245,3 +256,50 @@ tests/unit/context/test_summary_failure_not_reported_success.py
 #   （PR #105 让门禁脚本导入数据根却把它放在 sys.path 之后，CI experience-quality 直接
 #   ModuleNotFoundError；同形脚本一并扫）
 tests/unit/scripts/test_scripts_import_bootstrap.py
+# 上下文持久层批（Issue #90）B4 工单 001：归档跨重启为真（A1）
+#   （根因 P1-3：写穿点挂在生产不可达的驱逐路径上 → 台账恒空）
+tests/unit/context/test_context_persistence_restart.py
+# 同上批：回收契约的落盘判据已重定向（落盘在入池、回收只管常驻），
+#   原文件已在上册，无需重复登记
+
+# Issue #96 收尾：退役平铺目录的引用可达性。删副本必须同批改引用——否则报错从
+#   「两个候选」变成「零个候选」，洞只是换了个位置（活跃层链接 + INDEX 权威表两处）
+tests/unit/test_docs_retired_tree_refs_guard.py
+# Issue #97：install.py 供给契约（依赖声明/模型单源/真下载器/前端同判据）
+tests/unit/desktop/test_install_supply_contract.py
+
+# 上下文持久层批（Issue #90）B4 工单 002：context_ledger 版本域 + v1 迁移（A6）
+#   （根因：库只有 CREATE TABLE IF NOT EXISTS、无 user_version，schema 无纪律；
+#     U1 甲案的读侧兜底：列优先 + 旧行解析 metadata，两路同源 memory_scope）
+tests/unit/context/test_context_ledger_migration.py
+
+# 上下文持久层批（Issue #90）B4 工单 003：写侧批量提交（A2）
+#   （根因：record() 每行一次 connect+commit+close，24 条/轮实测 214–318 ms；
+#     批内一次事务 0.78–0.91 ms/轮；事务边界 = 一次归档调用，失败整批回滚）
+tests/unit/context/test_ledger_write_batching.py
+# Issue #72 残余项：记忆侧冲突信号必须落在「同一命题的否证」（子串含否定词 +
+#   0.3 相似度门是噪声根因），且判据全仓唯一（ConflictModule 不再自持第二份）
+tests/unit/cognitive_layers/memory_layer/test_conflict_signal_scope.py
+# Issue #72 残余项：冲突链闭环——检出带依据落账、读数可见（stats/summary/按来源）、
+#   依据缺失不入账、纯观测语义不变
+tests/unit/cognitive_layers/memory_layer/test_conflict_disposition_loop.py
+
+# Issue #96 收尾·第三轮（Ref: #68）：活跃层指向「不存在的具体文件」的引用。
+#   根因同 #96——三次搬家/退役（fd7ea92c / 5f94b93d / 3b5d7e80 / 663faa5d）
+#   都只改文件、不同批改引用方。前两轮只覆盖「归档层」与「退役目录」两类形态，
+#   活跃层指向不存在文件的引用一路无人拦。判据单源在 scripts/scan_docs_refs.py
+#   的 activeLayerDangling()，活跃层零容忍（硬零，不是棘轮）。
+tests/unit/test_active_layer_refs_guard.py
+# 上下文持久层批（Issue #90）B4 工单 002：context_ledger 版本域 + v1 迁移（A6）
+#   （根因：库只有 CREATE TABLE IF NOT EXISTS、无 user_version，schema 无纪律；
+#     U1 甲案的读侧兜底：列优先 + 旧行解析 metadata，两路同源 memory_scope）
+
+# 上下文持久层批（Issue #90）B4 工单 003：写侧批量提交（A2）
+#   （根因：record() 每行一次 connect+commit+close，24 条/轮实测 214–318 ms；
+#     批内一次事务 0.78–0.91 ms/轮；事务边界 = 一次归档调用，失败整批回滚）
+
+# 上下文持久层批（Issue #90）B4 工单 005：启动加载与热集回载（A9）
+#   （根因：池构造完全不读台账，/metrics 看不到持久规模，D10 的策略"没人实现"；
+#     启动只登记一次 COUNT(*)（常数次查询、零预载），rehydrate 显式按需，
+#     draw/query 零查库由断言锁住，登记值随写入/GC 增量同步并进 gauge）
+tests/unit/context/test_pool_startup_load.py

@@ -210,11 +210,18 @@ class TestRecyclingContractGuard:
         recorded = []
 
         class _Ledger:
-            def record(self, *, content, turn_id=None, session_id=None, source=None, metadata=None):
+            def record(
+                self, *, content, turn_id=None, session_id=None, source=None, metadata=None,
+                chat_scope=None, created_at=None,
+            ):
                 recorded.append(content)
+                return True
 
             def gc_stale(self):
                 return 0
+
+            def count(self):
+                return len(recorded)
 
         pool = ContextPool(
             user_id="perf", agent_id="perf", session_id="s",
@@ -225,5 +232,6 @@ class TestRecyclingContractGuard:
 
         assert pool.resident_count() == 200, "常驻未收敛到 resident_limit"
         assert pool.get_retention_stats()["archived_by_reason"]["capacity"] == 1_800
-        # 无损：被回收的 1800 条全部落盘（顺序 = 最旧优先）
-        assert recorded == [f"msg-{i}" for i in range(1_800)]
+        # 无损：全部 2000 条都在台账（B4/001 写穿点在入池，顺序 = 最旧优先）；
+        # 回收只把最旧的 1800 条移出常驻，不参与落盘判定
+        assert recorded == [f"msg-{i}" for i in range(2_000)]
