@@ -262,3 +262,8 @@ tests/unit/context/test_context_persistence_restart.py
 tests/unit/test_docs_retired_tree_refs_guard.py
 # Issue #97：install.py 供给契约（依赖声明/模型单源/真下载器/前端同判据）
 tests/unit/desktop/test_install_supply_contract.py
+
+# 上下文持久层批（Issue #90）B4 工单 002：context_ledger 版本域 + v1 迁移（A6）
+#   （根因：库只有 CREATE TABLE IF NOT EXISTS、无 user_version，schema 无纪律；
+#     U1 甲案的读侧兜底：列优先 + 旧行解析 metadata，两路同源 memory_scope）
+tests/unit/context/test_context_ledger_migration.py

@@ -571,6 +571,7 @@ class ContextPool:
         if self._ledger_db is None:
             return
         md = getattr(item, "metadata", None) or {}
+        archived_at = getattr(item, "created_at", None)
         try:
             self._ledger_db.record(
                 content=str(getattr(item, "content", "")),
@@ -578,6 +579,10 @@ class ContextPool:
                 session_id=md.get("session_id") or self.session_id,
                 source=getattr(getattr(item, "source", None), "value", None),
                 metadata=getattr(item, "metadata", None),
+                # B4/002：作用域与归档时刻落独立列（U1/U3 定案）。作用域取写入
+                # 咽喉已打好的 metadata，不在这里另算一份判定。
+                chat_scope=md.get("chat_scope"),
+                created_at=archived_at.isoformat() if archived_at else None,
             )
         except Exception as exc:  # noqa: BLE001 - 归档主流程不可被台账故障打断，但必须可见
             self._ledger_write_failed += 1
@@ -634,6 +639,14 @@ class ContextPool:
             # 持久源优先（覆盖重启前历史），行 → ContextInput
             if self._ledger_db is not None:
                 try:
+                    # B4/002：归档事实（作用域 / 归档时刻）必须随召回还给调用方。
+                    # 逐轮 import 太贵，但这两条判据**只此一份**（列优先 + 旧行兜底），
+                    # 复制到本文件就是第二份作用域规则——故仍取台账模块的同源函数。
+                    from neurova.context.eviction_ledger_db import (
+                        resolveArchivedCreatedAt,
+                        resolveArchivedScope,
+                    )
+
                     for row in self._ledger_db.search(query, session_id=self.session_id, limit=limit):
                         row = dict(row)  # sqlite3.Row 无 .get
                         h = ContextInput.compute_hash(ContextSource.CONVERSATION, row["content"])
@@ -644,10 +657,12 @@ class ContextPool:
                             ContextInput(
                                 source=ContextSource.CONVERSATION,
                                 content=row["content"],
+                                created_at=resolveArchivedCreatedAt(row),
                                 metadata={
                                     "turn_id": row.get("turn_id"),
                                     "session_id": row.get("session_id"),
                                     "evicted_at": row.get("evicted_at"),
+                                    "chat_scope": resolveArchivedScope(row),
                                     "recalled_from": "ledger_db",
                                 },
                             )
