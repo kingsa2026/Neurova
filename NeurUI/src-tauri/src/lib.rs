@@ -87,12 +87,23 @@ struct ModelManifest {
 struct RuntimeSources {
     python: RuntimeSpec,
     node: RuntimeSpec,
+    pip: PipSpec,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct RuntimeSpec {
     version: String,
     urls: Vec<String>,
+}
+
+/// 依赖供给声明：装哪份清单、按什么顺序试索引源、用什么 import 面判「装好了」。
+/// probe 与 CI 的「后端入口最小 import 面」保持同一批模块。
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PipSpec {
+    requirements: String,
+    index_urls: Vec<String>,
+    probe: Vec<String>,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -459,6 +470,180 @@ fn download_node_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Resu
     Ok(())
 }
 
+// ---- 依赖安装（首启 pip，索引源按候选回退）----
+
+static DEPS_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static DEPS_INSTALLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 就绪 = 探针通过 且 没有安装在进行中。pip 逐包写入 site-packages，
+/// 装到 fastapi 时探针就已通过，此时起后端等于在半装环境里跑。
+fn deps_ready_now(probe_passed: bool, installing: bool) -> bool {
+    probe_passed && !installing
+}
+
+/// pip 命令行形状在此一处固定；索引 URL 只能来自清单。
+fn pip_install_args(index_url: &str, requirements: &str) -> Vec<String> {
+    vec![
+        "-m".into(),
+        "pip".into(),
+        "install".into(),
+        "--no-input".into(),
+        "--disable-pip-version-check".into(),
+        "--index-url".into(),
+        index_url.to_string(),
+        "-r".into(),
+        requirements.to_string(),
+    ]
+}
+
+/// 跑一轮 pip 安装：stdout 行转成状态消息（节流写盘），stderr 单独收拢，
+/// 失败时把两端末尾原文一起交出。两路管道分别有人读，不会互相写满死锁。
+fn run_pip_install(layout: &RuntimeLayout, index_url: &str, requirements: &str) -> Result<(), String> {
+    use std::io::{BufRead, Read};
+    let mut cmd = Command::new(&layout.python);
+    cmd.args(pip_install_args(index_url, requirements))
+        .current_dir(&layout.root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("启动 pip 失败: {e}"))?;
+
+    let mut err_pipe = child.stderr.take().ok_or("pip stderr 未接上")?;
+    let err_collector = std::thread::spawn(move || {
+        let mut buf = String::new();
+        let _ = err_pipe.read_to_string(&mut buf);
+        buf
+    });
+
+    let mut tail: Vec<String> = Vec::new();
+    let mut seen = 0u32;
+    let out = child.stdout.take().ok_or("pip stdout 未接上")?;
+    for line in std::io::BufReader::new(out).lines() {
+        let Ok(line) = line else { break };
+        if line.trim().is_empty() {
+            continue;
+        }
+        seen += 1;
+        if tail.len() >= 40 {
+            tail.remove(0);
+        }
+        tail.push(line);
+        if seen % 10 == 1 {
+            write_download_status(&layout.root, &DownloadStatus {
+                phase: "deps".into(),
+                progress: 0,
+                message: tail.last().map(|s| s.chars().take(160).collect()).unwrap_or_default(),
+                error: None,
+            });
+        }
+    }
+    let status = child.wait().map_err(|e| format!("等待 pip 退出失败: {e}"))?;
+    let stderr = err_collector.join().unwrap_or_default();
+    if !status.success() {
+        let why = if stderr.trim().is_empty() { tail.join("\n") } else { stderr };
+        return Err(format!("pip 安装失败: {}", why.lines().rev().take(30).collect::<Vec<_>>().join("\n")));
+    }
+    Ok(())
+}
+
+/// 安装中标记：任何退出路径都要撤掉，否则就绪判定会被永久锁死。
+struct InstallingGuard;
+
+impl InstallingGuard {
+    fn new() -> Self {
+        DEPS_INSTALLING.store(true, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for InstallingGuard {
+    fn drop(&mut self) {
+        DEPS_INSTALLING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn install_python_dependencies(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Result<(), String> {
+    let spec = read_model_manifest(&layout.root)?.runtime.pip;
+    let req_path = layout.root.join(&spec.requirements);
+    if !req_path.exists() {
+        return Err(format!("依赖清单缺失: {}", req_path.display()));
+    }
+    write_download_status(&layout.root, &DownloadStatus {
+        phase: "deps".into(),
+        progress: 0,
+        message: "正在安装 Python 依赖…".into(),
+        error: None,
+    });
+    let _ = app.emit("runtime-status", "deps:installing");
+    let _guard = InstallingGuard::new();
+
+    let mut failures: Vec<String> = Vec::new();
+    for index in &spec.index_urls {
+        match run_pip_install(layout, index, &spec.requirements) {
+            Ok(()) => {
+                DEPS_READY.store(true, std::sync::atomic::Ordering::SeqCst);
+                return Ok(());
+            }
+            Err(e) => {
+                log::warn!("pip 索引源失败 {index}: {e}");
+                failures.push(format!(
+                    "{index} → {}",
+                    e.lines().last().unwrap_or("").trim()
+                ));
+            }
+        }
+    }
+    Err(format!("{} 个 pip 索引源全部失败：{}", failures.len(), failures.join(" | ")))
+}
+
+/// 依赖是否就绪：按清单声明的 import 面做一次探针导入，而不是猜文件在不在。
+/// 结果缓存，免得 boot 页每两秒起一次解释器。
+fn deps_ready(layout: &RuntimeLayout) -> bool {
+    use std::sync::atomic::Ordering;
+    if DEPS_READY.load(Ordering::SeqCst) {
+        return true;
+    }
+    if DEPS_INSTALLING.load(Ordering::SeqCst) {
+        return false;
+    }
+    let probe = match read_model_manifest(&layout.root) {
+        Ok(m) => m.runtime.pip.probe,
+        Err(e) => {
+            log::warn!("{}", e);
+            return false;
+        }
+    };
+    if probe.is_empty() {
+        return false;
+    }
+    let stmt = format!("import {}", probe.join(", "));
+    let mut cmd = Command::new(&layout.python);
+    cmd.args(["-c", &stmt])
+        .current_dir(&layout.root)
+        .env("PYTHONPATH", std::env::join_paths([layout.root.clone()]).unwrap())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000);
+    }
+    let ok = cmd
+        .spawn()
+        .and_then(|mut c| c.wait())
+        .map(|s| s.success())
+        .unwrap_or(false);
+    let ready = deps_ready_now(ok, DEPS_INSTALLING.load(Ordering::SeqCst));
+    if ready {
+        DEPS_READY.store(true, Ordering::SeqCst);
+    }
+    ready
+}
+
 fn download_models(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Result<(), String> {
     let manifest = read_model_manifest(&layout.root)?;
 
@@ -484,11 +669,13 @@ fn download_models(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Result<(),
     Ok(())
 }
 
-/// 判断运行时是否完整。
+/// 判断运行时是否完整。deps 排在最后：装依赖得先有解释器在场，
+/// boot 页按 missing 的顺序串行安装，此处的次序即安装次序。
 fn is_runtime_ready(layout: &RuntimeLayout) -> bool {
     layout.python.exists()
         && layout.node.exists()
         && is_model_ready(layout)
+        && deps_ready(layout)
 }
 
 /// 获取缺失组件列表。
@@ -497,6 +684,7 @@ fn get_missing(layout: &RuntimeLayout) -> Vec<String> {
     if !layout.python.exists() { missing.push("python".into()); }
     if !layout.node.exists() { missing.push("node".into()); }
     if !is_model_ready(layout) { missing.push("models".into()); }
+    if layout.python.exists() && !deps_ready(layout) { missing.push("deps".into()); }
     missing
 }
 
@@ -780,6 +968,7 @@ fn start_download(app: tauri::AppHandle, what: String) -> Result<(), String> {
             "python" => download_python_runtime(&layout, &app),
             "node" => download_node_runtime(&layout, &app),
             "models" => download_models(&layout, &app),
+            "deps" => install_python_dependencies(&layout, &app),
             _ => Err(format!("未知下载目标: {}", what)),
         };
         
@@ -997,7 +1186,10 @@ mod runtime_extract_tests {
             use std::os::windows::process::CommandExt;
             cmd.creation_flags(0x0800_0000);
         }
-        let child = cmd.spawn().expect("探针子进程启动失败");
+        let mut child = cmd.spawn().expect("探针子进程启动失败");
+        // 先收尸再断言：让「子进程已退」在第一次轮询就命中，用例与 9527 上是否
+        // 恰好有别的服务在听无关（否则本用例会随环境时好时坏）。
+        let _ = child.wait().expect("探针子进程等待失败");
         let state = ManagedChildren {
             python: Mutex::new(Some(child)),
             node: Mutex::new(None),
@@ -1033,6 +1225,31 @@ mod runtime_extract_tests {
         assert!(dst.join("node.exe").exists());
         assert!(!dst.join("leftover.txt").exists(), "旧运行时残留，说明是合并而非替换");
         let _ = std::fs::remove_dir_all(&case);
+    }
+
+    /// 探针导得动 ≠ 装完了：pip 是逐包写入 site-packages 的，装到 fastapi 时
+    /// 探针就已通过，而 mcp 之类的靠后包还没落地。真机表现是后端在半装环境里
+    /// 起来并打出「mcp SDK 未安装」。安装进行中一律不认就绪。
+    #[test]
+    fn probe_passing_while_pip_runs_is_not_readiness() {
+        assert!(deps_ready_now(true, false), "pip 已退出且探针通过才算就绪");
+        assert!(!deps_ready_now(true, true), "安装仍在进行，探针通过也不许报就绪");
+        assert!(!deps_ready_now(false, false), "探针没通过更不该就绪");
+        assert!(!deps_ready_now(false, true));
+    }
+
+    /// pip 命令行形状固定在一处：索引 URL 与清单文件都由参数带入，
+    /// 且不许出现 --extra-index-url 之类会让候选次序失效的写法。
+    #[test]
+    fn pip_args_carry_index_and_requirements_in_order() {
+        let args = pip_install_args("https://mirrors.example/simple/", "requirements.txt");
+        let joined = args.join("\u{1}");
+        assert!(joined.contains("\u{1}pip\u{1}install\u{1}"), "未走 python -m pip install: {args:?}");
+        assert!(args.windows(2).any(|w| w[0] == "--index-url" && w[1] == "https://mirrors.example/simple/"),
+            "索引 URL 未作为 --index-url 的值传入: {args:?}");
+        assert!(args.windows(2).any(|w| w[0] == "-r" && w[1] == "requirements.txt"),
+            "清单文件未作为 -r 的值传入: {args:?}");
+        assert!(!joined.contains("extra-index"), "候选次序由 Rust 侧循环负责，不交给 pip");
     }
 }
 

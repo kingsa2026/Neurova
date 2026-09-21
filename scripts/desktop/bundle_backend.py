@@ -6,6 +6,7 @@
     start_server.py    ← 后端入口
     models/            ← 模型空壳 + MANIFEST.json（模型改走首次启动按需下载）
     config/            ← 配置
+    requirements.txt   ← 首启 pip 安装依赖的清单（目标机没有仓库，必须随包发运）
     MANIFEST.json      ← 增量构建标记
 
 Python、Node.js 运行时不再内嵌（减小安装包体积），由 Neurova 首次启动时
@@ -171,6 +172,8 @@ def main() -> int:
     copy_tree_light(REPO / "models", STAGE / "models", manifest, "models", skip_heavy=True)
     copy_tree_light(REPO / "config", STAGE / "config", manifest, "config")
     copy_tree_light(REPO / "start_server.py", STAGE / "start_server.py", manifest, "start_server")
+    # 首启 pip 装依赖要有清单可用：目标机上没有仓库，requirements.txt 必须随包发运
+    copy_tree_light(REPO / "requirements.txt", STAGE / "requirements.txt", manifest, "requirements")
     ensure_runtime_dirs(STAGE)
 
     # 出厂清洁：剥离开发/测试期生成的运行时数据（.agents 补丁目录、

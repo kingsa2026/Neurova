@@ -15,6 +15,15 @@
         "https://mirrors.aliyun.com/nodejs-release/v24.16.0/node-v24.16.0-win-x64.zip",
         "https://nodejs.org/dist/v24.16.0/node-v24.16.0-win-x64.zip"
       ]
+    },
+    "pip": {
+      "requirements": "requirements.txt",
+      "indexUrls": [
+        "https://pypi.tuna.tsinghua.edu.cn/simple/",
+        "https://mirrors.aliyun.com/pypi/simple/",
+        "https://pypi.org/simple/"
+      ],
+      "probe": ["fastapi", "uvicorn"]
     }
   },
   "models": [
