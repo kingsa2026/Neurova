@@ -31,7 +31,7 @@
 ## 范围边界
 
 纳入：`neurova/`（58 个子目录）、`NeurUI/`、`tests/`、`config/`、`deploy/` `helm/` `Dockerfile`
-`docker-compose.yml`、`.github/`、`docs/adr/`。
+`docker-compose.yml`、`.github/`、`docs/01-architecture/adr/`。
 
 不纳入：`node_modules/` `dist/` `__pycache__/` `models/`（本地权重）`logs/` `backups/`
 `MagicMock/`（测试副产物）及根目录一次性分析产物。
@@ -44,7 +44,7 @@
 | contract | FastAPI 路由注册、Pydantic 模型、前端 `src/api/*` 调用路径 | 采集中 |
 | config | `.env.example`、`config/`、`pyproject.toml`、`vite.config.*`、`docker-compose.yml` | 采集中 |
 | data | SQLite 文件与路径常量、`neurova/db/`、零停机迁移、内存 dataclass | 采集中 |
-| document | `docs/CONTEXT.md`、`docs/adr/0001-0015`、`README.md`、`AGENTS.md` | 已读 |
+| document | `docs/CONTEXT.md`、`docs/01-architecture/adr/0001-0015`、`README.md`、`AGENTS.md` | 已读 |
 | runtime | 无生产遥测；端口与进程关系仅来自脚本与配置 | 缺口，标注 unknown |
 | assumption | 用户未提供额外口头约束 | 无 |
 
@@ -59,7 +59,8 @@
    同一依赖图存在 `-v2/-v3/-v4/-v5` 四个文件名副本 → 历史可视化不可重生成、不可 diff。
 4. **文档目录分叉**：`docs/01-architecture/`（99 跟踪文件）与 `docs/architecture/`（44）同名文件内容
    md5 不同（`01-core-architecture.md`、`08-project-structure.md` 已分叉；`11-database-architecture.md` 仍相同）。
-   `docs/adr/`（16）与 `docs/01-architecture/adr/`（14）并存。
+   `docs/adr/` 与 `docs/01-architecture/adr/` 曾并存——
+   2026-09-21 已按 Issue #68 收口为 `docs/01-architecture/adr/` 一份（19 份 ADR 全在此）。
 5. **测试面漂移**：`README.md:1413` 记"846 个后端测试文件（unit 703）"，实测 `tests/` 下 `test_*.py` **1535**
    （unit 1378 / integration 56 / e2e 5 / performance 2 / benchmarks 1）。
 6. **断链命令**：`README.md:1428` 写 `python tests/run_all_tests.py`，实际文件在 `tests/runners/run_all_tests.py`；

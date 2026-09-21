@@ -64,7 +64,7 @@ neurova/skills/builtin/github_push/
 ### 5. 文档
 
 #### 5.1 用户文档
-- `docs/github_push_skill_usage.md` - 详细使用指南
+- `docs/09-dev-progress/github_push_skill_usage.md` - 详细使用指南
 - `neurova/skills/builtin/github_push/README.md` - 技能说明
 
 #### 5.2 开发文档

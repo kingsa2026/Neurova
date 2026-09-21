@@ -194,6 +194,9 @@ class TestGateIntegration:
 
         assert "ontology_adjudication" not in gate.pendingSegments()
         assert gate.pendingSegments() == [], "已实现的段接齐即无缺段"
-        assert "indexing" in gate.plannedSegments(), "尚未建成的段如实另报"
+        # 入索引不是欠账而是分工（归属见 admission.SEGMENT_OWNERS），
+        # 如实报在 delegated 栏；混进 planned 就又把欠账与设计搅在一起了。
+        assert "indexing" in gate.delegatedSegments(), "另有归属的段如实另报"
+        assert "indexing" not in gate.plannedSegments()
         assert SEGMENTS.index("ontology_adjudication") < SEGMENTS.index("conflict_judgement"), \
             "段序是设计定的：本体裁决在冲突判定之前"
