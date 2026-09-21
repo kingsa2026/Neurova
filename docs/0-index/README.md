@@ -24,7 +24,7 @@
 
 | 功能模块 | 状态 | 关键代码 | 关联文档 |
 |----------|------|----------|----------|
-| 记忆系统（17 维分类 + 温度引擎） | ✅ | `cognitive_layers/memory_layer/` | [02-memory-system](../01-architecture/02-memory-system.md) |
+| 记忆系统（多维度分类 + 温度引擎） | ✅ | `cognitive_layers/memory_layer/` | [02-memory-system](../01-architecture/02-memory-system.md) |
 | NeRF 增强记忆检索（六通道体积渲染） | ✅ | `neurova_recall.py` `volume_renderer.py` `positional_encoding.py` `unified_retriever.py` | [16-vector-retrieval-system](../01-architecture/16-vector-retrieval-system.md) |
 | 记忆温度机制（遗忘曲线 + 固化） | ✅ | `temperature.py` | [12-memory-temperature-mechanism](../01-architecture/12-memory-temperature-mechanism.md) |
 | 睡眠整理（记忆巩固 + 梦境） | ✅ | `sleep.py` `sleep_adapter.py` `sleep_writeback.py` | [13-memory-intelligence-enhancements](../01-architecture/13-memory-intelligence-enhancements.md) |
@@ -85,7 +85,7 @@
 **核心架构（按阅读顺序）**：
 
 1. [01-core-architecture.md](../01-architecture/01-core-architecture.md) — 整体架构、分层设计（核心）
-2. [02-memory-system.md](../01-architecture/02-memory-system.md) — 记忆系统、17 维分类、LSM 存储
+2. [02-memory-system.md](../01-architecture/02-memory-system.md) — 记忆系统、多维度分类、LSM 存储
 3. [03-message-routing.md](../01-architecture/03-message-routing.md) — 消息路由、14 渠道适配
 4. [04-multi-agent-collaboration.md](../01-architecture/04-multi-agent-collaboration.md) — 多 Agent 协作、任务分配
 5. [05-skill-system.md](../01-architecture/05-skill-system.md) — Skill 系统、协议兼容、沙箱

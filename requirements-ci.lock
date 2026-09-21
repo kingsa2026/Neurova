@@ -82,7 +82,7 @@ httpx2==2.13.0
     #   anthropic
     #   mcp
     #   openai
-httpx2-jsfetch==1.0 ; sys_platform == 'emscripten'
+httpx2-jsfetch==1.0 ; python_full_version >= '3.12' and sys_platform == 'emscripten'
     # via httpx2
 idna==3.20
     # via
@@ -208,21 +208,29 @@ starlette==1.6.0
     #   sse-starlette
 tiktoken==0.14.0
     # via -r requirements-ci.txt
+tomli==2.4.1 ; python_full_version <= '3.11'
+    # via coverage
 truststore==0.10.4 ; sys_platform != 'emscripten'
     # via
     #   httpcore2
     #   httpx2
 typing-extensions==4.16.0
     # via
+    #   aiohttp
+    #   aiosignal
     #   anthropic
     #   anyio
     #   fastapi
+    #   httpx2
     #   mcp
     #   mcp-types
     #   openai
     #   opentelemetry-api
     #   pydantic
     #   pydantic-core
+    #   pytest-asyncio
+    #   referencing
+    #   starlette
     #   typing-inspection
 typing-inspection==0.4.4
     # via

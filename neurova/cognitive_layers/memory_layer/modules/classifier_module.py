@@ -1,7 +1,18 @@
 """
-ClassifierModule — 记忆分类模块
+ClassifierModule — 记忆分类模块（分类缓存 / 标签面）
 
-对记忆进行分类和标签管理
+职责边界（2026-09-21 收敛，Issue #68）：
+- **分类推断**不再在本文件实现。本文件此前自带 6 个硬编码关键词桶
+  （personal/work/knowledge/conversation/emotion/technical），与
+  `MemoryCategory`（7 值）**同名不同集且数量不同**：`general` 只是在
+  兜底分支里被 append，`experience`/`reflection`/`user_preference`/
+  `tool_usage` 四个生产枚举值根本认不出来。那条规则表是分叉的第二源头，
+  已删除。现统一委托 `auto_classifier.MemoryAutoClassifier`（唯一引擎）。
+- 本模块保留**有状态**的部分：memory_id → categories / tags 缓存与检索。
+  标签抽取（引号 / @ / # / 长词）是独立能力，不属于分类引擎，留在本文件。
+
+实现细节：classification 走引擎，缓存写入仍按 memory_id 索引，供
+`get_categories` / `search_by_category` / `get_stats` 消费。
 """
 
 from __future__ import annotations
@@ -19,24 +30,17 @@ class ClassifierModule:
     记忆分类模块
 
     对记忆进行自动分类和标签管理，支持：
-    - 基于关键词的分类
+    - 基于关键词的分类（委托 `MemoryAutoClassifier`，词汇表 = models.py）
     - 基于内容的标签提取
-    - 分类规则管理
+    - 分类缓存与检索（by category / by tag）
     """
 
     def __init__(self):
         self._lock = threading.RLock()
         self._initialized = False
 
-        # 分类规则: category -> keywords
-        self._category_rules: Dict[str, List[str]] = {
-            "personal": ["我", "我的", "个人", "自己", "my", "I", "me"],
-            "work": ["工作", "项目", "任务", "会议", "work", "project", "task"],
-            "knowledge": ["知识", "学习", "教程", "文档", "knowledge", "learn", "tutorial"],
-            "conversation": ["对话", "聊天", "讨论", "chat", "conversation", "discuss"],
-            "emotion": ["感觉", "心情", "情感", "feel", "emotion", "mood"],
-            "technical": ["代码", "编程", "技术", "API", "code", "programming", "tech"],
-        }
+        # 分类引擎（懒加载，避免模块导入期的重初始化）
+        self._engine = None
 
         # 记忆分类结果
         self._memory_categories: Dict[str, Set[str]] = {}  # memory_id -> categories
@@ -46,6 +50,23 @@ class ClassifierModule:
     def name(self) -> str:
         """模块名称"""
         return "classifier_module"
+
+    def _ensure_engine(self):
+        """懒加载唯一分类引擎（分类词汇表的定义在 models.py，不在此处）"""
+        if self._engine is None:
+            from neurova.cognitive_layers.memory_layer.auto_classifier import (
+                MemoryAutoClassifier,
+            )
+
+            self._engine = MemoryAutoClassifier()
+        return self._engine
+
+    @property
+    def defined_categories(self) -> List[str]:
+        """本模块可能产出的分类全集（= MemoryCategory 枚举值，无第二套）。"""
+        from neurova.cognitive_layers.memory_layer.models import MemoryCategory
+
+        return [c.value for c in MemoryCategory]
 
     def init(self) -> bool:
         """初始化模块"""
@@ -65,7 +86,7 @@ class ClassifierModule:
         metadata: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
         """
-        对记忆进行分类
+        对记忆进行分类（多标签，值域 = MemoryCategory）
 
         Args:
             memory_id: 记忆ID
@@ -73,21 +94,14 @@ class ClassifierModule:
             metadata: 额外元数据
 
         Returns:
-            分类结果列表
+            分类结果列表（至少含一个值；命中多个关键词桶时全部返回，
+            由调用方决定取最佳还是全取）
         """
-        categories = set()
-        content_lower = content.lower()
-
-        # 基于关键词分类
-        for category, keywords in self._category_rules.items():
-            for keyword in keywords:
-                if keyword.lower() in content_lower:
-                    categories.add(category)
-                    break
-
-        # 如果没有匹配任何分类，归为 general
-        if not categories:
-            categories.add("general")
+        engine = self._ensure_engine()
+        result = engine.classify(content, metadata)
+        categories = {result["category"].value}
+        for cat, _score in result["details"].get("category_multi_label", []):
+            categories.add(cat.value)
 
         with self._lock:
             self._memory_categories[memory_id] = categories
@@ -136,17 +150,22 @@ class ClassifierModule:
         return list(tags)[:max_tags]
 
     def add_category_rule(self, category: str, keywords: List[str]) -> None:
-        """添加分类规则"""
-        with self._lock:
-            if category in self._category_rules:
-                self._category_rules[category].extend(keywords)
-            else:
-                self._category_rules[category] = keywords
+        """添加分类关键词（透传到唯一引擎，不再维护第二份规则表）
 
-    def remove_category_rule(self, category: str) -> bool:
-        """移除分类规则"""
-        with self._lock:
-            return self._category_rules.pop(category, None) is not None
+        非法分类名显式拒绝：此前任意字符串都能建桶（于是库里出现
+        personal/work/technical 等无对应 MemoryCategory 的分类），
+        现要求必须是 MemoryCategory 枚举值。
+        """
+        from neurova.cognitive_layers.memory_layer.models import MemoryCategory
+
+        try:
+            MemoryCategory(category)
+        except (ValueError, KeyError) as exc:
+            raise ValueError(
+                f"未知分类 '{category}'：分类值域 = MemoryCategory 枚举（{self.defined_categories}）"
+            ) from exc
+
+        self._ensure_engine().add_category_keywords(category, keywords)
 
     def get_categories(self, memory_id: str) -> List[str]:
         """获取记忆的分类"""
@@ -208,5 +227,5 @@ class ClassifierModule:
                 "total_tagged": len(self._memory_tags),
                 "category_distribution": category_counts,
                 "top_tags": sorted(tag_counts.items(), key=lambda x: x[1], reverse=True)[:20],
-                "defined_categories": list(self._category_rules.keys()),
+                "defined_categories": self.defined_categories,
             }
