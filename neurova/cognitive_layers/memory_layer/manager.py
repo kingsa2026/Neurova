@@ -629,11 +629,16 @@ class MemoryManager:
                 if strict:
                     raise OSError("Question queue persistence failed") from e2
 
-    def _delete_persisted_memory(self, memory_id: str):
+    def _delete_persisted_memory(self, memory_id: str, owner=None):
         """从 SQLite 删除持久化记忆
 
+        owner 是**行自带**的三元组 (agent_id, neuser_id, user_id)；缺省用当前生效三元组。
+
         审计修复 (P1-6): 原 DELETE 仅按 id, 知道对方 memory_id 即可越权删除
-        任何作用域的持久化行。现强制附带生效三元组, 跨作用域删不掉。
+        任何作用域的持久化行。现强制附带三元组, 跨作用域删不掉。
+        调用方若已确知目标行归属（如按批次撤销——批量标签就是授权凭据），
+        必须显式传入，因为"行的归属"与"调用现场的归属"本就是两件事：
+        按现场三元组删，跨上下文的撤销会删掉内存却留下盘上行，重启即复活。
         M-15: 连接必被归还，execute 抛错也不例外（原 execute 抛错即泄漏连接）。
         busy_timeout 不再在此逐条设置：走池后由池的 PRAGMA 基线统一提供
         （ADR 0014），且借用者本地改动会在归还时被复原。
@@ -643,21 +648,16 @@ class MemoryManager:
             return
         from neurova.core.database import short_transaction
 
+        agent_id, neuser_id, user_id = owner or (
+            self._agent_id, self._eff_neuser_id(), self._eff_user_id()
+        )
         try:
             with short_transaction(self._persist_db_path) as conn:
-                scoped_id = "\x1f".join(
-                    (self._agent_id, self._eff_neuser_id(), self._eff_user_id(), memory_id)
-                )
+                scoped_id = "\x1f".join((agent_id, neuser_id, user_id, memory_id))
                 conn.execute(
                     "DELETE FROM memories WHERE id IN (?, ?) "
                     "AND agent_id = ? AND neuser_id = ? AND user_id = ?",
-                    (
-                        memory_id,
-                        scoped_id,
-                        self._agent_id,
-                        self._eff_neuser_id(),
-                        self._eff_user_id(),
-                    ),
+                    (memory_id, scoped_id, agent_id, neuser_id, user_id),
                 )
         except Exception as e:
             logger.debug("Delete persisted memory failed: %s", e)
@@ -1400,20 +1400,46 @@ class MemoryManager:
             user_id=self._eff_user_id(),
             created_at=created_at,
             updated_at=created_at,
+            # 事件时刻与获知时刻是两个时刻：created_at 记源侧历史时刻（照原样保留），
+            # last_accessed_at 记系统获知时刻（本次导入）。缺了它，衰减周期会把
+            # "刚导入"读成"闲置了半年"——days_idle 取 last_accessed_at or created_at，
+            # 半年回填的历史会被直接判成 ARCHIVED/FORGOTTEN。在产生该状态的这一侧定标，
+            # 不去改衰减消费方（消费方按"距今多久没被访问"算，语义本就正确）。
+            last_accessed_at=datetime.datetime.now(datetime.timezone.utc),
         )
 
     def delete_ingested_memories(self, ingest_run_id: str) -> int:
-        """按导入批次精确撤销（设计 §6：回滚靠标签，不靠快照）。"""
+        """按导入批次精确撤销（设计 §6：回滚靠标签，不靠快照）。
+
+        删盘按**行自带**三元组（导入行记着它是谁的历史），不按调用现场的生效作用域——
+        批次标签本身就是授权凭据，而 CLI 撤销永远跑在实例默认作用域，二者不是同一上下文。
+        倒排索引与运行期向量库同 forget 口径一并摘除：只删内存与盘、不摘索引，
+        会让已撤销的条子在召回链路里留一份指向不存在记忆的残留文档。
+        """
         removed = 0
         with self._lock:
             for mem_id, mem in list(self._memories.items()):
                 if (mem.metadata or {}).get("ingest_run_id") != ingest_run_id:
                     continue
                 del self._memories[mem_id]
-                self._delete_persisted_memory(mem_id)
+                self._delete_persisted_memory(
+                    mem_id, (mem.agent_id, mem.neuser_id, mem.user_id))
+                self._drop_from_recall_indexes(mem_id)
                 removed += 1
             self._stats["total_memories"] = len(self._memories)
         return removed
+
+    def _drop_from_recall_indexes(self, memory_id: str) -> None:
+        """把一条记忆从关键词倒排与运行期向量库摘掉（与 forget 的硬删同一口径）。"""
+        try:
+            from neurova.cognitive_layers.memory_layer.semantic_search import (
+                get_semantic_search,
+            )
+
+            get_semantic_search().remove_memory_index(memory_id)
+        except Exception:  # noqa: BLE001 - 索引维护失败不阻断撤销
+            logger.debug("关键词索引增量摘除失败: %s", memory_id, exc_info=True)
+        self._sync_runtime_vector_store(memory_id=memory_id)
 
     def _semantic_recall(
         self, query: str, memories: list, limit: int, agent_wide: bool = False
@@ -1632,16 +1658,8 @@ class MemoryManager:
                 self._persist_memory(self._memories[memory_id])  # 更新持久化
             else:
                 del self._memories[memory_id]
-                # 审计 P1-D6：关键词倒排增量摘除
-                try:
-                    from neurova.cognitive_layers.memory_layer.semantic_search import (
-                        get_semantic_search,
-                    )
-
-                    get_semantic_search().remove_memory_index(memory_id)
-                except Exception:  # noqa: BLE001
-                    logger.debug("关键词索引增量摘除失败: %s", memory_id, exc_info=True)
-                self._sync_runtime_vector_store(memory_id=memory_id)
+                # 审计 P1-D6：关键词倒排增量摘除（与撤销共用同一处收口）
+                self._drop_from_recall_indexes(memory_id)
                 self._delete_persisted_memory(memory_id)  # 删除持久化
             self._stats["total_memories"] = len(self._memories)
         # bus.emit 在锁外执行，避免持锁调用 handler 导致递归死锁
