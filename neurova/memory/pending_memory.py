@@ -509,11 +509,26 @@ _process_store: Optional[PendingMemoryStore] = None
 _process_lock = threading.Lock()
 
 
-def get_pending_memory_store(db_path: str = "./data/memory_pending/pending_memories.db") -> PendingMemoryStore:
-    """进程级单例（与 KnowledgeRepository.get_knowledge_repository 同式）。"""
+def defaultPendingDbPath() -> str:
+    """待确认记忆账本的默认落点：数据根下的 `memory_pending`（绝对路径）。
+
+    原默认值是 CWD 相对路径 `"./data/memory_pending/..."`——换个工作目录就换一个
+    待确认队列，"确认过的还在待确认里"这类现象正是它留下的。
+    """
+    from neurova.core.data_root import get_data_root
+
+    return str(get_data_root() / "memory_pending" / "pending_memories.db")
+
+
+def get_pending_memory_store(db_path: str = "") -> PendingMemoryStore:
+    """进程级单例（与 KnowledgeRepository.get_knowledge_repository 同式）。
+
+    `db_path` 缺省（空串）时按数据根推导；显式传路径（测试隔离）一字不改。
+    """
     global _process_store
+    target = db_path or defaultPendingDbPath()
     with _process_lock:
         if _process_store is None:
-            os.makedirs(str(Path(db_path).parent), exist_ok=True)
-            _process_store = PendingMemoryStore(db_path=db_path)
+            os.makedirs(str(Path(target).parent), exist_ok=True)
+            _process_store = PendingMemoryStore(db_path=target)
         return _process_store

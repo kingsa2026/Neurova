@@ -28,7 +28,7 @@
     { "id": "c.frontend", "label": "NeurUI (Vue3 SPA, :8100)", "type": "service", "state": "current", "confidence": "high", "sourceRefs": ["NeurUI/vite.config.ts:17-42", "NeurUI/package.json:6-13"] },
     { "id": "c.backend", "label": "FastAPI 后端 (:9527)", "type": "service", "state": "current", "confidence": "high", "sourceRefs": ["neurova/api/app.py:1160", "start_server.py:106"] },
     { "id": "c.launcher", "label": "start.py / start_server.py 启动装配", "type": "service", "state": "current", "confidence": "high", "sourceRefs": ["start_server.py:59", "start_server.py:67"] },
-    { "id": "c.sqlite", "label": "SQLite 数据文件族", "type": "database", "state": "current", "confidence": "high", "sourceRefs": ["docs/adr/0008-session-repository.md"] },
+    { "id": "c.sqlite", "label": "SQLite 数据文件族", "type": "database", "state": "current", "confidence": "high", "sourceRefs": ["docs/01-architecture/adr/0008-session-repository.md"] },
     { "id": "c.filesystems", "label": "文件存储 (agent_workspaces/sessions/memory_storage/trajectories/uploads)", "type": "database", "state": "current", "confidence": "medium", "sourceRefs": ["neurova/skills/skill_service.py:129"] },
     { "id": "c.ci", "label": "GitHub Actions 守卫", "type": "service", "state": "current", "confidence": "high", "sourceRefs": [".github/workflows/cost-guards.yml", "package.json:8-14"] },
     { "id": "c.helm", "label": "Helm Chart（唯一真实多服务拓扑）", "type": "service", "state": "current", "confidence": "high", "description": "backend/frontend Deployment+Service+hpa+ingress+pvc；replicaCount 均为 1", "sourceRefs": ["helm/neurova/templates", "helm/neurova/values.yaml:31", "helm/neurova/values.yaml:112"] },
@@ -106,7 +106,7 @@
     { "id": "e14", "from": "m.chatpipeline", "to": "m.sessionsync", "type": "publishes", "sync": "async", "protocol": "WebSocket", "description": "Step5 终答广播", "confidence": "high", "sourceRefs": ["neurova/agent/chat_pipeline.py:449", "neurova/agent/chat_pipeline.py:445"] },
     { "id": "e15", "from": "m.memcore", "to": "m.memorylayer", "type": "calls", "sync": "sync", "protocol": "in-process", "description": "函数级 lazy import，单向向下", "confidence": "high", "sourceRefs": ["neurova/mem_core.py:598-604", "neurova/mem_core.py:630", "neurova/mem_core.py:738"] },
     { "id": "e16", "from": "m.memorylayer", "to": "m.memorydc", "type": "reads", "sync": "sync", "protocol": "SQL", "confidence": "high", "sourceRefs": ["neurova/cognitive_layers/memory_layer/storage.py:29", "neurova/cognitive_layers/memory_layer/manager.py:3228"] },
-    { "id": "e17", "from": "m.memorylayer", "to": "c.sqlite", "type": "writes", "sync": "sync", "protocol": "SQL", "confidence": "high", "sourceRefs": ["docs/adr/0004-cognitive-storage-engine-lsm.md"] },
+    { "id": "e17", "from": "m.memorylayer", "to": "c.sqlite", "type": "writes", "sync": "sync", "protocol": "SQL", "confidence": "high", "sourceRefs": ["docs/01-architecture/adr/0004-cognitive-storage-engine-lsm.md"] },
     { "id": "e18", "from": "m.toolexecutor", "to": "m.toollayers", "type": "depends-on", "sync": "sync", "protocol": "in-process", "description": "非下游关系：executor 不 import tool_layers；router 反向回手调 executor 私有方法", "confidence": "high", "sourceRefs": ["neurova/tool_executor.py:1045", "neurova/tool_layers/tool_router.py:643-645", "neurova/agent_core.py:979-980"] },
     { "id": "e19", "from": "m.toollayers", "to": "ext.mcp", "type": "calls", "sync": "sync", "protocol": "unknown", "confidence": "high", "sourceRefs": ["neurova/agent_core.py:985-988"] },
     { "id": "e20", "from": "m.llmclient", "to": "ext.llmProviders", "type": "calls", "sync": "sync", "protocol": "HTTP", "confidence": "high", "sourceRefs": ["neurova/llm_client.py:354", "neurova/llm_client.py:445", "neurova/llm_client.py:576", "neurova/llm_client.py:695"] },
@@ -127,17 +127,17 @@
   ],
 
   "decisions": [
-    { "id": "adr.0001", "title": "统一 Memory dataclass 三套", "status": "Accepted", "date": "2026-06-27", "sourceRefs": ["docs/adr/0001-unify-memory-dataclass.md"] },
-    { "id": "adr.0008", "title": "SessionRepository 统一（5 套→1 ABC）", "status": "Accepted", "date": "2026-06-28", "sourceRefs": ["docs/adr/0008-session-repository.md"] },
-    { "id": "adr.0009", "title": "统一 ExecutionStatus（4 枚举收敛）", "status": "Accepted", "date": "2026-07-09", "sourceRefs": ["docs/adr/0009-unify-execution-status.md"] },
-    { "id": "adr.0010", "title": "统一 ToolExecutionContext（2 dataclass 收敛）", "status": "Accepted", "date": "2026-07-09", "sourceRefs": ["docs/adr/0010-unify-tool-execution-context.md"] },
-    { "id": "adr.0011", "title": "统一 SkillRegistry（A 规范 / B re-export）", "status": "Accepted", "date": "2026-07-09", "sourceRefs": ["docs/adr/0011-unify-skill-registry.md", "neurova/agent_core.py:29"] },
-    { "id": "adr.0013", "title": "统一技能市场端点（4 套→1 套）", "status": "Accepted", "date": "2026-07-14", "sourceRefs": ["docs/adr/0013-unify-skill-market-endpoints.md"] },
-    { "id": "adr.0015", "title": "ContextPool 回收契约", "status": "Accepted", "date": "2026-09-18", "sourceRefs": ["docs/adr/0015-context-pool-retention-contract.md"] }
+    { "id": "adr.0001", "title": "统一 Memory dataclass 三套", "status": "Accepted", "date": "2026-06-27", "sourceRefs": ["docs/01-architecture/adr/0001-unify-memory-dataclass.md"] },
+    { "id": "adr.0008", "title": "SessionRepository 统一（5 套→1 ABC）", "status": "Accepted", "date": "2026-06-28", "sourceRefs": ["docs/01-architecture/adr/0008-session-repository.md"] },
+    { "id": "adr.0009", "title": "统一 ExecutionStatus（4 枚举收敛）", "status": "Accepted", "date": "2026-07-09", "sourceRefs": ["docs/01-architecture/adr/0009-unify-execution-status.md"] },
+    { "id": "adr.0010", "title": "统一 ToolExecutionContext（2 dataclass 收敛）", "status": "Accepted", "date": "2026-07-09", "sourceRefs": ["docs/01-architecture/adr/0010-unify-tool-execution-context.md"] },
+    { "id": "adr.0011", "title": "统一 SkillRegistry（A 规范 / B re-export）", "status": "Accepted", "date": "2026-07-09", "sourceRefs": ["docs/01-architecture/adr/0011-unify-skill-registry.md", "neurova/agent_core.py:29"] },
+    { "id": "adr.0013", "title": "统一技能市场端点（4 套→1 套）", "status": "Accepted", "date": "2026-07-14", "sourceRefs": ["docs/01-architecture/adr/0013-unify-skill-market-endpoints.md"] },
+    { "id": "adr.0015", "title": "ContextPool 回收契约", "status": "Accepted", "date": "2026-09-18", "sourceRefs": ["docs/01-architecture/adr/0015-context-pool-retention-contract.md"] }
   ],
 
   "unknowns": [
-    { "id": "u1", "item": "17 维记忆分类无代码级单一事实源；实测为 auto_classifier 三枚举并集 7+6+4", "sourceRefs": ["neurova/cognitive_layers/memory_layer/auto_classifier.py:27-56", "docs/adr/0003-memory-system-architecture.md:11"] },
+    { "id": "u1", "item": "17 维记忆分类无代码级单一事实源；实测为 auto_classifier 三枚举并集 7+6+4", "sourceRefs": ["neurova/cognitive_layers/memory_layer/auto_classifier.py:27-56", "docs/01-architecture/adr/0003-memory-system-architecture.md:11"] },
     { "id": "u2", "item": "llm/{adapters,registry,interfaces,sandbox} 终态未定：未完成的对齐目标态 or 废弃残留", "sourceRefs": ["neurova/llm/adapters", "neurova/llm/registry"] },
     { "id": "u3", "item": "agent_ref 上约 40 个属性的实际读写矩阵未穷举，需静态分析才能出精确耦合图", "sourceRefs": ["neurova/agent_core.py:559-1012"] },
     { "id": "u4", "item": "无运行时遥测，进程与网络拓扑全部为静态推导", "sourceRefs": ["start_server.py:106"] },
