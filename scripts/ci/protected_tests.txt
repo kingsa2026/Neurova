@@ -297,3 +297,9 @@ tests/unit/test_active_layer_refs_guard.py
 #     启动只登记一次 COUNT(*)（常数次查询、零预载），rehydrate 显式按需，
 #     draw/query 零查库由断言锁住，登记值随写入/GC 增量同步并进 gauge）
 tests/unit/context/test_pool_startup_load.py
+
+# 上下文持久层批（Issue #90）B4 工单 007：GC 与 FTS 对齐（A5）
+#   （根因：_LEDGER_GC_EVERY 只被 _archive_evicted 递增，而它在生产构造面
+#     resident_limit=None / ttl_seconds=0 下永不执行 → 保留策略一次也不触发、
+#     库单调增长；改后触发点落在归档提交，FTS 对齐改分批删除）
+tests/unit/context/test_ledger_gc_retention.py
