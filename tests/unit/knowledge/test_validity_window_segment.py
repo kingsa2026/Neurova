@@ -92,6 +92,26 @@ class TestWindowActuallyGates:
             store, agentId="default").forQuery("成本护栏", now=_NOW)]
 
 
+class TestRecordedAtIsNotAValidityBound:
+    """`recorded_at` 是"我们何时得知"，不是"说法何时生效"。
+
+    把它当时效上界，参考时刻早于写入时刻的查询就会把**此刻仍然有效**的说法读没——
+    结论随墙上时钟走（2026-09-21 12:00Z 之后跑，`test_openWindowStaysVisible` 必红）。
+    上界只认调用方声明的 `valid_from`：没声明就说明这条说法没有"还没到生效时刻"可言。
+    """
+
+    def test_factRecordedAfterTheQueryMomentStaysVisible(self, store):
+        key = store.upsertSubject("default", "成本护栏")
+        factId = store.upsertFact(
+            "default", key, "governs", "0.6", "成本护栏落在 0.6",
+            validUntil=(_NOW + datetime.timedelta(days=30)).isoformat(),
+            recordedAt="2026-12-31T00:00:00+00:00")
+
+        assert store.fact(factId)["valid_from"] is None, "本用例的前提是没声明生效时刻"
+        assert factId in [h["id"] for h in TemporalFactReader(
+            store, agentId="default").forQuery("成本护栏", now=_NOW)]
+
+
 class TestDedupeDoesNotDropTheWindow:
     def test_sameContentReplayBackfillsTheMissingWindow(self, store):
         """同内容重放折回旧行时，声明过窗口就要补上——否则同一句话第一次带窗口、
@@ -102,3 +122,15 @@ class TestDedupeDoesNotDropTheWindow:
 
         assert first == second, "同内容必须折回同一行（004 口径）"
         assert store.fact(first)["valid_until"] == until
+
+    def test_replayThroughContentKeyNormalisesWindow(self, store):
+        """折回旧行补窗口也走同一条归一：混进 +08:00，文本序把"已到期"读成"未到期"。"""
+        shifted = datetime.datetime(2026, 9, 25, 20, 0, tzinfo=datetime.timezone(
+            datetime.timedelta(hours=8)))
+        first = _admit(store, "0.3", content="成本护栏取同一个取值口径")
+        second = _admit(store, "0.3", content="成本护栏取同一个取值口径",
+                        validUntil=shifted.isoformat())
+
+        assert first == second
+        assert store.fact(first)["valid_until"] == shifted.astimezone(
+            datetime.timezone.utc).isoformat()

@@ -147,8 +147,11 @@
 ### 6.4 有效期窗口：收了就落库，落了就咬合
 
 `upsertFact` 接 `validFrom` / `validUntil` 并落两列，按内容键折回旧行时走
-`fillValidityWindow` 只补 NULL。读面 `temporal_facts` 补上"不晚于此刻"的上界——
-`valid_from` 此前恒 NULL，这条上界一直空转。至此两列有了写入方、读取方与过滤效果。
+`fillValidityWindow` 只补 NULL，两处都按 `_instant` 归一成 UTC ISO。读面 `temporal_facts`
+补上"不晚于此刻"的上界，但**上界只认调用方声明的 `valid_from`**：`recorded_at` 是
+"我们何时得知"而不是"说法何时生效"，拿它顶上界会让参考时刻早于写入时刻的查询把
+此刻仍然有效的说法读没（结论随墙上时钟漂移）。下界仍可退到 `recorded_at`——缺列值
+不等于没有时间。至此两列有了写入方、读取方与过滤效果。
 
 ### 6.5 读面域与记忆围栏
 
