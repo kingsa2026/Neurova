@@ -55,11 +55,12 @@ class TestGateFactoryIsSingleSource:
     def test_factoryWiresEveryImplementedSegment(self, tmp_path):
         store = KnowledgeFactStore(str(tmp_path / "g.db"))
         try:
-            pending = productionAdmissionGate(store, toolVersion="unit").pendingSegments()
-            assert pending == ["indexing"], (
-                "020 起本体裁决已接进工厂，只剩索引段没接通（属 021/022 之后）；"
-                "若这里冒出 identity_resolution / lineage / ontology_adjudication，"
+            gate = productionAdmissionGate(store, toolVersion="unit")
+            assert gate.pendingSegments() == [], (
+                "工厂必须把已实现的段全部接齐；这里冒出任何名字，"
                 "说明工厂又被各自装配绕过了")
+            assert gate.plannedSegments() == ["indexing"], (
+                "尚未建成的段另立一栏，不进拒写判据")
         finally:
             store.close()
 
