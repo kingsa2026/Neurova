@@ -45,7 +45,11 @@ def _legacy_line(role: str, content: Any, ts: str) -> Dict[str, Any]:
 
 
 def test_unmapped_role_declared_as_role_not_empty_body(tmp_path: Path):
-    """报告不能把"不认这个角色"说成"这行没内容"——接第二家时正是这个形状。"""
+    """报告不能把"不认这个角色"说成"这行没内容"——接第二家时正是这个形状。
+
+    本族当前已在信封（dialog_daily._envelope）里申报角色，故这条是防回归的锁：
+    若哪天角色判定挪到 _build（那之前没有申报点），报告会退回"空正文"。
+    """
     src = _jsonl(tmp_path / "dialog" / "2026-04-07.jsonl",
                  _dialog_line("developer", [{"type": "text", "text": "指令"}],
                               "2026-04-07 17:36:13"))
