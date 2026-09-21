@@ -76,6 +76,7 @@ REASONS: Dict[str, str] = {
     "media": "源里的媒体载体取不到字节（路径不在源目录树的 media/ 下，或 base64 不可解）",
     "column": "源列在包内契约与 extra 都无落点，未携带",
     "timestamp": "时间戳定不出时区/解不开，整行未入包（不猜时刻）",
+    "空正文": "该行没有任何可携带内容（正文块为空且无调用），未入包",
 }
 
 
@@ -138,6 +139,11 @@ def _events_for_row(row: Dict[str, Any], sink: MediaSink, declared: Counter):
         return None
     if kind == "assistant_message":
         events = _expand_turn(row, blocks, sink)
+        if not events:
+            # 块全是空正文又无调用：这行确实没有可携带内容，但"没东西"必须报出来，
+            # 不能让它在包外看成一个从未存在的行。
+            declared["空正文"] += 1
+            return None
     else:
         events = [_flat_event(row, kind, blocks, sink)]
     declared.update(_stray_blocks(blocks, sink, TURN_BLOCK_TYPES if kind == "assistant_message"
