@@ -162,10 +162,15 @@ def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-def _instant(value) -> str:
+def _instant(value) -> Optional[str]:
     """时效判定比的是瞬时不是字面：混着 Z / +08:00 / 无时区写入时，
     文本序会把"已到期"读成"未到期"，所以进出都归一成 UTC ISO。naive 按 UTC 解读。
+
+    「没声明时刻」一律落 `None`（空串与缺省同义），调用方不必各自再判一次空——
+    判空散进各写入路径，就等于同一语义有了多份实现。
     """
+    if not value:
+        return None
     if isinstance(value, datetime.datetime):
         stamp = value
     else:
@@ -376,8 +381,8 @@ class KnowledgeFactStore:
         `conflict_judge` 的 temporal 分类与 `expireDueFacts()` 双双没有输入。
         调用方声明过窗口就补进已存在的行（只补 NULL，不覆盖既有窗口）。
         """
-        windowFrom = _instant(validFrom) if validFrom else None
-        windowUntil = _instant(validUntil) if validUntil else None
+        windowFrom = _instant(validFrom)
+        windowUntil = _instant(validUntil)
         if contentKey:
             existing = self.findFactByContentKey(agentId, contentKey)
             if existing:
@@ -992,8 +997,16 @@ class KnowledgeFactStore:
 
         咽喉的两条路径都调它：新建行走 `upsertFact`，按内容键折回旧行时走这里。
         同一个方法，不各写一套"只补空"的判据。
+
+        窗口→瞬时的转换只走 `_instant`，与新建路径同一实现：库列上的比较是文本序，
+        而同一个瞬时有无穷多种合法写法，混着落库就会出现「`20:00+08:00` 与
+        `12:00+00:00` 是同一瞬时、却不是同一串」——读面按文本序判真假，会把"已到期"
+        读成"未到期"。此前折回路径把调用方原样字符串直接落库、只有新建路径归一，
+        于是同一句事实的窗口随"哪条路径先写"而变。
         """
-        if validFrom is None and validUntil is None:
+        windowFrom = _instant(validFrom)
+        windowUntil = _instant(validUntil)
+        if windowFrom is None and windowUntil is None:
             return
         with self._lock, self._conn:
             self._conn.execute(
@@ -1001,11 +1014,11 @@ class KnowledgeFactStore:
                 " valid_from = COALESCE(valid_from, ?),"
                 " valid_until = COALESCE(valid_until, ?)"
                 " WHERE fact_id = ?",
-                (validFrom, validUntil, factId),
+                (windowFrom, windowUntil, factId),
             )
 
     def setValidUntil(self, factId: str, validUntil: Optional[str]) -> None:
-        stored = None if validUntil is None else _instant(validUntil)
+        stored = _instant(validUntil)
         with self._lock, self._conn:
             self._requireFact(factId)
             self._conn.execute(

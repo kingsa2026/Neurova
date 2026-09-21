@@ -426,32 +426,40 @@ class TemperatureEngine:
                 return True
         return False
 
+    # 遗忘曲线锚点（空闲天数, 衰减因子）——单一事实源。
+    # 锚点沿用历史经验值：1 天=2.0、7 天=1.0、30 天=0.5、90 天及以后=0.2。
+    _CURVE_ANCHORS = ((1.0, 2.0), (7.0, 1.0), (30.0, 0.5), (90.0, 0.2))
+
     @classmethod
     def _calculate_curve_factor(cls, days_idle: float) -> float:
-        """计算遗忘曲线因子
+        """计算遗忘曲线因子（连续幂律）
 
-        基于空闲天数的分段函数（值越大衰减越快）：
-        - ≤1天: 0.05 (极少衰减)
-        - ≤7天: 0.1 (慢速衰减)
-        - ≤30天: 0.2 (正常衰减)
-        - >30天: 0.4 (快速衰减)
+        幂律形态的遗忘曲线：短期衰减快、长期衰减慢，且**处处连续**。
+        锚点之间按对数-对数线性插值，锚点处严格取值，超出末锚点后保持末值。
+
+        为什么不是分段常量：原实现把曲线切成 4 段常量，在 1 / 7 / 30 天处
+        硬跳变（相对跳变 50%/50%/60%）。两条记忆 idle 时间相差 1 微秒，
+        衰减因子却能相差一倍——既不符合遗忘的连续本性，也让曲线边界上的
+        比较失去区分度（idle=1 天与 idle=6 天取到同一因子）。
 
         Args:
-            days_idle: 空闲天数
+            days_idle: 空闲天数（负值按 0 处理）
 
         Returns:
-            float: 曲线因子 (0.0 - 1.0)
+            float: 曲线因子，单调不增，取值区间约 [0.2, 2.0]
         """
-        # Ebbinghaus 遗忘曲线: 短期衰减快、长期衰减慢
-        # 1天=2.0, 7天=1.0, 30天=0.5, >30天=0.2
-        if days_idle <= 1:
-            return 2.0
-        elif days_idle <= 7:
-            return 1.0
-        elif days_idle <= 30:
-            return 0.5
-        else:
-            return 0.2
+        days = max(0.0, float(days_idle))
+        anchors = cls._CURVE_ANCHORS
+
+        if days <= anchors[0][0]:
+            return anchors[0][1]
+
+        for (day0, factor0), (day1, factor1) in zip(anchors, anchors[1:]):
+            if days <= day1:
+                span = (math.log(days) - math.log(day0)) / (math.log(day1) - math.log(day0))
+                return math.exp(math.log(factor0) + span * (math.log(factor1) - math.log(factor0)))
+
+        return anchors[-1][1]
 
     @classmethod
     def get_lifecycle_stage(cls, temperature: float) -> str:

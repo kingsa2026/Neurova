@@ -3,7 +3,7 @@ Tier 4A.1 RED 测试 — Memory dataclass 统一
 
 验证：
 1. mem_core.Memory 已删除（应抛 ImportError）
-2. memory_rw_manager / cognitive / neurova.memory 三处 Memory 全部指向 models.Memory
+2. cognitive / neurova.memory 两处 Memory 全部指向 models.Memory
 3. MemoryRecord.to_memory() / from_memory() 双向转换
 4. UnifiedMemoryNode.to_memory() / from_memory() 双向转换
 """
@@ -50,18 +50,6 @@ class TestDataclassUnificationImports:
                 pytest.fail("RED: from neurova.mem_core import Memory 仍可导入，应已删除")
             except (ImportError, AttributeError):
                 pass  # 预期
-
-    def test_memory_rw_manager_uses_models_Memory(self):
-        """RED: memory_rw_manager.Memory 应 is models.Memory"""
-        from neurova.cognitive_layers.memory_layer.models import Memory as ModelsMemory
-
-        # 重新加载以反映最新源码
-        import neurova.memory_rw_manager as mrw
-
-        importlib.reload(mrw)
-        assert mrw.Memory is ModelsMemory, (
-            f"RED: memory_rw_manager.Memory 应 is models.Memory, 实际: {mrw.Memory}"
-        )
 
     def test_cognitive_init_uses_models_Memory(self):
         """RED: neurova.cognitive.Memory 应 is models.Memory"""

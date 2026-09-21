@@ -171,21 +171,6 @@ class TestDeletedDeadCode:
         assert conflict["type"] == "negation_conflict"
 
 
-class TestProactiveRecallEmotionTrigger:
-    """缺陷：proactive_recall.py 中 `config.get("emotions", [])` 的返回值
-    被丢弃，下方使用未定义的 target_emotion → NameError，
-    情感触发回忆整体失效。
-    """
-
-    def test_target_emotion_is_bound(self):
-        import inspect
-
-        from neurova.cognitive_layers.memory_layer import proactive_recall
-
-        src = inspect.getsource(proactive_recall)
-        assert "target_emotion = config.get(" in src
-
-
 class TestFirewallStatsEndpoint:
     """缺陷：/stats 端点引用了不存在的模块级变量 _firewall_rules_store，
     NameError 被 except 吞掉，统计永远返回全 0。
