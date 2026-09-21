@@ -50,19 +50,20 @@ class TestEnvelopeBudgetNoDoubleCount:
         )
 
     def test_envelope_not_dropped_when_budget_sufficient(self, monkeypatch):
-        """压缩触发时历史保留条数=预算上限容纳的最大值（不因信封双计多弃）。"""
+        """压缩触发时历史保留条数 = 按"裸 user"口径算出的预算上限（不因信封双计多弃）。
+
+        旧版把 5 这个数字写死，那是用**会低估 20 倍的 BALANCED 尺子**算出来的。
+        改为从同一条预算等式反推应有条数：保留数必须达到
+        `(max_total - system - envelope - 裸user) / 每条历史` 的向下取整，
+        而不是信封被双计后的更小值。断言与尺子解耦，判据仍然咬合。
+        """
         inj = self._make_injector(max_total=1200)
         # 中性化 _adjust_budget，隔离信封压缩路径（该测试只打双计）
         monkeypatch.setattr(
             UnifiedContextInjector, "_adjust_budget", lambda self, h, m, mt: self._token_budget
         )
-        # 实测口径（TokenEstimator BALANCED）：历史条≈96；system≈300；
-        # 信封≈331；裸 user≈6。
-        # 总账：300 + 800(trim 预算满载) + 337 = 1437 > 1200 → 必触发压缩。
-        # 修复后裸 user 口径：1200-300-6=894 ≥331+96n → n=5 保留 5 条历史；
-        # 双计旧径 user 含信封(337)：1200-300-337=563 ≥331+96n → n=2。
         history = [
-            {"role": "user", "content": "历史消息内容填充" * 8} for _ in range(12)
+            {"role": "user", "content": "历史消息内容填充" * 8} for _ in range(30)
         ]
         result = inj.build_context(
             system_prompt="系统提示" * 50,
@@ -75,7 +76,23 @@ class TestEnvelopeBudgetNoDoubleCount:
             for m in result.context
             if m["role"] == "user" and m["content"].startswith("历史消息内容填充")
         ]
-        assert len(kept) == 5, f"历史保留 {len(kept)} 条 ≠ 5（信封双计导致过度丢弃）"
+        assert len(kept) < len(history), "预算不够却零淘汰——本用例没打到双计路径"
+
+        envelope = [m for m in result.context if m["content"].startswith("<system-reminder>")]
+        assert envelope, "信封被整包清空"
+        per_msg = inj._count_tokens(history[0]["content"])
+        budget_for_history = (
+            1200
+            - inj._count_tokens("系统提示" * 50)
+            - inj._count_tokens(envelope[0]["content"])
+            - inj._count_tokens("当前问题")  # 裸 user 口径（不含信封）
+        )
+        expected = budget_for_history // per_msg
+        # 历史淘汰走"最老先弃"，序列里还有一条摘要行占位，故允许 ±1 的编排差
+        assert abs(len(kept) - expected) <= 1, (
+            f"历史保留 {len(kept)} 条 ≠ 预算上限 {expected} 条"
+            "（信封双计导致过度丢弃）"
+        )
         assert result.total_tokens <= 1200
 
 
@@ -92,11 +109,12 @@ class TestCompressIfNeededUsesNewSignature:
             enable_cache=False,
             enable_compression=True,
         )
+        # 每条约 300 token（o200k 精确计数），80 条 = 24000 > MAX_CONTEXT_TOKENS(16000)
         context = (
             [{"role": "system", "content": "系统指令"}]
             + [
                 {"role": "user" if i % 2 == 0 else "assistant", "content": f"第{i}轮" + "填充内容" * 100}
-                for i in range(40)
+                for i in range(80)
             ]
             + [{"role": "user", "content": "最终问题"}]
         )

@@ -19,7 +19,7 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 # 导入统一的 Token 估算器
-from .token_estimator import EstimationStrategy, TokenEstimator
+from .token_estimator import estimate_tokens as estimate_text_tokens
 
 # 批次 A：动态上下文信封（五段动态内容+分钟级时间迁出 system）
 from .envelope import compress_envelope, build_envelope, build_time_block, build_system_time_hint
@@ -154,9 +154,6 @@ class UnifiedContextInjector(BaseModule):
         self._token_budget = token_budget or TokenBudget()
         self._enable_cache = enable_cache
         self._enable_compression = enable_compression
-
-        # 初始化统一的 Token 估算器
-        self._token_estimator = TokenEstimator(EstimationStrategy.BALANCED)
 
         # 初始化智能压缩器
         if self._enable_compression:
@@ -897,12 +894,11 @@ class UnifiedContextInjector(BaseModule):
         return text[:max_chars] + "\n...[已截断]"
 
     def _count_tokens(self, text: str) -> int:
-        """估算 Token 数"""
+        """估算 Token 数（统一入口，禁止就地近似）"""
         if not text:
             return 0
 
-        # 使用统一的 Token 估算器
-        return self._token_estimator.estimate(text)
+        return estimate_text_tokens(text)
 
     def retrieve_memories(self, query: str, limit: int = 10, prioritize_high_temp: bool = True) -> List[Dict]:
         """检索相关记忆"""
