@@ -98,7 +98,6 @@ def _session_order(conn: sqlite3.Connection) -> List[str]:
 def _session_rows(conn: sqlite3.Connection, session_id: str, session: Optional[sqlite3.Row],
                   sink: MediaSink, declared: Counter) -> List[Tuple[str, List[SourceEvent]]]:
     rows: List[Tuple[str, List[SourceEvent]]] = []
-    pending: List[str] = []
     for message in _rows(conn, "SELECT id, data, time_created FROM message"
                                " WHERE session_id = ? ORDER BY time_created, id", (session_id,)):
         data = _json(message["data"])
@@ -109,11 +108,13 @@ def _session_rows(conn: sqlite3.Connection, session_id: str, session: Optional[s
         metering = _metering(data, session, first=not rows)
         parts = _rows(conn, "SELECT id, data, time_created FROM part"
                             " WHERE message_id = ? ORDER BY time_created, id", (message["id"],))
-        produced = 0
+        produced = pending_thinking = 0
+        pending: List[str] = []                          # 思考只在本条消息内挂靠
         for part in parts:
             body = _json(part["data"])
             if str(body.get("type") or "") == "reasoning":
                 pending.append(str(body.get("text") or ""))
+                pending_thinking += 1
                 continue
             events = _part_events(part, body, kind, metering, sink, declared)
             if not events:
@@ -124,14 +125,15 @@ def _session_rows(conn: sqlite3.Connection, session_id: str, session: Optional[s
                                                  "reasoning": "".join(pending)}), *events[1:]]
                 del pending[:]
             rows.append((f"{session_id}#{part['id']}", events))
-        if not produced and not pending:
+        if pending:
+            # 这条消息没有可挂靠的事件（可能整条只有思考块）：思考自己成一条，
+            # 既不丢、也不会顺着会话窜到下一条消息（包括 user 消息）头上。
+            rows.append((f"{session_id}#{message['id']}#reasoning",
+                         [SourceEvent(kind=kind, ts=_ts(message["time_created"]),
+                                      role=ROLE_PREFIXES[kind], reasoning="".join(pending),
+                                      extra=dict(metering))]))
+        elif not produced and not pending_thinking:
             declared["无块"] += 1
-    if pending:
-        # 轮尾没人接的思考：并进最后一条事件，不丢
-        base, events = rows[-1]
-        rows[-1] = (base, [*events[:-1], events[-1].__class__(
-            **{**events[-1].__dict__,
-               "reasoning": events[-1].reasoning + "".join(pending)})])
     return rows
 
 
