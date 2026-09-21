@@ -1,7 +1,7 @@
 # Neurova
 
 <div align="center">
-  <img src="../../NEUROVA-ICO.png" alt="Neurova Logo" width="120" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
+  <img src="../../../NEUROVA-ICO.png" alt="Neurova Logo" width="120" style="border-radius: 12px; box-shadow: 0 4px 8px rgba(0,0,0,0.2);">
   <h1 style="margin-top: 16px;">🌟 따뜻한 AI 에이전트 🌟</h1>
   <p><i>모든 에이전트는 착한 별이며, 당신은 별의 수호자입니다</i></p>
 </div>
@@ -273,7 +273,7 @@ npm run dev
 
 ## 라이선스
 
-이 프로젝트는 **MIT 라이선스**로 라이선스되어 있습니다. 자세한 내용은 [LICENSE](../../LICENSE) 파일을 참조하세요.
+이 프로젝트는 **MIT 라이선스**로 라이선스되어 있습니다. 자세한 내용은 저장소 루트 [README.md](../../../README.md)의 「라이선스」 절을 참조하세요.
 
 ---
 

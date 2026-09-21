@@ -2258,11 +2258,16 @@ class PostChatPipeline:
     async def _step_conflict_detection(self, user_input: str, reply: str):
         """Step 9.9: 记忆冲突**纯观测**——只记录，不阻断、不回滚（工单 012 裁决）。
 
-        本步跑在 `save_memory` 之后，且检测器只给矛盾分，判不出"两条里哪条是
+        本步跑在 `save_memory` 之后，且检测器只给信号、判不出"两条里哪条是
         错的"；据此否决会随机丢真实记忆（回滚本身有 Step 9.95 版本快照兜底，缺
         的是"以哪条为准"的判据）。故显式定性为观测：结论里 `blocking=False`
         与 message 一同自陈"不阻断"，不得再留"检出了冲突"这种读起来像已处置的表述。
         要升级为可否决，需要先有裁决证据（哪条为准 + 出处），那是独立一张工单。
+
+        **检出与可读分开、但不留断点**：本步把检出的冲突连同依据落进记忆侧的账
+        （`memory_manager.record_conflicts`，source 自陈本步名），
+        于是"检出过什么"在 `get_conflict_summary()` / `/memory/stats` 上读得到。
+        依据缺失的条目按诚实边界拒绝入账，`conflicts_recorded` 如实反映差额。
         """
         step_name = "conflict_detection"
         start_time = time.time()
@@ -2319,16 +2324,31 @@ class PostChatPipeline:
                         conflict.get("type"),
                         conflict.get("similarity", 0.0),
                         conflict.get("contradiction_score", 0.0),
-                        conflict.get("description"),
+                        conflict.get("basis") or conflict.get("description"),
                     )
+                # 落账：检出多少条、账上留下多少条要分得开。依据缺失的按诚实边界
+                # 拒绝入账（宁可不记，也不记一条读不懂的账），返回值如实反映差额。
+                # 此前这一步只写日志、不写账，`get_conflict_summary()` 因此全仓
+                # 零调用方——检出了什么在读取侧看不见（Issue #72 登记的残余项）。
+                recorded = 0
+                recorder = getattr(memory_manager, "record_conflicts", None)
+                if callable(recorder):
+                    try:
+                        recorded = int(recorder(conflicts, source=step_name))
+                    except Exception as e:  # noqa: BLE001 - 记账失败不阻断观测
+                        logger.warning("冲突入账失败（观测结果仍在步骤读数里）: %s", e)
                 self._step_results.append(
                     StepResult(
                         step_name=step_name,
                         status=StepStatus.EXECUTED,
-                        message=f"检测到 {len(conflicts)} 处记忆冲突（纯观测，不阻断写入）",
+                        message=(
+                            f"检测到 {len(conflicts)} 处记忆冲突（纯观测，不阻断写入；"
+                            f"入账 {recorded} 条）"
+                        ),
                         duration_ms=(time.time() - start_time) * 1000,
                         data={
                             "conflicts_count": len(conflicts),
+                            "conflicts_recorded": recorded,
                             "blocking": False,
                             "conflicts": conflicts,
                         },

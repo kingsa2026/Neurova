@@ -305,14 +305,14 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 | # | 判据 | 观测方式 |
 |---|---|---|
 | A1 | **跨重启为真**：写 → 销毁实例 → 新实例同库 → `recall_evicted` 取回原文 | 新进程/新实例断言条数与内容逐字相等；写失败面走 `get_retention_stats()["ledger_persistence"]`（`failed`/`last_error` 点名原因） |
-| A2 | 写放大：24 条/轮的归档耗时 ≤ 现状形状的 **1/3**（实测两种形状差 260–420×，1/3 是极宽松的上界） | 同一台机、同一存量库规模下 A/B，各 20 轮取中位 |
+| A2 | 写放大：24 条/轮的归档耗时 ≤ 现状形状的 **1/3**（实测两种形状差 260–420×，1/3 是极宽松的上界） | 同一台机、同一存量库规模下 A/B，各 20 轮取中位；事务语义另观测：批内失败整批回滚、批外不可见、提交后跨连接可见、`batches` 可读（003） |
 | A3 | 中文预筛命中：`上下文压缩` 的 MATCH 命中数 == LIKE 真值 | 对拍断言（两路结果集相等） |
 | A4 | <3 长度查询走 LIKE，且 `%`/`_` 不越权 | 构造含 `%` `_` 的库内文本，断言命中集合与真值相等 |
 | A5 | GC 生效：超 `keep_count`/`keep_days` 的行被清理，FTS 同步 | 写入超限后断言两表行数一致 |
 | A6 | 迁移幂等 + 防降级：v0 库迁到 v2 后重跑 migrate 返回空；伪造高版本库被拒 | `migrate()` 返回值 + `SchemaVersionError` |
 | A7 | 零停机：迁移窗口内并发写不停且不被长事务阻塞 | 并发写线程 + 记录停等 p95 上界 |
 | A8 | 隔离：群聊归档在单聊轮召回不可见，跨房间互不可见 | 走 `filter_by_scope` 同源判据 |
-| A9 | 启动代价：只登记不预载，启动对 DB 的读次数为常数 | 计数连接/查询次数或断言耗时上界 |
+| A9 | 启动代价：只登记不预载，启动对 DB 的读次数为常数 | 计数连接/查询次数或断言耗时上界；另观测：登记值随写入/GC 同步、登记失败可见、`draw`/`query` 零查库、`recall_evicted` 为唯一读路径（005） |
 
 **全部判据走先红后绿**（AGENTS.md 修复教义第 3 条）：先写断言现状缺陷的失败测试并实证它
 真的红，再最小实现转绿。红灯文件在转绿前不得进 `scripts/ci/protected_tests.txt`。
@@ -352,7 +352,59 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 | 工单 | 状态 | 交付物 | 证据 |
 |---|---|---|---|
 | 001 跨重启召回示踪弹 | ✅ 已交付 | `neurova/context_pool.py`（写穿点前移到 `add_context`）+ `tests/unit/context/test_context_persistence_restart.py` | 红灯 7 failed → 绿灯 7 passed；live-verify 真跨进程 `tests/manual/context_persistence_restart_90.py` |
-| 002 版本域与 v1 迁移 | 待实施（U1 定案已就绪：v1 = `content_digest` + `created_at` + `chat_scope` + `uniq_digest` + `idx_scope_id`） | — | — |
+| 005 启动加载与热集回载 | ✅ 已交付 | `neurova/context_pool.py`（启动只登记 + `rehydrate`）+ `neurova/context/eviction_ledger_db.py`（`recentRows`）+ `neurova/core/metrics.py`（`ledger_rows` gauge） | 红灯 8 failed → 绿灯 12 passed；live-verify 稳态启动查询次数 2/2/2（库 0/200/5000 条）`tests/manual/context_pool_startup_load_90.py` |
+| 003 写侧批量提交 | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（常驻连接 + 批量事务）+ `neurova/context_pool.py`（`archiveBatch()` 事务边界）+ `neurova/context/orchestrator.py`（本轮归档收进一个批） | 红灯 10 failed → 绿灯 12 passed；live-verify 24 条/轮 233→1.03 ms（220–233×）`tests/manual/context_ledger_batching_90.py` |
+| 002 版本域与 v1 迁移 | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（`context_ledger` 版本域 + v1 迁移）+ `neurova/context_pool.py`（召回路径回填作用域/归档时刻）+ `tests/unit/context/test_context_ledger_migration.py` | 红灯 15 failed → 绿灯 17 passed；live-verify 真 v0 库经生产构造面迁移 `tests/manual/context_ledger_migration_90.py` |
+
+**005 对 D10 的偏离记录**：
+
+- **登记值不是"启动快照"而是增量读数**：D10 说启动只读一次 `COUNT(*)` 供
+  `get_retention_stats` / `/metrics`。若读数停在启动那一刻，对调用方就是一份**会过期**
+  的账（写了几千条仍显示启动值）。故登记一次 + 由本进程写入/GC 增量维护；
+  增量的判据是"这一行**是否真的插入了**"——`record()` 因此返回布尔值
+  （同内容去重命中为 False），不靠"自己数调用次数"糊一份可能与库不符的账。
+- **登记失败不静默降级**：`count()` 失败时池照常构造（内存归档不受影响），
+  但 `ledger.registered_at_startup` 变 False 并点名 `last_error`——读不出来的持久规模
+  必须以"不可用"形态暴露，不许看起来像一个正常的 0。
+- **指标接线是 A9 的必达路径**：登记值若无人读走就是"只写不读"的断点，
+  故新增 gauge `neurova_context_pool_ledger_rows` 并由 `observe_context_pools()` 填充。
+- **稳态 vs 首次启动分开读数**：旧库首次启动另付 002 的一次性迁移开销，
+  live-verify 把两个读数分别打印；把迁移混进"启动代价"就是拿一次性成本当常态。
+
+**003 对 D8 的偏离记录**：
+
+- **事务边界落在池侧而非台账侧**：D8 说"事务边界 = 一次归档调用（`add_context` 的
+  批量调用方）"。实施把该边界显式化为池的 `archiveBatch()` 上下文管理器，并由
+  `orchestrator.build_context` 的归档段整体包住（对话轮/记忆/经验/反思四类写入方
+  共用一批）——台账侧只提供 `beginBatch/commitBatch` 原语，不自作判断"哪几条算一批"。
+- **批内失败定死为整批回滚**（D8 未指定二选一）：本批条数整批计入 `failed` 并点名原因，
+  不部分提交、不谎报 `written`；内存归档不受影响。
+- **读路径一并改走常驻连接**：D8 只要求写入口，但常驻连接若只给写用，读仍每次
+  connect/close 会让 `recall_evicted` 在长会话下重复付连接成本。故 `search` / `count` /
+  `gc` 同批收敛（实例内 `RLock` 串行——sqlite3 连接对象不可并发使用）。
+- **`gc` 由隐式事务改为显式事务**：改前 `gc` 的删除 + FTS 对齐靠 sqlite3 隐式事务 +
+  末尾 commit；关掉 `isolation_level` 后必须显式包事务，否则语义从"全或全无"退化成
+  逐条自动提交（该退化属于"没人会发现"的那一类，故在此显式登记）。
+
+**002 对 D12 的偏离记录**：
+
+- **迁移耗时读数高于规格基线**：规格 D12 表的 v1「0.18–0.20 s」来自基线脚本
+  （其 `content_digest` 回填是常量 `'legacy-'||id`），而实施按**真内容指纹**逐行
+  回填。5 万行真库实测（三次连跑）：**0.48–0.49 s**；分阶段读数
+  加列 0.022 s / 回填 0.25 s / 合并重复行 0.09 s / 两个索引 0.09 s。
+  这仍是秒级、且在单条独立事务内，量级与"零停机"结论不冲突；回填已改
+  `executemany`（单条 round-trip 版本实测 0.52–0.56 s）。**读数以本节为准**，
+  D12 表的区间仅作形状比较。
+- **新增 v1 迁移步骤：合并同内容重复行**。规格未列该步，但唯一索引
+  `uniq_digest` 在旧库带重复行时会让迁移直接失败——合并（保留最早一条、
+  同批清掉对应 FTS 影子行、点名条数）是承载 D12「回滚场景允许旧代码写入」的
+  必要前置。
+- **回滚场景下的同内容双行由读侧去重兜住**：旧代码写的新行 `content_digest` 为
+  NULL，唯一索引对 NULL 不冲突（规格 D12 已实测）。此时"同内容只出一条"的对外
+  契约由召回路径按内容指纹去重承担，**不**把旧代码写入改成报错。
+- **`created_at` 与 `chat_scope` 的兜底落点**：两路兜底函数落在台账模块
+  （`resolveArchivedScope` / `resolveArchivedCreatedAt`），召回路径调用它们。
+  作用域判定仍只经 `memory_scope.scope_from_metadata` 一份规则，池侧不复制。
 
 **001 对 D8/D11 的偏离记录**：
 
