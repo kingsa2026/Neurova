@@ -221,7 +221,14 @@ class CognitiveStorageEngine:
 
     def __init__(self, agent_id: str, data_dir: str = None):
         self.agent_id = agent_id
-        self.data_dir = Path(data_dir or f"data/{agent_id}")
+        # 省略 data_dir 时必须落到按 agent 推导的**绝对**目录：原值 `f"data/{agent_id}"`
+        # 是 CWD 相对路径，认知图谱库随启动目录散落（审计 2026-09-21 §7 的同族）。
+        if data_dir:
+            self.data_dir = Path(data_dir)
+        else:
+            from neurova.core.data_root import get_agent_data_dir
+
+            self.data_dir = get_agent_data_dir(agent_id)
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
         # L0: WAL 缓冲区（内存 + 文件）
