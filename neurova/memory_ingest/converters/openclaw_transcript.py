@@ -139,10 +139,12 @@ def _memory_sql(tables: set) -> str:
     prov_join = (f"LEFT JOIN {PROVENANCE_TABLE} AS p ON p.chunk_id = c.id"
                  if PROVENANCE_TABLE in tables else "")
     prov_cols = ("p.origin_class, p.session_kind, p.observed_at, p.supersedes_key"
-                 if prov_join else "NULL, NULL, NULL, NULL")
+                 if prov_join else "NULL AS origin_class, NULL AS session_kind,"
+                                   " NULL AS observed_at, NULL AS supersedes_key")
     recall_join = (f"LEFT JOIN {RECALL_TABLE} AS m ON m.chunk_id = c.id"
                    if RECALL_TABLE in tables else "")
-    recall_cols = "m.importance, m.triggers, m.project_key" if recall_join else "NULL, NULL, NULL"
+    recall_cols = ("m.importance, m.triggers, m.project_key" if recall_join
+                   else "NULL AS importance, NULL AS triggers, NULL AS project_key")
     return (f"SELECT c.id, c.source, c.text, c.path, c.start_line, c.end_line, c.updated_at,"
             f" {prov_cols}, {recall_cols} FROM {MEMORY_TABLE} AS c"
             f" {prov_join} {recall_join} ORDER BY c.id")
