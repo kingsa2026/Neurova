@@ -195,3 +195,8 @@ tests/unit/evolution/experience/test_muscle_memory_param_shape.py
 tests/unit/evolution/experience/test_muscle_memory_recall.py
 tests/unit/skills/test_skill_view_key_domain.py
 tests/unit/skills/test_skill_entry_choke_migration.py
+
+# Issue #74 温度衰减双实现收敛：单一事实源（第二套实现不得回加）+ 连续衰减曲线
+# （阶跃边界 = 既有红灯 test_ebbinghaus_curve 的根因）+ 其余 5 组成建制死码退役锁定
+tests/unit/cognitive_layers/memory_layer/test_temperature_single_source.py
+
