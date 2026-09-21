@@ -165,3 +165,76 @@
   未在本批执行——读数上它们仍如实显示为 `unverified`。
 - 仓库根 `neurova_memories_persist.db`（71,831 行历史污染）：围栏已堵住新增，
   删库需人工确认，见 `docs/specs/2026-09-19-experience-quality-gate/tickets/011-记忆写入内容门.md`。
+
+---
+
+## 7. 未处置三项的收口（2026-09-21 第二批，Issue #75 用户点名"历史污染需要清空"）
+
+§6.6 登记的三项逐条处置。判据仍是"纪律重新咬合"，不是"报错消失"。
+
+### 7.1 历史污染：清空**已执行**，且清空动作本身可复核、可回退
+
+`neurova/cognitive_layers/memory_layer/pollution_purge.py`：按**正证据**判定，两条判据都在库里/盘上可查。
+
+- **位置证据**：库文件落在合法根（agent 工作区根 / 数据根）之外 ⇒ 散落物。
+- **身份证据**：行 `agent_id` 整段命中 `test_agent_*` / `test_*` / `engine_it_*`（与 §7 的实测口径一致）。
+  **不做子串包含、不做比例判断**——不命中的行一律保留。
+
+配套：`scripts/memory_pollution_purge.py`（默认只预报，`--apply` 才落手）。落手先归档整库（含
+`-wal` / `-shm`）成 `.pre-purge-<stamp>`，把归档副本改回原名即可回退；目标落在 agent 工作区内
+时当场拒（清历史污染不得连带真实 agent 的记忆）。
+
+实测（本仓）：仓库根那份散落库已于本次清除并归档，二次扫描报"未发现历史污染"。
+
+### 7.2 散落根因：默认落点收成单一事实源
+
+污染只堵新增不够——**默认值本身**还在各模块各写一遍，换个工作目录就换个库。本批新增
+`neurova/core/data_root.py`（`get_data_root()` / `get_agent_data_dir()` / `ensure_agent_data_dir()`，
+`NEUROVA_DATA_DIR` 可注入），并把这一族的默认值全部改为经它推导的**绝对路径**：
+
+`core/database.py`（`defaultDbPath()`）、`core/connection_pool.py`、`core/db_indexes.py`、
+`api/endpoints/files_api.py`（`users.db`）、`memory_layer/storage.py`（`defaultStorageDir()`）、
+`memory/pending_memory.py`（`defaultPendingDbPath()`）、`cognitive_storage_engine.py`、
+`knowledge_graph/manager.py`、`unified_vector_store.py`、`core/env_check.py`。
+
+认知图谱目录的**写入端与删除端改为同一处推导**（`agent_core._init_cognitive_graph` /
+`api/endpoints/agent.py` 的删除清理），此前一个拼 `f"data/{agent_id}"`、一个拼 `Path("data")/agent_id`，
+CWD 一变就删不掉（幽灵 agent 残留的成因之一）。
+
+live-verify：在任意 CWD 用各默认值取连接 / 建存储引擎，CWD 下**零新增文件**，全部落在数据根内。
+
+### 7.3 段7（入索引）：不是欠账，是**分工**——归属写进名册并受守卫约束
+
+段名册由两态扩为三态：`wired` / `delegated` / `planned`。`indexing` 归入 `delegated`，归属写在
+`admission.SEGMENT_OWNERS`：
+
+- `knowledge/repository.py::_rebuild_indexes` / `_apply_pending_ops`（条目与分块两路，挂在
+  `search_visible_items` 检索入口上按需维护，向量路落 `UnifiedVectorStore.index_memories`）；
+- `knowledge/foundation/read_surface.py::bm25_rank`（事实路查询时实时打分）。
+
+`test_index_segment_ownership` 去这两个文件里查 owner 是否还在、还在不在检索路上；owner 消失即红。
+回执分三栏（`pendingSegments` / `delegatedSegments` / `plannedSegments`），`segmentsApplied` 不再冒领别处负责的段。
+
+### 7.4 存量 `unverified`：归正入口已具备并实测闭环
+
+`scripts/knowledge_assertion_regrade.py`（默认只预报，`--apply` 落手；落手前自动归档整库）：
+`relinkUnlinked()` 补链位 → `attest()` 逐条裁决并回写。实测（真库真链路）：4 条存量行
+`unverified → verified`，`verify()` 无断裂。
+
+**无活动依据的行保持 `unverified`**——那一维确实没依据，不许为了读数好看给个 `verified`；
+混合态活动（部分有摘要）不重排，交由巡检报断裂。
+
+### 7.5 被跟踪的运行期残留：清出并加守卫
+
+`sessions/` 与 `trajectories/` 在 `.gitignore` 里本就写着，但更早一次提交把它们的内容一起提交了进来
+（一份 2026-06-04 的 "hello" 会话 + 5 份 `session_id=test` 的 anonymous 轨迹），ignore 规则从此看不见它们。
+本批将这些文件移出跟踪并删除；`test_tracked_run_residue_guard` 常驻锁住（`git ls-files` 在两个根下必须零命中，
+规格说明文档不受影响）。同族的 `agent_workspaces/kai/.../muscle_l2.json`（2 条降级参数脏条目）按 008 的
+既定口径归档重攒。
+
+### 7.6 仍在册（不静默遗留）
+
+- `CognitiveStorageEngine` 之外仍按 CWD 拼 `data/<sub>` 的零散面（如 `agent.py` 里另有若干
+  `data/<name>` 子目录，多为单个服务自己的配置/状态目录）未逐个纳入数据根；本批只收**与记忆/知识
+  写入面直接相关**的那一族。新增面若再拼相对路径，`test_data_root_single_source` 的
+  "字面量只在解析器里"那条会先红。

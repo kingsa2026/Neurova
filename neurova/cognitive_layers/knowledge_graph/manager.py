@@ -1,3 +1,4 @@
+from neurova.core.data_root import get_data_root
 """
 知识图谱管理器
 
@@ -1201,7 +1202,7 @@ def get_agent_knowledge_graph_manager(
         # 旧全局布局只有 default 的历史数据，一次性认领迁移
         if agent_id == "default":
             legacy = legacy_dir or str(
-                Path(__file__).resolve().parents[3] / "data" / "knowledge_graph"
+                get_data_root() / "knowledge_graph"
             )
             if (Path(legacy) / "nodes.json").exists():
                 _migrate_legacy_graph_layout(legacy, storage_dir)
