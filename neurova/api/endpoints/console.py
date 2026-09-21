@@ -609,13 +609,6 @@ def _build_tool_events(
     if not isinstance(tm, dict):
         return events
     tm_type = tm.get("type", "")
-    # _tool_messages_list 同时存在两种形状：
-    # - 文本模式条目（handle_tool_calls 写入）：{type, tool_name, params/result, ...}
-    # - 原生事件包装（_call_loop_stream C1 写入）：{type, data: {...}}
-    # 包装条目没有 tool_name，且语义与文本模式条目重复（同一次工具调用），
-    # 直接跳过，避免产出空 name 的 SSE 事件
-    if not tm.get("tool_name"):
-        return events
     if tm_type == "tool_call":
         _call_event = {
             "type": "tool_call",

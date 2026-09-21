@@ -916,42 +916,14 @@ class SubSystemContainer:
             a.tool_orchestrator = ToolOrchestrator()
 
             async def _orchestrator_executor(tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-                if a._skill_registry:
-                    # Wave H-W2 可见门（第三执行链）：轮级视图在场且视图外
-                    # 技能 → 不尝试执行（ToolRouter 路径照常）
-                    try:
-                        from neurova.core.turn_context import get_turn_skill_view
-
-                        _sv = get_turn_skill_view()
-                    except Exception:  # noqa: BLE001
-                        _sv = None
-                    if _sv is not None and not _sv.invocable(tool_name):
-                        skill = None
-                    else:
-                        skill = a._skill_registry.get_skill(tool_name)
-                    if skill:
-                        # 沙箱根注入（2026-09-08 相对路径乱放根因修复）：
-                        # file_operation 相对路径锚定本 agent 工作区，服务端
-                        # 赋值覆盖调用方伪造的同名参数
-                        if tool_name == "file_operation":
-                            params = {**(params or {}),
-                                      "_base_dir": str(getattr(a, "workspace_path", "") or ".")}
-                        result = await a._skill_registry.execute_skill(tool_name, params)
-                        if result.success:
-                            return {"success": True, "data": result.data}
-                        return {"success": False, "error": result.error}
-                if a.tool_router:
-                    router_result = await a.tool_router.execute(
-                        tool_name=tool_name,
-                        params=params,
-                        agent_id=a.config.agent_id,
-                        user_id=getattr(a.config, "user_id", "default"),
-                    )
-                    if router_result and router_result.success:
-                        return {"success": True, "data": router_result.result}
-                    error = getattr(router_result, "error", None) if router_result else "no result"
-                    return {"success": False, "error": str(error) if error else "unknown error"}
-                return {"success": False, "error": f"工具 '{tool_name}' 未找到"}
+                # 执行一律委托执行咽喉（工单 005：ToolOrchestrator 也是执行入口）。
+                # 此前这里自己走 SkillRegistry → ToolRouter 两级回退，绕开了票据、
+                # `on_tool_executed`、治理预检与沙箱根注入，与主链给出两套成败口径。
+                payload = await a.tool_executor.execute(tool_name, dict(params or {}))
+                if a.tool_executor._result_is_success(payload):
+                    return {"success": True, "data": payload}
+                error = (payload or {}).get("error") if isinstance(payload, dict) else None
+                return {"success": False, "error": str(error or "unknown error")}
 
             a.tool_orchestrator.set_executor(_orchestrator_executor)
         except Exception as e:

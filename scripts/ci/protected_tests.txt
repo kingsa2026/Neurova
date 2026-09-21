@@ -186,3 +186,12 @@ tests/unit/memory/test_memory_storage_fence.py
 # 前像回收 + 不得记成已修复），守卫与生成器 scripts/scan_docs_refs.py 同一口径
 tests/unit/test_legacy_ref_ledger_guard.py
 
+# 工具↔经验↔再调用三环路修复批（Issue #80）：三链路探针基座 + 形状单源 + 咽喉收编
+#   + 成败三态 + 采集可观测 + 肌肉记忆止血/终态 + 视图键域收口 + 入口迁移
+tests/unit/agent/test_tool_loop_funnel_probes.py
+tests/unit/evolution/experience/test_success_three_state.py
+tests/unit/evolution/experience/test_ticket_context_observability.py
+tests/unit/evolution/experience/test_muscle_memory_param_shape.py
+tests/unit/evolution/experience/test_muscle_memory_recall.py
+tests/unit/skills/test_skill_view_key_domain.py
+tests/unit/skills/test_skill_entry_choke_migration.py

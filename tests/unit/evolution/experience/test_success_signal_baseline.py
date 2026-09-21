@@ -77,13 +77,14 @@ def test_no_evidence_turn_is_tagged_not_recorded_as_failure(experience_probe):
 
     D1 的取舍是"保留量 + 标证据"：库里要能把"确证失败"与"这轮没有客观回执"分开，
     否则 007 的检索降权与 008 的指标都会把两者混成一锅。
-    002 交付时这格挤在 `tags` 字符串里；工单 008 把它升成一等列 `evidence_state`
-    （本用例随之改写：列上有值、tags 里不再有那个字符串 hack）。
+    002 交付时这格挤在 `tags` 字符串里；工单 008 把它升成一等列 `evidence_state`。
+    工单 004 再把 `success` 位放开为三态：本用例此前断言 `success == 0`——那正是
+    L-04 的折叠（把"没测到"演成"失败"），现按三态改为 `NULL`。
     """
     experience_probe.run_turn(tool_messages=[])
 
     row = experience_probe.experience_rows()[-1]
-    assert row["success"] == 0, f"无证据轮被写成成功票：{row}"
+    assert row["success"] is None, f"无证据轮被折成了二分成败：{row}"
     assert row["evidence_state"] == "unevidenced", (
         f"无证据轮没有可区分的证据列，将与确证失败同等降权：{row}")
     assert "unevidenced" not in (row["tags"] or ""), "字符串 hack 已退役，不得两处各写一份"

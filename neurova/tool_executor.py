@@ -1342,6 +1342,15 @@ class ToolExecutor:
         finally:
             # H5: 所有路径统一触发 on_tool_executed（成功/失败均触发）
             elapsed = time.time() - start
+            # 工单 009：elapsed 此前只喂钩子，"经验落库的 execution_time"没有来源
+            # （生产库 103 行 nonNULL 0/103）。咽喉是唯一知道真实耗时的地方，
+            # 故在此累加到轮级聚合，由 post-chat 读走。
+            try:
+                from neurova.core.turn_context import add_turn_tool_elapsed
+
+                add_turn_tool_elapsed(elapsed)
+            except Exception:  # noqa: BLE001 - 聚合失败不影响工具结果
+                logger.debug("轮级工具耗时聚合跳过", exc_info=True)
             try:
                 from neurova.skills.creation_governance import record_tool_execution
 
