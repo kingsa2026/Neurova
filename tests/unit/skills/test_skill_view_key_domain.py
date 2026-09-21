@@ -164,3 +164,115 @@ class TestNameCollisionWarning:
         registry.register(self._skill("s1", "synth_c"))
         registry.register(self._skill("s1", "synth_c"))
         assert getattr(registry, "_name_collision_count", 0) == 0
+
+
+class TestManualSkillRuntimeDisable:
+    """006 残留：`name == skill_id` 的手工技能经 runtime 停用后也必须少一项。
+
+    前一轮只把 manifest 的 `enabled` 反查进来，① registry 底座条目**没有带上
+    registry 运行时的 `status`**；而 `SkillRegistry.set_skill_enabled` 改的正是
+    `skill.status`（`SkillStatus.INACTIVE`），不经 manifest。于是停用一条手工
+    技能，`invocable(name)` 仍为 True —— 三闸里的第三闸依旧恒开绿灯。
+    """
+
+    def _disabled_registry(self, name: str):
+        from neurova.skill_system import Skill, SkillRegistry
+
+        skill = Skill(name=name, description="手工技能")
+        skill.skill_id = name
+        skill.config = {"skill_id": name}
+        registry = SkillRegistry()
+        registry.register(skill)
+        assert registry.set_skill_enabled(name, False) is True
+        return registry
+
+    def test_runtime_disabled_manual_skill_is_not_invocable(self):
+        registry = self._disabled_registry("manual_tool")
+        view = build_turn_view("agent-view-01", None, registry_skills=registry.skills)
+        assert not view.invocable("manual_tool"), (
+            "registry 运行时停用的手工技能仍被视图判可见（①条目没带 status）"
+        )
+
+    def test_runtime_enable_keeps_manual_skill_invocable(self):
+        """反向锁：启用态不能被一刀切拒掉。"""
+        from neurova.skill_system import Skill, SkillRegistry
+
+        skill = Skill(name="manual_tool", description="手工技能")
+        skill.skill_id = "manual_tool"
+        skill.config = {"skill_id": "manual_tool"}
+        registry = SkillRegistry()
+        registry.register(skill)
+        registry.set_skill_enabled("manual_tool", True)
+        view = build_turn_view("agent-view-01", None, registry_skills=registry.skills)
+        assert view.invocable("manual_tool")
+
+
+class TestArchivedEntryLeavesTheToolFace:
+    """011 前置（006 的同一条链）：归档技能也必须在工具面上真的少掉。
+
+    `archive_skill` 只写 `usage["state"]="archived"`，而视图的 `enabled` 判据
+    此前只读 manifest 的 `enabled` 与 registry 的 `status` ⇒ 归档完技能照样
+    在 schema 里。归档是"最大破坏动作"（物理搬迁 `.archive/`），工具面还留着
+    它等于给 LLM 一个必然失败的工具。
+    """
+
+    def test_archived_state_is_not_invocable(self, lib_base):
+        agent_id = "agent-view-01"
+        service = lib.get_library(lib.POOL_AGENT, agent_id)
+        register_proven_skill(service, "synth_arch", "archived_tool", description="待归档")
+        service.enable_skill("synth_arch")
+        assert service.archive_skill("synth_arch").get("success") is True
+        view = build_turn_view(agent_id, None, registry_skills=_stub_registry("archived_tool"))
+        assert not view.invocable("archived_tool"), "归档技能仍在工具面上"
+
+    def test_stale_state_is_still_invocable(self, lib_base):
+        """反向锁：`stale` 只是闲置标记，不是停用——不得一刀切拦掉。"""
+        agent_id = "agent-view-01"
+        service = lib.get_library(lib.POOL_AGENT, agent_id)
+        register_proven_skill(service, "synth_stale", "stale_tool", description="闲置")
+        service.enable_skill("synth_stale")
+        assert service.set_skill_lifecycle_state("synth_stale", "stale") is True
+        view = build_turn_view(agent_id, None, registry_skills=_stub_registry("stale_tool"))
+        assert view.invocable("stale_tool")
+
+
+class TestNameCollisionIsRecomputable:
+    """006 验收：同名冲突计数要在存量 manifest 上可复算（不是"我记得有 8 条"）。"""
+
+    @staticmethod
+    def _manifest(tmp_path, count: int):
+        import json
+
+        skills = {}
+        for index in range(count):
+            skills[f"synth_{index:04d}"] = {
+                "id": f"synth_{index:04d}",
+                "name": "general_tool",
+                "description": "历史生成器遗留",
+                "enabled": True,
+            }
+        path = tmp_path / "manifest.json"
+        path.write_text(json.dumps(skills, ensure_ascii=False), encoding="utf-8")
+        return path
+
+    def test_recount_matches_the_manifest(self, tmp_path):
+        from scripts.diagnostics.skill_name_collisions import recount_name_collisions
+
+        report = recount_name_collisions(self._manifest(tmp_path, 8))
+        assert report["collision_count"] == 7, (
+            "8 条不同身份共用同一个 name：先到的 1 条留得住，其余 7 条被静默顶替"
+        )
+        assert report["collisions"][0]["name"] == "general_tool"
+        assert len(report["collisions"][0]["shadowed"]) == 7
+
+    def test_no_collision_on_distinct_names(self, tmp_path):
+        import json
+
+        path = tmp_path / "manifest.json"
+        path.write_text(
+            json.dumps({"a": {"id": "a", "name": "alpha"}, "b": {"id": "b", "name": "beta"}}),
+            encoding="utf-8",
+        )
+        from scripts.diagnostics.skill_name_collisions import recount_name_collisions
+
+        assert recount_name_collisions(path)["collision_count"] == 0
