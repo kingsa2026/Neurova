@@ -166,8 +166,10 @@ class AnthropicNativeClient:
             yield chunk
 
     def count_tokens(self, text: str) -> int:
-        """粗估 token 数（Anthropic 无本地分词器可用，按 ~4 字符/token）"""
-        return max(1, len(text or "") // 4)
+        """估算 token 数（走全仓唯一尺子；Anthropic 无本地分词器，按类别上界）。"""
+        from neurova.context.token_estimator import estimate_tokens
+
+        return max(1, estimate_tokens(text))
 
     def count_message_tokens(self, messages, tools=None) -> int:
         total = 0

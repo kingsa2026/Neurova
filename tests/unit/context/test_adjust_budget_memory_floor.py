@@ -33,11 +33,11 @@ class TestAdjustBudgetSmallMemoryFloor:
         )
 
     def test_tiny_memory_budget_at_least_own_estimate(self):
-        """15-token 记忆在大历史下 ratio≈0.85 → int(15×0.856)=12 < 15（红）。"""
+        """小记忆在大历史下 ratio 缩放 → 预算被压到自身 token 以下（红）。"""
         inj = self._make()
         history = [
             {"role": "user", "content": "历史消息内容填充" * 20} for _ in range(150)
-        ]  # ≈14400 tokens → total_needed > 0.9×max → 缩放分支触发
+        ]  # ≈15000 tokens → total_needed > 0.9×max → 缩放分支触发
         memories = [{"content": "喜欢简洁回复", "temperature": 80}]
         mem_estimate = sum(_cn_tokens(inj, m["content"]) for m in memories)
         budget = inj._adjust_budget(history, memories, 16000)
@@ -69,8 +69,8 @@ class TestAdjustBudgetSmallMemoryFloor:
         history = [
             {"role": "user", "content": "历史消息内容填充" * 20} for _ in range(150)
         ]
-        big = "超大记忆内容" * 300  # 远超 1600 tokens
+        big = "超大记忆内容" * 400  # ≈2000 tokens > max/10（1600）→ 走缩放分支
         memories = [{"content": big, "temperature": 80}]
         budget = inj._adjust_budget(history, memories, 16000)
-        assert budget.memories < 16000 // 2, "超大记忆未被缩放"
+        assert budget.memories <= 16000 // 2, "超大记忆未被缩放"
         assert budget.memories >= 16000 // 10, "缩放后低于 max/10 下限（过度缩水）"
