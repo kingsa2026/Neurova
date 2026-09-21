@@ -170,6 +170,17 @@ def test_readable_reasoning_is_text_and_structured_is_opaque(tmp_path: Path):
     assert states["乙"][0] == "opaque" and states["乙"][1] == ""
 
 
+def test_reasoning_text_and_structured_items_both_declared(tmp_path: Path):
+    """有明文摘要不等于密文项没被丢：两份都得看得见。"""
+    rows = [_message(1, "assistant", "甲", reasoning="先想",
+                     reasoning_details=json.dumps([{"id": "enc"}]))]
+
+    manifest = convert(_db(tmp_path, rows=rows), tmp_path / "bundle", agent_name="x")
+
+    assert any(e["field"] == "reasoning:结构化" and e["count"] == 1
+               for e in manifest.dropped)
+
+
 def test_columns_without_a_landing_are_declared(tmp_path: Path):
     rows = [_message(1, "user", "甲")]
     path = _db(tmp_path, rows=rows, extra_column="mystery")
