@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import tempfile
 from pathlib import Path
@@ -23,7 +22,8 @@ from neurova.memory_ingest.cli_errors import (  # noqa: E402
 from neurova.memory_ingest.bundle.manifest import BundleError, UnrecognizedSourceError  # noqa: E402
 from neurova.memory_ingest.bundle.validate import validate_bundle  # noqa: E402
 from neurova.memory_ingest.converters import CONVERTERS  # noqa: E402
-from neurova.memory_ingest.intake import apply_bundle, plan_bundle, undo_run  # noqa: E402
+from neurova.memory_ingest.intake import (  # noqa: E402
+    apply_bundle, plan_bundle, session_manager_for, undo_run)
 from neurova.memory_ingest.probe import probe_store  # noqa: E402
 
 _VERDICT_LABEL = {"unique": "唯一命中", "conflict": "多指纹冲突", "unknown": "未识别"}
@@ -227,12 +227,7 @@ def _memory_manager(agent_id: str):
 
 
 def _session_manager(sessions_dir: Optional[str]):
-    if sessions_dir:
-        # 会话根目录必须在构造 SessionManager 之前定：类级单例只认首次构造
-        os.environ["NEUROVA_SESSIONS_DIR"] = str(Path(sessions_dir).resolve())
-    from neurova.session_manager import SessionManager
-
-    return SessionManager()
+    return session_manager_for(sessions_dir)
 
 
 if __name__ == "__main__":
