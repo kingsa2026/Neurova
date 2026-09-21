@@ -7,7 +7,7 @@
 ## Context
 
 > **口径更正（2026-09-21）**：本节把「17 维分类体系」当既定事实陈述，实测该数字在代码中
-> 无对应枚举（详见 [architecture-findings.md u1](../architecture-model/architecture-findings.md)）。
+> 无对应枚举（详见 [architecture-findings.md u1](../../architecture-model/architecture-findings.md)）。
 > 分类值域的唯一事实源为 `memory_layer/models.py`（7 类型 + 7 分类 + 4 视角），
 > 裁决见 [ADR 0018](./0018-memory-classification-vocabulary.md)。
 

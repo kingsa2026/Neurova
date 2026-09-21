@@ -60,7 +60,7 @@ Agent (2159 行文件, 类 1122 行/57 方法，拆分中)
 
 多维度记忆分类体系（**7 类型 + 7 分类 + 4 视角**，另有 5 生命周期阶段 / 9 情感
 作为状态与情感维度；值域唯一事实源 = `memory_layer/models.py`，见
-[ADR 0018](../adr/0018-memory-classification-vocabulary.md)。历史文档所称
+[ADR 0018](01-architecture/adr/0018-memory-classification-vocabulary.md)。历史文档所称
 「17 维」在代码中无对应，已废止）。核心组件：
 
 | 层级 | 组件 | 职责 |
