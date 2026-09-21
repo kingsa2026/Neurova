@@ -116,6 +116,7 @@ def _try_extract_to_graph(
         get_agent_knowledge_graph_manager,
         get_knowledge_graph_manager,
     )
+    from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
     from neurova.knowledge.graph_bridge import extract_knowledge_to_graph
     from neurova.knowledge.repository import get_knowledge_repository
 
@@ -124,6 +125,9 @@ def _try_extract_to_graph(
         logger.info("[知识导入] 未解析到可用 LLM，跳过 %s 条的图谱抽取", len(items))
         return
     repo = get_knowledge_repository()
+    # 权威落点必须显式接入：不传底座时抽取只落 JSON 投影，而答题读的是底座三元组，
+    # 那就是 Issue #72 的"两张图"（审计 §5.3 / B-09）。
+    authority = get_knowledge_fact_store()
     # per-agent 隔离：写入所属 agent 的图谱（agent_id 缺失时退全局，仅测试路径）
     if agent_id:
         try:
@@ -134,7 +138,10 @@ def _try_extract_to_graph(
         graph = get_knowledge_graph_manager()
     for entry in items:
         try:
-            extract_knowledge_to_graph(entry, repo=repo, llm_call=llm_call, graph_manager=graph)
+            extract_knowledge_to_graph(
+                entry, repo=repo, llm_call=llm_call, graph_manager=graph,
+                factStore=authority, agentId=agent_id or "",
+            )
         except Exception as e:  # noqa: BLE001
             logger.warning("[知识导入] 图谱抽取失败（已跳过）: %s", e)
 
