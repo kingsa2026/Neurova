@@ -15,20 +15,41 @@ import pytest
 
 from neurova.agent.loops.openai_loop import OpenAILoop, _looks_like_unsupported_tools_error
 
+from .conftest import attach_tool_executor
+
 
 def make_loop():
+    """原生链的工具执行经执行咽喉（工单 003），替身的接口层放 `tool_router`。"""
     agent = MagicMock()
     agent._tool_messages_list = []
+    # 咽喉读的是 `_skill_registry` / `_tool_registry` 那一组私有名，
+    # 替身必须显式置 None，否则 MagicMock auto-attr 会被当成"技能存在"。
     agent.skill_registry = None
-    agent.tool_router = SimpleNamespace(
-        execute=lambda **kw: SimpleNamespace(success=True, result={"ok": 1}, error=None)
-    )
+    agent._skill_registry = None
+    agent.tool_memory = None
+    agent.tool_lifecycle = None
+    agent.skill_packer = None
+
+    async def _route(tool_name, params=None, user_id=None):
+        return {"ok": 1}
+
+    agent.tool_router = SimpleNamespace(route=_route, execute=_route)
+    agent.config = SimpleNamespace(name="probe", user_id="default", agent_id="test-agent")
+    attach_tool_executor(agent)
     loop = OpenAILoop(agent)
     return loop
 
 
+# 非内置工具名：原生链经执行咽喉后，内置工具会真执行（含网络），
+# 本文件要测的是"路由失败如何回传真实错误"，故走 `tool_router` 那一档。
+TOOL = "mcp_probe.search"
+
+
 def tool_call(id_: str, arguments: str):
-    return {"id": id_, "function": {"name": "web_search", "arguments": arguments}}
+    return {"id": id_, "function": {"name": TOOL, "arguments": arguments}}
+
+
+VALID_ARGS = json.dumps({"query": "news"})
 
 
 class TestBadArgumentsTolerance:
@@ -37,7 +58,7 @@ class TestBadArgumentsTolerance:
         messages = []
         result = asyncio.run(
             loop.handle_tool_calls(
-                [tool_call("c1", "这不是JSON"), tool_call("c2", json.dumps({"query": "天气"}))],
+                [tool_call("c1", "这不是JSON"), tool_call("c2", VALID_ARGS)],
                 messages,
             )
         )
@@ -49,7 +70,8 @@ class TestBadArgumentsTolerance:
     def test_empty_arguments_treated_as_empty_object(self):
         loop = make_loop()
         result = asyncio.run(loop.handle_tool_calls([tool_call("c1", "")], []))
-        assert any(m.get("role") == "tool" and "ok" in m["content"] for m in result)
+        contents = [m["content"] for m in result if m.get("role") == "tool"]
+        assert contents and "ok" in contents[0]
 
 
 class TestToolRouterFailureErrorPropagation:
@@ -66,10 +88,12 @@ class TestToolRouterFailureErrorPropagation:
 
     def test_router_failure_returns_real_error(self):
         loop = make_loop()
-        loop.agent.tool_router = SimpleNamespace(
-            execute=lambda **kw: SimpleNamespace(success=False, result=None, error="REAL_ERROR_TARGET_DIR_MISSING")
-        )
-        result = asyncio.run(loop.handle_tool_calls([tool_call("c1", "{}")], []))
+
+        async def _failing(tool_name, params=None, user_id=None):
+            return {"error": "REAL_ERROR_TARGET_DIR_MISSING"}
+
+        loop.agent.tool_router = SimpleNamespace(route=_failing, execute=_failing)
+        result = asyncio.run(loop.handle_tool_calls([tool_call("c1", VALID_ARGS)], []))
         contents = [m["content"] for m in result if m["role"] == "tool"]
         assert contents, "失败也必须产出 tool 消息回给 LLM"
         assert "REAL_ERROR_TARGET_DIR_MISSING" in contents[0]
@@ -78,8 +102,12 @@ class TestToolRouterFailureErrorPropagation:
     def test_router_none_result_returns_fallback_error(self):
         """router 返回空（非 SimpleNamespace）时也不得炸 UnboundLocalError"""
         loop = make_loop()
-        loop.agent.tool_router = SimpleNamespace(execute=lambda **kw: None)
-        result = asyncio.run(loop.handle_tool_calls([tool_call("c1", "{}")], []))
+
+        async def _none(tool_name, params=None, user_id=None):
+            return None
+
+        loop.agent.tool_router = SimpleNamespace(route=_none, execute=_none)
+        result = asyncio.run(loop.handle_tool_calls([tool_call("c1", VALID_ARGS)], []))
         contents = [m["content"] for m in result if m["role"] == "tool"]
         assert contents
         assert "SimpleNamespace" not in contents[0]

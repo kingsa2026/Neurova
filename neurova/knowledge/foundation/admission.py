@@ -398,11 +398,14 @@ def productionAdmissionGate(store: Any, toolVersion: str = "foundation-gate") ->
     from .conflict_judge import KnowledgeConflictJudge
     from .lineage import KnowledgeLineageLedger
 
-    from neurova.knowledge.ontology.rule_engine import ForwardChainingEngine
+    from neurova.knowledge.ontology.rule_engine import ForwardChainingEngine, seedBuiltinRules
 
     registry = OntologyTermRegistry(store)
     engine = ForwardChainingEngine(store, gateFactory=lambda st: productionAdmissionGate(
         st, toolVersion=toolVersion))
+    # 规则也必须有人登记，否则前向链每轮空转（Issue #73：规则表 0 行 ⇒ 引擎白建）。
+    # 落点只能是这里——造门是唯一的生产装配点，种子规则因此只有一份 owner。
+    seedBuiltinRules(engine)
     return KnowledgeAdmissionGate(
         store,
         resolver=SubjectResolver(),

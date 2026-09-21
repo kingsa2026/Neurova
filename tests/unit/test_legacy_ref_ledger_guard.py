@@ -7,7 +7,9 @@
 引用直接删成空反引号 ``，或把路径删成 `docs/INDEX.md` →（空）。
 这正是修复教义第 2 条禁止的「抹除表面报错」：报错没了，信息也没了。
 
-归档层不就地改写（历史可追溯性优先），但也**不许静默遗留**（教义第 5 条）。
+归档层不许静默遗留（教义第 5 条）。其中 `空标签悬空`（引用被删成空白）不是
+"路径过期"而是数据丢失，已按 git 前像全仓修完；其余三类是历史归档的正常形态，
+只在台账里逐条定性，不就地改写。
 因此本单的落点是「登记台账 + 逐条可达性判定」，并由本守卫常驻锁住：
 
 1. **台账必须与扫描口径同源** —— 台账的机器区由 `scripts/scan_docs_refs.py`
@@ -160,14 +162,33 @@ class TestEmptyLabelsCarryPreimage:
             rows.append(cells)
         return rows
 
-    def test_preimage_count_matches_empty_labels(self, entries):
+    def test_preimage_rows_cover_every_empty_label(self, entries):
+        """前像表必须**覆盖**当前扫出的每一处空标签。
+
+        口径演进（本单实现层）：台账最初只做"登记"，故当时锁的是"行数相等"。
+        抹除形态被真正修完之后，"行数相等"会把"修好了"误判成违规——
+        台架不该惩罚修事实。改为"覆盖 + 未闭合须留痕"：
+        扫出的每一处空标签都必须在前像表里有行（防漏登记）；
+        空标签已归零时，前像表不得谎报为未处理（处置列须写明去向）。
+        """
         empties = [e for e in entries if e["verdict"] == scanner.VERDICT_EMPTY]
         rows = self._rows()
-        assert len(rows) == len(empties), (
-            "前像表行数（%d）与扫描出的空标签数（%d）不等。\n"
-            "新增一处空标签就必须补一行前像（从 git 历史取被删掉的目标）。"
-            % (len(rows), len(empties))
+        targets = {(row[0].strip("`"), row[1].strip()) for row in rows if len(row) >= 2}
+        missing = [
+            (e["file"], str(e["line"])) for e in empties
+            if (e["file"], str(e["line"])) not in targets
+        ]
+        assert not missing, (
+            "有仍然存在的空标签未登记前像: %s\n"
+            "新增一处空标签就必须补一行前像（从 git 历史取被删掉的目标）。" % missing
         )
+        if not empties:
+            unresolved = [row for row in rows if len(row) < 5 or not row[4].strip()]
+            assert not unresolved, (
+                "空标签已归零，但前像表仍有行未写处置去向:\n  "
+                + "\n  ".join(str(row) for row in unresolved[:5])
+                + "\n修完就要写下处置结果，不得留成悬案。"
+            )
 
     def test_preimage_targets_are_non_empty(self):
         for row in self._rows():
@@ -188,21 +209,27 @@ class TestEmptyLabelsCarryPreimage:
 
 
 class TestLedgerExposesHonestState:
-    """台账必须以诚实形态暴露「洞还在」，不得被读成一次修复。
+    """台账必须以诚实形态暴露「哪些洞还在」，不得被读成一次全面修复。
 
-    修复教义第 2 条：报错要么被根修，要么以诚实形态暴露。归档层选择的是后者
-    （历史可追溯性优先，不就地改写），那就必须**写明**这一点——
-    否则读者会把「登记台账」误读成「已处置」，这正是本次要禁止的表面抹除。
+    修复教义第 2 条：报错要么被根修，要么以诚实形态暴露。本单的口径是**两者并存**：
+    `空标签悬空`（引用被删成空白）属数据丢失，已根修为零；
+    其余三类属历史归档的正常形态，只定性、不就地改写。
+    台账必须把这条界线写明，否则读者会把整张表误读成「已全部处置」，
+    或反过来把已归零的那类当成还在——两种误读都是表面抹除。
     """
 
     DEVICE_WORDS = ("已修复", "已还原", "已补齐")
 
     def test_ledger_states_holes_remain(self):
-        """必须明写归档层不就地改写 / 未修复，读者才不会误判。"""
+        """必须明写「哪些还在、哪些已修」，读者才不会误判。"""
         text = _ledger_text()
-        assert re.search(r"不就地改写|未修复|不承诺", text), (
-            "台账未写明「归档层不就地改写、洞仍在」——"
-            "读者会把登记误读成修复，等于用台账代替修事实。"
+        assert re.search(r"不承诺|不就地改写|未修复", text), (
+            "台账未写明其余三类的洞仍在——读者会把登记误读成修复，"
+            "等于用台账代替修事实。"
+        )
+        assert re.search(r"已归零|已全仓归零|全仓修完", text), (
+            "台账未写明抹除形态已归零——读者会把已修完的那类当成还在，"
+            "台账与事实不符同样是失真。"
         )
 
     def test_no_entry_is_marked_as_repaired(self, entries):
@@ -227,4 +254,60 @@ class TestLedgerExposesHonestState:
             "台账把悬空引用记成了已修复形态（源文件里引用仍然悬空）:\n  "
             + "\n  ".join(str(o) for o in offenders[:5])
             + "\n登记台账不得代替修事实。"
+        )
+
+
+class TestErasureFormDoesNotGrow:
+    """棘轮：清理波不得再把引用删成空白（**全仓口径**，防历史事故回潮）。
+
+    范围取仓库根而非 `docs/`：实测抹除形态有 6 处落在 `README.md` 与
+    `audit-reports/`，只扫 `docs/` 会漏掉它们——同根因的命中点没扫全，
+    等于门禁留了盲区。
+    """
+
+    BASELINE = Path(__file__).resolve().parent / "docsErasureBaseline.txt"
+
+    def test_baseline_file_present(self):
+        assert self.BASELINE.is_file(), (
+            f"抹除形态基线丢失: {self.BASELINE.relative_to(PROJECT_ROOT)}\n"
+            "恢复方式：git checkout 该文件；确需下调基线时同批提交新值。"
+        )
+
+    def test_erasure_count_does_not_increase(self):
+        baseline = int(io.open(self.BASELINE, encoding="utf-8").read().strip())
+        entries = scanner.scanDirectory(PROJECT_ROOT)
+        current = sum(1 for e in entries if e["verdict"] == scanner.VERDICT_EMPTY)
+        assert current <= baseline, (
+            f"抹除形态从基线 {baseline} 升到 {current}——有引用又被删成了空白。\n"
+            "引用要么指向真实路径，要么以诚实形态暴露；删成空白不算修复。"
+        )
+
+    def test_empty_code_span_is_still_detected(self):
+        """负向控制：门禁不空转——注入孤立空反引号必须被抓到。"""
+        sample = Path(__file__).resolve().parent / "_erasure_probe.md"
+        sample.write_text("参考：`` 的说明\n", encoding="utf-8")
+        try:
+            byBasename = scanner.indexByBasename(scanner.trackedFiles())
+            found = scanner.scanFile(sample, byBasename)
+        finally:
+            sample.unlink()
+        assert any(e["verdict"] == scanner.VERDICT_EMPTY for e in found), (
+            "孤立空反引号（被清空的引用）未被识别——本守卫的核心目标失效"
+        )
+
+    def test_escaped_inline_code_is_not_a_false_positive(self):
+        """负向控制的反面：合法转义写法不得被误报。
+
+        `` `行内码` `` 是"内容里含反引号"的合法写法，代码审计/规范类文档里
+        大量出现。误报比漏报更坏——它会训练人忽略这道门禁。
+        """
+        sample = Path(__file__).resolve().parent / "_escape_probe.md"
+        sample.write_text("渲染：`` `行内码` `` 与 `普通代码`\n", encoding="utf-8")
+        try:
+            byBasename = scanner.indexByBasename(scanner.trackedFiles())
+            found = scanner.scanFile(sample, byBasename)
+        finally:
+            sample.unlink()
+        assert not [e for e in found if e["verdict"] == scanner.VERDICT_EMPTY], (
+            f"合法转义写法被误报为空引用: {found}"
         )

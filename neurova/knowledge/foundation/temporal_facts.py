@@ -9,9 +9,7 @@ B01 的形状是"接了但不工作"：`chat_pipeline.py` 无参构造 `Temporal
 
 - **只供三元组**。条目正文（`record_kind='narrative'`）由 `KnowledgeRetriever` 那一路给；
   这里再放一份就是同一篇正文占两个槽。
-- **"生效时间"取 `valid_from`，没声明就用 `recorded_at`**（**只限下界**）。缺列值不等于没有时间，
-  但 `recorded_at` 是"我们何时得知"，不是"说法何时生效"——上界只认声明的 `valid_from`，
-  否则参考时刻早于写入时刻的查询会把此刻仍有效的说法读没。
+- **"生效时间"取 `valid_from`，没声明就用 `recorded_at`**。缺列值不等于没有时间。
 - **匹配规则是"主体名（或别名）出现在查询文本里"**，不做分词。旧的关键词切法用
   `[^\\w\\s]`，中文整句会切成一个 token，只有全句正好等于主体名才命中——那等于没有匹配。
   主体集合规模是"实体数"而不是"事实数"，一遍扫过即可，不为此引分词依赖。
@@ -94,18 +92,16 @@ class TemporalFactReader:
     def _effectiveFacts(self, keys: List[str], windowStart: datetime.datetime,
                         now: datetime.datetime, limit: int) -> List[Any]:
         placeholders = ",".join("?" * len(keys))
-        # 生效时刻**下界**要有：只判上界的话，一条半年前的说法照样进此刻的上下文。
-        # `valid_from` 没声明就退到 `recorded_at`——缺列值不等于没有时间。
+        # 生效时刻既要有下界也要有上界：只判"不早于窗口起点"的话，一条还没到生效
+        # 时刻的说法照样此刻进上下文——`valid_from` 此前恒 NULL 所以这条上界一直空转，
+        # 与"写入端不落库"是同一个断点的两端。
         effective = "COALESCE(NULLIF(valid_from, ''), recorded_at)"
         clauses = [
             "subject_key IN (%s)" % placeholders,
             "status = 'active'",
             "record_kind = 'triple'",
             "%s >= ?" % effective,
-            # 生效时刻**上界**只认调用方声明的 `valid_from`，不许拿 `recorded_at` 顶替：
-            # 后者是"我们何时得知"，不是"说法何时生效"。混用会让参考时刻早于写入时刻的
-            # 查询把**此刻仍然有效**的说法读没——同一份数据在 12:00Z 前后给出相反结论。
-            "(valid_from IS NULL OR valid_from = '' OR valid_from <= ?)",
+            "%s <= ?" % effective,
             "(valid_until IS NULL OR valid_until = '' OR valid_until > ?)",
         ]
         params: List[Any] = list(keys) + [windowStart.isoformat(), now.isoformat(),

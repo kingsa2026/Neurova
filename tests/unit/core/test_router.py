@@ -190,13 +190,19 @@ class TestMessageRouting:
 
     @pytest.mark.asyncio
     async def test_route_file_operation_injects_workspace_base_dir(self, tmp_path):
-        """file_operation 技能路由：服务端注入 _base_dir 且覆盖伪造值（相对路径乱放根因修复）"""
+        """file_operation 技能路由：服务端注入 _base_dir 且覆盖伪造值。
+
+        无执行器（评测/脚本场景）时走降级直调分支——真机上 router 的
+        `_agent.tool_executor` 在场，执行委托咽喉（覆盖见
+        `tests/unit/skills/test_skill_entry_choke_migration.py`）。
+        """
         skill_registry = MagicMock()
         skill_registry.execute_skill = AsyncMock(
             return_value=MagicMock(success=True, data="ok", error=None, execution_time=0.1)
         )
         agent = MagicMock()
         agent.workspace_path = tmp_path
+        agent.tool_executor = None
         router = MessageRouter(agent=agent, skill_registry=skill_registry)
         msg = Message('file_operation {"operation": "write", "file_path": "x.md", "_base_dir": "/llm/forged"}')
         msg.message_type = MessageType.SKILL_REQUEST

@@ -34,7 +34,7 @@ def _seed(pool, owner, skill_id, description="d", **kw):
     from tests.unit.skills.creation_helpers import register_proven_skill
     assert register_proven_skill(svc,
         skill_id,
-        name=description or skill_id,
+        name=skill_id,
         description=description,
         config={"tool_sequence": ["a", "b"], "task_purpose": skill_id, **kw.get("config", {})},
         manifest_source="auto",
@@ -243,7 +243,9 @@ async def test_build_tools_section_filters_by_view():
 
     turn_context.reset_turn_tool_messages()
     view = SkillView(agent_id="a1")
-    view.skills["visible_one"] = types.SimpleNamespace(
+    from neurova.skills.skill_visibility import VisibleSkill
+
+    view.skills["visible_one"] = VisibleSkill(
         name="visible_one", skill_id="visible_one", pool="agent", owner_key="a1",
         entry={"enabled": True, "description": "d", "manifest": {"config": {}}},
     )
