@@ -89,6 +89,55 @@ def src(tmp_path: Path) -> Path:
     return _db(tmp_path / "opencode.db")
 
 
+def _mini_db(tmp_path: Path, messages, parts) -> Path:
+    """自定内容的最小库：本任务要的两种形状（只有思考块 / 思考后接 user）在固定夹具里没有。"""
+    path = tmp_path / "mini.db"
+    conn = sqlite3.connect(path)
+    conn.execute("CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, title TEXT,"
+                 " directory TEXT, model TEXT, agent TEXT, cost REAL, time_created INTEGER)")
+    conn.execute("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT,"
+                 " time_created INTEGER, time_updated INTEGER, data TEXT)")
+    conn.execute("CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,"
+                 " time_created INTEGER, time_updated INTEGER, data TEXT)")
+    conn.execute("INSERT INTO session VALUES ('s1', NULL, '标题', '/w', '{}', 'build', 0, ?)",
+                 (EPOCH,))
+    conn.executemany("INSERT INTO message VALUES (?,?,?,0,?)",
+                     [(mid, "s1", at, _data(role=role)) for mid, role, at in messages])
+    conn.executemany("INSERT INTO part VALUES (?,?,?,?,0,?)",
+                     [(pid, mid, "s1", at, _data(**body)) for pid, mid, body, at in parts])
+    conn.commit()
+    conn.close()
+    return path
+
+
+def test_reasoning_only_session_converts_without_crash(tmp_path: Path):
+    """只有思考块的一场会话：转得出包，不是一句 IndexError。"""
+    out = tmp_path / "bundle"
+
+    manifest = convert(_mini_db(tmp_path, [("m1", "assistant", 100)],
+                                [("p1", "m1", {"type": "reasoning", "text": "只想了一下"}, 100)]),
+                       out, agent_name="imported")
+
+    assert validate_bundle(out) == []
+    assert manifest.counts["transcripts"] == 1
+    record = list(_records(out)[0].values())[0]
+    assert record["kind"] == "assistant_message" and record["reasoning_state"] == "text"
+
+
+def test_thinking_does_not_bleed_into_next_message(tmp_path: Path):
+    """上一轮没人接的思考不能挂到下一条（可能是 user）头上。"""
+    out = tmp_path / "bundle"
+    convert(_mini_db(tmp_path,
+                     [("m1", "assistant", 100), ("m2", "user", 200)],
+                     [("p1", "m1", {"type": "reasoning", "text": "思考"}, 100),
+                      ("p2", "m2", {"type": "text", "text": "用户提问"}, 200)]),
+            out, agent_name="imported")
+
+    rows = list(_records(out)[0].values())
+    user = next(r for r in rows if r["kind"] == "user_message")
+    assert user.get("reasoning_state", "absent") == "absent"
+
+
 def _records(out: Path) -> List[Dict[str, Any]]:
     rows = [json.loads(x) for x in (out / "transcripts.jsonl").read_text(
         encoding="utf-8").splitlines() if x.strip()]
