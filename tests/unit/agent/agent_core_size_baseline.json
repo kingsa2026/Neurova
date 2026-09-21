@@ -30,6 +30,18 @@
       "agent_class_property_accessors": 17,
       "agent_class_non_property_methods": 40,
       "waiver": "methods 56→57、property 16→17：新增 turn_state property（门面访问点）；\n原 _current_user_input property 保留——净 +1 方法/property 为转发面，非逻辑回填"
+    },
+    {
+      "phase": "Phase 2",
+      "date": "2026-09-21",
+      "description": "工具↔经验↔再调用三环路修复批（Issue #80）：原生链执行收编进 ToolExecutor 咽喉，_orchestrator_executor 的两级回退（SkillRegistry → ToolRouter）替换为一次咽喉委托，沙箱根注入收口到 skills/sandbox_root.py。净减 43 行（2116 < 2159），无新增装配体。",
+      "agent_core_lines": 2116,
+      "subsystem_container_lines": 556,
+      "subsystem_container_methods": 16,
+      "agent_class_lines": 1118,
+      "agent_class_methods": 57,
+      "agent_class_property_accessors": 17,
+      "agent_class_non_property_methods": 40
     }
   ]
 }

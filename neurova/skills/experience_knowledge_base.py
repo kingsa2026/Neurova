@@ -139,7 +139,7 @@ class ExperienceKnowledgeBase:
                     skill_name TEXT NOT NULL,
                     context TEXT,           -- JSON
                     result TEXT,            -- JSON (NULL 允许)
-                    success INTEGER NOT NULL,  -- 0/1
+                    success INTEGER,  -- 1/0/NULL（NULL = 本轮无客观回执，未测量）
                     timestamp TEXT,
                     feedback TEXT,
                     agent_id TEXT,
@@ -174,6 +174,27 @@ class ExperienceKnowledgeBase:
         cols = {row[1] for row in cur.execute("PRAGMA table_info(experience_records)")}
         if "content_key" not in cols:
             cur.execute("ALTER TABLE experience_records ADD COLUMN content_key TEXT")
+        # 工单 004：`success` 从 NOT NULL 放开为可空——"未测量"必须有自己的取值，
+        # 不许折叠成 0（那正是把"没测到"演成"失败"的病灶）。老库按 SQLite 惯例
+        # 重建列：建新表 → 拷数据 → 换名，全程幂等（notnull=0 时跳过）。
+        info = {row[1]: row for row in cur.execute("PRAGMA table_info(experience_records)")}
+        if info.get("success") and info["success"][3]:
+            cur.execute("PRAGMA foreign_keys=off")
+            cur.execute(
+                "CREATE TABLE experience_records_migrating AS SELECT * FROM experience_records"
+            )
+            cur.execute("DROP TABLE experience_records")
+            cur.execute(
+                "CREATE TABLE experience_records AS SELECT * FROM experience_records_migrating"
+            )
+            cur.execute("DROP TABLE experience_records_migrating")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_exp_skill ON experience_records(skill_name)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_exp_success ON experience_records(success)"
+            )
+            cur.execute("PRAGMA foreign_keys=on")
         if "seen_count" not in cols:
             cur.execute(
                 "ALTER TABLE experience_records ADD COLUMN seen_count INTEGER NOT NULL DEFAULT 1"
@@ -319,7 +340,7 @@ class ExperienceKnowledgeBase:
         tags_json = json.dumps(tags, ensure_ascii=False)
         created_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
         content_key = normalized_payload_key(exp.context)
-        success_flag = 1 if exp.success else 0
+        success_flag = None if exp.success is None else (1 if exp.success else 0)
         evidence_state = "evidenced" if evidence is not None else "unevidenced"
 
         with self._lock:
@@ -692,6 +713,12 @@ class ExperienceKnowledgeBase:
                 quality_score = -0.25
             elif outcome == "unevidenced":
                 quality_score = 0.03
+            elif d.get("success") is None:
+                # 工单 004：`success` 为 NULL 是"这轮没测到"。旧写法
+                # `0.1 if d.get("success") else -0.05` 把 NULL 折进失败分支，
+                # 等于给未测量的行按真失败罚分（罚分必须只对真失败生效）。
+                # 与 `unevidenced` 同档：可见、不升权、不扣分。
+                quality_score = 0.03
             elif d.get("success") and d.get("evidence_state") == "unevidenced":
                 # 工单 010：无服务端票据的"成功"是自述，不是成功票。002 之后
                 # success 位开始携带信息，但它带的可能是本轮工具回执甚至关键词
@@ -712,56 +739,6 @@ class ExperienceKnowledgeBase:
         # 按相似度降序
         scored.sort(key=lambda x: x[0], reverse=True)
         return [d for _, d in scored[:effective_limit]]
-
-    def get_experience_stats(self, skill_name: Optional[str] = None, agent_id: Optional[str] = None) -> Dict[str, Any]:
-        """获取经验统计
-
-        Args:
-            skill_name: 指定技能则返回单技能统计，None 返回全局统计
-            agent_id: 限定 Agent（None 不限）
-
-        Returns:
-            单技能: skill_name/total_experiences/success_count (+ success_rate 若 >0)
-            全局: total_skills/total_records (+ by_skill 明细)
-            空技能: total_experiences=0 + skill_name
-        """
-        with self._lock:
-            cur = self._conn.cursor()
-            if skill_name:
-                sql = "SELECT COUNT(*) AS total, SUM(success) AS succ FROM experience_records WHERE skill_name = ?"
-                params: List[Any] = [skill_name]
-                if agent_id is not None:
-                    sql += " AND agent_id = ?"
-                    params.append(agent_id)
-                cur.execute(sql, params)
-                row = cur.fetchone()
-                total = row["total"] or 0
-                succ = row["succ"] or 0
-                stats: Dict[str, Any] = {
-                    "skill_name": skill_name,
-                    "total_experiences": total,
-                    "success_count": succ,
-                }
-                if total > 0:
-                    stats["success_rate"] = round(succ / total, 4)
-                return stats
-            else:
-                sql = "SELECT COUNT(*) AS total FROM experience_records"
-                params = []
-                if agent_id is not None:
-                    sql += " WHERE agent_id = ?"
-                    params.append(agent_id)
-                cur.execute(sql, params)
-                total_records = cur.fetchone()["total"] or 0
-                sql2 = "SELECT COUNT(DISTINCT skill_name) AS total_skills FROM experience_records"
-                if agent_id is not None:
-                    sql2 += " WHERE agent_id = ?"
-                cur.execute(sql2, params)
-                total_skills = cur.fetchone()["total_skills"] or 0
-                return {
-                    "total_skills": total_skills,
-                    "total_records": total_records,
-                }
 
     def get_record_by_id(self, record_id: int) -> Optional[Dict[str, Any]]:
         """按主键取单条记录（API 层查看/删除前置用）。"""

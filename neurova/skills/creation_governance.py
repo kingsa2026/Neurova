@@ -13,6 +13,10 @@ import threading
 import uuid
 from typing import Dict
 
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
+
 MIN_SUCCESSES = 3
 _locks = {}
 _locks_guard = threading.RLock()
@@ -201,9 +205,34 @@ def begin_task():
                     "closed": False, "lock": threading.RLock()})
 
 
+_missing_context_counter = 0
+_missing_context_lock = threading.Lock()
+
+
+def missing_context_count() -> int:
+    """票据上下文缺失的累计次数（观测面读数，进程级）。
+
+    "这个 agent 从没调过工具"与"它的工具调用没被采到"是两件事：`begin_task()`
+    只由 `reset_turn_tool_messages()` 触发（chat 主链轮首），子代理 / swarm /
+    neurflow / API 直调等入口全在此静默丢票。没有这个读数，005 迁移期出现的
+    漏采在观测面完全不可见。
+    """
+    return _missing_context_counter
+
+
 def record_tool_execution(tool_name, params, success, result):
     task = _execution.get()
-    if task is None or tool_name == "create_skill":
+    if task is None:
+        global _missing_context_counter
+        with _missing_context_lock:
+            _missing_context_counter += 1
+        logger.warning(
+            "票据上下文缺失，本次工具执行未进证据账本（入口/工具=%s）——"
+            "该入口未经 reset_turn_tool_messages 建任务上下文，属漏采",
+            tool_name,
+        )
+        return
+    if tool_name == "create_skill":
         return
     from neurova.security.governance import is_policy_denial
     ok = (success is True and result is not None and not is_policy_denial(result)
