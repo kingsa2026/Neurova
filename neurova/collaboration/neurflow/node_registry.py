@@ -382,39 +382,20 @@ def _sync_tools_from_engine(registry: NodeRegistry) -> int:
     """
     从 ToolEngine 同步工具节点
 
+    委托 `adapters.sync_tools`（工具→节点转换的单一实现）：本函数此前自己也写
+    了一份 dict 版转换，且 `from neurova.execution_engine.tool_engine import
+    get_tool_engine` 在该模块并不存在 —— 异常被吞成 `return 0`，工具节点永远
+    同步不进来。
+
     Args:
         registry: 节点注册表
 
     Returns:
         同步的工具数量
     """
-    try:
-        from neurova.execution_engine.tool_engine import get_tool_engine
+    from .adapters import sync_tools
 
-        tool_engine = get_tool_engine()
-
-        count = 0
-        for tool in tool_engine.list_tools():
-            node_def = NodeDefinition(
-                type=f"tool:{tool['name']}",
-                label=tool.get("name", tool["name"]),
-                icon="🔧",
-                category="tools",
-                description=tool.get("description", f"工具: {tool['name']}"),
-                sub_blocks=[],
-                inputs=[{"id": "input", "label": "输入"}],
-                outputs=[{"id": "output", "label": "输出"}, {"id": "error", "label": "错误"}],
-                source="tool",
-                source_id=tool["name"],
-                version=tool.get("version", "1.0.0"),
-                tags=tool.get("tags", []),
-            )
-            registry.register(node_def)
-            count += 1
-
-        return count
-    except ImportError:
-        return 0
+    return sync_tools(registry)
 
 
 def _sync_skills_from_registry(registry: NodeRegistry) -> int:

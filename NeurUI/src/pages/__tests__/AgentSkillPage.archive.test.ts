@@ -1,15 +1,13 @@
 /**
- * AgentSkillPage — 技能合并审批入口（P1-2 前端接线）
+ * AgentSkillPage — 归档与回滚入口（工单 011 前端切片）。
  *
- * 背景：后端三端点（GET plans / POST approve / POST reject）已落地并已鉴权，
- * 但 NeurUI 侧零引用 —— "后端有了没人调"是同一种接线断裂的反向形态。
- * 本文件锁定前端入口的契约：
- *  - 工具栏渲染「技能合并」入口；
- *  - 打开即拉 GET /skill-pool/agent/{id}/consolidation/plans；
- *  - 只展示待审件（落盘仓含已批/已拒历史条目，不能冒充待办）；
- *  - 计划卡显示聚簇依据（identity/structure/name_prefix）与吸收成员；
- *  - 批准/拒绝分别调 approve/reject，并刷新列表与技能网格；
- *  - 空计划渲染 empty 文案。
+ * 后端读面/写面已落地（`GET/POST /governance/skills/{id}/archives|rollback`），
+ * 但 NeurUI 侧零引用 —— "有端点没人按"是同一种接线断裂。本文件锁定：
+ *  - 技能卡渲染「归档」入口；
+ *  - 打开即拉该技能归档列表（带当前 agentId 定库）；
+ *  - 归档为空时回滚按钮不可用（后端也会 409，前端不得先给出假希望）；
+ *  - 回滚需二次确认，确认后调 rollbackSkill 并刷新归档与技能网格；
+ *  - 结果显示回滚后剩余归档数（= 回滚窗口还剩多少）。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
@@ -24,7 +22,6 @@ const { apiMock } = vi.hoisted(() => {
   }
   return { apiMock }
 })
-
 vi.mock('@/api/modules/skill-pool', () => ({
   __esModule: true,
   ...Object.fromEntries(Object.keys(apiMock).map((k) => [k, (...a: unknown[]) => apiMock[k](...a)])),
@@ -35,11 +32,6 @@ const { evolutionMock } = vi.hoisted(() => {
     getLifecycleUsage: vi.fn().mockResolvedValue({ data: { counts: {}, skills: [] } }),
     getEvolutionSettings: vi.fn().mockResolvedValue({ data: {} }),
     listProposals: vi.fn().mockResolvedValue({ data: [] }),
-    getProposal: vi.fn(),
-    approveProposal: vi.fn(),
-    rejectProposal: vi.fn(),
-    evolveSkill: vi.fn(),
-    pinSkill: vi.fn(),
     runLifecycleSweep: vi.fn(),
     updateEvolutionSettings: vi.fn(),
   }
@@ -49,19 +41,38 @@ vi.mock('@/api/modules/text-evolution', () => ({
   __esModule: true,
   ...Object.fromEntries(Object.keys(evolutionMock).map((k) => [k, (...a: unknown[]) => evolutionMock[k](...a)])),
 }))
+
+const { governanceMock } = vi.hoisted(() => {
+  const governanceMock: Record<string, any> = {
+    getSkillArchives: vi.fn(),
+    rollbackSkill: vi.fn(),
+  }
+  return { governanceMock }
+})
+vi.mock('@/api/modules/governance', () => ({
+  __esModule: true,
+  ...Object.fromEntries(Object.keys(governanceMock).map((k) => [k, (...a: unknown[]) => governanceMock[k](...a)])),
+}))
+
 vi.mock('ant-design-vue', () => ({
   message: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }))
 
 import AgentSkillPage from '../AgentSkillPage.vue'
 
-const PLAN = {
-  umbrella: 'file_read_file_write_skill',
-  absorbed: ['genetic_file_read_file_write', 'synth_deadbeef'],
-  reason: '业务身份重复：3 个条目工具序列+意图全同，收敛为类级技能',
-  basis: 'identity',
-  structure: 'file_read → file_write',
-  status: 'pending',
+const SKILL = {
+  skill_id: 'sk_a',
+  name: 'synth_alpha',
+  description: '自动技能',
+  enabled: true,
+  execution_count: 3,
+}
+
+const ARCHIVE = {
+  version: '1.0.0',
+  description: 'base desc',
+  archived_at: 1758400000,
+  reason: 'rebuild',
 }
 
 const messages = {
@@ -89,15 +100,12 @@ const messages = {
     proposalDetail: '提案详情', holdout: '留出集', iterationsUnit: '轮', baseline: '改进前',
     improved: '改进后', loadError: '加载失败', stateActive: '活跃', stateStale: '陈旧',
     stateArchived: '已归档', agentCreated: '智能体创建',
-    consolidation: '技能合并', consolidationHint: '合并说明', consolidationEmpty: '暂无待审合并计划',
-    consolidationAbsorbed: '吸收成员', consolidationApprove: '批准合并',
-    consolidationApproved: '已批准', consolidationRejected: '已拒绝', consolidationError: '合并失败',
-    consolidationBasisIdentity: '同身份重复', consolidationBasisStructure: '同序列跨意图',
-    consolidationBasisNamePrefix: '名字前缀兜底',
+    consolidation: '技能合并', consolidationHint: 'h', consolidationEmpty: '暂无',
     archive: '归档', archiveTitle: '归档与回滚', archiveEmpty: '暂无可回滚的归档',
-    archiveVersion: '版本', archiveArchivedAt: '归档时间', rollback: '回滚',
-    rollbackConfirm: '确认回滚？', rollbackDone: '已回滚，剩余归档 {left} 份',
-    rollbackError: '回滚失败', archiveLoadError: '归档加载失败',
+    archiveVersion: '版本', archiveArchivedAt: '归档时间',
+    rollback: '回滚', rollbackConfirm: '确认回滚到该归档版本？此操作会改写技能定义。',
+    rollbackDone: '已回滚，剩余归档 {left} 份', rollbackError: '回滚失败',
+    archiveLoadError: '归档加载失败',
   },
 }
 
@@ -116,7 +124,7 @@ function mountPage() {
         GlassButton: {
           props: ['variant', 'size', 'loading', 'disabled'],
           emits: ['click'],
-          template: '<button @click="$emit(\'click\')"><slot /></button>',
+          template: '<button class="gb" :disabled="disabled" @click="$emit(\'click\')"><slot /></button>',
         },
         GlassStatCard: { props: ['label', 'value', 'emoji'], template: '<div />' },
         'a-input-search': { template: '<input />' },
@@ -133,6 +141,7 @@ function mountPage() {
         'a-select': { template: '<div><slot /></div>' },
         'a-select-option': { template: '<div><slot /></div>' },
         'a-alert': { props: ['message'], template: '<div>{{ message }}</div>' },
+        'a-popconfirm': { template: '<div><slot name="default" /></div>' },
         'a-row': { template: '<div><slot /></div>' },
         'a-col': { template: '<div><slot /></div>' },
       },
@@ -140,83 +149,52 @@ function mountPage() {
   })
 }
 
-describe('AgentSkillPage — 技能合并审批入口', () => {
+describe('AgentSkillPage — 归档与回滚入口', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    apiMock.getAgentSkills.mockResolvedValue([])
-    apiMock.listConsolidationPlans.mockResolvedValue({ code: 0, data: [] })
+    apiMock.getAgentSkills.mockResolvedValue([SKILL])
+    governanceMock.getSkillArchives.mockResolvedValue({
+      data: { code: 0, data: { skill_id: 'sk_a', archives: [ARCHIVE] } },
+    })
+    governanceMock.rollbackSkill.mockResolvedValue({
+      data: { code: 0, data: { rolled_back: true, skill_id: 'sk_a', operator: 'u', archives_left: 0 } },
+    })
   })
 
-  it('工具栏渲染「技能合并」入口', async () => {
+  it('技能卡渲染「归档」入口', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    expect(wrapper.text()).toContain('技能合并')
+    expect(wrapper.text()).toContain('归档')
   })
 
-  it('打开入口拉取 plans 并按 agentId 定库', async () => {
+  it('打开归档面按当前 agentId 拉该技能归档', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    const vm = wrapper.vm as any
-    await vm.openConsolidation()
-    expect(apiMock.listConsolidationPlans).toHaveBeenCalledWith('agent-1')
+    await (wrapper.vm as any).openArchive('sk_a')
+    expect(governanceMock.getSkillArchives).toHaveBeenCalledWith('sk_a', 'agent-1')
+    expect((wrapper.vm as any).archiveEntries.length).toBe(1)
   })
 
-  it('只展示待审件（已批/已拒历史条目不得冒充待办）', async () => {
-    apiMock.listConsolidationPlans.mockResolvedValue({
-      code: 0,
-      data: [PLAN, { ...PLAN, umbrella: 'done_one', status: 'approved' }],
+  it('归档为空时回滚按钮不可用', async () => {
+    governanceMock.getSkillArchives.mockResolvedValue({
+      data: { code: 0, data: { skill_id: 'sk_a', archives: [] } },
     })
     const wrapper = mountPage()
     await flushPromises()
-    const vm = wrapper.vm as any
-    await vm.refreshConsolidation()
-    expect(vm.consolidationPlans.map((p: any) => p.umbrella)).toEqual([PLAN.umbrella])
-    expect(wrapper.text()).not.toContain('done_one')
+    await (wrapper.vm as any).openArchive('sk_a')
+    await flushPromises()
+    expect((wrapper.vm as any).archiveEntries.length).toBe(0)
+    expect(wrapper.text()).toContain('暂无可回滚的归档')
   })
 
-  it('计划卡显示聚簇依据与吸收成员', async () => {
-    apiMock.listConsolidationPlans.mockResolvedValue({ code: 0, data: [PLAN] })
+  it('回滚调 rollbackSkill 并刷新归档与技能网格', async () => {
     const wrapper = mountPage()
     await flushPromises()
-    const vm = wrapper.vm as any
-    await vm.refreshConsolidation()
-    await flushPromises()
-    const text = wrapper.text()
-    expect(text).toContain(PLAN.umbrella)
-    expect(text).toContain('同身份重复')
-    expect(text).toContain('genetic_file_read_file_write')
-    expect(text).toContain('吸收成员')
-  })
-
-  it('批准调 approveConsolidation 并刷新列表 + 技能网格', async () => {
-    apiMock.listConsolidationPlans.mockResolvedValue({ code: 0, data: [PLAN] })
-    const wrapper = mountPage()
-    await flushPromises()
-    const vm = wrapper.vm as any
-    await vm.refreshConsolidation()
+    await (wrapper.vm as any).openArchive('sk_a')
     const skillsBefore = apiMock.getAgentSkills.mock.calls.length
-    await vm.decideConsolidation(PLAN, true)
-    expect(apiMock.approveConsolidation).toHaveBeenCalledWith('agent-1', PLAN.umbrella)
-    expect(apiMock.listConsolidationPlans.mock.calls.length).toBeGreaterThan(1)
+    await (wrapper.vm as any).confirmRollback()
+    expect(governanceMock.rollbackSkill).toHaveBeenCalledWith('sk_a', expect.any(String), 'agent-1')
+    expect(governanceMock.getSkillArchives.mock.calls.length).toBeGreaterThan(1)
     expect(apiMock.getAgentSkills.mock.calls.length).toBeGreaterThan(skillsBefore)
-  })
-
-  it('拒绝调 rejectConsolidation（库零改动路径）', async () => {
-    apiMock.listConsolidationPlans.mockResolvedValue({ code: 0, data: [PLAN] })
-    const wrapper = mountPage()
-    await flushPromises()
-    const vm = wrapper.vm as any
-    await vm.decideConsolidation(PLAN, false)
-    expect(apiMock.rejectConsolidation).toHaveBeenCalledWith('agent-1', PLAN.umbrella)
-  })
-
-  it('无计划时渲染 empty 文案', async () => {
-    const wrapper = mountPage()
-    await flushPromises()
-    const vm = wrapper.vm as any
-    await vm.refreshConsolidation()
-    await flushPromises()
-    expect(apiMock.listConsolidationPlans).toHaveBeenCalled()
-    expect(wrapper.text()).toContain('暂无待审合并计划')
   })
 })

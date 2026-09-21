@@ -97,3 +97,47 @@ export function rejectRequest(requestId: string, note = '') {
     { note, approved_by: 'user' }
   )
 }
+
+// ---------------------------------------------------------------------------
+// 技能归档 / 回滚（工单 011）
+//
+// 后端 `get_archives` / `rollback_skill` 此前在顶层零生产调用方 —— 归档只写不读。
+// 归档列表是"能退回哪一版"的唯一读面；回滚是最大破坏动作，必须带操作者留痕。
+// ---------------------------------------------------------------------------
+
+/** 一份归档快照（后端 `SkillExperienceStore._archives` 的条目形状） */
+export interface SkillArchiveEntry {
+  version: string
+  description: string
+  archived_at?: number
+  reason?: string
+}
+
+export interface SkillArchives {
+  skill_id: string
+  archives: SkillArchiveEntry[]
+}
+
+export interface SkillRollbackResult {
+  rolled_back: boolean
+  skill_id: string
+  operator: string
+  /** 回滚后剩余归档数（0 = 窗口已用尽，再点会被后端 409 拒绝） */
+  archives_left: number
+}
+
+/** 归档读面：该技能保留的可回滚快照（未装配返 503，不是空列表） */
+export function getSkillArchives(skillId: string, agentId?: string) {
+  return api.get<ApiResponse<SkillArchives>>(
+    `${BASE}/skills/${skillId}/archives`,
+    { params: agentId ? { agent_id: agentId } : {} }
+  )
+}
+
+/** 回滚写面：退回最近一次归档；归档为空时后端返 409 */
+export function rollbackSkill(skillId: string, operator: string, agentId?: string) {
+  return api.post<ApiResponse<SkillRollbackResult>>(
+    `${BASE}/skills/${skillId}/rollback`,
+    { operator, ...(agentId ? { agent_id: agentId } : {}) }
+  )
+}
