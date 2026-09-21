@@ -200,3 +200,8 @@ tests/unit/skills/test_skill_entry_choke_migration.py
 # （阶跃边界 = 既有红灯 test_ebbinghaus_curve 的根因）+ 其余 5 组成建制死码退役锁定
 tests/unit/cognitive_layers/memory_layer/test_temperature_single_source.py
 
+
+# Issue #68 下一层：同名多份（回潮副本）逐条裁定 + 棘轮。
+# 根因 = 目录重排 fd7ea92c 之后，3b5d7e80 又把 306 个 docs 旧路径还原回来，
+# 同一篇文档在编号分层与旧路径各留一份，归档引用失去唯一裁定。本单收口为一份。
+tests/unit/test_docs_name_collision_guard.py

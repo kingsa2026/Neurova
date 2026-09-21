@@ -18,7 +18,7 @@
 |------|----------|------|
 | 整体架构 | [`docs/CONTEXT.md`](CONTEXT.md) + [`docs/INDEX.md`](INDEX.md) | 系统级事实源 |
 | **架构模型（可视化）** | `docs/architecture-model/` | **证据接地的 C4/DOT 文本源与风险图，`CONTEXT.md` 的图文配套层**；图中每条结论带 `文件:行号`，与 CONTEXT.md 冲突时以本目录的实测证据提 issue 回修 CONTEXT.md |
-| 架构决策(ADR) | `docs/adr/` | 已编号的决策记录，不可覆盖 |
+| 架构决策(ADR) | `docs/01-architecture/adr/` | 已编号的决策记录，不可覆盖 |
 | API 规范 | [`docs/02-api/`](02-api/) + [`API_REFERENCE.md`](02-api/API_REFERENCE.md) | 接口事实源 |
 | 记忆系统 | `docs/memory/` | 记忆层事实源 |
 | 认知架构 | `NEUROVA_CogArch_2.0.md` | 认知层演进总纲 |
