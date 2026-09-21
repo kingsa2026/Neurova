@@ -117,25 +117,34 @@ class RSIRollbackManager(PersistedStateMixin):
         return snapshot_id
 
     def should_rollback(self, metrics: Dict[str, Any]) -> bool:
-        """
-        判断是否应该回滚
+        """回滚判据的**唯一事实源**（工单 011 收口）。
 
-        Args:
-            metrics: 当前指标
+        三个可证伪的触发读数，任一成立即回滚：
 
-        Returns:
-            bool: 是否应该回滚
+        - `convergence_status == "diverging"`：收敛分析判出发散；
+        - `roi` 为负：成本花过而增益未现；
+        - `gain` 为负：本轮实测增益为负（棘轮的有害调整）。
+
+        收口前 `orchestrator.run_iteration` 自己写了一份 `gain < 0` 的内联判据，
+        与本函数口径不同 —— "人按 `should_rollback` 判断"与"系统实际回滚"会分叉。
+        现在编排器把读数喂进来问这一处，不再各判各的。
+
+        读数缺省**不参与**判据：`metrics` 里没有的键按"没测到"处理（不塞 0），
+        避免把"本轮没量"读成"量出来是 0"。
         """
-        # 检查收敛状态
-        convergence_status = metrics.get("convergence_status", "")
+        convergence_status = str(metrics.get("convergence_status") or "")
         if convergence_status == "diverging":
             logger.warning("Divergence detected, should rollback")
             return True
 
-        # 检查 ROI
-        roi = metrics.get("roi", 0)
-        if roi < 0:
+        roi = metrics.get("roi")
+        if isinstance(roi, (int, float)) and roi < 0:
             logger.warning("Negative ROI detected: %s, should rollback", roi)
+            return True
+
+        gain = metrics.get("gain")
+        if isinstance(gain, (int, float)) and gain < 0:
+            logger.warning("Negative gain detected: %s, should rollback", gain)
             return True
 
         return False

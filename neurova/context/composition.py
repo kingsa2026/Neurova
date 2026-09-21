@@ -13,8 +13,8 @@ tools_for_llm 已就绪、紧邻 loop.predict_step）实测一次 prompt 组成�
   （usage_accounting 已归集）；无供应商明细时用 LRU 重复前缀比例估算
   （相邻两轮 prompt 的公共前缀占比——上下文缓存命中的近似）
 
-token 计数统一走 context.token_estimator（EXACT 策略优先，tiktoken 失败
-自动回退比例估算），与注入侧预算口径一致。
+token 计数统一走 context.token_estimator —— 与判据侧（折叠/microcompact/
+窗口预算）共用同一把尺子，面板读数即判据读数。
 """
 
 from __future__ import annotations
@@ -23,13 +23,10 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from neurova.context.token_estimator import EstimationStrategy, get_token_estimator
+from neurova.context.token_estimator import estimate_tokens
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
-
-# 估算器（EXACT：tiktoken o200k，失败自动回退 BALANCED——estimator 内部处理）
-_estimator = get_token_estimator(EstimationStrategy.EXACT)
 
 # 最近一轮实测快照：{agent_id: composition_dict}
 _last_composition: Dict[str, Dict[str, Any]] = {}
@@ -48,13 +45,14 @@ _TOOL_SOURCE_ORDER = ("mcp", "system", "skill", "other")
 
 
 def _estimate(text: str) -> int:
-    """估算单段文本 token（空文本返回 0）。"""
+    """估算单段文本 token（空文本返回 0）。
+
+    与判据侧共用同一把尺子（`context.token_estimator`）——面板显示的口径
+    必须就是决定压不压缩的那个口径，否则 UI 上看不出超限。
+    """
     if not text:
         return 0
-    try:
-        return _estimator.estimate(text)
-    except Exception:  # noqa: BLE001 - 估算失败按 4 字符/token 兜底，不阻断实测
-        return max(1, len(text) // 4)
+    return estimate_tokens(text)
 
 
 def _json_schema_chars(schema: Any) -> str:

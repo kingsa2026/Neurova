@@ -127,7 +127,7 @@ def test_get_kg_manager_falls_back_to_agent_scoped(ws_root):
     assert mgr._storage_dir == ws_root / "a9" / "knowledge_graph"
 
 
-def test_import_extraction_writes_agent_scoped_graph(ws_root, monkeypatch):
+def test_import_extraction_writes_agent_scoped_graph(ws_root, monkeypatch, tmp_path):
     """导入抽取链路必须写所属 agent 的图谱（此前写全局单例）。"""
     import asyncio
     from unittest.mock import AsyncMock, MagicMock
@@ -157,6 +157,14 @@ def test_import_extraction_writes_agent_scoped_graph(ws_root, monkeypatch):
     monkeypatch.setattr(
         "neurova.knowledge.repository.get_knowledge_repository", lambda: FakeRepo()
     )
+    # 抽取现在同时落底座权威，测试给一个自带库（围栏不让碰生产目录）。
+    from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
+
+    isolation_store = KnowledgeFactStore(str(tmp_path / "knowledge_facts.db"))
+    monkeypatch.setattr(
+        "neurova.knowledge.foundation.knowledge_facts.get_knowledge_fact_store",
+        lambda *_a, **_k: isolation_store,
+    )
 
     entry = {"knowledge_id": "k1", "title": "T", "content": "C body"}
     asyncio.run(
@@ -169,3 +177,5 @@ def test_import_extraction_writes_agent_scoped_graph(ws_root, monkeypatch):
     assert any(n.label == "X" for n in kai_graph._nodes.values()), (
         "抽取节点必须落在 kai 的 agent 图谱里"
     )
+    assert isolation_store.listSubjects("kai"), "抽取产物同时要落到底座权威（kai 域）"
+    isolation_store.close()
