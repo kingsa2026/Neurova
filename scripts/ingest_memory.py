@@ -69,6 +69,8 @@ def _parser() -> argparse.ArgumentParser:
     apply_.add_argument("--agent-name", default="imported")
     apply_.add_argument("--run-id", default=None, help="批次标签；缺省自动生成，撤销按它删")
     apply_.add_argument("--sessions-dir", default=None)
+    apply_.add_argument("--owner-user-id", default="",
+                        help="导入会话的属主；缺省为空=共享会话（多用户下导入他人历史必须显式给）")
     apply_.add_argument("--yes", action="store_true", help="确认写库（缺省只出报告）")
 
     undo = sub.add_parser("undo", help="按批次标签撤销一次导入")
@@ -184,7 +186,8 @@ def _apply(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
         for label, bundle in bundles:
             try:
                 report = apply_bundle(bundle, agent_id=args.agent_id, manager=manager,
-                                      sessions=sessions, run_id=args.run_id)
+                                      sessions=sessions, run_id=args.run_id,
+                                      owner_user_id=args.owner_user_id)
             except BundleError as exc:
                 # 跨 store 不做分布式事务：失败者进报告，已写的靠 run_id 撤销
                 print(f"拒绝 {label}：{exc}", file=sys.stderr)
@@ -207,10 +210,13 @@ def _apply(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
 def _undo(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
     manager = manager or _memory_manager(args.agent_id)
     sessions = sessions or _session_manager(args.sessions_dir)
+    # 属主在删盘前取：删完这份批次的自述也就没了，撤销会变成一次无名删除
+    owners = sessions.ingested_run_owners(args.agent_id, args.run_id)
     memories, messages = undo_run(args.agent_id, args.run_id, manager=manager,
                                   sessions=sessions)
-    print(f"已撤销 run_id={args.run_id}：记忆 {memories} 条、消息 {messages} 条"
-          f"（这批引用过且已无人用的媒体文件一并清掉）")
+    scope = "、".join(owners) if owners else "共享（无属主）"
+    print(f"已撤销 run_id={args.run_id}：属主 {scope}，记忆 {memories} 条、"
+          f"消息 {messages} 条（这批引用过且已无人用的媒体文件一并清掉）")
     return EXIT_OK
 
 
