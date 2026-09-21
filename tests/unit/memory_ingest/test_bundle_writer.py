@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from neurova.memory_ingest.bundle.records import MemoryRecord, TranscriptRecord
+from neurova.memory_ingest.bundle.turns import to_turn_messages
 from neurova.memory_ingest.bundle.writer import (SourceEvent, dropped_entries, ensure_offset,
                                                  materialize, write_bundle)
 
@@ -81,7 +82,7 @@ def test_materialize_carries_role_verbatim():
     assert records[0].extra == {"tool_input": '{"a": 1}'}
     assert records[0].reasoning_state == "absent"
     assert records[0].role == ""
-    assert records[0].to_session_message()["role"] == "assistant"     # 消息层回落
+    assert to_turn_messages(records)[0]["role"] == "assistant"        # 消息层回落
     assert records[1].role == "user"
 
 

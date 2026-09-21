@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
-"""SessionManager 导入入口：保留扁平事件行，不压成一问一答。
+"""SessionManager 导入入口：只认包内形状，不承担纠错。
+
+喂进来的必须是产品会产出的形状（轮形装配的产物，见 bundle/turns.py）；咽喉不负责把
+扁平事件拼成轮——那是装配层的事，两处各拼一次就会从第二处开始漂移。
 
 取证事实（设计 §2）：工具调用与结果在所有被调研 harness 里都跨行关联；市面上的互导
 实现（把调用压成 "[ran tool: name]"、丢结果与推理）正是我们要反着做的。
@@ -9,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from neurova.memory_ingest.bundle.records import TranscriptRecord
+from neurova.memory_ingest.bundle.turns import to_turn_messages
 from neurova.session_manager import SessionManager, normalize_store_key
 
 _RUN = "nvimp-sess-1"
@@ -23,23 +27,24 @@ def sessions(tmp_path, monkeypatch):
     SessionManager._instance = None
 
 
-def _msg(seq: int, kind: str, text: str, **kw) -> dict:
-    record = TranscriptRecord(
+def _record(seq: int, kind: str, text: str, **kw) -> TranscriptRecord:
+    return TranscriptRecord(
         session_id="sA", seq=seq, kind=kind, ts=f"2026-05-01T10:00:{seq:02d}+00:00",
         identity_key=f"ik{seq}", content_blocks=({"type": "text", "text": text},) if text else (),
         **kw,
     )
-    return record.to_session_message()
 
 
 def _messages() -> list:
-    return [
-        _msg(1, "user_message", "问题"),
-        _msg(2, "assistant_message", "先读文件"),
-        _msg(3, "tool_call", "", tool_call_id="tc1", tool_name="fs_read"),
-        _msg(4, "tool_result", "结果正文", tool_call_id="tc1", tool_name="fs_read",
-             tool_state="ok"),
-    ]
+    """喂给咽喉的是产品会产出的形状：轮形装配的产物，不是单条记录。"""
+    return to_turn_messages([
+        _record(1, "user_message", "问题", role="user"),
+        _record(2, "assistant_message", "先读文件", role="assistant"),
+        _record(3, "tool_call", "", tool_call_id="tc1", tool_name="fs_read",
+                extra={"tool_input": '{"path": "A.md"}'}),
+        _record(4, "tool_result", "结果正文", tool_call_id="tc1", tool_name="fs_read",
+                tool_state="ok"),
+    ])
 
 
 def _stored(sessions: SessionManager, agent_id: str, session_id: str, date: str) -> list:
@@ -49,27 +54,33 @@ def _stored(sessions: SessionManager, agent_id: str, session_id: str, date: str)
     return (data or {}).get("messages", [])
 
 
-def test_import_keeps_tool_events_as_separate_rows(sessions):
+def test_import_keeps_the_turn_shape_with_its_tool_entries(sessions):
+    """一轮多事件合成一条 assistant 消息，工具调用与结果都在 metadata.tool_calls 里。
+
+    这条断言的是"导入产物与运行期落盘同形"：前端步骤卡按 tool_name/params/result 读，
+    拆成一条行一事件就看不见工具轨迹。
+    """
     added, skipped = sessions.import_session_messages(
         "default", "sA", "2026-05-01", _messages(), ingest_run_id=_RUN)
 
     stored = _stored(sessions, "default", "sA", "2026-05-01")
-    assert (added, skipped) == (4, 0)
-    assert [m["role"] for m in stored] == ["user", "assistant", "assistant", "tool"]
-    assert stored[3]["tool_call_id"] == "tc1"
-    assert stored[3]["tool_state"] == "ok"
+    assert (added, skipped) == (2, 0)
+    assert [m["role"] for m in stored] == ["user", "assistant"]
+    entries = stored[1]["metadata"]["tool_calls"]
+    assert [e["type"] for e in entries] == ["tool_call", "tool_result"]
+    assert entries[0]["tool_call_id"] == "tc1" and entries[0]["params"] == {"path": "A.md"}
+    assert entries[1]["result"] == "结果正文" and entries[1]["state"] == "ok"
 
 
-def test_imported_tool_links_survive_the_read_model(sessions):
-    """读路径也得拿到工具关联：SessionMessage 只透传 metadata，故镜像进 ingest。"""
+def test_imported_tool_entries_survive_the_read_model(sessions):
+    """读路径也得拿到工具轨迹：SessionMessage 只透传 metadata，故整串条目留在 metadata 上。"""
     sessions.import_session_messages("default", "sA", "2026-05-01", _messages(),
                                      ingest_run_id=_RUN)
 
-    read = sessions.get_session("default", "sA", date="2026-05-01").messages[3]
+    read = sessions.get_session("default", "sA", date="2026-05-01").messages[1]
 
-    assert read.role == "tool"
-    assert read.metadata["ingest"]["tool_call_id"] == "tc1"
-    assert read.metadata["ingest"]["tool_name"] == "fs_read"
+    assert read.role == "assistant"
+    assert [e["tool_name"] for e in read.metadata["tool_calls"]] == ["fs_read", "fs_read"]
 
 
 def test_import_is_idempotent_by_identity_key(sessions):
@@ -78,8 +89,8 @@ def test_import_is_idempotent_by_identity_key(sessions):
     again = sessions.import_session_messages("default", "sA", "2026-05-01", _messages(),
                                              ingest_run_id=_RUN)
 
-    assert (first, again) == ((4, 0), (0, 4))
-    assert len(_stored(sessions, "default", "sA", "2026-05-01")) == 4
+    assert (first, again) == ((2, 0), (0, 2))
+    assert len(_stored(sessions, "default", "sA", "2026-05-01")) == 2
 
 
 def test_import_creates_missing_session_with_history_date_and_title(sessions):
@@ -115,7 +126,7 @@ def test_delete_ingested_messages_removes_only_that_run(sessions):
     removed = sessions.delete_ingested_messages("default", _RUN)
 
     stored = _stored(sessions, "default", "sA", "2026-05-01")
-    assert removed == 4
+    assert removed == 2
     assert [m["role"] for m in stored] == ["user", "assistant"]
 
 
@@ -126,7 +137,7 @@ def test_delete_empties_file_when_all_messages_come_from_the_run(sessions, tmp_p
 
     removed = sessions.delete_ingested_messages("default", _RUN)
 
-    assert removed == 4 and not path.exists()
+    assert removed == 2 and not path.exists()
 
 
 def test_import_requires_run_id(sessions):
@@ -178,7 +189,7 @@ def test_source_session_id_is_recorded_and_session_is_readable(sessions):
 
     assert [m["metadata"]["ingest"]["source_session_id"] for m in stored[:1]] == [raw]
     assert stored[0]["metadata"]["ingest"]["session_id"] == key
-    assert len(record.messages) == 4
+    assert len(record.messages) == 2
 
 
 def test_empty_session_id_is_rejected(sessions):
