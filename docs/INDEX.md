@@ -20,16 +20,20 @@
 | **架构模型（可视化）** | `docs/architecture-model/` | **证据接地的 C4/DOT 文本源与风险图，`CONTEXT.md` 的图文配套层**；图中每条结论带 `文件:行号`，与 CONTEXT.md 冲突时以本目录的实测证据提 issue 回修 CONTEXT.md |
 | 架构决策(ADR) | `docs/01-architecture/adr/` | 已编号的决策记录，不可覆盖 |
 | API 规范 | [`docs/02-api/`](02-api/) + [`API_REFERENCE.md`](02-api/API_REFERENCE.md) | 接口事实源 |
-| 记忆系统 | `docs/memory/` | 记忆层事实源 |
+| 记忆系统 | `docs/01-architecture/memory/` | 记忆层事实源 |
 | 认知架构 | `NEUROVA_CogArch_2.0.md` | 认知层演进总纲 |
-| 开发进度 | `docs/dev_progress/` | 迭代记录（历史） |
+| 开发进度 | `docs/09-dev-progress/` | 迭代记录（历史） |
 | Bug 修复史 | 根目录 `bugfix-*.md` 集群 | 变更日志（历史，归档用） |
-| 配置 | `docs/configuration/` | 部署/配置事实源 |
-| 国际化 | `docs/i18n/` | 多语言事实源 |
+| 配置 | `docs/10-configuration/` | 部署/配置事实源 |
+| 国际化 | `docs/03-user-guide/i18n/` | 多语言事实源 |
 | 产品/品牌 | `PRODUCT_GUIDE.md` / `NEUROVA_BRAND.md` | 对外信息事实源 |
 | 鸿蒙端 | `HARMONYOS_*.md` | NeurovaHarmony 端事实源 |
 
 ## 2. 文档真实分布（实测，2026-08-23）
+
+> **口径说明（2026-09-21）**：本节及 2.1/2.2 是**搬迁前**的实测快照，正文按当时实况逐字保留；
+> 其中的旧目录路径（`docs/dev_progress/`、`docs/memory/`、`docs/reports/` 等）今天已按编号分层归位，
+> 当前归属一律以第 1 节表为准。保留原文是为了让重排前后可对照，不是当下导航。
 
 > 说明：扫描时混入的 `.venv/`(102)、(22)、`flow-kb-sdk/`(18) 等是**虚拟环境/第三方工具缓存**，
 > 不属于项目文档，已排除。真实项目 markdown 约 **377 篇**，其中 `docs/` 占 **297 篇**。
