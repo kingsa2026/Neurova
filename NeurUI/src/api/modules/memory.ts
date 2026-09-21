@@ -37,6 +37,27 @@ export const MEMORY_TYPE_COLOR: Record<string, string> = Object.fromEntries(
   MEMORY_TYPES.map((m) => [m.value, m.color]),
 )
 
+/**
+ * 分类值清单（后端 `MemoryCategory` 枚举，7 值，唯一事实源）。
+ *
+ * 修 Issue #68 登记的界面欠账：MemoryPage 筛选/新建下拉曾另有一份本地数组
+ * `['general','conversation','fact','preference','skill','emotion']` ——
+ * **6 个值里有 4 个不是后端枚举**（fact/preference/skill/emotion 经
+ * `remember()` 一律回落成 general），选它们筛选永远为空；而
+ * experience/tool_usage/reflection/user_preference 四个真实分类在界面上
+ * 筛不出来，于是"库里 99% 是 general"这件事在 UI 上既看不见也筛不出。
+ * 新增分类只改这里（值本身的显示沿用枚举字面量，文案 i18n 由页面按需绑定）。
+ */
+export const MEMORY_CATEGORY_VALUES: ReadonlyArray<string> = [
+  'general',
+  'conversation',
+  'knowledge',
+  'experience',
+  'tool_usage',
+  'reflection',
+  'user_preference',
+]
+
 export interface MemoryEntry {
   id: string
   agent_id: string
@@ -87,8 +108,10 @@ export interface MemoryCreatePayload {
   perspective?: string
   tags?: string[]
   metadata?: Record<string, unknown>
+  /** 是否自动分类推断（后端 AddMemoryRequest.auto_classify；只补未声明的分类维度） */
   auto_classify?: boolean
-  classification_context?: string
+  /** 分类上下文（后端为 dict，如 { emotion: 'joy' 触发情感亲和增强 }；此前 TS 误标为 string） */
+  classification_context?: Record<string, unknown>
   auto_analyze_emotion?: boolean
 }
 

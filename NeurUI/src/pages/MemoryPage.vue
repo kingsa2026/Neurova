@@ -515,7 +515,10 @@ const memoryStats = ref<MemoryStats | null>(null)
 // Semantic search results
 const searchResults = ref<MemorySearchResult[]>([])
 
-const categories = ['general', 'conversation', 'fact', 'preference', 'skill', 'emotion']
+// 分类清单取自后端 MemoryCategory 枚举（MEMORY_CATEGORY_VALUES 单一事实源）。
+// 此前这里是 6 个值的本地数组，其中 fact/preference/skill/emotion 并非后端枚举，
+// 选中即被回落成 general，筛选永远为空（Issue #68）。
+const categories = memoryApi.MEMORY_CATEGORY_VALUES
 
 const createForm = ref({
   content: '',
