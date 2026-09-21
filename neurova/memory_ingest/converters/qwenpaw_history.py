@@ -24,7 +24,8 @@ from typing import Any, Dict, List, Tuple
 from neurova.memory_ingest import probe
 from neurova.memory_ingest.bundle.manifest import BundleError, BundleManifest
 from neurova.memory_ingest.bundle.media import MEDIA_BLOCK_TYPES, MediaSink
-from neurova.memory_ingest.bundle.writer import SourceEvent, ensure_offset, materialize, write_bundle
+from neurova.memory_ingest.bundle.writer import (SourceEvent, dropped_entries, ensure_offset,
+                                                 materialize, write_bundle)
 from neurova.memory_ingest.probe import Handprint, register_handprint
 
 CONVERTER_NAME = "qwenpaw_history"
@@ -293,13 +294,10 @@ def _column_decls(store: Path, rows: List[Dict[str, Any]]) -> Counter:
 
 
 def _dropped_entries(declared: Counter) -> List[Dict[str, Any]]:
-    entries = []
-    for field, count in sorted(declared.items()):
-        if count <= 0:
-            continue
-        prefix, _, name = field.partition(":")
-        entries.append({"field": name if prefix == "column" else field,
-                        "count": count, "reason": REASONS.get(prefix, REASONS["blocks"])})
+    entries = dropped_entries(declared, dict(REASONS, __fallback__=REASONS["blocks"]))
+    for entry in entries:                      # 源列申报只显示列名（列名前缀是本族约定）
+        entry["field"] = entry["field"].split(":", 1)[1] \
+            if entry["field"].startswith("column:") else entry["field"]
     return entries
 
 

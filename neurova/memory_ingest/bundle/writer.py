@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone, tzinfo
 from pathlib import Path
@@ -86,18 +87,42 @@ def write_bundle(out_dir: Path, records: Sequence[TranscriptRecord], *, agent_na
     out_dir.mkdir(parents=True, exist_ok=True)
     _write_jsonl(out_dir / "transcripts.jsonl", records)
     _write_jsonl(out_dir / "memories.jsonl", memories)
+    relations = _line_count(out_dir / "relations.jsonl")   # 转换器暂不产它，但第三方包可能带
 
     manifest = BundleManifest(
         schema_version=1,
         generated_at=datetime.now(timezone.utc).isoformat(),
         agent_name=agent_name,
         source=dict(source),
-        counts={"transcripts": len(records), "memories": len(memories), "relations": 0},
+        counts={"transcripts": len(records), "memories": len(memories), "relations": relations},
         dropped=tuple(dropped),
         stores=tuple(stores),
     )
     dump_manifest(manifest, out_dir / "manifest.json")
     return manifest
+
+
+def _line_count(path: Path) -> int:
+    """非空行数：登记用的计数，与校验器核的是同一口径。"""
+    if not path.exists():
+        return 0
+    return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
+def dropped_entries(declared: Counter, reasons: Dict[str, str]) -> List[Dict[str, Any]]:
+    """申报的唯一口径：字段名原样带出，原因先按整名后按前缀查，都查不到用本族的兜底文案。
+
+    六族各写一份时，同一个未预期键会被说成不同的原因（"type"/"payload"/"event"/"part"…），
+    报告就不可比较了；reasons 必须带 "__fallback__" 键。
+    """
+    entries = []
+    for field, count in sorted(declared.items()):
+        if count <= 0:
+            continue
+        entries.append({"field": field, "count": count,
+                        "reason": reasons.get(field) or reasons.get(field.split(":")[0])
+                                  or reasons["__fallback__"]})
+    return entries
 
 
 def _write_jsonl(path: Path, records: Sequence[Any]) -> None:

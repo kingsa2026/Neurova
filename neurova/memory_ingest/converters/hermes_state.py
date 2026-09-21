@@ -26,7 +26,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from neurova.memory_ingest import probe
 from neurova.memory_ingest.bundle.manifest import BundleError, BundleManifest
 from neurova.memory_ingest.bundle.media import MediaSink
-from neurova.memory_ingest.bundle.writer import SourceEvent, materialize, write_bundle
+from neurova.memory_ingest.bundle.writer import (SourceEvent, dropped_entries,
+                                                 materialize, write_bundle)
 from neurova.memory_ingest.converters.blocks import ContentEvent, split_content
 from neurova.memory_ingest.probe import Handprint, register_handprint
 
@@ -296,9 +297,7 @@ def _schema_version(conn: sqlite3.Connection) -> Optional[int]:
 
 
 def _dropped_entries(declared: Counter) -> List[Dict[str, Any]]:
-    return [{"field": field, "count": count,
-             "reason": REASONS.get(str(field).split(":")[0], UNKNOWN_COLUMN_REASON)}
-            for field, count in sorted(declared.items()) if count > 0]
+    return dropped_entries(declared, dict(REASONS, __fallback__=UNKNOWN_COLUMN_REASON))
 
 
 def _json(raw: Any) -> Any:

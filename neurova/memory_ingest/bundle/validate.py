@@ -63,6 +63,7 @@ def validate_bundle(root: Path) -> List[str]:
             errors += verify_media(root)          # 引用型包的最后一道闸：路径与摘要
         else:
             errors += _origin_errors(rows)
+    errors += _relations_errors(root, counts)
     return errors
 
 
@@ -160,3 +161,16 @@ def _domain_errors(name: str, rows: List[dict]) -> List[str]:
                 errors.append(f"memories.jsonl {field} 必须是 {low:g}-{high:g} 内的数，"
                               f"实际 {value!r}（identity_key={key!r}）")
     return errors
+
+
+def _relations_errors(root: Path, counts: Dict[str, int]) -> List[str]:
+    """v1 不消费记忆图边，但包里有就必须登记：不在 manifest 里出现就是静默丢。"""
+    path = root / "relations.jsonl"
+    if not path.exists():
+        return []
+    claimed = int(counts.get("relations", 0))
+    actual = sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+    if claimed != actual:
+        return [f"relations.jsonl 存在但未登记: manifest 声称 {claimed}，实际 {actual}"
+                f"（v1 不导入图边，只登记；对不上就是漏报）"]
+    return []

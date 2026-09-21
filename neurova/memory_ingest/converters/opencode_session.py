@@ -26,7 +26,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from neurova.memory_ingest import probe
 from neurova.memory_ingest.bundle.manifest import BundleError, BundleManifest
 from neurova.memory_ingest.bundle.media import MediaSink
-from neurova.memory_ingest.bundle.writer import SourceEvent, materialize, write_bundle
+from neurova.memory_ingest.bundle.writer import (SourceEvent, dropped_entries,
+                                                 materialize, write_bundle)
 from neurova.memory_ingest.probe import Handprint, register_handprint
 
 CONVERTER_NAME = "opencode_session"
@@ -251,14 +252,7 @@ def _ts(value: Any) -> str:
 
 
 def _dropped_entries(declared: Counter) -> List[Dict[str, Any]]:
-    entries = []
-    for field, count in sorted(declared.items()):
-        if count <= 0:
-            continue
-        prefix = field.split(":")[0]
-        reason = REASONS.get(field) or REASONS.get(prefix) or REASONS["part"]
-        entries.append({"field": field, "count": count, "reason": reason})
-    return entries
+    return dropped_entries(declared, dict(REASONS, __fallback__=REASONS["part"]))
 
 
 register_handprint(Handprint(CONVERTER_NAME, "sqlite", matches_store))

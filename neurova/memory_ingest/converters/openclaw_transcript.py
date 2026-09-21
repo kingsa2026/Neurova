@@ -26,8 +26,8 @@ from neurova.memory_ingest import probe
 from neurova.memory_ingest.bundle.manifest import BundleError, BundleManifest
 from neurova.memory_ingest.bundle.media import MediaSink
 from neurova.memory_ingest.bundle.records import MemoryRecord
-from neurova.memory_ingest.bundle.writer import (SourceEvent, ensure_offset, materialize,
-                                                 write_bundle)
+from neurova.memory_ingest.bundle.writer import (SourceEvent, dropped_entries, ensure_offset,
+                                                 materialize, write_bundle)
 from neurova.memory_ingest.converters.blocks import split_content
 from neurova.memory_ingest.probe import Handprint, register_handprint
 
@@ -303,14 +303,7 @@ def _from_ms(value: Any) -> str:
 
 
 def _dropped_entries(declared: Counter) -> List[Dict[str, Any]]:
-    entries = []
-    for field, count in sorted(declared.items()):
-        if count <= 0:
-            continue
-        prefix = field.split(":")[0]
-        entries.append({"field": field, "count": count,
-                        "reason": REASONS.get(prefix, REASONS["event"])})
-    return entries
+    return dropped_entries(declared, dict(REASONS, __fallback__=REASONS["event"]))
 
 
 register_handprint(Handprint(CONVERTER_NAME, "sqlite", matches_store))
