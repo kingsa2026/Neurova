@@ -8,6 +8,7 @@
 | 入口 | 路径 | 说明 |
 |------|------|------|
 | 项目 README | [README.md](../../README.md) | 项目概述、快速开始、核心特性 |
+| **开发准则（强制）** | [DEVELOPMENT_RULES.md](DEVELOPMENT_RULES.md) | 中文交流 / TDD 红绿灯 / 根因修复 / 闭环 / 原创性 / Neurova 命名法 |
 | 项目上下文 | [CONTEXT.md](../CONTEXT.md) | 架构概览、技术栈、设计规则 |
 | 功能模块矩阵 | [见下](#功能模块矩阵) | 全部功能的状态对照 |
 | API 参考 | [API_REFERENCE.md](../02-api/API_REFERENCE.md) | 82 端点模块参考 |
@@ -249,6 +250,8 @@
 
 ## 维护指南
 
+0. **规则变更**：协作红线只改 `docs/0-index/DEVELOPMENT_RULES.md` 与 `.cnb/settings.yml`
+   两处，二者由 `tests/unit/test_devRulesConfigGuard.py` 常驻校验，禁止只改一侧。
 1. **新增模块**：在本文档"功能模块矩阵"增加一行（对照代码标注状态）
 2. **状态变更**：功能从🟡→✅ 或⬜→🟡，更新矩阵 + 对应架构文档头部状态
 3. **新文档**：按领域放入对应目录，在此索引的文档列表添加一行
