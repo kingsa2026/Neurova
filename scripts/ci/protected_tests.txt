@@ -267,3 +267,16 @@ tests/unit/desktop/test_install_supply_contract.py
 #   （根因：库只有 CREATE TABLE IF NOT EXISTS、无 user_version，schema 无纪律；
 #     U1 甲案的读侧兜底：列优先 + 旧行解析 metadata，两路同源 memory_scope）
 tests/unit/context/test_context_ledger_migration.py
+# Issue #72 残余项：记忆侧冲突信号必须落在「同一命题的否证」（子串含否定词 +
+#   0.3 相似度门是噪声根因），且判据全仓唯一（ConflictModule 不再自持第二份）
+tests/unit/cognitive_layers/memory_layer/test_conflict_signal_scope.py
+# Issue #72 残余项：冲突链闭环——检出带依据落账、读数可见（stats/summary/按来源）、
+#   依据缺失不入账、纯观测语义不变
+tests/unit/cognitive_layers/memory_layer/test_conflict_disposition_loop.py
+
+# Issue #96 收尾·第三轮（Ref: #68）：活跃层指向「不存在的具体文件」的引用。
+#   根因同 #96——三次搬家/退役（fd7ea92c / 5f94b93d / 3b5d7e80 / 663faa5d）
+#   都只改文件、不同批改引用方。前两轮只覆盖「归档层」与「退役目录」两类形态，
+#   活跃层指向不存在文件的引用一路无人拦。判据单源在 scripts/scan_docs_refs.py
+#   的 activeLayerDangling()，活跃层零容忍（硬零，不是棘轮）。
+tests/unit/test_active_layer_refs_guard.py
