@@ -175,8 +175,15 @@ def test_get_kg_manager_falls_back_to_agent_scoped_registry(monkeypatch):
 # R5: backfill 补抽端点
 # ---------------------------------------------------------------
 
+def _isolationFactStore(tmp_path):
+    """隔离底座库：抽取现在会落权威，测试必须给一个自带库（围栏不让碰生产目录）。"""
+    from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 
-def test_backfill_extracts_only_pending_entries(registry, monkeypatch):
+    return KnowledgeFactStore(str(tmp_path / "knowledge_facts.db"))
+
+
+
+def test_backfill_extracts_only_pending_entries(registry, monkeypatch, tmp_path):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -237,6 +244,12 @@ def test_backfill_extracts_only_pending_entries(registry, monkeypatch):
     )
     monkeypatch.setattr(
         "neurova.knowledge.repository.get_knowledge_repository", lambda: fake_repo
+    )
+    # 补建落的是同一份权威：不注入隔离底座，补给的就是"只有投影"的假成功。
+    isolation_store = _isolationFactStore(tmp_path)
+    monkeypatch.setattr(
+        "neurova.knowledge.foundation.knowledge_facts.get_knowledge_fact_store",
+        lambda *_a, **_k: isolation_store,
     )
 
     app = FastAPI()
