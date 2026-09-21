@@ -265,6 +265,13 @@ class MemoryManager:
             "remember_count": 0,
             # 工单 012：未知类型写入的可见计数（0 才是正常态）
             "unknown_memory_type_count": 0,
+            # Issue #68：分类闭环的可见计数。
+            # auto_classified_count 长期为 0 = "自动分类没接线"（本次修复前的现状）；
+            # unknown_category_count 与 unknown_memory_type_count 同纪律：非法分类
+            # 回落 GENERAL 时留痕 + 计数，不静默换成 general。
+            "auto_classified_count": 0,
+            "auto_classify_declared_skipped_count": 0,
+            "unknown_category_count": 0,
         }
 
         logger.info(
@@ -827,8 +834,13 @@ class MemoryManager:
     def remember(
         self,
         content: str,
-        category: str = "general",
-        memory_type: str = "semantic",
+        # Issue #68：默认 None = "未声明"，不是"general/semantic"。
+        # 原默认值把"没传"与"明确要求 general"混为一谈，自动分类无从下手
+        # （99% 的行因此恒 general）。未声明且 auto_classify=True 时由唯一分类
+        # 引擎推断；未声明且 auto_classify=False 时仍回落 general/semantic，
+        # 与历史默认值等价。
+        category: Optional[str] = None,
+        memory_type: Optional[str] = None,
         temperature: Optional[float] = None,
         importance: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -840,7 +852,12 @@ class MemoryManager:
         perspective: Optional[str] = None,
         # P1-9 来源信任分级: 闭集 owner/agent/untrusted/system, 写入时定级
         origin: Optional[str] = None,
-        # 控制参数(留 kwargs): auto_analyze_emotion / auto_classify / classification_context
+        # Issue #68：这两个控制参数曾是 kwargs 黑洞（文档写了、实现没有）——
+        # 现在显式入参并真的接线：auto_classify 触发分类推断，
+        # classification_context 作为引擎的元数据（如 {"emotion": "joy"} 走情感亲和）。
+        auto_classify: bool = False,
+        classification_context: Optional[Dict[str, Any]] = None,
+        # 其余控制参数(留 kwargs): auto_analyze_emotion
         **kwargs,
     ) -> str:
         """存储一条记忆
@@ -849,6 +866,15 @@ class MemoryManager:
         首条** —— 后到的同键写入返回既有 id、刷新 `updated_at`（再确认），不新增
         行也不另记计数。计数版语义落在 EKB `add_experience_record`（`seen_count`），
         两处口径不同是因为记忆行的温度/权重由衰减器持有，重复计数在此无消费方。
+
+        自动分类（Issue #68 闭环）：`auto_classify=True` 时按
+        `auto_classifier.MemoryAutoClassifier`（唯一引擎，词汇表 = models.py
+        枚举）推断 category / memory_type / perspective，并**只补未声明项**——
+        调用方显式传了就不覆盖（写入侧最了解自己那条是什么）。推断证据落
+        `metadata["_auto_classified"] = {...,"inferred":[...],"confidence":float}`，
+        使"这条分类是猜的"可复现、可审计；显式声明项不进 inferred。
+        默认 False：既有调用方（管线/睡眠写回等，自己标好类型）行为不变，
+        API 侧 `AddMemoryRequest.auto_classify` 默认 True 显式传入。
         """
         # 配置化默认值（memory-settings 配置页）: manager.new_memory_temperature /
         # new_memory_importance。默认 65（温度死锁修复：原 100 ≥ 高温不衰减
@@ -878,6 +904,22 @@ class MemoryManager:
                 except (ValueError, KeyError):
                     emotion_val = EmotionType.NEUTRAL
 
+            # ── 自动分类（Issue #68：让声明过的开关真正起作用）──────────────
+            # 只补未声明项；推断证据落 metadata 供审计（分类是猜的就写清是猜的）。
+            _auto_classify_evidence: Optional[Dict[str, Any]] = None
+            if auto_classify:
+                _auto_classify_evidence = self._infer_and_apply_classification(
+                    content=content,
+                    category=category,
+                    memory_type=memory_type,
+                    perspective=perspective,
+                    context=classification_context,
+                )
+                if _auto_classify_evidence["inferred"]:
+                    category = _auto_classify_evidence["values"]["category"]
+                    memory_type = _auto_classify_evidence["values"]["memory_type"]
+                    perspective = _auto_classify_evidence["values"]["perspective"]
+
             # 安全解析 memory_type（防御无效枚举值）
             # 工单 012：回落 SEMANTIC 不再静默——原声明进 metadata、计数进 _stats，
             # 行照存（按 D1"标无证据不砍量"：拒绝会把用户内容丢成一次 500）。
@@ -904,6 +946,8 @@ class MemoryManager:
                 except (ValueError, KeyError):
                     logger.warning("Invalid category '%s', falling back to GENERAL", category)
                     parsed_category = MemoryCategory.GENERAL
+                    # Issue #68：与未知 memory_type 同纪律——回落留痕 + 计数可见
+                    self._stats["unknown_category_count"] += 1
             elif category is None:
                 # None 直通会导致 _persist_memory 的 .value 炸掉（API 传 null 时触发）
                 parsed_category = MemoryCategory.GENERAL
@@ -922,6 +966,20 @@ class MemoryManager:
             # P-3 修复: 非法枚举 category 字符串保留到 metadata, 供 recall 按原始标签过滤
             if isinstance(category, str) and parsed_category == MemoryCategory.GENERAL and category != "general":
                 final_metadata["_original_category"] = category
+
+            # Issue #68：自动分类证据（只记推断出来的项 + 置信度/依据）。
+            # 分类一旦不可复现，"库里全是 general"这类问题就再也查不出来。
+            if _auto_classify_evidence is not None:
+                if _auto_classify_evidence["inferred"]:
+                    final_metadata["_auto_classified"] = {
+                        "inferred": _auto_classify_evidence["inferred"],
+                        "confidence": _auto_classify_evidence["confidence"],
+                        "reasoning": _auto_classify_evidence["reasoning"],
+                    }
+                    self._stats["auto_classified_count"] += 1
+                else:
+                    # 调用方三项都显式声明 → 引擎不推断，但开关确实生效过
+                    self._stats["auto_classify_declared_skipped_count"] += 1
 
             # 工单 012：未知 memory_type 的原始声明留痕 + 计数可见（不静默换类型）
             if _declared_memory_type is not None:
@@ -1739,6 +1797,15 @@ class MemoryManager:
         with self._lock:
             # M-06: 基集构造移入锁内（同 recall/get_memories 修复）
             base = self._agent_memories() if agent_wide else self._scoped_memories()
+            # Issue #68：分类分布是"17 维分类是否真起作用"的唯一可观测读数——
+            # 此前库里 99% 是 general 却无处可查。按生效作用域统计，与 total 同口径。
+            by_category: Dict[str, int] = {}
+            by_type: Dict[str, int] = {}
+            for m in base:
+                cat = getattr(getattr(m, "category", None), "value", None) or "unknown"
+                mtype = getattr(getattr(m, "memory_type", None), "value", None) or "unknown"
+                by_category[cat] = by_category.get(cat, 0) + 1
+                by_type[mtype] = by_type.get(mtype, 0) + 1
             return {
                 # 审计修复: 统计按生效作用域计数, 不泄漏其他用户的数据量;
                 # agent_wide=True(管理页)按 agent 全量口径计数。
@@ -1747,6 +1814,16 @@ class MemoryManager:
                 "recall_count": self._stats["recall_count"],
                 "bus_events": self._bus.emit_count,
                 "bus_handlers": self._bus.handler_count(),
+                # 分类闭环读数（0 是正常态；auto_classified_count 为 0 表示
+                # 自动分类没有被任何写入路径使用）
+                "by_category": by_category,
+                "by_memory_type": by_type,
+                "auto_classified_count": self._stats["auto_classified_count"],
+                "auto_classify_declared_skipped_count": self._stats[
+                    "auto_classify_declared_skipped_count"
+                ],
+                "unknown_memory_type_count": self._stats["unknown_memory_type_count"],
+                "unknown_category_count": self._stats["unknown_category_count"],
             }
 
     def get_full_stats(self, agent_wide: bool = False) -> Dict[str, Any]:
@@ -2006,10 +2083,23 @@ class MemoryManager:
         emotion = self._emotion_module.analyze_text_emotion(user_text)
         return emotion.to_dict()
 
-    # ────── Classification (委托到 modules/classifier_module.py) ──────
+    # ────── Classification（唯一引擎 = auto_classifier.MemoryAutoClassifier）──────
+
+    def _ensure_auto_classifier(self):
+        """懒加载唯一分类引擎（Issue #68：此前 `self._auto_classifier` 建好就没人读，
+        真正的规则却有两份——引擎私有枚举 + ClassifierModule 的 6 个硬编码桶）。
+        现在两个入口都走它。"""
+        if self._auto_classifier is None:
+            from neurova.cognitive_layers.memory_layer.auto_classifier import (
+                MemoryAutoClassifier,
+            )
+
+            self._auto_classifier = MemoryAutoClassifier()
+            logger.info("MemoryAutoClassifier lazily initialized")
+        return self._auto_classifier
 
     def _ensure_classifier_module(self):
-        """懒加载 ClassifierModule（首次调用时初始化）"""
+        """懒加载 ClassifierModule（分类缓存 / 标签面；推断已委托唯一引擎）"""
         if self._classifier_module is None:
             from neurova.cognitive_layers.memory_layer.modules.classifier_module import ClassifierModule
 
@@ -2018,30 +2108,138 @@ class MemoryManager:
             logger.info("ClassifierModule lazily initialized")
         return self._classifier_module
 
-    def classify_memory(self, content: str) -> Dict[str, Any]:
-        """分类记忆（委托到 ClassifierModule）"""
+    def classify_memory(
+        self, content: str, context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """分类记忆内容（只推断，不落库）
+
+        返回契约（API `/api/v1/memory/classify` 的 ClassifyMemoryResponse 逐字段
+        对齐）：`category` / `type` / `perspective` 是**字符串值**，各自带
+        `*_confidence`；另有 `categories`（多标签候选，含最佳）与 `tags`。
+
+        历史坑（Issue #68）：本方法的返回被 API 端点当成
+        `result["category"][0]`（以为值是 `(枚举, 置信度)` 元组），而实际返回是
+        `{"memory_id","categories","tags"}` ⇒ 端点恒 500。现把契约写死在这里，
+        端点只做透传。
+
+        Args:
+            content: 记忆内容
+            context: 可选分类上下文（透传引擎 metadata，如 {"emotion": "joy"}）
+        """
+        engine = self._ensure_auto_classifier()
+        result = engine.classify(content, context)
         module = self._ensure_classifier_module()
         # 使用内容哈希作为临时 memory_id
         memory_id = f"cls_{abs(hash(content)) % (10 ** 8)}"
-        categories = module.classify(memory_id=memory_id, content=content)
+        categories = module.classify(memory_id=memory_id, content=content, metadata=context)
         tags = module.extract_tags(memory_id=memory_id, content=content)
-        return {"memory_id": memory_id, "categories": categories, "tags": tags}
+        details = result["details"]
+        return {
+            "memory_id": memory_id,
+            "categories": categories,
+            "tags": tags,
+            "category": result["category"].value,
+            "category_confidence": float(details["category_confidence"]),
+            "type": result["memory_type"].value,
+            "type_confidence": float(details["type_confidence"]),
+            "perspective": result["perspective"].value,
+            "perspective_confidence": float(details["perspective_confidence"]),
+            "emotion": result["emotion"].value,
+            "is_important": bool(result["is_important"]),
+            "is_crystallized": bool(result["is_crystallized"]),
+            "confidence": float(result["confidence"]),
+            "reasoning": result["reasoning"],
+        }
+
+    def _infer_and_apply_classification(
+        self,
+        content: str,
+        category: Any,
+        memory_type: Any,
+        perspective: Any,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """推断并回填"未声明"的分类维度（`remember(auto_classify=True)` 用）。
+
+        只补未声明项：调用方显式传了就原样保留并记进 `declared`——写入侧最了解
+        自己那条记忆是什么，自动分类不该覆盖它。引擎异常不阻断写入（记忆内容比
+        分类标签重要），异常路径返回空推断并把原因记进 reasoning。
+
+        Returns:
+            {"values": {category/memory_type/perspective}, "inferred": [...],
+             "declared": [...], "confidence": float, "reasoning": str}
+        """
+        declared = {
+            "category": category is not None,
+            "memory_type": memory_type is not None,
+            "perspective": perspective is not None,
+        }
+        values = {"category": category, "memory_type": memory_type, "perspective": perspective}
+        if all(declared.values()) or not (content or "").strip():
+            return {
+                "values": values,
+                "inferred": [],
+                "declared": [k for k, v in declared.items() if v],
+                "confidence": 0.0,
+                "reasoning": "三项均已声明" if all(declared.values()) else "内容为空",
+            }
+
+        try:
+            result = self._ensure_auto_classifier().classify(content, context)
+        except Exception as exc:  # noqa: BLE001 - 分类失败不得丢用户内容
+            logger.warning("自动分类失败（按未声明项回落默认值）: %s", exc)
+            return {
+                "values": values,
+                "inferred": [],
+                "declared": [k for k, v in declared.items() if v],
+                "confidence": 0.0,
+                "reasoning": f"分类引擎异常: {exc}",
+            }
+
+        inferred = []
+        if not declared["category"]:
+            values["category"] = result["category"].value
+            inferred.append("category")
+        if not declared["memory_type"]:
+            values["memory_type"] = result["memory_type"].value
+            inferred.append("memory_type")
+        if not declared["perspective"]:
+            values["perspective"] = result["perspective"].value
+            inferred.append("perspective")
+
+        return {
+            "values": values,
+            "inferred": inferred,
+            "declared": [k for k, v in declared.items() if v],
+            "confidence": float(result["confidence"]),
+            "reasoning": result["reasoning"],
+        }
 
     def classify_and_remember(self, content: str, **kwargs) -> str:
-        # 根因修复（P2-#15）: 原先直接 remember 而完全丢弃分类结果。
-        # 先分类，再将分类类别并入 tags，使记忆携带分类信息。
+        """分类并记忆（一站式：分类结果真的落到记忆行）
+
+        Issue #68：原实现把分类类别只塞进 `kwargs["tags"]`，而 `remember()` 的
+        kwargs 并不接收 `tags` ⇒ 分类结果照样丢。现改为**直接落分类维度**：
+        auto_classify 交给 `remember` 的推断分支（显式项仍优先），并把多标签
+        候选写进 `metadata["categories"]` 保留"可能属于多类"的信息。
+        """
         try:
-            cls = self.classify_memory(content)
+            cls = self.classify_memory(content, kwargs.get("classification_context"))
         except Exception as e:  # noqa: BLE001
             logger.warning("classify_and_remember 分类失败，仅记忆原文: %s", e)
             cls = None
+
         if isinstance(cls, dict):
-            cats = cls.get("categories") or []
-            if cats:
-                tags = kwargs.get("tags")
-                if not isinstance(tags, list):
-                    tags = []
-                kwargs["tags"] = tags + [str(c) for c in cats]
+            kwargs.setdefault("auto_classify", True)
+            metadata = dict(kwargs.get("metadata") or {})
+            metadata.setdefault("categories", list(cls.get("categories") or []))
+            if cls.get("categories"):
+                metadata.setdefault("_auto_classified", {
+                    "inferred": ["category"],
+                    "confidence": cls.get("category_confidence", 0.0),
+                    "reasoning": cls.get("reasoning", ""),
+                })
+            kwargs["metadata"] = metadata
         return self.remember(content, **kwargs)
 
     # ────── Temperature ──────

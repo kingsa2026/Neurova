@@ -2,28 +2,27 @@
  * 思考段滚动跟随接线契约（2026-09-12 bug 回归）。
  *
  * 用户报障：思考过程较长出现滚动条后，看不到最新思考。
- * utils 层行为已由 chatSteps.reasoningFollow.test.ts 锁定；这里按
- * ChatPage.streamLifecycle.test.ts 的源码契约模式锁定接线：
- * 1. 渲染思考段的 .nr-step-reasoning 容器挂 @scroll 翻阅守卫；
- * 2. SSE reasoning/thinking 分支追加文本后调用 followReasoningScroll；
+ * utils 层行为已由 chatSteps.reasoningFollow.test.ts 锁定；这里锁「接线」：
+ * 1. .nr-step-reasoning 容器挂 @scroll 翻阅守卫 + 贴底跟随；
+ * 2. SSE reasoning/thinking 分支追加文本后触发滚动跟随；
  * 3. followReasoningScroll 内有 stick 守卫 + nextTick（DOM 更新后再滚）。
  *
- * 职责边界（2026-09-20 起）：思考段 DOM 由共享组件 MessageSteps.vue 承载
- * （ChatPage 与协作房间同源渲染），ChatPage 只保留 SSE 追加与滚动跟随调用。
- * 契约随之拆成"组件渲染容器"+"页面驱动滚动"两段，断言各自真实落点。
+ * 归属：思考段 UI 已内聚到共享组件 components/chat/MessageSteps.vue
+ * （ChatPage 拆组件时把该段模板与守卫整体搬走，只留流式分支的调用点），
+ * 故容器接线断言指向 MessageSteps，分支接线仍指向 ChatPage。
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const source = readFileSync(resolve(process.cwd(), 'src/pages/ChatPage.vue'), 'utf-8')
+const pageSource = readFileSync(resolve(process.cwd(), 'src/pages/ChatPage.vue'), 'utf-8')
 const stepsSource = readFileSync(
   resolve(process.cwd(), 'src/components/chat/MessageSteps.vue'),
   'utf-8',
 )
 
 /** 抽取 anchor 之后第一个平衡大括号块的内容。 */
-function blockAfter(anchor: string): string {
+function blockAfter(source: string, anchor: string): string {
   const idx = source.indexOf(anchor)
   if (idx === -1) return ''
   const braceStart = source.indexOf('{', idx)
@@ -40,24 +39,19 @@ function blockAfter(anchor: string): string {
 }
 
 describe('思考段滚动跟随接线', () => {
-  it('模板：MessageSteps 的 .nr-step-reasoning 容器挂 @scroll 翻阅守卫', () => {
+  it('模板：.nr-step-reasoning 容器挂 @scroll 翻阅守卫（共享 MessageSteps）', () => {
     expect(stepsSource).toMatch(/class="nr-step-reasoning"[^>]*@scroll="onReasoningScroll"/)
   })
 
-  it('ChatPage 把思考段渲染委派给 MessageSteps（不内联重复 DOM）', () => {
-    expect(source).toContain('<MessageSteps')
-    expect(source).not.toContain('class="nr-step-reasoning"')
-  })
-
   it('SSE reasoning/thinking 分支：追加文本后触发滚动跟随', () => {
-    const branch = blockAfter("case 'reasoning':")
+    const branch = blockAfter(pageSource, "case 'reasoning':")
     expect(branch).not.toBe('')
     expect(branch).toContain('appendReasoningStep')
     expect(branch).toContain('followReasoningScroll()')
   })
 
   it('followReasoningScroll：stick 守卫在前 + nextTick 后贴底', () => {
-    const fn = blockAfter('function followReasoningScroll(')
+    const fn = blockAfter(pageSource, 'function followReasoningScroll(')
     expect(fn).not.toBe('')
     expect(fn).toContain('reasoningStick.value')
     expect(fn).toContain('nextTick')
@@ -65,7 +59,7 @@ describe('思考段滚动跟随接线', () => {
   })
 
   it('onReasoningScroll：以 isNearBottom 回写 stick 态', () => {
-    const fn = blockAfter('function onReasoningScroll(')
+    const fn = blockAfter(stepsSource, 'function onReasoningScroll(')
     expect(fn).not.toBe('')
     expect(fn).toContain('isNearBottom')
     expect(fn).toContain('reasoningStick.value')

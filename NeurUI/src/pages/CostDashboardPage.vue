@@ -5,7 +5,7 @@
       <div class="header-actions">
         <a-tag v-if="status && !status.store_ready" color="orange">{{ t('costDashboard.storeNotReady') }}</a-tag>
         <a-tag v-else-if="status" :color="status.running ? 'green' : 'default'">
-          {{ status.running ? t('costDashboard.rollupRunning') : t('costDashboard.rollupIdle') }}
+          {{ t('costDashboard.rollupBadge', { state: status.running ? t('costDashboard.rollupRunning') : t('costDashboard.rollupIdle') }) }}
         </a-tag>
         <a-button size="small" :loading="rolling" @click="onRollupNow">{{ t('costDashboard.rollupNow') }}</a-button>
         <a-button size="small" @click="fetchAll">{{ t('costDashboard.refresh') }}</a-button>
@@ -16,8 +16,8 @@
       v-if="storeUnavailable"
       type="warning"
       show-icon
-      :message="t('costDashboard.storeUnavailableMessage')"
-      :description="t('costDashboard.storeUnavailableDescription')"
+      :message="t('costDashboard.unavailableTitle')"
+      :description="t('costDashboard.unavailableDesc')"
     />
 
     <a-spin :spinning="loading">
@@ -31,7 +31,7 @@
 
       <a-tabs v-model:activeKey="activeTab" style="margin-top: 8px">
         <!-- 趋势 -->
-        <a-tab-pane key="trend" :tab="t('costDashboard.trendTab')">
+        <a-tab-pane key="trend" :tab="t('costDashboard.tabTrend')">
           <GlassCard :title="t('costDashboard.last24hCost')">
             <div class="chart-placeholder">
               <div v-for="(p, i) in hourlyBars" :key="i" class="chart-bar-wrapper">
@@ -54,7 +54,7 @@
         </a-tab-pane>
 
         <!-- 预算 -->
-        <a-tab-pane key="budget" :tab="t('costDashboard.budgetTab')">
+        <a-tab-pane key="budget" :tab="t('costDashboard.tabBudget')">
           <GlassCard :title="t('costDashboard.budgetUsage')">
             <a-table
               :columns="budgetColumns"
@@ -84,7 +84,7 @@
         </a-tab-pane>
 
         <!-- 历史明细 -->
-        <a-tab-pane key="history" :tab="t('costDashboard.historyTab')">
+        <a-tab-pane key="history" :tab="t('costDashboard.tabHistory')">
           <GlassCard :title="t('costDashboard.dailyCostDetail')">
             <a-table
               :columns="dailyColumns"
@@ -187,10 +187,10 @@ async function onRollupNow() {
   rolling.value = true
   try {
     const res = await costApi.forceRollupNow()
-    message.success(`聚合完成，影响 ${res?.affected_rows ?? 0} 行`)
+    message.success(t('costDashboard.rollupDone', { n: res?.affected_rows ?? 0 }))
     await fetchAll()
   } catch {
-    message.error('聚合失败')
+    message.error(t('costDashboard.rollupFailed'))
   } finally {
     rolling.value = false
   }

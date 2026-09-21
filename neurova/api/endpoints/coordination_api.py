@@ -29,13 +29,14 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/coordination", tags=["coordination"])
 
 
-# ========== Seen Boundary Endpoints（未实现模块，已摘除）==========
+# ========== Seen Boundary Endpoints（未实现，已摘除）==========
 #
 # 原 3 个 seen-boundary 端点依赖 `neurova.agents.seen_boundary`
-# （get_seen_boundary / reset_seen_boundary）。该模块在本仓不存在（从未入库），
-# 导入即 ImportError 会让整份 coordination_api 注册失败 —— 连带下面 20 多个
-# 可用端点一起 404。未实现的模块不保留影子端点：要实现请连带实现模块与
-# 可运行测试，而不是留一份 import 即炸的 API 面。
+# （get_seen_boundary / reset_seen_boundary）——该模块在本仓不存在，
+# 导致整份 coordination_api 无法导入（25 个端点全部 404）。
+# 只有测试 tests/integration/test_multi_agent_coordination.py 引用过它。
+# 未实现的模块不保留影子端点：要实现请连带实现模块并配可运行测试，
+# 而不是留一份 import 即炸的 API 面。
 #
 #   GET  /seen-boundary/stats
 #   POST /seen-boundary/reset
@@ -44,7 +45,6 @@ router = APIRouter(prefix="/coordination", tags=["coordination"])
 # 同类新鲜度能力由 neurova/collaboration/seen_cursor.py
 # （SeenCursorManager.check_freshness）与 glance_yield_rules 的
 # freshness preflight 承担，已由下面的 yield-checker 端点对外服务。
-
 
 # ========== Yield Checker Endpoints ==========
 
@@ -157,19 +157,19 @@ async def reset_triage_gate_endpoint():
     return {"status": "reset"}
 
 
-# ========== Wake Debounce Endpoints（未实现模块，已摘除）==========
+# ========== Wake Debounce Endpoints（未实现，已摘除）==========
 #
 # 原 5 个 debounce 端点依赖 `neurova.agents.wake_debounce`
-# （get_wake_debounce_manager / reset_wake_debounce_manager / WakeEvent）。
-# 该模块在本仓不存在（从未入库），是 coordination_api 导入失败的另一分母。
-# 去抖/合并（wake debounce & coalesce）目前仅有设计注记，无实现。
+# （get_wake_debounce_manager / reset_wake_debounce_manager / WakeEvent）——
+# 该模块在本仓不存在，是 coordination_api 导入失败的分母之一。
+# 去抖/合并（Wake debounce & coalesce）目前仅在
+# neurova/collaboration/glance_yield_rules.py 里有设计注记，无实现。
 #
 #   GET  /debounce/stats
 #   POST /debounce/wake-event
 #   GET  /debounce/turn/{agent_id}/{conversation_id}
 #   POST /debounce/cancel
 #   POST /debounce/reset
-
 
 # ========== A/B Test Endpoints ==========
 
@@ -224,9 +224,9 @@ async def assign_experiment_group(
 class RecordMetricRequest(BaseModel):
     """记录实验指标请求体。
 
-    `metrics` / `context` 是结构化字典，不能作为 query 参数：FastAPI 在路由
-    注册期就断言 "Query parameter must be one of the supported types"，会让整份
-    模块导入即失败（所有端点一起不可用）。故收敛为 JSON 请求体。
+    metrics/context 是结构化字典，不能作为 query 参数——FastAPI 会在
+    路由注册期断言 "Query parameter must be one of the supported types"，
+    使整份模块导入即失败；故收敛为 JSON 请求体（与 acp_api 等一致）。
     """
 
     experiment_name: str = Field(..., description="Experiment Name")
