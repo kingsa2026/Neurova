@@ -108,3 +108,38 @@ def test_delete_ingested_memories_rolls_back_exactly_that_run(tmp_path: Path):
     assert removed == 1
     assert all(m.metadata.get("ingest_run_id") != _RUN for m in manager._memories.values())
     assert any(m.content == "运行期记忆" for m in manager._memories.values())
+
+
+def test_undo_removes_the_row_even_when_called_from_another_scope(tmp_path: Path):
+    """撤销按**行自带**三元组删盘：CLI 在实例默认作用域调用，导入却可能发生在别的上下文。
+
+    实测复现：在 u1 作用域导入、在默认作用域撤销——内存里删掉了，盘上的行还在
+    （`_delete_persisted_memory` 按**当前**生效三元组删，u1 那行删不掉），重启即复活。
+    """
+    manager = _manager(tmp_path)
+    with manager.request_scope("default", "u1"):
+        manager.import_memories([_record(1, "u1 的历史")], ingest_run_id=_RUN)
+
+    removed = manager.delete_ingested_memories(_RUN)
+    manager.close()
+
+    reopened = MemoryManager(db_path=str(tmp_path / "memory" / "memory.db"))
+
+    assert removed == 1
+    assert reopened._memories == {}
+
+
+def test_undo_does_not_touch_rows_outside_the_batch(tmp_path: Path):
+    """按行自带三元组删，不等于放开越权：只删本批的行，其他作用域的行一条不动。"""
+    manager = _manager(tmp_path)
+    with manager.request_scope("default", "u1"):
+        manager.import_memories([_record(1, "u1 的历史")], ingest_run_id=_RUN)
+    with manager.request_scope("default", "u2"):
+        manager.import_memories([_record(2, "u2 的历史")], ingest_run_id="nvimp-other")
+
+    removed = manager.delete_ingested_memories(_RUN)
+    manager.close()
+    reopened = MemoryManager(db_path=str(tmp_path / "memory" / "memory.db"))
+
+    assert removed == 1
+    assert [(m.content, m.user_id) for m in reopened._memories.values()] == [("u2 的历史", "u2")]
