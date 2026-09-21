@@ -153,3 +153,7 @@ tests/unit/document/test_document_sources.py
 tests/unit/document/test_document_pdf.py
 tests/unit/tools/test_write_pdf.py
 tests/unit/api/test_artifact_kind_parity.py
+
+# 路线 B 首启下载契约：模型清单必须入库（lib.rs 读它是硬失败）、运行时版本以清单为
+# 单源（抄本漂移即 404）、下载状态属运行态不得落仓库根、清单字段须与 ModelEntry 对齐
+tests/unit/desktop/test_route_b_runtime_download.py
