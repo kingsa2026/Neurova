@@ -148,13 +148,11 @@ class SemanticMatchDrawer:
                 # 审验闭环（2026-09-10）：单条超预算的大归档截断召回（尾部省略注记），
                 # 不再整条跳过——否则长消息被窗口折叠后永远无法召回（对话连续性断裂）。
                 # 截断只影响本次视图，池内原文仍无损。
-                from neurova.context.token_estimator import estimate_tokens as _est
-
                 content = str(drop.content or "")
-                keep_chars = max(200, self.max_tokens * 2)  # 保守 2 char/token 逆推
+                keep_chars = self._chars_for_token_budget(content, self.max_tokens)
                 truncated = content[:keep_chars] + "…[召回截断，全文见会话记录]"
                 drop.content = truncated
-                drop.tokens = _est(truncated)
+                drop.tokens = self._estimate_tokens(truncated)
                 selected.append(drop)
                 total_tokens += drop.tokens
             # 其余超预算：整条跳过并继续尝试更小的条目（不截断内容、不中断选取）
@@ -245,6 +243,19 @@ class SemanticMatchDrawer:
 
     @staticmethod
     def _estimate_tokens(text: str) -> int:
-        from neurova.context.token_estimator import EstimationStrategy, TokenEstimator
-        estimator = TokenEstimator(EstimationStrategy.BALANCED)
-        return estimator.estimate(text)
+        from neurova.context.token_estimator import estimate_tokens
+
+        return estimate_tokens(text)
+
+    @classmethod
+    def _chars_for_token_budget(cls, text: str, budget_tokens: int) -> int:
+        """按同一把尺子反解"budget_tokens 能装多少字符"（不许用固定 char/token 常数）。
+
+        固定逆推常数（曾为 2 char/token）对中文等于放进约 3 倍名义额度的内容：
+        同一仓库对中文的口径是 ~1 token/字。改为按估算器实测密度反解，
+        中文/英文/代码三种形态各自得到自己的字符上限。
+        """
+        total_tokens = cls._estimate_tokens(text)
+        if total_tokens <= 0:
+            return len(text)
+        return max(200, int(len(text) * budget_tokens / total_tokens))

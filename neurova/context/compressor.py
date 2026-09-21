@@ -72,6 +72,6 @@ class ContextCompressor:
 
     @staticmethod
     def _estimate_tokens(text: str) -> int:
-        from neurova.context.token_estimator import EstimationStrategy, TokenEstimator
-        estimator = TokenEstimator(EstimationStrategy.BALANCED)
-        return estimator.estimate(text)
+        from neurova.context.token_estimator import estimate_tokens
+
+        return estimate_tokens(text)
