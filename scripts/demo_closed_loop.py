@@ -13,7 +13,15 @@ Neurova 记忆系统闭环演示脚本
 import time
 import logging
 import sys
-from neurova.core.data_root import resolveDataPath
+from pathlib import Path
+
+# 以文件路径执行时（`python scripts/demo_closed_loop.py`）脚本目录不是仓库根，
+# 导入期必须先把仓库根放进 sys.path，否则 `import neurova` 直接 ModuleNotFoundError。
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from neurova.core.data_root import resolveDataPath  # noqa: E402
 
 # 设置日志
 logging.basicConfig(

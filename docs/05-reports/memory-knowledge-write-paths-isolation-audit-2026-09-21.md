@@ -262,3 +262,72 @@ live-verify：在任意 CWD 用各默认值取连接 / 建存储引擎，CWD 下
   `core/file_utils.py` 与 `files_api.py` 的 `storage/`：**属另一根族**（运行期数据 vs `data/`
   配置状态面），改名会让既有令牌/轨迹失联，本批未动，登记在此。
 - 预存失败口径见 §7.4 与 Issue #80 批次，本批未改。
+
+### 7.8 收口批自身引出的两条 CI 红灯（2026-09-21 第四批）
+
+§7.6 的收口动作有代价，本批把代价补平——两条红灯都不是"缺功能"，一条是本批自己引入的
+真回归，另一条是更早就存在的时序脆弱判据被本批的机器负载照出来。
+
+**（1）门禁脚本"导入顺序"回归（真回归，PR #105 引入）**
+
+为把落点收进数据根，`scripts/ci/experience_quality_gate.py` 在文件顶部加了
+`from neurova.core.data_root import get_data_root`，**但那一行在把仓库根放进 `sys.path` 之前**。
+CI 的 experience-quality 流水线装的是 `requirements-ci.txt`（依赖，未 `pip install -e .`），
+脚本靠"从仓库根执行"拿到包，于是必然
+`ModuleNotFoundError: No module named 'neurova'` —— **门禁根本跑不起来**（实测退出码 1，
+耗时 0.2s）。这条正是"记账齐全、校验从不闭环"的同一形态：读数存在，产生读数的那个门禁没启动。
+
+修法：把 sys.path 那两句提到导入之前。同形脚本一并处置（放大视角那一刀）——同一个"导入顺序"
+契约在 6 个脚本上命中：`demo_closed_loop.py`、`demo_optimization.py`、
+`diagnostics/check_databases.py`、`diagnostics/check_users_db.py`、
+`diagnostics/skill_name_collisions.py`、`diagnostics/_live_verify_growth_split.py`；
+另有两个存量同形（`token_estimation_compare.py` 只把**脚本自己所在目录**放进 sys.path，
+拿不到 `neurova` 包；`console_api_coverage_script.py` 从未加过）。常驻守卫
+`tests/unit/scripts/test_scripts_import_bootstrap.py` 锁住"任何 `import neurova` 之前，
+仓库根必须已进 sys.path"，并带反向控制（只放脚本自己目录**不算**数）。
+
+**（2）响应路径耗时判据的时序脆弱（预存族，非本批引入）**
+
+`test_post_chat_p0_latency_observability.py::test_background_response_path_does_not_scale_with_bypass_steps`
+断言 `elapsed < STEP_DELAY + 0.1`，把**固定开销**（线程跳、事件循环调度、GC、CI 机器抢占）
+也算进了预算。CI py312 实测 0.40s，本机加压实测 0.54s —— 而**干净基线（main）在同一负载下
+同样红**（本批 A/B：旧判据 main 1/10 红、本批分支 1/8 红，逐轮交替跑）。该族更早已被登记
+（`docs/specs/2026-09-20-knowledge-foundation/tickets/014-*.md`:60 记"全目录并发跑时因机器
+负载超时……属已登记的时序脆弱族"）。
+
+修法：判据改为**差分**——空臂（旁路 delay=0）与慢臂（旁路 delay=D）各取 min-of-N、交错取样，
+断言 `min(慢臂) - min(空臂) < 4×D`。固定开销在两臂同现而被相减消掉；正确后台化下增量 ≈ 1×D，
+泄漏时 ≈ 11×D，2.75 倍分离。**判据没有被放宽**：把 `background_enabled()` 变异成恒 `False`
+（后台化关死）后该用例仍红（实测增量 1.81s），复原即绿；对照组
+`test_kill_switch_path_pays_all_steps_serially` 原样保留。48 倍过载下新判据连跑 10 轮 0 红
+（旧判据同负载 10 轮 1 红）。
+
+**（3）"把 `"data/x"` 改成 `""`"不是收口，是换一种 CWD 相对（本批实测新发现）**
+
+上面两条之外，本批在自查过程中实证了同类病灶的**第三种写法**——它比前两种更隐蔽，
+因为字面量扫描器看不见它：`""` 不是 `"data/..."`，于是"扫出 0 处"的字面读数绿灯，
+而落点从"仓库根的 `data/`"退化成"**任意进程 CWD**"。
+
+物证：跑一轮 `tests/unit/agent + core` 后，仓库根多出三个 `.git` 目录
+（`loop-probe-01.git` / `test-agent.git` / `yi_ling.git`）——由这些默认值建出。
+实测落点（真构造点、`os.chdir('/tmp/reg')`）：
+
+- `CheckpointService(base_dir="")` → `/tmp/reg/agentX.git`（原默认 `data/checkpoints`）
+- `BackupOrchestrator(work_dir="")` → CWD（原默认 `data/backups`）
+- `UserCredentialStore(base_dir="")` / `user_config_path(base_dir="")` → CWD
+  （原默认 `data/web_reach_credentials`，加密 keyfile 也会落这儿）
+- `DLQConfig.storage_path = ""` → CWD。**配置注释写着"空串 = 数据根下的 dlq
+  （resolveDataPath 归一）"，消费端却是裸 `Path(...)`——注释撒了谎**
+- `NeuHebbConfig.persistence_path = ""` → CWD，注释写着"空串 = 数据根下的 neurova_hebbs/"
+
+判据补第三类，由 `tests/unit/core/test_data_root_no_cwd_landing.py` 的
+`TestEmptyDefaultIsNotACwdLanding` 常驻锁住：**空串默认值当落点用时，要么经数据根归一
+（`resolveDataPath` / `callerPath` / `dataPath` / `get_data_root`），要么有缺省判定
+（`if not x:` / `x or <默认>`）**。只认"真落点"——`Path(x).name` 取文件名、
+`Path(x).exists()` 判存在（如 `plugin_manager` 的 `Path(record.path)`）都不算，
+避免误伤；反向控制用六类形态（裸 `Path().mkdir()` / `callerPath` 归一 / `if not` 守卫 /
+`or` 守卫 / `Path(raw).name` / 数据类字段消费）锁住"扫描器真认得出"。
+
+五处一律改 `callerPath(x, <默认名>)`：调用方给了就用它的（显式入参一字不改，已实测
+注入临时目录仍被遵守），没给才落数据根。改后同一组真构造点 **CWD 零新增**，
+数据根下 `checkpoints` / `dlq` / `neurova_hebbs` / `backups` 四个目录如约出现。

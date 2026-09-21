@@ -241,3 +241,7 @@ tests/context/test_context_pool_hash_index.py
 #   就地改写/hash 不失配）+ 摘要沿用旧摘要不算"本轮成功"（不谎报覆盖）
 tests/unit/context/test_draw_never_mutates_archive.py
 tests/unit/context/test_summary_failure_not_reported_success.py
+# Issue #75 残余项：脚本以文件路径执行时，仓库根须先于 `import neurova` 进 sys.path
+#   （PR #105 让门禁脚本导入数据根却把它放在 sys.path 之后，CI experience-quality 直接
+#   ModuleNotFoundError；同形脚本一并扫）
+tests/unit/scripts/test_scripts_import_bootstrap.py

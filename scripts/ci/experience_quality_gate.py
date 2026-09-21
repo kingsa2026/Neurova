@@ -44,13 +44,17 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
-from neurova.core.data_root import get_data_root
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # 门禁脚本由 CI 以 `python scripts/ci/experience_quality_gate.py` 直接跑
 # （不一定 pip install -e .），显式把仓库根放进 sys.path。
+# 位置必须在任何 `from neurova...` 之前：以文件路径执行时 __file__ 所属目录
+# 不是仓库根，导入期就看不见 neurova 包——把它挪到导入之后，脚本会以
+# `ModuleNotFoundError: No module named 'neurova'` 直接停在第一行（CI 实测）。
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from neurova.core.data_root import get_data_root  # noqa: E402
 
 CORPUS_SCHEMA = "neurova.experience.quality.corpus/v1"
 REAL_SOURCE_KIND = "productionDbReadonlyProjection"

@@ -10,6 +10,7 @@ Agent 死信队列模块
 """
 
 import json
+from neurova.core.data_root import callerPath
 from neurova.core.logger import get_logger
 import time
 from collections import defaultdict
@@ -60,8 +61,9 @@ class DeadLetterQueue:
             "by_reason": defaultdict(int),
         }
 
-        # 确保存储目录存在
-        self._storage_path = Path(self.config.storage_path)
+        # 确保存储目录存在。缺省经数据根推导——配置注释写着"空串 = 数据根下的 dlq"，
+        # 但这里原先直接 `Path("")`，实际落点是进程 CWD（注释与行为不符）。
+        self._storage_path = callerPath(self.config.storage_path, "dlq")
         self._storage_path.mkdir(parents=True, exist_ok=True)
 
         # 加载已有的死信

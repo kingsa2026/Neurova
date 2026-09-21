@@ -12,7 +12,14 @@ Neurova 优化功能演示脚本
 import time
 import logging
 import sys
-from neurova.core.data_root import resolveDataPath
+from pathlib import Path
+
+# 同 demo_closed_loop：仓库根须先于 `import neurova` 进 sys.path。
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from neurova.core.data_root import resolveDataPath  # noqa: E402
 
 # 设置日志
 logging.basicConfig(
