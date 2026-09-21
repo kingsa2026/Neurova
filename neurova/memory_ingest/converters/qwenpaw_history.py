@@ -74,6 +74,7 @@ REASONS: Dict[str, str] = {
     "blocks": "该块型在包内契约无落点，未携带",
     "media": "源里的媒体载体取不到字节（路径不在源目录树的 media/ 下，或 base64 不可解）",
     "column": "源列在包内契约与 extra 都无落点，未携带",
+    "timestamp": "时间戳定不出时区/解不开，整行未入包（不猜时刻）",
 }
 
 
@@ -130,6 +131,9 @@ def _events_for_row(row: Dict[str, Any], sink: MediaSink, declared: Counter):
     blocks = _json_list(row.get("blocks"))
     if kind is None:
         declared[f"kind:{_text(row.get('kind')) or '<空>'}"] += 1
+        return None
+    if not _ts(row.get("created_at")):
+        declared["timestamp"] += 1
         return None
     if kind == "assistant_message":
         events = _expand_turn(row, blocks, sink)

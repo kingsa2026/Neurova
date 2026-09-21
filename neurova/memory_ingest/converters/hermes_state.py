@@ -88,6 +88,7 @@ REASONS = {
     "tool_calls": "该调用元素读不出字段，未展开",
     "reasoning": "该行推理只存在于结构化列，包内标 opaque、不搬运密文",
     "schema_version": "该库结构版本比转换器已知的更新，列面逐列核对通过才转",
+    "timestamp": "该行的时间列既不是 epoch 也不是可解时间，整行未入包（不猜时刻）",
     "api_content": "发送侧原文与正文同义，包内只留一份正文",
     "display_metadata": "展示层附加信息，非会话内容，未携带",
     "display_identity": "源侧去重用的 BLOB 摘要，包内无从表达，未携带",
@@ -145,6 +146,10 @@ def matches_store(path: Path) -> bool:
 
 def _row_events(row: Dict[str, Any], session: Dict[str, Any], sink: MediaSink,
                 declared: Counter) -> List[SourceEvent]:
+    moment = _ts(row.get("timestamp"))
+    if not moment:
+        declared["timestamp"] += 1
+        return []
     role = str(row.get("role") or "")
     kind = "compact_summary" if row.get("_compressed_summary") else ROLE_KINDS.get(role)
     if kind is None:
@@ -157,16 +162,16 @@ def _row_events(row: Dict[str, Any], session: Dict[str, Any], sink: MediaSink,
         # 有明文摘要不等于结构化列没被丢：密文项照条数申报，两份来源都得看得见
         declared["reasoning:结构化"] += 1
     base = _extra(row, session)
-    events = _content_events(row, kind, blocks, base, reasoning, opaque)
-    events += _call_events(row, base, declared)
+    events = _content_events(row, kind, blocks, base, reasoning, opaque, moment)
+    events += _call_events(row, base, declared, moment)
     if not events:
         declared["空正文"] += 1
     return events
 
 
 def _content_events(row: Dict[str, Any], kind: str, blocks: List[ContentEvent],
-                    base: Dict[str, Any], reasoning: str,
-                    opaque: bool) -> List[SourceEvent]:
+                    base: Dict[str, Any], reasoning: str, opaque: bool,
+                    moment: str) -> List[SourceEvent]:
     if not blocks and row.get("tool_call_id"):
         blocks = [ContentEvent("tool_result")]      # 结果为空串时调用位也不能丢
     state = "text" if reasoning else ("opaque" if opaque else "")
@@ -174,7 +179,7 @@ def _content_events(row: Dict[str, Any], kind: str, blocks: List[ContentEvent],
     for index, block in enumerate(blocks):
         events.append(SourceEvent(
             kind=block.kind if block.kind.startswith("tool_") else kind,
-            ts=_ts(row.get("timestamp")), role=str(row.get("role") or ""),
+            ts=moment, role=str(row.get("role") or ""),
             text=block.text, blocks=block.blocks,
             tool_call_id=str(row.get("tool_call_id") or "") or block.tool_call_id,
             tool_name=str(row.get("tool_name") or "") or block.tool_name,
@@ -185,8 +190,8 @@ def _content_events(row: Dict[str, Any], kind: str, blocks: List[ContentEvent],
     return events
 
 
-def _call_events(row: Dict[str, Any], base: Dict[str, Any],
-                 declared: Counter) -> List[SourceEvent]:
+def _call_events(row: Dict[str, Any], base: Dict[str, Any], declared: Counter,
+                 moment: str) -> List[SourceEvent]:
     """assistant 行的 tool_calls 数组：一条元素一次调用，结果在后续 tool 行里。"""
     if not row.get("tool_calls"):
         return []
@@ -201,7 +206,7 @@ def _call_events(row: Dict[str, Any], base: Dict[str, Any],
             declared["tool_calls:<读不出字段>"] += 1
             continue
         call_id, name, arguments = parsed
-        events.append(SourceEvent(kind="tool_call", ts=_ts(row.get("timestamp")),
+        events.append(SourceEvent(kind="tool_call", ts=moment,
                                   role=str(row.get("role") or ""), tool_call_id=call_id,
                                   tool_name=name,
                                   extra={**base, "tool_input": _dump(arguments)}))
@@ -315,10 +320,11 @@ def _dump(value: Any) -> str:
 
 
 def _ts(value: Any) -> str:
+    """REAL epoch 秒 → 带偏移 ISO；解不开返回空串，由调用方申报并跳过该行。"""
     try:
         return datetime.fromtimestamp(float(value), timezone.utc).isoformat()
     except (TypeError, ValueError, OSError):
-        return datetime.now(timezone.utc).isoformat()
+        return ""
 
 
 register_handprint(Handprint(CONVERTER_NAME, "sqlite", matches_store))

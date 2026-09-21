@@ -144,6 +144,18 @@ def _records(out: Path) -> List[Dict[str, Any]]:
     return {f"{r['identity_key']}": r for r in rows}, rows
 
 
+def test_block_without_readable_time_is_declared_not_stamped(tmp_path: Path):
+    """块时间不是毫秒时申报并跳过：造一个导入时刻，日期分桶会跟着错。"""
+    out = tmp_path / "bundle"
+
+    manifest = convert(_mini_db(tmp_path, [("m1", "assistant", "不是时间")],
+                                [("p1", "m1", {"type": "text", "text": "甲"}, "不是时间")]),
+                       out, agent_name="imported")
+
+    assert manifest.counts["transcripts"] == 0
+    assert any(e["field"] == "timestamp" and e["count"] >= 1 for e in manifest.dropped)
+
+
 def test_store_is_recognized_as_opencode(tmp_path: Path, src: Path):
     assert probe_store(src).hits == (CONVERTER_NAME,)
 

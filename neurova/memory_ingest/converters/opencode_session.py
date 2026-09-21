@@ -45,6 +45,7 @@ REASONS: Dict[str, str] = {
     "table": "该表承载的内容不在本转换器表达范围内（待记忆侧映射定案）",
     "无块": "该消息没有任何 content 块，正文载体缺失",
     "空正文": "该块没有可携带正文，未入包",
+    "timestamp": "该块的 time_created 不是 epoch 毫秒，整块未入包（不猜时刻）",
 }
 
 
@@ -142,6 +143,9 @@ def _part_events(part: sqlite3.Row, body: Dict[str, Any], kind: str, metering: D
     """一支块 → 包内事件；tool 块出两条（调用 + 结果）。"""
     btype = str(body.get("type") or "<无类型>")
     ts = _ts(part["time_created"])
+    if not ts:
+        declared["timestamp"] += 1
+        return []
     if btype == "text":
         text = str(body.get("text") or "")
         if not text.strip():
@@ -235,11 +239,15 @@ def _json(raw: Any) -> Dict[str, Any]:
 
 
 def _ts(value: Any) -> str:
+    """epoch 毫秒（绝对时刻）→ 带偏移 ISO；定不出来回空串，由调用方申报并跳过。"""
     try:
         millis = int(value)
     except (TypeError, ValueError):
-        return datetime.now(SOURCE_ZONE).isoformat()
-    return datetime.fromtimestamp(millis / 1000, SOURCE_ZONE).isoformat()
+        return ""
+    try:
+        return datetime.fromtimestamp(millis / 1000, SOURCE_ZONE).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return ""
 
 
 def _dropped_entries(declared: Counter) -> List[Dict[str, Any]]:

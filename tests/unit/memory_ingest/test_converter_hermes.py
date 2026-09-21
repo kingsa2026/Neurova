@@ -204,6 +204,16 @@ def test_newer_schema_version_is_reported_not_guessed(tmp_path: Path):
     assert any("schema_version" in e["field"] for e in manifest.dropped)
 
 
+def test_row_without_readable_time_is_declared_not_stamped(tmp_path: Path):
+    """时间列解不开时必须申报并跳过：盖上导入时刻会把历史写进今天的会话文件。"""
+    rows = [_message(1, "user", "甲", timestamp=None)]
+
+    manifest = convert(_db(tmp_path, rows=rows), tmp_path / "bundle", agent_name="x")
+
+    assert manifest.counts["transcripts"] == 0
+    assert any(e["field"] == "timestamp" and e["count"] == 1 for e in manifest.dropped)
+
+
 def test_source_is_read_only(tmp_path: Path):
     src = _db(tmp_path, rows=[_message(1, "user", "甲")])
     before = src.read_bytes()
