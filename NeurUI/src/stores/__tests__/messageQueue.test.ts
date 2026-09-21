@@ -6,8 +6,9 @@
  * - pending → sending → sent(出队) | failed；failed 可 retry 回 pending
  * - sending 不可移除；updateText 仅 pending
  * - 暂停开关只影响自动续发，不改变队列内容
+ * - 出队排序不得覆盖 moveToTop 的插队（见「排序稳定性」一节）
  */
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useMessageQueueStore } from '@/stores/messageQueue'
 
@@ -127,5 +128,27 @@ describe('messageQueue reorder / moveToTop（补课 A3）', () => {
     q.enqueue('a')
     q.reorder(['ghost-id'])
     expect(q.items.filter((i) => i.status === 'pending')).toHaveLength(1)
+  })
+
+  // 回归：moveToTop 是「改写数组次序」，不能被出队排序按 enqueuedAt 抹掉。
+  // enqueuedAt 为毫秒精度，上面那条用例只在两次 enqueue 恰好落在同一毫秒时通过
+  // （同一毫秒时旧实现的 sort 稳定退化为无操作），跨毫秒就红——CI 里表现为偶发。
+  // 这里强制两条目落在不同毫秒，把「排序不得覆盖插队」固化成确定性断言。
+  it('keeps the moved item on top across differing enqueue timestamps', () => {
+    const q = useMessageQueueStore()
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'))
+      const first = q.enqueue('First')
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.500Z'))
+      const second = q.enqueue('Second')
+      expect(first.enqueuedAt).not.toBe(second.enqueuedAt)
+
+      q.moveToTop(second.id)
+
+      expect(q.next()?.id).toBe(second.id)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
