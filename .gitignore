@@ -362,6 +362,10 @@ desktop/*.pfx
 # 后端全量打包 stage（1.6GB，构建脚本 scripts/desktop/bundle_backend.py 生成）
 NeurUI/src-tauri/resources/backend/
 NeurUI/src-tauri/resources/_python-*
+# 路线 B 首启下载在开发态的后端根即仓库根：runtime/ 是 Python/Node 下载目标，
+# 下载状态文件是每次启动改写的运行态，都不入库
+/runtime/
+/.download_status.json
 
 # ==================== 根目录杂物防再生（2026-09-02 二次清理） ====================
 # stash 事故复活过的根级临时测试脚本/产物，统一规范到 tests/ 分类目录
