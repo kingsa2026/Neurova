@@ -94,6 +94,10 @@ const messages = {
     consolidationApproved: '已批准', consolidationRejected: '已拒绝', consolidationError: '合并失败',
     consolidationBasisIdentity: '同身份重复', consolidationBasisStructure: '同序列跨意图',
     consolidationBasisNamePrefix: '名字前缀兜底',
+    archive: '归档', archiveTitle: '归档与回滚', archiveEmpty: '暂无可回滚的归档',
+    archiveVersion: '版本', archiveArchivedAt: '归档时间', rollback: '回滚',
+    rollbackConfirm: '确认回滚？', rollbackDone: '已回滚，剩余归档 {left} 份',
+    rollbackError: '回滚失败', archiveLoadError: '归档加载失败',
   },
 }
 
