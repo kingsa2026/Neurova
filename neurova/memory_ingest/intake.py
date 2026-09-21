@@ -236,8 +236,10 @@ def _read_records(cls, path: Path) -> List[Any]:
             continue
         try:
             records.append(cls(**json.loads(line)))
-        except TypeError as exc:
+        except (TypeError, ValueError) as exc:
+            # ValueError 来自各记录类型的取值域（kind/reasoning_state 等）：与未知字段同属
+            # "这行不符合契约"，必须在写库之前整包拒绝，不能让它穿到咽喉才炸。
             raise BundleError(
-                f"{path.name}:{lineno} 字段不在契约内（宁可整包拒绝，不做静默忽略）: {exc}"
+                f"{path.name}:{lineno} 记录不符合契约（宁可整包拒绝，不做静默忽略）: {exc}"
             ) from exc
     return records
