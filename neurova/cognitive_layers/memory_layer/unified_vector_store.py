@@ -1,3 +1,4 @@
+from neurova.core.data_root import get_data_root
 """
 UnifiedVectorStore — 三合一向量索引
 
@@ -61,7 +62,7 @@ def _embedding_cache_file() -> Path:
     env = os.environ.get("NEUROVA_EMBEDDING_CACHE", "").strip()
     if env:
         return Path(env)
-    return Path(__file__).resolve().parents[3] / "data" / "embedding_cache.json"
+    return get_data_root() / "embedding_cache.json"
 
 
 def _vec_to_b64(vec: List[float]) -> Optional[str]:

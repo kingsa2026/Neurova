@@ -231,9 +231,10 @@ def resolve_probe_paths() -> List[str]:
     """
     candidates: List[str] = []
     try:
-        from neurova.core.database import DEFAULT_DB_PATH
+        from neurova.core.database import defaultDbPath
 
-        candidates.append(str(DEFAULT_DB_PATH))
+        # 探针清单只收**已存在的**库：默认库没被建出来时不该被列进基线。
+        candidates.append(defaultDbPath())
     except Exception:  # noqa: BLE001
         pass
     import os
@@ -324,8 +325,16 @@ def bootstrap_index_observability(paths: Optional[Sequence[str]] = None) -> Dict
     return summary
 
 
-def list_indexes(db_path: str = "neurova_memory.db") -> list:
-    """列出数据库中的所有索引（运维诊断用；采集器对外只读接口）。"""
+def list_indexes(db_path: str = "") -> list:
+    """列出数据库中的所有索引（运维诊断用；采集器对外只读接口）。
+
+    缺省（空串）时取数据根下的默认库——原默认值 `"neurova_memory.db"` 是裸文件名，
+    诊断脚本换个目录跑就找不到库、静默回一份空清单。
+    """
+    if not db_path:
+        from neurova.core.database import defaultDbPath
+
+        db_path = defaultDbPath()
     if not Path(db_path).exists():
         return []
 
@@ -347,6 +356,11 @@ if __name__ == "__main__":
     import json
     import sys
 
-    target = sys.argv[1] if len(sys.argv) > 1 else "neurova_memory.db"
+    if len(sys.argv) > 1:
+        target = sys.argv[1]
+    else:
+        from neurova.core.database import defaultDbPath
+
+        target = defaultDbPath()
     print(json.dumps(collect_index_snapshot(target), ensure_ascii=False, indent=2))
     print(json.dumps(explain_hot_queries(target), ensure_ascii=False, indent=2))

@@ -19,6 +19,8 @@ WinError 1114（DLL 初始化例程失败），3 个路由 + Default Agent 初�
 """
 from __future__ import annotations
 
+from neurova.core.data_root import get_data_root
+
 import logging
 import os
 import subprocess
@@ -226,7 +228,7 @@ def _marker_path() -> Path:
     override = os.environ.get("NEUROVA_ENV_CHECK_MARKER", "").strip()
     if override:
         return Path(override)
-    return Path(__file__).resolve().parents[2] / "data" / "env_check_torch.json"
+    return get_data_root() / "env_check_torch.json"
 
 
 def _torch_fingerprint() -> str:
