@@ -96,3 +96,18 @@ lark-oapi>=1.6
 dingtalk-stream>=0.20
 # 企业微信智能机器人（aibot WebSocket 长连接）——import aibot
 wecom-aibot-python-sdk>=1.0.2
+
+# 代码裸 import 但此前零声明的运行期依赖（2026-09-21 按 neurova/ 模块级 import
+# 面逐件核实；守卫 tests/unit/desktop/test_install_supply_contract.py）。缺席语义
+# 不是"优雅降级"而是对应功能整条不可用：
+#   modelscope  —— neurova/tts/model_downloader.py:372，ModelScope 下载源唯一实现。
+#                  Windows 首启默认源与国内首选源都走它，缺席即模型下载只剩 hf-mirror
+#   requests    —— neurova/channels/feishu_auth.py:12 模块级 import（飞书 API 通道）。
+#                  此前只经 lark-oapi 传递带入（隐式依赖，上游一改即崩）
+#   PyYAML      —— neurova/plugins/plugin_manager.py:26 模块级 import；插件清单解析
+#   comtypes    —— neurova/tts/sapi5_tts.py，Windows SAPI5 离线 TTS 唯一实现
+#                  （TTS fallback 链：moss-nano → edge-tts → sapi5 → mock）
+modelscope>=1.9.0
+requests>=2.31.0
+PyYAML>=6.0
+comtypes; sys_platform == "win32"
