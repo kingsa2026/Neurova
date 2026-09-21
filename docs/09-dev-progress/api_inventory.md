@@ -92,10 +92,10 @@
 | GET | `/api/v1/memories/emotion/summary` | 获取情绪统计摘要 | ❌ 缺失 |
 | GET | `/api/v1/memories/emotion/distribution` | 获取情绪分布 | ❌ 缺失 |
 | POST | `/api/v1/memories/emotion/analyze` | 分析文本情绪 | ❌ 缺失 |
-| POST | `/api/v1/memories/classify` | 分类记忆内容 | ❌ 缺失 |
-| POST | `/api/v1/memories/classify-and-remember` | 分类并记忆 | ❌ 缺失 |
+| POST | `/api/v1/memory/classify` | 分类记忆内容 | ✅ 已实现（Issue #68 修复：此前恒 500；文件 `endpoints/memory/eki.py`） |
+| POST | `/api/v1/memory/classify-and-remember` | 分类并记忆 | ✅ 已实现（Issue #68 修复：分类结果此前被丢弃） |
 
-**文件**: `neurova/api/endpoints/memory.py`
+**文件**: `neurova/api/endpoints/memory/eki.py`（原表标注的 `endpoints/memory.py` 单文件版已不存在）
 
 **优先级**: ⭐⭐⭐⭐⭐ (P0 - 核心功能)
 

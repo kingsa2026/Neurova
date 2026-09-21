@@ -1,62 +1,51 @@
-"""
-自动分类器 - Auto Classifier for Memory
+"""自动分类器 —— 记忆分类的唯一引擎（Vocabulary 唯一事实源 = models.py）。
 
-功能:
-1. 自动推断记忆分类 (category)
-2. 自动推断记忆类型 (type)
-3. 自动推断记忆视角 (perspective)
-4. 自动判断重要性 (is_important)
-5. 自动判断是否固化 (is_crystallized)
+职责（写入路径零 LLM 调用，全正则/关键词，确定性可复现）：
+1. 推断记忆分类 (MemoryCategory)
+2. 推断记忆类型 (MemoryType)
+3. 推断记忆视角 (MemoryPerspective)
+4. 判断重要性 (is_important)
+5. 判断是否固化 (is_crystallized)
 
-基于关键词规则和上下文分析进行智能分类
+词汇表纪律（本文件此前是分叉源头）：本类曾自带 3 个私有枚举
+（CategoryType 7 / MemoryTypeEnum 6 / PerspectiveType 4），与生产真正
+落库的 `models.py` 枚举（MemoryCategory 7 / MemoryType 7 /
+MemoryPerspective 4）**同名不同集**：`MemoryTypeEnum` 缺
+`workflow_experience`，于是任何消费方都要在两者之间做一次无据可依的映射。
+现改为**只导入** models.py 的枚举，旧名以别名保留（`CategoryType` 等）供
+历史引用，不再定义第二套值域——分叉由
+tests/unit/cognitive_layers/memory_layer/test_classification_closed_loop.py
+的身份断言锁死（`CategoryType is MemoryCategory`）。
+
+消费方：
+  - `MemoryManager.remember(auto_classify=True)` → 写入时定分类/类型/视角；
+  - `MemoryManager.classify_memory()` → 只推断不落库（API `/memory/classify`）；
+  - `modules/classifier_module.ClassifierModule` → 分类缓存/标签面（委托本引擎）。
 """
 
 from neurova.core.logger import get_logger
 import re
-from enum import Enum
+import threading
 from typing import Any, Dict, List, Optional, Tuple
 
-from .models import EmotionType, MemoryType
+from .models import (
+    EmotionType,
+    MemoryCategory,
+    MemoryPerspective,
+    MemoryType,
+)
 
 logger = get_logger(__name__)
 
 
-# ────── Enums ──────
+# ────── 词汇表别名（唯一事实源 = models.py，此处不得再定义第二套值域）──────
 
-
-class CategoryType(Enum):
-    """记忆分类类型"""
-
-    GENERAL = "general"  # 通用
-    CONVERSATION = "conversation"  # 对话
-    KNOWLEDGE = "knowledge"  # 知识
-    EXPERIENCE = "experience"  # 经验
-    TOOL_USAGE = "tool_usage"  # 工具使用
-    REFLECTION = "reflection"  # 反思
-    USER_PREFERENCE = "user_preference"  # 用户偏好
-
-
-class MemoryTypeEnum(Enum):
-    """记忆类型枚举"""
-
-    SEMANTIC = "semantic"  # 语义记忆（事实知识）
-    EPISODIC = "episodic"  # 情景记忆（事件经历）
-    PROCEDURAL = "procedural"  # 程序记忆（技能操作）
-    PATTERN = "pattern"  # 模式记忆（行为模式）
-    EMOTIONAL = "emotional"  # 情感记忆
-    WORKING = "working"  # 工作记忆
-
-
-class PerspectiveType(Enum):
-    """记忆视角类型"""
-
-    FIRST_PERSON = "first_person"  # 第一人称
-    SECOND_PERSON = "second_person"  # 第二人称
-    THIRD_PERSON = "third_person"  # 第三人称
-    SYSTEM = "system"  # 系统视角
-
-
-# ────── Keywords Rules ──────
+#: 记忆分类（MemoryCategory，7 值）
+CategoryType = MemoryCategory
+#: 记忆类型（MemoryType，7 值，含 workflow_experience）
+MemoryTypeEnum = MemoryType
+#: 记忆视角（MemoryPerspective，4 值）
+PerspectiveType = MemoryPerspective
 
 # 分类关键词规则
 _CATEGORY_KEYWORDS = {
@@ -124,6 +113,14 @@ _TYPE_KEYWORDS = {
         r"current|now|working|temporary|todo|task|job",
         r"正在做|现在要|当前任务|待办事项",
     ],
+    # workflow_experience 是写入方（post_chat_pipeline._step_record_workflow_experience
+    # / neurflow 执行回写）真实在传的类型（工单 012 补进枚举）。这里给它一个
+    # 关键词桶，使"声明缺省、让写入侧自动定类型"时也能识别多步工具链经验。
+    MemoryType.WORKFLOW_EXPERIENCE: [
+        r"工作流|流程链|步骤链|多步|顺序执行|编排|流水线",
+        r"workflow|pipeline|multi.step|chain of|sequence of|orchestrat",
+        r"先.*再.*最后|第一步.*然后|抓取.*汇总|搜索.*总结.*导出",
+    ],
 }
 
 # 视角关键词规则
@@ -172,28 +169,42 @@ class MemoryAutoClassifier:
 
     def __init__(self):
         """初始化分类器"""
+        # 写入路径可被多线程调用（remember），运行时又支持追加热词（add_category_keywords），
+        # 故用 RLock 保护规则表的重编译；读取路径在锁内取快照后立刻释放。
+        self._lock = threading.RLock()
         self._compiled_patterns: Dict[str, List[re.Pattern]] = {}
+        #: 分类 → 热词（默认表为起点，运行时扩展只在此增，不新建第二份表）
+        self._category_keywords: Dict[CategoryType, List[str]] = {
+            k: list(v) for k, v in _CATEGORY_KEYWORDS.items()
+        }
         self._compile_patterns()
         logger.info("MemoryAutoClassifier 初始化完成")
 
     def _compile_patterns(self):
         """预编译所有关键词模式"""
         all_keywords = {
-            **{f"category_{k.value}": v for k, v in _CATEGORY_KEYWORDS.items()},
+            **{f"category_{k.value}": v for k, v in self._category_keywords.items()},
             **{f"type_{k.value}": v for k, v in _TYPE_KEYWORDS.items()},
             **{f"perspective_{k.value}": v for k, v in _PERSPECTIVE_KEYWORDS.items()},
             "important": _IMPORTANT_KEYWORDS,
             "crystallize": _CRYSTALLIZE_KEYWORDS,
         }
 
-        for key, patterns in all_keywords.items():
-            compiled = []
-            for pattern in patterns:
-                try:
-                    compiled.append(re.compile(pattern, re.IGNORECASE))
-                except re.error:
-                    logger.warning("无法编译正则表达式: %s", pattern)
-            self._compiled_patterns[key] = compiled
+        with self._lock:
+            for key, patterns in all_keywords.items():
+                compiled = []
+                for pattern in patterns:
+                    try:
+                        compiled.append(re.compile(pattern, re.IGNORECASE))
+                    except re.error:
+                        logger.warning("无法编译正则表达式: %s", pattern)
+                self._compiled_patterns[key] = compiled
+
+    def _category_bucket(self, category: CategoryType) -> List[re.Pattern]:
+        """取某分类的已编译规则（锁内快照，调用方在锁外匹配）"""
+        key = f"category_{category.value}"
+        with self._lock:
+            return list(self._compiled_patterns.get(key, ()))
 
     def classify(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
@@ -242,6 +253,11 @@ class MemoryAutoClassifier:
                 "category_confidence": category_confidence,
                 "type_confidence": type_confidence,
                 "perspective_confidence": perspective_confidence,
+                # 多标签候选（写入侧取"最佳"；分类缓存面取"全部达标"）
+                "category_multi_label": [
+                    (cat, score)
+                    for cat, score in self.classify_category_multi_label(content)
+                ],
             },
         }
 
@@ -292,14 +308,14 @@ class MemoryAutoClassifier:
         """
         scores: Dict[CategoryType, float] = {cat: 0.0 for cat in CategoryType}
 
-        for category, patterns in _CATEGORY_KEYWORDS.items():
-            key = f"category_{category.value}"
-            if key in self._compiled_patterns:
-                for pattern in self._compiled_patterns[key]:
-                    matches = pattern.findall(content)
-                    if matches:
-                        # 每个匹配增加分数，但有上限
-                        scores[category] += min(len(matches) * 0.2, 0.8)
+        with self._lock:
+            rules = list(self._category_keywords.items())
+        for category, _keywords in rules:
+            for pattern in self._category_bucket(category):
+                matches = pattern.findall(content)
+                if matches:
+                    # 每个匹配增加分数，但有上限
+                    scores[category] += min(len(matches) * 0.2, 0.8)
 
         # 找到最高分
         if not any(scores.values()):
@@ -326,13 +342,13 @@ class MemoryAutoClassifier:
         """
         scores: Dict[CategoryType, float] = {cat: 0.0 for cat in CategoryType}
 
-        for category, patterns in _CATEGORY_KEYWORDS.items():
-            key = f"category_{category.value}"
-            if key in self._compiled_patterns:
-                for pattern in self._compiled_patterns[key]:
-                    matches = pattern.findall(content)
-                    if matches:
-                        scores[category] += min(len(matches) * 0.2, 0.8)
+        with self._lock:
+            rules = list(self._category_keywords.items())
+        for category, _keywords in rules:
+            for pattern in self._category_bucket(category):
+                matches = pattern.findall(content)
+                if matches:
+                    scores[category] += min(len(matches) * 0.2, 0.8)
 
         # 归一化
         total = sum(scores.values())
@@ -344,6 +360,36 @@ class MemoryAutoClassifier:
         results.sort(key=lambda x: x[1], reverse=True)
 
         return results
+
+    def add_category_keywords(self, category: Any, keywords: List[str]) -> None:
+        """给某个分类追加热词（运行时扩展，值域仍锁在 MemoryCategory 内）。
+
+        `classifier_module.add_category_rule` 走这里——历史上那里自己维护了
+        一份 6 桶关键词表，删掉后扩展能力由唯一引擎提供，避免规则再次分叉。
+        正则编译失败不抛错：单条坏规则不该让整条写入路径崩。
+        """
+        try:
+            category = MemoryCategory(category)
+        except (ValueError, KeyError) as exc:
+            raise ValueError(
+                f"未知分类 '{category}'：分类值域 = MemoryCategory（{[c.value for c in MemoryCategory]}）"
+            ) from exc
+
+        from neurova.cognitive_layers.memory_layer.auto_classifier import _CATEGORY_KEYWORDS
+
+        key = f"category_{category.value}"
+        with self._lock:
+            self._category_keywords.setdefault(category, []).extend(keywords)
+            pattern_source = list(_CATEGORY_KEYWORDS.get(category, [])) + list(
+                self._category_keywords[category]
+            )
+            recompiled = []
+            for pattern in pattern_source:
+                try:
+                    recompiled.append(re.compile(pattern, re.IGNORECASE))
+                except re.error:
+                    logger.warning("无法编译正则表达式: %s", pattern)
+            self._compiled_patterns[key] = recompiled
 
     def classify_type(self, content: str) -> Tuple[MemoryTypeEnum, float]:
         """
@@ -491,6 +537,7 @@ class MemoryAutoClassifier:
                 "category_confidence": 0.5,
                 "type_confidence": 0.5,
                 "perspective_confidence": 0.5,
+                "category_multi_label": [],
             },
         }
 
