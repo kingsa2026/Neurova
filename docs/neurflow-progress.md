@@ -394,6 +394,6 @@ python -m pylint neurova/collaboration/neurflow/
 ## 📚 相关文档
 
 - [Neurflow 开发规范](neurflow-dev-spec.md)
-- [Neurova 架构文档](../CONTEXT.md)
+- [Neurova 架构文档](CONTEXT.md)
 - [API 设计指南](api-design-guide.md)
 - [前端组件规范](frontend-component-spec.md)

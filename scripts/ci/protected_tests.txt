@@ -5,6 +5,8 @@ tests/unit/test_audit_regressions.py
 tests/unit/auth/test_password_hasher.py
 tests/unit/test_ci_parity_guard.py
 tests/unit/test_ci_thin_env_guards.py
+# Issue #68 收口：协作域路由可达性（影子导入/FastAPI 注册期断言/漏 await 三形态）
+tests/unit/api/test_coordination_router_reachability.py
 tests/unit/agent/test_agent_core_size_ratchet.py
 tests/unit/security/test_governance_mcp.py
 tests/unit/security/test_url_guard.py
@@ -25,8 +27,6 @@ tests/unit/api/test_skill_pool_api_auth_consolidation.py
 tests/unit/evolution/test_skill_consolidation_structural_and_deadcode_p1p2.py
 # Issue #48 NPC 思考档位修正：model 禁带思考强度后缀 / thinkingLevel 必须字面量枚举
 tests/unit/test_ci_npc_config_guard.py
-# 开发准则配置（docs/0-index/DEVELOPMENT_RULES.md ↔ .cnb/settings.yml 人设同步、唯一测试根 + 模块分子目录、入口文档无悬空引用）
-tests/unit/test_devRulesConfigGuard.py
 # Issue #55 性能/资源优化：PostChatPipeline 尾延迟 + 可观测性
 tests/unit/agent/test_post_chat_p0_latency_observability.py
 # Issue #55 P1：共享线程池复用（禁止热路径每次新建池）
@@ -38,6 +38,9 @@ tests/unit/llm/test_capability_cache_single_source.py
 tests/unit/analytics/test_collector_mock_data_gated.py
 # Issue #55 P2：性能回归门禁常驻自检（双侧 CI 接线 + 门禁可通过）
 tests/performance/test_perf_gate_contract.py
+# Issue #68 修复纪律落库：TDD 红绿灯/放大视角/修根因/禁抹除表面报错
+#   （AGENTS.md 修复教义事实源 + NPC 角色 prompt + .gitignore 白名单 + CONTRIBUTING）
+tests/unit/test_repair_discipline_guard.py
 # Issue #55 后续：RSI 结果真接线（ctx.result['rsi'] 摘要 + 推送字段名对齐真实输出）
 tests/unit/evolution/test_rsi_result_summary_wiring.py
 

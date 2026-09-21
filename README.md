@@ -2195,11 +2195,11 @@ Neurova/
 
 ## 文档导航
 
-完整架构设计文档请访问 [docs/0-index/README.md](docs/0-index/README.md)
+完整架构设计文档请访问 [docs 文档总索引](docs/INDEX.md)
 
 | 核心文档 | 内容 |
 |---------|------|
-| **[开发准则（强制）](docs/0-index/DEVELOPMENT_RULES.md)** | 中文交流 / TDD 红绿灯 / 根因修复 / 闭环 / 原创性 / Neurova 命名法 |
+| **[纪律与约定（最高优先级）](AGENTS.md)** | 修复教义 6 条 / 协作红线（中文交流 / 原创性 / 命名法 / 闭环）/ 代码规约 / 测试纪律 |
 | [docs/CONTEXT.md](docs/CONTEXT.md) | 项目上下文文档（完整架构概览） |
 | [docs/03-user-guide/PRODUCT_GUIDE.md](docs/03-user-guide/PRODUCT_GUIDE.md) | 产品使用指南 |
 | [docs/02-api/API_REFERENCE.md](docs/02-api/API_REFERENCE.md) | API 参考文档（82 端点模块） |
