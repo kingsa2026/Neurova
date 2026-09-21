@@ -215,6 +215,28 @@ def test_foreign_role_name_does_not_leak_into_the_record(tmp_path: Path):
     assert [r["extra"]["source_role"] for r in rows] == ["compactionSummary", "toolResult"]
 
 
+def test_event_without_readable_time_is_declared_not_stamped(tmp_path: Path):
+    """信封没带时间、列 created_at 也不是毫秒时：申报 timestamp，不盖今天的章。"""
+    events = [("ses_a", 1, _event("e1", "message", {"role": "user",
+                                                    "content": [{"type": "text", "text": "甲"}]}),
+               "not-a-time")]
+
+    manifest = convert(_db(tmp_path, events=events), tmp_path / "bundle", agent_name="x")
+
+    assert manifest.counts["transcripts"] == 0
+    assert any(e["field"] == "timestamp" and e["count"] == 1 for e in manifest.dropped)
+
+
+def test_memory_without_readable_time_is_declared_not_imported(tmp_path: Path):
+    """记忆条的时间既不是毫秒也不是 ISO：整条不导并申报，不写导入时刻。"""
+    memory = {"chunks": [_chunk("ck7", "时间不祥", at="不是时间")]}
+
+    manifest = convert(_db(tmp_path, memory=memory), tmp_path / "bundle", agent_name="x")
+
+    assert manifest.counts["memories"] == 0
+    assert any(e["field"] == "memory:无时间" and e["count"] == 1 for e in manifest.dropped)
+
+
 def test_non_message_events_are_declared(tmp_path: Path):
     events = [
         ("ses_a", 1, _event("e1", "message", {"role": "user",

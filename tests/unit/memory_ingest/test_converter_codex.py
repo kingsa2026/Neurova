@@ -170,5 +170,22 @@ def test_refuses_foreign_store(tmp_path: Path):
         convert(other, tmp_path / "bundle", agent_name="x")
 
 
+def test_line_without_any_time_is_declared_not_stamped(tmp_path: Path):
+    """没有 per-line 时间、session_meta 也没给时间：报 timestamp，不盖今天的章。"""
+    path = tmp_path / "sessions" / "rollout-2026-05-01T10-00-00-thr_9.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join([
+        json.dumps({"type": "session_meta", "payload": {"id": "thr_9"}}),
+        _line({"type": "message", "role": "user",
+               "content": [{"type": "input_text", "text": "跑一下"}]}),
+    ]) + "\n", encoding="utf-8")
+    out = tmp_path / "bundle"
+
+    manifest = convert(path, out, agent_name="imported")
+
+    assert manifest.counts["transcripts"] == 0
+    assert any(e["field"] == "timestamp" and e["count"] == 1 for e in manifest.dropped)
+
+
 def test_is_routable_by_handprint_name():
     assert CONVERTERS[CONVERTER_NAME] is convert

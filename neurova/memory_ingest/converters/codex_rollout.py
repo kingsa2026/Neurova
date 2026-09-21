@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -47,6 +46,7 @@ REASONS: Dict[str, str] = {
     "role": "该角色在包内无对应 kind，不猜映射",
     "空正文": "该记录没有可携带正文，未入包",
     "坏行": "该行不是合法 JSON，无法解析",
+    "timestamp": "该行与 session_meta 都没给出可定标的时间，整行未入包（不猜时刻）",
 }
 for _t in BOOKKEEPING_TYPES:
     REASONS[f"payload:{_t}"] = "运行时上下文与计量记账，包内不表达（会话事实以 response_item 为准）"
@@ -63,8 +63,8 @@ def convert(store: Path, out_dir: Path, *, agent_name: str) -> BundleManifest:
     lines = _read_lines(store)
     meta = next((row["payload"] for row in lines if row["type"] == "session_meta"), {})
     session_id = str(_first(meta, "id", "session_id", "thread_id") or store.stem)
-    fallback_ts = str(_first(meta, "timestamp", "time", "created_at") or "") or \
-        datetime.now(timezone.utc).isoformat()
+    # 会话头的时间只是该行自己的时间的兜底：定不出来就留空，由 _row_events 申报并跳过
+    fallback_ts = str(_first(meta, "timestamp", "time", "created_at") or "")
 
     rows: List[Tuple[str, List[SourceEvent]]] = []
     for number, row in enumerate(lines, start=1):
@@ -121,10 +121,13 @@ def _row_events(row: Dict[str, Any], session_id: str, number: int, fallback_ts: 
     if rtype == "<坏行>":
         declared["坏行"] += 1
         return []
-    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
-    ts = ensure_offset(str(_first(payload, "timestamp", "ts", "time") or fallback_ts))
     if rtype == "session_meta":
         return []                              # 出处信息经 _attach_meta 挂在首条事件上
+    payload = row.get("payload") if isinstance(row.get("payload"), dict) else {}
+    ts = ensure_offset(str(_first(payload, "timestamp", "ts", "time") or fallback_ts))
+    if not ts:
+        declared["timestamp"] += 1
+        return []
     if rtype == "response_item":
         return _response_items(payload, ts, sink, declared)
     if rtype == "compacted":
