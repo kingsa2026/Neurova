@@ -98,10 +98,20 @@ def _check_ref(root: Path, rel: str, block: Dict[str, Any], lineno: int) -> List
         target = resolve_within(root, rel)
     except UnsafePathError as exc:
         return [f"transcripts.jsonl:{lineno} media 引用越出包外: {rel!r}（{exc}）"]
+    parts = rel.split("/")
+    if len(parts) != 2 or parts[0] != MEDIA_DIRNAME:
+        return [f"transcripts.jsonl:{lineno} media 引用命名不符内容寻址约定: {rel!r}"
+                f"（必须是 {MEDIA_DIRNAME}/<digest>.<ext>，落盘只取基名，子目录会被拍平）"]
+    declared = str(block.get("digest") or "")
+    if not declared:
+        return [f"transcripts.jsonl:{lineno} media 引用摘要必须声明: {rel!r}"
+                f"（无摘要就无法证明引用与字节是一对）"]
+    if Path(rel).name != f"{declared}{Path(rel).suffix.lower()}":
+        return [f"transcripts.jsonl:{lineno} media 引用命名不符内容寻址约定: {rel!r}"
+                f"（文件名应为 {declared}<原后缀>）"]
     if not target.is_file():
         return [f"transcripts.jsonl:{lineno} media 缺文件: {rel!r}"]
     data = target.read_bytes()
-    declared = str(block.get("digest") or "")
     actual = hashlib.sha256(data).hexdigest()[:_DIGEST_LEN]
     if declared and declared != actual:
         return [f"transcripts.jsonl:{lineno} media 摘要不符: {rel!r}"
