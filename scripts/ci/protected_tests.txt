@@ -212,6 +212,14 @@ tests/unit/memory_ingest/test_cli.py
 tests/unit/memory_ingest/test_intake.py
 tests/unit/migration/test_kai_import.py
 
+# Issue #72 写面与读面收口：抽取产物落被读的底座（不再只有 JSON 投影）+ 本体硬拒真咬合
+tests/unit/knowledge/test_extraction_lands_in_read_graph.py
+# Issue #72 附带根因：构造期播种只补缺，不覆盖已登记的 domain/range/cardinality
+tests/unit/knowledge/ontology/test_term_seed_does_not_clobber.py
+# Issue #72：时序事实单一权威（端点字段归一 + 坏输入 4xx + 第三套内存库退役）
+tests/unit/api/test_tkg_endpoint_single_source.py
+# Issue #72：记忆侧声明的取代真的生效（旧证据让位），找不到目标如实申报
+tests/unit/memory_ingest/test_imported_supersede_replaces_old.py
 # 上下文三链路修复批（Issue #90）B1 尺子：token 估算单一事实源 + 判据侧不得低估
 #   （P0-1 根因：BALANCED 对英文/JSON/无空格长串低估 20 倍量级 → 折叠永不触发）
 tests/unit/context/test_token_estimator_calibration.py

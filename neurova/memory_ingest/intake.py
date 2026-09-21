@@ -50,6 +50,10 @@ class IngestReport:
     sessions_touched: int = 0
     dropped: Tuple[Dict[str, Any], ...] = ()
     staged_media: Tuple[str, ...] = ()
+    # 声明取代的落地读数（审计 B-11）：让位的旧行 id 与"声明了却找不到目标"的声明值。
+    # 只写不报就不叫闭环——导入方要能看出这批取代有没有真的发生。
+    memories_superseded: Tuple[str, ...] = ()
+    supersede_unresolved: Tuple[str, ...] = ()
 
     def undo(self, *, manager, sessions) -> Tuple[int, int]:
         """返回 (撤销记忆条数, 撤销消息条数)；只删本批，不碰运行期数据。"""
@@ -153,8 +157,13 @@ def apply_bundle(root: Path, *, agent_id: str, manager, sessions,
             # 包里带记忆却没人接 = 这批记忆会被静默丢掉，那正是"半导"；响亮拒绝
             raise BundleError(
                 f"包里有 {len(memories)} 条记忆，但未提供记忆写入面（manager）")
-        report.memories_added, report.memories_skipped = manager.import_memories(
-            memories, ingest_run_id=report.run_id)
+        # 写入口的返回值是带取代读数的字典：计数与"声明取代是否真发生"都取这一份，
+        # 不再另立第二条读取路径（两侧合流后唯一的读处）。
+        outcome = manager.import_memories(memories, ingest_run_id=report.run_id)
+        report.memories_added = outcome["added"]
+        report.memories_skipped = outcome["skipped"]
+        report.memories_superseded = tuple(outcome["superseded"])
+        report.supersede_unresolved = tuple(outcome["supersede_unresolved"])
 
     try:
         _write_sessions(report, transcripts, sessions, Path(root))

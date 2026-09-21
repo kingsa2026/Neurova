@@ -28,10 +28,10 @@ def _record(seq: int, content: str) -> MemoryRecord:
 def test_import_memories_visible_without_restart_and_keeps_history_ts(tmp_path: Path):
     manager = _manager(tmp_path)
 
-    added, skipped = manager.import_memories([_record(1, "历史记忆一")], ingest_run_id=_RUN)
+    outcome = manager.import_memories([_record(1, "历史记忆一")], ingest_run_id=_RUN)
 
     stored = next(m for m in manager._memories.values() if m.content == "历史记忆一")
-    assert (added, skipped) == (1, 0)
+    assert (outcome["added"], outcome["skipped"]) == (1, 0)
     assert stored.origin is MemoryOrigin.OWNER
     assert stored.created_at.isoformat().startswith("2026-05-01")   # 不被 now() 覆盖
     assert stored.temperature == 100.0
@@ -45,8 +45,8 @@ def test_import_memories_is_idempotent(tmp_path: Path):
     first = manager.import_memories(records, ingest_run_id=_RUN)
     second = manager.import_memories(records, ingest_run_id=_RUN)
 
-    assert first == (2, 0)
-    assert second == (0, 2)
+    assert (first["added"], first["skipped"]) == (2, 0)
+    assert (second["added"], second["skipped"]) == (0, 2)
     assert len(manager._memories) == 2
 
 
