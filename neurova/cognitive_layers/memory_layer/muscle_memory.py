@@ -173,15 +173,21 @@ class MuscleMemory:
     三层记忆架构，实现条件反射级的工具使用记忆。
     """
 
-    def __init__(self, storage_path: Optional[str] = None, storage_dir: Optional[str] = None, **kwargs):
+    def __init__(self, storage_path: Optional[str] = None,
+                 storage_dir: Optional[str] = None, agent_id: str = ""):
         """
         初始化肌肉记忆系统
 
         Args:
             storage_path: 持久化存储路径
             storage_dir: storage_path 的别名（向后兼容）
+            agent_id: 归属 agent 身份（工单 008）。生产装配点
+                （`agent_core.py`）一直在传 `agent_id`，而此前签名是 `**kwargs`——
+                传进来的身份被静默吞掉，读取方取不到归属，"多 agent 串库"在
+                观测面上完全看不见。收口为显式参数并落成可读属性。
         """
         self._storage_path = storage_path or storage_dir
+        self.agent_id = str(agent_id or "")
         self._lock = threading.RLock()
 
         # 三层存储
