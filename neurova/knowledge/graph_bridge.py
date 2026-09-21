@@ -30,6 +30,7 @@ import re
 from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.knowledge.ontology.term_registry import IS_A_PREDICATE
 
 logger = get_logger(__name__)
 
@@ -439,3 +440,165 @@ def extract_knowledge_to_graph(
             logger.warning("graph_bridge: graph_node_ids 回写失败: %s", exc)
 
     return node_ids
+
+def extractionPending(item: Dict[str, Any], store: Any, agentId: str) -> bool:
+    """这条条目还欠一次抽取吗——判据问的是**权威**，不是投影。
+
+    `/knowledge-graph/backfill` 此前按"`graph_node_ids` 为空"筛待办。但抽取收口
+    **之前**抽过的条目两个字段都有值：旧实现只落 JSON 投影，也照样把节点 id 写回条目。
+    于是最需要补抽的那批存量（投影有、权威无）恰好被待办判据全部跳过——端点报表写
+     `entries=0`（"没有待补的"），实际是"待补的认不出来"（Issue #72 §5 登记的存量回填，
+    它不是纯运维动作，上游有一处判据要先修）。
+
+    判据落在权威：底座里这个域有指向本条目的抽取事实，才算抽过。投影是派生品，
+    拿它当依据就是让派生品决定谁该被补——那正是两面分裂能活下来的原因。
+    """
+    return not _authorityFactsForEntry(store, agentId, str(item.get("knowledge_id", "") or ""))
+
+
+def _authorityFactsForEntry(store: Any, agentId: str, knowledgeId: str) -> List[Any]:
+    """本条条目在权威侧留下的抽取事实（按断言的 medium_ref 认，与协商口径同源）。
+
+    条目 id 的落点有两处（`source_turn_id` 前缀与断言 `medium_ref`），两处任一命中都算：
+    只认一处就会把另一条真实写入链的产物当成"没抽过"，补抽于是重复落一遍。
+    """
+    if not knowledgeId:
+        return []
+    wanted = {knowledgeId, "entry:%s" % knowledgeId, "legacy:%s" % knowledgeId}
+    hits: List[Any] = []
+    for fact in store.searchableFacts(agentId=agentId):
+        if str(fact.get("source_turn_id") or "") in wanted:
+            hits.append(fact)
+            continue
+        for assertion in store.assertions(fact["fact_id"]):
+            if str(assertion.get("medium_ref") or "") in wanted:
+                hits.append(fact)
+                break
+    return hits
+
+
+# ── 投影一致性（Issue #72 未处置项：JSON 属性图是权威的派生投影）──────────
+#
+# 抽取那一刻两个落点同源，但权威侧此后还会变（存量补抽、冲突裁决取代、
+# 推导结论落库、对账回放）。没有一条路径把投影拉回与权威一致，投影就成了
+# 名下的第二份真相：可视化读它、检索读权威，两边各说各话且无人报出分叉。
+# 下面三个函数把这件事收干净：分叉可读、可修、且只动本域。
+
+def _relationTermIds(store: Any, termRegistry: Any) -> set:
+    """谓词合法集：注册表是权威；注册表不可用时退回枚举读兼容层（与类型判据同口径）。"""
+    if termRegistry is not None:
+        return set(registeredRelationTypes(termRegistry))
+    from neurova.cognitive_layers.knowledge_graph.manager import RelationType
+
+    return {t.value for t in RelationType if t.value != "custom"}
+
+
+def _authorityRelations(store: Any, agentId: str, termRegistry: Any) -> List[Dict[str, str]]:
+    """权威侧的关系清单：底座三元组里"两端都有主体"的那些。
+
+    `is_a` 不在此列：它是实体类型落到事实层的形状，投影里对应的是**节点类型**
+    而不是一条边（两边都算就会把同一个类型事实算成一条多余/缺失的边）。
+    客体不是主体的说法同样不算边（字面量客体，比如 `版本 = 2.0`）。
+    """
+    declared = _relationTermIds(store, termRegistry)
+    declared.discard(IS_A_PREDICATE)
+
+    byLabel = {s["canonical_label"] for s in store.listSubjects(agentId)}
+    out: List[Dict[str, str]] = []
+    for fact in store.searchableFacts(agentId=agentId):
+        predicate = str(fact.get("predicate_term_id") or "")
+        if predicate == IS_A_PREDICATE or predicate not in declared:
+            continue
+        source = str(fact.get("canonical_label") or "")
+        target = str(fact.get("object_term") or "")
+        if not source or target not in byLabel:
+            continue
+        out.append({"source": source, "relation": predicate, "target": target})
+    return out
+
+
+def _projectionRelations(graph: Any) -> List[Dict[str, str]]:
+    """投影侧的关系清单（同一形状：两端都是节点，`is_a` 不在这）。"""
+    labels = {n.node_id: n.label for n in graph._nodes.values()}
+    out: List[Dict[str, str]] = []
+    for edge in graph._edges.values():
+        source = labels.get(edge.source_id)
+        target = labels.get(edge.target_id)
+        relation = edge.relationTypeValue
+        if not source or not target or relation == IS_A_PREDICATE:
+            continue
+        out.append({"source": source, "relation": relation, "target": target})
+    return out
+
+
+def projectionDrift(agentId: str, graph: Any, store: Any,
+                    termRegistry: Any = None) -> Dict[str, Any]:
+    """权威与投影的关系差集：缺的（权威有投影无）与孤儿（投影有权威无）。
+
+    只报不计分、不自动修：分叉是**运维读数**，修由 `rebuildProjectionFromAuthority`
+    显式做——顺手修掉就等于把报出与处置混成一件事，读的人再也看不到曾经分叉过。
+    """
+    authority = _authorityRelations(store, agentId, termRegistry)
+    projection = _projectionRelations(graph)
+
+    def _key(rel: Dict[str, str]) -> str:
+        return "\x1f".join((rel["source"], rel["relation"], rel["target"]))
+
+    held = {_key(r) for r in projection}
+    known = {_key(r) for r in authority}
+    return {
+        "agent_id": agentId,
+        "authority_relations": len(authority),
+        "projection_relations": len(projection),
+        "missing_relations": [r for r in authority if _key(r) not in held],
+        "orphan_relations": [r for r in projection if _key(r) not in known],
+    }
+
+
+def rebuildProjectionFromAuthority(agentId: str, graph: Any, store: Any,
+                                   termRegistry: Any = None) -> Dict[str, Any]:
+    """按权威重建本域的投影：节点取自主体（类型取自主类型列），边取自三元组。
+
+    重建是**幂等**的：先摘掉本域旧的边与孤立节点，再按权威铺一遍，跑几次结论一样。
+    节点身份仍由消解段定（006 口径），不按 label 精确匹配——否则同一实体换个
+    类型词就开两个节点，图越写越碎；也因此"本域旧节点"只能按参与本域关系的标签认。
+    """
+    from neurova.cognitive_layers.knowledge_graph.manager import NodeType as _NodeType
+    from neurova.knowledge.identity.subject_resolver import SubjectResolver
+
+    authority = _authorityRelations(store, agentId, termRegistry)
+    wanted = {r["source"] for r in authority} | {r["target"] for r in authority}
+
+    labels = {n.node_id: n.label for n in graph._nodes.values()}
+    for edge_id, edge in list(graph._edges.items()):
+        if labels.get(edge.source_id) in wanted or labels.get(edge.target_id) in wanted:
+            graph.delete_edge(edge_id)
+    for node in list(graph._nodes.values()):
+        if node.label in wanted and not graph.get_neighbors(node.node_id):
+            graph.delete_node(node.node_id)
+
+    types = {s["canonical_label"]: (s.get("type_term_id") or _NodeType.CONCEPT.value)
+             for s in store.listSubjects(agentId)}
+    resolver = SubjectResolver()
+    nodeIds: Dict[str, str] = {}
+    for label in sorted(wanted):
+        nodeType = types.get(label) or _NodeType.CONCEPT.value
+        if nodeType == "custom":
+            nodeType = _NodeType.CONCEPT.value
+        existing = _resolveNodeId(graph, label, resolver)
+        if existing is not None:
+            nodeIds[label] = existing
+            continue
+        nodeIds[label] = graph.add_node(label=label, node_type=nodeType).node_id
+
+    edges = 0
+    for rel in authority:
+        sourceId = nodeIds.get(rel["source"])
+        targetId = nodeIds.get(rel["target"])
+        if not sourceId or not targetId or sourceId == targetId:
+            continue
+        if graph.add_edge(source_id=sourceId, target_id=targetId,
+                          relation_type=rel["relation"]) is not None:
+            edges += 1
+    return {"agent_id": agentId, "nodes": len(nodeIds), "edges": edges,
+            "drift": projectionDrift(agentId, graph, store, termRegistry)}
