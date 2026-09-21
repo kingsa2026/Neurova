@@ -13,7 +13,7 @@
 ## 文件结构
 
 审计过程中将创建以下文件：
-- `docs/compose/plans/2026-06-12-code-audit.md` - 本计划文件
+- `docs/05-reports/2026-06-12-code-audit.md` - 本计划文件
 - `audit-reports/security-audit.md` - 安全审计报告
 - `audit-reports/quality-audit.md` - 代码质量审计报告 
 - `audit-reports/architecture-audit.md` - 架构审计报告
