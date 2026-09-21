@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.checkpoints.repository import CheckpointRepository, make_ts
+from neurova.core.data_root import callerPath
 from neurova.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -34,7 +34,11 @@ class CheckpointService:
     ):
         self.agent_id = agent_id
         self.debounce_seconds = max(0.0, float(debounce_seconds))
-        base = Path(base_dir)
+        # 缺省落点经数据根推导。**不能写成 `base_dir: str = ""` 再裸 `Path(base_dir)`**：
+        # 空串解析出来就是进程 CWD，`<agent_id>.git` 会建在任意工作目录下
+        # （实测跑一轮单测就在仓库根留下三个 .git）。原默认 `"data/checkpoints"`
+        # 虽然也是相对路径，但至少锚在仓库根——"改成空串"是更坏的一步。
+        base = callerPath(base_dir, "checkpoints")
         base.mkdir(parents=True, exist_ok=True)
         self.repo = CheckpointRepository(str(base / f"{agent_id}.git"))
         self._last_auto_at: Dict[str, float] = {}

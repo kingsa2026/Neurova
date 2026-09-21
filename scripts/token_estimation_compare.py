@@ -4,12 +4,15 @@ Token 估算计算对比脚本
 """
 
 import sys
-import os
+from pathlib import Path
 
-# 添加项目路径
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 添加项目路径：必须是**仓库根**（`scripts/` 的上一层），不是脚本自己所在目录——
+# 后者拿不到 `neurova` 包，`import neurova...` 会 ModuleNotFoundError。
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-from neurova.context_compressor import Message
+from neurova.context_compressor import Message  # noqa: E402
 from neurova.context_pool import ContextPoolUtils
 
 

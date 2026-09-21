@@ -17,6 +17,7 @@
 import asyncio
 import inspect
 import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -374,7 +375,7 @@ class TestBackgroundTaskLifecycle:
 
     def test_concurrent_background_actually_parallel(self):
         """响应无关步骤应并发跑：总耗时 ≈ 单步耗时，而非 N 倍之和。"""
-        import time
+
 
         pipe = _make_pipeline()
 
@@ -463,11 +464,17 @@ class TestResponsePathLatencyImprovement:
     STEP_DELAY = 0.15
     BYPASS_STEPS_ON_PATH = 11  # 后台步骤里除 cognitive_analysis 外的 11 个
 
-    def _pipeline_with_slow_steps(self):
+    def _pipeline_with_slow_steps(self, step_delay=None):
+        """旁路步骤统一替换为"固定时长休眠"。
+
+        `step_delay` 显式传入（默认取本类标称值），**不改类属性**——类属性是共享
+        可变量，用例内改动会外溢到同一类的其他用例（差分判据要跑"delay=0"那一臂）。
+        """
+        delay = self.STEP_DELAY if step_delay is None else step_delay
         pipe = _make_pipeline()
 
         async def _slow(*a, **k):
-            await asyncio.sleep(self.STEP_DELAY)
+            await asyncio.sleep(delay)
 
         for name in (
             "_step_reflection",
@@ -487,34 +494,65 @@ class TestResponsePathLatencyImprovement:
         return pipe
 
     def test_background_response_path_does_not_scale_with_bypass_steps(self, monkeypatch):
-        import time
+        """判据是**差分**的：响应路径耗时里与旁路步骤数相关的部分必须极小。
 
+        为什么不直接卡"单次耗时 < delay + 0.1"：那一条把**固定开销**（线程跳、
+        事件循环调度、GC、CI 机器抢占）也算进了预算。CI 上实测过 0.40s / 0.54s 的
+        读数——同一台机器、同一份代码，负载一变读数就变，而那份负载与"后台化是否
+        生效"毫无关系。结果是门禁在 CI 上偶发红、在开发机上恒绿，红的那次还指不出
+        任何真问题（干净基线同样红）。
+
+        改成量**增量**：
+
+        - 空臂：所有旁路步骤 delay=0，响应路径只付固定开销；
+        - 慢臂：所有旁路步骤 delay=D，正确后台化下响应路径**应只多付 D**
+          （路径上真正 await 的只有 cognitive_analysis），泄漏时则多付 11×D。
+
+        固定开销在两臂同现，相减即消；两臂取 min-of-N 压掉偶发抢占。
+        预算 4×D 与泄漏信号 11×D 有 2.75 倍分离——只抓"是否随步数增长"这个量级，
+        不追求精确 benchmark。
+        """
         monkeypatch.setenv("NEUROVA_POSTCHAT_BACKGROUND", "1")
-        pipe = self._pipeline_with_slow_steps()
+        delay = self.STEP_DELAY
 
-        async def _run():
+        async def _once(step_delay: float) -> float:
+            pipe = self._pipeline_with_slow_steps(step_delay)
             start = time.perf_counter()
             await pipe.process(
                 user_input="hi", reply="yo", session_id="s1",
                 save_memory=True, enable_tts=False, metadata={},
             )
             elapsed = time.perf_counter() - start
-            await pipe.drain_background(timeout=10)
+            await pipe.drain_background(timeout=step_delay * 20 + 10)
             return elapsed
 
-        elapsed = asyncio.run(_run())
-        # 串行语义下 11 个旁路步骤会付 11×delay ≈ 1.65s；并发后台化后，
-        # 响应路径只付"认知分析"这一步（delay）+ 小开销。
-        assert elapsed < self.STEP_DELAY + 0.1, (
-            f"响应路径耗时 {elapsed:.2f}s 仍随旁路步骤数增长（应 ≈ 单步 {self.STEP_DELAY}s）"
+        rounds = 3
+        slow: list = []
+        empty: list = []
+        for i in range(rounds):
+            # 交错取样 + 交替顺序：避免"谁先跑谁吃冷启动"造成的系统性偏差
+            if i % 2 == 0:
+                slow.append(asyncio.run(_once(delay)))
+                empty.append(asyncio.run(_once(0.0)))
+            else:
+                empty.append(asyncio.run(_once(0.0)))
+                slow.append(asyncio.run(_once(delay)))
+
+        increment = min(slow) - min(empty)
+        budget = 4 * delay
+        assert increment < budget, (
+            f"响应路径耗时随旁路步骤数增长了 {increment:.2f}s"
+            f"（min(慢臂)={min(slow):.2f}s, min(空臂)={min(empty):.2f}s）——"
+            f"应只多付单步 {delay}s；{self.BYPASS_STEPS_ON_PATH} 个旁路步骤"
+            f"若仍在响应路径上会多付 {self.BYPASS_STEPS_ON_PATH * delay:.2f}s"
         )
 
     def test_kill_switch_path_pays_all_steps_serially(self, monkeypatch):
         """对照组：关闭后台化时确实付全部串行代价（证明上面测的是真实收益）。"""
-        import time
+
 
         monkeypatch.setenv("NEUROVA_POSTCHAT_BACKGROUND", "0")
-        pipe = self._pipeline_with_slow_steps()
+        pipe = self._pipeline_with_slow_steps(self.STEP_DELAY)
 
         async def _run():
             start = time.perf_counter()
