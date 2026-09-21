@@ -8,11 +8,11 @@ from dataclasses import dataclass, field
 from datetime import datetime
 import uuid
 
-from neurova.cdt.core import (
+from neurova.crdt.core import (
     GSetCRDT, PNCounterCRDT, LWWRegisterCRDT, ORSetCRDT,
     UniqueID,
 )
-from neurova.cdt.rga import RGACRDT, TextOperation
+from neurova.crdt.rga import RGACRDT, TextOperation
 
 
 @dataclass
