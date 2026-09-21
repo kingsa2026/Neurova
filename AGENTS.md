@@ -1,6 +1,7 @@
 # AGENTS.md —— 开发上下文速查与关键约定
 
-> 本文件是**纪律与约定的权威出处**（`docs/INDEX.md` 阅读顺序第 2 位）。
+> 本文件是**纪律与约定的唯一权威出处**（`docs/INDEX.md` 阅读顺序第 2 位），
+> 亦是工作区 AI 指令文件（`neurova/context/workspace_docs.py` 运行时读取）。
 > 文档各领域权威源见 [`docs/INDEX.md`](docs/INDEX.md)；人类贡献者入口见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 > 本文件被全仓 90+ 处以「`AGENTS.md` 修复教义第 N 条」编号引用——**改条款编号前先 grep 引用方**。
 
@@ -50,7 +51,38 @@
 
 ---
 
-## 2. 代码规约
+## 2. 协作红线（Issue #68 定稿）
+
+Issue #68 明确要求写进"项目配置"的通用准则。与修复教义同为本仓最高纪律。
+
+- **交流语言**：面向用户的回复、Issue/PR 评论、提交信息正文、文档正文**一律使用中文**。
+  代码标识符、命令、路径、第三方 API 字段名保持原文，不做翻译；面向国际化的产品文案仍按
+  `docs/i18n/` 的多语言对齐纪律执行，不因本准则放宽。
+- **原创性与自主性**：**严禁**在代码注释、技术文档或提交信息中引用、模仿或对齐任何第三方项目
+  （不写"参考 XX 项目""对齐 XX 实现""与 XX 保持一致"之类表述，不搬运其命名、结构与措辞）。
+  所有产出必须基于本项目的独立设计与实现；外部依赖只作为**功能依赖**登记（版本、许可、用途），
+  不引入其设计标准；研究参考类文档仅作背景，**不可作事实源**。
+- **命名风格（Neurova 技术美学）**：变量、函数、方法用 **camelCase**
+  （`resolveMemoryAnchor()`、`memoryTemperature`）；类、模块、类型用 **PascalCase**
+  （`MemoryRecallEngine`、`ContextPoolIndex`）；常量用全大写下划线（`MAX_RECALL_DEPTH`）。
+  命名以**简洁、语义清晰**为准，体现功能意图与业务领域；**禁用** `data`/`info`/`temp`/
+  `handler`/`manager`/`util`/`helper`/`process` 这类通用模糊词，除非叠加领域限定。
+  新增测试用例名用驼峰时，pytest 收集由 `pyproject.toml` 的
+  `python_functions = ["test_*", "test[A-Z]*"]` 放开（由 `tests/unit/core/test_pytest_collection_hygiene.py` 反向锁住）。
+- **规则文档与测试目录归属**：规则/准则/约定类文档统一存放于 `docs/`，仓库根目录不再新增；
+  新增准则须在 `docs/0-index/README.md` 登记。测试用例统一存放于本仓**唯一测试根 `tests/`**，
+  并按功能模块分子目录（`tests/unit/<module>/`、`tests/integration/`、`tests/e2e/`、
+  `tests/performance/`、`tests/fixtures/`、`tests/runners/`）；不得另建第二个测试根造成双源。
+- **功能与升级改造**：全局视角，先看全链路（数据从哪来、经谁处理、到哪去、谁消费），不留断点——
+  写出无人读的字段、注册无消费者的模块、只写不读的配置、只读不写的指标均属断点，
+  必须接线或删除；老路径退役与新路径接线同批完成，形成**写入 → 读取 → 反馈 → 再写入**的闭环。
+
+**无例外条款**：本准则无"紧急可绕过"入口。确需偏离时，必须在 PR 描述中显式说明偏离点、
+原因与补偿措施，并同步更新本文件——规则与行为不一致时，以**改规则**为准，不以"默认这么做"为准。
+
+---
+
+## 3. 代码规约
 
 - **深模块模式**：模块经 `agent_ref` 依赖注入访问 Agent，禁止直接 import Agent（循环依赖靠懒加载 `__getattr__` 打破——不要随手把局部 import 提到模块级）。
 - **单例**：懒创建型单例必须走 DCL（double-checked locking）+ `threading.RLock`；`neurova/agent/` 包的 `__init__` 链回 `tool_executor`，新增模块导入注意懒加载。
@@ -60,7 +92,7 @@
 - **i18n**：11 语言与 zh-CN 严格对齐（`src/i18n/__tests__/locale-consistency.test.ts` 守卫）。
 - **前端主题**：全站禁硬编码色值（`themes.test.ts` 契约），颜色令牌见 `src/styles/variables.css`。
 
-## 3. 测试纪律
+## 4. 测试纪律
 
 - 正式测试落 `tests/unit|integration|e2e|performance/<模块>/`；临时验证脚本即用即删，不留 `tests/` 根目录。
 - 新增测试文件若被 `.gitignore` 规则命中，必须 `git add -f` 显式加。
@@ -69,13 +101,13 @@
   （`git stash push <files> && pytest <套件> && git stash pop`），失败集合修复前后逐行比对。
 - 前端：`npm run test`（vitest）、`npm run lint`、`npx vue-tsc --noEmit`。
 
-## 4. 提交纪律
+## 5. 提交纪律
 
 - Conventional Commits：`feat(scope): ...` / `fix(scope): ...` / `docs: ...` / `chore: ...` / `refactor(scope): ...`；单任务单 commit。
 - commit 正文说明**动机与根因**（不只是改了什么），附红灯/绿灯实测证据与净 LOC 去向。
 - 工作树常含其他会话的在途改动：`git commit --only -- <paths>`，**严禁 `git add -A`**。
 - 文档：结构性文档进 `docs/` 编号分层目录，过程性分析不留 `docs/` 根目录。
 
-## 5. 安全
+## 6. 安全
 
 发现安全漏洞请勿公开 Issue——流程见 [`SECURITY.md`](SECURITY.md)。
