@@ -282,3 +282,57 @@ def test_apply_reports_written_memories_need_a_restart_to_be_visible(
     main(["apply", str(db), "--agent-id", "kai-import", "--yes"], manager=manager,
          sessions=sessions)
     assert "重启" not in capsys.readouterr().out
+
+
+# --- F-04 属主参数：多用户/多渠道下导入他人历史必须能指定归属
+
+
+def test_apply_owner_parameter_lands_on_the_session(tmp_path: Path, manager, sessions):
+    db = _db(tmp_path / "history.db")
+
+    code = main(["apply", str(db), "--agent-id", "kai-import", "--yes",
+                 "--run-id", "run-owner-1", "--owner-user-id", "u_alice"],
+                manager=manager, sessions=sessions)
+
+    assert code == EXIT_OK
+    assert [s["session_id"] for s in sessions.list_sessions("kai-import", user_id="u_alice")]
+    assert sessions.list_sessions("kai-import", user_id="u_bob") == []
+
+
+def test_apply_without_owner_keeps_the_session_shared(tmp_path: Path, manager, sessions):
+    db = _db(tmp_path / "history.db")
+
+    main(["apply", str(db), "--agent-id", "kai-import", "--yes", "--run-id", "run-owner-2"],
+         manager=manager, sessions=sessions)
+
+    assert sessions.list_sessions("kai-import")[0]["user_id"] == ""
+    assert sessions.list_sessions("kai-import", user_id="u_bob")
+
+
+def test_apply_refuses_to_take_over_an_owned_session(tmp_path: Path, manager, sessions, capsys):
+    """同一份会话被两次不同属主的导入碰：第二次整批拒绝，不改写登记在册的属主。"""
+    db = _db(tmp_path / "history.db")
+    assert main(["apply", str(db), "--agent-id", "kai-import", "--yes",
+                 "--run-id", "run-owner-a", "--owner-user-id", "u_alice"],
+                manager=manager, sessions=sessions) == EXIT_OK
+
+    code = main(["apply", str(db), "--agent-id", "kai-import", "--yes",
+                 "--run-id", "run-owner-b", "--owner-user-id", "u_bob"],
+                manager=manager, sessions=sessions)
+
+    printed = capsys.readouterr()
+    assert code == EXIT_INVALID_BUNDLE
+    assert "u_alice" in printed.out + printed.err
+    assert sessions.list_sessions("kai-import", user_id="u_alice")
+
+
+def test_undo_reports_the_owner_of_what_it_removes(tmp_path: Path, manager, sessions, capsys):
+    """撤销要能说清撤的是谁的批次：报告里看得见属主。"""
+    db = _db(tmp_path / "history.db")
+    main(["apply", str(db), "--agent-id", "kai-import", "--yes", "--run-id", "run-owner-3",
+          "--owner-user-id", "u_alice"], manager=manager, sessions=sessions)
+
+    assert main(["undo", "--agent-id", "kai-import", "--run-id", "run-owner-3"],
+                manager=manager, sessions=sessions) == EXIT_OK
+
+    assert "u_alice" in capsys.readouterr().out

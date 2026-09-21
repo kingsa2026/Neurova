@@ -215,6 +215,14 @@ tests/unit/api/test_skill_rollback_governance.py
 tests/unit/cognitive_layers/memory_layer/test_temperature_single_source.py
 
 
+# Issue #81 F-04/F-18：导入会话属主（归属落盘后只读）+ 两条导入路同一幂等域
+#   + 导入咽喉（唯一写入口）的既有回归（逐文件单跑确定全绿，已核）
+tests/unit/memory_ingest/test_import_interop.py
+tests/unit/memory_ingest/test_import_sessions.py
+tests/unit/memory_ingest/test_cli.py
+tests/unit/memory_ingest/test_intake.py
+tests/unit/migration/test_kai_import.py
+
 # Issue #68 下一层：同名多份（回潮副本）逐条裁定 + 棘轮。
 # 根因 = 目录重排 fd7ea92c 之后，3b5d7e80 又把 306 个 docs 旧路径还原回来，
 # 同一篇文档在编号分层与旧路径各留一份，归档引用失去唯一裁定。本单收口为一份。
