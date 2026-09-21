@@ -810,7 +810,85 @@ def renderTable(entries: list) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# 台账机器区生成入口（本文件是「唯一事实源」，这是它的写侧）
+# ---------------------------------------------------------------------------
+# 根因：台账的机器区此前**只有读者、没有写者**。四份守卫逐块重算比对，但
+# `--markdown` 只打印第三节表格——第四节前像、第五节裁定、第八节导航筛选
+# 都只能手贴。于是上游文档一合并（`docs/05-reports/` 追加一篇审计台账，
+# 导航可达文档的悬空引用条数就变），台账随即与事实脱节，而没有任何命令
+# 能把它拉回来。守卫的报错信息里写着「重跑 --markdown」，那个动作对
+# 第八节根本不成立——**报错指向一个做不到的动作**，等于把修复责任推给手改。
+#
+# 故把写侧补齐：`ledgerBlocks()` 产出每个机器区的正文（判据仍只此一份），
+# `applyLedgerBlocks()` 逐区替换，`--update-ledger` 落盘。守卫据此才能
+# 真正「重算 → 写回 → 比对」，人不必也不该手贴数字。
+
+#: 台账路径（本文件产出的机器区都写在这一份里，不新造第二份台账）
+LEDGER_PATH = PROJECT_ROOT / "docs" / "06-bugfix" / "历史悬空引用登记台账_2026-09-21.md"
+
+
+#: 台账机器区的（起始标记, 结束标记）：区块集合只此一份，
+#: `ledgerBlocks()` 与 `applyLedgerBlocks()` 共用，不各写一套键。
+LEDGER_BLOCK_MARKERS = (
+    (SUMMARY_BEGIN, SUMMARY_END),
+    (TABLE_BEGIN, TABLE_END),
+    (ADJUDICATION_BEGIN, ADJUDICATION_END),
+    (NAV_IMPACT_SUMMARY_BEGIN, NAV_IMPACT_SUMMARY_END),
+    (NAV_IMPACT_BEGIN, NAV_IMPACT_END),
+)
+
+
+def ledgerBlocks() -> dict:
+    """台账每个机器区的正文，键为区块起始标记。
+
+    覆盖**全部**被守卫逐块比对的区块——漏一个就还是手贴，守卫的
+    「重跑」提示也就仍是空话。
+    """
+    legacy = scanDirectory(PROJECT_ROOT / "docs" / "11-legacy")
+    impact = navigationImpactRefs()
+    return {
+        SUMMARY_BEGIN: renderSummary(legacy),
+        TABLE_BEGIN: renderTable(legacy),
+        ADJUDICATION_BEGIN: renderAdjudication(adjudicatedRows()),
+        NAV_IMPACT_SUMMARY_BEGIN: renderNavigationImpactSummary(impact),
+        NAV_IMPACT_BEGIN: renderNavigationImpact(impact),
+    }
+
+
+def applyLedgerBlocks(text: str) -> str:
+    """把 `ledgerBlocks()` 的产出替换进台账正文，区间之外一字不动。
+
+    区块缺失时保持原样并跳过（缺区由守卫点名，生成器不替它造结构）。
+    """
+    blocks = ledgerBlocks()
+    for begin, end in LEDGER_BLOCK_MARKERS:
+        rendered = blocks[begin]
+        start = text.find(begin)
+        if start == -1:
+            continue
+        stop = text.find(end, start)
+        if stop == -1:
+            continue
+        text = text[:start] + rendered + text[stop + len(end):]
+    return text
+
+
+def writeLedger() -> int:
+    """重生成台账机器区并落盘；返回写入的区块数。"""
+    current = io.open(LEDGER_PATH, encoding="utf-8").read()
+    updated = applyLedgerBlocks(current)
+    if updated != current:
+        with io.open(LEDGER_PATH, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(updated)
+    return len(ledgerBlocks())
+
+
 def main(argv: list) -> int:
+    if "--update-ledger" in argv:
+        count = writeLedger()
+        print(f"台账机器区已重生成：{LEDGER_PATH.relative_to(PROJECT_ROOT)}（{count} 个区块）")
+        return 0
     positional = [a for a in argv[1:] if not a.startswith("--")]
     target = Path(positional[0]) if positional else PROJECT_ROOT / "docs" / "11-legacy"
     if not target.is_absolute():
