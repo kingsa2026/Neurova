@@ -31,6 +31,15 @@ logger = get_logger(__name__)
 _JSON_DROP = object()
 
 
+class SessionOwnerConflict(ValueError):
+    """导入批次的属主与落盘会话已有属主冲突：拒绝整批，不改写既有归属。
+
+    一份会话文件的属主是读侧全部过滤（列表/改名/删除）赖以咬合的事实；导入侧
+    若能改写它，就等于把别人的历史认领成自己的，或把自己的推给别人——读侧在
+    错误的事实上做正确的事，防线等于没有。
+    """
+
+
 def _derive_imported_title(messages) -> str:
     """导入会话的标题取首条用户消息（运行期占位是"新对话"，导入不该都长那样）。"""
     for msg in messages:
@@ -639,6 +648,7 @@ class SessionManager(SessionRepository):
         messages,
         *,
         ingest_run_id: str,
+        owner_user_id: str = "",
     ) -> Tuple[int, int]:
         """导入专用写入口：一条历史事件一行消息，保留工具调用/结果的分行结构。
 
@@ -646,15 +656,26 @@ class SessionManager(SessionRepository):
         含多个调用与多个结果、也可以是纯 assistant/纯 tool 行，压成成对消息就会丢结构
         （市面互导实现的通病）。幂等靠 metadata.ingest.identity_key。
 
-        不写 user_id：对齐 pipeline 原生落盘口径（add_message 缺省为空串），写死具体用户
-        反而会被按用户过滤拦掉，使导入的历史在会话列表里不可见。
+        属主（F-04）：`owner_user_id` 缺省为空 = 共享会话，单用户桌面下这是合法语义，
+        与 pipeline 原生落盘口径（add_message 缺省空 user_id）一致。多用户/多渠道下
+        导入他人历史必须显式给属主：读侧（列表/改名/删除）的过滤规则是"空属主=任何人
+        可见"，那是正确的规则，错的是导入侧生产了"没有属主"这份状态——所以修在产生它
+        的这一侧（写入口），不去读侧加兜底判断。
+
+        归属一旦落盘就是**只读事实**：既有属主与会话属主不符、或用"共享"批次去碰一份
+        已有属主的会话（等于放宽可见范围），一律整批拒绝，不改写既有归属；存量共享会话
+        被指定属主导入时回填（与 add_message 的 DATA-P1-1 同一口径）。
 
         Returns:
             (新增条数, 因 identity_key 已存在而跳过的条数)
+
+        Raises:
+            SessionOwnerConflict: 本次批次的属主与会话已有属主冲突。
         """
         if not ingest_run_id:
             raise ValueError("ingest_run_id 必填（撤销按它精确删除）")
         store_key = normalize_store_key(session_id)
+        owner = str(owner_user_id or "").strip()
         messages = list(messages)
         if not messages:
             return 0, 0
@@ -670,7 +691,11 @@ class SessionManager(SessionRepository):
                     "messages": [],
                     "created_at": messages[0].get("timestamp", ""),
                     "title": _derive_imported_title(messages),
+                    "user_id": owner,
                 }
+            else:
+                session_data["user_id"] = self._reconcile_owner(
+                    session_data.get("user_id"), owner, store_key)
             existing = session_data.setdefault("messages", [])
             seen = {
                 (msg.get("metadata") or {}).get("ingest", {}).get("identity_key")
@@ -686,17 +711,73 @@ class SessionManager(SessionRepository):
                 metadata["ingest_run_id"] = ingest_run_id
                 ingest = metadata.setdefault("ingest", {})
                 ingest["session_id"] = store_key
+                if owner:
+                    # 属主随行落盘：撤销时按它说出撤的是谁的批次（写→读→反馈闭环）
+                    ingest["owner_user_id"] = owner
                 if store_key != str(session_id):
                     ingest["source_session_id"] = str(session_id)
                 existing.append(msg)
                 seen.add(key)
                 added += 1
+            # 零新增批次不落盘：给文件盖一个新 updated_at、内容却一个字节没变，会让
+            # 幂等重跑在盘上留下"这次动过"的假象（重复导入必须可证明是空操作）。
+            if not added:
+                return added, skipped
             session_data["total_messages"] = len(existing)
             session_data["updated_at"] = datetime.now().isoformat()
             # 持锁内只调无锁写入版（S4 约束：_write_session_file 会再取同一 file_lock）
             if not self._write_session_file_unlocked(file_path, session_data):
                 raise IOError(f"导入会话写入失败: {file_path}")
         return added, skipped
+
+    @staticmethod
+    def _reconcile_owner(existing_owner: Any, owner: str, store_key: str) -> str:
+        """本次批次的属主 → 该会话最终属主，冲突即拒绝（唯一判定处）。"""
+        current = str(existing_owner or "").strip()
+        if not current:
+            return owner          # 共享会话被指定属主导入：回填
+        if current != owner:
+            raise SessionOwnerConflict(
+                f"会话 {store_key!r} 已有属主 {current!r}，本次批次属主 "
+                f"{owner or '<共享>'}；属主是落盘事实，不由导入改写"
+            )
+        return current
+
+    def check_ingest_owners(self, agent_id: str, session_ids, owner_user_id: str) -> None:
+        """写前预检：目标会话的既有属主与本批属主是否相容，冲突即抛（此刻零写入）。
+
+        归属冲突不是"写了一半才发现的坏输入"，它关于**全部**目标会话，所以判定必须在
+        任何写入之前完成——否则前几支会话已落盘、后一支才抛，留下一次既没拒绝成功也
+        没法整批撤销的半程导入。
+        """
+        owner = str(owner_user_id or "").strip()
+        agent_dir = self._get_session_dir(agent_id)
+        for raw_id in session_ids:
+            store_key = normalize_store_key(raw_id)
+            for file_path in self._find_session_files(agent_dir, store_key):
+                data = self._read_session_file(file_path)
+                if not data:
+                    continue
+                self._reconcile_owner(data.get("user_id"), owner, store_key)
+
+    def ingested_run_owners(self, agent_id: str, ingest_run_id: str) -> Tuple[str, ...]:
+        """该批次落盘消息里记着的属主（去重，按首次出现序）；共享批次为空元组。
+
+        与写入侧 `metadata.ingest.owner_user_id` 同一处定义：撤销报告据此说清
+        "撤的是谁的批次"，不再让撤销变成一次无名删除。
+        """
+        owners: List[str] = []
+        agent_dir = self._get_session_dir(agent_id)
+        for file_path in sorted(agent_dir.glob("session_*.json")):
+            session_data = self._read_session_file(file_path) or {}
+            for msg in session_data.get("messages") or []:
+                metadata = msg.get("metadata") or {}
+                if metadata.get("ingest_run_id") != ingest_run_id:
+                    continue
+                owner = (metadata.get("ingest") or {}).get("owner_user_id")
+                if owner and owner not in owners:
+                    owners.append(str(owner))
+        return tuple(owners)
 
     def delete_ingested_messages(self, agent_id: str, ingest_run_id: str) -> int:
         """按导入批次撤销某 agent 的会话消息；消息被清空的会话文件直接删除。"""

@@ -255,8 +255,8 @@ async function example() {
 
 ## 9. 相关文档
 
-- [后端 API 文档](../neurova/api/README.md)
-- [前端开发指南](../neurova-ui/README.md)
+- 后端 API 文档：`neurova/api/README.md` 从未入库，接口事实源为 [API_REFERENCE.md](API_REFERENCE.md)
+- 前端开发指南：`neurova-ui/README.md` 从未入库，前端代码在 `NeurUI/`，目录说明见 [07-implementation-plan.md](../01-architecture/07-implementation-plan.md)
 - [架构设计文档](../01-architecture/NEUROVA_CogArch_2.0.md)
 
 ---

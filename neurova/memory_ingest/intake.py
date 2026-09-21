@@ -22,6 +22,7 @@ from neurova.memory_ingest.bundle.media import MEDIA_DIRNAME
 from neurova.memory_ingest.bundle.records import MemoryRecord, TranscriptRecord
 from neurova.memory_ingest.bundle.turns import to_turn_messages
 from neurova.memory_ingest.bundle.validate import validate_bundle
+from neurova.session_manager import SessionOwnerConflict
 
 MAX_RECORDS = 200_000          # 误指大目录的兜底闸
 _AGENT_ID = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._@-]*$")
@@ -41,6 +42,7 @@ class IngestPlan:
 class IngestReport:
     run_id: str
     agent_id: str
+    owner_user_id: str = ""
     memories_added: int = 0
     memories_skipped: int = 0
     messages_added: int = 0
@@ -56,6 +58,26 @@ class IngestReport:
     def undo(self, *, manager, sessions) -> Tuple[int, int]:
         """返回 (撤销记忆条数, 撤销消息条数)；只删本批，不碰运行期数据。"""
         return undo_run(self.agent_id, self.run_id, manager=manager, sessions=sessions)
+
+    def owner_of_run(self, sessions) -> Tuple[str, ...]:
+        """本批落盘消息里记着的属主（去重）。报告态取不到时为空元组，不猜。"""
+        return sessions.ingested_run_owners(self.agent_id, self.run_id)
+
+
+def session_manager_for(sessions_dir: Optional[str] = None):
+    """把会话库根目录定到 `sessions_dir` 后返回 SessionManager。
+
+    会话根目录必须在构造之前定（类级单例只认首次构造），所以这里显式设环境变量并
+    复位单例——CLI 与老脚本共用这一处装配口径，两边各写一遍就会从第二处开始漂移。
+    """
+    import os
+
+    if sessions_dir:
+        os.environ["NEUROVA_SESSIONS_DIR"] = str(Path(sessions_dir).resolve())
+    from neurova.session_manager import SessionManager
+
+    SessionManager._instance = None
+    return SessionManager()
 
 
 def undo_run(agent_id: str, run_id: str, *, manager, sessions) -> Tuple[int, int]:
@@ -105,19 +127,43 @@ def plan_bundle(root: Path) -> IngestPlan:
 
 
 def apply_bundle(root: Path, *, agent_id: str, manager, sessions,
-                 run_id: Optional[str] = None) -> IngestReport:
-    """把一支合规 bundle 写进两条咽喉；返回可直接 undo 的报告。"""
+                 run_id: Optional[str] = None,
+                 owner_user_id: str = "") -> IngestReport:
+    """把一支合规 bundle 写进两条咽喉；返回可直接 undo 的报告。
+
+    `owner_user_id` 缺省为空 = 共享会话（单用户桌面下的合法语义）；多用户/多渠道下
+    导入他人历史必须显式给属主，否则读侧"空属主=任何人可见"的规则会让导入的私有
+    历史对所有人开放。归属不合法（会话已有别的属主）由咽喉抛 SessionOwnerConflict，
+    这里兜成 BundleError：整批拒绝，与坏包同一姿态。
+    """
     if not _AGENT_ID.match(str(agent_id or "")):
         raise BundleError(f"agent_id 必须是简单标识符（它会参与目录拼接）: {agent_id!r}")
     transcripts, memories, manifest = _load(Path(root))
     report = IngestReport(run_id=run_id or f"nvimp-{uuid.uuid4().hex[:12]}",
-                          agent_id=agent_id, dropped=tuple(manifest.dropped))
+                          agent_id=agent_id, owner_user_id=str(owner_user_id or ""),
+                          dropped=tuple(manifest.dropped))
 
-    outcome = manager.import_memories(memories, ingest_run_id=report.run_id)
-    report.memories_added = outcome["added"]
-    report.memories_skipped = outcome["skipped"]
-    report.memories_superseded = tuple(outcome["superseded"])
-    report.supersede_unresolved = tuple(outcome["supersede_unresolved"])
+    # 归属冲突是整包级判据：写任何字节之前判完，绝不留"前几支会话已落盘"的半程导入。
+    # 咽喉抛的是自己那层的 SessionOwnerConflict；本层收口成 BundleError，让 CLI 与
+    # "坏包"走同一条拒绝路径（退出码与 stderr 文案都由 CLI 统一处理）。
+    try:
+        sessions.check_ingest_owners(report.agent_id, [sid for sid, _ in _group(transcripts)],
+                                     report.owner_user_id)
+    except SessionOwnerConflict as exc:
+        raise BundleError(str(exc)) from exc
+
+    if memories:
+        if manager is None:
+            # 包里带记忆却没人接 = 这批记忆会被静默丢掉，那正是"半导"；响亮拒绝
+            raise BundleError(
+                f"包里有 {len(memories)} 条记忆，但未提供记忆写入面（manager）")
+        # 写入口的返回值是带取代读数的字典：计数与"声明取代是否真发生"都取这一份，
+        # 不再另立第二条读取路径（两侧合流后唯一的读处）。
+        outcome = manager.import_memories(memories, ingest_run_id=report.run_id)
+        report.memories_added = outcome["added"]
+        report.memories_skipped = outcome["skipped"]
+        report.memories_superseded = tuple(outcome["superseded"])
+        report.supersede_unresolved = tuple(outcome["supersede_unresolved"])
 
     try:
         _write_sessions(report, transcripts, sessions, Path(root))
@@ -139,7 +185,8 @@ def _write_sessions(report: IngestReport, transcripts: Sequence[TranscriptRecord
             by_date[str(message["timestamp"])[:10]].append(message)
         for date, batch in sorted(by_date.items()):
             added, skipped = sessions.import_session_messages(
-                report.agent_id, session_id, date, batch, ingest_run_id=report.run_id)
+                report.agent_id, session_id, date, batch, ingest_run_id=report.run_id,
+                owner_user_id=report.owner_user_id)
             report.messages_added += added
             report.messages_skipped += skipped
             report.sessions_touched += 1
