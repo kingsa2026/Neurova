@@ -347,6 +347,6 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 - 审计：`docs/05-reports/上下文三链路审计_2026-09-21.md`（§3 P1-3、§10 B4 行与 D1）
 - 前置修复台账：`docs/05-reports/上下文三链路修复台账_2026-09-21.md`
 - 基线取证：`tests/manual/context_persistence_baseline_90.py`
-- 既有契约：`docs/adr/0015-context-pool-retention-contract.md`（回收契约）
-- 连接纪律：`docs/adr/0014-connection-pool-short-lived-only.md`（动态路径不进池）
+- 既有契约：`docs/01-architecture/adr/0015-context-pool-retention-contract.md`（回收契约）
+- 连接纪律：`docs/01-architecture/adr/0014-connection-pool-short-lived-only.md`（动态路径不进池）
 - 迁移机制：`neurova/core/db_migration.py`（版本域注册与防降级）
