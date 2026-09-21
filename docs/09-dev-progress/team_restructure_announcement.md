@@ -276,8 +276,8 @@
 ## 七、联系方式
 
 - **团队负责人**: team-lead
-- **进度跟踪表**: `docs/dev_progress/progress_tracker.md`
-- **团队重组计划**: `docs/dev_progress/team_restructure_plan.md`
+- **进度跟踪表**: `docs/09-dev-progress/progress_tracker.md`
+- **团队重组计划**: `docs/09-dev-progress/team_restructure_plan.md`
 - **冲刺计划**: `docs/dev_progress/sprint_plan.md`（待创建）
 
 ---

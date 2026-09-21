@@ -59,7 +59,7 @@ def app_client(mock_agent):
 @pytest.mark.skip(
     reason="D4 (ADR 0008 候选 #7) 落地:chat.py 中 /sessions 端点已删除,"
     "前端已迁移到 /api/v1/console/chat/sessions (console.py + SessionRepository)."
-    "测试期望的端点路径已不存在,设计方向分歧 — 详见 docs/adr/0008-session-repository.md"
+    "测试期望的端点路径已不存在,设计方向分歧 — 详见 docs/01-architecture/adr/0008-session-repository.md"
 )
 class TestEmptyAgentId:
     """测试空 agent_id 的情况

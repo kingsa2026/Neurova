@@ -170,6 +170,7 @@ class OntologyTermRegistry:
                 termId, spec["kind"],
                 label=spec.get("label", ""), parentTermId=spec.get("parentTermId"),
                 domain=spec.get("domain"), rangeTerms=spec.get("rangeTerms"),
+                rangeKinds=spec.get("rangeKinds"),
                 cardinality=spec.get("cardinality"), disjointWith=spec.get("disjointWith"),
                 requiredProps=spec.get("requiredProps"), version=spec.get("version", "v1"),
             )
@@ -326,8 +327,11 @@ def seedBuiltinTerms(registry: "OntologyTermRegistry") -> int:
     而 `register` 那套是 INSERT OR REPLACE。用后者意味着每次构造注册表都把
     写入方登记过的 domain/range/cardinality 抹掉，本体硬拒随之无依据可判。
 
-    顺序仍是"先 legacy 后显式种子"：新库里 `is_a` 两边都有，先写的那份留着，
-    后写的被跳过——所以种子表排在后面这件事只在"legacy 里没有它"时才起作用；
-    这正是只补缺该有的形状（谁先登记谁定，不被默认值覆盖）。
+    显式种子优先于枚举收编值：同一个 `term_id` 不同时出现在两份清单里。
+    否则"谁定这一行"就取决于拼接顺序——`is_a` 两边都有，枚举那份是裸值、种子那份
+    带值域声明，拼接顺序一变，值域声明就被裸值顶掉（只补缺的语义是"先登记的为准"，
+    而清单内部谁先谁后不该是语义）。去掉重复后两份清单互补，谁先写结论都一样。
     """
-    return registry.seedMissing(legacyGraphTerms() + _SEED_TERMS)
+    declared = {str(spec["termId"]) for spec in _SEED_TERMS}
+    return registry.seedMissing(
+        [t for t in legacyGraphTerms() if str(t["termId"]) not in declared] + _SEED_TERMS)

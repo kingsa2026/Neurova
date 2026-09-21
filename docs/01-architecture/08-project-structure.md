@@ -187,7 +187,7 @@ Agent 类是系统的心脏，通过深度模块化模式逐步拆分：
 - **LLMRouter** — 多模态自适应路由
 
 ### 记忆系统
-记忆分类体系（7 类型 + 7 分类 + 4 视角；值域唯一事实源 = `memory_layer/models.py`，见 [ADR 0018](../adr/0018-memory-classification-vocabulary.md)），核心组件：
+记忆分类体系（7 类型 + 7 分类 + 4 视角；值域唯一事实源 = `memory_layer/models.py`，见 [ADR 0018](./adr/0018-memory-classification-vocabulary.md)），核心组件：
 - **L1 肌肉记忆** — 工具使用模式自动执行
 - **L2 热缓存** — 高频访问记忆快速检索
 - **L3 工具记忆** — 工具使用经验闭环学习
