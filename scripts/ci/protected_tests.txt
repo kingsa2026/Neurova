@@ -251,3 +251,7 @@ tests/context/test_context_pool_hash_index.py
 #   就地改写/hash 不失配）+ 摘要沿用旧摘要不算"本轮成功"（不谎报覆盖）
 tests/unit/context/test_draw_never_mutates_archive.py
 tests/unit/context/test_summary_failure_not_reported_success.py
+
+# Issue #96 收尾：退役平铺目录的引用可达性。删副本必须同批改引用——否则报错从
+#   「两个候选」变成「零个候选」，洞只是换了个位置（活跃层链接 + INDEX 权威表两处）
+tests/unit/test_docs_retired_tree_refs_guard.py
