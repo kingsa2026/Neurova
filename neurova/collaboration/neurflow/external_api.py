@@ -1195,7 +1195,7 @@ class CommercePlatformClient:
                 # 1688/闲鱼交易 API method 名与字段待官方文档核对（§2.1/§2.3 待核对项），协议层已就绪
                 return _fail(
                     f"{COMMERCE_PLATFORMS.get(platform, platform)}订单 API 名与字段待官方文档核对"
-                    "（docs/neurflow-store-connection-design.md）",
+                    "（docs/01-architecture/neurflow-store-connection-design.md）",
                     platform,
                 )
             if platform == "taobao":

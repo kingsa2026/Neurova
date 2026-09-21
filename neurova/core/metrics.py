@@ -199,6 +199,13 @@ class _Metrics:
             "Entries archived out of resident set by capacity/TTL",
             ["pool", "reason"],
         )
+        # B4/005（判据 A9）：持久归档规模。启动只登记一次（常数次查询、零预载），
+        # 之后由本进程写入/清理增量维护——"磁盘上躺了多少归档"此前在观测面上空白。
+        self.context_pool_ledger_rows = Gauge(
+            "neurova_context_pool_ledger_rows",
+            "Archived rows in the persistent ledger of live context pools",
+            ["pool"],
+        )
         self.context_pool_query_seconds = Histogram(
             "neurova_context_pool_query_seconds",
             "ContextPool.query() duration by phase",
@@ -495,6 +502,9 @@ class _Metrics:
                 stats = pool.get_retention_stats()
                 for reason, value in (stats.get("archived_by_reason") or {}).items():
                     self.context_pool_evicted_total.labels(pool=key, reason=str(reason)).set(int(value))
+                self.context_pool_ledger_rows.labels(pool=key).set(
+                    int((stats.get("ledger") or {}).get("rows") or 0)
+                )
             except Exception:  # noqa: BLE001 - 单个池异常不影响其它池
                 logger.debug("context pool gauge failed", exc_info=True)
 
