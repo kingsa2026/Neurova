@@ -3,12 +3,13 @@ Tier 4B.1 RED 测试 — MemoryStorage 缺失方法验证
 
 验证 Bug 10：storage.py 中 MemoryStorage 缺 get_recent_memories / delete_memory
 
-调用方清单（8 处）：
+调用方清单（现存调用方）：
 - mem_core.py:486, 626 — self.storage.get_recent_memories(...)
 - compression.py:176 — self._storage.get_recent_memories(...)
 - compression.py:986 — self._storage.delete_memory(...)
-- memory_layer.py:434 — self.storage.get_recent_memories(...)
-- memory_layer.py:441 — self.storage.delete_memory(...)
+
+（原列的 `memory_layer.py:434/441` 两处调用方已随 Issue #74 退役该文件；
+本测试断言的是 storage.py 自身契约，与调用方存废无关。）
 
 预期 RED 结果：4 个测试全部 FAIL（AttributeError）
 """
