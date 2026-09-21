@@ -201,6 +201,7 @@
 - [2026-06-12-code-audit.md](../05-reports/2026-06-12-code-audit.md) — 6 月代码审计
 - [执行摘要.md](../05-reports/执行摘要.md) — 执行摘要
 - [最终集成总结.md](../05-reports/最终集成总结.md) — 最终集成总结
+- [memory-temperature-convergence-2026-09-21.md](../05-reports/memory-temperature-convergence-2026-09-21.md) — 温度衰减双实现比对与收敛（Issue #74 死码退役）
 
 ### 06-bugfix 修复记录
 
