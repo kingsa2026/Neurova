@@ -1,9 +1,15 @@
 """
-知识条目 → 图谱节点自动抽取（批次 3 / RAG 演进 B2）
+知识条目 → 图谱自动抽取（批次 3 / RAG 演进 B2；Issue #72 收口落点）
 
-打通 KnowledgeRepository → KnowledgeGraphManager 的写入链路：
-LLM 从条目标题+正文抽取实体与关系，建立图谱节点/边，
-并把节点 id 回写 KnowledgeItem.graph_node_ids。
+抽取有**两个落点**，缺一不可：
+
+1. **底座事实层（权威、被读的那张图）**：LLM 抽出的关系经唯一写咽喉
+   `admit()` 落成 `record_kind='triple'` 的治理事实，实体类型落成 `is_a` 三元组。
+   时效读面与多跳走查读的正是这张图；只写 JSON 属性图就等于"抽取产物永远
+   进不了被检索的图"（审计 §5.3 / B-09）。
+2. **JSON 属性图（派生投影、给可视化）**：`KnowledgeGraphManager` 的节点/边，
+   节点 id 回写 `KnowledgeItem.graph_node_ids`。它是投影不是权威——投影层不持写权，
+   也不该被当作读面。
 
 设计要点：
 - llm_call(prompt) -> str 可注入（测试零网络/零 LLM）；None 表示未配置，跳过
@@ -63,26 +69,6 @@ def registeredNodeTypes(registry: Any) -> List[str]:
     return registeredTypes(registry, "concept")
 
 
-def _allowedTypes(termRegistry: Any, kind: str, legacyEnum: Any) -> set:
-    """合法类型集合：注册表优先，拿不到时退回枚举读兼容层。
-
-    这里是导入链路上的尽力而为钩子（异常不外抛、失败不阻断导入），所以底座不可用时
-    必须还有一条能走的路，而不是让整个抽取静默死掉。退回枚举只意味着"新登记的类型
-    这一轮认不出来"，落 custom 仍是有据可依的保守侧。
-    """
-    if termRegistry is not None:
-        return set(registeredTypes(termRegistry, kind))
-    from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
-    from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
-
-    try:
-        return set(registeredTypes(OntologyTermRegistry(get_knowledge_fact_store()), kind))
-    except Exception as exc:  # noqa: BLE001 - 底座不可用不是抽取失败的理由
-        logger.warning("graph_bridge: 本体注册表不可用（%s），%s 合法集退回枚举读兼容层",
-                       exc, kind)
-        return {t.value for t in legacyEnum if t.value != "custom"}
-
-
 def _resolveNodeId(graph: Any, label: str, resolver: Any) -> Optional[str]:
     """节点身份只由消解段决定。
 
@@ -108,14 +94,178 @@ def _resolveNodeId(graph: Any, label: str, resolver: Any) -> Optional[str]:
     return resolution.subjectKey
 
 
+def _domainOf(item: Dict[str, Any], repo: Any) -> str:
+    """这条条目属于哪个 agent 域：条目自带 > 反查仓库 > default。
+
+    抽取钩子拿到的条目 dict 里没有 agent_id（仓库按 agent 分组存放），
+    但没有它就落不了权威。反查是确定性的，不是猜——`find_item` 是仓库既有能力。
+    """
+    declared = str(item.get("agent_id", "") or "").strip()
+    if declared:
+        return declared
+    if repo is not None:
+        try:
+            found = repo.find_item(str(item.get("knowledge_id", "") or ""))
+        except Exception as exc:  # noqa: BLE001 - 反查失败不阻断抽取
+            logger.debug("graph_bridge: agent 域反查失败: %s", exc)
+            found = None
+        if found:
+            return str(found[0] or "default")
+    return "default"
+
+
+def _statementOf(source: str, relation: str, target: str) -> str:
+    """三元组的说法文本 = 它自己的 SPO。
+
+    不能三条共用条目正文：内容身份（004 口径）会把它们折成同一行，第二条根本不存在。
+    也不自造自然语言模板——抽取产物本来就只有 SPO 这个形状，如实写它。
+    """
+    return "%s %s %s" % (source, relation, target)
+
+
+def _assertionFor(item: Dict[str, Any], statement: str) -> Dict[str, Any]:
+    """抽取断言的来路：管线抽的，依据就是这条条目（`medium_ref` 指名条目 id）。"""
+    kid = str(item.get("knowledge_id", "") or "")
+    return {
+        "actorType": "pipeline",
+        "actorId": "graph_bridge",
+        "mediumRef": "entry:%s" % kid,
+        "statementText": statement,
+    }
+
+
+def admitExtractedFacts(
+    data: Dict[str, Any],
+    item: Dict[str, Any],
+    factStore: Any,
+    termRegistry: Any = None,
+) -> List[str]:
+    """把抽取出的实体类型与关系经**唯一咽喉**落成底座三元组，返回落定的 fact_id。
+
+    这是 B-09 的根修点：抽取的产物必须与被读的图是同一张图。谓词直接用抽取出的
+    关系类型（越界已落 `custom`），实体类型落成 `is_a` 三元组——主体因此有类型，
+    本体校验（020）才有东西可判，否则那条硬拒判据永远是全集免检。
+
+    逐条独立 admit：一条不合法（本体硬拒/缺断言）不该让整条条目的抽取全灭，
+    但**失败必须留名**——吞掉就又是"看着成功、其实没写"。
+    """
+    from neurova.knowledge.foundation.admission import AdmissionRequest, productionAdmissionGate
+
+    gate = productionAdmissionGate(factStore, toolVersion="graph-bridge")
+    agentId = str(item.get("agent_id", "") or "default")
+    def _admitOne(subjectLabel: str, predicateTermId: str, objectTerm: str) -> Optional[str]:
+        statement = _statementOf(subjectLabel, predicateTermId, objectTerm)
+        try:
+            receipt = gate.admit(AdmissionRequest(
+                agentId=agentId,
+                subjectLabel=subjectLabel,
+                predicateTermId=predicateTermId,
+                objectTerm=objectTerm,
+                content=statement,
+                relationKind="entity",
+                assertions=[_assertionFor(item, statement)],
+                sourceTurnId="entry:%s" % str(item.get("knowledge_id", "") or ""),
+                activityKind="extract",
+                activityBasis="graph_bridge.extract_knowledge_to_graph（LLM 抽取落底座）",
+            ))
+        except Exception as exc:  # noqa: BLE001 - 逐条隔离，坏条目不留名就不算失败
+            logger.warning("graph_bridge: 抽取事实入底座被拒（%s %s %s）: %s",
+                           subjectLabel, predicateTermId, objectTerm, exc)
+            return None
+        return receipt.factId
+
+    factIds: List[str] = []
+    for ent in data.get("entities") or []:
+        if not isinstance(ent, dict):
+            continue
+        label = str(ent.get("label", "")).strip()
+        nodeType = str(ent.get("type", "")).strip()
+        if not label or not nodeType:
+            continue
+        decided = _typeFromRegistry(termRegistry, nodeType)
+        factId = _admitOne(label, "is_a", decided)
+        if factId:
+            factIds.append(factId)
+            # 主类型列在主体建出来之后才挂得上（此前主体还不存在）；
+            # 挂着它又是定义域校验唯一读处，所以顺序不能反。
+            _assignSubjectType(termRegistry, label, decided, agentId)
+
+    for rel in data.get("relations") or []:
+        if not isinstance(rel, dict):
+            continue
+        source = str(rel.get("source", "")).strip()
+        target = str(rel.get("target", "")).strip()
+        if not source or not target or source == target:
+            continue
+        relation = _typeFromRegistry(termRegistry, rel.get("type"))
+        factId = _admitOne(source, relation, target)
+        if factId:
+            factIds.append(factId)
+    return factIds
+
+
+def _assignSubjectType(termRegistry: Any, label: str, decided: str, agentId: str) -> None:
+    """把实体类型挂到主体的**主类型列**上。
+
+    两处落点各司其职，都是既有机制、不是新造的：
+
+    - **主类型列** `knowledge_subjects.type_term_id`：设计 §4.2 定的身份层主类型，
+      也是定义域校验（`validation.subjectType`）唯一的读处。只写 `is_a` 不写它，
+      定义域那条硬拒就永远无依据可判（审计 §3：87 个主体的这一列全 NULL）。
+    - **`is_a` 三元组**：`assertedTypesOf` 合并口径里"主体是什么"的落点，使类型
+      在事实层可见（图走查/血缘都读得到）。
+
+    `custom` 是兜底标记不是一种类型（术语表里没有它），所以只落 `is_a`、不占主类型列。
+    """
+    if termRegistry is None or not decided or decided == "custom":
+        return
+    try:
+        subjectKey = termRegistry._store.resolveSubjectKey(agentId, label)
+        if subjectKey:
+            termRegistry.assignSubjectType(subjectKey, decided)
+        else:
+            logger.warning("graph_bridge: 主体 %r 未落库，类型 %s 挂不上去", label, decided)
+    except Exception as exc:  # noqa: BLE001 - 挂类型失败不该让抽取整条死掉
+        logger.warning("graph_bridge: 主体 %r 挂类型 %s 失败: %s", label, decided, exc)
+
+
+def _typeFromRegistry(termRegistry: Any, value: Any) -> str:
+    """注册表里登记过才算一种类型；越界落 custom，不猜。
+
+    单一口径：本函数同时供底座落库与 JSON 投影使用——两处各判一次类型，
+    就会出现"图上标 custom、库里标别的"这种同一实体两套类型。
+    """
+    text = str(value or "").strip()
+    allowed = _registeredTypeIds(termRegistry)
+    return text if text in allowed else "custom"
+
+
+def _registeredTypeIds(termRegistry: Any) -> set:
+    """合法类型集合的唯一口径：注册表是权威，缺席时退回枚举读兼容层。
+
+    注册表**不缺席**时不再并上枚举——那等于给同一件事留第二份定义（018 收编后
+    枚举值本来就是表里的行，并上去只会让"新登记的类型"与"旧枚举值"共用一条判据）。
+    退回枚举只发生在"这一轮拿不到注册表"时，含义是"新登记的类型这一轮认不出来"。
+    """
+    if termRegistry is not None:
+        return (set(registeredTypes(termRegistry, "concept"))
+                | set(registeredTypes(termRegistry, "relation")))
+    from neurova.cognitive_layers.knowledge_graph.manager import NodeType, RelationType
+
+    return ({t.value for t in NodeType if t.value != "custom"}
+            | {t.value for t in RelationType if t.value != "custom"})
+
+
 def extract_knowledge_to_graph(
     item: Dict[str, Any],
     repo: Any = None,
     llm_call: Optional[Callable[[str], str]] = None,
     graph_manager: Any = None,
     termRegistry: Any = None,
+    factStore: Any = None,
+    agentId: str = "",
 ) -> List[str]:
-    """抽取一条知识条目的实体/关系写入图谱，返回回写后的 graph_node_ids。
+    """抽取一条知识条目的实体/关系：落底座三元组 + 投影 JSON 属性图，回写节点 id。
 
     Args:
         item: 知识条目 dict（含 knowledge_id/title/content）
@@ -123,6 +273,11 @@ def extract_knowledge_to_graph(
         llm_call: prompt -> 文本 的调用器；None/异常/畸形输出 → 跳过（返回 []）
         graph_manager: KnowledgeGraphManager；None 时用全局单例
         termRegistry: OntologyTermRegistry；None 时接生产底座的注册表
+        factStore: KnowledgeFactStore；None 时用生产底座单例。**它是权威落点**，
+            给了它抽取产物才进得了被检索的那张图
+        agentId: 事实域。条目 dict 里没有这一栏（仓库按 agent 分组存放），
+            缺省时经 `repo.find_item` 反查，再缺才落 default——不靠"猜不到的域不写"
+            把权威落点静默跳过
 
     Returns:
         条目关联的图谱节点 id 列表（失败为 []）
@@ -153,16 +308,29 @@ def extract_knowledge_to_graph(
 
         graph_manager = get_knowledge_graph_manager()
 
-    from neurova.cognitive_layers.knowledge_graph.manager import NodeType, RelationType
+    # ── 落点一：底座事实层（被读的那张图）────────────────────────
+    # 顺序刻意如此：抽出来的说法先入权威，JSON 属性图只是它的投影。
+    # 反过来（先投影、再尽力入底座）会让"投影有、权威没有"成为常态，
+    # 而那正是 B-09 的病态。
+    authority = factStore
+    if authority is None:
+        from neurova.knowledge.foundation.knowledge_facts import get_knowledge_fact_store
+
+        # 不 try：拿不到权威就不该假装抽成功。测试会话里这会被 storage_fence 当场
+        # 拦下（正是"忘了注入隔离库"该有的响亮形态），生产里由调用点逐条隔离。
+        authority = get_knowledge_fact_store()
+    domain = agentId or _domainOf(item, repo)
+    if termRegistry is None:
+        # 类型判据的唯一权威是本体注册表。拿不到它就没有"这个类型合法吗"，
+        # 落库那条路会退成整片 custom——退成默认值等于把判据换成猜测，所以这里
+        # 顺手建一份（生产装配同款）；注册表本身不可用才是硬故障，如实上抛。
+        from neurova.knowledge.ontology.term_registry import OntologyTermRegistry
+
+        termRegistry = OntologyTermRegistry(authority)
+    admitted = admitExtractedFacts(
+        data, {**item, "agent_id": domain}, authority, termRegistry)
+
     from neurova.knowledge.identity.subject_resolver import SubjectResolver
-
-    allowedNodeTypes = _allowedTypes(termRegistry, "concept", NodeType)
-    allowedRelationTypes = _allowedTypes(termRegistry, "relation", RelationType)
-
-    def _typeFromRegistry(value, allowed: set, default):
-        """注册表里登记过才算一种类型；越界落 custom，不猜。"""
-        text = str(value or "").strip()
-        return text if text in allowed else default
 
     resolver = SubjectResolver()
 
@@ -175,7 +343,7 @@ def extract_knowledge_to_graph(
         label = str(ent.get("label", "")).strip()
         if not label:
             continue
-        node_type = _typeFromRegistry(ent.get("type"), allowedNodeTypes, NodeType.CUSTOM.value)
+        node_type = _typeFromRegistry(termRegistry, ent.get("type"))
         existingId = _resolveNodeId(graph_manager, label, resolver)
         if existingId is not None:
             node_ids.append(existingId)
@@ -201,14 +369,23 @@ def extract_knowledge_to_graph(
         target_id = label_to_id.get(str(rel.get("target", "")).strip())
         if not source_id or not target_id or source_id == target_id:
             continue
-        relation = _typeFromRegistry(rel.get("type"), allowedRelationTypes,
-                                     RelationType.CUSTOM.value)
+        relation = _typeFromRegistry(termRegistry, rel.get("type"))
         try:
             graph_manager.add_edge(
                 source_id=source_id, target_id=target_id, relation_type=relation
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("graph_bridge: 建边失败 %s->%s: %s", source_id, target_id, exc)
+
+    if admitted:
+        logger.info("graph_bridge: 抽取入底座 %s 条三元组（条目 %s / 域 %s）",
+                    len(admitted), str(item.get("knowledge_id", "")), domain)
+    else:
+        # 抽取出的关系一条都没进权威 = 这条条目在答题面上不存在。响亮报出，
+        # 不静默返回一个"看着成功"的节点 id 列表。
+        logger.warning("graph_bridge: 抽取未产生任何底座三元组（条目 %s / 域 %s）——"
+                       "这批实体边只存在于 JSON 投影里，检索链读不到",
+                       str(item.get("knowledge_id", "")), domain)
 
     # 回写条目（经 find_item 跨组定位，不依赖 item dict 携带 agent_id）
     if node_ids and repo is not None:

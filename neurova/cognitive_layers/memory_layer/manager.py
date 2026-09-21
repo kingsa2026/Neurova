@@ -242,6 +242,8 @@ class MemoryManager:
         self._self_model_module = None
         self._self_manager_module = None
         self._tkg_module = None
+        # 底座事实库句柄：时序事实的唯一权威（None = 用生产单例，见 TKGModule._store）
+        self._factStore = None
         self._working_memory_module = None
         self._forgetting_recovery_module = None
         self._auto_context_module = None
@@ -1318,7 +1320,7 @@ class MemoryManager:
         except Exception as e:
             logger.warning("运行期向量库同步失败: %s", e)
 
-    def import_memories(self, records, *, ingest_run_id: str) -> Tuple[int, int]:
+    def import_memories(self, records, *, ingest_run_id: str) -> Dict[str, Any]:
         """导入专用写入口：批量单事务、保留历史时间戳、不触发运行期副作用。
 
         与 remember() 的分工（docs/specs/2026-09-20-external-agent-ingest-design.md §4）：
@@ -1326,8 +1328,13 @@ class MemoryManager:
         历史不是"刚发生的经验"，重新定温或参与再确认会篡改它的时序语义。可见性不受影响：
         行同时进内存表与持久层（persist_memory_batch 单事务）。
 
+        **声明取代必须真的生效**：`MemoryRecord.supersedes`（源库 `supersedes_key`）
+        说的是"我取代了谁"。此前它只被搬进 `metadata["supersedes"]` 就没人再读，
+        旧行照旧 active、retrieval 新旧一起端出来（审计 §5.3 / B-11）。现在导入
+        写这条链的闭环：按内容身份定位被取代的旧活跃行并软遗忘它，找不到就申报。
+
         Returns:
-            (新增条数, 因 identity_key 已存在而跳过的条数)
+            `{"added": int, "skipped": int, "superseded": [memory_id], "supersede_unresolved": [声明值]}`
         """
         if not ingest_run_id:
             raise ValueError("ingest_run_id 必填（撤销按它精确删除）")
@@ -1337,6 +1344,8 @@ class MemoryManager:
         }
         imported: List[Memory] = []
         skipped = 0
+        superseded: List[str] = []
+        unresolved: List[str] = []
         with self._lock:
             for rec in records:
                 if rec.identity_key in existing_keys:
@@ -1346,10 +1355,53 @@ class MemoryManager:
                 self._memories[mem.id] = mem
                 existing_keys.add(rec.identity_key)
                 imported.append(mem)
+                declared = str(getattr(rec, "supersedes", "") or "").strip()
+                if declared:
+                    retired = self._retireSuperseded(declared, keepId=mem.id)
+                    superseded.extend(retired)
+                    if not retired:
+                        unresolved.append(declared)
             if imported:
                 self.persist_memory_batch(imported)
             self._stats["total_memories"] = len(self._memories)
-        return len(imported), skipped
+        if unresolved:
+            self._stats["supersede_unresolved_count"] = (
+                self._stats.get("supersede_unresolved_count", 0) + len(unresolved))
+            logger.warning("导入声明取代 %s 条，其中 %s 条在库里找不到被取代的旧记忆: %s",
+                           len(superseded) + len(unresolved), len(unresolved), unresolved)
+        return {"added": len(imported), "skipped": skipped,
+                "superseded": superseded, "supersede_unresolved": unresolved}
+
+    def _retireSuperseded(self, declared: str, keepId: str) -> List[str]:
+        """把声明被取代的旧活跃行软遗忘；返回被遗忘的 memory_id。
+
+        定位口径复用内容身份（`normalized_key`，与内容门同一把键）：声明值可能是旧行
+        的原文，也可能是旧行的 identity_key——两种都按"同一份内容身份"认，不另立匹配规则。
+        只动本作用域、只动仍活跃的行；软遗忘是既有语义（可恢复、不删数据），
+        这里不新造第二种"作废"。
+        """
+        from neurova.core.content_identity import normalized_key
+
+        wanted = normalized_key(declared)
+        if not wanted:
+            return []
+        retired: List[str] = []
+        for mem in list(self._memories.values()):
+            if mem.id == keepId or mem.agent_id != self._agent_id:
+                continue
+            if mem.neuser_id != self._eff_neuser_id() or mem.user_id != self._eff_user_id():
+                continue
+            if mem.lifecycle_stage == LifecycleStage.FORGOTTEN:
+                continue
+            identity = str((mem.metadata or {}).get("ingest", {}).get("identity_key") or "")
+            if normalized_key(mem.content) != wanted and normalized_key(identity) != wanted:
+                continue
+            mem.lifecycle_stage = LifecycleStage.FORGOTTEN
+            mem.metadata = dict(mem.metadata or {})
+            mem.metadata["superseded_by_ingest"] = keepId
+            self._persist_memory(mem)
+            retired.append(mem.id)
+        return retired
 
     def _build_imported_memory(self, rec, ingest_run_id: str) -> "Memory":
         """把 MemoryRecord 翻成 Memory：枚举与时间戳解析口径与 remember 一致。"""
@@ -2886,70 +2938,122 @@ class MemoryManager:
         logger.info("EKIModule reconfigured: ensemble_size=%s, inflation_factor=%s", ensemble_size, inflation_factor)
 
     # ────── TKG (委托到 modules/tkg_module.py) ──────
+    #
+    # 时序事实的权威是底座 `knowledge_facts`（012 起对话链就读它）。委托层因此
+    # 只做两件事：把门面的入参形状**归一**到权威的字段名，再转交；一份事实都不自己存。
+    #
+    # 字段归一是必需的，不是兼容：`POST /memory/tkg/facts` 传的是
+    # entity/attribute/value，而这里曾用 `.get("subject", "")` 取 subject —— 取不到就
+    # 静默写一条空三元组，HTTP 还回 200（审计 B-02）。现改成显式映射 + 缺字段报错。
 
     def _ensure_tkg_module(self):
-        """懒加载 TKGModule（首次调用时初始化）"""
+        """懒加载 TKGModule（首次调用时初始化，并绑定本实例的 agent 域）"""
         if self._tkg_module is None:
             from neurova.cognitive_layers.memory_layer.modules.tkg_module import TKGModule
 
-            self._tkg_module = TKGModule(time_window_hours=24.0)
+            self._tkg_module = TKGModule(time_window_hours=24.0, factStore=self._factStore)
             self._tkg_module.init()
+            self._tkg_module.bindAgent(self._agent_id)
             logger.info("TKGModule lazily initialized")
         return self._tkg_module
 
+    def attachFactStore(self, store: Any) -> None:
+        """注入底座事实库（测试/隔离装配用；不注入则用生产单例）。"""
+        self._factStore = store
+        if self._tkg_module is not None:
+            self._tkg_module._factStore = store
+
+    # 门面入参别名表：键是权威字段名，值是它被叫过的写法（端点/前端/旧桥各一种）。
+    # 写成表而不是三串 if：加一个别名是加一行，不是加一个分支。
+    _TKG_FIELD_ALIASES = {
+        "subject": ("subject", "entity"),
+        "predicate": ("predicate", "relation", "attribute"),
+        "obj": ("obj", "object", "value"),
+    }
+
+    @classmethod
+    def _tkgField(cls, kwargs: Dict[str, Any], field: str) -> str:
+        """把入参归一成权威字段名下的一个非空字符串；取不到就是空。"""
+        for name in cls._TKG_FIELD_ALIASES[field]:
+            value = kwargs.get(name)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ""
+
     def tkg_add_fact(self, **kwargs) -> str:
-        """添加时序事实（委托到 TKGModule.add_fact）"""
+        """添加时序事实（委托到 TKGModule.add_fact）。
+
+        缺必填项**当场报错**：静默兜底写空行的代价是"调用方以为写进去了"，
+        而库里多一条谁也读不出来的空事实。
+        """
         module = self._ensure_tkg_module()
+        subject = self._tkgField(kwargs, "subject")
+        predicate = self._tkgField(kwargs, "predicate")
+        obj = self._tkgField(kwargs, "obj")
+        for name, value in (("subject", subject), ("predicate", predicate), ("obj", obj)):
+            if not value:
+                raise ValueError(
+                    "时序事实缺必填字段 %s（接受 subject/entity、predicate/relation/attribute、"
+                    "obj/object/value 三种写法）" % name)
         return module.add_fact(
-            subject=kwargs.get("subject", ""),
-            predicate=kwargs.get("predicate", ""),
-            obj=kwargs.get("obj", kwargs.get("object", "")),
-            confidence=kwargs.get("confidence", 1.0),
+            subject=subject,
+            predicate=predicate,
+            obj=obj,
+            confidence=kwargs.get("confidence"),
             valid_from=kwargs.get("valid_from"),
             valid_until=kwargs.get("valid_until"),
+            agentId=kwargs.get("agent_id") or self._agent_id,
+            mediumRef=str(kwargs.get("source") or ""),
+            statementText=str(kwargs.get("statement_text") or ""),
         )
+
+    def _tkgQuery(self, kwargs: Dict[str, Any], *, defaultLimit: int,
+                  timeFrom: Any = None, timeUntil: Any = None) -> List[Dict[str, Any]]:
+        """四个查询动词共用的一次转发：入参归一只有这一处，避免各改各的。"""
+        return self._ensure_tkg_module().query_facts(
+            subject=self._tkgField(kwargs, "subject"),
+            predicate=self._tkgField(kwargs, "predicate"),
+            obj=self._tkgField(kwargs, "obj"),
+            time_from=timeFrom,
+            time_until=timeUntil,
+            limit=kwargs.get("limit", defaultLimit),
+        )
+
+    def tkg_query(self, **kwargs) -> List[Dict[str, Any]]:
+        """按时序事实查询（`POST /memory/tkg/query` 的落点）。
+
+        这条动词此前**不存在**：端点调 `manager.tkg_query(...)` 直接 AttributeError
+        被吞成 500（审计 §5.1 同类病灶）。入参形状与端点契约一致：
+        entity / relation / start_time / end_time / limit。
+        """
+        return self._tkgQuery(kwargs, defaultLimit=10,
+                              timeFrom=kwargs.get("start_time") or kwargs.get("time_from"),
+                              timeUntil=kwargs.get("end_time") or kwargs.get("time_until"))
 
     def tkg_query_current(self, **kwargs) -> List[Dict[str, Any]]:
         """查询当前事实（委托到 TKGModule.query_facts）"""
-        module = self._ensure_tkg_module()
-        return module.query_facts(
-            subject=kwargs.get("subject"),
-            predicate=kwargs.get("predicate"),
-            obj=kwargs.get("obj", kwargs.get("object")),
-            limit=kwargs.get("limit", 10),
-        )
+        return self._tkgQuery(kwargs, defaultLimit=10)
 
     def tkg_query_at_time(self, **kwargs) -> List[Dict[str, Any]]:
         """按时间查询事实（委托到 TKGModule.query_facts）"""
-        module = self._ensure_tkg_module()
-        return module.query_facts(
-            subject=kwargs.get("subject"),
-            predicate=kwargs.get("predicate"),
-            obj=kwargs.get("obj", kwargs.get("object")),
-            time_from=kwargs.get("time_from"),
-            time_until=kwargs.get("time_until"),
-            limit=kwargs.get("limit", 10),
-        )
+        return self._tkgQuery(kwargs, defaultLimit=10,
+                              timeFrom=kwargs.get("time_from"),
+                              timeUntil=kwargs.get("time_until"))
 
     def tkg_get_history(self, **kwargs) -> List[Dict[str, Any]]:
         """获取历史事实（委托到 TKGModule.query_facts）"""
-        module = self._ensure_tkg_module()
-        return module.query_facts(
-            subject=kwargs.get("subject"),
-            predicate=kwargs.get("predicate"),
-            obj=kwargs.get("obj", kwargs.get("object")),
-            limit=kwargs.get("limit", 50),
-        )
+        return self._tkgQuery(kwargs, defaultLimit=50)
 
     def tkg_detect_conflicts(self, **kwargs) -> List[Dict[str, Any]]:
         """检测冲突（委托到 TKGModule.detect_conflicts）"""
-        module = self._ensure_tkg_module()
-        conflicts = module.detect_conflicts(
-            subject=kwargs.get("subject", ""),
-            predicate=kwargs.get("predicate", ""),
-            obj=kwargs.get("obj", kwargs.get("object", "")),
+        return self._ensure_tkg_module().detect_conflicts(
+            subject=self._tkgField(kwargs, "subject"),
+            predicate=self._tkgField(kwargs, "predicate"),
+            obj=self._tkgField(kwargs, "obj"),
         )
-        return conflicts
 
     def tkg_get_stats(self) -> Dict[str, Any]:
         """获取 TKG 统计（委托到 TKGModule.get_stats）"""
