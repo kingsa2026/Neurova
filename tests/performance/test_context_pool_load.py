@@ -210,11 +210,18 @@ class TestRecyclingContractGuard:
         recorded = []
 
         class _Ledger:
-            def record(self, *, content, turn_id=None, session_id=None, source=None, metadata=None):
+            def record(
+                self, *, content, turn_id=None, session_id=None, source=None, metadata=None,
+                chat_scope=None, created_at=None,
+            ):
                 recorded.append(content)
+                return True
 
             def gc_stale(self):
                 return 0
+
+            def count(self):
+                return len(recorded)
 
         pool = ContextPool(
             user_id="perf", agent_id="perf", session_id="s",
