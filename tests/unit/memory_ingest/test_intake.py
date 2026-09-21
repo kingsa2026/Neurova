@@ -268,6 +268,34 @@ def test_undo_keeps_media_still_referenced_by_other_runs(tmp_path: Path, manager
     assert not list(tmp_path.glob("**/session_*.json"))
 
 
+class _SessionsWith:
+    def __init__(self, files):
+        self._files = files
+
+    def iter_session_files(self, agent_id):
+        return list(self._files)
+
+
+def test_undo_prunes_even_when_name_appears_in_body(tmp_path: Path, monkeypatch):
+    """文件名只在正文里出现过一次，不算"仍被引用"：子串匹配会把它永久留住。"""
+    from neurova.memory_ingest import intake
+
+    digest = "a" * 32
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    (media_dir / f"{digest}.png").write_bytes(b"PNG")
+    session = tmp_path / "session_sA_2026-05-01.json"
+    session.write_text(json.dumps({"messages": [
+        {"role": "user", "content": f"我贴了 {digest}.png 但没注册产物",
+         "metadata": {"ingest_run_id": "other-run"}}]}), encoding="utf-8")
+    monkeypatch.setattr(intake, "workspace_media_dir",
+                        lambda agent_id, create=True: media_dir)
+
+    removed = intake._prune_media("audit", {f"{digest}.png"}, _SessionsWith([session]))
+
+    assert removed == 1 and not (media_dir / f"{digest}.png").exists()
+
+
 class _Recorder:
     """替身只记调用，不碰任何 store：本用例要证的就是"根本没被叫到"。"""
 

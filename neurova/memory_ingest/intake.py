@@ -15,7 +15,7 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from neurova.memory_ingest.bundle.manifest import BundleError, BundleManifest, load_manifest
 from neurova.memory_ingest.bundle.media import MEDIA_DIRNAME
@@ -59,16 +59,23 @@ def undo_run(agent_id: str, run_id: str, *, manager, sessions) -> Tuple[int, int
 
     媒体按"这批引用过、删完已无人引用"来清：内容寻址允许共享，所以不能直接删；
     但撤销完还留在盘上就是垃圾（工作区里已经栽过一次几百文件的跟头）。
+    候选要在删消息**之前**取：删完再扫，这批碰过谁就无从知道了。
     """
-    names = _media_names_for_run(agent_id, run_id, sessions)
+    _, candidates = _referenced_media(agent_id, run_id, sessions)
     removed = (manager.delete_ingested_memories(run_id),
                sessions.delete_ingested_messages(agent_id, run_id))
-    _prune_media(agent_id, names, sessions)
+    _prune_media(agent_id, candidates, sessions)
     return removed
 
 
-def _media_names_for_run(agent_id: str, run_id: str, sessions) -> Tuple[str, ...]:
-    names = set()
+def _referenced_media(agent_id: str, run_id: str, sessions) -> Tuple[Set[str], Set[str]]:
+    """一次扫描给出 (当前仍被引用的媒体名, 本批引用过的媒体名)。
+
+    引用只认 metadata.artifacts 里的登记条目：把全部会话拼成一个大串再取子串，
+    正文里偶然出现的同名串会把该删的文件永久留住。
+    """
+    every: Set[str] = set()
+    per_run: Set[str] = set()
     for path in sessions.iter_session_files(agent_id):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -76,12 +83,12 @@ def _media_names_for_run(agent_id: str, run_id: str, sessions) -> Tuple[str, ...
             continue
         for message in data.get("messages") or []:
             metadata = message.get("metadata") or {}
-            if metadata.get("ingest_run_id") != run_id:
-                continue
-            for artifact in metadata.get("artifacts") or []:
-                if isinstance(artifact, dict) and artifact.get("name"):
-                    names.add(str(artifact["name"]))
-    return tuple(sorted(names))
+            names = {str(artifact["name"]) for artifact in (metadata.get("artifacts") or [])
+                     if isinstance(artifact, dict) and artifact.get("name")}
+            every |= names
+            if metadata.get("ingest_run_id") == run_id:
+                per_run |= names
+    return every, per_run
 
 
 def plan_bundle(root: Path) -> IngestPlan:
@@ -163,17 +170,14 @@ def _stage_media(bundle_root: Path, message: Dict[str, Any], report: "IngestRepo
     report.staged_media = tuple(sorted(staged))
 
 
-def _prune_media(agent_id: str, names: Sequence[str], sessions) -> int:
-    """删掉这批碰过、且已无人引用的媒体；仍被别处引用的留着（内容寻址本就共享）。"""
-    if not names:
+def _prune_media(agent_id: str, candidates: Set[str], sessions) -> int:
+    """删掉这批碰过、且删完已无人引用的媒体；仍被别处引用的留着（内容寻址本就共享）。"""
+    if not candidates:
         return 0
     directory = workspace_media_dir(agent_id, create=False)
-    referenced = "".join(path.read_text(encoding="utf-8", errors="replace")
-                         for path in sessions.iter_session_files(agent_id))
+    still_referenced = _referenced_media(agent_id, "", sessions)[0]   # 删消息已发生，此刻的引用才是活的
     removed = 0
-    for name in names:
-        if name in referenced:
-            continue
+    for name in sorted(candidates - still_referenced):
         path = directory / name
         if path.is_file():
             path.unlink(missing_ok=True)
