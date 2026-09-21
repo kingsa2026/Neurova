@@ -19,6 +19,12 @@
    非 max 的 thinkingLevel 若重新出现（顶层 key、settings.yml 角色、
    或流水线里的档位值），守卫直接拦下：要么是有意恢复分档（需同步改
    档位表与本文档），要么是回归，两者都必须显式改测而非悄悄放过。
+5. **maxTurns 必须声明为字面量整数，且两侧事件同步** —— `maxTurns` 的
+   字面量要求同第 2 条（Schema 校验先于变量替换）；上限取 1000，与
+   main 上维护者的显式决定保持一致。构建 `cnb-f1c-1k31garu5` 实测 251 轮
+   吃满平台 2h 硬上限（7262s，均摊 ≈29s/轮），说明「被掐断」的根因不是
+   轮数给多了，而是 Agent 自己 `sleep` 轮询叠加单轮 20 分钟的全量 pytest ——
+   故轮数放宽，时间预算改由「禁止 sleep 轮询」的硬禁令守住。
 """
 import io
 from pathlib import Path
@@ -44,6 +50,14 @@ LEVEL_BY_ROLE = {"DSCoder-max": "xhigh"}
 LEVEL_BY_MOUNT = {"$": "xhigh", "DSCoder-max": "xhigh"}
 # 已取消的档位后缀：一旦重新出现在 .cnb.yml 顶层 key 或 settings.yml 角色名里即报错
 RETIRED_SUFFIXES = ("-low", "-high")
+
+# npc:go 的 maxTurns 上限。
+# 依据：维护者在 main（commit「修改超时限制」）把 $ 段显式调到 1000，
+# 即「轮数配额按任务够用来给，不压到 120」。构建 cnb-f1c-1k31garu5 实测
+# 251 轮 / 7262s（平台 2h 硬上限被吃满，均摊 ≈29s/轮）证明轮数不是死因，
+# 死因是 Agent 自己 sleep 轮询 + 单轮 20 分钟的全量 pytest。
+# 故上限放回 1000，真正的硬禁令改由「禁止 sleep 轮询」承担。
+MAX_TURNS_LIMIT = 1000
 
 
 def _load(path: Path):
@@ -144,6 +158,41 @@ class TestThinkingLevelLiteral:
             "thinkingLevel 不可用变量引用:\n  " + "\n  ".join(bad) +
             "\n原因：npc:go.options 的 Schema 校验发生在变量替换之前，"
             "枚举字段写 $VAR 会以「值不在枚举内」在配置期直接红。"
+        )
+
+
+class TestTurnBudget:
+    """maxTurns 是构建耗时的上界，不是「够用就好」的软参数。"""
+
+    def test_max_turns_declared_and_bounded(self, npc_options):
+        """每条 npc:go 流水线都必须声明 maxTurns，且不超过本仓上限。"""
+        problems = []
+        for path, opt in npc_options:
+            turns = opt.get("maxTurns")
+            if not isinstance(turns, int):
+                problems.append(f"{path}: maxTurns={turns!r} 未声明或非整数")
+                continue
+            if turns > MAX_TURNS_LIMIT:
+                problems.append(f"{path}: maxTurns={turns} > 上限 {MAX_TURNS_LIMIT}")
+        assert not problems, (
+            "npc:go 的 maxTurns 缺失或超出耗时上界:\n  " + "\n  ".join(problems) +
+            f"\n上限 {MAX_TURNS_LIMIT} 为维护者在 main 上的显式决定（「修改超时限制」）。"
+            "构建 cnb-f1c-1k31garu5 实测 251 轮吃满平台 2h 硬上限（均摊 ≈29s/轮），"
+            "根因是 sleep 轮询 + 单轮 20 分钟的全量 pytest，不是轮数配额；"
+            "确需调低/调高：请同步改守卫、.cnb.yml 注释与 issue/PR 两份事件定义。"
+        )
+
+    def test_max_turns_is_literal_int(self, npc_options):
+        """maxTurns 必须写字面量整数：Schema 校验先于变量替换。"""
+        bad = [
+            f"{path}: maxTurns={opt['maxTurns']!r}"
+            for path, opt in npc_options
+            if isinstance(opt.get("maxTurns"), str)
+        ]
+        assert not bad, (
+            "maxTurns 不可用变量/字符串:\n  " + "\n  ".join(bad) +
+            "\n原因同 thinkingLevel：options 走平台配置期 Schema 校验，"
+            "校验发生在变量替换之前。"
         )
 
 
