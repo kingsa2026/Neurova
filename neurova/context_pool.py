@@ -116,6 +116,11 @@ class ContextPool:
         self.user_id = user_id
         self.agent_id = agent_id
         self.session_id = session_id
+        # P0-2：本轮会话作用域（"direct" / "room:<房间 id>"）。由编排层每轮在归档
+        # 之前设置；`_inject_isolation_tags` 用它给**全部**写入方打 `chat_scope`
+        # ——这是池的唯一写入咽喉，故 swarm / voice_context / 摘要回写 / merge
+        # 等旁路写入方无需各自接线即可继承正确作用域。
+        self.turn_scope: Optional[str] = None
         self.max_tokens = max_tokens
         self.auto_tag = auto_tag
         # [兼容保留] max_size 在「无损归档」改造后不再驱逐（见类文档"回收契约"）
@@ -190,8 +195,8 @@ class ContextPool:
 
     @property
     def isolation_key(self) -> str:
-        """生成隔离键"""
-        session_part = self.session_id if self.session_id else "default"
+        """生成隔离键（P0-2：作用域优先于 session_id，避免恒 `:default`）。"""
+        session_part = self.turn_scope or self.session_id or "default"
         return f"{self.user_id}:{self.agent_id}:{session_part}"
 
     def add_context(self, context):
@@ -347,13 +352,20 @@ class ContextPool:
         self._read_index.rebuild(self._collector._contexts)
 
     def _inject_isolation_tags(self, context) -> None:
-        """根因 A 修复: 把 session_id/agent_id/user_id 注入到 chunk.metadata
+        """把作用域与归属标签注入 chunk.metadata（池的唯一写入咽喉）。
 
-        用户显式传入的字段优先, 不会被覆盖。
+        标签三件套 + 作用域：
+        - `chat_scope`：读侧隔离闸口（`memory_scope.filter_by_scope`）的唯一判据。
+          缺它则 `scope_from_metadata` 恒判 direct —— 隔离契约形同虚设。
+        - `session_id` / `agent_id` / `user_id`：隔离键与查询分区用。
+
+        用户显式传入的字段优先，不被覆盖（本轮显式作用域 > 池的轮次作用域）。
         """
         if context.metadata is None:
             context.metadata = {}
         # 仅在缺失时注入, 尊重用户显式传入的值
+        if "chat_scope" not in context.metadata and self.turn_scope:
+            context.metadata["chat_scope"] = self.turn_scope
         if "session_id" not in context.metadata and self.session_id is not None:
             context.metadata["session_id"] = self.session_id
         if "agent_id" not in context.metadata and self.agent_id is not None:
