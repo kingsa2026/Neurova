@@ -263,3 +263,94 @@ class TestProtectedGuardsUseNoExternalBinaries:
             + "\n  ".join(offenders)
             + "\n修复：改用纯 Python 扫描（Path.rglob + ast / 字符串匹配）。"
         )
+
+
+class TestCiTestRunnerAndFixtureDepsAreReal:
+    """受保护子集"跑起来"的两个前提：pytest 版本 + conftest fixture 依赖。
+
+    这两条都是"CI 报错与代码无关"的事故，且都在**同一个 job**里同时发作，
+    因此合在一个类里钉住。
+
+    4. **pytest 必须锁 <9（收集缓存按节点对象身份去重）** ——
+       9.x 里同一个目录会被两条路径各建一个 `Dir` 对象：
+         - `Session.collect()` 按每个 initial path 逐层下钻（`path_cache` 只在
+           单次 `collect()` 内共享）；
+         - `Package.collect()`（`_pytest/python.py`）扫自己的子目录时又建一个。
+       两个 `Dir` 的 `nodeid` 相同，但 `Node.__eq__` 是身份比较（`__hash__`
+       才用 nodeid），于是 `node in self._collection_cache` 落空、同一路径被
+       收集两次；`FixtureManager._matchfactories` 用 `fixturedef.node in
+       parent_nodes` 判定可见性，conftest 的 fixture 便绑到了"tests 实际不在
+       其下"的那棵子树 → 大批 `fixture 'xxx' not found`（实测 9.1.1 下受保护
+       子集 65 个 error，8.3.5/8.4.2 全绿）。
+       最小触发集（三条命令行参数即可复现）：
+         `pytest tests/unit/evolution/test_skill_consolidation_structural_and_deadcode_p1p2.py`
+         `tests/unit/test_ci_npc_config_guard.py`
+         `tests/unit/evolution/rsi/test_parameter_source_of_truth.py`
+
+    5. **受保护子集里"真跑渲染路径"的依赖必须在 CI 清单声明** ——
+       `tests/unit/document/test_document_pdf.py` 与 `tests/unit/tools/test_write_pdf.py`
+       断言 `"error" not in result`（即必须真出件），`neurova/document_pdf.py`
+       缺 reportlab 即 `RenderUnavailable` → 26 个失败。只在 requirements.txt
+       声明、不在 CI 清单声明，CI 薄环境就永远红。
+    """
+
+    def test_pytest_is_pinned_below_major_nine(self):
+        """requirements-ci.txt 必须把 pytest 锁在 <9（收集身份去重回归）。"""
+        text = io.open(PROJECT_ROOT / "requirements-ci.txt", encoding="utf-8").read()
+        decls = [
+            l.strip() for l in text.splitlines()
+            if re.match(r"^\s*pytest\s*[><=!~]", l.strip())
+        ]
+        assert decls, "requirements-ci.txt 缺 pytest 声明"
+        assert any("<9" in d.replace(" ", "") for d in decls), (
+            "requirements-ci.txt 未把 pytest 锁在 <9。pytest 9.x 的收集缓存按节点\n"
+            "对象身份去重，同一目录会被 Session.collect() 与 Package.collect() 各建\n"
+            "一个 Dir 对象，导致 conftest fixture 绑到没人用的子树 → 受保护子集\n"
+            "大批 'fixture not found'（65 个 error）。当前声明："
+            f"{decls}"
+        )
+
+    def test_ci_lock_pins_pytest_below_major_nine(self):
+        """锁文件必须与声明一致（CI 装的是锁，不是声明）。"""
+        lock = io.open(PROJECT_ROOT / "requirements-ci.lock", encoding="utf-8").read()
+        m = re.search(r"(?m)^pytest==(\d+)\.", lock)
+        assert m, "requirements-ci.lock 缺 pytest pin"
+        assert int(m.group(1)) < 9, (
+            f"requirements-ci.lock 把 pytest 锁在 {m.group(0)}——CI 装的是锁文件，"
+            "不锁 <9 则声明形同虚设。\n"
+            "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+        )
+
+    def test_document_pdf_render_path_deps_declared_in_ci(self):
+        """受保护子集里真跑 PDF 渲染的套件依赖 reportlab，CI 清单必须声明。"""
+        ci = io.open(PROJECT_ROOT / "requirements-ci.txt", encoding="utf-8").read()
+        assert re.search(r"(?m)^\s*reportlab\s*[><=!~]", ci), (
+            "requirements-ci.txt 缺 reportlab 声明——tests/unit/document/test_document_pdf.py\n"
+            "与 tests/unit/tools/test_write_pdf.py 在受保护子集里走真实渲染路径\n"
+            "（断言 'error' not in result，不做 try 降级），缺席即 26 个失败。"
+        )
+        lock = io.open(PROJECT_ROOT / "requirements-ci.lock", encoding="utf-8").read()
+        assert re.search(r"(?m)^reportlab==", lock), (
+            "requirements-ci.lock 缺 reportlab pin——CI 装的是锁文件。\n"
+            "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+        )
+
+    def test_protected_subset_keeps_fixture_consumers(self):
+        """本守卫自身的靶点必须留在受保护子集里，否则回归无人看。
+
+        没有这一条，任何一次"清理"都能把上面两个套件移出子集，
+        守卫退化成永远通过的空壳。
+        """
+        listed = io.open(
+            PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt", encoding="utf-8"
+        ).read()
+        for rel in (
+            "tests/unit/evolution/rsi/test_parameter_source_of_truth.py",
+            "tests/unit/evolution/experience/test_pattern_lifecycle.py",
+            "tests/unit/document/test_document_pdf.py",
+            "tests/unit/tools/test_write_pdf.py",
+        ):
+            assert rel in listed, (
+                f"{rel} 不在受保护子集——它是 pytest<9 / reportlab 两条回归的靶点，"
+                "移出后本守卫无法发现复发。"
+            )
