@@ -125,7 +125,7 @@ class TestRsiGradientAccount:
         assert isinstance(report["decision_changes"], bool)
 
     def test_adr_records_the_recheck(self):
-        adr = (REPO_ROOT / "docs" / "adr" / "0016-rsi-parameter-source-of-truth.md")
+        adr = (REPO_ROOT / "docs" / "01-architecture" / "adr" / "0016-rsi-parameter-source-of-truth.md")
         text = adr.read_text(encoding="utf-8")
         assert "梯度账" in text and "重验" in text, (
             "ADR 0016 的梯度账没有随 008 的指纹换代重验（票面明令不得默认它仍成立）"
