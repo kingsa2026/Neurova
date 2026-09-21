@@ -376,6 +376,16 @@ $:
           options:
             # 不写 model = 走平台默认模型（规避 400）；
             # 想锁定底座模型时，填平台真实存在的 model ID（不带思考强度后缀）。
+            #
+            # 为何不再压 maxTurns（2026-09-21 复盘）：
+            #   本 PR 初版曾把本值压到 120（≈58 分钟），理由是「maxTurns 同时
+            #   是单次构建的最坏耗时上限：500 轮 × 29s/轮 ≈ 4h，必然先被平台
+            #   2h 上限掐断」。维护者在 main 上显式把 $ 段调到 1000，方向相反：
+            #   轮数配额按「任务够用」给。因为实测 251 轮 / 7262s 证明「被掐断」
+            #   的根因不是轮数给多了，而是 (a) Agent 自己 sleep 轮询
+            #   （300s/420s/480s 串起等待）、(b) 单轮一次全量 pytest 就 20 分 39 秒。
+            #   修掉这两件事，时间预算才不会漏；硬压轮数只会让正常长任务死在半路。
+            #   故本值保持 1000，真正的硬禁令由下方「禁止 sleep 轮询」承担。
             maxTurns: 1000
             contextWindow: 1m
             maxTokens: 48k
@@ -390,9 +400,15 @@ $:
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           type: npc:go
           options:
-            maxTurns: 500
+            # 不写 model = 走平台默认模型（规避 400）；
+            # 想锁定底座模型时，填平台真实存在的 model ID（不带思考强度后缀）。
+            # maxTurns 取值理由见上方「为何不再压 maxTurns」；
+            # 两份事件定义必须逐字一致（test_ci_npc_config_guard.py 常驻校验）。
+            maxTurns: 1000
             contextWindow: 1m
             maxTokens: 48k
+            # 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故落 xhigh。
+            # 若后续平台开放 max 档，把本行改成 thinkingLevel: max 即可，其余不动。
             thinkingLevel: xhigh
 
 # 同档位别名：@kingsa2026/neurova(DSCoder-max) 与 DSCoder 完全一致。
