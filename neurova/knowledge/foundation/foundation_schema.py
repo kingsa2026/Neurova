@@ -24,7 +24,7 @@ from .knowledge_facts import (
 from .digest_chain import _SCHEMA_V11
 from ..ontology.derivation_ledger import _SCHEMA_V10
 from ..ontology.rule_engine import _SCHEMA_V9
-from ..ontology.term_registry import _SCHEMA_V8
+from ..ontology.term_registry import _SCHEMA_V8, _SCHEMA_V12
 from .narratives import NARRATIVE_DOMAIN, _SCHEMA_V4, _SCHEMA_V6, _SCHEMA_V7
 
 _STEPS: List[tuple] = [
@@ -39,6 +39,8 @@ _STEPS: List[tuple] = [
     (9, _SCHEMA_V9),
     (10, _SCHEMA_V10),
     (11, _SCHEMA_V11),
+    # v12：谓词值域可按类别声明（`range_kinds`）——`is_a` 的客体合法性随类型表增长自动跟随
+    (12, _SCHEMA_V12),
 ]
 
 _registered = False

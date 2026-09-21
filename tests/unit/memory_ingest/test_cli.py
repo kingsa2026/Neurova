@@ -209,3 +209,76 @@ def test_undo_removes_the_batch(tmp_path: Path, manager, sessions):
                 manager=manager, sessions=sessions) == EXIT_OK
 
     assert _session_files(tmp_path) == []
+
+
+def test_apply_accepts_a_previously_converted_bundle(tmp_path: Path, manager, sessions):
+    """convert 的产物必须能直接 apply——否则"先看包再导"这条路是断的。"""
+    db = _db(tmp_path / "history.db")
+    bundle = tmp_path / "bundle"
+    assert main(["convert", str(db), "--out", str(bundle),
+                 "--agent-name", "kai-import"]) == EXIT_OK
+
+    code = main(["apply", str(bundle), "--agent-id", "kai-import", "--yes",
+                 "--run-id", "run-bundle-1"], manager=manager, sessions=sessions)
+
+    assert code == EXIT_OK
+    assert list((tmp_path / "sessions" / "kai-import").glob("session_*.json"))
+
+
+def test_apply_on_directory_without_stores_is_not_success(tmp_path: Path, manager, sessions):
+    """指错目录（一个可探的 store 都没有）不能退 0：那和"导完了"无法区分。"""
+    empty = tmp_path / "nothing"
+    empty.mkdir()
+    (empty / "readme.txt").write_text("不是会话", encoding="utf-8")
+
+    assert main(["apply", str(empty), "--agent-id", "kai-import", "--yes"],
+                manager=manager, sessions=sessions) == EXIT_UNRECOGNIZED
+
+
+def test_detect_on_a_converted_bundle_still_reports_nothing_to_import(
+        tmp_path: Path, capsys):
+    """包不是源：detect 指到包上要说清"这是包"，不是逐文件报未识别。"""
+    db = _db(tmp_path / "history.db")
+    bundle = tmp_path / "bundle"
+    main(["convert", str(db), "--out", str(bundle), "--agent-name", "kai-import"])
+
+    assert main(["detect", str(bundle)]) == EXIT_OK
+
+    assert "包" in capsys.readouterr().out
+
+
+def _bundle_with_memories(tmp_path: Path) -> Path:
+    """直接落一支带记忆行的包：apply 认包，不必再造一个源库。"""
+    root = tmp_path / "membundle"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "memories.jsonl").write_text(json.dumps(
+        {"identity_key": "m1", "content": "一条回填的历史", "memory_type": "semantic",
+         "category": "general", "origin": "owner", "importance": 50.0,
+         "ts": "2026-05-01T10:00:00+00:00"}, ensure_ascii=False) + "\n", encoding="utf-8")
+    (root / "manifest.json").write_text(json.dumps({
+        "schema_version": 1, "generated_at": "2026-05-01T10:00:00+00:00",
+        "agent_name": "imported", "source": {"converter": "test", "version": "1"},
+        "counts": {"transcripts": 0, "memories": 1, "relations": 0},
+        "dropped": [], "stores": []}), encoding="utf-8")
+    return root
+
+
+def test_apply_reports_written_memories_need_a_restart_to_be_visible(
+        tmp_path: Path, manager, sessions, capsys):
+    """写入侧与运行中的后端各持一份内存表：CLI 必须把"记忆要重启才可见"说清楚。
+
+    会话面是读盘即见的，记忆面只在进程构造时 `_load_from_db`（manager.py:248 是唯一调用点），
+    所以同一个"导入成功"两半不一致。改运行期咽喉（开端点 / 加 reload 入口）是产品决定，
+    本轮不拍；但把不一致藏着不说不行——整批记忆在后端里一条看不见，报告却写"已写入"。
+    这里钉的是诚实暴露：口径印在输出里；没写记忆的批次不该出现这句。
+    """
+    code = main(["apply", str(_bundle_with_memories(tmp_path)), "--agent-id", "kai-import",
+                 "--yes"], manager=manager, sessions=sessions)
+    assert code == EXIT_OK
+    printed = capsys.readouterr().out
+    assert "重启" in printed and "记忆" in printed
+
+    db = _db(tmp_path / "history.db")   # 只有会话行，记忆为 0 条
+    main(["apply", str(db), "--agent-id", "kai-import", "--yes"], manager=manager,
+         sessions=sessions)
+    assert "重启" not in capsys.readouterr().out

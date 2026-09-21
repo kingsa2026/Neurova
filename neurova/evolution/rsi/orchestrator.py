@@ -303,6 +303,13 @@ class RSIOrchestrator:
         attempted = False
         gain_evidenced = False
         gain = 0.0
+        # 回滚判据要读 roi：取**本轮记数之前**的成本核算读数（本轮增益还没进
+        # 历史，判的是"走到这一步为止"的累积读数）。没有成本记录 → None，
+        # 判据按"没测到"处理，不塞 0。
+        roi_before_apply = (
+            self.convergence_analyzer.compute_roi()
+            if self.convergence_analyzer.cost_history else None
+        )
 
         if optimizations and self.deployment_controller.can_auto_execute("low"):
             perf_before = self._measure_performance()
@@ -323,7 +330,13 @@ class RSIOrchestrator:
                     isinstance(eval_before, dict) and eval_before.get("state") == "measured"
                     and isinstance(eval_after, dict) and eval_after.get("state") == "measured"
                 )
-                if gain < 0:
+                # 回滚判据的单一事实源是 `rollback_manager.should_rollback`：
+                # 编排器只负责把本轮读数喂进去，不自己另写一套比较。
+                if self.rollback_manager.should_rollback({
+                    "convergence_status": convergence.get("status", ""),
+                    "roi": roi_before_apply,
+                    "gain": gain,
+                }):
                     # 有害调整：回滚到应用前快照（失控漂移的本质防护）。
                     # 工单 004：回滚必须同时**留痕到 rollback_manager** ——
                     # 阶段晋升判据的"距上次回滚多少天"只有这一个真实数据来源；

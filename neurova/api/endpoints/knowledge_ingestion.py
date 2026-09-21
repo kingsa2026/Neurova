@@ -138,6 +138,8 @@ def _try_extract_to_graph(
         graph = get_knowledge_graph_manager()
     for entry in items:
         try:
+            # agentId 必须传：抽取产物要落进被检索的那张图，落错域等于把条目的事实
+            # 写进别人的库；factStore 同理——不传底座就只剩 JSON 投影。
             extract_knowledge_to_graph(
                 entry, repo=repo, llm_call=llm_call, graph_manager=graph,
                 factStore=authority, agentId=agent_id or "",

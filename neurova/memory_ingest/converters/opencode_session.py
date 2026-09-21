@@ -26,7 +26,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from neurova.memory_ingest import probe
 from neurova.memory_ingest.bundle.manifest import BundleError, BundleManifest
 from neurova.memory_ingest.bundle.media import MediaSink
-from neurova.memory_ingest.bundle.writer import SourceEvent, materialize, write_bundle
+from neurova.memory_ingest.bundle.writer import (SourceEvent, dropped_entries,
+                                                 materialize, write_bundle)
 from neurova.memory_ingest.probe import Handprint, register_handprint
 
 CONVERTER_NAME = "opencode_session"
@@ -45,6 +46,7 @@ REASONS: Dict[str, str] = {
     "table": "该表承载的内容不在本转换器表达范围内（待记忆侧映射定案）",
     "无块": "该消息没有任何 content 块，正文载体缺失",
     "空正文": "该块没有可携带正文，未入包",
+    "timestamp": "该块的 time_created 不是 epoch 毫秒，整块未入包（不猜时刻）",
 }
 
 
@@ -98,7 +100,6 @@ def _session_order(conn: sqlite3.Connection) -> List[str]:
 def _session_rows(conn: sqlite3.Connection, session_id: str, session: Optional[sqlite3.Row],
                   sink: MediaSink, declared: Counter) -> List[Tuple[str, List[SourceEvent]]]:
     rows: List[Tuple[str, List[SourceEvent]]] = []
-    pending: List[str] = []
     for message in _rows(conn, "SELECT id, data, time_created FROM message"
                                " WHERE session_id = ? ORDER BY time_created, id", (session_id,)):
         data = _json(message["data"])
@@ -109,11 +110,13 @@ def _session_rows(conn: sqlite3.Connection, session_id: str, session: Optional[s
         metering = _metering(data, session, first=not rows)
         parts = _rows(conn, "SELECT id, data, time_created FROM part"
                             " WHERE message_id = ? ORDER BY time_created, id", (message["id"],))
-        produced = 0
+        produced = pending_thinking = 0
+        pending: List[str] = []                          # 思考只在本条消息内挂靠
         for part in parts:
             body = _json(part["data"])
             if str(body.get("type") or "") == "reasoning":
                 pending.append(str(body.get("text") or ""))
+                pending_thinking += 1
                 continue
             events = _part_events(part, body, kind, metering, sink, declared)
             if not events:
@@ -124,14 +127,15 @@ def _session_rows(conn: sqlite3.Connection, session_id: str, session: Optional[s
                                                  "reasoning": "".join(pending)}), *events[1:]]
                 del pending[:]
             rows.append((f"{session_id}#{part['id']}", events))
-        if not produced and not pending:
+        if pending:
+            # 这条消息没有可挂靠的事件（可能整条只有思考块）：思考自己成一条，
+            # 既不丢、也不会顺着会话窜到下一条消息（包括 user 消息）头上。
+            rows.append((f"{session_id}#{message['id']}#reasoning",
+                         [SourceEvent(kind=kind, ts=_ts(message["time_created"]),
+                                      role=ROLE_PREFIXES[kind], reasoning="".join(pending),
+                                      extra=dict(metering))]))
+        elif not produced and not pending_thinking:
             declared["无块"] += 1
-    if pending:
-        # 轮尾没人接的思考：并进最后一条事件，不丢
-        base, events = rows[-1]
-        rows[-1] = (base, [*events[:-1], events[-1].__class__(
-            **{**events[-1].__dict__,
-               "reasoning": events[-1].reasoning + "".join(pending)})])
     return rows
 
 
@@ -140,6 +144,9 @@ def _part_events(part: sqlite3.Row, body: Dict[str, Any], kind: str, metering: D
     """一支块 → 包内事件；tool 块出两条（调用 + 结果）。"""
     btype = str(body.get("type") or "<无类型>")
     ts = _ts(part["time_created"])
+    if not ts:
+        declared["timestamp"] += 1
+        return []
     if btype == "text":
         text = str(body.get("text") or "")
         if not text.strip():
@@ -233,22 +240,19 @@ def _json(raw: Any) -> Dict[str, Any]:
 
 
 def _ts(value: Any) -> str:
+    """epoch 毫秒（绝对时刻）→ 带偏移 ISO；定不出来回空串，由调用方申报并跳过。"""
     try:
         millis = int(value)
     except (TypeError, ValueError):
-        return datetime.now(SOURCE_ZONE).isoformat()
-    return datetime.fromtimestamp(millis / 1000, SOURCE_ZONE).isoformat()
+        return ""
+    try:
+        return datetime.fromtimestamp(millis / 1000, SOURCE_ZONE).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return ""
 
 
 def _dropped_entries(declared: Counter) -> List[Dict[str, Any]]:
-    entries = []
-    for field, count in sorted(declared.items()):
-        if count <= 0:
-            continue
-        prefix = field.split(":")[0]
-        reason = REASONS.get(field) or REASONS.get(prefix) or REASONS["part"]
-        entries.append({"field": field, "count": count, "reason": reason})
-    return entries
+    return dropped_entries(declared, dict(REASONS, __fallback__=REASONS["part"]))
 
 
 register_handprint(Handprint(CONVERTER_NAME, "sqlite", matches_store))

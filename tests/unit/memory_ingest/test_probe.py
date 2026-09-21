@@ -8,7 +8,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from neurova.memory_ingest.probe import probe_store
+from neurova.memory_ingest.probe import probe_store, read_only_connect
 
 QWENPAW_COLS = ["seq", "session_id", "agent_id", "kind", "role", "name", "content",
                 "tool_call_id", "tool_input", "tool_state", "headline", "blocks",
@@ -135,3 +135,21 @@ def test_every_family_matches_only_its_own_store(tmp_path: Path):
         finding = probe_store(tmp_path / name)
         assert finding.verdict == "unique", (name, finding.hits)
         assert finding.hits == (family,), (name, finding.hits)
+
+
+def test_read_only_connect_handles_percent_in_path(tmp_path: Path):
+    """路径里字面的 % 会被 URI 当转义序列解掉：不转义就是"打不开"，而报成"未识别"。"""
+    store = tmp_path / "100%20done.db"
+    conn = sqlite3.connect(store)
+    conn.execute("CREATE TABLE t (a INTEGER)")
+    conn.commit()
+    conn.close()
+
+    assert list(read_only_connect(store).execute("SELECT * FROM t")) == []
+
+
+def test_percent_path_is_still_probed_as_a_store(tmp_path: Path):
+    """含 % 的库要能被识别出结构，而不是被 URI 解错后当成坏文件。"""
+    store = _db(tmp_path / "100%20done.db", QWENPAW_COLS)
+
+    assert probe_store(store).hits == ("qwenpaw_history",)

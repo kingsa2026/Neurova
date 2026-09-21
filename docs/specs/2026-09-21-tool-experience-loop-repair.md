@@ -73,3 +73,21 @@
 - 003 起原生链执行产票：`lookup == "evidenced"`；
 - 006 停用生效判据改为「发给 LLM 的工具清单少一项」；
 - 008 换实体近似句 confidence 由 0.400 升到 0.85（门槛 0.8 可达）。
+
+## 7. 第二轮补做（006 / 005 残留 + 011）
+
+前一轮只完成主干，三条收口各有未尽的断点，第二轮逐条补齐（明细见
+[`000-索引.md`](./2026-09-21-tool-experience-loop/tickets/000-索引.md)）：
+
+- **006**：`VisibleSkill.enabled` 的三条判停落点此前只有 manifest `enabled` 一条真生效；
+  补 registry 运行时 `status` 与生命周期 `usage.state=archived`，三闸同读一份 entry。
+  同名冲突计数改为可重跑（`scripts/diagnostics/skill_name_collisions.py`）。
+- **005**：`neurflow` 两处 `get_tool_engine` 是**不存在的导入**（静默零同步）；
+  `/tool-layers/tools/execute` 把 `ToolEngine` 当入口用（绕过咽喉）。两处各自改道 + 守卫。
+- **011**：整票交付——回滚判据单源（`should_rollback`）、留痕落 `revisions`、
+  治理面端点（未装配 503 / 空归档 409）、`AgentSkillPage.vue` 归档与回滚入口、
+  11 份 locale。
+
+live-verify（真 Agent + 真 ToolExecutor + 真 SkillService）：端点经咽喉执行产票、
+停用/归档后工具面各少一项、重建→归档→回滚留痕带操作者、`improvements` 键未复活、
+空归档回滚返回 False。
