@@ -60,6 +60,22 @@ class IngestReport:
         return sessions.ingested_run_owners(self.agent_id, self.run_id)
 
 
+def session_manager_for(sessions_dir: Optional[str] = None):
+    """把会话库根目录定到 `sessions_dir` 后返回 SessionManager。
+
+    会话根目录必须在构造之前定（类级单例只认首次构造），所以这里显式设环境变量并
+    复位单例——CLI 与老脚本共用这一处装配口径，两边各写一遍就会从第二处开始漂移。
+    """
+    import os
+
+    if sessions_dir:
+        os.environ["NEUROVA_SESSIONS_DIR"] = str(Path(sessions_dir).resolve())
+    from neurova.session_manager import SessionManager
+
+    SessionManager._instance = None
+    return SessionManager()
+
+
 def undo_run(agent_id: str, run_id: str, *, manager, sessions) -> Tuple[int, int]:
     """撤销一条批次——报告在不在手都走这条路，媒体清理不留第二条口径。
 
@@ -132,8 +148,13 @@ def apply_bundle(root: Path, *, agent_id: str, manager, sessions,
     except SessionOwnerConflict as exc:
         raise BundleError(str(exc)) from exc
 
-    report.memories_added, report.memories_skipped = manager.import_memories(
-        memories, ingest_run_id=report.run_id)
+    if memories:
+        if manager is None:
+            # 包里带记忆却没人接 = 这批记忆会被静默丢掉，那正是"半导"；响亮拒绝
+            raise BundleError(
+                f"包里有 {len(memories)} 条记忆，但未提供记忆写入面（manager）")
+        report.memories_added, report.memories_skipped = manager.import_memories(
+            memories, ingest_run_id=report.run_id)
 
     try:
         _write_sessions(report, transcripts, sessions, Path(root))

@@ -719,6 +719,10 @@ class SessionManager(SessionRepository):
                 existing.append(msg)
                 seen.add(key)
                 added += 1
+            # 零新增批次不落盘：给文件盖一个新 updated_at、内容却一个字节没变，会让
+            # 幂等重跑在盘上留下"这次动过"的假象（重复导入必须可证明是空操作）。
+            if not added:
+                return added, skipped
             session_data["total_messages"] = len(existing)
             session_data["updated_at"] = datetime.now().isoformat()
             # 持锁内只调无锁写入版（S4 约束：_write_session_file 会再取同一 file_lock）
