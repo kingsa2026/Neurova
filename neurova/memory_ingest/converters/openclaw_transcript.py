@@ -68,6 +68,8 @@ MESSAGE_LANDINGS = ("role", "content", "summary", "timestamp", "idempotencyKey",
 
 REASONS = {
     "event": "该事件类型不是可见正文（type != message），不猜映射",
+    "事件id": "同一会话内 event id 被多行复用：幂等键立在行主键 (session_id, seq) 上，"
+              "该 id 只作 extra 里的来源标识留档",
     "event键": "该事件级字段在包内契约与 extra 都无落点，未携带",
     "消息键": "该消息级字段在包内契约与 extra 都无落点，未携带",
     "role": "该角色在包内无对应 kind，不猜映射",
@@ -93,10 +95,12 @@ def convert(store: Path, out_dir: Path, *, agent_name: str) -> BundleManifest:
         windows = {row["session_id"]: dict(row) for row in conn.execute(
             f"SELECT * FROM {WINDOW_TABLE}")}
         by_session: Dict[str, List[Tuple[str, List[SourceEvent]]]] = {}
+        seen_event_ids: Dict[str, set] = {}
         for row in conn.execute(f"SELECT session_id, seq, event_json, created_at"
                                 f" FROM {EVENT_TABLE} ORDER BY session_id, seq"):
             session_id = str(row["session_id"])
-            events = _event_records(row, windows.get(session_id, {}), sink, declared)
+            events = _event_records(row, windows.get(session_id, {}), sink, declared,
+                                    seen_event_ids.setdefault(session_id, set()))
             if not events:
                 continue
             by_session.setdefault(session_id, []).extend(events)
@@ -214,16 +218,26 @@ def matches_store(path: Path) -> bool:
 
 
 def _event_records(row: sqlite3.Row, window: Dict[str, Any], sink: MediaSink,
-                   declared: Counter) -> List[Tuple[str, List[SourceEvent]]]:
+                   declared: Counter, seen_ids: set) -> List[Tuple[str, List[SourceEvent]]]:
+    """一行源记录 → 幂等前缀 + 事件列表。
+
+    幂等键立在**行自己的主键** ``(session_id, seq)`` 上，不立在信封的 event id 上：
+    指纹只要求 transcript_events 与 session_windows 两张表，而 event id 的唯一性由上游第三张表
+    transcript_event_identities 承担；老库没有那张表，且上游复制既往事件时会把同一条事件按新
+    seq 再落一份（只修 parentId），因此"同 id 不同 seq"是合法形状。把它当幂等键，重复即整支
+    store 被校验器判死；把它当可选标识，缺 id 的正文行又会被整行丢掉。两者都是把源侧不确定的
+    东西当成我们的不变量。
+    """
     body = _json(row["event_json"])
     if not _ts(body.get("timestamp"), row["created_at"]):
         declared["timestamp"] += 1
         return []
     event_id = str(body.get("id") or "").strip()
     declared.update(f"event键:{key}" for key in _strays(body, EVENT_LANDINGS))
-    if not event_id:
-        declared["event:<无id>"] += 1
-        return []
+    if event_id:
+        if event_id in seen_ids:
+            declared["事件id:复用"] += 1
+        seen_ids.add(event_id)
     etype = str(body.get("type") or "<无类型>")
     if etype != "message":
         declared[f"event:{etype}"] += 1
@@ -248,6 +262,7 @@ def _event_records(row: sqlite3.Row, window: Dict[str, Any], sink: MediaSink,
                          reasoning=event.reasoning, reasoning_state=event.reasoning_state,
                          blocks=event.blocks,
                          extra={"source_seq": int(row["seq"] or 0), "event_type": etype,
+                                "source_event_id": event_id or None,
                                 "source_role": role or None,
                                 "parent_event_id": body.get("parentId") or None,
                                 "message_idempotency_key": message.get("idempotencyKey") or None,
@@ -262,7 +277,7 @@ def _event_records(row: sqlite3.Row, window: Dict[str, Any], sink: MediaSink,
     if not built:
         declared["空正文"] += 1
         return []
-    return [(f"{row['session_id']}#{event_id}", built)]
+    return [(f"{row['session_id']}#{int(row['seq'] or 0)}", built)]
 
 
 def _strays(body: Dict[str, Any], landings: Tuple[str, ...]) -> List[str]:
