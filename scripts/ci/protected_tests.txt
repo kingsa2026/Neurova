@@ -251,6 +251,11 @@ tests/context/test_context_pool_hash_index.py
 #   就地改写/hash 不失配）+ 摘要沿用旧摘要不算"本轮成功"（不谎报覆盖）
 tests/unit/context/test_draw_never_mutates_archive.py
 tests/unit/context/test_summary_failure_not_reported_success.py
+# 上下文持久层批（Issue #90）B4 工单 001：归档跨重启为真（A1）
+#   （根因 P1-3：写穿点挂在生产不可达的驱逐路径上 → 台账恒空）
+tests/unit/context/test_context_persistence_restart.py
+# 同上批：回收契约的落盘判据已重定向（落盘在入池、回收只管常驻），
+#   原文件已在上册，无需重复登记
 
 # Issue #96 收尾：退役平铺目录的引用可达性。删副本必须同批改引用——否则报错从
 #   「两个候选」变成「零个候选」，洞只是换了个位置（活跃层链接 + INDEX 权威表两处）
