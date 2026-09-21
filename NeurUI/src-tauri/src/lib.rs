@@ -21,7 +21,6 @@ struct RuntimeLayout {
     root: std::path::PathBuf,
     python: std::path::PathBuf,
     node: std::path::PathBuf,
-    models: std::path::PathBuf,
 }
 
 // ---- 子进程托管（Python + Node）----
@@ -34,6 +33,12 @@ struct ManagedChildren {
 // ---- 下载状态文件 ----
 
 const DOWNLOAD_STATUS_FILE: &str = ".download_status.json";
+
+/// 下载状态是运行态，只能落在 runtime/ 下：开发态的后端根就是仓库根，
+/// 拼在根上等于每次启动往仓库里写一个未跟踪文件。
+fn download_status_path(root: &std::path::Path) -> std::path::PathBuf {
+    root.join("runtime").join(DOWNLOAD_STATUS_FILE)
+}
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 struct DownloadStatus {
@@ -50,8 +55,7 @@ impl DownloadStatus {
 }
 
 fn read_download_status(root: &std::path::Path) -> DownloadStatus {
-    let path = root.join(DOWNLOAD_STATUS_FILE);
-    let text = match std::fs::read_to_string(&path) {
+    let text = match std::fs::read_to_string(download_status_path(root)) {
         Ok(t) => t,
         Err(_) => return DownloadStatus::idle(),
     };
@@ -62,7 +66,10 @@ fn read_download_status(root: &std::path::Path) -> DownloadStatus {
 }
 
 fn write_download_status(root: &std::path::Path, status: &DownloadStatus) {
-    let path = root.join(DOWNLOAD_STATUS_FILE);
+    let path = download_status_path(root);
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
     let _ = std::fs::write(&path, serde_json::to_string_pretty(status).unwrap_or_default());
 }
 
@@ -79,24 +86,41 @@ struct ModelEntry {
     path: String,
     required: bool,
     source: String,
-    url: String,
     size_mb: u64,
+    repo_id: Option<String>,
+    model_size: Option<String>,
 }
 
-fn read_model_manifest(root: &std::path::Path) -> Option<ModelManifest> {
-    let text = std::fs::read_to_string(root.join("models/MANIFEST.json")).ok()?;
-    serde_json::from_str(&text).ok()
+fn read_model_manifest(root: &std::path::Path) -> Result<ModelManifest, String> {
+    let path = root.join("models/MANIFEST.json");
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("读 {} 失败: {}", path.display(), e))?;
+    // 解析失败必须与「文件不存在」区分报出：字段对不上时表现也是「清单不存在」，
+    // 排查会被引向文件缺失而非契约错位。
+    serde_json::from_str(&text)
+        .map_err(|e| format!("models/MANIFEST.json 解析失败: {}", e))
 }
 
+/// 清单里的 path 自带 models/ 前缀，一律相对后端根拼（相对 layout.models 拼
+/// 会成 root/models/models/... 永不命中）。必需项缺席即未就绪，可选项不阻塞启动。
 fn is_model_ready(layout: &RuntimeLayout) -> bool {
     let manifest = match read_model_manifest(&layout.root) {
-        Some(m) => m,
-        None => return false,
+        Ok(m) => m,
+        Err(e) => {
+            log::warn!("{}", e);
+            return false;
+        }
     };
-    manifest.models.iter().all(|m| {
-        let model_path = layout.models.join(&m.path);
-        model_path.exists() && model_path.read_dir().map(|mut d| d.next().is_some()).unwrap_or(false)
-    })
+    manifest
+        .models
+        .iter()
+        .filter(|m| m.required)
+        .all(|m| model_present(layout, m))
+}
+
+fn model_present(layout: &RuntimeLayout, entry: &ModelEntry) -> bool {
+    let dir = layout.root.join(&entry.path);
+    dir.exists() && dir.read_dir().map(|mut d| d.next().is_some()).unwrap_or(false)
 }
 
 // ---- 路径解析 ----
@@ -139,13 +163,13 @@ fn resolve_backend_root(app: &tauri::AppHandle) -> std::path::PathBuf {
     normalize_windows_path(repo_root())
 }
 
-/// 运行时布局解析（runtime/ 子目录 + models/）。
+/// 运行时布局解析（runtime/ 子目录）。模型位置由清单 path 自带 models/ 前缀，
+/// 一律相对 root 拼，不在这里再挂一个 models 目录。
 fn resolve_runtime(root: &std::path::Path) -> RuntimeLayout {
     RuntimeLayout {
         root: root.to_path_buf(),
         python: root.join("runtime/python/python.exe"),
         node: root.join("runtime/node/node.exe"),
-        models: root.join("models"),
     }
 }
 
@@ -196,7 +220,10 @@ fn download_file(url: &str, dest: &std::path::Path, on_progress: impl Fn(u8)) ->
 }
 
 fn download_python_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Result<(), String> {
-    let url = "https://github.com/astral-sh/python-build-standalone/releases/latest/download/cpython-3.12.5+20250916-x86_64-pc-windows-msvc-install_only.tar.gz";
+    // tag 与资产名内嵌的构建号必须同源：资产名钉在某一次构建上，而 latest 会随
+    // 上游发版漂移，借道 latest 必然 404。版本号由 models/MANIFEST.json 的
+    // runtime.python 单源约束（tests/unit/desktop/test_route_b_runtime_download.py）。
+    let url = "https://github.com/astral-sh/python-build-standalone/releases/download/20260901/cpython-3.12.14+20260901-x86_64-pc-windows-msvc-install_only.tar.gz";
     let dest = layout.root.join("runtime/_python.tar.gz");
     let extract_dir = layout.root.join("runtime/_python_extract");
 
@@ -356,8 +383,8 @@ fn download_node_runtime(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Resu
 }
 
 fn download_models(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Result<(), String> {
-    let manifest = read_model_manifest(&layout.root).ok_or("models/MANIFEST.json 不存在")?;
-    
+    let manifest = read_model_manifest(&layout.root)?;
+
     write_download_status(&layout.root, &DownloadStatus {
         phase: "models".into(),
         progress: 0,
@@ -366,36 +393,17 @@ fn download_models(layout: &RuntimeLayout, app: &tauri::AppHandle) -> Result<(),
     });
     let _ = app.emit("runtime-status", "models:checking");
 
-    let total_models = manifest.models.len() as u8;
-    for (idx, model) in manifest.models.iter().enumerate() {
-        let model_path = layout.models.join(&model.path);
-        if model_path.exists() && model_path.read_dir().map(|mut d| d.next().is_some()).unwrap_or(false) {
-            continue; // 已存在，跳过
-        }
-
-        let pct = ((idx as u8) * 100) / total_models.max(1);
-        write_download_status(&layout.root, &DownloadStatus {
-            phase: "models".into(),
-            progress: pct,
-            message: format!("正在下载模型 {}...", model.id),
-            error: None,
-        });
-
-        std::fs::create_dir_all(&model_path).map_err(|e| e.to_string())?;
-        // 尝试从 URL 下载（可能是目录索引页或直接文件）
-        let dest = model_path.join(format!("{}.bin", model.id));
-        if let Err(e) = download_file(&model.url, &dest, |_| {}) {
-            // 单个模型失败不阻断（非必需模型）
-            log::warn!("模型 {} 下载失败: {}", model.id, e);
-        }
+    // 清单声明的是仓库级来源（repo_id / model_size），单次 download_file 拿不下
+    // 一个仓库，也不再伪造 <id>.bin 单文件产物——缺席的按名点名交出。
+    let blocking: Vec<String> = manifest
+        .models
+        .iter()
+        .filter(|m| m.required && !model_present(layout, m))
+        .map(|m| format!("{}（来源 {}）", m.id, m.source))
+        .collect();
+    if !blocking.is_empty() {
+        return Err(format!("必需模型未就绪，仓库级拉取通道未接通: {}", blocking.join(", ")));
     }
-
-    write_download_status(&layout.root, &DownloadStatus {
-        phase: "models".into(),
-        progress: 100,
-        message: "模型检查完成".into(),
-        error: None,
-    });
     Ok(())
 }
 
@@ -807,4 +815,22 @@ pub fn run() {
         .register_uri_scheme_protocol("boot", |_ctx, _request| boot_page_response())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod manifest_contract_tests {
+    use super::*;
+
+    /// 直读真清单验一次反序列化。清单字段与 ModelEntry 错位时，运行期表现是
+    /// 「models/MANIFEST.json 不存在」，静态检查只能证明字段名对得上，证明不了
+    /// 类型也对——所以这里编译期取文件、跑期解析，才算把契约钉住。
+    #[test]
+    fn real_manifest_matches_model_entry_contract() {
+        const REAL: &str = include_str!("../../../models/MANIFEST.json");
+        let manifest: ModelManifest =
+            serde_json::from_str(REAL).expect("models/MANIFEST.json 与 ModelEntry 契约不一致");
+        assert!(manifest.models.iter().any(|m| m.required));
+        assert!(manifest.models.iter().all(|m| m.path.starts_with("models/")),
+            "清单 path 必须自带 models/ 前缀（is_model_ready 按 root 拼）");
+    }
 }
