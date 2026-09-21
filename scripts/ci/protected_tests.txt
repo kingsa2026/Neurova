@@ -275,3 +275,9 @@ tests/unit/cognitive_layers/memory_layer/test_conflict_disposition_loop.py
 #   活跃层指向不存在文件的引用一路无人拦。判据单源在 scripts/scan_docs_refs.py
 #   的 activeLayerDangling()，活跃层零容忍（硬零，不是棘轮）。
 tests/unit/test_active_layer_refs_guard.py
+
+# Issue #109：glib 0.18.5 的 VariantStrIter 未定义行为（RUSTSEC-2024-0429）改按
+#   上游修法就地打补丁（vendor 副本 + [patch.crates-io]）。本守卫锁住补丁在位、
+#   副本含修复、锁文件真走本地、允许清单条目与补丁绑定、门禁逐条核验本地补丁——
+#   任一环松掉都会让"已修"退回"拿清单静音"。
+tests/unit/desktop/test_rust_vendor_patch_guard.py
