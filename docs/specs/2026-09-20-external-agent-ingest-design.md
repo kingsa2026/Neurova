@@ -173,13 +173,13 @@ scripts/ingest_memory.py   薄 CLI：detect / convert / apply / undo
 | F-20 origin 权威归一处 | 已修（校验器权威；咽喉 fail-safe 降档保留并写明） | 519030d4 |
 | F-21 包内同名不同目录被拍平 | 已修（强制内容寻址命名 + 摘要必声明） | b74fa9ef |
 | F-22 撤销拼全文取子串判引用 | 已修（改结构化引用集合） | b74fa9ef |
-| F-04 导入会话用户归属 | 仍待拍板 DEC-4（归属是产品决定，本轮不动） | — |
+| F-04 导入会话用户归属 | 已修：CLI `--owner-user-id` + 会话级归属不变量（既有属主只读、共享批次不得放宽已有属主） | 见 §7.4 |
 | F-05 导入结果对运行中服务不可见 | 部分处置：CLI 明确报出"记忆需重启才可见"（DEC-2 的最小成本项）；开端点/加 reload 仍待拍板 | 877bd22c |
 | F-10 撤销作用域口径 | 已修：按**行自带**三元组删盘 + 索引摘除收口（授权凭据是批次标签，不是调用现场作用域） | 578536b4 |
 | F-11 回填历史的温度语义 | 已修：导入侧定标获知时刻（created_at 记事件、last_accessed_at 记获知），温度照原样落库 | b52eac01 |
 | F-16 OpenClaw 同 event id 多行 | 已修：幂等键改立行主键 (session_id, seq)，event id 降级为 extra 标识；**真样本已取证**（npm openclaw@2026.9.5 上游 schema） | c35b3458 |
 | F-17 memory-enhancement/import 端点 | 仍待拍板 DEC-5（退役/接线/声明仅演示，三选一；本轮不动） | — |
-| F-18 私有方言双路幂等域 | 仍待拍板 DEC-6（两条路的幂等域是否打通是产品决定；已实测确认两路在同源上产出不同会话号，互不感知） | — |
+| F-18 私有方言双路幂等域 | 已修：打通（老脚本会话导入改走产品链，会话号与行幂等键只在转换器定义一处）；见 §7.4 | 见 §7.4 |
 
 回写状态：本批次开工时审计报告 `docs/05-reports/外部agent导入兼容性审计_2026-09-21.md` 不在仓库
 可见分支内（grep 全仓与全历史零命中），无法逐条追加处置结果；故把上表落到规格 §7.1，
@@ -207,10 +207,69 @@ scripts/ingest_memory.py   薄 CLI：detect / convert / apply / undo
 - **F-05 只做诚实暴露**：开 HTTP 端点（推翻"本轮不开端点"）与加 `reload_memories` 入口
   （改运行期咽喉）都需拍板；但报告写"记忆 +N"而界面一条看不见，是第三种假成功。CLI 现报出
   "会话读盘即见；记忆需后端重启后才可见"，仅在有记忆写入时出现。
-- **F-04 / F-17 / F-18 仍闸门**：前两条是产品决定（属主语义；端点退役还是接线）。F-18 本轮
-  实测确认了"两条路互不感知"这一事实（同一支 dialog 源：老脚本落 `session_kai-dialog-20260501`，
-  ingest 落 `session_dialog-2026-05-01`，两套身份都在盘上、互不认对方），**但"是否打通"
-  仍要拍板**——打通的代价是给私有方言那侧补 identity_key，属新功能而不是缺陷修复。
+- **F-04 / F-18 已由拍板收口**（2026-09-21 第二批）：用户拍板"F-04 要给 CLI 加属主参数""F-18 打通"，
+  落地见 §7.4。此前把它们记成产品决定的判断仍成立——正因是决定，才需要拍板后才动。
+- **F-17 仍闸门**：退役 / 接线 / 声明"仅演示"三选一，属产品决定；本轮只做逐条说明（§7.5）。
+  另修正前批一处过期前提：计划写"UI 层无调用者"，实测 `MemoryPage.vue:863` **确实在调**。
+
+### 7.4 2026-09-21 拍板批（F-04 属主 / F-18 打通）
+
+用户拍板后落地两条，都按"在产生非法状态的一侧修"落地：
+
+**F-04 导入会话的用户归属**
+
+- 读侧规则不动：`list_sessions` / `delete` / `rename` 的过滤是"空属主=共享"，这条正确。
+  错的是导入侧生产了"没有属主"这份状态——多用户/多渠道下导入的他人历史对任意 `user_id`
+  可见，且可被任意用户改名或删除。
+- 修在 `SessionManager.import_session_messages(..., owner_user_id="")`（唯一导入写入口）：
+  缺省仍为空=共享（单用户桌面下的合法语义，与 `add_message` 缺省口径一致）；显式给属主时
+  写进会话文件 `user_id`，并随行落 `metadata.ingest.owner_user_id`。
+- **归属是只读事实**：`_reconcile_owner` 是唯一判定处。既有属主与本批不符、或用"共享"批次
+  去碰已有属主的会话（等价放宽可见范围）→ 抛 `SessionOwnerConflict` 整批拒绝；存量共享会话
+  被指定属主导入时回填（与 `add_message` 的 DATA-P1-1 同口径）。
+- **判定在任何写入之前**：`check_ingest_owners` 由 `apply_bundle` 在写第一字节前调用，
+  避免"前几支会话已落盘、后一支才抛"的半程导入；咽喉异常在 intake 收口成 `BundleError`。
+- 写入 → 读取 → 反馈闭环：`ingested_run_owners` 回读 + CLI `--owner-user-id` +
+  undo 报告印出"属主 u_alice，记忆 N 条、消息 M 条"，撤销不再是无名删除。
+
+**F-18 两条导入路收口到同一幂等域**
+
+- 实测的分裂是两套身份：同一支 dialog 源，老脚本落 `session_kai-dialog-20260501`（行键
+  `(kai_import.source, ts, 内容哈希)`），ingest 落 `session_dialog-2026-05-01`（行键
+  `metadata.ingest.identity_key`）——两套会话号 + 两套行键，互不认对方。
+- **修法不是给私有方言侧再补一份派生规则**（那是第二份事实源），而是让老脚本的会话导入
+  走产品链：删掉自造的 `SRC_PREFIX`/`_dedup_key`/`_derive_title`/`_SessionWriter`/三族
+  各自的抽取函数/`MAX_TOOL_RESULT` 截断（均无仓内第二消费方），`import_chats` 改为
+  逐 store `probe_store` 认指纹 → 转换器 → `apply_bundle`。会话号与行幂等键只在
+  `converters/` 定义一处，两条路的幂等域因此天然是同一个。
+- 分族计数从产出的包按 `session_id` 去重数出（一支会话表库里住着多场会话，按 store 计数
+  会把"几场会话"报成"几支库"）。
+- `intake.session_manager_for()` 收口会话库装配口径（CLI 与老脚本共用）。
+- 同批顺带修：`import_session_messages` 零新增批次不再落盘（原来即使 `added == 0` 也写回
+  一个 `updated_at`，给文件盖"这次动过"的章，幂等重跑就证明不了"空操作"——反方向 interop
+  用例抓到）；`apply_bundle` 包里有记忆却无人接时响亮拒绝，不静默丢那批记忆。
+
+判据（`tests/unit/memory_ingest/test_import_interop.py` 五个用例，双向都咬合）：
+老脚本先导 → 产品链零增量且文件字节不变；产品链先导 → 老脚本零增量且文件字节不变；
+会话号与产品链一致；落盘行带 `metadata.ingest.identity_key`。
+
+### 7.5 F-17 `POST /memory-enhancement/import` 的现状（待拍板 DEC-5）
+
+真后端实测（登录后打真端点，非读码推断）：
+
+- 端点写的是 `memory_enhancement.py` 的**进程内 dict** `_memories_store`：既不入 SQLite、
+  也不进 `MemoryManager`。实测导入返回 `Imported 1 memories`，但同一进程的 `GET /memory`
+  （管理页列表用）`count = 0`，而 `GET /memory-enhancement/categories` 报 1 条——说明写的是
+  另一个面，且那份 dict 重启即空。
+- `MemoryPage.vue:863` 的调用链是：导入弹窗确认 → `memoryApi.importMemories(...)`（打
+  `/memory-enhancement/import`）→ 提示"导入 N 条" → `fetchMemories()`（打 `GET /memory`）+
+  `fetchStats()`。两端点读写两个不同的面，所以这段代码实际实现的是"**点了确认、提示成功、
+  列表里什么都没有**"——报告说成功、用户看不到，属假成功。
+- 同文件的 `forget` / `strengthen` 端点实测落 `_memories_store`：`MemoryManager` 没有
+  `forget_memory`/`strengthen_memory` 两个方法（实测 `hasattr` 均为 False），那两个分支永不命中。
+  所以**删 UI 调用点解决不了问题**——得先定端点去留。
+- 去留三选一（退役并删前端 API / 接进 `MemoryManager.import_memories` / 保留但响应声明
+  "仅演示不落库"）仍是产品决定，本轮一行不改。
 
 ### 7.2 常驻判据
 

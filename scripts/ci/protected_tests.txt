@@ -200,3 +200,11 @@ tests/unit/skills/test_skill_entry_choke_migration.py
 # （阶跃边界 = 既有红灯 test_ebbinghaus_curve 的根因）+ 其余 5 组成建制死码退役锁定
 tests/unit/cognitive_layers/memory_layer/test_temperature_single_source.py
 
+
+# Issue #81 F-04/F-18：导入会话属主（归属落盘后只读）+ 两条导入路同一幂等域
+#   + 导入咽喉（唯一写入口）的既有回归（逐文件单跑确定全绿，已核）
+tests/unit/memory_ingest/test_import_interop.py
+tests/unit/memory_ingest/test_import_sessions.py
+tests/unit/memory_ingest/test_cli.py
+tests/unit/memory_ingest/test_intake.py
+tests/unit/migration/test_kai_import.py
