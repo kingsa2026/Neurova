@@ -7,22 +7,44 @@ SQLite WAL + FTS5：被驱逐/折叠的上下文 chunk 落库，重启后经 FTS
 拼接——所有隔离条件静态写死在每条查询里，天然通过参数化校验）。
 
 设计：
-- 每操作独立连接（WAL 已在 init 设置一次）
+- **一个常驻连接**（WAL + `synchronous=NORMAL` + `busy_timeout`）：写入口不再每次
+  connect/close。改前每行一次 connect + commit + close，24 条一轮在 10 万行存量库上
+  实测 214–318 ms/轮（规格 §2）；常驻连接 + 每轮一次事务为 0.78–0.91 ms/轮。
+- **批量事务**：`beginBatch()` / `commitBatch()` 让一次归档调用内的全部条目共用
+  一个事务，`commitBatch()` 返回前已提交（规格 D8 明确否掉异步/后台缓冲刷盘——
+  那会把崩溃窗口内的内容连同"已归档"的承诺一起丢掉）。
 - FTS5 独立表 + 手动双写（rowid 对齐内容表，GC 时对齐清理）
 - MATCH 语法错误安全降级为 LIKE 子串匹配
+- **schema 走 `core/db_migration` 的 `context_ledger` 版本域**（B4/002）：本库
+  此前只有 `CREATE TABLE IF NOT EXISTS`，没有 `user_version`，后续每次改 schema
+  都是裸改。v1 = `content_digest` / `created_at` / `chat_scope` 三列 +
+  `uniq_digest` 唯一索引 + `idx_scope_id` 索引，并回填既有行。
+- **作用域与时间另有读侧兜底**：v1 之前写入的行没有列值，`resolveArchivedScope`
+  / `resolveArchivedCreatedAt` 分别回退到 metadata（经单一事实源
+  `collaboration.memory_scope.scope_from_metadata`）与 `evicted_at`——
+  不新写第二份作用域规则。
 """
 
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from neurova.collaboration.memory_scope import scope_from_metadata
+from neurova.core.db_migration import migrate as applyMigrations, register_migration
+
 logger = logging.getLogger(__name__)
 
+LEDGER_DOMAIN = "context_ledger"
+
+# v1 基础结构（表 + 分区索引 + FTS 影子表）。后续 schema 变更只加新版本号，
+# 不再改这份基线 SQL。
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS evicted_chunks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,7 +55,10 @@ CREATE TABLE IF NOT EXISTS evicted_chunks (
     source TEXT,
     content TEXT NOT NULL,
     metadata TEXT,
-    evicted_at TEXT NOT NULL
+    evicted_at TEXT NOT NULL,
+    content_digest TEXT,
+    created_at TEXT,
+    chat_scope TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_evicted_user ON evicted_chunks(user_id, agent_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS evicted_fts USING fts5(
@@ -41,6 +66,147 @@ CREATE VIRTUAL TABLE IF NOT EXISTS evicted_fts USING fts5(
     tokenize='unicode61 remove_diacritics 2'
 );
 """
+
+# v1 之前的历史表结构（列是后加的）；用于迁移期加列判断，不参与新建库
+_V1_COLUMNS = ("content_digest", "created_at", "chat_scope")
+
+# `(user_id, agent_id, id)`：热集查询实测 0.9 ms；按 `session` 收尾是负优化
+# （33.9–35.5 ms），故索引以 `id` 收尾（规格 U4 定案）。
+_SCOPE_INDEX = (
+    "CREATE INDEX IF NOT EXISTS idx_scope_id ON evicted_chunks(user_id, agent_id, id)"
+)
+_DIGEST_INDEX = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS uniq_digest"
+    " ON evicted_chunks(user_id, agent_id, content_digest)"
+)
+
+
+def contentDigest(content: str) -> str:
+    """归档内容指纹：唯一索引与同内容去重的判据（非安全用途）。"""
+    return hashlib.sha256((content or "").encode("utf-8", errors="replace")).hexdigest()
+
+
+def archivedMetadata(row: sqlite3.Row) -> Dict[str, Any]:
+    """把一行读成 metadata dict（JSON 解析失败按无 metadata 处理，不抛）。"""
+    raw = _rowValue(row, "metadata")
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        logger.warning("归档行的 metadata 不是合法 JSON，按无 metadata 处理")
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def resolveArchivedScope(row: sqlite3.Row) -> str:
+    """解出归档行的作用域：列优先，缺失时回退解析 metadata（U1 甲案的配套）。
+
+    两路都经 `memory_scope.scope_from_metadata`——作用域规则只此一份，
+    不在这里重写"room: 前缀 / direct"的判定。
+    """
+    md = archivedMetadata(row)
+    if "chat_scope" not in md:
+        column = _rowValue(row, "chat_scope")
+        if column:
+            md["chat_scope"] = column
+    if "session_id" not in md:
+        session_id = _rowValue(row, "session_id")
+        if session_id:
+            md["session_id"] = session_id
+    return scope_from_metadata(md)
+
+
+def resolveArchivedCreatedAt(row: sqlite3.Row) -> datetime.datetime:
+    """归档时刻：`created_at` 列优先，旧行（NULL）回退 `evicted_at`。
+
+    缺了它，freshness 打分只能拿 `evicted_at` 顶替——那会让"归档时刻"与
+    "驱逐时刻"混为一谈。
+    """
+    for key in ("created_at", "evicted_at"):
+        value = _rowValue(row, key)
+        if value:
+            try:
+                return datetime.datetime.fromisoformat(str(value))
+            except ValueError:
+                logger.warning("归档行的 %s 不是 ISO 时间，继续回退", key)
+    return datetime.datetime.now()
+
+
+def _rowValue(row, key: str) -> Any:
+    """按列取值：sqlite3.Row / dict 通用；旧库缺该列时返回 None。"""
+    try:
+        keys = row.keys()
+    except AttributeError:
+        return None
+    return row[key] if key in keys else None
+
+
+def _mergeDuplicateContent(conn: sqlite3.Connection) -> int:
+    """合并 `(user_id, agent_id, content_digest)` 内的历史重复行（保留最早一条）。
+
+    唯一索引必须在合并之后建，否则旧库带重复行时迁移直接失败。被合并的
+    FTS 影子行同批删掉（否则两表行数脱节）。
+    """
+    rows = conn.execute(
+        "SELECT user_id, agent_id, content_digest, COUNT(*) AS c, MIN(id) AS keep_id"
+        " FROM evicted_chunks WHERE content_digest IS NOT NULL"
+        " GROUP BY user_id, agent_id, content_digest HAVING c > 1"
+    ).fetchall()
+    removed = 0
+    for row in rows:
+        victims = conn.execute(
+            "SELECT id FROM evicted_chunks"
+            " WHERE user_id = ? AND agent_id = ? AND content_digest = ? AND id != ?",
+            (row["user_id"], row["agent_id"], row["content_digest"], row["keep_id"]),
+        ).fetchall()
+        for victim in victims:
+            conn.execute("DELETE FROM evicted_chunks WHERE id = ?", (victim["id"],))
+            conn.execute("DELETE FROM evicted_fts WHERE rowid = ?", (victim["id"],))
+            removed += 1
+    if removed:
+        logger.info("归档库迁移：合并同内容重复行 %d 条（保留最早一条）", removed)
+    return removed
+
+
+def _backfillContentDigest(conn: sqlite3.Connection) -> int:
+    """既有行按内容重算 `content_digest`（唯一索引的判据来源）。
+
+    逐行 `executemany` 而非 50 万次单条 round-trip：大库上这是迁移耗时的主项
+    （实测 5 万行 0.52 s → 0.13 s），且仍在同一个迁移事务内，不引入长事务之外的
+    额外持锁窗口。
+    """
+    pending = conn.execute(
+        "SELECT id, content FROM evicted_chunks WHERE content_digest IS NULL"
+    ).fetchall()
+    if pending:
+        conn.executemany(
+            "UPDATE evicted_chunks SET content_digest = ? WHERE id = ?",
+            [(contentDigest(row["content"]), row["id"]) for row in pending],
+        )
+        logger.info("归档库迁移：回填 content_digest %d 行", len(pending))
+    return len(pending)
+
+
+def _migrateToV1(conn: sqlite3.Connection) -> None:
+    """v1：基础结构 + 三列 + 回填 + 唯一/作用域索引（旧库就地升级）。
+
+    用 `conn.execute` 而非 `executescript`：executescript 会先隐式提交当前事务，
+    迁移的显式事务与回滚语义就没了（`db_migration` 的 callable 步骤依赖它）。
+    """
+    for statement in filter(None, (s.strip() for s in _SCHEMA.split(";"))):
+        conn.execute(statement)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(evicted_chunks)")}
+    for name in _V1_COLUMNS:
+        if name not in columns:
+            conn.execute("ALTER TABLE evicted_chunks ADD COLUMN %s TEXT" % name)
+    _backfillContentDigest(conn)
+    _mergeDuplicateContent(conn)
+    conn.execute(_DIGEST_INDEX)
+    conn.execute(_SCOPE_INDEX)
+
+
+register_migration(1, _migrateToV1, domain=LEDGER_DOMAIN)
 
 
 class EvictionLedgerDB:
@@ -58,31 +224,104 @@ class EvictionLedgerDB:
         self.user_id = user_id
         self.agent_id = agent_id
         # P1-1③ 增强②：实例级保留参数（gc_stale 语义化封装用）
-        self.keep_count = 5000
-        self.keep_days = 30
         self.keep_count = keep_count
         self.keep_days = keep_days
+        # B4/003：一个常驻连接 + 一把锁（批量写与并发读共用，句柄不随每次写重建）
+        self._lock = threading.RLock()
+        self._batchDepth = 0
+        self._batchError: Optional[BaseException] = None
+        self._inTransaction = False
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        self._conn = self._openConnection()
+        try:
+            self._init_schema()
+        except Exception:
+            self.close()
+            raise
 
-    def gc_stale(self) -> int:
-        """按实例保留策略（keep_count/keep_days）清理；供定期触发调用。"""
-        return self.gc(keep_count=self.keep_count, keep_days=self.keep_days)
+    def _openConnection(self) -> sqlite3.Connection:
+        """常驻连接：WAL + `synchronous=NORMAL` + `busy_timeout`，事务显式管理。
+
+        `isolation_level=None` 关掉 sqlite3 的隐式 BEGIN：事务边界由
+        `beginBatch`/`commitBatch` 与单条 `record` 显式决定，不再受"隐式 BEGIN
+        与显式 BEGIN 打架"影响。
+        """
+        conn = sqlite3.connect(self.db_path, timeout=30, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.isolation_level = None
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA busy_timeout=10000")
+        return conn
+
+    def _requireConn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            raise sqlite3.ProgrammingError("台账连接已关闭（close() 后不可再写读）")
+        return self._conn
+
+    def close(self) -> None:
+        """释放常驻连接（幂等）；未结束的批量事务在此回滚，不留半提交状态。"""
+        with self._lock:
+            if self._conn is None:
+                return
+            if self._inTransaction:
+                try:
+                    self._conn.execute("ROLLBACK")
+                except sqlite3.Error:
+                    logger.warning("台账关闭时回滚未结束事务失败", exc_info=True)
+            self._conn.close()
+            self._conn = None
+            self._inTransaction = False
+            self._batchDepth = 0
+            self._batchError = None
 
     def _init_schema(self) -> None:
-        """建表 + WAL：幂等（IF NOT EXISTS），WAL 提升并发读写。"""
-        conn = self._connect()
-        try:
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.executescript(_SCHEMA)
-            conn.commit()
-        finally:
-            conn.close()
+        """WAL + 版本化迁移：schema 变更只经 `context_ledger` 版本域承载。
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        Raises:
+            SchemaVersionError: 库版本高于代码已知版本（防降级，沿用 db_migration 防护）
+        """
+        with self._lock:
+            applyMigrations(self._requireConn(), LEDGER_DOMAIN)
+
+    def beginBatch(self) -> None:
+        """开启批量事务（可嵌套：只有最外层真正开/提交事务）。"""
+        with self._lock:
+            if self._batchError is not None:
+                error, self._batchError = self._batchError, None
+                raise error
+            if self._batchDepth == 0:
+                self._requireConn().execute("BEGIN")
+                self._inTransaction = True
+            self._batchDepth += 1
+
+    def commitBatch(self) -> None:
+        """提交批量事务。批内任一条写失败 → 不提交并上抛该失败（整批回滚）。"""
+        with self._lock:
+            if self._batchDepth == 0:
+                return
+            self._batchDepth -= 1
+            if self._batchDepth > 0:
+                return
+            error, self._batchError = self._batchError, None
+            if error is not None:
+                self.rollbackBatch()
+                raise error
+            if self._inTransaction:
+                self._requireConn().execute("COMMIT")
+                self._inTransaction = False
+
+    def rollbackBatch(self) -> None:
+        """放弃批量事务（不抛）：调用方在批内失败时用它收口，避免留下半提交状态。"""
+        with self._lock:
+            if self._inTransaction:
+                try:
+                    self._requireConn().execute("ROLLBACK")
+                except sqlite3.Error:
+                    logger.warning("台账批量回滚失败", exc_info=True)
+                self._inTransaction = False
+            self._batchDepth = 0
+            self._batchError = None
 
     def record(
         self,
@@ -92,33 +331,78 @@ class EvictionLedgerDB:
         session_id: Optional[str] = None,
         source: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        chat_scope: Optional[str] = None,
+        created_at: Optional[str] = None,
     ) -> None:
-        """记录一次驱逐；content 同时写入 FTS 表。"""
+        """记录一次归档；content 同时写入 FTS 表。
+
+        `chat_scope` / `created_at` 落独立列（U1/U3 定案），读侧另有对旧行的
+        兜底（见 `resolveArchivedScope` / `resolveArchivedCreatedAt`）。未显式传入
+        `chat_scope` 时按 metadata 经**同一份**作用域规则（`scope_from_metadata`）
+        解出——不在这里重写第二份判定。
+
+        同 `(user_id, agent_id, content_digest)` 重复归档按去重语义忽略
+        （`ON CONFLICT ... DO NOTHING` 只吞这一条唯一约束，其余约束冲突照常上抛——
+        不写成 `INSERT OR IGNORE`，那会把真正的写入错误一起吞掉）。
+        """
         now = datetime.datetime.now().isoformat()
-        conn = self._connect()
-        try:
-            cur = conn.execute(
-                "INSERT INTO evicted_chunks"
-                " (user_id, agent_id, session_id, turn_id, source, content, metadata, evicted_at)"
-                " VALUES (:user_id, :agent_id, :session_id, :turn_id, :source, :content, :metadata, :evicted_at)",
-                {
-                    "user_id": self.user_id,
-                    "agent_id": self.agent_id,
-                    "session_id": session_id,
-                    "turn_id": turn_id,
-                    "source": source,
-                    "content": content,
-                    "metadata": json.dumps(metadata, ensure_ascii=False, default=str) if metadata else None,
-                    "evicted_at": now,
-                },
-            )
-            conn.execute(
-                "INSERT INTO evicted_fts(rowid, content) VALUES (:rowid, :content)",
-                {"rowid": cur.lastrowid, "content": content},
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        scopeSource = dict(metadata or {})
+        if session_id is not None:
+            scopeSource["session_id"] = session_id
+        scope = chat_scope or scope_from_metadata(scopeSource)
+        with self._lock:
+            conn = self._requireConn()
+            if self._inTransaction:
+                # 批量内：不提交，失败时把原因记在批次上——由 commitBatch 统一上抛
+                # 并整批回滚（一次归档调用 = 一个事务，规格 D8）。
+                try:
+                    self._insert(conn, content=content, turn_id=turn_id, session_id=session_id,
+                                 source=source, metadata=metadata, evicted_at=now,
+                                 scope=scope, created_at=created_at or now)
+                except Exception as exc:
+                    if self._batchError is None:
+                        self._batchError = exc
+                    raise
+                return
+            conn.execute("BEGIN")
+            try:
+                self._insert(conn, content=content, turn_id=turn_id, session_id=session_id,
+                             source=source, metadata=metadata, evicted_at=now,
+                             scope=scope, created_at=created_at or now)
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+    def _insert(self, conn, *, content, turn_id, session_id, source, metadata,
+                evicted_at, scope, created_at) -> None:
+        """单条落库（内容表 + FTS 影子表）；事务边界由调用方决定。"""
+        cur = conn.execute(
+            "INSERT INTO evicted_chunks"
+            " (user_id, agent_id, session_id, turn_id, source, content, metadata,"
+            "  evicted_at, content_digest, created_at, chat_scope)"
+            " VALUES (:user_id, :agent_id, :session_id, :turn_id, :source, :content, :metadata,"
+            "  :evicted_at, :content_digest, :created_at, :chat_scope)"
+            " ON CONFLICT (user_id, agent_id, content_digest) DO NOTHING",
+            {
+                "user_id": self.user_id,
+                "agent_id": self.agent_id,
+                "session_id": session_id,
+                "turn_id": turn_id,
+                "source": source,
+                "content": content,
+                "metadata": json.dumps(metadata, ensure_ascii=False, default=str) if metadata else None,
+                "evicted_at": evicted_at,
+                "content_digest": contentDigest(content),
+                "created_at": created_at,
+                "chat_scope": scope,
+            },
+        )
+        if cur.rowcount == 0:
+            return
+        conn.execute(
+            "INSERT INTO evicted_fts(rowid, content) VALUES (:rowid, :content)",
+            {"rowid": cur.lastrowid, "content": content},
+        )
 
     def search(
         self,
@@ -131,10 +415,21 @@ class EvictionLedgerDB:
         unicode61 分词器不切 CJK（连续中文整块成词），中文查询在 FTS 下
         常返回空——空结果自动降级 LIKE 子串匹配。
         """
+        with self._lock:
+            return self._search(query=query, session_id=session_id, limit=limit)
+
+    def _search(
+        self,
+        query: Optional[str] = None,
+        session_id: Optional[str] = None,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """召回主体（调用方须持 `_lock`：常驻连接不可并发使用）。"""
+        conn = self._requireConn()
         if query:
             hits: List[Dict[str, Any]] = []
             try:
-                hits = self._connect().execute(
+                hits = conn.execute(
                     "SELECT e.*, e.id AS _row FROM evicted_chunks e"
                     " JOIN evicted_fts f ON e.id = f.rowid"
                     " WHERE e.user_id = :user_id AND e.agent_id = :agent_id"
@@ -153,7 +448,7 @@ class EvictionLedgerDB:
                 logger.info("FTS query failed, fallback to LIKE search")
 
             if not hits:
-                hits = self._connect().execute(
+                hits = conn.execute(
                     "SELECT *, id AS _row FROM evicted_chunks"
                     " WHERE user_id = :user_id AND agent_id = :agent_id"
                     " AND content LIKE :like"
@@ -169,7 +464,7 @@ class EvictionLedgerDB:
                 ).fetchall()
             return hits
 
-        return self._connect().execute(
+        return conn.execute(
             "SELECT *, id AS _row FROM evicted_chunks"
             " WHERE user_id = :user_id AND agent_id = :agent_id"
             " AND (:session_id IS NULL OR session_id = :session_id)"
@@ -184,7 +479,11 @@ class EvictionLedgerDB:
         return f'"{escaped}"'
 
     def count(self) -> int:
-        row = self._connect().execute(
+        with self._lock:
+            return self._count()
+
+    def _count(self) -> int:
+        row = self._requireConn().execute(
             "SELECT COUNT(*) AS c FROM evicted_chunks"
             " WHERE user_id = :user_id AND agent_id = :agent_id",
             {"user_id": self.user_id, "agent_id": self.agent_id},
@@ -198,35 +497,46 @@ class EvictionLedgerDB:
     def gc(self, keep_count: Optional[int] = None, keep_days: Optional[int] = None) -> int:
         """按保留条数/天数清理本用户的过期台账；返回清理数量。"""
         removed = 0
-        conn = self._connect()
-        try:
-            if keep_days is not None:
-                cutoff = (
-                    datetime.datetime.now() - datetime.timedelta(days=keep_days)
-                ).isoformat()
-                cur = conn.execute(
-                    "DELETE FROM evicted_chunks"
-                    " WHERE user_id = :user_id AND agent_id = :agent_id"
-                    " AND evicted_at < :cutoff",
-                    {"user_id": self.user_id, "agent_id": self.agent_id, "cutoff": cutoff},
-                )
-                removed += cur.rowcount
-            if keep_count is not None:
-                cur = conn.execute(
-                    "DELETE FROM evicted_chunks WHERE id IN ("
-                    "  SELECT id FROM evicted_chunks"
-                    "  WHERE user_id = :user_id AND agent_id = :agent_id"
-                    "  ORDER BY id DESC LIMIT -1 OFFSET :keep_count"
-                    ")",
-                    {"user_id": self.user_id, "agent_id": self.agent_id, "keep_count": keep_count},
-                )
-                removed += cur.rowcount
+        with self._lock:
+            conn = self._requireConn()
+            conn.execute("BEGIN")
+            try:
+                removed = self._purge(conn, keep_count=keep_count, keep_days=keep_days)
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+        return removed
 
-            # FTS 与内容表对齐：清掉不在内容表里的 FTS 行
-            conn.execute(
-                "DELETE FROM evicted_fts WHERE rowid NOT IN (SELECT id FROM evicted_chunks)"
+    def _purge(
+        self, conn: sqlite3.Connection, *, keep_count: Optional[int], keep_days: Optional[int]
+    ) -> int:
+        """执行保留策略清理（调用方须已开启事务）。"""
+        removed = 0
+        if keep_days is not None:
+            cutoff = (
+                datetime.datetime.now() - datetime.timedelta(days=keep_days)
+            ).isoformat()
+            cur = conn.execute(
+                "DELETE FROM evicted_chunks"
+                " WHERE user_id = :user_id AND agent_id = :agent_id"
+                " AND evicted_at < :cutoff",
+                {"user_id": self.user_id, "agent_id": self.agent_id, "cutoff": cutoff},
             )
-            conn.commit()
-        finally:
-            conn.close()
+            removed += cur.rowcount
+        if keep_count is not None:
+            cur = conn.execute(
+                "DELETE FROM evicted_chunks WHERE id IN ("
+                "  SELECT id FROM evicted_chunks"
+                "  WHERE user_id = :user_id AND agent_id = :agent_id"
+                "  ORDER BY id DESC LIMIT -1 OFFSET :keep_count"
+                ")",
+                {"user_id": self.user_id, "agent_id": self.agent_id, "keep_count": keep_count},
+            )
+            removed += cur.rowcount
+
+        # FTS 与内容表对齐：清掉不在内容表里的 FTS 行
+        conn.execute(
+            "DELETE FROM evicted_fts WHERE rowid NOT IN (SELECT id FROM evicted_chunks)"
+        )
         return removed
