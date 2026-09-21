@@ -485,6 +485,254 @@ def _entry(file: str, line: int, ref: str, verdict: str, hit: str) -> dict:
     return {"file": file, "line": line, "ref": ref, "verdict": verdict, "hit": hit}
 
 
+# ---------------------------------------------------------------------------
+# 归档层「是否影响当下导航」筛选（Issue #68 下一层）
+# ---------------------------------------------------------------------------
+# 归档层 1800 余条悬空引用不是同一件事，不能一视同仁：
+#
+# - 绝大多数只陈述**当时**的路径，读者今天走不到那篇文档，改它等于改写历史事实；
+# - 真正会把人带错路的只有两类：**当下走得到**的文档里，**点开就 404** 的可点击引用，
+#   以及**专职指路**的文档里失效的指路条目。
+#
+# 判据两要件（全部成立才入筛，只此一份，台账与守卫同源取数）：
+#
+# 1. **载体在当下导航图里可达**：从仓库入口文档出发，沿「可解析链接 + 目录链接」
+#    做传递闭包（与 `activeLayerDangling` 同一套解析，不另写判据）。走不到的文档，
+#    它的失效引用不构成当下导航问题。
+# 2. **载体满足二者之一**：
+#    - `甲·可点击引用`：Markdown 链接 / 图片 / HTML `src|href`，点开即 404。
+#      **硬零**——与活跃层同一条纪律，本类必须修完。
+#    - `乙·指路条目`：载体是**导航承载文档**（`INDEX.md` / `README.md` 文件名，
+#      或标题含「清单 / 索引 / 图谱 / 单一事实源」）。这类文档存在的意义就是
+#      把人指向别处，其中失效的条目即使写成行内码也会把人带错，
+#      故不适用「归档层不就地改写」——但整篇级过期不是改路径能解决的，登记 + 立项。
+#
+# 不入筛的三类（豁免理由可复算，不接受「人工看过了没事」）：
+#   - `无当下读者`：载体不在导航图里；
+#   - `描述性行内码`：既不可点击、载体也不是导航承载文档——归档正文里的路径陈述；
+#   - `占位/模板路径`（`daily_reports/YYYY-MM-DD.md`、`neurova/xxx/yyy.py`）不是真实目标。
+
+#: 导航承载文档的标题特征（文档存在的意义是指路，不是叙事）
+NARRATIVE_TITLE_PATTERN = re.compile(r"清单|索引|图谱|单一事实源")
+#: 占位/模板形态的具体路径：不是任何真实目标，改指无从谈起
+PLACEHOLDER_PATH_PATTERN = re.compile(r"YYYY|MM-DD|\bxxx\b|\byyy\b|<[^>]+>")
+
+IMPACT_FORM_CLICKABLE = "甲·可点击引用"
+IMPACT_FORM_POINTER = "乙·指路条目"
+
+DISPOSITION_REPOINT = "改指真实路径"
+DISPOSITION_DESTINATION = "改显式文本交代去处"
+DISPOSITION_PROJECT = "单独立项（整篇级过期）"
+
+EXEMPT_UNREACHABLE = "无当下读者（不在导航图内）"
+EXEMPT_NARRATIVE = "描述性行内码（不可点击且非指路文档）"
+EXEMPT_PLACEHOLDER = "占位/模板路径（非真实目标）"
+
+
+def documentLinksFrom(relative: str) -> list:
+    """单篇文档里**仓库内**的引用目标原文（Markdown 链接 + HTML src/href）。
+
+    只取目标字符串，不判可达性——可达性解析统一走 `resolveTarget`，
+    避免"导航图一份解析、悬空判定另一份解析"的双源。
+    """
+    path = PROJECT_ROOT / relative
+    if not path.is_file():
+        return []
+    text = io.open(path, encoding="utf-8", errors="replace").read()
+    targets, inFence = [], False
+    for line in text.splitlines():
+        if _isFenceLine(line):
+            inFence = not inFence
+            continue
+        if inFence:
+            continue
+        skip = _codeSpanRanges(line)
+        matches = [(m.start(), m.group(2).strip()) for m in LINK_PATTERN.finditer(line)]
+        matches += [(m.start(), m.group("target").strip()) for m in HTML_REF_PATTERN.finditer(line)]
+        for position, target in sorted(matches):
+            if any(start <= position < stop for start, stop in skip):
+                continue
+            targets.append(target)
+    return targets
+
+
+#: 导航起点：仓库入口文档 + `docs/` 目录自述的唯一入口。
+#: `docs/0-index/README.md` 正文写明"本索引是 `docs/` 目录的唯一入口"，且被
+#: `AGENTS.md` 点名，读者从根目录出发的第一跳就是它——不认它，`docs/` 下
+#: 按领域分层的文档全都成了"无人走得到"，筛选会退化成空集（自证见守卫）。
+NAVIGATION_ROOTS = ENTRY_DOCUMENTS | frozenset({"docs/0-index/README.md"})
+
+
+def readerReachableDocuments() -> set:
+    """当下导航图里可达的文档（从导航起点做传递闭包）。
+
+    目录链接（`docs/09-dev-progress/module_designs/`）算作可达其下的全部文档——
+    读者点进目录就能逐篇打开。起点取自 `NAVIGATION_ROOTS`（单源）。
+    """
+    files = set(trackedFiles())
+    byBasename = indexByBasename(trackedFiles())
+    reached = set(NAVIGATION_ROOTS)
+    pending = list(NAVIGATION_ROOTS)
+    while pending:
+        current = pending.pop()
+        base = (PROJECT_ROOT / current).parent
+        for target in documentLinksFrom(current):
+            literal = target.split("#")[0].strip()
+            if not literal or literal.startswith(EXTERNAL_PREFIXES):
+                continue
+            if literal.endswith("/"):
+                folder = base / literal
+                if not folder.is_dir():
+                    continue
+                prefix = displayPath(folder.resolve()) + "/"
+                for path in files:
+                    if path.startswith(prefix) and path.endswith(".md") and path not in reached:
+                        reached.add(path)
+                        pending.append(path)
+                continue
+            verdict, hit = resolveTarget(literal, PROJECT_ROOT / current, byBasename)
+            if verdict == VERDICT_REACHABLE and hit in files and hit.endswith(".md") and hit not in reached:
+                reached.add(hit)
+                pending.append(hit)
+    return reached
+
+
+def isNavigationBearing(relative: str) -> bool:
+    """载体是否是「专职指路」的文档（INDEX/README 文件名，或标题写明清单/索引/图谱/单一事实源）。"""
+    if relative.split("/")[-1] in ("INDEX.md", "README.md"):
+        return True
+    path = PROJECT_ROOT / relative
+    if not path.is_file():
+        return False
+    for line in io.open(path, encoding="utf-8", errors="replace").read().splitlines():
+        heading = re.match(r"^#\s+(.*)$", line.strip())
+        if heading:
+            return bool(NARRATIVE_TITLE_PATTERN.search(heading.group(1)))
+    return False
+
+
+def archiveDanglingUnion() -> list:
+    """归档层全部悬空引用，**两种书写形态取并集**。
+
+    `scanDirectory` 只看行内码与空标签；可点击链接的目标在另一条解析路上
+    （`scanDocumentLinks`）。只看其一都会漏——这正是前几轮"洞换个位置"的来路。
+    每条带 `form` 标记（`行内码` / `可点击`），供筛选区分处置。
+    """
+    byBasename = indexByBasename(trackedFiles())
+    found = {}
+    for layer in sorted(HISTORICAL_LAYERS):
+        directory = PROJECT_ROOT / layer.rstrip("/")
+        if not directory.is_dir():
+            continue
+        for item in scanDirectory(directory):
+            found[(item["file"], item["line"], item["ref"])] = dict(item, form="行内码")
+        for path in sorted(directory.rglob("*.md")):
+            relative = displayPath(path)
+            if relative in LEDGER_DOCUMENTS:
+                continue
+            for item in scanDocumentLinks(path, byBasename):
+                key = (item["file"], item["line"], item["ref"])
+                if key in found:
+                    continue
+                found[key] = dict(item, form="可点击")
+    return sorted(found.values(), key=lambda item: (item["file"], item["line"], item["ref"]))
+
+
+def navigationImpactRefs() -> list:
+    """筛选出**真正影响当下导航**的归档层失效引用，并给出逐条处置。
+
+    不入筛的条目由 `navigationImpactExemptions()` 按理由计数登记——
+    筛选不是"眼不见为净"，被豁免的每一条都能说出为什么。
+    """
+    reached = readerReachableDocuments()
+    rows = []
+    for item in archiveDanglingUnion():
+        if PLACEHOLDER_PATH_PATTERN.search(item["ref"]):
+            continue
+        if item["file"] not in reached:
+            continue
+        if item["form"] == "可点击":
+            form = IMPACT_FORM_CLICKABLE
+            disposition = (DISPOSITION_REPOINT if item["verdict"] == VERDICT_MOVED
+                           else DISPOSITION_DESTINATION)
+        elif isNavigationBearing(item["file"]):
+            form = IMPACT_FORM_POINTER
+            disposition = DISPOSITION_PROJECT
+        else:
+            continue
+        rows.append(dict(item, form=form, disposition=disposition))
+    return rows
+
+
+def navigationImpactExemptions() -> dict:
+    """被筛掉的条目按理由计数（理由取自同一判据，不另写一套）。"""
+    reached = readerReachableDocuments()
+    counters = {EXEMPT_UNREACHABLE: 0, EXEMPT_NARRATIVE: 0, EXEMPT_PLACEHOLDER: 0}
+    for item in archiveDanglingUnion():
+        if PLACEHOLDER_PATH_PATTERN.search(item["ref"]):
+            counters[EXEMPT_PLACEHOLDER] += 1
+        elif item["file"] not in reached:
+            counters[EXEMPT_UNREACHABLE] += 1
+        elif item["form"] != "可点击" and not isNavigationBearing(item["file"]):
+            counters[EXEMPT_NARRATIVE] += 1
+    return counters
+
+
+#: 入筛指路条目数的棘轮基线（只降不升）
+POINTER_ENTRY_BASELINE = PROJECT_ROOT / "tests" / "unit" / "archiveNavPointerBaseline.txt"
+
+NAV_IMPACT_BEGIN = "<!-- NAV-IMPACT:TABLE:BEGIN -->"
+NAV_IMPACT_END = "<!-- NAV-IMPACT:TABLE:END -->"
+NAV_IMPACT_SUMMARY_BEGIN = "<!-- NAV-IMPACT:SUMMARY:BEGIN -->"
+NAV_IMPACT_SUMMARY_END = "<!-- NAV-IMPACT:SUMMARY:END -->"
+
+
+def renderNavigationImpactSummary(rows: list) -> str:
+    """入筛条目总数、形态分布、按载体分布，以及豁免理由计数。"""
+    byForm, byFile = {}, {}
+    for row in rows:
+        byForm[row["form"]] = byForm.get(row["form"], 0) + 1
+        byFile[row["file"]] = byFile.get(row["file"], 0) + 1
+    counters = navigationImpactExemptions()
+    lines = [
+        NAV_IMPACT_SUMMARY_BEGIN,
+        f"归档层悬空引用共 **{len(archiveDanglingUnion())}** 条，"
+        f"其中**影响当下导航 {len(rows)} 条**（"
+        + " · ".join(f"{form} {count}" for form, count in sorted(byForm.items()))
+        + "）。",
+        "",
+        "| 载体文档 | 入筛条数 |",
+        "|------|------|",
+    ]
+    for path, count in sorted(byFile.items(), key=lambda kv: (-kv[1], kv[0])):
+        lines.append(f"| `{path}` | {count} |")
+    lines.append("")
+    lines.append("余下按理由豁免（可复算，非人工判断）：")
+    lines.append("")
+    lines.append("| 豁免理由 | 条数 |")
+    lines.append("|------|------|")
+    for reason, count in sorted(counters.items()):
+        lines.append(f"| {reason} | {count} |")
+    lines.append(NAV_IMPACT_SUMMARY_END)
+    return "\n".join(lines)
+
+
+def renderNavigationImpact(rows: list) -> str:
+    """入筛条目逐条台账（载体 / 行号 / 引用 / 形态 / 可达性判定 / 处置）。"""
+    lines = [
+        NAV_IMPACT_BEGIN,
+        "| 载体文档 | 行 | 引用 | 形态 | 可达性判定 | 处置 |",
+        "|------|----|------|------|------|------|",
+    ]
+    for row in sorted(rows, key=lambda r: (r["file"], r["line"], r["ref"])):
+        lines.append(
+            f"| `{row['file']}` | {row['line']} | {_code(row['ref'])} | {row['form']} "
+            f"| {row['verdict']} | {row['disposition']} |"
+        )
+    lines.append(NAV_IMPACT_END)
+    return "\n".join(lines)
+
+
 def scanDirectory(targetDir: Path) -> list:
     """扫描目录下全部 Markdown，按（文件, 行号, 引用）去重。"""
     byBasename = indexByBasename(trackedFiles())

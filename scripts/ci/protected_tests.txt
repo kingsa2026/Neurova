@@ -275,3 +275,11 @@ tests/unit/cognitive_layers/memory_layer/test_conflict_disposition_loop.py
 #   活跃层指向不存在文件的引用一路无人拦。判据单源在 scripts/scan_docs_refs.py
 #   的 activeLayerDangling()，活跃层零容忍（硬零，不是棘轮）。
 tests/unit/test_active_layer_refs_guard.py
+
+# Issue #68 下一层：归档层 1800 余条按「是否影响当下导航」再筛一轮。
+#   前序口径把归档层一视同仁为「历史留痕，不就地改写」，副作用是把两类不同性质
+#   混在一起：绝大多数条目的载体今天没人走得到；少数条目的载体**导航可达**，
+#   其中可点击的引用点开就 404。判据单源在 scripts/scan_docs_refs.py 的
+#   navigationImpactRefs()（导航图传递闭包 + 可点击/指路两形态），
+#   甲类可点击硬零，乙类指路条目必须立项承接（登记不代替立项）。
+tests/unit/test_archive_nav_impact_guard.py
