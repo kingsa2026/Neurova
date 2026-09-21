@@ -995,13 +995,18 @@ class KnowledgeFactStore:
         """
         if validFrom is None and validUntil is None:
             return
+        # 归一与新建行同一条：窗口是"瞬时"不是字面串，混着 Z / +08:00 / 无时区写进去，
+        # 文本序会把"已到期"读成"未到期"。normalise 落在这两列的唯一写入口上，
+        # 不要求每个调用方自觉传 UTC。
+        windowFrom = _instant(validFrom) if validFrom else None
+        windowUntil = _instant(validUntil) if validUntil else None
         with self._lock, self._conn:
             self._conn.execute(
                 "UPDATE knowledge_facts SET"
                 " valid_from = COALESCE(valid_from, ?),"
                 " valid_until = COALESCE(valid_until, ?)"
                 " WHERE fact_id = ?",
-                (validFrom, validUntil, factId),
+                (windowFrom, windowUntil, factId),
             )
 
     def setValidUntil(self, factId: str, validUntil: Optional[str]) -> None:
