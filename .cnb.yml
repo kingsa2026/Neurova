@@ -376,7 +376,7 @@ $:
           options:
             # 不写 model = 走平台默认模型（规避 400）；
             # 想锁定底座模型时，填平台真实存在的 model ID（不带思考强度后缀）。
-            maxTurns: 500
+            maxTurns: 1000
             contextWindow: 1m
             maxTokens: 48k
             # 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故落 xhigh。
