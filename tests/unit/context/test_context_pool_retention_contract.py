@@ -26,7 +26,10 @@ class _FakeLedgerDB:
         self.rows = []
         self.gc_calls = 0
 
-    def record(self, *, content, turn_id=None, session_id=None, source=None, metadata=None):
+    def record(
+        self, *, content, turn_id=None, session_id=None, source=None, metadata=None,
+        chat_scope=None, created_at=None,
+    ):
         self.rows.append({"content": content, "turn_id": turn_id, "source": source})
 
     def gc_stale(self):
