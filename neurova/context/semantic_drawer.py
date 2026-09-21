@@ -7,6 +7,8 @@ from __future__ import annotations
 """
 
 import hashlib
+from dataclasses import replace
+
 from neurova.core.logger import get_logger
 import math
 import re
@@ -147,14 +149,24 @@ class SemanticMatchDrawer:
             elif drop_tokens > self.max_tokens and self.max_tokens > 200:
                 # 审验闭环（2026-09-10）：单条超预算的大归档截断召回（尾部省略注记），
                 # 不再整条跳过——否则长消息被窗口折叠后永远无法召回（对话连续性断裂）。
-                # 截断只影响本次视图，池内原文仍无损。
+                #
+                # P0-3：截断**只能产出视图副本**。collect() 返回的是归档列表里的同一批
+                # 对象引用，旧实现在这里直接 `drop.content = truncated` 就地改写归档
+                # 实体——被截掉的部分没有任何其他副本（违反"永不丢失"），且 hash（来源域
+                # + 原文指纹）不重算 → 索引与内容失配 → 后续归档原文会被去重当作
+                # "已存在"跳过，丢失不可挽回。改用 dataclasses.replace 产副本，
+                # 副本显式标注 truncated_from=原文 hash（可追溯、可重调取）。
                 content = str(drop.content or "")
                 keep_chars = self._chars_for_token_budget(content, self.max_tokens)
                 truncated = content[:keep_chars] + "…[召回截断，全文见会话记录]"
-                drop.content = truncated
-                drop.tokens = self._estimate_tokens(truncated)
-                selected.append(drop)
-                total_tokens += drop.tokens
+                view_copy = replace(
+                    drop,
+                    content=truncated,
+                    tokens=self._estimate_tokens(truncated),
+                    metadata={**(drop.metadata or {}), "truncated_from": drop.hash},
+                )
+                selected.append(view_copy)
+                total_tokens += view_copy.tokens
             # 其余超预算：整条跳过并继续尝试更小的条目（不截断内容、不中断选取）
 
         # [缓存稳定] 最终顺序按 created_at 稳定排序：
