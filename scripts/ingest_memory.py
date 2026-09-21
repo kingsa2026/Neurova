@@ -193,6 +193,10 @@ def _apply(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
             print(f"已写入 {label} run_id={report.run_id}：消息 +{report.messages_added}"
                   f"/跳过 {report.messages_skipped}，会话文件 {report.sessions_touched} 个，"
                   f"记忆 +{report.memories_added}/跳过 {report.memories_skipped}")
+            if report.memories_added:
+                # 记忆面与运行中的后端各持一份内存表（后端只在构造时读一次盘），会话面才是
+                # 读盘即见。不把这点说出来，报告写着"已写入"而界面上一条看不见，是第三种假成功。
+                print("  可见性：会话读盘即见；记忆要在后端启动时读盘，已在运行的后端需重启后才可见")
             print(f"  撤销：python scripts/ingest_memory.py undo --agent-id {args.agent_id} "
                   f"--run-id {report.run_id}")
         if blocked:
