@@ -202,4 +202,15 @@ tests/unit/api/test_skill_rollback_governance.py
 # Issue #74 温度衰减双实现收敛：单一事实源（第二套实现不得回加）+ 连续衰减曲线
 # （阶跃边界 = 既有红灯 test_ebbinghaus_curve 的根因）+ 其余 5 组成建制死码退役锁定
 tests/unit/cognitive_layers/memory_layer/test_temperature_single_source.py
-
+# 上下文三链路修复批（Issue #90）B1 尺子：token 估算单一事实源 + 判据侧不得低估
+#   （P0-1 根因：BALANCED 对英文/JSON/无空格长串低估 20 倍量级 → 折叠永不触发）
+tests/unit/context/test_token_estimator_calibration.py
+tests/unit/context/test_token_estimation_inconsistency.py
+# 上下文三链路修复批（Issue #90）B2 隔离写入口：归档即带作用域（群聊不泄入单聊）
+#   + 折叠摘要缓存按真作用域分槽（P1-1 跨会话串台）+ D2 缓存槽上限收口
+tests/unit/context/test_pool_scope_wiring.py
+tests/context/test_context_pool_hash_index.py
+# 上下文三链路修复批（Issue #90）B3 装配收口：视图截断只产副本（归档实体永不
+#   就地改写/hash 不失配）+ 摘要沿用旧摘要不算"本轮成功"（不谎报覆盖）
+tests/unit/context/test_draw_never_mutates_archive.py
+tests/unit/context/test_summary_failure_not_reported_success.py
