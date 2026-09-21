@@ -238,6 +238,7 @@ def test_memory_without_readable_time_is_declared_not_imported(tmp_path: Path):
 
 
 def test_non_message_events_are_declared(tmp_path: Path):
+    """非 message 事件按类型申报；缺 id 本身不是丢弃理由（id 不是我们的不变量）。"""
     events = [
         ("ses_a", 1, _event("e1", "message", {"role": "user",
                                               "content": [{"type": "text", "text": "甲"}]}), 1),
@@ -250,7 +251,7 @@ def test_non_message_events_are_declared(tmp_path: Path):
     fields = {e["field"]: e["count"] for e in manifest.dropped}
 
     assert fields["event:compaction"] == 1 and fields["event:model_switch"] == 1
-    assert fields["event:<无id>"] == 1
+    assert fields["event:no_id"] == 1
     assert manifest.counts["transcripts"] == 1
 
 
@@ -479,3 +480,42 @@ def test_converted_memories_apply_and_undo(tmp_path: Path, manager, sessions):
     removed = report.undo(manager=manager, sessions=sessions)
 
     assert removed[0] == 1 and manager._memories == {}
+
+
+def test_reused_source_event_id_does_not_kill_the_store(tmp_path: Path):
+    """源行复用同一个 event id 时，包内幂等键必须仍唯一（否则整支 store 被判死）。
+
+    取证：该平台建表语句里 transcript_events 的主键是 (session_id, seq)，而 event id 的
+    唯一性由另一张 transcript_event_identities 表承担（主键 (session_id, event_id)）；
+    指纹只认两张会话表，不要求 identities，因此老库没有这道保证。上游自己的
+    copyRetainedTranscriptPayload 也会把同一条事件按新 seq 再落一份（只修 parentId），
+    证明"同 id 不同 seq"是可出现的形状——幂等域只能立在行自己的主键上。
+    """
+    events = [("ses_a", 7, _event("dup", "message", {"role": "user", "content": [
+        {"type": "text", "text": "甲"}]}), 1),
+        ("ses_a", 9, _event("dup", "message", {"role": "assistant", "content": [
+            {"type": "text", "text": "乙"}]}), 2)]
+
+    manifest = convert(_db(tmp_path, events=events), tmp_path / "bundle", agent_name="x")
+
+    assert validate_bundle(tmp_path / "bundle") == []
+    rows = sorted(_rows(tmp_path / "bundle").values(), key=lambda r: r["seq"])
+    assert [r["content_blocks"][0]["text"] for r in rows] == ["甲", "乙"]
+    assert len({r["identity_key"] for r in rows}) == 2
+    assert any(e["field"] == "事件id:复用" and e["count"] == 1 for e in manifest.dropped)
+
+
+def test_message_event_without_id_is_still_carried(tmp_path: Path):
+    """event id 在源侧是可选的（读侧要求非空字符串，否则该行根本没有 identity 记录）。
+
+    幂等键立在行主键上以后，没有 id 的正文行不再被当成"读不出的事件"丢掉。
+    """
+    events = [("ses_a", 3, json.dumps({"type": "message", "message": {
+        "role": "user", "content": [{"type": "text", "text": "无 id 的正文"}]}}), 1)]
+
+    manifest = convert(_db(tmp_path, events=events), tmp_path / "bundle", agent_name="x")
+
+    assert manifest.counts["transcripts"] == 1
+    record = next(iter(_rows(tmp_path / "bundle").values()))
+    assert record["content_blocks"][0]["text"] == "无 id 的正文"
+    assert not any(e["field"].startswith("event:<无id>") for e in manifest.dropped)
