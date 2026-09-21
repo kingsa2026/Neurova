@@ -50,18 +50,25 @@ mcp>=1.2.0
 
 # Testing & Lint (dev)
 #
-# pytest 必须锁 <9：9.x 的收集缓存按「节点对象身份」去重，而同一个目录会被
-# `Session.collect()`（按 initial path 逐层下钻）与 `Package.collect()`（扫子目录）
-# 各建一个 Dir 对象；两个对象 nodeid 相同但 `is not`，于是 `node in _collection_cache`
-# 落空、同一路径被收集两次，conftest 里的 fixture 便绑到了「没人用的那棵子树」上。
-# 实测最小触发集（9.1.1 报 fixture not found，8.3.5/8.4.2 正常）：
-#   tests/unit/evolution/test_skill_consolidation_structural_and_deadcode_p1p2.py
-#   tests/unit/test_ci_npc_config_guard.py
-#   tests/unit/evolution/rsi/test_parameter_source_of_truth.py
-# 波及面 = 所有依赖 tests/unit/evolution{,/experience}/conftest.py 的套件
-# （受保护子集里 65 个 error）。回归见 tests/unit/evolution/rsi/test_parameter_source_of_truth.py
-# 与 tests/unit/evolution/experience/test_pattern_lifecycle.py 的运行方式守卫。
-pytest>=7.4.0,<9
+# pytest 必须 >=9.0.3：两个约束在同一条上，缺任一个 CI 必红。
+#
+# (a) 不能 <9 —— 9.0.3 起 `_pytest/pathlib.py` 的 tmpdir 兜底目录改用
+#     `tempfile.mkdtemp`（不可预测名），而 8.x 用可预测的
+#     `/tmp/pytest-of-{user}`。下面 (b) 的收集竞争只在「可预测」时才被利用。
+# (b) 不能 <9.0.3 —— CVE-2025-71176 / PYSEC-2026-1845（GHSA-6w46-j5rx-g56g），
+#     扫全版本区间、fixed 9.0.3，pip-audit 对 <9 一律报。
+#     8.4.2 曾是"为了绕开收集竞争"选的下限，但它是包修复版本之前的版本，
+#     dependency-audit 必红（本轮 CI 失败根因）。
+#
+# 收集竞争（受保护子集 65 error）的完整机制，见 tests/conftest.py 的
+# `_patch_pytest_basetemp_uniqueness` —— 不靠版本回避，靠 basetemp 唯一化兜底。
+# 最小触发集（`--co` 亦可，实测穷举只有这一组复现）：
+#   pytest tests/unit/evolution/test_skill_consolidation_structural_and_deadcode_p1p2.py \
+#          tests/unit/test_ci_npc_config_guard.py \
+#          tests/unit/evolution/rsi/test_parameter_source_of_truth.py
+# 回归守卫见 tests/unit/test_pytest_runner_guards.py 与
+# tests/unit/test_dev_path_and_runtime_dep_guards.py 的 TestCiTestRunnerAndFixtureDepsAreReal。
+pytest>=9.0.3
 pytest-asyncio>=0.21.0
 pytest-cov>=4.1.0
 pytest-timeout>=2.3
@@ -70,5 +77,10 @@ prometheus_client>=0.20
 
 # 文档出件（write_pdf：中间树 → PDF）——`neurova/document_pdf.py:335` 是唯一 import 处。
 # 受保护子集里 tests/unit/document/test_document_pdf.py 与 tests/unit/tools/test_write_pdf.py
-# 走真实渲染路径（不做 try 降级断言），缺席 reportlab 即 26 个失败。
+# 走真实渲染路径（不做 try 降级断言）：缺席 reportlab 出不了件（26 个失败），
+# 缺席 pypdf 则抽不出页面文本（test_header_repeats_on_every_page 在 CI 实测
+# ModuleNotFoundError: No module named 'pypdf'）。
+# 两者都只在 requirements.txt / requirements-full.lock 声明、CI 薄环境没有 ——
+# 同一根因（"只在生产清单声明、不在 CI 清单声明"），故同处补齐。
 reportlab>=4.0
+pypdf>=4.0.0
