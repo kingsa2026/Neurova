@@ -134,7 +134,10 @@ def _try_extract_to_graph(
         graph = get_knowledge_graph_manager()
     for entry in items:
         try:
-            extract_knowledge_to_graph(entry, repo=repo, llm_call=llm_call, graph_manager=graph)
+            # agentId 必须传：抽取产物要落进被检索的那张图（Issue #73），
+            # 落错域等于把条目的事实写进别人的库。
+            extract_knowledge_to_graph(entry, repo=repo, llm_call=llm_call,
+                                       graph_manager=graph, agentId=agent_id or "")
         except Exception as e:  # noqa: BLE001
             logger.warning("[知识导入] 图谱抽取失败（已跳过）: %s", e)
 

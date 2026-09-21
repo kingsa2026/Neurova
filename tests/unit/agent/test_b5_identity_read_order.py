@@ -20,22 +20,60 @@ from neurova.agent.loops.openai_loop import OpenAILoop
 from neurova.post_chat_pipeline import PostChatPipeline
 
 
-def _make_loop_with_skill_only(identity_kwargs):
-    """替身 Agent：只带 skill_registry，捕获隔离注入的 (args, ctx)。"""
+class _StubSkill:
+    def __init__(self, name):
+        self.name = name
+        self.description = "身份读取序探针技能"
+        self.config = {}
+
+
+class _StubRegistry:
+    """技能注册表替身：捕获隔离注入的 (args, ctx)。
+
+    工单 003 之后原生链经执行咽喉，身份注入发生在
+    `ToolExecutor.execute_skill_tool`（`_caller_user_id` 由服务端赋值），
+    故替身只需承载技能取件与执行体两个契约。
+    """
+
+    def __init__(self, name, captured):
+        self._skill = _StubSkill(name)
+        self.skills = {name: self._skill}
+        self._captured = captured
+
+    async def execute_skill(self, skill_name, args, ctx=None):
+        self._captured["args"] = args
+        self._captured["ctx"] = ctx
+        return {"ok": True}
+
+    def get_skill(self, skill_name):
+        return self._skill if skill_name == self._skill.name else None
+
+    def has_skill(self, skill_name):
+        return skill_name == self._skill.name
+
+    def list_skills(self):
+        return []
+
+
+def _make_loop_with_skill_only(identity_kwargs, tool_name="kb_builder"):
+    """替身 Agent：带真执行器 + 技能注册表替身，捕获隔离注入的 (args, ctx)。"""
+    from neurova.tool_executor import ToolExecutor
+
     captured = {}
-
-    async def _execute_skill(name, args, ctx):
-        captured["args"] = args
-        captured["ctx"] = ctx
-        return SimpleNamespace(success=True, data={"ok": True}, error=None)
-
-    registry = SimpleNamespace(execute_skill=AsyncMock(side_effect=_execute_skill))
+    registry = _StubRegistry(tool_name, captured)
     agent = SimpleNamespace(
         llm_client=SimpleNamespace(),
         config=SimpleNamespace(name="t", user_id="cfg-u", agent_id="a1"),
-        skill_registry=registry,
+        skill_registry=None,
+        _skill_registry=registry,
+        tool_memory=None,
+        tool_lifecycle=None,
+        skill_packer=None,
+        tool_router=None,
+        workspace_path=".",
         **identity_kwargs,
     )
+    agent.tool_executor = ToolExecutor(agent)
     return OpenAILoop(agent), captured
 
 

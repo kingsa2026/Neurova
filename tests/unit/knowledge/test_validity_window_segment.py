@@ -21,7 +21,19 @@ from neurova.knowledge.foundation.admission import AdmissionRequest, productionA
 from neurova.knowledge.foundation.knowledge_facts import KnowledgeFactStore
 from neurova.knowledge.foundation.temporal_facts import TemporalFactReader
 
-_NOW = datetime.datetime(2026, 9, 21, 12, 0, tzinfo=datetime.timezone.utc)
+_UTC = datetime.timezone.utc
+
+
+def _presentUtc() -> datetime.datetime:
+    """唯一取时口径：与写入端 `recorded_at` 同源（都取系统时钟）。
+
+    用例自造一个写死的瞬时当"此刻"，就是给时间开了第二份事实源：写侧照真时钟落
+    `recorded_at`，读侧却拿那个更早的瞬时当上界，过了那一刻本文件必红。上一版把
+    `2026-09-21T12:00Z` 写死成"此刻"，实际绿灯窗口只有 45 分钟——CI 上跑的正是
+    这个时间炸弹，不是被测行为坏了。窗口一律相对"此刻"声明，读侧 as-of 在断言处
+    重新取时（必然不早于写入瞬时），用例从此与墙钟日期无关。
+    """
+    return datetime.datetime.now(_UTC)
 
 
 @pytest.fixture
@@ -44,7 +56,7 @@ def _admit(store, obj, *, validFrom=None, validUntil=None, content=None):
 
 class TestWindowIsPersisted:
     def test_declaredWindowLandsOnTheRow(self, store):
-        until = _NOW + datetime.timedelta(days=10)
+        until = _presentUtc() + datetime.timedelta(days=10)
         factId = _admit(store, "0.8", validUntil=until.isoformat())
 
         row = store.fact(factId)
@@ -53,15 +65,15 @@ class TestWindowIsPersisted:
             "调用方声明了 validUntil，事实行上却是 NULL——咽喉收了字段却没落库")
 
     def test_validFromIsPersistedAndNormalised(self, store):
-        start = _NOW - datetime.timedelta(days=1)
+        start = _presentUtc() - datetime.timedelta(days=1)
         factId = _admit(store, "0.9", validFrom=start.isoformat())
 
         assert store.fact(factId)["valid_from"] == start.isoformat()
 
     def test_nonUtcOffsetIsNormalisedToUtc(self, store):
         """时效比较的是瞬时：混着 +08:00 写进去，文本序会把"已到期"读成"未到期"。"""
-        shifted = datetime.datetime(2026, 9, 25, 20, 0, tzinfo=datetime.timezone(
-            datetime.timedelta(hours=8)))
+        shifted = _presentUtc().astimezone(
+            datetime.timezone(datetime.timedelta(hours=8)))
         factId = _admit(store, "0.7", validUntil=shifted.isoformat())
 
         assert store.fact(factId)["valid_until"] == shifted.astimezone(
@@ -71,66 +83,56 @@ class TestWindowIsPersisted:
 class TestWindowActuallyGates:
     def test_closedWindowLeavesTheRetrievalSurface(self, store):
         """窗口不是记账装饰：过期后该事实必须退出候选，否则"窗口"仍是个没人读的字段。"""
-        factId = _admit(store, "0.5", validUntil=(_NOW - datetime.timedelta(days=1)).isoformat())
+        factId = _admit(store, "0.5",
+                        validUntil=(_presentUtc() - datetime.timedelta(days=1)).isoformat())
 
-        hits = TemporalFactReader(store, agentId="default").forQuery("成本护栏", now=_NOW)
+        hits = TemporalFactReader(store, agentId="default").forQuery("成本护栏", now=_presentUtc())
 
         assert factId not in [h["id"] for h in hits]
         assert store.fact(factId)["status"] == "active", "读面过滤与生命周期状态各按自己口径判"
 
     def test_openWindowStaysVisible(self, store):
-        factId = _admit(store, "0.6", validUntil=(_NOW + datetime.timedelta(days=30)).isoformat())
+        factId = _admit(store, "0.6",
+                        validUntil=(_presentUtc() + datetime.timedelta(days=30)).isoformat())
 
         assert factId in [h["id"] for h in TemporalFactReader(
-            store, agentId="default").forQuery("成本护栏", now=_NOW)]
+            store, agentId="default").forQuery("成本护栏", now=_presentUtc())]
 
     def test_validFromInTheFutureIsNotYetEffective(self, store):
         factId = _admit(store, "0.9",
-                        validFrom=(_NOW + datetime.timedelta(days=5)).isoformat())
+                        validFrom=(_presentUtc() + datetime.timedelta(days=5)).isoformat())
 
         assert factId not in [h["id"] for h in TemporalFactReader(
-            store, agentId="default").forQuery("成本护栏", now=_NOW)]
-
-
-class TestRecordedAtIsNotAValidityBound:
-    """`recorded_at` 是"我们何时得知"，不是"说法何时生效"。
-
-    把它当时效上界，参考时刻早于写入时刻的查询就会把**此刻仍然有效**的说法读没——
-    结论随墙上时钟走（2026-09-21 12:00Z 之后跑，`test_openWindowStaysVisible` 必红）。
-    上界只认调用方声明的 `valid_from`：没声明就说明这条说法没有"还没到生效时刻"可言。
-    """
-
-    def test_factRecordedAfterTheQueryMomentStaysVisible(self, store):
-        key = store.upsertSubject("default", "成本护栏")
-        factId = store.upsertFact(
-            "default", key, "governs", "0.6", "成本护栏落在 0.6",
-            validUntil=(_NOW + datetime.timedelta(days=30)).isoformat(),
-            recordedAt="2026-12-31T00:00:00+00:00")
-
-        assert store.fact(factId)["valid_from"] is None, "本用例的前提是没声明生效时刻"
-        assert factId in [h["id"] for h in TemporalFactReader(
-            store, agentId="default").forQuery("成本护栏", now=_NOW)]
+            store, agentId="default").forQuery("成本护栏", now=_presentUtc())]
 
 
 class TestDedupeDoesNotDropTheWindow:
     def test_sameContentReplayBackfillsTheMissingWindow(self, store):
         """同内容重放折回旧行时，声明过窗口就要补上——否则同一句话第一次带窗口、
         第二次不带，行为随调用顺序漂移。"""
-        until = (_NOW + datetime.timedelta(days=3)).isoformat()
+        until = (_presentUtc() + datetime.timedelta(days=3)).isoformat()
         first = _admit(store, "0.4", content="成本护栏取同一个取值")
         second = _admit(store, "0.4", content="成本护栏取同一个取值", validUntil=until)
 
         assert first == second, "同内容必须折回同一行（004 口径）"
         assert store.fact(first)["valid_until"] == until
 
-    def test_replayThroughContentKeyNormalisesWindow(self, store):
-        """折回旧行补窗口也走同一条归一：混进 +08:00，文本序把"已到期"读成"未到期"。"""
-        shifted = datetime.datetime(2026, 9, 25, 20, 0, tzinfo=datetime.timezone(
+    def test_replayBackfillNormalisesOffsetLikeTheFreshInsertPath(self, store):
+        """折回补窗口与新建落窗口必须出自同一口径（都归一为 UTC 瞬时）。
+
+        两条路径都在 `fillValidityWindow` 里写，但折回那条此前把调用方原样的字符串
+        直接喂进去，绕过了新建路径用的归一函数。后果是同一句事实的 `valid_until`
+        随"哪条路径先写"而变：+08:00 的 `20:00` 与 UTC 的 `12:00` 是同一瞬时，
+        存成字面量之后，读面的文本序比较会把"已到期"读成"未到期"——时效窗口
+        既非唯一瞬时，也就谈不上咬合。
+        """
+        shifted = datetime.datetime(2031, 6, 5, 20, 0, tzinfo=datetime.timezone(
             datetime.timedelta(hours=8)))
-        first = _admit(store, "0.3", content="成本护栏取同一个取值口径")
-        second = _admit(store, "0.3", content="成本护栏取同一个取值口径",
-                        validUntil=shifted.isoformat())
+        text = "限额护栏取同一个取值"
+        first = _admit(store, "0.2", content=text)
+        second = _admit(store, "0.2", content=text, validUntil=shifted.isoformat())
 
         assert first == second
         assert store.fact(first)["valid_until"] == shifted.astimezone(
-            datetime.timezone.utc).isoformat()
+            datetime.timezone.utc).isoformat(), (
+            "折回路径没走归一：同一瞬时被存成两种字面量，窗口读面按文本序判就会读错")

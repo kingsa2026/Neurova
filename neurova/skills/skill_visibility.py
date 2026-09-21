@@ -52,7 +52,16 @@ class VisibleSkill:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.entry.get("enabled", True))
+        """可调性 = manifest 的 `enabled` 且 registry 运行时状态不是停用。
+
+        `enabled=False` 是运营面/评审闸的停用落点；`status` 是
+        `SkillRegistry` 运行时状态机（`set_skill_enabled` 写的就是它）。两者任一
+        判停即不可调——此前 schema 段只看得到①条目的硬编码 True，两处判据都形同虚设。
+        """
+        if not bool(self.entry.get("enabled", True)):
+            return False
+        status = str(self.entry.get("status") or "").strip().lower()
+        return status not in ("disabled", "disabled_pending_review", "archived")
 
 
 class SkillView:
@@ -63,7 +72,16 @@ class SkillView:
         self.skills: Dict[str, VisibleSkill] = {}
 
     def invocable(self, name: str) -> bool:
-        return str(name or "") in self.skills
+        """该技能本轮是否可调（停用/待审的条目**在表里但不可调**）。
+
+        判据落在**同一份 entry**上：`build_turn_view` 已按 identity 反查把 manifest
+        的 `enabled`/`status` 合进来，此处不再各自查一遍（三个取数口统一到同一次
+        反查，禁止各查各的）。
+        """
+        visible = self.skills.get(str(name or ""))
+        if visible is None:
+            return False
+        return visible.enabled
 
     def provenance_for(self, name: str) -> Tuple[str, str]:
         v = self.skills.get(str(name or ""))
@@ -140,20 +158,21 @@ def build_turn_view(agent_id: str, user_key: Optional[str], registry_skills: Opt
     在时 get_library 首建空清单（首次装配可容忍一次 mkdir）。
     """
     view = SkillView(agent_id=agent_id)
+    registry_entries: Dict[str, dict] = {}
     # ① registry 内置/运行时技能（agent 层底座）
     for name, raw in (registry_skills or {}).items():
         skill = raw[0] if isinstance(raw, tuple) and raw else raw
-        view.skills[str(name)] = VisibleSkill(
-            name=str(name),
-            skill_id=str(name),
-            pool=lib.POOL_AGENT,
-            owner_key=agent_id,
-            entry={
-                "id": str(name),
-                "enabled": True,
-                "description": str(getattr(skill, "description", "") or ""),
-                "manifest": {"config": getattr(skill, "config", {}) if isinstance(getattr(skill, "config", None), dict) else {}},
-            },
+        key = str(name)
+        entry = {
+            "id": key,
+            "name": key,
+            "description": str(getattr(skill, "description", "") or ""),
+            "manifest": {"config": getattr(skill, "config", {}) if isinstance(getattr(skill, "config", None), dict) else {}},
+        }
+        registry_entries[key] = entry
+        view.skills[key] = VisibleSkill(
+            name=key, skill_id=key, pool=lib.POOL_AGENT,
+            owner_key=agent_id, entry=entry,
         )
     # ② 三库 manifest（agent 库最后写入，同名覆盖 registry 底座条目）
     layers = [(lib.POOL_PUBLIC, "")]
@@ -161,6 +180,8 @@ def build_turn_view(agent_id: str, user_key: Optional[str], registry_skills: Opt
         layers.append((lib.POOL_USER, user_key))
     if agent_id:
         layers.append((lib.POOL_AGENT, agent_id))
+    manifest_entries: Dict[str, dict] = {}
+    disabled_names: set = set()
     for pool, owner in layers:
         try:
             service = lib.get_library(pool, owner)
@@ -170,14 +191,35 @@ def build_turn_view(agent_id: str, user_key: Optional[str], registry_skills: Opt
         except Exception:  # noqa: BLE001 - 单库故障不拖垮装配（其余层照常可见）
             logger.warning("技能库加载失败（pool=%s owner=%s）", pool, owner, exc_info=True)
             continue
-        for key, entry in service.iter_skills():
-            if not entry.get("enabled", True):
+        for _skill_id, entry in service.iter_skills():
+            if not isinstance(entry, dict):
                 continue
-            view.skills[str(key)] = VisibleSkill(
-                name=str(key),
-                skill_id=str(entry.get("id") or key),
-                pool=pool,
-                owner_key=owner or (agent_id if pool == lib.POOL_AGENT else ""),
-                entry=dict(entry),
-            )
+            # 查询键域是 **name**（schema 装配拿 name 问视图，见
+            # `context/orchestrator.py` 的 `_view.invocable(n)`），而库条目按
+            # `skill_id` 建键。此前的写法把两套键域混在一张表里：以 registry 键
+            # （= name）建的①条目**硬编码 enabled=True**，于是自动技能
+            # （`name ≠ skill_id`）停用后仍走①条目，质量熔断/信任过滤三闸同时
+            # 恒开绿灯。收口方式：name 与 identity **同时登记**到同一份反查表，
+            # 不新建第三份映射。
+            entry = dict(entry)
+            entry.setdefault("name", str(entry.get("name") or _skill_id))
+            manifest_entries[str(entry["name"])] = entry
+            if not bool(entry.get("enabled", True)):
+                disabled_names.add(str(entry["name"]))
+
+    for name, entry in manifest_entries.items():
+        visible_entry = dict(registry_entries.get(str(name), {}))
+        visible_entry.update(entry)
+        view.skills[str(name)] = VisibleSkill(
+            name=str(name),
+            skill_id=str(entry.get("id") or name),
+            pool=str(entry.get("pool_type") or lib.POOL_AGENT),
+            owner_key=str(entry.get("owner_user_id") or "") or (agent_id if
+                       str(entry.get("pool_type") or lib.POOL_AGENT) == lib.POOL_AGENT else ""),
+            entry=visible_entry,
+        )
+    # 被 manifest 停用的名字：连 registry 底座条目一并从视图摘除——否则
+    # ①那条硬编码 `enabled=True` 的底座会把停用又"救回来"（三闸恒开绿灯的根因）。
+    for name in disabled_names:
+        view.skills.pop(str(name), None)
     return view
