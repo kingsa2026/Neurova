@@ -48,6 +48,10 @@ class IngestReport:
     sessions_touched: int = 0
     dropped: Tuple[Dict[str, Any], ...] = ()
     staged_media: Tuple[str, ...] = ()
+    # 声明取代的落地读数（审计 B-11）：让位的旧行 id 与"声明了却找不到目标"的声明值。
+    # 只写不报就不叫闭环——导入方要能看出这批取代有没有真的发生。
+    memories_superseded: Tuple[str, ...] = ()
+    supersede_unresolved: Tuple[str, ...] = ()
 
     def undo(self, *, manager, sessions) -> Tuple[int, int]:
         """返回 (撤销记忆条数, 撤销消息条数)；只删本批，不碰运行期数据。"""
@@ -102,8 +106,11 @@ def apply_bundle(root: Path, *, agent_id: str, manager, sessions,
     report = IngestReport(run_id=run_id or f"nvimp-{uuid.uuid4().hex[:12]}",
                           agent_id=agent_id, dropped=tuple(manifest.dropped))
 
-    report.memories_added, report.memories_skipped = manager.import_memories(
-        memories, ingest_run_id=report.run_id)
+    outcome = manager.import_memories(memories, ingest_run_id=report.run_id)
+    report.memories_added = outcome["added"]
+    report.memories_skipped = outcome["skipped"]
+    report.memories_superseded = tuple(outcome["superseded"])
+    report.supersede_unresolved = tuple(outcome["supersede_unresolved"])
 
     try:
         _write_sessions(report, transcripts, sessions, Path(root))

@@ -124,6 +124,30 @@ class OntologyTermRegistry:
             )
         return len(terms)
 
+    def seedMissing(self, terms: List[Dict[str, Any]]) -> int:
+        """**只补缺**的批量写入：已存在的术语一行都不动，返回真正补上的条数。
+
+        与 `register`/`registerMany` 的分工必须分清：那两个是"更新"动词（写入方
+        表达意图），本方法是"补齐"（播种默认值）。构造期每次都走更新语义，
+        就会把写入方登记过的 domain/range/cardinality 覆盖回默认裸值——
+        实测：给谓词登记了定义域，重新构造一次注册表，域就没了，
+        于是本体硬拒永远无依据可判（Issue #72 附带根因）。
+        """
+        added = 0
+        for spec in terms:
+            termId = str(spec.get("termId") or spec.get("term_id") or "").strip()
+            if not termId or self.term(termId) is not None:
+                continue
+            self.register(
+                termId, spec["kind"],
+                label=spec.get("label", ""), parentTermId=spec.get("parentTermId"),
+                domain=spec.get("domain"), rangeTerms=spec.get("rangeTerms"),
+                cardinality=spec.get("cardinality"), disjointWith=spec.get("disjointWith"),
+                requiredProps=spec.get("requiredProps"), version=spec.get("version", "v1"),
+            )
+            added += 1
+        return added
+
     def assignSubjectType(self, subjectKey: str, termId: str) -> None:
         """给主体挂类型。类型没登记就拒——挂一个不存在的类型比不挂更糟。"""
         if not self.term(termId):
@@ -260,9 +284,14 @@ def legacyGraphTerms() -> List[Dict[str, Any]]:
 
 
 def seedBuiltinTerms(registry: "OntologyTermRegistry") -> int:
-    """登记咽喉固定的谓词与图谱遗留类型（幂等：registerMany 是 INSERT OR REPLACE）。
+    """补齐咽喉固定的谓词与图谱遗留类型；**已登记的行一律不动**。
 
-    顺序是"先 legacy 后显式种子"：`is_a` 两边都有，种子那份带着中文 label 与基数，
-    不能被枚举里那个裸值盖掉。
+    走 `seedMissing` 而不是 `registerMany`：播种的语义是"缺什么补什么"，
+    而 `register` 那套是 INSERT OR REPLACE。用后者意味着每次构造注册表都把
+    写入方登记过的 domain/range/cardinality 抹掉，本体硬拒随之无依据可判。
+
+    顺序仍是"先 legacy 后显式种子"：新库里 `is_a` 两边都有，先写的那份留着，
+    后写的被跳过——所以种子表排在后面这件事只在"legacy 里没有它"时才起作用；
+    这正是只补缺该有的形状（谁先登记谁定，不被默认值覆盖）。
     """
-    return registry.registerMany(legacyGraphTerms() + _SEED_TERMS)
+    return registry.seedMissing(legacyGraphTerms() + _SEED_TERMS)

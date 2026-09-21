@@ -24,15 +24,27 @@ from .base import (
 
 
 class AddTemporalFactRequest(BaseModel):
-    """添加时序事实请求"""
+    """添加时序事实请求。
 
-    entity: str = Field(..., description="主体实体")
-    attribute: str = Field(..., description="属性名")
+    字段名保持前端既有契约（entity/attribute/value）。它们**必须**在调用处显式
+    映射到权威的 subject/predicate/obj —— 签名里三个字段名一个都不对得上，
+    靠委托层 `.get(..., "")` 兜底的结果是每次调用静默写一条空三元组（审计 B-02）。
+    """
+
+    entity: str = Field(..., min_length=1, description="主体实体")
+    attribute: str = Field(..., min_length=1, description="属性名")
     value: Any = Field(..., description="属性值")
     timestamp: Optional[str] = Field(default=None, description="时间戳（ISO8601格式，默认当前时间）")
     confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="置信度")
     source: Optional[str] = Field(default=None, description="信息来源")
     metadata: Optional[dict] = Field(default=None, description="额外元数据，如对话ID/环境等")
+    valid_from: Optional[str] = Field(default=None, description="生效时刻（ISO8601，缺省按获知时刻）")
+    valid_until: Optional[str] = Field(default=None, description="失效时刻（ISO8601，缺省不失效）")
+
+
+def objectText(value: Any) -> str:
+    """属性值统一成字符串：权威的客体是文本列，落库前归一，别让下游各自 str()。"""
+    return "" if value is None else str(value)
 
 
 class QueryTemporalRequest(BaseModel):
@@ -62,13 +74,14 @@ async def add_temporal_fact(
 
         manager = get_memory_manager(agent_id, {"neuser_id": neuser_id, "user_id": user_id})
         fact_id = manager.tkg_add_fact(
-            entity=request.entity,
-            attribute=request.attribute,
-            value=request.value,
-            timestamp=request.timestamp,
+            # 显式映射：请求字段名 → 权威字段名。空值由委托层报错，不静默写空行。
+            subject=request.entity,
+            predicate=request.attribute,
+            obj=objectText(request.value),
             confidence=request.confidence,
+            valid_from=request.valid_from or request.timestamp,
+            valid_until=request.valid_until,
             source=request.source,
-            metadata=request.metadata,
         )
 
         return success_response(
@@ -79,6 +92,10 @@ async def add_temporal_fact(
 
     except APIError:
         raise
+    except ValueError as e:
+        # 入参不合法（缺必填/空值）是调用方的错，诚实报 400；吞成 500 会让
+        # "写不进去"与"服务坏了"长得一样，两边都查不出真因。
+        raise APIError.validation(str(e)) from e
     except Exception as e:
         logger.exception("添加时序事实失败: %s", e)
         raise APIError.internal(f"添加时序事实失败: {str(e)}")

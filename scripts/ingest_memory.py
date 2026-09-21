@@ -161,6 +161,11 @@ def _apply(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
             print(f"已写入 {finding.path} run_id={report.run_id}：消息 +{report.messages_added}"
                   f"/跳过 {report.messages_skipped}，会话文件 {report.sessions_touched} 个，"
                   f"记忆 +{report.memories_added}/跳过 {report.memories_skipped}")
+            if report.memories_superseded or report.supersede_unresolved:
+                # 声明取代的落地读数：让位的旧行 + 找不到目标的声明，都得摆在台面上
+                print(f"  取代：让位 {len(report.memories_superseded)} 条，"
+                      f"声明无目标 {len(report.supersede_unresolved)} 条"
+                      f"{'（' + '、'.join(report.supersede_unresolved) + '）' if report.supersede_unresolved else ''}")
             print(f"  撤销：python scripts/ingest_memory.py undo --agent-id {args.agent_id} "
                   f"--run-id {report.run_id}")
         if blocked:
