@@ -4,11 +4,11 @@ Multi-agent 协作管理 RESTful API
 """
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from datetime import datetime
 
 from neurova.core.logger import get_logger
-from neurova.agents.seen_boundary import get_seen_boundary, reset_seen_boundary
 from neurova.collaboration.glance_yield_rules import (
     get_glance_yield_checker,
     reset_glance_yield_checker,
@@ -16,10 +16,6 @@ from neurova.collaboration.glance_yield_rules import (
 from neurova.llm.triage import (
     get_small_brain_triage_gate,
     reset_small_brain_triage_gate,
-)
-from neurova.agents.wake_debounce import (
-    get_wake_debounce_manager,
-    reset_wake_debounce_manager,
 )
 from neurova.experiments.ab_test_manager import (
     get_ab_test_manager,
@@ -33,49 +29,22 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/coordination", tags=["coordination"])
 
 
-# ========== Seen Boundary Endpoints ==========
-
-@router.get("/seen-boundary/stats")
-async def get_seen_boundary_stats():
-    """获取 Seen Boundary 统计信息"""
-    boundary = await get_seen_boundary()
-    return {"seen_boundary": boundary.get_stats()}
-
-
-@router.post("/seen-boundary/reset")
-async def reset_seen_boundary_endpoint():
-    """重置 Seen Boundary（仅用于测试）"""
-    reset_seen_boundary()
-    logger.info("Reset seen boundary")
-    return {"status": "reset"}
-
-
-@router.post("/seen-boundary/check-freshness")
-async def check_freshness(
-    agent_id: str = Query(..., description="Agent ID"),
-    conversation_id: str = Query(..., description="Conversation ID"),
-    last_seen_seq: int = Query(..., description="Last seen sequence number"),
-):
-    """检查消息新鲜度"""
-    boundary = await get_seen_boundary()
-    
-    held = await boundary.check_freshness(
-        agent_id=agent_id,
-        conversation_id=conversation_id,
-        last_seen_seq=last_seen_seq,
-    )
-    
-    if held:
-        return {
-            "is_stale": True,
-            "held_envelope": held.to_held_envelope(),
-        }
-    else:
-        return {
-            "is_stale": False,
-            "new_baseline": held.new_baseline if hasattr(held, 'new_baseline') else None,
-        }
-
+# ========== Seen Boundary Endpoints（未实现，已摘除）==========
+#
+# 原 3 个 seen-boundary 端点依赖 `neurova.agents.seen_boundary`
+# （get_seen_boundary / reset_seen_boundary）——该模块在本仓不存在，
+# 导致整份 coordination_api 无法导入（25 个端点全部 404）。
+# 只有测试 tests/integration/test_multi_agent_coordination.py 引用过它。
+# 未实现的模块不保留影子端点：要实现请连带实现模块并配可运行测试，
+# 而不是留一份 import 即炸的 API 面。
+#
+#   GET  /seen-boundary/stats
+#   POST /seen-boundary/reset
+#   POST /seen-boundary/check-freshness
+#
+# 同类新鲜度能力由 neurova/collaboration/seen_cursor.py
+# （SeenCursorManager.check_freshness）与 glance_yield_rules 的
+# freshness preflight 承担，已由下面的 yield-checker 端点对外服务。
 
 # ========== Yield Checker Endpoints ==========
 
@@ -188,75 +157,19 @@ async def reset_triage_gate_endpoint():
     return {"status": "reset"}
 
 
-# ========== Wake Debounce Endpoints ==========
-
-@router.get("/debounce/stats")
-async def get_debounce_stats():
-    """获取 Debounce Manager 统计信息"""
-    manager = get_wake_debounce_manager()
-    return {"debounce_manager": manager.get_stats()}
-
-
-@router.post("/debounce/wake-event")
-async def on_wake_event(
-    agent_id: str = Query(..., description="Agent ID"),
-    conversation_id: str = Query(..., description="Conversation ID"),
-    message_id: str = Query(..., description="Message ID"),
-):
-    """处理 Wake Event"""
-    manager = get_wake_debounce_manager()
-    
-    from neurova.agents.wake_debounce import WakeEvent
-    manager.on_wake_event(WakeEvent(
-        agent_id=agent_id,
-        conversation_id=conversation_id,
-        message_id=message_id,
-    ))
-    
-    logger.info(f"Wake event: agent={agent_id}, convo={conversation_id}, msg={message_id}")
-    return {"status": "received", "debounce_ms": manager.debounce_ms}
-
-
-@router.get("/debounce/turn/{agent_id}/{conversation_id}")
-async def get_coalesced_turn(
-    agent_id: str,
-    conversation_id: str,
-):
-    """获取 Coalesced Turn"""
-    manager = get_wake_debounce_manager()
-    
-    turn = manager.get_coalesced_turn(agent_id, conversation_id)
-    
-    if turn:
-        return {
-            "found": True,
-            "turn": turn.to_turn_payload(),
-            "message_count": len(turn.messages),
-        }
-    else:
-        return {"found": False}
-
-
-@router.post("/debounce/cancel")
-async def cancel_debounce(
-    agent_id: str = Query(..., description="Agent ID"),
-    conversation_id: str = Query(..., description="Conversation ID"),
-):
-    """取消 Pending 的 Debounce"""
-    manager = get_wake_debounce_manager()
-    manager.cancel_pending(agent_id, conversation_id)
-    
-    logger.info(f"Canceled debounce: agent={agent_id}, convo={conversation_id}")
-    return {"status": "cancelled"}
-
-
-@router.post("/debounce/reset")
-async def reset_debounce_manager_endpoint():
-    """重置 Debounce Manager（仅用于测试）"""
-    reset_wake_debounce_manager()
-    logger.info("Reset debounce manager")
-    return {"status": "reset"}
-
+# ========== Wake Debounce Endpoints（未实现，已摘除）==========
+#
+# 原 5 个 debounce 端点依赖 `neurova.agents.wake_debounce`
+# （get_wake_debounce_manager / reset_wake_debounce_manager / WakeEvent）——
+# 该模块在本仓不存在，是 coordination_api 导入失败的分母之一。
+# 去抖/合并（Wake debounce & coalesce）目前仅在
+# neurova/collaboration/glance_yield_rules.py 里有设计注记，无实现。
+#
+#   GET  /debounce/stats
+#   POST /debounce/wake-event
+#   GET  /debounce/turn/{agent_id}/{conversation_id}
+#   POST /debounce/cancel
+#   POST /debounce/reset
 
 # ========== A/B Test Endpoints ==========
 
@@ -308,14 +221,27 @@ async def assign_experiment_group(
     }
 
 
+class RecordMetricRequest(BaseModel):
+    """记录实验指标请求体。
+
+    metrics/context 是结构化字典，不能作为 query 参数——FastAPI 会在
+    路由注册期断言 "Query parameter must be one of the supported types"，
+    使整份模块导入即失败；故收敛为 JSON 请求体（与 acp_api 等一致）。
+    """
+
+    experiment_name: str = Field(..., description="Experiment Name")
+    group: str = Field(..., description="Experiment Group")
+    metrics: Dict[str, float] = Field(default_factory=dict, description="Metrics")
+    context: Dict[str, Any] = Field(default_factory=dict, description="Context")
+
+
 @router.post("/ab-tests/record-metric")
-async def record_metric(
-    experiment_name: str = Query(..., description="Experiment Name"),
-    group: str = Query(..., description="Experiment Group"),
-    metrics: Dict[str, float] = Query(..., description="Metrics"),
-    context: Dict[str, Any] = Query(..., description="Context"),
-):
+async def record_metric(payload: RecordMetricRequest):
     """记录实验指标"""
+    experiment_name = payload.experiment_name
+    group = payload.group
+    metrics = payload.metrics
+    context = payload.context
     manager = await get_ab_test_manager()
     
     try:
@@ -373,21 +299,16 @@ async def reset_ab_test_manager_endpoint():
 @router.get("/summary")
 async def get_coordination_summary():
     """获取完整的 Coordination System 摘要"""
-    seen_stats = (await get_seen_boundary()).get_stats()
     yield_stats = (await get_glance_yield_checker()).get_stats()
     triage_stats = get_small_brain_triage_gate().get_stats()
-    debounce_stats = get_wake_debounce_manager().get_stats()
     ab_tests = get_ab_test_manager().list_experiments()
-    
+
     return {
         "generated_at": datetime.utcnow().isoformat(),
-        "seen_boundary": seen_stats,
         "yield_checker": yield_stats,
         "triage_gate": triage_stats,
-        "wake_debounce": debounce_stats,
         "active_experiments": len(ab_tests),
         "system_status": "healthy" if all([
-            seen_stats.get("total_checks", 0) >= 0,
             yield_stats.get("total_checks", 0) >= 0,
         ]) else "degraded",
     }

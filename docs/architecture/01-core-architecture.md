@@ -13,13 +13,13 @@
 - **深度模块化**: 小接口，深实现，通过 `agent_ref` 依赖注入
 - **多模态支持**: 文本、图像、音频、视频全面处理
 - **多模型路由**: 自动选择最佳 LLM 提供商和模型
-- **持续记忆**: 17 维记忆分类体系，支持长期记忆和经验学习
+- **持续记忆**: 多维度记忆分类体系（7 类型 + 7 分类 + 4 视角，见 ADR 0018），支持长期记忆和经验学习
 - **情感架构**: 四层 17 种情感分类，情感驱动的记忆检索
 - **自主进化**: 模式挖掘、工具遗传编程、经验结晶
 
 ### 1.3 核心特性
 1. **多 Agent 协作系统** - 矩阵式 Agent 协作，支持复杂任务分解
-2. **17 维记忆系统** - 短期/长期/情感/工具/经验/反思等多维度记忆
+2. **多维度记忆系统** - 类型(semantic/episodic/procedural/pattern/emotional/working/workflow_experience) × 分类(general/conversation/knowledge/experience/tool_usage/reflection/user_preference) × 视角(first/second/third_person/system)
 3. **多模态 LLM 路由** - 6+ 提供商，10 种请求类型自动路由
 4. **14 种通信渠道** - 飞书/钉钉/企业微信/Telegram/Discord 等
 5. **情感架构** - 情感分析、情感记忆、情感驱动决策
@@ -61,7 +61,7 @@
 ### 2.2 分层职责
 
 #### Core Layer (核心层)
-- **Memory System**: 17 维记忆分类，温度管理，生命周期管理
+- **Memory System**: 多维度记忆分类（值域见 `models.py` / ADR 0018），温度管理，生命周期管理
 - **Emotion Engine**: 四层 17 种情感分类，情感记忆检索
 - **LLM Router**: 多模态自适应路由，6+ 提供商支持
 - **Evolution System**: 模式挖掘，经验结晶，工具遗传编程
@@ -163,7 +163,7 @@ class LLMRouter:
 ```python
 class MemoryManager:
     """
-    17 维记忆分类管理器
+    记忆分类管理器（分类值域 = MemoryCategory，ADR 0018）
     
     记忆维度:
         1. 短期记忆 (STM) - 当前对话上下文
@@ -593,7 +593,7 @@ services:
 
 ### v4.0 (CogArch 2.0) - 当前版本
 - 深度模块化重构 (Agent 2180→1621 行)
-- 17 维记忆系统
+- 多维度记忆系统（ADR 0018 口径）
 - 多模态 LLM 路由 (6+ 提供商)
 - 14 种通信渠道
 - 情感架构 (17 种情感分类)

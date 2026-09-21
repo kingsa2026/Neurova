@@ -6,6 +6,11 @@
 
 ## Context
 
+> **口径更正（2026-09-21）**：本节把「17 维分类体系」当既定事实陈述，实测该数字在代码中
+> 无对应枚举（详见 [architecture-findings.md u1](../architecture-model/architecture-findings.md)）。
+> 分类值域的唯一事实源为 `memory_layer/models.py`（7 类型 + 7 分类 + 4 视角），
+> 裁决见 [ADR 0018](./0018-memory-classification-vocabulary.md)。
+
 Neurova 记忆系统历经多轮演进，存在以下架构问题（Tier 1-4 重构前）：
 
 1. **17 维分类体系散落**：`memory_layer/` 下 7 个核心模块（manager / storage / models / neurova_recall / semantic_search / cognitive_storage_engine / temperature）职责边界模糊

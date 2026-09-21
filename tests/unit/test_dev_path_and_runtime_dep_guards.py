@@ -263,3 +263,100 @@ class TestProtectedGuardsUseNoExternalBinaries:
             + "\n  ".join(offenders)
             + "\n修复：改用纯 Python 扫描（Path.rglob + ast / 字符串匹配）。"
         )
+
+
+class TestCiTestRunnerAndFixtureDepsAreReal:
+    """受保护子集"跑起来"的两个前提：pytest 版本 + conftest fixture 依赖。
+
+    这两条都是"CI 报错与代码无关"的事故，且都在**同一个 job**里同时发作，
+    因此合在一个类里钉住。
+
+    4. **pytest 必须在安全下限之上（>=9.0.3），收集竞争的兜底不在版本号上** ——
+       这里的口径在 2026-09-21 被 CVE-2025-71176 推翻过一次，记录完整推导：
+         - 原先的"锁 <9"是为了绕开收集缓存按节点对象身份去重导致的
+           `fixture 'xxx' not found`（收集竞争机制与最小触发集见
+           `tests/unit/test_pytest_runner_guards.py` 的模块 docstring）；
+         - 但 `<9` 全部落在 CVE-2025-71176 / PYSEC-2026-1845（fixed 9.0.3，
+           扫全版本区间）里，`dependency-audit`（pip-audit）对 8.4.2 直接报红
+           —— 两条约束撞在同一条依赖上，不能再拿"回避版本"换绿。
+         - 正面修法是 `tests/unit/evolution/rsi/conftest.py`：在子包自己的
+           conftest 里按名重导出父包 fixture，让可见性判据不再跨 collector
+           身份求值。回归守卫用最小触发集实跑钉住（不靠版本回避）。
+       本类只钉"声明与锁都在安全下限之上"。
+
+    5. **受保护子集里"真跑渲染路径"的依赖必须在 CI 清单声明** ——
+       `tests/unit/document/test_document_pdf.py` 与 `tests/unit/tools/test_write_pdf.py`
+       断言 `"error" not in result`（即必须真出件），`neurova/document_pdf.py`
+       缺 reportlab 即 `RenderUnavailable` → 26 个失败。只在 requirements.txt
+       声明、不在 CI 清单声明，CI 薄环境就永远红。
+    """
+
+    def test_pytest_declared_at_or_above_security_floor(self):
+        """requirements-ci.txt 的 pytest 下限必须 >=9.0.3（CVE-2025-71176）。"""
+        text = io.open(PROJECT_ROOT / "requirements-ci.txt", encoding="utf-8").read()
+        decls = [
+            l.strip() for l in text.splitlines()
+            if re.match(r"^\s*pytest\s*[><=!~]", l.strip())
+        ]
+        assert decls, "requirements-ci.txt 缺 pytest 声明"
+        assert any(">=9.0.3" in d.replace(" ", "") for d in decls), (
+            "requirements-ci.txt 未把 pytest 下限钉在 >=9.0.3。低于 9.0.3 落在\n"
+            "CVE-2025-71176 / PYSEC-2026-1845（GHSA-6w46-j5rx-g56g，扫全版本区间）\n"
+            "内，dependency-audit（pip-audit）必红——2026-09-21 把 8.4.2 锁进 CI 后\n"
+            "实测 2 条漏洞。收集缓存的身份去重问题改由\n"
+            "tests/unit/evolution/rsi/conftest.py 兜底，不再用版本回避。当前声明："
+            f"{decls}"
+        )
+        assert not any("<9" in d.replace(" ", "") for d in decls), (
+            "requirements-ci.txt 仍把 pytest 锁在 <9——该区间内有 CVE-2025-71176，"
+            f"dependency-audit 必红。当前声明：{decls}"
+        )
+
+    def test_ci_lock_pins_pytest_at_or_above_security_floor(self):
+        """锁文件必须与声明一致（CI 装的是锁，不是声明）。"""
+        lock = io.open(PROJECT_ROOT / "requirements-ci.lock", encoding="utf-8").read()
+        m = re.search(r"(?m)^pytest==(\d+)\.(\d+)\.(\d+)", lock)
+        assert m, "requirements-ci.lock 缺 pytest pin"
+        version = tuple(int(g) for g in m.groups())
+        assert version >= (9, 0, 3), (
+            f"requirements-ci.lock 把 pytest 锁在 {m.group(0)}——CI 装的是锁文件，"
+            "低于 9.0.3 即落在 CVE-2025-71176 区间，dependency-audit 必红。\n"
+            "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+        )
+
+    def test_document_pdf_render_path_deps_declared_in_ci(self):
+        """受保护子集里真跑 PDF 渲染的套件依赖 reportlab，CI 清单必须声明。"""
+        ci = io.open(PROJECT_ROOT / "requirements-ci.txt", encoding="utf-8").read()
+        assert re.search(r"(?m)^\s*reportlab\s*[><=!~]", ci), (
+            "requirements-ci.txt 缺 reportlab 声明——tests/unit/document/test_document_pdf.py\n"
+            "与 tests/unit/tools/test_write_pdf.py 在受保护子集里走真实渲染路径\n"
+            "（断言 'error' not in result，不做 try 降级），缺席即 26 个失败。"
+        )
+        lock = io.open(PROJECT_ROOT / "requirements-ci.lock", encoding="utf-8").read()
+        assert re.search(r"(?m)^reportlab==", lock), (
+            "requirements-ci.lock 缺 reportlab pin——CI 装的是锁文件。\n"
+            "修复：uv pip compile --universal requirements-ci.txt -o requirements-ci.lock"
+        )
+
+    def test_protected_subset_keeps_fixture_consumers(self):
+        """本守卫自身的靶点必须留在受保护子集里，否则回归无人看。
+
+        没有这一条，任何一次"清理"都能把上面两个套件移出子集，
+        守卫退化成永远通过的空壳。
+        """
+        listed = io.open(
+            PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt", encoding="utf-8"
+        ).read()
+        for rel in (
+            "tests/unit/evolution/rsi/test_parameter_source_of_truth.py",
+            "tests/unit/evolution/experience/test_pattern_lifecycle.py",
+            "tests/unit/document/test_document_pdf.py",
+            "tests/unit/tools/test_write_pdf.py",
+            # 收集竞争兜底靶点：rsi 子包 conftest 重导出父包 fixture，
+            # 少了本条目则守卫退化成空壳（见 test_pytest_runner_guards.py）。
+            "tests/unit/test_pytest_runner_guards.py",
+        ):
+            assert rel in listed, (
+                f"{rel} 不在受保护子集——它是 pytest<9 / reportlab 两条回归的靶点，"
+                "移出后本守卫无法发现复发。"
+            )

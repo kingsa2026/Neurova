@@ -4,6 +4,7 @@ Agent Turn Coordinator
 Neurova Style: Follows existing patterns (Singleton, Thread-safe, etc.)
 """
 
+import asyncio
 import time
 import threading
 from typing import Optional, Dict, Any
