@@ -2195,28 +2195,29 @@ Neurova/
 
 ## 文档导航
 
-完整架构设计文档请访问 [``]()
+完整架构设计文档请访问 [docs 文档总索引](docs/INDEX.md)
 
 | 核心文档 | 内容 |
 |---------|------|
-| [CONTEXT.md]() | 项目上下文文档（完整架构概览） |
-| [PRODUCT_GUIDE.md]() | 产品使用指南 |
-| [API_REFERENCE.md]() | API 参考文档（82 端点模块） |
-| [02-memory-system.md]() | 记忆系统完整设计 |
-| [12-memory-temperature-mechanism.md]() | 记忆温度机制 |
-| [13-memory-intelligence-enhancements.md]() | 记忆智能增强（9大机制） |
-| [14-proactive-recall-mechanism.md]() | 主动回忆机制 |
-| [15-emotion-resonance-engine.md]() | 情感共鸣引擎 |
-| [17-memory-compression-mechanism.md]() | 记忆压缩机制 |
-| [living_context_pool_design.md]() | 活水上下文池设计 |
-| [neurova-upgrade-p0-p1-implementation-steps.md]() | 升级实施步骤（TDD） |
-| [SKILL_VERSION_MANAGEMENT.md]() | Skill 版本管理 |
-| [CONTEXT_CACHE_COMPRESSION.md]() | 上下文缓存与压缩 |
-| [DOCS_ALIGNMENT_PLAN.md]() | 文档对齐计划 |
-| [plugin-architecture-design.md]() | 插件架构设计 |
-| [cli_usage.md]() | CLI 使用指南 |
-| [BRAND_GUIDELINES.md]() | 品牌指南 |
-| [心流知识库功能使用指南.md]() | 心流知识库使用指南 |
+| **[纪律与约定（最高优先级）](AGENTS.md)** | 修复教义 6 条 / 协作红线（中文交流 / 原创性 / 命名法 / 闭环）/ 代码规约 / 测试纪律 |
+| [docs/CONTEXT.md](docs/CONTEXT.md) | 项目上下文文档（完整架构概览） |
+| [docs/03-user-guide/PRODUCT_GUIDE.md](docs/03-user-guide/PRODUCT_GUIDE.md) | 产品使用指南 |
+| [docs/02-api/API_REFERENCE.md](docs/02-api/API_REFERENCE.md) | API 参考文档（82 端点模块） |
+| [docs/01-architecture/02-memory-system.md](docs/01-architecture/02-memory-system.md) | 记忆系统完整设计 |
+| [docs/01-architecture/12-memory-temperature-mechanism.md](docs/01-architecture/12-memory-temperature-mechanism.md) | 记忆温度机制 |
+| [docs/01-architecture/13-memory-intelligence-enhancements.md](docs/01-architecture/13-memory-intelligence-enhancements.md) | 记忆智能增强（9大机制） |
+| [docs/01-architecture/14-proactive-recall-mechanism.md](docs/01-architecture/14-proactive-recall-mechanism.md) | 主动回忆机制 |
+| [docs/01-architecture/15-emotion-resonance-engine.md](docs/01-architecture/15-emotion-resonance-engine.md) | 情感共鸣引擎 |
+| [docs/01-architecture/17-memory-compression-mechanism.md](docs/01-architecture/17-memory-compression-mechanism.md) | 记忆压缩机制 |
+| [docs/01-architecture/living_context_pool_design.md](docs/01-architecture/living_context_pool_design.md) | 活水上下文池设计 |
+| [docs/04-plans/neurova-upgrade-p0-p1-implementation-steps.md](docs/04-plans/neurova-upgrade-p0-p1-implementation-steps.md) | 升级实施步骤（TDD） |
+| [docs/01-architecture/SKILL_VERSION_MANAGEMENT.md](docs/01-architecture/SKILL_VERSION_MANAGEMENT.md) | Skill 版本管理 |
+| [docs/01-architecture/CONTEXT_CACHE_COMPRESSION.md](docs/01-architecture/CONTEXT_CACHE_COMPRESSION.md) | 上下文缓存与压缩 |
+| [docs/04-plans/DOCS_ALIGNMENT_PLAN.md](docs/04-plans/DOCS_ALIGNMENT_PLAN.md) | 文档对齐计划 |
+| [docs/01-architecture/plugin-architecture-design.md](docs/01-architecture/plugin-architecture-design.md) | 插件架构设计 |
+| [docs/03-user-guide/cli_usage.md](docs/03-user-guide/cli_usage.md) | CLI 使用指南 |
+| [docs/03-user-guide/BRAND_GUIDELINES.md](docs/03-user-guide/BRAND_GUIDELINES.md) | 品牌指南 |
+| [docs/03-user-guide/心流知识库功能使用指南.md](docs/03-user-guide/心流知识库功能使用指南.md) | 心流知识库使用指南 |
 
 ---
 
