@@ -454,13 +454,35 @@ async def list_all_tools(source: Optional[str] = Query(default=None)):
 
 @router.post("/tools/execute")
 async def execute_tool(body: ToolExecuteRequest):
-    """执行工具调用
+    """执行工具调用。
 
-    优先通过 ToolEngine 执行，失败时回退到 Agent。
+    有 agent 时必须经**执行咽喉**（`agent.tool_executor`）：票据、轮级耗时、
+    `on_tool_executed`（肌肉记忆/生命周期）、治理预检与 hooks 都挂在那一层。
+    `ToolEngine` 本身是咽喉的**内层**一档（`tool_executor._execute_tool_core`
+    调它），把端点直接接到它上面等于绕过整条链——与工单 003 之前的原生链同型。
+    只在"没有 agent"的评测/脚本场景（无咽喉可用）才退回引擎直调。
     """
     start = time.time()
 
-    # 优先通过 ToolEngine 执行
+    from neurova.api.endpoints import get_agent_instance
+
+    agent = get_agent_instance()
+    executor = getattr(agent, "tool_executor", None) if agent is not None else None
+    if executor is not None:
+        try:
+            result = await executor.execute(body.tool_name, body.arguments)
+            # 成败判据单源：咽喉的 `_result_is_success`，不在此另写一套
+            if not executor._result_is_success(result):
+                return {
+                    "code": 1,
+                    "error": str((result or {}).get("error") or "工具执行失败"),
+                    "data": {"execution_time": time.time() - start},
+                }
+            return {"code": 0, "data": {"result": result, "execution_time": time.time() - start}}
+        except Exception as e:
+            logger.warning("工具经咽喉执行异常: %s", e, exc_info=True)
+
+    # 无 agent/执行器：评测台架与脚本路径，退回引擎直调（无票据面可言）
     try:
         engine = get_tool_engine()
         result = await engine.execute_with_safeguards(
@@ -472,25 +494,6 @@ async def execute_tool(body: ToolExecuteRequest):
         logger.warning("Tool execution via ToolEngine failed: %s", e)
     except Exception as e:
         logger.warning("Tool execution via ToolEngine error: %s", e)
-
-    # 回退到 Agent 执行
-    try:
-        from neurova.api.endpoints import get_agent_instance
-
-        agent = get_agent_instance()
-        if agent and hasattr(agent, "tool_executor"):
-            result = await agent.tool_executor.execute(body.tool_name, body.arguments)
-            # 检查执行结果是否包含 error 字段（工具执行失败）
-            # 避免把 {error: ...} 当作成功结果返回 code:0，导致前端误显示成功
-            if isinstance(result, dict) and "error" in result:
-                return {
-                    "code": 1,
-                    "error": result["error"],
-                    "data": {"execution_time": time.time() - start},
-                }
-            return {"code": 0, "data": {"result": result, "execution_time": time.time() - start}}
-    except Exception as e:
-        logger.warning("Tool execution via agent failed: %s", e)
 
     # 所有执行路径失败 → 返回明确错误（不再返回 simulated 假成功）
     return {

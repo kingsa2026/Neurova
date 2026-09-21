@@ -1,129 +1,72 @@
-"""
-统一 Token 估算器
+"""统一 Token 估算器 —— 全仓 token 计量的唯一事实源。
 
-解决 token 估算不一致问题：
-1. injector.py - _count_tokens (chinese_ratio=1.5, english_ratio=0.25)
-2. context_pool.py - ContextPoolUtils.estimate_tokens (中文1.5, 英文0.25)
-3. context_compressor.py - Message.estimate_tokens (中文2, 英文1)
-4. context_compressor.py - len() // 4 (粗略估算)
+判据侧（折叠/microcompact/抽屉额度/窗口预算）与展示侧（组成面板）**必须**共用
+同一把尺子：估算偏低会让"该压缩时不压缩"，估算偏高会过度折叠。两条都改变
+发给模型的内容，所以不允许存在第二份实现（含 `len//4`、`len*1.5` 这类就地近似）。
 
-提供统一的估算接口，支持多种策略。
+两档策略：
+
+- ``EXACT``（默认）：tiktoken ``o200k_base`` 精确计数。判据与展示统一走它。
+- ``BALANCED``：**无 tokenizer 时的回退**。按字符类别取实测上确界比例，
+  保证"宁可高估不可低估"——tokenizer 装不上的环境也不许漏掉折叠。
+
+回退比例由 o200k 实测标定，回归见
+``tests/unit/context/test_token_estimator_calibration.py``。
 """
 
 import re
 from enum import Enum
-from typing import Optional
+from typing import Dict, List, Optional
+
+from neurova.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class EstimationStrategy(Enum):
-    """估算策略"""
+    """估算策略。"""
 
-    BALANCED = "balanced"  # 平衡策略（推荐）
-    CONSERVATIVE = "conservative"  # 保守策略（高估）
-    AGGRESSIVE = "aggressive"  # 激进策略（低估）
-    EXACT = "exact"  # 精确策略（P1-1②）：tiktoken o200k 计数，失败回退 BALANCED
-    LEGACY_INJECTOR = "legacy_injector"  # 兼容 injector.py
-    LEGACY_POOL = "legacy_pool"  # 兼容 context_pool.py
-    LEGACY_COMPRESSOR = "legacy_compressor"  # 兼容 context_compressor.py
-    LEGACY_ROUGH = "legacy_rough"  # 兼容 len() // 4
+    EXACT = "exact"  # tiktoken o200k 精确计数（判据与展示的统一口径）
+    BALANCED = "balanced"  # 无 tokenizer 时的回退（按类别上界，宁可高估）
+
+
+# 回退档各字符类别的 token 上确界（o200k 实测标定）。
+# 取值原则：不得低于实测上界，否则无 tokenizer 环境会漏掉折叠。
+#   cjk   实测上界 1.575（生僻 CJK 序列）→ 取 2.0
+#   alnum 实测上界 1.000（十六进制串）  → 取 1.0
+#   punct 实测上界 0.583（标点密集）    → 取 0.6
+#   space 实测上界 0.063（纯空白）      → 取 0.1
+#   wide  实测上界 3.000（盲文/数学符号）→ 取 3.0
+_FALLBACK_RATES = {"cjk": 2.0, "alnum": 1.0, "punct": 0.6, "space": 0.1, "wide": 3.0}
+
+# CJK 及全角区段：中日韩统一表意、扩展 A、假名、谚文、CJK 标点、全角半角形。
+_CJK_CHAR = re.compile(
+    r"[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]"
+)
+
+
+def _fallback_rate(ch: str) -> float:
+    """单个字符在回退档下的 token 计入值。"""
+    if _CJK_CHAR.match(ch):
+        return _FALLBACK_RATES["cjk"]
+    if ch.isspace():
+        return _FALLBACK_RATES["space"]
+    if ord(ch) < 128:
+        return _FALLBACK_RATES["alnum"] if ch.isalnum() else _FALLBACK_RATES["punct"]
+    return _FALLBACK_RATES["wide"]
 
 
 class TokenEstimator:
-    """
-    统一的 Token 估算器
+    """统一的 Token 估算器。"""
 
-    提供一致的 token 估算接口，支持多种策略。
-    """
-
-    def __init__(self, strategy: EstimationStrategy = EstimationStrategy.BALANCED):
-        """
-        初始化估算器
-
-        Args:
-            strategy: 估算策略
-        """
+    def __init__(self, strategy: EstimationStrategy = EstimationStrategy.EXACT):
         self.strategy = strategy
         self._tiktoken_encoder = None
         self._tiktoken_failed = False
-        self._load_strategy(strategy)
-
-    def _load_strategy(self, strategy: EstimationStrategy):
-        """加载策略配置"""
-        if strategy == EstimationStrategy.BALANCED:
-            # 平衡策略：兼顾精度和性能
-            self.chinese_ratio = 1.5
-            self.english_word_ratio = 0.25
-            self.other_char_ratio = 0.1
-            self.min_tokens = 1
-            self.use_word_splitting = True
-            self.use_regex_splitting = False
-
-        elif strategy == EstimationStrategy.EXACT:
-            # 精确策略（P1-1②）：主路径走 tiktoken（estimate 顶部处理）；
-            # 回退时使用 BALANCED 参数
-            self.chinese_ratio = 1.5
-            self.english_word_ratio = 0.25
-            self.other_char_ratio = 0.1
-            self.min_tokens = 1
-            self.use_word_splitting = True
-            self.use_regex_splitting = False
-
-        elif strategy == EstimationStrategy.CONSERVATIVE:
-            # 保守策略：高估 token 数，避免超出预算
-            self.chinese_ratio = 2.0
-            self.english_word_ratio = 0.5
-            self.other_char_ratio = 0.2
-            self.min_tokens = 1
-            self.use_word_splitting = True
-            self.use_regex_splitting = False
-
-        elif strategy == EstimationStrategy.AGGRESSIVE:
-            # 激进策略：低估 token 数，尽可能多地包含内容
-            self.chinese_ratio = 1.0
-            self.english_word_ratio = 0.2
-            self.other_char_ratio = 0.05
-            self.min_tokens = 0
-            self.use_word_splitting = True
-            self.use_regex_splitting = False
-
-        elif strategy == EstimationStrategy.LEGACY_INJECTOR:
-            # 兼容 injector.py 的旧算法
-            self.chinese_ratio = 1.5
-            self.english_word_ratio = None  # 不使用单词分割
-            self.other_char_ratio = 0.25
-            self.min_tokens = 0
-            self.use_word_splitting = False
-            self.use_regex_splitting = False
-
-        elif strategy == EstimationStrategy.LEGACY_POOL:
-            # 兼容 context_pool.py 的旧算法
-            self.chinese_ratio = 1.5
-            self.english_word_ratio = 0.25
-            self.other_char_ratio = None  # 不计算其他字符
-            self.min_tokens = 1
-            self.use_word_splitting = True
-            self.use_regex_splitting = False
-
-        elif strategy == EstimationStrategy.LEGACY_COMPRESSOR:
-            # 兼容 context_compressor.py Message.estimate_tokens 的旧算法
-            self.chinese_ratio = 2.0
-            self.english_word_ratio = 1.0
-            self.other_char_ratio = None  # 不计算其他字符
-            self.min_tokens = 0
-            self.use_word_splitting = False
-            self.use_regex_splitting = True
-
-        elif strategy == EstimationStrategy.LEGACY_ROUGH:
-            # 兼容 len() // 4 的粗略估算
-            self.chinese_ratio = 0.25  # 每个字符 0.25 token
-            self.english_word_ratio = None
-            self.other_char_ratio = 0.25
-            self.min_tokens = 0
-            self.use_word_splitting = False
-            self.use_regex_splitting = False
+        self._degraded_logged = False
 
     def _get_tiktoken_encoder(self):
-        """懒加载 tiktoken o200k 编码器；失败标记 _tiktoken_failed 并回退比例估算。"""
+        """懒加载 tiktoken o200k 编码器；不可用时标记并回退比例估算。"""
         if self._tiktoken_failed:
             return None
         if self._tiktoken_encoder is None:
@@ -131,135 +74,59 @@ class TokenEstimator:
                 import tiktoken
 
                 self._tiktoken_encoder = tiktoken.get_encoding("o200k_base")
-            except Exception:
+            except Exception as e:  # noqa: BLE001 - 缺 tokenizer 是可用性降级，不是错误
                 self._tiktoken_failed = True
                 self._tiktoken_encoder = None
+                logger.warning(
+                    "tiktoken o200k 不可用（%s），token 估算降级为 BALANCED 比例上界口径"
+                    "——判定只会偏保守，不会漏掉压缩",
+                    e,
+                )
         return self._tiktoken_encoder
 
     def estimate(self, text: str) -> int:
-        """
-        估算文本的 token 数量
-
-        Args:
-            text: 要估算的文本
-
-        Returns:
-            估算的 token 数量
-        """
+        """估算文本的 token 数量。"""
         if not text:
             return 0
 
-        # P1-1② EXACT：tiktoken o200k 精确计数；失败回退 BALANCED 语义
         if self.strategy == EstimationStrategy.EXACT:
             encoder = self._get_tiktoken_encoder()
             if encoder is not None:
-                return len(encoder.encode(text))
-            # 落入下方 BALANCED 逻辑（_load_strategy 已为其装载参数）
-
-        # 中文字符计数
-        chinese_chars = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
-
-        # 计算中文 token 数
-        chinese_tokens = chinese_chars * self.chinese_ratio
-
-        # 计算英文和其他 token 数
-        if self.use_regex_splitting:
-            # 使用正则表达式分割（兼容 context_compressor.py）
-            english_words = len(re.findall(r"[a-zA-Z]+", text))
-            english_tokens = english_words * self.english_word_ratio if self.english_word_ratio else 0
-            other_tokens = 0  # 正则模式不单独计算其他字符
-        elif self.use_word_splitting:
-            # 使用空格分割（兼容 context_pool.py）
-            words = text.split()
-            english_words = len(words)
-            english_tokens = english_words * self.english_word_ratio if self.english_word_ratio else 0
-            other_tokens = 0  # 单词分割模式不单独计算其他字符
-        else:
-            # 使用字符计数（兼容 injector.py 和 len() // 4）
-            other_chars = len(text) - chinese_chars
-            english_tokens = 0
-            other_tokens = other_chars * self.other_char_ratio if self.other_char_ratio else 0
-
-        # 计算总 token 数
-        total = chinese_tokens + english_tokens + other_tokens
-
-        # 应用最小值
-        total = max(self.min_tokens, total)
-
-        return int(total)
-
-    def estimate_batch(self, texts: list) -> list:
-        """
-        批量估算 token 数量
-
-        Args:
-            texts: 文本列表
-
-        Returns:
-            token 数量列表
-        """
-        return [self.estimate(text) for text in texts]
-
-    def get_strategy_info(self) -> dict:
-        """
-        获取当前策略的详细信息
-
-        Returns:
-            策略信息字典
-        """
-        return {
-            "strategy": self.strategy.value,
-            "chinese_ratio": self.chinese_ratio,
-            "english_word_ratio": self.english_word_ratio,
-            "other_char_ratio": self.other_char_ratio,
-            "min_tokens": self.min_tokens,
-            "use_word_splitting": self.use_word_splitting,
-            "use_regex_splitting": self.use_regex_splitting,
-        }
-
-
-# 全局默认估算器实例
-_default_estimator: Optional[TokenEstimator] = None
-
-
-def get_token_estimator(strategy: EstimationStrategy = EstimationStrategy.BALANCED) -> TokenEstimator:
-    """
-    获取 Token 估算器实例
-
-    Args:
-        strategy: 估算策略
-
-    Returns:
-        TokenEstimator 实例
-    """
-    global _default_estimator
-
-    if _default_estimator is None or _default_estimator.strategy != strategy:
-        _default_estimator = TokenEstimator(strategy)
-
-    return _default_estimator
-
-
-def estimate_tokens(text: str, strategy: EstimationStrategy = EstimationStrategy.BALANCED) -> int:
-    """
-    估算文本的 token 数量（便捷函数）
-
-    Args:
-        text: 要估算的文本
-        strategy: 估算策略
-
-    Returns:
-        估算的 token 数量
-    """
-    estimator = get_token_estimator(strategy)
-    return estimator.estimate(text)
-
-
-# 向后兼容的接口
-class ContextPoolUtils:
-    """兼容 context_pool.py 的工具类"""
+                try:
+                    return len(encoder.encode(text))
+                except Exception as e:  # noqa: BLE001 - 单条编码失败同样降级，不抛
+                    if not self._degraded_logged:
+                        self._degraded_logged = True
+                        logger.warning("单条编码失败（%s），本条降级为比例上界口径", e)
+        return self._estimate_by_rate(text)
 
     @staticmethod
-    def estimate_tokens(text: str) -> int:
-        """估算 token 数量（使用平衡策略）"""
-        return estimate_tokens(text, EstimationStrategy.BALANCED)
+    def _estimate_by_rate(text: str) -> int:
+        """回退档：逐字符累加类别上界比例。"""
+        total = 0.0
+        for ch in text:
+            total += _fallback_rate(ch)
+        return int(round(total))
+
+    def estimate_batch(self, texts: List[str]) -> List[int]:
+        """批量估算 token 数量。"""
+        return [self.estimate(text) for text in texts]
+
+
+# 按策略缓存估算器实例（判据侧与展示侧会交替请求不同档，缓存必须按档分槽，
+# 否则每次跨档调用都重建对象）。
+_ESTIMATORS: Dict[EstimationStrategy, TokenEstimator] = {}
+
+
+def get_token_estimator(strategy: EstimationStrategy = EstimationStrategy.EXACT) -> TokenEstimator:
+    """获取指定策略的估算器实例（按策略缓存）。"""
+    estimator = _ESTIMATORS.get(strategy)
+    if estimator is None:
+        estimator = TokenEstimator(strategy)
+        _ESTIMATORS[strategy] = estimator
+    return estimator
+
+
+def estimate_tokens(text: str, strategy: EstimationStrategy = EstimationStrategy.EXACT) -> int:
+    """估算文本的 token 数量（全仓统一入口）。"""
+    return get_token_estimator(strategy).estimate(text)
