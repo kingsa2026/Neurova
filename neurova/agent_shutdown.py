@@ -157,6 +157,9 @@ async def shutdown_agent(agent) -> None:
         # 常驻 WAL 连接（sqlite3.Connection 自带 close，幂等）——不入清单
         # 则包导入回滚 rmtree 撞 neurova_memories_persist.db 句柄。
         (getattr(agent, "memory_manager", None), "_persist_conn"),
+        # B4/003 轮补（Issue #90）：ContextPool 的持久台账常驻连接（一个 agent 一个
+        # 库文件）——不入清单则同一根因再现：关闭/删除 agent 时 sqlite 句柄残留。
+        (getattr(agent, "context_orchestrator", None), "context_pool"),
     ):
         if _holder is None:
             continue
