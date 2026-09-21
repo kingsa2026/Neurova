@@ -13,7 +13,11 @@ from typing import Dict, List
 
 from neurova.memory_ingest.bundle.manifest import SUPPORTED_SCHEMA_VERSION
 from neurova.memory_ingest.bundle.media import verify_media
+from neurova.memory_ingest.bundle.records import VALID_KINDS, VALID_REASONING_STATES
 from neurova.memory_ingest.models import VALID_ORIGINS
+
+# 数值域：origin 已有闭集校验（_origin_errors），这里补齐会进召回权重与衰减判定的两个数
+_NUMERIC = {"importance": (0.0, 100.0), "temperature": (0.0, 100.0)}
 
 _REQUIRED = {
     "transcripts.jsonl": ("session_id", "seq", "kind", "ts", "identity_key"),
@@ -52,12 +56,14 @@ def validate_bundle(root: Path) -> List[str]:
         errors += _missing_field_errors(name, rows, required)
         errors += _duplicate_identity_errors(name, rows)
         errors += _count_errors(name, rows, claimed)
+        errors += _domain_errors(name, rows)
         if name == "transcripts.jsonl":
             errors += _seq_errors(rows)
             errors += _ts_errors(rows)
             errors += verify_media(root)          # 引用型包的最后一道闸：路径与摘要
         else:
             errors += _origin_errors(rows)
+    errors += _relations_errors(root, counts)
     return errors
 
 
@@ -132,3 +138,39 @@ def _seq_errors(rows: List[dict]) -> List[str]:
 def _origin_errors(rows: List[dict]) -> List[str]:
     return [f"memories.jsonl origin 越界: {row.get('origin')!r}"
             for row in rows if row.get("origin") not in VALID_ORIGINS]
+
+
+def _domain_errors(name: str, rows: List[dict]) -> List[str]:
+    """取值域只在校验层判一次：越界值进到咽喉才会以 float()/枚举异常炸出，那时已写了一半。"""
+    errors: List[str] = []
+    for row in rows:
+        key = row.get("identity_key")
+        if name == "transcripts.jsonl":
+            if row.get("kind") not in VALID_KINDS:
+                errors.append(f"transcripts.jsonl kind 越界: {row.get('kind')!r}（identity_key={key!r}）")
+            state = row.get("reasoning_state", "absent")
+            if state not in VALID_REASONING_STATES:
+                errors.append(f"transcripts.jsonl reasoning_state 越界: {state!r}（identity_key={key!r}）")
+            continue
+        for field, (low, high) in _NUMERIC.items():
+            value = row.get(field)
+            if field == "temperature" and value is None:
+                continue                      # 可缺省，缺省由 MemoryRecord 的契约默认承接
+            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                    or not low <= float(value) <= high:
+                errors.append(f"memories.jsonl {field} 必须是 {low:g}-{high:g} 内的数，"
+                              f"实际 {value!r}（identity_key={key!r}）")
+    return errors
+
+
+def _relations_errors(root: Path, counts: Dict[str, int]) -> List[str]:
+    """v1 不消费记忆图边，但包里有就必须登记：不在 manifest 里出现就是静默丢。"""
+    path = root / "relations.jsonl"
+    if not path.exists():
+        return []
+    claimed = int(counts.get("relations", 0))
+    actual = sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+    if claimed != actual:
+        return [f"relations.jsonl 存在但未登记: manifest 声称 {claimed}，实际 {actual}"
+                f"（v1 不导入图边，只登记；对不上就是漏报）"]
+    return []

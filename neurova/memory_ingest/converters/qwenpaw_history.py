@@ -24,7 +24,8 @@ from typing import Any, Dict, List, Tuple
 from neurova.memory_ingest import probe
 from neurova.memory_ingest.bundle.manifest import BundleError, BundleManifest
 from neurova.memory_ingest.bundle.media import MEDIA_BLOCK_TYPES, MediaSink
-from neurova.memory_ingest.bundle.writer import SourceEvent, ensure_offset, materialize, write_bundle
+from neurova.memory_ingest.bundle.writer import (SourceEvent, dropped_entries, ensure_offset,
+                                                 materialize, write_bundle)
 from neurova.memory_ingest.probe import Handprint, register_handprint
 
 CONVERTER_NAME = "qwenpaw_history"
@@ -74,6 +75,8 @@ REASONS: Dict[str, str] = {
     "blocks": "该块型在包内契约无落点，未携带",
     "media": "源里的媒体载体取不到字节（路径不在源目录树的 media/ 下，或 base64 不可解）",
     "column": "源列在包内契约与 extra 都无落点，未携带",
+    "timestamp": "时间戳定不出时区/解不开，整行未入包（不猜时刻）",
+    "空正文": "该行没有任何可携带内容（正文块为空且无调用），未入包",
 }
 
 
@@ -131,8 +134,16 @@ def _events_for_row(row: Dict[str, Any], sink: MediaSink, declared: Counter):
     if kind is None:
         declared[f"kind:{_text(row.get('kind')) or '<空>'}"] += 1
         return None
+    if not _ts(row.get("created_at")):
+        declared["timestamp"] += 1
+        return None
     if kind == "assistant_message":
         events = _expand_turn(row, blocks, sink)
+        if not events:
+            # 块全是空正文又无调用：这行确实没有可携带内容，但"没东西"必须报出来，
+            # 不能让它在包外看成一个从未存在的行。
+            declared["空正文"] += 1
+            return None
     else:
         events = [_flat_event(row, kind, blocks, sink)]
     declared.update(_stray_blocks(blocks, sink, TURN_BLOCK_TYPES if kind == "assistant_message"
@@ -289,13 +300,10 @@ def _column_decls(store: Path, rows: List[Dict[str, Any]]) -> Counter:
 
 
 def _dropped_entries(declared: Counter) -> List[Dict[str, Any]]:
-    entries = []
-    for field, count in sorted(declared.items()):
-        if count <= 0:
-            continue
-        prefix, _, name = field.partition(":")
-        entries.append({"field": name if prefix == "column" else field,
-                        "count": count, "reason": REASONS.get(prefix, REASONS["blocks"])})
+    entries = dropped_entries(declared, dict(REASONS, __fallback__=REASONS["blocks"]))
+    for entry in entries:                      # 源列申报只显示列名（列名前缀是本族约定）
+        entry["field"] = entry["field"].split(":", 1)[1] \
+            if entry["field"].startswith("column:") else entry["field"]
     return entries
 
 

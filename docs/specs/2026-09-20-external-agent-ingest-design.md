@@ -1,6 +1,6 @@
 # 外部 Agent 记忆与会话导入（Ingest Bundle）设计
 
-日期：2026-09-20　状态：待评审
+日期：2026-09-20　状态：已落地（2026-09-21 兼容性修复批次已并入，见 §6 硬规则与 §9）
 范围：把一次性本地脚本 `scripts/import_kai_to_neurova.py`（被 .gitignore 排除）的导入逻辑并入受控模块，
 并升级为"识别来源 → 路由转换器 → 显式确认写库"的通用外部 agent 数据导入能力。
 
@@ -115,15 +115,104 @@ scripts/ingest_memory.py   薄 CLI：detect / convert / apply / undo
 
 ## 6. 失败与撤销
 
+三条硬规则（2026-09-21 兼容性修复批次确立，各由用例钉住）：
+
+1. **取值域归校验层**：`kind` / `reasoning_state` / `importance` / `temperature` 的合法域只在
+   `bundle/validate.py` 判一次，越界即整包拒绝。咽喉侧不做二次校验——到那里才炸就已经写了一半；
+   `import_memories` 的 `origin` fail-safe 降档保留，但权威判据是校验器（守卫：`test_bundle_validate.py`
+   的 `test_unknown_kind_rejected_by_validator` 等 4 条 + `test_intake.py` 的"零写入"一条）。
+2. **时间戳定不出就申报，不造时刻**：`ensure_offset` 定不出来返回空串，五族在入口申报 `timestamp`
+   并跳过该行/该块（openclaw 记忆条记 `memory:无时间`）。造一个 `now()` 会把半年回填的历史按今天
+   分桶写进会话文件，且包内看不出区别（守卫：`test_bundle_writer.py::test_ensure_offset_never_invents_now`
+   与五族的 `*_without_readable_time_*` 用例；`grep "datetime.now(" neurova/memory_ingest/` 只允许
+   `writer.generated_at` 一处）。
+3. **包内媒体引用强制 `media/<digest>.<ext>`**：子目录会被落盘拍平（同名不同目录只落一份、第二条引用
+   指向错字节），摘要必须声明（否则引用与字节的对应无从证明）。撤销的"是否仍被引用"只看
+   `metadata.artifacts` 的结构化登记，不靠拼接全文取子串（守卫：`test_bundle_media.py` 三条命名闸 +
+   `test_intake.py::test_undo_prunes_even_when_name_appears_in_body`）。
+
 - 默认 `detect` 只出报告；写库必须显式 `--apply`（与既有 backup/restore 的显式确认口径一致）。
 - 每次 `--apply` 生成 `ingest_run_id`，落进每条记录 metadata。
 - 单 store 一个事务，整支成功或整支不落；跨 store 不做分布式事务，失败者进报告。
 - `--undo <ingest_run_id>` 按标签精确删除该批记忆行与会话消息。
+- `apply` 两种输入都收：源目录（先识别再转换）与**已转好的包**（有 `manifest.json` 的目录直接写库，
+  不再经临时目录重转）。「先 convert 看包、再 apply 同一支包」因此是全通路（守卫：
+  `test_cli.py::test_apply_accepts_a_previously_converted_bundle`）。
+- 一个可探查 store 都没探到（或部分 store 认不出）时以非零码收尾，认不出的那一支一个字节都不写；
+  退出码 `0 成功 / 2 未识别或冲突 / 3 校验失败 / 4 报告态`。
 - 条目数/体积上限，超限拒绝。
-- 安全：SQLite 一律只读 URI 打开；包内路径过 `safe_paths.resolve_within`（zip-slip 已有先例测试）；
-  导入内容不进 system prompt，工具参数只当数据存。
+- 安全：SQLite 一律只读 URI 打开（`probe.read_only_connect` 是唯一打开点，路径走 `Path.as_uri()`
+  转义——字面的 `%` 不转义会被 SQLite 当转义序列解掉，把"打不开"报成"未识别"）；包内路径过
+  `safe_paths.resolve_within`（zip-slip 已有先例测试）；导入内容不进 system prompt，工具参数只当数据存。
 
 ## 7. 测试与验收
+
+### 7.1 2026-09-21 兼容性修复批次（逐条处置）
+
+计划与取证：`docs/04-plans/2026-09-20-external-agent-ingest-plan.md`（同批次工单 Task 1-12）。
+审计报告 `docs/05-reports/外部agent导入兼容性审计_2026-09-21.md` 未在本次可见分支内（见下"回写"）。
+
+| Finding | 处置 | 提交 |
+|---|---|---|
+| F-01 未知 kind 抛 ValueError 穿到写入口 | 已修（取值域进校验层 + intake 兜 ValueError） | 519030d4 |
+| F-02 importance/temperature 无域校验 | 已修（同上） | 519030d4 |
+| F-03a opencode 只有思考块即 IndexError | 已修（思考作用域收到消息内） | 8a076a2c |
+| F-03b OpenClaw 缺记忆附表整支转不出 | 已修（NULL 列带别名） | 6c26172d |
+| F-06 五处静默 now() | 已修（定不出→申报跳过） | a202e456 |
+| F-07 空正文轮整条消失且不申报 | 已修（轮内记 reasoning_state；qwenpaw 补空行申报） | 83ecdfd9 / f48e14d7 |
+| F-08 extra 不进落盘形状 | 已修（extra 随行落盘） | 83ecdfd9 |
+| F-09 只有 redacted_thinking 的行不留痕 | 已修（产事件；hermes 照数申报） | 435c7f4b |
+| F-12 只读 URI 未转义 | 已修（Path.as_uri） | 5b22942a |
+| F-13 apply 不接受 convert 的产物 | 已修（_is_bundle 分岔） | 619f8f0b |
+| F-14 空目录假成功 | 已修（零 store 退非零码） | 619f8f0b |
+| F-15 第二份"记录→消息"映射 | 已删（只留 turns.py） | 620644e4 |
+| F-19a 六份 _dropped_entries 各写一份 | 已修（上收 writer.dropped_entries） | 31d38bef |
+| F-19b 角色不认报成"空正文" | 已修（本批核对：role 前缀在各族信封已申报，补防回归锁） | 31d38bef / fac2b1d3 |
+| F-19c 死条件 `if rows or True` | 已修（去掉包裹） | 31d38bef |
+| F-19d relations.jsonl 无从登记 | 已修（writer 按实计数 + validate 登记闸） | 31d38bef |
+| F-20 origin 权威归一处 | 已修（校验器权威；咽喉 fail-safe 降档保留并写明） | 519030d4 |
+| F-21 包内同名不同目录被拍平 | 已修（强制内容寻址命名 + 摘要必声明） | b74fa9ef |
+| F-22 撤销拼全文取子串判引用 | 已修（改结构化引用集合） | b74fa9ef |
+| F-04 导入会话用户归属 | 仍待拍板 DEC-4（归属是产品决定，本轮不动） | — |
+| F-05 导入结果对运行中服务不可见 | 部分处置：CLI 明确报出"记忆需重启才可见"（DEC-2 的最小成本项）；开端点/加 reload 仍待拍板 | 877bd22c |
+| F-10 撤销作用域口径 | 已修：按**行自带**三元组删盘 + 索引摘除收口（授权凭据是批次标签，不是调用现场作用域） | 578536b4 |
+| F-11 回填历史的温度语义 | 已修：导入侧定标获知时刻（created_at 记事件、last_accessed_at 记获知），温度照原样落库 | b52eac01 |
+| F-16 OpenClaw 同 event id 多行 | 已修：幂等键改立行主键 (session_id, seq)，event id 降级为 extra 标识；**真样本已取证**（npm openclaw@2026.9.5 上游 schema） | c35b3458 |
+| F-17 memory-enhancement/import 端点 | 仍待拍板 DEC-5（退役/接线/声明仅演示，三选一；本轮不动） | — |
+| F-18 私有方言双路幂等域 | 仍待拍板 DEC-6（两条路的幂等域是否打通是产品决定；已实测确认两路在同源上产出不同会话号，互不感知） | — |
+
+回写状态：本批次开工时审计报告 `docs/05-reports/外部agent导入兼容性审计_2026-09-21.md` 不在仓库
+可见分支内（grep 全仓与全历史零命中），无法逐条追加处置结果；故把上表落到规格 §7.1，
+待报告入库后按此表回写即可，不另建第二份口径。
+
+### 7.3 2026-09-21 闸门批（F-04 / F-05 / F-10 / F-11 / F-16 / F-17 / F-18）
+
+前批把七条留成闸门，理由是"要动运行期咽喉或需真实上游样本"。本轮把样本拉下来逐条核对，
+凡是**可由事实判定、且修在上游产生非法状态那一侧**的都收了；只留真正的产品决定：
+
+- **F-16 真样本取证（npm `openclaw@2026.9.5`）**：上游建表语句里 `transcript_events` 主键是
+  `(session_id, seq)`；event id 的唯一性由第三张表 `transcript_event_identities` 承担
+  （主键 `(session_id, event_id)`），而本转换器的指纹只要求两张会话表。上游自己的
+  `copyRetainedTranscriptPayload` 会把同一条事件按**新 seq** 再插一份（只 `json_set` 修
+  parentId），`readTranscriptEventIdentity` 对缺 id 的事件返回 undefined（只跳过 identity 行）。
+  结论：event id 在源侧不是不变量，把它当包内幂等键，重复即整包被校验器判死、缺 id 又整行丢——
+  两个方向的错，同一个根因。今改立行主键，真样本实测通过。
+- **F-11 判定性**：不是产品二选一。`days_idle` 取 `last_accessed_at or created_at` 的语义
+  （距今多久没被访问）本就正确，错的是导入侧只写了事件时刻、没写获知时刻。修在导入侧，
+  created_at 照原样保留历史时刻、last_accessed_at 定标为导入时刻，温度一个字节不改。
+- **F-10 授权口径**：批次标签 `ingest_run_id` 本身就是撤销的授权凭据（§6"回滚靠标签"），
+  行的归属与调用现场的归属是两个语义；按现场三元组删盘是这两者混用。今按行自带三元组删，
+  P1-6 越权守卫默认口径不变（只有显式传行归属才放宽）。同根因的第二个命中点——撤销不摘
+  关键词倒排与运行期向量库——同步收口到 `_drop_from_recall_indexes` 一处，`forget` 共用。
+- **F-05 只做诚实暴露**：开 HTTP 端点（推翻"本轮不开端点"）与加 `reload_memories` 入口
+  （改运行期咽喉）都需拍板；但报告写"记忆 +N"而界面一条看不见，是第三种假成功。CLI 现报出
+  "会话读盘即见；记忆需后端重启后才可见"，仅在有记忆写入时出现。
+- **F-04 / F-17 / F-18 仍闸门**：前两条是产品决定（属主语义；端点退役还是接线）。F-18 本轮
+  实测确认了"两条路互不感知"这一事实（同一支 dialog 源：老脚本落 `session_kai-dialog-20260501`，
+  ingest 落 `session_dialog-2026-05-01`，两套身份都在盘上、互不认对方），**但"是否打通"
+  仍要拍板**——打通的代价是给私有方言那侧补 identity_key，属新功能而不是缺陷修复。
+
+### 7.2 常驻判据
 
 - 转换器：每族一个合成 fixture 正例 + 一个"像但不是"的负例；黄金 bundle 摘要进 CI。
 - 校验器负例：未知 schema_version、origin 越界、`seq` 断裂、计数不符、路径越界。
@@ -170,6 +259,9 @@ v1 的记录类型边界（避免接口悬空）
 - 身份/人格文件导入（`import_identity`）：归人格装配面，已定不并入。
 - 记忆图边落图（`relations.jsonl`）：v1 只登记。
 - 运行期记忆写入无统一事件总线：`refresh_moe_index` 至今零调用方，本设计不依赖它。
+- 已核不是问题（勿重修，2026-09-21 批次反证）：源的 WAL sidecar 不由识别与转换读取（只读 URI 打开
+  主库即可，`-wal`/`-shm` 缺席也不影响）；非 UTF-8 行由各读点的 `errors="replace"` 承接，
+  识别与包产出都不会因此崩；`probe._structure` 对打不开的库回 `{"error": ...}` 而非空结构。
 - 导入媒体在**运行中的服务**里看不见：intake 把字节落进 `agent_workspaces/<agent>/media/`
   并按注册处同一算法给出 `metadata.artifacts` 条目，但产物注册表是 API 进程内的字典
   （`artifacts_api._artifacts_store`），跨进程不共享。要让导入的图片在 UI 里打开，需要的是

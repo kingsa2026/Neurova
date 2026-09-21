@@ -33,7 +33,10 @@ def main(argv: Sequence[str], *, manager=None, sessions=None) -> int:
     args = _parser().parse_args(list(argv))
     try:
         if args.cmd == "detect":
-            return _detect(_scan(Path(args.source)))
+            source = Path(args.source)
+            if _is_bundle(source):
+                return _report_bundle(source)
+            return _detect(_scan(source))
         if args.cmd == "convert":
             return _convert(Path(args.source), Path(args.out), args.agent_name)
         if args.cmd == "apply":
@@ -80,6 +83,11 @@ def _scan(source: Path) -> List[Any]:
     return findings if isinstance(findings, list) else [findings]
 
 
+def _is_bundle(path: Path) -> bool:
+    """有 manifest.json 的目录就是包，不是待识别的源：apply 两种都要收。"""
+    return path.is_dir() and (path / "manifest.json").is_file()
+
+
 def _detect(findings: Sequence[Any]) -> int:
     for finding in findings:
         hits = ",".join(finding.hits) or "无"
@@ -91,13 +99,32 @@ def _detect(findings: Sequence[Any]) -> int:
     return EXIT_UNRECOGNIZED
 
 
-def _bundles(source: Path, staging: Path, agent_name: str) -> Tuple[List[Tuple[Any, Path]], List[Tuple[str, str]]]:
+def _report_bundle(bundle: Path) -> int:
+    """包不是源：detect 指到包上就直接报价里有什么，不逐文件报未识别。"""
+    errors = validate_bundle(bundle)
+    if errors:
+        print("这是一支已转好的包，但校验未通过：" + "；".join(errors))
+        return EXIT_INVALID_BUNDLE
+    plan = plan_bundle(bundle)
+    print(f"这是一支已转好的包（{bundle}）：事件 {plan.counts['transcripts']} 条、"
+          f"记忆 {plan.counts['memories']} 条、降级申报 {len(plan.dropped)} 项")
+    print("导入用 apply 指到同一路径（写库仍需 --yes）。")
+    return EXIT_OK
+
+
+def _bundles(source: Path, staging: Path, agent_name: str
+             ) -> Tuple[List[Tuple[str, Path]], List[Tuple[str, str]]]:
     """逐 store 出结论：认得出的转，认不出的照实回报。
 
     单源不猜——指到哪一支就该是哪一支；整目录则不因一个无关文件判死整批，
     但被跳过的每一支都要报出来，并以非零码收尾，脚本才不会当成成功。
+    返回值第一元是给人读的标签（源路径 + 指纹名），第二元是包目录。
     """
     findings = _scan(source)
+    if not findings:
+        print(f"[跳过] {source} —— 目录里没有一个可探查的 store（既无 .db 也无 .jsonl），"
+              f"一个字节都没写")
+        return [], [(str(source), "无可探查的 store")]
     if _detect(findings) != EXIT_OK and not source.is_dir():
         raise UnrecognizedSourceError("源未识别或指纹冲突，拒绝猜测")
     usable, blocked = [], []
@@ -113,7 +140,7 @@ def _bundles(source: Path, staging: Path, agent_name: str) -> Tuple[List[Tuple[A
     for index, finding in enumerate(usable):
         out_dir = staging if single else staging / f"{index:02d}-{Path(finding.path).name}"
         CONVERTERS[finding.hits[0]](Path(finding.path), out_dir, agent_name=agent_name)
-        bundles.append((finding, out_dir))
+        bundles.append((f"{finding.path}({finding.hits[0]})", out_dir))
     for path, reason in blocked:
         print(f"[跳过] {path} —— {reason}，一个字节都没写")
     return bundles, blocked
@@ -123,9 +150,9 @@ def _convert(source: Path, out: Path, agent_name: str) -> int:
     staging = Path(out)
     staging.mkdir(parents=True, exist_ok=True)
     bundles, blocked = _bundles(source, staging, agent_name)
-    for finding, bundle in bundles:
+    for label, bundle in bundles:
         errors = validate_bundle(bundle)
-        print(f"{bundle} 指纹={finding.hits[0]} "
+        print(f"{bundle} 来源={label} "
               f"{'校验通过' if not errors else '校验失败：' + '；'.join(errors)}")
         if errors:
             raise BundleError(f"{bundle} 校验未通过")
@@ -133,11 +160,16 @@ def _convert(source: Path, out: Path, agent_name: str) -> int:
 
 
 def _apply(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
+    source = Path(args.source)
     with tempfile.TemporaryDirectory(prefix="neurova-ingest-") as staging:
-        bundles, blocked = _bundles(Path(args.source), Path(staging), args.agent_name)
-        for finding, bundle in bundles:
+        if _is_bundle(source):
+            # 包是 convert 的产物，拿来即用：不再经临时目录重转一遍
+            bundles, blocked = [(str(source), source)], []
+        else:
+            bundles, blocked = _bundles(source, Path(staging), args.agent_name)
+        for label, bundle in bundles:
             plan = plan_bundle(bundle)
-            print(f"{finding.path}：事件 {plan.counts['transcripts']} 条 → 装配后消息 "
+            print(f"{label}：事件 {plan.counts['transcripts']} 条 → 装配后消息 "
                   f"{plan.turn_messages} 条，记忆 {plan.counts['memories']} 条，"
                   f"降级申报 {len(plan.dropped)} 项")
             for entry in plan.dropped:
@@ -149,18 +181,22 @@ def _apply(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
         manager = manager or _memory_manager(args.agent_id)
         sessions = sessions or _session_manager(args.sessions_dir)
         code = EXIT_OK
-        for finding, bundle in bundles:
+        for label, bundle in bundles:
             try:
                 report = apply_bundle(bundle, agent_id=args.agent_id, manager=manager,
                                       sessions=sessions, run_id=args.run_id)
             except BundleError as exc:
                 # 跨 store 不做分布式事务：失败者进报告，已写的靠 run_id 撤销
-                print(f"拒绝 {finding.path}：{exc}", file=sys.stderr)
+                print(f"拒绝 {label}：{exc}", file=sys.stderr)
                 code = EXIT_INVALID_BUNDLE
                 continue
-            print(f"已写入 {finding.path} run_id={report.run_id}：消息 +{report.messages_added}"
+            print(f"已写入 {label} run_id={report.run_id}：消息 +{report.messages_added}"
                   f"/跳过 {report.messages_skipped}，会话文件 {report.sessions_touched} 个，"
                   f"记忆 +{report.memories_added}/跳过 {report.memories_skipped}")
+            if report.memories_added:
+                # 记忆面与运行中的后端各持一份内存表（后端只在构造时读一次盘），会话面才是
+                # 读盘即见。不把这点说出来，报告写着"已写入"而界面上一条看不见，是第三种假成功。
+                print("  可见性：会话读盘即见；记忆要在后端启动时读盘，已在运行的后端需重启后才可见")
             print(f"  撤销：python scripts/ingest_memory.py undo --agent-id {args.agent_id} "
                   f"--run-id {report.run_id}")
         if blocked:

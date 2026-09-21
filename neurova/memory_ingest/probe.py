@@ -37,8 +37,13 @@ class StoreFinding:
 
 
 def read_only_connect(path: Path) -> sqlite3.Connection:
-    """外部库一律只读打开：识别与转换阶段都不允许改动源。"""
-    return sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    """外部库一律只读打开：识别与转换阶段都不允许改动源。
+
+    路径按 URI 规范转义（`Path.as_uri()`）：路径里字面的 %（如 `100%20done.db`）不转义会被
+    SQLite 当转义序列解掉，于是"打不开"被报成"未识别"，换一张表也认不出。
+    Windows 盘符由 as_uri 统一写成 `file:///E:/...`，不在本模块再拼第二套形。
+    """
+    return sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True)
 
 
 def sqlite_tables(path: Path) -> List[str]:
