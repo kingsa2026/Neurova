@@ -157,3 +157,34 @@ class TestBgmMix:
         monkeypatch.setattr(ff.subprocess, "run", fake_run)
         ok, err = ff.mix_bgm("ffmpeg", "/in/a.mp4", "/in/b.mp3", "/in/m.mp4", has_audio=True)
         assert ok is False and "aac" in err
+
+
+class TestCjkFontProbeRejectsLatinOnlyNoto:
+    """`notosans` 是 Noto Sans **家族名**，不是 CJK 判据。
+
+    实锤：全新 Debian/Ubuntu 镜像预装 `google-noto-vf/NotoSans[wght].ttf`
+    （纯拉丁，无汉字字形）。旧判据按子串 `notosans` 命中它 → `find_cjk_font()`
+    返回一个**不含汉字**的字体：字幕烧录与 PDF 出件都拿它当"有中文字体"，
+    渲染出方框，正是本模块最忌讳的"假成功"形态。CJK 变体在文件名里带
+    `cjk`/`sc` 限定（如 `NotoSansCJKsc-Regular.otf`），据此收窄判据。
+    """
+
+    @pytest.fixture()
+    def single_root(self, monkeypatch):
+        """只认第一个字体根，避免同一替身文件被两个根各收一遍产生重复项。"""
+        monkeypatch.setattr(
+            ff.os.path, "isdir", lambda p: p == "/usr/share/fonts", raising=False
+        )
+
+    def test_latin_only_notosans_is_not_a_cjk_font(self, single_root, monkeypatch, tmp_path):
+        latin = tmp_path / "NotoSans[wght].ttf"
+        latin.write_bytes(b"LATINONLY")
+        monkeypatch.setattr(ff.Path, "rglob", lambda self, _p: iter([latin]))
+        assert ff._cjk_font_candidates() == [], "纯拉丁 NotoSans 不得被当作中文字体"
+        assert ff.find_cjk_font() is None
+
+    def test_noto_cjk_variant_still_matched(self, single_root, monkeypatch, tmp_path):
+        cjk = tmp_path / "NotoSansCJKsc-Regular.otf"
+        cjk.write_bytes(b"CJK")
+        monkeypatch.setattr(ff.Path, "rglob", lambda self, _p: iter([cjk]))
+        assert ff._cjk_font_candidates() == [cjk]

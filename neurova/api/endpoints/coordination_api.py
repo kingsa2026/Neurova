@@ -289,7 +289,7 @@ async def get_ab_test_results(experiment_name: str):
 @router.post("/ab-tests/reset")
 async def reset_ab_test_manager_endpoint():
     """重置 A/B Test Manager（仅用于测试）"""
-    reset_ab_test_manager()
+    await reset_ab_test_manager()
     logger.info("Reset ab test manager")
     return {"status": "reset"}
 
@@ -301,7 +301,10 @@ async def get_coordination_summary():
     """获取完整的 Coordination System 摘要"""
     yield_stats = (await get_glance_yield_checker()).get_stats()
     triage_stats = get_small_brain_triage_gate().get_stats()
-    ab_tests = get_ab_test_manager().list_experiments()
+    # 取实例必须 await：get_ab_test_manager 是协程工厂，漏 await 拿到的是
+    # coroutine 对象，.list_experiments() 直接 AttributeError（端点 500）。
+    ab_manager = await get_ab_test_manager()
+    ab_tests = ab_manager.list_experiments()
 
     return {
         "generated_at": datetime.utcnow().isoformat(),

@@ -1,413 +1,131 @@
 /**
- * Message Queue Store Unit Tests
- * 
- * Tests for the optimized Message Queue Store with offline-first architecture
+ * messageQueue store 状态机测试（补课 P3-b：消息队列）。
+ *
+ * 契约：
+ * - 流式中发送 → enqueue；done 后 next() 出队续发
+ * - pending → sending → sent(出队) | failed；failed 可 retry 回 pending
+ * - sending 不可移除；updateText 仅 pending
+ * - 暂停开关只影响自动续发，不改变队列内容
  */
-
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { useMessageQueueStore } from '@/stores/messageQueue.optimized'
-import { defineStore } from 'pinia'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { useMessageQueueStore } from '@/stores/messageQueue'
 
-// Mock localStorage
-const localStorageMock: Record<string, string> = {}
-Object.defineProperty(global, 'localStorage', {
-  value: {
-    getItem: vi.fn((key: string) => localStorageMock[key] || null),
-    setItem: vi.fn((key: string, value: string) => {
-      localStorageMock[key] = value
-    }),
-    removeItem: vi.fn((key: string) => {
-      delete localStorageMock[key]
-    }),
-    clear: vi.fn(() => {
-      Object.keys(localStorageMock).forEach(key => {
-        delete localStorageMock[key]
-      })
-    }),
-  },
-})
-
-// Mock navigator.onLine
-Object.defineProperty(global.navigator, 'onLine', {
-  value: true,
-  writable: true,
-})
-
-describe('MessageQueueStore', () => {
-  let store: ReturnType<typeof useMessageQueueStore>
-  
+describe('messageQueue store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    store = useMessageQueueStore()
-    // Reset state
-    store.reset()
   })
-  
-  describe('enqueue', () => {
-    it('should add message to queue', () => {
-      const result = store.enqueue('Test message', 'session-1')
-      
-      expect(result.id).toBeDefined()
-      expect(result.text).toBe('Test message')
-      expect(result.sessionId).toBe('session-1')
-      expect(result.status).toBe('pending')
-      expect(result.enqueuedAt).toBeDefined()
-    })
-    
-    it('should trim whitespace from text', () => {
-      const result = store.enqueue('  Test message  ')
-      
-      expect(result.text).toBe('Test message')
-    })
-    
-    it('should assign priority and TTL if provided', () => {
-      const result = store.enqueue('High priority', 'session-1', {
-        priority: 10,
-        ttlMs: 60000,
-      })
-      
-      expect(result.priority).toBe(10)
-      expect(result.ttlMs).toBe(60000)
-    })
-    
-    it('should increment totalEnqueued counter', () => {
-      store.enqueue('Message 1')
-      store.enqueue('Message 2')
-      
-      expect(store.stats.totalEnqueued).toBe(2)
-    })
-    
-    it('should persist to storage', () => {
-      store.enqueue('Test message')
-      
-      expect(global.localStorage.setItem).toHaveBeenCalled()
-    })
+
+  it('enqueue adds pending item with trimmed text', () => {
+    const q = useMessageQueueStore()
+    const item = q.enqueue('  hello  ')
+    expect(item.status).toBe('pending')
+    expect(item.text).toBe('hello')
+    expect(q.pendingCount).toBe(1)
+    expect(q.hasPending).toBe(true)
   })
-  
-  describe('next', () => {
-    it('should return first pending message', () => {
-      store.enqueue('First message')
-      store.enqueue('Second message')
-      
-      const next = store.next()
-      
-      expect(next?.text).toBe('First message')
-    })
-    
-    it('should respect session filter', () => {
-      store.enqueue('Session A message', 'session-a')
-      store.enqueue('Session B message', 'session-b')
-      
-      const next = store.next('session-a')
-      
-      expect(next?.sessionId).toBe('session-a')
-    })
-    
-    it('should prioritize by priority field', () => {
-      store.enqueue('Low priority', undefined, { priority: 1 })
-      store.enqueue('High priority', undefined, { priority: 10 })
-      
-      const next = store.next()
-      
-      expect(next?.text).toBe('High priority')
-    })
+
+  it('next returns first pending without dequeue', () => {
+    const q = useMessageQueueStore()
+    q.enqueue('a')
+    q.enqueue('b')
+    expect(q.next()?.text).toBe('a')
+    expect(q.pendingCount).toBe(2)
   })
-  
-  describe('status tracking', () => {
-    it('should mark message as sending', () => {
-      const msg = store.enqueue('Test message')
-      const result = store.markSending(msg.id)
-      
-      expect(result).toBe(true)
-      expect(msg.status).toBe('sending')
-    })
-    
-    it('should not allow re-marking as sending', () => {
-      const msg = store.enqueue('Test message')
-      store.markSending(msg.id)
-      const result = store.markSending(msg.id)
-      
-      expect(result).toBe(false)
-    })
-    
-    it('should mark message as sent and remove from queue', () => {
-      const msg = store.enqueue('Test message')
-      store.markSent(msg.id)
-      
-      expect(store.items.length).toBe(0)
-      expect(store.stats.totalSent).toBe(1)
-    })
-    
-    it('should mark message as failed with error', () => {
-      const msg = store.enqueue('Test message')
-      store.markFailed(msg.id, 'Network error')
-      
-      expect(msg.status).toBe('failed')
-      expect(msg.error).toBe('Network error')
-      expect(store.stats.totalFailed).toBe(0) // Only incremented on retry failure
-    })
-    
-    it('should retry failed message', () => {
-      const msg = store.enqueue('Test message')
-      store.markFailed(msg.id, 'Error')
-      const result = store.retry(msg.id)
-      
-      expect(result).toBe(true)
-      expect(msg.status).toBe('pending')
-      expect(msg.error).toBeUndefined()
-      expect(msg.retryCount).toBe(1)
-      expect(store.stats.totalRetried).toBe(1)
-    })
-    
-    it('should fail after max retries exceeded', () => {
-      const msg = store.enqueue('Test message')
-      
-      // Manually set retry count to max
-      msg.retryCount = 5
-      msg.status = 'failed'
-      
-      store.retry(msg.id)
-      
-      expect(msg.status).toBe('failed')
-      expect(msg.error).toContain('Max retries')
-      expect(store.stats.totalFailed).toBe(1)
-    })
-    
-    it('should update text of pending message', () => {
-      const msg = store.enqueue('Original text')
-      const result = store.updateText(msg.id, 'Updated text')
-      
-      expect(result).toBe(true)
-      expect(msg.text).toBe('Updated text')
-    })
-    
-    it('should not update text of non-pending message', () => {
-      const msg = store.enqueue('Test message')
-      store.markSent(msg.id)
-      const result = store.updateText(msg.id, 'New text')
-      
-      expect(result).toBe(false)
-    })
+
+  it('sending → sent removes from queue', () => {
+    const q = useMessageQueueStore()
+    const item = q.enqueue('a')
+    expect(q.markSending(item.id)).toBe(true)
+    expect(q.next()).toBeUndefined() // sending 不再是 pending
+    q.markSent(item.id)
+    expect(q.items).toHaveLength(0)
   })
-  
-  describe('ordering', () => {
-    it('should reorder pending messages', () => {
-      const msg1 = store.enqueue('Message 1')
-      const msg2 = store.enqueue('Message 2')
-      const msg3 = store.enqueue('Message 3')
-      
-      store.reorder([msg3.id, msg1.id, msg2.id])
-      
-      const pending = store.items.filter(i => i.status === 'pending')
-      expect(pending[0].id).toBe(msg3.id)
-      expect(pending[1].id).toBe(msg1.id)
-      expect(pending[2].id).toBe(msg2.id)
-    })
-    
-    it('should move message to top', () => {
-      const msg1 = store.enqueue('First')
-      const msg2 = store.enqueue('Second')
-      
-      store.moveToTop(msg2.id)
-      
-      const next = store.next()
-      expect(next?.id).toBe(msg2.id)
-    })
-    
-    it('should not move sending message to top', () => {
-      const msg = store.enqueue('Test')
-      store.markSending(msg.id)
-      const result = store.moveToTop(msg.id)
-      
-      expect(result).toBe(false)
-    })
-    
-    it('should remove single message', () => {
-      const msg = store.enqueue('Test message')
-      const result = store.remove(msg.id)
-      
-      expect(result).toBe(true)
-      expect(store.items.length).toBe(0)
-    })
-    
-    it('should not remove sending message', () => {
-      const msg = store.enqueue('Test message')
-      store.markSending(msg.id)
-      const result = store.remove(msg.id)
-      
-      expect(result).toBe(false)
-    })
-    
-    it('should clear queue keeping sending messages', () => {
-      store.enqueue('Pending 1')
-      store.enqueue('Pending 2')
-      const sendingMsg = store.enqueue('Sending')
-      store.markSending(sendingMsg.id)
-      
-      store.clear()
-      
-      expect(store.items.length).toBe(1)
-      expect(store.items[0].id).toBe(sendingMsg.id)
-    })
+
+  it('sending → failed → retry → pending', () => {
+    const q = useMessageQueueStore()
+    const item = q.enqueue('a')
+    q.markSending(item.id)
+    q.markFailed(item.id, 'network down')
+    const failed = q.items.find((i) => i.id === item.id)
+    expect(failed?.status).toBe('failed')
+    expect(failed?.error).toBe('network down')
+    expect(q.retry(item.id)).toBe(true)
+    expect(q.next()?.id).toBe(item.id)
+    expect(q.next()?.error).toBeUndefined()
   })
-  
-  describe('computed properties', () => {
-    it('should count pending messages', () => {
-      store.enqueue('Pending 1')
-      store.enqueue('Pending 2')
-      // 第三条也必须保持 pending：pendingCount 数的是收集态，
-      // 入队即变 sending/sent 会与 enqueue 契约（只入队、不代发）冲突。
-      store.enqueue('Sent', undefined, {})
-      
-      expect(store.pendingCount).toBe(3)
-    })
-    
-    it('should count failed messages', () => {
-      const msg = store.enqueue('Failed')
-      store.markFailed(msg.id, 'Error')
-      
-      expect(store.failedCount).toBe(1)
-    })
-    
-    it('should group pending by session', () => {
-      store.enqueue('Session A', 'session-a')
-      store.enqueue('Session A again', 'session-a')
-      store.enqueue('Session B', 'session-b')
-      
-      expect(store.pendingBySession.size).toBe(2)
-      expect(store.pendingBySession.get('session-a')?.length).toBe(2)
-      expect(store.pendingBySession.get('session-b')?.length).toBe(1)
-    })
-    
-    it('should sort prioritized queue by priority and time', () => {
-      store.enqueue('Low priority', undefined, { priority: 1 })
-      store.enqueue('High priority', undefined, { priority: 10 })
-      store.enqueue('Medium priority', undefined, { priority: 5 })
-      
-      const sorted = store.prioritizedQueue
-      expect(sorted[0].text).toBe('High priority')
-      expect(sorted[1].text).toBe('Medium priority')
-      expect(sorted[2].text).toBe('Low priority')
-    })
+
+  it('sending cannot be removed', () => {
+    const q = useMessageQueueStore()
+    const item = q.enqueue('a')
+    q.markSending(item.id)
+    expect(q.remove(item.id)).toBe(false)
+    expect(q.items).toHaveLength(1)
   })
-  
-  describe('control actions', () => {
-    it('should pause queue processing', () => {
-      store.setPaused(true)
-      expect(store.paused).toBe(true)
-    })
-    
-    it('should toggle pause state', () => {
-      store.togglePause()
-      expect(store.paused).toBe(true)
-      
-      store.togglePause()
-      expect(store.paused).toBe(false)
-    })
-    
-    it('should configure sync settings', () => {
-      store.configure({
-        maxBatchSize: 20,
-        syncIntervalMs: 10000,
-      })
-      
-      expect(store.syncConfig.maxBatchSize).toBe(20)
-      expect(store.syncConfig.syncIntervalMs).toBe(10000)
-    })
+
+  it('updateText only works on pending', () => {
+    const q = useMessageQueueStore()
+    const item = q.enqueue('a')
+    expect(q.updateText(item.id, 'edited')).toBe(true)
+    expect(q.next()?.text).toBe('edited')
+    q.markSending(item.id)
+    expect(q.updateText(item.id, 'nope')).toBe(false)
+    expect(q.items[0].text).toBe('edited')
   })
-  
-  describe('statistics', () => {
-    it('should provide comprehensive statistics', () => {
-      const msg1 = store.enqueue('Message 1')
-      const msg2 = store.enqueue('Message 2')
-      store.markSent(msg1.id)
-      store.markFailed(msg2.id, 'Error')
-      store.retry(msg2.id)
-      
-      const stats = store.getStatistics()
-      
-      expect(stats.totalEnqueued).toBe(2)
-      expect(stats.totalSent).toBe(1)
-      expect(stats.totalRetried).toBe(1)
-      // retry 后回到 pending（尚未再失败），故 failed 计数为 0；
-      // failedCount 是「当前失败态」读数，不是历史失败次数（后者在 totalFailed）。
-      expect(stats.current.pending).toBe(1)
-      expect(stats.current.failed).toBe(0)
-    })
+
+  it('clear keeps sending item', () => {
+    const q = useMessageQueueStore()
+    const a = q.enqueue('a')
+    const b = q.enqueue('b')
+    q.markSending(a.id)
+    q.markFailed(b.id)
+    q.clear()
+    expect(q.items).toHaveLength(1)
+    expect(q.items[0].id).toBe(a.id)
   })
-  
-  describe('cleanup', () => {
-    it('should remove expired messages', () => {
-      const recent = store.enqueue('Recent', undefined, { ttlMs: 60000 })
-      const expired = store.enqueue('Expired', undefined, { ttlMs: 1 })
-      
-      // Wait for expiration
-      vi.useFakeTimers()
-      vi.advanceTimersByTime(100)
-      
-      const removed = store.cleanupExpired()
-      
-      expect(removed).toBe(1)
-      expect(store.items.length).toBe(1)
-      expect(store.items[0].id).toBe(recent.id)
-      
-      vi.useRealTimers()
-    })
-    
-    it('should not remove non-expired messages', () => {
-      const msg = store.enqueue('Not expired', undefined, { ttlMs: 60000 })
-      
-      const removed = store.cleanupExpired()
-      
-      expect(removed).toBe(0)
-      expect(store.items.length).toBe(1)
-    })
+
+  it('pause is just a flag', () => {
+    const q = useMessageQueueStore()
+    expect(q.paused).toBe(false)
+    q.setPaused(true)
+    expect(q.paused).toBe(true)
   })
-  
-  describe('persistence', () => {
-    it('should save to localStorage', () => {
-      store.enqueue('Test message')
-      
-      expect(global.localStorage.setItem).toHaveBeenCalledWith(
-        'neurova_message_queue',
-        expect.any(String)
-      )
-    })
-    
-    it('should restore from localStorage', () => {
-      const mockData = JSON.stringify([
-        {
-          id: 'test-1',
-          text: 'Restored message',
-          enqueuedAt: new Date().toISOString(),
-          status: 'pending',
-          sessionId: 'session-1',
-        },
-      ])
-      
-      localStorageMock['neurova_message_queue'] = mockData
-      
-      store.restoreFromStorage()
-      
-      expect(store.items.length).toBe(1)
-      expect(store.items[0].text).toBe('Restored message')
-    })
+})
+
+describe('messageQueue reorder / moveToTop（补课 A3）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
   })
-  
-  describe('reset', () => {
-    it('should reset all state', () => {
-      store.enqueue('Message 1')
-      store.enqueue('Message 2')
-      store.markSent('q123-456')
-      
-      store.reset()
-      
-      expect(store.items.length).toBe(0)
-      expect(store.paused).toBe(false)
-      expect(store.isSyncing).toBe(false)
-      expect(store.stats.totalEnqueued).toBe(0)
-      expect(store.stats.totalSent).toBe(0)
-    })
+
+  it('moveToTop puts item at pending queue head', () => {
+    const q = useMessageQueueStore()
+    q.enqueue('a')
+    const b = q.enqueue('b')
+    expect(q.next()?.text).toBe('a')
+    expect(q.moveToTop(b.id)).toBe(true)
+    expect(q.next()?.text).toBe('b')
+    // a 仍在队列中
+    expect(q.pendingCount).toBe(2)
+  })
+
+  it('reorder reorders pending items, keeping non-pending pinned', () => {
+    const q = useMessageQueueStore()
+    const a = q.enqueue('a')
+    const b = q.enqueue('b')
+    const c = q.enqueue('c')
+    q.markSending(a.id)
+    q.reorder([c.id, b.id])
+    const pending = q.items.filter((i) => i.status === 'pending')
+    expect(pending.map((i) => i.text)).toEqual(['c', 'b'])
+    // sending 项仍在队里
+    expect(q.items.some((i) => i.id === a.id)).toBe(true)
+    expect(c.id).toBeDefined()
+  })
+
+  it('reorder ignores unknown ids', () => {
+    const q = useMessageQueueStore()
+    q.enqueue('a')
+    q.reorder(['ghost-id'])
+    expect(q.items.filter((i) => i.status === 'pending')).toHaveLength(1)
   })
 })
