@@ -700,6 +700,8 @@ export default {
     stats: 'Statistiken',
     overview: 'Übersicht',
     decay: 'Gedächtniszerfall',
+    reload: 'Von Datenträger neu laden',
+    reloadHint: 'Erinnerungen, die ein anderer Prozess (z. B. CLI-Import) geschrieben hat, ohne Neustart ins laufende Backend übernehmen',
     enhance: 'Gedächtnis verbessern',
     forget: 'Vergessen',
     strengthen: 'Stärken',
