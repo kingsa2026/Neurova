@@ -656,8 +656,14 @@ class ContextOrchestrator:
             window_budget = self._compute_window_budget(
                 system_instructions, developer_instructions, tools_desc
             )
+            # D4 甲案：窗口与信封共享同一个视图额度，因此**窗口侧先为信封留出保留额度**
+            # ——否则窗口会把额度吃满，信封只能拿到负数被压成空串，检索产物静默消失。
+            # 保留额度 = 信封额度下限（外壳 + 必然要放的部分）；召回内容按剩余额度取。
+            envelope_reserve = self._ENVELOPE_MIN_TOKENS
             window_msgs = await self._apply_window_budget(
-                conversation_context, window_budget, cache_key=self._resolve_window_cache_key()
+                conversation_context,
+                max(0, window_budget - envelope_reserve),
+                cache_key=self._resolve_window_cache_key(),
             )
             # microcompact（Anthropic context editing 对齐，2026-09-10）：
             # 保留最近 3 个工具结果原文，更早的替换为占位指针（池归档无损、
@@ -676,8 +682,22 @@ class ContextOrchestrator:
             for msg in window_msgs:
                 context.append({"role": msg.get("role", "user"), "content": msg["content"]})
 
-            # 3. 本轮检索产物直接注入（不经抽屉门槛——它们由上游检索链按当前
+            # 3. 本轮检索产物（不经抽屉门槛——它们由上游检索链按当前
             # 查询专门检索，是"本轮相关"的定义本身；同时已归档供未来召回）
+            #
+            # D4 甲案（审计 P2-8）：这类**动态检索文本**不再以 `system` 行直注。
+            # 理由两条（审计 §10.1 的裁决依据）：①`system` 行不在窗口预算管辖内
+            # （窗口预算只覆盖对话消息），是唯一无上限的注入面；②`system` 角色
+            # 权重最高且落在免疫句覆盖范围之外，而知识底座已接入外部来源。
+            # 现在一律收进末条 user 消息的 <system-reminder> 信封，并与对话窗口
+            # 同口径受 `compress_envelope` 确定性淘汰。
+            blocks: Dict[str, list] = {
+                "memories": [],
+                "experience": [],
+                "emotion": [],
+                "tooling": [],
+                "history": [],
+            }
             window_hashes = {
                 ContextInput.compute_hash(ContextSource.CONVERSATION, msg["content"])
                 for msg in window_msgs
@@ -694,22 +714,20 @@ class ContextOrchestrator:
                 try:
                     from neurova.memory.citation import render_memory_line
 
-                    context.append(
-                        {"role": "system", "content": render_memory_line(memory, registry=citation_registry)}
-                    )
+                    blocks["memories"].append(render_memory_line(memory, registry=citation_registry))
                 except Exception:  # noqa: BLE001 - citation 失败退回旧格式
-                    context.append({"role": "system", "content": f"[记忆] {content}"})
+                    blocks["memories"].append(f"[记忆] {content}")
             for experience in experience_items or []:
                 content = experience.get("content", str(experience)) if isinstance(experience, dict) else str(experience)
                 injected_hashes.add(ContextInput.compute_hash(ContextSource.EXPERIENCE, content))
-                context.append({"role": "system", "content": f"[经验] {content}"})
+                blocks["experience"].append(f"[经验] {content}")
             for pattern in crystallized_patterns or []:
                 content = pattern.get("content", str(pattern)) if isinstance(pattern, dict) else str(pattern)
                 crystallized_content = f"[结晶经验] {content}"
                 injected_hashes.add(ContextInput.compute_hash(ContextSource.EXPERIENCE, crystallized_content))
-                context.append({"role": "system", "content": f"[经验] {crystallized_content}"})
+                blocks["experience"].append(f"[经验] {crystallized_content}")
             for question in self._collect_pending_questions():
-                context.append({"role": "system", "content": f"[待探索问题] {question['content']}"})
+                blocks["tooling"].append(f"[待探索问题] {question['content']}")
 
             # 4. 跨轮语义调取块：从归档池按当前输入召回**历史**相关内容
             # 排除已注入条目（窗口 + 本轮产物），只召回往轮归档
@@ -717,10 +735,21 @@ class ContextOrchestrator:
             # 否则窗口折叠省下的 token 会被 draw 召回加倍吃回（实测
             # prompt 65920：draw 29 条归档撑爆）。固定前缀不占 draw 预算
             # （drawer 是池归档的独立额度）。
+            # 单源额度：抽屉与信封共用**同一个**剩余额度。二者各留一份额度时，
+            # 抽屉会按自己的份额取回内容、信封再按自己的份额把它们丢掉——
+            # 表现形态就是"召回了但视图里没有"，即检索产物静默消失（教义第 2 条）。
             try:
+                from neurova.context.token_estimator import estimate_tokens
                 from neurova.context.window_compactor import estimate_window_tokens
 
-                remaining = max(1000, window_budget - estimate_window_tokens(window_msgs))
+                # 剩余额度先扣掉外壳开销与已收集的非召回块，剩下的才是"召回内容额度"
+                remaining = max(
+                    self._ENVELOPE_MIN_TOKENS,
+                    window_budget
+                    - estimate_window_tokens(window_msgs)
+                    - self._envelopeFixedTokens(blocks)
+                    - estimate_tokens(str(user_input or "")),
+                )
                 drawer = getattr(self.context_pool, "_drawer", None)
                 if drawer is not None:
                     drawer.max_tokens = remaining
@@ -741,18 +770,19 @@ class ContextOrchestrator:
             for ctx in drawn_contexts:
                 if ctx.hash and ctx.hash in injected_hashes:
                     continue  # 已在窗口或本轮产物中，跳过避免重复
+                # 池召回一律进 <history>（D4 甲案：它是原文，池内无损可再召回；
+                # 按来源打标只影响行前缀，不再影响它落在哪一块）
                 if ctx.source == ContextSource.CONVERSATION:
                     role_label = "助手" if (ctx.metadata or {}).get("role") == "assistant" else "用户"
-                    context.append({"role": "system", "content": f"[历史回忆] {role_label}: {ctx.content}"})
+                    blocks["history"].append(f"[历史回忆] {role_label}: {ctx.content}")
                 elif ctx.source == ContextSource.MEMORY:
-                    context.append({"role": "system", "content": f"[记忆] {ctx.content}"})
+                    blocks["history"].append(f"[记忆] {ctx.content}")
                 elif ctx.source == ContextSource.EXPERIENCE:
-                    context.append({"role": "system", "content": f"[经验] {ctx.content}"})
+                    blocks["history"].append(f"[经验] {ctx.content}")
                 elif ctx.source == ContextSource.REFLECTION:
-                    context.append({"role": "system", "content": f"[反思] {ctx.content}"})
+                    blocks["history"].append(f"[反思] {ctx.content}")
                 else:
-                    # 兜底：其他归档来源保持 system 角色
-                    context.append({"role": "system", "content": ctx.content})
+                    blocks["history"].append(str(ctx.content))
 
             # P1-1④：记录本视图覆盖的池 chunk hash（模型请求成功后 ack 确认已读）
             self._last_view_hashes = {
@@ -781,7 +811,7 @@ class ContextOrchestrator:
                 if tool_memory_context.get("tool_decision") and tool_memory_context["tool_decision"] != "do_not_execute":
                     tool_lines.append(f"决策: {tool_memory_context['tool_decision']}")
                 if tool_lines:
-                    context.append({"role": "system", "content": "[工具记忆] " + " | ".join(tool_lines)})
+                    blocks["tooling"].append("[工具记忆] " + " | ".join(tool_lines))
 
             # 情感状态（本轮瞬态 + 长期倾向/回复基调）
             if agent_emotion:
@@ -790,9 +820,9 @@ class ContextOrchestrator:
                     emotion_line += f"；长期情感倾向: {agent_emotion['long_term_dominant']}"
                 if agent_emotion.get("tone") and agent_emotion.get("tone") != "neutral":
                     emotion_line += f"；建议回复基调: {agent_emotion['tone']}"
-                context.append({"role": "system", "content": emotion_line})
+                blocks["emotion"].append(emotion_line)
 
-            # 语音上下文（每轮瞬态）
+            # 语音上下文（每轮瞬态）——与 <tooling> 同槽（都是"本轮环境类"注入）
             if voice_context:
                 try:
                     content_parts = []
@@ -806,18 +836,48 @@ class ContextOrchestrator:
                             f"语音情感: {emotion['primary_emotion']} " f"(置信度: {emotion.get('confidence', 0):.2f})"
                         )
                     if content_parts:
-                        context.append({"role": "system", "content": "\n".join(content_parts)})
+                        blocks["tooling"].append("\n".join(content_parts))
                 except Exception as e:
                     logger.debug("语音上下文注入跳过: %s", e)
 
             # 5. 当前用户输入最后追加，确保是 LLM 看到的最后一条 user 消息
-            # 审计②（批次 A 接入主链）：动态注入内容（记忆/经验/反思/情感已由
-            # 上方 system 注入位承载）+ 分钟级时间以瞬态信封挂末条 user 消息——
-            # 此前 pool 分支完全绕过 UnifiedContextInjector，信封化（F1 前缀
-            # 缓存/免疫句）在默认配置下从未生效
-            from neurova.context.envelope import build_envelope, build_time_block
+            #
+            # D4 甲案前置条件 1：pool 分支接入 `compress_envelope`。不接入的话，
+            # 上面七处内容只是从 system 行**换了个位置**，仍然不受任何 token
+            # 预算管辖——那种半接状态比不改更糟（预算账目更难追）。
+            from neurova.context.envelope import (
+                build_envelope,
+                build_time_block,
+                compress_envelope,
+            )
+            from neurova.context.token_estimator import estimate_tokens
 
-            _env = build_envelope({"time": build_time_block()})
+            from neurova.context.window_compactor import estimate_window_tokens
+
+            envelope_blocks = {tag: "\n".join(lines) for tag, lines in blocks.items() if lines}
+            envelope_blocks["time"] = build_time_block()
+            _env = build_envelope(envelope_blocks)
+            if _env:
+                # 信封预算 = 固定部分 + 召回额度 + 召回行前缀开销，与抽屉
+                # （`drawer.max_tokens`）同一份额度（单源，见 `_envelopeFixedTokens`）。
+                # 两条不可省：
+                # ①召回行前缀——抽屉按 `drop.content` 计量，渲染成行还要加
+                #   "[历史回忆] 用户: " 这类前缀，不补进预算则"刚好取满"的内容会被信封丢掉；
+                # ②地板——窗口已吃满时"剩余"为负会把信封压成空串、检索产物静默消失；
+                #   地板带来的超出量有明确上界（≤ 一个地板值），口径可见、不掩盖也不扩散。
+                line_prefix = estimate_tokens("\n".join("[历史回忆] 用户: " for _ in blocks["history"]))
+                env_budget = (
+                    self._envelopeFixedTokens(blocks)
+                    + max(
+                        self._ENVELOPE_MIN_TOKENS,
+                        window_budget
+                        - estimate_window_tokens(window_msgs)
+                        - self._envelopeFixedTokens(blocks)
+                        - estimate_tokens(str(user_input or "")),
+                    )
+                    + line_prefix
+                )
+                _env = compress_envelope(_env, budget_tokens=env_budget)
             context.append(
                 {"role": "user", "content": f"{_env}\n\n{user_input}" if _env else user_input}
             )
@@ -1091,6 +1151,11 @@ class ContextOrchestrator:
     # 在 prompt 里的份额"，语义不同层。改动任何一层前先看本注释。
     _WINDOW_SHARE_OF_POOL_BUDGET = 0.6
 
+    # 信封额度地板（与 `drawer.max_tokens` 的地板同一口径，见 D4 甲案前置条件 1）：
+    # 窗口已吃满预算时"剩余"为负，信封会被压成空串、检索产物静默消失；
+    # 给一个地板，并把超出量约束在 ≤ 一个地板值（口径可见，不掩盖）。
+    _ENVELOPE_MIN_TOKENS = 1000
+
     def _resolve_window_token_budget(self) -> int:
         """窗口 token 预算：显式覆盖（_window_token_budget，测试/运维用）优先，
         否则模型元数据预算（get_token_budget_for_model）。
@@ -1112,6 +1177,26 @@ class ContextOrchestrator:
         except Exception:  # noqa: BLE001 - 预算查询失败不阻断
             pool_budget = 16000
         return max(3000, min(int(pool_budget * self._WINDOW_SHARE_OF_POOL_BUDGET), 100000))
+
+    @staticmethod
+    def _envelopeFixedTokens(blocks: Dict[str, list]) -> int:
+        """信封**固定部分**的 token 占用：外壳（免疫句）+ `<time>` + 非召回块。
+
+        抽屉与信封的额度计算共用它——这是"单源额度"的可证伪形态：若某处
+        自己再算一份，两处口径就会漂移（外壳/时间块被漏算），额度分配随之失衡，
+        表现形态正是"召回取回来了、信封却把它丢掉"。
+        """
+        from neurova.context.envelope import build_envelope, build_time_block
+
+        fixed = {
+            tag: "\n".join(str(x) for x in lines)
+            for tag, lines in (blocks or {}).items()
+            if tag != "history" and lines
+        }
+        fixed["time"] = build_time_block()
+        from neurova.context.token_estimator import estimate_tokens
+
+        return estimate_tokens(build_envelope(fixed))
 
     def _compute_window_budget(
         self,
