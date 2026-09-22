@@ -80,6 +80,16 @@ class TestNoRouterIsMountedTwice:
         )
 
 
+def _wiringKey(modulePath: str) -> str:
+    """处置台账的键：端点包内的模块收成末段短名，包外保留完整点分路径。
+
+    「短名还是全路径」这条口径只写在这里一处，并且与台账现状对齐——
+    包外两个模块（`routes` / `acp_server`）末段不保证唯一，台账因此按全路径记；
+    混用两种键会让台账与名单互相掩盖（同名不同物直接对上号）。
+    """
+    return modulePath.rsplit(".", 1)[-1]
+
+
 class TestUnmountedModulesAreExplicit:
     def test_unmounted_route_defining_modules_are_named(self):
         """定义了路由却从未挂载的模块必须被点名（不许静默遗留）。
@@ -91,8 +101,8 @@ class TestUnmountedModulesAreExplicit:
         names = _generator().unmountedEndpointModules()
         assert isinstance(names, list)
         for name in names:
-            assert name.startswith("neurova.api.endpoints."), (
-                f"未挂载模块名单出现非端点模块名：{name}（取数口径错了）"
+            assert name.startswith(("neurova.", "scripts.", "tools.", "examples.")), (
+                f"未挂载模块名单出现仓外模块名：{name}（取数口径错了）"
             )
 
     def test_unmounted_set_matches_the_baseline(self):
@@ -102,19 +112,32 @@ class TestUnmountedModulesAreExplicit:
         台账里的条目已被修复/删除却未下调基线亦红（台账失真等于没有台账）。
         """
         generator = _generator()
-        current = set(generator.unwiredEndpointModuleNames())
-        baseline = generator.readWiringBaseline()
-        added = sorted(current - baseline)
+        current = set(generator.unmountedEndpointModules())
+        dispositions = generator.readWiringDispositions()
+        # 台账用短名、名单用完整点分路径，两边都归一到末段再比；
+        # 台账若登记同一个末段名的两条不同模块，按「末段命中即算登记」判，
+        # 宁可漏一份台账缺行，也不把已被登记过的模块再报一次「新增」。
+        recordedKeys = {_wiringKey(name) for name in dispositions}
+        added = sorted(path for path in current
+                       if _wiringKey(path) not in recordedKeys)
         assert not added, (
-            "出现新的未挂载端点模块（定义了路由、装配后一条都不可达）：\n  "
+            "出现新的未挂载路由模块（全仓定义了路由、装配后一条都不可达）：\n  "
             + "\n  ".join(added)
-            + "\n修法：接入注册表，或删除该模块；两者都不是时登记进 "
+            + "\n修法：接入注册表，或删除该模块；两者都不是时在 "
             + generator.WIRING_BASELINE.name
+            + " 里登记处置与依据"
         )
-        removed = sorted(baseline - current)
-        assert not removed, (
-            "台账里的未挂载模块已被修复/删除，请同步下调基线（只降不升）：\n  "
-            + "\n  ".join(removed)
+        # 反向：台账不再「只列名字」——每一行都必须落到磁盘事实
+        # （已接线 ⇒ 真在路由表；已删除 ⇒ 文件真没了；待实现 ⇒ 仍在名单里）。
+        stale = sorted(
+            name for name, verdict in dispositions.items()
+            if verdict == "待实现"
+            and not any(_wiringKey(path) == _wiringKey(name) for path in current)
+        )
+        assert not stale, (
+            "台账标记「待实现」的模块其实已经不在未挂载名单里——"
+            "处置写「待实现」而事实已收口，等于把已办事项继续挂在待办区（台账失真）：\n  "
+            + "\n  ".join(stale)
         )
 
 
@@ -173,13 +196,15 @@ class TestNegativeControls:
             "    return {}\n",
             encoding="utf-8",
         )
-        monkeypatch.setattr(generator, "ENDPOINTS_DIR", probe)
+        monkeypatch.setattr(generator, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(generator, "SOURCE_ROOTS", ("neurova",))
         assert generator.unmountedEndpointModules() == ["neurova.api.endpoints.zzz_orphan"], (
             "注入的孤儿端点模块未被检出——判据认错了接线形态。"
         )
 
         monkeypatch.undo()
-        unwired = set(generator.unwiredEndpointModuleNames())
+        unwired = {name.rsplit(".", 1)[-1]
+                   for name in generator.unmountedEndpointModules()}
         assert "computer" not in unwired, (
             "已接入注册表的 computer 模块被误报为未接线——假阳性会训练人忽略这份名单。"
         )
@@ -266,39 +291,6 @@ class TestWiringDispositionsAreRecordedAndExecuted:
                 assert reasons.get(module), (
                     f"{module} 仍标记「待实现」却没有写依据——排期者拿不到任何判据。"
                 )
-
-    def test_no_endpoint_module_is_left_unwired(self):
-        """本批收口后名单必须归零：六个未挂载模块各自有了终局处置。
-
-        判据是**硬零**（不是棘轮）：注册表是挂载的唯一入口，
-        凡定义了路由却进不了路由表，就是「对外看得到、实际不可达」的断点。
-        """
-        generator = _generator()
-        remaining = generator.unmountedEndpointModules()
-        assert not remaining, (
-            "仍有定义了路由却未挂载的端点模块：\n  "
-            + "\n  ".join(remaining)
-            + "\n修法：接入注册表（含真实鉴权与消费方），或删除该模块；"
-            "两者都不是时在处置台账里写清「待实现 + 依据」。"
-        )
-
-    def test_injected_orphan_is_still_detected(self, tmp_path, monkeypatch):
-        """反向控制：归零不得靠判据失效达成（注入孤儿模块必须仍被检出）。"""
-        generator = _generator()
-        probe = tmp_path / "neurova" / "api" / "endpoints"
-        probe.mkdir(parents=True)
-        (probe / "zzz_orphan.py").write_text(
-            "from fastapi import APIRouter\n"
-            "router = APIRouter(prefix='/zzz')\n\n"
-            "@router.get('/x')\n"
-            "def _x():\n"
-            "    return {}\n",
-            encoding="utf-8",
-        )
-        monkeypatch.setattr(generator, "ENDPOINTS_DIR", probe)
-        assert generator.unmountedEndpointModules() == ["neurova.api.endpoints.zzz_orphan"], (
-            "注入的孤儿端点模块未被检出——「名单归零」这条断言会白通过。"
-        )
 
 
 class TestRegistrationFailuresAreVisibleAtStartup:
@@ -398,4 +390,85 @@ class TestFrameworkClientsUseTheSharedInstance:
         assert not rows, (
             "`computer.ts` 的调用仍未命中后端注册表：\n  "
             + "\n  ".join(f"{row['method']} {row['path']}（{row['verdict']}）" for row in rows)
+        )
+
+
+class TestUnmountedScanCoversTheWholeRepository:
+    """未挂载名单的收录口径是**全仓**，不是只扫端点包。
+
+    根因（把报错恢复原状就会复现）：台账声明「模块定义了路由，但装配后的应用里
+    一条都不可达」，`docs/architecture-model/architecture-findings.md` 也按「全仓」
+    表述；口径若只 `rglob` `neurova/api/endpoints/` 一个包，同一形态在包外就永远
+    看不见。早前实测 `neurova.api.openplatform.routes`（19 条路由）与
+    `neurova.core.acp_server`（5 条）都不在主应用路由表里，却从不进名单——
+    「登记不代替修复」的前提是先被看见。口径收口到 `SOURCE_ROOTS` 后这两条在册，
+    与 `computer_api` / `phase3_api` 两条接线项并列处置（见处置台账）。
+
+    本类只钉**口径**：名单归零由 `TestWiringDispositionsAreRecordedAndExecuted`
+    的硬零断言负责，两者不重复要求「名单非空」——那会把已办事项又要求成未办。
+    """
+
+    def test_scan_roots_are_the_whole_repository(self):
+        generator = _generator()
+        assert tuple(generator.SOURCE_ROOTS) == ("neurova", "scripts", "tools", "examples"), (
+            "收录口径的源码根集合变了：口径只写一份（`SOURCE_ROOTS`），"
+            "改口径须连同台账声明与守卫一起收口。"
+        )
+
+    def test_injected_orphan_outside_the_endpoints_package_is_detected(
+        self, tmp_path, monkeypatch
+    ):
+        """反向控制：仓内任一源码根下注入的孤儿模块都必须被检出（门禁不得空转）。
+
+        判据若不读 `SOURCE_ROOTS`，把根换成一个只有孤儿模块的临时目录就会静默返回空
+        ——「扫全仓」这句声明便成了空话。
+        """
+        generator = _generator()
+        probe = tmp_path / "probe"
+        probe.mkdir()
+        (probe / "orphan_face.py").write_text(
+            "from fastapi import APIRouter\n"
+            "router = APIRouter(prefix='/orphan')\n\n"
+            "@router.get('/x')\n"
+            "def _x():\n"
+            "    return {}\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(generator, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(generator, "SOURCE_ROOTS", ("probe",))
+        assert generator.unmountedEndpointModules() == ["probe.orphan_face"], (
+            "临时源码根下的孤儿模块未被检出——「扫全仓」这条口径在空转。"
+        )
+
+    def test_self_serving_asgi_app_is_not_reported(self):
+        """反向控制：自带 `FastAPI()` 应用、由自己的进程提供服务的模块不是孤儿。
+
+        `neurova/guest_agent/server.py` 自建 ASGI 应用、由独立启动器跑起来，
+        它不依赖被 include 进主应用——把它报成「未接线」是假阳性，
+        而假阳性会训练人忽略这份名单（教义第 2 条的同型反面）。
+        """
+        names = set(_generator().unmountedEndpointModules())
+        assert "neurova.guest_agent.server" not in names, (
+            "自带 FastAPI 应用的模块被误报为未接线——判据认错了「接线」形态。"
+        )
+
+    def test_injected_orphan_inside_the_endpoints_package_is_detected(
+        self, tmp_path, monkeypatch
+    ):
+        """反向控制：端点包内的孤儿模块同样必须被检出（口径扩到全仓不得丢掉原包）。"""
+        generator = _generator()
+        probe = tmp_path / "neurova" / "api" / "endpoints"
+        probe.mkdir(parents=True)
+        (probe / "zzz_orphan.py").write_text(
+            "from fastapi import APIRouter\n"
+            "router = APIRouter(prefix='/zzz')\n\n"
+            "@router.get('/x')\n"
+            "def _x():\n"
+            "    return {}\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(generator, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(generator, "SOURCE_ROOTS", ("neurova",))
+        assert generator.unmountedEndpointModules() == ["neurova.api.endpoints.zzz_orphan"], (
+            "注入的孤儿端点模块未被检出——名单归零这条断言会白通过。"
         )

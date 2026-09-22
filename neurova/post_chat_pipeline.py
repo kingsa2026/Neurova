@@ -67,6 +67,63 @@ logger = get_logger(__name__)
 _RSI_BACKOFF_EVERY_TURNS = 20
 
 
+def _landedEvidenceRows(stepResults: List[Any], memoryManager: Any) -> List[Dict[str, Any]]:
+    """本轮 `save_memory` 真实落地的证据行（从步骤读数取 id，再回库定位）。
+
+    身份的唯一来源是**落库结果**，不是检测步骤自己编的 id：`save_memory` 步骤读数里的
+    `user_memory_id` / `agent_memory_id` 是权威写入链的返回值，照读即可；回库再查一次
+    拿内容（`get_memory` 读不到的行按"未落地"处理）。账上成员必须是能定位的行——
+    说不清是谁的账无法被处置，只能停在纯观测（Issue #72 正文最后一条断链）。
+    """
+    ids: List[str] = []
+    for result in stepResults or []:
+        if getattr(result, "step_name", "") != "save_memory":
+            continue
+        data = getattr(result, "data", None) or {}
+        for key in ("user_memory_id", "agent_memory_id"):
+            memoryId = str(data.get(key) or "")
+            if memoryId and memoryId not in ids:
+                ids.append(memoryId)
+    rows: List[Dict[str, Any]] = []
+    for memoryId in ids:
+        row = memoryManager.get_memory(memoryId, agent_wide=True)
+        if isinstance(row, dict) and row.get("content"):
+            rows.append(row)
+    return rows
+
+
+def _detectAgainstEvidenceRows(
+    detector: Any, evidenceRows: List[Dict[str, Any]], earlierMemories: List[Any]
+) -> List[Dict[str, Any]]:
+    """逐条拿本轮证据行与已有记忆比对，返回带**可定位成员 id** 的信号。
+
+    对比单位是"一句证据"，不是把整轮对话揉成一个字符串：合成文本经子句切分后与
+    子句并看不出差别，但它**没有对应的行**——报出来的冲突指不出成员是谁。
+    """
+    from neurova.cognitive_layers.memory_layer.models import Memory
+
+    found: List[Dict[str, Any]] = []
+    for row in evidenceRows:
+        newMemory = Memory(id=str(row["id"]), content=str(row["content"]))
+        found.extend(detector.detect_conflict(
+            newMemory, [m for m in earlierMemories if m.id != newMemory.id]
+        ))
+    return found
+
+
+def _conflictsWithLocatableMembers(
+    conflicts: List[Dict[str, Any]], locatable: Any
+) -> List[Dict[str, Any]]:
+    """只保留两个成员都能在库里定位的信号：说不清是谁的账无法被处置。"""
+    kept: List[Dict[str, Any]] = []
+    for conflict in conflicts or []:
+        left = str(conflict.get("memory1_id") or "")
+        right = str(conflict.get("memory2_id") or "")
+        if left and right and left in locatable and right in locatable:
+            kept.append(conflict)
+    return kept
+
+
 class StepStatus(str, Enum):
     """步骤执行状态"""
 
@@ -2262,7 +2319,14 @@ class PostChatPipeline:
         错的"；据此否决会随机丢真实记忆（回滚本身有 Step 9.95 版本快照兜底，缺
         的是"以哪条为准"的判据）。故显式定性为观测：结论里 `blocking=False`
         与 message 一同自陈"不阻断"，不得再留"检出了冲突"这种读起来像已处置的表述。
-        要升级为可否决，需要先有裁决证据（哪条为准 + 出处），那是独立一张工单。
+
+        **成员身份由本步负责，检测器只负责信号**（Issue #72 第四轮）：账上每条
+        冲突的两个成员都必须是**库里查得到的行**。此前本步用一个自造 id
+        `pending_new_memory` 充当"新证据"——那个 id 在库里不存在，账上成员因此
+        永远指不出是谁，下游连"哪条跟哪条打架"都无从下手，这条链停在纯观测、
+        "判不出哪条为准"的现场根因就在这里。现在"新证据"取本轮 `save_memory`
+        真实落地的行（从步骤读数取 id，再回库定位），逐行与已有记忆比对。
+        无法定位成员的信号如实计进 `conflicts_unidentified`，不入账。
 
         **检出与可读分开、但不留断点**：本步把检出的冲突连同依据落进记忆侧的账
         （`memory_manager.record_conflicts`，source 自陈本步名），
@@ -2298,7 +2362,6 @@ class PostChatPipeline:
 
         try:
             recent_memories = memory_manager.recall(user_input, limit=5)
-            new_memory_content = f"用户: {user_input}\n助手: {reply}"
 
             # P2-9 修复: 真实 API 是
             # detect_conflict(new_memory: Memory, existing_memories: List[Memory]) -> List[Dict]。
@@ -2307,17 +2370,28 @@ class PostChatPipeline:
             # AttributeError 被 except 吞掉，冲突检测步骤恒 FAILED（从未真正运行）。
             from neurova.cognitive_layers.memory_layer.models import Memory
 
-            existing_memories = [
+            evidence_rows = _landedEvidenceRows(self._step_results, memory_manager)
+            evidence_ids = {row["id"] for row in evidence_rows}
+            earlier_memories = [
                 Memory(id=str(m.get("id", "")), content=str(m.get("content", "")))
                 for m in recent_memories
-                if isinstance(m, dict) and m.get("content")
+                if isinstance(m, dict) and m.get("content") and str(m.get("id", "")) not in evidence_ids
             ]
-            new_memory = Memory(id="pending_new_memory", content=new_memory_content)
+            locatable = evidence_ids | {m.id for m in earlier_memories}
 
-            conflicts = conflict_detector.detect_conflict(new_memory, existing_memories)
+            if evidence_rows:
+                raw_conflicts = _detectAgainstEvidenceRows(
+                    conflict_detector, evidence_rows, earlier_memories
+                )
+                conflicts = _conflictsWithLocatableMembers(raw_conflicts, locatable)
+            else:
+                # 本轮没有落地的证据行：**不造合成对象**——那正是查不到的成员的旧写法。
+                # 没有可定位的对象就如实报"无对象可比"，不假装检出、也不入账。
+                raw_conflicts = []
+                conflicts = []
+            unidentified = len(raw_conflicts) - len(conflicts)
 
-            if conflicts:
-                logger.warning("⚠️ 检测到 %s 处记忆冲突", len(conflicts))
+            if raw_conflicts:
                 for conflict in conflicts:
                     logger.info(
                         "  冲突: %s (相似度=%.2f, 矛盾分=%.2f) - %s",
@@ -2326,6 +2400,8 @@ class PostChatPipeline:
                         conflict.get("contradiction_score", 0.0),
                         conflict.get("basis") or conflict.get("description"),
                     )
+                logger.warning("⚠️ 检测到 %s 处记忆冲突（可定位成员 %s 处）",
+                               len(raw_conflicts), len(conflicts))
                 # 落账：检出多少条、账上留下多少条要分得开。依据缺失的按诚实边界
                 # 拒绝入账（宁可不记，也不记一条读不懂的账），返回值如实反映差额。
                 # 此前这一步只写日志、不写账，`get_conflict_summary()` 因此全仓
@@ -2342,27 +2418,41 @@ class PostChatPipeline:
                         step_name=step_name,
                         status=StepStatus.EXECUTED,
                         message=(
-                            f"检测到 {len(conflicts)} 处记忆冲突（纯观测，不阻断写入；"
+                            f"检测到 {len(raw_conflicts)} 处记忆冲突（纯观测，不阻断写入；"
                             f"入账 {recorded} 条）"
                         ),
                         duration_ms=(time.time() - start_time) * 1000,
                         data={
-                            "conflicts_count": len(conflicts),
+                            "conflicts_count": len(raw_conflicts),
                             "conflicts_recorded": recorded,
+                            # 成员在库里定位不到的条数：这些信号如实报出但不入账
+                            # （说不清是谁的账无法被处置）。
+                            "conflicts_unidentified": unidentified,
+                            "evidence_rows": len(evidence_rows),
                             "blocking": False,
-                            "conflicts": conflicts,
+                            "conflicts": raw_conflicts,
                         },
                     )
                 )
             else:
-                logger.debug("记忆冲突纯观测：未检出冲突")
+                logger.debug("记忆冲突纯观测：未检出冲突（本轮证据行 %d 条）", len(evidence_rows))
                 self._step_results.append(
                     StepResult(
                         step_name=step_name,
                         status=StepStatus.EXECUTED,
-                        message="未检出记忆冲突（纯观测，不阻断写入）",
+                        message=(
+                            "未检出记忆冲突（纯观测，不阻断写入）"
+                            if evidence_rows
+                            else "没有本轮落地的证据行，冲突无对象可比（纯观测，不阻断写入）"
+                        ),
                         duration_ms=(time.time() - start_time) * 1000,
-                        data={"conflicts_count": 0, "blocking": False},
+                        data={
+                            "conflicts_count": 0,
+                            "conflicts_recorded": 0,
+                            "conflicts_unidentified": unidentified,
+                            "evidence_rows": len(evidence_rows),
+                            "blocking": False,
+                        },
                     )
                 )
         except Exception as e:

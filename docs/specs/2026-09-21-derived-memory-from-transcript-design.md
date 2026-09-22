@@ -103,10 +103,11 @@
 - **A 主路**：新增导入端点（`neurova/api/endpoints/ingest.py`），`apply_bundle` 在服务端进程内
   执行，写的就是本进程 manager 单例 → 快照天然一致，无需失效协议。智能体管理页加导入入口
   （detect 报告 → 确认 → apply → 结果与申报回显；文案改 11 份 locale）。
-- **B 补齐通道**：`MemoryManager.reload_memories(agent_id)`——按作用域增量拉缺失行进
-  `_memories`，逐条 `upsert_memory_index`，并让内容门索引增量并入。只增量，不得退化成每次
-  recall 全量重建（那是审计 P1-D6 刚消掉的开销）。A 完成即调用它；CLI 独立进程导入后由人或
-  前端显式触发。
+- **B 补齐通道**：`MemoryManager.reload_memories()`——增量拉缺失行进 `_memories`，逐条
+  `upsert_memory_index`，并让内容门索引缺键登记。只增量，不得退化成每次 recall 全量重建
+  （那是审计 P1-D6 刚消掉的开销）。A 完成即调用它；CLI 独立进程导入后由人或前端显式触发
+  （HTTP 入口 `POST /v1/memory/reload`，管理页"重新读盘"；本片已落地，见
+  `2026-09-20-external-agent-ingest-design.md` §7.6）。
 - 前提关系要写明：**没有 B，§3 的"只补差异"在跨进程场景不成立**（门与召回读同一份陈旧快照）。
 
 ## 7. 失败与撤销

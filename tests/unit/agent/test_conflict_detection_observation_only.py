@@ -30,15 +30,27 @@ class RecordingConflictDetector:
 
     被测判据是"本步是否阻断"，不是检测算法；检测算法自身由
     tests/integration/test_full_conflict_integration.py 锁定。
+
+    载荷成员取自**入参两条记忆**：Issue #72 第四轮起，账上成员必须能在库里定位
+    （检测链会按"说不清是谁"拦下合成 id），替身也必须照真实契约给成员 id。
     """
 
-    def __init__(self, conflicts: List[Dict[str, Any]]) -> None:
-        self._conflicts = conflicts
+    def __init__(self, conflicts: bool = True) -> None:
+        self._report = conflicts
         self.seen: List[Dict[str, Any]] = []
 
     def detect_conflict(self, new_memory: Any, existing_memories: Any) -> List[Dict[str, Any]]:
         self.seen.append({"new": new_memory, "existing": list(existing_memories)})
-        return list(self._conflicts)
+        if not self._report or not existing_memories:
+            return []
+        return [{
+            "type": "negation_conflict",
+            "similarity": 0.9,
+            "contradiction_score": 0.8,
+            "memory1_id": new_memory.id,
+            "memory2_id": existing_memories[0].id,
+            "basis": "同一命题的否证：'我不喜欢咖啡' 与 '我喜欢咖啡'",
+        }]
 
 
 @pytest.fixture()
@@ -72,27 +84,35 @@ def probe(tmp_path):
 
 
 def _run(pipeline: PostChatPipeline):
-    asyncio.run(pipeline._step_conflict_detection("我不喜欢咖啡", "好的，记下了"))
+    """跑一轮真实链路（save_memory → conflict_detection），返回检测步骤读数。
+
+    检测对象是本轮**真实落地**的证据行：成员身份来自落库结果，不由测试桩合成。
+    """
+
+    async def _turn():
+        await pipeline._step_save_memory("我不喜欢咖啡", "好的，记下了", "s1", True, None)
+        await pipeline._step_conflict_detection("我不喜欢咖啡", "好的，记下了")
+
+    asyncio.run(_turn())
     return pipeline._step_results[-1]
 
 
 class TestObservationOnlyIsExplicit:
     def test_conflict_found_declares_non_blocking(self, probe):
         probe.manager.remember("用户喜欢咖啡")
-        pipeline, detector = probe.make([
-            {"type": "contradiction", "similarity": 0.9, "contradiction_score": 0.8,
-             "description": "喜欢咖啡 vs 不喜欢咖啡"},
-        ])
+        pipeline, detector = probe.make(True)
         result = _run(pipeline)
 
-        assert result.data["conflicts_count"] == 1, "检测确实跑到了（不是恒 0 的假观测）"
+        assert result.data["conflicts_count"] >= 1, "检测确实跑到了（不是恒 0 的假观测）"
         assert result.data["blocking"] is False, "纯观测必须把'不阻断'写进结论"
         assert "不阻断" in result.message, f"message 必须自陈性质，实际: {result.message}"
-        assert len(detector.seen[0]["existing"]) == 1, "观测必须读到真实记忆，不得空转"
-        assert len(probe.manager.get_all_memories()) == 1, "纯观测不改写记忆：不回滚也不新增"
+        assert len(detector.seen[0]["existing"]) >= 1, "观测必须读到真实记忆，不得空转"
+        assert len(probe.manager.get_all_memories()) == 3, (
+            "纯观测不改写记忆：只多了本轮 save_memory 的两行"
+        )
 
     def test_no_conflict_carries_the_same_declaration(self, probe):
-        pipeline, _detector = probe.make([])
+        pipeline, _detector = probe.make(False)
         result = _run(pipeline)
         assert result.data["conflicts_count"] == 0
         assert result.data["blocking"] is False, "口径必须一致：无冲突时同样声明不阻断"
