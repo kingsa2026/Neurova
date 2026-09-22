@@ -114,6 +114,8 @@ tests/unit/skills/test_ekb_content_gate.py
 tests/unit/cognitive_layers/memory_layer/test_content_gate.py
 tests/unit/cognitive_layers/memory_layer/test_memory_type_semantics.py
 tests/unit/agent/test_conflict_detection_observation_only.py
+# Issue #72 第四轮：冲突账上的成员必须是本轮真实落地的行（合成 id 不得冒充证据）
+tests/unit/agent/test_conflict_ledger_member_identity.py
 # 013 遗传臂真实成功率 / 014 NL 合成置信闸咬合
 tests/unit/evolution/test_genetic_seed_evidence.py
 tests/unit/evolution/test_nl_confidence_gate.py
