@@ -56,6 +56,10 @@ npc:
           工作收尾时不要写，否则空轮会白烧配额。
         - `.npc-turn-handoff` 是这条链路上唯一的接力判据（单一事实源），
           不要另建 state 文件、计数字段或第二套判据。
+        - 落点只有一处：`$CNB_BUILD_WORKSPACE/.npc-turn-handoff`（收尾阶段读的就是它）。
+          不要写成"工作区工作目录"这类字面表述 —— 它会被读成 $PWD，而构建里
+          $PWD 与 $CNB_BUILD_WORKSPACE 未必是同一个地方，写错位置等于没有接力。
+          拿不准就先跑 `python scripts/ci/npc_turn_handoff_gate.py` 看真实读数。
 
         协作红线（Issue #68 定稿，全文见 /AGENTS.md 第 2 节）：
         - 交流语言：面向用户的回复、评论、提交正文与文档一律使用中文；
@@ -157,6 +161,10 @@ npc:
           工作收尾时不要写，否则空轮会白烧配额。
         - `.npc-turn-handoff` 是这条链路上唯一的接力判据（单一事实源），
           不要另建 state 文件、计数字段或第二套判据。
+        - 落点只有一处：`$CNB_BUILD_WORKSPACE/.npc-turn-handoff`（收尾阶段读的就是它）。
+          不要写成"工作区工作目录"这类字面表述 —— 它会被读成 $PWD，而构建里
+          $PWD 与 $CNB_BUILD_WORKSPACE 未必是同一个地方，写错位置等于没有接力。
+          拿不准就先跑 `python scripts/ci/npc_turn_handoff_gate.py` 看真实读数。
 
         协作红线（Issue #68 定稿，全文见 /AGENTS.md 第 2 节）：
         - 交流语言：面向用户的回复、评论、提交正文与文档一律使用中文；
