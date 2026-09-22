@@ -366,6 +366,15 @@ class TestWithBinaryPreflightProvesUsableScanner:
         }
 
     @staticmethod
+    def _stubScanner(home: Path) -> Path:
+        """可执行的假扫描器：`--version` 自证能过，扫描调用由 fakeRun 接管。"""
+        home.mkdir(parents=True, exist_ok=True)
+        stub = home / "osv-scanner-stub"
+        stub.write_text("#!/bin/sh\necho 'osv-scanner version: 9.9.9'\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+        return stub
+
+    @staticmethod
     def _scannedOutput(targets, counts) -> str:
         return "".join(
             f"Scanned /w/{Path(rel).name} file and found {counts[rel]} packages\n"
@@ -383,6 +392,8 @@ class TestWithBinaryPreflightProvesUsableScanner:
         counts = auditModule._targetPackageCounts(list(paths.values()))
 
         def fakeRun(cmd, *, cwd=None, capture_output=None, text=None):
+            if "--version" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="osv-scanner version: 9.9.9\n", stderr="")
             output = Path(cmd[cmd.index("--output") + 1])
             output.write_text(json.dumps({"results": []}), encoding="utf-8")
             index = next(i for i, rel in enumerate(rels) if rel in " ".join(cmd))
@@ -394,7 +405,9 @@ class TestWithBinaryPreflightProvesUsableScanner:
 
         monkeypatch.setattr(auditModule.subprocess, "run", fakeRun)
         report = auditModule.runPreflight(
-            Path("/bin/true"), list(paths.values()), PROJECT_ROOT / "scripts/ci/osv-allowlist.toml"
+            self._stubScanner(home),
+            list(paths.values()),
+            PROJECT_ROOT / "scripts/ci/osv-allowlist.toml",
         )
         text = "\n".join(report)
         for rel in rels:
@@ -415,6 +428,8 @@ class TestWithBinaryPreflightProvesUsableScanner:
         monkeypatch.setattr(auditModule, "PROJECT_ROOT", home)
 
         def fakeRun(cmd, *, cwd=None, capture_output=None, text=None):
+            if "--version" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, stdout="osv-scanner version: 9.9.9\n", stderr="")
             return subprocess.CompletedProcess(
                 cmd, 127, stdout="Failed to walk source: no such file or directory\n", stderr=""
             )
@@ -422,7 +437,9 @@ class TestWithBinaryPreflightProvesUsableScanner:
         monkeypatch.setattr(auditModule.subprocess, "run", fakeRun)
         with pytest.raises(SystemExit) as exc:
             auditModule.runPreflight(
-                Path("/bin/true"), list(paths.values()), PROJECT_ROOT / "scripts/ci/osv-allowlist.toml"
+                self._stubScanner(home),
+                list(paths.values()),
+                PROJECT_ROOT / "scripts/ci/osv-allowlist.toml",
             )
         # 预检失败的「按基础设施错误收口」在命令行侧实测（live-verify 里读 exit code）；
         # 这里钉的是它必须**带着可点名的问题清单抛错**，而不是静默返回让调用方继续。
@@ -510,11 +527,74 @@ class TestScanCommandHasSingleRecipe:
             PROJECT_ROOT / "scripts/ci/osv-allowlist.toml",
             out,
         )
-        assert cmd[0] == "/bin/true"
+        # 二进制一律归一到绝对路径（相对路径在 cwd/PATH 变化时表现为 127，
+        # 会把「找不到文件」伪装成「扫描器故障」）
+        assert cmd[0] == str(Path("/bin/true").resolve())
         assert cmd[1 : 1 + len(contract["subcommand"])] == contract["subcommand"]
         assert cmd[cmd.index(contract["output"]) + 1] == str(out)
         locks = [cmd[i + 1] for i, tok in enumerate(cmd) if tok == contract["lockfile_flag"]]
         assert locks == ["/w/a.lock", "/w/b.lock"], "逐目标必须按契约定名的 flag 逐个挂上"
+
+
+class TestBinaryPathIsAbsolute:
+    """二进制路径必须绝对且自证可执行——127 的两种伪装都要在这里被拆掉。"""
+
+    def test_relative_binary_is_normalized_to_absolute(self, auditModule, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        home.mkdir()
+        binary = home / "osv-scanner"
+        binary.write_text("#!/bin/sh\necho 'osv-scanner version: 9.9.9'\nexit 0\n", encoding="utf-8")
+        binary.chmod(0o755)
+        monkeypatch.setattr(auditModule.Path, "cwd", classmethod(lambda cls: home))
+        resolved = auditModule.resolveBinaryPath(Path("osv-scanner"))
+        assert resolved.is_absolute(), "相对路径没被归一到绝对路径——127 会伪装成命令不成形"
+        assert resolved == binary.resolve()
+
+    def test_missing_binary_is_named_before_any_subprocess(self, auditModule, tmp_path):
+        """回退路径：二进制缺失 → 在起扫描之前就点名，而不是等壳层给 127。"""
+        with pytest.raises(SystemExit) as exc:
+            auditModule.resolveBinaryPath(tmp_path / "does-not-exist")
+        assert "不存在" in str(exc.value)
+
+    def test_non_executable_binary_is_named(self, auditModule, tmp_path):
+        """回退路径：文件在但不可执行（chmod 没生效）→ 点名「不可执行」，不报 127。"""
+        binary = tmp_path / "osv-scanner"
+        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        binary.chmod(0o644)
+        with pytest.raises(SystemExit) as exc:
+            auditModule.resolveBinaryPath(binary)
+        assert "不可执行" in str(exc.value), (
+            "文件在但权限位不对时报的还是 127 一类的含糊话——缺件与故障分不开"
+        )
+
+    def test_assert_scanner_executable_returns_version_line(self, auditModule, tmp_path):
+        binary = tmp_path / "osv-scanner"
+        binary.write_text(
+            "#!/bin/sh\necho 'osv-scanner version: 2.6.0'\necho 'osv-scalibr version: 0.5.2'\nexit 0\n",
+            encoding="utf-8",
+        )
+        binary.chmod(0o755)
+        line = auditModule.assertScannerExecutable(binary)
+        assert "2.6.0" in line, "自证没回报扫描器版本——日志里无从判断用的是哪个二进制"
+
+    def test_assert_scanner_executable_fails_on_nonzero_version(self, auditModule, tmp_path):
+        """回退路径：`--version` 非 0（架构不符 / 动态库缺失）→ 报红并点名退出码。"""
+        binary = tmp_path / "osv-scanner"
+        binary.write_text("#!/bin/sh\nexit 127\n", encoding="utf-8")
+        binary.chmod(0o755)
+        with pytest.raises(SystemExit) as exc:
+            auditModule.assertScannerExecutable(binary)
+        message = str(exc.value)
+        assert "127" in message and "自证失败" in message
+
+    def test_preflight_and_main_both_go_through_resolve(self, auditModule):
+        import inspect
+
+        for fn in (auditModule.runPreflight, auditModule.main):
+            assert "resolveBinaryPath" in inspect.getsource(fn), (
+                f"{fn.__name__} 没走 resolveBinaryPath —— 两类调用者的路径口径会分叉，"
+                "而 2026-09-22 那次「预检能跑、正式扫描 127」正是这么来的"
+            )
 
 
 class TestGuardIsWiredIntoCi:
