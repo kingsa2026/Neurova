@@ -415,6 +415,19 @@ $:
       env:
         turnLimitReached: $turnLimitReached
       stages:
+        - name: "接力判据可达性自证（$CNB_BUILD_WORKSPACE 是否真能写读标记）"
+          # 为何必须由真实构建自证（Issue #145，构建 cnb-2e8-1k341d9s1）：
+          #   npc:go 撞 maxTurns 时平台只是把 Agent 中止、把流水线判为失败，
+          #   收尾的接力 Stage 因读不到标记而 skipped —— 成果随容器一起丢，
+          #   用户在 Issue 上只看到「构建失败」，没有任何回音。
+          #   根因是标记落点只在人设里写着"工作区"，而**真实构建里工作目录是不是
+          #   工作区根**从没有人验证过。本步就是那条读数：断言
+          #   `$CNB_BUILD_WORKSPACE/.npc-turn-handoff` 可写可读，并反向自证
+          #   $PWD 是否等于 $CNB_BUILD_WORKSPACE（不等就把它打印出来）。
+          # 判据在 Agent 开工**之前**跑：接力能不能真发生，必须在烧掉整轮预算之前
+          #   就说清楚；跑不起来即红，不留"看着配了、其实永远不会触发"的接力。
+          script: python scripts/ci/npc_turn_handoff_gate.py
+          timeout: 2m
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           # 单条工具执行（bash 命令）的墙钟上界：不声明则连续 10 分钟无输出即中断，
           # 声明后按本值执行。注意它**不是**整个 Agent 会话的上界（见上方平台依据），
@@ -489,6 +502,19 @@ $:
       env:
         turnLimitReached: $turnLimitReached
       stages:
+        - name: "接力判据可达性自证（$CNB_BUILD_WORKSPACE 是否真能写读标记）"
+          # 为何必须由真实构建自证（Issue #145，构建 cnb-2e8-1k341d9s1）：
+          #   npc:go 撞 maxTurns 时平台只是把 Agent 中止、把流水线判为失败，
+          #   收尾的接力 Stage 因读不到标记而 skipped —— 成果随容器一起丢，
+          #   用户在 Issue 上只看到「构建失败」，没有任何回音。
+          #   根因是标记落点只在人设里写着"工作区"，而**真实构建里工作目录是不是
+          #   工作区根**从没有人验证过。本步就是那条读数：断言
+          #   `$CNB_BUILD_WORKSPACE/.npc-turn-handoff` 可写可读，并反向自证
+          #   $PWD 是否等于 $CNB_BUILD_WORKSPACE（不等就把它打印出来）。
+          # 判据在 Agent 开工**之前**跑：接力能不能真发生，必须在烧掉整轮预算之前
+          #   就说清楚；跑不起来即红，不留"看着配了、其实永远不会触发"的接力。
+          script: python scripts/ci/npc_turn_handoff_gate.py
+          timeout: 2m
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           # 单条工具执行（bash 命令）的墙钟上界：不声明则连续 10 分钟无输出即中断，
           # 声明后按本值执行。注意它**不是**整个 Agent 会话的上界（见上方平台依据），
