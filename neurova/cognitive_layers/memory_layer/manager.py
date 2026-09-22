@@ -32,7 +32,7 @@ import time
 from neurova.knowledge.foundation.storage_fence import assertNotUnderProductionMemory
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from neurova.cognitive_layers.memory_layer.bus_event import (
     EventBus,
@@ -526,29 +526,41 @@ class MemoryManager:
 
                 release_short_connection(conn)
 
-    def reload_memories(self) -> int:
-        """把本进程快照之外的行增量并入内存，返回并入条数（F-05 可见性补齐通道）。
+    def reload_memories(self) -> Dict[str, int]:
+        """与盘对账：并入盘上新增的行，回收盘上已消失的行（F-05 可见性补齐 + 断点①）。
 
         为什么需要它：快照只在构造期 `_load_from_db` 读一次盘，于是**另一个进程**
         （CLI 导入、备份恢复、多实例）写下的记忆，对运行中的服务一条都看不见——
         报告写着"已写入"、界面上却没有，是既非拒绝也非申报的假成功。可见性条件
         是"服务重启"或本方法，兑现手段只有这一处。
 
-        口径与 `_load_from_db` 同源（agent 全量，视图层再按调用语义过滤），
-        差别只在「只并入缺失的行」：
+        对账是**双向**的（Issue #81 断点①，用户拍板）：只补缺无法兑现撤销——
+        另一进程 `undo` 删掉的行在快照里既不会消失，还能被用户的一次强化经
+        `update_memory` 写回盘上（实测 0 → 1 行、重开实例复活）。所以重读时以盘
+        为准：盘上没有的行，快照里一并回收。回收后 `update_memory` 找不到该 id
+        自然返回 False——**不在写路径加兜底判断**，复活路径断在上游。
 
-        - **增量**：已有行（业务 id + 行自带三元组都在快照里）直接跳过，不重装、不覆盖
-          本进程运行期对温度/访问计数的改变；
-        - **召回面同步并入**：关键词倒排逐条 `upsert_memory_index`——**禁用**
-          `build_keyword_index`（它先 `clear()`，只喂缺失行会抹掉既有倒排）；
-        - **内容门索引并入**：否则 reload 之后同一句话会被门放过去、再写一条；
-        - **不写盘**：这是读侧可见性通道，不新增也不改写任何持久行。
+        口径与 `_load_from_db` 同源（agent 全量，视图层再按调用语义过滤）：
+
+        - **并入增量**：已有行（业务 id + 行自带三元组都在快照里）直接跳过，不重装、
+          不覆盖本进程运行期对温度/访问计数的改变；
+        - **回收消失行**：判据与并入对称（业务 id + 行自带三元组），盘上无此键即回收；
+        - **召回面同步**：并入逐条 `upsert_memory_index`（**禁用** `build_keyword_index`
+          ——它先 `clear()`，只喂缺失行会抹掉既有倒排）；回收经 `_drop_from_recall_indexes`
+          摘除，不留指向不存在记忆的残留文档；
+        - **内容门索引**：并入缺键才登记（否则 reload 之后同一句话会被门放过去、再写
+          一条），回收同步撤键；
+        - **不写盘**：这是读侧对账通道，不新增也不改写任何持久行。
+
+        Returns:
+            `{"reloaded": 并入条数, "reaped": 回收条数}`——两个数都只报真实发生量。
         """
         if not getattr(self, "_persist_db_path", None):
-            return 0
+            return {"reloaded": 0, "reaped": 0}
         conn = None
         released = False
         loaded: List["Memory"] = []
+        reaped: List["Memory"] = []
         try:
             conn = getattr(self, "_persist_conn", None)
             if conn is None:
@@ -561,6 +573,15 @@ class MemoryManager:
                 "SELECT * FROM memories WHERE agent_id = ? ORDER BY created_at DESC",
                 (self._agent_id,),
             ).fetchall()
+
+            # 盘上现存的全部行键（业务 id + 行自带三元组）。读盘成功之前不回收——
+            # 读失败时"盘上没有"是未知，不是事实。
+            on_disk: Set[Tuple[str, str, str, str]] = set()
+            for row in rows:
+                on_disk.add((
+                    self._plain_memory_id(row["id"]),
+                    str(row["agent_id"]), str(row["neuser_id"]), str(row["user_id"]),
+                ))
 
             with self._lock:
                 for row in rows:
@@ -577,13 +598,19 @@ class MemoryManager:
                         self._counter,
                         int(mem.id.replace("mem_", "")) if mem.id.startswith("mem_") else 0,
                     )
+                for mem in list(self._memories.values()):
+                    if (mem.id, mem.agent_id, mem.neuser_id, mem.user_id) in on_disk:
+                        continue
+                    del self._memories[mem.id]
+                    reaped.append(mem)
                 if loaded:
                     self._seed_counter_from_db(conn)
                     self._merge_content_index(loaded)
+                if loaded or reaped:
                     self._stats["total_memories"] = len(self._memories)
         except Exception as e:
             logger.warning("Failed to reload memories from DB: %s", e)
-            return len(loaded)
+            return {"reloaded": len(loaded), "reaped": len(reaped)}
         finally:
             if released and conn is not None:
                 from neurova.core.database import release_short_connection
@@ -592,9 +619,20 @@ class MemoryManager:
 
         for mem in loaded:
             self._index_reloaded_memory(mem)
-        if loaded:
-            logger.info("Reloaded %s memories from persistence DB", len(loaded))
-        return len(loaded)
+        for mem in reaped:
+            self._drop_from_recall_indexes(mem.id)
+            self._drop_content_index(mem)
+        if loaded or reaped:
+            logger.info("Reloaded %s memories from persistence DB (reaped %s)",
+                        len(loaded), len(reaped))
+        return {"reloaded": len(loaded), "reaped": len(reaped)}
+
+    def _drop_content_index(self, mem: "Memory") -> None:
+        """撤掉回收行的内容门键（只撤指向该行的那一条，不动别人的键）。"""
+        self._ensure_content_index()
+        key = self._content_gate_key(mem)
+        if key is not None and self._content_index.get(key) == mem.id:
+            del self._content_index[key]
 
     def _merge_content_index(self, mems: List["Memory"]) -> None:
         """把并入的行登记进内容门索引（缺键才登记，不抢已有键的归属）。
@@ -1441,13 +1479,20 @@ class MemoryManager:
         except Exception as e:
             logger.warning("运行期向量库同步失败: %s", e)
 
-    def import_memories(self, records, *, ingest_run_id: str) -> Dict[str, Any]:
+    def import_memories(self, records, *, ingest_run_id: str,
+                        owner_user_id: str = "") -> Dict[str, Any]:
         """导入专用写入口：批量单事务、保留历史时间戳、不触发运行期副作用。
 
         与 remember() 的分工（docs/specs/2026-09-20-external-agent-ingest-design.md §4）：
         这里不跑内容门、不喂关键词倒排、不同步 MoE 向量库、不计 remember_count——回填的
         历史不是"刚发生的经验"，重新定温或参与再确认会篡改它的时序语义。可见性不受影响：
         行同时进内存表与持久层（persist_memory_batch 单事务）。
+
+        **属主**（Issue #81 断点②）：`owner_user_id` 是"这批历史是谁的"。缺省为空时取
+        调用现场作用域（CLI 下的既有口径，单用户桌面下无感）；显式给定时两轴同定标——
+        只写一轴等于让三层隔离的第二轴回落到调用现场，属主实例按作用域检索依旧看不见，
+        "为他人导入"就只兑现了一半。与 F-04 同源：错在导入侧生产了"没有属主"这份状态，
+        所以修在产生它的一侧（本写入口），不在读侧加兜底判断。
 
         **声明取代必须真的生效**：`MemoryRecord.supersedes`（源库 `supersedes_key`）
         说的是"我取代了谁"。此前它只被搬进 `metadata["supersedes"]` 就没人再读，
@@ -1459,8 +1504,17 @@ class MemoryManager:
         """
         if not ingest_run_id:
             raise ValueError("ingest_run_id 必填（撤销按它精确删除）")
+        owner = str(owner_user_id or "").strip()
+        # 幂等键按**行的作用域**分槽：identity_key 是"这段历史"的身份，行的三元组是
+        # "这段历史是谁的"——两者不是同一件事。按全局键去重，同一份历史导给第二个人会
+        # 静默回落成 skipped（报告 +0、他的列表据此为空），而盘上本应各留一行。
+        scope_ne = owner or self._eff_neuser_id()
+        scope_uid = owner or self._eff_user_id()
         existing_keys = {
-            (mem.metadata or {}).get("ingest", {}).get("identity_key")
+            (
+                mem.neuser_id, mem.user_id,
+                (mem.metadata or {}).get("ingest", {}).get("identity_key"),
+            )
             for mem in self._memories.values()
         }
         imported: List[Memory] = []
@@ -1469,16 +1523,20 @@ class MemoryManager:
         unresolved: List[str] = []
         with self._lock:
             for rec in records:
-                if rec.identity_key in existing_keys:
+                if (scope_ne, scope_uid, rec.identity_key) in existing_keys:
                     skipped += 1
                     continue
-                mem = self._build_imported_memory(rec, ingest_run_id)
+                mem = self._build_imported_memory(
+                    rec, ingest_run_id, owner_user_id=owner_user_id)
                 self._memories[mem.id] = mem
-                existing_keys.add(rec.identity_key)
+                existing_keys.add((scope_ne, scope_uid, rec.identity_key))
                 imported.append(mem)
                 declared = str(getattr(rec, "supersedes", "") or "").strip()
                 if declared:
-                    retired = self._retireSuperseded(declared, keepId=mem.id)
+                    # 取代声明的旧行要在**本批行的作用域**里找：属主导入的取代若按调用
+                    # 现场作用域去找，跨上下文导入时永远落空（声明了却"找不到目标"）。
+                    retired = self._retireSuperseded(
+                        declared, keepId=mem.id, scope=(scope_ne, scope_uid))
                     superseded.extend(retired)
                     if not retired:
                         unresolved.append(declared)
@@ -1493,24 +1551,29 @@ class MemoryManager:
         return {"added": len(imported), "skipped": skipped,
                 "superseded": superseded, "supersede_unresolved": unresolved}
 
-    def _retireSuperseded(self, declared: str, keepId: str) -> List[str]:
+    def _retireSuperseded(self, declared: str, keepId: str,
+                          scope: Optional[Tuple[str, str]] = None) -> List[str]:
         """把声明被取代的旧活跃行软遗忘；返回被遗忘的 memory_id。
 
         定位口径复用内容身份（`normalized_key`，与内容门同一把键）：声明值可能是旧行
         的原文，也可能是旧行的 identity_key——两种都按"同一份内容身份"认，不另立匹配规则。
         只动本作用域、只动仍活跃的行；软遗忘是既有语义（可恢复、不删数据），
         这里不新造第二种"作废"。
+
+        `scope` 缺省取调用现场三元组；导入路径显式传**本批行**的作用域（属主给定的
+        情况下它与调用现场不是同一个上下文）。
         """
         from neurova.core.content_identity import normalized_key
 
         wanted = normalized_key(declared)
         if not wanted:
             return []
+        scope_ne, scope_uid = scope or (self._eff_neuser_id(), self._eff_user_id())
         retired: List[str] = []
         for mem in list(self._memories.values()):
             if mem.id == keepId or mem.agent_id != self._agent_id:
                 continue
-            if mem.neuser_id != self._eff_neuser_id() or mem.user_id != self._eff_user_id():
+            if mem.neuser_id != scope_ne or mem.user_id != scope_uid:
                 continue
             if mem.lifecycle_stage == LifecycleStage.FORGOTTEN:
                 continue
@@ -1524,8 +1587,13 @@ class MemoryManager:
             retired.append(mem.id)
         return retired
 
-    def _build_imported_memory(self, rec, ingest_run_id: str) -> "Memory":
-        """把 MemoryRecord 翻成 Memory：枚举与时间戳解析口径与 remember 一致。"""
+    def _build_imported_memory(self, rec, ingest_run_id: str,
+                               owner_user_id: str = "") -> "Memory":
+        """把 MemoryRecord 翻成 Memory：枚举与时间戳解析口径与 remember 一致。
+
+        `owner_user_id` 非空时两轴同定标（"这批历史是谁的"），空则取调用现场作用域。
+        """
+        owner = str(owner_user_id or "").strip()
         memory_type = MemoryType.SEMANTIC
         declared_type = None
         try:
@@ -1569,8 +1637,8 @@ class MemoryManager:
             lifecycle_stage=LifecycleStage.ACTIVE,
             metadata=metadata,
             agent_id=self._agent_id,
-            neuser_id=self._eff_neuser_id(),
-            user_id=self._eff_user_id(),
+            neuser_id=owner or self._eff_neuser_id(),
+            user_id=owner or self._eff_user_id(),
             created_at=created_at,
             updated_at=created_at,
             # 事件时刻与获知时刻是两个时刻：created_at 记源侧历史时刻（照原样保留），
