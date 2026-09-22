@@ -227,7 +227,10 @@ class TestOrchestratorGoalResolution:
             ("fetch a url", ["search_web"]),
             ("execute the code", ["run_code"]),
             ("run a script", ["run_code"]),
-            ("do something unknown", ["process_data"]),  # 默认
+            # 读不懂即弃权：历史实现兜底成 process_data（一个不存在的工具名），
+            # 把"没听懂"静默变成"跑个无关工具"。弃权契约见
+            # tests/unit/tools/test_tool_orchestrator_wiring.py::TestUnknownGoalAbstains
+            ("do something unknown", []),
         ]
         
         for goal, expected in test_cases:
