@@ -28,11 +28,25 @@ from neurova.llm.provider_manager import LLMProviderManager, get_provider_manage
 logger = get_logger(__name__)
 
 
+def _defaultConfigPath() -> Path:
+    """基础设施配置落点：数据根下的 `infrastructure.json`（绝对路径）。
+
+    原值 `Path("config/infrastructure.json")` 是 CWD 相对——配置写出去后
+    换个启动目录就"丢失"（文件在旧 CWD），用户改了又回默认值。
+    旧落点（仓库根 `config/infrastructure.json`）在数据根空缺时收养一次。
+    """
+    from neurova.core.data_root import dataLanding
+
+    return dataLanding("infrastructure.json", legacy=("config", "infrastructure.json"))
+
+
 @dataclass
 class InfrastructureConfig:
     """基础设施配置"""
 
-    config_path: Path = field(default_factory=lambda: Path("config/infrastructure.json"))
+    config_path: Path = field(
+        default_factory=lambda: _defaultConfigPath()
+    )
     auto_start: bool = True
     enable_event_bus: bool = True
     enable_service_manager: bool = True

@@ -1,8 +1,13 @@
 """一次性补丁脚本：delete_agent 清理 AgentConfigManager 配置。"""
+import sys
 from pathlib import Path
 
-path = 'neurova/api/endpoints/agent.py'
-src = Path(path).read_text(encoding='utf-8')
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from neurova.core.data_root import repoAsset
+
+# 改动对象是工作树里的仓库文件：锚仓库根，而不是"碰巧从哪儿启动"。
+path = repoAsset("neurova", "api", "endpoints", "agent.py")
+src = path.read_text(encoding='utf-8')
 
 old = '''    # 移除
     del agents[agent_id]
@@ -18,5 +23,5 @@ new = '''    # 移除运行时实例
 '''
 assert old in src
 src = src.replace(old, new, 1)
-Path(path).write_text(src, encoding='utf-8')
+path.write_text(src, encoding='utf-8')
 print('patched delete_agent')
