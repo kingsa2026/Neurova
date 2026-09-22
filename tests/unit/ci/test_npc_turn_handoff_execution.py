@@ -189,3 +189,176 @@ class TestGuardIsInProtectedSubset:
         assert rel in listed, (
             f"{rel} 不在受保护子集 —— 本守卫的判据在 CI 上不会执行。"
         )
+
+
+#: 平台 `cnb:apply` 的 applicable events（docs.cnb.cool/zh/build/internal-steps/cnb/apply.md）。
+#: 这份清单是**平台运行期**的准入判据：不在其中，Stage 直接以 error 收场。
+CNB_APPLY_EVENTS = frozenset({
+    "push",
+    "commit.add",
+    "branch.create",
+    "pull_request.target",
+    "pull_request.mergeable",
+    "tag_push",
+    "pull_request.merged",
+    "api_trigger",
+    "web_trigger",
+    "crontab",
+    "tag_deploy",
+})
+
+#: `cnb:apply` 的 `event` **参数自身**的取值约束（同一篇文档）：
+#: 「必须为 `api_trigger` 或以 `api_trigger_` 开头」。
+CNB_APPLY_EVENT_PARAM_PREFIX = "api_trigger"
+
+#: 接力落点事件名：`cnb:apply` 只能拉自定义 API 事件，故下一轮的入口**不是**
+#: 原评论事件，而是一条 `api_trigger_*` 流水线（其内用 npc:go 续跑）。
+HANDOFF_APPLY_EVENT = "api_trigger_npc_handoff"
+
+
+def _handoff_apply_stages(cnb_doc):
+    """产出 ($ 段每一处收尾接力 Stage) 及其所在事件名。
+
+    只扫**真实事件挂载点**：`$` 下以 `.` 开头的是 YAML 锚点定义
+    （如 `.npc-dscoder-job`），它们不直接触发、由事件展开时被引用；
+    锚点里无法写死 Issue/PR 专属的上下文（两条事件各不相同），
+    故「对话载体传下去了吗」的判据只能落在展开后的真实事件上。
+    """
+    fallback = cnb_doc.get("$") or {}
+    for event, body in fallback.items():
+        if not isinstance(event, str) or event.startswith("."):
+            continue
+        for job in (body if isinstance(body, list) else []):
+            if not isinstance(job, dict):
+                continue
+            for stage in (job.get("endStages") or []):
+                if isinstance(stage, dict) and stage.get("type") == "cnb:apply":
+                    yield event, stage
+
+
+class TestHandoffUsesAnEventCnbApplyActuallyAccepts:
+    """D. 接力的 `event` 必须是 `cnb:apply` **真能拉起来**的事件（Issue #158 第二次修）。
+
+    ## 事故形态（构建 cnb-k6e-1k34osn4f，2026-09-22 23:21:43 实测）
+
+    `$CNB_BUILD_WORKSPACE` 落点、`##[set-output]` + `exports` 通道、`if` 判据——
+    前两批修的东西**全部生效**了：Stage 0 打印 `turn_flag_handoff.written=true`，
+    收尾 Stage 的 `if` 真的被判真（`Finished, code: 0`，不再是 `skipped`）。
+    但 Stage 的最终状态是 **error**，平台逐字给出：
+
+        cnb:apply can only be used in push/commit.add/branch.create/
+        pull_request.target/pull_request.mergeable/tag_push/pull_request.merged/
+        api_trigger/web_trigger/crontab/tag_deploy events
+
+    `issue.comment@npc` **不在白名单里**——而原配置写的正是它。
+    同一篇文档还写着 `event` 参数「必须为 `api_trigger` 或以 `api_trigger_` 开头」。
+    即：那笔接力在写下的那一刻就没有可能拉起任何东西，
+    只是**此前被 `if` 恒假的 `skipped` 掩盖了**（判据不真，永远走不到平台的准入检查）。
+
+    这条是本仓第三次同型犯病（前两次：`GITHUB_ENV` 通道不存在、`options.prompt`
+    键不被承认）——**配置写了一个平台不支持的形态，平台不报错，只在真被执行时才响亮**。
+    故判据必须钉在"平台声明支持什么"上，而不是钉在"我们写了什么"上。
+    """
+
+    def test_cnb_apply_event_is_in_the_platform_allowlist(self, cnb_doc):
+        problems = []
+        seen = 0
+        for where, stage in _handoff_apply_stages(cnb_doc):
+            seen += 1
+            event = (stage.get("options") or {}).get("event")
+            if not isinstance(event, str) or not event:
+                problems.append(f"{where}: 收尾接力未声明 event")
+                continue
+            if event not in CNB_APPLY_EVENTS and not event.startswith(CNB_APPLY_EVENT_PARAM_PREFIX):
+                problems.append(
+                    f"{where}: 接力 event={event!r} 不在 cnb:apply 的适用事件内 —— "
+                    "运行期会被平台以 error 拒掉（构建 cnb-k6e-1k34osn4f 实测）"
+                )
+            if event.endswith("@npc"):
+                problems.append(
+                    f"{where}: 接力 event 指向 NPC 评论事件 {event!r}；"
+                    "cnb:apply 拉不起 @npc 事件，且 NPC 评论只能由人在评论里 @ 触发。"
+                )
+        assert seen, "未在 `$` 段找到任何收尾接力 Stage —— 本守卫空转"
+        assert not problems, (
+            "轮数触顶接力拉不起下一轮:\n  " + "\n  ".join(problems) +
+            "\n平台依据（docs.cnb.cool/zh/build/internal-steps/cnb/apply.md）："
+            "适用事件为 " + "/".join(sorted(CNB_APPLY_EVENTS)) +
+            f"，且 event 参数必须为 {CNB_APPLY_EVENT_PARAM_PREFIX} 或以其为前缀。"
+            "故「下一轮」必须落在一条 api_trigger_* 流水线上，"
+            "由它内部的 npc:go 续跑。"
+        )
+
+    def test_handoff_target_pipeline_exists_and_runs_npc_go(self, cnb_doc):
+        """接力拉的 `api_trigger_*` 事件必须在 `$` 下真的存在，且其内跑 npc:go。
+
+        只把 `event` 改成合法名还不够：事件不存在或里面没有 npc:go，
+        接力依然是"拉起来什么都不干"的空转——同一条死链的下一个命中点。
+        """
+        fallback = cnb_doc.get("$") or {}
+        assert HANDOFF_APPLY_EVENT in fallback, (
+            f"`$` 段缺少接力落点事件 {HANDOFF_APPLY_EVENT!r} —— "
+            "收尾的 cnb:apply 指向一个不存在的流水线，接力仍是空转。"
+        )
+        body = fallback.get(HANDOFF_APPLY_EVENT)
+        jobs = body if isinstance(body, list) else []
+        assert jobs, f"{HANDOFF_APPLY_EVENT}: 流水线体为空"
+        found = [
+            stage
+            for job in jobs if isinstance(job, dict)
+            for stage in (job.get("stages") or []) if isinstance(stage, dict)
+        ]
+        go = [s for s in found if s.get("type") == "npc:go"]
+        assert go, (
+            f"{HANDOFF_APPLY_EVENT}: 流水线里没有 npc:go —— "
+            "接力拉起来之后没有任何 Agent 续跑，等于只烧一次配额。"
+        )
+
+    def test_handoff_target_pipeline_supplies_its_own_prompts(self, cnb_doc):
+        """API 触发下 `npc:go` **不继承**评论触发的人设，必须自带提示词。
+
+        平台文档（internal-steps/npc/go.md）：`role` / `systemPrompt` / `userPrompt`
+        「仅 API 触发时生效」，且 `systemPrompt`、`userPrompt` 在 API 触发下**必填**——
+        评论触发时提示词由角色自带（并被忽略），api_trigger 时没有任何角色上下文，
+        不传则下一轮 Agent 不知道自己是谁、要干什么。
+
+        可证伪：把 `systemPrompt` 从接力流水线的 options 里删掉 → 本条红。
+        """
+        fallback = cnb_doc.get("$") or {}
+        body = fallback.get(HANDOFF_APPLY_EVENT) or []
+        options = [
+            stage.get("options") or {}
+            for job in (body if isinstance(body, list) else []) if isinstance(job, dict)
+            for stage in (job.get("stages") or []) if isinstance(stage, dict)
+            if stage.get("type") == "npc:go"
+        ]
+        assert options, f"{HANDOFF_APPLY_EVENT}: 找不到 npc:go 的 options"
+        problems = []
+        for opt in options:
+            for key in ("systemPrompt", "userPrompt"):
+                value = opt.get(key)
+                if not (isinstance(value, str) and value.strip()):
+                    problems.append(f"{HANDOFF_APPLY_EVENT}: npc:go 缺 {key}（API 触发下必填）")
+        assert not problems, "\n  ".join(problems)
+
+    def test_handoff_carries_the_issue_or_pr_context_forward(self, cnb_doc):
+        """下一轮要能找回**同一个** Issue/PR —— 上下文断链等于接力白跑。
+
+        评论触发时 `CNB_ISSUE_IID` / `CNB_PULL_REQUEST_IID` 由平台注入；
+        `api_trigger_*` 是全新流水线，这些变量**不会再出现**（平台只注入
+        `API_TRIGGER_*` 一族，见 cnb/apply.md 的「环境变量相关」）。
+        故上一轮必须显式把它们传下去，否则下一轮 Agent 无处可读对话载体。
+        判据落在"env 里确实点了名"，不落在"注释里说要传"。
+        """
+        problems = []
+        seen = 0
+        for where, stage in _handoff_apply_stages(cnb_doc):
+            seen += 1
+            env = (stage.get("options") or {}).get("env") or {}
+            keys = {str(k) for k in env}
+            if not ({"issueIid", "issueNumber", "handoffIssueIid"} & keys) and \
+               not ({"prIid", "pullRequestIid", "handoffPrIid"} & keys):
+                problems.append(
+                    f"{where}: 接力 env 未把 Issue/PR 标识传下去（下一轮读不到对话载体）"
+                )
+        assert seen and not problems, "\n  ".join(problems)
