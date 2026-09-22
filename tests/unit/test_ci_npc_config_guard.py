@@ -25,6 +25,19 @@
    吃满平台 2h 硬上限（7262s，均摊 ≈29s/轮），说明「被掐断」的根因不是
    轮数给多了，而是 Agent 自己 `sleep` 轮询叠加单轮 20 分钟的全量 pytest ——
    故轮数放宽，时间预算改由「禁止 sleep 轮询」的硬禁令守住。
+6. **maxTurns 必须自带耗时上界**（`MAX_TURNS_CEILING`）—— 第 5 条曾把
+   maxTurns 当「够用就好」的软参数给到 1000，理由是「轮数不是死因」。
+   构建 `cnb-m48-1k33grbms` 用实测把它否证了：同样的 2h 平台硬限被再次吃满
+   （7300s、207 轮、均摊 35.3s/轮），且是被**外部**掐断——Agent 死在
+   一条正常收尾的 pytest 上，没有告警轮、没有收尾。链路是自加速的：
+   context 每轮重放（compaction 后仍 ~8MiB 输入、单轮 in≈19 万 token）⇒
+   轮耗时由早期的 ~20s 涨到 30s+ ⇒ 2h/35s ≈ 205 轮 ⇒ 1000 的配额**永不触达**。
+   配额在硬限之上就等于没有配额：被掐断比配额触发的收尾更糟（无告警、无收尾、
+   worktree 里的成果直接丢）。故 maxTurns 必须有上界，且上界由硬限反推：
+   本仓 2h 硬限 ⇒ `MAX_TURNS_CEILING = 200`（200 × 35s ≈ 116min，
+   留 ~20% 机动；且与实测触发轮数 207 对齐）。
+   确要放宽：请先给出「单轮耗时」与「2h ÷ 单轮耗时」的实测读数，
+   而不是凭「任务够用」直觉调值。
 """
 import io
 from pathlib import Path
@@ -51,13 +64,19 @@ LEVEL_BY_MOUNT = {"$": "xhigh", "DSCoder-max": "xhigh"}
 # 已取消的档位后缀：一旦重新出现在 .cnb.yml 顶层 key 或 settings.yml 角色名里即报错
 RETIRED_SUFFIXES = ("-low", "-high")
 
-# npc:go 的 maxTurns 上限。
-# 依据：维护者在 main（commit「修改超时限制」）把 $ 段显式调到 1000，
-# 即「轮数配额按任务够用来给，不压到 120」。构建 cnb-f1c-1k31garu5 实测
-# 251 轮 / 7262s（平台 2h 硬上限被吃满，均摊 ≈29s/轮）证明轮数不是死因，
-# 死因是 Agent 自己 sleep 轮询 + 单轮 20 分钟的全量 pytest。
-# 故上限放回 1000，真正的硬禁令改由「禁止 sleep 轮询」承担。
+# npc:go 的 maxTurns 配额（流水线声明值）。
 MAX_TURNS_LIMIT = 1000
+
+# maxTurns 的耗时上界：由平台 2h 硬限反推，不是「够用就好」的软参数。
+#
+# 实测读数（同一平台的两次掐断）：
+#   cnb-f1c-1k31garu5：251 轮 / 7262s（均摊 ≈29s/轮）
+#   cnb-m48-1k33grbms：207 轮 / 7300s（均摊 35.3s/轮）
+# 两者都吃满 2h、都没触达配额。链路：context 每轮重放 ⇒ 单轮耗时随任务推进
+# 上涨（30s+）⇒ 2h / 35s ≈ 205 轮。配额在硬限之上 = 没有配额，且被掐断比
+# 配额触发的收尾更糟（无告警、无收尾、worktree 成果丢失）。
+# 200 × 35s ≈ 116min，留 ~20% 机动，并与实测触发轮数 207 对齐。
+MAX_TURNS_CEILING = 200
 
 
 def _load(path: Path):
@@ -175,11 +194,36 @@ class TestTurnBudget:
             if turns > MAX_TURNS_LIMIT:
                 problems.append(f"{path}: maxTurns={turns} > 上限 {MAX_TURNS_LIMIT}")
         assert not problems, (
-            "npc:go 的 maxTurns 缺失或超出耗时上界:\n  " + "\n  ".join(problems) +
-            f"\n上限 {MAX_TURNS_LIMIT} 为维护者在 main 上的显式决定（「修改超时限制」）。"
-            "构建 cnb-f1c-1k31garu5 实测 251 轮吃满平台 2h 硬上限（均摊 ≈29s/轮），"
-            "根因是 sleep 轮询 + 单轮 20 分钟的全量 pytest，不是轮数配额；"
+            "npc:go 的 maxTurns 缺失或超出配额:\n  " + "\n  ".join(problems) +
+            f"\n配额 {MAX_TURNS_LIMIT} 是上限，不是目标值——真正的耗时上界见 "
+            "test_max_turns_leaves_room_under_platform_hard_limit。"
             "确需调低/调高：请同步改守卫、.cnb.yml 注释与 issue/PR 两份事件定义。"
+        )
+
+    def test_max_turns_leaves_room_under_platform_hard_limit(self, npc_options):
+        """maxTurns 必须落在耗时上界内，配额不得高于平台硬限能容纳的轮数。
+
+        可证伪路径：把 .cnb.yml 的 maxTurns 改回 1000（本仓两次掐断时的值），
+        本测试立刻转红 —— 因为 1000 × 35s/轮 ≈ 9.7h 远超平台 2h 硬限，
+        配额在硬限之上就等于没有配额：Agent 会被外部掐断（无告警、无收尾）。
+        """
+        problems = []
+        for path, opt in npc_options:
+            turns = opt.get("maxTurns")
+            if isinstance(turns, int) and turns > MAX_TURNS_CEILING:
+                problems.append(f"{path}: maxTurns={turns} > 上界 {MAX_TURNS_CEILING}")
+        assert not problems, (
+            "npc:go 的 maxTurns 高于平台 2h 硬限能容纳的轮数（配额永不触达）:\n  "
+            + "\n  ".join(problems) +
+            f"\n上界 {MAX_TURNS_CEILING} 由 2h 硬限反推：实测单轮均摊 35.3s"
+            "（cnb-m48-1k33grbms 207 轮 / 7300s），200 × 35s ≈ 116min。"
+            "\n为何要上界而不是「够用就好」：构建 cnb-f1c-1k31garu5（251 轮 / 7262s）"
+            "与 cnb-m48-1k33grbms（207 轮 / 7300s）两次都在 maxTurns=1000 下被平台"
+            "2h 硬限外部掐断。链路是自加速的——context 每轮重放（compaction 后仍"
+            "~8MiB 输入、单轮 in≈19 万 token），单轮耗时从早期 ~20s 涨到 30s+，"
+            "2h / 35s ≈ 205 轮，配额根本到不了。"
+            "\n确需放宽：请附「单轮耗时」与「2h ÷ 单轮耗时」的实测读数，"
+            "并同步改 .cnb.yml、本守卫与 issue/PR 两份事件定义。"
         )
 
     def test_max_turns_is_literal_int(self, npc_options):
@@ -302,3 +346,61 @@ class TestSettingsRoleHygiene:
         names = [r.get("name") for r in (settings_doc.get("npc") or {}).get("roles") or []]
         dupes = sorted({n for n in names if names.count(n) > 1})
         assert not dupes, f"角色名重复: {dupes}"
+
+
+# 平台单次构建硬上限（超时即构建失败，任务与上下文全丢）。
+# 依据：构建 cnb-3k8-1k33gorhr 实测 7293033ms（≈2h2m）被掐断，
+# 同时在册的同类掐断有 cnb-f1c-1k31garu5 / cnb-1q8-1k33cb2v9 等多例 ——
+# 这是系统性耗时问题，不是单次偶发。
+BUILD_HARD_LIMIT_SECONDS = 7200
+
+# 会话内必须出现的时长纪律条目（人设 prompt 的硬约束子串）。
+# 这些字符串同时是"给 Agent 的行为约束"与"守卫的判据"，
+# 改动任一侧都会让另一侧变红——防后人把纪律删干净后无感回归。
+DURATION_DISCIPLINE_MARKERS = (
+    "单次构建上限 2h",
+    "禁止 sleep",
+    "禁止在单次会话里反复跑全量测试套件",
+    "长任务要分段交付",
+)
+
+
+class TestNpcBuildDurationDiscipline:
+    """NPC 人设必须载明构建时长纪律（2h 硬上限的根因处修复）。
+
+    只调 maxTurns 治不了这个病：cnb-f1c-1k31garu5（251 轮）与
+    cnb-3k8-1k33gorhr（204 轮）两次掐断的轮数都远低于 1000 配额，
+    真正的死因是单轮耗时（sleep 轮询 + 单轮全量 pytest + 上下文压缩开销）。
+    故纪律写在人设里（被 @ 时必加载），并由本守卫常驻钉住。
+    """
+
+    def test_every_role_states_build_hard_limit(self, settings_doc):
+        roles = (settings_doc.get("npc") or {}).get("roles") or []
+        assert roles, "settings.yml 未声明任何 NPC 角色"
+        problems = []
+        for role in roles:
+            prompt = role.get("prompt") or ""
+            missing = [m for m in DURATION_DISCIPLINE_MARKERS if m not in prompt]
+            if missing:
+                problems.append(f"{role.get('name')}: 缺 {missing}")
+        assert not problems, (
+            "NPC 人设缺少构建时长纪律:\n  " + "\n  ".join(problems) +
+            f"\n平台单次构建上限 {BUILD_HARD_LIMIT_SECONDS}s，超时即整条流水线失败、"
+            "会话成果全丢。纪律属根因处修复，不可省。"
+        )
+
+    def test_duration_discipline_identical_across_roles(self, settings_doc):
+        """同档别名角色（DSCoder / DSCoder-max）的时长纪律必须逐字一致。"""
+        roles = (settings_doc.get("npc") or {}).get("roles") or []
+        rendered = {}
+        for role in roles:
+            prompt = role.get("prompt") or ""
+            rendered[role.get("name")] = tuple(
+                line for line in prompt.splitlines()
+                if any(m in line for m in DURATION_DISCIPLINE_MARKERS)
+            )
+        values = set(rendered.values())
+        assert len(values) == 1, (
+            "各角色的构建时长纪律不一致（会各自漂移）:\n  "
+            + "\n  ".join(f"{k}: {len(v)} 行" for k, v in rendered.items())
+        )
