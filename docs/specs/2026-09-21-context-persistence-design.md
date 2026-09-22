@@ -311,7 +311,7 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 | A5 | GC 生效：超 `keep_count`/`keep_days` 的行被清理，FTS 同步 | 写入超限后断言两表行数一致；触发面读 `get_retention_stats()["ledger_gc"]`（`runs`/`removed`/`last_error`），断言在生产可达（007） |
 | A6 | 迁移幂等 + 防降级：v0 库迁到 v2 后重跑 migrate 返回空；伪造高版本库被拒 | `migrate()` 返回值 + `SchemaVersionError` |
 | A7 | 零停机：迁移窗口内并发写不停且不被长事务阻塞 | 并发写线程 + 记录停等 p95 上界（006 live-verify）；另加**结构面**判据：迁移提交次数 = ⌈行数/批大小⌉ + 1、回填读取带 `LIMIT`，不是一条长事务 |
-| A8 | 隔离：群聊归档在单聊轮召回不可见，跨房间互不可见 | 走 `filter_by_scope` 同源判据 |
+| A8 | 隔离：群聊归档在单聊轮召回不可见，跨房间互不可见 | 走 `filter_by_scope` 同源判据；另加**无会话池**与**跨进程**两个观测面，以及判据同源探针（探针打事实源函数，复刻第二份规则即抓不到调用）（008） |
 | A9 | 启动代价：只登记不预载，启动对 DB 的读次数为常数 | 计数连接/查询次数或断言耗时上界；另观测：登记值随写入/GC 同步、登记失败可见、`draw`/`query` 零查库、`recall_evicted` 为唯一读路径（005） |
 
 **全部判据走先红后绿**（AGENTS.md 修复教义第 3 条）：先写断言现状缺陷的失败测试并实证它
@@ -358,6 +358,23 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 | 002 版本域与 v1 迁移 | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（`context_ledger` 版本域 + v1 迁移）+ `neurova/context_pool.py`（召回路径回填作用域/归档时刻）+ `tests/unit/context/test_context_ledger_migration.py` | 红灯 15 failed → 绿灯 17 passed；live-verify 真 v0 库经生产构造面迁移 `tests/manual/context_ledger_migration_90.py` |
 | 004 读侧预筛与转义 | ✅ 已交付 | `neurova/core/sql_like.py`（转义/短语/长度分流单源）+ `neurova/context/eviction_ledger_db.py`（`_matchCandidates`/`_likeCandidates`/`_recentCandidates` + `CANDIDATE_LIMIT`）+ `tests/unit/context/test_ledger_read_prefilter.py` | 红灯 5 failed → 绿灯 9 passed；live-verify CJK 命中逐条对拍 LIKE 真值、`%`/`_` 不越权、短查询 SQL 轨迹无 MATCH `tests/manual/context_ledger_read_prefilter_90.py` |
 | 006 v2 迁移 FTS 重建为 trigram | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（`_rebuildFtsAsTrigram` + `_databasePath` + `_openSideConnection`；`_FTS_REBUILD_BATCH`/`_FTS_SHADOW_TABLE`/`_FTS_TOKENIZE`，v2 注册）+ `tests/unit/context/test_context_ledger_fts_migration.py` | 红灯 5 failed → 绿灯 10 passed；live-verify 真 v1 库 2 万行迁移 574–627 ms、期间并发写 36–39 次、迁移后中文命中对拍相等 `tests/manual/context_ledger_fts_rebuild_90.py` |
+| 008 召回作用域闸口 | ✅ 已交付 | `neurova/context_pool.py`（`_allowedRecallItems` 闸口 + `recall_evicted` 弃用 session 精确等值）+ `tests/unit/context/test_ledger_recall_scope_gate.py` | 红灯 4 failed → 绿灯 7 passed；live-verify 真库 + 真跨进程 `tests/manual/context_ledger_recall_scope_90.py` |
+
+**008 对 D13 的偏离记录**：
+
+- **可见性不再由 `session_id` 等值承担**：D13 说"session 过滤从精确等值改为
+  'session 优先 + 跨 session 兜底'，然后过作用域闸口"。实施更彻底：持久源查询
+  直接传 `session_id=None`（不做任何等值过滤），可见性**全交作用域闸口**。
+  理由：精确等值下的"单聊池恒 0 条"不是被挡住，是**查不到**——两种语义混在一起后，
+  闸口即使放行也读不出该读的跨会话历史（D1 要的正是跨重启跨会话可取）。
+- **闸口落在两条源合并之后**：只对持久源过滤等于半个闸口——内存台账里的房间内容
+  照样泄出（红灯第三条实测到的正是这一形态）。
+- **本群/本房间取 `self.turn_scope`**：它是写入侧打标与读侧放行的同一个值
+  （`orchestrator.build_context` 每轮写入），故不存在"写 room:A 读 room:B"的错配；
+  `turn_scope` 缺失时交 `scope_from_metadata` 按 `session_id` 前缀回溯，池侧不复刻规则。
+- **既有消费方按新契约修正判据语义**（教义第 5 条）：`test_context_ledger_migration.py`
+  两条"归档事实读得回来"用例原先靠 session 等值取得可见性，改为在同一房间轮次内召回；
+  断言未删（仍锁条数、内容与 `chat_scope`），只把"凭什么可见"换成新契约。
 
 **005 对 D10 的偏离记录**：
 

@@ -366,7 +366,11 @@ class TestRecallExposesArchivedFacts:
         archivedAt = pool.get_contexts()[0].created_at
         del pool
 
-        recalled = self._pool(db_path).recall_evicted(query="ZEPHYR", limit=10)
+        # B4/008：召回是第二条读路径，过作用域闸口（A8）。本用例要验的是
+        # "归档事实读得回来"，故让召回发生在**同一房间轮次**（本群可见本群）。
+        reader = self._pool(db_path)
+        reader.turn_scope = "room:project_roomB"
+        recalled = reader.recall_evicted(query="ZEPHYR", limit=10)
         assert len(recalled) == 1
         assert recalled[0].metadata.get("chat_scope") == "room:project_roomB", (
             "召回路径丢掉了归档作用域——工单 008 的闸口无据可判"
@@ -389,7 +393,8 @@ class TestRecallExposesArchivedFacts:
     def test_recall_resolves_legacy_rows_without_column(self, tmp_path):
         """旧行无列：召回条目的作用域经 metadata / session 前缀兜底解出。
 
-        本用例不涉及跨会话召回策略（那是工单 008），行与池同 session。
+        B4/008 已把跨会话召回策略落地（闸口见 `test_ledger_recall_scope_gate.py`）；
+        本用例只验旧行（无列）经 metadata / session 前缀兜底解出的作用域。
         """
         db_path = tmp_path / "legacy_recall.db"
         _legacyDb(db_path, [{
@@ -404,6 +409,8 @@ class TestRecallExposesArchivedFacts:
                 db_path=db_path, user_id="u1", agent_id="a1"
             ),
         )
+        # B4/008：同一房间轮次内召回（闸口见 A8；本用例只验旧行兜底解出的作用域）。
+        pool.turn_scope = "room:project_roomD"
         recalled = pool.recall_evicted(query="ATLAS", limit=10)
         assert len(recalled) == 1
         assert recalled[0].metadata.get("chat_scope") == "room:project_roomD"
