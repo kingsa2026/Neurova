@@ -131,10 +131,14 @@ def apply_bundle(root: Path, *, agent_id: str, manager, sessions,
                  owner_user_id: str = "") -> IngestReport:
     """把一支合规 bundle 写进两条咽喉；返回可直接 undo 的报告。
 
-    `owner_user_id` 缺省为空 = 共享会话（单用户桌面下的合法语义）；多用户/多渠道下
+    `owner_user_id` 缺省为空 = 共享（单用户桌面下的合法语义）；多用户/多渠道下
     导入他人历史必须显式给属主，否则读侧"空属主=任何人可见"的规则会让导入的私有
     历史对所有人开放。归属不合法（会话已有别的属主）由咽喉抛 SessionOwnerConflict，
     这里兜成 BundleError：整批拒绝，与坏包同一姿态。
+
+    **一处给，两条咽喉都用**（Issue #81 断点②）：属主同时定标**会话行**与**记忆行**。
+    原先只有会话写入口消费它，同一支包里的记忆取调用现场作用域——为他人导入的会话有主、
+    记忆无主，属主实例按作用域检索看不见。缺省仍为空（共享），既有调用方口径不变。
     """
     if not _AGENT_ID.match(str(agent_id or "")):
         raise BundleError(f"agent_id 必须是简单标识符（它会参与目录拼接）: {agent_id!r}")
@@ -159,7 +163,8 @@ def apply_bundle(root: Path, *, agent_id: str, manager, sessions,
                 f"包里有 {len(memories)} 条记忆，但未提供记忆写入面（manager）")
         # 写入口的返回值是带取代读数的字典：计数与"声明取代是否真发生"都取这一份，
         # 不再另立第二条读取路径（两侧合流后唯一的读处）。
-        outcome = manager.import_memories(memories, ingest_run_id=report.run_id)
+        outcome = manager.import_memories(memories, ingest_run_id=report.run_id,
+                                          owner_user_id=report.owner_user_id)
         report.memories_added = outcome["added"]
         report.memories_skipped = outcome["skipped"]
         report.memories_superseded = tuple(outcome["superseded"])
