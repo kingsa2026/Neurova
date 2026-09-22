@@ -212,6 +212,13 @@ tests/unit/knowledge/ontology/test_term_seed_does_not_clobber.py
 tests/unit/api/test_tkg_endpoint_single_source.py
 # Issue #72：记忆侧声明的取代真的生效（旧证据让位），找不到目标如实申报
 tests/unit/memory_ingest/test_imported_supersede_replaces_old.py
+# Issue #81 F-05 后半（可见性批）：运行中的后端不重启就看见别的进程写下的记忆。
+#   根因：快照只在进程构造时读一次盘，CLI 在另一个进程导入的记忆因此不可见——
+#   报告写"已写入"而界面一条看不见，是第三种假成功。
+#   判据：reload 增量且幂等（2/0）、不抹掉本进程运行期记忆、盘上行一字节不改、
+#   既有关键词倒排不被 clear、门索引咬合、快照口径不收窄、/reload 不被 /{memory_id} 吞掉。
+tests/unit/cognitive_layers/memory_layer/test_reload_memories_visibility.py
+tests/unit/api/test_memory_reload_endpoint.py
 # 上下文三链路修复批（Issue #90）B1 尺子：token 估算单一事实源 + 判据侧不得低估
 #   （P0-1 根因：BALANCED 对英文/JSON/无空格长串低估 20 倍量级 → 折叠永不触发）
 tests/unit/context/test_token_estimator_calibration.py

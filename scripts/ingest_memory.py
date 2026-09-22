@@ -204,7 +204,11 @@ def _apply(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
             if report.memories_added:
                 # 记忆面与运行中的后端各持一份内存表（后端只在构造时读一次盘），会话面才是
                 # 读盘即见。不把这点说出来，报告写着"已写入"而界面上一条看不见，是第三种假成功。
-                print("  可见性：会话读盘即见；记忆要在后端启动时读盘，已在运行的后端需重启后才可见")
+                # 可见性出口有两个：后端重启，或让它调 reload 端点重新读盘。后者不用重启，
+                # 是默认指引；重启作为等效兜底一并写明，避免用户在端点不可达时无路可走。
+                print("  可见性：会话读盘即见；记忆要让运行中的后端调 "
+                      "POST /api/v1/memory/reload（增量并入，无需重启）")
+                print("          端点不可达时（如后端不支持）重启后端等效")
             print(f"  撤销：python scripts/ingest_memory.py undo --agent-id {args.agent_id} "
                   f"--run-id {report.run_id}")
         if blocked:

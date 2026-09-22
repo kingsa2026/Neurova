@@ -287,6 +287,28 @@ def test_apply_reports_written_memories_need_a_restart_to_be_visible(
 # --- F-04 属主参数：多用户/多渠道下导入他人历史必须能指定归属
 
 
+def test_apply_points_at_the_reload_route_when_memories_were_written(
+        tmp_path: Path, manager, sessions, capsys):
+    """可见性不再只有"重启"一条路：CLI 要指出不重启就看见的办法（F-05 闭环）。
+
+    前批只做了诚实暴露（"需重启后才可见"），用户拍板开了 HTTP 入口后，出口那句
+    必须跟着换代——否则用户按 CLI 的指引去重启，而端点早已能解决。判据：
+    真写了记忆时那句要指向 reload 通道；没写记忆的批次不该出现这句。
+    """
+    code = main(["apply", str(_bundle_with_memories(tmp_path)), "--agent-id", "kai-import",
+                 "--yes"], manager=manager, sessions=sessions)
+    assert code == EXIT_OK
+    printed = capsys.readouterr().out
+    assert "reload" in printed, (
+        "写了记忆却不告诉用户怎么不重启就看见——可见性通道接好了而出口没跟上"
+    )
+
+    db = _db(tmp_path / "history.db")
+    main(["apply", str(db), "--agent-id", "kai-import", "--yes"], manager=manager,
+         sessions=sessions)
+    assert "reload" not in capsys.readouterr().out
+
+
 def test_apply_owner_parameter_lands_on_the_session(tmp_path: Path, manager, sessions):
     db = _db(tmp_path / "history.db")
 

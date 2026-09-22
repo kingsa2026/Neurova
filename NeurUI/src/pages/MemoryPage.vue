@@ -16,6 +16,11 @@
         </div>
       </div>
       <div class="header-actions">
+        <a-tooltip :title="t('memory.reloadHint')">
+          <GlassButton variant="ghost" size="sm" :loading="reloading" @click="handleReloadMemories">
+            {{ t('memory.reload') }}
+          </GlassButton>
+        </a-tooltip>
         <a-tooltip :title="t('memory.decay')">
           <GlassButton variant="ghost" size="sm" :loading="decaying" @click="handleTriggerDecay">
             {{ t('memory.decay') }}
@@ -436,6 +441,7 @@ const creating = ref(false)
 const updating = ref(false)
 const editing = ref(false)
 const decaying = ref(false)
+const reloading = ref(false)
 const importing = ref(false)
 
 const memories = ref<MemoryEntry[]>([])
@@ -811,6 +817,25 @@ const handleTriggerDecay = async () => {
     message.error(e?.response?.data?.message || e?.message || t('common.error'))
   } finally {
     decaying.value = false
+  }
+}
+
+/**
+ * 把外进程（如 CLI 导入）写入的记忆增量并入后端快照，然后重读列表。
+ * 不重新读盘时这些记忆在界面上一条都看不见（快照只在后端构造时读一次盘）。
+ */
+const handleReloadMemories = async () => {
+  reloading.value = true
+  try {
+    const res = await memoryApi.reloadMemories(agentId.value || undefined)
+    const reloaded = (res as any)?.data?.reloaded ?? 0
+    message.success(`${t('memory.reload')}: ${reloaded}`)
+    await fetchMemories()
+    await fetchStats()
+  } catch (e: any) {
+    message.error(e?.response?.data?.message || e?.message || t('common.error'))
+  } finally {
+    reloading.value = false
   }
 }
 
