@@ -3,9 +3,10 @@ Computer Management API Endpoints
 """
 
 from fastapi import APIRouter, HTTPException, Depends, status
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 
+from neurova.api.auth import get_current_user
 from neurova.core.logger import get_logger
 from neurova.models.computer import (
     Computer,
@@ -27,13 +28,25 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/computers", tags=["Computers"])
 
+
+def _currentUserId(identity: Dict[str, Any]) -> str:
+    """从 JWT 身份字典取当前用户 id（与全库其它端点同一形态）。
+
+    原先这里是 `Depends(lambda: "current_user")` —— 硬编码常量身份，
+    等于把「谁在调用」当成不可避免的未知。挂载之前必须先有真身份，
+    否则接上去就是把计算节点数据对匿名请求开放。
+    """
+    return str(identity.get("user_id") or "")
+
+
+
 # ============================================================================
 # Computer CRUD Operations
 # ============================================================================
 
 @router.get("", response_model=List[Computer])
 async def list_user_computers(
-    user_id: str = Depends(lambda: "current_user"),  # TODO: Extract from auth context
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     列出当前用户的所有 Computers
@@ -44,7 +57,7 @@ async def list_user_computers(
     """
     try:
         manager = get_computer_manager_singleton()
-        computers = manager.list_user_computers(user_id)
+        computers = manager.list_user_computers(_currentUserId(current_user))
 
         return computers
 
@@ -58,7 +71,7 @@ async def create_computer(
     kind: ComputerKind = ComputerKind.CLOUD,
     engine: ComputerEngine = ComputerEngine.MANAGED,
     company_id: Optional[str] = None,
-    user_id: str = Depends(lambda: "current_user"),  # TODO: Extract from auth context
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     创建新 Computer
@@ -73,7 +86,7 @@ async def create_computer(
 
         computer = manager.create_computer(
             name=name,
-            owner_user_id=user_id,
+            owner_user_id=_currentUserId(current_user),
             kind=kind,
             engine=engine,
             company_id=company_id or "",
@@ -82,7 +95,7 @@ async def create_computer(
         if not computer:
             raise HTTPException(status_code=500, detail="Failed to create computer")
 
-        logger.info(f"Created computer: {computer.computer_id} by {user_id}")
+        logger.info(f"Created computer: {computer.computer_id} by {_currentUserId(current_user)}")
         return computer
 
     except Exception as e:
@@ -92,7 +105,7 @@ async def create_computer(
 @router.get("/{computer_id}", response_model=Computer)
 async def get_computer(
     computer_id: str,
-    user_id: str = Depends(lambda: "current_user"),  # TODO: Extract from auth context
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     获取指定 Computer
@@ -102,7 +115,7 @@ async def get_computer(
     try:
         manager = get_computer_manager_singleton()
 
-        computer = manager.get_computer(computer_id, user_id=user_id)
+        computer = manager.get_computer(computer_id, user_id=_currentUserId(current_user))
 
         if not computer:
             raise HTTPException(
@@ -122,7 +135,7 @@ async def get_computer(
 async def delete_computer(
     computer_id: str,
     hard: bool = False,
-    user_id: str = Depends(lambda: "current_user"),  # TODO: Extract from auth context
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     删除 Computer
@@ -161,7 +174,7 @@ async def pair_byoa_computer(
     available_engines: List[str],
     daemon_version: str,
     supervised: bool = False,
-    user_id: str = Depends(lambda: "current_user"),  # TODO: Extract from auth context
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     BYOA Computer 配对
@@ -203,7 +216,7 @@ async def pair_byoa_computer(
 @router.post("/{computer_id}/revoke", response_model=Computer)
 async def revoke_computer(
     computer_id: str,
-    user_id: str = Depends(lambda: "current_user"),  # TODO: Extract from auth context
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     撤销 Computer 访问权限
@@ -222,7 +235,7 @@ async def revoke_computer(
             )
 
         logger.warning(f"Revoked computer: {computer_id}")
-        return manager.get_computer(computer_id, user_id=user_id)
+        return manager.get_computer(computer_id, user_id=_currentUserId(current_user))
 
     except HTTPException:
         raise
@@ -267,7 +280,7 @@ async def heartbeat(
 @router.get("/{computer_id}/agents", response_model=List[str])
 async def list_agents_on_computer(
     computer_id: str,
-    user_id: str = Depends(lambda: "current_user"),  # TODO: Extract from auth context
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     列出 Computer 上的所有 Agents
@@ -277,7 +290,7 @@ async def list_agents_on_computer(
     try:
         manager = get_computer_manager_singleton()
 
-        computer = manager.get_computer(computer_id, user_id=user_id)
+        computer = manager.get_computer(computer_id, user_id=_currentUserId(current_user))
 
         if not computer:
             raise HTTPException(
@@ -300,18 +313,24 @@ async def list_agents_on_computer(
 @router.get("/admin/all", response_model=List[Computer])
 async def admin_list_all_computers(
     include_deleted: bool = False,
-    admin_id: str = Depends(lambda: "admin_user"),  # TODO: Extract from admin context
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
     管理员列出所有 Computers
 
     - **include_deleted**: 是否包含已删除
-    - **admin_id**: 管理员 ID
     """
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions. Required role: admin",
+        )
     try:
         manager = get_computer_manager_singleton()
 
-        computers = manager.admin_list_all_computers(admin_id, include_deleted=include_deleted)
+        computers = manager.admin_list_all_computers(
+            _currentUserId(current_user), include_deleted=include_deleted
+        )
 
         return computers
 

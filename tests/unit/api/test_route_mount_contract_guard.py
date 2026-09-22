@@ -153,13 +153,33 @@ class TestNegativeControls:
             "注入的重复挂载未被检出——「无重复挂载」这条断言会白通过。"
         )
 
-    def test_unmounted_detector_marks_known_orphan_and_clears_known_wired(self):
-        """未挂载判据必须咬住已知孤儿、且不把已接入模块误报（假阳性比漏报更坏）。"""
+    def test_unmounted_detector_marks_injected_orphan_and_clears_known_wired(
+        self, tmp_path, monkeypatch
+    ):
+        """未挂载判据必须咬住孤儿、且不把已接入模块误报（假阳性比漏报更坏）。
+
+        孤儿侧用**注入**而非依赖仓库里的某个具体残留：本批已把实测的六个孤儿
+        各自收口（接线 / 删除），拿其中一个当锚点会让这条反向控制反过来
+        **要求那个孤儿继续存在**——门禁锚在可变事实上的典型失效。
+        """
         generator = _generator()
-        unwired = set(generator.unwiredEndpointModuleNames())
-        assert "computer_api" in unwired, (
-            "已实现但全仓无挂载点的 computer_api 未被检出——判据认错了接线形态。"
+        probe = tmp_path / "neurova" / "api" / "endpoints"
+        probe.mkdir(parents=True)
+        (probe / "zzz_orphan.py").write_text(
+            "from fastapi import APIRouter\n"
+            "router = APIRouter(prefix='/zzz')\n\n"
+            "@router.get('/x')\n"
+            "def _x():\n"
+            "    return {}\n",
+            encoding="utf-8",
         )
+        monkeypatch.setattr(generator, "ENDPOINTS_DIR", probe)
+        assert generator.unmountedEndpointModules() == ["neurova.api.endpoints.zzz_orphan"], (
+            "注入的孤儿端点模块未被检出——判据认错了接线形态。"
+        )
+
+        monkeypatch.undo()
+        unwired = set(generator.unwiredEndpointModuleNames())
         assert "computer" not in unwired, (
             "已接入注册表的 computer 模块被误报为未接线——假阳性会训练人忽略这份名单。"
         )
@@ -194,4 +214,188 @@ class TestFrontendBaseUrlIsReadFromEveryDeclaredForm:
         assert not gaps, (
             "`neuron.ts` 的调用被报成未命中，但后端确实挂在 /api/neuron 下：\n  "
             + "\n  ".join(f"{row['method']} {row['path']}" for row in gaps)
+        )
+
+
+class TestWiringDispositionsAreRecordedAndExecuted:
+    """未挂载名单的每一行都必须带「处置 + 依据」，且处置必须落到磁盘事实。
+
+    根因（把报错恢复原状就会复现）：此前的台账只是一张**持有名单**——
+    模块名 + 注释。它答得出「现在有哪些没接线」，答不出「每一条的结论是什么、
+    执行了没有」。于是同一份名单可以被反复登记、永不收敛，读者无法判断
+    某一行到底是「待办」还是「已办」。（本批处置见
+    `tests/unit/endpointWiringBaseline.txt` 的处置表。）
+    """
+
+    def test_every_ledger_row_carries_a_known_verdict(self):
+        generator = _generator()
+        dispositions = generator.readWiringDispositions()
+        assert dispositions, "处置台账为空——判据取数口径失效"
+        for module, verdict in dispositions.items():
+            assert verdict in generator.WIRING_VERDICTS, (
+                f"{module} 的处置 `{verdict}` 不在允许集合 {generator.WIRING_VERDICTS} 内"
+                "——处置必须是有限枚举，否则「已办/待办」无从机器判定。"
+            )
+
+    def test_wired_rows_are_really_mounted(self):
+        """处置写「已接线」的模块必须真在装配后的路由表里（不许只改台账）。"""
+        generator = _generator()
+        unwired = set(generator.unmountedEndpointModules())
+        for module, verdict in generator.readWiringDispositions().items():
+            if verdict == "已接线":
+                assert module not in unwired, (
+                    f"{module} 的处置写成「已接线」，但它仍不在装配后的路由表里"
+                    "——台账与事实不符（改台账不代替改事实）。"
+                )
+
+    def test_deleted_rows_are_really_gone(self):
+        """处置写「已删除」的模块文件必须真的不在盘上。"""
+        generator = _generator()
+        for module, verdict in generator.readWiringDispositions().items():
+            if verdict == "已删除":
+                assert not (PROJECT_ROOT / generator.moduleFile(module)).is_file(), (
+                    f"{module} 的处置写成「已删除」，但文件仍在盘上——台账失真。"
+                )
+
+    def test_pending_rows_carry_a_reason(self):
+        """仍待办的每一行必须写明依据——「待实现」不能是一句空话。"""
+        generator = _generator()
+        reasons = generator.readWiringReasons()
+        for module, verdict in generator.readWiringDispositions().items():
+            if verdict == "待实现":
+                assert reasons.get(module), (
+                    f"{module} 仍标记「待实现」却没有写依据——排期者拿不到任何判据。"
+                )
+
+    def test_no_endpoint_module_is_left_unwired(self):
+        """本批收口后名单必须归零：六个未挂载模块各自有了终局处置。
+
+        判据是**硬零**（不是棘轮）：注册表是挂载的唯一入口，
+        凡定义了路由却进不了路由表，就是「对外看得到、实际不可达」的断点。
+        """
+        generator = _generator()
+        remaining = generator.unmountedEndpointModules()
+        assert not remaining, (
+            "仍有定义了路由却未挂载的端点模块：\n  "
+            + "\n  ".join(remaining)
+            + "\n修法：接入注册表（含真实鉴权与消费方），或删除该模块；"
+            "两者都不是时在处置台账里写清「待实现 + 依据」。"
+        )
+
+    def test_injected_orphan_is_still_detected(self, tmp_path, monkeypatch):
+        """反向控制：归零不得靠判据失效达成（注入孤儿模块必须仍被检出）。"""
+        generator = _generator()
+        probe = tmp_path / "neurova" / "api" / "endpoints"
+        probe.mkdir(parents=True)
+        (probe / "zzz_orphan.py").write_text(
+            "from fastapi import APIRouter\n"
+            "router = APIRouter(prefix='/zzz')\n\n"
+            "@router.get('/x')\n"
+            "def _x():\n"
+            "    return {}\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(generator, "ENDPOINTS_DIR", probe)
+        assert generator.unmountedEndpointModules() == ["neurova.api.endpoints.zzz_orphan"], (
+            "注入的孤儿端点模块未被检出——「名单归零」这条断言会白通过。"
+        )
+
+
+class TestRegistrationFailuresAreVisibleAtStartup:
+    """注册表导入失败必须在启动期可见（`architecture-findings.md` 6.1 的另一半）。
+
+    根因（把报错恢复原状就会复现）：`register_endpoint_routers` 对导入失败只
+    `logger.debug("Skipping %s")` ——DEBUG 在默认级别下不输出，于是「某个注册表
+    模块炸了、该前缀整体 404」这件事在启动期**完全不可见**，只在用户点开页面时
+    表现为空白。这正是教义第 2 条点名的「把失败改写成看不见」。
+    """
+
+    def test_failing_registry_module_is_logged_at_error(self, caplog, monkeypatch):
+        import logging
+
+        from neurova.api import endpoints as endpoints_package
+        from fastapi import FastAPI
+
+        monkeypatch.setattr(
+            endpoints_package,
+            "ENDPOINT_MODULES",
+            [("neurova.api.endpoints.__nonexistent_probe__", "/v1/probe", "Probe API")],
+        )
+        endpoints_package.resetRegistrationFailures()
+        with caplog.at_level(logging.DEBUG):
+            endpoints_package.register_endpoint_routers(FastAPI())
+
+        records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert records, (
+            "注册表模块导入失败只留下了 DEBUG 级日志——启动期不可见。"
+        )
+        assert any("__nonexistent_probe__" in r.getMessage() for r in records), (
+            "ERROR 日志没有点出失败的模块名，排障者仍不知道是谁炸了。"
+        )
+
+    def test_failing_module_is_reported_by_the_failure_surface(self, monkeypatch):
+        from neurova.api import endpoints as endpoints_package
+        from fastapi import FastAPI
+
+        monkeypatch.setattr(
+            endpoints_package,
+            "ENDPOINT_MODULES",
+            [("neurova.api.endpoints.__nonexistent_probe__", "/v1/probe", "Probe API")],
+        )
+        endpoints_package.resetRegistrationFailures()
+        endpoints_package.register_endpoint_routers(FastAPI())
+        failures = endpoints_package.registrationFailures()
+        assert failures and failures[0][0] == "neurova.api.endpoints.__nonexistent_probe__", (
+            "导入失败没有被记进可读取的失败面——健康检查与启动自检都拿不到它。"
+        )
+
+    def test_real_application_registers_all_rows(self):
+        """live：真应用的注册表全量可导入（失败面为空）。
+
+        这条同时是「失败面不得恒空」的反向控制：若判据失效，
+        上面的注入用例会转绿，而这条会暴露真实注册表本身有模块进不来。
+        """
+        from neurova.api import endpoints as endpoints_package
+
+        endpoints_package.resetRegistrationFailures()
+        records = endpoints_package.register_endpoint_routers(
+            __import__("fastapi").FastAPI()
+        )
+        assert endpoints_package.registrationFailures() == [], (
+            "真实注册表有模块导入失败："
+            + repr(endpoints_package.registrationFailures())
+        )
+        assert records > 0
+
+
+class TestFrameworkClientsUseTheSharedInstance:
+    """`NeurUI/src/api/computer.ts` 必须走唯一 axios 实例（鉴权/信封解包只在那一处）。
+
+    根因（把报错恢复原状就会复现）：该客户端 `import axios from 'axios'` 自建裸调用
+    并硬编码 `const API_BASE = '/api'`。于是它拿不到 Bearer token、不做响应解包、
+    指向未挂载的 `/api/computers`——**「无 token + 无信封 + 必 404」**三件事叠在
+    一个文件里，而它恰恰是清单第四节 17 条「路径未注册」的来源。
+    """
+
+    CLIENT = "NeurUI/src/api/computer.ts"
+
+    def test_client_does_not_bare_import_axios(self):
+        text = (PROJECT_ROOT / self.CLIENT).read_text(encoding="utf-8")
+        assert "from 'axios'" not in text, (
+            "该客户端仍直接 import axios——绕开唯一实例即绕开鉴权拦截器与信封解包。"
+        )
+
+    def test_client_uses_the_shared_api_entry(self):
+        text = (PROJECT_ROOT / self.CLIENT).read_text(encoding="utf-8")
+        assert "@/api'" in text, (
+            "该客户端未使用 `@/api` 的共享实例——全库唯一 axios 实例在 `src/api/index.ts`。"
+        )
+
+    def test_client_calls_resolve_against_registered_routes(self):
+        generator = _generator()
+        rows = [row for row in generator.unmatchedFrontCallRows()
+                if row["module"] == "computer"]
+        assert not rows, (
+            "`computer.ts` 的调用仍未命中后端注册表：\n  "
+            + "\n  ".join(f"{row['method']} {row['path']}（{row['verdict']}）" for row in rows)
         )
