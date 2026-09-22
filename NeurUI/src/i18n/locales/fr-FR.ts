@@ -701,7 +701,7 @@ export default {
     overview: 'Aperçu',
     decay: 'Décay de mémoire',
     reload: 'Recharger depuis le disque',
-    reloadHint: 'Intégrer au backend en cours les souvenirs écrits par un autre processus (ex. import CLI) sans redémarrer',
+    reloadHint: 'Réconcilier avec le disque : intégrer les souvenirs écrits par un autre processus (ex. import CLI) et retirer les lignes annulées, sans redémarrer',
     enhance: 'Renforcer la mémoire',
     forget: 'Oublier',
     strengthen: 'Renforcer',

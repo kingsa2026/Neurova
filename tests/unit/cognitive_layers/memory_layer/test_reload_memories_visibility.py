@@ -75,7 +75,7 @@ class TestReloadPullsForeignRowsIntoTheSnapshot:
             "不重启就看见了外来行——判据本身失效，本测试失去意义"
         )
 
-        added = running.reload_memories()
+        added = running.reload_memories()["reloaded"]
 
         assert added == 1, f"reload 应拉进 1 条，实得 {added}"
         assert "跨进程导入的记忆锚点" in _contents(running)
@@ -84,8 +84,8 @@ class TestReloadPullsForeignRowsIntoTheSnapshot:
         running = _manager(tmp_path)
         _imported_elsewhere(running, "第一条", "第二条")
 
-        first = running.reload_memories()
-        second = running.reload_memories()
+        first = running.reload_memories()["reloaded"]
+        second = running.reload_memories()["reloaded"]
 
         assert (first, second) == (2, 0), (
             f"增量判据不成立：首次 {first} 条、二次 {second} 条（应为 2/0）"
@@ -197,7 +197,7 @@ class TestReloadRespectsTheScopeOfEachRow:
         writer.import_memories([_record(1, "u1 的历史")], ingest_run_id=_RUN)
         writer.close()
 
-        added = running.reload_memories()
+        added = running.reload_memories()["reloaded"]
 
         assert added == 1, f"reload 未拉进 u1 作用域的行，实得 {added}"
         u1_rows = [m for m in running._memories.values() if m.user_id == "u1"]

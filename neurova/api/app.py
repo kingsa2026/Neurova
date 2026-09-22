@@ -573,6 +573,16 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
     except Exception as _hyd_err:  # noqa: BLE001
         logger.warning("files 元数据水合异常（忽略）: %s", _hyd_err)
 
+    # artifact 元数据 SQLite 水合（Issue #81 断点③）：条目一丢，预览与
+    # /v1/artifacts/{id}/content 全 404，而会话消息里还记着 artifact_id——
+    # "文件在、条目没"同样是假成功。与 files 水合同一处、同一失败姿态。
+    try:
+        from neurova.api.endpoints.artifacts_api import hydrate_artifacts_store
+
+        hydrate_artifacts_store()
+    except Exception as _art_hyd_err:  # noqa: BLE001
+        logger.warning("artifact 元数据水合异常（忽略）: %s", _art_hyd_err)
+
     # 遗留①：bootstrap 用户引导（NEUROVA_BOOTSTRAP_USER 配置时；fail-open）
     try:
         from neurova.api.bootstrap_user import ensure_bootstrap_user

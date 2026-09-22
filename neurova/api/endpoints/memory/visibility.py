@@ -19,15 +19,19 @@ from neurova.interfaces.api_standard import APIError, ErrorCodes, success_respon
 from .base import _get_request_id, get_memory_manager, logger, router
 
 
-@router.post("/reload", summary="把外进程写入的记忆增量并入当前快照")
+@router.post("/reload", summary="与盘对账：并入外进程写入的行、回收已被撤销的行")
 async def reload_memories(
     request: Request,
     agent_id: Optional[str] = Query(default=None, description="Agent ID"),
     user: Dict[str, Any] = Depends(get_current_user_or_default),
 ):
-    """重新读盘，把本进程快照之外的记忆增量并入（不新增写路径）。
+    """重新读盘与盘对账（不新增写路径）。
 
-    返回**真实并入的条数**（幂等：无缺失行时是 0），不给"看起来成功"的计数。
+    双向：并入盘上新增的行（外进程导入）并回收盘上已消失的行（外进程撤销）。
+    只补缺不回收就兑现不了撤销——另一进程 `undo` 删掉的行会留在快照里，还能被
+    用户的一次强化写回盘上（实测 0 → 1 行、重开实例复活）。
+
+    返回**真实发生的两个读数**（幂等：无事发生时为 0），不给"看起来成功"的计数。
     """
     try:
         manager = get_memory_manager(agent_id, user)
@@ -36,10 +40,10 @@ async def reload_memories(
                 ErrorCodes.MEMORY_OPERATION_FAILED,
                 "当前记忆管理器不支持增量重新读盘",
             )
-        reloaded = manager.reload_memories()
+        outcome = manager.reload_memories()
         return success_response(
-            data={"reloaded": reloaded},
-            message=f"已并入 {reloaded} 条记忆",
+            data={"reloaded": outcome["reloaded"], "reaped": outcome["reaped"]},
+            message=f"已并入 {outcome['reloaded']} 条、回收 {outcome['reaped']} 条记忆",
             request_id=_get_request_id(request),
         )
     except APIError:
