@@ -15,11 +15,12 @@ from pathlib import Path
 from typing import Any, Dict
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
 _ENC_PREFIX = "enc:v1:"
-_KEY_FILE = "data/.secret_key"
+_KEY_FILE = dataPath(".secret_key")
 _KEYRING_SERVICE = "Neurova"
 _KEYRING_ENTRY = "config-secret-key"
 

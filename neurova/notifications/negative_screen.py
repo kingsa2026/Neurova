@@ -23,6 +23,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -103,7 +104,7 @@ class NegativeScreenConfigManager:
         Args:
             data_dir: 数据存储目录
         """
-        self._data_dir = Path(data_dir or "data/negative_screen")
+        self._data_dir = callerPath(data_dir, "negative_screen")
         self._data_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
 

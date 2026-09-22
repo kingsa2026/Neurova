@@ -19,7 +19,6 @@ WinError 1114（DLL 初始化例程失败），3 个路由 + Default Agent 初�
 """
 from __future__ import annotations
 
-from neurova.core.data_root import get_data_root
 
 import logging
 import os
@@ -28,6 +27,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from neurova.core.data_root import get_data_root
 
 logger = logging.getLogger(__name__)
 

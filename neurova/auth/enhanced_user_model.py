@@ -23,6 +23,7 @@ import uuid
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -669,7 +670,7 @@ class EnhancedUserModel:
 
 _singleton: Optional[EnhancedUserModel] = None
 _singleton_lock = threading.Lock()
-_DEFAULT_DIR = "./data/enhanced_user_model"
+_DEFAULT_DIR = dataPath("enhanced_user_model")
 
 
 def get_enhanced_user_model() -> EnhancedUserModel:

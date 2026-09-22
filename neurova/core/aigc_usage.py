@@ -20,9 +20,13 @@ import sqlite3
 import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
-DEFAULT_DB_PATH = Path("data") / "aigc_usage.db"
+from typing import Any, Dict, List, Optional
+from neurova.core.data_root import get_data_root
+
+def defaultDbPath() -> Path:
+    """默认库落点：数据根下的绝对路径（原值 `Path("data")` 随 CWD 漂移）。"""
+    return get_data_root() / "aigc_usage.db"
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS aigc_gen_usage (
@@ -51,7 +55,7 @@ class AigcUsageHistory:
 
     def __init__(self, db_path: Optional[str] = None) -> None:
         env_path = os.environ.get("NEUROVA_AIGC_USAGE_DB")
-        self._db_path = Path(db_path or env_path or DEFAULT_DB_PATH)
+        self._db_path = Path(db_path or env_path or defaultDbPath())
         self._lock = threading.RLock()
         self._conn: Optional[sqlite3.Connection] = None
 

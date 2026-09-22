@@ -10,11 +10,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
 # 默认错误日志目录（可被各函数 log_dir 参数覆盖）
-_DEFAULT_LOG_DIR = Path("data/error_logs")
+_DEFAULT_LOG_DIR = get_data_root() / "error_logs"
 
 # 锁
 _lock = threading.Lock()

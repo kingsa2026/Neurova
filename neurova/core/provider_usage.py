@@ -27,10 +27,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
-DEFAULT_DB_PATH = Path("data") / "provider_usage.db"
+def defaultDbPath() -> Path:
+    """默认库落点：数据根下的绝对路径（原值 `Path("data")` 随 CWD 漂移）。"""
+    return get_data_root() / "provider_usage.db"
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS provider_usage (
@@ -58,7 +61,7 @@ class ProviderUsageCollector:
         self._db_path = (
             db_path
             or os.environ.get("NEUROVA_PROVIDER_USAGE_DB")
-            or str(DEFAULT_DB_PATH)
+            or str(defaultDbPath())
         )
         self._lock = threading.RLock()
         # provider_id -> fetch 协程/普通函数（返回 Dict 快照）

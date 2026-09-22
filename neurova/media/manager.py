@@ -10,6 +10,7 @@ import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -171,7 +172,7 @@ class MediaManager:
 
 _singleton: Optional[MediaManager] = None
 _singleton_lock = threading.Lock()
-_DEFAULT_DIR = "./data/media"
+_DEFAULT_DIR = dataPath("media")
 
 
 def get_media_manager() -> MediaManager:

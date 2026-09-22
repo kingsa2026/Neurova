@@ -22,12 +22,17 @@ import urllib.request
 import urllib.error
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# 仓库根须先于 `import neurova` 进 sys.path（脚本以文件路径执行）。
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from neurova.core.data_root import resolveDataPath  # noqa: E402
 
 PROBE_ID = "__live_verify_probe__"
 BASE = f"http://127.0.0.1:9528/api/v1/growth"
-PERSONALITY_FILE = Path("data/personality") / f"{PROBE_ID}.json"
-CONSTITUTION_FILE = Path("data/constitution") / f"{PROBE_ID}.json"
+PERSONALITY_FILE = resolveDataPath("personality") / f"{PROBE_ID}.json"
+CONSTITUTION_FILE = resolveDataPath("constitution") / f"{PROBE_ID}.json"
 
 failures = []
 
@@ -64,7 +69,7 @@ def main() -> int:
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
         pass
-    os.environ.setdefault("NEUROVA_RSI_RECEIPTS", "data/evolution/rsi_receipts.jsonl")
+    os.environ.setdefault("NEUROVA_RSI_RECEIPTS", str(resolveDataPath("evolution/rsi_receipts.jsonl")))
 
     from neurova.api.app import create_app
     from neurova.api.auth import create_access_token
