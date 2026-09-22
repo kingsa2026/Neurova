@@ -447,8 +447,8 @@ def unmountedEndpointModules() -> list:
 def unwiredEndpointModuleNames() -> list:
     """未挂载模块清单（台账文件用的口径，`unmountedEndpointModules()` 的投影）。
 
-    用**完整点分模块路径**而非末段短名：口径已扩到全仓，`routes` / `acp_server`
-    这类末段不保证唯一，作台账键会产生歧义。
+    用**完整点分模块路径**而非末段短名：口径已扩到全仓后，末段短名不保证唯一
+    （同一包下可有同名叶子），作台账键会产生歧义。
     """
     return unmountedEndpointModules()
 

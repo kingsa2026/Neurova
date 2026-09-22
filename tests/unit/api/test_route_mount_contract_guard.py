@@ -202,20 +202,25 @@ class TestUnwiredScanCoversTheWholeRepository:
 
     根因（把报错恢复原状就会复现）：台账头部把收录口径写成「模块定义了路由，
     但装配后的应用里一条都不可达」，`docs/architecture-model/architecture-findings.md`
-    也按「全仓」表述；而 `unmountedEndpointModules()` 的实现只 `rglob`
-    `neurova/api/endpoints/` 一个包。判据比自己声明的契约窄一层，于是同一形态在
-    包外静默存活——实测 `neurova.api.openplatform.routes`（19 条路由）与
-    `neurova.core.acp_server`（5 条）都不在主应用路由表里，却从不进名单。
-    「登记不代替修复」的前提是先被看见；看不见的条目连登记的机会都没有。
+    也按「全仓」表述；而 `unmountedEndpointModules()` 的实现曾只 `rglob`
+    `neurova/api/endpoints/` 一个包。判据比自己声明的契约窄一层，同一形态在包外
+    就静默存活——包外的 `neurova.api.openplatform.routes`（19 条）与
+    `neurova.core.acp_server`（5 条）正是因此长期不在册的两条命中点。
+
+    两条命中点已在后续批次**按根因退役**（第二份平行实现，见
+    `tests/unit/api/test_orphan_faces_retired_guard.py`）：包外当前无孤儿，
+    故「扫全仓」这一口径由**注入探针**自证（把 `SOURCE_ROOTS` 换成一个只有
+    孤儿模块的临时根，必须检出）——判据不读该常量就会静默返回空。
     """
 
-    def test_orphans_outside_the_endpoints_package_are_named(self):
+    def test_retired_out_of_package_orphans_are_not_named(self):
+        """已退役的两条包外命中点不得再出现在名单里（名单是「尚未处置」的集合）。"""
         names = set(_generator().unmountedEndpointModules())
-        for orphan in ("neurova.api.openplatform.routes", "neurova.core.acp_server"):
-            assert orphan in names, (
-                f"{orphan} 定义了路由、装配后一条都不可达，却不在名单里——"
-                "收录口径只扫 `neurova/api/endpoints/`，比台账声明的「全仓」窄一个包。"
-            )
+        relisted = sorted({"neurova.api.openplatform.routes", "neurova.core.acp_server"} & names)
+        assert not relisted, (
+            "已退役的包外孤儿面又被报进未挂载名单：\n  " + "\n  ".join(relisted)
+            + "\n它们已按根因删除；再次出现说明删除被回退了。"
+        )
 
     def test_injected_orphan_outside_the_endpoints_package_is_detected(self, tmp_path, monkeypatch):
         """反向控制：仓内任一源码根下注入的孤儿模块都必须被检出（门禁不得空转）。

@@ -23,26 +23,27 @@ def test_route_prefix_changes():
 
 def test_import_after_fix():
     """测试修复后模块导入"""
-    try:
-        from neurova.api.endpoints import channels
-        from neurova.api.endpoints import context
-        from neurova.api.endpoints import context_pool_settings
-        from neurova.api.endpoints import skill_market
-        from neurova.api.endpoints import skills_market
-        
-        print("所有模块导入成功")
-        
-        # 检查router属性
-        assert hasattr(channels, 'router'), "channels模块应该有router"
-        assert hasattr(context, 'router'), "context模块应该有router"
-        assert hasattr(context_pool_settings, 'router'), "context_pool_settings模块应该有router"
-        assert hasattr(skill_market, 'router'), "skill_market模块应该有router"
-        assert hasattr(skills_market, 'router'), "skills_market模块应该有router"
-        
-        print("所有模块都有router属性")
-        
-    except ImportError as e:
-        pytest.fail(f"模块导入失败: {e}")
+    from neurova.api.endpoints import channels
+    from neurova.api.endpoints import context
+    from neurova.api.endpoints import context_pool_settings
+
+    # 检查router属性
+    assert hasattr(channels, 'router'), "channels模块应该有router"
+    assert hasattr(context, 'router'), "context模块应该有router"
+    assert hasattr(context_pool_settings, 'router'), "context_pool_settings模块应该有router"
+
+
+def test_deprecated_market_modules_are_retired():
+    """ADR 0013 判定的待删两套（skill_market / skills_market）已按该 ADR 删除。
+
+    此前本文件断言两套仍有 `router`，那是「已废弃却留着入口」的形态——
+    规范端点只有 `skill_pool_api.py`（/api/v1/skill-pool）。
+    """
+    import importlib
+
+    for name in ("neurova.api.endpoints.skill_market", "neurova.api.endpoints.skills_market"):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(name)
 
 
 if __name__ == "__main__":

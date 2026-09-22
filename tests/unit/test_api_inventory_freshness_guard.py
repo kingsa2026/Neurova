@@ -216,7 +216,7 @@ class TestBreakpointsAreNamedNotBuried:
         )
 
     def test_unmounted_endpoint_modules_are_exposed(self):
-        """定义了路由却从未挂载的模块必须点名（当前实测有 6 个，见清单第二节）。"""
+        """定义了路由却从未挂载的模块必须点名（当前实测有 4 个，见清单第二节）。"""
         module = _generator()
         names = module.unmountedEndpointModules()
         assert names, (
