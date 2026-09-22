@@ -77,14 +77,17 @@
 
 > `NeurUI/src/api/index.ts` 是 axios 实例与鉴权拦截器，`NeurUI/src/api/auth.ts` / `NeurUI/src/api/neuron.ts` 是模块目录之外的单文件客户端，三者不属本表模块口径。
 
-## 二、后端挂载前缀（90 条）
+## 二、后端挂载前缀（89 条）
 
 | 端点模块 | 挂载前缀 |
 |------|------|
-| `neurova/api/endpoints/__init__.py` | `/api/acp` |
-| `neurova/api/endpoints/agent.py` | `/api/v1/agents` |
+| `neurova/api/endpoints/acp_api.py` | `/api/acp` |
+| `neurova/api/endpoints/coordination_api.py` | `/api/coordination` |
+| `neurova/api/endpoints/neuron.py` | `/api/neuron` |
+| `neurova/api/endpoints/home.py` | `/api/v1` |
 | `neurova/api/endpoints/agent_communication_api.py` | `/api/v1/agent-communication` |
 | `neurova/api/endpoints/agent_enhancement.py` | `/api/v1/agent-enhancement` |
+| `neurova/api/endpoints/agent.py` | `/api/v1/agents` |
 | `neurova/api/endpoints/agent_package.py` | `/api/v1/agents` |
 | `neurova/api/endpoints/analytics.py` | `/api/v1/analytics` |
 | `neurova/api/endpoints/artifacts_api.py` | `/api/v1/artifacts` |
@@ -93,11 +96,11 @@
 | `neurova/api/endpoints/auth.py` | `/api/v1/auth` |
 | `neurova/api/endpoints/backup_api.py` | `/api/v1/backups` |
 | `neurova/api/endpoints/benchmark.py` | `/api/v1/benchmark` |
-| `neurova/api/endpoints/budget_api.py` | `/api/budgets` |
+| `neurova/api/endpoints/budget_api.py` | `/api/v1/budgets` |
 | `neurova/api/endpoints/builder.py` | `/api/v1/builder` |
+| `neurova/api/endpoints/channels.py` | `/api/v1/channel-adapters` |
 | `neurova/api/endpoints/channel_config.py` | `/api/v1/channel-configs` |
 | `neurova/api/endpoints/channel_sharing.py` | `/api/v1/channel-sharing` |
-| `neurova/api/endpoints/channels.py` | `/api/v1/channel-adapters` |
 | `neurova/api/endpoints/chat.py` | `/api/v1/chat` |
 | `neurova/api/endpoints/collaboration_api.py` | `/api/v1/collaboration` |
 | `neurova/api/endpoints/collaboration_room_api.py` | `/api/v1/collaboration` |
@@ -105,10 +108,10 @@
 | `neurova/api/endpoints/console.py` | `/api/v1/console` |
 | `neurova/api/endpoints/context.py` | `/api/v1/context` |
 | `neurova/api/endpoints/context_pool_settings.py` | `/api/v1/context-pool` |
-| `neurova/api/endpoints/coordination_api.py` | `/api/coordination/coordination` |
-| `neurova/api/endpoints/cost_rollup_api.py` | `/api/cost-rollup` |
+| `neurova/api/endpoints/cost_rollup_api.py` | `/api/v1/cost-rollup` |
 | `neurova/api/endpoints/enhanced_memory_search_api.py` | `/api/v1/enhanced-memory-search` |
 | `neurova/api/endpoints/enhanced_users_api.py` | `/api/v1/enhanced-users` |
+| `neurova/api/endpoints/text_evolution_api.py` | `/api/v1/evolution` |
 | `neurova/api/endpoints/experience_knowledge_api.py` | `/api/v1/experience` |
 | `neurova/api/endpoints/files_api.py` | `/api/v1/files` |
 | `neurova/api/endpoints/firewall.py` | `/api/v1/firewall` |
@@ -117,9 +120,8 @@
 | `neurova/api/endpoints/groups_api.py` | `/api/v1/groups` |
 | `neurova/api/endpoints/growth.py` | `/api/v1/growth` |
 | `neurova/api/endpoints/health.py` | `/api/v1/health` |
-| `neurova/api/endpoints/home.py` | `/api/v1` |
 | `neurova/api/endpoints/image.py` | `/api/v1/image` |
-| `neurova/api/endpoints/knowledge.py` | `/api/v1/knowledge` |
+| `neurova/api/endpoints/knowledge_core.py` | `/api/v1/knowledge` |
 | `neurova/api/endpoints/knowledge_graph_api.py` | `/api/v1/knowledge-graph` |
 | `neurova/api/endpoints/knowledge_integration.py` | `/api/v1/knowledge-integration` |
 | `neurova/api/endpoints/logs.py` | `/api/v1/logs` |
@@ -127,20 +129,18 @@
 | `neurova/api/endpoints/marketplace.py` | `/api/v1/marketplace` |
 | `neurova/api/endpoints/mcp_server_api.py` | `/api/v1/mcp` |
 | `neurova/api/endpoints/media.py` | `/api/v1/media` |
-| `neurova/api/endpoints/memory/__init__.py` | `/api/v1/memory` |
+| `neurova/api/endpoints/memory/crud.py` | `/api/v1/memory` |
 | `neurova/api/endpoints/memory_enhancement.py` | `/api/v1/memory-enhancement` |
 | `neurova/api/endpoints/memory_settings_api.py` | `/api/v1/memory-settings` |
 | `neurova/api/endpoints/memory_share_groups.py` | `/api/v1/memory-share-groups` |
 | `neurova/api/endpoints/memory_timeline_api.py` | `/api/v1/memory-timeline` |
 | `neurova/api/endpoints/metacognition_api.py` | `/api/v1/metacognition` |
 | `neurova/api/endpoints/mobile_pairing.py` | `/api/v1/mobile` |
-| `neurova/api/endpoints/model.py` | `/api/v1/models` |
 | `neurova/api/endpoints/model_adapter.py` | `/api/v1/model-adapter` |
+| `neurova/api/endpoints/model.py` | `/api/v1/models` |
 | `neurova/api/endpoints/monitor.py` | `/api/v1/monitor` |
 | `neurova/api/endpoints/negative_screen_settings.py` | `/api/v1/negative-screen` |
 | `neurova/api/endpoints/neurflow_api.py` | `/api/v1/neurflow` |
-| `neurova/api/endpoints/neuron.py` | `/api/neuron` |
-| `neurova/api/endpoints/neuron.py` | `/api/neuron/neuron` |
 | `neurova/api/endpoints/notifications.py` | `/api/v1/notifications` |
 | `neurova/api/endpoints/openplatform_keys.py` | `/api/v1/openplatform` |
 | `neurova/api/endpoints/plans.py` | `/api/v1/plans` |
@@ -152,19 +152,18 @@
 | `neurova/api/endpoints/sandbox.py` | `/api/v1/sandbox` |
 | `neurova/api/endpoints/scheduler.py` | `/api/v1/scheduler` |
 | `neurova/api/endpoints/semantic_search_api.py` | `/api/v1/semantic-search` |
-| `neurova/api/endpoints/session_sync.py` | `/api/v1/sync` |
 | `neurova/api/endpoints/settings.py` | `/api/v1/settings` |
 | `neurova/api/endpoints/shared_config.py` | `/api/v1/shared-config` |
-| `neurova/api/endpoints/skill.py` | `/api/v1/skills` |
 | `neurova/api/endpoints/skill_pool_api.py` | `/api/v1/skill-pool` |
 | `neurova/api/endpoints/skill_version_api.py` | `/api/v1/skill-versions` |
+| `neurova/api/endpoints/skill.py` | `/api/v1/skills` |
 | `neurova/api/endpoints/sleep.py` | `/api/v1/sleep` |
 | `neurova/api/endpoints/stats.py` | `/api/v1/stats` |
 | `neurova/api/endpoints/studio_api.py` | `/api/v1/studio` |
+| `neurova/api/endpoints/session_sync.py` | `/api/v1/sync` |
 | `neurova/api/endpoints/synonym_api.py` | `/api/v1/synonyms` |
 | `neurova/api/endpoints/tasks_api.py` | `/api/v1/tasks` |
 | `neurova/api/endpoints/teams_api.py` | `/api/v1/teams` |
-| `neurova/api/endpoints/text_evolution_api.py` | `/api/v1/evolution` |
 | `neurova/api/endpoints/tool_layers.py` | `/api/v1/tool-layers` |
 | `neurova/api/endpoints/tool_schema.py` | `/api/v1/tools` |
 | `neurova/api/endpoints/trace.py` | `/api/v1/trace` |
@@ -176,18 +175,20 @@
 
 **barrel 未导出的模块**：`NeurUI/src/api/modules/collaborationRoom.ts`, `NeurUI/src/api/modules/cost.ts`, `NeurUI/src/api/modules/governance.ts`, `NeurUI/src/api/modules/rsiGovernance.ts`, `NeurUI/src/api/modules/studio.ts`, `NeurUI/src/api/modules/text-evolution.ts`
 
-**前后端前缀契约断点**（前端按 `baseURL=/api/v1` 请求，后端无对应挂载点 → 404）：`NeurUI/src/api/modules/cost.ts` 请求 `/api/v1/budgets`, `NeurUI/src/api/modules/cost.ts` 请求 `/api/v1/cost-rollup`
+**前后端前缀契约断点**（前端按 `baseURL=/api/v1` 请求，后端无对应挂载点 → 404）：无
 
-**零路由挂载点**（注册动作在、路由一条没有 —— 断点，待接线或删除）：`/api/evolution`, `/api/rag`
+**零路由挂载点**（注册动作在、路由一条没有 —— 断点，待接线或删除）：无
 
-**未接线 router**（含被旁路注册掩盖的顶层空对象）：`neurova/api/endpoints/__init__.py` 的 `evolution_router`（挂 `/api/evolution`）, `neurova/api/endpoints/__init__.py` 的 `rag_router`（挂 `/api/rag`）, `neurova/api/endpoints/__init__.py` 的 `router`（挂 `/api`）
+**未接线 router**（挂载动作在、路由一条没有）：无
 
-**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/budgets`, `/api/coordination/coordination`, `/api/cost-rollup`, `/api/neuron`, `/api/neuron/neuron`, `/api/v1/artifacts`, `/api/v1/audio`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/benchmark`, `/api/v1/channel-sharing`, `/api/v1/chat`, `/api/v1/knowledge-integration`, `/api/v1/mcp`, `/api/v1/monitor`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/sync`, `/api/v1/tools`, `/api/v1/user-groups`, `/api/v1/workspace`
+**未挂载端点模块**（定义了路由、装配后却不在路由表里 —— 运行时不提供服务）：`neurova.api.endpoints.computer_api`, `neurova.api.endpoints.cost_api`, `neurova.api.endpoints.migration_api`, `neurova.api.endpoints.phase3_api`, `neurova.api.endpoints.skill_market`, `neurova.api.endpoints.skills_market`
+
+**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/coordination`, `/api/neuron`, `/api/v1/artifacts`, `/api/v1/audio`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/benchmark`, `/api/v1/channel-sharing`, `/api/v1/chat`, `/api/v1/knowledge-integration`, `/api/v1/mcp`, `/api/v1/monitor`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/sync`, `/api/v1/tools`, `/api/v1/user-groups`, `/api/v1/workspace`
 
 
 ## 四、前端调用 ↔ 后端注册 差集
 
-下列 **67** 处调用在本轮后端注册表里没有对应路由。这不等于「后端漏注册」——差异以显式列表暴露，由人去核：
+下列 **50** 处调用在本轮后端注册表里没有对应路由。这不等于「后端漏注册」——差异以显式列表暴露，由人去核：
 
 | 模块 | 方法 | 调用路径 | 差异形态 |
 |------|------|------|------|
@@ -210,15 +211,6 @@
 | computer | GET | `/api/cost/rollup/hourly` | 路径未注册 |
 | console | POST | `/api/v1/console/debug` | 路径未注册 |
 | console | POST | `/api/v1/console/push` | 路径未注册 |
-| cost | GET | `/api/v1/budgets/health` | 路径未注册 |
-| cost | GET | `/api/v1/budgets/status/*` | 路径未注册 |
-| cost | GET | `/api/v1/budgets/status/all` | 路径未注册 |
-| cost | GET | `/api/v1/cost-rollup/agent/*/cost` | 路径未注册 |
-| cost | GET | `/api/v1/cost-rollup/dashboard/metrics` | 路径未注册 |
-| cost | GET | `/api/v1/cost-rollup/history/daily` | 路径未注册 |
-| cost | GET | `/api/v1/cost-rollup/history/hourly` | 路径未注册 |
-| cost | POST | `/api/v1/cost-rollup/rollup/now` | 路径未注册 |
-| cost | GET | `/api/v1/cost-rollup/rollup/status` | 路径未注册 |
 | files | GET | `/api/v1/files/*/content` | 路径未注册 |
 | health | GET | `/api/v1/health/metrics` | 路径未注册 |
 | health | GET | `/api/v1/health/status` | 路径未注册 |
@@ -233,14 +225,6 @@
 | models | POST | `/api/v1/models/active` | 方法不匹配 |
 | models | GET | `/api/v1/models/fetch` | 方法不匹配 |
 | neurflow | POST | `/api/v1/neurflow/comfyui/import` | 路径未注册 |
-| neuron | POST | `/api/v1/absence/detect` | 路径未注册 |
-| neuron | POST | `/api/v1/cascade` | 路径未注册 |
-| neuron | POST | `/api/v1/dependencies` | 路径未注册 |
-| neuron | GET | `/api/v1/dependencies/*` | 路径未注册 |
-| neuron | GET | `/api/v1/entities` | 路径未注册 |
-| neuron | POST | `/api/v1/entities` | 路径未注册 |
-| neuron | POST | `/api/v1/extract` | 路径未注册 |
-| neuron | POST | `/api/v1/would-affect` | 路径未注册 |
 | openplatform | POST | `/api/v1/openplatform/keys` | 方法不匹配 |
 | openplatform | DELETE | `/api/v1/openplatform/keys/*` | 路径未注册 |
 | openplatform | PUT | `/api/v1/openplatform/keys/*` | 路径未注册 |
@@ -261,7 +245,7 @@
 
 ## 五、后端已注册 ↔ 前端消费方 差集
 
-下列 **21** 个后端挂载前缀无任何前端模块直连，属「后端已就位、前端待补消费方」的显式清单：
+下列 **20** 个后端挂载前缀无任何前端模块直连，属「后端已就位、前端待补消费方」的显式清单：
 
 | 后端挂载前缀 |
 |------|
@@ -278,7 +262,6 @@
 | `/mcp` |
 | `/metrics` |
 | `/monitor` |
-| `/neuron` |
 | `/skill-versions` |
 | `/skills` |
 | `/status` |

@@ -393,3 +393,19 @@ tests/unit/test_osv_audit_hardening_guard.py
 #   （根因：unicode61 对中文等于无索引，实测中文短语命中 0；只改 tokenize 参数
 #     不改已有索引 → 必须重建。影子表 + 分批短事务，禁一次性长事务/delete-all）
 tests/unit/context/test_context_ledger_fts_migration.py
+
+# Issue #68 收口（#112 第七节登记的三处接线断点）：路由挂载契约守卫。
+#   根因：真实路由路径由两处共同决定——endpoints/__init__.py 的 endpoint_modules
+#   挂载表 + 各模块 APIRouter(prefix=...) 自述前缀，app.py 另有旁路直接挂载。
+#   两处各写一半、无一致性校验，长出三类自相矛盾：
+#   ① 零路由挂载：router / evolution_router / rag_router 是模块级空 APIRouter()，
+#      却被挂成 /api、/api/evolution、/api/rag —— 对外声称可用、实际全 404；
+#   ② 前缀重复：neuron 与 coordination 的自述前缀被叠两次 → 真实路径
+#      /api/neuron/neuron/*、/api/coordination/coordination/*，前端单段路径全 404；
+#   ③ 挂载层错位：budget_api / cost_rollup_api 旁路挂在 /api 下（缺 v1），
+#      前端 baseURL=/api/v1 → CostDashboardPage.vue 必 404，被 .catch 静默吞成空数据。
+#   修法：挂载事实收口到注册表一处（旁路与空 router 删除），判据单源在生成器
+#   （mountedRouterAudit / unmountedEndpointModules），静态重建路由的二套实现删净。
+#   守卫另锁：前端基地址三类写法全认（漏认 neuron.ts 的 axios.create({baseURL}) 会
+#   产生 8 条假阳性）、未挂载端点模块名单非空（不许静默遗留）。
+tests/unit/api/test_route_mount_contract_guard.py
