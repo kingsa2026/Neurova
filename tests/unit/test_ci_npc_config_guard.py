@@ -91,15 +91,25 @@ MIN_TURNS = 10
 #: （≈2h2m）被掐断，在册同类掐断另有 cnb-f1c-1k31garu5 / cnb-1q8-1k33cb2v9 等多例。
 BUILD_HARD_LIMIT_SECONDS = 7200
 
-#: 实测单轮均摊耗时（秒），取两次掐断的较大值：
+#: 实测单轮均摊耗时（秒）的最大值（掐断读数）：
+#:   cnb-2e8-1k341d9s1：201 轮 / 3191326ms（均摊 15.9s/轮）
 #:   cnb-f1c-1k31garu5：251 轮 / 7262s（均摊 ≈29s/轮）
 #:   cnb-m48-1k33grbms：207 轮 / 7300s（均摊 35.3s/轮）
 #: 链路是自加速的：context 每轮重放（compaction 后仍 ~8MiB 输入、单轮 in≈19 万
-#: token）⇒ 单轮耗时由早期 ~20s 涨到 30s+ ⇒ 2h / 35s ≈ 205 轮。
+#: token）⇒ 单轮耗时由早期 ~16s 涨到 30s+。
+#:
+#: 用途**仅限**下面 AFFORDABLE_TURNS 这一个窄用途；它**不再**用来给 maxTurns
+#: 反推值 —— 那等于把 2h 硬限当成「轮数配额」（Issue #158）。
 SECONDS_PER_TURN = 35.3
 
-#: 2h 硬限能容纳的轮数（向下取整）。配额写在上限之上就等于没有配额，
-#: 而**被外部掐断**比配额触发的收尾更糟（无告警、无收尾、worktree 成果直接丢）。
+#: maxTurns 的现行值（功能决策）：一次构建跑 200 轮，跑满由收尾阶段接力下一轮。
+#: 轮数触顶是**设计内的正常收官**，不是"配额要贴着硬限写"——把配额写在硬限之上
+#: 只会让撞顶永远发生在平台掐断之后，接力来不及触发（Issue #158）。
+MAX_TURNS_BUDGET = 200
+
+#: 2h 硬限能容纳的轮数（按 SECONDS_PER_TURN 向下取整）。
+#: 它**不是**配额，只是「墙钟最多够跑多少轮」的读数：超过它，
+#: 撞顶就永远是"被平台外部掐断"（无告警、无收尾、worktree 成果直接丢）。
 AFFORDABLE_TURNS = int(BUILD_HARD_LIMIT_SECONDS / SECONDS_PER_TURN)
 
 
@@ -128,9 +138,11 @@ def maxTurnsCeiling(cnb_doc) -> int:
       会被 review 的配置改动），分支再跟随。上限永远不低于主线现行值，
       所以"分支跟着主线调高"是绿的，"分支私自定义上限"是红的。
 
-    上限自身被钳进 `[MIN_TURNS, AFFORDABLE_TURNS]`：既不会因 `$` 写成非法值
-    而被"洗白"成那个值，也不会被写成一个 2h 里永远跑不到的轮数——那样配额
-    等于没有配额，Agent 只会被平台外部掐断（无告警、无收尾、成果全丢）。
+    上限自身被钳进 `[MIN_TURNS, MAX_TURNS_BUDGET]`：既不会因 `$` 写成非法值
+    而被"洗白"成那个值（非法值 → 落 `MAX_TURNS_BUDGET`），也不会被抬到把
+    2h 硬限当配额的轮数 —— 那会让撞顶永远发生在平台掐断之后，收尾接力来不及触发
+    （Issue #158：2h ÷ 单轮耗时 ≈ {AFFORDABLE_TURNS} 轮，配额定在它之上就
+    等于"等平台掐断"，而不是"配额触顶后接力"）。
     """
     main_options = [
         opt
@@ -140,8 +152,8 @@ def maxTurnsCeiling(cnb_doc) -> int:
     parsed = [parseTurnBudget(opt.get("maxTurns")) for opt in main_options]
     parsed = [v for v in parsed if isinstance(v, int)]
     if not parsed:
-        return AFFORDABLE_TURNS
-    return min(max(min(parsed), MIN_TURNS), AFFORDABLE_TURNS)
+        return MAX_TURNS_BUDGET
+    return max(min(max(parsed), MAX_TURNS_BUDGET), MIN_TURNS)
 
 
 def _load(path: Path):
@@ -149,7 +161,15 @@ def _load(path: Path):
 
 
 def _iter_npc_go_options(node, path=""):
-    """递归收集所有 npc:go 任务的 options 及其路径。"""
+    """递归收集所有 npc:go 任务，产出 (路径, options)。
+
+    `npc:go.options` **不认 `prompt` 键**（平台 Schema 只声明 role / systemPrompt /
+    userPrompt / model / maxTurns / contextWindow / maxTokens / thinkingLevel /
+    supportImage），写进去被静默忽略（允许集事实源见 `.cnb/npc_schema_keys.txt`；
+    守卫见 tests/unit/ci/test_npc_pipeline_time_budget.py）；
+    故这里不再读取 `options.prompt` 做断言 —— 那是一条永不生效的通路，
+    以它为准的绿灯是假的（Issue #158）。
+    """
     if isinstance(node, list):
         for i, item in enumerate(node):
             yield from _iter_npc_go_options(item, f"{path}[{i}]")
@@ -329,18 +349,18 @@ class TestTurnBudget:
         )
 
     def test_ceiling_cannot_be_laundered_by_illegal_main_value(self):
-        """`$` 写成非法值时上限落 `AFFORDABLE_TURNS`；合法值不得被钳到硬限之上。"""
-        assert maxTurnsCeiling({"$": {}}) == AFFORDABLE_TURNS
+        """`$` 写成非法值时上限落现行值；合法值只在现行值之下被接受。"""
+        assert maxTurnsCeiling({"$": {}}) == MAX_TURNS_BUDGET
         assert maxTurnsCeiling({"$": {"issue.comment@npc": [
             {"type": "npc:go", "options": {"maxTurns": "many"}}
-        ]}}) == AFFORDABLE_TURNS
+        ]}}) == MAX_TURNS_BUDGET
         assert maxTurnsCeiling({"$": {"issue.comment@npc": [
             {"type": "npc:go", "options": {"maxTurns": 10}}
         ]}}) == MIN_TURNS
-        # 1000 × 35.3s ≈ 9.8h：远超 2h 硬限，必须被钳回可容纳轮数
+        # 1000 轮不是"配额"，是把 2h 硬限当配额：必须被钳回现行值
         assert maxTurnsCeiling({"$": {"issue.comment@npc": [
             {"type": "npc:go", "options": {"maxTurns": 1000}}
-        ]}}) == AFFORDABLE_TURNS
+        ]}}) == MAX_TURNS_BUDGET
         assert maxTurnsCeiling({"$": {"issue.comment@npc": [
             {"type": "npc:go", "options": {"maxTurns": 120}}
         ]}}) == 120

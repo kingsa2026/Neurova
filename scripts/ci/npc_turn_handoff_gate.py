@@ -10,10 +10,17 @@
 而同一份配置里的接力 Stage 被 skipper 跳过，Issue 上没有任何回音）。
 所以「撞顶之后把活交给下一轮」必须在配置里显式写出来。
 
-配置里已经写了这笔接力（`.cnb.yml` 的 `endStages` + `cnb:apply`），
-但接力的**燃料**是 Agent 在最后一轮自己写出的标记文件。标记写不出来，
-`cnb:apply` 的 `if` 恒假，接力就是一条死配置 —— 而这类"看着配了、
-其实永不触发"的形态平台不会报任何错。
+配置里已经写了这笔接力（`.cnb.yml` 的 `endStages` + `cnb:apply`）。
+**根因（Issue #158，构建 cnb-2v8-1k34htd2p / cnb-2e8-1k341d9s1 实测）**：
+接力的燃料曾指定由 Agent 在最后一轮自己写出标记文件 —— 而撞 maxTurns 时平台
+只是把 Agent 中止、**不执行任何收尾指令或工具调用**，Agent 根本没有机会写。
+于是 `cnb:apply` 的 `if` 恒假、收尾 Stage 每次都是 `skipped`，
+接力是一条"看着配了、其实永不触发"的死配置（平台不会为此报任何错）。
+
+故燃料改由**本门禁在 Agent 开工前写入**（它就是那个写点，也是自证点）：
+触顶那一轮跑不到任何指令，燃料就不可能来自 Agent。同时把
+`turnLimitReached=1` 经 `$CNB_ENV` 文件回写给后续 Stage 的 `cnb:apply`，
+让"这一轮是接力轮"这件事在配置期就成立，不依赖 Agent 的记忆。
 
 本门禁回答一个只有真实构建能回答的问题：**在有改动的真实构建里，
 `$CNB_BUILD_WORKSPACE` 到底等不等于构建容器的工作目录**。
@@ -54,6 +61,15 @@ from pathlib import Path
 #: 也是 `.cnb/settings.yml` 人设里唯一的写法约定。
 HANDOFF_MARKER_FILE = ".npc-turn-handoff"
 
+#: 「本轮是接力轮」的变量名。与 `.cnb.yml` 的 `env.turnLimitReached`、
+#: `endStages.if` 逐字一致 —— 该判据全仓只有一处事实源（git grep 可见）。
+TURN_FLAG_VAR = "turnLimitReached"
+
+#: 写回环境变量的通道。与 GitHub Actions 的 `$GITHUB_ENV` 同源的
+#: `name=value` 行协议，但**不做任何假设**：平台没有该文件（或格式不同）
+#: 时下面的写入超时静默跳过，不失败 —— 燃料已落盘，这里是尽力而为。
+TURN_FLAG_ENV_FILES = ("CNB_ENV", "GITHUB_ENV")
+
 
 def resolveWorkspaceRoot(env: dict) -> str:
     """接力判据的落点：环境变量给定，未给定返回空串。"""
@@ -69,6 +85,31 @@ def checkWorkspaceWritable(root: str) -> dict:
     finally:
         marker.unlink(missing_ok=True)
     return {"marker": str(marker), "readback": readback, "ok": readback == "1"}
+
+
+def markTurnAsHandoff(env: dict) -> dict:
+    """把「本轮是接力轮」写回给后续 Stage（尽力而为，不因缺通道而失败）。
+
+    通道：`$CNB_ENV`（`name=value` 行协议）。平台没有该文件时**静默跳过**——
+    燃料已经落在 HANDOFF_MARKER_FILE 上，缺通道只影响 `cnb:apply` 的 `if`
+    是否立即为真，不影响"接力这件事本身成立"。
+
+    只写一个变量、一种写法：接力判据全仓单点，不许出现第二种状态文件。
+    """
+    report = {"written": False, "channel": None}
+    for name in TURN_FLAG_ENV_FILES:
+        target = (env.get(name) or "").strip()
+        if not target:
+            continue
+        try:
+            with open(target, "a", encoding="utf-8") as handle:
+                handle.write(f"{TURN_FLAG_VAR}=1\n")
+            report.update(written=True, channel=name, file=target)
+        except OSError as exc:
+            report["error"] = f"{type(exc).__name__}: {exc}"
+        return report
+    report["error"] = "无 $CNB_ENV / $GITHUB_ENV 通道"
+    return report
 
 
 def checkWorkingDirectory(env: dict, cwd: str) -> dict:
@@ -114,6 +155,9 @@ def main() -> int:
             "「工作区工作目录」，收尾阶段读不到，接力整条失效"
         )
 
+    if not failures:
+        result["turn_flag_handoff"] = markTurnAsHandoff(os.environ)
+
     if args.json:
         print(json.dumps({"result": result, "failures": failures}, ensure_ascii=False, indent=2))
         return 1 if failures else 0
@@ -139,6 +183,8 @@ const os = require("os");
 const path = require("path");
 
 const HANDOFF_MARKER_FILE = ".npc-turn-handoff";
+const TURN_FLAG_VAR = "turnLimitReached";
+const TURN_FLAG_ENV_FILES = ["CNB_ENV", "GITHUB_ENV"];
 
 // 与 Python 的 json.dumps 对齐：缩进 2 空格、**不**转义非 ASCII、
 // 字符串外的空格与 Python 的 separators 一致（", " / ": "）。
@@ -210,6 +256,25 @@ function realpathOrSelf(target) {
   try { return fs.realpathSync(target); } catch (e) { return path.resolve(target); }
 }
 
+function markTurnAsHandoff(env) {
+  const report = { written: false, channel: null };
+  for (const name of TURN_FLAG_ENV_FILES) {
+    const target = String(env[name] || "").trim();
+    if (!target) continue;
+    try {
+      fs.appendFileSync(target, TURN_FLAG_VAR + "=1\n", "utf8");
+      report.written = true;
+      report.channel = name;
+      report.file = target;
+    } catch (exc) {
+      report.error = exc.constructor.name + ": " + exc.message;
+    }
+    return report;
+  }
+  report.error = "无 $CNB_ENV / $GITHUB_ENV 通道";
+  return report;
+}
+
 function checkWorkingDirectory(env, cwd) {
   const root = resolveWorkspaceRoot(env);
   return {
@@ -246,6 +311,10 @@ function main(argv) {
     result.working_directory_divergence =
       "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：Agent 若按字面把标记写到" +
       "「工作区工作目录」，收尾阶段读不到，接力整条失效";
+  }
+
+  if (!failures.length) {
+    result.turn_flag_handoff = markTurnAsHandoff(process.env);
   }
 
   if (asJson) {
@@ -309,6 +378,9 @@ def main() -> int:
             "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：Agent 若按字面把标记写到"
             "「工作区工作目录」，收尾阶段读不到，接力整条失效"
         )
+
+    if not failures:
+        result["turn_flag_handoff"] = markTurnAsHandoff(os.environ)
 
     if args.json:
         print(json.dumps({"result": result, "failures": failures}, ensure_ascii=False, indent=2))
