@@ -1,7 +1,7 @@
 # 上下文池持久层设计（B4 · P1-3 + D1）
 
 - 日期：2026-09-21
-- 状态：**实施中**（001/002/003/005/007 已交付，见 §8 收口记录；本文件是规格与决定的事实源）
+- 状态：**实施中**（001–005/007 已交付、004 本片交付；006 紧随其后，见 §8 收口记录）
 - 上游：`docs/05-reports/上下文三链路审计_2026-09-21.md` §3 P1-3、§10 批次表 B4 行、决策项 **D1**
 - 前置批次：B1/B2/B3 已完成（`docs/05-reports/上下文三链路修复台账_2026-09-21.md`）
 - 基线取证：`tests/manual/context_persistence_baseline_90.py`（本规格全部读数由它一次跑出；
@@ -306,8 +306,8 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 |---|---|---|
 | A1 | **跨重启为真**：写 → 销毁实例 → 新实例同库 → `recall_evicted` 取回原文 | 新进程/新实例断言条数与内容逐字相等；写失败面走 `get_retention_stats()["ledger_persistence"]`（`failed`/`last_error` 点名原因） |
 | A2 | 写放大：24 条/轮的归档耗时 ≤ 现状形状的 **1/3**（实测两种形状差 260–420×，1/3 是极宽松的上界） | 同一台机、同一存量库规模下 A/B，各 20 轮取中位；事务语义另观测：批内失败整批回滚、批外不可见、提交后跨连接可见、`batches` 可读（003） |
-| A3 | 中文预筛命中：`上下文压缩` 的 MATCH 命中数 == LIKE 真值 | 对拍断言（两路结果集相等） |
-| A4 | <3 长度查询走 LIKE，且 `%`/`_` 不越权 | 构造含 `%` `_` 的库内文本，断言命中集合与真值相等 |
+| A3 | 中文预筛命中：`上下文压缩` 的 MATCH 命中数 == LIKE 真值 | 对拍断言（两路结果集相等）；**FTS 分词器**归 006（v2 迁移），查询侧分流归 004 |
+| A4 | <3 长度查询走 LIKE，且 `%`/`_` 不越权 | 构造含 `%` `_` 的库内文本，断言命中集合与真值相等；短查询用 SQL 轨迹证明"未发出 MATCH"（004） |
 | A5 | GC 生效：超 `keep_count`/`keep_days` 的行被清理，FTS 同步 | 写入超限后断言两表行数一致；触发面读 `get_retention_stats()["ledger_gc"]`（`runs`/`removed`/`last_error`），断言在生产可达（007） |
 | A6 | 迁移幂等 + 防降级：v0 库迁到 v2 后重跑 migrate 返回空；伪造高版本库被拒 | `migrate()` 返回值 + `SchemaVersionError` |
 | A7 | 零停机：迁移窗口内并发写不停且不被长事务阻塞 | 并发写线程 + 记录停等 p95 上界 |
@@ -356,6 +356,7 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 | 007 GC 与 FTS 对齐 | ✅ 已交付 | `neurova/context_pool.py`（`_maybeGcLedger` 触发点搬到归档提交 + `get_retention_stats()["ledger_gc"]`）+ `neurova/context/eviction_ledger_db.py`（`_alignFts` 分批对齐） + `tests/unit/context/test_ledger_gc_retention.py` | 红灯 4 failed → 绿灯 7 passed；live-verify 生产面节流 3/3、收敛 900→200 且两表相等 `tests/manual/context_ledger_gc_90.py` |
 | 003 写侧批量提交 | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（常驻连接 + 批量事务）+ `neurova/context_pool.py`（`archiveBatch()` 事务边界）+ `neurova/context/orchestrator.py`（本轮归档收进一个批） | 红灯 10 failed → 绿灯 12 passed；live-verify 24 条/轮 233→1.03 ms（220–233×）`tests/manual/context_ledger_batching_90.py` |
 | 002 版本域与 v1 迁移 | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（`context_ledger` 版本域 + v1 迁移）+ `neurova/context_pool.py`（召回路径回填作用域/归档时刻）+ `tests/unit/context/test_context_ledger_migration.py` | 红灯 15 failed → 绿灯 17 passed；live-verify 真 v0 库经生产构造面迁移 `tests/manual/context_ledger_migration_90.py` |
+| 004 读侧预筛与转义 | ✅ 已交付 | `neurova/core/sql_like.py`（转义/短语/长度分流单源）+ `neurova/context/eviction_ledger_db.py`（`_matchCandidates`/`_likeCandidates`/`_recentCandidates` + `CANDIDATE_LIMIT`）+ `tests/unit/context/test_ledger_read_prefilter.py` | 红灯 5 failed → 绿灯 9 passed；live-verify CJK 命中逐条对拍 LIKE 真值、`%`/`_` 不越权、短查询 SQL 轨迹无 MATCH `tests/manual/context_ledger_read_prefilter_90.py` |
 
 **005 对 D10 的偏离记录**：
 
@@ -421,6 +422,31 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 - **`created_at` 与 `chat_scope` 的兜底落点**：两路兜底函数落在台账模块
   （`resolveArchivedScope` / `resolveArchivedCreatedAt`），召回路径调用它们。
   作用域判定仍只经 `memory_scope.scope_from_metadata` 一份规则，池侧不复制。
+
+**004 对 D9 的偏离记录**：
+
+- **判据单源到 `neurova/core/sql_like.py`**：D9 只说"LIKE 必须转义"，未指定落点。
+  实施把转义（`\` `%` `_`）、FTS5 短语包裹、长度分流阈值（`MATCH_MIN_CHARS = 3`）、
+  带 `ESCAPE` 的谓词产出收在一处，台账与其余四个同契约命中点全部经它——各写一份
+  就是第二份事实源，改一处漏一处等于没改。
+- **候选集不是"先整表 MATCH 再 `LIMIT`"**：实测 SQLite 对"FTS 虚表 JOIN 内容表
+  后按内容表 id 排序"会退化成"扫全表匹配项再排序"（5 万行库、1269 命中实测
+  442–548 ms / 条查询）。实施改为两步：先按 `rowid DESC` 取
+  `CANDIDATE_LIMIT + 1` 个候选（0.7–2.7 ms），再按候选是否触顶分流——
+  未触顶取这些行的内容、触顶降级为"最近 N 条 + 候选内子串过滤"。
+  降级买的是**内存有界**（候选集 ≤ `CANDIDATE_LIMIT`），不是"永远更快"：
+  密集命中（5 万条量级）时两步法比单次 JOIN 略慢（6.4 ms vs 0.5 ms）——
+  两个读数都在 live-verify 里如实打印，不挑对自己有利的那条。
+- **U2 的上限初值经真实语料校准后保留 2000**：量级超过它的查询本来就是"宽泛词"，
+  词法预筛在这种查询上给不出有意义的排序信号，此时"最近 2000 条内子串过滤"
+  与"全库子串过滤"的结果差异（在 `limit` 20 量级下）为零，而内存占用差 3 个量级。
+- **`<3` 字符走 LIKE 的判据用 SQL 轨迹证明**：改前实测该查询在 unicode61 下
+  MATCH 恰好返回空、兜底 LIKE 也刚好答对——只看结果输出无法证明分流做对了。
+  故改判据为"这一段查询期间不得出现 `MATCH` 语句"（步骤集合的性质，不随机器摆动）。
+- **同契约命中点一并收口**（教义第 5 条）：`neurflow` 的 `search_workflows` /
+  `search_node_definitions` / `find_subflow_references` 与 `CognitiveStorageEngine.retrieve`
+  的 LIKE 兜底同样直拼用户输入，一并改走 `likePattern`；各补一条红→绿用例
+  （改前实测 `%` 把整表拉回）。
 
 **007 对 D11 的偏离记录**：
 
