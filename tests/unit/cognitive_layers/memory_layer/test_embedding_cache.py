@@ -75,8 +75,11 @@ class TestEmbeddingCache:
         assert len(store._encoder.calls) == 3  # 首次全量编码
         assert cache_env.exists()
         data = json.loads(cache_env.read_text(encoding="utf-8"))
-        assert data["fingerprint"].startswith("onnx:test-model")
-        assert len(data["entries"]) == 3
+        # 落盘形状为"命名空间 → 条目表"（B6-6：多指纹共存，互不清空）；
+        # 本用例只锁"本次指纹的条目真落盘且条数正确"。
+        namespaces = data["namespaces"]
+        key = next(name for name in namespaces if name.startswith("onnx:test-model"))
+        assert len(namespaces[key]) == 3
 
     def test_second_start_hits_cache_zero_encode(self, cache_env):
         """重启后同文本同模型：0 次 encode，向量与首次一致（float32 精度内）"""
@@ -137,7 +140,9 @@ class TestEmbeddingCache:
         store = _make_store()
         store.index_memories(_make_memories(8))
         data = json.loads(cache_env.read_text(encoding="utf-8"))
-        assert len(data["entries"]) <= 5
+        namespaces = data["namespaces"]
+        key = next(name for name in namespaces if name.startswith("onnx:test-model"))
+        assert len(namespaces[key]) <= 5
 
     def test_centroid_encoding_also_benefits(self, cache_env):
         """质心初始化同文本也走缓存（第二次启动 4 个质心 0 编码）"""
