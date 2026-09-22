@@ -392,3 +392,11 @@ tests/unit/context/test_pool_branch_envelope_transient.py
 #   unwiredEndpointRouters；已实现未接线的 router 走 baseline 棘轮（只降不升），
 #   逐条处置理由写在 tests/unit/endpointWiringBaseline.txt。
 tests/unit/api/test_endpoint_mount_wiring_guard.py
+
+# Issue #128 收口（构建 cnb-3k8-1k33gorhr 掐断）：记忆增强端点不得持有影子事实源。
+#   根因：memory_enhancement.py 维护模块级 `_memories_store = {}`，
+#   六条端点（forget/strengthen/categories/batch/export/import）全以它为事实源；
+#   该字典从不被生产写入路径填充、读取侧也不可见 —— 「导入成功」「遗忘成功」
+#   全是假成功，真记忆库纹丝不动。现已整体删除，一律经 get_memory_manager
+#   读写真 MemoryManager（与 /v1/memory 同一装配点与作用域注入口径）。
+tests/unit/api/test_memory_enhancement_real_manager.py
