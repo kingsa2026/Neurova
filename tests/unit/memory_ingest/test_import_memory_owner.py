@@ -183,3 +183,46 @@ def test_supersede_declaration_looks_in_the_owners_scope(tmp_path: Path):
 
     assert outcome["superseded"], "属主导入的取代声明落成了找不到目标——旧行就在属主作用域里"
     assert outcome["supersede_unresolved"] == []
+
+
+def test_cli_owner_flag_lands_on_memories_too(tmp_path: Path, monkeypatch, capsys):
+    """CLI 面：`--owner-user-id` 一处给，会话行与记忆行两条咽喉都用。"""
+    from scripts.ingest_memory import main
+
+    from neurova.session_manager import SessionManager
+
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    (bundle / "manifest.json").write_text(json.dumps({
+        "schema_version": 1, "generated_at": "2026-09-20T00:00:00+00:00",
+        "agent_name": "cli-owner", "source": {"converter": "test", "version": "1"},
+        "counts": {"transcripts": 1, "memories": 1, "relations": 0},
+        "dropped": [], "stores": []}), encoding="utf-8")
+    (bundle / "transcripts.jsonl").write_text(json.dumps({
+        "session_id": "sA", "seq": 1, "kind": "user_message",
+        "ts": "2026-05-01T10:00:01+00:00", "identity_key": "e1", "role": "user",
+        "content_blocks": [{"type": "text", "text": "问题"}]}, ensure_ascii=False) + "\n",
+        encoding="utf-8")
+    (bundle / "memories.jsonl").write_text(json.dumps({
+        "identity_key": "m1", "content": "CLI 导入的属主记忆", "memory_type": "semantic",
+        "category": "general", "origin": "owner", "importance": 60.0,
+        "ts": "2026-05-01T10:00:00+00:00"}, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    monkeypatch.setenv("NEUROVA_SESSIONS_DIR", str(tmp_path / "sessions"))
+    SessionManager._instance = None
+    sessions = SessionManager()
+    manager = _manager(tmp_path)
+    try:
+        code = main(["apply", str(bundle), "--agent-id", "owner-agent", "--yes",
+                     "--run-id", "cli-owner-1", "--owner-user-id", "u_alice"],
+                    manager=manager, sessions=sessions)
+        rows = list(manager._memories.values())
+        assert code == 0 and rows, f"CLI 导入没有落记忆行（退出码 {code}）"
+        assert all((m.neuser_id, m.user_id) == ("u_alice", "u_alice") for m in rows), (
+            "CLI 给了属主，记忆行仍取调用现场作用域——会话有主、记忆无主"
+        )
+        stored_session = next(iter(sessions.iter_session_files("owner-agent")))
+        assert json.loads(stored_session.read_text(encoding="utf-8"))["user_id"] == "u_alice"
+    finally:
+        SessionManager._instance = None
+        capsys.readouterr()

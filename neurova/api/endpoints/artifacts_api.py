@@ -9,9 +9,13 @@
 - 安全：注册时校验路径位于白名单根内；读取时重新 resolve 再校验一次
   （防注册后移动/软链绕过）；归属校验非属主 404（与 files_api 一致）。
 
-存储：模块级 _artifacts_store（与 files_api._files_store 同生命周期；
-artifact 是会话产物，重启丢失可接受——文件本体仍在磁盘，路径幂等键
-意味着下次同名工具调用会重新注册）。
+存储：模块级 _artifacts_store + SQLite 写穿/启动水合（与 files_api._files_store
+同一套做法与同一个库）。原设计"重启丢失可接受"被实测证伪：条目一丢，读端按
+artifact_id 查不到、预览与 `/v1/artifacts/{id}/content` 全 404，而文件本体与
+会话消息里记着的 artifact_id 都还在——重启即出现的第三种假成功。
+
+归属：条目带 `user_id`（属主）或 `shared=True`（显式共享），读端据此判归属。
+**两者都没有的条目一律 404**——漏写属主这件事不许被静默放行成"任何人可读"。
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import hashlib
 import mimetypes
 import os
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -72,6 +77,103 @@ _KIND_BY_EXT = {
 }
 
 _artifacts_store: Dict[str, Dict[str, Any]] = {}
+# 与 files_api._files_store 同一把锁语义（并发注册同一 artifact_id 时防重入写竞争）
+_artifacts_store_lock = threading.Lock()
+
+# ---------------------------------------------------------------------------
+# SQLite 持久化：条目写穿 + 启动水合。与 files_api 同库（数据根 users.db）
+# 但各用各的表——两处元数据是不同事实，不共享表也不互相推导。
+# ---------------------------------------------------------------------------
+
+def _defaultArtifactsDbPath() -> str:
+    """产物元数据库默认落点：数据根下的 `users.db`（绝对路径，与 files_api 同源）。
+
+    相对路径会让落点随进程 CWD 漂移——正是 files_api 修过的那类缺陷。
+    """
+    from neurova.core.data_root import get_data_root
+
+    return str(get_data_root() / "users.db")
+
+
+_ARTIFACTS_DDL = """
+CREATE TABLE IF NOT EXISTS artifacts (
+    artifact_id TEXT PRIMARY KEY,
+    kind TEXT, name TEXT, size INTEGER, mime_type TEXT,
+    agent_id TEXT, user_id TEXT, shared INTEGER,
+    path TEXT, source TEXT, created_at REAL
+)
+"""
+
+
+def _artifacts_db_path(db_path: Optional[str] = None) -> str:
+    """显式入参优先；缺省**调用时**解析数据根（模块导入期取值会让注入失效）。"""
+    return db_path or _defaultArtifactsDbPath()
+
+
+_ARTIFACT_COLUMNS = (
+    "artifact_id", "kind", "name", "size", "mime_type",
+    "agent_id", "user_id", "shared", "path", "source", "created_at",
+)
+
+
+def persist_artifact(info: Dict[str, Any], db_path: Optional[str] = None) -> None:
+    """写穿单条产物元数据（失败仅告警，降级为内存态——不阻断产物注册本身）。"""
+    try:
+        Path(_artifacts_db_path(db_path)).parent.mkdir(parents=True, exist_ok=True)
+        from neurova.core.database import short_transaction
+
+        with short_transaction(_artifacts_db_path(db_path)) as conn:
+            conn.execute(_ARTIFACTS_DDL)
+            conn.execute(
+                "INSERT OR REPLACE INTO artifacts VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                tuple(
+                    int(info.get(col, False)) if col == "shared" else info.get(col, "")
+                    for col in _ARTIFACT_COLUMNS
+                ),
+            )
+    except Exception as e:  # noqa: BLE001 - 持久化失败降级为内存态
+        logger.warning("artifact 元数据写穿失败（降级内存态）: %s", e)
+
+
+def delete_artifact_record(artifact_id: str, db_path: Optional[str] = None) -> None:
+    """从 artifacts 表删除单条元数据（失败仅告警）。"""
+    try:
+        from neurova.core.database import short_transaction
+
+        with short_transaction(_artifacts_db_path(db_path)) as conn:
+            conn.execute("DELETE FROM artifacts WHERE artifact_id = ?", (artifact_id,))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("artifact 元数据删除失败: %s", e)
+
+
+def hydrate_artifacts_store(db_path: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+    """启动水合：磁盘文件仍在的条目恢复进 `_artifacts_store`，丢盘条目自动清理。
+
+    返回本次加载的条目（测试断言用）；坏库静默返回空（不阻塞启动）。
+    """
+    loaded: Dict[str, Dict[str, Any]] = {}
+    db = _artifacts_db_path(db_path)
+    if not Path(db).exists():
+        return loaded
+    try:
+        from neurova.core.database import short_transaction
+
+        with short_transaction(db) as conn:
+            rows = conn.execute("SELECT * FROM artifacts").fetchall()
+            for row in rows:
+                rec = dict(row)
+                rec["shared"] = bool(rec.get("shared"))
+                if rec.get("path") and not Path(rec["path"]).exists():
+                    conn.execute("DELETE FROM artifacts WHERE artifact_id = ?",
+                                 (rec.get("artifact_id"),))
+                    continue
+                loaded[rec["artifact_id"]] = rec
+                _artifacts_store[rec["artifact_id"]] = rec
+    except Exception as e:  # noqa: BLE001 - 坏库不阻塞启动
+        logger.warning("artifact 元数据水合失败（空库降级）: %s", e)
+        return {}
+    logger.info("artifact 元数据水合完成: %d 条", len(loaded))
+    return loaded
 
 
 class ArtifactInfo(BaseModel):
@@ -114,11 +216,17 @@ def _resolve_if_allowed(path: Path) -> Path:
     raise ValueError(f"artifact 路径不在白名单内: {path}")
 
 
-def register_artifact(path: str, agent_id: str = "", user_id: str = "") -> Dict[str, Any]:
+def register_artifact(path: str, agent_id: str = "", user_id: str = "",
+                     shared: bool = False, db_path: Optional[str] = None) -> Dict[str, Any]:
     """把一个磁盘文件注册为 artifact（幂等：同路径同 id）。
 
     路径不在白名单根内 / 文件不存在 → ValueError（调用方按需吞掉，
     artifact 是增强能力，注册失败不影响工具结果本身）。
+
+    归属（Issue #81 断点③）：`user_id` 给属主，`shared=True` 显式声明共享
+    （导入批次没给属主时的语义）。缺省两者都空 = 谁都不许读（读端诚实 404），
+    不做"空属主=共享"的隐式放宽——那是会话面 `list_sessions` 的规则，
+    产物面显式化，免得漏写属主被静默放行成任何人可读。
     """
     p = Path(path)
     if not p.is_file():
@@ -128,6 +236,13 @@ def register_artifact(path: str, agent_id: str = "", user_id: str = "") -> Dict[
     artifact_id = hashlib.sha1(str(resolved).encode("utf-8", errors="replace")).hexdigest()[:16]
     existing = _artifacts_store.get(artifact_id)
     if existing:
+        # 幂等复用不得丢归属：先注册时没带属主、后一次带了（导入场景常见），
+        # 原地回填并写穿——否则属主永远停在"谁都不许读"。
+        if not existing.get("user_id") and not existing.get("shared"):
+            with _artifacts_store_lock:
+                existing["user_id"] = user_id
+                existing["shared"] = bool(shared)
+            persist_artifact(existing, db_path=db_path)
         return existing
 
     try:
@@ -145,19 +260,31 @@ def register_artifact(path: str, agent_id: str = "", user_id: str = "") -> Dict[
         "mime_type": mime,
         "agent_id": agent_id,
         "user_id": user_id,
+        "shared": bool(shared),
         "path": str(resolved),
+        "source": "",
         "created_at": stat.st_mtime or time.time(),
     }
-    _artifacts_store[artifact_id] = info
+    with _artifacts_store_lock:
+        _artifacts_store[artifact_id] = info
+    persist_artifact(info, db_path=db_path)
     return info
 
 
 def _get_owned_artifact(artifact_id: str, current_user: Dict[str, Any]) -> Dict[str, Any]:
-    """按 id 取 artifact，非属主与不存在统一 404（防 IDOR 探测）。"""
+    """按 id 取 artifact，非属主与不存在统一 404（防 IDOR 探测）。
+
+    三种放行可能：条目属主 == 请求者、条目显式 `shared`。
+    **既无属主又无共享标记的条目一律 404**（含请求者身份为空串的情形）：
+    漏写属主不是"共享"，把它放行等于把越权做成默认值。
+    """
     info = _artifacts_store.get(artifact_id)
-    if not info or info.get("user_id") != current_user["user_id"]:
+    if not info:
         raise HTTPException(status_code=404, detail="Artifact not found")
-    return info
+    owner = str(info.get("user_id") or "")
+    if info.get("shared") or (owner and owner == str(current_user.get("user_id") or "")):
+        return info
+    raise HTTPException(status_code=404, detail="Artifact not found")
 
 
 @router.get("/{artifact_id}", response_model=ArtifactInfo)
