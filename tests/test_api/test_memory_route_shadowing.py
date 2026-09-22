@@ -23,6 +23,8 @@ from neurova.api.endpoints.memory import router as memory_router
 from neurova.cognitive_layers.memory_layer.models import Memory
 from neurova.interfaces.api_standard import ErrorCodes
 
+from tests.route_table import mountedLeafRoutes
+
 
 # ============================================================
 # 测试用 App 构造
@@ -122,8 +124,13 @@ def env(monkeypatch):
 
 
 def _first_matching_route(app, path, method):
-    """模拟 FastAPI 的路由匹配：按注册顺序返回第一条命中的路由"""
-    for route in app.routes:
+    """模拟 FastAPI 的路由匹配：按注册顺序返回第一条命中的路由。
+
+    走 `mountedLeafRoutes`：`include_router` 落成惰性包装层，包装对象既无
+    `path_regex` 也无 `methods`，直接遍历 `app.routes` 会**一条都匹配不到**
+    （断言退化成恒真的「没被遮蔽」）。
+    """
+    for _fullPath, route in mountedLeafRoutes(app):
         if not hasattr(route, "path_regex"):
             continue
         methods = getattr(route, "methods", None) or set()
@@ -139,20 +146,20 @@ def test_literal_routes_win_over_param_routes():
     而非被 /{memory_id}、/emotion/{emotion_type} 等参数路由截获"""
     app = _make_app()
     literal_routes = [
-        r
-        for r in app.routes
-        if getattr(r, "path", "").startswith("/api/v1/memory")
-        and "{" not in getattr(r, "path", "")
-        and getattr(r, "methods", None)
+        (fullPath, route)
+        for fullPath, route in mountedLeafRoutes(app)
+        if fullPath.startswith("/api/v1/memory")
+        and "{" not in fullPath
+        and getattr(route, "methods", None)
     ]
     assert literal_routes, "memory 路由未注册"
 
     shadowed = []
-    for route in literal_routes:
+    for fullPath, route in literal_routes:
         for method in route.methods:
-            matched = _first_matching_route(app, route.path, method)
-            if matched is not None and matched.path != route.path:
-                shadowed.append(f"{method} {route.path} -> {matched.path}")
+            matched = _first_matching_route(app, fullPath, method)
+            if matched is not None and matched.path != fullPath:
+                shadowed.append(f"{method} {fullPath} -> {matched.path}")
     assert not shadowed, f"字面路由被路径参数路由吞掉: {shadowed}"
 
 

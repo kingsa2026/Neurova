@@ -13,6 +13,8 @@ os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_kb_order_01
 
 from neurova.api.endpoints import knowledge as kb
 
+from tests.route_table import registeredPathMethods
+
 # 拆分前 knowledge.py 的 34 条路由快照（按注册顺序）+ 工单 002 新增的评测基线只读路由
 _KB_ROUTES = [
     ("", "GET"),
@@ -52,8 +54,9 @@ _KB_ROUTES = [
 
 
 def _router_routes(router):
-    return [(r.path, next(iter(r.methods - {"HEAD", "OPTIONS"})))
-            for r in router.routes if getattr(r, "methods", None)]
+    return [(path, method)
+            for path, methods in registeredPathMethods(router)
+            for method in methods - {"HEAD", "OPTIONS"}]
 
 
 def test_allRoutesPresentAfterSplit():
