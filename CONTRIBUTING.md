@@ -35,7 +35,9 @@ python start.py --check
 ## 测试纪律（重要）
 
 - **红绿灯 TDD**：新增功能与缺陷修复先红灯后绿灯（见上节第 1 条），不接受「实现写完再补绿灯测试」。
-- 新增测试**必须** `git add -f`：`.gitignore` 含 `/tests/` 规则，普通 add 会被忽略。
+- 唯一测试根 `tests/` 已在 `.gitignore` 里整根豁免（`!tests/**`），普通 `git add` 即可入库——
+  **不再需要** `git add -f`。跑测产物（`__pycache__` / `.pytest_cache` / `htmlcov`）与敏感件
+  仍单独挡在门外，提交前 `git status` 复核即可。
 - 正式测试放 `tests/unit|integration|e2e|performance/` 对应层级；临时验证脚本即用即删，不留仓库。
 - 跑测试用项目解释器 `.venv/Scripts/python.exe -m pytest`（系统 Python 与项目依赖不一致）。
 - 已知预存失败基线见 `docs/04-plans/` 各计划文档"预存失败 stash 实证"节——**预存失败不算回归，新增失败才算**；提交前用 `git stash push <files> && pytest && git stash pop` 做 A/B 验证。
