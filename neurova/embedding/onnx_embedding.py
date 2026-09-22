@@ -58,7 +58,7 @@ class ONNXEmbeddingEngine:
 
     def __init__(
         self,
-        model_dir: str = "models/embedding/bge-small-zh-v1.5",
+        model_dir: str = "",
         model_name: str = "BAAI/bge-small-zh-v1.5",
         max_length: int = 512,
         auto_download: bool = True,
@@ -72,7 +72,11 @@ class ONNXEmbeddingEngine:
             max_length: 最大序列长度
             auto_download: 是否自动下载模型
         """
-        self._model_dir = Path(model_dir)
+        # 模型目录锚在仓库根（随代码走的资产），不随 CWD 漂移。
+        from neurova.core.data_root import repoAsset
+
+        self._model_dir = (Path(model_dir) if model_dir
+                           else repoAsset("models", "embedding", "bge-small-zh-v1.5"))
         self._model_name = model_name
         self._max_length = max_length
         self._auto_download = auto_download

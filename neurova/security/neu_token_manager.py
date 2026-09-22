@@ -43,7 +43,11 @@ def _load_or_create_token_secret() -> str:
     不同密钥 → 间歇性 401。现改为从持久化文件读取（不存在则生成并 0600 保存）。
     """
     try:
-        data_dir = getattr(config, "DATA_DIR", None) or os.environ.get("NEUROVA_DATA_DIR") or "data"
+        # 原实现读一个全仓不存在的 `config.DATA_DIR`，再兜底到裸相对名 `"data"`
+        # ——换个启动目录就换一份签名密钥，重启后旧 token 全员验签失败。
+        from neurova.core.data_root import dataLanding
+
+        data_dir = str(dataLanding(_TOKEN_SECRET_FILENAME).parent)
         os.makedirs(data_dir, exist_ok=True)
         secret_path = os.path.join(data_dir, _TOKEN_SECRET_FILENAME)
         if os.path.exists(secret_path):

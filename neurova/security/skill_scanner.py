@@ -429,8 +429,12 @@ class ScanCache:
 class WhitelistManager:
     """白名单管理器"""
 
-    def __init__(self, config_path: str = "whitelist.json"):
-        self._config_path = Path(config_path)
+    def __init__(self, config_path: str = ""):
+        # 落点：显式入参 > 数据根下的 `whitelist.json`。原默认值是裸文件名，
+        # 一进构造函数就读一个随 CWD 变的路径（读到哪个白名单全看启动目录）。
+        from neurova.core.data_root import dataLanding
+
+        self._config_path = Path(config_path) if config_path else dataLanding("whitelist.json")
         self._entries: Dict[str, Dict[str, Any]] = {}
         self._load()
 
