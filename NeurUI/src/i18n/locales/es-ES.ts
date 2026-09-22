@@ -701,7 +701,7 @@ export default {
     overview: 'Resumen',
     decay: 'Decaimiento de memoria',
     reload: 'Recargar desde disco',
-    reloadHint: 'Integrar en el backend en ejecución los recuerdos escritos por otro proceso (p. ej. importación CLI) sin reiniciar',
+    reloadHint: 'Conciliar con el disco: integrar los recuerdos escritos por otro proceso (p. ej. importación CLI) y retirar las filas anuladas, sin reiniciar',
     enhance: 'Mejorar memoria',
     forget: 'Olvidar',
     strengthen: 'Fortalecer',

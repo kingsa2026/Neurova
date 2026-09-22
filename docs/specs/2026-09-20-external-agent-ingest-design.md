@@ -383,6 +383,85 @@ u_alice 实例 reload → 0；她的列表 []；她的 recall []
 | `IngestReport.owner_of_run` | 定义于 `intake.py` | 0 | CLI 走的是 `sessions.ingested_run_owners` |
 | `_stats["supersede_unresolved_count"]` | 导入侧累计 | `get_stats()` 不返回 | 唯一读它的是测试读私有 `_stats` |
 
+### 7.8 2026-09-22 对账批（① reload 双向对账 / ② 记忆属主 / ③ 产物属主与注册表持久化）
+
+用户拍板三条（"① 跨进程撤销走 reload 双向对账；② 记忆写入口也加属主参数；
+③ 产物属主与注册表持久化与②同批做（含'会话属主是否等同于产物属主'）"）后落地。
+三条都在**产生非法状态的一侧**修，不在下游加兜底判断。
+
+**① 跨进程撤销：reload 双向对账**
+
+根因（§7.7 断点①）：`reload_memories` 只单向并入，而写路径（`update_memory` /
+`remember`）命中内存快照后一律 `_persist_upsert` 直接落盘——运行实例能拿一份已被
+撤销的行覆盖盘上事实。
+
+- `MemoryManager.reload_memories()` 改为**与盘对账**：既并入盘上新增的行，也回收
+  盘上已消失的行（判据与并入对称：业务 id + 行自带三元组）。读盘成功之前不回收——
+  读失败时"盘上没有"是未知而不是事实。
+- 回收同步摘除召回面（`_drop_from_recall_indexes`，与 `forget` 同一处收口）与内容门
+  键（只撤指向该行的那一条），不留指向不存在记忆的残留文档。
+- 复活路径断在**上游**：回收后 `update_memory` 找不到该 id，自然返回 `False`——
+  不在写路径加"内存里还有没有"这类判断。
+- 读数从 `int` 改为 `{"reloaded", "reaped"}`（只报真实发生量，幂等时各自为 0），
+  端点 `POST /v1/memory/reload`、前端 API/页面提示（`+并入 / -回收`）、11 份 locale
+  的 `memory.reloadHint` 同批对齐（写入 → 读取 → 反馈闭环）。
+
+**② 记忆写入口的属主**
+
+根因（§7.7 断点②）：`apply --owner-user-id` 只被会话写入口消费，同一支包里的记忆行
+三元组取**调用现场**作用域（CLI 下即 `default/default`）——为他人导入的会话有主、
+记忆无主，属主实例按三层隔离检索看不见。
+
+- `MemoryManager.import_memories(..., owner_user_id="")`：非空时**两轴同定标**
+  （只写一轴等于让隔离的第二轴回落调用现场）；缺省仍取调用现场作用域，既有调用方
+  口径不变。
+- `apply_bundle` 把同一个 `owner_user_id` 交给两条咽喉（会话面 + 记忆面），闭环。
+- 同批收口两处同源命中点（**放大视角**）：
+  1. **幂等键按行作用域分槽**——`identity_key` 是"这段历史的身份"，行三元组是
+     "这段历史是谁的"；按全局键去重会让同一份历史导给第二个人静默回落成 skipped
+     （报告 +0、他的列表为空），而盘上本应各留一行；
+  2. **取代声明在本批行作用域里找旧行**——属主导入的取代若按调用现场作用域去找，
+     跨上下文导入时永远落成"声明了却找不到目标"。
+
+**③ 产物属主与注册表持久化**
+
+根因（§7.7 断点③）：条目不带 `user_id`（读端按它判归属 → 任何已登录用户一律 404，
+包括属主自己）；注册表无持久化（条目一丢，内容端点全 404，而文件本体与会话消息里
+记着的 `artifact_id` 都还在）。
+
+- **会话属主与产物属主的关系（本批定下）**：同一批导入里**取值同源**（都取
+  `apply --owner-user-id` 那一个值——这段历史是同一个人的，它的证据文件当然也是他
+  的），但**不是同一个判据、不合并成一个字段也不互相推导**：会话属主落在会话文件
+  `user_id`（会话写入口维护），产物属主落在条目 `user_id`（运行期产物来自请求身份，
+  与"批次属主"无关）。
+- 共享语义**显式化**：批次没给属主时条目落 `shared=True`，读端据此放行任何已登录
+  用户。**不写"空属主=共享"的隐式规则**（那是会话面 `list_sessions` 的口径）——
+  既无属主又无共享标记的条目一律 404，漏写属主必须落成诚实 404，不许被静默放宽。
+- 注册表与 `files_api._files_store` 同一套做法与同一个库（数据根 `users.db`），
+  各用各的表：写穿 / 删除 / 启动水合（`app.py` 与水合同一处），丢盘条目在启动时清理。
+  落点**调用时**解析数据根——模块导入期取值会让 `NEUROVA_DATA_DIR` 注入失效。
+- 幂等复用不得丢归属：先注册时没带属主、后一次带了（导入场景常见），原地回填并写穿。
+
+判据（三个文件，先红后绿，红灯实测输出见提交说明）：
+`tests/unit/cognitive_layers/memory_layer/test_reload_reconciles_with_disk.py`（回收、
+撤回写不再复活、回收幂等、不误伤本进程行、倒排同步摘除）、
+`tests/unit/memory_ingest/test_import_memory_owner.py`（两轴同定标、属主可见/非属主
+不可见、缺省取现场、撤销仍按行删净、端到端透传、CLI 面、幂等键分槽、取代在属主作用域）、
+`tests/unit/api/test_artifact_owner_persistence.py`（条目带属主/共享显式、读端三种
+放行、漏写仍 404、水合往返、丢盘清理、坏库不阻塞）。
+
+live-verify（真 CLI 子进程 + 真 intake + 真注册表 + 真读端点 + 真 MemoryManager）：
+
+```
+apply --owner-user-id u_alice --yes
+  → 消息 +1/跳过 0、记忆 +1/跳过 0；会话属主 ['u_alice']
+  → 记忆行三元组 ('lv-agent','u_alice','u_alice')；产物条目 {'user_id':'u_alice','shared':False}
+u_alice 列表 ['cli 导入的属主记忆'] ｜ u_bob 列表 []
+u_alice 读 /v1/artifacts/{id}/content → 200 ｜ u_bob → 404
+清内存后水合 → 1 条、属主 u_alice
+另一进程撤销 → reload {'reloaded': 0, 'reaped': 1} → 列表 []、按 id 改动 False
+```
+
 ### 7.2 常驻判据
 
 - 转换器：每族一个合成 fixture 正例 + 一个"像但不是"的负例；黄金 bundle 摘要进 CI。
@@ -433,20 +512,15 @@ v1 的记录类型边界（避免接口悬空）
 - 已核不是问题（勿重修，2026-09-21 批次反证）：源的 WAL sidecar 不由识别与转换读取（只读 URI 打开
   主库即可，`-wal`/`-shm` 缺席也不影响）；非 UTF-8 行由各读点的 `errors="replace"` 承接，
   识别与包产出都不会因此崩；`probe._structure` 对打不开的库回 `{"error": ...}` 而非空结构。
-- 导入媒体在**运行中的服务**里看不见（2026-09-22 复核，取证见 §7.7 断点③）：intake 把字节落进
-  `agent_workspaces/<agent>/media/` 并按注册处同一算法给出 `metadata.artifacts` 条目，但该条目
-  **不带 `user_id`**，而读端 `artifacts_api._get_owned_artifact` 按 `user_id` 判归属 →
-  任何已登录用户请求 `/v1/artifacts/{id}/content` 一律 404；产物注册表 `_artifacts_store` 亦无持久化
-  （`app.py` 只水合 `files_api`），跨进程不共享。两处都得修才有可读的媒体：条目补归属 + 注册表持久化。
-  原指引"预存缺口见 `test_files_store_persistence.py` 的红"已失真（该文件 4 passed，且测的是 `files_api`）。
-  修法均需拍板（属主口径要先定"会话属主是否等同于产物属主"），本轮登记不改。
-- 跨进程撤销不闭环（2026-09-22 复核，取证见 §7.7 断点①）：另一进程 `undo` 只删盘，运行中的实例
-  仍持该行且可经 `update_memory`/`remember` 把它写回盘上（实测 0 → 1 行、重开实例复活）。
-  根因是 `reload_memories` 单向并入 + 写路径以内存快照为准，不是实现走样；修法（撤销后要求重启，
-  或让 reload 做双向对账以盘为准）属产品决定。
-- `apply --owner-user-id` 只覆盖会话面（2026-09-22 复核，取证见 §7.7 断点②）：同一支包里记忆行的
-  三元组取**调用现场**作用域（CLI 下即 default/default），为他人导入的会话有主而记忆无主，
-  按作用域检索看不见。与 F-04 同源、落在另一条咽喉上，需拍板。
+- ~~导入媒体在运行中的服务里看不见~~（2026-09-22 复核；**已收口**，见 §7.8 ③）：条目补归属
+  （共享批次显式 `shared=True`）、注册表写穿+启动水合、读端不许静默放行漏写属主；
+  "会话属主是否等同于产物属主"的口径见 §7.8。
+  原指引"预存缺口见 `test_files_store_persistence.py` 的红"已失真（该文件 4 passed，
+  且测的是 `files_api`），该指引已改正。
+- ~~跨进程撤销不闭环~~（2026-09-22 复核；**已拍板"走 reload 双向对账"并收口**，见 §7.8 ①）：
+  另一进程 `undo` 删盘后，reload 回收该行，复活路径（`update_memory` 写回盘）随之断掉。
+- ~~`apply --owner-user-id` 只覆盖会话面~~（2026-09-22 复核；**已拍板并收口**，见 §7.8 ②）：
+  记忆写入口现也收属主，两轴同定标，同一个旗标管两条咽喉。
 - UI 导入路（`/memory-enhancement/import`）不可撤销且幂等读数不诚实（2026-09-22 复核，见 §7.7 断点④）：
   行不带 `ingest_run_id`（`delete_ingested_memories` 返回 0）；同一句重复导入两次响应均报
   `imported: 1`，而真库行数恒 1。
