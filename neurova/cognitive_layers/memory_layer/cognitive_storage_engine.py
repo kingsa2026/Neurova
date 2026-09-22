@@ -25,6 +25,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from neurova.core.data_root import get_agent_data_dir
+from neurova.core.sql_like import likePattern, likePredicate
 
 logger = get_logger(__name__)
 
@@ -482,16 +483,17 @@ class CognitiveStorageEngine:
                     (query, limit),
                 ).fetchall()
             except sqlite3.OperationalError:
-                # Fallback to LIKE search
+                # Fallback to LIKE search（`%` `_` `\` 经单一事实源转义——
+                # 直拼 f"%{query}%" 会把用户输入当通配模式）
                 rows = self._db.execute(
                     """SELECT id, content, memory_type, category,
                               temperature, layer, metadata, embedding,
                               created_at, updated_at, access_count, trace_id
                        FROM memories
-                       WHERE content LIKE ?
+                       WHERE """ + likePredicate("content") + """
                        ORDER BY temperature DESC
                        LIMIT ?""",
-                    (f"%{query}%", limit),
+                    (likePattern(query), limit),
                 ).fetchall()
 
             for row in rows:

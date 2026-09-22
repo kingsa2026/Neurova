@@ -9,6 +9,8 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
+from neurova.core.sql_like import likePattern, likePredicate
+
 from .models import (
     AgentInfo,
     ExecutionInstance,
@@ -691,8 +693,9 @@ class NeurflowStorage:
         refs: List[str] = []
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, nodes_json FROM workflows WHERE id != ? AND nodes_json LIKE ?",
-                (workflow_id, f'%"{workflow_id}"%'),
+                "SELECT id, nodes_json FROM workflows"
+                " WHERE id != ? AND " + likePredicate("nodes_json"),
+                (workflow_id, likePattern('"%s"' % workflow_id)),
             ).fetchall()
         for row in rows:
             try:
@@ -830,7 +833,7 @@ class NeurflowStorage:
             匹配的工作流定义列表
         """
         with self._lock:
-            search_pattern = f"%{query}%"
+            search_pattern = likePattern(query)
             scope = ""
             params: list = []
             if requester_id is not None and not is_admin:
@@ -842,12 +845,13 @@ class NeurflowStorage:
                     vis_params.extend(sorted(project_ids))
                 scope = f" AND ({' OR '.join(vis)})"
                 params.extend(vis_params)
+            where = likePredicate(("name", "description", "tags_json"))
             cursor = self._conn.execute(
                 f"""
                 SELECT * FROM workflows
-                WHERE (name LIKE ? OR description LIKE ? OR tags_json LIKE ?){scope}
+                WHERE ({where}){scope}
                 ORDER BY updated_at DESC
-            """,
+                """,
                 (search_pattern, search_pattern, search_pattern, *params),
             )
 
@@ -1238,11 +1242,11 @@ class NeurflowStorage:
             匹配的节点定义列表
         """
         with self._lock:
-            search_pattern = f"%{query}%"
+            search_pattern = likePattern(query)
             cursor = self._conn.execute(
                 """
-                SELECT * FROM node_definitions 
-                WHERE label LIKE ? OR description LIKE ? OR tags_json LIKE ?
+                SELECT * FROM node_definitions
+                WHERE (""" + likePredicate(("label", "description", "tags_json")) + """)
                 ORDER BY type
             """,
                 (search_pattern, search_pattern, search_pattern),
