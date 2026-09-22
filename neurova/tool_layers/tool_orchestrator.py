@@ -1,17 +1,22 @@
-"""
-ToolOrchestrator v1.0.0 — DAG 工具编排器 (Phase 3 P3-1b)
+"""DAG 工具编排器。
 
-职责:
-- 从目标能力描述自动构建 DAG 执行计划
-- 按拓扑顺序分层并行执行工具
-- 处理失败降级、步骤依赖等待
-- 导出编排结果（成功/失败/耗时/步骤详情）
+职责：
+- 从目标能力描述或显式步骤表构建 DAG 执行计划；
+- 按拓扑顺序分层并行执行（层内并发受 `_max_parallel` 约束）；
+- 上游失败时下游步进显式记 `SKIPPED`，不许静默缺席；
+- 导出编排结果（状态 / 耗时 / 逐步骤详情）。
 
-架构:
+架构：
     用户目标 ──▶ CapabilityGraph ──▶ DAG 执行计划
+
+生产消费方是工具面的 `orchestrate_tools` 内置工具（`ToolExecutor._execute_orchestrate_tools`）：
+编排器本身不含执行能力，每一个步进都经执行咽喉（票据 / `on_tool_executed` / 治理预检 /
+hooks / per-tool 超时全链生效）。编排器**不可重入**——嵌套编排在同一条执行链上会无限
+自我递归，故以 ContextVar 记账并在入口拒绝。
 """
 
 import asyncio
+from contextvars import ContextVar
 from neurova.core.logger import get_logger
 import time
 import typing
@@ -23,6 +28,14 @@ from neurova.tool_layers.capability_graph import ToolCapabilityGraph
 from neurova.tool_layers.types import ExecutionStatus
 
 logger = get_logger(__name__)
+
+#: 编排重入深度（单条执行链上的 ContextVar 记账）。
+#: 嵌套编排会让编排器在内层再次调用自己，形成无界递归；这里只记「是否已在编排中」，
+#: 不做并发上限——同一 agent 的两次独立对话互不影响（ContextVar 随任务上下文复制）。
+_orchestrationDepth: ContextVar[int] = ContextVar("neurova_orchestration_depth", default=0)
+
+#: 单次编排的步进上限（与工具面 schema 同源约束，防止一次调用无界 fan-out）。
+MAX_ORCHESTRATION_STEPS = 12
 
 
 @dataclass
@@ -69,111 +82,214 @@ class OrchestrationResult:
         }
 
 
-class ToolOrchestrator:
+class OrchestrationStep:
+    """一步编排的声明（工具面上的最小单元）。
+
+    只承载声明，不含执行状态；执行状态落在 `StepResult`。
     """
-    DAG 工具编排器
+
+    def __init__(
+        self,
+        tool_name: str,
+        params: typing.Optional[typing.Dict[str, typing.Any]] = None,
+        depends_on: typing.Optional[typing.List[str]] = None,
+    ) -> None:
+        self.tool_name = tool_name
+        self.params = dict(params or {})
+        self.depends_on = list(depends_on or [])
+
+    @classmethod
+    def coerce(cls, raw: typing.Any) -> typing.Optional["OrchestrationStep"]:
+        """把外部传入的步骤归一成 `OrchestrationStep`；不合法返回 None。
+
+        接受两种既有形态：纯工具名（str）与 `{"tool": …, "params": …, "depends_on": …}`。
+        不合法形态返回 None 而不是就地兜底——调用方据此点名拒绝。
+        """
+        if isinstance(raw, cls):
+            return raw
+        if isinstance(raw, str):
+            return cls(raw) if raw.strip() else None
+        if not isinstance(raw, dict):
+            return None
+        tool_name = str(raw.get("tool") or raw.get("name") or "").strip()
+        if not tool_name:
+            return None
+        params = raw.get("params")
+        if params is None:
+            params = {}
+        if not isinstance(params, dict):
+            return None
+        depends = raw.get("depends_on")
+        if depends is None:
+            depends = []
+        if isinstance(depends, str):
+            depends = [depends]
+        if not isinstance(depends, list):
+            return None
+        return cls(tool_name, params, [str(dep) for dep in depends])
+
+    def to_dict(self) -> typing.Dict[str, typing.Any]:
+        return {"tool": self.tool_name, "params": self.params, "depends_on": self.depends_on}
+
+
+class ToolOrchestrator:
+    """DAG 工具编排器。
 
     功能：
-    1. 从目标自动构建执行计划
-    2. 按拓扑顺序执行工具
-    3. 支持失败降级
-    4. 支持并行执行（如果工具无依赖）
+    1. 从目标构建执行计划（能力图 → 承接工具）
+    2. 按拓扑分层执行（层内并行，受 `_max_parallel` 约束）
+    3. 上游失败时下游步进显式记 `SKIPPED`
+    4. 成败判据单源（委托执行器的 `_result_is_success`）
+
+    执行器由 `set_executor` 注入；生产上是工具面 `orchestrate_tools` 的委托对象。
     """
 
-    def __init__(self):
-        """初始化编排器"""
-        self._executor = None
-        self._capability_graph = ToolCapabilityGraph()
-        self._step_timeout = 30.0  # 单步超时（秒）
-        self._max_parallel = 5  # 最大并行数
-
-    def set_executor(self, executor: typing.Any) -> None:
-        """设置工具执行器"""
-        self._executor = executor
-
-    def build_plan_from_goal(self, goal: str) -> typing.List[str]:
-        """
-        从目标构建执行计划
+    def __init__(self, max_parallel: int = 5, step_timeout: float = 30.0):
+        """初始化编排器
 
         参数:
-            goal: 用户目标描述
-
-        返回:
-            工具执行顺序列表
+            max_parallel: 层内并发上限
+            step_timeout: 单步超时（秒）
         """
-        # 解析目标为能力列表
+        self._executor = None
+        self._capability_graph = ToolCapabilityGraph()
+        self._step_timeout = float(step_timeout)
+        self._max_parallel = max(1, int(max_parallel))
+
+    def set_executor(self, executor: typing.Any) -> None:
+        """设置工具执行器（接受纯 async 可调用，或暴露 `execute` 的对象）。"""
+        self._executor = executor
+
+    async def _invoke_executor(
+        self, tool_name: str, params: typing.Dict[str, typing.Any]
+    ) -> typing.Any:
+        """调用执行器——两种形态在这里**一处**归一，不在上层分叉。
+
+        形态一：`self._executor` 本身是可调用（生产形态，工具面委托的对象）；
+        形态二：`self._executor` 暴露 `execute`（早期形态）。判据是「拿得出可调用的
+        `execute` 就优先用它」——`unittest.mock.Mock` 本身可调用，先判可调用会把
+        Mock 的自动属性当成真的执行体。
+        """
+        execute = getattr(self._executor, "execute", None)
+        target = execute if callable(execute) else self._executor
+        if not callable(target):
+            raise TypeError("执行器既不可调用也不暴露 execute(tool_name, params)")
+        outcome = target(tool_name, params)
+        return await outcome if asyncio.iscoroutine(outcome) else outcome
+
+    def is_orchestrating(self) -> bool:
+        """当前执行链是否已在编排中（工具面据此拒绝自嵌套）。"""
+        return _orchestrationDepth.get() > 0
+
+    def build_plan_from_goal(self, goal: str) -> typing.List[str]:
+        """从目标构建执行计划（工具名列表）。
+
+        读不懂目标时返回**空表**——把「读不懂」静默换成一个无关工具，
+        会让调用方把弃权当成一条已规划好的链路。
+        """
         capabilities = self._resolve_goal_to_capabilities_sync(goal)
+        if not capabilities:
+            return []
+        tools = self._capability_graph.tools_for_capabilities(capabilities)
+        if not tools:
+            return []
+        return self._capability_graph.build_execution_plan(tools)
 
-        # 使用能力图构建执行计划——能力名先经 capability_index 映射为承载
-        # 工具再入计划（残留处理 2026-09-13：原实现把能力名直接当
-        # target_tools 传 build_execution_plan，参数语义错配=恒空/污染计划）
-        if capabilities:
-            tools = self._capability_graph.tools_for_capabilities(capabilities)
-            if tools:
-                return self._capability_graph.build_execution_plan(tools)
-
-        # 如果无法解析，返回默认计划
-        return []
+    def normalize_steps(self, raw_steps: typing.Any) -> typing.List[OrchestrationStep]:
+        """归一外部步骤表；不合法即抛 `ValueError`（诚实形态，不静默丢弃）。"""
+        if not isinstance(raw_steps, (list, tuple)):
+            raise ValueError("steps 必须是列表")
+        if not raw_steps:
+            raise ValueError("steps 不能为空")
+        if len(raw_steps) > MAX_ORCHESTRATION_STEPS:
+            raise ValueError(
+                f"steps 步进数 {len(raw_steps)} 超过上限 {MAX_ORCHESTRATION_STEPS}"
+            )
+        steps: typing.List[OrchestrationStep] = []
+        for index, raw in enumerate(raw_steps):
+            step = OrchestrationStep.coerce(raw)
+            if step is None:
+                raise ValueError(f"第 {index} 步格式错误：需要工具名或 {{tool, params, depends_on}} 形态")
+            steps.append(step)
+        return steps
 
     async def orchestrate(
         self,
         goal: str,
         context: typing.Optional[typing.Dict] = None,
-        tool_plan: typing.Optional[typing.List[str]] = None,
+        tool_plan: typing.Optional[typing.List] = None,
     ) -> OrchestrationResult:
-        """
-        编排执行
+        """编排执行。
 
         参数:
-            goal: 用户目标
-            context: 执行上下文
-            tool_plan: 直接传入的工具执行计划（跳过 goal 解析）
+            goal: 用户目标（`tool_plan` 为 None 时用于构建计划）
+            context: 执行上下文（并入每步 params 的 `_context`）
+            tool_plan: 显式步骤表（工具名、或 `{tool, params, depends_on}`）
 
         返回:
-            编排结果
+            编排结果；读不懂目标/无可执行计划时 `FAILED` 且点名原因。
         """
         start_time = time.time()
+        if self.is_orchestrating():
+            return OrchestrationResult(
+                goal=goal,
+                status=ExecutionStatus.FAILED,
+                error="嵌套编排被拒绝：编排器不可重入（同一条执行链上会无限递归）",
+                total_duration_ms=(time.time() - start_time) * 1000,
+            )
 
         try:
-            # 构建执行计划：优先使用直接传入的 plan，否则从 goal 解析
-            plan = tool_plan if tool_plan is not None else self.build_plan_from_goal(goal)
+            steps = self._resolve_steps(goal, tool_plan)
+        except ValueError as invalid:
+            return OrchestrationResult(
+                goal=goal,
+                status=ExecutionStatus.FAILED,
+                error=str(invalid),
+                total_duration_ms=(time.time() - start_time) * 1000,
+            )
 
-            if not plan:
-                return OrchestrationResult(
-                    goal=goal,
-                    status=ExecutionStatus.FAILED,
-                    error="No execution plan could be built from goal",
-                    total_duration_ms=(time.time() - start_time) * 1000,
-                )
+        if not steps:
+            return OrchestrationResult(
+                goal=goal,
+                status=ExecutionStatus.FAILED,
+                error="No execution plan could be built from goal",
+                total_duration_ms=(time.time() - start_time) * 1000,
+            )
 
-            # 将 plan 分成可并行执行的层
-            layers = self._partition_plan_into_layers(plan)
-
-            step_results = []
-            step_counter = 0
+        token = _orchestrationDepth.set(_orchestrationDepth.get() + 1)
+        self._step_outputs = {}
+        try:
+            layers = self._partition_plan_into_layers(steps)
+            step_results: typing.List[StepResult] = []
+            offset = 0
+            blocked: typing.Set[str] = set()
 
             for layer in layers:
-                layer_results = await self._execute_layer(layer, step_counter, context or {})
-                step_results.extend(layer_results)
-                step_counter += len(layer)
+                runnable = [step for step in layer if not (blocked & set(step.depends_on))]
+                skipped = [step for step in layer if step not in runnable]
+                for step in skipped:
+                    blocked.add(step.tool_name)
+                    step_results.append(
+                        StepResult(
+                            step_id=f"step_{offset + layer.index(step)}",
+                            tool_name=step.tool_name,
+                            status=ExecutionStatus.SKIPPED,
+                            error="上游依赖失败，本步未执行",
+                        )
+                    )
+                if runnable:
+                    layer_results = await self._execute_layer(
+                        runnable, offset, context or {}
+                    )
+                    step_results.extend(layer_results)
+                    for result in layer_results:
+                        if result.status is not ExecutionStatus.COMPLETED:
+                            blocked.add(result.tool_name)
+                offset += len(layer)
 
-                # 检查本层是否有失败且降级也失败的步骤
-                for result in layer_results:
-                    if result.status == ExecutionStatus.FAILED:
-                        # 降级已在 _execute_layer 内部处理
-                        # 如果仍然失败，整个编排失败
-                        if result.error and "fallback also failed" in result.error:
-                            return OrchestrationResult(
-                                goal=goal,
-                                status=ExecutionStatus.FAILED,
-                                steps=step_results,
-                                total_duration_ms=(time.time() - start_time) * 1000,
-                                error=f"Step {result.step_id} failed and fallback also failed",
-                            )
-
-            # 检查所有步骤是否成功
-            all_success = all(s.status == ExecutionStatus.COMPLETED for s in step_results)
-
+            all_success = all(
+                step.status is ExecutionStatus.COMPLETED for step in step_results
+            )
             return OrchestrationResult(
                 goal=goal,
                 status=ExecutionStatus.COMPLETED if all_success else ExecutionStatus.FAILED,
@@ -181,156 +297,136 @@ class ToolOrchestrator:
                 total_duration_ms=(time.time() - start_time) * 1000,
                 error=None if all_success else "Some steps failed",
             )
-
-        except Exception as e:
-            logger.error("Orchestration failed: %s", e)
+        except Exception as exc:  # noqa: BLE001 - 编排整体异常须以结果形态返回
+            logger.error("Orchestration failed: %s", exc)
             return OrchestrationResult(
                 goal=goal,
                 status=ExecutionStatus.FAILED,
                 total_duration_ms=(time.time() - start_time) * 1000,
-                error=str(e),
+                error=str(exc),
             )
+        finally:
+            self._step_outputs = {}
+            _orchestrationDepth.reset(token)
 
-    def _partition_plan_into_layers(self, plan: typing.List[str]) -> typing.List[typing.List[str]]:
+    def _resolve_steps(
+        self, goal: str, tool_plan: typing.Optional[typing.List]
+    ) -> typing.List[OrchestrationStep]:
+        """把 goal / tool_plan 归一成步骤表（不合法即抛 ValueError）。"""
+        if tool_plan is not None:
+            return self.normalize_steps(tool_plan)
+        return [OrchestrationStep(name) for name in self.build_plan_from_goal(goal)]
+
+    def _partition_plan_into_layers(
+        self, plan: typing.List[OrchestrationStep]
+    ) -> typing.List[typing.List[OrchestrationStep]]:
+        """把步骤表分层：同层内的步进相互无依赖，可并行。
+
+        依赖来源两处合一：显式声明的 `depends_on` 优先，其次取能力图里该工具的前置。
+        落在计划**之外**的图依赖不参与分层——否则单步计划会被图里早就退役的前置
+        拖进「无法解析依赖」的兜底层。
         """
-        将执行计划分层：同一层内的工具无相互依赖，可以并行执行
-
-        参数:
-            plan: 拓扑排序后的工具计划
-
-        返回:
-            分层列表，每层包含可并行执行的工具
-        """
-        layers = []
+        declared = {step.tool_name: self._dependency_names(step) for step in plan}
+        in_plan = set(declared)
+        layers: typing.List[typing.List[OrchestrationStep]] = []
         remaining = list(plan)
 
         while remaining:
-            # 找出当前所有依赖都已在前面层中完成的工具
-            current_layer = []
-            executed = set()
-            for layer in layers:
-                executed.update(layer)
-
-            for tool in remaining:
-                node = self._capability_graph.get_node(tool)
-                if not node:
-                    # 未知工具放在当前层（无法解析依赖）
-                    current_layer.append(tool)
-                    continue
-
-                # 检查所有依赖是否都已执行
-                deps_met = all(dep in executed for dep in node.dependencies)
-                if deps_met:
-                    current_layer.append(tool)
-
-            if not current_layer:
-                # 防止无限循环：如果无法找到可执行的工具，剩余全部放入下一层
-                logger.warning("Cannot resolve dependencies for: %s", remaining)
-                current_layer = remaining[:]
-
-            layers.append(current_layer)
-            # 从 remaining 中移除当前层的工具
-            for tool in current_layer:
-                if tool in remaining:
-                    remaining.remove(tool)
+            executed = {step.tool_name for layer in layers for step in layer}
+            current: typing.List[OrchestrationStep] = []
+            for step in remaining:
+                deps = {dep for dep in declared[step.tool_name] if dep in in_plan}
+                if deps <= executed:
+                    current.append(step)
+            if not current:
+                current = list(remaining)
+                logger.warning(
+                    "Cannot resolve dependencies for: %s",
+                    [step.tool_name for step in remaining],
+                )
+            layers.append(current)
+            current_names = {step.tool_name for step in current}
+            remaining = [step for step in remaining if step.tool_name not in current_names]
 
         return layers
 
+    def _dependency_names(self, step: OrchestrationStep) -> typing.List[str]:
+        """步进的前置工具名：显式声明优先，否则取能力图。"""
+        if step.depends_on:
+            return list(step.depends_on)
+        node = self._capability_graph.get_node(step.tool_name)
+        return list(node.dependencies) if node else []
+
+    @staticmethod
+    def _render_params(
+        params: typing.Dict[str, typing.Any], step_outputs: typing.Dict[int, typing.Any]
+    ) -> typing.Dict[str, typing.Any]:
+        """`{step_<idx>.<field>}` 占位符渲染（**单源**在既有技能序列解释器）。
+
+        占位符约定不是本模块的私有语法：`ToolSequenceSkill` 早已按同一约定解释它。
+        此处直接复用那份实现，不在编排器里再写一遍解析（教义第 6 条）。
+        """
+        from neurova.skill_system import ToolSequenceSkill
+
+        return ToolSequenceSkill._render_params(params, step_outputs)
+
     async def _execute_layer(
-        self, layer: typing.List[str], step_offset: int, context: typing.Dict[str, typing.Any]
+        self,
+        layer: typing.List[OrchestrationStep],
+        step_offset: int,
+        context: typing.Dict[str, typing.Any],
     ) -> typing.List[StepResult]:
-        """
-        执行一层工具（层内并行）
+        """执行一层步进（层内并发受 `_max_parallel` 约束）。"""
+        semaphore = asyncio.Semaphore(self._max_parallel)
 
-        参数:
-            layer: 本层工具列表
-            step_offset: 步骤 ID 偏移
-            context: 执行上下文
-
-        返回:
-            本层所有工具的执行结果
-        """
-        if len(layer) == 1:
-            # 单个工具直接执行
-            result = await self._execute_step(f"step_{step_offset}", layer[0], context)
-
-            # 失败降级
-            if result.status == ExecutionStatus.FAILED:
-                fallback_result = await self._try_fallback(f"step_{step_offset}", layer[0], context, result.error)
-                if fallback_result.status == ExecutionStatus.COMPLETED:
-                    return [fallback_result]
-                else:
-                    return [
-                        StepResult(
-                            step_id=result.step_id,
-                            tool_name=result.tool_name,
-                            status=ExecutionStatus.FAILED,
-                            error=f"{result.error} | fallback also failed: {fallback_result.error}",
-                        )
-                    ]
-
-            return [result]
-
-        # 多个工具并行执行
-        min(len(layer), self._max_parallel)
-
-        # 构建所有任务
-        tasks = []
-        for i, tool_name in enumerate(layer):
-            step_id = f"step_{step_offset + i}"
-            tasks.append(self._execute_step(step_id, tool_name, context))
-
-        # 使用 asyncio.gather 并行执行
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # 处理结果和异常
-        final_results = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                step_id = f"step_{step_offset + i}"
-                final_results.append(
-                    StepResult(step_id=step_id, tool_name=layer[i], status=ExecutionStatus.FAILED, error=str(result))
+        async def _run(index: int, step: OrchestrationStep) -> StepResult:
+            async with semaphore:
+                params = self._render_params(step.params, step_outputs)
+                return await self._execute_step(
+                    f"step_{step_offset + index}", step.tool_name, params, context
                 )
-            else:
-                # 失败降级
-                if result.status == ExecutionStatus.FAILED:
-                    fallback_result = await self._try_fallback(result.step_id, result.tool_name, context, result.error)
-                    if fallback_result.status == ExecutionStatus.COMPLETED:
-                        final_results.append(fallback_result)
-                    else:
-                        final_results.append(
-                            StepResult(
-                                step_id=result.step_id,
-                                tool_name=result.tool_name,
-                                status=ExecutionStatus.FAILED,
-                                error=f"{result.error} | fallback also failed: {fallback_result.error}",
-                            )
-                        )
-                else:
-                    final_results.append(result)
 
-        return final_results
+        step_outputs: typing.Dict[int, typing.Any] = getattr(self, "_step_outputs", {})
+
+        results = await asyncio.gather(
+            *(_run(index, step) for index, step in enumerate(layer)),
+            return_exceptions=True,
+        )
+
+        final: typing.List[StepResult] = []
+        for index, outcome in enumerate(results):
+            if isinstance(outcome, BaseException):
+                final.append(
+                    StepResult(
+                        step_id=f"step_{step_offset + index}",
+                        tool_name=layer[index].tool_name,
+                        status=ExecutionStatus.FAILED,
+                        error=str(outcome),
+                    )
+                )
+                continue
+            if outcome.status is ExecutionStatus.COMPLETED:
+                final.append(outcome)
+                if outcome.output is not None:
+                    step_outputs[step_offset + index] = outcome.output
+                continue
+            step = layer[index]
+            final.append(
+                await self._try_fallback(
+                    outcome.step_id, step.tool_name, step.params, outcome.error or "", context
+                )
+            )
+        return final
 
     def _resolve_goal_to_capabilities_sync(self, goal: str) -> typing.List[str]:
-        """
-        同步版本：解析目标为能力列表
+        """解析目标为能力列表。
 
-        使用词边界匹配避免子串误匹配（如 "search" 中包含 "read"）。
-        多个匹配规则之间按优先级排列，独立检测。
-
-        参数:
-            goal: 用户目标
-
-        返回:
-            能力列表
+        词边界匹配（避免 "search" 命中 "read"）。**读不懂就返回空表**：
+        历史实现兜底成 `process_data`，把「没听懂」变成「跑个无关工具」。
         """
         import re
 
-        goal_lower = goal.lower()
-        capabilities = []
-
-        # 使用 word-boundary 正则避免子串误匹配
-        # 每个模式独立匹配，支持多个能力共存
+        goal_lower = (goal or "").lower()
         patterns = [
             (r"\bread\b", "read_file"),
             (r"\bwrite\b", "write_file"),
@@ -344,190 +440,149 @@ class ToolOrchestrator:
             (r"\bfetch\b.*\burl\b", "search_web"),
             (r"\bexecute\b.*\bcode\b", "run_code"),
             (r"\brun\b.*\b(code|script)\b", "run_code"),
+            (r"\bcalculate\b", "calculate"),
+            (r"\bplan\b", "plan_task"),
         ]
 
-        seen = set()
+        capabilities: typing.List[str] = []
+        seen: typing.Set[str] = set()
         for pattern, capability in patterns:
             if re.search(pattern, goal_lower) and capability not in seen:
                 capabilities.append(capability)
                 seen.add(capability)
-
-        # 宽泛回退：如果上面精确匹配没有命中
-        if not capabilities:
-            fallback_patterns = [
-                (r"\bsearch\b", "search_files"),
-                (r"\bfind\b", "search_files"),
-                (r"\bmemory\b", "search_memory"),
-                (r"\bcode\b", "run_code"),
-            ]
-            for pattern, capability in fallback_patterns:
-                if re.search(pattern, goal_lower) and capability not in seen:
-                    capabilities.append(capability)
-                    seen.add(capability)
-
-        # 最终兜底
-        if not capabilities:
-            capabilities = ["process_data"]
-
         return capabilities
 
-    async def _resolve_goal_to_capabilities(self, goal: str) -> typing.List[str]:
-        """
-        异步版本：解析目标为能力列表
-
-        参数:
-            goal: 用户目标
-
-        返回:
-            能力列表
-        """
-        # 这里可以调用 LLM 进行更智能的解析
-        return self._resolve_goal_to_capabilities_sync(goal)
-
-    async def _execute_step(self, step_id: str, tool_name: str, params: typing.Dict[str, typing.Any]) -> StepResult:
-        """
-        执行单个步骤
-
-        参数:
-            step_id: 步骤 ID
-            tool_name: 工具名称
-            params: 执行参数
-
-        返回:
-            步骤结果
-        """
+    async def _execute_step(
+        self,
+        step_id: str,
+        tool_name: str,
+        params: typing.Dict[str, typing.Any],
+        context: typing.Optional[typing.Dict[str, typing.Any]] = None,
+    ) -> StepResult:
+        """执行单个步骤。成败判据委托执行器声明（单源），不按「有没有抛异常」猜。"""
         start_time = time.time()
 
-        try:
-            # 检查执行器
-            if not self._executor:
-                return StepResult(
-                    step_id=step_id, tool_name=tool_name, status=ExecutionStatus.FAILED, error="No executor configured"
-                )
-
-            # 执行工具（带超时）
-            try:
-                output = await asyncio.wait_for(self._executor.execute(tool_name, params), timeout=self._step_timeout)
-            except asyncio.TimeoutError:
-                return StepResult(
-                    step_id=step_id,
-                    tool_name=tool_name,
-                    status=ExecutionStatus.TIMEOUT,
-                    duration_ms=(time.time() - start_time) * 1000,
-                    error=f"Step timed out after {self._step_timeout} seconds",
-                )
-
-            # 计算执行时间
-            duration_ms = (time.time() - start_time) * 1000
-
-            return StepResult(
-                step_id=step_id,
-                tool_name=tool_name,
-                status=ExecutionStatus.COMPLETED,
-                output=output,
-                duration_ms=duration_ms,
-            )
-
-        except Exception as e:
-            duration_ms = (time.time() - start_time) * 1000
-            logger.error("Step %s (%s) failed: %s", step_id, tool_name, e)
-
+        if not self._executor:
             return StepResult(
                 step_id=step_id,
                 tool_name=tool_name,
                 status=ExecutionStatus.FAILED,
-                duration_ms=duration_ms,
-                error=str(e),
+                error="No executor configured",
             )
 
+        call_params = dict(params or {})
+        if context:
+            call_params["_context"] = dict(context)
+
+        try:
+            output = await asyncio.wait_for(
+                self._invoke_executor(tool_name, call_params), timeout=self._step_timeout
+            )
+        except asyncio.TimeoutError:
+            return StepResult(
+                step_id=step_id,
+                tool_name=tool_name,
+                status=ExecutionStatus.TIMEOUT,
+                duration_ms=(time.time() - start_time) * 1000,
+                error=f"Step timed out after {self._step_timeout} seconds",
+            )
+        except Exception as exc:  # noqa: BLE001 - 单步异常转结果形态，不吞原因
+            logger.error("Step %s (%s) failed: %s", step_id, tool_name, exc)
+            return StepResult(
+                step_id=step_id,
+                tool_name=tool_name,
+                status=ExecutionStatus.FAILED,
+                duration_ms=(time.time() - start_time) * 1000,
+                error=str(exc),
+            )
+
+        duration_ms = (time.time() - start_time) * 1000
+        # 超时转后台的信封既不是成功也不是失败，而是**未完成**（工具仍在后台跑）。
+        # 它是 `tool_coordinator.run_with_timeout` 的显式状态，不是内容判据的第三种取值，
+        # 故不并入 `_result_is_success`（那会让判据承担两种语义）。
+        if isinstance(output, dict) and output.get("status") == "background":
+            return StepResult(
+                step_id=step_id,
+                tool_name=tool_name,
+                status=ExecutionStatus.TIMEOUT,
+                output=output,
+                duration_ms=duration_ms,
+                error="工具执行超时已转入后台，本轮未完成",
+            )
+
+        if not self._result_is_success(output):
+            return StepResult(
+                step_id=step_id,
+                tool_name=tool_name,
+                status=ExecutionStatus.FAILED,
+                output=output if isinstance(output, dict) else None,
+                duration_ms=duration_ms,
+                error=self._failure_reason(output),
+            )
+
+        return StepResult(
+            step_id=step_id,
+            tool_name=tool_name,
+            status=ExecutionStatus.COMPLETED,
+            output=output if isinstance(output, dict) else None,
+            duration_ms=duration_ms,
+        )
+
+    def _failure_reason(self, output: typing.Any) -> str:
+        """从工具返回里取失败原因；取不到时点名「工具自报失败」，不编造。"""
+        if isinstance(output, dict):
+            if output.get("error"):
+                return str(output["error"])
+            if output.get("status") == "background":
+                return "工具执行超时已转入后台，本轮未完成"
+            if output.get("success") is False:
+                return "工具自报 success=False"
+        return "工具自报失败"
+
+    @staticmethod
+    def _result_is_success(output: typing.Any) -> bool:
+        """成败判据单源：委托执行咽喉的 `_result_is_success`。
+
+        本模块不复写第二份内容判据（教义第 6 条）；`tool_executor` 与本模块
+        互为上下游，模块级互导会成环，故在此惰性取用。
+        """
+        from neurova.tool_executor import ToolExecutor
+
+        return ToolExecutor._result_is_success(output)
+
     async def _try_fallback(
-        self, step_id: str, primary_tool: str, params: typing.Dict[str, typing.Any], error: str
+        self,
+        step_id: str,
+        primary_tool: str,
+        params: typing.Dict[str, typing.Any],
+        error: str,
+        context: typing.Optional[typing.Dict[str, typing.Any]] = None,
     ) -> StepResult:
-        """
-        尝试降级执行
-
-        参数:
-            step_id: 步骤 ID
-            primary_tool: 主工具名称
-            params: 执行参数
-            error: 主工具错误信息
-
-        返回:
-            步骤结果
-        """
-        # 获取降级工具
+        """按能力图的降级关系重试一步；全失败则保留主因（不覆盖成兜底语义）。"""
         fallbacks = self._capability_graph.suggest_fallback(primary_tool)
+        primary_error = error or "unknown error"
+        if not fallbacks:
+            # 无降级路径时保留主因原文——报「all fallbacks failed」会让读者以为
+            # 试过若干兜底并全部失败，而事实是根本没有兜底。
+            return StepResult(
+                step_id=step_id,
+                tool_name=primary_tool,
+                status=ExecutionStatus.FAILED,
+                error=primary_error,
+            )
 
         for fallback_tool in fallbacks:
             logger.info("Trying fallback %s for %s", fallback_tool, primary_tool)
-
-            result = await self._execute_step(f"{step_id}_fallback", fallback_tool, params)
-
-            if result.status == ExecutionStatus.COMPLETED:
+            outcome = await self._execute_step(
+                f"{step_id}_fallback", fallback_tool, params or {}, context
+            )
+            if outcome.status is ExecutionStatus.COMPLETED:
                 logger.info("Fallback %s succeeded", fallback_tool)
-                return result
+                return outcome
 
-        # 所有降级都失败
         return StepResult(
             step_id=step_id,
             tool_name=primary_tool,
             status=ExecutionStatus.FAILED,
-            error=f"All fallbacks failed for {primary_tool}: {error}",
+            error=f"{primary_error} | all fallbacks failed",
         )
-
-    def _capability_to_dag(self, capabilities: typing.List[str]) -> typing.Dict[str, typing.List[str]]:
-        """
-        将能力列表转换为 DAG
-
-        参数:
-            capabilities: 能力列表
-
-        返回:
-            DAG 邻接表
-        """
-        dag = {}
-
-        for cap in capabilities:
-            # 找到拥有该能力的工具
-            tools = self._capability_graph._capability_index.get(cap, [])
-
-            if tools:
-                tool = tools[0]
-                node = self._capability_graph.get_node(tool)
-
-                if node:
-                    # 添加节点和依赖
-                    dag[tool] = list(node.dependencies)
-
-        return dag
-
-    def _can_run_in_parallel(
-        self, tool_name: str, previous_tools: typing.List[str], previous_results: typing.List[StepResult]
-    ) -> bool:
-        """
-        检查工具是否可以并行执行
-
-        参数:
-            tool_name: 工具名称
-            previous_tools: 之前执行的工具列表
-            previous_results: 之前执行的结果
-
-        返回:
-            是否可以并行执行
-        """
-        node = self._capability_graph.get_node(tool_name)
-        if not node:
-            return False
-
-        # 检查所有依赖是否已完成
-        for dep in node.dependencies:
-            if dep in previous_tools:
-                # 检查依赖是否成功
-                for result in previous_results:
-                    if result.tool_name == dep and result.status != ExecutionStatus.COMPLETED:
-                        return False
-            else:
-                # 依赖未执行，不能并行
-                return False
-
-        return True

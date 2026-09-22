@@ -564,3 +564,105 @@ $ pytest tests/unit/test_archive_nav_impact_guard.py -q
 
 幂等自证（生成器不空转重写）：把生成结果写回后逐字节不变——守卫
 `test_writer_is_idempotent_on_the_shipped_ledger` 即此判据，第二次重跑无差异。
+
+
+## 11. 第七轮：ToolOrchestrator 接线（Issue #80 续）
+
+来源：Issue #80 后续派发「接线 ToolOrchestrator」。
+
+### 11.1 断点：编排器是零消费方死链，接上去会连着三张假面一起接
+
+`tool_layers/tool_orchestrator.py`（DAG 工具编排器）此前是**零生产消费方**：`agent_core.py`
+按 005 的语义建了实例、注入了委托到咽喉的执行器，但全仓**没有任何地方**调用它的
+`orchestrate()`。003 票面自己写着「它本身是零调用方死链，本票不扩面（另票再议）」——
+那张另票一直不存在。协作红线明令「注册无消费者的模块」是断点形态，故本轮补上真实
+消费方：工具面新增 `orchestrate_tools` 内置工具，LLM 可直接发起多步编排。
+
+接线前先钉死了三张**假面**（不钉就接，接上的是必然失败的通路）：
+
+1. **假工具名**：默认能力图点名的 `code_execute` / `data_process` / `memory_save` /
+   `code_analyze` **从未注册过**（真实名是 `run_code` 等）。于是 `build_plan_from_goal`
+   产出的计划里混着永远「未知工具」的步进——能力图成了工具清单的**第二份定义**。
+   根修：默认图节点名改为 `_BUILTIN_SCHEMAS` 里的真实工具，并由守卫常驻拦截幻影名。
+2. **假兜底**：目标解析不出来时兜底成 `process_data`——把「读不懂目标」静默变成
+   「跑一个不存在的无关工具」，与教义第 2 条相反。根修：读不懂即返回空计划，入口
+   以 `FAILED` + 点名原因暴露；`orchestrate_tools` 在 steps/goal 都缺席（或 goal 规划不出
+   计划）时同样点名拒绝。
+3. **假成败**：`_execute_step` 只要不抛异常就记 COMPLETED，执行器已声明的
+   `{"success": False}` / `{"error": …}` 一律被抹成成功——同契约的成败判据分叉。
+   根修：判据**单源**委托咽喉的 `ToolExecutor._result_is_success`（本模块不复写第二份）；
+   超时转后台的 `{"status": "background"}` 信封既非成功也非失败，单列 `TIMEOUT`。
+
+### 11.2 同一根因的其余命中点（放大视角，教义第 5 条）
+
+「工具名被当成同一套契约，但生产者各写各的」不止能力图一处。按第 5 条扫荡后，
+以下命中点**本轮无法就地收口**（改动会牵动 RSI 变异池与 NL 合成的既有语义与用例），
+登记于此，不静默遗留：
+
+| 命中点 | 幻影工具名 | 为何不在本轮改 |
+|---|---|---|
+| `evolution/genetic_engine.py` 的 `_available_tools` | `browser_scroll`、`browser_wait`、`memory_store`、`memory_delete`、`code_execute`、`code_analyze`、`code_format`、`screenshot`、`visual_parse`、`smart_click`、`api_call`、`data_transform`、`log_analysis` | 它是遗传算法的**变异候选池**，不是执行计划；改池会改变搜索空间与既有用例的固定期望 |
+| `evolution/nl_synthesizer.py` 的 `_load_tool_patterns` / `suggest_tool_sequence` 的分类型建议 | `data_process`、`api_call`、`image_process`、`text_process`、`db_query`、`model_predict`、`task_execute`、`general_tool`、`web_scrape` | 同上，且既有 `test_nl_synthesizer.py::test_suggest_tool_sequence_general_category` 正断言 `general_tool` |
+
+两处产出的序列最终仍要经咽喉执行，幻影名在**执行时**会以「未知工具」诚实失败（不会
+产出假成功票）——与能力图那条的根本区别是：能力图的幻影名会**直接进入编排计划**并让
+整条链空转。故本轮只收口能力图这条会把幻影名变成计划的生产者；另两处需要一并重划
+RSI 的候选空间，留给后续专项。
+
+### 11.3 收口与判据
+
+- **新建** `tests/unit/tools/test_tool_orchestrator_wiring.py`（27 条，8 组判据 + 4 条反向控制）。
+- **工具面接线**：`neurova/builtin_tools.py` 新增 `orchestrate_tools` schema（含 steps /
+  goal，`maxItems: 12`）；`neurova/tool_executor.py` 新增 `_execute_orchestrate_tools`
+  并登记分派表，内层步进经 `_execute_single_tool` 回到咽喉（票据 / `on_tool_executed` /
+  治理预检 / hooks / per-tool 超时全链生效）。
+- **自嵌套拒绝**：编排器以 ContextVar 记重入深度，工具面在入口 fail-closed 拒绝步进里
+  再点名 `orchestrate_tools`（会在同一条执行链上无限递归）。
+- **占位符单源**：`{step_<idx>.<field>}` 的渲染复用既有技能序列解释器
+  `ToolSequenceSkill._render_params`，编排器不另写一份解析。
+- **删净第二份实现**：旧 `_can_run_in_parallel` / `_capability_to_dag` 死码删除，
+  分层由 `_partition_plan_into_layers` 一份承担。
+
+**红 → 绿实测（本环境 py3.11 + pytest 9.1.1）**：
+
+```
+# 红（实现前，本次新建的守卫）
+$ python -m pytest tests/unit/tools/test_tool_orchestrator_wiring.py -q
+15 failed, 11 passed
+
+# 绿（实现后）
+$ python -m pytest tests/unit/tools/test_tool_orchestrator_wiring.py tests/unit/tools/test_tool_orchestrator.py -q
+37 passed
+
+# 占位符单条反向锁（把渲染摘掉即复现红）
+$ python -m pytest ...::test_step_placeholder_reads_previous_output -q
+1 failed
+```
+
+**live-verify（真 `Agent` + 真 `ToolExecutor`，非单测）**：
+
+```
+payload.success = False status = failed
+  step: step_0 get_datetime completed
+  step: step_1 web_search failed 缺少搜索查询
+  step: step_2 calculator completed
+ticket steps = ['get_datetime', 'web_search', 'calculator', 'orchestrate_tools']
+missing_context: 0 -> 0
+orchestrate_tools visible to LLM = True | tool count = 71
+```
+
+读数说明三件事：① 内层三步进都落进了客观票据（`record_tool_execution`），即编排经由
+咽喉而非旁路；② 失败步进（`web_search` 空查询）如实报错、其下游 `calculator` 因**未声明
+依赖**而照常执行（依赖关系按声明走，不猜测）；③ 编排工具出现在发给 LLM 的工具清单里
+（71 项，比此前多 1）。
+
+**A/B 自证（`tests/unit/{tools,agent}` 改前 / 改后逐行比对）**：失败集合除本轮新建用例
+（红灯期）外**完全一致**（两侧 0 新增失败）；差异项均为本环境缺可选依赖
+（`openpyxl` / `pptx` / `prometheus_client` / `numpy` / `apscheduler`）与预存失败。
+
+**净 LOC**：生产代码 `neurova/` 净增。去向逐条列明：`tool_orchestrator.py` 重构
+（删旧分层/兜底实现、建 `OrchestrationStep` 与显式分层）净减约 24 行；
+`capability_graph.py` 默认图 `+64/-64`（改名 + 注释）；`builtin_tools.py` **+33**（
+新工具 schema，无它 LLM 看不见该工具）；`tool_executor.py` **+67**（工具面执行体 + 分派
+登记，含自嵌套与参数校验）。另两处 `+2/+5` 为既有用例随契约变更同步（断言弃权语义、
+改指新 API）。
