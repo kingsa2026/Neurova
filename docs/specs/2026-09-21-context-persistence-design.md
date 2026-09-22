@@ -1,7 +1,7 @@
 # 上下文池持久层设计（B4 · P1-3 + D1）
 
 - 日期：2026-09-21
-- 状态：**实施中**（001–005/007 已交付、004 本片交付；006 紧随其后，见 §8 收口记录）
+- 状态：**已实施**（001–008 全部交付，见 §8 收口记录；本文件是规格与决定的事实源）
 - 上游：`docs/05-reports/上下文三链路审计_2026-09-21.md` §3 P1-3、§10 批次表 B4 行、决策项 **D1**
 - 前置批次：B1/B2/B3 已完成（`docs/05-reports/上下文三链路修复台账_2026-09-21.md`）
 - 基线取证：`tests/manual/context_persistence_baseline_90.py`（本规格全部读数由它一次跑出；
@@ -310,7 +310,7 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 | A4 | <3 长度查询走 LIKE，且 `%`/`_` 不越权 | 构造含 `%` `_` 的库内文本，断言命中集合与真值相等；短查询用 SQL 轨迹证明"未发出 MATCH"（004） |
 | A5 | GC 生效：超 `keep_count`/`keep_days` 的行被清理，FTS 同步 | 写入超限后断言两表行数一致；触发面读 `get_retention_stats()["ledger_gc"]`（`runs`/`removed`/`last_error`），断言在生产可达（007） |
 | A6 | 迁移幂等 + 防降级：v0 库迁到 v2 后重跑 migrate 返回空；伪造高版本库被拒 | `migrate()` 返回值 + `SchemaVersionError` |
-| A7 | 零停机：迁移窗口内并发写不停且不被长事务阻塞 | 并发写线程 + 记录停等 p95 上界 |
+| A7 | 零停机：迁移窗口内并发写不停且不被长事务阻塞 | 并发写线程 + 记录停等 p95 上界（006 live-verify）；另加**结构面**判据：迁移提交次数 = ⌈行数/批大小⌉ + 1、回填读取带 `LIMIT`，不是一条长事务 |
 | A8 | 隔离：群聊归档在单聊轮召回不可见，跨房间互不可见 | 走 `filter_by_scope` 同源判据 |
 | A9 | 启动代价：只登记不预载，启动对 DB 的读次数为常数 | 计数连接/查询次数或断言耗时上界；另观测：登记值随写入/GC 同步、登记失败可见、`draw`/`query` 零查库、`recall_evicted` 为唯一读路径（005） |
 
@@ -357,6 +357,7 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 | 003 写侧批量提交 | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（常驻连接 + 批量事务）+ `neurova/context_pool.py`（`archiveBatch()` 事务边界）+ `neurova/context/orchestrator.py`（本轮归档收进一个批） | 红灯 10 failed → 绿灯 12 passed；live-verify 24 条/轮 233→1.03 ms（220–233×）`tests/manual/context_ledger_batching_90.py` |
 | 002 版本域与 v1 迁移 | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（`context_ledger` 版本域 + v1 迁移）+ `neurova/context_pool.py`（召回路径回填作用域/归档时刻）+ `tests/unit/context/test_context_ledger_migration.py` | 红灯 15 failed → 绿灯 17 passed；live-verify 真 v0 库经生产构造面迁移 `tests/manual/context_ledger_migration_90.py` |
 | 004 读侧预筛与转义 | ✅ 已交付 | `neurova/core/sql_like.py`（转义/短语/长度分流单源）+ `neurova/context/eviction_ledger_db.py`（`_matchCandidates`/`_likeCandidates`/`_recentCandidates` + `CANDIDATE_LIMIT`）+ `tests/unit/context/test_ledger_read_prefilter.py` | 红灯 5 failed → 绿灯 9 passed；live-verify CJK 命中逐条对拍 LIKE 真值、`%`/`_` 不越权、短查询 SQL 轨迹无 MATCH `tests/manual/context_ledger_read_prefilter_90.py` |
+| 006 v2 迁移 FTS 重建为 trigram | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（`_rebuildFtsAsTrigram` + `_databasePath` + `_openSideConnection`；`_FTS_REBUILD_BATCH`/`_FTS_SHADOW_TABLE`/`_FTS_TOKENIZE`，v2 注册）+ `tests/unit/context/test_context_ledger_fts_migration.py` | 红灯 5 failed → 绿灯 10 passed；live-verify 真 v1 库 2 万行迁移 574–627 ms、期间并发写 36–39 次、迁移后中文命中对拍相等 `tests/manual/context_ledger_fts_rebuild_90.py` |
 
 **005 对 D10 的偏离记录**：
 
@@ -422,6 +423,33 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 - **`created_at` 与 `chat_scope` 的兜底落点**：两路兜底函数落在台账模块
   （`resolveArchivedScope` / `resolveArchivedCreatedAt`），召回路径调用它们。
   作用域判定仍只经 `memory_scope.scope_from_metadata` 一份规则，池侧不复制。
+
+**006 对 D12 的偏离记录**：
+
+- **写面走独立连接，读面也在那条连接上**：D12 说"v2 走分批路径"，未指定连接归属。
+  实施必须整段（建影子表 + 分批回填 + 切换）在**一条独立连接**上做，理由两条：
+  1. `db_migration` 的 callable 步骤在迁移事务里，而 FTS 虚表的 `DROP`/`RENAME`
+     无法在持事务的连接上执行（同连接内直接 `database is locked`）；
+  2. **快照**：迁移连接的读快照看不到另一条连接的写入——若用它来读"影子表还差
+     哪些行"，循环永远取到同一批（实测同批被重复插入 →
+     `IntegrityError: constraint failed`），故读取与写入必须在同一条连接上。
+  迁移连接只负责最后推进 `user_version`（`db_migration` 的既有语义不变）。
+- **切换段把尾批补齐 + `DROP` + `RENAME` 收进同一个写事务**：分批回填的循环退出后、
+  切换之前，并发写可能已插入新行——那段时间里新行的内容行在、索引行不在
+  （实测迁移后两表差 1 行）。收进同一个 `BEGIN IMMEDIATE` 之后，切换窗口内没有
+  第三方写入的插缝，两表行数严格相等。
+- **每批显式 `BEGIN IMMEDIATE`**：deferred 事务在"先读后写"升级锁时会撞上别的写者
+  并直接失败（实测 `database is locked`）。显式取写锁 + 短事务窗口，是本片
+  "并发写不停"的落地形态（live-verify：2 万行库迁移 574–627 ms，期间并发写 36–39 次
+  全部提交成功，停等 p50 1.5–2.2 ms）。
+- **新增结构面判据**（进入 §6 A7）：迁移提交次数 = ⌈行数/批大小⌉ + 1，
+  且回填读取必须带 `LIMIT`。只留停等墙钟等于把契约交给机器速度；倍数/停等读数另存
+  live-verify 脚本，两者互为表里。
+- **规格 §6 的 `p95 ≤ 16 ms` 上界未落成断言**：本机 fsync 抖动大，同一形状跨次可差
+  一个量级（实测三次连跑区间 6.6–184.7 ms）。把单点读数写成门禁方向相反——
+  过严会偶发红、放宽就是"降级断言换绿"，故停等读数只作 live-verify 证据。
+- **v1 的 DDL 文本不再改写**：v1 已发布（002 交付），其 `_SCHEMA` 仍是**新库基线**
+  （006 只追加 v2，不动 v1 语句）。迁移测试用 v1 的前像构造真实旧库（前像纪律）。
 
 **004 对 D9 的偏离记录**：
 
