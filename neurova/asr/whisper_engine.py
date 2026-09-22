@@ -27,13 +27,16 @@ class WhisperEngine(ASRBase):
 
     def __init__(
         self,
-        model_dir: str = "models/asr/whisper",
+        model_dir: str = "",
         model_name: str = "base",
         device: str = "auto",
         auto_download: bool = True,
     ):
         super().__init__()
-        self._model_dir = Path(model_dir)
+        # 模型目录锚在仓库根（随代码走的资产），不随 CWD 漂移。
+        from neurova.core.data_root import repoAsset
+
+        self._model_dir = Path(model_dir) if model_dir else repoAsset("models", "asr", "whisper")
         self._model_name = model_name
         self._device = device
         self._auto_download = auto_download

@@ -80,7 +80,19 @@ class ConnectionManager:
 
 
 _manager = ConnectionManager()
-_CONSOLE_UPLOAD_DIR = Path(config.get("NEUROVA_CONSOLE_UPLOADS", "uploads/console"))
+def _resolveConsoleUploadDir() -> Path:
+    """console 上传落点：显式配置 > 数据根下的 `uploads/console`。
+
+    原兜底 `"uploads/console"` 是 CWD 相对——模块导入期就建目录，
+    换个启动目录就把用户上传件散到别处（真后端冒烟实测 CWD 多出 `uploads/`）。
+    """
+    from neurova.core.data_root import get_data_root
+
+    configured = config.get("NEUROVA_CONSOLE_UPLOADS")
+    return Path(configured) if configured else get_data_root() / "uploads" / "console"
+
+
+_CONSOLE_UPLOAD_DIR = _resolveConsoleUploadDir()
 _CONSOLE_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 

@@ -19,13 +19,18 @@ CWD）、`Path(__file__).resolve().parents[N] / "data"`（反推层数）、
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
+
+from neurova.core.logger import get_logger
 
 DATA_ROOT_ENV = "NEUROVA_DATA_DIR"
 
 # 本文件在 `neurova/core/` 下：parents[0]=core, [1]=neurova, [2]=仓库根。
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_DATA_DIR = "data"
+
+logger = get_logger(__name__)
 
 
 def get_data_root() -> Path:
@@ -95,3 +100,65 @@ def resolveDataPath(value: str | os.PathLike[str]) -> Path:
     if candidate.is_absolute():
         return candidate
     return get_data_root() / candidate
+
+
+def repoRoot() -> Path:
+    """仓库根：随代码走的资产（配置、模型、agents.json）的锚点。
+
+    与 `get_data_root()` 的分工：
+
+    - 数据根管**运行期产物**（库、日志、上传件、轨迹）——部署时挂卷、可注入；
+    - 仓库根管**随代码走的资产**——镜像里就带、不随 CWD 变，也不受数据根注入影响。
+
+    两者不能混：把 `models/` 或 `config/` 归到数据根，容器里就找不到模型；
+    把运行期产物按仓库根拼，换部署目录就丢数据。
+    """
+    return _REPO_ROOT
+
+
+def repoAsset(*parts: str) -> Path:
+    """仓库根下的资产路径（配置 / 模型 / 前端清单）。"""
+    return _REPO_ROOT.joinpath(*parts)
+
+
+def dataLanding(*parts: str, legacy: "tuple | None" = None) -> Path:
+    """运行期产物的落点：数据根下的 `parts`，并在空缺时收养仓库根旧物。
+
+    这是"运行期产物"的统一入口（库、日志、上传件、轨迹、密钥）。旧落点默认与
+    新落点同名同层（`"storage"` → 仓库根 `storage/`）；形状不同的面用 `legacy=`
+    显式给出旧相对路径（如 `infrastructure.json` 的旧落点是 `config/` 下的同名文件）。
+    没有旧物可收养的新面传 `legacy=()`——省一次查盘。
+    """
+    target = get_data_root().joinpath(*parts)
+    legacyParts = parts if legacy is None else legacy
+    if legacyParts:
+        adoptLegacyLanding(target, *legacyParts)
+    return target
+
+
+def adoptLegacyLanding(target: Path, *legacyParts: str) -> bool:
+    """旧落点（CWD 相对时代的产物）搬进新落点，只为**空缺时救济**。
+
+    收口"落点锚到绝对根"有个不得不认的代价：老部署在仓库根留下的
+    `config/infrastructure.json`、`agents.json`、`neurova_memory.db` 等，
+    换根之后新代码看不见它们——配置静默回默认值、库看起来"空了"。
+    本函数在**新落点尚无该物**时把旧物搬过去一次：
+
+    - 新落点已在 ⇒ 原样返回 False（旧物不覆盖新物，避免把已生效的配置盖回旧版）；
+    - 旧落点不存在 ⇒ 返回 False（无旧物可收）；
+    - 搬迁失败 ⇒ 返回 False 并留下告警，**不抛**：收养是救济，不该阻断启动。
+
+    调用点一律写在"落点解析"处，不写在业务路径里——收养只发生一次，
+    之后事实源仍是新落点。
+    """
+    legacy = repoRoot().joinpath(*legacyParts)
+    if target.exists() or not legacy.exists():
+        return False
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(legacy), str(target))
+    except OSError as exc:
+        logger.warning("旧落点 %s 收养失败（保留原位，新落点照常使用）: %s", legacy, exc)
+        return False
+    logger.info("旧落点已收养：%s → %s", legacy, target)
+    return True

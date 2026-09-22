@@ -373,3 +373,15 @@ tests/unit/test_tool_loop_ticket_set_guard.py
 #   （根因：unicode61 对中文等于无索引，实测中文短语命中 0；只改 tokenize 参数
 #     不改已有索引 → 必须重建。影子表 + 分批短事务，禁一次性长事务/delete-all）
 tests/unit/context/test_context_ledger_fts_migration.py
+
+
+# Issue #75 收口：运行期落点必须经数据根/仓库根推导，不得按进程 CWD 拼。
+#   根因：`core/data_root.py` 只收了 `data/` 那一族；`storage/`（file_utils、
+#   files_api）、`trajectories/`、`.jwt_secret`、`sessions/`、`config/media`、
+#   `logs/executions`、`neurflow.db`、`tool_execution.jsonl`、模型目录等仍是裸
+#   相对字面量，实测在任意 CWD 下就地造出文件（比 `data/` 那族更坏——它们连
+#   仓库根都不锚）。本批按其"是运行期产物还是随代码走的资产"分流：前者走
+#   `get_data_root()`，后者走 `repoRoot()`/`repoAsset()`；旧落点在数据根空缺时
+#   由 `adoptLegacyLanding()` 收养一次，既有部署不失联。
+#   守卫锁三条：静态零 CWD 相对落点 + 活体真构造点 CWD 零新增 + 收养语义。
+tests/unit/core/test_runtime_landing_root.py

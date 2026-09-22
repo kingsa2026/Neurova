@@ -234,10 +234,9 @@ def get_agent_config_manager():
 
 def load_agents_config() -> Dict[str, Any]:
     """加载 Agent 配置列表（固定在项目根目录，避免依赖 CWD）"""
-    candidates = [
-        Path(__file__).resolve().parent.parent.parent / "agents.json",
-        Path("agents.json"),
-    ]
+    from neurova.core.data_root import repoAsset
+
+    candidates = [repoAsset("agents.json")]
     for config_path in candidates:
         if config_path.exists():
             try:
