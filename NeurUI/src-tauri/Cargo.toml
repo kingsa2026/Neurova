@@ -25,4 +25,12 @@ tauri = { version = "2.11.3", features = [] }
 tauri-plugin-log = "2"
 ureq = { version = "2", features = ["json"] }
 # 勿无条件加 glib：Windows 上 glib-sys 需 pkg-config+系统 GLib 必编译失败；
-# 漏洞修复应走 tauri Linux 栈的传递版本（29be2081 曾因此打断打包，已回退）
+# glib 0.18.5 的 VariantStrIter 未定义行为（RUSTSEC-2024-0429）改按上游修法就地补：
+# 见下方 [patch.crates-io] 与 vendor/glib-0.18.5/PATCH_NOTES.md。
+# 勿改成"声明 glib 0.20"——gtk 的 glib ^0.18 约束会失配（29be2081 曾因此打断打包，已回退）。
+
+# 桌面栈的 gtk 钉在 ^0.18（wry 0.53-0.57 / tao 0.34-0.37 均如此），其依赖的 glib
+# 只到 0.18.x；上游 0.20.0 才修掉 VariantStrIter 的未定义行为。此补丁只换来源、
+# 不换版本，故 gtk 的 ^0.18 约束不受影响。升级路径见 PATCH_NOTES.md。
+[patch.crates-io]
+glib = { path = "vendor/glib-0.18.5" }
