@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import get_data_root
 
 # core imports
 
@@ -387,7 +388,7 @@ class UserGroupManager:
             data_dir: 数据目录路径
         """
         if data_dir is None:
-            data_dir = str(Path(__file__).parent.parent.parent / "data")
+            data_dir = str(get_data_root())
 
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)

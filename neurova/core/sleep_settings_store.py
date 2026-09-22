@@ -8,10 +8,10 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any, Dict
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -22,12 +22,12 @@ _AGENT_ID_RE = r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}"
 class SleepSettingsStore:
     """按 agent 持久化睡眠设置（JSON）"""
 
-    def __init__(self, agent_id: str, base_dir: str = "data"):
+    def __init__(self, agent_id: str, base_dir: str = ""):
         import re
 
         if not re.fullmatch(_AGENT_ID_RE, agent_id or ""):
             raise ValueError(f"Invalid agent_id for sleep settings: {agent_id!r}")
-        self._dir = Path(base_dir) / "sleep_settings"
+        self._dir = callerPath(base_dir) / "sleep_settings"
         self._file = self._dir / f"{agent_id}.json"
 
     def load(self) -> Dict[str, Any]:

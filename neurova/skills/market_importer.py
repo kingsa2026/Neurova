@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -387,7 +388,7 @@ def get_market_importer(skills_dir: Optional[Path] = None) -> MarketImporter:
         with _importer_lock:
             if _market_importer is None:
                 if skills_dir is None:
-                    skills_dir = Path("data/skills")
+                    skills_dir = get_data_root() / "skills"
                 _market_importer = MarketImporter(skills_dir=skills_dir)
     return _market_importer
 

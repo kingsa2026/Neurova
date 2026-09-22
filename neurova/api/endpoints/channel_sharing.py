@@ -23,6 +23,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, HTTPException
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(get_current_user)],)
@@ -64,7 +65,7 @@ _DEFAULT_CONFIG: Dict[str, Any] = {
     "updated_at": 0.0,
 }
 
-_STORE_FILE = "data/channel_sharing.json"
+_STORE_FILE = dataPath("channel_sharing.json")
 
 _sharing_config: Dict[str, Any] = {}
 

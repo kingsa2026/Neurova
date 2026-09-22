@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(get_current_user)],)
@@ -70,7 +71,7 @@ class DeliveryInfo(BaseModel):
 _webhooks: Dict[str, Dict[str, Any]] = {}
 _deliveries: Dict[str, Dict[str, Any]] = {}
 
-_STORE_FILE = "data/webhooks.json"
+_STORE_FILE = dataPath("webhooks.json")
 _MAX_DELIVERIES = 200
 
 

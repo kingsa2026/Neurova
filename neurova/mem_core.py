@@ -35,6 +35,7 @@ from pathlib import Path
 import threading
 from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -333,7 +334,7 @@ def _moe_index_state_path(scope_key: str) -> Path:
     """
     hashed = hashlib.md5(scope_key.encode("utf-8")).hexdigest()[:16]
     state_dir = os.environ.get("NEUROVA_MOE_INDEX_STATE_DIR") or str(
-        Path(__file__).resolve().parent.parent / "data"
+        get_data_root()
     )
     return Path(state_dir) / f"moe_index_state_{hashed}.json"
 
