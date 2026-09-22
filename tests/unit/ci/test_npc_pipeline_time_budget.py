@@ -504,21 +504,56 @@ class TestHandoffFuelIsWritableFromTheConfigAlone:
 
 
 def _gate_invocations(gate):
-    """产出 (分支名, argv) —— python 分支与经桥脚本的 node 分支。"""
+    """产出 (分支名, argv, 缺席原因) —— python 分支与经桥脚本的 node 分支。
+
+    缺席原因非空表示该环境没有对应解释器（CI 的 `python:3.11` 镜像**没有 node**），
+    此时调用方必须**点名跳过**该分支，不得把"环境缺解释器"写成"判据失败"：
+    后者在 python-only 镜像里恒红，与代码对错无关（构建 cnb-5go-1k34lk8sh-004 实测
+    `只跑到一个解释器分支：['python'] / assert 1 >= 2`）。
+    """
     out = []
     if shutil.which("python3") or shutil.which("python"):
-        out.append(("python", [sys.executable, str(gate)]))
+        out.append(("python", [sys.executable, str(gate)], None))
+    else:
+        out.append(("python", None, "本环境没有 python3/python"))
+
     bridge = PROJECT_ROOT / "scripts" / "ci" / "run_gate_under_node.sh"
-    if shutil.which("node") and bridge.exists():
-        out.append(("node", ["sh", str(bridge), str(gate)]))
+    if not bridge.exists():
+        out.append(("node", None, f"缺桥脚本 {bridge.relative_to(PROJECT_ROOT)}"))
+    elif not shutil.which("node"):
+        out.append(("node", None, "本环境没有 node（CI 的 python:* 镜像即如此）"))
+    elif not shutil.which("sh"):
+        out.append(("node", None, "本环境没有 sh（桥脚本是 sh 脚本）"))
+    else:
+        out.append(("node", ["sh", str(bridge), str(gate)], None))
     return out
+
+
+def _first_available_invocation(gate):
+    """取第一个可用的解释器分支 —— 不假定 `sys.executable` 一定能跑。
+
+    本仓库的测试环境有三种：开发机（python + node 都有）、CI 的 `python:*`
+    镜像（**没有 node**）、NPC 镜像 `cnbcool/default-npc:latest`（**没有 python**）。
+    `sys.executable` 只在真正跑着 pytest 时才存在，把它当成"一定有"的条件写进
+    默认参数，换到第三种环境就是 `FileNotFoundError` —— 与"少一个解释器分支"
+    同一族根因：**把环境前提当判据**。
+    """
+    for label, argv, reason in _gate_invocations(gate):
+        if argv is not None:
+            return label, argv
+        del label, reason
+    return None, None
 
 
 def _run_gate_capture_stdout(gate, argv=None, workspace=None):
     """在 CI 上下文里真跑一遍门禁，取回 stdout（含 `##[set-output]` 标记）。"""
     env = dict(os.environ, CNB="1", CI="true")
     env["CNB_BUILD_WORKSPACE"] = workspace or tempfile.mkdtemp(prefix="npc-handoff-gate-")
-    argv = argv if argv is not None else [sys.executable, str(gate)]
+    if argv is None:
+        label, argv = _first_available_invocation(gate)
+        if argv is None:
+            pytest.skip("本环境既无 python 也无 node，门禁判据无法执行")
+        del label
     proc = subprocess.run(argv, capture_output=True, env=env, cwd=str(PROJECT_ROOT))
     assert proc.returncode == 0, (
         f"门禁 {' '.join(argv)} 未以 0 退出：\n"
@@ -568,12 +603,28 @@ class TestHandoffFlagUsesAPlatformDeclaredExportChannel:
         )
 
     def test_both_interpreter_branches_emit_the_same_marker(self):
-        """python 与 node 两个分支必须发出逐字相同的标记（镜像只有 node）。"""
+        """python 与 node 两个分支必须发出逐字相同的标记（镜像只有 node）。
+
+        **环境缺席 ≠ 判据失败**：CI 的 `python:*` 镜像根本没有 node（构建
+        cnb-5go-1k34lk8sh-004 实测），此处若把"少一个分支"直接断言成红，
+        判据就在与代码对错无关的地方恒红 —— 而这正是本文件反复要消灭的
+        "门禁读数与事实脱钩"。缺席的分支**点名跳过**（`skipped` 在摘要里可见，
+        不等于 `passed`），在场的分支照旧逐字比对。
+
+        反向自证（负向控制）：把 `NODE_IMPLEMENTATION` 正文里的标记改掉 →
+        凡是有 node 的环境立刻红；在有 node 的环境删掉 node 分支 →
+        `_gate_invocations` 给缺席原因，本用例跳过而**不**静默通过。
+        """
         gate = PROJECT_ROOT / "scripts" / "ci" / "npc_turn_handoff_gate.py"
         workspace = tempfile.mkdtemp(prefix="npc-handoff-gate-")
-        branches = {}
-        for label, argv in _gate_invocations(gate):
+        branches, absent = {}, []
+        for label, argv, reason in _gate_invocations(gate):
+            if argv is None:
+                absent.append(f"{label}（{reason}）")
+                continue
             branches[label] = _run_gate_capture_stdout(gate, argv=argv, workspace=workspace)
+        if absent:
+            pytest.skip("本环境缺解释器分支，无法做双运行时等价比对：" + "、".join(absent))
         assert len(branches) >= 2, f"只跑到一个解释器分支：{list(branches)}"
         unique = set(branches.values())
         assert len(unique) == 1, (
