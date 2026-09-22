@@ -19,14 +19,21 @@
    非 max 的 thinkingLevel 若重新出现（顶层 key、settings.yml 角色、
    或流水线里的档位值），守卫直接拦下：要么是有意恢复分档（需同步改
    档位表与本文档），要么是回归，两者都必须显式改测而非悄悄放过。
-5. **maxTurns 必须声明为字面量整数，且两侧事件同步** —— `maxTurns` 的
-   字面量要求同第 2 条（Schema 校验先于变量替换）；上限取 1000，与
-   main 上维护者的显式决定保持一致。构建 `cnb-f1c-1k31garu5` 实测 251 轮
-   吃满平台 2h 硬上限（7262s，均摊 ≈29s/轮），说明「被掐断」的根因不是
-   轮数给多了，而是 Agent 自己 `sleep` 轮询叠加单轮 20 分钟的全量 pytest ——
-   故轮数放宽，时间预算改由「禁止 sleep 轮询」的硬禁令守住。
+5. **maxTurns 只准在自己的分支上改** —— 该参数走平台配置期 Schema 校验
+   （字面量要求同第 2 条），且 Agent 分支常把 `maxTurns` 当"耗时上限"反复
+   收紧（`500 → 120 → 1000` 来回改）。这类分支若被归档而不清理，**每次**产生
+   分支名的流水线都会以同一个 `invalid configuration` 收场：配置在推送分支的
+   那一刻就已经非法，与轮数取值、任务内容都无关。
+   本守卫把这条前置条件钉成红/绿：合法取值域是
+   `[MIN_TURNS, maxTurnsCeiling(cnb_doc)]`，上限由 `$` 兜底挂载点的现行取值得出
+   （上限自身被钳在 `MAIN_TURNS_FLOOR`，无法把"非法值合法化"），
+   取值形态按 `TURNS_SHAPE` 白名单。
+   历史：`cnb-f1c-1k31garu5` 实测 251 轮吃满平台 2h 硬上限（7262s，均摊 ≈29s/轮），
+   但那次的死因是 Agent 自己 `sleep` 轮询叠加单轮 20 分钟的全量 pytest，不是轮数配额 ——
+   轮数与耗时上限的换算关系无法从本仓证据推出，故不再在守卫里断言某个具体数字。
 """
 import io
+import re
 from pathlib import Path
 
 import pytest
@@ -46,18 +53,67 @@ SUFFIX_VARIANTS = ("-low", "-high", "-max")
 # 本仓只保留 max 一档（2026-09-18 收敛）：
 # 档位角色名 → 期望的 thinkingLevel
 LEVEL_BY_ROLE = {"DSCoder-max": "xhigh"}
-# NPC 挂载点（$ 兜底 / 角色名顶层 key）→ 期望的 thinkingLevel
-LEVEL_BY_MOUNT = {"$": "xhigh", "DSCoder-max": "xhigh"}
+# NPC **挂载点**（.cnb.yml 顶层 key）→ 期望的 thinkingLevel。
+#
+# `$` 是唯一允许的挂载点：.cnb.yml 的顶层 key 在平台 Schema 里只认分支名
+# （未知 key 只有 `^\..` 锚点形态被放行），`DSCoder-max` 这类角色名顶层 key
+# 会同时过不了 Schema 与「仓库级事件只能在 $ 下」的语义规则。
+# 别名角色（DSCoder-max）因此只保留在 settings.yml 侧，运行参数复用 `$` 的定义——
+# 见 `LEVEL_BY_ROLE`，若将来别名需要不同参数，正确做法是拆出**分支**而不是再造顶层 key。
+LEVEL_BY_MOUNT = {"$": "xhigh"}
 # 已取消的档位后缀：一旦重新出现在 .cnb.yml 顶层 key 或 settings.yml 角色名里即报错
 RETIRED_SUFFIXES = ("-low", "-high")
 
-# npc:go 的 maxTurns 上限。
-# 依据：维护者在 main（commit「修改超时限制」）把 $ 段显式调到 1000，
-# 即「轮数配额按任务够用来给，不压到 120」。构建 cnb-f1c-1k31garu5 实测
-# 251 轮 / 7262s（平台 2h 硬上限被吃满，均摊 ≈29s/轮）证明轮数不是死因，
-# 死因是 Agent 自己 sleep 轮询 + 单轮 20 分钟的全量 pytest。
-# 故上限放回 1000，真正的硬禁令改由「禁止 sleep 轮询」承担。
-MAX_TURNS_LIMIT = 1000
+#: maxTurns 的合法取值形态（正整数，可带 `k` 千位后缀）。
+#: 形态白名单与"上限是多少"无关——上限属功能决策（由 `$` 挂载点现值给出），
+#: 这里只钉"写出来必须是个能过 Schema 的轮数值"。
+TURNS_SHAPE = re.compile(r"^[1-9][0-9]*[kK]?$")
+
+#: 轮数下限（写入侧合理性）。平台没有公开的轮数下限；此值只挡住
+#: `0` / `1` 这类明显会让 Agent 一轮都跑不完的写法，与耗时上界无关。
+MIN_TURNS = 10
+
+#: 无法从 `$` 现值推出上限时（该挂载点缺失或写成非法值）的兜底下界：
+#: 10k 轮在 29s/轮 的实测口径下 ≈ 80h，远高于平台 2h 硬上限，
+#: 任何"真实需要更多轮"的分支都够用——不会把正常分支误判为超上限。
+MAIN_TURNS_FLOOR = 10_000
+
+
+def parseTurnBudget(value):
+    """把 `maxTurns` 的现行取值（含 `1k` 写法）解析成整数；非法返回 None。"""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, str):
+        raw = value.strip()
+        if not TURNS_SHAPE.match(raw):
+            return None
+        return int(raw[:-1]) * 1000 if raw[-1] in "kK" else int(raw)
+    return None
+
+
+def maxTurnsCeiling(cnb_doc) -> int:
+    """合法上限 = `$` 兜底挂载点的现行取值（钳在 `MAIN_TURNS_FLOOR` 之上）。
+
+    上限必须从流水线自己的现行配置推出，不能写成常量：
+
+    - 常量上限会把「合法上界」钉在某个具体数字上，分支只要调高轮数、
+      `main` 又来不及同步，守卫就红——而它其实拦不住真正的配置非法（Schema 才拦）；
+    - 由 `$` 现值给出，则「调高上限」= 先在主线上显式调高 `$` 段（一次可见的、
+      会被 review 的配置改动），分支再跟随。上限永远不会低于主线现行值，
+      所以"分支跟着主线调高"是绿的，"分支私自定义上限"是红的。
+    """
+    main_options = [
+        opt
+        for path, opt in _iter_npc_go_options({"$": (cnb_doc or {}).get("$") or {}})
+        if "issue.comment@npc" in path or "pull_request.comment@npc" in path
+    ]
+    parsed = [parseTurnBudget(opt.get("maxTurns")) for opt in main_options]
+    parsed = [v for v in parsed if isinstance(v, int)]
+    if not parsed:
+        return MAIN_TURNS_FLOOR
+    return max(min(parsed), MAIN_TURNS_FLOOR)
 
 
 def _load(path: Path):
@@ -162,24 +218,41 @@ class TestThinkingLevelLiteral:
 
 
 class TestTurnBudget:
-    """maxTurns 是构建耗时的上界，不是「够用就好」的软参数。"""
+    """maxTurns 的合法性：取值必须能过平台配置期 Schema。
 
-    def test_max_turns_declared_and_bounded(self, npc_options):
-        """每条 npc:go 流水线都必须声明 maxTurns，且不超过本仓上限。"""
+    参数化的合法取值域由 `.cnb.yml` 自身推出（见 `maxTurnsCeiling`），
+    不写死某个具体数字——写死会把「轮数该给多少」这个功能决策伪装成守卫契约，
+    而它拦不住的恰恰是真正的配置非法（那由平台 Schema 拦）。
+    """
+
+    def test_max_turns_declared_and_shaped(self, npc_options, cnb_doc):
+        """每条 npc:go 流水线都必须声明正整数形态的 maxTurns，且不超现行上限。"""
+        ceiling = maxTurnsCeiling(cnb_doc)
         problems = []
         for path, opt in npc_options:
             turns = opt.get("maxTurns")
-            if not isinstance(turns, int):
-                problems.append(f"{path}: maxTurns={turns!r} 未声明或非整数")
+            if turns is None:
+                problems.append(f"{path}: 未声明 maxTurns")
                 continue
-            if turns > MAX_TURNS_LIMIT:
-                problems.append(f"{path}: maxTurns={turns} > 上限 {MAX_TURNS_LIMIT}")
+            parsed = parseTurnBudget(turns)
+            if parsed is None:
+                problems.append(
+                    f"{path}: maxTurns={turns!r} 不是合法轮数值"
+                    f"（形态要求 {TURNS_SHAPE.pattern}，拒收变量/浮点/布尔）"
+                )
+                continue
+            if parsed < MIN_TURNS:
+                problems.append(f"{path}: maxTurns={parsed} < 下限 {MIN_TURNS}")
+            if parsed > ceiling:
+                problems.append(f"{path}: maxTurns={parsed} > 现行上限 {ceiling}")
         assert not problems, (
-            "npc:go 的 maxTurns 缺失或超出耗时上界:\n  " + "\n  ".join(problems) +
-            f"\n上限 {MAX_TURNS_LIMIT} 为维护者在 main 上的显式决定（「修改超时限制」）。"
-            "构建 cnb-f1c-1k31garu5 实测 251 轮吃满平台 2h 硬上限（均摊 ≈29s/轮），"
-            "根因是 sleep 轮询 + 单轮 20 分钟的全量 pytest，不是轮数配额；"
-            "确需调低/调高：请同步改守卫、.cnb.yml 注释与 issue/PR 两份事件定义。"
+            "npc:go 的 maxTurns 缺失或取值非法（该类配置**在推送分支的那一刻**就非法，"
+            "每次产生分支名的构建都会以 invalid configuration 收场，与任务内容无关）:\n  "
+            + "\n  ".join(problems) +
+            f"\n现行合法域: [{MIN_TURNS}, {ceiling}]（上限 = `$` 兜底挂载点现值，"
+            f"低于 {MAIN_TURNS_FLOOR} 时按兜底下限计）。\n"
+            "确需调高上限：先在主线显式调高 `$` 段，再让分支跟随——"
+            "上限永远不低于主线现值，故「跟随主线」是绿的、「私自定义上限」是红的。"
         )
 
     def test_max_turns_is_literal_int(self, npc_options):
@@ -188,12 +261,40 @@ class TestTurnBudget:
             f"{path}: maxTurns={opt['maxTurns']!r}"
             for path, opt in npc_options
             if isinstance(opt.get("maxTurns"), str)
+            and not TURNS_SHAPE.match(opt["maxTurns"].strip())
         ]
         assert not bad, (
             "maxTurns 不可用变量/字符串:\n  " + "\n  ".join(bad) +
             "\n原因同 thinkingLevel：options 走平台配置期 Schema 校验，"
             "校验发生在变量替换之前。"
         )
+
+    def test_ceiling_cannot_be_laundered_by_illegal_main_value(self):
+        """`$` 写成非法值时，上限不得被"洗白"成那个非法值。"""
+        assert maxTurnsCeiling({"$": {}}) == MAIN_TURNS_FLOOR
+        assert maxTurnsCeiling({"$": {"issue.comment@npc": [
+            {"type": "npc:go", "options": {"maxTurns": "many"}}
+        ]}}) == MAIN_TURNS_FLOOR
+        assert maxTurnsCeiling({"$": {"issue.comment@npc": [
+            {"type": "npc:go", "options": {"maxTurns": 10}}
+        ]}}) == MAIN_TURNS_FLOOR
+        assert maxTurnsCeiling({"$": {"issue.comment@npc": [
+            {"type": "npc:go", "options": {"maxTurns": 12000}}
+        ]}}) == 12000
+
+
+class TestTurnBudgetParsing:
+    """取值解析：形态与数值的边界（守卫要用它判"是不是能过 Schema 的轮数"）。"""
+
+    def test_parses_plain_and_suffix_forms(self):
+        assert parseTurnBudget(1000) == 1000
+        assert parseTurnBudget("1000") == 1000
+        assert parseTurnBudget("2k") == 2000
+        assert parseTurnBudget("2K") == 2000
+
+    def test_rejects_non_numeric_and_variable_forms(self):
+        for bad in (None, "", "$TURNS", "1.5", "0", "-5", 0, -5, True, 1.0, [], {}):
+            assert parseTurnBudget(bad) is None, bad
 
 
 class TestRolePipelineAlignment:
@@ -220,6 +321,33 @@ class TestRolePipelineAlignment:
         assert not problems, (
             "NPC 挂载点档位与档位表不一致（被 @ 时会静默回落默认档）:\n  "
             + "\n  ".join(problems)
+        )
+
+    def test_no_role_named_top_level_keys(self, cnb_doc, settings_doc):
+        """顶层 key 只准是分支名 / `crontab:` / `.` 锚点——角色名挂顶层 key 是非法配置。
+
+        这类 key 会在**推送的那一刻**就非法（Schema 的顶层 key 只认分支名 +
+        `^\..` 锚点；平台语义规则另把 `issue.*` 钉在 `$` 下），而不是等到跑任务才失败。
+        本仓曾用 `DSCoder-max:` 顶层 key 挂同档别名——别名与主角色运行参数本就没有差异，
+        第二份 key 是纯多余面，且是过不了 Schema 的那一份。
+        """
+        role_names = {
+            (r or {}).get("name")
+            for r in ((settings_doc.get("npc") or {}).get("roles") or [])
+        }
+        bad = sorted(
+            k for k in cnb_doc
+            if isinstance(k, str)
+            and k not in ("main", "include")
+            and not k.startswith(".")
+            and not k.startswith("crontab:")
+            and k in role_names
+        )
+        assert not bad, (
+            f".cnb.yml 把 NPC 角色名当作顶层 key 挂载: {bad}\n"
+            "平台 Schema 的顶层 key 只认分支名（未知 key 仅 `^\\.` 锚点形态放行），"
+            "角色名 key 会以 invalid configuration 收场。别名角色请留在 settings.yml 侧，"
+            "运行参数复用 `$` 兜底挂载点的定义。"
         )
 
     def test_no_retired_level_roles_in_settings(self, settings_doc):
@@ -263,14 +391,17 @@ class TestRolePipelineAlignment:
         assert not bad, f".cnb.yml 出现已取消的档位挂载点: {bad}（本仓只保留 max 档）"
 
     def test_npc_events_declared_and_aliased(self, cnb_doc):
-        """每个 NPC 挂载点下 issue / PR 两个事件都要声明，且共用同一份流水线。"""
+        """每个 NPC 挂载点下 issue / PR 两个事件都要声明，且共用同一份流水线。
+
+        挂载点集合 = `$`（兜底，唯一允许的角色挂载点）+ `LEVEL_BY_MOUNT` 登记项；
+        不再从"哪些顶层 key 长得像事件映射"反推——那会把非法形态当成合法挂载点收进来。
+        """
         mounts = {"$": cnb_doc.get("$") or {}}
-        for key, value in cnb_doc.items():
-            if key in ("main", "include") or key.startswith("."):
+        for key in LEVEL_BY_MOUNT:
+            if key == "$":
                 continue
-            if isinstance(value, dict) and any(
-                k.endswith("@npc") for k in value
-            ):
+            value = cnb_doc.get(key)
+            if isinstance(value, dict):
                 mounts[key] = value
 
         problems = []
