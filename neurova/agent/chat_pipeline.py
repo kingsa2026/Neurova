@@ -981,41 +981,104 @@ class ChatPipeline:
                 callback=self._on_tool_execution_status_change,
             )
 
-            # 检查执行结果
-            if execution_context.status == ExecutionStatus.COMPLETED:
-                ctx.auto_execute_result = execution_context.result
-                exec_status = ctx.auto_execute_result.get("status") if ctx.auto_execute_result else None
-                if exec_status == "success":
-                    logger.info("工具自动执行成功: %s", tool_name)
-                    ctx.tool_decision = "auto_executed"
-                elif exec_status == "failure":
-                    error_msg = ctx.auto_execute_result.get("error", "未知错误")
-                    logger.warning("工具自动执行失败: %s, 错误: %s", tool_name, error_msg)
-                    ctx.tool_decision = "failed"
-                    await self._record_tool_failure(tool_name, ctx.user_input, error_msg)
-            elif execution_context.status == ExecutionStatus.TIMEOUT:
+            # 检查执行结果：成败由**执行器给出的判据**裁定（结果里的 success），
+            # 调用生命周期只用来分派非终态（超时 / 取消 / 异常）。
+            ctx.auto_execute_result = execution_context.result
+            if execution_context.status == ExecutionStatus.TIMEOUT:
                 logger.warning("工具自动执行超时: %s (>%ss)", tool_name, execution_context.timeout)
                 ctx.tool_decision = "timeout"
-                ctx.auto_execute_result = None
+                await self._report_tool_outcome(tool_name, ctx, execution_context)
             elif execution_context.status == ExecutionStatus.CANCELLED:
                 logger.warning("工具自动执行被取消: %s", tool_name)
                 ctx.tool_decision = "cancelled"
-                ctx.auto_execute_result = None
-            elif execution_context.status == ExecutionStatus.FAILED:
-                error_msg = execution_context.error or "未知错误"
-                logger.warning("工具自动执行失败: %s, 错误: %s", tool_name, error_msg)
-                ctx.tool_decision = "failed"
-                ctx.auto_execute_result = {"status": "failure", "error": error_msg}
-                await self._record_tool_failure(tool_name, ctx.user_input, error_msg)
+                await self._report_tool_outcome(tool_name, ctx, execution_context)
+            elif execution_context.status == ExecutionStatus.COMPLETED:
+                # 判据只在结果里读一次：`{"error": …}` 的原生工具结果、判据缺席、
+                # 以及超时补写的 `success=False`，在这里是同一个分支。
+                if self._succeeded(execution_context.result) is True:
+                    logger.info("工具自动执行成功: %s", tool_name)
+                    ctx.tool_decision = "auto_executed"
+                    await self._record_tool_outcome(tool_name, ctx, success=True)
+                else:
+                    ctx.tool_decision = "failed"
+                    await self._report_tool_outcome(tool_name, ctx, execution_context)
             else:
-                logger.warning("工具自动执行未知状态: %s, 状态: %s", tool_name, execution_context.status)
+                # FAILED / 未知状态：同样按失败回流，不再各写一份分支。
+                logger.warning("工具自动执行失败: %s, 状态: %s", tool_name, execution_context.status)
                 ctx.tool_decision = "failed"
-                ctx.auto_execute_result = None
+                await self._report_tool_outcome(tool_name, ctx, execution_context)
 
         except Exception as e:
             logger.error("工具自动执行异常: %s, 错误: %s", tool_name, e)
             ctx.tool_decision = "failed"
-            ctx.auto_execute_result = {"status": "failure", "error": str(e)}
+            ctx.auto_execute_result = {"status": "failure", "error": str(e), "success": False}
+            await self._record_tool_outcome(tool_name, ctx, success=False, error_msg=str(e))
+
+    def _succeeded(self, result) -> Optional[bool]:
+        """本次工具执行是否成功：读**执行器产出的判据**，读不到返回 None。
+
+        优先读 `ToolExecutionManager.execute()` 随结果落下的 `success`
+        （生产端已经从执行器的 `_result_is_success` 归一过一次）；为兼容
+        直接调用 `execute_from_memory_async` 的入口，兜底读执行器的同一判据，
+        以及信封式 `{"status": "success"}` 的老形状。
+        """
+        if not isinstance(result, dict):
+            return None
+        if isinstance(result.get("success"), bool):
+            return result["success"]
+        if "status" in result:
+            return result.get("status") == "success"
+        judge = getattr(self.tool_executor, "_result_is_success", None)
+        if callable(judge):
+            try:
+                return bool(judge(result))
+            except Exception as e:  # noqa: BLE001 - 判据异常不得伪装成成功
+                logger.warning("工具成败判据抛异常，按失败处置: %s", e, exc_info=True)
+                return False
+        return None
+
+    async def _report_tool_outcome(self, tool_name: str, ctx: ChatContext, execution_context):
+        """失败/超时/取消统一出口：写出可读结果 + 记失败教训（成败信号回流）。"""
+        error_msg = ""
+        if isinstance(ctx.auto_execute_result, dict):
+            error_msg = ctx.auto_execute_result.get("error") or ""
+        error_msg = error_msg or execution_context.error or f"工具执行未成功（状态: {execution_context.status.value}）"
+        logger.warning("工具自动执行失败: %s, 错误: %s", tool_name, error_msg)
+        ctx.auto_execute_result = {"status": "failure", "error": error_msg, "success": False}
+        await self._record_tool_outcome(tool_name, ctx, success=False, error_msg=error_msg)
+
+    async def _record_tool_outcome(self, tool_name: str, ctx: ChatContext,
+                                   success: bool, error_msg: str = ""):
+        """把这一轮的成败回流给肌肉记忆（成功与失败走同一出口）。
+
+        为什么成功也要回流：肌肉记忆的连击计数、成功率与温度都靠这条信号；
+        只有失败回流时，成功侧永远停在旧读数上——闭环写成"写入→读取"两半，
+        反馈那一半是断的。
+        落盘失败不得影响本轮结论，但必须出声（不静默吞异常）。
+        """
+        try:
+            if success:
+                self._record_muscle_memory_outcome(ctx, success=True)
+            else:
+                await self._record_tool_failure(tool_name, ctx.user_input, error_msg)
+        except Exception as e:
+            logger.warning("工具成败回流到肌肉记忆失败（不影响本轮结论）: %s", e, exc_info=True)
+
+    def _record_muscle_memory_outcome(self, ctx: ChatContext, success: bool) -> None:
+        """在肌肉记忆上记一笔真实执行结果（命中本身不记账，见 check_tool_memory）。"""
+        tool_memory = self.tool_memory
+        muscle_memory = getattr(tool_memory, "muscle_memory", None)
+        if muscle_memory is None or not callable(getattr(muscle_memory, "record_usage", None)):
+            logger.debug("肌肉记忆不可用，成败回流跳过: success=%s", success)
+            return
+        record = ctx.tool_memory_result or {}
+        muscle_memory.record_usage(
+            tool_name=record.get("tool_name"),
+            query=ctx.user_input,
+            parameters=record.get("tool_params") or {},
+            success=success,
+            metadata={"source": "auto_execute", "confidence": record.get("confidence", 0)},
+        )
 
     def _on_tool_execution_status_change(self, event):
         """工具执行状态变更回调"""
