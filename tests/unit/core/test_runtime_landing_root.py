@@ -26,6 +26,8 @@ import os
 import re
 from pathlib import Path
 
+from tests import ast_scan
+
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -69,17 +71,20 @@ _CALL_HINT = re.compile(r"(Path|PurePath|join|joinpath|makedirs|mkdir|connect)\s
 _QUOTE_HINT = re.compile(r"[\"']")
 
 
-@functools.lru_cache(maxsize=None)
 def _textOf(path: Path) -> str:
-    """按文件缓存源码（预筛与解析共用）。"""
-    return path.read_text(encoding="utf-8", errors="replace")
+    """按文件缓存源码（预筛与解析共用）。
+
+    缓存落在 `tests/ast_scan.py`（同进程里其余跨文件 AST 判据已有同一份文本，
+    这里不读第二遍；Issue #148：全仓 `ast.parse` 单跑 5s，与受保护子集其余
+    170 个文件共享机器时撞 30s 墙钟）。
+    """
+    return ast_scan.sourceCode(path)
 
 
-@functools.lru_cache(maxsize=None)
 def _treeOf(path: Path):
     """按文件缓存 AST；语法错误返回 None（跳过该文件，与既有守卫一致）。"""
     try:
-        return ast.parse(_textOf(path))
+        return ast_scan._cachedParse(ast_scan._cacheKey(path), _textOf(path))
     except SyntaxError:
         return None
 
