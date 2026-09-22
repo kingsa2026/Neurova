@@ -701,7 +701,7 @@ export default {
     overview: 'Panoramica',
     decay: 'Decadimento memoria',
     reload: 'Ricarica dal disco',
-    reloadHint: 'Integra nel backend in esecuzione i ricordi scritti da un altro processo (es. import CLI) senza riavviare',
+    reloadHint: 'Riconcilia con il disco: integra i ricordi scritti da un altro processo (es. import CLI) e rimuovi le righe annullate, senza riavviare',
     enhance: 'Potenzia memoria',
     forget: 'Dimentica',
     strengthen: 'Rafforza',

@@ -821,15 +821,17 @@ const handleTriggerDecay = async () => {
 }
 
 /**
- * 把外进程（如 CLI 导入）写入的记忆增量并入后端快照，然后重读列表。
- * 不重新读盘时这些记忆在界面上一条都看不见（快照只在后端构造时读一次盘）。
+ * 与盘对账：并入外进程（如 CLI 导入）写入的记忆，并回收它在另一进程撤销掉的行，
+ * 然后重读列表。不重新读盘时前者在界面上一条都看不见，而后者会一直"还在"——
+ * 点一次强化就把撤销结果写回盘上（快照只在后端构造时读一次盘）。
  */
 const handleReloadMemories = async () => {
   reloading.value = true
   try {
     const res = await memoryApi.reloadMemories(agentId.value || undefined)
     const reloaded = (res as any)?.data?.reloaded ?? 0
-    message.success(`${t('memory.reload')}: ${reloaded}`)
+    const reaped = (res as any)?.data?.reaped ?? 0
+    message.success(`${t('memory.reload')}: +${reloaded} / -${reaped}`)
     await fetchMemories()
     await fetchStats()
   } catch (e: any) {
