@@ -340,6 +340,12 @@ tests/unit/test_archive_nav_impact_guard.py
 #     库单调增长；改后触发点落在归档提交，FTS 对齐改分批删除）
 tests/unit/context/test_ledger_gc_retention.py
 
+# 上下文持久层批（Issue #90）B4 工单 008：召回作用域闸口（A8）
+#   （根因：持久层这条读路径把可见性交给 session 精确等值——单聊池恒空、
+#     无会话池全放行；改后过 memory_scope.filter_by_scope，与视图路径同源，
+#     闸口落在两条源合并之后）
+tests/unit/context/test_ledger_recall_scope_gate.py
+
 # Issue #112 销账（Issue #68 归档层导航影响筛选·乙类）：前端 API 清单整篇重生成。
 #   根因：docs/09-dev-progress/api_inventory.md 是专职指路文档（docs/0-index/README.md
 #   的 09-dev-progress 领域入口），但此前**只有手写正文、没有写者**——代码树一变
