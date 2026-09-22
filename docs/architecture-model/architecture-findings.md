@@ -231,11 +231,22 @@ neurova/llm/cost_tracking_middleware.py  ← 362 行，全仓零消费者
 常驻守卫 `tests/unit/api/test_route_mount_contract_guard.py` 钉住
 「零路由挂载 / 前缀重复 / 挂载层错位」三类形态，并保留
 `unmountedEndpointModules()` 名单（`cost_api` / `computer_api` / `phase3_api` /
-`migration_api` / `skill_market` / `skills_market` / `openplatform.routes` /
-`core.acp_server` 仍定义了路由但未挂载，名单进 `docs/09-dev-progress/api_inventory.md`
+`migration_api` 仍定义了路由但未挂载，名单进 `docs/09-dev-progress/api_inventory.md`
 供人排期）。名单**收录口径是全仓**（`SOURCE_ROOTS`），不是只扫 `api/endpoints/` 包：
 口径若比声明窄，同一形态在包外就永远看不见——`openplatform.routes`（19 条）与
 `core.acp_server`（5 条）正是因此长期不在册的两条命中点。
+
+**同批处置（2026-09-22，包外两条命中点按根因退役）**：两条都不是「待接线」，
+而是**第二份平行实现**——`openplatform.routes` 自带 apps / webhooks / keys 三套
+资源面且**全仓零消费者、整条 router 无 `Depends`**（挂上去即把管理面对匿名请求开放）；
+`core.acp_server` 的 `chat_stream()` 是**模拟实现**（不调 LLM）、默认模型表是幻影条目，
+生产链路走的是 `endpoints/acp_api.py` + `agent/protocols/acp_runtime.py`。
+故在**产生第二份事实源的那一侧**删除（`neurova/api/openplatform/` 整包 +
+`core/acp_server.py` + 同名不同物的前端 `modules/openplatform.ts`），未给它们补鉴权
+或补挂载——补接线只会让同一件事长期有两个写入点。ADR 0013 早已裁定的待删两套
+（`skill_market` / `skills_market`）同批删除。守卫
+`tests/unit/api/test_orphan_faces_retired_guard.py` 钉住「不得复活 + 真面仍在 +
+零引用 + 不回台账」四条。
 「导入失败只 `logger.debug`」这条仍成立，属同域的下一个缺口，未在本轮处置。
 
 ### 6.2 成本链路：是只读报表，不是拦截器

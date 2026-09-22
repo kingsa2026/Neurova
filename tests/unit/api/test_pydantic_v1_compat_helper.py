@@ -91,7 +91,6 @@ def test_safe_model_dump_v2_compatible():
         "neurova.api.endpoints.enhanced_users_api",
         "neurova.api.endpoints.rules_api",
         "neurova.api.endpoints.shared_config",
-        "neurova.api.endpoints.skill_market",
         "neurova.api.endpoints.skill_pool_api",
         "neurova.api.endpoints.skill_version_api",
         "neurova.api.endpoints.tasks_api",

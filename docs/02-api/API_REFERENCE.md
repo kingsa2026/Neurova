@@ -179,8 +179,8 @@
 ### 46. `/api/v1/skill-pool` — `skill_pool_api.py`
 - `GET` | `POST` | `DELETE /{id}` | `POST /{id}/enable` | `POST /{id}/disable`
 
-### 47. `/api/v1/skills-market` — `skill_market.py` + `skills_market.py`
-- `GET` | `GET /{id}` | `POST /{id}/install` | `POST /publish` | `GET /categories`
+### 47. `/api/v1/marketplace` — `marketplace.py`
+- `GET /skills` | `GET /skills/{id}` | `POST /skills/{id}/install` | `DELETE /skills/{id}/install` | `GET /installed`
 
 ### 48. `/api/v1/skill-versions` — `skill_version_api.py`
 - `GET` | `GET /{id}` | `POST /{id}/rollback`
@@ -286,7 +286,7 @@
 
 | 认证类型 | 模块 |
 |----------|------|
-| **无需认证** | health, home, chat, agents, models, providers, skills, settings, logs, stats, monitor, scheduler, trace, generation, image, media, knowledge, growth, sleep, runtime, marketplace, channels, channel-adapters, channel-configs, channel-sharing, notifications, audit, firewall, analytics, collaboration, groups, teams, workflows, tasks, projects, rules, webhooks, enhanced-users, user-groups, files, file-flows, tools, tool-layers, skill-pool, skills-market, skill-versions, benchmark, console, plugins, sandbox, builder, computer, shared-config, openplatform, model-adapter, experience, knowledge-graph, knowledge-integration, semantic-search, enhanced-memory-search, memory-timeline, synonyms |
+| **无需认证** | health, home, chat, agents, models, providers, skills, settings, logs, stats, monitor, scheduler, trace, generation, image, media, knowledge, growth, sleep, runtime, marketplace, channels, channel-adapters, channel-configs, channel-sharing, notifications, audit, firewall, analytics, collaboration, groups, teams, workflows, tasks, projects, rules, webhooks, enhanced-users, user-groups, files, file-flows, tools, tool-layers, skill-pool, skill-versions, benchmark, console, plugins, sandbox, builder, computer, shared-config, openplatform, model-adapter, experience, knowledge-graph, knowledge-integration, semantic-search, enhanced-memory-search, memory-timeline, synonyms |
 | **JWT Token** | auth(me), memory子模块, context, context-pool, metacognition, agent-enhancement, logs-api, memory-enhancement, audio, session-sync, memory-share-groups |
 | **API Key** | agent-communication |
 | **HTTPBearer** | mobile |
