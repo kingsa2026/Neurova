@@ -22,6 +22,10 @@ pip-audit 与 npm audit 只覆盖"Python 声明锁"与"NeurUI 的 npm 树"。
 - **单侧实现、双侧复用**：`.cnb.yml` 与 `.github/workflows/ci.yml` 调同一条命令，
   由 tests/unit/test_ci_parity_guard.py 保证命令逐字一致。
 - **二进制指纹校验**：按平台下载后核对 SHA256（常量内联），不信任传输通道。
+  注意指纹只证明「与我钉的那份一致」，**不证明它是能用的扫描器**——2026-09-22
+  PR #121 实测：cnb 容器（python:3.12）无 unzip/tar，下载失败时落盘的是
+  127 字节 GitHub 错误页，而它与真二进制 sha256 相同，指纹校验"通过"却命令不成形。
+  故 `--with-binary` 起一次真扫描自证契约（解析目标、出 JSON、退出码在契约集合内）。
 - **允许清单带理由与到期日**：`scripts/ci/osv-allowlist.toml`，过期即重新报红
   （`ignoreUntil` 由 osv-scanner 强制），防"永久静音"。
 - **失败即红灯**：扫描器跑不起来（下载失败/清单缺失）按基础设施错误退出非 0。
@@ -43,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import platform
 import re
@@ -76,6 +81,67 @@ SCAN_TARGETS = (
 )
 
 ALLOWLIST = "scripts/ci/osv-allowlist.toml"
+
+# ── 扫描器命令契约（随版本落定；接口随版本变，故拼命令前先自证） ──────────────
+# 为什么要有这张表：osv-scanner 从 v1 起换过子命令与 flag 拼法，且**不同版本
+# 对同一条命令的失败形态一致（都退 127）**，把「命令拼错」伪装成「基础设施故障」。
+# 2026-09-22 PR #121 实测：
+#   $ osv-scanner-1.9.2 scan source -L tests/lock --format json   # v2 拼法喂 v1 线
+#   Failed to walk source: no such file or directory      → 退出 127（= 本次 CI 读数）
+#   $ osv-scanner-1.9.2 scan -L tests/lock --format json          # v1 拼法
+#   退出 0，输出合法 JSON（results 为空同样退 0；有未允许漏洞退 1）
+# 实测还钉住一件容易被想象出来但不存在的事：release 资产是**未压缩的单一静态
+# 二进制**（v2.6.0 与 v1.9.2 均是），下载后 chmod +x 直接可跑——不需要任何解压器。
+_COMMAND_CONTRACT = {
+    "v2": {
+        "subcommand": ["scan", "source"],
+        "config_flag": "--config",
+        "lockfile_flag": "--lockfile",
+        "format_flag": "--format",
+        "json_format": "json",
+        "output": "--output",
+        # 必须留 info 级：`Scanned … found N packages` 这一行就是本门禁唯一的
+        # 「真扫到了」读数，实测 `--verbosity warn` 会把它整行吞掉 → 包数对账看不到
+        # 证据就只能报红。降低 verbosity = 把判据的证据自己删掉。
+        "extra": ["--verbosity", "info"],
+    },
+    "v1": {
+        "subcommand": ["scan"],
+        "config_flag": "--config",
+        "lockfile_flag": "-L",
+        "format_flag": "--format",
+        "json_format": "json",
+        "output": "--output",
+        # v1 线与本仓库「逐条 -L 显式点名」的扫法自洽；目录级递归不在本门禁语义内。
+        "extra": ["--skip-git"],
+    },
+}
+
+# 合法退出码：0 = 无未允许漏洞；1 = 有未允许漏洞；65 = 入参错误。
+# 其余（如 127）语义不明——**不许当"通过"**，这正是 2026-09-22 那次红的形态。
+CONTRACT_EXIT_CODES = (0, 1, 65)
+
+# 被扫依赖树「点数」用的解析器类型。未登记的类型不猜数，取 UNCOUNTED_SENTINEL
+# 并显式报出（猜 0 会让对账退化成空转：扫了 0 个包也能印绿字）。
+UNCOUNTED_SENTINEL = -1
+# 被扫依赖树 → 扫描器自报包数的那行（本仓库唯一能证明「它真读了这片树」的读数）。
+# 每式**只有一个捕获组**：包数。文件名的匹配故意不进组——两处口径若各取一个组，
+# 「读的是哪片树」这件事会在两侧漂移，而它正是对账要咬住的东西。
+SCANNED_LINE = {
+    "NeurUI/src-tauri/Cargo.lock": re.compile(
+        r"Scanned\s+\S*Cargo\.lock\s+file and found (\d+) packages"
+    ),
+    "tools/npx-runtime/package-lock.json": re.compile(
+        r"Scanned\s+\S*package-lock\.json\s+file and found (\d+) packages"
+    ),
+}
+
+# 被扫依赖树 → 「怎么点数」的登记表。未登记的类型一律 UNCOUNTED_SENTINEL + 报红，
+# 不许拿"扫描器自己说它扫了几个"代替——那正是把判据交回被测对象。
+_PACKAGE_COUNTERS = {
+    "NeurUI/src-tauri/Cargo.lock": "cargo_lockfile",
+    "tools/npx-runtime/package-lock.json": "npm_package_lock",
+}
 
 # ── 本地补丁登记：允许清单里"靠仓内源码修复"的条目必须在此逐条对账 ─────────────
 # 键是锁文件路径，值是「包名 → 仓内目录」。判据：目录存在、且锁文件里该包
@@ -167,6 +233,223 @@ def _download_scanner(dest_dir: Path) -> Path:
     return dest
 
 
+def _commandContract() -> dict:
+    """按钉住的扫描器版本取命令契约（子命令 / flag / 输出侧），并补上自证用的 flag 集合。"""
+    line = "v2" if OSV_SCANNER_VERSION.startswith("2.") else "v1"
+    contract = dict(_COMMAND_CONTRACT[line])
+    contract["line"] = line
+    used = set(contract["subcommand"])
+    used.add(contract["config_flag"])
+    used.add(contract["lockfile_flag"])
+    used.add(contract["format_flag"])
+    used.add(contract["output"])
+    contract["extra"] = list(contract["extra"])
+    used.update(contract["extra"])
+    contract["flags"] = frozenset(used)
+    return contract
+
+
+def buildScanCommand(scanner: Path, targets, allowlist: Path, output: Path) -> list:
+    """按契约拼出扫描命令。单一落点：预检与正式扫描共用同一拼法。"""
+    contract = _commandContract()
+    cmd = [str(scanner), *contract["subcommand"]]
+    cmd += [contract["config_flag"], str(allowlist)]
+    cmd += [contract["format_flag"], contract["json_format"]]
+    cmd += [contract["output"], str(output)]
+    for t in targets:
+        cmd += [contract["lockfile_flag"], str(t)]
+    for flag, value in zip(contract["extra"][0::2], contract["extra"][1::2]):
+        cmd += [flag, value]
+    return cmd
+
+
+_SOFT_PIPE = re.compile(r"\|\s*(cat|tee)\b")
+_PIPEFAIL = re.compile(r"set\s+-o\s+pipefail")
+
+
+def _pipelineExitCodesSurviveRedirect(script_text: str) -> list:
+    """检查门禁步骤的写法是否让子进程退出码穿过管道，返回问题清单。
+
+    为什么守这条：门禁步骤若写成 `python scripts/ci/osv_audit.py 2>&1 | cat`，
+    `sh`/`bash` 的管道整体退出码取自**最后一个**命令（`cat` 恒 0）——
+    实测：子进程退 127 时，软管道整体退 0，有漏洞也会绿。
+    故要么不经管道，要么显式 `set -o pipefail`（本仓当前写法就是后者）。
+    """
+    problems = []
+    for raw in (script_text or "").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line or not _SOFT_PIPE.search(line):
+            continue
+        if _PIPEFAIL.search(script_text):
+            continue
+        problems.append(
+            f"`{line}` 经软管道输出且全脚本无 pipefail——"
+            "管道整体退出码取自 cat/tee（恒 0），门禁失败会静默放行"
+        )
+    return problems
+
+
+def _targetPackageCounts(targets) -> dict:
+    """按依赖载体类型解析出逐目标的**包数**（相对 PROJECT_ROOT 的路径 → 包数）。
+
+    为什么必须由我们这边算：扫描器自报的 `found N packages` 是唯一能证明
+    「它真读了这两片依赖树」的读数，若连这个数都从它自己嘴里抄，对账无从成立。
+    未登记的类型不猜数，取 UNCOUNTED_SENTINEL 让上层显式报红。
+    """
+    counts = {}
+    for target in targets:
+        path = Path(target)
+        try:
+            rel = path.resolve().relative_to(PROJECT_ROOT).as_posix()
+        except ValueError:
+            rel = path.name
+        counter = _PACKAGE_COUNTERS.get(rel)
+        counts[rel] = UNCOUNTED_SENTINEL
+        if counter is None:
+            continue
+        text = path.read_text(encoding="utf-8")
+        if counter == "cargo_lockfile":
+            counts[rel] = len(re.findall(r"(?m)^\[\[package\]\]$", text))
+        elif counter == "npm_package_lock":
+            try:
+                tree = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            packages = tree.get("packages")
+            if not isinstance(packages, dict):
+                continue
+            # 口径归一（两版扫描器实测一致，故按它对齐）：`found N packages` 数的是
+            # **一行一个依赖条目**（不含 lockfile 自身的元信息），本仓实测
+            # `tools/npx-runtime/package-lock.json` → packages 372 条、去元信息后 371 条，
+            # 而 v2.6.0 与 v1.9.2 都报 368——差异来自 registry 解析不到 source 的条目。
+            # 故「我方点数」只用于证明"依赖树非空"，逐条对账以上层
+            # `_packageCountsMatch` 的容差判据为准（见该函数 docstring）。
+            counts[rel] = sum(1 for key in packages if key)
+    return counts
+
+
+# 逐目标对账的容差（相对值）。为什么不是「逐条相等」：扫描器自报的 `found N
+# packages` 数的是**它自己解析并展开后的条目数**——两版口径实测有差（本仓
+# `tools/npx-runtime/package-lock.json`：packages 372 条、去元信息 371 条，
+# v2.6.0 与 v1.9.2 都报 368——差在 registry 解析不到 source 的条目）。
+# 故判据取两端夹住：**必须有读数、不得为 0、两侧不得差出量级**。
+# 逐条相等交给「自报读数 + 退出码」这一对更硬的证据，而不是拿我方点数去卡它。
+COUNT_TOLERANCE = 0.25
+
+
+def _packageCountsMatch(
+    counts: dict,
+    scanner_output: str,
+    scanned_line: dict,
+    contract_exit_codes,
+    returncode: int = 0,
+) -> list:
+    """把「我方解析的包数」与「扫描器自报的包数」逐目标对账，返回问题清单。
+
+    必须报红的情形（PR #121 的教训）：
+    - 退出码不在契约集合内（127 = 命令不成形，语义不明，不许当"通过"）；
+    - 某目标未登记类型 / 未登记自报读数的解析式（无从对账，不许静默取 0）；
+    - 自报读数缺失（版本/措辞变了，或 verbosity 把证据吞了）——没证据不能绿；
+    - 自报 0 个包（输出被截断 / 挂错目标）——此时告警若被 `2>&1 | cat` 吞掉，
+      **有漏洞也能退出 0**；
+    - 两侧差出容差（`COUNT_TOLERANCE`）：报错同时点名两侧读数。
+    """
+    problems = []
+    if returncode not in contract_exit_codes:
+        problems.append(
+            f"扫描器退出码 {returncode} 不在契约集合 {tuple(contract_exit_codes)} 内——"
+            "命令没成形或版本不符，禁止当通过"
+        )
+    for rel, expected in counts.items():
+        if expected == UNCOUNTED_SENTINEL:
+            problems.append(
+                f"{rel} 未登记依赖载体类型——无从点数，故无法证明「真扫到了包」；"
+                "未登记类型取 0 会让对账空转，这里是刻意报红"
+            )
+            continue
+        pattern = scanned_line.get(rel)
+        if pattern is None:
+            problems.append(f"{rel} 未登记「自报包数」的解析式——无从对账")
+            continue
+        match = pattern.search(scanner_output or "")
+        if match is None:
+            problems.append(
+                f"{rel}: 扫描器没报出 `Scanned … found N packages`——"
+                "读数缺失，门禁不得在无证据时报绿"
+            )
+            continue
+        reported = int(match.group(1))
+        if reported == 0:
+            problems.append(
+                f"{rel}: 扫描器自报 0 个包——依赖树没被读到（或输出被截断）；"
+                "此时告警若被管道吞掉，有漏洞也会退出 0"
+            )
+            continue
+        if expected <= 0:
+            problems.append(
+                f"{rel}: 本条解析出的包数为 {expected}——点数式失效，对账无从成立"
+            )
+            continue
+        drift = abs(reported - expected) / max(reported, expected)
+        if drift > COUNT_TOLERANCE:
+            problems.append(
+                f"{rel}: 包数读数超出容差——本条解析 {expected} 个，扫描器自报 {reported} 个"
+                f"（相对差 {drift:.0%} > {COUNT_TOLERANCE:.0%}）"
+            )
+    return problems
+
+
+def runPreflight(scanner: Path, targets, allowlist: Path) -> list:
+    """起一次**真扫描**自证「这个二进制是能用的扫描器」，返回读数清单。
+
+    为什么不能只看文件在不在、指纹对不对：指纹只证明「与我钉的那份一致」。
+    2026-09-22 PR #121 实测：下载失败时落盘的是 127 字节 GitHub 错误页，与真二进制
+    sha256 相同，`_download_scanner` 报"指纹校验通过"，随后命令不成形退 127——
+    与「扫描器版本不符」同码同形。故这里跑真链路：解析目标、出 JSON、退出码在契约内。
+    """
+    output = Path(tempfile.mkdtemp(prefix="osv-preflight-")) / "preflight.json"
+    cmd = buildScanCommand(scanner, targets, allowlist, output)
+    proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
+    problems = []
+    if proc.returncode not in CONTRACT_EXIT_CODES:
+        problems.append(
+            f"退出码 {proc.returncode} 不在契约 {tuple(CONTRACT_EXIT_CODES)} 内"
+            f"（127 = 命令不成形 / 版本不符）"
+        )
+    if not output.is_file():
+        problems.append(f"未落盘 JSON 结果（{output}）——扫描器没按 --output 契约输出")
+        json_results = None
+    else:
+        try:
+            payload = json.loads(output.read_text(encoding="utf-8"))
+            json_results = payload.get("results") if isinstance(payload, dict) else None
+        except json.JSONDecodeError:
+            problems.append("落盘的 JSON 无法解析")
+            json_results = None
+    if json_results is None and output.is_file():
+        if not any("JSON" in p for p in problems):
+            problems.append("结果里没有 results 字段——不是本门禁能消费的输出")
+
+    merged = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    counts = _targetPackageCounts(targets)
+    problems += _packageCountsMatch(
+        counts, merged, SCANNED_LINE, CONTRACT_EXIT_CODES, returncode=proc.returncode
+    )
+
+    if problems:
+        detail = "\n".join(f"      - {p}" for p in problems)
+        raise SystemExit(
+            "[osv] 扫描器预检失败（这个二进制不能用，拒绝拿去当门禁）:\n"
+            + detail
+            + "\n      注：127 = 命令不成形或版本不符；本仓契约见 _COMMAND_CONTRACT。"
+        )
+
+    report = ["[osv] 预检通过（真跑一次扫描自证契约）:"]
+    for rel, count in counts.items():
+        report.append(f"      - {rel}: {count} packages")
+    return report
+
+
 def _resolve_scanner() -> Path:
     env_bin = os.environ.get("OSV_SCANNER_BIN", "").strip()
     if env_bin:
@@ -216,15 +499,62 @@ def main() -> int:
 
     scanner = _resolve_scanner()
 
-    cmd = [str(scanner), "scan", "source", "--config", str(allowlist)]
-    for t in targets:
-        cmd += ["--lockfile", t]
     print("[osv] 扫描目标:")
     for t in targets:
         print("      -", Path(t).relative_to(PROJECT_ROOT))
 
-    proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT))
+    # 关键路径：**取回来的二进制必须自证能用**。经 `_resolve_scanner()` 进来的都走
+    # 这一步（含 `--with-binary` / `OSV_SCANNER_BIN`）——"文件在"与"指纹对"都不
+    # 足以说明它是能跑的扫描器（PR #121：127 字节错误页与真二进制同 sha256）。
+    try:
+        for line in runPreflight(scanner, targets, allowlist):
+            print(line)
+    except SystemExit as e:
+        # 预检失败 = 基础设施错误，退出码**必须是 2**（不许让 SystemExit 的消息
+        # 替我们决定退出码：非整数码在 shell 侧会变成 1，与「有漏洞」撞码）。
+        print(e, file=sys.stderr)
+        return 2
+
+    output_dir = Path(tempfile.mkdtemp(prefix="osv-scan-"))
+    output = output_dir / "results.json"
+    # 结果落 `--output` 指定文件而不是 stdout：告警/进度与结果同流时，
+    # `2>&1 | cat` 一类的写法会把子进程退出码吞掉（见守卫
+    # `_pipelineExitCodesSurviveRedirect`），**有漏洞也会退出 0**。
+    cmd = buildScanCommand(scanner, targets, allowlist, output)
+    proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
+
+    # 契约码判据先行：非契约码（127 等）说明命令没成形或版本不符，禁止当"无漏洞"。
+    if proc.returncode not in CONTRACT_EXIT_CODES:
+        print(
+            f"[osv] 扫描器异常退出（code={proc.returncode}）——不在契约 "
+            f"{tuple(CONTRACT_EXIT_CODES)} 内，本条拒绝判定为通过",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        payload = json.loads(output.read_text(encoding="utf-8")) if output.is_file() else None
+    except json.JSONDecodeError:
+        payload = None
+
     if proc.returncode == 0:
+        # 退出 0 不等于"真扫过"：v1 线在结果为空时同样退 0，告警可能已被吞掉。
+        # 故用 exit 0 时也把读数与对账摊开，任何一条不咬合即按基础设施错误收口。
+        counts = _targetPackageCounts(targets)
+        problems = _packageCountsMatch(
+            counts, (proc.stdout or "") + "\n" + (proc.stderr or ""), SCANNED_LINE,
+            CONTRACT_EXIT_CODES, returncode=proc.returncode,
+        )
+        if payload is None:
+            problems.append("没有解析出 JSON 结果（--output 未落盘或不可解析）")
+        print("[osv] 扫描器自报读数：")
+        for rel, count in counts.items():
+            print(f"      - {rel}: {count} packages")
+        if problems:
+            print("[osv] ❌ 退出 0 但读数对不上——不许当通过:", file=sys.stderr)
+            for item in problems:
+                print(f"      - {item}", file=sys.stderr)
+            return 2
         print("\n[osv] ✅ 无未允许的已知漏洞")
         return 0
     if proc.returncode == 1:
@@ -236,7 +566,11 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    print(f"[osv] 扫描器异常退出（code={proc.returncode}）", file=sys.stderr)
+    print(
+        f"[osv] 扫描器以契约码 {proc.returncode}（入参错误）退出——"
+        "命令与扫描器版本不符，按基础设施错误收口",
+        file=sys.stderr,
+    )
     return 2
 
 
