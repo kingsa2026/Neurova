@@ -517,3 +517,50 @@ FAILED tests/unit/test_dev_path_and_runtime_dep_guards.py::TestProtectedGuardsUs
 处置依据与该提交的红→绿实测以其提交说明为准，本节不复制第二份。此处记录它的理由只有一个：
 它与本轮的文档改动同处一条 PR、同一个 `unit-tests-*` 门禁，读者复核「这一批为什么红过」
 时必须能在一个地方看到因与果——不因分属「CI」与「文档」而拆到两处。
+
+### 10.5 与本轮同批的第二处 CI 红：台账生成物与扫描器脱节
+
+同一条 PR 的第二次推送上，`unit-tests-py311/py312` 又红在同一处，仍与任务内容无关：
+
+```
+FAILED tests/unit/test_archive_nav_impact_guard.py
+  ::TestPointerEntriesAreProjectInitiated::test_summary_block_matches_scanner
+  ::TestMachineBlocksHaveAGenerator::test_writer_is_idempotent_on_the_shipped_ledger
+2 failed, 21 passed, 1 skipped
+```
+
+两处指向同一件事：台账 `docs/06-bugfix/历史悬空引用登记台账_2026-09-21.md` 第 8.2 节
+（`<!-- NAV-IMPACT:SUMMARY:BEGIN -->` 区块）写着归档层悬空引用 **1778** 条，而扫描器
+当时的真实读数是 **1781**（其中「无当下读者」豁免 830 → 833）。
+
+**根因**：本轮给 `docs/05-reports/dependency-cve-ledger.md` 追加的修复台账一节里，
+有 3 处引用写成了**裸文件名**（`test_tracked_run_residue_guard.py` 等）——同节相邻引用
+都写了全路径，这 3 处是漏写。归档层正文改动会让扫描器的悬空引用计数变化，而第 8.2 节
+是**生成物**，本轮改完源文档没有同批重生成，生成物与唯一事实源（扫描器）就此脱节。
+
+这正是「写入 → 读取」的环断在**生成物**这一环：源文档改了，生成物没跟上，守卫比对的
+两侧读数不再相等。
+
+**处置**：按守卫明示的唯一动作重生成，不手改生成区、不就地改写归档层正文
+（该层政策是「陈述当时形态，不就地改写」；裸文件名在扫描器口径里属**已枚举的合法
+形态**，落在「描述性行内码」与「无当下读者」两个豁免桶里，不是非法状态）：
+
+```
+$ python scripts/scan_docs_refs.py --update-ledger
+台账机器区已重生成：docs/06-bugfix/历史悬空引用登记台账_2026-09-21.md（5 个区块）
+```
+
+**红 → 绿实测（本环境 py3.11）**：
+
+```
+# 红（重生成前）
+$ pytest tests/unit/test_archive_nav_impact_guard.py -q
+2 failed, 21 passed, 1 skipped
+
+# 绿（重生成后）
+$ pytest tests/unit/test_archive_nav_impact_guard.py -q
+23 passed, 1 skipped
+```
+
+幂等自证（生成器不空转重写）：把生成结果写回后逐字节不变——守卫
+`test_writer_is_idempotent_on_the_shipped_ledger` 即此判据，第二次重跑无差异。
