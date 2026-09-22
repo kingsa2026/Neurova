@@ -1,8 +1,9 @@
-# 未接线 router 台账（Issue #112 后续·未接线断点）· 只降不升
+# 未挂载端点模块台账（Issue #112 后续·接线断点）· 只降不升
 #
-# 收录口径：模块有**真实路由**，但装配后的应用里一条都不可达，且全仓无挂载点。
-# 判据单源在 scripts/gen_api_inventory.py 的 unwiredEndpointRouters()；
-# 守卫 tests/unit/api/test_endpoint_mount_wiring_guard.py 双向钉住（新增即红、
+# 收录口径：模块定义了路由（`@router.<verb>`），但装配后的应用里一条都不可达
+# ——是「有实现却无挂载点」，不是「挂了零条路由」（后者由 mountedRouterAudit 拦下）。
+# 判据单源在 scripts/generate_api_inventory.py 的 unmountedEndpointModules()；
+# 守卫 tests/unit/api/test_route_mount_contract_guard.py 双向钉住（新增即红、
 # 修好后未下调亦红）。登记不代替修复——但也不许把已知项假装不存在。
 #
 # 逐条处置理由（不许静默）：

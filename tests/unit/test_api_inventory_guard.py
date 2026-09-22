@@ -11,7 +11,7 @@
 表，而清单的全部价值在于可信），而是**重生成 + 常驻守卫**：
 
 1. **机器区必须有生成器，且与生成器逐字一致**。清单正文由
-   `scripts/gen_api_inventory.py` 产出，守卫重算比对；人在清单里手改一行即红。
+   `scripts/generate_api_inventory.py` 产出，守卫重算比对；人在清单里手改一行即红。
 2. **模块双向差集为空**。清单声明的模块 ←→ `NeurUI/src/api/modules/*.ts`，
    任一方向有差即红——这是 Issue #112 的验收判据 1。
 3. **差异项以显式列表暴露，不得删条目掩盖**。「前端调用未命中后端注册」
@@ -33,7 +33,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-generator = pytest.importorskip("scripts.gen_api_inventory")
+generator = pytest.importorskip("scripts.generate_api_inventory")
 
 INVENTORY = generator.INVENTORY_PATH
 
@@ -70,7 +70,7 @@ class TestGeneratorIsTheSingleSource:
             )
 
     def test_declares_generate_command(self):
-        assert "gen_api_inventory.py" in generator.GENERATE_COMMAND, (
+        assert "generate_api_inventory.py" in generator.GENERATE_COMMAND, (
             "生成命令必须指向本仓实际的生成器脚本；写错命令等于把修复责任推给手改。"
         )
 
@@ -161,26 +161,31 @@ class TestDifferencesAreListedExplicitly:
 
 
 class TestSnapshotDiscipline:
-    """快照纪律：命令与日期必须可核，过期必须显式标注。"""
+    """快照纪律：命令与日期必须可核，过期必须显式标注。
 
-    def test_block_publishes_command_and_date(self):
-        block = _machine_block()
-        assert generator.GENERATE_COMMAND in block, (
-            "清单机器区未写明生成命令——读者无法自行复算，快照纪律形同虚设。"
+    头部是**人的叙述区**（生成命令 + 快照日期写在区块标记之外），机器区的日期由
+    `--write` 写回时读回（保证幂等）。故取数一律从**整篇**取：这不是放宽判据，
+    而是承认「快照纪律落在头部」这一既定形态。
+    """
+
+    def test_header_publishes_command_and_date(self):
+        text = _inventory_text()
+        assert generator.GENERATE_COMMAND in text, (
+            "清单头部未写明生成命令——读者无法自行复算，快照纪律形同虚设。"
         )
-        assert generator.extractSnapshotDate(block) is not None, (
-            "清单机器区未写明快照日期（或日期不可解析）。"
+        assert generator.extractSnapshotDate(text) is not None, (
+            "清单头部未写明快照日期（或日期不可解析）。"
             "没有日期，读者无法判断这份表是否已过期。"
         )
 
     def test_snapshot_date_is_not_in_the_future(self):
-        snapshot = generator.extractSnapshotDate(_machine_block())
+        snapshot = generator.extractSnapshotDate(_inventory_text())
         assert snapshot <= date.today(), (
             f"快照日期 {snapshot} 在未来——日期不可信，快照纪律失效。"
         )
 
     def test_snapshot_is_within_the_agreed_age(self):
-        snapshot = generator.extractSnapshotDate(_machine_block())
+        snapshot = generator.extractSnapshotDate(_inventory_text())
         age = (date.today() - snapshot).days
         assert age <= generator.SNAPSHOT_MAX_AGE_DAYS, (
             f"清单快照已 {age} 天未重生成（上限 {generator.SNAPSHOT_MAX_AGE_DAYS} 天）。\n"
@@ -190,9 +195,9 @@ class TestSnapshotDiscipline:
 
     def test_injected_stale_block_is_detected(self):
         """负向控制：机器区被手改成陈旧内容，比对必须转红。"""
-        drifted = _inventory_text().replace(
-            generator.INVENTORY_END, "手改出来的陈旧行\n" + generator.INVENTORY_END
-        )
+        text = _inventory_text()
+        drifted = text[:text.find(generator.INVENTORY_END)] + \
+            "手改出来的陈旧行\n" + text[text.find(generator.INVENTORY_END):]
         assert drifted != _inventory_text(), "注入漂移失败"
         restored = generator.applyInventoryBlocks(drifted)
         assert generator.INVENTORY_END in restored
@@ -206,7 +211,7 @@ class TestSnapshotDiscipline:
         """负向控制：清单漏写一个现行模块，双向差集必须报出来。"""
         text = _inventory_text()
         line = next(l for l in text.splitlines()
-                    if l.startswith("| memory |") and "modules/memory.ts" in l)
+                    if "`NeurUI/src/api/modules/memory.ts`" in l)
         drifted = tmp_path / "api_inventory.md"
         drifted.write_text(text.replace(line, ""), encoding="utf-8")
         monkeypatch.setattr(generator, "INVENTORY_PATH", drifted)

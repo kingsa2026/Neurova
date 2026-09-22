@@ -514,7 +514,6 @@ def _register_core_modules(app_state: AppState) -> None:
 def _register_routes(app: FastAPI, app_state: AppState) -> None:
     """注册所有 API 路由"""
     from neurova.api.endpoints import (
-        acp_router,
         register_endpoint_routers,
         set_app_state,
     )
@@ -543,10 +542,12 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
         }
     )
 
-    # 注册特殊路由（ACP 自带 prefix，故此处只给挂载层）
-    app.include_router(acp_router, prefix="/api/acp", tags=["ACP"])
-
-    # 注册所有端点路由（唯一挂载表：endpoints/__init__.py 的 endpoint_modules）
+    # 路由挂载只有一个入口：`endpoint_modules` 注册表（含 ACP / 预算 / 成本聚合 /
+    # NEURON / 协作域）。此前这里另有一组旁路 include_router，与注册表并存成了
+    # 第二份挂载事实：neuron 与 coordination 被叠两次前缀（真实路径
+    # /api/neuron/neuron/*、/api/coordination/coordination/*），预算与成本聚合被挂在
+    # /api 下（缺 /v1，前端 baseURL=/api/v1 → 必 404），另有三个空 router 挂出
+    # /api、/api/evolution、/api/rag 三个零路由前缀。旁路已删除。
     register_endpoint_routers(app)
 
     # 工具大输出 OutputRef 落盘引用（产物预览计划 W1-4，2026-09-08）：
