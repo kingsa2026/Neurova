@@ -7,6 +7,7 @@ import json
 import hashlib
 import re
 from collections import OrderedDict
+from neurova.core.data_root import dataLanding
 from neurova.core.logger import get_logger
 from neurova.session_repository import SessionRepository
 import threading
@@ -190,9 +191,11 @@ class SessionManager(SessionRepository):
             self._initialized = True
             # NEUROVA_SESSIONS_DIR 环境变量供测试隔离（单例 __new__ 下
             # 构造参数只在首次生效，env 是唯一可靠覆盖通道）
-            self._sessions_dir = Path(
-                sessions_dir or os.environ.get("NEUROVA_SESSIONS_DIR") or "sessions"
-            )
+            # 会话存档落点：显式入参 > NEUROVA_SESSIONS_DIR > 数据根下的 sessions/。
+            # 原兜底是裸相对名 `"sessions"`——换个启动目录就读到另一份会话库。
+            explicit = sessions_dir or os.environ.get("NEUROVA_SESSIONS_DIR")
+            self._sessions_dir = (Path(explicit) if explicit
+                                  else dataLanding("sessions"))
             self._sessions_dir.mkdir(parents=True, exist_ok=True)
             # 2026-09-07 根因修复（audit SUB-P0-6）：文件锁改 RLock——
             # _quarantine_broken_file 在 add_message 等持锁路径内被调用且

@@ -94,18 +94,24 @@ _app_instance: Optional[FastAPI] = None
 _state_lock = threading.Lock()
 
 
-def _make_database_health_check(db_path: str = "neurova_memory.db"):
+def _make_database_health_check(db_path: str = ""):
     """构造 database 健康检查闭包（可注入 db_path 供测试）。
 
     刻意不走业务连接池：池 get_connection 空池时阻塞等待 30s，
     健康探测需要轻量独立、不与业务争连接。
+
+    默认库落点走数据根（原值裸文件名 `"neurova_memory.db"` 随 CWD 漂移，
+    健康检查会连到一个并不存在的库并误报 degraded）。
     """
+    from neurova.core.database import defaultDbPath
+
+    resolved = db_path or defaultDbPath()
 
     def check_database():
         try:
             import sqlite3
 
-            conn = sqlite3.connect(db_path, timeout=3)
+            conn = sqlite3.connect(resolved, timeout=3)
             try:
                 conn.execute("SELECT 1").fetchone()
             finally:
