@@ -186,7 +186,16 @@ class TestProtectedGuardsUseNoExternalBinaries:
        的路径，缺席时照样 `FileNotFoundError`，正是本守卫要拦的形态。
     """
 
-    #: 台账：仅 CI 镜像保证存在的命令。`git` 是克隆与跟踪状态判定的前提。
+    #: 台账：仅 CI 镜像保证存在的命令。登记前提 = CI 镜像保证它存在，
+    #: 且判据无法跳过它（`git` 是克隆与跟踪状态判定的前提）。
+    #:
+    #: `sh` **不得**登记在此：桥脚本 `scripts/ci/run_gate_under_node.sh` 是 sh 脚本，
+    #: 故"解释器探测落到 node 分支"那条判据确实要跑 sh —— 但它在使用点
+    #: （`tests/unit/ci/test_npc_script_interpreter_reachability.py`）**先探后用**：
+    #: `shutil.which("sh")` 缺席即 skip，再把探测结果当命令头执行。走的是「先探后用」
+    #: 通路，本来就被放行。若为图省事把它塞进本台账，`_offendersInSource` 会在
+    #: 解析命令名前就放行，于是「裸用 sh」这一反面用例的读数从 1 条变成 0 条
+    #: —— 台账就成了免检通道，正是本类要拦的形态（见 test_guard_readings_are_falsifiable）。
     ALLOWED = {"git"}
 
     @staticmethod
@@ -408,6 +417,15 @@ class TestProtectedGuardsUseNoExternalBinaries:
                 "def test_x():\n"
                 "    subprocess.run(['git', 'status'])\n",
                 0,
+            ),
+            (
+                # 白名单不是免检通道：登记过的命令若在使用点裸用，照样必须命中。
+                # 可证伪：把 ALLOWED 当免检用（去掉 'sh' 的使用点探测）→ 本用例红。
+                "allowlisted_still_needs_use_site_probe",
+                "import subprocess\n"
+                "def test_x():\n"
+                "    subprocess.run(['sh', '-c', 'echo hi'])\n",
+                1,
             ),
             (
                 "interpreter_itself",

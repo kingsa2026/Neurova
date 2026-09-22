@@ -339,6 +339,13 @@ class TestNodeDispatchReallyWorks:
         node = shutil.which("node")
         if node is None:
             pytest.skip("本环境无 node，无法做调用形态比对")
+        # 登记的调用形态是 `sh scripts/ci/run_gate_under_node.sh <script>`：
+        # 桥脚本是 sh 脚本，故 sh 是**被测产物本身**的依赖，不是顺手借的宿主工具。
+        # 仍与 node 一样先断言存在再使用——缺席时 skip 而不是 FileNotFoundError
+        # （受保护子集里"守卫静默不跑"的同一根因，见
+        # tests/unit/test_dev_path_and_runtime_dep_guards.py）。
+        if shutil.which("sh") is None:
+            pytest.skip("本环境无 sh，跑不了桥脚本的调用形态")
 
         # 平台登记的命令形态以 `sh <桥脚本>` 起头（`.cnb.yml` 的 node 分支），
         # 故这里先解析 sh 而不是写死字面量：受保护子集里写死外部命令，镜像缺席时
