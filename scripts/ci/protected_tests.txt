@@ -333,3 +333,10 @@ tests/unit/test_archive_nav_impact_guard.py
 #     resident_limit=None / ttl_seconds=0 下永不执行 → 保留策略一次也不触发、
 #     库单调增长；改后触发点落在归档提交，FTS 对齐改分批删除）
 tests/unit/context/test_ledger_gc_retention.py
+
+# Issue #112 销账：`docs/09-dev-progress/api_inventory.md` 整篇级过期 → 重生成。
+#   根因：那篇是手写清单（专职指路文档，导航可达），手写的模块表必然随代码改名/合并漂移，
+#   实测声明 71 个前端模块里 29 个已不存在、现行 61 个里 20 个未列出。
+#   唯一写者 scripts/generate_api_inventory.py（清单正文由代码树产出），
+#   过期判据由日历改为**双向差集 + 运行时常量对齐**（静态路由零假阳性自证）。
+tests/unit/test_api_inventory_freshness_guard.py
