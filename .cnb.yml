@@ -399,6 +399,26 @@ main:
 #   故条款落在 `.cnb/settings.yml` 每个档位角色的 prompt 里（唯一必达通道），
 #   允许键清单见 `.cnb/npc_schema_keys.txt`，两处漂移由
 #   tests/unit/ci/test_npc_pipeline_time_budget.py 常驻拦截。
+# ── NPC 流水线脚本的解释器解析 ────────────────────────────────────────────────
+# `cnbcool/default-npc:latest`（NPC 流水线唯一镜像）**只有 node，没有 python**。
+# 构建 cnb-du8-1k34cfhg1 实测：第 1 步 `python scripts/ci/npc_turn_handoff_gate.py`
+# 以 `sh: 1: python: not found`（rc=127）收场，Agent 那一步被 skipper 跳过 ——
+# 用户看到的是「流水线构建失败」，实际是脚本拉不起来，与任务内容无关。
+# 同一条死链的两处命中点（issue.comment@npc / pull_request.comment@npc）一次扫清。
+#
+# 解释器探测逐级降级，且**不做任何安装**（镜像体积与网络都不由本流水线负责）：
+#   python3 → python → node（门禁脚本用 node 可跑，见
+#   tests/unit/test_ci_npc_config_guard.py::TestNpcScriptInterpreterReachability）；
+#   三级都不可用即以 127 收场 —— 请求解释器失败必须响亮，不得静默跳过（教义第 2 条）。
+.解释器探测: &npc-script-interpreter |
+  if command -v python3 >/dev/null 2>&1; then NPX=python3
+  elif command -v python >/dev/null 2>&1; then NPX=python
+  elif command -v node >/dev/null 2>&1; then NPX=node
+  else
+    echo "无可用脚本解释器（python3 / python / node 均不存在）" >&2
+    exit 127
+  fi
+
 $:
   issue.comment@npc: &npc-dscoder-issue
     - docker:
@@ -414,7 +434,22 @@ $:
       #   没有标记就当没触顶 —— 否则用户只说了「你好」也会被无限接力，把配额烧在空轮上。
       env:
         turnLimitReached: $turnLimitReached
+      # 本 Job 各 stage 的脚本解释器由探测结果 $NPX 给出（见 .解释器探测）。
+      envScript: *npc-script-interpreter
       stages:
+        - name: "接力判据可达性自证（$CNB_BUILD_WORKSPACE 是否真能写读标记）"
+          # 为何必须由真实构建自证（Issue #145，构建 cnb-2e8-1k341d9s1）：
+          #   npc:go 撞 maxTurns 时平台只是把 Agent 中止、把流水线判为失败，
+          #   收尾的接力 Stage 因读不到标记而 skipped —— 成果随容器一起丢，
+          #   用户在 Issue 上只看到「构建失败」，没有任何回音。
+          #   根因是标记落点只在人设里写着"工作区"，而**真实构建里工作目录是不是
+          #   工作区根**从没有人验证过。本步就是那条读数：断言
+          #   `$CNB_BUILD_WORKSPACE/.npc-turn-handoff` 可写可读，并反向自证
+          #   $PWD 是否等于 $CNB_BUILD_WORKSPACE（不等就把它打印出来）。
+          # 判据在 Agent 开工**之前**跑：接力能不能真发生，必须在烧掉整轮预算之前
+          #   就说清楚；跑不起来即红，不留"看着配了、其实永远不会触发"的接力。
+          script: "$NPX scripts/ci/npc_turn_handoff_gate.py"
+          timeout: 2m
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           # 单条工具执行（bash 命令）的墙钟上界：不声明则连续 10 分钟无输出即中断，
           # 声明后按本值执行。注意它**不是**整个 Agent 会话的上界（见上方平台依据），
@@ -488,7 +523,22 @@ $:
       # 两份事件定义必须逐字一致（test_ci_npc_config_guard.py 常驻校验）。
       env:
         turnLimitReached: $turnLimitReached
+      # 本 Job 各 stage 的脚本解释器由探测结果 $NPX 给出（见 .解释器探测）。
+      envScript: *npc-script-interpreter
       stages:
+        - name: "接力判据可达性自证（$CNB_BUILD_WORKSPACE 是否真能写读标记）"
+          # 为何必须由真实构建自证（Issue #145，构建 cnb-2e8-1k341d9s1）：
+          #   npc:go 撞 maxTurns 时平台只是把 Agent 中止、把流水线判为失败，
+          #   收尾的接力 Stage 因读不到标记而 skipped —— 成果随容器一起丢，
+          #   用户在 Issue 上只看到「构建失败」，没有任何回音。
+          #   根因是标记落点只在人设里写着"工作区"，而**真实构建里工作目录是不是
+          #   工作区根**从没有人验证过。本步就是那条读数：断言
+          #   `$CNB_BUILD_WORKSPACE/.npc-turn-handoff` 可写可读，并反向自证
+          #   $PWD 是否等于 $CNB_BUILD_WORKSPACE（不等就把它打印出来）。
+          # 判据在 Agent 开工**之前**跑：接力能不能真发生，必须在烧掉整轮预算之前
+          #   就说清楚；跑不起来即红，不留"看着配了、其实永远不会触发"的接力。
+          script: "$NPX scripts/ci/npc_turn_handoff_gate.py"
+          timeout: 2m
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           # 单条工具执行（bash 命令）的墙钟上界：不声明则连续 10 分钟无输出即中断，
           # 声明后按本值执行。注意它**不是**整个 Agent 会话的上界（见上方平台依据），
