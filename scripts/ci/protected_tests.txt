@@ -407,7 +407,9 @@ tests/unit/context/test_context_ledger_fts_migration.py
 #   修法：挂载事实收口到注册表一处（旁路与空 router 删除），判据单源在生成器
 #   （mountedRouterAudit / unmountedEndpointModules），静态重建路由的二套实现删净。
 #   守卫另锁：前端基地址三类写法全认（漏认 neuron.ts 的 axios.create({baseURL}) 会
-#   产生 8 条假阳性）、未挂载端点模块名单非空（不许静默遗留）。
+#   产生 8 条假阳性）、未挂载路由模块名单非空且扫描范围为**全仓**
+#   （口径只扫端点包时，同一形态在包外静默存活——实测 openplatform.routes 与
+#    acp_server 两条命中点因此长期不在名单里）。
 tests/unit/api/test_route_mount_contract_guard.py
 # 上下文三链路批（Issue #90）B3 剩余 P2-8 / D4 甲案：pool 分支瞬态注入收回信封。
 #   （根因：记忆/经验/结晶/待探索问题/池召回/工具记忆/情感七类动态检索文本以
@@ -428,7 +430,7 @@ tests/unit/context/test_pool_branch_envelope_transient.py
 #   守卫锁三条：静态零 CWD 相对落点 + 活体真构造点 CWD 零新增 + 收养语义。
 tests/unit/core/test_runtime_landing_root.py
 
-# Issue #112 后续（接线断点处置）：未挂载端点模块台账棘轮。
+# Issue #112 后续（接线断点处置）：未挂载路由模块台账棘轮（收录口径为全仓）。
 #   根因：注册表把「挂载动作」与「接线完成」当成同一件事——只要求模块有 `router`
 #   属性就 include_router，于是「挂了零条路由」「挂载前缀与 router 自持前缀叠层」
 #   「同一 router 挂两次」三类形态长期存活；`cost.ts` 按 baseURL=/api/v1 请求
