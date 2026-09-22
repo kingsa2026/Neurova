@@ -22,6 +22,7 @@
    字符串/`ast`），不得依赖 `rg` / `grep` 等宿主工具。
 """
 
+import ast
 import io
 import re
 import shutil
@@ -169,14 +170,136 @@ class TestProtectedGuardsUseNoExternalBinaries:
     守卫**根本没执行**，同文件的真实断言也一起被跳过。
 
     规则：扫描/搜索类守卫一律走纯 Python（`Path.rglob` + `ast` / 字符串匹配）。
+
+    两条放行通路（PR #155 回归：原实现只认 `ALLOWED` 字面量集合，与本节注释
+    「仅'当前环境断言存在'的可执行文件」对不上 —— 新增命令要么忘登记、
+    要么只能手改台账；而"存在"这件事本来就由运行期探测给出事实，
+    不该再由第二处人工同步。PR #155 正是这么红的：受保护子集里新写了
+    `subprocess.run(["sh", "-c", ...])`，台账没同步，unit-tests 两条
+    py3.11/py3.12 全红）：
+
+    1. `ALLOWED` 台账：CI 镜像保证存在、且判据无法跳过它的命令（`git`）；
+    2. **先探后用**：用 `shutil.which(<命令>)` 断言其存在（缺席即 `pytest.skip`
+       并说明原因），再用探测结果执行。放行范围 = **从模块顶层到调用点**的
+       词法路径（模块级 `NODE = shutil.which("node")` + 用例内使用，或用例内
+       就地探测，都算）；在**别的用例**里探过却在此处裸用不算——那不是调用点
+       的路径，缺席时照样 `FileNotFoundError`，正是本守卫要拦的形态。
     """
 
-    # 允许的外部命令：仅"当前环境断言存在"的可执行文件（用 shutil.which 跳过）。
-    # 例：git 在 CI 镜像里存在，且测试用 needs_git 标记守卫。
-    # sh：桥脚本 scripts/ci/run_gate_under_node.sh 本身就是 sh 脚本，
-    # 即"解释器探测落到 node 分支时平台执行的调用形态"——它是**被测产物**的一部分，
-    # 不是顺手借来的搜索工具。使用点已按同一口径先 shutil.which("sh") 再跑。
-    ALLOWED = {"git", "sh"}
+    #: 台账：仅 CI 镜像保证存在的命令。登记前提 = CI 镜像保证它存在，
+    #: 且判据无法跳过它（`git` 是克隆与跟踪状态判定的前提）。
+    #:
+    #: `sh` **不得**登记在此：桥脚本 `scripts/ci/run_gate_under_node.sh` 是 sh 脚本，
+    #: 故"解释器探测落到 node 分支"那条判据确实要跑 sh —— 但它在使用点
+    #: （`tests/unit/ci/test_npc_script_interpreter_reachability.py`）**先探后用**：
+    #: `shutil.which("sh")` 缺席即 skip，再把探测结果当命令头执行。走的是「先探后用」
+    #: 通路，本来就被放行。若为图省事把它塞进本台账，`_offendersInSource` 会在
+    #: 解析命令名前就放行，于是「裸用 sh」这一反面用例的读数从 1 条变成 0 条
+    #: —— 台账就成了免检通道，正是本类要拦的形态（见 test_guard_readings_are_falsifiable）。
+    ALLOWED = {"git"}
+
+    @staticmethod
+    def _whichLiterals(scope) -> set:
+        """`scope` 内以字面量断言过存在的命令名（`shutil.which("git")` 形态）。"""
+        names = set()
+        for node in ast.walk(scope):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, "attr", None) != "which":
+                continue
+            if "shutil" not in ast.dump(getattr(node.func, "value", ast.Constant(None))):
+                continue
+            if node.args and isinstance(node.args[0], ast.Constant) \
+                    and isinstance(node.args[0].value, str):
+                names.add(node.args[0].value)
+        return names
+
+    @staticmethod
+    def _literalAssignments(scope) -> dict:
+        """`scope` 内「变量名 → 直接赋的字面量」映射（多分支赋值取并集）。"""
+        table: dict = {}
+        for node in ast.walk(scope):
+            if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+                continue
+            target = node.targets[0]
+            if not isinstance(target, ast.Name):
+                continue
+            table.setdefault(target.id, set()).add(ast.unparse(node.value))
+        return table
+
+    #: 「解释器自身」的表达式——必然存在，不属外部二进制依赖。
+    INTERPRETER_CONSTANTS = frozenset({"sys.executable"})
+
+    def _resolvedCommandNames(self, scopes, head) -> set:
+        """把命令头静态解成候选命令名；解不出返回空集（不猜）。
+
+        - 字面量 → 它自己；
+        - `sys.executable` → 解释器自身，不记为外部命令；
+        - 变量 → 追它在包住调用点的各层作用域里的赋值（`shutil.which("x")`
+          取 `x`、字面量取其值、解释器常量忽略）；分支里赋了多份则取并集；
+        - 其余（函数调用结果、参数、跨作用域解不出）→ 解不出，交给调用点跳过。
+        """
+        if isinstance(head, ast.Constant) and isinstance(head.value, str):
+            return {head.value}
+        if isinstance(head, ast.Attribute):
+            # `sys.executable` 是解释器自身（必然存在，不算外部依赖）；
+            # 其余属性链（如 `os.path.join(...)` 的结果）静态解不出命令名，
+            # 一律不猜，交由调用点跳过。
+            return set()
+        if not isinstance(head, ast.Name):
+            return set()
+        exprs = set()
+        for scope in scopes:
+            exprs |= self._literalAssignments(scope).get(head.id, set())
+        if not exprs:
+            return set()
+        names = set()
+        for expr in exprs:
+            if expr in self.INTERPRETER_CONSTANTS:
+                continue
+            match = re.fullmatch(r'shutil\.which\(\s*["\']([^"\']+)["\']\s*\)', expr)
+            if match:
+                names.add(match.group(1))
+                continue
+            match = re.fullmatch(r'["\']([^"\']+)["\']', expr)
+            if match:
+                names.add(match.group(1))
+                continue
+            return set()  # 有解不出的分支 → 整体放弃，不猜
+        return names
+
+    @staticmethod
+    def _enclosingScopes(tree, lineno) -> list:
+        """从模块顶层到 `lineno` 的词法作用域路径（由外到内）。
+
+        模块层只取**真·顶层语句**（不含函数/类体）：若把 `tree` 整棵交给
+        `ast.walk`，「别的用例里探过」会被当成「此处断言过」——那正是本守卫
+        要拦的形态。
+        """
+        moduleScope = ast.Module(
+            body=[stmt for stmt in tree.body
+                  if not isinstance(
+                      stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))],
+            type_ignores=[],
+        )
+        scopes = [moduleScope]
+        for func in ast.walk(tree):
+            if isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                    and func.lineno <= lineno <= func.end_lineno:
+                scopes.append(func)
+        return scopes
+
+    def _probedCommandsAround(self, tree, lineno) -> set:
+        """从模块顶层到 `lineno` 的词法路径上断言过存在的命令名。
+
+        路径 = 模块级顶层语句 + 包住调用点的各层函数。**别的用例**里的探测
+        不在路径上，故不认——那里探过、此处裸用，缺席时照样
+        `FileNotFoundError`，正是本守卫要拦的形态。
+        """
+        probed = set()
+        for scope in self._enclosingScopes(tree, lineno):
+            probed |= self._whichLiterals(scope)
+        return probed
 
     def _protected_test_files(self):
         listed = []
@@ -188,86 +311,136 @@ class TestProtectedGuardsUseNoExternalBinaries:
                 listed.append(line)
         return listed
 
-    def test_no_bare_external_command_in_subprocess(self):
-        import ast
+    _SUBPROCESS_ATTRS = {"run", "check_output", "Popen", "call", "check_call"}
 
+    def _offendersInSource(self, rel, source) -> list:
+        """单文件读数：返回该文件里"裸用未断言外部命令"的命中点。
+
+        与调用点分离，便于本类用合成源码反向自证（守卫自身可证伪）。
+        """
+        tree = ast.parse(source)
+        offenders = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if getattr(func, "attr", None) not in self._SUBPROCESS_ATTRS:
+                continue
+            if "subprocess" not in ast.dump(getattr(func, "value", ast.Constant(None))):
+                continue
+            if not node.args:
+                continue
+            first = node.args[0]
+            # 命令头静态解析：字面量、解释器常量、同作用域内可追的变量；
+            # 解不出的形态（调用结果 / 参数 / 跨作用域）不在本守卫范围。
+            if isinstance(first, ast.List) and first.elts:
+                head = first.elts[0]
+            elif isinstance(first, ast.Constant) and isinstance(first.value, str):
+                head = first
+            else:
+                continue
+            resolved = self._resolvedCommandNames(
+                self._enclosingScopes(tree, node.lineno), head)
+            if not resolved:
+                continue
+            probed = self._probedCommandsAround(tree, node.lineno)
+            for name in sorted(resolved):
+                if name in self.ALLOWED or name in probed:
+                    continue
+                offenders.append(
+                    f"{rel}:{node.lineno}: 直接执行外部命令 {name!r}（未断言其存在）")
+        return offenders
+
+    def test_no_bare_external_command_in_subprocess(self):
         offenders = []
         for rel in self._protected_test_files():
             path = PROJECT_ROOT / rel
-            tree = ast.parse(io.open(path, encoding="utf-8").read())
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                func = node.func
-                attr = getattr(func, "attr", None)
-                if attr not in {"run", "check_output", "Popen", "call", "check_call"}:
-                    continue
-                if "subprocess" not in ast.dump(getattr(func, "value", ast.Constant(None))):
-                    continue
-                if not node.args:
-                    continue
-                first = node.args[0]
-                # 只查字面量命令名；sys.executable / 变量不在本守卫范围
-                if isinstance(first, ast.List) and first.elts:
-                    head = first.elts[0]
-                elif isinstance(first, ast.Constant) and isinstance(first.value, str):
-                    head = first
-                else:
-                    continue
-                if not (isinstance(head, ast.Constant) and isinstance(head.value, str)):
-                    continue
-                if head.value in self.ALLOWED:
-                    continue
-                offenders.append(f"{rel}:{node.lineno}: 直接执行外部命令 {head.value!r}")
+            offenders.extend(
+                self._offendersInSource(rel, io.open(path, encoding="utf-8").read()))
         assert not offenders, (
             "受保护子集里的守卫依赖外部二进制——CI 镜像没有它时不是断言失败而是 "
             "FileNotFoundError，整个守卫（含同文件其他断言）静默不跑：\n  "
             + "\n  ".join(offenders)
-            + "\n修复：扫描类守卫改用纯 Python（Path.rglob / ast），"
+            + "\n修复：扫描类守卫改用纯 Python（Path.rglob / ast）；"
+            "确需外部命令时用 shutil.which(<命令>) 先断言存在再使用（缺席即 skip），"
             "或把命令加进 ALLOWED 并说明镜像内确实存在。"
         )
 
-    def test_allowed_entries_are_existence_checked_at_use_site(self):
-        """白名单条目必须在**使用它的文件**里先断言存在，否则白名单就是盲区。
+    def test_guard_readings_are_falsifiable(self):
+        """反向自证：本守卫的读数在两个方向上都可证伪（否则是恒真空壳）。
 
-        `ALLOWED` 的登记条件是"当前环境断言存在"（上文注释）。但只把命令名
-        写进集合、使用点却不 `shutil.which(...)` 的话，白名单就成了免检通道：
-        该二进制缺席时照样 `FileNotFoundError`，本类要拦的故障原样复现——
-        正是本 PR 要消灭的"配了但没接线"同一形态。
-
-        可证伪：把 `sh` 从使用点前面的 `shutil.which("sh")` 检查里摘掉 → 红。
+        - 裸用未断言的命令 → **必须**命中（含"别处探过、此处裸用"形态）；
+        - 同用例先 `shutil.which` 探后使用、或探出的路径变量 → **不得**命中；
+        - `sys.executable`（解释器自身）→ **不得**命中（它不是外部二进制）。
         """
-        import ast
-
-        offenders = []
-        for rel in self._protected_test_files():
-            source = io.open(PROJECT_ROOT / rel, encoding="utf-8").read()
-            for binary in sorted(self.ALLOWED):
-                if 'subprocess' not in source or f'"{binary}"' not in source:
-                    continue
-                if f'which("{binary}")' in source or f"which('{binary}')" in source:
-                    continue
-                tree = ast.parse(source)
-                used = any(
-                    isinstance(node, ast.Call)
-                    and getattr(node.func, "attr", None)
-                    in {"run", "check_output", "Popen", "call", "check_call"}
-                    and "subprocess" in ast.dump(getattr(node.func, "value", ast.Constant(None)))
-                    and node.args
-                    and isinstance(node.args[0], ast.List)
-                    and node.args[0].elts
-                    and isinstance(node.args[0].elts[0], ast.Constant)
-                    and node.args[0].elts[0].value == binary
-                    for node in ast.walk(tree)
-                )
-                if used:
-                    offenders.append(f"{rel}: 白名单命令 {binary!r} 未先 shutil.which 断言存在")
-        assert not offenders, (
-            "白名单条目在使用点没有断言存在——缺席时仍会 FileNotFoundError，"
-            "守卫静默不跑：\n  " + "\n  ".join(offenders)
-            + "\n修复：使用前 `if shutil.which(<cmd>) is None: pytest.skip(...)`，"
-            "或把该命令从 ALLOWED 里摘掉（说明镜像内确实存在是白名单的前提）。"
+        cases = (
+            (
+                "bare_sh",
+                "import subprocess\n"
+                "def test_x():\n"
+                "    subprocess.run(['sh', '-c', 'echo hi'])\n",
+                1,
+            ),
+            (
+                "probed_in_other_case",
+                "import shutil, subprocess\n"
+                "def test_probe():\n"
+                "    if shutil.which('sh') is None:\n"
+                "        return\n"
+                "def test_use():\n"
+                "    subprocess.run(['sh', '-c', 'echo hi'])\n",
+                1,
+            ),
+            (
+                "probed_then_used",
+                "import shutil, subprocess, pytest\n"
+                "def test_x():\n"
+                "    sh = shutil.which('sh')\n"
+                "    if sh is None:\n"
+                "        pytest.skip('无 sh')\n"
+                "    subprocess.run([sh, '-c', 'echo hi'])\n",
+                0,
+            ),
+            (
+                "module_level_probe_then_use",
+                "import shutil, subprocess, pytest\n"
+                "NODE = shutil.which('node')\n"
+                "def test_x():\n"
+                "    if NODE is None:\n"
+                "        pytest.skip('无 node')\n"
+                "    subprocess.run([NODE, '--version'])\n",
+                0,
+            ),
+            (
+                "literal_registered",
+                "import subprocess\n"
+                "def test_x():\n"
+                "    subprocess.run(['git', 'status'])\n",
+                0,
+            ),
+            (
+                # 白名单不是免检通道：登记过的命令若在使用点裸用，照样必须命中。
+                # 可证伪：把 ALLOWED 当免检用（去掉 'sh' 的使用点探测）→ 本用例红。
+                "allowlisted_still_needs_use_site_probe",
+                "import subprocess\n"
+                "def test_x():\n"
+                "    subprocess.run(['sh', '-c', 'echo hi'])\n",
+                1,
+            ),
+            (
+                "interpreter_itself",
+                "import subprocess, sys\n"
+                "def test_x():\n"
+                "    subprocess.run([sys.executable, '-c', 'print(1)'])\n",
+                0,
+            ),
         )
+        for name, source, expected in cases:
+            got = self._offendersInSource(f"<{name}>", source)
+            assert len(got) == expected, (
+                f"守卫读数与预期不符（{name}）：期望 {expected} 条命中，实得 {got}。\n"
+                "恒真/恒假的守卫等于没有守卫——本条目就是它的红绿灯。"
+            )
 
     def test_no_shell_out_to_ripgrep(self):
         """`rg` 是本次实锤的缺席二进制——全 tests/ 都不该硬依赖它。
@@ -275,8 +448,6 @@ class TestProtectedGuardsUseNoExternalBinaries:
         与上一条同口径：只看 AST 里真实的 `subprocess.[...](["rg", ...])`
         调用，不匹配文档/注释里的文字（否则守卫自己就成了违规样本）。
         """
-        import ast
-
         offenders = []
         # 文本预筛：违规形态必然含 subprocess 调用与 "rg" 字面量，其余文件不解析；
         # 解析走 tests/ast_scan.py 的共享预算（Issue #148：全仓 ast.parse 单跑 4s，
