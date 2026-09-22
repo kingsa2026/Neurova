@@ -497,3 +497,36 @@ tests/unit/ci/test_npc_script_interpreter_reachability.py
 #   守卫锁四条：退役面不得复活 / 真面（openplatform_keys、acp_api）仍在服务 /
 #   零悬空引用 / 不得回填未挂载台账（只降不升）。
 tests/unit/api/test_orphan_faces_retired_guard.py
+
+# 上下文三链路批（Issue #90）B5 规模：单趟打分 / 候选集上界 / 召回地板自适应 /
+#   折叠计量单源（PR #138）。本批的登记此前**漏了**——文件在仓、单跑全绿、
+#   CI 全绿，而受保护子集对它们命中 0，等于三条判据从未在 CI 上跑过。
+#   登记纪律由 tests/unit/context/test_b5_scale_batch_registration.py 反锁
+#   （Issue #109 是反向形态：清单指向不存在的文件；两者都是"绿 ≠ 跑过"）。
+#   （根因 P1-4：draw 对同一 need 与同一归档文本反复语义编码——1000 条常驻时
+#    单轮 encode 6988 次，need 占 1000 次；且候选集无上界，成本随池规模线性。
+#     改后：ScoringContext 单趟编码 + 零编码词法粗筛收敛候选，encode 1001 次）
+tests/unit/context/test_drawer_scale_scoring.py
+#   （根因 D3：召回额度地板是与模型窗口无关的常数 1000——8k 上过宽、128k 上过窄；
+#    且"剩余额度"公式在 build_context 里写了两遍，各减各的项。
+#     改后：地板随窗口预算单调不减 + 绝对下限，公式单源 `_retrievalBudget`）
+tests/unit/context/test_recall_budget_floor.py
+#   （根因（台账 §2 补充发现）：compact_window 单次调用内对同一批文本重复计量
+#    约 2.4× —— split_window_by_budget 每轮重算整窗又逐条单算，递进折叠循环
+#    每轮再各来一遍；尺子换 o200k 后单次折叠约 20ms→75ms，长会话成倍放大。
+#     改后：WindowTokenMeter 单源记忆体，整窗量由逐条求和得出）
+tests/unit/context/test_window_token_metering.py
+#   上述登记纪律的守卫本身：新判据文件必须真进清单（漏登记即红）。
+tests/unit/context/test_b5_scale_batch_registration.py
+
+# 上下文三链路批（Issue #90）B6-1：上下文域死线三态台账与判据同源守卫。
+#   （根因：审计 §10 对 B6 要求「每个孤儿需单独论证可达性」，而本仓实测已有
+#    两面反例说明「按 grep 名字计数」不可用——池方法 dedup 零调用，但池实际走
+#    context/dedup.py 的**另一接收者**的同名方法（按名字判会误删真实现）；
+#    clear 是通用名（全仓 300+ 命中，完全不具判别力）。
+#    故判据拆成两轴：判据类由 scripts/ci/context_deadline_ledger.py 的
+#    classify() 机器算（absent / no_consumer / self_loop / consumed 四值），
+#    台账照抄且不一致即报红；处置是人对该条的决定（有限枚举）。
+#    反向控制：draw / archiveBatch 已知生产可达，必须报 consumed 且永远
+#    「待处置」——它们被误报或赋处置即说明判据整体失效。）
+tests/unit/context/test_context_deadline_ledger.py
