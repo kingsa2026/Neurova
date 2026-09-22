@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import ast
+import functools
 import re
 from pathlib import Path
 
@@ -40,6 +41,42 @@ _DATA_ROOT_NORMALIZERS = ("resolveDataPath", "callerPath", "dataPath",
 _CWD_PREFIXES = ("data/", "data\\", "./data/", "./data\\", ".\\data\\", "../data/")
 
 
+#: 预筛：判据命中的**前提**字形（命中集合是判据的严格超集，不漏判）
+#:   - CWD 相对 / 第二份根：落点字面量必写成引号或转义前缀 + `data`
+#:     （`"data/...`、`'data'`、`"./data/`、`"..\\data\\`、f-string 首段同形）；
+#:   - 空串默认值当落点：必有 `mkdir` 调用与空串默认值同现。
+_CWD_HIT_HINT = re.compile(r"""["']\.{0,2}[/\\]?data""")
+_EMPTY_DEFAULT_HINTS = ("mkdir", '""')
+
+
+def _maybeContainsLanding(source: str, hints) -> bool:
+    """文本级粗筛：不含该字形前提的源码不可能命中对应判据。
+
+    `ast.parse` 与 `ast.walk` 占扫描成本的绝大部分（实测全量 1067 文件约
+    10s，受保护子集并发跑时可达 45s），先按文本筛掉不可能命中的文件，
+    是"判据不变、成本下降"的着力点。预筛是严格超集，并由
+    `test_prefilterNeverDropsAJudgedShape` 反向锁住。
+    """
+    if isinstance(hints, re.Pattern):
+        return bool(hints.search(source))
+    return all(hint in source for hint in hints)
+
+
+@functools.lru_cache(maxsize=None)
+def _textOf(path: Path) -> str:
+    """按文件缓存源码文本（两条判据共用）。"""
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+@functools.lru_cache(maxsize=None)
+def _treeOf(path: Path):
+    """按文件缓存 AST；语法错误返回 None（与旧行为一致：跳过该文件）。"""
+    try:
+        return ast.parse(_textOf(path))
+    except SyntaxError:
+        return None
+
+
 def _sourceOf(node: ast.AST) -> str:
     try:
         return ast.unparse(node)
@@ -56,50 +93,62 @@ def _isPathCall(node: ast.AST) -> bool:
     return False
 
 
-def _docstringNodes(tree: ast.AST) -> set:
-    """模块/类/函数首条字符串是文档，不是落点。"""
-    ids = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            body = node.body
-            if body and isinstance(body[0], ast.Expr) \
-                    and isinstance(body[0].value, ast.Constant) \
-                    and isinstance(body[0].value.value, str):
-                ids.add(id(body[0].value))
-    return ids
+def _scanAnchors(tree: ast.AST) -> tuple:
+    """**单趟**遍历同时取齐三份锚点，供两条判据共用。
 
+    返回 `(nodes, parents, docstrings, defaults)`：
 
-def _defaultNodes(tree: ast.AST) -> set:
-    """函数参数默认值：`db_path: str = "data/x.db"` 是典型 CWD 相对落点。"""
-    ids = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            for default in list(node.args.defaults) + [d for d in node.args.kw_defaults if d]:
-                for sub in ast.walk(default):
-                    ids.add(id(sub))
-    return ids
+    - `nodes`：全部节点（判据原先各自 `ast.walk` 一遍，改为复用本列表）；
+    - `parents`：子节点 → 父节点（判据要看字面量出现在什么位置）；
+    - `docstrings`：模块/类/函数首条字符串——是文档，不是落点；
+    - `defaults`：函数参数默认值子树——`db_path: str = "data/x.db"` 是典型落点。
 
-
-def _cwdRelativeHits(path: Path) -> list:
-    """返回该文件里 CWD 相对 / 第二份根的 data 落点（行号 + 原因）。"""
-    source = path.read_text(encoding="utf-8", errors="replace")
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return []
-    docstrings = _docstringNodes(tree)
-    defaults = _defaultNodes(tree)
+    为何合并：`ast.walk` 每趟都要遍历整棵树（实测 1067 个文件走三趟约 10s，
+    受保护子集并发负载下本文件两条判据累计 45s / 42s，撞 `pytest-timeout`
+    的 30s 上界）。三份锚点的收集条件互不依赖，单趟即等价，判据一字未改。
+    """
     parents = {}
-    for node in ast.walk(tree):
+    docstrings = set()
+    defaults = set()
+    nodes = []
+    stack = [tree]
+    while stack:
+        node = stack.pop()
+        nodes.append(node)
         for child in ast.iter_child_nodes(node):
             parents[child] = node
+            stack.append(child)
+        kind = node.__class__
+        if kind in (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef):
+            body = node.body
+            if body and body[0].__class__ is ast.Expr:
+                first = body[0].value
+                if first.__class__ is ast.Constant and isinstance(first.value, str):
+                    docstrings.add(id(first))
+        if kind in (ast.FunctionDef, ast.AsyncFunctionDef):
+            for default in list(node.args.defaults) + [d for d in node.args.kw_defaults if d]:
+                defaults.add(id(default))
+                for sub in ast.walk(default):
+                    defaults.add(id(sub))
+    return nodes, parents, docstrings, defaults
+
+
+@functools.lru_cache(maxsize=None)
+def _cwdRelativeHits(path: Path) -> list:
+    """返回该文件里 CWD 相对 / 第二份根的 data 落点（行号 + 原因）。"""
+    if not _maybeContainsLanding(_textOf(path), _CWD_HIT_HINT):
+        return []
+    tree = _treeOf(path)
+    if tree is None:
+        return []
+    nodes, parents, docstrings, defaults = _scanAnchors(tree)
 
     hits = []
 
     def record(node, reason):
         hits.append((node.lineno, reason))
 
-    for node in ast.walk(tree):
+    for node in nodes:
         # f-string：`f"data/agents/{agent_id}/skills"` 的开头常量即落点前缀
         if isinstance(node, ast.JoinedStr) and node.values:
             head = node.values[0]
@@ -218,17 +267,20 @@ def _isGuarded(fn: ast.AST, param: str) -> bool:
     return False
 
 
+@functools.lru_cache(maxsize=None)
 def _emptyDefaultOffendersInFile(path: Path) -> list:
     """判据实现（生产树与反向控制共用，保证"扫描器"只有一份）。"""
-    source = path.read_text(encoding="utf-8")
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
+    if not _maybeContainsLanding(_textOf(path), _EMPTY_DEFAULT_HINTS):
+        return []
+    tree = _treeOf(path)
+    if tree is None:
         return []
     found = []
 
+    nodes, _parents, _docs, _defaults = _scanAnchors(tree)
+
     # 规则一：函数/方法签名的空串默认值 —— 消费端裸 Path(x) 建目录，且无缺省判定
-    for fn in ast.walk(tree):
+    for fn in nodes:
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         defaults = list(fn.args.defaults) + [d for d in fn.args.kw_defaults if d is not None]
@@ -261,7 +313,7 @@ def _emptyDefaultOffendersInFile(path: Path) -> list:
     # 规则二：类属性/数据类字段默认空串 —— 同一病灶的另一写法
     # （`DLQConfig.storage_path = ""` 注释自陈"空串 = 数据根"，消费端却裸 Path）。
     fields = set()
-    for node in ast.walk(tree):
+    for node in nodes:
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
                 and isinstance(node.value, ast.Constant) and node.value.value == "":
             fields.add(node.target.id)
@@ -272,7 +324,7 @@ def _emptyDefaultOffendersInFile(path: Path) -> list:
                     fields.add(target.id)
     for field in sorted(fields):
         pattern = re.compile(r"(^|\.)%s$" % re.escape(field))
-        for node in ast.walk(tree):
+        for node in nodes:
             if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute) \
                     or node.func.attr != "mkdir":
                 continue
@@ -422,6 +474,63 @@ class TestNoCwdRelativeDataLandingInProduction:
         assert len(reasons) == 8, "扫描器漏认或误伤：%s" % reasons
         assert not any("payload" in reason for reason in reasons), \
             "取值 .get(\"data\") 被误判成落点"
+
+
+class TestScanCostStaysBounded:
+    """扫描器自身的成本必须留出余量——门禁自己不稳就会被绕过。
+
+    实测（CI py312 受保护子集一次性跑）：本文件两条判据在共享负载下耗时
+    45.2s / 42.2s，撞 `pytest-timeout` 的 30s 上界而红；同一份代码 py311 同一条
+    用例绿。判据本身没问题（生产树 0 命中），红的是**扫描成本贴边**——
+    每条判据各自 `read_text` + `ast.parse` 一遍 1067 个文件。
+
+    修法只动成本、不动判据：按"判据只可能命中含该字面量的源码"做粗预筛，
+    并把解析结果按文件缓存（两条判据共用一次解析）。预筛是**严格超集**：
+    相对字面量与第二份根必然含 `data`，空串默认值当落点必然含 `mkdir`。
+    下述两条用例反向锁住预筛不漏判、且不得退化成"全量直扫"。
+    """
+
+    def test_prefilterIsStrictButNotVacuous(self):
+        files = _scannedFiles()
+        cwd = [p for p in files if _maybeContainsLanding(_textOf(p), _CWD_HIT_HINT)]
+        empty = [p for p in files if _maybeContainsLanding(_textOf(p), _EMPTY_DEFAULT_HINTS)]
+        assert len(cwd) < len(files), "预筛没起作用（候选=全集，等于没有预筛）"
+        assert len(cwd) > 200, "预筛过窄，疑似把生产树的真实落点候选滤掉了"
+        assert len(empty) > 50, "预筛过窄：空串默认值判据的候选集退化"
+
+    def test_prefilterNeverDropsAJudgedShape(self):
+        """反向控制：判据认得的每一种写法都必须过预筛，否则扫描会静默空转。"""
+        shapes = [
+            'A = "data/a.json"',
+            'B = Path("data")',
+            'C = os.environ.get("X", "data/c.json")',
+            'D = Path(__file__).resolve().parents[2] / "data"',
+            'E = f"data/agents/{x}/skills"',
+            'F = PROJECT_ROOT / "data" / "f.db"',
+            'def g(db_path: str = "data/g.db"): return db_path',
+            "G = 'data\\\\'",
+        ]
+        for shape in shapes:
+            assert _maybeContainsLanding(shape, _CWD_HIT_HINT), (
+                "判据认得的落点写法被预筛滤掉：%s" % shape
+            )
+        guarded = (
+            "from pathlib import Path\n"
+            "class C:\n"
+            "    def __init__(self, base_dir: str = \"\"):\n"
+            "        Path(base_dir).mkdir()\n"
+        )
+        assert _maybeContainsLanding(guarded, _EMPTY_DEFAULT_HINTS), (
+            "空串默认值判据的载体被预筛滤掉"
+        )
+
+    def test_parsedTreeIsSharedAcrossJudgements(self, tmp_path):
+        """解析缓存生效：同一文件被两条判据读到时不重复 parse。"""
+        probe = tmp_path / "shared.py"
+        probe.write_text('X = "data/x.json"\n', encoding="utf-8")
+        _treeOf.cache_clear()
+        first = _treeOf(probe)
+        assert _treeOf(probe) is first, "解析结果未复用——两条判据会各 parse 一遍"
 
 
 class TestGuardIsProtected:
