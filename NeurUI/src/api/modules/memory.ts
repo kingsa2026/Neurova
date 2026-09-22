@@ -534,13 +534,14 @@ export function triggerDecay(agentId: string) {
 }
 
 /**
- * 把外进程写入的记忆增量并入运行中后端的记忆快照（F-05）。
+ * 与盘对账：把外进程写入的记忆并入运行中后端的快照，并回收盘上已消失的行（F-05 / 断点①）。
  *
- * 记忆快照只在后端构造时读一次盘，CLI 在另一个进程导入的记忆因此看不见；
- * 端点返回真实并入条数（幂等，无缺失行时为 0），无需重启后端。
+ * 记忆快照只在后端构造时读一次盘：CLI 在另一个进程导入的记忆看不见（reloaded），
+ * 它在另一个进程撤销掉的行也不会消失、还能被界面的一次强化写回盘上（reaped）。
+ * 两个读数都只报真实发生量（幂等，无事发生时为 0），无需重启后端。
  */
 export function reloadMemories(agentId?: string) {
-  return api.post<ApiResponse<{ reloaded: number }>>(`${BASE}/reload`, null, { params: { agent_id: agentId } })
+  return api.post<ApiResponse<{ reloaded: number; reaped: number }>>(`${BASE}/reload`, null, { params: { agent_id: agentId } })
 }
 
 // ---------------------------------------------------------------------------
