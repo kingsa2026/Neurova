@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -46,7 +47,7 @@ POOL_PUBLIC = "public"
 _VALID_POOLS = (POOL_AGENT, POOL_USER, POOL_PUBLIC)
 
 # 测试注入点：monkeypatch 此值即整体切换库根
-_BASE_DIR = Path("data")
+_BASE_DIR = get_data_root()
 
 # 键白名单：u:<alnum_-+ .> / ch:<alnum_-+ .>:<alnum_-+ .>
 # 禁 "/" ".." 空格 冒号嵌套——目录名安全 = 路径注入第一道闸

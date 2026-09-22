@@ -19,12 +19,12 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from neurova.core.data_root import get_data_root
+
 # 安装技能 ID 白名单：字母数字开头，仅含 . _ - 与字母数字（拒路径穿越/绝对/相对点段）
 _SAFE_SKILL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-]*$")
 
-
 # ── 技能质量漏斗归因──
-
 
 def compute_skill_funnel_update(
     entries: Optional[List[Dict[str, Any]]], task_completed: bool
@@ -57,9 +57,7 @@ def compute_skill_funnel_update(
             delta["fallbacks"] += 1
     return updates
 
-
 # ── 信任生命周期──
-
 
 def compute_trust_transition(
     state: str, outcome: str, successes_since_failure: int, min_successes: int = 2
@@ -80,7 +78,6 @@ failure 即刻降级并清零计数；晋升须
         return "trusted", 0
     count += 1
     return ("trusted", 0) if count >= max(1, int(min_successes)) else ("provisional", count)
-
 
 def compute_trust_observations(
     entries: Optional[List[Dict[str, Any]]], task_completed: bool
@@ -104,7 +101,6 @@ def compute_trust_observations(
         for skill_id, agg in seen.items()
     }
 
-
 class SkillService:
     """
     Agent 技能服务
@@ -125,7 +121,10 @@ class SkillService:
             skills_dir: 技能目录路径
         """
         self.agent_id = agent_id
-        self.skills_dir = Path(skills_dir) if skills_dir else Path(f"data/agents/{agent_id}/skills")
+        if skills_dir:
+            self.skills_dir = Path(skills_dir)
+        else:
+            self.skills_dir = get_data_root() / "agents" / str(agent_id) / "skills"
         self.manifest_path = self.skills_dir / "manifest.json"
         self._skills: Dict[str, Dict[str, Any]] = {}
         self._logger = get_logger(__name__)

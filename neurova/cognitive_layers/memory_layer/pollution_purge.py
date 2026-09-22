@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -56,7 +57,6 @@ _SAMPLE_IDS = 12
 
 def dataRoot() -> Path:
     """`data` 根：与各存储默认落点同源（`NEUROVA_DATA_DIR` 可注入）。"""
-    from neurova.core.data_root import get_data_root
 
     return get_data_root()
 

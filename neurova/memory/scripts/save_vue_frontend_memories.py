@@ -5,9 +5,9 @@
 import json
 import sqlite3
 import time
-from pathlib import Path
+from neurova.core.data_root import get_data_root
 
-db_path = Path(__file__).parent.parent / "data" / "yi_ling_memory.db"
+db_path = get_data_root() / "yi_ling_memory.db"
 
 db_path.parent.mkdir(parents=True, exist_ok=True)
 

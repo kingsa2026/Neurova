@@ -24,10 +24,11 @@ from .negative_screen import (
     NegativeScreenPusher,
     PushResult,
 )
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
-_DEFAULT_STORAGE = "./data/notifications.json"
+_DEFAULT_STORAGE = dataPath("notifications.json")
 
 
 @dataclass

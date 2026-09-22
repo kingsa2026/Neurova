@@ -20,6 +20,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parents[2]
+# 仓库根须先于 `import neurova` 进 sys.path（脚本以文件路径执行）。
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from neurova.core.data_root import get_data_root  # noqa: E402
 
 # 别名表键不是技能条目，扫描时排除（`SkillService._ALIASES_KEY`）
 _ALIASES_KEY = "_skill_aliases"
@@ -57,12 +62,13 @@ def recount_name_collisions(manifest_path: Path) -> Dict[str, Any]:
 
 def _default_targets() -> List[Path]:
     targets: List[Path] = []
+    data_root = get_data_root()
     for pattern in (
-        "data/agents/*/skills/manifest.json",
-        "data/public/skills/manifest.json",
-        "data/users/*/skills/manifest.json",
+        "agents/*/skills/manifest.json",
+        "public/skills/manifest.json",
+        "users/*/skills/manifest.json",
     ):
-        targets.extend(sorted(ROOT.glob(pattern)))
+        targets.extend(sorted(data_root.glob(pattern)))
     return targets
 
 
@@ -70,7 +76,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     targets = [Path(a) for a in argv] or _default_targets()
     if not targets:
-        print("未找到任何 manifest（data/ 下无技能库）")
+        print("未找到任何 manifest（数据根下无技能库）")
         return 0
     for target in targets:
         if not target.exists():

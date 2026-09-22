@@ -42,7 +42,6 @@ def stores(tmp_path, monkeypatch):
     import neurova.skills.experience_knowledge_base as mod
     path = str(tmp_path / "ekb.db")
     monkeypatch.setenv("NEUROVA_EKB_DB", path)
-    monkeypatch.setattr(mod, "_DEFAULT_DB_PATH", path)
     kb = mod.ExperienceKnowledgeBase(path)
     monkeypatch.setattr(mod, "_experience_kb", kb)
     monkeypatch.setattr(growth, "_get_experience_knowledge_base", lambda: kb)
