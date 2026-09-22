@@ -1341,3 +1341,85 @@ class TestCausalLineNamesTheReasonNotTheTail:
         assert "_causalLine(" in source, (
             "报错路径没走 _causalLine —— 说因那句会被 allowlist 列表挤掉（死码）"
         )
+
+class TestPrefetchFailureDoesNotBecomeABlockingGate:
+    """预取是 best-effort（CI 里写 `|| true`），而门禁是阻塞的 `--require-offline`。
+
+    这两句话放在同一条流水线里会互相抵消：预取失败 ⇒ 缓存不齐 ⇒ 门禁缺库 ⇒ exit 2。
+    于是「api.osv.dev 不可达」这个**本单要消灭的红**，只是换了个措辞继续红——
+    与修复前同样是「CI 网络抖动与真有漏洞长得一样」，读日志的人仍只能重跑。
+
+    实测（2026-09-22，本机清空 `~/.cache/osv-scalibr` 后跑 CI 的两阶段命令）：
+
+        $ python3 scripts/ci/osv_audit.py --prefetch-offline-databases || true
+        （预取失败，退出码被 `|| true` 吞掉，流水线继续）
+        $ python3 scripts/ci/osv_audit.py --require-offline
+        [osv] 离线库缓存不齐且显式要求离线——拒绝回退直连:
+              - 离线库缺失: …/crates.io/all.zip（生态 crates.io）
+        exit 2   ← 与修复前的红同形：不是本仓代码的问题，却堵住合并
+
+    判据：预取失败**不得**单独构成阻塞红灯。裁决通路应当在该情形下仍然给出
+    诚实结论（直连并点名，`--require-offline` 只用于「预取确实不该失败」的
+    自证场景，不由 CI 门禁使用）。
+    """
+
+    def test_ci_gate_does_not_require_a_prefetch_that_is_allowed_to_fail(self):
+        """CI 侧：预取允许失败，门禁就不得要求「预取必须成功」。
+
+        只检查**命令**（`script:` / `run:` 行），不扫注释——注解里出现该 flag
+        的字样是允许的（本单的注释正是要解释为什么不带它）。
+        """
+        for label, path in (
+            ("cnb", PROJECT_ROOT / ".cnb.yml"),
+            ("github", PROJECT_ROOT / ".github" / "workflows" / "ci.yml"),
+        ):
+            commands = [
+                line.split(":", 1)[1].strip()
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if re.match(r"^\s*(script|run):", line)
+            ]
+            gate_commands = [c for c in commands if "osv_audit.py" in c]
+            assert any(c.endswith("--prefetch-offline-databases || true") for c in gate_commands), (
+                f"{label} 侧的预取不是 best-effort —— 两句话的口径对不上"
+            )
+            for command in gate_commands:
+                if "--prefetch-offline-databases" in command:
+                    continue
+                assert "--require-offline" not in command, (
+                    f"{label} 侧门禁用了 --require-offline：预取允许失败、门禁却要求"
+                    "缓存齐备 —— 预取一失败就是红灯，而这与「真有未允许漏洞」同形，"
+                    "读日志的人仍只能重跑（正是本单要消灭的形态）"
+                )
+
+    def test_cache_absent_falls_back_to_live_query_not_a_hard_red(self, auditModule, tmp_path, monkeypatch):
+        """门禁本体：缓存不齐时必须回退直连并点名，不许直接判红。"""
+        monkeypatch.setattr(auditModule, "OSV_DB_CACHE", tmp_path / "empty-cache")
+        monkeypatch.setattr(auditModule, "PROJECT_ROOT", tmp_path / "home")
+        rels = ["NeurUI/src-tauri/Cargo.lock", "tools/npx-runtime/package-lock.json"]
+        paths = _paths(tmp_path / "home", rels)
+        offline, problems = auditModule.resolveVerdictChannel(list(paths.values()), requireOffline=False)
+        assert offline is False, "缓存不齐却仍要离线 —— 扫描器必退 127"
+        assert problems, "缓存不齐必须点名缺哪一份，不许静默回退"
+
+    def test_explicit_requirement_still_hard_reds(self, auditModule, tmp_path, monkeypatch):
+        """反向控制：显式要求离线时缺库仍须判红（判据不空转）。"""
+        monkeypatch.setattr(auditModule, "OSV_DB_CACHE", tmp_path / "empty-cache")
+        monkeypatch.setattr(auditModule, "PROJECT_ROOT", tmp_path / "home")
+        rels = ["NeurUI/src-tauri/Cargo.lock", "tools/npx-runtime/package-lock.json"]
+        paths = _paths(tmp_path / "home", rels)
+        with pytest.raises(auditModule.OfflineDatabaseMissing):
+            auditModule.resolveVerdictChannel(list(paths.values()), requireOffline=True)
+
+    def test_cached_database_still_wins(self, auditModule, tmp_path, monkeypatch):
+        """缓存齐备时仍走离线通路——本单的核心能力不许被这次收口拆掉。"""
+        cache = tmp_path / "cache"
+        for scope in ("crates.io", "npm"):
+            (cache / scope).mkdir(parents=True)
+            (cache / scope / "all.zip").write_bytes(b"pk\x03\x04")
+        monkeypatch.setattr(auditModule, "OSV_DB_CACHE", cache)
+        monkeypatch.setattr(auditModule, "PROJECT_ROOT", tmp_path / "home")
+        rels = ["NeurUI/src-tauri/Cargo.lock", "tools/npx-runtime/package-lock.json"]
+        paths = _paths(tmp_path / "home", rels)
+        offline, problems = auditModule.resolveVerdictChannel(list(paths.values()), requireOffline=True)
+        assert offline is True
+        assert problems == []

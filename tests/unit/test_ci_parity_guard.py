@@ -82,7 +82,12 @@ EXPECTED_CORE_COMMANDS = {
         # 预取离线库那一步**不进本表**：它刻意带 `|| true`（允许失败），
         # 而本表锁的是「阻塞门禁的核心命令」。两侧都已显式登记预取步骤，
         # 命令逐字一致由 `test_offline_prefetch_is_declared_on_both_sides` 守。
-        "python scripts/ci/osv_audit.py --require-offline",
+        #
+        # 门禁本体**不带** `--require-offline`：预取是 best-effort（`|| true`），
+        # 门禁就不能要求「预取必须成功」——否则预取一失败就是阻塞红灯，且与
+        # 「真有未允许漏洞」在合并流程里同形。缓存不齐时门禁回退直连并点名
+        # 缺哪一份，红的成因可读（判据收口在 resolveVerdictChannel 一处）。
+        "python scripts/ci/osv_audit.py",
     ],
     # 经验质量基准（工单 009）：读数取自 EKB.quality_snapshot，语料冻结在仓内，
     # 每次运行先自证低质探针会被判红（详见 scripts/ci/experience_quality_gate.py）。
@@ -198,6 +203,7 @@ class TestOfflineDatabasePathIsDeclaredOnBothSides:
     """离线库预取必须两侧都在，且命令逐字一致（否则一侧仍依赖实时可达性）。"""
 
     _PREFETCH = "python scripts/ci/osv_audit.py --prefetch-offline-databases"
+    _GATE = "python scripts/ci/osv_audit.py"
 
     def test_offline_prefetch_is_declared_on_both_sides(self, cnb_pipelines, ghw_jobs):
         job = "dependency-audit"
@@ -215,8 +221,17 @@ class TestOfflineDatabasePathIsDeclaredOnBothSides:
             "cnb 侧仍会现查 api.osv.dev，网络不可达时门禁红得无从归因"
         )
 
-    def test_prefetch_step_is_non_blocking_but_gate_is_not(self, cnb_pipelines):
-        """预取允许失败、门禁不许：预取红会让「网络抖动」直接变成阻塞红灯。"""
+    def test_prefetch_is_best_effort_and_gate_does_not_require_it(self, cnb_pipelines):
+        """两句话必须同口径：预取允许失败（`|| true`），门禁就不得要求它成功。
+
+        修复前这里是反的——预取 `|| true`、门禁 `--require-offline`。于是
+        「允许失败的前置步骤」与「必须成功的门禁」互相抵消：预取一失败就是阻塞
+        红灯，而这与「真有未允许漏洞」在合并流程里同形，读日志的人只能重跑
+        （2026-09-22 PR #121 的红就是这么来的，本单要消灭的正是这个形态）。
+
+        正确口径：预取 best-effort，门禁缓存不齐时**回退直连并点名**，
+        红只留给「真有未允许漏洞」（判据收口在 resolveVerdictChannel 一处）。
+        """
         for name in EXPECTED_MAP["dependency-audit"]:
             pipe = cnb_pipelines.get(name)
             if pipe is None:
@@ -226,9 +241,12 @@ class TestOfflineDatabasePathIsDeclaredOnBothSides:
                 f"流水线 {name} 的预取步骤没带 `|| true`——预取失败会阻塞合并，"
                 "而它只是「网络能不能拿到最新库」这一件事"
             )
-            assert "--require-offline" in scripts, (
-                f"流水线 {name} 没显式要求离线——缺库时会静默回退直连，"
-                "「预取坏了」被藏成「这次网络恰好通」"
+            assert self._GATE + " --require-offline" not in scripts, (
+                f"流水线 {name} 门禁要求了离线，而它上面那步预取被允许失败——"
+                "预取一失败就是阻塞红灯，与「真有未允许漏洞」同形"
+            )
+            assert self._GATE in scripts, (
+                f"流水线 {name} 缺门禁本体命令"
             )
 
 
