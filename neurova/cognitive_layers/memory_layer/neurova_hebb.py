@@ -10,6 +10,7 @@ NeuHebbMem 负责 Neurova Hebb 的持久化存储和检索。
 from __future__ import annotations
 
 import json
+from neurova.core.data_root import callerPath
 from neurova.core.logger import get_logger
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -64,7 +65,7 @@ class NeuHebbConfig:
     neurova_hebbs_limit: int = 15
     pre_query_count: int = 5
     verification_enabled: bool = True
-    persistence_path: str = "data/neurova_hebbs/"
+    persistence_path: str = ""  # 空串 = 数据根下的 neurova_hebbs/
     max_neurova_hebbs_per_document: int = 100
     embedding_model: str = "facebook/contriever"
     embedding_dimension: int = 768
@@ -90,7 +91,9 @@ class NeuHebbMem:
     def __init__(self, config: Optional[NeuHebbConfig] = None):
         self.config = config or NeuHebbConfig()
         self._data: Dict[str, Dict[str, Any]] = {}
-        self._storage_path = Path(self.config.persistence_path)
+        # 缺省经数据根推导：配置注释写着"空串 = 数据根下的 neurova_hebbs/"，
+        # 原先直接 `Path("")` 实际落在进程 CWD（注释与行为不符）。
+        self._storage_path = callerPath(self.config.persistence_path, "neurova_hebbs")
         self._storage_path.mkdir(parents=True, exist_ok=True)
         self._load_data()
 

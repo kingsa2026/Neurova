@@ -16,10 +16,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
-_DEFAULT_PATH = "data/security/mcp_tool_grants.json"
+_DEFAULT_PATH = dataPath("security/mcp_tool_grants.json")
 
 
 class ToolGrantStore:

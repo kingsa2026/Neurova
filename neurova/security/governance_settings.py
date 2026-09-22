@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import resolveDataPath
 
 logger = get_logger(__name__)
 
@@ -48,7 +49,7 @@ def settings_path() -> Path:
     custom = os.environ.get("NEUROVA_GOVERNANCE_SETTINGS")
     if custom:
         return Path(custom)
-    return Path("data") / "governance_settings.json"
+    return resolveDataPath("governance_settings.json")
 
 
 def load_governance_settings(path: Optional[Path] = None) -> Dict[str, Any]:

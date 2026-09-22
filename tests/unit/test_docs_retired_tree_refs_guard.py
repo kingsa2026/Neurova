@@ -142,6 +142,11 @@ class TestRetiredTreeLinksAreRebased:
 #: 点名到具体文件（带扩展名、无 `<>`/`*` 占位）的退役目录引用
 SPECIFIC_REF = re.compile(r"(docs/([A-Za-z0-9][\w\-]*)/[^\s`|()]*\.[A-Za-z0-9]{1,6})")
 
+#: 源码里的**路径拼接**形态：`"docs" / "<退役目录>" / "<文件名>"`。
+#: 它不会出现在任何 Markdown 正文里，只在代码里被拼成真实路径——口径漏了它，
+#: 改指就只能靠人工记得，删副本留下的洞照样会从门禁下溜过去。
+JOIN_REF = re.compile(r"""["']docs["']\s*/\s*["']([A-Za-z0-9_-]+)["']\s*/\s*["']([^"']+)["']""")
+
 
 class TestNamedRetiredFilesAreRebased:
     """规则 1b：点名到**具体文件**的退役目录引用，若目标在编号分层唯一可解，必须改指。
@@ -175,6 +180,79 @@ class TestNamedRetiredFilesAreRebased:
                         offenders.append(f"{path}:{number} `{target}` → {matches[0]}")
         assert not offenders, (
             "点名的退役目录文件在编号分层唯一可解，却没改指（同批删除漏改的同一根因）:\n  "
+            + "\n  ".join(offenders)
+        )
+
+
+class TestSourcePathJoinRefsAreRebased:
+    """规则 1c：源码里拼出来的退役目录路径，唯一可解时必须改指。
+
+    前两条规则只看得见 Markdown（链接 + 正文行内路径）。`docs/adr/` 整目录删除后，
+    本批新增用例里的 `REPO_ROOT / "docs" / "adr" / "0016-….md"` 正是拼接形态：
+    正文里没有它的影子，规则 1/1b 都放行，于是 CI 上 py3.11/py3.12 双跑同时红在
+    `FileNotFoundError`。同一根因（改指面没有覆盖全部消费方），只是消费方换成了代码。
+    """
+
+    SOURCE_SUFFIXES = (".py", ".ts", ".js", ".vue", ".json")
+
+    def testJoinRefsWithUniqueRebaseAreFixed(self, files):
+        retired = retiredTrees(files)
+        fileSet = set(files)
+        offenders = []
+        for path in files:
+            if not path.endswith(self.SOURCE_SUFFIXES) or path.startswith(ARCHIVE_PREFIXES):
+                continue
+            text = io.open(PROJECT_ROOT / path, encoding="utf-8", errors="ignore").read()
+            for number, line in enumerate(text.splitlines(), 1):
+                for match in JOIN_REF.finditer(line):
+                    tree, leaf = match.group(1), match.group(2)
+                    if tree not in retired or "<" in leaf or "*" in leaf:
+                        continue
+                    if "." not in leaf:
+                        continue
+                    target = f"docs/{tree}/{leaf}"
+                    if target in fileSet:
+                        continue
+                    matches = [f for f in files if f.endswith("/" + leaf)]
+                    if len(matches) == 1:
+                        offenders.append(f"{path}:{number} `{target}` → {matches[0]}")
+        assert not offenders, (
+            "源码里拼出的退役目录路径在编号分层唯一可解，却没改指"
+            "（同批删除漏改的同一根因，只在代码里出现，Markdown 口径看不见）:\n  "
+            + "\n  ".join(offenders)
+        )
+
+
+class TestGlobRefsIntoRetiredTreesAreRebased:
+    """规则 1b′：通配形态（`docs/adr/0019-*.md`）在唯一可解时同样必须改指。
+
+    通配不是占位符：占位符描述**将来**会产生什么文件名（`YYYY-MM-DD-<dev>.md`），
+    通配描述**现在已存在**的那一份（`0019-*.md` 指的就是那份唯一的 ADR）。前者
+    不参与判定，后者一旦命中唯一候选就与普通引用同性质——删副本没同步改指。
+    只在唯一可解时判红：多候选说明它真的是一族文件，不给假阳性留口子。
+    """
+
+    def testGlobRefsWithUniqueCandidateAreRebased(self, files):
+        retired = retiredTrees(files)
+        offenders = []
+        for path in activeDocs(files):
+            text = io.open(PROJECT_ROOT / path, encoding="utf-8", errors="ignore").read()
+            for number, line in enumerate(text.splitlines(), 1):
+                for match in SPECIFIC_REF.finditer(line):
+                    target, tree = match.group(1), match.group(2)
+                    if tree not in retired or "*" not in target or "<" in target:
+                        continue
+                    leaf = target.split("/", 2)[-1]
+                    prefix = leaf.split("*")[0].rstrip("-. _")
+                    if not prefix:
+                        continue
+                    matches = [f for f in files
+                               if f.startswith("docs/") and f.split("/")[-1].startswith(prefix)]
+                    if len(matches) == 1:
+                        offenders.append(f"{path}:{number} `{target}` → {matches[0]}")
+        assert not offenders, (
+            "通配引用指向已退役目录且唯一可解，却没改指"
+            "（通配说的是'现在已存在的那一份'，不是占位符）:\n  "
             + "\n  ".join(offenders)
         )
 

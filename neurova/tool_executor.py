@@ -33,6 +33,7 @@ import threading
 import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -2649,7 +2650,7 @@ class ToolExecutor:
                 from pathlib import Path as _P
 
                 cache = SkillVectorCache(
-                    cache_file=_P(f"data/agents/{_agent_id}/skills/embeddings.json")
+                    cache_file=_P(dataPath("agents", str(_agent_id), "skills", "embeddings.json"))
                 )
                 _VECTOR_CACHES[_agent_id] = cache
             qvec = cache.encode_query(query)

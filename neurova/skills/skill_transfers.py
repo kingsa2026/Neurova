@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -37,7 +38,7 @@ TT_PUBLIC_TO_AGENT = "public_to_agent"    # 需求 5：公共库升级 → agent
 
 
 def _transfers_path() -> Path:
-    return Path(os.environ.get("NEUROVA_SKILL_TRANSFERS", str(Path("data") / "skill_transfers.json")))
+    return callerPath(os.environ.get("NEUROVA_SKILL_TRANSFERS"), "skill_transfers.json")
 
 
 class SkillTransferStore:

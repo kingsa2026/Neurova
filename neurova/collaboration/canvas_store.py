@@ -25,10 +25,11 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
+from neurova.core.data_root import get_data_root
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_BASE_DIR = Path("data") / "collaboration"
+_DEFAULT_BASE_DIR = get_data_root() / "collaboration"
 
 
 class CanvasVersionConflict(Exception):

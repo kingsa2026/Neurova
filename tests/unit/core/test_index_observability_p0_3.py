@@ -27,6 +27,7 @@ DB_INDEXES = PROJECT_ROOT / "neurova" / "core" / "db_indexes.py"
 
 
 def _make_db(tmp_path, with_index=True):
+    tmp_path.mkdir(parents=True, exist_ok=True)
     db = tmp_path / "obs.db"
     conn = sqlite3.connect(str(db))
     conn.execute(
@@ -39,6 +40,19 @@ def _make_db(tmp_path, with_index=True):
     conn.commit()
     conn.close()
     return str(db)
+
+
+def _fill_rows(db_path, rows: int) -> None:
+    """往 memories 灌数据行——只为验证快照成本与行数无关。"""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.executemany(
+            "INSERT INTO memories (id, agent_id, content, temperature) VALUES (?, ?, ?, ?)",
+            [(f"m{i}", "a1", "c", 0.5) for i in range(rows)],
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 class TestCollectorNotSecondSourceOfTruth:
@@ -103,13 +117,79 @@ class TestIndexSnapshot:
         assert snap["available"] is False
         assert snap["index_count"] == 0
 
-    def test_snapshot_cost_is_negligible(self, tmp_path):
-        """启动期成本：全库 index_list+index_info 实测亚毫秒级（否则会拖慢启动）。"""
+    def test_snapshot_cost_does_not_scale_with_row_count(self, tmp_path, monkeypatch):
+        """启动期成本只随**结构**（表/索引条数）走，不随**数据量**走。
+
+        原判据是墙钟上界（``duration_ms < 250``）。它测不出"成本是否与数据量
+        相关"（那才是"拖慢启动"的成因），却能在 CI 共享机的负载下把正确实现
+        判红——误判方向还会诱导"放宽阈值换绿"。改为结构不变量：快照只发
+        ``sqlite_master`` 一次 + 每表 ``index_list`` + 每索引 ``index_info``，
+        与行数无关；行数放大若干倍后语句序列必须逐条相同。
+        """
         from neurova.core.db_indexes import collect_index_snapshot
 
-        db = _make_db(tmp_path)
-        snap = collect_index_snapshot(db)
-        assert snap["duration_ms"] < 250, f"索引快照过慢: {snap['duration_ms']}ms"
+        def _statements(db_path):
+            seen = []
+            real_connect = sqlite3.connect
+
+            def traced(*a, **k):
+                conn = real_connect(*a, **k)
+                conn.set_trace_callback(seen.append)
+                return conn
+
+            monkeypatch.setattr(sqlite3, "connect", traced)
+            try:
+                return collect_index_snapshot(db_path), seen
+            finally:
+                monkeypatch.setattr(sqlite3, "connect", real_connect)
+
+        small = _make_db(tmp_path / "small")
+        big = _make_db(tmp_path / "big")
+        _fill_rows(big, 20000)
+
+        snap_small, stmts_small = _statements(small)
+        snap_big, stmts_big = _statements(big)
+
+        def _normalise(stmts):
+            """语句骨架：把表名/索引名抹平，只留"语句种类"序列。"""
+            out = []
+            for s in stmts:
+                kind = s.split("(", 1)[0].strip().split("'", 1)[0].strip()
+                out.append(kind)
+            return out
+
+        assert snap_small["index_count"] == snap_big["index_count"], (
+            "两份库的索引条数应相同（夹具只差数据量）"
+        )
+        assert _normalise(stmts_big) == _normalise(stmts_small), (
+            "快照发出的语句序列随数据量变化 ⇒ 启动成本与数据量挂钩：\n"
+            f"  small={stmts_small}\n  big={stmts_big}"
+        )
+
+        # 更强的判据：快照只允许读**元数据**（sqlite_master 清单 + PRAGMA），
+        # 一条都不许碰表数据。否则"某个查询顺手全表扫一遍"这类回归——语句条数
+        # 不变、耗时却随行数线性增长——就从上面那条序列比较下溜过去。
+        offenders = [
+            s for s in stmts_big
+            if "sqlite_master" not in s and not s.strip().upper().startswith("PRAGMA")
+        ]
+        assert offenders == [], (
+            "快照读了元数据之外的东西（启动成本会随数据量增长，且无法解释）:\n  "
+            + "\n  ".join(offenders)
+        )
+
+        # 成本结构：1 次表清单 + 每表 1 次 index_list + 每索引 1 次 index_info。
+        # 逐条断言（而非只看总数），否则"多扫了一张表"这种增量会被总数掩盖。
+        assert len([s for s in stmts_big if "sqlite_master" in s]) == 1, (
+            f"表清单应发 1 次：{stmts_big}"
+        )
+        assert len([s for s in stmts_big if "index_list" in s]) == 1, (
+            f"index_list 应每表 1 次（本夹具仅 memories 一张表）：{stmts_big}"
+        )
+        assert len([s for s in stmts_big if "index_info" in s]) == snap_big["index_count"], (
+            "index_info 应每索引 1 次（与 index_count 同口径）："
+            f"{snap_big['index_count']} vs {stmts_big}"
+        )
 
 
 class TestHotQueryPlans:

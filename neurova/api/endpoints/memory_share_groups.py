@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from neurova.cognitive_layers.memory_layer.share_group import (
     get_share_group_manager,
 )
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -24,7 +25,7 @@ router = APIRouter(dependencies=[Depends(get_current_user)],prefix="/memory-shar
 # P7（2026-09-12）：ShareGroupManager 自带 JSON 持久化，但原端点调用
 # get_share_group_manager() 从不传 storage_path（None → _save_to_file 直接
 # return）→ 持久化能力存在却从未接线，恒内存假保存。现缺省传真实路径。
-_STORE_PATH = "data/memory_share_groups.json"
+_STORE_PATH = dataPath("memory_share_groups.json")
 
 
 def _manager():
