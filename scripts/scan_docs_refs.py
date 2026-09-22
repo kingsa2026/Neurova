@@ -694,12 +694,12 @@ def renderNavigationImpactSummary(rows: list) -> str:
         byForm[row["form"]] = byForm.get(row["form"], 0) + 1
         byFile[row["file"]] = byFile.get(row["file"], 0) + 1
     counters = navigationImpactExemptions()
+    forms = " · ".join(f"{form} {count}" for form, count in sorted(byForm.items()))
+    breakdown = f"（{forms}）" if forms else ""
     lines = [
         NAV_IMPACT_SUMMARY_BEGIN,
         f"归档层悬空引用共 **{len(archiveDanglingUnion())}** 条，"
-        f"其中**影响当下导航 {len(rows)} 条**（"
-        + " · ".join(f"{form} {count}" for form, count in sorted(byForm.items()))
-        + "）。",
+        f"其中**影响当下导航 {len(rows)} 条**{breakdown}。",
         "",
         "| 载体文档 | 入筛条数 |",
         "|------|------|",

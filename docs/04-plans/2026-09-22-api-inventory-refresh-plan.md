@@ -78,3 +78,35 @@
   不逐行比对旧文本。
 - **端点前缀需运行时确认**：前端所需与后端注册可能不一致，差异项以**显式列表**暴露
   （缺哪个、谁负责），不得用「大致一致」带过。
+
+---
+
+## 6. 落地结果（2026-09-22，Issue #112 销账）
+
+- **唯一写者**：`scripts/generate_api_inventory.py`；清单正文由它产出，
+  生成命令 `python scripts/generate_api_inventory.py --write`。
+- **双向差集归零**：清单声明的前端模块 61 个 == `NeurUI/src/api/modules/*.ts` 全集
+  （排除 barrel `index.ts`）；后端挂载点 88 条 == 注册表 + `app.py` 直接挂载的实际结果。
+- **过期判据换成差集**：不再靠日历。代码树增删一个模块，差集即非空，
+  守卫 `tests/unit/test_api_inventory_freshness_guard.py` 报红并给出两侧名单。
+- **导航归属**：仍作**现行清单**保留在 `docs/0-index/README.md` 的 `09-dev-progress`
+  领域入口表内（不降级为归档）；重生成后其路径引用全部可解析，
+  台账第八节入筛条目 103 → 0，棘轮基线 `tests/unit/archiveNavPointerBaseline.txt` 下调为 `0`。
+- **live-verify**：静态收集到的 830 条路由与真应用 `openapi()` 的 836 条逐条对齐，
+  静态侧零假阳性（守卫内含该自证）。
+
+## 7. 重生成暴露的断点（本单**登记**，另单处置）
+
+重生成按「逐条可核」执行，顺带把此前只存在于架构评审里的三处接线断点变成**可复算读数**。
+它们不在本单改动范围（改动面涉及运行时路由行为，需独立评估），故在此登记，不静默遗留：
+
+| 断点 | 读数 | 性质 |
+|------|------|------|
+| `/api/evolution`、`/api/rag` | 挂载动作在、路由零条 | `endpoints/__init__.py` 的 `evolution_router` / `rag_router` 是模块级空 `APIRouter()`，全仓无任何注册语句 |
+| `/api`（顶层 `router`） | 同上 | `endpoints/__init__.py` 的顶层 `router` 零路由，仅作容器 |
+| `cost.ts` 请求 `/api/v1/budgets`、`/api/v1/cost-rollup` | 运行时零命中 | 后端挂在 `/api/budgets`、`/api/cost-rollup`（缺 `v1`），前端 `baseURL=/api/v1` → 必 404 |
+
+处置建议（择一，须单独立项）：空 router 接线或删除；
+`cost.ts` 的两条前缀要么后端改挂 `/api/v1`，要么前端改走绝对路径——
+两条路都会动运行时行为，需与 `docs/architecture-model/architecture-findings.md`
+第 6.1/6.3 节的既有裁定合并考虑，不在本单顺手改。
