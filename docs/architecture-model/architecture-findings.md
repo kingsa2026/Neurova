@@ -225,12 +225,6 @@ neurova/llm/cost_tracking_middleware.py  ← 362 行，全仓零消费者
 - 动态字符串注册**不可静态分析**：IDE、类型检查、依赖图、以及本目录所有架构图，
   都看不到这张表。这是自动化治理的结构性障碍。
 
-**2026-09-22 收口状态**：旁路注册组与三个模块级空 `APIRouter`
-（`router` / `evolution_router` / `rag_router`）已删除，挂载事实收口到
-`endpoint_modules` 注册表一处；`neuron` / `coordination_api` 的重复前缀段消失。
-常驻守卫 `tests/unit/api/test_route_mount_contract_guard.py` 钉住
-「零路由挂载 / 前缀重复 / 挂载层错位」三类形态。
-
 **同日后续收口（本批）**：
 
 - **未挂载名单各自取得终局处置**。注册表提为模块级常量 `ENDPOINT_MODULES`（挂在函数体外，
@@ -238,17 +232,21 @@ neurova/llm/cost_tracking_middleware.py  ← 362 行，全仓零消费者
   补真实身份后**接线**（后者破坏性动作另加管理员闸）；
   `cost_api`（与 `/api/v1/cost-rollup` + `/api/v1/budgets` 并行第二份读面）、
   `migration_api`（底层四阶段全 `pass`、`verify` 恒真）、
-  `skill_market` / `skills_market`（ADR 0013 早判定的待删套）**删除**。
+  `skill_market` / `skills_market`（ADR 0013 早判定的待删套）、
+  `openplatform.routes` / `core.acp_server`（同日认定的第二份平行实现）**删除**。
   处置表从「一张只列名字的持有名单」升级为**可机器判定办没办**的三态台账
   （`已接线` / `已删除` / `待实现`），见 `tests/unit/endpointWiringBaseline.txt`。
 - **收录口径收口到全仓**（`SOURCE_ROOTS`），不是只扫 `api/endpoints/` 包：
   口径若比声明窄，同一形态在包外就永远看不见，连被登记的机会都没有。
   包外两条命中点 `openplatform.routes`（19 条）与 `core.acp_server`（5 条）
-  因此在本批**进册**，处置同为「待实现 + 依据」（前者缺鉴权且与
-  `openplatform_keys.py` 同名不同物、须先定归属；后者实现在类实例上、
-  属「实现有主、端点无客」）。
-  名单因此**不是硬零**：接线项与待裁定项各自在册，判据是「每行都有处置与依据」，
-  不是「名字全消失」。
+  因此进册——它们是**第二份平行实现**（前者零消费者、整条 router 无 `Depends`，
+  与在用的 `openplatform_keys.py` 同名不同物；后者 `chat_stream()` 是模拟实现，
+  生产链路走 `acp_api.py` + `acp_runtime.py`），已按教义第 6 条在产生第二份
+  事实源的一侧删除，不补接线也不补鉴权。守卫
+  `tests/unit/api/test_orphan_faces_retired_guard.py` 钉住「不得复活 + 真面仍在 +
+  零悬空引用 + 不回填台账」四条。
+  名单现为**硬零**：退役批之后包外无孤儿，全仓未挂载模块为零；判据仍是
+  「每行都有处置与依据」，且三态处置必须落到磁盘事实（已删除 ⇒ 文件真没了）。
 - **`「导入失败只 logger.debug」` 这条已处置**：装载失败一律 ERROR 级记录 +
   写入可读取的失败面 `registrationFailures()`，启动期可见（不再是「炸了没人知道」）。
 

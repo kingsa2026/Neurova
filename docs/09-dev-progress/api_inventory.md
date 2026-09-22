@@ -9,7 +9,7 @@
 过期判据不是日历而是**双向差集**：代码树增删一个模块，本表与代码树的差集即非空，守卫 `tests/unit/test_api_inventory_freshness_guard.py` 立刻报红并给出差集两侧的名单。
 
 <!-- API-INVENTORY:BEGIN -->
-## 一、前端 API 模块（61 个）
+## 一、前端 API 模块（60 个）
 
 | 模块文件 | 消费的后端前缀 | barrel 导出 | 仓内引用处 |
 |------|------|------|------|
@@ -50,7 +50,6 @@
 | `NeurUI/src/api/modules/negative-screen.ts` | `/negative-screen`, `/notifications` | 是 | 5 |
 | `NeurUI/src/api/modules/neurflow.ts` | `/neurflow` | 是 | 8 |
 | `NeurUI/src/api/modules/notifications.ts` | `/notifications` | 是 | 6 |
-| `NeurUI/src/api/modules/openplatform.ts` | `/openplatform` | 是 | 0 |
 | `NeurUI/src/api/modules/plans.ts` | `/plans` | 是 | 3 |
 | `NeurUI/src/api/modules/plugins.ts` | `/plugins` | 是 | 0 |
 | `NeurUI/src/api/modules/projects.ts` | `/projects` | 是 | 5 |
@@ -183,14 +182,14 @@
 
 **未接线 router**（挂载动作在、路由一条没有）：无
 
-**未挂载路由模块**（全仓定义了路由、装配后却不在路由表里 —— 运行时不提供服务）：`neurova.api.openplatform.routes`, `neurova.core.acp_server`
+**未挂载路由模块**（全仓定义了路由、装配后却不在路由表里 —— 运行时不提供服务）：无
 
-**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/coordination`, `/api/neuron`, `/api/v1/artifacts`, `/api/v1/audio`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/benchmark`, `/api/v1/channel-sharing`, `/api/v1/chat`, `/api/v1/computers`, `/api/v1/knowledge-integration`, `/api/v1/mcp`, `/api/v1/monitor`, `/api/v1/phase3`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/sync`, `/api/v1/tools`, `/api/v1/user-groups`, `/api/v1/workspace`
+**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/coordination`, `/api/neuron`, `/api/v1/artifacts`, `/api/v1/audio`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/benchmark`, `/api/v1/channel-sharing`, `/api/v1/chat`, `/api/v1/computers`, `/api/v1/knowledge-integration`, `/api/v1/mcp`, `/api/v1/monitor`, `/api/v1/openplatform`, `/api/v1/phase3`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/sync`, `/api/v1/tools`, `/api/v1/user-groups`, `/api/v1/workspace`
 
 
 ## 四、前端调用 ↔ 后端注册 差集
 
-下列 **33** 处调用在本轮后端注册表里没有对应路由。这不等于「后端漏注册」——差异以显式列表暴露，由人去核：
+下列 **28** 处调用在本轮后端注册表里没有对应路由。这不等于「后端漏注册」——差异以显式列表暴露，由人去核：
 
 | 模块 | 方法 | 调用路径 | 差异形态 |
 |------|------|------|------|
@@ -210,11 +209,6 @@
 | models | POST | `/api/v1/models/active` | 方法不匹配 |
 | models | GET | `/api/v1/models/fetch` | 方法不匹配 |
 | neurflow | POST | `/api/v1/neurflow/comfyui/import` | 路径未注册 |
-| openplatform | POST | `/api/v1/openplatform/keys` | 方法不匹配 |
-| openplatform | DELETE | `/api/v1/openplatform/keys/*` | 路径未注册 |
-| openplatform | PUT | `/api/v1/openplatform/keys/*` | 路径未注册 |
-| openplatform | POST | `/api/v1/openplatform/keys/*/rotate` | 路径未注册 |
-| openplatform | GET | `/api/v1/openplatform/keys/*/usage` | 路径未注册 |
 | plugins | POST | `/api/v1/plugins` | 方法不匹配 |
 | plugins | DELETE | `/api/v1/plugins/*` | 方法不匹配 |
 | plugins | PUT | `/api/v1/plugins/*` | 方法不匹配 |
@@ -230,7 +224,7 @@
 
 ## 五、后端已注册 ↔ 前端消费方 差集
 
-下列 **21** 个后端挂载前缀无任何前端模块直连，属「后端已就位、前端待补消费方」的显式清单：
+下列 **22** 个后端挂载前缀无任何前端模块直连，属「后端已就位、前端待补消费方」的显式清单：
 
 | 后端挂载前缀 |
 |------|
@@ -247,6 +241,7 @@
 | `/mcp` |
 | `/metrics` |
 | `/monitor` |
+| `/openplatform` |
 | `/phase3` |
 | `/skill-versions` |
 | `/skills` |
