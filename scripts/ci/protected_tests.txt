@@ -4,6 +4,8 @@
 tests/unit/test_audit_regressions.py
 tests/unit/auth/test_password_hasher.py
 tests/unit/test_ci_parity_guard.py
+# 受保护子集里的墙钟上界断言逐条有结论（CI 偶发红的根因：结构契约被编码成墙钟阈值）
+tests/unit/test_ci_wallclock_assertion_ledger.py
 tests/unit/test_ci_thin_env_guards.py
 # Issue #68 收口：协作域路由可达性（影子导入/FastAPI 注册期断言/漏 await 三形态）
 tests/unit/api/test_coordination_router_reachability.py
@@ -182,17 +184,6 @@ tests/unit/knowledge/test_read_surface_agent_scope.py
 # Issue #75：记忆库写入围栏 + 默认路径不再随 CWD 散落（仓库根 71,831 行的来路）
 tests/unit/memory/test_memory_storage_fence.py
 
-# Issue #75 残余项 A：历史污染清空（正证据判据 + 先归档再删 + 幂等 + 工作区目标拒删）
-tests/unit/memory/test_memory_pollution_purge.py
-# Issue #75 残余项 B：默认落点收成单一事实源（数据根），CWD 不再决定库在哪
-tests/unit/core/test_data_root_single_source.py
-# Issue #75 残余项 C：入索引段报出**归属**（delegated + owner），不再挂在"还没做"
-tests/unit/knowledge/test_index_segment_ownership.py
-# Issue #75 残余项 D：存量断言归正入口（补链位后必须转 verified；无依据的行保持 unverified）
-tests/unit/knowledge/test_assertion_regrade_entry.py
-# Issue #75 残余项 E：仓库里不许再有被跟踪的运行期残留（sessions/ / trajectories/）
-tests/unit/memory/test_tracked_run_residue_guard.py
-
 # Issue #68 收口后下一层：docs/11-legacy 归档层悬空引用登记台账（逐条可达性判定 +
 # 前像回收 + 不得记成已修复），守卫与生成器 scripts/scan_docs_refs.py 同一口径
 tests/unit/test_legacy_ref_ledger_guard.py
@@ -213,6 +204,49 @@ tests/unit/api/test_skill_rollback_governance.py
 # （阶跃边界 = 既有红灯 test_ebbinghaus_curve 的根因）+ 其余 5 组成建制死码退役锁定
 tests/unit/cognitive_layers/memory_layer/test_temperature_single_source.py
 
+# Issue #72 写面与读面收口：抽取产物落被读的底座（不再只有 JSON 投影）+ 本体硬拒真咬合
+tests/unit/knowledge/test_extraction_lands_in_read_graph.py
+# Issue #72 附带根因：构造期播种只补缺，不覆盖已登记的 domain/range/cardinality
+tests/unit/knowledge/ontology/test_term_seed_does_not_clobber.py
+# Issue #72：时序事实单一权威（端点字段归一 + 坏输入 4xx + 第三套内存库退役）
+tests/unit/api/test_tkg_endpoint_single_source.py
+# Issue #72：记忆侧声明的取代真的生效（旧证据让位），找不到目标如实申报
+tests/unit/memory_ingest/test_imported_supersede_replaces_old.py
+# 上下文三链路修复批（Issue #90）B1 尺子：token 估算单一事实源 + 判据侧不得低估
+#   （P0-1 根因：BALANCED 对英文/JSON/无空格长串低估 20 倍量级 → 折叠永不触发）
+tests/unit/context/test_token_estimator_calibration.py
+tests/unit/context/test_token_estimation_inconsistency.py
+# 上下文三链路修复批（Issue #90）B2 隔离写入口：归档即带作用域（群聊不泄入单聊）
+#   + 折叠摘要缓存按真作用域分槽（P1-1 跨会话串台）+ D2 缓存槽上限收口
+tests/unit/context/test_pool_scope_wiring.py
+tests/context/test_context_pool_hash_index.py
+# 上下文三链路修复批（Issue #90）B3 装配收口：视图截断只产副本（归档实体永不
+#   就地改写/hash 不失配）+ 摘要沿用旧摘要不算"本轮成功"（不谎报覆盖）
+tests/unit/context/test_draw_never_mutates_archive.py
+tests/unit/context/test_summary_failure_not_reported_success.py
+
+# Issue #80 第三轮补做（9 条尾巴）：逐文件单跑全绿后登记
+tests/unit/tools/test_tool_router_success_verdict.py
+tests/unit/evolution/experience/test_three_state_four_faces.py
+tests/unit/evolution/experience/test_structure_identity_param_shape.py
+tests/unit/evolution/experience/test_muscle_memory_agent_identity.py
+tests/unit/evolution/experience/test_muscle_memory_rearchive_safety.py
+tests/unit/evolution/experience/test_rsi_idle_cost_recorded.py
+tests/unit/core/test_chain_integrity_observability.py
+tests/unit/agent/test_tool_experience_loop_offline_probe.py
+tests/unit/skills/test_skill_name_collision_recount.py
+tests/unit/test_script_index_registration.py
+
+# Issue #75 残余项 A：历史污染清空（正证据判据 + 先归档再删 + 幂等 + 工作区目标拒删）
+tests/unit/memory/test_memory_pollution_purge.py
+# Issue #75 残余项 B：默认落点收成单一事实源（数据根），CWD 不再决定库在哪
+tests/unit/core/test_data_root_single_source.py
+# Issue #75 残余项 C：入索引段报出**归属**（delegated + owner），不再挂在"还没做"
+tests/unit/knowledge/test_index_segment_ownership.py
+# Issue #75 残余项 D：存量断言归正入口（补链位后必须转 verified；无依据的行保持 unverified）
+tests/unit/knowledge/test_assertion_regrade_entry.py
+# Issue #75 残余项 E：仓库里不许再有被跟踪的运行期残留（sessions/ / trajectories/）
+tests/unit/memory/test_tracked_run_residue_guard.py
 
 # Issue #81 F-04/F-18：导入会话属主（归属落盘后只读）+ 两条导入路同一幂等域
 #   + 导入咽喉（唯一写入口）的既有回归（逐文件单跑确定全绿，已核）
@@ -226,30 +260,12 @@ tests/unit/migration/test_kai_import.py
 # 根因 = 目录重排 fd7ea92c 之后，3b5d7e80 又把 306 个 docs 旧路径还原回来，
 # 同一篇文档在编号分层与旧路径各留一份，归档引用失去唯一裁定。本单收口为一份。
 tests/unit/test_docs_name_collision_guard.py
-# Issue #72 写面与读面收口：抽取产物落被读的底座（不再只有 JSON 投影）+ 本体硬拒真咬合
-tests/unit/knowledge/test_extraction_lands_in_read_graph.py
-# Issue #72 附带根因：构造期播种只补缺，不覆盖已登记的 domain/range/cardinality
-tests/unit/knowledge/ontology/test_term_seed_does_not_clobber.py
-# Issue #72：时序事实单一权威（端点字段归一 + 坏输入 4xx + 第三套内存库退役）
-tests/unit/api/test_tkg_endpoint_single_source.py
-# Issue #72：记忆侧声明的取代真的生效（旧证据让位），找不到目标如实申报
-tests/unit/memory_ingest/test_imported_supersede_replaces_old.py
+
 # Issue #72 第二轮：投影与权威的双向差集可读、可修、只动本域（含端点接线）
 tests/unit/knowledge/test_projection_derived_from_authority.py
 # Issue #72 第二轮：存量补抽的待办判据问权威（投影有 id 不算抽过）
 tests/unit/knowledge/test_backfill_heals_authority_less_entries.py
-# 上下文三链路修复批（Issue #90）B1 尺子：token 估算单一事实源 + 判据侧不得低估
-#   （P0-1 根因：BALANCED 对英文/JSON/无空格长串低估 20 倍量级 → 折叠永不触发）
-tests/unit/context/test_token_estimator_calibration.py
-tests/unit/context/test_token_estimation_inconsistency.py
-# 上下文三链路修复批（Issue #90）B2 隔离写入口：归档即带作用域（群聊不泄入单聊）
-#   + 折叠摘要缓存按真作用域分槽（P1-1 跨会话串台）+ D2 缓存槽上限收口
-tests/unit/context/test_pool_scope_wiring.py
-tests/context/test_context_pool_hash_index.py
-# 上下文三链路修复批（Issue #90）B3 装配收口：视图截断只产副本（归档实体永不
-#   就地改写/hash 不失配）+ 摘要沿用旧摘要不算"本轮成功"（不谎报覆盖）
-tests/unit/context/test_draw_never_mutates_archive.py
-tests/unit/context/test_summary_failure_not_reported_success.py
+
 # 上下文持久层批（Issue #90）B4 工单 001：归档跨重启为真（A1）
 #   （根因 P1-3：写穿点挂在生产不可达的驱逐路径上 → 台账恒空）
 tests/unit/context/test_context_persistence_restart.py
@@ -297,6 +313,14 @@ tests/unit/test_active_layer_refs_guard.py
 #     启动只登记一次 COUNT(*)（常数次查询、零预载），rehydrate 显式按需，
 #     draw/query 零查库由断言锁住，登记值随写入/GC 增量同步并进 gauge）
 tests/unit/context/test_pool_startup_load.py
+
+# Issue #68 下一层：归档层 1800 余条按「是否影响当下导航」再筛一轮。
+#   前序口径把归档层一视同仁为「历史留痕，不就地改写」，副作用是把两类不同性质
+#   混在一起：绝大多数条目的载体今天没人走得到；少数条目的载体**导航可达**，
+#   其中可点击的引用点开就 404。判据单源在 scripts/scan_docs_refs.py 的
+#   navigationImpactRefs()（导航图传递闭包 + 可点击/指路两形态），
+#   甲类可点击硬零，乙类指路条目必须立项承接（登记不代替立项）。
+tests/unit/test_archive_nav_impact_guard.py
 
 # 上下文持久层批（Issue #90）B4 工单 007：GC 与 FTS 对齐（A5）
 #   （根因：_LEDGER_GC_EVERY 只被 _archive_evicted 递增，而它在生产构造面

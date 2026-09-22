@@ -403,9 +403,18 @@ class ToolRouter:
             else:
                 result = await self._execute_builtin(tool, params)
 
+            # 成败判据**单源**在咽喉的 `ToolExecutor._result_is_success`。
+            # 原实现无条件 `success=True`：工具以 `{"error": …}` 形态失败（不抛异常）
+            # 时，路由器的包装壳报成功，`ToolSequenceSkill.execute` 只读这个壳，
+            # 于是单步真失败的自动技能照样产出成功票（审计 L-02）。此处不另写
+            # 内容判据，只把总判据搬过来用。
+            success = self._result_is_success(result)
             return ToolResult(
-                success=True,
+                success=success,
                 result=result,
+                error=None if success else str(
+                    result.get("error") if isinstance(result, dict) else None
+                ) or f"工具执行失败: {tool_name}",
                 metadata={"tool_name": tool_name, "source": source, "agent_id": agent_id, "user_id": user_id},
             )
         except KeyError as e:
@@ -544,6 +553,17 @@ class ToolRouter:
             p.name == name or p.kind == inspect.Parameter.VAR_KEYWORD
             for p in parameters
         )
+
+    @staticmethod
+    def _result_is_success(result: typing.Any) -> bool:
+        """成败判据单源：委托咽喉的内容判据，不在此复写第二份。
+
+        `tool_executor` 与 `tool_router` 互为内外两层，模块级互相 import 会成环，
+        故在此惰性取用（单向：router → executor）。
+        """
+        from neurova.tool_executor import ToolExecutor
+
+        return ToolExecutor._result_is_success(result)
 
     async def _execute_mcp(
         self,

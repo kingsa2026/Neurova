@@ -47,8 +47,27 @@ def normalize_purpose(purpose=""):
     return " ".join(str(purpose or "").casefold().split())
 
 
+def structural_identity(steps):
+    """**结构身份**的归一与哈希：结构 = 工具序列 + 每一步的参数。
+
+    这里是"结构"的唯一定义处（工单 009）。`fingerprint`（业务身份）与
+    `structure_key`（结构身份）都经它出哈希，差异只在**有没有把意图并进载荷**——
+    两个键各自复写一遍归并与序列化，等于让"结构 = 工具序列 + 参数"有了第二份实现，
+    任一处漂移都会让票据侧与经验侧对同一次执行算出两个身份。
+    """
+    normalized = normalize_steps(steps)
+    if not normalized:
+        return None
+    return normalized
+
+
+def _hash_identity(identity):
+    return hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False,
+                                     separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
 def fingerprint(steps, purpose=""):
-    """结构身份 = 工具序列 + 参数 + 业务意图，三者全吸收。
+    """业务身份 = 结构（工具序列 + 参数）+ 业务意图，三者全吸收。
 
     历史缺陷（P1 统一指纹）：旧实现只在**所有**步骤 params 为空时才吸收
     purpose，于是同一业务意图的两种真实形态（带参步 / 裸工具名）产出两个
@@ -57,16 +76,15 @@ def fingerprint(steps, purpose=""):
       - 裸工具名：identity = {steps(裸名), purpose}
     purpose 为空时（旧 API 的缺省调用）退回纯结构身份，向后兼容。
     """
-    steps = normalize_steps(steps)
-    if not steps:
+    normalized = structural_identity(steps)
+    if not normalized:
         return None
-    identity = {"steps": steps}
+    identity = {"steps": normalized}
     # purpose 恒为身份的一部分（空串也占位）：否则**同一批任务**里有的证据带
     # 意图、有的不带就会落到两个身份——计量分叉（任务计数/成功数各算一半）。
     # 空意图 = "未标注意图"这一等价类，不是"任意意图"。
     identity["purpose"] = normalize_purpose(purpose)
-    return hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False,
-                                     separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    return _hash_identity(identity)
 
 
 def structure_key(steps):
@@ -82,13 +100,16 @@ def structure_key(steps):
     任务永远查不回来**，"三次独立成功"闸门因此恒不可达。二键分离后，
     record 同时落业务身份与结构身份（一行一列），查询按结构身份聚合，
     两个问题各自有正确答案。
+
+    结构 = **工具序列 + 每一步的参数**（工单 009 的"参数形状指纹"）：只按工具名
+    计身份会让"同一串工具、不同参数"塌成一条经验，参数形状的差异必须可分辨。
+    参数值随结构进哈希（哈希不可逆，明文不外泄），`post_chat_pipeline` 只把哈希
+    写进 EKB `context`，从不落参数明文。
     """
-    steps = normalize_steps(steps)
-    if not steps:
+    normalized = structural_identity(steps)
+    if not normalized:
         return None
-    identity = {"steps": steps}
-    return hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False,
-                                     separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    return _hash_identity({"steps": normalized})
 
 
 def canonical_skill_id(steps, purpose="", prefix="skill"):
