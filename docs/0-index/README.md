@@ -179,6 +179,7 @@
 - [stub-cleanup-plan.md](../04-plans/stub-cleanup-plan.md) — 存根清理计划
 - [DOCS_ALIGNMENT_PLAN.md](../04-plans/DOCS_ALIGNMENT_PLAN.md) — 文档对齐计划
 - [neurova-memory-system-upgrade-technical.md](../04-plans/neurova-memory-system-upgrade-technical.md) — 记忆升级技术方案
+- [2026-09-22-api-inventory-refresh-plan.md](../04-plans/2026-09-22-api-inventory-refresh-plan.md) — 前端 API 清单重生成立项（Issue #68 归档层导航影响筛选）
 
 ### 05-reports 报告
 
