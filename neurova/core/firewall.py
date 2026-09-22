@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -369,7 +370,7 @@ def get_firewall(config_path: Optional[str] = None) -> AgentFirewall:
                 _firewall = AgentFirewall(
                     config_path=config_path
                     or os.environ.get("NEUROVA_FIREWALL_PATH")
-                    or "data/firewall.json"
+                    or dataPath("firewall.json")
                 )
     return _firewall
 

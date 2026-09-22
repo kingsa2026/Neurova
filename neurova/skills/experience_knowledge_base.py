@@ -26,18 +26,20 @@ import os
 import re
 import sqlite3
 import threading
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from neurova.core.content_identity import normalized_payload_key
 from neurova.core.logger import get_logger
 from neurova.skills.models import ExperienceRecord
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
 
 # 默认数据库路径（相对项目根目录的 data 目录）
-_DEFAULT_DB_PATH = str(Path(__file__).resolve().parent.parent.parent / "data" / "experience_knowledge.db")
+def defaultDbPath() -> str:
+    """默认库落点：数据根下的绝对路径（原值按 __file__ 反推，是第二份根）。"""
+    return str(get_data_root() / "experience_knowledge.db")
 
 
 def _resolve_default_db_path() -> str:
@@ -45,7 +47,7 @@ def _resolve_default_db_path() -> str:
     conftest autouse fixture 把所有测试的 EKB 指向临时目录），
     未设置时回退项目 data/ 目录（向后兼容）。"""
     env_path = os.environ.get("NEUROVA_EKB_DB", "")
-    return env_path or _DEFAULT_DB_PATH
+    return env_path or defaultDbPath()
 
 
 # agent_id 安全字符集：字母/数字/下划线/连字符，1-64 位。

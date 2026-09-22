@@ -20,6 +20,7 @@ import time
 from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
+from neurova.core.data_root import resolveDataPath
 
 logger = get_logger(__name__)
 
@@ -91,10 +92,9 @@ class VerificationCodeModel:
             db_path: 数据库文件路径
         """
         if db_path is None:
-            # 默认数据库路径
-            db_dir = os.path.join(os.path.dirname(__file__), "..", "..", "data")
-            os.makedirs(db_dir, exist_ok=True)
-            db_path = os.path.join(db_dir, "verification_codes.db")
+            # 默认数据库路径：数据根下（原实现按 __file__ 反推，是第二份根）
+            db_path = str(resolveDataPath("verification_codes.db"))
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
         self.db_path = db_path
         self._conn: Optional[sqlite3.Connection] = None

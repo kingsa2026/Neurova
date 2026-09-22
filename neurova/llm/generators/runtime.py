@@ -29,12 +29,13 @@ from neurova.core.logger import get_logger
 from neurova.llm.generators import protocols as protocols
 from neurova.llm.generators.base import GenerationConfig, GenerationResult, GeneratorType
 from neurova.llm.generators.protocols import ProtocolCredentials
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
 # P1-8 同源：仓库根绝对路径（端点 generation.py 引用本常量，杜绝两处漂移）
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-GENERATION_OUTPUT_DIR = PROJECT_ROOT / "data" / "generations"
+GENERATION_OUTPUT_DIR = get_data_root() / "generations"
 
 DEFAULT_OPENAI_BASE = "https://api.openai.com/v1"
 DEFAULT_WAN_BASE = "https://dashscope.aliyuncs.com/api/v1"
