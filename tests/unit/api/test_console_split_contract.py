@@ -11,6 +11,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from neurova.api.endpoints import console as api
+from tests.route_table import leafRoutes
 
 SNAPSHOT = Path(__file__).with_name("console_split_routes.json")
 DOMAINS = {
@@ -53,7 +54,9 @@ def dependency_tree(dep, root=False):
 
 def route_snapshot():
     result = []
-    for route in api.router.routes:
+    # 走 leafRoutes：console 聚合 router 内嵌 3 个子 router，不就地摊平，
+    # 直接遍历 `api.router.routes` 取 `.endpoint` 会 AttributeError（守卫失明）。
+    for route in leafRoutes(api.router):
         sig = inspect.signature(route.endpoint)
         result.append({"kind": type(route).__name__, "path": route.path,
                        "methods": sorted(getattr(route, "methods", []) or []),
@@ -79,7 +82,7 @@ def test_structure(domain):
     for name in DOMAINS[domain]:
         endpoint = getattr(api, name)
         assert endpoint.__module__ == leaf.__name__
-        route = next(r for r in api.router.routes if r.name == name)
+        route = next(r for r in leafRoutes(api.router) if r.name == name)
         assert route.endpoint is endpoint
         for param in inspect.signature(endpoint).parameters.values():
             if hasattr(param.default, "dependency"):

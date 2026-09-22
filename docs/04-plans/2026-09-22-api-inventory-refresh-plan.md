@@ -1,8 +1,9 @@
 # 立项：`api_inventory.md` 重生成（前端 API 清单快照过期）
 
 > 立项日期：2026-09-22
-> **状态：已落地（2026-09-22）**——生成器 `scripts/gen_api_inventory.py` + 守卫
-> `tests/unit/test_api_inventory_guard.py`；销账后台账第八节入筛条目 103 → 0。
+> **状态：已落地（2026-09-22）**——生成器 `scripts/generate_api_inventory.py` + 守卫
+> `tests/unit/test_api_inventory_freshness_guard.py` / `tests/unit/test_api_inventory_guard.py`；
+> 销账后台账第八节入筛条目 103 → 0。
 > 承接单：Issue #112（本立项）；上游：Issue #68 下一层——归档层按「是否影响当下导航」筛选后，入筛的指路条目
 > 台账与判据见 `docs/06-bugfix/历史悬空引用登记台账_2026-09-21.md` 第八节；
 > 判据单源在 `scripts/scan_docs_refs.py::navigationImpactRefs`。
@@ -81,18 +82,12 @@
 - **端点前缀需运行时确认**：前端所需与后端注册可能不一致，差异项以**显式列表**暴露
   （缺哪个、谁负责），不得用「大致一致」带过。
 
-
 ---
 
-## 6. 落地记录（2026-09-22）
+## 6. 落地结果（2026-09-22，Issue #112 销账）
 
-### 交付物
-
-| 落点 | 作用 |
-|------|------|
-| `scripts/gen_api_inventory.py` | 清单**唯一事实源**：读代码树取全集，产出机器区；`--update` 落盘 |
-| `docs/09-dev-progress/api_inventory.md` | 改为生成物：机器区 + 叙述性说明分区，机器区禁手改 |
-| `tests/unit/test_api_inventory_guard.py` | 常驻守卫：重算比对 + 5 项反向控制 |
+**唯一写者**：`scripts/generate_api_inventory.py`；清单正文由它产出，
+生成命令 `python scripts/generate_api_inventory.py --write`。
 
 ### 验收判据逐条核对
 
@@ -118,4 +113,57 @@
 
 本清单是**前端视角**（哪个前端模块请求了哪些端点前缀、哪些后端前缀还没有消费方）；
 接口本身的事实源仍是 `docs/02-api/API_REFERENCE.md`。两者职责不同，不合并——
-原立项第 3 节「非目标」已写明，落地时未偏离。
+立项第 3 节「非目标」已写明，落地时未偏离。
+
+### 守卫分工（同一判据，两条守卫各锁一半）
+
+| 落点 | 作用 |
+|------|------|
+| `scripts/generate_api_inventory.py` | 清单**唯一事实源**：读代码树取全集，产出机器区；`--write` 落盘 |
+| `docs/09-dev-progress/api_inventory.md` | 改为生成物：机器区 + 叙述性说明分区，机器区禁手改 |
+| `tests/unit/test_api_inventory_freshness_guard.py` | 锁模块双向差集、前缀表、快照纪律、生成入口幂等与运行时零假阳性 |
+| `tests/unit/test_api_inventory_guard.py` | 锁机器区与生成器输出**逐字一致**、两组差异逐条登记、快照不逾期 |
+
+## 7. 重生成暴露的断点（已处置：2026-09-22）
+
+重生成按「逐条可核」执行，把此前只存在于架构评审里的接线断点变成了**可复算读数**。
+原计划是「本单只登记、另单处置」；后续在同一线上收口了——因为它们的根因同一处：
+**挂载事实有两份**（注册表 + `app.py` 旁路），两份之间没有任何一致性校验。
+
+| 断点 | 修前读数 | 处置 |
+|------|------|------|
+| `/api`、`/api/evolution`、`/api/rag` | 挂载动作在、路由零条 | `endpoints/__init__.py` 的 `router` / `evolution_router` / `rag_router` 是模块级空 `APIRouter()`，全仓无任何注册语句 → **删除空壳与挂载**（空 router 不是「待接线」，是「不存在却对外可见」） |
+| `/api/neuron/neuron/*`、`/api/coordination/coordination/*` | 前缀重复段 | 表内 prefix 与模块自述 `APIRouter(prefix=...)` 各叠一次 → **表内前缀留空、以自述前缀为准**，旁路挂载删除 |
+| `/api/v1/budgets`、`/api/v1/cost-rollup` | 运行时零命中 | 旁路挂在 `/api` 下（缺 `v1`），前端 `baseURL=/api/v1` → 必 404 → **并入注册表挂 `/v1`**，旁路副本删除 |
+
+三处的共同修法：**挂载只有一个入口**——`endpoint_modules` 注册表；`app.py` 的旁路
+`include_router` 组全部删除。判据（`mountedRouterAudit` / `unmountedEndpointModules`）
+单源在同一条装配路径上，常驻守卫
+`tests/unit/api/test_route_mount_contract_guard.py` 逐条钉住。
+
+`docs/architecture-model/architecture-findings.md` 第 6.1/6.3 节的既有裁定同批对齐：
+6.1 记的「两套注册事实源」与 6.3 记的「前后端前缀契约断裂」在本轮一并收口。
+
+### 并入 main 后的守卫收口（2026-09-22）
+
+并入 `main` 时，`main` 侧的 `#127` 与本单**对同一根因各写了一份守卫**：
+`main` 的 `tests/unit/api/test_endpoint_mount_wiring_guard.py`（判据取自
+`scripts/gen_api_inventory.py` 的 `appMounts` / `mountProblems` /
+`unwiredEndpointRouters`）与本单的 `test_route_mount_contract_guard.py`
+（判据取自 `scripts/generate_api_inventory.py` 的 `mountedRouterAudit` /
+`unmountedEndpointModules`）。
+
+两份守卫是同一件事的两次实现——**收口到一份**（教义第 6 条：不新造平行体系）。
+处置如下：
+
+| 侧 | 能力 | 去向 |
+|------|------|------|
+| `main` 侧独有 | 重复挂载检测 | 并入 `mountedRouterAudit()` 的「重复挂载」 |
+| `main` 侧独有 | 未挂载模块棘轮（台账只降不升） | 并入 `unmountedEndpointModules()` 的别名 `unwiredEndpointModuleNames()` + `readWiringBaseline()` |
+| `main` 侧独有 | 假阳性反向控制（`computer` 不得误报） | 并入本守卫的 `TestNegativeControls` |
+| 本单侧保留 | 零路由挂载 / 前缀重复 / 未挂载名单 / 前端基地址三类写法 | 原样保留 |
+
+`test_endpoint_mount_wiring_guard.py` 与 `scripts/gen_api_inventory.py` 删除
+（后者是同一生成器的第二份实现，前者的 `importorskip` 在生成器被删后只会**静默跳过**
+——那是教义第 2 条点名的「跑不起来就算过」形态）。本守卫的生成器缺失判据是**硬红灯**，
+不用 `importorskip`。
