@@ -77,7 +77,7 @@
 
 > `NeurUI/src/api/index.ts` 是 axios 实例与鉴权拦截器，`NeurUI/src/api/auth.ts` / `NeurUI/src/api/neuron.ts` 是模块目录之外的单文件客户端，三者不属本表模块口径。
 
-## 二、后端挂载前缀（89 条）
+## 二、后端挂载前缀（91 条）
 
 | 端点模块 | 挂载前缀 |
 |------|------|
@@ -105,6 +105,7 @@
 | `neurova/api/endpoints/collaboration_api.py` | `/api/v1/collaboration` |
 | `neurova/api/endpoints/collaboration_room_api.py` | `/api/v1/collaboration` |
 | `neurova/api/endpoints/computer.py` | `/api/v1/computer` |
+| `neurova/api/endpoints/computer_api.py` | `/api/v1/computers` |
 | `neurova/api/endpoints/console.py` | `/api/v1/console` |
 | `neurova/api/endpoints/context.py` | `/api/v1/context` |
 | `neurova/api/endpoints/context_pool_settings.py` | `/api/v1/context-pool` |
@@ -143,6 +144,7 @@
 | `neurova/api/endpoints/neurflow_api.py` | `/api/v1/neurflow` |
 | `neurova/api/endpoints/notifications.py` | `/api/v1/notifications` |
 | `neurova/api/endpoints/openplatform_keys.py` | `/api/v1/openplatform` |
+| `neurova/api/endpoints/phase3_api.py` | `/api/v1/phase3` |
 | `neurova/api/endpoints/plans.py` | `/api/v1/plans` |
 | `neurova/api/endpoints/plugin.py` | `/api/v1/plugins` |
 | `neurova/api/endpoints/projects_api.py` | `/api/v1/projects` |
@@ -181,34 +183,17 @@
 
 **未接线 router**（挂载动作在、路由一条没有）：无
 
-**未挂载端点模块**（定义了路由、装配后却不在路由表里 —— 运行时不提供服务）：`neurova.api.endpoints.computer_api`, `neurova.api.endpoints.cost_api`, `neurova.api.endpoints.migration_api`, `neurova.api.endpoints.phase3_api`, `neurova.api.endpoints.skill_market`, `neurova.api.endpoints.skills_market`
+**未挂载端点模块**（定义了路由、装配后却不在路由表里 —— 运行时不提供服务）：无
 
-**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/coordination`, `/api/neuron`, `/api/v1/artifacts`, `/api/v1/audio`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/benchmark`, `/api/v1/channel-sharing`, `/api/v1/chat`, `/api/v1/knowledge-integration`, `/api/v1/mcp`, `/api/v1/monitor`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/sync`, `/api/v1/tools`, `/api/v1/user-groups`, `/api/v1/workspace`
+**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/coordination`, `/api/neuron`, `/api/v1/artifacts`, `/api/v1/audio`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/benchmark`, `/api/v1/channel-sharing`, `/api/v1/chat`, `/api/v1/computers`, `/api/v1/knowledge-integration`, `/api/v1/mcp`, `/api/v1/monitor`, `/api/v1/phase3`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/sync`, `/api/v1/tools`, `/api/v1/user-groups`, `/api/v1/workspace`
 
 
 ## 四、前端调用 ↔ 后端注册 差集
 
-下列 **50** 处调用在本轮后端注册表里没有对应路由。这不等于「后端漏注册」——差异以显式列表暴露，由人去核：
+下列 **33** 处调用在本轮后端注册表里没有对应路由。这不等于「后端漏注册」——差异以显式列表暴露，由人去核：
 
 | 模块 | 方法 | 调用路径 | 差异形态 |
 |------|------|------|------|
-| computer | GET | `/api/computers` | 路径未注册 |
-| computer | POST | `/api/computers` | 路径未注册 |
-| computer | DELETE | `/api/computers/*` | 路径未注册 |
-| computer | GET | `/api/computers/*` | 路径未注册 |
-| computer | GET | `/api/computers/*/agents` | 路径未注册 |
-| computer | POST | `/api/computers/*/heartbeat` | 路径未注册 |
-| computer | POST | `/api/computers/*/pair` | 路径未注册 |
-| computer | POST | `/api/computers/*/revoke` | 路径未注册 |
-| computer | POST | `/api/computers/cleanup-offline` | 路径未注册 |
-| computer | GET | `/api/computers/cloud` | 路径未注册 |
-| computer | GET | `/api/cost/agent/*/detailed` | 路径未注册 |
-| computer | GET | `/api/cost/agent/*/summary` | 路径未注册 |
-| computer | POST | `/api/cost/calculate` | 路径未注册 |
-| computer | GET | `/api/cost/company/*/leaderboard` | 路径未注册 |
-| computer | GET | `/api/cost/company/*/summary` | 路径未注册 |
-| computer | GET | `/api/cost/dashboard/realtime` | 路径未注册 |
-| computer | GET | `/api/cost/rollup/hourly` | 路径未注册 |
 | console | POST | `/api/v1/console/debug` | 路径未注册 |
 | console | POST | `/api/v1/console/push` | 路径未注册 |
 | files | GET | `/api/v1/files/*/content` | 路径未注册 |
@@ -245,7 +230,7 @@
 
 ## 五、后端已注册 ↔ 前端消费方 差集
 
-下列 **20** 个后端挂载前缀无任何前端模块直连，属「后端已就位、前端待补消费方」的显式清单：
+下列 **21** 个后端挂载前缀无任何前端模块直连，属「后端已就位、前端待补消费方」的显式清单：
 
 | 后端挂载前缀 |
 |------|
@@ -262,6 +247,7 @@
 | `/mcp` |
 | `/metrics` |
 | `/monitor` |
+| `/phase3` |
 | `/skill-versions` |
 | `/skills` |
 | `/status` |

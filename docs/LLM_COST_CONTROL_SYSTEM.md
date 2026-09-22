@@ -408,8 +408,13 @@ class CostMonitor:
 
 ## 📝 相关文档
 
-- [Neurova Cost Tracker](./neurova/models/cost_tracking.py)
-- [Cost API Endpoints](./neurova/api/endpoints/cost_api.py)
+- [Neurova Cost Tracker](../neurova/models/cost_tracking.py)
+- [成本聚合端点](../neurova/api/endpoints/cost_rollup_api.py)
+- [预算端点](../neurova/api/endpoints/budget_api.py)
+
+> 原「Cost API Endpoints」指向 `neurova/api/endpoints/cost_api.py`。该模块与
+> `/api/v1/cost-rollup`、`/api/v1/budgets` 逐条重叠、口径不同，按修复教义第 6 条
+> 收口为一份后删除（处置见 `tests/unit/endpointWiringBaseline.txt`）。
 
 ---
 

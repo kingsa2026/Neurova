@@ -407,7 +407,9 @@ tests/unit/context/test_context_ledger_fts_migration.py
 #   修法：挂载事实收口到注册表一处（旁路与空 router 删除），判据单源在生成器
 #   （mountedRouterAudit / unmountedEndpointModules），静态重建路由的二套实现删净。
 #   守卫另锁：前端基地址三类写法全认（漏认 neuron.ts 的 axios.create({baseURL}) 会
-#   产生 8 条假阳性）、未挂载端点模块名单非空（不许静默遗留）。
+#   产生 8 条假阳性）、未挂载端点模块判据以注入自证不空转（本批已把实测的六个
+#   未挂载模块各自收口：四个删除、两个补真实身份后接线，名单归零是「修好了」，
+#   故反向控制改用注入，不拿残留孤儿当锚点）。
 tests/unit/api/test_route_mount_contract_guard.py
 # 上下文三链路批（Issue #90）B3 剩余 P2-8 / D4 甲案：pool 分支瞬态注入收回信封。
 #   （根因：记忆/经验/结晶/待探索问题/池召回/工具记忆/情感七类动态检索文本以
