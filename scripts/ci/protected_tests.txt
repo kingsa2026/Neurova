@@ -416,3 +416,15 @@ tests/unit/api/test_route_mount_contract_guard.py
 #     改为全部收进末条 user 信封并接入 compress_envelope；抽屉与信封共用同一份额度，
 #     避免"召回取回来了、信封又把它丢掉"的静默消失。）
 tests/unit/context/test_pool_branch_envelope_transient.py
+
+# Issue #112 后续（接线断点处置）：未挂载端点模块台账棘轮。
+#   根因：注册表把「挂载动作」与「接线完成」当成同一件事——只要求模块有 `router`
+#   属性就 include_router，于是「挂了零条路由」「挂载前缀与 router 自持前缀叠层」
+#   「同一 router 挂两次」三类形态长期存活；`cost.ts` 按 baseURL=/api/v1 请求
+#   /api/v1/budgets、/api/v1/cost-rollup 而后端挂在不带 v1 的 /api 下 → 看板数据
+#   全空且被 `.catch(() => null)` 吞成「未就绪」。
+#   判据单源在 scripts/generate_api_inventory.py 的 mountedRouterAudit/
+#   unmountedEndpointModules；未挂载模块走 baseline 棘轮（只降不升），
+#   逐条处置理由写在 tests/unit/endpointWiringBaseline.txt。
+#   守卫与上一条（路由挂载契约）同文件，判据同一处——不再另立第二份接线守卫
+#   （同一根因两份守卫 = 第二套平行体系，改一处漏一处）。
