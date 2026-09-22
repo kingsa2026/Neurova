@@ -320,3 +320,19 @@ class TestMachineBlocksHaveAGenerator:
                          + len(scanner.NAV_IMPACT_SUMMARY_END)]
         assert block.strip() == expected.strip(), "生成器未能把漂移区块拉回扫描器输出"
         assert "陈旧数字" not in restored, "生成器留下了旧内容（替换不彻底）"
+
+class TestSummaryRendersHonestlyWhenEmpty:
+    """生成物必须自洽：入筛归零时不得渲染出空壳（`0 条（）`）。
+
+    本单（Issue #112）把该篇指路文档重生成后入筛首次归零，空容器这一形态
+    才第一次出现——生成器要能渲染「没有形态分布」，而不是留一对空括号。
+    """
+
+    def test_empty_screening_summary_has_no_empty_parentheses(self):
+        rows = scanner.navigationImpactRefs()
+        if rows:
+            pytest.skip("本轮仍有入筛条目（空容器形态未出现）")
+        rendered = scanner.renderNavigationImpactSummary(rows)
+        assert "（）" not in rendered and "()" not in rendered, (
+            "入筛归零后摘要里出现空括号（`0 条（）`）——生成物必须自洽。"
+        )
