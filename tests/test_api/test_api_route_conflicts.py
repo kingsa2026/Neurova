@@ -36,24 +36,14 @@ def test_context_route_conflict():
         pytest.skip(f"跳过测试: 模块导入失败 - {e}")
 
 
-def test_skill_market_route_conflict():
-    """单复数两套市场端点已由 ADR 0013 删除——冲突的土壤不存在了。
+def test_deprecated_market_shells_are_gone():
+    """skill_market / skills_market 双套已按 ADR 0013 删除，单复数冲突主体消失。
 
-    原用例要求 `skill_market` / `skills_market` 两个模块都有 router，
-    再拿它们的自述前缀比对。两模块已按该 ADR 第 2 条删除（Issue #68 处置台账
-    亦登记为「已删除」），故本条改为断言死套确实不在——用 `pytest.skip`
-    让导入失败静默通过，正是教义第 2 条禁止的「跑不起来就算过」。
+    此前本文件断言两套都仍有 `router`——那正是待删套还活着的读数。
     """
-    import importlib.util
-
-    for removed in ("skill_market", "skills_market"):
-        assert importlib.util.find_spec(f"neurova.api.endpoints.{removed}") is None, (
-            f"{removed} 已被 ADR 0013 判定删除，却仍可导入——死套复活。"
-        )
-    canonical = __import__(
-        "neurova.api.endpoints.skill_pool_api", fromlist=["router"]
-    )
-    assert hasattr(canonical, "router"), "规范端点 skill_pool_api 必须存活"
+    for name in ("neurova.api.endpoints.skill_market", "neurova.api.endpoints.skills_market"):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(name)
 
 
 def test_endpoint_registration_count():
