@@ -83,7 +83,7 @@ LLM 不知道当前真实时间,只能依赖训练时的知识截止日期(GLM �
 
 ## 测试
 
-**新增测试文件**:[tests/unit/test_current_time_injection.py](../tests/unit/test_current_time_injection.py)
+**新增测试文件**:[tests/unit/test_current_time_injection.py](../../tests/unit/test_current_time_injection.py)
 
 5 个测试类,12 个测试用例:
 
@@ -119,4 +119,4 @@ LLM 不知道当前真实时间,只能依赖训练时的知识截止日期(GLM �
 - [neurova/context/orchestrator.py](../../neurova/context/orchestrator.py) — 修复主文件
 - [neurova/context/injector.py:412](../../neurova/context/injector.py#L412) — 已有一段时间注入(`%Y年%m月%d日 %H:%M`),但格式简单,且 injector 不是主路径
 - [neurova/agent/chat_pipeline.py:687](../../neurova/agent/chat_pipeline.py#L687) — 实际调用 build_context 的入口
-- [tests/unit/test_current_time_injection.py](../tests/unit/test_current_time_injection.py) — TDD 测试
+- [tests/unit/test_current_time_injection.py](../../tests/unit/test_current_time_injection.py) — TDD 测试
