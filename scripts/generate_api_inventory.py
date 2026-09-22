@@ -36,6 +36,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 INVENTORY_PATH = PROJECT_ROOT / "docs" / "09-dev-progress" / "api_inventory.md"
 
+#: 跨文件 AST 扫描的共享解析预算（`tests/ast_scan.py`）：按文件整进程缓存 + 文本预筛。
+#: 判据只写一份，多个守卫各调一次也不重复付解析成本（Issue #148）。
+from tests import ast_scan as _scan  # noqa: E402  （仓根已在上面插入 sys.path）
+
 FRONTEND_MODULES_DIR = PROJECT_ROOT / "NeurUI" / "src" / "api" / "modules"
 #: 模块目录的短名（守卫按此名做「磁盘多出一个模块」的负向控制；同一对象，非第二份定义）
 MODULES_DIR = FRONTEND_MODULES_DIR
@@ -44,6 +48,7 @@ APP_MODULE = PROJECT_ROOT / "neurova" / "api" / "app.py"
 #: 未挂载扫描的仓内源码根（收录口径是「**全仓**无挂载点」，不是「端点包内无挂载点」）。
 #: 口径只写一份：台账与本常量同源。`tests/` 不在内——测试自建的应用不提供服务面。
 SOURCE_ROOTS = ("neurova", "scripts", "tools", "examples")
+
 #: 未挂载路由模块的棘轮台账（只降不升；逐条处置理由写在本文件头部）
 WIRING_BASELINE = PROJECT_ROOT / "tests" / "unit" / "endpointWiringBaseline.txt"
 
@@ -61,6 +66,13 @@ HTTP_METHODS = {
     "get": "GET", "post": "POST", "put": "PUT",
     "delete": "DELETE", "patch": "PATCH", "head": "HEAD",
 }
+#: 路由装饰器的文本预筛词：判据入口是 `@router.<verb>` / `APIRouter` / `FastAPI`，
+#: 连这些字样都没有的文件不可能命中。全仓逐文件 `ast.parse` 实测单次 5s，
+#: 而本判据被多个守卫各调一次——必须预筛 + 走共享解析预算（Issue #148）。
+_ROUTE_DECORATOR_HINTS = tuple(
+    sorted({f"@{owner}.{verb}" for owner in ("router", "app")
+            for verb in HTTP_METHODS} | {"APIRouter", "FastAPI"}))
+
 REQUEST_CALL_PATTERN = re.compile(
     r"\b(?:" + "|".join(REQUEST_CLIENTS) + r")\.(" + "|".join(HTTP_METHODS) + r")\b")
 BASE_CONST_PATTERN = re.compile(r"const\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*['\"]([^'\"]+)['\"]")
@@ -429,16 +441,13 @@ def unmountedEndpointModules() -> list:
     served = servedModules()
     dead = []
     for root in SOURCE_ROOTS:
-        for path in sorted((PROJECT_ROOT / root).rglob("*.py")):
-            if path.name == "__init__.py":
+        for ref in _scan.sourceRefsUnder(PROJECT_ROOT / root, hints=_ROUTE_DECORATOR_HINTS):
+            if ref.path.name == "__init__.py":
                 continue
-            try:
-                tree = ast.parse(io.open(path, encoding="utf-8", errors="replace").read())
-            except SyntaxError:
-                continue
+            tree = _scan._cachedParse(ref.stamp, ref.code)
             if not definesRoutes(tree) or servesOwnAsgiApp(tree):
                 continue
-            module = ".".join(path.relative_to(PROJECT_ROOT).with_suffix("").parts)
+            module = ".".join(ref.path.relative_to(PROJECT_ROOT).with_suffix("").parts)
             if module not in served:
                 dead.append(module)
     return sorted(dead)

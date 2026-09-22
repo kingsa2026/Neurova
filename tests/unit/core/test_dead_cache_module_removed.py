@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 NEUROVA = PROJECT_ROOT / "neurova"
 
@@ -34,11 +36,13 @@ KNOWN_REEXPORT_SHIMS = {
 }
 
 
-def _iter_production_py():
-    for path in NEUROVA.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        yield path
+#: 已删模块名：文本预筛词（含 `neurova.performance` 字样的文件才需要解析）
+REMOVED_MODULE = "neurova.performance"
+
+
+def _iterProductionPy():
+    """生产侧源码路径（解析走 `tests/ast_scan.py` 的共享预算）。"""
+    return ast_scan.filesUnder(NEUROVA)
 
 
 class TestPerformanceModuleRemoved:
@@ -49,49 +53,46 @@ class TestPerformanceModuleRemoved:
         )
 
     def test_no_production_reference(self):
-        offenders = []
-        for path in _iter_production_py():
-            src = io.open(path, encoding="utf-8", errors="replace").read()
-            tree = ast.parse(src)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ImportFrom) and (node.module or "") == "neurova.performance":
-                    offenders.append(f"{path.relative_to(PROJECT_ROOT)}:{node.lineno}")
-                elif isinstance(node, ast.Import):
-                    for alias in node.names:
-                        if alias.name == "neurova.performance":
-                            offenders.append(f"{path.relative_to(PROJECT_ROOT)}:{node.lineno}")
+        """生产侧不得 import 已删模块（判据是 `import` 语句，不是文本里提过）。
+
+        解析走 `tests/ast_scan.py`（Issue #148）：全仓 `ast.parse` 单跑 5s、与
+        受保护子集其余 170 个文件共享机器时必然逼近 30s 默认墙钟；`importsOf`
+        只解析文本里出现过模块名的文件，与代码总量脱钩。
+        """
+        offenders = [
+            f"{ast_scan.relativeToRepo(path)}:{lineno}"
+            for path, lineno in ast_scan.importsOf(
+                ast_scan.nodeScan(NEUROVA, hints=(REMOVED_MODULE,)), REMOVED_MODULE)
+        ]
         assert not offenders, f"仍有代码引用已删除的 neurova.performance: {offenders}"
 
     def test_no_test_reference(self):
-        """测试也不得 import 已删模块（本守卫文件自身只谈字符串，不 import）。"""
+        """测试也不得 import 已删模块（本守卫文件自身只谈字符串，不 import）。
+
+        解析范围用 `tests/ast_scan.py` 的共享预算；本文件按名字排除，
+        否则文档里那句 ``neurova.performance`` 会被自己的判据读到。
+        """
         offenders = []
-        for path in (PROJECT_ROOT / "tests").rglob("*.py"):
-            if "__pycache__" in path.parts:
-                continue
+        for path, lineno in ast_scan.importsOf(
+                ast_scan.nodeScan(PROJECT_ROOT / "tests", hints=(REMOVED_MODULE,)),
+                REMOVED_MODULE):
             if path.name == Path(__file__).name:
                 continue
-            src = io.open(path, encoding="utf-8", errors="replace").read()
-            tree = ast.parse(src)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ImportFrom) and (node.module or "") == "neurova.performance":
-                    offenders.append(f"{path.relative_to(PROJECT_ROOT)}:{node.lineno}")
-                elif isinstance(node, ast.Import):
-                    for alias in node.names:
-                        if alias.name == "neurova.performance":
-                            offenders.append(f"{path.relative_to(PROJECT_ROOT)}:{node.lineno}")
+            offenders.append(f"{ast_scan.relativeToRepo(path)}:{lineno}")
         assert not offenders, f"测试仍引用已删除的 neurova.performance: {offenders}"
 
 
 class TestSingleMemoryCacheImplementation:
     def test_only_one_memory_cache_class_definition(self):
-        """MemoryCache 只允许有一个类定义（薄门面只 re-export，不重写）。"""
-        definitions = []
-        for path in _iter_production_py():
-            tree = ast.parse(io.open(path, encoding="utf-8", errors="replace").read())
-            rel = path.relative_to(PROJECT_ROOT).as_posix()
-            for node in tree.body:
-                if isinstance(node, ast.ClassDef) and node.name == "MemoryCache":
-                    definitions.append(rel)
+        """MemoryCache 只允许有一个类定义（薄门面只 re-export，不重写）。
+
+        `classDefsIn` 走共享解析预算与文本预筛：没有 `class MemoryCache` 字样的
+        文件不解析，判据与代码总量脱钩。
+        """
+        definitions = [
+            ast_scan.relativeToRepo(path)
+            for path, _lineno in ast_scan.classDefsIn(NEUROVA, "MemoryCache")
+        ]
         assert definitions == [CANONICAL_CACHE], (
             f"MemoryCache 实现应为 {CANONICAL_CACHE} 独一份，实际: {definitions}\n"
             "重复实现会导致缓存语义分叉（TTL/LRU 行为不一致）。"

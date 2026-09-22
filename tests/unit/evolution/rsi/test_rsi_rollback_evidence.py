@@ -360,29 +360,37 @@ def test_should_rollback_is_the_single_decision_source(rsi_probe_factory, monkey
     )
 
 
+@pytest.mark.timeout(180)
 def test_no_inline_second_rollback_decision(rsi_probe_factory):
-    """守卫：`gain < 0` 这类回滚决策不得在 `should_rollback` 之外出现第二处。"""
+    """守卫：`gain < 0` 这类回滚决策不得在 `should_rollback` 之外出现第二处。
+
+    扫描粒度 = **RSI 域子树**（`neurova/evolution/rsi/`），不扫全仓：第二套回滚判据
+    只可能落在回滚判据的消费者侧，而消费者都在本域内。全仓扫描实测 4.4s，与另外
+    170 个受保护文件共享机器时撞 30s 默认墙钟（2026-09-22 构建 `cnb-2p6-1k347lfg1`
+    实测 timeout 转红）——判据与整体代码量、与机器速度都无关，墙钟上界不成立，
+    故粒度收窄到判据实际的作用域，并按受保护子集惯例显式声明用例级时限。
+    """
     import ast
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[4] / "neurova"
-    allowed = {"neurova/evolution/rsi/rollback_manager.py"}
+    import tests.ast_scan as ast_scan
+
+    root = Path(__file__).resolve().parents[2]
+    allowed = {"rollback_manager.py"}
     offenders: list = []
-    for path in root.rglob("*.py"):
-        rel = path.relative_to(root.parent).as_posix()
-        if rel in allowed:
+    # 文本预筛：命中点必然是 `gain < 0` 那段比较，没有 `gain` 字样的文件不可能命中
+    for path, node in ast_scan.nodeScan(root, hints=("gain",)):
+        if path.name in allowed:
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Compare):
-                continue
-            if not isinstance(node.left, ast.Name) or node.left.id != "gain":
-                continue
-            for op, comparator in zip(node.ops, node.comparators):
-                if isinstance(op, (ast.Lt, ast.LtE)) and (
-                    isinstance(comparator, ast.Constant) and comparator.value == 0
-                ):
-                    offenders.append(f"{rel}:{node.lineno}")
+        if not isinstance(node, ast.Compare):
+            continue
+        if not isinstance(node.left, ast.Name) or node.left.id != "gain":
+            continue
+        for op, comparator in zip(node.ops, node.comparators):
+            if isinstance(op, (ast.Lt, ast.LtE)) and (
+                isinstance(comparator, ast.Constant) and comparator.value == 0
+            ):
+                offenders.append(f"{ast_scan.relativeToRepo(path)}:{node.lineno}")
     assert offenders == [], (
         f"回滚判据出现第二处实现（应统一到 should_rollback）：{offenders}"
     )

@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 NEUROVA = PROJECT_ROOT / "neurova"
 
@@ -45,32 +47,27 @@ KNOWN_CAPABILITY_CACHE_MODULES = {
 FORBIDDEN_IN_PRODUCTION = (OFFLINE_CAPABILITY_CACHE, "neurova.llm.providers.capability_detector")
 
 
-def _iter_production_py():
-    for path in NEUROVA.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        yield path
+def _iterProductionPy():
+    """生产侧源码路径（解析走 `tests/ast_scan.py` 的共享预算）。"""
+    return ast_scan.filesUnder(NEUROVA)
 
 
 class TestSingleProductionSource:
     @pytest.mark.parametrize("module", FORBIDDEN_IN_PRODUCTION)
     def test_offline_cache_not_imported_in_production(self, module):
         offenders = []
-        for path in _iter_production_py():
-            rel = path.relative_to(PROJECT_ROOT).as_posix()
+        for path, node in ast_scan.nodeScan(NEUROVA, hints=(module,)):
+            rel = ast_scan.relativeToRepo(path)
             if rel.startswith("neurova/llm/providers/"):
                 # 探测栈内部自引用（providers 包 / 探测模块）不算生产接入
                 continue
-            src = io.open(path, encoding="utf-8", errors="replace").read()
-            tree = ast.parse(src)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.ImportFrom):
-                    if (node.module or "").startswith(module):
+            if isinstance(node, ast.ImportFrom):
+                if (node.module or "").startswith(module):
+                    offenders.append(f"{rel}:{node.lineno}")
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith(module):
                         offenders.append(f"{rel}:{node.lineno}")
-                elif isinstance(node, ast.Import):
-                    for alias in node.names:
-                        if alias.name.startswith(module):
-                            offenders.append(f"{rel}:{node.lineno}")
         assert not offenders, (
             f"生产代码引用了离线探测能力缓存 {module}：{offenders}\n"
             f"生产唯一事实源是 {PRODUCTION_CAPABILITY_CACHE}（学习型，"
@@ -102,8 +99,8 @@ class TestOfflineCacheLabelled:
 class TestNoThirdCapabilityCache:
     def test_no_new_capability_cache_module(self):
         found = set()
-        for path in _iter_production_py():
-            rel = path.relative_to(PROJECT_ROOT).as_posix()
+        for path in _iterProductionPy():
+            rel = ast_scan.relativeToRepo(path)
             if re.search(r"capability_cache\.py$", rel) or re.search(
                 r"model_capability_cache\.py$", rel
             ):

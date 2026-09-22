@@ -28,6 +28,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from tests import ast_scan
+
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -231,35 +233,31 @@ class TestProtectedGuardsUseNoExternalBinaries:
         import ast
 
         offenders = []
-        for path in sorted((PROJECT_ROOT / "tests").rglob("*.py")):
-            if "__pycache__" in path.parts:
+        # 文本预筛：违规形态必然含 subprocess 调用与 "rg" 字面量，其余文件不解析；
+        # 解析走 tests/ast_scan.py 的共享预算（Issue #148：全仓 ast.parse 单跑 4s，
+        # 与受保护子集其余 170 个文件共享机器时撞 30s 默认墙钟）。
+        for path, node in ast_scan.nodeScan(
+                PROJECT_ROOT / "tests",
+                hints=("subprocess", '"rg"', "'rg'")):
+            if not isinstance(node, ast.Call):
                 continue
-            try:
-                tree = ast.parse(io.open(path, encoding="utf-8").read())
-            except SyntaxError:
+            func = node.func
+            if getattr(func, "attr", None) not in {
+                "run", "check_output", "Popen", "call", "check_call"
+            }:
                 continue
-            for node in ast.walk(tree):
-                if not isinstance(node, ast.Call):
-                    continue
-                func = node.func
-                if getattr(func, "attr", None) not in {
-                    "run", "check_output", "Popen", "call", "check_call"
-                }:
-                    continue
-                if "subprocess" not in ast.dump(getattr(func, "value", ast.Constant(None))):
-                    continue
-                if not node.args:
-                    continue
-                first = node.args[0]
-                head = None
-                if isinstance(first, ast.List) and first.elts:
-                    head = first.elts[0]
-                elif isinstance(first, ast.Constant):
-                    head = first
-                if isinstance(head, ast.Constant) and head.value == "rg":
-                    offenders.append(
-                        f"{path.relative_to(PROJECT_ROOT).as_posix()}:{node.lineno}"
-                    )
+            if "subprocess" not in ast.dump(getattr(func, "value", ast.Constant(None))):
+                continue
+            if not node.args:
+                continue
+            first = node.args[0]
+            head = None
+            if isinstance(first, ast.List) and first.elts:
+                head = first.elts[0]
+            elif isinstance(first, ast.Constant):
+                head = first
+            if isinstance(head, ast.Constant) and head.value == "rg":
+                offenders.append(f"{ast_scan.relativeToRepo(path)}:{node.lineno}")
         assert not offenders, (
             "测试硬依赖 ripgrep（python:* CI 镜像里没有 rg，会 FileNotFoundError）：\n  "
             + "\n  ".join(offenders)
