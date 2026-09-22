@@ -6,7 +6,6 @@ import json
 import shutil
 import threading
 import time
-from pathlib import Path
 from typing import List, Optional, Dict, Set, Any
 
 from neurova.core.logger import get_logger
@@ -16,6 +15,7 @@ from neurova.models.computer import (
     ComputerEngine,
     ComputerStatus,
 )
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -37,7 +37,7 @@ class ComputerManager:
         Args:
             data_dir: 数据目录路径
         """
-        self.data_dir = Path(data_dir) if data_dir else Path("data/computers")
+        self.data_dir = callerPath(data_dir, "computers")
 
         # Thread safety
         self._lock = threading.RLock()

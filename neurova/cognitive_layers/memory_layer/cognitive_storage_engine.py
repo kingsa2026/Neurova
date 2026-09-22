@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import get_agent_data_dir
 
 logger = get_logger(__name__)
 
@@ -226,7 +227,6 @@ class CognitiveStorageEngine:
         if data_dir:
             self.data_dir = Path(data_dir)
         else:
-            from neurova.core.data_root import get_agent_data_dir
 
             self.data_dir = get_agent_data_dir(agent_id)
         self.data_dir.mkdir(parents=True, exist_ok=True)

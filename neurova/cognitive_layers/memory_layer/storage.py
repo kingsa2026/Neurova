@@ -14,6 +14,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from neurova.core.data_root import get_data_root
 
 if TYPE_CHECKING:
     from .isolation import IsolationContext
@@ -702,7 +703,6 @@ def defaultStorageDir() -> str:
     与知识侧 `data/knowledge`、记忆侧 agent 工作区同一条纪律——先有唯一的根，
     再谈根下面叫什么。
     """
-    from neurova.core.data_root import get_data_root
 
     return str(get_data_root() / "memory_layer")
 

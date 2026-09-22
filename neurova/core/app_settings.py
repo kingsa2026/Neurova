@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -73,7 +74,7 @@ SECTION_DEFAULTS: Dict[str, Dict[str, Any]] = {
 
 
 def _settings_path(path: Optional[Path] = None) -> Path:
-    return path or (Path("data") / "app_settings.json")
+    return callerPath(path, "app_settings.json")
 
 
 def load_app_settings(path: Optional[Path] = None) -> Dict[str, Any]:

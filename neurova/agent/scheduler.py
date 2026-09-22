@@ -29,6 +29,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -720,9 +721,8 @@ class TaskScheduler:
     # ============================================================
 
     def _ledger_path(self):
-        from pathlib import Path
 
-        return Path(os.environ.get("NEUROVA_SCHEDULER_LEDGER") or "data/agent_scheduler_tasks.json")
+        return callerPath(os.environ.get("NEUROVA_SCHEDULER_LEDGER"), "agent_scheduler_tasks.json")
 
     def _load_tasks_ledger(self) -> None:
         path = self._ledger_path()

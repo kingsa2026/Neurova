@@ -27,6 +27,7 @@ from pydantic import BaseModel
 
 from neurova.api.endpoints import get_app_state
 from neurova.api.deps import require_admin
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -179,7 +180,7 @@ def _db_connection() -> ConnectionStatus:
         import sqlite3
 
         state = _get_app_state()
-        db_path = "data/neurova.db"
+        db_path = dataPath("neurova.db")
         if state and state.get("database_path"):
             db_path = state["database_path"]
         conn = sqlite3.connect(db_path, timeout=1)

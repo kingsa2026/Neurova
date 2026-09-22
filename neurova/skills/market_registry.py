@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -41,7 +42,7 @@ def _default_market_skills_dir() -> Path:
 
         return get_market_importer()._skills_dir
     except Exception:  # noqa: BLE001
-        return Path("data/skills")
+        return get_data_root() / "skills"
 
 
 def _build_executable_skill(skill_id: str, description: str, market_skills_dir: Any = None) -> Optional[Any]:
