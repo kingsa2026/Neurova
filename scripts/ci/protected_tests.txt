@@ -340,6 +340,15 @@ tests/unit/test_archive_nav_impact_guard.py
 #     库单调增长；改后触发点落在归档提交，FTS 对齐改分批删除）
 tests/unit/context/test_ledger_gc_retention.py
 
+# Issue #112 销账（Issue #68 归档层导航影响筛选·乙类）：前端 API 清单重生成。
+#   根因：docs/09-dev-progress/api_inventory.md 是专职指路文档（docs/0-index/README.md
+#   的 09-dev-progress 领域入口），但此前**只有手写正文、没有写者**——代码树一变
+#   它只能漂移，且没有任何命令能把它拉回来。
+#   现为生成物：判据单源在 scripts/gen_api_inventory.py（前端 modules 调用面 ←→
+#   真实路由表），守卫只做「重算 + 比对 + 反向控制」；
+#   模块双向差集为空，两组差异（前端未命中后端 / 后端无前端消费）逐条显式登记，
+#   快照命令与日期写入机器区、逾期由守卫点名。棘轮基线 103 → 0。
+tests/unit/test_api_inventory_guard.py
 # Issue #80 工具↔经验↔再调用三环路修复批（第四轮）：票面正文入库与「判据可复核」收口。
 #   根因：001–011 的票面（即每张票的收工判据）只存在于 Issue 附件的对话里，仓内只有
 #   000-索引.md——索引表 11 行的落点指向 11 份并不存在的票面，复核者拿不到判据原文。
