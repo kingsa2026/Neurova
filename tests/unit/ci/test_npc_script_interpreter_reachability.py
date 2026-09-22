@@ -62,7 +62,11 @@ INTERPRETER_VAR = "NPX"
 PROBED_INTERPRETERS = ("python3", "python", "node")
 
 #: 脚本任务里出现的解释器写法白名单：一律走探测结果，不写死解释器名。
-SCRIPT_INTERPRETER_ALLOWLIST = re.compile(r"^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\s")
+#: 允许两种形态：`$NPX <script>`（python 侧）与 `$NPX_CALL`（node 侧特例，
+#: 因为 `node <script>.py` 会被 node 按扩展名拒收，必须由桥脚本改写调用形态）。
+SCRIPT_INTERPRETER_ALLOWLIST = re.compile(
+    r"^\$\{?(?:[A-Za-z_][A-Za-z0-9_]*)\b"
+)
 
 #: 纯 Shell 内建（不解析 $PATH 的 `command`）——探测段的证据形态
 #: 探测行的证据形态：`command -v <解释器>`（if / elif 两种分支写法都认）
@@ -141,7 +145,8 @@ class TestInterpreterIsProbedBeforeUse:
                             offenders.append(f"{mount}.{event}: {script.strip()}")
         assert not offenders, (
             "以下 NPC stage 的脚本没走探测结果解释器:\n  " + "\n  ".join(offenders) +
-            f"\n统一写成 `\"${INTERPRETER_VAR} scripts/...\"`，变量由 Job 的探测段给出。"
+            f"\n统一写成 `\"${INTERPRETER_VAR}_CALL\"`（由探测段给出调用形态），"
+            "不得写死 python/node。"
         )
 
     def test_probe_binds_a_path_reachable_variable(self, cnb_doc):
@@ -246,6 +251,151 @@ class TestGateScriptRunsOnBothInterpreters:
             f"缺 CNB_BUILD_WORKSPACE 时 node 分支没判红: rc={result.returncode}\n{result.stdout}"
         )
         assert "CNB_BUILD_WORKSPACE" in result.stdout
+
+
+class TestNodeDispatchReallyWorks:
+    """E. node 分派链必须**真能跑通** —— 这正是构建 cnb-9cc-1k34ff3t1 的死因。
+
+    上一版守卫（A/B/C）只把脚本里的 node 实现**抠出来**写成 `.js` 再跑，
+    于是"抠出来的正文是对的"与"平台按 `$NPX <script>.py` 调用能跑通"是两件事：
+    平台实际执行的是 `node scripts/ci/npc_turn_handoff_gate.py`，而 node 按
+    扩展名解析模块、遇到 `.py` 在解析前就以 `ERR_UNKNOWN_FILE_EXTENSION` 退出。
+    实测读数（本仓，node v24）：
+
+        $ node scripts/ci/npc_turn_handoff_gate.py
+        TypeError [ERR_UNKNOWN_FILE_EXTENSION]: Unknown file extension ".py" ...
+
+    这条链**从没有人真跑过**，所以守卫全绿而平台全红。本类把判据落到
+    「平台真实的调用形态」上：探测段给出的 $NPX_CALL 必须真能跑出正确读数。
+
+    可证伪：把 .cnb.yml 的 node 分支改回 `$NPX <script>.py` → 红。
+    """
+
+    def _npc_call_forms(self, cnb_doc):
+        """从 .cnb.yml 取探测段里登记的各分支调用形态。"""
+        text = io.open(CNB, encoding="utf-8").read()
+        anchor_at = text.find(INTERPRETER_ANCHOR)
+        assert anchor_at >= 0, f"{CNB} 里找不到探测段锚点 {INTERPRETER_ANCHOR}"
+        # 探测段正文（锚点到下一个同级 key 之前）
+        rest = text[anchor_at:]
+        end = rest.find("\n$:", 1)
+        body = rest[: end if end > 0 else len(rest)]
+        return body
+
+    def test_node_branch_does_not_hand_py_to_node(self):
+        """node 分支不得写 `$NPX <script>.py`：node 会在解析前拒收 .py。"""
+        body = self._npc_call_forms(None)
+        node_branch = None
+        for line in body.splitlines():
+            if "NPX=node" in line:
+                node_branch = line
+        assert node_branch is not None, "探测段没有 node 分支 —— 镜像只有 node 时判据不可达"
+        assert "command -v node" in body, "探测段未登记 node（与 PROBED_INTERPRETERS 不一致）"
+        # node 分支后必须给出调用形态，且该形态不得是 `node <脚本>.py`
+        assert "NPX_CALL" in body, (
+            "探测段没有给出调用形态 $NPX_CALL —— 解释器与调用方式各写各的，"
+            "node 分支会被写成 `$NPX <script>.py`（本事故的死因）"
+        )
+
+    def _node_branch_call(self, text, script_path):
+        """取探测段 node 分支登记的命令形态，拼出平台会执行的完整命令。
+
+        调用形态是 `$NPX_CALL <script>`，故这里返回 `$NPX_CALL` 的值 + 脚本路径。
+        """
+        anchor_at = text.find(INTERPRETER_ANCHOR)
+        assert anchor_at >= 0, f"找不到探测段锚点 {INTERPRETER_ANCHOR}"
+        body = text[anchor_at:]
+        cut = body.find("\n$:", 1)
+        if cut > 0:
+            body = body[:cut]
+        lines = body.splitlines()
+        # 只认**赋值分支行**（`then NPX=node` / `elif ... then NPX=node`）：
+        # 注释里也会出现 `NPX=node` 字样，按子串找会锚到注释上，
+        # 取到的是别的分支的调用形态（本守卫自身踩过这个坑）。
+        branch_at = next(
+            (
+                i
+                for i, line in enumerate(lines)
+                if re.search(r"then\s+NPX=node\b", line) or re.fullmatch(r"\s*NPX=node\s*", line)
+            ),
+            None,
+        )
+        assert branch_at is not None, "探测段没有 node 分支（须为赋值形态 `NPX=node`）"
+        # node 分支之后的第一个 NPX_CALL 赋值即其调用形态
+        for line in lines[branch_at:]:
+            match = re.search(r'NPX_CALL="([^"]+)"', line)
+            if match:
+                return f"{match.group(1)} {script_path}"
+        raise AssertionError("node 分支没有登记调用形态 NPX_CALL")
+
+    def test_node_call_form_reaches_the_same_reading(self, tmp_path):
+        """真跑 `.cnb.yml` 里登记的那条 node 命令：与 python 分支同读数、同退出码。
+
+        这一条是上一版守卫缺的那格：上一版跑的是把正文**抠出来**的 `.js`，
+        而平台执行的是 `.cnb.yml` 里逐字写下的那条命令。两者只有在
+        "命令形态本身正确"时才等价 —— 本条目直接取配置里的命令来跑，
+        故能拦住 `$NPX <script>.py`（ERR_UNKNOWN_FILE_EXTENSION）。
+        """
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("本环境无 node，无法做调用形态比对")
+
+        text = io.open(CNB, encoding="utf-8").read()
+        node_command = self._node_branch_call(text, "scripts/ci/npc_turn_handoff_gate.py")
+        assert node_command.strip(), "node 分支调用形态为空"
+        assert "npc_turn_handoff_gate.py" in node_command, "调用形态里没有脚本路径"
+
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        base_env = {"PATH": "/usr/bin:/bin:/usr/local/bin"}
+
+        for workspace_env in (
+            {"CNB_BUILD_WORKSPACE": str(workspace)},
+            {},
+        ):
+            for flag in ([], ["--json"]):
+                python_run = subprocess.run(
+                    [sys.executable, str(GATE_SCRIPT), *flag],
+                    capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+                    env={**base_env, **workspace_env}, timeout=60,
+                )
+                node_run = subprocess.run(
+                    ["sh", "-c", f"{node_command} {' '.join(flag)}"],
+                    capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+                    env={**base_env, **workspace_env}, timeout=60,
+                )
+                assert node_run.returncode == python_run.returncode, (
+                    f"配置里登记的 node 命令与 python 分支退出码不一致"
+                    f"（flag={flag}, env={workspace_env}）:\n"
+                    f"命令: {node_command}\n"
+                    f"python={python_run.returncode} node={node_run.returncode}\n"
+                    f"node stderr={node_run.stderr}"
+                )
+                assert node_run.stdout == python_run.stdout, (
+                    "配置里登记的 node 命令与 python 分支读数不一致（换解释器即换判据）:\n"
+                    f"命令: {node_command}\n"
+                    f"node={node_run.stdout!r}\npython={python_run.stdout!r}"
+                )
+
+    def test_raw_node_on_py_is_still_rejected(self):
+        """反向自证：`node <script>.py` 确实跑不通 —— 说明这层桥不是摆设。
+
+        若哪天 node 能直接解析 .py，本条目会红，提醒把这层桥连同探测段一起收掉。
+        """
+        node = shutil.which("node")
+        if node is None:
+            pytest.skip("本环境无 node")
+        result = subprocess.run(
+            [node, str(GATE_SCRIPT), "--json"],
+            capture_output=True, text=True, cwd=str(PROJECT_ROOT),
+            env={"PATH": "/usr/bin:/bin", "CNB_BUILD_WORKSPACE": "/tmp"}, timeout=60,
+        )
+        assert result.returncode != 0, (
+            "node 居然能直接跑 .py 了 —— 请复核探测段的 node 桥是否还需要"
+        )
+        assert "ERR_UNKNOWN_FILE_EXTENSION" in result.stderr, (
+            f"node 拒收 .py 的原因不是扩展名，请复核本桥的前提:\n{result.stderr[:500]}"
+        )
 
 
 class TestGuardIsInProtectedSubset:
