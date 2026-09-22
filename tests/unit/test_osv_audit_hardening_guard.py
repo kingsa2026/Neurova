@@ -48,11 +48,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 #     Total 0 packages affected by 0 known vulnerabilities (0 Critical, …)
 # 本守卫的假扫描器必须同形——缺了它，门禁按「拿不到裁决证据」收口，
 # 而那正是 PR #121 那次红能读出真因的关键。
+# 真扫描器「跑完并给出裁决」时的读数（2026-09-22 实测原文拼接）。
+# 注意那句 `Total N packages affected by M known vulnerabilities` **不在**这里：
+# 实测数据源不可达时它照印（M=0），把它当裁决证据就等于把「没查成」读成
+# 「没漏洞」。裁决证据取 `No issues found` / `Filtered N vulnerabilities`。
 VERDICT_OUTPUT = (
     "End status: 0 dirs visited, 2 inodes visited, 2 Extract calls, "
     "29.4ms elapsed, 29.4ms wall time\n"
-    "Total 0 packages affected by 0 known vulnerabilities "
-    "(0 Critical, 0 High, 0 Medium, 0 Low, 0 Unknown) from 2 ecosystems.\n"
+    "No issues found\n"
 )
 AUDIT_SCRIPT = PROJECT_ROOT / "scripts" / "ci" / "osv_audit.py"
 ALLOWLIST = PROJECT_ROOT / "scripts" / "ci" / "osv-allowlist.toml"
@@ -967,6 +970,160 @@ class TestUnreachableVulnDbIsNotAnAllClear:
         problem = auditModule._missingVerdictProblem(0)
         assert "拿不到裁决证据" in problem
         assert "api.osv.dev" in problem
+
+
+class TestSourceTreeAndDatabaseAreDistinguished:
+    """「读到了依赖树」与「查到了漏洞库」是两件事——2026-09-22 实测把它拆开了。
+
+    实测读数（同一份 v2.6.0、同一条命令，2026-09-22）：
+
+        # 出站正常
+        End status: 0 dirs visited, 2 inodes visited, 2 Extract calls, 29ms elapsed
+        Filtered 8 vulnerabilities from output
+        No issues found                                        → exit 0
+
+        # api.osv.dev 被拦（CI 形态；本机用黑洞代理复刻）
+        End status: 0 dirs visited, 2 inodes visited, 2 Extract calls, 29ms elapsed
+        Total 0 packages affected by 0 known vulnerabilities from 0 ecosystems.
+        Error during extraction: (extracting as vulnmatch/osvdev) … api.osv.dev …
+                                                                → exit 127
+
+    两处 `End status` **一模一样**——它数的是「扫了几个依赖清单」，不是「查了几个包」。
+    故 `End status` 只能证明「依赖树被读了」，**不构成对漏洞库的裁决**：
+    数据源不可达时它照样足数，那句「0 漏洞」也照印（fail-open 形态）。
+    """
+
+    def test_scanning_input_files_is_not_a_database_verdict(self, auditModule):
+        """同一条 `End status` 在两个场景里都足数 → 它单独不足以构成裁决。
+
+        判据：只看依赖树读数（足数 + 空结果 + 退出 0）时，门禁必须仍报红——
+        因为这两个场景在依赖树这一层**不可区分**，区分的证据在数据源那一路。
+        """
+        identical_status = (
+            "Scanned /w/Cargo.lock file and found 447 packages\n"
+            "Scanned /w/package-lock.json file and found 368 packages\n"
+            "End status: 0 dirs visited, 2 inodes visited, 2 Extract calls, 29ms elapsed\n"
+        )
+        empty = {"results": []}
+        targets = ["a", "b"]
+
+        clean = identical_status + "Filtered 8 vulnerabilities from output\nNo issues found\n"
+        blocked = (
+            identical_status
+            + "Total 0 packages affected by 0 known vulnerabilities from 0 ecosystems.\n"
+            + "Error during extraction: (extracting as vulnmatch/osvdev) request failed: "
+            + 'Post "https://api.osv.dev/v1/querybatch"\n'
+        )
+
+        assert auditModule._verdictProblems(0, clean, empty, targets) == [], (
+            "真·无漏洞的形态（No issues found）被误判成故障——门禁会永远红"
+        )
+        assert auditModule._verdictProblems(0, blocked, empty, targets), (
+            "数据源不可达 + 退出 0 + 空结果被放行——这条路径与「真·无漏洞」在依赖树"
+            "一层完全同形，是 fail-open。判据必须咬住数据源那一路的读数"
+        )
+
+    def test_database_readout_is_announced_as_a_separate_axis(self, auditModule):
+        """通过时必须把「依赖树读数」与「漏洞库裁决」两条都摊开，不许合并成一句绿。"""
+        clean = (
+            "Scanned /w/Cargo.lock file and found 447 packages\n"
+            "Scanned /w/package-lock.json file and found 368 packages\n"
+            "End status: 0 dirs visited, 2 inodes visited, 2 Extract calls, 29ms elapsed\n"
+            "No issues found\n"
+        )
+        verdict = auditModule._dbVerdict(clean)
+        assert verdict is not None, (
+            "真·无漏洞的读数没被认成「数据源有裁决」——通过路径无从区分两个场景"
+        )
+
+
+class TestOfflineDatabaseRemovesTheNetworkDependency:
+    """门禁的裁决依赖远端漏洞库，而 CI 出站对 api.osv.dev 的放行不在本仓控制内。
+
+    2026-09-22 实测（本机直连，三次里两次命中 i/o timeout）：
+    `api.osv.dev` 不可达时扫描器退 127 并印一句「0 漏洞」——门禁只能退 2 报红，
+    于是「CI 网络抖动」与「真有未允许漏洞」在合并流程里长得一样，都得人来看。
+
+    离线库（`--offline --offline-vulnerabilities` + 预取缓存）把这条外部依赖
+    收进可控面：实测下载 218MB 耗时 47s、随后扫描 12.7s 且退出 0（allowlist 生效），
+    与直连结果逐条一致。故门禁**优先**走离线库，网络侧退化为「只影响缓存新鲜度」。
+    """
+
+    def test_offline_flags_are_in_the_command_contract(self, auditModule):
+        """离线库的 flag 必须进契约表——它随扫描器版本变，拼错就是 127。"""
+        contract = auditModule._commandContract()
+        for flag in ("--offline", "--offline-vulnerabilities"):
+            assert flag in contract["flags"], (
+                f"{flag} 不在命令契约里——离线库路径无从拼出，网络依赖仍在"
+            )
+
+    def test_offline_scan_command_carries_the_flags(self, auditModule, tmp_path):
+        """拼出来的命令必须真带上离线 flag（否则「优先离线」只是句注释）。"""
+        binary = tmp_path / "osv-scanner"
+        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        binary.chmod(0o755)
+        cmd = auditModule.buildScanCommand(
+            binary, [str(tmp_path / "a.lock")], tmp_path / "allow.toml", tmp_path / "o.json",
+            offline=True,
+        )
+        assert "--offline" in cmd and "--offline-vulnerabilities" in cmd, (
+            "offline=True 时命令里没有离线 flag——CI 上仍要现查 api.osv.dev"
+        )
+        online = auditModule.buildScanCommand(
+            binary, [str(tmp_path / "a.lock")], tmp_path / "allow.toml", tmp_path / "o.json"
+        )
+        assert "--offline" not in online, (
+            "默认（未显式要求离线）不该擅自离线——缓存缺失时会造成误判"
+        )
+
+    def test_offline_db_requirements_are_derived_from_the_targets(
+        self, auditModule, tmp_path, monkeypatch
+    ):
+        """离线库归属必须从**被扫目标**推出，不写死一份平行清单。"""
+        rels = ["NeurUI/src-tauri/Cargo.lock", "tools/npx-runtime/package-lock.json"]
+        paths = _paths(tmp_path / "home", rels)
+        monkeypatch.setattr(auditModule, "PROJECT_ROOT", tmp_path / "home")
+        scopes = auditModule._requiredOfflineScopes(list(paths.values()))
+        assert scopes == ["crates.io", "npm"], (
+            f"离线库归属与 SCAN_TARGETS 不咬合（得 {scopes}）——"
+            "写死一份平行清单就会在加目标时静默漏一个生态"
+        )
+
+    def test_missing_offline_db_is_named_not_silently_ignored(self, auditModule, tmp_path, monkeypatch):
+        """缓存不齐时必须点名缺哪个生态的哪一份，不许静默离线。"""
+        monkeypatch.setattr(auditModule, "OSV_DB_CACHE", tmp_path / "empty-cache")
+        monkeypatch.setattr(auditModule, "PROJECT_ROOT", tmp_path / "home")
+        rels = ["NeurUI/src-tauri/Cargo.lock", "tools/npx-runtime/package-lock.json"]
+        paths = _paths(tmp_path / "home", rels)
+        problems = auditModule.offlineDatabaseProblems(list(paths.values()))
+        assert len(problems) == 2, "两个生态各缺一份，必须逐条点名"
+        assert any("crates.io" in p for p in problems)
+        assert any("npm" in p for p in problems)
+        assert all("all.zip" in p for p in problems), (
+            "点名要落到具体文件——只写「离线库缺失」的话，读日志的人还得自己找"
+        )
+
+    def test_offline_db_present_is_accepted(self, auditModule, tmp_path, monkeypatch):
+        """缓存齐备时必须判定「可供离线使用」，否则门禁永远回退直连。"""
+        cache = tmp_path / "cache"
+        for scope in ("crates.io", "npm"):
+            (cache / scope).mkdir(parents=True)
+            (cache / scope / "all.zip").write_bytes(b"pk\x03\x04")
+        monkeypatch.setattr(auditModule, "OSV_DB_CACHE", cache)
+        monkeypatch.setattr(auditModule, "PROJECT_ROOT", tmp_path / "home")
+        rels = ["NeurUI/src-tauri/Cargo.lock", "tools/npx-runtime/package-lock.json"]
+        paths = _paths(tmp_path / "home", rels)
+        assert auditModule.offlineDatabaseProblems(list(paths.values())) == []
+
+    def test_prefetch_uses_the_same_offline_flags_as_the_gate(self, auditModule):
+        """预取与门禁必须共用同一份离线 flag——否则会出现「取到 A 处、读 B 处」。"""
+        prefetch_flags = {
+            f for f in auditModule._commandContract()["offline_flags"]
+        }
+        assert "--offline" in prefetch_flags and "--offline-vulnerabilities" in prefetch_flags
+        # 预取的下载开关必须与「扫的时候要读的那两个库」同源：由 targets 推归属
+        assert auditModule.OFFLINE_DB_SCOPE["NeurUI/src-tauri/Cargo.lock"] == "crates.io"
+        assert auditModule.OFFLINE_DB_SCOPE["tools/npx-runtime/package-lock.json"] == "npm"
 
 
 class TestGuardIsWiredIntoCi:
