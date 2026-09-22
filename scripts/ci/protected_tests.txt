@@ -392,3 +392,6 @@ tests/unit/context/test_pool_branch_envelope_transient.py
 #   unwiredEndpointRouters；已实现未接线的 router 走 baseline 棘轮（只降不升），
 #   逐条处置理由写在 tests/unit/endpointWiringBaseline.txt。
 tests/unit/api/test_endpoint_mount_wiring_guard.py
+# NPC 流水线时间预算：禁止 sleep 轮询 / 禁宽匹配 pkill / 预算字面量上界
+#（事故：cnb-1q8-1k33cb2v9 在一次无产出的等待上烧光 2h 墙钟）
+tests/unit/ci/test_npc_pipeline_time_budget.py

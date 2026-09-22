@@ -46,8 +46,10 @@ SUFFIX_VARIANTS = ("-low", "-high", "-max")
 # 本仓只保留 max 一档（2026-09-18 收敛）：
 # 档位角色名 → 期望的 thinkingLevel
 LEVEL_BY_ROLE = {"DSCoder-max": "xhigh"}
-# NPC 挂载点（$ 兜底 / 角色名顶层 key）→ 期望的 thinkingLevel
-LEVEL_BY_MOUNT = {"$": "xhigh", "DSCoder-max": "xhigh"}
+# NPC 挂载点（$ 兜底 / 角色名顶层 key）→ 期望的 thinkingLevel。
+# 两个角色名都必须有顶层 key：`$` 只是兜底，不替代角色名挂载点——
+# 少一个，被 @ 的那个角色就静默回落平台默认 prompt（本仓的修复教义随之失效）。
+LEVEL_BY_MOUNT = {"$": "xhigh", "DSCoder": "xhigh", "DSCoder-max": "xhigh"}
 # 已取消的档位后缀：一旦重新出现在 .cnb.yml 顶层 key 或 settings.yml 角色名里即报错
 RETIRED_SUFFIXES = ("-low", "-high")
 
