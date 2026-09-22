@@ -1193,13 +1193,18 @@ class ContextPool:
             self._cache.clear()
             self._cache_version += 1
 
-    def draw(self, need: str = None) -> List:
+    def draw(self, need: str = None, budget_tokens: Optional[int] = None) -> List:
+        """按需调取：`budget_tokens` 是本轮视图额度（B6-9：经入参透传，
+        不再由调用方就地改写抽屉的构造期字段）。
+
+        额度只在这里透传到抽屉一处，池侧不另存一份——两份额度必然漂移。
+        """
         with self._lock:
             all_drops = self._collector.collect()
             # [FIX] draw() 也应用 TTL 过期过滤（之前绕过 get_contexts() 的 TTL 检查）
             all_drops = self._filter_ttl(all_drops)
             deduped = self._deduplicator.dedup(all_drops, stage="output")
-            selected = self._drawer.draw(deduped, need=need)
+            selected = self._drawer.draw(deduped, need=need, budget_tokens=budget_tokens)
             # P1-1①（方案 §4.1）：视图出口配对完整性校验——预算/相关性选取
             # 可能产生孤儿 TOOL_CALL（其 pairs_with 目标未入选），剔除以避免
             # LLM 看到"无上下文的工具结果"；孤儿留在池中（归档无损语义不变）

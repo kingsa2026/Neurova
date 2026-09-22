@@ -547,3 +547,21 @@ tests/unit/api/test_token_budget_endpoint_contract.py
 tests/unit/context/test_pool_identity_resolution.py
 tests/unit/neurflow/test_context_node_pool_resolution.py
 tests/unit/context/test_view_tool_addressing.py
+
+# 上下文三链路批（Issue #90）B6-6 / B6-7 / B6-8 / B6-9：四类同形态断链。
+#   （B6-6 根因：`UnifiedVectorStore` **没有批量入口** —— `semantic_drawer` 的
+#    `hasattr(store, "encode_batch")` 恒假，"批量打分"在 store 层从未接上；
+#    且 tfidf 一律不进内容寻址缓存，同批文本跨轮各重编码 301 次。
+#    改后：批量入口是唯一实现（`encode` 由它派生，不是第二份），tfidf 稳定形态
+#    进缓存，缓存文件按指纹分命名空间共存。
+#    B6-7 根因：读侧 freshness 打分读 `updated_at`（零写入方的第二份时刻定义，
+#    召回归档时它是"本次构造时刻"）→ 越老的归档越"新鲜"。
+#    改后：归档时刻（`created_at`）是读侧排序与打分的唯一时间事实源，第二份删净。
+#    B6-8 根因：台账/摘要器装配失败只留一行 warning，能力永久关闭、读数面上看不见。
+#    改后：`get_context_health()` 给出 attempts/enabled/last_error，且每轮重试恢复。
+#    B6-9 根因：抽屉额度被编排器每轮就地改写构造期字段（同一字段两种含义）。
+#    改后：每轮额度经入参透传，`max_tokens` 恒为构造期默认；硬顶口径单源。）
+tests/unit/context/test_vector_batch_encoding.py
+tests/unit/context/test_archive_moment_scoring.py
+tests/unit/context/test_context_degradation_recovery.py
+tests/unit/context/test_view_budget_single_form.py

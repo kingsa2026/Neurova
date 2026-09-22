@@ -120,16 +120,18 @@ class TestBudgetHasSingleDefinition:
         )
 
         assert seen["calls"] >= 2, "抽屉与信封必须各走一次同一份额度方法"
-        assert orch.context_pool._drawer.max_tokens in seen["values"]
+        # B6-9：本轮生效额度经 `effective_view_budget()` 读——`max_tokens` 是**构造期**
+        # 默认值，不再被就地改写（改前断言读的正是那个被覆写的字段）。
+        assert orch.context_pool._drawer.effective_view_budget() in seen["values"]
 
     @pytest.mark.asyncio
     async def test_two_builds_same_budget_same_value(self):
         """取向稳定：同窗口预算下两轮拿到同一额度（前缀缓存前提）。"""
         orch = _orchestrator(20000)
         await _build(orch, user_input="第一轮", session_context=[{"role": "user", "content": "历史一"}])
-        first = orch.context_pool._drawer.max_tokens
+        first = orch.context_pool._drawer.effective_view_budget()
         await _build(orch, user_input="第二轮", session_context=[{"role": "user", "content": "历史一"}])
-        second = orch.context_pool._drawer.max_tokens
+        second = orch.context_pool._drawer.effective_view_budget()
         assert first == second
 
     def test_envelope_budget_not_duplicated_formula(self):
@@ -154,5 +156,8 @@ class TestEnvelopeFloorSharesRecallFloor:
         orch = _orchestrator(100000)
         await _build(orch, user_input="问题", session_context=[{"role": "user", "content": "短历史"}])
         floor = orch._resolveRecallFloor()
-        assert orch.context_pool._drawer.max_tokens >= floor
-        assert orch.context_pool._drawer.max_tokens > ContextOrchestrator._RECALL_MIN_TOKENS
+        assert orch.context_pool._drawer.effective_view_budget() >= floor
+        assert (
+            orch.context_pool._drawer.effective_view_budget()
+            > ContextOrchestrator._RECALL_MIN_TOKENS
+        )

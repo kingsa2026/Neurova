@@ -42,8 +42,10 @@ class ContextInput:
     tokens: int = 0
     tags: List[str] = field(default_factory=list)  # 标签列表
     hash: str = None  # 内容哈希（用于精确去重）
-    created_at: datetime = None  # 创建时间
-    updated_at: datetime = None  # 更新时间
+    #: 归档时刻——读侧排序与 freshness 打分的**唯一**时间事实源（B6-7）。
+    #: 改前还有一个 `updated_at`（构造时与它同值、全仓零写入方），召回老归档时
+    #: 该字段是"本次构造时刻"，会让越老的归档越新鲜（打分读到的不是归档时刻）。
+    created_at: datetime = None
     seen_confirmed: bool = False  # P1-1④ ack 集：已被成功模型请求读过
 
     # created_at 单调化守卫（残留处理 2026-09-13 真 bug 根治）：
@@ -70,8 +72,6 @@ class ContextInput:
             ContextInput._last_created_at = now
         if self.created_at is None:
             self.created_at = now
-        if self.updated_at is None:
-            self.updated_at = now
 
     @classmethod
     def compute_hash(cls, source: "ContextSource", content: str) -> str:
@@ -94,5 +94,4 @@ class ContextInput:
             "tags": self.tags,
             "hash": self.hash,
             "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

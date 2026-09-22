@@ -56,7 +56,13 @@ class SemanticMatchDrawer:
     RELEVANCE_FLOOR = 0.65
 
     def __init__(self, max_tokens: int = 16000, max_candidates: int = None):
+        #: 构造期默认额度。它**不随轮次变化**：每轮额度经 `draw(budget_tokens=...)`
+        #: 传入（B6-9 前是编排器就地改写本字段——同一个字段在不同时刻含义不同，
+        #: 调用方无从分辨手里这个值是"池预算"还是"本轮窗口剩余"）。
         self.max_tokens = max_tokens
+        #: 本实例最近一次生效的每轮额度（None=尚无，生效额度回落构造期默认）。
+        #: 只读口径，供读数与诊断；选取逻辑一律走 `_budgetFor(budget_tokens)`。
+        self._turnBudget: Optional[int] = None
         # 语义打分候选集上限：池规模超过它时先用**零编码**的词法粗筛收敛候选。
         # 单源约束：默认值直接取台账读侧的 `CANDIDATE_LIMIT`（规格 U2 定案），
         # 不在这里另写一个数——两处上限若各写一份，口径必然漂移。
@@ -88,9 +94,24 @@ class SemanticMatchDrawer:
                 logger.warning("UnifiedVectorStore 不可用，使用简单匹配")
                 self._vector_store = False
 
-    def draw(self, drops: List[ContextInput], need: str = None) -> List[ContextInput]:
+    def effective_view_budget(self) -> int:
+        """本实例**生效**的视图额度（单一解释：本轮入参优先，缺省回落构造期默认）。"""
+        return self._turnBudget if self._turnBudget is not None else self.max_tokens
+
+    def _budgetFor(self, budget_tokens: Optional[int]) -> int:
+        """本轮额度解析（唯一判据）并记忆为生效额度——入参不改构造期字段。"""
+        self._turnBudget = int(budget_tokens) if budget_tokens is not None else None
+        return self.effective_view_budget()
+
+    def draw(
+        self,
+        drops: List[ContextInput],
+        need: str = None,
+        budget_tokens: Optional[int] = None,
+    ) -> List[ContextInput]:
         if not drops:
             return []
+        viewBudget = self._budgetFor(budget_tokens)
 
         # ── 阶段 1：零编码词法粗筛（P1-4 根因修复） ────────────────────────
         # 池规模超过候选上限时，先把候选集收敛到上限以内再进语义打分；池内规模
@@ -164,10 +185,10 @@ class SemanticMatchDrawer:
             drop = result_by_pos[pos]
             drop_tokens = drop.tokens if drop.tokens > 0 else self._estimate_tokens(drop.content)
 
-            if total_tokens + drop_tokens <= self.max_tokens:
+            if total_tokens + drop_tokens <= viewBudget:
                 selected.append(drop)
                 total_tokens += drop_tokens
-            elif drop_tokens > self.max_tokens and self.max_tokens > 200:
+            elif drop_tokens > viewBudget and viewBudget > 200:
                 # 审验闭环（2026-09-10）：单条超预算的大归档截断召回（尾部省略注记），
                 # 不再整条跳过——否则长消息被窗口折叠后永远无法召回（对话连续性断裂）。
                 #
@@ -178,7 +199,7 @@ class SemanticMatchDrawer:
                 # "已存在"跳过，丢失不可挽回。改用 dataclasses.replace 产副本，
                 # 副本显式标注 truncated_from=原文 hash（可追溯、可重调取）。
                 content = str(drop.content or "")
-                keep_chars = self._chars_for_token_budget(content, self.max_tokens)
+                keep_chars = self._chars_for_token_budget(content, viewBudget)
                 truncated = content[:keep_chars] + "…[召回截断，全文见会话记录]"
                 view_copy = replace(
                     drop,
@@ -310,10 +331,17 @@ class SemanticMatchDrawer:
         return 0.5 * tag_ratio + 0.5 * content_ratio
 
     def _calculate_freshness_score(self, drop: ContextInput) -> float:
-        if not drop.updated_at:
+        """退火因子按**归档时刻**（`created_at`）算——读侧时间判据只有这一份。
+
+        B6-7：改前读 `updated_at`，而该字段是"本次构造对象的时刻"（零写入方），
+        于是召回一条 45 天前的归档时 age=0 → 退火系数 1.0：越老的归档越"新鲜"，
+        相关性打分被系统性地抬向旧内容。排序（`draw` 末尾的 `created_at` 稳定排序）
+        与打分现在共用同一个字段，不再是一处一个时刻。
+        """
+        if not drop.created_at:
             return 0.5
 
-        age_hours = (datetime.now() - drop.updated_at).total_seconds() / 3600
+        age_hours = (datetime.now() - drop.created_at).total_seconds() / 3600
         freshness = math.exp(-0.1 * age_hours)
         multiplier = self.SOURCE_MULTIPLIERS.get(drop.source, 0.5)
 
