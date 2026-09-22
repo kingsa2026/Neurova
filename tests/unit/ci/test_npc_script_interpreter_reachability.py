@@ -339,21 +339,28 @@ class TestNodeDispatchReallyWorks:
         node = shutil.which("node")
         if node is None:
             pytest.skip("本环境无 node，无法做调用形态比对")
+        # 登记的调用形态是 `sh scripts/ci/run_gate_under_node.sh <script>`：
+        # 桥脚本是 sh 脚本，故 sh 是**被测产物本身**的依赖，不是顺手借的宿主工具。
+        # 仍与 node 一样先断言存在再使用——缺席时 skip 而不是 FileNotFoundError
+        # （受保护子集里"守卫静默不跑"的同一根因，见
+        # tests/unit/test_dev_path_and_runtime_dep_guards.py）。
+        if shutil.which("sh") is None:
+            pytest.skip("本环境无 sh，跑不了桥脚本的调用形态")
+
+        # 平台登记的命令形态以 `sh <桥脚本>` 起头（`.cnb.yml` 的 node 分支），
+        # 故这里先解析 sh 而不是写死字面量：受保护子集里写死外部命令，镜像缺席时
+        # 不是断言失败而是 FileNotFoundError，整个文件（含同文件其余断言）静默不跑
+        # —— 这正是 tests/unit/test_dev_path_and_runtime_dep_guards.py 的
+        # TestProtectedGuardsUseNoExternalBinaries 常驻拦截的形态。与 node 同口径：
+        # 先 which、缺席即跳过，不把环境能力写进判据。
+        shell = shutil.which("sh")
+        if shell is None:
+            pytest.skip("本环境无 sh，无法复核平台登记的 node 调用形态")
 
         text = io.open(CNB, encoding="utf-8").read()
         node_command = self._node_branch_call(text, "scripts/ci/npc_turn_handoff_gate.py")
         assert node_command.strip(), "node 分支调用形态为空"
         assert "npc_turn_handoff_gate.py" in node_command, "调用形态里没有脚本路径"
-
-        # 平台执行这条桥命令的方式是把它交给 POSIX shell（`sh scripts/...sh`），
-        # 故 shell 也是被依赖的解释器：与同文件其余 node 调用同口径，**先证后用**
-        # （`sh` 已在受保护子集的 ALLOWED 里，并在本使用点自证可达；契约见
-        # tests/unit/test_dev_path_and_runtime_dep_guards.py 的
-        # TestProtectedGuardsUseNoExternalBinaries）。缺席即显式 skip，而不是把
-        # 未证明存在的二进制直接递进 subprocess —— 那会是 FileNotFoundError，
-        # 本文件整组断言（含本条的等价性判据）会静默不跑。
-        if shutil.which("sh") is None:
-            pytest.skip("本环境无 POSIX shell（sh），无法执行 .cnb.yml 登记的桥命令")
 
         workspace = tmp_path / "ws"
         workspace.mkdir()
@@ -370,7 +377,7 @@ class TestNodeDispatchReallyWorks:
                     env={**base_env, **workspace_env}, timeout=60,
                 )
                 node_run = subprocess.run(
-                    ["sh", "-c", f"{node_command} {' '.join(flag)}"],
+                    [shell, "-c", f"{node_command} {' '.join(flag)}"],
                     capture_output=True, text=True, cwd=str(PROJECT_ROOT),
                     env={**base_env, **workspace_env}, timeout=60,
                 )
