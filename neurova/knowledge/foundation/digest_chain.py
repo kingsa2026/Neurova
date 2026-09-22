@@ -197,6 +197,31 @@ class ActivityDigestChain:
 
     # ── 校验闭环（工单 023 的落点）──────────────────────────
 
+    def closeWrite(self, activityId: str) -> Dict[str, Any]:
+        """写入收尾：裁决**本笔活动**并回写 `verification_state`，返回本笔读数。
+
+        与 `attest()` 的分工是成本口径，不是功能口径：
+
+        - 本方法长在写路径上，只碰这一条活动，读数也只数这一条（一次活动查询 +
+          一次断言行查询 + 每行一次回写）。写路径每写一笔就全表 `GROUP BY` 一遍，
+          成本随库增长，那不该是写入要付的钱；
+        - `attest()` 是巡检/运维入口，读数是全库三态分布——那里全表扫描正是它的目的。
+
+        两者共用同一个 `_gradeAll` 裁决函数（摘要公式与链位判据只有一份）。
+        """
+        entries = self._gradeAll(str(activityId))
+        with self._store._lock, self._store._conn:
+            for entry in entries:
+                self._store._conn.execute(
+                    "UPDATE knowledge_assertions SET verification_state = ?"
+                    " WHERE assertion_id = ?", (entry["state"], entry["assertion_id"]))
+        states = [e["state"] for e in entries]
+        failed = states.count("failed")
+        return {"ok": failed == 0, "activity_id": str(activityId),
+                "graded": len(entries), "verified": states.count("verified"),
+                "unverified": states.count("unverified"), "failed": failed,
+                "failures": [e for e in entries if e["state"] == "failed"][:5]}
+
     def attest(self, activityId: Optional[str] = None) -> Dict[str, Any]:
         """逐条裁决并**回写** `verification_state`——只报不改就等于从不闭环。
 

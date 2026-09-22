@@ -142,7 +142,11 @@
 `ActivityDigestChain.attest()` 逐条裁决并**回写** `verification_state`
 （正文与哈希 / 摘要与内容 / 链位三样都成立才 `verified`），`unverified` 从此只剩
 "还没验过"一义；`setAssertionVerification` 在库层收口值域，`assertionVerificationCounts()`
-给出三态分布，`verify()` 与巡检端点一并带出。调用点是条目投影与历史回填两条真实写入链。
+给出三态分布，`verify()` 与巡检端点一并带出。
+
+> **本批当时的登记有误，已在 §7.9 更正**：这里写"调用点是条目投影与历史回填两条真实写入链"，
+> 但经咽喉落库的真实写入链有六条。另外四条（对账回放 / 规则推导 / LLM 抽取 / 时序事实）
+> 写完就走，断言从落库那刻起恒为 `unverified`——与本节要灭的病灶同形。
 
 ### 6.4 有效期窗口：收了就落库，落了就咬合
 
@@ -381,3 +385,58 @@ CI 的 experience-quality 流水线装的是 `requirements-ci.txt`（依赖，�
 五处一律改 `callerPath(x, <默认名>)`：调用方给了就用它的（显式入参一字不改，已实测
 注入临时目录仍被遵守），没给才落数据根。改后同一组真构造点 **CWD 零新增**，
 数据根下 `checkpoints` / `dlq` / `neurova_hebbs` / `backups` 四个目录如约出现。
+
+
+### 7.9 校验闭环长回咽喉（2026-09-21 第六批，Issue #75 用户点名"现在是否闭环了"）
+
+**结论：上一批的 §6.3 把闭环的落点记窄了。** 它把 `attest()` 的调用点登记为
+"条目投影与历史回填两条真实写入链"，于是另外四条经咽喉落库的写入链
+（对账回放 / 规则推导 / LLM 抽取 / 时序事实）写完就走，没有任何人回写结论。
+实测（真咽喉、真底座，无替身）：
+
+```
+[写入后]  {'unverified': 3, 'verified': 0, 'failed': 0}
+          活动形如 admit | KnowledgeAdmissionGate.admit（直写兜底：调用方未声明来路）
+```
+
+三条断言里两条直写、一条是 `is_a_transitive` 推出的结论——**全是 `unverified`**。
+这与 §5.5 点名的"92/92 恒 unverified"是同一形状，只是把"没人写"换成了"四条链不写"。
+
+**修法长在唯一咽喉，不在四条链上各补一次 `attest()`。** 后者是"记住了的才闭环"
+的原地复活：下一次新增写入方照样会漏。`admit()` 落完账即对本笔活动裁决并回写，
+回执带 `verification`（本笔读数）。谁走咽喉谁闭环，没有第二条纪律。
+
+成本口径与巡检分开（功能口径共用同一个 `_gradeAll` 裁决函数）：
+
+- `ActivityDigestChain.closeWrite(activityId)`：写路径收尾，只碰**本笔活动**，
+  一次活动查询 + 一次断言行查询 + 每行一次回写；
+- `ActivityDigestChain.attest(activityId?)`：巡检/运维入口，读数是全库三态分布——
+  那里全表扫描正是它的目的。
+
+写路径每写一笔就全表 `GROUP BY` 一遍是不可接受的：库一大，写入成本随之增长。
+
+**同族第二处：原来的两处闭环调用点成了第二份实现，已删净。** `backfill` 的全库
+`attest()` 与 `EntryLedger.attest()` 在本批之后都不再需要（本笔结论已由咽喉收口），
+留着就是"同一件事两处各写一遍"——下一次新增写入链时必然只改一处。两者删净，
+`attestation` 这个**写出无人读**的报告字段（本仓教义点名的断点形态）随之消失。
+`test_matrixHasNoSecondClosurePoint` 用 AST 扫调用点常驻锁住（扫代码不扫注释：
+解释性文字提一句 `attest()` 不是调用）。
+
+**同族第三处：推导的来路此前不自陈。** `ForwardChainingEngine._admitDerivedFact`
+不声明来路，落进咽喉兜底的 `admit` +「直写兜底」，于是 `ACTIVITY_KINDS` 里那个
+`derive` 从无使用者——溯源账上读起来像"有人直插了一条"。本批改为自陈
+`activityKind="derive"`。
+
+**验证**
+
+- 红 → 绿：`tests/unit/knowledge/test_write_boundary_closes_verification.py` 先跑出
+  **6 failed**（四条链的 `unverified`、回执无 `verification`、推导来路落成兜底），
+  最小实现后 **9 passed**。
+- live-verify（真仓库 → 真咽喉 → 真规则引擎 → 真抽取桥 → 真时序模块，无替身）：
+  `tests/manual/write_boundary_closes_verification_75.py`——六链分布
+  `{admit/verified: 4, derive/verified: 2, extract/verified: 1}`，**未验过 0 条**；
+  巡检 `{ok: true, chains: 7, rows: 7, unlinked: 0, verification: {unverified: 0,
+  verified: 7, failed: 0}}`；反向控制：篡改一笔后巡检判 `failed = 1`。
+- A/B 回归：`knowledge + api/knowledge 两条 + cognitive_layers/memory_layer` 两侧同为
+  **17 failed**（1179 / 1168 passed），失败集合逐行一致（全为环境缺 pytest-asyncio /
+  jieba / numpy 的预存失败），无新增失败；本批新守卫 11 例即那 +11 passed。
