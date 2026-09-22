@@ -91,6 +91,7 @@ def test_safe_model_dump_v2_compatible():
         "neurova.api.endpoints.enhanced_users_api",
         "neurova.api.endpoints.rules_api",
         "neurova.api.endpoints.shared_config",
+        # skill_market 已按 ADR 0013 删除（Issue #68 处置台账），不再是本契约的被检面。
         "neurova.api.endpoints.skill_pool_api",
         "neurova.api.endpoints.skill_version_api",
         "neurova.api.endpoints.tasks_api",

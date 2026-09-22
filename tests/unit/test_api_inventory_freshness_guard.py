@@ -215,12 +215,28 @@ class TestBreakpointsAreNamedNotBuried:
             "注入零路由 router 后审计仍为空——判据失效，断点会被静默吞掉。"
         )
 
-    def test_unmounted_endpoint_modules_are_exposed(self):
-        """定义了路由却从未挂载的模块必须点名（当前实测有 4 个，见清单第二节）。"""
+    def test_unmounted_endpoint_modules_are_exposed(self, tmp_path, monkeypatch):
+        """定义了路由却从未挂载的模块必须点名（判据不空转，用注入自证）。
+
+        本轮已把实测的六个未挂载模块各自收口（四个删除、两个接线），
+        故这里以注入自证判据仍咬得住，而不是拿某个残留孤儿当锚点——
+        那会反过来要求孤儿继续存在。
+        """
         module = _generator()
-        names = module.unmountedEndpointModules()
-        assert names, (
-            "实测存在「定义了路由但从未挂载」的端点模块，名单为空说明取数口径失效。"
+        probe = tmp_path / "neurova" / "api" / "endpoints"
+        probe.mkdir(parents=True)
+        (probe / "zzz_orphan.py").write_text(
+            "from fastapi import APIRouter\n"
+            "router = APIRouter(prefix='/zzz')\n\n"
+            "@router.get('/x')\n"
+            "def _x():\n"
+            "    return {}\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(module, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(module, "SOURCE_ROOTS", ("neurova",))
+        assert module.unmountedEndpointModules() == ["neurova.api.endpoints.zzz_orphan"], (
+            "注入的孤儿端点模块未被点名——取数口径失效，断点会被静默吞掉。"
         )
 
     def test_delta_section_names_every_breakpoint(self):

@@ -76,6 +76,23 @@ class TestDeclaredSupersedeTakesEffect:
         assert report["supersede_unresolved"] == ["库里根本没有这句"]
         assert manager._stats["supersede_unresolved_count"] == 1
 
+    def test_unresolvedDeclarationIsVisibleAtTheReadingSurface(self, manager):
+        """申报"找不到目标"要出现在**读取面**上，不能只有测试读私有 `_stats`。
+
+        只写不读的读数等于没有读数：`/v1/memory/stats` 读的是 `get_stats()`，
+        导入侧累计了这个数却没接到那条读路径，用户与运维都看不见
+        "有取代声明落了空"。判据取的是公开读面，不是私有字段。
+        """
+        manager.import_memories(
+            [_record("mem#5", "无人认领的新说法", supersedes="库里根本没有这句")],
+            ingest_run_id="run-5",
+        )
+
+        assert manager.get_stats()["supersede_unresolved_count"] == 1, (
+            "get_stats() 没暴露导入侧累计的 supersede_unresolved_count——"
+            "这条读数只写不读，读取面看不见"
+        )
+
 
 class TestContentGateStillHolds:
     def test_relearningAfterSupersedeLandsANewRow(self, manager):
