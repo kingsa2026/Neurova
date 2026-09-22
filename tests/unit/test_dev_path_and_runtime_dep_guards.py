@@ -173,7 +173,10 @@ class TestProtectedGuardsUseNoExternalBinaries:
 
     # 允许的外部命令：仅"当前环境断言存在"的可执行文件（用 shutil.which 跳过）。
     # 例：git 在 CI 镜像里存在，且测试用 needs_git 标记守卫。
-    ALLOWED = {"git"}
+    # sh：桥脚本 scripts/ci/run_gate_under_node.sh 本身就是 sh 脚本，
+    # 即"解释器探测落到 node 分支时平台执行的调用形态"——它是**被测产物**的一部分，
+    # 不是顺手借来的搜索工具。使用点已按同一口径先 shutil.which("sh") 再跑。
+    ALLOWED = {"git", "sh"}
 
     def _protected_test_files(self):
         listed = []
@@ -222,6 +225,48 @@ class TestProtectedGuardsUseNoExternalBinaries:
             + "\n  ".join(offenders)
             + "\n修复：扫描类守卫改用纯 Python（Path.rglob / ast），"
             "或把命令加进 ALLOWED 并说明镜像内确实存在。"
+        )
+
+    def test_allowed_entries_are_existence_checked_at_use_site(self):
+        """白名单条目必须在**使用它的文件**里先断言存在，否则白名单就是盲区。
+
+        `ALLOWED` 的登记条件是"当前环境断言存在"（上文注释）。但只把命令名
+        写进集合、使用点却不 `shutil.which(...)` 的话，白名单就成了免检通道：
+        该二进制缺席时照样 `FileNotFoundError`，本类要拦的故障原样复现——
+        正是本 PR 要消灭的"配了但没接线"同一形态。
+
+        可证伪：把 `sh` 从使用点前面的 `shutil.which("sh")` 检查里摘掉 → 红。
+        """
+        import ast
+
+        offenders = []
+        for rel in self._protected_test_files():
+            source = io.open(PROJECT_ROOT / rel, encoding="utf-8").read()
+            for binary in sorted(self.ALLOWED):
+                if 'subprocess' not in source or f'"{binary}"' not in source:
+                    continue
+                if f'which("{binary}")' in source or f"which('{binary}')" in source:
+                    continue
+                tree = ast.parse(source)
+                used = any(
+                    isinstance(node, ast.Call)
+                    and getattr(node.func, "attr", None)
+                    in {"run", "check_output", "Popen", "call", "check_call"}
+                    and "subprocess" in ast.dump(getattr(node.func, "value", ast.Constant(None)))
+                    and node.args
+                    and isinstance(node.args[0], ast.List)
+                    and node.args[0].elts
+                    and isinstance(node.args[0].elts[0], ast.Constant)
+                    and node.args[0].elts[0].value == binary
+                    for node in ast.walk(tree)
+                )
+                if used:
+                    offenders.append(f"{rel}: 白名单命令 {binary!r} 未先 shutil.which 断言存在")
+        assert not offenders, (
+            "白名单条目在使用点没有断言存在——缺席时仍会 FileNotFoundError，"
+            "守卫静默不跑：\n  " + "\n  ".join(offenders)
+            + "\n修复：使用前 `if shutil.which(<cmd>) is None: pytest.skip(...)`，"
+            "或把该命令从 ALLOWED 里摘掉（说明镜像内确实存在是白名单的前提）。"
         )
 
     def test_no_shell_out_to_ripgrep(self):
