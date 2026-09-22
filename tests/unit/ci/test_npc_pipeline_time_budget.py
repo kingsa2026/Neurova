@@ -377,3 +377,115 @@ class TestGuardIsInProtectedSubset:
         assert rel in listed, (
             f"{rel} 不在受保护子集 —— 本守卫的判据在 CI 上不会执行。"
         )
+
+
+#: 轮数触顶接力的燃料文件：Agent 在最后一轮写出它，`.cnb.yml` 的收尾阶段读它。
+HANDOFF_MARKER_FILE = ".npc-turn-handoff"
+
+
+class TestNpcOptionsPromptIsAnUnreachableChannel:
+    """`npc:go.options` 里不得再出现 `prompt` 键 —— 它是一条永不生效的通路。
+
+    根因（Issue #158，构建 cnb-2v8-1k34htd2p）：接力配置"看着配了、其实跑不到"，
+    第二处就在 `$` 段的 NPC 流水线里写了 `options.prompt`：平台 Schema 不声明该键，
+    评论触发时提示词**一律由 `.cnb/settings.yml` 的角色自带**，写进去既不识别也不生效，
+    而平台对未知键静默忽略 —— 没有任何红灯会亮。
+    本仓为此专门设了一张错误码清单（`.cnb/npc_schema_keys.txt` 的
+    「禁止出现（曾误用、被静默忽略）」段），`prompt` 第一位在册。
+    然而 `tests/unit/test_ci_npc_config_guard.py` 的 `_iter_npc_go_options`
+    曾一路 **skip 掉 `options` 子节点**，于是那张清单没有任何执行体 ——
+    禁令写在纸上、判据空转（教义第 2 条：不许把门禁做成"看着配了"）。
+
+    判据：`npc:go` 的 options 键集与 `.cnb/npc_schema_keys.txt` 的允许键集取差
+    必须为空。允许键集是单一事实源，两处不得各写一份。
+    """
+
+    def test_options_keys_stay_inside_the_schema_allowlist(self, cnb_doc):
+        allowed = _schema_allowlist()
+        offenders = []
+        for path, stage in _iter_npc_go_stages(cnb_doc):
+            for key in (stage.get("options") or {}):
+                if key not in allowed:
+                    offenders.append(f"{path}.options.{key}")
+        assert not offenders, (
+            "npc:go.options 写了平台 Schema 未声明的键（会被静默忽略，等于没配）：\n  "
+            + "\n  ".join(offenders) +
+            f"\n允许键集见 {SCHEMA.relative_to(PROJECT_ROOT)}；"
+            "行为约束（时长纪律、修复教义、接力协议）一律写进 "
+            ".cnb/settings.yml 的角色 prompt —— 那是评论触发期唯一必达的通道。"
+        )
+
+
+def _schema_allowlist() -> set:
+    """`.cnb/npc_schema_keys.txt` 的允许键集（注释与空行不计）。"""
+    return {
+        line.split("#", 1)[0].strip()
+        for line in io.open(SCHEMA, encoding="utf-8").read().splitlines()
+        if line.split("#", 1)[0].strip()
+    }
+
+
+class TestHandoffFuelIsWritableFromTheConfigAlone:
+    """接力的燃料必须能只靠「配置 + 交付物」产生，不依赖 Agent 记得在最后一轮写文件。
+
+    根因（Issue #158，构建 cnb-2v8-1k34htd2p / cnb-2e8-1k341d9s1 连续两次实测）：
+    `npc:go` 撞 maxTurns 时平台只把 Agent 中止，**不执行任何收尾指令** ——
+    Agent 没有机会执行「把 1 写进 .npc-turn-handoff」这条提示。实测两次掐断
+    （201 轮 / 3191326ms；200 轮 / 2362852ms）里，收尾的
+    「轮数触顶接力」Stage 都是 `skipped`，Issue 上没有任何回音、成果随容器丢。
+
+    即：写标记这件事在**触顶的那一轮**是执行不到的，那么燃料就只能由配置侧
+    产生 —— 判据落在"仓库里确实有一份燃料供给物"，而不是落在"人设里写了要写文件"。
+    人设里的那段话仍然保留（它是无歧义的行为约定），但**不构成**燃料。
+    """
+
+    def test_repo_carries_a_handoff_fuel_source(self):
+        """门禁脚本必须**真的写**燃料，并把接力变量回写给收尾阶段。
+
+        判据落在"写"这件事上，不落在"文件里提到这个名字"：
+        只提名字（例如只在 docstring 里写一句）等于没写 —— 那正是本案要消灭的
+        "看着配了、其实永不触发"。两个解释器分支都要有写点，否则镜像里没有
+        python 时（NPC 镜像就是如此）燃料照样写不出。
+        """
+        gate = PROJECT_ROOT / "scripts" / "ci" / "npc_turn_handoff_gate.py"
+        assert gate.exists(), (
+            "接力燃料没有供给物：收尾阶段读的 "
+            f"{HANDOFF_MARKER_FILE} 若只由 Agent 在最后一轮写出，"
+            "而触顶那一轮执行不到任何指令（cnb-2v8-1k34htd2p 实测 skipped）——"
+            "接力永远是死配置。必须由构建侧在 Agent 开工前写下燃料。"
+        )
+        source = io.open(gate, encoding="utf-8").read()
+        assert source.count(f'"{HANDOFF_MARKER_FILE}"') >= 2, (
+            f"{gate.relative_to(PROJECT_ROOT)} 的写点不足：燃料文件名常量必须在 "
+            "python 与 node 两个分支各出现一次（NPC 镜像只有 node）。"
+        )
+        # 写燃料 + 回写接力变量：两个动作分属两个函数，各自必须在两个分支里有实现。
+        for symbol in ("checkWorkspaceWritable", "markTurnAsHandoff"):
+            assert source.count(f"function {symbol}") == 1, (
+                f"{gate.relative_to(PROJECT_ROOT)} 的 node 分支缺 {symbol}() —— "
+                "镜像里没有 python 时该分支是唯一可执行通路。"
+            )
+            assert source.count(f"def {symbol}") == 1, (
+                f"{gate.relative_to(PROJECT_ROOT)} 的 python 分支缺 {symbol}()。"
+            )
+
+    def test_handoff_stage_reads_fuel_not_agent_memory(self, cnb_doc):
+        """收尾接力的 `if` 必须只读 `$turnLimitReached` —— 不许新增第二套判据。"""
+        fallback = cnb_doc.get("$") or {}
+        applies = [
+            stage
+            for event, body in fallback.items()
+            if isinstance(event, str) and event.endswith("@npc")
+            for job in (body if isinstance(body, list) else [])
+            if isinstance(job, dict)
+            for stage in (job.get("endStages") or [])
+            if isinstance(stage, dict) and stage.get("type") == "cnb:apply"
+        ]
+        assert applies, "$ 段 NPC 流水线缺收尾接力（cnb:apply）"
+        for stage in applies:
+            conditions = stage.get("if") or []
+            assert conditions == ['[ "$turnLimitReached" = "1" ]'], (
+                "收尾接力的判据不是 turnLimitReached："
+                f"{conditions!r}\n"
+                "接力判据只允许一处（单一事实源），新增计数文件/状态字段都是平行体系。"
+            )
