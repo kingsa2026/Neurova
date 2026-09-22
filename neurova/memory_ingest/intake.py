@@ -224,7 +224,8 @@ def _stage_media(bundle_root: Path, message: Dict[str, Any], report: "IngestRepo
         target = destination / Path(rel).name
         if not target.exists():
             shutil.copyfile(bundle_root / rel, target)
-        artifacts.append(_artifact_info(target, report.agent_id, ref))
+        artifacts.append(_artifact_info(target, report.agent_id, ref,
+                                        owner_user_id=report.owner_user_id))
         staged.add(target.name)
     report.staged_media = tuple(sorted(staged))
 
@@ -244,8 +245,20 @@ def _prune_media(agent_id: str, candidates: Set[str], sessions) -> int:
     return removed
 
 
-def _artifact_info(path: Path, agent_id: str, ref: Dict[str, Any]) -> Dict[str, Any]:
+def _artifact_info(path: Path, agent_id: str, ref: Dict[str, Any],
+                   owner_user_id: str = "") -> Dict[str, Any]:
+    """产出一条运行期同形的 artifact 登记（含**归属**，读端按它判可见性）。
+
+    归属（Issue #81 断点③）：取值与**会话属主同源**——都来自 `apply --owner-user-id`
+    那一个值（这段历史是同一个人的，它的证据文件当然也是他的）。但不合并成同一个
+    字段：会话属主落在会话文件 `user_id` 上由会话写入口维护，产物属主落在条目
+    `user_id` 上由注册处维护，两处各自是事实源，这里只保证导入这一条路上同源。
+
+    批次没给属主（共享批次）时显式落 `shared=True`：读端据此放行任何已登录用户。
+    **不写"空属主=共享"的隐式规则**——漏写属主必须落成诚实 404，不许被静默放宽。
+    """
     mime = str(ref.get("mime") or mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+    owner = str(owner_user_id or "").strip()
     return {
         "artifact_id": hashlib.sha1(str(path.resolve()).encode("utf-8", errors="replace"))
         .hexdigest()[:16],
@@ -254,6 +267,8 @@ def _artifact_info(path: Path, agent_id: str, ref: Dict[str, Any]) -> Dict[str, 
         "size": path.stat().st_size,
         "mime_type": mime,
         "agent_id": agent_id,
+        "user_id": owner,
+        "shared": not owner,
         "path": str(path.resolve()),
         "source": "ingest",
     }
