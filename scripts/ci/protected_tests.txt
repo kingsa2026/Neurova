@@ -340,12 +340,20 @@ tests/unit/test_archive_nav_impact_guard.py
 #     库单调增长；改后触发点落在归档提交，FTS 对齐改分批删除）
 tests/unit/context/test_ledger_gc_retention.py
 
-# Issue #112 销账：`docs/09-dev-progress/api_inventory.md` 整篇级过期 → 重生成。
-#   根因：那篇是手写清单（专职指路文档，导航可达），手写的模块表必然随代码改名/合并漂移，
-#   实测声明 71 个前端模块里 29 个已不存在、现行 61 个里 20 个未列出。
-#   唯一写者 scripts/generate_api_inventory.py（清单正文由代码树产出），
-#   过期判据由日历改为**双向差集 + 运行时常量对齐**（静态路由零假阳性自证）。
+# Issue #112 销账（Issue #68 归档层导航影响筛选·乙类）：前端 API 清单整篇重生成。
+#   根因：docs/09-dev-progress/api_inventory.md 是专职指路文档（docs/0-index/README.md
+#   的 09-dev-progress 领域入口），但此前**只有手写正文、没有写者**——代码树一变
+#   它只能漂移，且没有任何命令能把它拉回来：实测声明 71 个前端模块里 29 个已不存在、
+#   现行 61 个里 20 个未列出。
+#   现为生成物：唯一写者 scripts/generate_api_inventory.py，判据单源在生成器内
+#   （前端调用面 ←→ create_app() 装配后的真实路由表）。过期判据由日历改为
+#   **双向差集 + 运行时常量对齐**（静态路由零假阳性自证）。
+#   两条守卫同源分工：freshness 守卫锁模块双向差集、前缀表、快照纪律与生成入口幂等；
+#   inventory 守卫锁机器区与生成器输出逐字一致、两组差异逐条登记、快照不逾期。
+#   模块双向差集为空，两组差异（前端未命中后端 / 后端无前端消费）逐条显式登记。
+#   棘轮基线 103 → 0。
 tests/unit/test_api_inventory_freshness_guard.py
+tests/unit/test_api_inventory_guard.py
 # Issue #80 工具↔经验↔再调用三环路修复批（第四轮）：票面正文入库与「判据可复核」收口。
 #   根因：001–011 的票面（即每张票的收工判据）只存在于 Issue 附件的对话里，仓内只有
 #   000-索引.md——索引表 11 行的落点指向 11 份并不存在的票面，复核者拿不到判据原文。

@@ -1,7 +1,7 @@
 # Neurova 前端 API 清单（生成物）
 
-> **生成日期：2026-09-22**
 > **生成命令**：`python scripts/generate_api_inventory.py --write`
+> **快照日期**：2026-09-22
 > **事实源**：前端模块 `NeurUI/src/api/modules/`；后端端点 `neurova/api/endpoints/`
 > （注册表 `neurova/api/endpoints/__init__.py` 加 `neurova/api/app.py` 直接挂载）。
 > 本表**由脚本产出，不要手改**；接口报文与字段以 [API_REFERENCE.md](../02-api/API_REFERENCE.md) 为准。
@@ -184,6 +184,108 @@
 
 **后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/budgets`, `/api/coordination/coordination`, `/api/cost-rollup`, `/api/neuron`, `/api/neuron/neuron`, `/api/v1/artifacts`, `/api/v1/audio`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/benchmark`, `/api/v1/channel-sharing`, `/api/v1/chat`, `/api/v1/knowledge-integration`, `/api/v1/mcp`, `/api/v1/monitor`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/sync`, `/api/v1/tools`, `/api/v1/user-groups`, `/api/v1/workspace`
 
+
+## 四、前端调用 ↔ 后端注册 差集
+
+下列 **67** 处调用在本轮后端注册表里没有对应路由。这不等于「后端漏注册」——差异以显式列表暴露，由人去核：
+
+| 模块 | 方法 | 调用路径 | 差异形态 |
+|------|------|------|------|
+| computer | GET | `/api/computers` | 路径未注册 |
+| computer | POST | `/api/computers` | 路径未注册 |
+| computer | DELETE | `/api/computers/*` | 路径未注册 |
+| computer | GET | `/api/computers/*` | 路径未注册 |
+| computer | GET | `/api/computers/*/agents` | 路径未注册 |
+| computer | POST | `/api/computers/*/heartbeat` | 路径未注册 |
+| computer | POST | `/api/computers/*/pair` | 路径未注册 |
+| computer | POST | `/api/computers/*/revoke` | 路径未注册 |
+| computer | POST | `/api/computers/cleanup-offline` | 路径未注册 |
+| computer | GET | `/api/computers/cloud` | 路径未注册 |
+| computer | GET | `/api/cost/agent/*/detailed` | 路径未注册 |
+| computer | GET | `/api/cost/agent/*/summary` | 路径未注册 |
+| computer | POST | `/api/cost/calculate` | 路径未注册 |
+| computer | GET | `/api/cost/company/*/leaderboard` | 路径未注册 |
+| computer | GET | `/api/cost/company/*/summary` | 路径未注册 |
+| computer | GET | `/api/cost/dashboard/realtime` | 路径未注册 |
+| computer | GET | `/api/cost/rollup/hourly` | 路径未注册 |
+| console | POST | `/api/v1/console/debug` | 路径未注册 |
+| console | POST | `/api/v1/console/push` | 路径未注册 |
+| cost | GET | `/api/v1/budgets/health` | 路径未注册 |
+| cost | GET | `/api/v1/budgets/status/*` | 路径未注册 |
+| cost | GET | `/api/v1/budgets/status/all` | 路径未注册 |
+| cost | GET | `/api/v1/cost-rollup/agent/*/cost` | 路径未注册 |
+| cost | GET | `/api/v1/cost-rollup/dashboard/metrics` | 路径未注册 |
+| cost | GET | `/api/v1/cost-rollup/history/daily` | 路径未注册 |
+| cost | GET | `/api/v1/cost-rollup/history/hourly` | 路径未注册 |
+| cost | POST | `/api/v1/cost-rollup/rollup/now` | 路径未注册 |
+| cost | GET | `/api/v1/cost-rollup/rollup/status` | 路径未注册 |
+| files | GET | `/api/v1/files/*/content` | 路径未注册 |
+| health | GET | `/api/v1/health/metrics` | 路径未注册 |
+| health | GET | `/api/v1/health/status` | 路径未注册 |
+| knowledge | POST | `/api/v1/knowledge/annotations` | 方法不匹配 |
+| knowledge | DELETE | `/api/v1/knowledge/annotations/*` | 路径未注册 |
+| knowledge | PUT | `/api/v1/knowledge/annotations/*` | 路径未注册 |
+| knowledge | GET | `/api/v1/knowledge/annotations/export` | 路径未注册 |
+| memory | PUT | `/api/v1/memory/*` | 方法不匹配 |
+| memory | POST | `/api/v1/memory/search` | 方法不匹配 |
+| models | POST | `/api/v1/models` | 方法不匹配 |
+| models | GET | `/api/v1/models/*` | 方法不匹配 |
+| models | POST | `/api/v1/models/active` | 方法不匹配 |
+| models | GET | `/api/v1/models/fetch` | 方法不匹配 |
+| neurflow | POST | `/api/v1/neurflow/comfyui/import` | 路径未注册 |
+| neuron | POST | `/api/v1/absence/detect` | 路径未注册 |
+| neuron | POST | `/api/v1/cascade` | 路径未注册 |
+| neuron | POST | `/api/v1/dependencies` | 路径未注册 |
+| neuron | GET | `/api/v1/dependencies/*` | 路径未注册 |
+| neuron | GET | `/api/v1/entities` | 路径未注册 |
+| neuron | POST | `/api/v1/entities` | 路径未注册 |
+| neuron | POST | `/api/v1/extract` | 路径未注册 |
+| neuron | POST | `/api/v1/would-affect` | 路径未注册 |
+| openplatform | POST | `/api/v1/openplatform/keys` | 方法不匹配 |
+| openplatform | DELETE | `/api/v1/openplatform/keys/*` | 路径未注册 |
+| openplatform | PUT | `/api/v1/openplatform/keys/*` | 路径未注册 |
+| openplatform | POST | `/api/v1/openplatform/keys/*/rotate` | 路径未注册 |
+| openplatform | GET | `/api/v1/openplatform/keys/*/usage` | 路径未注册 |
+| plugins | POST | `/api/v1/plugins` | 方法不匹配 |
+| plugins | DELETE | `/api/v1/plugins/*` | 方法不匹配 |
+| plugins | PUT | `/api/v1/plugins/*` | 方法不匹配 |
+| plugins | POST | `/api/v1/plugins/*/uninstall` | 方法不匹配 |
+| plugins | GET | `/api/v1/plugins/discover` | 方法不匹配 |
+| sandbox | POST | `/api/v1/sandbox/*/execute` | 路径未注册 |
+| settings | POST | `/api/v1/settings/clear-cache` | 方法不匹配 |
+| shared-config | POST | `/api/v1/shared-config/llm-providers/*/test` | 路径未注册 |
+| shared-config | POST | `/api/v1/shared-config/mcp-servers/*/test` | 路径未注册 |
+| system-logs | POST | `/api/v1/logs/clear` | 路径未注册 |
+| tool-layers | POST | `/api/v1/tool-layers/tools/*/execute` | 路径未注册 |
+| tool-layers | POST | `/api/v1/tool-layers/tools/install` | 路径未注册 |
+
+## 五、后端已注册 ↔ 前端消费方 差集
+
+下列 **21** 个后端挂载前缀无任何前端模块直连，属「后端已就位、前端待补消费方」的显式清单：
+
+| 后端挂载前缀 |
+|------|
+| `/acp` |
+| `/artifacts` |
+| `/audio` |
+| `/backups` |
+| `/benchmark` |
+| `/channel-sharing` |
+| `/chat` |
+| `/coordination` |
+| `/frontend` |
+| `/knowledge-integration` |
+| `/mcp` |
+| `/metrics` |
+| `/monitor` |
+| `/neuron` |
+| `/skill-versions` |
+| `/skills` |
+| `/status` |
+| `/sync` |
+| `/tools` |
+| `/user-groups` |
+| `/workspace` |
 <!-- API-INVENTORY:END -->
 
 ## 口径说明

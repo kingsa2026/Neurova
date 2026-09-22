@@ -1,6 +1,9 @@
 # 立项：`api_inventory.md` 重生成（前端 API 清单快照过期）
 
 > 立项日期：2026-09-22
+> **状态：已落地（2026-09-22）**——生成器 `scripts/generate_api_inventory.py` + 守卫
+> `tests/unit/test_api_inventory_freshness_guard.py` / `tests/unit/test_api_inventory_guard.py`；
+> 销账后台账第八节入筛条目 103 → 0。
 > 承接单：Issue #112（本立项）；上游：Issue #68 下一层——归档层按「是否影响当下导航」筛选后，入筛的指路条目
 > 台账与判据见 `docs/06-bugfix/历史悬空引用登记台账_2026-09-21.md` 第八节；
 > 判据单源在 `scripts/scan_docs_refs.py::navigationImpactRefs`。
@@ -83,17 +86,43 @@
 
 ## 6. 落地结果（2026-09-22，Issue #112 销账）
 
-- **唯一写者**：`scripts/generate_api_inventory.py`；清单正文由它产出，
-  生成命令 `python scripts/generate_api_inventory.py --write`。
-- **双向差集归零**：清单声明的前端模块 61 个 == `NeurUI/src/api/modules/*.ts` 全集
-  （排除 barrel `index.ts`）；后端挂载点 88 条 == 注册表 + `app.py` 直接挂载的实际结果。
-- **过期判据换成差集**：不再靠日历。代码树增删一个模块，差集即非空，
-  守卫 `tests/unit/test_api_inventory_freshness_guard.py` 报红并给出两侧名单。
-- **导航归属**：仍作**现行清单**保留在 `docs/0-index/README.md` 的 `09-dev-progress`
-  领域入口表内（不降级为归档）；重生成后其路径引用全部可解析，
-  台账第八节入筛条目 103 → 0，棘轮基线 `tests/unit/archiveNavPointerBaseline.txt` 下调为 `0`。
-- **live-verify**：静态收集到的 830 条路由与真应用 `openapi()` 的 836 条逐条对齐，
-  静态侧零假阳性（守卫内含该自证）。
+**唯一写者**：`scripts/generate_api_inventory.py`；清单正文由它产出，
+生成命令 `python scripts/generate_api_inventory.py --write`。
+
+### 验收判据逐条核对
+
+1. **模块双向差集为空** —— 清单声明 ←→ `NeurUI/src/api/modules/*.ts`，实测双向 0 差异。
+   声明侧从清单正文解析（不直接读磁盘），否则该断言会退化成恒真。
+2. **端点前缀与后端注册一致** —— 差异**显式登记**而非「大致一致」：前端调用未命中
+   后端注册 59 处（逐条给出调用路径与形态：`路径未注册` 45 · `方法不匹配` 14），
+   后端已注册无前端消费 20 个一级前缀逐条列出。
+   取舍说明：本仓路由由挂载表 + `APIRouter(prefix=...)` + 聚合器 include 三层构成。
+   起初试过静态重建路由表，实测比真实表少认 40 余条——**那等于再实现一遍 FastAPI
+   路由匹配**，属第二套平行体系且必然逐版漂移，还会把真实端点误报成「未注册」
+   （假阳性比漏报更坏：它会训练人忽略这张表）。故后端事实源改取
+   `create_app()` 装配后的真实路由表（与 `tests/e2e/test_backend_boot.py` 同一条装配路径）。
+3. **头部含生成命令与日期** —— 机器区首两行即命令与快照日期；`SNAPSHOT_MAX_AGE_DAYS`
+   到期由守卫点名，逾期不重生成即红。
+4. **导航归属** —— 重生成后**仍留在导航图上**，不降级为归档。理由：它现在满足
+   「专职指路文档」的健康前提（与代码树一致、可复算、差异显式），不再是过期快照。
+   `docs/0-index/README.md` 的链接描述同步为「前端 API 面清单（生成物…）」。
+5. **销账** —— 台账第八节入筛条目 103 → 0；棘轮基线
+   `tests/unit/archiveNavPointerBaseline.txt` 由 `103` 下调为 `0`（只降不升）。
+
+### 与接口事实源的分工
+
+本清单是**前端视角**（哪个前端模块请求了哪些端点前缀、哪些后端前缀还没有消费方）；
+接口本身的事实源仍是 `docs/02-api/API_REFERENCE.md`。两者职责不同，不合并——
+立项第 3 节「非目标」已写明，落地时未偏离。
+
+### 守卫分工（同一判据，两条守卫各锁一半）
+
+| 落点 | 作用 |
+|------|------|
+| `scripts/generate_api_inventory.py` | 清单**唯一事实源**：读代码树取全集，产出机器区；`--write` 落盘 |
+| `docs/09-dev-progress/api_inventory.md` | 改为生成物：机器区 + 叙述性说明分区，机器区禁手改 |
+| `tests/unit/test_api_inventory_freshness_guard.py` | 锁模块双向差集、前缀表、快照纪律、生成入口幂等与运行时零假阳性 |
+| `tests/unit/test_api_inventory_guard.py` | 锁机器区与生成器输出**逐字一致**、两组差异逐条登记、快照不逾期 |
 
 ## 7. 重生成暴露的断点（本单**登记**，另单处置）
 
