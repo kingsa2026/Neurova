@@ -1,112 +1,194 @@
-# 前端 API 面清单（生成物）
+# Neurova 前端 API 清单（生成物）
 
-> **性质**：本清单由 `scripts/gen_api_inventory.py` 对**现行代码树**取全集产出，
-> 机器区请勿手改。它是 `docs/0-index/README.md` 里的 `09-dev-progress` 领域入口——
-> 存在意义是**把人指对地方**，因此唯一可接受的形态是「与代码树一致且可复算」。
->
-> **与接口事实源的分工**：本清单是**前端视角**（哪个前端模块请求了哪些端点前缀、
-> 哪些后端前缀还没有消费方）；接口本身的事实源是
-> [`docs/02-api/API_REFERENCE.md`](../02-api/API_REFERENCE.md)。两者职责不同，不合并。
+> **生成命令**：`python scripts/generate_api_inventory.py --write`
+> **快照日期**：2026-09-22
+> **事实源**：前端模块 `NeurUI/src/api/modules/`；后端端点 `neurova/api/endpoints/`
+> （注册表 `neurova/api/endpoints/__init__.py` 加 `neurova/api/app.py` 直接挂载）。
+> 本表**由脚本产出，不要手改**；接口报文与字段以 [API_REFERENCE.md](../02-api/API_REFERENCE.md) 为准。
 
-## 这份清单解决什么
+过期判据不是日历而是**双向差集**：代码树增删一个模块，本表与代码树的差集即非空，守卫 `tests/unit/test_api_inventory_freshness_guard.py` 立刻报红并给出差集两侧的名单。
 
-历史版本是手写的「API 完整清单」，自 2026-06-06 起与代码树脱节：声明的模块近半已
-改名或合并，另有一批现行模块根本没进清单。它坏掉的方式不是「没人维护」，而是
-**压根没有生成入口**——代码树一变它只能漂移，且没有任何命令能把它拉回来。
-
-故本清单改为生成物，判据只写一份（生成器内），由常驻守卫
-（`tests/unit/test_api_inventory_guard.py`）重算比对。三件事因此变成机器可验：
-
-1. **模块双向差集为空**：清单声明的模块与 `NeurUI/src/api/modules/*.ts` 一致；
-2. **差异显式暴露**：前端调用未命中后端注册（区分「路径未注册」与「方法不匹配」）、
-   后端前缀无前端消费，两组差异逐条列出，不删条目掩盖（删条目只是把洞换个位置，
-   与「禁止表面抹除」同一条纪律）；
-3. **快照纪律可核**：生成命令与快照日期写在机器区，逾期由守卫点名。
-
-## 非目标
-
-- 不改后端路由注册结构。清单只做**读**——发现差异就登记，不在本清单里顺手改代码；
-- 不重写 `docs/02-api/API_REFERENCE.md`（接口视角与前端视角各司其职）。
-
-<!-- 以下机器区由 `python scripts/gen_api_inventory.py --update` 生成 -->
 <!-- API-INVENTORY:BEGIN -->
-**生成命令**：`python scripts/gen_api_inventory.py --update`
-**快照日期**：2026-09-22
+## 一、前端 API 模块（61 个）
 
-本区为**生成物**，请勿手改；重跑上面的命令即可刷新。快照周期上限 120 天，逾期由守卫点名。
-
-事实源：前端 `NeurUI/src/api/modules/*.ts`（61 个模块 · 674 处调用），后端 `create_app()` 装配后的真实路由表（830 条路由）。
-
-## 一、前端 API 模块清单
-
-| 模块 | 边界 | 请求到的一级前缀 | 调用数 |
+| 模块文件 | 消费的后端前缀 | barrel 导出 | 仓内引用处 |
 |------|------|------|------|
-| agent-communication | `NeurUI/src/api/modules/agent-communication.ts` | `/agent-communication` | 12 |
-| agent-enhancement | `NeurUI/src/api/modules/agent-enhancement.ts` | `/agent-enhancement` | 4 |
-| agent-package | `NeurUI/src/api/modules/agent-package.ts` | `/agents` | 2 |
-| analytics | `NeurUI/src/api/modules/analytics.ts` | `/analytics` | 4 |
-| audit | `NeurUI/src/api/modules/audit.ts` | `/audit` | 2 |
-| builder | `NeurUI/src/api/modules/builder.ts` | `/builder` | 5 |
-| channel-configs | `NeurUI/src/api/modules/channel-configs.ts` | `/channel-adapters`、`/channel-configs` | 11 |
-| collaboration | `NeurUI/src/api/modules/collaboration.ts` | `/collaboration`、`/neurflow` | 32 |
-| collaborationRoom | `NeurUI/src/api/modules/collaborationRoom.ts` | `/collaboration` | 4 |
-| computer | `NeurUI/src/api/modules/computer.ts` | `/computer` | 9 |
-| console | `NeurUI/src/api/modules/console.ts` | `/console` | 9 |
-| context-pool | `NeurUI/src/api/modules/context-pool.ts` | `/context-pool` | 4 |
-| context | `NeurUI/src/api/modules/context.ts` | `/context` | 10 |
-| cost | `NeurUI/src/api/modules/cost.ts` | `/budgets`、`/cost-rollup` | 9 |
-| enhanced-users | `NeurUI/src/api/modules/enhanced-users.ts` | `/enhanced-users` | 6 |
-| experience | `NeurUI/src/api/modules/experience.ts` | `/experience` | 9 |
-| files | `NeurUI/src/api/modules/files.ts` | `/files` | 7 |
-| firewall | `NeurUI/src/api/modules/firewall.ts` | `/firewall` | 6 |
-| generation | `NeurUI/src/api/modules/generation.ts` | `/generation` | 9 |
-| governance | `NeurUI/src/api/modules/governance.ts` | `/governance` | 9 |
-| groups | `NeurUI/src/api/modules/groups.ts` | `/groups` | 8 |
-| growth | `NeurUI/src/api/modules/growth.ts` | `/growth` | 14 |
-| health | `NeurUI/src/api/modules/health.ts` | `/health` | 5 |
-| home | `NeurUI/src/api/modules/home.ts` | `/home` | 2 |
-| image | `NeurUI/src/api/modules/image.ts` | `/image` | 5 |
-| knowledge | `NeurUI/src/api/modules/knowledge.ts` | `/knowledge`、`/knowledge-graph`、`/semantic-search` | 42 |
-| logs-api | `NeurUI/src/api/modules/logs-api.ts` | `/logs-api` | 6 |
-| media | `NeurUI/src/api/modules/media.ts` | `/media` | 9 |
-| memory-settings | `NeurUI/src/api/modules/memory-settings.ts` | `/memory-settings` | 7 |
-| memory | `NeurUI/src/api/modules/memory.ts` | `/enhanced-memory-search`、`/memory`、`/memory-enhancement`、`/memory-share-groups`、`/memory-timeline`、`/semantic-search` | 101 |
-| metacognition | `NeurUI/src/api/modules/metacognition.ts` | `/metacognition` | 7 |
-| mobile | `NeurUI/src/api/modules/mobile.ts` | `/mobile` | 4 |
-| model-adapter | `NeurUI/src/api/modules/model-adapter.ts` | `/model-adapter` | 3 |
-| models | `NeurUI/src/api/modules/models.ts` | `/models` | 17 |
-| negative-screen | `NeurUI/src/api/modules/negative-screen.ts` | `/negative-screen`、`/notifications` | 5 |
-| neurflow | `NeurUI/src/api/modules/neurflow.ts` | `/neurflow` | 36 |
-| notifications | `NeurUI/src/api/modules/notifications.ts` | `/notifications` | 6 |
-| openplatform | `NeurUI/src/api/modules/openplatform.ts` | `/openplatform` | 8 |
-| plans | `NeurUI/src/api/modules/plans.ts` | `/plans` | 6 |
-| plugins | `NeurUI/src/api/modules/plugins.ts` | `/plugins` | 12 |
-| projects | `NeurUI/src/api/modules/projects.ts` | `/projects` | 14 |
-| providers | `NeurUI/src/api/modules/providers.ts` | `/providers` | 13 |
-| rsiGovernance | `NeurUI/src/api/modules/rsiGovernance.ts` | `/governance` | 5 |
-| rules | `NeurUI/src/api/modules/rules.ts` | `/rules` | 8 |
-| runtime | `NeurUI/src/api/modules/runtime.ts` | `/runtime` | 4 |
-| sandbox | `NeurUI/src/api/modules/sandbox.ts` | `/sandbox` | 6 |
-| scheduler | `NeurUI/src/api/modules/scheduler.ts` | `/scheduler` | 7 |
-| settings | `NeurUI/src/api/modules/settings.ts` | `/governance`、`/settings` | 17 |
-| shared-config | `NeurUI/src/api/modules/shared-config.ts` | `/shared-config` | 14 |
-| skill-pool | `NeurUI/src/api/modules/skill-pool.ts` | `/marketplace`、`/skill-pool` | 30 |
-| sleep | `NeurUI/src/api/modules/sleep.ts` | `/sleep` | 10 |
-| stats | `NeurUI/src/api/modules/stats.ts` | `/stats` | 7 |
-| studio | `NeurUI/src/api/modules/studio.ts` | `/studio` | 20 |
-| synonyms | `NeurUI/src/api/modules/synonyms.ts` | `/synonyms` | 10 |
-| system-logs | `NeurUI/src/api/modules/system-logs.ts` | `/logs` | 2 |
-| tasks | `NeurUI/src/api/modules/tasks.ts` | `/tasks` | 4 |
-| teams | `NeurUI/src/api/modules/teams.ts` | `/teams` | 6 |
-| text-evolution | `NeurUI/src/api/modules/text-evolution.ts` | `/evolution` | 10 |
-| tool-layers | `NeurUI/src/api/modules/tool-layers.ts` | `/tool-layers` | 10 |
-| trace | `NeurUI/src/api/modules/trace.ts` | `/trace` | 4 |
-| webhooks | `NeurUI/src/api/modules/webhooks.ts` | `/webhooks` | 7 |
+| `NeurUI/src/api/modules/agent-communication.ts` | `/agent-communication` | 是 | 1 |
+| `NeurUI/src/api/modules/agent-enhancement.ts` | `/agent-enhancement` | 是 | 1 |
+| `NeurUI/src/api/modules/agent-package.ts` | `/agents` | 是 | 1 |
+| `NeurUI/src/api/modules/analytics.ts` | `/analytics` | 是 | 4 |
+| `NeurUI/src/api/modules/audit.ts` | `/audit` | 是 | 1 |
+| `NeurUI/src/api/modules/builder.ts` | `/builder` | 是 | 1 |
+| `NeurUI/src/api/modules/channel-configs.ts` | `/channel-adapters`, `/channel-configs` | 是 | 5 |
+| `NeurUI/src/api/modules/collaboration.ts` | `/collaboration`, `/neurflow` | 是 | 23 |
+| `NeurUI/src/api/modules/collaborationRoom.ts` | `/collaboration` | **否** | 2 |
+| `NeurUI/src/api/modules/computer.ts` | `/computer` | 是 | 2 |
+| `NeurUI/src/api/modules/console.ts` | `/console` | 是 | 5 |
+| `NeurUI/src/api/modules/context-pool.ts` | `/context-pool` | 是 | 1 |
+| `NeurUI/src/api/modules/context.ts` | `/context` | 是 | 1 |
+| `NeurUI/src/api/modules/cost.ts` | `/budgets`, `/cost-rollup` | **否** | 2 |
+| `NeurUI/src/api/modules/enhanced-users.ts` | `/enhanced-users` | 是 | 0 |
+| `NeurUI/src/api/modules/experience.ts` | `/experience` | 是 | 4 |
+| `NeurUI/src/api/modules/files.ts` | `/files` | 是 | 7 |
+| `NeurUI/src/api/modules/firewall.ts` | `/firewall` | 是 | 2 |
+| `NeurUI/src/api/modules/generation.ts` | `/generation` | 是 | 6 |
+| `NeurUI/src/api/modules/governance.ts` | `/governance` | **否** | 3 |
+| `NeurUI/src/api/modules/groups.ts` | `/groups` | 是 | 2 |
+| `NeurUI/src/api/modules/growth.ts` | `/growth` | 是 | 5 |
+| `NeurUI/src/api/modules/health.ts` | `/health` | 是 | 5 |
+| `NeurUI/src/api/modules/home.ts` | `/home` | 是 | 3 |
+| `NeurUI/src/api/modules/image.ts` | `/image` | 是 | 1 |
+| `NeurUI/src/api/modules/knowledge.ts` | `/knowledge`, `/knowledge-graph`, `/semantic-search` | 是 | 9 |
+| `NeurUI/src/api/modules/logs-api.ts` | `/logs-api` | 是 | 1 |
+| `NeurUI/src/api/modules/media.ts` | `/media` | 是 | 1 |
+| `NeurUI/src/api/modules/memory-settings.ts` | `/memory-settings` | 是 | 4 |
+| `NeurUI/src/api/modules/memory.ts` | `/enhanced-memory-search`, `/memory`, `/memory-enhancement`, `/memory-share-groups`, `/memory-timeline`, `/semantic-search` | 是 | 14 |
+| `NeurUI/src/api/modules/metacognition.ts` | `/metacognition` | 是 | 4 |
+| `NeurUI/src/api/modules/mobile.ts` | `/mobile` | 是 | 1 |
+| `NeurUI/src/api/modules/model-adapter.ts` | `/model-adapter` | 是 | 1 |
+| `NeurUI/src/api/modules/models.ts` | `/models` | 是 | 12 |
+| `NeurUI/src/api/modules/negative-screen.ts` | `/negative-screen`, `/notifications` | 是 | 5 |
+| `NeurUI/src/api/modules/neurflow.ts` | `/neurflow` | 是 | 8 |
+| `NeurUI/src/api/modules/notifications.ts` | `/notifications` | 是 | 6 |
+| `NeurUI/src/api/modules/openplatform.ts` | `/openplatform` | 是 | 0 |
+| `NeurUI/src/api/modules/plans.ts` | `/plans` | 是 | 3 |
+| `NeurUI/src/api/modules/plugins.ts` | `/plugins` | 是 | 0 |
+| `NeurUI/src/api/modules/projects.ts` | `/projects` | 是 | 5 |
+| `NeurUI/src/api/modules/providers.ts` | `/providers` | 是 | 11 |
+| `NeurUI/src/api/modules/rsiGovernance.ts` | `/governance` | **否** | 2 |
+| `NeurUI/src/api/modules/rules.ts` | `/rules` | 是 | 1 |
+| `NeurUI/src/api/modules/runtime.ts` | `/runtime` | 是 | 1 |
+| `NeurUI/src/api/modules/sandbox.ts` | `/sandbox` | 是 | 0 |
+| `NeurUI/src/api/modules/scheduler.ts` | `/scheduler` | 是 | 3 |
+| `NeurUI/src/api/modules/settings.ts` | `/governance`, `/settings` | 是 | 7 |
+| `NeurUI/src/api/modules/shared-config.ts` | `/shared-config` | 是 | 0 |
+| `NeurUI/src/api/modules/skill-pool.ts` | `/marketplace`, `/skill-pool` | 是 | 9 |
+| `NeurUI/src/api/modules/sleep.ts` | `/sleep` | 是 | 8 |
+| `NeurUI/src/api/modules/stats.ts` | `/stats` | 是 | 6 |
+| `NeurUI/src/api/modules/studio.ts` | `/studio` | **否** | 6 |
+| `NeurUI/src/api/modules/synonyms.ts` | `/synonyms` | 是 | 1 |
+| `NeurUI/src/api/modules/system-logs.ts` | `/logs` | 是 | 1 |
+| `NeurUI/src/api/modules/tasks.ts` | `/tasks` | 是 | 0 |
+| `NeurUI/src/api/modules/teams.ts` | `/teams` | 是 | 2 |
+| `NeurUI/src/api/modules/text-evolution.ts` | `/evolution` | **否** | 2 |
+| `NeurUI/src/api/modules/tool-layers.ts` | `/tool-layers` | 是 | 2 |
+| `NeurUI/src/api/modules/trace.ts` | `/trace` | 是 | 2 |
+| `NeurUI/src/api/modules/webhooks.ts` | `/webhooks` | 是 | 1 |
 
-## 二、前端调用 ↔ 后端注册 差集
+> `NeurUI/src/api/index.ts` 是 axios 实例与鉴权拦截器，`NeurUI/src/api/auth.ts` / `NeurUI/src/api/neuron.ts` 是模块目录之外的单文件客户端，三者不属本表模块口径。
 
-下列 **50** 处调用在本轮后端注册表里没有对应路由。这不等于「后端漏注册」——差异以显式列表暴露，由人去核；
-**删条目不等于修好**（清单的价值在于可信，藏差异则整表不可信）。
+## 二、后端挂载前缀（89 条）
+
+| 端点模块 | 挂载前缀 |
+|------|------|
+| `neurova/api/endpoints/acp_api.py` | `/api/acp` |
+| `neurova/api/endpoints/coordination_api.py` | `/api/coordination` |
+| `neurova/api/endpoints/neuron.py` | `/api/neuron` |
+| `neurova/api/endpoints/home.py` | `/api/v1` |
+| `neurova/api/endpoints/agent_communication_api.py` | `/api/v1/agent-communication` |
+| `neurova/api/endpoints/agent_enhancement.py` | `/api/v1/agent-enhancement` |
+| `neurova/api/endpoints/agent.py` | `/api/v1/agents` |
+| `neurova/api/endpoints/agent_package.py` | `/api/v1/agents` |
+| `neurova/api/endpoints/analytics.py` | `/api/v1/analytics` |
+| `neurova/api/endpoints/artifacts_api.py` | `/api/v1/artifacts` |
+| `neurova/api/endpoints/audio.py` | `/api/v1/audio` |
+| `neurova/api/endpoints/audit.py` | `/api/v1/audit` |
+| `neurova/api/endpoints/auth.py` | `/api/v1/auth` |
+| `neurova/api/endpoints/backup_api.py` | `/api/v1/backups` |
+| `neurova/api/endpoints/benchmark.py` | `/api/v1/benchmark` |
+| `neurova/api/endpoints/budget_api.py` | `/api/v1/budgets` |
+| `neurova/api/endpoints/builder.py` | `/api/v1/builder` |
+| `neurova/api/endpoints/channels.py` | `/api/v1/channel-adapters` |
+| `neurova/api/endpoints/channel_config.py` | `/api/v1/channel-configs` |
+| `neurova/api/endpoints/channel_sharing.py` | `/api/v1/channel-sharing` |
+| `neurova/api/endpoints/chat.py` | `/api/v1/chat` |
+| `neurova/api/endpoints/collaboration_api.py` | `/api/v1/collaboration` |
+| `neurova/api/endpoints/collaboration_room_api.py` | `/api/v1/collaboration` |
+| `neurova/api/endpoints/computer.py` | `/api/v1/computer` |
+| `neurova/api/endpoints/console.py` | `/api/v1/console` |
+| `neurova/api/endpoints/context.py` | `/api/v1/context` |
+| `neurova/api/endpoints/context_pool_settings.py` | `/api/v1/context-pool` |
+| `neurova/api/endpoints/cost_rollup_api.py` | `/api/v1/cost-rollup` |
+| `neurova/api/endpoints/enhanced_memory_search_api.py` | `/api/v1/enhanced-memory-search` |
+| `neurova/api/endpoints/enhanced_users_api.py` | `/api/v1/enhanced-users` |
+| `neurova/api/endpoints/text_evolution_api.py` | `/api/v1/evolution` |
+| `neurova/api/endpoints/experience_knowledge_api.py` | `/api/v1/experience` |
+| `neurova/api/endpoints/files_api.py` | `/api/v1/files` |
+| `neurova/api/endpoints/firewall.py` | `/api/v1/firewall` |
+| `neurova/api/endpoints/generation.py` | `/api/v1/generation` |
+| `neurova/api/endpoints/governance.py` | `/api/v1/governance` |
+| `neurova/api/endpoints/groups_api.py` | `/api/v1/groups` |
+| `neurova/api/endpoints/growth.py` | `/api/v1/growth` |
+| `neurova/api/endpoints/health.py` | `/api/v1/health` |
+| `neurova/api/endpoints/image.py` | `/api/v1/image` |
+| `neurova/api/endpoints/knowledge_core.py` | `/api/v1/knowledge` |
+| `neurova/api/endpoints/knowledge_graph_api.py` | `/api/v1/knowledge-graph` |
+| `neurova/api/endpoints/knowledge_integration.py` | `/api/v1/knowledge-integration` |
+| `neurova/api/endpoints/logs.py` | `/api/v1/logs` |
+| `neurova/api/endpoints/logs_api.py` | `/api/v1/logs-api` |
+| `neurova/api/endpoints/marketplace.py` | `/api/v1/marketplace` |
+| `neurova/api/endpoints/mcp_server_api.py` | `/api/v1/mcp` |
+| `neurova/api/endpoints/media.py` | `/api/v1/media` |
+| `neurova/api/endpoints/memory/crud.py` | `/api/v1/memory` |
+| `neurova/api/endpoints/memory_enhancement.py` | `/api/v1/memory-enhancement` |
+| `neurova/api/endpoints/memory_settings_api.py` | `/api/v1/memory-settings` |
+| `neurova/api/endpoints/memory_share_groups.py` | `/api/v1/memory-share-groups` |
+| `neurova/api/endpoints/memory_timeline_api.py` | `/api/v1/memory-timeline` |
+| `neurova/api/endpoints/metacognition_api.py` | `/api/v1/metacognition` |
+| `neurova/api/endpoints/mobile_pairing.py` | `/api/v1/mobile` |
+| `neurova/api/endpoints/model_adapter.py` | `/api/v1/model-adapter` |
+| `neurova/api/endpoints/model.py` | `/api/v1/models` |
+| `neurova/api/endpoints/monitor.py` | `/api/v1/monitor` |
+| `neurova/api/endpoints/negative_screen_settings.py` | `/api/v1/negative-screen` |
+| `neurova/api/endpoints/neurflow_api.py` | `/api/v1/neurflow` |
+| `neurova/api/endpoints/notifications.py` | `/api/v1/notifications` |
+| `neurova/api/endpoints/openplatform_keys.py` | `/api/v1/openplatform` |
+| `neurova/api/endpoints/plans.py` | `/api/v1/plans` |
+| `neurova/api/endpoints/plugin.py` | `/api/v1/plugins` |
+| `neurova/api/endpoints/projects_api.py` | `/api/v1/projects` |
+| `neurova/api/endpoints/provider.py` | `/api/v1/providers` |
+| `neurova/api/endpoints/rules_api.py` | `/api/v1/rules` |
+| `neurova/api/endpoints/runtime.py` | `/api/v1/runtime` |
+| `neurova/api/endpoints/sandbox.py` | `/api/v1/sandbox` |
+| `neurova/api/endpoints/scheduler.py` | `/api/v1/scheduler` |
+| `neurova/api/endpoints/semantic_search_api.py` | `/api/v1/semantic-search` |
+| `neurova/api/endpoints/settings.py` | `/api/v1/settings` |
+| `neurova/api/endpoints/shared_config.py` | `/api/v1/shared-config` |
+| `neurova/api/endpoints/skill_pool_api.py` | `/api/v1/skill-pool` |
+| `neurova/api/endpoints/skill_version_api.py` | `/api/v1/skill-versions` |
+| `neurova/api/endpoints/skill.py` | `/api/v1/skills` |
+| `neurova/api/endpoints/sleep.py` | `/api/v1/sleep` |
+| `neurova/api/endpoints/stats.py` | `/api/v1/stats` |
+| `neurova/api/endpoints/studio_api.py` | `/api/v1/studio` |
+| `neurova/api/endpoints/session_sync.py` | `/api/v1/sync` |
+| `neurova/api/endpoints/synonym_api.py` | `/api/v1/synonyms` |
+| `neurova/api/endpoints/tasks_api.py` | `/api/v1/tasks` |
+| `neurova/api/endpoints/teams_api.py` | `/api/v1/teams` |
+| `neurova/api/endpoints/tool_layers.py` | `/api/v1/tool-layers` |
+| `neurova/api/endpoints/tool_schema.py` | `/api/v1/tools` |
+| `neurova/api/endpoints/trace.py` | `/api/v1/trace` |
+| `neurova/api/endpoints/user_group_api.py` | `/api/v1/user-groups` |
+| `neurova/api/endpoints/webhooks.py` | `/api/v1/webhooks` |
+| `neurova/api/endpoints/workspace_files.py` | `/api/v1/workspace` |
+
+## 三、差集（断点以显式名单暴露，不用「大致一致」带过）
+
+**barrel 未导出的模块**：`NeurUI/src/api/modules/collaborationRoom.ts`, `NeurUI/src/api/modules/cost.ts`, `NeurUI/src/api/modules/governance.ts`, `NeurUI/src/api/modules/rsiGovernance.ts`, `NeurUI/src/api/modules/studio.ts`, `NeurUI/src/api/modules/text-evolution.ts`
+
+**前后端前缀契约断点**（前端按 `baseURL=/api/v1` 请求，后端无对应挂载点 → 404）：无
+
+**零路由挂载点**（注册动作在、路由一条没有 —— 断点，待接线或删除）：无
+
+**未接线 router**（挂载动作在、路由一条没有）：无
+
+**未挂载端点模块**（定义了路由、装配后却不在路由表里 —— 运行时不提供服务）：`neurova.api.endpoints.computer_api`, `neurova.api.endpoints.cost_api`, `neurova.api.endpoints.migration_api`, `neurova.api.endpoints.phase3_api`, `neurova.api.endpoints.skill_market`, `neurova.api.endpoints.skills_market`
+
+**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/coordination`, `/api/neuron`, `/api/v1/artifacts`, `/api/v1/audio`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/benchmark`, `/api/v1/channel-sharing`, `/api/v1/chat`, `/api/v1/knowledge-integration`, `/api/v1/mcp`, `/api/v1/monitor`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/sync`, `/api/v1/tools`, `/api/v1/user-groups`, `/api/v1/workspace`
+
+
+## 四、前端调用 ↔ 后端注册 差集
+
+下列 **50** 处调用在本轮后端注册表里没有对应路由。这不等于「后端漏注册」——差异以显式列表暴露，由人去核：
 
 | 模块 | 方法 | 调用路径 | 差异形态 |
 |------|------|------|------|
@@ -161,11 +243,11 @@
 | tool-layers | POST | `/api/v1/tool-layers/tools/*/execute` | 路径未注册 |
 | tool-layers | POST | `/api/v1/tool-layers/tools/install` | 路径未注册 |
 
-## 三、后端已注册 ↔ 前端消费方 差集
+## 五、后端已注册 ↔ 前端消费方 差集
 
-下列 **20** 个后端一级前缀无任何前端客户端请求，属「后端已就位、前端待补消费方」的显式清单：
+下列 **20** 个后端挂载前缀无任何前端模块直连，属「后端已就位、前端待补消费方」的显式清单：
 
-| 后端一级前缀 |
+| 后端挂载前缀 |
 |------|
 | `/acp` |
 | `/artifacts` |
@@ -188,3 +270,9 @@
 | `/user-groups` |
 | `/workspace` |
 <!-- API-INVENTORY:END -->
+
+## 口径说明
+
+1. **后台逐端点清单已退役**：旧表逐条列「方法 / 路径 / 功能 / 是否实现」，那是人工维护的第二份事实源，必然漂移。逐条端点以 `docs/02-api/API_REFERENCE.md`（接口事实源）与运行时 `/docs` 为准。
+2. **导航归属**：本表定位仍是**现行清单**，保留在 `docs/0-index/README.md` 的 `09-dev-progress` 领域入口表内；重生成后其路径引用全部可解析，不再构成「指路条目」形态的失效引用。
+3. **快照纪律**：头部生成日期与生成命令必须同时在场；超过约定周期未重生成时，以代码树差集（而非日期）判定是否过期。

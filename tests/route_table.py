@@ -9,7 +9,7 @@
 的前缀能长期存活，正是因为没有任何守卫真正把装配后的路由表看全。
 
 故遍历只写这一份，判据在装配侧（`neurova/api/app.py` 的挂载表、
-`scripts/gen_api_inventory.py` 的挂载问题检测），测试只从这里取数。
+`scripts/generate_api_inventory.py` 的挂载问题检测），测试只从这里取数。
 """
 
 

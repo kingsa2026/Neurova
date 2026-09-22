@@ -263,11 +263,25 @@ main:
           # playwright/paramiko/pycryptodome ...）此前完全无人扫——本步补齐该缺口。
           script: python -m pip_audit -r requirements-full.lock --progress-spinner off
           timeout: 20m
+        - name: prefetch OSV offline databases (best effort)
+          # 先把漏洞库落到 runner 本地缓存，让下面这条门禁的裁决**不依赖**
+          # api.osv.dev 的实时可达性——2026-09-22 PR #121 三次红全因该域名
+          # 在本容器里不可达（扫描器此时退 127 并印一句「0 漏洞」）。
+          # 预取失败**不判红**：库过期只漏报新公告，库缺失只是让门禁回退直连；
+          # 把一条随网络抖动的命令放进阻塞门禁，就是本单在消灭的那个形态。
+          # 判据在门禁本体：缓存齐就走离线、不齐则点名并回退（可读、可复算）。
+          script: python scripts/ci/osv_audit.py --prefetch-offline-databases || true
+          timeout: 20m
         - name: audit non-pip trees (Rust crates + runtime npx packages)
           # pip-audit / npm audit 之外的两片依赖面（Issue #56 残留边界）：
           #   * NeurUI/src-tauri/Cargo.lock —— Tauri 桌面壳 crate 树
           #   * tools/npx-runtime/package-lock.json —— 运行时 `npx -y` 现拉的包
           # 统一走 OSV-Scanner；允许清单见 scripts/ci/osv-allowlist.toml。
+          # 不带 `--require-offline`：上面那步预取是 best-effort（`|| true`），
+          # 门禁就不能要求「预取必须成功」——否则预取一失败就是红灯，而这与
+          # 「真有未允许漏洞」在合并流程里同形，读日志的人仍只能重跑。
+          # 缓存不齐时门禁**回退直连并点名缺哪一份**（裁决通路收口在
+          # resolveVerdictChannel 一处），红只留给「真有未允许漏洞」。
           script: python scripts/ci/osv_audit.py
           timeout: 20m
 
@@ -359,11 +373,21 @@ main:
 #   现在：@kingsa2026/neurova(DSCoder) 即 max 档；@...(DSCoder-max) 等价。
 # ============================================================================
 # ── max 档（唯一档位）：@kingsa2026/neurova(DSCoder) / (DSCoder-max) ────────
-# DSCoder 与 DSCoder-max 两个角色名各有一个挂载点，共用同一份锚点定义
-# （均落 thinkingLevel: xhigh）；`$` 只是兜底，不替代角色名挂载点。
-# 三个挂载点的档位与逐字一致性由 tests/unit/test_ci_npc_config_guard.py 常驻校验；
-# 角色名枚举的完整性由 tests/unit/ci/test_npc_pipeline_time_budget.py 常驻校验。
-_档位映射: &npc-level
+# 运行参数只在 `$` 下写一份（落 thinkingLevel: xhigh），
+# 避免「$ 中性档 + 被 @ 时落到平台默认低档」的档位漂移；
+# 档位角色名与参数的一致性由 tests/unit/test_ci_npc_config_guard.py 常驻校验。
+#
+# 本批冲突消解（2026-09-22，PR #136 并入 main）：本 PR 侧曾补 `DSCoder:` 顶层
+# 挂载点（理由是「`$` 只是兜底，不替代角色名挂载点，不带后缀的 DSCoder 会静默
+# 回落平台默认 prompt」）。并入时 main 已由 PR #134 用平台 Schema 证明：
+# `.cnb.yml` 顶层 key **只认分支名**，角色名顶层 key 在推送分支那一刻就非法
+# （Schema 只放行 `^\..` 锚点形态，语义规则另把 `issue.*` 钉在 `$` 下）。
+# 故结论取 main —— 不补角色名挂载点，别名留在 .cnb/settings.yml 侧；
+# 而本 PR 的洞见由 `$` 兜底覆盖**全部**角色来满足（平台按角色名动态匹配顶层 key，
+# 未命中角色名时回落 `$`），「每个在册角色都有配置期必达通道」这件事因此仍成立，
+# 只是不再靠多加一份顶层 key 实现。这条不变量由
+# tests/unit/test_ci_npc_config_guard.py 的挂载点判据常驻校验。
+.档位映射: &npc-level
   DSCoder: xhigh
   DSCoder-max: xhigh
 
@@ -379,6 +403,17 @@ $:
   issue.comment@npc: &npc-dscoder-issue
     - docker:
         image: cnbcool/default-npc:latest
+      # 轮数触顶的接力标记：由本流水线经环境变量传给下一次构建
+      # （同一事件级联 apply 时，本 Job 的环境变量会传给新流水线）。
+      # 空值 = 用户新发的 @；`1` = 上一轮轮数用满、由 endStages 自动接力而来。
+      #
+      # 为何必须把标记传下去、而不是每次都接力：
+      #   收尾阶段无法直接读到 npc:go 的 options（maxTurns 是字面量，不能反向查询），
+      #   所以「本轮是否触顶」由 Agent 自己在最后一轮写出该标记（写进
+      #   $CNB_BUILD_WORKSPACE/.npc-turn-handoff，见 `.cnb/settings.yml` 的工作方式）。
+      #   没有标记就当没触顶 —— 否则用户只说了「你好」也会被无限接力，把配额烧在空轮上。
+      env:
+        turnLimitReached: $turnLimitReached
       stages:
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           # 单条工具执行（bash 命令）的墙钟上界：不声明则连续 10 分钟无输出即中断，
@@ -391,40 +426,68 @@ $:
             # 不写 model = 走平台默认模型（规避 400）；
             # 想锁定底座模型时，填平台真实存在的 model ID（不带思考强度后缀）。
             #
-            # 为何不再压 maxTurns（2026-09-21 复盘）：
-            #   本 PR 初版曾把本值压到 120（≈58 分钟），理由是「maxTurns 同时
-            #   是单次构建的最坏耗时上限：500 轮 × 29s/轮 ≈ 4h，必然先被平台
-            #   2h 上限掐断」。维护者在 main 上显式把 $ 段调到 1000，方向相反：
-            #   轮数配额按「任务够用」给。因为实测 251 轮 / 7262s 证明「被掐断」
-            #   的根因不是轮数给多了，而是 (a) Agent 自己 sleep 轮询
-            #   （300s/420s/480s 串起等待）、(b) 单轮一次全量 pytest 就 20 分 39 秒。
-            #   修掉这两件事，时间预算才不会漏；硬压轮数只会让正常长任务死在半路。
-            #   故本值保持 1000，真正的硬禁令由下方 prompt 的「禁止在构建中主动等待」承担。
+            # 为何 maxTurns 是 200（2026-09-22 二次实测复盘，取代 2026-09-21 的 1000）：
+            #   2026-09-21 的复盘曾把本值放回 1000，理由是「轮数不是死因，够用就好」。
+            #   构建 cnb-m48-1k33grbms 把这个判断否证了：同样的 2h 硬限被再次吃满
+            #   （7300s、207 轮、均摊 35.3s/轮），且是被**外部**掐断。
+            #   1000 轮 × 35.3s ≈ 9.7h，而 2h ÷ 35.3s ≈ 205 轮 ⇒ 1000 的配额**永不触达**，
+            #   于是撞顶发生的时机永远在平台掐断**之后**，收尾阶段根本来不及接力。
+            #   被外部掐断比配额触发的收尾更糟：无告警、无收尾，worktree 里已改未提交
+            #   的成果随容器一起丢。故本值收在硬限之内：200 × 35.3s ≈ 118min。
             #
-            #   2026-09-22 补记（构建 cnb-1q8-1k33cb2v9）：上一轮只把禁令写在这条注释里，
-            #   而注释不进 Agent 的上下文 —— 它照样 sleep 轮询容器内根本不存在的
-            #   前后端进程，并在收尾用 `pkill -f start_server.py` 把自己所在的构建
-            #   容器一并打掉（Stage 340 轮、7261220ms 后以「构建环境异常终止」报错）。
-            #   禁令必须在 prompt 里（配置期唯一必达通道），注释只是给人看的。
+            #   2026-09-22 补记（构建 cnb-1q8-1k33cb2v9）：本 PR 侧的诊断还指向另一层
+            #   —— 上一轮把时间禁令写在这条注释里，而注释不进 Agent 的上下文，它照样
+            #   sleep 轮询容器内根本不存在的前后端进程，并在收尾用
+            #   `pkill -f start_server.py` 把自己所在的构建容器一并打掉
+            #   （Stage 340 轮、7261220ms 后以「构建环境异常终止」报错）。
+            #   禁令必须在 prompt 里（.cnb/settings.yml 的角色 prompt 是唯一必达通道），
+            #   注释只是给人看的。
             #
             #   平台依据（docs.cnb.cool 的「超时」与「npc:go」两篇）：
             #     * Job 默认最长执行 2h；声明 `timeout` 后最长 12h，且该值同时取代
             #       默认的「连续 10 分钟无输出即超时」。
             #     * `npc:go` 的 `timeout` 作用于 Agent 的**每一次工具执行**（bash 命令），
             #       不是整个 Agent 会话；会话整体只受流水线 20h 上限约束。
-            #   故下面那条 `timeout: 20m` 的真实语义是「单条 bash 命令 ≤20 分钟」，
+            #   故上面那条 `timeout: 20m` 的真实语义是「单条 bash 命令 ≤20 分钟」，
             #   它挡不住「300s+420s+480s 串起来的 sleep 轮询」——那正是本案的死因，
-            #   只能靠 prompt 禁令 + 下面守卫兜住。
-            maxTurns: 1000
+            #   只能靠 prompt 禁令 + 守卫兜住。
+            #
+            #   读数与推演常驻在 tests/unit/test_ci_npc_config_guard.py 的
+            #   SECONDS_PER_TURN / AFFORDABLE_TURNS。
+            maxTurns: 200
             contextWindow: 1m
             maxTokens: 48k
             # 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故落 xhigh。
             # 若后续平台开放 max 档，把本行改成 thinkingLevel: max 即可，其余不动。
             thinkingLevel: xhigh
+      # 轮数触顶后自动开启下一轮（回答 Issue #131）：
+      #   npc:go 撞 maxTurns 只是「中止 Agent」，它本身不产生新的轮次预算 ——
+      #   没有这一笔接力，当前流水线结束即终结，用户必须自己发现并手动催下一轮。
+      #   这里在收尾阶段用 cnb:apply 再拉一次**同一事件**，事件名逐字复用 $ 段
+      #   的上下文，故 issues 事件拉起的仍是 issue.comment@npc（PR 事件同理），
+      #   下一轮从仓库默认分支 / PR 分支重新 clone，读取同一个 Issue 的评论继续干。
+      #   关于「为什么不新开一个对话」：Issue/PR 本身就是对话载体，`@` 同一条评论
+      #   即续跑同一现场；另开 Issue 只会让上下文断链（教义：不留断点）。
+      #   关于轮次上界（防无限接力）：每一轮的轮次预算都是 maxTurns=200，
+      #   没有总轮数硬上界；唯一的刹车是 Agent 在触顶时写出的标记 ——
+      #   它每轮都重新判定「我是否真用满了配额」，用不满（正常收官）就不再接力。
+      endStages:
+        - name: "轮数触顶接力：自动开启下一轮（写不出成果就烧配额）"
+          type: cnb:apply
+          if:
+            - '[ "$turnLimitReached" = "1" ]'
+          options:
+            event: issue.comment@npc
+            env:
+              turnLimitReached: $turnLimitReached
 
   pull_request.comment@npc: &npc-dscoder-pr
     - docker:
         image: cnbcool/default-npc:latest
+      # 接力标记与 Issue 事件同义：空 = 用户新发的 @，`1` = 自动接力轮。
+      # 两份事件定义必须逐字一致（test_ci_npc_config_guard.py 常驻校验）。
+      env:
+        turnLimitReached: $turnLimitReached
       stages:
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           # 单条工具执行（bash 命令）的墙钟上界：不声明则连续 10 分钟无输出即中断，
@@ -436,26 +499,38 @@ $:
             # 时间预算硬约束见 .cnb/settings.yml 的角色 prompt（options 不认 prompt 键）。
             # 不写 model = 走平台默认模型（规避 400）；
             # 想锁定底座模型时，填平台真实存在的 model ID（不带思考强度后缀）。
-            # maxTurns 取值理由见上方「为何不再压 maxTurns」；
+            # maxTurns 取值理由见上方「为何 maxTurns 是 200，不是 1000」；
             # 两份事件定义必须逐字一致（test_ci_npc_config_guard.py 常驻校验）。
-            maxTurns: 1000
+            maxTurns: 200
             contextWindow: 1m
             maxTokens: 48k
             # 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故落 xhigh。
             # 若后续平台开放 max 档，把本行改成 thinkingLevel: max 即可，其余不动。
             thinkingLevel: xhigh
+      # 轮数触顶接力：同 Issue 事件，仅事件名换成当前事件。
+      endStages:
+        - name: "轮数触顶接力：自动开启下一轮（写不出成果就烧配额）"
+          type: cnb:apply
+          if:
+            - '[ "$turnLimitReached" = "1" ]'
+          options:
+            event: pull_request.comment@npc
+            env:
+              turnLimitReached: $turnLimitReached
 
-# 两个角色名各自一个挂载点（同一份锚点定义，逐字一致）。
+# 两个角色名都不挂顶层 key：`DSCoder` 与 `DSCoder-max` 一律落到 `$` 兜底。
 #
-# 为何两个都要写：`$` 是**兜底**挂载点，只在角色名没有自己的顶层 key 时才生效。
-# 本仓的角色名是 DSCoder / DSCoder-max，若只声明 DSCoder-max 这一个顶层 key，
-# 不带后缀的 DSCoder 就没有配置期必达通道 —— 本仓 90+ 处按「AGENTS.md 修复教义」
-# 引用的纪律随人设 prompt 一起失效，而平台不会报错（人设静默回落默认）。
-# 两个 key 指向同一份锚点，既补上 DSCoder，又保证两份定义不会各自漂移。
-DSCoder:
-  issue.comment@npc: *npc-dscoder-issue
-  pull_request.comment@npc: *npc-dscoder-pr
-
-DSCoder-max:
-  issue.comment@npc: *npc-dscoder-issue
-  pull_request.comment@npc: *npc-dscoder-pr
+# 为什么不挂：.cnb.yml 的顶层 key 在平台 Schema 里**只认分支名**——
+#   * Schema 层：顶层未知 key 只有 `^\..` 形态（锚点定义）被放行，其余一律要求是分支对象；
+#   * 语义层：`issue.*` 是仓库级事件，只能落在 `$` 兜底分支下。
+# 本仓库在 `$` 下用 `&npc-dscoder-issue / &npc-dscoder-pr` 定义了 max 档的全部运行参数，
+# 且不再写 model、只写 thinkingLevel: xhigh —— 这两点正是 DSCoder 与 DSCoder-max 的**全部差异**，
+# 故别名无需第二份定义：被 @ 时落到哪一份，运行参数都相同。
+#
+# 「不带后缀的 DSCoder 会不会静默回落平台默认 prompt」这件事仍要有人守：
+#   平台按角色名动态匹配顶层 key，未命中角色名时回落 `$`；而角色人设来自
+#   .cnb/settings.yml（评论触发时提示词由角色自带），两个角色名都能拿到本仓的人设
+#   与修复教义。该不变量（每个在册角色都被合法挂载点覆盖、顶层 key 只准 `$` 或
+#   `^\.` 锚点形态）由 tests/unit/test_ci_npc_config_guard.py 常驻校验。
+# （若将来两个角色确实需要不同参数，正确的做法是让它们在 settings.yml 侧只保留一个角色名，
+#   而不是再造一份顶层 key——顶层 key 一旦不是分支名，就是一份过不了 Schema 的配置。）

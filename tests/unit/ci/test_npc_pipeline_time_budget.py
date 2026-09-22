@@ -31,9 +31,10 @@ Agent 为一项「浏览器级 live」收尾任务反复 `sleep` 轮询构建容
 - **B. 时间条款落在真正必达的通道**：`npc:go.options` 不认 `prompt` / `systemPrompt`
   这类字段（评论触发时提示词由 `.cnb/settings.yml` 的角色自带），故时间预算条款
   必须写进**每个档位角色**的 `prompt`，并覆盖两类死因（sleep 轮询 / 宽匹配 pkill）。
-- **C. 枚举仍在**：角色名不得被悄悄重命名 —— 名字一改，`DSCoder-max` 就失去配置期
-  唯一必达通道，只得回落到平台默认 prompt（本仓 90+ 处引用的纪律随之失效），
-  而平台不会报错。
+- **C. 枚举仍在**：角色名不得被悄悄重命名，也不得被挂到 `.cnb.yml` 顶层 key 上
+  —— 前者让 `DSCoder-max` 失去配置期唯一必达通道、回落平台默认 prompt，
+  后者在**推送的那一刻**就是非法配置（顶层 key 只认分支名）。两条路都让本仓
+  90+ 处引用的纪律静默失效，而平台不会报错。
 - **D. 守卫自洽**：本文件必须留在受保护子集里，否则 A/B/C 三条在 CI 上无人执行。
 
 可证伪路径：
@@ -287,6 +288,23 @@ class TestTimeClauseLivesOnTheReachableChannel:
         assert not problems, "\n  ".join(problems)
 
 
+def _strip_self_event(pipeline):
+    """把收尾自行接力里的 `event` 置为占位——两份事件定义只允许在此处不同。"""
+    def walk(node):
+        if isinstance(node, list):
+            return [walk(i) for i in node]
+        if isinstance(node, dict):
+            return {
+                k: ("<self-event>"
+                    if k == "event" and isinstance(v, str) and v.endswith("@npc")
+                    else walk(v))
+                for k, v in node.items()
+            }
+        return node
+
+    return walk(pipeline)
+
+
 class TestLevelRoleEnumUnchanged:
     """档位角色名不得被悄悄重命名（改名即失去配置期唯一必达通道）。"""
 
@@ -300,27 +318,55 @@ class TestLevelRoleEnumUnchanged:
         )
 
     def test_every_level_role_has_mount_point(self, cnb_doc):
+        """每个档位角色都必须落到**合法**挂载点上 —— 非法顶层的唯一形态是角色名。
+
+        本批冲突消解（2026-09-22，PR #136 并入 main）：本 PR 侧最初把本条判据写成
+        「每个档位角色在 .cnb.yml 有同名顶层 key」，理由是角色名缺挂载点会静默回落
+        平台默认 prompt。并入 main 时该写法已被 PR #134 用平台 Schema 否证：
+        `.cnb.yml` 顶层 key **只认分支名**，角色名顶层 key 在推送那一刻就非法
+        （Schema 只放行 `^\..` 锚点，语义规则另把 `issue.*` 钉在 `$` 下）。
+        故判据改成「每个角色名都不得作为顶层 key 出现，且必须被 `$` 覆盖到」——
+        洞见（不能静默回落）保留，实现取合法形态。
+        """
         problems = []
         for role in LEVEL_ROLES:
-            body = cnb_doc.get(role)
-            if not isinstance(body, dict):
-                problems.append(f"{role}: .cnb.yml 缺同名挂载点")
-                continue
-            keys = [k for k in body if isinstance(k, str) and k.endswith("@npc")]
+            if role in cnb_doc:
+                problems.append(
+                    f"{role}: 角色名挂在 .cnb.yml 顶层 key 上 —— 顶层 key 只认分支名，"
+                    "该形态在推送那一刻就是非法配置"
+                )
+        fallback = cnb_doc.get("$")
+        if not isinstance(fallback, dict):
+            problems.append("$: .cnb.yml 缺 `$` 兜底挂载点（角色没有配置期必达通道）")
+        else:
+            keys = [k for k in fallback if isinstance(k, str) and k.endswith("@npc")]
             if len(keys) < 2:
-                problems.append(f"{role}: 挂载点缺事件（应含 issue 与 pull_request 两类）")
-            if body.get("issue.comment@npc") != body.get("pull_request.comment@npc"):
-                problems.append(f"{role}: 两条事件定义不一致（会各自漂移）")
+                problems.append("$: 兜底挂载点缺事件（应含 issue 与 pull_request 两类）")
+            # 两条事件定义的唯一允许差异是收尾自行接力的事件名
+            # （issue 拉 issue、PR 拉 PR），其余逐字一致——判据与
+            # tests/unit/test_ci_npc_config_guard.py 同源，不另立一套口径。
+            if _strip_self_event(fallback.get("issue.comment@npc")) != \
+                    _strip_self_event(fallback.get("pull_request.comment@npc")):
+                problems.append("$: 两条事件定义不一致（除自身事件名外应逐字相同）")
         assert not problems, "\n  ".join(problems)
 
     def test_roles_rendered_identically_across_mounts(self, cnb_doc):
-        """角色名挂载点之间必须逐字一致：共用锚点解析出的配置对象应当相等。"""
-        bodies = {role: cnb_doc.get(role) for role in LEVEL_ROLES}
-        distinct = {role: body for role, body in bodies.items() if body is not None}
-        assert len({repr(body) for body in distinct.values()}) <= 1, (
-            "档位角色挂载点之间的配置不一致："
-            + ", ".join(sorted(distinct)) +
-            "\n改一处必须同步另一处（或共用同一份 YAML 锚点）。"
+        """档位角色之间必须共用同一份锚点：两个角色名解析出的配置对象应当相等。
+
+        顶层 key 已收敛为 `$` 一处（角色名顶层 key 非法），所以「多挂载点漂移」
+        的形态在本仓不可能出现；本条改为直接钉住 `$` 段两条事件定义共用的锚点，
+        防后人把某个角色拆出去另写一份定义（那就是第二套平行体系）。
+        """
+        fallback = cnb_doc.get("$") or {}
+        bodies = {
+            key: fallback.get(key)
+            for key in ("issue.comment@npc", "pull_request.comment@npc")
+        }
+        distinct = {k: body for k, body in bodies.items() if body is not None}
+        assert len(distinct) == 2, (
+            "$ 段缺少 NPC 事件定义："
+            + ", ".join(sorted(set(bodies) - set(distinct))) +
+            "\n两个档位角色（DSCoder / DSCoder-max）都落到 `$`，缺一个就等于缺一类触发。"
         )
 
 

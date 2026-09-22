@@ -215,18 +215,25 @@ neurova/llm/cost_tracking_middleware.py  ← 362 行，全仓零消费者
 88 项 endpoint 白名单靠**运行时字符串**导入，失败只 `logger.debug`。后果：
 
 - 漏注册 / 导入炸了在启动期**完全不可见**；
-- 实测 4 个新端点模块（`cost_api.py` / `computer_api.py` / `phase3_api.py` / `migration_api.py`）
+- 实测 4 个端点模块（`cost_api.py` / `computer_api.py` / `phase3_api.py` / `migration_api.py`）
   **零注册、零引用**；
-- `budget_api` / `cost_rollup_api` 走 `app.py:525,560,563-564` **旁路**注册，
+- `budget_api` / `cost_rollup_api` 走 `app.py` **旁路**注册，
   与白名单机制并存 = 两套注册事实源；
-- `neuron` 既在白名单 `[:280]`（prefix `""`）又在 `app.py:568`（`/api/neuron`）**重复挂载**；
-- `coordination_api` 自带 `prefix="/coordination"` `[:33]` 又被挂到 `/api/coordination`
+- `neuron` 既在白名单（prefix `""`）又在 `app.py` **重复挂载**；
+- `coordination_api` 自带 `prefix="/coordination"` 又被挂到 `/api/coordination`
   → 实际路径 `/api/coordination/coordination/*`，前端零引用；
 - 动态字符串注册**不可静态分析**：IDE、类型检查、依赖图、以及本目录所有架构图，
   都看不到这张表。这是自动化治理的结构性障碍。
 
-`test_route_registration.py` 存在但只在仓库根、未跟踪、未纳入 CI 断言清单
-（`scripts/ci/protected_tests.txt` 不含它）→ 守卫没接上。
+**2026-09-22 收口状态**：旁路注册组与三个模块级空 `APIRouter`
+（`router` / `evolution_router` / `rag_router`）已删除，挂载事实收口到
+`endpoint_modules` 注册表一处；`neuron` / `coordination_api` 的重复前缀段消失。
+常驻守卫 `tests/unit/api/test_route_mount_contract_guard.py` 钉住
+「零路由挂载 / 前缀重复 / 挂载层错位」三类形态，并保留
+`unmountedEndpointModules()` 名单（`cost_api` / `computer_api` / `phase3_api` /
+`migration_api` / `skill_market` / `skills_market` 仍定义了路由但未挂载，
+名单进 `docs/09-dev-progress/api_inventory.md` 供人排期）。
+「导入失败只 `logger.debug`」这条仍成立，属同域的下一个缺口，未在本轮处置。
 
 ### 6.2 成本链路：是只读报表，不是拦截器
 
@@ -266,14 +273,19 @@ CI: package.json:9-11 + cost-guards.yml
 ### 6.3 前后端前缀契约断裂
 
 ```
-前端 baseURL = /api/v1                    [NeurUI/src/api/index.ts:77 ← config/index.ts:32]
-后端 budget/cost_rollup 挂在 /api/...      [app.py:560,563-564]  ← 缺 /v1
+前端 baseURL = /api/v1                    [NeurUI/src/api/index.ts ← config/index.ts]
+后端 budget/cost_rollup 挂在 /api/...      [app.py 旁路注册]  ← 缺 /v1
    ⇒ CostDashboard 全部请求 404
-   ⇒ 被 .catch(() => null) 静默吞掉        [CostDashboardPage.vue:171-173]
+   ⇒ 被 .catch(() => null) 静默吞掉        [CostDashboardPage.vue]
 
-api/computer.ts 更用裸 axios 绕开唯一实例  [api/computer.ts:1,5,12]
+api/computer.ts 更用裸 axios 绕开唯一实例  [api/computer.ts]
    ⇒ 无 token、无信封解包，且指向未注册路由 → 必 404
 ```
+
+**2026-09-22 收口状态**：`budget_api` / `cost_rollup_api` 已并入注册表挂 `/v1`，
+`/api/v1/budgets/*`、`/api/v1/cost-rollup/*` 实测可达（真应用探活）。`api/computer.ts`
+仍用裸 axios 且指向未挂载的 `/api/computers`——它属 `unmountedEndpointModules()`
+名单里的 `computer_api`，是同一张清单的下一层，未在本轮处置（清单里逐条在册）。
 
 这一条把 §6.1（未注册）与 §6.3（前缀不一致）耦合成同一个可观测故障：
 **前端界面会正常渲染，只是所有数据都是空的**。这是最难从外部发现的一类 bug。
