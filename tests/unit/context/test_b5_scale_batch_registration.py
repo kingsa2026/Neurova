@@ -23,11 +23,18 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
 
-#: B5 规模批（PR #138）交付的判据文件。
+#: 已交付批次 → 该批交付的判据文件。一个批次一条登记，同一条判据不复制扫描逻辑。
 BATCH_FILES = (
+    # B5 规模批（PR #138）
     "tests/unit/context/test_drawer_scale_scoring.py",
     "tests/unit/context/test_recall_budget_floor.py",
     "tests/unit/context/test_window_token_metering.py",
+    # B6 收尾批（B6-6 向量层批量入口 / B6-7 归档时刻 / B6-8 降级恢复 /
+    # B6-9 视图额度形态）——同一形态：文件在仓、单跑全绿，漏登记则 CI 跑不到。
+    "tests/unit/context/test_vector_batch_encoding.py",
+    "tests/unit/context/test_archive_moment_scoring.py",
+    "tests/unit/context/test_context_degradation_recovery.py",
+    "tests/unit/context/test_view_budget_single_form.py",
 )
 
 
