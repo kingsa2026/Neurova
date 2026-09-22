@@ -346,7 +346,13 @@ tests/unit/context/test_ledger_gc_retention.py
 #     闸口落在两条源合并之后）
 tests/unit/context/test_ledger_recall_scope_gate.py
 
-# Issue #112 销账（Issue #68 归档层导航影响筛选·乙类）：前端 API 清单整篇重生成。
+# 上下文持久层批（Issue #90）B4 工单 004：读侧预筛与转义（A3/A4）
+#   （根因：LIKE 兜底直拼用户输入 `f"%{query}%"`——`%`/`_` 是通配符，把用户输入
+#    变成通配模式；且长度 <3 的查询强上 MATCH 得假阴性（漏召回）。
+#    转义/短语包裹/长度分流收口到 neurova/core/sql_like.py 一处，候选集两步法有界）
+tests/unit/context/test_ledger_read_prefilter.py
+
+# Issue #112 销账（Issue #68 归档层导航影响筛选·乙类）：前端 API 清单重生成。
 #   根因：docs/09-dev-progress/api_inventory.md 是专职指路文档（docs/0-index/README.md
 #   的 09-dev-progress 领域入口），但此前**只有手写正文、没有写者**——代码树一变
 #   它只能漂移，且没有任何命令能把它拉回来：实测声明 71 个前端模块里 29 个已不存在、
@@ -360,6 +366,7 @@ tests/unit/context/test_ledger_recall_scope_gate.py
 #   棘轮基线 103 → 0。
 tests/unit/test_api_inventory_freshness_guard.py
 tests/unit/test_api_inventory_guard.py
+
 # Issue #80 工具↔经验↔再调用三环路修复批（第四轮）：票面正文入库与「判据可复核」收口。
 #   根因：001–011 的票面（即每张票的收工判据）只存在于 Issue 附件的对话里，仓内只有
 #   000-索引.md——索引表 11 行的落点指向 11 份并不存在的票面，复核者拿不到判据原文。
@@ -381,3 +388,8 @@ tests/unit/test_tool_loop_ticket_set_guard.py
 #   守卫另锁：命令契约与下载的扫描器版本自洽、门禁步骤的退出码能穿过管道
 #   （软管道实测吞码：子进程 127 → 管道整体 0）。
 tests/unit/test_osv_audit_hardening_guard.py
+
+# 上下文持久层批（Issue #90）B4 工单 006：v2 迁移 FTS 重建为 trigram（A7/A6）
+#   （根因：unicode61 对中文等于无索引，实测中文短语命中 0；只改 tokenize 参数
+#     不改已有索引 → 必须重建。影子表 + 分批短事务，禁一次性长事务/delete-all）
+tests/unit/context/test_context_ledger_fts_migration.py

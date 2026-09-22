@@ -15,7 +15,12 @@ SQLite WAL + FTS5：被驱逐/折叠的上下文 chunk 落库，重启后经 FTS
   那会把崩溃窗口内的内容连同"已归档"的承诺一起丢掉）。
 - FTS5 独立表 + 手动双写（rowid 对齐内容表）；GC 时**分批**对齐清理
   （`delete-all` 对本表非法）
-- MATCH 语法错误安全降级为 LIKE 子串匹配
+- 读侧预筛按**长度分流**：≥3 字符走 MATCH，<3 字符直接走 LIKE（trigram 索引不到
+  短查询，强上 MATCH 是假阴性 = 漏召回；规格 §7 已知的坑第 1 条）
+- **候选集有上限**（`CANDIDATE_LIMIT`）：MATCH 命中超限时降级为"最近 N 条候选 +
+  候选内子串过滤"，不整库拉回内存（规格 U2 定案）
+- LIKE 模式的 `%` `_` `\` 转义与 MATCH 短语规则**只此一份**（`core.sql_like`）：
+  就地拼 `f"%{query}%"` 等于把用户输入当通配模式（实测 3 行全命中）
 - **schema 走 `core/db_migration` 的 `context_ledger` 版本域**（B4/002）：本库
   此前只有 `CREATE TABLE IF NOT EXISTS`，没有 `user_version`，后续每次改 schema
   都是裸改。v1 = `content_digest` / `created_at` / `chat_scope` 三列 +
@@ -39,6 +44,9 @@ from typing import Any, Dict, List, Optional
 
 from neurova.collaboration.memory_scope import scope_from_metadata
 from neurova.core.db_migration import migrate as applyMigrations, register_migration
+# 读侧查询判据按**模块属性**引用（而非 `from ... import`）：同源探针打事实源函数上，
+# 若本模块把函数绑成模块级名字，复刻一份就地拼装就抓不到调用（008 的同源探针纪律）。
+from neurova.core import sql_like
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +92,18 @@ _DIGEST_INDEX = (
 # D11：FTS 对齐走分批删除（5000/批）。整表 `NOT IN` 与分批量级相当（基线脚本 §7），
 # 但分批不长时间持写锁。`delete-all` 对本表非法（普通 FTS5，实测 OperationalError）。
 _FTS_ALIGN_BATCH = 5000
+
+# D9 候选集上限（规格 U2 定案初值）：MATCH 命中超过它时降级为"最近 N 条候选 +
+# 候选内子串过滤"。用于避免一次查询把整库拉回内存再逐条过滤。
+CANDIDATE_LIMIT = 2000
+
+# D12 v2：FTS 重建为 trigram 的回填批大小（规格实测值）。分批短事务——
+# 一次性 `INSERT … SELECT` 会把并发写整段阻塞（基线脚本 §6 实测 0.84 s 全程持写锁）。
+_FTS_REBUILD_BATCH = 5000
+
+# v2 的影子表名与分词器（重建期用；切换完成后影子表被 RENAME 成正式表）
+_FTS_SHADOW_TABLE = "evicted_fts_v2"
+_FTS_TOKENIZE = "trigram"
 
 
 def contentDigest(content: str) -> str:
@@ -211,7 +231,103 @@ def _migrateToV1(conn: sqlite3.Connection) -> None:
     conn.execute(_SCOPE_INDEX)
 
 
+def _rebuildFtsAsTrigram(conn: sqlite3.Connection) -> None:
+    """v2：把 FTS 分词器从 `unicode61` 换成 `trigram`（中文可检索）。
+
+    **只改 `tokenize` 参数不会改已有索引**，必须重建表。为什么影子表 + 分批：
+
+    - `delete-all` 只对 contentless/external-content 表合法，本表是普通 FTS5，
+      实测直接 `OperationalError`；
+    - 一次性 `INSERT … SELECT` 回填是一条长事务，会把并发写整段阻塞
+      （基线脚本 §6 实测 0.84 s 全程持写锁），与"零停机"判据 A7 冲突。
+
+    顺序：建影子表 → **分批短事务**回填（每批独立提交）→ 最后一个事务里
+    `DROP` 旧表 + `RENAME` 影子表。
+
+    为什么整段写面走**独立连接**（`_sideConnection`）：
+
+    1. `db_migration` 的 callable 步骤在迁移事务里，而 FTS 虚表的 `DROP`/`RENAME`
+       无法在持事务的连接上执行（实测同连接内 `database is locked`）；
+    2. 更关键的是**快照**：迁移连接的读快照看不到另一条连接的写入，若用它来读
+       "影子表里还差哪些行"，循环永远取到同一批（实测：同批被重复插入 →
+       `IntegrityError: constraint failed`）。故读取与写入必须在**同一条**连接上。
+
+    迁移连接只负责最后推进 `user_version`（`db_migration` 的既有语义）。
+
+    幂等/可重入：影子表 `IF NOT EXISTS` 建、回填按"影子表里还没有的行"取——
+    中途失败留下的半成品影子表在重跑时被补齐，不会把行数算丢。
+    """
+    dbPath = _databasePath(conn)
+    side = _openSideConnection(dbPath)
+    try:
+        side.execute("CREATE VIRTUAL TABLE IF NOT EXISTS %s USING fts5(content, tokenize='%s')"
+                     % (_FTS_SHADOW_TABLE, _FTS_TOKENIZE))
+        while True:
+            side.execute("BEGIN IMMEDIATE")
+            batch = side.execute(
+                "SELECT id, content FROM evicted_chunks"
+                " WHERE id NOT IN (SELECT rowid FROM %s) LIMIT ?" % _FTS_SHADOW_TABLE,
+                (_FTS_REBUILD_BATCH,),
+            ).fetchall()
+            if not batch:
+                side.execute("COMMIT")
+                break
+            side.executemany(
+                "INSERT INTO %s(rowid, content) VALUES (?, ?)" % _FTS_SHADOW_TABLE,
+                [(row["id"], row["content"]) for row in batch],
+            )
+            side.execute("COMMIT")
+        # 切换窗口：**在同一个写事务里**补齐尾批 + DROP + RENAME。
+        # 尾批不能留在上一次循环的读之后——那段时间里并发写可能已插入了新行，
+        # 而它们的内容行在、索引行不在（实测迁移后两表差 1 行）。
+        # 放进同一个 BEGIN IMMEDIATE 里，切换窗口内没有第三方写入的插缝。
+        side.execute("BEGIN IMMEDIATE")
+        side.execute(
+            "INSERT INTO %s(rowid, content)"
+            " SELECT id, content FROM evicted_chunks"
+            " WHERE id NOT IN (SELECT rowid FROM %s)" % (_FTS_SHADOW_TABLE, _FTS_SHADOW_TABLE)
+        )
+        side.execute("DROP TABLE IF EXISTS evicted_fts")
+        side.execute("ALTER TABLE %s RENAME TO evicted_fts" % _FTS_SHADOW_TABLE)
+        side.execute("COMMIT")
+    except Exception:
+        try:
+            side.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+    finally:
+        side.close()
+
+
+def _databasePath(conn: sqlite3.Connection) -> str:
+    """取连接的实际库路径（`db_migration` 的步骤只拿到连接）。
+
+    不用 `sqlite_master` 查询判存在性：那会在迁移事务里取读锁，与同库的 DDL 写锁
+    冲突（实测 `database is locked`）。`PRAGMA database_list` 不取锁。
+    """
+    row = conn.execute("PRAGMA database_list").fetchone()
+    path = row[2] if row else ""
+    if not path:
+        raise sqlite3.OperationalError("台账库是内存库/匿名库，无法做影子表迁移")
+    return path
+
+
+def _openSideConnection(dbPath: str) -> sqlite3.Connection:
+    """重建用的独立连接：短事务（每批 `BEGIN IMMEDIATE` + `COMMIT`）。
+
+    `BEGIN IMMEDIATE` 显式取写锁：默认 deferred 事务在"先读后写"升级锁时会撞上
+    别的写者并直接失败（实测 `database is locked`）。短事务窗口让并发写在批次之间
+    插得进来——这是 A7「迁移窗口内并发写不停」的落地形态。
+    """
+    side = sqlite3.connect(dbPath, timeout=30, isolation_level=None)
+    side.row_factory = sqlite3.Row
+    side.execute("PRAGMA busy_timeout=10000")
+    return side
+
+
 register_migration(1, _migrateToV1, domain=LEDGER_DOMAIN)
+register_migration(2, _rebuildFtsAsTrigram, domain=LEDGER_DOMAIN)
 
 
 class EvictionLedgerDB:
@@ -449,59 +565,101 @@ class EvictionLedgerDB:
         session_id: Optional[str] = None,
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
-        """召回主体（调用方须持 `_lock`：常驻连接不可并发使用）。"""
+        """召回主体（调用方须持 `_lock`：常驻连接不可并发使用）。
+
+        查询侧判据（长度分流 / 转义 / 候选集上限）只经 `core.sql_like` 与本模块
+        常量，不在此就地拼装第二份——转义规则改一处漏一处等于没改。
+        """
         conn = self._requireConn()
-        if query:
-            hits: List[Dict[str, Any]] = []
-            try:
-                hits = conn.execute(
-                    "SELECT e.*, e.id AS _row FROM evicted_chunks e"
-                    " JOIN evicted_fts f ON e.id = f.rowid"
-                    " WHERE e.user_id = :user_id AND e.agent_id = :agent_id"
-                    " AND evicted_fts MATCH :fts_query"
-                    " AND (:session_id IS NULL OR e.session_id = :session_id)"
-                    " ORDER BY e.id DESC LIMIT :limit",
-                    {
-                        "user_id": self.user_id,
-                        "agent_id": self.agent_id,
-                        "fts_query": self._fts_safe(query),
-                        "session_id": session_id,
-                        "limit": limit,
-                    },
-                ).fetchall()
-            except sqlite3.OperationalError:
-                logger.info("FTS query failed, fallback to LIKE search")
+        filters = {"user_id": self.user_id, "agent_id": self.agent_id}
+        session_filter = " AND (:session_id IS NULL OR session_id = :session_id)"
+        if not (query or "").strip():
+            return conn.execute(
+                "SELECT *, id AS _row FROM evicted_chunks"
+                " WHERE user_id = :user_id AND agent_id = :agent_id"
+                + session_filter
+                + " ORDER BY id DESC LIMIT :limit",
+                {**filters, "session_id": session_id, "limit": limit},
+            ).fetchall()
 
-            if not hits:
-                hits = conn.execute(
-                    "SELECT *, id AS _row FROM evicted_chunks"
-                    " WHERE user_id = :user_id AND agent_id = :agent_id"
-                    " AND content LIKE :like"
-                    " AND (:session_id IS NULL OR session_id = :session_id)"
-                    " ORDER BY id DESC LIMIT :limit",
-                    {
-                        "user_id": self.user_id,
-                        "agent_id": self.agent_id,
-                        "like": f"%{query}%",
-                        "session_id": session_id,
-                        "limit": limit,
-                    },
-                ).fetchall()
-            return hits
+        hits: List = []
+        if sql_like.shouldMatch(query):
+            hits = self._matchCandidates(conn, query, session_id, limit)
+        if not hits:
+            hits = self._likeCandidates(conn, query, session_id, limit)
+        return hits
 
+    def _matchCandidates(self, conn, query: str, session_id: Optional[str], limit: int) -> List:
+        """MATCH 预筛：候选集**先按上限截断**，再在候选内取内容行。
+
+        两个返回面合起来才是"候选集超上限时不得整库拉回"的可证伪形态：
+
+        - 候选行数达到 `CANDIDATE_LIMIT` 时，说明命中超过上限 → 改为按 `id DESC`
+          取最近 `CANDIDATE_LIMIT` 条，并在**候选内**做子串过滤（降级分支）；
+        - 候选行数不足上限时，说明命中全在候选里 → 直取这些行（命中语义对齐 LIKE 真值）。
+
+        不做单次 `JOIN` + `LIMIT`：SQLite 对 FTS 虚表的 `ORDER BY e.id DESC` 会退化成
+        "扫全表匹配项再排序"（实测 5 万行库上零命中查询 336 ms vs 候选集查询 0.01 ms）。
+        """
+        try:
+            candidates = conn.execute(
+                "SELECT rowid FROM evicted_fts WHERE evicted_fts MATCH :fts_query"
+                " ORDER BY rowid DESC LIMIT :cap",
+                {"fts_query": sql_like.matchQuery(query), "cap": CANDIDATE_LIMIT + 1},
+            ).fetchall()
+        except sqlite3.OperationalError:
+            logger.info("FTS MATCH 失败，降级 LIKE 子串匹配（query=%r）", query)
+            return []
+        if not candidates:
+            return []
+        if len(candidates) > CANDIDATE_LIMIT:
+            return self._recentCandidates(conn, query, session_id, limit)
+        return self._rowsByIds(conn, [row["rowid"] for row in candidates], session_id, limit)
+
+    def _rowsByIds(self, conn, ids: List[int], session_id: Optional[str], limit: int) -> List:
+        """按 id 集合取内容行（顺序按 `id DESC`，与既有召回序一致）。"""
+        if not ids:
+            return []
+        placeholders = ", ".join("?" for _ in ids)
         return conn.execute(
+            "SELECT *, id AS _row FROM evicted_chunks"
+            " WHERE user_id = ? AND agent_id = ?"
+            " AND id IN (" + placeholders + ")"
+            " AND (? IS NULL OR session_id = ?)"
+            " ORDER BY id DESC LIMIT ?",
+            (self.user_id, self.agent_id, *ids, session_id, session_id, limit),
+        ).fetchall()
+
+    def _recentCandidates(self, conn, query: str, session_id: Optional[str], limit: int) -> List:
+        """降级分支：按 `id DESC` 取最近 `CANDIDATE_LIMIT` 条，在候选内做子串过滤。
+
+        用于"MATCH 命中超上限"的情形——不整库拉回，也不把命中整个丢掉。
+        """
+        recent = conn.execute(
             "SELECT *, id AS _row FROM evicted_chunks"
             " WHERE user_id = :user_id AND agent_id = :agent_id"
             " AND (:session_id IS NULL OR session_id = :session_id)"
-            " ORDER BY id DESC LIMIT :limit",
-            {"user_id": self.user_id, "agent_id": self.agent_id, "session_id": session_id, "limit": limit},
+            " ORDER BY id DESC LIMIT :cap",
+            {"user_id": self.user_id, "agent_id": self.agent_id,
+             "session_id": session_id, "cap": CANDIDATE_LIMIT},
         ).fetchall()
+        needle = query.lower()
+        return [row for row in recent if needle in row["content"].lower()][:limit]
 
-    @staticmethod
-    def _fts_safe(query: str) -> str:
-        """FTS5 短语安全化：包裹双引号并转义内部引号，避免 MATCH 语法错误。"""
-        escaped = (query or "").replace('"', '""')
-        return f'"{escaped}"'
+    def _likeCandidates(self, conn, query: str, session_id: Optional[str], limit: int) -> List:
+        """LIKE 子串分支（长度 <3 或 MATCH 空结果/语法错误时的兜底）。
+
+        `%` `_` `\` 的转义只经 `core.sql_like.likePattern`——就地拼
+        `f"%{query}%"` 等于把用户输入当通配模式（实测库内 3 行时 `%` 命中 3 行）。
+        """
+        return conn.execute(
+            "SELECT *, id AS _row FROM evicted_chunks"
+            " WHERE user_id = ? AND agent_id = ?"
+            " AND " + sql_like.likePredicate("content") +
+            " AND (? IS NULL OR session_id = ?)"
+            " ORDER BY id DESC LIMIT ?",
+            (self.user_id, self.agent_id, sql_like.likePattern(query), session_id, session_id, limit),
+        ).fetchall()
 
     def count(self) -> int:
         with self._lock:

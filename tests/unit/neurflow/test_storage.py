@@ -738,3 +738,58 @@ class TestNeurflowStorage:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+class TestSearchTreatsInputAsSubstring:
+    """搜索入口把用户输入当**子串**，不是 LIKE 通配模式。
+
+    根因（004 的同契约命中点）：`search_workflows` / `search_node_definitions` /
+    `find_subflow_references` 三处各自拼 `f"%{query}%"`，而 `%` 与 `_` 是 LIKE
+    通配符——用户输入 `%` 会把整表拉回。转义判据只此一份（`core.sql_like`）。
+    """
+
+    @pytest.fixture
+    def storage(self):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+            db_path = f.name
+        try:
+            yield NeurflowStorage(db_path)
+        finally:
+            os.unlink(db_path)
+
+    def test_workflowSearchDoesNotTreatPercentAsWildcard(self, storage):
+        def make(id, name):
+            return WorkflowDefinition(
+                id=id, name=name, description="", version="1.0.0", nodes=[], edges=[],
+                variables=[], tags=[], category="programming", author="tester",
+                created_at=1717833600.0, updated_at=1717833600.0,
+                status=WorkflowStatus.DRAFT,
+            )
+
+        storage.save_workflow(make("wf_pct", "含百分号 100% 的工作流"))
+        storage.save_workflow(make("wf_plain", "普通工作流"))
+
+        hits = storage.search_workflows("%")
+
+        assert [w.id for w in hits] == ["wf_pct"], "`%` 被当成通配模式（整表拉回）"
+
+    def test_nodeSearchDoesNotTreatUnderscoreAsWildcard(self, storage):
+        storage.save_node_definition(
+            NodeDefinition(
+                type="tool:probe", label="带下划线 a_b 的节点", description="",
+                icon="", sub_blocks=[], inputs=[], outputs=[],
+                category="tools", version="1.0.0",
+            )
+        )
+        storage.save_node_definition(
+            NodeDefinition(
+                type="tool:plain", label="普通节点", description="",
+                icon="", sub_blocks=[], inputs=[], outputs=[],
+                category="tools", version="1.0.0",
+            )
+        )
+
+        hits = storage.search_node_definitions("_")
+
+        assert [n.type for n in hits] == ["tool:probe"], "`_` 被当成通配模式（整表拉回）"
