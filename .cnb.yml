@@ -277,9 +277,12 @@ main:
           #   * NeurUI/src-tauri/Cargo.lock —— Tauri 桌面壳 crate 树
           #   * tools/npx-runtime/package-lock.json —— 运行时 `npx -y` 现拉的包
           # 统一走 OSV-Scanner；允许清单见 scripts/ci/osv-allowlist.toml。
-          # `--require-offline`：本流水线已显式预取，缺库即报错，不许静默回退直连
-          # （回退会把「预取坏了」藏成「这次网络恰好通」，下一次抖动才红）。
-          script: python scripts/ci/osv_audit.py --require-offline
+          # 不带 `--require-offline`：上面那步预取是 best-effort（`|| true`），
+          # 门禁就不能要求「预取必须成功」——否则预取一失败就是红灯，而这与
+          # 「真有未允许漏洞」在合并流程里同形，读日志的人仍只能重跑。
+          # 缓存不齐时门禁**回退直连并点名缺哪一份**（裁决通路收口在
+          # resolveVerdictChannel 一处），红只留给「真有未允许漏洞」。
+          script: python scripts/ci/osv_audit.py
           timeout: 20m
 
     # ── 10. 经验质量基准（工单 009，阻塞）──────────────────────────────────

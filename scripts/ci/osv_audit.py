@@ -45,8 +45,13 @@ pip-audit 与 npm audit 只覆盖"Python 声明锁"与"NeurUI 的 npm 树"。
   「漏洞库被查过」，实测两个场景的 `End status` 逐字相同；
   ③ 把这条外部依赖收进可控面：**优先走离线库**（`--offline --offline-vulnerabilities`
   + 预取缓存，实测下载 47s / 扫描 12.7s，与直连逐条一致），CI 两侧各加一步
-  best-effort 预取（`--prefetch-offline-databases || true`），门禁本体
-  `--require-offline`：缓存不齐即点名缺哪个生态，不静默回退。
+  best-effort 预取（`--prefetch-offline-databases || true`）。
+  裁决通路收口在 `resolveVerdictChannel()` 一处：缓存齐 → 离线（不再依赖远端）；
+  缓存不齐 → **回退直连并点名缺哪一份**。门禁本体**不带** `--require-offline`：
+  预取既然允许失败，门禁就不能要求「预取必须成功」——两者放在同一条流水线里会
+  互相抵消，预取一失败就是阻塞红灯，而这与「真有未允许漏洞」同形，
+  读日志的人仍只能重跑（正是本单要消灭的形态）。`--require-offline` 保留给
+  自证场景（缺库时显式判红），不由 CI 门禁使用。
 - **本地补丁必须被核验**：OSV 按 `name + version` 判定，看的是清单里的版本字符串，
   不是实际编译的源码——`[patch.crates-io]` 换成仓内源码后它照旧报同一个版本。
   于是"某条允许清单靠本地补丁成立"这件事，只能由本脚本自己核验：`LOCAL_PATCHES`
@@ -56,7 +61,7 @@ pip-audit 与 npm audit 只覆盖"Python 声明锁"与"NeurUI 的 npm 树"。
 用法：
     python scripts/ci/osv_audit.py                 # CI 用法
     python scripts/ci/osv_audit.py --prefetch-offline-databases   # 预取离线库（CI 前置步）
-    python scripts/ci/osv_audit.py --require-offline              # 缺库即报错，不回退直连
+    python scripts/ci/osv_audit.py --require-offline              # 自证：缺库即报错，不回退直连（CI 不用）
     OSV_SCANNER_BIN=/path/to/osv-scanner python scripts/ci/osv_audit.py   # 离线/本地
 
 退出码：0 = 无未允许的漏洞；1 = 有未允许的漏洞；2 = 基础设施错误。
@@ -376,6 +381,38 @@ def offlineDatabaseProblems(targets) -> list:
     if not scopes:
         problems.append("没有可归属到生态的被扫目标——离线库归属表需复核")
     return problems
+
+
+class OfflineDatabaseMissing(RuntimeError):
+    """显式要求离线、而离线库不齐——此时拒绝回退直连，属基础设施错误。
+
+    只在调用方**明确要求**离线时抛出（自证场景）。CI 门禁不要求离线：
+    预取允许失败，门禁就不能要求「预取必须成功」，否则预取一失败就是红灯，
+    而这与「真有未允许漏洞」在合并流程里长得一样——正是本单要消灭的形态。
+    """
+
+    def __init__(self, problems):
+        super().__init__("；".join(problems))
+        self.problems = list(problems)
+
+
+def resolveVerdictChannel(targets, requireOffline: bool):
+    """单源决定本次裁决走离线库还是直连，返回 `(用离线吗, 问题清单)`。
+
+    两句话必须由同一处推导，否则会互相抵消：预取是 best-effort（CI 里 `|| true`），
+    而门禁若写死「必须离线」，就把一条**允许失败**的前置步骤变成了红灯来源。
+    实测（清空缓存后跑 CI 两阶段命令）：预取失败 ⇒ 门禁 exit 2，红的成因与修复前
+    同形（远端不可达，不是本仓代码），读日志的人仍只能重跑。
+
+    故收口为：缓存齐 → 走离线（不依赖远端）；缓存不齐且未显式要求 → 回退直连并点名；
+    缓存不齐且显式要求 → 抛 `OfflineDatabaseMissing`（调用方收口为 exit 2）。
+    """
+    problems = offlineDatabaseProblems(targets)
+    if not problems:
+        return True, problems
+    if requireOffline:
+        raise OfflineDatabaseMissing(problems)
+    return False, problems
 
 
 def prefetch_offline_databases(scanner: Path, targets) -> int:
@@ -958,7 +995,8 @@ def main() -> int:
     ap.add_argument(
         "--require-offline",
         action="store_true",
-        help="离线库不齐即退 2（默认：不齐则回退直连并在日志里点名）",
+        help="离线库不齐即退 2（默认：不齐则回退直连并在日志里点名）。"
+             "自证场景用；CI 门禁不传——预取是 best-effort，门禁要求它就是自相矛盾",
     )
     args = ap.parse_args()
 
@@ -1022,17 +1060,17 @@ def main() -> int:
     # 缓存齐备就走离线：本仓的裁决不该依赖一个 CI 出站不在本仓手里的远端域名
     # （2026-09-22 PR #121 三次红全因它不可达）。缓存不齐就直连——库过期只会漏报
     # 新公告，而缺库硬走离线会让整条门禁变成「永远退 127」的哑弹（实测）。
-    offline_problems = offlineDatabaseProblems(targets)
-    offline = not offline_problems
-    if offline:
-        print(f"[osv] 离线库缓存齐备，裁决走离线通路: {OSV_DB_CACHE}")
-    elif args.require_offline:
-        # CI 侧显式要求离线时，缺库**不静默回退**：回退直连会把「预取步骤坏了」
-        # 藏成「这次网络恰好通」，下一次抖动才红，读日志的人无从归因。
+    try:
+        offline, offline_problems = resolveVerdictChannel(targets, args.require_offline)
+    except OfflineDatabaseMissing as e:
+        # 只有调用方**明确要求**离线才会到这里（自证场景）；CI 门禁不要求，
+        # 故「允许失败的预取」不会把整条门禁变成随网络抖动的红灯。
         print("[osv] 离线库缓存不齐且显式要求离线——拒绝回退直连:", file=sys.stderr)
-        for item in offline_problems:
+        for item in e.problems:
             print(f"      - {item}", file=sys.stderr)
         return 2
+    if offline:
+        print(f"[osv] 离线库缓存齐备，裁决走离线通路: {OSV_DB_CACHE}")
     else:
         # 不静默降级：点名缺什么、以及「本次仍会现查远端」，让读日志的人知道
         # 下一次网络抖动会红在这里。
