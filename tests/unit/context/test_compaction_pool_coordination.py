@@ -70,8 +70,9 @@ class TestCompactionPoolCoordination:
         from neurova.context.window_compactor import estimate_window_tokens
 
         # 折叠确实发生（窗口 < 原始）
+        # D4 甲案后瞬态注入已不在 system 行，窗口就是 user/assistant 消息（去掉末条信封）
         window_tokens = estimate_window_tokens(
-            [m for m in result if not str(m.get("content", "")).startswith(("[记忆]", "[经验]", "[历史回忆]"))]
+            [m for m in result if m.get("role") in ("user", "assistant")][:-1]
         )
         assert window_tokens < estimate_window_tokens(ctx)
         # 归档集含被折叠的首条
@@ -100,9 +101,13 @@ class TestCompactionPoolCoordination:
         result2 = await _build(orch, ctx2, user_input="0号城市部署的结论是什么？")
 
         joined = "".join(str(m.get("content", "")) for m in result2)
-        # 被折叠的「0号城市…」经 [历史回忆] 召回（零丢失语义）
-        assert "[历史回忆]" in joined, "折叠消息应可被 draw 语义召回"
-        assert "0号城市" in joined
+        # 被折叠的「0号城市…」经 [历史回忆] 召回（零丢失语义）。
+        # D4 甲案：召回落在末条 user 信封的 <history> 块（不再是 system 行）。
+        from neurova.context.envelope import parse_envelope
+
+        history_block = parse_envelope(str(result2[-1].get("content", ""))).get("history", "")
+        assert "[历史回忆]" in history_block, "折叠消息应可被 draw 语义召回"
+        assert "0号城市" in history_block
 
     @pytest.mark.asyncio
     async def test_summary_persists_across_turns(self):
@@ -135,11 +140,10 @@ class TestCompactionPoolCoordination:
         ctx = [_long(i) for i in range(6)]  # 预算内，全窗口保留
         result = await _build(orch, ctx, user_input="关于项目A的长讨论0")
 
-        recall_lines = [
-            str(m.get("content", "")) for m in result
-            if str(m.get("content", "")).startswith("[历史回忆]")
-        ]
-        assert recall_lines == [], "窗口内消息不得被 draw 二次召回（injected_hashes 过滤）"
+        from neurova.context.envelope import parse_envelope
+
+        recall_lines = parse_envelope(str(result[-1].get("content", ""))).get("history", "")
+        assert recall_lines == "", "窗口内消息不得被 draw 二次召回（injected_hashes 过滤）"
 
 
 if __name__ == "__main__":
