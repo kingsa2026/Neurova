@@ -19,7 +19,8 @@
 
 故燃料改由**本门禁在 Agent 开工前写入**（它就是那个写点，也是自证点）：
 触顶那一轮跑不到任何指令，燃料就不可能来自 Agent。同时把
-`turnLimitReached=1` 经 `$CNB_ENV` 文件回写给后续 Stage 的 `cnb:apply`，
+`turnLimitReached=1` 经**平台声明的导出通道**（stdout 的 `##[set-output]` 标记 +
+`.cnb.yml` 同一 Stage 上的 `exports` 映射）交给后续 Stage 的 `cnb:apply`，
 让"这一轮是接力轮"这件事在配置期就成立，不依赖 Agent 的记忆。
 
 本门禁回答一个只有真实构建能回答的问题：**在有改动的真实构建里，
@@ -65,10 +66,19 @@ HANDOFF_MARKER_FILE = ".npc-turn-handoff"
 #: `endStages.if` 逐字一致 —— 该判据全仓只有一处事实源（git grep 可见）。
 TURN_FLAG_VAR = "turnLimitReached"
 
-#: 写回环境变量的通道。与 GitHub Actions 的 `$GITHUB_ENV` 同源的
-#: `name=value` 行协议，但**不做任何假设**：平台没有该文件（或格式不同）
-#: 时下面的写入超时静默跳过，不失败 —— 燃料已落盘，这里是尽力而为。
-TURN_FLAG_ENV_FILES = ("CNB_ENV", "GITHUB_ENV")
+#: 把 `TURN_FLAG_VAR` 导出给收尾阶段所用的一对名字，逐字对应 `.cnb.yml` 里
+#: 调用本脚本那个 Stage 的 `exports` 映射：
+#:
+#:     script: "$NPX_CALL scripts/ci/npc_turn_handoff_gate.py"
+#:     exports:
+#:       <SET_OUTPUT_KEY>: <TURN_FLAG_VAR>
+#:
+#: 平台**没有** `$CNB_ENV` / `$GITHUB_ENV` 这类文件通道（官方文档
+#: 「环境变量」「默认环境变量」两篇全文零命中；本次真实构建里该变量也未注入）。
+#: 文本输出与 `exports` 的映射关系写在两处，故这三处名字必须同源，由
+#: tests/unit/ci/test_npc_pipeline_time_budget.py 常驻校验。
+SET_OUTPUT_DIRECTIVE = "##[set-output"
+SET_OUTPUT_KEY = TURN_FLAG_VAR
 
 
 def resolveWorkspaceRoot(env: dict) -> str:
@@ -88,28 +98,30 @@ def checkWorkspaceWritable(root: str) -> dict:
 
 
 def markTurnAsHandoff(env: dict) -> dict:
-    """把「本轮是接力轮」写回给后续 Stage（尽力而为，不因缺通道而失败）。
+    """把「本轮是接力轮」交给后续 Stage 与收尾的 `cnb:apply`。
 
-    通道：`$CNB_ENV`（`name=value` 行协议）。平台没有该文件时**静默跳过**——
-    燃料已经落在 HANDOFF_MARKER_FILE 上，缺通道只影响 `cnb:apply` 的 `if`
-    是否立即为真，不影响"接力这件事本身成立"。
+    通道：平台声明的 **stdout 标记协议** —— 本函数向标准输出写一行
 
+        ##[set-output turnLimitReached=1]
+
+    CI 按行识别该标记，把它放进本 Job 的 `result`；再由 `.cnb.yml` 同一 Stage 上的
+    `exports` 把它映射成环境变量。平台文档明确：`exports` 导出的变量**生命周期为
+    当前 Pipeline**，因此 `endStages` 的 `if` 读得到 —— 这正是接力判据需要的可见性。
+
+    为什么不用文件通道（上一批的写法，已被证伪）：
+      平台不提供 `$CNB_ENV` / `$GITHUB_ENV`（官方文档零命中，真实构建里也未注入）。
+      往一个不存在的路径追加内容既写不出、也不报错，接力会在绿灯下静默失效。
+
+    返回值保留为一份可复算的读数：真实构建日志里能看见它到底走没走通。
     只写一个变量、一种写法：接力判据全仓单点，不许出现第二种状态文件。
     """
-    report = {"written": False, "channel": None}
-    for name in TURN_FLAG_ENV_FILES:
-        target = (env.get(name) or "").strip()
-        if not target:
-            continue
-        try:
-            with open(target, "a", encoding="utf-8") as handle:
-                handle.write(f"{TURN_FLAG_VAR}=1\n")
-            report.update(written=True, channel=name, file=target)
-        except OSError as exc:
-            report["error"] = f"{type(exc).__name__}: {exc}"
-        return report
-    report["error"] = "无 $CNB_ENV / $GITHUB_ENV 通道"
-    return report
+    if not (env.get("CNB") or "").strip() and not (env.get("CI") or "").strip():
+        # 本地直跑（无 CI 标记）时不往 stdout 注入协议行，避免污染人类可读输出；
+        # 仍然如实报告"未发出"，让读数与 CI 里一致可解释。
+        return {"written": False, "channel": None, "reason": "非 CI 环境，未发出 set-output 标记"}
+    sys.stdout.write(f"{SET_OUTPUT_DIRECTIVE} {SET_OUTPUT_KEY}=1]\n")
+    sys.stdout.flush()
+    return {"written": True, "channel": SET_OUTPUT_DIRECTIVE, "key": SET_OUTPUT_KEY}
 
 
 def checkWorkingDirectory(env: dict, cwd: str) -> dict:
@@ -184,7 +196,8 @@ const path = require("path");
 
 const HANDOFF_MARKER_FILE = ".npc-turn-handoff";
 const TURN_FLAG_VAR = "turnLimitReached";
-const TURN_FLAG_ENV_FILES = ["CNB_ENV", "GITHUB_ENV"];
+const SET_OUTPUT_DIRECTIVE = "##[set-output";
+const SET_OUTPUT_KEY = TURN_FLAG_VAR;
 
 // 与 Python 的 json.dumps 对齐：缩进 2 空格、**不**转义非 ASCII、
 // 字符串外的空格与 Python 的 separators 一致（", " / ": "）。
@@ -257,22 +270,11 @@ function realpathOrSelf(target) {
 }
 
 function markTurnAsHandoff(env) {
-  const report = { written: false, channel: null };
-  for (const name of TURN_FLAG_ENV_FILES) {
-    const target = String(env[name] || "").trim();
-    if (!target) continue;
-    try {
-      fs.appendFileSync(target, TURN_FLAG_VAR + "=1\n", "utf8");
-      report.written = true;
-      report.channel = name;
-      report.file = target;
-    } catch (exc) {
-      report.error = exc.constructor.name + ": " + exc.message;
-    }
-    return report;
+  if (!String(env.CNB || "").trim() && !String(env.CI || "").trim()) {
+    return { written: false, channel: null, reason: "非 CI 环境，未发出 set-output 标记" };
   }
-  report.error = "无 $CNB_ENV / $GITHUB_ENV 通道";
-  return report;
+  process.stdout.write(SET_OUTPUT_DIRECTIVE + " " + SET_OUTPUT_KEY + "=1]\n");
+  return { written: true, channel: SET_OUTPUT_DIRECTIVE, key: SET_OUTPUT_KEY };
 }
 
 function checkWorkingDirectory(env, cwd) {

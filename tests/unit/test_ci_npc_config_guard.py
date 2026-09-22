@@ -745,11 +745,22 @@ class TestTurnHandoffCeiling:
         """接力标记只允许出现在「读它」的位置，不许新增第二份判据。
 
         白名单是逐行判据，不是计数：每一行含标记的文本都必须落在
-        （a）流水线 `env` 的传入/传出、（b）`if` 条件的判定
+        （a）流水线 `env` 的传入/传出、（b）`if` 条件的判定、
+        （c）导出通道的声明（把 `##[set-output]` 的键映射成环境变量，见下）
         这三类用途之内；任何新形态（例如 Agent 另写一个 state 文件、
         或再加一个 handoff 计数器）都会被这条拦下——那是平行体系。
+
+        第 (c) 类的必要性（Issue #158）：接力变量要能被收尾 `endStages` 的
+        `if` 读到，必须经平台声明的导出通道 —— 门禁脚本向 stdout 写
+        `##[set-output turnLimitReached=1]`，再由同一 Stage 的 `exports`
+        映射成环境变量（生命周期覆盖整个 Pipeline）。这条映射就是 `(c)`：
+        它只是把同一个标记换个承载形态，不是第二套判据。
         """
-        allowed = ("turnLimitReached:", '"$turnLimitReached" = "1"')
+        allowed = (
+            "turnLimitReached:",
+            '"$turnLimitReached" = "1"',
+            "turnLimitReached: turnLimitReached",
+        )
         offenders = [
             f"{lineno}: {line.strip()}"
             for lineno, line in enumerate(io.open(CNB, encoding="utf-8"), 1)
