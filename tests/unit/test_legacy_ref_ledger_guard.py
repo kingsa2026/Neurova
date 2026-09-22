@@ -75,7 +75,7 @@ class TestLedgerIsRegenerable:
         assert actual.strip() == expected.strip(), (
             "台账的悬空引用表与扫描器输出不一致。\n"
             "台账是生成物，不要手改；改完源文件后重跑：\n"
-            "  python scripts/scan_docs_refs.py --markdown\n"
+            "  python scripts/scan_docs_refs.py --update-ledger\n"
             "期望行数 %d，实际行数 %d。"
             % (expected.count("\n"), actual.count("\n"))
         )
@@ -86,7 +86,7 @@ class TestLedgerIsRegenerable:
         actual = _block(_ledger_text(), scanner.SUMMARY_BEGIN, scanner.SUMMARY_END)
         assert actual.strip() == expected.strip(), (
             "台账摘要区与扫描器输出不一致（总数或按文件分布漂移）。\n"
-            "重跑：python scripts/scan_docs_refs.py --markdown"
+            "重跑：python scripts/scan_docs_refs.py --update-ledger"
         )
 
     def test_scanner_actually_finds_this_directory(self, entries):
