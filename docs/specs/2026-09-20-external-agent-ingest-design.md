@@ -174,7 +174,7 @@ scripts/ingest_memory.py   薄 CLI：detect / convert / apply / undo
 | F-21 包内同名不同目录被拍平 | 已修（强制内容寻址命名 + 摘要必声明） | b74fa9ef |
 | F-22 撤销拼全文取子串判引用 | 已修（改结构化引用集合） | b74fa9ef |
 | F-04 导入会话用户归属 | 已修：CLI `--owner-user-id` + 会话级归属不变量（既有属主只读、共享批次不得放宽已有属主） | 见 §7.4 |
-| F-05 导入结果对运行中服务不可见 | 部分处置：CLI 明确报出"记忆需重启才可见"（DEC-2 的最小成本项）；开端点/加 reload 仍待拍板 | 877bd22c |
+| F-05 导入结果对运行中服务不可见 | 已修：`MemoryManager.reload_memories()` 增量并入 + `POST /v1/memory/reload` 端点 + 管理页入口；CLI 出口改指该通道（重启降为兜底）。见 §7.6 | 见 §7.6 |
 | F-10 撤销作用域口径 | 已修：按**行自带**三元组删盘 + 索引摘除收口（授权凭据是批次标签，不是调用现场作用域） | 578536b4 |
 | F-11 回填历史的温度语义 | 已修：导入侧定标获知时刻（created_at 记事件、last_accessed_at 记获知），温度照原样落库 | b52eac01 |
 | F-16 OpenClaw 同 event id 多行 | 已修：幂等键改立行主键 (session_id, seq)，event id 降级为 extra 标识；**真样本已取证**（npm openclaw@2026.9.5 上游 schema） | c35b3458 |
@@ -270,6 +270,34 @@ scripts/ingest_memory.py   薄 CLI：detect / convert / apply / undo
   所以**删 UI 调用点解决不了问题**——得先定端点去留。
 - 去留三选一（退役并删前端 API / 接进 `MemoryManager.import_memories` / 保留但响应声明
   "仅演示不落库"）仍是产品决定，本轮一行不改。
+
+### 7.6 2026-09-22 可见性批（F-05 后半：reload 通道）
+
+用户拍板"开 HTTP 端点 / 加 reload_memories 入口"后落地。**根因**：记忆快照只在进程
+构造时 `_load_from_db` 读一次盘，另一个进程（CLI 导入、备份恢复、多实例）写下的行对
+运行中的服务不可见——报告写"已写入"而界面一条看不见，是既非拒绝也非申报的假成功。
+可见性条件只有两条：**服务重启** 或 **显式 reload**；本轮兑现后者。
+
+- **`MemoryManager.reload_memories() -> int`**：口径与 `_load_from_db` 同源（agent 全量，
+  视图层再按调用语义过滤），差别只在"只并入缺失的行"（判据 = 业务 id + 行自带三元组）。
+  行构造收口到 `_row_to_memory`、并入去重收口到 `_merge_loaded_memory`，装载与 reload
+  共用同一处——两处各写一份就是下一轮漂移的起点。
+- **召回面同步并入**：关键词倒排逐条 `upsert_memory_index`（**禁用** `build_keyword_index`
+  ——它先 `clear()`，只喂缺失行会抹掉既有倒排）；内容门索引缺键才登记
+  （`_merge_content_index`，用 `setdefault` 不抢已有键归属），否则 reload 之后同键写入
+  会另起一行。
+- **不写盘**：这是读侧可见性通道，不新增也不改写任何持久行。
+- **`POST /v1/memory/reload`**（`neurova/api/endpoints/memory/visibility.py`）：返回真实
+  并入条数（幂等，无缺失行时为 0）。**注册顺序**与 `/stats`/`/hot` 同一条纪律——字面路由
+  必须先于 crud 的 `/{memory_id}`，否则被吞成"获取 memory_id='reload' 的记忆"→ 404。
+- **闭环**：CLI 出口由"需重启后才可见"改为指向该端点（重启降为端点不可达时的兜底）；
+  管理页 `MemoryPage` 加"重新读盘"入口（`reloadMemories()` + 11 份 locale 的
+  `memory.reload` / `memory.reloadHint`），写入 → 读取 → 反馈形成闭环。
+
+判据（`tests/unit/cognitive_layers/memory_layer/test_reload_memories_visibility.py`、
+`tests/unit/api/test_memory_reload_endpoint.py`、`tests/unit/memory_ingest/test_cli.py`）：
+增量与幂等（2/0）、本进程运行期记忆不被抹掉、盘上行一个字节不改、关键词倒排既有词条不被清空、
+门索引咬合（同键写入不另起行）、快照口径不因 reload 收窄、`/reload` 不被 `/{memory_id}` 吞掉。
 
 ### 7.2 常驻判据
 

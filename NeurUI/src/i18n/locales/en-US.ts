@@ -702,6 +702,8 @@ export default {
     stats: 'Statistics',
     overview: 'Overview',
     decay: 'Memory Decay',
+    reload: 'Reload from disk',
+    reloadHint: 'Pull memories written by another process (e.g. CLI import) into the running backend without restarting',
     enhance: 'Enhance Memory',
     forget: 'Forget',
     strengthen: 'Strengthen',

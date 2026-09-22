@@ -40,8 +40,10 @@ FRONTEND_MODULES_DIR = PROJECT_ROOT / "NeurUI" / "src" / "api" / "modules"
 #: 模块目录的短名（守卫按此名做「磁盘多出一个模块」的负向控制；同一对象，非第二份定义）
 MODULES_DIR = FRONTEND_MODULES_DIR
 ENDPOINT_PACKAGE = PROJECT_ROOT / "neurova" / "api" / "endpoints" / "__init__.py"
-ENDPOINTS_DIR = PROJECT_ROOT / "neurova" / "api" / "endpoints"
 APP_MODULE = PROJECT_ROOT / "neurova" / "api" / "app.py"
+#: 未挂载扫描的仓内源码根（收录口径是「**全仓**无挂载点」，不是「端点包内无挂载点」）。
+#: 口径只写一份：台账与本常量同源。`tests/` 不在内——测试自建的应用不提供服务面。
+SOURCE_ROOTS = ("neurova", "scripts", "tools", "examples")
 #: 未挂载端点模块的**处置台账**（行格式 `模块短名 | 处置 | 依据`）。
 #: 处置是有限枚举：`已接线`（真进了装配后路由表）、`已删除`（模块已不存在）、
 #: `待实现`（保留待接线，须写明依据）。台账必须**可机器判定办没办**，
@@ -392,45 +394,67 @@ def auditMountsFor(app) -> dict:
     return mountedRouterAudit(app)
 
 
-def unmountedEndpointModules() -> list:
-    """定义了路由、却从未出现在装配后路由表里的端点模块（显式名单，不静默遗留）。
+def servedModules(app=None) -> set:
+    """装配后**真的在提供服务的模块**集合（叶子处理函数所属模块）。
 
-    判据：AST 找出所有带 `@router.<verb>` 装饰器的模块；装配后遍历每条路由的
-    `endpoint.__module__` 取「真的在提供服务的模块」集合；两者之差即从未挂载者。
-    这是「路由写了但进不去」，与此前 coordination_api 那种「导入即崩」同型：
-    静态看代码都在，运行时不提供服务。名单进清单供人排期，不在本项顺手接线。
+    嵌套 include 在装配结果里是包装对象，得逐层展开才能取到叶子。
     """
     served = set()
-    pending = list(assembledApp().router.routes)
+    pending = list((app if app is not None else assembledApp()).router.routes)
     while pending:
         route = pending.pop()
         inner = getattr(route, "original_router", None)
         if inner is not None:
-            # 嵌套 include 在装配结果里是包装对象，得逐层展开才能取到叶子的处理函数
             pending.extend(getattr(inner, "routes", []) or ())
             continue
         served.add(getattr(getattr(route, "endpoint", None), "__module__", ""))
+    return served
 
+
+def servesOwnAsgiApp(tree) -> bool:
+    """该模块是否自建 ASGI 应用（`FastAPI(...)`）——由自己的进程提供服务。
+
+    报成「未接线」是假阳性，而假阳性会训练人忽略这份名单。
+    """
+    return any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+               and node.func.id == "FastAPI" for node in ast.walk(tree))
+
+
+def unmountedEndpointModules() -> list:
+    """定义了路由、却从未出现在装配后路由表里的模块（显式名单，不静默遗留）。
+
+    收录口径是**全仓**（台账头部即如此声明，`SOURCE_ROOTS` 为唯一事实源）：
+    口径若只扫端点包，同一形态在包外就永远看不见——「登记不代替修复」的前提是
+    先被看见。判据：AST 找出所有带 `@router.<verb>` 装饰器的模块；装配后取
+    「真的在提供服务的模块」集合；两者之差即从未挂载者。自带 `FastAPI()` 应用的
+    模块排除（它由自己的进程服务，不是孤儿）。
+    名单进清单供人排期，不在本项顺手接线。
+    """
+    served = servedModules()
     dead = []
-    for path in sorted(ENDPOINTS_DIR.rglob("*.py")):
-        if path.name == "__init__.py":
-            continue
-        try:
-            tree = ast.parse(io.open(path, encoding="utf-8", errors="replace").read())
-        except SyntaxError:
-            continue
-        if not definesRoutes(tree):
-            continue
-        module = "neurova.api.endpoints." + ".".join(
-            path.relative_to(ENDPOINTS_DIR).with_suffix("").parts)
-        if module not in served:
-            dead.append(module)
-    return dead
+    for root in SOURCE_ROOTS:
+        for path in sorted((PROJECT_ROOT / root).rglob("*.py")):
+            if path.name == "__init__.py":
+                continue
+            try:
+                tree = ast.parse(io.open(path, encoding="utf-8", errors="replace").read())
+            except SyntaxError:
+                continue
+            if not definesRoutes(tree) or servesOwnAsgiApp(tree):
+                continue
+            module = ".".join(path.relative_to(PROJECT_ROOT).with_suffix("").parts)
+            if module not in served:
+                dead.append(module)
+    return sorted(dead)
 
 
 def unwiredEndpointModuleNames() -> list:
-    """未挂载模块的**短名**清单（台账文件用的口径，`unmountedEndpointModules()` 的投影）。"""
-    return sorted(name.rsplit(".", 1)[-1] for name in unmountedEndpointModules())
+    """未挂载模块清单（台账文件用的口径，`unmountedEndpointModules()` 的投影）。
+
+    用**完整点分模块路径**而非末段短名：口径已扩到全仓，`routes` / `acp_server`
+    这类末段不保证唯一，作台账键会产生歧义。
+    """
+    return unmountedEndpointModules()
 
 
 def readWiringDispositions() -> dict:
@@ -466,8 +490,11 @@ def _wiringRows() -> list:
         if not stripped:
             continue
         cells = [cell.strip() for cell in stripped.split("|")]
-        while len(cells) < 3:
-            cells.append("")
+        if len(cells) < 3:
+            # 只有带处置与依据的行才是台账行（`模块 | 处置 | 依据`）。
+            # 缺列的行按约定跳过：它无法参与「办没办」的机器判定，
+            # 硬塞进来的空处置只会造出一个必然判红、却说不清原因的行。
+            continue
         rows.append((cells[0], cells[1], cells[2]))
     return rows
 
@@ -642,7 +669,7 @@ def renderInventory(generatedOn: str) -> str:
         + (", ".join(f"挂载点 `{point}`（操作 `{operation}`）"
                      for point, _own, operation in unwiredRouters()) or "无"),
         "",
-        "**未挂载端点模块**（定义了路由、装配后却不在路由表里 —— 运行时不提供服务）："
+        "**未挂载路由模块**（全仓定义了路由、装配后却不在路由表里 —— 运行时不提供服务）："
         + (", ".join("`" + name + "`" for name in unmountedEndpointModules()) or "无"),
         "",
         "**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）："

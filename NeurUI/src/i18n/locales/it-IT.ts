@@ -700,6 +700,8 @@ export default {
     stats: 'Statistiche',
     overview: 'Panoramica',
     decay: 'Decadimento memoria',
+    reload: 'Ricarica dal disco',
+    reloadHint: 'Integra nel backend in esecuzione i ricordi scritti da un altro processo (es. import CLI) senza riavviare',
     enhance: 'Potenzia memoria',
     forget: 'Dimentica',
     strengthen: 'Rafforza',

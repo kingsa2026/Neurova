@@ -219,8 +219,8 @@ class TestBreakpointsAreNamedNotBuried:
         """定义了路由却从未挂载的模块必须点名（判据不空转，用注入自证）。
 
         本轮已把实测的六个未挂载模块各自收口（四个删除、两个接线），
-        名单归零是**修好了**；故这里以注入自证判据仍咬得住，
-        而不是拿某个残留孤儿当锚点——那会反过来要求孤儿继续存在。
+        故这里以注入自证判据仍咬得住，而不是拿某个残留孤儿当锚点——
+        那会反过来要求孤儿继续存在。
         """
         module = _generator()
         probe = tmp_path / "neurova" / "api" / "endpoints"
@@ -233,7 +233,8 @@ class TestBreakpointsAreNamedNotBuried:
             "    return {}\n",
             encoding="utf-8",
         )
-        monkeypatch.setattr(module, "ENDPOINTS_DIR", probe)
+        monkeypatch.setattr(module, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(module, "SOURCE_ROOTS", ("neurova",))
         assert module.unmountedEndpointModules() == ["neurova.api.endpoints.zzz_orphan"], (
             "注入的孤儿端点模块未被点名——取数口径失效，断点会被静默吞掉。"
         )
