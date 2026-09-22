@@ -597,6 +597,38 @@ class TestBinaryPathIsAbsolute:
             )
 
 
+class TestScanFailureIsSelfExplaining:
+    """红的时候必须自解释——2026-09-22 定性慢，全卡在「日志说不清用的是哪份二进制」。"""
+
+    def test_failure_branch_reports_binary_identity(self, auditModule):
+        import inspect
+
+        source = inspect.getsource(auditModule.main)
+        assert "本轮二进制" in source, (
+            "非契约退出码的分支没把二进制身份打进日志——下一次红又要靠猜"
+        )
+        assert "可执行=" in source, "没报权限位：127 的第一种来源查不到"
+
+    def test_download_lands_in_a_dedicated_directory(self, auditModule):
+        """下载落点必须是**每次解包出来的专属目录**，且自己 chmod。
+
+        回退路径：改用固定路径 / 复用上一次的目录 → 两次调用之间任何东西动了
+        那个文件，第二次就是 127，而这与「命令不成形」同码。
+        """
+        import inspect
+
+        source = inspect.getsource(auditModule._resolve_scanner)
+        assert "mkdtemp" in source, "下载落点不是专属目录——并发/复用会让第二次调用 127"
+        assert "resolveBinaryPath" in source, "解析出的路径没归一，相对路径的 127 缺口又开"
+
+    def test_gate_summary_is_machine_readable_on_failure(self, auditModule, capsys):
+        auditModule._emitGateSummary(2, targets=["a", "b"])
+        out = capsys.readouterr().out
+        assert out.startswith("OSV_GATE_SUMMARY "), "失败摘要不是可后处理的单行形态"
+        payload = json.loads(out.split(" ", 1)[1])
+        assert payload == {"gate": "osv", "exit": 2, "targets": 2}
+
+
 class TestGuardIsWiredIntoCi:
     def test_listed_in_protected_tests(self):
         listed = {
