@@ -741,6 +741,11 @@ class WorkflowExecutor:
                     # 用户隔离：配置引用（kb_config_id 等）的属主检查数据源。
                     # 空值时消费端必须 fail-closed（远程配置默认私有）
                     "user_id": instance.user_id or "",
+                    # B6-3：节点级身份同时透传 agent_id/session_id——未显式注入池时，
+                    # 上下文节点凭这三个键取回**已登记**的池（改前只透传 user_id，
+                    # 即便有取池入口也无从定位是哪个 Agent 的池）。
+                    "agent_id": resolution_context.agent_id or "",
+                    "session_id": resolution_context.session_id,
                     **(subflow_harness or {}),
                 },
             )
