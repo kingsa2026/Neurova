@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import glob
+import importlib
 import io
 import re
 import sys
@@ -40,8 +41,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 API_DIR = PROJECT_ROOT / "NeurUI" / "src" / "api"
 MODULES_DIR = API_DIR / "modules"
+ENDPOINT_DIR = PROJECT_ROOT / "neurova" / "api" / "endpoints"
 
 INVENTORY_PATH = PROJECT_ROOT / "docs" / "09-dev-progress" / "api_inventory.md"
+WIRING_BASELINE = PROJECT_ROOT / "tests" / "unit" / "endpointWiringBaseline.txt"
 INVENTORY_BEGIN = "<!-- API-INVENTORY:BEGIN -->"
 INVENTORY_END = "<!-- API-INVENTORY:END -->"
 
@@ -66,6 +69,11 @@ MOUNT_PREFIXES = ("/api/v1", "/api")
 
 #: 桶文件：只做 re-export，本身不承载端点
 NON_MODULE_FILES = frozenset({"index.ts"})
+
+#: 挂载问题的三类形态——「挂载动作在」不等于「接线完成」
+MOUNT_PROBLEM_EMPTY = "零路由挂载"
+MOUNT_PROBLEM_REPEAT = "前缀叠层"
+MOUNT_PROBLEM_DUPLICATE = "重复挂载"
 
 STRING_CONSTANT = re.compile(
     r"^\s*(?:export\s+)?const\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::[^=]+)?=\s*'([^']*)'",
@@ -296,6 +304,138 @@ def registeredRoutes() -> list:
 
     walk(app.router.routes)
     return sorted((path, frozenset(methods)) for path, methods in routes.items())
+
+
+def countLeafRoutes(items) -> int:
+    """一段路由列表里的叶子路由数（`include_router` 内嵌的子 router 递归下钻）。"""
+    total = 0
+    for route in items:
+        inner = getattr(route, "original_router", None)
+        if inner is not None:
+            total += countLeafRoutes(getattr(inner, "routes", []))
+        else:
+            total += 1
+    return total
+
+
+def appMounts() -> list:
+    """装配后应用里**每一次 include_router 的落点**。
+
+    形状：`(挂载前缀, router 自持前缀, 叶子路由数, router 标识)`。
+    只做「取一次装配结果」，判据在 `mountProblems()`——挂载动作与接线完成是两件事，
+    这里把「动作」取全，由判据去分「接没接上」。
+    """
+    from neurova.api.app import create_app
+
+    app = create_app(enable_memory=False, enable_channels=False)
+    mounts = []
+    for route in app.router.routes:
+        inner = getattr(route, "original_router", None)
+        if inner is None:
+            continue
+        context = getattr(route, "include_context", None)
+        mounts.append((
+            context.prefix if context else "",
+            getattr(inner, "prefix", "") or "",
+            countLeafRoutes(getattr(inner, "routes", [])),
+            id(inner),
+        ))
+    return mounts
+
+
+def mountProblems(mounts: list) -> list:
+    """挂载表里的三类断点：零路由挂载 / 前缀叠层 / 重复挂载。
+
+    - **零路由挂载**：挂载动作在、叶子路由零条。读者在路由表里看到该前缀存在，
+      实际请求必 404——比「没挂」更坏，因为它看起来是通的。
+    - **前缀叠层**：挂载前缀与 router 自持前缀同段，实际路径多出一段
+      （`/api/coordination` + `/coordination` → `/api/coordination/coordination/*`）。
+    - **重复挂载**：同一 router 挂两次——同一件事两个写入点，改一处漏一处。
+    """
+    problems = []
+    firstMount = {}
+    for mountPrefix, routerPrefix, leafCount, routerId in mounts:
+        if leafCount == 0:
+            problems.append({"kind": MOUNT_PROBLEM_EMPTY, "mountPrefix": mountPrefix,
+                             "routerPrefix": routerPrefix})
+        if routerPrefix and mountPrefix.endswith(routerPrefix):
+            problems.append({"kind": MOUNT_PROBLEM_REPEAT, "mountPrefix": mountPrefix,
+                             "routerPrefix": routerPrefix})
+        if routerId in firstMount:
+            problems.append({"kind": MOUNT_PROBLEM_DUPLICATE, "mountPrefix": mountPrefix,
+                             "firstMount": firstMount[routerId]})
+        else:
+            firstMount[routerId] = mountPrefix
+    return problems
+
+
+def endpointModuleNames() -> list:
+    """端点模块名清单：`endpoints/*.py` 单文件模块 + 子包（`memory/`）。"""
+    names = []
+    for path in sorted(ENDPOINT_DIR.glob("*.py")):
+        if path.stem.startswith("_") or path.stem == "__init__":
+            continue
+        names.append(path.stem)
+    for path in sorted(ENDPOINT_DIR.glob("*/__init__.py")):
+        names.append(path.parent.name)
+    return names
+
+
+def _reachableRouterIds() -> set:
+    """装配后应用里可达的 router 标识与叶子路由标识（一次装配，两种标识一起收）。"""
+    from neurova.api.app import create_app
+
+    app = create_app(enable_memory=False, enable_channels=False)
+    reachable = set()
+
+    def walk(items):
+        for route in items:
+            inner = getattr(route, "original_router", None)
+            if inner is not None:
+                reachable.add(id(inner))
+                walk(getattr(inner, "routes", []))
+                continue
+            reachable.add(id(route))
+
+    walk(app.router.routes)
+    return reachable
+
+
+def unwiredEndpointRouters() -> list:
+    """**未接线 router**：模块有真实路由，但装配后的应用里一条都不可达。
+
+    与 `mountProblems()` 的「零路由挂载」是两个方向：零路由挂载是挂了空壳；
+    这里是模块本身有实现、却没有任何挂载点——全仓 grep 只能找到它的定义。
+    不许静默遗留，故核到基线 `WIRING_BASELINE` 上，新增即红。
+    """
+    reachable = _reachableRouterIds()
+    unwired = []
+    for name in endpointModuleNames():
+        try:
+            module = importlib.import_module("neurova.api.endpoints." + name)
+        except Exception:
+            continue
+        router = getattr(module, "router", None)
+        if router is None or not router.routes:
+            continue
+        if id(router) in reachable:
+            continue
+        if any(id(route) in reachable for route in router.routes):
+            continue
+        unwired.append(name)
+    return sorted(unwired)
+
+
+def readWiringBaseline() -> set:
+    """读取未接线基线（`#` 起为注释，空行忽略）。"""
+    if not WIRING_BASELINE.is_file():
+        return set()
+    names = set()
+    for line in io.open(WIRING_BASELINE, encoding="utf-8"):
+        stripped = line.split("#", 1)[0].strip()
+        if stripped:
+            names.add(stripped)
+    return names
 
 
 def pathPattern(path: str):
