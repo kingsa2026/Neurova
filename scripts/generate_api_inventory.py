@@ -42,6 +42,8 @@ MODULES_DIR = FRONTEND_MODULES_DIR
 ENDPOINT_PACKAGE = PROJECT_ROOT / "neurova" / "api" / "endpoints" / "__init__.py"
 ENDPOINTS_DIR = PROJECT_ROOT / "neurova" / "api" / "endpoints"
 APP_MODULE = PROJECT_ROOT / "neurova" / "api" / "app.py"
+#: 未挂载端点模块的棘轮台账（只降不升；逐条处置理由写在对应用例文件里）
+WIRING_BASELINE = PROJECT_ROOT / "tests" / "unit" / "endpointWiringBaseline.txt"
 
 #: 清单正文里机器区的边界标记（人写说明在标记之外，生成器只碰标记之内）
 BLOCK_BEGIN = "<!-- API-INVENTORY:BEGIN -->"
@@ -304,20 +306,24 @@ def backendMountPoints() -> list:
 def mountedRouterAudit(app=None) -> dict:
     """挂载契约审计：装配后逐条 `include_router` 核对它挂出的前缀是否成立。
 
-    两类断点（判据只写一份，守卫与清单同源取数）：
+    三类断点（判据只写一份，守卫与清单同源取数）：
 
     - **零路由挂载**：router 的 `routes` 为空却仍被挂到某前缀——对外声称该前缀可用、
       实际全 404。挂载动作不报错、静态导入也不失败，只有装配后才看得见。
     - **前缀重复**：挂载前缀以 router 自述前缀结尾，真实路径多出一段重复段
       （本仓实测 `/api/neuron/neuron/*`、`/api/coordination/coordination/*`），
       前端按单段路径请求即 404。
+    - **重复挂载**：同一个 router 被挂到两个前缀——同一件事两个写入点，改一处漏一处
+      （本仓实测 `neuron` 被注册表与 `app.py` 各挂一次）。
 
     为什么不静态解析：真实挂载前缀由 `include_router(prefix=...)` 与 router 自述
     `prefix` 共同决定，静态重建等于再实现一遍 FastAPI 的挂载语义——第二套平行体系，
     必然逐版漂移。故取装配后的真实 include 操作。
     """
-    empties, duplicates = [], []
-    for operation in mountOperations(app):
+    empties, duplicates, repeats = [], [], []
+    firstMount = {}
+    operations = mountOperations(app)
+    for operation in operations:
         point = operation["挂载前缀"]
         if operation["路由条数"] == 0:
             empties.append((point, operation["自述前缀"], operation["操作标识"]))
@@ -325,11 +331,17 @@ def mountedRouterAudit(app=None) -> dict:
         own = operation["自述前缀"].strip("/")
         if own and operation["include前缀"].rstrip("/").endswith("/" + own):
             duplicates.append((point, operation["自述前缀"], operation["操作标识"]))
+        routerId = operation["router标识"]
+        if routerId in firstMount:
+            repeats.append((point, operation["自述前缀"], firstMount[routerId]))
+        else:
+            firstMount[routerId] = operation["操作标识"]
     key = lambda row: (row[0], row[2])
     return {
         "零路由挂载": sorted(set(empties), key=key),
         "前缀重复": sorted(set(duplicates), key=key),
-        "挂载操作数": len(mountOperations(app)),
+        "重复挂载": sorted(set(repeats), key=key),
+        "挂载操作数": len(operations),
     }
 
 
@@ -364,6 +376,9 @@ def mountOperations(app=None) -> list:
             "自述前缀": ownPrefix,
             "路由条数": len(leaves),
             "操作标识": f"{ownPrefix or '<无自述前缀>'} #{index}",
+            # router 对象标识：同一 router 被挂两次时两块读数同源 —— 那正是
+            # 「同一件事两个写入点」，由 mountedRouterAudit 拦下。
+            "router标识": id(inner),
         })
     return operations
 
@@ -407,6 +422,23 @@ def unmountedEndpointModules() -> list:
         if module not in served:
             dead.append(module)
     return dead
+
+
+def unwiredEndpointModuleNames() -> list:
+    """未挂载模块的**短名**清单（台账文件用的口径，`unmountedEndpointModules()` 的投影）。"""
+    return sorted(name.rsplit(".", 1)[-1] for name in unmountedEndpointModules())
+
+
+def readWiringBaseline() -> set:
+    """未挂载台账当前登记项（`#` 起为注释，空行忽略）。"""
+    if not WIRING_BASELINE.is_file():
+        return set()
+    names = set()
+    for line in io.open(WIRING_BASELINE, encoding="utf-8"):
+        stripped = line.split("#", 1)[0].strip()
+        if stripped:
+            names.add(stripped)
+    return names
 
 
 def definesRoutes(tree) -> bool:

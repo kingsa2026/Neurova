@@ -70,6 +70,16 @@ class TestNoRepeatedPrefixSegment:
         )
 
 
+class TestNoRouterIsMountedTwice:
+    def test_same_router_is_not_mounted_twice(self):
+        audit = _generator().mountedRouterAudit()
+        assert not audit["重复挂载"], (
+            "同一个 router 被挂到两个前缀——同一件事两个写入点，改一处漏一处：\n  "
+            + "\n  ".join(f"{point}（自述前缀 {own!r}，首挂 {first}）"
+                          for point, own, first in audit["重复挂载"])
+        )
+
+
 class TestUnmountedModulesAreExplicit:
     def test_unmounted_route_defining_modules_are_named(self):
         """定义了路由却从未挂载的模块必须被点名（不许静默遗留）。
@@ -84,6 +94,28 @@ class TestUnmountedModulesAreExplicit:
             assert name.startswith("neurova.api.endpoints."), (
                 f"未挂载模块名单出现非端点模块名：{name}（取数口径错了）"
             )
+
+    def test_unmounted_set_matches_the_baseline(self):
+        """未挂载名单与台账逐项咬合，双向——只降不升。
+
+        新出现一个未挂载模块即红（不许静默新增无服务面的模块）；
+        台账里的条目已被修复/删除却未下调基线亦红（台账失真等于没有台账）。
+        """
+        generator = _generator()
+        current = set(generator.unwiredEndpointModuleNames())
+        baseline = generator.readWiringBaseline()
+        added = sorted(current - baseline)
+        assert not added, (
+            "出现新的未挂载端点模块（定义了路由、装配后一条都不可达）：\n  "
+            + "\n  ".join(added)
+            + "\n修法：接入注册表，或删除该模块；两者都不是时登记进 "
+            + generator.WIRING_BASELINE.name
+        )
+        removed = sorted(baseline - current)
+        assert not removed, (
+            "台账里的未挂载模块已被修复/删除，请同步下调基线（只降不升）：\n  "
+            + "\n  ".join(removed)
+        )
 
 
 class TestNegativeControls:
@@ -107,6 +139,29 @@ class TestNegativeControls:
         audit = _generator().auditMountsFor(app)
         assert any(point == "/api/dup/dup" for point, _own, _op in audit["前缀重复"]), (
             "注入的「挂载前缀重复自述前缀」未被检出——重复段这条断言会白通过。"
+        )
+
+    def test_injected_double_mount_is_detected(self):
+        """同一个 router 挂两次 → 必须报重复挂载，且不把正常挂载误判成问题。"""
+        app = FastAPI()
+        router = APIRouter(prefix="/once")
+        router.get("/x")(_noop)
+        app.include_router(router, prefix="/api/once")
+        app.include_router(router, prefix="/api/twice")
+        audit = _generator().auditMountsFor(app)
+        assert any(point == "/api/twice/once" for point, _own, _first in audit["重复挂载"]), (
+            "注入的重复挂载未被检出——「无重复挂载」这条断言会白通过。"
+        )
+
+    def test_unmounted_detector_marks_known_orphan_and_clears_known_wired(self):
+        """未挂载判据必须咬住已知孤儿、且不把已接入模块误报（假阳性比漏报更坏）。"""
+        generator = _generator()
+        unwired = set(generator.unwiredEndpointModuleNames())
+        assert "computer_api" in unwired, (
+            "已实现但全仓无挂载点的 computer_api 未被检出——判据认错了接线形态。"
+        )
+        assert "computer" not in unwired, (
+            "已接入注册表的 computer 模块被误报为未接线——假阳性会训练人忽略这份名单。"
         )
 
 

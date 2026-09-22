@@ -10,6 +10,7 @@ import os
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from tests.route_table import registeredPathMethods
 
 os.environ.setdefault("NEUROVA_JWT_SECRET_KEY", "test_secret_key_for_growth_routes_012345")
 
@@ -38,11 +39,13 @@ _EXPECTED_ROUTES = {
 
 
 def _router_routes(router):
-    """收集 (相对路径, 方法)——raw router 路径即相对路径，每条装饰器一条记录"""
+    """收集 (相对路径, 方法)——raw router 路径即相对路径，每条装饰器一条记录。
+
+    走 `registeredPathMethods`：聚合 router 内嵌的子 router 不就地摊平，
+    自己遍历 `router.routes` 取 `.path` 会 AttributeError（守卫失明）。
+    """
     out = set()
-    for r in router.routes:
-        m = getattr(r, "methods", None)
-        p = getattr(r, "path", "")
+    for p, m in registeredPathMethods(router):
         if m and not p.startswith(("/openapi", "/docs")):
             for method in m - {"HEAD", "OPTIONS"}:
                 out.add((p, method))

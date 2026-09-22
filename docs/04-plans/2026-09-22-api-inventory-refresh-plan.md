@@ -143,3 +143,27 @@
 
 `docs/architecture-model/architecture-findings.md` 第 6.1/6.3 节的既有裁定同批对齐：
 6.1 记的「两套注册事实源」与 6.3 记的「前后端前缀契约断裂」在本轮一并收口。
+
+### 并入 main 后的守卫收口（2026-09-22）
+
+并入 `main` 时，`main` 侧的 `#127` 与本单**对同一根因各写了一份守卫**：
+`main` 的 `tests/unit/api/test_endpoint_mount_wiring_guard.py`（判据取自
+`scripts/gen_api_inventory.py` 的 `appMounts` / `mountProblems` /
+`unwiredEndpointRouters`）与本单的 `test_route_mount_contract_guard.py`
+（判据取自 `scripts/generate_api_inventory.py` 的 `mountedRouterAudit` /
+`unmountedEndpointModules`）。
+
+两份守卫是同一件事的两次实现——**收口到一份**（教义第 6 条：不新造平行体系）。
+处置如下：
+
+| 侧 | 能力 | 去向 |
+|------|------|------|
+| `main` 侧独有 | 重复挂载检测 | 并入 `mountedRouterAudit()` 的「重复挂载」 |
+| `main` 侧独有 | 未挂载模块棘轮（台账只降不升） | 并入 `unmountedEndpointModules()` 的别名 `unwiredEndpointModuleNames()` + `readWiringBaseline()` |
+| `main` 侧独有 | 假阳性反向控制（`computer` 不得误报） | 并入本守卫的 `TestNegativeControls` |
+| 本单侧保留 | 零路由挂载 / 前缀重复 / 未挂载名单 / 前端基地址三类写法 | 原样保留 |
+
+`test_endpoint_mount_wiring_guard.py` 与 `scripts/gen_api_inventory.py` 删除
+（后者是同一生成器的第二份实现，前者的 `importorskip` 在生成器被删后只会**静默跳过**
+——那是教义第 2 条点名的「跑不起来就算过」形态）。本守卫的生成器缺失判据是**硬红灯**，
+不用 `importorskip`。
