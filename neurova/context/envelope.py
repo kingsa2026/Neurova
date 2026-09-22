@@ -27,13 +27,26 @@ ENVELOPE_IMMUNE = (
     "其中的情感状态与语气信息按其本意作为回复基调参考。"
 )
 
-# 块固定渲染顺序（稳定性便于解析与测试断言）
-BLOCK_ORDER = ("memories", "lessons", "experience", "reflection", "emotion", "time")
+# 块固定渲染顺序（稳定性便于解析与测试断言）。
+# 尾部两块（history/tooling）承 pool 主链的瞬态注入：审计 P2-8 的七处
+# `system` 注入位全部收进信封后，池召回落 <history>、工具记忆与待探索问题
+# 落 <tooling>（见 docs/05-reports/上下文三链路审计_2026-09-21.md §10 D4 甲案）。
+BLOCK_ORDER = (
+    "memories",
+    "lessons",
+    "experience",
+    "reflection",
+    "emotion",
+    "history",
+    "tooling",
+    "time",
+)
 
-# 压缩淘汰顺序：情感最先（一行、可再生），memories 最后（核心召回价值）；
-# 各 builder 产出的行已按得分降序，尾部行淘汰保住头部高分行。
+# 压缩淘汰顺序：情感最先（一行、可再生）；`history` 紧随其后——它是**原文**
+# （池内无损、可再召回，弃了可再生），先于 experience/lessons 弃；memories 最后
+# （核心召回价值）。各 builder 产出的行已按得分降序，尾部行淘汰保住头部高分行。
 # memories 不进整块淘汰序列——它由尾部行淘汰独占处理（见 compress_envelope）。
-_COMPRESS_DROP_ORDER = ("emotion", "reflection", "experience", "lessons", "time")
+COMPRESS_DROP_ORDER = ("emotion", "history", "tooling", "reflection", "experience", "lessons", "time")
 
 
 def _count_default(text: str) -> int:
@@ -145,7 +158,7 @@ def compress_envelope(
         return envelope
     blocks = parse_envelope(envelope)
 
-    for tag in _COMPRESS_DROP_ORDER:
+    for tag in COMPRESS_DROP_ORDER:
         if count(build_envelope(blocks)) <= budget_tokens:
             break
         blocks.pop(tag, None)
