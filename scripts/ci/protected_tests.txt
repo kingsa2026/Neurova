@@ -27,6 +27,10 @@ tests/unit/evolution/test_skill_gate_and_unified_identity_p0p1.py
 tests/unit/api/test_skill_pool_api_auth_consolidation.py
 # Issue #46 收口 P1/P2：结构身份聚类 + 合并审批面归属校验 + 死代码真删
 tests/unit/evolution/test_skill_consolidation_structural_and_deadcode_p1p2.py
+# Issue #46 收口：bench_gate 中性只有一条来源（删注册表派生假咬合 + 中性外露到结果面）
+tests/unit/evolution/eval/test_bench_gate_honest_neutrality.py
+# Issue #46 收口：「清空生效正文」在带工具序列/编辑链两形态下也必须被拦
+tests/unit/skills/test_body_clear_is_gated.py
 # Issue #48 NPC 思考档位修正：model 禁带思考强度后缀 / thinkingLevel 必须字面量枚举
 tests/unit/test_ci_npc_config_guard.py
 # Issue #55 性能/资源优化：PostChatPipeline 尾延迟 + 可观测性
