@@ -321,6 +321,9 @@ class ToolExecutor:
         "canvas_layout": "_execute_canvas_layout",
         "canvas_run": "_execute_canvas_run",
         "canvas_list_nodes": "_execute_canvas_list_nodes",
+        # 多步编排入口（DAG 工具编排器的生产消费方）：整条链的每一步都经咽喉，
+        # 票据 / on_tool_executed / 治理预检 / hooks / per-tool 超时全链生效。
+        "orchestrate_tools": "_execute_orchestrate_tools",
     }
 
     # file_search 跳过的噪音目录（依赖/构建/版本控制）
@@ -2517,6 +2520,70 @@ class ToolExecutor:
             "node_results": node_results,
             "duration": getattr(instance, "duration", None),
         }
+
+    async def _execute_orchestrate_tools(self, params: Dict) -> Dict:
+        """多步编排入口（DAG 工具编排器 `ToolOrchestrator` 的生产消费方）。
+
+        编排器只做声明解析、分层与结果汇总，**执行一律回到本咽喉**：每个步进经
+        `_execute_single_tool` 走同一管道，于是整条链的每一跳都拿到票据、
+        `on_tool_executed`、治理预检、hooks 与 per-tool 超时——与单工具调用同口径。
+
+        自嵌套（步进里再点名 `orchestrate_tools`）会让编排器在自身执行链上无限递归，
+        故在入口 fail-closed 拒绝并点名工具名。
+        """
+        orchestrator = getattr(self._agent, "tool_orchestrator", None)
+        if orchestrator is None:
+            return {"success": False, "error": "工具编排器未装配（Agent 初始化失败），无法执行多步编排"}
+
+        raw_steps = params.get("steps")
+        goal = str(params.get("goal") or "").strip()
+        if not raw_steps and not goal:
+            return {
+                "success": False,
+                "error": "缺少 steps 或 goal 参数：多步编排需要显式步骤表或一句可规划的目标",
+            }
+        if raw_steps:
+            try:
+                steps = orchestrator.normalize_steps(raw_steps)
+            except ValueError as invalid:
+                return {"success": False, "error": str(invalid)}
+        else:
+            steps = orchestrator.build_plan_from_goal(goal)
+            if not steps:
+                return {
+                    "success": False,
+                    "error": f"目标无法规划出执行计划（读不懂或能力图无承接工具）: {goal}",
+                }
+            steps = orchestrator.normalize_steps(steps)
+
+        nested = sorted(
+            {step.tool_name for step in steps if step.tool_name == "orchestrate_tools"}
+        )
+        if nested:
+            return {
+                "success": False,
+                "error": (
+                    "拒绝自嵌套编排：步进不得再点名 orchestrate_tools"
+                    "（会在同一条执行链上无限递归）"
+                ),
+            }
+
+        from neurova.core.turn_context import get_turn_user_input
+
+        try:
+            goal = get_turn_user_input() or "多步工具编排"
+        except Exception:  # noqa: BLE001 - 非轮次上下文（脚本/评测）按通用目标
+            goal = "多步工具编排"
+
+        # 执行器由 Agent 装配期一次性注入（指向同一个咽喉），此处**不再改写**——
+        # 每轮重新 set_executor 会在 Agent 级共享对象上做无谓写，且写的是同一等价体。
+        result = await orchestrator.orchestrate(goal, tool_plan=steps)
+
+        payload = result.to_dict()
+        payload["success"] = result.status.value == "completed"
+        if not payload["success"]:
+            payload["error"] = result.error or "编排未全部完成"
+        return payload
 
     @staticmethod
     def _blocking_fetch(url: str, user_agent: str, timeout: int = 10) -> str:
