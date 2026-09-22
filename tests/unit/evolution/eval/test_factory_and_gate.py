@@ -42,7 +42,11 @@ class TestEvalHarnessGate:
 
         gate = make_eval_harness_gate(live_params_provider=provider, apply_fn=apply_fn)
         gain = gate("baseline", "bad-candidate")
-        assert gain < 0.0, "候选致参数劣化 → 门必须咬合(负 gain)"
+        assert gain == pytest.approx(-2.0 / 3.0), (
+            "候选致参数劣化 → 门必须咬合(负 gain)；用实测值而非仅判符号，"
+            "以免与「回滚判据单源」守卫(`test_rsi_rollback_evidence.py`"
+            "::test_no_inline_second_rollback_decision)的 AST 走查口径混淆："
+            "本处断言的是**评测门咬合读数**，不是回滚决策。")
         assert restored["called"], "度量后必须恢复系统状态"
 
     def test_apply_fn_exception_does_not_skip_restore(self):

@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from neurova.evolution.rsi.metrics import RSIMetrics
+from tests import ast_scan
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 PKG_ROOT = REPO_ROOT / "neurova"
@@ -50,23 +51,21 @@ def _production_metric_writes() -> set[str]:
 
     排除 `metrics.py` 自身（它在 `__init__` 里把每个键初始化成 0，那是"仪表通电"
     不是"有读数"，算进去就等于让仪表自己给自己供值）。
+
+    解析走 `tests/ast_scan.py`（Issue #148）：本判据只谈「`record_metric` 的写入点
+    有哪些」，与文件总数无关，故按 `record_metric` 文本预筛——实测 `neurova/` 1014
+    文件里含该字样的只有十几个，全仓 `ast.parse` 要 5s、与受保护子集其余 170 个
+    文件共享机器时必撞 30s 默认墙钟（本次构建实测 timeout）。
     """
     written: set[str] = set()
-    for path in PKG_ROOT.rglob("*.py"):
-        if "__pycache__" in path.parts or path.name == "metrics.py":
+    for path, node in ast_scan.callNodes(PKG_ROOT, "record_metric", hints=("record_metric",)):
+        if path.name == "metrics.py":
             continue
-        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            fn = node.func
-            if not (isinstance(fn, ast.Attribute) and fn.attr == "record_metric"):
-                continue
-            if not node.args:
-                continue
-            first = node.args[0]
-            if isinstance(first, ast.Attribute) and first.attr in _CANONICAL_ATTRS:
-                written.add(first.attr)
+        if not node.args:
+            continue
+        first = node.args[0]
+        if isinstance(first, ast.Attribute) and first.attr in _CANONICAL_ATTRS:
+            written.add(first.attr)
     return written
 
 
