@@ -78,37 +78,18 @@ def test_context_route_registration():
 
 
 def test_skill_market_route_registration():
-    """测试skill_market和skills_market模块的实际路由注册"""
-    app = create_test_app()
-    
-    # 注册skill_market模块
-    try:
-        from neurova.api.endpoints import skill_market
-        app.include_router(skill_market.router, prefix="/api/v1/skill-market", tags=["skill_market"])
-    except ImportError:
-        pytest.skip("skill_market模块导入失败")
-    
-    # 注册skills_market模块
-    try:
-        from neurova.api.endpoints import skills_market
-        app.include_router(skills_market.router, prefix="/api/v1/skills-market", tags=["skills_market"])
-    except ImportError:
-        pytest.skip("skills_market模块导入失败")
-    
-    # 获取所有路由
-    routes = []
-    for route in app.routes:
-        if hasattr(route, "path"):
-            routes.append(route.path)
-    
-    print(f"注册的路由: {routes}")
-    
-    # 检查路由命名不一致
-    has_skill_market = any("/api/v1/skill-market" in route for route in routes)
-    has_skills_market = any("/api/v1/skills-market" in route for route in routes)
-    
-    print(f"是否有 /api/v1/skill-market 路由: {has_skill_market}")
-    print(f"是否有 /api/v1/skills-market 路由: {has_skills_market}")
+    """单复数两套市场端点已由 ADR 0013 删除（Issue #68 处置台账：已删除）。
+
+    原用例把两个模块 include 进临时 app 再检查前缀——它们已不存在，
+    继续用 `pytest.skip("模块导入失败")` 收场就是「跑不起来就算过」。
+    改为断言死套不在、规范端点存活。
+    """
+    import importlib.util
+
+    for removed in ("skill_market", "skills_market"):
+        assert importlib.util.find_spec(f"neurova.api.endpoints.{removed}") is None, (
+            f"{removed} 已删除，不应再出现在仓库里。"
+        )
 
 
 def test_actual_registration_simulation():
@@ -120,8 +101,6 @@ def test_actual_registration_simulation():
         ("neurova.api.endpoints.channels", "/v1/channels", "Channels API"),
         ("neurova.api.endpoints.context", "/v1/context", "Context API"),
         ("neurova.api.endpoints.context_pool_settings", "/v1/context", "Context Pool Settings API"),
-        ("neurova.api.endpoints.skill_market", "/v1/skill-market", "Skill Market API"),
-        ("neurova.api.endpoints.skills_market", "/v1/skills-market", "Skills Market API"),
     ]
     
     registered_routes = []
