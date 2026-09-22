@@ -597,6 +597,186 @@ class TestBinaryPathIsAbsolute:
             )
 
 
+class TestSubprocessFailureIsNotScannerVerdict:
+    """子进程**起不来**（调用侧故障）不等于「扫描器不能用」，更不是「扫出了漏洞」。
+
+    2026-09-22 PR #121 的 dependency-audit 连红三次，三次读数都是同一种形状：
+
+        $ python scripts/ci/osv_audit.py
+        [osv] 指纹校验通过 (linux_amd64)
+        [osv] 扫描器二进制: /tmp/…/osv-scanner_linux_amd64
+        [osv] 扫描器自证: osv-scanner version: 2.6.0（/tmp/…/osv-scanner_linux_amd64）
+        [osv] 预检通过（真跑一次扫描自证契约）:
+              - NeurUI/src-tauri/Cargo.lock: 447 packages
+              - tools/npx-runtime/package-lock.json: 371 packages
+        [osv] 扫描器异常退出（code=127）——不在契约 (0, 1, 65) 内
+
+    同一次运行里，**同一个二进制刚被真跑并通过**（下载、指纹、版本自证、解析
+    447/371 包全对），红却只出现在随后那一次调用上。127 是 `sh` 的
+    「command not found」：子进程创建失败（ENOENT/ENOEXEC/EACCES）经解释器呈现的
+    码与它同形，而 osv-scanner 自己**从不退 127**（v2.6.0 实跑：同一条命令退出 0）。
+
+    `resolveBinaryPath()` 只能证明「文件在这一秒还在、权限位也对」——真起进程时它
+    可能刚到就被摘掉、被挂断，或解释器没有执行权。故这里钉的是：
+    **调用侧异常必须被单独归因**，且**不许拿状态码反推根因**。
+    """
+
+    def test_subprocess_oserror_is_reported_as_invocation_failure(
+        self, auditModule, tmp_path, monkeypatch
+    ):
+        """`FileNotFoundError`/`PermissionError` 必须转成可点名的调用故障，不许裸抛。"""
+        binary = tmp_path / "osv-scanner"
+        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        binary.chmod(0o755)
+
+        def boom(cmd, **kwargs):
+            raise FileNotFoundError(2, "No such file or directory")
+
+        monkeypatch.setattr(auditModule.subprocess, "run", boom)
+        with pytest.raises(auditModule.ScannerInvocationError) as exc:
+            auditModule.assertScannerExecutable(binary)
+        message = str(exc.value)
+        assert isinstance(exc.value, RuntimeError), "调用故障必须与扫描器裁决区分开"
+        assert "无法执行" in message or "调用" in message, (
+            "报错必须点明这是「门禁自己没能把扫描器跑起来」，"
+            "而不是把 127 当成扫描器给出的裁决——两者在读日志时无法区分"
+        )
+
+    def test_preflight_failure_and_invocation_failure_are_distinct_types(
+        self, auditModule, tmp_path, monkeypatch
+    ):
+        """两种根因必须是两个类型：否则「换一份二进制」与「修调用点」会被混为一句。
+
+        `resolveBinaryPath` 拦「路径本身就不对」（起子进程之前），
+        `ScannerInvocationError` 拦「路径看着对、真起进程时起不来」（之中）。
+        两条路都必须单独归因，且**都不许复用 SystemExit**：否则调用方在
+        `except SystemExit` 里无从分辨「扫描器说不能用」与「我根本没跑起来扫描器」。
+        """
+        assert issubclass(auditModule.ScannerInvocationError, RuntimeError)
+        assert not issubclass(auditModule.ScannerInvocationError, SystemExit), (
+            "调用故障不能复用 SystemExit——复用后调用方无从分辨"
+            "「扫描器说不能用」与「我根本没跑起来扫描器」"
+        )
+        binary = tmp_path / "osv-scanner"
+        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        binary.chmod(0o755)
+
+        def boom(cmd, **kwargs):
+            raise OSError(13, "Permission denied")
+
+        monkeypatch.setattr(auditModule.subprocess, "run", boom)
+        with pytest.raises(auditModule.ScannerInvocationError):
+            auditModule.assertScannerExecutable(binary)
+
+    def test_main_returns_two_when_scanner_cannot_be_invoked(
+        self, auditModule, tmp_path, monkeypatch
+    ):
+        """调用故障是基础设施错误（2），绝不能与「发现未允许漏洞」（1）撞码。"""
+        targets = _paths(tmp_path / "home", ["NeurUI/src-tauri/Cargo.lock"])
+        monkeypatch.setattr(auditModule, "PROJECT_ROOT", tmp_path / "home")
+
+        def boom(*a, **k):
+            raise auditModule.ScannerInvocationError("调用点探测失败")
+
+        monkeypatch.setattr(auditModule, "runPreflight", boom)
+        monkeypatch.setattr(auditModule, "verify_local_patches", lambda: [])
+        monkeypatch.setattr(auditModule, "_resolve_scanner", lambda: Path("/bin/true"))
+        argv = ["osv_audit.py", "--targets", str(list(targets.values())[0])]
+        monkeypatch.setattr(auditModule.sys, "argv", argv)
+        assert auditModule.main() == 2, (
+            "调用故障必须退 2——退 1 会被读成「真扫出漏洞」，"
+            "与 PR #121 里那个 127 被误读成「扫描器坏了」是同一类错"
+        )
+
+    def test_non_contract_exit_code_names_the_invocation_point(
+        self, auditModule, tmp_path, monkeypatch
+    ):
+        """拿到非契约码（127 等）时必须先探测调用点，把「缺件」与「拼法不符」拆开。"""
+        binary = tmp_path / "osv-scanner"
+        # 探测只看「起得来 + 有输出」：真扫描器回的是 `osv-scanner version: X`
+        binary.write_text(
+            "#!/bin/sh\nprintf 'osv-scanner version: 9.9.9\\n'\n", encoding="utf-8"
+        )
+        binary.chmod(0o755)
+        problems = auditModule._invocationProbe(binary)
+        assert problems == [], "能调起来的二进制被误判为调用点不可用"
+
+        gone = tmp_path / "vanish"
+        problems = auditModule._invocationProbe(gone)
+        assert problems, (
+            "调用点已不可用却没被点名——拿到 127 时只能反推根因，"
+            "这正是 PR #121 连红三次的读法"
+        )
+        assert str(gone) in problems[0], "点名必须带上具体路径（日志里要能直接复核）"
+
+    def test_scanner_capability_is_a_probe_not_an_exit_code(self, auditModule, tmp_path, monkeypatch):
+        """能力判据必须是**探测**出来的：同一条命令在预检里真跑过，才算「能用」。"""
+        home = tmp_path / "home"
+        paths = _paths(
+            home, ["NeurUI/src-tauri/Cargo.lock", "tools/npx-runtime/package-lock.json"]
+        )
+        monkeypatch.setattr(auditModule, "PROJECT_ROOT", home)
+        stub = home / "osv-scanner-stub"
+        stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+        calls = []
+
+        def fakeRun(cmd, **kwargs):
+            calls.append(list(cmd))
+            if cmd[1] == "--version":
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout="osv-scanner version: 9.9.9\n", stderr=""
+                )
+            output = Path(cmd[cmd.index("--output") + 1])
+            output.write_text(json.dumps({"results": []}), encoding="utf-8")
+            body = "".join(
+                f"Scanned /w/{rel.rsplit('/', 1)[-1]} file and found {n} packages\n"
+                for rel, n in (("Cargo.lock", 447), ("package-lock.json", 368))
+            )
+            return subprocess.CompletedProcess(cmd, 0, stdout=body, stderr="")
+
+        monkeypatch.setattr(auditModule.subprocess, "run", fakeRun)
+        report = auditModule.runPreflight(stub, list(paths.values()), stub)
+        assert calls, "预检必须真起一次扫描——不看文件在不在、不猜退出码语义"
+        assert any("预检通过" in line for line in report)
+        assert all(call[0] == str(stub) for call in calls), (
+            "预检与正式扫描必须调同一个二进制（否则「预检通过」不代表正式那次能用）"
+        )
+        assert any(call[1] == "--version" for call in calls), (
+            "自证那一次必须在真扫描之前——不然只能拿 127 反推根因"
+        )
+
+    def test_preflight_asks_the_same_question_twice_not_a_guess(
+        self, auditModule, tmp_path, monkeypatch
+    ):
+        """「二进制能不能用」在**起扫描之前**就问一次；起不来时由调用归因兜住。
+
+        PR #121 的红全部发生在「预检成功、下一次调用 127」之后——那一次调用是否
+        真的起得来，只能由调用侧异常回答，不能靠读码。
+        """
+        binary = tmp_path / "osv-scanner"
+        binary.write_text("#!/bin/sh\nprintf 'osv-scanner version: 9.9.9\\n'\n", encoding="utf-8")
+        binary.chmod(0o755)
+        calls = []
+
+        def flaky(cmd, **kwargs):
+            calls.append(list(cmd))
+            if len(calls) > 1:
+                raise FileNotFoundError(2, "No such file or directory")
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout="osv-scanner version: 9.9.9\n", stderr=""
+            )
+
+        monkeypatch.setattr(auditModule.subprocess, "run", flaky)
+        monkeypatch.setattr(auditModule, "_targetPackageCounts", lambda ts: {str(ts[0]): 1})
+        with pytest.raises(auditModule.ScannerInvocationError) as exc:
+            auditModule.runPreflight(binary, [binary], binary)
+        assert str(binary) in str(exc.value), "调用故障必须点名是哪个二进制起不来"
+        assert calls and calls[0][1] == "--version", (
+            "预检必须先用 --version 真跑一次自证；不先问就只能在拿到 127 之后反推根因"
+        )
+
+
 class TestGuardIsWiredIntoCi:
     def test_listed_in_protected_tests(self):
         listed = {

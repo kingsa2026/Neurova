@@ -32,6 +32,10 @@ pip-audit 与 npm audit 只覆盖"Python 声明锁"与"NeurUI 的 npm 树"。
   （`ignoreUntil` 由 osv-scanner 强制），防"永久静音"。
 - **失败即红灯**：扫描器跑不起来（下载失败/清单缺失）按基础设施错误退出非 0。
   "跑不起来就算过"的安全门禁是安全剧场，本仓库不收。
+- **两种根因不许混为一句话**：2026-09-22 PR #121 的 dependency-audit 连红三次，
+  每次预检都真的跑通了，红只发生在随后那次调用上（127 = `sh` 的 command not found，
+  与「命令拼错」同码同形）。故调用侧故障由 `ScannerInvocationError` 单独归因，
+  「路径现在还能不能被调起来」由 `_invocationProbe()` 直接测，**不用状态码猜根因**。
 - **本地补丁必须被核验**：OSV 按 `name + version` 判定，看的是清单里的版本字符串，
   不是实际编译的源码——`[patch.crates-io]` 换成仓内源码后它照旧报同一个版本。
   于是"某条允许清单靠本地补丁成立"这件事，只能由本脚本自己核验：`LOCAL_PATCHES`
@@ -122,6 +126,21 @@ _COMMAND_CONTRACT = {
 # 合法退出码：0 = 无未允许漏洞；1 = 有未允许漏洞；65 = 入参错误。
 # 其余（如 127）语义不明——**不许当"通过"**，这正是 2026-09-22 那次红的形态。
 CONTRACT_EXIT_CODES = (0, 1, 65)
+
+
+class ScannerInvocationError(RuntimeError):
+    """门禁自己没能把扫描器跑起来（调用侧故障），**不是**扫描器给出的裁决。
+
+    为什么必须单独一个类型：2026-09-22 PR #121 的 dependency-audit 连红三次，三次
+    都是**同一次运行里预检真的跑成功了**（下载、指纹、解析 447/371 包全对），红只
+    发生在随后那一次调用上。`resolveBinaryPath` 只证明「文件在这一秒还在、权限位也
+    对」——真起进程时它可能刚被摘掉、被挂断，或解释器根本没有执行权；这时壳层给的
+    码仍是 127，与「命令不成形」同形。`sh` 的 127 就是 "command not found"，
+    而扫描器自己**从不退它**（v2.6.0 实跑：同一条命令退出 0）。
+
+    故本脚本不再拿状态码反推根因：调用侧故障在这里单独归因，
+    `main()` 一律按基础设施错误 2 收口，绝不与「发现未允许漏洞(1)」撞码。
+    """
 
 # 被扫依赖树「点数」用的解析器类型。未登记的类型不猜数，取 UNCOUNTED_SENTINEL
 # 并显式报出（猜 0 会让对账退化成空转：扫了 0 个包也能印绿字）。
@@ -257,6 +276,46 @@ def resolveBinaryPath(scanner) -> Path:
     return path
 
 
+def _runScannerProcess(cmd, **kwargs):
+    """起扫描器进程；把「起不来」单独归因，不再让它伪装成扫描器的退出码。
+
+    子进程创建失败在 Python 侧是 OSError 子类（`FileNotFoundError` / `PermissionError`
+    等），而壳层看到的是 127——与「命令不成形」同码。故这里在**任何状态码判据之前**
+    捕获调用侧故障，转成 `ScannerInvocationError`（上层按基础设施错误 2 收口）。
+    本仓所有 `subprocess.run` 调用点共用它，异常语义不会各写一份。
+    """
+    try:
+        return subprocess.run(cmd, **kwargs)
+    except OSError as e:
+        raise ScannerInvocationError(
+            f"无法执行扫描器命令：{cmd[0]}（{type(e).__name__}: {e}）"
+            "——这是门禁没把扫描器跑起来，不是扫描器给出的裁决"
+        ) from e
+
+
+def _invocationProbe(scanner) -> list:
+    """探测「这个路径现在还能不能被调起来」，返回问题清单（空 = 能调起来）。
+
+    判据刻意**不看业务结果**（锁文件 / allowlist / 退出码语义都不参与）：
+    这里只问一件事——同一个路径，预检调得起来、正式那次调得起来吗。
+    能调起来返回空清单（它自己退什么码由各自的判据管），调不起来就点名 errno。
+    缺了这一步，只能拿 127 反推根因——而那正是 PR #121 连红三次的读法。
+    """
+    try:
+        proc = subprocess.run(
+            [str(scanner), "--version"], capture_output=True, text=True, timeout=60
+        )
+    except OSError as e:
+        return [
+            f"{scanner} 无法执行（{type(e).__name__}: {e}）——"
+            "预检通过说明它此前可用，正式扫描却在调用点失败"
+        ]
+    except subprocess.TimeoutExpired:
+        return [f"{scanner} --version 超时（60s）——调用点已不可用"]
+    lines = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip().splitlines()
+    return [] if lines else [f"{scanner} --version 无任何输出——调用点已不可用"]
+
+
 def assertScannerExecutable(scanner) -> str:
     """起扫描之前先自证「这个二进制能被执行」，返回它的版本行。
 
@@ -264,7 +323,9 @@ def assertScannerExecutable(scanner) -> str:
     三件事一次问清。缺了这一步，127（command not found）会被误读成版本不符。
     """
     binary = resolveBinaryPath(scanner)
-    proc = subprocess.run([str(binary), "--version"], capture_output=True, text=True)
+    # 起进程这一步也可能失败（文件刚到就被摘掉、解释器没有执行权、被挂断），
+    # 壳层给的码还是 127 —— 故与扫描调用共用同一个归因落点，不许裸抛 OSError。
+    proc = _runScannerProcess([str(binary), "--version"], capture_output=True, text=True)
     line = (proc.stdout or proc.stderr or "").strip().splitlines()
     version_line = line[0] if line else ""
     if proc.returncode != 0 or not version_line:
@@ -459,7 +520,7 @@ def runPreflight(scanner: Path, targets, allowlist: Path) -> list:
     version_line = assertScannerExecutable(binary)
     output = Path(tempfile.mkdtemp(prefix="osv-preflight-")) / "preflight.json"
     cmd = buildScanCommand(binary, targets, allowlist, output)
-    proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
+    proc = _runScannerProcess(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
     problems = []
     if proc.returncode not in CONTRACT_EXIT_CODES:
         problems.append(
@@ -565,6 +626,12 @@ def main() -> int:
     try:
         for line in runPreflight(scanner, targets, allowlist):
             print(line)
+    except ScannerInvocationError as e:
+        # 门禁自己没把扫描器跑起来（调用侧故障）：**必须在任何状态码判据之前**
+        # 单独归因，按基础设施错误 2 收口。若与「扫描器给出的裁决」混为一句，
+        # 读日志的人只能原地重跑一次（PR #121 连红三次的处置方式）。
+        print(f"[osv] 调用故障（扫描器没被跑起来）: {e}", file=sys.stderr)
+        return 2
     except SystemExit as e:
         # 预检失败 = 基础设施错误，退出码**必须是 2**（不许让 SystemExit 的消息
         # 替我们决定退出码：非整数码在 shell 侧会变成 1，与「有漏洞」撞码）。
@@ -576,16 +643,35 @@ def main() -> int:
     # 结果落 `--output` 指定文件而不是 stdout：告警/进度与结果同流时，
     # `2>&1 | cat` 一类的写法会把子进程退出码吞掉（见守卫
     # `_pipelineExitCodesSurviveRedirect`），**有漏洞也会退出 0**。
+    # buildScanCommand 内部走 resolveBinaryPath，与 runPreflight 自证过的是同一份
+    # 绝对路径；调用侧故障（起不来）由 _runScannerProcess 单独归因。
     cmd = buildScanCommand(scanner, targets, allowlist, output)
-    proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
+    proc = _runScannerProcess(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
 
     # 契约码判据先行：非契约码（127 等）说明命令没成形或版本不符，禁止当"无漏洞"。
     if proc.returncode not in CONTRACT_EXIT_CODES:
+        # 127 是壳层的 "command not found"，与「命令拼错」同码同形。本次预检刚拿同一条
+        # 命令跑通过，所以这里先用探测点定根因，再回落到「命令不成形」；两种情况都要给
+        # 可点名的读数，不许只印一个码让人去猜（PR #121 三次红就是这么被当成抖动重跑的）。
+        problems = _invocationProbe(scanner)
+        if problems:
+            print(
+                f"[osv] 扫描器异常退出（code={proc.returncode}）——"
+                "不在契约内，且调用点已不可用：",
+                file=sys.stderr,
+            )
+            for item in problems:
+                print(f"      - {item}", file=sys.stderr)
+            return 2
+        # 扫描器自述的最后一行带上：版本/拼法不符时，这句话本身就是读数。
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
         print(
             f"[osv] 扫描器异常退出（code={proc.returncode}）——不在契约 "
             f"{tuple(CONTRACT_EXIT_CODES)} 内，本条拒绝判定为通过",
             file=sys.stderr,
         )
+        if detail:
+            print(f"      扫描器自述：{detail[-1][:400]}", file=sys.stderr)
         return 2
 
     try:
