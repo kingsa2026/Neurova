@@ -30,7 +30,7 @@ class FunASREngine(ASRBase):
 
     def __init__(
         self,
-        model_dir: str = "models/asr/funasr",
+        model_dir: str = "",
         model_name: str = "funasr",
         device: str = "auto",
         auto_download: bool = True,
@@ -45,7 +45,11 @@ class FunASREngine(ASRBase):
             auto_download: 是否自动下载模型
         """
         super().__init__()
-        self._model_dir = Path(model_dir)
+        # 模型目录是**随代码走的资产**（镜像里就带），锚在仓库根而不是 CWD：
+        # 原值是裸相对名，换个启动目录就找不到模型（静默回落自动下载）。
+        from neurova.core.data_root import repoAsset
+
+        self._model_dir = Path(model_dir) if model_dir else repoAsset("models", "asr", "funasr")
         self._model_name = model_name
         self._device = device
         self._auto_download = auto_download

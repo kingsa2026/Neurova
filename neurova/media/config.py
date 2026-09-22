@@ -283,10 +283,16 @@ class MediaStorageConfig:
         )
 
     def get_root_path(self, agent_id: Optional[str] = None) -> Path:
-        """获取根路径"""
+        """媒体存储根：按 agent 落数据根，非 agent 场景落数据根下的 `media/`。
+
+        原实现返回 `Path("agents/<id>/workspace/media")` 与 `Path("media")`
+        —— 都是 CWD 相对：换个启动目录，已入库的媒体文件就"找不到"。
+        """
+        from neurova.core.data_root import get_agent_data_dir, get_data_root
+
         if agent_id:
-            return Path(f"agents/{agent_id}/workspace/{self.root_dir}")
-        return Path(self.root_dir)
+            return get_agent_data_dir(agent_id) / "workspace" / self.root_dir
+        return get_data_root() / self.root_dir
 
     def get_media_path(self, agent_id: str, filename: str, date: Optional[datetime.datetime] = None) -> Path:
         """获取媒体文件路径"""
@@ -328,7 +334,13 @@ class MediaStorageConfigManager:
         Args:
             config_dir: 配置目录路径
         """
-        self.config_dir = config_dir or Path("config/media")
+        # 媒体配置落点：显式入参 > 数据根下的 `media_config/`。
+        # 原兜底 `Path("config/media")` 是 CWD 相对，且与"随代码走的 config/ 资产"
+        # 同名——一个随部署漂移、一个是镜像内固定资产，混在一处必分不清。
+        from neurova.core.data_root import callerPath, dataLanding
+
+        self.config_dir = callerPath(config_dir, "media_config") if config_dir \
+            else dataLanding("media_config")
 
         # 线程锁
         self._lock = threading.RLock()

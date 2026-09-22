@@ -34,7 +34,19 @@ from neurova.api.auth import get_current_user
 logger = get_logger(__name__)
 router = APIRouter()
 
-STORAGE_ROOT = Path("storage/users")
+def _defaultStorageRoot() -> Path:
+    """上传根：数据根下的 `storage/users`（绝对路径）。
+
+    原值 `Path("storage/users")` 是 CWD 相对——上传件的落点随启动目录漂移，
+    与 `file_utils` 的上传根分裂成两处"事实源"。旧的仓库根 `storage/users`
+    只在数据根尚无该目录时搬进来一次。
+    """
+    from neurova.core.data_root import dataLanding
+
+    return dataLanding("storage", "users")
+
+
+STORAGE_ROOT = _defaultStorageRoot()
 
 # BUG AUDIT S-15: 上传原先 await file.read() 全量读内存且无大小/类型限制，
 # 恶意/超大上传可打满内存与磁盘。改为分块流式落盘 + 大小上限 + 危险扩展名黑名单。
