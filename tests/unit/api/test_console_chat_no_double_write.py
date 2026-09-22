@@ -35,7 +35,8 @@ from fastapi.testclient import TestClient
 def isolated_sessions_dir(tmp_path, monkeypatch):
     """隔离的临时 sessions 目录,避免污染项目数据.
 
-    通过 monkeypatch Path("sessions") 让 SessionManager 把文件写到 tmp_path/sessions.
+    走 SessionManager 的既定注入口 `NEUROVA_SESSIONS_DIR`（原实现 patch
+    `Path("sessions")`——"靠 CWD 相对名隔离"正是本批要灭的形态）。
     同时重置单例,确保每次测试拿到干净实例.
     """
     sessions_dir = tmp_path / "sessions"
@@ -51,16 +52,7 @@ def isolated_sessions_dir(tmp_path, monkeypatch):
 
     monkeypatch.setattr(session_repository, "_repository_instance", None)
 
-    # 让 SessionManager._sessions_dir 指向 tmp_path/sessions
-    # 通过 patch Path() 让 SessionManager.__init__ 中的 Path("sessions") 返回我们的临时目录
-    original_path = Path
-
-    def fake_path(p):
-        if p == "sessions":
-            return sessions_dir
-        return original_path(p)
-
-    monkeypatch.setattr("neurova.session_manager.Path", fake_path)
+    monkeypatch.setenv("NEUROVA_SESSIONS_DIR", str(sessions_dir))
 
     yield sessions_dir
 

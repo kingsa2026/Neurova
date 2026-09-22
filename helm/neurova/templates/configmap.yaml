@@ -22,6 +22,10 @@ data:
   NEUROVA_LOG_JSON: {{ ternary "1" "0" .Values.logging.json | quote }}
   NEUROVA_LOG_FILE: {{ .Values.logging.file | quote }}
 
+  # 会话存档落点（读取键是 NEUROVA_SESSIONS_DIR，见 neurova/session_manager.py）。
+  # 应用侧默认落数据根，这里显式指回既有 subPath 挂载，老部署的会话档案不失联。
+  NEUROVA_SESSIONS_DIR: "/app/sessions"
+
   # 数据库配置（读取键是 NEUROVA_DB_PATH，见 neurova/core/db_indexes.py）
   NEUROVA_DB_PATH: {{ .Values.database.dbPath | quote }}
 

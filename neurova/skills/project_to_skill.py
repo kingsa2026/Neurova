@@ -32,7 +32,12 @@ class ProjectToSkillConverter:
         Args:
             output_dir: 技能输出目录
         """
-        self.output_dir = Path(output_dir) if output_dir else Path("./generated_skills")
+        # 产出落点：显式入参 > 数据根下的 `generated_skills/`。
+        # 原兜底 `Path("./generated_skills")` 是 CWD 相对，换个启动目录就
+        # 把技能生成到别处（此前的仓库根 generated_skills/ 就是这么来的）。
+        from neurova.core.data_root import dataLanding
+
+        self.output_dir = Path(output_dir) if output_dir else dataLanding("generated_skills")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info("ProjectToSkillConverter 初始化完成")
