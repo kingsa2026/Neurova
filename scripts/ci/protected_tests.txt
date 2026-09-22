@@ -320,6 +320,12 @@ tests/unit/test_active_layer_refs_guard.py
 #     draw/query 零查库由断言锁住，登记值随写入/GC 增量同步并进 gauge）
 tests/unit/context/test_pool_startup_load.py
 
+# Issue #109：glib 0.18.5 的 VariantStrIter 未定义行为（RUSTSEC-2024-0429）改按
+#   上游修法就地打补丁（vendor 副本 + [patch.crates-io]）。本守卫锁住补丁在位、
+#   副本含修复、锁文件真走本地、允许清单条目与补丁绑定、门禁逐条核验本地补丁——
+#   任一环松掉都会让"已修"退回"拿清单静音"。
+tests/unit/desktop/test_rust_vendor_patch_guard.py
+
 # Issue #68 下一层：归档层 1800 余条按「是否影响当下导航」再筛一轮。
 #   前序口径把归档层一视同仁为「历史留痕，不就地改写」，副作用是把两类不同性质
 #   混在一起：绝大多数条目的载体今天没人走得到；少数条目的载体**导航可达**，
@@ -343,3 +349,9 @@ tests/unit/context/test_ledger_gc_retention.py
 #   模块双向差集为空，两组差异（前端未命中后端 / 后端无前端消费）逐条显式登记，
 #   快照命令与日期写入机器区、逾期由守卫点名。棘轮基线 103 → 0。
 tests/unit/test_api_inventory_guard.py
+# Issue #80 工具↔经验↔再调用三环路修复批（第四轮）：票面正文入库与「判据可复核」收口。
+#   根因：001–011 的票面（即每张票的收工判据）只存在于 Issue 附件的对话里，仓内只有
+#   000-索引.md——索引表 11 行的落点指向 11 份并不存在的票面，复核者拿不到判据原文。
+#   守卫锁三条：索引声明的票号必须有同名唯一票面正文；票面的「执行结果」不得停在占位符；
+#   本批文档里的仓库路径引用与章节号必须可达（判据复用 scripts/scan_docs_refs.py）。
+tests/unit/test_tool_loop_ticket_set_guard.py
