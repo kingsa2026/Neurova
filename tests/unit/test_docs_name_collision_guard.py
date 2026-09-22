@@ -132,7 +132,7 @@ class TestLedgerPublishesAdjudication:
         actual = _block(ledger_text, scanner.ADJUDICATION_BEGIN, scanner.ADJUDICATION_END)
         assert actual.strip() == expected.strip(), (
             "台账的裁定表与扫描器输出不一致。台账是生成物，不要手改；\n"
-            "改完源文件后重跑：python scripts/scan_docs_refs.py --markdown"
+            "改完源文件后重跑：python scripts/scan_docs_refs.py --update-ledger"
         )
 
     def test_no_row_is_left_pending(self, ledger_text):

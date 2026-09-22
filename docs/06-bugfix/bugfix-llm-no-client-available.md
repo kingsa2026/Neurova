@@ -378,7 +378,7 @@ Invoke-WebRequest -Uri "http://localhost:9527/api/v1/console/chat" -Method POST 
 
 ## 8. 参考资料
 
-- [bug-hunt methodology](C:\Users\xccoo\.agents\skills\bug-hunt.keep) — 五阶段调查流程
+- `bug-hunt methodology`（五阶段调查流程）——记录在会话本地技能目录，未入库；本仓的调查流程事实源见 `docs/CONTEXT.md` 与 `AGENTS.md` 修复教义
 - [Python threading.Lock vs RLock](https://docs.python.org/3/library/threading.html#lock-objects) — 官方文档
 - [pycryptodome AES-GCM](https://pycryptodome.readthedocs.io/en/latest/src/cipher/aes.html) — 加密库文档
 - P0-3 修复(`test_multi_model_client_init_lock.py`)— 类级 `_lock` 改为 RLock 的先例
