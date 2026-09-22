@@ -77,7 +77,7 @@ def _archiveTurn(pool, turnIndex, size=ROUND_SIZE):
 class TestConnectionIsResident:
     """常驻连接：写入口不再每次 connect/close。"""
 
-    def test_record_reuses_resident_connection(self, tmp_path, monkeypatch):
+    def _countConnections(self, monkeypatch):
         realConnect = ledgerModule.sqlite3.connect
         opens = []
 
@@ -86,13 +86,30 @@ class TestConnectionIsResident:
             return realConnect(*args, **kwargs)
 
         monkeypatch.setattr(ledgerModule.sqlite3, "connect", countingConnect)
-        ledger = EvictionLedgerDB(db_path=tmp_path / "l.db", user_id="u1", agent_id="a1")
+        return opens
+
+    def test_record_reuses_resident_connection(self, tmp_path, monkeypatch):
+        """稳态（版本已是最新）下写入口不再每次 connect/close。
+
+        构造期可能有**一次**额外的短连接：006 的 v2 迁移（FTS 重建为 trigram）在
+        一条独立连接上分批短事务执行——迁移事务所在连接持读锁，同连接内
+        `DROP`/`RENAME` FTS 虚表与它自相冲突（实测 `database is locked`）。
+        该额外连接只在"有未应用的 v2"时出现，且是一次性的（下条用例锁住）。
+        """
+        opens = self._countConnections(monkeypatch)
+        dbPath = tmp_path / "l.db"
+        EvictionLedgerDB(db_path=dbPath, user_id="u1", agent_id="a1").close()  # 首次：跑 v2
+        opens.clear()
+
+        ledger = EvictionLedgerDB(db_path=dbPath, user_id="u1", agent_id="a1")
         opensAfterInit = len(opens)
+        assert opensAfterInit == 1, (
+            f"版本已最新的库构造期应只开一次连接（常驻），实际 {opensAfterInit} 次"
+        )
 
         for turn_id, text in _turnContents(1):
             ledger.record(content=text, turn_id=turn_id, session_id="s1")
 
-        assert opensAfterInit == 1, f"构造期应只开一次连接，实际 {opensAfterInit} 次"
         assert len(opens) == opensAfterInit, (
             f"record() 仍在每次新建连接（{len(opens) - opensAfterInit} 次）——"
             "写放大的一半开销就在 connect/close 上"
