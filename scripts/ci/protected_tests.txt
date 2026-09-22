@@ -346,3 +346,14 @@ tests/unit/context/test_ledger_gc_retention.py
 #   守卫锁三条：索引声明的票号必须有同名唯一票面正文；票面的「执行结果」不得停在占位符；
 #   本批文档里的仓库路径引用与章节号必须可达（判据复用 scripts/scan_docs_refs.py）。
 tests/unit/test_tool_loop_ticket_set_guard.py
+
+# 上下文持久层批（Issue #90）B4 工单 004：读侧预筛与转义（A3/A4）
+#   （根因：LIKE 兜底直拼 f"%{query}%"——`%`/`_` 是通配符，实测库内 3 行时 `%`
+#     命中 3 行；<3 字符强行 MATCH 是假阴性。转义/长度分流/候选集上限单源到
+#     core/sql_like + CANDIDATE_LIMIT）
+tests/unit/context/test_ledger_read_prefilter.py
+
+# 上下文持久层批（Issue #90）B4 工单 004 的同契约命中点（教义第 5 条）：
+#   neurflow 搜索与 CSE 检索的 LIKE 兜底同样直拼用户输入（`%` 把整表拉回）
+tests/unit/neurflow/test_storage.py
+tests/unit/cognitive/test_cognitive_storage_engine.py
