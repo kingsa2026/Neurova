@@ -461,8 +461,10 @@ $:
   #
   # 空轮防护（为什么不是"每次都接力"）：
   #   `if` 恒真会使用户只说一句「你好」也无限接力烧配额。故 Stage 1 在写入燃料时
-  #   **同时回写接力变量**（Node 20+ 支持 `$GITHUB_ENV` 同源的
-  #   `$CNB_ENV` 文件协议；平台不提供该文件时以 5s 静默超时，不失败）。于是：
+  #   **同时经平台声明的导出通道回写接力变量**：stdout 的 `##[set-output]` 标记
+  #   ＋ 同一 Stage 上的 `exports` 映射（生命周期覆盖整个 Pipeline，含 endStages）。
+  #   上一批曾用 `$GITHUB_ENV` 同源的 `$CNB_ENV` 文件通道 —— 那是一条**不存在的
+  #   路径**（官方文档零命中，真实构建里也未注入），已被证伪并换掉。于是：
   #     用户新发的 @   → 变量为空 → 不接力（空轮不烧配额）
   #     碰完 maxTurns 的构建 → 变量为 1 → 自动接力下一轮
   #   链路上没有任何一处需要 Agent 配合，也没有第二套状态文件。
@@ -504,6 +506,20 @@ $:
           #   就说清楚；跑不起来即红，不留"看着配了、其实永远不会触发"的接力。
           script: "$NPX_CALL scripts/ci/npc_turn_handoff_gate.py"
           timeout: 2m
+          # 把门禁写出的 `##[set-output]` 标记映射成环境变量（键名见下方映射）。
+          # 平台依据（docs.cnb.cool 的「环境变量」篇）：CI 按行识别 stdout 的
+          #   `##[set-output key=value]` 放进本 Job 的 `result`；再由 `exports`
+          #   映射为环境变量，**生命周期为当前 Pipeline** —— 因此收尾 `endStages`
+          #   的 `if` 读得到，这正是接力判据需要的可见性。
+          # 为什么不是文件通道（上一批写法，已被证伪）：
+          #   平台**不提供** `$CNB_ENV` / `$GITHUB_ENV`（官方文档全文零命中，
+          #   本次真实构建里也未注入）。往不存在的路径追加内容既不生效、
+          #   也不报错 —— 接力会在绿灯下静默失效。`GITHUB_ENV` 同源的写法
+          #   只在 GitHub Actions 成立，照搬到 CNB 是一条不存在的路径。
+          # 键名与门禁脚本的 SET_OUTPUT_KEY 同源，漂移由
+          #   tests/unit/ci/test_npc_pipeline_time_budget.py 常驻校验。
+          exports:
+            turnLimitReached: turnLimitReached
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           # npc:go 的 `timeout` 作用于 Agent 的**每一次工具执行**（bash 命令），
           # 不是整个 Agent 会话；会话整体只受流水线 20h 上限约束。
@@ -526,7 +542,8 @@ $:
       # 事件名逐字复用当前事件的上下文（issue 拉 issue、PR 拉 PR），
       # 下一轮重新 clone 后读同一个 Issue/PR 的评论继续干 —— Issue/PR 本身就是
       # 对话载体，另开 Issue 只会让上下文断链（教义：不留断点）。
-      # `if` 的判据只有一处（即本文件 env 传入的那一个变量），由 Stage 1 回写。
+      # `if` 的判据只有一处（即本文件 env 传入的那一个变量），由 Stage 1 经
+      # `##[set-output]` + `exports` 回写；不新增第二套状态文件或计数器。
       endStages:
         - name: "轮数触顶接力：自动开启下一轮（写不出成果就烧配额）"
           type: cnb:apply

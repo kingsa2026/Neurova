@@ -46,7 +46,12 @@ Agent 为一项「浏览器级 live」收尾任务反复 `sleep` 轮询构建容
 - 从 `scripts/ci/protected_tests.txt` 摘掉本文件 → D 红。
 """
 import io
+import os
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 
 from pathlib import Path
 
@@ -382,6 +387,13 @@ class TestGuardIsInProtectedSubset:
 #: 轮数触顶接力的燃料文件：Agent 在最后一轮写出它，`.cnb.yml` 的收尾阶段读它。
 HANDOFF_MARKER_FILE = ".npc-turn-handoff"
 
+#: 写燃料的门禁脚本：`.cnb.yml` 在 Agent 开工前调用它。
+HANDOFF_GATE_SCRIPT = "scripts/ci/npc_turn_handoff_gate.py"
+
+#: 「本轮是接力轮」的变量名。`.cnb.yml` 的 `env` / `endStages.if` 与门禁逐字一致，
+#: 全仓只有一处事实源。
+TURN_FLAG_VAR = "turnLimitReached"
+
 
 class TestNpcOptionsPromptIsAnUnreachableChannel:
     """`npc:go.options` 里不得再出现 `prompt` 键 —— 它是一条永不生效的通路。
@@ -489,3 +501,136 @@ class TestHandoffFuelIsWritableFromTheConfigAlone:
                 f"{conditions!r}\n"
                 "接力判据只允许一处（单一事实源），新增计数文件/状态字段都是平行体系。"
             )
+
+
+def _gate_invocations(gate):
+    """产出 (分支名, argv) —— python 分支与经桥脚本的 node 分支。"""
+    out = []
+    if shutil.which("python3") or shutil.which("python"):
+        out.append(("python", [sys.executable, str(gate)]))
+    bridge = PROJECT_ROOT / "scripts" / "ci" / "run_gate_under_node.sh"
+    if shutil.which("node") and bridge.exists():
+        out.append(("node", ["sh", str(bridge), str(gate)]))
+    return out
+
+
+def _run_gate_capture_stdout(gate, argv=None, workspace=None):
+    """在 CI 上下文里真跑一遍门禁，取回 stdout（含 `##[set-output]` 标记）。"""
+    env = dict(os.environ, CNB="1", CI="true")
+    env["CNB_BUILD_WORKSPACE"] = workspace or tempfile.mkdtemp(prefix="npc-handoff-gate-")
+    argv = argv if argv is not None else [sys.executable, str(gate)]
+    proc = subprocess.run(argv, capture_output=True, env=env, cwd=str(PROJECT_ROOT))
+    assert proc.returncode == 0, (
+        f"门禁 {' '.join(argv)} 未以 0 退出：\n"
+        + proc.stdout.decode("utf-8", "replace")
+        + proc.stderr.decode("utf-8", "replace")
+    )
+    return proc.stdout.decode("utf-8", "replace")
+
+
+class TestHandoffFlagUsesAPlatformDeclaredExportChannel:
+    """接力变量必须经**平台已声明的导出通道**传给 `endStages` 的 `if`。
+
+    根因（Issue #158 的下半段，即"如实登记、未闭环"那一项）：
+    上一批把接力变量回写到 `$CNB_ENV` / `$GITHUB_ENV` 文件，并把它标成
+    「可证伪假设」。实测证伪了 —— **CNB 平台不存在 `CNB_ENV`**：
+
+    * 官方文档全文检索 `CNB_ENV` / `GITHUB_ENV` 零命中（`docs.cnb.cool`
+      的「环境变量」「默认环境变量」两篇都不声明该变量）；
+    * 本次真实构建（`issue.comment@npc`）里 `CNB_ENV` 未被注入，门禁输出
+      `turn_flag_handoff.written=false`，收尾 Stage 照旧 `skipped`。
+
+    而平台**真正**声明的通道是「脚本 stdout 的 `##[set-output key=value]`
+    → `exports` 映射为环境变量」，生命周期为当前 Pipeline
+    （官方文档「环境变量」篇），也正因如此它才能被 `endStages` 的 `if` 读到。
+
+    判据落在"**用哪条通道**"上，而不是"文件里出现过变量名"：
+    只提到名字等于没配 —— 那正是本案要消灭的"看着配了、其实永不触发"。
+    """
+
+    def test_the_gate_emits_the_documented_set_output_marker(self):
+        """门禁必须**真的把** `##[set-output ...]` 标记写进 stdout。
+
+        判据落在"真跑一遍看 stdout"上，不落在"源码里出现过这个词"上 ——
+        后者连一句注释都能满足，等于判据空转（本文件上一版的形态）。
+        两个解释器分支（NPC 镜像只有 node）都要真发出标记：
+        python 可用时走 python，否则经桥脚本走 node。
+        """
+        gate = PROJECT_ROOT / "scripts" / "ci" / "npc_turn_handoff_gate.py"
+        emitted = _run_gate_capture_stdout(gate)
+        assert f"##[set-output {TURN_FLAG_VAR}=1]" in emitted, (
+            f"{gate.relative_to(PROJECT_ROOT)} 没有按平台协议输出 "
+            f"`##[set-output {TURN_FLAG_VAR}=1]`。\n"
+            "平台不提供 `CNB_ENV` / `GITHUB_ENV` 文件通道（官方文档零命中，"
+            "真实构建里也未注入）；唯一被官方声明、且生命周期覆盖整个 Pipeline"
+            "（含 endStages）的通道是 stdout 的 `##[set-output ...]` 标记 + "
+            "`exports` 映射。\n实际 stdout：\n" + emitted
+        )
+
+    def test_both_interpreter_branches_emit_the_same_marker(self):
+        """python 与 node 两个分支必须发出逐字相同的标记（镜像只有 node）。"""
+        gate = PROJECT_ROOT / "scripts" / "ci" / "npc_turn_handoff_gate.py"
+        workspace = tempfile.mkdtemp(prefix="npc-handoff-gate-")
+        branches = {}
+        for label, argv in _gate_invocations(gate):
+            branches[label] = _run_gate_capture_stdout(gate, argv=argv, workspace=workspace)
+        assert len(branches) >= 2, f"只跑到一个解释器分支：{list(branches)}"
+        unique = set(branches.values())
+        assert len(unique) == 1, (
+            "两个解释器分支的 stdout 不一致（判据分叉即双源）：\n"
+            + "\n".join(f"── {label} ──\n{out}" for label, out in branches.items())
+        )
+
+    def test_the_gate_no_longer_writes_an_undeclared_env_file(self):
+        """不得再**读取/写入**平台不声明存在的 `$CNB_ENV` / `$GITHUB_ENV`。
+
+        判据落在"把它当通道用"这件事上：注释里说明"平台没有这条通道"是必要的
+        理由记录，不构成违规；而 `env.get("CNB_ENV")` / `env["GITHUB_ENV"]`
+        这类真去读它的写法必须消失 —— 否则接力依旧把成败押在不存在的文件上。
+        """
+        gate = PROJECT_ROOT / "scripts" / "ci" / "npc_turn_handoff_gate.py"
+        source = io.open(gate, encoding="utf-8").read()
+        for undeclared in ("CNB_ENV", "GITHUB_ENV"):
+            offenders = [
+                line.strip()
+                for line in source.splitlines()
+                if undeclared in line
+                and not line.strip().startswith("#")
+                and (f'"{undeclared}"' in line or f"'{undeclared}'" in line)
+            ]
+            assert not offenders, (
+                f"{gate.relative_to(PROJECT_ROOT)} 仍把平台不存在的 `{undeclared}` 当通道用：\n  "
+                + "\n  ".join(offenders) +
+                "\n该通道是上一批的可证伪假设，已被真实构建证伪（文档零命中 + "
+                "现场未注入）；继续保留它只会让接力在绿灯下静默失效。"
+            )
+
+    def test_handoff_stage_exports_the_set_output_key(self, cnb_doc):
+        """Stage 1 必须把 `##[set-output]` 的键经 `exports` 导出给收尾阶段。"""
+        fallback = cnb_doc.get("$") or {}
+        jobs = [
+            job
+            for event, body in fallback.items()
+            if isinstance(event, str) and event.endswith("@npc")
+            for job in (body if isinstance(body, list) else [])
+            if isinstance(job, dict)
+        ]
+        assert jobs, "$ 段缺 NPC 事件定义"
+        for job in jobs:
+            gate_stages = [
+                stage
+                for stage in (job.get("stages") or [])
+                if isinstance(stage, dict) and HANDOFF_GATE_SCRIPT in str(stage.get("script") or "")
+            ]
+            assert gate_stages, (
+                f"NPC Job 里找不到调用 {HANDOFF_GATE_SCRIPT} 的 Stage —— "
+                "接力燃料没有供给物，收尾 `if` 恒假。"
+            )
+            for stage in gate_stages:
+                exported = stage.get("exports") or {}
+                assert TURN_FLAG_VAR in exported, (
+                    f"调用 {HANDOFF_GATE_SCRIPT} 的 Stage 未把 `{TURN_FLAG_VAR}` 经 "
+                    "`exports` 导出。`##[set-output]` 只是把值放进 Job 的 `result`，"
+                    "要成为后续 Stage/`endStages` 的 `if` 可读的环境变量，"
+                    "必须在同一 Stage 上声明 `exports` 映射（平台文档「环境变量」篇）。"
+                )
