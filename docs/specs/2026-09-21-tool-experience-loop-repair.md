@@ -91,3 +91,247 @@
 live-verify（真 Agent + 真 ToolExecutor + 真 SkillService）：端点经咽喉执行产票、
 停用/归档后工具面各少一项、重建→归档→回滚留痕带操作者、`improvements` 键未复活、
 空归档回滚返回 False。
+
+
+---
+
+## 8. 第三轮补做：9 条尾巴（逐条先红后绿）
+
+第二轮把主干补齐后仍有 9 处未兑现的尾巴，逐条按「先红后绿」修掉。每条先落一条
+必红用例并实证它红，再改实现转绿；红→绿实测输出见 PR 描述与各测试文件的模块说明。
+
+### 8.1 003 残留：`ToolRouter` 复判（假成功票的第二处生产点）
+
+票面点名「`tool_router.py` 的 `ToolResult(success=True, result={...})` **必须复判**」。
+前一轮只把咽喉内层改对了，路由器仍对任何不抛异常的结果报成功，于是同一次失败在两条
+消费链上分叉：经咽喉的调用判失败（正确），经 `ToolSequenceSkill.execute` 的自动技能
+恒真 ⇒ 自动技能产出假成功票（审计 L-02）。
+
+- 收口：`ToolRouter` 的成败判据改为委托咽喉的 `ToolExecutor._result_is_success`
+  （**单源**，路由器内不写第二份内容判据），失败时把 `error` 一并带出。
+- 红灯：`tests/unit/tools/test_tool_router_success_verdict.py` 改前 3 failed
+  （error 载荷判成功 / `route()` 不抛 / 自动技能产成功票），改后 5 passed。
+
+### 8.2 004 残留：三态在四个面各自可分辨
+
+票面要求「三种输入在**四个面**（EKB 行、权重表、结晶器、API 展示）各自独立可分辨；
+用一张对照表贴进票末，缺一格不算完」，并要求「把 `success=NULL` 手工写成 0 ⇒
+至少一条用例必须红」。前一轮只有 EKB 列与权重表两格，结晶器面与 API 展示面零用例。
+
+| 输入 | EKB `success` | 权重表 | 结晶器 | API `outcome` |
+|---|---|---|---|---|
+| 真成功 | `1` | `success_count+1` | 进分子分母 | `success` |
+| 真失败 | `0` | `failure_count+1` | 进分子分母 | `failure` |
+| 无票无回执 | `NULL` | 不投票 | 不进分子分母 | `unevidenced` |
+
+- 落点：`tests/unit/evolution/experience/test_three_state_four_faces.py`（8 条）。
+  写入走 `ExperienceKnowledgeBase.add_experience_record`，读数走 `/ranking` 契约的
+  唯一产出点 `_outcome_word`；反向锁把 `NULL` 手工 UPDATE 成 `0` 后断言 API 面
+  必然转成 `failure`（证明断言真的在区分，而不是复述一遍 NULL）。
+
+### 8.3 009 残留：结构身份 = 工具序列 + 参数
+
+票面定义「结构身份（工具序列 + **参数形状指纹**）」。前一轮把指纹接到了 EKB
+`context`，但**同一份"结构"算法有两个实现**：`fingerprint`（结构 + 意图）与
+`structure_key`（结构）各自复写归一与序列化。
+
+- 收口：抽 `structural_identity()`（归一）+ `_hash_identity()`（序列化哈希），
+  两个键都经它们出哈希，差异只在有没有把意图并进载荷。AST 守卫钉住单源。
+- 覆盖：`tests/unit/evolution/experience/test_structure_identity_param_shape.py`（9 条），
+  含端到端负向（换参数的两次调用必须落两个 `structure_key`）与隐私锁（不落明文）。
+- 实测澄清：复核发现 `structure_key` 在 `1e1341b0` 上**已**吃参数（`{"city":"x"}` 与
+  `{"city":"y"}` 本就不同哈希），上一轮"参数塌成同一身份"的读数有误。本条的净改动是
+  **消除第二份实现**，不是"补上参数"——报告原文与订正一并留在 PR 描述里。
+
+### 8.4 007 的连带代价（票面明令「必须写进票末」）
+
+`tool_memory.muscle_memory_threshold` 是 ADR 0016 判死方向后 RSI 参数寻优臂唯一还有
+位移的旋钮（起点 0.85 / 目标 0.8）。007 收紧裁定档位会让那条臂**近乎空转**：
+
+- 这是**有意**的临时状态，由 008 终态解；
+- **不得**为"让 RSI 有活干"而回退 007 的收紧；
+- 008 必须重验 ADR 0016 的梯度账，不得默认它仍成立。
+
+守卫：`tests/unit/evolution/experience/test_rsi_idle_cost_recorded.py`。
+
+### 8.5 008 三项附带要求
+
+- **身份显式化**：`MuscleMemory.__init__` 原用 `**kwargs` 静默吞掉 `agent_id`
+  （实测 `hasattr(m, "_agent_id") == False`）⇒ 收口为显式参数并落成可读属性
+  `memory.agent_id`，未知 kwarg 直接 `TypeError`，不再静默吞。
+- **现网脏条目作废重攒**：`agent_workspaces/kai/.../muscle_l2.json` 的 2 条 `_raw`
+  条目已归档重攒。**归档落点同时修正**：原实现把副本写在源文件旁边，而
+  `agent_workspaces/` 被 `.gitignore` 整目录忽略——一次 `git clean -xfd` 或换机器，
+  "可回退"就没了。现落 `docs/05-reports/muscle-memory-ledger/`（仓内、随提交入库）。
+- **阈值可达性重算 + ADR 0016 梯度账重验**：新增可复算入口
+  `scripts/diagnostics/muscle_memory_threshold_attainability.py`。实测 8 条相关配对里，
+  阈值 0.85 与 0.8 的裁定**完全相同**，落在开区间 `(0.8, 0.85)` 的真输入为 **0 条**。
+  ⇒ "唯一还有真实梯度的参数"须订正为"**可动参数一颗、梯度带为空**"，ADR 0016 已回写。
+
+### 8.6 010 / 006 残留：只写不读的计数接线
+
+`missing_context_count()` 在 `neurova/` 内**零生产消费方**，`_name_collision_count`
+只见于日志——"写出了读数、没人读"正是协作红线点名的断点形态。
+
+- 收口：`core/metrics.py` 新增两个 gauge（`neurova_ticket_context_missing` /
+  `neurova_skill_name_collisions`）与抓取时快照 `observe_chain_integrity()`，
+  接进既有 `/metrics` 端点（**不新开端点**）。
+- 数值取自计数器本体（单一事实源）；取注册表读数经
+  `skill_system.registered_collision_count()` 只读口，**抓指标绝不懒建注册表**。
+- 守卫：`tests/unit/core/test_chain_integrity_observability.py`（5 条）。
+
+### 8.7 001 残留：只读取证脚本落库
+
+票面点名的 `scripts/diagnostics/_tool_experience_loop_probe.py` 已落库：一条命令输出
+三读数 + `ticket_lookup` / `ticket_reason` 的 JSON，库落临时目录（**不指向 `data/`**），
+模型边界只放一个回预置 tool_call 的替身，不触网。守卫
+`tests/unit/agent/test_tool_experience_loop_offline_probe.py` 钉住"可独立重跑"与
+"绝不打开生产库"两条。
+
+### 8.8 005 残留：迁移清单逐条有结论
+
+票面要求「清单逐条有结论：**迁移 / 不迁移（写明风险与不修理由，回审计文档 §2 新开登记项）**，
+无一条含糊」。守卫
+`tests/unit/skills/test_skill_entry_choke_migration.py::TestMigratedEntriesCallTheChoke`
+原来用一个 `allowed` 文件集整体放行，等于"清单上其余入口一律不写理由"。现改为
+**行号级清单**：每个保留点必须携带理由，新增的未登记命中点直接判红（见 §9 台账）。
+
+### 8.9 杂项
+
+- `scripts/ci/protected_tests.txt` 里 `test_rsi_rollback_evidence.py` 重复登记两行 ⇒ 去重。
+- 两个诊断脚本（`skill_name_collisions.py` / `muscle_memory_rearchive.py`）未登记
+  `scripts/diagnostics/INDEX.md` ⇒ 补登记。
+- 006 的同名冲突"预期计数 = 8"改为可复算：新增 `tests/unit/evolution/experience/`
+  与 `tests/unit/skills/` 下的复算用例（按审计记载的存量形状重建 manifest，
+  断言计数口径 = 不同身份的额外条目数），并在 §9 说明本检出环境**没有** `data/` 下的
+  真 manifest 文件，故该数字的生产态仍待在有生产库的机器上复跑。
+
+
+### 8.10 第三轮后的 CI 红：改指面漏了「代码里的路径拼接」
+
+第二轮之后 `docs/adr/` 整目录被删净（改为编号分层 `docs/01-architecture/adr/`），
+本批新增用例里仍按旧路径拼 ADR 0016 的位置 ⇒ `unit-tests-py311` / `unit-tests-py12`
+双跑同时红在 `FileNotFoundError`。已修并补判据：
+
+- `tests/unit/evolution/experience/test_muscle_memory_rearchive_safety.py` 改指
+  `docs/01-architecture/adr/0016-rsi-parameter-source-of-truth.md`（唯一解，仓库里就一份）；
+- 退役目录守卫补两条口径：**规则 1c** 管源码里的路径拼接形态
+  （`REPO_ROOT / "docs" / "adr" / "…"`），**规则 1b′** 管通配形态
+  （旧目录下的通配 ADR 引用在唯一可解时必须改指）。此前两条只看得见 Markdown，
+  这类引用因此从门禁下溜过去；
+- 同批扫荡另有三处通配引用指向已退役目录，一并改指。
+
+### 8.11 CI 上的墙钟上界断言：从"登记为既有时序脆弱"改判为"根因处修复"
+
+第三轮推送后 `unit-tests-py312` 红在
+`tests/unit/agent/test_post_chat_p0_latency_observability.py::TestResponsePathLatencyImprovement::test_background_response_path_does_not_scale_with_bypass_steps`
+（`assert 0.42625 < (0.15 + 0.1)`）。当时按"既有时序脆弱族"登记，并写明根治方向是把判据
+从墙钟阈值改为步骤数不变量——但**留在本批未做**。本轮按该方向补齐，因为"登记为脆弱"
+并没有让 CI 变绿，偶发红仍会持续。
+
+**根因（不是"阈值太小"）：结构性契约被编码成墙钟阈值。**
+"响应路径不付旁路代价"、"响应无关步骤并发跑"、"RSI 不进响应路径"这三条契约**与机器
+速度无关**，是步骤集合与调度结构的事；写成 `elapsed < 0.25` 之后判据与机器强相关，
+同一份代码在 py3.11 绿、py3.12 红。更坏的是它的**误判方向**：负载越高越红，
+于是"让 CI 变绿"的捷径就变成放宽阈值——那会把真实的尾延迟回归一并放行，
+属教义第 2 条禁止的降级断言。
+
+**实测（本机注入 GIL 争抢，复刻 CI 负载）**：旧判据 `elapsed=0.437s vs 阈值 0.25` 必红，
+且无负载时也已是 `0.437s`（阈值本身就没有裕量不代表契约）。详见下表。
+
+**改动点（4 处，全部先红后绿）**
+
+1. `test_background_response_path_does_not_scale_with_bypass_steps`：
+   把 11 个旁路步骤全部闸在 `asyncio.Event` 上，`gate` 只在 `process()` 返回之后放开
+   ⇒ "响应路径仍在等旁路步骤"表现为 `process()` 返回不了（`wait_for` 超时判红），
+   而不是"耗时看起来偏大"。
+2. `test_concurrent_background_actually_parallel`：
+   每个步骤进门把在飞计数 +1 后停在闸上，断言**同轮在飞高水位 = 并发步数 5**
+   （串行 await 时恒为 1）。
+3. `test_summary_never_awaits_rsi_on_response_path`：
+   RSI 步骤闸住不放（永不自行结束），若仍挂在响应路径上则 `process()` 超时；
+   再断言返回时 `rsi_iteration` 未出现在 `_step_results` 里。
+4. `test_snapshot_cost_is_negligible` → `test_snapshot_cost_does_not_scale_with_row_count`：
+   原判据 `duration_ms < 250` 测不出"成本是否与数据量相关"（那才是"拖慢启动"的成因），
+   却能在负载下误判。改为两条结构不变量：**语句骨架随数据量不变** +
+   **只允许读元数据**（`sqlite_master` / `PRAGMA`，一条都不许碰表数据）。
+   第 4 处最初只写"语句序列相同"，反向注入"每表多发一条 `SELECT COUNT(*)`"时
+   **判绿（空转）**——语句条数不变、成本却随行数线性增长。补上"只读元数据"这条后，
+   同一注入立即判红。
+
+**新增门禁（防复发，单一事实源）**
+`tests/unit/test_ci_wallclock_assertion_ledger.py`：受保护子集里每一个**墙钟上界断言**
+都必须逐条登记结论（当前台账为空 = 此处不允许留墙钟）；外加 `CONVERTED_TO_INVARIANT`
+登记本轮改为结构不变量的 4 处，**改回墙钟即判红**。检出口径覆盖三种写法：由时钟算出的
+变量、名字含耗时词的量、以及**断言里就地算时钟**的表达式（漏了第三类，改一处写法就能
+从门禁下溜过——本守卫的红灯用例锁住这点）。
+
+**放大视角（教义第 5 条）：子集外的 22 处一并登记**
+同一契约（结构性契约被编码成墙钟阈值）在受保护子集**之外**还有 22 处、分布在 17 个文件里。
+它们不在 CI 跑，故不阻塞本批，但不得静默遗留——已逐文件登记数量进守卫
+（`OUTSIDE_SUBSET_LEDGER`），分布一变即判红。是否改判属另一票范围：其中一部分本意就是
+量真实机时（性能/超时类基准），一部分被测对象就是墙上时钟本身。
+
+**门禁自身的稳定性**：新的分布核对用例最初要 parse 整仓 1694 个测试文件（实测约 4s），
+注入负载后直接撞 `pytest-timeout`（>30s）——门禁自己都不稳就会被人绕过。加文本预筛
+（候选词是判据的超集，不漏判，并有专门用例锁住"预筛不得滤掉真命中"）后降到约 1.2s，
+负载下整组 `72 passed / 29.89s`。
+
+**红→绿实测**
+- 守卫自身：`2 failed, 5 passed`（判红 4 处未登记墙钟断言 + 守卫未登记受保护子集）
+  → 登记后 `13 passed`。
+- 反向验证（把实现回退成"旁路步骤仍在响应路径上"，位置：`process()` 的
+  `if self.background_enabled():` → `if False and ...`）：3 处结构不变量全部判红；
+  快照处的注入（每表多扫一条数据查询）同样判红。
+- 反向验证（守卫本身）：① 往受保护子集塞一处未登记墙钟上界 → 判红；
+  ② 把已改结构不变量的用例改回 `assert elapsed < 0.25` → 判红。
+- 受保护子集（CI 同款 pytest 9.0.3）：`1925 passed, 6 skipped`。
+- 负载自证：注入 16 个 GIL 争抢进程后，被改的 4 个文件 `72 passed`；
+  A/B 对照（同一份负载）旧判据必红、新判据必绿（`0.437s` vs 阈值 `0.25`）。
+- `ruff check neurova tests` 全过；`ci_static_gate.py --skip-import` 全过。
+
+**净 LOC**：生产代码 `neurova/` **0 行**——改动全在测试判据（结构性判据替换墙钟判据）。
+
+### 8.12 墙钟守卫与 A2 判据口径：合入 main 后的 CI 红
+
+合入 main（上下文持久化批次 #108/#113/#115）后，`unit-tests-py311` / `unit-tests-py312`
+双跑红在同一处：`test_ci_wallclock_assertion_ledger.py::test_no_unledgered_wallclock_upper_bound`
+点名 `tests/unit/context/test_ledger_write_batching.py::test_batch_round_is_far_below_per_row_shape`。
+该文件在 main 侧进受保护子集、在本分支侧还没有，合并才把它们凑到一起。
+
+**根因（不是"阈值太小"）：A2 的比值读数把一次性冷加载算进了分子。**
+被点名的用例其实**本机必红**（`227.6 ms > 194.0/3 ms`），与 CI 负载无关：
+批量形状的首次归档会懒加载 token 估算器（tiktoken `o200k_base`，实测 227–331 ms），
+而现状形状那一侧不带这项成本 ⇒ 分子恒为分母的 1.2 倍。也就是说，
+"批量提交让写侧快 200 倍"的契约读数，被一次性的进程级冷加载盖住了。
+
+**改动点**
+
+1. `TestWriteAmplification`：两侧各预热一轮，再取 3 轮中位。实测现状 194–253 ms/轮 vs
+   批量 0.42–1.57 ms/轮，倍数 **135–427×**（阈值只要 3×，裕量 45× 以上）。断言逐字未放宽。
+2. 同契约补**结构面**判据 `TestRoundHasOneTransactionBoundary`：一轮归档内
+   **新建连接 0 次 / `BEGIN` 1 次 / `COMMIT` 1 次**（用 `set_trace_callback` 数真语句）。
+   与机器速度无关；反向验证（实现退回逐条提交）当场判红 `一轮归档开了 24 个事务（应共用一个）`。
+3. 守卫台账逐条登记这 1 处（`WALLCLOCK_LEDGER`）：A2 的倍数本身是机时契约，墙钟不可替代，
+   但**同一契约的结构面必须另有用例钉住**——只留比值等于把契约交给机器速度。
+4. **守卫检出器的两个洞一并补上**（教义第 5 条：同一根因全命中点扫荡）：
+   - 「用时经容器收集后取中位」（`samples.append(perf_counter() - t0)` → `median(samples) < 0.2`）
+     与「用时派生量」（`budget = elapsed * 3`）此前**整片漏检**；
+   - 同时把**时刻**（`before = time.time()`、`expires_at = time.time() + 3600`）
+     从耗时量里摘出去——否则区间/过期断言会被误判（假阳性会训练人忽略门禁）。
+
+**红→绿实测**
+
+- 红灯（修复前，本机）：守卫 `1 failed / 12 passed`，点名上述 1 处；
+  该用例**单独跑也红**：`批量形状 252.7 ms/轮 > 现状形状 221.8 ms/轮 的 1/3`。
+- 绿灯：`test_ledger_write_batching.py` 13 passed；守卫 15 passed。
+- 检出器新增的红灯（先红后绿）：`test_detector_follows_clock_through_collected_samples`、
+  `test_detector_follows_clock_through_derived_variable` —— 补口径前两条均 `assert []` 判红，
+  补后转绿。
+- 反向验证：① 实现退回逐条提交 → 结构面用例判红（24 个事务）；
+  ② 用例退回"不预热 + 单轮读数" → 原样判红（227.56 vs 194.00/3）。
+- 子集外台账同步复核（检出器收紧的后果）：`test_phase4_integration.py` 1→2、
+  `test_b7_worker_occupancy.py` 1→2、`test_camofox_supervisor.py` 1→0（时刻区间断言不算墙钟上界）。
+- `ruff check neurova tests --no-cache` 全过。
+
+**净 LOC**：生产代码 `neurova/` **0 行**——改动全在测试判据与文档。
