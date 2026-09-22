@@ -388,8 +388,179 @@ live-verify（真 Agent + 真 ToolExecutor + 真 SkillService）：端点经咽�
   「同名冲突 = 8」的生产态真值仍待在有生产库的机器上跑
   `python scripts/diagnostics/skill_name_collisions.py` 复核；计数**口径**已可复算（= 7）。
 - **008 浏览器级 live** 与 **011 三件套**：沿用第二轮登记，均属需人配合或本仓无既有落点的动作。
+  两项已在第六轮由用户裁定「按现状承接」，退出未闭环清单，见 §10 与票集索引的「用户裁定」节。
 - **来源审计文档**（工具↔经验环路的深度审计）：其正文只存在于 Issue #80 附件，
   仓内从未有过；005 票面要求的「回审计文档 §2 新开登记项」因此无法就地兑现，
   已改由 `入口迁移台账.md` 承接并在该文件「登记」节写明。
 - **本票集正文的 L-xx 断点编号**（如 003 的「审计 L-02」）引自上述未入库的审计文档；
   本轮未改写这些引用（它们不构成仓库内死链），待审计文档入库后即可回填。
+
+---
+
+## 9. 第五轮：批次级判据入库与断点编号出处
+
+第四轮把 001–011 的**票面正文**入了库，判据在「每张票」这一层可读了。但这一批
+还有**更高一层的判据**仍然只存在于 Issue #80 的附件里，仓内不可读：
+
+- **全局约束**（每张票都必须遵守，违反任一条该票视为未完成）；
+- **硬次序**（`002` 早于 `003`、`007` 早于 `008`，不可调换）；
+- **整批完成判据**（`001` 三条探针全绿 + 经验质量门禁两格读数不变差）；
+- **票面里的 `L-xx` 断点编号**：其出处（工具↔经验环路的深度审计）从未入库。
+
+前两者的后果是**同一批的 11 张票在两套口径下被裁**：索引里只有「全局约束**遵守情况**」，
+那是实现方的自陈报告，不是约束本体；复核者读不到「约束写了哪几条」，也就无法判断
+各票是否在同一契约下完成——与第四轮那个「有索引、无判据」的断点是同一形态，
+只是断在更高一层。
+
+第三项更硬：票面正文大量出现 `审计 L-02`、`L-04 / L-05 / L-10` 这类编号，
+读者在仓内**查不到它指什么**。出处文档的正文无法凭空复原（它从未入库，见 §5 的「明确不做」登记与本文档 §9.3），
+但「编号 → 承载它的票」这件事可以从票面自陈回填，让「同一断点在哪几张票被处理」
+在仓内可读——「查不到」与「没人写」必须分得开。
+
+### 9.1 收口
+
+- 票集索引新增 `## 批次级判据`：硬次序、全局约束 11 条、完成判据（各自点名取证入口）、
+  以及 `L-xx` 编号出处表。正文按附件原文录入，遵守情况仍在各票「执行结果」与
+  §8 各节——**不新造第二份遵守情况**。
+- 守卫 `tests/unit/test_tool_loop_ticket_set_guard.py` 增第 4、5 组判据（6 条 + 2 条反向控制）：
+  批次级节必须存在、约束条目数不得退化、完成判据必须点名可重跑的取证入口、
+  票面里每个 `L-xx` 编号必须在本表登记。
+
+### 9.2 红→绿实测
+
+- 红灯（实现前，6 failed）：
+  `test_batchConstraintsBlockExists` / `test_everyBatchHeadingIsPresent` /
+  `test_globalConstraintsAreEnumerated` / `test_completionCriteriaNameTheirEvidenceSources` /
+  `test_everyTicketDefectNumberIsIndexed`（点名 `L-02 … L-11` 共 10 个未登记编号）/
+  `test_provenanceFormIsStated`。
+- 绿灯（收口后）：`tests/unit/test_tool_loop_ticket_set_guard.py` **21 passed**
+  （原 13 条 + 本轮 6 条 + 2 条反向控制）。
+- 反向控制各自独立，均喂合成输入、不拿仓库现状当输入：约束条目检出器认得出
+  `1. **粗体标题**` 形态且不把普通编号列表算进来；编号完备性判据能判出「票面有、索引无」
+  的 `L-99`。
+
+### 9.3 本批不做项在哪
+
+附件索引里的「不排本批（登记，勿顺手做）」与 §5「明确不做（登记）」是同一批内容
+（`D5` 失败粘性解冻、`injector.py` 的 `context`/`content` 键错位、`estimate_confidence`
+序列分虚高、`voice_memory_bridge` 硬编码 success、`neurflow/builtin.py` 吃模型自报），
+以 §5 为准，不在本轮回填第二份。
+
+
+## 10. 第六轮：用户裁定入库（008 / 011 两项「按现状承接」）
+
+第五轮末本批剩四项「实现方无法单方面闭环」的事项。其中两项需要用户裁决：**008 的
+浏览器级 live** 与 **011 的设计契约三件套**。用户在 Issue #80 裁定：
+
+> 第 2、3 项「按现状承接」。
+
+### 10.1 本轮断点：裁定落在评论里，读者在仓内看不到
+
+裁定之前，这两项在各处都写作「未闭环（诚实登记）」。裁定之后若不同步，读者在票面
+看到的仍是这四个字——**「已裁定、不必再做」与「没人做、待办挂着」在仓内分不开**。
+与第四轮（有索引、无判据）、第五轮（有票面、无批次判据）是同一形态：写入→读取的环
+断在**读者**这一环，只是这次断的是「裁决结果」这一类事实。
+
+裁定本体无法从代码反推，也无既有落点可承载（它既不是票面判据，也不是规格正文），
+故按「单一事实源」在票集索引新开一节；不另建裁定文书、不在规格里复写第二份。
+
+### 10.2 收口
+
+- 票集索引新增 `## 用户裁定（按现状承接）`：裁定原文引用、两项的覆盖范围与等价覆盖方式、
+  以及**未闭环清单里哪两项不适用本裁定**（006 生产库真值、来源审计文档入库，属「缺输入」
+  而非「按现状收」）。
+- 008 与 011 两份票面的「未闭环」段末尾各补一句回指：写明已裁定、退出未闭环清单，
+  并指向索引那一节——票面是读者的第一站，环必须在那里闭上。
+- 守卫 `tests/unit/test_tool_loop_ticket_set_guard.py` 增第 6 组判据
+  `TestUserRulingIsReadableInRepo`（4 条判据 + 1 条反向控制）：裁定节必须存在、
+  必须点名结论与覆盖项、必须交代「退出未闭环清单」并指向本节、被覆盖票面必须回指。
+
+### 10.3 红→绿实测
+
+- 红灯（收口前，4 failed）：
+  `test_rulingSectionExists` / `test_rulingNamesTheCoveredItems` /
+  `test_rulingSaysTheseAreNoLongerOpenItems` / `test_coveredTicketsPointAtTheRuling`
+  （点名 `008-…md` 与 `011-…md` 两份票面未回指）。
+- 绿灯（收口后）：`tests/unit/test_tool_loop_ticket_set_guard.py` **26 passed**。
+- 反向控制 `test_rulingCriterionIsNotVacuous` 喂合成输入，不拿仓库现状当输入：
+  节缺失、结论写错、覆盖项说不全三种形态各判一次。
+- 过程读数（既有判据当场生效）：索引里写下 `§10` 而规格尚无该节时，
+  `test_crossDocRefsIntoTheSpecResolve` 立即报红点名 `000-索引.md:315 §10`
+  ——本轮新增的跨文档引用被既有的章节号判据接住了。
+
+### 10.4 与本轮同批的第一处 CI 红：受保护子集的 `sh` 依赖
+
+本 PR 首次推送时 `unit-tests-py311/py312` 双跑红，唯一失败项与文档改动无关：
+
+```
+FAILED tests/unit/test_dev_path_and_runtime_dep_guards.py::TestProtectedGuardsUseNoExternalBinaries::test_no_bare_external_command_in_subprocess
+  tests/unit/ci/test_npc_script_interpreter_reachability.py:362: 直接执行外部命令 'sh'
+1 failed, 2368 passed, 12 skipped
+```
+
+红点在上一提交（`7b2c9c84`，PR #155）新入受保护子集的
+`test_node_call_form_reaches_the_same_reading`：它为复现平台调用形态写下字面量
+`subprocess.run(["sh", "-c", ...])`。`sh` 缺席时不是断言失败而是 `FileNotFoundError`，
+整个文件（含同文件其余判据）**静默不跑** —— 正是该守卫存在的理由。
+
+根因与处置（**以主线提交为准，本节不复制第二份**）：
+
+该红点由主线提交 `e4b1c5c6`（与同文件 `node` 同口径：`shutil.which("sh")` 先证后用，
+缺席即 `pytest.skip`，不再写死字面量）与 `d0cd61fd`（守卫补命令头变量解析、调用点
+词法路径判定与反向自证，堵住同类逃逸形态）收口。两提交各自的红→绿实测见其提交说明。
+
+**一处口径必须点明**：`sh` **不得**登记进 `ALLOWED` 白名单。白名单的语义是
+「CI 镜像保证存在、且判据无法跳过它」；`sh` 走「先探后用」通路本就被放行，
+若为省事塞进台账，解析命令名前即放行，「裸用 `sh`」这条反面用例的读数会从
+1 条变 0 条，台账即成免检通道 —— 正是该守卫要拦的形态。
+
+此处记录它的理由只有一个：它与本轮的文档改动同处一条 PR、同一个 `unit-tests-*`
+门禁，读者复核「这一批为什么红过」时必须能在一个地方看到因与果——不因分属
+「CI」与「文档」而拆到两处。
+
+### 10.5 与本轮同批的第二处 CI 红：台账生成物与扫描器脱节
+
+同一条 PR 的第二次推送上，`unit-tests-py311/py312` 又红在同一处，仍与任务内容无关：
+
+```
+FAILED tests/unit/test_archive_nav_impact_guard.py
+  ::TestPointerEntriesAreProjectInitiated::test_summary_block_matches_scanner
+  ::TestMachineBlocksHaveAGenerator::test_writer_is_idempotent_on_the_shipped_ledger
+2 failed, 21 passed, 1 skipped
+```
+
+两处指向同一件事：台账 `docs/06-bugfix/历史悬空引用登记台账_2026-09-21.md` 第 8.2 节
+（`<!-- NAV-IMPACT:SUMMARY:BEGIN -->` 区块）写着归档层悬空引用 **1778** 条，而扫描器
+当时的真实读数是 **1781**（其中「无当下读者」豁免 830 → 833）。
+
+**根因**：本轮给 `docs/05-reports/dependency-cve-ledger.md` 追加的修复台账一节里，
+有 3 处引用写成了**裸文件名**（`test_tracked_run_residue_guard.py` 等）——同节相邻引用
+都写了全路径，这 3 处是漏写。归档层正文改动会让扫描器的悬空引用计数变化，而第 8.2 节
+是**生成物**，本轮改完源文档没有同批重生成，生成物与唯一事实源（扫描器）就此脱节。
+
+这正是「写入 → 读取」的环断在**生成物**这一环：源文档改了，生成物没跟上，守卫比对的
+两侧读数不再相等。
+
+**处置**：按守卫明示的唯一动作重生成，不手改生成区、不就地改写归档层正文
+（该层政策是「陈述当时形态，不就地改写」；裸文件名在扫描器口径里属**已枚举的合法
+形态**，落在「描述性行内码」与「无当下读者」两个豁免桶里，不是非法状态）：
+
+```
+$ python scripts/scan_docs_refs.py --update-ledger
+台账机器区已重生成：docs/06-bugfix/历史悬空引用登记台账_2026-09-21.md（5 个区块）
+```
+
+**红 → 绿实测（本环境 py3.11）**：
+
+```
+# 红（重生成前）
+$ pytest tests/unit/test_archive_nav_impact_guard.py -q
+2 failed, 21 passed, 1 skipped
+
+# 绿（重生成后）
+$ pytest tests/unit/test_archive_nav_impact_guard.py -q
+23 passed, 1 skipped
+```
+
+幂等自证（生成器不空转重写）：把生成结果写回后逐字节不变——守卫
+`test_writer_is_idempotent_on_the_shipped_ledger` 即此判据，第二次重跑无差异。
