@@ -234,7 +234,7 @@
 
 - [README.md](../09-dev-progress/README.md) — 开发进展索引
 - [frontend_development_plan.md](../09-dev-progress/frontend_development_plan.md) — 前端开发计划
-- [api_inventory.md](../09-dev-progress/api_inventory.md) — API 清单
+- [api_inventory.md](../09-dev-progress/api_inventory.md) — 前端 API 面清单（生成物，含「调用未命中后端」「后端无前端消费」两组显式差异）
 - [progress_tracker.md](../09-dev-progress/progress_tracker.md) — 进度追踪
 - [module_designs/](../09-dev-progress/module_designs/) — 模块设计（19 篇，含 chat_page/execution_engine/knowledge_base 等）
 - [daily_reports/](../09-dev-progress/daily_reports/) — 日常报告（2026-05-12/13）
