@@ -510,7 +510,10 @@ def _resolve_scanner() -> Path:
         if not p.is_file():
             raise SystemExit(f"OSV_SCANNER_BIN 指向的文件不存在: {p}")
         print(f"[osv] 使用本地二进制: {p}")
-        return p
+        return resolveBinaryPath(p)
+    # 下载落点用专属目录：**每个消费者拿自己的一份**。预检与正式扫描两次调用之间
+    # 只要有任何东西动了这个文件（并发清理、临时目录策略），第二次就是 127——
+    # 而 127 与「命令不成形」同码。本脚本自己 chmod，不赌 umask 与目录默认权限。
     tmp = Path(tempfile.mkdtemp(prefix="osv-scanner-"))
     return _download_scanner(tmp)
 
@@ -581,9 +584,15 @@ def main() -> int:
 
     # 契约码判据先行：非契约码（127 等）说明命令没成形或版本不符，禁止当"无漏洞"。
     if proc.returncode not in CONTRACT_EXIT_CODES:
+        binary = resolveBinaryPath(scanner)
         print(
             f"[osv] 扫描器异常退出（code={proc.returncode}）——不在契约 "
-            f"{tuple(CONTRACT_EXIT_CODES)} 内，本条拒绝判定为通过",
+            f"{tuple(CONTRACT_EXIT_CODES)} 内，本条拒绝判定为通过。\n"
+            f"      本轮二进制: {binary}\n"
+            f"      在位={binary.is_file()} 可执行={os.access(binary, os.X_OK)} "
+            f"大小={binary.stat().st_size if binary.is_file() else 'N/A'}\n"
+            f"      127 的两种来源都要查：二进制本身不可执行（--version 已自证过），"
+            f"或它依赖的某件东西不在。",
             file=sys.stderr,
         )
         return 2
@@ -630,5 +639,23 @@ def main() -> int:
     return 2
 
 
+def _emitGateSummary(code: int, scanner_line: str = "", targets=()) -> None:
+    """把失败读数落成一行可后处理的结构化摘要（CI 面板可据此聚合/告警）。
+
+    为什么单独一行：本门禁的失败形态有 0/1/2 三种语义（无漏洞 / 有漏洞 /
+    基础设施错误），日志里散在 print 之间时，看板只能靠人肉读。一行 JSON 让
+    「最近一周基础设施错误率」这种问题变成可复算读数。
+    """
+    payload = {"gate": "osv", "exit": code, "targets": len(list(targets))}
+    if scanner_line:
+        payload["scanner"] = scanner_line
+    print("OSV_GATE_SUMMARY " + json.dumps(payload, ensure_ascii=False))
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    _code = main()
+    # 非 0 时落一行结构化摘要：本门禁的 0/1/2 三种语义在散行日志里只能人肉读，
+    # 一行 JSON 让「基础设施错误率」变成可复算读数（CI 面板可后处理）。
+    if _code != 0:
+        _emitGateSummary(_code, targets=SCAN_TARGETS)
+    sys.exit(_code)
