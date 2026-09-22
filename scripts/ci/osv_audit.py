@@ -189,14 +189,32 @@ END_STATUS_LINE = re.compile(
 NO_ISSUES_LINE = re.compile(r"No issues found", re.IGNORECASE)
 FILTERED_LINE = re.compile(r"Filtered\s+\d+\s+vulnerabilit", re.IGNORECASE)
 
-# 扫描器自述「漏洞库数据源不可达」（真扫描器实测原文，2026-09-22）：
+# 扫描器自述「漏洞库数据源不可达」（真扫描器实测原文，2026-09-22）。**两条分发
+# 路径都要认**，它们同源同因、退出码也一样：
+#
+# ① 线上查询（默认直连通路）：
 #     Error during extraction: (extracting as vulnmatch/osvdev) max retries
 #     exceeded: attempt 4: request failed: Post "https://api.osv.dev/v1/querybatch"
 #     dial tcp …: i/o timeout
-# 这是**环境**问题（CI 出站被拦），不是本仓代码问题；但它绝不能以"绿"的形态
-# 通过——扫描器自己就退 127，故按基础设施错误收口（exit 2），并点名数据源。
+# ② 离线库分发（本仓修后默认通路，缓存缺失/被拦时）：
+#     could not load db for crates.io ecosystem: unable to fetch OSV database:
+#     could not retrieve OSV database archive: Get
+#     "https://osv-vulnerabilities.storage.googleapis.com/crates.io/all.zip"
+#     dial tcp: lookup …: connection refused
+#     Error during extraction: (extracting as vulnmatch/osvlocal) unable to fetch …
+#
+# 只认 ① 会让「离线库被拦」漏成「命令不成形 / 版本不符」——正是 PR #121 的误读形态
+# （`vulnmatch/osvlocal` 与 `vulnmatch/osvdev` 是同一条链的两端）。
+# 这是**环境**问题（CI 出站被拦），不是本仓代码问题；但它绝不能以"绿"的形态通过
+# ——扫描器自己就退 127，故按基础设施错误收口（exit 2），并点名数据源。
 VULN_DB_UNREACHABLE = re.compile(
-    r"(extracting as vulnmatch/osvdev|api\.osv\.dev)", re.IGNORECASE
+    r"(extracting as vulnmatch/osv(?:dev|local)"
+    r"|api\.osv\.dev"
+    r"|osv-vulnerabilities\.storage\.googleapis\.com"
+    r"|could not load db for \w+ ecosystem"
+    r"|unable to fetch OSV database"
+    r"|no offline version of the OSV database)",
+    re.IGNORECASE,
 )
 
 
@@ -213,6 +231,23 @@ class ScannerInvocationError(RuntimeError):
     故本脚本不再拿状态码反推根因：调用侧故障在这里单独归因，
     `main()` 一律按基础设施错误 2 收口，绝不与「发现未允许漏洞(1)」撞码。
     """
+
+_CAUSAL_LINE = re.compile(r"error during extraction|unable to|failed|could not", re.I)
+
+
+def _causalLine(text: str) -> str:
+    """取自述里**说明原因**的那一行。
+
+    为什么不取 tail：扫描器红的时候，最后几行常被「allowlist 未命中条目」列表占满
+    （本仓实测），取 tail 会把「说因的那句」挤掉，读日志的人看到的还是无关行。
+    故优先找含 error/failed/unable 的行，找不到才回落到最后一行。
+    """
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()]
+    for line in lines:
+        if _CAUSAL_LINE.search(line):
+            return line[:300]
+    return lines[-1][:300] if lines else "(无输出)"
+
 
 # 被扫依赖树「点数」用的解析器类型。未登记的类型不猜数，取 UNCOUNTED_SENTINEL
 # 并显式报出（猜 0 会让对账退化成空转：扫了 0 个包也能印绿字）。
@@ -374,9 +409,10 @@ def prefetch_offline_databases(scanner: Path, targets) -> int:
         print(f"[osv] 预取未完成（扫描器退出码 {proc.returncode}）:", file=sys.stderr)
         for item in problems:
             print(f"      - {item}", file=sys.stderr)
-        detail = ((proc.stderr or "") + (proc.stdout or "")).strip().splitlines()
-        if detail:
-            print(f"      扫描器自述：{detail[-1][:300]}", file=sys.stderr)
+        print(
+            f"      扫描器自述：{_causalLine((proc.stderr or '') + (proc.stdout or ''))}",
+            file=sys.stderr,
+        )
         return 2
     for scope in scopes:
         db = OSV_DB_CACHE / scope / "all.zip"
@@ -1032,7 +1068,9 @@ def main() -> int:
     cmd = buildScanCommand(scanner, targets, allowlist, output, offline=offline)
     proc = _runScannerProcess(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
 
-    # 契约码判据先行：非契约码（127 等）说明命令没成形或版本不符，禁止当"无漏洞"。
+    versions = _invocationProbe(scanner)
+
+    # 契约码判据：非契约码说明命令没成形或版本不符，禁止当"无漏洞"。
     if proc.returncode not in CONTRACT_EXIT_CODES:
         # 127 是壳层的 "command not found"，与「命令拼错」同码同形。本次预检刚拿同一条
         # 命令跑通过，所以这里先用探测点定根因，再回落到「命令不成形」；两种情况都要给
@@ -1045,7 +1083,7 @@ def main() -> int:
                 "不在契约内，且调用点已不可用：",
                 file=sys.stderr,
             )
-            for item in problems:
+            for item in versions:
                 print(f"      - {item}", file=sys.stderr)
             print(f"      本轮二进制: {binary}", file=sys.stderr)
             return 2
@@ -1064,7 +1102,8 @@ def main() -> int:
             )
             return 2
         # 调用点还在（能调起来），那问题就在「命令拼法 / 版本不符」。两种读数都带上：
-        # 二进制身份（定位「用的是哪份」）+ 扫描器自述最后一行（拼法不符时它就是读数）。
+        # 二进制身份（定位「用的是哪份」）+ 扫描器自述的**说因那一行**（不取 tail：
+        # 实测 tail 常被 allowlist 的未命中条目列表占满，把说因那句挤掉）。
         print(
             f"[osv] 扫描器异常退出（code={proc.returncode}）——不在契约 "
             f"{tuple(CONTRACT_EXIT_CODES)} 内，本条拒绝判定为通过。\n"
@@ -1073,9 +1112,10 @@ def main() -> int:
             f"大小={binary.stat().st_size if binary.is_file() else 'N/A'}",
             file=sys.stderr,
         )
-        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
-        if detail:
-            print(f"      扫描器自述：{detail[-1][:400]}", file=sys.stderr)
+        print(
+            f"      扫描器自述：{_causalLine((proc.stderr or '') + (proc.stdout or ''))}",
+            file=sys.stderr,
+        )
         return 2
 
     try:
@@ -1129,8 +1169,8 @@ def main() -> int:
         )
         return 1
     print(
-        f"[osv] 扫描器以契约码 {proc.returncode}（入参错误）退出——"
-        "命令与扫描器版本不符，按基础设施错误收口",
+        f"[osv] 扫描器以契约码 {proc.returncode} 退出——命令与扫描器版本不符，"
+        "按基础设施错误收口（不是「发现漏洞」，也不是「无漏洞」）",
         file=sys.stderr,
     )
     return 2
