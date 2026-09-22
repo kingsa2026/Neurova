@@ -86,8 +86,10 @@ updates:
   # ── Rust：Tauri 桌面壳（NeurUI/src-tauri/Cargo.lock）────────────────────
   # Issue #56 残留边界：该依赖树此前从不被任何工具看过（pip-audit 与
   # npm audit 都覆盖不到 Rust）。Cargo 更新由 dependabot 每周提单。
-  # 注意：glib / unic-* 两条被上游钉死（见 scripts/ci/osv-allowlist.toml），
-  # 强行升它们会在 Windows 打断打包——升级 PR 需逐个人工评估。
+  # 注意：glib 已由仓内补丁修复（NeurUI/src-tauri/vendor/glib-0.18.5），
+  # unic-* 仍被上游钉死——见 scripts/ci/osv-allowlist.toml。
+  # 强行升 glib 到 0.20+ 会与 gtk 的 ^0.18 约束失配（29be2081 曾打断 Windows 打包），
+  # glib / gtk / wry / tao 的升级 PR 需逐个人工评估。
   - package-ecosystem: cargo
     directory: "/NeurUI/src-tauri"
     schedule:

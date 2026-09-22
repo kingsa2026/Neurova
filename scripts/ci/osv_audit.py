@@ -9,6 +9,8 @@ pip-audit 与 npm audit 只覆盖"Python 声明锁"与"NeurUI 的 npm 树"。
 1. **Rust 依赖树** —— `NeurUI/src-tauri/Cargo.lock`（Tauri 桌面壳，447 包）。
    2026-09-18 实跑命中 8 条 RUSTSEC 公告（含 glib 0.18.5 未定义行为、
    rustls 0.23.43 TLS 1.3 跨加密层接受）。此前无任何工具看过它。
+   （glib 0.18.5 已于 Issue #109 由仓内补丁修复：OSV 不解析 [patch] 段，故靠
+   下方 LOCAL_PATCHES 逐条核验"版本未变但源码已修"这件事是否仍然成立。）
 2. **运行时经 npx 拉取的 Node 包** —— camofox-browser / context7 / dbhub /
    server-filesystem 等由 `npx -y <pkg>` 在用户机器上现拉现跑，
    既无锁文件、也不进任何 audit 覆盖面（而这些包在生产路径上执行）。
@@ -24,6 +26,11 @@ pip-audit 与 npm audit 只覆盖"Python 声明锁"与"NeurUI 的 npm 树"。
   （`ignoreUntil` 由 osv-scanner 强制），防"永久静音"。
 - **失败即红灯**：扫描器跑不起来（下载失败/清单缺失）按基础设施错误退出非 0。
   "跑不起来就算过"的安全门禁是安全剧场，本仓库不收。
+- **本地补丁必须被核验**：OSV 按 `name + version` 判定，看的是清单里的版本字符串，
+  不是实际编译的源码——`[patch.crates-io]` 换成仓内源码后它照旧报同一个版本。
+  于是"某条允许清单靠本地补丁成立"这件事，只能由本脚本自己核验：`LOCAL_PATCHES`
+  逐条绑定「锁文件 → 包 → 仓内路径」，路径不在、或锁里该包仍带 `source`（说明补丁
+  没生效），一律按基础设施错误退出 2。清单与补丁只绑一头，等于给不存在的修复背书。
 
 用法：
     python scripts/ci/osv_audit.py                 # CI 用法
@@ -38,6 +45,7 @@ import argparse
 import hashlib
 import os
 import platform
+import re
 import subprocess
 import sys
 import tempfile
@@ -68,6 +76,52 @@ SCAN_TARGETS = (
 )
 
 ALLOWLIST = "scripts/ci/osv-allowlist.toml"
+
+# ── 本地补丁登记：允许清单里"靠仓内源码修复"的条目必须在此逐条对账 ─────────────
+# 键是锁文件路径，值是「包名 → 仓内目录」。判据：目录存在、且锁文件里该包
+# 不再带 source（带 source = cargo 仍在用 registry 版本，补丁未生效）。
+# 为什么必须核验：OSV 不解析 [patch] 段，只按锁文件里的 name+version 查库，
+# 所以"版本没变但源码已修"这种形态它能看出的只有旧版本号——谁修的、修还在不在，
+# 扫描器不知道。少了这一步，删掉 vendor 目录 CI 照样全绿。
+LOCAL_PATCHES = {
+    "NeurUI/src-tauri/Cargo.lock": {
+        "glib": "NeurUI/src-tauri/vendor/glib-0.18.5",
+    },
+}
+
+
+def verify_local_patches() -> list:
+    """核验本地补丁登记与磁盘/锁文件一致，返回问题清单（空 = 通过）。"""
+    problems = []
+    for lock_rel, patches in LOCAL_PATCHES.items():
+        lock_path = PROJECT_ROOT / lock_rel
+        if not lock_path.is_file():
+            problems.append(f"锁文件缺失，无法核验本地补丁: {lock_rel}")
+            continue
+        lock_text = lock_path.read_text(encoding="utf-8")
+        for crate, vendor_rel in patches.items():
+            vendor_dir = PROJECT_ROOT / vendor_rel
+            if not (vendor_dir / "Cargo.toml").is_file():
+                problems.append(
+                    f"本地补丁目录不存在或不是 crate: {vendor_rel}"
+                    f"（{lock_rel} 的 {crate} 正靠它修复）"
+                )
+            block = re.search(
+                r'\[\[package\]\]\nname = "'
+                + re.escape(crate)
+                + r'"\nversion = "([^"]+)"\n(.*?)(?:\n\n|\Z)',
+                lock_text,
+                re.S,
+            )
+            if block is None:
+                problems.append(f"{lock_rel} 里找不到包 {crate}（补丁登记已陈旧）")
+                continue
+            if "source = " in block.group(2):
+                problems.append(
+                    f"{lock_rel} 的 {crate} 仍带 source 字段——"
+                    f"[patch.crates-io] 未生效，实际编译的不是 {vendor_rel}"
+                )
+    return problems
 
 
 def _platform_key() -> str:
@@ -151,6 +205,13 @@ def main() -> int:
     allowlist = PROJECT_ROOT / ALLOWLIST
     if not allowlist.is_file():
         print(f"[osv] 允许清单缺失: {ALLOWLIST}（无清单不容许静默放行）", file=sys.stderr)
+        return 2
+
+    patch_problems = verify_local_patches()
+    if patch_problems:
+        print("[osv] 本地补丁核验失败——允许清单正在为不存在的修复背书:", file=sys.stderr)
+        for item in patch_problems:
+            print(f"      - {item}", file=sys.stderr)
         return 2
 
     scanner = _resolve_scanner()

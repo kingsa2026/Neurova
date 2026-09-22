@@ -430,3 +430,58 @@ thought-retriever-src/
 
 # 第三方产品参考克隆（本地留档）：与 thought-retriever-src 同策略，目录整体不入库
 cumora/
+
+# ==================== 唯一测试根豁免（2026-09-22） ====================
+# 上方「调试和临时文件」「临时脚本」两节是**未锚定**的通配（check*.py /
+# verify*.py / *_patch*.py / debug*.py / run_*.py / fix_*.py …）。它们本意是排除
+# 开发机随手丢的临时脚本，却会连 `tests/` 下的合法测试文件一起吞掉。
+#
+# 2026-09-22 实锤：新增守卫 tests/unit/desktop/test_rust_vendor_patch_guard.py
+# 命中 `*_patch*.py`，提交后仓库里根本没有该文件，而 scripts/ci/protected_tests.txt
+# 已收录它——CI 的 unit-tests 以 `ERROR: file or directory not found` 退出 4
+# （收集 0 项）。本机单跑全绿、CI 全红，是最难察觉的一类断链。
+#
+# 故为唯一测试根加豁免：tests/ 下的一切视为候选入库内容。
+# 随后只把**跑测产物**与**敏感件**重新挡在门外——这几行是该清单的唯一出处，
+# 行为由 tests/unit/test_dev_path_and_runtime_dep_guards.py 的
+# TestProtectedSubsetEntriesAreTracked 双向钉住（正当名不得被吞 / 产物不得放行）。
+!tests/**
+# 跑测缓存与覆盖产物
+tests/**/__pycache__/
+tests/**/*.py[cod]
+tests/**/.pytest_cache/
+tests/**/htmlcov/
+tests/**/.coverage
+# 隐藏目录（补齐上方 `.*/` 在测试根内的语义）
+tests/**/.*/
+# 构建产物
+tests/**/dist/
+tests/**/build/
+tests/**/*.egg-info/
+tests/**/*.so
+tests/**/*.whl
+tests/**/*.tar.gz
+# 跑测落库/日志（运行期数据不入库；测试夹具应写 tmp_path）
+tests/**/*.db
+tests/**/*.db-shm
+tests/**/*.db-wal
+tests/**/*.log
+tests/**/logs/
+# 编辑器临时件
+tests/**/*.bak
+tests/**/*.tmp
+tests/**/*.backup
+# 敏感件：豁免不能给密钥开出通道
+tests/**/*.pem
+tests/**/*.pfx
+tests/**/*.token.json
+tests/**/credentials*
+tests/**/*_secret*
+tests/**/secret_*.json
+tests/**/api_keys*
+tests/**/llm_config*
+tests/**/provider_config*
+tests/**/*.llm.json
+tests/**/*.env
+tests/**/.env
+tests/**/.env.*
