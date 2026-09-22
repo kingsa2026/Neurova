@@ -70,7 +70,7 @@ export interface AgentCostSummary {
 }
 
 // ---------------------------------------------------------------------------
-// Cost Rollup API（/api/cost-rollup/*）
+// Cost Rollup API（挂在 /api/v1/cost-rollup 下，见后端注册表）
 // ---------------------------------------------------------------------------
 
 const ROLLUP_BASE = '/cost-rollup'
@@ -115,7 +115,7 @@ export function getAgentCost(agentId: string, params?: { start?: string; end?: s
 }
 
 // ---------------------------------------------------------------------------
-// Budget API（/api/budgets/*）
+// Budget API（挂在 /api/v1/budgets 下，见后端注册表）
 // ---------------------------------------------------------------------------
 
 const BUDGET_BASE = '/budgets'
