@@ -130,5 +130,9 @@ class TestConversationOrdering:
                 relevant_memories=[{"content": "用户喜欢蓝色"}],
             )
         )
-        system_msgs = [m["content"] for m in ctx if m["role"] == "system"]
-        assert any("用户喜欢蓝色" in c for c in system_msgs), "记忆富化内容丢失"
+        # D4 甲案：记忆不再是 system 行，改落末条 user 信封 <memories> 块
+        # （断言未删——仍锁"记忆富化内容必须在上下文里"，只把承载位置换成新契约）
+        from neurova.context.envelope import parse_envelope
+
+        blocks = parse_envelope(str(ctx[-1].get("content", "")))
+        assert "用户喜欢蓝色" in blocks.get("memories", ""), "记忆富化内容丢失"
