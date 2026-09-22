@@ -124,8 +124,44 @@ _COMMAND_CONTRACT = {
 }
 
 # 合法退出码：0 = 无未允许漏洞；1 = 有未允许漏洞；65 = 入参错误。
-# 其余（如 127）语义不明——**不许当"通过"**，这正是 2026-09-22 那次红的形态。
+# **127 不是本门禁的契约码**，但它有一个必须被认出的来源（见下方
+# VULN_DB_UNREACHABLE / VERDICT_LINE）：osv-scanner 在**漏洞库数据源不可达**时
+# 自己就退 127。2026-09-22 PR #121 的 dependency-audit 连红三次，真因即此——
+# 同一容器里下载 GitHub release 成功（出站对 github.com 放行），而
+# `api.osv.dev` 被拦（实测指纹与版本自证全过、预检的第一次真扫描把两片树都读了）。
 CONTRACT_EXIT_CODES = (0, 1, 65)
+
+# ── 扫描器「查询到第几步」的**证据行**：每个目标一条 ────────────────────────────
+# 为什么不能只看退出码：同一个 127 至少有三个来源（二进制缺失/不可执行、调用侧
+# 异常、**数据源不可达**），且第三种在读数是 `Total 0 packages affected by
+# 0 known vulnerabilities` —— 一句"没扫到漏洞"的话。只判码就分不出
+# 「真扫了、真没漏洞」与「一个包都没查成、却印了句安心话」（fail-open）。
+#
+# 判据取**每目标一行**的 `End status: N dirs visited, M inodes visited, K Extract
+# calls`：实测（2026-09-22，v2.6.0）
+#   * 正常扫描两片锁文件 → `2 inodes visited, 2 Extract calls`（每个目标一次）；
+#   * api.osv.dev 被拦（CI 形态）→ 同一行照印，但退出码 127 且结果里 0 条；
+#   * **全部命中被允许清单静默** → 读数只有 `No issues found`（没有 Total 行），
+#     退出 0，JSON 里 `results` 为空数组。
+# 故「有裁决」不能靠某一句措辞（措辞会随版本与结果形态变），只能靠
+# ① 每个目标都被点数（inodes/Extract 计数），② JSON 结果可解析并与退出码一致。
+# 缺任一 → 按基础设施错误收口。
+END_STATUS_LINE = re.compile(
+    r"End status:\s*(\d+)\s+dirs visited,\s*(\d+)\s+inodes visited,\s*(\d+)\s+Extract calls"
+)
+# 全部命中被允许清单静默时扫描器的唯一读数（实测原文）。它允许「退出 0 且
+# results 为空」，但**不**允许拿来解释「results 非空却退 0」这种自相矛盾的形态。
+NO_ISSUES_LINE = re.compile(r"No issues found", re.IGNORECASE)
+
+# 扫描器自述「漏洞库数据源不可达」（真扫描器实测原文，2026-09-22）：
+#     Error during extraction: (extracting as vulnmatch/osvdev) max retries
+#     exceeded: attempt 4: request failed: Post "https://api.osv.dev/v1/querybatch"
+#     dial tcp …: i/o timeout
+# 这是**环境**问题（CI 出站被拦），不是本仓代码问题；但它绝不能以"绿"的形态
+# 通过——扫描器自己就退 127，故按基础设施错误收口（exit 2），并点名数据源。
+VULN_DB_UNREACHABLE = re.compile(
+    r"(extracting as vulnmatch/osvdev|api\.osv\.dev)", re.IGNORECASE
+)
 
 
 class ScannerInvocationError(RuntimeError):
@@ -291,6 +327,86 @@ def _runScannerProcess(cmd, **kwargs):
             f"无法执行扫描器命令：{cmd[0]}（{type(e).__name__}: {e}）"
             "——这是门禁没把扫描器跑起来，不是扫描器给出的裁决"
         ) from e
+
+
+def _endStatus(scanner_output: str):
+    """从读数里取 `End status: …` 三个计数，返回 `(dirs, inodes, extract)` 或 `None`。
+
+    这是「扫描器真的把每个目标都读了」的**每目标**读数——本门禁据此证明
+    「不是只读了第一片树就退出」。措辞会随版本变，故只在缺失时报「无证据」，
+    不把它当作唯一的裁决来源（裁决另看 JSON 与退出码是否自洽）。
+    """
+    match = END_STATUS_LINE.search(scanner_output or "")
+    if match is None:
+        return None
+    return tuple(int(g) for g in match.groups())
+
+
+def _verdictProblems(returncode: int, scanner_output: str, payload, targets) -> list:
+    """检查「这次调用到底有没有拿到可信裁决」，返回问题清单。
+
+    三条判据（2026-09-22 实测校准，缺任一即按基础设施错误收口）：
+
+    1. **每个目标都被点数**：`End status: … N inodes visited, K Extract calls` 里
+       的 N 必须 ≥ 目标数。只读到第一片树就把自己关掉（IO 错误、出站半途被拦）
+       是本门禁此前看不见的形态——它仍会印 `Total 0 … 0 known vulnerabilities`。
+    2. **结果与退出码自洽**：
+       - 退出 0：JSON 可解析，且要么 `results` 为空、要么读数里有 `No issues found`
+         （全部命中被允许清单静默时实测就是这个形态）；
+       - 退出 1：JSON 可解析，且 `results` **非空**（空数组 + 退出 1 自相矛盾，
+         此前会被读成「扫出漏洞了」）。
+    3. **不许用一句安心话代替证据**：`Total 0 packages affected by 0 known
+       vulnerabilities` 在「一个目标都没查成」时同样会印（实测：api.osv.dev 被拦时
+       它照印，退出码却是 127），所以那句话本身不构成通过依据。
+    """
+    problems = []
+    status = _endStatus(scanner_output)
+    expected_targets = len(list(targets))
+    if status is None:
+        problems.append(
+            f"扫描器以 {returncode} 退出且读数里没有 `End status: …` 这一行——"
+            "拿不到「读了几个目标」的读数，按基础设施错误收口。自查顺序："
+            "① 二进制缺失/不可执行（已在起扫描前自证）；② 调用侧异常（已单独归因）；"
+            "③ **漏洞库数据源不可达**：osv-scanner 在 api.osv.dev 被拦时自己就退 127，"
+            "且仍会印 `Total 0 packages affected by 0 known vulnerabilities`"
+        )
+    elif status[1] < expected_targets:
+        problems.append(
+            f"扫描器只读了 {status[1]} 个目标（本次挂了 {expected_targets} 个）——"
+            "有目标没被读，此前的「0 漏洞」读数对它们无效"
+        )
+    results = payload.get("results") if isinstance(payload, dict) else None
+    if results is None:
+        problems.append(
+            f"没有可解析的 JSON 结果（--output 未落盘或不可解析）——"
+            f"退出码 {returncode} 不足以构成裁决"
+        )
+        return problems
+    if returncode == 0 and results:
+        problems.append(
+            f"退出 0 但 JSON 里有 {len(results)} 段命中——结果与退出码自相矛盾，"
+            "不许当通过（要么扫描器版本/契约不符，要么告警被吞）"
+        )
+    if returncode == 1 and not results:
+        problems.append(
+            "退出 1 但 JSON 里 0 段命中——结果与退出码自相矛盾，"
+            "不许当成「扫出未允许漏洞」（该形态此前会被读成后者）"
+        )
+    if returncode == 1 and not NO_ISSUES_LINE.search(scanner_output or "") and not results:
+        problems.append("退出 1 且读数与结果都拿不到命中名单——无法据以处置")
+    return problems
+
+
+def _missingVerdictProblem(returncode: int) -> str:
+    """读数缺失时的问题描述——把非契约退出码的来源摊开，读日志的人不必再猜。"""
+    return (
+        f"扫描器以 {returncode} 退出但读数不完整——拿不到裁决证据，"
+        "按基础设施错误收口。自查顺序：① 二进制缺失/不可执行（已在起扫描前自证）；"
+        "② 调用侧异常（起进程失败，已单独归因）；③ **漏洞库数据源不可达**："
+        "osv-scanner 在 api.osv.dev 被拦时自己就退 127，且仍会印 "
+        "`Total 0 packages affected by 0 known vulnerabilities` —— "
+        "这是本条拒绝就它下结论的原因（一个包都没查成时那句话照印）"
+    )
 
 
 def _invocationProbe(scanner) -> list:
@@ -467,7 +583,8 @@ def _packageCountsMatch(
     if returncode not in contract_exit_codes:
         problems.append(
             f"扫描器退出码 {returncode} 不在契约集合 {tuple(contract_exit_codes)} 内——"
-            "命令没成形或版本不符，禁止当通过"
+            "禁止当通过（127 的来源不止一个：二进制/调用点问题、漏洞库数据源不可达、"
+            "命令与版本不符；调用方须逐条点名，不许按码猜）"
         )
     for rel, expected in counts.items():
         if expected == UNCOUNTED_SENTINEL:
@@ -522,37 +639,49 @@ def runPreflight(scanner: Path, targets, allowlist: Path) -> list:
     cmd = buildScanCommand(binary, targets, allowlist, output)
     proc = _runScannerProcess(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
     problems = []
+    merged = (proc.stdout or "") + "\n" + (proc.stderr or "")
     if proc.returncode not in CONTRACT_EXIT_CODES:
-        problems.append(
-            f"退出码 {proc.returncode} 不在契约 {tuple(CONTRACT_EXIT_CODES)} 内"
-            f"（127 = 命令不成形 / 版本不符）"
-        )
+        if VULN_DB_UNREACHABLE.search(merged):
+            problems.append(
+                f"漏洞库数据源不可达（退出码 {proc.returncode}）——"
+                "读数自述 api.osv.dev 查询失败；这不是二进制或拼法问题，"
+                "且扫描器此时仍会印 `Total 0 packages affected by 0 known vulnerabilities`"
+            )
+        else:
+            problems.append(
+                f"退出码 {proc.returncode} 不在契约 {tuple(CONTRACT_EXIT_CODES)} 内"
+                f"（127 = 命令不成形 / 版本不符）"
+            )
+    payload = None
     if not output.is_file():
         problems.append(f"未落盘 JSON 结果（{output}）——扫描器没按 --output 契约输出")
-        json_results = None
     else:
         try:
             payload = json.loads(output.read_text(encoding="utf-8"))
-            json_results = payload.get("results") if isinstance(payload, dict) else None
         except json.JSONDecodeError:
             problems.append("落盘的 JSON 无法解析")
-            json_results = None
-    if json_results is None and output.is_file():
-        if not any("JSON" in p for p in problems):
-            problems.append("结果里没有 results 字段——不是本门禁能消费的输出")
+        else:
+            if not isinstance(payload, dict) or "results" not in payload:
+                problems.append("结果里没有 results 字段——不是本门禁能消费的输出")
+                payload = None
 
-    merged = (proc.stdout or "") + "\n" + (proc.stderr or "")
     counts = _targetPackageCounts(targets)
     problems += _packageCountsMatch(
         counts, merged, SCANNED_LINE, CONTRACT_EXIT_CODES, returncode=proc.returncode
     )
+    if proc.returncode in CONTRACT_EXIT_CODES:
+        problems += _verdictProblems(proc.returncode, merged, payload, targets)
+    elif VULN_DB_UNREACHABLE.search(merged):
+        pass  # 已在上面点名「数据源不可达」，不再叠一条泛化描述
 
     if problems:
         detail = "\n".join(f"      - {p}" for p in problems)
         raise SystemExit(
-            "[osv] 扫描器预检失败（这个二进制不能用，拒绝拿去当门禁）:\n"
+            "[osv] 扫描器预检失败（本次无法给出可信裁决，拒绝当门禁）:\n"
             + detail
-            + "\n      注：127 = 命令不成形或版本不符；本仓契约见 _COMMAND_CONTRACT。"
+            + "\n      注：非契约退出码有多个来源（二进制缺失/不可执行、调用侧异常、"
+            "漏洞库数据源不可达、命令与版本不符）；上面每条问题已逐条点名，"
+            "按点名的那条处置，勿按码猜。"
         )
 
     report = [
@@ -569,7 +698,7 @@ def _resolve_scanner() -> Path:
     if env_bin:
         p = Path(env_bin)
         if not p.is_file():
-            raise SystemExit(f"OSV_SCANNER_BIN 指向的文件不存在: {p}")
+            raise SystemExit(f"[osv] OSV_SCANNER_BIN 指向的文件不存在: {p}")
         print(f"[osv] 使用本地二进制: {p}")
         return resolveBinaryPath(p)
     # 下载落点用专属目录：**每个消费者拿自己的一份**。预检与正式扫描两次调用之间
@@ -614,10 +743,24 @@ def main() -> int:
             print(f"      - {item}", file=sys.stderr)
         return 2
 
-    scanner = _resolve_scanner()
+    try:
+        scanner = _resolve_scanner()
+    except SystemExit as e:
+        # 归属解析失败（OSV_SCANNER_BIN 指的文件不在）同样是基础设施错误：不许让
+        # SystemExit 的消息替我们决定退出码（非整数码在 shell 侧会变成 1，与
+        # 「发现未允许漏洞」撞码）。
+        print(e, file=sys.stderr)
+        return 2
+    # 二进制缺失/不可执行在**起扫描之前**就点名，不让壳层把它包成 127 再回来
+    # （127 的三个来源混在一起时，读日志的人只能猜——PR #121 三次红就是这么读的）。
+    try:
+        binary = resolveBinaryPath(scanner)
+    except SystemExit as e:
+        print(e, file=sys.stderr)
+        return 2
     # 日志里必须能读到「用的是哪个二进制」：2026-09-22 那次红的定性完全靠这一行
     # （下载路径确实拿到了 v2.6.0 → 问题只能在别处），否则只能猜。
-    print(f"[osv] 扫描器二进制: {resolveBinaryPath(scanner)}")
+    print(f"[osv] 扫描器二进制: {binary}")
 
     print("[osv] 扫描目标:")
     for t in targets:
@@ -668,9 +811,22 @@ def main() -> int:
                 print(f"      - {item}", file=sys.stderr)
             print(f"      本轮二进制: {binary}", file=sys.stderr)
             return 2
+        # 先认「漏洞库数据源不可达」——2026-09-22 PR #121 的真因：出站被拦，
+        # 扫描器自己退 127 且仍印 `Total 0 packages affected by 0 known vulnerabilities`。
+        # 点名数据源，不要让人去换二进制、也不要让它以绿的形态过。
+        merged = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        if VULN_DB_UNREACHABLE.search(merged):
+            print(
+                f"[osv] ❌ 漏洞库数据源不可达（扫描器退出 {proc.returncode}）——"
+                "本条无法给出裁决，按基础设施错误收口：\n"
+                "      - 读数自述: api.osv.dev 查询失败（extracting as vulnmatch/osvdev）\n"
+                "      - 注意：扫描器此时仍会印 `Total 0 packages affected by "
+                "0 known vulnerabilities`，那不是「无漏洞」",
+                file=sys.stderr,
+            )
+            return 2
         # 调用点还在（能调起来），那问题就在「命令拼法 / 版本不符」。两种读数都带上：
         # 二进制身份（定位「用的是哪份」）+ 扫描器自述最后一行（拼法不符时它就是读数）。
-        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
         print(
             f"[osv] 扫描器异常退出（code={proc.returncode}）——不在契约 "
             f"{tuple(CONTRACT_EXIT_CODES)} 内，本条拒绝判定为通过。\n"
@@ -679,6 +835,7 @@ def main() -> int:
             f"大小={binary.stat().st_size if binary.is_file() else 'N/A'}",
             file=sys.stderr,
         )
+        detail = (proc.stderr or proc.stdout or "").strip().splitlines()
         if detail:
             print(f"      扫描器自述：{detail[-1][:400]}", file=sys.stderr)
         return 2
@@ -688,6 +845,8 @@ def main() -> int:
     except json.JSONDecodeError:
         payload = None
 
+    merged_output = (proc.stdout or "") + "\n" + (proc.stderr or "")
+
     if proc.returncode == 0:
         # 退出 0 不等于"真扫过"：v1 线在结果为空时同样退 0，告警可能已被吞掉。
         # 故用 exit 0 时也把读数与对账摊开，任何一条不咬合即按基础设施错误收口。
@@ -696,8 +855,13 @@ def main() -> int:
             counts, (proc.stdout or "") + "\n" + (proc.stderr or ""), SCANNED_LINE,
             CONTRACT_EXIT_CODES, returncode=proc.returncode,
         )
-        if payload is None:
-            problems.append("没有解析出 JSON 结果（--output 未落盘或不可解析）")
+        # 「退出 0」不是裁决：还要结果与退出码自洽、每个目标都被点数。
+        problems += _verdictProblems(proc.returncode, merged_output, payload, targets)
+        if VULN_DB_UNREACHABLE.search(merged_output):
+            problems.append(
+                "漏洞库数据源不可达（读数自述 api.osv.dev 查询失败）——"
+                "本条无法给出裁决，扫了 0 个漏洞也不代表无漏洞"
+            )
         print("[osv] 扫描器自报读数：")
         for rel, count in counts.items():
             print(f"      - {rel}: {count} packages")
@@ -709,6 +873,15 @@ def main() -> int:
         print("\n[osv] ✅ 无未允许的已知漏洞")
         return 0
     if proc.returncode == 1:
+        verdict = _verdictProblems(proc.returncode, merged_output, payload, targets)
+        if verdict:
+            print(
+                "[osv] ❌ 扫描器以 1 退出，但拿不到可据以处置的裁决：",
+                file=sys.stderr,
+            )
+            for item in verdict:
+                print(f"      - {item}", file=sys.stderr)
+            return 2
         print(
             "\n[osv] ❌ 发现未允许的漏洞。处置二选一：\n"
             "  (a) 升级依赖修掉（首选）；\n"
