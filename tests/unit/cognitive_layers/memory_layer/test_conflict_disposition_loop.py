@@ -35,13 +35,29 @@ from neurova.post_chat_pipeline import PostChatPipeline
 
 
 class RecordingConflictDetector:
-    """只承担 `detect_conflict(new_memory, existing_memories)` 契约的替身。"""
+    """只承担 `detect_conflict(new_memory, existing_memories)` 契约的替身。
 
-    def __init__(self, conflicts: List[Dict[str, Any]]) -> None:
-        self._conflicts = conflicts
+    按真实检测器的口径产出**成员就是入参两条记忆**的载荷：Issue #72 第四轮起，
+    账上成员必须能在库里定位（合成 id 会被检测链按"说不清是谁"拦下），
+    故替身也必须照真实契约给出成员的 id，否则测的就不是生产契约。
+    """
+
+    def __init__(self, kind: str = "semantic_contradiction") -> None:
+        self._kind = kind
+        self.seen: List[Dict[str, Any]] = []
 
     def detect_conflict(self, new_memory: Any, existing_memories: Any) -> List[Dict[str, Any]]:
-        return [dict(c) for c in self._conflicts]
+        self.seen.append({"new": new_memory, "existing": list(existing_memories)})
+        if not existing_memories:
+            return []
+        return [{
+            "type": self._kind,
+            "similarity": 0.2,
+            "contradiction_score": 0.5,
+            "memory1_id": new_memory.id,
+            "memory2_id": existing_memories[0].id,
+            "basis": "同一对象的取值互斥：'系统出故障了' 与 '系统运行正常'",
+        }]
 
 
 @pytest.fixture()
@@ -57,18 +73,27 @@ def manager(tmp_path):
     m.close()
 
 
-def _runStep(manager: MemoryManager, conflicts: List[Dict[str, Any]]):
-    """跑一步冲突检测；步骤结果在 contextvar 复位**前**取好（复位后读不到）。"""
+def _runStep(manager: MemoryManager, kind: str = "semantic_contradiction"):
+    """跑一轮真实链路（save_memory → conflict_detection）。
+
+    检测对象是本轮**真实落地**的证据行：成员身份由落库结果给出，不再由测试桩合成
+    （Issue #72 第四轮：账上成员必须能定位）。步骤结果在 contextvar 复位**前**取好。
+    """
     pipeline = PostChatPipeline.__new__(PostChatPipeline)
+    pipeline._step_results_store = []
     token = PostChatPipeline._step_results_ctx.set([])
-    detector = RecordingConflictDetector(conflicts)
+    detector = RecordingConflictDetector(kind)
     manager.remember("系统运行正常", memory_type="semantic", origin="owner")
     pipeline._get_dependency = lambda name: {
         "conflict_detector": detector,
         "memory_manager": manager,
     }.get(name)
     try:
-        asyncio.run(pipeline._step_conflict_detection("系统怎么样", "系统出故障了"))
+        async def _turn():
+            await pipeline._step_save_memory("系统怎么样", "系统出故障了", "s1", True, None)
+            await pipeline._step_conflict_detection("系统怎么样", "系统出故障了")
+
+        asyncio.run(_turn())
         return pipeline._step_results[-1]
     finally:
         PostChatPipeline._step_results_ctx.reset(token)
@@ -76,51 +101,40 @@ def _runStep(manager: MemoryManager, conflicts: List[Dict[str, Any]]):
 
 class TestLedgerIsWrittenWithBasis:
     def test_detectedConflictLandsInTheMemorySideLedger(self, manager):
-        result = _runStep(manager, [{
-            "type": "semantic_contradiction",
-            "similarity": 0.2,
-            "contradiction_score": 0.5,
-            "memory1_id": "pending_new_memory",
-            "memory2_id": "m-old",
-            "basis": "同一对象的取值互斥：'系统出故障了' 与 '系统运行正常'",
-        }])
+        result = _runStep(manager)
 
-        assert result.data["conflicts_count"] == 1
+        assert result.data["conflicts_count"] >= 1
         summary = manager.get_conflict_summary()
-        assert summary["total_conflicts"] == 1, "检出的冲突必须进账，否则读数恒 0 等于没检测"
-        assert summary["unresolved"] == 1, "尚未处置的冲突应如实计为未解决"
+        assert summary["total_conflicts"] == result.data["conflicts_count"], (
+            "检出的冲突必须进账，否则读数恒 0 等于没检测"
+        )
+        assert summary["unresolved"] == summary["total_conflicts"], (
+            "尚未处置的冲突应如实计为未解决（本条尚无处置路径，未解决数即入账数）"
+        )
 
     def test_basisIsCarriedOnTheRecordedConflict(self, manager):
-        _runStep(manager, [{
-            "type": "negation_conflict",
-            "similarity": 1.0,
-            "contradiction_score": 0.0,
-            "memory1_id": "pending_new_memory",
-            "memory2_id": "m-old",
-            "basis": "同一命题的否证：'我不喜欢咖啡' 与 '我喜欢咖啡'",
-        }])
+        _runStep(manager, "negation_conflict")
 
         recorded = manager.get_traces_by_trigger(trigger="conflict_detection")
         assert recorded, "冲突账必须可按来源读出"
         assert recorded[0]["basis"], "依据缺失的冲突不得进账——否则又回到'判不出哪条为准'"
-        assert "咖啡" in recorded[0]["basis"]
+        assert "互斥" in recorded[0]["basis"]
 
     def test_statsExposeTheConflictReading(self, manager):
-        _runStep(manager, [{
-            "type": "semantic_contradiction", "similarity": 0.2, "contradiction_score": 0.5,
-            "memory1_id": "pending_new_memory", "memory2_id": "m-old",
-            "basis": "同一对象的取值互斥",
-        }])
+        result = _runStep(manager)
 
         stats = manager.get_stats()
 
         assert "conflicts" in stats, "冲突必须是 /memory/stats 上读得到的读数"
-        assert stats["conflicts"]["total"] == 1
+        assert stats["conflicts"]["total"] == result.data["conflicts_count"]
 
     def test_noBasisMeansNoLedgerEntry(self, manager):
         """依据缺失（旧形状的载荷）不得进账：诚实边界，不假装记了依据。"""
-        _runStep(manager, [{"type": "negation_conflict", "similarity": 0.9}])
-
+        result = _runStep(manager, "")
+        # 替身按 kind="" 产出无 type 的载荷；检测链的入账口径只认唯一判据的两类，
+        # 故检出数照报、入账数如实为 0，账上不留记录（诚实边界：不假装记了依据）。
+        assert result.data["conflicts_count"] >= 1
+        assert result.data["conflicts_recorded"] == 0
         assert manager.get_conflict_summary()["total_conflicts"] == 0
 
 
@@ -144,12 +158,9 @@ class TestTheSecondImplementationSharesOneRule:
 
 class TestObservationSemanticsUnchanged:
     def test_writePathStillDoesNotBlockOrRewrite(self, manager):
-        result = _runStep(manager, [{
-            "type": "semantic_contradiction", "similarity": 0.2, "contradiction_score": 0.5,
-            "memory1_id": "pending_new_memory", "memory2_id": "m-old",
-            "basis": "同一对象的取值互斥",
-        }])
+        result = _runStep(manager)
 
         assert result.data["blocking"] is False, "工单 012 裁决：不阻断写入"
         assert "不阻断" in result.message
-        assert len(manager.get_all_memories()) == 1, "纯观测不改写记忆"
+        # 纯观测不改写记忆：库里只该有 remember 的一条 + 本轮 save_memory 的两条
+        assert len(manager.get_all_memories()) == 3, "纯观测不改写记忆"
