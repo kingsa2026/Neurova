@@ -49,6 +49,11 @@ class EvolutionRunResult:
     constraint_failures: list[str] = field(default_factory=list)
     # P0：判分可用性（judge 全线失败/输出不可解析 → 任何"增益"都不可信）
     judge_available: bool = True
+    # benchmark 门本轮是否真的咬合（False 且 reason 非空 = 中性放行）。
+    # 没有这两个字段时，bench_gain=0.0 在"真咬合且零增益"与"门没量出来"
+    # 两种情形下对外完全同形——门内的诚实标注必须外露到结果面。
+    bench_neutral: bool = False
+    bench_neutral_reason: str = ""
 
     @property
     def improvement(self) -> float:
@@ -69,6 +74,8 @@ class EvolutionRunResult:
             "train_best": round(self.train_best, 4),
             "iterations_run": self.iterations_run,
             "bench_gain": round(self.bench_gain, 4),
+            "bench_neutral": self.bench_neutral,
+            "bench_neutral_reason": self.bench_neutral_reason,
             "judge_available": self.judge_available,
             "changed": self.changed,
             "constraint_failures": list(self.constraint_failures),
@@ -271,6 +278,12 @@ class SkillEvolutionRunner:
                 logger.debug("bench gate 调用失败,跳过该闸: %s", e)
                 gain = 0.0
             result.bench_gain = gain
+            # 门的诚实标注外露：`bench_gain=0.0` 在"真咬合且零增益"与
+            # "门压根没量出来（中性放行）"两种情形下数值相同、含义相反，
+            # 故把门本轮的 `neutral`/`neutral_reason` 收进结果面（门可能不
+            # 提供这两个属性 → 缺省视为"未自报"，不臆测为已咬合）。
+            result.bench_neutral = bool(getattr(self._bench_gate, "neutral", False))
+            result.bench_neutral_reason = str(getattr(self._bench_gate, "neutral_reason", "") or "")
             if gain < -self.config.bench_tolerance:
                 result.rejected = True
                 result.reject_reason = "bench_regression"

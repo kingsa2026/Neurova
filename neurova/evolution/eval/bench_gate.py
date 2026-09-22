@@ -38,6 +38,8 @@ def _params_from_orchestrator(orchestrator: Any) -> dict:
 NEUTRAL_GAIN = 0.0
 #: 中性通过的原因标签——审计时必须能看出"这道门没咬合"
 NEUTRAL_REASON_NO_APPLY_FN = "no_apply_fn"
+#: 有 apply_fn 但本轮读数不存在（参数族为空 ⇒ harness 自报 measurement_blind）
+NEUTRAL_REASON_MEASUREMENT_BLIND = "measurement_blind"
 
 
 def make_eval_harness_gate(
@@ -49,21 +51,25 @@ def make_eval_harness_gate(
 
     apply_fn(candidate_text) -> restore:把候选暂挂进系统后返回恢复函数。
 
-    诚实边界（P0 复核，2026-09-17）：无 apply_fn 时纯文本候选**不触及**
+    诚实边界（Issue #46 复核，2026-09-22）：无 apply_fn 时纯文本候选**不触及**
     eval_harness 度量的四族参数 → 返回中性 `NEUTRAL_GAIN`，并在返回函数上
     挂 `neutral`/`neutral_reason` 供审计取证。**绝不假称测过**：文本候选在
     四族参数上本来就是 0 位移，"跑一遍参数快照"得到 0 也不是证据。
 
-    默认 apply_fn（真实接线）：用技能注册表临时挂载候选正文，度量后再恢复——
-    否则 `make_skill_evolution_runner()` 走的是这条恒中性分支，`bench_tolerance`
-    形同不存在（复核发现"参数族进化的门"从未咬合过技能文本进化）。
+    中性**只有一条来源**：调用方没提供 apply_fn。曾经的"从技能注册表派生
+    apply_fn"通道已删——那条路把候选正文挂进技能条目就宣告 `neutral=False`，
+    但四族参数一点没动（gain 依然恒 0），等于把"这道门没咬合"的唯一可审计
+    痕迹抹掉；且它的 restore 是浅拷贝快照，实测**永久改写**技能正文
+    （`apply('CAND')` → `restore()` → 条目内容仍为 `'CAND'`）。假咬合比
+    诚实中性更坏，故连根删除而不是修补恢复逻辑。
+
+    因此：技能文本进化在四族参数上**本来就没有位移可言**，这道门对它恒中性
+    ——这是构造成立的事实，不是待修的缺陷。要让它对某类候选真咬合，唯一
+    路径是调用方提供一条**能证明位移了参数族**的 apply_fn。
     """
     from neurova.evolution.rsi.eval_harness import RSIEvalHarness
 
     harness = RSIEvalHarness()
-
-    if apply_fn is None and orchestrator is not None:
-        apply_fn = _registry_apply_fn(orchestrator)
 
     def _live_params() -> dict:
         if live_params_provider is not None:
@@ -91,10 +97,17 @@ def make_eval_harness_gate(
         return None if score is None else float(score)
 
     def gate(baseline_text: str, candidate_text: str) -> float:
+        """返回候选相对基线的 gain，并把**本轮**是否咬合落到 `neutral`/`neutral_reason`。
+
+        这三个属性随每次调用重算（不是构造期定值）：`neutral` 回答的是"这一轮
+        的结果是不是中性放行"，而"调用方提供了 apply_fn"只是它的必要条件。
+        二者混同会让"取不到读数 ⇒ 中性放行"这一轮对外宣称成"已咬合、零增益"。
+        """
         before = _readout(harness.run(_live_params()))
         if apply_fn is None:
             # 纯文本候选不触及参数族——**中性**（非"测得 0"）。基线度量确实
             # 跑了一遍，但那不是"候选的增益"。理由随函数外挂供审计取证。
+            _mark_neutral(NEUTRAL_REASON_NO_APPLY_FN)
             logger.debug("bench gate(无 apply_fn): before=%s, 纯文本候选中性通过", before)
             return NEUTRAL_GAIN
         restore: Any = None
@@ -110,40 +123,24 @@ def make_eval_harness_gate(
         if before is None or after is None:
             # 读数不存在就没有"回退"可言：按中性放行，但必须留下可审计的痕迹，
             # 否则这道门在失明时与在咬合时对外长得一模一样。
+            _mark_neutral(NEUTRAL_REASON_MEASUREMENT_BLIND)
             logger.warning(
                 "bench gate 度量失明(before=%s after=%s)：按中性判定，不构成通过证据",
                 before, after,
             )
             return NEUTRAL_GAIN
+        _mark_neutral("")
         gain = after - before
         logger.debug("bench gate: before=%.4f after=%.4f gain=%.4f", before, after, gain)
         return gain
 
-    gate.neutral = apply_fn is None
-    gate.neutral_reason = NEUTRAL_REASON_NO_APPLY_FN if apply_fn is None else ""
+    def _mark_neutral(reason: str) -> None:
+        """把本轮的咬合状态写到门函数上（空 reason = 本轮真咬合）。"""
+        gate.neutral = bool(reason)
+        gate.neutral_reason = reason
+
+    # 构造期先按"还没跑过任何一轮"标注：有 apply_fn 不等于已咬合，故此处
+    # 只把"没有 apply_fn"这一确定事实写死；其余留给每轮调用刷新。
+    _mark_neutral(NEUTRAL_REASON_NO_APPLY_FN if apply_fn is None else "")
     return gate
 
-
-def _registry_apply_fn(orchestrator: Any) -> Optional[Callable[[str], Any]]:
-    """从编排器/agent 取技能注册表，构造"挂候选 → 度量 → 恢复"的真实 apply_fn。
-
-    拿不到注册表就返回 None（门保持显式中性，不假装咬合）。
-    """
-    agent = getattr(orchestrator, "agent", None) or getattr(orchestrator, "_agent", None)
-    registry = getattr(agent, "_skill_registry", None)
-    if registry is None:
-        return None
-
-    def apply_fn(candidate_text: str) -> Callable[[], None]:
-        entries = getattr(registry, "_skills", None)
-        if not isinstance(entries, dict):
-            return lambda: None
-        snapshot = dict(entries)
-        # 候选正文挂到所有技能上（参数族度量的是"这套系统在用哪份正文"）
-        for entry in entries.values():
-            config = getattr(entry, "config", None)
-            if isinstance(config, dict):
-                config["context_template"] = candidate_text
-        return lambda: entries.update(snapshot)
-
-    return apply_fn
