@@ -12,6 +12,7 @@
 """
 
 import json
+from tests.route_table import registeredPaths
 
 import pytest
 
@@ -71,7 +72,7 @@ class TestConfigMgmt:
 class TestConfigEndpoints:
     def test_route_paths(self):
         # 路由必须已注册 configs/collections 前缀（防 shadowing：字面路由先于 {id}）
-        paths = [r.path for r in kb.router.routes]
+        paths = registeredPaths(kb.router)
         assert "/configs" in paths
         assert "/configs/{config_id}" in paths
         assert "/collections" in paths
