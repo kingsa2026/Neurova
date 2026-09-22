@@ -167,3 +167,31 @@
 （后者是同一生成器的第二份实现，前者的 `importorskip` 在生成器被删后只会**静默跳过**
 ——那是教义第 2 条点名的「跑不起来就算过」形态）。本守卫的生成器缺失判据是**硬红灯**，
 不用 `importorskip`。
+
+## 8. 包外两条命中点的根因退役（2026-09-22 第二批）
+
+第 7 节收口了三处**包内**断点；口径扩到全仓后第一次被看见的两条**包外**命中点
+（`neurova.api.openplatform.routes` 19 条 / `neurova.core.acp_server` 5 条）
+当时只做了「登记进台账待裁定」。本批把它们从登记推进到处置。
+
+判据：这两条**不是「还没接线」，是第二份平行实现**（教义第 6 条）。
+
+| 命中点 | 实测 | 处置 |
+|------|------|------|
+| `neurova.api.openplatform.routes` | 自带 apps / webhooks / keys 三套资源面；全仓零 `include_router` 消费者；整条 router **无任何 `Depends`**（挂上去即把应用与 Webhook 管理面对匿名请求开放） | 删除 `neurova/api/openplatform/` 整包 |
+| 同名不同物的前端侧 | `modules/openplatform.ts` 的 BASE 是 `/openplatform`，实际命中的是 `endpoints/openplatform_keys.py`（只做密钥管理）；其 8 条调用里 5 条在后端无对应路由 | 删除该客户端与 barrel 导出（仓内引用处 = 0） |
+| `neurova.core.acp_server` | `ACPServer.chat_stream()` 是**模拟实现**（返回「这是对您消息的回复: …」，不调任何 LLM）；默认模型表是幻影条目；全仓零消费者（只被测试直接实例化） | 删除模块与 `tests/unit/core/test_acp_server.py`；真面 `endpoints/acp_api.py` + `agent/protocols/acp_runtime.py` 原位保留 |
+| ADR 0013 待删两套 | `skill_market.py`（全 stub）/ `skills_market.py`（demo 数据）长期只标 `_DEPRECATED` 未删 | 删除；ADR 0013 补修订 0013-B 记录 |
+
+**为什么不是「补鉴权再挂载」**：那等于承认同一件事有两个写入点（注册表外的第二份
+开放平台面、第二份 ACP 会话面），而补鉴权只是给第二份面加一把锁——写入点仍是两个。
+**为什么不是「给假实现补真实现」**：`ACPServer` 的会话面与 `acp_api.py` 的调用面
+语义不同（前者是协议模拟器，后者是运行时消息中枢），补真实现等于新造第三个面。
+
+**反向断言（防一刀切）**：删除不得连带真面。守卫
+`tests/unit/api/test_orphan_faces_retired_guard.py` 的 `TestLiveFacesSurvive`
+断言 `endpoints/openplatform_keys.py` 与 `endpoints/acp_api.py` 仍在装配后的路由表里
+提供服务——「删除」若退化成「把用同一前缀的真面一起删掉」，这条即红。
+
+**同步收口**：`tests/unit/endpointWiringBaseline.txt` 未挂载台账 8 → 4 条（销账四条）；
+`scripts/ci/protected_tests.txt` 补登新守卫。

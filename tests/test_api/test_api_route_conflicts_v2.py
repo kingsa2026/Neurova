@@ -77,19 +77,11 @@ def test_context_route_registration():
     # 两个模块都注册到 /api/v1/context，这会导致冲突
 
 
-def test_skill_market_route_registration():
-    """单复数两套市场端点已由 ADR 0013 删除（Issue #68 处置台账：已删除）。
-
-    原用例把两个模块 include 进临时 app 再检查前缀——它们已不存在，
-    继续用 `pytest.skip("模块导入失败")` 收场就是「跑不起来就算过」。
-    改为断言死套不在、规范端点存活。
-    """
-    import importlib.util
-
-    for removed in ("skill_market", "skills_market"):
-        assert importlib.util.find_spec(f"neurova.api.endpoints.{removed}") is None, (
-            f"{removed} 已删除，不应再出现在仓库里。"
-        )
+def test_deprecated_market_shells_are_gone():
+    """skill_market / skills_market 双套已按 ADR 0013 删除（不再注册到任何前缀）。"""
+    for name in ("neurova.api.endpoints.skill_market", "neurova.api.endpoints.skills_market"):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(name)
 
 
 def test_actual_registration_simulation():
@@ -98,7 +90,7 @@ def test_actual_registration_simulation():
     
     # 模拟注册列表中的前几个模块
     endpoint_modules = [
-        ("neurova.api.endpoints.channels", "/v1/channels", "Channels API"),
+        ("neurova.api.endpoints.channels", "/v1/channel-adapters", "Channels API"),
         ("neurova.api.endpoints.context", "/v1/context", "Context API"),
         ("neurova.api.endpoints.context_pool_settings", "/v1/context", "Context Pool Settings API"),
     ]

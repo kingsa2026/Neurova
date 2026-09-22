@@ -472,3 +472,15 @@ tests/unit/ci/test_npc_turn_handoff_execution.py
 tests/unit/ci/test_npc_script_interpreter_reachability.py
 #   守卫与上一条（路由挂载契约）同文件，判据同一处——不再另立第二份接线守卫
 #   （同一根因两份守卫 = 第二套平行体系，改一处漏一处）。
+
+# Issue #112 后续（包外两条命中点的根因退役）：孤儿面防复活守卫。
+#   根因：口径扩到全仓后才被看见的两条包外命中点——`neurova.api.openplatform.routes`
+#   （19 条路由、零消费者、整条 router 无 `Depends`）与 `neurova.core.acp_server`
+#   （`chat_stream()` 是模拟实现、默认模型表是幻影条目）——都不是「待接线」，
+#   而是**第二份平行实现**。补接线会让同一件事长期有两个写入点；补鉴权只是给
+#   第二份面加锁。故在产生第二份事实源的一侧删除：`neurova/api/openplatform/` 整包
+#   + `core/acp_server.py` + 同名不同物的前端 `modules/openplatform.ts`，
+#   以及 ADR 0013 早已裁定的待删两套（`skill_market` / `skills_market`）。
+#   守卫锁四条：退役面不得复活 / 真面（openplatform_keys、acp_api）仍在服务 /
+#   零悬空引用 / 不得回填未挂载台账（只降不升）。
+tests/unit/api/test_orphan_faces_retired_guard.py

@@ -245,22 +245,36 @@ class TestFrontendBaseUrlIsReadFromEveryDeclaredForm:
 class TestWiringDispositionsAreRecordedAndExecuted:
     """未挂载名单的每一行都必须带「处置 + 依据」，且处置必须落到磁盘事实。
 
-    根因（把报错恢复原状就会复现）：此前的台账只是一张**持有名单**——
-    模块名 + 注释。它答得出「现在有哪些没接线」，答不出「每一条的结论是什么、
-    执行了没有」。于是同一份名单可以被反复登记、永不收敛，读者无法判断
-    某一行到底是「待办」还是「已办」。（本批处置见
-    `tests/unit/endpointWiringBaseline.txt` 的处置表。）
+    根因（把报错恢复原状就会复现）：台账头部把收录口径写成「模块定义了路由，
+    但装配后的应用里一条都不可达」，`docs/architecture-model/architecture-findings.md`
+    也按「全仓」表述；而 `unmountedEndpointModules()` 的实现曾只 `rglob`
+    `neurova/api/endpoints/` 一个包。判据比自己声明的契约窄一层，同一形态在包外
+    就静默存活——包外的 `neurova.api.openplatform.routes`（19 条）与
+    `neurova.core.acp_server`（5 条）正是因此长期不在册的两条命中点。
+
+    两条命中点已在后续批次**按根因退役**（第二份平行实现，见
+    `tests/unit/api/test_orphan_faces_retired_guard.py`）：包外当前无孤儿，
+    故「扫全仓」这一口径由**注入探针**自证（把 `SOURCE_ROOTS` 换成一个只有
+    孤儿模块的临时根，必须检出）——判据不读该常量就会静默返回空。
+
+    本文件（上一轮：接线断点处置批）：台账升级为**三态处置表**——只列名字的台账
+    答得出「现在有哪些没接线」，答不出「每一条的结论是什么、执行了没有」，
+    于是同一份名单可以被反复登记、永不收敛；处置是有限枚举后，「已办/待办」
+    才可机器判定，且每一行都必须落到磁盘事实（已接线 ⇒ 真在路由表；
+    已删除 ⇒ 文件真没了；待实现 ⇒ 仍在名单里且写了依据）。
+
+    两条口径合并后仅存一种台账写法：**全仓 + 三态处置**。删除批若另立一份
+    只列名字的名单，就是同一件事的第二份事实源（教义第 6 条）。
     """
 
-    def test_every_ledger_row_carries_a_known_verdict(self):
-        generator = _generator()
-        dispositions = generator.readWiringDispositions()
-        assert dispositions, "处置台账为空——判据取数口径失效"
-        for module, verdict in dispositions.items():
-            assert verdict in generator.WIRING_VERDICTS, (
-                f"{module} 的处置 `{verdict}` 不在允许集合 {generator.WIRING_VERDICTS} 内"
-                "——处置必须是有限枚举，否则「已办/待办」无从机器判定。"
-            )
+    def test_retired_out_of_package_orphans_are_not_named(self):
+        """已退役的两条包外命中点不得再出现在名单里（名单是「尚未处置」的集合）。"""
+        names = set(_generator().unmountedEndpointModules())
+        relisted = sorted({"neurova.api.openplatform.routes", "neurova.core.acp_server"} & names)
+        assert not relisted, (
+            "已退役的包外孤儿面又被报进未挂载名单：\n  " + "\n  ".join(relisted)
+            + "\n它们已按根因删除；再次出现说明删除被回退了。"
+        )
 
     def test_wired_rows_are_really_mounted(self):
         """处置写「已接线」的模块必须真在装配后的路由表里（不许只改台账）。"""
