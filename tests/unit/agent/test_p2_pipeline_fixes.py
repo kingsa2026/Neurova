@@ -190,6 +190,30 @@ class TestProactiveQuestionContract:
         manager.mark_asked.assert_called_once_with("q1"), "弹出的问题必须标记已提问以进入冷却"
 
 
+def _withLandedEvidence(fake, user_content: str, agent_content: str):
+    """给假管线补上 `save_memory` 的落地读数（Issue #72 第四轮：成员须能定位）。
+
+    检测对象是本轮真实落地的证据行，故前置步骤的读数必须在场——否则检测步骤
+    如实报"没有本轮证据行"，测的就不是"检测器 API 用对了"这条判据。
+    """
+    from neurova.post_chat_pipeline import StepResult, StepStatus
+
+    fake._step_results.append(
+        StepResult(
+            step_name="save_memory",
+            status=StepStatus.EXECUTED,
+            message="Memory saved successfully",
+            data={"user_memory_id": "m-user", "agent_memory_id": "m-agent"},
+        )
+    )
+    memoryManager = fake._get_dependency("memory_manager")
+    memoryManager.get_memory.side_effect = lambda memory_id, agent_wide=False: {
+        "m-user": {"id": "m-user", "content": user_content},
+        "m-agent": {"id": "m-agent", "content": agent_content},
+    }.get(memory_id)
+    return fake
+
+
 class TestConflictDetectionRealApi:
     @pytest.mark.asyncio
     async def test_uses_detect_conflict_and_reports_conflicts(self):
@@ -201,8 +225,12 @@ class TestConflictDetectionRealApi:
         memory_manager.recall.return_value = [
             {"id": "m1", "content": "系统运行正常"},
         ]
-        fake = _make_post_pipeline_fake(
-            {"conflict_detector": detector, "memory_manager": memory_manager}
+        fake = _withLandedEvidence(
+            _make_post_pipeline_fake(
+                {"conflict_detector": detector, "memory_manager": memory_manager}
+            ),
+            "系统怎么样",
+            "系统出故障了",
         )
 
         await PostChatPipeline._step_conflict_detection(fake, "系统怎么样", "系统出故障了")
@@ -211,7 +239,8 @@ class TestConflictDetectionRealApi:
         assert StepStatus.FAILED not in statuses, (
             "真实 API 是 detect_conflict()，调用不存在的 check_conflict() 不得把步骤打成 FAILED"
         )
-        executed = [r for r in fake._step_results if r.status == StepStatus.EXECUTED]
+        executed = [r for r in fake._step_results if r.status == StepStatus.EXECUTED
+                    and r.step_name == "conflict_detection"]
         assert executed, "冲突检测步骤必须实际执行"
         assert executed[0].data.get("conflicts_count", 0) >= 1, (
             "「正常」与「故障」构成矛盾对，应检出至少 1 处冲突"
@@ -225,13 +254,18 @@ class TestConflictDetectionRealApi:
         detector = ConflictDetector(use_semantic=False)
         memory_manager = MagicMock()
         memory_manager.recall.return_value = []
-        fake = _make_post_pipeline_fake(
-            {"conflict_detector": detector, "memory_manager": memory_manager}
+        fake = _withLandedEvidence(
+            _make_post_pipeline_fake(
+                {"conflict_detector": detector, "memory_manager": memory_manager}
+            ),
+            "今天天气",
+            "今天天气不错",
         )
 
         await PostChatPipeline._step_conflict_detection(fake, "今天天气", "今天天气不错")
 
-        executed = [r for r in fake._step_results if r.status == StepStatus.EXECUTED]
+        executed = [r for r in fake._step_results if r.status == StepStatus.EXECUTED
+                    and r.step_name == "conflict_detection"]
         assert executed and executed[0].data.get("conflicts_count") == 0
 
 
