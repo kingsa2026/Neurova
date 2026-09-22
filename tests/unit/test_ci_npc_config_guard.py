@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """NPC 配置守卫（.cnb.yml / .cnb/settings.yml）。
 
-锁定四件已实锤踩过的事故，防同源复发：
+锁定几件已实锤踩过的事故，防同源复发：
 
 1. **model 不得带思考强度后缀** —— `deepseek-v4.1-flash-{low,high,max}` 是
    "同一底座模型 + 不同思考强度"的变体名，合法 model ID 只有
@@ -19,18 +19,27 @@
    非 max 的 thinkingLevel 若重新出现（顶层 key、settings.yml 角色、
    或流水线里的档位值），守卫直接拦下：要么是有意恢复分档（需同步改
    档位表与本文档），要么是回归，两者都必须显式改测而非悄悄放过。
-5. **maxTurns 只准在自己的分支上改** —— 该参数走平台配置期 Schema 校验
-   （字面量要求同第 2 条），且 Agent 分支常把 `maxTurns` 当"耗时上限"反复
-   收紧（`500 → 120 → 1000` 来回改）。这类分支若被归档而不清理，**每次**产生
-   分支名的流水线都会以同一个 `invalid configuration` 收场：配置在推送分支的
-   那一刻就已经非法，与轮数取值、任务内容都无关。
-   本守卫把这条前置条件钉成红/绿：合法取值域是
-   `[MIN_TURNS, maxTurnsCeiling(cnb_doc)]`，上限由 `$` 兜底挂载点的现行取值得出
-   （上限自身被钳在 `MAIN_TURNS_FLOOR`，无法把"非法值合法化"），
-   取值形态按 `TURNS_SHAPE` 白名单。
-   历史：`cnb-f1c-1k31garu5` 实测 251 轮吃满平台 2h 硬上限（7262s，均摊 ≈29s/轮），
-   但那次的死因是 Agent 自己 `sleep` 轮询叠加单轮 20 分钟的全量 pytest，不是轮数配额 ——
-   轮数与耗时上限的换算关系无法从本仓证据推出，故不再在守卫里断言某个具体数字。
+5. **maxTurns 的取值域由 `$` 兜底挂载点给出，不写死常量** —— 该参数走
+   平台配置期 Schema 校验（字面量要求同第 2 条）；合法域是
+   `[MIN_TURNS, maxTurnsCeiling(cnb_doc)]`，上限取 `$` 兜底挂载点的**现行
+   取值**（钳进 `[MIN_TURNS, AFFORDABLE_TURNS]`，既无法把"非法值合法化"，
+   也无法把配额写到 2h 里跑不到的轮数上），取值形态
+   按 `TURNS_SHAPE` 白名单。
+   上限必须从流水线自己的现行配置推出：常量上限会把「合法上界」钉在某个
+   具体数字上，分支只要调高轮数、`main` 又来不及同步，守卫就红——而它其实
+   拦不住真正的配置非法（那由平台 Schema 拦）。由 `$` 现值给出，则
+   「调高上限」= 先在主线上显式调高 `$` 段（一次可见的、会被 review 的配置
+   改动），分支再跟随：上限永远不低于主线现行值，故「跟随主线」是绿的、
+   「私自定义上限」是红的。
+   历史：`cnb-f1c-1k31garu5`（251 轮 / 7262s）与 `cnb-m48-1k33grbms`
+   （207 轮 / 7300s）两次都把平台 2h 硬限吃满后**被外部掐断**，配额并未触达
+   ——2h / 35s ≈ 205 轮，配额在硬限之上就等于没有配额。故上限另被
+   `AFFORDABLE_TURNS`（2h ÷ 实测单轮均摊耗时）钳死：配额只准落在硬限之内，
+   越界即红，判据由实测读数给出而非直觉。
+6. **顶层 key 只认分支名** —— 角色名挂顶层 key（如 `DSCoder-max:`）在**推送
+   分支的那一刻**就是非法配置：Schema 的顶层未知 key 只有 `^\..` 锚点形态被
+   放行，语义规则另把 `issue.*` 钉在 `$` 下。别名角色留在 settings.yml 侧，
+   运行参数复用 `$` 的定义。
 """
 import io
 import re
@@ -73,10 +82,47 @@ TURNS_SHAPE = re.compile(r"^[1-9][0-9]*[kK]?$")
 #: `0` / `1` 这类明显会让 Agent 一轮都跑不完的写法，与耗时上界无关。
 MIN_TURNS = 10
 
-#: 无法从 `$` 现值推出上限时（该挂载点缺失或写成非法值）的兜底下界：
-#: 10k 轮在 29s/轮 的实测口径下 ≈ 80h，远高于平台 2h 硬上限，
-#: 任何"真实需要更多轮"的分支都够用——不会把正常分支误判为超上限。
-MAIN_TURNS_FLOOR = 10_000
+#: 平台单次构建硬上限（2h）。依据：构建 cnb-3k8-1k33gorhr 实测 7293033ms
+#: （≈2h2m）被掐断，在册同类掐断另有 cnb-f1c-1k31garu5 / cnb-1q8-1k33cb2v9 等多例。
+BUILD_HARD_LIMIT_SECONDS = 7200
+
+#: 实测单轮均摊耗时（秒），取两次掐断的较大值：
+#:   cnb-f1c-1k31garu5：251 轮 / 7262s（均摊 ≈29s/轮）
+#:   cnb-m48-1k33grbms：207 轮 / 7300s（均摊 35.3s/轮）
+#: 链路是自加速的：context 每轮重放（compaction 后仍 ~8MiB 输入、单轮 in≈19 万
+#: token）⇒ 单轮耗时由早期 ~20s 涨到 30s+ ⇒ 2h / 35s ≈ 205 轮。
+SECONDS_PER_TURN = 35.3
+
+#: 2h 硬限能容纳的轮数（向下取整）。配额写在上限之上就等于没有配额，
+#: 而**被外部掐断**比配额触发的收尾更糟（无告警、无收尾、worktree 成果直接丢）。
+AFFORDABLE_TURNS = int(BUILD_HARD_LIMIT_SECONDS / SECONDS_PER_TURN)
+
+
+def maxTurnsCeiling(cnb_doc) -> int:
+    """合法上限 = `$` 兜底挂载点的现行取值（钳进 `[MIN_TURNS, AFFORDABLE_TURNS]`）。
+
+    上限必须从流水线自己的现行配置推出，不能写成孤立的常量：
+
+    - 常量上限会把「合法上界」钉在某个具体数字上，分支只要调高轮数、
+      `main` 又来不及同步，守卫就红——而它其实拦不住真正的配置非法（Schema 才拦）；
+    - 由 `$` 现值给出，则「调高上限」= 先在主线上显式调高 `$` 段（一次可见的、
+      会被 review 的配置改动），分支再跟随。上限永远不低于主线现行值，
+      所以"分支跟着主线调高"是绿的，"分支私自定义上限"是红的。
+
+    上限本身被钳进 `[MIN_TURNS, AFFORDABLE_TURNS]`：既不会因 `$` 写成非法值
+    而被"洗白"成那个值，也不会被写成一个 2h 里永远跑不到的轮数——那样配额
+    等于没有配额，Agent 只会被平台外部掐断（无告警、无收尾）。
+    """
+    main_options = [
+        opt
+        for path, opt in _iter_npc_go_options({"$": (cnb_doc or {}).get("$") or {}})
+        if "issue.comment@npc" in path or "pull_request.comment@npc" in path
+    ]
+    parsed = [parseTurnBudget(opt.get("maxTurns")) for opt in main_options]
+    parsed = [v for v in parsed if isinstance(v, int)]
+    if not parsed:
+        return AFFORDABLE_TURNS
+    return min(max(min(parsed), MIN_TURNS), AFFORDABLE_TURNS)
 
 
 def parseTurnBudget(value):
@@ -94,15 +140,19 @@ def parseTurnBudget(value):
 
 
 def maxTurnsCeiling(cnb_doc) -> int:
-    """合法上限 = `$` 兜底挂载点的现行取值（钳在 `MAIN_TURNS_FLOOR` 之上）。
+    """合法上限 = `$` 兜底挂载点的现行取值（钳进 `[MIN_TURNS, AFFORDABLE_TURNS]`）。
 
-    上限必须从流水线自己的现行配置推出，不能写成常量：
+    上限必须从流水线自己的现行配置推出，不能写成孤立的常量：
 
     - 常量上限会把「合法上界」钉在某个具体数字上，分支只要调高轮数、
       `main` 又来不及同步，守卫就红——而它其实拦不住真正的配置非法（Schema 才拦）；
     - 由 `$` 现值给出，则「调高上限」= 先在主线上显式调高 `$` 段（一次可见的、
-      会被 review 的配置改动），分支再跟随。上限永远不会低于主线现行值，
+      会被 review 的配置改动），分支再跟随。上限永远不低于主线现行值，
       所以"分支跟着主线调高"是绿的，"分支私自定义上限"是红的。
+
+    上限自身被钳进 `[MIN_TURNS, AFFORDABLE_TURNS]`：既不会因 `$` 写成非法值
+    而被"洗白"成那个值，也不会被写成一个 2h 里永远跑不到的轮数——那样配额
+    等于没有配额，Agent 只会被平台外部掐断（无告警、无收尾、成果全丢）。
     """
     main_options = [
         opt
@@ -112,8 +162,8 @@ def maxTurnsCeiling(cnb_doc) -> int:
     parsed = [parseTurnBudget(opt.get("maxTurns")) for opt in main_options]
     parsed = [v for v in parsed if isinstance(v, int)]
     if not parsed:
-        return MAIN_TURNS_FLOOR
-    return max(min(parsed), MAIN_TURNS_FLOOR)
+        return AFFORDABLE_TURNS
+    return min(max(min(parsed), MIN_TURNS), AFFORDABLE_TURNS)
 
 
 def _load(path: Path):
@@ -250,9 +300,40 @@ class TestTurnBudget:
             "每次产生分支名的构建都会以 invalid configuration 收场，与任务内容无关）:\n  "
             + "\n  ".join(problems) +
             f"\n现行合法域: [{MIN_TURNS}, {ceiling}]（上限 = `$` 兜底挂载点现值，"
-            f"低于 {MAIN_TURNS_FLOOR} 时按兜底下限计）。\n"
+            f"上限钳进 [{MIN_TURNS}, {AFFORDABLE_TURNS}]。\n"
             "确需调高上限：先在主线显式调高 `$` 段，再让分支跟随——"
             "上限永远不低于主线现值，故「跟随主线」是绿的、「私自定义上限」是红的。"
+        )
+
+    def test_max_turns_leaves_room_under_platform_hard_limit(self, npc_options, cnb_doc):
+        """maxTurns 必须落在平台 2h 硬限能容纳的轮数内，配额不得落在硬限之上。
+
+        实测读数（同一平台的两次掐断，均未触达配额）：
+          cnb-f1c-1k31garu5：251 轮 / 7262s（均摊 ≈29s/轮）
+          cnb-m48-1k33grbms：207 轮 / 7300s（均摊 35.3s/轮）
+        配额在硬限之上就等于没有配额，而**被外部掐断**比配额触发的收尾更糟
+        （无告警、无收尾、worktree 里的成果直接丢）。
+
+        可证伪路径：把 `$` 段的 maxTurns 改成 1000，上限随之抬到 1000，
+        本测试立刻转红——1000 × 35.3s ≈ 9.8h 远超平台 2h 硬限。
+        """
+        ceiling = maxTurnsCeiling(cnb_doc)
+        problems = [
+            f"{path}: maxTurns={opt.get('maxTurns')} > 2h 硬限可容纳 {AFFORDABLE_TURNS} 轮"
+            for path, opt in npc_options
+            if isinstance(parseTurnBudget(opt.get("maxTurns")), int)
+            and parseTurnBudget(opt.get("maxTurns")) > AFFORDABLE_TURNS
+        ]
+        if ceiling > AFFORDABLE_TURNS:
+            problems.append(f"现行上限 {ceiling} > 硬限可容纳 {AFFORDABLE_TURNS} 轮")
+        assert not problems, (
+            "npc:go 的 maxTurns 高于平台 2h 硬限能容纳的轮数（配额永不触达）:\n  "
+            + "\n  ".join(problems) +
+            f"\n判据：实测单轮均摊 {SECONDS_PER_TURN}s"
+            "（cnb-m48-1k33grbms 207 轮 / 7300s），"
+            f"2h ÷ {SECONDS_PER_TURN}s ≈ {AFFORDABLE_TURNS} 轮。"
+            "\n确需放宽：请附新的「单轮耗时」与「2h ÷ 单轮耗时」实测读数，"
+            "先在主线调 `$` 段，再让分支跟随。"
         )
 
     def test_max_turns_is_literal_int(self, npc_options):
@@ -270,17 +351,21 @@ class TestTurnBudget:
         )
 
     def test_ceiling_cannot_be_laundered_by_illegal_main_value(self):
-        """`$` 写成非法值时，上限不得被"洗白"成那个非法值。"""
-        assert maxTurnsCeiling({"$": {}}) == MAIN_TURNS_FLOOR
+        """`$` 写成非法值时上限落 `AFFORDABLE_TURNS`；合法值不得被钳到硬限之上。"""
+        assert maxTurnsCeiling({"$": {}}) == AFFORDABLE_TURNS
         assert maxTurnsCeiling({"$": {"issue.comment@npc": [
             {"type": "npc:go", "options": {"maxTurns": "many"}}
-        ]}}) == MAIN_TURNS_FLOOR
+        ]}}) == AFFORDABLE_TURNS
         assert maxTurnsCeiling({"$": {"issue.comment@npc": [
             {"type": "npc:go", "options": {"maxTurns": 10}}
-        ]}}) == MAIN_TURNS_FLOOR
+        ]}}) == MIN_TURNS
+        # 1000 × 35.3s ≈ 9.8h：远超 2h 硬限，必须被钳回可容纳轮数
         assert maxTurnsCeiling({"$": {"issue.comment@npc": [
-            {"type": "npc:go", "options": {"maxTurns": 12000}}
-        ]}}) == 12000
+            {"type": "npc:go", "options": {"maxTurns": 1000}}
+        ]}}) == AFFORDABLE_TURNS
+        assert maxTurnsCeiling({"$": {"issue.comment@npc": [
+            {"type": "npc:go", "options": {"maxTurns": 120}}
+        ]}}) == 120
 
 
 class TestTurnBudgetParsing:
@@ -433,3 +518,55 @@ class TestSettingsRoleHygiene:
         names = [r.get("name") for r in (settings_doc.get("npc") or {}).get("roles") or []]
         dupes = sorted({n for n in names if names.count(n) > 1})
         assert not dupes, f"角色名重复: {dupes}"
+
+
+# 会话内必须出现的时长纪律条目（人设 prompt 的硬约束子串）。
+# 这些字符串同时是"给 Agent 的行为约束"与"守卫的判据"，
+# 改动任一侧都会让另一侧变红——防后人把纪律删干净后无感回归。
+DURATION_DISCIPLINE_MARKERS = (
+    "单次构建上限 2h",
+    "禁止 sleep",
+    "禁止在单次会话里反复跑全量测试套件",
+    "长任务要分段交付",
+)
+
+
+class TestNpcBuildDurationDiscipline:
+    """NPC 人设必须载明构建时长纪律（2h 硬上限的根因处修复）。
+
+    只调 maxTurns 治不了这个病：cnb-f1c-1k31garu5（251 轮）与
+    cnb-3k8-1k33gorhr（204 轮）两次掐断的轮数都远低于 1000 配额，
+    真正的死因是单轮耗时（sleep 轮询 + 单轮全量 pytest + 上下文压缩开销）。
+    故纪律写在人设里（被 @ 时必加载），并由本守卫常驻钉住。
+    """
+
+    def test_every_role_states_build_hard_limit(self, settings_doc):
+        roles = (settings_doc.get("npc") or {}).get("roles") or []
+        assert roles, "settings.yml 未声明任何 NPC 角色"
+        problems = []
+        for role in roles:
+            prompt = role.get("prompt") or ""
+            missing = [m for m in DURATION_DISCIPLINE_MARKERS if m not in prompt]
+            if missing:
+                problems.append(f"{role.get('name')}: 缺 {missing}")
+        assert not problems, (
+            "NPC 人设缺少构建时长纪律:\n  " + "\n  ".join(problems) +
+            f"\n平台单次构建上限 {BUILD_HARD_LIMIT_SECONDS}s，超时即整条流水线失败、"
+            "会话成果全丢。纪律属根因处修复，不可省。"
+        )
+
+    def test_duration_discipline_identical_across_roles(self, settings_doc):
+        """同档别名角色（DSCoder / DSCoder-max）的时长纪律必须逐字一致。"""
+        roles = (settings_doc.get("npc") or {}).get("roles") or []
+        rendered = {}
+        for role in roles:
+            prompt = role.get("prompt") or ""
+            rendered[role.get("name")] = tuple(
+                line for line in prompt.splitlines()
+                if any(m in line for m in DURATION_DISCIPLINE_MARKERS)
+            )
+        values = set(rendered.values())
+        assert len(values) == 1, (
+            "各角色的构建时长纪律不一致（会各自漂移）:\n  "
+            + "\n  ".join(f"{k}: {len(v)} 行" for k, v in rendered.items())
+        )
