@@ -41,6 +41,7 @@
 """
 import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -73,6 +74,8 @@ def _code_only(src: str) -> str:
 class TestManifestIsCommitted:
     def test_model_manifest_is_tracked(self):
         """问 git 不问磁盘：文件在工作树里存在不代表它进了 HEAD。"""
+        if shutil.which("git") is None:
+            pytest.skip("本环境无 git，查不了入库状态")
         r = subprocess.run(
             ["git", "ls-files", "--error-unmatch", "models/MANIFEST.json"],
             cwd=_REPO, capture_output=True,

@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -21,7 +22,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_ROOTS = ("sessions", "trajectories")
 
 pytestmark = pytest.mark.skipif(
-    not (PROJECT_ROOT / ".git").exists(), reason="需要 git 工作树才能查跟踪状态")
+    not (PROJECT_ROOT / ".git").exists() or shutil.which("git") is None,
+    reason="需要 git 工作树与可执行的 git 才能查跟踪状态")
 
 
 def _trackedUnder(root: str) -> list:
