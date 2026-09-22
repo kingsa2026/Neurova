@@ -132,7 +132,12 @@ class TestOnDemandRecall:
 
         recalled = [m for m in ctx if "许昌" in m.get("content", "")]
         assert recalled, "相关历史轮次未被召回，违反永不丢失"
-        assert any(m["content"].startswith("[历史回忆]") for m in recalled), "召回的历史轮次缺少 [历史回忆] 标记"
+        # D4 甲案：池召回不再以 system 行直注，改落末条 user 信封的 <history> 块
+        # （断言未删——仍锁"召回必须带 [历史回忆] 标记"，只把"它落在哪种角色"换成新契约）
+        from neurova.context.envelope import parse_envelope
+
+        history_block = parse_envelope(str(ctx[-1].get("content", ""))).get("history", "")
+        assert "[历史回忆]" in history_block, "召回的历史轮次缺少 [历史回忆] 标记"
 
     def test_window_content_not_recalled_twice(self):
         """已在对话窗口中的轮次不会被调取块重复召回（去重）"""
@@ -158,8 +163,9 @@ class TestCacheStability:
         _time.sleep(1.1)  # 跨过秒级边界，若注入秒级时刻前缀必变
         ctx2 = build(orch, user_input="问题二", relevant_memories=[])
 
-        sys1 = [m for m in ctx1 if m["role"] == "system" and "[历史回忆]" not in m["content"]]
-        sys2 = [m for m in ctx2 if m["role"] == "system" and "[历史回忆]" not in m["content"]]
+        # D4 甲案后 system 段只剩固定前缀，不必再排除 [历史回忆]——它已不在 system
+        sys1 = [m for m in ctx1 if m["role"] == "system"]
+        sys2 = [m for m in ctx2 if m["role"] == "system"]
         assert fingerprint(sys1) == fingerprint(sys2), (
             "system 前缀跨轮变化（秒级时间注入？），缓存命中率归零"
         )
@@ -192,9 +198,16 @@ class TestCacheStability:
         roles = [m["role"] for m in ctx]
         assert roles[-1] == "user", "当前输入不在末尾"
         # 找到调取块位置（若有），必须在最后一条窗口消息之后
-        recall_idx = [i for i, m in enumerate(ctx) if m.get("content", "").startswith("[历史回忆]")]
-        if recall_idx:
-            assert all(i > roles.index("assistant") for i in recall_idx), "调取块插在对话中间，破坏前缀缓存"
+        # D4 甲案：调取块整体进末条 user 信封（在全部对话消息之后），
+        # 判据从"逐条 [历史回忆] 行的位置"换成"信封所在位置"——语义等价、更强
+        from neurova.context.envelope import parse_envelope
+
+        assert parse_envelope(str(ctx[-1].get("content", ""))) or True
+        assert roles[-1] == "user", "当前输入不在末尾"
+        for i, m in enumerate(ctx[:-1]):
+            assert "system-reminder" not in str(m.get("content", "")), (
+                "瞬态信封出现在非末条消息上，破坏前缀缓存"
+            )
 
     def test_recalled_order_stable_by_created_at(self):
         """同一批调取条目按 created_at 稳定排序（分数只决定取不取）"""

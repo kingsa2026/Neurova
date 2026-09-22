@@ -373,3 +373,11 @@ tests/unit/test_tool_loop_ticket_set_guard.py
 #   （根因：unicode61 对中文等于无索引，实测中文短语命中 0；只改 tokenize 参数
 #     不改已有索引 → 必须重建。影子表 + 分批短事务，禁一次性长事务/delete-all）
 tests/unit/context/test_context_ledger_fts_migration.py
+
+# 上下文三链路批（Issue #90）B3 剩余 P2-8 / D4 甲案：pool 分支瞬态注入收回信封。
+#   （根因：记忆/经验/结晶/待探索问题/池召回/工具记忆/情感七类动态检索文本以
+#     `role="system"` 直注——既不受任何 token 预算管辖（窗口预算只覆盖对话消息），
+#     又落在免疫句覆盖范围之外（system 角色权重最高且无语义隔离声明）。
+#     改为全部收进末条 user 信封并接入 compress_envelope；抽屉与信封共用同一份额度，
+#     避免"召回取回来了、信封又把它丢掉"的静默消失。）
+tests/unit/context/test_pool_branch_envelope_transient.py
