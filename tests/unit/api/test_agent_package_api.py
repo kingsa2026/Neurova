@@ -51,10 +51,15 @@ MANIFEST_V1 = {
 
 @pytest.fixture()
 def env(tmp_path, monkeypatch):
-    """隔离环境：agent 工作区根经 env 注入 tmp，data 面靠 CWD（chdir tmp）。"""
+    """隔离环境：工作区根与数据根都经 env 注入 tmp。
+
+    数据面此前靠 CWD（chdir tmp）——那正是"换个工作目录就换个库"的入口，
+    2026-09-21 数据根收口后改为同一个注入口 `NEUROVA_DATA_DIR`。
+    """
     monkeypatch.setenv(
         "NEUROVA_AGENT_WORKSPACES_DIR", str(tmp_path / "agent_workspaces")
     )
+    monkeypatch.setenv("NEUROVA_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.chdir(tmp_path)
     from neurova.agent_config import reset_config_manager
     from neurova.api.endpoints import set_app_state

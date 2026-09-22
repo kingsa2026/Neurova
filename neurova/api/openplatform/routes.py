@@ -32,6 +32,7 @@ from neurova.api.openplatform.models import (
     generate_webhook_id,
     hash_api_key,
 )
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/openplatform", tags=["开放平台"])
@@ -39,7 +40,7 @@ router = APIRouter(prefix="/openplatform", tags=["开放平台"])
 
 # ── 数据文件辅助函数 ──────────────────────────────────────────────
 def _data_dir() -> Path:
-    d = Path(__file__).parent.parent.parent.parent / "data" / "openplatform"
+    d = get_data_root() / "openplatform"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

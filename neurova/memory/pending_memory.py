@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.content_identity import normalized_key
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -515,7 +516,6 @@ def defaultPendingDbPath() -> str:
     原默认值是 CWD 相对路径 `"./data/memory_pending/..."`——换个工作目录就换一个
     待确认队列，"确认过的还在待确认里"这类现象正是它留下的。
     """
-    from neurova.core.data_root import get_data_root
 
     return str(get_data_root() / "memory_pending" / "pending_memories.db")
 

@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
 from neurova.tool_layers.npx_runtime_registry import pinned_npx_args
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -52,7 +53,7 @@ class SharedConfigManager:
         self._lock = threading.RLock()
 
         # 配置文件路径（兼容 str / Path 入参，统一归一化为 Path）
-        self._config_path = Path(config_path) if config_path else Path("data/shared_config.json")
+        self._config_path = callerPath(config_path, "shared_config.json")
         self._config_path.parent.mkdir(parents=True, exist_ok=True)
 
         # 加载配置
@@ -420,7 +421,7 @@ class SharedConfigManager:
         """
         with self._lock:
             try:
-                export_path = export_path or Path("data/shared_config_export.json")
+                export_path = callerPath(export_path, "shared_config_export.json")
 
                 with open(export_path, "w", encoding="utf-8") as f:
                     json.dump(self._config, f, ensure_ascii=False, indent=2)

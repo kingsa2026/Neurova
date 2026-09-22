@@ -9,6 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import callerPath
 
 
 logger = get_logger(__name__)
@@ -166,7 +167,7 @@ class AgentSelfManager:
             storage_path: 存储路径
         """
         self.agent_id = agent_id
-        self.storage_path = storage_path or f"data/agent_self_{agent_id}.json"
+        self.storage_path = callerPath(storage_path) / f"agent_self_{agent_id}.json"
 
         self._commands: Dict[str, CoreCommand] = {}
         self._heartbeat_tasks: Dict[str, HeartbeatTask] = {}

@@ -215,6 +215,19 @@ class _Metrics:
         # 热点路径 child 句柄缓存（惰性构造，见 observe_context_pool_query）
         self._context_pool_query_children = None
 
+        # ── 链路完整性读数（工单 010 / 006 残留）──
+        # 两个计数器此前只写不读：`creation_governance.missing_context_count` 在
+        # `neurova/` 内零生产消费方、`SkillRegistry._name_collision_count` 只见于
+        # 日志。抓取时快照（与池/缓存同款，不新开端点）把它们接到既有观测面。
+        self.ticket_context_missing = Gauge(
+            "neurova_ticket_context_missing",
+            "Tool executions dropped because no turn ticket context existed",
+        )
+        self.skill_name_collisions = Gauge(
+            "neurova_skill_name_collisions",
+            "Registry entries shadowed by another skill registering the same name",
+        )
+
         # ── 对话后处理管线（PostChatPipeline）──
         # 尾延迟最大来源：20+ 步串行/后台步骤此前零埋点——无 histogram 无
         # 失败计数，优化收益无法验证。status 取 executed/skipped/failed/
@@ -502,6 +515,27 @@ class _Metrics:
                     self.context_pool_entries.remove(label_set)
         except Exception:  # noqa: BLE001
             logger.debug("context pool gauge cleanup failed", exc_info=True)
+
+    def observe_chain_integrity(self) -> None:
+        """链路完整性读数快照（/metrics 抓取时调用）。
+
+        数值一律取自计数器本体（单一事实源），抓取时绝不为了读数而创建对象：
+        技能注册表尚未创建时读数保持 0，不懒建注册表。
+        """
+        try:
+            from neurova.skills.creation_governance import missing_context_count
+
+            self._safe_set(self.ticket_context_missing, missing_context_count,
+                           "ticket_context_missing")
+        except Exception:  # noqa: BLE001 - 单读数失败不影响另一个
+            logger.debug("ticket context gauge failed", exc_info=True)
+
+        def _collisions() -> int:
+            from neurova.skill_system import registered_collision_count
+
+            return registered_collision_count()
+
+        self._safe_set(self.skill_name_collisions, _collisions, "skill_name_collisions")
 
     def observe_state(self, state: Any) -> None:
         """运行态 gauge 快照（/metrics 请求时调用）。

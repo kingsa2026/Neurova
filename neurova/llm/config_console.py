@@ -18,11 +18,12 @@ import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
 
-_DEFAULT_CONFIG_PATH = "./data/llm_config.json"
+_DEFAULT_CONFIG_PATH = dataPath("llm_config.json")
 _DEFAULT_PARAMS: Dict[str, Any] = {
     "temperature": 0.7,
     "top_p": 1.0,

@@ -6,13 +6,13 @@ import json
 import uuid
 import threading
 import time
-from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -153,7 +153,7 @@ class OutboxHandler:
         if self._initialized:
             return
 
-        self.data_dir = Path(data_dir) if data_dir else Path("data/outbox")
+        self.data_dir = callerPath(data_dir, "outbox")
 
         # Thread safety
         self._lock = threading.RLock()

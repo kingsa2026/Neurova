@@ -19,10 +19,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
-_DEFAULT_PATH = "./data/marketplace/submissions.json"
+_DEFAULT_PATH = dataPath("marketplace/submissions.json")
 
 _SUBMISSION_PENDING = "pending"
 _SUBMISSION_APPROVED = "approved"
