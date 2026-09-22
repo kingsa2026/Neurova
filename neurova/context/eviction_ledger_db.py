@@ -13,7 +13,8 @@ SQLite WAL + FTS5：被驱逐/折叠的上下文 chunk 落库，重启后经 FTS
 - **批量事务**：`beginBatch()` / `commitBatch()` 让一次归档调用内的全部条目共用
   一个事务，`commitBatch()` 返回前已提交（规格 D8 明确否掉异步/后台缓冲刷盘——
   那会把崩溃窗口内的内容连同"已归档"的承诺一起丢掉）。
-- FTS5 独立表 + 手动双写（rowid 对齐内容表，GC 时对齐清理）
+- FTS5 独立表 + 手动双写（rowid 对齐内容表）；GC 时**分批**对齐清理
+  （`delete-all` 对本表非法）
 - MATCH 语法错误安全降级为 LIKE 子串匹配
 - **schema 走 `core/db_migration` 的 `context_ledger` 版本域**（B4/002）：本库
   此前只有 `CREATE TABLE IF NOT EXISTS`，没有 `user_version`，后续每次改 schema
@@ -79,6 +80,10 @@ _DIGEST_INDEX = (
     "CREATE UNIQUE INDEX IF NOT EXISTS uniq_digest"
     " ON evicted_chunks(user_id, agent_id, content_digest)"
 )
+
+# D11：FTS 对齐走分批删除（5000/批）。整表 `NOT IN` 与分批量级相当（基线脚本 §7），
+# 但分批不长时间持写锁。`delete-all` 对本表非法（普通 FTS5，实测 OperationalError）。
+_FTS_ALIGN_BATCH = 5000
 
 
 def contentDigest(content: str) -> str:
@@ -555,8 +560,27 @@ class EvictionLedgerDB:
             )
             removed += cur.rowcount
 
-        # FTS 与内容表对齐：清掉不在内容表里的 FTS 行
-        conn.execute(
-            "DELETE FROM evicted_fts WHERE rowid NOT IN (SELECT id FROM evicted_chunks)"
-        )
+        self._alignFts(conn)
+        return removed
+
+    @staticmethod
+    def _alignFts(conn: sqlite3.Connection) -> int:
+        """把 FTS 影子行对齐到内容表（分批删除，短事务窗口）。
+
+        FTS5 不随内容表删除而收缩（实测：删 2 万内容行后 FTS 仍 5 万行），
+        不对齐就是两表脱节。分批而非整表 `NOT IN`：量级相当但不长时间持写锁。
+        """
+        removed = 0
+        while True:
+            cur = conn.execute(
+                "DELETE FROM evicted_fts WHERE rowid IN ("
+                "  SELECT rowid FROM evicted_fts"
+                "  WHERE rowid NOT IN (SELECT id FROM evicted_chunks)"
+                "  LIMIT :batch"
+                ")",
+                {"batch": _FTS_ALIGN_BATCH},
+            )
+            if not cur.rowcount:
+                break
+            removed += cur.rowcount
         return removed
