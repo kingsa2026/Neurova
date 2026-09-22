@@ -181,7 +181,7 @@
 
 **未接线 router**（挂载动作在、路由一条没有）：无
 
-**未挂载端点模块**（定义了路由、装配后却不在路由表里 —— 运行时不提供服务）：`neurova.api.endpoints.computer_api`, `neurova.api.endpoints.cost_api`, `neurova.api.endpoints.migration_api`, `neurova.api.endpoints.phase3_api`, `neurova.api.endpoints.skill_market`, `neurova.api.endpoints.skills_market`
+**未挂载路由模块**（全仓定义了路由、装配后却不在路由表里 —— 运行时不提供服务）：`neurova.api.endpoints.computer_api`, `neurova.api.endpoints.cost_api`, `neurova.api.endpoints.migration_api`, `neurova.api.endpoints.phase3_api`, `neurova.api.endpoints.skill_market`, `neurova.api.endpoints.skills_market`, `neurova.api.openplatform.routes`, `neurova.core.acp_server`
 
 **后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）：`/api/acp`, `/api/coordination`, `/api/neuron`, `/api/v1/artifacts`, `/api/v1/audio`, `/api/v1/auth`, `/api/v1/backups`, `/api/v1/benchmark`, `/api/v1/channel-sharing`, `/api/v1/chat`, `/api/v1/knowledge-integration`, `/api/v1/mcp`, `/api/v1/monitor`, `/api/v1/skill-versions`, `/api/v1/skills`, `/api/v1/sync`, `/api/v1/tools`, `/api/v1/user-groups`, `/api/v1/workspace`
 
