@@ -361,11 +361,35 @@ class TestBenchGateHonesty:
         assert getattr(gate, "neutral_reason", "") == "no_apply_fn"
 
     def test_gate_with_apply_fn_is_not_neutral(self):
-        from neurova.evolution.eval.bench_gate import make_eval_harness_gate
+        """**真有读数**的一轮必须不再自报中性（本用例的判据对象已修正）。
 
-        gate = make_eval_harness_gate(live_params_provider=lambda: {}, apply_fn=lambda text: (lambda: None))
+        原断言写作"提供了 apply_fn ⇒ neutral 为 False"。Issue #46 收口复核
+        实测证伪：`live_params_provider` 返回空参数时 harness 自报
+        `measurement_blind`（score=None），门按中性返回 0.0——此种情形下
+        `neutral=False` 是**假咬合**，与"真咬合且零增益"对外一模一样，恰好
+        抹掉 `neutral_reason` 存在的意义。故判据对象由"调用方提供了什么"
+        改为"这一轮的结果是不是中性放行"，并补齐两个方向。
+        """
+        from neurova.evolution.eval.bench_gate import (
+            NEUTRAL_REASON_MEASUREMENT_BLIND,
+            make_eval_harness_gate,
+        )
+
+        def engaged_provider():
+            return {"tool_memory": {"success_bonus": 0.1, "failure_penalty": 0.05,
+                                    "decay_rate": 0.1, "muscle_memory_threshold": 0.6}}
+
+        gate = make_eval_harness_gate(live_params_provider=engaged_provider,
+                                      apply_fn=lambda text: (lambda: None))
         gate("a", "b")
-        assert getattr(gate, "neutral", True) is False
+        assert getattr(gate, "neutral", True) is False, "有读数的一轮不得自称中性"
+
+        # 反向：同一门在"取不到读数"的一轮必须如实自报中性，且理由可审计。
+        blind = make_eval_harness_gate(live_params_provider=lambda: {},
+                                       apply_fn=lambda text: (lambda: None))
+        blind("a", "b")
+        assert getattr(blind, "neutral", False) is True
+        assert getattr(blind, "neutral_reason", "") == NEUTRAL_REASON_MEASUREMENT_BLIND
 
 
 # ══════════════════════════════════════════════════════════════

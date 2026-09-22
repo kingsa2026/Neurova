@@ -1136,8 +1136,9 @@ class SkillService:
         eff_config = (effective.get("manifest") or {}).get("config") or {}
         body = str(eff_config.get("context_template") or "").strip()
         sequence = eff_config.get("tool_sequence") or []
-        # 有效正文 = 指令体 / 描述 / 工具序列，任一非空即算有内容——这样
-        # "把正文写成空串"被拦，而"只改 tool_sequence"的既有通道不受影响。
+        # 有效正文 = 指令体 / 描述 / 工具序列，任一非空即算有内容——"只改
+        # tool_sequence"的既有通道因此不受影响。注意本判据**不足以**拦"清空
+        # 指令体"：工具序列在场时它恒真（见下方 body_cleared 判据）。
         has_body = bool(body) or bool(str(effective.get("description") or "").strip()) or bool(sequence)
         # 编辑链判定：**本次没有提交版本**。`update_auto_skill` 是两条链共用
         # 的落盘通道（见方法 docstring），编辑链（PUT/share/push/enabled 开关、
@@ -1166,6 +1167,16 @@ class SkillService:
         if description is not None and not str(description).strip() \
                 and str(entry.get("description") or "").strip():
             return "content_cleared"
+        # 编辑链/提案方**主动清空指令体**：与上面 `content_cleared`（针对
+        # description）对称的同一类动作。`has_body` 把工具序列也算作内容，
+        # 于是"带序列 + 把 context_template 写成空串"这条形态从判据缝里漏过
+        # （实测落盘成功）。指令体是技能**行为正文**的事实源，被清空后条目
+        # 仍显示"有内容"，评审闸看不出来——故按同一口径拦：只咬"本次提交了
+        # 空的 context_template 且库存非空"这个动作，存量空指令体不受影响。
+        if config is not None and "context_template" in config:
+            if not str(config.get("context_template") or "").strip() \
+                    and str((((entry.get("manifest") or {}).get("config")) or {}).get("context_template") or "").strip():
+                return "body_cleared"
         if version is not None:
             order = self._version_key(version)
             if order is None:
