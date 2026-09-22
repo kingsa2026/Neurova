@@ -10,10 +10,18 @@
 而同一份配置里的接力 Stage 被 skipper 跳过，Issue 上没有任何回音）。
 所以「撞顶之后把活交给下一轮」必须在配置里显式写出来。
 
-配置里已经写了这笔接力（`.cnb.yml` 的 `endStages` + `cnb:apply`），
-但接力的**燃料**是 Agent 在最后一轮自己写出的标记文件。标记写不出来，
-`cnb:apply` 的 `if` 恒假，接力就是一条死配置 —— 而这类"看着配了、
-其实永不触发"的形态平台不会报任何错。
+配置里已经写了这笔接力（`.cnb.yml` 的 `endStages` + `cnb:apply`）。
+**根因（Issue #158，构建 cnb-2v8-1k34htd2p / cnb-2e8-1k341d9s1 实测）**：
+接力的燃料曾指定由 Agent 在最后一轮自己写出标记文件 —— 而撞 maxTurns 时平台
+只是把 Agent 中止、**不执行任何收尾指令或工具调用**，Agent 根本没有机会写。
+于是 `cnb:apply` 的 `if` 恒假、收尾 Stage 每次都是 `skipped`，
+接力是一条"看着配了、其实永不触发"的死配置（平台不会为此报任何错）。
+
+故燃料改由**本门禁在 Agent 开工前写入**（它就是那个写点，也是自证点）：
+触顶那一轮跑不到任何指令，燃料就不可能来自 Agent。同时把
+`turnLimitReached=1` 经**平台声明的导出通道**（stdout 的 `##[set-output]` 标记 +
+`.cnb.yml` 同一 Stage 上的 `exports` 映射）交给后续 Stage 的 `cnb:apply`，
+让"这一轮是接力轮"这件事在配置期就成立，不依赖 Agent 的记忆。
 
 本门禁回答一个只有真实构建能回答的问题：**在有改动的真实构建里，
 `$CNB_BUILD_WORKSPACE` 到底等不等于构建容器的工作目录**。
@@ -54,6 +62,24 @@ from pathlib import Path
 #: 也是 `.cnb/settings.yml` 人设里唯一的写法约定。
 HANDOFF_MARKER_FILE = ".npc-turn-handoff"
 
+#: 「本轮是接力轮」的变量名。与 `.cnb.yml` 的 `env.turnLimitReached`、
+#: `endStages.if` 逐字一致 —— 该判据全仓只有一处事实源（git grep 可见）。
+TURN_FLAG_VAR = "turnLimitReached"
+
+#: 把 `TURN_FLAG_VAR` 导出给收尾阶段所用的一对名字，逐字对应 `.cnb.yml` 里
+#: 调用本脚本那个 Stage 的 `exports` 映射：
+#:
+#:     script: "$NPX_CALL scripts/ci/npc_turn_handoff_gate.py"
+#:     exports:
+#:       <SET_OUTPUT_KEY>: <TURN_FLAG_VAR>
+#:
+#: 平台**没有** `$CNB_ENV` / `$GITHUB_ENV` 这类文件通道（官方文档
+#: 「环境变量」「默认环境变量」两篇全文零命中；本次真实构建里该变量也未注入）。
+#: 文本输出与 `exports` 的映射关系写在两处，故这三处名字必须同源，由
+#: tests/unit/ci/test_npc_pipeline_time_budget.py 常驻校验。
+SET_OUTPUT_DIRECTIVE = "##[set-output"
+SET_OUTPUT_KEY = TURN_FLAG_VAR
+
 
 def resolveWorkspaceRoot(env: dict) -> str:
     """接力判据的落点：环境变量给定，未给定返回空串。"""
@@ -69,6 +95,33 @@ def checkWorkspaceWritable(root: str) -> dict:
     finally:
         marker.unlink(missing_ok=True)
     return {"marker": str(marker), "readback": readback, "ok": readback == "1"}
+
+
+def markTurnAsHandoff(env: dict) -> dict:
+    """把「本轮是接力轮」交给后续 Stage 与收尾的 `cnb:apply`。
+
+    通道：平台声明的 **stdout 标记协议** —— 本函数向标准输出写一行
+
+        ##[set-output turnLimitReached=1]
+
+    CI 按行识别该标记，把它放进本 Job 的 `result`；再由 `.cnb.yml` 同一 Stage 上的
+    `exports` 把它映射成环境变量。平台文档明确：`exports` 导出的变量**生命周期为
+    当前 Pipeline**，因此 `endStages` 的 `if` 读得到 —— 这正是接力判据需要的可见性。
+
+    为什么不用文件通道（上一批的写法，已被证伪）：
+      平台不提供 `$CNB_ENV` / `$GITHUB_ENV`（官方文档零命中，真实构建里也未注入）。
+      往一个不存在的路径追加内容既写不出、也不报错，接力会在绿灯下静默失效。
+
+    返回值保留为一份可复算的读数：真实构建日志里能看见它到底走没走通。
+    只写一个变量、一种写法：接力判据全仓单点，不许出现第二种状态文件。
+    """
+    if not (env.get("CNB") or "").strip() and not (env.get("CI") or "").strip():
+        # 本地直跑（无 CI 标记）时不往 stdout 注入协议行，避免污染人类可读输出；
+        # 仍然如实报告"未发出"，让读数与 CI 里一致可解释。
+        return {"written": False, "channel": None, "reason": "非 CI 环境，未发出 set-output 标记"}
+    sys.stdout.write(f"{SET_OUTPUT_DIRECTIVE} {SET_OUTPUT_KEY}=1]\n")
+    sys.stdout.flush()
+    return {"written": True, "channel": SET_OUTPUT_DIRECTIVE, "key": SET_OUTPUT_KEY}
 
 
 def checkWorkingDirectory(env: dict, cwd: str) -> dict:
@@ -114,6 +167,9 @@ def main() -> int:
             "「工作区工作目录」，收尾阶段读不到，接力整条失效"
         )
 
+    if not failures:
+        result["turn_flag_handoff"] = markTurnAsHandoff(os.environ)
+
     if args.json:
         print(json.dumps({"result": result, "failures": failures}, ensure_ascii=False, indent=2))
         return 1 if failures else 0
@@ -139,6 +195,9 @@ const os = require("os");
 const path = require("path");
 
 const HANDOFF_MARKER_FILE = ".npc-turn-handoff";
+const TURN_FLAG_VAR = "turnLimitReached";
+const SET_OUTPUT_DIRECTIVE = "##[set-output";
+const SET_OUTPUT_KEY = TURN_FLAG_VAR;
 
 // 与 Python 的 json.dumps 对齐：缩进 2 空格、**不**转义非 ASCII、
 // 字符串外的空格与 Python 的 separators 一致（", " / ": "）。
@@ -210,6 +269,14 @@ function realpathOrSelf(target) {
   try { return fs.realpathSync(target); } catch (e) { return path.resolve(target); }
 }
 
+function markTurnAsHandoff(env) {
+  if (!String(env.CNB || "").trim() && !String(env.CI || "").trim()) {
+    return { written: false, channel: null, reason: "非 CI 环境，未发出 set-output 标记" };
+  }
+  process.stdout.write(SET_OUTPUT_DIRECTIVE + " " + SET_OUTPUT_KEY + "=1]\n");
+  return { written: true, channel: SET_OUTPUT_DIRECTIVE, key: SET_OUTPUT_KEY };
+}
+
 function checkWorkingDirectory(env, cwd) {
   const root = resolveWorkspaceRoot(env);
   return {
@@ -246,6 +313,10 @@ function main(argv) {
     result.working_directory_divergence =
       "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：Agent 若按字面把标记写到" +
       "「工作区工作目录」，收尾阶段读不到，接力整条失效";
+  }
+
+  if (!failures.length) {
+    result.turn_flag_handoff = markTurnAsHandoff(process.env);
   }
 
   if (asJson) {
@@ -309,6 +380,9 @@ def main() -> int:
             "PWD 与 CNB_BUILD_WORKSPACE 不是同一目录：Agent 若按字面把标记写到"
             "「工作区工作目录」，收尾阶段读不到，接力整条失效"
         )
+
+    if not failures:
+        result["turn_flag_handoff"] = markTurnAsHandoff(os.environ)
 
     if args.json:
         print(json.dumps({"result": result, "failures": failures}, ensure_ascii=False, indent=2))
