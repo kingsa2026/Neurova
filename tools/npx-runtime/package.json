@@ -4,10 +4,16 @@
   "private": true,
   "description": "运行时经 npx 拉取的 Node 包——仅用于解析依赖树并纳入 OSV 审计（不被 npm 安装执行）",
   "license": "Apache-2.0",
+  "overridesNote": "overrides 只作用于本清单的解析结果（审计面）。swagger-jsdoc 6.3.0 这类子依赖若用精确版本声明（如 yaml: \"2.0.0-1\"），锁文件里的传递依赖会一直停在该版本，重跑 npm install 也不会抬升——此时只能由 overrides 顶替。不属降级：顶替方向是抬到修复版，且实际运行的那份包由 neurova/tool_layers/npx_runtime_registry.py 的 PINNED 钉住。",
   "dependencies": {
     "@askjo/camofox-browser": "1.16.0",
     "@bytebase/dbhub": "1.2.5",
     "@modelcontextprotocol/server-filesystem": "2026.8.31",
     "@upstash/context7-mcp": "4.1.1"
+  },
+  "overrides": {
+    "swagger-jsdoc": {
+      "yaml": "2.8.3"
+    }
   }
 }
