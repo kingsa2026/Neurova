@@ -22,10 +22,12 @@ pip-audit 与 npm audit 只覆盖"Python 声明锁"与"NeurUI 的 npm 树"。
 - **单侧实现、双侧复用**：`.cnb.yml` 与 `.github/workflows/ci.yml` 调同一条命令，
   由 tests/unit/test_ci_parity_guard.py 保证命令逐字一致。
 - **二进制指纹校验**：按平台下载后核对 SHA256（常量内联），不信任传输通道。
-  注意指纹只证明「与我钉的那份一致」，**不证明它是能用的扫描器**——2026-09-22
-  PR #121 实测：cnb 容器（python:3.12）无 unzip/tar，下载失败时落盘的是
-  127 字节 GitHub 错误页，而它与真二进制 sha256 相同，指纹校验"通过"却命令不成形。
-  故 `--with-binary` 起一次真扫描自证契约（解析目标、出 JSON、退出码在契约集合内）。
+  注意指纹只证明「与我钉的那份一致」，**不证明它是能用的扫描器**：实测 127 =
+  扫描器本体缺失或不可执行（`sh` 的 "command not found" 码），与「版本不符/命令拼错」
+  同码同形，把「环境缺件」伪装成「基础设施抖动」。故预检**在起扫描之前先自证
+  二进制可执行**（`--version`），并把「用的是哪个二进制」打进日志——2026-09-22
+  PR #121 的红就是靠这一步定性的：下载路径确实拿到了 v2.6.0，于是问题只可能在
+  「扫描器本体不在 sh 能找到的地方」，据此把下载落点与自证统一改成绝对路径。
 - **允许清单带理由与到期日**：`scripts/ci/osv-allowlist.toml`，过期即重新报红
   （`ignoreUntil` 由 osv-scanner 强制），防"永久静音"。
 - **失败即红灯**：扫描器跑不起来（下载失败/清单缺失）按基础设施错误退出非 0。
@@ -233,6 +235,46 @@ def _download_scanner(dest_dir: Path) -> Path:
     return dest
 
 
+def resolveBinaryPath(scanner) -> Path:
+    """把扫描器路径归一为**绝对路径**，并自证文件在位、可执行。
+
+    为什么必须绝对：127 在 `sh` 里就是 "command not found"。相对路径一旦碰上
+    cwd 变化或 PATH 不含当前目录，表现与「扫描器坏了」完全一样——实测定位到
+    2026-09-22 PR #121 的红正是这一类伪装（预检能跑、正式扫描 127，唯一的差别
+    就是路径写法）。把路径归一放在一处，两类调用者不可能再分叉。
+    """
+    path = Path(scanner)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    path = path.resolve()
+    if not path.is_file():
+        raise SystemExit(f"[osv] 扫描器二进制不存在: {path}")
+    if not os.access(path, os.X_OK):
+        raise SystemExit(
+            f"[osv] 扫描器二进制不可执行: {path}"
+            "（chmod +x 未生效或文件系统禁执行）——127 会伪装成命令不成形"
+        )
+    return path
+
+
+def assertScannerExecutable(scanner) -> str:
+    """起扫描之前先自证「这个二进制能被执行」，返回它的版本行。
+
+    判据是 `--version` 真跑 + 退出码 0 + 有输出：文件在位、权限位对、架构匹配
+    三件事一次问清。缺了这一步，127（command not found）会被误读成版本不符。
+    """
+    binary = resolveBinaryPath(scanner)
+    proc = subprocess.run([str(binary), "--version"], capture_output=True, text=True)
+    line = (proc.stdout or proc.stderr or "").strip().splitlines()
+    version_line = line[0] if line else ""
+    if proc.returncode != 0 or not version_line:
+        raise SystemExit(
+            f"[osv] 扫描器自证失败：`{binary} --version` 退出 {proc.returncode}"
+            f"（127 = 不可执行 / 架构不符）\n      输出: {version_line or '(空)'}"
+        )
+    return version_line
+
+
 def _commandContract() -> dict:
     """按钉住的扫描器版本取命令契约（子命令 / flag / 输出侧），并补上自证用的 flag 集合。"""
     line = "v2" if OSV_SCANNER_VERSION.startswith("2.") else "v1"
@@ -250,9 +292,15 @@ def _commandContract() -> dict:
 
 
 def buildScanCommand(scanner: Path, targets, allowlist: Path, output: Path) -> list:
-    """按契约拼出扫描命令。单一落点：预检与正式扫描共用同一拼法。"""
+    """按契约拼出扫描命令。单一落点：预检与正式扫描共用同一拼法。
+
+    二进制一律走 `resolveBinaryPath()`（绝对路径）——相对路径在 `cwd` 变换、
+    临时目录、或壳层 PATH 不含当前目录时表现为 `command not found`（127），
+    而 127 与「命令不成形」同码，会把缺件伪装成扫描器故障。实测依据见
+    `tests/unit/test_osv_audit_hardening_guard.py` 的 `TestBinaryPathIsAbsolute`。
+    """
     contract = _commandContract()
-    cmd = [str(scanner), *contract["subcommand"]]
+    cmd = [str(resolveBinaryPath(scanner)), *contract["subcommand"]]
     cmd += [contract["config_flag"], str(allowlist)]
     cmd += [contract["format_flag"], contract["json_format"]]
     cmd += [contract["output"], str(output)]
@@ -407,8 +455,10 @@ def runPreflight(scanner: Path, targets, allowlist: Path) -> list:
     sha256 相同，`_download_scanner` 报"指纹校验通过"，随后命令不成形退 127——
     与「扫描器版本不符」同码同形。故这里跑真链路：解析目标、出 JSON、退出码在契约内。
     """
+    binary = resolveBinaryPath(scanner)
+    version_line = assertScannerExecutable(binary)
     output = Path(tempfile.mkdtemp(prefix="osv-preflight-")) / "preflight.json"
-    cmd = buildScanCommand(scanner, targets, allowlist, output)
+    cmd = buildScanCommand(binary, targets, allowlist, output)
     proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
     problems = []
     if proc.returncode not in CONTRACT_EXIT_CODES:
@@ -444,7 +494,10 @@ def runPreflight(scanner: Path, targets, allowlist: Path) -> list:
             + "\n      注：127 = 命令不成形或版本不符；本仓契约见 _COMMAND_CONTRACT。"
         )
 
-    report = ["[osv] 预检通过（真跑一次扫描自证契约）:"]
+    report = [
+        f"[osv] 扫描器自证: {version_line}（{binary}）",
+        "[osv] 预检通过（真跑一次扫描自证契约）:",
+    ]
     for rel, count in counts.items():
         report.append(f"      - {rel}: {count} packages")
     return report
@@ -498,6 +551,9 @@ def main() -> int:
         return 2
 
     scanner = _resolve_scanner()
+    # 日志里必须能读到「用的是哪个二进制」：2026-09-22 那次红的定性完全靠这一行
+    # （下载路径确实拿到了 v2.6.0 → 问题只能在别处），否则只能猜。
+    print(f"[osv] 扫描器二进制: {resolveBinaryPath(scanner)}")
 
     print("[osv] 扫描目标:")
     for t in targets:
