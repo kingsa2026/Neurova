@@ -39,6 +39,11 @@ from tests import ast_scan
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
+# 全部判据都要 `git ls-files` 取「入库文件」全集；git 缺席时先跳，
+# 不要让它变成 FileNotFoundError 把同文件其余断言一起带走。
+pytestmark = pytest.mark.skipif(
+    shutil.which("git") is None, reason="需要可执行的 git 才能查入库文件全集")
+
 # 权威实现（唯一允许的衰减模型载体）
 CANONICAL_TEMPERATURE = "neurova/cognitive_layers/memory_layer/temperature.py"
 
@@ -57,9 +62,6 @@ def _tracked_py() -> list:
     与受保护子集其余 170 个文件共享机器时必撞 30s 默认墙钟（本次构建实测 timeout）。
     判据只谈「哪些文件 import 了退役模块」，与入库文件总量无关，故按模块名文本预筛。
     """
-    # 白名单契约：执行 git 前先自证可达，缺席即显式 skip（而非 FileNotFoundError）。
-    if shutil.which("git") is None:
-        pytest.skip("本环境无 git，无法取回入库文件清单")
     out = subprocess.run(
         ["git", "-c", "core.quotepath=false", "ls-files", "-z", "*.py"],
         cwd=str(PROJECT_ROOT), capture_output=True, text=True,
