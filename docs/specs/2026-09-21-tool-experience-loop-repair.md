@@ -194,7 +194,8 @@ live-verify（真 Agent + 真 ToolExecutor + 真 SkillService）：端点经咽�
 无一条含糊」。守卫
 `tests/unit/skills/test_skill_entry_choke_migration.py::TestMigratedEntriesCallTheChoke`
 原来用一个 `allowed` 文件集整体放行，等于"清单上其余入口一律不写理由"。现改为
-**行号级清单**：每个保留点必须携带理由，新增的未登记命中点直接判红（见 §9 台账）。
+**行号级清单**：每个保留点必须携带理由，新增的未登记命中点直接判红
+（人类可读副本见 [`入口迁移台账.md`](./2026-09-21-tool-experience-loop/入口迁移台账.md)）。
 
 ### 8.9 杂项
 
@@ -203,8 +204,8 @@ live-verify（真 Agent + 真 ToolExecutor + 真 SkillService）：端点经咽�
   `scripts/diagnostics/INDEX.md` ⇒ 补登记。
 - 006 的同名冲突"预期计数 = 8"改为可复算：新增 `tests/unit/evolution/experience/`
   与 `tests/unit/skills/` 下的复算用例（按审计记载的存量形状重建 manifest，
-  断言计数口径 = 不同身份的额外条目数），并在 §9 说明本检出环境**没有** `data/` 下的
-  真 manifest 文件，故该数字的生产态仍待在有生产库的机器上复跑。
+  断言计数口径 = 不同身份的额外条目数），并注明本检出环境**没有** `data/` 下的
+  真 manifest 文件，故该数字的生产态仍待在有生产库的机器上复跑（见 §8.13）。
 
 
 ### 8.10 第三轮后的 CI 红：改指面漏了「代码里的路径拼接」
@@ -335,3 +336,58 @@ live-verify（真 Agent + 真 ToolExecutor + 真 SkillService）：端点经咽�
 - `ruff check neurova tests --no-cache` 全过。
 
 **净 LOC**：生产代码 `neurova/` **0 行**——改动全在测试判据与文档。
+
+### 8.13 第四轮：票面正文入库与「判据可复核」的收口
+
+前三轮把生产代码修完并逐条登记，但**「收工判据」本身在仓库内不可达**：001–011
+的票面正文只存在于 Issue #80 的附件里，仓内只有 `000-索引.md`。后果不是"文档不齐"，
+而是复核者拿不到判据原文，只能反推——索引表 11 行的「主要落点」把人指向 11 份
+**并不存在**的票面。
+
+本轮把它收口成可机器校验的三条判据，落在 `tests/unit/test_tool_loop_ticket_set_guard.py`：
+
+1. **票面齐备**：`000-索引.md` 表格里声明的每个票号都必须有同名唯一的票面正文，
+   且正文不得是占位（≥200 字、至少一个小节）。索引表是唯一事实源，票号清单不另写一份。
+2. **执行结果不留白**：票面进仓后「执行结果」格必须填上读数或诚实的「未做到 + 原因」，
+   不许停在 `待填`。写出了字段却没人读，正是协作红线点名的断点形态。
+3. **文档里的落点与人读的入口必须可达**：本批文档内以行内码写出的**仓库路径**
+   （`docs/...`、`neurova/...`、`tests/...` 等）不得零命中或多候选；规格文档与票集索引里的
+   **章节号**（`§8.10`）必须指向真实存在的章节。判据复用仓库既有的引用判定
+   （`scripts/scan_docs_refs.py`），不另写一套解析。
+
+**红→绿实测**
+
+- 判据 1 红灯（入库前）：`1 failed`，点名 `001 → 缺 001-*.md` 至 `011 → 缺 011-*.md` 共 11 条；
+  11 份正文入库后 `4 passed`。
+- 判据 2 红灯（正文入库后）：`1 failed`，点名 11 处 `待填`；
+  逐票填入实测读数后转绿（读数取自 §8.1–§8.12 与本轮复跑：`test_tool_router_success_verdict`
+  `5 passed`、`test_three_state_four_faces` `8 passed`、`test_structure_identity_param_shape`
+  `9 passed`、`test_rsi_idle_cost_recorded` `4 passed`、`test_chain_integrity_observability`
+  `5 passed`、`test_skill_view_key_domain` `13 passed`、`test_skill_entry_choke_migration`
+  `15 passed`、`test_skill_rollback_governance` `7 passed`、`test_tool_loop_funnel_probes`
+  `8 passed`、离线探针 `4 passed`）。
+- 判据 3 红灯（覆盖面只含索引时）：把票面正文纳入覆盖面后当场点名
+  `006-…:38 docs/adr/0018-skill-view-key-domain.md → 源已删除`；
+  改指 `docs/01-architecture/adr/0019-skill-view-key-domain.md` 后 `10 passed`。
+  另两处同类死指针一并改指：`入口迁移台账.md` 里的审计文档路径（那份审计**从未入库**，
+  改成显式文本交代去处，不再写成仓库内路径形态）、规格文档里两处指向**第九节**的悬空
+  章节号（本规格实际只有第一节至第八节，改为指向台账与本轮这一节）。
+- 三条反向控制各自独立：缺号判据喂合成输入判出 `099`；占位判据认得出 `待填`
+  且不误报已填读数；章节号判据认得出 `§8.2` 悬空、`§8.1` 存在；路径判据认得出
+  零命中为「源已删除」，同时不得把**唯一可解**的旧路径（`agent/chat_pipeline.py`）
+  误判成断链（假阳性会训练人忽略这道门禁）。
+
+**净 LOC**：生产代码 `neurova/` **0 行**；改动全在文档（票面正文入库 + 若干处改指）
+与一份新守卫（`tests/unit/test_tool_loop_ticket_set_guard.py`，测试不计入教义第 2 条的账）。
+
+**仍未闭环（诚实登记，不静默遗留）**
+
+- **006 生产库读数**：本检出环境 `data/` 下没有 `data/agents/*/skills/manifest.json`，
+  「同名冲突 = 8」的生产态真值仍待在有生产库的机器上跑
+  `python scripts/diagnostics/skill_name_collisions.py` 复核；计数**口径**已可复算（= 7）。
+- **008 浏览器级 live** 与 **011 三件套**：沿用第二轮登记，均属需人配合或本仓无既有落点的动作。
+- **来源审计文档**（工具↔经验环路的深度审计）：其正文只存在于 Issue #80 附件，
+  仓内从未有过；005 票面要求的「回审计文档 §2 新开登记项」因此无法就地兑现，
+  已改由 `入口迁移台账.md` 承接并在该文件「登记」节写明。
+- **本票集正文的 L-xx 断点编号**（如 003 的「审计 L-02」）引自上述未入库的审计文档；
+  本轮未改写这些引用（它们不构成仓库内死链），待审计文档入库后即可回填。
