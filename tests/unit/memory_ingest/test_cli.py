@@ -358,3 +358,25 @@ def test_undo_reports_the_owner_of_what_it_removes(tmp_path: Path, manager, sess
                 manager=manager, sessions=sessions) == EXIT_OK
 
     assert "u_alice" in capsys.readouterr().out
+
+
+def test_undo_points_at_the_reload_route_when_memories_were_removed(
+        tmp_path: Path, manager, sessions, capsys):
+    """撤销的出口必须与 apply 的出口对称：撤完还要让运行中的后端与盘对账。
+
+    撤销只删盘，运行中的实例手里那份快照仍持这批行，而它的任何一次改写都会把
+    撤销结果写回盘上——CLI 不把这条出口说出来，用户看到的就是"撤了还在"。
+    """
+    code = main(["apply", str(_bundle_with_memories(tmp_path)), "--agent-id", "kai-import",
+                 "--yes", "--run-id", "undo-out-1"], manager=manager, sessions=sessions)
+    assert code == EXIT_OK
+    capsys.readouterr()
+
+    assert main(["undo", "--agent-id", "kai-import", "--run-id", "undo-out-1"],
+                manager=manager, sessions=sessions) == EXIT_OK
+
+    printed = capsys.readouterr().out
+    assert "reload" in printed, (
+        "撤销了记忆却不告诉用户运行中的后端要重新对账——它手里那批行还在，"
+        "点一次强化就把撤销结果写回盘上"
+    )
