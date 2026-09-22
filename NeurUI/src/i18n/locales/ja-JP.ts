@@ -701,7 +701,7 @@ export default {
     overview: '概要',
     decay: '記憶減衰',
     reload: 'ディスクから再読込',
-    reloadHint: '外部プロセス（CLI インポート等）が書き込んだ記憶を、再起動せずにバックエンドへ取り込みます',
+    reloadHint: 'ディスクと突き合わせ、外部プロセス（CLI インポート等）が書き込んだ記憶を取り込み、取り消された行を回収します（再起動不要）',
     enhance: '記憶強化',
     forget: '忘れる',
     strengthen: '強化する',

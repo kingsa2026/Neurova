@@ -131,10 +131,14 @@ def apply_bundle(root: Path, *, agent_id: str, manager, sessions,
                  owner_user_id: str = "") -> IngestReport:
     """把一支合规 bundle 写进两条咽喉；返回可直接 undo 的报告。
 
-    `owner_user_id` 缺省为空 = 共享会话（单用户桌面下的合法语义）；多用户/多渠道下
+    `owner_user_id` 缺省为空 = 共享（单用户桌面下的合法语义）；多用户/多渠道下
     导入他人历史必须显式给属主，否则读侧"空属主=任何人可见"的规则会让导入的私有
     历史对所有人开放。归属不合法（会话已有别的属主）由咽喉抛 SessionOwnerConflict，
     这里兜成 BundleError：整批拒绝，与坏包同一姿态。
+
+    **一处给，两条咽喉都用**（Issue #81 断点②）：属主同时定标**会话行**与**记忆行**。
+    原先只有会话写入口消费它，同一支包里的记忆取调用现场作用域——为他人导入的会话有主、
+    记忆无主，属主实例按作用域检索看不见。缺省仍为空（共享），既有调用方口径不变。
     """
     if not _AGENT_ID.match(str(agent_id or "")):
         raise BundleError(f"agent_id 必须是简单标识符（它会参与目录拼接）: {agent_id!r}")
@@ -159,7 +163,8 @@ def apply_bundle(root: Path, *, agent_id: str, manager, sessions,
                 f"包里有 {len(memories)} 条记忆，但未提供记忆写入面（manager）")
         # 写入口的返回值是带取代读数的字典：计数与"声明取代是否真发生"都取这一份，
         # 不再另立第二条读取路径（两侧合流后唯一的读处）。
-        outcome = manager.import_memories(memories, ingest_run_id=report.run_id)
+        outcome = manager.import_memories(memories, ingest_run_id=report.run_id,
+                                          owner_user_id=report.owner_user_id)
         report.memories_added = outcome["added"]
         report.memories_skipped = outcome["skipped"]
         report.memories_superseded = tuple(outcome["superseded"])
@@ -219,7 +224,8 @@ def _stage_media(bundle_root: Path, message: Dict[str, Any], report: "IngestRepo
         target = destination / Path(rel).name
         if not target.exists():
             shutil.copyfile(bundle_root / rel, target)
-        artifacts.append(_artifact_info(target, report.agent_id, ref))
+        artifacts.append(_artifact_info(target, report.agent_id, ref,
+                                        owner_user_id=report.owner_user_id))
         staged.add(target.name)
     report.staged_media = tuple(sorted(staged))
 
@@ -239,8 +245,20 @@ def _prune_media(agent_id: str, candidates: Set[str], sessions) -> int:
     return removed
 
 
-def _artifact_info(path: Path, agent_id: str, ref: Dict[str, Any]) -> Dict[str, Any]:
+def _artifact_info(path: Path, agent_id: str, ref: Dict[str, Any],
+                   owner_user_id: str = "") -> Dict[str, Any]:
+    """产出一条运行期同形的 artifact 登记（含**归属**，读端按它判可见性）。
+
+    归属（Issue #81 断点③）：取值与**会话属主同源**——都来自 `apply --owner-user-id`
+    那一个值（这段历史是同一个人的，它的证据文件当然也是他的）。但不合并成同一个
+    字段：会话属主落在会话文件 `user_id` 上由会话写入口维护，产物属主落在条目
+    `user_id` 上由注册处维护，两处各自是事实源，这里只保证导入这一条路上同源。
+
+    批次没给属主（共享批次）时显式落 `shared=True`：读端据此放行任何已登录用户。
+    **不写"空属主=共享"的隐式规则**——漏写属主必须落成诚实 404，不许被静默放宽。
+    """
     mime = str(ref.get("mime") or mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+    owner = str(owner_user_id or "").strip()
     return {
         "artifact_id": hashlib.sha1(str(path.resolve()).encode("utf-8", errors="replace"))
         .hexdigest()[:16],
@@ -249,6 +267,8 @@ def _artifact_info(path: Path, agent_id: str, ref: Dict[str, Any]) -> Dict[str, 
         "size": path.stat().st_size,
         "mime_type": mime,
         "agent_id": agent_id,
+        "user_id": owner,
+        "shared": not owner,
         "path": str(path.resolve()),
         "source": "ingest",
     }
