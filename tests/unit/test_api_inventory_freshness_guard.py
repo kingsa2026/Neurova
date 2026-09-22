@@ -283,6 +283,30 @@ class TestGeneratedBlockIsWritableAndIdempotent:
             "机器区标记缺失或重复——生成器定位不到该写哪里。"
         )
 
+    def test_snapshot_date_round_trips_for_any_given_date(self):
+        """日期回读必须与「今天」无关：写入哪天，读回就是哪天。
+
+        产物日期与回读判据必须是**同一份定义**。两份一旦漂移，回读会静默回落到
+        当日，于是幂等只在「生成当天」碰巧成立——日期一滚即爆的定时炸弹。
+        """
+        module = _generator()
+        for given in ("2020-01-02", "2026-09-22", "2031-12-31"):
+            rendered = module.renderInventory(given)
+            assert module.snapshotDate(rendered) == given, (
+                f"渲染 {given} 后回读不到同一个日期（回读判据与头部格式已脱节）。"
+            )
+
+    def test_snapshot_date_pattern_is_defined_once(self):
+        """快照日期的判据只许一份定义——两份就是两个事实源。"""
+        module = _generator()
+        owned = [name for name in dir(module)
+                 if isinstance(getattr(module, name), type(re.compile("")))
+                 and "快照日期" in getattr(module, name).pattern]
+        assert len(owned) == 1, (
+            f"快照日期有 {len(owned)} 份正则定义 {sorted(owned)}——"
+            "读写各认一份，必然逐版漂移（教义第 6 条）。"
+        )
+
     def test_writer_is_idempotent_on_the_shipped_document(self):
         module = _generator()
         original = _inventory_text()
