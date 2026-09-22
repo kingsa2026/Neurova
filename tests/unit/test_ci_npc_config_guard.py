@@ -11,10 +11,13 @@
 2. **thinkingLevel 必须是字面量枚举值** —— `npc:go.options` 走平台
    配置阶段的 Schema 校验，而校验发生在变量替换之前，写成 `$VAR`
    会以"值不在枚举内"配置期直接红（本仓实测 100 条 Schema 报错）。
-3. **档位角色与流水线一一对齐** —— 每个声明的档位角色名（含同档别名
-   DSCoder-max，以及 `$` 兜底挂载点）必须在 `.cnb.yml` 有对应 NPC 事件
-   流水线，且其 thinkingLevel 与本仓档位表一致；否则角色被 @ 时静默回落
-   平台默认档，用户以为切了档、其实没切。
+3. **档位角色与流水线一一对齐** —— 每个在册档位角色（含同档别名 DSCoder-max）
+   都必须被 `.cnb.yml` 的合法挂载点覆盖到，且该挂载点的 thinkingLevel 与本仓
+   档位表一致；否则角色被 @ 时静默回落平台默认档、乃至平台默认 **prompt**，
+   用户以为切了档、其实没切，本仓 90+ 处引用的修复教义随之失效。
+   合法挂载点**只有 `$`**（见第 6 条）：角色名顶层 key 在推送那一刻就是非法配置，
+   所以「每个角色都有必达通道」不能靠再挂一个角色名 key 来实现——它由 `$` 兜底
+   覆盖全部角色来满足，`LEVEL_BY_MOUNT` 落 `$` 一处不落二处。
 4. **档位收敛不倒退** —— 本仓只保留 max 一档。`-low` / `-high` 两档与
    非 max 的 thinkingLevel 若重新出现（顶层 key、settings.yml 角色、
    或流水线里的档位值），守卫直接拦下：要么是有意恢复分档（需同步改
@@ -62,6 +65,7 @@ SUFFIX_VARIANTS = ("-low", "-high", "-max")
 # 本仓只保留 max 一档（2026-09-18 收敛）：
 # 档位角色名 → 期望的 thinkingLevel
 LEVEL_BY_ROLE = {"DSCoder-max": "xhigh"}
+
 # NPC **挂载点**（.cnb.yml 顶层 key）→ 期望的 thinkingLevel。
 #
 # `$` 是唯一允许的挂载点：.cnb.yml 的顶层 key 在平台 Schema 里只认分支名
@@ -70,6 +74,7 @@ LEVEL_BY_ROLE = {"DSCoder-max": "xhigh"}
 # 别名角色（DSCoder-max）因此只保留在 settings.yml 侧，运行参数复用 `$` 的定义——
 # 见 `LEVEL_BY_ROLE`，若将来别名需要不同参数，正确做法是拆出**分支**而不是再造顶层 key。
 LEVEL_BY_MOUNT = {"$": "xhigh"}
+
 # 已取消的档位后缀：一旦重新出现在 .cnb.yml 顶层 key 或 settings.yml 角色名里即报错
 RETIRED_SUFFIXES = ("-low", "-high")
 
@@ -486,6 +491,49 @@ class TestRolePipelineAlignment:
                     "（PR 事件拉到 issue 流水线会跑错上下文）"
                 )
         assert not problems, "\n  ".join(problems)
+
+    def test_every_registry_role_falls_into_a_legal_mount(self, cnb_doc, settings_doc):
+        """每个在册角色都必须被合法挂载点覆盖——「静默回落平台默认 prompt」的根因处判据。
+
+        本批冲突消解（2026-09-22，PR #136 并入 main）：本 PR 侧的诊断洞见是
+        「角色名没有配置期必达通道时，被 @ 会静默回落平台默认 prompt，本仓 90+ 处
+        引用的修复教义随之失效，而平台不会报错」，当时靠补一个 `DSCoder:` 顶层 key 来满足。
+        main 侧（PR #134）用平台 Schema 证明角色名顶层 key 在推送那一刻就非法，
+        真通道只有 `$`——`$` 不是「某一档的兜底」，而是**全部角色**的兜底。
+
+        于是不变量改成（结论取 main，洞见收下）：在册角色名无论是否在
+        `.cnb.yml` 有专属顶层 key，都必须命中一份合法挂载点；顶层 key 只准
+        `$` 或 `^\..` 锚点形态（后者只承载锚点定义，不作角色挂载）。
+        若哪天有人真的加回角色名顶层 key，这条会连同
+        `test_no_role_named_top_level_keys` 一起红——两条判据咬合，不靠自觉。
+        """
+        roles = (settings_doc.get("npc") or {}).get("roles") or []
+        assert roles, ".cnb/settings.yml 未声明任何 NPC 角色"
+
+        # 合法顶层 key 的判据与 test_no_role_named_top_level_keys 同源：
+        # 分支名 / `main` / `include` / `crontab:` / `^\..` 锚点定义。
+        illegal_keys = [
+            key for key in cnb_doc
+            if not (key == "$" or key == "main" or key == "include"
+                    or str(key).startswith("crontab:") or str(key).startswith("."))
+        ]
+        assert not illegal_keys, (
+            f".cnb.yml 出现角色名/非锚点的顶层 key: {illegal_keys}\n"
+            "顶层 key 只认分支名；角色一律靠 `$` 兜底覆盖——补一个角色名 key "
+            "不是「加了必达通道」，而是把一份过不了 Schema 的配置推上分支。"
+        )
+
+        # `$` 段必须声明两个事件：它是全部角色的唯一挂载点，漏一个事件就等于
+        # 该场景下角色没有配置期必达通道（平台改走默认行为）。
+        fallback = cnb_doc.get("$") or {}
+        uncovered = [
+            role.get("name") for role in roles
+            if not {"issue.comment@npc", "pull_request.comment@npc"} <= set(fallback)
+        ]
+        assert not uncovered, (
+            f"在册角色 {uncovered} 没有配置期必达通道（`$` 段缺事件声明）——"
+            "角色名未命中专属 key 时会回落平台默认 prompt，人设与修复教义静默失效。"
+        )
 
 
 class TestSettingsRoleHygiene:
