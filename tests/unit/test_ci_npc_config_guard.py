@@ -302,3 +302,61 @@ class TestSettingsRoleHygiene:
         names = [r.get("name") for r in (settings_doc.get("npc") or {}).get("roles") or []]
         dupes = sorted({n for n in names if names.count(n) > 1})
         assert not dupes, f"角色名重复: {dupes}"
+
+
+# 平台单次构建硬上限（超时即构建失败，任务与上下文全丢）。
+# 依据：构建 cnb-3k8-1k33gorhr 实测 7293033ms（≈2h2m）被掐断，
+# 同时在册的同类掐断有 cnb-f1c-1k31garu5 / cnb-1q8-1k33cb2v9 等多例 ——
+# 这是系统性耗时问题，不是单次偶发。
+BUILD_HARD_LIMIT_SECONDS = 7200
+
+# 会话内必须出现的时长纪律条目（人设 prompt 的硬约束子串）。
+# 这些字符串同时是"给 Agent 的行为约束"与"守卫的判据"，
+# 改动任一侧都会让另一侧变红——防后人把纪律删干净后无感回归。
+DURATION_DISCIPLINE_MARKERS = (
+    "单次构建上限 2h",
+    "禁止 sleep",
+    "禁止在单次会话里反复跑全量测试套件",
+    "长任务要分段交付",
+)
+
+
+class TestNpcBuildDurationDiscipline:
+    """NPC 人设必须载明构建时长纪律（2h 硬上限的根因处修复）。
+
+    只调 maxTurns 治不了这个病：cnb-f1c-1k31garu5（251 轮）与
+    cnb-3k8-1k33gorhr（204 轮）两次掐断的轮数都远低于 1000 配额，
+    真正的死因是单轮耗时（sleep 轮询 + 单轮全量 pytest + 上下文压缩开销）。
+    故纪律写在人设里（被 @ 时必加载），并由本守卫常驻钉住。
+    """
+
+    def test_every_role_states_build_hard_limit(self, settings_doc):
+        roles = (settings_doc.get("npc") or {}).get("roles") or []
+        assert roles, "settings.yml 未声明任何 NPC 角色"
+        problems = []
+        for role in roles:
+            prompt = role.get("prompt") or ""
+            missing = [m for m in DURATION_DISCIPLINE_MARKERS if m not in prompt]
+            if missing:
+                problems.append(f"{role.get('name')}: 缺 {missing}")
+        assert not problems, (
+            "NPC 人设缺少构建时长纪律:\n  " + "\n  ".join(problems) +
+            f"\n平台单次构建上限 {BUILD_HARD_LIMIT_SECONDS}s，超时即整条流水线失败、"
+            "会话成果全丢。纪律属根因处修复，不可省。"
+        )
+
+    def test_duration_discipline_identical_across_roles(self, settings_doc):
+        """同档别名角色（DSCoder / DSCoder-max）的时长纪律必须逐字一致。"""
+        roles = (settings_doc.get("npc") or {}).get("roles") or []
+        rendered = {}
+        for role in roles:
+            prompt = role.get("prompt") or ""
+            rendered[role.get("name")] = tuple(
+                line for line in prompt.splitlines()
+                if any(m in line for m in DURATION_DISCIPLINE_MARKERS)
+            )
+        values = set(rendered.values())
+        assert len(values) == 1, (
+            "各角色的构建时长纪律不一致（会各自漂移）:\n  "
+            + "\n  ".join(f"{k}: {len(v)} 行" for k, v in rendered.items())
+        )
