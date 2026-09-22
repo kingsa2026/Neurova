@@ -694,12 +694,13 @@ def renderNavigationImpactSummary(rows: list) -> str:
         byForm[row["form"]] = byForm.get(row["form"], 0) + 1
         byFile[row["file"]] = byFile.get(row["file"], 0) + 1
     counters = navigationImpactExemptions()
-    forms = " · ".join(f"{form} {count}" for form, count in sorted(byForm.items()))
-    breakdown = f"（{forms}）" if forms else ""
+    # 入筛为空时不渲染空括号：那是「没有内容可列」，不是「有一项没写出来」
+    formDetail = " · ".join(f"{form} {count}" for form, count in sorted(byForm.items()))
     lines = [
         NAV_IMPACT_SUMMARY_BEGIN,
         f"归档层悬空引用共 **{len(archiveDanglingUnion())}** 条，"
-        f"其中**影响当下导航 {len(rows)} 条**{breakdown}。",
+        f"其中**影响当下导航 {len(rows)} 条**"
+        + (f"（{formDetail}）。" if formDetail else "——**本类已归零**。"),
         "",
         "| 载体文档 | 入筛条数 |",
         "|------|------|",
