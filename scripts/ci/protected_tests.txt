@@ -518,3 +518,15 @@ tests/unit/context/test_recall_budget_floor.py
 tests/unit/context/test_window_token_metering.py
 #   上述登记纪律的守卫本身：新判据文件必须真进清单（漏登记即红）。
 tests/unit/context/test_b5_scale_batch_registration.py
+
+# 上下文三链路批（Issue #90）B6-1：上下文域死线三态台账与判据同源守卫。
+#   （根因：审计 §10 对 B6 要求「每个孤儿需单独论证可达性」，而本仓实测已有
+#    两面反例说明「按 grep 名字计数」不可用——池方法 dedup 零调用，但池实际走
+#    context/dedup.py 的**另一接收者**的同名方法（按名字判会误删真实现）；
+#    clear 是通用名（全仓 300+ 命中，完全不具判别力）。
+#    故判据拆成两轴：判据类由 scripts/ci/context_deadline_ledger.py 的
+#    classify() 机器算（absent / no_consumer / self_loop / consumed 四值），
+#    台账照抄且不一致即报红；处置是人对该条的决定（有限枚举）。
+#    反向控制：draw / archiveBatch 已知生产可达，必须报 consumed 且永远
+#    「待处置」——它们被误报或赋处置即说明判据整体失效。）
+tests/unit/context/test_context_deadline_ledger.py
