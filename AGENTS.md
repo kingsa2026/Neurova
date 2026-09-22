@@ -95,7 +95,10 @@ Issue #68 明确要求写进"项目配置"的通用准则。与修复教义同�
 ## 4. 测试纪律
 
 - 正式测试落 `tests/unit|integration|e2e|performance/<模块>/`；临时验证脚本即用即删，不留 `tests/` 根目录。
-- 新增测试文件若被 `.gitignore` 规则命中，必须 `git add -f` 显式加。
+- 唯一测试根 `tests/` 已在 `.gitignore` 里整根豁免，**不得**再依赖 `git add -f` 兜底：
+  提交前用 `git status` 确认新文件处于跟踪态即可。守卫
+  `tests/unit/test_dev_path_and_runtime_dep_guards.py::TestProtectedSubsetEntriesAreTracked`
+  双向钉住——测试根下的正当文件名不得被忽略、跑测产物与敏感件不得被放行。
 - 跑测试用项目解释器：`.venv/Scripts/python.exe -m pytest`（Windows）或 `.venv/bin/python -m pytest`。
 - **预存失败不算回归，新增失败才算**：涉及共享文件时提交前做 A/B 自证
   （`git stash push <files> && pytest <套件> && git stash pop`），失败集合修复前后逐行比对。

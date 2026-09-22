@@ -24,6 +24,8 @@
 
 import io
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -360,3 +362,140 @@ class TestCiTestRunnerAndFixtureDepsAreReal:
                 f"{rel} 不在受保护子集——它是 pytest<9 / reportlab 两条回归的靶点，"
                 "移出后本守卫无法发现复发。"
             )
+
+
+class TestProtectedSubsetEntriesAreTracked:
+    """受保护子集的每个条目必须**真实存在且被 git 跟踪**。
+
+    根因（2026-09-22 的 CI 事故，Issue #109 的 PR #117）：新增守卫
+    `tests/unit/desktop/test_rust_vendor_patch_guard.py` 被 `.gitignore` 的
+    临时脚本通配 `*_patch*.py` 吞掉，于是：
+
+    - 本机工作区里文件在，单跑 pytest 全绿；
+    - 提交后仓库里**根本没有该文件**（未跟踪），CI 的 unit-tests 拿到
+      `ERROR: file or directory not found`，收集 0 项、退出码 4；
+    - 更隐蔽的一层：`scripts/ci/protected_tests.txt` 里写着它——清单声称
+      「这个守卫在跑」，而它从未被跑过。守卫缺席比守卫变红更危险。
+
+    本类钉两件事：清单条目的存在性与跟踪状态；以及测试根不得再被
+    「临时脚本通配」按名字吞掉（否则同类事故会以别的文件名复发）。
+    """
+
+    # 会被名单里那批通配命中的形态（见 .gitignore 的「调试和临时文件」「临时脚本」两节）。
+    # 这些名字在仓库根/scripts 下是临时脚本的合理排除对象，但在唯一测试根下
+    # 它们就是正当的测试文件名，不得被误吞。
+    CANARY_NAMES = (
+        "tests/unit/desktop/test_rust_vendor_patch_guard.py",
+        "tests/unit/_probe_patch_notes.py",
+        "tests/unit/x/test_debug_flow.py",
+        "tests/unit/x/check_contract.py",
+        "tests/unit/x/verify_binding.py",
+        "tests/unit/x/run_pipeline.py",
+    )
+
+    @staticmethod
+    def _protected_entries() -> list:
+        raw = io.open(
+            PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt", encoding="utf-8"
+        ).read()
+        return [
+            line.split("#", 1)[0].strip()
+            for line in raw.splitlines()
+            if line.split("#", 1)[0].strip()
+        ]
+
+    @staticmethod
+    def _git(*args) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(PROJECT_ROOT),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+    def test_git_available_for_tracking_checks(self):
+        """反向控制：没有 git 时本类会静默变成空壳，必须显式跳过而不是假绿。"""
+        if not shutil.which("git") or not (PROJECT_ROOT / ".git").exists():
+            pytest.skip("非 git 工作区 / 无 git：跟踪状态无从判定")
+
+    def test_every_protected_entry_exists_on_disk(self):
+        """清单指向不存在的文件 = CI 必红（pytest 退出码 4），且断言无从执行。"""
+        if not shutil.which("git") or not (PROJECT_ROOT / ".git").exists():
+            pytest.skip("非 git 工作区 / 无 git")
+        missing = [
+            rel for rel in self._protected_entries()
+            if not (PROJECT_ROOT / rel).exists()
+        ]
+        assert not missing, (
+            "受保护子集指向不存在的文件——unit-tests 流水线会以 "
+            "`ERROR: file or directory not found` 退出 4：\n  " + "\n  ".join(missing)
+        )
+
+    def test_every_protected_entry_is_tracked_by_git(self):
+        """清单条目必须在库里被跟踪：本机有文件 ≠ 仓库里有文件。
+
+        可证伪路径：把任一清单条目的文件从索引里摘掉（`git rm --cached <path>`）
+        → 转红。本次事故正是"本机绿、仓库里没有"这一形态。
+        """
+        if not shutil.which("git") or not (PROJECT_ROOT / ".git").exists():
+            pytest.skip("非 git 工作区 / 无 git")
+        untracked = []
+        for rel in self._protected_entries():
+            proc = self._git("ls-files", "--error-unmatch", "--", rel)
+            if proc.returncode != 0:
+                untracked.append(rel)
+        assert not untracked, (
+            "受保护子集里有条目未被 git 跟踪——本机跑得通、克隆/CI 上文件不存在，"
+            "门禁声称跑过而从未跑过（比变红更危险）：\n  " + "\n  ".join(untracked)
+            + "\n修复：确认该文件未被 .gitignore 吞掉（测试根见下一条），"
+            "再 `git add` 入库。"
+        )
+
+    @pytest.mark.parametrize("rel", CANARY_NAMES)
+    def test_test_root_names_are_not_swallowed_by_adhoc_globs(self, rel):
+        """测试根下的正当文件名不得被「临时脚本通配」吞掉。
+
+        可证伪路径：删掉 `.gitignore` 的测试根豁免 → 前两条转红。
+        """
+        if not shutil.which("git") or not (PROJECT_ROOT / ".git").exists():
+            pytest.skip("非 git 工作区 / 无 git")
+        proc = self._git("check-ignore", "-q", "--", rel)
+        assert proc.returncode != 0, (
+            f"{rel} 仍被 .gitignore 忽略——它会被静默排除在提交之外，"
+            "本机绿而 CI 上文件不存在。\n"
+            "修复：在 .gitignore 里为唯一测试根加豁免（`!tests/**`），"
+            "并单独重新忽略测试根下的缓存/产物。"
+        )
+
+    @pytest.mark.parametrize(
+        "rel",
+        (
+            "tests/__pycache__/x.pyc",
+            "tests/unit/x/__pycache__/y.pyc",
+            "tests/unit/x/.pytest_cache/v/cache/lastfailed",
+            "tests/unit/x/htmlcov/index.html",
+        ),
+    )
+    def test_test_root_caches_stay_ignored(self, rel):
+        """反向控制：豁免测试根**不得**顺手把缓存/产物放进来。
+
+        可证伪路径：把 `.gitignore` 的测试根豁免写成一条无限定的
+        `!tests/**` 而不同时重新忽略缓存 → 转红。
+        """
+        if not shutil.which("git") or not (PROJECT_ROOT / ".git").exists():
+            pytest.skip("非 git 工作区 / 无 git")
+        proc = self._git("check-ignore", "-q", "--", rel)
+        assert proc.returncode == 0, (
+            f"{rel} 不再被忽略——测试根豁免把跑测产物也放进了仓库。\n"
+            "修复：豁免测试根后，单独重新忽略 __pycache__ / .pytest_cache / htmlcov。"
+        )
+
+    def test_guard_itself_is_in_protected_subset(self):
+        """本守卫必须在受保护子集里，否则它的断言在 CI 上无人执行。"""
+        rel = "tests/unit/test_dev_path_and_runtime_dep_guards.py"
+        assert rel in self._protected_entries(), (
+            f"{rel} 不在受保护子集——本类锁的『清单条目必须存在且被跟踪』"
+            "在 CI 上不会被执行，同类事故会无声复发。"
+        )
