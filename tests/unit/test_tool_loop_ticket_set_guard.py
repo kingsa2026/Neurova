@@ -33,6 +33,9 @@ INDEX = TICKETS / "000-索引.md"
 #: 索引表行首的票号单元格（`| 001 | 标题 |`）
 ROW = re.compile(r"^\|\s*(\d{2,3}[a-z0-9]*)\s*\|")
 
+#: 断点编号索引表的行（`| L-02 | 003 | … |`）
+DEFECT_ROW = re.compile(r"^\|\s*(L-\d{2}[a-z]?)\s*\|\s*([^|]*)\|")
+
 
 def _declaredNumbers() -> list:
     """索引表声明的票号（按出现顺序）。"""
@@ -276,3 +279,217 @@ class TestBatchDocRepoRefsResolvePlaceholder:
     def test_extractionIgnoresProductionAndGlobForms(self):
         text = "见 `data/agents/default/skills/manifest.json`、`tests/unit/tool_tools_*.py`"
         assert _repoRefs(text) == [], "生产库路径与通配形态不该进判据（会制造假阳性）"
+
+
+# ---------------------------------------------------------------------------
+# 判据四：**批次级判据**（全局约束 / 硬次序 / 整批完成判据 / 断点编号出处）
+# ---------------------------------------------------------------------------
+# 第四轮把 001–011 的**票面正文**入了库，判据在「每张票」这一层可读了。
+# 但这一批还有**更高一层的判据**：每张票都必须遵守的全局约束（11 条）、
+# 不可调换的硬次序（002 早于 003、007 早于 008）、以及整批的完成判据
+# （三条探针全绿 + 经验质量门禁两格读数不变差）。它们此前同样只存在于
+# Issue #80 的附件里，仓内索引只有一节「全局约束**遵守情况**」——那是
+# 实现方的自陈报告，不是约束本体；读者拿不到「约束到底写了哪 11 条」，
+# 也就无从复核每张票是不是在同一个契约下完成的。
+#
+# 同型断点的第二处：票面正文里大量出现 `审计 L-02` / `L-04 / L-05 / L-10`
+# 这类**断点编号**，其出处（工具↔经验环路的深度审计）从未入库。读者在仓内
+# 查不到「L-06b 到底指什么」。出处无法凭空复原，但**编号到票的索引**可以
+# 从票面自陈回填，并显式交代出处形态——「查不到」与「没人写」必须分得开。
+
+BATCH_SECTION_HEADINGS = ("全局约束", "硬次序", "完成判据")
+DEFECT_NUMBER = re.compile(r"\bL-\d{2}[a-z]?\b")
+CONSTRAINT_ITEM = re.compile(r"^\s*(\d{1,2})\.\s+\*\*", re.M)
+
+
+def _batchContractText() -> str:
+    """批次级判据的事实源 = 票集索引本体（不另立一份）。"""
+    return io.open(INDEX, encoding="utf-8").read()
+
+
+def _ticketDefectNumbers() -> dict:
+    """每份票面正文里出现的断点编号 → 出现的票（票面自陈，唯一可核的出处）。"""
+    found: dict = {}
+    for path in sorted(TICKETS.glob("[0-9][0-9][0-9]-*.md")):
+        if path.name.startswith("000-"):
+            continue
+        text = io.open(path, encoding="utf-8").read()
+        for number in DEFECT_NUMBER.findall(text):
+            found.setdefault(number, set()).add(path.name.split("-")[0])
+    return found
+
+
+def _indexedDefectNumbers(text: str) -> dict:
+    """索引里的编号索引表：编号 → 承载它的票号。"""
+    indexed: dict = {}
+    for line in text.splitlines():
+        row = DEFECT_ROW.match(line.strip())
+        if row:
+            indexed.setdefault(row.group(1), set()).update(
+                re.findall(r"\b\d{3}\b", row.group(2))
+            )
+    return indexed
+
+
+def _unindexedDefectNumbers(tickets: dict, indexed: dict) -> list:
+    """票面里出现、索引却没有登记出处的编号（纯函数，供反向控制复算）。"""
+    return sorted(
+        number for number, carriers in tickets.items()
+        if not carriers.issubset(indexed.get(number, set()))
+    )
+
+
+class TestBatchLevelContractIsReadableInRepo:
+    """批次级判据必须在仓内可读——否则每张票的「完成」是在两套口径下裁的。"""
+
+    def test_batchConstraintsBlockExists(self):
+        text = _batchContractText()
+        assert "## 批次级判据" in text, (
+            "票集索引里没有「批次级判据」这一节：全局约束/硬次序/整批完成判据"
+            "只存在于 Issue 附件，复核者在仓内无从判断各票是否在同一契约下完成"
+        )
+
+    def test_everyBatchHeadingIsPresent(self):
+        text = _batchContractText()
+        missing = [name for name in BATCH_SECTION_HEADINGS if f"### {name}" not in text]
+        assert missing == [], f"批次级判据缺节：{missing}"
+
+    def test_globalConstraintsAreEnumerated(self):
+        items = CONSTRAINT_ITEM.findall(_batchContractText())
+        assert len(items) >= 10, (
+            f"全局约束只解析出 {len(items)} 条——约束本体没入库或格式退化，"
+            "「每张票都必须遵守」这件事就成了一句无从复核的话"
+        )
+
+    def test_completionCriteriaNameTheirEvidenceSources(self):
+        text = _batchContractText()
+        for token in (
+            "tests/unit/agent/test_tool_loop_funnel_probes.py",
+            "scripts/ci/experience_quality_gate.py",
+        ):
+            assert token in text, (
+                f"整批完成判据没有点名它的取证入口 `{token}`，"
+                "读者无法从判据走到可重跑的读数"
+            )
+
+    def test_constraintCriterionIsNotVacuous(self):
+        """反向控制：条目检出器必须真的认得条目形态（合成输入，不看仓库现状）。"""
+        sample = "1. **TDD 红绿灯**：先写必红用例。\n2. **单一事实源**：收口到一份。\n"
+        assert len(CONSTRAINT_ITEM.findall(sample)) == 2
+        assert CONSTRAINT_ITEM.findall("普通编号列表 1. 没有粗体标题\n") == []
+
+
+class TestDefectNumberingHasProvenance:
+    """票面里的 `L-xx` 断点编号必须有仓内出处索引（编号 → 票 → 出处形态）。"""
+
+    def test_everyTicketDefectNumberIsIndexed(self):
+        unindexed = _unindexedDefectNumbers(_ticketDefectNumbers(), _indexedDefectNumbers(_batchContractText()))
+        assert unindexed == [], (
+            "票面正文引用了索引里没有登记出处的断点编号——读者在仓内查不到它指什么:\n  "
+            + "\n  ".join(unindexed)
+        )
+
+    def test_provenanceFormIsStated(self):
+        text = _batchContractText()
+        assert "### 断点编号 L-xx 的出处" in text, (
+            "没有交代 L-xx 编号的出处形态：编号来源（深度审计）从未入库这件事"
+            "必须显式写出来，否则读者会把「查不到」当成「自己找错了地方」"
+        )
+        assert "从未入库" in text, "出处节必须点名来源文档**从未入库**，不得含糊"
+
+    def test_defectIndexCriterionIsNotVacuous(self):
+        """反向控制：判据必须真的抓得住「票面有、索引无」的编号（合成输入）。"""
+        tickets = {"L-02": {"003"}, "L-99": {"004"}}
+        indexed = {"L-02": {"003"}}
+        assert _unindexedDefectNumbers(tickets, indexed) == ["L-99"]
+        assert _unindexedDefectNumbers(indexed, indexed) == []
+
+
+# ---------------------------------------------------------------------------
+# 第六组：两项「需人配合」事项的**用户裁定**必须在仓内可读
+# ---------------------------------------------------------------------------
+# 第五轮末，本批还剩四项「无法由实现方单方面闭环」的事项，全部登记在案。其中两项
+# （008 的浏览器级 live、011 的设计契约三件套）需要用户裁决：做，还是按现状收。
+# 用户在 Issue #80 给出裁定 —— **按现状承接**。
+#
+# 裁定落在评论里，而评论不进版本库：下一个复核者读票面，仍会看到「未闭环」四个字，
+# 于是「已经裁定过、不必再做」与「没人做、待办挂着」在仓内**分不开**。这与前几轮
+# 反复收口的是同一形态——写入（裁定做了）→ 读取（读者拿不到）的环断在读者这一环。
+#
+# 故本组判据只锁一件事：裁定本体必须在票集索引可读，且被裁定覆盖的票面必须指向它。
+
+RULING_HEADING = "## 用户裁定（按现状承接）"
+#: 裁定覆盖的两项（票号 + 事项关键词），与票面自陈一致。
+RULING_ITEMS = (("008", "浏览器级 live"), ("011", "三件套"))
+SPEC = PROJECT_ROOT / "docs" / "specs" / "2026-09-21-tool-experience-loop-repair.md"
+
+
+def _rulingSection(text: str) -> str:
+    """取裁定节正文（到下一个二级标题为止）；节不存在即返回空串。"""
+    if RULING_HEADING not in text:
+        return ""
+    body = text.split(RULING_HEADING, 1)[1]
+    cut = body.find("\n## ", 1)
+    return body if cut < 0 else body[:cut]
+
+
+def _rulingGaps(section: str) -> list:
+    """裁定节的缺陷清单（纯函数，供反向控制复算）。"""
+    gaps = []
+    if not section.strip():
+        return ["裁定节缺失"]
+    if "按现状承接" not in section:
+        gaps.append("没有写明裁定结论「按现状承接」")
+    for number, topic in RULING_ITEMS:
+        if number not in section or topic not in section:
+            gaps.append(f"未点名被裁定项：{number} {topic}")
+    return gaps
+
+
+class TestUserRulingIsReadableInRepo:
+    """两项需人配合事项的用户裁定必须随票集入库，否则「已裁定」与「没人做」不可分。"""
+
+    def test_rulingSectionExists(self):
+        text = _batchContractText()
+        assert RULING_HEADING in text, (
+            "票集索引里没有「用户裁定（按现状承接）」这一节：裁定只存在于 Issue 评论，"
+            "复核者读票面仍会看到「未闭环」，无法与「待办挂着」区分"
+        )
+
+    def test_rulingNamesTheCoveredItems(self):
+        gaps = _rulingGaps(_rulingSection(_batchContractText()))
+        assert gaps == [], (
+            "裁定节没有把被裁定项说全（结论 + 覆盖哪两张票的哪一项）:\n  "
+            + "\n  ".join(gaps)
+        )
+
+    def test_rulingSaysTheseAreNoLongerOpenItems(self):
+        section = _rulingSection(_batchContractText())
+        assert "不再列为未闭环" in section or "退出未闭环" in section, (
+            "裁定节没有交代这两项**退出未闭环清单**——「按现状承接」若只写成一句"
+            "「已确认」，下一位复核者仍会把它们当成待办重开一遍"
+        )
+        assert "§10" in section, (
+            "裁定节没有指向规格文档里记录本轮处置的那一节，读者无从看到红→绿与落点"
+        )
+
+    def test_coveredTicketsPointAtTheRuling(self):
+        """写入→读取闭环：落在票面（读者第一站）的登记必须指向裁定。"""
+        missing = []
+        for number, _ in RULING_ITEMS:
+            body = next(TICKETS.glob(f"{number}-*.md"), None)
+            assert body is not None, f"{number} 票面缺失"
+            if "按现状承接" not in io.open(body, encoding="utf-8").read():
+                missing.append(body.name)
+        assert missing == [], (
+            "被裁定覆盖的票面没有指向该裁定——读者在票面上看到的还是「未闭环」，"
+            "环断在读者这一环:\n  " + "\n  ".join(missing)
+        )
+
+    def test_rulingCriterionIsNotVacuous(self):
+        """反向控制：判据必须真的抓得住缺失与说不全（合成输入，不看仓库现状）。"""
+        assert _rulingGaps("") == ["裁定节缺失"]
+        assert "按现状承接" in _rulingGaps("结论：取消该项。")[0]
+        assert _rulingGaps(
+            "结论：按现状承接。008 浏览器级 live 与 011 三件套，不再列为未闭环。"
+        ) == []
