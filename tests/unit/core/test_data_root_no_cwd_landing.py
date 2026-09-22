@@ -23,8 +23,6 @@ import functools
 import re
 from pathlib import Path
 
-import pytest
-
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATA_ROOT_MODULE = PROJECT_ROOT / "neurova" / "core" / "data_root.py"
 SCANNED_ROOTS = ("neurova", "scripts")
@@ -45,21 +43,31 @@ _CWD_PREFIXES = ("data/", "data\\", "./data/", "./data\\", ".\\data\\", "../data
 #:   - CWD 相对 / 第二份根：落点字面量必写成引号或转义前缀 + `data`
 #:     （`"data/...`、`'data'`、`"./data/`、`"..\\data\\`、f-string 首段同形）；
 #:   - 空串默认值当落点：必有 `mkdir` 调用与空串默认值同现。
-_CWD_HIT_HINT = re.compile(r"""["']\.{0,2}[/\\]?data""")
-_EMPTY_DEFAULT_HINTS = ("mkdir", '""')
+#: 空串默认值判据的前筛必要条件：该判据只认 `ast.Call(func=Attribute(attr="mkdir"))`，
+#: 故"文本不含 `mkdir` ⇒ 必无命中"**可证**。
+#: CWD 相对那条判据**不设**文本前筛——命中字形无法用文本穷举：`A = "da" "ta/x.json"`
+#: 在解析期被合并成 `"data/x.json"`，判据在 AST 上命中而源码文本里看不到 `data`，
+#: 按文本筛会静默放行（门禁被筛瞎比慢更坏）。
+_MKDIR_TOKEN = "mkdir"
 
 
-def _maybeContainsLanding(source: str, hints) -> bool:
-    """文本级粗筛：不含该字形前提的源码不可能命中对应判据。
 
-    `ast.parse` 与 `ast.walk` 占扫描成本的绝大部分（实测全量 1067 文件约
-    10s，受保护子集并发跑时可达 45s），先按文本筛掉不可能命中的文件，
-    是"判据不变、成本下降"的着力点。预筛是严格超集，并由
-    `test_prefilterNeverDropsAJudgedShape` 反向锁住。
+def _mentionsMkdirCall(path: Path) -> bool:
+    """文本上是否可能含 `.mkdir` 落点（空串默认值判据的**必要条件**前筛）。
+
+    该判据的两个分支都只认 `ast.Call(func=Attribute(attr="mkdir"))`；属性写法
+    `x.mkdir(...)` 在源码文本里必然出现 `mkdir` 这个标识符（`getattr(obj, "mkdir")`
+    形成的 Call 的 func 是 `Name`，本就不在判据的匹配面上）。故"文本不含 `mkdir`
+    ⇒ 该判据必无命中"是判据自身的必要条件，不是启发式猜测——前筛不会把门禁筛瞎。
+
+    收掉的成本：全仓一千余个文件里只有约两百个含 `mkdir`，为其余文件建 AST 纯属
+    白付。CWD 相对判据**不能**照此办：其命中字形无法用文本穷举（见 `_MKDIR_TOKEN`
+    上方的说明），故那条判据保持全量扫描。
     """
-    if isinstance(hints, re.Pattern):
-        return bool(hints.search(source))
-    return all(hint in source for hint in hints)
+    try:
+        return _MKDIR_TOKEN in _textOf(path)
+    except OSError:
+        return False
 
 
 @functools.lru_cache(maxsize=None)
@@ -134,14 +142,25 @@ def _scanAnchors(tree: ast.AST) -> tuple:
 
 
 @functools.lru_cache(maxsize=None)
-def _cwdRelativeHits(path: Path) -> list:
-    """返回该文件里 CWD 相对 / 第二份根的 data 落点（行号 + 原因）。"""
-    if not _maybeContainsLanding(_textOf(path), _CWD_HIT_HINT):
-        return []
+def _anchorsOf(path: Path):
+    """按文件缓存 `_scanAnchors` 的产出：两条判据共用同一份锚点表。"""
     tree = _treeOf(path)
     if tree is None:
+        return None
+    return _scanAnchors(tree)
+
+
+@functools.lru_cache(maxsize=None)
+def _cwdRelativeHits(path: Path) -> list:
+    """返回该文件里 CWD 相对 / 第二份根的 data 落点（行号 + 原因）。
+
+    不做文本前筛：命中字形无法用文本穷举（相邻字面量在解析期被合并成 `"data/..."`，
+    源码文本里可能看不到 `data`），按字样筛会静默放行这类写法。
+    """
+    anchors = _anchorsOf(path)
+    if anchors is None:
         return []
-    nodes, parents, docstrings, defaults = _scanAnchors(tree)
+    nodes, parents, docstrings, defaults = anchors
 
     hits = []
 
@@ -270,14 +289,14 @@ def _isGuarded(fn: ast.AST, param: str) -> bool:
 @functools.lru_cache(maxsize=None)
 def _emptyDefaultOffendersInFile(path: Path) -> list:
     """判据实现（生产树与反向控制共用，保证"扫描器"只有一份）。"""
-    if not _maybeContainsLanding(_textOf(path), _EMPTY_DEFAULT_HINTS):
+    if not _mentionsMkdirCall(path):
         return []
-    tree = _treeOf(path)
-    if tree is None:
+    anchors = _anchorsOf(path)
+    if anchors is None:
         return []
     found = []
 
-    nodes, _parents, _docs, _defaults = _scanAnchors(tree)
+    nodes = anchors[0]
 
     # 规则一：函数/方法签名的空串默认值 —— 消费端裸 Path(x) 建目录，且无缺省判定
     for fn in nodes:
@@ -333,7 +352,7 @@ def _emptyDefaultOffendersInFile(path: Path) -> list:
                 found.append("Path(%s).mkdir()" % target)
                 break
             # name = Path(cfg.field) ... name.mkdir()
-            for assign in ast.walk(tree):
+            for assign in nodes:
                 if isinstance(assign, ast.Assign) and isinstance(assign.value, ast.Call) \
                         and isinstance(assign.value.func, ast.Name) \
                         and assign.value.func.id == "Path" and assign.value.args \
@@ -492,37 +511,45 @@ class TestScanCostStaysBounded:
 
     def test_prefilterIsStrictButNotVacuous(self):
         files = _scannedFiles()
-        cwd = [p for p in files if _maybeContainsLanding(_textOf(p), _CWD_HIT_HINT)]
-        empty = [p for p in files if _maybeContainsLanding(_textOf(p), _EMPTY_DEFAULT_HINTS)]
-        assert len(cwd) < len(files), "预筛没起作用（候选=全集，等于没有预筛）"
-        assert len(cwd) > 200, "预筛过窄，疑似把生产树的真实落点候选滤掉了"
-        assert len(empty) > 50, "预筛过窄：空串默认值判据的候选集退化"
+        empty = [p for p in files if _mentionsMkdirCall(p)]
+        assert len(empty) < len(files), "前筛没起作用（候选 = 全集，等于没有前筛）"
+        assert len(empty) > 50, "前筛过窄：空串默认值判据的候选集退化"
 
-    def test_prefilterNeverDropsAJudgedShape(self):
-        """反向控制：判据认得的每一种写法都必须过预筛，否则扫描会静默空转。"""
-        shapes = [
-            'A = "data/a.json"',
-            'B = Path("data")',
-            'C = os.environ.get("X", "data/c.json")',
-            'D = Path(__file__).resolve().parents[2] / "data"',
-            'E = f"data/agents/{x}/skills"',
-            'F = PROJECT_ROOT / "data" / "f.db"',
-            'def g(db_path: str = "data/g.db"): return db_path',
-            "G = 'data\\\\'",
-        ]
-        for shape in shapes:
-            assert _maybeContainsLanding(shape, _CWD_HIT_HINT), (
-                "判据认得的落点写法被预筛滤掉：%s" % shape
+    def test_prefixNeverAllowsUndetectableShapes(self, tmp_path):
+        """反向控制：CWD 判据不得被接上文本前筛——相邻字面量拼接在文本上不可见。
+
+        `A = "da" "ta/x.json"` 在**解析期**被合并成 `"data/x.json"`：判据在 AST 上
+        命中，而源码文本里既没有连续 `data`，也不符合"引号紧跟 data"的形态。
+        任何按 `data` 字样的文本前筛都会静默放行它。
+        """
+        spliced = tmp_path / "spliced.py"
+        spliced.write_text(
+            'A = "da" "ta/spliced.json"\n'
+            'from pathlib import Path\n'
+            'B = Path("da" "ta")\n',
+            encoding="utf-8",
+        )
+        assert "data" not in _textOf(spliced), "探针前提被破坏"
+        assert _cwdRelativeHits(spliced), (
+            "相邻字面量拼接的落点在 AST 上命中，CWD 判据不得被文本前筛筛掉"
+        )
+
+    def test_emptyDefaultPrefixCoversBothQuoteStyles(self, tmp_path):
+        """空串前筛只按 `mkdir` 判定，故单/双引号两种空串写法都必须照旧命中。"""
+        for quote in ("''", '""'):
+            probe = tmp_path / ("empty_%s.py" % quote[0])
+            probe.write_text(
+                "from pathlib import Path\n"
+                "class Config:\n"
+                "    storage_path: str = %s\n"
+                "def consume(config):\n"
+                "    holder = Path(config.storage_path)\n"
+                "    holder.mkdir(parents=True, exist_ok=True)\n" % quote,
+                encoding="utf-8",
             )
-        guarded = (
-            "from pathlib import Path\n"
-            "class C:\n"
-            "    def __init__(self, base_dir: str = \"\"):\n"
-            "        Path(base_dir).mkdir()\n"
-        )
-        assert _maybeContainsLanding(guarded, _EMPTY_DEFAULT_HINTS), (
-            "空串默认值判据的载体被预筛滤掉"
-        )
+            assert _emptyDefaultOffendersInFile(probe), (
+                "空串写法 %s 的落点被前筛筛掉" % quote
+            )
 
     def test_parsedTreeIsSharedAcrossJudgements(self, tmp_path):
         """解析缓存生效：同一文件被两条判据读到时不重复 parse。"""
