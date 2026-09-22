@@ -521,15 +521,23 @@ class TestCountToleranceIsCalibrated:
 class TestScanCommandHasSingleRecipe:
     """预检与正式扫描必须共用同一拼法——两处各拼一份就是第二个事实源。"""
 
-    def test_preflight_and_main_use_the_same_builder(self, auditModule):
+    def test_every_scan_caller_uses_the_same_builder(self, auditModule):
+        """预检与正式扫描必须共用同一拼法——两处各拼一份就是第二个事实源。
+
+        回退路径：让任一调用者自己拼一份 `[scanner, "scan", "source", ...]` → 转红。
+        另钉一条：`offline` 必须**同值**传入，否则「预检直连、正式离线」（或反之）
+        会让「预检通过」不再代表正式那一次的行为。
+        """
         import inspect
 
         for fn in (auditModule.runPreflight, auditModule.main):
-            source = inspect.getsource(fn)
-            assert "buildScanCommand(" in source, (
+            assert "buildScanCommand(" in inspect.getsource(fn), (
                 f"{fn.__name__} 没走 buildScanCommand —— 命令拼法分叉后，"
                 "「预检通过」不再能代表正式扫描那一次会用同一条命令"
             )
+        assert "offline=offline" in inspect.getsource(auditModule.runPreflight), (
+            "预检没把 offline 传下去——预检与正式扫描的通路会分叉"
+        )
 
     def test_builder_places_targets_and_output_from_contract(self, auditModule, tmp_path):
         contract = auditModule._commandContract()
@@ -1140,3 +1148,196 @@ class TestGuardIsWiredIntoCi:
     def test_allowlist_is_still_the_gate_input(self, auditModule):
         assert ALLOWLIST.is_file()
         assert str(ALLOWLIST).endswith(auditModule.ALLOWLIST)
+
+
+
+
+class TestOfflineSourceIsTheDefaultVerdictPath:
+    """裁决通路必须默认走离线库——不依赖 `api.osv.dev` 的实时可达。
+
+    2026-09-22 PR #121 的红是**漏洞库数据源不可达**（扫描器退 127 且照印
+    `Total 0 packages affected by 0 known vulnerabilities`，fail-open）。远端
+    434e6249 已把这条外部依赖收进可控面：预取离线库 + 门禁本体按缓存齐备决定通路。
+    本组钉住「通路选择」这件事本身，防止它被静默改回「每次都直连」。
+
+    回退路径：让 `main()` 无视 `offlineDatabaseProblems` 一律直连 → 转红。
+    """
+
+    def test_cache_scope_table_covers_every_scan_target(self, auditModule):
+        """每个被扫目标都必须登记它归属的生态——缺登记会让「缓存齐不齐」判错。"""
+        for rel in auditModule.SCAN_TARGETS:
+            assert rel in auditModule.OFFLINE_DB_SCOPE, (
+                f"{rel} 未登记离线库归属——门禁会误判缓存已备齐，"
+                "随后按离线通路起扫描并撞 `no offline version of the OSV database`"
+            )
+
+    def test_contract_carries_paired_offline_flags(self, auditModule):
+        """两个 flag 必须成对：只给 --offline 会退回「查本地缓存」并在缺库时退 127。"""
+        flags = auditModule._commandContract()["offline_flags"]
+        assert "--offline" in flags and "--offline-vulnerabilities" in flags, (
+            f"离线 flag 不成对: {flags} —— 缺 --offline-vulnerabilities 时扫描器"
+            "退回查本地缓存，缓存不齐即报 `no offline version of the OSV database "
+            "is available` 并退 127（正是本门禁要消灭的形态）"
+        )
+
+    def test_v1_line_declares_no_offline_flags(self, auditModule):
+        """v1 线没有离线库子命令——不许假设它存在（拼上就是命令不成形）。"""
+        assert auditModule._COMMAND_CONTRACT["v1"]["offline_flags"] == [], (
+            "v1 线被声明了 offline flag —— 实测 1.9.2 的 `scan --help` 无 --offline*，"
+            "拼上它会退 127"
+        )
+
+    def test_build_command_omits_offline_flags_when_not_required(self, auditModule):
+        """不带 offline 时必须一条都不挂——否则「直连通路」是假动作。"""
+        cmd = auditModule.buildScanCommand(
+            Path("/bin/true"), ["/w/a.lock"],
+            PROJECT_ROOT / "scripts/ci/osv-allowlist.toml", Path("/tmp/o.json"),
+            offline=False,
+        )
+        assert "--offline" not in cmd and "--offline-vulnerabilities" not in cmd
+        on = auditModule.buildScanCommand(
+            Path("/bin/true"), ["/w/a.lock"],
+            PROJECT_ROOT / "scripts/ci/osv-allowlist.toml", Path("/tmp/o.json"),
+            offline=True,
+        )
+        assert "--offline" in on and "--offline-vulnerabilities" in on
+
+    def test_missing_cache_is_named_per_ecosystem(self, auditModule, tmp_path, monkeypatch):
+        """缓存缺失必须点名缺哪个生态的哪个文件——只说「缺库」等于没给可执行信息。"""
+        monkeypatch.setattr(auditModule, "OSV_DB_CACHE", tmp_path / "cache")
+        problems = auditModule.offlineDatabaseProblems(
+            [str(PROJECT_ROOT / rel) for rel in auditModule.SCAN_TARGETS]
+        )
+        assert problems, "缓存目录为空却没报问题——门禁会按离线通路起扫描并必红"
+        joined = "\n".join(problems)
+        for scope in ("crates.io", "npm"):
+            assert scope in joined, f"缺失清单没点名生态 {scope}"
+        assert "all.zip" in joined, "缺失清单没点名具体文件"
+
+    def test_present_cache_reports_nothing(self, auditModule, tmp_path, monkeypatch):
+        """阴性对照：缓存齐备时必须报空（否则离线通路永远开不起来）。"""
+        cache = tmp_path / "cache"
+        for scope in set(auditModule.OFFLINE_DB_SCOPE.values()):
+            (cache / scope).mkdir(parents=True)
+            (cache / scope / "all.zip").write_bytes(b"x")
+        monkeypatch.setattr(auditModule, "OSV_DB_CACHE", cache)
+        problems = auditModule.offlineDatabaseProblems(
+            [str(PROJECT_ROOT / rel) for rel in auditModule.SCAN_TARGETS]
+        )
+        assert problems == [], f"缓存齐备却被判缺失: {problems}"
+
+
+class TestVulnerabilityDbUnreachableIsRecognized:
+    """「漏洞库数据源不可达」必须被认出来——它是 127 的第三个来源，且 fail-open。"""
+
+    @staticmethod
+    def _ciText() -> str:
+        """PR #121 CI 日志里的原文（本仓实测复现，逐字保留）。"""
+        return (
+            "Scanned /w/Cargo.lock file and found 447 packages\n"
+            "End status: 0 dirs visited, 2 inodes visited, 2 Extract calls\n"
+            'Error during extraction: (extracting as vulnmatch/osvdev) Post '
+            '"https://api.osv.dev/v1/querybatch": dial tcp 173.194.43.121:443: i/o timeout\n'
+            "Total 0 packages affected by 0 known vulnerabilities\n"
+        )
+
+    def test_recognizes_the_ci_shape(self, auditModule):
+        assert auditModule.VULN_DB_UNREACHABLE.search(self._ciText()), (
+            "CI 原文里的数据源不可达自述没被认出——根因会被推回「命令不成形」"
+        )
+
+    def test_recognizes_the_offline_db_variant(self, auditModule):
+        text = (
+            "could not load db for crates.io ecosystem: unable to fetch OSV database: "
+            'Get "https://osv-vulnerabilities.storage.googleapis.com/crates.io/all.zip": '
+            "dial tcp: lookup ...: connection refused\n"
+            "Error during extraction: (extracting as vulnmatch/osvlocal) unable to fetch OSV database\n"
+        )
+        assert auditModule.VULN_DB_UNREACHABLE.search(text), (
+            "离线库分发端点不可达未被认出——它是同一根因的另一条分发路径"
+        )
+        assert "could not load db" in auditModule._causalLine(text), "取因行取到了无关行"
+
+    def test_healthy_output_is_not_flagged(self, auditModule):
+        healthy = "Scanned /w/Cargo.lock file and found 447 packages\nNo issues found\n"
+        assert not auditModule.VULN_DB_UNREACHABLE.search(healthy), (
+            "正常输出被误判为数据源不可达——门禁会误红每一次合法合并"
+        )
+
+    def test_zero_affected_line_is_not_verdict_evidence(self, auditModule):
+        """`Total N packages affected …` 不许当裁决证据。
+
+        实测依据：数据源不可达时扫描器**照印**这句且 M=0（fail-open）。把它当证据
+        等于把「没查成」读成「没漏洞」——这正是本条红过的形态。
+        """
+        assert auditModule._dbVerdict(self._ciText()) is None, (
+            "数据源不可达的输出里被判出了裁决——fail-open 形态被当成「无漏洞」"
+        )
+
+
+def _functionBody(source: str, name: str) -> str:
+    """从源码文本里切出一个顶层函数的函数体（按缩进判界，不依赖字节码缓存）。"""
+    lines = source.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line.startswith(f"def {name}("):
+            start = i
+            break
+    if start is None:
+        return ""
+    body = [lines[start]]
+    for line in lines[start + 1:]:
+        if line.strip() and not line.startswith((" ", "\t", ")")):
+            break
+        body.append(line)
+    return "\n".join(body)
+
+
+class TestCausalLineNamesTheReasonNotTheTail:
+    """报错必须取「说因的那一行」——tail 会被 allowlist 未命中列表占满。"""
+
+    def test_prefers_the_reason_over_the_tail(self, auditModule):
+        """回退路径：改成取 `splitlines()[-1]` → 转红。
+
+        实测依据：红的时候最后几行常是
+        `<allowlist> has unused ignores:` + 逐条 id 列表，取 tail 会把
+        `i/o timeout` 那句挤掉，读日志的人看到的还是无关行。
+        """
+        text = (
+            'Error during extraction: (extracting as vulnmatch/osvdev) Post "...": i/o timeout\n'
+            "/w/scripts/ci/osv-allowlist.toml has unused ignores:\n"
+            " - RUSTSEC-2024-0429\n - RUSTSEC-2024-0370\n"
+        )
+        line = auditModule._causalLine(text)
+        assert "i/o timeout" in line, (
+            f"取因取到了无关行: {line!r} —— 读日志的人看不到真正的原因"
+        )
+
+    def test_falls_back_to_last_line_when_no_reason_marker(self, auditModule):
+        """阴性对照：没有任何原因标记时回落到最后一行（不许返回空）。"""
+        assert auditModule._causalLine("alpha\nbeta\n") == "beta"
+        assert auditModule._causalLine("") == "(无输出)"
+
+    def test_no_reporting_site_falls_back_to_the_tail(self, auditModule):
+        """报错路径必须走 `_causalLine`，**且不许再有取 tail 的写法**。
+
+        回退路径：把任一处 `_causalLine(...)` 换回 `...splitlines()[-1]` → 转红。
+        为什么这条要按「不许出现 tail 写法」写而不是「必须出现函数名」：
+        前者能抓住「新增一处又用 tail 的报错点」，后者只要有一处在用就恒真。
+        """
+        # 直接读**磁盘上的源码**，不用 inspect.getsource：后者会命中字节码缓存，
+        # 判据在「源码被改、缓存未失效」的瞬间会失真（本仓实测踩过）。
+        source = AUDIT_SCRIPT.read_text(encoding="utf-8")
+        for name in ("prefetch_offline_databases", "main"):
+            body = _functionBody(source, name)
+            assert body, f"源码里找不到 {name}——判据无从生效"
+            # 两种 tail 写法都要抓：`...splitlines()[-1]`（链式）与
+            # `detail[-1]`（先赋给中间变量）——只抓前者会漏掉后者（本仓实测踩过）。
+            for tail_idiom in ("splitlines()[-1]", "[-1][:", "[-1]"):
+                assert tail_idiom not in body, (
+                    f"{name} 里仍有取 tail 的报错写法（`{tail_idiom}`）——实测 tail 常被"
+                    "allowlist 的未命中条目列表占满，会把说因那句（如 i/o timeout）挤掉"
+                )
+        assert "_causalLine(" in source, (
+            "报错路径没走 _causalLine —— 说因那句会被 allowlist 列表挤掉（死码）"
+        )
