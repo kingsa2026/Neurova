@@ -119,3 +119,92 @@
 本清单是**前端视角**（哪个前端模块请求了哪些端点前缀、哪些后端前缀还没有消费方）；
 接口本身的事实源仍是 `docs/02-api/API_REFERENCE.md`。两者职责不同，不合并——
 原立项第 3 节「非目标」已写明，落地时未偏离。
+
+---
+
+## 7. 重生成暴露的断点：处置记录（2026-09-22 同批）
+
+第 6 节重生成把三处断点从「静态前缀推导」提到了「真实路由表实测」，本章是它们的处置记录。
+
+### 7.1 断点与根因
+
+根因是**同一件事**：注册表把「挂载动作」与「接线完成」当成同一件事。
+`register_endpoint_routers` 只要求模块有 `router` 属性就 `include_router`，于是
+三类「看起来接了、实际断着」的形态得以长期存活：
+
+| # | 形态 | 实测 |
+|---|------|------|
+| 1 | 零路由挂载 | `/api/evolution`、`/api/rag` 挂的是模块级空 `APIRouter()`，叶子路由零条 |
+| 2 | 前缀叠层 | `/api/coordination` + router 自持 `/coordination` → 实际 `/api/coordination/coordination/*`；`/api/neuron` + `/neuron` → `/api/neuron/neuron/*` |
+| 3 | 双源挂载 | `neuron` 的 router 被注册表与 `app.py` 各挂一次；`budget_api` / `cost_rollup_api` 只走 `app.py` 旁路，不在注册表 |
+
+外加一处契约断裂：`cost.ts` 按 `baseURL=/api/v1` 请求 `/api/v1/budgets`、
+`/api/v1/cost-rollup`，而后端把两者挂在不带 `v1` 的 `/api` 下 → 必 404，
+且调用处 `.catch(() => null)` 把它吞成「存储未就绪」，看板静默空白。
+
+### 7.2 处置（在根因处修，不在报错处兜底）
+
+- **删空壳**：`endpoints/__init__.py` 的顶层 `router`、`evolution_router`、`rag_router`
+  三个零路由 `APIRouter()` 全部删除，`app.py` 对应三处 `include_router` 一并删除。
+  证据：全仓 grep 这三个名字，除定义与挂载外零消费者，前端零调用方。
+- **单一挂载表**：`budget_api` / `cost_rollup_api` 收口进注册表（挂载前缀 `/v1`，
+  实际路径 `/api/v1/budgets/*`、`/api/v1/cost-rollup/*`，与前端 baseURL 对齐）；
+  `app.py` 的三处旁路 `include_router`（`budget_router` / `cost_rollup_router` /
+  `neuron_router`）删除——同一件事不再有两个写入点。
+- **去叠层**：`neuron` 挂载前缀 `""`（router 自持 `/neuron`），`coordination_api`
+  挂载前缀 `""`（router 自持 `/coordination`），实际路径回到 `/api/neuron/*`、
+  `/api/coordination/*`。
+- **判据单源**：三类形态的检测写进 `scripts/gen_api_inventory.py`
+  （`appMounts()` / `mountProblems()` / `unwiredEndpointRouters()`），
+  守卫 `tests/unit/api/test_endpoint_mount_wiring_guard.py` 只做「取数 → 断言 →
+  反向控制」，不另写一套解析。
+
+路由表实测：**839 → 830 条**（去 41 条叠层/错前缀，增 32 条归位）。
+逐条核过：无一条是「删掉真实端点」，全部是同一批端点的路径归位。
+
+### 7.3 已实现未接线的 router（登记，走棘轮）
+
+六份模块有真实路由但全仓无挂载点。**不许静默遗留**，也不必在本单强接——
+逐条理由写在 `tests/unit/endpointWiringBaseline.txt`，守卫双向钉住（新增即红、
+修好后未下调亦红）：
+
+- `computer_api` / `cost_api`：唯一调用方是 `NeurUI/src/api/computer.ts`，而它只被
+  `NeurUI/src/views/*.tsx` 三份 React 原型引用（Vue 入口从不加载，`package.json`
+  无 react 依赖，见 `architecture-findings.md` 第 12 节 u5）。且 `computer_api`
+  的鉴权是 `Depends(lambda: "current_user")` 硬编码身份，挂上去等于对匿名开放。
+- `phase3_api`：全仓零调用方；它依赖的 `small_brain_router` / `outbox_handler`
+  在生产链路另有主线消费方（`agent/model_selector.py`、`agent/turn_coordinator.py`）。
+- `migration_api`：零调用方，且底层 7 阶段实现**全是 `pass`**、
+  `verify_migration()` 恒返回 `True`——挂上去等于对外提供一圈恒真接口。
+- `skill_market` / `skills_market`：ADR 0013「统一技能市场端点」判定的待删套
+  （分别 stub / demo 实现，模块自带 `_DEPRECATED`），规范端点为 `skill_pool_api.py`。
+
+### 7.4 同一根因的其余命中点（放大视角）
+
+守卫失明与上面是**同一条契约**：`include_router` 不再就地摊平子路由，而是追加惰性
+包装对象（`_IncludedRouter`）。凡直接 `for r in app.routes: r.path` 的测试都会
+`AttributeError`，或用 `hasattr` 兜底后**静默取空集**——守卫既红不了也绿不了。
+故遍历收口为 `tests/route_table.py` 一份，并修好命中点：
+
+- `tests/unit/test_neuron_api_registration.py`（3 例红转绿）
+- `tests/unit/api/test_console_split_contract.py`（4 例）
+- `tests/unit/api/test_knowledge_route_order.py`（2 例）
+- `tests/unit/api/test_knowledge_config_endpoints.py`（1 例）
+- `tests/unit/api/test_growth_route_livability.py`（1 例）
+- `tests/unit/api/test_text_evolution_api.py`（1 例）
+- `tests/test_api/test_memory_route_shadowing.py`（1 例）
+
+```text
+# 改动前（红）
+pytest tests/unit/api tests/test_api tests/unit/test_neuron_api_registration.py
+  → 27 failed
+# 改动后（同一个集合）
+  → 全部转绿，新增失败 0（A/B 逐行比对 comm 为空集）
+```
+
+### 7.5 非目标（未偏离）
+
+`computer.ts`（React 原型客户端）那一支的 `/api/computers/*`、`/api/cost/*`
+十五条差异**仍留在差集表里显式登记**，未顺手补后端——那要先裁定
+`NeurUI/src/views/*.tsx` 是迁移中还是误提交（findings u5），属产品形态决策。
+删条目不等于修好：清单的价值在可信，藏差异则整表不可信。

@@ -5,14 +5,7 @@ from neurova.core.logger import get_logger
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter
-
 logger = get_logger(__name__)
-
-# 创建顶层 router
-router = APIRouter()
-evolution_router = APIRouter()
-rag_router = APIRouter()
 
 # ACP 消息协议路由（真实实现，见 acp_api.py）
 from neurova.api.endpoints.acp_api import router as acp_router  # noqa: E402
@@ -279,7 +272,9 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.negative_screen_settings", "/v1/negative-screen", "Negative Screen Settings API"),
         ("neurova.api.endpoints.memory_settings_api", "/v1/memory-settings", "Memory Settings API"),
         ("neurova.api.endpoints.neuron", "", "NEURON System API"),
-        ("neurova.api.endpoints.coordination_api", "/coordination", "Multi-Agent Coordination API"),
+        ("neurova.api.endpoints.budget_api", "/v1", "Budget API"),
+        ("neurova.api.endpoints.cost_rollup_api", "/v1", "Cost Rollup API"),
+        ("neurova.api.endpoints.coordination_api", "", "Multi-Agent Coordination API"),
     ]
 
     registered = 0

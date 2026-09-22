@@ -3,10 +3,32 @@ NEURON API 路由注册测试
 
 验证 neuron.py 的 router 已正确注册到 FastAPI 应用中，
 前端 /api/neuron/* 请求能被正确路由到后端端点。
-"""
 
+取数走 `registeredPathMethods()`（递归下钻 `include_router` 的嵌套 router）：
+现行 FastAPI 把 include 落成惰性包装对象，直接遍历 `app.routes` 取 `.path` 会
+AttributeError——守卫因此会**失明**（红不了也绿不了，只在报错里打转）。
+"""
 import pytest
 from fastapi import FastAPI
+
+
+def registeredPathMethods(app) -> list:
+    """装配后应用的路由 `(路径, 方法集合)`——递归下钻嵌套 router。"""
+    found = []
+
+    def walk(items, prefix=""):
+        for route in items:
+            inner = getattr(route, "original_router", None)
+            if inner is not None:
+                context = getattr(route, "include_context", None)
+                walk(getattr(inner, "routes", []), prefix + (context.prefix if context else ""))
+                continue
+            path = getattr(route, "path", None)
+            if path is not None:
+                found.append((prefix + path, frozenset(getattr(route, "methods", None) or ())))
+
+    walk(app.routes)
+    return found
 
 
 class TestNeuronAPIRegistration:
@@ -32,7 +54,7 @@ class TestNeuronAPIRegistration:
         from neurova.api.endpoints import register_endpoint_routers
         register_endpoint_routers(app)
 
-        route_paths = {r.path for r in app.routes}
+        route_paths = {path for path, _ in registeredPathMethods(app)}
 
         expected_prefix = "/api/neuron"
         expected_endpoints = [
@@ -56,7 +78,7 @@ class TestNeuronAPIRegistration:
         from neurova.api.endpoints import register_endpoint_routers
         register_endpoint_routers(app)
 
-        neuron_routes = [r.path for r in app.routes if "/api/neuron" in r.path]
+        neuron_routes = [path for path, _ in registeredPathMethods(app) if "/api/neuron" in path]
 
         # 前端调用的关键端点
         assert "/api/neuron/entities" in neuron_routes
@@ -69,7 +91,7 @@ class TestNeuronAPIRegistration:
         from neurova.api.endpoints import register_endpoint_routers
         register_endpoint_routers(app)
 
-        neuron_routes = [r for r in app.routes if "/api/neuron" in getattr(r, "path", "")]
+        neuron_routes = [path for path, _ in registeredPathMethods(app) if "/api/neuron" in path]
         # GET /entities, POST /entities, POST /dependencies,
         # GET /dependencies/{id}, POST /cascade, POST /would-affect,
         # POST /absence/detect, POST /extract, GET /stats, GET /health
@@ -81,6 +103,6 @@ class TestNeuronAPIRegistration:
         from neurova.api.endpoints import register_endpoint_routers
         register_endpoint_routers(app)
 
-        neuron_routes = [r.path for r in app.routes if "neuron" in getattr(r, "path", "")]
+        neuron_routes = [path for path, _ in registeredPathMethods(app) if "neuron" in path]
         for path in neuron_routes:
             assert "/neuron/neuron" not in path, f"Double prefix detected: {path}"
