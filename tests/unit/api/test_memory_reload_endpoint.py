@@ -64,8 +64,8 @@ def client(manager, monkeypatch):
     app.dependency_overrides.clear()
 
 
-def _foreign_write(manager, content: str) -> None:
-    """另一个进程往同一份库写一条（CLI 导入的真实形态）。"""
+def _foreign_write(manager, content: str):
+    """另一个进程往同一份库写一条（CLI 导入的真实形态）；返回该写者供撤销使用。"""
     from neurova.cognitive_layers.memory_layer.manager import MemoryManager
     from neurova.memory_ingest.bundle.records import MemoryRecord
 
@@ -76,7 +76,7 @@ def _foreign_write(manager, content: str) -> None:
                       category="general", origin="owner", importance=60.0,
                       ts="2026-05-01T10:00:00+00:00")],
         ingest_run_id="nvimp-http-1")
-    writer.close()
+    return writer
 
 
 def test_reload_route_is_not_swallowed_by_the_memory_id_route(client):
@@ -104,6 +104,22 @@ def test_reload_makes_a_foreign_row_visible_to_the_next_read(client, manager):
     assert "另一个进程导入的记忆锚点" in str(after), (
         "reload 之后紧跟的 GET /v1/memory 仍读不到——闭环没接上"
     )
+
+
+def test_reload_reaps_a_row_that_another_process_undid(client, manager):
+    """断点①的端点面：另一进程撤销后 reload 要回收，列表里那条不能再"还在"。"""
+    from neurova.cognitive_layers.memory_layer.manager import MemoryManager
+
+    writer = _foreign_write(manager, "待撤销的锚点")
+    assert client.post("/v1/memory/reload").json()["data"]["reloaded"] == 1
+
+    writer.delete_ingested_memories("nvimp-http-1")   # 另一进程撤销：盘上行已删
+    writer.close()
+
+    reaped = client.post("/v1/memory/reload").json()["data"]
+
+    assert reaped["reaped"] == 1, reaped
+    assert "待撤销的锚点" not in str(client.get("/v1/memory", params={"limit": 100}).json())
 
 
 def test_reload_is_idempotent(client, manager):

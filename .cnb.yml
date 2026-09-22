@@ -388,7 +388,7 @@ main:
 # 只是不再靠多加一份顶层 key 实现。这条不变量由
 # tests/unit/test_ci_npc_config_guard.py 的挂载点判据常驻校验。
 .档位映射: &npc-level
-  DSCoder: xhigh
+  DSCoder: high
   DSCoder-max: xhigh
 
 # 时间预算条款**不写在这里**。原因（2026-09-22 实测）：
@@ -532,7 +532,7 @@ $:
             # maxTokens / thinkingLevel / supportImage，写别的键被静默忽略。
             # 行为约束一律写在 .cnb/settings.yml 的角色 prompt 里（唯一必达通道）。
             # 不写 model = 走平台默认模型（规避 400）；要锁定底座模型就填真实 ID。
-            maxTurns: 200
+            maxTurns: 500
             contextWindow: 1m
             maxTokens: 48k
             # 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故落 xhigh。
@@ -619,7 +619,7 @@ $:
             systemPrompt: 你是 DSCoder-max —— Neurova 仓库的专属代码搭档。本轮是上一轮撞满轮数配额后的接力轮：上一轮 Agent 被平台中止，成果只留在 Issue/PR 评论里。请先读 Issue/PR 评论区里上一轮的分段落交接（干了什么、下一步是什么、未提交的改动在哪），再从断点继续。
             # 对话载体由上一轮经 env 传下来（api_trigger 流水线里拿不到 CNB_ISSUE_IID）。
             userPrompt: 请先在 Issue/PR 评论区读取上一轮的交接评论，然后继续推进未完成的工作，完成后按惯例提交 PR 并在评论里汇报结论与未闭环项。
-            maxTurns: 200
+            maxTurns: 500
             contextWindow: 1m
             maxTokens: 48k
             thinkingLevel: xhigh

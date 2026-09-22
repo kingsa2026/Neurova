@@ -207,7 +207,7 @@ def _apply(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
                 # 可见性出口有两个：后端重启，或让它调 reload 端点重新读盘。后者不用重启，
                 # 是默认指引；重启作为等效兜底一并写明，避免用户在端点不可达时无路可走。
                 print("  可见性：会话读盘即见；记忆要让运行中的后端调 "
-                      "POST /api/v1/memory/reload（增量并入，无需重启）")
+                      "POST /api/v1/memory/reload（与盘对账：并入新增、回收已撤，无需重启）")
                 print("          端点不可达时（如后端不支持）重启后端等效")
             print(f"  撤销：python scripts/ingest_memory.py undo --agent-id {args.agent_id} "
                   f"--run-id {report.run_id}")
@@ -226,6 +226,12 @@ def _undo(args: argparse.Namespace, *, manager=None, sessions=None) -> int:
     scope = "、".join(owners) if owners else "共享（无属主）"
     print(f"已撤销 run_id={args.run_id}：属主 {scope}，记忆 {memories} 条、"
           f"消息 {messages} 条（这批引用过且已无人用的媒体文件一并清掉）")
+    if memories:
+        # 撤销只删盘。运行中的后端手里那份快照仍持这批行，而它的任何一次改写都会
+        # 把撤销结果写回盘上——不把这条出口说出来，用户看到的就是"撤了还在"，
+        # 而"点一下强化就复活"更是难以归因。与 apply 的可见性出口对称。
+        print("  生效：会话读盘即见；记忆要让运行中的后端调 "
+              "POST /api/v1/memory/reload（与盘对账，回收本批已被撤销的行）")
     return EXIT_OK
 
 
