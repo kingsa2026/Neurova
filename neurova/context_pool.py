@@ -182,8 +182,6 @@ class ContextPool:
         # （每条消息追加/每轮 ack 都扫一遍，池为永久归档只增不减，随历史线性劣化）。
         # 列表被整体重排（TTL/compress/dedup/clear）时须调用 _rebuild_indexes 同步。
         self._by_hash: Dict[str, Any] = {}
-        # B-8：turn_id→条目列表索引——mark_turn_seen 此前同为全池 O(n) 线性扫。
-        self._by_turn: Dict[str, List[Any]] = {}
         # Issue #65：source/session 分区索引——query() 此前是全池线性扫（读路径
         # 瓶颈，池只增不减时随历史劣化），现按分区直取 + 关键字匹配降本。
         self._read_index = PoolReadIndex()
@@ -247,9 +245,6 @@ class ContextPool:
                         idx = self._collector._contexts.index(existing_entry)
                         self._collector._contexts[idx] = context
                         self._by_hash[context.hash] = context
-                        # B-8：turn 索引随替换同步（旧条目可能换了 turn）
-                        self._turn_index_remove(existing_entry)
-                        self._turn_index_add(context)
                         # #65：读索引随替换同步（source/metadata 可能都变了）
                         self._read_index.remove(existing_entry)
                         self._read_index.add(context)
@@ -269,7 +264,6 @@ class ContextPool:
             self._collector.add_context(context)
             if context.hash:
                 self._by_hash[context.hash] = context
-            self._turn_index_add(context)
             self._read_index.add(context)
             self._cache_version += 1
             # B4/001：落常驻即写穿持久台账——这是池的**唯一写入咽喉**，
@@ -314,7 +308,6 @@ class ContextPool:
         for entry in victims:
             if entry.hash:
                 self._by_hash.pop(entry.hash, None)
-            self._turn_index_remove(entry)
             # 逐条摘除（不整表重建）：回收发生在 add 热路径上，O(被回收数)
             # 而不是 O(常驻数)；分区内其余条目的相对顺序不变
             self._read_index.remove(entry)
@@ -377,36 +370,13 @@ class ContextPool:
             },
         }
 
-    @staticmethod
-    def _entry_turn_id(entry) -> Optional[str]:
-        return (entry.metadata or {}).get("turn_id")
-
-    def _turn_index_add(self, entry) -> None:
-        tid = self._entry_turn_id(entry)
-        if not tid:
-            return
-        self._by_turn.setdefault(tid, []).append(entry)
-
-    def _turn_index_remove(self, entry) -> None:
-        tid = self._entry_turn_id(entry)
-        if not tid:
-            return
-        bucket = self._by_turn.get(tid)
-        if bucket is None:
-            return
-        try:
-            bucket.remove(entry)
-        except ValueError:
-            pass
-        if not bucket:
-            self._by_turn.pop(tid, None)
-
     def _rebuild_indexes(self) -> None:
-        """整体重排 _contexts 后重建 hash/turn/read 三索引（调用方须持 _lock）。"""
+        """整体重排 _contexts 后重建 hash/read 两索引（调用方须持 _lock）。
+
+        turn 索引随 `mark_turn_seen`（零消费旁路 ack）一并退役：ack 的唯一通路
+        是 `mark_hashes_seen`（编排器调），按轮标记原就没有生产调用方。
+        """
         self._by_hash = {c.hash: c for c in self._collector._contexts if c.hash}
-        self._by_turn = {}
-        for c in self._collector._contexts:
-            self._turn_index_add(c)
         # #65：source/session 分区随整体重排同步（顺序也被重建，故不保留旧分区）
         self._read_index.rebuild(self._collector._contexts)
 
@@ -968,22 +938,6 @@ class ContextPool:
             )
         )
 
-    def mark_turn_seen(self, turn_id: str) -> int:
-        """P1-1④ ack 集：标记指定轮次的全部 chunk 为已读（模型请求成功后）。
-
-        B-8：经 _by_turn 索引 O(k) 直取，旧实现全池 O(n) 线性扫。
-
-        Returns:
-            标记数量
-        """
-        with self._lock:
-            count = 0
-            for chunk in self._by_turn.get(turn_id, []):
-                if not chunk.seen_confirmed:
-                    chunk.seen_confirmed = True
-                    count += 1
-            return count
-
     def mark_hashes_seen(self, hashes) -> int:
         """ack 集：按内容 hash 标记已读（视图捕获路径）。
 
@@ -1000,24 +954,6 @@ class ContextPool:
                     chunk.seen_confirmed = True
                     count += 1
             return count
-
-    def select_fold_candidates(self, max_count: int = 50) -> List:
-        """P1-1④ 分层剪枝：折叠候选 = 已确认读过（seen_confirmed）的 TOOL_CALL，
-        最老优先（created_at 升序）。未读的工具结果绝不进入折叠候选——
-        模型尚未看过，折叠会导致幻觉。
-
-        消费方：溢出恢复/摘要压缩（compact 前 prior 调取）。
-        """
-        with self._lock:
-            candidates = [
-                c
-                for c in self._collector._contexts
-                if c.source == ContextSource.TOOL_CALL
-                and c.seen_confirmed
-                and (c.metadata or {}).get("turn_id") is not None
-            ]
-            candidates.sort(key=lambda c: c.created_at or datetime.datetime.min)
-            return candidates[:max(0, int(max_count))]
 
     def get_eviction_stats(self) -> Dict[str, Any]:
         """驱逐台账统计。"""
@@ -1167,9 +1103,6 @@ class ContextPool:
 
             return messages
 
-    def convert_context_for_model(self, model_name: str) -> List[Dict[str, Any]]:
-        return self.build_context_for_model(model_name)
-
     def compress_context(self):
         with self._lock:
             contexts = self.get_contexts()
@@ -1177,18 +1110,10 @@ class ContextPool:
             self._collector._contexts = compressed
             self._rebuild_indexes()
 
-    def merge_with(self, other_pool: "ContextPool"):
-        with self._lock:
-            other_contexts = other_pool.get_contexts()
-            for ctx in other_contexts:
-                # 重入 add_context（RLock 允许重入）
-                self.add_context(ctx)
-
     def clear(self):
         with self._lock:
             self._collector._contexts.clear()
             self._by_hash.clear()
-            self._by_turn.clear()
             self._read_index.clear()
             self._cache.clear()
             self._cache_version += 1
@@ -1236,7 +1161,6 @@ from neurova.context.pool_index import PoolReadIndex
 from neurova.context.collector import ContextCollector
 from neurova.context.converter import ContextConverter
 from neurova.context.compressor import ContextCompressor
-from neurova.context.utils import ContextPoolUtils
 from neurova.context.dedup import DriftSafeDeduplicator
 from neurova.context.semantic_drawer import SemanticMatchDrawer
 from neurova.context.auto_tagger import AutoTagger
@@ -1285,7 +1209,6 @@ __all__ = [
     "ContextCollector",
     "ContextConverter",
     "ContextCompressor",
-    "ContextPoolUtils",
     "DriftSafeDeduplicator",
     "SemanticMatchDrawer",
     "AutoTagger",
