@@ -145,37 +145,15 @@ class ContextOrchestrator:
             max_tokens = ContextPool.get_token_budget_for_model(model_name)
 
             # P1-1③ 接线：驱逐台账持久层（WAL+FTS5，按 agent 分库）+
-            # 摘要压缩器（经 agent.llm_client.chat 桥接真 LLM）
-            _ledger_db = None
-            _summarizer = None
-            try:
-                from neurova.context.eviction_ledger_db import EvictionLedgerDB
-
-                _agent_id = getattr(agent_ref, "agent_id", "default")
-                _ledger_db = EvictionLedgerDB(
-                    db_path=dataPath("context_ledger", f"{_agent_id}.db"),
-                    user_id=getattr(agent_ref, "user_id", "default"),
-                    agent_id=_agent_id,
-                )
-            except Exception as e:
-                logger.warning("驱逐台账初始化失败（回退内存台账）: %s", e)
-
-            try:
-                from neurova.context.summarizing_compressor import SummarizingCompressor
-
-                async def _llm_digest_call(prompt: str) -> str:
-                    """摘要 LLM 桥：MultiModelLLMClient.chat 的 dict 契约提取 content"""
-                    response = await agent_ref.llm_client.chat(
-                        [{"role": "user", "content": prompt}],
-                        model=getattr(agent_ref.config, "llm_model", None),
-                    )
-                    if isinstance(response, dict):
-                        return str(response.get("content") or "")
-                    return str(getattr(response, "content", "") or "")
-
-                _summarizer = SummarizingCompressor(llm_call=_llm_digest_call, timeout_s=60)
-            except Exception as e:
-                logger.warning("摘要压缩器初始化失败（摘要回写停用）: %s", e)
+            # 摘要压缩器（经 agent.llm_client.chat 桥接真 LLM）。
+            # P2-5/D5：两处装配都记进 `_context_health` 并**允许下一轮重试**——
+            # 改前失败只留一行 warning、能力永久关闭，读数面上看不见。
+            self._context_health = {
+                "ledger": {"enabled": False, "attempts": 0, "last_error": None},
+                "summarizer": {"enabled": False, "attempts": 0, "last_error": None},
+            }
+            _ledger_db = self._buildLedgerDb(agent_ref)
+            _summarizer = self._buildSummarizer(agent_ref)
 
             self.context_pool = ContextPool(
                 user_id=getattr(agent_ref, "user_id", "default"),
@@ -201,6 +179,89 @@ class ContextOrchestrator:
             )
         else:
             self.context_pool = None
+
+    def _buildLedgerDb(self, agent_ref):
+        """装配驱逐台账持久层（失败如实登记，不静默、不粘死）。"""
+        record = self._context_health["ledger"]
+        record["attempts"] += 1
+        try:
+            from neurova.context.eviction_ledger_db import EvictionLedgerDB
+
+            agentId = getattr(agent_ref, "agent_id", "default")
+            db = EvictionLedgerDB(
+                db_path=dataPath("context_ledger", f"{agentId}.db"),
+                user_id=getattr(agent_ref, "user_id", "default"),
+                agent_id=agentId,
+            )
+        except Exception as e:  # noqa: BLE001 - 装配失败不阻断池构造，但必须可见
+            record["enabled"] = False
+            record["last_error"] = f"{type(e).__name__}: {e}"
+            logger.warning("驱逐台账初始化失败（回退内存台账，后续轮次将重试）: %s", e)
+            return None
+        record["enabled"] = True
+        record["last_error"] = None
+        return db
+
+    def _buildSummarizer(self, agent_ref):
+        """装配摘要压缩器（失败如实登记；成功一次即不再重建）。"""
+        record = self._context_health["summarizer"]
+        if record["enabled"]:
+            pool = getattr(self, "context_pool", None)
+            return getattr(pool, "_summarizer", None)
+        record["attempts"] += 1
+        try:
+            from neurova.context.summarizing_compressor import SummarizingCompressor
+
+            async def _llm_digest_call(prompt: str) -> str:
+                """摘要 LLM 桥：MultiModelLLMClient.chat 的 dict 契约提取 content"""
+                response = await agent_ref.llm_client.chat(
+                    [{"role": "user", "content": prompt}],
+                    model=getattr(agent_ref.config, "llm_model", None),
+                )
+                if isinstance(response, dict):
+                    return str(response.get("content") or "")
+                return str(getattr(response, "content", "") or "")
+
+            summarizer = SummarizingCompressor(llm_call=_llm_digest_call, timeout_s=60)
+        except Exception as e:  # noqa: BLE001 - 装配失败不阻断池构造，但必须可见
+            record["enabled"] = False
+            record["last_error"] = f"{type(e).__name__}: {e}"
+            logger.warning("摘要压缩器初始化失败（摘要回写停用，后续轮次将重试）: %s", e)
+            return None
+        record["enabled"] = True
+        record["last_error"] = None
+        return summarizer
+
+    def _retryContextAssemblies(self) -> None:
+        """重试此前装配失败的上下文部件（幂等：已启用的部件不会重建）。"""
+        health = getattr(self, "_context_health", None) or {}
+        pool = getattr(self, "context_pool", None)
+        if pool is None:
+            return
+        if not (health.get("ledger") or {}).get("enabled"):
+            ledger = self._buildLedgerDb(self._agent)
+            if ledger is not None:
+                pool._ledger_db = ledger
+                pool._registerLedgerRows()
+        if not (health.get("summarizer") or {}).get("enabled"):
+            summarizer = self._buildSummarizer(self._agent)
+            if summarizer is not None:
+                pool._summarizer = summarizer
+
+    def get_context_health(self) -> Dict[str, Dict]:
+        """上下文域降级读数（**单源**：编排器持有，池侧读同一份）。
+
+        P2-5：审计要求"降级有可观测读数与重试/恢复路径，不以 warning 代替"。
+        回 `attempts` / `enabled` / `last_error` 三元组：`enabled=False` 时
+        `last_error` 必非空（点名声明的失败原因），消费方无需解析日志。
+        """
+        health = getattr(self, "_context_health", None) or {}
+        return {
+            "ledger": dict(health.get("ledger") or {"enabled": False, "attempts": 0, "last_error": None}),
+            "summarizer": dict(
+                health.get("summarizer") or {"enabled": False, "attempts": 0, "last_error": None}
+            ),
+        }
 
     def set_session_id(self, session_id: str) -> None:
         """显式设置实例级 session 归属。
@@ -610,6 +671,12 @@ class ContextOrchestrator:
             self.context_pool.turn_scope = turn_scope
             self.context_pool.session_id = turn_session
 
+            # P2-5：降级不粘死——上一轮装配失败的部件在本轮重试一次。摘要器是
+            # 唯一会被"装配失败"永久关掉的 LLM 能力（`_build_window_summarizer`
+            # 闭包读 `pool._summarizer`，为 None 时窗口摘要链路整条停摆），故在
+            # 真·每轮构建路径上重试；成功即恢复，读数同步转 enabled。
+            self._retryContextAssemblies()
+
             # B4/003：本轮全部归档收进**一次事务**（判据 A2，规格 D8）。
             # 事务边界就是"本轮归档调用"——批内条目在批结束时一次提交，不做
             # 异步/后台缓冲刷盘（那会把崩溃窗口内的内容连同"已归档"的承诺一起丢）。
@@ -661,8 +728,10 @@ class ContextOrchestrator:
             # 被折叠消息原文已入池、可经 [历史回忆] 语义召回（零丢失）。
             # 审计⑦：视图重建剥 tool_calls/tool_call_id（只保留 role+content），
             # 先重建后 repair——残留 role:"tool" 此处转 user 注记，协议合法
-            window_budget = self._compute_window_budget(
-                system_instructions, developer_instructions, tools_desc
+            window_budget = self._effectiveWindowBudget(
+                self._compute_window_budget(
+                    system_instructions, developer_instructions, tools_desc
+                )
             )
             # D4 甲案：窗口与信封共享同一个视图额度，因此**窗口侧先为信封留出保留额度**
             # ——否则窗口会把额度吃满，信封只能拿到负数被压成空串，检索产物静默消失。
@@ -750,17 +819,17 @@ class ContextOrchestrator:
             # 单源额度：抽屉与信封共用**同一个**剩余额度。二者各留一份额度时，
             # 抽屉会按自己的份额取回内容、信封再按自己的份额把它们丢掉——
             # 表现形态就是"召回了但视图里没有"，即检索产物静默消失（教义第 2 条）。
+            # 单源：与信封额度同一个 `_retrievalBudget`（改前此处与信封处各写一份公式）。
+            # B6-9：本轮额度经**入参**透传（改前是 `drawer.max_tokens = ...` 就地改写
+            # 构造期字段——同一字段在不同时刻含义不同，且下一轮忘了写就沿用上一轮的值）。
             try:
-                # 剩余额度先扣掉外壳开销与已收集的非召回块，剩下的才是"召回内容额度"。
-                # 单源：与信封额度同一个 `_retrievalBudget`（改前此处与信封处各写一份公式）。
-                drawer = getattr(self.context_pool, "_drawer", None)
-                if drawer is not None:
-                    drawer.max_tokens = self._retrievalBudget(
-                        window_budget, window_msgs, blocks, user_input
-                    )
+                retrievalBudget = self._retrievalBudget(
+                    window_budget, window_msgs, blocks, user_input
+                )
             except Exception as e:  # noqa: BLE001 - 预算联动失败不阻断召回
                 logger.debug("draw 预算联动跳过: %s", e)
-            drawn_contexts = self.context_pool.draw(need=user_input)
+                retrievalBudget = None
+            drawn_contexts = self.context_pool.draw(need=user_input, budget_tokens=retrievalBudget)
             # 会话作用域隔离：旁路"历史回忆"召回同样过滤——单聊/非协作仅见 direct（仍跨普通
             # 会话召回），排除任何房间归档；群轮见 direct + 本群。chunk 归属由 metadata.session_id
             # 的 project_ 前缀判定（与长期记忆同规则）。
@@ -1200,6 +1269,18 @@ class ContextOrchestrator:
             + line_prefix
         )
 
+    def _effectiveWindowBudget(self, budget_tokens: int) -> int:
+        """过 90% 硬顶后的窗口预算（**单源**：召回额度与窗口裁剪取同一个值）。
+
+        B6-9（P2-6）：改前 `_apply_window_budget` 内部自钳，而召回额度公式用的是
+        未钳制的 `window_budget`——同一轮里两处对"窗口预算"理解不一致（配置预算
+        大于模型上下文 90% 时，召回按大预算取、窗口按小预算裁）。
+        """
+        hardLimit = self._resolve_auto_compact_hard_limit()
+        if hardLimit and hardLimit < budget_tokens:
+            return hardLimit
+        return budget_tokens
+
     def _resolve_window_token_budget(self) -> int:
         """窗口 token 预算：显式覆盖（_window_token_budget，测试/运维用）优先，
         否则模型元数据预算（get_token_budget_for_model）。
@@ -1372,9 +1453,9 @@ class ContextOrchestrator:
             return normalizeViewMessages(conversation_context)
 
         # P0-2：硬顶钳制——配置预算再大也不越过模型上下文的 90%
-        hard_limit = self._resolve_auto_compact_hard_limit()
-        if hard_limit and hard_limit < budget_tokens:
-            budget_tokens = hard_limit
+        # （判据单源 `_effectiveWindowBudget`，调用方已按同一值给出入参；此处
+        # 保留一次钳制以便 `_apply_window_budget` 被直接调用时行为不变）
+        budget_tokens = self._effectiveWindowBudget(budget_tokens)
 
         msgs = normalizeViewMessages(conversation_context)
         if not msgs or estimate_window_tokens(msgs) <= budget_tokens:

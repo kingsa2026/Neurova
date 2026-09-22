@@ -205,6 +205,8 @@ class TestWindowTokenBudget:
         assert window_msgs, "对话窗口为空——本用例没打到窗口预算路径"
         window_tokens = estimate_window_tokens(window_msgs)
         expected = max(1000, 8000 - window_tokens)
-        assert drawer.max_tokens <= expected, (
-            f"draw 预算 {drawer.max_tokens} 应 ≤ 窗口剩余 {expected}（窗口实占 {window_tokens}）"
+        # B6-9：读本轮**生效**额度（`max_tokens` 是构造期默认值，不再被就地改写）
+        assert drawer.effective_view_budget() <= expected, (
+            f"draw 预算 {drawer.effective_view_budget()} 应 ≤ 窗口剩余 {expected}"
+            f"（窗口实占 {window_tokens}）"
         )
