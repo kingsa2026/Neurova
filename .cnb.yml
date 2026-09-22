@@ -388,7 +388,7 @@ main:
 # 只是不再靠多加一份顶层 key 实现。这条不变量由
 # tests/unit/test_ci_npc_config_guard.py 的挂载点判据常驻校验。
 .档位映射: &npc-level
-  DSCoder: xhigh
+  DSCoder: high
   DSCoder-max: xhigh
 
 # 时间预算条款**不写在这里**。原因（2026-09-22 实测）：
