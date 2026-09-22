@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -20,8 +21,12 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_ROOTS = ("sessions", "trajectories")
 
+# 白名单契约（tests/unit/test_dev_path_and_runtime_dep_guards.py 的 ALLOWED）：
+# 直接执行的外部命令必须在使用点自证可达——只查 `.git` 目录存在，查的是工作树，
+# 不是 git 二进制；后者缺席时 subprocess 抛 FileNotFoundError，本文件整组断言静默不跑。
 pytestmark = pytest.mark.skipif(
-    not (PROJECT_ROOT / ".git").exists(), reason="需要 git 工作树才能查跟踪状态")
+    not shutil.which("git") or not (PROJECT_ROOT / ".git").exists(),
+    reason="需要 git 二进制与工作树才能查跟踪状态")
 
 
 def _trackedUnder(root: str) -> list:

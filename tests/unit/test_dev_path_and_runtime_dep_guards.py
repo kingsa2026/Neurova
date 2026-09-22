@@ -172,8 +172,13 @@ class TestProtectedGuardsUseNoExternalBinaries:
     """
 
     # 允许的外部命令：仅"当前环境断言存在"的可执行文件（用 shutil.which 跳过）。
-    # 例：git 在 CI 镜像里存在，且测试用 needs_git 标记守卫。
-    ALLOWED = {"git"}
+    # 白名单的语义是「已在使用点自证可达」，不是免检通道——由
+    # test_allowed_binaries_are_proven_reachable_at_every_call_site 常驻校验。
+    #   git —— 版本库状态判定（入库/ignore），CI 镜像内存在。
+    #   sh  —— POSIX shell。`.cnb.yml` 的 node 分派本身就把桥命令交给 sh 执行
+    #          （`sh scripts/ci/run_gate_under_node.sh ...`），守卫要复现的正是
+    #          平台那条调用形态，故必须以 sh 起进程；使用点自证可达后跳过。
+    ALLOWED = {"git", "sh"}
 
     def _protected_test_files(self):
         listed = []
@@ -222,6 +227,112 @@ class TestProtectedGuardsUseNoExternalBinaries:
             + "\n  ".join(offenders)
             + "\n修复：扫描类守卫改用纯 Python（Path.rglob / ast），"
             "或把命令加进 ALLOWED 并说明镜像内确实存在。"
+        )
+
+    @staticmethod
+    def _literalCommandsIn(source, command):
+        """该源码里以**字面量**直接执行 `command` 的行号（AST 口径，不吃注释/字符串）。"""
+        import ast
+
+        lines = []
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            return lines
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, "attr", None) not in {
+                "run", "check_output", "Popen", "call", "check_call"
+            }:
+                continue
+            if "subprocess" not in ast.dump(getattr(node.func, "value", ast.Constant(None))):
+                continue
+            if not node.args:
+                continue
+            first = node.args[0]
+            head = None
+            if isinstance(first, ast.List) and first.elts:
+                head = first.elts[0]
+            elif isinstance(first, ast.Constant) and isinstance(first.value, str):
+                head = first
+            if isinstance(head, ast.Constant) and head.value == command:
+                lines.append(node.lineno)
+        return lines
+
+    @staticmethod
+    def _provesReachability(source, command):
+        """源码里是否有 `shutil.which("<command>")` 调用（AST 口径）。"""
+        import ast
+
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            return False
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if getattr(func, "attr", None) != "which":
+                continue
+            if "shutil" not in ast.dump(getattr(func, "value", ast.Constant(None))):
+                continue
+            if node.args and isinstance(node.args[0], ast.Constant):
+                if node.args[0].value == command:
+                    return True
+        return False
+
+    def _missingProbes(self, sources):
+        """sources: {文件名: 源码} → 未自证可达的白名单命令使用点清单。"""
+        problems = []
+        for rel, source in sources.items():
+            for command in sorted(self.ALLOWED):
+                if self._literalCommandsIn(source, command) and not self._provesReachability(
+                        source, command):
+                    problems.append(f"{rel}: 直接执行 {command!r} 却无 shutil.which 探测")
+        return problems
+
+    def test_allowed_binaries_are_proven_reachable_at_every_call_site(self):
+        """白名单不是免检通道：放行的命令必须**在每个使用点**自证可达。
+
+        上一条判据的 `ALLOWED` 语义是「仅当前环境断言存在的外部命令」——
+        断言存在的方式就是 `shutil.which(...)` + 缺席即显式 skip。
+        本条把这个契约钉成判据：命令一旦进了 `ALLOWED`，受保护子集里任何
+        直接执行它的文件都必须在**同一文件内**带上该命令的 which 调用。
+
+        为何要单独钉（实锤）：构建 `cnb-abg-1k34ioaot` 的 unit-tests 双跑红在
+        `test_no_bare_external_command_in_subprocess`——上一轮新入子集的守卫
+        `tests/unit/ci/test_npc_script_interpreter_reachability.py` 写了字面量
+        `subprocess.run(["sh", ...])`。白名单收 `git` 的同时，`git` 的四个使用点
+        从不自证可达：白名单于是成了「把已知坏味道挪进去」，换镜像即复发。
+
+        可证伪：删掉任一使用点的 `shutil.which("<命令>")` → 红。
+        """
+        sources = {
+            rel: io.open(PROJECT_ROOT / rel, encoding="utf-8").read()
+            for rel in self._protected_test_files()
+        }
+        problems = self._missingProbes(sources)
+        assert not problems, (
+            "白名单命令在受保护子集的使用点未自证可达——`ALLOWED` 的语义是"
+            "「当前环境断言存在」，不探测就执行等于把 FileNotFoundError 留在原处"
+            "（守卫静默不跑）：\n  " + "\n  ".join(problems)
+            + "\n修复：在使用点加 `shutil.which(\"<命令>\")`，缺席即 pytest.skip。"
+        )
+
+    def test_reachabilityContractCriterionIsNotVacuous(self):
+        """反向控制：判据真能咬住缺口，且不误伤已自证的写法（合成输入，不拿仓库现状当输入）。"""
+        offender = 'import subprocess\nsubprocess.run(["git", "ls-files"])\n'
+        proven = (
+            'import shutil\nimport subprocess\n'
+            'if shutil.which("git"):\n'
+            '    subprocess.run(["git", "ls-files"])\n'
+        )
+        assert self._missingProbes({"synthetic_offender.py": offender}) == [
+            "synthetic_offender.py: 直接执行 'git' 却无 shutil.which 探测"
+        ], "缺口写法未被咬住 —— 判据空转"
+        assert self._missingProbes({"synthetic_proven.py": proven}) == [], (
+            "已自证的写法被误判 —— 判据过严，正常修复也会被拦"
         )
 
     def test_no_shell_out_to_ripgrep(self):

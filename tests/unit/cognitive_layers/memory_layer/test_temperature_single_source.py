@@ -29,6 +29,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import io
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -56,6 +57,9 @@ def _tracked_py() -> list:
     与受保护子集其余 170 个文件共享机器时必撞 30s 默认墙钟（本次构建实测 timeout）。
     判据只谈「哪些文件 import 了退役模块」，与入库文件总量无关，故按模块名文本预筛。
     """
+    # 白名单契约：执行 git 前先自证可达，缺席即显式 skip（而非 FileNotFoundError）。
+    if shutil.which("git") is None:
+        pytest.skip("本环境无 git，无法取回入库文件清单")
     out = subprocess.run(
         ["git", "-c", "core.quotepath=false", "ls-files", "-z", "*.py"],
         cwd=str(PROJECT_ROOT), capture_output=True, text=True,

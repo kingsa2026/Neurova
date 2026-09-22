@@ -345,6 +345,16 @@ class TestNodeDispatchReallyWorks:
         assert node_command.strip(), "node 分支调用形态为空"
         assert "npc_turn_handoff_gate.py" in node_command, "调用形态里没有脚本路径"
 
+        # 平台执行这条桥命令的方式是把它交给 POSIX shell（`sh scripts/...sh`），
+        # 故 shell 也是被依赖的解释器：与同文件其余 node 调用同口径，**先证后用**
+        # （`sh` 已在受保护子集的 ALLOWED 里，并在本使用点自证可达；契约见
+        # tests/unit/test_dev_path_and_runtime_dep_guards.py 的
+        # TestProtectedGuardsUseNoExternalBinaries）。缺席即显式 skip，而不是把
+        # 未证明存在的二进制直接递进 subprocess —— 那会是 FileNotFoundError，
+        # 本文件整组断言（含本条的等价性判据）会静默不跑。
+        if shutil.which("sh") is None:
+            pytest.skip("本环境无 POSIX shell（sh），无法执行 .cnb.yml 登记的桥命令")
+
         workspace = tmp_path / "ws"
         workspace.mkdir()
         base_env = {"PATH": "/usr/bin:/bin:/usr/local/bin"}
