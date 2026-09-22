@@ -88,6 +88,35 @@ def estimate_window_tokens(msgs: typing.Iterable) -> int:
     return WindowTokenMeter().total(msgs)
 
 
+#: 视图归一化保留的字段（协议契约字段 + 工具寻址字段）。
+#: 单源：折叠、视图重建、窗口计量三处都读这一份，避免各留各的字段白名单。
+_MESSAGE_FIELDS = ("role", "content", "tool_call_id", "name", "tool_calls")
+
+
+def normalizeViewMessages(messages: typing.Optional[typing.List[dict]]) -> typing.List[dict]:
+    """把消息序列归一化为视图序列（保留契约字段，剔除空内容项）。
+
+    视图装配的**唯一归一入口**：折叠、视图重建、窗口计量三处共用，避免各自
+    写一份字段白名单——改前正是三处各抄一份"只留 role+content"，于是工具寻址
+    字段被无声裁掉（审计 P2-4）。
+    """
+    out = [_normalizeMessage(m) for m in (messages or []) if isinstance(m, dict)]
+    return [m for m in out if m.get("content") or m.get("tool_calls")]
+
+
+def _normalizeMessage(message: typing.Optional[dict]) -> dict:
+    """把一条消息归一化为视图消息：只保留契约字段（含工具寻址字段）。
+
+    不含 `tool_call_id`/`name`/`tool_calls` 的形态会让"硬地址直取"与
+    "tool 轮配对"两条链同时断掉（见模块顶部 P2-4 说明）。
+    """
+    src = message or {}
+    out = {key: src[key] for key in _MESSAGE_FIELDS if key in src}
+    out.setdefault("role", "user")
+    out.setdefault("content", "")
+    return out
+
+
 def split_window_by_budget(
     msgs: typing.List[dict],
     budget_tokens: int,
@@ -160,11 +189,11 @@ async def compact_window(
 
     summarize: async (dropped_msgs, previous_summary) -> Optional[str]
     """
-    msgs = [
-        {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
-        for m in (conversation_context or [])
-        if isinstance(m, dict) and (m or {}).get("content")
-    ]
+    # 归一化**只裁协议外字段**：工具寻址字段（tool_call_id / name / tool_calls）
+    # 必须随消息走——它们被裁掉后，`_tool_placeholder` 的硬地址指针与
+    # `repair_tool_turns` 的配对判据同时失效（前者产空指针、后者把完整的
+    # tool 轮误判为孤儿），模型再也无法凭指针直取归档原文（审计 P2-4）。
+    msgs = normalizeViewMessages(conversation_context)
     if not msgs:
         return None
 

@@ -187,6 +187,14 @@ class ContextOrchestrator:
                 auto_tag=auto_tag,
                 ttl_seconds=0,  # [无损归档] 池是永久归档，TTL 不门禁调取（永不丢失）
             )
+            # B6-3/B6-4：按身份登记**这个**池，让读侧（端点 /context/build、
+            # 工作流上下文节点、按身份取池的消费方）取到同一实例。不登记的话
+            # 读侧取不到就只能各自新建——那正是 P2-3"写入即丢"的根因。
+            from neurova.context_pool import poolIdentityOf
+            from neurova.context_pool_registry import get_registry
+
+            get_registry().adopt(self.context_pool)
+            self._pool_identity = poolIdentityOf(agent_ref, session_id)
             logger.info(
                 "ContextPool 初始化完成（无损归档模式），模型: %s，Token 预算: %s, session_id: %s",
                 model_name, max_tokens, session_id,
@@ -679,8 +687,12 @@ class ContextOrchestrator:
                 window_msgs = repair_tool_turns(window_msgs)
             except Exception as e:  # noqa: BLE001 - 修复故障不阻断上下文构建
                 logger.debug("tool-turn 修复跳过: %s", e)
+            # 视图装配保留协议契约字段（含工具寻址字段）：`tool_call_id` / `name`
+            # / `tool_calls` 被裁掉时，`_tool_placeholder` 的硬地址指针恒为空、
+            # `repair_tool_turns` 也把完整的 tool 轮误判成孤儿转成 user 注记——
+            # "凭 tool_call_id 直取归档原文"这条承诺在 pool 分支不可能成立（P2-4）。
             for msg in window_msgs:
-                context.append({"role": msg.get("role", "user"), "content": msg["content"]})
+                context.append({key: value for key, value in msg.items() if value is not None})
 
             # 3. 本轮检索产物（不经抽屉门槛——它们由上游检索链按当前
             # 查询专门检索，是"本轮相关"的定义本身；同时已归档供未来召回）
@@ -1210,6 +1222,43 @@ class ContextOrchestrator:
             pool_budget = 16000
         return max(3000, min(int(pool_budget * self._WINDOW_SHARE_OF_POOL_BUDGET), 100000))
 
+    # 预算读写只认"窗口预算对象"这一处口径：端点 PUT 的 max_tokens 落成
+    # 显式覆盖（`_window_token_budget`），GET 读回同一个方法——读写同源，
+    # 不存在"PUT 写 A、GET 读 B"的假闸口（B6-2 / P2-2）。
+    _BUDGET_MIN = 1000
+    _BUDGET_MAX = 400000
+
+    def get_token_budget(self) -> Dict[str, int]:
+        """当前生效的 token 预算读数（`max_tokens` 口径 = 窗口预算）。
+
+        `used_tokens` 取 compose 侧最近一次实测的 prompt 总量——面板与判据
+        共用同一把尺子（`context.composition`）。无实测快照时为 0（不是估算）。
+        """
+        max_tokens = self._resolve_window_token_budget()
+        used_tokens = 0
+        try:
+            from neurova.context.composition import get_last_composition
+
+            snapshot = get_last_composition(
+                str(getattr(self.config, "agent_id", "") or "default"),
+                self._session_id or None,
+            )
+            if snapshot:
+                used_tokens = int(snapshot.get("total_tokens") or 0)
+        except Exception:  # noqa: BLE001 - 无实测快照不影响预算读数
+            used_tokens = 0
+        return {
+            "max_tokens": max_tokens,
+            "used_tokens": used_tokens,
+            "available_tokens": max(0, max_tokens - used_tokens),
+        }
+
+    def set_token_budget(self, max_tokens: int) -> int:
+        """写入生效预算，返回实际生效值（越界被钳位，调用方拿得到真值）。"""
+        value = max(self._BUDGET_MIN, min(self._BUDGET_MAX, int(max_tokens)))
+        self._window_token_budget = value
+        return value
+
     @staticmethod
     def _envelopeFixedTokens(blocks: Dict[str, list]) -> int:
         """信封**固定部分**的 token 占用：外壳（免疫句）+ `<time>` + 非召回块。
@@ -1312,32 +1361,24 @@ class ContextOrchestrator:
  - P0-2：auto_compact_enabled=False 时原样返回；
           有效预算 = min(budget, 模型上下文窗口×90%) 硬顶。
         """
-        from neurova.context.window_compactor import compact_window, estimate_window_tokens
+        from neurova.context.window_compactor import (
+            compact_window,
+            estimate_window_tokens,
+            normalizeViewMessages,
+        )
 
         # P0-2：显式关闭语义——超预算也原样返回（调用方自行承担窗口超限）
         if not getattr(self, "auto_compact_enabled", True):
-            return [
-                {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
-                for m in (conversation_context or [])
-                if isinstance(m, dict) and (m or {}).get("content")
-            ]
+            return normalizeViewMessages(conversation_context)
 
         # P0-2：硬顶钳制——配置预算再大也不越过模型上下文的 90%
         hard_limit = self._resolve_auto_compact_hard_limit()
         if hard_limit and hard_limit < budget_tokens:
             budget_tokens = hard_limit
 
-        msgs = [
-            {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
-            for m in (conversation_context or [])
-            if isinstance(m, dict) and (m or {}).get("content")
-        ]
+        msgs = normalizeViewMessages(conversation_context)
         if not msgs or estimate_window_tokens(msgs) <= budget_tokens:
-            return [
-                {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
-                for m in (conversation_context or [])
-                if isinstance(m, dict) and (m or {}).get("content")
-            ]
+            return normalizeViewMessages(conversation_context)
 
         cache = self._window_cache_slot(cache_key or self._resolve_window_cache_key())
         # 增量防抖：距上次成功摘要新追加的消息数 ≤ 阈值时复用缓存摘要
@@ -1425,13 +1466,13 @@ class ContextOrchestrator:
             {compacted, folded, kept, tokens_before, tokens_after,
              summary_generated, reason?}
         """
-        from neurova.context.window_compactor import compact_window, estimate_window_tokens
+        from neurova.context.window_compactor import (
+            compact_window,
+            estimate_window_tokens,
+            normalizeViewMessages,
+        )
 
-        msgs = [
-            {"role": (m or {}).get("role", "user"), "content": (m or {}).get("content", "")}
-            for m in (conversation_history or [])
-            if isinstance(m, dict) and (m or {}).get("content")
-        ]
+        msgs = normalizeViewMessages(conversation_history)
         if not msgs:
             return {"compacted": False, "reason": "empty_history", "folded": 0, "kept": 0,
                     "tokens_before": 0, "tokens_after": 0, "summary_generated": False}

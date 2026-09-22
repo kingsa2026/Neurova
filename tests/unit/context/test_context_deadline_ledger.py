@@ -121,14 +121,46 @@ class TestJudgeRulesAreDecidable:
     def test_absent_rule_does_not_require_zero_references(self):
         """`absent` 说的是「无定义」，不是「零引用」。
 
-        这条区分是有意的：`get_context_pool` 有 import 与调用（所以引用数不为 0），
-        但**符号本身不存在**——正是 P2-1 的形态（调用方靠 except 静默降级）。
-        若判据把「有引用」当成「符号存在」，P2-1 会永远被判成可达。
+        这条区分是判据的骨：若把「有引用」当成「符号存在」，那么"有调用方、
+        没有实现"这一类（P2-1）会永远被判成可达。B6-3 补上 `get_context_pool`
+        真面之前，它就是这个形态的**活标本**；现在该符号已存在（判据随之转为
+        `consumed`），故本用例改为直接对 `classify()` 喂"有消费点、无定义"的
+        事实，把规则本身钉住——**规则不因标本被修好而失去守卫**。
         """
+        from scripts.ci import context_deadline_ledger as mod
+
+        site = mod.RefSite
+
+        original = mod.referenceSites
+
+        def _sites(forms):
+            return tuple(
+                site(path=f"neurova/{i}.py", line=i + 1, form=form)
+                for i, form in enumerate(forms)
+            )
+
+        def _run(forms):
+            try:
+                mod.referenceSites = lambda _symbol: _sites(forms)
+                return mod.classify("get_context_pool")
+            finally:
+                mod.referenceSites = original
+
+        judge, _ = _run(["def", "call"])
+        assert judge == mod.JUDGE_CONSUMED, "自证前置：有定义 + 跨文件消费点应为 consumed"
+        judge, detail = _run(["call"])
+        assert judge == mod.JUDGE_ABSENT, (
+            "有消费点但无定义必须判 absent；判成可达会让「有调用方、没有实现」"
+            "这一类永久漏检"
+        )
+        assert detail["rule"] == "1 · 无定义、无赋值"
+
+    def test_p2_1_symbol_now_consumed(self):
+        """B6-3 交付后的新事实：符号已补齐，判据由 absent 转 consumed。"""
         rows = {str(r["symbol"]): r for r in ledger.facts()}
-        assert rows["get_context_pool"]["judge"] == ledger.JUDGE_ABSENT, (
-            "get_context_pool 必须判为 absent（符号级缺失）——它是最典型的"
-            "「有调用方、没有实现」形态，判错会让 P2-1 永久漏检。"
+        assert rows["get_context_pool"]["judge"] == ledger.JUDGE_CONSUMED, (
+            "get_context_pool 已补真面并有跨文件消费点；若退回 absent，说明符号"
+            "又被删掉了（P2-1 复发）"
         )
 
 

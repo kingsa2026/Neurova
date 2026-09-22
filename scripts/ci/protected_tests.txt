@@ -534,3 +534,16 @@ tests/unit/context/test_b5_scale_batch_registration.py
 #    反向控制：draw / archiveBatch 已知生产可达，必须报 consumed 且永远
 #    「待处置」——它们被误报或赋处置即说明判据整体失效。）
 tests/unit/context/test_context_deadline_ledger.py
+
+# 上下文三链路批（Issue #90）B6-2 / B6-3 / B6-4 / B6-5：假闸口与断链判据。
+#   （根因：端点与工作流节点挂在**从不存在的对象/符号**上——`/token-budget`
+#    读写 `agent.unified_injector`（全仓零赋值点，GET 恒硬编码、PUT 恒成功且
+#    零效果）；`/context/build` 每请求新建池（写入即丢）；neurflow 的
+#    `get_context_pool` 符号不存在且被 `except ImportError` 吞成 DEBUG；
+#    视图重建只留 role+content，工具寻址字段被剥后 `_tool_placeholder` 的
+#    硬地址指针与 `repair_tool_turns` 的配对判据同时失效。
+#    四条判据都钉「真值可从生产对象取回」，不是钉实现形状。）
+tests/unit/api/test_token_budget_endpoint_contract.py
+tests/unit/context/test_pool_identity_resolution.py
+tests/unit/neurflow/test_context_node_pool_resolution.py
+tests/unit/context/test_view_tool_addressing.py
