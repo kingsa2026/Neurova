@@ -409,3 +409,10 @@ tests/unit/context/test_context_ledger_fts_migration.py
 #   守卫另锁：前端基地址三类写法全认（漏认 neuron.ts 的 axios.create({baseURL}) 会
 #   产生 8 条假阳性）、未挂载端点模块名单非空（不许静默遗留）。
 tests/unit/api/test_route_mount_contract_guard.py
+# 上下文三链路批（Issue #90）B3 剩余 P2-8 / D4 甲案：pool 分支瞬态注入收回信封。
+#   （根因：记忆/经验/结晶/待探索问题/池召回/工具记忆/情感七类动态检索文本以
+#     `role="system"` 直注——既不受任何 token 预算管辖（窗口预算只覆盖对话消息），
+#     又落在免疫句覆盖范围之外（system 角色权重最高且无语义隔离声明）。
+#     改为全部收进末条 user 信封并接入 compress_envelope；抽屉与信封共用同一份额度，
+#     避免"召回取回来了、信封又把它丢掉"的静默消失。）
+tests/unit/context/test_pool_branch_envelope_transient.py
