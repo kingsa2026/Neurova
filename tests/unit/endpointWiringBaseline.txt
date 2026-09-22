@@ -1,7 +1,11 @@
-# 未挂载端点模块台账（Issue #112 后续·接线断点）· 只降不升
+# 未挂载路由模块台账（Issue #112 后续·接线断点）· 只降不升
 #
 # 收录口径：模块定义了路由（`@router.<verb>`），但装配后的应用里一条都不可达
 # ——是「有实现却无挂载点」，不是「挂了零条路由」（后者由 mountedRouterAudit 拦下）。
+# 范围是**全仓**（scripts/generate_api_inventory.py 的 SOURCE_ROOTS），不是只扫端点包：
+# 口径若比声明窄，同一形态在包外就永远看不见，连被登记的机会都没有。
+# 自带 FastAPI() 应用的模块不在内——它由自己的进程服务，不是孤儿。
+# 条目用**完整点分模块路径**（末段短名不保证唯一，作台账键会有歧义）。
 # 判据单源在 scripts/generate_api_inventory.py 的 unmountedEndpointModules()；
 # 守卫 tests/unit/api/test_route_mount_contract_guard.py 双向钉住（新增即红、
 # 修好后未下调亦红）。登记不代替修复——但也不许把已知项假装不存在。
@@ -14,28 +18,44 @@
 #   （package.json 无 react 依赖，见 architecture-findings 第 12 节 u5）。
 #   不挂载的另一半理由是**鉴权是假的**：8 处 `Depends(lambda: "current_user")`
 #   硬编码身份，挂上去等于把计算节点数据对匿名请求开放。故先修身份再谈接线。
-computer_api
+neurova.api.endpoints.computer_api
 # cost_api ― /cost/* 成本查询面（agent/company 汇总、leaderboard、calculate、
 #   rollup/hourly、dashboard/realtime）。唯一调用方同上（api/computer.ts）。
 #   现行成本看板走的是 `modules/cost.ts` → /api/v1/cost-rollup/*、/api/v1/budgets/*
 #   （本轮已归位），与此模块无交集；挂上去只是并行第二份成本读面。
-cost_api
+neurova.api.endpoints.cost_api
 # phase3_api ― /phase3/* 智能路由/outbox/告警面，全仓零调用方（含前端与 Harmony）。
 #   它依赖的 `small_brain_router` / `outbox_handler` 在生产链路里**另有主线消费方**
 #   （`agent/model_selector.py`、`agent/turn_coordinator.py`），故本模块是
 #   「实现有主、端点无客」——保留待接线，不制造无消费者的路由面。
-phase3_api
+neurova.api.endpoints.phase3_api
 # migration_api ― /migrations/* 零停机迁移面，全仓零调用方。且底层
 #   `neurova/storage/zero_downtime_migration.py` 的 7 阶段实现**全是 pass**
 #   （`_enable_dual_write` / `_insert_into_new_schema` / `_switch_readers` /
 #   `_schedule_cleanup`），`verify_migration()` 恒返回 True。
 #   挂上去等于对外提供一圈恒真的迁移接口——按修复教义第 2 条属「以假形态
 #   冒充能力」，故先在台账点名，待实现真身再接线。
-migration_api
+neurova.api.endpoints.migration_api
 # skill_market ― ADR 0013「统一技能市场端点（4 套→1 套）」第 2 条判定的待删套
 #   之一（stub 实现，模块自带 `_DEPRECATED`）。规范端点为 skill_pool_api.py。
 #   当前状态是「已废弃且不注册」，属 ADR 已裁定路径上的在途债，登记待删。
-skill_market
+neurova.api.endpoints.skill_market
 # skills_market ― 同 ADR 0013 第 2 条的另一待删套（demo 数据实现，自带
 #   `_DEPRECATED`）。与 skill_market 同因，登记待删。
-skills_market
+neurova.api.endpoints.skills_market
+# openplatform.routes ― /openplatform/* 开放平台面（应用/Webhook 管理 + 19 条路由）。
+#   全仓零挂载点：`neurova/api/openplatform/` 包只被自身内部互引，无任何
+#   `include_router` 消费者。前端 `modules/openplatform.ts` 的 BASE 是 `/openplatform`，
+#   实际请求 `/api/v1/openplatform/*`，命中的是**另一个模块**
+#   `endpoints/openplatform_keys.py`（只做密钥管理）——两者同名不同物，
+#   本模块的 apps/webhooks/docs/events 四条资源域前端零调用。
+#   不本单强接的另一半理由是**鉴权缺失**：整个 router 无 `Depends`，
+#   挂上去等于把应用与 Webhook 管理面对匿名请求开放（同 computer_api 的形态）。
+#   故先定归属（与 openplatform_keys 是否合并）再谈接线。
+neurova.api.openplatform.routes
+# acp_server ― `ACPServer` 类自持的 `/acp/sessions*` 面（5 条路由），挂在类实例上而非模块级。
+#   全仓零消费者：`ACPServer` 只被 `tests/unit/core/test_acp_server.py` 直接实例化，
+#   生产链路走的是 `endpoints/acp_api.py`（`/api/acp/*`，注册表内已挂载）+
+#   `agent/protocols/acp_runtime.py`。即「实现有主、端点无客」——与 phase3_api 同型：
+#   保留待裁定（合并进 acp_api 或退役），不制造第二份 ACP 路由面。
+neurova.core.acp_server
