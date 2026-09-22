@@ -712,7 +712,7 @@ export default {
     overview: '概览',
     decay: '记忆衰减',
     reload: '重新读盘',
-    reloadHint: '把外部进程（如 CLI 导入）写入的记忆并入后端，无需重启',
+    reloadHint: '与磁盘对账：并入外部进程（如 CLI 导入）写入的记忆，并回收已被撤销的行，无需重启',
     enhance: '记忆增强',
     forget: '遗忘',
     strengthen: '强化',
