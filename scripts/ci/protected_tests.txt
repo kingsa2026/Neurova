@@ -228,6 +228,14 @@ tests/unit/memory_ingest/test_imported_supersede_replaces_old.py
 #   既有关键词倒排不被 clear、门索引咬合、快照口径不收窄、/reload 不被 /{memory_id} 吞掉。
 tests/unit/cognitive_layers/memory_layer/test_reload_memories_visibility.py
 tests/unit/api/test_memory_reload_endpoint.py
+# Issue #81 对账批（用户拍板三条）：① 跨进程撤销走 reload 双向对账；② 记忆写入口加属主；
+#   ③ 产物属主 + 注册表持久化。判据：盘上已消失的行在 reload 时被回收、复活路径（按 id
+#   改动写回盘）断掉、回收幂等且不误伤本进程行、倒排不留残留；属主两轴同定标且真的参与
+#   隔离（属主可见/非属主不可见）、幂等键按行作用域分槽、取代声明在属主作用域里找；
+#   产物条目带归属、共享批次显式标记、漏写属主一律诚实 404、注册表水合往返与丢盘清理。
+tests/unit/cognitive_layers/memory_layer/test_reload_reconciles_with_disk.py
+tests/unit/memory_ingest/test_import_memory_owner.py
+tests/unit/api/test_artifact_owner_persistence.py
 # 上下文三链路修复批（Issue #90）B1 尺子：token 估算单一事实源 + 判据侧不得低估
 #   （P0-1 根因：BALANCED 对英文/JSON/无空格长串低估 20 倍量级 → 折叠永不触发）
 tests/unit/context/test_token_estimator_calibration.py

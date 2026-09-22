@@ -703,7 +703,7 @@ export default {
     overview: 'Overview',
     decay: 'Memory Decay',
     reload: 'Reload from disk',
-    reloadHint: 'Pull memories written by another process (e.g. CLI import) into the running backend without restarting',
+    reloadHint: 'Reconcile with disk: pull memories written by another process (e.g. CLI import) into the running backend and reap the rows that were undone, without restarting',
     enhance: 'Enhance Memory',
     forget: 'Forget',
     strengthen: 'Strengthen',
