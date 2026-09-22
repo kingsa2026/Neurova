@@ -267,3 +267,75 @@ live-verify（真链路，`/tmp/live_verify.py` 原文进 PR）：
 [链4] 导入结果: {'added': 1, 'skipped': 0, 'superseded': ['mem_000001'], 'supersede_unresolved': []}
 [链4] 旧行状态: forgotten | recall 是否含旧行: False
 ```
+
+## 5d. 冲突账的成员身份收口（Issue #72 第四轮）
+
+第三轮把"信号是否可分辨"与"账是否可读"收口之后，"哪条为准"仍判不出来。
+第四轮追到它的**现场根因**：不是缺裁决策略，是**账上的成员指不出是谁**。
+
+**① 合成成员：`pending_new_memory` 在库里根本不存在**
+
+`_step_conflict_detection` 自造 `Memory(id="pending_new_memory", content="用户: X\n助手: Y")`
+充当"本轮新证据"，而同一轮 `save_memory` 刚落地的 `user_memory_id` / `agent_memory_id`
+**没有任何读方**。实测 `get_memory("pending_new_memory")` 为 `None`：
+
+- 账上 `memory_id_1` 恒为查不到的合成 id，下游连"哪条跟哪条打架"都指不出来；
+- 对比单位还是**整轮对话**（`"用户: X\n助手: Y"`），这句话没有对应的行——
+  检测器在子句层能报出"哪两句"，但报出的"哪条记忆"是空的。
+
+这条链之所以只能停在"纯观测、判不出哪条为准"，根因在这里，不在"缺少裁决工单"。
+
+**② 修法：身份的唯一来源改回落库结果**
+
+在产生非法状态的上游修（教义第 1 条）：
+
+- `_landedEvidenceRows()`：从 `save_memory` 步骤读数取 id、再回库定位
+  （`get_memory` 读不到的行按"未落地"处理）；
+- 检测单位改为**逐条证据行**（`_detectAgainstEvidenceRows()`），
+  不再把整轮对话揉成一条合成文本；
+- `_conflictsWithLocatableMembers()`：两个成员都在库里定位不到的信号拦下，
+  如实计进 `conflicts_unidentified`，不入账；
+- 本轮无落地证据行时**不造合成对象**，步骤 message 点明
+  "没有本轮落地的证据行，冲突无对象可比"。
+
+纯观测语义不变：`blocking=False`、不回滚不新增行（工单 012 裁决原样保留）。
+
+**判据与实测（第四轮）**
+
+红灯（实现前实测）：
+
+- `test_conflict_ledger_member_identity.py` 5 例：
+  `AssertionError: 账上成员 'pending_new_memory' 在库里查不到`、
+  `assert 'pending_new_memory' in {'mem_000001','mem_000002','mem_000003'}`、
+  `KeyError: 'evidence_rows'` ×2。
+
+绿灯（实现后）：
+
+| 判据 | 结果 |
+|---|---|
+| 成员可定位 / 不合成 id / 证据行读数 / 无证据行不落账 / 纯观测不变 | 5 例绿 |
+| 受影响的既有套件按新契约改判据（桩不再用合成 id 造账） | `test_conflict_detection_observation_only` 3、`test_conflict_disposition_loop` 8、`test_p2_pipeline_fixes` 14、`test_memory_guards_wiring` 11 全绿 |
+| 爆炸半径 | `tests/unit/{agent,cognitive_layers/memory_layer,cognitive}` 修复前 36 失败 → 修复后 32，差集只有本批新增红灯文件自身（A/B 自证，其余为环境预存失败） |
+
+live-verify（真 MemoryManager + 真 post_chat 链路 + 真检测器）：
+
+```
+[链1] 步骤读数: conflicts_count=1 recorded=1 unidentified=0 evidence_rows=2 blocking=False
+[链1] message: 检测到 1 处记忆冲突（纯观测，不阻断写入；入账 1 条）
+[链2] 账上条目: 1
+[链2] 成员可定位=True | mem_000002 ↔ mem_000001 | 依据=同一命题的否证：'我不喜欢咖啡' 与 '我喜欢咖啡'
+[链3] summary: {'total_conflicts': 1, 'unresolved': 1, 'by_type': {'contradiction': 1}}
+[链3] /memory/stats 冲突栏: {'total': 1, 'resolved': 0, 'unresolved': 1}
+[链4] 无本轮证据行: evidence_rows=0 conflicts_count=0 recorded=0
+[链4] message: 没有本轮落地的证据行，冲突无对象可比（纯观测，不阻断写入）
+```
+
+**仍然登记、本批不动**：升级为"可否决"还缺**裁决策略的归属**这一半
+——本轮把"哪两条"补齐了（账上成员可定位），"由谁按什么策略判定胜者"仍属独立一张票。
+`ConflictModule.resolve_conflict` 与 `ConflictResolution` 四值目前只有测试消费，
+人工处置面（端点 + 前端）尚未接线，同属那张票的范围。
+
+**台账（不静默遗留）**：`ConflictModule._auto_resolve_conflict` 只被
+`detect_conflict(auto_resolve=True)` 调用，而生产装配点是
+`ConflictModule(auto_resolve=False)`（`manager._ensure_conflict_module`）
+⇒ 自动裁决分支在当前装配下不可达，本批只登记、不删（它是人工处置面的最近邻）。
