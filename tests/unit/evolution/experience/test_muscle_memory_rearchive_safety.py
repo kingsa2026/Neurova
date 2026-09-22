@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -87,6 +88,8 @@ class TestArchiveIsRecoverable:
 class TestLedgerIsNotIgnored:
     def test_ledger_path_is_trackable(self):
         """`.gitignore` 不得吞掉留底路径——否则归档依旧只活在磁盘上。"""
+        if shutil.which("git") is None:
+            pytest.skip("本环境无 git，查不了 ignore 判定")
         ledger_rel = "docs/05-reports/muscle-memory-ledger/probe.json"
         result = subprocess.run(
             ["git", "check-ignore", "-q", ledger_rel],
