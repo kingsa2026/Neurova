@@ -28,6 +28,8 @@ EXPECTED_NON_REPRODUCIBLE = {
     "computer_som_snapshot", "computer_dom_snapshot",
     # P0-3 会话式 shell：进程输出不可重放（重跑时系统状态已变）
     "exec_command", "write_stdin",
+    # 多步编排：内层步进可能含任意写操作，重放制造新变更
+    "orchestrate_tools",
 }
 
 

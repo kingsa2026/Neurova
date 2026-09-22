@@ -341,8 +341,14 @@ class ToolCapabilityGraph:
         return "\n".join(lines)
 
     def _build_default_graph(self) -> None:
-        """构建默认工具关系图"""
-        # 基础工具
+        """构建默认工具关系图。
+
+        节点名必须是**真实存在**的工具名（`builtin_tools._BUILTIN_SCHEMAS` 是工具清单的
+        单一事实源）。历史实现点名的 `code_execute` / `data_process` / `memory_save` /
+        `code_analyze` 从未注册过——据此产出的执行计划里每一步都是「未知工具」，
+        能力图成了工具清单的第二份定义。未知工具名的缺席由
+        `tests/unit/tools/test_tool_orchestrator_wiring.py` 常驻拦截。
+        """
         default_tools = [
             ToolCapabilityNode(
                 tool_name="file_read",
@@ -360,24 +366,18 @@ class ToolCapabilityGraph:
                 tool_name="file_search",
                 capabilities=["search_files", "find_files"],
                 companions=["file_read"],
-                metadata={"category": "filesystem", "description": "搜索文件"},
+                metadata={"category": "filesystem", "description": "按内容搜索文件"},
             ),
             ToolCapabilityNode(
                 tool_name="memory_search",
                 capabilities=["search_memory", "recall"],
-                companions=["memory_save"],
-                metadata={"category": "memory", "description": "搜索记忆"},
-            ),
-            ToolCapabilityNode(
-                tool_name="memory_save",
-                capabilities=["save_memory", "remember"],
-                companions=["memory_search"],
-                metadata={"category": "memory", "description": "保存记忆"},
+                companions=["planning"],
+                metadata={"category": "memory", "description": "检索长期记忆"},
             ),
             ToolCapabilityNode(
                 tool_name="web_search",
                 capabilities=["search_web", "internet_search"],
-                companions=["web_fetch"],
+                companions=["web_fetch", "deep_research"],
                 metadata={"category": "web", "description": "网络搜索"},
             ),
             ToolCapabilityNode(
@@ -387,36 +387,44 @@ class ToolCapabilityGraph:
                 metadata={"category": "web", "description": "获取网页内容"},
             ),
             ToolCapabilityNode(
-                tool_name="code_execute",
-                capabilities=["run_code", "execute_python"],
-                fallbacks=["code_analyze"],
-                metadata={"category": "code", "description": "执行代码"},
-            ),
-            ToolCapabilityNode(
-                tool_name="code_analyze",
-                capabilities=["analyze_code", "lint_code"],
-                companions=["code_execute"],
-                metadata={"category": "code", "description": "分析代码"},
-            ),
-            ToolCapabilityNode(
-                tool_name="data_process",
+                tool_name="deep_research",
                 capabilities=["process_data", "transform_data"],
-                dependencies=["file_read"],
-                fallbacks=["memory_search"],
-                metadata={"category": "data", "description": "处理数据"},
+                dependencies=["web_search"],
+                fallbacks=["web_fetch"],
+                metadata={"category": "web", "description": "多源检索与摘录汇总"},
+            ),
+            ToolCapabilityNode(
+                tool_name="run_code",
+                capabilities=["run_code", "execute_code"],
+                fallbacks=["computer_shell"],
+                companions=["calculator"],
+                metadata={"category": "code", "description": "执行代码或脚本"},
+            ),
+            ToolCapabilityNode(
+                tool_name="calculator",
+                capabilities=["calculate", "compute"],
+                companions=["run_code"],
+                metadata={"category": "code", "description": "安全数学计算"},
+            ),
+            ToolCapabilityNode(
+                tool_name="planning",
+                capabilities=["plan_task", "update_plan"],
+                companions=["memory_search"],
+                metadata={"category": "planning", "description": "任务计划读写"},
             ),
         ]
 
         for tool in default_tools:
             self.add_node(tool)
 
-        # 添加共现关系
+        # 共现关系（weight 越小表示同现越少见）
         co_occurrences = [
             ("file_read", "file_write", 0.9),
             ("file_read", "file_search", 0.8),
-            ("memory_search", "memory_save", 0.7),
             ("web_search", "web_fetch", 0.9),
-            ("code_execute", "code_analyze", 0.6),
+            ("web_search", "deep_research", 0.8),
+            ("run_code", "calculator", 0.6),
+            ("memory_search", "planning", 0.7),
         ]
 
         for tool1, tool2, weight in co_occurrences:
