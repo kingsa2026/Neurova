@@ -120,6 +120,10 @@ class AdmissionReceipt:
     delegatedSegments: List[str] = field(default_factory=list)
     # 本条事实挂在哪条活动上：调用方要顺着自己的账往下记，得拿得到这个 id。
     activityId: str = ""
+    # 本笔写入的校验结论（写→验→回写→再读出的那一环由咽喉自己收）。
+    # 不在回执里带出来，调用方就只能自己去猜"校验到底跑没跑"——四条第链此前
+    # 各自写完就走，`verification_state` 从落库起恒为 `unverified`，正是这条。
+    verification: Dict[str, Any] = field(default_factory=dict)
 
 
 import threading
@@ -282,6 +286,7 @@ class KnowledgeAdmissionGate:
                 plannedSegments=planned,
                 delegatedSegments=delegated,
                 activityId=activityId,
+                verification=self._closeVerification(activityId),
             )
 
         subjectKey, needsReview, applied = self._resolveSubject(request)
@@ -325,7 +330,27 @@ class KnowledgeAdmissionGate:
             plannedSegments=planned,
             delegatedSegments=delegated,
             activityId=activityId,
+            verification=self._closeVerification(activityId),
         )
+
+    def _closeVerification(self, activityId: str) -> Dict[str, Any]:
+        """本笔写入的收尾：裁决自己刚落的断言并**回写** `verification_state`。
+
+        为什么长在咽喉里而不是各调用点：经咽喉落库的真实写入链有六条（条目投影、
+        历史回填、对账回放、规则推导、LLM 抽取、时序事实），只在"记得调 attest 的两条"
+        上收口，另外四条写完就走——它们的断言从落库那一刻起恒为 `unverified`，
+        与审计点名的「92/92 恒 unverified」是同一形状，只是换了四条链。
+        谁走咽喉谁闭环，没有第二条纪律。
+
+        只裁决**本笔活动**，不做全库重扫：校验是写入的收尾动作，挂成全库巡检就等于
+        每次写一条都重扫整本账（链长随库增长，写路径的成本不该如此）。
+        没有活动可挂（无血缘段的裸门）时不假装验过，如实回空。
+        """
+        if not str(activityId or "").strip():
+            return {}
+        from .digest_chain import ActivityDigestChain
+
+        return ActivityDigestChain(self._store).closeWrite(activityId)
 
     def _derive(self, request: AdmissionRequest, subjectKey: str) -> List[str]:
         """段3 后半：按规则推导。嵌套写不再点燃规则——推导事实又触发推导，

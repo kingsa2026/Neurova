@@ -390,12 +390,90 @@ class MemoryManager:
             self._persist_db_path = None
             self._persist_conn = None
 
+    def _row_to_memory(self, row) -> "Memory":
+        """把一篇持久行翻成 Memory（装载与 reload 共用的唯一构造处）。"""
+        from datetime import datetime
+
+        return Memory(
+            # M-25: 作用域限定行 id 剥前缀还原业务 id（旧行无前缀原样）
+            id=self._plain_memory_id(row["id"]),
+            content=row["content"],
+            memory_type=MemoryType(row["memory_type"]),
+            category=MemoryCategory(row["category"]),
+            lifecycle_stage=LifecycleStage(row["lifecycle_stage"]),
+            emotion=EmotionType(row["emotion"]),
+            temperature=row["temperature"],
+            importance=row["importance"],
+            access_count=row["access_count"],
+            metadata=json.loads(row["metadata"]) if row["metadata"] else {},
+            agent_id=row["agent_id"],
+            neuser_id=row["neuser_id"],
+            user_id=row["user_id"],
+            shared=bool(row["shared"]),
+            # P1-9: origin 列旧库可能不存在（迁移前快照），按行键探测
+            origin=_row_origin(row),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            last_accessed_at=(
+                datetime.fromisoformat(row["last_accessed_at"]) if row["last_accessed_at"] else None
+            ),
+        )
+
+    def _merge_loaded_memory(self, mem: "Memory") -> bool:
+        """把一篇持久行并入快照；返回是否真的并入了（装载与 reload 共用一条口径）。
+
+        M-25: 作用域限定行剥前缀后可能与普通行同 id（跨作用域自定义 id）。
+        内存 dict 每 id 只能留一份 —— 当前生效作用域匹配的行优先，持久层两行
+        均保留（重启不丢）。
+        """
+        existing = self._memories.get(mem.id)
+        if existing is None:
+            self._memories[mem.id] = mem
+            return True
+        new_match = (
+            mem.neuser_id == self._eff_neuser_id()
+            and mem.user_id == self._eff_user_id()
+        )
+        old_match = (
+            existing.neuser_id == self._eff_neuser_id()
+            and existing.user_id == self._eff_user_id()
+        )
+        if new_match or not old_match:
+            self._memories[mem.id] = mem
+            return True
+        return False
+
+    def _already_loaded(self, mem: "Memory") -> bool:
+        """该持久行是否已在快照里（判据 = 业务 id + 行自带三元组）。"""
+        existing = self._memories.get(mem.id)
+        return existing is not None and (
+            existing.agent_id, existing.neuser_id, existing.user_id
+        ) == (mem.agent_id, mem.neuser_id, mem.user_id)
+
+    def _seed_counter_from_db(self, conn) -> None:
+        """审计修复 (P1-7): 计数器跨作用域取全局最大 id。
+
+        原实现只按本作用域已加载行回填 _counter, 新作用域实例会重新从
+        mem_000001 生成 id, 与其他作用域同 id 行 INSERT OR REPLACE 互踩。
+        """
+        try:
+            row = conn.execute(
+                "SELECT MAX(CAST(SUBSTR(id, 5) AS INTEGER)) FROM memories WHERE id LIKE 'mem\\_%' ESCAPE '\\'"
+            ).fetchone()
+            if row and row[0]:
+                self._counter = max(self._counter, int(row[0]))
+        except Exception as e:
+            logger.debug("Seed counter from persist DB failed: %s", e)
+
     def _load_from_db(self):
         """从 SQLite 加载记忆到内存
 
         快照口径 = agent 全量(WHERE 仅 agent_id 一层): 视图层(_scoped_memories
         三层隔离 / agent_wide 浏览口径)再按调用语义过滤。早期按三元组加载会
         把其他用户域的记忆挡在快照外, 管理页永远看不全。
+
+        只在**构造期**跑一次。此后另一个进程写入的行要进门，走 `reload_memories()`
+        （F-05：可见性条件是重启或显式 reload，二者不能各写一套装配）。
         """
         if not getattr(self, "_persist_db_path", None):
             return
@@ -417,51 +495,10 @@ class MemoryManager:
                 (self._agent_id,),
             ).fetchall()
 
-            from datetime import datetime
-
             for row in rows:
                 try:
-                    mem = Memory(
-                        # M-25: 作用域限定行 id 剥前缀还原业务 id（旧行无前缀原样）
-                        id=self._plain_memory_id(row["id"]),
-                        content=row["content"],
-                        memory_type=MemoryType(row["memory_type"]),
-                        category=MemoryCategory(row["category"]),
-                        lifecycle_stage=LifecycleStage(row["lifecycle_stage"]),
-                        emotion=EmotionType(row["emotion"]),
-                        temperature=row["temperature"],
-                        importance=row["importance"],
-                        access_count=row["access_count"],
-                        metadata=json.loads(row["metadata"]) if row["metadata"] else {},
-                        agent_id=row["agent_id"],
-                        neuser_id=row["neuser_id"],
-                        user_id=row["user_id"],
-                        shared=bool(row["shared"]),
-                        # P1-9: origin 列旧库可能不存在（迁移前快照），按行键探测
-                        origin=_row_origin(row),
-                        created_at=datetime.fromisoformat(row["created_at"]),
-                        updated_at=datetime.fromisoformat(row["updated_at"]),
-                        last_accessed_at=(
-                            datetime.fromisoformat(row["last_accessed_at"]) if row["last_accessed_at"] else None
-                        ),
-                    )
-                    # M-25: 作用域限定行剥前缀后可能与普通行同 id（跨作用域
-                    # 自定义 id）。内存 dict 每 id 只能留一份 —— 当前生效作用域
-                    # 匹配的行优先, 持久层两行均保留（重启不丢）。
-                    existing = self._memories.get(mem.id)
-                    if existing is not None:
-                        new_match = (
-                            mem.neuser_id == self._eff_neuser_id()
-                            and mem.user_id == self._eff_user_id()
-                        )
-                        old_match = (
-                            existing.neuser_id == self._eff_neuser_id()
-                            and existing.user_id == self._eff_user_id()
-                        )
-                        if new_match or not old_match:
-                            self._memories[mem.id] = mem
-                    else:
-                        self._memories[mem.id] = mem
+                    mem = self._row_to_memory(row)
+                    self._merge_loaded_memory(mem)
                     # 存量迁移（2026-09-08 结晶闭环）：历史实现把 is_crystallized
                     # 只落 metadata、stage 停在 active，读取端永远查不到。
                     # 装载时按 metadata 标记收敛 stage 并回写。
@@ -477,17 +514,7 @@ class MemoryManager:
                 except Exception as e:
                     logger.debug("Skip invalid memory row %s: %s", row['id'], e)
 
-            # 审计修复 (P1-7): 计数器跨作用域取全局最大 id。
-            # 原实现只按本作用域已加载行回填 _counter, 新作用域实例会重新从
-            # mem_000001 生成 id, 与其他作用域同 id 行 INSERT OR REPLACE 互踩。
-            try:
-                row = conn.execute(
-                    "SELECT MAX(CAST(SUBSTR(id, 5) AS INTEGER)) FROM memories WHERE id LIKE 'mem\\_%' ESCAPE '\\'"
-                ).fetchone()
-                if row and row[0]:
-                    self._counter = max(self._counter, int(row[0]))
-            except Exception as e:
-                logger.debug("Seed counter from persist DB failed: %s", e)
+            self._seed_counter_from_db(conn)
 
             # P1-D1：常驻连接不关；兜底池连接在 finally 统一归还（ADR 0014）
             logger.info("Loaded %s memories from persistence DB", len(self._memories))
@@ -498,6 +525,100 @@ class MemoryManager:
                 from neurova.core.database import release_short_connection
 
                 release_short_connection(conn)
+
+    def reload_memories(self) -> int:
+        """把本进程快照之外的行增量并入内存，返回并入条数（F-05 可见性补齐通道）。
+
+        为什么需要它：快照只在构造期 `_load_from_db` 读一次盘，于是**另一个进程**
+        （CLI 导入、备份恢复、多实例）写下的记忆，对运行中的服务一条都看不见——
+        报告写着"已写入"、界面上却没有，是既非拒绝也非申报的假成功。可见性条件
+        是"服务重启"或本方法，兑现手段只有这一处。
+
+        口径与 `_load_from_db` 同源（agent 全量，视图层再按调用语义过滤），
+        差别只在「只并入缺失的行」：
+
+        - **增量**：已有行（业务 id + 行自带三元组都在快照里）直接跳过，不重装、不覆盖
+          本进程运行期对温度/访问计数的改变；
+        - **召回面同步并入**：关键词倒排逐条 `upsert_memory_index`——**禁用**
+          `build_keyword_index`（它先 `clear()`，只喂缺失行会抹掉既有倒排）；
+        - **内容门索引并入**：否则 reload 之后同一句话会被门放过去、再写一条；
+        - **不写盘**：这是读侧可见性通道，不新增也不改写任何持久行。
+        """
+        if not getattr(self, "_persist_db_path", None):
+            return 0
+        conn = None
+        released = False
+        loaded: List["Memory"] = []
+        try:
+            conn = getattr(self, "_persist_conn", None)
+            if conn is None:
+                from neurova.core.database import get_short_connection
+
+                conn = get_short_connection(self._persist_db_path)
+                released = True
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM memories WHERE agent_id = ? ORDER BY created_at DESC",
+                (self._agent_id,),
+            ).fetchall()
+
+            with self._lock:
+                for row in rows:
+                    try:
+                        mem = self._row_to_memory(row)
+                    except Exception as e:
+                        logger.debug("Skip invalid memory row %s: %s", row["id"], e)
+                        continue
+                    if self._already_loaded(mem):
+                        continue
+                    self._merge_loaded_memory(mem)
+                    loaded.append(mem)
+                    self._counter = max(
+                        self._counter,
+                        int(mem.id.replace("mem_", "")) if mem.id.startswith("mem_") else 0,
+                    )
+                if loaded:
+                    self._seed_counter_from_db(conn)
+                    self._merge_content_index(loaded)
+                    self._stats["total_memories"] = len(self._memories)
+        except Exception as e:
+            logger.warning("Failed to reload memories from DB: %s", e)
+            return len(loaded)
+        finally:
+            if released and conn is not None:
+                from neurova.core.database import release_short_connection
+
+                release_short_connection(conn)
+
+        for mem in loaded:
+            self._index_reloaded_memory(mem)
+        if loaded:
+            logger.info("Reloaded %s memories from persistence DB", len(loaded))
+        return len(loaded)
+
+    def _merge_content_index(self, mems: List["Memory"]) -> None:
+        """把并入的行登记进内容门索引（缺键才登记，不抢已有键的归属）。
+
+        `_content_index` 只收在服务期的行（与 `_ensure_content_index` 同一谓词），
+        且同一键只留一条——直接赋值会把先到的行挤掉，故只补空缺。
+        """
+        self._ensure_content_index()
+        for mem in mems:
+            key = self._content_gate_key(mem)
+            if key is not None:
+                self._content_index.setdefault(key, mem.id)
+
+    @staticmethod
+    def _index_reloaded_memory(mem: "Memory") -> None:
+        """把并入的行喂给召回面（关键词倒排逐条增量；索引维护失败不阻断并入）。"""
+        try:
+            from neurova.cognitive_layers.memory_layer.semantic_search import (
+                get_semantic_search,
+            )
+
+            get_semantic_search().upsert_memory_index(mem.to_dict())
+        except Exception:  # noqa: BLE001 - 与 remember 同口径：索引失败不阻断可见性
+            logger.debug("关键词索引增量并入失败: %s", mem.id, exc_info=True)
 
     # M-25: id 为全表主键, 原 INSERT OR REPLACE 按 id 覆盖 —— A 作用域自定义 id
     # 会被 B 作用域同 id 的写入直接覆盖（重启丢数据）。改为作用域三元组匹配的

@@ -700,6 +700,8 @@ export default {
     stats: '통계',
     overview: '개요',
     decay: '기억 감쇠',
+    reload: '디스크에서 다시 읽기',
+    reloadHint: '외부 프로세스(CLI 가져오기 등)가 기록한 기억을 재시작 없이 백엔드로 가져옵니다',
     enhance: '기억 강화',
     forget: '잊기',
     strengthen: '강화',

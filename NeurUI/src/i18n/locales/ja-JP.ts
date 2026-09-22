@@ -700,6 +700,8 @@ export default {
     stats: '統計',
     overview: '概要',
     decay: '記憶減衰',
+    reload: 'ディスクから再読込',
+    reloadHint: '外部プロセス（CLI インポート等）が書き込んだ記憶を、再起動せずにバックエンドへ取り込みます',
     enhance: '記憶強化',
     forget: '忘れる',
     strengthen: '強化する',

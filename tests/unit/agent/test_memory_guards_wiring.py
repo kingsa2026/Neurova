@@ -101,7 +101,13 @@ class TestStep995SignatureAlignment:
 
     @pytest.mark.asyncio
     async def test_conflict_detection_runs_with_wired_detector(self):
-        """装配后 Step9.9 真实运行（不再恒 SKIPPED）"""
+        """装配后 Step9.9 真实运行（不再恒 SKIPPED）。
+
+        检测对象是本轮**真实落地**的证据行（Issue #72 第四轮），故先补 `save_memory`
+        的落地读数——否则检测步骤如实报"没有本轮证据行"，测不到"装配后真的在跑"。
+        """
+        from neurova.post_chat_pipeline import StepResult, StepStatus
+
         agent = MagicMock()
         pipeline = PostChatPipeline(agent)
 
@@ -110,11 +116,27 @@ class TestStep995SignatureAlignment:
         pipeline._conflict_detector = detector
         mm = MagicMock()
         mm.recall.return_value = [{"id": "m1", "content": "c"}]
+        mm.get_memory.side_effect = lambda memory_id, agent_wide=False: {
+            "u1": {"id": "u1", "content": "用户: q"},
+            "a1": {"id": "a1", "content": "助手: r"},
+        }.get(memory_id)
         pipeline._memory_manager = mm
+        pipeline._step_results.append(
+            StepResult(
+                step_name="save_memory",
+                status=StepStatus.EXECUTED,
+                message="Memory saved successfully",
+                data={"user_memory_id": "u1", "agent_memory_id": "a1"},
+            )
+        )
 
         await pipeline._step_conflict_detection("q", "r")
 
-        detector.detect_conflict.assert_called_once()
+        # 逐条证据行各比一次（本轮落地两行：用户行 + 助手行）——检测单位是"一句证据"，
+        # 不是把整轮对话揉成一条合成文本（Issue #72 第四轮：成员身份即行身份）。
+        assert detector.detect_conflict.call_count == 2, (
+            f"检测次数应与本轮落地证据行数一致，实际 {detector.detect_conflict.call_count}"
+        )
         statuses = [str(r.status) for r in pipeline._step_results]
         assert not any("skipped" in s.lower() for s in statuses)
 
