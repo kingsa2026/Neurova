@@ -44,6 +44,16 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# 真扫描器每次都会印的「裁决证据行」（2026-09-22 实测原文）：
+#     Total 0 packages affected by 0 known vulnerabilities (0 Critical, …)
+# 本守卫的假扫描器必须同形——缺了它，门禁按「拿不到裁决证据」收口，
+# 而那正是 PR #121 那次红能读出真因的关键。
+VERDICT_OUTPUT = (
+    "End status: 0 dirs visited, 2 inodes visited, 2 Extract calls, "
+    "29.4ms elapsed, 29.4ms wall time\n"
+    "Total 0 packages affected by 0 known vulnerabilities "
+    "(0 Critical, 0 High, 0 Medium, 0 Low, 0 Unknown) from 2 ecosystems.\n"
+)
 AUDIT_SCRIPT = PROJECT_ROOT / "scripts" / "ci" / "osv_audit.py"
 ALLOWLIST = PROJECT_ROOT / "scripts" / "ci" / "osv-allowlist.toml"
 PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
@@ -379,7 +389,7 @@ class TestWithBinaryPreflightProvesUsableScanner:
         return "".join(
             f"Scanned /w/{Path(rel).name} file and found {counts[rel]} packages\n"
             for rel in targets
-        )
+        ) + VERDICT_OUTPUT
 
     def test_preflight_reports_each_scanned_target_with_package_counts(
         self, auditModule, tmp_path, monkeypatch
@@ -763,7 +773,7 @@ class TestSubprocessFailureIsNotScannerVerdict:
             body = "".join(
                 f"Scanned /w/{rel.rsplit('/', 1)[-1]} file and found {n} packages\n"
                 for rel, n in (("Cargo.lock", 447), ("package-lock.json", 368))
-            )
+            ) + VERDICT_OUTPUT
             return subprocess.CompletedProcess(cmd, 0, stdout=body, stderr="")
 
         monkeypatch.setattr(auditModule.subprocess, "run", fakeRun)
@@ -806,6 +816,157 @@ class TestSubprocessFailureIsNotScannerVerdict:
         assert calls and calls[0][1] == "--version", (
             "预检必须先用 --version 真跑一次自证；不先问就只能在拿到 127 之后反推根因"
         )
+
+
+class TestUnreachableVulnDbIsNotAnAllClear:
+    """漏洞库数据源不可达 ≠ 无漏洞——这是 PR #121 那次 CI 红的**真因**。
+
+    2026-09-22 实测（本机直连复刻，三次里两次命中）：
+
+        $ osv-scanner scan source --lockfile … --lockfile … --verbosity info
+        Scanned …/Cargo.lock file and found 447 packages
+        Scanned …/package-lock.json file and found 368 packages
+        End status: 0 dirs visited, 2 inodes visited, 2 Extract calls, 29ms elapsed
+        Total 0 packages affected by 0 known vulnerabilities (0 Critical, …) from 0 ecosystems.
+        $ echo $?
+        127
+        Error during extraction: (extracting as vulnmatch/osvdev) max retries exceeded:
+        request failed: Post "https://api.osv.dev/v1/querybatch": dial tcp …: i/o timeout
+
+    三个要点：
+    * **扫描器自己就退 127**（所以 127 不等于它的二进制有问题）；
+    * 它**照印**「0 packages affected by 0 known vulnerabilities」——一个包都没查成，
+      却给出一句安心话（fail-open）；
+    * 同一次运行里，`End status: … 2 inodes visited, 2 Extract calls` 仍然只证明
+      「两片树的清单被读了」，**不证明漏洞库被查过**。
+
+    故判据不能是某一句措辞，只能三件一起咬合：每个目标都被点数、
+    JSON 结果可解析、结果与退出码不自相矛盾。缺任一按基础设施错误收口。
+    """
+
+    def test_end_status_is_parsed_as_per_target_readout(self, auditModule):
+        """`End status: … inodes visited, … Extract calls` 必须能被解析成计数。"""
+        real = (
+            "End status: 0 dirs visited, 2 inodes visited, 2 Extract calls, "
+            "29.4ms elapsed, 29.4ms wall time\n"
+        )
+        assert auditModule._endStatus(real) == (0, 2, 2), (
+            "真扫描器的 End status 行没被解析出来——门禁会退化成只看退出码"
+        )
+        assert auditModule._endStatus("Total 0 packages affected by 0 …") is None, (
+            "没有 End status 行时必须是「无证据」，不许把别的话当它"
+        )
+        assert auditModule._endStatus("") is None
+
+    def test_zero_verdict_statement_is_not_evidence(self, auditModule, tmp_path, monkeypatch):
+        """那句「0 packages affected by 0 known vulnerabilities」不许当成通过依据。"""
+        home = tmp_path / "home"
+        paths = _paths(home, ["NeurUI/src-tauri/Cargo.lock"])
+        monkeypatch.setattr(auditModule, "PROJECT_ROOT", home)
+        reassuring = (
+            "Scanned /w/Cargo.lock file and found 447 packages\n"
+            "Total 0 packages affected by 0 known vulnerabilities (0 Critical, …) "
+            "from 0 ecosystems.\n"
+        )
+        # 只有那句安心话：没有 End status 行 → 无证据
+        problems = auditModule._verdictProblems(127, reassuring, {"results": []}, paths.values())
+        assert problems, "只凭一句「0 漏洞」就放行——数据源不可达时正是这个形态"
+        assert any("End status" in item for item in problems), (
+            "报错必须点名缺的是「读了几个目标」的读数"
+        )
+
+    def test_unreachable_database_is_named_from_the_scanner_readout(self, auditModule):
+        """读数里点名 api.osv.dev 失败 → 必须被识别为「数据源不可达」，不是二进制问题。"""
+        readout = (
+            "Scanned /workspace/NeurUI/src-tauri/Cargo.lock file and found 447 packages\n"
+            "Total 0 packages affected by 0 known vulnerabilities (0 Critical, …)\n"
+            'Error during extraction: (extracting as vulnmatch/osvdev) max retries '
+            'exceeded: attempt 4: request failed: Post "https://api.osv.dev/v1/querybatch": '
+            "dial tcp 127.0.0.1:9: connect: connection refused\n"
+        )
+        assert auditModule.VULN_DB_UNREACHABLE.search(readout), (
+            "数据源不可达没被识别——CI 出站策略问题会被说成二进制问题"
+        )
+
+    def test_scan_that_never_reached_the_database_is_red_not_green(
+        self, auditModule, tmp_path, monkeypatch
+    ):
+        """端到端：出站被拦那种读数（退 127 + 一句 0 漏洞）必须报红，且点名数据源。"""
+        blocked_readout = (
+            "Scanned /workspace/NeurUI/src-tauri/Cargo.lock file and found 447 packages\n"
+            "Scanned /workspace/tools/npx-runtime/package-lock.json file and found 368 packages\n"
+            "End status: 0 dirs visited, 2 inodes visited, 2 Extract calls, 29ms elapsed\n"
+            "Total 0 packages affected by 0 known vulnerabilities (0 Critical, …) "
+            "from 0 ecosystems.\n"
+            'Error during extraction: (extracting as vulnmatch/osvdev) request failed: '
+            'Post "https://api.osv.dev/v1/querybatch"\n'
+        )
+        home = tmp_path / "home"
+        paths = _paths(
+            home, ["NeurUI/src-tauri/Cargo.lock", "tools/npx-runtime/package-lock.json"]
+        )
+        monkeypatch.setattr(auditModule, "PROJECT_ROOT", home)
+        stub = home / "osv-scanner-stub"
+        stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+
+        def fakeRun(cmd, **kwargs):
+            if cmd[1] == "--version":
+                return subprocess.CompletedProcess(
+                    cmd, 0, stdout="osv-scanner version: 2.6.0\n", stderr=""
+                )
+            return subprocess.CompletedProcess(cmd, 127, stdout=blocked_readout, stderr="")
+
+        monkeypatch.setattr(auditModule.subprocess, "run", fakeRun)
+        with pytest.raises(SystemExit) as exc:
+            auditModule.runPreflight(stub, list(paths.values()), stub)
+        message = str(exc.value)
+        assert "数据源不可达" in message, "预检报错没点名数据源——真因会被读成二进制问题"
+        assert "0 known vulnerabilities" in message, (
+            "报错必须点出那句会误导人的读数（0 漏洞），否则读日志的人会以为真没问题"
+        )
+
+    def test_only_one_target_read_is_red(self, auditModule, tmp_path, monkeypatch):
+        """只读了第一个目标就把自己关掉 → 报红（往后的目标「0 漏洞」读数无效）。"""
+        home = tmp_path / "home"
+        rels = ["NeurUI/src-tauri/Cargo.lock", "tools/npx-runtime/package-lock.json"]
+        paths = _paths(home, rels)
+        monkeypatch.setattr(auditModule, "PROJECT_ROOT", home)
+        output = (
+            "Scanned /w/Cargo.lock file and found 447 packages\n"
+            "End status: 0 dirs visited, 1 inodes visited, 1 Extract calls, 29ms elapsed\n"
+            "Total 0 packages affected by 0 known vulnerabilities (0 Critical, …)\n"
+        )
+        problems = auditModule._verdictProblems(0, output, {"results": []}, paths.values())
+        assert any("只读了 1 个目标" in item for item in problems), (
+            "半途而废的扫描没被认出来——两片树里有一片压根没查，读数却是「0 漏洞」"
+        )
+
+    def test_self_contradicting_readouts_are_red(self, auditModule, tmp_path, monkeypatch):
+        """退出码与 JSON 结果自相矛盾时，两个方向都不许被当成有效裁决。"""
+        home = tmp_path / "home"
+        paths = _paths(home, ["NeurUI/src-tauri/Cargo.lock"])
+        monkeypatch.setattr(auditModule, "PROJECT_ROOT", home)
+        good_status = "End status: 0 dirs visited, 2 inodes visited, 2 Extract calls, 29ms\n"
+        hit = {"results": [{"packages": [{"vulnerabilities": [{"id": "X"}]}]}]}
+        empty = {"results": []}
+
+        # 退出 1 却说 0 段命中：此前会被读成「扫出未允许漏洞」
+        problems = auditModule._verdictProblems(1, good_status, empty, paths.values())
+        assert any("退出 1 但 JSON 里 0 段命中" in item for item in problems), (
+            "退出 1 + 空结果被放过——读日志的人会去查一个不存在的漏洞"
+        )
+        # 退出 0 却带着命中：不许当通过
+        problems = auditModule._verdictProblems(0, good_status, hit, paths.values())
+        assert any("退出 0 但 JSON 里有" in item for item in problems), (
+            "退出 0 + 有命中被放过——告警被吞的形态会以绿收尾"
+        )
+
+    def test_missing_verdict_problem_lists_the_database_as_a_suspect(self, auditModule):
+        """读数缺失时的自查顺序必须包含「数据源不可达」——它是 PR #121 的真因。"""
+        problem = auditModule._missingVerdictProblem(0)
+        assert "拿不到裁决证据" in problem
+        assert "api.osv.dev" in problem
 
 
 class TestGuardIsWiredIntoCi:
