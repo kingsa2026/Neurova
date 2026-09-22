@@ -1236,6 +1236,43 @@ from neurova.context.dedup import DriftSafeDeduplicator
 from neurova.context.semantic_drawer import SemanticMatchDrawer
 from neurova.context.auto_tagger import AutoTagger
 
+def poolIdentityOf(agent_ref, session_id: Optional[str] = None) -> tuple:
+    """池身份三元组的**唯一派生处**（(user_id, agent_id, session_id)）。
+
+    构造侧（编排器）与查询侧（端点 / 工作流节点）必须用同一份派生：各写一遍
+    `getattr(...) or "default"` 就会出现"构造时用 default、查询时用 JWT user"
+    这类查不到的静默失配——池明明活着，取池返回 None，消费方再各造一个
+    （审计 P2-3 的形态）。
+    """
+    return (
+        str(getattr(agent_ref, "user_id", None) or "default"),
+        str(getattr(agent_ref, "agent_id", None) or "default"),
+        session_id,
+    )
+
+
+def get_context_pool(
+    user_id: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+):
+    """按身份取**已登记**的池（无则 None）。池的读侧唯一入口。
+
+    改前本符号不存在：消费方（neurflow 的上下文节点）只能 `try: import ...`
+    然后 `except ImportError` 静默降级——**符号缺失**在日志里只是个 DEBUG，
+    于是"取不到池"与"池里没内容"再也分不开（审计 P2-1）。
+
+    这里刻意**不造池**：取池路径能隐式造池的话，调用方拿到的是空池却以为
+    拿到了真池（审计 P2-3 的形态就是各造各的池、写入即丢）。要池请走
+    `ContextPoolRegistry.get_or_create`（显式创建）或从 Agent 的编排器取。
+
+    身份归一（None 与 "" 同键）由注册表负责，避免"登记用 None、查询用 ''"的静默失配。
+    """
+    from neurova.context_pool_registry import get_registry
+
+    return get_registry().get_pool(user_id or "", agent_id or "", session_id)
+
+
 __all__ = [
     "ContextSource",
     "ContextInput",
@@ -1247,4 +1284,5 @@ __all__ = [
     "DriftSafeDeduplicator",
     "SemanticMatchDrawer",
     "AutoTagger",
+    "get_context_pool",
 ]
