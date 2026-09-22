@@ -29,6 +29,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import io
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -37,6 +38,11 @@ import pytest
 from tests import ast_scan
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
+
+# 全部判据都要 `git ls-files` 取「入库文件」全集；git 缺席时先跳，
+# 不要让它变成 FileNotFoundError 把同文件其余断言一起带走。
+pytestmark = pytest.mark.skipif(
+    shutil.which("git") is None, reason="需要可执行的 git 才能查入库文件全集")
 
 # 权威实现（唯一允许的衰减模型载体）
 CANONICAL_TEMPERATURE = "neurova/cognitive_layers/memory_layer/temperature.py"
