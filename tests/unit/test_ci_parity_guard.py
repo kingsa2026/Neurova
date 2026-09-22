@@ -78,7 +78,11 @@ EXPECTED_CORE_COMMANDS = {
         # 非 pip 依赖树（Issue #56 残留边界）：Tauri Cargo.lock（Rust crates）
         # + tools/npx-runtime 锁（运行时 `npx -y` 现拉的包）。pip-audit 与
         # npm audit 都看不到它们，此前完全无人审计。
-        "python scripts/ci/osv_audit.py",
+        #
+        # 预取离线库那一步**不进本表**：它刻意带 `|| true`（允许失败），
+        # 而本表锁的是「阻塞门禁的核心命令」。两侧都已显式登记预取步骤，
+        # 命令逐字一致由 `test_offline_prefetch_is_declared_on_both_sides` 守。
+        "python scripts/ci/osv_audit.py --require-offline",
     ],
     # 经验质量基准（工单 009）：读数取自 EKB.quality_snapshot，语料冻结在仓内，
     # 每次运行先自证低质探针会被判红（详见 scripts/ci/experience_quality_gate.py）。
@@ -187,6 +191,44 @@ class TestCommandParity:
             assert cmd in cnb_scripts, (
                 f".cnb.yml 流水线 {pipe_names} 缺核心命令: {cmd}\n"
                 f"ci.yml 对应 job 有而 cnb 无——命令被单侧改动，放行标准漂移。"
+            )
+
+
+class TestOfflineDatabasePathIsDeclaredOnBothSides:
+    """离线库预取必须两侧都在，且命令逐字一致（否则一侧仍依赖实时可达性）。"""
+
+    _PREFETCH = "python scripts/ci/osv_audit.py --prefetch-offline-databases"
+
+    def test_offline_prefetch_is_declared_on_both_sides(self, cnb_pipelines, ghw_jobs):
+        job = "dependency-audit"
+        ghw = _job_scripts(ghw_jobs[job])
+        cnb = "\n".join(
+            _pipeline_scripts(cnb_pipelines[n])
+            for n in EXPECTED_MAP[job]
+            if n in cnb_pipelines
+        )
+        # `|| true` 是这一步的语义（允许失败），逐字比对时把它钉住
+        expected = self._PREFETCH + " || true"
+        assert expected in ghw, f"ci.yml job '{job}' 缺离线库预取步骤"
+        assert expected in cnb, (
+            f".cnb.yml 流水线 {EXPECTED_MAP[job]} 缺离线库预取步骤——"
+            "cnb 侧仍会现查 api.osv.dev，网络不可达时门禁红得无从归因"
+        )
+
+    def test_prefetch_step_is_non_blocking_but_gate_is_not(self, cnb_pipelines):
+        """预取允许失败、门禁不许：预取红会让「网络抖动」直接变成阻塞红灯。"""
+        for name in EXPECTED_MAP["dependency-audit"]:
+            pipe = cnb_pipelines.get(name)
+            if pipe is None:
+                continue
+            scripts = _pipeline_scripts(pipe)
+            assert self._PREFETCH + " || true" in scripts, (
+                f"流水线 {name} 的预取步骤没带 `|| true`——预取失败会阻塞合并，"
+                "而它只是「网络能不能拿到最新库」这一件事"
+            )
+            assert "--require-offline" in scripts, (
+                f"流水线 {name} 没显式要求离线——缺库时会静默回退直连，"
+                "「预取坏了」被藏成「这次网络恰好通」"
             )
 
 

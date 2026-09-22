@@ -36,6 +36,17 @@ pip-audit 与 npm audit 只覆盖"Python 声明锁"与"NeurUI 的 npm 树"。
   每次预检都真的跑通了，红只发生在随后那次调用上（127 = `sh` 的 command not found，
   与「命令拼错」同码同形）。故调用侧故障由 `ScannerInvocationError` 单独归因，
   「路径现在还能不能被调起来」由 `_invocationProbe()` 直接测，**不用状态码猜根因**。
+- **裁决不依赖远端可实时到达**：127 的第三个来源是**漏洞库数据源不可达**——
+  实测 `api.osv.dev` 被拦时扫描器自己就退 127，并且**照印**一句
+  `Total 0 packages affected by 0 known vulnerabilities`（一个包都没查成却给安心话，
+  fail-open）。故 ① 认这形态（`VULN_DB_UNREACHABLE`）并按基础设施错误收口；
+  ② 裁决证据只取漏洞库那一路的读数（`No issues found` / `Filtered N vulnerabilities`，
+  `_dbVerdict()`）——「依赖树被读了」（`End status: … inodes visited`）**不等于**
+  「漏洞库被查过」，实测两个场景的 `End status` 逐字相同；
+  ③ 把这条外部依赖收进可控面：**优先走离线库**（`--offline --offline-vulnerabilities`
+  + 预取缓存，实测下载 47s / 扫描 12.7s，与直连逐条一致），CI 两侧各加一步
+  best-effort 预取（`--prefetch-offline-databases || true`），门禁本体
+  `--require-offline`：缓存不齐即点名缺哪个生态，不静默回退。
 - **本地补丁必须被核验**：OSV 按 `name + version` 判定，看的是清单里的版本字符串，
   不是实际编译的源码——`[patch.crates-io]` 换成仓内源码后它照旧报同一个版本。
   于是"某条允许清单靠本地补丁成立"这件事，只能由本脚本自己核验：`LOCAL_PATCHES`
@@ -44,9 +55,13 @@ pip-audit 与 npm audit 只覆盖"Python 声明锁"与"NeurUI 的 npm 树"。
 
 用法：
     python scripts/ci/osv_audit.py                 # CI 用法
+    python scripts/ci/osv_audit.py --prefetch-offline-databases   # 预取离线库（CI 前置步）
+    python scripts/ci/osv_audit.py --require-offline              # 缺库即报错，不回退直连
     OSV_SCANNER_BIN=/path/to/osv-scanner python scripts/ci/osv_audit.py   # 离线/本地
 
 退出码：0 = 无未允许的漏洞；1 = 有未允许的漏洞；2 = 基础设施错误。
+
+仅安装了 Python 的环境即可跑（不依赖 unzip/tar/jq 等额外 CLI）。
 """
 
 from __future__ import annotations
@@ -110,6 +125,18 @@ _COMMAND_CONTRACT = {
         # 「真扫到了」读数，实测 `--verbosity warn` 会把它整行吞掉 → 包数对账看不到
         # 证据就只能报红。降低 verbosity = 把判据的证据自己删掉。
         "extra": ["--verbosity", "info"],
+        # 离线漏洞库：把「裁决依赖远端 api.osv.dev」这条外部依赖收进可控面。
+        # 2026-09-22 PR #121 的真红就是 api.osv.dev 不可达（扫描器退 127 并印
+        # 一句「0 漏洞」）。实测（同一天，v2.6.0）：
+        #   --offline --download-offline-databases   → 缓存 crates.io 3.4MB + npm 206MB，
+        #                                               耗时 47s
+        #   --offline --offline-vulnerabilities      → 扫描 12.7s，退出 0，allowlist 生效，
+        #                                               与直连结果逐条一致
+        # 注意 **两个 flag 必须成对**：只给 --offline 而不给
+        # --offline-vulnerabilities 时扫描器会退回「查本地缓存」，实测在缓存缺失或
+        # 不完整时报 `no offline version of the OSV database is available` 并退 127——
+        # 那正是本门禁要消灭的形态。
+        "offline_flags": ["--offline", "--offline-vulnerabilities"],
     },
     "v1": {
         "subcommand": ["scan"],
@@ -120,6 +147,9 @@ _COMMAND_CONTRACT = {
         "output": "--output",
         # v1 线与本仓库「逐条 -L 显式点名」的扫法自洽；目录级递归不在本门禁语义内。
         "extra": ["--skip-git"],
+        # v1 线**没有**离线库子命令（实测 1.9.2 的 `scan --help` 无 --offline*），
+        # 故留空：拼命令时按契约取，不假设存在。
+        "offline_flags": [],
     },
 }
 
@@ -149,9 +179,15 @@ CONTRACT_EXIT_CODES = (0, 1, 65)
 END_STATUS_LINE = re.compile(
     r"End status:\s*(\d+)\s+dirs visited,\s*(\d+)\s+inodes visited,\s*(\d+)\s+Extract calls"
 )
-# 全部命中被允许清单静默时扫描器的唯一读数（实测原文）。它允许「退出 0 且
-# results 为空」，但**不**允许拿来解释「results 非空却退 0」这种自相矛盾的形态。
+# 漏洞库**给出裁决**的两种读数（实测原文，v2.6.0）：
+#   * 全部命中被允许清单静默 → `Filtered 8 vulnerabilities from output` + `No issues found`
+#   * 无命中                → `No issues found`
+#   * 无命中且 filters 为空 → `Scanned … No issues found`
+# 这两行是「漏洞库这一路答复了」的唯一证据。**不**收那句
+# `Total N packages affected by M known vulnerabilities`：实测数据源不可达时它照印
+# （M=0），把它当证据就等于把「没查成」读成「没漏洞」——本门禁 2026-09-22 红过的那条。
 NO_ISSUES_LINE = re.compile(r"No issues found", re.IGNORECASE)
+FILTERED_LINE = re.compile(r"Filtered\s+\d+\s+vulnerabilit", re.IGNORECASE)
 
 # 扫描器自述「漏洞库数据源不可达」（真扫描器实测原文，2026-09-22）：
 #     Error during extraction: (extracting as vulnmatch/osvdev) max retries
@@ -245,6 +281,107 @@ def verify_local_patches() -> list:
                     f"[patch.crates-io] 未生效，实际编译的不是 {vendor_rel}"
                 )
     return problems
+
+
+# ── 离线漏洞库缓存：把「裁决依赖远端 api.osv.dev」收进可控面 ──────────────────
+# 为什么必须做：2026-09-22 PR #121 那次红，真因是 CI 容器对 `api.osv.dev` 不可达
+# （同容器对 github.com 放行，故二进制下载与指纹自证全过）。扫描器此时退 127 并
+# 印一句「0 漏洞」，门禁只能退 2 报红——于是「CI 网络抖动」与「真有未允许漏洞」
+# 在合并流程里长得一样，都得人来看（那一单连红三次，每次都被当抖动重跑）。
+#
+# 本仓跑过的两条通路（2026-09-22 实测，v2.6.0）：
+#   crates.io 离线库   3.4MB
+#   npm 离线库       206MB   下载耗时 47s（两者合计）
+#   随后 `--offline --offline-vulnerabilities` 扫描 12.7s、退出 0、allowlist 生效，
+#   与直连结果逐条一致。
+#
+# 缓存落点与扫描器自己的默认位置一致（`~/.cache/osv-scalibr/<ecosystem>/all.zip`），
+# 故不必额外教它去哪儿找；本脚本只负责「判断齐不齐」与「触发预取」。
+# 为什么用扫描器自己的目录而不是本脚本另建一个：另建就等于维护第二份缓存口径，
+# 而「哪个生态的库存在哪」是扫描器随版本变的事实——本脚本不抄它。
+OSV_DB_CACHE = Path.home() / ".cache" / "osv-scalibr"
+# 被扫依赖树 → 它需要的离线库归属（crates.io / npm）。缺一份即整条离线路径不可用：
+# 实测缓存只有 crates.io 时，npm 那一路会报
+# `no offline version of the OSV database is available` 并退 127。
+OFFLINE_DB_SCOPE = {
+    "NeurUI/src-tauri/Cargo.lock": "crates.io",
+    "tools/npx-runtime/package-lock.json": "npm",
+}
+
+
+def _requiredOfflineScopes(targets) -> list:
+    """从被扫目标推出「必须备好哪几个生态的离线库」（相对 PROJECT_ROOT 的路径）。"""
+    scopes = []
+    for target in targets:
+        path = Path(target)
+        try:
+            rel = path.resolve().relative_to(PROJECT_ROOT).as_posix()
+        except ValueError:
+            rel = path.name
+        scope = OFFLINE_DB_SCOPE.get(rel)
+        if scope and scope not in scopes:
+            scopes.append(scope)
+    return scopes
+
+
+def offlineDatabaseProblems(targets) -> list:
+    """检查离线库缓存是否已备齐，返回问题清单（空 = 可供 `--offline` 使用）。
+
+    判据是**文件在场**，不是「下载过」：扫描器把每个生态的库落成
+    `<scopes>/<ecosystem>/all.zip`（实测 crates.io/all.zip 3.4MB、npm/all.zip 206MB）。
+    只查在场不查新鲜度——新鲜度由预取步骤负责，且**过期库仍好过一个不可达的库**：
+    过期只会漏报新公告，不可达会让整条门禁在「网络抖动」与「真有漏洞」之间无从分辨。
+    """
+    scopes = _requiredOfflineScopes(targets)
+    problems = []
+    for scope in scopes:
+        db = OSV_DB_CACHE / scope / "all.zip"
+        if not db.is_file():
+            problems.append(f"离线库缺失: {db}（生态 {scope}）")
+    if not scopes:
+        problems.append("没有可归属到生态的被扫目标——离线库归属表需复核")
+    return problems
+
+
+def prefetch_offline_databases(scanner: Path, targets) -> int:
+    """预取离线漏洞库到 `OSV_DB_CACHE`，返回退出码（0 = 齐备）。
+
+    为什么由本脚本而不是 CI 里写死命令：`--download-offline-databases` 的拼法
+    与「哪个生态落在哪个子目录」都是扫描器随版本变的事实，二者必须与
+    `buildScanCommand` 的离线 flag 同源，否则会出现「预取到 A 处、扫描读 B 处」
+    ——那时门禁报的是「离线库缺失」，而缓存其实就在旁边。
+
+    预取**允许失败**（本函数返回非 0，但 CI 步不据此判红）：库过期只漏报新公告，
+    而库缺失只是让门禁回退直连。把预取写成硬门禁，等于把「CI 出站策略」升级成
+    一个会随网络抖动的红灯——那正是本单要消灭的形态。真正的判据在门禁本体。
+    """
+    binary = resolveBinaryPath(scanner)
+    assertScannerExecutable(binary)
+    scopes = _requiredOfflineScopes(targets)
+    if not scopes:
+        print("[osv] 没有可归属到生态的被扫目标——不预取", file=sys.stderr)
+        return 2
+    print(f"[osv] 预取离线漏洞库 → {OSV_DB_CACHE}（生态: {', '.join(scopes)}）")
+    cmd = [str(binary), "scan", "source", "--offline", "--download-offline-databases"]
+    for t in targets:
+        cmd += ["--lockfile", str(t)]
+    proc = _runScannerProcess(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
+    # 退出码语义：「已经是最新」与「刚下载完」都不该算失败。实测下载完 rc=1
+    # （扫描器先下载、再拿新库扫了一遍并报了允许清单外的历史命中），
+    # 「已最新」实测 rc=0。故判据落在**缓存文件是否在场**上，码只打日志。
+    problems = offlineDatabaseProblems(targets)
+    if problems:
+        print(f"[osv] 预取未完成（扫描器退出码 {proc.returncode}）:", file=sys.stderr)
+        for item in problems:
+            print(f"      - {item}", file=sys.stderr)
+        detail = ((proc.stderr or "") + (proc.stdout or "")).strip().splitlines()
+        if detail:
+            print(f"      扫描器自述：{detail[-1][:300]}", file=sys.stderr)
+        return 2
+    for scope in scopes:
+        db = OSV_DB_CACHE / scope / "all.zip"
+        print(f"[osv]       - {scope}: {db.stat().st_size // (1 << 20)} MB")
+    return 0
 
 
 def _platform_key() -> str:
@@ -342,6 +479,40 @@ def _endStatus(scanner_output: str):
     return tuple(int(g) for g in match.groups())
 
 
+def _dbVerdict(scanner_output: str):
+    """取「漏洞库这一路给出的裁决」，`None` = 没拿到。
+
+    为什么要单独一根轴：`End status: … 2 inodes visited, 2 Extract calls` 数的是
+    **扫了几个依赖清单**，`Filtered N vulnerabilities` / `No issues found` 才是
+    **漏洞库查询的裁决**。2026-09-22 实测两者会分叉——同一条 `End status` 在两
+    个场景里逐字相同：
+
+        # 出站正常
+        End status: 0 dirs visited, 2 inodes visited, 2 Extract calls, 29ms elapsed
+        Filtered 8 vulnerabilities from output
+        No issues found                                          → exit 0
+
+        # api.osv.dev 被拦（本机用黑洞代理复刻，实测）
+        End status: 0 dirs visited, 2 inodes visited, 2 Extract calls, 29ms elapsed
+        Error during extraction: (extracting as vulnmatch/osvdev) … api.osv.dev …
+                                                                 → exit 127
+
+    只咬依赖树读数时，这两个场景**不可区分**；而后者印的那句「Total 0 packages
+    affected by 0 known vulnerabilities」会让下游把它读成「真没漏洞」（fail-open）。
+    故裁决一律从这一路取：拿到 `No issues found` 或 `Filtered N vulnerabilities`
+    才算「漏洞库给了答复」；只有那份「0 漏洞」的安心话不算（实测它在数据源不可达
+    时照印）。
+
+    返回值取那句裁决原文（便于打进日志），取不到则 `None`。
+    """
+    text = scanner_output or ""
+    for pattern in (NO_ISSUES_LINE, FILTERED_LINE):
+        match = pattern.search(text)
+        if match is not None:
+            return match.group(0)
+    return None
+
+
 def _verdictProblems(returncode: int, scanner_output: str, payload, targets) -> list:
     """检查「这次调用到底有没有拿到可信裁决」，返回问题清单。
 
@@ -386,6 +557,18 @@ def _verdictProblems(returncode: int, scanner_output: str, payload, targets) -> 
         problems.append(
             f"退出 0 但 JSON 里有 {len(results)} 段命中——结果与退出码自相矛盾，"
             "不许当通过（要么扫描器版本/契约不符，要么告警被吞）"
+        )
+    if returncode == 0 and not results and _dbVerdict(scanner_output) is None:
+        # 依赖树读数足数、结果为空、退出 0 —— 看起来最像「真没漏洞」的形态，
+        # 但漏洞库那一路**没给裁决**。两个场景（数据源不可达 / 真无漏洞）在
+        # 依赖树一层完全同形，区别只在这一路；分不出就必须报红，不许赌。
+        problems.append(
+            "退出 0 且空结果，但读数里没有漏洞库给出的裁决"
+            "（既无 `No issues found`、也无 `Filtered N vulnerabilities`）——"
+            "依赖树读数足数只证明「清单被读了」，不证明「漏洞库被查过」；"
+            "实测 api.osv.dev 被拦时扫描器照印 "
+            "`Total 0 packages affected by 0 known vulnerabilities` 并退非零，"
+            "该形态与「真无漏洞」在依赖树这一层同形，故不得据以报绿"
         )
     if returncode == 1 and not results:
         problems.append(
@@ -464,17 +647,25 @@ def _commandContract() -> dict:
     used.add(contract["output"])
     contract["extra"] = list(contract["extra"])
     used.update(contract["extra"])
+    contract["offline_flags"] = list(contract.get("offline_flags", []))
+    used.update(contract["offline_flags"])
     contract["flags"] = frozenset(used)
     return contract
 
 
-def buildScanCommand(scanner: Path, targets, allowlist: Path, output: Path) -> list:
+def buildScanCommand(
+    scanner: Path, targets, allowlist: Path, output: Path, offline: bool = False
+) -> list:
     """按契约拼出扫描命令。单一落点：预检与正式扫描共用同一拼法。
 
     二进制一律走 `resolveBinaryPath()`（绝对路径）——相对路径在 `cwd` 变换、
     临时目录、或壳层 PATH 不含当前目录时表现为 `command not found`（127），
     而 127 与「命令不成形」同码，会把缺件伪装成扫描器故障。实测依据见
     `tests/unit/test_osv_audit_hardening_guard.py` 的 `TestBinaryPathIsAbsolute`。
+
+    `offline=True` 时补上离线库 flag（成对，见契约表注释）。调用方按
+    「缓存是否已备好」决定，不由本函数猜——缓存缺失时擅自离线会得到
+    `no offline version of the OSV database is available`（实测退 127）。
     """
     contract = _commandContract()
     cmd = [str(resolveBinaryPath(scanner)), *contract["subcommand"]]
@@ -485,6 +676,8 @@ def buildScanCommand(scanner: Path, targets, allowlist: Path, output: Path) -> l
         cmd += [contract["lockfile_flag"], str(t)]
     for flag, value in zip(contract["extra"][0::2], contract["extra"][1::2]):
         cmd += [flag, value]
+    if offline:
+        cmd += list(contract["offline_flags"])
     return cmd
 
 
@@ -625,18 +818,22 @@ def _packageCountsMatch(
     return problems
 
 
-def runPreflight(scanner: Path, targets, allowlist: Path) -> list:
+def runPreflight(scanner: Path, targets, allowlist: Path, offline: bool = False) -> list:
     """起一次**真扫描**自证「这个二进制是能用的扫描器」，返回读数清单。
 
     为什么不能只看文件在不在、指纹对不对：指纹只证明「与我钉的那份一致」。
     2026-09-22 PR #121 实测：下载失败时落盘的是 127 字节 GitHub 错误页，与真二进制
     sha256 相同，`_download_scanner` 报"指纹校验通过"，随后命令不成形退 127——
     与「扫描器版本不符」同码同形。故这里跑真链路：解析目标、出 JSON、退出码在契约内。
+
+    `offline` 与正式扫描**必须同值**：预检若直连、正式跑离线（或反之），两者用的
+    就不是同一条通路——「预检通过」不再代表正式那次能给出裁决，而这正是 2026-09-22
+    连红三次的读法。故由 `main()` 决策一次、两处透传同一份。
     """
     binary = resolveBinaryPath(scanner)
     version_line = assertScannerExecutable(binary)
     output = Path(tempfile.mkdtemp(prefix="osv-preflight-")) / "preflight.json"
-    cmd = buildScanCommand(binary, targets, allowlist, output)
+    cmd = buildScanCommand(binary, targets, allowlist, output, offline=offline)
     proc = _runScannerProcess(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
     problems = []
     merged = (proc.stdout or "") + "\n" + (proc.stderr or "")
@@ -686,6 +883,7 @@ def runPreflight(scanner: Path, targets, allowlist: Path) -> list:
 
     report = [
         f"[osv] 扫描器自证: {version_line}（{binary}）",
+        f"[osv] 裁决通路: {'离线库（不依赖 api.osv.dev）' if offline else '直连 api.osv.dev'}",
         "[osv] 预检通过（真跑一次扫描自证契约）:",
     ]
     for rel, count in counts.items():
@@ -715,6 +913,16 @@ def main() -> int:
         nargs="*",
         default=None,
         help="覆盖被扫锁文件（默认取 SCAN_TARGETS 中存在者）",
+    )
+    ap.add_argument(
+        "--prefetch-offline-databases",
+        action="store_true",
+        help="只预取离线漏洞库后退出（CI 的前置步骤；门禁本体不靠它成功与否）",
+    )
+    ap.add_argument(
+        "--require-offline",
+        action="store_true",
+        help="离线库不齐即退 2（默认：不齐则回退直连并在日志里点名）",
     )
     args = ap.parse_args()
 
@@ -766,11 +974,41 @@ def main() -> int:
     for t in targets:
         print("      -", Path(t).relative_to(PROJECT_ROOT))
 
+    if args.prefetch_offline_databases:
+        # 预取是 CI 的前置步骤，只做这一件事就退出；判据在门禁本体里。
+        try:
+            return prefetch_offline_databases(scanner, targets)
+        except ScannerInvocationError as e:
+            print(f"[osv] 预取时调用故障（扫描器没被跑起来）: {e}", file=sys.stderr)
+            return 2
+
+    # 裁决通路决策**在预检之前**做一次，两处（预检 / 正式）透传同一个值。
+    # 缓存齐备就走离线：本仓的裁决不该依赖一个 CI 出站不在本仓手里的远端域名
+    # （2026-09-22 PR #121 三次红全因它不可达）。缓存不齐就直连——库过期只会漏报
+    # 新公告，而缺库硬走离线会让整条门禁变成「永远退 127」的哑弹（实测）。
+    offline_problems = offlineDatabaseProblems(targets)
+    offline = not offline_problems
+    if offline:
+        print(f"[osv] 离线库缓存齐备，裁决走离线通路: {OSV_DB_CACHE}")
+    elif args.require_offline:
+        # CI 侧显式要求离线时，缺库**不静默回退**：回退直连会把「预取步骤坏了」
+        # 藏成「这次网络恰好通」，下一次抖动才红，读日志的人无从归因。
+        print("[osv] 离线库缓存不齐且显式要求离线——拒绝回退直连:", file=sys.stderr)
+        for item in offline_problems:
+            print(f"      - {item}", file=sys.stderr)
+        return 2
+    else:
+        # 不静默降级：点名缺什么、以及「本次仍会现查远端」，让读日志的人知道
+        # 下一次网络抖动会红在这里。
+        print("[osv] 离线库缓存不齐，本次回退直连 api.osv.dev（网络不可达即无法裁决）:")
+        for item in offline_problems:
+            print(f"      - {item}")
+
     # 关键路径：**取回来的二进制必须自证能用**。经 `_resolve_scanner()` 进来的都走
     # 这一步（含 `--with-binary` / `OSV_SCANNER_BIN`）——"文件在"与"指纹对"都不
     # 足以说明它是能跑的扫描器（PR #121：127 字节错误页与真二进制同 sha256）。
     try:
-        for line in runPreflight(scanner, targets, allowlist):
+        for line in runPreflight(scanner, targets, allowlist, offline=offline):
             print(line)
     except ScannerInvocationError as e:
         # 门禁自己没把扫描器跑起来（调用侧故障）：**必须在任何状态码判据之前**
@@ -791,7 +1029,7 @@ def main() -> int:
     # `_pipelineExitCodesSurviveRedirect`），**有漏洞也会退出 0**。
     # buildScanCommand 内部走 resolveBinaryPath，与 runPreflight 自证过的是同一份
     # 绝对路径；调用侧故障（起不来）由 _runScannerProcess 单独归因。
-    cmd = buildScanCommand(scanner, targets, allowlist, output)
+    cmd = buildScanCommand(scanner, targets, allowlist, output, offline=offline)
     proc = _runScannerProcess(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True)
 
     # 契约码判据先行：非契约码（127 等）说明命令没成形或版本不符，禁止当"无漏洞"。

@@ -221,13 +221,24 @@ jobs:
         # playwright/paramiko/pycryptodome ...）此前完全无人扫——本步补齐该缺口。
         run: python -m pip_audit -r requirements-full.lock --progress-spinner off
 
+      - name: Prefetch OSV offline databases (best effort)
+        # 先把漏洞库落到 runner 本地缓存，让下面这条门禁的裁决**不依赖**
+        # api.osv.dev 的实时可达性——2026-09-22 PR #121 三次红全因该域名
+        # 在 CI 容器里不可达（扫描器此时退 127 并印一句「0 漏洞」）。
+        # 预取失败**不判红**：库过期只漏报新公告，库缺失只是让门禁回退直连；
+        # 把一条随网络抖动的命令放进阻塞门禁，就是本单在消灭的那个形态。
+        # 判据在门禁本体：缓存齐就走离线、不齐则点名并回退（可读、可复算）。
+        run: python scripts/ci/osv_audit.py --prefetch-offline-databases || true
+
       - name: Audit non-pip trees (Rust crates + runtime npx packages)
         # pip-audit / npm audit 之外的两片依赖面（Issue #56 残留边界）：
         #   * NeurUI/src-tauri/Cargo.lock —— Tauri 桌面壳 447 个 crate
         #   * tools/npx-runtime/package-lock.json —— 运行时 `npx -y` 现拉的包
         # 两者都在生产执行路径上，此前无锁无审计。统一走 OSV-Scanner，
         # 允许清单（带理由+到期日）见 scripts/ci/osv-allowlist.toml。
-        run: python scripts/ci/osv_audit.py
+        # `--require-offline`：本 job 已显式预取，缺库即报错，不许静默回退直连
+        # （回退会把「预取坏了」藏成「这次网络恰好通」，下一次抖动才红）。
+        run: python scripts/ci/osv_audit.py --require-offline
 
   experience-quality:
     name: Experience quality benchmark (real corpus A/B)
