@@ -239,45 +239,47 @@ class TestDynamicTokenBudget:
         assert vision_budget > text_budget
 
 
-class TestVectorStorePreload:
-    """向量存储预加载测试"""
-    
-    def test_vector_store_preload(self):
-        """测试向量存储预加载（Mock 用后恢复，不污染 sys.modules）"""
+class TestVectorStoreLazyCreation:
+    """向量仓按需创建（B6-10：预加载入口 `preload_vector_store` 已退役）。
+
+    `preload_vector_store` 与 `vector_store` property 是同一件事的两份写法，
+    而生产只走 property（`_buildScoringContext` 取它编码）。故把契约钉在真面：
+    首次访问即建、之后复用同一实例，且不可用时 fail-soft 成 False。
+    """
+
+    def test_vector_store_created_on_first_access(self):
         from neurova.context_pool import SemanticMatchDrawer
 
         drawer = SemanticMatchDrawer(max_tokens=16000)
-
-        # 验证预加载方法存在
-        assert hasattr(drawer, "preload_vector_store")
-
-        # 初始状态应该是 None
-        assert drawer._vector_store is None
+        assert drawer._vector_store is None  # 不预载：访问前不开销
 
         import sys as _sys
         _key = "neurova.cognitive_layers.memory_layer.unified_vector_store"
         _real = _sys.modules.get(_key)
         try:
             with patch("neurova.context_pool.UnifiedVectorStore", create=True):
-                drawer.preload_vector_store()
-                assert drawer._vector_store is not None
+                first = drawer.vector_store
+                assert first is not None
+                # 二次访问复用同一实例（不是每次重建）
+                assert drawer.vector_store is first
         finally:
             if _real is not None:
                 _sys.modules[_key] = _real
             else:
                 _sys.modules.pop(_key, None)
-    def test_vector_store_cache_hit(self):
-        """测试向量存储缓存命中"""
+
+    def test_vector_store_unavailable_degrades_to_false(self):
+        """依赖缺席时 fail-soft 成 False，且不反复重试导入。"""
         from neurova.context_pool import SemanticMatchDrawer
-        
+        import builtins
+
         drawer = SemanticMatchDrawer(max_tokens=16000)
-        
-        # 模拟预加载 - 设置一个 mock 对象
-        drawer._vector_store = Mock()
-        
-        # 再次调用 preload_vector_store 应该不会重新创建（因为 _vector_store 不是 None）
-        original_store = drawer._vector_store
-        drawer.preload_vector_store()
-        
-        # 应该是同一个对象（缓存命中）
-        assert drawer._vector_store is original_store
+        real_import = builtins.__import__
+
+        def _blocked(name, *args, **kwargs):
+            if name == "neurova.cognitive_layers.memory_layer.unified_vector_store":
+                raise ImportError("模拟依赖缺席")
+            return real_import(name, *args, **kwargs)
+
+        with patch.object(builtins, "__import__", _blocked):
+            assert drawer.vector_store is False

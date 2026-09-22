@@ -3,10 +3,14 @@ P1-1④ ack 集 + 分层剪枝测试
 
 语义：
 - ContextInput.seen_confirmed：已被成功模型请求读过的标志（默认 False）
-- ContextPool.mark_turn_seen / mark_hashes_seen：ack 写入
+- ContextPool.mark_hashes_seen：ack 写入（唯一通路：编排器按视图 hash 标记）
 - orchestrator.mark_last_view_seen：确认最近一次视图内的 chunk 已读
 - Drawer 分层：未读 TOOL_CALL 优先入选（必须在模型视野内）；
-  已确认的作为折叠候选排后——超预算时先被跳过（第一层剪枝）
+  已确认的排后——超预算时先被跳过（第一层剪枝）
+
+B6-10（Issue #90 审计 §5）：池上的旁路 ack `ContextPool.mark_turn_seen` 与其
+配套的 turn 索引生产零消费，已删净；下面把「未读工具结果优先入选」这条契约
+搬到它真正的承载面（`SemanticMatchDrawer.draw` 的分层选取）上用例钉住。
 """
 
 import pytest
@@ -47,25 +51,6 @@ class TestSeenConfirmedField:
 
 
 class TestPoolAck:
-    def test_mark_turn_seen_flips_matching_chunks(self):
-        pool = ContextPool(user_id="u", agent_id="a")
-        pool.add_context(_tool_chunk("t1 result", turn_id="turn_1"))
-        pool.add_context(_tool_chunk("t2 result", turn_id="turn_2"))
-
-        count = pool.mark_turn_seen("turn_1")
-
-        assert count == 1
-        chunks = pool.get_contexts()
-        by_content = {c.content: c.seen_confirmed for c in chunks}
-        assert by_content["t1 result"] is True
-        assert by_content["t2 result"] is False
-
-    def test_mark_turn_seen_idempotent(self):
-        pool = ContextPool(user_id="u", agent_id="a")
-        pool.add_context(_tool_chunk("r", turn_id="turn_1"))
-        assert pool.mark_turn_seen("turn_1") == 1
-        assert pool.mark_turn_seen("turn_1") == 0  # 已标记不再计数
-
     def test_mark_hashes_seen(self):
         pool = ContextPool(user_id="u", agent_id="a")
         chunk = _conv_chunk("target")
@@ -80,43 +65,38 @@ class TestPoolAck:
         assert pool.mark_hashes_seen([]) == 0
 
 
-class TestFoldCandidates:
-    def test_fold_candidates_only_confirmed_tool_calls(self):
-        """折叠候选 = 已确认的 TOOL_CALL（最老优先）；未读/其他源不入选"""
-        pool = ContextPool(user_id="u", agent_id="a")
-        pool.add_context(_tool_chunk("seen old", turn_id="turn_1", seen=True))
-        pool.add_context(_tool_chunk("unseen fresh", turn_id="turn_2", seen=False))
-        pool.add_context(_conv_chunk("conversation", turn_id="turn_3"))
+class TestDrawerPrefersUnreadToolResults:
+    """未读工具结果优先入选（契约从已退役的 select_fold_candidates 搬到真面）。
 
-        candidates = pool.select_fold_candidates()
+    `ContextPool.select_fold_candidates` 是最初的承载面，但它生产零消费（池上
+    没有折叠路径，窗口折叠在 `window_compactor`），B6-10 删净。真正在生产的
+    分层选取是 `SemanticMatchDrawer.draw` 的 `layered_positions`：未读
+    TOOL_CALL 排在第 1 层、已确认的排第 2 层，超预算时先跳过后者。
 
-        contents = [c.content for c in candidates]
-        assert contents == ["seen old"]  # 只收已确认 TOOL_CALL
+    本类把契约钉在真面上：预算只够一条时，留下的必须是**没被模型看过**的那条。
+    """
 
-    def test_fold_candidates_oldest_first(self):
-        from datetime import datetime, timedelta
+    def _draw_with_budget(self, drops, budget):
+        from neurova.context.semantic_drawer import SemanticMatchDrawer
 
-        pool = ContextPool(user_id="u", agent_id="a")
-        c_later = _tool_chunk("later", turn_id="turn_2", seen=True)
-        c_earlier = _tool_chunk("earlier", turn_id="turn_1", seen=True)
-        c_later.created_at = datetime.now()  # Windows 同毫秒打平 → 显式错开
-        c_earlier.created_at = datetime.now() - timedelta(seconds=1)
-        pool.add_context(c_later)
-        pool.add_context(c_earlier)
-        contents = [c.content for c in pool.select_fold_candidates()]
-        assert contents == ["earlier", "later"]
+        return SemanticMatchDrawer(max_tokens=budget).draw(list(drops), need=None)
 
-    def test_fold_candidates_max_count(self):
-        pool = ContextPool(user_id="u", agent_id="a")
-        for i in range(5):
-            pool.add_context(_tool_chunk(f"t{i}", turn_id=f"turn_{i}", seen=True))
-        assert len(pool.select_fold_candidates(max_count=2)) == 2
+    def test_unread_tool_result_wins_under_tight_budget(self):
+        unread = _tool_chunk("unseen result", tokens=40, turn_id="t1", seen=False)
+        seen = _tool_chunk("already read", tokens=40, turn_id="t2", seen=True)
+        # 插入序刻意把已读的放前面——按位置序选取会选错
+        selected = self._draw_with_budget([seen, unread], budget=60)
+        assert [d.content for d in selected] == ["unseen result"], (
+            "预算不足时被跳过的应是已确认读过的条目；未读工具结果必须在视野内"
+        )
 
-    def test_unread_tool_never_fold_candidate(self):
-        """核心不变量：未读工具结果绝不进折叠候选（防折叠致幻觉）"""
-        pool = ContextPool(user_id="u", agent_id="a")
-        pool.add_context(_tool_chunk("unseen", turn_id="turn_1", seen=False))
-        assert pool.select_fold_candidates() == []
+    def test_seen_tool_result_still_eligible_when_budget_allows(self):
+        unread = _tool_chunk("unseen result", tokens=40, turn_id="t1", seen=False)
+        seen = _tool_chunk("already read", tokens=40, turn_id="t2", seen=True)
+        selected = self._draw_with_budget([seen, unread], budget=500)
+        assert {d.content for d in selected} == {"unseen result", "already read"}, (
+            "预算充足时两层都应入选——分层只影响超预算时的跳过顺序"
+        )
 
 
 class TestOrchestratorAck:

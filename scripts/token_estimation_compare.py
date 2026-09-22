@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from neurova.context_compressor import Message  # noqa: E402
-from neurova.context_pool import ContextPoolUtils
+from neurova.context.token_estimator import estimate_tokens as estimate_text_tokens
 
 
 def count_tokens_injector(text: str) -> int:
@@ -46,8 +46,8 @@ def test_text(text: str, label: str):
     # 方法1: injector.py - _count_tokens
     injector_tokens = count_tokens_injector(text)
     
-    # 方法2: context_pool.py - ContextPoolUtils.estimate_tokens
-    pool_tokens = ContextPoolUtils.estimate_tokens(text)
+    # 方法2: 统一 token 估算入口（context/token_estimator.py，唯一事实源）
+    pool_tokens = estimate_text_tokens(text)
     
     # 方法3: context_compressor.py - Message.estimate_tokens
     message = Message(role="user", content=text)
