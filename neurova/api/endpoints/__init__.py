@@ -4,17 +4,12 @@
 from neurova.core.logger import get_logger
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter
-
 logger = get_logger(__name__)
 
-# 创建顶层 router
-router = APIRouter()
-evolution_router = APIRouter()
-rag_router = APIRouter()
-
-# ACP 消息协议路由（真实实现，见 acp_api.py）
-from neurova.api.endpoints.acp_api import router as acp_router  # noqa: E402
+# 挂载事实唯一的落点：`endpoint_modules` 注册表（见 register_endpoint_routers）。
+# 历史上这里另有三个模块级空 APIRouter（router / evolution_router / rag_router），
+# 被 app.py 挂成 /api、/api/evolution、/api/rag —— 对外声称三个前缀可用、实际全 404。
+# 已删除：空 router 不是「待接线」，是「不存在却对外可见」。
 
 # 全局状态（由 app.py 初始化时设置）
 _app_state: Optional[Dict[str, Any]] = None
@@ -279,8 +274,16 @@ def register_endpoint_routers(app) -> None:
         ("neurova.api.endpoints.mcp_server_api", "/v1/mcp", "Neurova MCP Server Face"),
         ("neurova.api.endpoints.negative_screen_settings", "/v1/negative-screen", "Negative Screen Settings API"),
         ("neurova.api.endpoints.memory_settings_api", "/v1/memory-settings", "Memory Settings API"),
+        # neuron / coordination_api / acp_api 的挂载前缀由模块自述 `APIRouter(prefix=...)`
+        # 提供（表内留空），避免与自述前缀各叠一次拼出 /api/neuron/neuron 这类重复段。
         ("neurova.api.endpoints.neuron", "", "NEURON System API"),
-        ("neurova.api.endpoints.coordination_api", "/coordination", "Multi-Agent Coordination API"),
+        ("neurova.api.endpoints.coordination_api", "", "Multi-Agent Coordination API"),
+        ("neurova.api.endpoints.acp_api", "/acp", "ACP 消息协议 API"),
+        # 此前由 app.py 旁路挂在 /api 下（缺 /v1），而前端 axios baseURL=/api/v1 →
+        # 真实页面 CostDashboardPage.vue 的请求必 404。并入注册表即回到全库统一的
+        # /api/v1 挂载层，旁路副本同步删除。
+        ("neurova.api.endpoints.budget_api", "/v1", "Budget API"),
+        ("neurova.api.endpoints.cost_rollup_api", "/v1", "Cost Rollup API"),
     ]
 
     registered = 0

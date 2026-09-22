@@ -263,11 +263,25 @@ main:
           # playwright/paramiko/pycryptodome ...）此前完全无人扫——本步补齐该缺口。
           script: python -m pip_audit -r requirements-full.lock --progress-spinner off
           timeout: 20m
+        - name: prefetch OSV offline databases (best effort)
+          # 先把漏洞库落到 runner 本地缓存，让下面这条门禁的裁决**不依赖**
+          # api.osv.dev 的实时可达性——2026-09-22 PR #121 三次红全因该域名
+          # 在本容器里不可达（扫描器此时退 127 并印一句「0 漏洞」）。
+          # 预取失败**不判红**：库过期只漏报新公告，库缺失只是让门禁回退直连；
+          # 把一条随网络抖动的命令放进阻塞门禁，就是本单在消灭的那个形态。
+          # 判据在门禁本体：缓存齐就走离线、不齐则点名并回退（可读、可复算）。
+          script: python scripts/ci/osv_audit.py --prefetch-offline-databases || true
+          timeout: 20m
         - name: audit non-pip trees (Rust crates + runtime npx packages)
           # pip-audit / npm audit 之外的两片依赖面（Issue #56 残留边界）：
           #   * NeurUI/src-tauri/Cargo.lock —— Tauri 桌面壳 crate 树
           #   * tools/npx-runtime/package-lock.json —— 运行时 `npx -y` 现拉的包
           # 统一走 OSV-Scanner；允许清单见 scripts/ci/osv-allowlist.toml。
+          # 不带 `--require-offline`：上面那步预取是 best-effort（`|| true`），
+          # 门禁就不能要求「预取必须成功」——否则预取一失败就是红灯，而这与
+          # 「真有未允许漏洞」在合并流程里同形，读日志的人仍只能重跑。
+          # 缓存不齐时门禁**回退直连并点名缺哪一份**（裁决通路收口在
+          # resolveVerdictChannel 一处），红只留给「真有未允许漏洞」。
           script: python scripts/ci/osv_audit.py
           timeout: 20m
 
@@ -359,10 +373,10 @@ main:
 #   现在：@kingsa2026/neurova(DSCoder) 即 max 档；@...(DSCoder-max) 等价。
 # ============================================================================
 # ── max 档（唯一档位）：@kingsa2026/neurova(DSCoder) / (DSCoder-max) ────────
-# $ 与 DSCoder-max 两个挂载点各写一份事件定义（均落 thinkingLevel: xhigh），
-# 避免「$ 中性档 + 不带后缀被 @ 时落到平台默认低档」的档位漂移；
-# 两份内容必须逐字一致，由 tests/unit/test_ci_npc_config_guard.py 常驻校验。
-_档位映射: &npc-level
+# 运行参数只在 `$` 下写一份（落 thinkingLevel: xhigh），
+# 避免「$ 中性档 + 被 @ 时落到平台默认低档」的档位漂移；
+# 档位角色名与参数的一致性由 tests/unit/test_ci_npc_config_guard.py 常驻校验。
+.档位映射: &npc-level
   DSCoder: xhigh
   DSCoder-max: xhigh
 
@@ -377,16 +391,22 @@ $:
             # 不写 model = 走平台默认模型（规避 400）；
             # 想锁定底座模型时，填平台真实存在的 model ID（不带思考强度后缀）。
             #
-            # 为何不再压 maxTurns（2026-09-21 复盘）：
-            #   本 PR 初版曾把本值压到 120（≈58 分钟），理由是「maxTurns 同时
-            #   是单次构建的最坏耗时上限：500 轮 × 29s/轮 ≈ 4h，必然先被平台
-            #   2h 上限掐断」。维护者在 main 上显式把 $ 段调到 1000，方向相反：
-            #   轮数配额按「任务够用」给。因为实测 251 轮 / 7262s 证明「被掐断」
-            #   的根因不是轮数给多了，而是 (a) Agent 自己 sleep 轮询
-            #   （300s/420s/480s 串起等待）、(b) 单轮一次全量 pytest 就 20 分 39 秒。
-            #   修掉这两件事，时间预算才不会漏；硬压轮数只会让正常长任务死在半路。
-            #   故本值保持 1000，真正的硬禁令由下方「禁止 sleep 轮询」承担。
-            maxTurns: 1000
+            # 为何 maxTurns 是 200，不是 1000（2026-09-22 二次实测复盘）：
+            #   2026-09-21 的复盘把本值放回 1000，理由是「轮数不是死因，够用就好，
+            #   硬压轮数会让正常长任务死在半路」。构建 cnb-m48-1k33grbms 把这个
+            #   判断否证了：同样的 2h 平台硬限被再次吃满（7300s、207 轮、
+            #   均摊 35.3s/轮），且是被**外部**掐断——Agent 死在一条正常收尾的
+            #   pytest 上，没有告警轮、没有收尾，worktree 里的成果直接丢。
+            #   链路是自加速的：context 每轮重放（compaction 后仍 ~8MiB 输入、
+            #   单轮 in≈19 万 token）⇒ 单轮耗时由早期 ~20s 涨到 30s+ ⇒
+            #   2h / 35s ≈ 205 轮 ⇒ 1000 的配额**永不触达**。
+            #   配额在硬限之上就等于没有配额，而且被掐断比配额触发的收尾更糟。
+            #   故取 200：200 × 35s ≈ 116min，留 ~20% 机动，并与实测触发轮数 207 对齐。
+            #   注意：轮数上界是**下界保障**，不是省时间的手段——单轮耗时才是
+            #   时间预算的放大器（context 重放 + 全量 pytest），那两件事仍需
+            #   按各自纪律处置，不要指望压轮数来省时间。
+            #   确要放宽：先给出「单轮耗时」与「2h ÷ 单轮耗时」的实测读数。
+            maxTurns: 200
             contextWindow: 1m
             maxTokens: 48k
             # 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故落 xhigh。
@@ -402,16 +422,22 @@ $:
           options:
             # 不写 model = 走平台默认模型（规避 400）；
             # 想锁定底座模型时，填平台真实存在的 model ID（不带思考强度后缀）。
-            # maxTurns 取值理由见上方「为何不再压 maxTurns」；
+            # maxTurns 取值理由见上方「为何 maxTurns 是 200，不是 1000」；
             # 两份事件定义必须逐字一致（test_ci_npc_config_guard.py 常驻校验）。
-            maxTurns: 1000
+            maxTurns: 200
             contextWindow: 1m
             maxTokens: 48k
             # 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故落 xhigh。
             # 若后续平台开放 max 档，把本行改成 thinkingLevel: max 即可，其余不动。
             thinkingLevel: xhigh
 
-# 同档位别名：@kingsa2026/neurova(DSCoder-max) 与 DSCoder 完全一致。
-DSCoder-max:
-  issue.comment@npc: *npc-dscoder-issue
-  pull_request.comment@npc: *npc-dscoder-pr
+# 同档位别名：@kingsa2026/neurova(DSCoder-max) 不再单独挂顶层 key。
+#
+# 为什么不挂：.cnb.yml 的顶层 key 在平台 Schema 里**只认分支名**——
+#   * Schema 层：顶层未知 key 只有 `^\..` 形态（锚点定义）被放行，其余一律要求是分支对象；
+#   * 语义层：`issue.*` 是仓库级事件，只能落在 `$` 兜底分支下。
+# 本仓库在 `$` 下用 `&npc-dscoder-issue / &npc-dscoder-pr` 定义了 max 档的全部运行参数，
+# 且不再写 model、只写 thinkingLevel: xhigh —— 这两点正是 DSCoder 与 DSCoder-max 的**全部差异**，
+# 故别名无需第二份定义：被 @ 时落到哪一份，运行参数都相同。
+# （若将来两个角色确实需要不同参数，正确的做法是让它们在 settings.yml 侧只保留一个角色名，
+#   而不是再造一份顶层 key——顶层 key 一旦不是分支名，就是一份过不了 Schema 的配置。）
