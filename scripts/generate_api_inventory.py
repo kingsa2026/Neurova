@@ -80,7 +80,9 @@ REQUEST_CALL_PATTERN = re.compile(
     r"\b(?:" + "|".join(REQUEST_CLIENTS) + r")\.(" + "|".join(HTTP_METHODS) + r")\b")
 BASE_CONST_PATTERN = re.compile(r"const\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*['\"]([^'\"]+)['\"]")
 CONSUME_PATTERN = re.compile(r"from\s+'@/api/modules/([^']+)'")
-GENERATED_ON_PATTERN = re.compile(r"快照日期：(\d{4}-\d{2}-\d{2})")
+
+#: 快照日期的唯一判据：渲染端写这个格式，读取端认这个格式（不许出现第二份）
+SNAPSHOT_DATE_PATTERN = re.compile(r"快照日期\*{0,2}：\s*(\d{4}-\d{2}-\d{2})")
 
 #: app.py 里直接挂载的 router（不在注册表中，但同属注册事实）
 DIRECT_MOUNT_PATTERN = re.compile(r"app\.include_router\([^)]*?prefix\s*=\s*\"([^\"]+)\"", re.S)
@@ -884,10 +886,15 @@ def backendPrefixOf(fullPath: str) -> str:
 
 
 def snapshotDate(text: str) -> str:
-    """从已生成正文里读回生成日期；读不到才退回当日（保证写回幂等）。"""
-    match = GENERATED_ON_PATTERN.search(text)
-    if match:
-        return match.group(1)
+    """从已生成正文里读回生成日期；读不到才退回当日（保证写回幂等）。
+
+    与 `extractSnapshotDate` 共用**同一份**正则：写出去的格式与读回来的判据
+    一旦各认一份，回读会在头部改格式后静默回落到当日，幂等也就只在
+    生成当天碰巧成立。
+    """
+    found = SNAPSHOT_DATE_PATTERN.search(text)
+    if found:
+        return found.group(1)
     return datetime.date.today().isoformat()
 
 
@@ -959,7 +966,6 @@ if __name__ == "__main__":
 GENERATE_COMMAND = "python scripts/generate_api_inventory.py --write"
 #: 快照周期：超过这个天数未重生成，由守卫点名（日期口径，与双向差集并列的两个判据）
 SNAPSHOT_MAX_AGE_DAYS = 120
-SNAPSHOT_DATE_PATTERN = re.compile(r"快照日期\*\*：\s*(\d{4}-\d{2}-\d{2})")
 
 
 def extractSnapshotDate(text: str) -> "datetime.date | None":
