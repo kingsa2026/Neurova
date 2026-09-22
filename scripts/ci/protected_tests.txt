@@ -241,12 +241,18 @@ tests/unit/test_script_index_registration.py
 tests/unit/memory/test_memory_pollution_purge.py
 # Issue #75 残余项 B：默认落点收成单一事实源（数据根），CWD 不再决定库在哪
 tests/unit/core/test_data_root_single_source.py
+# Issue #75 残余项：CWD 相对与第二份数据根的落点必须为零（含 scripts/）
+tests/unit/core/test_data_root_no_cwd_landing.py
 # Issue #75 残余项 C：入索引段报出**归属**（delegated + owner），不再挂在"还没做"
 tests/unit/knowledge/test_index_segment_ownership.py
 # Issue #75 残余项 D：存量断言归正入口（补链位后必须转 verified；无依据的行保持 unverified）
 tests/unit/knowledge/test_assertion_regrade_entry.py
 # Issue #75 残余项 E：仓库里不许再有被跟踪的运行期残留（sessions/ / trajectories/）
 tests/unit/memory/test_tracked_run_residue_guard.py
+# Issue #75 残余项：脚本以文件路径执行时，仓库根须先于 `import neurova` 进 sys.path
+#   （PR #105 让门禁脚本导入数据根却把它放在 sys.path 之后，CI experience-quality 直接
+#   ModuleNotFoundError；同形脚本一并扫）
+tests/unit/scripts/test_scripts_import_bootstrap.py
 
 # Issue #81 F-04/F-18：导入会话属主（归属落盘后只读）+ 两条导入路同一幂等域
 #   + 导入咽喉（唯一写入口）的既有回归（逐文件单跑确定全绿，已核）

@@ -16,6 +16,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -367,7 +368,7 @@ class ResourceQuotaManager:
 
 _singleton: Optional[ResourceQuotaManager] = None
 _singleton_lock = threading.Lock()
-_DEFAULT_DIR = "./data/resource_quota"
+_DEFAULT_DIR = dataPath("resource_quota")
 
 
 def get_resource_quota_manager() -> ResourceQuotaManager:

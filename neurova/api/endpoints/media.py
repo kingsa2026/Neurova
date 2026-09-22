@@ -32,6 +32,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(get_current_user)],)
@@ -72,8 +73,8 @@ class UpdateConfigRequest(BaseModel):
 # AgentMediaPage 列表恒空且孤儿文件不可管；config 保存同样不落盘）
 # ---------------------------------------------------------------------------
 
-_INDEX_FILE = os.environ.get("NEUROVA_MEDIA_INDEX_PATH", "data/media_index.json")
-_CONFIG_FILE = os.environ.get("NEUROVA_MEDIA_CONFIG_PATH", "data/media_config.json")
+_INDEX_FILE = os.environ.get("NEUROVA_MEDIA_INDEX_PATH") or dataPath("media_index.json")
+_CONFIG_FILE = os.environ.get("NEUROVA_MEDIA_CONFIG_PATH") or dataPath("media_config.json")
 
 _media_store: Dict[str, Dict[str, Any]] = {}
 _media_config: Dict[str, Any] = {

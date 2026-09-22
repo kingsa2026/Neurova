@@ -327,6 +327,7 @@ from neurova.evolution.genetic_engine import ToolGeneticEngine
 
 # 从真实实现导入，替代占位符
 from neurova.evolution.pattern_miner import PatternMiner
+from neurova.core.data_root import get_data_root
 
 
 class PatternBasedToolSynthesizer:
@@ -727,7 +728,7 @@ def default_evolution_weights_path() -> Path:
     env_path = os.environ.get("NEUROVA_EVOLUTION_WEIGHTS")
     if env_path:
         return Path(env_path)
-    return Path("data") / "evolution" / "tool_weights.json"
+    return get_data_root() / "evolution" / "tool_weights.json"
 
 
 def default_evolution_patterns_path() -> Path:
@@ -735,7 +736,7 @@ def default_evolution_patterns_path() -> Path:
     env_path = os.environ.get("NEUROVA_EVOLUTION_PATTERNS")
     if env_path:
         return Path(env_path)
-    return Path("data") / "evolution" / "pattern_sequences.json"
+    return get_data_root() / "evolution" / "pattern_sequences.json"
 
 
 def default_evolution_lifecycle_path() -> Path:
@@ -743,7 +744,7 @@ def default_evolution_lifecycle_path() -> Path:
     env_path = os.environ.get("NEUROVA_EVOLUTION_LIFECYCLE")
     if env_path:
         return Path(env_path)
-    return Path("data") / "evolution" / "tool_lifecycle.json"
+    return get_data_root() / "evolution" / "tool_lifecycle.json"
 
 
 def default_evolution_experience_path() -> Path:
@@ -751,7 +752,7 @@ def default_evolution_experience_path() -> Path:
     env_path = os.environ.get("NEUROVA_EVOLUTION_EXPERIENCE")
     if env_path:
         return Path(env_path)
-    return Path("data") / "evolution" / "experience_feedback.json"
+    return get_data_root() / "evolution" / "experience_feedback.json"
 
 
 def default_evolution_skill_experience_path() -> Path:
@@ -759,7 +760,7 @@ def default_evolution_skill_experience_path() -> Path:
     env_path = os.environ.get("NEUROVA_EVOLUTION_SKILL_EXPERIENCE")
     if env_path:
         return Path(env_path)
-    return Path("data") / "evolution" / "skill_experiences.json"
+    return get_data_root() / "evolution" / "skill_experiences.json"
 
 
 def default_evolution_improvements_path() -> Path:
@@ -767,7 +768,7 @@ def default_evolution_improvements_path() -> Path:
     env_path = os.environ.get("NEUROVA_EVOLUTION_IMPROVEMENTS")
     if env_path:
         return Path(env_path)
-    return Path("data") / "evolution" / "skill_improvements.json"
+    return get_data_root() / "evolution" / "skill_improvements.json"
 
 
 def bootstrap_evolution_persistence(path: Optional[Path] = None) -> bool:
