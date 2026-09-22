@@ -498,17 +498,24 @@ class TestRolePipelineAlignment:
             pr_body = body.get("pull_request.comment@npc")
             if issue_body is None or pr_body is None:
                 continue
-            # 事件名必须不同（接力时要各拉各的事件），其余逐字一致
-            # —— 唯一的差异点由下面这条断言钉死，不是"允许漂移"。
+            # 两处按设计就该不同（自接力事件名、对话载体键），其余逐字一致
+            # —— 差异点由 _strip_self_event 逐字点名，不是"允许漂移"。
             if _strip_self_event(issue_body) != _strip_self_event(pr_body):
                 problems.append(
-                    f"{mount} 下 issue 与 PR 事件定义不一致（除自身事件名外应逐字相同）"
+                    f"{mount} 下 issue 与 PR 事件定义不一致"
+                    "（除自接力事件名与对话载体键外应逐字相同）"
                 )
-            elif _self_apply_events(issue_body) != {"issue.comment@npc"} or \
-                    _self_apply_events(pr_body) != {"pull_request.comment@npc"}:
+            elif _self_apply_events(issue_body) != {"api_trigger_npc_handoff"} or \
+                    _self_apply_events(pr_body) != {"api_trigger_npc_handoff"}:
                 problems.append(
-                    f"{mount} 下 issue / PR 的收尾自行接力事件名错位"
-                    "（PR 事件拉到 issue 流水线会跑错上下文）"
+                    f"{mount} 下 issue / PR 的收尾接力事件名错位"
+                    "（应同为本仓的接力落点事件 api_trigger_npc_handoff）"
+                )
+            elif not _handoff_carries_context(issue_body, "handoffIssueIid") or \
+                    not _handoff_carries_context(pr_body, "handoffPrIid"):
+                problems.append(
+                    f"{mount} 下 issue / PR 的收尾接力未把自己那侧的对话载体传下去"
+                    "（api_trigger 流水线里拿不到 CNB_ISSUE_IID / CNB_PULL_REQUEST_IID）"
                 )
         assert not problems, "\n  ".join(problems)
 
@@ -627,8 +634,23 @@ class TestNpcBuildDurationDiscipline:
         )
 
 
+#: 收尾接力里「对话载体」的键名——issue 侧传 Issue 标识、PR 侧传 PR 标识，
+#: 这正是两条事件定义**必然不同**的第二处（第一处是自接力事件名本身）。
+#: `cnb:apply` 的 event 只能落在 `api_trigger_*` 上（平台准入，见
+#: tests/unit/ci/test_npc_turn_handoff_execution.py），故上下文不再由
+#: "拉同一个评论事件"继承，只能靠 env 显式传递，两个键名因此不同。
+HANDOFF_CONTEXT_KEYS = ("handoffIssueIid", "handoffPrIid")
+
+
 def _strip_self_event(pipeline):
-    """把收尾自行接力里的 `event` 置为占位——两份事件定义只允许在此处不同。"""
+    """把两份事件定义中**按设计就该不同**的部分置为占位。
+
+    允许的不同只有两类，且都是逐字点名的：
+      1. 自接力事件名（`event`）——历史上是「issue 拉 issue」，现在是
+         统一的 `api_trigger_npc_handoff`，占位逻辑保留以兼容两种形态；
+      2. 对话载体键（`handoffIssueIid` / `handoffPrIid`）——三条以上差异
+         一律视为漂移，由调用方的断言拦下。
+    """
     def walk(node):
         if isinstance(node, list):
             return [walk(i) for i in node]
@@ -637,12 +659,37 @@ def _strip_self_event(pipeline):
             for k, v in node.items():
                 if k == "event" and isinstance(v, str) and v.endswith("@npc"):
                     out[k] = "<self-event>"
+                elif k in HANDOFF_CONTEXT_KEYS:
+                    # 键名与取值都占位：两侧传的是不同的平台变量
+                    # （$CNB_ISSUE_IID / $CNB_PULL_REQUEST_IID），这就是它们该不同的地方。
+                    out["<handoff-context>"] = "<context-var>"
                 else:
                     out[k] = walk(v)
             return out
         return node
 
     return walk(pipeline)
+
+
+def _handoff_carries_context(pipeline, key):
+    """收尾接力的 env 里有没有把指定对话载体键传下去（逐字点名，不看注释）。"""
+    found = []
+
+    def walk(node):
+        if isinstance(node, list):
+            for i in node:
+                walk(i)
+            return
+        if isinstance(node, dict):
+            if node.get("type") == "cnb:apply":
+                env = (node.get("options") or {}).get("env") or {}
+                if isinstance(env, dict):
+                    found.append(env)
+            for v in node.values():
+                walk(v)
+
+    walk(pipeline)
+    return any(isinstance(env.get(key), str) and env.get(key).strip() for env in found)
 
 
 def _self_apply_events(pipeline):
@@ -707,8 +754,22 @@ class TestTurnHandoffCeiling:
                     if has_npc:
                         yield f"{mount}.{event}[{i}]", event, job
 
+    #: `cnb:apply` 的 `event` 唯一能拉的自定义事件前缀（平台文档：apply.md）。
+    #: 「下一轮」落在 `api_trigger_*` 上，而不是同名评论事件——后者在
+    #: `cnb:apply` 的适用事件白名单之外，运行期被平台以 error 拒掉
+    #: （构建 cnb-k6e-1k34osn4f 实测）。
+    HANDOFF_APPLY_EVENT_PREFIX = "api_trigger"
+
     def test_npc_pipeline_carries_turn_handoff(self, cnb_doc):
-        """每条 npc:go 流水线都要有收尾接力（apply 同事件 + 轮次上限标记）。"""
+        """每条 npc:go 流水线都要有收尾接力（apply + 轮次上限标记）。
+
+        判据的历史（Issue #158 两次修，形态不同）：
+          * 第一批断言 `event` 与触发事件**同名**（issue 拉 issue）——已被平台
+            证伪：`cnb:apply` 只认 `push`/`api_trigger` 等固定事件，`@npc` 不在
+            其列，且 `event` 参数必须为 `api_trigger` 或以它开头。
+          * 故现判据改为「接力指向一条 `api_trigger_*` 事件，且该事件在 `$` 下
+            真实存在、其内跑 npc:go」——这三件事共同保证「下一轮真的会被拉起来」。
+        """
         problems = []
         seen = 0
         for where, event, job in self._npc_pipelines(cnb_doc):
@@ -718,11 +779,19 @@ class TestTurnHandoffCeiling:
             if not applies:
                 problems.append(f"{where}: endStages 无 cnb:apply，轮数触顶后无人接力")
                 continue
-            if not any((s.get("options") or {}).get("event") == event for s in applies):
-                problems.append(
-                    f"{where}: 接力的 event 未与触发事件 {event!r} 同名，"
-                    "下一轮不会重新执行这份 NPC 配置"
-                )
+            for stage in applies:
+                target = (stage.get("options") or {}).get("event")
+                if not (isinstance(target, str) and target.startswith(self.HANDOFF_APPLY_EVENT_PREFIX)):
+                    problems.append(
+                        f"{where}: 接力的 event={target!r} 不是 cnb:apply 能拉的事件"
+                        f"（须以 {self.HANDOFF_APPLY_EVENT_PREFIX} 开头），"
+                        "运行期会被平台以 error 拒掉"
+                    )
+                elif target not in (cnb_doc.get("$") or {}):
+                    problems.append(
+                        f"{where}: 接力的 event={target!r} 在 `$` 下不存在——"
+                        "cnb:apply 指向一个拉不起的流水线，接力仍是空转"
+                    )
             # 标记必须由上一轮经 env 传下来、由 NPC 在触顶时写出，
             # 且两处变量名逐字一致——否则守卫会因为「标记永不为真」拦不住无限接力。
             passed_down = str(job.get("env", {}).get("turnLimitReached", ""))
@@ -736,8 +805,9 @@ class TestTurnHandoffCeiling:
             "NPC 轮数触顶后没有接力（构建 cnb-m48-1k33grbms 的丢成果形态）:\n  "
             + "\n  ".join(problems) +
             "\n平台没有「轮数用满自动重跑」的原生开关，接力必须显式写在 endStages："
-            "`type: cnb:apply` + `event: <同名事件>` + `env: {"
-            f"{self.HANDOFF_FLAG}: ${self.HANDOFF_FLAG}" + "}`。"
+            "`type: cnb:apply` + `event: <api_trigger_* 事件>` + `env: {"
+            f"{self.HANDOFF_FLAG}: ${self.HANDOFF_FLAG}" + "}`，"
+            "且该 api_trigger 事件要在 `$` 下真实存在并跑 npc:go。"
             "改完请同步 .cnb.yml 注释里的轮次上界推演。"
         )
 
