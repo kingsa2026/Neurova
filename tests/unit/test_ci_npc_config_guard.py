@@ -861,3 +861,73 @@ class TestTurnHandoffCeiling:
             "这是 .cnb.yml 收尾阶段唯一的读点，写不出就等于没有接力；"
             "同时要提醒 Agent 用评论落进度（工作树不跨轮保存）。"
         )
+
+
+class TestAnchoredConfigHasConsumer:
+    """`.cnb.yml` 的锚点定义必须有消费方：只写不读的配置就是断点。
+
+    平台不解析 YAML 锚点语义（那是 YAML 解析期的事），故「有没有人读」
+    只能由本仓自己守。`^\..` 形态的顶层键在 Schema 里合法、平台也不报错，
+    一份无人读的档位表就此长期留在配置里，且会被顺手改成与档位收敛口径
+    相反的值（main 的 `DSCoder: high` 即此形态）——规则与行为不一致时
+    没有任何一处会响亮。
+
+    判据取 YAML 事件流：声明锚点（AnchorEvent）与引用锚点（AliasEvent）
+    都出自**同一份配置文本**，逐名比对，可证伪路径 = 重新写一份无人引用的
+    `&xxx` 锚点定义 → 立刻转红。
+    """
+
+    @staticmethod
+    def _anchor_names():
+        declared, used = set(), set()
+
+        class _Recorder(yaml.SafeLoader):
+            def compose_node(self, parent, index):
+                event = self.peek_event()
+                anchor = getattr(event, "anchor", None)
+                if anchor:
+                    (used if isinstance(event, yaml.events.AliasEvent)
+                     else declared).add(anchor)
+                return super().compose_node(parent, index)
+
+        with io.open(CNB, encoding="utf-8") as fh:
+            _Recorder(fh.read()).get_single_data()
+        return declared, used
+
+    def test_every_declared_anchor_is_referenced(self):
+        declared, used = self._anchor_names()
+        assert declared, ".cnb.yml 里一个锚点都没解析到——本判据已失效"
+        orphans = sorted(declared - used)
+        assert not orphans, (
+            f".cnb.yml 声明了无人引用的锚点: {orphans}\n"
+            "只写不读的配置是断点（AGENTS.md 协作红线「不留断点」）："
+            "要么接到消费方，要么连同它承载的那份重复定义一起删净"
+            "（教义第 6 条：发现第二份定义就收口并删净）。"
+        )
+
+    def test_tier_table_has_no_unread_second_copy(self, cnb_doc):
+        """档位口径只准有一份（`.cnb.yml` 的 `$` 现值），不许再放一份无人读的表。
+
+        本仓的档位事实源是 `$` 挂载点 + `.cnb/settings.yml` 的角色定义，
+        由 `LEVEL_BY_ROLE` / `LEVEL_BY_MOUNT` 常驻校验。`.cnb.yml` 里若再出现
+        一份「角色名 → thinkingLevel」的映射，那就是第三份口径，且平台不读、
+        守卫也不读，只能静默漂移（main 的 `DSCoder: high` 即此形态，
+        与同一份文件里 `thinkingLevel: xhigh` 的收敛口径相反）。
+        """
+        role_names = {
+            (r or {}).get("name")
+            for r in ((_load(SETTINGS).get("npc") or {}).get("roles") or [])
+        }
+        offenders = []
+        for key, value in (cnb_doc or {}).items():
+            if not isinstance(key, str) or not key.startswith("."):
+                continue
+            if not isinstance(value, dict):
+                continue
+            if set(value) & role_names:
+                offenders.append(f"{key}: {value}")
+        assert not offenders, (
+            "`.cnb.yml` 里出现了第二份无人读的档位表:\n  " + "\n  ".join(offenders) +
+            "\n档位口径只有一处：`$` 挂载点的 thinkingLevel 现值，"
+            "加上 `.cnb/settings.yml` 的角色定义。"
+        )
