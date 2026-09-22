@@ -533,6 +533,16 @@ export function triggerDecay(agentId: string) {
   return api.post<ApiResponse<{ decayed: number }>>(`${BASE}/decay`, null, { params: { agent_id: agentId } })
 }
 
+/**
+ * 把外进程写入的记忆增量并入运行中后端的记忆快照（F-05）。
+ *
+ * 记忆快照只在后端构造时读一次盘，CLI 在另一个进程导入的记忆因此看不见；
+ * 端点返回真实并入条数（幂等，无缺失行时为 0），无需重启后端。
+ */
+export function reloadMemories(agentId?: string) {
+  return api.post<ApiResponse<{ reloaded: number }>>(`${BASE}/reload`, null, { params: { agent_id: agentId } })
+}
+
 // ---------------------------------------------------------------------------
 // Markdown export/import  (prefix: /memory/markdown)  — P1 记忆可解释性
 // ---------------------------------------------------------------------------
