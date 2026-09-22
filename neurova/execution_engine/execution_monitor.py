@@ -14,6 +14,7 @@ from neurova.core.logger import get_logger
 import os
 import typing
 import uuid
+from pathlib import Path
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -157,6 +158,17 @@ class ExecutionTrace:
             "tool_calls_count": len(self.tool_calls),
             "errors": self.errors,
         }
+
+
+def executionLogDir() -> Path:
+    """执行日志目录：数据根下的 `logs/executions`（绝对路径）。
+
+    原值 `os.path.join("logs", "executions")` 是 CWD 相对——换个启动目录，
+    `/monitor` 的告警与执行历史就读不到旧记录（文件还在，只是没人按新 CWD 找）。
+    """
+    from neurova.core.data_root import dataLanding
+
+    return dataLanding("logs", "executions")
 
 
 class ExecutionMonitor:
@@ -414,7 +426,7 @@ class ExecutionMonitor:
     def _save_execution_log(self, trace: ExecutionTrace) -> None:
         """保存执行日志到文件"""
         try:
-            log_dir = os.path.join("logs", "executions")
+            log_dir = str(executionLogDir())
             os.makedirs(log_dir, exist_ok=True)
             path = os.path.join(log_dir, f"{trace.trace_id}.json")
             with open(path, "w", encoding="utf-8") as f:
@@ -434,7 +446,7 @@ class ExecutionMonitor:
 
     def load_execution_history(self, log_dir: str = None) -> int:
         """加载执行历史"""
-        log_dir = log_dir or os.path.join("logs", "executions")
+        log_dir = log_dir or str(executionLogDir())
         if not os.path.exists(log_dir):
             return 0
 

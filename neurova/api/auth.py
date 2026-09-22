@@ -53,7 +53,19 @@ _INSECURE_DEFAULT_SECRETS = {
     "test",
 }
 
-_SECRET_FILE = Path(".jwt_secret")
+_SECRET_FILENAME = ".jwt_secret"
+
+
+def _secretFilePath() -> Path:
+    """密钥文件落点：数据根下的 `.jwt_secret`（绝对路径）。
+
+    原值 `Path(".jwt_secret")` 是 CWD 相对：换个启动目录就换个密钥文件，
+    进程重启即视为"没有密钥"→ 重新生成 → 既有 token 全员失效。
+    只在数据根无该文件时收养仓库根的旧文件，老部署不因此掉线。
+    """
+    from neurova.core.data_root import dataLanding
+
+    return dataLanding(_SECRET_FILENAME)
 
 
 def _is_production() -> bool:
@@ -90,9 +102,9 @@ def _write_secret_file(secret: str) -> None:
     import os
 
     try:
-        _SECRET_FILE.write_text(secret)
+        _secretFilePath().write_text(secret)
         try:
-            os.chmod(_SECRET_FILE, 0o600)
+            os.chmod(_secretFilePath(), 0o600)
         except OSError as e:  # 非 POSIX 或权限不足（如 Windows）降级为告警
             logger.warning("Failed to chmod .jwt_secret to 0600: %s", e)
     except Exception as e:
@@ -116,16 +128,16 @@ def _load_or_create_secret_key() -> str:
         return _validate_secret(env_key)
 
     # 2. 配置文件
-    if _SECRET_FILE.exists():
+    if _secretFilePath().exists():
         try:
-            secret = _SECRET_FILE.read_text().strip()
+            secret = _secretFilePath().read_text().strip()
             if secret:
                 # 启动即收紧历史遗留文件的权限
                 import os
 
                 try:
-                    if (os.stat(_SECRET_FILE).st_mode & 0o077) != 0:
-                        os.chmod(_SECRET_FILE, 0o600)
+                    if (os.stat(_secretFilePath()).st_mode & 0o077) != 0:
+                        os.chmod(_secretFilePath(), 0o600)
                 except OSError:
                     pass
                 return _validate_secret(secret)

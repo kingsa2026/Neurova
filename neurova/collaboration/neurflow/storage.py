@@ -32,14 +32,18 @@ from .models import (
 class NeurflowStorage:
     """Neurflow SQLite 存储管理器"""
 
-    def __init__(self, db_path: str = "neurflow.db"):
+    def __init__(self, db_path: str = ""):
         """
         初始化存储管理器
 
         Args:
             db_path: SQLite 数据库文件路径
         """
-        self.db_path = db_path
+        # 落点：显式入参 > 数据根下的 `neurflow.db`。原默认值是裸文件名，
+        # sqlite 会在**当前工作目录**建库（实测任意 CWD 都会造出 neurflow.db）。
+        from neurova.core.data_root import dataLanding
+
+        self.db_path = str(db_path or dataLanding("neurflow.db"))
         self._lock = threading.RLock()
         self._conn = None
         self._init_db()

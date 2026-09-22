@@ -31,6 +31,18 @@ def _safe_path_seg(value: str) -> str:
     return s.strip() or "unknown"
 
 
+def defaultTrajectoryDir() -> Path:
+    """轨迹目录：数据根下的 `trajectories/`（绝对路径）。
+
+    原值 `Path("trajectories")` 是 CWD 相对——换个启动目录就换一份轨迹库，
+    界面上的历史 trace"凭空消失"。仓库根残留的旧轨迹目录只在数据根尚无
+    该目录时搬进来一次，老部署的记录不因落点收口而失联。
+    """
+    from neurova.core.data_root import dataLanding
+
+    return dataLanding("trajectories")
+
+
 class TrajectoryRecorder:
     """轨迹记录器（单例模式）
 
@@ -55,8 +67,8 @@ class TrajectoryRecorder:
         # 使 end_trace/delete_trace 的行为依赖"此前是否有人起过 trace"
         #（单测单文件跑必 AttributeError，全套跑才绿——顺序耦合根因）。
         self._active_traces_by_user: Dict[str, List[str]] = defaultdict(list)
-        self._storage_dir = Path("trajectories")
-        self._storage_dir.mkdir(exist_ok=True)
+        self._storage_dir = defaultTrajectoryDir()
+        self._storage_dir.mkdir(parents=True, exist_ok=True)
         self._enabled = True
         self._auto_save = True
         self._max_traces_in_memory = 100

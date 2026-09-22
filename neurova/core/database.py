@@ -12,7 +12,6 @@ from typing import Optional
 from contextlib import contextmanager
 
 from neurova.core.connection_pool import get_connection_pool, get_db_connection, close_all_pools
-from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -24,7 +23,9 @@ def defaultDbPath() -> str:
     保留 `DEFAULT_DB_PATH` 这个名字给旧调用方，但它现在是个按调用时解析的函数——
     模块级常量会在导入期把根钉死，注入 `NEUROVA_DATA_DIR` 就晚了。
     """
-    return str(get_data_root() / "neurova_memory.db")
+    from neurova.core.data_root import dataLanding
+
+    return str(dataLanding("neurova_memory.db"))
 
 
 

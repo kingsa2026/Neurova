@@ -85,7 +85,7 @@ class ToolExecutionLogger:
     5. 支持统计信息
     """
 
-    def __init__(self, log_file: str = "tool_execution.jsonl", buffer_size: int = 100, auto_flush: bool = True):
+    def __init__(self, log_file: str = "", buffer_size: int = 100, auto_flush: bool = True):
         """
         初始化日志器
 
@@ -94,7 +94,11 @@ class ToolExecutionLogger:
             buffer_size: 缓冲区大小
             auto_flush: 是否自动刷新
         """
-        self._log_file = log_file
+        # 落点：显式入参 > 数据根下的 `tool_execution.jsonl`。原默认值是裸
+        # 文件名，构造时就会在**当前工作目录**建目录并写日志。
+        from neurova.core.data_root import dataLanding
+
+        self._log_file = str(log_file or dataLanding("tool_execution.jsonl"))
         self._buffer_size = buffer_size
         self._auto_flush = auto_flush
 
