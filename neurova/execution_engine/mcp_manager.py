@@ -136,7 +136,12 @@ class MCPManager:
         self._lock = __import__("threading").RLock()
 
         # 配置
-        self._config_path = config_path or "config/mcp_servers.json"
+        # 配置落点：显式入参 > 数据根下的 `mcp_servers.json`。
+        # 原兜底 `"config/mcp_servers.json"` 是 CWD 相对，且与"随代码走的
+        # config/ 资产"同名——两者混用会让部署时的只读挂载与运行期写入打架。
+        from neurova.core.data_root import dataLanding
+
+        self._config_path = str(config_path or dataLanding("mcp_servers.json"))
         self._servers: typing.Dict[str, MCPServerConfig] = {}
 
         # 连接

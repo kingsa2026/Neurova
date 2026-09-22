@@ -1,8 +1,12 @@
 # -*- coding: utf-8 -*-
 """检查 tests/unit/core 下所有测试文件的 git 跟踪状态"""
-import subprocess, os
+import subprocess, os, sys
+from pathlib import Path
 
-test_dir = "tests/unit/core"
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from neurova.core.data_root import repoAsset
+
+test_dir = repoAsset("tests", "unit", "core")
 files = sorted(os.listdir(test_dir))
 tracked = subprocess.run(
     ["git", "ls-files"] + [os.path.join(test_dir, f) for f in files],
@@ -11,7 +15,7 @@ tracked = subprocess.run(
 
 untracked = []
 for f in files:
-    fp = os.path.join(test_dir, f)
+    fp = str(test_dir / f)
     if fp not in tracked:
         untracked.append(f)
 

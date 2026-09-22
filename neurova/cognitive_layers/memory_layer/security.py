@@ -37,12 +37,11 @@ def _load_or_create_encryption_key() -> str:
     生成符合 Fernet 规范的密钥并 0600 保存），两类加密器均可复用。
     """
     try:
-        try:
-            from neurova.core import config as _cfg
+        # 原实现读一个全仓不存在的 `config.DATA_DIR`，再兜底到裸相对名 `"data"`
+        # ——换个启动目录就换一份加密密钥，旧记忆解密静默返回空串（"记忆消失"）。
+        from neurova.core.data_root import dataLanding
 
-            data_dir = getattr(_cfg, "DATA_DIR", None) or os.environ.get("NEUROVA_DATA_DIR") or "data"
-        except Exception:
-            data_dir = os.environ.get("NEUROVA_DATA_DIR") or "data"
+        data_dir = str(dataLanding(_ENCRYPTION_KEY_FILENAME).parent)
         os.makedirs(data_dir, exist_ok=True)
         key_path = os.path.join(data_dir, _ENCRYPTION_KEY_FILENAME)
         if os.path.exists(key_path):

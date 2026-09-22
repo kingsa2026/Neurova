@@ -95,9 +95,12 @@ class ZeroDowntimeMigrationManager:
         self._migration_history: List[Dict] = []
         self._lock = threading.RLock()
         
-        # Database paths
-        self.old_db_path = "neurova_memory.db"
-        self.new_db_path = "neurova_memory_v2.db"
+        # Database paths：走数据根（原值是裸文件名，迁移会对着**当前工作目录**
+        # 里那个并不存在的库跑，逐批"成功"却什么都没迁）。
+        from neurova.core.data_root import dataLanding
+
+        self.old_db_path = str(dataLanding("neurova_memory.db"))
+        self.new_db_path = str(dataLanding("neurova_memory_v2.db"))
         
         logger.info("ZeroDowntimeMigrationManager initialized")
         self._initialized = True

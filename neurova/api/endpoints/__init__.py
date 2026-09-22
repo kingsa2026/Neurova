@@ -2,7 +2,6 @@
 # 从各端点模块统一导出
 
 from neurova.core.logger import get_logger
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 logger = get_logger(__name__)
@@ -80,8 +79,10 @@ def init_default_user():
 
 
 def load_agents_config():
-    """加载 Agent 配置"""
-    config_path = Path("agents.json")
+    """加载 Agent 配置（随代码走的资产，锚在仓库根，不随 CWD 漂移）。"""
+    from neurova.core.data_root import repoAsset
+
+    config_path = repoAsset("agents.json")
     if config_path.exists():
         try:
             import json
