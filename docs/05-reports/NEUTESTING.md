@@ -126,8 +126,8 @@ pytest tests/unit/ -v
 
 ## 🔧 配置
 
-- [pytest.ini](../pytest.ini) - pytest 配置文件
-- [.github/workflows/ci.yml](../.github/workflows/ci.yml) - CI/CD 工作流
+- [pyproject.toml](../../pyproject.toml) - pytest 配置（`[tool.pytest.ini_options]`，原 `pytest.ini` 已并入）
+- [.github/workflows/ci.yml](../../.github/workflows/ci.yml) - CI/CD 工作流
 
 ## 📚 文档
 
