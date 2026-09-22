@@ -24,6 +24,43 @@ from typing import Any, Callable, Dict, List, Optional
 logger = get_logger(__name__)
 
 
+def judgeToolOutcome(result: Any) -> Optional[bool]:
+    """工具执行器给出的成败判据：True 成功 / False 失败 / None 未给出。
+
+    `ToolExecutor` 自己带一份 `_result_is_success`（`{"error": …}` 或
+    `success=False` 即失败），它是"这次执行算不算成功"的**候选唯一出处**。
+    这里只做一次属性取用，取不到就返回 `None` —— 由调用方按"判据缺失"处理，
+    **不在这里补一份平行实现**（教义第 6 条：判据只允许一处定义）。
+
+    为什么要报到执行管理器这一层：`ToolExecutionContext.status` 曾被消费方
+    当成成败判据，但 `COMPLETED` 说的是"这次调用跑完了"，而不是"工具成功了"
+    （返回 `{"error": …}` 的工具同样是 COMPLETED）。判据要么由生产端随
+    `status` 一起给出，要么消费端只能自己猜——而猜出来的默认值是"成功"，
+    正是构建 cnb-1h8-1k341hkm9 里失败被静默吞掉的那条路。
+    """
+    if isinstance(result, dict):
+        if isinstance(result.get("success"), bool):
+            return result["success"]
+        if isinstance(result.get("ok"), bool):
+            return result["ok"]
+        if result.get("status") in ("success", "failure"):
+            return result["status"] == "success"
+        if "error" in result:
+            # `{"error": …}` 是**声明式失败**：不管执行器是谁，这一份结果自己说了失败。
+            # 只有它能被无判据地判红；其余形状要靠执行器的判据，缺判据就不猜。
+            return False
+        tool_executor = getattr(result, "tool_executor", None)
+        judge = getattr(tool_executor, "_result_is_success", None)
+        if callable(judge):
+            try:
+                return bool(judge(result))
+            except Exception as e:  # noqa: BLE001 - 判据自身异常时不得伪装成成功
+                logger.warning("执行器的成败判据抛异常，按未知处置: %s", e, exc_info=True)
+                return None
+    # 判据缺席：不猜。诚实标成"未知"，让调用方按失败处置并报出原因。
+    return None
+
+
 # ADR 0009/0010: ExecutionStatus / TimeoutStrategy / ToolExecutionContext
 # 的单一规范定义位于 neurova.tool_layers.types，本模块 re-export 以保持
 # 既有 import 路径（from neurova.agent.tool_execution_manager import ...）可用。
@@ -223,10 +260,49 @@ class ToolExecutionManager:
             context.completed_at = datetime.now(timezone.utc)
             # 清理任务引用
             self._running_tasks.pop(context_id, None)
+            # 判据随结果一起产出：成败是**工具执行器**的判据，不是调用状态
+            # （COMPLETED 只说明"跑完了"）。放在 finally 是为了让 TIMEOUT /
+            # CANCELLED 也拿到 `success=False`——超时不是成功，这一点不需要
+            # 任何调用方再猜一次。
+            self._attach_outcome_verdict(context)
             # 资源修复: 终态上下文只增不减曾是无界泄漏, 每次执行结束后触发淘汰
             self._evict_over_capacity()
 
         return context
+
+    @staticmethod
+    def _attach_outcome_verdict(context: ToolExecutionContext) -> None:
+        """把工具执行的成败判据落到 `context.result` 上，供消费方单源读取。
+
+        - 非终态（PENDING / RUNNING）：不动 result，避免写入半成品；
+        - 终态但无结果（TIMEOUT / CANCELLED / FAILED）：补一份带 error 的结果，
+          让消费方的判据恒有物可判——超时被读成成功，同样是失败被静默吞掉。
+
+        只做"补判据"，不改 `context.status`：状态语义仍是"调用生命周期"，
+        两个维度各自单源，消费方不再用其中一个去推另一个。
+        """
+        if context.status in (ExecutionStatus.PENDING, ExecutionStatus.RUNNING):
+            return
+
+        if context.result is None:
+            if context.status in (ExecutionStatus.TIMEOUT, ExecutionStatus.CANCELLED):
+                reason = "timeout" if context.status == ExecutionStatus.TIMEOUT else "cancelled"
+                context.result = {"success": False, "error": f"工具执行{'超时' if reason == 'timeout' else '被取消'}"}
+            else:
+                context.result = {"success": False, "error": context.error or "工具执行失败"}
+            return
+
+        if not isinstance(context.result, dict) or "success" in context.result:
+            return
+
+        verdict = judgeToolOutcome(context.result)
+        if verdict is None:
+            # 判据缺席 ⇒ 不动结果形状，让消费方看见"未知"并按失败报出原因；
+            # 补一个 `success: False` 会把"判据没给出"伪装成"工具报错了"。
+            return
+        result = dict(context.result)
+        result["success"] = verdict is True
+        context.result = result
 
     async def cancel(self, context_id: str) -> bool:
         """
