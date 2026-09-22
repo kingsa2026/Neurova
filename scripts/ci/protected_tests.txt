@@ -379,6 +379,19 @@ tests/unit/context/test_ledger_read_prefilter.py
 tests/unit/test_api_inventory_freshness_guard.py
 tests/unit/test_api_inventory_guard.py
 
+# Issue #148 跨文件 AST 判据的解析预算收口（CI 受保护子集偶发红根因）。
+#   根因：「单源 / 收口点」判据把**代码总量**编码成了时间上界——全仓 rglob + ast.parse
+#   实测 1.4ms/文件，单个用例 4–6s；与另外 170 个受保护文件共享机器、按 -q 一次性跑时
+#   撞 pytest-timeout 默认 30s 墙钟（2026-09-22 构建 cnb-2p6-1k347lfg1 实测转红：
+#   Failed: Timeout (>30.0s) from pytest-timeout）。判据本身与代码行数、与机器快慢都
+#   无关，墙钟上界不会因为它变松而更成立（教义第 2 条禁止的「降级断言换绿」近亲）。
+#   处置：解析单源到 tests/ast_scan.py（按文件整进程缓存 + 文本预筛）。预筛是**充分
+#   条件**：谓词是 `X.<name>`，连 `<name>` 都没出现的文件不可能命中——实测
+#   `neurova/` 1014 文件里含 `attest` 的只有 4 个，解析量从「代码总量」降到「命中面」
+#   （0.06s vs 6.5s）。守卫锁形态而非秒数：无预筛的全仓 rglob+parse 归零、
+#   共享入口真实可用、预筛不漏报（注入真实命中自证）。
+tests/unit/test_ci_ast_scan_budget_guard.py
+
 # Issue #80 工具↔经验↔再调用三环路修复批（第四轮）：票面正文入库与「判据可复核」收口。
 #   根因：001–011 的票面（即每张票的收工判据）只存在于 Issue 附件的对话里，仓内只有
 #   000-索引.md——索引表 11 行的落点指向 11 份并不存在的票面，复核者拿不到判据原文。

@@ -34,6 +34,8 @@ from pathlib import Path
 
 import pytest
 
+from tests import ast_scan
+
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 # 权威实现（唯一允许的衰减模型载体）
@@ -47,23 +49,49 @@ MAX_RELATIVE_STEP = 0.05
 
 
 def _tracked_py() -> list:
+    """git 跟踪的 `.py` 相对路径（口径仍是「入库文件」，不变）。
+
+    解析改走 `tests/ast_scan.py` 的共享预算（Issue #148）：此前本文件在三个用例里
+    各做一次「`git ls-files` + 逐文件 `ast.parse`」，实测分别 7.4s / 7.7s / 9.1s，
+    与受保护子集其余 170 个文件共享机器时必撞 30s 默认墙钟（本次构建实测 timeout）。
+    判据只谈「哪些文件 import 了退役模块」，与入库文件总量无关，故按模块名文本预筛。
+    """
     out = subprocess.run(
-        ["git", "-c", "core.quotepath=false", "ls-files", "*.py"],
+        ["git", "-c", "core.quotepath=false", "ls-files", "-z", "*.py"],
         cwd=str(PROJECT_ROOT), capture_output=True, text=True,
-    ).stdout.split()
-    return [p for p in out if "__pycache__" not in p and (PROJECT_ROOT / p).is_file()]
+    ).stdout.split("\0")
+    return [p for p in out if p and "__pycache__" not in p and (PROJECT_ROOT / p).is_file()]
 
 
-def _imported_modules(path: str) -> set:
-    tree = ast.parse(io.open(PROJECT_ROOT / path, encoding="utf-8", errors="replace").read())
+def _importedModules(ref: ast_scan.SourceRef) -> set:
+    """该文件的 import 目标模块集合（解析走共享预算，命中缓存时零编译）。"""
     found = set()
-    for node in ast.walk(tree):
+    for node in ast_scan._cachedNodes(ref):
         if isinstance(node, ast.ImportFrom) and not node.level and node.module:
             found.add(node.module)
         elif isinstance(node, ast.Import):
             for alias in node.names:
                 found.add(alias.name)
     return found
+
+
+def _filesImporting(retired: set) -> list:
+    """全仓（入库口径）import 了 `retired` 里任一模块的 `路径: 模块` 清单。
+
+    文本预筛：退役模块名的**末段**没出现在文件里就不解析——import 语句必然写出
+    完整模块路径，故这是充分条件。三个用例共用同一份取数，解析只付一次。
+    """
+    needles = tuple(sorted({name.rsplit(".", 1)[-1] for name in retired if name}))
+    tracked = set(_tracked_py())  # 一次取全集：git 调用不得落在逐文件循环里
+    offenders = []
+    for ref in ast_scan.sourceRefsUnder(PROJECT_ROOT, hints=needles):
+        rel = ast_scan.relativeToRepo(ref.path)
+        if rel not in tracked:
+            continue
+        for mod in _importedModules(ref):
+            if mod in retired:
+                offenders.append(f"{rel}: {mod}")
+    return offenders
 
 
 class TestSecondTemperatureImplementationIsRetired:
@@ -78,14 +106,18 @@ class TestSecondTemperatureImplementationIsRetired:
     def test_no_duplicate_decay_curve_definition(self):
         """全仓只允许一处"衰减曲线/衰减率"计算函数。"""
         offenders = []
-        for path in _tracked_py():
-            tree = ast.parse(io.open(PROJECT_ROOT / path, encoding="utf-8", errors="replace").read())
-            for node in ast.walk(tree):
+        tracked = set(_tracked_py())  # 一次取全集：git 调用不得落在逐文件循环里
+        # 文本预筛：违规形态是函数定义，没有 `_calculate_curve_factor` 字样的文件不解析
+        for ref in ast_scan.sourceRefsUnder(
+                PROJECT_ROOT, hints=("_calculate_curve_factor",)):
+            rel = ast_scan.relativeToRepo(ref.path)
+            if rel not in tracked:
+                continue
+            for node in ast_scan._cachedNodes(ref):
                 if not isinstance(node, ast.FunctionDef):
                     continue
-                name = node.name
-                if name in ("_calculate_curve_factor", "calculate_curve_factor"):
-                    offenders.append(f"{path}::{name}")
+                if node.name in ("_calculate_curve_factor", "calculate_curve_factor"):
+                    offenders.append(f"{rel}::{node.name}")
         assert offenders == [f"{CANONICAL_TEMPERATURE}::_calculate_curve_factor"], (
             "衰减曲线算子在仓库内出现多份定义（第二份事实源）：\n"
             + "\n".join(f"  - {o}" for o in offenders)
@@ -93,13 +125,8 @@ class TestSecondTemperatureImplementationIsRetired:
         )
 
     def test_no_code_imports_retired_module(self):
-        offenders = []
-        for path in _tracked_py():
-            if path == RETIRED_TEMPERATURE_MODULE:
-                continue
-            for mod in _imported_modules(path):
-                if "temperature_module" in mod:
-                    offenders.append(f"{path}: {mod}")
+        offenders = [row for row in _filesImporting({"temperature_module"})
+                     if not row.startswith(RETIRED_TEMPERATURE_MODULE + ":")]
         assert not offenders, (
             "仍有代码引用已退役的第二套温度实现：\n"
             + "\n".join(f"  - {o}" for o in offenders)
@@ -250,13 +277,8 @@ class TestOtherDeadCodeGroupsAreRetired:
 
     def test_no_code_imports_any_retired_module(self):
         retired = {_module_of(p) for p in RETIRED_DEAD_MODULES}
-        offenders = []
-        for path in _tracked_py():
-            if path in RETIRED_DEAD_MODULES:
-                continue
-            for mod in _imported_modules(path):
-                if mod in retired:
-                    offenders.append(f"{path}: {mod}")
+        offenders = [row for row in _filesImporting(retired)
+                     if row.split(":", 1)[0] not in RETIRED_DEAD_MODULES]
         assert not offenders, (
             "仍有代码 import 已退役模块（删文件没删引用，属静默遗留）：\n"
             + "\n".join(f"  - {o}" for o in offenders)
