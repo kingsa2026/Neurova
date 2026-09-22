@@ -408,12 +408,27 @@ main:
 #
 # 解释器探测逐级降级，且**不做任何安装**（镜像体积与网络都不由本流水线负责）：
 #   python3 → python → node（门禁脚本用 node 可跑，见
-#   tests/unit/test_ci_npc_config_guard.py::TestNpcScriptInterpreterReachability）；
+#   tests/unit/ci/test_npc_script_interpreter_reachability.py）；
 #   三级都不可用即以 127 收场 —— 请求解释器失败必须响亮，不得静默跳过（教义第 2 条）。
 .解释器探测: &npc-script-interpreter |
-  if command -v python3 >/dev/null 2>&1; then NPX=python3
-  elif command -v python >/dev/null 2>&1; then NPX=python
-  elif command -v node >/dev/null 2>&1; then NPX=node
+  # 探测结果给出「怎么跑门禁脚本」。第三级 node 是**特例**：
+  # node 按扩展名解析模块，把 `.py` 交给 node 会在解析前以
+  # `ERR_UNKNOWN_FILE_EXTENSION` 退出（rc=1，构建 cnb-9cc-1k34ff3t1 实测），
+  # 所以 node 分支不能是 `node <script>.py`，必须经桥脚本
+  # scripts/ci/run_gate_under_node.sh 提取脚本自带的 node 实现再执行。
+  #
+  # 调用形态统一由 $NPX_CALL 表达；脚本路径仍逐字出现在 script 里，
+  # 故「本流水线确实执行了这个脚本」不因换解释器而不可读
+  # （tests/unit/ci/test_npc_turn_handoff_execution.py 的可见性判据）。
+  if command -v python3 >/dev/null 2>&1; then
+    NPX=python3
+    NPX_CALL="python3"
+  elif command -v python >/dev/null 2>&1; then
+    NPX=python
+    NPX_CALL="python"
+  elif command -v node >/dev/null 2>&1; then
+    NPX=node
+    NPX_CALL="sh scripts/ci/run_gate_under_node.sh"
   else
     echo "无可用脚本解释器（python3 / python / node 均不存在）" >&2
     exit 127
@@ -448,7 +463,7 @@ $:
           #   $PWD 是否等于 $CNB_BUILD_WORKSPACE（不等就把它打印出来）。
           # 判据在 Agent 开工**之前**跑：接力能不能真发生，必须在烧掉整轮预算之前
           #   就说清楚；跑不起来即红，不留"看着配了、其实永远不会触发"的接力。
-          script: "$NPX scripts/ci/npc_turn_handoff_gate.py"
+          script: "$NPX_CALL scripts/ci/npc_turn_handoff_gate.py"
           timeout: 2m
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           # 单条工具执行（bash 命令）的墙钟上界：不声明则连续 10 分钟无输出即中断，
@@ -537,7 +552,7 @@ $:
           #   $PWD 是否等于 $CNB_BUILD_WORKSPACE（不等就把它打印出来）。
           # 判据在 Agent 开工**之前**跑：接力能不能真发生，必须在烧掉整轮预算之前
           #   就说清楚；跑不起来即红，不留"看着配了、其实永远不会触发"的接力。
-          script: "$NPX scripts/ci/npc_turn_handoff_gate.py"
+          script: "$NPX_CALL scripts/ci/npc_turn_handoff_gate.py"
           timeout: 2m
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           # 单条工具执行（bash 命令）的墙钟上界：不声明则连续 10 分钟无输出即中断，

@@ -326,23 +326,14 @@ def main() -> int:
     return 0
 
 
-def runUnderNode() -> int:
-    """本脚本的 node 实现：平台流水线镜像里没有 python 时的同一份判据。"""
-    import contextlib
-    import subprocess
-    import tempfile
-
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "npc_turn_handoff_gate_node.js"
-        path.write_text(NODE_IMPLEMENTATION.lstrip("\n"), encoding="utf-8")
-        # eslint-disable-next-line no-control-regex 的场景与 Lint 无关：
-        # 该文件只落在临时目录，不进仓库、不被 lint/打包。
-        completed = subprocess.run(
-            ["node", str(path), *sys.argv[1:]],
-            env=dict(os.environ),
-        )
-    return completed.returncode
-
-
 if __name__ == "__main__":
-    sys.exit(runUnderNode() if os.path.basename(sys.executable).startswith("node") else main())
+    # node 分支的入口**不在这里**：`node <本文件>.py` 到不了这一行。
+    # node 按扩展名解析模块，遇到 `.py` 在解析阶段就以
+    # `ERR_UNKNOWN_FILE_EXTENSION` 退出（构建 cnb-9cc-1k34ff3t1 实测 rc=1），
+    # 任何写在 `__main__` 里的"按解释器分派"都不可达，故不留这段死码。
+    #
+    # node 侧由外层壳 scripts/ci/run_gate_under_node.sh 接管：它从本文件里
+    # 取出下方 NODE_IMPLEMENTATION 正文、写成临时 .js 交给 node，
+    # 再把退出码原样传出。两份实现的等价性由
+    # tests/unit/ci/test_npc_script_interpreter_reachability.py 真跑比对。
+    sys.exit(main())
