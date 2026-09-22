@@ -135,3 +135,113 @@ async def test_tool_execution_manager_integration():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+class _ShapeJudgingExecutor:
+    """最小可用的工具执行器替身。
+
+    只实现 `execute_tool`——**不**实现 `_result_is_success`。
+    生产装配下肌肉记忆要保存的正是"这次执行用什么判据判成败"，
+    该判据由执行器自己给出；替身不给出时，生产者无从判断，
+    原实现里 `{"status": "success"}` 的替身数据会把这一步盖住。
+    """
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.calls = 0
+
+    async def execute_tool(self, tool_name, params, user_input):
+        self.calls += 1
+        return self.payload
+
+
+class _ShapeJudgingExecutorWithVerdict(_ShapeJudgingExecutor):
+    """同上，但显式给出判据（与生产 `ToolExecutor._result_is_success` 同形）。"""
+
+    @staticmethod
+    def _result_is_success(result):
+        return not (isinstance(result, dict) and result.get("error"))
+
+
+async def _run_auto_execute(payload, executor_cls=_ShapeJudgingExecutor):
+    executor = executor_cls(payload)
+    agent = MockAgent()
+    agent.tool_executor = executor
+    pipeline = ChatPipeline(agent)
+
+    recorded = []
+
+    class _Muscle:
+        def record_usage(self, tool_name, query, parameters, success, **kwargs):
+            recorded.append({"tool_name": tool_name, "success": success})
+            return Mock()
+
+    class _ToolMemory:
+        muscle_memory = _Muscle()
+
+    # 生产装配点：agent.tool_memory 就是肌肉记忆的持有者
+    # （`ChatPipeline.tool_memory` 走 `getattr(self._agent, "tool_memory", None)`）。
+    agent.tool_memory = _ToolMemory()
+    pipeline._record_tool_failure = _AsyncRecorder(recorded)
+
+    ctx = ChatContext(
+        user_input="再来一次",
+        tool_memory_result={
+            "tool_name": "get_datetime",
+            "tool_params": {},
+            "confidence": 0.9,
+        },
+    )
+    await pipeline._auto_execute_tool(ctx)
+    return ctx, recorded
+
+
+class _AsyncRecorder:
+    def __init__(self, sink):
+        self._sink = sink
+
+    async def __call__(self, tool_name, user_input, error_msg):
+        self._sink.append({"tool_name": tool_name, "success": False, "error": error_msg})
+
+
+class TestAutoExecuteJudgesToolOutcomeAtTheExecutor:
+    """自动执行臂必须按**执行器给出的判据**判成败，并把成败回流给肌肉记忆。
+
+    现场（构建 cnb-1h8-1k341hkm9，Issue #99 工具↔经验↔再调用环路）：
+    自动执行臂把 `{"error": …}` 的原生工具结果当成成功，且 `_record_tool_failure`
+    从不是生产调用的——失败教训不落账、肌肉记忆的连续成功数不清零。
+    """
+
+    @pytest.mark.asyncio
+    async def test_error_payload_is_reported_as_failed(self):
+        """`{"error": …}` 必须被**判成失败**，而不是"没成功但也没说失败"。"""
+        ctx, recorded = await _run_auto_execute({"error": "boom"})
+        assert ctx.tool_decision == "failed", (
+            f"`{{'error': …}}` 的裁定不是失败（现场形态是静默当成成功）：{ctx.auto_execute_result}"
+        )
+        assert ctx.auto_execute_result.get("success") is False
+        assert recorded and recorded[0]["success"] is False, (
+            f"失败结果没有回流到肌肉记忆（成败信号断链）：{recorded}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_success_payload_flows_back_to_muscle_memory(self):
+        ctx, recorded = await _run_auto_execute(
+            {"result": 42}, executor_cls=_ShapeJudgingExecutorWithVerdict
+        )
+        assert ctx.tool_decision == "auto_executed", ctx.auto_execute_result
+        assert recorded and recorded[0]["success"] is True, (
+            f"成功结果没有回流到肌肉记忆：{recorded}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_executor_without_verdict_is_a_named_failure(self):
+        """判据缺席时不得默认成功——那正是本次事故的形态（无判据 ⇒ 静默绿）。"""
+        ctx, recorded = await _run_auto_execute({"anything": 1})
+        assert ctx.tool_decision == "failed", (
+            f"执行器未给出成败判据时未被判失败（默认成功即本次事故形态）：{ctx.auto_execute_result}"
+        )
+        assert ctx.auto_execute_result and "判据" not in str(ctx.auto_execute_result.get("error", "")), (
+            "失败结论应当点名真实原因，而不是把判据缺失伪装成工具报错"
+        )
+        assert recorded and recorded[0]["success"] is False
