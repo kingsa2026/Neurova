@@ -231,8 +231,11 @@ neurova/llm/cost_tracking_middleware.py  ← 362 行，全仓零消费者
 常驻守卫 `tests/unit/api/test_route_mount_contract_guard.py` 钉住
 「零路由挂载 / 前缀重复 / 挂载层错位」三类形态，并保留
 `unmountedEndpointModules()` 名单（`cost_api` / `computer_api` / `phase3_api` /
-`migration_api` / `skill_market` / `skills_market` 仍定义了路由但未挂载，
-名单进 `docs/09-dev-progress/api_inventory.md` 供人排期）。
+`migration_api` / `skill_market` / `skills_market` / `openplatform.routes` /
+`core.acp_server` 仍定义了路由但未挂载，名单进 `docs/09-dev-progress/api_inventory.md`
+供人排期）。名单**收录口径是全仓**（`SOURCE_ROOTS`），不是只扫 `api/endpoints/` 包：
+口径若比声明窄，同一形态在包外就永远看不见——`openplatform.routes`（19 条）与
+`core.acp_server`（5 条）正是因此长期不在册的两条命中点。
 「导入失败只 `logger.debug`」这条仍成立，属同域的下一个缺口，未在本轮处置。
 
 ### 6.2 成本链路：是只读报表，不是拦截器
