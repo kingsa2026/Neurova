@@ -373,34 +373,56 @@ class TestBackgroundTaskLifecycle:
         )
 
     def test_concurrent_background_actually_parallel(self):
-        """响应无关步骤应并发跑：总耗时 ≈ 单步耗时，而非 N 倍之和。"""
-        import time
+        """响应无关步骤必须并发跑：同轮在飞高水位 = 并发步数（串行时恒为 1）。
 
+        判据是结构性的（与机器速度无关）：每个步骤进门把在飞计数 +1 后停在
+        "闸"上，主流程观察到在飞高水位到齐才放闸。旧写法断言墙钟
+        ``elapsed < 0.6``（5×0.2s 串行需 ≥1.0s），在 CI 共享机的负载下会把
+        正确实现读成"未并发"——见 ``tests/unit/test_ci_wallclock_assertion_ledger.py``。
+        """
         pipe = _make_pipeline()
-
-        async def _slow(*a, **k):
-            await asyncio.sleep(0.2)
-
-        for name in (
+        step_names = (
             "_step_reflection",
             "_step_record_experience",
             "_step_record_workflow_experience",
-        ):
-            setattr(pipe, name, _slow)
-        pipe._step_skill_funnel_flush = _slow
-        pipe._step_evocate_generation = _slow
+            "_step_skill_funnel_flush",
+            "_step_evocate_generation",
+        )
+        # 在飞计数与高水位（可变容器：闭包内改写，不靠 nonlocal 传递）
+        gauge = {"inflight": 0, "peak": 0}
 
         async def _run():
+            gate = asyncio.Event()
+
+            async def _gated(*a, **k):
+                gauge["inflight"] += 1
+                gauge["peak"] = max(gauge["peak"], gauge["inflight"])
+                try:
+                    await gate.wait()
+                finally:
+                    gauge["inflight"] -= 1
+
+            for name in step_names:
+                setattr(pipe, name, _gated)
+
             await pipe.process(
                 user_input="hi", reply="yo", session_id="s1",
                 save_memory=True, enable_tts=False, metadata={},
             )
-            started = time.perf_counter()
+            # 派发只建任务，任务体在事件循环下一轮才起跑：让出若干轮等它们进门
+            for _ in range(20):
+                if gauge["peak"] == len(step_names):
+                    break
+                await asyncio.sleep(0)
+            gate.set()
             await pipe.drain_background(timeout=10)
-            return time.perf_counter() - started
+            return gauge["peak"]
 
-        elapsed = asyncio.run(_run())
-        assert elapsed < 0.6, f"5 个 0.2s 步骤若串行需 ≥1.0s，实测 {elapsed:.2f}s → 未并发"
+        peak = asyncio.run(_run())
+        assert peak == len(step_names), (
+            f"{len(step_names)} 个响应无关步骤同时在飞的高水位应为 {len(step_names)}，"
+            f"实测 {peak} → 未并发（在响应路径上串行 await 时恒为 1）"
+        )
 
 
 class TestObservabilityInMetricsRegistry:
@@ -487,26 +509,52 @@ class TestResponsePathLatencyImprovement:
         return pipe
 
     def test_background_response_path_does_not_scale_with_bypass_steps(self, monkeypatch):
-        import time
+        """响应路径不等待旁路步骤——把 11 个旁路步骤全部"闸住"来证明。
 
+        判据是结构性的（与机器速度无关）：闸只在 ``process()`` 返回之后才放开，
+        所以"响应路径仍在等旁路步骤"会表现为 ``process()`` 返回不了（超时判红），
+        而不是"耗时看起来偏大"。旧写法断言墙钟 ``elapsed < STEP_DELAY + 0.1``：
+        CI 共享机负载下把正确实现误判为回归（实测 0.42625s vs 阈值 0.25s），
+        且这个误判方向会诱导"放宽阈值换绿"——那连真实的尾延迟回归一起放行，
+        属教义第 2 条禁止的降级断言。
+        """
         monkeypatch.setenv("NEUROVA_POSTCHAT_BACKGROUND", "1")
-        pipe = self._pipeline_with_slow_steps()
+        pipe = _make_pipeline()
+        released = set()
 
         async def _run():
-            start = time.perf_counter()
-            await pipe.process(
-                user_input="hi", reply="yo", session_id="s1",
-                save_memory=True, enable_tts=False, metadata={},
-            )
-            elapsed = time.perf_counter() - start
-            await pipe.drain_background(timeout=10)
-            return elapsed
+            gate = asyncio.Event()
 
-        elapsed = asyncio.run(_run())
-        # 串行语义下 11 个旁路步骤会付 11×delay ≈ 1.65s；并发后台化后，
-        # 响应路径只付"认知分析"这一步（delay）+ 小开销。
-        assert elapsed < self.STEP_DELAY + 0.1, (
-            f"响应路径耗时 {elapsed:.2f}s 仍随旁路步骤数增长（应 ≈ 单步 {self.STEP_DELAY}s）"
+            def _make_gated(step_name):
+                async def _gated(*a, **k):
+                    await gate.wait()
+                    released.add(step_name)
+                return _gated
+
+            for step_name in BACKGROUND_STEPS:
+                setattr(pipe, f"_step_{step_name}", _make_gated(step_name))
+
+            result = await asyncio.wait_for(
+                pipe.process(
+                    user_input="hi", reply="yo", session_id="s1",
+                    save_memory=True, enable_tts=False, metadata={},
+                ),
+                timeout=10,
+            )
+            atReturn = {r.step_name for r in pipe._step_results}
+            gate.set()
+            await pipe.drain_background(timeout=10)
+            return result, atReturn
+
+        result, atReturn = asyncio.run(_run())
+        assert result["actual_session_id"] == "s1"
+        assert not (atReturn & BACKGROUND_STEPS), (
+            "process() 返回时旁路步骤已收口："
+            f"{sorted(atReturn & BACKGROUND_STEPS)} —— 它们仍在响应路径上被 await"
+        )
+        assert released == BACKGROUND_STEPS, (
+            f"放闸后未跑完的旁路步骤：{sorted(BACKGROUND_STEPS - released)}"
+            "（后台化不是删步骤）"
         )
 
     def test_kill_switch_path_pays_all_steps_serially(self, monkeypatch):

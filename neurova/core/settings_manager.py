@@ -11,10 +11,10 @@ from __future__ import annotations
 
 import json
 import threading
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -50,7 +50,7 @@ class SettingsManager:
         }
 
         # 数据目录
-        self._data_dir = Path(self._config.get("data_dir", "data"))
+        self._data_dir = callerPath(self._config.get("data_dir"))
         self._settings_file = self._data_dir / "settings.json"
 
         # 确保目录存在

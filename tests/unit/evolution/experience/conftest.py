@@ -209,3 +209,16 @@ def experience_probe(tmp_path, monkeypatch):
         PostChatPipeline._step_results_ctx.reset(token)
         # 复位到"未创建"，避免把临时库路径泄漏给后续用例
         reset_experience_knowledge_base()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_muscle_memory_ledger(tmp_path, monkeypatch):
+    """肌肉记忆归档留底目录隔离（防仓库 `docs/05-reports/` 被测试写入）。
+
+    留底目录是模块级常量（指向仓内），测试里若不加隔离，每跑一次归档用例就往
+    仓库里落一份带时间戳的副本——一次性文件不可回收，且会把"留底"变成噪声。
+    """
+    from scripts.diagnostics import muscle_memory_rearchive
+
+    monkeypatch.setattr(muscle_memory_rearchive, "LEDGER_DIR",
+                        tmp_path / "muscle-memory-ledger")
