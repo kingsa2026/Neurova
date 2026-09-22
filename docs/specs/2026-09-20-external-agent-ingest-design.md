@@ -299,6 +299,90 @@ scripts/ingest_memory.py   薄 CLI：detect / convert / apply / undo
 增量与幂等（2/0）、本进程运行期记忆不被抹掉、盘上行一个字节不改、关键词倒排既有词条不被清空、
 门索引咬合（同键写入不另起行）、快照口径不因 reload 收窄、`/reload` 不被 `/{memory_id}` 吞掉。
 
+### 7.7 2026-09-22 整链路复核（"是否闭环"的逐段取证）
+
+结论先行：**主干闭环成立，跨进程撤销不闭环**。逐段实测如下（命令可复跑）。
+
+**已闭环（实测）**
+
+- 识别 → 转换 → 校验 → 写库：`pytest tests/unit/memory_ingest tests/unit/migration
+  tests/unit/api/test_memory_enhancement_real_manager.py -q` → **287 passed**。
+- 记忆跨进程可见（F-05 通道）：非本进程写入后 `GET /v1/memory` 仍 0 条 →
+  `POST /api/v1/memory/reload` → `{'reloaded': 1}` → 紧接着 `GET` 读到该条 → 再 reload 报 0。
+- 会话跨进程可见**不需要** reload：长驻读进程先见 `[]`，另一进程 apply 后同一读进程见 `['sX']`
+  （会话面读盘即见）——与 §7.6 的口径一致。
+- 单进程内撤销精确：`undo` 后同一实例列表为空、盘上行为 0（本批断言见 `test_intake.py`）。
+
+**断点① 跨进程撤销不闭环（会咬到用户）**
+
+另一进程 `undo` 只删盘，运行中的实例既不知道、也不会因此收敛；而它手里那条行仍算"在服务期"，
+用户任何一次碰它都会把撤销结果写回盘：
+
+```
+① 另一进程 apply（1 条）→ 后端 reload 后列表 ['待撤销的锚点']
+② 另一进程 undo → 盘上行数 0
+③ 后端未做任何动作：列表仍 ['待撤销的锚点']、stats.total_memories 仍是 1、recall 仍命中
+④ 后端 reload → 0（并入端只补缺，不回收已消失行——这是 §7.6 定的口径，不是实现走样）
+⑤ 用户对界面里这条"还在"的记忆点一次强化 → update_memory 返回 True → 盘上行数 0 → 1
+⑥ 重开实例：被撤销的那条又回来了
+```
+
+根因有两处、都在"谁的事实为准"这一层：`reload_memories` 是**单向并入**（只补缺不回收），
+而 `update_memory` / `remember` 命中内存快照后一律走 `_persist_upsert` 直接落盘 ——
+于是运行实例可以拿一份已被撤销的内存行去覆盖盘上事实。修法（撤销后要求重启，还是让 reload
+做双向对账、以盘为准回收）属产品决定，本轮一行未改，登记在此。
+
+**断点② `apply --owner-user-id` 只覆盖会话面**
+
+实测（真 CLI 参数 + 真 MemoryManager）：
+
+```
+apply --owner-user-id u_alice
+  → 会话文件 user_id = u_alice         （F-04 已闭环）
+  → 记忆行三元组 = ('a', 'default', 'default')
+u_alice 实例 reload → 0；她的列表 []；她的 recall []
+```
+
+根因：`import_memories` 用 `_eff_*`（**调用现场**作用域）给行定标，而 CLI 现场没有属主语义；
+`owner_user_id` 只被会话写入口消费。影响：为他人导入的会话有主，同一支包里的记忆无主——
+她按作用域检索看不见，只能经管理口径（agent_wide）看到。与 F-04 同源（"导入侧生产了没有属主的
+状态"），但落在另一条咽喉上，修法同样需要拍板（给记忆写入口也加属主参数）。
+
+**断点③ 导入的媒体在运行中的服务里读不到（§9 原有条目，指引已失真）**
+
+复核证据（两段，后一段是新增的）：
+
+- `intake._artifact_info` 产出的条目键为
+  `['agent_id','artifact_id','kind','mime_type','name','path','size','source']` —— **没有 `user_id`**；
+- 读端 `artifacts_api._get_owned_artifact` 的判据是 `info.get("user_id") != current_user["user_id"]`
+  → 任何已登录用户（实测 `u_alice` / `default` / 空串）请求 `/v1/artifacts/{id}/content` 均 **404**；
+- 注册表 `_artifacts_store` 无持久化（`app.py` 只水合 `files_api`），跨进程不共享。
+
+§9 原写"预存缺口，见 `tests/unit/api/test_files_store_persistence.py` 的红"——该文件实测
+**4 passed**，且它测的是 `files_api._files_store` 的水合，与 artifacts 读端无关；指引已改正如后。
+
+**断点④ F-17 残余（UI 导入路的幂等读数与可撤销性）**
+
+六条端点接真库后，`/memory-enhancement/import` 走 `manager.remember`，同一句导入两次实测：
+
+```
+第一次 {"imported": 1, "updated": 0, "skipped": 0, "errors": []}
+第二次 {"imported": 1, "updated": 0, "skipped": 0, "errors": []}   ← 真库行数恒 1
+```
+
+内容门把第二次落成"再确认"（返回既有 id），但响应仍报 `imported: 1` 且 `skipped: 0`——
+读数与增量不一致。另：该路写入的行没有 `ingest_run_id`，`delete_ingested_memories` 实测返回 0，
+即 **UI 导入的记忆不可按批次撤销**（CLI 路可撤销）。两条都在产品面上，本轮只登记。
+
+**断点⑤ 只写不读（契约与读数）**
+
+| 落点 | 生产方 | 消费方 | 备注 |
+|---|---|---|---|
+| `TranscriptRecord.parent_seq`（契约 §3 声明的树边） | 0（转换器无一产出） | 0（turns/intake 都不读） | 只有字段声明与契约文字 |
+| `manifest.stores[]`（"每个来源 store 的识别结论"） | 6 个转换器全写 | 0（校验层、CLI、`plan_bundle` 均不读） | 包外不可见 |
+| `IngestReport.owner_of_run` | 定义于 `intake.py` | 0 | CLI 走的是 `sessions.ingested_run_owners` |
+| `_stats["supersede_unresolved_count"]` | 导入侧累计 | `get_stats()` 不返回 | 唯一读它的是测试读私有 `_stats` |
+
 ### 7.2 常驻判据
 
 - 转换器：每族一个合成 fixture 正例 + 一个"像但不是"的负例；黄金 bundle 摘要进 CI。
@@ -349,11 +433,30 @@ v1 的记录类型边界（避免接口悬空）
 - 已核不是问题（勿重修，2026-09-21 批次反证）：源的 WAL sidecar 不由识别与转换读取（只读 URI 打开
   主库即可，`-wal`/`-shm` 缺席也不影响）；非 UTF-8 行由各读点的 `errors="replace"` 承接，
   识别与包产出都不会因此崩；`probe._structure` 对打不开的库回 `{"error": ...}` 而非空结构。
-- 导入媒体在**运行中的服务**里看不见：intake 把字节落进 `agent_workspaces/<agent>/media/`
-  并按注册处同一算法给出 `metadata.artifacts` 条目，但产物注册表是 API 进程内的字典
-  （`artifacts_api._artifacts_store`），跨进程不共享。要让导入的图片在 UI 里打开，需要的是
-  注册表持久化（预存缺口，见 `tests/unit/api/test_files_store_persistence.py` 的红），
-  不是再往导入侧加一遍写入。
+- 导入媒体在**运行中的服务**里看不见（2026-09-22 复核，取证见 §7.7 断点③）：intake 把字节落进
+  `agent_workspaces/<agent>/media/` 并按注册处同一算法给出 `metadata.artifacts` 条目，但该条目
+  **不带 `user_id`**，而读端 `artifacts_api._get_owned_artifact` 按 `user_id` 判归属 →
+  任何已登录用户请求 `/v1/artifacts/{id}/content` 一律 404；产物注册表 `_artifacts_store` 亦无持久化
+  （`app.py` 只水合 `files_api`），跨进程不共享。两处都得修才有可读的媒体：条目补归属 + 注册表持久化。
+  原指引"预存缺口见 `test_files_store_persistence.py` 的红"已失真（该文件 4 passed，且测的是 `files_api`）。
+  修法均需拍板（属主口径要先定"会话属主是否等同于产物属主"），本轮登记不改。
+- 跨进程撤销不闭环（2026-09-22 复核，取证见 §7.7 断点①）：另一进程 `undo` 只删盘，运行中的实例
+  仍持该行且可经 `update_memory`/`remember` 把它写回盘上（实测 0 → 1 行、重开实例复活）。
+  根因是 `reload_memories` 单向并入 + 写路径以内存快照为准，不是实现走样；修法（撤销后要求重启，
+  或让 reload 做双向对账以盘为准）属产品决定。
+- `apply --owner-user-id` 只覆盖会话面（2026-09-22 复核，取证见 §7.7 断点②）：同一支包里记忆行的
+  三元组取**调用现场**作用域（CLI 下即 default/default），为他人导入的会话有主而记忆无主，
+  按作用域检索看不见。与 F-04 同源、落在另一条咽喉上，需拍板。
+- UI 导入路（`/memory-enhancement/import`）不可撤销且幂等读数不诚实（2026-09-22 复核，见 §7.7 断点④）：
+  行不带 `ingest_run_id`（`delete_ingested_memories` 返回 0）；同一句重复导入两次响应均报
+  `imported: 1`，而真库行数恒 1。
+- 只写不读的落点（2026-09-22 复核，逐条取证见 §7.7 断点⑤）：`TranscriptRecord.parent_seq`
+  （契约 §3 声明的树边，转换器无一产出、turns/intake 均不读）、`manifest.stores[]`
+  （6 个转换器全写，校验层/CLI/`plan_bundle` 均不读）、`IngestReport.owner_of_run`
+  （零消费方，CLI 实际走 `sessions.ingested_run_owners`）、`_stats["supersede_unresolved_count"]`
+  （导入侧累计，`get_stats()` 不返回）。前三条要动契约或 CLI 输出面，需拍板；
+  第四条属读数开口，已随本批复核收口（`get_stats()` 现在返回该计数）。`parent_seq`
+  因属 §3 契约字段，删除会拒收带该键的第三方包，故留待拍板而非就地删。
 - 通道侧会话号仍带冒号（`discord:{channel}:{user}` 等）：路径装配处已统一归一并在读侧保留
   源名兜底，POSIX 老库不受影响；但**新写入**会落在归一名下，若老库里同日已有源名文件则
   续写老文件——彻底收敛需要一次带备份的重命名，另开批次做。

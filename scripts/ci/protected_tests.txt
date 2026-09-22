@@ -419,9 +419,12 @@ tests/unit/context/test_context_ledger_fts_migration.py
 #   修法：挂载事实收口到注册表一处（旁路与空 router 删除），判据单源在生成器
 #   （mountedRouterAudit / unmountedEndpointModules），静态重建路由的二套实现删净。
 #   守卫另锁：前端基地址三类写法全认（漏认 neuron.ts 的 axios.create({baseURL}) 会
-#   产生 8 条假阳性）、未挂载路由模块名单非空且扫描范围为**全仓**
-#   （口径只扫端点包时，同一形态在包外静默存活——实测 openplatform.routes 与
-#    acp_server 两条命中点因此长期不在名单里）。
+#   产生 8 条假阳性）、未挂载路由模块判据以注入自证不空转、且扫描范围为**全仓**
+#   （口径只扫端点包时同一形态在包外静默存活——实测 openplatform.routes 与
+#   acp_server 两条命中点因此长期不在名单里）。台账口径随后升级为**三态处置表**
+#   （已接线 / 已删除 / 待实现 + 依据，见 tests/unit/endpointWiringBaseline.txt）：
+#   本批已把实测的六个模块各自收口——四个删除、两个补真实身份后接线；
+#   反向控制改用注入，不拿残留孤儿当锚点（那会反过来要求孤儿继续存在）。
 tests/unit/api/test_route_mount_contract_guard.py
 # 上下文三链路批（Issue #90）B3 剩余 P2-8 / D4 甲案：pool 分支瞬态注入收回信封。
 #   （根因：记忆/经验/结晶/待探索问题/池召回/工具记忆/情感七类动态检索文本以
@@ -460,6 +463,13 @@ tests/unit/core/test_runtime_landing_root.py
 # NPC 流水线时间预算：禁止 sleep 轮询 / 禁宽匹配 pkill / 预算字面量上界
 #（事故：cnb-1q8-1k33cb2v9 在一次无产出的等待上烧光 2h 墙钟）
 tests/unit/ci/test_npc_pipeline_time_budget.py
+# NPC 轮数触顶接力的**执行面**：标记落点写作纪律 + 落点由真实构建自证
+#（事故：cnb-2e8-1k341d9s1 撞满 200 轮，接力 Stage 因读不到标记被 skipped，成果全丢）
+tests/unit/ci/test_npc_turn_handoff_execution.py
+# NPC 流水线脚本解释器的**可达性**守卫（Issue #151）
+#（事故：cnb-du8-1k34cfhg1 第 1 步 `python ...` 在只有 node 的镜像里 rc=127，
+#  npc:go 被 skipper 跳过；同一条死链在 issue/PR 两处逐字重复）
+tests/unit/ci/test_npc_script_interpreter_reachability.py
 #   守卫与上一条（路由挂载契约）同文件，判据同一处——不再另立第二份接线守卫
 #   （同一根因两份守卫 = 第二套平行体系，改一处漏一处）。
 
