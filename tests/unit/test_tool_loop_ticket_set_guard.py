@@ -403,3 +403,93 @@ class TestDefectNumberingHasProvenance:
         indexed = {"L-02": {"003"}}
         assert _unindexedDefectNumbers(tickets, indexed) == ["L-99"]
         assert _unindexedDefectNumbers(indexed, indexed) == []
+
+
+# ---------------------------------------------------------------------------
+# 第六组：两项「需人配合」事项的**用户裁定**必须在仓内可读
+# ---------------------------------------------------------------------------
+# 第五轮末，本批还剩四项「无法由实现方单方面闭环」的事项，全部登记在案。其中两项
+# （008 的浏览器级 live、011 的设计契约三件套）需要用户裁决：做，还是按现状收。
+# 用户在 Issue #80 给出裁定 —— **按现状承接**。
+#
+# 裁定落在评论里，而评论不进版本库：下一个复核者读票面，仍会看到「未闭环」四个字，
+# 于是「已经裁定过、不必再做」与「没人做、待办挂着」在仓内**分不开**。这与前几轮
+# 反复收口的是同一形态——写入（裁定做了）→ 读取（读者拿不到）的环断在读者这一环。
+#
+# 故本组判据只锁一件事：裁定本体必须在票集索引可读，且被裁定覆盖的票面必须指向它。
+
+RULING_HEADING = "## 用户裁定（按现状承接）"
+#: 裁定覆盖的两项（票号 + 事项关键词），与票面自陈一致。
+RULING_ITEMS = (("008", "浏览器级 live"), ("011", "三件套"))
+SPEC = PROJECT_ROOT / "docs" / "specs" / "2026-09-21-tool-experience-loop-repair.md"
+
+
+def _rulingSection(text: str) -> str:
+    """取裁定节正文（到下一个二级标题为止）；节不存在即返回空串。"""
+    if RULING_HEADING not in text:
+        return ""
+    body = text.split(RULING_HEADING, 1)[1]
+    cut = body.find("\n## ", 1)
+    return body if cut < 0 else body[:cut]
+
+
+def _rulingGaps(section: str) -> list:
+    """裁定节的缺陷清单（纯函数，供反向控制复算）。"""
+    gaps = []
+    if not section.strip():
+        return ["裁定节缺失"]
+    if "按现状承接" not in section:
+        gaps.append("没有写明裁定结论「按现状承接」")
+    for number, topic in RULING_ITEMS:
+        if number not in section or topic not in section:
+            gaps.append(f"未点名被裁定项：{number} {topic}")
+    return gaps
+
+
+class TestUserRulingIsReadableInRepo:
+    """两项需人配合事项的用户裁定必须随票集入库，否则「已裁定」与「没人做」不可分。"""
+
+    def test_rulingSectionExists(self):
+        text = _batchContractText()
+        assert RULING_HEADING in text, (
+            "票集索引里没有「用户裁定（按现状承接）」这一节：裁定只存在于 Issue 评论，"
+            "复核者读票面仍会看到「未闭环」，无法与「待办挂着」区分"
+        )
+
+    def test_rulingNamesTheCoveredItems(self):
+        gaps = _rulingGaps(_rulingSection(_batchContractText()))
+        assert gaps == [], (
+            "裁定节没有把被裁定项说全（结论 + 覆盖哪两张票的哪一项）:\n  "
+            + "\n  ".join(gaps)
+        )
+
+    def test_rulingSaysTheseAreNoLongerOpenItems(self):
+        section = _rulingSection(_batchContractText())
+        assert "不再列为未闭环" in section or "退出未闭环" in section, (
+            "裁定节没有交代这两项**退出未闭环清单**——「按现状承接」若只写成一句"
+            "「已确认」，下一位复核者仍会把它们当成待办重开一遍"
+        )
+        assert "§10" in section, (
+            "裁定节没有指向规格文档里记录本轮处置的那一节，读者无从看到红→绿与落点"
+        )
+
+    def test_coveredTicketsPointAtTheRuling(self):
+        """写入→读取闭环：落在票面（读者第一站）的登记必须指向裁定。"""
+        missing = []
+        for number, _ in RULING_ITEMS:
+            body = next(TICKETS.glob(f"{number}-*.md"), None)
+            assert body is not None, f"{number} 票面缺失"
+            if "按现状承接" not in io.open(body, encoding="utf-8").read():
+                missing.append(body.name)
+        assert missing == [], (
+            "被裁定覆盖的票面没有指向该裁定——读者在票面上看到的还是「未闭环」，"
+            "环断在读者这一环:\n  " + "\n  ".join(missing)
+        )
+
+    def test_rulingCriterionIsNotVacuous(self):
+        """反向控制：判据必须真的抓得住缺失与说不全（合成输入，不看仓库现状）。"""
+        assert _rulingGaps("") == ["裁定节缺失"]
+        assert "按现状承接" in _rulingGaps("结论：取消该项。")[0]
+        assert _rulingGaps(
+            "结论：按现状承接。008 浏览器级 live 与 011 三件套，不再列为未闭环。"
+        ) == []
