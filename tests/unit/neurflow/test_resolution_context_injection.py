@@ -83,10 +83,13 @@ class TestResolutionContextInjection:
 
         mock_agent = Mock()
         mock_agent.memory_manager = Mock()
-        # 显式删除 context_pool，使 getattr 返回 None，触发 context_orchestrator 降级
+        # 编排器上的属性名是 context_pool（B6-3 修正：此处原作 `.pool`，
+        # 那个名字在编排器上不存在 → 生产上恒取到 None 并落到"降级新建池"，
+        # 工作流节点读的是一个与对话链无关的空池。用例的语义（用 Agent 自己的
+        # 池、不新建）不变，只把取数路径改回真实属性名）
         mock_agent.context_pool = None
         mock_agent.context_orchestrator = Mock()
-        mock_agent.context_orchestrator.pool = Mock()
+        mock_agent.context_orchestrator.context_pool = Mock()
         mock_agent.crystallizer = Mock()
         mock_agent.memory_manager._emotion_module = Mock()
 
@@ -128,7 +131,7 @@ class TestResolutionContextInjection:
                 mock_executor.execute.assert_called_once()
                 call_kwargs = mock_executor.execute.call_args[1]
                 assert call_kwargs["memory_manager"] is mock_agent.memory_manager
-                assert call_kwargs["context_pool"] is mock_agent.context_orchestrator.pool
+                assert call_kwargs["context_pool"] is mock_agent.context_orchestrator.context_pool
                 assert call_kwargs["emotion_module"] is mock_agent.memory_manager._emotion_module
                 assert call_kwargs["crystallizer"] is mock_agent.crystallizer
 
@@ -201,14 +204,14 @@ class TestNeurflowApiFallback:
         mock_agent.memory_manager = Mock()
         mock_agent.context_pool = None
         mock_agent.context_orchestrator = Mock()
-        mock_agent.context_orchestrator.pool = Mock()
+        mock_agent.context_orchestrator.context_pool = Mock()
         mock_agent.crystallizer = Mock()
         mock_agent.memory_manager._emotion_module = Mock()
 
         call_kwargs = self._run_execute(mock_agent=mock_agent)
 
         assert call_kwargs["memory_manager"] is mock_agent.memory_manager
-        assert call_kwargs["context_pool"] is mock_agent.context_orchestrator.pool
+        assert call_kwargs["context_pool"] is mock_agent.context_orchestrator.context_pool
         assert call_kwargs["emotion_module"] is mock_agent.memory_manager._emotion_module
         assert call_kwargs["crystallizer"] is mock_agent.crystallizer
 

@@ -750,15 +750,20 @@ def _get_emotion_module():
         return None
 
 
-def _get_context_pool():
-    """获取 ContextPool 实例"""
-    try:
-        from neurova.context_pool import get_context_pool
+def _get_context_pool(user_id=None, agent_id=None, session_id=None):
+    """按身份取**已登记**的 ContextPool 实例（无则 None）。
 
-        return get_context_pool()
-    except ImportError:
-        logger.debug("ContextPool 未可用")
-        return None
+    改前这里 `except ImportError` 把**符号缺失**也吞成 DEBUG——因为
+    `get_context_pool` 当时并不存在，所以本函数在生产上恒返回 None，
+    调用方（`exec_context`）恒走"未注入"分支。符号缺失与"池里没内容"
+    在日志里长得一样，故障因此不可见（审计 P2-1）。
+
+    现在符号存在，且取池按身份归一；解析失败仍返回 None（不新造池），
+    但**调用方必须点名失败原因**，不得再静默降级。
+    """
+    from neurova.context_pool import get_context_pool
+
+    return get_context_pool(user_id=user_id, agent_id=agent_id, session_id=session_id)
 
 
 def _get_channel_manager():
@@ -1367,14 +1372,23 @@ async def exec_context(config: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str,
     （ContextPool 条目对象）与旧式 get_context()（返回 dict）两种池接口。
     按来源过滤并应用 token 预算。
     """
+    # 显式注入优先（ResolutionContext.context_pool）；未注入时凭执行上下文里的
+    # 身份取池——改前那一步恒取不到（符号不存在），于是"没注入"等于"永远失败"。
     context_pool = ctx.get("context_pool")
     if context_pool is None:
-        getter = globals().get("_get_context_pool")
-        context_pool = getter() if callable(getter) else None
+        context_pool = _get_context_pool(
+            user_id=ctx.get("user_id"),
+            agent_id=ctx.get("agent_id"),
+            session_id=ctx.get("session_id"),
+        )
     if context_pool is None:
         return {
             "status": "failed",
-            "error": "context_pool 未注入到执行上下文（ResolutionContext.context_pool 为 None）",
+            "error": (
+                "context_pool 取不到：既未注入（ResolutionContext.context_pool 为 None），"
+                f"也未登记该身份（user_id={ctx.get('user_id')!r}, "
+                f"agent_id={ctx.get('agent_id')!r}, session_id={ctx.get('session_id')!r}）"
+            ),
             "output": None,
         }
 

@@ -97,21 +97,40 @@ def _get_agent(agent_id: str = "default"):
 
 
 def _get_context_builder(user_id: str = None, agent_id: str = None, session_id: str = None):
-    """获取上下文构建器（隔离版本）
+    """取该身份下的上下文池（隔离版本）。
 
-    Args:
-        user_id: 用户ID（必需）
-        agent_id: Agent ID（必需）
-        session_id: 会话ID（可选）
+    改前每次请求都 `ContextPool(...)` 新建：与 Agent 的池完全隔离，写入即丢
+    （审计 P2-3）。现在按身份**取同一个池**：
+
+    1. Agent 已有编排器池 → 直接返回它（这才是对话主链真正在用的池）；
+    2. 否则按 (user, agent, session) 在注册表里取；取不到才创建**并登记**——
+       登记这一步是根因所在：不登记，同一身份的下一次请求又会拿到新池。
+
+    池身份是隔离契约的一部分，故参数缺省仍落显式默认值（不静默丢弃隔离维度）。
     """
     try:
-        from neurova.context_pool import ContextPool
+        from neurova.context_pool import ContextPool, get_context_pool
+        from neurova.context_pool_registry import get_registry
 
         if user_id is None or agent_id is None:
             logger.warning("ContextPool requires user_id and agent_id for isolation. Using default values.")
             user_id = user_id or "default_user"
             agent_id = agent_id or "default_agent"
-        return ContextPool(user_id=user_id, agent_id=agent_id, session_id=session_id)
+
+        agent = _get_agent(agent_id)
+        orchestrator = getattr(agent, "context_orchestrator", None) if agent is not None else None
+        agent_pool = getattr(orchestrator, "context_pool", None) if orchestrator is not None else None
+        if agent_pool is not None:
+            get_registry().adopt(agent_pool)
+            return agent_pool
+
+        existing = get_context_pool(user_id=user_id, agent_id=agent_id, session_id=session_id)
+        if existing is not None:
+            return existing
+
+        pool = ContextPool(user_id=user_id, agent_id=agent_id, session_id=session_id)
+        get_registry().adopt(pool)
+        return pool
     except Exception as e:
         logger.warning("ContextPool not available: %s", e)
         return None
@@ -499,6 +518,26 @@ async def inject_hot_memories(
         raise HTTPException(status_code=500, detail=f"Failed to inject hot memories: {str(e)}")
 
 
+def _resolve_budget_holder(agent, agent_id: str):
+    """取该 Agent 的真实 token 预算对象（编排器）。
+
+    端点此前挂在 `agent.unified_injector` 上，而该属性全仓没有赋值点——
+    `hasattr` 恒假，GET 恒硬编码、PUT 恒成功且零效果（审计 P2-2）。
+    真正决定 prompt 规模的预算是编排器的窗口预算，故此处以它为准；
+    取不到即 503 点名，不给静默假象。
+    """
+    orchestrator = getattr(agent, "context_orchestrator", None)
+    if orchestrator is None or not hasattr(orchestrator, "get_token_budget"):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Agent '{agent_id}' 的上下文预算对象不可用"
+                "（context_orchestrator 缺失）——拒绝返回硬编码读数"
+            ),
+        )
+    return orchestrator
+
+
 @router.get("/token-budget")
 async def get_token_budget(
     request: Request,
@@ -512,16 +551,11 @@ async def get_token_budget(
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-        # 获取 Token 预算
-        budget = {
-            "max_tokens": 16000,
-            "used_tokens": 0,
-            "available_tokens": 16000,
-        }
-
-        if hasattr(agent, "unified_injector") and agent.unified_injector:
-            if hasattr(agent.unified_injector, "get_token_budget"):
-                budget = agent.unified_injector.get_token_budget()
+        # B6-2：预算读数取自真实预算对象（编排器的窗口预算）——改前这里读的是
+        # `agent.unified_injector`，而全仓无该属性赋值点，于是恒返回硬编码
+        # 16000/0/16000（假读数）。取不到预算对象时点名报错，不再给一个
+        # 看着正常的数字。
+        budget = _resolve_budget_holder(agent, agent_id).get_token_budget()
 
         return {
             "code": 0,
@@ -550,15 +584,14 @@ async def set_token_budget(
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found")
 
-        # 设置 Token 预算
-        if hasattr(agent, "unified_injector") and agent.unified_injector:
-            if hasattr(agent.unified_injector, "set_token_budget"):
-                agent.unified_injector.set_token_budget(max_tokens)
+        # B6-2：写进真实预算对象，返回**实际生效值**（越界被钳位后调用方拿得到真值）。
+        holder = _resolve_budget_holder(agent, agent_id)
+        applied = holder.set_token_budget(max_tokens)
 
         return {
             "code": 0,
             "message": "Token budget updated",
-            "data": {"max_tokens": max_tokens},
+            "data": {"max_tokens": applied},
             "request_id": request_id,
         }
     except HTTPException:
