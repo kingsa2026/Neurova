@@ -514,16 +514,9 @@ def _register_core_modules(app_state: AppState) -> None:
 def _register_routes(app: FastAPI, app_state: AppState) -> None:
     """注册所有 API 路由"""
     from neurova.api.endpoints import (
-        acp_router,
-        evolution_router,
-        rag_router,
         register_endpoint_routers,
-        router,
         set_app_state,
     )
-    
-    # Budget management API
-    from neurova.api.endpoints.budget_api import router as budget_router
 
     # 全局业务异常处理：APIError → 标准 JSON 信封（未注册时会变成纯文本 500）
     from neurova.api.error_handlers import register_error_handlers
@@ -549,26 +542,12 @@ def _register_routes(app: FastAPI, app_state: AppState) -> None:
         }
     )
 
-    # 注册主路由
-    app.include_router(router, prefix="/api")
-
-    # 注册特殊路由
-    app.include_router(acp_router, prefix="/api/acp", tags=["ACP"])
-    app.include_router(evolution_router, prefix="/api/evolution", tags=["Evolution"])
-    app.include_router(rag_router, prefix="/api/rag", tags=["RAG"])
-    
-    # 注册预算管理系统 API
-    app.include_router(budget_router, prefix="/api")
-    
-    # Cost rollup API (performance optimization)
-    from neurova.api.endpoints.cost_rollup_api import router as cost_rollup_router
-    app.include_router(cost_rollup_router, prefix="/api")
-    
-    # 注册 NEURON 系统路由
-    from neurova.api.endpoints.neuron import router as neuron_router
-    app.include_router(neuron_router, prefix="/api/neuron", tags=["NEURON"])
-
-    # 注册所有端点路由
+    # 路由挂载只有一个入口：`endpoint_modules` 注册表（含 ACP / 预算 / 成本聚合 /
+    # NEURON / 协作域）。此前这里另有一组旁路 include_router，与注册表并存成了
+    # 第二份挂载事实：neuron 与 coordination 被叠两次前缀（真实路径
+    # /api/neuron/neuron/*、/api/coordination/coordination/*），预算与成本聚合被挂在
+    # /api 下（缺 /v1，前端 baseURL=/api/v1 → 必 404），另有三个空 router 挂出
+    # /api、/api/evolution、/api/rag 三个零路由前缀。旁路已删除。
     register_endpoint_routers(app)
 
     # 工具大输出 OutputRef 落盘引用（产物预览计划 W1-4，2026-09-08）：

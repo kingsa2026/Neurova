@@ -132,21 +132,24 @@ class TestBidirectionalDifferenceIsEmpty:
 
 
 class TestRouteFactsMatchTheRuntime:
-    """静态口径必须与真实注册结果一致 —— 否则清单就是第三份会漂移的事实。
+    """路由事实只有一个来源：**装配后的真实路由表**。
 
-    静态能力不足会把真 router 误判为空；故守卫先自证静态口径（不给假阳性留口子），
-    再要求清单把真断点显式点名。这一步是 live-verify：起真应用读它自己的路由表。
+    本仓历史上同时存在两套路由事实——`endpoint_modules` 注册表 + 各模块
+    `APIRouter(prefix=...)` 自述前缀的静态重建，与 `create_app()` 装配结果。
+    两套各写一半，正是「零路由挂载 / 前缀重复 / 挂载层错位」三类矛盾的土壤。
+    收口后静态重建已删除（教义第 6 条：不新造平行体系），故这里不来比对
+    「静态 vs 运行时」，而是**禁止第二套静态重建复活**，并用运行时读数自证判据。
     """
 
-    def test_static_route_paths_have_no_false_positive(self):
-        """静态收集的每条路由都必须真的注册了（能力不足不得表现为错误结论）。"""
+    def test_no_second_static_route_reconstruction(self):
+        """不得再出现「静态重建路由表」的第二套实现。"""
         module = _generator()
-        static = {_normalize(path) for _relative, path in module.backendRoutePaths()}
-        runtime = {_normalize(path) for path in _runtimeRoutePaths()}
-        falsePositives = sorted(static - runtime)
-        assert not falsePositives, (
-            f"这些静态路由在运行时并不存在（静态口径给了错误结论）：{falsePositives[:10]}"
-        )
+        for retired in ("backendRoutePaths", "routerRoutePaths", "routerRoutePaths",
+                        "registrationRows", "mountPoint", "moduleRouterPrefix"):
+            assert not hasattr(module, retired), (
+                f"生成器又出现了 {retired}()：那是静态重建路由的二套实现，"
+                "与 `create_app()` 装配结果必然逐版漂移（教义第 6 条）。"
+            )
 
     def test_zero_route_mount_points_match_the_runtime(self):
         """空 router 判据必须与运行时一致：点名的挂载点在真实路由表里零命中。"""
@@ -157,6 +160,19 @@ class TestRouteFactsMatchTheRuntime:
                     if path == point or path.startswith(point.rstrip("/") + "/")]
             assert not hits, (
                 f"被判为零路由的挂载点 {point} 在运行时其实有 {len(hits)} 条路由——判据给了假阳性。"
+            )
+
+    def test_mount_table_matches_the_runtime(self):
+        """清单挂载表里的每条前缀都必须在真实路由表里有命中。"""
+        module = _generator()
+        runtime = {_normalize(path) for path in _runtimeRoutePaths()}
+        for point, _ownPrefix, _module in module.backendMountPoints():
+            if point in ("/api/v1", "/api"):
+                continue  # 伞形前缀：其下各子挂载点是逐条列出的
+            hits = [path for path in runtime
+                    if path == point or path.startswith(point.rstrip("/") + "/")]
+            assert hits, (
+                f"挂载表列出的 {point} 在真实路由表里零命中——表在报一个并不存在的挂载点。"
             )
 
     def test_frontend_contract_breaks_are_real(self):
@@ -184,15 +200,27 @@ class TestBreakpointsAreNamedNotBuried:
             )
 
     def test_known_empty_mount_points_become_visible(self):
-        """事实自证：本轮实测存在未接线 router，清单必须如实呈现。"""
+        """判据不空转：注入一个零路由 router，清单侧必须报得出来。
+
+        （本轮已把实测存在的 `/api`、`/api/evolution`、`/api/rag` 三个零路由挂载退役，
+        当前列表为空是**修好了**，不是判据失效——故这里用注入自证，不靠残留读数。）
+        """
+        from fastapi import APIRouter, FastAPI
+
         module = _generator()
-        assert module.zeroRouteMountPoints(), (
-            "实测存在零路由挂载点（`/api/evolution`、`/api/rag`），"
-            "列表为空说明判据失效、断点被静默吞掉。"
+        app = FastAPI()
+        app.include_router(APIRouter(prefix="/zzz-probe"), prefix="/api/zzz-probe")
+        audit = module.auditMountsFor(app)
+        assert audit["零路由挂载"], (
+            "注入零路由 router 后审计仍为空——判据失效，断点会被静默吞掉。"
         )
-        assert module.unwiredRouters(), (
-            "实测存在未接线 router（`/api/evolution`、`/api/rag`；另有顶层 `router` 挂在 `/api`），"
-            "列表为空说明判据失效。"
+
+    def test_unmounted_endpoint_modules_are_exposed(self):
+        """定义了路由却从未挂载的模块必须点名（当前实测有 6 个，见清单第二节）。"""
+        module = _generator()
+        names = module.unmountedEndpointModules()
+        assert names, (
+            "实测存在「定义了路由但从未挂载」的端点模块，名单为空说明取数口径失效。"
         )
 
     def test_delta_section_names_every_breakpoint(self):

@@ -124,18 +124,22 @@
 | `tests/unit/test_api_inventory_freshness_guard.py` | 锁模块双向差集、前缀表、快照纪律、生成入口幂等与运行时零假阳性 |
 | `tests/unit/test_api_inventory_guard.py` | 锁机器区与生成器输出**逐字一致**、两组差异逐条登记、快照不逾期 |
 
-## 7. 重生成暴露的断点（本单**登记**，另单处置）
+## 7. 重生成暴露的断点（已处置：2026-09-22）
 
-重生成按「逐条可核」执行，顺带把此前只存在于架构评审里的三处接线断点变成**可复算读数**。
-它们不在本单改动范围（改动面涉及运行时路由行为，需独立评估），故在此登记，不静默遗留：
+重生成按「逐条可核」执行，把此前只存在于架构评审里的接线断点变成了**可复算读数**。
+原计划是「本单只登记、另单处置」；后续在同一线上收口了——因为它们的根因同一处：
+**挂载事实有两份**（注册表 + `app.py` 旁路），两份之间没有任何一致性校验。
 
-| 断点 | 读数 | 性质 |
+| 断点 | 修前读数 | 处置 |
 |------|------|------|
-| `/api/evolution`、`/api/rag` | 挂载动作在、路由零条 | `endpoints/__init__.py` 的 `evolution_router` / `rag_router` 是模块级空 `APIRouter()`，全仓无任何注册语句 |
-| `/api`（顶层 `router`） | 同上 | `endpoints/__init__.py` 的顶层 `router` 零路由，仅作容器 |
-| `cost.ts` 请求 `/api/v1/budgets`、`/api/v1/cost-rollup` | 运行时零命中 | 后端挂在 `/api/budgets`、`/api/cost-rollup`（缺 `v1`），前端 `baseURL=/api/v1` → 必 404 |
+| `/api`、`/api/evolution`、`/api/rag` | 挂载动作在、路由零条 | `endpoints/__init__.py` 的 `router` / `evolution_router` / `rag_router` 是模块级空 `APIRouter()`，全仓无任何注册语句 → **删除空壳与挂载**（空 router 不是「待接线」，是「不存在却对外可见」） |
+| `/api/neuron/neuron/*`、`/api/coordination/coordination/*` | 前缀重复段 | 表内 prefix 与模块自述 `APIRouter(prefix=...)` 各叠一次 → **表内前缀留空、以自述前缀为准**，旁路挂载删除 |
+| `/api/v1/budgets`、`/api/v1/cost-rollup` | 运行时零命中 | 旁路挂在 `/api` 下（缺 `v1`），前端 `baseURL=/api/v1` → 必 404 → **并入注册表挂 `/v1`**，旁路副本删除 |
 
-处置建议（择一，须单独立项）：空 router 接线或删除；
-`cost.ts` 的两条前缀要么后端改挂 `/api/v1`，要么前端改走绝对路径——
-两条路都会动运行时行为，需与 `docs/architecture-model/architecture-findings.md`
-第 6.1/6.3 节的既有裁定合并考虑，不在本单顺手改。
+三处的共同修法：**挂载只有一个入口**——`endpoint_modules` 注册表；`app.py` 的旁路
+`include_router` 组全部删除。判据（`mountedRouterAudit` / `unmountedEndpointModules`）
+单源在同一条装配路径上，常驻守卫
+`tests/unit/api/test_route_mount_contract_guard.py` 逐条钉住。
+
+`docs/architecture-model/architecture-findings.md` 第 6.1/6.3 节的既有裁定同批对齐：
+6.1 记的「两套注册事实源」与 6.3 记的「前后端前缀契约断裂」在本轮一并收口。

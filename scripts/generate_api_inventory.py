@@ -40,6 +40,7 @@ FRONTEND_MODULES_DIR = PROJECT_ROOT / "NeurUI" / "src" / "api" / "modules"
 #: 模块目录的短名（守卫按此名做「磁盘多出一个模块」的负向控制；同一对象，非第二份定义）
 MODULES_DIR = FRONTEND_MODULES_DIR
 ENDPOINT_PACKAGE = PROJECT_ROOT / "neurova" / "api" / "endpoints" / "__init__.py"
+ENDPOINTS_DIR = PROJECT_ROOT / "neurova" / "api" / "endpoints"
 APP_MODULE = PROJECT_ROOT / "neurova" / "api" / "app.py"
 
 #: 清单正文里机器区的边界标记（人写说明在标记之外，生成器只碰标记之内）
@@ -65,17 +66,27 @@ GENERATED_ON_PATTERN = re.compile(r"快照日期：(\d{4}-\d{2}-\d{2})")
 #: app.py 里直接挂载的 router（不在注册表中，但同属注册事实）
 DIRECT_MOUNT_PATTERN = re.compile(r"app\.include_router\([^)]*?prefix\s*=\s*\"([^\"]+)\"", re.S)
 
-#: 各模块 router 自述的完整前缀（以 `/v1` 开头时不再叠加表内 prefix）
-VERSIONED_PREFIX = "/v1"
+#: 客户端自持基地址的两类写法（漏认任一类都会把整份差异表污染成假阳性）：
+#: - 常量形态：`const BASE = '/api/neuron'`；
+#: - 对象属性形态：`axios.create({ baseURL: '/api/neuron' })`。
+BASE_URL_PROPERTY_PATTERN = re.compile(r"baseURL\s*:\s*['\"]([^'\"]+)['\"]")
 
 
-class RegistrationRow:
-    """注册表一行：模块 import 路径、表内挂载前缀、说明。"""
+def clientBaseUrl(text: str) -> str:
+    """单个前端客户端文件的请求基地址（判据只写一份，取数与取前缀共用）。
 
-    def __init__(self, module: str, tablePrefix: str, description: str) -> None:
-        self.module = module
-        self.tablePrefix = tablePrefix
-        self.description = description
+    取数顺序：
+    1. 自建 axios 实例的 `baseURL: '...'`（`neuron.ts` → `/api/neuron`）；
+    2. 值为 `/api` 或 `/api/v1…` 的路径常量（`computer.ts` → `const API_BASE = '/api'`）；
+    3. 全库默认 `/api/v1`（`NeurUI/src/config/index.ts` 的 VITE_API_BASE_URL 兜底）。
+    """
+    declared = BASE_URL_PROPERTY_PATTERN.search(text)
+    if declared:
+        return declared.group(1).rstrip("/")
+    for value in dict(BASE_CONST_PATTERN.findall(text)).values():
+        if value == "/api" or value.startswith("/api"):
+            return value.rstrip("/")
+    return DEFAULT_API_BASE
 
 
 def moduleFile(modulePath: str) -> str:
@@ -180,11 +191,7 @@ def frontendModuleCalls(relative: str) -> list:
     path = PROJECT_ROOT / relative
     text = io.open(path, encoding="utf-8", errors="replace").read()
     constants = dict(BASE_CONST_PATTERN.findall(text))
-    base = DEFAULT_API_BASE
-    for value in constants.values():
-        if value == "/api" or value.startswith("/api/"):
-            base = value.rstrip("/")
-            break
+    base = clientBaseUrl(text)
     calls = []
     for match in REQUEST_CALL_PATTERN.finditer(text):
         method = HTTP_METHODS.get(match.group(1))
@@ -224,6 +231,9 @@ def frontendConsumedPrefixes(relative: str) -> list:
     for name, value in BASE_CONST_PATTERN.findall(text):
         if value.startswith("/") and "${" + name + "}" in text:
             prefixes.add("/" + value.strip("/").split("/")[0])
+    base = clientBaseUrl(text)
+    if base not in MOUNT_PREFIXES and base.startswith("/api/"):
+        prefixes.add("/" + base.strip("/").split("/", 1)[1])
     return sorted(prefixes)
 
 
@@ -253,258 +263,173 @@ def consumerCounts() -> dict:
     return counts
 
 
-def registrationRows() -> list:
-    """注册表逐行（`endpoint_modules` 表，唯一事实源）。"""
-    tree = ast.parse(io.open(ENDPOINT_PACKAGE, encoding="utf-8").read())
-    rows = []
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Assign)
-                and getattr(node.targets[0], "id", "") == "endpoint_modules"):
-            continue
-        for element in node.value.elts:
-            module, prefix, description = (part.value for part in element.elts)
-            rows.append(RegistrationRow(module, prefix, description))
-    return rows
-
-
-def moduleRouterPrefix(modulePath: str) -> str:
-    """模块内 `router` 自述的 prefix（无声明返回空串）。"""
-    relative = moduleFile(modulePath)
-    path = PROJECT_ROOT / relative
-    if not path.is_file():
-        return ""
-    tree = ast.parse(io.open(path, encoding="utf-8", errors="replace").read())
-    for node in tree.body:
-        if not (isinstance(node, ast.Assign)
-                and any(getattr(target, "id", "") == "router" for target in node.targets)):
-            continue
-        if not isinstance(node.value, ast.Call):
-            continue
-        for keyword in node.value.keywords:
-            if keyword.arg == "prefix" and isinstance(keyword.value, ast.Constant):
-                return keyword.value.value
-    return ""
-
-
-def mountPoint(tablePrefix: str, routerPrefix: str) -> str:
-    """挂载点 = 表内 prefix 与模块 router 自述 prefix 的拼接（自述含 `/v1` 时不再叠加）。"""
-    if routerPrefix.startswith(VERSIONED_PREFIX):
-        return ("/api" + routerPrefix).rstrip("/")
-    return ("/api" + tablePrefix.rstrip("/") + routerPrefix.rstrip("/")) or "/api"
-
-
-#: 路由注册语句：装饰器形态 `@router.get(...)` 与 `router.add_api_route(...)`
-ROUTE_DECORATOR_PATTERN = re.compile(r"@\s*([A-Za-z_][A-Za-z0-9_]*)\.(?:get|post|put|patch|delete|head|options|trace)\b")
-
-#: app.py 的直接挂载：`app.include_router(<名字>, prefix="...")`
-DIRECT_MOUNT_VERB_PATTERN = re.compile(
-    r"app\.include_router\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:,[^)]*?)?prefix\s*=\s*\"([^\"]+)\"", re.S
-)
-
-#: `X = APIRouter(...)` / `X = some.APIRouter(...)`
-ROUTER_ASSIGN_PATTERN = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[\w.]*APIRouter\(", re.M)
-
-
-def _importedRouters(relative: str) -> dict:
-    """单篇文件里 `router 变量 → (来源模块, 原变量名, 是否相对导入)`。
-
-    用 AST 取 import，不靠正则——本仓的 `from X import (a, b, c)` 多行括号形态
-    在 `app.py` 里就是主流写法，正则版本会把它们整批漏掉。
-    """
-    text = io.open(PROJECT_ROOT / relative, encoding="utf-8", errors="replace").read()
-    mapping = {}
-    for node in ast.walk(ast.parse(text)):
-        if not isinstance(node, ast.ImportFrom):
-            continue
-        for alias in node.names:
-            local = alias.asname or alias.name
-            if alias.name == "router" or alias.name.endswith("_router") or local.endswith("_router"):
-                mapping[local] = (("." * node.level) + (node.module or ""),
-                                  alias.name, node.level > 0)
-    return mapping
-
-
-def _moduleRelative(modulePath: str) -> str:
-    return moduleFile(modulePath)
-
-
-def displayRelative(path: Path) -> str:
-    """仓内相对路径（与 `trackedFiles` 同一书写口径）。"""
-    return str(path.relative_to(PROJECT_ROOT)).replace("\\", "/")
-
-
-def relativeModuleName(relative: str) -> str:
-    """仓内文件路径 → 包内点分模块名（包用其包名，非 `__init__`）。"""
-    stem = relative[:-3] if relative.endswith(".py") else relative
-    parts = stem.split("/")
-    if parts[-1] == "__init__":
-        parts = parts[:-1]
-    return ".".join(parts)
-
-
-def resolveImportModule(modulePath: str, importer: str) -> str:
-    """把 `from .base import router` 这类相对导入解析成仓内文件路径。"""
-    if not modulePath.startswith("."):
-        return moduleFile(modulePath)
-    importerPackage = relativeModuleName(importer)
-    package = importerPackage if importer.endswith("__init__.py") else importerPackage.rsplit(".", 1)[0]
-    depth = len(modulePath) - len(modulePath.lstrip("."))
-    suffix = modulePath.lstrip(".")
-    baseParts = package.split(".")
-    if depth > 1:
-        baseParts = baseParts[:len(baseParts) - (depth - 1)]
-    dotted = ".".join([part for part in baseParts if part] + ([suffix] if suffix else []))
-    return moduleFile(dotted)
-
-
-ROUTE_VERBS = "get|post|put|patch|delete|head|options|trace"
-
-
-def routerRoutePaths(name: str, relative: str, base: str, seen: set = None) -> list:
-    """静态收集某个 router 注册的**完整路由路径**（含跨模块 include_router）。
-
-    三类载体都要认，否则会把「统计能力不足」误判成断点：
-
-    - 本文件里的装饰器注册（`@router.get("/x")`）；
-    - 本文件里 `router.include_router(<子 router>)` 的递归跟随；
-    - **转发出口**（`from .base import router` / `from .x import router as y`）
-      ——注册语句在别的模块里，不跟随就永远数出空；
-    - 同包同级模块各自持有的共享 router（本仓 `endpoints/memory/`）。
-
-    `base` 是该 router 的挂载点；返回路径已拼上 base，可直接与前端请求比对。
-    """
-    seen = seen or set()
-    key = (relative, name)
-    if key in seen:
-        return []
-    seen.add(key)
-    path = PROJECT_ROOT / relative
-    if not path.is_file():
-        return []
-    text = io.open(path, encoding="utf-8", errors="replace").read()
-    found = []
-    for verb, route in re.findall(
-            r"@\s*" + re.escape(name) + r"\.(" + ROUTE_VERBS + r")\(\s*[\"']([^\"']*)[\"']", text):
-        found.append((base.rstrip("/") + "/" + route.strip("/")).rstrip("/") or base)
-    imports = _importedRouters(relative)
-    for inner in re.findall(re.escape(name)
-                            + r"\.include_router\(\s*([A-Za-z_][A-Za-z0-9_]*)", text):
-        if inner in imports:
-            modulePath, original, _isRelative = imports[inner]
-            innerPrefix = moduleRouterPrefix(modulePath)
-            innerBase = base + (innerPrefix if not innerPrefix.startswith(VERSIONED_PREFIX) else "")
-            found += routerRoutePaths(original, resolveImportModule(modulePath, relative),
-                                      innerBase, seen)
-        else:
-            found += routerRoutePaths(inner, relative, base, seen)
-    if not found:
-        imported = imports.get(name)
-        if imported:
-            modulePath, original, isRelative = imported
-            innerPrefix = moduleRouterPrefix(modulePath)
-            innerBase = base + (innerPrefix if not innerPrefix.startswith(VERSIONED_PREFIX) else "")
-            found += routerRoutePaths(original, resolveImportModule(modulePath, relative),
-                                      innerBase, seen)
-            if not found and name == "router" and isRelative:
-                packageDir = (PROJECT_ROOT / relative).parent
-                for sibling in sorted(packageDir.glob("*.py")):
-                    siblingRelative = displayRelative(sibling)
-                    if siblingRelative == relative:
-                        continue
-                    found += routerRoutePaths(name, siblingRelative, base, seen)
-    return sorted(set(found))
-
-
-def backendRoutePaths() -> list:
-    """（端点模块, 完整路由路径）逐条 —— 静态口径，可与运行时 openapi 复核。"""
-    rows = []
-    for row in registrationRows():
-        relative = moduleFile(row.module)
-        base = mountPoint(row.tablePrefix, moduleRouterPrefix(row.module))
-        for route in routerRoutePaths("router", relative, base):
-            rows.append((relative, route))
-    for relative, name, original, base in directMountRows():
-        for route in routerRoutePaths(original, relative, base):
-            rows.append((relative, route))
-    return sorted(set(rows))
-
-
-def directMountRows() -> list:
-    """`app.py` 直接挂载的（来源模块, 变量名, 挂载点）。
-
-    挂载点 = `include_router` 的 prefix + 该 router 自述 prefix
-    （例：`budget_router` 自述 `/budgets`，被挂到 `/api` → 实为 `/api/budgets`）。
-    """
-    appText = io.open(APP_MODULE, encoding="utf-8").read()
-    imports = _importedRouters("neurova/api/app.py")
-    rows = []
-    for name, prefix in DIRECT_MOUNT_VERB_PATTERN.findall(appText):
-        modulePath, original, _isRelative = imports.get(name, ("", name, False))
-        source = moduleFile(modulePath) if modulePath else ""
-        point = (prefix.rstrip("/") + moduleRouterPrefix(modulePath)) if modulePath else prefix
-        rows.append((source or "neurova/api/app.py", name, original, point.rstrip("/") or "/api"))
-    return rows
-
-
 def unwiredRouters() -> list:
-    """**未接线 router**：注册动作在、路由一条没有 —— 断点，不是「已注册」。
+    """**未接线 router**：挂载动作在、路由一条没有 —— 断点，不是「已注册」。
 
-    三种载体都会命中：
-
-    - 注册表里某模块的 `router` 零路由（模块整体是壳）；
-    - 模块级空对象被挂到具体前缀——本仓实测 `evolution_router` / `rag_router`
-      是**零路由空 router**（全仓无任何注册语句），却挂成 `/api/evolution`、`/api/rag`；
-    - `endpoints/__init__.py` 的顶层 `router` 同样零路由，被挂在 `/api`。
-
-    返回 (来源模块, 变量名, 挂载点)，按来源去重。
+    返回 `(挂载点, router 自述前缀, 操作标识)`。取数走 `mountedRouterAudit()`
+    （同一份判据），不另写一套解析。
     """
-    unwired = []
-    for row in registrationRows():
-        relative = moduleFile(row.module)
-        base = mountPoint(row.tablePrefix, moduleRouterPrefix(row.module))
-        if not routerRoutePaths("router", relative, base):
-            unwired.append((relative, "router", base))
-    for relative, name, original, prefix in directMountRows():
-        if not routerRoutePaths(original, relative, prefix):
-            unwired.append((relative, name, prefix))
-    return sorted(set(unwired))
+    return mountedRouterAudit()["零路由挂载"]
 
 
 def zeroRouteMountPoints() -> list:
     """零路由挂载点中**不承载任何其它挂载点**的那些（可一把断言「该前缀零路由」）。
 
-    伞形前缀（`/api`）被排除在外：它下面还挂着别的模块，说「`/api` 零路由」是
-    错的；那种情形由 `unwiredRouters()` 以（来源模块, 变量名）指名，不靠前缀说话。
+    伞形前缀被排除在外：它下面还挂着别的模块，说它「零路由」是错的；
+    那种情形由 `unwiredRouters()` 以操作标识指名，不靠前缀说话。
     """
-    points = sorted({point.rstrip("/") or "/" for _relative, _name, point in unwiredRouters()})
-    occupied = {point for _relative, point in backendMountPoints()}
+    points = sorted({point for point, _own, _operation in unwiredRouters()})
+    occupied = {operation["挂载前缀"] for operation in mountOperations()}
     return [point for point in points
             if not any(other.startswith(point + "/") and other != point for other in occupied)]
 
 
 def backendMountPoints() -> list:
-    """（模块文件, 挂载前缀）逐条，含 `app.py` 的直接挂载。
+    """（挂载前缀, router 自述前缀）逐条 —— 取**装配后**的真实 `include_router` 操作。
 
-    零路由挂载点（`zeroRouteMountPoints()`）**不入表**——那是断点，
-    与「已注册前缀」不是一回事，混在一起会让读者以为它可用。
+    为什么不静态重建：真实挂载前缀由 `include_router(prefix=...)` 与 router 自述
+    `prefix` 共同决定（本仓两者并用），静态解析等于再实现一遍 FastAPI 的挂载语义——
+    第二套平行体系，必然逐版漂移。既然 `app.py` 与注册表都走真装配，判据也取真装配。
+
+    零路由挂载点（`zeroRouteMountPoints()`）**不入表**：挂载动作在、路由一条没有，
+    是断点而非「已注册前缀」，混进表里会让读者以为它可用。
     """
-    unwired = {(relative, name) for relative, name, _point in unwiredRouters()}
-    points = []
-    for row in registrationRows():
-        relative = moduleFile(row.module)
-        if (relative, "router") in unwired:
+    empties = set(zeroRouteMountPoints())
+    points = {(operation["挂载前缀"], operation["自述前缀"], operation["模块"])
+              for operation in mountOperations()}
+    return sorted(row for row in points if row[0] not in empties)
+
+
+
+def mountedRouterAudit(app=None) -> dict:
+    """挂载契约审计：装配后逐条 `include_router` 核对它挂出的前缀是否成立。
+
+    两类断点（判据只写一份，守卫与清单同源取数）：
+
+    - **零路由挂载**：router 的 `routes` 为空却仍被挂到某前缀——对外声称该前缀可用、
+      实际全 404。挂载动作不报错、静态导入也不失败，只有装配后才看得见。
+    - **前缀重复**：挂载前缀以 router 自述前缀结尾，真实路径多出一段重复段
+      （本仓实测 `/api/neuron/neuron/*`、`/api/coordination/coordination/*`），
+      前端按单段路径请求即 404。
+
+    为什么不静态解析：真实挂载前缀由 `include_router(prefix=...)` 与 router 自述
+    `prefix` 共同决定，静态重建等于再实现一遍 FastAPI 的挂载语义——第二套平行体系，
+    必然逐版漂移。故取装配后的真实 include 操作。
+    """
+    empties, duplicates = [], []
+    for operation in mountOperations(app):
+        point = operation["挂载前缀"]
+        if operation["路由条数"] == 0:
+            empties.append((point, operation["自述前缀"], operation["操作标识"]))
             continue
-        points.append((relative, mountPoint(row.tablePrefix, moduleRouterPrefix(row.module))))
-    for relative, name, _original, prefix in directMountRows():
-        if (relative, name) in unwired:
+        own = operation["自述前缀"].strip("/")
+        if own and operation["include前缀"].rstrip("/").endswith("/" + own):
+            duplicates.append((point, operation["自述前缀"], operation["操作标识"]))
+    key = lambda row: (row[0], row[2])
+    return {
+        "零路由挂载": sorted(set(empties), key=key),
+        "前缀重复": sorted(set(duplicates), key=key),
+        "挂载操作数": len(mountOperations(app)),
+    }
+
+
+def mountOperations(app=None) -> list:
+    """逐条 `include_router` 操作字典。
+
+    字段：`模块`（该挂载下叶子处理函数所属模块，多来源时取首个）、`挂载前缀`、
+    `自述前缀`（router 自己的 `prefix=`）、`路由条数`、`操作标识`。
+
+    只取**一层**：本仓的嵌套 include 都发生在模块内部（聚合器包含叶子），
+    装配结果里它们已被展开成同一层的多个 include 操作，逐层递归会把同一条
+    路由数两遍。
+    """
+    app = app if app is not None else assembledApp()
+    operations = []
+    for index, route in enumerate(app.router.routes):
+        inner = getattr(route, "original_router", None)
+        if inner is None:
             continue
-        points.append((relative, prefix.rstrip("/")))
-    return [(path, point) for path, point in sorted(set(points)) if point != "/api"]
+        context = getattr(route, "include_context", None)
+        ownPrefix = getattr(inner, "prefix", "") or ""
+        leaves = list(getattr(inner, "routes", []) or ())
+        modules = sorted({getattr(getattr(leaf, "endpoint", None), "__module__", "")
+                          for leaf in leaves} - {""})
+        includePrefix = (context.prefix if context else "").rstrip("/")
+        operations.append({
+            "模块": modules[0] if modules else "",
+            # 有效挂载前缀 = include 前缀 + router 自述前缀 —— 这才是路由真实落在的
+            # 位置，也是本表要答的问题。（重复段是断点，由 mountedRouterAudit 拦下。）
+            "挂载前缀": (includePrefix + ownPrefix.rstrip("/")) or "/",
+            "include前缀": includePrefix,
+            "自述前缀": ownPrefix,
+            "路由条数": len(leaves),
+            "操作标识": f"{ownPrefix or '<无自述前缀>'} #{index}",
+        })
+    return operations
+
+
+def auditMountsFor(app) -> dict:
+    """对给定 app 做挂载审计（守卫反向控制入口：注入探针 router 后必须报出来）。"""
+    return mountedRouterAudit(app)
+
+
+def unmountedEndpointModules() -> list:
+    """定义了路由、却从未出现在装配后路由表里的端点模块（显式名单，不静默遗留）。
+
+    判据：AST 找出所有带 `@router.<verb>` 装饰器的模块；装配后遍历每条路由的
+    `endpoint.__module__` 取「真的在提供服务的模块」集合；两者之差即从未挂载者。
+    这是「路由写了但进不去」，与此前 coordination_api 那种「导入即崩」同型：
+    静态看代码都在，运行时不提供服务。名单进清单供人排期，不在本项顺手接线。
+    """
+    served = set()
+    pending = list(assembledApp().router.routes)
+    while pending:
+        route = pending.pop()
+        inner = getattr(route, "original_router", None)
+        if inner is not None:
+            # 嵌套 include 在装配结果里是包装对象，得逐层展开才能取到叶子的处理函数
+            pending.extend(getattr(inner, "routes", []) or ())
+            continue
+        served.add(getattr(getattr(route, "endpoint", None), "__module__", ""))
+
+    dead = []
+    for path in sorted(ENDPOINTS_DIR.rglob("*.py")):
+        if path.name == "__init__.py":
+            continue
+        try:
+            tree = ast.parse(io.open(path, encoding="utf-8", errors="replace").read())
+        except SyntaxError:
+            continue
+        if not definesRoutes(tree):
+            continue
+        module = "neurova.api.endpoints." + ".".join(
+            path.relative_to(ENDPOINTS_DIR).with_suffix("").parts)
+        if module not in served:
+            dead.append(module)
+    return dead
+
+
+def definesRoutes(tree) -> bool:
+    """该模块是否声明了路由（装饰器形态），不依赖 import 副作用。"""
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for decorator in node.decorator_list:
+                target = decorator.func if isinstance(decorator, ast.Call) else decorator
+                if isinstance(target, ast.Attribute) and target.attr in HTTP_METHODS:
+                    return True
+    return False
+
+
+def assembledApp():
+    """装配后的真实应用（唯一取数路径：不静态重建路由语义）。"""
+    from neurova.api.app import create_app
+
+    return create_app(enable_memory=False, enable_channels=False)
 
 
 def registeredBackendPrefixes() -> list:
     """后端挂载前缀集合（注册表 + `app.py` 直接挂载；零路由挂载点不入表）。"""
-    return sorted({point for _, point in backendMountPoints()})
+    return sorted({point for point, _ownPrefix, _module in backendMountPoints()})
 
 
 def frontendRequestedPaths() -> list:
@@ -523,7 +448,7 @@ def frontendContractBreaks() -> list:
     实际请求 `/api/v1/xxx`。后端若把它挂在别处（如 `/api/xxx`，缺 `v1`）或不挂，
     请求即 404；这类断点界面上不报错，只会「页面正常渲染、数据全空」。
     """
-    routes = {route for _relative, route in backendRoutePaths()}
+    routes = registeredRoutePaths()
     breaks = []
     for relative, expected in frontendRequestedPaths():
         if not any(route == expected or route.startswith(expected + "/") for route in routes):
@@ -535,7 +460,7 @@ def backendMountPointsWithoutFrontendConsumer() -> list:
     """后端已注册、但没有任何前端模块直连的挂载点（内部/平台面，逐条点名）。"""
     requested = {expected for _relative, expected in frontendRequestedPaths()}
     orphans = []
-    for _relative, point in backendMountPoints():
+    for point, _ownPrefix, _module in backendMountPoints():
         if not any(expected == point or expected.startswith(point + "/")
                    for expected in requested):
             orphans.append(point)
@@ -641,9 +566,12 @@ def renderInventory(generatedOn: str) -> str:
         "**零路由挂载点**（注册动作在、路由一条没有 —— 断点，待接线或删除）："
         + (", ".join("`" + point + "`" for point in zeroRouteMountPoints()) or "无"),
         "",
-        "**未接线 router**（含被旁路注册掩盖的顶层空对象）："
-        + (", ".join(f"`{module}` 的 `{name}`（挂 `{point}`）"
-                     for module, name, point in unwiredRouters()) or "无"),
+        "**未接线 router**（挂载动作在、路由一条没有）："
+        + (", ".join(f"挂载点 `{point}`（操作 `{operation}`）"
+                     for point, _own, operation in unwiredRouters()) or "无"),
+        "",
+        "**未挂载端点模块**（定义了路由、装配后却不在路由表里 —— 运行时不提供服务）："
+        + (", ".join("`" + name + "`" for name in unmountedEndpointModules()) or "无"),
         "",
         "**后端已注册、前端无模块直连的挂载点**（内部/平台面，通常由控制台或 SDK 消费）："
         + (", ".join("`" + item + "`" for item in backendMountPointsWithoutFrontendConsumer())
@@ -699,9 +627,9 @@ def unmatchedFrontCallLines() -> list:
 def backendMountPointLines() -> list:
     """后端挂载点表：逐条「端点模块 → 挂载前缀」。
 
-    这一节答「后端**声明**了哪些挂载点」；「前端调用是否真能落到路由」由第四节的
-    真实路由表逐条比对回答。两者分工明确：挂载表是**声明面**（模块 + 表内
-    prefix + 模块 `APIRouter(prefix=...)` 自述前缀），差异面取**真实执行面**。
+    这一节答「后端**挂出了哪些挂载点**」；「前端调用是否真能落到路由」由第四节的
+    真实路由表逐条比对回答。两者分工明确：挂载表取**装配后的 include 操作**
+    （模块 + 实际挂载前缀），差异面取**真实执行面**。
     """
     backend = backendMountPoints()
     lines = [
@@ -711,8 +639,8 @@ def backendMountPointLines() -> list:
         "| 端点模块 | 挂载前缀 |",
         "|------|------|",
     ]
-    for path, point in backend:
-        lines.append("| `" + path + "` | `" + point + "` |")
+    for point, _ownPrefix, module in backend:
+        lines.append("| `" + moduleFile(module) + "` | `" + point + "` |")
     return lines
 
 
