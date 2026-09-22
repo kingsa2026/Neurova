@@ -576,3 +576,11 @@ tests/unit/context/test_vector_batch_encoding.py
 tests/unit/context/test_archive_moment_scoring.py
 tests/unit/context/test_context_degradation_recovery.py
 tests/unit/context/test_view_budget_single_form.py
+
+# 上下文三链路批（Issue #90）B6-10：死线处置的终局判据。
+#   （根因：B6-1 立了「判据类（机器算）」与「处置（人填）」两条轴，但只钉住了
+#    第一轴——台账写「已删除」而符号还在代码里，没有任何守卫察觉，处置于是退化
+#    成第二份自述。本守卫把处置轴也钉成机器可验：「已删除 / 收口第二份」⇒ 实测
+#    判据类必须为 absent；「已接线」⇒ consumed。另有反向控制（仍在仓的符号被标成
+#    已删除即红）与已退场类的活跃层文档悬空引用归零判定。）
+tests/unit/context/test_context_deadline_disposal.py

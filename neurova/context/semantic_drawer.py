@@ -84,16 +84,6 @@ class SemanticMatchDrawer:
                 self._vector_store = False
         return self._vector_store
 
-    def preload_vector_store(self):
-        if self._vector_store is None:
-            try:
-                from neurova.cognitive_layers.memory_layer.unified_vector_store import UnifiedVectorStore
-                self._vector_store = UnifiedVectorStore(backend="auto")
-                logger.info("向量存储预加载完成")
-            except ImportError:
-                logger.warning("UnifiedVectorStore 不可用，使用简单匹配")
-                self._vector_store = False
-
     def effective_view_budget(self) -> int:
         """本实例**生效**的视图额度（单一解释：本轮入参优先，缺省回落构造期默认）。"""
         return self._turnBudget if self._turnBudget is not None else self.max_tokens

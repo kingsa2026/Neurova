@@ -27,22 +27,22 @@
 # 取数命令：python scripts/ci/context_deadline_ledger.py
 # 处理工单：B6-10（死线处置执行）；`get_context_pool` 属 P2-1 同判据，归 B6-3。
 #
-EnhancedContextBuilder | absent | 待处置 | 文件 neurova/context/enhanced_context_builder.py 已删（生产侧无定义无赋值，判据引用 0 处）。**遗留问题**：docs/01-architecture/COMPLETE_MODULES.md:476 与 :708 两处仍列着它 → 悬空引用；处置动作是「改文档指向真面」，不是补代码（类已按审计退役）
+EnhancedContextBuilder | absent | 已删除 | B6-10 批次 A 定案：类与 `neurova/context/enhanced_context_builder.py` 早已从生产侧退场（零生产消费方，判据引用 0 处），本批把**遗留的文档悬空引用**一并改指真面：`docs/01-architecture/COMPLETE_MODULES.md` 两处（§9.1 表 + §14.5）改显式「已退役」交代并指向 `context/orchestrator.py`，`CONTEXT_CACHE_COMPRESSION.md` 加退役头注与 §4 退役标记，`README.md` 表行删净，`26-context-pipeline-p1.md` / `FUNCTIONALITY_ANALYSIS.md` / `04-plans/audit-remediation-plan-2026-09-10.md` 各自交代去处。活跃层引用扫描（`scripts/scan_docs_refs.py` 判据）对本题为 0 悬空
 ContextFacade | self_loop | 待处置 | context_facade.py 自身保留单例工厂（:322/:327），工厂 get_context_facade() 零消费、模块外零引用 → 门面层是第二份装配路径。**传递不可达已论证**：`orchestrator.build_system_prompt` 仅被本文件 :104/:156 调用，本文件又零外部消费者
 ContextPoolRegistry | self_loop | 待处置 | context_pool_registry.py:184 的 get_registry() 零消费；本文件是 ContextPool.query 的唯一调用方（:103/:131）→ 池的 session 分区读路径在对话主链从未被走。处置需先裁定「分区读是否有真需求」
 ContextCompressor | consumed | 待处置 | 判据为 consumed：唯一外部消费点是 context_pool.py:146（self._compressor = ContextCompressor(...)）。**但该消费方自身不可达**：`ContextPool.compress_context`（:1173）零消费 → 整条压缩面不通。处置口径见 B6-10（与 SmartContextCompressor 同契约，须一并收口到一份）
 SmartContextCompressor | consumed | 待处置 | 判据为 consumed：外部消费点为 injector.py:163（实例化即弃，self._compressor 全仓无读取点）与 context_compressor.py:647（工厂零消费）。两处都不是真消费 → 第二份压缩实现，处置见 B6-10
-ContextPoolUtils | no_consumer | 待处置 | context/utils.py:18 定义；context_pool.py:1234 仅 `from ... import`、:1245 仅进 `__all__` 再导出——判据按「孤立 import 不算消费」归入零消费点。处置：确认无消费者后删除，或补真接线
-mark_turn_seen | no_consumer | 待处置 | context_pool.py:971 定义，生产侧零调用
-select_fold_candidates | no_consumer | 待处置 | context_pool.py:1004 定义，生产侧零调用
-convert_context_for_model | no_consumer | 待处置 | context_pool.py:1170 定义，生产侧零调用
-merge_with | no_consumer | 待处置 | context_pool.py:1180 定义，生产侧零调用（同名的 merge_with_user_emotion 是另一件事，判据未计入）
+ContextPoolUtils | absent | 收口第二份 | B6-10 批次 A 定案：`estimate_tokens` 只转发 `context/token_estimator.estimate_tokens`（**同契约的第二份入口**，估算口径的唯一事实源是 token_estimator，协作红线「不新造平行体系」），`merge_contexts` / `filter_by_source` 生产零消费者。处置：删净 `neurova/context/utils.py` 整文件 + 池侧 import 与 `__all__` 再导出；三个被牵连的测试判据改指真面（`test_token_estimation_inconsistency` 比对基准改 `token_estimator.estimate_tokens`、`test_context_pool_truncate` 直接用 `estimate_tokens`、`test_context_pool.py` 的 `TestContextPoolUtils` 整类退役）
+mark_turn_seen | absent | 已删除 | B6-10 批次 A 定案：ack 的唯一通路是 `mark_hashes_seen`（`orchestrator.mark_last_view_seen` 调，按视图 hash），按轮标记的旁路 ack 生产零调用。处置：删净该方法 + 只服务它的 `_by_turn` 索引（`_turn_index_add/_turn_index_remove/_entry_turn_id`）及三处同步点；契约搬到真面——`test_ack_set.py` 新增 `TestDrawerPrefersUnreadToolResults` 直接钉 `SemanticMatchDrawer.draw` 的分层选取（预算只够一条时留下未读的那条），`test_context_pool_hash_index.py` 的 `TestTurnIndex` 与 `test_context_pool_retention_contract` 的 ack 断言改走存活的 hash 通路
+select_fold_candidates | absent | 已删除 | B6-10 批次 A 定案：池上没有折叠路径（窗口折叠的真面是 `context/window_compactor.compact_window`），该入口生产零调用。处置：删净；「未读工具结果绝不进折叠候选」这条契约搬到真实承载面 `SemanticMatchDrawer.draw` 的分层选取，用例见 `tests/unit/context/test_ack_set.py::TestDrawerPrefersUnreadToolResults`
+convert_context_for_model | absent | 收口第二份 | B6-10 批次 A 定案：该方法体是 `return self.build_context_for_model(model_name)` —— **同实现的别名**（第二份入口），真实读路径（`api/endpoints/context.py:171/:259`）一律走 `build_context_for_model`。处置：删净别名 + `test_context_pool.py::test_convert_context_for_model` 退役（该用例锁的是别名本身，`build_context_for_model` 的同等断言在同文件 `TestContextConverter` 内保留）
+merge_with | absent | 已删除 | B6-10 批次 A 定案：生产零调用，且语义与三层隔离契约**冲突**（把 other_pool 的条目并进本池 = 跨 user/agent/session 身份混池，与 `isolation_key` / read 分区索引的设计前提相反）。处置：删净，不接线；隔离语义由 `add_context` 的身份标签与 read 分区索引承载，用例见 `test_context_pool_isolation.py`。`test_context_pool_agent_core_integration.py` 的合并段改为断言条目数不变
 cleanup_expired | no_consumer | 待处置 | context_pool.py:1057 定义，生产侧零调用。**附带事实**：池构造 ttl_seconds=0 → 即便接线也是空转；处置须连同 TTL 语义一并裁定（B6-10）
 compress_context | no_consumer | 待处置 | context_pool.py:1173 定义，生产侧零调用（同名命中为 injector._compress_context 等**另一个方法**，判据未计入）。与 ContextCompressor / SmartContextCompressor 同契约
 dedup | self_loop | 待处置 | ContextPool.dedup（context_pool.py:1214）零调用；池实际走 self._deduplicator.dedup(...)（:1201/:1217）= context/dedup.py:23 DriftSafeDeduplicator.dedup。判据报 self_loop（消费点全在 context_pool.py 内，且那里的 `.dedup(` 是**另一接收者**的方法）——按名字计数会误判为「可删」，故须按「收口第二份」处置
 set_session_id | no_consumer | 待处置 | orchestrator.py:197 定义；:227 注释自陈「旧实现的唯一出口是已退役的 set_session_id 裁剪」→ 生产侧零调用
 build_system_prompt | self_loop | 待处置 | orchestrator.build_system_prompt 仅被 context_facade.py:104/:156 调用，而 context_facade 自身零外部消费（见本表 ContextFacade 行）→ 判据报 self_loop；**两级同时死，只删一级无效**，处置见 B6-10
-preload_vector_store | no_consumer | 待处置 | semantic_drawer.py 定义，生产侧零调用。注：B5 尾巴一（store 层缺批量入口 + tfidf 不进缓存）与本条同域但不重叠，见 B6-6
+preload_vector_store | absent | 已删除 | B6-10 批次 A 定案：它和 `SemanticMatchDrawer.vector_store` property 是同一件事的两份写法（都做懒创建 + ImportError fail-soft），而生产只走 property（`_buildScoringContext` 取它编码）。处置：删净预加载入口（方法体与 property 完全重复）；契约搬到真面——`test_context_pool_optimizations.py` 的 `TestVectorStorePreload` 改为 `TestVectorStoreLazyCreation`，锁「首次访问即建 + 二次复用同一实例 + 依赖缺席 fail-soft 成 False」
 _last_archived_window_hashes | self_loop | 待处置 | orchestrator.py:128 初始化、:1069 赋值（两者归 write）；判据另在同文件内检出读取点，无跨文件消费 → 报 self_loop。审计称它是「折叠前必须已归档」零丢失判据的唯一物证却无人校验；处置须裁定「补校验」还是「删去」
 get_context_pool | consumed | 已接线 | B6-3 已交付：`neurova/context_pool.py` 补上真面（按身份查**已登记**的池，无则 None），`ContextPoolRegistry.adopt/get_pool` 承接登记与查询，编排器构造池时就地登记，neurflow 的解析函数不再吞 ImportError。判据随之由 absent 转为 consumed（符号已存在且有跨文件消费点）——**这正是 B6-1 判据轴的价值：符号补齐后台账必须跟着改，否则守卫报红**。调用方失败时点名身份，不再静默降级
 draw | consumed | 待处置 | 反向控制项：已知生产可达（context/orchestrator.py 与 context_pool.py 均有真实消费点）。本行永远为「待处置」，被标成其他处置即说明判据或台账被改坏
