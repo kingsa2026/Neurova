@@ -26,6 +26,8 @@ import re
 import sys
 from pathlib import Path
 
+from tests import ast_scan
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 # ---------- 共享解析 ----------
@@ -107,17 +109,23 @@ def _find_annotation_mines(src: str, tree: ast.AST, exempt_tops: set[str]) -> li
 
 class TestAnnotationMineSweep:
     def test_whole_neurova_zero_mines(self):
-        """neurova/ 全目录无注解地雷（新增降级导入模块时须先惰性化注解）。"""
+        """neurova/ 全目录无注解地雷（新增降级导入模块时须先惰性化注解）。
+
+        解析走 `tests/ast_scan.py`（Issue #148）：本判据要读注解，不能靠文本预筛
+        缩面，但**解析结果跨用例复用**——`ast_scan.sourceRefsUnder` 一次读盘、
+        `ast_scan._cachedParse` 一次编译，同进程里其余「单源」守卫共享这份预算。
+        实测全仓 `ast.parse` 单跑 3.9s，与另外 170 个受保护文件共享机器时撞
+        30s 默认墙钟（本次构建实测 timeout），故粒度保持不变而成本大幅下降。
+        """
         exempt = _ci_top_packages() | {"neurova"}
         mines = []
-        for path in sorted((PROJECT_ROOT / "neurova").rglob("*.py")):
-            if "__pycache__" in path.parts:
-                continue
-            src = path.read_text(encoding="utf-8")
-            tree = ast.parse(src)
+        # 文本预筛：地雷必然含 `except ImportError`，其余文件连读都不用读
+        for ref in ast_scan.sourceRefsUnder(
+                PROJECT_ROOT / "neurova", hints=("except ImportError",)):
+            tree = ast_scan._cachedParse(ref.stamp, ref.code)
             mines += [
-                f"{path.relative_to(PROJECT_ROOT).as_posix()} -> {top}"
-                for top in _find_annotation_mines(src, tree, exempt)
+                f"{ast_scan.relativeToRepo(ref.path)} -> {top}"
+                for top in _find_annotation_mines(ref.code, tree, exempt)
             ]
         assert not mines, (
             "发现注解地雷（无包环境导入即 AttributeError，CI 薄环境实锤形态）：\n"

@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import pathlib
 
+from tests import ast_scan
+
 import pytest
 
 from neurova.knowledge.foundation.admission import AdmissionRequest, productionAdmissionGate
@@ -180,26 +182,20 @@ class TestThereIsOnlyOneClosurePoint:
 
     def test_matrixHasNoSecondClosurePoint(self):
         """扫**代码**不扫注释：注释里提一句"这里再跑一次 attest 就是第二份实现"
-        本身不是调用；按文本扫会把解释性文字误判成违规，判据一被误伤就没人再看。"""
-        import ast
+        本身不是调用；按文本扫会把解释性文字误判成违规，判据一被误伤就没人再看。
 
-        root = pathlib.Path(__file__).resolve().parents[3]
+        解析走 `tests/ast_scan.py`（Issue #148）：全仓 `ast.parse` 单跑 5s、
+        与受保护子集其余 170 个文件共享机器时撞 30s 默认墙钟；本判据只谈
+        「`attest()` 调用点有几处」，与文件总数无关，故复用共享解析预算。
+        """
         offenders = []
-        for path in (root / "neurova").rglob("*.py"):
-            try:
-                tree = ast.parse(path.read_text(encoding="utf-8"))
-            except SyntaxError:
-                continue
-            calls = {node.func.attr for node in ast.walk(tree)
-                     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)}
-            if not calls & {"attest"}:
-                continue
-            rel = str(path.relative_to(root)).replace("\\", "/")
+        for path, lineno in ast_scan.callSites(ast_scan.PRODUCTION_ROOT, "attest"):
             # 咽喉（收口点）与 digest_chain（定义处 + 巡检入口）。
+            rel = ast_scan.relativeToRepo(path)
             if rel in ("neurova/knowledge/foundation/admission.py",
                        "neurova/knowledge/foundation/digest_chain.py"):
                 continue
-            offenders.append(rel)
+            offenders.append(f"{rel}:{lineno}")
 
         assert offenders == [], (
             "写路径上出现了第二份闭环实现（%s）——应收口到 `admit()` 的收尾，"
