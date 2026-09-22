@@ -212,7 +212,7 @@ neurova/llm/cost_tracking_middleware.py  ← 362 行，全仓零消费者
 #                                        :296-297  except ImportError: logger.debug(...)
 ```
 
-88 项 endpoint 白名单靠**运行时字符串**导入，失败只 `logger.debug`。后果：
+注册表靠**运行时字符串**导入。后果：
 
 - 漏注册 / 导入炸了在启动期**完全不可见**；
 - 实测 4 个端点模块（`cost_api.py` / `computer_api.py` / `phase3_api.py` / `migration_api.py`）
@@ -225,18 +225,30 @@ neurova/llm/cost_tracking_middleware.py  ← 362 行，全仓零消费者
 - 动态字符串注册**不可静态分析**：IDE、类型检查、依赖图、以及本目录所有架构图，
   都看不到这张表。这是自动化治理的结构性障碍。
 
-**2026-09-22 收口状态**：旁路注册组与三个模块级空 `APIRouter`
-（`router` / `evolution_router` / `rag_router`）已删除，挂载事实收口到
-`endpoint_modules` 注册表一处；`neuron` / `coordination_api` 的重复前缀段消失。
-常驻守卫 `tests/unit/api/test_route_mount_contract_guard.py` 钉住
-「零路由挂载 / 前缀重复 / 挂载层错位」三类形态，并保留
-`unmountedEndpointModules()` 名单（`cost_api` / `computer_api` / `phase3_api` /
-`migration_api` / `skill_market` / `skills_market` / `openplatform.routes` /
-`core.acp_server` 仍定义了路由但未挂载，名单进 `docs/09-dev-progress/api_inventory.md`
-供人排期）。名单**收录口径是全仓**（`SOURCE_ROOTS`），不是只扫 `api/endpoints/` 包：
-口径若比声明窄，同一形态在包外就永远看不见——`openplatform.routes`（19 条）与
-`core.acp_server`（5 条）正是因此长期不在册的两条命中点。
-「导入失败只 `logger.debug`」这条仍成立，属同域的下一个缺口，未在本轮处置。
+**同日后续收口（本批）**：
+
+- **未挂载名单各自取得终局处置**。注册表提为模块级常量 `ENDPOINT_MODULES`（挂在函数体外，
+  启动自检 / 健康检查 / 守卫同读一份）。逐条结论：`computer_api` 与 `phase3_api`
+  补真实身份后**接线**（后者破坏性动作另加管理员闸）；
+  `cost_api`（与 `/api/v1/cost-rollup` + `/api/v1/budgets` 并行第二份读面）、
+  `migration_api`（底层四阶段全 `pass`、`verify` 恒真）、
+  `skill_market` / `skills_market`（ADR 0013 早判定的待删套）、
+  `openplatform.routes` / `core.acp_server`（同日认定的第二份平行实现）**删除**。
+  处置表从「一张只列名字的持有名单」升级为**可机器判定办没办**的三态台账
+  （`已接线` / `已删除` / `待实现`），见 `tests/unit/endpointWiringBaseline.txt`。
+- **收录口径收口到全仓**（`SOURCE_ROOTS`），不是只扫 `api/endpoints/` 包：
+  口径若比声明窄，同一形态在包外就永远看不见，连被登记的机会都没有。
+  包外两条命中点 `openplatform.routes`（19 条）与 `core.acp_server`（5 条）
+  因此进册——它们是**第二份平行实现**（前者零消费者、整条 router 无 `Depends`，
+  与在用的 `openplatform_keys.py` 同名不同物；后者 `chat_stream()` 是模拟实现，
+  生产链路走 `acp_api.py` + `acp_runtime.py`），已按教义第 6 条在产生第二份
+  事实源的一侧删除，不补接线也不补鉴权。守卫
+  `tests/unit/api/test_orphan_faces_retired_guard.py` 钉住「不得复活 + 真面仍在 +
+  零悬空引用 + 不回填台账」四条。
+  名单现为**硬零**：退役批之后包外无孤儿，全仓未挂载模块为零；判据仍是
+  「每行都有处置与依据」，且三态处置必须落到磁盘事实（已删除 ⇒ 文件真没了）。
+- **`「导入失败只 logger.debug」` 这条已处置**：装载失败一律 ERROR 级记录 +
+  写入可读取的失败面 `registrationFailures()`，启动期可见（不再是「炸了没人知道」）。
 
 ### 6.2 成本链路：是只读报表，不是拦截器
 
@@ -286,9 +298,14 @@ api/computer.ts 更用裸 axios 绕开唯一实例  [api/computer.ts]
 ```
 
 **2026-09-22 收口状态**：`budget_api` / `cost_rollup_api` 已并入注册表挂 `/v1`，
-`/api/v1/budgets/*`、`/api/v1/cost-rollup/*` 实测可达（真应用探活）。`api/computer.ts`
-仍用裸 axios 且指向未挂载的 `/api/computers`——它属 `unmountedEndpointModules()`
-名单里的 `computer_api`，是同一张清单的下一层，未在本轮处置（清单里逐条在册）。
+`/api/v1/budgets/*`、`/api/v1/cost-rollup/*` 实测可达（真应用探活）。
+
+同日后续收口：`api/computer.ts` 已回归 `@/api` **唯一 axios 实例**（Bearer token
+注入 / 401 单飞刷新 / 信封解包全在那一处），并按 `/api/v1/computers` 请求；
+`computer_api` 也补上真实 JWT 身份后接入注册表。原「无 token + 无信封 + 必 404」
+三个缺陷同时消失，前端调用与后端注册表**逐条命中**（清单第四节不再有 computer 行）。
+成本读取面的唯一事实源是 `@/api/modules/cost`（`/api/v1/cost-rollup` 与
+`/api/v1/budgets`）；并行的 `cost_api.py` 已按教义第 6 条删除。
 
 这一条把 §6.1（未注册）与 §6.3（前缀不一致）耦合成同一个可观测故障：
 **前端界面会正常渲染，只是所有数据都是空的**。这是最难从外部发现的一类 bug。
@@ -425,7 +442,7 @@ Helm 有两个 Deployment 但零副本冗余。任何"某子系统独立伸缩"�
 | F1 | 路由注册 `ImportError` 改为启动期 fail-fast（或显式降级清单），并把 `test_route_registration.py` 纳入 `protected_tests.txt` 路由快照断言 | R2 | ≤0（换掉 debug 分支 + 加一条快照测试） |
 | F2 | 消除 `skill_system` 同名遮蔽：`skill_system.py` 改名上提为包内规范模块，删 `__getattr__` 六分支 + 幽灵模块别名 + 占位 `Skill` 类 | R1, R1b | **显著为负**（删 ~120 行兜底） |
 | F3 | 让预算成为拦截器而非报表：在 `cost_tracking.py:510` 记账后调用 `throttle_if_needed`（`cost_budget.py:282`）并据结果拦停；装饰器 `ImportError` 改快速失败；补齐 10 处未覆盖调用点 | R3, R3b | +少量（含防回归用例） |
-| F4 | 前后端前缀统一到 `/api/v1`，去掉 `.catch(()=>null)`，`api/computer.ts` 回归唯一 axios 实例 | R7 | ≈0 |
+| F4 | 前后端前缀统一到 `/api/v1`，去掉 `.catch(()=>null)`，`api/computer.ts` 回归唯一 axios 实例（**已完成，本批**） | R7 | ≈0 |
 | F5 | 把 §9 列出的未跟踪核心纳入版本控制，`CODEOWNERS` 与 `cost-guards.yml` 一并入库 | R11, R11b, R8 可验证性 | 0（仅 `git add`） |
 | F6 | 行数棘轮从 `agent_core.py` 1 个文件扩到 top-10；为 129 个重名类建收敛台账，每收一个开 ADR | R5, R4 | 守卫为配置，台账为文档 |
 | F7 | `migration_api.py:11` 大小写对齐；零停机迁移要么实现 `_switch_readers`，要么把 `verify` 改为 `NotImplementedError` 并同步 `MIGRATION_SYSTEM_GUIDE.md` | R10, R12 | ≤0 |

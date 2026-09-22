@@ -2031,6 +2031,11 @@ class MemoryManager:
                 ],
                 "unknown_memory_type_count": self._stats["unknown_memory_type_count"],
                 "unknown_category_count": self._stats["unknown_category_count"],
+                # 导入侧累计的"取代声明落了空"：写进 _stats 就要在读面看得见，
+                # 否则这条读数只写不读（/memory/stats 走的就是本方法）。
+                "supersede_unresolved_count": self._stats.get(
+                    "supersede_unresolved_count", 0
+                ),
                 # Issue #72：冲突是记忆侧的一条真实产出，读数必须与检测链同源。
                 # 此前 `get_conflict_summary()` 全仓零调用方，检出了什么在读取侧看不见。
                 "conflicts": self._conflictReading(),

@@ -34,7 +34,6 @@ HIGH_RISK_SINGLETONS = [
 # 良性批（P3-e 收尾）：无状态/幂等构造，但统一收敛到 DCL 模式，
 # 防止未来构造获得副作用后竞态复活
 BENIGN_SINGLETONS = [
-    ("neurova/api/openplatform/events.py", "get_event_system"),
     ("neurova/auth/invitation_code.py", "get_invitation_code_model"),
     ("neurova/auth/password_hasher.py", "get_password_hasher"),
     ("neurova/auth/user_group_model.py", "get_user_group_manager"),

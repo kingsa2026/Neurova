@@ -48,9 +48,12 @@ APP_MODULE = PROJECT_ROOT / "neurova" / "api" / "app.py"
 #: 未挂载扫描的仓内源码根（收录口径是「**全仓**无挂载点」，不是「端点包内无挂载点」）。
 #: 口径只写一份：台账与本常量同源。`tests/` 不在内——测试自建的应用不提供服务面。
 SOURCE_ROOTS = ("neurova", "scripts", "tools", "examples")
-
-#: 未挂载路由模块的棘轮台账（只降不升；逐条处置理由写在本文件头部）
+#: 未挂载端点模块的**处置台账**（行格式 `模块短名 | 处置 | 依据`）。
+#: 处置是有限枚举：`已接线`（真进了装配后路由表）、`已删除`（模块已不存在）、
+#: `待实现`（保留待接线，须写明依据）。台账必须**可机器判定办没办**，
+#: 否则它只是一张反复登记、永不收敛的名单。
 WIRING_BASELINE = PROJECT_ROOT / "tests" / "unit" / "endpointWiringBaseline.txt"
+WIRING_VERDICTS = ("已接线", "已删除", "待实现")
 
 #: 清单正文里机器区的边界标记（人写说明在标记之外，生成器只碰标记之内）
 BLOCK_BEGIN = "<!-- API-INVENTORY:BEGIN -->"
@@ -456,22 +459,61 @@ def unmountedEndpointModules() -> list:
 def unwiredEndpointModuleNames() -> list:
     """未挂载模块清单（台账文件用的口径，`unmountedEndpointModules()` 的投影）。
 
-    用**完整点分模块路径**而非末段短名：口径已扩到全仓，`routes` / `acp_server`
-    这类末段不保证唯一，作台账键会产生歧义。
+    用**完整点分模块路径**而非末段短名：口径已扩到全仓后，末段短名不保证唯一
+    （同一包下可有同名叶子），作台账键会产生歧义。
     """
     return unmountedEndpointModules()
 
 
-def readWiringBaseline() -> set:
-    """未挂载台账当前登记项（`#` 起为注释，空行忽略）。"""
+def readWiringDispositions() -> dict:
+    """未挂载台账的**处置表**：`{模块短名: 处置}`（行格式 `模块 | 处置 | 依据`）。
+
+    为什么台账必须带处置：只列名字的台账答得出「现在有哪些没接线」，
+    答不出「每一条的结论是什么、执行了没有」。于是同一份名单可以被反复登记、
+    永不收敛，读者无法判断某一行是「待办」还是「已办」。
+    处置是**有限枚举**，故「已办/待办」可机器判定。
+    """
+    dispositions = {}
+    for _module, verdict, _reason in _wiringRows():
+        dispositions[_module] = verdict
+    return dispositions
+
+
+def readWiringReasons() -> dict:
+    """未挂载台账的逐条依据：`{模块短名: 依据}`（与 `readWiringDispositions()` 同源取数）。"""
+    return {module: reason for module, _verdict, reason in _wiringRows()}
+
+
+def _wiringRows() -> list:
+    """台账逐行 `(模块短名, 处置, 依据)`；`#` 起为注释、空行忽略。
+
+    单一取数口径：`readWiringDispositions()` / `readWiringReasons()` /
+    `readWiringBaseline()` 全部投影自本函数，不各自再解析一遍台账。
+    """
     if not WIRING_BASELINE.is_file():
-        return set()
-    names = set()
+        return []
+    rows = []
     for line in io.open(WIRING_BASELINE, encoding="utf-8"):
         stripped = line.split("#", 1)[0].strip()
-        if stripped:
-            names.add(stripped)
-    return names
+        if not stripped:
+            continue
+        cells = [cell.strip() for cell in stripped.split("|")]
+        if len(cells) < 3:
+            # 只有带处置与依据的行才是台账行（`模块 | 处置 | 依据`）。
+            # 缺列的行按约定跳过：它无法参与「办没办」的机器判定，
+            # 硬塞进来的空处置只会造出一个必然判红、却说不清原因的行。
+            continue
+        rows.append((cells[0], cells[1], cells[2]))
+    return rows
+
+
+def readWiringBaseline() -> set:
+    """**仍未接线**的模块短名（= 处置为 `待实现` 的那些行）。
+
+    与 `unwiredEndpointModuleNames()` 双向咬合、只降不升：新出现未挂载模块即红；
+    台账把某一行标记成「已接线/已删除」后，它就不再计入基线——台账失真亦红。
+    """
+    return {module for module, verdict, _reason in _wiringRows() if verdict == "待实现"}
 
 
 def definesRoutes(tree) -> bool:

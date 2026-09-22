@@ -5,6 +5,7 @@ Phase 3 API Endpoints - Intelligence & Realtime Features
 from fastapi import APIRouter, HTTPException, Depends, status
 from typing import List, Optional, Dict, Any
 
+from neurova.api.auth import get_current_user
 from neurova.core.logger import get_logger
 from neurova.collaboration.small_brain_router import (
     SmallBrainRouter,
@@ -27,7 +28,24 @@ from neurova.collaboration.cost_ledger_integration import (
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/phase3", tags=["Phase 3 Intelligence"])
+#: 本面是小脑路由 / outbox / 成本告警三类运行态的单一只读+运维入口。
+#: 三者都已在生产链路被消费（`agent/model_selector.py`、`agent/turn_coordinator.py`），
+#: 但此前该面**零鉴权且零挂载**——挂上去即匿名可改全局态。故先补身份闸口再接线，
+#: 且破坏性动作（reset / 清理旧事件）再收一道管理员闸。
+router = APIRouter(
+    prefix="/phase3",
+    tags=["Phase 3 Intelligence"],
+    dependencies=[Depends(get_current_user)],
+)
+
+
+def _requireAdmin(identity: Dict[str, Any]) -> None:
+    """破坏性运维动作的管理员闸口（与 `/computers/admin/all`、`require_admin` 同一口径）。"""
+    if identity.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions. Required role: admin",
+        )
 
 # ============================================================================
 # Small-Brain Router Endpoints
@@ -351,8 +369,10 @@ async def on_task_completed(
 @router.post("/cleanup-old-events")
 async def cleanup_old_events(
     keep_days: int = 7,
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """清理旧事件"""
+    """清理旧事件（管理员）"""
+    _requireAdmin(current_user)
     try:
         outbox = get_outbox_handler()
 
@@ -365,8 +385,11 @@ async def cleanup_old_events(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/reset")
-async def reset_phase3_state():
-    """重置所有 Phase 3 状态 (仅用于测试)"""
+async def reset_phase3_state(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """重置所有 Phase 3 状态（仅管理员；原为测试后门）"""
+    _requireAdmin(current_user)
     reset_small_brain_router()
     reset_outbox_handler()
     reset_cost_alert_system()
