@@ -1,5 +1,12 @@
 # ACP Server 设计文档
 
+> **⚠️ 已退役（2026-09-22）**：本设计描述的实现 `neurova/core/acp_server.py`
+> 已删除。它是 `/acp/sessions*` 的**第二份 ACP 面**——`chat_stream()` 为模拟实现
+> （返回「这是对您消息的回复: …」，不调任何 LLM），默认模型表是幻影条目，
+> 且全仓零消费者。生产链路走的是 `neurova/api/endpoints/acp_api.py`（`/api/acp/*`）
+> 与 `neurova/agent/protocols/acp_runtime.py`。本篇保留作历史设计记录，
+> **不再对应任何在跑的代码**；防复活见 `tests/unit/api/test_orphan_faces_retired_guard.py`。
+
 > **模块ID**: Task6-ACPServer  
 > **创建时间**: 2026-05-13 00:00  
 > **最后更新**: 2026-05-13 00:05  
