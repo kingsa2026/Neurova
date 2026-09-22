@@ -32,7 +32,6 @@
 import ast
 import asyncio
 import io
-import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -240,32 +239,40 @@ class TestProcessExposesSummary:
         assert summary["phase_advanced"] is True
 
     def test_summary_never_awaits_rsi_on_response_path(self):
-        """摘要出口不得把 RSI 拉回响应路径（P0 尾延迟不可回退）。"""
-        pipe = _stub_pipeline()
-        started = []
+        """摘要出口不得把 RSI 拉回响应路径（P0 尾延迟不可回退）。
 
-        async def _slow_rsi():
-            started.append(threading.get_ident())
-            await asyncio.sleep(0.4)
+        判据是结构性的（与机器速度无关）：把 RSI 步骤闸住不放，若它仍挂在响应
+        路径上，``process()`` 会等它而返回不了（``wait_for`` 超时判红）。原写法
+        断言墙钟 ``elapsed < 0.35``（RSI 睡眠 0.4s），在 CI 共享机的负载下会把
+        正确实现误判为回归；误判方向还会诱导"放宽阈值换绿"，那是教义第 2 条
+        禁止的降级断言。见 ``tests/unit/test_ci_wallclock_assertion_ledger.py``。
+        """
+        pipe = _stub_pipeline()
+        rsi_entered = asyncio.Event()
+
+        async def _gated_rsi():
+            rsi_entered.set()
+            await asyncio.Event().wait()  # 永不自行结束：只有被取消才会退出
             return REAL_ITERATION_RESULT
 
-        pipe._step_rsi_iteration = _slow_rsi
+        pipe._step_rsi_iteration = _gated_rsi
 
         async def _run():
-            import time
-
-            t0 = time.perf_counter()
-            result = await pipe.process(
-                user_input="hi", reply="yo", session_id="s1",
-                save_memory=False, enable_tts=False, metadata={},
+            result = await asyncio.wait_for(
+                pipe.process(
+                    user_input="hi", reply="yo", session_id="s1",
+                    save_memory=False, enable_tts=False, metadata={},
+                ),
+                timeout=10,
             )
-            elapsed = time.perf_counter() - t0
-            await pipe.drain_background(timeout=5)
-            return result, elapsed
+            at_return = {r.step_name for r in pipe._step_results}
+            return result, at_return
 
-        result, elapsed = asyncio.run(_run())
-        assert elapsed < 0.35, f"RSI 后台步骤阻塞了响应路径（{elapsed:.2f}s）"
+        result, at_return = asyncio.run(_run())
         assert "rsi" in result
+        assert "rsi_iteration" not in at_return, (
+            "process() 返回时 RSI 步骤已收口 ⇒ 它被 await 在响应路径上（P0 尾延迟回退）"
+        )
 
     def test_step_rsi_iteration_records_summary_with_real_field_names(self, monkeypatch):
         """步骤真跑一次 → 摘要落库，且字段取自真实输出（不是 iteration/improvements）。"""

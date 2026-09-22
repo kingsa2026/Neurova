@@ -11,6 +11,7 @@ import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+from neurova.core.data_root import callerPath
 
 
 @dataclass
@@ -109,5 +110,5 @@ class EvalDataset:
 
 def dataset_dir_for(name: str, base: Optional[Path] = None) -> Path:
     """评测集落盘目录:data/evolution/datasets/<name>/。"""
-    root = base or Path(os.environ.get("NEUROVA_EVAL_DATASETS_DIR", "data/evolution/datasets"))
+    root = callerPath(base or os.environ.get("NEUROVA_EVAL_DATASETS_DIR"), "evolution/datasets")
     return Path(root) / name

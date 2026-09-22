@@ -18,13 +18,16 @@ import sqlite3
 import threading
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
-# __file__ 锚定项目根，杜绝 CWD 相对路径把测试写进生产库（2026-09-06 巡检：
-# data/metacognition.db 曾混入 482 行测试 agent 数据）。EKB 同款约定。
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-_DEFAULT_DB = os.path.join(_REPO_ROOT, "data", "metacognition.db")
+# 落点经数据根推导（2026-09-06 巡检：data/metacognition.db 曾混入 482 行测试
+# agent 数据）。原实现按 __file__ 反推项目根再拼 data/，是同一根的又一份定义。
+def defaultDbPath() -> str:
+    """默认库落点：数据根下的 `metacognition.db`。"""
+
+    return dataPath("metacognition.db")
 
 _DEFAULT_MAX_EVENTS = 2000
 _DEFAULT_MAX_RECORDS = 1000
@@ -87,7 +90,7 @@ class MetaLedger:
         max_records_per_agent: int = _DEFAULT_MAX_RECORDS,
         max_states_per_agent: int = _DEFAULT_MAX_STATES,
     ):
-        self._db_path = db_path or os.environ.get("NEUROVA_META_LEDGER_DB") or _DEFAULT_DB
+        self._db_path = db_path or os.environ.get("NEUROVA_META_LEDGER_DB") or defaultDbPath()
         self._max_events = max_events_per_agent
         self._max_records = max_records_per_agent
         self._max_states = max_states_per_agent

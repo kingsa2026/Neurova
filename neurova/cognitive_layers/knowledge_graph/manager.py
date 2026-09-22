@@ -1,4 +1,3 @@
-from neurova.core.data_root import get_data_root
 """
 知识图谱管理器
 
@@ -17,6 +16,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+from neurova.core.data_root import callerPath, get_data_root
 
 logger = get_logger(__name__)
 
@@ -1129,7 +1129,7 @@ def get_knowledge_graph_manager(
     with _manager_lock:
         if _global_manager is None:
             _global_manager = KnowledgeGraphManager(
-                storage_dir=storage_dir or "./data/knowledge_graph",
+                storage_dir=callerPath(storage_dir, "knowledge_graph"),
             )
         return _global_manager
 

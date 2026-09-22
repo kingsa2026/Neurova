@@ -28,12 +28,13 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
 _STATUS = ("pending", "running", "done", "failed_retryable", "failed")
 _OPEN_STATUSES = ("pending", "running", "failed_retryable")
-_DEFAULT_DB = Path("data/evolution/jobs.db")
+_DEFAULT_DB = get_data_root() / "evolution" / "jobs.db"
 
 
 def queue_enabled() -> bool:

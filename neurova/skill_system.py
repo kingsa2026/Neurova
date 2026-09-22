@@ -857,6 +857,15 @@ def create_default_skills(memory_manager=None) -> SkillRegistry:
 _skill_registry_singleton = None
 
 
+def registered_collision_count() -> int:
+    """已创建的注册表上的同名覆盖累计次数（未创建时为 0）。
+
+    观测面读数（工单 006）：跨模块直接读模块私有量会绕过包代理，故在此开一个
+    只读取数口。**抓指标绝不懒建注册表**——没有注册表就是 0，不为读数造对象。
+    """
+    return int(getattr(_skill_registry_singleton, "_name_collision_count", 0) or 0)
+
+
 def get_skill_registry(memory_manager=None) -> "SkillRegistry":
     """获取全局 SkillRegistry 单例。
 

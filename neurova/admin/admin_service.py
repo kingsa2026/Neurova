@@ -8,6 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -334,7 +335,7 @@ class AdminService:
 
 _singleton: Optional[AdminService] = None
 _singleton_lock = threading.Lock()
-_DEFAULT_DIR = "./data/admin"
+_DEFAULT_DIR = dataPath("admin")
 
 
 def get_admin_service() -> AdminService:

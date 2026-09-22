@@ -14,12 +14,13 @@ import logging
 import threading
 from dataclasses import dataclass, asdict
 from pathlib import Path
+from neurova.core.data_root import get_data_root
 
 logger = logging.getLogger(__name__)
 
 # 合法选择值（前端下拉/对话框同契约）
 VALID_CHOICES = {"auto", "always_modelscope", "always_huggingface", "skip"}
-DEFAULT_PATH = Path("data") / "model_source.json"
+DEFAULT_PATH = get_data_root() / "model_source.json"
 
 _lock = threading.RLock()
 

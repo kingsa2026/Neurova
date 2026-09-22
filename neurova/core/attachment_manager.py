@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -69,7 +70,7 @@ class AttachmentManager:
         self._lock = threading.RLock()
 
         # 附件存储目录
-        self._storage_dir = Path(self._config.get("storage_dir", "data/attachments"))
+        self._storage_dir = callerPath(self._config.get("storage_dir"), "attachments")
         self._storage_dir.mkdir(parents=True, exist_ok=True)
 
         # 元数据存储

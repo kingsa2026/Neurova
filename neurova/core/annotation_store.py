@@ -21,6 +21,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -36,10 +37,12 @@ def normalize_query(text: str) -> str:
 class AnnotationStore:
     """精准回复命中表（SQLite 持久化；线程安全）"""
 
-    def __init__(self, db_path: str = "data/annotations.db"):
-        self._db_path = db_path
+    def __init__(self, db_path: str = ""):
+        target = callerPath(db_path, "annotations.db")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        self._db_path = str(target)
         self._lock = threading.RLock()
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_db()
 

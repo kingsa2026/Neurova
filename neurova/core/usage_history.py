@@ -21,9 +21,13 @@ import sqlite3
 import threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-DEFAULT_DB_PATH = Path("data") / "usage_history.db"
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+from neurova.core.data_root import get_data_root
+
+def defaultDbPath() -> Path:
+    """默认库落点：数据根下的绝对路径（原值 `Path("data")` 随 CWD 漂移）。"""
+    return get_data_root() / "usage_history.db"
 
 _CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS llm_usage (
@@ -59,7 +63,7 @@ class UsageHistoryStore:
         self._db_path = (
             db_path
             or os.environ.get("NEUROVA_USAGE_HISTORY_DB")
-            or str(DEFAULT_DB_PATH)
+            or str(defaultDbPath())
         )
         self._lock = threading.RLock()
         # 审计 P1-E5：常驻连接（原每次 record 新建 sqlite3 连接；
