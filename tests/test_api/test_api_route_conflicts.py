@@ -37,31 +37,23 @@ def test_context_route_conflict():
 
 
 def test_skill_market_route_conflict():
-    """测试skill_market和skills_market模块路由冲突"""
-    # 根据分析文档，两个模块分别注册到 /v1/skill-market 和 /v1/skills-market
-    
-    app = FastAPI()
-    
-    try:
-        from neurova.api.endpoints import skill_market
-        from neurova.api.endpoints import skills_market
-        
-        # 检查两个模块是否都有router
-        assert hasattr(skill_market, 'router'), "skill_market模块应该有router"
-        assert hasattr(skills_market, 'router'), "skills_market模块应该有router"
-        
-        # 检查路由前缀
-        skill_market_prefix = skill_market.router.prefix
-        skills_market_prefix = skills_market.router.prefix
-        
-        print(f"skill_market模块路由前缀: {skill_market_prefix}")
-        print(f"skills_market模块路由前缀: {skills_market_prefix}")
-        
-        # 根据分析文档，两个模块分别注册到不同前缀
-        # 但命名不一致（单复数混淆）
-        
-    except ImportError as e:
-        pytest.skip(f"跳过测试: 模块导入失败 - {e}")
+    """单复数两套市场端点已由 ADR 0013 删除——冲突的土壤不存在了。
+
+    原用例要求 `skill_market` / `skills_market` 两个模块都有 router，
+    再拿它们的自述前缀比对。两模块已按该 ADR 第 2 条删除（Issue #68 处置台账
+    亦登记为「已删除」），故本条改为断言死套确实不在——用 `pytest.skip`
+    让导入失败静默通过，正是教义第 2 条禁止的「跑不起来就算过」。
+    """
+    import importlib.util
+
+    for removed in ("skill_market", "skills_market"):
+        assert importlib.util.find_spec(f"neurova.api.endpoints.{removed}") is None, (
+            f"{removed} 已被 ADR 0013 判定删除，却仍可导入——死套复活。"
+        )
+    canonical = __import__(
+        "neurova.api.endpoints.skill_pool_api", fromlist=["router"]
+    )
+    assert hasattr(canonical, "router"), "规范端点 skill_pool_api 必须存活"
 
 
 def test_endpoint_registration_count():
