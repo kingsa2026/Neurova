@@ -256,11 +256,61 @@ live-verify：在任意 CWD 用各默认值取连接 / 建存储引擎，CWD 下
 同批把 `test_agent_package_api` 的隔离方式从 `monkeypatch.chdir(tmp_path)` 改为注入
 `NEUROVA_DATA_DIR`——"靠 CWD 隔离"本身就是这条纪律要灭的形态。
 
-### 7.7 仍不在本批范围内（如实登记）
+### 7.7 运行期落点收口（2026-09-21 第五批，Issue #75 用户点名"是否闭环了"）
 
-- `neurova/api/auth.py` 的 `.jwt_secret`、`core/trace_recorder.py` 的 `trajectories/`、
-  `core/file_utils.py` 与 `files_api.py` 的 `storage/`：**属另一根族**（运行期数据 vs `data/`
-  配置状态面），改名会让既有令牌/轨迹失联，本批未动，登记在此。
+§7.7 此前把 `auth.py` 的 `.jwt_secret`、`trace_recorder.py` 的 `trajectories/`、
+`file_utils.py` 与 `files_api.py` 的 `storage/` 登记为"另一根族、改名会让既有令牌/轨迹失联"。
+**那条登记把性质判错了**：它们同样是**真 CWD 泄露**，而非"另一种合理形状"。真构造点 +
+临时 CWD 实测（无替身）：
+
+```
+LEAK  api.auth 密钥文件             ['.jwt_secret']
+LEAK  trace_recorder 轨迹目录       ['trajectories']
+LEAK  file_utils 隔离存储           ['storage']
+LEAK  files_api 上传根             ['storage']
+LEAK  session_manager 会话目录      ['sessions']
+LEAK  media.config 配置目录         ['config']
+LEAK  infrastructure 配置          ['config']
+LEAK  project_to_skill 输出目录     ['generated_skills']
+LEAK  app 健康检查连库              ['neurova_memory.db']
+LEAK  shutdown_guard 哨兵          ['data']
+LEAK  neurflow 库                  ['neurflow.db', ...]
+LEAK  zero_downtime 旧库            ['neurova_memory.db']
+```
+
+它们比 `data/` 那族**更坏**：`data/` 至少还锚在仓库根（默认启动目录就是仓库根），
+这批连仓库根都不锚——落点是"进程碰巧从哪儿启动"。真后端冒烟另实证三处同形落点：
+`console.py` 的 `uploads/console`、`media.py` 的 `media_storage`、
+`start_server.py` 注入的 `data/evolution/rsi_rollback.json`（后两份是"7 天无回滚"
+判据的唯一数据来源，散落等于判据在真实部署里永不可满足）。
+
+判据分流成两类，由 `tests/unit/core/test_runtime_landing_root.py` 常驻锁住：
+
+- **运行期产物**（库、日志、上传件、轨迹、密钥、会话、备份、待办）走 `get_data_root()`；
+  新增 `dataLanding(*parts, legacy=...)` 作为统一入口。
+- **随代码走的资产**（模型目录、`config/` 配置、`agents.json`）走 `repoRoot()` / `repoAsset()`
+  ——镜像里就带、不随 CWD 变、也不受数据根注入影响。两者不能混：把 `models/` 归到数据根，
+  容器里就找不到模型。
+
+**既有部署不失联**：`adoptLegacyLanding()` 在新落点**空缺**时把仓库根旧物搬过去一次
+（新落点已在则不覆盖，旧物不存在则无操作，搬迁失败只告警不抛）。实测：
+
+```
+[4 收养结果] 旧物搬迁 = True  字节一致 = True
+[6 库收养]   旧物搬迁 = True  字节一致 = True
+[7 幂等]     二次收养 = False（新落点已在）
+```
+
+**部署面同步**：会话存档落点从"裸 `sessions/`"改为数据根后，容器里原有的 `/app/sessions`
+卷会变成死挂载。已按应用真读的键补上显式落点（`docker-compose.yml` 与 Helm configmap 的
+`NEUROVA_SESSIONS_DIR`），由 `deploy_config_consistency_check.py` 的 R5 常驻把关
+（反向控制实测：把它换成任意零读取的键，门禁立即报"死配置"）。
+
+活体验证两条独立证据：22 个真构造点 + 临时 CWD + 注入数据根 ⇒ **CWD 泄露 0 / 22**；
+真后端 `start_server.py` 子进程 + 真端点（`/health`、`/metrics`、`/health/detailed`）
+⇒ **CWD 零新增**（反向控制：把 `start_server.py` 的注入退回原写入法，冒烟立即报
+`CWD 出现新增：['data']`）。
+
 - 预存失败口径见 §7.4 与 Issue #80 批次，本批未改。
 
 ### 7.8 收口批自身引出的两条 CI 红灯（2026-09-21 第四批）

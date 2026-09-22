@@ -439,7 +439,11 @@ def get_shutdown_guard(workspace_dir: Optional[str] = None) -> ShutdownGuard:
         with _guard_lock:
             if _shutdown_guard is None:
                 if workspace_dir is None:
-                    workspace_dir = "data"
+                    # 原值裸相对名 `"data"`：换个启动目录就把哨兵写到别处，
+                    # 崩溃检测从此看不见前一次运行留下的标记。
+                    from neurova.core.data_root import dataLanding
+
+                    workspace_dir = str(dataLanding("shutdown"))
                 _shutdown_guard = ShutdownGuard(workspace_dir=workspace_dir)
     return _shutdown_guard
 

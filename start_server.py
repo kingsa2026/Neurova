@@ -78,8 +78,16 @@ def main():
         try:
             import os as _os
 
-            _os.environ.setdefault("NEUROVA_RSI_RECEIPTS", "data/evolution/rsi_receipts.jsonl")
-            _os.environ.setdefault("NEUROVA_EVOLUTION_ROLLBACK", "data/evolution/rsi_rollback.json")
+            from neurova.core.data_root import dataLanding
+
+            # 落点必须是**绝对**路径：原值 `data/evolution/...` 是 CWD 相对，
+            # 换个启动目录就把回执与回滚时间线写散（后端冒烟实测 CWD 多出
+            # `data/evolution/rsi_rollback.json`）。这两份是"7 天无回滚"判据的
+            # 唯一数据来源，散落等于判据在真实部署里永不可满足。
+            _os.environ.setdefault(
+                "NEUROVA_RSI_RECEIPTS", str(dataLanding("evolution", "rsi_receipts.jsonl")))
+            _os.environ.setdefault(
+                "NEUROVA_EVOLUTION_ROLLBACK", str(dataLanding("evolution", "rsi_rollback.json")))
         except Exception as _receipt_err:  # noqa: BLE001
             print(f"Warning: 回执路径注入失败（忽略）: {_receipt_err}")
 

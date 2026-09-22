@@ -149,8 +149,15 @@ def _generate_media_id() -> str:
 
 
 def _storage_root() -> Path:
-    """媒体存储根目录（磁盘内容源的基准路径，相对路径按 CWD 解析）。"""
-    return Path(os.path.abspath(_media_config.get("storage_path", "media_storage")))
+    """媒体存储根目录（磁盘内容源的基准路径）。
+
+    未配置时落数据根下的 `media_storage/`——原兜底是裸相对名，
+    相对路径按 CWD 解析，换个启动目录已入库的媒体就"找不到"。
+    """
+    from neurova.core.data_root import get_data_root
+
+    configured = _media_config.get("storage_path")
+    return Path(configured) if configured else get_data_root() / "media_storage"
 
 
 def _media_disk_path(media: Dict[str, Any]) -> Path:
@@ -248,9 +255,7 @@ async def save_media(
     mime_type = _get_mime_type(media_type, filename)
 
     # 存储路径（P1-2: 内容真实落盘，路径必须防逃逸——agent_id/文件名可能携带路径片段）
-    storage_path = os.path.join(
-        _media_config.get("storage_path", "media_storage"), agent_id, media_type, f"{media_id}_{filename}"
-    )
+    storage_path = str(_storage_root() / agent_id / media_type / f"{media_id}_{filename}")
     disk_path = Path(os.path.abspath(storage_path))
     if not disk_path.is_relative_to(_storage_root()):
         raise HTTPException(status_code=400, detail="非法的存储路径（agent_id 或文件名包含路径片段）")
@@ -567,7 +572,7 @@ async def get_user_storage_path(
     user_id: Optional[str] = Query(default=None, description="用户 ID"),
 ):
     """获取用户指定媒体类型的存储路径"""
-    base_path = _media_config.get("storage_path", "media_storage")
+    base_path = str(_storage_root())
 
     if user_id:
         path = os.path.join(base_path, agent_id, user_id, media_type)
