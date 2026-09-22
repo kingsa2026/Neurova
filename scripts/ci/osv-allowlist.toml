@@ -7,40 +7,51 @@
 #   2. ignoreUntil 到期后 osv-scanner 会让该条重新报红 → 门禁自动逼你复核。
 #      这是刻意设计：允许清单是"有期限的技术债"，不是永久豁免。
 #   3. 能升级修掉的一律升级，不进本清单（例：rustls 0.23.43→0.23.45 已实修）。
+#   3b. 上游未发版但源码可就地修时，先打本地补丁再把条目改成"已修 + 与补丁绑定"
+#       （例：glib 0.18.5，见下方该条与 osv_audit.py 的 LOCAL_PATCHES）。
+#       补丁在被核验的前提下才允许留条目——不许拿清单给不存在的修复背书。
 #   4. 新增条目前先确认"确无修复版本"或"修复超出本仓可控范围（上游未发版）"，
 #      并把该判断的证据写进 reason。
 #
-# ── 本轮情形态（2026-09-18 新增 Cargo 审计门禁时实跑发现）──────────────────
+# ── 情形（2026-09-18 新增 Cargo 审计门禁时实跑发现；2026-09-21 部分处置）────
 # 首次扫 NeurUI/src-tauri/Cargo.lock（447 包）命中 8 条。其中 rustls 一条当场
-# 升级修掉；其余 7 条全部同源于一个上游事实：
+# 升级修掉；glib 0.18.5 一条于 2026-09-21（Issue #109）改为仓内补丁修复；
+# 其余 6 条同源于一个上游事实：
 #
 #   Tauri 2.x 的 Linux 栈把 gtk 钉在 0.18（wry 0.55–0.57 与 tao 0.35–0.37
 #   的 Cargo.toml 均为 `gtk ^0.18`），而 gtk 0.19（对应 glib 0.22）尚无
 #   wry/tao 正式版采用——即"上游未发版，本仓无处可升"。
+#   故 glib 走不了 registry 升级（见下方该条：改按上游修法就地打补丁）。
 #
 #   历史证据：本仓曾试过在 Cargo.toml 里强行声明 glib 0.20（提交 29be2081），
 #   结果 Windows 上 glib-sys 需 pkg-config + 系统 GLib 而编译失败，打断打包，
 #   已由 e2e62d62 回退并在 Cargo.toml 留下"勿无条件加 glib"的注释。
-#   → 结论：这条路已证伪，只能等上游。故改为登记 + 到期复核。
+#   → 结论：直接抬版本这条路已证伪；补丁只改源码、不动版本号，故不受此限。
 #
 #   （另一处 unic-* 由 tauri-utils 的 `urlpattern ^0.3` 引入；tauri-utils
 #    全 2.x 线均钉 ^0.3，仅 3.0.0-alpha.0 起改用 ^0.6 → 同属"等上游"。
 #    而 proc-macro-error 由 glib-macros / gtk3-macros 带入，随 gtk 0.19 一并消失。）
 #
 # 复核触发条件（到期时按此判断，勿只看日期）：
-#   wry 或 tao 任一正式版把 gtk 依赖抬到 ^0.19 → 立刻升 tauri 栈并删除下方
-#   glib / proc-macro-error 两条；tauri-utils 正式版（非 alpha）改用
-#   urlpattern ^0.6 → 删除 5 条 unic-*。
+#   wry 或 tao 任一正式版把 gtk 依赖抬到 ^0.19 → 立刻升 tauri 栈到 glib >= 0.20，
+#   同批删除 glib 的 vendor 补丁条目与 proc-macro-error 一条；
+#   tauri-utils 正式版（非 alpha）改用 urlpattern ^0.6 → 删除 5 条 unic-*。
 # ============================================================================
 
 # ── glib 0.18.5：VariantStrIter 未定义行为（GHSA-wrw7-89jp-8q8g）──────────────
 # 性质：unsoundness（内存安全），CVSS 6.9，恶意输入可致 NULL 解引用崩溃。
 # 可达性：仅 Linux 桌面壳走 gtk 0.18 栈；Windows 打包/后端服务不涉及。
-# 上游修复：glib 0.20.0 起已修（本仓 glib 0.22.9 已发布可用），但拉它的
-#           wry/tao 仍钉 gtk ^0.18 → glib 只能停在 0.18.5。
+#
+# **本条不是"等上游"式豁免，而已由本地补丁修复**（Issue #109）。为何仍留在清单：
+# OSV 按 name+version 查库，不解析 [patch] 段——源码换成仓内修复副本后它照旧命中
+# 0.18.5（实测：去掉 source 与 checksum 后仍然报）。故本条的真实含义是
+# "版本号未变、源码已修"，靠 `NeurUI/src-tauri/vendor/glib-0.18.5` 成立。
+# 该绑定由 scripts/ci/osv_audit.py 的 LOCAL_PATCHES 每次实跑核验：
+# vendor 目录消失或锁文件仍带 source → 核验失败，门禁退出 2。
+# 守卫：tests/unit/desktop/test_rust_vendor_patch_guard.py。
 [[IgnoredVulns]]
 id = "RUSTSEC-2024-0429"
-reason = "上游未发版：wry 0.55-0.57 / tao 0.35-0.37 均钉 gtk ^0.18 → glib 只能 0.18.5；glib 0.20+ 已修但需 gtk 0.19（wry/tao 未采用）。强行声明 glib 0.20 曾在 Windows 打断打包（29be2081 已回退，见 Cargo.toml 注释）。复核：wry/tao 抬 gtk 到 ^0.19 即升栈并删本条。"
+reason = "已由本地补丁修复（源码在 NeurUI/src-tauri/vendor/glib-0.18.5，按上游修法把出参由 &p 改为 &mut p）；版本号保持 0.18.5 是因为 wry 0.55-0.57 / tao 0.35-0.37 一律钉 gtk ^0.18，而 gtk 0.19（对应 glib ^0.22）未被采用，仓内无法经 registry 升级。OSV 不解析 [patch] 段故仍命中本版本，清单条目与补丁绑定由 LOCAL_PATCHES 实跑核验，补丁丢失即门禁报红。复核：gtk 抬到 ^0.19 即升级 Tauri 栈到 glib >= 0.20，同批删除 vendor 目录、[patch.crates-io] 段与本条。"
 ignoreUntil = 2027-03-31
 
 # ── proc-macro-error 1.0.4：unmaintained（RUSTSEC-2024-0370）────────────────
