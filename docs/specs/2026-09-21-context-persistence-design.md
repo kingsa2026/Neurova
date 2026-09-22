@@ -1,7 +1,7 @@
 # 上下文池持久层设计（B4 · P1-3 + D1）
 
 - 日期：2026-09-21
-- 状态：**实施中**（001 已交付，见 §8 收口记录；本文件是规格与决定的事实源）
+- 状态：**实施中**（001/002/003/005/007 已交付，见 §8 收口记录；本文件是规格与决定的事实源）
 - 上游：`docs/05-reports/上下文三链路审计_2026-09-21.md` §3 P1-3、§10 批次表 B4 行、决策项 **D1**
 - 前置批次：B1/B2/B3 已完成（`docs/05-reports/上下文三链路修复台账_2026-09-21.md`）
 - 基线取证：`tests/manual/context_persistence_baseline_90.py`（本规格全部读数由它一次跑出；
@@ -308,7 +308,7 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 | A2 | 写放大：24 条/轮的归档耗时 ≤ 现状形状的 **1/3**（实测两种形状差 260–420×，1/3 是极宽松的上界） | 同一台机、同一存量库规模下 A/B，各 20 轮取中位；事务语义另观测：批内失败整批回滚、批外不可见、提交后跨连接可见、`batches` 可读（003） |
 | A3 | 中文预筛命中：`上下文压缩` 的 MATCH 命中数 == LIKE 真值 | 对拍断言（两路结果集相等） |
 | A4 | <3 长度查询走 LIKE，且 `%`/`_` 不越权 | 构造含 `%` `_` 的库内文本，断言命中集合与真值相等 |
-| A5 | GC 生效：超 `keep_count`/`keep_days` 的行被清理，FTS 同步 | 写入超限后断言两表行数一致 |
+| A5 | GC 生效：超 `keep_count`/`keep_days` 的行被清理，FTS 同步 | 写入超限后断言两表行数一致；触发面读 `get_retention_stats()["ledger_gc"]`（`runs`/`removed`/`last_error`），断言在生产可达（007） |
 | A6 | 迁移幂等 + 防降级：v0 库迁到 v2 后重跑 migrate 返回空；伪造高版本库被拒 | `migrate()` 返回值 + `SchemaVersionError` |
 | A7 | 零停机：迁移窗口内并发写不停且不被长事务阻塞 | 并发写线程 + 记录停等 p95 上界 |
 | A8 | 隔离：群聊归档在单聊轮召回不可见，跨房间互不可见 | 走 `filter_by_scope` 同源判据 |
@@ -353,6 +353,7 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 |---|---|---|---|
 | 001 跨重启召回示踪弹 | ✅ 已交付 | `neurova/context_pool.py`（写穿点前移到 `add_context`）+ `tests/unit/context/test_context_persistence_restart.py` | 红灯 7 failed → 绿灯 7 passed；live-verify 真跨进程 `tests/manual/context_persistence_restart_90.py` |
 | 005 启动加载与热集回载 | ✅ 已交付 | `neurova/context_pool.py`（启动只登记 + `rehydrate`）+ `neurova/context/eviction_ledger_db.py`（`recentRows`）+ `neurova/core/metrics.py`（`ledger_rows` gauge） | 红灯 8 failed → 绿灯 12 passed；live-verify 稳态启动查询次数 2/2/2（库 0/200/5000 条）`tests/manual/context_pool_startup_load_90.py` |
+| 007 GC 与 FTS 对齐 | ✅ 已交付 | `neurova/context_pool.py`（`_maybeGcLedger` 触发点搬到归档提交 + `get_retention_stats()["ledger_gc"]`）+ `neurova/context/eviction_ledger_db.py`（`_alignFts` 分批对齐） + `tests/unit/context/test_ledger_gc_retention.py` | 红灯 4 failed → 绿灯 7 passed；live-verify 生产面节流 3/3、收敛 900→200 且两表相等 `tests/manual/context_ledger_gc_90.py` |
 | 003 写侧批量提交 | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（常驻连接 + 批量事务）+ `neurova/context_pool.py`（`archiveBatch()` 事务边界）+ `neurova/context/orchestrator.py`（本轮归档收进一个批） | 红灯 10 failed → 绿灯 12 passed；live-verify 24 条/轮 233→1.03 ms（220–233×）`tests/manual/context_ledger_batching_90.py` |
 | 002 版本域与 v1 迁移 | ✅ 已交付 | `neurova/context/eviction_ledger_db.py`（`context_ledger` 版本域 + v1 迁移）+ `neurova/context_pool.py`（召回路径回填作用域/归档时刻）+ `tests/unit/context/test_context_ledger_migration.py` | 红灯 15 failed → 绿灯 17 passed；live-verify 真 v0 库经生产构造面迁移 `tests/manual/context_ledger_migration_90.py` |
 
@@ -420,6 +421,23 @@ D11 的保留策略同时落地——否则它就是单调增长的磁盘占用�
 - **`created_at` 与 `chat_scope` 的兜底落点**：两路兜底函数落在台账模块
   （`resolveArchivedScope` / `resolveArchivedCreatedAt`），召回路径调用它们。
   作用域判定仍只经 `memory_scope.scope_from_metadata` 一份规则，池侧不复制。
+
+**007 对 D11 的偏离记录**：
+
+- **触发点落在"归档提交"（D11 原意）**：节流计数递增放进 `_flushBatch`（批量提交成功
+  结算处）与 `_persist_archived`（批外单条）——正是 D11 的"随归档批量提交同批执行
+  （每 N 次提交一次）"。同时把 `_archive_evicted` 里的旧 piggyback **删掉**：该路径在生产
+  构造面（`resident_limit=None` / `ttl_seconds=0`）永不执行，留着等于两处节流、其中一处恒 0。
+- **单点触发函数**：`_maybeGcLedger` 是唯一的触发与失败上报入口，两条写路径共用一份
+  节流计数，不新造第二套触发逻辑（教义第 6 条：单一事实源）。
+- **FTS 对齐改分批删除**（5000/批，模块常量 `_FTS_ALIGN_BATCH`）：D11 已指定分批；
+  实施把整表 `NOT IN` 从 `_purge` 换成 `_alignFts` 循环，并显式记下"`delete-all` 不可用"
+  （普通 FTS5 实测 `OperationalError`）。
+- **清理读数补齐**：`ledger_gc.runs` / `removed` / `last_error` / `keep_count` / `keep_days`。
+  D11 只要求"GC 有可观测计数"，实施把触发次数与清理条数都点上，且清理失败点名原因
+  （与 `ledger_persistence` 同口径，不静默）。
+- **保留策略未改默认值**：`keep_count=5000` / `keep_days=30` 沿用既有构造默认，
+  实施只保证它们"默认生效"（真被触发），不改数值——数值调整属容量议题（B5），本片不夹带。
 
 **001 对 D8/D11 的偏离记录**：
 

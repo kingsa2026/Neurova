@@ -327,3 +327,9 @@ tests/unit/context/test_pool_startup_load.py
 #   navigationImpactRefs()（导航图传递闭包 + 可点击/指路两形态），
 #   甲类可点击硬零，乙类指路条目必须立项承接（登记不代替立项）。
 tests/unit/test_archive_nav_impact_guard.py
+
+# 上下文持久层批（Issue #90）B4 工单 007：GC 与 FTS 对齐（A5）
+#   （根因：_LEDGER_GC_EVERY 只被 _archive_evicted 递增，而它在生产构造面
+#     resident_limit=None / ttl_seconds=0 下永不执行 → 保留策略一次也不触发、
+#     库单调增长；改后触发点落在归档提交，FTS 对齐改分批删除）
+tests/unit/context/test_ledger_gc_retention.py
