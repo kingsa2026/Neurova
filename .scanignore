@@ -1,0 +1,13 @@
+# 仓库根路径
+/go.mod
+
+# 第三方代码
+vendor/
+node_modules/
+
+# 测试装置
+**/testdata/**
+
+# 构建产物
+dist/
+build/
