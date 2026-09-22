@@ -347,6 +347,16 @@ class TestNodeDispatchReallyWorks:
         if shutil.which("sh") is None:
             pytest.skip("本环境无 sh，跑不了桥脚本的调用形态")
 
+        # 平台登记的命令形态以 `sh <桥脚本>` 起头（`.cnb.yml` 的 node 分支），
+        # 故这里先解析 sh 而不是写死字面量：受保护子集里写死外部命令，镜像缺席时
+        # 不是断言失败而是 FileNotFoundError，整个文件（含同文件其余断言）静默不跑
+        # —— 这正是 tests/unit/test_dev_path_and_runtime_dep_guards.py 的
+        # TestProtectedGuardsUseNoExternalBinaries 常驻拦截的形态。与 node 同口径：
+        # 先 which、缺席即跳过，不把环境能力写进判据。
+        shell = shutil.which("sh")
+        if shell is None:
+            pytest.skip("本环境无 sh，无法复核平台登记的 node 调用形态")
+
         text = io.open(CNB, encoding="utf-8").read()
         node_command = self._node_branch_call(text, "scripts/ci/npc_turn_handoff_gate.py")
         assert node_command.strip(), "node 分支调用形态为空"
@@ -367,7 +377,7 @@ class TestNodeDispatchReallyWorks:
                     env={**base_env, **workspace_env}, timeout=60,
                 )
                 node_run = subprocess.run(
-                    ["sh", "-c", f"{node_command} {' '.join(flag)}"],
+                    [shell, "-c", f"{node_command} {' '.join(flag)}"],
                     capture_output=True, text=True, cwd=str(PROJECT_ROOT),
                     env={**base_env, **workspace_env}, timeout=60,
                 )
