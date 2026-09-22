@@ -333,3 +333,10 @@ tests/unit/test_archive_nav_impact_guard.py
 #     resident_limit=None / ttl_seconds=0 下永不执行 → 保留策略一次也不触发、
 #     库单调增长；改后触发点落在归档提交，FTS 对齐改分批删除）
 tests/unit/context/test_ledger_gc_retention.py
+
+# Issue #80 工具↔经验↔再调用三环路修复批（第四轮）：票面正文入库与「判据可复核」收口。
+#   根因：001–011 的票面（即每张票的收工判据）只存在于 Issue 附件的对话里，仓内只有
+#   000-索引.md——索引表 11 行的落点指向 11 份并不存在的票面，复核者拿不到判据原文。
+#   守卫锁三条：索引声明的票号必须有同名唯一票面正文；票面的「执行结果」不得停在占位符；
+#   本批文档里的仓库路径引用与章节号必须可达（判据复用 scripts/scan_docs_refs.py）。
+tests/unit/test_tool_loop_ticket_set_guard.py
