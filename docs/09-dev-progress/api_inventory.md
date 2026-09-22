@@ -35,7 +35,7 @@
 
 本区为**生成物**，请勿手改；重跑上面的命令即可刷新。快照周期上限 120 天，逾期由守卫点名。
 
-事实源：前端 `NeurUI/src/api/modules/*.ts`（61 个模块 · 674 处调用），后端 `create_app()` 装配后的真实路由表（839 条路由）。
+事实源：前端 `NeurUI/src/api/modules/*.ts`（61 个模块 · 674 处调用），后端 `create_app()` 装配后的真实路由表（830 条路由）。
 
 ## 一、前端 API 模块清单
 
@@ -105,7 +105,7 @@
 
 ## 二、前端调用 ↔ 后端注册 差集
 
-下列 **59** 处调用在本轮后端注册表里没有对应路由。这不等于「后端漏注册」——差异以显式列表暴露，由人去核；
+下列 **50** 处调用在本轮后端注册表里没有对应路由。这不等于「后端漏注册」——差异以显式列表暴露，由人去核；
 **删条目不等于修好**（清单的价值在于可信，藏差异则整表不可信）。
 
 | 模块 | 方法 | 调用路径 | 差异形态 |
@@ -129,15 +129,6 @@
 | computer | GET | `/api/cost/rollup/hourly` | 路径未注册 |
 | console | POST | `/api/v1/console/debug` | 路径未注册 |
 | console | POST | `/api/v1/console/push` | 路径未注册 |
-| cost | GET | `/api/v1/budgets/health` | 路径未注册 |
-| cost | GET | `/api/v1/budgets/status/*` | 路径未注册 |
-| cost | GET | `/api/v1/budgets/status/all` | 路径未注册 |
-| cost | GET | `/api/v1/cost-rollup/agent/*/cost` | 路径未注册 |
-| cost | GET | `/api/v1/cost-rollup/dashboard/metrics` | 路径未注册 |
-| cost | GET | `/api/v1/cost-rollup/history/daily` | 路径未注册 |
-| cost | GET | `/api/v1/cost-rollup/history/hourly` | 路径未注册 |
-| cost | POST | `/api/v1/cost-rollup/rollup/now` | 路径未注册 |
-| cost | GET | `/api/v1/cost-rollup/rollup/status` | 路径未注册 |
 | files | GET | `/api/v1/files/*/content` | 路径未注册 |
 | health | GET | `/api/v1/health/metrics` | 路径未注册 |
 | health | GET | `/api/v1/health/status` | 路径未注册 |
