@@ -355,11 +355,16 @@ tests/unit/context/test_ledger_read_prefilter.py
 # Issue #112 销账（Issue #68 归档层导航影响筛选·乙类）：前端 API 清单重生成。
 #   根因：docs/09-dev-progress/api_inventory.md 是专职指路文档（docs/0-index/README.md
 #   的 09-dev-progress 领域入口），但此前**只有手写正文、没有写者**——代码树一变
-#   它只能漂移，且没有任何命令能把它拉回来。
-#   现为生成物：判据单源在 scripts/gen_api_inventory.py（前端 modules 调用面 ←→
-#   真实路由表），守卫只做「重算 + 比对 + 反向控制」；
-#   模块双向差集为空，两组差异（前端未命中后端 / 后端无前端消费）逐条显式登记，
-#   快照命令与日期写入机器区、逾期由守卫点名。棘轮基线 103 → 0。
+#   它只能漂移，且没有任何命令能把它拉回来：实测声明 71 个前端模块里 29 个已不存在、
+#   现行 61 个里 20 个未列出。
+#   现为生成物：唯一写者 scripts/generate_api_inventory.py，判据单源在生成器内
+#   （前端调用面 ←→ create_app() 装配后的真实路由表）。过期判据由日历改为
+#   **双向差集 + 运行时常量对齐**（静态路由零假阳性自证）。
+#   两条守卫同源分工：freshness 守卫锁模块双向差集、前缀表、快照纪律与生成入口幂等；
+#   inventory 守卫锁机器区与生成器输出逐字一致、两组差异逐条登记、快照不逾期。
+#   模块双向差集为空，两组差异（前端未命中后端 / 后端无前端消费）逐条显式登记。
+#   棘轮基线 103 → 0。
+tests/unit/test_api_inventory_freshness_guard.py
 tests/unit/test_api_inventory_guard.py
 
 # Issue #80 工具↔经验↔再调用三环路修复批（第四轮）：票面正文入库与「判据可复核」收口。
@@ -368,12 +373,42 @@ tests/unit/test_api_inventory_guard.py
 #   守卫锁三条：索引声明的票号必须有同名唯一票面正文；票面的「执行结果」不得停在占位符；
 #   本批文档里的仓库路径引用与章节号必须可达（判据复用 scripts/scan_docs_refs.py）。
 tests/unit/test_tool_loop_ticket_set_guard.py
+# Issue #121 修复单：OSV 门禁「真扫到、且真拦得住」收口。
+#   根因三处（PR #121 的 dependency-audit 连续两次红，读数均为 `扫描器异常退出 code=127`）：
+#   ① 扫描器**不校验 CLI 契约**——取回二进制直接用。实测：v1.9.2 在 v2 拼法
+#      （`scan source`）下退 127、v1 拼法退 0；而 cnb 容器（python:3.12）无解压器时
+#      下载会落 127 字节 GitHub 错误页，它与真二进制 sha256 相同 → 原「指纹校验通过」
+#      压根没证明这二进制能用。现 `--with-binary` 先起一次真扫描自证：解析目标、
+#      出 JSON、退出码在契约集合 {0,1,65} 内。
+#   ② 被扫依赖树**没被点数**——`Scanned … found N packages` 的读数无人核，
+#      扫了 0 个包也能印绿字；告警若被 `2>&1 | cat` 吞掉，有漏洞也会退出 0。
+#      现把「由 Python 解析出的逐目标包数」与扫描器自报数对账（未登记类型取
+#      UNCOUNTED_SENTINEL 并显式报红，不猜 0）。
+#   ③ 下载段里的解压器死码删除——release 资产是未压缩单一静态二进制（v2.6.0 / v1.9.2 实测）。
+#   守卫另锁：命令契约与下载的扫描器版本自洽、门禁步骤的退出码能穿过管道
+#   （软管道实测吞码：子进程 127 → 管道整体 0）。
+tests/unit/test_osv_audit_hardening_guard.py
 
 # 上下文持久层批（Issue #90）B4 工单 006：v2 迁移 FTS 重建为 trigram（A7/A6）
 #   （根因：unicode61 对中文等于无索引，实测中文短语命中 0；只改 tokenize 参数
 #     不改已有索引 → 必须重建。影子表 + 分批短事务，禁一次性长事务/delete-all）
 tests/unit/context/test_context_ledger_fts_migration.py
 
+# Issue #68 收口（#112 第七节登记的三处接线断点）：路由挂载契约守卫。
+#   根因：真实路由路径由两处共同决定——endpoints/__init__.py 的 endpoint_modules
+#   挂载表 + 各模块 APIRouter(prefix=...) 自述前缀，app.py 另有旁路直接挂载。
+#   两处各写一半、无一致性校验，长出三类自相矛盾：
+#   ① 零路由挂载：router / evolution_router / rag_router 是模块级空 APIRouter()，
+#      却被挂成 /api、/api/evolution、/api/rag —— 对外声称可用、实际全 404；
+#   ② 前缀重复：neuron 与 coordination 的自述前缀被叠两次 → 真实路径
+#      /api/neuron/neuron/*、/api/coordination/coordination/*，前端单段路径全 404；
+#   ③ 挂载层错位：budget_api / cost_rollup_api 旁路挂在 /api 下（缺 v1），
+#      前端 baseURL=/api/v1 → CostDashboardPage.vue 必 404，被 .catch 静默吞成空数据。
+#   修法：挂载事实收口到注册表一处（旁路与空 router 删除），判据单源在生成器
+#   （mountedRouterAudit / unmountedEndpointModules），静态重建路由的二套实现删净。
+#   守卫另锁：前端基地址三类写法全认（漏认 neuron.ts 的 axios.create({baseURL}) 会
+#   产生 8 条假阳性）、未挂载端点模块名单非空（不许静默遗留）。
+tests/unit/api/test_route_mount_contract_guard.py
 # 上下文三链路批（Issue #90）B3 剩余 P2-8 / D4 甲案：pool 分支瞬态注入收回信封。
 #   （根因：记忆/经验/结晶/待探索问题/池召回/工具记忆/情感七类动态检索文本以
 #     `role="system"` 直注——既不受任何 token 预算管辖（窗口预算只覆盖对话消息），
@@ -382,21 +417,14 @@ tests/unit/context/test_context_ledger_fts_migration.py
 #     避免"召回取回来了、信封又把它丢掉"的静默消失。）
 tests/unit/context/test_pool_branch_envelope_transient.py
 
-# Issue #112 后续（未接线断点处置）：端点接线守卫。
+# Issue #112 后续（接线断点处置）：未挂载端点模块台账棘轮。
 #   根因：注册表把「挂载动作」与「接线完成」当成同一件事——只要求模块有 `router`
 #   属性就 include_router，于是「挂了零条路由」「挂载前缀与 router 自持前缀叠层」
 #   「同一 router 挂两次」三类形态长期存活；`cost.ts` 按 baseURL=/api/v1 请求
 #   /api/v1/budgets、/api/v1/cost-rollup 而后端挂在不带 v1 的 /api 下 → 看板数据
 #   全空且被 `.catch(() => null)` 吞成「未就绪」。
-#   判据单源在 scripts/gen_api_inventory.py 的 appMounts/mountProblems/
-#   unwiredEndpointRouters；已实现未接线的 router 走 baseline 棘轮（只降不升），
+#   判据单源在 scripts/generate_api_inventory.py 的 mountedRouterAudit/
+#   unmountedEndpointModules；未挂载模块走 baseline 棘轮（只降不升），
 #   逐条处置理由写在 tests/unit/endpointWiringBaseline.txt。
-tests/unit/api/test_endpoint_mount_wiring_guard.py
-
-# Issue #128 收口（构建 cnb-3k8-1k33gorhr 掐断）：记忆增强端点不得持有影子事实源。
-#   根因：memory_enhancement.py 维护模块级 `_memories_store = {}`，
-#   六条端点（forget/strengthen/categories/batch/export/import）全以它为事实源；
-#   该字典从不被生产写入路径填充、读取侧也不可见 —— 「导入成功」「遗忘成功」
-#   全是假成功，真记忆库纹丝不动。现已整体删除，一律经 get_memory_manager
-#   读写真 MemoryManager（与 /v1/memory 同一装配点与作用域注入口径）。
-tests/unit/api/test_memory_enhancement_real_manager.py
+#   守卫与上一条（路由挂载契约）同文件，判据同一处——不再另立第二份接线守卫
+#   （同一根因两份守卫 = 第二套平行体系，改一处漏一处）。
