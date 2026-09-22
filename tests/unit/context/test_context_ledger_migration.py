@@ -118,10 +118,15 @@ class TestVersionDomain:
             "与 AGENTS.md §3 的 schema 版本纪律直接冲突"
         )
 
-    def test_fresh_ledger_lands_at_v1(self, tmp_path):
+    def test_fresh_ledger_lands_at_latest(self, tmp_path):
+        """新建库落在**当前注册的最大版本**上（v1 结构 + v2 trigram 重建）。
+
+        002 交付时该断言是 `== 1`；006 追加 v2（FTS 重建为 trigram）后最大值变 2——
+        判据语义不变（"库有版本号纪律且落到最新"），只是版本号随链增长。
+        """
         path = tmp_path / "fresh.db"
         EvictionLedgerDB(db_path=path, user_id="u1", agent_id="a1")
-        assert _userVersion(path) == 1, "新建库没有版本号（无 user_version 纪律）"
+        assert _userVersion(path) == 2, "新建库没有落到最新版本号（无 user_version 纪律）"
         assert {"content_digest", "created_at", "chat_scope"} <= _columns(path)
         assert {"uniq_digest", "idx_scope_id"} <= _indexes(path)
 
@@ -174,14 +179,15 @@ class TestV1Migration:
         },
     ]
 
-    def test_legacy_db_migrates_to_v1(self, tmp_path):
+    def test_legacy_db_migrates_to_latest(self, tmp_path):
+        """v0 前像库一路迁到最新（v1 加列 + v2 FTS 重建）。"""
         path = tmp_path / "legacy.db"
         _legacyDb(path, self._LEGACY_ROWS)
         assert _userVersion(path) == 0, "前像库不该带版本号（本用例的前提）"
 
         EvictionLedgerDB(db_path=path, user_id="u1", agent_id="a1")
 
-        assert _userVersion(path) == 1
+        assert _userVersion(path) == 2
         assert {"content_digest", "created_at", "chat_scope"} <= _columns(path)
         assert {"uniq_digest", "idx_scope_id"} <= _indexes(path)
 
