@@ -49,7 +49,7 @@ _DEFAULT_USER = "default"
 class PlanStore:
     """计划 SQLite 存储层（归属 = (agent_id, user_id) 二维；SQL 内联 + 参数绑定；RLock）"""
 
-    def __init__(self, db_path: str = "data/plans.db"):
+    def __init__(self, db_path: str = ""):
         self.db_path = db_path
         db_dir = os.path.dirname(self.db_path)
         if db_dir and not os.path.exists(db_dir):
@@ -258,7 +258,7 @@ class PlanningTool:
 
     name = "planning"
 
-    def __init__(self, db_path: str = "data/plans.db", store: Optional[PlanStore] = None):
+    def __init__(self, db_path: str = "", store: Optional[PlanStore] = None):
         self._store = store or PlanStore(db_path)
 
     async def run_command(
@@ -401,7 +401,7 @@ _store_instance: Optional[PlanStore] = None
 _store_lock = threading.Lock()
 
 
-def get_planning_store(db_path: str = "data/plans.db") -> PlanStore:
+def get_planning_store(db_path: str = "") -> PlanStore:
     global _store_instance
     if _store_instance is None:
         with _store_lock:

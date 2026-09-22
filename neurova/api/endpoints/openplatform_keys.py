@@ -21,10 +21,12 @@ import typing
 import uuid
 from pathlib import Path
 
+
 from fastapi import APIRouter, HTTPException, Request
 from neurova.api.auth import get_current_user, Depends
 from pydantic import BaseModel, Field
 from neurova.core.logger import get_logger
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(get_current_user)],)
@@ -58,7 +60,7 @@ _AVAILABLE_SCOPES = [
 
 
 def _db_path() -> Path:
-    return Path(os.environ.get("NEUROVA_OPENPLATFORM_KEYS_DB") or "data/openplatform_keys.json")
+    return callerPath(os.environ.get("NEUROVA_OPENPLATFORM_KEYS_DB"), "openplatform_keys.json")
 
 
 def _ensure_loaded() -> None:

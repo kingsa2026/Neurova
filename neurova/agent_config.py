@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -31,7 +32,7 @@ class AgentConfigManager:
         self._lock = threading.RLock()
 
         # 配置目录
-        self._config_dir = config_dir or Path("data/agents")
+        self._config_dir = callerPath(config_dir, "agents")
         self._config_dir.mkdir(parents=True, exist_ok=True)
 
         # 配置文件路径

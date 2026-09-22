@@ -34,6 +34,7 @@ from typing import Any, Dict, List, Optional
 
 from neurova.core.db_migration import migrate as apply_migrations, register_migration
 from neurova.core.logger import get_logger
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -68,11 +69,13 @@ TERMINAL_STATUSES = ("completed", "failed", "cancelled")
 # 进程 identity：owner 栅栏的比较基准
 OWNER_IDENTITY = f"p{os.getpid()}-{uuid.uuid4().hex[:8]}"
 
-DEFAULT_DB_PATH = Path("data") / "agent_runs.db"
+def defaultDbPath() -> Path:
+    """默认库落点：数据根下的绝对路径（原值 `Path("data")` 随 CWD 漂移）。"""
+    return get_data_root() / "agent_runs.db"
 
 
 def _default_db_path() -> str:
-    return str(os.environ.get("NEUROVA_RUN_STORE_DB") or DEFAULT_DB_PATH)
+    return str(os.environ.get("NEUROVA_RUN_STORE_DB") or defaultDbPath())
 
 
 class AgentRunStore:

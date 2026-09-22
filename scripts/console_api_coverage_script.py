@@ -10,11 +10,17 @@ Web Console API 覆盖率补充测试
 from __future__ import annotations
 
 import json
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any
 from unittest.mock import AsyncMock, Mock, patch
+
+# 仓库根须先于 `import neurova` 进 sys.path（脚本以文件路径执行）。
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import pytest
 from fastapi.testclient import TestClient

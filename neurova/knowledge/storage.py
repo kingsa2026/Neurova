@@ -13,6 +13,7 @@ import threading
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
@@ -288,7 +289,7 @@ class KnowledgeStorage:
 
 _singleton: Optional["KnowledgeStorage"] = None
 _singleton_lock = threading.Lock()
-_DEFAULT_DIR = "./data/knowledge"
+_DEFAULT_DIR = dataPath("knowledge")
 
 
 def get_knowledge_storage() -> KnowledgeStorage:

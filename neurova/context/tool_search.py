@@ -143,10 +143,11 @@ def _bm25_scores(query: str, entries: List[Dict[str, Any]]) -> Dict[str, float]:
 import hashlib
 import json
 import threading
+from neurova.core.data_root import dataPath
 
 _EMB_WEIGHT = 0.6
 _BM25_WEIGHT = 0.4
-_INDEX_PATH = os.path.join("data", "tool_search_index.json")
+_INDEX_PATH = dataPath("tool_search_index.json")
 _index_lock = threading.RLock()
 
 

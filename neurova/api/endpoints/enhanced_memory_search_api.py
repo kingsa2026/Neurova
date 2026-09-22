@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from neurova.api.deps import get_current_user, require_admin
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -165,7 +166,7 @@ async def get_retrieval_stats():
 # - 越界/非法枚举 → 422，不再假成功。
 # ---------------------------------------------------------------------------
 
-_UI_FILE = "data/memory_search_ui_settings.json"
+_UI_FILE = dataPath("memory_search_ui_settings.json")
 
 _UI_DEFAULTS: typing.Dict[str, typing.Any] = {
     "search": {"method": "hybrid", "top_k": 10, "score_threshold": 0.5},

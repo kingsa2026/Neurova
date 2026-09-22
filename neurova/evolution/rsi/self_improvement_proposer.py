@@ -116,6 +116,7 @@ from neurova.skills.market_registry import (
     persist_synthesized_skill,
     restore_market_skills_from_service,
 )
+from neurova.core.data_root import callerPath
 
 logger = get_logger(__name__)
 
@@ -387,7 +388,7 @@ class SelfImprovementProposer:
         self._agent_id = str(agent_id)
 
         if proposals_dir is None:
-            root = Path(os.environ.get("NEUROVA_PROPOSALS_ROOT") or Path("data") / "agents")
+            root = callerPath(os.environ.get("NEUROVA_PROPOSALS_ROOT"), "agents")
             proposals_dir = root / self._agent_id / "proposals"
         self._proposals_dir = Path(proposals_dir)
         self._proposals_dir.mkdir(parents=True, exist_ok=True)
