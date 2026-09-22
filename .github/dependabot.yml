@@ -83,6 +83,13 @@ updates:
       npx-runtime-security:
         applies-to: security-updates
         patterns: ["*"]
+    ignore:
+      # 传递依赖由 package.json overrides 统一收口（同 NeurUI 侧纪律）。
+      # swagger-jsdoc 6.3.0 用精确版本 yaml "2.0.0-1" 引入 yaml，Dependabot
+      # 直接改这条传递依赖会与 overrides 打架；yaml 的升级路径是
+      # 「改 overrides → 重生成锁 → osv 实扫」，见 overridesNote 与
+      # docs/05-reports/dependency-cve-ledger.md 的 CVE-2026-33532 一节。
+      - dependency-name: "yaml"
   # ── Rust：Tauri 桌面壳（NeurUI/src-tauri/Cargo.lock）────────────────────
   # Issue #56 残留边界：该依赖树此前从不被任何工具看过（pip-audit 与
   # npm audit 都覆盖不到 Rust）。Cargo 更新由 dependabot 每周提单。
