@@ -293,23 +293,6 @@ class TestTimeClauseLivesOnTheReachableChannel:
         assert not problems, "\n  ".join(problems)
 
 
-def _strip_self_event(pipeline):
-    """把收尾自行接力里的 `event` 置为占位——两份事件定义只允许在此处不同。"""
-    def walk(node):
-        if isinstance(node, list):
-            return [walk(i) for i in node]
-        if isinstance(node, dict):
-            return {
-                k: ("<self-event>"
-                    if k == "event" and isinstance(v, str) and v.endswith("@npc")
-                    else walk(v))
-                for k, v in node.items()
-            }
-        return node
-
-    return walk(pipeline)
-
-
 class TestLevelRoleEnumUnchanged:
     """档位角色名不得被悄悄重命名（改名即失去配置期唯一必达通道）。"""
 
@@ -347,12 +330,16 @@ class TestLevelRoleEnumUnchanged:
             keys = [k for k in fallback if isinstance(k, str) and k.endswith("@npc")]
             if len(keys) < 2:
                 problems.append("$: 兜底挂载点缺事件（应含 issue 与 pull_request 两类）")
-            # 两条事件定义的唯一允许差异是收尾自行接力的事件名
-            # （issue 拉 issue、PR 拉 PR），其余逐字一致——判据与
-            # tests/unit/test_ci_npc_config_guard.py 同源，不另立一套口径。
-            if _strip_self_event(fallback.get("issue.comment@npc")) != \
-                    _strip_self_event(fallback.get("pull_request.comment@npc")):
-                problems.append("$: 两条事件定义不一致（除自身事件名外应逐字相同）")
+            # 「两条事件定义的差异被逐字点名」这件事**不在本文件判**：
+            # 它的单一事实源是 tests/unit/test_ci_npc_config_guard.py 的
+            # `_strip_self_event` + `test_npc_events_declared_and_aliased`
+            # （那份判据同时钉自接力事件名与对话载体键）。
+            # 本文件曾逐字复制一份 `_strip_self_event`，两份实现随即分叉：
+            # Issue #158 让 `cnb:apply` 的 event 从"同名评论事件"改为
+            # `api_trigger_npc_handoff`、并新增对话载体键之后，那份副本立刻红在
+            # 「除自身事件名外应逐字相同」上——**同一个事实被两份守卫各说一遍，
+            # 改一处漏一处**（教义第 6 条：发现第二份定义就收口）。
+            # 故此处删除副本，只保留本文件独有的职责：档位角色的合法挂载点。
         assert not problems, "\n  ".join(problems)
 
     def test_roles_rendered_identically_across_mounts(self, cnb_doc):
