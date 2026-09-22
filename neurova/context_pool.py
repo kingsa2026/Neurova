@@ -163,8 +163,15 @@ class ContextPool:
         self._eviction_ledger: List[Any] = []
         self._evicted_total = 0
         self._max_eviction_ledger = 500
-        # 增强②：台账 GC 节流计数（每 _LEDGER_GC_EVERY 次驱逐触发一次 gc_stale）
+        # D11：台账 GC 节流计数——触发点是**归档提交**（真有调用方），不再挂在
+        # 生产不可达的驱逐路径上（改前 _LEDGER_GC_EVERY 只被 _archive_evicted
+        # 递增，而它在生产构造面 resident_limit=None / ttl_seconds=0 下永不执行）。
         self._ledger_gc_counter = 0
+        # D11：清理的可观测面（触发次数 / 清理条数 / 点名失败原因）。
+        # 清理会改变库规模，静默执行等于"保留策略生效"无从核对。
+        self._ledger_gc_runs = 0
+        self._ledger_gc_removed = 0
+        self._ledger_gc_last_error: Optional[str] = None
 
         # 并发保护：保护 _cache / _cache_version / _collector._contexts 等共享状态
         # 使用 RLock 因为 merge_with 等方法会重入调用 add_context
@@ -358,6 +365,15 @@ class ContextPool:
                 "batches": self._ledger_batches,
                 "pending": len(self._ledger_batch) if self._ledger_batch is not None else 0,
                 "last_error": self._ledger_last_error,
+            },
+            # D11（A5）：保留策略的执行面。runs=触发次数、removed=清理条数；
+            # 缺了它只能靠读库反推"超限有没有被清"，等于不可观测。
+            "ledger_gc": {
+                "runs": self._ledger_gc_runs,
+                "removed": self._ledger_gc_removed,
+                "keep_count": getattr(self._ledger_db, "keep_count", None),
+                "keep_days": getattr(self._ledger_db, "keep_days", None),
+                "last_error": self._ledger_gc_last_error,
             },
         }
 
@@ -700,6 +716,7 @@ class ContextPool:
             return
         self._ledger_written += len(pending)
         self._ledger_rows += inserted
+        self._maybeGcLedger()
 
     def _record_batch_failure(self, pending: List[Any], exc: BaseException) -> None:
         self._ledger_write_failed += len(pending)
@@ -738,6 +755,7 @@ class ContextPool:
         self._ledger_written += 1
         if inserted:
             self._ledger_rows += 1
+        self._maybeGcLedger()
 
     def _writeArchived(self, item) -> bool:
         """单条写库调用（事务边界由调用方决定：批内不提交、批外立即提交）。
@@ -759,30 +777,47 @@ class ContextPool:
             created_at=archived_at.isoformat() if archived_at else None,
         )
 
+    def _maybeGcLedger(self) -> None:
+        """按节流触发一次保留策略清理（B4/007 判据 A5）。
+
+        触发点是**归档提交**（批量结算 / 单条落库后）——这是持久层在生产真正
+        被使用的那条路径。改前挂在 ``_archive_evicted`` 上，而该路径在生产构造面
+        （``resident_limit=None``、``ttl_seconds=0``）永不执行，于是 GC 一次也
+        不触发、"保留策略生效"落空，库只单调增长。
+
+        清理失败不阻断归档主流程，但**不静默**：点名原因经
+        ``get_retention_stats()["ledger_gc"]`` 上报（与 ``ledger_persistence`` 同口径）。
+        """
+        if self._ledger_db is None:
+            return
+        self._ledger_gc_counter += 1
+        if self._ledger_gc_counter % _LEDGER_GC_EVERY:
+            return
+        try:
+            removed = int(self._ledger_db.gc_stale() or 0)
+        except Exception as exc:  # noqa: BLE001 - 清理失败不阻断归档，但必须可见
+            self._ledger_gc_last_error = f"{type(exc).__name__}: {exc}"
+            logger.warning("归档台账 GC 失败（不影响归档）：%s", self._ledger_gc_last_error, exc_info=True)
+            return
+        self._ledger_gc_runs += 1
+        self._ledger_gc_removed += removed
+        if removed:
+            # 登记读数随清理扣减——不然它会停在一个高于库内实况的旧值上。
+            self._ledger_rows = max(0, self._ledger_rows - removed)
+
     def _archive_evicted(self, item) -> None:
         """把被驱逐条目归档进有界台账；台账满时淘汰最旧记录。
 
         B4/001：持久台账的写穿点在 ``add_context``（落常驻即落库），本方法
         **不再**写库——驱逐的条目必然先经 `add_context` 落过常驻，重复写会让
         同一条内容在台账里出现两行（同内容双份，破坏去重语义）。
-        本方法只维护内存台账（本进程内更快的一等公民）与 GC 节流。
+        B4/007：本方法不再承担 GC 节流（那条节流在生产不可达），只维护内存台账。
         """
         self._eviction_ledger.append(item)
         self._evicted_total += 1
         overflow = len(self._eviction_ledger) - max(0, int(self._max_eviction_ledger))
         if overflow > 0:
             del self._eviction_ledger[:overflow]
-        if self._ledger_db is not None:
-            # P1-1③ 增强②：GC piggyback（每 _LEDGER_GC_EVERY 次驱逐触发，
-            # 按保留天数清理过期台账；异常不破坏归档主流程）
-            self._ledger_gc_counter += 1
-            if self._ledger_gc_counter % _LEDGER_GC_EVERY == 0:
-                try:
-                    removed = self._ledger_db.gc_stale()
-                    if removed:
-                        self._ledger_rows = max(0, self._ledger_rows - int(removed))
-                except Exception:
-                    logger.warning("驱逐台账 GC 失败（不影响归档）", exc_info=True)
 
     def _allowedRecallItems(self, items: List) -> List:
         """召回作用域闸口：本进程允许看到的作用域集（B4/008 判据 A8）。
@@ -1187,7 +1222,9 @@ class ContextPool:
 
 from neurova.context.pairing import validate_pairing
 
-# 增强②：台账 GC 节流——每 N 次驱逐归档触发一次 gc_stale
+# D11：台账 GC 节流——每 N 次**归档提交**触发一次 gc_stale（触发点见
+# _maybeGcLedger；改前挂在生产不可达的驱逐路径上）。与环境无关地写死，
+# 不做运行时调参。
 _LEDGER_GC_EVERY = 20
 from neurova.context.pool_models import ContextSource, ContextInput
 from neurova.context.pool_index import PoolReadIndex
