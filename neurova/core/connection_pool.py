@@ -21,6 +21,7 @@ from typing import Optional
 from contextlib import contextmanager
 from pathlib import Path
 from queue import Queue, Empty, Full
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
@@ -316,7 +317,6 @@ _pools_lock = threading.Lock()
 
 def _defaultPoolPath() -> str:
     """默认池库路径：数据根下的绝对路径（延迟到调用时解析，注入才生效）。"""
-    from neurova.core.data_root import get_data_root
 
     return str(get_data_root() / "neurova_memory.db")
 

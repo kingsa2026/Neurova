@@ -14,9 +14,11 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from neurova.core.data_root import get_data_root
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "aigc_studio.db"
+def defaultDbPath() -> Path:
+    """默认库落点：数据根下的 `aigc_studio.db`（原值按 PROJECT_ROOT 拼，是第二份根）。"""
+    return get_data_root() / "aigc_studio.db"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS projects(
@@ -109,7 +111,7 @@ class StudioStore:
     """aigc_studio SQLite 存储（线程安全 + WAL，风格与 task_ledger/neurflow 一致）。"""
 
     def __init__(self, db_path: Optional[str] = None):
-        self.db_path = str(db_path or DEFAULT_DB_PATH)
+        self.db_path = str(db_path or defaultDbPath())
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)

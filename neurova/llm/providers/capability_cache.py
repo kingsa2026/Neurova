@@ -21,6 +21,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from neurova.core.data_root import dataPath, get_data_root
 
 logger = get_logger(__name__)
 
@@ -97,7 +98,7 @@ class CapabilityCache:
             self._load_cache()
 
     def _get_default_cache_path(self) -> Path:
-        return Path("./data/llm/capability_cache.json")
+        return get_data_root() / "llm" / "capability_cache.json"
 
     def _make_key(self, provider_id: str, model: str) -> str:
         return f"{provider_id}::{model}"
@@ -243,7 +244,7 @@ class CapabilityCache:
 
 _singleton: Optional[CapabilityCache] = None
 _singleton_lock = threading.Lock()
-_DEFAULT_DIR = "./data/llm"
+_DEFAULT_DIR = dataPath("llm")
 
 
 def get_capability_cache() -> CapabilityCache:

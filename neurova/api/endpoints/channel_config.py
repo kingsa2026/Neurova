@@ -40,13 +40,14 @@ from neurova.channels.wechat import create_wechat_adapter
 from neurova.channels.wecom import create_wecom_adapter
 from neurova.channels.xiaoyi import create_xiaoyi_adapter
 from neurova.api.endpoints._pydantic_compat import safe_model_dump  # s9: pydantic v1 兼容
+from neurova.core.data_root import get_data_root
 
 logger = get_logger(__name__)
 
 router = APIRouter(dependencies=[Depends(get_current_user)],prefix="/channel-configs", tags=["渠道配置"])
 
 # 配置文件路径
-CONFIG_DIR = Path(__file__).parent.parent.parent / "data"
+CONFIG_DIR = get_data_root()
 CONFIG_FILE = CONFIG_DIR / "channel_configs.json"
 
 # ============================================================

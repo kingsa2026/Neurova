@@ -15,8 +15,10 @@ import pathlib
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+from neurova.core.data_root import dataPath
 
-CONSTITUTION_DIR = "data/constitution"
+
+CONSTITUTION_DIR = dataPath("constitution")
 
 
 def constitution_path(agent_id: str) -> pathlib.Path:

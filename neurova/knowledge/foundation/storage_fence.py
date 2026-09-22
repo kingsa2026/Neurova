@@ -21,12 +21,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Union
+from neurova.core.data_root import dataPath
 
-PRODUCTION_STORAGE_DIR = "./data/knowledge"
+PRODUCTION_STORAGE_DIR = dataPath("knowledge")
 
 
 def productionStorageDir() -> Path:
-    """按当前工作目录解析——与 `PRODUCTION_STORAGE_DIR` 的相对语义一致。"""
+    """生产知识库目录（resolve 形态，比较口径用）。"""
     return Path(PRODUCTION_STORAGE_DIR).resolve()
 
 

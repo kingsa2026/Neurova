@@ -23,10 +23,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from neurova.core.logger import get_logger
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 
-_DEFAULT_PATH = "data/security/profile_grants.json"
+_DEFAULT_PATH = dataPath("security/profile_grants.json")
 
 # 作用域 → TTL 秒（long=0 表示不过期）
 _SCOPE_TTL = {"task": 3600, "session": 4 * 3600, "long": 0}

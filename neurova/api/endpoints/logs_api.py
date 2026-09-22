@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from neurova.api.auth import get_current_user
+from neurova.core.data_root import dataPath
 
 logger = get_logger(__name__)
 # P0 安全修复: 工作日志含用户活动数据，读写/导出均必须认证
@@ -95,7 +96,7 @@ class LogStats(BaseModel):
 # neurova.projects.work_log 不存在的死桥已删）
 # ---------------------------------------------------------------------------
 
-_STORE_FILE = os.environ.get("NEUROVA_WORKLOGS_PATH", "data/work_logs.json")
+_STORE_FILE = os.environ.get("NEUROVA_WORKLOGS_PATH") or dataPath("work_logs.json")
 
 _logs_store: Dict[str, Dict[str, Any]] = {}
 
@@ -125,7 +126,7 @@ def _reboot_load() -> None:
     """测试钩子：模拟进程重启。"""
     _logs_store.clear()
     global _STORE_FILE
-    _STORE_FILE = os.environ.get("NEUROVA_WORKLOGS_PATH", "data/work_logs.json")
+    _STORE_FILE = os.environ.get("NEUROVA_WORKLOGS_PATH") or dataPath("work_logs.json")
     _load_store()
 
 
