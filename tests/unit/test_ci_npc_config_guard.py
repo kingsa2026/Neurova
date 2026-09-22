@@ -931,3 +931,31 @@ class TestAnchoredConfigHasConsumer:
             "\n档位口径只有一处：`$` 挂载点的 thinkingLevel 现值，"
             "加上 `.cnb/settings.yml` 的角色定义。"
         )
+
+
+class TestMountClaimMatchesTheRealMount:
+    """`.cnb/settings.yml` 不得宣称角色名顶层 key 挂载 —— 那是已删净的非法形态。
+
+    根因与 `TestAnchoredConfigHasConsumer` 同源：档位表（`.档位映射: &npc-level`）
+    已被删净，顶层 key 收敛为 `$` 一处，角色名顶层 key 在推送那一刻就是非法配置。
+    而 `.cnb/settings.yml` 的头部与角色注释仍在宣称「档位挂在 `.cnb.yml` 同名顶层 key」——
+    一句读不出任何真实挂载点、且与现行配置相反的陈述，同属「只写不读的第二份定义」：
+    后人照着它去补顶层 key，就会推一份过不了 Schema 的配置上分支。
+
+    判据：`.cnb/settings.yml` 的**全部**文本里不得再出现「同名顶层 key」这一宣称形态。
+    可证伪路径 = 把该句写回去 → 立刻转红。
+    """
+
+    def test_settings_never_claims_a_role_named_top_level_mount(self):
+        text = io.open(SETTINGS, encoding="utf-8").read()
+        offenders = [
+            f"第 {number} 行: {line.strip()}"
+            for number, line in enumerate(text.splitlines(), start=1)
+            if "同名顶层 key" in line
+        ]
+        assert not offenders, (
+            ".cnb/settings.yml 仍在宣称角色名顶层 key 挂载（该形态已删净且为非法配置）:\n  "
+            + "\n  ".join(offenders) +
+            "\n顶层 key 只认分支名；角色一律靠 `$` 兜底覆盖——"
+            "档位事实源是 `$` 挂载点的 thinkingLevel 现值加本文件的角色定义。"
+        )
