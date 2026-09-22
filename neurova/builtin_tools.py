@@ -956,6 +956,37 @@ _BUILTIN_SCHEMAS: Dict[str, Dict] = {
             "required": [],
         },
     },
+    "orchestrate_tools": {
+        "description": "【多步编排】按显式步骤表在一次调用里跑完一条工具链：层内无依赖的步进并行、有依赖的步进按顺序执行，任一步失败即跳过其下游并点名失败原因。已知确切的执行顺序、且要与一次工具调用等价地拿到整条链的成败时用它。【何时不用】只是把常见序列固化下来供以后反复复用，改用 create_skill（那是持久技能，这里是单次编排）；单个工具直接调它自己；需要可视化分支/循环编排用画布工具族。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "steps": {
+                    "type": "array",
+                    "maxItems": 12,
+                    "description": "按声明执行的步骤表；同层（互不依赖）并行，声明 depends_on 的步进等前置完成",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tool": {"type": "string", "description": "被编排的工具名（必须真实存在，如 web_search / file_write / get_datetime）"},
+                            "params": {"type": "object", "description": "传给该工具的参数（支持 {step_<idx>.<field>} 占位符引用前序步骤输出字段）"},
+                            "depends_on": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "本步依赖的前置工具名列表（缺省时按能力图取该工具的前置）",
+                            },
+                        },
+                        "required": ["tool"],
+                    },
+                    "minItems": 1,
+                },
+                "goal": {
+                    "type": "string",
+                    "description": "用一句目标描述让编排器自己规划步骤（与 steps 二选一；两者都给时以 steps 为准）",
+                },
+            },
+        },
+    },
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -1012,6 +1043,8 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
     "exec_command", "write_stdin",
     # 子代理派生：spawn 有副作用
     "spawn_subagent",
+    # 多步编排：内层步进可能含任意写操作，重放制造新变更
+    "orchestrate_tools",
 })
 
 
