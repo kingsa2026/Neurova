@@ -280,8 +280,22 @@ class TestRolePipelineAlignment:
                     problems.append(
                         f"{mount} 缺 {key}——NPC 配置按事件独立合并，漏配会走默认行为"
                     )
-            if body.get("issue.comment@npc") != body.get("pull_request.comment@npc"):
-                problems.append(f"{mount} 下 issue 与 PR 事件定义不一致（两侧会各自漂移）")
+            issue_body = body.get("issue.comment@npc")
+            pr_body = body.get("pull_request.comment@npc")
+            if issue_body is None or pr_body is None:
+                continue
+            # 事件名必须不同（接力时要各拉各的事件），其余逐字一致
+            # —— 唯一的差异点由下面这条断言钉死，不是"允许漂移"。
+            if _strip_self_event(issue_body) != _strip_self_event(pr_body):
+                problems.append(
+                    f"{mount} 下 issue 与 PR 事件定义不一致（除自身事件名外应逐字相同）"
+                )
+            elif _self_apply_events(issue_body) != {"issue.comment@npc"} or \
+                    _self_apply_events(pr_body) != {"pull_request.comment@npc"}:
+                problems.append(
+                    f"{mount} 下 issue / PR 的收尾自行接力事件名错位"
+                    "（PR 事件拉到 issue 流水线会跑错上下文）"
+                )
         assert not problems, "\n  ".join(problems)
 
 
@@ -302,3 +316,158 @@ class TestSettingsRoleHygiene:
         names = [r.get("name") for r in (settings_doc.get("npc") or {}).get("roles") or []]
         dupes = sorted({n for n in names if names.count(n) > 1})
         assert not dupes, f"角色名重复: {dupes}"
+
+
+def _strip_self_event(pipeline):
+    """把收尾自行接力里的 `event` 置为占位——两份事件定义只允许在此处不同。"""
+    def walk(node):
+        if isinstance(node, list):
+            return [walk(i) for i in node]
+        if isinstance(node, dict):
+            out = {}
+            for k, v in node.items():
+                if k == "event" and isinstance(v, str) and v.endswith("@npc"):
+                    out[k] = "<self-event>"
+                else:
+                    out[k] = walk(v)
+            return out
+        return node
+
+    return walk(pipeline)
+
+
+def _self_apply_events(pipeline):
+    """收集流水线里所有 cnb:apply 声明的事件名（接力判据）。"""
+    found = set()
+
+    def walk(node):
+        if isinstance(node, list):
+            for i in node:
+                walk(i)
+            return
+        if isinstance(node, dict):
+            if node.get("type") == "cnb:apply":
+                event = (node.get("options") or {}).get("event")
+                if isinstance(event, str):
+                    found.add(event)
+            for v in node.values():
+                walk(v)
+
+    walk(pipeline)
+    return found
+
+
+class TestTurnHandoffCeiling:
+    """轮数触顶后的接力：NPC 事件流水线必须在收尾把剩余工作交给下一次构建。
+
+    根因（构建 cnb-m48-1k33grbms 实测）：`maxTurns` 撞顶时 `npc:go` 只是把
+    Agent 中止，当前流水线随即结束——**没有消费者读这个中止事件**，worktree 里
+    已改未提交的成果随容器一起丢，用户必须自己发现并手动催下一轮。
+    平台没有「Agent 用满轮数后自动重跑同一条流水线」的原生开关
+    （`retry` / `allowFailure` / `endStages` 都只管当前这条流水线，不产生新的
+    轮次预算），所以接力必须在配置里显式写出来：收尾阶段用 `cnb:apply`
+    再拉一次同一事件，`turnLimitReached` 标记把「接力轮」与用户新发的
+    `@` 区分开，防止同一条评论被无限重跑。
+
+    判据落在**是否有这笔接力**，不落在 `$变量` 替换后的形态上：
+    `api_trigger_pipeline` 的 options 在配置期做 Schema 校验，事件名写成
+    `$VAR` 会被平台拒掉；且 `type: cnb:apply` 的 `env` 值只接受 `$变量`
+    （见 tests/unit/test_ci_thin_env_guards.py 同型的薄环境事故）。
+    """
+
+    #: 判定「这一轮是轮数触顶的接力轮」的标记名（run 计数器的唯一事实源）
+    HANDOFF_FLAG = "turnLimitReached"
+
+    @staticmethod
+    def _npc_pipelines(cnb_doc):
+        """collect: (挂载点, 事件名, 流水线体) —— 只取含 npc:go 的流水线。"""
+        for mount, body in cnb_doc.items():
+            if not isinstance(body, dict):
+                continue
+            for event, event_body in body.items():
+                if not event.endswith("@npc"):
+                    continue
+                for i, job in enumerate(event_body if isinstance(event_body, list) else []):
+                    if not isinstance(job, dict):
+                        continue
+                    has_npc = any(
+                        stage.get("type") == "npc:go"
+                        for stage in (job.get("stages") or [])
+                        if isinstance(stage, dict)
+                    )
+                    if has_npc:
+                        yield f"{mount}.{event}[{i}]", event, job
+
+    def test_npc_pipeline_carries_turn_handoff(self, cnb_doc):
+        """每条 npc:go 流水线都要有收尾接力（apply 同事件 + 轮次上限标记）。"""
+        problems = []
+        seen = 0
+        for where, event, job in self._npc_pipelines(cnb_doc):
+            seen += 1
+            end_stages = [s for s in (job.get("endStages") or []) if isinstance(s, dict)]
+            applies = [s for s in end_stages if s.get("type") == "cnb:apply"]
+            if not applies:
+                problems.append(f"{where}: endStages 无 cnb:apply，轮数触顶后无人接力")
+                continue
+            if not any((s.get("options") or {}).get("event") == event for s in applies):
+                problems.append(
+                    f"{where}: 接力的 event 未与触发事件 {event!r} 同名，"
+                    "下一轮不会重新执行这份 NPC 配置"
+                )
+            # 标记必须由上一轮经 env 传下来、由 NPC 在触顶时写出，
+            # 且两处变量名逐字一致——否则守卫会因为「标记永不为真」拦不住无限接力。
+            passed_down = str(job.get("env", {}).get("turnLimitReached", ""))
+            if passed_down.strip() != f"${self.HANDOFF_FLAG}":
+                problems.append(
+                    f"{where}: 收尾阶段缺 {self.HANDOFF_FLAG} 标记"
+                    "（无标记则每轮都判定「已触顶」，同一评论会被无限接力）"
+                )
+        assert seen, "未在 .cnb.yml 找到任何 npc:go 流水线——守卫失效（判据空转）"
+        assert not problems, (
+            "NPC 轮数触顶后没有接力（构建 cnb-m48-1k33grbms 的丢成果形态）:\n  "
+            + "\n  ".join(problems) +
+            "\n平台没有「轮数用满自动重跑」的原生开关，接力必须显式写在 endStages："
+            "`type: cnb:apply` + `event: <同名事件>` + `env: {"
+            f"{self.HANDOFF_FLAG}: ${self.HANDOFF_FLAG}" + "}`。"
+            "改完请同步 .cnb.yml 注释里的轮次上界推演。"
+        )
+
+    def test_handoff_flag_is_the_only_reading_of_reached_state(self, cnb_doc):
+        """接力标记只允许出现在「读它」的位置，不许新增第二份判据。
+
+        白名单是逐行判据，不是计数：每一行含标记的文本都必须落在
+        （a）流水线 `env` 的传入/传出、（b）`if` 条件的判定
+        这三类用途之内；任何新形态（例如 Agent 另写一个 state 文件、
+        或再加一个 handoff 计数器）都会被这条拦下——那是平行体系。
+        """
+        allowed = ("turnLimitReached:", '"$turnLimitReached" = "1"')
+        offenders = [
+            f"{lineno}: {line.strip()}"
+            for lineno, line in enumerate(io.open(CNB, encoding="utf-8"), 1)
+            if self.HANDOFF_FLAG in line
+            and not any(mark in line for mark in allowed)
+        ]
+        assert not offenders, (
+            "接力标记出现在白名单之外的位置:\n  " + "\n  ".join(offenders) +
+            "\n标记只有两个合法用途：流水线 env 传入/传出、if 条件判定。"
+        )
+
+    #: 接力协议的书写落点：NPC 人设必须把「怎么写出标记」讲清楚，
+    #: 否则 .cnb.yml 里的收尾阶段永远读不到真值（写不出 → 永不接力 = 死配置）。
+    HANDOFF_MARKER_FILE = ".npc-turn-handoff"
+
+    def test_npc_personas_declare_handoff_protocol(self, settings_doc):
+        """每个 NPC 角色的人设都要写明接力标记的写法与唯一的判据文件。"""
+        roles = (settings_doc.get("npc") or {}).get("roles") or []
+        assert roles, ".cnb/settings.yml 无角色——NPC 人设未入库"
+        missing = [
+            r.get("name") for r in roles
+            if self.HANDOFF_MARKER_FILE not in (r.get("prompt") or "")
+        ]
+        assert not missing, (
+            f"NPC 角色未写明轮数触顶接力协议: {missing}\n"
+            f"人设里必须写清「用满轮数且还有未完成步骤时，把 1 写进 "
+            f"$CNB_BUILD_WORKSPACE/{self.HANDOFF_MARKER_FILE}」——"
+            "这是 .cnb.yml 收尾阶段唯一的读点，写不出就等于没有接力；"
+            "同时要提醒 Agent 用评论落进度（工作树不跨轮保存）。"
+        )

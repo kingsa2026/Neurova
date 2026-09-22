@@ -370,6 +370,17 @@ $:
   issue.comment@npc: &npc-dscoder-issue
     - docker:
         image: cnbcool/default-npc:latest
+      # 轮数触顶的接力标记：由本流水线经环境变量传给下一次构建
+      # （同一事件级联 apply 时，本 Job 的环境变量会传给新流水线）。
+      # 空值 = 用户新发的 @；`1` = 上一轮轮数用满、由 endStages 自动接力而来。
+      #
+      # 为何必须把标记传下去、而不是每次都接力：
+      #   收尾阶段无法直接读到 npc:go 的 options（maxTurns 是字面量，不能反向查询），
+      #   所以「本轮是否触顶」由 Agent 自己在最后一轮写出该标记（写进
+      #   $CNB_BUILD_WORKSPACE/.npc-turn-handoff，见 `.cnb/settings.yml` 的工作方式）。
+      #   没有标记就当没触顶 —— 否则用户只说了「你好」也会被无限接力，把配额烧在空轮上。
+      env:
+        turnLimitReached: $turnLimitReached
       stages:
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           type: npc:go
@@ -377,39 +388,71 @@ $:
             # 不写 model = 走平台默认模型（规避 400）；
             # 想锁定底座模型时，填平台真实存在的 model ID（不带思考强度后缀）。
             #
-            # 为何不再压 maxTurns（2026-09-21 复盘）：
-            #   本 PR 初版曾把本值压到 120（≈58 分钟），理由是「maxTurns 同时
-            #   是单次构建的最坏耗时上限：500 轮 × 29s/轮 ≈ 4h，必然先被平台
-            #   2h 上限掐断」。维护者在 main 上显式把 $ 段调到 1000，方向相反：
-            #   轮数配额按「任务够用」给。因为实测 251 轮 / 7262s 证明「被掐断」
-            #   的根因不是轮数给多了，而是 (a) Agent 自己 sleep 轮询
-            #   （300s/420s/480s 串起等待）、(b) 单轮一次全量 pytest 就 20 分 39 秒。
-            #   修掉这两件事，时间预算才不会漏；硬压轮数只会让正常长任务死在半路。
-            #   故本值保持 1000，真正的硬禁令由下方「禁止 sleep 轮询」承担。
-            maxTurns: 1000
+            # 为何 maxTurns 是 200（2026-09-22 二次实测复盘）：
+            #   2026-09-21 的复盘把本值放回 1000，理由是「轮数不是死因，够用就好」。
+            #   构建 cnb-m48-1k33grbms 把这个判断否证了：同样的 2h 硬限被再次吃满
+            #   （7300s、207 轮、均摊 35.3s/轮），且是被**外部**掐断 ——
+            #   没有告警轮、没有收尾，worktree 里 20 个已改未提交的文件随容器一起丢。
+            #   1000 轮 × 35.3s ≈ 9.7h，而 2h / 35.3s ≈ 205 轮 ⇒ 1000 的配额**永不触达**。
+            #   配额是「下界保障」而不是省钱旋钮：它必须在硬限之内，才能保证
+            #   撞顶发生**在**掐断之前，收尾阶段才来得及接力（见下方 endStages）。
+            maxTurns: 200
             contextWindow: 1m
             maxTokens: 48k
             # 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故落 xhigh。
             # 若后续平台开放 max 档，把本行改成 thinkingLevel: max 即可，其余不动。
             thinkingLevel: xhigh
+      # 轮数触顶后自动开启下一轮（回答 Issue #131）：
+      #   npc:go 撞 maxTurns 只是「中止 Agent」，它本身不产生新的轮次预算 ——
+      #   没有这一笔接力，当前流水线结束即终结，用户必须自己发现并手动催下一轮。
+      #   这里在收尾阶段用 cnb:apply 再拉一次**同一事件**，事件名逐字复用 $ 段
+      #   的上下文，故 issues 事件拉起的仍是 issue.comment@npc（PR 事件同理），
+      #   下一轮从仓库默认分支 / PR 分支重新 clone，读取同一个 Issue 的评论继续干。
+      #   关于「为什么不新开一个对话」：Issue/PR 本身就是对话载体，`@` 同一条评论
+      #   即续跑同一现场；另开 Issue 只会让上下文断链（教义：不留断点）。
+      #   关于轮次上界（防无限接力）：每一轮的轮次预算都是 maxTurns=200，
+      #   没有总轮数硬上界；唯一的刹车是 Agent 在触顶时写出的标记 ——
+      #   它每轮都重新判定「我是否真用满了配额」，用不满（正常收官）就不再接力。
+      endStages:
+        - name: "轮数触顶接力：自动开启下一轮（写不出成果就烧配额）"
+          type: cnb:apply
+          if:
+            - '[ "$turnLimitReached" = "1" ]'
+          options:
+            event: issue.comment@npc
+            env:
+              turnLimitReached: $turnLimitReached
 
   pull_request.comment@npc: &npc-dscoder-pr
     - docker:
         image: cnbcool/default-npc:latest
+      # 接力标记与 Issue 事件同义：空 = 用户新发的 @，`1` = 自动接力轮。
+      # 两份事件定义必须逐字一致（test_ci_npc_config_guard.py 常驻校验）。
+      env:
+        turnLimitReached: $turnLimitReached
       stages:
         - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
           type: npc:go
           options:
             # 不写 model = 走平台默认模型（规避 400）；
             # 想锁定底座模型时，填平台真实存在的 model ID（不带思考强度后缀）。
-            # maxTurns 取值理由见上方「为何不再压 maxTurns」；
-            # 两份事件定义必须逐字一致（test_ci_npc_config_guard.py 常驻校验）。
-            maxTurns: 1000
+            # maxTurns=200 的取值理由见上方「为何 maxTurns 是 200，不是 1000」。
+            maxTurns: 200
             contextWindow: 1m
             maxTokens: 48k
             # 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故落 xhigh。
             # 若后续平台开放 max 档，把本行改成 thinkingLevel: max 即可，其余不动。
             thinkingLevel: xhigh
+      # 轮数触顶接力：同 Issue 事件，仅事件名换成当前事件。
+      endStages:
+        - name: "轮数触顶接力：自动开启下一轮（写不出成果就烧配额）"
+          type: cnb:apply
+          if:
+            - '[ "$turnLimitReached" = "1" ]'
+          options:
+            event: pull_request.comment@npc
+            env:
+              turnLimitReached: $turnLimitReached
 
 # 同档位别名：@kingsa2026/neurova(DSCoder-max) 与 DSCoder 完全一致。
 DSCoder-max:
