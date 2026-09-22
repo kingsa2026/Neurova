@@ -739,20 +739,13 @@ class ContextOrchestrator:
             # 抽屉会按自己的份额取回内容、信封再按自己的份额把它们丢掉——
             # 表现形态就是"召回了但视图里没有"，即检索产物静默消失（教义第 2 条）。
             try:
-                from neurova.context.token_estimator import estimate_tokens
-                from neurova.context.window_compactor import estimate_window_tokens
-
-                # 剩余额度先扣掉外壳开销与已收集的非召回块，剩下的才是"召回内容额度"
-                remaining = max(
-                    self._ENVELOPE_MIN_TOKENS,
-                    window_budget
-                    - estimate_window_tokens(window_msgs)
-                    - self._envelopeFixedTokens(blocks)
-                    - estimate_tokens(str(user_input or "")),
-                )
+                # 剩余额度先扣掉外壳开销与已收集的非召回块，剩下的才是"召回内容额度"。
+                # 单源：与信封额度同一个 `_retrievalBudget`（改前此处与信封处各写一份公式）。
                 drawer = getattr(self.context_pool, "_drawer", None)
                 if drawer is not None:
-                    drawer.max_tokens = remaining
+                    drawer.max_tokens = self._retrievalBudget(
+                        window_budget, window_msgs, blocks, user_input
+                    )
             except Exception as e:  # noqa: BLE001 - 预算联动失败不阻断召回
                 logger.debug("draw 预算联动跳过: %s", e)
             drawn_contexts = self.context_pool.draw(need=user_input)
@@ -850,33 +843,13 @@ class ContextOrchestrator:
                 build_time_block,
                 compress_envelope,
             )
-            from neurova.context.token_estimator import estimate_tokens
-
-            from neurova.context.window_compactor import estimate_window_tokens
-
             envelope_blocks = {tag: "\n".join(lines) for tag, lines in blocks.items() if lines}
             envelope_blocks["time"] = build_time_block()
             _env = build_envelope(envelope_blocks)
             if _env:
                 # 信封预算 = 固定部分 + 召回额度 + 召回行前缀开销，与抽屉
-                # （`drawer.max_tokens`）同一份额度（单源，见 `_envelopeFixedTokens`）。
-                # 两条不可省：
-                # ①召回行前缀——抽屉按 `drop.content` 计量，渲染成行还要加
-                #   "[历史回忆] 用户: " 这类前缀，不补进预算则"刚好取满"的内容会被信封丢掉；
-                # ②地板——窗口已吃满时"剩余"为负会把信封压成空串、检索产物静默消失；
-                #   地板带来的超出量有明确上界（≤ 一个地板值），口径可见、不掩盖也不扩散。
-                line_prefix = estimate_tokens("\n".join("[历史回忆] 用户: " for _ in blocks["history"]))
-                env_budget = (
-                    self._envelopeFixedTokens(blocks)
-                    + max(
-                        self._ENVELOPE_MIN_TOKENS,
-                        window_budget
-                        - estimate_window_tokens(window_msgs)
-                        - self._envelopeFixedTokens(blocks)
-                        - estimate_tokens(str(user_input or "")),
-                    )
-                    + line_prefix
-                )
+                # （`drawer.max_tokens`）同一份额度（单源 `_envelopeBudget`）。
+                env_budget = self._envelopeBudget(window_budget, window_msgs, blocks, user_input)
                 _env = compress_envelope(_env, budget_tokens=env_budget)
             context.append(
                 {"role": "user", "content": f"{_env}\n\n{user_input}" if _env else user_input}
@@ -1151,10 +1124,69 @@ class ContextOrchestrator:
     # 在 prompt 里的份额"，语义不同层。改动任何一层前先看本注释。
     _WINDOW_SHARE_OF_POOL_BUDGET = 0.6
 
-    # 信封额度地板（与 `drawer.max_tokens` 的地板同一口径，见 D4 甲案前置条件 1）：
-    # 窗口已吃满预算时"剩余"为负，信封会被压成空串、检索产物静默消失；
-    # 给一个地板，并把超出量约束在 ≤ 一个地板值（口径可见，不掩盖）。
-    _ENVELOPE_MIN_TOKENS = 1000
+    # 召回额度地板（D3 裁决：地板按模型上下文自适应，取向以提升前缀缓存命中率
+    # 优先——倾向跨轮**小而稳定**的召回集合，而不是"多召回更懂你"）。
+    #
+    # 为什么是份额而不是常数：固定 1000 在 8k 模型上相对过宽（挤掉窗口份额），
+    # 在 128k 模型上又过窄（召回被压到几乎不可用）。改为窗口预算的既定份额，
+    # 并保留绝对下限——窗口预算极小时额度不得退化为 0（那等于取消召回）。
+    _RECALL_FLOOR_SHARE = 0.05
+    _RECALL_MIN_TOKENS = 1000
+
+    def _resolveRecallFloor(self) -> int:
+        """召回额度地板：窗口预算的既定份额，钳在绝对下限之上。"""
+        budget = self._resolve_window_token_budget()
+        return min(
+            max(self._RECALL_MIN_TOKENS, int(budget * self._RECALL_FLOOR_SHARE)),
+            max(self._RECALL_MIN_TOKENS, budget),
+        )
+
+    @property
+    def _ENVELOPE_MIN_TOKENS(self) -> int:
+        """信封额度地板——与召回地板**同一个**判据（改前是两条各写一份的常数）。"""
+        return self._resolveRecallFloor()
+
+    def _retrievalBudget(
+        self, window_budget: int, window_msgs, blocks: Dict[str, list], user_input
+    ) -> int:
+        """本轮召回内容额度（**单源**：抽屉与信封共用它的返回值）。
+
+        改前同一份公式在 `build_context` 里写了两遍（抽屉联动处与信封额度处），
+        两份各减各的项——口径分裂的典型形态：只要某一处漏减一项，抽屉取回的内容
+        就会被信封丢掉，表现形态是"检索产物静默消失"。
+
+        额度 = 窗口预算 − 对话窗口实占 − 信封固定部分 − 本轮用户输入，
+        下限为召回地板（窗口已吃满时"剩余"为负，不给地板会把内容压成空串）。
+        """
+        from neurova.context.token_estimator import estimate_tokens
+        from neurova.context.window_compactor import estimate_window_tokens
+
+        return max(
+            self._ENVELOPE_MIN_TOKENS,
+            window_budget
+            - estimate_window_tokens(window_msgs)
+            - self._envelopeFixedTokens(blocks)
+            - estimate_tokens(str(user_input or "")),
+        )
+
+    def _envelopeBudget(
+        self, window_budget: int, window_msgs, blocks: Dict[str, list], user_input
+    ) -> int:
+        """信封额度 = 固定部分 + 召回额度 + 召回行前缀开销（同样是**单源**导出）。
+
+        召回行前缀不可省：抽屉按 `drop.content` 计量，渲染成行还要加
+        "[历史回忆] 用户: " 这类前缀；不补进预算则"刚好取满"的内容会被信封丢掉。
+        """
+        from neurova.context.token_estimator import estimate_tokens
+
+        line_prefix = estimate_tokens(
+            "\n".join("[历史回忆] 用户: " for _ in (blocks or {}).get("history", []))
+        )
+        return (
+            self._envelopeFixedTokens(blocks)
+            + self._retrievalBudget(window_budget, window_msgs, blocks, user_input)
+            + line_prefix
+        )
 
     def _resolve_window_token_budget(self) -> int:
         """窗口 token 预算：显式覆盖（_window_token_budget，测试/运维用）优先，

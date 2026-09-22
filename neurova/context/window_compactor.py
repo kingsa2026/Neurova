@@ -9,8 +9,13 @@ build_context 中做「尾部保留 + 老消息折叠」的自动压缩。
 import typing
 from dataclasses import dataclass
 
-# 每条消息的协议开销（role/分隔符等的保守估计）
-_PER_MSG_OVERHEAD = 4
+# 每条消息的协议开销（role/分隔符等的保守估计）。
+# 单一事实源：模块内一切"整窗计量"与"逐条计量"都必须经 WindowTokenMeter，
+# 它按此常量补开销；`estimate_window_tokens` 只是它的无状态入口。
+# 第二份开销常数（含就地写法 `+ 4`）即口径分裂，守卫见
+# tests/unit/context/test_window_token_metering.py。
+PER_MSG_OVERHEAD = 4
+_PER_MSG_OVERHEAD = PER_MSG_OVERHEAD
 
 # 摘要失败收敛：摘要请求失败时从折叠区丢最旧一条
 # 重试（输入变小更易成功），最多重试 _SUMMARY_MAX_RETRIES 次；仍失败则回落
@@ -18,15 +23,69 @@ _PER_MSG_OVERHEAD = 4
 _SUMMARY_MAX_RETRIES = 3
 
 
-def estimate_window_tokens(msgs: typing.Iterable) -> int:
-    """估算窗口消息序列的 token 总量（统一估算器 BALANCED 策略）。"""
-    from neurova.context.token_estimator import estimate_tokens
+class WindowTokenMeter:
+    """窗口 token 计量的**单源记忆体**（Issue #90 台账 §2 补充发现的根因修复）。
 
-    total = 0
-    for m in msgs or []:
-        content = (m or {}).get("content", "") if isinstance(m, dict) else str(m)
-        total += estimate_tokens(content) + _PER_MSG_OVERHEAD
-    return total
+    改前形态：`split_window_by_budget` 每轮重算整窗、又为每条单算一次；
+    `compact_window` 的递进折叠循环（ratio 每轮 +0.1，从 0.5 走到 1.0）每轮再各来
+    一遍——单位调用内对同一批文本重复计量约 **2.4×**。尺子换成 o200k 精确计数后，
+    单次折叠从约 20ms 涨到 75ms，重复计量按倍数放大。
+
+    本类把"计量"收成一次：同一条消息在同一 meter 生命周期内只真正算一次，
+    整窗总量由逐条值求和得出（不再有第二套整窗算法）。
+
+    生命周期纪律：一个 meter 只服务一次折叠调用。跨调用复用会把已变化的窗口
+    当旧的算——所以 `compact_window` / `split_window_by_budget` 的 `meter` 参数
+    缺省为 None，每次调用自建。
+    """
+
+    def __init__(self, estimator: typing.Optional[typing.Callable[[str], int]] = None):
+        if estimator is None:
+            from neurova.context.token_estimator import estimate_tokens
+
+            estimator = estimate_tokens
+        self._estimator = estimator
+        # 键是 id(obj)，但**同时持有强引用**——只存 id 会被 CPython 的 id 复用
+        # 击中（对象被回收后新对象拿到同一 id → 计量结果串号）。meter 生命周期
+        # 只有一次折叠调用，持有引用的代价可忽略。
+        self._per_message: typing.Dict[int, typing.Tuple[typing.Any, int]] = {}
+        self._totals: typing.Dict[int, typing.Tuple[typing.Any, int]] = {}
+
+    @staticmethod
+    def _contentOf(message) -> str:
+        if isinstance(message, dict):
+            return (message or {}).get("content", "") or ""
+        return str(message)
+
+    def one(self, message) -> int:
+        """单条消息的 token 占用（含协议开销）。"""
+        key = id(message)
+        cached = self._per_message.get(key)
+        if cached is not None and cached[0] is message:
+            return cached[1]
+        value = self._estimator(self._contentOf(message)) + PER_MSG_OVERHEAD
+        self._per_message[key] = (message, value)
+        return value
+
+    def total(self, msgs: typing.Iterable) -> int:
+        """消息序列的 token 总量：逐条求和（与 `one` 同源，无第二套算法）。"""
+        seq = msgs if isinstance(msgs, (list, tuple)) else list(msgs or [])
+        key = id(seq)
+        cached = self._totals.get(key)
+        if cached is not None and cached[0] is seq:
+            return cached[1]
+        value = sum(self.one(m) for m in seq)
+        self._totals[key] = (seq, value)
+        return value
+
+
+def estimate_window_tokens(msgs: typing.Iterable) -> int:
+    """估算窗口消息序列的 token 总量（统一估算器 EXACT/BALANCED 策略）。
+
+    无状态入口：等价于一次性 `WindowTokenMeter`。需要在一段逻辑内多次求值时，
+    请显式持有 meter，避免重复计量。
+    """
+    return WindowTokenMeter().total(msgs)
 
 
 def split_window_by_budget(
@@ -34,6 +93,7 @@ def split_window_by_budget(
     budget_tokens: int,
     keep_min_messages: int = 6,
     target_ratio: float = 0.5,
+    meter: typing.Optional["WindowTokenMeter"] = None,
 ) -> typing.Tuple[typing.List[dict], typing.List[dict]]:
     """按 token 预算把窗口切成 (dropped, kept)。
 
@@ -45,14 +105,15 @@ def split_window_by_budget(
     msgs = list(msgs or [])
     if not msgs:
         return [], []
-    if estimate_window_tokens(msgs) <= budget_tokens:
+    meter = meter or WindowTokenMeter()
+    if meter.total(msgs) <= budget_tokens:
         return [], msgs
 
     target = max(budget_tokens * target_ratio, 1.0)
     acc = 0.0
     kept_count = 0
     for m in reversed(msgs):
-        t = estimate_window_tokens([m])
+        t = meter.one(m)
         if kept_count >= keep_min_messages and acc + t > target:
             break
         acc += t
@@ -88,6 +149,7 @@ async def compact_window(
     keep_min_messages: int = 6,
     target_ratio: float = 0.5,
     summary_prefix: str = "[早期对话摘要] ",
+    meter: typing.Optional["WindowTokenMeter"] = None,
 ) -> typing.Optional[WindowCompaction]:
     """超预算时折叠窗口老消息；未超预算返回 None（零行为变化）。
 
@@ -106,24 +168,27 @@ async def compact_window(
     if not msgs:
         return None
 
+    # 单源计量：整段折叠（含递进各轮）共用同一个 meter，同一条消息只算一次。
+    meter = meter or WindowTokenMeter()
+
     summary = None
     ratio = target_ratio
     best: typing.Optional[WindowCompaction] = None
 
     while True:
         dropped, kept = split_window_by_budget(
-            msgs, budget_tokens, keep_min_messages, target_ratio=ratio
+            msgs, budget_tokens, keep_min_messages, target_ratio=ratio, meter=meter
         )
         if not dropped:
             # 无可折叠（keep_min 下限本身超预算等物理无解）：返回保留态的
             # 尽力结果（零折叠、带说明性摘要行），不静默丢弃折叠机会
-            if best is None and estimate_window_tokens(msgs) > budget_tokens:
+            if best is None and meter.total(msgs) > budget_tokens:
                 best = WindowCompaction(
                     window=list(msgs),
                     summary=None,
                     compacted_count=0,
-                    tokens_before=estimate_window_tokens(msgs),
-                    tokens_after=estimate_window_tokens(msgs),
+                    tokens_before=meter.total(msgs),
+                    tokens_after=meter.total(msgs),
                 )
             break
 
@@ -159,8 +224,8 @@ async def compact_window(
             window=window,
             summary=round_summary,
             compacted_count=len(dropped),
-            tokens_before=estimate_window_tokens(msgs),
-            tokens_after=estimate_window_tokens(window),
+            tokens_before=meter.total(msgs),
+            tokens_after=meter.total(window),
             summary_is_fresh=bool(round_summary)
             and (not previous_summary or round_summary != previous_summary),
         )
