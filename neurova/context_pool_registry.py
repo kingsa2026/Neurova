@@ -52,7 +52,7 @@ class ContextPoolRegistry:
 
         同三元组重复调用返回同一实例(缓存), 不同 session 隔离。
         """
-        key = (user_id, agent_id, session_id)
+        key = self._identityKey(user_id, agent_id, session_id)
         with self._lock:
             if key in self._pools:
                 return self._pools[key]
@@ -145,9 +145,40 @@ class ContextPoolRegistry:
 
         return all_results
 
+    @staticmethod
+    def _identityKey(user_id: str, agent_id: str, session_id: Optional[str]) -> tuple:
+        """身份键归一：session_id 的 None 与 "" 是同一个归属。
+
+        不归一就会出现"Agent 用 None 登记、调用方用 '' 查询"这类查不到的
+        静默失配——池明明活着，取池却返回 None。
+        """
+        return (str(user_id or ""), str(agent_id or ""), str(session_id or ""))
+
+    def adopt(self, pool) -> None:
+        """登记一个**已存在**的池实例（写侧接线）。
+
+        与 `get_or_create` 的分工：那里是"没有就造一个"（注册表自持生命周期），
+        这里是"Agent 已经造好了，登记进来让按身份的读侧取得到"。生产对话链的
+        池由 ContextOrchestrator 构造，只有登记进来，端点/工作流节点才能取到
+        **同一个**池（而不是各造一个、写入即丢）。
+        """
+        key = self._identityKey(pool.user_id, pool.agent_id, getattr(pool, "session_id", None))
+        with self._lock:
+            self._pools[key] = pool
+
+    def get_pool(self, user_id: str, agent_id: str, session_id: Optional[str] = None):
+        """按身份取**已登记**的池（无则 None）。
+
+        刻意不建池：取池路径一旦能隐式造池，"取到了但那是新池"就无从分辨，
+        调用方会把空池当成真池用（P2-3 的形态）。
+        """
+        key = self._identityKey(user_id, agent_id, session_id)
+        with self._lock:
+            return self._pools.get(key)
+
     def _has_session_locked(self, user_id: str, agent_id: str, session_id: str) -> bool:
         """调用方必须已持锁"""
-        return (user_id, agent_id, session_id) in self._pools
+        return self._identityKey(user_id, agent_id, session_id) in self._pools
 
     def list_sessions(self, user_id: str, agent_id: str) -> List[str]:
         """返回该 (user, agent) 下的所有 session_id"""
@@ -156,12 +187,11 @@ class ContextPoolRegistry:
 
     def _list_sessions_locked(self, user_id: str, agent_id: str) -> List[str]:
         """内部辅助: 调用方必须已持锁"""
-        prefix = (user_id, agent_id)
-        return [sid for (u, a, sid) in self._pools.keys() if u == user_id and a == agent_id]
+        return [sid for (u, a, sid) in self._pools.keys() if u == str(user_id or "") and a == str(agent_id or "")]
 
     def clear_session(self, user_id: str, agent_id: str, session_id: str) -> bool:
         """清除指定 session 的 pool 缓存(返回是否成功移除)"""
-        key = (user_id, agent_id, session_id)
+        key = self._identityKey(user_id, agent_id, session_id)
         with self._lock:
             if key in self._pools:
                 del self._pools[key]
