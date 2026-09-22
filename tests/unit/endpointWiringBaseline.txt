@@ -1,41 +1,65 @@
-# 未挂载端点模块台账（Issue #112 后续·接线断点）· 只降不升
+# 未挂载端点模块**处置台账**（Issue #68）· 只降不升
+#
+# 行格式：`模块短名 | 处置 | 依据`
 #
 # 收录口径：模块定义了路由（`@router.<verb>`），但装配后的应用里一条都不可达
 # ——是「有实现却无挂载点」，不是「挂了零条路由」（后者由 mountedRouterAudit 拦下）。
 # 判据单源在 scripts/generate_api_inventory.py 的 unmountedEndpointModules()；
 # 守卫 tests/unit/api/test_route_mount_contract_guard.py 双向钉住（新增即红、
-# 修好后未下调亦红）。登记不代替修复——但也不许把已知项假装不存在。
+# 处置与磁盘事实不符亦红）。
 #
-# 逐条处置理由（不许静默）：
+# 处置是**有限枚举**，机器可判定（WIRING_VERDICTS）：
+#   已接线 ― 该模块现在真在装配后的路由表里；
+#   已删除 ― 该模块已不存在（消失的写法只有一种：真的删掉，不是「不注册」）；
+#   待实现 ― 保留待接线，必须写明依据（不得留空）。
 #
-# computer_api ― /computers/* 计算节点管理面。唯一调用方是
-#   `NeurUI/src/api/computer.ts`，而它只被 `NeurUI/src/views/*.tsx` 这三份
-#   React 原型文件引用；Vue 应用入口 `src/main.ts` 从不加载 views/*.tsx
-#   （package.json 无 react 依赖，见 architecture-findings 第 12 节 u5）。
-#   不挂载的另一半理由是**鉴权是假的**：8 处 `Depends(lambda: "current_user")`
-#   硬编码身份，挂上去等于把计算节点数据对匿名请求开放。故先修身份再谈接线。
-computer_api
-# cost_api ― /cost/* 成本查询面（agent/company 汇总、leaderboard、calculate、
-#   rollup/hourly、dashboard/realtime）。唯一调用方同上（api/computer.ts）。
-#   现行成本看板走的是 `modules/cost.ts` → /api/v1/cost-rollup/*、/api/v1/budgets/*
-#   （本轮已归位），与此模块无交集；挂上去只是并行第二份成本读面。
-cost_api
-# phase3_api ― /phase3/* 智能路由/outbox/告警面，全仓零调用方（含前端与 Harmony）。
-#   它依赖的 `small_brain_router` / `outbox_handler` 在生产链路里**另有主线消费方**
-#   （`agent/model_selector.py`、`agent/turn_coordinator.py`），故本模块是
-#   「实现有主、端点无客」——保留待接线，不制造无消费者的路由面。
-phase3_api
-# migration_api ― /migrations/* 零停机迁移面，全仓零调用方。且底层
+# 逐条处置（本轮收口，2026-09-22）：
+#
+# computer_api | 已接线 | /computers/* 计算节点管理面。此前未挂载的**根因是身份是假的**
+#   ——8 处 `Depends(lambda: "current_user")` 硬编码身份，挂上去等于把计算节点数据
+#   对匿名请求开放；且唯一消费方 `NeurUI/src/api/computer.ts` 走裸 axios 绕开唯一
+#   实例（无 token、无信封解包），指向未挂载的 `/api/computers`。两处同批收口：
+#   身份改真实 JWT `get_current_user`（admin 面另加角色闸），前端回归 `@/api`
+#   唯一实例并按 `/api/v1` 请求。挂载点 `/api/v1/computers`。
+# computer_api
+#
+# cost_api | 已删除 | `/cost/*` 成本查询面。挂上去只是**并行第二份成本读面**：
+#   现行成本看板走 `modules/cost.ts` → `/api/v1/cost-rollup/*` + `/api/v1/budgets/*`
+#   （Issue #121 已归位、实测可达），与本模块的 `/cost/agent|company/*`、`/cost/calculate`
+#   逐条重叠而口径不同。唯一调用方是与 computer_api 同一份 React 原型。
+#   教义第 6 条：同域两名并行读面是待收口项，不是待接线项。
+# cost_api
+#
+# migration_api | 已删除 | `/migrations/*` 零调用方，且底层
 #   `neurova/storage/zero_downtime_migration.py` 的 7 阶段实现**全是 pass**
 #   （`_enable_dual_write` / `_insert_into_new_schema` / `_switch_readers` /
-#   `_schedule_cleanup`），`verify_migration()` 恒返回 True。
-#   挂上去等于对外提供一圈恒真的迁移接口——按修复教义第 2 条属「以假形态
-#   冒充能力」，故先在台账点名，待实现真身再接线。
-migration_api
-# skill_market ― ADR 0013「统一技能市场端点（4 套→1 套）」第 2 条判定的待删套
-#   之一（stub 实现，模块自带 `_DEPRECATED`）。规范端点为 skill_pool_api.py。
-#   当前状态是「已废弃且不注册」，属 ADR 已裁定路径上的在途债，登记待删。
-skill_market
-# skills_market ― 同 ADR 0013 第 2 条的另一待删套（demo 数据实现，自带
-#   `_DEPRECATED`）。与 skill_market 同因，登记待删。
-skills_market
+#   `_schedule_cleanup`），`rollback_migration` 恒 False、`verify_migration` 恒 True。
+#   挂上去等于对外提供一圈**恒真的迁移接口**——按修复教义第 2 条属「以假形态冒充
+#   能力」。端点面与那个桩实现同批删除：诚实的形态是能力不存在，而不是提供假接口。
+#   真实 schema 演进的唯一入口是 `neurova/core/db_migration.py`（PRAGMA user_version
+#   注册表，已有 6 个消费域）。
+# migration_api
+#
+# phase3_api | 已接线 | `/phase3/*` 小脑路由 / outbox / 成本告警的运维面。
+#   它依赖的三类运行态在生产链路**另有主线消费方**
+#   （`agent/model_selector.py`、`agent/turn_coordinator.py`），故属「实现有主、
+#   端点无客」。此前该面**零挂载且零鉴权**：挂上去即匿名可改全局运行态。
+#   本批补身份闸口（`APIRouter(dependencies=[Depends(get_current_user)])`），
+#   破坏性动作（`/reset`、`/cleanup-old-events`）另加管理员闸后接线。
+#   挂载点 `/api/v1/phase3`。
+# phase3_api
+#
+# skill_market | 已删除 | ADR 0013 第 2 条判定的待删套（stub 实现，模块自带
+#   `_DEPRECATED`）。规范端点为 `skill_pool_api.py`（`/api/v1/skill-pool`）。
+#   该 ADR 的决策是「删除 A/B/C」，此前长期停在「已废弃且不注册」——本批执行裁定。
+# skill_market
+#
+# skills_market | 已删除 | 同 ADR 0013 第 2 条的另一待删套（demo 数据实现，
+#   自带 `_DEPRECATED`）。与 skill_market 同因、同批执行。
+# skills_market
+computer_api | 已接线 | 身份改真实 JWT 后接入注册表（/api/v1/computers）；前端 computer.ts 回归唯一 axios 实例
+cost_api | 已删除 | 与 /api/v1/cost-rollup + /api/v1/budgets 并行第二份成本读面，按教义第 6 条收口为一份
+migration_api | 已删除 | 底层桩实现四阶段全 pass、verify 恒真；对外提供恒真迁移接口属以假形态冒充能力，端点面同批删除
+phase3_api | 已接线 | 补真实身份闸口（破坏性动作另加管理员闸）后接入注册表（/api/v1/phase3）
+skill_market | 已删除 | ADR 0013 第 2 条判定的待删套（stub），规范端点为 skill_pool_api.py
+skills_market | 已删除 | ADR 0013 第 2 条判定的待删套（demo 数据），与 skill_market 同批执行
