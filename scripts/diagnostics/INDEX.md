@@ -15,6 +15,18 @@
 | `_agent_probe.py` | 拉起后端(9527)并探测 agents 路由 | `python scripts/diagnostics/_agent_probe.py` | 启动临时 uvicorn 线程 |
 | `_trace_stack.py` | 最小 Agent 初始化 + 一次 chat，用于堆栈定位 | `python scripts/diagnostics/_trace_stack.py` | 创建 `./_smoke_workspace` |
 | `_run_backend.py` | 仅启动本地后端(9527)，供手工调试单独拉起服务 | `python scripts/diagnostics/_run_backend.py` | 占用 9527 端口 |
+| `_tool_experience_loop_probe.py` | 工具↔经验↔再调用环路只读取证：一轮之后输出三读数 + 票据 `lookup`/`ticket_reason` 的 JSON（不触网，库落临时目录） | `python scripts/diagnostics/_tool_experience_loop_probe.py [--json] [--workspace DIR]` | 在临时目录建 EKB 库与 agent 工作区 |
+
+### 数据迁移 / 复算（one-off + 可重复读数）
+
+| 脚本 | 用途 | 运行方式 | 副作用 |
+|------|------|----------|--------|
+| `muscle_memory_rearchive.py` | 肌肉记忆脏条目作废重攒：原文件归档到仓内 `docs/05-reports/muscle-memory-ledger/` 后清空待重攒（**不删除**，可回退） | `python scripts/diagnostics/muscle_memory_rearchive.py [文件 ...]` | 改写 `agent_workspaces/*/memory/muscle_memory/muscle_l*.json` |
+| `skill_name_collisions.py` | 同名技能覆盖复算：按 manifest 数「同 name 不同身份的额外条目数」 | `python scripts/diagnostics/skill_name_collisions.py [manifest.json ...]` | 只读 |
+| `muscle_memory_threshold_attainability.py` | 肌肉记忆阈值可达性重算：0.85（装配起点）与 0.8（RSI setpoint）在新指纹分布下的触发率与梯度带规模 | `python scripts/diagnostics/muscle_memory_threshold_attainability.py [--json]` | 只读（临时目录建库） |
+| `_live_verify_growth_split.py` | 知识增长分槽 live-verify 复现（上下文三链路批） | `python scripts/diagnostics/_live_verify_growth_split.py` | 只读 / 临时库 |
+| `_live_verify_knowledge_split.py` | 知识分槽 live-verify 复现（上下文三链路批） | `python scripts/diagnostics/_live_verify_knowledge_split.py` | 只读 / 临时库 |
+| `_kb_backfill_rerun.py` | 知识库回填重跑（抽取产物入库） | `python scripts/diagnostics/_kb_backfill_rerun.py` | 写目标库（按参数） |
 
 ## 二、检查脚本（checks）
 
