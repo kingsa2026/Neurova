@@ -179,6 +179,9 @@ tests/unit/test_pytest_runner_guards.py
 tests/unit/knowledge/test_segment_visibility_honesty.py
 # Issue #75：断言校验闭环（unverified → verified/failed 回写 + 三态读数进巡检）
 tests/unit/knowledge/test_assertion_verification_loop.py
+# Issue #75：闭环长在唯一咽喉上（六条真实写入链各自写完即裁决回写，回执带本笔读数；
+# 推导的来路自陈 derive 而不是落进兜底「直写」）
+tests/unit/knowledge/test_write_boundary_closes_verification.py
 # Issue #75：有效期窗口真落库且真咬合（validFrom/validUntil 断点）
 tests/unit/knowledge/test_validity_window_segment.py
 # Issue #75：底座两条读面的 agent 域装配（跨 agent 锚点读口）
