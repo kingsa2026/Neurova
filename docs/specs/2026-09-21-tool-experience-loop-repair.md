@@ -388,6 +388,7 @@ live-verify（真 Agent + 真 ToolExecutor + 真 SkillService）：端点经咽�
   「同名冲突 = 8」的生产态真值仍待在有生产库的机器上跑
   `python scripts/diagnostics/skill_name_collisions.py` 复核；计数**口径**已可复算（= 7）。
 - **008 浏览器级 live** 与 **011 三件套**：沿用第二轮登记，均属需人配合或本仓无既有落点的动作。
+  两项已在第六轮由用户裁定「按现状承接」，退出未闭环清单，见 §10 与票集索引的「用户裁定」节。
 - **来源审计文档**（工具↔经验环路的深度审计）：其正文只存在于 Issue #80 附件，
   仓内从未有过；005 票面要求的「回审计文档 §2 新开登记项」因此无法就地兑现，
   已改由 `入口迁移台账.md` 承接并在该文件「登记」节写明。
@@ -445,3 +446,74 @@ live-verify（真 Agent + 真 ToolExecutor + 真 SkillService）：端点经咽�
 序列分虚高、`voice_memory_bridge` 硬编码 success、`neurflow/builtin.py` 吃模型自报），
 以 §5 为准，不在本轮回填第二份。
 
+
+## 10. 第六轮：用户裁定入库（008 / 011 两项「按现状承接」）
+
+第五轮末本批剩四项「实现方无法单方面闭环」的事项。其中两项需要用户裁决：**008 的
+浏览器级 live** 与 **011 的设计契约三件套**。用户在 Issue #80 裁定：
+
+> 第 2、3 项「按现状承接」。
+
+### 10.1 本轮断点：裁定落在评论里，读者在仓内看不到
+
+裁定之前，这两项在各处都写作「未闭环（诚实登记）」。裁定之后若不同步，读者在票面
+看到的仍是这四个字——**「已裁定、不必再做」与「没人做、待办挂着」在仓内分不开**。
+与第四轮（有索引、无判据）、第五轮（有票面、无批次判据）是同一形态：写入→读取的环
+断在**读者**这一环，只是这次断的是「裁决结果」这一类事实。
+
+裁定本体无法从代码反推，也无既有落点可承载（它既不是票面判据，也不是规格正文），
+故按「单一事实源」在票集索引新开一节；不另建裁定文书、不在规格里复写第二份。
+
+### 10.2 收口
+
+- 票集索引新增 `## 用户裁定（按现状承接）`：裁定原文引用、两项的覆盖范围与等价覆盖方式、
+  以及**未闭环清单里哪两项不适用本裁定**（006 生产库真值、来源审计文档入库，属「缺输入」
+  而非「按现状收」）。
+- 008 与 011 两份票面的「未闭环」段末尾各补一句回指：写明已裁定、退出未闭环清单，
+  并指向索引那一节——票面是读者的第一站，环必须在那里闭上。
+- 守卫 `tests/unit/test_tool_loop_ticket_set_guard.py` 增第 6 组判据
+  `TestUserRulingIsReadableInRepo`（4 条判据 + 1 条反向控制）：裁定节必须存在、
+  必须点名结论与覆盖项、必须交代「退出未闭环清单」并指向本节、被覆盖票面必须回指。
+
+### 10.3 红→绿实测
+
+- 红灯（收口前，4 failed）：
+  `test_rulingSectionExists` / `test_rulingNamesTheCoveredItems` /
+  `test_rulingSaysTheseAreNoLongerOpenItems` / `test_coveredTicketsPointAtTheRuling`
+  （点名 `008-…md` 与 `011-…md` 两份票面未回指）。
+- 绿灯（收口后）：`tests/unit/test_tool_loop_ticket_set_guard.py` **26 passed**。
+- 反向控制 `test_rulingCriterionIsNotVacuous` 喂合成输入，不拿仓库现状当输入：
+  节缺失、结论写错、覆盖项说不全三种形态各判一次。
+- 过程读数（既有判据当场生效）：索引里写下 `§10` 而规格尚无该节时，
+  `test_crossDocRefsIntoTheSpecResolve` 立即报红点名 `000-索引.md:315 §10`
+  ——本轮新增的跨文档引用被既有的章节号判据接住了。
+
+### 10.4 与本轮同批的 CI 红：受保护子集的 `sh` 依赖
+
+本 PR 首次推送时 `unit-tests-py311/py312` 双跑红，唯一失败项与文档改动无关：
+
+```
+FAILED tests/unit/test_dev_path_and_runtime_dep_guards.py::TestProtectedGuardsUseNoExternalBinaries::test_no_bare_external_command_in_subprocess
+  tests/unit/ci/test_npc_script_interpreter_reachability.py:362: 直接执行外部命令 'sh'
+1 failed, 2368 passed, 12 skipped
+```
+
+红点在上一提交（`7b2c9c84`，PR #155）新入受保护子集的
+`test_node_call_form_reaches_the_same_reading`：它为复现平台调用形态写下字面量
+`subprocess.run(["sh", "-c", ...])`，而 `sh` 不在白名单里。`sh` 缺席时不是断言失败
+而是 `FileNotFoundError`，整个文件（含同文件其余 9 条判据）**静默不跑** —— 正是该
+守卫存在的理由。
+
+根因两层，已由同一分支上的后续提交一次修掉（`e8d62417`）：
+
+1. 直接原因：`sh` 在使用点先证后用（`shutil.which("sh")` 缺席即显式 skip 并点名原因），
+   再把 `sh` / `-c` / 桥命令原样交给 `subprocess`——调用形态与平台一致，判据未降级。
+2. 更高一层：白名单的**语义没有判据守着**。原注释写着「仅当前环境断言存在的外部命令
+   （用 `shutil.which` 跳过）」，但 `git` 的四个使用点从不自证可达，白名单于是成了
+   「把已知坏味道挪进去」的通道，换基础镜像即复发。故补
+   `test_allowed_binaries_are_proven_reachable_at_every_call_site`：白名单里的每个命令
+   都必须在每个使用点自证可达（AST 口径）+ 一条反向控制，同批补齐 `git` 的四个使用点。
+
+处置依据与该提交的红→绿实测以其提交说明为准，本节不复制第二份。此处记录它的理由只有一个：
+它与本轮的文档改动同处一条 PR、同一个 `unit-tests-*` 门禁，读者复核「这一批为什么红过」
+时必须能在一个地方看到因与果——不因分属「CI」与「文档」而拆到两处。
