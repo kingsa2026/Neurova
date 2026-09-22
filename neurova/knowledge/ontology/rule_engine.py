@@ -393,6 +393,11 @@ class ForwardChainingEngine:
                 assertions=[{"actorType": "pipeline", "actorId": "rule:%s" % rule["rule_id"],
                              "mediumRef": "rule:%s" % rule["rule_id"],
                              "statementText": content}],
+                # 来路由推导器自陈：不声明就落进咽喉的兜底「直写」，溯源账上读起来
+                # 像"有人直插了一条"，而 `ACTIVITY_KINDS` 里的 `derive` 从无使用者。
+                activityKind="derive",
+                activityBasis="ForwardChainingEngine._admitDerivedFact（规则 %s 推导）"
+                              % rule["rule_id"],
             ))
         except ValueError:
             return None            # 本体/基数拒绝推导结果：与原始写入同一口径，不开例外

@@ -20,7 +20,6 @@ from neurova.core.content_identity import normalized_key
 from neurova.core.logger import get_logger
 
 from .admission import AdmissionRequest, productionAdmissionGate
-from .digest_chain import ActivityDigestChain
 from .reconcile import _assertionFor
 
 logger = get_logger(__name__)
@@ -45,7 +44,6 @@ class EntryLedger:
     def syncFromEntries(self, itemsByAgent: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Any]:
         """把治理层对齐到条目集合。返回本轮动作与每条目的当前置信度。"""
         claims: set = set()
-        activityIds: List[str] = []
         confidences: Dict[str, Optional[float]] = {}
         mediums: Dict[str, str] = {}
         admitted = 0
@@ -77,33 +75,15 @@ class EntryLedger:
                 # 条目被恢复时，admit 会按内容键折叠回那条 retracted 行——认领它就得让它
                 # 重新生效，否则条目活着而治理行是收回状态，投影永远不收敛。
                 self._store.reviveRetracted(receipt.factId, reason="条目恢复，重新主张同一说法")
-                if receipt.activityId:
-                    activityIds.append(receipt.activityId)
                 claims.add(receipt.factId)
                 confidences[kid] = self._confidenceOf(receipt.factId)
                 mediums[kid] = self._mediumOf(receipt.factId)
 
         retracted = self._retractUnclaimed(claims)
-        # 投影完就校验：这一列写完是 `unverified`，校验结论必须回写，否则
-        # 读面拿到的永远是"没人验过"（2026-09-21 审计：生产 92/92 恒 unverified）。
-        attestation = self.attest(activityIds)
+        # 校验不在这里补：结论由唯一咽喉 `admit()` 逐笔收口（`closeWrite`），
+        # 投影只需把置信度与来源读回去。此处再验一遍就是第二份闭环实现。
         return {"admitted": admitted, "retracted": retracted,
-                "confidences": confidences, "mediums": mediums,
-                "attestation": attestation}
-
-    def attest(self, activityIds: Iterable[str]) -> Dict[str, Any]:
-        """对本轮落账的活动逐条裁决并回写 `verification_state`。
-
-        只校验这一轮碰过的活动，不做全库扫描：校验是写入的收尾动作，
-        把它挂成全库巡检就等于每次写一条条目都重扫一遍账本。
-        """
-        chain = ActivityDigestChain(self._store)
-        graded = failed = 0
-        for activityId in sorted({str(a) for a in activityIds if a}):
-            report = chain.attest(activityId)
-            graded += report["graded"]
-            failed += report["failed"]
-        return {"graded": graded, "failed": failed}
+                "confidences": confidences, "mediums": mediums}
 
     def verifyProjection(self, itemsByAgent: Dict[str, List[Dict[str, Any]]]) -> List[str]:
         """条目在、治理行不在 ⇒ 分叉清单。只报不改——补投的语义还没定（见工单注记）。"""
