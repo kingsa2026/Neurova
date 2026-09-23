@@ -6,7 +6,7 @@
 2. ContextInput 数据类
 3. ContextCollector 收集器
 4. ContextConverter 转换器
-5. ContextCompressor 压缩器
+5. 视图层预算选取（draw）
 6. ContextPool 上下文池
 """
 
@@ -17,7 +17,6 @@ from neurova.context_pool import (
     ContextInput,
     ContextCollector,
     ContextConverter,
-    ContextCompressor,
     ContextPool,
 )
 
@@ -276,58 +275,53 @@ class TestContextConverter:
         assert isinstance(anthropic_msg["content"], list)
 
 
-class TestContextCompressor:
-    """ContextCompressor 压缩器测试"""
-    
-    def test_creation(self):
-        """测试创建 ContextCompressor"""
-        compressor = ContextCompressor(max_tokens=1000)
-        assert compressor.max_tokens == 1000
-    
-    def test_compress_by_truncation(self):
-        """测试截断压缩"""
-        compressor = ContextCompressor(max_tokens=100)
-        
-        contexts = [
-            ContextInput(source=ContextSource.MEMORY, content="记忆" * 50, priority=80),
-            ContextInput(source=ContextSource.CONVERSATION, content="对话" * 50, priority=50),
-            ContextInput(source=ContextSource.USER_INPUT, content="用户输入", priority=50),
-        ]
-        
-        compressed = compressor.compress(contexts)
-        
-        # 应该压缩到预算内
-        total_tokens = sum(len(ctx.content) for ctx in compressed)
-        assert total_tokens <= 100
-    
-    def test_compress_by_priority(self):
-        """测试优先级压缩"""
-        compressor = ContextCompressor(max_tokens=100)
-        
-        contexts = [
-            ContextInput(source=ContextSource.MEMORY, content="重要记忆" * 20, priority=100),
-            ContextInput(source=ContextSource.CONVERSATION, content="普通对话" * 20, priority=50),
-            ContextInput(source=ContextSource.USER_INPUT, content="用户输入", priority=50),
-        ]
-        
-        compressed = compressor.compress(contexts)
-        
-        # 应该保留高优先级内容
-        assert any(ctx.priority == 100 for ctx in compressed)
-    
-    def test_compress_with_summarization(self):
-        """测试摘要压缩"""
-        compressor = ContextCompressor(max_tokens=50, enable_summarization=True)
-        
-        contexts = [
-            ContextInput(source=ContextSource.CONVERSATION, content="很长的对话内容" * 10, priority=50),
-        ]
-        
-        compressed = compressor.compress(contexts)
-        
-        # 应该生成摘要
-        assert len(compressed) == 1
-        assert "摘要" in compressed[0].content or len(compressed[0].content) < len(contexts[0].content)
+class TestViewLayerBudgetSelection:
+    """按预算取用是**视图层**（draw）职责，不是归档层。
+
+    B6-10 批次 C：原 `TestContextCompressor` 锁 `ContextCompressor` 的按预算
+    裁剪，而该类整模块退役（同契约第二份实现，唯一消费点
+    `ContextPool.compress_context` 零消费）。契约搬到真面——视图层选取：
+    预算内整条取用 + 高优先级先中选 + 归档不被改动。
+    """
+
+    def test_draw_respects_budget(self):
+        pool = ContextPool(user_id="test_user", agent_id="test_agent")
+        for source, content, priority in (
+            (ContextSource.MEMORY, "记忆" * 50, 80),
+            (ContextSource.CONVERSATION, "对话" * 50, 50),
+            (ContextSource.USER_INPUT, "用户输入", 50),
+        ):
+            pool.add_context(ContextInput(source=source, content=content, priority=priority))
+
+        drawn = pool.draw(budget_tokens=100)
+        assert sum(ctx.tokens for ctx in drawn) <= 100
+
+    def test_high_priority_selected_first(self):
+        pool = ContextPool(user_id="test_user", agent_id="test_agent")
+        for source, content, priority in (
+            (ContextSource.MEMORY, "重要记忆" * 20, 100),
+            (ContextSource.CONVERSATION, "普通对话" * 20, 50),
+            (ContextSource.USER_INPUT, "用户输入", 50),
+        ):
+            pool.add_context(ContextInput(source=source, content=content, priority=priority))
+
+        drawn = pool.draw(budget_tokens=100)
+        assert any(ctx.priority == 100 for ctx in drawn), (
+            "预算紧张时高优先级条目必须先被选中"
+        )
+
+    def test_draw_never_mutates_archive(self):
+        pool = ContextPool(user_id="test_user", agent_id="test_agent")
+        pool.add_context(ContextInput(
+            source=ContextSource.CONVERSATION,
+            content="很长的对话内容" * 10,
+            priority=50,
+        ))
+        before = [c.content for c in pool.get_contexts()]
+        pool.draw(budget_tokens=50)
+        assert [c.content for c in pool.get_contexts()] == before, (
+            "视图层取用不得改动归档（无损归档语义）"
+        )
 
 
 class TestContextPool:
@@ -395,28 +389,32 @@ class TestContextPool:
         assert len(messages) == 1
         assert isinstance(messages[0]["content"], list)
     
-    def test_compress_context(self):
-        """测试压缩上下文"""
+    def test_archive_not_trimmed_by_budget(self):
+        """超预算不裁剪归档：池是无损归档，预算只作用于视图层取用。
+
+        B6-10 批次 C：原用例调用 `pool.compress_context()` 把归档裁到预算内——
+        那个出口零消费，且与"池是永久归档、永不丢失"的类契约**相反**
+        （见 ADR-0015 的回收契约）。压缩真通路在 orchestrator 的
+        信封+历史确定性淘汰（判据：test_envelope.py）。此处改锁归档无损。
+        """
         pool = ContextPool(user_id="test_user", agent_id="test_agent", max_tokens=100)
-        
-        # 添加超过预算的上下文
+
         pool.add_context(ContextInput(
             source=ContextSource.CONVERSATION,
             content="很长的对话" * 50,
             priority=50
         ))
-        
+
         pool.add_context(ContextInput(
             source=ContextSource.USER_INPUT,
             content="用户输入",
             priority=50
         ))
-        
-        # 压缩上下文
-        pool.compress_context()
-        
+
         contexts = pool.get_contexts()
-        total_tokens = sum(ctx.tokens for ctx in contexts)
-        assert total_tokens <= 100
+        assert len(contexts) == 2, "归档层不得按预算裁剪（永不丢失是硬约束）"
+        # 视图层才按预算整条取用
+        drawn = pool.draw(budget_tokens=100)
+        assert sum(c.tokens for c in drawn) <= 100
 
 
