@@ -133,7 +133,7 @@ class TestResidentLimitContract:
         assert {c.content for c in pool.get_contexts()} == {f"m{i}" for i in range(7, 12)}
 
     def test_indexes_stay_consistent_after_recycling(self):
-        """回收后 hash/turn/read 三索引须与常驻列表一致（否则后续 add/query 走偏）。"""
+        """回收后 hash/read 两索引须与常驻列表一致（否则后续 add/query 走偏）。"""
         ledger = _FakeLedgerDB()
         pool = _pool(resident_limit=5, ledger_db=ledger)
         for i in range(12):
@@ -145,11 +145,13 @@ class TestResidentLimitContract:
                 )
             )
         assert len(pool._by_hash) == 5
-        assert set(pool._by_turn) == {f"t{i}" for i in range(7, 12)}
         assert pool.get_retention_stats()["read_index"]["indexed_entries"] == 5
-        # 回收掉的条目不得再被 ack 标记
-        assert pool.mark_turn_seen("t0") == 0
-        assert pool.mark_turn_seen("t11") == 1
+        # 回收掉的条目不得再被 ack 标记（turn 索引已随 mark_turn_seen 一并退役，
+        # 判据收敛到存活的 hash 通路）
+        recycled = {c.hash for c in pool._collector._contexts if c.content == "m6"}
+        resident = {c.hash for c in pool._collector._contexts if c.content == "m11"}
+        assert pool.mark_hashes_seen(recycled) == 0
+        assert pool.mark_hashes_seen(resident) == 1
 
     def test_query_does_not_see_recycled_entries(self):
         ledger = _FakeLedgerDB()

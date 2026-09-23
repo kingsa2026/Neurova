@@ -1,5 +1,13 @@
 # 上下文缓存与压缩系统使用说明
 
+> **退役说明（B6-10 / Issue #90 审计 §5）**：本文第 4 节与下方示例围绕
+> `neurova/enhanced_context_builder.py` 的 `EnhancedContextBuilder` 展开，
+> 而该类**已从生产侧删除**（零生产消费方）。上下文装配的真面是
+> [`context/orchestrator.py`](../../neurova/context/orchestrator.py) 的
+> `ContextOrchestrator`（`build_context` / `build_system_prompt`），缓存与压缩
+> 分别落在 `context_cache.py`、`context_compressor.py`。本文余下内容是**历史形态**，
+> 保留以解释缓存/压缩的设计取舍，**不得据此重新加回** `EnhancedContextBuilder`。
+
 ## 核心特性
 
 ### 1. 智能上下文缓存 (`context_cache.py`)
@@ -19,9 +27,9 @@
 - **批量提交**: 定期刷新到存储
 - **温度衰减**: 定期执行记忆温度更新
 
-### 4. 增强版上下文构建器 (`enhanced_context_builder.py`)
-- 整合缓存、压缩和记忆管理
-- 统一的上下文构建接口
+### 4. ~~增强版上下文构建器~~ (`enhanced_context_builder.py`，已退役)
+- 该类已删除：装配职责由 `context/orchestrator.py` 的 `ContextOrchestrator` 承担
+- 历史设计意图：整合缓存、压缩和记忆管理
 
 ## 快速开始
 
@@ -184,6 +192,6 @@ python tests/test_context_cache_compression.py
 | `neurova/context_cache.py` | 上下文缓存管理器 |
 | `neurova/context_compressor.py` | 智能上下文压缩器 |
 | `neurova/memory_rw_manager.py` | 记忆读写管理器 |
-| `neurova/enhanced_context_builder.py` | 增强版上下文构建器 |
+| ~~`neurova/enhanced_context_builder.py`~~ | 已退役（B6-10）：装配真面为 `neurova/context/orchestrator.py` |
 | `neurova/context_persistence.py` | 上下文持久化引擎（已更新） |
 | `tests/test_context_cache_compression.py` | 测试脚本 |

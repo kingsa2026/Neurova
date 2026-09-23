@@ -364,7 +364,7 @@
 | C1 | 上下文缓存管理器 | ✅ 已实现 | `neurova/context_cache.py` | LRU 淘汰/批量写入/会话完整性保护 |
 | C2 | 上下文持久化 | ✅ 已实现 | `neurova/context_persistence.py` | JSON 存储/按 Agent 和 Session 分类 |
 | C3 | 上下文压缩器 | ✅ 已实现 | `neurova/context_compressor.py` | 3 层压缩/去重/摘要生成 |
-| C4 | 增强上下文构建器 | ✅ 已实现 | `neurova/enhanced_context_builder.py` | 记忆注入/情感注入/时间感知 |
+| C4 | 上下文装配（原「增强上下文构建器」） | ✅ 已实现（载体迁移） | `neurova/context/orchestrator.py` | 记忆注入/情感注入/时间感知；旧的 `enhanced_context_builder.py` 已退役（B6-10） |
 | C5 | 上下文缓存测试 | ✅ 已实现 | `tests/test_context_cache_compression.py` | 缓存和压缩集成测试 |
 
 ### 6.3 记忆读写管理 (1/1 已实现)

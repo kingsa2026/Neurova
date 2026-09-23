@@ -1932,7 +1932,6 @@ Neurova
 | **智能上下文缓存** (`context_cache.py`) | 优先读缓存、批量写入、LRU 淘汰、内存限制 |
 | **智能压缩** (`context_compressor.py`) | 会话完整性保护、分层压缩、Token 预算管理 |
 | **记忆读写管理** (`memory_rw_manager.py`) | 缓冲写入、批量提交、温度衰减 |
-| **增强版上下文构建器** (`enhanced_context_builder.py`) | 整合缓存、压缩和记忆管理 |
 
 **压缩策略**：
 
