@@ -65,6 +65,8 @@ class ContextPool:
        显式上报（计数 + 点名原因），不静默。
     3. **TTL**：``ttl_seconds>0`` 时过期条目经 ``cleanup_expired()`` / 查询过滤
        剔除（先归档再剔除）；``0`` = 永不过期（生产 orchestrator 走此档）。
+       回收的**真调用点**是写入咽喉 ``add_context``（B6-10 批次 D）——改前它零
+       生产调用点，读面只做惰性过滤，过期条目仍占常驻、TTL 回收计数恒 0。
     4. **视图预算**：``draw()`` / Drawer 决定"这次取多少"，与常驻规模解耦。
 
     契约可观测：``get_retention_stats()`` + ``/metrics`` 的
@@ -140,6 +142,11 @@ class ContextPool:
         self._ttl_evicted_total = 0
         self._replaced_total = 0
         self.ttl_seconds = ttl_seconds
+        # B6-10 批次 D：常驻条目里**最早的归档时刻**（`created_at` 为 None 者
+        # 不参与）。它是「本轮是否需要回收」的唯一前置判据：最早的那条都没过期，
+        # 其余必然没过期，于是写入路径不必为 TTL 做全表扫描。
+        # 取值只在两处更新：落常驻时下压、回收后按剩余条目重算。
+        self._ttl_floor: Optional[datetime] = None
 
         self._collector = ContextCollector(max_tokens)
         self._converter = ContextConverter()
@@ -227,6 +234,15 @@ class ContextPool:
 
     def add_context(self, context):
         with self._lock:
+            # B6-10 批次 D：TTL 回收挂在**写入咽喉**（每一次落常驻之前）。
+            # 改前 `cleanup_expired` 生产零调用点：读面只做惰性过滤，过期条目
+            # 永远占着常驻列表，`archived_by_reason["ttl"]` 恒 0 —— "TTL 生效"
+            # 在内存规模上是空账。挂在这里而不是读面：所有写入方（含 swarm /
+            # voice / 摘要回写等旁路）都经本方法，单点接线即全覆盖；在读面加判空
+            # 只是把症状挪走（教义第 1 条）。
+            # 代价由 `_reclaimExpiredOnWrite` 的 O(1) 前置判定兜住：常驻条目里
+            # 最早归档时刻都没过期时直接跳过，不做全表扫描。
+            self._reclaimExpiredOnWrite()
             # 根因 A 修复: 自动注入 session_id/agent_id/user_id 到 chunk.metadata
             # (用户显式传入的字段优先,不被覆盖)
             self._inject_isolation_tags(context)
@@ -261,6 +277,7 @@ class ContextPool:
             # Issue #65：max_size 已失效，首次越界告警一次（否则"设了没生效"
             # 只会在压测里被发现）；常驻上限改由显式 resident_limit 承载。
             self._collector.add_context(context)
+            self._noteTtlFloor(getattr(context, "created_at", None))
             if context.hash:
                 self._by_hash[context.hash] = context
             self._read_index.add(context)
@@ -989,8 +1006,57 @@ class ContextPool:
             contexts = self._collector.collect()
             return self._filter_ttl(contexts)
 
+    def _noteTtlFloor(self, created_at) -> None:
+        """登记最早的归档时刻（调用方须持 _lock）。"""
+        if created_at is None:
+            return
+        if self._ttl_floor is None or created_at < self._ttl_floor:
+            self._ttl_floor = created_at
+
+    def _recomputeTtlFloor(self) -> None:
+        """按当前常驻条目重算最早归档时刻（回收之后调用，调用方须持 _lock）。"""
+        floor = None
+        for item in self._collector._contexts:
+            stamp = getattr(item, "created_at", None)
+            if stamp is None:
+                continue
+            if floor is None or stamp < floor:
+                floor = stamp
+        self._ttl_floor = floor
+
+    def _reclaimExpiredOnWrite(self) -> int:
+        """写入路径上的 TTL 回收（调用方须持 _lock）。
+
+        `ttl_seconds<=0`（生产构造档 = 永不丢失）或常驻为空时零开销返回；
+        否则先看最早归档时刻是否已经过期 —— 未过期即**必然**没有过期条目，
+        直接跳过，不做全表扫描。过期才交给 `cleanup_expired()` 全量对账
+        （`created_at` 可被导入/测试显式改成过去时刻，故全量判定不假设插入序）。
+        """
+        if not hasattr(self, "ttl_seconds") or self.ttl_seconds <= 0:
+            return 0
+        floor = self._ttl_floor
+        if floor is None:
+            # 常驻条目是绕过公开 API 直插的（历史/测试写法），最早归档时刻未知：
+            # 不做"必然没有过期条目"的假设，退回全量对账（仅此一次，直插下一次
+            # 公开写入就会把 floor 补上）。空池则零开销返回。
+            if not self._collector._contexts:
+                return 0
+            return self.cleanup_expired()
+        if floor >= datetime.now() - timedelta(seconds=self.ttl_seconds):
+            return 0
+        return self.cleanup_expired()
+
     def cleanup_expired(self) -> int:
-        """清理过期条目，返回移除数量（过期条目归档进驱逐台账）"""
+        """清理过期条目，返回移除数量（过期条目归档进驱逐台账）。
+
+        B6-10 批次 D：本方法的**真调用点**是写入咽喉 ``add_context``（每次落
+        常驻之前先回收，见 ``_reclaimExpiredOnWrite``）；显式调用仍可用，供
+        运维/诊断与"某一刻全量对账"。`ttl_seconds<=0`（生产构造档 = 永不丢失）
+        时立即返回 0。
+
+        注意回收**不等于丢失**：过期条目先经 ``_archive_evicted`` 进驱逐台账
+        （全文早在入池时已写穿持久台账），``recall_evicted()`` 仍可召回。
+        """
         with self._lock:
             if not hasattr(self, "ttl_seconds") or self.ttl_seconds <= 0:
                 return 0
@@ -1000,6 +1066,7 @@ class ContextPool:
             original_count = len(self._collector._contexts)
             self._collector._contexts = valid
             self._rebuild_indexes()
+            self._recomputeTtlFloor()
 
             removed_count = original_count - len(valid)
             for item in removed_items:
@@ -1105,6 +1172,7 @@ class ContextPool:
     def clear(self):
         with self._lock:
             self._collector._contexts.clear()
+            self._ttl_floor = None
             self._by_hash.clear()
             self._read_index.clear()
             self._cache.clear()

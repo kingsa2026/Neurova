@@ -126,7 +126,7 @@ class TestCompactCommand:
 class TestManualCompact:
     """orchestrator.manual_compact 本体：强制折叠 + 摘要落缓存。"""
 
-    def _mk_orchestrator(self):
+    def _mk_orchestrator(self, session_id="sess-mc"):
         from neurova.context.orchestrator import ContextOrchestrator
 
         agent = MagicMock()
@@ -149,7 +149,9 @@ class TestManualCompact:
         # 给可用桥以覆盖「摘要落缓存」的真实契约
         agent.llm_client = MagicMock()
         agent.llm_client.chat = AsyncMock(return_value={"content": "测试摘要：会话讨论了30条长消息。"})
-        orch = ContextOrchestrator(agent, use_pool=True, auto_tag=False)
+        # 会话身份经**构造期初值**给定（B6-10 批次 D：实例级 setter 已删净，
+        # 身份的唯一可变写入点是 `build_context` 每轮刷新）
+        orch = ContextOrchestrator(agent, use_pool=True, auto_tag=False, session_id=session_id)
         # 显式覆盖窗口预算（_resolve_window_token_budget 读取）——保证 61 条
         # 历史必然超限；此前 _force_window_budget 是死属性（从未被读取）
         orch._window_token_budget = 4000
@@ -158,7 +160,6 @@ class TestManualCompact:
     @pytest.mark.asyncio
     async def test_manual_compact_forces_fold_and_caches_summary(self):
         orch = self._mk_orchestrator()
-        orch.set_session_id("sess-mc")
         history = _long_history()
 
         result = await orch.manual_compact(history)
@@ -171,8 +172,7 @@ class TestManualCompact:
 
     @pytest.mark.asyncio
     async def test_manual_compact_noop_under_budget(self):
-        orch = self._mk_orchestrator()
-        orch.set_session_id("sess-mc2")
+        orch = self._mk_orchestrator(session_id="sess-mc2")
         result = await orch.manual_compact(
             [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
         )

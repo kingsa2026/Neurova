@@ -2,7 +2,8 @@
 
 - ContextPool hash 索引：add 去重与 mark_hashes_seen 由全池 O(n) 线性扫
   改为索引直取；整体重排（clear/dedup/compress/cleanup）后索引同步重建。
-- ContextOrchestrator.set_session_id：切换会话时裁剪 _window_compaction_cache
+- ContextOrchestrator 的会话身份：实例级 setter 已删净（B6-10 批次 D），
+  身份只由构造期初值与 `build_context` 每轮刷新写入；折叠缓存由槽位上限收口
   （旧实现按 session_id 记账永不清理，随历史会话数无界增长）。
 
 B6-10：`mark_turn_seen` 与其配套 turn 索引（`_by_turn`）生产零消费，已删净；
@@ -122,13 +123,25 @@ class TestOrchestratorCacheTrim:
         # 最近插入的槽必须在（淘汰的是最老插入的）
         assert f"room{orch._WINDOW_CACHE_SLOTS + 3}" in orch._window_compaction_cache
 
-    def test_set_session_id_only_assigns(self):
-        """set_session_id 只赋值，不再承担缓存治理（D2 职责收口）。"""
+    def test_session_identity_is_read_only(self):
+        """B6-10 批次 D：实例级 setter 已删净，身份读面只读且不改缓存。
+
+        原用例锁的是 `set_session_id` 的"只赋值、不裁剪缓存"语义。该方法是
+        **零生产调用点的第二写入方**（身份的真写入点是 `build_context` 每轮刷新），
+        审计 D2 裁决退役其裁剪职责后它只剩赋值——与每轮刷新重复，故一并删净。
+        契约搬到这里：身份读得到（构造期初值），但**没有写通道**，
+        且读写身份都不触碰折叠缓存。
+        """
         orch = self._make_orch()
         orch._window_compaction_cache = {"s1": {"summary": "keep", "covered": set()}}
-        orch.set_session_id("s9")
-        assert orch._session_id == "s9"
-        assert orch._window_compaction_cache == {"s1": {"summary": "keep", "covered": set()}}
+        assert orch.session_id == "s1", "身份读面丢失（构造期初值应读得到）"
+        assert not hasattr(orch, "set_session_id"), (
+            "`set_session_id` 又回来了 —— 会话身份于是有两个写入方"
+            "（构造期入参 + 每轮刷新）。"
+        )
+        assert orch._window_compaction_cache == {"s1": {"summary": "keep", "covered": set()}}, (
+            "读身份不得改动折叠缓存"
+        )
 
     def test_slot_creation_is_idempotent(self):
         orch = self._make_orch()
