@@ -4,6 +4,9 @@
   改为索引直取；整体重排（clear/dedup/compress/cleanup）后索引同步重建。
 - ContextOrchestrator.set_session_id：切换会话时裁剪 _window_compaction_cache
   （旧实现按 session_id 记账永不清理，随历史会话数无界增长）。
+
+B6-10：`mark_turn_seen` 与其配套 turn 索引（`_by_turn`）生产零消费，已删净；
+本文件的 TestTurnIndex 一并退役（契约搬到了 `test_ack_set.py` 的抽屉分层用例）。
 """
 
 from neurova.context.pool_models import ContextInput, ContextSource
@@ -125,40 +128,3 @@ class TestOrchestratorCacheTrim:
         a["summary"] = "kept"
         b = orch._window_cache_slot("s1")
         assert b is a and b["summary"] == "kept"
-
-
-class TestTurnIndex:
-    """B-8：mark_turn_seen 经 turn 索引 O(k) 直取（旧行为为全池 O(n) 扫）。"""
-
-    def test_mark_turn_seen_via_index_and_idempotent(self):
-        pool = _make_pool()
-        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="q", metadata={"turn_id": "t1"}))
-        pool.add_context(ContextInput(source=ContextSource.CONVERSATION, content="a", metadata={"turn_id": "t1"}))
-        assert pool.mark_turn_seen("t1") == 2
-        assert pool._collector._contexts[0].seen_confirmed is True
-        assert pool.mark_turn_seen("t1") == 0
-
-    def test_turn_index_rebuilt_after_clear(self):
-        pool = _make_pool()
-        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="q", metadata={"turn_id": "t1"}))
-        pool.clear()
-        assert pool.mark_turn_seen("t1") == 0
-        assert pool._by_turn == {}
-
-    def test_replace_updates_turn_index(self):
-        pool = _make_pool()
-        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="low", priority=10, metadata={"turn_id": "t1"}))
-        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="low", priority=99, metadata={"turn_id": "t2"}))
-        # 替换后旧 turn 不再持有该条目、新 turn 持有
-        assert pool.mark_turn_seen("t1") == 0
-        assert pool.mark_turn_seen("t2") == 1
-
-    def test_dedup_rebuild_keeps_turn_index_consistent(self):
-        pool = _make_pool()
-        pool.add_context(ContextInput(source=ContextSource.USER_INPUT, content="a", metadata={"turn_id": "t1"}))
-        pool.add_context(ContextInput(source=ContextSource.CONVERSATION, content="b", metadata={"turn_id": "t1"}))
-        pool.dedup(stage="output")
-        for c in pool._collector._contexts:
-            tid = (c.metadata or {}).get("turn_id")
-            if tid:
-                assert c in pool._by_turn.get(tid, [])
