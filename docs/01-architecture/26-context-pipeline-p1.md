@@ -32,7 +32,8 @@ neurova/
 ├── context_pool_registry.py  # 池注册表
 ├── context_cache.py          # 上下文缓存（LRU）
 ├── context_compressor.py     # 上下文压缩（会话完整性保护）
-└── enhanced_context_builder.py  # 增强上下文构建器
+└── (enhanced_context_builder.py 已于 B6-10 退役：零生产消费方，
+    上下文装配由 orchestrator.py 承担)
 ```
 
 ## 与活水上下文池的关系

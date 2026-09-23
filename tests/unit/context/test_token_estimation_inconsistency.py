@@ -13,15 +13,14 @@ neurova.context.token_estimator 后，三处入口必须给出**完全相同的�
 """
 
 import pytest
-from neurova.context.token_estimator import TokenEstimator
-from neurova.context_pool import ContextPoolUtils
+from neurova.context.token_estimator import TokenEstimator, estimate_tokens
 from neurova.context.compressor import ContextCompressor
 
 
 def _tokens(text: str):
     return (
         TokenEstimator().estimate(text),
-        ContextPoolUtils.estimate_tokens(text),
+        estimate_tokens(text),
         ContextCompressor._estimate_tokens(text),
     )
 

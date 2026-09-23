@@ -19,7 +19,6 @@ from neurova.context_pool import (
     ContextConverter,
     ContextCompressor,
     ContextPool,
-    ContextPoolUtils,
 )
 
 
@@ -396,26 +395,6 @@ class TestContextPool:
         assert len(messages) == 1
         assert isinstance(messages[0]["content"], list)
     
-    def test_convert_context_for_model(self):
-        """测试转换上下文格式"""
-        pool = ContextPool(user_id="test_user", agent_id="test_agent")
-        
-        pool.add_context(ContextInput(
-            source=ContextSource.USER_INPUT,
-            content="你好",
-            priority=50
-        ))
-        
-        # 转换为 OpenAI 格式
-        openai_messages = pool.convert_context_for_model("gpt-4o")
-        assert openai_messages[0]["role"] == "user"
-        assert isinstance(openai_messages[0]["content"], str)
-        
-        # 转换为 Anthropic 格式
-        anthropic_messages = pool.convert_context_for_model("claude-3-opus")
-        assert anthropic_messages[0]["role"] == "user"
-        assert isinstance(anthropic_messages[0]["content"], list)
-    
     def test_compress_context(self):
         """测试压缩上下文"""
         pool = ContextPool(user_id="test_user", agent_id="test_agent", max_tokens=100)
@@ -441,46 +420,3 @@ class TestContextPool:
         assert total_tokens <= 100
 
 
-class TestContextPoolUtils:
-    """ContextPoolUtils 工具函数测试"""
-    
-    def test_estimate_tokens(self):
-        """测试 Token 估算"""
-        # 英文
-        tokens = ContextPoolUtils.estimate_tokens("Hello world")
-        assert tokens > 0
-        
-        # 中文
-        tokens = ContextPoolUtils.estimate_tokens("你好世界")
-        assert tokens > 0
-    
-    def test_merge_contexts(self):
-        """测试合并上下文"""
-        contexts1 = [
-            ContextInput(source=ContextSource.MEMORY, content="记忆1", priority=80),
-            ContextInput(source=ContextSource.MEMORY, content="记忆2", priority=70),
-        ]
-        
-        contexts2 = [
-            ContextInput(source=ContextSource.CONVERSATION, content="对话1", priority=50),
-            ContextInput(source=ContextSource.CONVERSATION, content="对话2", priority=40),
-        ]
-        
-        merged = ContextPoolUtils.merge_contexts(contexts1, contexts2)
-        
-        assert len(merged) == 4
-        # 应该按优先级排序
-        assert merged[0].priority >= merged[1].priority >= merged[2].priority >= merged[3].priority
-    
-    def test_filter_by_source(self):
-        """测试按来源过滤"""
-        contexts = [
-            ContextInput(source=ContextSource.MEMORY, content="记忆", priority=80),
-            ContextInput(source=ContextSource.CONVERSATION, content="对话", priority=50),
-            ContextInput(source=ContextSource.MEMORY, content="记忆2", priority=70),
-        ]
-        
-        filtered = ContextPoolUtils.filter_by_source(contexts, ContextSource.MEMORY)
-        
-        assert len(filtered) == 2
-        assert all(ctx.source == ContextSource.MEMORY for ctx in filtered)

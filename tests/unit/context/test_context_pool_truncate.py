@@ -7,7 +7,8 @@ ContextPool 视图层预算测试
 """
 
 import pytest
-from neurova.context_pool import ContextInput, ContextSource, ContextPool, ContextPoolUtils, SemanticMatchDrawer
+from neurova.context.token_estimator import estimate_tokens
+from neurova.context_pool import ContextInput, ContextSource, ContextPool, SemanticMatchDrawer
 
 
 class TestWholeItemSelection:
@@ -109,7 +110,7 @@ class TestDrawTokenBudgetOverflow:
         result = drawer.draw(drops, "helpful")
         assert isinstance(result, list)
         total = sum(
-            drop.tokens if drop.tokens > 0 else ContextPoolUtils.estimate_tokens(drop.content)
+            drop.tokens if drop.tokens > 0 else estimate_tokens(drop.content)
             for drop in result
         )
         assert total <= 100
