@@ -166,11 +166,15 @@ class TestQuerySemanticEquivalence:
         assert pool.get_retention_stats()["read_index"]["indexed_entries"] == 2
 
     def test_index_rebuilt_after_reordering_paths(self):
-        """clear / dedup / compress / cleanup_expired 后索引须与列表一致。"""
+        """整体重排路径（clear / cleanup_expired）后索引须与列表一致。
+
+        B6-10 批次 C：`dedup` / `compress_context` 两个出口已删净（真面分别是
+        `add_context` 的 _by_hash 去重与 orchestrator 的确定性淘汰），故此处
+        只锁仍然存活的整体重排路径。
+        """
         pool = ContextPool(user_id="u", agent_id="a", session_id="s1")
         for i in range(5):
             pool.add_context(ContextInput(source=ContextSource.MEMORY, content=f"m{i}", priority=i))
-        pool.dedup(stage="output")
         assert pool.get_retention_stats()["read_index"]["indexed_entries"] == len(
             pool._collector._contexts
         )

@@ -124,7 +124,7 @@
 15. `neurova/execution_layers/` (1 个文件)
 16. `neurova/evolution/` (4 个文件)
 17. `neurova/error_logger.py` (1 个文件)
-18. `neurova/context_compressor.py` (1 个文件)
+18. ~~`neurova/context_compressor.py`~~ (1 个文件) —— **已于 B6-10 批次 C 退役**
 19. `neurova/context_cache.py` (1 个文件)
 20. `neurova/agent_config.py` (1 个文件)
 21. `neurova/benchmark/` (1 个文件)

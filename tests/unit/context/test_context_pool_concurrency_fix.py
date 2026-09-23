@@ -3,7 +3,7 @@ P0-1 修复测试：ContextPool 并发安全（C1）
 
 测试目标（来自 fix-all-bugs-plan-v1.md）：
 - RED：10 线程并发调用 add_context 100 次，断言最终长度 == 1000 且无异常
-- 同时验证 cleanup_expired / clear / dedup / build_context_for_model 的并发安全
+- 同时验证 cleanup_expired / clear / build_context_for_model 的并发安全
 
 设计依据：
 - ContextPool 共享状态：_cache / _cache_version / _collector._contexts
@@ -194,8 +194,12 @@ class TestContextPoolConcurrencyFix:
 
         assert errors == [], f"build+add 并发抛异常: {errors}"
 
-    def test_concurrent_dedup_and_add(self):
-        """RED: 并发 dedup 与 add_context 不应数据损坏"""
+    def test_concurrent_clear_and_add(self):
+        """RED: 并发整体重排（clear）与 add_context 不应数据损坏
+
+        B6-10 批次 C：原用例让 `pool.dedup()` 承担"整体重排"的并发压力，而
+        该出口零消费、已删净。仍未闭环的重排路径是 `clear`，并发压力改打在它身上。
+        """
         pool = ContextPool(user_id="u1", agent_id="a1", max_size=10000)
         for i in range(30):
             pool.add_context(_make_context(f"init-{i}"))
@@ -205,7 +209,7 @@ class TestContextPoolConcurrencyFix:
         def dedup_worker():
             try:
                 for _ in range(10):
-                    pool.dedup()
+                    pool.clear()
                     time.sleep(0.002)
             except Exception as e:
                 errors.append(e)
@@ -225,7 +229,7 @@ class TestContextPoolConcurrencyFix:
         t1.join()
         t2.join()
 
-        assert errors == [], f"dedup+add 并发抛异常: {errors}"
+        assert errors == [], f"clear+add 并发抛异常: {errors}"
 
     def test_concurrent_add_at_max_size_boundary_no_lost_updates(self):
         """并发 add_context 无丢失（无损归档语义）
