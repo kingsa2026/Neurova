@@ -381,6 +381,11 @@ HANDOFF_GATE_SCRIPT = "scripts/ci/npc_turn_handoff_gate.py"
 #: 全仓只有一处事实源。
 TURN_FLAG_VAR = "turnLimitReached"
 
+#: 收尾接力唯一允许的内置任务类型（Issue #170，构建 cnb-i5m-1k355ooo1 实测）：
+#: `cnb:apply` 的宿主事件白名单里没有 `@npc` 一族，改用适用「所有事件」的
+#: `cnb:trigger`。通道更换由 test_npc_turn_handoff_execution.py 单独钉住。
+HANDOFF_TRIGGER_TYPE = "cnb:trigger"
+
 
 class TestNpcOptionsPromptIsAnUnreachableChannel:
     """`npc:go.options` 里不得再出现 `prompt` 键 —— 它是一条永不生效的通路。
@@ -469,19 +474,26 @@ class TestHandoffFuelIsWritableFromTheConfigAlone:
             )
 
     def test_handoff_stage_reads_fuel_not_agent_memory(self, cnb_doc):
-        """收尾接力的 `if` 必须只读 `$turnLimitReached` —— 不许新增第二套判据。"""
+        """收尾接力的 `if` 必须只读 `$turnLimitReached` —— 不许新增第二套判据。
+
+        接力 Stage 的内置任务类型由 Issue #170 定死为 `cnb:trigger`：
+        `cnb:apply` 的宿主事件白名单里没有 `@npc` 一族，写在 `@npc` 流水线里
+        注定执行不了（构建 cnb-i5m-1k355ooo1 实测）。判据本身（燃料变量）
+        不受通道更换影响——这里只认它，通道由
+        `tests/unit/ci/test_npc_turn_handoff_execution.py` 单独钉住。
+        """
         fallback = cnb_doc.get("$") or {}
-        applies = [
+        handoffs = [
             stage
             for event, body in fallback.items()
             if isinstance(event, str) and event.endswith("@npc")
             for job in (body if isinstance(body, list) else [])
             if isinstance(job, dict)
             for stage in (job.get("endStages") or [])
-            if isinstance(stage, dict) and stage.get("type") == "cnb:apply"
+            if isinstance(stage, dict) and stage.get("type") == HANDOFF_TRIGGER_TYPE
         ]
-        assert applies, "$ 段 NPC 流水线缺收尾接力（cnb:apply）"
-        for stage in applies:
+        assert handoffs, f"$ 段 NPC 流水线缺收尾接力（{HANDOFF_TRIGGER_TYPE}）"
+        for stage in handoffs:
             conditions = stage.get("if") or []
             assert conditions == ['[ "$turnLimitReached" = "1" ]'], (
                 "收尾接力的判据不是 turnLimitReached："
