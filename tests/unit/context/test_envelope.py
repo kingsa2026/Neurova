@@ -222,10 +222,10 @@ class TestInjectorEnvelope:
 
 
 class TestCompressionHistory:
-    """核验轮修复③：SmartContextCompressor 契约错位（签名/返回值双不符，
-    TypeError 被吞 → 压缩器在生产从未生效，重构后调用继承该错位导致
-    超预算时信封被整包丢弃）。改为确定性压缩：信封行淘汰 + 最老历史轮淘汰，
-    不再调用契约不符的压缩器。"""
+    """核验轮修复③：曾被借道的可插拔压缩器契约错位（签名/返回值双不符，
+    TypeError 被吞 → 压缩在生产从未生效，重构后调用继承该错位导致
+    超预算时信封被整包丢弃）。现为确定性压缩：信封行淘汰 + 最老历史轮淘汰，
+    不依赖任何可插拔压缩器（那份实现已随 B6-10 批次 C 整模块退役）。"""
 
     def test_history_dropped_from_oldest_with_summary_marker(self):
         inj = _make_injector(enable_compression=True)

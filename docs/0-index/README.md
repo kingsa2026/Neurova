@@ -73,7 +73,7 @@
 | REST API（82 端点模块） | ✅ | `api/endpoints/` | [API_REFERENCE](../02-api/API_REFERENCE.md) |
 | NeurUI 前端（60 页面） | ✅ | `NeurUI/src/pages/` | [UI_FRAMEWORK_GUIDE](../03-user-guide/UI_FRAMEWORK_GUIDE.md) |
 | 上下文管线（活水上下文池） | 🟡 | `context/`（collector/compressor/converter），P1-1 已补齐溢出恢复/真摘要等 | [26-context-pipeline-p1](../01-architecture/26-context-pipeline-p1.md) |
-| 上下文缓存与压缩 | ✅ | `context_cache.py` `context_compressor.py` | [CONTEXT_CACHE_COMPRESSION](../01-architecture/CONTEXT_CACHE_COMPRESSION.md) |
+| 上下文缓存与压缩 | ✅ | `context_cache.py`（压缩已收口到 `context/orchestrator.py` 的确定性淘汰） | [CONTEXT_CACHE_COMPRESSION](../01-architecture/CONTEXT_CACHE_COMPRESSION.md) |
 | 移动配对（QR + WebSocket） | ✅ | `api/endpoints/mobile_pairing.py` | [API_REFERENCE](../02-api/API_REFERENCE.md) |
 | 睡眠系统管理（睡眠设置页） | ✅ | `cognitive_layers/memory_layer/sleep.py` | [02-memory-system](../01-architecture/02-memory-system.md) |
 
