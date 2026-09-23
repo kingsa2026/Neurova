@@ -74,7 +74,12 @@ def estimate_tokens(text: str) -> int:
 - 英文单词: 0.25 tokens/词（按空格分词）
 - 最小返回值为 1
 
-#### 算法 3: context_compressor.py - Message.estimate_tokens (第58-67行)
+> **已退役（B6-10 批次 C）**：`neurova/context_compressor.py` 已整模块删除——
+> 它是装配即弃的第二份压缩实现（真实签名与唯一调用形状双不符，TypeError 被
+> except 吞掉）。本节与下方算法 4 保留为**历史分析记录**，不得据以重新引入。
+> 现行估算口径的唯一事实源是 `neurova/context/token_estimator.py`。
+
+#### 算法 3: ~~context_compressor.py~~ - Message.estimate_tokens (第58-67行，已退役)
 ```python
 def estimate_tokens(self) -> int:
     """估算token数量"""
@@ -93,7 +98,7 @@ def estimate_tokens(self) -> int:
 - 英文单词: 1 token/词（使用正则表达式匹配字母序列）
 - 使用正则表达式进行更精确的分词
 
-#### 算法 4: context_compressor.py - len() // 4 (第271, 611, 634行)
+#### 算法 4: ~~context_compressor.py~~ - len() // 4 (第271, 611, 634行，已退役)
 ```python
 # 第271行
 system_tokens = len(system_prompt) // 4  # 粗略估算
@@ -327,7 +332,7 @@ class TokenEstimator:
 
 - `neurova/context/injector.py` - 主要问题文件
 - `neurova/context_pool.py` - 主要问题文件
-- `neurova/context_compressor.py` - 主要问题文件
+- ~~`neurova/context_compressor.py`~~ - **已退役**（B6-10 批次 C，整模块删除）
 - `neurova/context/models.py` - TokenBudget 定义
 - `tests/unit/test_token_estimation_inconsistency.py` - 测试文件
 - `test_token_calculation.py` - 计算对比脚本

@@ -470,7 +470,7 @@ ErrorCode (neurova/core/error_handler.py)
 | `Agent` | `agent.py` | Agent 核心（记忆检索/上下文构建/LLM 调用/Router 集成） |
 | `NeurovaCLI` | `cli.py` | 命令行交互界面（15+ 命令） |
 | `ContextBuilder` | `context.py` | 上下文构建器 |
-| `SmartContextCompressor` | `context_compressor.py` | 智能上下文压缩器 |
+| ~~`SmartContextCompressor`~~ | ~~`context_compressor.py`~~ | **已退役**（B6-10 批次 C）：装配即弃的第二份压缩实现，真通路是 `context/orchestrator.py` 的确定性淘汰 |
 | `ContextCacheManager` | `context_cache.py` | 上下文缓存管理器 |
 | `ContextPersistence` | `context_persistence.py` | 上下文持久化 |
 | ~~`EnhancedContextBuilder`~~ | — | **已退役**（B6-10 / Issue #90）：该类与 `enhanced_context_builder.py` 已从生产侧删除（零生产消费方）。上下文装配的真面是 `context/orchestrator.py` 的 `ContextOrchestrator` |
@@ -699,7 +699,7 @@ ErrorCode (neurova/core/error_handler.py)
 
 | 文件 | 路径 | 类/函数 | 说明 |
 |------|------|---------|------|
-| `context_compressor.py` | `neurova/` | `SmartContextCompressor` | 智能上下文压缩器（3 层压缩/去重/摘要生成） |
+| ~~`context_compressor.py`~~ | `neurova/` | ~~`SmartContextCompressor`~~ | **已退役**（B6-10 批次 C）：整模块删除，详见 `context/injector.py::_compress_context` 的确定性淘汰 |
 
 ### 14.5 ~~增强版上下文构建器~~（已退役）
 

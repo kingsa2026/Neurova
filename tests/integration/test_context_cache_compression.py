@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-上下文缓存、压缩和记忆管理测试
+上下文缓存与记忆管理集成测试
+
+来源沿革（B6-10 批次 C）：本文件原含 `test_context_compression()`，锁定已退役的
+`SmartContextCompressor` / `CompressionConfig`（装配即弃的第二份压缩实现，
+真通路见 `tests/unit/context/test_envelope.py`），随之退场。
+存活的缓存面契约保留在本文件。
 
 测试场景:
 1. 上下文缓存 - 优先读缓存、批量写入
-2. 智能压缩 - 会话完整性保护
-3. 记忆管理 - 缓冲写入、批量提交
-4. 集成测试 - 完整工作流
+2. 记忆管理 - 缓冲写入、批量提交
+3. 集成测试 - 完整工作流
 """
 
 import sys
@@ -19,7 +23,6 @@ project_root = current_file.parent.parent
 sys.path.insert(0, str(project_root))
 
 from neurova.context_cache import ContextCacheManager
-from neurova.context_compressor import SmartContextCompressor, CompressionConfig
 from neurova.memory import MemoryManager
 
 
@@ -113,105 +116,3 @@ def test_context_cache():
     print(f"  ✅ 刷新: {flushed} 个上下文")
     
     print("\n✅ 上下文缓存测试完成")
-
-
-def test_context_compression():
-    """测试智能上下文压缩"""
-    print("\n" + "="*60)
-    print("测试 2: 智能上下文压缩（保护会话完整性）")
-    print("="*60)
-    
-    # 配置（小预算用于测试）
-    config = CompressionConfig(
-        max_context_tokens=500,
-        system_prompt_budget=100,
-        memory_budget=100,
-        history_budget=300,
-        min_recent_turns=3  # 最少保留3轮
-    )
-    
-    compressor = SmartContextCompressor(config)
-    
-    # 1. 创建长对话历史（10轮）
-    print("\n--- 步骤1: 创建长对话历史 ---")
-    history = []
-    for i in range(10):
-        history.append({
-            'role': 'user',
-            'content': f'这是第{i+1}轮用户消息，内容比较长，关于某个话题的讨论' * 3
-        })
-        history.append({
-            'role': 'assistant',
-            'content': f'这是第{i+1}轮助手回复，详细的回答和解释' * 3
-        })
-    
-    print(f"  总轮次: 10")
-    print(f"  总消息: {len(history)}")
-    
-    # 2. 创建记忆
-    memories = [
-        {'content': '用户喜欢喝咖啡', 'temperature': 90, 'is_crystallized': True, 'is_important': True},
-        {'content': '用户住在北京', 'temperature': 80, 'is_crystallized': False, 'is_important': True},
-        {'content': '用户讨厌下雨天', 'temperature': 60, 'is_crystallized': False, 'is_important': False},
-        {'content': '用户养了一只猫', 'temperature': 50, 'is_crystallized': False, 'is_important': False},
-        {'content': '用户昨天去了电影院', 'temperature': 30, 'is_crystallized': False, 'is_important': False},
-    ]
-    print(f"  记忆数: {len(memories)}")
-    
-    # 3. 执行压缩
-    print("\n--- 步骤2: 执行智能压缩 ---")
-    system_prompt = "你是一个友好的AI助手，名叫Kai"
-    user_input = "今天天气怎么样？"
-    
-    result = compressor.compress_context(
-        system_prompt=system_prompt,
-        memories=memories,
-        conversation_history=history,
-        user_input=user_input
-    )
-    
-    # 4. 验证压缩结果
-    print("\n--- 步骤3: 验证压缩结果 ---")
-    context = result['context']
-    stats = result['stats']
-    
-    print(f"  原始tokens: {stats['original_tokens']}")
-    print(f"  压缩后tokens: {stats['compressed_tokens']}")
-    print(f"  压缩率: {stats['compression_ratio']:.0%}")
-    print(f"  是否压缩: {stats['compressed']}")
-    
-    # 验证会话完整性
-    print("\n--- 步骤4: 验证会话完整性 ---")
-    turn_count = 0
-    incomplete_turns = 0
-    
-    i = 0
-    while i < len(context):
-        msg = context[i]
-        if msg.get('role') == 'user':
-            # 检查是否有对应的assistant回复
-            if i + 1 < len(context) and context[i+1].get('role') == 'assistant':
-                turn_count += 1
-                i += 2  # 跳过完整的轮次
-            elif msg.get('is_summary'):
-                print(f"  ✅ 轮次{turn_count+1}: 摘要 (保留了{msg.get('original_turns', '?')}轮)")
-                i += 1
-            else:
-                incomplete_turns += 1
-                i += 1
-        else:
-            i += 1
-    
-    print(f"  完整轮次: {turn_count}")
-    print(f"  不完整轮次: {incomplete_turns}")
-    
-    if incomplete_turns == 0:
-        print(f"  ✅ 会话完整性保护成功！")
-    else:
-        print(f"  ❌ 存在不完整的会话轮次")
-    
-    # 5. 显示摘要
-    print(f"\n--- 步骤5: 压缩摘要 ---")
-    print(f"  {result['summary']}")
-    
-    print("\n✅ 上下文压缩测试完成")

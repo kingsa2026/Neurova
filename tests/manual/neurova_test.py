@@ -60,7 +60,6 @@ async def test_imports():
         ("neurova.agent", "Agent核心"),
         ("neurova.router", "消息路由"),
         ("neurova.context", "上下文管理"),
-        ("neurova.context_compressor", "上下文压缩"),
         ("neurova.tool_layers.tool_router", "工具路由"),
         ("neurova.skills.registry", "Skill注册"),
         ("neurova.cognitive_layers.memory_layer.manager", "记忆管理"),

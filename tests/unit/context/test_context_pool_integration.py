@@ -133,45 +133,44 @@ class TestContextPoolAgentIntegration:
         # 这里只是验证现有功能正常工作
         assert contexts[0].tags == []
     
-    def test_context_pool_dedup_integration(self):
-        """测试 ContextPool 去重集成"""
-        # 创建 ContextPool
+    def test_context_pool_dedup_happens_on_add(self):
+        """去重真面是**入池**（同 hash 只出一条，高优先级替换低优先级）。
+
+        B6-10 批次 C：原用例驱动 `pool.dedup(stage=...)`——那个出口零消费，
+        池的真实去重在 `add_context`（`_by_hash` O(1) 查找 + 优先级替换）。
+        契约搬到真面，断言语义不减：同内容只出一条、留下的是高优先级那条。
+        """
         pool = ContextPool(
             user_id="test_user",
             agent_id="test_agent",
             max_tokens=16000
         )
-        
-        # 添加重复内容
+
         pool.add_context(ContextInput(
             source=ContextSource.MEMORY,
             content="相同内容",
             priority=80
         ))
-        
+
         pool.add_context(ContextInput(
             source=ContextSource.MEMORY,
             content="相同内容",
             priority=70
         ))
-        
+
         pool.add_context(ContextInput(
             source=ContextSource.MEMORY,
             content="不同内容",
             priority=60
         ))
-        
-        # 执行去重
-        count = pool.dedup(stage='input')
-        
-        # 应该去除一个重复的
-        assert count == 2
-        
-        # 验证去重后的上下文
+
         contexts = pool.get_contexts()
-        assert len(contexts) == 2
-        
+        assert len(contexts) == 2, "同 hash 只允许出一条"
+
         # 验证保留了高优先级的
+        same = [c for c in contexts if c.content == "相同内容"]
+        assert len(same) == 1 and same[0].priority == 80
+
         priorities = [ctx.priority for ctx in contexts]
         assert 80 in priorities
         assert 60 in priorities
@@ -230,12 +229,10 @@ class TestContextPoolBackwardCompatibility:
         messages = pool.build_context_for_model("gpt-3.5-turbo")
         assert len(messages) == 2
         
-        # 旧代码可能使用 compress_context()
-        pool.compress_context()
-        
-        # 验证压缩后仍然有上下文
+        # 归档层不压缩：池没有压缩通路（真通路在 orchestrator 的信封+历史
+        # 确定性淘汰，见 test_envelope.py）——视图层按预算整条取用，归档不变。
         contexts_after = pool.get_contexts()
-        assert len(contexts_after) > 0
+        assert len(contexts_after) == len(contexts)
 
 
 class TestSemanticMatchDrawerIntegration:

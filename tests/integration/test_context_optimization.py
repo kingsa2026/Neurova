@@ -1,89 +1,19 @@
 """
-Neurova 上下文系统优化 - 单元测试
-测试智能压缩和记忆注入功能
+Neurova 上下文注入面 - 单元测试（记忆注入 / 预算调整）
+
+来源沿革（B6-10 批次 C）：本文件原含 2 个类锁定一份已退役的可插拔压缩实现
+（`CompressionConfig` / `SmartContextCompressor`），该实现与唯一调用点双不符
+（TypeError 被 except 吞掉），即"装配即弃"；压缩真通路是 `orchestrator` 的
+信封+历史确定性淘汰（判据：`tests/unit/context/test_envelope.py`）。
+仍然存活的注入面契约保留在本文件，断言未删。
 """
 
 import unittest
 from typing import Dict, List
 
 
-class TestCompressionConfig(unittest.TestCase):
-    """测试 CompressionConfig 配置"""
-
-    def test_config_defaults(self):
-        """测试默认配置"""
-        from neurova.context_compressor import CompressionConfig
-
-        config = CompressionConfig()
-        self.assertEqual(config.max_context_tokens, 8000)
-        self.assertEqual(config.memory_budget, 2000)
-        self.assertEqual(config.conversation_history_budget, 5000)
-        self.assertTrue(config.enable_progressive_compression)
-        self.assertEqual(config.recent_turns_full, 2)
-
-    def test_config_custom(self):
-        """测试自定义配置"""
-        from neurova.context_compressor import CompressionConfig
-
-        config = CompressionConfig(
-            enable_progressive_compression=False,
-            recent_turns_full=3
-        )
-        self.assertFalse(config.enable_progressive_compression)
-        self.assertEqual(config.recent_turns_full, 3)
 
 
-class TestSmartContextCompressor(unittest.TestCase):
-    """测试 SmartContextCompressor 压缩器"""
-
-    def setUp(self):
-        """测试前的准备工作"""
-        from neurova.context_compressor import SmartContextCompressor
-
-        self.compressor = SmartContextCompressor()
-
-    def test_smart_truncate(self):
-        """测试智能截断功能"""
-        text = "这是一段很长的中文文本。我们需要看看它会如何被截断。句号是很重要的。"
-
-        result = self.compressor._smart_truncate(text, 0.5)
-
-        # 应该包含部分文本
-        self.assertIsNotNone(result)
-        self.assertLess(len(result), len(text))
-        # 应该在自然断点截断
-        self.assertIn('。', result[:-3] if result.endswith('...') else result)
-
-    def test_smart_truncate_short_text(self):
-        """测试短文本不需要截断"""
-        text = "这是短文本。"
-
-        result = self.compressor._smart_truncate(text, 0.5)
-
-        # 短文本应该原样返回
-        self.assertEqual(result, text)
-
-    def test_calculate_dynamic_budget(self):
-        """测试动态预算计算"""
-        # 创建一个短对话
-        history_short = [
-            {'role': 'user', 'content': '你好'},
-            {'role': 'assistant', 'content': '你好，有什么可以帮你'}
-        ]
-
-        # 创建一个长对话
-        history_long = []
-        for i in range(100):
-            history_long.append({'role': 'user', 'content': f'第{i}轮对话'})
-            history_long.append({'role': 'assistant', 'content': f'回复第{i}轮'})
-
-        # 短对话预算应该较低
-        budget_short = self.compressor._calculate_dynamic_budget(history_short)
-
-        # 长对话预算应该较高
-        budget_long = self.compressor._calculate_dynamic_budget(history_long)
-
-        self.assertLessEqual(budget_short, budget_long)
 
 
 class TestUnifiedContextInjectorMemory(unittest.TestCase):
@@ -219,8 +149,6 @@ def run_tests():
     suite = unittest.TestSuite()
 
     # 添加所有测试
-    suite.addTests(loader.loadTestsFromTestCase(TestCompressionConfig))
-    suite.addTests(loader.loadTestsFromTestCase(TestSmartContextCompressor))
     suite.addTests(loader.loadTestsFromTestCase(TestUnifiedContextInjectorMemory))
     suite.addTests(loader.loadTestsFromTestCase(TestMemoryContextBuilding))
     suite.addTests(loader.loadTestsFromTestCase(TestBudgetAdjustment))
