@@ -76,14 +76,23 @@ class TestMarkHashesSeen:
         pool.add_context(_make_ctx(ContextSource.USER_INPUT, "hello"))
         assert pool._collector._contexts[0].seen_confirmed is False
 
-    def test_dedup_rebuild_keeps_index_accurate(self):
-        """dedup() 整体重排列表后，索引必须与列表一致。"""
+    def test_clear_rebuild_keeps_index_accurate(self):
+        """整体重排（clear）后，索引必须与列表一致。
+
+        B6-10 批次 C：原用例驱动 `pool.dedup(stage=...)` 触发整体重排，而那个
+        出口零消费、已删净（真面是 add_context 的 _by_hash 去重）。改锁仍然
+        存活的整体重排路径 `clear`，判据不变：`_by_hash` 与列表逐条对应。
+        """
         pool = _make_pool()
         c1 = _make_ctx(ContextSource.USER_INPUT, "a")
         c2 = _make_ctx(ContextSource.CONVERSATION, "b")
         pool.add_context(c1)
         pool.add_context(c2)
-        pool.dedup(stage="output")
+        for c in pool._collector._contexts:
+            assert pool._by_hash.get(c.hash) is c, "入池路径必须同步 hash 索引"
+        pool.clear()
+        assert pool._by_hash == {}, "整体重排后 hash 索引必须与列表一致（清空）"
+        pool.add_context(_make_ctx(ContextSource.USER_INPUT, "a"))
         assert len(pool._by_hash) == len([c for c in pool._collector._contexts if c.hash])
         for c in pool._collector._contexts:
             assert pool._by_hash.get(c.hash) is c

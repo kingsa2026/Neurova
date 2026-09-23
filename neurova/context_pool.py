@@ -143,7 +143,6 @@ class ContextPool:
 
         self._collector = ContextCollector(max_tokens)
         self._converter = ContextConverter()
-        self._compressor = ContextCompressor(max_tokens)
 
         # 活水上下文池新增组件
         self._drawer = SemanticMatchDrawer(max_tokens)
@@ -1103,13 +1102,6 @@ class ContextPool:
 
             return messages
 
-    def compress_context(self):
-        with self._lock:
-            contexts = self.get_contexts()
-            compressed = self._compressor.compress(contexts)
-            self._collector._contexts = compressed
-            self._rebuild_indexes()
-
     def clear(self):
         with self._lock:
             self._collector._contexts.clear()
@@ -1141,14 +1133,6 @@ class ContextPool:
                 )
             return report.kept
 
-    def dedup(self, stage: str = "input") -> int:
-        with self._lock:
-            all_drops = self._collector.collect()
-            deduped = self._deduplicator.dedup(all_drops, stage=stage)
-            self._collector._contexts = deduped
-            self._rebuild_indexes()
-            return len(deduped)
-
 
 from neurova.context.pairing import validate_pairing
 
@@ -1160,7 +1144,6 @@ from neurova.context.pool_models import ContextSource, ContextInput
 from neurova.context.pool_index import PoolReadIndex
 from neurova.context.collector import ContextCollector
 from neurova.context.converter import ContextConverter
-from neurova.context.compressor import ContextCompressor
 from neurova.context.dedup import DriftSafeDeduplicator
 from neurova.context.semantic_drawer import SemanticMatchDrawer
 from neurova.context.auto_tagger import AutoTagger
@@ -1208,7 +1191,6 @@ __all__ = [
     "ContextPool",
     "ContextCollector",
     "ContextConverter",
-    "ContextCompressor",
     "DriftSafeDeduplicator",
     "SemanticMatchDrawer",
     "AutoTagger",

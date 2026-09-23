@@ -123,7 +123,7 @@
 - `shared_config.py`
 - `memory_rw_manager.py`
 - `agent_config.py`
-- `context_compressor.py`
+- ~~`context_compressor.py`~~（已于 B6-10 批次 C 整模块退役）
 - `context_cache.py`
 - `tts/moss_nano.py`
 - `tts/mock_tts_simple.py`

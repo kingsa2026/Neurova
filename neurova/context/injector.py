@@ -155,18 +155,11 @@ class UnifiedContextInjector(BaseModule):
         self._enable_cache = enable_cache
         self._enable_compression = enable_compression
 
-        # 初始化智能压缩器
-        if self._enable_compression:
-            try:
-                from neurova.context_compressor import SmartContextCompressor
-
-                self._compressor = SmartContextCompressor()
-                logger.info("SmartContextCompressor initialized")
-            except Exception as e:
-                logger.warning("SmartContextCompressor initialization failed: %s", e)
-                self._compressor = None
-        else:
-            self._compressor = None
+        # 压缩通路单一事实源（B6-10 批次 C）：确定性淘汰（见 _compress_context）。
+        # 改前此处装配一个可插拔压缩器后**从不读取**（全仓零读取点），且它的
+        # 真实签名与 _compress_context 的调用形状双不符（TypeError 被 except
+        # 吞掉）——装配即弃的第二份实现，已整模块退役，此处不再留装配点。
+        # _enable_compression 仍是确定性淘汰的开关，保留。
 
         self._cache: OrderedDict[str, ContextEntry] = OrderedDict()
         self._max_cache_entries = 100
@@ -840,11 +833,10 @@ class UnifiedContextInjector(BaseModule):
         F5 修复：旧实现按 "## 相关记忆" 字符串切 system_content、降级路径对
         整个 system 硬截断——信封化后 system 恒为稳定 base，压缩改为对信封
         做确定性块淘汰（compress_envelope）。
-        核验轮修复③：原借道 SmartContextCompressor 的调用与其真实签名
-        （compress_context(messages, memories, system_prompt, target_tokens)
-        → 元组）双不符，TypeError 被 except 吞掉 → 压缩器在生产从未生效、
-        信封被整包丢弃。改为确定性历史淘汰：最老轮先弃，保留轮次摘要标记，
-        压缩行为不再依赖压缩器是否可用。
+        核验轮修复③：原借道已退役的第二份压缩实现，其真实签名与调用形状双不符
+        （TypeError 被 except 吞掉）→ 压缩在生产从未生效、信封被整包丢弃。
+        现为确定性历史淘汰：最老轮先弃，保留轮次摘要标记，压缩行为不再依赖
+        任何可插拔压缩器（B6-10 批次 C 已把那份实现整模块退役）。
         """
         try:
             compression_ratio = 1.0
