@@ -61,6 +61,9 @@ DISPOSED_EXPECTATIONS = {
     "EnhancedContextBuilder": ("已删除", ledger.JUDGE_ABSENT),
     # 反向：B6-3 已把符号补齐并接线，处置必须与 consumed 咬合。
     "get_context_pool": ("已接线", ledger.JUDGE_CONSUMED),
+    # B6-10 批次 B：审计点名的「唯一物证却无人校验」——判据的消费面落在
+    # `neurova/context/fold_integrity.py`（折叠发生即对账），故有跨文件消费点。
+    "_last_archived_window_hashes": ("已接线", ledger.JUDGE_CONSUMED),
 }
 
 #: 反向控制：这些符号仍在生产侧（判据非 absent），把它们标成「已删除」必须被抓到。
