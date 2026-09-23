@@ -93,6 +93,14 @@ class ContextOrchestrator:
     # 不跑 __init__ 也要能取到，否则一次实例化方式差异就让缓存失去上限。
     _WINDOW_CACHE_SLOTS: int = 8
 
+    # B6-10 批次 B：折叠/归档指纹集的类级空默认。判据消费面
+    # （`context/fold_integrity.py`）直接读这两个属性——`__new__` 直构路径不跑
+    # `__init__`，没有默认值会让「折叠零丢失」判据在测试/工具路径上抛
+    # AttributeError（那是判据被绕过，不是判据成立）。两者只被整体赋值、
+    # 从不就地增删元素，故类级 set 共享没有串改风险。
+    _last_folded_hashes: set = frozenset()
+    _last_archived_window_hashes: set = frozenset()
+
     def __init__(
         self,
         agent_ref,
@@ -125,6 +133,10 @@ class ContextOrchestrator:
         self._DELTA_RESUMMARY_MSGS = 4
         # 本轮刚折叠消息的 hash 集（当轮 draw 防召回；下轮起正常参与语义召回）
         self._last_folded_hashes: set = set()
+        # 归档侧指纹集（B6-10 批次 B：折叠零丢失判据的**唯一**物证）。
+        # 它在 _archive_conversation_to_pool 写入、在 context/fold_integrity.py
+        # 读取（判据的唯一消费面），读数并进 get_context_health()["fold_integrity"]
+        # ——留下即被校验，不留空账。类级默认见下方声明（`__new__` 直构路径也要能读）。
         self._last_archived_window_hashes: set = set()
 
         # P0-2：自动压缩开关 + 上下文窗口硬顶
@@ -151,6 +163,9 @@ class ContextOrchestrator:
             self._context_health = {
                 "ledger": {"enabled": False, "attempts": 0, "last_error": None},
                 "summarizer": {"enabled": False, "attempts": 0, "last_error": None},
+                # B6-10 批次 B：折叠零丢失校验的读数（判据的消费面）。
+                # 空形状与校验模块同源，不在两处各写一份字段表。
+                "fold_integrity": self._foldIntegrityEmptyReport(),
             }
             _ledger_db = self._buildLedgerDb(agent_ref)
             _summarizer = self._buildSummarizer(agent_ref)
@@ -179,6 +194,12 @@ class ContextOrchestrator:
             )
         else:
             self.context_pool = None
+
+    def _foldIntegrityEmptyReport(self) -> Dict[str, Any]:
+        """折叠零丢失读数的空形状（与校验模块同源，不复制字段表）。"""
+        from neurova.context.fold_integrity import EMPTY_REPORT
+
+        return dict(EMPTY_REPORT)
 
     def _buildLedgerDb(self, agent_ref):
         """装配驱逐台账持久层（失败如实登记，不静默、不粘死）。"""
@@ -260,6 +281,9 @@ class ContextOrchestrator:
             "ledger": dict(health.get("ledger") or {"enabled": False, "attempts": 0, "last_error": None}),
             "summarizer": dict(
                 health.get("summarizer") or {"enabled": False, "attempts": 0, "last_error": None}
+            ),
+            "fold_integrity": dict(
+                health.get("fold_integrity") or self._foldIntegrityEmptyReport()
             ),
         }
 
@@ -1105,6 +1129,29 @@ class ContextOrchestrator:
 
         return context
 
+    @staticmethod
+    def _windowChunkIdentity(message: Dict[str, Any]) -> tuple:
+        """窗口消息 →（归档来源域, 内容）的**唯一**派生处。
+
+        归档侧按来源分域：`role=tool` 走 `TOOL_CALL`，其余走 `CONVERSATION`。
+        折叠侧的指纹与防召回集合必须复用同一份派生——各自写一份"一律
+        CONVERSATION"会让工具结果这一支永远匹配不到池内条目（B6-10 批次 B：
+        零丢失判据报假缺失，而防召回对工具归档恒不命中，折叠白做）。
+        """
+        from neurova.context_pool import ContextSource
+
+        msg = message or {}
+        if msg.get("role") == "tool":
+            return ContextSource.TOOL_CALL, msg.get("content", "")
+        return ContextSource.CONVERSATION, msg.get("content", "")
+
+    def _windowChunkHash(self, message: Dict[str, Any]) -> str:
+        """窗口消息的归档指纹（与归档侧同源，见 `_windowChunkIdentity`）。"""
+        from neurova.context_pool import ContextInput
+
+        source, content = self._windowChunkIdentity(message)
+        return ContextInput.compute_hash(source, content)
+
     def _archive_conversation_to_pool(self, conversation_context: List[Dict[str, Any]]) -> None:
         """P1-1① 写入侧归档：对话轮次打标 + tool 结果以 TOOL_CALL 源入池。
 
@@ -1119,33 +1166,20 @@ class ContextOrchestrator:
         archived_hashes: set = set()
         for msg, turn_id in assign_turn_ids(conversation_context):
             role = (msg or {}).get("role", "user")
-            if role == "tool":
-                content = msg.get("content", "")
-                archived_hashes.add(ContextInput.compute_hash(ContextSource.TOOL_CALL, content))
-                self.context_pool.add_context(
-                    ContextInput(
-                        source=ContextSource.TOOL_CALL,
-                        content=content,
-                        priority=60,
-                        metadata={
-                            "role": "tool",
-                            "turn_id": turn_id,
-                            "pairs_with": turn_id,
-                            "tool_call_id": msg.get("tool_call_id"),
-                        },
-                    )
-                )
+            source, content = self._windowChunkIdentity(msg)
+            archived_hashes.add(ContextInput.compute_hash(source, content))
+            if source == ContextSource.TOOL_CALL:
+                metadata = {
+                    "role": "tool",
+                    "turn_id": turn_id,
+                    "pairs_with": turn_id,
+                    "tool_call_id": msg.get("tool_call_id"),
+                }
             else:
-                content = msg.get("content", "")
-                archived_hashes.add(ContextInput.compute_hash(ContextSource.CONVERSATION, content))
-                self.context_pool.add_context(
-                    ContextInput(
-                        source=ContextSource.CONVERSATION,
-                        content=content,
-                        priority=60,
-                        metadata={"role": role, "turn_id": turn_id},
-                    )
-                )
+                metadata = {"role": role, "turn_id": turn_id}
+            self.context_pool.add_context(
+                ContextInput(source=source, content=content, priority=60, metadata=metadata)
+            )
         # 修2：暴露本轮归档的窗口 hash 集（窗口折叠发生在归档之后——零丢失判据）
         self._last_archived_window_hashes = archived_hashes
 
@@ -1483,13 +1517,26 @@ class ContextOrchestrator:
         # 本轮被折叠消息 hash 集（build_context 据此当轮防召回——刚折叠即召回
         # 会让折叠白做；下轮起窗口滑走、恢复正常语义召回）
         kept_contents = {m.get("content", "") for m in compaction.window}
-        from neurova.context_pool import ContextInput as _CI, ContextSource as _CS
-
+        # 指纹域与归档侧同源（`_windowChunkHash`）：工具结果归档在 TOOL_CALL 域，
+        # 折叠侧若一律按 CONVERSATION 取，防召回集合对工具归档恒不命中。
         self._last_folded_hashes = {
-            _CI.compute_hash(_CS.CONVERSATION, m.get("content", ""))
+            self._windowChunkHash(m)
             for m in msgs
             if m.get("content", "") not in kept_contents
         }
+        # 零丢失判据的消费点（改前 `_last_archived_window_hashes` 只写不读）：
+        # 折叠发生即对归档对账，读数并进 get_context_health()["fold_integrity"]。
+        from neurova.context.fold_integrity import verifyOrchestratorFoldIntegrity
+
+        # `__new__` 直构路径（测试/工具）不跑 __init__、没有 `_context_health`：
+        # 读数面按需建一份，而不是让判据在这条路径上抛异常（那是判据被绕过）。
+        health = getattr(self, "_context_health", None)
+        if health is None:
+            health = self._context_health = {
+                "ledger": {"enabled": False, "attempts": 0, "last_error": None},
+                "summarizer": {"enabled": False, "attempts": 0, "last_error": None},
+            }
+        health["fold_integrity"] = verifyOrchestratorFoldIntegrity(self)
 
         # 更新跨轮缓存（摘要失败时保留旧摘要，下次重试增量）。
         #
@@ -1507,9 +1554,7 @@ class ContextOrchestrator:
             kept_set = {m["content"] for m in compaction.window}
             for m in msgs:
                 if m["content"] not in kept_set:
-                    cache["covered"].add(
-                        ContextInput.compute_hash(ContextSource.CONVERSATION, m["content"])
-                    )
+                    cache["covered"].add(self._windowChunkHash(m))
 
         window = compaction.window
         if compaction.compacted_count > 0 and not compaction.summary:
@@ -1589,9 +1634,7 @@ class ContextOrchestrator:
             kept_set = {m["content"] for m in compaction.window}
             for m in msgs:
                 if m["content"] not in kept_set:
-                    cache["covered"].add(
-                        ContextInput.compute_hash(ContextSource.CONVERSATION, m["content"])
-                    )
+                    cache["covered"].add(self._windowChunkHash(m))
         elif cache.get("summary"):
             # 无新摘要但旧摘要存在：保留（后续轮次仍携带）
             pass
