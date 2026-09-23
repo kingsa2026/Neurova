@@ -10,18 +10,24 @@
 而同一份配置里的接力 Stage 被 skipper 跳过，Issue 上没有任何回音）。
 所以「撞顶之后把活交给下一轮」必须在配置里显式写出来。
 
-配置里已经写了这笔接力（`.cnb.yml` 的 `endStages` + `cnb:apply`）。
+配置里已经写了这笔接力（`.cnb.yml` 的 `endStages` + `cnb:trigger`）。
 **根因（Issue #158，构建 cnb-2v8-1k34htd2p / cnb-2e8-1k341d9s1 实测）**：
 接力的燃料曾指定由 Agent 在最后一轮自己写出标记文件 —— 而撞 maxTurns 时平台
 只是把 Agent 中止、**不执行任何收尾指令或工具调用**，Agent 根本没有机会写。
-于是 `cnb:apply` 的 `if` 恒假、收尾 Stage 每次都是 `skipped`，
+于是接力的 `if` 恒假、收尾 Stage 每次都是 `skipped`，
 接力是一条"看着配了、其实永不触发"的死配置（平台不会为此报任何错）。
 
 故燃料改由**本门禁在 Agent 开工前写入**（它就是那个写点，也是自证点）：
 触顶那一轮跑不到任何指令，燃料就不可能来自 Agent。同时把
 `turnLimitReached=1` 经**平台声明的导出通道**（stdout 的 `##[set-output]` 标记 +
-`.cnb.yml` 同一 Stage 上的 `exports` 映射）交给后续 Stage 的 `cnb:apply`，
+`.cnb.yml` 同一 Stage 上的 `exports` 映射）交给收尾的 `cnb:trigger`，
 让"这一轮是接力轮"这件事在配置期就成立，不依赖 Agent 的记忆。
+
+通道本身还有一条平台约束（Issue #170，构建 cnb-i5m-1k355ooo1 实测）：
+  `cnb:apply` 的适用事件白名单里**没有** `@npc` 一族（也没有其宿主
+  `issue.comment` / `pull_request.comment`），校验看的是**宿主事件**，
+  改 `options.event` 绕不开。故收尾接力改用 `cnb:trigger`
+  （适用「所有事件」），并显式传 `slug` 与 `branch`。
 
 本门禁回答一个只有真实构建能回答的问题：**在有改动的真实构建里，
 `$CNB_BUILD_WORKSPACE` 到底等不等于构建容器的工作目录**。
@@ -98,7 +104,7 @@ def checkWorkspaceWritable(root: str) -> dict:
 
 
 def markTurnAsHandoff(env: dict) -> dict:
-    """把「本轮是接力轮」交给后续 Stage 与收尾的 `cnb:apply`。
+    """把「本轮是接力轮」交给后续 Stage 与收尾的 `cnb:trigger`。
 
     通道：平台声明的 **stdout 标记协议** —— 本函数向标准输出写一行
 
@@ -146,7 +152,7 @@ def main() -> int:
     if not root:
         failures.append(
             "环境变量 CNB_BUILD_WORKSPACE 缺失 —— 接力标记没有落点，"
-            "endStages 的 cnb:apply 会因 if 恒假被跳过（构建 cnb-2e8-1k341d9s1 的形态）"
+            "收尾接力会因 if 恒假被跳过（构建 cnb-2e8-1k341d9s1 的形态）"
         )
     elif not Path(root).is_dir():
         failures.append(f"CNB_BUILD_WORKSPACE 指向的目录不存在: {root}")
@@ -295,7 +301,7 @@ function main(argv) {
   if (!root) {
     failures.push(
       "环境变量 CNB_BUILD_WORKSPACE 缺失 —— 接力标记没有落点，" +
-      "endStages 的 cnb:apply 会因 if 恒假被跳过（构建 cnb-2e8-1k341d9s1 的形态）");
+      "收尾接力会因 if 恒假被跳过（构建 cnb-2e8-1k341d9s1 的形态）");
   } else if (!fs.existsSync(root) || !fs.statSync(root).isDirectory()) {
     failures.push("CNB_BUILD_WORKSPACE 指向的目录不存在: " + root);
   } else {
@@ -360,7 +366,7 @@ def main() -> int:
     if not root:
         failures.append(
             "环境变量 CNB_BUILD_WORKSPACE 缺失 —— 接力标记没有落点，"
-            "endStages 的 cnb:apply 会因 if 恒假被跳过（构建 cnb-2e8-1k341d9s1 的形态）"
+            "收尾接力会因 if 恒假被跳过（构建 cnb-2e8-1k341d9s1 的形态）"
         )
     elif not Path(root).is_dir():
         failures.append(f"CNB_BUILD_WORKSPACE 指向的目录不存在: {root}")
