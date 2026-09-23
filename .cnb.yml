@@ -472,6 +472,19 @@ $:
   #     碰完 maxTurns 的构建 → 变量为 1 → 自动接力下一轮
   #   链路上没有任何一处需要 Agent 配合，也没有第二套状态文件。
   #
+  # 通道选型（Issue #170，构建 cnb-i5m-1k355ooo1 实测）：
+  #   收尾接力**不能**用 `cnb:apply` —— 它的适用事件白名单
+  #   （push/commit.add/branch.create/pull_request.target/pull_request.mergeable/
+  #   tag_push/pull_request.merged/api_trigger/web_trigger/crontab/tag_deploy）
+  #   里没有 `@npc` 一族，也没有其宿主 `issue.comment` / `pull_request.comment`。
+  #   平台校验的是**宿主事件**，不是 `options.event` 的取值 ——
+  #   改 event 绕不开，那笔接力在写下那一刻就注定执行不了。
+  #   前两批把它当成"event 取值问题"修（同名事件 → api_trigger_*），
+  #   于是每次都在真被执行时以同一句 error 收场。
+  #   改用 `cnb:trigger`（适用**所有事件**，官方 trigger.md）：
+  #   slug 必填（不默认当前仓库）、branch 显式点名（它默认主分支，
+  #   而 PR 评论事件跑在 PR 目标分支，不传会接力到主分支上落空）。
+  #
   # 轮次上界（平台依据：docs.cnb.cool 的「超时」与「npc:go」两篇）：
   #   `maxTurns` 是**轮数配额**（一次构建跑 200 轮），不是 2h 墙钟的反推值 ——
   #   把配额写在硬限之上只会让撞顶永远发生在平台掐断之后（届时无告警、无收尾，
@@ -538,8 +551,11 @@ $:
             maxTurns: 200
             contextWindow: 1m
             maxTokens: 48k
-            # 平台档位枚举里最高档是 xhigh（没有名为 max 的档位），故落 xhigh。
-            # 若后续平台开放 max 档，把本行改成 thinkingLevel: max 即可，其余不动。
+            # 平台档位枚举为 off/minimal/low/medium/high/xhigh/max（官方 npc:go 文档），
+            # 现行值取 xhigh —— 这是本仓**主动选定**的档位，不是"平台没有 max"。
+            # （此前注释写成"平台最高档是 xhigh、没有 max"，是对文档的误读：
+            #  枚举里确有 max。要不要提到 max 是耗时/质量权衡，属功能决策，
+            #  与本次流水线失败无关，故只纠正说法、不动取值。）
             thinkingLevel: xhigh
       # 轮数触顶后自动开启下一轮。`if` 的判据只有一处（本文件 env 传入的那一个
       # 变量），由 Stage 1 经 `##[set-output]` + `exports` 回写；
@@ -549,21 +565,28 @@ $:
       # 在 `api_trigger` 流水线里不会再出现，不传下去下一轮读不到 Issue/PR。
       endStages:
         - name: "轮数触顶接力：自动开启下一轮（写不出成果就烧配额）"
-          type: cnb:apply
+          type: cnb:trigger
           if:
             - '[ "$turnLimitReached" = "1" ]'
           options:
+            slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
 
   issue.comment@npc:
     - <<: *npc-dscoder-job
       endStages:
         - name: "轮数触顶接力：自动开启下一轮（写不出成果就烧配额）"
-          type: cnb:apply
+          type: cnb:trigger
           if:
             - '[ "$turnLimitReached" = "1" ]'
           options:
+            slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
+            # 分支必须显式点名：`cnb:trigger` 的 branch 默认为**主分支**，
+            # 而 `issue.comment@npc` 跑在默认分支、`pull_request.comment@npc`
+            # 跑在 PR 目标分支 —— 不传 branch，接力会跑到主分支上，
+            # api_trigger_npc_handoff 在那边可能根本不存在（接力静默落空）。
+            branch: $CNB_BRANCH
             env:
               turnLimitReached: $turnLimitReached
               handoffIssueIid: $CNB_ISSUE_IID
@@ -571,28 +594,31 @@ $:
     - <<: *npc-dscoder-job
       endStages:
         - name: "轮数触顶接力：自动开启下一轮（写不出成果就烧配额）"
-          type: cnb:apply
+          type: cnb:trigger
           if:
             - '[ "$turnLimitReached" = "1" ]'
           options:
+            slug: $CNB_REPO_SLUG
             event: api_trigger_npc_handoff
+            branch: $CNB_BRANCH
             env:
               turnLimitReached: $turnLimitReached
               handoffPrIid: $CNB_PULL_REQUEST_IID
 
   # ── 接力落点：轮数触顶后「下一轮」的真正入口 ──────────────────────────
-  # 为什么不能直接把 event 写成 `issue.comment@npc`（上一批写法，已被证伪）：
-  #   构建 cnb-k6e-1k34osn4f 实测，收尾 Stage 由 `skipped` 变成 **error**，
-  #   平台逐字给出 `cnb:apply can only be used in push/commit.add/branch.create/
-  #   pull_request.target/pull_request.mergeable/tag_push/pull_request.merged/
-  #   api_trigger/web_trigger/crontab/tag_deploy events` —— `@npc` 事件不在
-  #   准入名单内，且 `event` 参数本身「必须为 api_trigger 或以 api_trigger_ 开头」。
-  #   即：那笔接力在写下的那一刻就拉不起任何东西，只是**此前被 `if` 恒假的
-  #   `skipped` 掩盖了**（判据不真，永远走不到平台的准入检查）。
-  #   与 `$GITHUB_ENV` 通道、`options.prompt` 键同型：平台不报错，
-  #   只在真被执行时才响亮。
-  #
-  # 故「下一轮」落在本事件上：`api_trigger_*` 是 `cnb:apply` 唯一能拉的自定义事件，
+  # 三次修，前两次都修错了方向，记在这里免得再犯：
+  #   1) 同名评论事件（issue 拉 issue）—— `cnb:apply` 只认固定事件，
+  #      `@npc` 不在白名单，且在 `if` 恒假的那些轮里从未被执行到。
+  #   2) 换成合法 event 名 `api_trigger_npc_handoff`，仍用 `cnb:apply`——
+  #      构建 cnb-i5m-1k355ooo1 实测，收尾 Stage 由 `skipped` 变成 **error**，
+  #      平台逐字给出 `cnb:apply can only be used in push/commit.add/branch.create/
+  #      pull_request.target/pull_request.mergeable/tag_push/pull_request.merged/
+  #      api_trigger/web_trigger/crontab/tag_deploy events`。
+  #      于是白名单的判据方向被钉死：校验的是**宿主事件**，不是 `options.event`。
+  #      `@npc`（及其宿主 `issue.comment` / `pull_request.comment`）不在列，
+  #      改 event 绕不开。
+  #   3) 现形态：`cnb:trigger`（适用所有事件，官方 trigger.md）+ 显式
+  #      `slug` / `branch` / `env`，指向本文件下方的 `api_trigger_npc_handoff`。
   # 其内用 npc:go 续跑（`npc:go` 适用**所有**事件，见平台的 npc:go 文档）。
   # 上下文不靠"拉同一个评论事件"继承，而靠上一轮经 `env` 显式传递：
   #   接力判据（单一事实源）与对话载体。评论触发时平台注入的 Issue/PR 标识

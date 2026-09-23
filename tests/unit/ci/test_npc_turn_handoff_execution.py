@@ -216,6 +216,15 @@ CNB_APPLY_EVENT_PARAM_PREFIX = "api_trigger"
 HANDOFF_APPLY_EVENT = "api_trigger_npc_handoff"
 
 
+#: 收尾接力唯一允许的内置任务类型（Issue #170，构建 cnb-i5m-1k355ooo1 实测）。
+#: `cnb:apply` 的适用事件白名单里没有 `@npc` 一族及其宿主 `issue.comment` /
+#: `pull_request.comment`，写在 `@npc` 流水线里注定执行不了 —— 校验看的是
+#: **宿主事件**，`options.event` 取值再合法也绕不开。`cnb:trigger` 的适用事件
+#: 是「所有事件」（docs.cnb.cool/zh/build/internal-steps/cnb/trigger.md），
+#: 是同一件事在 `@npc` 宿主下唯一可行的通道；代价是多了必填的 `slug`。
+HANDOFF_TRIGGER_TYPE = "cnb:trigger"
+
+
 def _handoff_apply_stages(cnb_doc):
     """产出 ($ 段每一处收尾接力 Stage) 及其所在事件名。
 
@@ -232,14 +241,14 @@ def _handoff_apply_stages(cnb_doc):
             if not isinstance(job, dict):
                 continue
             for stage in (job.get("endStages") or []):
-                if isinstance(stage, dict) and stage.get("type") == "cnb:apply":
+                if isinstance(stage, dict) and stage.get("type") == HANDOFF_TRIGGER_TYPE:
                     yield event, stage
 
 
 class TestHandoffUsesAnEventCnbApplyActuallyAccepts:
-    """D. 接力的 `event` 必须是 `cnb:apply` **真能拉起来**的事件（Issue #158 第二次修）。
+    """D. 接力的**通道与宿主事件**必须是平台真支持的形态（Issue #158 / #170 三次修）。
 
-    ## 事故形态（构建 cnb-k6e-1k34osn4f，2026-09-22 23:21:43 实测）
+    ## 事故形态一（构建 cnb-k6e-1k34osn4f，2026-09-22 23:21:43 实测）
 
     `$CNB_BUILD_WORKSPACE` 落点、`##[set-output]` + `exports` 通道、`if` 判据——
     前两批修的东西**全部生效**了：Stage 0 打印 `turn_flag_handoff.written=true`，
@@ -250,17 +259,41 @@ class TestHandoffUsesAnEventCnbApplyActuallyAccepts:
         pull_request.target/pull_request.mergeable/tag_push/pull_request.merged/
         api_trigger/web_trigger/crontab/tag_deploy events
 
-    `issue.comment@npc` **不在白名单里**——而原配置写的正是它。
-    同一篇文档还写着 `event` 参数「必须为 `api_trigger` 或以 `api_trigger_` 开头」。
-    即：那笔接力在写下的那一刻就没有可能拉起任何东西，
-    只是**此前被 `if` 恒假的 `skipped` 掩盖了**（判据不真，永远走不到平台的准入检查）。
+    当时读到的是「`event` 参数取值不合法」，于是把 `event` 改成 `api_trigger_*`
+    ——**判据方向错了**，故本轮（Issue #170，构建 cnb-i5m-1k355ooo1 三次实测）
+    仍然以同一句 error 收场。
 
-    这条是本仓第三次同型犯病（前两次：`GITHUB_ENV` 通道不存在、`options.prompt`
-    键不被承认）——**配置写了一个平台不支持的形态，平台不报错，只在真被执行时才响亮**。
-    故判据必须钉在"平台声明支持什么"上，而不是钉在"我们写了什么"上。
+    ## 事故形态二（构建 cnb-i5m-1k355ooo1，2026-09-23 实测）
+
+    同一句 error 再次出现，而这次 `event` 早已是合法的 `api_trigger_npc_handoff`
+    ——于是白名单的判据方向终于被钉死：平台校验的是**承载 `cnb:apply` 的宿主
+    事件**（`issue.comment@npc` / `pull_request.comment@npc`），不是 `options.event`。
+    `@npc` 一族不在白名单内，**这一点无法靠改 `options.event` 绕开**。
+    `cnb:trigger` 的适用事件是「所有事件」，是同一件事唯一可行的通道。
+
+    这条是本仓第四次同型犯病（前三次：`GITHUB_ENV` 通道不存在、`options.prompt`
+    键不被承认、`options.event` 取值合规）——**配置写了一个平台不支持的形态，
+    平台不报错，只在真被执行时才响亮**。故判据必须钉在"平台声明支持什么"上，
+    而不是钉在"我们写了什么"上。
     """
 
-    def test_cnb_apply_event_is_in_the_platform_allowlist(self, cnb_doc):
+    #: `cnb:apply` 的**宿主事件**白名单（apply.md「适用事件」节）；`@npc` 一族不在列。
+    APPLY_HOST_EVENT_WHITELIST = frozenset({
+        "push", "commit.add", "branch.create", "pull_request.target",
+        "pull_request.mergeable", "tag_push", "pull_request.merged",
+        "api_trigger", "web_trigger", "crontab", "tag_deploy",
+    })
+
+    def test_handoff_never_rides_cnb_apply(self, cnb_doc):
+        """`@npc` 流水线的收尾接力**不得**用 `cnb:apply`（宿主事件不在白名单）。
+
+        Issue #170 的根因判据。粗看像"写法问题"，实际是平台约束：
+        `cnb:apply` 校验的是**宿主事件**，`@npc`（及其宿主 `issue.comment` /
+        `pull_request.comment`）不在白名单内，**改 `options.event` 绕不开**。
+        故这条判据的本体不是"event 取值合不合法"，而是"用的内置任务对不对"。
+
+        可证伪路径：把任一处接力改回 `type: cnb:apply` → 立刻转红。
+        """
         problems = []
         seen = 0
         for where, stage in _handoff_apply_stages(cnb_doc):
@@ -269,24 +302,49 @@ class TestHandoffUsesAnEventCnbApplyActuallyAccepts:
             if not isinstance(event, str) or not event:
                 problems.append(f"{where}: 收尾接力未声明 event")
                 continue
-            if event not in CNB_APPLY_EVENTS and not event.startswith(CNB_APPLY_EVENT_PARAM_PREFIX):
+            if not event.startswith(CNB_APPLY_EVENT_PARAM_PREFIX):
                 problems.append(
-                    f"{where}: 接力 event={event!r} 不在 cnb:apply 的适用事件内 —— "
-                    "运行期会被平台以 error 拒掉（构建 cnb-k6e-1k34osn4f 实测）"
+                    f"{where}: 接力 event={event!r} 不是 api_trigger* 事件 —— "
+                    "运行期会被平台以 error 拒掉"
                 )
             if event.endswith("@npc"):
                 problems.append(
                     f"{where}: 接力 event 指向 NPC 评论事件 {event!r}；"
-                    "cnb:apply 拉不起 @npc 事件，且 NPC 评论只能由人在评论里 @ 触发。"
+                    "cnb:trigger 拉的是自定义事件，@npc 事件只能由人在评论里 @ 触发。"
                 )
         assert seen, "未在 `$` 段找到任何收尾接力 Stage —— 本守卫空转"
         assert not problems, (
             "轮数触顶接力拉不起下一轮:\n  " + "\n  ".join(problems) +
-            "\n平台依据（docs.cnb.cool/zh/build/internal-steps/cnb/apply.md）："
-            "适用事件为 " + "/".join(sorted(CNB_APPLY_EVENTS)) +
-            f"，且 event 参数必须为 {CNB_APPLY_EVENT_PARAM_PREFIX} 或以其为前缀。"
-            "故「下一轮」必须落在一条 api_trigger_* 流水线上，"
-            "由它内部的 npc:go 续跑。"
+            f"\n接力必须用 {HANDOFF_TRIGGER_TYPE}（适用「所有事件」）+ "
+            "api_trigger_* 落点，由它内部的 npc:go 续跑。"
+        )
+
+    def test_handoff_does_not_use_cnb_apply_anywhere(self, cnb_doc):
+        """全 `$` 段不得再把 `cnb:apply` 用在 `@npc` 事件下（宿主白名单）。
+
+        与上一条的区别：上一条查**接力 Stage 的存在与否与 event 取值**，
+        这一条直接在整份配置里搜 `cnb:apply` 的宿主事件——即便有人另加一处
+        接力（或把 `endStages` 挪到别处），只要宿主是 `@npc` 一族，本条即红。
+        `cnb:apply` 的宿主白名单见平台文档 apply.md「适用事件」节。
+        """
+        fallback = cnb_doc.get("$") or {}
+        offenders = []
+        for event, body in fallback.items():
+            if not isinstance(event, str) or event.startswith("."):
+                continue
+            if event.split("@", 1)[0] in self.APPLY_HOST_EVENT_WHITELIST:
+                continue
+            for job in (body if isinstance(body, list) else []):
+                if not isinstance(job, dict):
+                    continue
+                for stage in (job.get("endStages") or []) + (job.get("stages") or []):
+                    if isinstance(stage, dict) and stage.get("type") == "cnb:apply":
+                        offenders.append(f"{event}: cnb:apply")
+        assert not offenders, (
+            "cnb:apply 被用在平台不允许的宿主事件下（构建 cnb-i5m-1k355ooo1 实测 error）:\n  "
+            + "\n  ".join(offenders) +
+            "\n白名单：" + "/".join(sorted(self.APPLY_HOST_EVENT_WHITELIST)) +
+            f"。`@npc` 一族不在列，改用 {HANDOFF_TRIGGER_TYPE}。"
         )
 
     def test_handoff_target_pipeline_exists_and_runs_npc_go(self, cnb_doc):

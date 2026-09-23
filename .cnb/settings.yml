@@ -50,9 +50,11 @@ npc:
           用满后你会被平台直接中止，此时流水线收尾阶段会**再拉一条
           api_trigger_npc_handoff 流水线**自动开启下一轮 ——
           你不需要、也无法自己重新开局。
-          （为何不是"再拉一次同一评论事件"：`cnb:apply` 的适用事件白名单里
-          没有 `@npc` 事件、`event` 参数也必须是 `api_trigger*`，写同名评论事件
-          会被平台以 error 拒掉——构建 cnb-k6e-1k34osn4f 实测。
+          （为何不是"再拉一次同一评论事件"，也不是用 `cnb:apply`：
+          `cnb:apply` 的适用事件白名单里没有 `@npc` 一族，也没有其宿主
+          `issue.comment` / `pull_request.comment`；平台校验的是**宿主事件**，
+          改 `options.event` 绕不开——构建 cnb-i5m-1k355ooo1 实测。
+          故改用 `cnb:trigger`（适用所有事件）。
           下一轮拿到的不是"评论触发的角色人设"，而是本文件的人设 + 流水线自带的
           systemPrompt/userPrompt，Issue/PR 标识由上一轮经 env 传下来。）
         - 燃料由流水线自己在开工前写入（且会读回自证），**不需要你做任何事**：
@@ -161,9 +163,11 @@ npc:
           用满后你会被平台直接中止，此时流水线收尾阶段会**再拉一条
           api_trigger_npc_handoff 流水线**自动开启下一轮 ——
           你不需要、也无法自己重新开局。
-          （为何不是"再拉一次同一评论事件"：`cnb:apply` 的适用事件白名单里
-          没有 `@npc` 事件、`event` 参数也必须是 `api_trigger*`，写同名评论事件
-          会被平台以 error 拒掉——构建 cnb-k6e-1k34osn4f 实测。
+          （为何不是"再拉一次同一评论事件"，也不是用 `cnb:apply`：
+          `cnb:apply` 的适用事件白名单里没有 `@npc` 一族，也没有其宿主
+          `issue.comment` / `pull_request.comment`；平台校验的是**宿主事件**，
+          改 `options.event` 绕不开——构建 cnb-i5m-1k355ooo1 实测。
+          故改用 `cnb:trigger`（适用所有事件）。
           下一轮拿到的不是"评论触发的角色人设"，而是本文件的人设 + 流水线自带的
           systemPrompt/userPrompt，Issue/PR 标识由上一轮经 env 传下来。）
         - 燃料由流水线自己在开工前写入（且会读回自证），**不需要你做任何事**：
