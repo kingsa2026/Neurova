@@ -69,19 +69,52 @@ class TestContextOrchestratorSessionBinding:
         assert len(chunks) >= 1
         assert chunks[0].metadata.get("session_id") == "s_test"
 
-    def test_set_session_id_runtime(self):
-        """RED: 应支持运行时切换 session_id(用于跨 session 调取)"""
+    @pytest.mark.asyncio
+    async def test_runtime_session_switch_goes_through_the_turn_refresh(self):
+        """运行时切换会话：唯一可变写入点是 `build_context` 的每轮刷新。
+
+        B6-10 批次 D：实例级 `set_session_id` 已删净（零生产调用点的第二写入方）。
+        跨 session 调取所依赖的"切换"由 `build_context(chat_room_id=...)` 承接——
+        它同时写 `context_pool.session_id` 与 `_turn_room_id`，是**唯一**的可变写入点。
+        本用例锁这条契约：换会话必须经每轮刷新，且初值（构造期入参）不参与覆盖。
+        """
+        from unittest.mock import AsyncMock, patch
+
         from neurova.context.orchestrator import ContextOrchestrator
 
         mock_agent = MagicMock()
         mock_agent.config.llm_model = "gpt-4"
+        mock_agent.config.constitution = ""
+        mock_agent.config.behavior_rules = []
+        mock_agent.config.name = "t"
+        mock_agent.memory_manager = MagicMock()
+        mock_agent.context_builder = MagicMock()
+        mock_agent.tool_router = None
+        mock_agent._skill_registry = None
+        mock_agent.soul = "测试助手"
+        mock_agent.personality = ""
+        mock_agent.conversation_history = []
+        mock_agent.growth_log_manager = MagicMock()
         mock_agent.user_id = "u1"
         mock_agent.agent_id = "a1"
 
         co = ContextOrchestrator(mock_agent, use_pool=True, session_id="s1")
-        # 切换 session
-        co.set_session_id("s2")
-        assert co.context_pool.session_id == "s2"
+        assert co.session_id == "s1", "构造期初值读不到"
+
+        with patch.object(co, "get_tools_description", new_callable=AsyncMock) as tools:
+            tools.return_value = "工具描述"
+            await co.build_context(
+                user_input="继续",
+                session_context=[{"role": "user", "content": "hi"}],
+                relevant_memories=[],
+                chat_collab=True,
+                chat_room_id="project_roomB",
+            )
+
+        assert co.context_pool.session_id == "project_roomB", (
+            "本轮有效会话没有写进池 —— `build_context` 是唯一的可变写入点"
+        )
+        assert co.session_id == "s1", "构造期初值被就地改写（身份又变成两处可写）"
 
 
 def _add(pool, content):
