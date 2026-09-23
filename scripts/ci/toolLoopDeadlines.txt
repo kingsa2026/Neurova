@@ -90,7 +90,7 @@ TokenBudgetGate | symbol | consumed | single_source | 6 | 待处置 | 反向控�
 #   ← 出处：agent/gates.py:78（阈值型门控·反向控制）
 notify_tool_result | symbol | consumed | not_a_threshold | 3 | 待处置 | 反向控制（符号级）：agent/tool_pipeline.py:460 定义，唯一接入点是 tool_executor.py:5352 import + :5354 调用 ⇒ consumed。与 `ToolExecutionPipeline`（:202，零引用）**同处一个文件**——本行存在的意义就是钉住「判据落到符号级而非文件级」：若判据按文件判「死」，砍掉这个文件会连带砍断工具结果观察者通道。本行永远为「待处置」。
 #   ← 出处：agent/tool_pipeline.py:460（反向控制·符号级）
-get_pipeline_observers | symbol | consumed | not_a_threshold | 4 | 待处置 | 反向控制（符号级）：agent/tool_pipeline.py:443 定义，被自身模块（:482 `notify_tool_result` 内）与 security/tool_circuit_breaker.py:30 import + :136 调用消费 ⇒ consumed（熔断器经此挂载结果观察者）。同 ToolExecutionPipeline 一个文件，同 notifY_tool_result 一行理由。本行永远为「待处置」。
+get_pipeline_observers | symbol | consumed | not_a_threshold | 4 | 待处置 | 反向控制（符号级）：agent/tool_pipeline.py:443 定义，被自身模块（:482 `notify_tool_result` 内）与 security/tool_circuit_breaker.py:30 import + :136 调用消费 ⇒ consumed（熔断器经此挂载结果观察者）。同 ToolExecutionPipeline 一个文件，同 notify_tool_result 一行理由。本行永远为「待处置」。
 #   ← 出处：agent/tool_pipeline.py:443（反向控制·符号级）
 set_goal_gate | symbol | no_consumer | not_a_threshold | 1 | 待处置 | 放大视角补登（grep 同一根因：定义了、生产零调用）。openai_loop.py:140 定义，生产侧零调用；`GoalGate`（gates.py:149）本身是活的（openai_loop.py:150 构造），但这条**注入入口**无人调——即 goal 模式门控在生产侧没有任何装配点。与 IterationGate 同属「门控装配面」断链，处置归 T-04 同批裁定。
 #   ← 出处：agent/loops/openai_loop.py:140（放大视角补登）
