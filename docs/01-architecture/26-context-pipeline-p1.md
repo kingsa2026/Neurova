@@ -31,7 +31,8 @@ neurova/
 ├── context_pool.py           # 活水上下文池（去重/语义匹配）
 ├── context_pool_registry.py  # 池注册表
 ├── context_cache.py          # 上下文缓存（LRU）
-├── context_compressor.py     # 上下文压缩（会话完整性保护）
+├── (context_compressor.py 已于 B6-10 批次 C 退役：装配即弃的第二份压缩实现，
+│   真通路是 orchestrator 的确定性淘汰)
 └── (enhanced_context_builder.py 已于 B6-10 退役：零生产消费方，
     上下文装配由 orchestrator.py 承担)
 ```

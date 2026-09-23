@@ -954,7 +954,13 @@ class TokenCounter:
 
 ## 6. 上下文压缩机制
 
-### 6.1 上下文压缩器
+> **形态更新（B6-10 批次 C）**：本节示例中的 `ContextCompressor` 独立压缩器类
+> 已从生产侧退役（同契约第二份实现，唯一消费点零消费）。现行压缩通路是
+> `neurova/context/injector.py::_compress_context` 的**确定性淘汰**——
+> 信封行淘汰 + 最老历史轮淘汰，判据在 `tests/unit/context/test_envelope.py` 与
+> `tests/unit/context/test_compress_if_needed.py`。本节保留为设计说明。
+
+### 6.1 上下文压缩器（示例形态，已退役）
 
 ```python
 class ContextCompressor:
