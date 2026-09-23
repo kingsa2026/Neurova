@@ -287,20 +287,21 @@ class ContextOrchestrator:
             ),
         }
 
-    def set_session_id(self, session_id: str) -> None:
-        """显式设置实例级 session 归属。
-
-        D2（三链路审计裁决）：原实现里"切换时裁剪 _window_compaction_cache"
-        是缓存无界增长的唯一出口，但该出口从未被生产调用（零调用点）。
-        裁剪职责已收口到 `_window_cache_slot()` 的槽位上限，本方法只保留
-        赋值语义 —— 不再承担缓存治理。
-        """
-        self._session_id = session_id
-        if self.context_pool is not None:
-            self.context_pool.session_id = session_id
-
     @property
     def session_id(self) -> Optional[str]:
+        """实例的**初值**会话身份（构造期入参），只读。
+
+        B6-10 批次 D：会话身份此前有**两个写入方** —— 构造期入参，以及
+        `set_session_id`（零生产调用点的第二份事实源）。两者并存时"实例身份"
+        与"本轮有效会话"谁为准没有单一答案，故第二写入方已删净（审计 D2 的裁决
+        是退役它的裁剪职责，裁剪现由 `_window_cache_slot()` 的槽位上限承担；
+        剩下的赋值语义与 `build_context` 的每轮刷新重复，故一并收口）。
+
+        现约定：本属性是**不可变的初值**；"本轮有效会话"由 `build_context` 每轮
+        以 `chat_room_id or self.session_id` 写入 `context_pool.session_id` 与
+        `_turn_room_id`，那是唯一的可变写入点。要换会话就用 `chat_room_id` /
+        `ctx.session_id` 走每轮刷新，不要在实例上改初值。
+        """
         return self._session_id
 
     def _resolve_window_cache_key(self) -> str:
