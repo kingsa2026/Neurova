@@ -3100,7 +3100,13 @@ class ToolExecutor:
             from neurova.session_repository import get_session_repository
 
             repo = get_session_repository()
-        history = repo.get_history(agent_id="", session_id=session_id) or []
+        # 会话文件写在 `<sessions>/<agent_id>/` 下（写侧 `_save_to_session` 传的是
+        # 真实 agent_id），空值会被会话管理器归入 `default` 目录 —— 用空 agent_id
+        # 读等于去别的目录找一个刚写下的地址，直取恒落空。故按会话属主读。
+        history = repo.get_history(
+            agent_id=str(getattr(getattr(self._agent, "config", None), "agent_id", "") or ""),
+            session_id=session_id,
+        ) or []
         entry = None
         for msg in reversed(history):
             for tc in ((msg or {}).get("metadata") or {}).get("tool_calls") or []:
