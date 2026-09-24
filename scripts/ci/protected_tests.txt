@@ -627,3 +627,35 @@ tests/unit/context/test_context_compression_single_face.py
 #      ② setter 删净，身份的可变写入点收口为 build_context 每轮刷新一处。
 #   契约搬到真面、断言未删（逐条见提交说明与台账脚本/ci/contextDeadlines.txt）。
 tests/unit/context/test_ttl_reclaim_and_session_identity.py
+
+# Issue #81 复核：设计 §6 三条硬规则点名的**包层守卫**漏登记（14 文件 / 197 用例）。
+#   根因不是"少写一行"：受保护子集的语义是"这些回归有人守"，但清单只靠人记得补——
+#   文件在仓、逐文件单跑全绿、CI 全绿，而子集对它们命中 0，判据从未在 CI 上跑过。
+#   同批 4 个运行时锁文件（test_cli / test_intake / test_import_interop /
+#   test_import_sessions）登记了，故是漏做而非有意排除（对照 Issue #109 的反向形态：
+#   清单指向不存在的文件 → pytest 退 4）。逐文件单跑确认全绿后登记（275 passed）。
+#   登记纪律由 tests/unit/memory_ingest/test_protected_registration.py 反锁：
+#   本目录下每个测试文件都必须进清单，新加文件自动落在同一约束下。
+#   ① 整包校验器：取值域只在 validate 判一次，越界整包拒绝（§6 硬规则 1）
+tests/unit/memory_ingest/test_bundle_validate.py
+#   ② 写入器：时间戳定不出即申报+跳过，绝不造 now（§6 硬规则 2 的唯一守卫处）
+tests/unit/memory_ingest/test_bundle_writer.py
+#   ③ 媒体引用强制 media/<digest>.<ext>，撤销只看结构化登记（§6 硬规则 3）
+tests/unit/memory_ingest/test_bundle_media.py
+#   ④ 回合消息构造与记录形状（§3 契约的消费面）
+tests/unit/memory_ingest/test_bundle_turns.py
+tests/unit/memory_ingest/test_bundle_records.py
+#   ⑤ 来源识别：未识别不是失败，必须回结构摘要（§5）
+tests/unit/memory_ingest/test_probe.py
+#   ⑥ 记忆导入咽喉（与 test_intake 同一写入口的记忆面）
+tests/unit/memory_ingest/test_import_memories.py
+#   ⑦ 七族转换器：每族合成 fixture 正例 + "像但不是"负例（§7.2 常驻判据）
+tests/unit/memory_ingest/test_converter_blocks.py
+tests/unit/memory_ingest/test_converter_chat_jsonl.py
+tests/unit/memory_ingest/test_converter_codex.py
+tests/unit/memory_ingest/test_converter_hermes.py
+tests/unit/memory_ingest/test_converter_openclaw.py
+tests/unit/memory_ingest/test_converter_opencode.py
+tests/unit/memory_ingest/test_converter_qwenpaw.py
+#   上述登记纪律的守卫本身：本目录新判据文件漏登记即红。
+tests/unit/memory_ingest/test_protected_registration.py
