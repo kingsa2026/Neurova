@@ -154,14 +154,12 @@ class BaseAgentLoop(ABC):
         # handle_tool_calls 整体抛异常 → 被 loop 当作"工具调用失败"降级/回退到
         # 无工具路径，本轮全部工具静默丢失。
         # 现在解析失败只把错误作为该工具的结果回传给 LLM，让它自行纠正参数格式。
-        # T-10a（工单 §11.2）：协议原文形态的 arguments。展示记录要把它逐字节带走——
-        # 落盘只会写展示记录，重建 assistant.tool_calls 时须与 provider 回传形态对齐，
-        # 从 `params` 反序列化重排出来的串会与 provider 的原文对不上。
+        # T-10a：provider 是否**真给过** arguments —— 这是**唯一**的"有没有"判据，
+        # 记录里只收原文，缺键时不补默认值（补了等于替 provider 声称"它给过"）。
+        _has_raw_arguments = "arguments" in (tool_call.get("function") or {})
+        # 解析用取值：provider 缺键时按空对象理解为"无参数"，只供 `params` 解析，
+        # **不得**回写成 `arguments` 的原文形态（那正是替 provider 声称它给过）。
         _raw_arguments = tool_call.get("function", {}).get("arguments", "{}")
-        _tc_arguments_text = (
-            _raw_arguments if isinstance(_raw_arguments, str)
-            else json.dumps(_raw_arguments, ensure_ascii=False)
-        )
 
         _tc_arguments = {}
         try:
@@ -209,10 +207,20 @@ class BaseAgentLoop(ABC):
             # 配对信息随落盘丢失，读侧无从重建（工单 §11.2 点名的硬缺口）。
             "tool_call_id": _tc_id,
             "params": _tc_arguments,
-            # 协议原文形态（JSON 串），与 provider 回传逐字节同源
-            "arguments": _tc_arguments_text,
             "timestamp": datetime.now().isoformat(),
         }
+        # T-10a（工单 §11.2）：调用侧记录必须把配对信息一起带走。
+        # 落盘的是这批展示记录（`post_chat_pipeline._step_save_session` 写进
+        # 会话 `metadata.tool_calls`），配对关系在这里丢一次就再也补不回来：
+        #   - `tool_call_id` 是结果侧的寻址键（`_recall_by_call_id` 按它直取原文），
+        #     调用侧缺它则 id ↔ arguments 的对应关系不在库里；
+        #   - `arguments` 是 provider 回传的**协议原文形态**，读侧重建
+        #     `assistant.tool_calls` 必须与它逐字节一致——`params` 是剥掉
+        #     taskName* 的解析结果，重新序列化会改写空白，替代不了原文。
+        # 只增键，不改既有键语义（工单 §11.7 第 4 条）。
+        _call_record["tool_call_id"] = _tc_id
+        if _has_raw_arguments:
+            _call_record["arguments"] = _raw_arguments
         if _task_name_active:
             _call_record["task_name"] = _task_name_active
         records.append(_call_record)
