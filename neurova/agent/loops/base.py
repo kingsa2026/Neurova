@@ -157,7 +157,10 @@ class BaseAgentLoop(ABC):
         # T-10a（工单 §11.2）：协议原文形态的 arguments。展示记录要把它逐字节带走——
         # 落盘只会写展示记录，重建 assistant.tool_calls 时须与 provider 回传形态对齐，
         # 从 `params` 反序列化重排出来的串会与 provider 的原文对不上。
+        # `_has_arguments` 是"provider 到底给过没有"的**唯一**判据：下层必须显式
+        # 按它判，不得反过来把"取值里那份默认 `{}`"当成"给过"（那判据恒真）。
         _raw_arguments = tool_call.get("function", {}).get("arguments", "{}")
+        _has_arguments = "arguments" in (tool_call.get("function") or {})
         _tc_arguments_text = (
             _raw_arguments if isinstance(_raw_arguments, str)
             else json.dumps(_raw_arguments, ensure_ascii=False)
@@ -209,10 +212,12 @@ class BaseAgentLoop(ABC):
             # 配对信息随落盘丢失，读侧无从重建（工单 §11.2 点名的硬缺口）。
             "tool_call_id": _tc_id,
             "params": _tc_arguments,
-            # 协议原文形态（JSON 串），与 provider 回传逐字节同源
-            "arguments": _tc_arguments_text,
             "timestamp": datetime.now().isoformat(),
         }
+        # 协议原文形态（JSON 串），与 provider 回传逐字节同源；
+        # provider 未给过该键时**不写** —— 补默认值等于替它声称"给过"。
+        if _has_arguments:
+            _call_record["arguments"] = _tc_arguments_text
         if _task_name_active:
             _call_record["task_name"] = _task_name_active
         records.append(_call_record)
