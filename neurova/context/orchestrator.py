@@ -341,23 +341,27 @@ class ContextOrchestrator:
     def _resolveTurnSessionId(self) -> Optional[str]:
         """本轮会话身份的**唯一回落链**（房间 → 构造期显式覆盖 → 每轮单源）。
 
-        T-03b 的根因不是"漏传一个参数"，而是装配入口**造了第二条身份通道却全空**：
-        构造期不传 session_id、`build_context` 无该形参、`chat_room_id` 又只在协作轮
-        非空 —— 三条通道全空，键便恒退化为 `direct`，两个普通单聊会话共用一条折叠摘要。
+        T-03b（Issue #90 工单 §4bis）的根因不是"漏传一个参数"，而是装配入口
+        **造了第二条身份通道却全空**：构造期不传 session_id、`build_context`
+        无该形参、`chat_room_id` 又只在协作轮非空 —— 三条通道全空，键便恒退化为
+        `direct`，两个普通单聊会话共用一条折叠摘要（探针 P2 形状一）。
 
-        而本轮的会话身份一直存在：`ChatPipeline` 每轮把它写进 `core.turn_context`
-        的 ContextVar（`agent.current_session_id` 即其读取契约名，后链的幂等键与
-        落盘 session 都在用它）。所以这里只做一件事：**读那份已在跑的单源**。
+        而本轮的会话身份一直存在：`ChatPipeline` 每轮经 `set_request_identity`
+        把它写进 `core.turn_context` 的 ContextVar（`agent.current_session_id`
+        即其读取契约名，后链的幂等键与落盘 session 都在用它）。所以这里只做一件事：
+        **读那份已在跑的单源**，不新增第二条身份存储（修复教义第 6 条）。
 
         回落链次序不可换（每条都对应一个真实入口）：
 
-        1. `_turn_room_id`：协作轮的房间身份（由 `build_context(chat_room_id=...)` 写入）；
+        1. `_turn_room_id`：协作轮的房间身份（群轮身份更具体，由
+           `build_context(chat_room_id=...)` 写入）；
         2. `_session_id`：构造期显式覆盖 —— 测试与运维的显式入口，语义是"就按这个来"；
         3. `self._agent.current_session_id`：每轮身份单源（深模块经 `agent_ref` 访问，
-           遵守 AGENTS.md §3；**不新增第二条身份存储**）。
+           遵守 AGENTS.md §3；**不新增第二条身份存储**）；
+        4. 全缺 → `None`（调用方落 `direct` 并计数，不静默）。
 
-        刻意**不**给 `build_context` 加 `session_id` 形参：那会与第 3 条并存成两份定义
-        （修复教义第 6 条），掩盖入口真正缺的是"读单源"而不是"少个参数"。
+        刻意**不**给 `build_context` 加 `session_id` 形参：那会与第 3 条并存成两份
+        定义（修复教义第 6 条），掩盖入口真正缺的是"读单源"而不是"少个参数"。
         """
         room = getattr(self, "_turn_room_id", "") or ""
         if room:
@@ -365,6 +369,17 @@ class ContextOrchestrator:
         explicit = getattr(self, "_session_id", None)
         if explicit:
             return explicit
+        if room:
+            return room
+        explicit = getattr(self, "_session_id", None)
+        if explicit:
+            return explicit
+        # 经 agent_ref 读本轮身份（深模块依赖注入，AGENTS.md §3）。
+        # 异步边界：本方法只在装配的同一条 task 内被调用（`build_context`
+        # 与其同步子步骤），不在发后不管的协程里读——ContextVar 跨 task 会
+        # 指向别的轮。
+        # `__new__` 直构路径（测试/工具）没有 `_agent`：按"无身份"处理并计数，
+        # 而不是让身份推导在这条路径上抛异常（那是判据被绕过）。
         agent = getattr(self, "_agent", None)
         turn_session = getattr(agent, "current_session_id", None) if agent is not None else None
         # 契约类型是字符串（真 Agent 的 `TurnState.current_session_id` 即
@@ -382,26 +397,63 @@ class ContextOrchestrator:
         用于判定"能不能看见"），而缓存键是**身份**——两个不同的单聊会话
         作用域都是 `direct`，但摘要绝不能互相串。旧实现用 `self.session_id or "_"`
         记账，session_id 恒 None → 所有会话共用一条（P1-1 跨会话串台）。
+
+        身份取不到时落 `direct`，但**必须可见**：计数 + 首次 warning
+        （`get_context_health()["turn_identity"]`）——静默共用槽正是
+        T-03b 缺陷的形态，不能换个位置再犯一次。
         """
+        identity = self._resolveTurnSessionId()
+        if identity:
+            return identity
+        self._noteIdentitylessTurn()
         # 折叠摘要槽与工具裁剪优先级共用本键；`__new__` 直构路径也必须可读。
-        return self._resolveTurnSessionId() or "direct"
+        return "direct"
+
+    def _noteIdentitylessTurn(self) -> None:
+        """无身份轮的可见性（计数 + 首次 warning），读数并入健康面。
+
+        读数槽与写入面与 `_recordTurnIdentity` **同源**（同为
+        `_contextHealthSlot("turn_identity")`）：两处各写一份字段名就是第二份
+        读数口径，消费方读到的计数会与 `last_key` 对不上。
+        """
+        record = self._contextHealthSlot("turn_identity")
+        record["identityless"] = int(record.get("identityless") or 0) + 1
+        if not record.get("last_error"):
+            record["last_error"] = (
+                "IdentitylessTurn: 本轮无会话身份（`_turn_room_id` / 构造期 session_id / "
+                "`agent.current_session_id` 全空），折叠摘要共槽 direct"
+            )
+            logger.warning(
+                "本轮无会话身份（`_turn_room_id` / 构造期 session_id / "
+                "`agent.current_session_id` 全空），折叠摘要共槽 direct —— "
+                "静默共用槽即 T-03b 缺陷的形态，此处点名以便发现身份链路断了"
+            )
 
     def _window_cache_slot(self, key: str) -> dict:
-        """取（或建）折叠摘要缓存槽，并把槽数钳在上限内（LRU 近似的插入序淘汰）。
+        """取（或建）折叠摘要缓存槽；超上限时淘汰**最久未使用**的槽。
 
-        P1-1/D2：键必须是真作用域（旧实现恒 `"_"`，跨会话串台）；槽数必须有
-        上限（旧实现的唯一出口是已退役的 `set_session_id` 裁剪）。
+        P1-1/D2：键必须是真身份（旧实现恒 `"_"`，跨会话串台）；槽数必须有上限
+        （旧实现的唯一出口是已退役的 `set_session_id` 裁剪）。
+
+        T-03b（工单 §4bis 要求 3）：上限策略是**最近使用**，不是插入序。键数此前
+        恒 1（身份取不到），上限无从触发；身份接通后槽数才真增长，故上限策略与
+        接线同批落地。口径之差在稳态下可见：被反复引用的老会话若按"建得早"先丢，
+        它的摘要会原地重算——等于把"串台"换成"反复失忆"。
+
+        实现靠 dict 的插入序（命中即 pop 后重插，把该键移到队尾），不引第三方
+        有序容器，也不另存一份访问时间戳（第二份状态就是第二份漂移源）。
         """
         cache = self._window_compaction_cache
         slot = cache.get(key)
-        if slot is None:
-            slot = {"summary": "", "covered": set(), "last_count": 0}
+        if slot is not None:
+            # 命中即移到队尾：最近使用的那一槽不会被下一次淘汰选中。
+            cache.pop(key, None)
             cache[key] = slot
-            while len(cache) > self._WINDOW_CACHE_SLOTS:
-                oldest = next(iter(cache))
-                if oldest == key:
-                    break
-                cache.pop(oldest, None)
+            return slot
+        slot = {"summary": "", "covered": set(), "last_count": 0}
+        cache[key] = slot
+        while len(cache) > self._WINDOW_CACHE_SLOTS:
+            cache.pop(next(iter(cache)), None)
         return slot
 
     # ---- 属性代理（方便内部访问） ----
@@ -760,9 +812,11 @@ class ContextOrchestrator:
             # 作用域只认**房间**：单聊轮必须是 direct，把会话 id 当房间会当场破坏隔离。
             self._turn_room_id = chat_room_id or (self._session_id or "")
             turn_scope = scope_tag_for_turn(collab=self._turn_collab, room_id=self._turn_room_id)
-            # 身份（缓存键 / 池归属 / 持久台账 session 列）走回落链单源。改前
-            # `chat_room_id or self._session_id or None` 在非协作轮恒 None —— 条目
-            # metadata、`query()` 的本会话优先、写穿台账的 session 列三处同时失效。
+            # T-03b 第二命中点：改前这里是 `chat_room_id or self._session_id or None`
+            # ——非协作轮把 None 写进池归属，连带条目 metadata["session_id"] 缺失、
+            # query() 的本会话优先排序退化、写穿台账的 session 列为 NULL。
+            # 归属与缓存键必须取**同一条**回落链（`_resolveTurnSessionId`），
+            # 各写一份就是第二份身份口径（教义第 6 条）。
             turn_session = self._resolveTurnSessionId()
             self._recordTurnIdentity(turn_session)
 
@@ -1430,9 +1484,9 @@ class ContextOrchestrator:
         try:
             from neurova.context.composition import get_last_composition
 
-            # 读数按**本轮会话身份**取（回落链同 `_resolveTurnSessionId`）：
-            # 改前读构造期初值 `self._session_id`，而它在生产恒 None → 读到的是
-            # agent 级快照（别的会话的上下文），面板会显示串了会话的数字。
+            # T-03b 第三命中点：改前只认 `self._session_id`（构造期恒 None）→
+            # 退到 **agent 级** 快照，面板显示的是别的会话的最近一轮规模。
+            # 身份推导只允许一处（`_resolveTurnSessionId`），与缓存键、池归属同源。
             snapshot = get_last_composition(
                 str(getattr(self.config, "agent_id", "") or "default"),
                 self._resolveTurnSessionId(),
