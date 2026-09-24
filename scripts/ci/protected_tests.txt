@@ -674,10 +674,23 @@ tests/unit/core/test_pytest_collection_hygiene.py
 # 上下文三链路批（Issue #90）工单 §11.2 T-10a：调用侧展示记录补硬地址。
 #   （根因：结果侧有 `tool_call_id`、调用侧没有，而落盘写的是展示记录——
 #    配对信息在写盘那一刻就丢了，读侧无从重建 assistant.tool_calls。
-#    判据同时反锁"只增键"：结果侧 reproducible/offload_path 与调用侧既有键
-#    一个都不许动；并把新字段纳入出口脱敏（`params`/`arguments` 同管），
-#    否则补键本身就成为敏感值绕过 E2 门控的旁路。）
+#    判据反锁"只增键"：结果侧 reproducible/offload_path 与调用侧既有键
+#    一个都不许动。）
 tests/unit/agent/test_tool_call_record_addressing.py
+
+# 上下文三链路批（Issue #90）T-10a 放大视角命中点：工具事件出口脱敏的**键集合契约**。
+#   （根因：出口脱敏曾按 `params` 单键名硬编码，T-10a 新增的 `arguments`
+#    原样透出敏感值。判据取契约本体 `TOOL_PAYLOAD_KEYS`，含反向控制：
+#    键集合漏一个即红、且必须与写入端 `agent/loops/base.py` 同源。
+#    该契约的逐条不变量只此一处，调用侧记录文件不另写第二份。）
+tests/unit/security/test_tool_event_export_redaction.py
+
+# 上下文三链路批（Issue #90）T-10a 放大视角第二命中点：直取寻址须按会话属主读台账。
+#   （根因：写侧 `mem_core.save_to_session` 落在 `<sessions>/<agent_id>/`，
+#    读侧 `_recall_by_call_id` 却传空 agent_id —— 空值被会话管理器归入
+#    `default/` 目录，于是"自己写下的硬地址自己读不回来"，T-10a 的
+#    `tool_call_id` 与 T-10b 的重建都无从寻址。判据含真 SessionManager 往返。）
+tests/unit/agent/test_tool_call_recall_owner.py
 
 # 上下文三链路批（Issue #90）工单 §11.3 T-10b：读侧重建 provider 合法工具轮（R1）。
 #   （根因：会话库里不存在 `role="tool"` 行——落盘的是 assistant 的
