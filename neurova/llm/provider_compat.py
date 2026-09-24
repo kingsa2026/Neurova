@@ -56,6 +56,19 @@ class ProviderCompat:
     # 仅声明 True 的网关注入；thinking_budget 只在 thinking_enabled=True 时随发。
     supports_thinking_toggle: bool = False
 
+    # ── 工具面（Issue #177）──────────────────────────────────────────────
+    # 「这条请求端点收不收工具键」是 **wire 契约**，与
+    # `AdapterCapabilities.supports_tool_choice`（「这个模型自身具备什么能力」，
+    # 逐模型设值、面向适配器目录展示）**不是同一件事**，故不合并：真正的缺口
+    # 是前者（原生协议不承载工具），后者既有的能力目录语义保持原样。
+    #
+    # supports_tools=False 时，tools / tool_choice 一律不进请求体，并留一行
+    # 点名 not_supported 的日志（诚实暴露，不静默丢弃）。
+    supports_tools: bool = True
+    # supports_tool_choice=False 时只发 tools、不发 tool_choice（低容忍网关
+    # 收到不认识的请求键会 400 —— 与 include_stream_usage 同一条声明式纪律）。
+    supports_tool_choice: bool = True
+
     def map_reasoning_effort(self, thinking_effort: Optional[str]) -> Optional[str]:
         """前端深度档位 → API reasoning_effort 值；light/未知/空 → None（不注入）。"""
         if not self.supports_reasoning_effort:
@@ -71,6 +84,18 @@ class ProviderCompat:
             return self
         return replace(self, **{f: overrides[f] for f in valid})
 
+
+# 协议面静态表（Issue #177）：按 **wire protocol** 声明工具承载能力，
+# 与 provider id / baseUrl host 行是**不同维度**，故单列一张表、字段级合并。
+# 默认值即 OpenAI 兼容协议行为（承载 tools/tool_choice）；新协议实测有差异再加行。
+PROTOCOL_COMPAT: dict = {
+    "openai": ProviderCompat(),
+    "anthropic": ProviderCompat(),
+    "gemini": ProviderCompat(),
+    "google": ProviderCompat(),
+    "google-vertex": ProviderCompat(),
+    "google-cn": ProviderCompat(),
+}
 
 # 静态描述表：provider id 精确匹配优先，其次 baseUrl host 匹配。
 # 只收录实测过的 provider；新 provider 默认走协议标准行为，实测异常再加行。
@@ -107,17 +132,61 @@ def resolve_compat(
     provider_id: str = "",
     base_url: str = "",
     compat_dict: Optional[dict] = None,
+    protocol: str = "",
+    declared: Optional[ProviderCompat] = None,
 ) -> ProviderCompat:
     """解析 provider 的 compat 开关。
 
-    优先级：ProviderConfig 显式声明（compat_dict）> provider id 静态表 >
-    baseUrl host 静态表 > 默认值。
+    优先级（**字段级**合并，各层互不抹掉对方的字段）：
+    ProviderConfig 显式声明（compat_dict）> provider id 静态表 > baseUrl host
+    静态表 > 协议面静态表 > 调用方已持有的声明（declared）> 默认值。
+
+    协议面是**独立维度**（wire protocol）且是**最宽的一层**：它只声明某协议
+    的工具承载能力，provider 行声明该网关注意事项（如 sensetime 的
+    include_stream_usage=False）。故协议面先合、provider 行后合 —— 顺序颠倒
+    会让协议面的默认值把 provider 行的显式开关抹回默认（这正是本片红灯抓到
+    的形态）。显式声明（compat_dict）仍是最终裁决者。
     """
-    compat = ProviderCompat()
+    layers: list = []
+    face = PROTOCOL_COMPAT.get(str(protocol or "").strip().lower())
+    if face is not None:
+        layers.append(face)
     base = PROVIDER_COMPAT.get(_id_key(provider_id))
     if base is None:
-        host = _host_of(base_url)
-        base = PROVIDER_COMPAT.get(host)
+        base = PROVIDER_COMPAT.get(_host_of(base_url))
     if base is not None:
-        compat = base
+        layers.append(base)
+    if declared is not None:
+        layers.append(declared)
+
+    compat = ProviderCompat()
+    for layer in layers:
+        compat = compat.merged({f: getattr(layer, f) for f in layer.__dataclass_fields__})
     return compat.merged(compat_dict)
+
+
+def dropUnsupportedToolKeys(
+    compat: ProviderCompat, kwargs: dict, logger, where: str = ""
+) -> list:
+    """按声明位剔除网关承载不了的请求键，并**点名**上报（不静默丢弃）。
+
+    返回被剔除的键名列表（可复算的读数）。声明不支持 tools 时 tool_choice
+    一并剔除 —— 只发 tool_choice 而不发 tools 是矛盾请求。
+    """
+    dropped: list = []
+    if not getattr(compat, "supports_tools", True):
+        for key in ("tools", "tool_choice"):
+            if key in kwargs:
+                kwargs.pop(key, None)
+                dropped.append(key)
+    elif not getattr(compat, "supports_tool_choice", True):
+        if "tool_choice" in kwargs:
+            kwargs.pop("tool_choice", None)
+            dropped.append("tool_choice")
+    if dropped:
+        logger.warning(
+            "not_supported: 网关未声明承载 %s（%s）—— 已从请求体剔除",
+            "/".join(sorted(dropped)),
+            where or "unknown",
+        )
+    return dropped

@@ -7,6 +7,8 @@ LLM Client - 语言模型客户端
 import asyncio
 from neurova.core.logger import get_logger
 import logging
+
+_logger = get_logger(__name__)
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncIterator, Dict, Iterator, List, Optional
@@ -237,8 +239,25 @@ class LLMClient:
         if stream:
             params["stream"] = True
 
+        # 工具面（Issue #177）：能力声明单源在 cfg.compat，逐键挑选不再漏键。
+        # 原实现只转发了 tools —— tool_choice 全链路空转（openai_loop:281 写了它，
+        # 降级路径还 pop 它，却从未到过网关），模型因此从未被告知 auto/required/none。
+        # 声明位说承载不了就不发：supports_tools=False 时两者一并剔除，
+        # supports_tool_choice=False 时只发 tools（低容忍网关收到不认识的键会 400）。
+        compat = getattr(self.config, "compat", None)
+        if compat is not None:
+            from neurova.llm.provider_compat import dropUnsupportedToolKeys
+
+            dropUnsupportedToolKeys(
+                compat,
+                kwargs,
+                getattr(self, "logger", None) or _logger,
+                where="LLMClient._build_request_params",
+            )
         if "tools" in kwargs:
             params["tools"] = kwargs["tools"]
+        if "tools" in params and "tool_choice" in kwargs:
+            params["tool_choice"] = kwargs["tool_choice"]
 
         # 显式透传的 reasoning_effort 优先；否则按 thinking_effort 档位映射
         reasoning_effort = kwargs.get("reasoning_effort")

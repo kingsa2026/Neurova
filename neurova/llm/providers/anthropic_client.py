@@ -29,6 +29,7 @@ from neurova.llm.providers.protocol_thinking import (
     aiter_anthropic_stream_events,
     normalize_anthropic_response,
 )
+from neurova.llm.providers.tool_transport import toAnthropicToolChoice, toAnthropicTools
 
 logger = get_logger(__name__)
 
@@ -52,6 +53,8 @@ def build_anthropic_body(
     model: str,
     max_tokens: typing.Optional[int] = None,
     thinking_effort: typing.Optional[str] = None,
+    tools: typing.Optional[typing.List[dict]] = None,
+    tool_choice: typing.Optional[str] = None,
     **kwargs,
 ) -> dict:
     """OpenAI 风格 messages → Anthropic /v1/messages 请求体（纯函数）。
@@ -60,6 +63,9 @@ def build_anthropic_body(
     - thinking_effort（light/standard/deep）→ thinking budget；
       light/None 不启用 thinking（Anthropic 无"关闭"参数，缺省即关）
     - 启用 thinking 时强制 temperature=1、max_tokens > budget_tokens
+    - tools/tool_choice → Anthropic `tools`（`input_schema` 形态）与
+      `tool_choice`（auto/any/none）。原实现在此**静默丢弃**工具，
+      使原生链路上的函数调用能力消失（Issue #177）
     """
     system_parts: list = []
     convo: list = []
@@ -82,6 +88,13 @@ def build_anthropic_body(
     }
     if system_parts:
         body["system"] = "\n\n".join(system_parts)
+
+    anthropic_tools = toAnthropicTools(tools)
+    if anthropic_tools:
+        body["tools"] = anthropic_tools
+        choice = toAnthropicToolChoice(tool_choice)
+        if choice is not None:
+            body["tool_choice"] = choice
 
     budget = _THINKING_BUDGET_BY_EFFORT.get((thinking_effort or "").strip().lower())
     if budget:
@@ -143,11 +156,24 @@ class AnthropicNativeClient:
     # ── 请求体组装 ───────────────────────────────────────────
 
     def _body(self, messages, **kwargs) -> dict:
+        """请求体组装。
+
+        工具键先过声明位（`compat.supports_tools` / `supports_tool_choice`）：
+        未声明的网关一律剔除并留一行点名 `not_supported` 的日志 —— 原实现是
+        「形参根本没有 tools」，静默丢弃、无日志无报错（Issue #177 的诚实化）。
+        """
+        compat = getattr(self.config, "compat", None)
+        if compat is not None:
+            from neurova.llm.provider_compat import dropUnsupportedToolKeys
+
+            dropUnsupportedToolKeys(compat, kwargs, self.logger, where=f"{self.provider_id}._body")
         return build_anthropic_body(
             messages,
             model=self.config.model,
             max_tokens=kwargs.get("max_tokens", self.config.max_tokens),
             thinking_effort=kwargs.get("thinking_effort"),
+            tools=kwargs.get("tools"),
+            tool_choice=kwargs.get("tool_choice"),
             temperature=kwargs.get("temperature", self.config.temperature),
         )
 
