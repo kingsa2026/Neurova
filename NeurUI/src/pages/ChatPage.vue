@@ -3204,16 +3204,6 @@ onBeforeUnmount(() => {
   border-radius: 10px;
 }
 
-.nr-tool-background {
-  margin: 8px 0;
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  background: rgba(245, 158, 11, 0.08);
-  color: #b45309;
-  font-size: 12px;
-}
-
 /* 会话内按需 SSH 凭据卡覆盖层 */
 .ssh-cred-overlay {
   position: fixed;
