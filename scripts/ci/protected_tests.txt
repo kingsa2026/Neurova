@@ -670,3 +670,12 @@ tests/unit/memory_ingest/test_protected_registration.py
 #    一个都不许动；并把新字段纳入出口脱敏（`params`/`arguments` 同管），
 #    否则补键本身就成为敏感值绕过 E2 门控的旁路。）
 tests/unit/agent/test_tool_call_record_addressing.py
+
+# 上下文三链路批（Issue #90）工单 §11.3 T-10b：读侧重建 provider 合法工具轮（R1）。
+#   （根因：会话库里不存在 `role="tool"` 行——落盘的是 assistant 的
+#    `metadata.tool_calls` 展示记录，而旧读 API `get_recent_context` 只回
+#    {role,content} 且显式过滤非 user/assistant（那是一条防回灌契约）。
+#    故另立专用入口 `get_recent_model_context`：还原 assistant.tool_calls +
+#    配套 tool 行；缺配对信息的旧记录整条降级为 user 注记并计数，禁止伪造配对。
+#    判据同时反锁旧 API 形态逐字节不变，避免把展示/统计面一起拖进新语义。）
+tests/unit/agent/test_model_context_tool_rebuild.py
