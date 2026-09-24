@@ -225,7 +225,9 @@ class ChatPipeline:
 
             register_annotation_retriever(self._memory_retrieval_chain)
         except Exception as e:
-            logger.warning("AnnotationRetrieverAdapter 接入失败（降级跳过）: %s", e)
+            # 缺席必须是可见的（与 TKG/图检索两条分支同口径）：人工标注是最高权威
+            # 检索源，"没挂上"等于本轮对话拿不到人工修正过的答案，不是无事发生。
+            logger.error("AnnotationRetrieverAdapter 接入失败（本轮无人工标注可用）: %s", e)
 
         # 3. KnowledgeRetriever（知识库，中低优先级：记忆/MoE 之后、Cache 之前）
         try:
