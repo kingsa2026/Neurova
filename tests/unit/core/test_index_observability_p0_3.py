@@ -198,7 +198,10 @@ class TestHotQueryPlans:
 
         assert HOT_QUERIES, "热点查询白名单为空 = 计划基线无从谈起"
         for entry in HOT_QUERIES:
-            assert len(entry) == 3, "每条应为 (query_id, sql, params)"
+            # Issue #189 起形状为 (query_id, sql, params, 依赖表, 依赖列)：
+            # 探针库既有记忆库也有审计库，"不发不属于该库的查询"必须先知道依赖。
+            assert len(entry) == 5, "每条应为 (query_id, sql, params, table, columns)"
+            assert entry[3], f"未声明依赖表，适用性无从判定: {entry[0]}"
 
     def test_detects_index_usage(self, tmp_path):
         from neurova.core.db_indexes import explain_hot_queries
