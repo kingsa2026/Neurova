@@ -597,6 +597,12 @@ _open_chat_browser → webbrowser.open`（该函数在别的用例里被 patch �
 副作用已量过：`tests/unit` 在放宽前后收集到同样 15678 条用例（差集为空），
 所以 `python_functions` 加 `test[A-Z]*` 不改变任何现有用例的运行与否，只是防未来再踩。
 
+> 复核更正（Issue #81 复核批，2026-09-24）：此处当时记的机制有误 —— pytest 的
+> `python_functions` 默认值本就是**前缀** `test`，`def testXxx` 一直能被收集；
+> 会静默丢用例的是把它收窄成 `["test_*"]`。`test[A-Z]*` 的实际效果是**收紧**：
+> `def test` / `def testing_helper` 这类"像用例却非用例"的落点不再被收走。
+> 依据与逐条判据见 `tests/unit/core/test_pytest_collection_hygiene.py`。
+
 新增常驻守卫 2 条：生产库写入围栏用例、pytest 收集卫生守卫
 （`test_pytest_collection_hygiene.py`——实施期三次把用例写成 `def testXxx` 导致整份文件静默不跑）。
 迁移链守卫 `test_everyTableExistsAfterMigrationChain` 随 v4 一并抬到 `user_version == 4`，
