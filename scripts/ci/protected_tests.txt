@@ -251,6 +251,9 @@ tests/context/test_context_pool_hash_index.py
 #   就地改写/hash 不失配）+ 摘要沿用旧摘要不算"本轮成功"（不谎报覆盖）
 tests/unit/context/test_draw_never_mutates_archive.py
 tests/unit/context/test_summary_failure_not_reported_success.py
+# 上下文三链路修复批（Issue #90）T-03b：每轮会话身份接到装配入口
+#   （P2 两个单聊会话共用折叠摘要槽 / 池归属与台账 session 列为 None / 预算读数取别会话快照）
+tests/unit/context/test_turn_session_identity.py
 
 # Issue #80 第三轮补做（9 条尾巴）：逐文件单跑全绿后登记
 tests/unit/tools/test_tool_router_success_verdict.py
