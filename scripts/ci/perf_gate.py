@@ -20,6 +20,21 @@
 "是否发生数量级退化"，不追求精确 benchmark——追精确会让门禁变成
 flaky 噪音源，最终被人绕过。
 
+**判分用时源（Issue #176 未闭环项，构建 cnb-6t7-1k3964vd2 实测）**：
+进程内的两处微基准量的是"这段代码要花多少 CPU"，故取**本线程 CPU 时间**
+（``time.thread_time``），不取墙钟。墙钟 = 本线程 CPU 时间 + **等 CPU 的时间**，
+于是判值随同机负载漂移：同一提交 ``-004``（unit-tests-py311）报
+``1000 次池获取耗时 21.9ms > 预算 20ms`` 而 ``-005``（py312）绿，
+其后两次主线构建 11/11 全绿且其间无任何 perf / thread_pool 改动。
+更坏的是误判方向——负载越高越红，于是"让 CI 变绿"的捷径变成放宽阈值，
+而那恰恰把真正的尾延迟回归一并放行（``AGENTS.md`` 修复教义第 2 条）。
+受控取证（8 cpus / 64 自旋线程）：同一份工作墙钟读数 7.5ms → 528–1561ms，
+本线程 CPU 时间稳定在 7.4–8.5ms。
+
+冷 import 检查是**例外**且必须留墙钟：它在子进程里量"用户实际等了多久"
+（首轮对话延迟），不是"这段代码要花多少 CPU"。该例外由
+``tests/performance/test_perf_gate_contract.py`` 的两条用例分别钉住。
+
 用法：
     python scripts/ci/perf_gate.py            # 全部检查
     python scripts/ci/perf_gate.py --json     # 机器可读
@@ -54,7 +69,12 @@ class Failures(list):
 
 
 def _measure_import(module: str) -> float:
-    """在子进程里冷 import 并返回毫秒（子进程隔离 sys.modules 缓存）。"""
+    """在子进程里冷 import 并返回毫秒（子进程隔离 sys.modules 缓存）。
+
+    本函数是门禁里**唯一**该用墙钟的地方：它量的是"用户实际等了多久"
+    （首轮对话延迟），等待 CPU 的时间对用户同样是延迟，必须计入。
+    进程内的两处微基准与此相反，见模块 docstring。
+    """
     code = (
         "import time; t=time.perf_counter(); "
         f"import {module}; "
@@ -112,10 +132,11 @@ def check_step_metric_overhead(failures: Failures) -> dict:
         "motivation_observations", "rsi_iteration",
     )
     iterations = 2000
-    start = time.perf_counter()
+    # 量"这段代码要花多少 CPU"：取本线程 CPU 时间，等待不计入（见模块 docstring）
+    start = time.thread_time()
     for i in range(iterations):
         metrics.record_pipeline_step(step_names[i % len(step_names)], "executed", 1.0)
-    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    elapsed_ms = (time.thread_time() - start) * 1000.0
     per_step_us = elapsed_ms * 1000.0 / iterations
     if elapsed_ms > STEP_METRIC_BUDGET_MS:
         failures.add(
@@ -132,13 +153,22 @@ def check_step_metric_overhead(failures: Failures) -> dict:
 
 
 def check_shared_pool_reuse(failures: Failures) -> dict:
-    """检查 3：共享线程池确为复用（不得退化为每次新建池）。"""
+    """检查 3：共享线程池确为复用（不得退化为每次新建池）。
+
+    身份判据必须**持有实例引用**：原写法在集合推导里即时丢弃引用，新建出来的池
+    立刻可回收，CPython 复用同一块内存 ⇒ ``id()`` 全部相同 ⇒ ``len(pools) == 1``。
+    实测把实现换成"每次新建池"后该判据仍报绿，即这条判据从未能咬合过
+    （保留引用再比 id 则同一变异给出 1000 个不同实例）。
+    这是教义第 2 条点名禁止的"恒真断言"：看着守一条契约，对违反者一律放行。
+    """
     from neurova.core.thread_pool import get_thread_pool
 
     iterations = 1000
-    start = time.perf_counter()
-    pools = {id(get_thread_pool(name="perf-probe", max_workers=2)) for _ in range(iterations)}
-    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    # 同检查 2：取本线程 CPU 时间（池获取是纯 CPU 路径，等待不该算进判值）
+    start = time.thread_time()
+    acquired = [get_thread_pool(name="perf-probe", max_workers=2) for _ in range(iterations)]
+    elapsed_ms = (time.thread_time() - start) * 1000.0
+    pools = {id(pool) for pool in acquired}
     if len(pools) != 1:
         failures.add(
             "shared-thread-pool",
