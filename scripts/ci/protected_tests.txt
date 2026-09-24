@@ -679,6 +679,17 @@ tests/unit/memory_ingest/test_converter_qwenpaw.py
 #   上述登记纪律的守卫本身：本目录新判据文件漏登记即红。
 tests/unit/memory_ingest/test_protected_registration.py
 
+
+# 上下文三链路批（Issue #90）T-10a：工具轮的配对信息必须活得回会话台账。
+#   （根因：调用侧展示记录只有 `{type,tool_name,params,timestamp}` —— 落进
+#    会话 `metadata.tool_calls` 的正是这批记录，于是 id ↔ arguments 的对应
+#    关系在落盘那一刻就丢了，读侧重建 `assistant.tool_calls` 只能靠猜。
+#    同一契约的两处命中点一并钉住：解析失败分支的结果记录缺 id（结果侧不可
+#    寻址）、直取寻址读台账用空 agent_id（写侧落在会话属主目录，读侧恒落空）。
+#    第三处是 T-10a 自己引入的：新增的协议原文形态 `arguments` 未进 E2 出口
+#    门控，同一密钥在 `params` 被脱敏、在 `arguments` 原样出网。）
+tests/unit/agent/test_tool_call_record_pairing.py
+tests/unit/agent/test_tool_call_egress_redaction.py
 # Issue #81 复核批：pytest 收集卫生守卫（此前从未登记 —— 它红着也没人知道）。
 #   判据按**活配置**（pytestconfig.getini）判定"名字像用例却收不到"，
 #   不抄一份模式（抄一份就是第二份事实源：配置改了守卫判的还是旧口径，
