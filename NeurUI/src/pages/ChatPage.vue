@@ -387,7 +387,7 @@ import { isDefaultChatTitle } from '@/utils/sessionTitle'
 import { useRouter } from 'vue-router'
 import { useChat } from '@/composables/useChat'
 import { reorderConsoleSessions } from '@/api/modules/console'
-import type { ChatMessage, Session, PendingFile } from '@/types/chat'
+import type { ChatMessage, Session } from '@/types/chat'
 import { api } from '@/api'
 import { extractUploadedFileId } from '@/api/modules/files'
 import { useGovernanceApproval } from '@/composables/useGovernanceApproval'
@@ -420,6 +420,7 @@ import { useRightDockStore } from '@/stores/rightDock'
 import { useSessionOps } from '@/composables/useSessionOps'
 import { registerRateLimitSwitchHook, useChatModels } from '@/composables/useChatModels'
 import { usePendingFiles } from '@/composables/usePendingFiles'
+import { formatFileSize, getFileCategory, getFileIcon } from '@/utils/fileKind'
 import { useASRRecording } from '@/composables/useASRRecording'
 import { useAutoVoice } from '@/composables/useAutoVoice'
 import { useSlashCommands, setupSlashCommands } from '@/composables/useSlashCommands'
@@ -442,8 +443,6 @@ import {
   toggleStep,
   deriveStreamPhase,
   followActiveReasoningScroll,
-  isNearBottom,
-  type ChatStep,
 } from '@/utils/chatSteps'
 import { createQueueDrainer } from '@/utils/queueDrain'
 import type { ThinkingEffort } from '@/composables/useThinkingEffort'
@@ -621,7 +620,7 @@ const {
   loadChatModels,
   noModelsHint,
 } = useChatModels()
-const { pendingFiles } = usePendingFiles()
+const { pendingFiles, addFiles } = usePendingFiles()
 
 // ── 会话操作共享层（侧栏与 dock 历史/存档 tab 共用）─────────────
 const {
@@ -742,14 +741,6 @@ function streamPhaseMeta(phase: ReturnType<typeof deriveStreamPhase>): { icon: s
     case 'output':
       return { icon: 'edit', label: t('chat.phaseOutput') }
   }
-}
-
-/** 段落耗时文案（"持续 N 秒"；未封口的活跃段按当前时刻计）。 */
-function stepDurationText(step: ChatStep): string {
-  if (!step.startedAt) return ''
-  const end = step.endedAt ?? Date.now()
-  const secs = Math.max(1, Math.round((end - step.startedAt) / 1000))
-  return t('chat.stepDuration', { n: secs })
 }
 
 /** 旧消息（无 steps）的兜底工具列表：toolCalls 优先，legacy 单工具次之。 */
@@ -1454,11 +1445,6 @@ async function attachAudioUrl(msg: ChatMessage, url: string): Promise<void> {
 // reasoningStick 记录用户最近一次滚动是否贴底——向上翻阅即暂停拽回，回到底部恢复。
 const reasoningStick = ref(true)
 
-function onReasoningScroll(e: Event): void {
-  const el = e.target as HTMLElement
-  reasoningStick.value = isNearBottom(el.scrollTop, el.scrollHeight, el.clientHeight)
-}
-
 function followReasoningScroll(): void {
   if (!reasoningStick.value) return
   // nextTick：文本已入 DOM（scrollHeight 增长）后再贴底
@@ -1904,38 +1890,8 @@ function formatAudioTime(seconds: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// File Handling (Enhanced with Drag & Drop, Paste, Type Detection)
+// File Handling：页面只保留拖放（投递到共享属主 usePendingFiles.addFiles）
 // ---------------------------------------------------------------------------
-const MAX_FILE_SIZE = 50 * 1024 * 1024 // 50MB
-
-function handleFileSelect(e: Event) {
-  const target = e.target as HTMLInputElement
-  if (!target.files) return
-  addFiles(Array.from(target.files))
-  target.value = ''
-}
-
-function addFiles(files: File[]) {
-  for (const file of files) {
-    if (file.size > MAX_FILE_SIZE) {
-      console.warn(`[File] ${file.name} exceeds 50MB limit, skipped`)
-      continue
-    }
-
-    const pf: PendingFile = { name: file.name, file, type: file.type }
-    if (file.type.startsWith('image/')) {
-      pf.preview = URL.createObjectURL(file)
-    }
-    pendingFiles.value.push(pf)
-  }
-}
-
-function removePendingFile(index: number) {
-  const pf = pendingFiles.value[index]
-  if (pf.preview) URL.revokeObjectURL(pf.preview)
-  pendingFiles.value.splice(index, 1)
-}
-
 // Drag & Drop
 function onDragEnter(e: DragEvent) {
   dragCounter++
@@ -1962,66 +1918,8 @@ function onDrop(e: DragEvent) {
   }
 }
 
-// Paste from clipboard
-function handlePaste(e: ClipboardEvent) {
-  const items = e.clipboardData?.items
-  if (!items) return
-
-  const files: File[] = []
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i]
-    if (item.kind === 'file') {
-      const file = item.getAsFile()
-      if (file) files.push(file)
-    }
-  }
-  if (files.length > 0) {
-    e.preventDefault()
-    addFiles(files)
-  }
-}
-
-// File type utilities
-function getFileCategory(type?: string): string {
-  if (!type) return 'unknown'
-  if (type.startsWith('image/')) return 'image'
-  if (type.startsWith('audio/')) return 'audio'
-  if (type.startsWith('video/')) return 'video'
-  if (type === 'application/pdf') return 'pdf'
-  if (type.includes('spreadsheet') || type.includes('csv')) return 'spreadsheet'
-  if (type.includes('presentation') || type.includes('powerpoint')) return 'presentation'
-  if (
-    type.includes('document') ||
-    type.includes('msword') ||
-    type.includes('wordprocessing')
-  )
-    return 'document'
-  if (type.startsWith('text/')) return 'text'
-  return 'file'
-}
-
-function getFileIcon(type?: string): string {
-  const cat = getFileCategory(type)
-  const icons: Record<string, string> = {
-    image: 'image',
-    audio: 'audio',
-    video: 'image',
-    pdf: 'fileText',
-    spreadsheet: 'fileText',
-    presentation: 'fileText',
-    document: 'fileText',
-    text: 'fileText',
-    file: 'file',
-    unknown: 'file',
-  }
-  return icons[cat] || 'file'
-}
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-}
+// 粘贴链路（handlePaste）与附件分类/图标/体积文案已收口：
+// 前者在 composables/usePendingFiles.ts，后者在 utils/fileKind.ts。
 
 // P2-10：复制按钮复位定时器句柄（卸载时清理，防回调触碰已销毁 DOM）
 const copyResetTimers: number[] = []
@@ -2346,18 +2244,6 @@ function scrollToBottomForHistory(): void {
   })
 }
 
-/** 定位到指定下标消息（会话内搜索跳转用；无则回退底部）。 */
-function scrollToMessage(idx: number): void {
-  nextTick(() => {
-    const el = document.getElementById(`nr-msg-${idx}`)
-    if (el) {
-      el.scrollIntoView({ block: 'center' })
-      return
-    }
-    scrollToBottomForHistory()
-  })
-}
-
 // 补课 E：消息内容变更 → 防抖渲染 mermaid 占位
 // P2-16（审计 2026-09-11）：源改为增量信号（消息条数 + 末条 content 长度）。
 // 原 map+reduce 对全部历史消息求长度和，流式每 chunk 全量重算；流式只追加
@@ -2371,15 +2257,6 @@ watch(
   () => scheduleMermaidRender(messagesRef.value),
 )
 onMounted(() => void nextTick().then(() => renderMermaid(messagesRef.value)))
-
-function formatJSON(str?: string): string {
-  if (!str) return ''
-  try {
-    return JSON.stringify(JSON.parse(str), null, 2)
-  } catch {
-    return str
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Watch locale change → update ASR language
