@@ -3,12 +3,13 @@
 AGENT_TOOL_RESULT 等工具事件会广播到 WS/聊天渠道预览。工具 params 里
 常见 password/token/secret/api_key 等敏感键——OC 的做法是 progress 事件
 必须显式 visibility:"channel"/privacy:"public" 才进 UI。Neurova 侧采取
-等效的出口脱敏：敏感键值脱敏 + 显式 visibility:"private" 的事件整体丢 params。
+等效的出口脱敏：载荷键（`TOOL_PAYLOAD_KEYS`）内的敏感键值脱敏 +
+显式 visibility:"private" 的事件整体丢掉全部载荷键。
 """
 
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 from neurova.core.logger import get_logger
 
@@ -16,10 +17,12 @@ logger = get_logger(__name__)
 
 _SENSITIVE_KEY = re.compile(r"password|passwd|secret|token|api_key|apikey|authorization|credential", re.I)
 
-#: 记录里承载"调用参数"的键。`arguments` 是协议原文形态（provider 回传串），
-#: `params` 是解析后的结构 —— 两者是同一份事实的两种形态，出口门控必须一起认，
-#: 只脱一个等于让同一密钥在出口处出现两个结论。
-_PARAM_FIELDS = ("params", "arguments")
+#: 工具事件里承载调用参数的键名（**契约本体**，唯一事实源）。
+#: 调用侧展示记录同时写 `params`（剥离展示参数后的执行参数）与 `arguments`
+#: （模型原样传入的参数串，读侧重建协议消息用）——两者都是"参数载荷"，
+#: 出口脱敏必须按同一契约覆盖全部载荷键；曾按单键名硬编码，新增载荷键
+#: 即从 channel/SSE 出口泄露敏感值。
+TOOL_PAYLOAD_KEYS: Tuple[str, ...] = ("params", "arguments")
 
 
 def _redact_value(value: Any) -> str:
@@ -44,16 +47,33 @@ def _redact_params(params: Any) -> Any:
     return params
 
 
+def _redact_payload(value: Any) -> Tuple[Any, bool]:
+    """按载荷自身形态脱敏；返回 (脱敏值, 是否应丢弃该键)。
+
+    形态是契约的一部分，脱敏不改形态：dict/list 就地递归；JSON 串解析后
+    仍序列化成串（`arguments` 的消费方按串取用）。解析不开则**丢弃该键**并
+    出声 —— 不可定位的载荷不得原样出口（静默放行等于没脱敏）。
+    """
+    if isinstance(value, str):
+        if not value.strip():
+            return value, False
+        try:
+            parsed = json.loads(value)
+        except (ValueError, TypeError) as err:
+            logger.warning("工具事件参数载荷不是可解析 JSON，已从出口移除: %s", err)
+            return None, True
+        return json.dumps(_redact_params(parsed), ensure_ascii=False), False
+    return _redact_params(value), False
+
+
 def redact_tool_messages_for_channel(tool_messages: List[Dict]) -> List[Dict]:
     """工具事件出口脱敏（E2）。
 
     规则：
-    - 事件带 visibility:"private" → 丢掉全部参数字段（事件名/状态保留，供 UI 显示）
-    - 参数字段中敏感键（password/token/secret/api_key…）值脱敏（保留键名与形状）
+    - 事件带 visibility:"private" → 丢掉全部载荷键（事件名/状态保留，供 UI 显示）
+    - 载荷键（`TOOL_PAYLOAD_KEYS`）中敏感键（password/token/secret/api_key…）
+      的值脱敏（保留键名与形状）；解析不开的载荷整体移除
     - 其余字段原样透传；非 dict 条目原样返回
-
-    "参数字段"是集合而非单个键名（见 `_PARAM_FIELDS`）：`params` 与 `arguments`
-    是同一份调用参数的两种形态，只脱一个会让同一密钥在出口处得到两个结论。
     """
     out: List[Dict] = []
     for m in tool_messages or []:
@@ -61,25 +81,21 @@ def redact_tool_messages_for_channel(tool_messages: List[Dict]) -> List[Dict]:
             out.append(m)
             continue
         item = dict(m)
-        for field in _PARAM_FIELDS:
-            if field not in item:
-                continue
-            if item.get("visibility") == "private":
-                item.pop(field, None)
-                continue
-            raw = item[field]
-            if isinstance(raw, str):
+        if item.get("visibility") == "private":
+            for key in TOOL_PAYLOAD_KEYS:
+                item.pop(key, None)
+        else:
+            for key in TOOL_PAYLOAD_KEYS:
+                if key not in item:
+                    continue
                 try:
-                    parsed = json.loads(raw)
-                    redacted = _redact_params(parsed)
-                    # 没有敏感键时保留原文逐字形态，不做无谓的重新序列化
-                    if redacted != parsed:
-                        item[field] = json.dumps(redacted, ensure_ascii=False)
-                except (TypeError, ValueError) as e:
-                    # 解不开原文 = 判不出里面有没有敏感值，只能整体移除（不放行原文）
-                    logger.debug("%s 原文脱敏失败，整体移除: %s", field, e)
-                    item.pop(field, None)
-            else:
-                item[field] = _redact_params(raw)
+                    redacted, drop = _redact_payload(item[key])
+                except Exception as e:  # noqa: BLE001 - 脱敏失败即不派发，不静默放行
+                    logger.debug("%s 脱敏失败，整体移除: %s", key, e)
+                    drop = True
+                if drop:
+                    item.pop(key, None)
+                else:
+                    item[key] = redacted
         out.append(item)
     return out
