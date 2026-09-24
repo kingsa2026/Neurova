@@ -20,6 +20,10 @@ from typing import Optional, Tuple
 
 MAX_EXTRACT_CHARS = 200_000  # 20 万字符上限（真正的上下文闸门）
 
+#: 文本抽取通道结构上打不开的原始二进制容器（不是"解析失败"，是"不该走这条通道"）。
+#: 名单只用来做**如实告知**（"当前无可用抽取原语"），不参与抽取分支判定。
+_RAW_BINARY_EXTENSIONS = frozenset({".db", ".sqlite", ".sqlite3", ".db3"})
+
 
 def _decode_text(data: bytes, filename: str) -> Optional[str]:
     text = None
@@ -98,6 +102,34 @@ def _extract_pdf(data: bytes) -> str:
         if page_text.strip():
             parts.append(page_text)
     return "\n".join(parts)[:MAX_EXTRACT_CHARS]
+
+
+#: 各分类下"真能把这类附件读出内容"的注册原语名（单源建议表）。
+#: 键是文件**分类**，值取自 `builtin_tools.get_registered_tool_names()` 的真实名字；
+#: 表里没有该分类即表示"当前无可用抽取原语"——此时调用方必须如实说没有，
+#: 不得编一个名字充当路标（假路标会让模型拿读不到该附件的工具去试）。
+#: 本表**不含任何按路径读取的原语**：附件取用凭证只有 `file_id`（D1）。
+_EXTRACTION_PRIMITIVES = {
+    "document": "file_parse",
+}
+
+
+def suggestExtractionPrimitive(filename: str, file_type: str) -> Optional[str]:
+    """给出"哪条注册原语可能读得出这个附件"，没有就返回 None（不编名字）。
+
+    只做分类到原语的映射，不猜内容：`filename` 参与分类是为了让
+    `.db` / `.sqlite` 这类"扩展名即能力边界"的附件走 `None`，
+    而不是被 `file_type=file` 笼统盖住。
+    """
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext in _RAW_BINARY_EXTENSIONS:
+        return None
+    primitive = _EXTRACTION_PRIMITIVES.get(file_type)
+    if primitive is None:
+        return None
+    from neurova.builtin_tools import get_registered_tool_names
+
+    return primitive if primitive in get_registered_tool_names() else None
 
 
 def extract_attachment_text(data: bytes, filename: str, file_type: str) -> Tuple[Optional[str], str]:
