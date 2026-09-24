@@ -94,10 +94,13 @@ class TestTtlEvictionArchived(unittest.TestCase):
         old.created_at = dt.datetime.now() - dt.timedelta(seconds=120)
         fresh = _ctx("新鲜轮次")
         pool.add_context(old)
+        # B6-10 批次 D：回收挂在写入咽喉，故本次写入即把过期条目归档剔除。
+        # 断言未删，只是把"谁触发回收"这一句搬到真面（显式调用此时已无残留）。
         pool.add_context(fresh)
 
         removed = pool.cleanup_expired()
-        self.assertEqual(removed, 1)
+        self.assertEqual(removed, 0)
+        self.assertEqual(pool.resident_count(), 1)
         recalled = pool.recall_evicted("过期但重要")
         self.assertEqual(len(recalled), 1)
 
