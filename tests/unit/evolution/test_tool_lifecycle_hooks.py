@@ -4,8 +4,13 @@
 - AutoSkillImprover: 全仓无任何 record_usage 调用 → 技能成败数据从不采集，
   改进提案永不产生。接入点: Agent._on_skill_post_execute（成败都记录）+
   propose_pending_improvements 批量提案。
-- EvolutionOrchestrator.on_before_tool_selection: 归档/冻结工具过滤与权重排序
+- EvolutionOrchestrator.on_before_tool_selection: 归档/冻结工具过滤
   从未在生产路径执行。接入点: orchestrator.build_tools_for_llm 尾部。
+
+T-02 后本方法只取该钩子的**过滤**语义：排序不再落到下发数组上（权重每轮
+都在动，重排即毁 provider 前缀缓存），改作目录压缩的裁剪优先级。故本文件的
+断言为「过滤生效 + 聚合顺序原样保留」，裁剪优先级的落点见
+`tests/unit/context/test_tool_catalog_stability.py`。
 """
 
 import unittest
@@ -19,7 +24,8 @@ def _tool_schema(name):
 
 
 class ApplyToolLifecycleTest(unittest.TestCase):
-    def test_filters_archived_and_ranks_by_weight(self):
+    def test_filters_archived_and_keeps_aggregation_order(self):
+        """过滤生效；下发顺序取自聚合顺序，不按权重重排（T-02 前缀缓存稳定）。"""
         from neurova.context.orchestrator import ContextOrchestrator
 
         fake_evolution = SimpleNamespace(
@@ -29,13 +35,53 @@ class ApplyToolLifecycleTest(unittest.TestCase):
                 "filtered": ["tool_c"],
             }
         )
-        stub = SimpleNamespace(_agent=SimpleNamespace(evolution=fake_evolution))
+        stub = ContextOrchestrator.__new__(ContextOrchestrator)
+        stub._agent = SimpleNamespace(evolution=fake_evolution)
         tools = [_tool_schema("tool_a"), _tool_schema("tool_b"), _tool_schema("tool_c")]
 
         result = ContextOrchestrator._apply_tool_lifecycle(stub, tools)
 
         names = [t["function"]["name"] for t in result]
-        self.assertEqual(names, ["tool_b", "tool_a"], "应按权重排序并剔除被过滤工具")
+        self.assertEqual(names, ["tool_a", "tool_b"], "应剔除被过滤工具且保持聚合顺序")
+        # ranking 不是只写不读：它被记成会话级裁剪优先级（消费面 = 目录压缩）
+        self.assertEqual(stub._toolClipOrder["direct"], ["tool_b", "tool_a"])
+
+    def test_clip_priority_follows_the_session_not_each_round(self):
+        """裁剪优先级按会话冻结：同会话内权重漂移不得改写它。"""
+        from neurova.context.orchestrator import ContextOrchestrator
+
+        order = {"ranking": ["tool_a", "tool_b"], "filtered": []}
+        fake_evolution = SimpleNamespace(
+            on_before_tool_selection=lambda available_tools=None, context="", tools=None: dict(order)
+        )
+        stub = ContextOrchestrator.__new__(ContextOrchestrator)
+        stub._agent = SimpleNamespace(evolution=fake_evolution)
+        tools = [_tool_schema("tool_a"), _tool_schema("tool_b")]
+
+        ContextOrchestrator._apply_tool_lifecycle(stub, tools)
+        order["ranking"] = ["tool_b", "tool_a"]  # 第二轮权重翻转
+        ContextOrchestrator._apply_tool_lifecycle(stub, tools)
+
+        self.assertEqual(stub._toolClipOrder["direct"], ["tool_a", "tool_b"], "同会话内优先级应冻结")
+
+    def test_bookkeeping_failure_never_unfilters(self):
+        """裁剪优先级簿记失败，过滤结果仍必须生效（不得连带放行归档工具）。"""
+        from neurova.context.orchestrator import ContextOrchestrator
+
+        fake_evolution = SimpleNamespace(
+            on_before_tool_selection=lambda **kwargs: {"ranking": ["tool_a"], "filtered": ["tool_c"]}
+        )
+        stub = ContextOrchestrator.__new__(ContextOrchestrator)
+        stub._agent = SimpleNamespace(evolution=fake_evolution)
+        tools = [_tool_schema("tool_a"), _tool_schema("tool_c")]
+
+        def _boom():
+            raise RuntimeError("键派生失败")
+
+        stub._resolve_window_cache_key = _boom
+        result = ContextOrchestrator._apply_tool_lifecycle(stub, tools)
+
+        self.assertEqual([t["function"]["name"] for t in result], ["tool_a"], "簿记失败不得放行归档工具")
 
     def test_noop_without_evolution(self):
         from neurova.context.orchestrator import ContextOrchestrator
