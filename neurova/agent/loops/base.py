@@ -161,9 +161,12 @@ class BaseAgentLoop(ABC):
         # 按它判，不得反过来把"取值里那份默认 `{}`"当成"给过"（那判据恒真）。
         _raw_arguments = tool_call.get("function", {}).get("arguments", "{}")
         _has_arguments = "arguments" in (tool_call.get("function") or {})
+        # 模型原始载荷在此冻成快照（`arguments` 记录的就是它）：执行面随后会剥离
+        # taskName*，dict 形态若与 `_tc_arguments` 共用同一对象，剥离会就地改写
+        # 原始载荷 —— "模型原样传入"与"剥离后的执行参数"必须各自成立。
         _tc_arguments_text = (
             _raw_arguments if isinstance(_raw_arguments, str)
-            else json.dumps(_raw_arguments, ensure_ascii=False)
+            else _safe_json_dumps(_raw_arguments)
         )
 
         _tc_arguments = {}
@@ -171,7 +174,7 @@ class BaseAgentLoop(ABC):
             if isinstance(_raw_arguments, str):
                 _tc_arguments = json.loads(_raw_arguments) if _raw_arguments.strip() else {}
             elif isinstance(_raw_arguments, dict):
-                _tc_arguments = _raw_arguments
+                _tc_arguments = dict(_raw_arguments)
         except (json.JSONDecodeError, TypeError, ValueError) as _parse_err:
             _parse_error = f"工具 {_tc_function_name} 参数 JSON 解析失败: {_parse_err}"
             logger.warning(_parse_error)
