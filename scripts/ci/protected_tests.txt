@@ -694,13 +694,6 @@ tests/unit/core/test_pytest_collection_hygiene.py
 #    一个都不许动。）
 tests/unit/agent/test_tool_call_record_addressing.py
 
-# 上下文三链路批（Issue #90）T-10a 放大视角命中点：工具事件出口脱敏的**键集合契约**。
-#   （根因：出口脱敏曾按 `params` 单键名硬编码，T-10a 新增的 `arguments`
-#    原样透出敏感值。判据取契约本体 `TOOL_PAYLOAD_KEYS`，含反向控制：
-#    键集合漏一个即红、且必须与写入端 `agent/loops/base.py` 同源。
-#    该契约的逐条不变量只此一处，调用侧记录文件不另写第二份。）
-tests/unit/security/test_tool_event_export_redaction.py
-
 # 上下文三链路批（Issue #90）T-10a 放大视角第二命中点：直取寻址须按会话属主读台账。
 #   （根因：写侧 `mem_core.save_to_session` 落在 `<sessions>/<agent_id>/`，
 #    读侧 `_recall_by_call_id` 却传空 agent_id —— 空值被会话管理器归入
