@@ -341,8 +341,8 @@ class TestIdentitylessTurnIsVisible:
             key = orch._resolve_window_cache_key()
 
         assert key == "direct", "无身份轮应落 direct（回落链的终点）"
-        report = orch.get_context_health()["session_identity"]
-        assert report["identityless_turns"] >= 1, (
+        report = orch.get_context_health()["turn_identity"]
+        assert report["identityless"] >= 1, (
             "无身份轮没有被计数 —— 共用槽静默发生，与改前无法区分"
         )
         assert any(
@@ -356,8 +356,8 @@ class TestIdentitylessTurnIsVisible:
         _setTurnIdentity("sess_ok")
         orch._resolve_window_cache_key()
 
-        report = orch.get_context_health()["session_identity"]
-        assert set(report) >= {"identityless_turns", "last_error"}, report
+        report = orch.get_context_health()["turn_identity"]
+        assert set(report) >= {"identityless", "last_error"}, report
 
 
 class TestNoSecondIdentityChannel:
