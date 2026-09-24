@@ -612,3 +612,18 @@ tests/unit/context/test_fold_archive_integrity.py
 #   （`scripts/ci/context_deadline_ledger.py`）读的是残留站点，给不出终局，
 #   故本守卫补**拥有者级**判据：直接对 `ContextPool` 断言那两个出口不存在。
 tests/unit/context/test_context_compression_single_face.py
+
+# 上下文域（Issue #90）B6-10 批次 D：TTL 回收的真调用点 + 会话身份单一写入方。
+#   根因（两条同族：定义了、生产到不了）：
+#   ① `ContextPool.cleanup_expired` 零生产调用点 —— 读面（draw / query /
+#      get_contexts）只做惰性过滤，过期条目永远占着常驻列表、
+#      `archived_by_reason["ttl"]` 恒 0，"TTL 生效"在内存规模上是空账；
+#   ② `ContextOrchestrator.set_session_id` 零生产调用点 —— 会话身份有
+#      两个写入方（构造期入参 + build_context 每轮刷新），第二写入方
+#      就是第二份事实源。
+#   改后：① 回收挂在**写入咽喉** `add_context`（所有写入方含旁路自动继承，
+#      不在读面加判空），代价由 `_ttl_floor` 的 O(1) 前置判定兜住，
+#      生产档 `ttl_seconds=0` 首行即返回；回收不等于丢失（仍可 recall_evicted）。
+#      ② setter 删净，身份的可变写入点收口为 build_context 每轮刷新一处。
+#   契约搬到真面、断言未删（逐条见提交说明与台账脚本/ci/contextDeadlines.txt）。
+tests/unit/context/test_ttl_reclaim_and_session_identity.py
