@@ -5331,6 +5331,27 @@ class ToolExecutor:
             except Exception:
                 logger.debug("tool metrics 埋点跳过", exc_info=True)
 
+        # S2 生产点（T-03）：成败判据就是上面这个 `success`（客观回执，来自
+        # `_result_is_success`）。策略拒绝不算缺口（决策 ≠ 故障，与断点 B 同口径）。
+        # 阈值判定在 `capability_gap.recordCapabilityGap` 一处，此处不重写。
+        if not policy_denial:
+            try:
+                from neurova.agent.capability_gap import (
+                    GAP_REPEATED_TOOL_FAILURE,
+                    noteToolSuccess,
+                    recordCapabilityGap,
+                )
+
+                if success:
+                    noteToolSuccess()
+                else:
+                    recordCapabilityGap(
+                        GAP_REPEATED_TOOL_FAILURE,
+                        {"tool": tool_name, "tool_source": tool_source or ""},
+                    )
+            except Exception:
+                logger.debug("能力缺口 S2 投递跳过", exc_info=True)
+
         # 记录工具使用统计 → 传播到肌肉记忆 L1/L2/L3
         if self.tool_memory and not policy_denial:
             try:

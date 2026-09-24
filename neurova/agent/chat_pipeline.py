@@ -595,6 +595,11 @@ class ChatPipeline:
         """初始化 Agent 的临时状态（经 Agent 轮次级显式 API，P3-c 收窄）"""
         self._agent.set_current_reasoning(None)
         self._agent.reset_tool_messages()
+        # 能力缺口收件箱与工具消息账本同生命周期：同轮起点清空，
+        # 否则上一轮的缺口会在这一轮无据重放一次合成（T-03）。
+        from neurova.agent.capability_gap import clearCapabilityGap
+
+        clearCapabilityGap(str(ctx.session_id or ""))
         # session_id 透传给工具层（蜂群工具派生子 Agent 时广播事件用）
         # JWT 登录用户透传给工具层（三层隔离：planning 归属/治理/审计用）。
         # console /chat 的 metadata 已携带 JWT user_id（=sub，与 neuser_id 同源）；
@@ -1174,23 +1179,20 @@ class ChatPipeline:
             return
 
         try:
-            action_keywords = [
-                "帮我",
-                "读取",
-                "写入",
-                "搜索",
-                "下载",
-                "转换",
-                "生成",
-                "read",
-                "write",
-                "search",
-                "download",
-                "convert",
-                "generate",
-            ]
-            if not any(kw in ctx.user_input.lower() for kw in action_keywords):
+            # 入口判据由**用户措辞关键词**改为**能力缺口**（T-03）。
+            # 老判据的病灶：事故三轮原话（"还有这个 你看看有什么信息可以提炼"
+            # "继续补充" "出什么问题了？继续任务"）零命中，而模型确实缺一条
+            # 读 SQLite 的能力 —— 入口只对"用户说得像不像命令"敏感，
+            # 对"确实缺能力"不敏感。缺口信号单源在 `agent/capability_gap.py`。
+            from neurova.agent.capability_gap import detectCapabilityGap
+
+            # 附件缺口（S1）由注入步在生产点投递（那里才知道抽取结果），
+            # 此处只消费判据。
+            gap = detectCapabilityGap()
+            if not gap.hasGap:
                 return
+
+            logger.info("[能力缺口] 驱动自主创建：kinds=%s", gap.kinds)
 
             skill_registry = getattr(self._agent, "_skill_registry", None)
             has_tool = False
@@ -1556,6 +1558,11 @@ class ChatPipeline:
                     status,
                     file_id or "缺失",
                 )
+                # S1 生产点（T-03）：这里才知道"这个附件真读不出内容"，
+                # `status` 也是抽取器给的那一份。缺口驱动入口消费它。
+                from neurova.agent.capability_gap import noteAttachmentSignal
+
+                noteAttachmentSignal(filename, file_type, file_id, status)
                 parts.append(
                     composeUnparseableAttachmentNotice(
                         filename=filename,
