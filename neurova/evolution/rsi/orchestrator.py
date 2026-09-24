@@ -1051,7 +1051,25 @@ class RSIOrchestrator:
             "escalation": self._last_escalation,
             "experience_channel": experience_channel,
             "metrics": self.metrics.get_dashboard_data(),
+            # 能力缺口读数（T-03 的读侧）：写侧在 `agent/capability_gap` →
+            # `agent/gap_metric_channel`，读侧在此 —— 只写不读是断点
+            # （AGENTS §2），故写进同一个状态面的字段里。
+            "capability_gap": _readGapMetrics(),
         }
+
+
+def _readGapMetrics() -> Dict[str, Any]:
+    """能力缺口指标读侧（写侧见 `agent/gap_metric_channel`）。
+
+    独立函数而非直接 import：`agent` 包与本模块的导入链互相牵连，
+    函数级 import 让"读侧未接线"退化为一个空读数而不是 ImportError。
+    """
+    try:
+        from neurova.agent.capability_gap import gapMetricReadout
+
+        return gapMetricReadout()
+    except Exception:  # noqa: BLE001 - 观测面缺失不得让状态面整体失败
+        return {"by_kind": {}, "total": 0}
 
 
 def create_rsi_orchestrator(
