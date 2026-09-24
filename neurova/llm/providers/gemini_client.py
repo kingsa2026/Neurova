@@ -27,6 +27,9 @@ _THINKING_BUDGET_BY_EFFORT = {"standard": 2048, "deep": 8192}
 
 _DEFAULT_MAX_TOKENS = 4096
 
+#: 每条消息的固定开销（与 `LLMClient._PER_MESSAGE_OVERHEAD` 同源口径）。
+_PER_MESSAGE_OVERHEAD = 4
+
 
 def gemini_endpoint_urls(base_url: str, model: str) -> typing.Tuple[str, str]:
     """base_url → (非流式 URL, 流式 SSE URL)。
@@ -192,8 +195,21 @@ class GeminiNativeClient:
         return max(1, estimate_tokens(text))
 
     def count_message_tokens(self, messages, tools=None) -> int:
+        """输入 token 总量（含 `messages` 里的 tool_calls 与 `tools` 目录）。
+
+        与 `LLMClient.count_message_tokens` 逐字同口径：单一事实源，不另立尺子。
+        原实现把 `tools` 形参收下就丢，工具目录不进预算（与 `tool_choice`
+        同型的「接受但不读」死参）。
+        """
         total = 0
         for msg in messages or []:
             content = msg.get("content") or ""
-            total += self.count_tokens(str(content)) + 4
+            total += self.count_tokens(str(content)) + _PER_MESSAGE_OVERHEAD
+            for tc in (msg.get("tool_calls") or []) if isinstance(msg, dict) else []:
+                fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                total += self.count_tokens(str(fn.get("arguments", ""))) + self.count_tokens(
+                    str(fn.get("name", ""))
+                )
+        for tool in tools or []:
+            total += self.count_tokens(str(tool))
         return total

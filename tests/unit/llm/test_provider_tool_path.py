@@ -416,3 +416,73 @@ class TestPreConvertedToolsSurvive:
             tools=[{"type": "function", "function": {"name": ""}}],
         )
         assert "tools" not in body
+
+
+# ---------------------------------------------------------------------------
+# 7) 输入预算：原生客户端不得静默忽略 tools
+# ---------------------------------------------------------------------------
+
+
+class TestNativeTokenCountingCountsTools:
+    """`count_message_tokens(messages, tools=...)` 的 `tools` 形参在原生客户端里
+    只被接收、从不读取 —— 与 `tool_choice` 同型的「接受但不读」死参。
+
+    真消费方存在：`multi_model_client.py` 的工具轮记账路径就是
+    `client.client.count_message_tokens(messages, tools=kwargs.get("tools"))`。
+    工具目录占上下文预算，少算即预算闸门偏松（同一契约的第二个命中点）。
+    """
+
+    _TOOLS = [
+        {
+            "type": "function",
+            "function": {
+                "name": "search_files",
+                "description": "按关键词搜文件" * 200,
+                "parameters": {"type": "object", "properties": {"q": {"type": "string"}}},
+            },
+        }
+    ]
+
+    def test_anthropic_counts_tool_catalog(self):
+        from neurova.llm.providers.anthropic_client import AnthropicNativeClient
+
+        c = AnthropicNativeClient(
+            LLMConfig(api_key="k", base_url="https://api.anthropic.com", model="claude-sonnet-4")
+        )
+        msgs = [{"role": "user", "content": "hi"}]
+        assert c.count_message_tokens(msgs, tools=self._TOOLS) > c.count_message_tokens(msgs)
+
+    def test_gemini_counts_tool_catalog(self):
+        from neurova.llm.providers.gemini_client import GeminiNativeClient
+
+        c = GeminiNativeClient(
+            LLMConfig(api_key="k", base_url="https://g/v1beta", model="gemini-2.5-flash")
+        )
+        msgs = [{"role": "user", "content": "hi"}]
+        assert c.count_message_tokens(msgs, tools=self._TOOLS) > c.count_message_tokens(msgs)
+
+    def test_native_counting_matches_openai_formula(self):
+        """两条链路对同一输入必须给出同一口径读数（单一事实源，不另立尺子）。"""
+        from neurova.llm.providers.anthropic_client import AnthropicNativeClient
+
+        c = AnthropicNativeClient(
+            LLMConfig(api_key="k", base_url="https://api.anthropic.com", model="claude-sonnet-4")
+        )
+        msgs = [{"role": "user", "content": "hi"}]
+        bare = c.count_message_tokens(msgs, tools=None)
+        with_tools = c.count_message_tokens(msgs, tools=self._TOOLS)
+        # 工具目录按「逐条序列化后计 token」的同一口径增量，量级必须可解释
+        assert with_tools - bare >= c.count_tokens(str(self._TOOLS[0]))
+
+    def test_openai_formula_consistent_with_native(self):
+        from neurova.llm.providers.anthropic_client import AnthropicNativeClient
+
+        native = AnthropicNativeClient(
+            LLMConfig(api_key="k", base_url="https://api.anthropic.com", model="claude-sonnet-4")
+        )
+        oai = LLMClient.__new__(LLMClient)
+        oai.config = LLMConfig(api_key="k", model="gpt-4")
+        msgs = [{"role": "user", "content": "hi"}]
+        assert native.count_message_tokens(msgs, tools=self._TOOLS) == oai.count_message_tokens(
+            msgs, tools=self._TOOLS
+        )
