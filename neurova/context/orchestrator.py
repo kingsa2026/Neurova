@@ -160,15 +160,7 @@ class ContextOrchestrator:
             # 摘要压缩器（经 agent.llm_client.chat 桥接真 LLM）。
             # P2-5/D5：两处装配都记进 `_context_health` 并**允许下一轮重试**——
             # 改前失败只留一行 warning、能力永久关闭，读数面上看不见。
-            self._context_health = {
-                "ledger": {"enabled": False, "attempts": 0, "last_error": None},
-                "summarizer": {"enabled": False, "attempts": 0, "last_error": None},
-                # B6-10 批次 B：折叠零丢失校验的读数（判据的消费面）。
-                # 空形状与校验模块同源，不在两处各写一份字段表。
-                "fold_integrity": self._foldIntegrityEmptyReport(),
-                # T-03b：无身份轮计数与点名（身份链断掉时必须看得见，不静默共槽）。
-                "session_identity": {"identityless_turns": 0, "last_error": None},
-            }
+            self._context_health = self._emptyContextHealth()
             _ledger_db = self._buildLedgerDb(agent_ref)
             _summarizer = self._buildSummarizer(agent_ref)
 
@@ -196,6 +188,53 @@ class ContextOrchestrator:
             )
         else:
             self.context_pool = None
+
+    def _emptyContextHealth(self) -> Dict[str, Dict]:
+        """降级/身份读数各字段的空形状（**单源**：`__init__`、直构路径与
+        `get_context_health` 都取它，不在三处各写一份字段表）。
+
+        字段语义：
+        - `ledger` / `summarizer`：装配降级（P2-5），`enabled=False` 时
+          `last_error` 必非空（点名原因）；
+        - `fold_integrity`：折叠零丢失对账（B6-10 批次 B），形状来自校验模块；
+        - `turn_identity`：每轮会话身份的解析结果（T-03b）。落到 `direct`
+          意味着本轮所有单聊共用同一个折叠摘要槽——静默共用正是本缺陷的形态，
+          所以计数与 `last_key` 必须可读。
+        """
+        return {
+            "ledger": {"enabled": False, "attempts": 0, "last_error": None},
+            "summarizer": {"enabled": False, "attempts": 0, "last_error": None},
+            "fold_integrity": self._foldIntegrityEmptyReport(),
+            "turn_identity": {"identityless": 0, "resolved": 0, "last_key": None, "last_error": None},
+        }
+
+    def _contextHealthSlot(self, key: str) -> Dict[str, Any]:
+        """取（或建）读数槽：直构路径没跑 `__init__` 时按需补一份空形状。"""
+        health = getattr(self, "_context_health", None)
+        if health is None:
+            health = self._context_health = self._emptyContextHealth()
+        return health.setdefault(key, dict(self._emptyContextHealth()[key]))
+
+    def _recordTurnIdentity(self, resolved: Optional[str]) -> None:
+        """记账本轮会话身份的解析结果（唯一写入方=每轮构建路径）。
+
+        入参是**回落链的原始结果**（可能为 None），不是回落后的键 —— 否则一个
+        真叫 `direct` 的会话会被误判成"无身份轮"。
+
+        无身份轮（`resolved is None`）**必须可见**：计数 + 首次 warning。
+        这类轮次共用同一个折叠摘要槽，正是本次缺陷的形态，靠日志猜不是可观测面。
+        """
+        record = self._contextHealthSlot("turn_identity")
+        record["last_key"] = resolved or "direct"
+        if resolved is None:
+            record["identityless"] += 1
+            if record["identityless"] == 1:
+                logger.warning(
+                    "本轮无会话身份，折叠摘要与其他无身份轮共用 direct 槽"
+                    "（每轮身份单源 `agent.current_session_id` 为空）"
+                )
+        else:
+            record["resolved"] += 1
 
     def _foldIntegrityEmptyReport(self) -> Dict[str, Any]:
         """折叠零丢失读数的空形状（与校验模块同源，不复制字段表）。"""
@@ -279,20 +318,8 @@ class ContextOrchestrator:
         `last_error` 必非空（点名声明的失败原因），消费方无需解析日志。
         """
         health = getattr(self, "_context_health", None) or {}
-        return {
-            "ledger": dict(health.get("ledger") or {"enabled": False, "attempts": 0, "last_error": None}),
-            "summarizer": dict(
-                health.get("summarizer") or {"enabled": False, "attempts": 0, "last_error": None}
-            ),
-            "fold_integrity": dict(
-                health.get("fold_integrity") or self._foldIntegrityEmptyReport()
-            ),
-            # T-03b：本轮身份的可见性读数（无身份轮不得静默共槽）。
-            "session_identity": dict(
-                health.get("session_identity")
-                or {"identityless_turns": 0, "last_error": None}
-            ),
-        }
+        empty = self._emptyContextHealth()
+        return {key: dict(health.get(key) or value) for key, value in empty.items()}
 
     @property
     def session_id(self) -> Optional[str]:
@@ -311,25 +338,37 @@ class ContextOrchestrator:
         """
         return self._session_id
 
-    def _turnSessionIdentity(self) -> Optional[str]:
-        """本轮**有效会话身份**（回落链的唯一派生处）。
+    def _resolveTurnSessionId(self) -> Optional[str]:
+        """本轮会话身份的**唯一回落链**（房间 → 构造期显式覆盖 → 每轮单源）。
 
-        T-03b（工单 §4bis）：改前 `_resolve_window_cache_key` 只认
-        `_turn_room_id` 与 `_session_id` 两条通道，而两者在生产恒空 ——
-        `chat_room_id` 只在协作轮非空，`agent_core` 构造编排器不传 `session_id`。
-        于是键恒 `direct`：两个普通单聊会话共用一条折叠摘要（探针 P2 形状一）。
+        T-03b（Issue #90 工单 §4bis）的根因不是"漏传一个参数"，而是装配入口
+        **造了第二条身份通道却全空**：构造期不传 session_id、`build_context`
+        无该形参、`chat_room_id` 又只在协作轮非空 —— 三条通道全空，键便恒退化为
+        `direct`，两个普通单聊会话共用一条折叠摘要（探针 P2 形状一）。
 
-        本轮身份**一直存在**（`chat_pipeline._init_agent_state` 每轮
-        `set_request_identity` 写入 `core/turn_context` ContextVar，读面是
-        `agent.current_session_id`）——故这里读的是已在跑的单源，不新增
-        第二条身份存储（教义第 6 条）。回落次序即来源优先级：
+        而本轮的会话身份一直存在：`ChatPipeline` 每轮经 `set_request_identity`
+        把它写进 `core.turn_context` 的 ContextVar（`agent.current_session_id`
+        即其读取契约名，后链的幂等键与落盘 session 都在用它）。所以这里只做一件事：
+        **读那份已在跑的单源**，不新增第二条身份存储（修复教义第 6 条）。
 
-        1. `_turn_room_id`：本轮协作房间（群轮身份更具体）；
-        2. `self._session_id`：构造期显式覆盖（测试 / 运维用，语义即"本来就知道是谁"）；
-        3. `self._agent.current_session_id`：本轮单源；
+        回落链次序不可换（每条都对应一个真实入口）：
+
+        1. `_turn_room_id`：协作轮的房间身份（群轮身份更具体，由
+           `build_context(chat_room_id=...)` 写入）；
+        2. `_session_id`：构造期显式覆盖 —— 测试与运维的显式入口，语义是"就按这个来"；
+        3. `self._agent.current_session_id`：每轮身份单源（深模块经 `agent_ref` 访问，
+           遵守 AGENTS.md §3；**不新增第二条身份存储**）；
         4. 全缺 → `None`（调用方落 `direct` 并计数，不静默）。
+
+        刻意**不**给 `build_context` 加 `session_id` 形参：那会与第 3 条并存成两份
+        定义（修复教义第 6 条），掩盖入口真正缺的是"读单源"而不是"少个参数"。
         """
-        room = getattr(self, "_turn_room_id", "")
+        room = getattr(self, "_turn_room_id", "") or ""
+        if room:
+            return room
+        explicit = getattr(self, "_session_id", None)
+        if explicit:
+            return explicit
         if room:
             return room
         explicit = getattr(self, "_session_id", None)
@@ -342,13 +381,17 @@ class ContextOrchestrator:
         # `__new__` 直构路径（测试/工具）没有 `_agent`：按"无身份"处理并计数，
         # 而不是让身份推导在这条路径上抛异常（那是判据被绕过）。
         agent = getattr(self, "_agent", None)
-        current = getattr(agent, "current_session_id", None) if agent is not None else None
-        if isinstance(current, str) and current:
-            return current
-        return None
+        turn_session = getattr(agent, "current_session_id", None) if agent is not None else None
+        # 契约类型是字符串（真 Agent 的 `TurnState.current_session_id` 即
+        # `str(get_turn_session_id() or "")`）。非字符串（测试替身、未装配的
+        # 占位对象）一律视为"本轮无身份"，不让它渗进缓存键与池归属。
+        if not isinstance(turn_session, str):
+            turn_session = ""
+        # 显式 `direct` 也是合法身份（某些调用方就用它当会话名），但空串不算。
+        return turn_session.strip() or None
 
     def _resolve_window_cache_key(self) -> str:
-        """折叠摘要缓存的键：**真实会话身份**（房间 id → 会话 id）。
+        """折叠摘要缓存的键：**真实会话身份**（见 `_resolveTurnSessionId` 的回落链）。
 
         注意与"记忆作用域"的分工：作用域是**隔离策略**（单聊恒 `direct`，
         用于判定"能不能看见"），而缓存键是**身份**——两个不同的单聊会话
@@ -356,10 +399,10 @@ class ContextOrchestrator:
         记账，session_id 恒 None → 所有会话共用一条（P1-1 跨会话串台）。
 
         身份取不到时落 `direct`，但**必须可见**：计数 + 首次 warning
-        （`get_context_health()["session_identity"]`）——静默共用槽正是
+        （`get_context_health()["turn_identity"]`）——静默共用槽正是
         T-03b 缺陷的形态，不能换个位置再犯一次。
         """
-        identity = self._turnSessionIdentity()
+        identity = self._resolveTurnSessionId()
         if identity:
             return identity
         self._noteIdentitylessTurn()
@@ -367,9 +410,14 @@ class ContextOrchestrator:
         return "direct"
 
     def _noteIdentitylessTurn(self) -> None:
-        """无身份轮的可见性（计数 + 首次 warning），读数并入健康面。"""
-        record = self._sessionIdentityRecord()
-        record["identityless_turns"] = int(record.get("identityless_turns") or 0) + 1
+        """无身份轮的可见性（计数 + 首次 warning），读数并入健康面。
+
+        读数槽与写入面与 `_recordTurnIdentity` **同源**（同为
+        `_contextHealthSlot("turn_identity")`）：两处各写一份字段名就是第二份
+        读数口径，消费方读到的计数会与 `last_key` 对不上。
+        """
+        record = self._contextHealthSlot("turn_identity")
+        record["identityless"] = int(record.get("identityless") or 0) + 1
         if not record.get("last_error"):
             record["last_error"] = (
                 "IdentitylessTurn: 本轮无会话身份（`_turn_room_id` / 构造期 session_id / "
@@ -380,22 +428,6 @@ class ContextOrchestrator:
                 "`agent.current_session_id` 全空），折叠摘要共槽 direct —— "
                 "静默共用槽即 T-03b 缺陷的形态，此处点名以便发现身份链路断了"
             )
-
-    def _sessionIdentityRecord(self) -> Dict[str, Any]:
-        """会话身份读数的**单源**登记（`__new__` 直构路径按需建一份）。"""
-        health = getattr(self, "_context_health", None)
-        if health is None:
-            health = self._context_health = {
-                "ledger": {"enabled": False, "attempts": 0, "last_error": None},
-                "summarizer": {"enabled": False, "attempts": 0, "last_error": None},
-            }
-        record = health.get("session_identity")
-        if record is None:
-            record = health["session_identity"] = {
-                "identityless_turns": 0,
-                "last_error": None,
-            }
-        return record
 
     def _window_cache_slot(self, key: str) -> dict:
         """取（或建）折叠摘要缓存槽；超上限时淘汰**最久未使用**的槽。
@@ -777,14 +809,16 @@ class ContextOrchestrator:
             from neurova.collaboration.memory_scope import scope_tag_for_turn
 
             self._turn_collab = bool(chat_collab)
+            # 作用域只认**房间**：单聊轮必须是 direct，把会话 id 当房间会当场破坏隔离。
             self._turn_room_id = chat_room_id or (self._session_id or "")
             turn_scope = scope_tag_for_turn(collab=self._turn_collab, room_id=self._turn_room_id)
             # T-03b 第二命中点：改前这里是 `chat_room_id or self._session_id or None`
             # ——非协作轮把 None 写进池归属，连带条目 metadata["session_id"] 缺失、
             # query() 的本会话优先排序退化、写穿台账的 session 列为 NULL。
-            # 归属与缓存键必须取**同一条**回落链（`_turnSessionIdentity`），
+            # 归属与缓存键必须取**同一条**回落链（`_resolveTurnSessionId`），
             # 各写一份就是第二份身份口径（教义第 6 条）。
-            turn_session = self._turnSessionIdentity()
+            turn_session = self._resolveTurnSessionId()
+            self._recordTurnIdentity(turn_session)
 
             # 池的唯一写入咽喉据此给**全部**写入方打作用域（含 swarm/voice/
             # 摘要回写等旁路）——写入侧单点接线，读侧闸口才有据可判。
@@ -1451,11 +1485,11 @@ class ContextOrchestrator:
             from neurova.context.composition import get_last_composition
 
             # T-03b 第三命中点：改前只认 `self._session_id`（构造期恒 None）→
-            # 退到 **agent 级**快照，面板显示的是别的会话的最近一轮规模。
-            # 身份推导只允许一处（`_turnSessionIdentity`），与缓存键、池归属同源。
+            # 退到 **agent 级** 快照，面板显示的是别的会话的最近一轮规模。
+            # 身份推导只允许一处（`_resolveTurnSessionId`），与缓存键、池归属同源。
             snapshot = get_last_composition(
                 str(getattr(self.config, "agent_id", "") or "default"),
-                self._turnSessionIdentity(),
+                self._resolveTurnSessionId(),
             )
             if snapshot:
                 used_tokens = int(snapshot.get("total_tokens") or 0)
@@ -1628,13 +1662,11 @@ class ContextOrchestrator:
         from neurova.context.fold_integrity import verifyOrchestratorFoldIntegrity
 
         # `__new__` 直构路径（测试/工具）不跑 __init__、没有 `_context_health`：
-        # 读数面按需建一份，而不是让判据在这条路径上抛异常（那是判据被绕过）。
+        # 读数面按需建一份（空形状取 `_emptyContextHealth()` 单源，不在此另写
+        # 一份字段表），而不是让判据在这条路径上抛异常（那是判据被绕过）。
         health = getattr(self, "_context_health", None)
         if health is None:
-            health = self._context_health = {
-                "ledger": {"enabled": False, "attempts": 0, "last_error": None},
-                "summarizer": {"enabled": False, "attempts": 0, "last_error": None},
-            }
+            health = self._context_health = self._emptyContextHealth()
         health["fold_integrity"] = verifyOrchestratorFoldIntegrity(self)
 
         # 更新跨轮缓存（摘要失败时保留旧摘要，下次重试增量）。
