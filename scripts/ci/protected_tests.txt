@@ -631,6 +631,22 @@ tests/unit/context/test_context_compression_single_face.py
 #   契约搬到真面、断言未删（逐条见提交说明与台账脚本/ci/contextDeadlines.txt）。
 tests/unit/context/test_ttl_reclaim_and_session_identity.py
 
+# 上下文域（Issue #90 工单）T-03b：每轮会话身份接入装配入口（先红后绿）。
+#   根因不是"漏传一个参数"，是装配入口**造了第二条身份通道却全空**：
+#   构造期不传 session_id、`build_context` 无该形参、`chat_room_id` 只在协作轮
+#   非空 → 折叠摘要缓存键恒退化为 `direct`，两个普通单聊会话共用一条摘要
+#   （探针 P2 形状一：单聊两会话串台=True，两个房间串台=False）。
+#   而本轮的会话身份一直存在：ChatPipeline 每轮把它写进 `core.turn_context`，
+#   读法就是 `agent.current_session_id`（后链的幂等键与落盘 session 已在用）。
+#   改后：① 身份回落链收口 `_resolveTurnSessionId()` 单源（房间 → 构造期显式
+#   覆盖 → 每轮身份单源），**不给** build_context 加 session_id 形参（那会与
+#   单源并存成两份定义，教义第 6 条）；② 第二命中点同批——`pool.session_id`
+#   随同一份判据，条目 metadata / query 的本会话优先 / 持久台账 session 列三处
+#   同时恢复；③ 落到 direct 必须可见（get_context_health()["turn_identity"] 有
+#   计数与 last_key，首次 warning 点名）；④ 放大视角：`get_token_budget()` 的
+#   会话快照也改读同一份回落链（原先读构造期初值，生产恒 None → 串会话读数）。
+tests/unit/context/test_turn_identity_wiring.py
+
 # Issue #81 复核：设计 §6 三条硬规则点名的**包层守卫**漏登记（14 文件 / 197 用例）。
 #   根因不是"少写一行"：受保护子集的语义是"这些回归有人守"，但清单只靠人记得补——
 #   文件在仓、逐文件单跑全绿、CI 全绿，而子集对它们命中 0，判据从未在 CI 上跑过。
