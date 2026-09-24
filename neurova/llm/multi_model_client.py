@@ -302,6 +302,10 @@ class MultiModelLLMClient:
                     provider_id=provider.id,
                     base_url=provider.base_url,
                     compat_dict=getattr(provider, "compat_dict", None),
+                    # 协议面（Issue #177）：工具承载能力按 wire protocol 声明，
+                    # 与 provider id / host 行是不同维度、字段级合并。此前解析
+                    # 只按 provider 行，协议面根本没有出口。
+                    protocol=str(provider.provider),
                 ),
                 **_timeout_kwargs,
             )

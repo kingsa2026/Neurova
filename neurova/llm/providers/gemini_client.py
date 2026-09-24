@@ -17,6 +17,7 @@ import aiohttp
 
 from neurova.core.logger import get_logger
 from neurova.llm.providers.protocol_thinking import normalize_gemini_response
+from neurova.llm.providers.tool_transport import toGeminiToolChoice, toGeminiTools
 
 logger = get_logger(__name__)
 
@@ -46,6 +47,8 @@ def build_gemini_body(
     messages: typing.List[dict],
     max_tokens: typing.Optional[int] = None,
     thinking_effort: typing.Optional[str] = None,
+    tools: typing.Optional[typing.List[dict]] = None,
+    tool_choice: typing.Optional[str] = None,
     **kwargs,
 ) -> dict:
     """OpenAI 风格 messages → Gemini generateContent 请求体（纯函数）。
@@ -53,6 +56,9 @@ def build_gemini_body(
     - system 消息 → systemInstruction；其余仅保留 user/assistant 轮
     - thinking_effort（standard/deep）→ thinkingConfig.thinkingBudget；
       light/None 不传（保持模型默认）
+    - tools/tool_choice → `tools[].functionDeclarations[]` 与 `toolConfig`
+      （AUTO/ANY/NONE）。原实现**静默丢弃**工具，使原生链路上的函数调用
+      能力消失（Issue #177）
     """
     system_parts: list = []
     contents: list = []
@@ -75,6 +81,13 @@ def build_gemini_body(
     }
     if system_parts:
         body["systemInstruction"] = {"parts": [{"text": "\n\n".join(system_parts)}]}
+
+    gemini_tools = toGeminiTools(tools)
+    if gemini_tools:
+        body["tools"] = gemini_tools
+        tool_config = toGeminiToolChoice(tool_choice)
+        if tool_config is not None:
+            body["toolConfig"] = tool_config
 
     budget = _THINKING_BUDGET_BY_EFFORT.get((thinking_effort or "").strip().lower())
     if budget:
@@ -127,10 +140,18 @@ class GeminiNativeClient:
     # ── 请求体组装 ───────────────────────────────────────────
 
     def _body(self, messages, **kwargs) -> dict:
+        """请求体组装，工具键先过声明位（未声明即剔除并点名 not_supported）。"""
+        compat = getattr(self.config, "compat", None)
+        if compat is not None:
+            from neurova.llm.provider_compat import dropUnsupportedToolKeys
+
+            dropUnsupportedToolKeys(compat, kwargs, self.logger, where=f"{self.provider_id}._body")
         return build_gemini_body(
             messages,
             max_tokens=kwargs.get("max_tokens", self.config.max_tokens),
             thinking_effort=kwargs.get("thinking_effort"),
+            tools=kwargs.get("tools"),
+            tool_choice=kwargs.get("tool_choice"),
             temperature=kwargs.get("temperature", self.config.temperature),
         )
 
