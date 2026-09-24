@@ -275,6 +275,8 @@
   cursor: pointer;
   user-select: none;
   min-width: 0;
+  /* 窄容器（分屏/协作房间/移动端）下子项换行，避免徽标与耗时被挤成竖排 */
+  flex-wrap: wrap;
 }
 
 .nr-step-header:hover {
@@ -290,9 +292,10 @@
 .nr-step-title {
   font-size: 12px;
   color: var(--nr-text-secondary, #9aa0ac);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* 长任务名/长工具名折行显示：原先 nowrap+ellipsis 把内容裁成省略号，
+     用户看不到工具到底在做什么（报障 2026-09-24） */
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .nr-step-item.is-active .nr-step-title {
@@ -370,7 +373,12 @@
   border-radius: 6px;
   padding: 8px 10px;
   margin: 0;
-  overflow-x: auto;
+  /* 折行优先：JSON 里的长路径/token 原先只能横向拖动（pre + overflow-x: auto），
+     改 pre-wrap + anywhere 后按容器宽折行，超长内容仍靠纵向滚动兜底 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
+  overflow-y: auto;
   font-family: var(--nr-font-mono);
   max-height: 120px;
 }
@@ -415,7 +423,11 @@
   border-radius: 6px;
   padding: 8px 10px;
   margin: 0;
-  overflow-x: auto;
+  /* 与 .nr-tool-args 同契约（同一次报障的两块都改了） */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
+  overflow-y: auto;
   font-family: var(--nr-font-mono);
   max-height: 120px;
 }
@@ -428,6 +440,8 @@
   background: rgba(245, 158, 11, 0.08);
   color: #b45309;
   font-size: 12px;
+  /* 同"卡内换行"契约：提示条里的长路径/句柄也要折行 */
+  overflow-wrap: anywhere;
 }
 
 /* ── Legacy 推理块（旧消息无 steps 时兜底）── */
@@ -465,6 +479,8 @@
   color: var(--nr-text-tertiary);
   line-height: 1.5;
   white-space: pre-wrap;
+  /* 同"卡内换行"契约：无空格长 token（句柄/路径）按容器宽折断 */
+  overflow-wrap: anywhere;
   border-top: 1px solid var(--nr-border-light);
 }
 
@@ -482,6 +498,7 @@
   gap: 8px;
   cursor: pointer;
   user-select: none;
+  flex-wrap: wrap;
 }
 
 .nr-tool-header:hover {
@@ -502,4 +519,6 @@
   font-size: 13px;
   font-weight: 600;
   color: var(--nr-text-primary);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
