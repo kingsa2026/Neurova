@@ -155,12 +155,22 @@ class BaseAgentLoop(ABC):
         # 无工具路径，本轮全部工具静默丢失。
         # 现在解析失败只把错误作为该工具的结果回传给 LLM，让它自行纠正参数格式。
         _tc_arguments = {}
+        # T-10a（Issue #90 §11.2）：模型原始 arguments 串单独留存 —— 展示记录
+        # 里只写剥离 taskName* 后的 params，读侧无从重建协议消息（id ↔ arguments
+        # 的对应关系会在落盘时丢掉，而会话库不存在 role="tool" 行）。
+        _raw_arguments = tool_call.get("function", {}).get("arguments", "{}")
+        # 模型原始载荷在此冻成快照（`arguments` 记录的就是它）：执行面随后会剥离
+        # taskName*，dict 形态若与 `_tc_arguments` 共用同一对象，剥离会就地改写
+        # 原始载荷 —— "模型原样传入"与"剥离后的执行参数"必须各自成立。
+        _original_arguments = (
+            _raw_arguments if isinstance(_raw_arguments, str)
+            else _safe_json_dumps(_raw_arguments)
+        )
         try:
-            _raw_arguments = tool_call.get("function", {}).get("arguments", "{}")
             if isinstance(_raw_arguments, str):
                 _tc_arguments = json.loads(_raw_arguments) if _raw_arguments.strip() else {}
             elif isinstance(_raw_arguments, dict):
-                _tc_arguments = _raw_arguments
+                _tc_arguments = dict(_raw_arguments)
         except (json.JSONDecodeError, TypeError, ValueError) as _parse_err:
             _parse_error = f"工具 {_tc_function_name} 参数 JSON 解析失败: {_parse_err}"
             logger.warning(_parse_error)
@@ -174,6 +184,7 @@ class BaseAgentLoop(ABC):
                 {
                     "type": "tool_result",
                     "tool_name": _tc_function_name,
+                    "tool_call_id": _tc_id,
                     "result": _parse_error,
                     "success": False,
                     "timestamp": datetime.now().isoformat(),
@@ -196,7 +207,9 @@ class BaseAgentLoop(ABC):
         _call_record = {
             "type": "tool_call",
             "tool_name": _tc_function_name,
+            "tool_call_id": _tc_id,
             "params": _tc_arguments,
+            "arguments": _original_arguments,
             "timestamp": datetime.now().isoformat(),
         }
         if _task_name_active:
