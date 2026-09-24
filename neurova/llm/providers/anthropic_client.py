@@ -39,6 +39,10 @@ _THINKING_BUDGET_BY_EFFORT = {"standard": 4096, "deep": 16384}
 
 _DEFAULT_MAX_TOKENS = 4096
 
+#: 每条消息的固定开销（与 `LLMClient._PER_MESSAGE_OVERHEAD` 同源口径 —— 两条链路
+#: 对同一输入必须给出同一读数，不另立第二把尺子）。
+_PER_MESSAGE_OVERHEAD = 4
+
 
 def anthropic_endpoint_url(base_url: str) -> str:
     """base_url → /v1/messages 端点（兼容 base 已带 /v1 的网关，如 AMD /radeon/api/v1）"""
@@ -198,8 +202,23 @@ class AnthropicNativeClient:
         return max(1, estimate_tokens(text))
 
     def count_message_tokens(self, messages, tools=None) -> int:
+        """输入 token 总量。
+
+        原实现只累加消息正文，把 `tools` 形参**收下就丢** —— 而工具目录占上下文
+        预算，真消费方 `multi_model_client` 的工具轮记账路径正是
+        `count_message_tokens(messages, tools=kwargs.get("tools"))`。少算即预算
+        闸门偏松（与 `tool_choice` 同型的「接受但不读」死参）。
+        口径与 `LLMClient.count_message_tokens` 逐字一致：单一事实源，不另立尺子。
+        """
         total = 0
         for msg in messages or []:
             content = msg.get("content") or ""
-            total += self.count_tokens(str(content)) + 4
+            total += self.count_tokens(str(content)) + _PER_MESSAGE_OVERHEAD
+            for tc in (msg.get("tool_calls") or []) if isinstance(msg, dict) else []:
+                fn = tc.get("function", {}) if isinstance(tc, dict) else {}
+                total += self.count_tokens(str(fn.get("arguments", ""))) + self.count_tokens(
+                    str(fn.get("name", ""))
+                )
+        for tool in tools or []:
+            total += self.count_tokens(str(tool))
         return total
