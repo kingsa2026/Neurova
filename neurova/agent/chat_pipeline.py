@@ -696,7 +696,11 @@ class ChatPipeline:
                     self._agent.conversation_history = saved_messages
                     logger.info("从 session %s 恢复了 %s 条对话历史", ctx.session_id, len(saved_messages))
 
-            ctx.session_context = self.session_manager.get_recent_context(
+            # T-10b（R1）：模型上下文的会话历史走**专用读 API**，它把落盘的
+            # `metadata.tool_calls` 还原成 provider 合法的工具轮（assistant.tool_calls
+            # + 配套 role="tool"）。旧 `get_recent_context` 的"只回 user/assistant"
+            # 是展示/统计面共用的防回灌契约，模型面另立入口，两条各自成立。
+            ctx.session_context = self.session_manager.get_recent_model_context(
                 agent_id=self.config.agent_id,
                 session_id=ctx.session_id,
                 max_messages=20,
