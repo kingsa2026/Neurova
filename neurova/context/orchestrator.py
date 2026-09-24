@@ -312,7 +312,8 @@ class ContextOrchestrator:
         作用域都是 `direct`，但摘要绝不能互相串。旧实现用 `self.session_id or "_"`
         记账，session_id 恒 None → 所有会话共用一条（P1-1 跨会话串台）。
         """
-        return getattr(self, "_turn_room_id", "") or self._session_id or "direct"
+        # 折叠摘要槽与工具裁剪优先级共用本键；`__new__` 直构路径也必须可读。
+        return getattr(self, "_turn_room_id", "") or getattr(self, "_session_id", None) or "direct"
 
     def _window_cache_slot(self, key: str) -> dict:
         """取（或建）折叠摘要缓存槽，并把槽数钳在上限内（LRU 近似的插入序淘汰）。
@@ -457,10 +458,15 @@ class ContextOrchestrator:
         return items
 
     def _apply_tool_lifecycle(self, tools: Optional[List[Dict]]) -> Optional[List[Dict]]:
-        """应用工具生命周期过滤与权重排序（委托 EvolutionOrchestrator.on_before_tool_selection）
+        """应用工具生命周期过滤（委托 EvolutionOrchestrator.on_before_tool_selection）
 
         根因修复: on_before_tool_selection 此前零生产调用——归档/冻结工具永远
-        出现在 LLM 工具列表中，降级工具不加权。
+        出现在 LLM 工具列表中。
+
+        T-02：只取过滤语义。此前按权重重排整个 `tools` 数组，而权重每轮都在动
+        （任一工具执行即改窗口成功率与惰性衰减），provider 前缀缓存要求目录会话
+        内稳定——重排一次，整段目录及其后上下文全部重新计费。权重改作 catalog
+        裁剪优先级（会话内冻结），下发顺序保持聚合顺序。
         """
         if not tools:
             return tools
@@ -476,27 +482,20 @@ class ContextOrchestrator:
                 return tools
 
             filtered = set(result.get("filtered", []) or [])
-            ranking = [n for n in (result.get("ranking", []) or []) if n not in filtered]
-            if not ranking:
-                return tools
-
-            by_name = {
-                t["function"]["name"]: t
-                for t in tools
-                if isinstance(t, dict) and t.get("function", {}).get("name")
-            }
-            ordered = [by_name[n] for n in ranking if n in by_name]
-            # ranking 未覆盖的工具（如新增）保持相对顺序追加在尾部（按名字判断过滤）
-            covered = set(by_name)
-            ordered.extend(
-                t
-                for t in tools
-                if isinstance(t, dict)
-                and t.get("function", {}).get("name")
-                and t["function"]["name"] not in covered
-                and t["function"]["name"] not in filtered
-            )
-            return ordered if ordered else tools
+            # 裁剪优先级按会话冻结（钩子排序的唯一消费面＝目录压缩裁剪时谁先留下）。
+            try:
+                cache = getattr(self, "_toolClipOrder", None)
+                if cache is None:
+                    cache = self._toolClipOrder = {}
+                ranking = [n for n in (result.get("ranking") or []) if n not in filtered]
+                key = self._resolve_window_cache_key()
+                if ranking and key not in cache:
+                    cache[key] = ranking
+                    while len(cache) > self._WINDOW_CACHE_SLOTS:
+                        cache.pop(next(iter(cache)))
+            except Exception as e:  # noqa: BLE001 - 簿记失败不改过滤语义
+                logger.debug("工具裁剪优先级簿记跳过: %s", e)
+            return [t for t in tools if (t.get("function") or {}).get("name") not in filtered]
         except Exception as e:
             logger.debug("工具生命周期过滤跳过: %s", e)
             return tools
@@ -2049,19 +2048,18 @@ class ContextOrchestrator:
             except ValueError:
                 min_catalog = 40
 
-            hidden_candidates = [
-                t["function"]["name"]
-                for t in tools
-                if t.get("function", {}).get("name") not in set(direct)
-                and t.get("function", {}).get("name") not in ("tool_search", "tool_describe", "tool_call")
-            ]
             compacted = _compact(tools, direct, min_catalog=min_catalog)
             if compacted is None:
                 return tools
 
-            from neurova.context.tool_search import build_catalog, get_active_catalog, get_directory_budget
+            from neurova.context.tool_search import get_active_catalog, get_directory_budget
 
             catalog_entries = [e for e in get_active_catalog()]
+            # T-02：目录超预算时按（会话冻结的）裁剪优先级淘汰；sort 稳定。
+            _order = (getattr(self, "_toolClipOrder", None) or {}).get(self._resolve_window_cache_key(), [])
+            if _order:
+                _rank = {n: i for i, n in enumerate(_order)}
+                catalog_entries.sort(key=lambda e: _rank.get(e["name"], len(_rank)))
             directory = render_directory(catalog_entries, max_chars=get_directory_budget())
             _nl = chr(10)
             directory_block = (
