@@ -154,13 +154,27 @@ class BaseAgentLoop(ABC):
         # handle_tool_calls 整体抛异常 → 被 loop 当作"工具调用失败"降级/回退到
         # 无工具路径，本轮全部工具静默丢失。
         # 现在解析失败只把错误作为该工具的结果回传给 LLM，让它自行纠正参数格式。
+        # T-10a（工单 §11.2）：协议原文形态的 arguments。展示记录要把它逐字节带走——
+        # 落盘只会写展示记录，重建 assistant.tool_calls 时须与 provider 回传形态对齐，
+        # 从 `params` 反序列化重排出来的串会与 provider 的原文对不上。
+        # `_has_arguments` 是"provider 到底给过没有"的**唯一**判据：下层必须显式
+        # 按它判，不得反过来把"取值里那份默认 `{}`"当成"给过"（那判据恒真）。
+        _raw_arguments = tool_call.get("function", {}).get("arguments", "{}")
+        _has_arguments = "arguments" in (tool_call.get("function") or {})
+        # 模型原始载荷在此冻成快照（`arguments` 记录的就是它）：执行面随后会剥离
+        # taskName*，dict 形态若与 `_tc_arguments` 共用同一对象，剥离会就地改写
+        # 原始载荷 —— "模型原样传入"与"剥离后的执行参数"必须各自成立。
+        _tc_arguments_text = (
+            _raw_arguments if isinstance(_raw_arguments, str)
+            else _safe_json_dumps(_raw_arguments)
+        )
+
         _tc_arguments = {}
         try:
-            _raw_arguments = tool_call.get("function", {}).get("arguments", "{}")
             if isinstance(_raw_arguments, str):
                 _tc_arguments = json.loads(_raw_arguments) if _raw_arguments.strip() else {}
             elif isinstance(_raw_arguments, dict):
-                _tc_arguments = _raw_arguments
+                _tc_arguments = dict(_raw_arguments)
         except (json.JSONDecodeError, TypeError, ValueError) as _parse_err:
             _parse_error = f"工具 {_tc_function_name} 参数 JSON 解析失败: {_parse_err}"
             logger.warning(_parse_error)
@@ -174,6 +188,7 @@ class BaseAgentLoop(ABC):
                 {
                     "type": "tool_result",
                     "tool_name": _tc_function_name,
+                    "tool_call_id": _tc_id,
                     "result": _parse_error,
                     "success": False,
                     "timestamp": datetime.now().isoformat(),
@@ -196,9 +211,16 @@ class BaseAgentLoop(ABC):
         _call_record = {
             "type": "tool_call",
             "tool_name": _tc_function_name,
+            # T-10a：硬地址在调用侧也落一份。此前只有结果侧带 `tool_call_id`，
+            # 配对信息随落盘丢失，读侧无从重建（工单 §11.2 点名的硬缺口）。
+            "tool_call_id": _tc_id,
             "params": _tc_arguments,
             "timestamp": datetime.now().isoformat(),
         }
+        # 协议原文形态（JSON 串），与 provider 回传逐字节同源；
+        # provider 未给过该键时**不写** —— 补默认值等于替它声称"给过"。
+        if _has_arguments:
+            _call_record["arguments"] = _tc_arguments_text
         if _task_name_active:
             _call_record["task_name"] = _task_name_active
         records.append(_call_record)
