@@ -19,8 +19,10 @@ NLToolSynthesizer v1.0.0 — 自然语言工具合成器 (Phase 3 P3-3)
        └─▶ SynthesizedTool → 导出格式
 """
 
-from neurova.core.logger import get_logger
+import hashlib
 import re
+
+from neurova.core.logger import get_logger
 import typing
 import uuid
 from dataclasses import dataclass, field
@@ -165,33 +167,78 @@ class NLToolSynthesizer:
         self._pattern_miner = pattern_miner
         # 置信闸拦下计数（工单 014）：008 指标面就绪前的可观测落点
         self.low_confidence_rejections = 0
+        # 字母表校验拦下计数（T-04）：与上面同一类可观测落点，含义是"产出含未注册名"。
+        # 二者分开计数：低置信是估分问题，字母表不合法是**名字根本不存在**，
+        # 混在一个计数器里就再也分不清"该调估分器"还是"该补原语"。
+        self.unregistered_alphabet_rejections = 0
+
+        # 分类 → 候选原语（**单源**分类表；未知分类不在表内，即"无合法候选"）
+        self._category_primitives = self._load_category_primitives()
 
         # 内置工具模式库
         self._tool_patterns = self._load_tool_patterns()
 
         logger.info("NLToolSynthesizer initialized (pattern_miner=%s)", pattern_miner is not None)
 
+    def _load_category_primitives(self) -> typing.Dict[str, typing.List[str]]:
+        """加载"分类 → 候选原语"表（单源）。
+
+        表里的名字一律取自**真实注册名**。原表 10 个分类里 7 个是幻名
+        （`db_query`/`data_process`/`image_process`/`text_process`/
+        `model_predict`/`task_execute`/`api_call` 注册处均为 0），
+        产出的序列因此是模型读不到的路标；未知分类还落到同样不存在的
+        `general_tool`。现在：表内只有已注册名，分类不在表内即**无候选**。
+        """
+        return {
+            "search": ["memory_search"],
+            "file": ["file_read"],
+            "data": ["file_parse"],
+            "web": ["web_fetch"],
+            "image": ["file_parse"],
+            "text": ["file_read"],
+            "ai": ["deep_research"],
+            "automation": ["update_plan"],
+        }
+        # `database` 与 `api` **不在此表里**：它们是"确实缺原语"的分类，不是
+        # "有原语但名字写错了"。硬塞一个 `file_parse` 进去等于给模型指一条读不到
+        # 数据集的路（`file_parse` 只收工作区内的 file_path）。
+        # 缺原语就该在合成面上诚实暴露为"无合法候选、转人工复核"；
+        # 等真正补上 `query_database` 后，再把 `database` 一行加到这里——
+        # 单一事实源，不两处各写一份。
+
     def _load_tool_patterns(self) -> typing.Dict[str, typing.Any]:
-        """加载工具模式库"""
+        """加载工具模式库。
+
+        表里的 `tools` 一律取自**真实注册名**（`builtin_tools.get_registered_tool_names`
+        是唯一读侧）。原实现里 `data_process` / `data_analyze` / `web_scrape` 三个名字
+        全仓注册处为 0 —— 合成序列经这条表产出后，模型拿到的是一条读不到的工具路标。
+        """
+        from neurova.builtin_tools import get_registered_tool_names
+
+        registered = set(get_registered_tool_names())
+
+        def _pick(*names: str) -> typing.List[str]:
+            return [name for name in names if name in registered]
+
         return {
             "search_pattern": {
                 "keywords": ["搜索", "查找", "查询"],
-                "tools": ["memory_search", "web_search"],
+                "tools": _pick("memory_search", "web_search"),
                 "category": "search",
             },
             "file_pattern": {
                 "keywords": ["文件", "读取", "写入"],
-                "tools": ["file_read", "file_write"],
+                "tools": _pick("file_read", "file_write"),
                 "category": "file",
             },
             "data_pattern": {
                 "keywords": ["数据", "分析", "处理"],
-                "tools": ["data_process", "data_analyze"],
+                "tools": _pick("file_parse", "calculator"),
                 "category": "data",
             },
             "web_pattern": {
                 "keywords": ["网页", "爬取", "网络"],
-                "tools": ["web_fetch", "web_scrape"],
+                "tools": _pick("web_fetch", "web_search"),
                 "category": "web",
             },
         }
@@ -244,6 +291,35 @@ class NLToolSynthesizer:
             sequence = self.suggest_tool_sequence(description, category)
             tool.tool_sequence = sequence
             result.stages_completed.append(SynthesisStage.SEQUENCE_SUGGESTION)
+
+            # 阶段4.5: 字母表闸（T-04）——序列里出现**未注册名**即拒绝合成。
+            # 为什么摆在置信度之前：名字不存在与估分高低无关。放后面会让
+            # "高置信的幻名序列"以 COMPLETED 出现在产物面上 —— 那正是 T-03
+            # 打开入口后幽灵技能放大器的形态。D4：不降级为部分合成。
+            # 空序列（未知分类无合法候选）**不在此另开分支**：它由紧随其后的
+            # 既有置信闸处置（序列为空自然拿不到"序列合理性"分，估分即低）。
+            # 单开一条分支等于第二套拦截口径 —— 教义第 6 条，且会让"调阈值"
+            # 这条既有旋钮对未知分类失效。
+            from neurova.builtin_tools import get_registered_tool_names
+
+            _unregistered = [
+                _name for _name in sequence if _name not in set(get_registered_tool_names())
+            ]
+            if _unregistered:
+                self.unregistered_alphabet_rejections += 1
+                tool.stage = SynthesisStage.PENDING_REVIEW
+                result.stages_completed.append(SynthesisStage.PENDING_REVIEW)
+                result.success = False
+                result.error_message = (
+                    f"合成序列含未注册工具 {_unregistered}（字母表不合法，转人工复核）"
+                )
+                tool.name = self._generate_tool_name(description, category)
+                tool.description = description
+                tool.tool_id = f"synth_{uuid.uuid4().hex[:8]}"
+                result.synthesized_tool = tool
+                logger.warning("NL 合成被字母表闸拦下: %s", result.error_message)
+                result.processing_time = time.time() - start_time
+                return result
 
             # 阶段5: 估算置信度
             tool.stage = SynthesisStage.CONFIDENCE_ESTIMATION
@@ -425,6 +501,29 @@ class NLToolSynthesizer:
 
         return base_schema
 
+    def resolveAlphabetCandidates(self, category: str, description: str) -> typing.List[str]:
+        """给定分类与描述，给出**已注册**的候选原语（单源解析点）。
+
+        与 `suggest_tool_sequence` 同处一个类、同一份读侧：
+        候选来源只有两处——分类基础表与模式库表，两处都由
+        `builtin_tools.get_registered_tool_names()` 过滤后返回。
+        未知分类**不编造**候选，也没有兜底幻名：返回空列表，
+        由调用方转人工复核（D4：不降级为部分合成）。
+        """
+        from neurova.builtin_tools import get_registered_tool_names
+
+        registered = set(get_registered_tool_names())
+        if category not in self._category_primitives:
+            return []
+
+        base = [name for name in self._category_primitives[category] if name in registered]
+        for pattern in self._tool_patterns.values():
+            if any(keyword in description for keyword in pattern["keywords"]):
+                base.extend(name for name in pattern["tools"] if name in registered)
+        # 去重保序（同名原语只建议一次）
+        seen: typing.Set[str] = set()
+        return [name for name in base if not (name in seen or seen.add(name))]
+
     def suggest_tool_sequence(self, description: str, category: str) -> typing.List[str]:
         """
         建议工具执行序列
@@ -436,33 +535,7 @@ class NLToolSynthesizer:
         返回:
             List[str]: 工具序列
         """
-        sequence = []
-
-        # 基于分类建议基础工具
-        category_tools = {
-            "search": ["memory_search"],
-            "file": ["file_read"],
-            "data": ["data_process"],
-            "web": ["web_fetch"],
-            "api": ["api_call"],
-            "image": ["image_process"],
-            "text": ["text_process"],
-            "database": ["db_query"],
-            "ai": ["model_predict"],
-            "automation": ["task_execute"],
-        }
-
-        base_tools = category_tools.get(category, ["general_tool"])
-        sequence.extend(base_tools)
-
-        # 基于模式库扩展
-        for pattern_name, pattern in self._tool_patterns.items():
-            for keyword in pattern["keywords"]:
-                if keyword in description:
-                    for tool in pattern["tools"]:
-                        if tool not in sequence:
-                            sequence.append(tool)
-                    break
+        sequence = self.resolveAlphabetCandidates(category, description)
 
         # 限制序列长度
         return sequence[: self._max_sequence_length]
@@ -546,7 +619,12 @@ class NLToolSynthesizer:
             # 中文描述无 ASCII 词时回退到 category（恒为 ASCII，如 search/file/web）
             name_part = category
 
-        return f"{name_part}_tool"
+        # 唯一化后缀：注册表按 name 建键，纯词干名会让"同一描述连跑两次"的两个
+        # 产物互相顶替（启动日志累计 10 条 `技能同名覆盖（name=general_tool/ai_tool）`）。
+        # 后缀取描述指纹——同描述的重复合成因此**幂等**（同名的确是同一个东西），
+        # 不同描述必不撞名。不取随机数：随机后缀会让"重复合成"变成产生一堆垃圾技能。
+        fingerprint = hashlib.sha256(description.encode("utf-8", "replace")).hexdigest()[:8]
+        return f"{name_part}_{fingerprint}_tool"
 
 
 # ────── 单例管理 ──────
