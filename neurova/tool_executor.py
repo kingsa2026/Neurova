@@ -3100,12 +3100,15 @@ class ToolExecutor:
             from neurova.session_repository import get_session_repository
 
             repo = get_session_repository()
-        # 会话文件写在 `<sessions>/<agent_id>/` 下（写侧 `_save_to_session` 传的是
-        # 真实 agent_id），空值会被会话管理器归入 `default` 目录 —— 用空 agent_id
-        # 读等于去别的目录找一个刚写下的地址，直取恒落空。故按会话属主读。
+        # 台账按**会话属主**读：写侧 `mem_core.save_to_session` 落在
+        # `<sessions>/<config.agent_id>/` 下，空 agent_id 会被
+        # `SessionManager._get_session_dir` 归入 `default/` 目录 ——
+        # 用空值读等于去别的目录找一个刚落下的硬地址，直取恒落空
+        # （T-10a 的 `tool_call_id` 与 T-10b 的重建都以它为唯一寻址）。
+        # 属主派生复用本模块既有的 `_agent_identity()`，不另写第二份判据。
+        _user_id, _owner_id = self._agent_identity()
         history = repo.get_history(
-            agent_id=str(getattr(getattr(self._agent, "config", None), "agent_id", "") or ""),
-            session_id=session_id,
+            agent_id=str(_owner_id or ""), session_id=session_id
         ) or []
         entry = None
         for msg in reversed(history):
