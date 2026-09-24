@@ -210,3 +210,121 @@ class TestBootstrapSummarySeparatesTheTwo:
         assert summary.get("not_applicable"), (
             "汇总未区分「不适用」这一类读数，运维看不出跳过是因为什么"
         )
+
+
+class TestSummaryKeepsGenuineFailuresOutOfNotApplicable:
+    """反向锁的下一层：汇总口径不许把「真失败」记成「不适用」。
+
+    `explain_hot_queries` 对「表/列不在」与「表在但 SQL 有缺陷」两件事都会写
+    `reason`。而 `bootstrap_index_observability` 此前只按 `reason` 是否非空分流
+    ⇒ 真失败被归进 `not_applicable`。这与本单要修的假告警是同一类混淆，只是
+    方向相反：把「SQL 写错了」读成「这库用不上这条查询」，等于把真失败抹平。
+    判据必须在**生产侧**明确（`status` 字段一处定义），消费侧按它分流。
+    """
+
+    @staticmethod
+    def _withBrokenProbe(tmp_path):
+        import sqlite3
+
+        db = tmp_path / "memories_with_a_broken_probe.db"
+        conn = sqlite3.connect(str(db))
+        conn.execute(
+            "CREATE TABLE memories (id TEXT PRIMARY KEY, agent_id TEXT, neuser_id TEXT,"
+            " user_id TEXT, content TEXT, temperature REAL, created_at TEXT)"
+        )
+        conn.commit()
+        conn.close()
+        return str(db)
+
+    def test_brokenSqlIsNotReportedAsNotApplicable(self, tmp_path):
+        from neurova.core import db_indexes
+
+        db = self._withBrokenProbe(tmp_path)
+        original = db_indexes.HOT_QUERIES
+        db_indexes.HOT_QUERIES = list(original) + [
+            ("broken_probe", "SELECT this_col_does_not_exist FROM memories", ()),
+        ]
+        try:
+            summary = db_indexes.bootstrap_index_observability([db])
+        finally:
+            db_indexes.HOT_QUERIES = original
+        assert "broken_probe" not in summary["not_applicable"], (
+            "表在、SQL 有缺陷的真失败被记成了「该库不适用」——真失败被抹平了。"
+        )
+        assert "broken_probe" in summary["eqp_failed"], (
+            "真失败必须有独立读数；混进 not_applicable 让运维看不出这是 SQL 缺陷。"
+        )
+
+    def test_brokenSqlSummaryIsWarnedAbout(self, tmp_path, caplog):
+        import logging
+
+        from neurova.core import db_indexes
+
+        db = self._withBrokenProbe(tmp_path)
+        original = db_indexes.HOT_QUERIES
+        db_indexes.HOT_QUERIES = list(original) + [
+            ("broken_probe", "SELECT this_col_does_not_exist FROM memories", ()),
+        ]
+        try:
+            with caplog.at_level(logging.WARNING, logger="neurova.core.db_indexes"):
+                db_indexes.bootstrap_index_observability([db])
+        finally:
+            db_indexes.HOT_QUERIES = original
+        warned = [
+            r.getMessage()
+            for r in caplog.records
+            if "broken_probe" in r.getMessage() and r.levelno >= logging.WARNING
+        ]
+        assert warned, "真失败在汇总里没有任何 WARNING 级痕迹"
+
+    def test_statusIsTheSingleDiscriminator(self, tmp_path):
+        """分流判据只允许一份：`status` 由生产侧（explain_hot_queries）给出。"""
+        from neurova.core.db_indexes import explain_hot_queries
+
+        plans = {e["query_id"]: e for e in explain_hot_queries(self._withBrokenProbe(tmp_path))}
+        assert plans["memories_by_agent_desc"]["status"] == "unindexed"
+        assert plans["audit_logs_recent"]["status"] == "not_applicable"
+
+    def test_statusOfASuccessfullyIndexedQuery(self, tmp_path):
+        import sqlite3
+
+        from neurova.core.db_indexes import explain_hot_queries
+
+        db = tmp_path / "indexed.db"
+        conn = sqlite3.connect(str(db))
+        conn.execute(
+            "CREATE TABLE memories (id TEXT PRIMARY KEY, agent_id TEXT, neuser_id TEXT,"
+            " user_id TEXT, content TEXT, temperature REAL, created_at TEXT)"
+        )
+        conn.execute(
+            "CREATE INDEX idx_agent_created ON memories(agent_id, created_at)"
+        )
+        conn.commit()
+        conn.close()
+        plans = {e["query_id"]: e for e in explain_hot_queries(str(db))}
+        assert plans["memories_by_agent_desc"]["status"] == "indexed"
+
+
+class TestInapplicableReadingIsConsumed:
+    """`not_applicable` 必须有生产侧读者（协作红线：写出无人读的字段即断点）。
+
+    上一轮只把它累加进 summary，而 `bootstrap_index_observability` 的返回值在
+    装配点被丢弃（`await asyncio.to_thread(bootstrap_index_observability)` 不接
+    返回值）⇒ 该字段在生产里**没有任何读者**。运维因此无法回答"这条审计查询
+    为什么没参与基线"——正是本单要消灭的那类断链。
+    """
+
+    def test_skippedQueriesAreReportedWithTheirReason(self, tmp_path, caplog):
+        import logging
+
+        from neurova.core.db_indexes import bootstrap_index_observability
+
+        with caplog.at_level(logging.INFO, logger="neurova.core.db_indexes"):
+            bootstrap_index_observability([_dbWithMemoriesOnly(tmp_path)])
+        messages = [r.getMessage() for r in caplog.records]
+        skipped = [m for m in messages if "audit_logs_recent" in m and "表" in m]
+        assert skipped, (
+            "不适用的查询在生产侧没有任何读数（summary 的返回值被装配点丢弃）——"
+            "运维看不出跳过是因为'这库没有这张表'，字段成了只写不读的断点。\n"
+            "实际日志行：\n  " + "\n  ".join(messages)
+        )
