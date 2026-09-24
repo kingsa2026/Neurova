@@ -662,3 +662,11 @@ tests/unit/memory_ingest/test_converter_opencode.py
 tests/unit/memory_ingest/test_converter_qwenpaw.py
 #   上述登记纪律的守卫本身：本目录新判据文件漏登记即红。
 tests/unit/memory_ingest/test_protected_registration.py
+
+# 上下文三链路批（Issue #90）工单 §11.2 T-10a：调用侧展示记录补硬地址。
+#   （根因：结果侧有 `tool_call_id`、调用侧没有，而落盘写的是展示记录——
+#    配对信息在写盘那一刻就丢了，读侧无从重建 assistant.tool_calls。
+#    判据同时反锁"只增键"：结果侧 reproducible/offload_path 与调用侧既有键
+#    一个都不许动；并把新字段纳入出口脱敏（`params`/`arguments` 同管），
+#    否则补键本身就成为敏感值绕过 E2 门控的旁路。）
+tests/unit/agent/test_tool_call_record_addressing.py
