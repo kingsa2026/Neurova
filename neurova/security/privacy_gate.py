@@ -3,7 +3,8 @@
 AGENT_TOOL_RESULT 等工具事件会广播到 WS/聊天渠道预览。工具 params 里
 常见 password/token/secret/api_key 等敏感键——OC 的做法是 progress 事件
 必须显式 visibility:"channel"/privacy:"public" 才进 UI。Neurova 侧采取
-等效的出口脱敏：敏感键值脱敏 + 显式 visibility:"private" 的事件整体丢 params。
+等效的出口脱敏：载荷键（`TOOL_PAYLOAD_KEYS`）内的敏感键值脱敏 +
+显式 visibility:"private" 的事件整体丢掉全部载荷键。
 """
 
 import json
@@ -18,8 +19,8 @@ _SENSITIVE_KEY = re.compile(r"password|passwd|secret|token|api_key|apikey|author
 
 #: 工具事件里承载调用参数的键名（**契约本体**，唯一事实源）。
 #: 调用侧展示记录同时写 `params`（剥离展示参数后的执行参数）与 `arguments`
-#: （模型原样传入的参数串，读侧重建协议消息用），两者都是"参数载荷"，
-#: 出口脱敏必须按同一契约覆盖全部载荷键——曾按单键名硬编码，新增载荷键
+#: （模型原样传入的参数串，读侧重建协议消息用）——两者都是"参数载荷"，
+#: 出口脱敏必须按同一契约覆盖全部载荷键；曾按单键名硬编码，新增载荷键
 #: 即从 channel/SSE 出口泄露敏感值。
 TOOL_PAYLOAD_KEYS: Tuple[str, ...] = ("params", "arguments")
 

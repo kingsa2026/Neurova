@@ -101,9 +101,12 @@ max-attributes = 15
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
-# "test_*" 是 pytest 默认口径；"test[A-Z]*" 是给本项目补的：AGENTS.md 要求函数用驼峰名，
-# 于是 def testFoo 既合规又不被收集（既不报错也不失败，整份文件静默不跑，已重复踩中多次）。
-# 两种写法都能收集；驼峰名由 tests/unit/core/test_pytest_collection_hygiene.py 禁止出现在守卫自身。
+# pytest 默认口径是**前缀** `test`（`--help` 的 "Prefixes or glob names"），
+# 故 def testFoo（驼峰）本就被收集；真正会静默丢用例的是把它收窄成 ["test_*"]。
+# 本项显式列出两条，效果比默认更严：`def test` / `def testing_helper` 这类
+# 名字像用例却非用例的落点不再被收集（收集到它们只会得到一条恒真的假绿）。
+# 判定语义（前缀 或 glob）与仓内落点由
+# tests/unit/core/test_pytest_collection_hygiene.py 按**活配置**逐条反证。
 python_functions = ["test_*", "test[A-Z]*"]
 # 使用 importlib import mode 避免重名测试模块冲突
 # （tests/ 下有 ad-hoc 文件与 unit/ 下的同名文件，prepend 模式会冲突）

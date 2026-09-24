@@ -79,7 +79,10 @@ Issue #68 明确要求写进"项目配置"的通用准则。与修复教义同�
   命名以**简洁、语义清晰**为准，体现功能意图与业务领域；**禁用** `data`/`info`/`temp`/
   `handler`/`manager`/`util`/`helper`/`process` 这类通用模糊词，除非叠加领域限定。
   新增测试用例名用驼峰时，pytest 收集由 `pyproject.toml` 的
-  `python_functions = ["test_*", "test[A-Z]*"]` 放开（由 `tests/unit/core/test_pytest_collection_hygiene.py` 反向锁住）。
+  `python_functions = ["test_*", "test[A-Z]*"]` 放开。两项都在活配置里显式列出
+  （比 pytest 默认的 `test` 前缀更严，`def test` / `def testing_helper` 这类
+  "像用例却非用例"的落点因此不再被收集），判定与仓内落点由
+  `tests/unit/core/test_pytest_collection_hygiene.py` 按**活配置**逐条反证。
 - **规则文档与测试目录归属**：规则/准则/约定类文档统一存放于 `docs/`，仓库根目录不再新增；
   新增准则须在 `docs/0-index/README.md` 登记。测试用例统一存放于本仓**唯一测试根 `tests/`**，
   并按功能模块分子目录（`tests/unit/<module>/`、`tests/integration/`、`tests/e2e/`、
