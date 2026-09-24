@@ -155,6 +155,9 @@ class BaseAgentLoop(ABC):
         # 无工具路径，本轮全部工具静默丢失。
         # 现在解析失败只把错误作为该工具的结果回传给 LLM，让它自行纠正参数格式。
         _tc_arguments = {}
+        # T-10a：provider 是否**真给过** arguments —— 记录里只收原文，
+        # 缺键时不补默认值（补了等于替 provider 声称"它给过"）。
+        _has_raw_arguments = "arguments" in (tool_call.get("function") or {})
         try:
             _raw_arguments = tool_call.get("function", {}).get("arguments", "{}")
             if isinstance(_raw_arguments, str):
@@ -174,6 +177,7 @@ class BaseAgentLoop(ABC):
                 {
                     "type": "tool_result",
                     "tool_name": _tc_function_name,
+                    "tool_call_id": _tc_id,
                     "result": _parse_error,
                     "success": False,
                     "timestamp": datetime.now().isoformat(),
@@ -199,6 +203,18 @@ class BaseAgentLoop(ABC):
             "params": _tc_arguments,
             "timestamp": datetime.now().isoformat(),
         }
+        # T-10a（工单 §11.2）：调用侧记录必须把配对信息一起带走。
+        # 落盘的是这批展示记录（`post_chat_pipeline._step_save_session` 写进
+        # 会话 `metadata.tool_calls`），配对关系在这里丢一次就再也补不回来：
+        #   - `tool_call_id` 是结果侧的寻址键（`_recall_by_call_id` 按它直取原文），
+        #     调用侧缺它则 id ↔ arguments 的对应关系不在库里；
+        #   - `arguments` 是 provider 回传的**协议原文形态**，读侧重建
+        #     `assistant.tool_calls` 必须与它逐字节一致——`params` 是剥掉
+        #     taskName* 的解析结果，重新序列化会改写空白，替代不了原文。
+        # 只增键，不改既有键语义（工单 §11.7 第 4 条）。
+        _call_record["tool_call_id"] = _tc_id
+        if _has_raw_arguments:
+            _call_record["arguments"] = _raw_arguments
         if _task_name_active:
             _call_record["task_name"] = _task_name_active
         records.append(_call_record)
