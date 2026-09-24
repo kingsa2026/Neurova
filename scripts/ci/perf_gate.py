@@ -6,19 +6,44 @@
 .cnb.yml 无 perf 任务，tests/performance/ 只有一个压测，
 于是"关键路径变慢 3 倍"这种回归只能等人肉发现（而尾延迟正是用户体验）。
 
+## 判分时钟：本线程 CPU 时间，不用墙钟
+
+判据是**数量级契约**，判分量就必须与机器负载无关。`time.perf_counter()`
+量的是「本线程 CPU 时间 + **等 CPU / 等锁的时间**」，于是读数随同机负载漂移，
+误判方向还是「负载越高越红」——"让 CI 变绿"的捷径因此变成放宽阈值，
+而那恰好把真正的尾延迟回归一并放行（`AGENTS.md` 教义第 2 条禁止的降级断言换绿；
+同一纪律已由 tests/unit/test_ci_wallclock_assertion_ledger.py 常驻锁定）。
+
+实测（2026-09-24，构建 cnb-6t7-1k3964vd2）：同一提交的 unit-tests-py311
+报 `1000 次池获取耗时 21.9ms > 预算 20ms`，而同机同 cpus 的 unit-tests-py312
+success；该 sha 之后两次主线构建 11/11 全绿，其间无 perf 相关改动。
+受控复现（本容器 8 cpus，给被测环节注入纯等待）：
+  `get_thread_pool` 1000 次注入 0.1ms 等待 → 墙钟读 154.1ms > 预算 20ms（判红）
+                                         → 本线程 CPU 读 0.22ms（判绿）
+  `record_pipeline_step` 2000 次注入 0.3ms 等待 → 墙钟读 715.1ms > 预算 50ms
+                                               → 本线程 CPU 读 5.4ms
+故判分一律走 `time.thread_time()`（等待不计入）。**预算一个都没有放宽**。
+
+换时钟不能变成"看不见重活"：CPU 时钟看不到 import 期的**阻塞型**副作用
+（网络、子进程、动态库、读仓内数据文件），故 import 检查同时挂 `sys.addaudithook`
+把这些事件按**结构形态**点名（`measureImportProbe` 的 `sideEffects`），
+而不是靠一个会被负载左右秒数。
+
 门禁内容（都刻意与机器无关/宽松，只抓数量级回归）：
 
-1. **import 冷启动预算**：``import neurova.post_chat_pipeline`` 的墙钟时长
-   必须低于 IMPORT_BUDGET_MS。历史上该模块是每轮对话必经的 import 面，
-   import 期偷偷做重活（网络/模型加载/大文件读）会直接进首轮延迟。
+1. **import 冷启动预算**：``import neurova.post_chat_pipeline`` 的**本线程
+   CPU 时长**必须低于 IMPORT_BUDGET_MS，且 import 期不得出现阻塞型副作用。
+   历史上该模块是每轮对话必经的 import 面，import 期偷偷做重活
+   （网络/模型加载/大文件读）会直接进首轮延迟。
 2. **关键路径微基准**：管线与共享线程池的最热操作必须有数量级裕量。
    - PostChatPipeline 步骤埋点开销（每步一次 counter+histogram）
    - 共享线程池 get_thread_pool() 复用（不得退化为每次新建）
    - MetricsCollector 假数据默认禁用（接线假数 = 仪表盘失真）
 
-阈值策略：给足裕量（CI 机器比开发机慢、负载抖动）。门禁只回答
-"是否发生数量级退化"，不追求精确 benchmark——追精确会让门禁变成
-flaky 噪音源，最终被人绕过。
+阈值策略：给足裕量（CI 机器比开发机慢、负载抖动），且同一判据连量
+`SCORING_ROUNDS` 轮取最优。门禁只回答"是否发生数量级退化"，不追求精确
+benchmark——追精确会让门禁变成 flaky 噪音源，最终被人绕过。
+取优抵的是调度抖动，不是放宽：真退化在每一轮都成立，取优抹不平它。
 
 用法：
     python scripts/ci/perf_gate.py            # 全部检查
@@ -34,6 +59,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Callable, Dict, List, Optional, Union
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # 门禁脚本由 CI 以 `python scripts/ci/perf_gate.py` 直接跑（不一定 pip install -e .），
@@ -48,20 +74,156 @@ STEP_METRIC_BUDGET_MS = 50.0     # 1000 次步骤埋点
 POOL_GET_BUDGET_MS = 20.0        # 1000 次共享池获取
 
 
+#: 同一判据连量几轮，取**最小值**（最优读数）后判分。
+#: 取优抵的是调度抖动与偶发 GC，**不是放宽阈值**——阈值一个都没动，
+#: 而真退化在每一轮都成立，取优抹不平它。受控复现：本容器 8 cpus、
+#: 注入 64 个自旋进程时，`record_pipeline_step` 的墙钟读数在
+#: 528ms / 1307ms / 1561ms 之间跳（同一份工作），而本线程 CPU 稳定在 8ms 级。
+SCORING_ROUNDS = 5
+
+#: import 期**阻塞型**副作用的事件名（本线程 CPU 时钟看不到它们，
+#: 故必须由结构判据点名，不能靠秒数）。刻意不含 `ctypes.dlopen`：
+#: 它是 CPython 装载扩展模块的正常行为，纳进来会把假阳性变成常态化噪音。
+BLOCKING_IMPORT_EVENTS = (
+    "socket.connect",
+    "socket.getaddrinfo",
+    "socket.gethostbyname",
+    "subprocess.Popen",
+    "os.system",
+    "os.exec",
+    "os.spawn",
+)
+
+#: 不算重活的扩展名（import 期读 `.py`/`.pyc` 是解释器本职，`.so` 是扩展模块装载）。
+_CODE_EXTENSIONS = (
+    ".py", ".pyc", ".pyi", ".pth", ".egg-link", ".dist-info", ".egg-info",
+    ".so", ".pyd", ".dylib", ".dll",
+)
+
+#: 子进程里的 import 探针：隔离 sys.modules 缓存，按**本线程 CPU 时间**计时，
+#: 并用 `sys.addaudithook` 记录 import 期的阻塞型副作用与仓内数据文件读取。
+#: 载荷经 argv 以 JSON 传入（免去转义与拼接）。
+_IMPORT_PROBE_SOURCE = r"""
+import json, sys, sysconfig, time
+
+_payload = json.loads(sys.argv[1])
+_target = _payload["module"]
+_code_ext = tuple(_payload["codeExt"])
+
+# 解释器自身的地盘（标准库 / site-packages / 前缀 / 虚拟设备）不算重活：
+# import 期在那里读 `.py` 之外的东西（如 dist-info）是解释器本职。
+_own_trees = set()
+for _key in ("stdlib", "platstdlib", "purelib", "platlib"):
+    _path = sysconfig.get_paths().get(_key)
+    if _path:
+        _own_trees.add(_path)
+_own_trees.update({sys.prefix, sys.base_prefix, getattr(sys, "exec_prefix", sys.prefix)})
+_own_trees.update({"/proc", "/sys", "/dev"})
+
+def _isOwnTree(path):
+    return any(path == tree or path.startswith(tree.rstrip("/") + "/") for tree in _own_trees)
+
+_events = []
+
+def _looksLikeCode(path):
+    # .py 一族；并覆盖 CPython 写字节码缓存与它落盘的临时名：
+    #   .../__pycache__/foo.cpython-311.pyc
+    #   .../__pycache__/foo.cpython-311.pyc.140283084811248
+    # 这两类都是解释器本职（写 .pyc 是 import 的正常副产物），算成重活即假阳性。
+    lowered = path.lower()
+    if lowered.endswith(_code_ext):
+        return True
+    if "__pycache__" in lowered:
+        return True
+    head, _, tail = lowered.rpartition(".pyc.")
+    return bool(head) and tail.isdigit()
+
+def _hook(event, args):
+    if event in _payload["blocking"]:
+        _events.append(event)
+        return
+    if event != "open":
+        return
+    raw = args[0]
+    # `open` 的路径既可能是 str/bytes，也可能是个**文件描述符整数**（fdopen 一族）；
+    # 后者不是"读了哪个文件"的事实，`str()` 出来只会是 `open:3` 这种噪音。
+    if isinstance(raw, bytes):
+        path = raw.decode("utf-8", "replace")
+    elif isinstance(raw, str):
+        path = raw
+    else:
+        return
+    if _looksLikeCode(path) or _isOwnTree(path):
+        return
+    _events.append("open:" + path)
+
+sys.addaudithook(_hook)
+sys.path[:0] = [p for p in _payload["searchPath"] if p]
+
+_start = time.thread_time()
+__import__(_target)
+_cpu_ms = (time.thread_time() - _start) * 1000.0
+print("##import-probe##" + json.dumps({
+    "cpu_ms": round(_cpu_ms, 3),
+    "sideEffects": sorted(set(_events)),
+}))
+"""
+
+_PROBE_MARKER = "##import-probe##"
+
+
 class Failures(list):
     def add(self, name: str, detail: str) -> None:
         self.append({"check": name, "detail": detail})
 
 
-def _measure_import(module: str) -> float:
-    """在子进程里冷 import 并返回毫秒（子进程隔离 sys.modules 缓存）。"""
-    code = (
-        "import time; t=time.perf_counter(); "
-        f"import {module}; "
-        "print(round((time.perf_counter()-t)*1000, 2))"
+def measureThreadCpu(job: Callable[[], None]) -> float:
+    """按**本线程 CPU 时间**给一段工作计分（毫秒）。
+
+    为什么不是 `time.perf_counter()`：墙钟 = 本线程 CPU 时间 **+ 等 CPU /
+    等锁的时间**。等待不是被测对象的成本，把它算进判分只会让读数随同机负载
+    漂移，且误判方向是「负载越高越红」。实测：同一份 1000 次池获取，注入
+    0.1ms/次纯等待后墙钟读 154.1ms（越过 20ms 预算判红），本线程 CPU 读 0.22ms。
+    """
+    start = time.thread_time()
+    job()
+    return (time.thread_time() - start) * 1000.0
+
+
+def bestOfRounds(job: Callable[[], None], rounds: int = SCORING_ROUNDS) -> float:
+    """同一判据连量 `rounds` 轮取最小读数（抵抖动，不动阈值）。"""
+    return min(measureThreadCpu(job) for _ in range(rounds))
+
+
+def measureImportProbe(
+    module: str, searchPath: Optional[Union[str, List[str]]] = None
+) -> Dict[str, object]:
+    """在子进程里冷 import `module`，回报本线程 CPU 毫秒与 import 期副作用。
+
+    子进程隔离 `sys.modules` 缓存（同进程二次 import 只会读到缓存，量不到冷启动）。
+    两个读数分别回答两件事：`cpu_ms` 是否发生数量级退化（判分用它），
+    `sideEffects` 是否在 import 期做了**阻塞型**重活（网络/子进程/读仓内数据文件）
+    ——后者靠秒数测不出（阻塞不耗 CPU），必须以结构形态暴露。
+
+    `searchPath` 收单个路径或路径列表（单个字符串被 `for` 迭代会逐字符裂开，
+    静默变成"模块找不到"——那是调用方无从察觉的陷阱）。
+    """
+    if searchPath is None:
+        extraPath: List[str] = []
+    elif isinstance(searchPath, str):
+        extraPath = [searchPath]
+    else:
+        extraPath = [str(p) for p in searchPath]
+    payload = json.dumps(
+        {
+            "module": module,
+            "blocking": list(BLOCKING_IMPORT_EVENTS),
+            "codeExt": list(_CODE_EXTENSIONS),
+            "searchPath": [str(PROJECT_ROOT)] + extraPath,
+        }
     )
     proc = subprocess.run(
-        [sys.executable, "-c", code],
+        [sys.executable, "-c", _IMPORT_PROBE_SOURCE, payload],
         capture_output=True,
         text=True,
         cwd=str(PROJECT_ROOT),
@@ -69,22 +231,35 @@ def _measure_import(module: str) -> float:
     )
     if proc.returncode != 0:
         raise RuntimeError(f"import {module} 失败: {proc.stderr.strip()[-500:]}")
-    return float(proc.stdout.strip().splitlines()[-1])
+    lines = [ln for ln in proc.stdout.splitlines() if ln.startswith(_PROBE_MARKER)]
+    if not lines:
+        raise RuntimeError(f"import {module} 探针无读数（stdout 末行: {proc.stdout.strip()[-200:]}）")
+    return json.loads(lines[-1][len(_PROBE_MARKER):])
 
 
 def check_import_budget(failures: Failures) -> dict:
-    """检查 1：import 时长。"""
+    """检查 1：import 冷启动（本线程 CPU 时间判分 + 阻塞型副作用点名）。"""
     results = {}
     total = 0.0
     for module in ("neurova.core.metrics", "neurova.post_chat_pipeline"):
-        ms = _measure_import(module)
+        probe = measureImportProbe(module)
+        ms = float(probe["cpu_ms"])
         results[module] = ms
+        results[f"{module}::sideEffects"] = probe["sideEffects"]
         total += ms
         if ms > IMPORT_BUDGET_MS:
             failures.add(
                 "import-budget",
-                f"import {module} 耗时 {ms:.1f}ms > 预算 {IMPORT_BUDGET_MS:.0f}ms"
+                f"import {module} 本线程 CPU {ms:.1f}ms > 预算 {IMPORT_BUDGET_MS:.0f}ms"
                 "（import 期重型副作用会进首轮对话延迟）",
+            )
+        # 阻塞型重活不耗 CPU，CPU 时钟量不到它 —— 以结构形态点名，
+        # 否则本次换时钟会把「import 期偷偷起网络/子进程」一并放行。
+        if probe["sideEffects"]:
+            failures.add(
+                "import-budget",
+                f"import {module} 在 import 期做了阻塞型/IO 重活: {probe['sideEffects']}"
+                "（首轮对话要为它付等待；应惰性化到真正使用时）",
             )
     results["_total_ms"] = total
     if total > IMPORT_ALL_BUDGET_MS:
@@ -93,6 +268,18 @@ def check_import_budget(failures: Failures) -> dict:
             f"关键 import 面合计 {total:.1f}ms > 预算 {IMPORT_ALL_BUDGET_MS:.0f}ms",
         )
     return results
+
+
+def _trackPipelineSteps(metrics, stepNames, iterations: int) -> None:
+    for i in range(iterations):
+        metrics.record_pipeline_step(stepNames[i % len(stepNames)], "executed", 1.0)
+
+
+def _getPoolRepeatedly(iterations: int) -> None:
+    from neurova.core.thread_pool import get_thread_pool
+
+    for _ in range(iterations):
+        get_thread_pool(name="perf-probe", max_workers=2)
 
 
 def check_step_metric_overhead(failures: Failures) -> dict:
@@ -112,10 +299,7 @@ def check_step_metric_overhead(failures: Failures) -> dict:
         "motivation_observations", "rsi_iteration",
     )
     iterations = 2000
-    start = time.perf_counter()
-    for i in range(iterations):
-        metrics.record_pipeline_step(step_names[i % len(step_names)], "executed", 1.0)
-    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    elapsed_ms = bestOfRounds(lambda: _trackPipelineSteps(metrics, step_names, iterations))
     per_step_us = elapsed_ms * 1000.0 / iterations
     if elapsed_ms > STEP_METRIC_BUDGET_MS:
         failures.add(
@@ -136,9 +320,8 @@ def check_shared_pool_reuse(failures: Failures) -> dict:
     from neurova.core.thread_pool import get_thread_pool
 
     iterations = 1000
-    start = time.perf_counter()
+    elapsed_ms = bestOfRounds(lambda: _getPoolRepeatedly(iterations))
     pools = {id(get_thread_pool(name="perf-probe", max_workers=2)) for _ in range(iterations)}
-    elapsed_ms = (time.perf_counter() - start) * 1000.0
     if len(pools) != 1:
         failures.add(
             "shared-thread-pool",
