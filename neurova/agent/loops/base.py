@@ -154,9 +154,17 @@ class BaseAgentLoop(ABC):
         # handle_tool_calls 整体抛异常 → 被 loop 当作"工具调用失败"降级/回退到
         # 无工具路径，本轮全部工具静默丢失。
         # 现在解析失败只把错误作为该工具的结果回传给 LLM，让它自行纠正参数格式。
+        # T-10a（工单 §11.2）：协议原文形态的 arguments。展示记录要把它逐字节带走——
+        # 落盘只会写展示记录，重建 assistant.tool_calls 时须与 provider 回传形态对齐，
+        # 从 `params` 反序列化重排出来的串会与 provider 的原文对不上。
+        _raw_arguments = tool_call.get("function", {}).get("arguments", "{}")
+        _tc_arguments_text = (
+            _raw_arguments if isinstance(_raw_arguments, str)
+            else json.dumps(_raw_arguments, ensure_ascii=False)
+        )
+
         _tc_arguments = {}
         try:
-            _raw_arguments = tool_call.get("function", {}).get("arguments", "{}")
             if isinstance(_raw_arguments, str):
                 _tc_arguments = json.loads(_raw_arguments) if _raw_arguments.strip() else {}
             elif isinstance(_raw_arguments, dict):
@@ -174,6 +182,7 @@ class BaseAgentLoop(ABC):
                 {
                     "type": "tool_result",
                     "tool_name": _tc_function_name,
+                    "tool_call_id": _tc_id,
                     "result": _parse_error,
                     "success": False,
                     "timestamp": datetime.now().isoformat(),
@@ -196,7 +205,12 @@ class BaseAgentLoop(ABC):
         _call_record = {
             "type": "tool_call",
             "tool_name": _tc_function_name,
+            # T-10a：硬地址在调用侧也落一份。此前只有结果侧带 `tool_call_id`，
+            # 配对信息随落盘丢失，读侧无从重建（工单 §11.2 点名的硬缺口）。
+            "tool_call_id": _tc_id,
             "params": _tc_arguments,
+            # 协议原文形态（JSON 串），与 provider 回传逐字节同源
+            "arguments": _tc_arguments_text,
             "timestamp": datetime.now().isoformat(),
         }
         if _task_name_active:
