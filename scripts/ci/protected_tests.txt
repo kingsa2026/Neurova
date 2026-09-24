@@ -251,6 +251,9 @@ tests/context/test_context_pool_hash_index.py
 #   就地改写/hash 不失配）+ 摘要沿用旧摘要不算"本轮成功"（不谎报覆盖）
 tests/unit/context/test_draw_never_mutates_archive.py
 tests/unit/context/test_summary_failure_not_reported_success.py
+# 上下文三链路修复批（Issue #90）T-03b：每轮会话身份接到装配入口
+#   （P2 两个单聊会话共用折叠摘要槽 / 池归属与台账 session 列为 None / 预算读数取别会话快照）
+tests/unit/context/test_turn_session_identity.py
 
 # Issue #80 第三轮补做（9 条尾巴）：逐文件单跑全绿后登记
 tests/unit/tools/test_tool_router_success_verdict.py
@@ -675,3 +678,11 @@ tests/unit/memory_ingest/test_converter_opencode.py
 tests/unit/memory_ingest/test_converter_qwenpaw.py
 #   上述登记纪律的守卫本身：本目录新判据文件漏登记即红。
 tests/unit/memory_ingest/test_protected_registration.py
+
+# Issue #81 复核批：pytest 收集卫生守卫（此前从未登记 —— 它红着也没人知道）。
+#   判据按**活配置**（pytestconfig.getini）判定"名字像用例却收不到"，
+#   不抄一份模式（抄一份就是第二份事实源：配置改了守卫判的还是旧口径，
+#   本文件旧版正是这么坏的 —— 把 test[A-Z]* 当成"收不到驼峰"，误报 15 例）。
+#   三条：活配置口径逐条点名 / 守卫自身用例名不依赖驼峰模式 /
+#   匹配语义由真收集反证（探针带本仓 -c pyproject.toml）。
+tests/unit/core/test_pytest_collection_hygiene.py
