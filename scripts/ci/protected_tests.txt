@@ -631,6 +631,22 @@ tests/unit/context/test_context_compression_single_face.py
 #   契约搬到真面、断言未删（逐条见提交说明与台账脚本/ci/contextDeadlines.txt）。
 tests/unit/context/test_ttl_reclaim_and_session_identity.py
 
+# 上下文域（Issue #90 工单）T-03b：每轮会话身份接入装配入口（先红后绿）。
+#   根因不是"漏传一个参数"，是装配入口**造了第二条身份通道却全空**：
+#   构造期不传 session_id、`build_context` 无该形参、`chat_room_id` 只在协作轮
+#   非空 → 折叠摘要缓存键恒退化为 `direct`，两个普通单聊会话共用一条摘要
+#   （探针 P2 形状一：单聊两会话串台=True，两个房间串台=False）。
+#   而本轮的会话身份一直存在：ChatPipeline 每轮把它写进 `core.turn_context`，
+#   读法就是 `agent.current_session_id`（后链的幂等键与落盘 session 已在用）。
+#   改后：① 身份回落链收口 `_resolveTurnSessionId()` 单源（房间 → 构造期显式
+#   覆盖 → 每轮身份单源），**不给** build_context 加 session_id 形参（那会与
+#   单源并存成两份定义，教义第 6 条）；② 第二命中点同批——`pool.session_id`
+#   随同一份判据，条目 metadata / query 的本会话优先 / 持久台账 session 列三处
+#   同时恢复；③ 落到 direct 必须可见（get_context_health()["turn_identity"] 有
+#   计数与 last_key，首次 warning 点名）；④ 放大视角：`get_token_budget()` 的
+#   会话快照也改读同一份回落链（原先读构造期初值，生产恒 None → 串会话读数）。
+tests/unit/context/test_turn_identity_wiring.py
+
 # Issue #81 复核：设计 §6 三条硬规则点名的**包层守卫**漏登记（14 文件 / 197 用例）。
 #   根因不是"少写一行"：受保护子集的语义是"这些回归有人守"，但清单只靠人记得补——
 #   文件在仓、逐文件单跑全绿、CI 全绿，而子集对它们命中 0，判据从未在 CI 上跑过。
@@ -670,3 +686,26 @@ tests/unit/memory_ingest/test_protected_registration.py
 #   三条：活配置口径逐条点名 / 守卫自身用例名不依赖驼峰模式 /
 #   匹配语义由真收集反证（探针带本仓 -c pyproject.toml）。
 tests/unit/core/test_pytest_collection_hygiene.py
+
+# 上下文三链路批（Issue #90）工单 §11.2 T-10a：调用侧展示记录补硬地址。
+#   （根因：结果侧有 `tool_call_id`、调用侧没有，而落盘写的是展示记录——
+#    配对信息在写盘那一刻就丢了，读侧无从重建 assistant.tool_calls。
+#    判据反锁"只增键"：结果侧 reproducible/offload_path 与调用侧既有键
+#    一个都不许动。）
+tests/unit/agent/test_tool_call_record_addressing.py
+
+# 上下文三链路批（Issue #90）T-10a 放大视角第二命中点：直取寻址须按会话属主读台账。
+#   （根因：写侧 `mem_core.save_to_session` 落在 `<sessions>/<agent_id>/`，
+#    读侧 `_recall_by_call_id` 却传空 agent_id —— 空值被会话管理器归入
+#    `default/` 目录，于是"自己写下的硬地址自己读不回来"，T-10a 的
+#    `tool_call_id` 与 T-10b 的重建都无从寻址。判据含真 SessionManager 往返。）
+tests/unit/agent/test_tool_call_recall_owner.py
+
+# 上下文三链路批（Issue #90）工单 §11.3 T-10b：读侧重建 provider 合法工具轮（R1）。
+#   （根因：会话库里不存在 `role="tool"` 行——落盘的是 assistant 的
+#    `metadata.tool_calls` 展示记录，而旧读 API `get_recent_context` 只回
+#    {role,content} 且显式过滤非 user/assistant（那是一条防回灌契约）。
+#    故另立专用入口 `get_recent_model_context`：还原 assistant.tool_calls +
+#    配套 tool 行；缺配对信息的旧记录整条降级为 user 注记并计数，禁止伪造配对。
+#    判据同时反锁旧 API 形态逐字节不变，避免把展示/统计面一起拖进新语义。）
+tests/unit/agent/test_model_context_tool_rebuild.py

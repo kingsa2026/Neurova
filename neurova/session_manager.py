@@ -1068,6 +1068,131 @@ class SessionManager(SessionRepository):
             return all_messages
         return all_messages[-max_messages:] if len(all_messages) > max_messages else all_messages
 
+    def get_recent_model_context(
+        self, agent_id: str, session_id: str, max_messages: Optional[int] = 20
+    ) -> List[Dict[str, Any]]:
+        """会话库 → provider 合法模型上下文（工具轮重建的唯一入口，T-10b R1）。
+
+        与 `get_recent_context` 的分工：那个是"只回 user/assistant"的**防回灌契约**
+        （展示/统计等既有消费方共用），本方法承担工具轮重建——把落盘的
+        `metadata.tool_calls` 展示记录还原成 `assistant.tool_calls` + 配套的
+        `role="tool"` 结果消息。改写前者会让全部既有消费方共同承担新语义。
+
+        旧数据诚实降级（工单 §11.7 第 1 条）：调用侧无 `tool_call_id` 的历史轮次，
+        id 与 arguments 的对应关系不在库里，整条降级为 `user` 注记并计数，
+        **绝不伪造配对**。降级读数经 `get_model_context_stats()` 取回。
+        """
+        self._model_context_stats = {"rebuilt_pairs": 0, "degraded_turns": 0}
+        sessions = self._get_session_data_list(agent_id, session_id)
+        if not sessions:
+            return []
+        # 模型上下文按时间升序（旧→新）；`get_recent_context` 的降序口径属展示面，
+        # 不由本方法继承——顺序即"谁是最近的"这一语义。
+        sessions.sort(key=lambda x: x.get("session_date", ""))
+        messages: List[Dict[str, Any]] = []
+        for session in sessions:
+            for msg in session.get("messages", []):
+                if not isinstance(msg, dict):
+                    continue
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                entries = (msg.get("metadata") or {}).get("tool_calls") or []
+                if role == "assistant" and entries:
+                    rebuilt = self._rebuildToolTurn(content, entries)
+                    if rebuilt is not None:
+                        messages.extend(rebuilt)
+                        self._model_context_stats["rebuilt_pairs"] += 1
+                        continue
+                    self._model_context_stats["degraded_turns"] += 1
+                    messages.append(
+                        {"role": "user", "content": self._degradeToolTurn(entries, content)}
+                    )
+                    continue
+                if role in ("user", "assistant"):
+                    messages.append({"role": role, "content": content})
+        if max_messages is not None and len(messages) > max_messages:
+            messages = messages[-max_messages:]
+            # 截断必须落在轮边界：切点落在 tool 段中间会让声明它的 assistant 留在
+            # 窗口外，直接产出孤儿 tool 行（provider 400）。
+            while messages and messages[0].get("role") == "tool":
+                messages.pop(0)
+        return messages
+
+    @staticmethod
+    def _rebuildToolTurn(content: str, entries: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        """展示记录 → provider 合法消息对；配对信息不全时返回 None（交调用方降级）。
+
+        合法性要求（缺一条即 provider 400）：调用与结果**一一对应**、
+        每个结果都能找到声明它的调用、每个调用都有结果。
+        """
+        calls = [e for e in entries if isinstance(e, dict) and e.get("type") == "tool_call"]
+        results = [e for e in entries if isinstance(e, dict) and e.get("type") == "tool_result"]
+        if not calls or not results:
+            return None
+        declared: Dict[str, Dict[str, Any]] = {}
+        for call in calls:
+            cid = str(call.get("tool_call_id") or "")
+            if not cid or cid in declared:
+                return None
+            declared[cid] = call
+        matched: set = set()
+        tool_calls: List[Dict[str, Any]] = []
+        for call in calls:
+            cid = str(call.get("tool_call_id") or "")
+            if not any(str(r.get("tool_call_id") or "") == cid for r in results):
+                return None
+            arguments = call.get("arguments")
+            if not isinstance(arguments, str) or not arguments.strip():
+                # 协议原文缺失时的等价形态：由执行面真值序列化，配对不受影响
+                arguments = json.dumps(call.get("params") or {}, ensure_ascii=False)
+            tool_calls.append({
+                "id": cid,
+                "type": "function",
+                "function": {"name": str(call.get("tool_name") or ""), "arguments": arguments},
+            })
+        tool_rows: List[Dict[str, Any]] = []
+        for res in results:
+            cid = str(res.get("tool_call_id") or "")
+            if cid not in declared or cid in matched:
+                return None
+            matched.add(cid)
+            result = res.get("result")
+            tool_rows.append({
+                "role": "tool",
+                "tool_call_id": cid,
+                "name": str(res.get("tool_name") or ""),
+                "content": result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str),
+            })
+        return [{"role": "assistant", "content": content or "", "tool_calls": tool_calls}, *tool_rows]
+
+    @staticmethod
+    def _degradeToolTurn(entries: List[Dict[str, Any]], content: str) -> str:
+        """缺配对的轮次整条降级为 `user` 注记（沿用 `repair_tool_turns` 的孤儿语义）。"""
+        parts = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            tool_name = str(entry.get("tool_name") or "tool")
+            cid = entry.get("tool_call_id") or "未知"
+            if entry.get("type") == "tool_call":
+                parts.append(f"[{tool_name} 调用（tool_call_id={cid}，缺配对信息）] {json.dumps(entry.get('params') or {}, ensure_ascii=False)}")
+            elif entry.get("type") == "tool_result":
+                parts.append(f"[{tool_name} 结果（tool_call_id={cid}，缺配对信息）] {entry.get('result', '')}")
+        note = "\n".join(parts)
+        return f"{content}\n{note}" if content else note
+
+    def get_model_context_stats(self) -> Dict[str, int]:
+        """上次 `get_recent_model_context` 的读数（重建/降级各自计数）。
+
+        降级是"看得见的诚实"：调用方据此报出重建成功率，不拿"看起来有内容"
+        冒充"协议合法"（工单 §11.3）。
+        """
+        stats = getattr(self, "_model_context_stats", None) or {}
+        return {
+            "rebuilt_pairs": int(stats.get("rebuilt_pairs", 0)),
+            "degraded_turns": int(stats.get("degraded_turns", 0)),
+        }
+
     def get_recent_origins(self, agent_id: str, session_id: str, max_messages: Optional[int] = 20) -> List[Optional[str]]:
         """返回最近若干条 user 轮的来源标记（message.metadata.turn_origin）。
 

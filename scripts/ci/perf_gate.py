@@ -45,6 +45,21 @@ success；该 sha 之后两次主线构建 11/11 全绿，其间无 perf 相关�
 benchmark——追精确会让门禁变成 flaky 噪音源，最终被人绕过。
 取优抵的是调度抖动，不是放宽：真退化在每一轮都成立，取优抹不平它。
 
+**判分用时源（Issue #176 未闭环项，构建 cnb-6t7-1k3964vd2 实测）**：
+进程内的两处微基准量的是"这段代码要花多少 CPU"，故取**本线程 CPU 时间**
+（``time.thread_time``），不取墙钟。墙钟 = 本线程 CPU 时间 + **等 CPU 的时间**，
+于是判值随同机负载漂移：同一提交 ``-004``（unit-tests-py311）报
+``1000 次池获取耗时 21.9ms > 预算 20ms`` 而 ``-005``（py312）绿，
+其后两次主线构建 11/11 全绿且其间无任何 perf / thread_pool 改动。
+更坏的是误判方向——负载越高越红，于是"让 CI 变绿"的捷径变成放宽阈值，
+而那恰恰把真正的尾延迟回归一并放行（``AGENTS.md`` 修复教义第 2 条）。
+受控取证（8 cpus / 64 自旋线程）：同一份工作墙钟读数 7.5ms → 528–1561ms，
+本线程 CPU 时间稳定在 7.4–8.5ms。
+
+冷 import 检查是**例外**且必须留墙钟：它在子进程里量"用户实际等了多久"
+（首轮对话延迟），不是"这段代码要花多少 CPU"。该例外由
+``tests/performance/test_perf_gate_contract.py`` 的两条用例分别钉住。
+
 用法：
     python scripts/ci/perf_gate.py            # 全部检查
     python scripts/ci/perf_gate.py --json     # 机器可读
@@ -160,10 +175,16 @@ def _hook(event, args):
 sys.addaudithook(_hook)
 sys.path[:0] = [p for p in _payload["searchPath"] if p]
 
-_start = time.thread_time()
+# 两个读数各回答一件事：墙钟 elapsed_ms = "用户为首轮对话实际等了多久"
+# （判分用它）；cpu_ms = 这段 import 花了多少 CPU（诊断用，不参与判分，
+# 因为阻塞型重活不耗 CPU）。sideEffects 补上 CPU 时钟看不见的那一半。
+_wall_start = time.perf_counter()
+_cpu_start = time.thread_time()
 __import__(_target)
-_cpu_ms = (time.thread_time() - _start) * 1000.0
+_cpu_ms = (time.thread_time() - _cpu_start) * 1000.0
+_elapsed_ms = (time.perf_counter() - _wall_start) * 1000.0
 print("##import-probe##" + json.dumps({
+    "elapsed_ms": round(_elapsed_ms, 3),
     "cpu_ms": round(_cpu_ms, 3),
     "sideEffects": sorted(set(_events)),
 }))
@@ -191,19 +212,26 @@ def measureThreadCpu(job: Callable[[], None]) -> float:
 
 
 def bestOfRounds(job: Callable[[], None], rounds: int = SCORING_ROUNDS) -> float:
-    """同一判据连量 `rounds` 轮取最小读数（抵抖动，不动阈值）。"""
+    """同一判据连量 `rounds` 轮取最小读数（抵抖动，不动阈值）。
+
+    取**最小值**（最优读数）：真退化在每一轮都成立，取优抹不平它；
+    被抹掉的是调度抖动与偶发 GC。这与墙钟/CPU 时钟之争是两件事——
+    时钟口径决定"等 CPU 算不算成本"，取优只决定"抖动用哪一轮读数"。
+    """
     return min(measureThreadCpu(job) for _ in range(rounds))
 
 
 def measureImportProbe(
     module: str, searchPath: Optional[Union[str, List[str]]] = None
 ) -> Dict[str, object]:
-    """在子进程里冷 import `module`，回报本线程 CPU 毫秒与 import 期副作用。
+    """在子进程里冷 import `module`，回报 `elapsed_ms`（墙钟）与 import 期副作用。
 
     子进程隔离 `sys.modules` 缓存（同进程二次 import 只会读到缓存，量不到冷启动）。
-    两个读数分别回答两件事：`cpu_ms` 是否发生数量级退化（判分用它），
-    `sideEffects` 是否在 import 期做了**阻塞型**重活（网络/子进程/读仓内数据文件）
-    ——后者靠秒数测不出（阻塞不耗 CPU），必须以结构形态暴露。
+    本函数是门禁里**唯一**该用墙钟（``time.perf_counter``）的地方：它量的是
+    "用户实际等了多久"（首轮对话延迟），等待对用户同样是延迟，必须计入。
+    `sideEffects` 则回答另一半：import 期是否做了**阻塞型**重活（网络/子进程/
+    读仓内数据文件）——这类活首轮延迟要全付，但阻塞不耗 CPU，
+    本线程 CPU 时钟看不见它，必须以结构形态点名。
 
     `searchPath` 收单个路径或路径列表（单个字符串被 `for` 迭代会逐字符裂开，
     静默变成"模块找不到"——那是调用方无从察觉的陷阱）。
@@ -238,19 +266,25 @@ def measureImportProbe(
 
 
 def check_import_budget(failures: Failures) -> dict:
-    """检查 1：import 冷启动（本线程 CPU 时间判分 + 阻塞型副作用点名）。"""
+    """检查 1：import 冷启动（**墙钟**判分 + 阻塞型副作用结构点名）。
+
+    本检查是门禁里**唯一**该用墙钟的命中点：它量的是"用户为首轮对话实际等了
+    多久"，等待对用户同样是延迟，必须计入。与进程内两处微基准相反，
+    那两处量的是"这段代码要花多少 CPU"，故取本线程 CPU 时间。
+    """
     results = {}
     total = 0.0
     for module in ("neurova.core.metrics", "neurova.post_chat_pipeline"):
         probe = measureImportProbe(module)
-        ms = float(probe["cpu_ms"])
+        ms = float(probe["elapsed_ms"])  # 探针墙钟读数（perf_counter），首轮延迟口径
         results[module] = ms
+        results[f"{module}::cpu_ms"] = probe["cpu_ms"]
         results[f"{module}::sideEffects"] = probe["sideEffects"]
         total += ms
         if ms > IMPORT_BUDGET_MS:
             failures.add(
                 "import-budget",
-                f"import {module} 本线程 CPU {ms:.1f}ms > 预算 {IMPORT_BUDGET_MS:.0f}ms"
+                f"import {module} 冷启动 {ms:.1f}ms > 预算 {IMPORT_BUDGET_MS:.0f}ms"
                 "（import 期重型副作用会进首轮对话延迟）",
             )
         # 阻塞型重活不耗 CPU，CPU 时钟量不到它 —— 以结构形态点名，
@@ -299,6 +333,7 @@ def check_step_metric_overhead(failures: Failures) -> dict:
         "motivation_observations", "rsi_iteration",
     )
     iterations = 2000
+    # 取本线程 CPU 时间（time.thread_time）：等待不计入判分；并连量数轮取最优。
     elapsed_ms = bestOfRounds(lambda: _trackPipelineSteps(metrics, step_names, iterations))
     per_step_us = elapsed_ms * 1000.0 / iterations
     if elapsed_ms > STEP_METRIC_BUDGET_MS:
@@ -316,12 +351,24 @@ def check_step_metric_overhead(failures: Failures) -> dict:
 
 
 def check_shared_pool_reuse(failures: Failures) -> dict:
-    """检查 3：共享线程池确为复用（不得退化为每次新建池）。"""
+    """检查 3：共享线程池确为复用（不得退化为每次新建池）。
+
+    身份判据必须**持有实例引用**：原写法在集合推导里即时丢弃引用，新建出来的池
+    立刻可回收，CPython 复用同一块内存 ⇒ ``id()`` 全部相同 ⇒ ``len(pools) == 1``。
+    实测把实现换成"每次新建池"后该判据仍报绿，即这条判据从未能咬合过
+    （保留引用再比 id 则同一变异给出 1000 个不同实例）。
+    这是教义第 2 条点名禁止的"恒真断言"：看着守一条契约，对违反者一律放行。
+    """
     from neurova.core.thread_pool import get_thread_pool
 
     iterations = 1000
+    # 同检查 2：取本线程 CPU 时间（time.thread_time，池获取是纯 CPU 路径，等待不
+    # 该算进判值），连量数轮取最优。
     elapsed_ms = bestOfRounds(lambda: _getPoolRepeatedly(iterations))
-    pools = {id(get_thread_pool(name="perf-probe", max_workers=2)) for _ in range(iterations)}
+    # 身份判据则**先收集实例再比对**：集合推导里即时丢弃引用会让回收内存被复用，
+    # 于是一律 distinct=1；保留引用后同一变异给出 1000 个不同实例。
+    acquired = [get_thread_pool(name="perf-probe", max_workers=2) for _ in range(iterations)]
+    pools = {id(pool) for pool in acquired}
     if len(pools) != 1:
         failures.add(
             "shared-thread-pool",
