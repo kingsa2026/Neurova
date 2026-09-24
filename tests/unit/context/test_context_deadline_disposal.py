@@ -11,7 +11,11 @@ B6-1 立了「判据类（机器算）」与「处置（人填）」两条轴，
 本守卫把处置轴也钉成机器可验的三条：
 
 1. **处置与判据咬合**：声明「已删除 / 收口第二份」的符号，其实测判据类必须为
-   `absent`（生产侧无定义无赋值）；声明「已接线」的必须为 `consumed`。
+   `absent`（生产侧无定义无赋值）；声明「已接线」的符号必须**真的有消费点** ——
+   跨文件的记 `consumed`，落在自己定义文件内的记 `self_loop`（B6-10 批次 D 的
+   `cleanup_expired` 即后者：真调用点是同文件的写入咽喉 `add_context`）。
+   期望值逐符号写死在 `DISPOSED_EXPECTATIONS()` 里，不做"某处置必然对应某判据类"
+   的一刀切——那会把"消费点在自己家里"这种正当形态误报成假接线。
    写「已删除」而判据仍是 `consumed`/`no_consumer` ⇒ 报红，说明处置只是口号。
 2. **反向控制**：`disposeExpectations` 必须对**仍在仓**的符号报红——否则这条
    规则恒真（例如分类函数被改坏成永远返回 absent 时，第一节会空转通过）。
@@ -61,6 +65,12 @@ DISPOSED_EXPECTATIONS = {
     "EnhancedContextBuilder": ("已删除", ledger.JUDGE_ABSENT),
     # 反向：B6-3 已把符号补齐并接线，处置必须与 consumed 咬合。
     "get_context_pool": ("已接线", ledger.JUDGE_CONSUMED),
+    # B6-10 批次 D：TTL 回收的真调用点是写入咽喉 `add_context`
+    # （同文件内），故判据类是 self_loop 而不是 consumed —— 消费点确实存在，
+    # 只是落在池自己的定义文件里。
+    "cleanup_expired": ("已接线", ledger.JUDGE_SELF_LOOP),
+    # B6-10 批次 D：会话身份的第二写入方（实例级 setter）已从生产侧删净。
+    "set_session_id": ("已删除", ledger.JUDGE_ABSENT),
     # B6-10 批次 B：审计点名的「唯一物证却无人校验」——判据的消费面落在
     # `neurova/context/fold_integrity.py`（折叠发生即对账），故有跨文件消费点。
     "_last_archived_window_hashes": ("已接线", ledger.JUDGE_CONSUMED),

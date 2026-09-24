@@ -181,19 +181,42 @@ class TestResidentLimitContract:
 
 class TestTtlRecyclingIsCounted:
     def test_cleanup_expired_counts_removed(self):
+        """TTL 回收的真调用点是写入咽喉（B6-10 批次 D），此处锁它的可观测面。
+
+        改前本用例锁的是"显式调 `cleanup_expired()` 才回收"，而那条路径在生产
+        零调用点 —— 契约等于挂在一个没人走的门上。现在回收发生在**每一次写入
+        之前**（`add_context` → `_reclaimExpiredOnWrite`），故：过期条目在下一次
+        写入时即被回收，随后显式调用返回 0（没有可回收的了）。断言一条未删，
+        只是把"谁触发"这一句搬到真面。
+        """
         import datetime as _dt
 
         pool = _pool(ttl_seconds=60)
         stale = ContextInput(source=ContextSource.MEMORY, content="stale")
         stale.created_at = _dt.datetime.now() - _dt.timedelta(seconds=3600)
         pool.add_context(stale)
+        # 写入咽喉触发回收：过期条目在本行之前已被归档剔除
         pool.add_context(ContextInput(source=ContextSource.MEMORY, content="fresh"))
 
-        assert pool.cleanup_expired() == 1
+        assert pool.cleanup_expired() == 0, "回收已由写入路径完成，此处无残留过期条目"
         stats = pool.get_retention_stats()
         assert stats["archived_by_reason"]["ttl"] == 1
         assert stats["resident_count"] == 1
         assert stats["eviction_ledger"]["total"] == 1
+
+    def test_explicit_call_still_reclaims_directly(self):
+        """显式调用仍是可用通路（运维/诊断与"某一刻全量对账"）。"""
+        import datetime as _dt
+
+        pool = _pool(ttl_seconds=60)
+        stale = ContextInput(source=ContextSource.MEMORY, content="stale")
+        stale.created_at = _dt.datetime.now() - _dt.timedelta(seconds=3600)
+        # 绕过写入咽喉直插（历史/测试写法），过期条目留在常驻
+        pool._collector.add_context(stale)
+        pool._cache_version += 1
+
+        assert pool.cleanup_expired() == 1
+        assert pool.get_retention_stats()["archived_by_reason"]["ttl"] == 1
 
     def test_ttl_disabled_keeps_everything(self):
         pool = _pool(ttl_seconds=0)
