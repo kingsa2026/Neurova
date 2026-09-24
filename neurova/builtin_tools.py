@@ -1048,6 +1048,15 @@ _NON_REPRODUCIBLE_TOOLS = frozenset({
 })
 
 
+def get_registered_tool_names() -> List[str]:
+    """内置工具注册名清单（**单源**读侧）。
+
+    字母表类校验（合成器序列、附件提示文案）一律读这一处，不得各自持有
+    一份名字表——第二份表就是幻名的温床（教义第 6 条）。
+    """
+    return sorted(_BUILTIN_SCHEMAS)
+
+
 def is_builtin_tool_reproducible(tool_name: str) -> bool:
     """内置工具可重现性查询（单源 _NON_REPRODUCIBLE_TOOLS）；未知工具 False。"""
     if tool_name not in _BUILTIN_SCHEMAS:

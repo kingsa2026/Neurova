@@ -37,6 +37,37 @@ from neurova.agent.turn_origin import is_machine_origin, is_machine_origin_value
 
 logger = get_logger(__name__)
 
+
+def composeUnparseableAttachmentNotice(
+    filename: str,
+    file_type: str,
+    status: str,
+    file_id: str = "",
+    primitive: Optional[str] = None,
+) -> str:
+    """抽取不到文本时的注入文案（**单源构造点**，含句柄、原因、可用原语）。
+
+    为什么必须带句柄：附件落在 `data/storage/users/**` 下，而 `file_search` /
+    `file_list` 锚定 agent 工作区（`_resolve_agent_path`），**永远看不到它**。
+    没有 `file_id` 时 agent 对"不可抽取的附件"结构上无从下手。
+
+    为什么原语要么点名真名、要么明说没有：附件取用凭证只有 `file_id`（D1），
+    而当前注册原语里没有任何一条接受 `file_id` 去读原始二进制容器。
+    此时若编一个 `file_parse` 之类的名字，模型会拿一条读不到该附件的工具去试
+    —— 那是假路标，比"没有"更坏（教义第 2 条：诚实形态暴露）。
+    """
+    parts = [
+        f"[用户上传了文件 {filename}（{file_type}），未能抽取文本内容]",
+        f"原因: {status}",
+    ]
+    if file_id:
+        parts.append(f"附件句柄 file_id={file_id}（服务端路径不对外，取用一律凭该句柄）")
+    if primitive:
+        parts.append(f"如需读取内容，请用 `{primitive}` 并传上述 file_id。")
+    else:
+        parts.append("当前无可用抽取原语：现有工具面没有任何原语可以按 file_id 读取这类附件。")
+    return " ".join(parts)
+
 # ── 思考程度（light/standard/deep）→ 系统提示指令 ──────────────
 # 提示词方式对所有模型通用；standard 为默认行为不注入
 _THINKING_DIRECTIVES: Dict[str, str] = {
@@ -1513,9 +1544,27 @@ class ChatPipeline:
                     f"[用户上传了文件 {filename}，以下为该文件的完整内容（请直接使用，无需调用工具读取）]\n{text}"
                 )
             else:
-                parts.append(f"[用户上传了文件 {filename}（{file_type}），无法解析文本内容]")
-                if status not in ("unsupported_format", "empty_file"):
-                    logger.debug("[附件注入] %s 未抽取文本: %s", filename, status)
+                from neurova.attachment_parser import suggestExtractionPrimitive
+
+                # 抽取失败一律留痕：`unsupported_format` 此前被显式排除在日志外，
+                # 于是事故轮在日志里零痕迹，问题只能靠人肉复现（T-03 的缺口信号
+                # 也要读得到它，故级别取 warning）。
+                logger.warning(
+                    "[附件注入] %s（%s）未抽取文本: %s（file_id=%s）",
+                    filename,
+                    file_type,
+                    status,
+                    file_id or "缺失",
+                )
+                parts.append(
+                    composeUnparseableAttachmentNotice(
+                        filename=filename,
+                        file_type=file_type,
+                        status=status,
+                        file_id=file_id,
+                        primitive=suggestExtractionPrimitive(filename, file_type),
+                    )
+                )
 
         return "\n\n".join(parts), vision_parts
 
