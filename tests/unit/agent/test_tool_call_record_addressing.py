@@ -7,11 +7,15 @@
 从库里读到的 `metadata.tool_calls` 无法重建 `assistant.tool_calls`（id ↔
 arguments 的对应关系不在库里），T-10b 的读侧重建因此没有数据可依。
 
-本文件同时钉住两件事（工单 §11.7 第 4 条「只增键」的反向锁）：
+本文件钉住两件事（工单 §11.7 第 4 条「只增键」的反向锁）：
 
 1. 红：调用侧记录缺 `tool_call_id`、缺协议原文形态的 `arguments`；
 2. 反向锁：补键**不得改动**结果侧既有键（`reproducible` / `offload_path`
    是 `_recall_by_call_id` 与产物卡片注册的依赖）。
+
+出口脱敏（新增 `arguments` 是第二份参数载荷）不在此处判：键集合契约与逐条
+不变量由 `tests/unit/security/test_tool_event_export_redaction.py` 单点持有，
+本文件不另写一份（教义第 6 条）。
 
 断言取真值来源：`arguments` 必须等于**模型给出的原文串**（逐字节），
 不是从 `params` 反序列化重排出来的赝品 —— 重建的 `assistant.tool_calls` 要
@@ -160,42 +164,3 @@ class TestResultRecordKeysUnchanged:
         for key in ("params", "tool_name", "timestamp", "type"):
             assert key in call_rec, f"补 `tool_call_id` 时挤掉了既有键 {key!r}：{sorted(call_rec)}"
         assert call_rec["params"] == _EXPECTED_PARAMS, "params 仍是剥离 taskName* 后的执行面真值"
-
-
-class TestOutboundGateCoversArguments:
-    """放大视角（教义第 5 条）：新增 `arguments` 必须与 `params` 同受出口脱敏。
-
-    同一份"调用参数"如今有两个出口形态——`params`（解析后的 dict）与
-    `arguments`（协议原文串）。出口脱敏（`redact_tool_messages_for_channel`）
-    只认 `params`，新字段就成了一条绕过脱敏的旁路：调用原文里的
-    `password`/`token` 会以明文进渠道/WS 广播。补键不补脱敏 = 新开一个泄露面。
-    """
-
-    def test_sensitive_arguments_are_redacted(self):
-        from neurova.security.privacy_gate import redact_tool_messages_for_channel
-
-        rec = {
-            "type": "tool_call",
-            "tool_name": "login",
-            "params": {"password": "hunter2secret", "url": "https://x"},
-            "arguments": json.dumps({"password": "hunter2secret", "url": "https://x"}),
-            "tool_call_id": "c1",
-        }
-        out = redact_tool_messages_for_channel([rec])[0]
-        blob = json.dumps(out)
-        assert "hunter2secret" not in blob, f"`arguments` 绕过了出口脱敏：{blob}"
-        assert json.loads(out["arguments"])["url"] == "https://x", "非敏感键不得被误伤"
-
-    def test_private_visibility_drops_arguments(self):
-        from neurova.security.privacy_gate import redact_tool_messages_for_channel
-
-        rec = {
-            "type": "tool_call",
-            "tool_name": "computer_shell",
-            "visibility": "private",
-            "params": {"command": "ls"},
-            "arguments": json.dumps({"command": "ls", "token": "sk-leak"}),
-        }
-        out = redact_tool_messages_for_channel([rec])[0]
-        assert "arguments" not in out, f"private 事件必须整体丢调用原文：{sorted(out)}"
-        assert "sk-leak" not in json.dumps(out)
