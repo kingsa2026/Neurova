@@ -7,14 +7,29 @@
 1. 脚本存在、可执行、退出码语义正确（当前仓库应为 0=通过）；
 2. 双侧 CI 都真的调用它（cnb + GitHub），语义都是阻断；
 3. 门禁覆盖的四项能力仍在（import 预算 / 埋点开销 / 共享池复用 / 假数据门控）；
-4. 假数据门控不会被"顺手"放宽（默认禁用的不变式由门禁自己验证）。
+4. 假数据门控不会被"顺手"放宽（默认禁用的不变式由门禁自己验证）；
+5. **判分量与机器负载无关**：进程内两处微基准不得用墙钟判分（下节）；
+6. **池复用判据必须能被证伪**（再下一节）：真退化成"每次新建池"时要报红。
+
+本套件自身不得自带负载：它每个用例的预算（pytest-timeout 30s）由 CI job 的
+全部用例共享，自带 32 个 CPU 自旋线程的判据会把测量拖到 ~19s，机器一忙即撞
+超时（2026-09-24 构建 cnb-i3l-1k3a5ht8f-004 实测）。负载一律走**注入**：
+在被测环节的生产装配点上注入等待，是确定性的、与机器无关的。
+
+第 5 条是 2026-09-24 那次「同一份代码 py3.11 红、py3.12 绿」的根修判据：
+`POOL_GET_BUDGET_MS` / `STEP_METRIC_BUDGET_MS` 是**数量级契约**，判分却取自
+`time.perf_counter()`。墙钟 = 本线程 CPU + **等 CPU / 等锁的时间**，于是读数随
+同机负载漂移；误判方向还是「负载越高越红」，把「让 CI 变绿」的捷径变成放宽阈值
+——那正是教义第 2 条禁止的降级断言换绿（判据同 `test_ci_wallclock_assertion_ledger`）。
+**例外**：冷 import 检查量与机器无关的"用户实际等了多久"，属可留墙钟的命中点；
+该例外由 `TestImportBudgetKeepsWallClock` 单独钉住，不在这条禁令内。
 """
 
 import ast
+import importlib
 import io
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
 
@@ -96,6 +111,190 @@ class TestBothSidesWireTheGate:
         assert "scripts/ci/perf_gate.py" in runs
 
 
+class TestJudgingIgnoresMachineLoad:
+    """门禁的判分量必须与机器负载无关（墙钟会把排队算成退化）。
+
+    红灯形态（修复前实测）：给被测环节注入**等待**，墙钟判分立刻放大——
+    `record_pipeline_step` 每次多等 0.3ms × 2000 次 ≈ 600ms > 预算 50ms；
+    `get_thread_pool` 每次多等 0.1ms × 1000 次 ≈ 100ms > 预算 20ms。
+    同一份代码在负载下就这么被判红，与是否有真实退化无关。
+
+    例外且必须留墙钟的是冷 import 检查：它量"用户为首轮对话实际等了多久"，
+    见本类末节 `TestImportBudgetKeepsWallClock`。
+    """
+
+    def test_gate_exposes_a_load_independent_scoring_primitive(self):
+        gate = importlib.import_module("scripts.ci.perf_gate")
+        assert hasattr(gate, "measureThreadCpu"), (
+            "门禁没有「按本线程 CPU 计分」的取数口——各检查会退回各写一套墙钟"
+        )
+        charged = gate.measureThreadCpu(lambda: time.sleep(0.3))
+        assert charged < 50.0, (
+            f"注入 300ms 纯等待被计了 {charged:.1f}ms——等待不得进入判分"
+        )
+
+    def test_injected_waiting_is_not_charged_by_step_metric_check(self, monkeypatch):
+        """真正的红：在门禁**真实取数链路**上注入等待，判据必须仍判绿。"""
+        gate = importlib.import_module("scripts.ci.perf_gate")
+        # 生产装配点取类：不抄私有类名，避免与真实实现漂移
+        from neurova.core.metrics import get_metrics
+
+        collector = type(get_metrics())
+        original = collector.record_pipeline_step
+
+        def slowed(self, step_name, status, duration_ms):
+            time.sleep(0.0003)
+            return original(self, step_name, status, duration_ms)
+
+        monkeypatch.setattr(collector, "record_pipeline_step", slowed)
+        failures = gate.Failures()
+        gate.check_step_metric_overhead(failures)
+        assert [f["check"] for f in failures] == [], (
+            "同机负载（等待）被算成了埋点退化——判据绑了墙钟："
+            f"{list(failures)}"
+        )
+
+    def test_real_cpu_regression_in_step_metric_is_still_caught(self, monkeypatch):
+        """反向控制：真退化（CPU 变重）必须仍被判红，本判据不得空转。"""
+        gate = importlib.import_module("scripts.ci.perf_gate")
+        # 生产装配点取类：不抄私有类名，避免与真实实现漂移
+        from neurova.core.metrics import get_metrics
+
+        collector = type(get_metrics())
+        original = collector.record_pipeline_step
+
+        def heavy(self, step_name, status, duration_ms):
+            deadline = time.thread_time() + 0.0001
+            while time.thread_time() < deadline:
+                pass
+            return original(self, step_name, status, duration_ms)
+
+        monkeypatch.setattr(collector, "record_pipeline_step", heavy)
+        failures = gate.Failures()
+        gate.check_step_metric_overhead(failures)
+        assert any(f["check"] == "pipeline-step-metric" for f in failures), (
+            "埋点真变重 200ms 却仍判绿——本判据已被改空"
+        )
+
+    def test_injected_waiting_is_not_charged_by_pool_check(self, monkeypatch):
+        import importlib as _importlib
+
+        gate = importlib.import_module("scripts.ci.perf_gate")
+        pool_mod = _importlib.import_module("neurova.core.thread_pool")
+        original = pool_mod.get_thread_pool
+
+        def slowed(*args, **kwargs):
+            time.sleep(0.0001)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(pool_mod, "get_thread_pool", slowed)
+        failures = gate.Failures()
+        gate.check_shared_pool_reuse(failures)
+        assert [f["check"] for f in failures] == [], (
+            f"同机负载（等待）被算成池获取退化——判据绑了墙钟：{list(failures)}"
+        )
+
+########################################################################
+# 冷 import：门禁里唯一该留墙钟的命中点
+########################################################################
+
+
+class TestImportBudgetKeepsWallClock:
+    """冷 import 判分取**子进程墙钟**，并保留 CPU 读数作诊断。
+
+    为什么是例外：它量的是"用户为首轮对话实际等了多久"——等待 CPU 的时间对用户
+    同样是延迟，必须计入；而进程内两处微基准正相反（"这段代码要花多少 CPU"）。
+    把 import 判分顺手改成 CPU 时间，就不再量首轮延迟了（教义第 5 条：同一根因
+    全命中点扫荡，但例外命中点不得顺手改）。
+
+    另一半：CPU 时钟看不到 import 期的**阻塞型**重活（网络/子进程/读数据文件），
+    故由 `sys.addaudithook` 按结构形态点名（`sideEffects`），否则本次换时钟
+    等于把"import 期偷偷做重活"一并放行（教义第 2 条禁止的降级换绿）。
+    """
+
+    def test_import_probe_reports_wallclock_and_ignores_load(self, tmp_path):
+        """判分读数是墙钟；而与负载无关的阻塞被点名，纯等待仍照实计入（这就是它要量的）。"""
+        import importlib as _importlib
+
+        gate = _importlib.import_module("scripts.ci.perf_gate")
+        (tmp_path / "sleepy_module.py").write_text(
+            "import time\ntime.sleep(0.4)\n", encoding="utf-8"
+        )
+        sleepy = gate.measureImportProbe("sleepy_module", searchPath=str(tmp_path))
+        assert sleepy["elapsed_ms"] >= 300.0, (
+            f"import 期 400ms 等待只被读到 {sleepy['elapsed_ms']}ms——"
+            "冷 import 量的是用户实际等待，必须计入"
+        )
+        assert sleepy["cpu_ms"] < 100.0, (
+            f"纯等待被计成 CPU {sleepy['cpu_ms']}ms——CPU 读数只作诊断，不得把等待算进去"
+        )
+        assert sleepy["sideEffects"] == [], f"干净模块被误判副作用: {sleepy['sideEffects']}"
+
+    def test_import_side_effects_are_named_by_structure(self, tmp_path):
+        """import 期的阻塞型重活不耗 CPU，必须由结构判据点名。"""
+        import importlib as _importlib
+
+        gate = _importlib.import_module("scripts.ci.perf_gate")
+        (tmp_path / "networky_module.py").write_text(
+            "import socket\nsocket.getaddrinfo('localhost', 80)\n", encoding="utf-8"
+        )
+        networky = gate.measureImportProbe("networky_module", searchPath=str(tmp_path))
+        assert networky["sideEffects"], (
+            "import 期发起网络调用未被点名——CPU 时钟看不到这类重活，"
+            "必须由结构判据兜住，否则本次改动等于降级断言"
+        )
+
+    def test_import_reading_a_data_file_is_named(self, tmp_path):
+        """import 期读**非代码**数据文件同样要点名（CPU 时钟看不见 IO 等待）。
+
+        这是冷 import 判据必须留墙钟/挂审计钩的另一半：否则「把大文件/模型/语料
+        挪到 import 期」会从本判据下溜过（CPU 只耗一点点，首轮延迟却全付在这里）。
+        """
+        import importlib as _importlib
+
+        gate = _importlib.import_module("scripts.ci.perf_gate")
+        (tmp_path / "corpus.json").write_text("[]", encoding="utf-8")
+        (tmp_path / "reader_module.py").write_text(
+            f"open({str(tmp_path / 'corpus.json')!r}).read()\n", encoding="utf-8"
+        )
+        reader = gate.measureImportProbe("reader_module", searchPath=str(tmp_path))
+        assert any("corpus.json" in e for e in reader["sideEffects"]), (
+            f"import 期读数据文件未被点名: {reader['sideEffects']}——"
+            "该路径会让首轮对话替 import 付 IO 等待"
+        )
+
+    def test_real_cpu_regression_in_import_is_still_caught(self, tmp_path):
+        """反向控制：import 期真做 CPU 重活必须仍被判红。"""
+        import importlib as _importlib
+
+        gate = _importlib.import_module("scripts.ci.perf_gate")
+        (tmp_path / "busy_module.py").write_text(
+            "import time\n"
+            "deadline = time.thread_time() + 0.25\n"
+            "while time.thread_time() < deadline:\n"
+            "    pass\n",
+            encoding="utf-8",
+        )
+        busy = gate.measureImportProbe("busy_module", searchPath=str(tmp_path))
+        assert busy["elapsed_ms"] >= 100.0, (
+            f"import 期 250ms CPU 重活在墙钟口径下只读到 {busy['elapsed_ms']}ms——判据已被改空"
+        )
+
+    def test_import_judging_uses_wallclock_only_for_the_probe(self, monkeypatch):
+        """预算判分读的是墙钟读数：把探针读数调大，检查必须报红。"""
+        gate = importlib.import_module("scripts.ci.perf_gate")
+
+        def inflated(module, searchPath=None):
+            return {"elapsed_ms": gate.IMPORT_BUDGET_MS + 1000.0, "cpu_ms": 1.0, "sideEffects": []}
+
+        monkeypatch.setattr(gate, "measureImportProbe", inflated)
+        failures = gate.Failures()
+        gate.check_import_budget(failures)
+        assert any(f["check"] == "import-budget" for f in failures), (
+            "冷 import 超预算却未判红——import 判分被改空"
+        )
+
+
 class TestJudgedValueIsLoadIndependent:
     """判值只在"干活的时间"上成立，不在"排队等 CPU 的时间"上成立。
 
@@ -111,17 +310,31 @@ class TestJudgedValueIsLoadIndependent:
     且误判方向是"负载越高越红"，于是捷径变成放宽阈值，反而把真回归一并放行。
     """
 
-    #: 争抢线程数：4×CPU 的超订量足以让墙钟口径必然出现被拉长的读数。
-    CONTEND_WORKERS = 32
+    def test_judged_value_does_not_inflate_under_injected_waiting(self, monkeypatch):
+        """被测环节被注入**等待**时，判值不得放大（两个检查都不得把等待算成退化）。
 
-    def test_judged_value_does_not_inflate_under_cpu_contention(self):
-        """受控 CPU 争抢下判值不得放大——墙钟口径实测放大 10–100 倍。"""
-        idle = _peakJudgedValue(self.CONTEND_WORKERS, loaded=False)
-        loaded = _peakJudgedValue(self.CONTEND_WORKERS, loaded=True)
-        for name, (base, hot) in (("埋点开销", (idle[0], loaded[0])), ("池获取", (idle[1], loaded[1]))):
-            assert hot <= base * 3 + 2.0, (
-                f"{name}判值被同机 CPU 争抢放大：空载 {base:.3f}ms → 争抢 {hot:.3f}ms。"
-                "判分口径把'等待 CPU'算进去了；应量本线程 CPU 时间（time.thread_time）"
+        注入的等待是该环节花掉的真实墙钟时间，判值若把它算进去就与"排队等 CPU"
+        同形：同一份代码在共享 runner 上会因同机负载被误判成退化。门禁改量本线程
+        CPU 时间后，注入 2000×0.3ms + 1000×0.1ms = 700ms 等待，判值不动。
+        """
+        gate = importlib.import_module("scripts.ci.perf_gate")
+        injected, failures, judged = _measuringWithInjectedWaiting(gate, monkeypatch)
+        assert not failures, (
+            f"同机负载（等待）被算成退化：{list(failures)}\n注入等待 {injected:.1f}ms，"
+            f"判值 {judged}"
+        )
+
+    def test_real_cpu_regression_is_still_caught_under_the_same_harness(self, monkeypatch):
+        """同一判据必须仍咬得住真退化：CPU 真变重 10 倍即判红（反向控制）。
+
+        与上一条共用同一个"注入"入口，只把等待换成 CPU 自旋：判据若被改成
+        "对任何注入一律报绿"，这条立刻红。
+        """
+        gate = importlib.import_module("scripts.ci.perf_gate")
+        _, failures, judged = _measuringWithInjectedWaiting(gate, monkeypatch, cpu_ms=0.1)
+        for name in ("pipeline-step-metric", "shared-thread-pool"):
+            assert any(f["check"] == name for f in failures), (
+                f"{name} 真退化（每次多烧 0.1ms CPU）却判绿——判据已被改空；判值 {judged}"
             )
 
     def test_judged_checks_take_their_clock_from_thread_cpu_time(self):
@@ -136,14 +349,89 @@ class TestJudgedValueIsLoadIndependent:
                 f"{check} 仍用墙钟（perf_counter）判分——本仓墙钟台账纪律禁止（负载越高越红）"
             )
 
-    def test_import_budget_keeps_wallclock_and_says_why(self):
-        """冷 import 是**子进程**墙钟，量的是"用户实际等了多久"——属可留墙钟的命中点。"""
+    def test_judged_checks_take_their_reading_from_the_single_scoring_primitive(self):
+        """两处判值必须取自门禁**唯一**的取数口，且经 `bestOfRounds` 连量取优。
+
+        取数口收在一处（`measureThreadCpu` / `bestOfRounds`），是"改回墙钟即判红"这条
+        判据能成立的前提：各检查各写一套取数，就总有一处能悄悄退回 `perf_counter`。
+        取数与取优本身的行为面由 `TestCheckSourceIsSingleAndRepeated` 两条钉住。
+        """
         source = io.open(GATE, encoding="utf-8").read()
-        segment = _functionSource(source, "_measure_import")
+        for check in ("check_step_metric_overhead", "check_shared_pool_reuse"):
+            segment = _functionSource(source, check)
+            assert "bestOfRounds(" in segment, (
+                f"{check} 的判值不经过 bestOfRounds——单轮读数会把一次性成本与超订算进判值"
+            )
+
+    def test_import_budget_keeps_wallclock_and_says_why(self):
+        """冷 import 是**子进程**墙钟，量的是"用户实际等了多久"——属可留墙钟的命中点。
+
+        判分口径的单一事实源在门禁侧的 `measureImportProbe`：它出的 `elapsed_ms`
+        取自子进程 `time.perf_counter`，`check_import_budget` 也只读这个字段。
+        """
+        source = io.open(GATE, encoding="utf-8").read()
+        segment = _functionSource(source, "measureImportProbe")
         assert "perf_counter" in segment, (
-            "冷 import 若改量本进程 CPU 时间，就不再量'首轮对话延迟'了；"
+            "冷 import 探针不再取墙钟读数，就不再量'首轮对话延迟'了；"
             "该命中点属可留墙钟，不得顺手改"
         )
+        check = _functionSource(source, "check_import_budget")
+        assert "elapsed_ms" in check, (
+            "import 预算判分不再读墙钟读数（elapsed_ms）——首轮延迟口径被改掉"
+        )
+
+
+def _injectLoad(monkeypatch, sleep_ms: float, cpu_ms: float):
+    """在被测环节的**生产装配点**上注入成本：等待与 CPU 二选一。
+
+    注入点在门禁真正取数的那两个函数上（`MetricsCollector.record_pipeline_step`
+    与 `neurova.core.thread_pool.get_thread_pool`），不碰门禁的计时口径——
+    故判据是否"把等待算成退化"由门禁自己回答。
+
+    注入的两种成本强度都按**量级**取：等待是 1e-4 s 级、CPU 是 1e-4 s 级，
+    与门禁的预算（20/50ms）隔着数量级，注入量本身不构成 flaky。
+    """
+    from neurova.core.metrics import get_metrics
+
+    collector = type(get_metrics())
+    original_step = collector.record_pipeline_step
+
+    def injectedStep(self, step_name, status, duration_ms):
+        if cpu_ms:
+            deadline = time.thread_time() + cpu_ms / 1000.0
+            while time.thread_time() < deadline:
+                pass
+        if sleep_ms:
+            time.sleep(sleep_ms / 1000.0)
+        return original_step(self, step_name, status, duration_ms)
+
+    monkeypatch.setattr(collector, "record_pipeline_step", injectedStep)
+
+    pool_module = importlib.import_module("neurova.core.thread_pool")
+    original_pool = pool_module.get_thread_pool
+
+    def injectedPool(*args, **kwargs):
+        if cpu_ms:
+            deadline = time.thread_time() + cpu_ms / 1000.0
+            while time.thread_time() < deadline:
+                pass
+        if sleep_ms:
+            time.sleep(sleep_ms / 1000.0)
+        return original_pool(*args, **kwargs)
+
+    monkeypatch.setattr(pool_module, "get_thread_pool", injectedPool)
+    return (sleep_ms / 1000.0) * (2000 + 1000)
+
+
+def _measuringWithInjectedWaiting(gate, monkeypatch, cpu_ms: float = 0.0):
+    """注入等待（默认）或 CPU，回报 (注入总等待 ms, 门禁失败项, 两个判值)。"""
+    sleep_ms = 0.0 if cpu_ms else 0.2
+    injected = _injectLoad(monkeypatch, sleep_ms, cpu_ms)
+    failures = gate.Failures()
+    step = gate.check_step_metric_overhead(failures)
+    pool = gate.check_shared_pool_reuse(failures)
+    judged = {"step_metric_ms": step["elapsed_ms"], "pool_get_ms": pool["elapsed_ms"]}
+    return injected, failures, judged
 
 
 def _functionSource(source: str, name: str) -> str:
@@ -156,43 +444,6 @@ def _functionSource(source: str, name: str) -> str:
         if index != -1:
             tail = tail[:index]
     return tail
-
-
-def _peakJudgedValue(workers: int, loaded: bool):
-    """(埋点判值, 池判值) 在该负载窗口内的**峰值**读数。
-
-    取峰值而非均值：判据若含"等待"，负载下必然出现被拉长的读数，峰值就是它的上界读数；
-    而改用本线程 CPU 时间后，峰值同样不受争抢影响（实测 1.3 倍以内）。
-    线程为守护线程且退出即回收，不留常驻进程。
-    """
-    stop = threading.Event()
-    threads = []
-    if loaded:
-        def spin():
-            counter = 0
-            while not stop.is_set():
-                counter += 1
-
-        threads = [
-            threading.Thread(target=spin, daemon=True, name=f"contend-{i}") for i in range(workers)
-        ]
-        for thread in threads:
-            thread.start()
-        time.sleep(0.6)
-    try:
-        gate = _loadGate()
-        step = max(_judgeValue(gate, gate.check_step_metric_overhead) for _ in range(3))
-        pool = max(_judgeValue(gate, gate.check_shared_pool_reuse) for _ in range(3))
-    finally:
-        stop.set()
-        for thread in threads:
-            thread.join(timeout=5)
-    return step, pool
-
-
-def _judgeValue(gate, check) -> float:
-    failures = gate.Failures()
-    return float(check(failures)["elapsed_ms"])
 
 
 def _loadGate():
@@ -246,4 +497,64 @@ class TestReuseJudgeIsFalsifiable:
             "判据把 id() 直接打在临时值上（即时丢弃引用），回收后的内存会被复用，"
             "于是一律 distinct=1；必须先收集实例再比对身份"
             "（实测变异体在原写法下 distinct=1，保留引用后为 1000）"
+        )
+
+
+class TestCheckSourceIsSingleAndRepeated:
+    """判值取数口是**一处**，且**连量取优**——两半都是"判据不随机器漂移"的前提。
+
+    第一半（取数口唯一）在 AST 侧钉住：两处检查的判值构建式必须出现 `bestOfRounds(`。
+    各检查各写一套取数，就总有一处能悄悄退回 `perf_counter`，那条"改回墙钟即判红"
+    的判据也就不再成立。
+
+    第二半（连量取优）是门禁预算能对**稳态**成立的那一半：`check_step_metric_overhead`
+    的单轮读数在空闲机上也会出现首轮档位（首次把 prometheus 的 histogram / label 路径
+    编译完，之后各轮才落到稳态——本容器实测首轮 10.5ms / 稳态 5.2ms），且单位 cpu
+    时间的读数在超订机上会被抬高（同机 8 个满载进程下最佳轮 7.8ms）。门禁要回答的是
+    "稳态下有没有数量级退化"，故取各轮最小值；这不是放宽阈值——真退化在每一轮都成立，
+    取优抹不平它。两半都由行为侧用例钉住（取最小值 + 首轮一次性成本被抹掉）。
+    """
+
+    def test_best_of_rounds_takes_the_minimum_and_repeats(self):
+        gate = importlib.import_module("scripts.ci.perf_gate")
+        rounds = []
+
+        def job():
+            start = time.thread_time()
+            deadline = start + 0.01
+            while time.thread_time() < deadline:
+                pass
+            rounds.append((time.thread_time() - start) * 1000.0)
+
+        best = gate.bestOfRounds(job)
+        assert len(rounds) == gate.SCORING_ROUNDS, (
+            f"取数口只量了 {len(rounds)} 轮，判据的取优面消失"
+        )
+        assert best <= min(rounds) + 0.5, (
+            f"bestOfRounds 取的不是最小值（{best:.3f}ms vs 各轮最小值 {min(rounds):.3f}ms）"
+            "——判值会随机器抖动"
+        )
+
+    def test_single_round_reading_is_not_a_usable_judge_on_a_loaded_machine(self):
+        """反向控制：**同一段工作**的单轮读数确实会随机器状态漂开——取优不是装饰。
+
+        判据每轮跑同一段工作，其中**第一轮**含一次性成本（与稳态差一个数量级，
+        复刻首次把 prometheus 的 histogram / label 路径编译完那个档位）。取各轮
+        最小值时读数落在稳态档；只判单轮（尤其判第一轮或取最大值）就会把一次性
+        成本算进判值，判值于是看机器状态——这条用例把那个改动钉红。
+        """
+        gate = importlib.import_module("scripts.ci.perf_gate")
+        state = {"round": 0}
+
+        def firstCallThenSteady():
+            state["round"] += 1
+            if state["round"] == 1:
+                # 首轮的一次性成本：与稳态差一个数量级（复刻 prometheus 首次编译）
+                deadline = time.thread_time() + 0.02
+                while time.thread_time() < deadline:
+                    pass
+
+        best = gate.bestOfRounds(firstCallThenSteady)
+        assert best < 10.0, (
+            f"取优把首轮一次性成本算了进去（{best:.3f}ms）——判值对机器状态敏感"
         )
