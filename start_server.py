@@ -34,6 +34,13 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 
+try:
+    from neurova.core.port_guard import PortUnavailableError
+except Exception:  # noqa: BLE001 - 判据缺席时退化为"无此类"，不阻断入口
+    class PortUnavailableError(RuntimeError):  # type: ignore[no-redef]
+        """占位：port_guard 不可导入时不该让入口本身炸在 import 期。"""
+
+
 def _get_app_version():
     try:
         from neurova import __version__
@@ -50,8 +57,25 @@ def main():
     print("=" * 60)
 
     try:
-        from neurova.api.app import create_app
         import uvicorn
+
+        from neurova.api.app import create_app
+
+        # 端口预检必须在**任何重型装配之前**：uvicorn 的次序是 lifespan.startup()
+        # 先跑完、再 loop.create_server()，所以端口被占的失败会落在全量装配（实测
+        # 约 8 秒：4 个 Agent、LLM providers、DB、torch 预检、1253 行日志）之后，
+        # 且还会再触发一轮完整关机整理——真正的失败信息被埋在日志尾部。
+        # 判据与 `start.py` 同源（neurova/core/port_guard.py），两套启动器行为一致。
+        host = os.environ.get("NEUROVA_HOST", "0.0.0.0")
+        port = int(os.environ.get("NEUROVA_PORT", "9527"))
+        try:
+            from neurova.core.port_guard import preflightPortAvailable
+
+            preflightPortAvailable(host, port)
+        except PortUnavailableError:
+            raise
+        except Exception as _port_probe_err:  # noqa: BLE001 - 探针自身故障不阻断启动
+            print(f"Warning: 端口预检无法执行（忽略）: {_port_probe_err}")
 
         # torch 环境预检：c10.dll 初始化失败（缺 VC++ 运行库）→ 自动下载安装。
         # 任何失败只告警，不阻断启动。
@@ -109,11 +133,9 @@ def main():
         print(f"Version: {app.version}")
 
         # 启动服务器
-        # host/port 读环境变量（默认 0.0.0.0:9527，与 Dockerfile EXPOSE /
+        # host/port 已在上方预检处读出（默认 0.0.0.0:9527，与 Dockerfile EXPOSE /
         # compose 映射 / Helm service 同源；跨文件一致性见
         # scripts/ci/deploy_config_consistency_check.py 的 R1）。
-        host = os.environ.get("NEUROVA_HOST", "0.0.0.0")
-        port = int(os.environ.get("NEUROVA_PORT", "9527"))
         print(f"Health: http://{host}:{port}/health")
         print("=" * 60)
         uvicorn.run(
@@ -125,6 +147,12 @@ def main():
 
     except KeyboardInterrupt:
         print("\nServer stopped by user")
+    except PortUnavailableError as e:
+        # 端口被占是**可自辨的启动失败**：不是崩溃，也不必走启动失败上报
+        # （那是给"解释器都起不来"这类故障用的）。一条点名端口的显式提示就够。
+        print()
+        print(f"[启动中止] {e}")
+        return 1
     except Exception as e:
         print(f"Server failed to start: {e}")
         import traceback

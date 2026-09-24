@@ -686,3 +686,17 @@ tests/unit/memory_ingest/test_protected_registration.py
 #   三条：活配置口径逐条点名 / 守卫自身用例名不依赖驼峰模式 /
 #   匹配语义由真收集反证（探针带本仓 -c pyproject.toml）。
 tests/unit/core/test_pytest_collection_hygiene.py
+
+# Issue #189 启动器一致性批：
+#   ① 端口判据收口到 neurova/core/port_guard.py（唯一实现），start_server.py 的
+#      预检必须在 create_app 之前 —— 判据是 AST 行号（结构性），不用墙钟上界；
+#   ② 声明进检索链的适配器必须真满足 Retriever 协议（缺 get_quality_score 会让
+#      add_retriever 拒收、被 except 降级成 warning，人工标注检索源静默缺席）；
+#   ③ NL 合成工具名必须携带身份（名字侧根因，消除 ai_tool/general_tool 同名覆盖）；
+#   ④ EQP 探针发查询前按库的 schema 过闸（不适用≠没走索引，两类读数分开）。
+tests/unit/core/test_port_guard_preflight.py
+tests/unit/agent/test_retriever_protocol_conformance.py
+tests/unit/evolution/test_synth_tool_name_carries_identity.py
+tests/unit/core/test_index_probe_schema_applicability.py
+# ③ 的既有契约面（工具名仍须满足 OpenAI 规范）与 ① 的既有消费者
+tests/unit/skills/test_scripts_port_utils.py
