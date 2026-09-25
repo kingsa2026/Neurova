@@ -197,13 +197,13 @@ class NLToolSynthesizer:
             "text": ["file_read"],
             "ai": ["deep_research"],
             "automation": ["update_plan"],
+            # T-05 补上的那条真原语：附件句柄 → 只读数据集查询。
+            # 在它落地之前这一行**刻意留空**（当时硬塞 `file_parse` 等于给模型
+            # 指一条读不到数据集的路）。现在真名有了，才接线——单一事实源。
+            "database": ["query_database"],
         }
-        # `database` 与 `api` **不在此表里**：它们是"确实缺原语"的分类，不是
-        # "有原语但名字写错了"。硬塞一个 `file_parse` 进去等于给模型指一条读不到
-        # 数据集的路（`file_parse` 只收工作区内的 file_path）。
-        # 缺原语就该在合成面上诚实暴露为"无合法候选、转人工复核"；
-        # 等真正补上 `query_database` 后，再把 `database` 一行加到这里——
-        # 单一事实源，不两处各写一份。
+        # `api` **不在此表里**：它是"确实缺原语"的分类，不是"有原语但名字写错了"。
+        # 缺原语就该在合成面上诚实暴露为"无合法候选、转人工复核"。
 
     def _load_tool_patterns(self) -> typing.Dict[str, typing.Any]:
         """加载工具模式库。

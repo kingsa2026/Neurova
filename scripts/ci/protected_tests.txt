@@ -733,3 +733,7 @@ tests/unit/agent/test_tool_failure_diagnostics.py
 tests/unit/agent/test_attachment_handle_injection.py
 tests/unit/agent/test_capability_gap_trigger.py
 tests/unit/evolution/test_synthesis_alphabet_registered.py
+
+# T-05 只读数据集查询原语（Issue #197）：句柄域 / 只读连接 / SQL 白名单 / 有界
+#   四道防线与真读链路（真 .db 字节经真 get_attachment_bytes）。
+tests/unit/tools/test_query_database.py

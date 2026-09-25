@@ -29,6 +29,7 @@ from neurova.document_pdf import RenderUnavailable, render_document
 from neurova.document_sources import parse_html, parse_markdown
 import re
 import shlex
+import sqlite3
 import threading
 import time
 from datetime import datetime
@@ -258,6 +259,7 @@ class ToolExecutor:
         "discover_skills": "_execute_discover_skills",
         "file_read": "_execute_file_read",
         "file_parse": "_execute_file_parse",
+        "query_database": "_execute_query_database",
         "file_write": "_execute_file_write",
         "file_create": "_execute_file_create",
         "file_delete": "_execute_file_delete",
@@ -3330,6 +3332,66 @@ class ToolExecutor:
     _PARSE_TEXT_EXTS = frozenset({".txt", ".md", ".rst", ".json", ".yaml", ".yml", ".toml", ".log"})
     # 解析前置体积闸门（50MB）——防超大文件拖垮内存；超限诚实报错
     _PARSE_MAX_BYTES = 50 * 1024 * 1024
+
+    async def _execute_query_database(self, params: Dict) -> Dict:
+        """只读数据集查询（T-05）：附件句柄 → 表结构 / 样例行 / 只读 SQL。
+
+        安全边界四道全在 `attachment_dataset`（句柄域 / 只读连接 / SQL 白名单 /
+        有界），本处只做**身份串联**：属主校验用 `get_attachment_info(file_id, 调用者)`
+        取元数据，取字节用 `get_attachment_bytes(file_id)`。两者都走附件域的既有
+        咽喉，本处**不开任何按路径读取的口子**（D1：形参里没有 file_path）。
+        """
+        from neurova.api.endpoints import files_api
+        from neurova.attachment_dataset import (
+            assertReadOnlySql,
+            materializeReadOnlyCopy,
+            normalizeRowLimit,
+            openReadOnlyConnection,
+            readDatasetSummary,
+            runReadOnlyQuery,
+        )
+
+        file_id = str(params.get("file_id") or "").strip()
+        if not file_id:
+            return {"error": "缺少 file_id 参数（附件取用凭证，见注入文案里的句柄）"}
+
+        caller_user_id, _agent_id = self._agent_identity()
+        info = files_api.get_attachment_info(file_id, caller_user_id)
+        if not info:
+            return {
+                "error": f"附件不存在或不属于当前用户: {file_id}（跨用户句柄一律拒绝）"
+            }
+
+        data = files_api.get_attachment_bytes(file_id)
+        if not data:
+            return {"error": f"附件字节不可读: {file_id}"}
+
+        row_limit = normalizeRowLimit(params.get("row_limit"))
+        sql = params.get("sql")
+        if sql is not None and not str(sql).strip():
+            sql = None
+
+        def _run() -> Dict:
+            copy_path = materializeReadOnlyCopy(
+                file_id, data, str(info.get("filename") or "")
+            )
+            conn = openReadOnlyConnection(copy_path)
+            try:
+                if sql is None:
+                    return readDatasetSummary(conn, row_limit)
+                assertReadOnlySql(str(sql))
+                return runReadOnlyQuery(conn, str(sql), row_limit)
+            finally:
+                conn.close()
+
+        try:
+            return await asyncio.to_thread(_run)
+        except ValueError as e:
+            return {"error": f"SQL 被只读白名单拒绝: {e}"}
+        except sqlite3.Error as e:
+            return {"error": f"数据集读取失败: {type(e).__name__}: {e}"}
+        except Exception as e:  # noqa: BLE001 - 失败以诚实体暴露，不吞
+            return {"error": f"数据集读取失败: {type(e).__name__}: {e}"}
 
     async def _execute_file_parse(self, params: Dict) -> Dict:
         """执行文档解析（P0-1：PDF/Office 二进制 → 文本，复用 attachment_parser）"""
