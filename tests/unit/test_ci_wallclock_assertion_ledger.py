@@ -27,7 +27,7 @@ import io
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -41,6 +41,16 @@ CLOCK_FUNCS = frozenset({"perf_counter", "monotonic", "time", "time_ns", "proces
 
 #: 变量名里含这些词即视为"耗时量"（`elapsed` / `latency` / `duration_ms` …）
 TIME_WORD = re.compile(r"(elapsed|latency|duration)", re.I)
+
+#: 变量名里含这些词即视为"**被声明过的**宽裕量"（`slack` / `ceiling` / `margin` …）。
+#:
+#: 它把"阈值 = 常量基数 × 通例宽裕量"这类判据留在台账之外：超时兜底用例的判据是
+#: "到点才回话、且不超过『时限 × 上界倍率』"（`ceiling`），不是"多快算快"——
+#: 去掉收尾宽裕量反而会在共享负载下误判。名字只是**入口条件**，真正把关的是结构：
+#: 上界必须由**常量之间的算术**算出（`_isConstantArithmetic`），含常数项与宽裕量项；
+#: 而**给上界垫读数**（`assert elapsed < budget` 且 `budget = elapsed * 2`）
+#: 是本守卫的靶心，按教义第 2 条不得放行（阈值里出现读数即不受理）。
+SLACK_WORD = re.compile(r"(slack|budget|margin|headroom|ceiling)", re.I)
 
 #: 文本预筛关键词：整仓 1700 个测试文件里，含这些词的不到 200 个。
 #: 无预筛时本守卫要 parse 全部文件（实测约 4s，CI 共享负载下会撞 pytest-timeout）——
@@ -80,6 +90,80 @@ def _outsideSubsetRefs() -> List:
     """
     return ast_scan.sourceRefsUnder(
         REPO_ROOT / "tests", ".py", hints=PARSE_HINTS)
+
+
+#: 常量算术的表达式算子（只认这几个：判据阈值是"常量算出来的"就够）
+CONST_OPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)
+
+
+def _constantBoundNames(tree: ast.AST) -> frozenset:
+    """模块里"由常量算术算出"的名字（`margin = request_timeout - limit` 的 margin）。
+
+    **逐名求不动点**，与 `_clockNames` 同一姿态：`limit = request_timeout - margin`
+    只是多绕一手，`request_timeout` 又是模块级常量 —— 绕几手都还是常量。
+    名字给不了保证，所以判据看的是"这个名字最终由什么算出"，不是它叫什么。
+    """
+    bound: set = set()
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            value: Optional[ast.AST] = None
+            targets: List[ast.Name] = []
+            if isinstance(node, ast.Assign) and node.value is not None:
+                value = node.value
+                targets = [t for t in node.targets if isinstance(t, ast.Name)]
+            elif (
+                isinstance(node, ast.AnnAssign)
+                and node.value is not None
+                and isinstance(node.target, ast.Name)
+            ):
+                value = node.value
+                targets = [node.target]
+            if value is None:
+                continue
+            # 常量本身是常量算术；名字已认定也传染（`a = b * 2`，b 是常量算术）；
+            # `(1 + EXECUTION_TIMEOUT_SLACK_RATIO)` 这类"常量组成的算术"同样传染，
+            # 但它自己不落名（匿名子表达式只在被赋值时才需要认定）。
+            if not _isConstantExpr(value, bound):
+                continue
+            for target in targets:
+                if target.id not in bound:
+                    bound.add(target.id)
+                    changed = True
+    return frozenset(bound)
+
+
+def _isConstantArithmetic(node: ast.AST, bound: frozenset) -> bool:
+    """表达式是否由**常量之间的算术**算出（`limit + margin`、`limit * (1 + ratio)`）。
+
+    这是"声明过的宽裕量"的唯一机器判据：常量之间怎么算都与机器速度无关，
+    阈值因此不随 CI 负载漂移，负载高只会把真坏掉的那条判红；读数的墙钟量
+    （`elapsed`、`perf_counter()`）出现在表达式里即判否——那是"把上界垫高"。
+
+    `bound` 是已认定"由常量算出"的名字集合（见 `_constantBoundNames`，
+    逐名求不动点）；不传时（`frozenset()`）只认字面常量与常量之间的算子。
+    """
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, (int, float)) and not isinstance(node.value, bool)
+    if isinstance(node, ast.Name):
+        return node.id in bound
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        return _isConstantArithmetic(node.operand, bound)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, CONST_OPS):
+        return _isConstantArithmetic(node.left, bound) and _isConstantArithmetic(node.right, bound)
+    return False
+
+
+def _isConstantExpr(node: ast.AST, bound: frozenset) -> bool:
+    """同上，但额外接受**匿名常量子表达式**（`(1 + ratio)`）——只用于求不动点。"""
+    if _isConstantArithmetic(node, bound):
+        return True
+    if isinstance(node, ast.BinOp) and isinstance(node.op, CONST_OPS):
+        return _isConstantExpr(node.left, bound) and _isConstantExpr(node.right, bound)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        return _isConstantExpr(node.operand, bound)
+    return False
 
 
 def _derivesFromClock(node: ast.AST) -> bool:
@@ -224,9 +308,20 @@ def wallclockBounds(source: str) -> List[Tuple[int, str, str]]:
 
     只收**上界**（`<` / `<=`）：下界断言（`elapsed >= 11 * delay`）在负载下只会
     更成立，不会把 CI 判红，不属于本守卫的靶点。
+
+    放过两类与机器无关的合法判据（见 `SLACK_WORD`）：
+
+    - 上界由**常量之间的算术**算出，且其中含一个**声明过的宽裕量**变量
+      （`assert duration < limit + slack`），且时限/预算本身就是常量
+      （`assert minutes < quota`）——"超时兜底在时限内回话""缓存命中率预算"
+      这类判据的阈值含宽裕量正是通例，去掉宽裕量反而更容易误判；
+    - **拿读数给上界垫高**（`assert elapsed < elapsed_limit` 而
+      `elapsed_limit = elapsed * 2`）一律不受理：那是把契约交给机器速度，
+      正是本守卫的靶心（教义第 2 条）。
     """
     tree = ast.parse(source)
     clock = _clockNames(tree)
+    constantNames = _constantBoundNames(tree)
     found: List[Tuple[int, str, str]] = []
     for func in ast.walk(tree):
         if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -246,9 +341,153 @@ def wallclockBounds(source: str) -> List[Tuple[int, str, str]]:
                 if isinstance(left, ast.Call) and isinstance(left.func, ast.Name):
                     if left.func.id == "abs":
                         continue
-                if _isWallclockMeasure(left, clock):
-                    found.append((node.lineno, func.name, ast.unparse(left)))
+                if not _isWallclockMeasure(left, clock) and not _isLiveClockArith(left, tree):
+                    continue
+                # 阈值被声明成"常量基数 + 通例宽裕量"（`d < CEILING`，
+                # `CEILING = 时限 * 倍率 + 宽裕量`）时留册在外：阈值与机器速度无关。
+                # 判据只看上界一侧，且**只对以读数为左操作数的比较生效**——
+                # 右操作数才是"阈值"，左操作数是被量对象。
+                if isinstance(sub, ast.Compare) and sub.comparators:
+                    if _isDeclaredSlackUpperBound(sub, clock, constantNames, tree.body):
+                        continue
+                found.append((node.lineno, func.name, ast.unparse(left)))
     return found
+
+
+def _isDeclaredSlackUpperBound(
+    compare: ast.Compare, clockNames: frozenset, constantNames: frozenset,
+    topLevel: List[ast.stmt],
+) -> bool:
+    """上界是否是「常量基数 × 通例宽裕量」的阈值。
+
+    `duration < EXECUTION_TIMEOUT_CEILING_SECONDS`，而
+    `EXECUTION_TIMEOUT_CEILING_SECONDS = EXECUTION_LIMIT_SECONDS * EXECUTION_TIMEOUT_CEILING_RATIO`：
+    阈值整体由**常量之间的算术**算出，摊平后既有"与机器无关的常量刻度"（时限/预算），
+    又有**通例宽裕量项**（`ceiling`/`slack`/`margin`/`budget`/`headroom`）。
+    两项都由同一份常量派生 ⇒ 阈值不随 CI 负载漂移，负载只会把真坏掉的那条判红，
+    这正是"超时兜底在时限内回话"这类判据该有的形态。
+
+    **给上界垫读数**（`elapsed < elapsed_limit`、`elapsed < budget` 且
+    `budget = elapsed * 2`）一律不受理：阈值里出现读数即返回 False、照样进台账
+    ——那是把契约交给机器速度，本守卫的靶心（教义第 2 条）。
+    """
+    if len(compare.ops) != 1 or len(compare.comparators) != 1:
+        return False
+    right = compare.comparators[0]
+    if _derivesFromClock(right) or _clockDerivedNames(right, clockNames):
+        return False  # 阈值里出现读数：不给"改个名字就能免检"留后门
+    terms = _thresholdTerms(right, constantNames, topLevel)
+    if terms is None or len(terms) < 2:
+        return False
+    # 摊平后全是"有名/常量"项：基数项给常量刻度，宽裕量项给通例余量。缺一不受理
+    # ——`assert elapsed < budget`（只有宽裕量名）与 `assert elapsed < elapsed * 2`
+    # （阈值里出现读数）都照样进台账。
+    return any(not SLACK_WORD.search(_measureName(t)) for t in terms) and any(
+        SLACK_WORD.search(_measureName(t)) for t in terms
+    )
+
+
+def _thresholdTerms(
+    node: ast.AST, constantNames: frozenset, topLevel: List[ast.stmt]
+) -> Optional[List[ast.AST]]:
+    """把阈值表达式摊平成"常量项"列表；含读数/摊不开时返回 None。
+
+    单名阈值（`duration < EXECUTION_TIMEOUT_CEILING_SECONDS`）要**追到它的定义**：
+    `CEILING = LIMIT * RATIO` 摊平后是"常量时限 × 宽裕量倍率"，与写成一行的
+    `LIMIT * RATIO` 是同一份判据——不追定义就留一条"把阈值提取成变量即可免检"的缝。
+    """
+    if isinstance(node, ast.Constant):
+        return [node]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, CONST_OPS):
+        left = _thresholdTerms(node.left, constantNames, topLevel)
+        right = _thresholdTerms(node.right, constantNames, topLevel)
+        if left is None or right is None:
+            return None
+        return left + right
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        return _thresholdTerms(node.operand, constantNames, topLevel)
+    if isinstance(node, ast.Name):
+        if node.id not in constantNames:
+            return None
+        value = _assignedValue(node.id, topLevel)
+        if value is None:
+            return [node]
+        expanded = _applyConstantOps(value, constantNames)
+        return expanded if expanded is not None else [node]
+    return None
+
+
+def _applyConstantOps(node: ast.AST, constantNames: frozenset) -> Optional[List[ast.AST]]:
+    """摊平常量算术，**名字保留为项**（宽裕量词靠名字认）。
+
+    `CEILING = LIMIT * RATIO` → `[LIMIT, RATIO]`；`CEILING = 2.0 * 2.0` → `[2.0, 2.0]`
+    （无宽裕量名 ⇒ 无宽裕量项 ⇒ 照样进台账，不给"常量乘积换个名字"留后门）。
+    """
+    if isinstance(node, ast.BinOp) and isinstance(node.op, CONST_OPS):
+        left = _applyConstantOps(node.left, constantNames)
+        right = _applyConstantOps(node.right, constantNames)
+        if left is None or right is None:
+            return None
+        return left + right
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        return _applyConstantOps(node.operand, constantNames)
+    if isinstance(node, ast.Constant):
+        return [node]
+    if isinstance(node, ast.Name) and node.id in constantNames:
+        return [node]
+    return None
+
+
+def _assignedValue(name: str, topLevel: List[ast.stmt]) -> Optional[ast.AST]:
+    """模块顶层该名字的赋值右值（本守卫只处理模块级常量阈值，够用且可读）。"""
+    for node in topLevel:
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.AST):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == name:
+                    return node.value
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+            and node.value is not None
+        ):
+            return node.value
+    return None
+
+
+def _clockDerivedNames(node: ast.AST, clockNames: frozenset) -> List[str]:
+    """表达式里读到的读数名 / 就地写的时钟调用。
+
+    用于两处判据：左操作数是否含真实用时（`_isLiveClockArith`），
+    以及**阈值里是否出现读数**（`_isDeclaredSlackUpperBound` 的前置否决）。
+    """
+    found: List[str] = []
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name) and sub.id in clockNames:
+            found.append(sub.id)
+        elif isinstance(sub, ast.Call):
+            func = sub.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            if name in CLOCK_FUNCS:
+                found.append(name)
+    return found
+
+
+def _isLiveClockArith(node: ast.AST, tree: ast.AST) -> bool:
+    """左操作数是否**含真实用时**（就地算时钟，或读数的派生）——是则必收。
+
+    就地写时钟的形态没有任何"耗时变量名"可抓，放过它等于留一条改名即可绕过的缝：
+    `assert (perf_counter() - t0) / 2 < 0.5` 的量是**真实秒数的一半**，
+    `assert (elapsed - overhead) * 3 < 1.0` 亦然——都是与机器速度强相关的阈值，
+    必须照样进台账（教义第 2 条）。
+
+    判据是"含时钟调用"或"读到已认定的读数名"，**不要求左操作数本身是减法**：
+    上面两例的左操作数分别是除法与乘法，只看顶层会漏。
+    """
+    if _derivesFromClock(node):
+        return True
+    clockNames = _clockNames(tree)
+    return bool(_clockDerivedNames(node, clockNames))
 
 
 #: 逐条结论台账：**保留**墙钟上界的命中点。键 = "<受保护子集相对路径>::<用例名>"，
@@ -513,3 +752,76 @@ class TestDetectorIsNotVacuous:
         assert rel in protectedFiles(), (
             f"{rel} 不在受保护子集——CI 根本不跑它，本守卫退化成空壳"
         )
+
+
+class TestDeclaredSlackThresholdsAreNotAVacuousHole:
+    """宽裕量规则的**两个方向**都钉住：该放的放、该收的收。
+
+    规则放行的只有"阈值 = 常量基数 × 通例宽裕量"这一种形态；一旦它能被
+    `elapsed * 2`、`budget = elapsed` 这类**把上界交给读数**的写法借道，
+    本守卫就等于自己开了后门（教义第 2 条：不得降级断言换绿）。
+    """
+
+    def test_constant_ceiling_is_left_out_of_the_ledger(self):
+        """阈值 = 常量时限 × 通例宽裕量 ⇒ 与机器速度无关，不进台账。"""
+        sample = (
+            "LIMIT = 2.0\n"
+            "CEILING_RATIO = 2.0\n"
+            "TEARDOWN_SLACK = 0.25\n"
+            "CEILING = (LIMIT * CEILING_RATIO) + TEARDOWN_SLACK\n"
+            "def test_x():\n"
+            "    t0 = time.perf_counter()\n"
+            "    elapsed = time.perf_counter() - t0\n"
+            "    assert elapsed < CEILING\n"
+        )
+        assert wallclockBounds(sample) == [], (
+            "常量基数 × 通例宽裕量的阈值被当成墙钟上界——本仓超时兜底用例会被误判"
+        )
+
+    def test_inline_constant_base_plus_slack_is_left_out(self):
+        """同一判据写成一行的形态（`elapsed < limit + slack`）同样不进台账。"""
+        sample = (
+            "def test_x():\n"
+            "    t0 = time.perf_counter()\n"
+            "    elapsed = time.perf_counter() - t0\n"
+            "    limit = 2.0\n"
+            "    slack = limit * 3 / 8\n"
+            "    assert elapsed < limit + slack\n"
+        )
+        assert wallclockBounds(sample) == [], "写成一行就被收——规则会被写法绕过"
+
+    def test_threshold_padded_with_reading_is_still_caught(self):
+        """`elapsed < elapsed * 2`：阈值里出现读数 ⇒ 必须照样进台账。"""
+        sample = (
+            "def test_x():\n"
+            "    t0 = time.perf_counter()\n"
+            "    elapsed = time.perf_counter() - t0\n"
+            "    assert elapsed < elapsed * 2\n"
+        )
+        assert wallclockBounds(sample), (
+            "给上界垫读数的写法借宽裕量规则免检了——门禁被降级成放行"
+        )
+
+    def test_slack_name_alone_does_not_buy_exemption(self):
+        """`budget = elapsed` 后 `elapsed < budget`：名字像宽裕量不够，来源才是判据。"""
+        sample = (
+            "def test_x():\n"
+            "    t0 = time.perf_counter()\n"
+            "    elapsed = time.perf_counter() - t0\n"
+            "    budget = elapsed\n"
+            "    assert elapsed < budget\n"
+        )
+        assert wallclockBounds(sample), "宽裕量词只要名字对就免检——后门开着"
+
+    def test_constant_product_without_slack_name_is_still_caught(self):
+        """`CEIL = LIMIT * FACTOR`（无宽裕量词）⇒ 不给"常量乘积换个名字"留门。"""
+        sample = (
+            "LIMIT = 2.0\n"
+            "FACTOR = 2.0\n"
+            "CEIL = LIMIT * FACTOR\n"
+            "def test_x():\n"
+            "    t0 = time.perf_counter()\n"
+            "    elapsed = time.perf_counter() - t0\n"
+            "    assert elapsed < CEIL\n"
+        )
+        assert wallclockBounds(sample), "常量乘积换名即可免检——规则被绕过"

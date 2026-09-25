@@ -832,6 +832,12 @@ tests/unit/api/test_knowledge_annotations_contract.py
 #    不可能存在。代际栈不设上限（工单 §12.1，负责人 2026-09-25 裁定撤销原上限 5），
 #    一档都不丢：栈深 == 代数，读数里无 truncated 字段（无上限即不可能截断）。）
 tests/unit/context/test_fold_generation_t11a.py
+# T-11b 层节点索引（Issue #90 工单 §12.4）：折叠产出的池内 SUMMARY 节点带
+#   covers（turn 区间 + hash 列表）与层序，档号由读面派生；covers 解析率 0、
+#   覆盖闭合、跨重启读得回；层节点由确定性索引寻址、不参加概率性相关性召回
+#   （§12.5 第 3 条：下钻靠相关性门槛碰运气属假实现）——后者是 A/B 咬出来的
+#   真实回归（两个单聊会话作用域都是 direct，层节点混进召回面即跨会话泄漏）。
+tests/unit/context/test_fold_layer_index_t11b.py
 # 曾登记过、被静默删掉的历史条目复原（守 `test_protected_subset_registration_history.py`）。
 # 根因：清单是纯文本，删一行不产生任何红——「删重复」与「删光」在文本上同形，
 # 合并解冲突时更容易整段带走（实测 `88901c00` 想删重复条目，结果两份都删了；
@@ -868,3 +874,14 @@ tests/unit/ci/test_protected_subset_registration_history.py
 #    判定口径与复算入口在 scripts/ci/npc_branch_cleanup.py，台账见
 #    docs/06-bugfix/npc分支归档台账.md；守卫不连网。）
 tests/unit/ci/test_npc_branch_cleanup.py
+
+# Issue #68 收口：代码执行沙箱后端（前端 SandboxPage 的承载面补齐）。
+#   （根因：同一件事「沙箱」被定义了两份——前端页面是代码执行沙箱
+#    （image/command/language），后端实现是思维沙箱（topic/step/commit）。
+#    `/sandbox/{id}/execute` 从未注册过路由（必 404）、`/start` 要
+#    agent_id/topic（前端载荷必 422）、`/commit` 强制结论 body（必 422）。
+#    现收口为一套值域：代码执行 = 真 session（容器后端，enforced 自报），
+#    思维沙箱 = 保留 id `null` 的限定能力面。
+#    关联：tests/unit/frontContractBaseline.txt 该条已由「待接线」改判「已修」，
+#    docs/09-dev-progress/api_inventory.md 第四节差集归零。）
+tests/unit/sandbox/test_code_execution_sandbox_contract.py
