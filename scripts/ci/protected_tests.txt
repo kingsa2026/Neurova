@@ -853,6 +853,15 @@ tests/unit/context/test_fold_span_drilldown_t11d.py
 #   覆盖账（与 T-05 同族），读数落 `get_context_health()["fold_rollup"]`。
 #   回退开关 NEUROVA_CONTEXT_ROLLUP=0 时行为等价于本票之前。
 tests/unit/context/test_fold_rollup_t11e.py
+# 上下文三链路批（Issue #90）T-11c：分辨率装配器（视图按距离 1:4:16 几何退避装多档概览）。
+#   改前视图只装配代际栈顶一代（实测池内 6 档 / 视图 1 行），§12.1 C2 梯度不成立。
+#   本票让视图从池层索引按档号装多档（近细远粗、位置由远及近），档间预算比由
+#   `context/fold_resolution.py` 单点定义；读数落 `get_context_health()["fold_resolution"]`
+#   （生产读者 = /metrics），截断与未装档数均可见。
+#   回退开关 NEUROVA_CONTEXT_FOLD_RESOLUTION=0 时视图等价于本票之前。
+#   同批在根因处修了索引读面按全局层序派生档号导致跨会话串档（见本文件用例
+#   TestIndexIsSessionScoped）—— 层序是会话内事实，档号只在本会话内派生。
+tests/unit/context/test_fold_resolution_t11c.py
 # 曾登记过、被静默删掉的历史条目复原（守 `test_protected_subset_registration_history.py`）。
 # 根因：清单是纯文本，删一行不产生任何红——「删重复」与「删光」在文本上同形，
 # 合并解冲突时更容易整段带走（实测 `88901c00` 想删重复条目，结果两份都删了；
