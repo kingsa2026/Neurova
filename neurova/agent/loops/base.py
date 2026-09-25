@@ -243,7 +243,15 @@ class BaseAgentLoop(ABC):
         if exec_result.success:
             content = _safe_json_dumps(exec_result.data) if exec_result.data is not None else "Success"
         else:
-            content = _safe_json_dumps({"error": exec_result.error})
+            # 失败正文不得只剩一句兜底串：`run_code` 这类"跑了但非零退出"的工具
+            # 由执行面给出 `{success: False, error: None, stderr, exit_code}`，
+            # 原实现只序列化 `error`（None），stderr/exit_code 在回环处蒸发。
+            # 诊断键名单与正文构造**单源**在 `native_tool_dispatch`。
+            from neurova.agent import native_tool_dispatch as _native_dispatch
+
+            content = _safe_json_dumps(
+                _native_dispatch.buildFailureToolBody(exec_result.error, exec_result.data)
+            )
 
         # P1-#6（§5.6）：溢出分层——可重现大结果全文落工作区文件、
         # 消息体换预览+指针；不可重现（含 MCP/自创未声明）豁免原文直进。
