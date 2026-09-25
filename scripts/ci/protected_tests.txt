@@ -939,3 +939,6 @@ tests/unit/test_ci_pipeline_speed_guard.py
 #    修法按 AGENTS.md 第 6 条收口到一份：单一事实源是 `main.push` 的长度，
 #    头部只描述结构与口径，不再保留第二份手抄定义。）
 tests/unit/ci/test_cnb_header_pipeline_count.py
+# Issue #242 知识库索引接线：建库流水线的挂载事件 / options 键集 /
+# include 真命中且 exclude 不空转 / 每个在册角色的知识库作答纪律 / 指南导航可达
+tests/unit/ci/test_knowledge_base_index_wiring.py
