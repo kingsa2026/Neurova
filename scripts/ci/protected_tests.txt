@@ -305,6 +305,11 @@ tests/unit/migration/test_kai_import.py
 # 根因 = 目录重排 fd7ea92c 之后，3b5d7e80 又把 306 个 docs 旧路径还原回来，
 # 同一篇文档在编号分层与旧路径各留一份，归档引用失去唯一裁定。本单收口为一份。
 tests/unit/test_docs_name_collision_guard.py
+# Issue #189 续：导航/纪律事实源不得手抄「仓库条目数」（第二份定义）。
+# 根因与 `.cnb.yml` 头部手抄流水线条数同形：索引里的数字与目录实况之间没有
+# 任何机器判据，已实测漂移三处（修复记录 47→37、模块设计 19→21、代码评审 3→4）；
+# `AGENTS.md` 的 `90+` 与总索引的 `97` 更是同一事实的两份手抄、同一时刻两个数。
+tests/unit/test_docs_index_hand_copied_counts.py
 
 # Issue #72 第二轮：投影与权威的双向差集可读、可修、只动本域（含端点接线）
 tests/unit/knowledge/test_projection_derived_from_authority.py
