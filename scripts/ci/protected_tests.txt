@@ -826,3 +826,8 @@ tests/unit/api/test_front_contract_endpoints.py
 #   （唯一消费者是 KnowledgePage 的 AnnotationDrawer，前端按
 #    /api/v1/knowledge/annotations* 请求；此前挂在 /v1/console 下，实测恒 404。）
 tests/unit/api/test_knowledge_annotations_contract.py
+
+# T-11a 折叠分代（Issue #90 工单 §12.4）：新折叠产出新节点，旧摘要降一层保留。
+#   （根因：摘要在改前是一个字符串，每轮折叠原地覆盖——多节点/梯度在数据上
+#    不可能存在。截断可见（fold_layers.truncated），不静默丢层。）
+tests/unit/context/test_fold_generation_t11a.py
