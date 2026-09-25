@@ -17,7 +17,6 @@ SNAPSHOT = Path(__file__).with_name("console_split_routes.json")
 DOMAINS = {
     "files": ["post_console_upload", "list_console_uploads", "get_console_upload", "delete_console_upload"],
     "system": ["get_backend_debug_logs", "get_system_status", "post_debug_run_command"],
-    "annotations": ["list_annotations", "create_annotation", "update_annotation", "delete_annotation", "export_training_set"],
 }
 
 
@@ -161,35 +160,10 @@ def test_admin_http_rejection(client, monkeypatch, role, expected, method, path,
     spawn.assert_not_awaited()
 
 
-def test_annotations_mock_store(client, monkeypatch):
-    from neurova.core import annotation_store
-    store = Mock()
-    item = {"id": "a", "question": "Question", "answer": "Answer"}
-    store.list_annotations.return_value = [item]
-    store.count.return_value = 1
-    store.add.return_value = "a"
-    store.get.return_value = item
-    store.delete.return_value = True
-    store.export_training_set.return_value = ["one", "two"]
-    monkeypatch.setattr(annotation_store, "get_annotation_store", lambda: store)
-    assert client.get("/annotations?q=question").json()["data"] == {"items": [item], "total": 1}
-    assert client.get("/annotations?q=missing").json()["data"]["items"] == []
-    assert client.get("/annotations?limit=0").status_code == 422
-    assert client.post("/annotations", json={"question": " q ", "answer": " a "}).json()["data"]["id"] == "a"
-    store.add.assert_called_once_with("q", "a", source="manual")
-    assert client.post("/annotations", json={"question": " ", "answer": "a"}).status_code == 400
-    assert client.put("/annotations/a", json={"answer": "new", "enabled": False}).status_code == 200
-    store.update_answer.assert_called_once_with("a", "new")
-    store.set_enabled.assert_called_once_with("a", False)
-    assert client.get("/annotations/export").json()["data"] == {"jsonl": "one\ntwo", "count": 2}
-    assert client.delete("/annotations/a").status_code == 200
-    store.get.return_value = None
-    assert client.put("/annotations/a", json={"answer": "new"}).status_code == 404
-    store.delete.return_value = False
-    assert client.delete("/annotations/a").status_code == 404
-
-
 def test_model_identity():
-    for name, model in [("post_debug_run_command", api.CommandRequest), ("create_annotation", api.AnnotationCreateRequest), ("update_annotation", api.AnnotationUpdateRequest)]:
+    # annotations 的两个请求模型已随迁移移出 console 域（Issue #68 收口：
+    # 归属知识域），其身份契约由 tests/unit/api/test_knowledge_annotations_contract.py
+    # 承接；本文件只钉 console 域仍持有的模型。
+    for name, model in [("post_debug_run_command", api.CommandRequest)]:
         assert inspect.signature(getattr(api, name)).parameters["body"].annotation is model
         assert model.__module__ == api.__name__
