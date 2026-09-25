@@ -232,6 +232,12 @@ class ContextOrchestrator:
           读数是**最近一次折叠所在会话槽**的形态（折叠缓存按会话分槽），
           `demoted` 为累计量；这与同面 `turn_identity` / `microcompact`
           的"最近一次"口径一致，故不另造第二份逐会话读数。
+        - `fold_index`：折叠层索引读数（T-11b，工单 §12.4）。`nodes` 是池内
+          **带 covers 的层节点数**，`levels` 是档数，`unparsable` 是解析不出
+          covers/层序的 SUMMARY 节点数（解析失败率必须为 0），`uncovered` 是
+          「覆盖闭合」的反例数（已折叠原文的 hash 不在任何档 covers 内）。
+          读数取自池的**唯一读面** `summaryLayers()`（含持久读回），编排器不
+          在这里另算一份索引——两份索引必然漂移。
         - `microcompact`：工具结果占位清除的触发回执（T-10c 前置裁定后的可观测面）。
           `calls` 与 `triggered_calls` 分开记，"没触发"与"没跑"因此可分；
           `last_*` 是最近一次的强度（载荷 / 触发线 / 替换与保留条数）。
@@ -245,6 +251,13 @@ class ContextOrchestrator:
                 "levels": 0,
                 "demoted": 0,
                 "last_summary_chars": 0,
+            },
+            "fold_index": {
+                "nodes": 0,
+                "levels": 0,
+                "unparsable": 0,
+                "uncovered": 0,
+                "last_error": None,
             },
             "microcompact": {
                 "calls": 0,
@@ -378,7 +391,29 @@ class ContextOrchestrator:
         """
         health = getattr(self, "_context_health", None) or {}
         empty = self._emptyContextHealth()
-        return {key: dict(health.get(key) or value) for key, value in empty.items()}
+        snapshot = {key: dict(health.get(key) or value) for key, value in empty.items()}
+        # T-11b：层索引读数取自池的**唯一读面**（含持久回读），不在这里另算一份。
+        # 池缺席/读面失败时保留空形状（读数不为幻觉），失败原因由池侧点名。
+        pool = getattr(self, "context_pool", None)
+        reader = getattr(pool, "foldIndexHealth", None)
+        if callable(reader):
+            try:
+                snapshot["fold_index"] = {**empty["fold_index"], **reader(self._foldedHashes())}
+            except Exception as exc:  # noqa: BLE001 - 读数失败不影响其余读数
+                snapshot["fold_index"]["last_error"] = f"{type(exc).__name__}: {exc}"
+        return snapshot
+
+    def _foldedHashes(self) -> set:
+        """折叠侧登记的已覆盖 hash 全集（覆盖闭合对账的**唯一**事实源）。
+
+        取折叠缓存各槽 `covered` 的并集 —— 池不另存一份（教义第 6 条），
+        读数时作为入参交给池的层索引读面。
+        """
+        cache = getattr(self, "_window_compaction_cache", None) or {}
+        folded: set = set()
+        for slot in cache.values():
+            folded |= set((slot or {}).get("covered") or ())
+        return folded
 
     @property
     def session_id(self) -> Optional[str]:
@@ -488,7 +523,13 @@ class ContextOrchestrator:
                 "静默共用槽即 T-03b 缺陷的形态，此处点名以便发现身份链路断了"
             )
 
-    def _advanceFoldGeneration(self, slot: dict, summary: str) -> None:
+    def _advanceFoldGeneration(
+        self,
+        slot: dict,
+        summary: str,
+        covers: Optional[List[str]] = None,
+        turnIds: Optional[List[str]] = None,
+    ) -> None:
         """把本轮新摘要推进代际栈：旧摘要**降一层**保留，而不是被覆盖（T-11a）。
 
         根因（工单 §12.2 第 1 行）：折叠摘要在改前是**一个字符串**
@@ -524,6 +565,25 @@ class ContextOrchestrator:
         readout["levels"] = len(stack)
         readout["demoted"] = slot["demoted_total"]
         readout["last_summary_chars"] = len(summary or "")
+
+        # T-11b：把**这一代**写进池并带 covers（层即索引，工单 §12.4）。
+        # 三件事必须同批，缺一条索引就是假的：
+        #   1) 层序（不可变事实）单调 +1 —— 档号由它派生，不写进归档实体；
+        #   2) covers 的 hash 取**本轮新覆盖**那批（`coveredNow`），其数据源就是
+        #      折叠缓存 `covered` 集合里刚追加的那一批，不另算一份覆盖事实（§12.3）；
+        #   3) 入池走 `archive_summary`（池的唯一写入咽喉）→ 自动继承 T-02 的作用域。
+        coveredNow = [h for h in (covers or ()) if h]
+        if coveredNow and self.context_pool is not None:
+            from neurova.context.fold_index import buildCovers
+
+            slot["fold_seq"] = int(slot.get("fold_seq") or 0) + 1
+            self.context_pool.archive_summary(
+                summary,
+                source_summary=slot.get("summary_prev", ""),
+                covers=buildCovers(turnIds or (), coveredNow),
+                foldSeq=slot["fold_seq"],
+            )
+        slot["summary_prev"] = summary
 
     def _window_cache_slot(self, key: str) -> dict:
         """取（或建）折叠摘要缓存槽；超上限时淘汰**最久未使用**的槽。
@@ -1920,17 +1980,29 @@ class ContextOrchestrator:
         # 还在窗口里，等于在摘要层做假账（防抖期内不再重摘要，视图只剩一个
         # 与内容无关的旧标题）。
         if compaction.summary and compaction.summary_is_fresh:
-            # T-11a：新摘要推进代际栈（旧摘要降一层），栈顶投影回 `cache["summary"]`
-            # —— 上面那个"是否为新鲜摘要"的判据一字不改，分代只改变旧摘要的去向。
-            self._advanceFoldGeneration(cache, compaction.summary)
             cache["last_count"] = len(msgs)
             from neurova.context_pool import ContextInput, ContextSource
 
-            # 标记本轮仍被折叠的消息为已覆盖（凡未出现在新窗口的）
+            # 标记本轮仍被折叠的消息为已覆盖（凡未出现在新窗口的），
+            # 并同批收集这一代的 covers（hash + 轮次 id）。
+            # 轮次 id 的派生与归档侧**同源**（`assign_turn_ids`）：另起一份
+            # "第几条算一轮"的算法，covers 的 turn 区间会与归档归属对不上。
             kept_set = {m["content"] for m in compaction.window}
-            for m in msgs:
-                if m["content"] not in kept_set:
-                    cache["covered"].add(self._windowChunkHash(m))
+            coveredNow: List[str] = []
+            turnIdsNow: List[str] = []
+            for m, turnId in assign_turn_ids(msgs):
+                if m.get("content", "") in kept_set:
+                    continue
+                fingerprint = self._windowChunkHash(m)
+                cache["covered"].add(fingerprint)
+                coveredNow.append(fingerprint)
+                turnIdsNow.append(turnId)
+            # T-11a/T-11b：新摘要推进代际栈（旧摘要降一层）并写进池带 covers。
+            # 顺序不可换：covers 取的正是上面刚落进 `covered` 的那批 hash，
+            # 先推进则这一代没有任何原文可寻址。
+            self._advanceFoldGeneration(
+                cache, compaction.summary, covers=coveredNow, turnIds=turnIdsNow
+            )
 
         window = compaction.window
         if compaction.compacted_count > 0 and not compaction.summary:
@@ -2004,14 +2076,22 @@ class ContextOrchestrator:
 
         if compaction.summary:
             # 与自动折叠**共用同一处**分代推进（教义第 6 条：一个契约一处实现）。
-            self._advanceFoldGeneration(cache, compaction.summary)
             cache["last_count"] = len(msgs)
             from neurova.context_pool import ContextInput, ContextSource
 
             kept_set = {m["content"] for m in compaction.window}
-            for m in msgs:
-                if m["content"] not in kept_set:
-                    cache["covered"].add(self._windowChunkHash(m))
+            coveredNow = []
+            turnIdsNow = []
+            for m, turnId in assign_turn_ids(msgs):
+                if m.get("content", "") in kept_set:
+                    continue
+                fingerprint = self._windowChunkHash(m)
+                cache["covered"].add(fingerprint)
+                coveredNow.append(fingerprint)
+                turnIdsNow.append(turnId)
+            self._advanceFoldGeneration(
+                cache, compaction.summary, covers=coveredNow, turnIds=turnIdsNow
+            )
         elif cache.get("summary"):
             # 无新摘要但旧摘要存在：保留（后续轮次仍携带）
             pass
