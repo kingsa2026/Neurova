@@ -183,6 +183,10 @@
 - [2026-09-22-ci-ast-scan-budget.md](../04-plans/2026-09-22-ci-ast-scan-budget.md) — 跨文件 AST 判据的解析预算收口（Issue #148 受保护子集偶发超时）
 - [2026-09-25-ci-pipeline-cost-convergence.md](../04-plans/2026-09-25-ci-pipeline-cost-convergence.md) — CI 流水线耗时收口（Issue #223：离线库缓存 / 静态门禁合并 / 依赖走锁 / 不自举 pip）
 
+**CI / NPC 口径**：
+
+- [npc轮数配额口径收口_2026-09-25.md](../05-reports/npc轮数配额口径收口_2026-09-25.md) — NPC `maxTurns` 配额口径收口（Issue #236：删掉「2h ÷ 单轮耗时」上钳、配额单源化到 `.cnb.yml`）
+
 ### 05-reports 报告
 
 **测试报告**：
