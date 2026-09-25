@@ -784,3 +784,66 @@ orchestrate_tools visible to LLM = True | tool count = 71
 （累加器类 + 测量计数）、`agent/chat_pipeline.py` **-2**、`context/builder.py` **+9**（注释说明
 缺键语义）、`api/endpoints/experience_knowledge_api.py` **-2**（实现委托单源）、
 `post_chat_pipeline.py` **+3**（测量计数判据）。测试另计。
+
+
+## 13. 第九轮：写入面的词域（`outcome` 词 → 三态）
+
+来源：Issue #80 派发方点名的两格问题（进 prompt 那一段 / `execution_time` 判据）已在
+第八轮收口。本轮按教义第 5 条对**同一契约**做放大视角：五面全在**读**侧，写入侧的
+`POST /experience/records` 仍是一句补集表达式。
+
+### 13.1 命中点：词 → 态的入口只认两个半词
+
+```python
+success=None if body.outcome == "unevidenced" else (body.outcome != "failure")
+```
+
+| 入参 | 落库前 | 落库后 | 结果 |
+|---|---|---|---|
+| `success` | — | `1` | 正确 |
+| `failure` | — | `0` | 正确 |
+| `unevidenced` | — | `NULL` | 正确 |
+| `partial`（前端表单提供的词） | — | `1` | **静默记成成功** |
+| 任意未知词 / 空串 | — | `1` | **静默记成成功** |
+
+根因不是"少配一个词"，是**词域有三份**：后端契约（`skills/models.py` 三值）、
+前端类型与表单（`success|failure|partial`）、端点内部（补集表达式里硬编码的两个词）。
+前端加词不会带着后端一起动，所以 `partial` 一路走到库里都无人出声。
+
+### 13.2 收口（教义第 1 / 2 / 6 条）
+
+- **反向映射单源**：`skills/models.py` 新增 `OUTCOME_STATES` 与 `outcomeStateFromWord()`，
+  与 `outcomeWord()` / `OUTCOME_MARKS` 同处一份词域。非契约词**抛 `ValueError`**。
+- **边界显式拒绝**：端点在边界把 `ValueError` 转成 `422` 并点名合法词域。不折叠、不兜底——
+  "没听懂"必须与"没测到"分家（诚实形态暴露）。
+- **前端词域对齐**：`experience.ts` 具名类型 `ExperienceOutcome`（删 `partial`、补
+  `unevidenced`），新建表单换成契约词，四张表各写一份的色标三元式收口到 `outcomeColor`，
+  11 个语言包 `outcomePartial` 死键退役 + `outcomeUnevidenced` 补齐。
+
+### 13.3 判据与实测
+
+- **新建** `tests/unit/api/test_experience_outcome_word_domain.py`（16 条）。
+- 红 → 绿：
+  ```
+  红（改动前，真端点 + 真库）：
+    入参 'partial' -> 落库 success=1  回读 outcome='success'
+    入参 'bogus'   -> 落库 success=1  回读 outcome='success'
+    入参 ''        -> 落库 success=1  回读 outcome='success'
+  绿（改动后）：
+    入参 'success'/'failure'/'unevidenced' -> 1 / 0 / NULL（各归各位）
+    入参 'partial'/'bogus'/''               -> 422：非法的 outcome 词 …：契约词只有 success / failure / unevidenced
+  判据文件：红（完整回滚折叠）7 failed, 9 passed -> 绿 16 passed
+  ```
+- **反向锁**：把补集表达式写回端点 ⇒ `1 failed`（单源判据咬合），恢复后 `16 passed`。
+- **A/B 自证**：`tests/unit/{api/test_experience_*,context,evolution/experience}`
+  改前 13 failed / 1068 passed → 改后 13 failed / 1084 passed，失败集合逐行一致（零新增失败；
+  13 条均为本环境缺可选依赖 `prometheus_client`/`tiktoken`/`feedparser` 与预存失败）。
+- **前端**：`npx vue-tsc --noEmit` 净；`npx vitest run`（i18n + 三份 ExperienceKnowledgePage 用例）
+  **45 passed**。
+- 保护清单：新文件已登记 `scripts/ci/protected_tests.txt`（登记前逐文件单跑确定全绿，无重复行）。
+
+### 13.4 净 LOC
+
+生产代码 `neurova/` 净约 **+12**（为正的去向）：`skills/models.py` **+20**（反向映射与
+其唯一落点，与正向映射同处）、`api/endpoints/experience_knowledge_api.py` **-8**
+（补集表达式换成取值 + 显式拒绝，注释说明根因）。前端另计（类型 / 表单 / 色标收口 / 11 语言包）。

@@ -2709,7 +2709,7 @@ export default {
     taskType: 'Task type',
     outcomeSuccess: 'Success',
     outcomeFailure: 'Failure',
-    outcomePartial: 'Partial',
+    outcomeUnevidenced: 'Unevidenced',
     addLessons: 'Add lessons learned',
     title: 'Experience Knowledge',
     successRate: 'Success Rate',
