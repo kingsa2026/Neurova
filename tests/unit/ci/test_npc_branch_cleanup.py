@@ -207,7 +207,7 @@ class TestCriterionIsMergeFactNotBranchName:
         verdicts = cleanup.classifyBranches(
             heads,
             ancestorOfMain={"fix-caliber-generated": True},
-            mergedSourceTips={"bdda0ba1"},
+            mergedTips={"bdda0ba1"},
         )
         assert cleanup.staleBranches(verdicts) == ["fix-caliber-generated"], (
             "已合并的 PR 源分支只因不叫 auto/* 就被放行 —— 判据挂在了名字上，"
@@ -221,7 +221,7 @@ class TestCriterionIsMergeFactNotBranchName:
         verdicts = cleanup.classifyBranches(
             heads,
             ancestorOfMain={"auto/code-exec-sandbox-555c": True},
-            mergedSourceTips={"b1d2057e"},
+            mergedTips={"b1d2057e"},
         )
         assert cleanup.staleBranches(verdicts) == ["auto/code-exec-sandbox-555c"]
 
@@ -235,7 +235,7 @@ class TestCriterionIsMergeFactNotBranchName:
         verdicts = cleanup.classifyBranches(
             heads,
             ancestorOfMain={"main": True},
-            mergedSourceTips={"deadbeef"},  # 默认分支的头不在其中
+            mergedTips={"deadbeef"},  # 默认分支的头不在其中
         )
         assert cleanup.staleBranches(verdicts) == []
 
@@ -245,7 +245,7 @@ class TestCriterionIsMergeFactNotBranchName:
         verdicts = cleanup.classifyBranches(
             heads,
             ancestorOfMain={"auto/relay-not-a-gate-217": False},
-            mergedSourceTips={"deadbeef"},
+            mergedTips={"deadbeef"},
         )
         assert cleanup.staleBranches(verdicts) == []
 

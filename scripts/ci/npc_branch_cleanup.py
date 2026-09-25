@@ -158,7 +158,7 @@ def mergedSourceTips(main_ref: str = MAIN_REF) -> set:
 
 def classifyBranches(
     heads: Dict[str, str],
-    mergedSourceTips: set,
+    mergedTips: set,
     main_ref: str = MAIN_REF,
     ancestorOfMain: Optional[Dict[str, bool]] = None,
 ) -> List[Dict[str, object]]:
@@ -172,8 +172,9 @@ def classifyBranches(
 
     第 2 条不放宽：头不是祖先（合并后又推了新提交）仍是 `keep` —— 删掉就是丢成果。
 
-    `ancestorOfMain` / `mergedSourceTips` 允许调用方注入判定结果，使**纯逻辑可离线
-    单测**——否则测试就要依赖真远端，那是「判据随环境漂红」。不传时现算。
+    `mergedTips`（＝ `mergedSourceTips()` 的结果）与 `ancestorOfMain` 允许调用方
+    注入判定结果，使**纯逻辑可离线单测**——否则测试就要依赖真远端，那是
+    「判据随环境漂红」。`ancestorOfMain` 不传时逐条现算。
 
     早先的实现对 `main` 自己也去跑一次祖先判定，而在只拿到远端头的检出里
     `origin/main` 可能还没建（浅克隆 / 首次 fetch 前），于是判据在"不存在的东西"上
@@ -183,7 +184,7 @@ def classifyBranches(
     verdicts: List[Dict[str, object]] = []
     for name in sorted(heads):
         tip = heads[name]
-        if tip not in mergedSourceTips:
+        if tip not in mergedTips:
             verdicts.append({"branch": name, "sha": tip, "verdict": "keep",
                              "reason": "不是任何已合并请求的源分支头，不由本判据裁决"})
             continue
