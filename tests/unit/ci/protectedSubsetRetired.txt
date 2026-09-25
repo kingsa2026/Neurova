@@ -1,0 +1,15 @@
+# 受保护子集**退役台账**：曾登记过、现已按依据退役的条目。
+# 行格式：`路径 | 退役依据`。与 tests/unit/ci/test_protected_subset_registration_history.py
+# 同源咬合（两向都可证伪：条目被摘掉即红、台账留无效行也红）。
+#
+# 为什么需要它：清单是纯文本，删一行不产生任何红，「删重复」与「删光」在文本上同形。
+# 故任何"曾登记过、文件也还在仓里、却从清单上消失"的条目都必须在此署名，
+# 让删除从静默动作变成有人签字的动作。
+#
+# 本台账只收**文件已不在仓里**的条目（文件还在却退役的，属"判据被撤"，
+# 那种情况必须由 PR 描述显式说明，不接受只在台账里写一行）。
+
+tests/unit/agent/test_tool_call_egress_redaction.py | 两份平行判据收口（教义第 6 条）：该文件连同 test_tool_call_record_pairing.py 一并删净，其覆盖的不变量在 main 各有单点持有者（test_tool_call_record_addressing.py / test_tool_event_export_redaction.py / test_tool_call_recall_owner.py），登记随之回收
+tests/unit/agent/test_tool_call_record_pairing.py | 同上：与 test_tool_call_egress_redaction.py 是同一次收口删净的两份平行判据
+tests/unit/api/test_endpoint_mount_wiring_guard.py | 与 test_route_mount_contract_guard.py 是同一根因的两份实现，收口到后者一份；该文件与其生成器 scripts/gen_api_inventory.py 同批删除（依据见 docs/04-plans/2026-09-22-api-inventory-refresh-plan.md 第 7 节）
+tests/unit/test_devRulesConfigGuard.py | 随 dev 规则配置退役：所守的配置面已由 AGENTS.md 与 .cnb/settings.yml 的角色 prompt 单点持有，文件不再存在
