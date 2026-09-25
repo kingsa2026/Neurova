@@ -92,14 +92,14 @@ export function testMCPServer(id: string) {
   return api.post<null>(`${BASE}/mcp-servers/${id}/test`)
 }
 
-/** Install a tool by ID. */
-export function installTool(toolId: string) {
-  return api.post<null>(`${BASE}/tools/install`, { tool_id: toolId })
-}
-
 /** Execute a tool with parameters. */
 export function executeTool(toolId: string, params: Record<string, unknown>) {
-  return api.post<unknown>(`${BASE}/tools/${toolId}/execute`, params)
+  // 后端契约是 `POST /api/v1/tool-layers/tools/execute`，工具名与参数都在 body
+  // （`endpoints/tool_layers.py` 的 `ToolExecuteRequest{tool_name, arguments}`）；
+  // 原写 `/tools/{id}/execute`（id 入路径）从未注册过路由，ToolLayerPage 的
+  // 「执行」实测恒 404。列表返回的 `tool_id` 与 `name` 恒等（同一 name 去重），
+  // 故此处按名传入不丢身份。
+  return api.post<unknown>(`${BASE}/tools/execute`, { tool_name: toolId, arguments: params })
 }
 
 // ---------------------------------------------------------------------------

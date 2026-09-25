@@ -53,8 +53,12 @@ export function uploadFile(formData: FormData) {
 }
 
 /** Get file content as text. */
-export function getFileContent(id: string) {
-  return api.get<ApiResponse<string>>(`${BASE}/${id}/content`)
+export function getFileContent(id: string): Promise<string> {
+  // 后端 `GET /api/v1/files/{id}/content` 回 `{file_id, filename, mime_type, content}`
+  // （files_api.py）；此前前端类型写成裸字符串、页面靠 `typeof res === 'string'`
+  // 兜底，于是预览里显示的是整个 JSON 外壳。这里收口成取 `.content`，
+  // 与后端的真实返回形状单源一致（二进制文件后端显式 415，不静默回空串）。
+  return api.get<{ content: string }>(`${BASE}/${id}/content`).then((res) => res.content)
 }
 
 /** Get version history for a file. */
