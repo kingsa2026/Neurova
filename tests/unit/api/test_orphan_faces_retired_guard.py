@@ -39,6 +39,8 @@ import io
 import sys
 from pathlib import Path
 
+from tests import ast_scan
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -63,11 +65,14 @@ RETIRED_FRONTEND = ("NeurUI/src/api/modules/openplatform.ts",)
 WIRING_LEDGER = PROJECT_ROOT / "tests" / "unit" / "endpointWiringBaseline.txt"
 
 
-def _productionPy():
-    for path in (PROJECT_ROOT / "neurova").rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        yield path
+def _retiredModuleTexts() -> tuple:
+    """文本预筛词 = 退役模块的**全名**。
+
+    这是**严格超集**而非启发式：被判为引用的两种形态（`import X` / `from X…`）
+    在源码文本里必然逐字含 `X` 的全名——只要语句没被换行拆断。判据的判定面
+    没有因此变窄：预筛只缩"要解析哪些文件"，不参与"怎么判"。
+    """
+    return tuple(sorted(RETIRED_MODULES))
 
 
 def _importable(module: str) -> bool:
@@ -142,26 +147,31 @@ class TestNoReferenceToRetiredFaces:
     """引用若留着，就是「洞换个位置」：报错从「模块存在但没接线」变成「导入失败」。"""
 
     def _references(self) -> list:
+        """生产树 + tests 树里对退役模块的 import 引用。
+
+        取数走本仓唯一 AST 入口 `tests/ast_scan`（Issue #148 / #197）：
+        本判据原先自己 `rglob("*.py")` + `ast.parse()` 把 2905 个文件全量解析
+        一遍（实测单次 5.2s），与受保护子集其余 260 余个文件共享机器时，
+        成本随**代码总量**增长——判据本身与代码总量毫无关系（教义第 2 条）。
+        改走共享预算后按 `_retiredModuleTexts()` 预筛（退役名必然以文本出现在
+        `import` 语句里），解析量与文件总数脱钩，且与其余判据复用同一份
+        `_cachedCode` / `_cachedParse` 缓存。
+        """
         retired = set(RETIRED_MODULES)
         found = []
-        scan = list(_productionPy()) + [
-            path for path in (PROJECT_ROOT / "tests").rglob("*.py")
-            if "__pycache__" not in path.parts and path.name != Path(__file__).name
-        ]
-        for path in scan:
-            try:
-                tree = ast.parse(io.open(path, encoding="utf-8", errors="replace").read())
-            except SyntaxError:
-                continue
-            for node in ast.walk(tree):
+        own = Path(__file__).name
+        for root in (ast_scan.PRODUCTION_ROOT, PROJECT_ROOT / "tests"):
+            for path, node in ast_scan.nodeScan(root, hints=_retiredModuleTexts()):
+                if path.name == own:
+                    continue
                 if isinstance(node, ast.ImportFrom):
                     module = node.module or ""
                     if module in retired or any(module.startswith(r + ".") for r in retired):
-                        found.append(f"{path.relative_to(PROJECT_ROOT)}:{node.lineno}")
+                        found.append(f"{ast_scan.relativeToRepo(path)}:{node.lineno}")
                 elif isinstance(node, ast.Import):
                     for alias in node.names:
                         if alias.name in retired:
-                            found.append(f"{path.relative_to(PROJECT_ROOT)}:{node.lineno}")
+                            found.append(f"{ast_scan.relativeToRepo(path)}:{node.lineno}")
         return found
 
     def test_no_reference_remains(self):
