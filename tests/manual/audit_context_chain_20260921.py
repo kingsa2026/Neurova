@@ -535,6 +535,93 @@ def p16():
     )
 
 
+def p15():
+    """P15（工单 §12.6 DoD）：30 轮长轨迹后视图内分辨率档数 ≥3 且预算比≈1:4:16。
+
+    走**生产构造面**：真 `ContextOrchestrator.build_context` → 真折叠 → 真池层索引
+    → 真分辨率装配器 → 真 `get_context_health()["fold_resolution"]`。
+
+    测量规程（§12.7）：轨迹 30 轮、每轮 ≥800 token、三形态混合；token 口径同
+    `estimate_tokens`（T-01 之后的唯一判据尺）；预算取 128k 档型号的窗口份额
+    （8000 ≈ 该档 `_resolve_window_token_budget()` 的一档形态）。
+
+    判据两条（都取**实际授予**的读数，不自己算几何比 —— 自算就是恒真断言）：
+    1. 视图内档数 ≥ 3；
+    2. 相邻档预算比落在 4 ±25%（即 1:4:16 的相邻比）。
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from neurova.context.orchestrator import ContextOrchestrator
+
+    agent = MagicMock()
+    agent.config = MagicMock()
+    agent.config.name = "p15"
+    agent.config.constitution = ""
+    agent.config.behavior_rules = []
+    agent.config.llm_model = "test-model"
+    agent.memory_manager = MagicMock()
+    agent.context_builder = MagicMock()
+    agent.tool_router = None
+    agent._skill_registry = None
+    agent.soul = "探针"
+    agent.personality = ""
+    agent.conversation_history = []
+    agent.growth_log_manager = MagicMock()
+    agent.user_id = "u1"
+    agent.agent_id = "a-p15"
+
+    orch = ContextOrchestrator(agent, use_pool=True, auto_tag=False, session_id="sess-p15")
+    orch._window_token_budget = 8000
+    orch._DELTA_RESUMMARY_MSGS = 0
+    calls = {"n": 0}
+
+    async def _summarize(dropped_msgs, previous_summary=""):
+        calls["n"] += 1
+        return f"第{calls['n']}代摘要：覆盖 {len(dropped_msgs)} 条。" + "细节" * 120
+
+    orch._window_summarizer = _summarize
+
+    # 三形态混合（中文散文 : 英文散文 : JSON+无空格块 = 4 : 4 : 2），每轮 ≥800 token
+    def _round(i: int) -> dict:
+        kind = i % 5
+        if kind in (0, 1):
+            body = "本轮讨论产品演进路线与验收口径。" * 60
+        elif kind in (2, 3):
+            body = "This round reviews the roadmap and the acceptance criteria. " * 40
+        else:
+            body = '{"trace":["' + "a" * 1200 + '"],"ok":true}'
+        return {"role": "user", "content": f"第{i}轮：{body}"}
+
+    async def _build(history):
+        with patch.object(orch, "get_tools_description", new_callable=AsyncMock) as m:
+            m.return_value = "工具描述"
+            return await orch.build_context(
+                user_input="继续", session_context=history, relevant_memories=[]
+            )
+
+    history = [_round(i) for i in range(14)]
+    asyncio.run(_build(history))
+    for rnd in range(29):
+        history = history + [_round(100 + rnd)]
+        asyncio.run(_build(history))
+
+    readout = orch.get_context_health()["fold_resolution"]
+    levels = readout["levels"]
+    budgets = list(readout["level_budgets"])[:3]
+    ratios = [round(near / far, 2) for near, far in zip(budgets, budgets[1:])]
+    inTolerance = len(ratios) >= 2 and all(4 * 0.75 <= r <= 4 * 1.25 for r in ratios)
+    ok = levels >= 3 and inTolerance
+    orch.context_pool.close()
+    emit(
+        "P15",
+        f"30 轮后视图档数={levels}（池内索引档数={len(orch.context_pool.summaryLayers()) if orch.context_pool else 0}）"
+        f" 前{len(budgets)}档预算={budgets} 相邻比={ratios} 1:4:16 容差内={inTolerance} "
+        f"摘要调用={calls['n']} 截断字符={readout['truncated_chars']} "
+        f"{'PASS' if ok else 'FAIL'}",
+    )
+
+
 def main():
     tmp_base = _tmp_ledger_dir()
     try:
@@ -552,6 +639,7 @@ def main():
         p12(tmp_base)
         p13()
         p14()
+        p15()
         p16()
     finally:
         shutil.rmtree(tmp_base, ignore_errors=True)

@@ -680,6 +680,17 @@ def _strip_self_event(pipeline):
 #:   是同一件事（触发本仓自定义事件流水线）在 `@npc` 宿主下唯一可行的通道。
 HANDOFF_TRIGGER_TYPE = "cnb:trigger"
 
+#: 平台在收尾时刻注入的**事实**变量（Issue #158 的判据来源）。
+#: 实测读数（探针 cnb-c9g-1k3c3dqg7 / cnb-p2q-1k3c2g7u3 / cnb-o8q-1k3c25fpt，
+#: 2026-09-25）：`endStages` 里 `CNB_PIPELINE_STATUS=error`、
+#: `CNB_BUILD_FAILED_MSG=Agent aborted: reached maxTurns limit (N)`；
+#: 同一 Job 的 `failStages` 里 `CNB_PIPELINE_STATUS` 为空串。
+PLATFORM_STATUS_VAR = "CNB_PIPELINE_STATUS"
+
+#: 平台自己的中止措辞。四条独立构建里逐字一致：
+#: `Agent aborted: reached maxTurns limit (200)`。
+ABORT_MARKER = "reached maxTurns limit"
+
 
 def _handoff_carries_context(pipeline, key):
     """收尾接力的 env 里有没有把指定对话载体键传下去（逐字点名，不看注释）。"""
@@ -731,18 +742,26 @@ class TestTurnHandoffCeiling:
     已改未提交的成果随容器一起丢，用户必须自己发现并手动催下一轮。
     平台没有「Agent 用满轮数后自动重跑同一条流水线」的原生开关
     （`retry` / `allowFailure` / `endStages` 都只管当前这条流水线，不产生新的
-    轮次预算），所以接力必须在配置里显式写出来：收尾阶段用 `cnb:apply`
-    再拉一次同一事件，`turnLimitReached` 标记把「接力轮」与用户新发的
-    `@` 区分开，防止同一条评论被无限重跑。
+    轮次预算），所以接力必须在配置里显式写出来：收尾阶段用 `cnb:trigger`
+    再拉一次自定义事件（`api_trigger_npc_handoff`），并由**平台在收尾时刻注入的
+    事实变量**把「本轮真撞顶」与「用户新发的 `@`」区分开，防止同一条评论被无限
+    重跑。`turnLimitReached` 那条预写判据已由 Issue #158 证伪并删净（它由 Agent
+    开工前的步骤无条件写成 1，跟"是否撞顶"无关）。
 
-    判据落在**是否有这笔接力**，不落在 `$变量` 替换后的形态上：
-    `api_trigger_pipeline` 的 options 在配置期做 Schema 校验，事件名写成
-    `$VAR` 会被平台拒掉；且 `type: cnb:apply` 的 `env` 值只接受 `$变量`
+    判据落在**是否有这笔接力 + 判据读的是不是平台事实**上，不落在
+    `$变量` 替换后的形态上：`api_trigger_pipeline` 的 options 在配置期做
+    Schema 校验，事件名写成 `$VAR` 会被平台拒掉；且内置任务的 `env` 值只接受 `$变量`
     （见 tests/unit/test_ci_thin_env_guards.py 同型的薄环境事故）。
     """
 
-    #: 判定「这一轮是轮数触顶的接力轮」的标记名（run 计数器的唯一事实源）
+    #: 上一代用于判定接力轮的标记名。现已作废 —— 保留常量只为**反向钉住**
+    #: "它不得再出现"，见 `test_no_self_fabricated_relay_flag_survives_in_the_config`。
     HANDOFF_FLAG = "turnLimitReached"
+
+    #: 平台在收尾期注入的事实（平台「环境变量」篇，`endStages` 内可读）。
+    #: 真 `npc:go` 撞 `maxTurns` 的读数见构建 cnb-s4f-1k3c46us9。
+    STATUS_VAR = "CNB_PIPELINE_STATUS"
+    FAILED_MSG_VAR = "CNB_BUILD_FAILED_MSG"
 
     @staticmethod
     def _npc_pipelines(cnb_doc):
@@ -814,22 +833,44 @@ class TestTurnHandoffCeiling:
                         f"{where}: 接力未给 slug —— `cnb:trigger` 的 slug 是必填项"
                         "（目标仓库完整路径），缺它触发不了"
                     )
-            # 标记必须由上一轮经 env 传下来、由 NPC 在触顶时写出，
-            # 且两处变量名逐字一致——否则守卫会因为「标记永不为真」拦不住无限接力。
-            passed_down = str(job.get("env", {}).get("turnLimitReached", ""))
-            if passed_down.strip() != f"${self.HANDOFF_FLAG}":
+            # 无限接力的拦阻改由**平台事实**承担（Issue #189 / #158）：
+            # 收尾 `if` 读 `$CNB_PIPELINE_STATUS` + `$CNB_BUILD_FAILED_MSG`，
+            # 正常收官（status=success）第一条即为假 ⇒ 不接力。
+            # 上一代用 env 传一个自造标记，那条链路已被证伪为**恒真**：
+            #   cnb-2q8-1k3buskao / cnb-kdg-1k3bv22ct 均 Agent stage success
+            #   （未撞顶）却照拉下一轮（cnb-lga-1k3c0itrj / cnb-fln-1k3c2rjk7）；
+            # 实测四条父构建在 76~164 轮即被接力，接力落点 32 次构建 / 22.2h 墙钟。
+            # 故判据从"标记传下来了吗"改成"判据读的是平台事实吗"，
+            # 并反向钉住"不许再有自造标记"。
+            conditions = stage.get("if") or []
+            if isinstance(conditions, str):
+                conditions = [conditions]
+            blob = "\n".join(str(item) for item in conditions)
+            for needed in (self.STATUS_VAR, self.FAILED_MSG_VAR):
+                if needed not in blob:
+                    problems.append(
+                        f"{where}: 收尾接力未读 ${needed} —— "
+                        "无限接力的拦阻必须落在平台事实上，不是上一轮预写的值"
+                    )
+            if ABORT_MARKER not in blob:
                 problems.append(
-                    f"{where}: 收尾阶段缺 {self.HANDOFF_FLAG} 标记"
-                    "（无标记则每轮都判定「已触顶」，同一评论会被无限接力）"
+                    f"{where}: 收尾接力未认平台的中止措辞 {ABORT_MARKER!r}"
+                )
+            if self.HANDOFF_FLAG in (job.get("env") or {}):
+                problems.append(
+                    f"{where}: job.env 仍在传自造的 {self.HANDOFF_FLAG} "
+                    "（该标记恒真，等于没有空轮防护）"
                 )
         assert seen, "未在 .cnb.yml 找到任何 npc:go 流水线——守卫失效（判据空转）"
         assert not problems, (
             "NPC 轮数触顶后没有接力（构建 cnb-m48-1k33grbms 的丢成果形态）:\n  "
             + "\n  ".join(problems) +
             "\n平台没有「轮数用满自动重跑」的原生开关，接力必须显式写在 endStages："
-            "`type: cnb:apply` + `event: <api_trigger_* 事件>` + `env: {"
-            f"{self.HANDOFF_FLAG}: ${self.HANDOFF_FLAG}" + "}`，"
-            "且该 api_trigger 事件要在 `$` 下真实存在并跑 npc:go。"
+            "`type: cnb:trigger` + `event: <api_trigger_* 事件>` + "
+            f"`if: [ $${self.STATUS_VAR} = error 且 $${self.FAILED_MSG_VAR} 含 "
+            "reached maxTurns limit ]`，"
+            "且该 api_trigger 事件要在 `$` 下真实存在并跑 npc:go ——"
+            "由开工前的步骤预写标记只会让接力变成'每次都接力'（Issue #158）。"
             "改完请同步 .cnb.yml 注释里的轮次上界推演。"
         )
 
@@ -864,12 +905,12 @@ class TestTurnHandoffCeiling:
         （这里是 `issue.comment@npc` / `pull_request.comment@npc`），
         它不在白名单里，于是这笔接力**在写下的那一刻就注定执行不了**。
         此前一直被 `if` 恒假的 `skipped` 掩盖 —— 判据不真就走不到准入检查；
-        本轮燃料改成真的为真（`##[set-output]` + `exports` 通道生效）之后，
+        一轮让 `if` 真的为真的改动（自造燃料，见 Issue #189 的作废记录）之后，
         平台的准入检查终于被执行到，问题才第一次响亮。
 
         `@npc` 事件不在白名单内，故**收尾阶段不能放 `cnb:apply`** ——
         这是平台约束，不是配置写法问题；接力必须换一条真正可用的通道
-        （见下方 `TestHandoffRidesAnAllowedChannel`）。
+        （现形态为 `cnb:trigger`，见 `TestHandoffRidesAnAllowedChannel`）。
 
         可证伪路径：把 `@npc` 事件的 `endStages` 里再放一个 `cnb:apply` → 立刻转红。
         """
@@ -894,55 +935,31 @@ class TestTurnHandoffCeiling:
         )
 
 
-    def test_handoff_flag_is_the_only_reading_of_reached_state(self, cnb_doc):
-        """接力标记只允许出现在「读它」的位置，不许新增第二份判据。
-
-        白名单是逐行判据，不是计数：每一行含标记的文本都必须落在
-        （a）流水线 `env` 的传入/传出、（b）`if` 条件的判定、
-        （c）导出通道的声明（把 `##[set-output]` 的键映射成环境变量，见下）
-        这三类用途之内；任何新形态（例如 Agent 另写一个 state 文件、
-        或再加一个 handoff 计数器）都会被这条拦下——那是平行体系。
-
-        第 (c) 类的必要性（Issue #158）：接力变量要能被收尾 `endStages` 的
-        `if` 读到，必须经平台声明的导出通道 —— 门禁脚本向 stdout 写
-        `##[set-output turnLimitReached=1]`，再由同一 Stage 的 `exports`
-        映射成环境变量（生命周期覆盖整个 Pipeline）。这条映射就是 `(c)`：
-        它只是把同一个标记换个承载形态，不是第二套判据。
-        """
-        allowed = (
-            "turnLimitReached:",
-            '"$turnLimitReached" = "1"',
-            "turnLimitReached: turnLimitReached",
-        )
-        offenders = [
-            f"{lineno}: {line.strip()}"
-            for lineno, line in enumerate(io.open(CNB, encoding="utf-8"), 1)
-            if self.HANDOFF_FLAG in line
-            and not any(mark in line for mark in allowed)
-        ]
-        assert not offenders, (
-            "接力标记出现在白名单之外的位置:\n  " + "\n  ".join(offenders) +
-            "\n标记只有两个合法用途：流水线 env 传入/传出、if 条件判定。"
-        )
-
-    #: 接力协议的书写落点：NPC 人设必须把「怎么写出标记」讲清楚，
-    #: 否则 .cnb.yml 里的收尾阶段永远读不到真值（写不出 → 永不接力 = 死配置）。
-    HANDOFF_MARKER_FILE = ".npc-turn-handoff"
-
     def test_npc_personas_declare_handoff_protocol(self, settings_doc):
-        """每个 NPC 角色的人设都要写明接力标记的写法与唯一的判据文件。"""
+        """每个 NPC 角色的人设都要写清接力协议，并**禁止**自己写状态标记。
+
+        判据随根因一起改了（Issue #158 / #189）：旧协议要求 Agent 在触顶那一轮
+        写标记，而那件事平台根本不给它机会做（撞顶即中止、不执行任何收尾指令）；
+        随后改成"由开工前的门禁预写"，又变成与"是否撞顶"无关的恒真判据。
+        现协议是：**判据由平台在收尾时刻自己判定，Agent 什么都不用写** ——
+        人设必须把这一点讲明白，否则下一轮 Agent 会去新建第二套状态文件。
+        """
         roles = (settings_doc.get("npc") or {}).get("roles") or []
         assert roles, ".cnb/settings.yml 无角色——NPC 人设未入库"
-        missing = [
-            r.get("name") for r in roles
-            if self.HANDOFF_MARKER_FILE not in (r.get("prompt") or "")
-        ]
+        missing = []
+        for role in roles:
+            prompt = role.get("prompt") or ""
+            if self.STATUS_VAR not in prompt or self.FAILED_MSG_VAR not in prompt:
+                missing.append(f"{role.get('name')}: 未点明接力判据读的平台事实")
+            if "别去写任何状态文件或标记" not in prompt:
+                missing.append(f"{role.get('name')}: 未显式禁止写状态文件/标记")
+            if "不需要你做任何事" not in prompt or "分段" not in prompt:
+                missing.append(f"{role.get('name')}: 未写清「判据由平台判定 + 分段落评论」")
         assert not missing, (
-            f"NPC 角色未写明轮数触顶接力协议: {missing}\n"
-            f"人设里必须写清「用满轮数且还有未完成步骤时，把 1 写进 "
-            f"$CNB_BUILD_WORKSPACE/{self.HANDOFF_MARKER_FILE}」——"
-            "这是 .cnb.yml 收尾阶段唯一的读点，写不出就等于没有接力；"
-            "同时要提醒 Agent 用评论落进度（工作树不跨轮保存）。"
+            "NPC 角色人设未写明轮数触顶接力协议:\n  " + "\n  ".join(missing) +
+            f"\n`.cnb.yml` 的收尾 `if` 读 ${self.STATUS_VAR} 与 "
+            f"${self.FAILED_MSG_VAR}（撞顶时后者含 `reached maxTurns limit`）；"
+            "人设里不写清楚，Agent 会以为接力还需要它配合，或另造一套平行判据。"
         )
 
 

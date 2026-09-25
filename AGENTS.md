@@ -3,7 +3,8 @@
 > 本文件是**纪律与约定的唯一权威出处**（`docs/INDEX.md` 阅读顺序第 2 位），
 > 亦是工作区 AI 指令文件（`neurova/context/workspace_docs.py` 运行时读取）。
 > 文档各领域权威源见 [`docs/INDEX.md`](docs/INDEX.md)；人类贡献者入口见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
-> 本文件被全仓 90+ 处以「`AGENTS.md` 修复教义第 N 条」编号引用——**改条款编号前先 grep 引用方**。
+> 本文件被全仓多处以「`AGENTS.md` 修复教义第 N 条」编号引用——**改条款编号前先 grep 引用方**
+> （引用面每次都在变，不在此手抄处数；现读数现场复算 `grep -rn '修复教义第' .`）。
 
 ---
 
@@ -15,7 +16,7 @@
 | 落点 | 作用 |
 |------|------|
 | `.cnb/settings.yml` 的 `npc.roles[].prompt` | 平台配置期唯一必达通道——NPC 被 `@` 时加载的就是它 |
-| 本文件 `/AGENTS.md` | 纪律事实源；被 90+ 处编号引用 |
+| 本文件 `/AGENTS.md` | 纪律事实源；被全仓多处编号引用 |
 | `CONTRIBUTING.md` 测试纪律节 | 人类贡献者入口 |
 
 **流水线配置随分支走，合并后必须收口。** 构建配置按触发分支加载：某个分支改动过
