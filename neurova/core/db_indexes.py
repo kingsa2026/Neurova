@@ -36,43 +36,61 @@ logger = get_logger(__name__)
 # 每条 = (query_id, sql, params)：sql 必须与生产调用点同形（同 WHERE/ORDER BY），
 # 否则 EXPLAIN 出来的计划不能代表生产。params 用同类型样本值（计划只与形状有关，
 # 但与"是否会用到索引"绑定于列与常量比较形式，故必须给真参数）。
-HOT_QUERIES: List[Tuple[str, str, tuple]] = [
+# 适用性声明：每条白名单查询**依赖哪张表、哪些列**。
+#
+# 为什么必须有：探针库清单（`resolve_probe_paths`）里既有主记忆库也有审计库，
+# 而白名单同时含 memories 系与 audit_logs 系查询。此前不看 schema 就发查询，
+# 于是每一对"库 × 不属于它的查询"必然抛 `no such table` / `no such column`，
+# 再被下面的 except 压成一条 DEBUG——启动日志里成片的
+# `EQP 失败 ...: no such table: audit_logs` 就是这么来的。
+# 更坏的是汇总口径把它算进"没走索引"，假告警常年冲刷真告警。
+#
+# 表名/列名在此声明一次，`explain_hot_queries` 按真实 schema 过闸；不从 SQL
+# 文本里反解（正则解 SQL 是第二套判据，迟早与 SQL 漂移）。
+HotQuery = Tuple[str, str, tuple, str, Tuple[str, ...]]
+
+HOT_QUERIES: List[HotQuery] = [
     (
         # memory_layer/manager.py:_load_from_db —— 启动与浏览页主查询
         "memories_by_agent_desc",
         "SELECT * FROM memories WHERE agent_id = ? ORDER BY created_at DESC",
         ("default",),
+        "memories",
+        ("agent_id", "created_at"),
     ),
     (
         # memory_layer/manager.py:get_top_memories_by_temperature —— 温度通道每查询
         "memories_by_temperature",
         "SELECT * FROM memories ORDER BY temperature DESC LIMIT ?",
         (10,),
+        "memories",
+        ("temperature",),
     ),
     (
         # 三层隔离查询（agent_id, neuser_id, user_id）
         "memories_three_tier",
         "SELECT * FROM memories WHERE agent_id = ? AND neuser_id = ? AND user_id = ?",
         ("default", "default", "default"),
+        "memories",
+        ("agent_id", "neuser_id", "user_id"),
     ),
     (
         # security/audit_logger.py:query —— 审计页倒序分页
         "audit_logs_recent",
         "SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT ? OFFSET ?",
         (50, 0),
+        "audit_logs",
+        ("timestamp",),
     ),
     (
         # security/audit_logger.py —— 按事件类型筛选
         "audit_logs_by_event_type",
         "SELECT * FROM audit_logs WHERE event_type = ? ORDER BY timestamp DESC LIMIT ?",
         ("system_event", 50),
+        "audit_logs",
+        ("event_type", "timestamp"),
     ),
 ]
-
-# 计划判定：SQLite EQP 的 detail 文本里出现这些形状即"用了索引"。
-# SCAN 单独判定为全表扫描（`SCAN <table>`），`SCAN <table> USING INDEX` 属覆盖索引扫描，
-# 仍是"用了索引"，故必须先判 USING INDEX 再判 SCAN。
-_INDEX_MARKERS = ("USING INDEX", "USING COVERING INDEX", "SEARCH ")
 
 
 def table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
@@ -85,14 +103,48 @@ def table_exists(conn: sqlite3.Connection, table_name: str) -> bool:
     return cursor.fetchone() is not None
 
 
-def index_exists(conn: sqlite3.Connection, index_name: str) -> bool:
-    """检查索引是否存在。"""
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name=?",
-        (index_name,)
-    )
-    return cursor.fetchone() is not None
+def table_columns(conn: sqlite3.Connection, table_name: str) -> List[str]:
+    """表的列名清单（表不存在时返回空表，不抛错）。"""
+    if not table_exists(conn, table_name):
+        return []
+    try:
+        return [str(row[1]) for row in conn.execute(f"PRAGMA table_info('{table_name}')")]
+    except sqlite3.DatabaseError:
+        return []
+
+
+def probeApplicability(
+    conn: sqlite3.Connection, entry: "HotQuery"
+) -> Optional[str]:
+    """该库能否承载这条热点查询。能则 None，不能则返回点名缺口的理由。
+
+    这是判断"该不该发这条 EQP"的**唯一**入口（发查询前先过这道闸）。
+    理由文本直接进读数与日志：不适用必须说得出缺哪张表/哪些列，而不是把
+    `no such table` 原文当结论（那看不出是"库没这张表"还是"SQL 写错了"）。
+    """
+    table = hotQueryTable(entry)
+    if not table:
+        return None  # 未声明依赖（理论上不该有）：不做无依据的拦截
+    if not table_exists(conn, table):
+        return f"该库没有 {table} 表"
+    declared = hotQueryColumns(entry)
+    if not declared:
+        return None
+    present = set(table_columns(conn, table))
+    missing = [column for column in declared if column not in present]
+    if missing:
+        return f"{table} 表缺少列 {', '.join(missing)}"
+    return None
+
+
+def hotQueryTable(entry: "HotQuery") -> str:
+    """热点查询依赖的表名（声明的单一读取口）。"""
+    return str(entry[3] if len(entry) > 3 else "")
+
+
+def hotQueryColumns(entry: "HotQuery") -> Tuple[str, ...]:
+    """热点查询依赖的列名（声明的单一读取口）。"""
+    return tuple(entry[4]) if len(entry) > 4 else ()
 
 
 def list_tables(conn: sqlite3.Connection) -> List[str]:
@@ -179,11 +231,25 @@ def _plan_uses_index(detail: str) -> bool:
     return False
 
 
+#: 热点查询判定结果的状态（一处定义，生产侧写、消费侧读）。
+STATUS_INDEXED = "indexed"
+STATUS_UNINDEXED = "unindexed"
+STATUS_NOT_APPLICABLE = "not_applicable"
+STATUS_EQP_FAILED = "eqp_failed"
+
+
 def explain_hot_queries(db_path: str) -> List[Dict[str, Any]]:
     """对白名单热点查询跑 EQP，返回每条的走索引判定与探针耗时。
 
-    表不存在（该库没有对应 schema）/ SQL 无法解析 → available=False 条目，
-    不抛错。实测 50 条 EQP 合计 0.13ms，启动期成本可忽略。
+    发查询**之前**先按库的真实 schema 过闸（`probeApplicability`）：
+    - 表/列不适用 → `available=False` + `reason`（点名缺口），**一条 EQP 都不发**；
+    - 适用但 SQL 有缺陷 → 照发，失败留 `EQP 失败` 痕迹（真问题不许被静音）。
+
+    每条结果带 `status` 作为**唯一分流判据**（消费方不许自己反解
+    available/reason 的组合）：`indexed`/`unindexed` 是真发过查询的结论；
+    `not_applicable` 是库缺表/缺列（一条查询都没发）；`eqp_failed` 是表列都在
+    而 SQL 执行失败（**真失败**）。后两者都写 `reason`，故"按 reason 是否非空"
+    分流不够——那会把 SQL 缺陷读成"该库用不上"，方向相反地抹平真失败。
     """
     if not Path(db_path).exists():
         return []
@@ -192,24 +258,35 @@ def explain_hot_queries(db_path: str) -> List[Dict[str, Any]]:
     conn: Optional[sqlite3.Connection] = None
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=3.0)
-        for query_id, sql, params in HOT_QUERIES:
+        for entry_spec in HOT_QUERIES:
+            query_id, sql, params = entry_spec[0], entry_spec[1], entry_spec[2]
             started = time.perf_counter()
             entry: Dict[str, Any] = {
                 "query_id": query_id,
                 "db": str(db_path),
                 "indexed": False,
-                "available": False,
                 "plan": [],
+                "reason": "",
+                "status": STATUS_NOT_APPLICABLE,
                 "duration_ms": 0.0,
             }
+            inapplicable = probeApplicability(conn, entry_spec)
+            if inapplicable:
+                entry["reason"] = inapplicable
+                entry["duration_ms"] = (time.perf_counter() - started) * 1000.0
+                results.append(entry)
+                continue
             try:
                 rows = conn.execute("EXPLAIN QUERY PLAN " + sql, params).fetchall()
                 details = [str(r[3]) if len(r) > 3 else str(r[-1]) for r in rows]
                 entry["plan"] = details
-                entry["available"] = True
                 entry["indexed"] = any(_plan_uses_index(d) for d in details)
+                entry["status"] = STATUS_INDEXED if entry["indexed"] else STATUS_UNINDEXED
             except sqlite3.Error as e:
-                logger.debug("EQP 失败 %s @ %s: %s", query_id, db_path, e)
+                # 走到这里说明表与列都在 ⇒ 是 SQL 自身的问题（真失败，必须留痕）
+                entry["reason"] = f"EQP 失败: {e}"
+                entry["status"] = STATUS_EQP_FAILED
+                logger.warning("EQP 失败 %s @ %s: %s", query_id, db_path, e)
             entry["duration_ms"] = (time.perf_counter() - started) * 1000.0
             results.append(entry)
     except Exception as e:  # noqa: BLE001
@@ -220,6 +297,9 @@ def explain_hot_queries(db_path: str) -> List[Dict[str, Any]]:
                 conn.close()
             except Exception:  # noqa: BLE001
                 pass
+    # `available` 是 `status` 的派生视图（历史调用方读它），不另设一套决策。
+    for entry in results:
+        entry["available"] = entry["status"] in (STATUS_INDEXED, STATUS_UNINDEXED)
     return results
 
 
@@ -258,7 +338,13 @@ def bootstrap_index_observability(paths: Optional[Sequence[str]] = None) -> Dict
     """启动期采集索引可观测数据并写入 metrics gauge（fail-open）。
 
     返回汇总统计（供日志/测试断言）：{"dbs": n, "indexes": n, "hot_queries": n,
-    "unindexed": [query_id...], "duration_ms": float}。
+    "unindexed": [query_id...], "not_applicable": [query_id...],
+    "eqp_failed": [query_id...], "duration_ms": float}。
+
+    三类读数互不重叠（按 `status` 分流）：`unindexed` 只在**适用**的探针上累积；
+    "该库没这张表"另计 `not_applicable`；"表在而 SQL 有缺陷"另计 `eqp_failed`。
+    前两者混在一起是假告警的来源（不含 audit_logs 的库被判成"审计查询全表扫描"），
+    后两者混在一起则是真失败被读成"用不上"被抹平。
     """
     started = time.perf_counter()
     summary: Dict[str, Any] = {
@@ -266,9 +352,14 @@ def bootstrap_index_observability(paths: Optional[Sequence[str]] = None) -> Dict
         "indexes": 0,
         "hot_queries": 0,
         "unindexed": [],
+        "not_applicable": [],
+        "eqp_failed": [],
         "duration_ms": 0.0,
     }
     probe_paths = list(paths) if paths is not None else resolve_probe_paths()
+    #: 跳过的探针及其理由。summary 的返回值在装配点被丢弃，故"哪条查询为什么
+    #: 没参与基线"必须在日志里有读者，否则该读数只写不读（教义第 5 条）。
+    skipped: List[str] = []
     try:
         from neurova.core.metrics import (
             record_index_snapshot,
@@ -295,17 +386,30 @@ def bootstrap_index_observability(paths: Optional[Sequence[str]] = None) -> Dict
 
         try:
             for entry in explain_hot_queries(db_path):
+                # 分流判据只有 status（生产侧定义）：按 reason 非空与否会把
+                # "SQL 有缺陷"与"该库没这张表"混成一类，抹平真失败。
+                query_key = str(entry.get("query_id", "?"))
+                status = str(entry.get("status") or "")
+                # 指标面只收"真发过查询"的读数；探针自身失败已由 eqp_failed 告警
+                # 独立出声，不靠指标沉默来表达。
                 record_hot_query_plan(
                     db_path,
-                    str(entry.get("query_id", "?")),
+                    query_key,
                     bool(entry.get("indexed")),
                     float(entry.get("duration_ms", 0.0)),
-                    available=bool(entry.get("available")),
+                    available=status in (STATUS_INDEXED, STATUS_UNINDEXED),
                 )
-                if entry.get("available"):
+                if status in (STATUS_INDEXED, STATUS_UNINDEXED):
                     summary["hot_queries"] += 1
-                    if not entry.get("indexed"):
-                        summary["unindexed"].append(str(entry.get("query_id", "?")))
+                    if status == STATUS_UNINDEXED:
+                        summary["unindexed"].append(query_key)
+                elif status == STATUS_EQP_FAILED:
+                    summary["eqp_failed"].append(query_key)
+                elif status == STATUS_NOT_APPLICABLE:
+                    summary["not_applicable"].append(query_key)
+                    skipped.append(
+                        f"{query_key} @ {db_path}: {entry.get('reason') or '未声明理由'}"
+                    )
         except Exception as e:  # noqa: BLE001
             logger.debug("热点查询计划写入失败 %s: %s", db_path, e)
 
@@ -321,6 +425,18 @@ def bootstrap_index_observability(paths: Optional[Sequence[str]] = None) -> Dict
     if summary["unindexed"]:
         logger.warning(
             "热点查询未走索引（全表扫描）: %s", ", ".join(sorted(set(summary["unindexed"])))
+        )
+    if skipped:
+        # INFO 而非 WARNING：不适用不是问题，但"为什么跳过"必须可查——
+        # 审计查询在记忆库上永不参与基线，运维得看得出这是设计而非故障。
+        logger.info(
+            "热点查询因库 schema 不适用而跳过（未发 EQP，非故障）: %s",
+            "; ".join(sorted(set(skipped))),
+        )
+    if summary["eqp_failed"]:
+        logger.warning(
+            "热点查询探针自身失败（SQL 与库 schema 不符，非「不适用」）: %s",
+            ", ".join(sorted(set(summary["eqp_failed"]))),
         )
     return summary
 

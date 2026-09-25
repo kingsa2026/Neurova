@@ -38,7 +38,17 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 GATE = PROJECT_ROOT / "scripts" / "ci" / "perf_gate.py"
 
+#: 本套件要跑门禁本体与三个生产装配点，故依赖 `prometheus_client` / `psutil`
+#: （门禁 import 面 → `neurova.core.metrics`；占用者观测面 → `port_guard`）。
+#: 这两者由 CI 与运行时的依赖清单声明（`requirements-ci.lock` / `requirements.txt`），
+#: 缺席只可能是精简环境手工跑——但**收集期**缺席会让整个文件收集失败，把"一条都不该
+#: 少跑"的常驻守卫变成"静默作废"：夹具不咬合时那份绿比红危险（本容器缺
+#: `prometheus_client` 实测：`pytest tests/performance/ -q` ⇒ `1 error`）。
+#: 故按本文件既有 `yaml = pytest.importorskip(...)` 的同一形态，在**模块级**声明依赖：
+#: pytest 对收集期 `Skipped` 只按文件级 skip 处理，不判红。
 yaml = pytest.importorskip("yaml")
+pytest.importorskip("prometheus_client", reason="门禁 import 面依赖 neurova.core.metrics")
+pytest.importorskip("psutil", reason="端口占用者观测面依赖 psutil.net_connections")
 
 
 def _cnb_pipelines():
@@ -197,6 +207,118 @@ class TestJudgingIgnoresMachineLoad:
 ########################################################################
 # 冷 import：门禁里唯一该留墙钟的命中点
 ########################################################################
+
+
+########################################################################
+# 依赖缺席的形态：跳过，而不是整文件收集失败
+########################################################################
+
+
+#: 子进程里用来"假装重依赖不在"的 sitecustomize：装一个 meta_path 拒绝者。
+#: 刻意不用"往 PYTHONPATH 里放同名模块抛 ImportError"——那会绕过 `importorskip`
+#: 的捕获范围（它只捕 ImportError 来源的"模块找不到"），实测落在收集期 ERROR。
+#: 这里让 `find_spec` 抛 `ModuleNotFoundError`（`ImportError` 的子类），
+#: 与"真的没装"同形，正是本判据要覆盖的场景。
+_DEP_BLOCKER_SOURCE = """\
+import sys
+import importlib.abc
+
+
+class _Rejector(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "prometheus_client":
+            raise ModuleNotFoundError("No module named 'prometheus_client'")
+        return None
+
+
+sys.meta_path.insert(0, _Rejector())
+"""
+
+
+class TestHeavyDepsAreDeclaredAtCollectionTime:
+    """重依赖缺席时，本套件必须是**文件级 skip**，不得整文件 ERROR。
+
+    为什么这条值得常驻：整个测试根 `tests/` 在 `.gitignore` 里整根豁免，
+    单纯把重依赖写进依赖清单**不够**：`tests/performance/` 不在 CI 的受保护子集里
+    （没人跑它），故本判据常驻在这里，钉住"缺依赖时的形态"。
+
+    判据形态刻意选**行为**而非源码扫描：真正要钉的是"缺依赖时 pytest 判 skip
+    而不是 error"。子进程里放的是**本文件自己**（一次跑完 26 条判据，本容器 16s），
+    但不带 `::用例` 选择器——模块级 skip 只在收集期成立，带选择器会让 pytest
+    因"选择器指着一条被跳过的用例"退 4，那是选择器语义，不是本判据要钉的形态。
+
+    **不许用"往 PYTHONPATH 里放同名模块抛 ImportError"来伪造缺席**：实测那会绕过
+    `importorskip` 的捕获范围（它只把"模块找不到"这类异常转成 skip）、直接落在
+    收集期 ERROR——那正是本判据要区分的两种形态被混成一种。故用 meta_path 拒绝者
+    抛 `ModuleNotFoundError`（与"真的没装"同形）。
+    """
+
+    def test_missingHeavyDepYieldsFileLevelSkipNotError(self, tmp_path):
+        import os
+        import subprocess
+
+        (tmp_path / "sitecustomize.py").write_text(_DEP_BLOCKER_SOURCE, encoding="utf-8")
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(tmp_path)
+        proc = subprocess.run(
+            # 刻意整文件跑（不带 `::用例` 选择器）：模块级 skip 只在收集期成立，
+            # 带选择器时 pytest 会因"选择器指着一条被跳过的用例"退 4（非 0），
+            # 那是选择器语义、不是本判据要钉的形态。
+            [sys.executable, "-m", "pytest", str(Path(__file__)), "-q", "--no-header", "-p", "no:cacheprovider"],
+            capture_output=True,
+            text=True,
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            timeout=120,
+        )
+        output = proc.stdout + proc.stderr
+        # 退出码语义：0 = 有用例跑完（正常），5 = 一条都没收集到但**没有错误**
+        # （文件级 skip 就是这种形态）。两者都说明"缺依赖没有把文件判成失败"。
+        assert proc.returncode in (0, 5), (
+            "重依赖缺席时整文件收集失败（本文件 20+ 条判据被一次性作废）：\n"
+            + output[-1200:]
+        )
+        assert " 1 skipped" in output, (
+            "缺依赖既没报红也没报「整文件跳过」——形态不明，"
+            f"读者无从判断这次跑是不是什么都没验：\n{output[-1200:]}"
+        )
+
+    def test_theGuardItselfBitesWhenTheDeclarationsAreRemoved(self, tmp_path):
+        """反向控制：把模块级依赖声明摘掉后，同一场景必须真的红（判据不空转）。
+
+        同样整文件跑（不带选择器）：摘掉声明后**收集期**就会失败，
+        pytest 不会收集到任何用例，故不会重演"21 条判据各跑一遍"的开销。
+        """
+        import os
+        import subprocess
+
+        scratch = Path(tmp_path) / "stripped_perf_gate_contract.py"
+        stripped = io.open(Path(__file__), encoding="utf-8").read()
+        #: 逐条摘掉模块级依赖声明（行锚定到本文件自己的声明文本）
+        for module in ("prometheus_client", "psutil"):
+            stripped = stripped.replace(
+                f'pytest.importorskip("{module}", reason=', f'pytest.{module}_declared('
+            )
+        scratch.write_text(stripped, encoding="utf-8")
+        (Path(tmp_path) / "sitecustomize.py").write_text(_DEP_BLOCKER_SOURCE, encoding="utf-8")
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(tmp_path)
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", str(scratch), "-q", "--no-header", "-p", "no:cacheprovider"],
+            capture_output=True,
+            text=True,
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            timeout=120,
+        )
+        output = proc.stdout + proc.stderr
+        assert proc.returncode != 0, (
+            "摘掉依赖声明后同一场景仍判绿——本判据对'守卫失效'无反应（恒真断言）：\n"
+            + output[-1200:]
+        )
+        assert "ERROR collecting" in output, (
+            f"摘掉声明后的红灯不是收集期失败，判据测的不是同一件事：\n{output[-1200:]}"
+        )
 
 
 class TestImportBudgetKeepsWallClock:

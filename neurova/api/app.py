@@ -1305,6 +1305,13 @@ def run_server(
     port = config.get_int("NEUROVA_PORT", port)
     debug = config.get_bool("NEUROVA_DEBUG", False) or debug
 
+    # 端口预检先于应用装配：uvicorn 的次序是 lifespan 先跑完再 bind，
+    # 全量装配（Agent/LLM/DB）之后才失败等于把唯一有用的信息埋进日志尾部。
+    # 与 start_server.py / guest_agent 同源判据（neurova.core.port_guard）。
+    from neurova.core.port_guard import preflightPortAvailable
+
+    preflightPortAvailable(host, port)
+
     # 创建应用
     app = create_app(host=host, port=port, debug=debug)
 
