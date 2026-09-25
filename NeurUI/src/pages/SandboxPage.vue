@@ -18,7 +18,7 @@
             </div>
           </template>
           <div class="sb-body">
-            <p class="sb-meta">{{ t('sandbox.created') }}{{ formatTime(sb.created_at) }}</p>
+            <p class="sb-meta">{{ t('sandbox.created') }}{{ formatTimestampText(sb.created_at) }}</p>
             <p class="sb-meta">{{ t('sandbox.steps') }}{{ sb.steps_count ?? 0 }}</p>
             <p v-if="sb.image" class="sb-meta">{{ t('sandbox.image') }}{{ sb.image }}</p>
           </div>
@@ -77,6 +77,7 @@ import { sandboxApi } from '@/api/modules'
 import GlassCard from '@/components/GlassCard.vue'
 import GlassButton from '@/components/GlassButton.vue'
 import { message, Modal } from 'ant-design-vue'
+import { formatTimestampText } from '@/utils/displayText'
 
 const { t } = useI18n()
 
@@ -92,7 +93,6 @@ const execOutput = ref('')
 
 const newSandbox = ref<sandboxApi.CreateSandboxPayload>({ name: '', image: 'python:3.11-slim', timeout: 300 })
 
-const formatTime = (ts?: string) => ts ? new Date(ts).toLocaleString() : ''
 
 const fetchSandboxes = async () => {
   loading.value = true
