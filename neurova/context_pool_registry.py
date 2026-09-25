@@ -1,26 +1,49 @@
-"""
-ContextPoolRegistry - Agent 专属上下文池注册表
+"""上下文池注册表——按身份查**已登记**的池（读侧唯一入口）。
 
-根因 D 修复: 提供按 (user_id, agent_id, session_id) 索引的 ContextPool 池注册表,
-支持:
-  1. 同 agent 多个 session 隔离缓存
-  2. 同 agent 跨 session 按需调取
-  3. 不同 agent 池互不串扰
-  4. session 池的生命周期管理
+## 职责（B6-10 批次 F 收窄后）
+
+只做一件事：编排器构造池时就地 `adopt`（登记），消费方按身份 `get_pool` 取回
+**同一个实例**。端点 `/context/build`、工作流上下文节点都经它取池——不登记的话，
+读侧取不到就只能各自新建，"写入即丢"（审计 P2-3）。
+
+## 为什么不再按 session 分池
+
+改前本模块还带一套多池机制（`get_or_create` 按 `(user, agent, session)` 造池 +
+`query_agent` 跨 session 分区调取 + `list_sessions` / `clear_session` /
+`get_pool_count` 生命周期管理）。那是**按池分会话**的隔离设计，与
+`ContextPool.isolation_key` 同源；而 T-02 / ADR-0015 交付的真设计是
+**单池 + 作用域标签**：池是"永不丢失"的归档，隔离由内容的 `chat_scope`
+（随写入咽喉落进 metadata）经 `filter_by_scope` 判，池归属不承担隔离。
+
+两套并存的结果实测（2026-09-26，真 `ContextOrchestrator` 构造面）：
+
+   生产构造后登记池数: 1
+   登记键: [('u1', 'yi_ling', '')]     ← 一个 agent 一个池，session 段恒空
+   池自身 draw 取得: ['真归档']          ← 真读路径取得到
+   registry.query_agent 同身份: []       ← 分区读路径一条都取不回来
+
+`query_agent` 的跨 session 模式按 `_list_sessions_locked()` 枚举 `''` 这个键，
+再 `pool.query(session_id='')`；而池的 `session_id` 每轮由 `build_context` 刷成
+本轮身份，与注册表键里的 `''` 无因果。于是池里明明有内容也取不回来，且**返回空
+列表而不是报错**——消费方分不出"没有"与"坏掉"（教义第 2 条）。
+
+那套机制生产侧零调用点，故整批退场，留下单池读侧的两个入口 `adopt` / `get_pool`。
 """
 from __future__ import annotations
 
 import threading
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from neurova.context_pool import ContextPool
 
 
 class ContextPoolRegistry:
-    """Agent 专属上下文池注册表（线程安全）
+    """按身份索引的池注册表（线程安全，进程内单例）。
 
-    数据结构:
-        _pools: {(user_id, agent_id, session_id): ContextPool}
+    数据结构: `_pools: {(user_id, agent_id, session_id): ContextPool}`。
+    键里的 `session_id` 段取自池的**构造期**归属；生产池由编排器以
+    `session_id=None` 构造（每轮身份刷在 `pool.session_id` 上），故生产键的
+    session 段恒空——这正是"按身份查已登记的池"够用的原因（一个 agent 一个池）。
     """
 
     _instance: Optional["ContextPoolRegistry"] = None
@@ -40,111 +63,6 @@ class ContextPoolRegistry:
         self._pools: Dict[tuple, ContextPool] = {}
         self._lock = threading.RLock()
 
-    def get_or_create(
-        self,
-        user_id: str,
-        agent_id: str,
-        session_id: str,
-        max_tokens: int = 16000,
-        auto_tag: bool = False,
-    ) -> ContextPool:
-        """获取或创建指定 (user, agent, session) 的 ContextPool
-
-        同三元组重复调用返回同一实例(缓存), 不同 session 隔离。
-        """
-        key = self._identityKey(user_id, agent_id, session_id)
-        with self._lock:
-            if key in self._pools:
-                return self._pools[key]
-            pool = ContextPool(
-                user_id=user_id,
-                agent_id=agent_id,
-                session_id=session_id,
-                max_tokens=max_tokens,
-                auto_tag=auto_tag,
-                ttl_seconds=0,  # 无损归档
-            )
-            self._pools[key] = pool
-            return pool
-
-    def query_agent(
-        self,
-        user_id: str,
-        agent_id: str,
-        query: Optional[str] = None,
-        source=None,
-        session_id: Optional[str] = None,
-        current_session_id: Optional[str] = None,
-        tags: Optional[List[str]] = None,
-        limit: int = 20,
-    ) -> list:
-        """跨 session 按需调取某 agent 的上下文(默认当前 session 优先)
-
-        Args:
-            user_id: 用户ID
-            agent_id: Agent ID
-            query: 关键词过滤
-            source: 按 ContextSource 过滤
-            session_id: 若指定, 只检索该 session(否则跨所有 session)
-            current_session_id: 当前活跃 session, 其内容优先返回; 剩余名额
-                                跨 session 兜底
-            tags: tags 过滤
-            limit: 总数上限
-
-        Returns:
-            List[ContextInput], current_session 优先; 同 session 内按 priority 降序
-        """
-        # 显式 session_id 模式: 严格限定单个 session
-        if session_id is not None:
-            with self._lock:
-                if not self._has_session_locked(user_id, agent_id, session_id):
-                    return []
-            pool = self.get_or_create(user_id, agent_id, session_id)
-            return pool.query(
-                query=query,
-                source=source,
-                session_id=session_id,
-                tags=tags,
-                limit=limit,
-            )
-
-        # 跨 session 模式: 获取所有 session
-        with self._lock:
-            all_sessions = self._list_sessions_locked(user_id, agent_id)
-
-        # 当前 session 优先 + 跨 session 兜底
-        ordered_sessions = []
-        if current_session_id and current_session_id in all_sessions:
-            ordered_sessions.append(current_session_id)
-            ordered_sessions.extend(s for s in all_sessions if s != current_session_id)
-        else:
-            ordered_sessions = all_sessions
-
-        # 从每个 session 调取, 直到 limit 填满
-        all_results = []
-        remaining = limit
-        for sid in ordered_sessions:
-            if remaining <= 0:
-                break
-            pool = self.get_or_create(user_id, agent_id, sid)
-            # 用 query 拿该 session 的所有候选, 调取 limit 个
-            results = pool.query(
-                query=query,
-                source=source,
-                session_id=sid,  # 严格限定单 session, 避免跨 session 串扰
-                tags=tags,
-                limit=remaining,
-            )
-            all_results.extend(results)
-            remaining -= len(results)
-
-        # 不传 current_session_id 时, 跨 session 重新按 priority 降序(向后兼容)
-        if not current_session_id:
-            all_results.sort(key=lambda c: c.priority, reverse=True)
-            all_results = all_results[:limit]
-
-        return all_results
-
     @staticmethod
     def _identityKey(user_id: str, agent_id: str, session_id: Optional[str]) -> tuple:
         """身份键归一：session_id 的 None 与 "" 是同一个归属。
@@ -155,12 +73,12 @@ class ContextPoolRegistry:
         return (str(user_id or ""), str(agent_id or ""), str(session_id or ""))
 
     def adopt(self, pool) -> None:
-        """登记一个**已存在**的池实例（写侧接线）。
+        """登记一个**已存在**的池实例（写侧唯一入口）。
 
-        与 `get_or_create` 的分工：那里是"没有就造一个"（注册表自持生命周期），
-        这里是"Agent 已经造好了，登记进来让按身份的读侧取得到"。生产对话链的
-        池由 ContextOrchestrator 构造，只有登记进来，端点/工作流节点才能取到
-        **同一个**池（而不是各造一个、写入即丢）。
+        只登记，不造池：生产对话链的池由 `ContextOrchestrator` 构造，只有登记
+        进来，端点/工作流节点才能取到**同一个**池（而不是各造一个、写入即丢）。
+        注册表刻意不自持生命周期——"取池顺带造池"会让调用方把空池当真池用
+        （审计 P2-3 的形态）。
         """
         key = self._identityKey(pool.user_id, pool.agent_id, getattr(pool, "session_id", None))
         with self._lock:
@@ -175,33 +93,6 @@ class ContextPoolRegistry:
         key = self._identityKey(user_id, agent_id, session_id)
         with self._lock:
             return self._pools.get(key)
-
-    def _has_session_locked(self, user_id: str, agent_id: str, session_id: str) -> bool:
-        """调用方必须已持锁"""
-        return self._identityKey(user_id, agent_id, session_id) in self._pools
-
-    def list_sessions(self, user_id: str, agent_id: str) -> List[str]:
-        """返回该 (user, agent) 下的所有 session_id"""
-        with self._lock:
-            return self._list_sessions_locked(user_id, agent_id)
-
-    def _list_sessions_locked(self, user_id: str, agent_id: str) -> List[str]:
-        """内部辅助: 调用方必须已持锁"""
-        return [sid for (u, a, sid) in self._pools.keys() if u == str(user_id or "") and a == str(agent_id or "")]
-
-    def clear_session(self, user_id: str, agent_id: str, session_id: str) -> bool:
-        """清除指定 session 的 pool 缓存(返回是否成功移除)"""
-        key = self._identityKey(user_id, agent_id, session_id)
-        with self._lock:
-            if key in self._pools:
-                del self._pools[key]
-                return True
-            return False
-
-    def get_pool_count(self) -> int:
-        """调试用: 返回当前池总数"""
-        with self._lock:
-            return len(self._pools)
 
     def reset(self) -> None:
         """清空所有缓存(用于测试隔离)"""
