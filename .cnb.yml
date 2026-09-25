@@ -2,26 +2,50 @@
 # Neurova CI — cnb.cool 云原生构建
 # ============================================================================
 # 与 .github/workflows/ci.yml 对齐的门禁：同源命令、同等严格度、同等放行标准。
-# 对齐关系由 tests/unit/test_ci_parity_guard.py 常驻校验（20 用例）：
-#   job↔pipeline 映射 / 核心命令逐字一致 / 非阻塞语义对齐 / 防样例空壳再生。
+# 对齐关系由 tests/unit/test_ci_parity_guard.py 常驻校验（四组断言：
+#   job↔pipeline 映射 / 核心命令逐字一致 / 非阻塞语义对齐 / 防样例空壳再生）。
 # 改动任一侧配置必须同步另一侧并更新守卫的 EXPECTED_* 表。
 #
-# 分层（自内向外加固，与 GitHub 侧一致的 6 层 + 1 非阻塞）：
-#   1. static-gate           语法/未定义名巡检（pyflakes，成本极低）
-#   2. lint                  ruff E9+F821（规则集与豁免见 pyproject）
-#   3. import-and-regression 模块导入巡检 + 审计回归
-#   4. unit-tests            受保护子集（scripts/ci/protected_tests.txt）
+# 分层（自内向外加固，与 GitHub 侧一致；全部为阻断门禁，无 continue-on-error）：
+#   1. static-gate           语法/未定义名巡检（pyflakes）+ ruff E9+F821
+#                            （规则集与豁免见 pyproject）——两条都在读同一片全仓 AST，
+#                            故并成一条流水线，不再各扫一遍（Issue #223 第 2 条）
+#   2. import-and-regression 模块导入巡检 + 审计回归
+#   3. unit-tests            受保护子集（scripts/ci/protected_tests.txt）
 #                            + 覆盖率门禁 fail_under=60，py3.11/3.12 双跑
-#   5. e2e                   后端启动冒烟（health/docs/metrics/鉴权）
-#   6. frontend              vue-tsc 类型门禁 + vitest
-#   7. dependency-audit      pip-audit 锁定版本审计（allowFailure: true，非阻塞）
+#   4. e2e                   后端启动冒烟（health/docs/metrics/鉴权）
+#   5. frontend              npm audit --audit-level=high（阻塞）+ vue-tsc + vitest
+#   6. dependency-audit      pip-audit 阻塞审计：CI 精简锁 + 生产全量锁（requirements-full.lock）
+#                            + OSV 扫非 pip 依赖树（Cargo.lock / npx 运行时包锁）；
+#                            离线漏洞库缓存挂卷跨构建复用（Issue #223 第 1 条）
+#   7. perf-gate             import 时长预算 + 关键路径微基准（阻断，
+#                            见 scripts/ci/perf_gate.py）
+#   8. deploy-config         部署配置一致性（Dockerfile / docker-compose /
+#                            Helm / requirements 跨文件不变量，阻断，
+#                            见 scripts/ci/deploy_config_consistency_check.py）
+#   9. experience-quality    经验质量基准（工单 009，阻断）：冻结真实语料的
+#                            门槛收紧前后 A/B 读数 + 低质探针自证，
+#                            见 scripts/ci/experience_quality_gate.py
+#
+# 依赖安装口径（Issue #223 第 3/4 条，四条规则，全仓命中点一次扫清）：
+#   - 无锁的 `-r requirements-ci.txt` 一律不再出现在 CI 里：装锁
+#     （`requirements-ci.lock`）不必解析依赖树，是无锁解析之外最省的一种装法；
+#   - 不自举 pip（`pip install --upgrade pip`）：每次构建一次 PyPI 网络往返，
+#     与「这次提交是否合格」无关；确需新版 pip 请钉进依赖清单；
+#   - e2e 的 `--no-deps` + 显式点名两段式语义**不动**（薄环境是它的设计目的）；
+#   - 装的是同一份锁的三条流水线由 tests/unit/test_ci_pipeline_speed_guard.py
+#     逐条钉住，回填无锁安装即红。
 #
 # 原则：只进当前确定全绿的测试；预存失败模块修复后逐个搬入 protected_tests.txt。
 #
 # 语法约定（见 https://docs.cnb.cool/zh/build/grammar.html）：
 #   - 分支 → 事件(push/pull_request) → 流水线数组；同一事件下的多条流水线并发执行，
-#     故 8 条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐（unit-tests 按
-#     py3.11/py3.12 拆为两条，对应 GitHub 的 matrix 两格）。
+#     故 10 条流水线各自独立上报状态，粒度与 GitHub 的 job 对齐（unit-tests 按
+#     py3.11/py3.12 拆为两条，对应 GitHub 的 matrix 两格；static-gate 与 ruff
+#     并成一条，对应 GitHub 侧同为一条的 static-gate job）。
+#   - 定时任务用第 3 类顶层 key：`"crontab: <5 段 POSIX cron>"`（分支下一级），
+#     平台最小调度间隔 5 分钟，周级用第 5 段（星期）表达；本文件另有 1 条周级
+#     巡检流水线（deploy-config 的时间维度兜底），不计入上面 10 条 push 流水线。
 #   - 单条流水线内的 stages 串行；任一 stage 失败即中止该流水线。
 #   - runner.cpus: N 对应内存 N×2GiB（本文件最大 4 → 8GiB）。
 #   - docker.volumes 为构建节点级缓存（copy-on-write 默认），跨节点不共享；
@@ -41,7 +65,10 @@
 main:
   # push 事件：流水线定义一次（锚点 &pipelines）
   push: &pipelines
-    # ── 1. 静态门禁：语法 + 未定义名（无依赖安装，秒级反馈）──────────────
+    # ── 1. 静态门禁：语法 + 未定义名 + lint（全仓 AST，一条读到底）─────────
+    # 本流水线曾是两条（static-gate 与 lint）：pyflakes 与 ruff 都在读同一片
+    # 全仓 AST，拆两条只是多一次容器启动 + 多一遍全仓遍历（Issue #223 第 2 条）。
+    # 两条命令逐字保留 —— 合并的是「读几遍」，不是「放宽哪一项判据」。
     - name: static-gate
       runner:
         tags: cnb:arch:amd64
@@ -51,24 +78,11 @@ main:
         volumes:
           - /root/.cache/pip
       stages:
-        - name: install pyflakes
-          script: python -m pip install --upgrade pip pyflakes
+        - name: install pyflakes + ruff
+          script: python -m pip install pyflakes ruff
         - name: fast static gate (syntax + undefined names)
           script: python scripts/ci_static_gate.py --skip-import
           timeout: 10m
-
-    # ── 2. Lint：ruff E9 + F821 ──────────────────────────────────────────
-    - name: lint
-      runner:
-        tags: cnb:arch:amd64
-        cpus: 2
-      docker:
-        image: python:3.12
-        volumes:
-          - /root/.cache/pip
-      stages:
-        - name: install ruff
-          script: python -m pip install --upgrade pip ruff
         - name: ruff check
           script: python -m ruff check neurova tests --no-cache
           timeout: 15m
@@ -83,8 +97,10 @@ main:
         volumes:
           - /root/.cache/pip
       stages:
-        - name: install core dependencies (lean set, no torch)
-          script: python -m pip install --upgrade pip -r requirements-ci.txt
+        # 装的是锁不是声明：三条流水线装同一份精简依赖，锁过一次就不必各自
+        # 解析整棵依赖树（无锁 pip 解析是这三种装法里最慢的一种，Issue #223 第 3 条）。
+        - name: install core dependencies (locked lean set, no torch)
+          script: python -m pip install -r requirements-ci.lock
           timeout: 20m
         - name: full static gate (incl. module import sweep)
           script: python scripts/ci_static_gate.py
@@ -106,7 +122,7 @@ main:
       stages:
         - name: install uv + locked dependencies
           script: |
-            python -m pip install --upgrade pip uv
+            python -m pip install uv
             uv pip install --system -r requirements-ci.lock
           timeout: 30m
         - name: protected subset with coverage gate (fail_under=60)
@@ -127,7 +143,7 @@ main:
       stages:
         - name: install uv + locked dependencies
           script: |
-            python -m pip install --upgrade pip uv
+            python -m pip install uv
             uv pip install --system -r requirements-ci.lock
           timeout: 30m
         - name: protected subset with coverage gate (fail_under=60)
@@ -155,7 +171,6 @@ main:
         # 以上皆为"裸 import 无降级"，非已知可选依赖，不进 ci_static_gate.KNOWN_OPTIONAL_DEPS
         - name: install minimal runtime deps
           script: |
-            python -m pip install --upgrade pip
             python -m pip install -r requirements.txt --no-deps
             python -m pip install fastapi uvicorn httpx pydantic pydantic-settings pytest \
               pytest-timeout bcrypt passlib python-dotenv aiosqlite prometheus_client
@@ -179,6 +194,9 @@ main:
         - name: install dependencies
           script: cd NeurUI && npm ci
           timeout: 20m
+        - name: dependency audit (npm, blocking on high/critical)
+          script: cd NeurUI && npm audit --audit-level=high
+          timeout: 15m
         - name: type check (vue-tsc)
           script: cd NeurUI && npx vue-tsc --noEmit
           timeout: 20m
@@ -186,9 +204,32 @@ main:
           script: cd NeurUI && npx vitest run
           timeout: 30m
 
-    # ── 7. 依赖审计（非阻塞，对齐 GitHub continue-on-error）──────────────
-    - name: dependency-audit
-      allowFailure: true
+    # ── 8. 性能门禁：import 时长 + 关键路径微基准（阻断）────────────────
+    # 原状：.cnb.yml 无任何 perf/benchmark 任务，尾延迟回归只能人肉发现。
+    # 门禁只抓"数量级退化"（预算带充裕裕量），不做精确 benchmark——
+    # 精确 benchmark 在共享 runner 上必然 flaky，最终会被绕过。
+    - name: perf-gate
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.11
+        volumes:
+          - /root/.cache/pip
+      stages:
+        - name: install minimal deps (locked)
+          script: python -m pip install -r requirements-ci.lock
+          timeout: 20m
+        - name: perf regression gate
+          script: python scripts/ci/perf_gate.py
+          timeout: 15m
+
+    # ── 9. 部署配置一致性（阻塞）─────────────────────────────────────────
+    # 三种交付形态（Dockerfile / docker-compose / Helm）此前各写各的、零自动化
+    # 对齐检查：端口、健康检查、资源限制、环境变量名、持久化、硬依赖声明全靠
+    # 人肉记忆。本门禁把这些跨文件不变量钉成 R1~R12（详见脚本 docstring），
+    # 另由 tests/unit/test_deploy_config_guard.py 锁死门禁自身与周级巡检的接线。
+    - name: deploy-config
       runner:
         tags: cnb:arch:amd64
         cpus: 2
@@ -197,63 +238,443 @@ main:
         volumes:
           - /root/.cache/pip
       stages:
+        - name: install pyyaml
+          script: python -m pip install pyyaml
+          timeout: 10m
+        - name: deploy config consistency gate
+          script: python scripts/ci/deploy_config_consistency_check.py
+          timeout: 10m
+
+    # ── 7. 依赖审计（阻塞，对齐 GitHub 已转阻塞的 dependency-audit）────────
+    - name: dependency-audit
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.12
+        volumes:
+          - /root/.cache/pip
+          # OSV 离线漏洞库缓存（`scripts/ci/osv_audit.py` 的 OSV_DB_CACHE 落点）。
+          # 不挂卷时每一次构建都要重下整份 npm 库（实测 206MB / 47s+），
+          # 而它与「某次提交是否引入漏洞」毫无关系——纯网络往返（Issue #223 第 1 条）。
+          # 卷判据由 tests/unit/test_ci_pipeline_speed_guard.py 与脚本的
+          # OSV_DB_CACHE 同源校验，不写死第二份口径。
+          - /root/.cache/osv-scalibr
+      stages:
         - name: install pip-audit
-          script: python -m pip install --upgrade pip pip-audit
+          script: python -m pip install pip-audit
           timeout: 15m
-        - name: audit locked dependency set
+        - name: audit CI locked set
           script: python -m pip_audit -r requirements-ci.lock --progress-spinner off
           timeout: 20m
+        - name: audit full runtime locked set
+          # CI 锁只覆盖精简子集，生产全量依赖（curl_cffi/onnxruntime/transformers/
+          # playwright/paramiko/pycryptodome ...）此前完全无人扫——本步补齐该缺口。
+          script: python -m pip_audit -r requirements-full.lock --progress-spinner off
+          timeout: 20m
+        - name: prefetch OSV offline databases (best effort)
+          # 先把漏洞库落到 runner 本地缓存，让下面这条门禁的裁决**不依赖**
+          # api.osv.dev 的实时可达性——2026-09-22 PR #121 三次红全因该域名
+          # 在本容器里不可达（扫描器此时退 127 并印一句「0 漏洞」）。
+          # 预取失败**不判红**：库过期只漏报新公告，库缺失只是让门禁回退直连；
+          # 把一条随网络抖动的命令放进阻塞门禁，就是本单在消灭的那个形态。
+          # 判据在门禁本体：缓存齐就走离线、不齐则点名并回退（可读、可复算）。
+          script: python scripts/ci/osv_audit.py --prefetch-offline-databases || true
+          timeout: 20m
+        - name: audit non-pip trees (Rust crates + runtime npx packages)
+          # pip-audit / npm audit 之外的两片依赖面（Issue #56 残留边界）：
+          #   * NeurUI/src-tauri/Cargo.lock —— Tauri 桌面壳 crate 树
+          #   * tools/npx-runtime/package-lock.json —— 运行时 `npx -y` 现拉的包
+          # 统一走 OSV-Scanner；允许清单见 scripts/ci/osv-allowlist.toml。
+          # 不带 `--require-offline`：上面那步预取是 best-effort（`|| true`），
+          # 门禁就不能要求「预取必须成功」——否则预取一失败就是红灯，而这与
+          # 「真有未允许漏洞」在合并流程里同形，读日志的人仍只能重跑。
+          # 缓存不齐时门禁**回退直连并点名缺哪一份**（裁决通路收口在
+          # resolveVerdictChannel 一处），红只留给「真有未允许漏洞」。
+          script: python scripts/ci/osv_audit.py
+          timeout: 20m
+
+    # ── 10. 经验质量基准（工单 009，阻塞）──────────────────────────────────
+    # 收紧了一整轮经验形成链之后，"变好了"必须有一个可比读数回答：冻结的真实语料
+    # 跑门槛收紧前/后两臂 A/B，读数取 EKB.quality_snapshot()（008 的唯一算式），
+    # 判据阈值取同一张 ALERT_THRESHOLDS。每次运行先自证低质探针会被判红——
+    # 探针不红说明判据坏了，那种"绿"比红危险，按 exit 2 出声。
+    # 语料是 --freeze-corpus 从生产库只读投影出来的仓内夹具，CI 上不碰 data/ 活库。
+    - name: experience-quality
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.11
+        volumes:
+          - /root/.cache/pip
+      stages:
+        - name: install minimal deps (locked)
+          script: python -m pip install -r requirements-ci.lock
+          timeout: 20m
+        - name: experience quality gate
+          script: python scripts/ci/experience_quality_gate.py
+          timeout: 10m
 
   # pull_request 事件：复用同一份流水线定义（锚点别名，单一事实来源）
   pull_request: *pipelines
 
+  # ── 周级巡检：部署配置漂移（crontab）─────────────────────────────────────
+  # 为什么独立成 crontab 而不只放 push/PR：漂移的主要来源**不在本仓的提交里**——
+  # 基础镜像上游发版、Helm/K8s API 演进、依赖上游 CVE，都会让"上次对齐过"的
+  # 配置在无人改仓库的情况下失效。周级巡检负责抓这类时间维度漂移。
+  #
+  # 为什么不用 push 兜底：push 门禁只在有人提交时跑，沉寂期等于没有巡检。
+  #
+  # 周级为什么能写：平台 crontab 支持标准 5 段 POSIX cron（最小调度间隔 5 分钟），
+  # 周级 cadence 用第 5 段（星期）表达即 `30 3 * * 1`（每周一 03:30，Asia/Shanghai）。
+  # 注意：不要试图用"间隔 N 天"的语义——平台只认 cron 表达式，没有 interval 单位，
+  # 也不存在"任务最长存活 3 天"的限制；配置错误的形态只会在解析期报错。
+  "crontab: 30 3 * * 1":
+    - name: weekly-deploy-config-audit
+      runner:
+        tags: cnb:arch:amd64
+        cpus: 2
+      docker:
+        image: python:3.12
+        volumes:
+          - /root/.cache/pip
+      stages:
+        - name: install pyyaml
+          script: python -m pip install pyyaml
+          timeout: 10m
+        - name: weekly deploy config consistency audit
+          script: python scripts/ci/deploy_config_consistency_check.py
+          timeout: 10m
+
 # ============================================================================
-# 自定义 NPC —— DSCoder（DeepSeek 驱动）
+# 自定义 NPC —— DSCoder
 # ============================================================================
-# 角色定义见 .cnb/settings.yml；此处为 NPC 事件流水线，用于绑定模型等运行参数。
+# 角色定义见 .cnb/settings.yml；此处为 NPC 事件流水线，只管运行参数，不管人设。
 # 触发：Issue/PR 评论中 @kingsa2026/neurova(DSCoder)
 # 合并机制：本段覆盖同名事件，未声明的事件保留系统默认行为（故两个事件都声明）。
-# 说明：模型能力参数（maxTurns/contextWindow/maxTokens/thinkingLevel/supportImage）
-#   在指定自定义 model 后不再继承平台默认，故按 DeepSeek 常规能力显式给出兜底值。
+#
+# 为何不写 model：
+#   此前写死 model: deepseek-v4.1-flash-max，该模型 ID 平台并不存在，
+#   npc:go 又不校验 model 有效性（配置期不报错、流水线能启动），
+#   直到真正发请求才被 LLM 网关以 400 拒绝 —— 表现为「配置都对却秒挂」。
+#   故此处不指定 model，走平台默认模型，能力参数随之继承平台默认值。
+#   如需绑定特定模型，请填平台真实存在的 model ID（不带思考强度后缀）后再放开注释。
+#
+# 为何 max 后缀必须去掉：
+#   deepseek-v4.1-flash-{low,high,max} 只是「同一底座模型 + 不同思考强度」的
+#   三个变体名，合法的底座 model ID 只有 deepseek-v4.1-flash（或走平台默认模型）。
+#   直接把带后缀的名字传给 model，就是上一轮 400 的同款死法。
+#   故本题的解法是：model 只传底座 ID（或留空走默认），
+#   思考强度一律用 thinkingLevel 表达。
+#
+# 为何不把档位也做成 $变量：
+#   npc:go.options 走平台配置阶段的 Schema 校验，而校验发生在变量替换之前 ——
+#   thinkingLevel 的取值域是枚举（off/minimal/low/medium/high/xhigh/max），
+#   写成 $NPC_THINKING 会以「值不在枚举内」配置期直接红。所以档位必须写字面量。
+#
+# 装配方式（对齐官方《NPC - 按角色名配置》）：
+#   档位角色挂【角色名顶层 key】，同名事件覆盖 $ 下的定义，互不干扰；$ 为兜底。
+#
+# 档位收敛（2026-09-18 按用户口径）：
+#   DSCoder 只保留 max 模式，取消 low / high 两档（顶层 key 与 settings.yml
+#   角色定义同步删除，守卫同步收敛）。
+#   现在：@kingsa2026/neurova(DSCoder) 即 max 档；@...(DSCoder-max) 等价。
 # ============================================================================
+# ── max 档（唯一档位）：@kingsa2026/neurova(DSCoder) / (DSCoder-max) ────────
+# 运行参数只在 `$` 下写一份（落 thinkingLevel: xhigh），
+# 避免「$ 中性档 + 被 @ 时落到平台默认低档」的档位漂移；
+# 档位角色名与参数的一致性由 tests/unit/test_ci_npc_config_guard.py 常驻校验。
+#
+# 本批冲突消解（2026-09-22，PR #136 并入 main）：本 PR 侧曾补 `DSCoder:` 顶层
+# 挂载点（理由是「`$` 只是兜底，不替代角色名挂载点，不带后缀的 DSCoder 会静默
+# 回落平台默认 prompt」）。并入时 main 已由 PR #134 用平台 Schema 证明：
+# `.cnb.yml` 顶层 key **只认分支名**，角色名顶层 key 在推送分支那一刻就非法
+# （Schema 只放行 `^\..` 锚点形态，语义规则另把 `issue.*` 钉在 `$` 下）。
+# 故结论取 main —— 不补角色名挂载点，别名留在 .cnb/settings.yml 侧；
+# 而本 PR 的洞见由 `$` 兜底覆盖**全部**角色来满足（平台按角色名动态匹配顶层 key，
+# 未命中角色名时回落 `$`），「每个在册角色都有配置期必达通道」这件事因此仍成立，
+# 只是不再靠多加一份顶层 key 实现。这条不变量由
+# tests/unit/test_ci_npc_config_guard.py 的挂载点判据常驻校验。
+# （此处曾有一份 `.档位映射: &npc-level` 的「角色名 → thinkingLevel」表。
+#  它没有任何消费方：平台不读 `^\.` 形态的自定义顶层键，本仓守卫也不读它，
+#  档位事实源是 `$` 挂载点的 thinkingLevel 现值加 `.cnb/settings.yml` 的角色定义。
+#  只写不读的配置是断点，且它已被改成与收敛口径相反的 `DSCoder: high`——
+#  规则与行为不一致时没有任何一处会响亮，故连同锚点一并删净（教义第 6 条）。
+#  「锚点定义必须有消费方」由 tests/unit/test_ci_npc_config_guard.py 常驻校验。）
+
+# 时间预算条款**不写在这里**。原因（2026-09-22 实测）：
+#   `npc:go.options` 只认平台 Schema 声明的键（role / systemPrompt / userPrompt /
+#   model / maxTurns / contextWindow / maxTokens / thinkingLevel / supportImage），
+#   且评论触发时提示词一律由角色自带 —— 写在此处的 `prompt:` 既不被识别也不生效，
+#   而平台对未知键**不报错、不告警、静默忽略**。
+#   故条款落在 `.cnb/settings.yml` 每个档位角色的 prompt 里（唯一必达通道），
+#   允许键清单见 `.cnb/npc_schema_keys.txt`，两处漂移由
+#   tests/unit/ci/test_npc_pipeline_time_budget.py 常驻拦截。
+# ── NPC 流水线脚本的解释器解析 ────────────────────────────────────────────────
+# `cnbcool/default-npc:latest`（NPC 流水线唯一镜像）**只有 node，没有 python**。
+# 构建 cnb-du8-1k34cfhg1 实测：第 1 步 `python scripts/ci/npc_turn_handoff_gate.py`
+# 以 `sh: 1: python: not found`（rc=127）收场，Agent 那一步被 skipper 跳过 ——
+# 用户看到的是「流水线构建失败」，实际是脚本拉不起来，与任务内容无关。
+# 同一条死链的两处命中点（issue.comment@npc / pull_request.comment@npc）一次扫清。
+#
+# 解释器探测逐级降级，且**不做任何安装**（镜像体积与网络都不由本流水线负责）：
+#   python3 → python → node（门禁脚本用 node 可跑，见
+#   tests/unit/ci/test_npc_script_interpreter_reachability.py）；
+#   三级都不可用即以 127 收场 —— 请求解释器失败必须响亮，不得静默跳过（教义第 2 条）。
+.解释器探测: &npc-script-interpreter |
+  # 探测结果给出「怎么跑门禁脚本」。第三级 node 是**特例**：
+  # node 按扩展名解析模块，把 `.py` 交给 node 会在解析前以
+  # `ERR_UNKNOWN_FILE_EXTENSION` 退出（rc=1，构建 cnb-9cc-1k34ff3t1 实测），
+  # 所以 node 分支不能是 `node <script>.py`，必须经桥脚本
+  # scripts/ci/run_gate_under_node.sh 提取脚本自带的 node 实现再执行。
+  #
+  # 调用形态统一由 $NPX_CALL 表达；脚本路径仍逐字出现在 script 里，
+  # 故「本流水线确实执行了这个脚本」不因换解释器而不可读
+  # （tests/unit/ci/test_npc_turn_handoff_execution.py 的可见性判据）。
+  if command -v python3 >/dev/null 2>&1; then
+    NPX=python3
+    NPX_CALL="python3"
+  elif command -v python >/dev/null 2>&1; then
+    NPX=python
+    NPX_CALL="python"
+  elif command -v node >/dev/null 2>&1; then
+    NPX=node
+    NPX_CALL="sh scripts/ci/run_gate_under_node.sh"
+  else
+    echo "无可用脚本解释器（python3 / python / node 均不存在）" >&2
+    exit 127
+  fi
+
 $:
-  issue.comment@npc: &npc-pipeline
+  # ── 轮数触顶接力（回答 Issue #131；根因修复见 Issue #158）─────────────────
+  # 事实（两次真实构建实测，不是推测）：
+  #   cnb-2e8-1k341d9s1：201 轮 / 3191326ms，Stage 报 `Agent aborted: reached
+  #                      maxTurns limit (200)`
+  #   cnb-2v8-1k34htd2p：200 轮 / 2362852ms，同上
+  #
+  # 落点（单一事实源）：`$CNB_BUILD_WORKSPACE/.npc-turn-handoff` ——
+  #   收尾 Stage 读的就是它，写它的只有 scripts/ci/npc_turn_handoff_gate.py 一处。
+  # 两次的收尾 Stage「轮数触顶接力」都是 `skipped`，Issue 上没有任何回音。
+  #
+  # 根因不是"没人写标记"，而是**标记永远写不出**：
+  #   撞 maxTurns 时平台只是把 Agent 中止，**不执行任何收尾指令/工具调用** ——
+  #   Agent 没有机会在触顶那一轮执行「把 1 写进
+  #   `$CNB_BUILD_WORKSPACE/.npc-turn-handoff`」。
+  #   读端（`endStages` 的 `if`）因此恒假，接力是一条死配置，
+  #   而"看着配了、其实永不触发"平台不会报任何错。
+  #
+  # 修法（教义第 1 条：修在上游生产该状态的地方）：
+  #   燃料改由**本流水线自己在 Agent 开工前写**（Stage 1 调用
+  #   scripts/ci/npc_turn_handoff_gate.py，它把标记写到
+  #   `$CNB_BUILD_WORKSPACE/.npc-turn-handoff` 并读回自证），
+  #   不再依赖 Agent 的记忆与触顶那一轮的执行机会。
+  #   判据仍是 env 传入的那一个变量，不新增第二种判据（教义第 6 条）。
+  #
+  # 空轮防护（为什么不是"每次都接力"）：
+  #   `if` 恒真会使用户只说一句「你好」也无限接力烧配额。故 Stage 1 在写入燃料时
+  #   **同时经平台声明的导出通道回写接力变量**：stdout 的 `##[set-output]` 标记
+  #   ＋ 同一 Stage 上的 `exports` 映射（生命周期覆盖整个 Pipeline，含 endStages）。
+  #   上一批曾用 `$GITHUB_ENV` 同源的 `$CNB_ENV` 文件通道 —— 那是一条**不存在的
+  #   路径**（官方文档零命中，真实构建里也未注入），已被证伪并换掉。于是：
+  #     用户新发的 @   → 变量为空 → 不接力（空轮不烧配额）
+  #     碰完 maxTurns 的构建 → 变量为 1 → 自动接力下一轮
+  #   链路上没有任何一处需要 Agent 配合，也没有第二套状态文件。
+  #
+  # 通道选型（Issue #170，构建 cnb-i5m-1k355ooo1 实测）：
+  #   收尾接力**不能**用 `cnb:apply` —— 它的适用事件白名单
+  #   （push/commit.add/branch.create/pull_request.target/pull_request.mergeable/
+  #   tag_push/pull_request.merged/api_trigger/web_trigger/crontab/tag_deploy）
+  #   里没有 `@npc` 一族，也没有其宿主 `issue.comment` / `pull_request.comment`。
+  #   平台校验的是**宿主事件**，不是 `options.event` 的取值 ——
+  #   改 event 绕不开，那笔接力在写下那一刻就注定执行不了。
+  #   前两批把它当成"event 取值问题"修（同名事件 → api_trigger_*），
+  #   于是每次都在真被执行时以同一句 error 收场。
+  #   改用 `cnb:trigger`（适用**所有事件**，官方 trigger.md）：
+  #   slug 必填（不默认当前仓库）、branch 显式点名（它默认主分支，
+  #   而 PR 评论事件跑在 PR 目标分支，不传会接力到主分支上落空）。
+  #
+  # 轮次上界（平台依据：docs.cnb.cool 的「超时」与「npc:go」两篇）：
+  #   `maxTurns` 是**轮数配额**（一次构建跑 200 轮），不是 2h 墙钟的反推值 ——
+  #   把配额写在硬限之上只会让撞顶永远发生在平台掐断之后（届时无告警、无收尾，
+  #   worktree 里已改未提交的成果随容器一起丢）。
+  #   200 轮 × 实测单轮均摊 16~35s ≈ 53~118min，落在 2h 硬限内，
+  #   撞顶是"配额触发的正常收官"，接力来得及发生。
+  #   总轮数没有硬上界：每一轮都重新判定"我是否真用满了配额"。
+  #
+  # 事故依据（2026-09-22，构建 cnb-1q8-1k33cb2v9）：上一轮曾把时间禁令写在
+  #   .cnb.yml 的注释里，而注释不进 Agent 的上下文，Agent 照样 sleep 轮询容器内
+  #   根本不存在的前后端进程，并在收尾用 `pkill -f start_server.py` 把自己所在的
+  #   构建容器一并打掉（7261220ms 全部耗在一次零产出的等待上）。
+  #   禁令的唯一必达通道是 .cnb/settings.yml 的角色 prompt。
+  #
+  # 脚本解释器：本 Job 各 stage 由探测结果 $NPX 给出（见 .解释器探测）。
+  #   NPC 镜像只有 node；`.py` 交 node 会以 ERR_UNKNOWN_FILE_EXTENSION 退出，
+  #   故 node 分支必须经桥脚本 scripts/ci/run_gate_under_node.sh（见其头注释）。
+  # 装配方式：两条事件定义共用**同一份 Job 体**（锚点 .npc-dscoder-job），
+  #   只在最外层的 `endStages.options.event` 上各自写自己的事件名
+  #   （issue 拉 issue、PR 拉 PR）—— 收尾接力拉错事件会跑错上下文，
+  #   而逐字重复两份 Job 体会漂移，故"共用 Job 体 + 只差事件名"是唯一收敛形态。
+  .npc-dscoder-job: &npc-dscoder-job
     - docker:
         image: cnbcool/default-npc:latest
+      env:
+        turnLimitReached: $turnLimitReached
+      envScript: *npc-script-interpreter
       stages:
-        - name: DSCoder 执行任务
+        - name: "轮数触顶接力：写入并自证燃料（触顶轮也跑得到，不碰 Agent）"
+          # 为何必须由真实构建自证（Issue #145，构建 cnb-2e8-1k341d9s1）：
+          #   npc:go 撞 maxTurns 时平台只是把 Agent 中止、把流水线判为失败，
+          #   收尾的接力 Stage 因读不到标记而 skipped —— 成果随容器一起丢，
+          #   用户在 Issue 上只看到「构建失败」，没有任何回音。
+          # 判据在 Agent 开工**之前**跑：接力能不能真发生，必须在烧掉整轮预算之前
+          #   就说清楚；跑不起来即红，不留"看着配了、其实永远不会触发"的接力。
+          script: "$NPX_CALL scripts/ci/npc_turn_handoff_gate.py"
+          timeout: 2m
+          # 把门禁写出的 `##[set-output]` 标记映射成环境变量（键名见下方映射）。
+          # 平台依据（docs.cnb.cool 的「环境变量」篇）：CI 按行识别 stdout 的
+          #   `##[set-output key=value]` 放进本 Job 的 `result`；再由 `exports`
+          #   映射为环境变量，**生命周期为当前 Pipeline** —— 因此收尾 `endStages`
+          #   的 `if` 读得到，这正是接力判据需要的可见性。
+          # 为什么不是文件通道（上一批写法，已被证伪）：
+          #   平台**不提供** `$CNB_ENV` / `$GITHUB_ENV`（官方文档全文零命中，
+          #   本次真实构建里也未注入）。往不存在的路径追加内容既不生效、
+          #   也不报错 —— 接力会在绿灯下静默失效。`GITHUB_ENV` 同源的写法
+          #   只在 GitHub Actions 成立，照搬到 CNB 是一条不存在的路径。
+          # 键名与门禁脚本的 SET_OUTPUT_KEY 同源，漂移由
+          #   tests/unit/ci/test_npc_pipeline_time_budget.py 常驻校验。
+          exports:
+            turnLimitReached: turnLimitReached
+        - name: "DSCoder 执行任务（thinkingLevel: xhigh，max 档）"
+          # npc:go 的 `timeout` 作用于 Agent 的**每一次工具执行**（bash 命令），
+          # 不是整个 Agent 会话；会话整体只受流水线 20h 上限约束。
+          # 它挡不住「300s+420s+480s 串起来的 sleep 轮询」——那只能靠 prompt 禁令兜住。
+          timeout: 20m
           type: npc:go
           options:
-            model: deepseek-v4.1-flash-max
-            maxTurns: 500
+            # `npc:go.options` **没有 prompt 键**：平台 Schema 只认
+            # role / systemPrompt / userPrompt / model / maxTurns / contextWindow /
+            # maxTokens / thinkingLevel / supportImage，写别的键被静默忽略。
+            # 行为约束一律写在 .cnb/settings.yml 的角色 prompt 里（唯一必达通道）。
+            # 不写 model = 走平台默认模型（规避 400）；要锁定底座模型就填真实 ID。
+            maxTurns: 200
             contextWindow: 1m
             maxTokens: 48k
-            thinkingLevel: high
+            # 平台档位枚举为 off/minimal/low/medium/high/xhigh/max（官方 npc:go 文档），
+            # 现行值取 xhigh —— 这是本仓**主动选定**的档位，不是"平台没有 max"。
+            # （此前注释写成"平台最高档是 xhigh、没有 max"，是对文档的误读：
+            #  枚举里确有 max。要不要提到 max 是耗时/质量权衡，属功能决策，
+            #  与本次流水线失败无关，故只纠正说法、不动取值。）
+            thinkingLevel: xhigh
+      # 轮数触顶后自动开启下一轮。`if` 的判据只有一处（本文件 env 传入的那一个
+      # 变量），由 Stage 1 经 `##[set-output]` + `exports` 回写；
+      # 不新增第二套状态文件或计数器。
+      # `env` 里的对话载体由外层两条事件各自补（见下方 `<<:` 覆写）——
+      # 评论触发时平台注入的 `CNB_ISSUE_IID` / `CNB_PULL_REQUEST_IID`
+      # 在 `api_trigger` 流水线里不会再出现，不传下去下一轮读不到 Issue/PR。
+      endStages:
+        - name: "轮数触顶接力：自动开启下一轮（写不出成果就烧配额）"
+          type: cnb:trigger
+          if:
+            - '[ "$turnLimitReached" = "1" ]'
+          options:
+            slug: $CNB_REPO_SLUG
+            event: api_trigger_npc_handoff
 
-  pull_request.comment@npc: *npc-pipeline
+  issue.comment@npc:
+    - <<: *npc-dscoder-job
+      endStages:
+        - name: "轮数触顶接力：自动开启下一轮（写不出成果就烧配额）"
+          type: cnb:trigger
+          if:
+            - '[ "$turnLimitReached" = "1" ]'
+          options:
+            slug: $CNB_REPO_SLUG
+            event: api_trigger_npc_handoff
+            # 分支必须显式点名：`cnb:trigger` 的 branch 默认为**主分支**，
+            # 而 `issue.comment@npc` 跑在默认分支、`pull_request.comment@npc`
+            # 跑在 PR 目标分支 —— 不传 branch，接力会跑到主分支上，
+            # api_trigger_npc_handoff 在那边可能根本不存在（接力静默落空）。
+            branch: $CNB_BRANCH
+            env:
+              turnLimitReached: $turnLimitReached
+              handoffIssueIid: $CNB_ISSUE_IID
+  pull_request.comment@npc:
+    - <<: *npc-dscoder-job
+      endStages:
+        - name: "轮数触顶接力：自动开启下一轮（写不出成果就烧配额）"
+          type: cnb:trigger
+          if:
+            - '[ "$turnLimitReached" = "1" ]'
+          options:
+            slug: $CNB_REPO_SLUG
+            event: api_trigger_npc_handoff
+            branch: $CNB_BRANCH
+            env:
+              turnLimitReached: $turnLimitReached
+              handoffPrIid: $CNB_PULL_REQUEST_IID
 
-# ============================================================================
-# 自定义 NPC —— GLMCoder（GLM 驱动）
-# ============================================================================
-# 角色定义见 .cnb/settings.yml；此处按【角色名】挂载 NPC 事件流水线，
-# 使 GLMCoder 与 $ 下的 DSCoder 各跑各的、互不影响（模型不同）。
-# 触发：Issue/PR 评论中 @kingsa2026/neurova(GLMCoder)
-# 合并机制：按事件独立合并，未声明的事件保留默认行为（故两个事件都声明）。
-# 说明：模型能力参数（maxTurns/contextWindow/maxTokens/thinkingLevel/supportImage）
-#   在指定自定义 model 后不再继承平台默认，故按 GLM 常规能力显式给出兜底值。
-# ============================================================================
-GLMCoder:
-  issue.comment@npc: &glm-npc-pipeline
+  # ── 接力落点：轮数触顶后「下一轮」的真正入口 ──────────────────────────
+  # 三次修，前两次都修错了方向，记在这里免得再犯：
+  #   1) 同名评论事件（issue 拉 issue）—— `cnb:apply` 只认固定事件，
+  #      `@npc` 不在白名单，且在 `if` 恒假的那些轮里从未被执行到。
+  #   2) 换成合法 event 名 `api_trigger_npc_handoff`，仍用 `cnb:apply`——
+  #      构建 cnb-i5m-1k355ooo1 实测，收尾 Stage 由 `skipped` 变成 **error**，
+  #      平台逐字给出 `cnb:apply can only be used in push/commit.add/branch.create/
+  #      pull_request.target/pull_request.mergeable/tag_push/pull_request.merged/
+  #      api_trigger/web_trigger/crontab/tag_deploy events`。
+  #      于是白名单的判据方向被钉死：校验的是**宿主事件**，不是 `options.event`。
+  #      `@npc`（及其宿主 `issue.comment` / `pull_request.comment`）不在列，
+  #      改 event 绕不开。
+  #   3) 现形态：`cnb:trigger`（适用所有事件，官方 trigger.md）+ 显式
+  #      `slug` / `branch` / `env`，指向本文件下方的 `api_trigger_npc_handoff`。
+  # 其内用 npc:go 续跑（`npc:go` 适用**所有**事件，见平台的 npc:go 文档）。
+  # 上下文不靠"拉同一个评论事件"继承，而靠上一轮经 `env` 显式传递：
+  #   接力判据（单一事实源）与对话载体。评论触发时平台注入的 Issue/PR 标识
+  #   在 `api_trigger` 流水线里**不会再出现**（平台只注入 API_TRIGGER_* 一族），
+  #   不传下去下一轮就无处可读 Issue/PR，接力白跑。
+  #
+  # 提示词为何要自带：`role` / `systemPrompt` / `userPrompt` 三个参数
+  #   「仅 API 触发时生效」，且 systemPrompt / userPrompt 在 API 触发下**必填**——
+  #   评论触发时提示词由角色自带（写在这里也会被忽略），api_trigger 时没有角色上下文。
+  #   `role: DSCoder` 让平台按 .cnb/settings.yml 解析人设并拼进 system prompt
+  #   （人设仍是配置期唯一必达通道），userPrompt 只补本轮要干的活。
+  api_trigger_npc_handoff:
     - docker:
         image: cnbcool/default-npc:latest
+      envScript: *npc-script-interpreter
+      env:
+        handoffIssueIid: $handoffIssueIid
+        handoffPrIid: $handoffPrIid
       stages:
-        - name: GLMCoder 执行任务
+        - name: "DSCoder 接力执行任务（thinkingLevel: xhigh，max 档）"
+          timeout: 20m
           type: npc:go
           options:
-            model: glm-5.3-flash
-            maxTurns: 500
+            # 人设走 .cnb/settings.yml 的角色，唯一必达通道不变。
+            role: DSCoder
+            # API 触发下必填：说明本轮为何被拉起、成果落点在哪。
+            systemPrompt: 你是 DSCoder-max —— Neurova 仓库的专属代码搭档。本轮是上一轮撞满轮数配额后的接力轮：上一轮 Agent 被平台中止，成果只留在 Issue/PR 评论里。请先读 Issue/PR 评论区里上一轮的分段落交接（干了什么、下一步是什么、未提交的改动在哪），再从断点继续。
+            # 对话载体由上一轮经 env 传下来（api_trigger 流水线里拿不到 CNB_ISSUE_IID）。
+            userPrompt: 请先在 Issue/PR 评论区读取上一轮的交接评论，然后继续推进未完成的工作，完成后按惯例提交 PR 并在评论里汇报结论与未闭环项。
+            maxTurns: 200
             contextWindow: 1m
             maxTokens: 48k
-            thinkingLevel: high
+            thinkingLevel: xhigh
 
-  pull_request.comment@npc: *glm-npc-pipeline
+# 两个角色名都不挂顶层 key：`DSCoder` 与 `DSCoder-max` 一律落到 `$` 兜底。
+#
+# 为什么不挂：.cnb.yml 的顶层 key 在平台 Schema 里**只认分支名**——
+#   * Schema 层：顶层未知 key 只有 `^\..` 形态（锚点定义）被放行，其余一律要求是分支对象；
+#   * 语义层：`issue.*` 是仓库级事件，只能落在 `$` 兜底分支下。
+# 本仓库在 `$` 下用 `&npc-dscoder-issue / &npc-dscoder-pr` 定义了 max 档的全部运行参数，
+# 且不再写 model、只写 thinkingLevel: xhigh —— 这两点正是 DSCoder 与 DSCoder-max 的**全部差异**，
+# 故别名无需第二份定义：被 @ 时落到哪一份，运行参数都相同。
+#
+# 「不带后缀的 DSCoder 会不会静默回落平台默认 prompt」这件事仍要有人守：
+#   平台按角色名动态匹配顶层 key，未命中角色名时回落 `$`；而角色人设来自
+#   .cnb/settings.yml（评论触发时提示词由角色自带），两个角色名都能拿到本仓的人设
+#   与修复教义。该不变量（每个在册角色都被合法挂载点覆盖、顶层 key 只准 `$` 或
+#   `^\.` 锚点形态）由 tests/unit/test_ci_npc_config_guard.py 常驻校验。
+# （若将来两个角色确实需要不同参数，正确的做法是让它们在 settings.yml 侧只保留一个角色名，
+#   而不是再造一份顶层 key——顶层 key 一旦不是分支名，就是一份过不了 Schema 的配置。）
