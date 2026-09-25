@@ -33,8 +33,11 @@ on:
 # 不在 CI 里静默放行）。
 
 jobs:
+  # 静态门禁与 lint 是同一条流水线：pyflakes 与 ruff 都在读同一片全仓 AST，
+  # 拆两个 job 只是多一次容器启动 + 多一遍全仓遍历（Issue #223 第 2 条）。
+  # 合并的是「读几遍」，两条命令逐字保留 —— 不放宽任何一项判据。
   static-gate:
-    name: Static gate (syntax + pyflakes)
+    name: Static gate (syntax + pyflakes + ruff)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,24 +46,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install pyflakes
-        run: python -m pip install --upgrade pip pyflakes
+      - name: Install pyflakes + ruff
+        run: python -m pip install pyflakes ruff
 
       - name: Run fast static gate (syntax + undefined names)
         run: python scripts/ci_static_gate.py --skip-import
-
-  lint:
-    name: Lint (ruff E9 + F821)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install ruff
-        run: python -m pip install --upgrade pip ruff
 
       - name: Ruff (规则集与 per-file 豁免见 pyproject)
         run: python -m ruff check neurova tests --no-cache
@@ -76,7 +66,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install pyyaml
-        run: python -m pip install --upgrade pip pyyaml
+        run: python -m pip install pyyaml
 
       - name: Deploy config consistency gate
         run: python scripts/ci/deploy_config_consistency_check.py
@@ -93,8 +83,10 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-ci.lock
 
-      - name: Install core dependencies (lean set, no torch)
-        run: python -m pip install --upgrade pip -r requirements-ci.txt
+      # 装的是锁不是声明：三条 job 装同一份精简依赖，锁过一次就不必各自解析
+      # 整棵依赖树（无锁 pip 解析是这三种装法里最慢的一种，Issue #223 第 3 条）。
+      - name: Install core dependencies (locked lean set, no torch)
+        run: python -m pip install -r requirements-ci.lock
 
       - name: Run full static gate (incl. module import sweep)
         run: python scripts/ci_static_gate.py
@@ -154,7 +146,6 @@ jobs:
         #                       /metrics 暴露面（历史上曾随 passlib[bcrypt] 等 extras 隐式带入）
         # 以上皆为"裸 import 无降级"，非已知可选依赖，不进 ci_static_gate.KNOWN_OPTIONAL_DEPS
         run: |
-          python -m pip install --upgrade pip
           python -m pip install -r requirements.txt --no-deps
           python -m pip install fastapi uvicorn httpx pydantic pydantic-settings pytest \
             pytest-timeout bcrypt passlib python-dotenv aiosqlite prometheus_client
@@ -199,10 +190,10 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: requirements-ci.txt
+          cache-dependency-path: requirements-ci.lock
 
-      - name: Install minimal deps
-        run: python -m pip install --upgrade pip -r requirements-ci.txt
+      - name: Install minimal deps (locked)
+        run: python -m pip install -r requirements-ci.lock
 
       - name: Perf regression gate
         run: python scripts/ci/perf_gate.py
@@ -218,7 +209,18 @@ jobs:
           python-version: "3.12"
 
       - name: Install pip-audit
-        run: python -m pip install --upgrade pip pip-audit
+        run: python -m pip install pip-audit
+
+      # OSV 离线漏洞库缓存（`scripts/ci/osv_audit.py` 的 OSV_DB_CACHE 落点）。
+      # 不缓存时每一次构建都要重下整份 npm 库（实测 206MB / 47s+），
+      # 而它与「某次提交是否引入漏洞」毫无关系——纯网络往返（Issue #223 第 1 条）。
+      # 卷/缓存判据由 tests/unit/test_ci_pipeline_speed_guard.py 与脚本的
+      # OSV_DB_CACHE 同源校验，不写死第二份口径。
+      - name: Cache OSV offline databases
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/osv-scalibr
+          key: osv-scalibr-${{ runner.os }}
 
       - name: Audit CI locked set
         run: python -m pip_audit -r requirements-ci.lock --progress-spinner off
@@ -260,10 +262,10 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: requirements-ci.txt
+          cache-dependency-path: requirements-ci.lock
 
-      - name: Install minimal deps
-        run: python -m pip install --upgrade pip -r requirements-ci.txt
+      - name: Install minimal deps (locked)
+        run: python -m pip install -r requirements-ci.lock
 
       - name: Experience quality gate
         # 语料是冻结在仓内的真实投影（tests/fixtures/experience_quality_corpus.json，
