@@ -451,6 +451,90 @@ def p14():
     )
 
 
+def p16():
+    """P16（工单 §12.6 DoD）：任取一档摘要，按其 covers 引用取回原文并逐条 hash 对齐。
+
+    走**生产构造面**：真 `ContextOrchestrator.build_context` → 真折叠 → 真池索引
+    → 真 `ContextPool.drilldown`（引用解析 → 索引 → 原文直取 → 作用域闸门）。
+    判据取工单 §12.7 第 5 条：对齐率必须 100%；取不回时必须点名原因（不伪装空成功）。
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from neurova.context.fold_index import parseCoversRef
+    from neurova.context.orchestrator import ContextOrchestrator
+
+    agent = MagicMock()
+    agent.config = MagicMock()
+    agent.config.name = "p16"
+    agent.config.constitution = ""
+    agent.config.behavior_rules = []
+    agent.config.llm_model = "test-model"
+    agent.memory_manager = MagicMock()
+    agent.context_builder = MagicMock()
+    agent.tool_router = None
+    agent._skill_registry = None
+    agent.soul = "探针"
+    agent.personality = ""
+    agent.conversation_history = []
+    agent.growth_log_manager = MagicMock()
+    agent.user_id = "u1"
+    agent.agent_id = "a-p16"
+    agent.current_session_id = "sess-p16"
+
+    orch = ContextOrchestrator(agent, use_pool=True, auto_tag=False, session_id="sess-p16")
+    orch._window_token_budget = 1200
+    orch._DELTA_RESUMMARY_MSGS = 0
+    calls = {"n": 0}
+
+    async def _summarize(dropped_msgs, previous_summary=""):
+        calls["n"] += 1
+        return f"第{calls['n']}代摘要：覆盖 {len(dropped_msgs)} 条"
+
+    orch._window_summarizer = _summarize
+
+    async def _build(history):
+        with patch.object(orch, "get_tools_description", new_callable=AsyncMock) as m:
+            m.return_value = "工具描述"
+            return await orch.build_context(
+                user_input="继续", session_context=history, relevant_memories=[]
+            )
+
+    history = [{"role": "user", "content": f"第{i}轮的长讨论：" + "内容" * 200} for i in range(14)]
+    view = asyncio.run(_build(history))
+    history = history + [
+        {"role": "user", "content": f"第{i}轮的长讨论：" + "内容" * 200} for i in range(14, 30)
+    ]
+    view = asyncio.run(_build(history))
+
+    line = next(
+        (str(m["content"]) for m in view if m.get("role") == "system" and "早期对话摘要" in str(m.get("content", ""))),
+        "",
+    )
+    parsed = parseCoversRef(line)
+    pool = orch.context_pool
+    layers = pool.summaryLayers()
+    span = pool.drilldown(line) if line else {"resolved": False, "reason": "NoSummaryLine"}
+    wanted = set()
+    if parsed:
+        layer = next((l for l in layers if l["fold_seq"] == parsed[0]), None)
+        wanted = set((layer or {}).get("covers", {}).get("hashes") or ())
+    got = {e["hash"] for e in span.get("entries", [])}
+    aligned = bool(wanted) and wanted == got
+
+    bogus = pool.drilldown("covers_ref=fold:99@sess-p16")
+    honest = (not bogus.get("resolved")) and bool(bogus.get("reason"))
+    pool.close()
+
+    emit(
+        "P16",
+        f"摘要行带引用={bool(parsed)} 引用={parsed} 索引档数={len(layers)} "
+        f"covers 条数={len(wanted)} 取回条数={len(got)} 对齐率="
+        f"{(len(wanted & got) / len(wanted) * 100) if wanted else 0:.0f}% 逐条相等={aligned} "
+        f"假引用如实报错={honest}",
+    )
+
+
 def main():
     tmp_base = _tmp_ledger_dir()
     try:
@@ -468,6 +552,7 @@ def main():
         p12(tmp_base)
         p13()
         p14()
+        p16()
     finally:
         shutil.rmtree(tmp_base, ignore_errors=True)
     print("\n===== 汇总 =====")
