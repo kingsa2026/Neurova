@@ -1,0 +1,25 @@
+# 平台 Schema：knowledge:update.options 允许的键
+# ---------------------------------------------------------------------------
+# 来源：https://docs.cnb.cool/conf-schema-zh.json → definitions.internalStep
+#       → oneOf 中 type == "knowledge:update" 的 options.properties
+# 抓取日期：2026-09-25
+#
+# 为什么需要这份清单：
+#   `options` 不受平台 additionalProperties:false 约束 —— 写进去的未知键
+#   不报错、不告警、静默忽略。配置者以为"配了约束"，实际什么都没发生
+#   （本仓已踩过一次：把行为约束写进 npc:go.options.prompt，整条从未生效）。
+#   故允许集与配置同住，由 tests/unit/ci/test_knowledge_base_index_wiring.py 常驻校验。
+#
+# 维护方式：平台升级时重新核对上面 URL 的 knowledge:update 定义，逐个键对齐。
+# ---------------------------------------------------------------------------
+include
+exclude
+forceRebuild
+chunkSize
+chunkOverlap
+ignoreProcessFailures
+issueSyncEnabled
+issueState
+issueLabels
+issueExcludeLabels
+embeddingModel
