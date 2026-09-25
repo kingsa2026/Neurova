@@ -688,7 +688,9 @@ $:
               handoffIssueIid: $handoffIssueIid
               handoffPrIid: $handoffPrIid
 
-# 两个角色名都不挂顶层 key：`DSCoder` 与 `DSCoder-max` 一律落到 `$` 兜底。
+# 全部在册角色都不挂顶层 key：一律落到 `$` 兜底。
+# （不写死角色数量与名单——名单的事实源是 .cnb/settings.yml 的 npc.roles，
+#   抄一份进注释就立刻过期，那是「只写不读的第二份定义」。）
 #
 # 为什么不挂：.cnb.yml 的顶层 key 在平台 Schema 里**只认分支名**——
 #   * Schema 层：顶层未知 key 只有 `^\..` 形态（锚点定义）被放行，其余一律要求是分支对象；
@@ -699,8 +701,8 @@ $:
 #
 # 「不带后缀的 DSCoder 会不会静默回落平台默认 prompt」这件事仍要有人守：
 #   平台按角色名动态匹配顶层 key，未命中角色名时回落 `$`；而角色人设来自
-#   .cnb/settings.yml（评论触发时提示词由角色自带），两个角色名都能拿到本仓的人设
+#   .cnb/settings.yml（评论触发时提示词由角色自带），每个在册角色都能拿到本仓的人设
 #   与修复教义。该不变量（每个在册角色都被合法挂载点覆盖、顶层 key 只准 `$` 或
 #   `^\.` 锚点形态）由 tests/unit/test_ci_npc_config_guard.py 常驻校验。
-# （若将来两个角色确实需要不同参数，正确的做法是让它们在 settings.yml 侧只保留一个角色名，
+# （若将来某两个角色确实需要不同参数，正确的做法是让它们在 settings.yml 侧只保留一个角色名，
 #   而不是再造一份顶层 key——顶层 key 一旦不是分支名，就是一份过不了 Schema 的配置。）
