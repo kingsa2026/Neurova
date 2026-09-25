@@ -336,3 +336,74 @@ class TestSummaryRendersHonestlyWhenEmpty:
         assert "（）" not in rendered and "()" not in rendered, (
             "入筛归零后摘要里出现空括号（`0 条（）`）——生成物必须自洽。"
         )
+
+
+class TestCodeSpanIsAPathBeforeItIsADanglingRef:
+    """行内码入账前必须先判定「它是不是一条路径引用」。
+
+    根因（Issue #236 会话实证，非形状）：`scanFile` 把任意被反引号包住、
+    且后缀落在 `PATH_SUFFIXES` 里的字符串一律当作路径引用。`PATH_SUFFIXES`
+    里有 `js`，于是 `prefix.js` 这类**看起来像文件名、实际不是本仓文件**的
+    写法——变量名、模块名、被提及的第三方脚本名——都被登记成悬空引用。
+
+    实证：本批新增的
+    `docs/05-reports/npc轮数配额口径收口_2026-09-25.md` 里，正文是
+    「`validate.js` 对 `.cnb.yml` … 报 22 处『不允许的字段』」。
+    `validate.js` 是**平台侧**的校验器（`cnb` CLI 的一部分），**不在本仓**；
+    该句是叙述，不是"仓库内某文件的路径"。扫描器却派生出判定「源已删除」，
+    把它计入归档层悬空引用，台账随即从 1866 漂到 1867，CI 两例红。
+
+    判据（不是"白名单豁免某个名字"）：行内码只有在**能表达仓库内位置**时
+    才算路径引用——带目录分隔符（`context/fold_resolution.py`）、含仓库内
+    已知的顶层目录（`neurova/...`、`tests/...`、`docs/...`），或**全仓唯一
+    同名命中**。裸文件名在仓库里零命中时是**叙述性提及**，不是路径。
+
+    这条判据同时修掉一批既存误报（`validate.js` 类型），不是为这一篇开的后门：
+    判据只调"入账门槛"，判定与豁免口径仍由同一份 `resolveTarget` 提供。
+    """
+
+    _PROSE_SAMPLE = (
+        "# 样例\n\n"
+        "`validate.js` 对 `.cnb.yml` 报「不允许的字段」。\n"
+    )
+    _PATH_SAMPLE = (
+        "# 样例\n\n"
+        "见 `context/fold_resolution.py` 与 `tests/manual/audit_context_chain_20260921.py`。\n"
+    )
+
+    def test_bare_filename_with_no_repo_hit_is_not_a_path_ref(self, tmp_path):
+        """裸文件名且全仓零命中 → 叙述性提及，不得入账。"""
+        sample = tmp_path / "prose.md"
+        sample.write_text(self._PROSE_SAMPLE, encoding="utf-8")
+        byBasename = scanner.indexByBasename(scanner.trackedFiles())
+        found = scanner.scanFile(sample, byBasename)
+        assert not [e for e in found if e["ref"] == "validate.js"], (
+            "叙述性提及 `validate.js` 被登记成悬空路径引用——"
+            "它不在本仓，句意是「平台校验器报错」，不是「仓库里这个文件没了」。\n"
+            "误报会训练人忽略门禁，并让台账数字随任一篇正文的举例漂移。"
+        )
+
+    def test_repo_path_forms_are_still_dangling_refs(self, tmp_path):
+        """负向控制：真正的仓库内路径（含目录 / 已知顶层目录）仍要入账。"""
+        sample = tmp_path / "paths.md"
+        sample.write_text(
+            "# 样例\n\n见 `context/这条路径并不存在_zzz.py` 与 "
+            "`tests/nothing/does_not_exist_zzz.py`。\n",
+            encoding="utf-8",
+        )
+        byBasename = scanner.indexByBasename(scanner.trackedFiles())
+        refs = {e["ref"] for e in scanner.scanFile(sample, byBasename)}
+        assert "context/这条路径并不存在_zzz.py" in refs, "带目录的仓库内路径漏检"
+        assert "tests/nothing/does_not_exist_zzz.py" in refs, "已知顶层目录的路径漏检"
+
+    def test_the_shipped_report_doc_adds_no_virtual_entry(self, tmp_path):
+        """收官自证：本批新增的台账报告不得因叙述性提及多出一条入账条目。"""
+        report = (PROJECT_ROOT / "docs" / "05-reports"
+                  / "npc轮数配额口径收口_2026-09-25.md")
+        if not report.is_file():
+            pytest.skip("本批报告文档未在本检出内（分支已收敛）")
+        byBasename = scanner.indexByBasename(scanner.trackedFiles())
+        refs = [e["ref"] for e in scanner.scanFile(report, byBasename)]
+        assert "validate.js" not in refs, (
+            "`validate.js` 仍被当作仓库内路径引用——根因未修，台账数字仍会漂。"
+        )

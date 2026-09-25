@@ -36,6 +36,15 @@ PATH_SUFFIXES = ("py", "md", "yml", "yaml", "json", "toml", "sh", "bat", "js", "
 # 通配/占位形态（`bugfix-*.md`、`HARMONYOS_*.md`）不是具体路径，单独归类
 PLACEHOLDER_PATTERN = re.compile(r"[*<>{}\[\]]")
 
+# 「行内码是不是仓库内位置」的判据（`scanFile` 的入账门槛，只此一份）：
+# 带目录分隔符即视为路径（`context/fold_resolution.py`）；
+# 裸文件名必须在全仓有同名命中，才算指向仓库内某个文件。
+# 零命中的裸文件名是**叙述性提及**——它说的是"某个叫这个名字的东西"，
+# 不是"仓库里这个文件没了"。`PATH_SUFFIXES` 里含 `js` / `ts` / `json`，
+# 于是变量名、模块名、第三方脚本名（如平台侧校验器 `validate.js`）都曾被
+# 登记成悬空引用，台账数字随任一篇正文的举例漂移。判定与可达性解析仍走同一份
+# `resolveTarget`，此处只调"入账门槛"，不另造一套解析。
+
 # 编号分层（docs/<NN-领域>/…）——文档重排后的唯一留存层
 NUMBERED_LAYERS = frozenset({
     "0-index", "01-architecture", "02-api", "03-user-guide", "04-plans", "05-reports",
@@ -159,6 +168,26 @@ def displayPath(path: Path) -> str:
         return str(path).replace("\\", "/")
 
 
+def codeSpanNamesARepoLocation(ref: str, byBasename: dict) -> bool:
+    """行内码是否在表达**仓库内位置**（`scanFile` 的入账门槛）。
+
+    只认两种形态：
+
+    - 带目录分隔符（`context/fold_resolution.py`、`docs/INDEX.md`）——
+      相对位置本身就是「仓库内某处」的表达；
+    - 裸文件名但全仓有同名命中（`fold_resolution.py`、`orchestrator.py`）——
+      指向仓库里真实存在的那个文件，路径过期与否交给 `resolveTarget` 判。
+
+    零命中的裸文件名判为**叙述性提及**，不入账：它说的是"某个叫这个名字的
+    东西"，不是"仓库里这个文件没了"。`PATH_SUFFIXES` 含 `js`/`ts`/`json`，
+    于是变量名、模块名、第三方脚本名（平台侧校验器 `validate.js` 即一例）
+    都曾被登记成悬空引用，台账数字随之漂移。判定本身仍只此一份。
+    """
+    if "/" in ref:
+        return True
+    return bool(byBasename.get(ref))
+
+
 def scanFile(path: Path, byBasename: dict) -> list:
     """扫描单个 Markdown，返回悬空条目（可达的引用不返回）。"""
     text = io.open(path, encoding="utf-8", errors="replace").read()
@@ -184,6 +213,8 @@ def scanFile(path: Path, byBasename: dict) -> list:
             if not ref.endswith(tuple("." + suffix for suffix in PATH_SUFFIXES)):
                 continue
             if PLACEHOLDER_PATTERN.search(ref):
+                continue
+            if not codeSpanNamesARepoLocation(ref, byBasename):
                 continue
             verdict, hit = resolveTarget(ref, path, byBasename)
             if verdict == VERDICT_REACHABLE:
