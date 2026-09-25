@@ -97,10 +97,15 @@ def reset_experience_kb() -> None:
 
 
 def _outcome_word(success: Any) -> str:
-    """成败三态 → 契约词汇（True / False / None 各归各位，不折叠）。"""
-    if success is None:
-        return "unevidenced"
-    return "success" if success else "failure"
+    """成败三态 → 契约词汇（True / False / None 各归各位，不折叠）。
+
+    实现收口到 `skills.models.outcomeWord`（三态词汇的唯一定义处）：本文件此前
+    自带一份字面量，与进 prompt 的那一面各写各的，正是"三态在半路裂开"的形态。
+    名字保留是调用方与既有判据的落点。
+    """
+    from neurova.skills.models import outcomeWord
+
+    return outcomeWord(success)
 
 
 def _to_contract(row: Dict[str, Any], experience_count: int) -> Dict[str, Any]:
