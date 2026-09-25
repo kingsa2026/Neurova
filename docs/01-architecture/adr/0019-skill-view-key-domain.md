@@ -42,7 +42,8 @@
 `SkillRegistry.register` 按 `skill.name` 建键，`name ≠ skill_id` 的自动技能会**静默**顶掉
 先到的同名条目（现网 `data/agents/default/skills/manifest.json` 有 8 条不同 `synth_*`
 共用 name=`general_tool`）。本单只加**告警 + 计数**（`_name_collision_count`），
-**不硬拒**：当场硬拒会让存量库装配失败，迁移方案另单。
+**不硬拒**：当场硬拒会让存量库装配失败，迁移方案另单（见
+[ADR 0021](./0021-skill-name-domain-derivation.md)：迁移改的是名字取值，不改主键）。
 
 ## 不采纳的替代方案
 
@@ -57,7 +58,8 @@
 - 停用/熔断的生效判据变成"**发给 LLM 的工具清单真的少了那一项**"（断言 `tools_for_llm`），
   不再以"manifest 字段变了"充数。
 - 视图条目多带一份 `status`/`usage` 快照，装配成本可忽略（内存态合并）。
-- 同名冲突在存量库上可复算（计数），迁移待另单。
+- 同名冲突在存量库上可复算（计数），迁移待另单 —— 该另单已由
+[ADR 0021](./0021-skill-name-domain-derivation.md) 落地（名字域 = 身份的函数）。
 
 ## References
 
