@@ -781,6 +781,9 @@ tests/unit/tools/test_query_database.py
 # 缺口信号须由"市场未命中"这个生产点就地投递。
 tests/unit/agent/test_skill_acquisition_fallback.py
 
+# 轮级账本跨任务可见 + 耗时列「测到 0.0」不折叠（工单 016）：四个命中点实测转绿，
+#   反向锁证明标量 ContextVar.set 的子任务写入确实对父不可见（判据有区分力）。
+tests/unit/evolution/experience/test_turn_ledger_cross_task_and_measurement.py
 # T-01 同契约（Issue #197）：失败结果不得被 OutputRef 折叠成无诊断信息的引用
 #   ——失败正文（error/stderr/exit_code）就是诊断载体，体量折叠的单源是回环处
 #   既有的 apply_offload_policy，本层只管成功结果。
