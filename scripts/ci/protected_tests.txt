@@ -709,3 +709,12 @@ tests/unit/agent/test_tool_call_recall_owner.py
 #    配套 tool 行；缺配对信息的旧记录整条降级为 user 注记并计数，禁止伪造配对。
 #    判据同时反锁旧 API 形态逐字节不变，避免把展示/统计面一起拖进新语义。）
 tests/unit/agent/test_model_context_tool_rebuild.py
+
+# 上下文三链路批（Issue #90）T-10c 前置裁定：microcompact 的触发轴与保留窗与窗口
+#   折叠各自声明（裁掉共线），并整合「未触发折叠但工具输出已撑满窗口」那一段。
+#   （根因：触发曾看整窗 token、保留曾看条数"最近 3 条"，而 3 恰是折叠留下的
+#    工具行数 —— 真序列先折叠后 microcompact，两处稳态互相抵消，占位指针恒不触发。
+#    现两根轴都按工具结果载荷 token 声明：触发=`min(8000, 窗口实占半数)` 再抬到
+#    收益门槛，保留=载荷的一半（至少 1 条）。触发事实记进
+#    `get_context_health()["microcompact"]`，供下游按读数判断而非解析日志。）
+tests/unit/context/test_microcompact_threshold_decoupling.py
