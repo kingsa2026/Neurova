@@ -742,3 +742,12 @@ tests/unit/evolution/test_synth_tool_name_carries_identity.py
 tests/unit/core/test_index_probe_schema_applicability.py
 # ③ 的既有契约面（工具名仍须满足 OpenAI 规范）与 ① 的既有消费者
 tests/unit/skills/test_scripts_port_utils.py
+
+# Issue #197 §7 台账 N4（预算账本边界）：
+#   金额域（成本侧 float，价格表与 cost_store 的 REAL 列）与账本域（Decimal 算术）
+#   的交界上两处都缺归一 —— float 进 Decimal 账本即 TypeError，被 fail-open
+#   兜住后记账整体静默失效（用量恒 0.00、超支闸恒 False）；
+#   告警阈值又写成 0~1 制，与用量读数（0~100 制）不同尺度，1% 用量即全档触发。
+#   RECOVERED 档同函数内被当成越线档，超支时反报"已恢复到 125000%"。
+#   三处判据同文件，全部经真实记账入口（record_llm_cost）驱动。
+tests/unit/models/test_cost_budget_ledger_boundary.py
