@@ -232,7 +232,7 @@
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'timestamp'">
-                <span class="mono">{{ formatTime(record.timestamp) }}</span>
+                <span class="mono">{{ formatTimestampText(record.timestamp) }}</span>
               </template>
               <template v-if="column.key === 'layer'">
                 <a-tag :color="layerColor(record.layer)">{{ record.layer || 'L0' }}</a-tag>
@@ -340,6 +340,7 @@ import { request } from '@/api'
 import GlassButton from '@/components/GlassButton.vue'
 import GlassPanel from '@/components/GlassPanel.vue'
 import { message } from 'ant-design-vue'
+import { formatTimestampText } from '@/utils/displayText'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -390,7 +391,6 @@ const ruleForm = ref({
 })
 
 // --- Helpers ---
-const formatTime = (ts: string) => (ts ? new Date(ts).toLocaleString() : '')
 
 const actionColor = (action: string) => {
   const map: Record<string, string> = {
