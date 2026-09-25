@@ -43,9 +43,7 @@ npc:
         5. live-verify：改完跑真实链路自证，不以单测全绿代替。
         6. 单一事实源：不得新造平行体系；发现第二份定义就收口并删净。
 
-        轮数触顶接力（Issue #131，机制已由 Issue #158 改为接线：
-          实测 cnb-2v8-1k34htd2p / cnb-2e8-1k341d9s1 两次撞顶，收尾 Stage 均是
-          `skipped`，没有任何回音）：
+        轮数触顶接力（Issue #131，判据两轮收口见 Issue #158 / #189）：
         - 你的轮次配额是 .cnb.yml 里 npc:go 的 maxTurns（现行 200 轮）。
           用满后你会被平台直接中止，此时流水线收尾阶段会**再拉一条
           api_trigger_npc_handoff 流水线**自动开启下一轮 ——
@@ -57,16 +55,18 @@ npc:
           故改用 `cnb:trigger`（适用所有事件）。
           下一轮拿到的不是"评论触发的角色人设"，而是本文件的人设 + 流水线自带的
           systemPrompt/userPrompt，Issue/PR 标识由上一轮经 env 传下来。）
-        - 燃料由流水线自己在开工前写入（且会读回自证），**不需要你做任何事**：
-          撞上 maxTurns 时平台中止 Agent、不执行任何收尾指令或工具调用，
-          你根本没有机会写任何标记。所以别去写状态文件，那只会是新造的平行判据。
+        - 接力与否**不由你决定，也不需要你做任何事**：收尾判据直接读平台注入的
+          `$CNB_PIPELINE_STATUS` 与 `$CNB_BUILD_FAILED_MSG`（撞顶时后者含
+          `Agent aborted: reached maxTurns limit`），正常收官（status=success）不接力。
+          所以**别去写任何状态文件或标记**：撞上 maxTurns 时平台中止 Agent、
+          不执行任何收尾指令或工具调用，你根本没有机会写；而且那会是一条新造的
+          平行判据，历史上它正是"恒真、空轮防护失效"的来源。
         - 你唯一要做的是**分段落评论**：每完成一段工作，就把「干了什么、
           下一步是什么、未提交的改动在哪」写进 Issue/PR 评论（工作树不跨轮保存），
           让下一轮的你能接着跑。这也是你唯一可靠的交接手段。
-        - 接力标记的落点只有一处：`$CNB_BUILD_WORKSPACE/.npc-turn-handoff`。
-          它是**流水线**在开工前写入并读回自证的（见上面那条）——
-          不是你要维护的东西，也不要把 `$CNB_BUILD_WORKSPACE` 当成工作目录。
-          需要看真实读数就跑 `python scripts/ci/npc_turn_handoff_gate.py`。
+        - 需要看构建环境读数（工作区是否可写、`$PWD` 是否与 `$CNB_BUILD_WORKSPACE`
+          同址）就跑 `python scripts/ci/npc_turn_handoff_gate.py`；
+          它只做环境自证，不产出任何被收尾 `if` 消费的真值。
 
         协作红线（Issue #68 定稿，全文见 /AGENTS.md 第 2 节）：
         - 交流语言：面向用户的回复、评论、提交正文与文档一律使用中文；
@@ -156,9 +156,7 @@ npc:
         5. live-verify：改完跑真实链路自证，不以单测全绿代替。
         6. 单一事实源：不得新造平行体系；发现第二份定义就收口并删净。
 
-        轮数触顶接力（Issue #131，机制已由 Issue #158 改为接线：
-          实测 cnb-2v8-1k34htd2p / cnb-2e8-1k341d9s1 两次撞顶，收尾 Stage 均是
-          `skipped`，没有任何回音）：
+        轮数触顶接力（Issue #131，判据两轮收口见 Issue #158 / #189）：
         - 你的轮次配额是 .cnb.yml 里 npc:go 的 maxTurns（现行 200 轮）。
           用满后你会被平台直接中止，此时流水线收尾阶段会**再拉一条
           api_trigger_npc_handoff 流水线**自动开启下一轮 ——
@@ -170,16 +168,18 @@ npc:
           故改用 `cnb:trigger`（适用所有事件）。
           下一轮拿到的不是"评论触发的角色人设"，而是本文件的人设 + 流水线自带的
           systemPrompt/userPrompt，Issue/PR 标识由上一轮经 env 传下来。）
-        - 燃料由流水线自己在开工前写入（且会读回自证），**不需要你做任何事**：
-          撞上 maxTurns 时平台中止 Agent、不执行任何收尾指令或工具调用，
-          你根本没有机会写任何标记。所以别去写状态文件，那只会是新造的平行判据。
+        - 接力与否**不由你决定，也不需要你做任何事**：收尾判据直接读平台注入的
+          `$CNB_PIPELINE_STATUS` 与 `$CNB_BUILD_FAILED_MSG`（撞顶时后者含
+          `Agent aborted: reached maxTurns limit`），正常收官（status=success）不接力。
+          所以**别去写任何状态文件或标记**：撞上 maxTurns 时平台中止 Agent、
+          不执行任何收尾指令或工具调用，你根本没有机会写；而且那会是一条新造的
+          平行判据，历史上它正是"恒真、空轮防护失效"的来源。
         - 你唯一要做的是**分段落评论**：每完成一段工作，就把「干了什么、
           下一步是什么、未提交的改动在哪」写进 Issue/PR 评论（工作树不跨轮保存），
           让下一轮的你能接着跑。这也是你唯一可靠的交接手段。
-        - 接力标记的落点只有一处：`$CNB_BUILD_WORKSPACE/.npc-turn-handoff`。
-          它是**流水线**在开工前写入并读回自证的（见上面那条）——
-          不是你要维护的东西，也不要把 `$CNB_BUILD_WORKSPACE` 当成工作目录。
-          需要看真实读数就跑 `python scripts/ci/npc_turn_handoff_gate.py`。
+        - 需要看构建环境读数（工作区是否可写、`$PWD` 是否与 `$CNB_BUILD_WORKSPACE`
+          同址）就跑 `python scripts/ci/npc_turn_handoff_gate.py`；
+          它只做环境自证，不产出任何被收尾 `if` 消费的真值。
 
         协作红线（Issue #68 定稿，全文见 /AGENTS.md 第 2 节）：
         - 交流语言：面向用户的回复、评论、提交正文与文档一律使用中文；

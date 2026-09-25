@@ -1,38 +1,40 @@
 # -*- coding: utf-8 -*-
-"""NPC 轮数触顶接力的**执行面**守卫（Issue #145）。
+"""NPC 轮数触顶接力的**执行面**守卫（Issue #145；判据两轮收口见 Issue #189）。
 
 ## 为什么需要这份守卫
 
-配置面已经有一份守卫（`tests/unit/test_ci_npc_config_guard.py` 的
-`TestTurnHandoffCeiling`）：它钉住「`.cnb.yml` 里有这笔接力」——
-`endStages` 里存在 `cnb:apply`、`event` 与触发事件同名、标记经 `env` 传下来。
+配置面另有一份守卫（`tests/unit/test_ci_npc_config_guard.py` 的
+`TestTurnHandoffCeiling`）：它钉住「`.cnb.yml` 里有这笔接力」。但"接力被声明过"
+与"接力会真的按预期发生"是两件事 —— 本仓为此付过三轮代价：
 
-但那份配置**从来没有被执行过**：接力 Stage 的 `if` 读的标记是 Agent 自己
-在最后一轮写出的文件，而写在哪里由人设文本约定。构建 cnb-2e8-1k341d9s1 的
-实测形态正是这样：
+1. 燃料由 Agent 在最后一轮自己写文件 → 撞 maxTurns 时平台**不执行任何收尾
+   指令或工具调用**，`if` 恒假、收尾 Stage 每次 `skipped`，没有回音
+   （构建 cnb-2e8-1k341d9s1 / cnb-2v8-1k34htd2p 实测）。
+2. 燃料改由构建侧在 Agent 开工前**无条件**写出 → `if` 恒**真**。
+   判据的输入端被自己填成了真值：该变量回答「上一轮是否用满配额」，
+   而得知这件事的唯一时点是收尾期。后果是空轮防护全失效，正常收官也照拉下一轮：
+     cnb-2q8-1k3buskao  Agent stage success（1774s，未撞顶）→ 拉 cnb-lga-1k3c0itrj
+     cnb-kdg-1k3bv22ct  Agent stage success（3977s，未撞顶）→ 拉 cnb-fln-1k3c2rjk7
+3. 现形态（Issue #189）：收尾 `if` 读**平台在收尾期注入的事实** ——
+   `$CNB_PIPELINE_STATUS` 与 `$CNB_BUILD_FAILED_MSG`（平台「环境变量」篇；
+   真 `npc:go` 撞 `maxTurns` 的读数见构建 cnb-s4f-1k3c46us9 / cnb-p2q-1k3c2g7u3）。
+   构建侧不再产出任何被 `if` 消费的真值。
 
-    Master[agent][201] stop with error: Agent aborted: reached maxTurns limit (200)
-    ✅ DebugDetection / End 通过
-    ⏳ 轮数触顶接力：自动开启下一轮 → skipped
+## 本文件钉四件事（都可证伪）
 
-Agent 从未写出标记，于是 `if` 恒假、接力被跳过、成果随容器一起丢，
-用户在 Issue 上只看到「流水线构建失败」。配置面守卫对此是完全绿的 ——
-它只能证明"接力被声明过"，证明不了"接力会真的发生"。
-
-## 本文件钉三件事（都可证伪）
-
-- **A 落点词汇统一**：`$CNB_BUILD_WORKSPACE` 是接力判据的唯一落点，
-  凡提到"标记写在哪"的人设文本必须用这个变量，不得退化成
-  「工作区工作目录 / 构建目录 / workspace 目录」这类字面表述 ——
-  后者会让 Agent 把它理解成 `$PWD`，在两者不同的构建里写错位置。
-- **B 落点在构建里可达**：`scripts/ci/npc_turn_handoff_gate.py` 存在，
+- **A 人设教的是当前契约**：必须点明判据读哪两个平台变量、必须显式禁止
+  Agent 去写状态文件或标记、且不得再出现已作废的标记文件名 ——
+  继续教一个死协议与"看着配了、其实永不触发"是同一类断点，只是断在人这一侧。
+- **B 门禁在构建里可达**：`scripts/ci/npc_turn_handoff_gate.py` 存在，
   且被 `.cnb.yml` 的 NPC 流水线真实执行（不是躺在仓库里当摆设）。
-- **C 门禁留在受保护子集**：门禁脚本的判据要在 CI 上真的跑，否则 A/B 无人执行。
+- **C 接力通道是平台真支持的形态**：`cnb:trigger`（适用所有事件），
+  且接力载体能自己续链（否则接力只有一跳）。
+- **D 门禁留在受保护子集**：判据要在 CI 上真的跑，否则 A/B/C 无人执行。
 
 可证伪路径：
 - 把 `.cnb.yml` 里跑门禁的那一步删掉 → B 红；
-- 把人设里 `$CNB_BUILD_WORKSPACE/.npc-turn-handoff` 改写成「工作区工作目录」→ A 红；
-- 从 `scripts/ci/protected_tests.txt` 摘掉本文件 → C 红。
+- 把人设里的两个平台变量名删掉、或加回自造标记 → A 红；
+- 从 `scripts/ci/protected_tests.txt` 摘掉本文件 → D 红。
 """
 import ast
 import io
@@ -49,20 +51,15 @@ CNB = PROJECT_ROOT / ".cnb.yml"
 SETTINGS = PROJECT_ROOT / ".cnb" / "settings.yml"
 PROTECTED = PROJECT_ROOT / "scripts" / "ci" / "protected_tests.txt"
 
-#: 接力标记的文件名（与 `.cnb/settings.yml` 人设、`.cnb.yml` 收尾阶段同一事实源）
+#: 已作废的接力标记文件名（Issue #158 引入、Issue #189 废止）。
+#: 保留常量只为**反向钉住**「它不得再出现」—— 见
+#: `TestPersonaTeachesTheCurrentRelayContract`：收尾 `if` 自 #189 起读平台
+#: 注入的 `$CNB_PIPELINE_STATUS` / `$CNB_BUILD_FAILED_MSG`，
+#: 这个文件不再是任何判据的输入。
 HANDOFF_MARKER_FILE = ".npc-turn-handoff"
 
-#: 落点变量：标记必须写在 `$CNB_BUILD_WORKSPACE` 下，而不是「工作目录」这类字面表述。
-HANDOFF_ROOT_VAR = "$CNB_BUILD_WORKSPACE"
-
-#: 门的脚本（接力判据可达性自证）
+#: 门的脚本（接力环境前提自证）
 GATE_SCRIPT = PROJECT_ROOT / "scripts" / "ci" / "npc_turn_handoff_gate.py"
-
-#: 人设提到标记落点时的**正确**写法（逐字）
-MARKER_PATH_IN_PERSONA = f"{HANDOFF_ROOT_VAR}/{HANDOFF_MARKER_FILE}"
-
-#: 同一句话里绝不允许出现的模糊说法：它们会被读成 `$PWD`，而非工作区根。
-VAGUE_ROOT_PHRASES = ("工作区工作目录", "构建目录", "workspace 目录", "工作目录下")
 
 
 @pytest.fixture(scope="module")
@@ -80,44 +77,77 @@ def npc_personas():
     return {r.get("name"): (r.get("prompt") or "") for r in roles}
 
 
-class TestHandoffRootIsTheWorkspaceVariable:
-    """A. 标记落点必须用 `$CNB_BUILD_WORKSPACE` 表达，不得退化成字面目录名。"""
+class TestPersonaTeachesTheCurrentRelayContract:
+    """A. 人设必须教**当前**的接力契约，不许再教已作废的标记协议。
 
-    def test_personas_state_the_marker_path_with_the_workspace_variable(self, npc_personas):
-        missing = [name for name, prompt in npc_personas.items() if MARKER_PATH_IN_PERSONA not in prompt]
+    这条守卫的前身钉的是「标记落点必须写成
+    `$CNB_BUILD_WORKSPACE/.npc-turn-handoff`」。Issue #189 之后那个文件**不再是
+    任何判据的输入**（收尾 `if` 读平台注入的 `$CNB_PIPELINE_STATUS` /
+    `$CNB_BUILD_FAILED_MSG`），继续把它写进人设就是把 Agent 往一个已死的
+    协议上引 —— 与它当初要消灭的"看着配了、其实永不触发"是同一类断点，
+    只是这次断在文档与人之间。
+
+    故判据改为两条，都落在**行为**上：
+
+    - 人设必须点明接力判据读的是平台事实（两个变量名）；
+    - 人设必须点明"别去写状态文件/标记"（否则 Agent 会新造平行判据）。
+    """
+
+    #: 平台在收尾期注入的两个事实（`.cnb.yml` 收尾 `if` 读它们）。
+    STATUS_VAR = "CNB_PIPELINE_STATUS"
+    FAILED_MSG_VAR = "CNB_BUILD_FAILED_MSG"
+
+    def test_personas_name_the_platform_facts_the_relay_reads(self, npc_personas):
+        missing = [
+            name
+            for name, prompt in npc_personas.items()
+            if self.STATUS_VAR not in prompt or self.FAILED_MSG_VAR not in prompt
+        ]
         assert not missing, (
-            f"NPC 人设未把标记落点写成 {MARKER_PATH_IN_PERSONA}: {missing}\n"
-            "收尾阶段读的是 `$CNB_BUILD_WORKSPACE/"
-            f"{HANDOFF_MARKER_FILE}`；写法一旦含糊（如「工作区工作目录」），"
-            "Agent 会把它当成 $PWD，在两者不同的构建里写到收尾读不到的位置，"
-            "接力整条失效（构建 cnb-2e8-1k341d9s1 的跳过形态）。"
+            f"NPC 人设未点明接力判据读的平台事实: {missing}\n"
+            f"收尾 `if` 读的是 ${self.STATUS_VAR} 与 ${self.FAILED_MSG_VAR}；"
+            "人设里不写清楚，Agent 会以为接力还需要它配合，"
+            "或者以为接力不存在而另造一套判据。"
         )
 
-    def test_personas_do_not_use_vague_directory_phrases(self, npc_personas):
-        offenders = []
-        for name, prompt in npc_personas.items():
-            for line in prompt.splitlines():
-                if HANDOFF_MARKER_FILE not in line:
-                    continue
-                for phrase in VAGUE_ROOT_PHRASES:
-                    if phrase in line:
-                        offenders.append(f"{name}: 「{phrase}」出现在 {line.strip()}")
+    def test_personas_forbid_writing_a_state_file(self, npc_personas):
+        """人设必须显式禁止写状态文件 —— 那是平行判据的唯一入口。"""
+        offenders = [
+            name
+            for name, prompt in npc_personas.items()
+            if "别去写任何状态文件或标记" not in prompt
+        ]
         assert not offenders, (
-            "标记落点用了会被读成 $PWD 的模糊表述:\n  " + "\n  ".join(offenders) +
-            f"\n统一写成 {MARKER_PATH_IN_PERSONA}（单一事实源）。"
+            f"NPC 人设未显式禁止写状态文件/标记: {offenders}\n"
+            "撞上 maxTurns 时平台中止 Agent、不执行任何收尾指令或工具调用，"
+            "写不出也不该写；而自造标记正是上一轮「恒真、空轮防护失效」的来源。"
         )
 
-    def test_cnb_comment_only_cites_the_variable_form(self, cnb_doc):
-        """`.cnb.yml` 里提到标记落点时，同样只准用变量形态。"""
+    def test_personas_do_not_teach_the_retired_marker_file(self, npc_personas):
+        """人设不得再出现已作废的标记文件名（教一个死协议 = 新断点）。"""
+        offenders = [
+            f"{name}: {line.strip()}"
+            for name, prompt in npc_personas.items()
+            for line in prompt.splitlines()
+            if HANDOFF_MARKER_FILE in line
+        ]
+        assert not offenders, (
+            "人设仍在教已作废的接力标记协议:\n  " + "\n  ".join(offenders) +
+            f"\n`{HANDOFF_MARKER_FILE}` 自 Issue #189 起不再是任何判据的输入；"
+            "继续教它会把 Agent 引到一个已死的协议上。"
+        )
+
+    def test_cnb_config_carries_no_retired_marker(self, cnb_doc):
+        """`.cnb.yml` 里同样不得再出现该文件名。"""
         text = io.open(CNB, encoding="utf-8").read()
         bad = [
             f"{lineno}: {line.strip()}"
             for lineno, line in enumerate(text.splitlines(), 1)
-            if HANDOFF_MARKER_FILE in line and HANDOFF_ROOT_VAR not in line
+            if HANDOFF_MARKER_FILE in line
         ]
         assert not bad, (
-            "`.cnb.yml` 提到接力标记时未点明落点变量:\n  " + "\n  ".join(bad) +
-            f"\n落点只有一处：{MARKER_PATH_IN_PERSONA}。"
+            "`.cnb.yml` 仍在提接力标记文件:\n  " + "\n  ".join(bad) +
+            "\n收尾判据读平台事实，配置侧与它无关。"
         )
 
 
@@ -163,9 +193,9 @@ class TestGateScriptIsExecutedByTheBuild:
         ]
         assert not missing, (
             f"{len(missing)} 条 npc:go 流水线未执行 scripts/ci/npc_turn_handoff_gate.py\n"
-            "该步在真实构建里断言 `$CNB_BUILD_WORKSPACE/.npc-turn-handoff` 可写可读，"
+            "该步在真实构建里自证工作区可写，"
             "并反向自证 $PWD 是否等于 $CNB_BUILD_WORKSPACE——"
-            "这是接手时唯一能回答「标记到底写在哪」的读数。"
+            "这是接手时唯一能回答「构建环境前提是否成立」的读数。"
         )
 
     def test_gate_is_registered_in_the_import_sweep_or_directly_runnable(self):
@@ -179,6 +209,125 @@ class TestGateScriptIsExecutedByTheBuild:
         assert r.returncode == 0, (
             f"门禁在 CNB_BUILD_WORKSPACE 可写时仍判红: rc={r.returncode}\n"
             f"stdout={r.stdout}\nstderr={r.stderr}"
+        )
+
+
+class TestRelayJudgmentReadsPlatformFacts:
+    """接力的判据必须读**平台在收尾期给出的事实**，不许读自己事前伪造的燃料。
+
+    根因（本轮实测取证，2026-09-25）：
+    燃料曾被设计为「由门禁在 Agent 开工前无条件写出 1」——
+    而门禁的判据是 `CNB` 非空即写（真实构建里 `CNB=1`，该条件恒真），
+    于是 `##[set-output turnLimitReached=1]` → `exports` → Pipeline 级环境变量，
+    收尾 `if` **恒真**。空轮防护因此是死的，任一正常收官的轮次都会再拉一条接力轮：
+
+        cnb-2q8-1k3buskao  Agent stage success（1774s，未撞顶）→ 照拉 cnb-lga-1k3c0itrj
+        cnb-kdg-1k3bv22ct  Agent stage success（3977s，未撞顶）→ 照拉 cnb-fln-1k3c2rjk7
+
+    这不是"判据写松了"，而是**判据的输入端被自己填成了真值**：
+    该变量回答的是"上一轮是否用满配额"，而得知这件事的唯一时点是收尾期。
+
+    平台已在 `endStages` 内提供这两个事实（构建 cnb-s4f-1k3c46us9 与
+    cnb-p2q-1k3c2g7u3 实测，真 `npc:go` 撞 `maxTurns: 1`）：
+
+        PROBE_STATUS=[error]
+        PROBE_MSG=[Agent aborted: reached maxTurns limit (1)]
+
+    故判据改为读它们，并删净事前伪造的燃料链路（门禁发射、`exports`、
+    `env` 透传）——留着它就是"看着守住了空轮、其实恒真"。
+    """
+
+    #: 平台在收尾期给出的事实（`endStages` 内可读，平台「环境变量」篇）。
+    STATUS_VAR = "CNB_PIPELINE_STATUS"
+    FAILED_MSG_VAR = "CNB_BUILD_FAILED_MSG"
+
+    #: 真实撞顶时平台给出的错误原文片段（构建 cnb-s4f-1k3c46us9 实测）。
+    ABORT_MARKER = "reached maxTurns limit"
+
+    @staticmethod
+    def _relay_stages(cnb_doc):
+        """产出 (挂载点, 事件名, job, 接力 Stage) —— `cnb:trigger` 收尾任务。"""
+        for mount, body in cnb_doc.items():
+            if not isinstance(body, dict):
+                continue
+            for event, event_body in body.items():
+                for i, job in enumerate(event_body if isinstance(event_body, list) else []):
+                    if not isinstance(job, dict):
+                        continue
+                    for stage in (job.get("endStages") or []):
+                        if isinstance(stage, dict) and stage.get("type") == HANDOFF_TRIGGER_TYPE:
+                            yield f"{mount}.{event}[{i}]", event, job, stage
+
+    def test_every_relay_condition_reads_the_two_platform_facts(self, cnb_doc):
+        """接力 `if` 必须同时读「流水线状态」与「失败原文」，不得读自造标记。"""
+        seen = 0
+        problems = []
+        for where, event, job, stage in self._relay_stages(cnb_doc):
+            seen += 1
+            conditions = stage.get("if") or []
+            if isinstance(conditions, str):
+                conditions = [conditions]
+            blob = "\n".join(str(item) for item in conditions)
+            if self.STATUS_VAR not in blob:
+                problems.append(f"{where}: 接力 `if` 未读 ${self.STATUS_VAR}")
+            if self.FAILED_MSG_VAR not in blob:
+                problems.append(f"{where}: 接力 `if` 未读 ${self.FAILED_MSG_VAR}")
+            if self.ABORT_MARKER not in blob:
+                problems.append(
+                    f"{where}: 接力 `if` 未按平台原文片段 {self.ABORT_MARKER!r} 判定"
+                    "（不许以其它近似条件代替）"
+                )
+        assert seen, "未在 .cnb.yml 找到任何接力 Stage —— 本守卫空转"
+        assert not problems, (
+            "接力判据没有读平台给出的事实：\n  " + "\n  ".join(problems) +
+            "\n该变量回答「上一轮是否用满配额」，唯一得知时点是收尾期；"
+            "$" + self.STATUS_VAR + " 与 $" + self.FAILED_MSG_VAR + " 由平台注入。"
+        )
+
+    def test_no_self_fabricated_relay_flag_anywhere(self):
+        """全仓不得再有"由构建侧提前写出接力真值"的形态。
+
+        判据落在**真实文件内容**上：`.cnb.yml`、门禁脚本、人设三处都不得
+        再出现发射/映射该标记的写法。留着任何一处，空轮防护就还是恒真。
+        """
+        sources = {
+            ".cnb.yml": CNB,
+            ".cnb/settings.yml": SETTINGS,
+        }
+        offenders = []
+        for label, path in sources.items():
+            if not path.exists():
+                continue
+            text = io.open(path, encoding="utf-8").read()
+            for lineno, line in enumerate(text.splitlines(), 1):
+                if "turnLimitReached" in line or "set-output" in line:
+                    offenders.append(f"{label}:{lineno}: {line.strip()}")
+        assert not offenders, (
+            "仍在发射/映射一个由构建侧提前写出的接力标记（空轮防护恒真）：\n  "
+            + "\n  ".join(offenders) +
+            "\n真值只能来自平台在收尾期注入的 $CNB_PIPELINE_STATUS + "
+            "$CNB_BUILD_FAILED_MSG。"
+        )
+
+    def test_relay_carrier_can_continue_the_chain(self, cnb_doc):
+        """接力载体自己也要有心跳：否则接力只有一跳，撞顶后仍会断链。
+
+        接力载体（`api_trigger_npc_handoff`）跑的就是下一轮 Agent。
+        它若不在收尾再判一次，第二轮撞满配额时就没有任何消费者 ——
+        与 Issue #131 最初的断点同形，只是往后挪了一跳。
+        """
+        body = (cnb_doc.get("$") or {}).get(HANDOFF_APPLY_EVENT)
+        assert body, f"`$` 段缺接力落点事件 {HANDOFF_APPLY_EVENT!r}"
+        jobs = body if isinstance(body, list) else [body]
+        relays = [
+            stage
+            for job in jobs if isinstance(job, dict)
+            for stage in (job.get("endStages") or [])
+            if isinstance(stage, dict) and stage.get("type") == HANDOFF_TRIGGER_TYPE
+        ]
+        assert relays, (
+            f"{HANDOFF_APPLY_EVENT} 没有收尾接力 —— 接力只发生一跳："
+            "第一轮撞顶拉起的第二轮若再撞顶，链条即断，用户仍收不到回音。"
         )
 
 
@@ -250,8 +399,8 @@ class TestHandoffUsesAnEventCnbApplyActuallyAccepts:
 
     ## 事故形态一（构建 cnb-k6e-1k34osn4f，2026-09-22 23:21:43 实测）
 
-    `$CNB_BUILD_WORKSPACE` 落点、`##[set-output]` + `exports` 通道、`if` 判据——
-    前两批修的东西**全部生效**了：Stage 0 打印 `turn_flag_handoff.written=true`，
+    收尾 `if` 的判据（当时是自造的 `##[set-output]` + `exports` 通道，现已作废）——
+    那一批修的东西**全部生效**了：Stage 0 打印 `turn_flag_handoff.written=true`，
     收尾 Stage 的 `if` 真的被判真（`Finished, code: 0`，不再是 `skipped`）。
     但 Stage 的最终状态是 **error**，平台逐字给出：
 
