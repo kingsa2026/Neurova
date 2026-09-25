@@ -21,8 +21,17 @@ from typing import Optional, Tuple
 MAX_EXTRACT_CHARS = 200_000  # 20 万字符上限（真正的上下文闸门）
 
 #: 文本抽取通道结构上打不开的原始二进制容器（不是"解析失败"，是"不该走这条通道"）。
-#: 名单只用来做**如实告知**（"当前无可用抽取原语"），不参与抽取分支判定。
+#: 它们各自有**专用**原语（查表 `_RAW_CONTAINER_PRIMITIVES`），抽取通道不碰。
 _RAW_BINARY_EXTENSIONS = frozenset({".db", ".sqlite", ".sqlite3", ".db3"})
+
+#: 原始二进制容器 → 专用读取原语的**单源**表（名字取自 `builtin_tools` 注册清单）。
+#: 表里没有的容器 = 当前真无原语，调用方必须如实说"没有"，不得编名字（T-02 判据）。
+_RAW_CONTAINER_PRIMITIVES = {
+    ".db": "query_database",
+    ".sqlite": "query_database",
+    ".sqlite3": "query_database",
+    ".db3": "query_database",
+}
 
 
 def _decode_text(data: bytes, filename: str) -> Optional[str]:
@@ -122,14 +131,18 @@ def suggestExtractionPrimitive(filename: str, file_type: str) -> Optional[str]:
     而不是被 `file_type=file` 笼统盖住。
     """
     ext = os.path.splitext(filename or "")[1].lower()
+    from neurova.builtin_tools import get_registered_tool_names
+
+    registered = get_registered_tool_names()
     if ext in _RAW_BINARY_EXTENSIONS:
-        return None
+        # 原始二进制容器走专用原语（SQLite → query_database）；专用表里没有
+        # 就直接返回 None —— 仍是"如实说没有"，不回落通用抽取通道（它对容器无效）。
+        container = _RAW_CONTAINER_PRIMITIVES.get(ext)
+        return container if container in registered else None
     primitive = _EXTRACTION_PRIMITIVES.get(file_type)
     if primitive is None:
         return None
-    from neurova.builtin_tools import get_registered_tool_names
-
-    return primitive if primitive in get_registered_tool_names() else None
+    return primitive if primitive in registered else None
 
 
 def extract_attachment_text(data: bytes, filename: str, file_type: str) -> Tuple[Optional[str], str]:
