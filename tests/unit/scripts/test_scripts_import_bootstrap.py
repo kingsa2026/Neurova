@@ -26,10 +26,15 @@
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_ROOT = PROJECT_ROOT / "scripts"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from tests import ast_scan
 
 # 把仓库根放进 sys.path 的形态：层数反推（parents[N] / ".."*N）或根常量。
 _ROOT_TEXT_MARKERS = ("parents[", "REPO_ROOT", "PROJECT_ROOT", "dirname(__file__)")
@@ -82,18 +87,22 @@ def _firstNeurovaImportLine(tree: ast.AST) -> int | None:
 
 
 def _scannedScripts() -> list[Path]:
-    return [
-        path
-        for path in sorted(SCRIPTS_ROOT.rglob("*.py"))
-        if "__pycache__" not in path.parts
-    ]
+    """`scripts/` 下的源码清单（走共享入口，解析量不随代码总量涨）。
+
+    Issue #148 / #197：本判据原先自己 `SCRIPTS_ROOT.rglob("*.py")` + 逐文件
+    `ast.parse`。`scripts/` 如今只有 61 个文件、成本尚小，但**形态**与
+    Issue #148 的根因同款——判据只谈「导入顺序对不对」，与脚本总数无关。
+    枚举与解析各收口一处：`ast_scan.filesUnder` + `_cachedParse`，
+    与其余跨文件判据复用同一份缓存。
+    """
+    return ast_scan.filesUnder(SCRIPTS_ROOT, ".py")
 
 
 def _offenders() -> list[str]:
     found = []
     for path in _scannedScripts():
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
+            tree = ast_scan._cachedParse(ast_scan._cacheKey(path), ast_scan.sourceCode(path))
         except SyntaxError:
             continue
         first_import = _firstNeurovaImportLine(tree)
