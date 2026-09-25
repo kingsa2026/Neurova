@@ -845,6 +845,14 @@ tests/unit/context/test_fold_layer_index_t11b.py
 #   （content_digest）——两个域不相等，按 covers hash 查台账必然落空，故加
 #   台账 v3 迁移落 `pool_hash` 列作寻址键（不回填就等于只对新数据成立）。
 tests/unit/context/test_fold_span_drilldown_t11d.py
+# T-11e 折叠 rollup 后台化（Issue #90 工单 §12.4/§12.7 判据 6）：关键路径每轮
+#   至多 1 次摘要 LLM 调用。根因：压缩器的「失败丢最旧一条重试（上限 3）」与
+#   「递进扩折叠重摘要」整段跑在热路径上，摘要器恒失败时单轮实测发起 4 次调用；
+#   失败批次改交 `ContextRollupWorker` 后台补做 —— worker **持有并 await** 自己的
+#   任务（工单 §12.5 第 4 条把 `ensure_future` 发后不管列为假实现），失败不推进
+#   覆盖账（与 T-05 同族），读数落 `get_context_health()["fold_rollup"]`。
+#   回退开关 NEUROVA_CONTEXT_ROLLUP=0 时行为等价于本票之前。
+tests/unit/context/test_fold_rollup_t11e.py
 # 曾登记过、被静默删掉的历史条目复原（守 `test_protected_subset_registration_history.py`）。
 # 根因：清单是纯文本，删一行不产生任何红——「删重复」与「删光」在文本上同形，
 # 合并解冲突时更容易整段带走（实测 `88901c00` 想删重复条目，结果两份都删了；
