@@ -40,6 +40,11 @@
  *   node scripts-qa/duplicate-function-audit.mjs --json              # 机器可读计数
  *   node scripts-qa/duplicate-function-audit.mjs --write-ledger <f>  # 生成台账机器段
  *   node scripts-qa/duplicate-function-audit.mjs --help              # 口径说明
+ *
+ * **口径候选表也是生成物。** 台账里那张「换个扫法读数是多少」的表由本脚本
+ * 实跑生成（`CALIBER_CANDIDATES` + `--write-ledger`），守卫逐字比对。
+ * 手抄读数与代码必然脱节 —— 代码改了它不会跟着改，前版台账即因此出现
+ * 复跑不出的数字。
  */
 import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
@@ -116,21 +121,35 @@ function readFunctionBody(source, match, isDeclaration) {
   return sliceExpressionBody(source, cursor)
 }
 
-export function collectSourceFiles(dir = SCAN_ROOT, out = []) {
+/**
+ * 扫描选项。默认值即台账「正式口径」，逐字等于历史行为；候选口径表
+ * （见 `CALIBER_CANDIDATES`）用它把「换个扫法读数是多少」变成可执行事实，
+ * 而不是手抄进文档的数字 —— 手抄的那一版实测已与实跑脱节。
+ */
+export const DEFAULT_SCAN_OPTIONS = {
+  suffixes: SCAN_SUFFIXES,
+  includeTestDirs: false,
+  includeTestFiles: false,
+}
+
+export function collectSourceFiles(dir = SCAN_ROOT, out = [], options = DEFAULT_SCAN_OPTIONS) {
   for (const name of readdirSync(dir)) {
     const entry = join(dir, name)
     if (statSync(entry).isDirectory()) {
-      if (!SKIP_DIRS.has(name)) collectSourceFiles(entry, out)
-    } else if (isCandidateFile(name)) {
+      // `__tests__` 由 includeTestDirs 单独控制：它在 SKIP_DIRS 里只是默认不收，
+      // 不能被 SKIP_DIRS 一并挡死，否则「含测试」这个开关形同不存在。
+      const skipped = name === '__tests__' ? !options.includeTestDirs : SKIP_DIRS.has(name)
+      if (!skipped) collectSourceFiles(entry, out, options)
+    } else if (isCandidateFile(name, options)) {
       out.push(entry)
     }
   }
   return out
 }
 
-function isCandidateFile(name) {
-  if (/\.(test|spec)\.tsx?$/.test(name)) return false
-  return SCAN_SUFFIXES.some((suffix) => name.endsWith(suffix))
+function isCandidateFile(name, options = DEFAULT_SCAN_OPTIONS) {
+  if (!options.includeTestFiles && /\.(test|spec)\.tsx?$/.test(name)) return false
+  return options.suffixes.some((suffix) => name.endsWith(suffix))
 }
 
 function stripNoise(text) {
@@ -141,7 +160,7 @@ function stripNoise(text) {
     .trim()
 }
 
-export function collectDefinitions(files) {
+export function collectDefinitions(files = collectSourceFiles()) {
   const byName = new Map()
   for (const file of files) {
     const source = readFileSync(file, 'utf-8')
@@ -216,6 +235,119 @@ export function auditDuplicateFunctions() {
     tier.sort((a, b) => b.sites.length - a.sites.length || a.name.localeCompare(b.name))
   }
   return { scannedFiles: files.length, tiers }
+}
+
+/**
+ * 候选口径表。**这张表是生成物，不是手抄件。**
+ *
+ * 来由（根因）：先前版本的台账把「换个扫法读数是多少」手抄进文档，实测复跑
+ * 不出同一组数 —— 同一张表里混着收口前后的时点、以及四种开关的不同取值，
+ * 读者无从判断哪个读数对应哪份代码。手抄读数与代码脱节是必然的，因为代码
+ * 改了它不会跟着变。故候选口径在此定义为数据，读数由脚本实跑得出，
+ * 台账里的表由 `--write-ledger` 重写（守卫逐字比对，手改即红）。
+ *
+ * 四个开关就是「同名」这件事的全部自由度：扫哪些根、收哪些扩展名、
+ * 是否含测试、是否要求跨文件。全部显式写出，不留隐含默认。
+ */
+export const CALIBER_CANDIDATES = [
+  {
+    key: 'src-vue-ts',
+    label: '`src` · `.vue+.ts` · 排除测试 · 跨文件同名',
+    roots: ['src'],
+    options: { ...DEFAULT_SCAN_OPTIONS },
+  },
+  {
+    key: 'src-vue-ts-tests',
+    label: '`src` · `.vue+.ts` · 含测试 · 跨文件同名',
+    roots: ['src'],
+    options: { ...DEFAULT_SCAN_OPTIONS, includeTestDirs: true, includeTestFiles: true },
+  },
+  {
+    key: 'src-vue',
+    label: '`src` · `.vue` · 排除测试 · 跨文件同名',
+    roots: ['src'],
+    options: { ...DEFAULT_SCAN_OPTIONS, suffixes: ['.vue'] },
+  },
+  {
+    key: 'src-ts',
+    label: '`src` · `.ts` · 排除测试 · 跨文件同名',
+    roots: ['src'],
+    options: { ...DEFAULT_SCAN_OPTIONS, suffixes: ['.ts'] },
+  },
+  {
+    key: 'pages-vue-ts',
+    label: '`src/pages` · `.vue+.ts` · 排除测试 · 跨文件同名',
+    roots: ['src/pages'],
+    options: { ...DEFAULT_SCAN_OPTIONS },
+  },
+  {
+    key: 'pages-components-vue-ts',
+    label: '`src/pages+src/components` · `.vue+.ts` · 排除测试 · 跨文件同名',
+    roots: ['src/pages', 'src/components'],
+    options: { ...DEFAULT_SCAN_OPTIONS },
+  },
+]
+
+/** 按候选口径的开关实跑，取「跨文件同名名字数」。 */
+export function countCrossFileNames(candidate, rootDir = PROJECT_ROOT) {
+  const options = candidate.options
+  const files = []
+  for (const relativeRoot of candidate.roots) {
+    collectSourceFiles(join(rootDir, relativeRoot), files, options)
+  }
+  const definitions = collectDefinitions(files)
+  let names = 0
+  for (const [, sites] of definitions) {
+    if (new Set(sites.map((site) => site.relPath)).size >= 2) names++
+  }
+  return names
+}
+
+/** 候选口径的实跑读数（顺序与表格一致，供守卫与台账比对）。 */
+export function caliberCandidates() {
+  return CALIBER_CANDIDATES.map((candidate) => ({
+    key: candidate.key,
+    label: candidate.label,
+    crossFileSameNames: countCrossFileNames(candidate),
+  }))
+}
+
+/**
+ * 组数口径。**同一个名字可以既落在同体档（A/B）又落在异体档（C）**，
+ * 所以「组数之和」与「唯一名字数」是两个不同的量：把两者当同一个数相加，
+ * 会得出比实际多一个的组数（本仓实况：同体 9 + 异体 97 = 106，唯一名字 105，
+ * 重叠项 openCreate 同时出现在两档）。此处把三个量分别给出，
+ * 并**逐个点名**重叠项，让读数可以复算而不是只能相信。
+ */
+export function reportCounts(report = auditDuplicateFunctions()) {
+  const namesOf = (tier) => tier.map((group) => group.name)
+  const sameBody = [...namesOf(report.tiers.A), ...namesOf(report.tiers.B)]
+  const variantBody = namesOf(report.tiers.C)
+  const variantSet = new Set(variantBody)
+  return {
+    sameBodyGroups: sameBody.length,
+    variantBodyGroups: variantBody.length,
+    tierAGroups: report.tiers.A.length,
+    crossFileUniqueNames: new Set([...sameBody, ...variantBody]).size,
+    overlappingNames: [...new Set(sameBody)].filter((name) => variantSet.has(name)).sort(),
+    scannedFiles: report.scannedFiles,
+  }
+}
+
+/** 台账口径候选段的分隔标记。 */
+export const CALIBER_BEGIN = '<!-- duplicate-function-caliber:begin -->'
+export const CALIBER_END = '<!-- duplicate-function-caliber:end -->'
+
+/** 生成台账 §1.1 的口径候选表（表格 + 计数 JSON），由 `--write-ledger` 写盘。 */
+export function renderCaliberBlock(report = auditDuplicateFunctions()) {
+  const candidates = caliberCandidates()
+  const counts = reportCounts(report)
+  const lines = [CALIBER_BEGIN, '', '| 口径（扫描范围 / 定义形态 / 是否含测试 / 是否跨文件） | 结果 |', '| --- | --- |']
+  for (const candidate of candidates) {
+    lines.push(`| ${candidate.label} | ${candidate.crossFileSameNames} |`)
+  }
+  lines.push('', '```json', JSON.stringify({ candidates, counts }, null, 2), '```', '', CALIBER_END)
+  return lines.join('\n')
 }
 
 export function caliberSummary() {
@@ -307,25 +439,37 @@ function main() {
   if (writeIndex !== -1) {
     const target = args[writeIndex + 1]
     if (!target) throw new Error('--write-ledger 需要台账文件路径')
-    const current = readFileSync(target, 'utf-8')
+    let current = readFileSync(target, 'utf-8')
     const begin = current.indexOf(LEDGER_BEGIN)
     const end = current.indexOf(LEDGER_END)
     if (begin === -1 || end === -1) throw new Error(`台账缺少机器段标记：${target}`)
-    writeFileSync(target, current.slice(0, begin) + renderLedgerBlock(report) + current.slice(end + LEDGER_END.length), 'utf-8')
-    console.log(`已写入台账机器段：${target}`)
+    current = current.slice(0, begin) + renderLedgerBlock(report) + current.slice(end + LEDGER_END.length)
+    const caliberBegin = current.indexOf(CALIBER_BEGIN)
+    const caliberEnd = current.indexOf(CALIBER_END)
+    if (caliberBegin === -1 || caliberEnd === -1) throw new Error(`台账缺少口径候选段标记：${target}`)
+    current = current.slice(0, caliberBegin) + renderCaliberBlock(report) + current.slice(caliberEnd + CALIBER_END.length)
+    writeFileSync(target, current, 'utf-8')
+    console.log(`已写入台账机器段与口径候选段：${target}`)
     return
   }
-  const total = report.tiers.A.length + report.tiers.B.length + report.tiers.C.length
+  const counts = reportCounts(report)
   if (args.includes('--json')) {
     console.log(JSON.stringify({
       scannedFiles: report.scannedFiles,
       caliber: caliberSummary(),
-      counts: { A: report.tiers.A.length, B: report.tiers.B.length, C: report.tiers.C.length, crossFileSameNameTotal: total },
+      counts: reportCounts(report),
+      caliberCandidates: caliberCandidates(),
       tierA: report.tiers.A.map((g) => ({ name: g.name, sites: g.sites })),
     }, null, 2))
     return
   }
-  console.log(`扫描文件 ${report.scannedFiles} 个；跨文件同名组 ${total} 组`)
+  // 「组数」与「唯一名字数」是两个量（同名可同时落同体档与异体档），分开讲，
+  // 否则一个加法就把名字数说多了 —— 前版台账正是在这里错的。
+  console.log(
+    `扫描文件 ${counts.scannedFiles} 个；跨文件同名 ${counts.crossFileUniqueNames} 个名字`
+    + `（收口前：${counts.sameBodyGroups} 组同体 + ${counts.variantBodyGroups} 组异体`
+    + `；重叠名 ${counts.overlappingNames.join('、') || '无'}）`,
+  )
   const labels = {
     A: 'A 类 · 同名同体无局部耦合（应收口到单一属主）',
     B: 'B 类 · 同名同体耦合局部状态（编排胶水，登记不收口）',
