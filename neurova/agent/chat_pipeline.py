@@ -37,6 +37,37 @@ from neurova.agent.turn_origin import is_machine_origin, is_machine_origin_value
 
 logger = get_logger(__name__)
 
+
+def composeUnparseableAttachmentNotice(
+    filename: str,
+    file_type: str,
+    status: str,
+    file_id: str = "",
+    primitive: Optional[str] = None,
+) -> str:
+    """抽取不到文本时的注入文案（**单源构造点**，含句柄、原因、可用原语）。
+
+    为什么必须带句柄：附件落在 `data/storage/users/**` 下，而 `file_search` /
+    `file_list` 锚定 agent 工作区（`_resolve_agent_path`），**永远看不到它**。
+    没有 `file_id` 时 agent 对"不可抽取的附件"结构上无从下手。
+
+    为什么原语要么点名真名、要么明说没有：附件取用凭证只有 `file_id`（D1），
+    而当前注册原语里没有任何一条接受 `file_id` 去读原始二进制容器。
+    此时若编一个 `file_parse` 之类的名字，模型会拿一条读不到该附件的工具去试
+    —— 那是假路标，比"没有"更坏（教义第 2 条：诚实形态暴露）。
+    """
+    parts = [
+        f"[用户上传了文件 {filename}（{file_type}），未能抽取文本内容]",
+        f"原因: {status}",
+    ]
+    if file_id:
+        parts.append(f"附件句柄 file_id={file_id}（服务端路径不对外，取用一律凭该句柄）")
+    if primitive:
+        parts.append(f"如需读取内容，请用 `{primitive}` 并传上述 file_id。")
+    else:
+        parts.append("当前无可用抽取原语：现有工具面没有任何原语可以按 file_id 读取这类附件。")
+    return " ".join(parts)
+
 # ── 思考程度（light/standard/deep）→ 系统提示指令 ──────────────
 # 提示词方式对所有模型通用；standard 为默认行为不注入
 _THINKING_DIRECTIVES: Dict[str, str] = {
@@ -566,6 +597,11 @@ class ChatPipeline:
         """初始化 Agent 的临时状态（经 Agent 轮次级显式 API，P3-c 收窄）"""
         self._agent.set_current_reasoning(None)
         self._agent.reset_tool_messages()
+        # 能力缺口收件箱与工具消息账本同生命周期：同轮起点清空，
+        # 否则上一轮的缺口会在这一轮无据重放一次合成（T-03）。
+        from neurova.agent.capability_gap import clearCapabilityGap
+
+        clearCapabilityGap(str(ctx.session_id or ""))
         # session_id 透传给工具层（蜂群工具派生子 Agent 时广播事件用）
         # JWT 登录用户透传给工具层（三层隔离：planning 归属/治理/审计用）。
         # console /chat 的 metadata 已携带 JWT user_id（=sub，与 neuser_id 同源）；
@@ -1122,11 +1158,31 @@ class ChatPipeline:
                 if acquired:
                     logger.info("主动技能获取: 成功安装 %s 个技能 %s", len(acquired), acquired)
                 else:
-                    logger.info("需要技能: %s，但未在市场中找到", [r.get("skill_name") for r in skills_needed if isinstance(r, dict)])
+                    _missing_skills = [
+                        r.get("skill_name") for r in skills_needed if isinstance(r, dict)
+                    ]
+                    logger.info("需要技能: %s，但未在市场中找到", _missing_skills)
                     # [BUGFIX] 市场未命中时，不应仅记录日志后放弃：回退到 NL 合成自主创建。
                     # 此前 `_check_nl_synthesis` 被 `skill_manager.auto_acquire` 互斥屏蔽，
                     # 导致「查询到所需技能结构但市场无此技能」时既不获取、也不合成——agent
                     # 永远无法自主创建工具/技能。这里用 force=True 显式绕过该守卫。
+                    #
+                    # T-03 之后入口判据是**能力缺口**，故本分支必须**就地投递**缺口信号：
+                    # 这里才是真正知道"这条能力取不到"的生产点（读数来自市场返回，
+                    # 不重算）。只记日志不投信号，回退调用就会被入口的
+                    # `detectCapabilityGap()` 读到空而直接 return —— 回退成死路
+                    # （`force=True` 此时只绕开了 auto_acquire 互斥，绕不开缺口判据）。
+                    # 类别复用既有 S3（能力检索零命中），不新增第四类信号。
+                    from neurova.agent.capability_gap import (
+                        GAP_CATALOG_MISS,
+                        recordCapabilityGap,
+                    )
+
+                    recordCapabilityGap(
+                        GAP_CATALOG_MISS,
+                        {"surface": "skill_market", "skills": _missing_skills},
+                        str(ctx.session_id or ""),
+                    )
                     await self._check_nl_synthesis(ctx, force=True)
         except Exception:
             logger.exception("主动技能获取检查失败")
@@ -1145,23 +1201,20 @@ class ChatPipeline:
             return
 
         try:
-            action_keywords = [
-                "帮我",
-                "读取",
-                "写入",
-                "搜索",
-                "下载",
-                "转换",
-                "生成",
-                "read",
-                "write",
-                "search",
-                "download",
-                "convert",
-                "generate",
-            ]
-            if not any(kw in ctx.user_input.lower() for kw in action_keywords):
+            # 入口判据由**用户措辞关键词**改为**能力缺口**（T-03）。
+            # 老判据的病灶：事故三轮原话（"还有这个 你看看有什么信息可以提炼"
+            # "继续补充" "出什么问题了？继续任务"）零命中，而模型确实缺一条
+            # 读 SQLite 的能力 —— 入口只对"用户说得像不像命令"敏感，
+            # 对"确实缺能力"不敏感。缺口信号单源在 `agent/capability_gap.py`。
+            from neurova.agent.capability_gap import detectCapabilityGap
+
+            # 附件缺口（S1）由注入步在生产点投递（那里才知道抽取结果），
+            # 此处只消费判据。
+            gap = detectCapabilityGap()
+            if not gap.hasGap:
                 return
+
+            logger.info("[能力缺口] 驱动自主创建：kinds=%s", gap.kinds)
 
             skill_registry = getattr(self._agent, "_skill_registry", None)
             has_tool = False
@@ -1515,9 +1568,32 @@ class ChatPipeline:
                     f"[用户上传了文件 {filename}，以下为该文件的完整内容（请直接使用，无需调用工具读取）]\n{text}"
                 )
             else:
-                parts.append(f"[用户上传了文件 {filename}（{file_type}），无法解析文本内容]")
-                if status not in ("unsupported_format", "empty_file"):
-                    logger.debug("[附件注入] %s 未抽取文本: %s", filename, status)
+                from neurova.attachment_parser import suggestExtractionPrimitive
+
+                # 抽取失败一律留痕：`unsupported_format` 此前被显式排除在日志外，
+                # 于是事故轮在日志里零痕迹，问题只能靠人肉复现（T-03 的缺口信号
+                # 也要读得到它，故级别取 warning）。
+                logger.warning(
+                    "[附件注入] %s（%s）未抽取文本: %s（file_id=%s）",
+                    filename,
+                    file_type,
+                    status,
+                    file_id or "缺失",
+                )
+                # S1 生产点（T-03）：这里才知道"这个附件真读不出内容"，
+                # `status` 也是抽取器给的那一份。缺口驱动入口消费它。
+                from neurova.agent.capability_gap import noteAttachmentSignal
+
+                noteAttachmentSignal(filename, file_type, file_id, status)
+                parts.append(
+                    composeUnparseableAttachmentNotice(
+                        filename=filename,
+                        file_type=file_type,
+                        status=status,
+                        file_id=file_id,
+                        primitive=suggestExtractionPrimitive(filename, file_type),
+                    )
+                )
 
         return "\n\n".join(parts), vision_parts
 

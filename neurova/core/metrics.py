@@ -172,6 +172,15 @@ class _Metrics:
             ["provider"],
         )
 
+        # ── 能力缺口（T-03）──
+        # "自主造能力的入口"由用户措辞改挂到能力缺口之后，缺口本身必须可测：
+        # 没有这个计数，"入口没被触发"与"入口根本没接电"在观测上同形。
+        self.capability_gap_total = Counter(
+            "neurova_capability_gap_total",
+            "Capability-gap signals observed by the agent turn",
+            ["kind"],
+        )
+
         # ── 记忆检索 ──
         self.memory_recall_total = Counter(
             "neurova_memory_recall_total",
@@ -295,6 +304,14 @@ class _Metrics:
             self.llm_call_seconds.labels(provider=provider, model=model).observe(duration_s)
         except Exception:
             logger.debug("llm metrics record failed", exc_info=True)
+
+    def observe_capability_gap(self, kinds) -> None:
+        """能力缺口命中埋点（按类别累加）。"""
+        try:
+            for kind in kinds or []:
+                self.capability_gap_total.labels(kind=str(kind)).inc()
+        except Exception:  # noqa: BLE001 - 观测失败不得影响对话主链
+            logger.debug("capability gap metric failed", exc_info=True)
 
     def record_circuit_rejection(self, provider: str) -> None:
         try:
@@ -589,6 +606,11 @@ class _Metrics:
 
 
 _metrics: Optional[_Metrics] = None
+
+
+def observe_capability_gap(kinds) -> None:
+    """模块级埋点入口（与 `record_db_connection_created` 等同形式）。"""
+    get_metrics().observe_capability_gap(kinds)
 
 
 def get_metrics() -> _Metrics:
