@@ -133,7 +133,10 @@ class OpenAIAdapter(LLMAbstractProvider):
         
         # Simulate response
         usage = {
-            "prompt_tokens": sum(len(msg.content.split()) for msg in messages),
+            # 唯一尺子：与 `_estimate_message_tokens`（沙箱校验用的同一个函数）同源。
+            # 改前这里是 `sum(len(msg.content.split()))`——沙箱按真尺子判、usage 按
+            # 词数报，同一份请求两个数（第二把尺子，钉在 text "token" 语义上）。
+            "prompt_tokens": self._estimate_message_tokens(messages),
             "completion_tokens": max_tokens,
             "total_tokens": 0,
         }
