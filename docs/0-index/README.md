@@ -138,7 +138,7 @@
 
 **ADR / 审计 / 记忆专题**：
 
-- [adr/README.md](../01-architecture/adr/README.md) — 13 个架构决策记录（memory/recall/skill/market 等）
+- [adr/README.md](../01-architecture/adr/README.md) — 20 个架构决策记录（memory/recall/skill/market/sandbox 等）
 - [audit/three-tier-isolation-audit.md](../01-architecture/audit/three-tier-isolation-audit.md) — 三层隔离审计报告
 - [audit/three-tier-isolation-fixes.md](../01-architecture/audit/three-tier-isolation-fixes.md) — 隔离修复记录
 - [memory/memo-technical-overview.md](../01-architecture/memory/memo-technical-overview.md) — MeMo 技术综述

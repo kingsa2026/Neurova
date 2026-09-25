@@ -861,3 +861,14 @@ tests/unit/tts/test_model_integrity_manifest.py
 # 清单历史登记的守卫本身：曾登记过、文件仍在仓、却不在清单里的条目即红
 #   （根因：删一行即可让整票判据从 CI 消失且无任何红；本批已复原 9 条）。
 tests/unit/ci/test_protected_subset_registration_history.py
+
+# Issue #68 收口：代码执行沙箱后端（前端 SandboxPage 的承载面补齐）。
+#   （根因：同一件事「沙箱」被定义了两份——前端页面是代码执行沙箱
+#    （image/command/language），后端实现是思维沙箱（topic/step/commit）。
+#    `/sandbox/{id}/execute` 从未注册过路由（必 404）、`/start` 要
+#    agent_id/topic（前端载荷必 422）、`/commit` 强制结论 body（必 422）。
+#    现收口为一套值域：代码执行 = 真 session（容器后端，enforced 自报），
+#    思维沙箱 = 保留 id `null` 的限定能力面。
+#    关联：tests/unit/frontContractBaseline.txt 该条已由「待接线」改判「已修」，
+#    docs/09-dev-progress/api_inventory.md 第四节差集归零。）
+tests/unit/sandbox/test_code_execution_sandbox_contract.py
