@@ -191,85 +191,55 @@ def _writeLines(symbol: str) -> Dict[str, set]:
     return writes
 
 
-@functools.lru_cache(maxsize=None)
-def _repoRelative(stamp: Tuple[str, int, int]) -> str:
-    """生产根相对路径：`ast_scan.relativeToRepo()` 的**按文件内容戳**缓存。
-
-    相对路径按文件是常量，但 `_rawNodes` 此前对每个节点都算一次：实测 20 个
-    登记符号合计 **249205** 次 `Path.relative_to`（剖析里占 0.5s 自耗时 + 1.75s
-    累计），是排在 AST 解析之后的第二大开销 —— 纯粹是重复计算。
-    缓存键取自 `ast_scan` 的同一份内容戳（`SourceRef.stamp`：路径 + mtime + size），
-    故**与解析缓存同源、改文件即失效**，不引入会漏报的陈旧缓存
-    （`AGENTS.md` 修复教义第 6 条：不新造第二份口径）。
-    """
-    return ast_scan.relativeToRepo(Path(stamp[0]))
+#: 取数只保留**形态上可能成为引用**的节点。
+#:
+#: 这是 `_rawNodes` 的**唯一**预筛谓词面，与文本预筛同一条纪律：预筛必须是
+#: **充分条件** —— `_classifyNode` 与 `_writeLines` 只可能从这几类节点里判出形态，
+#: 其余节点（`Load` / `Name` / `Constant` / `arguments` / `Module` …）结构上永远
+#: 判不出，留着只是把**代码总量**编码成**时间上界**（`cnb-2p6-1k347lfg1` /
+#: 2026-09-25 py3.12 腿 `Failed: Timeout (>30.0s)` 的同形账）。
+#:
+#: 实测：20 个登记符号共 249547 个节点，按本集合筛后 42435 个（17%），
+#: 而真正可能是引用点的只有 43 个。
+#:
+#: **为什么是类型元组而不是照抄一遍判定分支**：谓词必须覆盖 `_rawNodes` 的
+#: **全部**消费方所认的形态 —— 不只是 `_classifyNode`，还有 `_writeLines`
+#: （认 `ast.Assign`）。手写分支漏一类**不会报错**，只会让「只写不读」类死线
+#: 静默变成 `absent`（把活线伪装成死线）。故改为「判定面派生 + 常驻咬合判据」：
+#: 覆盖性由 `tests/unit/context/test_context_deadline_ledger.py` 的
+#: `test_site_shapes_covers_every_shape_the_judge_reads` 从 `_classifyNode`
+#: 源码反解 `isinstance(本节点, X)` 后逐个反证，漏配即报红。
+SITE_SHAPES = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.ClassDef,
+    ast.Call,
+    ast.ImportFrom,
+    ast.Import,
+    ast.Attribute,
+    ast.Assign,
+)
 
 
 @functools.lru_cache(maxsize=None)
 def _rawNodes(symbol: str) -> Tuple[SourceKey, ...]:
-    """该符号的全部节点取数（按符号整进程缓存）。
+    """该符号的**候选**节点取数（按符号整进程缓存）。
 
     为什么不直接 `list(nodeScan(...))`：每个符号要跑两遍（一遍取引用、一遍取
     写入归属），而 `sourceRefsUnder` 每次都要遍历并读取生产根下的全部文件。
     20 个登记符号 × 多次调用 = 数万次文件读取，实测单跑 50s，会直接撞
     pytest-timeout 的 30s 墙钟（本仓已有 `cnb-2p6-1k347lfg1` 的同形事故）。
-    缓存键是符号名，值是**已解析的节点**（`_cachedNodes` 已按内容戳缓存，
+    缓存键是符号名，值是**已解析的候选节点**（`_cachedNodes` 已按内容戳缓存，
     这里只是避免重复的文本预筛遍历）。
+
+    预筛掉的是**形态上不可能成为引用**的节点（见 `SITE_SHAPES`）：预筛漏一类
+    形态不会报错，只会让死线静默失准，故覆盖性由咬合判据常驻反证。
     """
     return tuple(
-        (_repoRelative(_stampOf(path)), node)
+        (ast_scan.relativeToRepo(path), node)
         for path, node in ast_scan.nodeScan(PRODUCTION_ROOT, hints=(symbol,))
-        if _mentionsSymbol(node, symbol)
+        if isinstance(node, SITE_SHAPES)
     )
-
-
-@functools.lru_cache(maxsize=None)
-def _stampOf(path: Path) -> Tuple[str, int, int]:
-    """`ast_scan.SourceRef.stamp` 形态的内容戳（与解析缓存同键）。"""
-    return ast_scan._cacheKey(path)
-
-
-def _mentionsSymbol(node: ast.AST, symbol: str) -> bool:
-    """该节点是否是 `symbol` 的**候选**引用点（`_rawNodes` 的**唯一**预筛谓词）。
-
-    谓词必须覆盖 `_rawNodes` 的**全部**消费方所认的形态，不只是 `_classifyNode`
-    那一组：`_writeLines()`（赋值左侧归属）认的是 `ast.Assign`，故 `Assign` 一并
-    保留 —— 预筛漏一类形态不会报错，只会让「只写不读」类死线**静默变成「无定义、
-    无赋值」（`absent`）**，即把活线伪装成死线（本谓词第一版实测即漏了 `Assign`，
-    由 `_last_archived_window_hashes` 的对账当场咬出：台账 `consumed` / 实测 `absent`）。
-
-    根因（2026-09-25 实测，性能剖析 1187 万次函数调用 / 5.6s）：`_rawNodes` 此前
-    **物化该符号命中文件里的全部节点**（实测 `dedup` 一个符号 55447 个节点，
-    20 个登记符号合计 **249225** 个），而下游 `referenceSites` 对其中绝大多数
-    直接 `continue`（`form is None`）。更贵的是：`ast_scan.relativeToRepo()` 对每个
-    节点都要做一次 `Path.relative_to`（实测占掉其中 1.75s，是排在解析之后的第二大
-    开销）—— 而相对路径**按文件是常量**。
-
-    本谓词与 `_classifyNode` 同一判据、不新造第二份规则（`AGENTS.md` 修复教义第 6 条）：
-    只保留「定义名相同 / 调用名相同 / 导入名相同 / 属性名相同」四种形态，其余节点在
-    构造相对路径**之前**就被滤掉。改前改后 `referenceSites()` 的结论必须逐点相同
-    （由 `tests/unit/context/test_context_deadline_ledger.py` 的判据与台账逐条钉住）。
-    """
-    if isinstance(node, ast.Assign):
-        # `_writeLines` 的落点：赋值左侧可能含 `X.<symbol>`（再深一层由它自己
-        # `ast.walk` 展开），故赋值语句整体保留，不在此提前判定。
-        return True
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-        return node.name == symbol
-    if isinstance(node, ast.Call):
-        func = node.func
-        return (isinstance(func, ast.Attribute) and func.attr == symbol) or (
-            isinstance(func, ast.Name) and func.id == symbol
-        )
-    if isinstance(node, ast.ImportFrom):
-        return any(alias.name == symbol for alias in node.names)
-    if isinstance(node, ast.Import):
-        # 与 `_classifyNode` 同口径：`from x import y` 与 `import x.y` 都算命中
-        return any(
-            alias.name == symbol or alias.name.endswith("." + symbol)
-            for alias in node.names
-        )
-    return isinstance(node, ast.Attribute) and node.attr == symbol
 
 
 @functools.lru_cache(maxsize=None)
