@@ -6,10 +6,17 @@
 `stderr` / `exit_code` 从未进入喂回模型的 tool 消息。模型于是拿到一句
 无信息的话，无从自我纠正。
 
-本文件钉三件事：
+本文件钉四件事：
 1. 真执行器（不 mock 业务对象）跑非零退出，喂回正文含 stderr 原文与 exit_code；
 2. 超大 stderr 仍走既有 `apply_offload_policy` 折叠成指针（不新写截断器）；
-3. 反向锁：撤掉诊断合并 ⇒ 正文回到只有兜底串，必红。
+3. 反向锁：撤掉诊断合并 ⇒ 正文回到只有兜底串，必红；
+4. **生产装配态**下同样成立：app lifespan 默认开启 OutputRef（>8KiB 结果落盘引用），
+   失败结果的正文正是诊断载体，不得被无诊断信息的引用顶替。
+
+第 4 条是 CI 实测出来的：受保护子集整批跑时，前序用例装配了 OutputRef，
+失败结果在咽喉处先被折叠成 `{success, output_ref, note}`，诊断键随之蒸发，
+本文件的判据在"单跑绿、批跑红"之间摇摆。故夹具显式按生产口径装配 —— 判据要么
+在生产装配下成立，要么以红灯暴露，不接受"顺序一变就绿"。
 """
 
 from __future__ import annotations
@@ -25,6 +32,21 @@ from neurova.tool_executor import ToolExecutor
 pytestmark = pytest.mark.asyncio
 
 _FAILING_CODE = "echo boom >&2; exit 3"
+
+
+@pytest.fixture(autouse=True)
+def _productionOutputRefAssembly():
+    """按生产装配态跑：OutputRef 默认开启（`app.py` lifespan 的 env 门控）。
+
+    生产默认装配下，咽喉会把 >8KiB 的结果折叠成落盘引用。失败结果的正文
+    就是模型自我纠正所需的诊断，折叠它等于把 T-01 修好的蒸发再放回来一次 ——
+    故本夹具显式装配，把"批跑才红"的顺序依赖转成确定性判据。
+    """
+    from neurova.agent import tool_output_ref
+
+    tool_output_ref.install_tool_output_ref()
+    yield
+    tool_output_ref.uninstall_tool_output_ref(force=True)
 
 
 def _make_loop(workspace: str = "."):
