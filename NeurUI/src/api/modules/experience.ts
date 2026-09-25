@@ -5,6 +5,9 @@ import type { ApiResponse, PaginatedData, PageParams } from '@/types/response'
 // Types
 // ---------------------------------------------------------------------------
 
+/** 成败三态契约词（与后端 `skills.models` 的单源词域逐字同一份） */
+export type ExperienceOutcome = 'success' | 'failure' | 'unevidenced'
+
 /** 人工处置态（工单 015）；null = 未处置/已恢复 */
 export type ExperienceDisposition = 'endorsed' | 'demoted' | 'suppressed'
 
@@ -14,7 +17,7 @@ export interface ExperienceRecord {
   task_type: string
   skill_name?: string
   context: string
-  outcome: 'success' | 'failure' | 'partial'
+  outcome: ExperienceOutcome
   /** 置信度；后端无该值时给 null，不再回落成 1/0 二值（工单 015） */
   success_rate?: number | null
   proficiency?: number | null
@@ -37,7 +40,8 @@ export interface ExperienceCreatePayload {
   agent_id: string
   task_type: string
   context: string
-  outcome: string
+  /** 契约词域与后端 `skills.models` 同一份：success / failure / unevidenced（其余词后端 422） */
+  outcome: ExperienceOutcome
   lessons?: string[]
   metadata?: Record<string, unknown>
 }

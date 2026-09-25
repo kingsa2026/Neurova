@@ -2707,7 +2707,7 @@ export default {
     taskType: '任务类型',
     outcomeSuccess: '成功',
     outcomeFailure: '失败',
-    outcomePartial: '部分成功',
+    outcomeUnevidenced: '미측정',
     addLessons: '添加经验教训',
     title: '경험 지식',
     successRate: '성공률',
