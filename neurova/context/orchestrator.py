@@ -2127,46 +2127,6 @@ class ContextOrchestrator:
             pool_budget = 16000
         return max(3000, min(int(pool_budget * self._WINDOW_SHARE_OF_POOL_BUDGET), 100000))
 
-    # 预算读写只认"窗口预算对象"这一处口径：端点 PUT 的 max_tokens 落成
-    # 显式覆盖（`_window_token_budget`），GET 读回同一个方法——读写同源，
-    # 不存在"PUT 写 A、GET 读 B"的假闸口（B6-2 / P2-2）。
-    _BUDGET_MIN = 1000
-    _BUDGET_MAX = 400000
-
-    def get_token_budget(self) -> Dict[str, int]:
-        """当前生效的 token 预算读数（`max_tokens` 口径 = 窗口预算）。
-
-        `used_tokens` 取 compose 侧最近一次实测的 prompt 总量——面板与判据
-        共用同一把尺子（`context.composition`）。无实测快照时为 0（不是估算）。
-        """
-        max_tokens = self._resolve_window_token_budget()
-        used_tokens = 0
-        try:
-            from neurova.context.composition import get_last_composition
-
-            # T-03b 第三命中点：改前只认 `self._session_id`（构造期恒 None）→
-            # 退到 **agent 级** 快照，面板显示的是别的会话的最近一轮规模。
-            # 身份推导只允许一处（`_resolveTurnSessionId`），与缓存键、池归属同源。
-            snapshot = get_last_composition(
-                str(getattr(self.config, "agent_id", "") or "default"),
-                self._resolveTurnSessionId(),
-            )
-            if snapshot:
-                used_tokens = int(snapshot.get("total_tokens") or 0)
-        except Exception:  # noqa: BLE001 - 无实测快照不影响预算读数
-            used_tokens = 0
-        return {
-            "max_tokens": max_tokens,
-            "used_tokens": used_tokens,
-            "available_tokens": max(0, max_tokens - used_tokens),
-        }
-
-    def set_token_budget(self, max_tokens: int) -> int:
-        """写入生效预算，返回实际生效值（越界被钳位，调用方拿得到真值）。"""
-        value = max(self._BUDGET_MIN, min(self._BUDGET_MAX, int(max_tokens)))
-        self._window_token_budget = value
-        return value
-
     @staticmethod
     def _envelopeFixedTokens(blocks: Dict[str, list]) -> int:
         """信封**固定部分**的 token 占用：外壳（免疫句）+ `<time>` + 非召回块。

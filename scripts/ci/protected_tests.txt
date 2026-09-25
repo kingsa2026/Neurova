@@ -570,18 +570,24 @@ tests/unit/context/test_b5_scale_batch_registration.py
 #    「待处置」——它们被误报或赋处置即说明判据整体失效。）
 tests/unit/context/test_context_deadline_ledger.py
 
-# 上下文三链路批（Issue #90）B6-2 / B6-3 / B6-4 / B6-5：假闸口与断链判据。
-#   （根因：端点与工作流节点挂在**从不存在的对象/符号**上——`/token-budget`
-#    读写 `agent.unified_injector`（全仓零赋值点，GET 恒硬编码、PUT 恒成功且
-#    零效果）；`/context/build` 每请求新建池（写入即丢）；neurflow 的
-#    `get_context_pool` 符号不存在且被 `except ImportError` 吞成 DEBUG；
-#    视图重建只留 role+content，工具寻址字段被剥后 `_tool_placeholder` 的
-#    硬地址指针与 `repair_tool_turns` 的配对判据同时失效。
-#    四条判据都钉「真值可从生产对象取回」，不是钉实现形状。）
-tests/unit/api/test_token_budget_endpoint_contract.py
+# 上下文三链路批（Issue #90）B6-3 / B6-4 / B6-5：断链判据。
+#   （根因：端点与工作流节点挂在**从不存在的对象/符号**上——`/context/build`
+#    每请求新建池（写入即丢）；neurflow 的 `get_context_pool` 符号不存在且被
+#    `except ImportError` 吞成 DEBUG；视图重建只留 role+content，工具寻址字段
+#    被剥后 `_tool_placeholder` 的硬地址指针与 `repair_tool_turns` 的配对判据
+#    同时失效。三条判据都钉「真值可从生产对象取回」，不是钉实现形状。
+#    B6-2 的 `/token-budget` 判据已随该面下架退役，见下一条。）
 tests/unit/context/test_pool_identity_resolution.py
 tests/unit/neurflow/test_context_node_pool_resolution.py
 tests/unit/context/test_view_tool_addressing.py
+
+# Issue #90 T-09（清场批·第 2 项）：假预算面下架。
+#   （根因：`/context/token-budget` 的 GET/PUT 自 B6-2 起读数已真（取不到即 503
+#    点名），但该面**零非测试消费者**——前端两个包装无任何 .vue / store 调用，
+#    唯一的"引用"是锁它自己 URL 的用例。工单 §10 第 2 项按"三处一并退役"默认
+#    执行：端点 + 前端包装 + 锁 URL 的测试同删。本判据钉的是**下架后不得回潮**，
+#    以及两个事实仍由有真实消费者的 `/context/composition` 提供。）
+tests/unit/api/test_context_budget_face_retirement.py
 
 # 上下文三链路批（Issue #90）B6-6 / B6-7 / B6-8 / B6-9：四类同形态断链。
 #   （B6-6 根因：`UnifiedVectorStore` **没有批量入口** —— `semantic_drawer` 的
