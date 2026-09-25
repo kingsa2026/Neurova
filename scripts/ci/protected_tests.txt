@@ -742,3 +742,8 @@ tests/unit/security/test_p1_6_skill_guard.py
 # T-05 只读数据集查询原语（Issue #197）：句柄域 / 只读连接 / SQL 白名单 / 有界
 #   四道防线与真读链路（真 .db 字节经真 get_attachment_bytes）。
 tests/unit/tools/test_query_database.py
+
+# 市场未命中 → 自主合成的回退必须真能走到入口（T-03 改判据后一度成死路）：
+# 既有六例都打方法替身，只证明"调用发出去了"；本文件不走 mock 驱动真入口，
+# 缺口信号须由"市场未命中"这个生产点就地投递。
+tests/unit/agent/test_skill_acquisition_fallback.py

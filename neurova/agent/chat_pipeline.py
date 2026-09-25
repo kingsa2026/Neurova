@@ -1158,11 +1158,31 @@ class ChatPipeline:
                 if acquired:
                     logger.info("主动技能获取: 成功安装 %s 个技能 %s", len(acquired), acquired)
                 else:
-                    logger.info("需要技能: %s，但未在市场中找到", [r.get("skill_name") for r in skills_needed if isinstance(r, dict)])
+                    _missing_skills = [
+                        r.get("skill_name") for r in skills_needed if isinstance(r, dict)
+                    ]
+                    logger.info("需要技能: %s，但未在市场中找到", _missing_skills)
                     # [BUGFIX] 市场未命中时，不应仅记录日志后放弃：回退到 NL 合成自主创建。
                     # 此前 `_check_nl_synthesis` 被 `skill_manager.auto_acquire` 互斥屏蔽，
                     # 导致「查询到所需技能结构但市场无此技能」时既不获取、也不合成——agent
                     # 永远无法自主创建工具/技能。这里用 force=True 显式绕过该守卫。
+                    #
+                    # T-03 之后入口判据是**能力缺口**，故本分支必须**就地投递**缺口信号：
+                    # 这里才是真正知道"这条能力取不到"的生产点（读数来自市场返回，
+                    # 不重算）。只记日志不投信号，回退调用就会被入口的
+                    # `detectCapabilityGap()` 读到空而直接 return —— 回退成死路
+                    # （`force=True` 此时只绕开了 auto_acquire 互斥，绕不开缺口判据）。
+                    # 类别复用既有 S3（能力检索零命中），不新增第四类信号。
+                    from neurova.agent.capability_gap import (
+                        GAP_CATALOG_MISS,
+                        recordCapabilityGap,
+                    )
+
+                    recordCapabilityGap(
+                        GAP_CATALOG_MISS,
+                        {"surface": "skill_market", "skills": _missing_skills},
+                        str(ctx.session_id or ""),
+                    )
                     await self._check_nl_synthesis(ctx, force=True)
         except Exception:
             logger.exception("主动技能获取检查失败")
