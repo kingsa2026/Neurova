@@ -600,6 +600,15 @@ tests/unit/api/test_context_budget_face_retirement.py
 #    处置保持「待处置」——不给零消费编造可达性。）
 tests/unit/context/test_context_facade_retirement.py
 
+# Issue #90 探针 P10：摘要器降级的**显式位**必须在生产观测面上可读。
+#   （先核 B6-8 的读数面：`get_context_health()["summarizer"]` 已有
+#    `enabled/attempts/last_error`，不需新造第二份读数。缺的是它在 `/metrics`
+#    上丢了——导出器把布尔与字符串合成一条过滤条件，副作用是**所有降级位**在
+#    生产读数上消失：健康 agent 与装配失败的 agent 长得一样（都只有 attempts=1），
+#    P2-5 的"能力被关掉与这轮本来不需要长得一样"换了一层皮。
+#    根因处收窄条件（只排除非数值），不给 summarizer 单开 gauge。）
+tests/unit/context/test_summarizer_degradation_bit_observable.py
+
 # 上下文三链路批（Issue #90）B6-6 / B6-7 / B6-8 / B6-9：四类同形态断链。
 #   （B6-6 根因：`UnifiedVectorStore` **没有批量入口** —— `semantic_drawer` 的
 #    `hasattr(store, "encode_batch")` 恒假，"批量打分"在 store 层从未接上；
