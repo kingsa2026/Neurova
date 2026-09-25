@@ -831,3 +831,8 @@ tests/unit/api/test_knowledge_annotations_contract.py
 #   （根因：摘要在改前是一个字符串，每轮折叠原地覆盖——多节点/梯度在数据上
 #    不可能存在。截断可见（fold_layers.truncated），不静默丢层。）
 tests/unit/context/test_fold_generation_t11a.py
+# AGENTS.md §0：NPC 分支合并/废弃后必须立即删除远端分支（Issue #204 遗留清理）。
+#   （根因：构建配置随分支走，归档分支的过期 .cnb.yml 会永久复现同一场失败。
+#    判定口径与复算入口在 scripts/ci/npc_branch_cleanup.py，台账见
+#    docs/06-bugfix/npc分支归档台账.md；守卫不连网。）
+tests/unit/ci/test_npc_branch_cleanup.py
